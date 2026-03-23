@@ -1,0 +1,14 @@
+-- Terminal color VRAM initialization
+-- 300 x 32-bit words (1200 bytes = 40x30 cells)
+-- Each byte: [7:4]=bg color, [3:0]=fg color
+-- Default: 0x0F = black background (0), white foreground (F)
+
+WIDTH=32;
+DEPTH=300;
+
+ADDRESS_RADIX=DEC;
+DATA_RADIX=HEX;
+
+CONTENT BEGIN
+[0..299] : 0F0F0F0F;
+END;

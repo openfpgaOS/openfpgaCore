@@ -1,0 +1,54 @@
+# Build output
+build/
+
+# Quartus intermediate files
+db/
+incremental_db/
+*.rpt
+*.summary
+*.qws
+*.bak
+
+# Archives
+*.zip
+
+# Firmware build outputs
+src/firmware/**/*.o
+src/firmware/**/*.d
+src/firmware/**/*.elf
+src/firmware/**/*.bin
+src/firmware/**/*.map
+src/firmware/**/*.lst
+src/firmware/**/*.mif
+
+# FPGA build outputs
+src/fpga/output_files/
+src/fpga/db/
+src/fpga/incremental_db/
+src/fpga/simulation/
+src/fpga/greybox_tmp/
+src/fpga/*.qws
+src/fpga/*.bak
+src/fpga/targets/*/firmware.mif
+
+# Build tools (compiled from source)
+tools/reverse_bits
+
+# Editor/IDE
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+.claude/
+
+# Python
+.venv/
+__pycache__/
+
+# VexRiscv source trees (only generated .v needed)
+src/fpga/vexriscv/VexRiscv/
+src/fpga/vexriscv/VexiiRiscv/
+
+# macOS
+.DS_Store
