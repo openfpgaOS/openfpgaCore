@@ -16,6 +16,7 @@ module text_terminal (
     input wire [9:0] pixel_x,
     input wire [9:0] pixel_y,
     output reg [23:0] pixel_color,
+    output reg        pixel_opaque,     // High when pixel is a foreground glyph pixel
 
     // CPU memory interface (directly exposed for memory mapping)
     input wire        mem_valid,
@@ -258,15 +259,18 @@ wire in_visible_area = (pixel_x_d2 < 320) && (pixel_y_d2 < 240);
 
 // Get pixel value (MSB first)
 wire pixel_on = font_data[7 - pixel_col_d2];
-
-// Generate pixel color from palette
+// Generate pixel color and opaque flag from palette
 always @(*) begin
-    if (in_visible_area && pixel_on)
+    if (in_visible_area && pixel_on) begin
         pixel_color = palette[fg_index_d2];
-    else if (in_visible_area)
+        pixel_opaque = 1'b1;
+    end else if (in_visible_area) begin
         pixel_color = palette[bg_index_d2];
-    else
+        pixel_opaque = 1'b0;
+    end else begin
         pixel_color = 24'h000000;
+        pixel_opaque = 1'b0;
+    end
 end
 
 // ======================================================================

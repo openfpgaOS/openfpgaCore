@@ -5,7 +5,27 @@
 #include "audio.h"
 #include "regs.h"
 
+/* ======================================================================
+ * Ring buffer for kernel-side audio drain
+ *
+ * Placed in uncached CRAM1 (PSRAM) so that drain reads never stall
+ * behind SDRAM arbiter contention during heavy bridge DMA.
+ * ====================================================================== */
+
+#define AUDIO_RING_SIZE 8192  /* stereo pairs (32KB total) */
+#define AUDIO_RING_ADDR 0x39300000  /* CRAM1 uncached, above save/FTAB region */
+
+static volatile int16_t *audio_ring = (volatile int16_t *)AUDIO_RING_ADDR;
+static volatile int ring_read;
+static volatile int ring_write;
+
 void of_audio_init(void) {
+    /* Zero the PSRAM-backed ring buffer */
+    for (int i = 0; i < AUDIO_RING_SIZE * 2; i++)
+        audio_ring[i] = 0;
+    ring_read = 0;
+    ring_write = 0;
+
     of_opl_reset();
 }
 
@@ -30,16 +50,6 @@ int of_audio_get_free(void) {
     int level = AUDIO_STATUS & AUDIO_FIFO_LEVEL_MASK;
     return AUDIO_FIFO_DEPTH - level;
 }
-
-/* ======================================================================
- * Ring buffer for kernel-side audio drain
- * ====================================================================== */
-
-#define AUDIO_RING_SIZE 8192  /* stereo pairs (32KB total) */
-
-static int16_t audio_ring[AUDIO_RING_SIZE * 2];  /* L/R interleaved */
-static volatile int ring_read;
-static volatile int ring_write;
 
 static int ring_used(void) {
     int used = ring_write - ring_read;

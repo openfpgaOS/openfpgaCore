@@ -64,7 +64,7 @@ module axi_periph_slave (
     input wire         term_mem_ready,
 
     // Display control outputs
-    output wire        display_mode,
+    output wire [1:0]  display_mode,
     output wire [2:0]  color_mode,      // 0=8bit, 1=4bit, 2=2bit, 3=RGB565, 4=RGB555, 5=RGBA5551
     output wire [24:0] fb_display_addr,
 
@@ -202,7 +202,7 @@ assign term_mem_wstrb = is_write ? req_wstrb : 4'b0;
 // ============================================
 reg [31:0] sysreg_rdata;
 reg [63:0] cycle_counter;
-reg display_mode_reg;
+reg [1:0] display_mode_reg /* synthesis preserve */;
 reg [2:0] color_mode_reg;
 
 reg [15:0] ds_slot_id_reg;
@@ -354,7 +354,7 @@ always @(posedge clk) begin
 
         if (sysreg_wr_fire) begin
             case (req_addr[7:2])
-                6'b000011: display_mode_reg <= req_wdata[0];
+                6'b000011: display_mode_reg <= req_wdata[1:0];
                 6'b011100: color_mode_reg <= req_wdata[2:0];  // offset 0x70
                 6'b000110: if (req_wdata[0]) begin
                     fb_swap_pending <= 1'b1;
@@ -432,7 +432,7 @@ always @(*) begin
         6'b000000: sysreg_rdata = {30'b0, dataslot_allcomplete_s, 1'b1};
         6'b000001: sysreg_rdata = cycle_counter[31:0];
         6'b000010: sysreg_rdata = cycle_counter[63:32];
-        6'b000011: sysreg_rdata = {31'b0, display_mode_reg};
+        6'b000011: sysreg_rdata = {30'b0, display_mode_reg};
         6'b011100: sysreg_rdata = {29'b0, color_mode_reg};
         6'b000100: sysreg_rdata = {7'b0, fb_display_addr_reg};
         6'b000101: sysreg_rdata = {7'b0, fb_draw_addr_reg};

@@ -1954,7 +1954,7 @@ assign video_hs = vidout_hs;
     wire        term_mem_ready;
 
     // Display mode and framebuffer address from CPU
-    wire display_mode;
+    wire [1:0] display_mode;
     wire [2:0] color_mode;
     wire [24:0] fb_display_addr;
 
@@ -2345,6 +2345,7 @@ assign video_hs = vidout_hs;
 
     // Terminal display (40x30 characters, 320x240 pixels)
     wire [23:0] terminal_pixel_color;
+    wire        terminal_pixel_opaque;
 
     text_terminal terminal (
         .clk(clk_core_12288),
@@ -2353,6 +2354,7 @@ assign video_hs = vidout_hs;
         .pixel_x({1'b0, visible_x[9:1]}),  // Halve doubled-X CRT resolution back to 320
         .pixel_y(visible_y),
         .pixel_color(terminal_pixel_color),
+        .pixel_opaque(terminal_pixel_opaque),
         .mem_valid(term_mem_valid),
         .mem_addr(term_mem_addr),
         .mem_wdata(term_mem_wdata),
@@ -2487,13 +2489,13 @@ always @(posedge clk_core_12288 or negedge reset_n) begin
                 // data enable. this is the active region of the line
                 vidout_de <= 1;
 
-                // Display mode: 0=terminal, 1=framebuffer
-                if (display_mode) begin
-                    vidout_rgb <= framebuffer_pixel_color;
-                end else begin
-                    // Terminal mode - full terminal display with colors
+                // Display mode: 0=terminal, 1=framebuffer, 2=overlay (white text over FB)
+                if (display_mode == 2'd0)
                     vidout_rgb <= terminal_pixel_color;
-                end
+                else if (display_mode == 2'd2 && terminal_pixel_color == 24'hFFFFFF)
+                    vidout_rgb <= 24'hFFFFFF;
+                else
+                    vidout_rgb <= framebuffer_pixel_color;
             end
         end
     end

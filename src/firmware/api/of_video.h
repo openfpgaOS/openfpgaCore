@@ -13,6 +13,11 @@
 #define OF_SCREEN_W     320
 #define OF_SCREEN_H     240
 
+/* Display mode constants */
+#define OF_DISPLAY_TERMINAL    0  /* Terminal only */
+#define OF_DISPLAY_FRAMEBUFFER 1  /* Framebuffer only */
+#define OF_DISPLAY_OVERLAY     2  /* White terminal text over framebuffer */
+
 #ifndef OF_PC
 
 #include "of_syscall.h"
@@ -83,6 +88,10 @@ static inline void of_video_blit_letterbox(const uint8_t *src, int src_w, int sr
         __builtin_memset(fb + OF_SCREEN_W * bottom, 0, OF_SCREEN_W * (OF_SCREEN_H - bottom));
 }
 
+static inline void of_video_set_display_mode(int mode) {
+    __of_syscall1(OF_SYS_VIDEO_SET_DISPLAY_MODE, mode);
+}
+
 /* Color mode constants */
 #define OF_VIDEO_MODE_8BIT     0  /* 8-bit indexed: 256 colors, 1 byte/pixel */
 #define OF_VIDEO_MODE_4BIT     1  /* 4-bit indexed: 16 colors, 0.5 byte/pixel */
@@ -116,6 +125,7 @@ void     of_video_clear(uint8_t color);
 void     of_video_palette(uint8_t index, uint32_t rgb);
 void     of_video_palette_bulk(const uint32_t *pal, int count);
 void     of_video_flush(void);
+void     of_video_set_display_mode(int mode);
 
 /* Convert and set a VGA 6-bit palette (768 bytes: R,G,B triplets, 0-63 range).
  * Converts to 8-bit 0x00RRGGBB and sets all 256 entries at once. */

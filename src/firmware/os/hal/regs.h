@@ -53,6 +53,8 @@
 #define CRAM1_UNCACHED      0x39000000      /* CRAM1 uncached (D-cache bypass) */
 #define CRAM_SIZE           (16 * 1024 * 1024)
 
+#define AUDIO_RING_ADDR     0x39300000      /* Audio ring buffer in CRAM1 uncached (32KB) */
+
 #define SRAM_BASE           0x3A000000      /* SRAM uncached */
 #define SRAM_SIZE           (256 * 1024)
 
@@ -75,6 +77,7 @@
 #define SYS_DISPLAY_MODE    REG32(SYSREG_BASE + 0x0C)
 #define   DISPLAY_MODE_TERMINAL     0
 #define   DISPLAY_MODE_FRAMEBUFFER  1
+#define   DISPLAY_MODE_OVERLAY      2  /* White terminal text over framebuffer */
 
 #define SYS_COLOR_MODE      REG32(SYSREG_BASE + 0x70)
 #define   COLOR_MODE_8BIT       0   /* 8-bit indexed (256 colors, 1 byte/pixel) */
