@@ -189,6 +189,14 @@
 #define OPL_ADDR2           REG32(OPL_BASE + 0x08)      /* Bank 1 address register */
 #define OPL_DATA2           REG32(OPL_BASE + 0x0C)      /* Bank 1 data register */
 
+/* UART (0x4F000000) — DevKey debug serial, 2 Mbaud 8N1 */
+#define UART_BASE           0x4F000000
+#define UART_STATUS         REG32(UART_BASE + 0x00)     /* Read: bit0=1, bit1=TX ready, bit2=RX valid */
+#define UART_TX_DATA        REG32(UART_BASE + 0x04)     /* Write: send byte [7:0] */
+#define UART_RX_DATA        REG32(UART_BASE + 0x08)     /* Read: received byte (clears valid) */
+#define   UART_TX_RDY       (1 << 1)
+#define   UART_RX_AVAIL     (1 << 2)
+
 /* ======================================================================
  * Analogizer (Bridge registers, accessible via interact.json settings)
  * CPU reads current state from bridge-synced registers.

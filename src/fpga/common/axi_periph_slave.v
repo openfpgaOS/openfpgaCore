@@ -109,6 +109,13 @@ module axi_periph_slave (
     output reg  [31:0] save_dt_size,    // size to write
     output reg         save_dt_commit,  // pulse: write save_dt_size to datatable
 
+    // UART interface
+    output reg         uart_tx_dv,      // TX data valid (1 cycle pulse)
+    output reg  [7:0]  uart_tx_byte,    // TX data byte
+    input wire         uart_tx_active,  // TX busy
+    input wire         uart_rx_dv,      // RX data valid (1 cycle pulse)
+    input wire  [7:0]  uart_rx_byte,    // RX data byte
+
     // App ID from instance JSON memory_writes
     input wire  [31:0] app_id,
 
@@ -464,9 +471,48 @@ end
 // ============================================
 // Peripheral read data mux
 // ============================================
+// ============================================
+// UART RX FIFO — 256-byte buffer so CPU doesn't have to read every byte within 10μs
+// ============================================
+reg [7:0]  uart_rx_fifo [0:1023];
+reg [9:0]  uart_rx_wr_ptr;
+reg [9:0]  uart_rx_rd_ptr;
+wire [9:0] uart_rx_count = uart_rx_wr_ptr - uart_rx_rd_ptr;
+wire       uart_rx_empty = (uart_rx_wr_ptr == uart_rx_rd_ptr);
+wire       uart_rx_full  = (uart_rx_count == 10'd1023);
+
+// CPU reads the byte at rd_ptr
+wire [7:0] uart_rx_data  = uart_rx_fifo[uart_rx_rd_ptr];
+wire       uart_rx_valid = !uart_rx_empty;
+
+always @(posedge clk) begin
+    if (reset) begin
+        uart_rx_wr_ptr <= 0;
+        uart_rx_rd_ptr <= 0;
+    end else begin
+        // Write: new byte from UART RX module
+        if (uart_rx_dv && !uart_rx_full) begin
+            uart_rx_fifo[uart_rx_wr_ptr[9:0]] <= uart_rx_byte;
+            uart_rx_wr_ptr <= uart_rx_wr_ptr + 10'd1;
+        end
+        // Read: CPU reads the RX register → advance rd_ptr
+        if (state == S_PERIPH_RD && reg_uart && req_addr[3:2] == 2'b10 && !uart_rx_empty)
+            uart_rx_rd_ptr <= uart_rx_rd_ptr + 10'd1;
+    end
+end
+
+// UART read data mux:
+//   0x4F000000 (offset 0x00): status — bit0=1, bit1=TX ready, bit2=RX valid, [15:8]=FIFO count
+//   0x4F000004 (offset 0x04): TX data (write-only, reads as 0)
+//   0x4F000008 (offset 0x08): RX data (read pops from FIFO)
+wire [31:0] uart_rdata = (req_addr[3:2] == 2'b00) ? {14'b0, uart_rx_count, 5'b0, uart_rx_valid, ~uart_tx_active, 1'b1} :
+                          (req_addr[3:2] == 2'b10) ? {24'b0, uart_rx_data} :
+                          32'h0;
+
 wire [31:0] periph_rd_mux = reg_sysreg ? sysreg_rdata :
                              reg_audio  ? {19'b0, audio_fifo_full, audio_fifo_level} :
                              reg_link   ? link_reg_rdata :
+                             reg_uart   ? uart_rdata :
                              32'h0;
 
 // ============================================
@@ -498,6 +544,7 @@ reg reg_sysreg;
 reg reg_audio;
 reg reg_link;
 reg reg_opm;
+reg reg_uart;
 
 wire beat_is_last = (burst_count == burst_len);
 
@@ -538,6 +585,7 @@ wire ar_dec_sysreg = (ar_addr[31:8]  == 24'h400000);
 wire ar_dec_audio  = (ar_addr[31:24] == 8'h4C);
 wire ar_dec_link   = (ar_addr[31:24] == 8'h4D);
 wire ar_dec_opm    = (ar_addr[31:24] == 8'h4E);
+wire ar_dec_uart   = (ar_addr[31:24] == 8'h4F);
 
 wire aw_dec_ram    = (aw_addr[31:16] == 16'b0);
 wire aw_dec_term   = (aw_addr[31:13] == 19'h10000);
@@ -545,6 +593,7 @@ wire aw_dec_sysreg = (aw_addr[31:8]  == 24'h400000);
 wire aw_dec_audio  = (aw_addr[31:24] == 8'h4C);
 wire aw_dec_link   = (aw_addr[31:24] == 8'h4D);
 wire aw_dec_opm    = (aw_addr[31:24] == 8'h4E);
+wire aw_dec_uart   = (aw_addr[31:24] == 8'h4F);
 
 // ============================================
 // OPL write request tracking
@@ -580,10 +629,13 @@ always @(posedge clk or posedge reset) begin
         reg_audio <= 0;
         reg_link <= 0;
         reg_opm <= 0;
+        reg_uart <= 0;
 
         sysreg_wr_fire <= 0;
         audio_sample_wr <= 0;
         audio_sample_data <= 0;
+        uart_tx_dv <= 0;
+        uart_tx_byte <= 0;
         link_reg_wr <= 0;
         link_reg_rd <= 0;
         link_reg_addr <= 0;
@@ -602,6 +654,7 @@ always @(posedge clk or posedge reset) begin
         s_axi_bvalid <= 0;
         sysreg_wr_fire <= 0;
         audio_sample_wr <= 0;
+        uart_tx_dv <= 0;
         link_reg_wr <= 0;
         link_reg_rd <= 0;
 
@@ -630,6 +683,7 @@ always @(posedge clk or posedge reset) begin
                 reg_audio  <= ar_dec_audio;
                 reg_link   <= ar_dec_link;
                 reg_opm    <= ar_dec_opm;
+                reg_uart   <= ar_dec_uart;
 
                 if (ar_dec_ram)
                     state <= S_BRAM_RD;
@@ -656,6 +710,7 @@ always @(posedge clk or posedge reset) begin
                 reg_audio  <= aw_dec_audio;
                 reg_link   <= aw_dec_link;
                 reg_opm    <= aw_dec_opm;
+                reg_uart   <= aw_dec_uart;
 
                 if (s_axi_wvalid) begin
                     s_axi_wready <= 1;
@@ -816,6 +871,10 @@ always @(posedge clk or posedge reset) begin
                         link_reg_wr <= 1;
                         link_reg_addr <= req_addr[6:2];
                         link_reg_wdata <= s_axi_wdata;
+                    end
+                    if (reg_uart && |s_axi_wstrb && req_addr[3:2] == 2'b01) begin
+                        uart_tx_byte <= s_axi_wdata[7:0];
+                        uart_tx_dv <= 1;
                     end
                 end
             end

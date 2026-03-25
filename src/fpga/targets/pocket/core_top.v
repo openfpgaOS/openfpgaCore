@@ -415,6 +415,17 @@ wire crt_blankn;
 assign crt_csync = ~(HSync ^ VSync);
 assign crt_blankn   = ~(crt_hblank | crt_vblank);
 
+// Analogizer/UART cart pin mux: UART owns bank0 + pin31 when Analogizer is disabled
+wire [7:4] ana_cart_bank0;
+wire       ana_cart_bank0_dir;
+wire       ana_cart_pin31;
+wire       ana_cart_pin31_dir;
+
+assign cart_tran_bank0     = analogizer_ena ? ana_cart_bank0     : {uart_tx_serial, uart_tx_serial, uart_tx_serial, uart_tx_serial};
+assign cart_tran_bank0_dir = analogizer_ena ? ana_cart_bank0_dir : 1'b1;   // output for UART TX
+assign cart_tran_pin31     = analogizer_ena ? ana_cart_pin31     : 1'bZ;    // input for UART RX
+assign cart_tran_pin31_dir = analogizer_ena ? ana_cart_pin31_dir : 1'b0;   // input
+
 openFPGA_Pocket_Analogizer #(
     .MASTER_CLK_FREQ(49_152_000),
     .LINE_LENGTH(640)
@@ -464,13 +475,13 @@ openFPGA_Pocket_Analogizer #(
     .cart_tran_bank3_dir(cart_tran_bank3_dir),
     .cart_tran_bank1(cart_tran_bank1),
     .cart_tran_bank1_dir(cart_tran_bank1_dir),
-    .cart_tran_bank0(cart_tran_bank0),
-    .cart_tran_bank0_dir(cart_tran_bank0_dir),
+    .cart_tran_bank0(ana_cart_bank0),
+    .cart_tran_bank0_dir(ana_cart_bank0_dir),
     .cart_tran_pin30(cart_tran_pin30),
     .cart_tran_pin30_dir(cart_tran_pin30_dir),
     .cart_pin30_pwroff_reset(cart_pin30_pwroff_reset),
-    .cart_tran_pin31(cart_tran_pin31),
-    .cart_tran_pin31_dir(cart_tran_pin31_dir),
+    .cart_tran_pin31(ana_cart_pin31),
+    .cart_tran_pin31_dir(ana_cart_pin31_dir),
     // Debug
     .DBG_TX(),
     .o_stb()
@@ -736,7 +747,37 @@ sram_controller #(
     .sram_lb_n(sram_lb_n_w)
 );
 
-assign dbg_tx = 1'bZ;
+// ============================================================
+// UART (2 Mbaud, 8N1) — DevKey/Cartridge debug interface
+// CLKS_PER_BIT = 90 MHz / 115200 = 781
+// ============================================================
+wire        uart_tx_serial;
+wire        uart_tx_active;
+wire        uart_tx_done;
+wire        uart_tx_dv;
+wire [7:0]  uart_tx_byte;
+wire        uart_rx_dv;
+wire [7:0]  uart_rx_byte;
+
+uart_tx #(.CLKS_PER_BIT(781)) uart_tx_inst (
+    .i_Clock(clk_cpu),
+    .i_Tx_DV(uart_tx_dv),
+    .i_Tx_Byte(uart_tx_byte),
+    .o_Tx_Active(uart_tx_active),
+    .o_Tx_Serial(uart_tx_serial),
+    .o_Tx_Done(uart_tx_done)
+);
+
+uart_rx #(.CLKS_PER_BIT(781)) uart_rx_inst (
+    .i_Clock(clk_cpu),
+    .i_Rx_Serial(cart_tran_pin31),  // DevKey Pin 31 = UART RX
+    .o_Rx_DV(uart_rx_dv),
+    .o_Rx_Byte(uart_rx_byte)
+);
+
+// UART TX also on dbg_tx (direct 1.8V debug pin)
+assign dbg_tx = uart_tx_serial;
+
 assign user1 = 1'bZ;
 assign aux_scl = 1'bZ;
 assign vpll_feed = 1'bZ;
@@ -895,7 +936,7 @@ wire        cpu_m_local_wlast;
 wire        cpu_m_local_bvalid;
 wire [1:0]  cpu_m_local_bresp;
 
-// AXI4 arbiter output → axi_sdram_slave
+// AXI4 arbiter output → axi_sdram_slave (direct, no pipeline)
 wire        arb_s_arvalid, arb_s_arready;
 wire [31:0] arb_s_araddr;
 wire [7:0]  arb_s_arlen;
@@ -2125,6 +2166,12 @@ assign video_hs = vidout_hs;
         .opl_write_addr(opl_write_addr),
         .opl_write_data(opl_write_data),
         .opl_ack(opl_ack),
+        // UART
+        .uart_tx_dv(uart_tx_dv),
+        .uart_tx_byte(uart_tx_byte),
+        .uart_tx_active(uart_tx_active),
+        .uart_rx_dv(uart_rx_dv),
+        .uart_rx_byte(uart_rx_byte),
         .save_dt_slot(cpu_save_dt_slot),
         .save_dt_size(cpu_save_dt_size),
         .save_dt_commit(cpu_save_dt_commit),
