@@ -530,6 +530,9 @@ int main(void) {
             exec_payload[3] = (entry >> 24) & 0xFF;
             phdp_send(PHDP_EVT_EXEC_START, exec_payload, 4);
 
+            /* Small delay to let EXEC_START packet transmit fully */
+            for (volatile int i = 0; i < 100000; i++) {}
+
             boot_vram_clear_row(14);
             boot_vram_puts(0, 14, "OK - starting OS (debug)");
             goto start_os;

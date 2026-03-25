@@ -421,10 +421,12 @@ wire       ana_cart_bank0_dir;
 wire       ana_cart_pin31;
 wire       ana_cart_pin31_dir;
 
-assign cart_tran_bank0     = analogizer_ena ? ana_cart_bank0     : {uart_tx_serial, uart_tx_serial, uart_tx_serial, uart_tx_serial};
-assign cart_tran_bank0_dir = analogizer_ena ? ana_cart_bank0_dir : 1'b1;   // output for UART TX
-assign cart_tran_pin31     = analogizer_ena ? ana_cart_pin31     : 1'bZ;    // input for UART RX
-assign cart_tran_pin31_dir = analogizer_ena ? ana_cart_pin31_dir : 1'b0;   // input
+// UART always owns cart pins (Analogizer disabled for debug builds)
+// TODO: add runtime switch when Analogizer + UART coexistence is needed
+assign cart_tran_bank0     = {uart_tx_serial, uart_tx_serial, uart_tx_serial, uart_tx_serial};
+assign cart_tran_bank0_dir = 1'b1;   // output for UART TX
+assign cart_tran_pin31     = 1'bZ;    // input for UART RX
+assign cart_tran_pin31_dir = 1'b0;   // input
 
 openFPGA_Pocket_Analogizer #(
     .MASTER_CLK_FREQ(49_152_000),

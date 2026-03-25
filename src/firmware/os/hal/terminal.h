@@ -62,5 +62,7 @@ void of_term_set_cell(int col, int row, char ch, uint8_t fg, uint8_t bg);
 /* Reset ANSI escape parser and restore default colors */
 void of_term_reset(void);
 
+/* Enable UART console mirror (call after PHDP handshake completes) */
+void of_term_enable_uart_mirror(void);
 
 #endif /* OFOS_TERMINAL_H */

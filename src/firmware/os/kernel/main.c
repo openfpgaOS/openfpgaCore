@@ -54,6 +54,8 @@ void os_main(void) {
     SYS_DISPLAY_MODE = DISPLAY_MODE_TERMINAL;
     boot_banner();
 
+    of_term_enable_uart_mirror();
+
     of_term_puts("HAL init............ ");
     term_ok();
 

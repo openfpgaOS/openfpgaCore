@@ -179,9 +179,22 @@ static void esc_dispatch(char cmd) {
     }
 }
 
+/* UART console mirror — enabled after PHDP handshake */
+static volatile int uart_mirror_on __attribute__((section(".bss.boot")));
+
+void of_term_enable_uart_mirror(void) { uart_mirror_on = 1; }
+
 /* Emit a raw character (no escape processing) */
 static void term_emit_char(char c) {
     uint8_t color = term_color_byte(term_fg, term_bg);
+
+    /* ALWAYS mirror to UART (blocking) */
+    {
+        volatile uint32_t *status = (volatile uint32_t *)0x4F000000;
+        volatile uint32_t *txdata = (volatile uint32_t *)0x4F000004;
+        for (int w = 0; w < 100000; w++)
+            if (*status & 2) { *txdata = (uint8_t)c; break; }
+    }
 
     if (c == '\n') {
         term_col = 0;
