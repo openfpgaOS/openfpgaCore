@@ -45,6 +45,12 @@ module psram_controller #(
     output reg          burst_rdata_valid,  // Pulses for each assembled 32-bit word
     output reg  [31:0]  burst_rdata,
 
+    // Sync burst write interface
+    input wire          burst_wr,           // Start sync burst write (single-cycle pulse)
+    input wire  [5:0]   burst_wr_len,      // 32-bit words minus 1
+    input wire  [31:0]  burst_wr_data,      // Write data (sampled when burst_wr_next pulses)
+    output reg          burst_wr_done,      // Pulses when burst write is complete
+
     // Raw psram.sv busy (for BCR init FSM — bypasses word_busy)
     output wire         raw_busy,
 
@@ -71,6 +77,8 @@ localparam [3:0] ST_BURST_WAIT  = 4'd9;
 localparam [3:0] ST_BURST_LO    = 4'd10;
 localparam [3:0] ST_BURST_HI    = 4'd11;
 localparam [3:0] ST_BURST_DONE  = 4'd12;
+localparam [3:0] ST_BWR_START   = 4'd13;  // Sync burst write: issue command
+localparam [3:0] ST_BWR_DONE    = 4'd14;  // Wait for !busy
 
 reg [3:0] state;
 reg is_write;   // Distinguishes reads from writes in shared LO/HI states
@@ -97,6 +105,11 @@ reg psram_write_low_byte;
 // Sync burst signals
 reg psram_sync_burst_en;
 reg [5:0] psram_sync_burst_len;
+
+// Sync burst write signals
+reg psram_sync_burst_wr_en;
+reg [5:0] psram_sync_burst_wr_len;
+reg [31:0] psram_sync_burst_wr_word;
 
 // Latched config bank_sel — must persist for the full config transaction.
 // psram.sv doesn't use bank_sel until STATE_CONFIG_CRE_SETUP, several
@@ -141,6 +154,10 @@ psram #(
 
     .sync_burst_en(psram_sync_burst_en),
     .sync_burst_len(psram_sync_burst_len),
+
+    .sync_burst_wr_en(psram_sync_burst_wr_en),
+    .sync_burst_wr_len(psram_sync_burst_wr_len),
+    .sync_burst_wr_word(psram_sync_burst_wr_word),
 
     .config_en(config_en),
     .config_data(config_data),
@@ -194,14 +211,19 @@ always @(posedge clk or negedge reset_n) begin
         psram_write_low_byte <= 1'b1;
         psram_sync_burst_en <= 1'b0;
         psram_sync_burst_len <= 6'b0;
+        psram_sync_burst_wr_en <= 1'b0;
+        psram_sync_burst_wr_len <= 6'b0;
+        psram_sync_burst_wr_word <= 32'b0;
         burst_words_remaining <= 6'b0;
         burst_lo_captured <= 1'b0;
         burst_rdata_valid <= 1'b0;
         burst_rdata <= 32'b0;
+        burst_wr_done <= 1'b0;
     end else begin
         // Default: clear single-cycle signals
         psram_write_en <= 1'b0;
         psram_read_en <= 1'b0;
+        psram_sync_burst_wr_en <= 1'b0;
         psram_sync_burst_en <= 1'b0;
         word_q_valid <= 1'b0;
         burst_rdata_valid <= 1'b0;
@@ -219,6 +241,15 @@ always @(posedge clk or negedge reset_n) begin
                     burst_words_remaining <= burst_len;
                     burst_lo_captured <= 1'b0;
                     state <= ST_BURST_START;
+                end else if (burst_wr) begin
+                    // Sync burst write: issue one sync burst for N words (2N halfwords)
+                    word_busy <= 1'b1;
+                    latched_addr <= word_addr;
+                    latched_chip_sel <= word_addr[21];
+                    latched_data <= burst_wr_data;
+                    burst_words_remaining <= burst_wr_len;
+                    burst_wr_done <= 1'b0;
+                    state <= ST_BWR_START;
                 end else if (word_wr || word_rd) begin
                     word_busy <= 1'b1;
                     is_write <= word_wr;
@@ -357,6 +388,30 @@ always @(posedge clk or negedge reset_n) begin
                 // Wait for psram.sv to finish (busy goes low)
                 if (!psram_busy) begin
                     word_busy <= 1'b0;
+                    state <= ST_IDLE;
+                end
+            end
+
+            // ============================================
+            // Sync burst write path
+            // Writes 2*(N+1) halfwords via psram.sv sync burst write.
+            // Low halfword first, then high halfword, for each 32-bit word.
+            // ============================================
+            ST_BWR_START: begin
+                // Issue sync burst write: psram.sv handles both halfwords
+                // from the 32-bit word (low first, high second).
+                psram_bank_sel <= latched_chip_sel;
+                psram_addr <= {latched_addr[20:0], 1'b0};  // halfword address
+                psram_sync_burst_wr_en <= 1'b1;
+                psram_sync_burst_wr_len <= {burst_words_remaining[4:0], 1'b1};  // 2*(N+1)-1
+                psram_sync_burst_wr_word <= latched_data;
+                state <= ST_BWR_DONE;
+            end
+
+            ST_BWR_DONE: begin
+                if (!psram_busy) begin
+                    word_busy <= 1'b0;
+                    burst_wr_done <= 1'b1;
                     state <= ST_IDLE;
                 end
             end

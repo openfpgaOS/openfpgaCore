@@ -21,7 +21,13 @@
  * ====================================================================== */
 
 #define BRAM_BASE           0x00000000
-#define BRAM_SIZE           (64 * 1024)
+#define BRAM_SIZE           (192 * 1024)
+
+/* App BRAM region — available for app hot code after OS sections.
+ * Top 512 bytes reserved for trap handler stack frame. */
+#define APP_BRAM_BASE       0x00002000
+#define APP_BRAM_END        (BRAM_BASE + BRAM_SIZE - 512)  /* 0x0002FE00 */
+#define APP_BRAM_SIZE       (APP_BRAM_END - APP_BRAM_BASE)
 
 #define SDRAM_BASE          0x10000000
 #define SDRAM_SIZE          (64 * 1024 * 1024)
@@ -153,6 +159,10 @@
 #define SYS_SHUTDOWN        REG32(SYSREG_BASE + 0xB0)
 #define   SHUTDOWN_PENDING  (1 << 0)    /* Read: bridge requests shutdown */
 #define   SHUTDOWN_ACK      (1 << 0)    /* Write: CPU acknowledges shutdown */
+
+/* PSRAM debug registers (0xF8-0xFC) */
+#define PSRAM_DBG_WAIT      REG32(SYSREG_BASE + 0xF8)  /* [16]=wait_seen [15:0]=wait_cycles */
+#define PSRAM_DBG_BURST     REG32(SYSREG_BASE + 0xFC)  /* [31:16]=burst_count [15:0]=stale_count */
 
 /* Tile/Sprite constants */
 #define TILE_MAP_COLS       64

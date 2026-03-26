@@ -2,7 +2,7 @@
  * openfpgaOS Linker Script
  *
  * Memory layout:
- * - BRAM:     0x00000000 (64KB)  - Bootloader + trap handler + hot code
+ * - BRAM:     0x00000000 (192KB) - Bootloader + trap handler + hot code
  * - SDRAM:    0x10200000 (2MB)   - OS kernel code + data + BSS
  * - App area: 0x10400000+        - Dynamically loaded application
  * - Terminal: 0x20000000 (8KB)
@@ -12,7 +12,7 @@
 ENTRY(_start)
 
 MEMORY {
-    BRAM      (rwx) : ORIGIN = 0x00000000, LENGTH = 64K
+    BRAM      (rwx) : ORIGIN = 0x00000000, LENGTH = 192K
     SDRAM     (rwx) : ORIGIN = 0x10200000, LENGTH = 2M
 }
 
@@ -115,10 +115,10 @@ SECTIONS {
     /* Stack at end of BRAM */
     __stack_top = ORIGIN(BRAM) + LENGTH(BRAM);
 
-    /* App BRAM region — available for app hot code after OS sections.
-     * Top 512 bytes reserved for trap handler stack frame. */
+    /* App BRAM region — must match APP_BRAM_BASE/END in hal/regs.h
+     * and OF_APP_BRAM_BASE/END in of_bram.h (SDK). */
     __app_bram_start = 0x00002000;
-    __app_bram_end   = 0x0000FE00;
+    __app_bram_end   = ORIGIN(BRAM) + LENGTH(BRAM) - 512;
 
     /* Provide symbols for C code */
     PROVIDE(_start_addr = ORIGIN(BRAM));

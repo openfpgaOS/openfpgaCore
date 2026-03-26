@@ -31,7 +31,6 @@ BITSTREAM_SOURCE = $(FPGA_TARGET_DIR)/output_files/$(QUARTUS_PROJECT).rbf
 BITSTREAM_TARGET = $(RELEASE_CORE_DIR)/bitstream.rbf_r
 FIRMWARE_SOURCE = $(OS_DIR)/os.bin
 FIRMWARE_TARGET = $(RELEASE_ASSETS_DIR)/os.bin
-APPS_DIR = $(FIRMWARE_DIR)/apps
 # JSON configuration files (in dist/core/)
 DIST_DIR = dist/core
 JSON_FILES = core.json video.json audio.json input.json data.json variants.json interact.json
@@ -83,12 +82,8 @@ firmware:
 chip32:
 	$(MAKE) -C $(CHIP32_DIR)
 
-# Build apps
-apps:
-	$(MAKE) -C $(APPS_DIR)
-
 # Package release (uses existing bitstream)
-package: $(REVERSE_BITS) check-bitstream firmware chip32 apps release-dirs copy-bitstream copy-chip32 copy-firmware copy-apps copy-app-data copy-json copy-platform copy-icon install-txt
+package: $(REVERSE_BITS) check-bitstream firmware chip32 release-dirs copy-bitstream copy-chip32 copy-firmware copy-json copy-platform copy-icon install-txt
 	@echo ""
 	@echo "Build complete!"
 	@echo "Release package: $(OUTPUT_DIR)/"
@@ -131,24 +126,6 @@ copy-chip32:
 copy-firmware:
 	@echo "Copying os.bin..."
 	cp $(FIRMWARE_SOURCE) $(FIRMWARE_TARGET)
-
-# Copy application ELFs (named to match instance filenames)
-copy-apps:
-	@echo "Copying application ELFs..."
-	@for app in $(APPS_DIR)/*/app.elf; do \
-		dir=$$(basename $$(dirname $$app)); \
-		echo "  $$dir.elf"; \
-		cp $$app $(RELEASE_ASSETS_DIR)/$$dir.elf; \
-	done
-
-# Copy application data files (MIDI, WAV, etc.) referenced by data slots
-copy-app-data:
-	@echo "Copying application data files..."
-	@for f in $(APPS_DIR)/*/*.mid $(APPS_DIR)/*/*.wav $(APPS_DIR)/*/*.dat $(APPS_DIR)/*/*.png dist/app_data/*.cfg; do \
-		[ -f "$$f" ] || continue; \
-		echo "  $$(basename $$f)"; \
-		cp "$$f" $(RELEASE_ASSETS_DIR)/; \
-	done
 
 # Copy JSON configuration files
 copy-json:
@@ -272,4 +249,4 @@ program: $(FW_MIF)
 	@echo "Programming FPGA via JTAG..."
 	$(MAKE) -C $(FPGA_TARGET_DIR) program
 
-.PHONY: all full fpga firmware-mif firmware chip32 firmware-update fw package check-bitstream release-dirs copy-bitstream copy-chip32 copy-firmware copy-apps copy-app-data copy-json copy-platform copy-icon install-txt clean clean-fpga-cache clean-fpga quick program apps
+.PHONY: all full fpga firmware-mif firmware chip32 firmware-update fw package check-bitstream release-dirs copy-bitstream copy-chip32 copy-firmware copy-json copy-platform copy-icon install-txt clean clean-fpga-cache clean-fpga quick program

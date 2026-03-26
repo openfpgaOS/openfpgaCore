@@ -62,7 +62,13 @@ module axi_psram_slave (
     output reg         psram_burst_rd,
     output reg  [5:0]  psram_burst_len,
     input  wire        psram_burst_rdata_valid,
-    input  wire [31:0] psram_burst_rdata
+    input  wire [31:0] psram_burst_rdata,
+
+    // PSRAM sync burst write interface (to psram_controller)
+    output reg         psram_burst_wr,
+    output reg  [5:0]  psram_burst_wr_len,
+    output reg  [31:0] psram_burst_wr_data,
+    input  wire        psram_burst_wr_done
 );
 
 wire reset = ~reset_n;
@@ -76,12 +82,15 @@ localparam S_WR_CMD     = 4'd4;  // Issue word_wr, wait for busy
 localparam S_WR_WAIT    = 4'd5;  // Wait for !busy (write done)
 localparam S_WR_NEXT    = 4'd6;  // Accept next W beat
 localparam S_RD_DAT     = 4'd7;  // Present single-word read data on R channel
+localparam S_BWR_CMD    = 4'd8;  // Issue burst_wr for CRAM0
+localparam S_BWR_WAIT   = 4'd9;  // Wait for burst_wr_done
 
 reg [3:0] state;
 
 // Transaction tracking
 reg [7:0]  burst_len;
 reg [7:0]  beat_count;
+reg        is_cram0_wr;  // Latched: current write targets CRAM0 (use sync burst)
 reg [31:0] addr_r;
 reg        cmd_issued;
 reg        psram_started;   // busy was seen after issuing command
@@ -92,8 +101,10 @@ wire beat_is_last = (beat_count == burst_len);
 
 // SRAM detection: addr[27:24] == 0xA
 // CRAM1 detection: addr[27:24] == 0x1 or 0x9 (async mode, no burst)
+// CRAM0 write detection: addr[27:24] == 0x0 or 0x8 (sync burst mode)
 wire addr_is_sram  = (s_axi_araddr[27:24] == 4'hA);
 wire addr_is_cram1 = (s_axi_araddr[27:24] == 4'h1) || (s_axi_araddr[27:24] == 4'h9);
+wire aw_is_cram0   = (s_axi_awaddr[27:24] == 4'h0) || (s_axi_awaddr[27:24] == 4'h8);
 
 always @(posedge clk or posedge reset) begin
     if (reset) begin
@@ -123,6 +134,9 @@ always @(posedge clk or posedge reset) begin
         psram_wstrb <= 0;
         psram_burst_rd <= 0;
         psram_burst_len <= 0;
+        psram_burst_wr <= 0;
+        psram_burst_wr_len <= 0;
+        psram_burst_wr_data <= 0;
     end else begin
         // Defaults
         s_axi_arready <= 0;
@@ -133,6 +147,7 @@ always @(posedge clk or posedge reset) begin
         psram_rd <= 0;
         psram_wr <= 0;
         psram_burst_rd <= 0;
+        psram_burst_wr <= 0;
         case (state)
 
         S_IDLE: begin
@@ -152,11 +167,13 @@ always @(posedge clk or posedge reset) begin
                 addr_r <= s_axi_awaddr;
                 burst_len <= s_axi_awlen;
                 beat_count <= 0;
+                is_cram0_wr <= aw_is_cram0;
                 if (s_axi_wvalid) begin
                     s_axi_wready <= 1;
                     psram_wdata <= s_axi_wdata;
                     psram_wstrb <= s_axi_wstrb;
-                    state <= S_WR_CMD;
+                    // CRAM0: use sync burst write; others: async
+                    state <= aw_is_cram0 ? S_BWR_CMD : S_WR_CMD;
                 end else begin
                     state <= S_WR_NEXT;
                 end
@@ -294,7 +311,38 @@ always @(posedge clk or posedge reset) begin
                 s_axi_wready <= 1;
                 psram_wdata <= s_axi_wdata;
                 psram_wstrb <= s_axi_wstrb;
-                state <= S_WR_CMD;
+                state <= is_cram0_wr ? S_BWR_CMD : S_WR_CMD;
+            end
+        end
+
+        // ============================================
+        // Write path — sync burst (CRAM0 targets)
+        // ============================================
+        S_BWR_CMD: begin
+            if (!cmd_issued) begin
+                if (!psram_busy) begin
+                    psram_burst_wr <= 1;
+                    psram_addr <= addr_r[27:2];
+                    psram_burst_wr_len <= 8'd0;  // single 32-bit word
+                    psram_burst_wr_data <= psram_wdata;
+                    cmd_issued <= 1;
+                    state <= S_BWR_WAIT;
+                end
+            end
+        end
+
+        S_BWR_WAIT: begin
+            if (psram_burst_wr_done) begin
+                beat_count <= beat_count + 1;
+                cmd_issued <= 0;
+                if (beat_is_last) begin
+                    s_axi_bvalid <= 1;
+                    s_axi_bresp <= 2'b00;
+                    state <= S_IDLE;
+                end else begin
+                    addr_r <= addr_r + 32'd4;
+                    state <= S_WR_NEXT;
+                end
             end
         end
 

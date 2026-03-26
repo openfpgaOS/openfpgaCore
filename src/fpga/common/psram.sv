@@ -66,6 +66,10 @@ module psram #(
     input wire sync_burst_en,        // Start synchronous burst read (single-cycle pulse)
     input wire [5:0] sync_burst_len, // Number of 16-bit reads minus 1 (max 63)
 
+    input wire sync_burst_wr_en,     // Start synchronous burst write (single-cycle pulse)
+    input wire [5:0] sync_burst_wr_len, // Number of 16-bit writes minus 1
+    input wire [31:0] sync_burst_wr_word, // 32-bit word: [15:0]=low half (first), [31:16]=high half (second)
+
     input wire config_en,            // Write BCR register (single-cycle pulse)
     input wire [15:0] config_data,   // BCR value to write
 
@@ -170,6 +174,13 @@ module psram #(
   localparam STATE_SYNC_DATA  = 62;
   localparam STATE_SYNC_END   = 63;
 
+  // -- Sync burst write states --
+  localparam STATE_SYNC_WR_CE_SETUP = 70;  // CE# low, address loaded, ADV# HIGH
+  localparam STATE_SYNC_WR_ADV      = 71;  // ADV# LOW + WE# LOW (address+cmd latched on PSRAM clock edge)
+  localparam STATE_SYNC_WR_WAIT     = 72;  // Latency wait (same as read latency, BCR fixed latency mode)
+  localparam STATE_SYNC_WR_DATA     = 73;  // Drive data halfwords
+  localparam STATE_SYNC_WR_END      = 74;  // Release bus
+
   initial begin
     $info("Instantiated PSRAM with the following settings:");
     $info("  Clock speed: %f MHz with period %f ns", CLOCK_SPEED, PERIOD);
@@ -256,7 +267,7 @@ module psram #(
       busy <= 1;
     end
 
-    // Default: clear read_avail every cycle (pulsed in data states)
+    // Default: clear pulsed outputs every cycle
     read_avail <= 0;
 
     case (state)
@@ -320,6 +331,27 @@ module psram #(
           cram_lb_n <= 0;
 
           busy <= 1;
+        end else if (sync_burst_wr_en) begin
+          // Synchronous burst write — CE# setup phase
+          state <= STATE_SYNC_WR_CE_SETUP;
+
+          if (bank_sel) cram_ce1_n <= 0;
+          else cram_ce0_n <= 0;
+
+          cram_a <= addr[21:16];
+          cram_data <= addr[15:0];
+          data_out_en <= 1;
+
+          cram_adv_n <= 1;  // ADV# HIGH this cycle (CE# setup)
+          cram_we_n <= 1;   // WE# high during address phase
+          cram_oe_n <= 1;
+          cram_ub_n <= 0;
+          cram_lb_n <= 0;
+
+          burst_counter <= sync_burst_wr_len;
+          latched_data_in <= sync_burst_wr_word[15:0];  // low half first
+          busy <= 1;
+
         end else if (sync_burst_en) begin
           // Synchronous burst read — CE# setup phase.
           // Assert CE# and load address ONE cycle before ADV# goes LOW.
@@ -514,6 +546,66 @@ module psram #(
         cram_lb_n <= 1;
         busy <= 0;
       end
+
+      // ============================================
+      // Synchronous burst write states
+      // ============================================
+      STATE_SYNC_WR_CE_SETUP: begin
+        // CE# is LOW, address is on bus.  Assert ADV# LOW so the PSRAM
+        // latches the address on the next clock edge.
+        cram_adv_n <= 0;
+        cram_we_n <= 0;     // WE# low indicates write
+        state <= STATE_SYNC_WR_ADV;
+      end
+
+      STATE_SYNC_WR_ADV: begin
+        // Address latched on PSRAM clock edge.  Deassert ADV#.
+        // Release DQ bus briefly — we'll drive data after latency.
+        cram_adv_n <= 1;
+        data_out_en <= 0;
+        latency_counter <= SYNC_LATENCY[5:0];
+        state <= STATE_SYNC_WR_WAIT;
+      end
+
+      STATE_SYNC_WR_WAIT: begin
+        // Wait for initial access latency (same as read latency).
+        // The PSRAM needs these cycles before accepting write data.
+        if (latency_counter == 6'd0) begin
+          // Latency done — drive low halfword
+          data_out_en <= 1;
+          cram_data <= sync_burst_wr_word[15:0];
+          state <= STATE_SYNC_WR_DATA;
+        end else begin
+          latency_counter <= latency_counter - 6'd1;
+        end
+      end
+
+      STATE_SYNC_WR_DATA: begin
+        // PSRAM latches cram_data on each rising clock edge while CE# low.
+        if (burst_counter == 6'd0) begin
+          // All halfwords driven.  Keep CE# LOW for one more cycle
+          // so the PSRAM safely latches the final halfword on the
+          // next clock edge before we deassert.
+          state <= STATE_SYNC_WR_END;
+        end else begin
+          // Drive next halfword (high half for 2-halfword bursts)
+          cram_data <= sync_burst_wr_word[31:16];
+          burst_counter <= burst_counter - 6'd1;
+        end
+      end
+
+      STATE_SYNC_WR_END: begin
+        // Deassert CE# now — the final halfword has been latched
+        state <= STATE_NONE;
+        data_out_en <= 0;
+        cram_we_n <= 1;
+        cram_ub_n <= 1;
+        cram_lb_n <= 1;
+        cram_ce0_n <= 1;
+        cram_ce1_n <= 1;
+        busy <= 0;
+      end
+
     endcase
   end
 

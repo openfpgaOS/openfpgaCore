@@ -81,8 +81,7 @@ typedef struct {
  * BRAM directly since it's not in the bridge address space).
  * ====================================================================== */
 
-#define APP_BRAM_BASE   0x00002000  /* After OS boot/trap/fasttext sections */
-#define APP_BRAM_END    0x0000FE00  /* 512B reserved for trap handler stack */
+/* APP_BRAM_BASE/END defined in hal/regs.h (single source of truth) */
 
 /* ======================================================================
  * ELF Loading Implementation
@@ -213,8 +212,10 @@ int elf_load(uint32_t slot_id, uintptr_t load_addr,
                 phdr.p_vaddr < APP_BRAM_END) {
                 /* BRAM segment: DMA to bounce buffer, CPU-copy to BRAM */
                 if (phdr.p_filesz > 0) {
+                    of_term_putchar('B');
                     rc = elf_copy_to_bram(slot_id, phdr.p_offset,
                                           phdr.p_vaddr, phdr.p_filesz);
+                    of_term_putchar(rc < 0 ? '!' : 'b');
                     if (rc < 0)
                         return -6;
                 }
@@ -229,6 +230,7 @@ int elf_load(uint32_t slot_id, uintptr_t load_addr,
 
                 /* Load file contents directly to SDRAM via DMA */
                 if (phdr.p_filesz > 0) {
+                    of_term_putchar('D');
                     rc = of_file_read_chunked(slot_id, phdr.p_offset,
                                                (void *)seg_addr, phdr.p_filesz);
                     if (rc < 0)
