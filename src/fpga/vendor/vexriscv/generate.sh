@@ -19,7 +19,7 @@ fi
 cp "$SCRIPT_DIR/GenofOS.scala" "$VEXRISCV_DIR/src/main/scala/vexriscv/demo/"
 
 # Generate
-echo "Generating VexRiscv (32KB I$ + 128KB D$)..."
+echo "Generating VexRiscv..."
 cd "$VEXRISCV_DIR"
 sbt "runMain vexriscv.demo.GenofOS"
 

@@ -6,7 +6,7 @@ A game development platform for the [Analogue Pocket](https://www.analogue.co/po
 
 - **One-header API** — `#include "of.h"` and start writing a game
 - **Sub-second iteration** — compile C, copy ELF to SD, run. No FPGA synthesis required
-- **VexRiscv RISC-V CPU** — rv32imafc at 100 MHz, AXI4 bus, 128 KB D-cache, hardware FPU
+- **VexRiscv RISC-V CPU** — rv32imafc at 100 MHz, AXI4 bus, 32 KB D-cache + 8 KB I-cache, hardware FPU
 - **320×240 double-buffered video** — 6 color modes (8/4/2-bit indexed, RGB565, RGB555, RGBA5551), 256-entry palette
 - **OPL3 FM synthesis** — 18-channel hardware YMF262 (both register banks) + 48 kHz stereo PCM mixer
 - **MIDI playback** — `of_midi` library with built-in GM instrument bank, Format 0+1, non-blocking pump

@@ -751,7 +751,7 @@ sram_controller #(
 
 // ============================================================
 // UART (2 Mbaud, 8N1) — DevKey/Cartridge debug interface
-// CLKS_PER_BIT = 90 MHz / 115200 = 781
+// CLKS_PER_BIT = 90 MHz / 2000000 = 45
 // ============================================================
 wire        uart_tx_serial;
 wire        uart_tx_active;
@@ -761,7 +761,7 @@ wire [7:0]  uart_tx_byte;
 wire        uart_rx_dv;
 wire [7:0]  uart_rx_byte;
 
-uart_tx #(.CLKS_PER_BIT(781)) uart_tx_inst (
+uart_tx #(.CLKS_PER_BIT(45)) uart_tx_inst (
     .i_Clock(clk_cpu),
     .i_Tx_DV(uart_tx_dv),
     .i_Tx_Byte(uart_tx_byte),
@@ -770,7 +770,7 @@ uart_tx #(.CLKS_PER_BIT(781)) uart_tx_inst (
     .o_Tx_Done(uart_tx_done)
 );
 
-uart_rx #(.CLKS_PER_BIT(781)) uart_rx_inst (
+uart_rx #(.CLKS_PER_BIT(45)) uart_rx_inst (
     .i_Clock(clk_cpu),
     .i_Rx_Serial(cart_tran_pin31),  // DevKey Pin 31 = UART RX
     .o_Rx_DV(uart_rx_dv),

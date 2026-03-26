@@ -214,6 +214,7 @@ assign font_addr = {current_char, pixel_row_d1};
 
 altsyncram #(
     .operation_mode("ROM"),
+    .ram_block_type("MLAB"),
     .width_a(8),
     .widthad_a(11),
     .numwords_a(2048),

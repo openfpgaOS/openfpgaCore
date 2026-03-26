@@ -424,6 +424,12 @@ static int boot_dma_read(uint32_t slot_id, uint32_t slot_offset,
 
     __asm__ volatile("fence" ::: "memory");
 
+    /* Wait for bridge to be idle before issuing a new command. */
+    timeout = BOOT_DMA_TIMEOUT;
+    while (!(DS_STATUS & DS_STATUS_READY)) {
+        if (--timeout == 0) return -3;
+    }
+
     DS_SLOT_ID     = slot_id;
     DS_SLOT_OFFSET = slot_offset;
     DS_BRIDGE_ADDR = bridge_addr;
@@ -491,6 +497,8 @@ int main(void) {
     /* Brief delay for deferload to settle */
     for (volatile int i = 0; i < 1000000; i++) {}
 
+    boot_vram_puts(0, 14, "Booting...");
+
     /* ── PHDP Discovery ─────────────────────────────────────────── */
     int debug_mode = 0;
 
@@ -530,8 +538,16 @@ int main(void) {
             exec_payload[3] = (entry >> 24) & 0xFF;
             phdp_send(PHDP_EVT_EXEC_START, exec_payload, 4);
 
-            /* Small delay to let EXEC_START packet transmit fully */
-            for (volatile int i = 0; i < 100000; i++) {}
+            /* Enable UART mirror before jumping to OS */
+            extern volatile int uart_mirror_on;
+            uart_mirror_on = 1;
+
+            /* Wait for EXEC_START to finish transmitting, then send test byte
+             * using raw UART (not term_emit_char — string data might not be in MIF) */
+            while (!(UART_STATUS & UART_TX_RDY)) {}
+            UART_TX_DATA = '!';
+            while (!(UART_STATUS & UART_TX_RDY)) {}
+            UART_TX_DATA = '\n';
 
             boot_vram_clear_row(14);
             boot_vram_puts(0, 14, "OK - starting OS (debug)");

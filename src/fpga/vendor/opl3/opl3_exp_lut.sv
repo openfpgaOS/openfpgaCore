@@ -51,6 +51,7 @@ module opl3_exp_lut (
     input wire [7:0] in,
     output logic [9:0] out = 0
 );
+    (* ramstyle = "logic" *) // Force into LUTs, not M10K blocks
     always_ff @(posedge clk)
         unique case(in)
         8'h0: out <= 0;

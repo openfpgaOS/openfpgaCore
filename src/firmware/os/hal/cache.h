@@ -1,6 +1,6 @@
 /*
  * openfpgaOS Cache Management HAL
- * Zicbom cache-block management for DMA coherency
+ * Cache management for DMA coherency (conflict eviction)
  */
 
 #ifndef OFOS_CACHE_H

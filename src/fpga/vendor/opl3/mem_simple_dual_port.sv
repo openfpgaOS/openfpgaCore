@@ -58,7 +58,7 @@ module mem_simple_dual_port #(
 );
     logic [DATA_WIDTH-1:0] dob_p0;
 
-    logic [DATA_WIDTH-1:0] ram [DEPTH-1:0] = '{default: DEFAULT_VALUE};
+    (* ramstyle = "MLAB, no_rw_check" *) logic [DATA_WIDTH-1:0] ram [DEPTH-1:0] = '{default: DEFAULT_VALUE};
 
     always_ff @(posedge clka)
         if (wea)

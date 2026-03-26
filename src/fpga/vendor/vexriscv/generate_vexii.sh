@@ -2,11 +2,14 @@
 # Generate VexiiRiscv for openfpgaOS
 #
 # RV32IMAFCB + Zicbom (cache block management)
-#   I-cache: 32KB (512 sets x 1 way x 64B line)
-#   D-cache: 128KB (1024 sets x 2 ways x 64B line, write-back)
+#
+# NOTE: The parameters below request a larger cache (1024x2 D$, 512x1 I$)
+# but the CURRENT generated VexiiRiscv_Full.v has:
+#   I-cache: 8KB  (128 sets x 1 way x 64B line)
+#   D-cache: 32KB (512 sets x 1 way x 64B line, write-back, direct-mapped)
 #   Branch: BTB + GShare + RAS
 #   FPU: single-precision (F extension)
-#   Cache mgmt: CBO.CLEAN, CBO.INVAL, CBO.FLUSH (Zicbom)
+#   Cache mgmt: Zicbom enabled in hardware (not used by firmware)
 #
 # Prerequisites: java, sbt
 # Usage: ./generate_vexii.sh
@@ -64,9 +67,9 @@ if [ -f "$OUTPUT" ]; then
     echo ""
     echo "Done! Copied to VexiiRiscv_Full.v"
     echo "Extensions: RV32IMAFCB + Zicbom"
-    echo "D-cache: 128KB (1024x2x64B, write-back)"
-    echo "I-cache: 32KB (512x1x64B)"
-    echo "Cache mgmt: cbo.clean, cbo.inval, cbo.flush"
+    echo "D-cache: check generated Verilog for actual size"
+    echo "I-cache: check generated Verilog for actual size"
+    echo "Cache mgmt: Zicbom enabled in hardware"
 else
     echo "ERROR: VexiiRiscv.v not found after generation"
     exit 1

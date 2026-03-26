@@ -8,6 +8,7 @@
 #include "loader.h"
 #include "libc_table.h"
 #include <stddef.h>
+#include <string.h>
 
 /* Data slot IDs (match data.json) */
 #define OS_SLOT_ID      1       /* OS binary (loaded by bootloader) */
@@ -15,6 +16,9 @@
 
 /* App load address (after OS region) */
 #define APP_LOAD_ADDR   0x10400000
+
+/* Heap cannot grow past the save region */
+#define HEAP_LIMIT      0x13C00000
 
 /* Symbols from linker script */
 extern char __os_bss_end[];
@@ -59,8 +63,14 @@ void os_main(void) {
     of_term_puts("HAL init............ ");
     term_ok();
 
-    /* Initialize syscall subsystem with heap starting after OS BSS */
+    /* Clear heap region so stale allocations from a previous instance
+     * don't corrupt dlmalloc's internal state on reload. */
+    of_term_puts("Clearing memory..... ");
     uintptr_t heap_start = ((uintptr_t)__os_bss_end + 15) & ~15;
+    memset((void *)heap_start, 0, HEAP_LIMIT - heap_start);
+    term_ok();
+
+    /* Initialize syscall subsystem with heap starting after OS BSS */
     syscall_init(heap_start);
     of_term_puts("Syscall init........ ");
     term_ok();

@@ -234,7 +234,7 @@ int of_file_read_chunked(uint32_t slot_id, uint32_t slot_offset,
         if (bounce) {
             /* DMA to SDRAM bounce buffer, then copy to destination.
              * of_file_read() invalidates cache lines for DMA_BUFFER
-             * via cbo.inval, so the subsequent read gets fresh data. */
+             * via cache eviction, so the subsequent read gets fresh data. */
             int rc = of_file_read(slot_id, slot_offset + done,
                                    (void *)DMA_BUFFER, chunk);
             if (rc < 0)

@@ -741,7 +741,7 @@ long syscall_dispatch(long n, long a0, long a1, long a2,
 
     if (n == OF_SYS_FILE_READ) {
         /* Direct DMA syscall — of_file_read handles all cache
-         * coherency via cbo.flush (before) + cbo.inval (after). */
+         * coherency via cache eviction (before and after). */
         return of_file_read((uint32_t)a0, (uint32_t)a1,
                              (void *)a2, (uint32_t)a3);
     }

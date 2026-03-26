@@ -51,6 +51,7 @@ module opl3_log_sine_lut (
     input wire [7:0] theta,
     output logic [11:0] out = 0
 );
+    (* ramstyle = "logic" *) // Force into LUTs, not M10K blocks
     always_ff @(posedge clk)
         unique case(theta)
         8'h0: out <= 2137;

@@ -1,88 +1,59 @@
 /*
  * openfpgaOS Cache Management HAL Implementation
  *
- * VexiiRiscv D-cache: 128KB, 2-way set-associative, write-back, 64B lines.
- * Uses Zicbom (Cache-Block Management Operations) for precise control:
- *   cbo.clean  addr  — write-back dirty line, keep in cache
- *   cbo.inval  addr  — discard line (no write-back!)
- *   cbo.flush  addr  — write-back dirty line + discard
+ * VexiiRiscv D-cache: 32KB, direct-mapped (1-way), write-back, 64B lines
+ * (512 sets x 1 way x 64B).
+ *
+ * Cache coherency is maintained via conflict eviction: reading through
+ * a 32KB eviction region forces all dirty lines to be written back.
+ * No Zicbom (cbo.*) instructions are used.
  */
 
 #include "cache.h"
 #include "regs.h"
 
 #define DCACHE_LINE_SIZE  64
+#define DCACHE_SETS       512
+#define DCACHE_WAYS       1
+#define DCACHE_TOTAL      (DCACHE_SETS * DCACHE_WAYS * DCACHE_LINE_SIZE)  /* 32KB */
 
 void of_cache_init(void) {
     /* No initialization required */
 }
 
-/* Zicbom instruction encodings (rs1 in bits 19:15):
- * cbo.clean  = 0x0010200F with rs1
- * cbo.inval  = 0x0000200F with rs1
- * cbo.flush  = 0x0020200F with rs1
- *
- * We use inline asm with the .insn directive for portability. */
-
-/* Write-back dirty data for one cache line, keep line in cache.
- * Use before DMA reads FROM memory (ensures peripheral sees latest data). */
-static inline void cbo_clean(void *addr) {
-    __asm__ volatile(".insn i 0x0F, 2, x0, %0, 0x001" :: "r"(addr) : "memory");
+/* Flush entire D-cache by conflict eviction.
+ * Reads 32KB from the top of SDRAM, forcing all dirty cache lines
+ * to be written back.  The eviction region is well above any active
+ * data (app heap grows from 0x10400000, eviction is near 0x13FE0000). */
+static void dcache_evict_all(void) {
+    __asm__ volatile("fence" ::: "memory");
+    volatile char *p = (volatile char *)(SDRAM_BASE + SDRAM_SIZE - DCACHE_TOTAL);
+    for (uint32_t i = 0; i < DCACHE_TOTAL; i += DCACHE_LINE_SIZE)
+        (void)p[i];
+    __asm__ volatile("fence" ::: "memory");
 }
 
-/* Invalidate one cache line WITHOUT write-back.
- * Use after DMA writes TO memory (discards stale cached copy). */
-static inline void cbo_inval(void *addr) {
-    __asm__ volatile(".insn i 0x0F, 2, x0, %0, 0x000" :: "r"(addr) : "memory");
-}
+/* Without per-line cache management instructions, all range operations
+ * fall back to a full cache eviction.  This is less granular but correct
+ * for DMA coherency. */
 
-/* Write-back + invalidate one cache line.
- * Use when both directions may be dirty. */
-static inline void cbo_flush(void *addr) {
-    __asm__ volatile(".insn i 0x0F, 2, x0, %0, 0x002" :: "r"(addr) : "memory");
-}
-
-/* Invalidate D-cache lines for a memory range.
- * Call AFTER DMA writes to memory — discards stale cached data
- * so the CPU fetches fresh DMA results on next access. */
 void of_cache_inval_range(void *addr, uint32_t size) {
-    uint8_t *p = (uint8_t *)((uintptr_t)addr & ~(DCACHE_LINE_SIZE - 1));
-    uint8_t *end = (uint8_t *)addr + size;
-    while (p < end) {
-        cbo_inval(p);
-        p += DCACHE_LINE_SIZE;
-    }
+    (void)addr; (void)size;
+    dcache_evict_all();
 }
 
-/* Write-back D-cache lines for a memory range.
- * Call BEFORE a peripheral reads from memory — ensures dirty
- * data is visible in SDRAM. */
 void of_cache_clean_range(void *addr, uint32_t size) {
-    uint8_t *p = (uint8_t *)((uintptr_t)addr & ~(DCACHE_LINE_SIZE - 1));
-    uint8_t *end = (uint8_t *)addr + size;
-    while (p < end) {
-        cbo_clean(p);
-        p += DCACHE_LINE_SIZE;
-    }
+    (void)addr; (void)size;
+    dcache_evict_all();
 }
 
-/* Write-back + invalidate D-cache lines for a memory range. */
 void of_cache_flush_range(void *addr, uint32_t size) {
-    uint8_t *p = (uint8_t *)((uintptr_t)addr & ~(DCACHE_LINE_SIZE - 1));
-    uint8_t *end = (uint8_t *)addr + size;
-    while (p < end) {
-        cbo_flush(p);
-        p += DCACHE_LINE_SIZE;
-    }
+    (void)addr; (void)size;
+    dcache_evict_all();
 }
 
-/* Flush entire D-cache (write-back all dirty lines + invalidate).
- * Walks known dirty regions rather than the full address space. */
 void of_cache_flush_dcache(void) {
-    /* Flush all cacheable SDRAM: framebuffers, DMA buffer, kernel, app.
-     * 128KB D-cache = 2048 lines × 64B.  Walking 4MB covers all possible
-     * dirty lines many times over (4MB / 64B = 65536 > 2048 lines). */
-    of_cache_flush_range((void *)0x10000000, 0x400000);
+    dcache_evict_all();
 }
 
 void of_cache_invalidate_icache(void) {

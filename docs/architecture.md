@@ -10,8 +10,8 @@ ofOS is a minimal operating system for the Analogue Pocket FPGA handheld. It run
 - **ISA:** rv32imafc (integer, multiply/divide, atomics, single-precision FPU, compressed instructions)
 - **Clock:** 100 MHz
 - **Bus:** AXI4, 3-bus architecture (FetchL1, LsuL1, LsuIO)
-- **I-Cache:** 64KB, 2-way set associative
-- **D-Cache:** 64KB, 2-way set associative
+- **I-Cache:** 8KB, direct-mapped (128 sets × 1 way × 64B)
+- **D-Cache:** 32KB, direct-mapped (512 sets × 1 way × 64B, write-back)
 - **MMU:** None (bare-metal, M-mode only)
 - **Privilege level:** M-mode only (all code runs in machine mode)
 
@@ -135,7 +135,7 @@ The OS loads applications as ELF32 static-PIE binaries:
 
 The system has no hardware cache coherency mechanism. Software manages coherency:
 
-- **D-cache flush:** Read 128KB from address 0x10380000 to evict all dirty lines from the 64KB 2-way D-cache
+- **D-cache flush:** Read 32KB from the top of SDRAM to evict all dirty lines from the 32KB direct-mapped D-cache
 - **I-cache invalidate:** `fence.i` instruction
 - **Uncached alias:** SDRAM addresses at 0x50000000 bypass D-cache entirely
 - **DMA coherency:** Fence before DMA operations; use uncached alias to read DMA results

@@ -89,7 +89,7 @@ typedef struct {
  * ====================================================================== */
 
 /* Read bytes from data slot into a buffer via DMA bounce buffer.
- * of_file_read() handles cache invalidation via cbo.inval (Zicbom). */
+ * of_file_read() handles cache invalidation via conflict eviction. */
 static int elf_read(uint32_t slot_id, uint32_t offset, void *buf, uint32_t len) {
     if (len > DMA_CHUNK_SIZE)
         return -1;

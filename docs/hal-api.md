@@ -370,7 +370,7 @@ void cache_invalidate_icache(void); // fence.i
 void cache_flush_all(void);         // Both
 ```
 
-D-cache flush works by reading 128KB from 0x10380000, which evicts all dirty lines from the 64KB 2-way set-associative cache.
+D-cache flush works by conflict eviction: reading 32KB from the top of SDRAM, which evicts all dirty lines from the 32KB direct-mapped cache.
 
 ---
 
