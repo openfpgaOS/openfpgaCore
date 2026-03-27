@@ -60,4 +60,9 @@ int of_file_slot_write(uint32_t slot_id, uint32_t bridge_addr, uint32_t length);
 int of_file_slot_write_at(uint32_t slot_id, uint32_t slot_offset,
                            uint32_t bridge_addr, uint32_t length);
 
+/* Invalidate D-cache for CRAM cached aliases after bridge writes.
+ * Call after any bridge operation that writes to CRAM (dataslot load,
+ * save restore) so CPU reads via 0x30/0x31 see fresh data. */
+void of_file_inval_cram(uint32_t bridge_addr, uint32_t length);
+
 #endif /* OFOS_FILE_H */

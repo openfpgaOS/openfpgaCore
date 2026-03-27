@@ -139,10 +139,29 @@ int of_file_read(uint32_t slot_id, uint32_t slot_offset,
     /* Post-DMA: invalidate D-cache lines for the DMA target region.
      * The bridge wrote directly to physical SDRAM, bypassing the CPU
      * D-cache. Any stale cache lines must be discarded so the CPU
-     * fetches fresh DMA data on next access. */
+     * fetches fresh DMA data on next access.
+     *
+     * Also invalidate the corresponding CRAM cached aliases if the
+     * bridge address falls in CRAM space, since bridge writes go
+     * directly to PSRAM without touching the D-cache. */
     of_cache_inval_range(dest, length);
 
     return rc;
+}
+
+/* Invalidate D-cache for CRAM cached aliases after any bridge
+ * operation that writes to CRAM. The bridge bypasses the CPU
+ * entirely, so cached reads would return stale data. */
+void of_file_inval_cram(uint32_t bridge_addr, uint32_t length) {
+    /* Bridge addresses 0x00000000-0x00FFFFFF map to CRAM0 (CPU 0x30000000)
+     * Bridge addresses 0x30000000-0x30FFFFFF map to CRAM1 (CPU 0x31000000)
+     * Invalidate the cached alias so CPU reads see fresh bridge data. */
+    if (bridge_addr < 0x01000000) {
+        of_cache_inval_range((void *)(CRAM0_BASE + bridge_addr), length);
+    } else if (bridge_addr >= 0x30000000 && bridge_addr < 0x31000000) {
+        uint32_t offset = bridge_addr - 0x30000000;
+        of_cache_inval_range((void *)(CRAM1_BASE + offset), length);
+    }
 }
 
 long of_file_size(uint32_t slot_id) {
