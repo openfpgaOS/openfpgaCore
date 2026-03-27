@@ -1650,10 +1650,17 @@ assign cpu_psram_rdata = cpu_psram_sel_cram1 ? psram1_mux_rdata :
                          cpu_psram_sel_sram  ? sram_word_rdata :
                                                psram_mux_rdata;
 
-// OR all busy signals — prevents race when address changes between
-// write-back eviction and burst read targeting the same controller.
-assign cpu_psram_busy = psram_mux_busy | psram1_mux_busy | sram_word_busy |
-                        cram0_bridge_wr_active | bridge_cram1_active;
+// Per-target busy mux. Latch the target select at transaction start
+// to prevent glitches when address changes between write-back and read.
+reg [1:0] psram_busy_sel;  // 0=cram0, 1=cram1, 2=sram
+always @(posedge clk_ram_controller)
+    if (!cpu_psram_busy)  // latch only when idle
+        psram_busy_sel <= cpu_psram_sel_cram1 ? 2'd1 :
+                          cpu_psram_sel_sram  ? 2'd2 : 2'd0;
+
+assign cpu_psram_busy = (psram_busy_sel == 2'd1) ? (bridge_cram1_active | psram1_mux_busy) :
+                        (psram_busy_sel == 2'd2) ? sram_word_busy :
+                                                   (cram0_bridge_wr_active | psram_mux_busy);
 
 assign cpu_psram_rdata_valid = cpu_psram_sel_cram1 ? psram1_mux_rdata_valid :
                                cpu_psram_sel_sram  ? sram_word_rdata_valid :
