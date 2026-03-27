@@ -49,9 +49,21 @@ FW_SOURCES = $(wildcard $(OS_DIR)/hal/*.c $(OS_DIR)/targets/$(TARGET)/*.c $(OS_D
 FW_HEADERS = $(wildcard $(OS_DIR)/hal/*.h $(OS_DIR)/targets/$(TARGET)/*.h $(OS_DIR)/targets/$(TARGET)/boot/*.h $(OS_DIR)/kernel/*.h)
 FW_MIF = $(FPGA_TARGET_DIR)/firmware.mif
 
-# Compile FPGA with Quartus (builds firmware first to generate MIF)
+# VexiiRiscv CPU generation (requires java + sbt)
+VEXII_DIR = $(FPGA_DIR)/vendor/vexriscv
+VEXII_SCRIPT = $(VEXII_DIR)/generate_vexii.sh
+VEXII_OUTPUT = $(VEXII_DIR)/VexiiRiscv_Full.v
+
+$(VEXII_OUTPUT): $(VEXII_SCRIPT)
+	@echo "Generating VexiiRiscv CPU..."
+	cd $(VEXII_DIR) && bash generate_vexii.sh
+	@echo "VexiiRiscv generation complete"
+
+cpu: $(VEXII_OUTPUT)
+
+# Compile FPGA with Quartus (builds firmware + CPU first)
 # Clears Quartus cache to ensure MIF changes are picked up
-fpga: $(FW_MIF) clean-fpga-cache
+fpga: $(FW_MIF) $(VEXII_OUTPUT) clean-fpga-cache
 	@echo "Compiling FPGA design..."
 	@if ! command -v quartus_sh >/dev/null 2>&1; then \
 		echo "Error: quartus_sh not found in PATH"; \
@@ -213,6 +225,7 @@ clean:
 	@echo "Cleaning..."
 	rm -rf $(OUTPUT_DIR)
 	rm -f $(REVERSE_BITS)
+	rm -f $(VEXII_OUTPUT) $(VEXII_OUTPUT).bak
 	$(MAKE) -C $(OS_DIR) clean
 	$(MAKE) -C $(CHIP32_DIR) clean
 
@@ -249,4 +262,4 @@ program: $(FW_MIF)
 	@echo "Programming FPGA via JTAG..."
 	$(MAKE) -C $(FPGA_TARGET_DIR) program
 
-.PHONY: all full fpga firmware-mif firmware chip32 firmware-update fw package check-bitstream release-dirs copy-bitstream copy-chip32 copy-firmware copy-json copy-platform copy-icon install-txt clean clean-fpga-cache clean-fpga quick program
+.PHONY: all full fpga cpu firmware-mif firmware chip32 firmware-update fw package check-bitstream release-dirs copy-bitstream copy-chip32 copy-firmware copy-json copy-platform copy-icon install-txt clean clean-fpga-cache clean-fpga quick program

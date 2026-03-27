@@ -52,3 +52,4 @@ src/fpga/vendor/vexriscv/VexiiRiscv/
 
 # macOS
 .DS_Store
+src/fpga/vendor/vexriscv/VexiiRiscv_Full.v
