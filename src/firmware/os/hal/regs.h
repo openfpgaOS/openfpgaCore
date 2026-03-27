@@ -160,9 +160,6 @@
 #define   SHUTDOWN_PENDING  (1 << 0)    /* Read: bridge requests shutdown */
 #define   SHUTDOWN_ACK      (1 << 0)    /* Write: CPU acknowledges shutdown */
 
-/* PSRAM debug registers (0xF8-0xFC) */
-#define PSRAM_DBG_WAIT      REG32(SYSREG_BASE + 0xF8)  /* [16]=wait_seen [15:0]=wait_cycles */
-#define PSRAM_DBG_BURST     REG32(SYSREG_BASE + 0xFC)  /* [31:16]=burst_count [15:0]=stale_count */
 
 /* Tile/Sprite constants */
 #define TILE_MAP_COLS       64

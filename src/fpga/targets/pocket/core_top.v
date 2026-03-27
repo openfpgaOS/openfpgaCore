@@ -606,17 +606,6 @@ wire        psram0_burst_rd;
 wire [5:0]  psram0_burst_len;
 wire        psram0_burst_rdata_valid;
 wire [31:0] psram0_burst_rdata;
-wire        psram0_burst_wr;
-wire [5:0]  psram0_burst_wr_len;
-wire [31:0] psram0_burst_wr_data;
-wire        psram0_burst_wr_done;
-
-// PSRAM0 debug wires
-wire        cram0_dbg_wait_seen;
-wire [15:0] cram0_dbg_wait_cycles;
-wire [15:0] cram0_dbg_burst_count;
-wire [15:0] cram0_dbg_stale_count;
-
 // PSRAM Controller for CRAM0 (16MB) - stays alive during reset to maintain init state
 psram_controller #(
     .CLOCK_SPEED(100.0)
@@ -650,15 +639,11 @@ psram_controller #(
     .burst_len(psram0_burst_len),
     .burst_rdata_valid(psram0_burst_rdata_valid),
     .burst_rdata(psram0_burst_rdata),
-    .burst_wr(psram0_burst_wr),
-    .burst_wr_len(psram0_burst_wr_len),
-    .burst_wr_data(psram0_burst_wr_data),
-    .burst_wr_done(psram0_burst_wr_done),
     .raw_busy(psram0_raw_busy),
-    .dbg_wait_seen(cram0_dbg_wait_seen),
-    .dbg_wait_cycles(cram0_dbg_wait_cycles),
-    .dbg_burst_count(cram0_dbg_burst_count),
-    .dbg_stale_count(cram0_dbg_stale_count)
+    .dbg_wait_seen(),
+    .dbg_wait_cycles(),
+    .dbg_burst_count(),
+    .dbg_stale_count()
 );
 
 // CRAM1 controller (16 MB) - stays alive during reset
@@ -709,10 +694,6 @@ psram_controller #(
     .burst_len(psram1_burst_len),
     .burst_rdata_valid(psram1_burst_rdata_valid),
     .burst_rdata(psram1_burst_rdata),
-    .burst_wr(1'b0),
-    .burst_wr_len(6'd0),
-    .burst_wr_data(32'd0),
-    .burst_wr_done(),
     .raw_busy(psram1_raw_busy),
     .dbg_wait_seen(),
     .dbg_wait_cycles(),
@@ -887,11 +868,6 @@ wire [5:0]  cpu_psram_burst_len;
 wire        cpu_psram_burst_rdata_valid;
 wire [31:0] cpu_psram_burst_rdata;
 
-// Burst write interface from axi_psram_slave
-wire        cpu_psram_burst_wr;
-wire [5:0]  cpu_psram_burst_wr_len;
-wire [31:0] cpu_psram_burst_wr_data;
-wire        cpu_psram_burst_wr_done;
 
 // Address decode: cpu_psram_addr[25:22] = original addr[27:24]
 wire [3:0] mem_target_sel = cpu_psram_addr[25:22];
@@ -1431,11 +1407,6 @@ assign psram_mux_wstrb = cram0_wr_pending ? 4'b1111 : cpu_psram_wstrb;
 assign psram0_burst_rd  = cram0_bridge_wr_active ? 1'b0 : cpu_cram0_burst_rd;
 assign psram0_burst_len = cpu_psram_burst_len;
 
-// CRAM0 burst write routing
-wire cpu_cram0_burst_wr = cpu_psram_burst_wr & cpu_psram_sel_cram0;
-assign psram0_burst_wr      = cram0_bridge_wr_active ? 1'b0 : cpu_cram0_burst_wr;
-assign psram0_burst_wr_len  = cpu_psram_burst_wr_len;
-assign psram0_burst_wr_data = cpu_psram_burst_wr_data;
 
 // ============================================================
 // Bridge CRAM1 Write Path: dcfifo (clk_74a -> clk_ram_controller)
@@ -1700,8 +1671,6 @@ assign cpu_psram_burst_rdata_valid = cpu_psram_sel_cram1 ? psram1_burst_rdata_va
 assign cpu_psram_burst_rdata = cpu_psram_sel_cram1 ? psram1_burst_rdata :
                                                       psram0_burst_rdata;
 
-// Burst write done mux back to axi_psram_slave
-assign cpu_psram_burst_wr_done = psram0_burst_wr_done;
 
 
 //
@@ -2233,12 +2202,7 @@ assign video_hs = vidout_hs;
         .sprchar_wdata(sprchar_wdata_w),
         // Shutdown handshake
         .shutdown_pending(shutdown_pending_cpu),
-        .shutdown_ack(shutdown_ack_cpu),
-        // PSRAM debug pass-through
-        .cram0_wait_seen(cram0_dbg_wait_seen),
-        .cram0_wait_cycles(cram0_dbg_wait_cycles),
-        .cram0_burst_count(cram0_dbg_burst_count),
-        .cram0_stale_count(cram0_dbg_stale_count)
+        .shutdown_ack(shutdown_ack_cpu)
     );
 
     // Slave → io_sdram pulse adapter
@@ -2428,10 +2392,6 @@ assign video_hs = vidout_hs;
         .psram_burst_len(cpu_psram_burst_len),
         .psram_burst_rdata_valid(cpu_psram_burst_rdata_valid),
         .psram_burst_rdata(cpu_psram_burst_rdata),
-        .psram_burst_wr(cpu_psram_burst_wr),
-        .psram_burst_wr_len(cpu_psram_burst_wr_len),
-        .psram_burst_wr_data(cpu_psram_burst_wr_data),
-        .psram_burst_wr_done(cpu_psram_burst_wr_done)
     );
 
     // Terminal display (40x30 characters, 320x240 pixels)

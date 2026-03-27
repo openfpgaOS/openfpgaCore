@@ -132,13 +132,7 @@ module axi_periph_slave (
 
     // Shutdown handshake
     input wire         shutdown_pending,
-    output reg         shutdown_ack,
-
-    // PSRAM debug inputs
-    input wire         cram0_wait_seen,
-    input wire [15:0]  cram0_wait_cycles,
-    input wire [15:0]  cram0_burst_count,
-    input wire [15:0]  cram0_stale_count
+    output reg         shutdown_ack
 );
 
 wire reset = ~reset_n;
@@ -470,9 +464,6 @@ always @(*) begin
         // Tile/sprite registers (readback) — return 0, engines removed
         // Shutdown handshake
         6'b101100: sysreg_rdata = {31'b0, shutdown_pending};  // SYS_SHUTDOWN (0xB0)
-        // PSRAM debug registers
-        6'b111110: sysreg_rdata = {15'b0, cram0_wait_seen, cram0_wait_cycles};  // 0xF8
-        6'b111111: sysreg_rdata = {cram0_burst_count, cram0_stale_count};       // 0xFC
         default: sysreg_rdata = 32'h0;
     endcase
 end
