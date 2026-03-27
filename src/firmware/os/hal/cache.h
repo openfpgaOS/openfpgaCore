@@ -33,4 +33,14 @@ void of_cache_invalidate_icache(void);
  * Use before jumping to newly loaded code. */
 void of_cache_flush(void);
 
+/* DMA copy: src→dst, cache-coherent. For large SDRAM-to-SDRAM transfers.
+ * Flushes D-cache before DMA to ensure src data is in SDRAM,
+ * invalidates dst lines after DMA so CPU reads fresh data.
+ * len must be word-aligned (multiple of 4). */
+void dma_copy(void *dst, const void *src, uint32_t len);
+
+/* DMA fill: fills dst with 32-bit value, cache-coherent.
+ * len must be word-aligned. */
+void dma_fill(void *dst, uint32_t value, uint32_t len);
+
 #endif /* OFOS_CACHE_H */

@@ -2202,7 +2202,55 @@ assign video_hs = vidout_hs;
         .sprchar_wdata(sprchar_wdata_w),
         // Shutdown handshake
         .shutdown_pending(shutdown_pending_cpu),
-        .shutdown_ack(shutdown_ack_cpu)
+        .shutdown_ack(shutdown_ack_cpu),
+        // DMA engine
+        .dma_src(dma_src_w),
+        .dma_dst(dma_dst_w),
+        .dma_len(dma_len_w),
+        .dma_start(dma_start_w),
+        .dma_fill_mode(dma_fill_mode_w),
+        .dma_busy(dma_busy_w)
+    );
+
+    // DMA engine — memory-to-memory copy/fill via SDRAM arbiter M1
+    wire [31:0] dma_src_w, dma_dst_w, dma_len_w;
+    wire        dma_start_w, dma_fill_mode_w, dma_busy_w;
+    wire        dma_m_arvalid, dma_m_arready;
+    wire [31:0] dma_m_araddr;
+    wire [7:0]  dma_m_arlen;
+    wire        dma_m_rvalid;
+    wire [31:0] dma_m_rdata;
+    wire [1:0]  dma_m_rresp;
+    wire        dma_m_rlast;
+    wire        dma_m_awvalid, dma_m_awready;
+    wire [31:0] dma_m_awaddr;
+    wire [7:0]  dma_m_awlen;
+    wire        dma_m_wvalid, dma_m_wready;
+    wire [31:0] dma_m_wdata;
+    wire [3:0]  dma_m_wstrb;
+    wire        dma_m_wlast;
+    wire        dma_m_bvalid;
+    wire [1:0]  dma_m_bresp;
+
+    dma_engine dma_inst (
+        .clk(clk_cpu),
+        .reset_n(reset_n),
+        .src_addr(dma_src_w),
+        .dst_addr(dma_dst_w),
+        .length(dma_len_w),
+        .start(dma_start_w),
+        .fill_mode(dma_fill_mode_w),
+        .busy(dma_busy_w),
+        .m_arvalid(dma_m_arvalid), .m_arready(dma_m_arready),
+        .m_araddr(dma_m_araddr),   .m_arlen(dma_m_arlen),
+        .m_rvalid(dma_m_rvalid),   .m_rdata(dma_m_rdata),
+        .m_rresp(dma_m_rresp),     .m_rlast(dma_m_rlast),
+        .m_awvalid(dma_m_awvalid), .m_awready(dma_m_awready),
+        .m_awaddr(dma_m_awaddr),   .m_awlen(dma_m_awlen),
+        .m_wvalid(dma_m_wvalid),   .m_wready(dma_m_wready),
+        .m_wdata(dma_m_wdata),     .m_wstrb(dma_m_wstrb),
+        .m_wlast(dma_m_wlast),
+        .m_bvalid(dma_m_bvalid),   .m_bresp(dma_m_bresp)
     );
 
     // Slave → io_sdram pulse adapter
@@ -2272,17 +2320,17 @@ assign video_hs = vidout_hs;
         .m0_wdata(32'b0),   .m0_wstrb(4'b0),
         .m0_wlast(1'b0),
         .m0_bvalid(),       .m0_bresp(),
-        // M1: Tied off (unused)
-        .m1_arvalid(1'b0), .m1_arready(),
-        .m1_araddr(32'b0),  .m1_arlen(8'b0),
-        .m1_rvalid(),       .m1_rdata(),
-        .m1_rresp(),        .m1_rlast(),
-        .m1_awvalid(1'b0), .m1_awready(),
-        .m1_awaddr(32'b0),  .m1_awlen(8'b0),
-        .m1_wvalid(1'b0),  .m1_wready(),
-        .m1_wdata(32'b0),   .m1_wstrb(4'b0),
-        .m1_wlast(1'b0),
-        .m1_bvalid(),       .m1_bresp(),
+        // M1: DMA engine
+        .m1_arvalid(dma_m_arvalid), .m1_arready(dma_m_arready),
+        .m1_araddr(dma_m_araddr),   .m1_arlen(dma_m_arlen),
+        .m1_rvalid(dma_m_rvalid),   .m1_rdata(dma_m_rdata),
+        .m1_rresp(dma_m_rresp),     .m1_rlast(dma_m_rlast),
+        .m1_awvalid(dma_m_awvalid), .m1_awready(dma_m_awready),
+        .m1_awaddr(dma_m_awaddr),   .m1_awlen(dma_m_awlen),
+        .m1_wvalid(dma_m_wvalid),   .m1_wready(dma_m_wready),
+        .m1_wdata(dma_m_wdata),     .m1_wstrb(dma_m_wstrb),
+        .m1_wlast(dma_m_wlast),
+        .m1_bvalid(dma_m_bvalid),   .m1_bresp(dma_m_bresp),
         // M2: CPU
         .m2_arvalid(cpu_m_sdram_arvalid), .m2_arready(cpu_m_sdram_arready),
         .m2_araddr(cpu_m_sdram_araddr),   .m2_arlen(cpu_m_sdram_arlen),

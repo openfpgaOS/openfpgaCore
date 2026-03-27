@@ -761,6 +761,7 @@ set_global_assignment -name VERILOG_FILE ../../common/sram_controller.v
 set_global_assignment -name VERILOG_FILE ../../common/axi_sdram_slave.v
 set_global_assignment -name VERILOG_FILE ../../common/axi_psram_slave.v
 set_global_assignment -name VERILOG_FILE ../../common/axi_sdram_arbiter.v
+set_global_assignment -name VERILOG_FILE ../../common/dma_engine.v
 set_global_assignment -name VERILOG_FILE ../../common/axi_bridge_master.v
 set_global_assignment -name VERILOG_FILE ../../common/uart_tx.v
 set_global_assignment -name VERILOG_FILE ../../common/uart_rx.v

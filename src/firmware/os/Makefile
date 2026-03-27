@@ -72,6 +72,8 @@ HAL_SRCS = $(HAL_DIR)/hal.c \
            $(HAL_DIR)/codec.c \
            $(HAL_DIR)/lzw.c
 
+HAL_SRCS_S = $(HAL_DIR)/fast_mem.S
+
 # Source files - HAL (target-specific)
 TARGET_SRCS = $(TARGET_DIR)/video.c \
               $(TARGET_DIR)/audio.c \
@@ -94,7 +96,7 @@ KERNEL_SRCS = $(KERNEL_DIR)/main.c \
 
 # All sources
 ALL_C_SRCS = $(BOOT_SRCS_C) $(HAL_SRCS) $(TARGET_SRCS) $(KERNEL_SRCS)
-OBJS = $(ALL_C_SRCS:.c=.o) $(BOOT_SRCS_S:.S=.o)
+OBJS = $(ALL_C_SRCS:.c=.o) $(BOOT_SRCS_S:.S=.o) $(HAL_SRCS_S:.S=.o)
 
 # RAM size for MIF generation
 RAM_WORDS = 16384
@@ -152,6 +154,9 @@ $(BOOT_DIR)/%.o: $(BOOT_DIR)/%.c
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 $(BOOT_DIR)/%.o: $(BOOT_DIR)/%.S
+	$(AS) $(ASFLAGS) -c -o $@ $<
+
+$(HAL_DIR)/%.o: $(HAL_DIR)/%.S
 	$(AS) $(ASFLAGS) -c -o $@ $<
 
 $(HAL_DIR)/%.o: $(HAL_DIR)/%.c

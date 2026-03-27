@@ -160,6 +160,34 @@
 #define   SHUTDOWN_PENDING  (1 << 0)    /* Read: bridge requests shutdown */
 #define   SHUTDOWN_ACK      (1 << 0)    /* Write: CPU acknowledges shutdown */
 
+/* DMA engine (0xC0) — memory-to-memory copy/fill, bypasses D-cache */
+#define DMA_SRC             REG32(SYSREG_BASE + 0xC0)
+#define DMA_DST             REG32(SYSREG_BASE + 0xC4)
+#define DMA_LEN             REG32(SYSREG_BASE + 0xC8)
+#define DMA_CTRL            REG32(SYSREG_BASE + 0xCC)
+#define   DMA_CTRL_START    (1 << 0)
+#define   DMA_CTRL_FILL     (1 << 1)
+#define DMA_STATUS          REG32(SYSREG_BASE + 0xD0)
+#define   DMA_STATUS_BUSY   (1 << 0)
+
+/* Low-level DMA start (no cache management — caller must handle) */
+static inline void dma_start_copy(uint32_t dst, uint32_t src, uint32_t len) {
+    DMA_SRC = src;
+    DMA_DST = dst;
+    DMA_LEN = len;
+    DMA_CTRL = DMA_CTRL_START;
+}
+
+static inline void dma_start_fill(uint32_t dst, uint32_t value, uint32_t len) {
+    DMA_SRC = value;
+    DMA_DST = dst;
+    DMA_LEN = len;
+    DMA_CTRL = DMA_CTRL_START | DMA_CTRL_FILL;
+}
+
+static inline void dma_wait(void) {
+    while (DMA_STATUS & DMA_STATUS_BUSY) {}
+}
 
 /* Tile/Sprite constants */
 #define TILE_MAP_COLS       64

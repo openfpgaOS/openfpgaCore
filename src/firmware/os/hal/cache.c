@@ -81,3 +81,23 @@ void of_cache_flush(void) {
     of_cache_flush_dcache();
     of_cache_invalidate_icache();
 }
+
+void dma_copy(void *dst, const void *src, uint32_t len) {
+    if (len == 0) return;
+    /* Flush src dirty lines to SDRAM so DMA reads correct data */
+    dcache_evict_range((void *)src, len);
+    /* Evict dst lines so CPU doesn't hold stale copies */
+    dcache_evict_range(dst, len);
+    /* Start DMA and wait */
+    dma_start_copy((uint32_t)(uintptr_t)dst,
+                   (uint32_t)(uintptr_t)src, len);
+    dma_wait();
+}
+
+void dma_fill(void *dst, uint32_t value, uint32_t len) {
+    if (len == 0) return;
+    /* Evict dst lines so CPU doesn't hold stale copies */
+    dcache_evict_range(dst, len);
+    dma_start_fill((uint32_t)(uintptr_t)dst, value, len);
+    dma_wait();
+}
