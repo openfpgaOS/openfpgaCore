@@ -1650,9 +1650,10 @@ assign cpu_psram_rdata = cpu_psram_sel_cram1 ? psram1_mux_rdata :
                          cpu_psram_sel_sram  ? sram_word_rdata :
                                                psram_mux_rdata;
 
-assign cpu_psram_busy = cpu_psram_sel_cram1 ? (bridge_cram1_active | psram1_mux_busy) :
-                        cpu_psram_sel_sram  ? sram_word_busy :
-                                              (cram0_bridge_wr_active | psram_mux_busy);
+// OR all busy signals — prevents race when address changes between
+// write-back eviction and burst read targeting the same controller.
+assign cpu_psram_busy = psram_mux_busy | psram1_mux_busy | sram_word_busy |
+                        cram0_bridge_wr_active | bridge_cram1_active;
 
 assign cpu_psram_rdata_valid = cpu_psram_sel_cram1 ? psram1_mux_rdata_valid :
                                cpu_psram_sel_sram  ? sram_word_rdata_valid :
