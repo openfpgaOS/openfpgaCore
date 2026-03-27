@@ -571,8 +571,9 @@ always @(posedge clk_ram_controller) begin
 
         BCR_ST_WAIT_CE1: begin
             if (!bcr_raw_busy && !bcr_config_en) begin
-                // CRAM0 done — CRAM1 stays async for now (needs clock/timing work)
-                bcr_state <= BCR_ST_DONE;
+                // CRAM0 done — now configure CRAM1
+                bcr_target_cram1 <= 1;
+                bcr_state <= BCR_ST_CFG_CE0;
             end
         end
 
@@ -582,9 +583,9 @@ always @(posedge clk_ram_controller) begin
     endcase
 end
 
-// BCR config routing: CRAM0 only (CRAM1 stays async)
+// BCR config routing: both CRAM0 and CRAM1
 wire psram0_config_en       = bcr_config_en && !bcr_target_cram1;
-wire psram1_config_en       = 1'b0;
+wire psram1_config_en       = bcr_config_en &&  bcr_target_cram1;
 
 // ============================================================
 // CRAM0 burst interface signals
@@ -2647,9 +2648,10 @@ mf_pllram_133 mp_ram (
 assign clk_cpu = clk_ram_controller;
 
 // Drive CRAM CLK pins from 105MHz PLL output after BCR init completes.
-// Before init, keep clock low (async mode doesn't use CLK).
-assign cram0_clk = bcr_init_done ? clk_cram : 1'b0;
-assign cram1_clk = 1'b0;  // CRAM1 async mode (no sync clock needed)
+// Drive CRAM clocks continuously. BCR writes are async (ignore CLK).
+// After BCR init, sync burst reads need the clock running.
+assign cram0_clk = clk_cram;
+assign cram1_clk = clk_cram;
 
 // SDRAM controller
 io_sdram isr0 (
