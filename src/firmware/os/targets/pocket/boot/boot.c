@@ -503,29 +503,27 @@ int main(void) {
     int debug_mode = 0;
 
     if (uart_probe()) {
-        boot_vram_puts(0, 13, "Checking debug host...");
         debug_mode = phdp_discover();
-        boot_vram_clear_row(13);
     }
 
     if (debug_mode) {
-        /* Host connected — try to override OS slot */
-        boot_vram_clear_row(13);
-        boot_vram_puts(0, 13, "Debug host connected!");
+        boot_vram_clear_row(14);
+        boot_vram_puts(0, 14, "Debug host connected");
 
         uint32_t total_size = 0;
         uint16_t chunk_size = 0;
 
         if (phdp_request_override(OS_SLOT_ID, &total_size, &chunk_size)) {
             /* Stream OS binary over UART */
-            boot_vram_clear_row(13);
-            boot_vram_puts(0, 13, "Streaming os.bin via UART...");
+            boot_vram_clear_row(14);
+            boot_vram_puts(0, 14, "Loading via UART...");
 
             volatile uint8_t *dest = (volatile uint8_t *)(uintptr_t)_os_load_addr;
             int rc = phdp_stream_slot(dest, total_size, chunk_size);
 
             if (rc < 0) {
-                boot_vram_puts(0, 15, "UART STREAM FAILED - SD fallback");
+                boot_vram_clear_row(14);
+                boot_vram_puts(0, 14, "UART failed, trying SD...");
                 goto load_from_sd;
             }
 
@@ -542,25 +540,19 @@ int main(void) {
             extern volatile int uart_mirror_on;
             uart_mirror_on = 1;
 
-            /* Wait for EXEC_START to finish transmitting, then send test byte
-             * using raw UART (not term_emit_char — string data might not be in MIF) */
+            /* Wait for EXEC_START to finish transmitting */
             while (!(UART_STATUS & UART_TX_RDY)) {}
-            UART_TX_DATA = '!';
-            while (!(UART_STATUS & UART_TX_RDY)) {}
-            UART_TX_DATA = '\n';
 
             boot_vram_clear_row(14);
-            boot_vram_puts(0, 14, "OK - starting OS (debug)");
             goto start_os;
         }
         /* Host said USE_SD or timeout — fall through */
-        boot_vram_clear_row(13);
     }
 
 load_from_sd:
     /* ── Standard SD card boot ──────────────────────────────────── */
-    boot_vram_clear_row(13);
-    boot_vram_puts(0, 13, "Loading os.bin...");
+    boot_vram_clear_row(14);
+    boot_vram_puts(0, 14, "Loading...");
 
     pd_dbg_stage = 3;
 
@@ -569,13 +561,14 @@ load_from_sd:
     int rc = boot_load_os_sd(_os_load_addr, os_size);
 
     if (rc < 0) {
-        boot_vram_puts(0, 14, "LOAD FAILED!");
+        boot_vram_clear_row(14);
+        boot_vram_puts(0, 14, "Load failed");
         pd_dbg_info = (unsigned int)(-rc);
         while (1) {}
     }
 
     pd_dbg_stage = 4;
-    boot_vram_puts(0, 14, "OK - starting OS");
+    boot_vram_clear_row(14);
 
 start_os:
     flush_dcache();

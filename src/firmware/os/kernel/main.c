@@ -17,9 +17,6 @@
 /* App load address (after OS region) */
 #define APP_LOAD_ADDR   0x10400000
 
-/* Heap cannot grow past the save region */
-#define HEAP_LIMIT      0x13C00000
-
 /* Symbols from linker script */
 extern char __os_bss_end[];
 
@@ -36,18 +33,15 @@ static void boot_banner(void) {
     of_term_puts("  /_/_/_/___\\___/_/ |_|\n");
     of_term_puts(" / __ \\/ __/\n");
     of_term_puts("/ /_/ /\\ \\\n");
-    of_term_puts("\\____/___/  \033[93mv0.1\n");  /* bright yellow */
-    of_term_puts("\033[0m\n");  /* reset */
+    of_term_puts("\\____/___/  \033[93mv0.1\033[0m\n\n");
 }
 
-static void term_ok(void) {
-    of_term_puts("\033[92mOK\033[0m\n");  /* bright green + reset */
+static void status_ok(void) {
+    of_term_puts(" \033[92mOK\033[0m\n");
 }
 
-static void term_fail(const char *msg) {
-    of_term_puts("\033[91m");  /* bright red */
-    of_term_puts(msg);
-    of_term_puts("\033[0m");   /* reset */
+static void status_fail(void) {
+    of_term_puts(" \033[91mFAIL\033[0m\n");
 }
 
 void os_main(void) {
@@ -60,65 +54,58 @@ void os_main(void) {
 
     of_term_enable_uart_mirror();
 
-    of_term_puts("HAL init............ ");
-    term_ok();
+    of_term_puts("  HAL init.......... ");
+    status_ok();
 
-    /* Initialize syscall subsystem — resets current_brk to heap_start.
-     * dlmalloc's global state (gm) lives in BSS, already zeroed by the
-     * bootloader.  No heap clear needed: dlmalloc writes its own chunk
-     * headers on first sbrk and doesn't trust stale heap content. */
+    /* Initialize syscall subsystem */
     uintptr_t heap_start = ((uintptr_t)__os_bss_end + 15) & ~15;
     syscall_init(heap_start);
-    of_term_puts("Syscall init........ ");
-    term_ok();
 
-    /* Stay on boot screen for 1 second */
-    of_timer_delay_ms(1000);
+    of_term_puts("  Syscall init...... ");
+    status_ok();
 
-    /* Attempt to load application ELF from data slot */
-    of_term_printf("Loading app slot %d.. ", APP_SLOT_ID);
+    /* Brief pause to show banner */
+    of_timer_delay_ms(800);
+
+    /* Load application ELF */
+    of_term_puts("  Loading app....... ");
 
     elf_load_result_t app;
     int rc = elf_load(APP_SLOT_ID, APP_LOAD_ADDR, &app);
-    of_term_printf("rc=%d ", rc);
 
     if (rc < 0) {
-        term_fail("FAIL\n");
-        of_term_printf("  Error code: %d\n", rc);
+        status_fail();
         of_term_putchar('\n');
-        of_term_puts("No application found.\n");
-        of_term_puts("Place .elf in data slot.\n");
-        of_term_puts("Press START to retry.\n");
+        of_term_puts("  \033[93mNo application found.\033[0m\n\n");
+        of_term_puts("  Place .elf in data slot 2\n");
+        of_term_puts("  and press START to retry.\n");
 
         while (1) {
             of_input_poll();
             if (of_input_is_pressed(0, BTN_START)) {
-                of_term_puts("Retrying...\n");
+                of_term_puts("\n  Retrying...");
                 rc = elf_load(APP_SLOT_ID, APP_LOAD_ADDR, &app);
                 if (rc == 0)
                     break;
-                term_fail("FAIL");
-                of_term_printf(" (rc=%d)\n", rc);
+                status_fail();
             }
         }
     }
 
-    term_ok();
+    status_ok();
 
-    /* Set heap to after the app's BSS BEFORE libc init.
-     * musl's setvbuf/malloc may call brk() during libc_table_init,
-     * so brk must already point to the app's free memory. */
+    /* Set heap to after the app's BSS */
     syscall_init(app.bss_end);
 
     /* Populate libc jump table for the app */
     libc_table_init();
-    of_term_puts("Libc table.......... ");
-    term_ok();
 
-    /* Brief delay to show boot messages */
-    of_timer_delay_ms(500);
+    of_term_puts("  Libc init......... ");
+    status_ok();
 
-    /* Execute the app (app controls display mode) */
+    of_timer_delay_ms(300);
+
+    /* Execute the app */
     char *argv[] = {"app", NULL};
     elf_exec(&app, 1, argv);
 
