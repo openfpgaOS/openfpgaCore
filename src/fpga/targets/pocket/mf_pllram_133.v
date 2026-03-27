@@ -24,7 +24,7 @@ module mf_pllram_133(
         .phase_shift1("6750 ps"),
         .duty_cycle1(50),
         .output_clock_frequency2("100.000000 MHz"),
-        .phase_shift2("4500 ps"),
+        .phase_shift2("5500 ps"),
         .duty_cycle2(50),
         .output_clock_frequency3("0 MHz"),
         .phase_shift3("0 ps"),
