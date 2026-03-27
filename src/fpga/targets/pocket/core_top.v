@@ -571,9 +571,14 @@ always @(posedge clk_ram_controller) begin
 
         BCR_ST_WAIT_CE1: begin
             if (!bcr_raw_busy && !bcr_config_en) begin
-                // CRAM0 done — now configure CRAM1
-                bcr_target_cram1 <= 1;
-                bcr_state <= BCR_ST_CFG_CE0;
+                if (!bcr_target_cram1) begin
+                    // CRAM0 done — now configure CRAM1
+                    bcr_target_cram1 <= 1;
+                    bcr_state <= BCR_ST_CFG_CE0;
+                end else begin
+                    // CRAM1 done — both chips configured
+                    bcr_state <= BCR_ST_DONE;
+                end
             end
         end
 
@@ -611,7 +616,7 @@ psram_controller #(
     .cram_a(cram0_a),
     .cram_dq(cram0_dq),
     .cram_wait(cram0_wait),
-    .cram_clk(),             // CRAM CLK driven by PLL, not psram.sv
+    .cram_clk(),    // PLL drives cram0_clk directly
     .cram_adv_n(cram0_adv_n),
     .cram_cre(cram0_cre),
     .cram_ce0_n(cram0_ce0_n),
@@ -666,7 +671,7 @@ psram_controller #(
     .cram_a(cram1_a),
     .cram_dq(cram1_dq),
     .cram_wait(cram1_wait),
-    .cram_clk(),             // CRAM CLK driven by PLL, not psram.sv
+    .cram_clk(),    // PLL drives cram1_clk directly
     .cram_adv_n(cram1_adv_n),
     .cram_cre(cram1_cre),
     .cram_ce0_n(cram1_ce0_n),
@@ -2648,8 +2653,7 @@ mf_pllram_133 mp_ram (
 assign clk_cpu = clk_ram_controller;
 
 // Drive CRAM CLK pins from 105MHz PLL output after BCR init completes.
-// Drive CRAM clocks continuously. BCR writes are async (ignore CLK).
-// After BCR init, sync burst reads need the clock running.
+// PLL clock always on (PocketQuake confirmed: BCR config works with clock running)
 assign cram0_clk = clk_cram;
 assign cram1_clk = clk_cram;
 
