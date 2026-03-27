@@ -8,19 +8,20 @@
 /* ======================================================================
  * Ring buffer for kernel-side audio drain
  *
- * Placed in uncached CRAM1 (PSRAM) so that drain reads never stall
- * behind SDRAM arbiter contention during heavy bridge DMA.
+ * Placed in SRAM (0x3A000000, 256KB, uncached, separate bus).
+ * SRAM has no contention with CRAM bridge writes or D-cache evictions,
+ * so audio drain reads are fast and predictable (~6 cycles each).
  * ====================================================================== */
 
 #define AUDIO_RING_SIZE 8192  /* stereo pairs (32KB total) */
-#define AUDIO_RING_ADDR 0x39300000  /* CRAM1 uncached, above save/FTAB region */
+#define AUDIO_RING_ADDR 0x3A000000  /* SRAM uncached */
 
 static volatile int16_t *audio_ring = (volatile int16_t *)AUDIO_RING_ADDR;
 static volatile int ring_read;
 static volatile int ring_write;
 
 void of_audio_init(void) {
-    /* Zero the PSRAM-backed ring buffer */
+    /* Zero the SRAM-backed ring buffer */
     for (int i = 0; i < AUDIO_RING_SIZE * 2; i++)
         audio_ring[i] = 0;
     ring_read = 0;

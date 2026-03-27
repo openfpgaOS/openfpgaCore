@@ -59,7 +59,7 @@
 #define CRAM1_UNCACHED      0x39000000      /* CRAM1 uncached (D-cache bypass) */
 #define CRAM_SIZE           (16 * 1024 * 1024)
 
-#define AUDIO_RING_ADDR     0x39300000      /* Audio ring buffer in CRAM1 uncached (32KB) */
+#define AUDIO_RING_ADDR     0x3A000000      /* Audio ring buffer in SRAM (32KB, separate bus) */
 
 #define SRAM_BASE           0x3A000000      /* SRAM uncached */
 #define SRAM_SIZE           (256 * 1024)
