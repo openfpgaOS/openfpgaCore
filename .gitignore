@@ -47,8 +47,8 @@ tools/reverse_bits
 __pycache__/
 
 # VexRiscv source trees (only generated .v needed)
-src/fpga/vexriscv/VexRiscv/
-src/fpga/vexriscv/VexiiRiscv/
+src/fpga/vendor/vexriscv/VexRiscv/
+src/fpga/vendor/vexriscv/VexiiRiscv/
 
 # macOS
 .DS_Store

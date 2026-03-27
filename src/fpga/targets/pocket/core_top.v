@@ -206,9 +206,8 @@ assign bridge_endian_little = 1;
 // Analogizer adapter (optional, directly controls cart port)
 // ============================================================
 
-//Pocket Menu settings
+// Pocket Menu settings
 reg [31:0] analogizer_settings;
-//wire [31:0] analogizer_settings_s;
 
 // App ID from instance JSON memory_writes (bridge 0xF7000010)
 reg [31:0] app_id_74a;
@@ -223,11 +222,6 @@ reg [3:0] analogizer_video_type;
 reg [4:0] snac_cont_type /* synthesis keep */;
 reg [3:0] snac_cont_assignment /* synthesis keep */;
 
-//synch_3 #(.WIDTH(32)) sync_analogizer(analogizer_settings, analogizer_settings_s, clk_core_49152);
-
-  //create aditional switch to blank Pocket screen.
-  //assign video_rgb = (analogizer_video_type[3]) ? 24'h000000: video_rgb_reg;
-
 always @(*) begin
   snac_cont_type        = analogizer_settings[4:0];
   snac_cont_assignment  = analogizer_settings[9:6];
@@ -239,9 +233,7 @@ end
 
     wire pocket_blank_screen = analogizer_settings[13] && analogizer_ena;
 
-    //create aditional switch to blank Pocket screen.
     wire [23:0] video_rgb_core;
-    //assign video_rgb_irem72 = (pocket_blank_screen && !analogizer_ena) ? 24'h000000: {core_r,core_g,core_b};
     assign video_rgb_core = (pocket_blank_screen) ? 24'h000000: vidout_rgb;
 
     //switch between Analogizer SNAC and Pocket Controls for P1-P4 (P3,P4 when uses PCEngine Multitap)
@@ -1642,7 +1634,7 @@ assign psram1_mux_addr = cram1_wr_pending ? cram1_wr_addr_r :
 assign psram1_mux_wdata = cram1_wr_pending ? cram1_wr_data_r : cpu_psram_wdata;
 assign psram1_mux_wstrb = cram1_wr_pending ? 4'b1111 : cpu_psram_wstrb;
 
-// CRAM1 burst reads disabled (async mode — no sync burst support)
+// CRAM1 burst reads not yet routed through arbiter
 assign psram1_burst_rd  = 1'b0;
 assign psram1_burst_len = 6'd0;
 
@@ -2004,8 +1996,7 @@ assign video_hs = vidout_hs;
     wire [2:0] color_mode;
     wire [24:0] fb_display_addr;
 
-    // Tile/sprite engines removed — rendering done in software via framebuffer.
-    // Stub wires for axi_periph_slave ports (register writes are no-ops).
+    // Stub wires for axi_periph_slave tile/sprite register ports (no-ops).
     wire        tile_enable_w;
     wire        tile_priority_w;
     wire [8:0]  tile_scroll_x_w;
@@ -2262,7 +2253,7 @@ assign video_hs = vidout_hs;
     axi_sdram_arbiter sdram_arb (
         .clk(clk_cpu),
         .reset_n(1'b1),
-        // M0: Tied off (was span rasterizer)
+        // M0: Tied off (unused)
         .m0_arvalid(1'b0), .m0_arready(),
         .m0_araddr(32'b0),  .m0_arlen(8'b0),
         .m0_rvalid(),       .m0_rdata(),
@@ -2273,7 +2264,7 @@ assign video_hs = vidout_hs;
         .m0_wdata(32'b0),   .m0_wstrb(4'b0),
         .m0_wlast(1'b0),
         .m0_bvalid(),       .m0_bresp(),
-        // M1: Tied off (was DMA)
+        // M1: Tied off (unused)
         .m1_arvalid(1'b0), .m1_arready(),
         .m1_araddr(32'b0),  .m1_arlen(8'b0),
         .m1_rvalid(),       .m1_rdata(),
@@ -2460,7 +2451,6 @@ assign video_hs = vidout_hs;
         .pal_data(cpu_pal_data)
     );
 
-    // Tile/sprite engines removed — all rendering done in software via framebuffer.
 
         // ---  CRT 15.7kHz / 60Hz Parameters ---
     localparam CRT_V_TOTAL  = CRT_V_SYNC + CRT_V_BPORCH + CRT_V_ACTIVE + CRT_V_FPORCH;
@@ -2665,7 +2655,7 @@ assign clk_cpu = clk_ram_controller;
 // Drive CRAM CLK pins from 105MHz PLL output after BCR init completes.
 // Before init, keep clock low (async mode doesn't use CLK).
 assign cram0_clk = bcr_init_done ? clk_cram : 1'b0;
-assign cram1_clk = 1'b0;  // CRAM1 stays in async mode (no sync burst)
+assign cram1_clk = 1'b0;  // CRAM1 burst reads not yet routed
 
 // SDRAM controller
 io_sdram isr0 (

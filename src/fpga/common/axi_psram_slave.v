@@ -2,9 +2,9 @@
 // AXI4 Slave Wrapper for PSRAM (psram_controller word interface)
 //
 // Converts AXI4 transactions to the psram_controller word-level protocol.
-// CRAM reads use sync burst mode (1 hardware burst per AXI read).
+// CRAM0 and CRAM1 reads use sync burst mode (1 hardware burst per AXI read).
 // SRAM reads fall back to single-word operations (no burst support).
-// Writes always use single-word async operations (PSRAM has no burst write).
+// Writes use single-word operations.
 //
 // Address mapping: psram_addr[25:22] carries addr[27:24] for target decode:
 //   0x0/0x8 → CRAM0, 0x1/0x9 → CRAM1, 0xA → SRAM

@@ -8,8 +8,6 @@
  * the cache sets that overlap the target range, instead of sweeping
  * all 512 sets.  For a 4KB DMA read this is 64 reads vs 512.
  *
- * NOTE: When Zicbom is enabled in a future VexiiRiscv build, replace
- * the eviction loops with cbo.clean/cbo.inval/cbo.flush instructions.
  */
 
 #include "cache.h"

@@ -3,13 +3,12 @@
 #
 # RV32IMAFCB + Zicbom (cache block management)
 #
-# NOTE: The parameters below request a larger cache (1024x2 D$, 512x1 I$)
-# but the CURRENT generated VexiiRiscv_Full.v has:
+# Current VexiiRiscv_Full.v config:
 #   I-cache: 8KB  (128 sets x 1 way x 64B line)
 #   D-cache: 32KB (512 sets x 1 way x 64B line, write-back, direct-mapped)
 #   Branch: BTB + GShare + RAS
 #   FPU: single-precision (F extension)
-#   Cache mgmt: Zicbom enabled in hardware (not used by firmware)
+#   Cache mgmt: Zicbom enabled in hardware
 #
 # Prerequisites: java, sbt
 # Usage: ./generate_vexii.sh
@@ -67,8 +66,6 @@ if [ -f "$OUTPUT" ]; then
     echo ""
     echo "Done! Copied to VexiiRiscv_Full.v"
     echo "Extensions: RV32IMAFCB + Zicbom"
-    echo "D-cache: check generated Verilog for actual size"
-    echo "I-cache: check generated Verilog for actual size"
     echo "Cache mgmt: Zicbom enabled in hardware"
 else
     echo "ERROR: VexiiRiscv.v not found after generation"
