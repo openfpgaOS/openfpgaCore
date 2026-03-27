@@ -580,10 +580,11 @@ always @(posedge clk_ram_controller) begin
         BCR_ST_WAIT_CE1: begin
             if (!bcr_raw_busy && !bcr_config_en) begin
                 if (!bcr_target_cram1) begin
-                    // CRAM0 done — skip CRAM1 (stays in async mode for
-                    // simpler bridge interfacing; no CLK/WAIT dependency).
-                    bcr_state <= BCR_ST_DONE;
+                    // CRAM0 done — now configure CRAM1 for sync burst too
+                    bcr_target_cram1 <= 1;
+                    bcr_state <= BCR_ST_CFG_CE0;
                 end else begin
+                    // CRAM1 done
                     bcr_state <= BCR_ST_DONE;
                 end
             end
@@ -595,9 +596,9 @@ always @(posedge clk_ram_controller) begin
     endcase
 end
 
-// BCR config routing: CRAM0 only (CRAM1 stays in async mode)
+// BCR config routing: both CRAM0 and CRAM1
 wire psram0_config_en       = bcr_config_en && !bcr_target_cram1;
-wire psram1_config_en       = 1'b0;  // no BCR config for CRAM1
+wire psram1_config_en       = bcr_config_en &&  bcr_target_cram1;
 
 // ============================================================
 // CRAM0 burst interface signals

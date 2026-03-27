@@ -42,7 +42,7 @@ sbt "runMain vexiiriscv.Generate \
       --regfile-async --allow-bypass-from=0 \
       --relaxed-src \
       --reset-vector=0 \
-      --region base=0,size=10000,main=0,exe=1 \
+      --region base=0,size=30000,main=0,exe=1 \
       --region base=10000000,size=4000000,main=1,exe=1 \
       --region base=20000000,size=10000000,main=0,exe=0 \
       --region base=30000000,size=8000000,main=1,exe=1 \
@@ -50,7 +50,7 @@ sbt "runMain vexiiriscv.Generate \
       --region base=40000000,size=40000000,main=0,exe=0"
 
 # Memory regions:
-#   0x00000000  64KB  BRAM           (uncached, executable)
+#   0x00000000 192KB  BRAM           (uncached, executable)
 #   0x10000000  64MB  SDRAM          (cached, executable)
 #   0x20000000 256MB  VRAM/reserved  (uncached, non-exec)
 #   0x30000000 128MB  CRAM cached    (cached, executable)

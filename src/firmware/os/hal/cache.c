@@ -1,12 +1,15 @@
 /*
- * openfpgaOS Cache Management HAL Implementation
+ * openfpgaOS Cache Management HAL
  *
- * VexiiRiscv D-cache: 32KB, direct-mapped (1-way), write-back, 64B lines
+ * VexiiRiscv D-cache: 32KB, direct-mapped, write-back, 64B lines
  * (512 sets x 1 way x 64B).
  *
- * Cache coherency is maintained via conflict eviction: reading through
- * a 32KB eviction region forces all dirty lines to be written back.
- * No Zicbom (cbo.*) instructions are used.
+ * Uses targeted conflict eviction for range operations: only touches
+ * the cache sets that overlap the target range, instead of sweeping
+ * all 512 sets.  For a 4KB DMA read this is 64 reads vs 512.
+ *
+ * NOTE: When Zicbom is enabled in a future VexiiRiscv build, replace
+ * the eviction loops with cbo.clean/cbo.inval/cbo.flush instructions.
  */
 
 #include "cache.h"
@@ -14,42 +17,58 @@
 
 #define DCACHE_LINE_SIZE  64
 #define DCACHE_SETS       512
-#define DCACHE_WAYS       1
-#define DCACHE_TOTAL      (DCACHE_SETS * DCACHE_WAYS * DCACHE_LINE_SIZE)  /* 32KB */
+#define DCACHE_TOTAL      (DCACHE_SETS * DCACHE_LINE_SIZE)  /* 32KB */
 
-void of_cache_init(void) {
-    /* No initialization required */
+/* Eviction region: top of SDRAM, above all active data */
+#define EVICT_BASE  (SDRAM_BASE + SDRAM_SIZE - DCACHE_TOTAL)
+
+void of_cache_init(void) { }
+
+/* Evict specific cache sets covering [addr, addr+size).
+ * Direct-mapped: set index = bits [14:6] of address.
+ * Each eviction read forces the dirty line in that set to write back. */
+static void dcache_evict_range(void *addr, uint32_t size) {
+    __asm__ volatile("fence" ::: "memory");
+
+    uintptr_t start = (uintptr_t)addr & ~(DCACHE_LINE_SIZE - 1);
+    uintptr_t end   = ((uintptr_t)addr + size + DCACHE_LINE_SIZE - 1)
+                      & ~(DCACHE_LINE_SIZE - 1);
+    uint32_t lines = (end - start) / DCACHE_LINE_SIZE;
+
+    if (lines >= DCACHE_SETS) {
+        /* Full eviction is cheaper when range >= cache size */
+        volatile char *p = (volatile char *)EVICT_BASE;
+        for (uint32_t i = 0; i < DCACHE_TOTAL; i += DCACHE_LINE_SIZE)
+            (void)p[i];
+    } else {
+        /* Targeted: touch only overlapping sets */
+        for (uintptr_t a = start; a < end; a += DCACHE_LINE_SIZE) {
+            uint32_t set = (a >> 6) & (DCACHE_SETS - 1);
+            (void)*(volatile char *)(EVICT_BASE + set * DCACHE_LINE_SIZE);
+        }
+    }
+
+    __asm__ volatile("fence" ::: "memory");
 }
 
-/* Flush entire D-cache by conflict eviction.
- * Reads 32KB from the top of SDRAM, forcing all dirty cache lines
- * to be written back.  The eviction region is well above any active
- * data (app heap grows from 0x10400000, eviction is near 0x13FE0000). */
 static void dcache_evict_all(void) {
     __asm__ volatile("fence" ::: "memory");
-    volatile char *p = (volatile char *)(SDRAM_BASE + SDRAM_SIZE - DCACHE_TOTAL);
+    volatile char *p = (volatile char *)EVICT_BASE;
     for (uint32_t i = 0; i < DCACHE_TOTAL; i += DCACHE_LINE_SIZE)
         (void)p[i];
     __asm__ volatile("fence" ::: "memory");
 }
 
-/* Without per-line cache management instructions, all range operations
- * fall back to a full cache eviction.  This is less granular but correct
- * for DMA coherency. */
-
 void of_cache_inval_range(void *addr, uint32_t size) {
-    (void)addr; (void)size;
-    dcache_evict_all();
+    dcache_evict_range(addr, size);
 }
 
 void of_cache_clean_range(void *addr, uint32_t size) {
-    (void)addr; (void)size;
-    dcache_evict_all();
+    dcache_evict_range(addr, size);
 }
 
 void of_cache_flush_range(void *addr, uint32_t size) {
-    (void)addr; (void)size;
-    dcache_evict_all();
+    dcache_evict_range(addr, size);
 }
 
 void of_cache_flush_dcache(void) {
