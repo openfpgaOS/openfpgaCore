@@ -296,9 +296,23 @@ static inline volatile void *sdram_uncached(void *addr) {
     return (volatile void *)((uint32_t)addr - SDRAM_BASE + SDRAM_UNCACHED_BASE);
 }
 
-/* Convert CPU SDRAM address to bridge address (for DMA) */
+/* Convert CPU address to bridge address (for DMA).
+ * Bridge address space:
+ *   0x00000000  SDRAM   (CPU 0x10000000)
+ *   0x20000000  CRAM0   (CPU 0x30000000 cached / 0x38000000 uncached)
+ *   0x30000000  CRAM1   (CPU 0x31000000 cached / 0x39000000 uncached)
+ */
 static inline uint32_t sdram_to_bridge(void *addr) {
     return (uint32_t)addr - SDRAM_BASE;
+}
+
+static inline uint32_t cpu_to_bridge(void *addr) {
+    uint32_t a = (uint32_t)addr;
+    if (a >= 0x39000000 && a < 0x3A000000) return (a - 0x39000000) + 0x30000000; /* CRAM1 uncached */
+    if (a >= 0x38000000 && a < 0x39000000) return (a - 0x38000000) + 0x20000000; /* CRAM0 uncached */
+    if (a >= 0x31000000 && a < 0x32000000) return (a - 0x31000000) + 0x30000000; /* CRAM1 cached */
+    if (a >= 0x30000000 && a < 0x31000000) return (a - 0x30000000) + 0x20000000; /* CRAM0 cached */
+    return a - SDRAM_BASE; /* SDRAM */
 }
 
 /* ======================================================================

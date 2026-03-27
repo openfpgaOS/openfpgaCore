@@ -116,35 +116,26 @@ static int file_wait_complete(void) {
 
 int of_file_read(uint32_t slot_id, uint32_t slot_offset,
                   void *dest, uint32_t length) {
-    /* Validate destination is in SDRAM */
     uint32_t addr = (uintptr_t)dest;
-    if (addr < SDRAM_BASE || addr + length > SDRAM_BASE + SDRAM_SIZE)
-        return OF_ERR_PARAM;
+    uint32_t bridge_addr = cpu_to_bridge(dest);
 
-    /* Pre-DMA: flush (clean+inval) destination cache lines.
-     * Clean: writes back any dirty data so it doesn't later evict
-     *        and overwrite the DMA result.
-     * Inval: ensures no stale lines survive to serve reads after DMA. */
+    /* Pre-DMA: flush destination cache lines so dirty data doesn't
+     * later evict and overwrite the DMA result. */
     of_cache_flush_range(dest, length);
 
     /* Set up DMA transfer */
     DS_SLOT_ID     = slot_id;
     DS_SLOT_OFFSET = slot_offset;
-    DS_BRIDGE_ADDR = sdram_to_bridge(dest);
+    DS_BRIDGE_ADDR = bridge_addr;
     DS_LENGTH      = length;
     DS_COMMAND     = OF_FILE_CMD_READ;
 
     int rc = file_wait_complete();
 
-    /* Post-DMA: invalidate D-cache lines for the DMA target region.
-     * The bridge wrote directly to physical SDRAM, bypassing the CPU
-     * D-cache. Any stale cache lines must be discarded so the CPU
-     * fetches fresh DMA data on next access.
-     *
-     * Also invalidate the corresponding CRAM cached aliases if the
-     * bridge address falls in CRAM space, since bridge writes go
-     * directly to PSRAM without touching the D-cache. */
+    /* Post-DMA: invalidate D-cache so CPU reads fresh DMA data.
+     * For CRAM destinations, also invalidate the cached alias. */
     of_cache_inval_range(dest, length);
+    of_file_inval_cram(bridge_addr, length);
 
     return rc;
 }
