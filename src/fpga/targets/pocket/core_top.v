@@ -1634,9 +1634,9 @@ assign psram1_mux_addr = cram1_wr_pending ? cram1_wr_addr_r :
 assign psram1_mux_wdata = cram1_wr_pending ? cram1_wr_data_r : cpu_psram_wdata;
 assign psram1_mux_wstrb = cram1_wr_pending ? 4'b1111 : cpu_psram_wstrb;
 
-// CRAM1 burst reads not yet routed through arbiter
-assign psram1_burst_rd  = 1'b0;
-assign psram1_burst_len = 6'd0;
+// CRAM1 burst reads (stall during bridge activity)
+assign psram1_burst_rd  = bridge_cram1_active ? 1'b0 : cpu_cram1_burst_rd;
+assign psram1_burst_len = cpu_psram_burst_len;
 
 // SRAM mux: CPU only (no burst support)
 assign sram_word_rd = cpu_psram_rd & cpu_psram_sel_sram;
