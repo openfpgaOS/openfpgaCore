@@ -90,8 +90,10 @@ reg        is_sram_target;  // Latched: current read targets SRAM (no burst)
 
 wire beat_is_last = (beat_count == burst_len);
 
-// SRAM detection: addr[27:24] == 0xA (no burst support)
+// SRAM detection: addr[27:24] == 0xA
+// CRAM1: addr[27:24] == 0x1 or 0x9 (async mode, no burst — needs clock work)
 wire addr_is_sram  = (s_axi_araddr[27:24] == 4'hA);
+wire addr_is_cram1 = (s_axi_araddr[27:24] == 4'h1) || (s_axi_araddr[27:24] == 4'h9);
 
 always @(posedge clk or posedge reset) begin
     if (reset) begin
@@ -143,8 +145,8 @@ always @(posedge clk or posedge reset) begin
                 burst_len <= s_axi_arlen;
                 beat_count <= 0;
                 is_sram_target <= addr_is_sram;
-                // SRAM: single-word async reads; CRAM0/CRAM1: sync burst reads
-                state <= addr_is_sram ? S_RD_CMD : S_RD_BURST;
+                // SRAM/CRAM1: single-word reads; CRAM0: sync burst reads
+                state <= (addr_is_sram || addr_is_cram1) ? S_RD_CMD : S_RD_BURST;
             end else if (s_axi_awvalid) begin
                 s_axi_awready <= 1;
                 addr_r <= s_axi_awaddr;
