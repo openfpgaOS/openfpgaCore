@@ -9,6 +9,7 @@
 #   Branch: BTB + GShare + RAS
 #   FPU: single-precision (F extension)
 #   Cache mgmt: Zicbom enabled in hardware
+#   Store buffer: 2 slots, 32 ops
 #
 # Prerequisites: java, sbt
 # Usage: ./generate_vexii.sh
@@ -67,6 +68,7 @@ if [ -f "$OUTPUT" ]; then
     echo "Done! Copied to VexiiRiscv_Full.v"
     echo "Extensions: RV32IMAFCB + Zicbom"
     echo "Cache mgmt: Zicbom enabled in hardware"
+    echo "Store buffer: 2 slots, 32 ops"
 else
     echo "ERROR: VexiiRiscv.v not found after generation"
     exit 1

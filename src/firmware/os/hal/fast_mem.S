@@ -10,16 +10,15 @@
  *   - Out-of-cache: ~30 MB/s (write-allocate + eviction overhead)
  *
  * cbo.inval encoding: .word 0x0005200F  (cbo.inval (a0))
- *   Invalidates cache line at a0. Does NOT prevent write-allocate
- *   on subsequent stores. Would need Zicboz (cbo.zero) for that.
- *   Used here on DESTINATION lines before overwriting: if the line
- *   was dirty from a previous write, cbo.inval drops it without
- *   write-back (saves eviction cost, not allocation cost).
+ *   Invalidates cache line at a0. Drops dirty data without write-back.
+ *   Saves the dirty eviction cost (~68 cycles per 64B line) but does
+ *   NOT prevent the write-allocate fetch on the next store.
+ *   Zicboz (cbo.zero) is NOT available in this VexiiRiscv build.
  */
 
-/* cbo.inval (reg): invalidate cache line. Encoding: funct12=0, rs1, 010, 00000, 0001111 */
+/* cbo.inval (reg): invalidate cache line, drop dirty data.
+ * Encoding: funct12=0x000, rs1, funct3=010, rd=00000, opcode=0001111 */
 .macro CBO_INVAL reg
-    /* cbo.inval (\reg): 0000000_00000_rs1_010_00000_0001111 */
     .if \reg == 10   /* a0 */
     .word 0x0005200F
     .elseif \reg == 6 /* t1 */
@@ -54,12 +53,14 @@ memcpy:
     andi    t1, a0, 63
     bnez    t1, .Lcpy_32_enter
 
-    /* 64-byte cache-line copy with dest invalidation.
-     * Saves eviction writeback cost for large copies. */
+    /* 64-byte cache-line copy with cbo.inval on dest.
+     * cbo.inval drops the dest cache line (including dirty data).
+     * Saves the dirty eviction writeback (~68 cycles per 64B line).
+     * The write-allocate fetch still happens (~25 cycles). */
     li      t1, 64
 .Lcpy_64_inval:
     bltu    a2, t1, .Lcpy_32_enter
-    /* Invalidate dest cache line (drops dirty data, no write-back) */
+    /* Invalidate dest line (drops dirty data, no write-back) */
     CBO_INVAL 10    /* cbo.inval (a0) */
     /* Copy 64 bytes (16 words) interleaved LLSS */
     lw      t2,  0(a1)
