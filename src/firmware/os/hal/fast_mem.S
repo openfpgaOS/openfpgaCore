@@ -1,8 +1,31 @@
 /*
  * Optimized memory functions for RISC-V (rv32)
  * Pinned in BRAM (.fasttext) for 0-wait-state access.
- * Word-aligned bulk transfers using lw/sw (4 bytes per instruction).
+ *
+ * VexiiRiscv pipeline notes:
+ *   - D-cache: 32KB, 2-way, 64B lines, write-back
+ *   - Store buffer: 2 slots — LLSS interleaving prevents stalls
+ *   - Zicbom: cbo.clean/flush/inval available (NOT cbo.zero)
+ *   - In-cache: ~200 MB/s with LLSS pattern
+ *   - Out-of-cache: ~30 MB/s (write-allocate + eviction overhead)
+ *
+ * cbo.inval encoding: .word 0x0005200F  (cbo.inval (a0))
+ *   Invalidates cache line at a0. Does NOT prevent write-allocate
+ *   on subsequent stores. Would need Zicboz (cbo.zero) for that.
+ *   Used here on DESTINATION lines before overwriting: if the line
+ *   was dirty from a previous write, cbo.inval drops it without
+ *   write-back (saves eviction cost, not allocation cost).
  */
+
+/* cbo.inval (reg): invalidate cache line. Encoding: funct12=0, rs1, 010, 00000, 0001111 */
+.macro CBO_INVAL reg
+    /* cbo.inval (\reg): 0000000_00000_rs1_010_00000_0001111 */
+    .if \reg == 10   /* a0 */
+    .word 0x0005200F
+    .elseif \reg == 6 /* t1 */
+    .word 0x0003200F
+    .endif
+.endm
 
 .section .fasttext, "ax"
 
@@ -19,11 +42,65 @@ memcpy:
     andi    t1, t1, 3
     bnez    t1, .Lcpy_byte
 
-    /* 8-word interleaved copy (32 bytes/iteration)
-     * LLSSLLSSLLSSLLSS pattern: 2 loads then 2 stores, repeat.
-     * Keeps the 2-slot store buffer from filling: each pair of stores
-     * drains while the next pair of loads runs.
-     * Target: 2 cycles/word = 200 MB/s @ 100MHz */
+    /* For large copies (> D-cache size), invalidate destination lines
+     * before overwriting. This saves dirty eviction cost when the dest
+     * line was previously written (avoids write-back of data we'll
+     * overwrite anyway). Both dest AND src must be 64B-aligned for
+     * the invalidation path. */
+    li      t1, 64
+    bltu    a2, t1, .Lcpy_32_enter
+
+    /* Check 64-byte alignment of dest for cbo.inval path */
+    andi    t1, a0, 63
+    bnez    t1, .Lcpy_32_enter
+
+    /* 64-byte cache-line copy with dest invalidation.
+     * Saves eviction writeback cost for large copies. */
+    li      t1, 64
+.Lcpy_64_inval:
+    bltu    a2, t1, .Lcpy_32_enter
+    /* Invalidate dest cache line (drops dirty data, no write-back) */
+    CBO_INVAL 10    /* cbo.inval (a0) */
+    /* Copy 64 bytes (16 words) interleaved LLSS */
+    lw      t2,  0(a1)
+    lw      t3,  4(a1)
+    sw      t2,  0(a0)
+    sw      t3,  4(a0)
+    lw      t4,  8(a1)
+    lw      t5, 12(a1)
+    sw      t4,  8(a0)
+    sw      t5, 12(a0)
+    lw      t2, 16(a1)
+    lw      t3, 20(a1)
+    sw      t2, 16(a0)
+    sw      t3, 20(a0)
+    lw      t4, 24(a1)
+    lw      t5, 28(a1)
+    sw      t4, 24(a0)
+    sw      t5, 28(a0)
+    lw      t2, 32(a1)
+    lw      t3, 36(a1)
+    sw      t2, 32(a0)
+    sw      t3, 36(a0)
+    lw      t4, 40(a1)
+    lw      t5, 44(a1)
+    sw      t4, 40(a0)
+    sw      t5, 44(a0)
+    lw      t2, 48(a1)
+    lw      t3, 52(a1)
+    sw      t2, 48(a0)
+    sw      t3, 52(a0)
+    lw      t4, 56(a1)
+    lw      t5, 60(a1)
+    sw      t4, 56(a0)
+    sw      t5, 60(a0)
+    addi    a0, a0, 64
+    addi    a1, a1, 64
+    addi    a2, a2, -64
+    bgeu    a2, t1, .Lcpy_64_inval
+
+    /* 32-byte interleaved copy (no invalidation) */
+.Lcpy_32_enter:
     li      t1, 32
     bltu    a2, t1, .Lcpy_16
 .Lcpy_32:
