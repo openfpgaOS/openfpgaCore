@@ -5,7 +5,7 @@
 #
 # Current VexiiRiscv_Full.v config:
 #   I-cache: 8KB  (128 sets x 1 way x 64B line)
-#   D-cache: 32KB (512 sets x 1 way x 64B line, write-back, direct-mapped)
+#   D-cache: 32KB (256 sets x 2 ways x 64B line, write-back, 2-way set-associative)
 #   Branch: BTB + GShare + RAS
 #   FPU: single-precision (F extension)
 #   Cache mgmt: Zicbom enabled in hardware
@@ -32,13 +32,13 @@ sbt "runMain vexiiriscv.Generate \
       --with-rvZcbm \
       --with-fetch-l1 --fetch-l1-sets=128 --fetch-l1-ways=1 --fetch-l1-refill-count=2 \
       --fetch-l1-hardware-prefetch=nl --fetch-axi4 \
-      --with-lsu-l1 --lsu-l1-sets=512 --lsu-l1-ways=1 \
+      --with-lsu-l1 --lsu-l1-sets=256 --lsu-l1-ways=2 \
       --lsu-l1-refill-count=2 --lsu-l1-writeback-count=2 \
       --lsu-l1-store-buffer-slots=2 --lsu-l1-store-buffer-ops=32 \
       --lsu-l1-axi4 \
-      --with-btb --btb-sets=512 --relaxed-btb --relaxed-btb-hit \
+      --with-btb --btb-sets=256 --relaxed-btb --relaxed-btb-hit \
       --with-gshare --with-ras \
-      --regfile-async --allow-bypass-from=0 \
+      --regfile-async --allow-bypass-from=1 \
       --relaxed-src \
       --reset-vector=0 \
       --region base=0,size=40000,main=0,exe=1 \

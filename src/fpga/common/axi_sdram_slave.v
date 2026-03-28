@@ -56,29 +56,42 @@ module axi_sdram_slave (
     output reg  [31:0] sdram_wdata,
     output reg  [3:0]  sdram_wstrb,
     output reg  [3:0]  sdram_burst_len,
+    output reg  [3:0]  sdram_burst_wr_len,
     input  wire [31:0] sdram_rdata,
     input  wire        sdram_busy,
     input  wire        sdram_accepted,
-    input  wire        sdram_rdata_valid
+    input  wire        sdram_rdata_valid,
+    input  wire        sdram_wr_data_next, // io_sdram needs next word for burst write
+    output wire [31:0] sdram_next_wdata,   // Pre-staged next word (combinational)
+    output wire [3:0]  sdram_next_wstrb
 );
 
 wire reset = ~reset_n;
 
 // FSM states
-localparam S_IDLE     = 3'd0;
-localparam S_RD_CMD   = 3'd1;  // Issue word_rd, wait for accepted
-localparam S_RD_DAT   = 3'd2;  // Wait for rdata_valid, send R beats
-localparam S_WR_CMD   = 3'd3;  // Issue word_wr, wait for accepted
-localparam S_WR_DON   = 3'd4;  // Wait for write completion (!busy)
-localparam S_WR_NEXT  = 3'd5;  // Accept next W beat in burst write
+localparam S_IDLE      = 4'd0;
+localparam S_RD_CMD    = 4'd1;  // Issue word_rd, wait for accepted
+localparam S_RD_DAT    = 4'd2;  // Wait for rdata_valid, send R beats
+localparam S_WR_CMD    = 4'd3;  // Issue word_wr, wait for accepted
+localparam S_WR_DON    = 4'd4;  // Wait for write completion (!busy)
+localparam S_WR_NEXT   = 4'd5;  // Accept next W beat (single-word writes)
+localparam S_WR_BURST  = 4'd6;  // Streaming: io_sdram pulls data via wr_data_next
 
-reg [2:0] state;
+reg [3:0] state;
 
 // Transaction tracking
 reg [7:0]  burst_len;    // ARLEN/AWLEN
 reg [7:0]  beat_count;   // Beats completed
 reg [31:0] addr_r;       // Current address (advances per beat)
 reg        cmd_issued;   // word_rd/wr issued, waiting for accepted
+reg [31:0] next_wdata;   // Pre-staged next W beat data (burst write)
+reg [3:0]  next_wstrb;
+reg        wready_given; // Next W beat already accepted
+reg        wr_busy_seen; // word_busy seen high during burst (guards early bvalid)
+
+// Combinational export of pre-staged data for burst write forwarding
+assign sdram_next_wdata = next_wdata;
+assign sdram_next_wstrb = next_wstrb;
 reg        started;      // accepted seen, waiting for completion
 
 wire beat_is_last = (beat_count == burst_len);
@@ -108,6 +121,11 @@ always @(posedge clk or posedge reset) begin
         sdram_wdata <= 0;
         sdram_wstrb <= 0;
         sdram_burst_len <= 0;
+        sdram_burst_wr_len <= 0;
+        next_wdata <= 0;
+        next_wstrb <= 0;
+        wready_given <= 0;
+        wr_busy_seen <= 0;
     end else begin
         // Defaults: deassert single-cycle signals
         s_axi_arready <= 0;
@@ -118,6 +136,7 @@ always @(posedge clk or posedge reset) begin
         sdram_rd <= 0;
         sdram_wr <= 0;
         sdram_burst_len <= 0;
+        sdram_burst_wr_len <= 0;
 
         case (state)
 
@@ -152,6 +171,7 @@ always @(posedge clk or posedge reset) begin
                     if (!sdram_busy) begin
                         sdram_wr <= 1;
                         sdram_addr <= s_axi_awaddr[25:2];
+                        sdram_burst_wr_len <= s_axi_awlen[3:0];
                         cmd_issued <= 1;
                     end
                     state <= S_WR_CMD;
@@ -213,32 +233,63 @@ always @(posedge clk or posedge reset) begin
                 if (!sdram_busy) begin
                     sdram_wr <= 1;
                     sdram_addr <= addr_r[25:2];
+                    sdram_burst_wr_len <= burst_len[3:0];
                     cmd_issued <= 1;
                     started <= 0;
                 end
             end else begin
                 sdram_wr <= 1;
                 sdram_addr <= addr_r[25:2];
+                sdram_burst_wr_len <= burst_len[3:0];
                 if (sdram_accepted) begin
                     started <= 1;
-                    state <= S_WR_DON;
+                    if (burst_len == 0)
+                        state <= S_WR_DON;   // Single word: wait for !busy
+                    else begin
+                        wready_given <= 0;
+                        wr_busy_seen <= 0;
+                        state <= S_WR_BURST;  // Burst: stream data
+                    end
                 end
             end
         end
 
+        S_WR_BURST: begin
+            // Streaming burst write: when io_sdram signals wr_data_next,
+            // accept the next W beat and update sdram_wdata.
+            // io_sdram has 3 gap cycles (ST_WRITE_5/6/7) to let data propagate.
+            if (sdram_wr_data_next) begin
+                beat_count <= beat_count + 1;
+                if (s_axi_wvalid) begin
+                    s_axi_wready <= 1;
+                    sdram_wdata <= s_axi_wdata;
+                    sdram_wstrb <= s_axi_wstrb;
+                end
+            end
+            // Track when io_sdram actually starts (word_busy goes high)
+            if (sdram_busy) wr_busy_seen <= 1;
+            // io_sdram returns to IDLE when burst is done
+            if (wr_busy_seen && !sdram_busy) begin
+                beat_count <= beat_count + 1;
+                cmd_issued <= 0;
+                started <= 0;
+                s_axi_bvalid <= 1;
+                s_axi_bresp <= 2'b00;
+                state <= S_IDLE;
+            end
+        end
+
         S_WR_DON: begin
-            // Wait for write completion (accepted and not busy)
+            // Wait for single write completion
             if (started && !sdram_busy) begin
                 beat_count <= beat_count + 1;
                 cmd_issued <= 0;
                 started <= 0;
                 if (beat_is_last) begin
-                    // All beats written - send B response
                     s_axi_bvalid <= 1;
-                    s_axi_bresp <= 2'b00;  // OKAY
+                    s_axi_bresp <= 2'b00;
                     state <= S_IDLE;
                 end else begin
-                    // More beats: advance address, get next W
                     addr_r <= addr_r + 32'd4;
                     state <= S_WR_NEXT;
                 end
@@ -246,7 +297,7 @@ always @(posedge clk or posedge reset) begin
         end
 
         S_WR_NEXT: begin
-            // Accept next W beat
+            // Accept next W beat (single-word fallback path)
             if (s_axi_wvalid) begin
                 s_axi_wready <= 1;
                 sdram_wdata <= s_axi_wdata;

@@ -14,8 +14,9 @@
 #include "regs.h"
 
 #define DCACHE_LINE_SIZE  64
-#define DCACHE_SETS       512
-#define DCACHE_TOTAL      (DCACHE_SETS * DCACHE_LINE_SIZE)  /* 32KB */
+#define DCACHE_SETS       256
+#define DCACHE_WAYS       2
+#define DCACHE_TOTAL      (DCACHE_SETS * DCACHE_WAYS * DCACHE_LINE_SIZE)  /* 32KB */
 
 /* Eviction region: top of SDRAM, above all active data */
 #define EVICT_BASE  (SDRAM_BASE + SDRAM_SIZE - DCACHE_TOTAL)
@@ -23,8 +24,8 @@
 void of_cache_init(void) { }
 
 /* Evict specific cache sets covering [addr, addr+size).
- * Direct-mapped: set index = bits [14:6] of address.
- * Each eviction read forces the dirty line in that set to write back. */
+ * 2-way set-associative: set index = bits [13:6] of address.
+ * Must read 2 addresses per set (different tags) to evict both ways. */
 static void dcache_evict_range(void *addr, uint32_t size) {
     __asm__ volatile("fence" ::: "memory");
 
@@ -34,15 +35,18 @@ static void dcache_evict_range(void *addr, uint32_t size) {
     uint32_t lines = (end - start) / DCACHE_LINE_SIZE;
 
     if (lines >= DCACHE_SETS) {
-        /* Full eviction is cheaper when range >= cache size */
+        /* Full eviction: read 32KB to fill all 256 sets × 2 ways */
         volatile char *p = (volatile char *)EVICT_BASE;
         for (uint32_t i = 0; i < DCACHE_TOTAL; i += DCACHE_LINE_SIZE)
             (void)p[i];
     } else {
-        /* Targeted: touch only overlapping sets */
+        /* Targeted: touch both ways of each overlapping set */
+        uint32_t half = DCACHE_SETS * DCACHE_LINE_SIZE;  /* 16KB */
         for (uintptr_t a = start; a < end; a += DCACHE_LINE_SIZE) {
             uint32_t set = (a >> 6) & (DCACHE_SETS - 1);
-            (void)*(volatile char *)(EVICT_BASE + set * DCACHE_LINE_SIZE);
+            uint32_t off = set * DCACHE_LINE_SIZE;
+            (void)*(volatile char *)(EVICT_BASE + off);
+            (void)*(volatile char *)(EVICT_BASE + half + off);
         }
     }
 

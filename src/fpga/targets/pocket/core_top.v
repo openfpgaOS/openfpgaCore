@@ -785,6 +785,8 @@ reg     [23:0]  ram1_word_addr;
 reg     [31:0]  ram1_word_data;
 reg     [3:0]   ram1_word_wstrb;
 reg     [3:0]   ram1_word_burst_len;
+reg     [3:0]   ram1_word_burst_wr_len;
+wire            ram1_word_wr_data_next;
 wire    [31:0]  ram1_word_q;
 wire            ram1_word_busy;
 wire            ram1_word_q_valid;
@@ -796,6 +798,12 @@ wire    [23:0]  sdram_slave_addr;
 wire    [31:0]  sdram_slave_wdata;
 wire    [3:0]   sdram_slave_wstrb;
 wire    [3:0]   sdram_slave_burst_len;
+wire    [3:0]   sdram_slave_burst_wr_len;
+// io_sdram word_wr_data_next → axi_sdram_slave sdram_wr_data_next
+// Same clock domain (clk_cpu = clk_ram_controller), direct wire
+wire            sdram_slave_wr_data_next = ram1_word_wr_data_next;
+wire    [31:0]  sdram_slave_next_wdata;
+wire    [3:0]   sdram_slave_next_wstrb;
 
 // ============================================================
 // CPU AXI4 master buses
@@ -2256,10 +2264,12 @@ assign video_hs = vidout_hs;
     // Slave → io_sdram pulse adapter
     reg sdram_accepted_r;
     reg sdram_cmd_forwarded;
+    reg wr_data_fwd_d1;
     always @(posedge clk_ram_controller) begin
         ram1_word_rd <= 0;
         ram1_word_wr <= 0;
         ram1_word_burst_len <= 4'd0;
+        ram1_word_burst_wr_len <= 4'd0;
         sdram_accepted_r <= 0;
 
         if (!sdram_slave_rd && !sdram_slave_wr)
@@ -2273,8 +2283,16 @@ assign video_hs = vidout_hs;
             ram1_word_data <= sdram_slave_wdata;
             ram1_word_wstrb <= sdram_slave_wstrb;
             ram1_word_burst_len <= sdram_slave_burst_len;
+            ram1_word_burst_wr_len <= sdram_slave_burst_wr_len;
             sdram_accepted_r <= 1;
             sdram_cmd_forwarded <= 1;
+        end
+
+        // Burst write data forwarding: delay by 1 cycle after slave updates
+        wr_data_fwd_d1 <= ram1_word_wr_data_next;
+        if (wr_data_fwd_d1) begin
+            ram1_word_data <= sdram_slave_wdata;
+            ram1_word_wstrb <= sdram_slave_wstrb;
         end
     end
 
@@ -2397,10 +2415,14 @@ assign video_hs = vidout_hs;
         .sdram_wdata(sdram_slave_wdata),
         .sdram_wstrb(sdram_slave_wstrb),
         .sdram_burst_len(sdram_slave_burst_len),
+        .sdram_burst_wr_len(sdram_slave_burst_wr_len),
         .sdram_rdata(ram1_word_q),
         .sdram_busy(ram1_word_busy),
         .sdram_accepted(sdram_accepted_r),
-        .sdram_rdata_valid(ram1_word_q_valid)
+        .sdram_rdata_valid(ram1_word_q_valid),
+        .sdram_wr_data_next(sdram_slave_wr_data_next),
+        .sdram_next_wdata(sdram_slave_next_wdata),
+        .sdram_next_wstrb(sdram_slave_next_wstrb)
     );
 
     // AXI4 PSRAM slave
@@ -2754,9 +2776,11 @@ io_sdram isr0 (
     .word_data  ( ram1_word_data ),
     .word_wstrb ( ram1_word_wstrb ),
     .word_burst_len ( ram1_word_burst_len ),
+    .word_burst_wr_len ( ram1_word_burst_wr_len ),
     .word_q     ( ram1_word_q ),
     .word_busy  ( ram1_word_busy ),
-    .word_q_valid ( ram1_word_q_valid )
+    .word_q_valid ( ram1_word_q_valid ),
+    .word_wr_data_next ( ram1_word_wr_data_next )
 
 );
 

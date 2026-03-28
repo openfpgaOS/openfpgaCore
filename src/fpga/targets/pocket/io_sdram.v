@@ -42,9 +42,11 @@ input   wire    [23:0]  word_addr,
 input   wire    [31:0]  word_data,
 input   wire    [3:0]   word_wstrb, // byte enables: [0]=byte0, [1]=byte1, [2]=byte2, [3]=byte3
 input   wire    [3:0]   word_burst_len, // 0=single word, N=N+1 words (for CPU cache line fills)
+input   wire    [3:0]   word_burst_wr_len, // 0=single word, N=N+1 words (for burst writes)
 output  reg     [31:0]  word_q,
 output  reg             word_busy,
-output  reg             word_q_valid  // Pulses high for one cycle when word_q data is valid
+output  reg             word_q_valid, // Pulses high for one cycle when word_q data is valid
+output  reg             word_wr_data_next // Pulse: need next word data for burst write
 );
 
     // tristate for DQ
@@ -96,6 +98,7 @@ assign {phy_ras, phy_cas, phy_we} = cmd;
     localparam      ST_WRITE_4          = 'd24;
     localparam      ST_WRITE_5          = 'd25;
     localparam      ST_WRITE_6          = 'd26;
+    localparam      ST_WRITE_7          = 'd27;
 
     localparam      ST_READ_0           = 'd30;
     localparam      ST_READ_1           = 'd31;
@@ -142,6 +145,8 @@ synch_3 s1(reset_n, reset_n_s, controller_clk);
     reg [31:0] word_data_captured;
     reg [3:0]  word_wstrb_captured;
     reg [3:0]  word_burst_len_captured;
+    reg [3:0]  word_burst_wr_len_captured;
+    reg [3:0]  wr_burst_remaining;
 
     reg burst_rd_queue;
     reg burstwr_queue;
@@ -201,6 +206,7 @@ always @(posedge controller_clk) begin
     burst_data_valid <= 0;
     burstwr_ready <= 0;
     word_q_valid <= 0;  // Clear each cycle, set when read data is captured
+    word_wr_data_next <= 0;
 
     enable_dq_read_5 <= enable_dq_read_4;
     enable_dq_read_4 <= enable_dq_read_3;
@@ -378,6 +384,7 @@ always @(posedge controller_clk) begin
             word_op <= 1;
             addr <= pending_addr;
             word_busy <= 1;
+            wr_burst_remaining <= word_burst_wr_len_captured;
 
             if(pending_row_hit) begin
                 // ROW HIT: 1-cycle DQ setup, then WRITE
@@ -498,7 +505,15 @@ always @(posedge controller_clk) begin
         phy_dq_out <= word_data_captured[31:16]; // Second BL=2 beat: high half (little-endian)
         phy_dqm <= ~word_wstrb_captured[3:2];    // Byte enables for bytes 2,3
 
-        state <= ST_WRITE_4;
+        if (wr_burst_remaining > 0) begin
+            // More words in burst: request next data, advance address
+            wr_burst_remaining <= wr_burst_remaining - 4'd1;
+            addr <= addr + 2'd2;  // BL=2: 2 halfword addresses per 32-bit word
+            word_wr_data_next <= 1;
+            state <= ST_WRITE_5;
+        end else begin
+            state <= ST_WRITE_4;
+        end
     end
     ST_WRITE_4: begin
         phy_dqm <= 2'b00;  // Clear byte masks
@@ -506,6 +521,28 @@ always @(posedge controller_clk) begin
             // Leave row open: skip precharge, return to IDLE
             state <= ST_IDLE;
         end
+    end
+    // Burst write gap: 3 cycles for data to propagate through
+    // slave → pulse adapter → word_data input
+    // Cycle 1: slave processes word_wr_data_next, updates sdram_wdata
+    ST_WRITE_5: begin
+        phy_dq_oe <= 1;
+        phy_dqm <= 2'b11;  // Mask DQ during gap
+        state <= ST_WRITE_6;
+    end
+    // Cycle 2: pulse adapter copies sdram_wdata → word_data
+    ST_WRITE_6: begin
+        phy_dq_oe <= 1;
+        phy_dqm <= 2'b11;
+        state <= ST_WRITE_7;
+    end
+    // Cycle 3: capture word_data (now valid)
+    ST_WRITE_7: begin
+        word_data_captured <= word_data;
+        word_wstrb_captured <= word_wstrb;
+        phy_dq_oe <= 1;
+        phy_dqm <= 2'b00;
+        state <= ST_WRITE_2;
     end
 
 
@@ -686,6 +723,7 @@ always @(posedge controller_clk) begin
         word_addr_captured <= word_addr;
         word_data_captured <= word_data;
         word_wstrb_captured <= word_wstrb;
+        word_burst_wr_len_captured <= word_burst_wr_len;
     end else if(word_rd) begin
         word_rd_queue <= 1;
         word_addr_captured <= word_addr;
@@ -720,9 +758,12 @@ always @(posedge controller_clk) begin
         word_data_captured <= 0;
         word_wstrb_captured <= 0;
         word_burst_len_captured <= 0;
+        word_burst_wr_len_captured <= 0;
+        wr_burst_remaining <= 0;
         word_q <= 0;
         word_busy <= 0;
         word_q_valid <= 0;
+        word_wr_data_next <= 0;
         enable_dq_read_toggle <= 0;
         row_open <= 0;
         prechg_return <= 2'd0;

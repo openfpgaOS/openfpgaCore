@@ -2,14 +2,14 @@
 // DMA Engine — SDRAM memory-to-memory copy and fill
 //
 // Bypasses CPU D-cache: reads/writes SDRAM directly via AXI M1 port
-// on the SDRAM arbiter. Uses 8-word burst reads; writes are single-beat
-// (SDRAM controller limitation — no burst write support).
+// on the SDRAM arbiter. Uses 16-word burst reads (64 bytes, one cache
+// line); writes are single-beat (SDRAM controller limitation).
 //
 // Modes:
 //   Copy: reads from src, writes to dst
 //   Fill: writes fill value to dst (no reads)
 //
-// 0 M10K — 8-word register buffer only.
+// 0 M10K — 16-word register buffer only.
 //
 
 `default_nettype none
@@ -55,21 +55,23 @@ module dma_engine (
 wire reset = ~reset_n;
 
 localparam S_IDLE     = 3'd0;
-localparam S_CALC     = 3'd1;  // Calculate burst len for next block
-localparam S_RD_ADDR  = 3'd2;  // Issue AR
-localparam S_RD_DATA  = 3'd3;  // Capture R beats
-localparam S_WR_ADDR  = 3'd4;  // Issue AW
-localparam S_WR_DATA  = 3'd5;  // Send W beats
-localparam S_WR_RESP  = 3'd6;  // Wait B
+localparam S_CALC     = 3'd1;
+localparam S_RD_ADDR  = 3'd2;
+localparam S_RD_DATA  = 3'd3;
+localparam S_WR_ADDR  = 3'd4;
+localparam S_WR_DATA  = 3'd5;
+localparam S_WR_RESP  = 3'd6;
+
+localparam BURST_MAX  = 16;  // 16 words = 64 bytes per block
 
 reg [2:0] state;
 reg [31:0] cur_src, cur_dst, remaining;
 reg        is_fill;
 
-// 8-word buffer
-reg [31:0] dbuf[0:7];
-reg [3:0]  burst_len;  // 0-7 (actual beats = burst_len + 1)
-reg [3:0]  beat_idx;
+// 16-word buffer
+reg [31:0] dbuf[0:15];
+reg [4:0]  burst_len;  // 0-15 (actual beats = burst_len + 1)
+reg [4:0]  beat_idx;
 
 assign busy = (state != S_IDLE);
 
@@ -105,23 +107,26 @@ always @(posedge clk or posedge reset) begin
                 cur_dst <= dst_addr;
                 remaining <= length;
                 is_fill <= fill_mode;
-                // Fill buffer with fill value for fill mode
                 if (fill_mode) begin
-                    dbuf[0] <= src_addr; dbuf[1] <= src_addr;
-                    dbuf[2] <= src_addr; dbuf[3] <= src_addr;
-                    dbuf[4] <= src_addr; dbuf[5] <= src_addr;
-                    dbuf[6] <= src_addr; dbuf[7] <= src_addr;
+                    dbuf[0]  <= src_addr; dbuf[1]  <= src_addr;
+                    dbuf[2]  <= src_addr; dbuf[3]  <= src_addr;
+                    dbuf[4]  <= src_addr; dbuf[5]  <= src_addr;
+                    dbuf[6]  <= src_addr; dbuf[7]  <= src_addr;
+                    dbuf[8]  <= src_addr; dbuf[9]  <= src_addr;
+                    dbuf[10] <= src_addr; dbuf[11] <= src_addr;
+                    dbuf[12] <= src_addr; dbuf[13] <= src_addr;
+                    dbuf[14] <= src_addr; dbuf[15] <= src_addr;
                 end
                 state <= S_CALC;
             end
         end
 
         S_CALC: begin
-            // Calculate burst length: min(8, remaining_words) - 1
-            if (remaining[31:5] != 0)  // >= 32 bytes = 8 words
-                burst_len <= 4'd7;
+            // burst length: min(16, remaining_words) - 1
+            if (remaining[31:6] != 0)  // >= 64 bytes = 16 words
+                burst_len <= 5'd15;
             else
-                burst_len <= remaining[4:2] - 4'd1;  // 1-7 words → 0-6
+                burst_len <= remaining[5:2] - 5'd1;
             beat_idx <= 0;
             state <= is_fill ? S_WR_ADDR : S_RD_ADDR;
         end
@@ -130,7 +135,7 @@ always @(posedge clk or posedge reset) begin
         S_RD_ADDR: begin
             m_arvalid <= 1;
             m_araddr <= cur_src;
-            m_arlen <= {4'b0, burst_len};
+            m_arlen <= {3'b0, burst_len};
             if (m_arready) begin
                 m_arvalid <= 0;
                 state <= S_RD_DATA;
@@ -139,7 +144,7 @@ always @(posedge clk or posedge reset) begin
 
         S_RD_DATA: begin
             if (m_rvalid) begin
-                dbuf[beat_idx[2:0]] <= m_rdata;
+                dbuf[beat_idx[3:0]] <= m_rdata;
                 beat_idx <= beat_idx + 1;
                 if (m_rlast) begin
                     beat_idx <= 0;
@@ -152,10 +157,9 @@ always @(posedge clk or posedge reset) begin
         S_WR_ADDR: begin
             m_awvalid <= 1;
             m_awaddr <= cur_dst;
-            m_awlen <= {4'b0, burst_len};
+            m_awlen <= {3'b0, burst_len};
             if (m_awready) begin
                 m_awvalid <= 0;
-                // Start first W beat
                 m_wvalid <= 1;
                 m_wdata <= dbuf[0];
                 m_wstrb <= 4'hF;
@@ -167,7 +171,7 @@ always @(posedge clk or posedge reset) begin
 
         S_WR_DATA: begin
             m_wvalid <= 1;
-            m_wdata <= dbuf[beat_idx[2:0]];
+            m_wdata <= dbuf[beat_idx[3:0]];
             m_wstrb <= 4'hF;
             m_wlast <= (beat_idx == burst_len);
             if (m_wready) begin
@@ -183,11 +187,10 @@ always @(posedge clk or posedge reset) begin
 
         S_WR_RESP: begin
             if (m_bvalid) begin
-                // Advance by (burst_len + 1) * 4 bytes
-                cur_src <= cur_src + {25'b0, burst_len + 4'd1, 2'b00};
-                cur_dst <= cur_dst + {25'b0, burst_len + 4'd1, 2'b00};
-                remaining <= remaining - {25'b0, burst_len + 4'd1, 2'b00};
-                if (remaining <= {25'b0, burst_len + 4'd1, 2'b00})
+                cur_src <= cur_src + {24'b0, burst_len + 5'd1, 2'b00};
+                cur_dst <= cur_dst + {24'b0, burst_len + 5'd1, 2'b00};
+                remaining <= remaining - {24'b0, burst_len + 5'd1, 2'b00};
+                if (remaining <= {24'b0, burst_len + 5'd1, 2'b00})
                     state <= S_IDLE;
                 else
                     state <= S_CALC;
