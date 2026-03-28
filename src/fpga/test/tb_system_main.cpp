@@ -176,19 +176,20 @@ int main(int argc, char **argv) {
     Verilated::commandArgs(argc, argv);
     tb = new Vtb_system;
 
-    const char *bram_path = NULL;
-    const char *sdram_path = NULL;
+    const char *bram_path = NULL;      // Boot stub or full boot.bin
+    const char *sdram_path = NULL;     // OS binary (os.bin)
+    const char *bram_base_path = NULL; // Full boot.bin (for .fasttext etc.)
     int max_cycles = 500000;
 
-    // Usage: ./Vtb_system [boot.bin [os.bin [max_cycles]]]
-    if (argc >= 2 && argv[1][0] != '-')
-        bram_path = argv[1];
-    if (argc >= 3 && argv[2][0] != '-')
-        sdram_path = argv[2];
-    if (argc >= 4)
-        max_cycles = atoi(argv[3]);
-    else if (argc >= 3 && !sdram_path)
-        max_cycles = atoi(argv[2]);
+    // Usage: ./Vtb_system <stub.bin> <os.bin> [boot.bin] [max_cycles]
+    // Or:    ./Vtb_system (runs built-in self-test)
+    for (int i = 1; i < argc; i++) {
+        if (argv[i][0] == '-' || (argv[i][0] >= '0' && argv[i][0] <= '9')) {
+            max_cycles = atoi(argv[i]);
+        } else if (!bram_path) bram_path = argv[i];
+        else if (!sdram_path) sdram_path = argv[i];
+        else if (!bram_base_path) bram_base_path = argv[i];
+    }
 
     printf("=== VexiiRiscv System Simulation ===\n\n");
 
@@ -204,9 +205,15 @@ int main(int argc, char **argv) {
 
     // Load firmware
     if (bram_path) {
+        // If boot.bin base image provided, load it first (for .fasttext section)
+        if (bram_base_path) {
+            printf("Loading BRAM base: ");
+            if (load_binary(bram_base_path) < 0) return 1;
+        }
+        // Load boot stub (overwrites entry point at addr 0)
+        printf("Loading boot stub: ");
         if (load_binary(bram_path) < 0) return 1;
-        // Load SDRAM binary if provided
-        // os.bin loads at SDRAM addr 0x10200000 → word offset 0x80000
+        // Load SDRAM binary (os.bin at 0x10200000)
         if (sdram_path) {
             if (load_sdram_binary(sdram_path, 0x80000) < 0) return 1;
         }
@@ -220,18 +227,24 @@ int main(int argc, char **argv) {
     // Clear result
     bram_write(RESULT_STATUS_ADDR, 0);
 
-    // Release reset
-    printf("Starting CPU...\n");
+    // Release reset — SDRAM controller inits in parallel with CPU boot.
+    // CPU stalls naturally on first SDRAM access until io_sdram is ready.
     printf("--- UART output ---\n");
     tb->reset_n = 1;
 
     // Run until result or timeout
     int status = 0;
+    uint32_t last_pc_sample = 0;
+    int stall_count = 0;
     for (int i = 0; i < max_cycles; i++) {
         tick();
         if (i % 1000 == 999) {
             status = bram_read(RESULT_STATUS_ADDR);
             if (status != 0) break;
+        }
+        // Progress indicator
+        if (i > 100000 && i % 500000 == 499999) {
+            fprintf(stderr, "[%dK cycles]\n", (i + 1) / 1000);
         }
     }
 

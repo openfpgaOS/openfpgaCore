@@ -66,8 +66,9 @@ module bram_model #(
     output reg  [7:0]             uart_tx_byte
 );
 
-// Cycle counter for SYS_CYCLE registers
+// Cycle counter for SYS_CYCLE registers (1000x speed for fast sim)
 reg [63:0] sys_cycle;
+wire [63:0] fast_cycle = sys_cycle * 1000;
 always @(posedge clk)
     if (!reset_n) sys_cycle <= 0;
     else sys_cycle <= sys_cycle + 1;
@@ -172,13 +173,13 @@ always @(posedge clk) begin
     L_RDATA: begin
         local_r_valid <= 1;
         if (l_raddr[31:24] == 8'h4F && l_raddr[3:2] == 2'b00)
-            local_r_data <= 32'h00000006;  // UART status: TX ready + enabled
+            local_r_data <= 32'h00000003;  // UART: present(bit0) + TX ready(bit1)
         else if (l_raddr[31:24] == 8'h40) begin
             // System register stubs (0x40000000+)
             case (l_raddr[7:0])
-            8'h00: local_r_data <= 32'h00000001;  // SYS_STATUS: ready
-            8'h04: local_r_data <= sys_cycle[31:0] * 1000; // SYS_CYCLE_LO (1000x for fast sim)
-            8'h08: local_r_data <= 32'h0;  // SYS_CYCLE_HI (not needed with 1000x)
+            8'h00: local_r_data <= 32'h00000003;  // SYS_STATUS: ready + all_complete
+            8'h04: local_r_data <= fast_cycle[31:0];  // SYS_CYCLE_LO
+            8'h08: local_r_data <= fast_cycle[63:32]; // SYS_CYCLE_HI
             8'h3C: local_r_data <= 32'h00000023;  // DS_STATUS: ACK+DONE+READY
             8'h68: local_r_data <= 32'h00000000;  // SYS_GAME_ID
             8'hD0: local_r_data <= 32'h00000000;  // DMA_STATUS: idle

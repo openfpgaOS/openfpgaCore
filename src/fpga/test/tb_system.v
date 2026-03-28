@@ -32,7 +32,13 @@ module tb_system (
     // SDRAM backdoor (for OS binary preload)
     input  wire        sd_bd_we,
     input  wire [23:0] sd_bd_addr,    // 24-bit word address
-    input  wire [31:0] sd_bd_wdata
+    input  wire [31:0] sd_bd_wdata,
+
+    // Debug: expose fetch and LSU addresses for PC tracing
+    output wire [31:0] dbg_fetch_addr,
+    output wire        dbg_fetch_valid,
+    output wire [31:0] dbg_lsu_addr,
+    output wire        dbg_lsu_valid
 );
 
 // ============================================================
@@ -365,6 +371,14 @@ sdram_model sdram_chip (
 
 // For now, tie off the BRAM fetch port (cpu_system handles routing)
 assign fetch_arvalid = 0;
+
+// Debug: expose bus activity for PC tracing
+assign dbg_fetch_addr = local_arvalid ? local_araddr :
+                         sdram_arvalid ? sdram_araddr : 32'h0;
+assign dbg_fetch_valid = local_arvalid | sdram_arvalid;
+assign dbg_lsu_addr = local_awvalid ? local_awaddr :
+                       sdram_awvalid ? sdram_awaddr : 32'h0;
+assign dbg_lsu_valid = local_awvalid | sdram_awvalid;
 assign fetch_araddr = 0;
 assign fetch_arlen = 0;
 wire fetch_rready = 1;

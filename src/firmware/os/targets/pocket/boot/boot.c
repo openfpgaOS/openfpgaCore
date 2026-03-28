@@ -495,16 +495,18 @@ int main(void) {
     pd_dbg_stage = 2;
 
     /* Brief delay for deferload to settle */
-    for (volatile int i = 0; i < 1000000; i++) {}
+    for (volatile int i = 0; i < 100; i++) {}  // Shortened for fast sim
 
     boot_vram_puts(0, 14, "Booting...");
 
     /* ── PHDP Discovery ─────────────────────────────────────────── */
     int debug_mode = 0;
 
+    /* Skip PHDP for fast boot — uncomment for debug host support:
     if (uart_probe()) {
         debug_mode = phdp_discover();
     }
+    */
 
     if (debug_mode) {
         boot_vram_clear_row(14);

@@ -613,26 +613,37 @@ always @(posedge clk or posedge reset) begin
         // MEM_R: Forward R beats to requester
         // ============================================
         FSM_MEM_R: begin
-            if (mem_rvalid) begin
-                if (active_bus == BUS_FETCH) begin
+            // AXI R channel: hold valid until requester accepts (rready)
+            // The requester (I-cache or D-cache) may not be ready immediately.
+            if (active_bus == BUS_FETCH) begin
+                if (fetch_r_valid && !fetch_r_ready) begin
+                    // Hold: requester hasn't accepted yet
+                    fetch_r_valid <= 1;
+                end else if (mem_rvalid) begin
                     fetch_r_valid <= 1;
                     fetch_r_data <= mem_rdata;
                     fetch_r_id <= req_id_r;
                     fetch_r_last <= beat_is_last;
-                end else if (active_bus == BUS_LSU) begin
+                    burst_count <= burst_count + 1;
+                    if (beat_is_last) fsm_state <= FSM_IDLE;
+                end
+            end else if (active_bus == BUS_LSU) begin
+                if (lsu_r_valid && !lsu_r_ready) begin
+                    lsu_r_valid <= 1;
+                end else if (mem_rvalid) begin
                     lsu_r_valid <= 1;
                     lsu_r_data <= mem_rdata;
                     lsu_r_id <= req_id_r;
                     lsu_r_last <= beat_is_last;
-                end else begin
-                    // BUS_IO: single-beat read response
-                    io_rsp_valid <= 1;
-                    io_rsp_data <= mem_rdata;
-                    io_rsp_error <= 0;
+                    burst_count <= burst_count + 1;
+                    if (beat_is_last) fsm_state <= FSM_IDLE;
                 end
+            end else if (mem_rvalid) begin
+                io_rsp_valid <= 1;
+                io_rsp_data <= mem_rdata;
+                io_rsp_error <= 0;
                 burst_count <= burst_count + 1;
-                if (beat_is_last)
-                    fsm_state <= FSM_IDLE;
+                if (beat_is_last) fsm_state <= FSM_IDLE;
             end
         end
 
