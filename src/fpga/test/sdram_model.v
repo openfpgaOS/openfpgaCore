@@ -283,11 +283,16 @@ function [31:0] read_word;
     end
 endfunction
 
-// Backdoor write port: load 32-bit words directly (for firmware preload)
+// Backdoor write port: uses same {bank, row, col[8:0]} flat addressing as the model.
+wire [24:0] bd_hw_lo = {bd_word_addr[23:0], 1'b0};
+wire [24:0] bd_hw_hi = {bd_word_addr[23:0], 1'b0} + 25'd1;
+wire [23:0] bd_flat_lo = flat_addr(bd_hw_lo[24:23], bd_hw_lo[22:10], bd_hw_lo[9:0]);
+wire [23:0] bd_flat_hi = flat_addr(bd_hw_hi[24:23], bd_hw_hi[22:10], bd_hw_hi[9:0]);
+
 always @(posedge clk) begin
     if (bd_we) begin
-        mem[{bd_word_addr[22:0], 1'b0}]     <= bd_wdata[15:0];
-        mem[{bd_word_addr[22:0], 1'b0} + 1] <= bd_wdata[31:16];
+        mem[bd_flat_lo] <= bd_wdata[15:0];
+        mem[bd_flat_hi] <= bd_wdata[31:16];
     end
 end
 

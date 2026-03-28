@@ -15,17 +15,21 @@
 #include <cstring>
 #include "Vtb_system.h"
 #include "verilated.h"
+#include "verilated_vcd_c.h"
 
 static Vtb_system *tb;
+static VerilatedVcdC *trace = nullptr;
 static uint64_t sim_time = 0;
 static uint64_t cycle_count = 0;
 
 static void tick() {
     tb->clk = 0;
     tb->eval();
+    if (trace) trace->dump(sim_time);
     sim_time++;
     tb->clk = 1;
     tb->eval();
+    if (trace) trace->dump(sim_time);
     sim_time++;
     cycle_count++;
 
@@ -174,7 +178,11 @@ static const uint32_t fw_selftest[] = {
 
 int main(int argc, char **argv) {
     Verilated::commandArgs(argc, argv);
+    Verilated::traceEverOn(true);
     tb = new Vtb_system;
+    trace = new VerilatedVcdC;
+    tb->trace(trace, 5);  // Shallow trace depth for speed
+    // trace disabled for speed
 
     const char *bram_path = NULL;      // Boot stub or full boot.bin
     const char *sdram_path = NULL;     // OS binary (os.bin)
