@@ -464,6 +464,9 @@ always @(posedge controller_clk) begin
     ST_WRITE_HIT: begin
         phy_a[10] <= 1'b0;
         phy_dq_oe <= 1;
+        // Pipeline fill: request word 1 early
+        if (wr_burst_remaining > 0)
+            word_wr_data_next <= 1;
         state <= ST_WRITE_2;
     end
 
@@ -485,6 +488,10 @@ always @(posedge controller_clk) begin
     end
     ST_WRITE_1: begin
         phy_a[10] <= 1'b0; // no auto precharge
+        // Pipeline fill: request word 1 during tRCD wait so its data
+        // is on burst_wr_direct_data by ST_WRITE_3 of word 0.
+        if (dc == 0 && wr_burst_remaining > 0)
+            word_wr_data_next <= 1;
         if(dc == TIMING_ACT_RW-1) begin
             dc <= 0;
             phy_dq_oe <= 1;
@@ -497,12 +504,13 @@ always @(posedge controller_clk) begin
         phy_a <= addr[9:0]; // A0-A9 column address
         cmd <= CMD_WRITE;
         phy_dq_oe <= 1;
-        phy_dq_out <= word_data_captured[15:0];  // First BL=2 beat: low half (little-endian)
-        phy_dqm <= ~word_wstrb_captured[1:0];    // Byte enables for bytes 0,1
+        phy_dq_out <= word_data_captured[15:0];  // First BL=2 beat: low half
+        phy_dqm <= ~word_wstrb_captured[1:0];
 
-        // Pipeline: request next word NOW (1 cycle early) so the AXI slave
-        // has data ready on burst_wr_direct_data by ST_WRITE_5
-        if (wr_burst_remaining > 0)
+        // 2-deep pipeline: request word N+2 now.
+        // Word N+1 was requested during word N-1's ST_WRITE_3.
+        // Its data is now on burst_wr_direct_data (2 cycles later).
+        if (wr_burst_remaining > 1)
             word_wr_data_next <= 1;
 
         state <= ST_WRITE_3;
@@ -510,36 +518,29 @@ always @(posedge controller_clk) begin
     ST_WRITE_3: begin
         dc <= 0;
 
-        // Second BL=2 beat - SDRAM auto-accepts, no WRITE command needed
+        // Second BL=2 beat
         phy_dq_oe <= 1;
-        phy_dq_out <= word_data_captured[31:16]; // Second BL=2 beat: high half (little-endian)
-        phy_dqm <= ~word_wstrb_captured[3:2];    // Byte enables for bytes 2,3
+        phy_dq_out <= word_data_captured[31:16];
+        phy_dqm <= ~word_wstrb_captured[3:2];
 
         if (wr_burst_remaining > 0) begin
             wr_burst_remaining <= wr_burst_remaining - 4'd1;
-            addr <= addr + 2'd2;  // BL=2: 2 halfword addresses per 32-bit word
-            state <= ST_WRITE_5;  // Single gap cycle (was 3)
+            addr <= addr + 2'd2;
+            // Capture next word from direct bus (requested 2 cycles ago in
+            // previous word's ST_WRITE_2, or in the initial setup for word 1).
+            // No gap cycle needed — data is ready.
+            word_data_captured <= burst_wr_direct_data;
+            word_wstrb_captured <= burst_wr_direct_strb;
+            state <= ST_WRITE_2;  // Back-to-back: 2 cycles/word!
         end else begin
             state <= ST_WRITE_4;
         end
     end
     ST_WRITE_4: begin
-        phy_dqm <= 2'b00;  // Clear byte masks
+        phy_dqm <= 2'b00;
         if(dc == TIMING_WRITE-1+1) begin
-            // Leave row open: skip precharge, return to IDLE
             state <= ST_IDLE;
         end
-    end
-    // Pipelined burst write: single gap cycle
-    // word_wr_data_next was asserted in ST_WRITE_2 (2 cycles ago).
-    // AXI slave has accepted the next W beat and updated sdram_wdata.
-    // burst_wr_direct_data bypasses the pulse adapter — data available now.
-    ST_WRITE_5: begin
-        word_data_captured <= burst_wr_direct_data;
-        word_wstrb_captured <= burst_wr_direct_strb;
-        phy_dq_oe <= 1;
-        phy_dqm <= 2'b11;  // Mask DQ during gap (tWR recovery)
-        state <= ST_WRITE_2;
     end
 
 

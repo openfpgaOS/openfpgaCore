@@ -373,6 +373,107 @@ static void test_burst_write_performance() {
     }
 }
 
+// Thorough burst write pipeline test: stresses the 2-deep request pipeline
+// with various burst lengths, patterns, and back-to-back sequences.
+static void test_burst_write_pipeline() {
+    printf("TEST: Burst write pipeline (2-deep, all lengths)\n");
+
+    // Test every burst length from 1 to 16
+    for (int len = 1; len <= 16; len++) {
+        uint32_t wdata[16];
+        for (int i = 0; i < len; i++)
+            wdata[i] = (len << 24) | (0xBEEF00 + i);
+
+        uint32_t base = 0x10060000 + (len - 1) * 0x100;
+        bool ok = axi_write(base, wdata, len - 1);
+        char name[48];
+        snprintf(name, sizeof(name), "pipe_wr_len%d_ok", len);
+        check(name, ok, 1);
+
+        // Read back and verify every word
+        for (int i = 0; i < len; i++) {
+            uint32_t val = axi_read_word(base + i * 4);
+            snprintf(name, sizeof(name), "pipe_wr_len%d[%d]", len, i);
+            check(name, val, wdata[i]);
+        }
+    }
+
+    // Back-to-back burst writes to sequential addresses (tests pipeline refill)
+    printf("TEST: Back-to-back burst writes (pipeline stress)\n");
+    for (int blk = 0; blk < 8; blk++) {
+        uint32_t wdata[16];
+        for (int i = 0; i < 16; i++)
+            wdata[i] = ((blk + 1) << 28) | (i << 4) | blk;
+        axi_write(0x10070000 + blk * 64, wdata, 15);
+    }
+    // Verify all 8 blocks
+    for (int blk = 0; blk < 8; blk++) {
+        uint32_t rdata[16];
+        bool ok = axi_read(0x10070000 + blk * 64, rdata, 15);
+        check("b2b_pipe_rd", ok, 1);
+        for (int i = 0; i < 16; i++) {
+            uint32_t expected = ((blk + 1) << 28) | (i << 4) | blk;
+            char name[48];
+            snprintf(name, sizeof(name), "b2b_pipe[%d][%d]", blk, i);
+            check(name, rdata[i], expected);
+        }
+    }
+
+    // Walking ones: each word has a single bit set, catches data corruption
+    printf("TEST: Walking ones burst write\n");
+    uint32_t walk[16];
+    for (int i = 0; i < 16; i++)
+        walk[i] = 1u << (i * 2);  // Spread bits across word
+    axi_write(0x10080000, walk, 15);
+    uint32_t rdata[16];
+    axi_read(0x10080000, rdata, 15);
+    for (int i = 0; i < 16; i++) {
+        char name[48];
+        snprintf(name, sizeof(name), "walk1[%d]", i);
+        check(name, rdata[i], walk[i]);
+    }
+
+    // Alternating pattern: catches pipeline data mismatch
+    printf("TEST: Alternating pattern burst write\n");
+    uint32_t alt[16];
+    for (int i = 0; i < 16; i++)
+        alt[i] = (i & 1) ? 0xFFFFFFFF : 0x00000000;
+    axi_write(0x10090000, alt, 15);
+    axi_read(0x10090000, rdata, 15);
+    for (int i = 0; i < 16; i++) {
+        char name[48];
+        snprintf(name, sizeof(name), "alt[%d]", i);
+        check(name, rdata[i], alt[i]);
+    }
+
+    // Address-as-data: catches address pipeline errors
+    printf("TEST: Address-as-data burst write\n");
+    uint32_t addr_data[16];
+    for (int i = 0; i < 16; i++)
+        addr_data[i] = 0x100A0000 + i * 4;
+    axi_write(0x100A0000, addr_data, 15);
+    axi_read(0x100A0000, rdata, 15);
+    for (int i = 0; i < 16; i++) {
+        char name[48];
+        snprintf(name, sizeof(name), "addrdata[%d]", i);
+        check(name, rdata[i], addr_data[i]);
+    }
+
+    // Burst write followed by single-word overwrite + re-read
+    printf("TEST: Burst write then single-word overwrite\n");
+    uint32_t fill[16];
+    for (int i = 0; i < 16; i++) fill[i] = 0xAAAAAAAA;
+    axi_write(0x100B0000, fill, 15);
+    // Overwrite word 7 only
+    axi_write_word(0x100B001C, 0x12345678);
+    axi_read(0x100B0000, rdata, 15);
+    for (int i = 0; i < 16; i++) {
+        char name[48];
+        snprintf(name, sizeof(name), "overwrite[%d]", i);
+        check(name, rdata[i], (i == 7) ? 0x12345678 : 0xAAAAAAAA);
+    }
+}
+
 int main(int argc, char **argv) {
     Verilated::commandArgs(argc, argv);
     Verilated::traceEverOn(true);
@@ -397,6 +498,7 @@ int main(int argc, char **argv) {
     test_dma_pattern();
     test_interleaved_rw();
     test_burst_write_performance();
+    test_burst_write_pipeline();
 
     printf("\n=== Results: %d passed, %d failed ===\n",
            pass_count, fail_count);
