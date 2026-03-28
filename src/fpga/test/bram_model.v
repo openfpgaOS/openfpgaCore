@@ -66,9 +66,12 @@ module bram_model #(
     output reg  [7:0]             uart_tx_byte
 );
 
-// Cycle counter for SYS_CYCLE registers (100000x speed for fast sim)
+// Cycle counter for SYS_CYCLE registers.
+// Use moderate speedup (100x) so fast_cycle[63:32] changes slowly
+// enough for read_cycles()'s HI-LO-HI retry loop to see stable values.
+// At 100x: HI increments every ~42M real cycles = plenty of time.
 reg [63:0] sys_cycle;
-wire [63:0] fast_cycle = sys_cycle * 100000;
+wire [63:0] fast_cycle = sys_cycle;  // No speedup — real time
 always @(posedge clk)
     if (!reset_n) sys_cycle <= 0;
     else sys_cycle <= sys_cycle + 1;
