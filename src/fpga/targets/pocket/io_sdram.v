@@ -46,7 +46,12 @@ input   wire    [3:0]   word_burst_wr_len, // 0=single word, N=N+1 words (for bu
 output  reg     [31:0]  word_q,
 output  reg             word_busy,
 output  reg             word_q_valid, // Pulses high for one cycle when word_q data is valid
-output  reg             word_wr_data_next // Pulse: need next word data for burst write
+output  reg             word_wr_data_next, // Pulse: need next word data for burst write
+
+// Direct data bus for pipelined burst writes (bypasses pulse adapter)
+// Connected to axi_sdram_slave's sdram_wdata/sdram_wstrb registers
+input   wire    [31:0]  burst_wr_direct_data,
+input   wire    [3:0]   burst_wr_direct_strb
 );
 
     // tristate for DQ
@@ -495,6 +500,11 @@ always @(posedge controller_clk) begin
         phy_dq_out <= word_data_captured[15:0];  // First BL=2 beat: low half (little-endian)
         phy_dqm <= ~word_wstrb_captured[1:0];    // Byte enables for bytes 0,1
 
+        // Pipeline: request next word NOW (1 cycle early) so the AXI slave
+        // has data ready on burst_wr_direct_data by ST_WRITE_5
+        if (wr_burst_remaining > 0)
+            word_wr_data_next <= 1;
+
         state <= ST_WRITE_3;
     end
     ST_WRITE_3: begin
@@ -506,11 +516,9 @@ always @(posedge controller_clk) begin
         phy_dqm <= ~word_wstrb_captured[3:2];    // Byte enables for bytes 2,3
 
         if (wr_burst_remaining > 0) begin
-            // More words in burst: request next data, advance address
             wr_burst_remaining <= wr_burst_remaining - 4'd1;
             addr <= addr + 2'd2;  // BL=2: 2 halfword addresses per 32-bit word
-            word_wr_data_next <= 1;
-            state <= ST_WRITE_5;
+            state <= ST_WRITE_5;  // Single gap cycle (was 3)
         end else begin
             state <= ST_WRITE_4;
         end
@@ -522,26 +530,15 @@ always @(posedge controller_clk) begin
             state <= ST_IDLE;
         end
     end
-    // Burst write gap: 3 cycles for data to propagate through
-    // slave → pulse adapter → word_data input
-    // Cycle 1: slave processes word_wr_data_next, updates sdram_wdata
+    // Pipelined burst write: single gap cycle
+    // word_wr_data_next was asserted in ST_WRITE_2 (2 cycles ago).
+    // AXI slave has accepted the next W beat and updated sdram_wdata.
+    // burst_wr_direct_data bypasses the pulse adapter — data available now.
     ST_WRITE_5: begin
+        word_data_captured <= burst_wr_direct_data;
+        word_wstrb_captured <= burst_wr_direct_strb;
         phy_dq_oe <= 1;
-        phy_dqm <= 2'b11;  // Mask DQ during gap
-        state <= ST_WRITE_6;
-    end
-    // Cycle 2: pulse adapter copies sdram_wdata → word_data
-    ST_WRITE_6: begin
-        phy_dq_oe <= 1;
-        phy_dqm <= 2'b11;
-        state <= ST_WRITE_7;
-    end
-    // Cycle 3: capture word_data (now valid)
-    ST_WRITE_7: begin
-        word_data_captured <= word_data;
-        word_wstrb_captured <= word_wstrb;
-        phy_dq_oe <= 1;
-        phy_dqm <= 2'b00;
+        phy_dqm <= 2'b11;  // Mask DQ during gap (tWR recovery)
         state <= ST_WRITE_2;
     end
 

@@ -2780,7 +2780,9 @@ io_sdram isr0 (
     .word_q     ( ram1_word_q ),
     .word_busy  ( ram1_word_busy ),
     .word_q_valid ( ram1_word_q_valid ),
-    .word_wr_data_next ( ram1_word_wr_data_next )
+    .word_wr_data_next ( ram1_word_wr_data_next ),
+    .burst_wr_direct_data ( sdram_slave_wdata ),
+    .burst_wr_direct_strb ( sdram_slave_wstrb )
 
 );
 
