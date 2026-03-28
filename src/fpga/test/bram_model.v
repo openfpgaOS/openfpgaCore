@@ -71,7 +71,7 @@ module bram_model #(
 // enough for read_cycles()'s HI-LO-HI retry loop to see stable values.
 // At 100x: HI increments every ~42M real cycles = plenty of time.
 reg [63:0] sys_cycle;
-wire [63:0] fast_cycle = sys_cycle;  // No speedup — real time
+wire [63:0] fast_cycle = sys_cycle * 10;  // 10x speedup (HI stable for ~430M cycles)
 always @(posedge clk)
     if (!reset_n) sys_cycle <= 0;
     else sys_cycle <= sys_cycle + 1;
