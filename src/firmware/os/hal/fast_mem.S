@@ -19,28 +19,30 @@ memcpy:
     andi    t1, t1, 3
     bnez    t1, .Lcpy_byte
 
-    /* 8-word unrolled copy (32 bytes/iteration)
-     * 16 ld/st + 3 addi + 1 bgeu = 21 cycles for 32B → ~152 MB/s @ 100MHz
-     * Old: 14 insn + 1 penalty = 15 cycles for 16B → ~107 MB/s */
+    /* 8-word interleaved copy (32 bytes/iteration)
+     * LLSSLLSSLLSSLLSS pattern: 2 loads then 2 stores, repeat.
+     * Keeps the 2-slot store buffer from filling: each pair of stores
+     * drains while the next pair of loads runs.
+     * Target: 2 cycles/word = 200 MB/s @ 100MHz */
     li      t1, 32
     bltu    a2, t1, .Lcpy_16
 .Lcpy_32:
     lw      t2,  0(a1)
     lw      t3,  4(a1)
-    lw      t4,  8(a1)
-    lw      t5, 12(a1)
-    lw      t6, 16(a1)
-    lw      a3, 20(a1)
-    lw      a4, 24(a1)
-    lw      a5, 28(a1)
     sw      t2,  0(a0)
     sw      t3,  4(a0)
+    lw      t4,  8(a1)
+    lw      t5, 12(a1)
     sw      t4,  8(a0)
     sw      t5, 12(a0)
-    sw      t6, 16(a0)
-    sw      a3, 20(a0)
-    sw      a4, 24(a0)
-    sw      a5, 28(a0)
+    lw      t2, 16(a1)
+    lw      t3, 20(a1)
+    sw      t2, 16(a0)
+    sw      t3, 20(a0)
+    lw      t4, 24(a1)
+    lw      t5, 28(a1)
+    sw      t4, 24(a0)
+    sw      t5, 28(a0)
     addi    a0, a0, 32
     addi    a1, a1, 32
     addi    a2, a2, -32
@@ -187,20 +189,20 @@ memmove:
     bltu    a2, t1, .Lmov_16
     lw      t2,  0(a1)
     lw      t3,  4(a1)
-    lw      t4,  8(a1)
-    lw      t5, 12(a1)
-    lw      t6, 16(a1)
-    lw      a3, 20(a1)
-    lw      a4, 24(a1)
-    lw      a5, 28(a1)
     sw      t2,  0(a0)
     sw      t3,  4(a0)
+    lw      t4,  8(a1)
+    lw      t5, 12(a1)
     sw      t4,  8(a0)
     sw      t5, 12(a0)
-    sw      t6, 16(a0)
-    sw      a3, 20(a0)
-    sw      a4, 24(a0)
-    sw      a5, 28(a0)
+    lw      t2, 16(a1)
+    lw      t3, 20(a1)
+    sw      t2, 16(a0)
+    sw      t3, 20(a0)
+    lw      t4, 24(a1)
+    lw      t5, 28(a1)
+    sw      t4, 24(a0)
+    sw      t5, 28(a0)
     addi    a0, a0, 32
     addi    a1, a1, 32
     addi    a2, a2, -32
