@@ -31,7 +31,7 @@ sbt "runMain vexiiriscv.Generate \
       --xlen=32 \
       --with-rvm --with-rva --with-rvf --with-rvc \
       --with-rvZcbm \
-      --with-fetch-l1 --fetch-l1-sets=256 --fetch-l1-ways=2 --fetch-l1-refill-count=2 \
+      --with-fetch-l1 --fetch-l1-sets=256 --fetch-l1-ways=1 --fetch-l1-refill-count=2 \
       --fetch-l1-hardware-prefetch=nl --fetch-axi4 \
       --with-lsu-l1 --lsu-l1-sets=256 --lsu-l1-ways=2 \
       --lsu-l1-refill-count=2 --lsu-l1-writeback-count=2 \
