@@ -71,16 +71,59 @@ wire [3:0]  psram_wstrb;
 wire        psram_bvalid;
 wire [1:0]  psram_bresp;
 
-// Tie off PSRAM (no memory behind it for initial test)
-assign psram_arready = 0;
-assign psram_rvalid = 0;
-assign psram_rdata = 0;
-assign psram_rresp = 0;
-assign psram_rlast = 0;
-assign psram_awready = 0;
-assign psram_wready = 0;
-assign psram_bvalid = 0;
-assign psram_bresp = 0;
+// PSRAM stub: accept and drop all transactions (no actual memory)
+// Prevents CPU hang when OS writes to SRAM/PSRAM regions
+reg psram_stub_state;
+localparam PS_IDLE = 0, PS_WDATA = 1;
+
+assign psram_arready = (psram_stub_state == PS_IDLE);
+assign psram_awready = (psram_stub_state == PS_IDLE);
+assign psram_wready = 1;  // Always accept W beats
+
+// Read: return 0 immediately
+reg psram_r_pending;
+reg [7:0] psram_r_cnt, psram_r_len;
+assign psram_rvalid = psram_r_pending;
+assign psram_rdata = 32'h0;
+assign psram_rresp = 2'b00;
+assign psram_rlast = (psram_r_cnt == psram_r_len);
+
+// Write: accept and respond immediately
+reg psram_b_pending;
+assign psram_bvalid = psram_b_pending;
+assign psram_bresp = 2'b00;
+
+always @(posedge clk) begin
+    if (!reset_n) begin
+        psram_r_pending <= 0;
+        psram_b_pending <= 0;
+        psram_r_cnt <= 0;
+        psram_r_len <= 0;
+    end else begin
+        // Read handling
+        if (psram_arvalid && psram_arready) begin
+            psram_r_pending <= 1;
+            psram_r_cnt <= 0;
+            psram_r_len <= psram_arlen;
+        end
+        if (psram_r_pending && psram_rlast) begin
+            psram_r_pending <= 0;
+        end else if (psram_r_pending) begin
+            psram_r_cnt <= psram_r_cnt + 1;
+        end
+
+        // Write handling
+        if (psram_awvalid && psram_awready) begin
+            psram_b_pending <= 0;  // Will set after wlast
+        end
+        if (psram_wvalid && psram_wready && psram_wlast) begin
+            psram_b_pending <= 1;
+        end
+        if (psram_b_pending && 1'b1) begin  // bready always 1 from cpu_system
+            psram_b_pending <= 0;
+        end
+    end
+end
 
 // Local AXI4 bus (BRAM)
 wire        local_arvalid, local_arready;
