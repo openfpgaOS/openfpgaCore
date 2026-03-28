@@ -171,7 +171,8 @@ sdram_model sdram_chip (
     .ba(phy_ba), .a(phy_a),
     .dq_in(ctrl_dq_out),
     .dq_out(model_dq_out), .dq_oe(model_dq_oe),
-    .dqm(phy_dqm)
+    .dqm(phy_dqm),
+    .bd_we(1'b0), .bd_word_addr(24'b0), .bd_wdata(32'b0)
 );
 
 endmodule

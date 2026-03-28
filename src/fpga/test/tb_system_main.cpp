@@ -44,10 +44,45 @@ static void bram_write(uint32_t word_addr, uint32_t data) {
     tb->bd_we = 0;
 }
 
+// SDRAM backdoor write (word address relative to SDRAM base)
+static void sdram_write(uint32_t word_addr, uint32_t data) {
+    tb->sd_bd_we = 1;
+    tb->sd_bd_addr = word_addr;
+    tb->sd_bd_wdata = data;
+    tick();
+    tb->sd_bd_we = 0;
+}
+
 static uint32_t bram_read(uint32_t word_addr) {
     tb->bd_addr = word_addr;
     tb->eval();
     return tb->bd_rdata;
+}
+
+// Load raw binary into SDRAM (word address offset from SDRAM base)
+static int load_sdram_binary(const char *path, uint32_t word_offset) {
+    FILE *f = fopen(path, "rb");
+    if (!f) { printf("ERROR: can't open %s\n", path); return -1; }
+
+    fseek(f, 0, SEEK_END);
+    long size = ftell(f);
+    fseek(f, 0, SEEK_SET);
+
+    printf("Loading %s into SDRAM (%ld bytes, %ld words)\n", path, size, size / 4);
+
+    uint8_t *buf = (uint8_t *)malloc(size);
+    fread(buf, 1, size, f);
+    fclose(f);
+
+    for (long i = 0; i < size; i += 4) {
+        uint32_t word = 0;
+        for (int b = 0; b < 4 && (i + b) < size; b++)
+            word |= (uint32_t)buf[i + b] << (b * 8);
+        sdram_write(word_offset + i / 4, word);
+    }
+
+    free(buf);
+    return 0;
 }
 
 // Load raw binary into BRAM
@@ -141,12 +176,18 @@ int main(int argc, char **argv) {
     Verilated::commandArgs(argc, argv);
     tb = new Vtb_system;
 
-    const char *firmware_path = NULL;
-    int max_cycles = 500000;  // Default 500K cycles
+    const char *bram_path = NULL;
+    const char *sdram_path = NULL;
+    int max_cycles = 500000;
 
+    // Usage: ./Vtb_system [boot.bin [os.bin [max_cycles]]]
     if (argc >= 2 && argv[1][0] != '-')
-        firmware_path = argv[1];
-    if (argc >= 3)
+        bram_path = argv[1];
+    if (argc >= 3 && argv[2][0] != '-')
+        sdram_path = argv[2];
+    if (argc >= 4)
+        max_cycles = atoi(argv[3]);
+    else if (argc >= 3 && !sdram_path)
         max_cycles = atoi(argv[2]);
 
     printf("=== VexiiRiscv System Simulation ===\n\n");
@@ -156,11 +197,19 @@ int main(int argc, char **argv) {
     tb->bd_we = 0;
     tb->bd_addr = 0;
     tb->bd_wdata = 0;
+    tb->sd_bd_we = 0;
+    tb->sd_bd_addr = 0;
+    tb->sd_bd_wdata = 0;
     for (int i = 0; i < 10; i++) tick();
 
     // Load firmware
-    if (firmware_path) {
-        if (load_binary(firmware_path) < 0) return 1;
+    if (bram_path) {
+        if (load_binary(bram_path) < 0) return 1;
+        // Load SDRAM binary if provided
+        // os.bin loads at SDRAM addr 0x10200000 → word offset 0x80000
+        if (sdram_path) {
+            if (load_sdram_binary(sdram_path, 0x80000) < 0) return 1;
+        }
     } else {
         printf("Loading built-in self-test (%lu words)\n",
                (unsigned long)(sizeof(fw_selftest) / sizeof(fw_selftest[0])));

@@ -27,7 +27,12 @@ module tb_system (
 
     // UART output (from CPU writes to 0x4F000004)
     output wire        uart_tx_valid,
-    output wire [7:0]  uart_tx_byte
+    output wire [7:0]  uart_tx_byte,
+
+    // SDRAM backdoor (for OS binary preload)
+    input  wire        sd_bd_we,
+    input  wire [23:0] sd_bd_addr,    // 24-bit word address
+    input  wire [31:0] sd_bd_wdata
 );
 
 // ============================================================
@@ -294,7 +299,8 @@ sdram_model sdram_chip (
     .ba(phy_ba), .a(phy_a),
     .dq_in(ctrl_dq_out),
     .dq_out(model_dq_out), .dq_oe(model_dq_oe),
-    .dqm(phy_dqm)
+    .dqm(phy_dqm),
+    .bd_we(sd_bd_we), .bd_word_addr(sd_bd_addr), .bd_wdata(sd_bd_wdata)
 );
 
 // ============================================================

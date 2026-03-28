@@ -28,7 +28,12 @@ module sdram_model (
     input  wire [15:0] dq_in,   // data from controller (writes)
     output wire [15:0] dq_out,  // data to controller (reads) — combinational, like real SDRAM
     output wire        dq_oe,   // output enable (1 = model driving)
-    input  wire [1:0]  dqm
+    input  wire [1:0]  dqm,
+
+    // Backdoor: direct memory write for firmware preload
+    input  wire        bd_we,
+    input  wire [23:0] bd_word_addr,  // 24-bit WORD address (not halfword)
+    input  wire [31:0] bd_wdata
 );
 
 // Commands decoded from {ras_n, cas_n, we_n}
@@ -277,5 +282,26 @@ function [31:0] read_word;
         read_word = {mem[ha + 1], mem[ha]};
     end
 endfunction
+
+// Backdoor write port: load 32-bit words directly (for firmware preload)
+always @(posedge clk) begin
+    if (bd_we) begin
+        mem[{bd_word_addr[22:0], 1'b0}]     <= bd_wdata[15:0];
+        mem[{bd_word_addr[22:0], 1'b0} + 1] <= bd_wdata[31:16];
+    end
+end
+
+// Legacy task (not used by Verilator, kept for reference)
+// word_addr is a 24-bit word address → 2 consecutive halfwords
+task bd_write32;
+    input [23:0] word_addr;
+    input [31:0] data;
+    reg [23:0] ha;
+    begin
+        ha = word_addr << 1;
+        mem[ha]     = data[15:0];
+        mem[ha + 1] = data[31:16];
+    end
+endtask
 
 endmodule
