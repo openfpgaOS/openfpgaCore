@@ -4,7 +4,7 @@
 # RV32IMAFCB + Zicbom (cache block management)
 #
 # Current VexiiRiscv_Full.v config:
-#   I-cache: 8KB  (128 sets x 1 way x 64B line)
+#   I-cache: 16KB (256 sets x 1 way x 64B line)
 #   D-cache: 32KB (256 sets x 2 ways x 64B line, write-back, 2-way set-associative)
 #   Branch: BTB + GShare + RAS
 #   FPU: single-precision (F extension)
@@ -31,7 +31,7 @@ sbt "runMain vexiiriscv.Generate \
       --xlen=32 \
       --with-rvm --with-rva --with-rvf --with-rvc \
       --with-rvZcbm \
-      --with-fetch-l1 --fetch-l1-sets=128 --fetch-l1-ways=1 --fetch-l1-refill-count=2 \
+      --with-fetch-l1 --fetch-l1-sets=256 --fetch-l1-ways=1 --fetch-l1-refill-count=2 \
       --fetch-l1-hardware-prefetch=nl --fetch-axi4 \
       --with-lsu-l1 --lsu-l1-sets=256 --lsu-l1-ways=2 \
       --lsu-l1-refill-count=2 --lsu-l1-writeback-count=2 \
