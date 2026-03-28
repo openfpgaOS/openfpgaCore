@@ -227,11 +227,14 @@ psram_controller_test #(.CLOCK_SPEED(48.0)) psram0 (
     .burst_wr(psram0_burst_wr_sig), .burst_wr_len(cpu_psram_burst_wr_len),
     .burst_wdata(cpu_psram_burst_wdata), .burst_wstrb(cpu_psram_burst_wstrb),
     .burst_wdata_next(psram0_burst_wdata_next),
+    .burst_wr_strobe(cram0_wr_strobe),
     .raw_busy(psram0_raw_busy),
     .dbg_wait_seen(), .dbg_wait_cycles(), .dbg_burst_count(), .dbg_stale_count()
 );
 
 wire psram0_burst_wdata_next;
+wire        cram0_wr_strobe;
+
 wire [15:0] cram0_errors;
 cram_chip_model cram0_chip (
     .clk(clk), .cram_clk(cram_clk), .reset_n(reset_n),
@@ -244,6 +247,7 @@ cram_chip_model cram0_chip (
     .cram_ce0_n(cram0_ce0_n), .cram_ce1_n(cram0_ce1_n),
     .cram_oe_n(cram0_oe_n), .cram_we_n(cram0_we_n),
     .cram_ub_n(cram0_ub_n), .cram_lb_n(cram0_lb_n),
+    .cram_wr_strobe(cram0_wr_strobe),
     .error_count(cram0_errors)
 );
 
@@ -412,11 +416,14 @@ psram_controller_test #(.CLOCK_SPEED(48.0)) psram1 (
     .burst_wr(psram1_burst_wr_sig), .burst_wr_len(cpu_psram_burst_wr_len),
     .burst_wdata(cpu_psram_burst_wdata), .burst_wstrb(cpu_psram_burst_wstrb),
     .burst_wdata_next(psram1_burst_wdata_next),
+    .burst_wr_strobe(cram1_wr_strobe),
     .raw_busy(psram1_raw_busy),
     .dbg_wait_seen(), .dbg_wait_cycles(), .dbg_burst_count(), .dbg_stale_count()
 );
 
 wire psram1_burst_wdata_next;
+wire cram1_wr_strobe;
+
 wire [15:0] cram1_errors;
 cram_chip_model cram1_chip (
     .clk(clk), .cram_clk(cram_clk),
@@ -429,6 +436,7 @@ cram_chip_model cram1_chip (
     .cram_ce0_n(cram1_ce0_n), .cram_ce1_n(cram1_ce1_n),
     .cram_oe_n(cram1_oe_n), .cram_we_n(cram1_we_n),
     .cram_ub_n(cram1_ub_n), .cram_lb_n(cram1_lb_n),
+    .cram_wr_strobe(cram1_wr_strobe),
     .error_count(cram1_errors)
 );
 

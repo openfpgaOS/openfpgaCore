@@ -40,6 +40,7 @@ module cram_chip_model #(
     input  wire        cram_we_n,
     input  wire        cram_ub_n,
     input  wire        cram_lb_n,
+    input  wire        cram_wr_strobe,  // Pulse: capture current DQ data for burst write
 
     // Error reporting
     output reg  [15:0] error_count
@@ -93,6 +94,7 @@ reg [BANK_BITS-1:0] burst_addr;
 reg        burst_bank;
 reg        burst_data_valid;
 reg        oe_seen;  // Tracks whether OE# went low during async read
+reg        wr_strobe_prev;  // Previous cram_wr_strobe for edge detection
 
 // Output mux: async read is combinational, burst is registered
 reg [15:0] burst_dq_out;  // Registered output from cram_clk domain
@@ -122,6 +124,7 @@ initial begin
     burst_bank = 0;
     burst_data_valid = 0;
     oe_seen = 0;
+    wr_strobe_prev = 0;
     error_count = 0;
     powerup_cnt = 0;
     powered_up = 0;
@@ -195,14 +198,10 @@ always @(posedge clk) begin
                 end
                 state <= ST_IDLE;
             end else if (latched_is_write) begin
-                // In sync burst mode (BCR configured), writes are burst too
-                if (bcr_valid && bcr_sync_mode) begin
-                    burst_addr <= latched_addr[BANK_BITS-1:0];
-                    burst_bank <= latched_bank;
-                    state <= ST_BURST_WRITE;
-                end else begin
-                    state <= ST_WRITE;
-                end
+                // Always use async write capture (WE# edge + DQ sampling).
+                // Works for both single async writes and sync burst writes
+                // because the controller drives WE# and DQ in both cases.
+                state <= ST_WRITE;
             end else begin
                 if (!cram_oe_n) begin
                     // Sync burst read — hand off to cram_clk domain
@@ -262,16 +261,16 @@ always @(posedge clk) begin
     end
 
     ST_BURST_WRITE: begin
-        // Sync burst write: accept data from DQ each cycle while WE# low
-        if (!cram_we_n && cram_dq_oe) begin
-            if (burst_bank) begin
+        // Capture on edges of cram_wr_strobe toggle signal.
+        // The toggle changes when new data is on DQ (after NBA propagation).
+        if (cram_wr_strobe != wr_strobe_prev) begin
+            if (burst_bank)
                 mem1[burst_addr] <= cram_dq_in;
-            end else begin
+            else
                 mem0[burst_addr] <= cram_dq_in;
-            end
             burst_addr <= burst_addr + 1;
         end
-        // End when CE# goes high or WE# goes high
+        wr_strobe_prev <= cram_wr_strobe;
         if (!chip_active || cram_we_n) begin
             state <= ST_IDLE;
         end
@@ -282,19 +281,21 @@ always @(posedge clk) begin
 end
 
 // ============================================================
-// CRAM-clock domain: sync burst data streaming
+// CRAM-clock domain: sync burst read/write data streaming
 // ============================================================
 always @(posedge cram_clk) begin
-    if (burst_active) begin
+    if (burst_active && !latched_is_write) begin
+        // Sync burst READ: output data
         if (burst_latency_cnt > 0) begin
-            cram_wait_out <= 1'b1;  // WAIT HIGH = data not valid
+            cram_wait_out <= 1'b1;
             burst_latency_cnt <= burst_latency_cnt - 4'd1;
         end else begin
-            cram_wait_out <= 1'b0;  // WAIT LOW = data valid
+            cram_wait_out <= 1'b0;
             burst_dq_out <= burst_bank ? mem1[burst_addr] : mem0[burst_addr];
             burst_addr <= burst_addr + 1;
         end
     end
+    // (Burst writes are captured in clk domain, not cram_clk)
 end
 
 // ============================================================

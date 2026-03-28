@@ -69,7 +69,8 @@ module psram #(
     input wire sync_burst_wr_en,     // Start synchronous burst write (single-cycle pulse)
     input wire [5:0] sync_burst_wr_len, // Number of 16-bit writes minus 1 (max 63)
     input wire [15:0] sync_burst_wr_data, // Data for current write beat
-    output reg sync_burst_wr_next,   // Pulse: advance to next write data
+    input wire sync_burst_wr_next,   // Pulse from controller: halfword is valid, capture it
+    output reg sync_burst_wr_beat,   // Toggles on each new halfword driven on DQ
 
     input wire config_en,            // Write BCR register (single-cycle pulse)
     input wire [15:0] config_data,   // BCR value to write
@@ -176,11 +177,12 @@ module psram #(
   localparam STATE_SYNC_END   = 63;
 
   // -- Sync burst write states --
-  localparam STATE_SYNCWR_CE_SETUP = 70;  // CE# asserted, WE# low, address loaded
-  localparam STATE_SYNCWR_SETUP    = 71;  // ADV# low (address latch with WE#)
-  localparam STATE_SYNCWR_DATA     = 72;  // Drive data on DQ
-  localparam STATE_SYNCWR_WAIT     = 73;  // Wait for next data from controller
-  localparam STATE_SYNCWR_END      = 74;  // Release CE#, WE#
+  localparam STATE_SYNCWR_CE_SETUP = 70;
+  localparam STATE_SYNCWR_SETUP    = 71;
+  localparam STATE_SYNCWR_WAIT1    = 72;  // Wait cycle 1
+  localparam STATE_SYNCWR_WAIT2    = 73;  // Wait cycle 2
+  localparam STATE_SYNCWR_DATA     = 74;  // Drive data on DQ
+  localparam STATE_SYNCWR_END      = 75;
 
 
   initial begin
@@ -202,6 +204,7 @@ module psram #(
   end
 
   reg [7:0] state = STATE_NONE;
+  initial sync_burst_wr_beat = 0;
 
   // If 1, route cram_data reg to cram_dq
   reg data_out_en = 0;
@@ -272,7 +275,6 @@ module psram #(
 
     // Default: clear pulsed outputs every cycle
     read_avail <= 0;
-    sync_burst_wr_next <= 0;
 
     case (state)
       STATE_NONE: begin
@@ -558,36 +560,25 @@ module psram #(
 
       STATE_SYNCWR_SETUP: begin
         // Address latched (ADV# was low). Deassert ADV#, keep WE# low.
-        // Drive first halfword (already loaded from controller).
+        // Enter DATA state — controller feeds data via sync_burst_wr_data.
         cram_adv_n <= 1;
+        data_out_en <= 1;
         cram_data <= sync_burst_wr_data;
-        data_out_en <= 1;
-        if (burst_wr_counter == 6'd0) begin
-          state <= STATE_SYNCWR_END;
-        end else begin
-          burst_wr_counter <= burst_wr_counter - 6'd1;
-          sync_burst_wr_next <= 1;  // Request next halfword
-          state <= STATE_SYNCWR_WAIT;
-        end
-      end
-
-      STATE_SYNCWR_WAIT: begin
-        // 1-cycle gap: controller sees sync_burst_wr_next (from prev NBA),
-        // updates sync_burst_wr_data (NBA). Available next cycle.
-        data_out_en <= 1;
         state <= STATE_SYNCWR_DATA;
       end
 
       STATE_SYNCWR_DATA: begin
-        // Drive halfword from controller (now valid after WAIT cycle).
         cram_data <= sync_burst_wr_data;
         data_out_en <= 1;
-        if (burst_wr_counter == 6'd0) begin
-          state <= STATE_SYNCWR_END;
-        end else begin
-          burst_wr_counter <= burst_wr_counter - 6'd1;
-          sync_burst_wr_next <= 1;
-          state <= STATE_SYNCWR_WAIT;
+        // Toggle beat flag when controller provides new data (after NBA propagation,
+        // the CRAM model can detect the edge on cram_clk).
+        if (sync_burst_wr_next) begin
+          sync_burst_wr_beat <= ~sync_burst_wr_beat;
+          if (burst_wr_counter == 6'd0) begin
+            state <= STATE_SYNCWR_END;
+          end else begin
+            burst_wr_counter <= burst_wr_counter - 6'd1;
+          end
         end
       end
 

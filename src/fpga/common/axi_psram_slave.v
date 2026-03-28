@@ -169,13 +169,7 @@ always @(posedge clk or posedge reset) begin
                     s_axi_wready <= 1;
                     psram_wdata <= s_axi_wdata;
                     psram_wstrb <= s_axi_wstrb;
-                    // CRAM targets: sync burst write available but disabled pending
-                    // timing validation. Enable by uncommenting:
-                    // if (s_axi_awaddr[27:24] != 4'hA) begin
-                    //     state <= S_WR_BURST;
-                    // end else begin
-                        state <= S_WR_CMD;
-                    // end
+                    state <= S_WR_CMD;
                 end else begin
                     state <= S_WR_NEXT;
                 end
@@ -336,19 +330,17 @@ always @(posedge clk or posedge reset) begin
         end
 
         S_WR_BSTREAM: begin
-            // Stream W beats: when controller signals burst_wdata_next,
-            // accept next AXI W beat and provide it
             if (psram_burst_wdata_next) begin
                 beat_count <= beat_count + 1;
+                $display("[%0t] WR_BSTREAM: next beat=%0d wvalid=%0d wdata=%08x",
+                         $time, beat_count+1, s_axi_wvalid, s_axi_wdata);
                 if (s_axi_wvalid) begin
                     s_axi_wready <= 1;
                     psram_burst_wdata <= s_axi_wdata;
                     psram_burst_wstrb <= s_axi_wstrb;
                 end
             end
-            // Track busy
             if (psram_busy) psram_started <= 1;
-            // Complete when busy drops after starting
             if (psram_started && !psram_busy) begin
                 beat_count <= beat_count + 1;
                 cmd_issued <= 0;
