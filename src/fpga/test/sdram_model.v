@@ -85,6 +85,14 @@ reg        rd_beat;
 // Cycle counter
 reg [31:0] cycle_count;
 
+// Refresh enforcement
+// IS42S16160G: 8192 refreshes per 64ms. At 100MHz = 781 cycles max between refreshes.
+// Use a generous margin (1000 cycles) to avoid false positives during init.
+localparam T_REF_MAX = 1000;  // Max cycles between auto-refreshes
+reg [31:0] last_refresh_cycle;
+reg [31:0] refresh_count;
+reg        refresh_tracking;  // Don't enforce during init sequence
+
 // Error counter
 integer errors;
 
@@ -106,6 +114,9 @@ initial begin
     cycle_count = 0;
     wr_pending = 0;
     rd_burst_active = 0;
+    last_refresh_cycle = 0;
+    refresh_count = 0;
+    refresh_tracking = 0;
     for (i = 0; i < 4; i = i + 1) begin
         bank_active[i] = 0;
         bank_row[i] = 0;
@@ -122,6 +133,16 @@ end
 
 always @(posedge clk) begin
     cycle_count <= cycle_count + 1;
+
+    // Refresh enforcement: after first auto-refresh, start tracking interval
+    if (refresh_count > 0 && !refresh_tracking)
+        refresh_tracking <= 1;
+    if (refresh_tracking && (cycle_count - last_refresh_cycle) > T_REF_MAX) begin
+        $display("[%0t] SDRAM ERROR: refresh interval exceeded (%0d cycles since last refresh, max %0d)",
+                 $time, cycle_count - last_refresh_cycle, T_REF_MAX);
+        errors = errors + 1;
+        refresh_tracking <= 0;  // Suppress repeated errors
+    end
 
     // Shift read pipeline
     for (i = CAS_LATENCY; i > 0; i = i - 1) begin
@@ -231,7 +252,9 @@ always @(posedge clk) begin
         end
 
         CMD_AUTOREF: begin
-            // Just accept it
+            // Track refresh timing
+            last_refresh_cycle <= cycle_count;
+            refresh_count <= refresh_count + 1;
         end
 
         CMD_LMR: begin
