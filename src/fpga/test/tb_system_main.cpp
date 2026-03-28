@@ -159,8 +159,8 @@ static const uint32_t fw_selftest[] = {
     0x00D72223,  // 40: sw    a3, 4(a4)
 
     // Write pass/fail to BRAM result register (0x0003FF00)
-    0x00040837,  // 44: lui   a6, 0x00040
-    0xF0080813,  // 48: addi  a6, a6, -256    # a6 = 0x0003FF00
+    0x00010837,  // 44: lui   a6, 0x00010
+    0xF0080813,  // 48: addi  a6, a6, -256    # a6 = 0x0000FF00
 
     0x00100693,  // 4C: li    a3, 1           # pass
     0x00C58463,  // 50: beq   a1, a2, +8
@@ -173,8 +173,9 @@ static const uint32_t fw_selftest[] = {
     0x0000006F,  // 60: j     .               # infinite loop
 };
 
-#define RESULT_STATUS_ADDR  (0x3FF00 / 4)
-#define RESULT_VALUE_ADDR   (0x3FF04 / 4)
+// Result register address within 64KB BRAM (word address)
+#define RESULT_STATUS_ADDR  (0xFF00 / 4)  // 0xFF00 < 0x10000 (64KB)
+#define RESULT_VALUE_ADDR   (0xFF04 / 4)
 
 int main(int argc, char **argv) {
     Verilated::commandArgs(argc, argv);
