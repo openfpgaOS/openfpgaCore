@@ -76,6 +76,7 @@ localparam [2:0] ST_WRITE       = 3'd2;
 localparam [2:0] ST_READ_ASYNC  = 3'd3;
 localparam [2:0] ST_BURST_SETUP = 3'd4;  // Hand off to cram_clk domain
 localparam [2:0] ST_BURST_ACTIVE= 3'd5;  // Burst running on cram_clk
+localparam [2:0] ST_BURST_WRITE = 3'd6;  // Sync burst write: data in each cycle
 
 reg [2:0] state;
 reg [21:0] latched_addr;
@@ -194,7 +195,14 @@ always @(posedge clk) begin
                 end
                 state <= ST_IDLE;
             end else if (latched_is_write) begin
-                state <= ST_WRITE;
+                // In sync burst mode (BCR configured), writes are burst too
+                if (bcr_valid && bcr_sync_mode) begin
+                    burst_addr <= latched_addr[BANK_BITS-1:0];
+                    burst_bank <= latched_bank;
+                    state <= ST_BURST_WRITE;
+                end else begin
+                    state <= ST_WRITE;
+                end
             end else begin
                 if (!cram_oe_n) begin
                     // Sync burst read — hand off to cram_clk domain
@@ -243,13 +251,28 @@ always @(posedge clk) begin
     end
 
     ST_BURST_ACTIVE: begin
-        // Burst data is driven by cram_clk domain
-        // Monitor for burst end (CE# goes high)
+        // Burst read data is driven by cram_clk domain
         if (!chip_active) begin
             burst_active <= 0;
             burst_data_valid <= 0;
             burst_dq_out <= 16'h0;
             cram_wait_out <= 1'b0;
+            state <= ST_IDLE;
+        end
+    end
+
+    ST_BURST_WRITE: begin
+        // Sync burst write: accept data from DQ each cycle while WE# low
+        if (!cram_we_n && cram_dq_oe) begin
+            if (burst_bank) begin
+                mem1[burst_addr] <= cram_dq_in;
+            end else begin
+                mem0[burst_addr] <= cram_dq_in;
+            end
+            burst_addr <= burst_addr + 1;
+        end
+        // End when CE# goes high or WE# goes high
+        if (!chip_active || cram_we_n) begin
             state <= ST_IDLE;
         end
     end

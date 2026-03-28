@@ -59,6 +59,13 @@ wire [31:0] psram_burst_rdata;
 assign busy = psram_busy;
 
 // AXI PSRAM Slave (real RTL)
+// Burst write wires
+wire        psram_burst_wr;
+wire [5:0]  psram_burst_wr_len;
+wire [31:0] psram_burst_wdata;
+wire [3:0]  psram_burst_wstrb;
+wire        psram_burst_wdata_next;
+
 axi_psram_slave slave (
     .clk(clk), .reset_n(reset_n),
     .s_axi_arvalid(s_axi_arvalid), .s_axi_arready(s_axi_arready),
@@ -76,7 +83,10 @@ axi_psram_slave slave (
     .psram_rdata_valid(psram_rdata_valid),
     .psram_burst_rd(psram_burst_rd), .psram_burst_len(psram_burst_len),
     .psram_burst_rdata_valid(psram_burst_rdata_valid),
-    .psram_burst_rdata(psram_burst_rdata)
+    .psram_burst_rdata(psram_burst_rdata),
+    .psram_burst_wr(psram_burst_wr), .psram_burst_wr_len(psram_burst_wr_len),
+    .psram_burst_wdata(psram_burst_wdata), .psram_burst_wstrb(psram_burst_wstrb),
+    .psram_burst_wdata_next(psram_burst_wdata_next)
 );
 
 // Behavioral PSRAM backend model
@@ -88,7 +98,10 @@ psram_backend_model backend (
     .psram_rdata_valid(psram_rdata_valid),
     .psram_burst_rd(psram_burst_rd), .psram_burst_len(psram_burst_len),
     .psram_burst_rdata_valid(psram_burst_rdata_valid),
-    .psram_burst_rdata(psram_burst_rdata)
+    .psram_burst_rdata(psram_burst_rdata),
+    .psram_burst_wr(psram_burst_wr), .psram_burst_wr_len(psram_burst_wr_len),
+    .psram_burst_wdata(psram_burst_wdata), .psram_burst_wstrb(psram_burst_wstrb),
+    .psram_burst_wdata_next(psram_burst_wdata_next)
 );
 
 endmodule

@@ -72,6 +72,12 @@ wire [5:0]  cpu_psram_burst_len;
 wire        cpu_psram_burst_rdata_valid;
 wire [31:0] cpu_psram_burst_rdata;
 
+wire        cpu_psram_burst_wr;
+wire [5:0]  cpu_psram_burst_wr_len;
+wire [31:0] cpu_psram_burst_wdata;
+wire [3:0]  cpu_psram_burst_wstrb;
+wire        cpu_psram_burst_wdata_next;
+
 axi_psram_slave slave (
     .clk(clk), .reset_n(reset_n),
     .s_axi_arvalid(s_axi_arvalid), .s_axi_arready(s_axi_arready),
@@ -89,7 +95,10 @@ axi_psram_slave slave (
     .psram_rdata_valid(cpu_psram_rdata_valid),
     .psram_burst_rd(cpu_psram_burst_rd), .psram_burst_len(cpu_psram_burst_len),
     .psram_burst_rdata_valid(cpu_psram_burst_rdata_valid),
-    .psram_burst_rdata(cpu_psram_burst_rdata)
+    .psram_burst_rdata(cpu_psram_burst_rdata),
+    .psram_burst_wr(cpu_psram_burst_wr), .psram_burst_wr_len(cpu_psram_burst_wr_len),
+    .psram_burst_wdata(cpu_psram_burst_wdata), .psram_burst_wstrb(cpu_psram_burst_wstrb),
+    .psram_burst_wdata_next(cpu_psram_burst_wdata_next)
 );
 
 // ============================================================
@@ -173,6 +182,8 @@ wire [21:0] psram0_mux_addr = cram0_wr_pending ? cram0_wr_addr_r : cpu_psram_add
 wire [31:0] psram0_mux_wdata = cram0_wr_pending ? cram0_wr_data_r : cpu_psram_wdata;
 wire [3:0]  psram0_mux_wstrb = cram0_wr_pending ? 4'b1111 : cpu_psram_wstrb;
 wire        psram0_burst_rd_sig = cram0_bridge_wr_active ? 1'b0 : cpu_cram0_burst_rd;
+wire        cpu_cram0_burst_wr = cpu_psram_burst_wr & cpu_psram_sel_cram0;
+wire        psram0_burst_wr_sig = cram0_bridge_wr_active ? 1'b0 : cpu_cram0_burst_wr;
 
 wire [31:0] psram0_rdata;
 wire        psram0_busy;
@@ -213,10 +224,14 @@ psram_controller_test #(.CLOCK_SPEED(48.0)) psram0 (
     .config_bank_sel(bcr_config_bank),
     .burst_rd(psram0_burst_rd_sig), .burst_len(cpu_psram_burst_len),
     .burst_rdata_valid(psram0_burst_rdata_valid), .burst_rdata(psram0_burst_rdata),
+    .burst_wr(psram0_burst_wr_sig), .burst_wr_len(cpu_psram_burst_wr_len),
+    .burst_wdata(cpu_psram_burst_wdata), .burst_wstrb(cpu_psram_burst_wstrb),
+    .burst_wdata_next(psram0_burst_wdata_next),
     .raw_busy(psram0_raw_busy),
     .dbg_wait_seen(), .dbg_wait_cycles(), .dbg_burst_count(), .dbg_stale_count()
 );
 
+wire psram0_burst_wdata_next;
 wire [15:0] cram0_errors;
 cram_chip_model cram0_chip (
     .clk(clk), .cram_clk(cram_clk), .reset_n(reset_n),
@@ -354,6 +369,8 @@ wire        psram1_word_rd = cram1_rd_pending ? 1'b1 :
 wire        psram1_word_wr = bridge_cram1_rd_active ? 1'b0 : cpu_cram1_wr;
 wire [21:0] psram1_mux_addr = cram1_rd_pending ? cram1_rd_addr_r : cpu_psram_addr[21:0];
 wire        psram1_burst_rd_sig = bridge_cram1_rd_active ? 1'b0 : cpu_cram1_burst_rd;
+wire        cpu_cram1_burst_wr = cpu_psram_burst_wr & cpu_psram_sel_cram1;
+wire        psram1_burst_wr_sig = bridge_cram1_rd_active ? 1'b0 : cpu_cram1_burst_wr;
 
 wire [31:0] psram1_rdata;
 wire        psram1_busy;
@@ -392,10 +409,14 @@ psram_controller_test #(.CLOCK_SPEED(48.0)) psram1 (
     .config_bank_sel(bcr_config_bank),
     .burst_rd(psram1_burst_rd_sig), .burst_len(cpu_psram_burst_len),
     .burst_rdata_valid(psram1_burst_rdata_valid), .burst_rdata(psram1_burst_rdata),
+    .burst_wr(psram1_burst_wr_sig), .burst_wr_len(cpu_psram_burst_wr_len),
+    .burst_wdata(cpu_psram_burst_wdata), .burst_wstrb(cpu_psram_burst_wstrb),
+    .burst_wdata_next(psram1_burst_wdata_next),
     .raw_busy(psram1_raw_busy),
     .dbg_wait_seen(), .dbg_wait_cycles(), .dbg_burst_count(), .dbg_stale_count()
 );
 
+wire psram1_burst_wdata_next;
 wire [15:0] cram1_errors;
 cram_chip_model cram1_chip (
     .clk(clk), .cram_clk(cram_clk),
@@ -459,7 +480,7 @@ assign cpu_psram_rdata_valid = cpu_psram_sel_cram1 ? psram1_rdata_valid :
                                cpu_psram_sel_sram  ? sram_rdata_valid :
                                                      psram0_rdata_valid;
 
-// Busy mux with latch (prevents glitches when address changes mid-transaction)
+// Busy mux with latch (from core_top.v)
 reg [1:0] psram_busy_sel;
 always @(posedge clk)
     if (!cpu_psram_busy)
@@ -475,6 +496,10 @@ assign cpu_psram_burst_rdata_valid = cpu_psram_sel_cram1 ? psram1_burst_rdata_va
                                                          : psram0_burst_rdata_valid;
 assign cpu_psram_burst_rdata = cpu_psram_sel_cram1 ? psram1_burst_rdata
                                                     : psram0_burst_rdata;
+
+// Burst write data next mux
+assign cpu_psram_burst_wdata_next = cpu_psram_sel_cram1 ? psram1_burst_wdata_next
+                                                        : psram0_burst_wdata_next;
 
 assign busy = cpu_psram_busy;
 

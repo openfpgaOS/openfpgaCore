@@ -33,7 +33,14 @@ module psram_backend_model #(
     input wire         psram_burst_rd,
     input wire  [5:0]  psram_burst_len,
     output reg         psram_burst_rdata_valid,
-    output reg  [31:0] psram_burst_rdata
+    output reg  [31:0] psram_burst_rdata,
+
+    // Burst write interface (from axi_psram_slave)
+    input wire         psram_burst_wr,
+    input wire  [5:0]  psram_burst_wr_len,
+    input wire  [31:0] psram_burst_wdata,
+    input wire  [3:0]  psram_burst_wstrb,
+    output reg         psram_burst_wdata_next
 );
 
 // Memory: {addr[25:22] target, addr[15:0] local} = 20-bit index
@@ -49,6 +56,8 @@ localparam [2:0] S_RD           = 3'd1;
 localparam [2:0] S_WR           = 3'd2;
 localparam [2:0] S_BURST_WAIT   = 3'd3;
 localparam [2:0] S_BURST_STREAM = 3'd4;
+localparam [2:0] S_BURST_WR     = 3'd5;
+localparam [2:0] S_BURST_WR_WAIT = 3'd6;
 
 reg [2:0] state;
 reg [7:0] counter;
@@ -78,6 +87,7 @@ always @(posedge clk or negedge reset_n) begin
         psram_rdata_valid <= 0;
         psram_burst_rdata_valid <= 0;
         psram_burst_rdata <= 0;
+        psram_burst_wdata_next <= 0;
         counter <= 0;
         latched_idx <= 0;
         latched_wdata <= 0;
@@ -89,11 +99,18 @@ always @(posedge clk or negedge reset_n) begin
         // Default: clear pulsed outputs
         psram_rdata_valid <= 0;
         psram_burst_rdata_valid <= 0;
+        psram_burst_wdata_next <= 0;
 
         case (state)
         S_IDLE: begin
             psram_busy <= 0;
-            if (psram_burst_rd) begin
+            if (psram_burst_wr) begin
+                psram_busy <= 1;
+                burst_target <= psram_addr[25:22];
+                burst_local <= psram_addr[15:0];
+                burst_remaining <= psram_burst_wr_len;
+                state <= S_BURST_WR;
+            end else if (psram_burst_rd) begin
                 psram_busy <= 1;
                 burst_target <= psram_addr[25:22];
                 burst_local <= psram_addr[15:0];
@@ -156,6 +173,30 @@ always @(posedge clk or negedge reset_n) begin
                 state <= S_IDLE;
             end else
                 burst_remaining <= burst_remaining - 6'd1;
+        end
+
+        S_BURST_WR: begin
+            // Write current word using burst_wdata/burst_wstrb
+            mem[{burst_target, burst_local}] <= {
+                psram_burst_wstrb[3] ? psram_burst_wdata[31:24] : mem[{burst_target, burst_local}][31:24],
+                psram_burst_wstrb[2] ? psram_burst_wdata[23:16] : mem[{burst_target, burst_local}][23:16],
+                psram_burst_wstrb[1] ? psram_burst_wdata[15:8]  : mem[{burst_target, burst_local}][15:8],
+                psram_burst_wstrb[0] ? psram_burst_wdata[7:0]   : mem[{burst_target, burst_local}][7:0]
+            };
+            burst_local <= burst_local + 16'd1;
+            if (burst_remaining == 0) begin
+                psram_busy <= 0;
+                state <= S_IDLE;
+            end else begin
+                burst_remaining <= burst_remaining - 6'd1;
+                psram_burst_wdata_next <= 1;
+                state <= S_BURST_WR_WAIT;
+            end
+        end
+
+        S_BURST_WR_WAIT: begin
+            // Wait 1 cycle for AXI slave to update psram_burst_wdata (NBA)
+            state <= S_BURST_WR;
         end
 
         default: state <= S_IDLE;

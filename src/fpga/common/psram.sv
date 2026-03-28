@@ -66,6 +66,11 @@ module psram #(
     input wire sync_burst_en,        // Start synchronous burst read (single-cycle pulse)
     input wire [5:0] sync_burst_len, // Number of 16-bit reads minus 1 (max 63)
 
+    input wire sync_burst_wr_en,     // Start synchronous burst write (single-cycle pulse)
+    input wire [5:0] sync_burst_wr_len, // Number of 16-bit writes minus 1 (max 63)
+    input wire [15:0] sync_burst_wr_data, // Data for current write beat
+    output reg sync_burst_wr_next,   // Pulse: advance to next write data
+
     input wire config_en,            // Write BCR register (single-cycle pulse)
     input wire [15:0] config_data,   // BCR value to write
 
@@ -170,6 +175,13 @@ module psram #(
   localparam STATE_SYNC_DATA  = 62;
   localparam STATE_SYNC_END   = 63;
 
+  // -- Sync burst write states --
+  localparam STATE_SYNCWR_CE_SETUP = 70;  // CE# asserted, WE# low, address loaded
+  localparam STATE_SYNCWR_SETUP    = 71;  // ADV# low (address latch with WE#)
+  localparam STATE_SYNCWR_DATA     = 72;  // Drive data on DQ
+  localparam STATE_SYNCWR_WAIT     = 73;  // Wait for next data from controller
+  localparam STATE_SYNCWR_END      = 74;  // Release CE#, WE#
+
 
   initial begin
     $info("Instantiated PSRAM with the following settings:");
@@ -200,6 +212,7 @@ module psram #(
   // Sync burst counters
   reg [5:0] latency_counter;
   reg [5:0] burst_counter;
+  reg [5:0] burst_wr_counter;  // Remaining write beats
 
   // Debug counters (no reset — accumulate until power cycle)
   initial begin
@@ -259,6 +272,7 @@ module psram #(
 
     // Default: clear pulsed outputs every cycle
     read_avail <= 0;
+    sync_burst_wr_next <= 0;
 
     case (state)
       STATE_NONE: begin
@@ -323,15 +337,11 @@ module psram #(
           busy <= 1;
         end else if (sync_burst_en) begin
           // Synchronous burst read — CE# setup phase.
-          // Assert CE# and load address ONE cycle before ADV# goes LOW.
-          // This guarantees tCSP (CE# setup to CLK) is met at the PSRAM CLK
-          // edge where the address is latched.
           state <= STATE_SYNC_CE_SETUP;
 
           if (bank_sel) cram_ce1_n <= 0;
           else cram_ce0_n <= 0;
 
-          // Pre-load address on DQ/A bus (ADV# stays HIGH this cycle)
           cram_a <= addr[21:16];
           cram_data <= addr[15:0];
           data_out_en <= 1;
@@ -345,6 +355,27 @@ module psram #(
           latency_counter <= SYNC_LATENCY[5:0];
           burst_counter <= sync_burst_len;
           first_capture_pending <= 1;
+          busy <= 1;
+
+        end else if (sync_burst_wr_en) begin
+          // Synchronous burst write — CE# setup phase.
+          // WE# low during address latch tells CRAM it's a write.
+          state <= STATE_SYNCWR_CE_SETUP;
+
+          if (bank_sel) cram_ce1_n <= 0;
+          else cram_ce0_n <= 0;
+
+          cram_a <= addr[21:16];
+          cram_data <= addr[15:0];
+          data_out_en <= 1;
+
+          cram_adv_n <= 1;  // ADV# HIGH — address not latched yet
+          cram_we_n <= 0;   // WE# low for write
+          cram_oe_n <= 1;
+          cram_ub_n <= 0;
+          cram_lb_n <= 0;
+
+          burst_wr_counter <= sync_burst_wr_len;
           busy <= 1;
         end
       end
@@ -511,6 +542,62 @@ module psram #(
         cram_ce0_n <= 1;
         cram_ce1_n <= 1;
         cram_oe_n <= 1;
+        cram_ub_n <= 1;
+        cram_lb_n <= 1;
+        busy <= 0;
+      end
+
+      // ============================================
+      // Synchronous burst write states
+      // ============================================
+      STATE_SYNCWR_CE_SETUP: begin
+        // CE# now low, WE# low, address on bus. Assert ADV# to latch.
+        cram_adv_n <= 0;
+        state <= STATE_SYNCWR_SETUP;
+      end
+
+      STATE_SYNCWR_SETUP: begin
+        // Address latched (ADV# was low). Deassert ADV#, keep WE# low.
+        // Drive first halfword (already loaded from controller).
+        cram_adv_n <= 1;
+        cram_data <= sync_burst_wr_data;
+        data_out_en <= 1;
+        if (burst_wr_counter == 6'd0) begin
+          state <= STATE_SYNCWR_END;
+        end else begin
+          burst_wr_counter <= burst_wr_counter - 6'd1;
+          sync_burst_wr_next <= 1;  // Request next halfword
+          state <= STATE_SYNCWR_WAIT;
+        end
+      end
+
+      STATE_SYNCWR_WAIT: begin
+        // 1-cycle gap: controller sees sync_burst_wr_next (from prev NBA),
+        // updates sync_burst_wr_data (NBA). Available next cycle.
+        data_out_en <= 1;
+        state <= STATE_SYNCWR_DATA;
+      end
+
+      STATE_SYNCWR_DATA: begin
+        // Drive halfword from controller (now valid after WAIT cycle).
+        cram_data <= sync_burst_wr_data;
+        data_out_en <= 1;
+        if (burst_wr_counter == 6'd0) begin
+          state <= STATE_SYNCWR_END;
+        end else begin
+          burst_wr_counter <= burst_wr_counter - 6'd1;
+          sync_burst_wr_next <= 1;
+          state <= STATE_SYNCWR_WAIT;
+        end
+      end
+
+      STATE_SYNCWR_END: begin
+        // Burst write complete — release everything
+        state <= STATE_NONE;
+        data_out_en <= 0;
+        cram_we_n <= 1;
+        cram_ce0_n <= 1;
+        cram_ce1_n <= 1;
         cram_ub_n <= 1;
         cram_lb_n <= 1;
         busy <= 0;
