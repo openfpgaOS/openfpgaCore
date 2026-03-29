@@ -224,82 +224,9 @@ bram_model #(.ADDR_BITS(16)) bram (
 );
 
 // ============================================================
-// SDRAM stack: axi_sdram_slave → io_sdram_test → sdram_model
-// (Reuse existing SDRAM test stack from tb_sdram.v)
+// SDRAM: fast behavioral model (~4 cycle latency)
 // ============================================================
-
-// AXI slave ↔ word interface
-wire        sdram_rd, sdram_wr;
-wire [23:0] sdram_addr_w;
-wire [31:0] sdram_wdata_w;
-wire [3:0]  sdram_wstrb_w;
-wire [3:0]  sdram_burst_len;
-wire [3:0]  sdram_burst_wr_len;
-wire        sdram_wr_data_next;
-wire [31:0] sdram_next_wdata;
-wire [3:0]  sdram_next_wstrb;
-
-// io_sdram physical signals
-wire        phy_cke, phy_clk, phy_cas, phy_ras, phy_we;
-wire [1:0]  phy_ba;
-wire [12:0] phy_a;
-wire [1:0]  phy_dqm;
-wire [15:0] ctrl_dq_out, model_dq_out;
-wire        ctrl_dq_oe, model_dq_oe;
-wire [15:0] dq_to_ctrl = model_dq_oe ? model_dq_out : 16'h0;
-
-// Word interface
-reg         word_rd, word_wr;
-reg  [23:0] word_addr;
-reg  [31:0] word_data;
-reg  [3:0]  word_wstrb;
-reg  [3:0]  word_burst_len;
-reg  [3:0]  word_burst_wr_len;
-wire [31:0] word_q;
-wire        word_busy;
-wire        word_q_valid;
-wire        word_wr_data_next;
-
-// Pulse adapter (from tb_sdram.v)
-reg         cmd_forwarded;
-reg         accepted_r;
-reg         wr_data_fwd_d1;
-
-always @(posedge clk or negedge reset_n) begin
-    if (!reset_n) begin
-        word_rd <= 0; word_wr <= 0;
-        word_addr <= 0; word_data <= 0; word_wstrb <= 0;
-        word_burst_len <= 0; word_burst_wr_len <= 0;
-        cmd_forwarded <= 0; accepted_r <= 0; wr_data_fwd_d1 <= 0;
-    end else begin
-        word_rd <= 0; word_wr <= 0;
-        word_burst_len <= 0; word_burst_wr_len <= 0;
-        accepted_r <= 0;
-
-        if (!sdram_rd && !sdram_wr)
-            cmd_forwarded <= 0;
-
-        if (!word_busy && !cmd_forwarded && (sdram_rd || sdram_wr)) begin
-            word_rd <= sdram_rd;
-            word_wr <= sdram_wr;
-            word_addr <= sdram_addr_w;
-            word_data <= sdram_wdata_w;
-            word_wstrb <= sdram_wstrb_w;
-            word_burst_len <= sdram_burst_len;
-            word_burst_wr_len <= sdram_burst_wr_len;
-            accepted_r <= 1;
-            cmd_forwarded <= 1;
-        end
-
-        wr_data_fwd_d1 <= word_wr_data_next;
-        if (wr_data_fwd_d1) begin
-            word_data <= sdram_wdata_w;
-            word_wstrb <= sdram_wstrb_w;
-        end
-    end
-end
-
-axi_sdram_slave sdram_slave (
+sdram_fast_model sdram_fast (
     .clk(clk), .reset_n(reset_n),
     .s_axi_arvalid(sdram_arvalid), .s_axi_arready(sdram_arready),
     .s_axi_araddr(sdram_araddr), .s_axi_arlen(sdram_arlen),
@@ -310,45 +237,6 @@ axi_sdram_slave sdram_slave (
     .s_axi_wvalid(sdram_wvalid), .s_axi_wready(sdram_wready),
     .s_axi_wdata(sdram_wdata), .s_axi_wstrb(sdram_wstrb), .s_axi_wlast(sdram_wlast),
     .s_axi_bvalid(sdram_bvalid), .s_axi_bready(1'b1), .s_axi_bresp(sdram_bresp),
-    .sdram_rd(sdram_rd), .sdram_wr(sdram_wr),
-    .sdram_addr(sdram_addr_w), .sdram_wdata(sdram_wdata_w), .sdram_wstrb(sdram_wstrb_w),
-    .sdram_burst_len(sdram_burst_len), .sdram_burst_wr_len(sdram_burst_wr_len),
-    .sdram_rdata(word_q), .sdram_busy(word_busy),
-    .sdram_accepted(accepted_r), .sdram_rdata_valid(word_q_valid),
-    .sdram_wr_data_next(sdram_wr_data_next),
-    .sdram_next_wdata(sdram_next_wdata),
-    .sdram_next_wstrb(sdram_next_wstrb)
-);
-
-io_sdram sdram_ctrl (
-    .controller_clk(clk), .chip_clk(clk), .clk_90(clk), .reset_n(reset_n),
-    .phy_cke(phy_cke), .phy_clk(phy_clk),
-    .phy_cas(phy_cas), .phy_ras(phy_ras), .phy_we(phy_we),
-    .phy_ba(phy_ba), .phy_a(phy_a),
-    .phy_dq_in(dq_to_ctrl),
-    .phy_dq_out_port(ctrl_dq_out),
-    .phy_dq_oe_port(ctrl_dq_oe),
-    .phy_dqm(phy_dqm),
-    .burst_rd(1'b0), .burst_addr(25'b0), .burst_len(11'b0), .burst_32bit(1'b1),
-    .burst_data(), .burst_data_valid(), .burst_data_done(),
-    .burstwr(1'b0), .burstwr_addr(25'b0), .burstwr_ready(),
-    .burstwr_strobe(1'b0), .burstwr_data(16'b0), .burstwr_done(1'b0),
-    .word_rd(word_rd), .word_wr(word_wr),
-    .word_addr(word_addr), .word_data(word_data), .word_wstrb(word_wstrb),
-    .word_burst_len(word_burst_len), .word_burst_wr_len(word_burst_wr_len),
-    .word_q(word_q), .word_busy(word_busy), .word_q_valid(word_q_valid),
-    .word_wr_data_next(word_wr_data_next),
-    .burst_wr_direct_data(sdram_wdata_w),
-    .burst_wr_direct_strb(sdram_wstrb_w)
-);
-
-sdram_model sdram_chip (
-    .clk(phy_clk), .cke(phy_cke), .cs_n(1'b0),
-    .ras_n(phy_ras), .cas_n(phy_cas), .we_n(phy_we),
-    .ba(phy_ba), .a(phy_a),
-    .dq_in(ctrl_dq_out),
-    .dq_out(model_dq_out), .dq_oe(model_dq_oe),
-    .dqm(phy_dqm),
     .bd_we(sd_bd_we), .bd_word_addr(sd_bd_addr), .bd_wdata(sd_bd_wdata)
 );
 

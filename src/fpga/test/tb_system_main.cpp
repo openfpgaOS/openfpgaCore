@@ -179,25 +179,22 @@ static const uint32_t fw_selftest[] = {
 
 int main(int argc, char **argv) {
     Verilated::commandArgs(argc, argv);
-    Verilated::traceEverOn(true);
+    Verilated::traceEverOn(false);
     tb = new Vtb_system;
-    trace = new VerilatedVcdC;
-    tb->trace(trace, 5);  // Shallow trace depth for speed
-    // trace disabled for speed
 
-    const char *bram_path = NULL;      // Boot stub or full boot.bin
-    const char *sdram_path = NULL;     // OS binary (os.bin)
-    const char *bram_base_path = NULL; // Full boot.bin (for .fasttext etc.)
+    const char *bram_path = NULL;      // boot.bin (BRAM entry)
+    const char *sdram_path = NULL;     // os.bin (SDRAM at 0x10200000)
+    const char *app_elf_path = NULL;   // app.elf (loaded at DMA buffer + target addr)
     int max_cycles = 500000;
 
-    // Usage: ./Vtb_system <stub.bin> <os.bin> [boot.bin] [max_cycles]
-    // Or:    ./Vtb_system (runs built-in self-test)
+    // Usage: ./Vtb_system <boot.bin> <os.bin> [app.elf] [max_cycles]
+    // Or:    ./Vtb_system [max_cycles]  (runs built-in self-test)
     for (int i = 1; i < argc; i++) {
         if (argv[i][0] == '-' || (argv[i][0] >= '0' && argv[i][0] <= '9')) {
             max_cycles = atoi(argv[i]);
         } else if (!bram_path) bram_path = argv[i];
         else if (!sdram_path) sdram_path = argv[i];
-        else if (!bram_base_path) bram_base_path = argv[i];
+        else if (!app_elf_path) app_elf_path = argv[i];
     }
 
     printf("=== VexiiRiscv System Simulation ===\n\n");
@@ -214,17 +211,46 @@ int main(int argc, char **argv) {
 
     // Load firmware
     if (bram_path) {
-        // If boot.bin base image provided, load it first (for .fasttext section)
-        if (bram_base_path) {
-            printf("Loading BRAM base: ");
-            if (load_binary(bram_base_path) < 0) return 1;
-        }
-        // Load boot stub (overwrites entry point at addr 0)
-        printf("Loading boot stub: ");
+        printf("Loading boot: ");
         if (load_binary(bram_path) < 0) return 1;
-        // Load SDRAM binary (os.bin at 0x10200000)
         if (sdram_path) {
             if (load_sdram_binary(sdram_path, 0x80000) < 0) return 1;
+        }
+        // Load app ELF: headers at DMA_BUFFER, segments at target address
+        if (app_elf_path) {
+            if (load_sdram_binary(app_elf_path, 0x60000) < 0) return 1;
+            FILE *ef = fopen(app_elf_path, "rb");
+            if (ef) {
+                uint8_t ehdr[52];
+                fread(ehdr, 1, 52, ef);
+                uint32_t phoff = ehdr[28]|(ehdr[29]<<8)|(ehdr[30]<<16)|(ehdr[31]<<24);
+                uint16_t phnum = ehdr[44]|(ehdr[45]<<8);
+                uint16_t phentsize = ehdr[42]|(ehdr[43]<<8);
+                for (int p = 0; p < phnum; p++) {
+                    uint8_t phdr[32];
+                    fseek(ef, phoff + p * phentsize, SEEK_SET);
+                    fread(phdr, 1, 32, ef);
+                    uint32_t p_type = phdr[0]|(phdr[1]<<8)|(phdr[2]<<16)|(phdr[3]<<24);
+                    if (p_type != 1) continue;
+                    uint32_t p_offset = phdr[4]|(phdr[5]<<8)|(phdr[6]<<16)|(phdr[7]<<24);
+                    uint32_t p_vaddr = phdr[8]|(phdr[9]<<8)|(phdr[10]<<16)|(phdr[11]<<24);
+                    uint32_t p_filesz = phdr[16]|(phdr[17]<<8)|(phdr[18]<<16)|(phdr[19]<<24);
+                    if (p_filesz == 0 || p_vaddr < 0x10000000) continue;
+                    uint32_t sdram_word_off = (p_vaddr - 0x10000000) / 4;
+                    printf("Preloading ELF segment: 0x%08x (%d bytes)\n", p_vaddr, p_filesz);
+                    fseek(ef, p_offset, SEEK_SET);
+                    uint8_t *sbuf = (uint8_t *)malloc(p_filesz);
+                    fread(sbuf, 1, p_filesz, ef);
+                    for (uint32_t i = 0; i < p_filesz; i += 4) {
+                        uint32_t word = 0;
+                        for (int b = 0; b < 4 && (i+b) < p_filesz; b++)
+                            word |= (uint32_t)sbuf[i+b] << (b*8);
+                        sdram_write(sdram_word_off + i/4, word);
+                    }
+                    free(sbuf);
+                }
+                fclose(ef);
+            }
         }
     } else {
         printf("Loading built-in self-test (%lu words)\n",
@@ -247,7 +273,8 @@ int main(int argc, char **argv) {
     int stall_count = 0;
     for (int i = 0; i < max_cycles; i++) {
         tick();
-        if (i % 1000 == 999) {
+        // Only check result register for self-test (no bram_path)
+        if (!bram_path && i % 1000 == 999) {
             status = bram_read(RESULT_STATUS_ADDR);
             if (status != 0) break;
         }
