@@ -5,15 +5,10 @@
  * VexiiRiscv pipeline notes:
  *   - D-cache: 32KB, 2-way, 64B lines, write-back
  *   - Store buffer: 2 slots — LLSS interleaving prevents stalls
- *   - Zicbom: cbo.clean/flush/inval available (NOT cbo.zero)
- *   - In-cache: ~200 MB/s with LLSS pattern
- *   - Out-of-cache: ~30 MB/s (write-allocate + eviction overhead)
- *
- * cbo.inval encoding: .word 0x0005200F  (cbo.inval (a0))
- *   Invalidates cache line at a0. Drops dirty data without write-back.
- *   Saves the dirty eviction cost (~68 cycles per 64B line) but does
- *   NOT prevent the write-allocate fetch on the next store.
- *   Zicboz (cbo.zero) is NOT available in this VexiiRiscv build.
+ *   - Zicbom: cbo.clean/flush/inval
+ *   - Zicboz: cbo.zero (allocate zeroed line, no SDRAM read)
+ *   - In-cache: ~265 MB/s memset, ~48 MB/s memcpy
+ *   - Out-of-cache: ~42 MB/s memset (with cbo.zero), ~29 MB/s memcpy
  */
 
 /* cbo.inval (reg): invalidate cache line, drop dirty data.
@@ -23,6 +18,16 @@
     .word 0x0005200F
     .elseif \reg == 6 /* t1 */
     .word 0x0003200F
+    .endif
+.endm
+
+/* cbo.zero (reg): allocate cache line filled with zeros, no SDRAM read.
+ * Encoding: funct12=0x004, rs1, funct3=010, rd=00000, opcode=0001111 */
+.macro CBO_ZERO reg
+    .if \reg == 10   /* a0 */
+    .word 0x0045200F
+    .elseif \reg == 15 /* a5 */
+    .word 0x0047A00F
     .endif
 .endm
 
@@ -169,6 +174,10 @@ memcpy:
 
 /* ================================================================
  * memset(dest, c, n) — returns dest
+ *
+ * For memset(ptr, 0, n) with 64B-aligned ptr and n >= 64:
+ *   Uses cbo.zero (Zicboz) to allocate cache lines filled with zeros
+ *   WITHOUT reading from SDRAM. Eliminates write-allocate overhead.
  * ================================================================ */
 .global memset
 memset:
@@ -186,6 +195,26 @@ memset:
     andi    t1, a0, 3
     bnez    t1, .Lset_byte
 
+    /* cbo.zero fast path: value==0, 64B-aligned, size >= 64 */
+    bnez    a1, .Lset_sw_enter
+    li      t1, 64
+    bltu    a2, t1, .Lset_sw_enter
+    andi    t1, a0, 63
+    bnez    t1, .Lset_sw_enter
+
+    /* Zero fill using cbo.zero — one instruction per 64B cache line.
+     * No SDRAM read (skips write-allocate), ~2x faster for large buffers. */
+    li      t1, 64
+.Lset_zero_64:
+    CBO_ZERO 10             /* cbo.zero (a0) — zero 64B, no SDRAM read */
+    addi    a0, a0, 64
+    addi    a2, a2, -64
+    bgeu    a2, t1, .Lset_zero_64
+    /* Fall through for remaining < 64 bytes */
+    beqz    a2, .Lset_done
+    j       .Lset_4
+
+.Lset_sw_enter:
     /* 8-word unrolled set (32 bytes/iteration) */
     li      t1, 32
     bltu    a2, t1, .Lset_16

@@ -46,7 +46,10 @@ input   wire    [3:0]   word_burst_wr_len, // 0=single word, N=N+1 words (for bu
 output  reg     [31:0]  word_q,
 output  reg             word_busy,
 output  reg             word_q_valid, // Pulses high for one cycle when word_q data is valid
-output  reg             word_wr_data_next // Pulse: need next word data for burst write
+output  reg             word_wr_data_next, // Pulse: need next word data for burst write
+
+input   wire    [31:0]  burst_wr_direct_data, // Direct data bus from AXI slave (bypasses pulse adapter)
+input   wire    [3:0]   burst_wr_direct_strb  // Direct byte enables
 );
 
     // tristate for DQ
@@ -522,26 +525,27 @@ always @(posedge controller_clk) begin
             state <= ST_IDLE;
         end
     end
-    // Burst write gap: 3 cycles for data to propagate through
-    // slave → pulse adapter → word_data input
-    // Cycle 1: slave processes word_wr_data_next, updates sdram_wdata
+    // Burst write: capture next word from direct bus.
+    // burst_wr_direct_data is wired directly from axi_sdram_slave's sdram_wdata,
+    // bypassing the pulse adapter. Data is valid 1 cycle after word_wr_data_next
+    // because the slave updates sdram_wdata via NBA when it sees wr_data_next.
+    // Burst write: capture next word from direct bus.
+    // ST_WRITE_3 fires word_wr_data_next (NBA).
+    // ST_WRITE_5: slave sees wr_data_next, updates sdram_wdata (NBA).
+    // ST_WRITE_6: sdram_wdata (= burst_wr_direct_data) now valid. Capture it.
     ST_WRITE_5: begin
         phy_dq_oe <= 1;
         phy_dqm <= 2'b11;  // Mask DQ during gap
         state <= ST_WRITE_6;
     end
-    // Cycle 2: pulse adapter copies sdram_wdata → word_data
     ST_WRITE_6: begin
         phy_dq_oe <= 1;
-        phy_dqm <= 2'b11;
-        state <= ST_WRITE_7;
-    end
-    // Cycle 3: capture word_data (now valid)
-    ST_WRITE_7: begin
-        word_data_captured <= word_data;
-        word_wstrb_captured <= word_wstrb;
-        phy_dq_oe <= 1;
         phy_dqm <= 2'b00;
+        word_data_captured <= burst_wr_direct_data;
+        word_wstrb_captured <= burst_wr_direct_strb;
+        state <= ST_WRITE_2;
+    end
+    ST_WRITE_7: begin
         state <= ST_WRITE_2;
     end
 
