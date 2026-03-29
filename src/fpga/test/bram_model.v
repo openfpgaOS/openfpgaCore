@@ -188,8 +188,10 @@ always @(posedge clk) begin
             8'hD0: local_r_data <= 32'h00000000;  // DMA_STATUS: idle
             default: local_r_data <= 32'h00000000;
             endcase
-        end else
+        end else if (l_raddr[31:20] == 12'h000)
             local_r_data <= mem[l_raddr[ADDR_BITS+1:2]];
+        else
+            local_r_data <= 32'h00000000;  // Non-BRAM address: return 0
         local_r_resp <= 2'b00;
         local_r_last <= (l_rcnt == l_rlen);
         if (local_r_ready) begin
@@ -208,8 +210,9 @@ always @(posedge clk) begin
                 // UART TX: intercept write to 0x4F000004
                 uart_tx_valid <= 1;
                 uart_tx_byte <= local_w_data[7:0];
-            end else if (l_waddr[ADDR_BITS+1:2] < (1 << ADDR_BITS)) begin
-                // BRAM write (only within address range)
+            end else if (l_waddr[31:20] == 12'h000) begin
+                // BRAM write: only accept addresses < 0x00100000
+                // Silently drop writes to VRAM (0x20000000) etc.
                 if (local_w_strb[0]) mem[l_waddr[ADDR_BITS+1:2]][7:0]   <= local_w_data[7:0];
                 if (local_w_strb[1]) mem[l_waddr[ADDR_BITS+1:2]][15:8]  <= local_w_data[15:8];
                 if (local_w_strb[2]) mem[l_waddr[ADDR_BITS+1:2]][23:16] <= local_w_data[23:16];

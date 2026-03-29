@@ -89,6 +89,9 @@ reg [3:0]  next_wstrb;
 reg        wready_given; // Next W beat already accepted
 reg        wr_busy_seen; // word_busy seen high during burst (guards early bvalid)
 
+// Round-robin fairness between reads and writes
+reg        last_was_write;
+
 // Combinational export of pre-staged data for burst write forwarding
 assign sdram_next_wdata = next_wdata;
 assign sdram_next_wstrb = next_wstrb;
@@ -126,6 +129,7 @@ always @(posedge clk or posedge reset) begin
         next_wstrb <= 0;
         wready_given <= 0;
         wr_busy_seen <= 0;
+        last_was_write <= 0;
     end else begin
         // Defaults: deassert single-cycle signals
         s_axi_arready <= 0;
@@ -143,13 +147,13 @@ always @(posedge clk or posedge reset) begin
         S_IDLE: begin
             cmd_issued <= 0;
             started <= 0;
-            // Reads have priority over writes
-            if (s_axi_arvalid) begin
+            // Round-robin between reads and writes to prevent starvation
+            if (s_axi_arvalid && (!s_axi_awvalid || last_was_write)) begin
                 s_axi_arready <= 1;
                 addr_r <= s_axi_araddr;
                 burst_len <= s_axi_arlen;
                 beat_count <= 0;
-                // Early command issue: if SDRAM idle, start read 1 cycle sooner
+                last_was_write <= 0;
                 if (!sdram_busy) begin
                     sdram_rd <= 1;
                     sdram_addr <= s_axi_araddr[25:2];
@@ -162,12 +166,11 @@ always @(posedge clk or posedge reset) begin
                 addr_r <= s_axi_awaddr;
                 burst_len <= s_axi_awlen;
                 beat_count <= 0;
-                // Also accept W if valid (common case: AW and W arrive together)
+                last_was_write <= 1;
                 if (s_axi_wvalid) begin
                     s_axi_wready <= 1;
                     sdram_wdata <= s_axi_wdata;
                     sdram_wstrb <= s_axi_wstrb;
-                    // Early command issue for writes too
                     if (!sdram_busy) begin
                         sdram_wr <= 1;
                         sdram_addr <= s_axi_awaddr[25:2];
@@ -244,11 +247,11 @@ always @(posedge clk or posedge reset) begin
                 if (sdram_accepted) begin
                     started <= 1;
                     if (burst_len == 0)
-                        state <= S_WR_DON;   // Single word: wait for !busy
+                        state <= S_WR_DON;
                     else begin
                         wready_given <= 0;
                         wr_busy_seen <= 0;
-                        state <= S_WR_BURST;  // Burst: stream data
+                        state <= S_WR_BURST;
                     end
                 end
             end
@@ -257,7 +260,6 @@ always @(posedge clk or posedge reset) begin
         S_WR_BURST: begin
             // Streaming burst write: when io_sdram signals wr_data_next,
             // accept the next W beat and update sdram_wdata.
-            // io_sdram has 3 gap cycles (ST_WRITE_5/6/7) to let data propagate.
             if (sdram_wr_data_next) begin
                 beat_count <= beat_count + 1;
                 if (s_axi_wvalid) begin
@@ -266,9 +268,7 @@ always @(posedge clk or posedge reset) begin
                     sdram_wstrb <= s_axi_wstrb;
                 end
             end
-            // Track when io_sdram actually starts (word_busy goes high)
             if (sdram_busy) wr_busy_seen <= 1;
-            // io_sdram returns to IDLE when burst is done
             if (wr_busy_seen && !sdram_busy) begin
                 beat_count <= beat_count + 1;
                 cmd_issued <= 0;
