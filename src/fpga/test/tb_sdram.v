@@ -159,9 +159,7 @@ io_sdram sdram_ctrl (
     .word_addr(word_addr), .word_data(word_data), .word_wstrb(word_wstrb),
     .word_burst_len(word_burst_len), .word_burst_wr_len(word_burst_wr_len),
     .word_q(word_q), .word_busy(word_busy), .word_q_valid(word_q_valid),
-    .word_wr_data_next(word_wr_data_next),
-    .burst_wr_direct_data(sdram_wdata),
-    .burst_wr_direct_strb(sdram_wstrb)
+    .word_wr_data_next(word_wr_data_next)
 );
 
 // Behavioral SDRAM model

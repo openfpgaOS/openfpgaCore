@@ -2,7 +2,7 @@
  * openfpgaOS Linker Script
  *
  * Memory layout:
- * - BRAM:     0x00000000 (64KB) - Bootloader + trap handler + hot code
+ * - BRAM:     0x00000000 (192KB) - Bootloader + trap handler + hot code
  * - SDRAM:    0x10200000 (2MB)   - OS kernel code + data + BSS
  * - App area: 0x10400000+        - Dynamically loaded application
  * - Terminal: 0x20000000 (8KB)
@@ -12,7 +12,7 @@
 ENTRY(_start)
 
 MEMORY {
-    BRAM      (rwx) : ORIGIN = 0x00000000, LENGTH = 64K
+    BRAM      (rwx) : ORIGIN = 0x00000000, LENGTH = 192K
     SDRAM     (rwx) : ORIGIN = 0x10200000, LENGTH = 2M
 }
 

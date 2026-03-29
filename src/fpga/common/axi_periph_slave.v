@@ -161,17 +161,17 @@ assign sat_idx = 0; assign sat_field = 0; assign sat_wdata = 0;
 assign sprchar_wr = 0; assign sprchar_waddr = 0; assign sprchar_wdata = 0;
 
 // ============================================
-// BRAM (64KB = 16384 x 32-bit words)
+// BRAM (192KB = 49152 x 32-bit words)
 // ============================================
 wire [31:0] ram_rdata;
-reg  [13:0] ram_addr_mux;
+reg  [15:0] ram_addr_mux;
 wire ram_wren;
 
 altsyncram #(
     .operation_mode("SINGLE_PORT"),
     .width_a(32),
-    .widthad_a(14),
-    .numwords_a(16384),
+    .widthad_a(16),
+    .numwords_a(49152),
     .width_byteena_a(4),
     .lpm_type("altsyncram"),
     .outdata_reg_a("UNREGISTERED"),
@@ -585,26 +585,26 @@ wire beat_is_last = (burst_count == burst_len);
 // Terminal pending flag
 wire term_pending = (state == S_TERM);
 
-// BRAM address mux (64KB: 14-bit word address = [15:2])
-wire [13:0] bram_next_word = req_addr[15:2] + 14'd1;
+// BRAM address mux (256KB: 16-bit word address = [17:2])
+wire [15:0] bram_next_word = req_addr[17:2] + 16'd1;
 
 always @(*) begin
     case (state)
         S_IDLE: begin
             if (s_axi_arvalid && !s_axi_awvalid)
-                ram_addr_mux = ar_addr[15:2];
+                ram_addr_mux = ar_addr[17:2];
             else if (s_axi_awvalid)
-                ram_addr_mux = aw_addr[15:2];
+                ram_addr_mux = aw_addr[17:2];
             else
-                ram_addr_mux = 14'd0;
+                ram_addr_mux = 16'd0;
         end
         S_BRAM_RD: begin
             if (!beat_is_last)
                 ram_addr_mux = bram_next_word;
             else
-                ram_addr_mux = req_addr[15:2];
+                ram_addr_mux = req_addr[17:2];
         end
-        default: ram_addr_mux = req_addr[15:2];
+        default: ram_addr_mux = req_addr[17:2];
     endcase
 end
 

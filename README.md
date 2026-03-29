@@ -22,18 +22,26 @@ A game development platform for the [Analogue Pocket](https://www.analogue.co/po
 
 For **game development**, use the [openfpgaOS SDK](https://github.com/ThinkElastic/openfpgaOS-SDK). You don't need this repo unless you're modifying the OS, FPGA design, or adding a new target.
 
-### Building the OS
+### Building
 
 ```bash
-# Prerequisites: RISC-V toolchain + Intel Quartus Prime
-make firmware          # Build OS kernel + apps
-make chip32            # Build Chip32 loader
-make fpga              # Compile FPGA bitstream (requires Quartus)
-make full              # All of the above + package
+# Prerequisites: RISC-V toolchain (riscv64-elf-*), Intel Quartus Prime, Java + sbt
+cd src/fpga/targets/pocket
+
+make              # full clean build: cpu → firmware → compile → test → deploy
+make flash        # quick: rebuild firmware, patch into bitstream, deploy
+make build        # incremental Quartus compile only
+make cpu          # regenerate VexiiRiscv from SpinalHDL
+make firmware     # rebuild bootloader + os.bin
+make test         # run Verilator test suite (836 tests)
+make check        # fast RTL syntax check
+make program      # JTAG flash via USB Blaster (dev)
+make clean        # wipe Quartus build artifacts
 ```
 
 ### Deploying
 
+Copy `build/Cores/ThinkElastic.openfpgaOS/` to SD card, or:
 ```bash
 ./deploy.sh                    # auto-detect SD card
 ./deploy.sh ../openfpgaOS-SDK  # push to SDK repo instead

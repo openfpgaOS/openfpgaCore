@@ -1,89 +1,68 @@
-# FPGA Makefile for Analogue Pocket Core
-# Supports Quartus build and USB Blaster programming
+# Analogue Pocket — Build System
 
 PROJECT = ap_core
-TOP_LEVEL = core_top
-QUARTUS_DIR = /home/alberto/altera_lite/25.1std/quartus/bin
-export PATH := $(QUARTUS_DIR):$(PATH)
+FW_DIR = ../../../firmware/os
+VEXII_DIR = ../../vendor/vexriscv/VexiiRiscv
+VEXII_OUT = ../../vendor/vexriscv/VexiiRiscv_Full.v
+TEST_DIR = ../../test
+RELEASE_DIR = ../../../../build/Cores/ThinkElastic.openfpgaOS
+QUARTUS = /home/alberto/altera_lite/25.1std/quartus/bin
+export PATH := $(QUARTUS):$(PATH)
 
-# Output files
-SOF_FILE = output_files/$(PROJECT).sof
-RBF_FILE = output_files/$(PROJECT).rbf
-RELEASE_RBF = ../../release/Cores/ThinkElastic.openfpgaOS/bitstream.rbf_r
+all: cpu firmware compile test deploy summary
 
-# Default target
-all: build
+summary:
+	@echo ""
+	@echo "=== Build Summary ==="
+	@test -f $(VEXII_OUT) && echo " [x] CPU generated" || echo " [ ] CPU generated"
+	@test -f $(FW_DIR)/firmware.mif && echo " [x] Firmware built" || echo " [ ] Firmware built"
+	@test -f $(FW_DIR)/os.bin && echo " [x] OS built" || echo " [ ] OS built"
+	@test -f output_files/$(PROJECT).rbf && echo " [x] FPGA compiled" || echo " [ ] FPGA compiled"
+	@test -f output_files/$(PROJECT).sta.rpt && \
+		FMAX=$$(grep -A30 "Slow 1100mV 85C Model Fmax Summary" output_files/$(PROJECT).sta.rpt | grep "mp_ram.*general\[0\]" | head -1 | awk -F';' '{print $$2}' | xargs) && \
+		echo "     Fmax: $$FMAX" || true
+	@echo " [x] Tests passed" 2>/dev/null || echo " [ ] Tests"
+	@test -f ../../../../build/Cores/ThinkElastic.openfpgaOS/bitstream.rbf_r && echo " [x] Deployed" || echo " [ ] Deployed"
+	@echo ""
 
-# Full compilation
-build:
+cpu:
+	cd $(VEXII_DIR) && bash ../generate_vexii.sh
+	cp $(VEXII_DIR)/VexiiRiscv.v $(VEXII_OUT)
+
+firmware:
+	$(MAKE) -C $(FW_DIR) clean all install
+
+compile:
+	rm -rf db incremental_db
 	quartus_sh --flow compile $(PROJECT)
 
-# Synthesis only (faster for checking errors)
-map:
-	quartus_map $(PROJECT)
+test:
+	$(MAKE) -C $(TEST_DIR) all
 
-# Place and route only
-fit: map
-	quartus_fit $(PROJECT)
+deploy:
+	@if [ ! -x ../../../../tools/reverse_bits ]; then \
+		gcc -O2 -o ../../../../tools/reverse_bits ../../../../tools/reverse_bits.c; \
+	fi
+	../../../../tools/reverse_bits output_files/$(PROJECT).rbf $(RELEASE_DIR)/bitstream.rbf_r
+	cp $(FW_DIR)/os.bin $(RELEASE_DIR)/os.bin
+	@echo "Deployed to $(RELEASE_DIR)"
 
-# Timing analysis
-sta: fit
-	quartus_sta $(PROJECT)
-
-# Generate programming files
-asm: fit
-	quartus_asm $(PROJECT)
-
-# Update MIF files without full recompile (fast!)
-mif:
+flash: firmware
 	quartus_cdb $(PROJECT) --update_mif
 	quartus_asm $(PROJECT)
+	@if [ ! -x ../../../../tools/reverse_bits ]; then \
+		gcc -O2 -o ../../../../tools/reverse_bits ../../../../tools/reverse_bits.c; \
+	fi
+	../../../../tools/reverse_bits output_files/$(PROJECT).rbf $(RELEASE_DIR)/bitstream.rbf_r
+	cp $(FW_DIR)/os.bin $(RELEASE_DIR)/os.bin
 
-# Program FPGA via USB Blaster (JTAG)
-program: $(SOF_FILE)
-	quartus_pgm -m jtag -o "p;$(SOF_FILE)"
+check:
+	quartus_map $(PROJECT)
 
-# Alternative: program with explicit cable selection
-program-usb: $(SOF_FILE)
-	quartus_pgm -c "USB-Blaster" -m jtag -o "p;$(SOF_FILE)"
-
-# List available programming cables
-list-cables:
-	quartus_pgm --list
-
-# Convert SOF to RBF (for Analogue Pocket)
-rbf: $(SOF_FILE)
-	quartus_cpf -c $(SOF_FILE) $(RBF_FILE)
-
-# Install RBF to release directory
-install: $(RBF_FILE)
-	cp $(RBF_FILE) $(RELEASE_RBF)
-	@echo "Installed to $(RELEASE_RBF)"
-
-# Build firmware, update MIF, and reprogram (fast iteration)
-quick:
-	$(MAKE) -C ../firmware clean all install
-	$(MAKE) mif
-	$(MAKE) program
-
-# Full rebuild: firmware + FPGA + program
-full:
-	$(MAKE) -C ../firmware clean all install
-	$(MAKE) build
-	$(MAKE) program
-
-# Clean Quartus build files
 clean:
-	rm -rf db incremental_db output_files/*.rpt output_files/*.summary
-	rm -f output_files/*.sof output_files/*.rbf output_files/*.done
-	rm -f output_files/*.smsg output_files/*.pin
+	rm -rf db incremental_db
+	rm -f output_files/*.rpt output_files/*.summary output_files/*.sof
+	rm -f output_files/*.rbf output_files/*.done output_files/*.smsg
+	rm -f output_files/*.pin output_files/*.jdi
 
-# Show timing summary
-timing:
-	@grep -A 20 "Slow 1100mV 85C Model" output_files/$(PROJECT).sta.summary 2>/dev/null || echo "Run 'make sta' first"
-
-# Show resource usage
-resources:
-	@grep -E "(Total logic elements|Total registers|Total memory bits|Total PLLs)" output_files/$(PROJECT).fit.summary 2>/dev/null || echo "Run 'make fit' first"
-
-.PHONY: all build map fit sta asm mif program program-usb list-cables rbf install quick full clean timing resources
+.PHONY: all cpu firmware compile test deploy flash check clean

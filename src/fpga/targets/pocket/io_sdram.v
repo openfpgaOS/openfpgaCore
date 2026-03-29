@@ -46,12 +46,7 @@ input   wire    [3:0]   word_burst_wr_len, // 0=single word, N=N+1 words (for bu
 output  reg     [31:0]  word_q,
 output  reg             word_busy,
 output  reg             word_q_valid, // Pulses high for one cycle when word_q data is valid
-output  reg             word_wr_data_next, // Pulse: need next word data for burst write
-
-// Direct data bus for pipelined burst writes (bypasses pulse adapter)
-// Connected to axi_sdram_slave's sdram_wdata/sdram_wstrb registers
-input   wire    [31:0]  burst_wr_direct_data,
-input   wire    [3:0]   burst_wr_direct_strb
+output  reg             word_wr_data_next // Pulse: need next word data for burst write
 );
 
     // tristate for DQ
@@ -464,9 +459,6 @@ always @(posedge controller_clk) begin
     ST_WRITE_HIT: begin
         phy_a[10] <= 1'b0;
         phy_dq_oe <= 1;
-        // Pipeline fill: request word 1 early
-        if (wr_burst_remaining > 0)
-            word_wr_data_next <= 1;
         state <= ST_WRITE_2;
     end
 
@@ -488,10 +480,6 @@ always @(posedge controller_clk) begin
     end
     ST_WRITE_1: begin
         phy_a[10] <= 1'b0; // no auto precharge
-        // Pipeline fill: request word 1 during tRCD wait so its data
-        // is on burst_wr_direct_data by ST_WRITE_3 of word 0.
-        if (dc == 0 && wr_burst_remaining > 0)
-            word_wr_data_next <= 1;
         if(dc == TIMING_ACT_RW-1) begin
             dc <= 0;
             phy_dq_oe <= 1;
@@ -504,43 +492,57 @@ always @(posedge controller_clk) begin
         phy_a <= addr[9:0]; // A0-A9 column address
         cmd <= CMD_WRITE;
         phy_dq_oe <= 1;
-        phy_dq_out <= word_data_captured[15:0];  // First BL=2 beat: low half
-        phy_dqm <= ~word_wstrb_captured[1:0];
-
-        // 2-deep pipeline: request word N+2 now.
-        // Word N+1 was requested during word N-1's ST_WRITE_3.
-        // Its data is now on burst_wr_direct_data (2 cycles later).
-        if (wr_burst_remaining > 1)
-            word_wr_data_next <= 1;
+        phy_dq_out <= word_data_captured[15:0];  // First BL=2 beat: low half (little-endian)
+        phy_dqm <= ~word_wstrb_captured[1:0];    // Byte enables for bytes 0,1
 
         state <= ST_WRITE_3;
     end
     ST_WRITE_3: begin
         dc <= 0;
 
-        // Second BL=2 beat
+        // Second BL=2 beat - SDRAM auto-accepts, no WRITE command needed
         phy_dq_oe <= 1;
-        phy_dq_out <= word_data_captured[31:16];
-        phy_dqm <= ~word_wstrb_captured[3:2];
+        phy_dq_out <= word_data_captured[31:16]; // Second BL=2 beat: high half (little-endian)
+        phy_dqm <= ~word_wstrb_captured[3:2];    // Byte enables for bytes 2,3
 
         if (wr_burst_remaining > 0) begin
+            // More words in burst: request next data, advance address
             wr_burst_remaining <= wr_burst_remaining - 4'd1;
-            addr <= addr + 2'd2;
-            // Capture next word from direct bus (requested 2 cycles ago in
-            // previous word's ST_WRITE_2, or in the initial setup for word 1).
-            // No gap cycle needed — data is ready.
-            word_data_captured <= burst_wr_direct_data;
-            word_wstrb_captured <= burst_wr_direct_strb;
-            state <= ST_WRITE_2;  // Back-to-back: 2 cycles/word!
+            addr <= addr + 2'd2;  // BL=2: 2 halfword addresses per 32-bit word
+            word_wr_data_next <= 1;
+            state <= ST_WRITE_5;
         end else begin
             state <= ST_WRITE_4;
         end
     end
     ST_WRITE_4: begin
-        phy_dqm <= 2'b00;
+        phy_dqm <= 2'b00;  // Clear byte masks
         if(dc == TIMING_WRITE-1+1) begin
+            // Leave row open: skip precharge, return to IDLE
             state <= ST_IDLE;
         end
+    end
+    // Burst write gap: 3 cycles for data to propagate through
+    // slave → pulse adapter → word_data input
+    // Cycle 1: slave processes word_wr_data_next, updates sdram_wdata
+    ST_WRITE_5: begin
+        phy_dq_oe <= 1;
+        phy_dqm <= 2'b11;  // Mask DQ during gap
+        state <= ST_WRITE_6;
+    end
+    // Cycle 2: pulse adapter copies sdram_wdata → word_data
+    ST_WRITE_6: begin
+        phy_dq_oe <= 1;
+        phy_dqm <= 2'b11;
+        state <= ST_WRITE_7;
+    end
+    // Cycle 3: capture word_data (now valid)
+    ST_WRITE_7: begin
+        word_data_captured <= word_data;
+        word_wstrb_captured <= word_wstrb;
+        phy_dq_oe <= 1;
+        phy_dqm <= 2'b00;
+        state <= ST_WRITE_2;
     end
 
 

@@ -30,8 +30,8 @@ cd "$VEXII_DIR"
 sbt "runMain vexiiriscv.Generate \
       --xlen=32 \
       --with-rvm --with-rva --with-rvf --with-rvc \
-      --with-rvZcbm \
-      --with-fetch-l1 --fetch-l1-sets=256 --fetch-l1-ways=1 --fetch-l1-refill-count=2 \
+      --with-rvZcbm --with-rvZcbz \
+      --with-fetch-l1 --fetch-l1-sets=128 --fetch-l1-ways=1 --fetch-l1-refill-count=2 \
       --fetch-l1-hardware-prefetch=nl --fetch-axi4 \
       --with-lsu-l1 --lsu-l1-sets=256 --lsu-l1-ways=2 \
       --lsu-l1-refill-count=2 --lsu-l1-writeback-count=2 \
@@ -42,7 +42,7 @@ sbt "runMain vexiiriscv.Generate \
       --regfile-async --allow-bypass-from=1 \
       --relaxed-src \
       --reset-vector=0 \
-      --region base=0,size=10000,main=0,exe=1 \
+      --region base=0,size=40000,main=0,exe=1 \
       --region base=10000000,size=4000000,main=1,exe=1 \
       --region base=20000000,size=10000000,main=0,exe=0 \
       --region base=30000000,size=8000000,main=1,exe=1 \

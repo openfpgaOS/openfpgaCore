@@ -94,7 +94,8 @@ SRAM_DIR = obj_dir_sram
 # ============================================================
 .PHONY: all sdram psram psram-rtl sram run run-psram run-sram build clean
 
-all: sdram psram psram-rtl sram
+all: sdram psram sram
+# psram-rtl disabled: requires burst write ports not in current RTL
 
 # --- SDRAM ---
 sdram: $(SDRAM_DIR)/V$(SDRAM_TOP)

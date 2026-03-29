@@ -265,14 +265,12 @@ wire lsu_rd_req = lsu_ar_valid;
 wire lsu_wr_req = lsu_aw_valid;
 wire lsu_req = lsu_rd_req | lsu_wr_req;
 
-// IO gets highest priority when pending — VexiiRiscv's pipeline stalls
-// on IO writes, so D-cache traffic must not starve the IO bus.
-wire io_pending = io_cmd_valid;
-wire lsu_grant = lsu_req & ~io_pending & (~fetch_req | ~last_grant_lsu);
-wire fetch_grant = fetch_req & ~lsu_grant & ~io_pending;
+// Priority: LSU > Fetch with round-robin, IO lowest
+wire lsu_grant = lsu_req & (~fetch_req | ~last_grant_lsu);
+wire fetch_grant = fetch_req & ~lsu_grant;
 wire lsu_rd_grant = lsu_grant & lsu_rd_req;
 wire lsu_wr_grant = lsu_grant & ~lsu_rd_req;
-wire io_grant = io_pending & ~lsu_grant & ~fetch_grant;
+wire io_grant = io_cmd_valid & ~lsu_grant & ~fetch_grant;
 
 // ============================================
 // Memory access FSM

@@ -62,14 +62,7 @@ module axi_psram_slave (
     output reg         psram_burst_rd,
     output reg  [5:0]  psram_burst_len,
     input  wire        psram_burst_rdata_valid,
-    input  wire [31:0] psram_burst_rdata,
-
-    // PSRAM sync burst write interface (to psram_controller)
-    output reg         psram_burst_wr,
-    output reg  [5:0]  psram_burst_wr_len,
-    output reg  [31:0] psram_burst_wdata,
-    output reg  [3:0]  psram_burst_wstrb,
-    input  wire        psram_burst_wdata_next  // Pulse: controller needs next word
+    input  wire [31:0] psram_burst_rdata
 );
 
 wire reset = ~reset_n;
@@ -83,8 +76,6 @@ localparam S_WR_CMD     = 4'd4;  // Issue word_wr, wait for busy
 localparam S_WR_WAIT    = 4'd5;  // Wait for !busy (write done)
 localparam S_WR_NEXT    = 4'd6;  // Accept next W beat
 localparam S_RD_DAT     = 4'd7;  // Present single-word read data on R channel
-localparam S_WR_BURST   = 4'd8;  // Issue burst_wr for CRAM targets
-localparam S_WR_BSTREAM = 4'd9;  // Stream W beats to burst write
 
 reg [3:0] state;
 
@@ -130,10 +121,6 @@ always @(posedge clk or posedge reset) begin
         psram_wstrb <= 0;
         psram_burst_rd <= 0;
         psram_burst_len <= 0;
-        psram_burst_wr <= 0;
-        psram_burst_wr_len <= 0;
-        psram_burst_wdata <= 0;
-        psram_burst_wstrb <= 0;
     end else begin
         // Defaults
         s_axi_arready <= 0;
@@ -144,7 +131,6 @@ always @(posedge clk or posedge reset) begin
         psram_rd <= 0;
         psram_wr <= 0;
         psram_burst_rd <= 0;
-        psram_burst_wr <= 0;
         case (state)
 
         S_IDLE: begin
@@ -164,7 +150,6 @@ always @(posedge clk or posedge reset) begin
                 addr_r <= s_axi_awaddr;
                 burst_len <= s_axi_awlen;
                 beat_count <= 0;
-                is_sram_target <= (s_axi_awaddr[27:24] == 4'hA);
                 if (s_axi_wvalid) begin
                     s_axi_wready <= 1;
                     psram_wdata <= s_axi_wdata;
@@ -308,46 +293,6 @@ always @(posedge clk or posedge reset) begin
                 psram_wdata <= s_axi_wdata;
                 psram_wstrb <= s_axi_wstrb;
                 state <= S_WR_CMD;
-            end
-        end
-
-        // ============================================
-        // Write path — sync burst (CRAM targets)
-        // ============================================
-        S_WR_BURST: begin
-            if (!cmd_issued) begin
-                if (!psram_busy) begin
-                    psram_burst_wr <= 1;
-                    psram_addr <= addr_r[27:2];
-                    psram_burst_wr_len <= burst_len[5:0];
-                    psram_burst_wdata <= psram_wdata;
-                    psram_burst_wstrb <= psram_wstrb;
-                    cmd_issued <= 1;
-                    psram_started <= 0;
-                    state <= S_WR_BSTREAM;
-                end
-            end
-        end
-
-        S_WR_BSTREAM: begin
-            if (psram_burst_wdata_next) begin
-                beat_count <= beat_count + 1;
-                $display("[%0t] WR_BSTREAM: next beat=%0d wvalid=%0d wdata=%08x",
-                         $time, beat_count+1, s_axi_wvalid, s_axi_wdata);
-                if (s_axi_wvalid) begin
-                    s_axi_wready <= 1;
-                    psram_burst_wdata <= s_axi_wdata;
-                    psram_burst_wstrb <= s_axi_wstrb;
-                end
-            end
-            if (psram_busy) psram_started <= 1;
-            if (psram_started && !psram_busy) begin
-                beat_count <= beat_count + 1;
-                cmd_issued <= 0;
-                psram_started <= 0;
-                s_axi_bvalid <= 1;
-                s_axi_bresp <= 2'b00;
-                state <= S_IDLE;
             end
         end
 
