@@ -195,12 +195,20 @@ memset:
     andi    t1, a0, 3
     bnez    t1, .Lset_byte
 
-    /* cbo.zero fast path: value==0, 64B-aligned, size >= 64 */
+    /* cbo.zero fast path: value==0, 64B-aligned, size >= 64, cached region.
+     * Only safe for cached SDRAM (0x10-0x13) and PSRAM (0x30-0x37). */
     bnez    a1, .Lset_sw_enter
     li      t1, 64
     bltu    a2, t1, .Lset_sw_enter
     andi    t1, a0, 63
     bnez    t1, .Lset_sw_enter
+    srli    t1, a0, 26        /* top 6 bits: 0x10-0x13 = 0b000100 = 4 */
+    li      t2, 4
+    beq     t1, t2, .Lset_zero_ok
+    srli    t1, a0, 27        /* top 5 bits: 0x30-0x37 = 0b00110 = 6 */
+    li      t2, 6
+    bne     t1, t2, .Lset_sw_enter
+.Lset_zero_ok:
 
     /* Zero fill using cbo.zero — one instruction per 64B cache line.
      * No SDRAM read (skips write-allocate), ~2x faster for large buffers. */
