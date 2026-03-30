@@ -1,17 +1,19 @@
 // Async SRAM controller wrapper for 32-bit CPU/video accesses.
 // Targets Analogue Pocket external SRAM (128K x 16 = 256KB).
-// Tristate data bus is handled EXTERNALLY (at top level) to avoid
-// synthesis issues with inout ports through module hierarchy.
+// Supports page-mode reads: LO→HI within same page uses fast
+// address change (~10ns) instead of full access time (~55ns).
+// Tristate data bus is handled EXTERNALLY (at top level).
 
 `default_nettype none
 
 module sram_controller #(
-    parameter WAIT_CYCLES = 6  // Wait cycles for SRAM access time (55ns chip, need ~6 cycles at 100MHz)
+    parameter WAIT_CYCLES = 6,  // Full access time (55ns = ~6 cycles at 100MHz)
+    parameter PAGE_CYCLES = 1   // Page-mode access time (10ns = ~1 cycle at 100MHz)
 )(
     input  wire        clk,
     input  wire        reset_n,
 
-    // 32-bit word interface (compatible with existing psram-style bus)
+    // 32-bit word interface
     input  wire        word_rd,
     input  wire        word_wr,
     input  wire [21:0] word_addr,
@@ -21,11 +23,11 @@ module sram_controller #(
     output reg         word_busy,
     output reg         word_q_valid,
 
-    // Physical SRAM signals (active-low controls, active-high dq_oe)
+    // Physical SRAM signals
     output reg  [16:0] sram_a,
     output reg  [15:0] sram_dq_out,
     input  wire [15:0] sram_dq_in,
-    output reg         sram_dq_oe,     // 1 = FPGA drives bus, 0 = SRAM drives bus
+    output reg         sram_dq_oe,
     output reg         sram_oe_n,
     output reg         sram_we_n,
     output reg         sram_ub_n,
@@ -42,10 +44,9 @@ module sram_controller #(
     localparam [3:0] ST_RD_LO_SETUP   = 4'd7;
     localparam [3:0] ST_RD_LO_WAIT    = 4'd8;
     localparam [3:0] ST_RD_LO_SAMPLE  = 4'd9;
-    localparam [3:0] ST_RD_HI_SETUP   = 4'd10;
-    localparam [3:0] ST_RD_HI_WAIT    = 4'd11;
-    localparam [3:0] ST_RD_HI_SAMPLE  = 4'd12;
-    localparam [3:0] ST_DONE          = 4'd13;
+    localparam [3:0] ST_RD_HI_WAIT    = 4'd10;
+    localparam [3:0] ST_RD_HI_SAMPLE  = 4'd11;
+    localparam [3:0] ST_DONE          = 4'd12;
 
     reg [3:0] state;
     reg       is_write;
@@ -156,7 +157,7 @@ module sram_controller #(
                     end
                 end
 
-                // ---- Read Low Half ----
+                // ---- Read Low Half (full access time) ----
                 ST_RD_LO_SETUP: begin
                     sram_a <= latched_addr_lo;
                     sram_dq_oe <= 1'b0;
@@ -178,24 +179,14 @@ module sram_controller #(
 
                 ST_RD_LO_SAMPLE: begin
                     word_q[15:0] <= sram_dq_in;
-                    sram_oe_n <= 1'b1;
-                    sram_ub_n <= 1'b1;
-                    sram_lb_n <= 1'b1;
-                    state <= ST_RD_HI_SETUP;
-                end
-
-                // ---- Read High Half ----
-                ST_RD_HI_SETUP: begin
+                    // Page mode: keep OE# low, just change address.
+                    // LO and HI addresses differ only in bit 0 (same page).
                     sram_a <= latched_addr_hi;
-                    sram_dq_oe <= 1'b0;
-                    sram_we_n <= 1'b1;
-                    sram_oe_n <= 1'b0;
-                    sram_ub_n <= 1'b0;
-                    sram_lb_n <= 1'b0;
-                    wait_cnt <= WAIT_CYCLES[3:0];
+                    wait_cnt <= PAGE_CYCLES[3:0];
                     state <= ST_RD_HI_WAIT;
                 end
 
+                // ---- Read High Half (page mode — fast) ----
                 ST_RD_HI_WAIT: begin
                     if (wait_cnt == 0) begin
                         state <= ST_RD_HI_SAMPLE;
@@ -214,9 +205,8 @@ module sram_controller #(
 
                 ST_DONE: begin
                     word_busy <= 1'b0;
-                    if (!is_write) begin
+                    if (!is_write)
                         word_q_valid <= 1'b1;
-                    end
                     state <= ST_IDLE;
                 end
 

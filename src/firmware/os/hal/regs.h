@@ -336,6 +336,7 @@ static inline volatile void *sdram_uncached(void *addr) {
  *   0x00000000  SDRAM   (CPU 0x10000000)
  *   0x20000000  CRAM0   (CPU 0x30000000 cached / 0x38000000 uncached)
  *   0x30000000  CRAM1   (CPU 0x31000000 cached / 0x39000000 uncached)
+ *   0x3A000000  SRAM    (CPU 0x3A000000 uncached)
  */
 static inline uint32_t sdram_to_bridge(void *addr) {
     return (uint32_t)addr - SDRAM_BASE;

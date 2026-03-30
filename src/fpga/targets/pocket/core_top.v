@@ -1425,6 +1425,117 @@ end
 wire cram0_bridge_wr_active = cram0_wr_pending | !cram0_wr_fifo_empty | cram0_wr_skid_nonempty;
 wire cram_bridge_active = cram0_bridge_wr_active | cram1_rd_pending;
 
+// ============================================================
+// Bridge SRAM Write Path: dcfifo (clk_74a -> clk_ram_controller)
+// Enables file reads to bounce through SRAM (256KB, separate bus)
+// to avoid SDRAM/PSRAM contention during bridge DMA.
+// Bridge address 0x3Axxxxxx → SRAM.
+// ============================================================
+wire bridge_sram_wr_detect = bridge_wr && (bridge_addr[31:24] == 8'h3A);
+
+// Skid buffer (4-entry) in clk_74a domain
+localparam integer SRAM_WR_SKID_DEPTH = 4;
+reg [55:0] sram_wr_skid_data [0:SRAM_WR_SKID_DEPTH-1];
+reg [1:0]  sram_wr_skid_wrptr;
+reg [1:0]  sram_wr_skid_rdptr;
+reg [2:0]  sram_wr_skid_count;
+wire       sram_wr_skid_empty = (sram_wr_skid_count == 0);
+wire       sram_wr_skid_pop = !sram_wr_skid_empty && !sram_wr_fifo_full;
+wire [55:0] sram_wr_skid_head =
+            (sram_wr_skid_rdptr == 2'd0) ? sram_wr_skid_data[0] :
+            (sram_wr_skid_rdptr == 2'd1) ? sram_wr_skid_data[1] :
+            (sram_wr_skid_rdptr == 2'd2) ? sram_wr_skid_data[2] :
+                                             sram_wr_skid_data[3];
+wire       sram_wr_skid_push = bridge_sram_wr_detect;
+wire       sram_wr_skid_has_space = (sram_wr_skid_count != 3'd4);
+wire       sram_wr_skid_push_ok = sram_wr_skid_push &&
+                                  (sram_wr_skid_has_space || sram_wr_skid_pop);
+
+wire       sram_wr_fifo_full;
+wire       sram_wr_fifo_empty;
+wire [55:0] sram_wr_fifo_q;
+
+always @(posedge clk_74a) begin
+    if (sram_wr_skid_pop)
+        sram_wr_skid_rdptr <= sram_wr_skid_rdptr + 2'd1;
+
+    if (sram_wr_skid_push_ok) begin
+        case (sram_wr_skid_wrptr)
+            2'd0: sram_wr_skid_data[0] <= {bridge_addr[23:2], 2'b00, bridge_wr_data[31:0]};
+            2'd1: sram_wr_skid_data[1] <= {bridge_addr[23:2], 2'b00, bridge_wr_data[31:0]};
+            2'd2: sram_wr_skid_data[2] <= {bridge_addr[23:2], 2'b00, bridge_wr_data[31:0]};
+            default: sram_wr_skid_data[3] <= {bridge_addr[23:2], 2'b00, bridge_wr_data[31:0]};
+        endcase
+        sram_wr_skid_wrptr <= sram_wr_skid_wrptr + 2'd1;
+    end
+
+    case ({sram_wr_skid_push_ok, sram_wr_skid_pop})
+        2'b10: sram_wr_skid_count <= sram_wr_skid_count + 3'd1;
+        2'b01: sram_wr_skid_count <= sram_wr_skid_count - 3'd1;
+        default: ;
+    endcase
+end
+
+// Async FIFO: clk_74a -> clk_ram_controller
+wire sram_wr_fifo_drain;
+
+dcfifo sram_wr_fifo (
+    .wrclk   (clk_74a),
+    .wrreq   (sram_wr_skid_pop),
+    .data    (sram_wr_skid_head),
+    .wrfull  (sram_wr_fifo_full),
+    .rdclk   (clk_ram_controller),
+    .rdreq   (sram_wr_fifo_drain),
+    .q       (sram_wr_fifo_q),
+    .rdempty (sram_wr_fifo_empty),
+    .aclr    (1'b0),
+    .wrusedw (), .wrempty (), .rdfull (), .rdusedw ()
+);
+defparam sram_wr_fifo.intended_device_family = "Cyclone V",
+    sram_wr_fifo.lpm_numwords  = 512,
+    sram_wr_fifo.lpm_showahead = "ON",
+    sram_wr_fifo.lpm_type      = "dcfifo",
+    sram_wr_fifo.lpm_width     = 56,
+    sram_wr_fifo.lpm_widthu    = 9,
+    sram_wr_fifo.overflow_checking  = "ON",
+    sram_wr_fifo.underflow_checking = "ON",
+    sram_wr_fifo.rdsync_delaypipe   = 5,
+    sram_wr_fifo.wrsync_delaypipe   = 5,
+    sram_wr_fifo.use_eab       = "ON";
+
+// SRAM write drain FSM
+reg        sram_wr_pending;
+reg        sram_wr_started;
+reg [21:0] sram_wr_addr_r;
+reg [31:0] sram_wr_data_r;
+
+initial begin
+    sram_wr_pending = 0;
+    sram_wr_started = 0;
+end
+
+assign sram_wr_fifo_drain = !sram_wr_fifo_empty && !sram_wr_pending;
+
+always @(posedge clk_ram_controller) begin
+    if (!sram_wr_pending) begin
+        if (!sram_wr_fifo_empty) begin
+            sram_wr_addr_r <= sram_wr_fifo_q[55:34];
+            sram_wr_data_r <= sram_wr_fifo_q[31:0];
+            sram_wr_pending <= 1;
+            sram_wr_started <= 0;
+        end
+    end else begin
+        if (!sram_wr_started && sram_word_busy)
+            sram_wr_started <= 1;
+        else if (sram_wr_started && !sram_word_busy) begin
+            sram_wr_pending <= 0;
+            sram_wr_started <= 0;
+        end
+    end
+end
+
+wire sram_bridge_wr_active = sram_wr_pending | !sram_wr_fifo_empty;
+
 // CRAM mux: Bridge FIFO drain has priority, then CRAM1 bridge reads, then CPU
 wire cpu_cram_rd = cpu_psram_rd & cpu_psram_sel_cram;
 wire cpu_cram_wr = cpu_psram_wr & cpu_psram_sel_cram;
@@ -1444,12 +1555,12 @@ assign psram32_burst_rd  = cram_bridge_active ? 1'b0 : cpu_cram_burst_rd;
 assign psram32_burst_len = cpu_psram_burst_len;
 
 
-// SRAM mux: CPU only (no burst support)
-assign sram_word_rd = cpu_psram_rd & cpu_psram_sel_sram;
-assign sram_word_wr = cpu_psram_wr & cpu_psram_sel_sram;
-assign sram_word_addr = cpu_psram_addr[21:0];
-assign sram_word_wdata = cpu_psram_wdata;
-assign sram_word_wstrb = cpu_psram_wstrb;
+// SRAM mux: bridge write drain has priority, CPU when bridge idle
+assign sram_word_rd = sram_bridge_wr_active ? 1'b0 : (cpu_psram_rd & cpu_psram_sel_sram);
+assign sram_word_wr = sram_wr_pending ? 1'b1 : (sram_bridge_wr_active ? 1'b0 : (cpu_psram_wr & cpu_psram_sel_sram));
+assign sram_word_addr = sram_wr_pending ? sram_wr_addr_r : cpu_psram_addr[21:0];
+assign sram_word_wdata = sram_wr_pending ? sram_wr_data_r : cpu_psram_wdata;
+assign sram_word_wstrb = sram_wr_pending ? 4'b1111 : cpu_psram_wstrb;
 
 // Read data / busy / valid mux back to axi_psram_slave
 // With psram_controller_32, CRAM0+CRAM1 are unified — no separate mux needed

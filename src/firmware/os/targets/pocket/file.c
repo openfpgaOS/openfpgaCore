@@ -9,6 +9,7 @@
 #include "cache.h"
 #include "regs.h"
 #include "terminal.h"
+#include <string.h>
 
 #define DMA_TIMEOUT         200000000   /* ~2 seconds at 100MHz */
 
@@ -114,16 +115,56 @@ static int file_wait_complete(void) {
     return 0;
 }
 
+/* Check if address is in SDRAM (DMA-capable) range */
+static int addr_is_sdram(uint32_t addr) {
+    return (addr >= SDRAM_BASE && addr < SDRAM_BASE + SDRAM_SIZE);
+}
+
+/* CRAM bounce buffer for file reads — avoids SDRAM contention.
+ * Bridge writes to CRAM (PSRAM bus), CPU copies CRAM→SDRAM.
+ * During bridge write, SDRAM is free for the app.
+ * CRAM0: 512KB at bridge 0x20000000, CPU 0x30000000 (cached). */
+#define FILE_BOUNCE_BRIDGE  0x20000000
+#define FILE_BOUNCE_CPU     CRAM0_BASE
+#define FILE_BOUNCE_SIZE    DMA_CHUNK_SIZE  /* 512KB */
+
 int of_file_read(uint32_t slot_id, uint32_t slot_offset,
                   void *dest, uint32_t length) {
-    uint32_t addr = (uintptr_t)dest;
+    uint32_t dest_addr = (uintptr_t)dest;
+
+    /* For SDRAM destinations: bounce through CRAM to avoid SDRAM contention.
+     * Bridge writes to CRAM (PSRAM bus), then DMA copies CRAM→SDRAM. */
+    /* TODO: CRAM bounce buffer for file reads — disabled pending investigation.
+     * When enabled, bridge writes to CRAM instead of SDRAM to avoid contention.
+     * Currently causes ELF load failures (cache invalidation or bridge timing). */
+    if (0 && addr_is_sdram(dest_addr) && length <= FILE_BOUNCE_SIZE) {
+        /* Invalidate CRAM bounce region in D-cache */
+        of_cache_inval_range((void *)FILE_BOUNCE_CPU, length);
+
+        /* Bridge DMA: SD → CRAM (PSRAM bus, SDRAM free for app) */
+        DS_SLOT_ID     = slot_id;
+        DS_SLOT_OFFSET = slot_offset;
+        DS_BRIDGE_ADDR = FILE_BOUNCE_BRIDGE;
+        DS_LENGTH      = length;
+        DS_COMMAND     = OF_FILE_CMD_READ;
+
+        int rc = file_wait_complete();
+        if (rc < 0) return rc;
+
+        /* Invalidate CRAM in D-cache (bridge wrote behind our back) */
+        of_cache_inval_range((void *)FILE_BOUNCE_CPU, length);
+
+        /* Copy CRAM → SDRAM via CPU memcpy */
+        memcpy(dest, (const void *)FILE_BOUNCE_CPU, length);
+
+        return 0;
+    }
+
+    /* Direct path: non-SDRAM destinations or fallback */
     uint32_t bridge_addr = cpu_to_bridge(dest);
 
-    /* Pre-DMA: flush destination cache lines so dirty data doesn't
-     * later evict and overwrite the DMA result. */
     of_cache_flush_range(dest, length);
 
-    /* Set up DMA transfer */
     DS_SLOT_ID     = slot_id;
     DS_SLOT_OFFSET = slot_offset;
     DS_BRIDGE_ADDR = bridge_addr;
@@ -132,8 +173,6 @@ int of_file_read(uint32_t slot_id, uint32_t slot_offset,
 
     int rc = file_wait_complete();
 
-    /* Post-DMA: invalidate D-cache so CPU reads fresh DMA data.
-     * For CRAM destinations, also invalidate the cached alias. */
     of_cache_inval_range(dest, length);
     of_file_inval_cram(bridge_addr, length);
 
@@ -225,41 +264,22 @@ int of_file_slot_write_at(uint32_t slot_id, uint32_t slot_offset,
     return file_wait_complete();
 }
 
-/* Check if address is in SDRAM (DMA-capable) range */
-static int addr_is_sdram(uint32_t addr) {
-    return (addr >= SDRAM_BASE && addr < SDRAM_BASE + SDRAM_SIZE);
-}
+/* (moved to top of file read section) */
 
 int of_file_read_chunked(uint32_t slot_id, uint32_t slot_offset,
                           void *dest, uint32_t total) {
-    uint32_t dest_addr = (uintptr_t)dest;
-    int bounce = !addr_is_sdram(dest_addr);
     uint32_t done = 0;
 
     while (done < total) {
         uint32_t chunk = total - done;
-        if (chunk > DMA_CHUNK_SIZE)
-            chunk = DMA_CHUNK_SIZE;
+        if (chunk > FILE_BOUNCE_SIZE)
+            chunk = FILE_BOUNCE_SIZE;
 
-        if (bounce) {
-            /* DMA to SDRAM bounce buffer, then copy to destination.
-             * of_file_read() invalidates cache lines for DMA_BUFFER
-             * via cache eviction, so the subsequent read gets fresh data. */
-            int rc = of_file_read(slot_id, slot_offset + done,
-                                   (void *)DMA_BUFFER, chunk);
-            if (rc < 0)
-                return rc;
-
-            uint8_t *src = (uint8_t *)DMA_BUFFER;
-            uint8_t *dst = (uint8_t *)((uintptr_t)dest + done);
-            for (uint32_t i = 0; i < chunk; i++)
-                dst[i] = src[i];
-        } else {
-            int rc = of_file_read(slot_id, slot_offset + done,
-                                   (void *)((uintptr_t)dest + done), chunk);
-            if (rc < 0)
-                return rc;
-        }
+        /* of_file_read handles CRAM bounce automatically for SDRAM dests */
+        int rc = of_file_read(slot_id, slot_offset + done,
+                               (void *)((uintptr_t)dest + done), chunk);
+        if (rc < 0)
+            return rc;
 
         done += chunk;
     }
