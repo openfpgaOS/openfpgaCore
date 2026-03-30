@@ -492,57 +492,50 @@ always @(posedge controller_clk) begin
     ST_WRITE_2: begin
         dc <= 0;
 
-        phy_a <= addr[9:0]; // A0-A9 column address
+        phy_a <= addr[9:0];
         cmd <= CMD_WRITE;
         phy_dq_oe <= 1;
-        phy_dq_out <= word_data_captured[15:0];  // First BL=2 beat: low half (little-endian)
-        phy_dqm <= ~word_wstrb_captured[1:0];    // Byte enables for bytes 0,1
+        phy_dq_out <= word_data_captured[15:0];
+        phy_dqm <= ~word_wstrb_captured[1:0];
+
+        // Request word N+1 during low-half output.
+        // Slave sees it next cycle, updates sdram_wdata.
+        // Data arrives on direct bus at ST_WRITE_5.
+        if (wr_burst_remaining > 0)
+            word_wr_data_next <= 1;
 
         state <= ST_WRITE_3;
     end
     ST_WRITE_3: begin
         dc <= 0;
 
-        // Second BL=2 beat - SDRAM auto-accepts, no WRITE command needed
         phy_dq_oe <= 1;
-        phy_dq_out <= word_data_captured[31:16]; // Second BL=2 beat: high half (little-endian)
-        phy_dqm <= ~word_wstrb_captured[3:2];    // Byte enables for bytes 2,3
+        phy_dq_out <= word_data_captured[31:16];
+        phy_dqm <= ~word_wstrb_captured[3:2];
 
         if (wr_burst_remaining > 0) begin
-            // More words in burst: request next data, advance address
             wr_burst_remaining <= wr_burst_remaining - 4'd1;
-            addr <= addr + 2'd2;  // BL=2: 2 halfword addresses per 32-bit word
-            word_wr_data_next <= 1;
-            state <= ST_WRITE_5;
+            addr <= addr + 2'd2;
+            state <= ST_WRITE_5;  // 1 gap cycle then capture
         end else begin
             state <= ST_WRITE_4;
         end
     end
     ST_WRITE_4: begin
-        phy_dqm <= 2'b00;  // Clear byte masks
+        phy_dqm <= 2'b00;
         if(dc == TIMING_WRITE-1+1) begin
-            // Leave row open: skip precharge, return to IDLE
             state <= ST_IDLE;
         end
     end
-    // Burst write: capture next word from direct bus.
-    // burst_wr_direct_data is wired directly from axi_sdram_slave's sdram_wdata,
-    // bypassing the pulse adapter. Data is valid 1 cycle after word_wr_data_next
-    // because the slave updates sdram_wdata via NBA when it sees wr_data_next.
-    // Burst write: capture next word from direct bus.
-    // ST_WRITE_3 fires word_wr_data_next (NBA).
-    // ST_WRITE_5: slave sees wr_data_next, updates sdram_wdata (NBA).
-    // ST_WRITE_6: sdram_wdata (= burst_wr_direct_data) now valid. Capture it.
+    // 3 cycles/word burst write: request in WRITE_2, gap in WRITE_5, capture+loop.
     ST_WRITE_5: begin
-        phy_dq_oe <= 1;
-        phy_dqm <= 2'b11;  // Mask DQ during gap
-        state <= ST_WRITE_6;
-    end
-    ST_WRITE_6: begin
         phy_dq_oe <= 1;
         phy_dqm <= 2'b00;
         word_data_captured <= burst_wr_direct_data;
         word_wstrb_captured <= burst_wr_direct_strb;
+        state <= ST_WRITE_2;
+    end
+    ST_WRITE_6: begin
         state <= ST_WRITE_2;
     end
     ST_WRITE_7: begin
