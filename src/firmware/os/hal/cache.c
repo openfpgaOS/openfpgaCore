@@ -105,3 +105,19 @@ void dma_fill(void *dst, uint32_t value, uint32_t len) {
     dma_start_fill((uint32_t)(uintptr_t)dst, value, len);
     dma_wait();
 }
+
+void dma_copy_async(void *dst, const void *src, uint32_t len) {
+    if (len == 0) return;
+    dcache_evict_range((void *)src, len);
+    dcache_evict_range(dst, len);
+    dma_start_copy((uint32_t)(uintptr_t)dst,
+                   (uint32_t)(uintptr_t)src, len);
+    /* Returns without waiting — caller must call dma_wait() */
+}
+
+void dma_fill_async(void *dst, uint32_t value, uint32_t len) {
+    if (len == 0) return;
+    dcache_evict_range(dst, len);
+    dma_start_fill((uint32_t)(uintptr_t)dst, value, len);
+    /* Returns without waiting — caller must call dma_wait() */
+}

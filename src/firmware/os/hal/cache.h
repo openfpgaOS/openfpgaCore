@@ -43,4 +43,12 @@ void dma_copy(void *dst, const void *src, uint32_t len);
  * len must be word-aligned. */
 void dma_fill(void *dst, uint32_t value, uint32_t len);
 
+/* Async DMA copy: starts transfer, returns immediately.
+ * Caller MUST call dma_wait() before accessing dst. */
+void dma_copy_async(void *dst, const void *src, uint32_t len);
+
+/* Async DMA fill: starts transfer, returns immediately.
+ * Caller MUST call dma_wait() before accessing dst. */
+void dma_fill_async(void *dst, uint32_t value, uint32_t len);
+
 #endif /* OFOS_CACHE_H */

@@ -768,6 +768,7 @@ set_global_assignment -name VERILOG_FILE ../../common/uart_rx.v
 set_global_assignment -name VERILOG_FILE io_sdram.v
 set_global_assignment -name VERILOG_FILE mf_pllram_133.v
 set_global_assignment -name VERILOG_FILE ../../common/psram_controller.v
+set_global_assignment -name VERILOG_FILE ../../common/psram_controller_32.v
 set_global_assignment -name SYSTEMVERILOG_FILE ../../common/psram.sv
 set_global_assignment -name VERILOG_FILE mf_linebuf.v
 set_global_assignment -name VERILOG_FILE ../../vendor/vexriscv/VexiiRiscv_Full.v
