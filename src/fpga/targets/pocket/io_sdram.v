@@ -412,8 +412,15 @@ always @(posedge controller_clk) begin
             addr <= burst_addr;
             length <= burst_len;
             word_busy <= 1;
-            if(row_open) begin
-                // Precharge open bank before burst ACT
+            // Row-hit check for burst reads (same logic as word reads)
+            if(row_open && (burst_addr[24:23] == open_bank) &&
+               (burst_addr[22:10] == open_row)) begin
+                // ROW HIT: skip precharge+ACT, go directly to READ
+                phy_ba <= burst_addr[24:23];
+                enable_dq_read_toggle <= 0;
+                state <= ST_READ_2;
+            end else if(row_open) begin
+                // ROW MISS: precharge open bank, then ACT
                 dc <= 0;
                 cmd <= CMD_PRECHG;
                 phy_ba <= open_bank;
@@ -422,6 +429,7 @@ always @(posedge controller_clk) begin
                 prechg_return <= 2'd0;
                 state <= ST_PRECHG_WAIT;
             end else begin
+                // NO ROW OPEN: normal ACT path
                 state <= ST_READ_0;
             end
         end else
@@ -608,11 +616,12 @@ always @(posedge controller_clk) begin
         if(!read_newrow && !word_op) enable_data_done <= 1;
         dc <= 0;
 
-        if(word_op && !read_newrow) begin
-            // Word operation complete: leave row open, return to IDLE
+        if(!read_newrow) begin
+            // No row crossing: leave row open, return to IDLE
+            // (applies to both word and burst reads)
             state <= ST_IDLE;
         end else begin
-            // Burst read or row-crossing: precharge as before
+            // Row-crossing: precharge and activate next row
             cmd <= CMD_PRECHG;
             phy_a[10] <= 0; // only precharge current bank
             row_open <= 0;

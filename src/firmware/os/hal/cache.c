@@ -1,12 +1,12 @@
 /*
  * openfpgaOS Cache Management HAL
  *
- * VexiiRiscv D-cache: 32KB, direct-mapped, write-back, 64B lines
- * (512 sets x 1 way x 64B).
+ * VexiiRiscv D-cache: 128KB, 2-way set-associative, write-back, 64B lines
+ * (1024 sets x 2 ways x 64B).
  *
  * Uses targeted conflict eviction for range operations: only touches
  * the cache sets that overlap the target range, instead of sweeping
- * all 512 sets.  For a 4KB DMA read this is 64 reads vs 512.
+ * all 1024 sets.
  *
  */
 
@@ -14,9 +14,9 @@
 #include "regs.h"
 
 #define DCACHE_LINE_SIZE  64
-#define DCACHE_SETS       256
+#define DCACHE_SETS       1024
 #define DCACHE_WAYS       2
-#define DCACHE_TOTAL      (DCACHE_SETS * DCACHE_WAYS * DCACHE_LINE_SIZE)  /* 32KB */
+#define DCACHE_TOTAL      (DCACHE_SETS * DCACHE_WAYS * DCACHE_LINE_SIZE)  /* 128KB */
 
 /* Eviction region: top of SDRAM, above all active data */
 #define EVICT_BASE  (SDRAM_BASE + SDRAM_SIZE - DCACHE_TOTAL)
@@ -24,7 +24,7 @@
 void of_cache_init(void) { }
 
 /* Evict specific cache sets covering [addr, addr+size).
- * 2-way set-associative: set index = bits [13:6] of address.
+ * 2-way set-associative: set index = bits [15:6] of address.
  * Must read 2 addresses per set (different tags) to evict both ways. */
 static void dcache_evict_range(void *addr, uint32_t size) {
     __asm__ volatile("fence" ::: "memory");

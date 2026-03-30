@@ -87,6 +87,7 @@ static void boot_vram_clear_row(int row) {
         boot_vram_putchar(col, row, ' ');
 }
 
+
 __attribute__((section(".text.boot")))
 static void clear_os_bss(void) {
     unsigned int *p = (unsigned int *)_os_bss_start;
@@ -102,13 +103,13 @@ static void flush_icache(void) {
 }
 
 /* Flush D-cache by conflict eviction.
- * Reads through 32KB from the top of SDRAM to force all dirty lines
- * out of the direct-mapped cache (512 sets x 64B = 32KB). */
+ * Reads through 128KB from the top of SDRAM to force all dirty lines
+ * out of the 2-way set-associative cache (1024 sets x 2 ways x 64B = 128KB). */
 __attribute__((section(".text.boot")))
 static void flush_dcache(void) {
     __asm__ volatile("fence" ::: "memory");
-    volatile char *p = (volatile char *)(SDRAM_BASE + SDRAM_SIZE - 32768);
-    for (uint32_t i = 0; i < 32768; i += 64)
+    volatile char *p = (volatile char *)(SDRAM_BASE + SDRAM_SIZE - 131072);
+    for (uint32_t i = 0; i < 131072; i += 64)
         (void)p[i];
     __asm__ volatile("fence" ::: "memory");
 }
@@ -564,7 +565,8 @@ load_from_sd:
 
     if (rc < 0) {
         boot_vram_clear_row(14);
-        boot_vram_puts(0, 14, "Load failed");
+        boot_vram_puts(0, 14, "Load failed E");
+        boot_vram_putchar(14, 14, '0' + (unsigned int)(-rc));
         pd_dbg_info = (unsigned int)(-rc);
         while (1) {}
     }

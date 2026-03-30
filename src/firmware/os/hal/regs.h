@@ -21,12 +21,12 @@
  * ====================================================================== */
 
 #define BRAM_BASE           0x00000000
-#define BRAM_SIZE           (192 * 1024)
+#define BRAM_SIZE           (64 * 1024)
 
 /* App BRAM region — available for app hot code after OS sections.
  * Top 512 bytes reserved for trap handler stack frame. */
 #define APP_BRAM_BASE       0x00002000
-#define APP_BRAM_END        (BRAM_BASE + BRAM_SIZE - 512)  /* 0x0002FE00 */
+#define APP_BRAM_END        (BRAM_BASE + BRAM_SIZE - 512)  /* 0x0000FE00 */
 #define APP_BRAM_SIZE       (APP_BRAM_END - APP_BRAM_BASE)
 
 #define SDRAM_BASE          0x10000000
@@ -169,6 +169,13 @@
 #define   DMA_CTRL_FILL     (1 << 1)
 #define DMA_STATUS          REG32(SYSREG_BASE + 0xD0)
 #define   DMA_STATUS_BUSY   (1 << 0)
+
+/* Audio DMA engine (0xE0) — reads from SDRAM ring buffer, feeds audio FIFO */
+#define ADMA_RING_BASE      REG32(SYSREG_BASE + 0xE0)  /* SDRAM byte address of ring */
+#define ADMA_RING_CFG       REG32(SYSREG_BASE + 0xE4)  /* [12:0]=size_log2, [16]=enable */
+#define ADMA_RING_WPTR      REG32(SYSREG_BASE + 0xE8)  /* Write pointer (entry index) */
+#define ADMA_RING_RPTR      REG32(SYSREG_BASE + 0xEC)  /* Read pointer (read-only) */
+#define   ADMA_ENABLE       (1 << 16)
 
 /* Low-level DMA start (no cache management — caller must handle) */
 static inline void dma_start_copy(uint32_t dst, uint32_t src, uint32_t len) {

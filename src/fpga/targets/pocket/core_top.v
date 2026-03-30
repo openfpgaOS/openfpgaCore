@@ -2008,7 +2008,12 @@ assign video_hs = vidout_hs;
         .dma_len(dma_len_w),
         .dma_start(dma_start_w),
         .dma_fill_mode(dma_fill_mode_w),
-        .dma_busy(dma_busy_w)
+        .dma_busy(dma_busy_w),
+        .adma_enable(adma_enable),
+        .adma_ring_base(adma_ring_base),
+        .adma_ring_size_log(adma_ring_size_log),
+        .adma_ring_wptr(adma_ring_wptr),
+        .adma_ring_rptr(adma_ring_rptr)
     );
 
     // DMA engine — memory-to-memory copy/fill via SDRAM arbiter M1
@@ -2118,11 +2123,11 @@ assign video_hs = vidout_hs;
     axi_sdram_arbiter sdram_arb (
         .clk(clk_cpu),
         .reset_n(1'b1),
-        // M0: Tied off (unused)
-        .m0_arvalid(1'b0), .m0_arready(),
-        .m0_araddr(32'b0),  .m0_arlen(8'b0),
-        .m0_rvalid(),       .m0_rdata(),
-        .m0_rresp(),        .m0_rlast(),
+        // M0: Audio DMA (highest priority)
+        .m0_arvalid(adma_m_arvalid), .m0_arready(adma_m_arready),
+        .m0_araddr(adma_m_araddr),   .m0_arlen(adma_m_arlen),
+        .m0_rvalid(adma_m_rvalid),   .m0_rdata(adma_m_rdata),
+        .m0_rresp(adma_m_rresp),     .m0_rlast(adma_m_rlast),
         .m0_awvalid(1'b0), .m0_awready(),
         .m0_awaddr(32'b0),  .m0_awlen(8'b0),
         .m0_wvalid(1'b0),  .m0_wready(),
@@ -2459,13 +2464,32 @@ opl3_wrapper opl3 (
 //
 // Audio output (dcfifo + I2S) with OPL3 mixing
 //
+// Audio DMA control signals
+wire        adma_enable;
+wire [31:0] adma_ring_base;
+wire [12:0] adma_ring_size_log;
+wire [12:0] adma_ring_wptr;
+wire [12:0] adma_ring_rptr;
+wire        adma_sample_wr;
+wire [31:0] adma_sample_data;
+wire        adma_m_arvalid, adma_m_arready;
+wire [31:0] adma_m_araddr;
+wire [7:0]  adma_m_arlen;
+wire        adma_m_rvalid;
+wire [31:0] adma_m_rdata;
+wire [1:0]  adma_m_rresp;
+wire        adma_m_rlast;
+
+wire        audio_mux_wr = adma_enable ? adma_sample_wr : audio_sample_wr;
+wire [31:0] audio_mux_data = adma_enable ? adma_sample_data : audio_sample_data;
+
 audio_output audio_out (
     .clk_sys      (clk_cpu),
     .clk_audio    (clk_core_12288),
     .reset_n      (reset_n),
 
-    .sample_wr    (audio_sample_wr),
-    .sample_data  (audio_sample_data),
+    .sample_wr    (audio_mux_wr),
+    .sample_data  (audio_mux_data),
     .fifo_level   (audio_fifo_level),
     .fifo_full    (audio_fifo_full),
 
@@ -2475,6 +2499,25 @@ audio_output audio_out (
     .audio_mclk   (audio_mclk),
     .audio_lrck   (audio_lrck),
     .audio_dac    (audio_dac)
+);
+
+audio_dma adma (
+    .clk(clk_cpu), .reset_n(reset_n),
+    .enable(adma_enable),
+    .ring_base(adma_ring_base),
+    .ring_size_log(adma_ring_size_log),
+    .ring_wptr(adma_ring_wptr),
+    .ring_rptr(adma_ring_rptr),
+    .fifo_level(audio_fifo_level),
+    .fifo_full(audio_fifo_full),
+    .sample_wr(adma_sample_wr),
+    .sample_data(adma_sample_data),
+    .m_arvalid(adma_m_arvalid), .m_arready(adma_m_arready),
+    .m_araddr(adma_m_araddr), .m_arlen(adma_m_arlen),
+    .m_arsize(), .m_arburst(),
+    .m_rvalid(adma_m_rvalid), .m_rready(),
+    .m_rdata(adma_m_rdata), .m_rresp(adma_m_rresp),
+    .m_rlast(adma_m_rlast)
 );
 
 

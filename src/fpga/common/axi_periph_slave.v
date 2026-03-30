@@ -140,7 +140,14 @@ module axi_periph_slave (
     output reg  [31:0] dma_len,
     output reg         dma_start,
     output reg         dma_fill_mode,
-    input wire         dma_busy
+    input wire         dma_busy,
+
+    // Audio DMA control
+    output reg         adma_enable,
+    output reg  [31:0] adma_ring_base,
+    output reg  [12:0] adma_ring_size_log,
+    output reg  [12:0] adma_ring_wptr,
+    input  wire [12:0] adma_ring_rptr
 );
 
 wire reset = ~reset_n;
@@ -161,17 +168,17 @@ assign sat_idx = 0; assign sat_field = 0; assign sat_wdata = 0;
 assign sprchar_wr = 0; assign sprchar_waddr = 0; assign sprchar_wdata = 0;
 
 // ============================================
-// BRAM (192KB = 49152 x 32-bit words)
+// BRAM (64KB = 16384 x 32-bit words)
 // ============================================
 wire [31:0] ram_rdata;
-reg  [15:0] ram_addr_mux;
+reg  [13:0] ram_addr_mux;
 wire ram_wren;
 
 altsyncram #(
     .operation_mode("SINGLE_PORT"),
     .width_a(32),
-    .widthad_a(16),
-    .numwords_a(49152),
+    .widthad_a(14),
+    .numwords_a(16384),
     .width_byteena_a(4),
     .lpm_type("altsyncram"),
     .outdata_reg_a("UNREGISTERED"),
@@ -350,6 +357,10 @@ always @(posedge clk) begin
         dma_start <= 0;
         dma_fill_mode <= 0;
         dma_started <= 0;
+        adma_enable <= 0;
+        adma_ring_base <= 0;
+        adma_ring_size_log <= 0;
+        adma_ring_wptr <= 0;
     end else begin
         cycle_counter <= cycle_counter + 1;
         pal_wr <= 0;
@@ -448,6 +459,14 @@ always @(posedge clk) begin
                     dma_started <= 1;  // Stays high until DMA engine is busy
                 end
 
+                // Audio DMA registers (0xE0-0xEC)
+                6'b111000: adma_ring_base <= req_wdata;
+                6'b111001: begin
+                    adma_ring_size_log <= req_wdata[12:0];
+                    adma_enable <= req_wdata[16];
+                end
+                6'b111010: adma_ring_wptr <= req_wdata[12:0];
+
                 default: ;
             endcase
         end
@@ -498,6 +517,11 @@ always @(*) begin
         6'b110010: sysreg_rdata = dma_len;
         6'b110011: sysreg_rdata = 32'h0;
         6'b110100: sysreg_rdata = {31'b0, dma_busy | dma_started};  // DMA_STATUS (0xD0)
+        // Audio DMA registers (0xE0-0xEC)
+        6'b111000: sysreg_rdata = adma_ring_base;
+        6'b111001: sysreg_rdata = {15'b0, adma_enable, 3'b0, adma_ring_size_log};
+        6'b111010: sysreg_rdata = {19'b0, adma_ring_wptr};
+        6'b111011: sysreg_rdata = {19'b0, adma_ring_rptr};
         default: sysreg_rdata = 32'h0;
     endcase
 end
@@ -585,26 +609,26 @@ wire beat_is_last = (burst_count == burst_len);
 // Terminal pending flag
 wire term_pending = (state == S_TERM);
 
-// BRAM address mux (256KB: 16-bit word address = [17:2])
-wire [15:0] bram_next_word = req_addr[17:2] + 16'd1;
+// BRAM address mux (64KB: 14-bit word address = [15:2])
+wire [13:0] bram_next_word = req_addr[15:2] + 14'd1;
 
 always @(*) begin
     case (state)
         S_IDLE: begin
             if (s_axi_arvalid && !s_axi_awvalid)
-                ram_addr_mux = ar_addr[17:2];
+                ram_addr_mux = ar_addr[15:2];
             else if (s_axi_awvalid)
-                ram_addr_mux = aw_addr[17:2];
+                ram_addr_mux = aw_addr[15:2];
             else
-                ram_addr_mux = 16'd0;
+                ram_addr_mux = 14'd0;
         end
         S_BRAM_RD: begin
             if (!beat_is_last)
                 ram_addr_mux = bram_next_word;
             else
-                ram_addr_mux = req_addr[17:2];
+                ram_addr_mux = req_addr[15:2];
         end
-        default: ram_addr_mux = req_addr[17:2];
+        default: ram_addr_mux = req_addr[15:2];
     endcase
 end
 

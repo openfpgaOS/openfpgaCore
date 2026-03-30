@@ -20,9 +20,16 @@
 /* Symbols from linker script */
 extern char __os_bss_end[];
 
-static void boot_banner(void) {
-    of_term_clear();
-    of_term_puts("\033[96m");  /* bright cyan */
+/* Draw boot logo. First call clears screen, subsequent calls just recolor. */
+static int logo_drawn = 0;
+
+static void boot_logo(const char *color) {
+    if (!logo_drawn) {
+        of_term_clear();
+        logo_drawn = 1;
+    }
+    of_term_set_pos(0, 0);
+    of_term_puts(color);
     of_term_putchar('\n');
     of_term_puts("       ___  ___  ___ ___\n");
     of_term_puts("      / _ \\/ _ \\/ -_) _ \\\n");
@@ -48,11 +55,14 @@ void os_main(void) {
     /* Initialize all hardware */
     of_init();
 
-    /* Show boot banner on terminal */
+    /* Boot stage: red logo = OS initializing */
     SYS_DISPLAY_MODE = DISPLAY_MODE_TERMINAL;
-    boot_banner();
+    boot_logo("\033[91m");  /* red */
 
     of_term_enable_uart_mirror();
+
+    /* Boot stage: green logo = HAL ready */
+    boot_logo("\033[92m");  /* green */
 
     of_term_puts("  HAL init.......... ");
     status_ok();
@@ -104,6 +114,10 @@ void os_main(void) {
     status_ok();
 
     of_timer_delay_ms(300);
+
+    /* Boot stage: blue logo = launching app */
+    boot_logo("\033[94m");  /* blue */
+    of_timer_delay_ms(200);
 
     /* Execute the app */
     char *argv[] = {"app", NULL};

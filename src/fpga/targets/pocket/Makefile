@@ -6,6 +6,7 @@ VEXII_DIR = ../../vendor/vexriscv/VexiiRiscv
 VEXII_OUT = ../../vendor/vexriscv/VexiiRiscv_Full.v
 TEST_DIR = ../../test
 RELEASE_DIR = ../../../../build/Cores/ThinkElastic.openfpgaOS
+ASSETS_DIR  = ../../../../build/Assets/openfpgaos/common
 QUARTUS = /home/alberto/altera_lite/25.1std/quartus/bin
 export PATH := $(QUARTUS):$(PATH)
 
@@ -45,7 +46,8 @@ deploy:
 	fi
 	../../../../tools/reverse_bits output_files/$(PROJECT).rbf $(RELEASE_DIR)/bitstream.rbf_r
 	cp $(FW_DIR)/os.bin $(RELEASE_DIR)/os.bin
-	@echo "Deployed to $(RELEASE_DIR)"
+	cp $(FW_DIR)/os.bin $(ASSETS_DIR)/os.bin
+	@echo "Deployed to $(RELEASE_DIR) + $(ASSETS_DIR)"
 
 flash: firmware
 	quartus_cdb $(PROJECT) --update_mif
@@ -55,6 +57,7 @@ flash: firmware
 	fi
 	../../../../tools/reverse_bits output_files/$(PROJECT).rbf $(RELEASE_DIR)/bitstream.rbf_r
 	cp $(FW_DIR)/os.bin $(RELEASE_DIR)/os.bin
+	cp $(FW_DIR)/os.bin $(ASSETS_DIR)/os.bin
 
 check:
 	quartus_map $(PROJECT)
