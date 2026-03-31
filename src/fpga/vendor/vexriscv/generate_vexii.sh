@@ -35,8 +35,9 @@ sbt "runMain vexiiriscv.Generate \
       --fetch-l1-hardware-prefetch=nl --fetch-axi4 \
       --with-lsu-l1 --lsu-l1-sets=1024 --lsu-l1-ways=2 \
       --lsu-l1-refill-count=2 --lsu-l1-writeback-count=2 \
-      --lsu-l1-store-buffer-slots=2 --lsu-l1-store-buffer-ops=32 \
+      --lsu-l1-store-buffer-slots=4 --lsu-l1-store-buffer-ops=32 \
       --lsu-l1-axi4 \
+      --lsu-software-prefetch --lsu-hardware-prefetch rpt \
       --with-btb --btb-sets=256 --relaxed-btb --relaxed-btb-hit \
       --with-gshare --with-ras \
       --regfile-async --allow-bypass-from=1 \
