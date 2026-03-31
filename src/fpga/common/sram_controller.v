@@ -8,7 +8,7 @@
 
 module sram_controller #(
     parameter WAIT_CYCLES = 6,  // Full access time (55ns = ~6 cycles at 100MHz)
-    parameter PAGE_CYCLES = 1   // Page-mode access time (10ns = ~1 cycle at 100MHz)
+    parameter PAGE_CYCLES = 3   // Page-mode access time (25ns + margin = ~3 cycles at 100MHz)
 )(
     input  wire        clk,
     input  wire        reset_n,
