@@ -22,6 +22,10 @@ static VerilatedVcdC *trace = nullptr;
 static uint64_t sim_time = 0;
 static uint64_t cycle_count = 0;
 
+// UART capture buffer
+static char uart_buf[4096];
+static int uart_pos = 0;
+
 static void tick() {
     tb->clk = 0;
     tb->eval();
@@ -35,8 +39,12 @@ static void tick() {
 
     // Capture UART output
     if (tb->uart_tx_valid) {
-        putchar(tb->uart_tx_byte);
+        char c = (char)tb->uart_tx_byte;
+        putchar(c);
         fflush(stdout);
+        if (uart_pos < (int)sizeof(uart_buf) - 1)
+            uart_buf[uart_pos++] = c;
+        uart_buf[uart_pos] = '\0';
     }
 }
 
@@ -207,6 +215,9 @@ int main(int argc, char **argv) {
     tb->sd_bd_we = 0;
     tb->sd_bd_addr = 0;
     tb->sd_bd_wdata = 0;
+    tb->cram_bd_we = 0;
+    tb->cram_bd_addr = 0;
+    tb->cram_bd_wdata = 0;
     for (int i = 0; i < 10; i++) tick();
 
     // Load firmware
@@ -267,17 +278,12 @@ int main(int argc, char **argv) {
     printf("--- UART output ---\n");
     tb->reset_n = 1;
 
-    // Run until result or timeout
-    int status = 0;
-    uint32_t last_pc_sample = 0;
-    int stall_count = 0;
+    // Run until UART shows result or timeout
     for (int i = 0; i < max_cycles; i++) {
         tick();
-        // Only check result register for self-test (no bram_path)
-        if (!bram_path && i % 1000 == 999) {
-            status = bram_read(RESULT_STATUS_ADDR);
-            if (status != 0) break;
-        }
+        // Check UART for result string (self-test prints "OK\n" or "X!\n")
+        if (!bram_path && uart_pos > 0 && uart_buf[uart_pos - 1] == '\n')
+            break;
         // Progress indicator
         if (i > 100000 && i % 500000 == 499999) {
             fprintf(stderr, "[%dK cycles]\n", (i + 1) / 1000);
@@ -285,20 +291,21 @@ int main(int argc, char **argv) {
     }
 
     printf("--- end UART ---\n");
-    status = bram_read(RESULT_STATUS_ADDR);
-    uint32_t value = bram_read(RESULT_VALUE_ADDR);
-
     printf("\nCPU ran for %lu cycles\n", (unsigned long)cycle_count);
 
-    if (status == 1) {
-        printf("PASS (value=0x%08x)\n", value);
-    } else if (status == 2) {
-        printf("FAIL (value=0x%08x)\n", value);
+    // Determine pass/fail from UART output
+    int pass = (strstr(uart_buf, "OK") != NULL);
+    int fail = (strstr(uart_buf, "X!") != NULL);
+
+    if (pass) {
+        printf("PASS\n");
+    } else if (fail) {
+        printf("FAIL (SDRAM read mismatch)\n");
     } else {
-        printf("TIMEOUT after %d cycles (status=%d)\n", max_cycles, status);
+        printf("TIMEOUT (no UART result after %d cycles)\n", max_cycles);
     }
 
-    printf("\n=== Result: %s ===\n", status == 1 ? "PASS" : "FAIL");
+    printf("\n=== Result: %s ===\n", pass ? "PASS" : "FAIL");
     delete tb;
-    return (status == 1) ? 0 : 1;
+    return pass ? 0 : 1;
 }

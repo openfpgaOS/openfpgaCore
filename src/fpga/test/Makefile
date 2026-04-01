@@ -4,6 +4,7 @@
 
 COMMON_DIR = ../common
 TARGET_DIR = ../targets/pocket
+VENDOR_DIR = ../vendor
 
 VERILATOR = verilator
 VERILATOR_FLAGS = --cc --exe --build \
@@ -76,6 +77,29 @@ psram_controller_test.v: $(COMMON_DIR)/psram_controller.v
 	  $< > $@
 
 # ============================================================
+# System (CPU + SDRAM + PSRAM + Bridge save path)
+# ============================================================
+SYSTEM_SRCS = \
+	tb_system.v \
+	bram_word_model.v \
+	sdram_word_model.v \
+	psram_word_model.v \
+	bridge_responder.v \
+	$(COMMON_DIR)/cpu_system.v \
+	$(COMMON_DIR)/word_sdram_arbiter.v \
+	$(COMMON_DIR)/bridge_master.v \
+	$(VENDOR_DIR)/vexriscv/VexiiRiscv_Full.v \
+	$(TARGET_DIR)/apf/common.v
+
+SYSTEM_CPP = tb_system_main.cpp
+SYSTEM_TOP = tb_system
+SYSTEM_DIR = obj_dir_system_wb
+
+SYSTEM_VERILATOR_FLAGS = --cc --exe --build \
+	-Wall -Wno-fatal -Wno-BADVLTPRAGMA -Wno-TIMESCALEMOD \
+	-CFLAGS "-std=c++17 -O2"
+
+# ============================================================
 # SRAM
 # ============================================================
 SRAM_SRCS = \
@@ -134,6 +158,15 @@ $(SRAM_DIR)/V$(SRAM_TOP): $(SRAM_SRCS) $(SRAM_CPP)
 		$(SRAM_SRCS) $(SRAM_CPP)
 
 run-sram: sram
+
+# --- System ---
+system: $(SYSTEM_DIR)/V$(SYSTEM_TOP)
+	./$(SYSTEM_DIR)/V$(SYSTEM_TOP)
+
+$(SYSTEM_DIR)/V$(SYSTEM_TOP): $(SYSTEM_SRCS) $(SYSTEM_CPP)
+	$(VERILATOR) $(SYSTEM_VERILATOR_FLAGS) \
+		--top-module $(SYSTEM_TOP) --Mdir $(SYSTEM_DIR) \
+		$(SYSTEM_SRCS) $(SYSTEM_CPP)
 
 # --- Clean ---
 clean:
