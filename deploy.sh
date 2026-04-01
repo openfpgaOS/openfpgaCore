@@ -39,18 +39,17 @@ if [ -n "$DEST" ] && [ -f "$DEST/src/sdk/sdk.mk" ]; then
 
     # ── Core configs → dist/sdk/core/ ─────────────────────────────
     mkdir -p "$DEST/dist/sdk/core"
-    for f in core.json data.json audio.json video.json input.json interact.json variants.json; do
-        [ -f "dist/core/$f" ] && cp "dist/core/$f" "$DEST/dist/sdk/core/"
+    for f in "$BUILD_DIR"/*.json "$BUILD_DIR"/icon.bin; do
+        [ -f "$f" ] && cp "$f" "$DEST/dist/sdk/core/"
     done
-    [ -f dist/core/icon.bin ] && cp dist/core/icon.bin "$DEST/dist/sdk/core/"
     echo -e "  ${GREEN}✓${RESET} Core configs"
 
     # ── Platform files → dist/sdk/platform/ ────────────────────────
     mkdir -p "$DEST/dist/sdk/platform/_images"
-    [ -f dist/platforms/openfpgaos.json ] && \
-        cp dist/platforms/openfpgaos.json "$DEST/dist/sdk/platform/"
-    [ -f dist/platforms/_images/openfpgaos.bin ] && \
-        cp dist/platforms/_images/openfpgaos.bin "$DEST/dist/sdk/platform/_images/"
+    [ -f build/Platforms/openfpgaos.json ] && \
+        cp build/Platforms/openfpgaos.json "$DEST/dist/sdk/platform/"
+    [ -f build/Platforms/_images/openfpgaos.bin ] && \
+        cp build/Platforms/_images/openfpgaos.bin "$DEST/dist/sdk/platform/_images/"
     echo -e "  ${GREEN}✓${RESET} Platform files"
 
     # ── SDK API headers (committed) ────────────────────────────────
