@@ -77,6 +77,18 @@ psram_controller_test.v: $(COMMON_DIR)/psram_controller.v
 	  $< > $@
 
 # ============================================================
+# Arbiter (multi-master SDRAM stress test)
+# ============================================================
+ARB_SRCS = \
+	tb_arb.v \
+	sdram_word_model.v \
+	$(COMMON_DIR)/word_sdram_arbiter.v
+
+ARB_CPP = tb_arb_main.cpp
+ARB_TOP = tb_arb
+ARB_DIR = obj_dir_arb
+
+# ============================================================
 # System (CPU + SDRAM + PSRAM + Bridge save path)
 # ============================================================
 SYSTEM_SRCS = \
@@ -157,6 +169,14 @@ $(SRAM_DIR)/V$(SRAM_TOP): $(SRAM_SRCS) $(SRAM_CPP)
 		$(SRAM_SRCS) $(SRAM_CPP)
 
 run-sram: sram
+
+# --- Arbiter ---
+arb: $(ARB_DIR)/V$(ARB_TOP)
+	./$(ARB_DIR)/V$(ARB_TOP)
+
+$(ARB_DIR)/V$(ARB_TOP): $(ARB_SRCS) $(ARB_CPP)
+	$(VERILATOR) $(VERILATOR_FLAGS) --top-module $(ARB_TOP) --Mdir $(ARB_DIR) \
+		$(ARB_SRCS) $(ARB_CPP)
 
 # --- System ---
 system: $(SYSTEM_DIR)/V$(SYSTEM_TOP)

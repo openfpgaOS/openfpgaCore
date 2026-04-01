@@ -97,10 +97,12 @@ localparam ST_IDLE   = 2'd0;
 localparam ST_ACTIVE = 2'd1;
 
 reg [1:0] arb_state;
-reg [1:0] grant;  // 0=M0, 1=M1, 2=M2, 3=M3
-reg       cmd_forwarded;  // Pulse already sent to io_sdram
-reg       io_busy_seen;   // io_sdram busy was seen (transaction started)
-reg       wr_data_fwd_d1; // 1-cycle delay for burst write data forwarding
+reg [1:0] grant;       // 0=M0, 1=M1, 2=M2, 3=M3
+reg       cmd_forwarded;
+reg       io_busy_seen;
+reg       wr_data_fwd_d1;
+reg [1:0] last_grant;  // Anti-starvation: skip last-served master for 1 round
+reg       skip_last;   // When set, last_grant is deprioritized
 
 // Request detection
 wire m0_req = m0_rd;
@@ -127,6 +129,8 @@ always @(posedge clk or posedge reset) begin
         cmd_forwarded <= 0;
         io_busy_seen <= 0;
         wr_data_fwd_d1 <= 0;
+        last_grant <= 0;
+        skip_last <= 0;
         sdram_rd <= 0;
         sdram_wr <= 0;
         sdram_addr <= 0;
@@ -147,18 +151,31 @@ always @(posedge clk or posedge reset) begin
             cmd_forwarded <= 0;
             io_busy_seen <= 0;
             // Fixed priority: M0 > M1 > M3 > M2
-            if (m0_req) begin
+            // Anti-starvation: if skip_last is set, defer last_grant master
+            // for one round so lower-priority masters get a chance.
+            if (m0_req && !(skip_last && last_grant == 2'd0 && (m1_req || m2_req || m3_req))) begin
                 grant <= 2'd0;
                 arb_state <= ST_ACTIVE;
-            end else if (m1_req) begin
+                skip_last <= 0;
+            end else if (m1_req && !(skip_last && last_grant == 2'd1 && (m2_req || m3_req))) begin
                 grant <= 2'd1;
                 arb_state <= ST_ACTIVE;
-            end else if (m3_req) begin
+                skip_last <= 0;
+            end else if (m3_req && !(skip_last && last_grant == 2'd3 && m2_req)) begin
                 grant <= 2'd3;
                 arb_state <= ST_ACTIVE;
+                skip_last <= 0;
             end else if (m2_req) begin
                 grant <= 2'd2;
                 arb_state <= ST_ACTIVE;
+                skip_last <= 0;
+            end else if (skip_last && (m0_req || m1_req || m3_req)) begin
+                // Skipped master is the only one requesting — serve it anyway
+                if (m0_req) grant <= 2'd0;
+                else if (m1_req) grant <= 2'd1;
+                else grant <= 2'd3;
+                arb_state <= ST_ACTIVE;
+                skip_last <= 0;
             end
         end
 
@@ -187,16 +204,17 @@ always @(posedge clk or posedge reset) begin
             end
 
             // Transaction complete: io_sdram went busy then returned to idle
-            // Master has also deasserted rd/wr (processed the accepted)
             if (cmd_forwarded && io_busy_seen && !sdram_busy) begin
                 cmd_forwarded <= 0;
                 io_busy_seen <= 0;
-                // Check if same master has another request immediately
-                if (mux_rd || mux_wr) begin
-                    // Stay granted — new transaction from same master
-                end else begin
-                    arb_state <= ST_IDLE;
-                end
+                last_grant <= grant;
+                // If other masters are waiting, skip this master for 1 round
+                // to prevent starvation
+                skip_last <= (m0_req && grant != 2'd0) ||
+                             (m1_req && grant != 2'd1) ||
+                             (m2_req && grant != 2'd2) ||
+                             (m3_req && grant != 2'd3);
+                arb_state <= ST_IDLE;
             end
         end
 
