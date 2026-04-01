@@ -151,8 +151,6 @@ fi
 
 echo "Found Pocket SD card at: $POCKET_SD"
 
-make fw
-
 rsync -av --checksum build/ "$POCKET_SD/"
 
 sync
