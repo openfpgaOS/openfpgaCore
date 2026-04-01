@@ -530,8 +530,10 @@ always @(posedge clk or posedge reset) begin
         // ============================================
         // SDRAM burst write: ACK each beat, track completion
         // ============================================
+        // Beat 0 was ACKed in FSM_SDRAM_WR. Beats 1..N ACKed here on
+        // wr_data_next. burst_count tracks ACKed beats (starting from 0).
+        // burst_len_r = N-1 for N total beats.
         FSM_SDRAM_WR_BURST: begin
-            // When SDRAM needs next word, provide data and ACK to CPU
             if (m_sdram_wr_data_next) begin
                 burst_count <= burst_count + 1;
                 if (active_bus == BUS_LSU && lsu_cyc && lsu_stb) begin
@@ -541,19 +543,16 @@ always @(posedge clk or posedge reset) begin
                 end
             end
             if (m_sdram_busy) wr_busy_seen <= 1;
-            // SDRAM done: ACK the final beat and go to IDLE.
-            // The last beat may not have gotten an ACK via wr_data_next
-            // (CPU STB may lag), so ACK it now unconditionally.
             if (wr_busy_seen && !m_sdram_busy) begin
                 cmd_issued <= 0;
                 started <= 0;
-                if (active_bus == BUS_LSU && lsu_cyc && lsu_stb)
-                    lsu_ack <= 1;
-                else if (active_bus == BUS_IO) begin
+                if (active_bus == BUS_IO) begin
                     io_rsp_valid <= 1;
                     io_rsp_data <= 0;
                     io_rsp_error <= 0;
                 end
+                // All beats already ACKed via wr_data_next + beat 0 ACK.
+                // Do NOT send another ACK here — it would be spurious.
                 fsm_state <= FSM_IDLE;
             end
         end
