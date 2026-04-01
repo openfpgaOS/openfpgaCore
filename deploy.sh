@@ -76,18 +76,7 @@ if [ -n "$DEST" ] && [ -f "$DEST/src/sdk/sdk.mk" ]; then
     sed -i 's|"../of_\([^"]*\)"|"of_\1"|g' "$DEST"/src/sdk/libc/*.h 2>/dev/null
     echo -e "  ${GREEN}✓${RESET} Libc headers"
 
-    # ── Pre-built CRT objects (of_posix.o, of_midi.o) ────────────
-    # Rebuild from SDK source against the just-updated headers.
-    mkdir -p "$DEST/src/sdk/crt"
-    CROSS=$(which riscv64-unknown-elf-gcc >/dev/null 2>&1 && echo riscv64-unknown-elf- || echo riscv64-elf-)
-    GCC_INC=$(${CROSS}gcc -print-file-name=include)
-    CRT_CFLAGS="-march=rv32imafc -mabi=ilp32f -O2 -Wall -Wextra -ffreestanding -nostdlib -nostartfiles -ffunction-sections -fdata-sections -fno-builtin -nostdinc -I$DEST/src/sdk/libc -I$DEST/src/sdk/include -isystem $GCC_INC"
-    for src_c in "$DEST"/src/sdk/of_posix.c "$DEST"/src/sdk/of_midi.c; do
-        [ -f "$src_c" ] || continue
-        obj="$DEST/src/sdk/crt/$(basename "${src_c%.c}.o")"
-        ${CROSS}gcc $CRT_CFLAGS -c -o "$obj" "$src_c" 2>/dev/null
-        echo -e "  ${GREEN}✓${RESET} Rebuilt $(basename "$obj")"
-    done
+    # ── CRT objects — rebuilt by SDK's own Makefile, not here ──────
 
     # App source lives in the SDK repo (single source of truth).
     # deploy.sh only syncs runtime, configs, and API headers.
