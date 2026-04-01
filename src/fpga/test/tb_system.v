@@ -36,6 +36,12 @@ module tb_system (
     input  wire [21:0] cram_bd_addr,
     input  wire [31:0] cram_bd_wdata,
 
+    // Save capture verification (from bridge responder)
+    output wire        save_complete,
+    output wire [31:0] save_captured_words,
+    input  wire [15:0] save_bd_addr,
+    output wire [31:0] save_bd_rdata,
+
     // Debug
     output wire [31:0] dbg_fetch_addr,
     output wire        dbg_fetch_valid,
@@ -148,15 +154,6 @@ bram_word_model bram (
 // SDRAM: word_sdram_arbiter → sdram_word_model
 // ============================================================
 
-// Bridge master signals (M3 on arbiter)
-wire        bridge_m_rd, bridge_m_wr;
-wire [23:0] bridge_m_addr;
-wire [31:0] bridge_m_wdata;
-wire [3:0]  bridge_m_wstrb, bridge_m_burst_len, bridge_m_burst_wr_len;
-wire [31:0] bridge_m_rdata;
-wire        bridge_m_busy, bridge_m_accepted, bridge_m_rdata_valid;
-wire        bridge_m_wr_data_next;
-
 // Arbiter → SDRAM model
 wire        arb_sdram_rd, arb_sdram_wr;
 wire [23:0] arb_sdram_addr;
@@ -185,14 +182,14 @@ word_sdram_arbiter sdram_arb (
     .m2_rdata(cpu_sdram_rdata), .m2_busy(cpu_sdram_busy),
     .m2_accepted(cpu_sdram_accepted), .m2_rdata_valid(cpu_sdram_rdata_valid),
     .m2_wr_data_next(cpu_sdram_wr_data_next),
-    // M3: Bridge
-    .m3_rd(bridge_m_rd), .m3_wr(bridge_m_wr),
-    .m3_addr(bridge_m_addr), .m3_wdata(bridge_m_wdata),
-    .m3_wstrb(bridge_m_wstrb),
-    .m3_burst_len(bridge_m_burst_len), .m3_burst_wr_len(bridge_m_burst_wr_len),
-    .m3_rdata(bridge_m_rdata), .m3_busy(bridge_m_busy),
-    .m3_accepted(bridge_m_accepted), .m3_rdata_valid(bridge_m_rdata_valid),
-    .m3_wr_data_next(bridge_m_wr_data_next),
+    // M3: Bridge (tied off — saves go direct CRAM→SD, not through SDRAM)
+    .m3_rd(1'b0), .m3_wr(1'b0),
+    .m3_addr(24'b0), .m3_wdata(32'b0),
+    .m3_wstrb(4'b0),
+    .m3_burst_len(4'b0), .m3_burst_wr_len(4'b0),
+    .m3_rdata(), .m3_busy(),
+    .m3_accepted(), .m3_rdata_valid(),
+    .m3_wr_data_next(),
     // SDRAM output
     .sdram_rd(arb_sdram_rd), .sdram_wr(arb_sdram_wr),
     .sdram_addr(arb_sdram_addr), .sdram_wdata(arb_sdram_wdata),
@@ -247,12 +244,8 @@ psram_word_model psram (
 );
 
 // ============================================================
-// Bridge responder + bridge_master (save path)
+// Bridge responder (save path: reads CRAM1, captures to verify buffer)
 // ============================================================
-
-wire [55:0] bridge_fifo_q;
-wire        bridge_fifo_empty;
-wire        bridge_fifo_rdreq;
 
 bridge_responder bridge_resp (
     .clk(clk), .reset_n(reset_n),
@@ -265,23 +258,11 @@ bridge_responder bridge_resp (
     .target_dataslot_done(ds_done),
     .cram_rd(bridge_cram_rd), .cram_addr(bridge_cram_addr),
     .cram_rdata(bridge_cram_rdata), .cram_rdata_valid(bridge_cram_rdata_valid),
-    .fifo_q(bridge_fifo_q), .fifo_empty(bridge_fifo_empty),
-    .fifo_rdreq(bridge_fifo_rdreq)
-);
-
-bridge_master bridge_m (
-    .clk(clk), .reset_n(reset_n),
-    .fifo_q(bridge_fifo_q), .fifo_empty(bridge_fifo_empty),
-    .fifo_rdreq(bridge_fifo_rdreq),
-    .bridge_rd_req(1'b0), .bridge_rd_addr(24'b0),
-    .bridge_rd_data(), .bridge_rd_done(),
-    .m_rd(bridge_m_rd), .m_wr(bridge_m_wr),
-    .m_addr(bridge_m_addr), .m_wdata(bridge_m_wdata),
-    .m_wstrb(bridge_m_wstrb),
-    .m_burst_len(bridge_m_burst_len), .m_burst_wr_len(bridge_m_burst_wr_len),
-    .m_rdata(bridge_m_rdata), .m_busy(bridge_m_busy),
-    .m_accepted(bridge_m_accepted), .m_rdata_valid(bridge_m_rdata_valid),
-    .idle(), .wr_idle()
+    .save_complete(save_complete),
+    .save_captured_words(save_captured_words),
+    .save_slot_id(),
+    .save_bd_addr(save_bd_addr),
+    .save_bd_rdata(save_bd_rdata)
 );
 
 // ============================================================

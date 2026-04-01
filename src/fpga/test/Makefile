@@ -87,7 +87,6 @@ SYSTEM_SRCS = \
 	bridge_responder.v \
 	$(COMMON_DIR)/cpu_system.v \
 	$(COMMON_DIR)/word_sdram_arbiter.v \
-	$(COMMON_DIR)/bridge_master.v \
 	$(VENDOR_DIR)/vexriscv/VexiiRiscv_Full.v \
 	$(TARGET_DIR)/apf/common.v
 
