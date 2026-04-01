@@ -95,7 +95,7 @@ chip32:
 	$(MAKE) -C $(CHIP32_DIR)
 
 # Package release (uses existing bitstream)
-package: $(REVERSE_BITS) check-bitstream firmware chip32 release-dirs copy-bitstream copy-chip32 copy-firmware copy-json copy-platform copy-icon install-txt
+package: $(REVERSE_BITS) check-bitstream release-dirs copy-bitstream copy-chip32 copy-firmware copy-json copy-platform copy-icon install-txt
 	@echo ""
 	@echo "Build complete!"
 	@echo "Release package: $(OUTPUT_DIR)/"
