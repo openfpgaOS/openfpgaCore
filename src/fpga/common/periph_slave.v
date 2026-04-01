@@ -1,46 +1,34 @@
 //
-// AXI4 Peripheral Slave (openfpgaOS)
+// Peripheral Slave (openfpgaOS)
 // Handles all local/peripheral accesses from the CPU:
 //   - BRAM (64KB, burst reads for I-cache line fills)
 //   - System registers (cycle counter, display, palette, dataslot, controllers)
 //   - Terminal forwarding
 //   - Audio/Link/OPL register dispatch
 //
-// AXI4 slave (NOT AXI4-Lite) — iBus issues burst reads to BRAM for I-cache fills.
+// Word-level slave interface — no AXI4 overhead.
+// Burst reads supported for I-cache line fills from BRAM.
 //
 
 `default_nettype none
 
-module axi_periph_slave (
+module periph_slave (
     input wire clk,
     input wire reset_n,
 
-    // AXI4 slave interface (from cpu_system m_local)
-    input  wire        s_axi_arvalid,
-    output reg         s_axi_arready,
-    input  wire [31:0] s_axi_araddr,
-    input  wire [7:0]  s_axi_arlen,
+    // Word-level slave interface (from cpu_system)
+    input  wire        req_rd,          // read request pulse
+    input  wire        req_wr,          // write request pulse
+    input  wire [31:0] req_addr_in,     // address
+    input  wire [31:0] req_wdata_in,    // write data
+    input  wire [3:0]  req_wstrb_in,    // byte enables
+    input  wire [7:0]  req_burst_len_in,// burst length for reads (0=single)
 
-    output reg         s_axi_rvalid,
-    input  wire        s_axi_rready,
-    output reg  [31:0] s_axi_rdata,
-    output reg  [1:0]  s_axi_rresp,
-    output reg         s_axi_rlast,
-
-    input  wire        s_axi_awvalid,
-    output reg         s_axi_awready,
-    input  wire [31:0] s_axi_awaddr,
-    input  wire [7:0]  s_axi_awlen,
-
-    input  wire        s_axi_wvalid,
-    output reg         s_axi_wready,
-    input  wire [31:0] s_axi_wdata,
-    input  wire [3:0]  s_axi_wstrb,
-    input  wire        s_axi_wlast,
-
-    output reg         s_axi_bvalid,
-    input  wire        s_axi_bready,
-    output reg  [1:0]  s_axi_bresp,
+    output reg  [31:0] rsp_rdata,       // read data
+    output reg         rsp_rdata_valid, // read data strobe (one per beat)
+    output reg         rsp_rdata_last,  // last beat of read burst
+    output reg         rsp_wr_done,     // write complete pulse
+    output wire        rsp_busy,        // slave busy (terminal, OPL)
 
     // CDC inputs
     input wire         dataslot_allcomplete,
@@ -153,10 +141,8 @@ module axi_periph_slave (
 wire reset = ~reset_n;
 
 // ============================================
-// Address decode (combinatorial, on AXI address channels)
+// Address decode
 // ============================================
-wire [31:0] ar_addr = s_axi_araddr;
-wire [31:0] aw_addr = s_axi_awaddr;
 
 // Tile/sprite stub tie-offs (engines removed, rendering in software)
 assign tile_enable = 0;  assign tile_priority = 0;
@@ -581,9 +567,8 @@ localparam S_BRAM_RD   = 3'd1;
 localparam S_PERIPH_RD = 3'd2;
 localparam S_PERIPH_WR = 3'd3;
 localparam S_TERM      = 3'd4;
-localparam S_WR_NEXT   = 3'd5;
-localparam S_BRAM_WR   = 3'd6;
-localparam S_OPL_WAIT  = 3'd7;
+localparam S_BRAM_WR   = 3'd5;
+localparam S_OPL_WAIT  = 3'd6;
 
 reg [2:0] state;
 
@@ -606,6 +591,9 @@ reg reg_uart;
 
 wire beat_is_last = (burst_count == burst_len);
 
+// Busy: slave is processing a request (not idle)
+assign rsp_busy = (state != S_IDLE);
+
 // Terminal pending flag
 wire term_pending = (state == S_TERM);
 
@@ -614,14 +602,7 @@ wire [13:0] bram_next_word = req_addr[15:2] + 14'd1;
 
 always @(*) begin
     case (state)
-        S_IDLE: begin
-            if (s_axi_arvalid && !s_axi_awvalid)
-                ram_addr_mux = ar_addr[15:2];
-            else if (s_axi_awvalid)
-                ram_addr_mux = aw_addr[15:2];
-            else
-                ram_addr_mux = 14'd0;
-        end
+        S_IDLE: ram_addr_mux = req_addr_in[15:2];
         S_BRAM_RD: begin
             if (!beat_is_last)
                 ram_addr_mux = bram_next_word;
@@ -635,28 +616,20 @@ end
 assign ram_wren = (state == S_BRAM_WR) && (|req_wstrb);
 
 // ============================================
-// Region decode helpers
+// Region decode helpers (on incoming request address)
 // ============================================
-wire ar_dec_ram    = (ar_addr[31:18] == 14'b0);  // 192KB: 0x00000-0x2FFFF
-wire ar_dec_term   = (ar_addr[31:13] == 19'h10000);
-wire ar_dec_sysreg = (ar_addr[31:8]  == 24'h400000);
-wire ar_dec_audio  = (ar_addr[31:24] == 8'h4C);
-wire ar_dec_link   = (ar_addr[31:24] == 8'h4D);
-wire ar_dec_opm    = (ar_addr[31:24] == 8'h4E);
-wire ar_dec_uart   = (ar_addr[31:24] == 8'h4F);
-
-wire aw_dec_ram    = (aw_addr[31:18] == 14'b0);  // 192KB: 0x00000-0x2FFFF
-wire aw_dec_term   = (aw_addr[31:13] == 19'h10000);
-wire aw_dec_sysreg = (aw_addr[31:8]  == 24'h400000);
-wire aw_dec_audio  = (aw_addr[31:24] == 8'h4C);
-wire aw_dec_link   = (aw_addr[31:24] == 8'h4D);
-wire aw_dec_opm    = (aw_addr[31:24] == 8'h4E);
-wire aw_dec_uart   = (aw_addr[31:24] == 8'h4F);
+wire dec_ram    = (req_addr_in[31:18] == 14'b0);  // 192KB: 0x00000-0x2FFFF
+wire dec_term   = (req_addr_in[31:13] == 19'h10000);
+wire dec_sysreg = (req_addr_in[31:8]  == 24'h400000);
+wire dec_audio  = (req_addr_in[31:24] == 8'h4C);
+wire dec_link   = (req_addr_in[31:24] == 8'h4D);
+wire dec_opm    = (req_addr_in[31:24] == 8'h4E);
+wire dec_uart   = (req_addr_in[31:24] == 8'h4F);
 
 // ============================================
 // OPL write request tracking
 // ============================================
-reg opl_req_pending;  // Set when OPL write issued, cleared on opl_ack
+reg opl_req_pending;
 
 // ============================================
 // Main FSM
@@ -664,15 +637,10 @@ reg opl_req_pending;  // Set when OPL write issued, cleared on opl_ack
 always @(posedge clk or posedge reset) begin
     if (reset) begin
         state <= S_IDLE;
-        s_axi_arready <= 0;
-        s_axi_rvalid <= 0;
-        s_axi_rdata <= 0;
-        s_axi_rresp <= 0;
-        s_axi_rlast <= 0;
-        s_axi_awready <= 0;
-        s_axi_wready <= 0;
-        s_axi_bvalid <= 0;
-        s_axi_bresp <= 0;
+        rsp_rdata <= 0;
+        rsp_rdata_valid <= 0;
+        rsp_rdata_last <= 0;
+        rsp_wr_done <= 0;
 
         req_addr <= 0;
         req_wdata <= 0;
@@ -705,11 +673,8 @@ always @(posedge clk or posedge reset) begin
         opl_req_pending <= 0;
     end else begin
         // Defaults: deassert single-cycle pulses
-        s_axi_arready <= 0;
-        s_axi_rvalid <= 0;
-        s_axi_awready <= 0;
-        s_axi_wready <= 0;
-        s_axi_bvalid <= 0;
+        rsp_rdata_valid <= 0;
+        rsp_wr_done <= 0;
         sysreg_wr_fire <= 0;
         audio_sample_wr <= 0;
         uart_tx_dv <= 0;
@@ -725,95 +690,89 @@ always @(posedge clk or posedge reset) begin
         case (state)
 
         // ============================================
-        // IDLE: Accept AR (read) or AW+W (write)
+        // IDLE: Accept rd or wr pulse
         // ============================================
         S_IDLE: begin
-            if (s_axi_arvalid) begin
-                s_axi_arready <= 1;
+            if (req_rd) begin
                 is_write <= 0;
-                req_addr <= ar_addr;
-                burst_len <= s_axi_arlen;
+                req_addr <= req_addr_in;
+                burst_len <= req_burst_len_in;
                 burst_count <= 0;
 
-                reg_ram    <= ar_dec_ram;
-                reg_term   <= ar_dec_term;
-                reg_sysreg <= ar_dec_sysreg;
-                reg_audio  <= ar_dec_audio;
-                reg_link   <= ar_dec_link;
-                reg_opm    <= ar_dec_opm;
-                reg_uart   <= ar_dec_uart;
+                reg_ram    <= dec_ram;
+                reg_term   <= dec_term;
+                reg_sysreg <= dec_sysreg;
+                reg_audio  <= dec_audio;
+                reg_link   <= dec_link;
+                reg_opm    <= dec_opm;
+                reg_uart   <= dec_uart;
 
-                if (ar_dec_ram)
+                if (dec_ram)
                     state <= S_BRAM_RD;
-                else if (ar_dec_term)
+                else if (dec_term)
                     state <= S_TERM;
                 else begin
                     state <= S_PERIPH_RD;
-                    if (ar_dec_link) begin
-                        link_reg_addr <= ar_addr[6:2];
+                    if (dec_link) begin
+                        link_reg_addr <= req_addr_in[6:2];
                         link_reg_rd <= 1;
                     end
                 end
 
-            end else if (s_axi_awvalid) begin
-                s_axi_awready <= 1;
+            end else if (req_wr) begin
                 is_write <= 1;
-                req_addr <= aw_addr;
-                burst_len <= s_axi_awlen;
+                req_addr <= req_addr_in;
+                req_wdata <= req_wdata_in;
+                req_wstrb <= req_wstrb_in;
+                burst_len <= 0;  // writes are single-beat from cpu_system
                 burst_count <= 0;
 
-                reg_ram    <= aw_dec_ram;
-                reg_term   <= aw_dec_term;
-                reg_sysreg <= aw_dec_sysreg;
-                reg_audio  <= aw_dec_audio;
-                reg_link   <= aw_dec_link;
-                reg_opm    <= aw_dec_opm;
-                reg_uart   <= aw_dec_uart;
+                reg_ram    <= dec_ram;
+                reg_term   <= dec_term;
+                reg_sysreg <= dec_sysreg;
+                reg_audio  <= dec_audio;
+                reg_link   <= dec_link;
+                reg_opm    <= dec_opm;
+                reg_uart   <= dec_uart;
 
-                if (s_axi_wvalid) begin
-                    s_axi_wready <= 1;
-                    req_wdata <= s_axi_wdata;
-                    req_wstrb <= s_axi_wstrb;
-
-                    if (aw_dec_ram)
-                        state <= S_BRAM_WR;
-                    else if (aw_dec_term)
-                        state <= S_TERM;
-                    else if (aw_dec_opm && |s_axi_wstrb) begin
-                        // OPL write: issue request and wait for ack
-                        opl_write_req <= 1;
-                        opl_write_addr <= aw_addr[3:2];
-                        opl_write_data <= s_axi_wdata[7:0];
-                        opl_req_pending <= 1;
-                        state <= S_OPL_WAIT;
-                    end else begin
-                        state <= S_PERIPH_WR;
-                        if (aw_dec_sysreg && |s_axi_wstrb)
-                            sysreg_wr_fire <= 1;
-                        if (aw_dec_audio && |s_axi_wstrb && aw_addr[3:2] == 2'b00) begin
-                            audio_sample_wr <= 1;
-                            audio_sample_data <= s_axi_wdata;
-                        end
-                        if (aw_dec_link && |s_axi_wstrb) begin
-                            link_reg_wr <= 1;
-                            link_reg_addr <= aw_addr[6:2];
-                            link_reg_wdata <= s_axi_wdata;
-                        end
-                    end
+                if (dec_ram)
+                    state <= S_BRAM_WR;
+                else if (dec_term)
+                    state <= S_TERM;
+                else if (dec_opm && |req_wstrb_in) begin
+                    opl_write_req <= 1;
+                    opl_write_addr <= req_addr_in[3:2];
+                    opl_write_data <= req_wdata_in[7:0];
+                    opl_req_pending <= 1;
+                    state <= S_OPL_WAIT;
                 end else begin
-                    state <= S_WR_NEXT;
+                    state <= S_PERIPH_WR;
+                    if (dec_sysreg && |req_wstrb_in)
+                        sysreg_wr_fire <= 1;
+                    if (dec_audio && |req_wstrb_in && req_addr_in[3:2] == 2'b00) begin
+                        audio_sample_wr <= 1;
+                        audio_sample_data <= req_wdata_in;
+                    end
+                    if (dec_link && |req_wstrb_in) begin
+                        link_reg_wr <= 1;
+                        link_reg_addr <= req_addr_in[6:2];
+                        link_reg_wdata <= req_wdata_in;
+                    end
+                    if (dec_uart && |req_wstrb_in && req_addr_in[3:2] == 2'b01) begin
+                        uart_tx_byte <= req_wdata_in[7:0];
+                        uart_tx_dv <= 1;
+                    end
                 end
             end
         end
 
         // ============================================
-        // BRAM read
+        // BRAM read (one word per cycle, auto-burst)
         // ============================================
         S_BRAM_RD: begin
-            s_axi_rvalid <= 1;
-            s_axi_rdata <= ram_rdata;
-            s_axi_rresp <= 2'b00;
-            s_axi_rlast <= beat_is_last;
+            rsp_rdata_valid <= 1;
+            rsp_rdata <= ram_rdata;
+            rsp_rdata_last <= beat_is_last;
             burst_count <= burst_count + 1;
             if (beat_is_last) begin
                 state <= S_IDLE;
@@ -823,49 +782,29 @@ always @(posedge clk or posedge reset) begin
         end
 
         // ============================================
-        // BRAM write
+        // BRAM write (single beat)
         // ============================================
         S_BRAM_WR: begin
-            burst_count <= burst_count + 1;
-            if (beat_is_last) begin
-                s_axi_bvalid <= 1;
-                s_axi_bresp <= 2'b00;
-                state <= S_IDLE;
-            end else begin
-                req_addr <= req_addr + 32'd4;
-                state <= S_WR_NEXT;
-            end
+            rsp_wr_done <= 1;
+            state <= S_IDLE;
         end
 
         // ============================================
         // Peripheral read
         // ============================================
         S_PERIPH_RD: begin
-            s_axi_rvalid <= 1;
-            s_axi_rdata <= periph_rd_mux;
-            s_axi_rresp <= 2'b00;
-            s_axi_rlast <= beat_is_last;
-            burst_count <= burst_count + 1;
-            if (beat_is_last) begin
-                state <= S_IDLE;
-            end else begin
-                req_addr <= req_addr + 32'd4;
-            end
+            rsp_rdata_valid <= 1;
+            rsp_rdata <= periph_rd_mux;
+            rsp_rdata_last <= 1;
+            state <= S_IDLE;
         end
 
         // ============================================
         // Peripheral write
         // ============================================
         S_PERIPH_WR: begin
-            burst_count <= burst_count + 1;
-            if (beat_is_last) begin
-                s_axi_bvalid <= 1;
-                s_axi_bresp <= 2'b00;
-                state <= S_IDLE;
-            end else begin
-                req_addr <= req_addr + 32'd4;
-                state <= S_WR_NEXT;
-            end
+            rsp_wr_done <= 1;
+            state <= S_IDLE;
         end
 
         // ============================================
@@ -874,67 +813,13 @@ always @(posedge clk or posedge reset) begin
         S_TERM: begin
             if (term_mem_ready) begin
                 if (is_write) begin
-                    burst_count <= burst_count + 1;
-                    if (beat_is_last) begin
-                        s_axi_bvalid <= 1;
-                        s_axi_bresp <= 2'b00;
-                        state <= S_IDLE;
-                    end else begin
-                        req_addr <= req_addr + 32'd4;
-                        state <= S_WR_NEXT;
-                    end
+                    rsp_wr_done <= 1;
                 end else begin
-                    s_axi_rvalid <= 1;
-                    s_axi_rdata <= term_mem_rdata;
-                    s_axi_rresp <= 2'b00;
-                    s_axi_rlast <= beat_is_last;
-                    burst_count <= burst_count + 1;
-                    if (beat_is_last) begin
-                        state <= S_IDLE;
-                    end else begin
-                        req_addr <= req_addr + 32'd4;
-                    end
+                    rsp_rdata_valid <= 1;
+                    rsp_rdata <= term_mem_rdata;
+                    rsp_rdata_last <= 1;
                 end
-            end
-        end
-
-        // ============================================
-        // WR_NEXT: Accept next W beat
-        // ============================================
-        S_WR_NEXT: begin
-            if (s_axi_wvalid) begin
-                s_axi_wready <= 1;
-                req_wdata <= s_axi_wdata;
-                req_wstrb <= s_axi_wstrb;
-
-                if (reg_ram) begin
-                    state <= S_BRAM_WR;
-                end else if (reg_term) begin
-                    state <= S_TERM;
-                end else if (reg_opm && |s_axi_wstrb) begin
-                    opl_write_req <= 1;
-                    opl_write_addr <= req_addr[3:2];
-                    opl_write_data <= s_axi_wdata[7:0];
-                    opl_req_pending <= 1;
-                    state <= S_OPL_WAIT;
-                end else begin
-                    state <= S_PERIPH_WR;
-                    if (reg_sysreg && |s_axi_wstrb)
-                        sysreg_wr_fire <= 1;
-                    if (reg_audio && |s_axi_wstrb && req_addr[3:2] == 2'b00) begin
-                        audio_sample_wr <= 1;
-                        audio_sample_data <= s_axi_wdata;
-                    end
-                    if (reg_link && |s_axi_wstrb) begin
-                        link_reg_wr <= 1;
-                        link_reg_addr <= req_addr[6:2];
-                        link_reg_wdata <= s_axi_wdata;
-                    end
-                    if (reg_uart && |s_axi_wstrb && req_addr[3:2] == 2'b01) begin
-                        uart_tx_byte <= s_axi_wdata[7:0];
-                        uart_tx_dv <= 1;
-                    end
-                end
+                state <= S_IDLE;
             end
         end
 
@@ -943,16 +828,8 @@ always @(posedge clk or posedge reset) begin
         // ============================================
         S_OPL_WAIT: begin
             if (!opl_req_pending) begin
-                // OPL write completed (opl_ack received)
-                burst_count <= burst_count + 1;
-                if (beat_is_last) begin
-                    s_axi_bvalid <= 1;
-                    s_axi_bresp <= 2'b00;
-                    state <= S_IDLE;
-                end else begin
-                    req_addr <= req_addr + 32'd4;
-                    state <= S_WR_NEXT;
-                end
+                rsp_wr_done <= 1;
+                state <= S_IDLE;
             end
         end
 

@@ -17,7 +17,7 @@ VERILATOR_FLAGS = --cc --exe --build \
 SDRAM_SRCS = \
 	tb_sdram.v \
 	sdram_model.v \
-	$(COMMON_DIR)/axi_sdram_slave.v \
+	$(COMMON_DIR)/word_sdram_arbiter.v \
 	io_sdram_test.v
 
 SDRAM_SYNCH = $(TARGET_DIR)/apf/common.v
@@ -38,8 +38,7 @@ io_sdram_test.v: $(TARGET_DIR)/io_sdram.v
 # ============================================================
 PSRAM_SRCS = \
 	tb_psram.v \
-	psram_backend_model.v \
-	$(COMMON_DIR)/axi_psram_slave.v
+	psram_backend_model.v
 
 PSRAM_CPP = tb_psram_main.cpp
 PSRAM_TOP = tb_psram
@@ -53,7 +52,6 @@ PSRAM_RTL_SRCS = \
 	cram_chip_model.v \
 	sram_chip_model.v \
 	async_fifo.v \
-	$(COMMON_DIR)/axi_psram_slave.v \
 	$(COMMON_DIR)/sram_controller.v \
 	psram_controller_test.v \
 	psram_test.sv

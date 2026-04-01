@@ -720,83 +720,40 @@ assign aux_scl = 1'bZ;
 assign vpll_feed = 1'bZ;
 
 // ============================================================
-// SDRAM word interface signals (to io_sdram)
+// SDRAM word interface signals (to io_sdram, from word_sdram_arbiter)
 // ============================================================
-reg             ram1_word_rd;
-reg             ram1_word_wr;
-reg     [23:0]  ram1_word_addr;
-reg     [31:0]  ram1_word_data;
-reg     [3:0]   ram1_word_wstrb;
-reg     [3:0]   ram1_word_burst_len;
-reg     [3:0]   ram1_word_burst_wr_len;
+wire            ram1_word_rd;
+wire            ram1_word_wr;
+wire    [23:0]  ram1_word_addr;
+wire    [31:0]  ram1_word_data;
+wire    [3:0]   ram1_word_wstrb;
+wire    [3:0]   ram1_word_burst_len;
+wire    [3:0]   ram1_word_burst_wr_len;
 wire            ram1_word_wr_data_next;
 wire    [31:0]  ram1_word_q;
 wire            ram1_word_busy;
 wire            ram1_word_q_valid;
 
-// axi_sdram_slave word-level outputs (held signals, need pulse conversion)
-wire            sdram_slave_rd;
-wire            sdram_slave_wr;
-wire    [23:0]  sdram_slave_addr;
-wire    [31:0]  sdram_slave_wdata;
-wire    [3:0]   sdram_slave_wstrb;
-wire    [3:0]   sdram_slave_burst_len;
-wire    [3:0]   sdram_slave_burst_wr_len;
-// io_sdram word_wr_data_next → axi_sdram_slave sdram_wr_data_next
-// Same clock domain (clk_cpu = clk_ram_controller), direct wire
-wire            sdram_slave_wr_data_next = ram1_word_wr_data_next;
-wire    [31:0]  sdram_slave_next_wdata;
-wire    [3:0]   sdram_slave_next_wstrb;
-
 // ============================================================
 // CPU AXI4 master buses
 // ============================================================
 
-// CPU AXI4 master → axi_sdram_slave (via arbiter)
-wire        cpu_m_sdram_arvalid;
-wire        cpu_m_sdram_arready;
-wire [31:0] cpu_m_sdram_araddr;
-wire [7:0]  cpu_m_sdram_arlen;
-wire        cpu_m_sdram_rvalid;
-wire [31:0] cpu_m_sdram_rdata;
-wire [1:0]  cpu_m_sdram_rresp;
-wire        cpu_m_sdram_rlast;
-wire        cpu_m_sdram_awvalid;
-wire        cpu_m_sdram_awready;
-wire [31:0] cpu_m_sdram_awaddr;
-wire [7:0]  cpu_m_sdram_awlen;
-wire        cpu_m_sdram_wvalid;
-wire        cpu_m_sdram_wready;
+// CPU word-level SDRAM master (to word_sdram_arbiter M2)
+wire        cpu_m_sdram_rd;
+wire        cpu_m_sdram_wr;
+wire [23:0] cpu_m_sdram_addr;
 wire [31:0] cpu_m_sdram_wdata;
 wire [3:0]  cpu_m_sdram_wstrb;
-wire        cpu_m_sdram_wlast;
-wire        cpu_m_sdram_bvalid;
-wire [1:0]  cpu_m_sdram_bresp;
+wire [3:0]  cpu_m_sdram_burst_len;
+wire [3:0]  cpu_m_sdram_burst_wr_len;
+wire [31:0] cpu_m_sdram_rdata;
+wire        cpu_m_sdram_busy;
+wire        cpu_m_sdram_accepted;
+wire        cpu_m_sdram_rdata_valid;
+wire        cpu_m_sdram_wr_data_next;
 
-// CPU AXI4 master → axi_psram_slave
-wire        cpu_m_psram_arvalid;
-wire        cpu_m_psram_arready;
-wire [31:0] cpu_m_psram_araddr;
-wire [7:0]  cpu_m_psram_arlen;
-wire        cpu_m_psram_rvalid;
-wire [31:0] cpu_m_psram_rdata;
-wire [1:0]  cpu_m_psram_rresp;
-wire        cpu_m_psram_rlast;
-wire        cpu_m_psram_awvalid;
-wire        cpu_m_psram_awready;
-wire [31:0] cpu_m_psram_awaddr;
-wire [7:0]  cpu_m_psram_awlen;
-wire        cpu_m_psram_wvalid;
-wire        cpu_m_psram_wready;
-wire [31:0] cpu_m_psram_wdata;
-wire [3:0]  cpu_m_psram_wstrb;
-wire        cpu_m_psram_wlast;
-wire        cpu_m_psram_bvalid;
-wire [1:0]  cpu_m_psram_bresp;
-
-// axi_psram_slave → memory target mux (word-level)
-// psram_addr[25:22] carries addr[27:24] for CRAM0/CRAM1/SRAM decode:
-//   0x0 or 0x8 → CRAM0, 0x1 or 0x9 → CRAM1, 0xA → SRAM
+// CPU word-level PSRAM master (direct from cpu_system to psram_controller)
+// cpu_psram_addr[25:22] carries addr[27:24] for CRAM0/CRAM1/SRAM decode
 wire        cpu_psram_rd;
 wire        cpu_psram_wr;
 wire [25:0] cpu_psram_addr;
@@ -805,8 +762,6 @@ wire [3:0]  cpu_psram_wstrb;
 wire [31:0] cpu_psram_rdata;
 wire        cpu_psram_busy;
 wire        cpu_psram_rdata_valid;
-
-// Burst read interface from axi_psram_slave
 wire        cpu_psram_burst_rd;
 wire [5:0]  cpu_psram_burst_len;
 wire        cpu_psram_burst_rdata_valid;
@@ -863,57 +818,36 @@ wire        link_sd_out;
 wire        link_sd_oe;
 
 // CPU AXI4 master → axi_periph_slave (local peripherals)
-wire        cpu_m_local_arvalid;
-wire        cpu_m_local_arready;
-wire [31:0] cpu_m_local_araddr;
-wire [7:0]  cpu_m_local_arlen;
-wire        cpu_m_local_rvalid;
-wire [31:0] cpu_m_local_rdata;
-wire [1:0]  cpu_m_local_rresp;
-wire        cpu_m_local_rlast;
-wire        cpu_m_local_awvalid;
-wire        cpu_m_local_awready;
-wire [31:0] cpu_m_local_awaddr;
-wire [7:0]  cpu_m_local_awlen;
-wire        cpu_m_local_wvalid;
-wire        cpu_m_local_wready;
+// CPU word-level local master (to periph_slave)
+wire        cpu_m_local_rd;
+wire        cpu_m_local_wr;
+wire [31:0] cpu_m_local_addr;
 wire [31:0] cpu_m_local_wdata;
 wire [3:0]  cpu_m_local_wstrb;
-wire        cpu_m_local_wlast;
-wire        cpu_m_local_bvalid;
-wire [1:0]  cpu_m_local_bresp;
+wire [7:0]  cpu_m_local_burst_len;
+wire [31:0] cpu_m_local_rdata;
+wire        cpu_m_local_rdata_valid;
+wire        cpu_m_local_rdata_last;
+wire        cpu_m_local_wr_done;
+wire        cpu_m_local_busy;
 
 // AXI4 arbiter output → axi_sdram_slave (direct, no pipeline)
-wire        arb_s_arvalid, arb_s_arready;
-wire [31:0] arb_s_araddr;
-wire [7:0]  arb_s_arlen;
-wire        arb_s_rvalid, arb_s_rlast;
-wire [31:0] arb_s_rdata;
-wire [1:0]  arb_s_rresp;
-wire        arb_s_awvalid, arb_s_awready;
-wire [31:0] arb_s_awaddr;
-wire [7:0]  arb_s_awlen;
-wire        arb_s_wvalid, arb_s_wready, arb_s_wlast;
-wire [31:0] arb_s_wdata;
-wire [3:0]  arb_s_wstrb;
-wire        arb_s_bvalid;
-wire [1:0]  arb_s_bresp;
+// (AXI arbiter slave wires removed — word_sdram_arbiter drives io_sdram directly)
 
 // Bridge AXI4 master (from axi_bridge_master to axi_sdram_arbiter)
-wire        bridge_m_arvalid, bridge_m_arready;
-wire [31:0] bridge_m_araddr;
-wire [7:0]  bridge_m_arlen;
-wire        bridge_m_rvalid, bridge_m_rlast;
-wire [31:0] bridge_m_rdata;
-wire [1:0]  bridge_m_rresp;
-wire        bridge_m_awvalid, bridge_m_awready;
-wire [31:0] bridge_m_awaddr;
-wire [7:0]  bridge_m_awlen;
-wire        bridge_m_wvalid, bridge_m_wready, bridge_m_wlast;
+// Bridge word-level SDRAM master (to word_sdram_arbiter M3)
+wire        bridge_m_rd;
+wire        bridge_m_wr;
+wire [23:0] bridge_m_addr;
 wire [31:0] bridge_m_wdata;
 wire [3:0]  bridge_m_wstrb;
-wire        bridge_m_bvalid;
-wire [1:0]  bridge_m_bresp;
+wire [3:0]  bridge_m_burst_len;
+wire [3:0]  bridge_m_burst_wr_len;
+wire [31:0] bridge_m_rdata;
+wire        bridge_m_busy;
+wire        bridge_m_accepted;
+wire        bridge_m_rdata_valid;
+wire        bridge_m_wr_data_next;
 wire        bridge_m_idle;
 wire        bridge_m_wr_idle;
 wire [31:0] bridge_axi_rd_data;
@@ -1934,98 +1868,66 @@ assign video_hs = vidout_hs;
     wire [10:0] sprchar_waddr_w;
     wire [31:0] sprchar_wdata_w;
 
-    // VexiiRiscv CPU system — AXI4 bus routing
+    // VexiiRiscv CPU system — word-level bus routing
     cpu_system cpu (
         .clk(clk_cpu),
         .reset_n(reset_n),
-        // SDRAM AXI4 master interface
-        .m_sdram_arvalid(cpu_m_sdram_arvalid),
-        .m_sdram_arready(cpu_m_sdram_arready),
-        .m_sdram_araddr(cpu_m_sdram_araddr),
-        .m_sdram_arlen(cpu_m_sdram_arlen),
-        .m_sdram_rvalid(cpu_m_sdram_rvalid),
-        .m_sdram_rdata(cpu_m_sdram_rdata),
-        .m_sdram_rresp(cpu_m_sdram_rresp),
-        .m_sdram_rlast(cpu_m_sdram_rlast),
-        .m_sdram_awvalid(cpu_m_sdram_awvalid),
-        .m_sdram_awready(cpu_m_sdram_awready),
-        .m_sdram_awaddr(cpu_m_sdram_awaddr),
-        .m_sdram_awlen(cpu_m_sdram_awlen),
-        .m_sdram_wvalid(cpu_m_sdram_wvalid),
-        .m_sdram_wready(cpu_m_sdram_wready),
+        // SDRAM word-level master interface
+        .m_sdram_rd(cpu_m_sdram_rd),
+        .m_sdram_wr(cpu_m_sdram_wr),
+        .m_sdram_addr(cpu_m_sdram_addr),
         .m_sdram_wdata(cpu_m_sdram_wdata),
         .m_sdram_wstrb(cpu_m_sdram_wstrb),
-        .m_sdram_wlast(cpu_m_sdram_wlast),
-        .m_sdram_bvalid(cpu_m_sdram_bvalid),
-        .m_sdram_bresp(cpu_m_sdram_bresp),
-        // PSRAM AXI4 master interface
-        .m_psram_arvalid(cpu_m_psram_arvalid),
-        .m_psram_arready(cpu_m_psram_arready),
-        .m_psram_araddr(cpu_m_psram_araddr),
-        .m_psram_arlen(cpu_m_psram_arlen),
-        .m_psram_rvalid(cpu_m_psram_rvalid),
-        .m_psram_rdata(cpu_m_psram_rdata),
-        .m_psram_rresp(cpu_m_psram_rresp),
-        .m_psram_rlast(cpu_m_psram_rlast),
-        .m_psram_awvalid(cpu_m_psram_awvalid),
-        .m_psram_awready(cpu_m_psram_awready),
-        .m_psram_awaddr(cpu_m_psram_awaddr),
-        .m_psram_awlen(cpu_m_psram_awlen),
-        .m_psram_wvalid(cpu_m_psram_wvalid),
-        .m_psram_wready(cpu_m_psram_wready),
-        .m_psram_wdata(cpu_m_psram_wdata),
-        .m_psram_wstrb(cpu_m_psram_wstrb),
-        .m_psram_wlast(cpu_m_psram_wlast),
-        .m_psram_bvalid(cpu_m_psram_bvalid),
-        .m_psram_bresp(cpu_m_psram_bresp),
-        // Local peripheral AXI4 master interface
-        .m_local_arvalid(cpu_m_local_arvalid),
-        .m_local_arready(cpu_m_local_arready),
-        .m_local_araddr(cpu_m_local_araddr),
-        .m_local_arlen(cpu_m_local_arlen),
-        .m_local_rvalid(cpu_m_local_rvalid),
-        .m_local_rdata(cpu_m_local_rdata),
-        .m_local_rresp(cpu_m_local_rresp),
-        .m_local_rlast(cpu_m_local_rlast),
-        .m_local_awvalid(cpu_m_local_awvalid),
-        .m_local_awready(cpu_m_local_awready),
-        .m_local_awaddr(cpu_m_local_awaddr),
-        .m_local_awlen(cpu_m_local_awlen),
-        .m_local_wvalid(cpu_m_local_wvalid),
-        .m_local_wready(cpu_m_local_wready),
+        .m_sdram_burst_len(cpu_m_sdram_burst_len),
+        .m_sdram_burst_wr_len(cpu_m_sdram_burst_wr_len),
+        .m_sdram_rdata(cpu_m_sdram_rdata),
+        .m_sdram_busy(cpu_m_sdram_busy),
+        .m_sdram_accepted(cpu_m_sdram_accepted),
+        .m_sdram_rdata_valid(cpu_m_sdram_rdata_valid),
+        .m_sdram_wr_data_next(cpu_m_sdram_wr_data_next),
+        // PSRAM word-level master interface
+        .m_psram_rd(cpu_psram_rd),
+        .m_psram_wr(cpu_psram_wr),
+        .m_psram_addr(cpu_psram_addr),
+        .m_psram_wdata(cpu_psram_wdata),
+        .m_psram_wstrb(cpu_psram_wstrb),
+        .m_psram_rdata(cpu_psram_rdata),
+        .m_psram_busy(cpu_psram_busy),
+        .m_psram_rdata_valid(cpu_psram_rdata_valid),
+        .m_psram_burst_rd(cpu_psram_burst_rd),
+        .m_psram_burst_len(cpu_psram_burst_len),
+        .m_psram_burst_rdata_valid(cpu_psram_burst_rdata_valid),
+        .m_psram_burst_rdata(cpu_psram_burst_rdata),
+        // Local peripheral word-level master interface
+        .m_local_rd(cpu_m_local_rd),
+        .m_local_wr(cpu_m_local_wr),
+        .m_local_addr(cpu_m_local_addr),
         .m_local_wdata(cpu_m_local_wdata),
         .m_local_wstrb(cpu_m_local_wstrb),
-        .m_local_wlast(cpu_m_local_wlast),
-        .m_local_bvalid(cpu_m_local_bvalid),
-        .m_local_bresp(cpu_m_local_bresp)
+        .m_local_burst_len(cpu_m_local_burst_len),
+        .m_local_rdata(cpu_m_local_rdata),
+        .m_local_rdata_valid(cpu_m_local_rdata_valid),
+        .m_local_rdata_last(cpu_m_local_rdata_last),
+        .m_local_wr_done(cpu_m_local_wr_done),
+        .m_local_busy(cpu_m_local_busy)
     );
 
-    // AXI4 peripheral slave
-    axi_periph_slave periph (
+    // Peripheral slave (word-level)
+    periph_slave periph (
         .clk(clk_cpu),
         .reset_n(reset_n),
-        // AXI4 slave interface
-        .s_axi_arvalid(cpu_m_local_arvalid),
-        .s_axi_arready(cpu_m_local_arready),
-        .s_axi_araddr(cpu_m_local_araddr),
-        .s_axi_arlen(cpu_m_local_arlen),
-        .s_axi_rvalid(cpu_m_local_rvalid),
-        .s_axi_rready(1'b1),
-        .s_axi_rdata(cpu_m_local_rdata),
-        .s_axi_rresp(cpu_m_local_rresp),
-        .s_axi_rlast(cpu_m_local_rlast),
-        .s_axi_awvalid(cpu_m_local_awvalid),
-        .s_axi_awready(cpu_m_local_awready),
-        .s_axi_awaddr(cpu_m_local_awaddr),
-        .s_axi_awlen(cpu_m_local_awlen),
-        .s_axi_wvalid(cpu_m_local_wvalid),
-        .s_axi_wready(cpu_m_local_wready),
-        .s_axi_wdata(cpu_m_local_wdata),
-        .s_axi_wstrb(cpu_m_local_wstrb),
-        .s_axi_wlast(cpu_m_local_wlast),
-        .s_axi_bvalid(cpu_m_local_bvalid),
-        .s_axi_bready(1'b1),
-        .s_axi_bresp(cpu_m_local_bresp),
+        // Word-level slave interface
+        .req_rd(cpu_m_local_rd),
+        .req_wr(cpu_m_local_wr),
+        .req_addr_in(cpu_m_local_addr),
+        .req_wdata_in(cpu_m_local_wdata),
+        .req_wstrb_in(cpu_m_local_wstrb),
+        .req_burst_len_in(cpu_m_local_burst_len),
+        .rsp_rdata(cpu_m_local_rdata),
+        .rsp_rdata_valid(cpu_m_local_rdata_valid),
+        .rsp_rdata_last(cpu_m_local_rdata_last),
+        .rsp_wr_done(cpu_m_local_wr_done),
+        .rsp_busy(cpu_m_local_busy),
         // CDC inputs
         .dataslot_allcomplete(dataslot_allcomplete && bridge_wr_idle),
         .vsync(vidout_vs),
@@ -2127,25 +2029,16 @@ assign video_hs = vidout_hs;
         .adma_ring_rptr(adma_ring_rptr)
     );
 
-    // DMA engine — memory-to-memory copy/fill via SDRAM arbiter M1
+    // DMA engine — memory-to-memory copy/fill via word_sdram_arbiter M1
     wire [31:0] dma_src_w, dma_dst_w, dma_len_w;
     wire        dma_start_w, dma_fill_mode_w, dma_busy_w;
-    wire        dma_m_arvalid, dma_m_arready;
-    wire [31:0] dma_m_araddr;
-    wire [7:0]  dma_m_arlen;
-    wire        dma_m_rvalid;
-    wire [31:0] dma_m_rdata;
-    wire [1:0]  dma_m_rresp;
-    wire        dma_m_rlast;
-    wire        dma_m_awvalid, dma_m_awready;
-    wire [31:0] dma_m_awaddr;
-    wire [7:0]  dma_m_awlen;
-    wire        dma_m_wvalid, dma_m_wready;
+    wire        dma_m_rd, dma_m_wr;
+    wire [23:0] dma_m_addr;
     wire [31:0] dma_m_wdata;
     wire [3:0]  dma_m_wstrb;
-    wire        dma_m_wlast;
-    wire        dma_m_bvalid;
-    wire [1:0]  dma_m_bresp;
+    wire [3:0]  dma_m_burst_len, dma_m_burst_wr_len;
+    wire [31:0] dma_m_rdata;
+    wire        dma_m_busy, dma_m_accepted, dma_m_rdata_valid, dma_m_wr_data_next;
 
     dma_engine dma_inst (
         .clk(clk_cpu),
@@ -2156,220 +2049,88 @@ assign video_hs = vidout_hs;
         .start(dma_start_w),
         .fill_mode(dma_fill_mode_w),
         .busy(dma_busy_w),
-        .m_arvalid(dma_m_arvalid), .m_arready(dma_m_arready),
-        .m_araddr(dma_m_araddr),   .m_arlen(dma_m_arlen),
-        .m_rvalid(dma_m_rvalid),   .m_rdata(dma_m_rdata),
-        .m_rresp(dma_m_rresp),     .m_rlast(dma_m_rlast),
-        .m_awvalid(dma_m_awvalid), .m_awready(dma_m_awready),
-        .m_awaddr(dma_m_awaddr),   .m_awlen(dma_m_awlen),
-        .m_wvalid(dma_m_wvalid),   .m_wready(dma_m_wready),
-        .m_wdata(dma_m_wdata),     .m_wstrb(dma_m_wstrb),
-        .m_wlast(dma_m_wlast),
-        .m_bvalid(dma_m_bvalid),   .m_bresp(dma_m_bresp)
+        .m_rd(dma_m_rd),             .m_wr(dma_m_wr),
+        .m_addr(dma_m_addr),         .m_wdata(dma_m_wdata),
+        .m_wstrb(dma_m_wstrb),
+        .m_burst_len(dma_m_burst_len), .m_burst_wr_len(dma_m_burst_wr_len),
+        .m_rdata(dma_m_rdata),       .m_busy(dma_m_busy),
+        .m_accepted(dma_m_accepted), .m_rdata_valid(dma_m_rdata_valid),
+        .m_wr_data_next(dma_m_wr_data_next)
     );
 
-    // Slave → io_sdram pulse adapter
-    reg sdram_accepted_r;
-    reg sdram_cmd_forwarded;
-    reg wr_data_fwd_d1;
-    always @(posedge clk_ram_controller) begin
-        ram1_word_rd <= 0;
-        ram1_word_wr <= 0;
-        ram1_word_burst_len <= 4'd0;
-        ram1_word_burst_wr_len <= 4'd0;
-        sdram_accepted_r <= 0;
-
-        if (!sdram_slave_rd && !sdram_slave_wr)
-            sdram_cmd_forwarded <= 0;
-
-        if (!ram1_word_busy && !sdram_cmd_forwarded &&
-            (sdram_slave_rd || sdram_slave_wr)) begin
-            ram1_word_rd <= sdram_slave_rd;
-            ram1_word_wr <= sdram_slave_wr;
-            ram1_word_addr <= sdram_slave_addr;
-            ram1_word_data <= sdram_slave_wdata;
-            ram1_word_wstrb <= sdram_slave_wstrb;
-            ram1_word_burst_len <= sdram_slave_burst_len;
-            ram1_word_burst_wr_len <= sdram_slave_burst_wr_len;
-            sdram_accepted_r <= 1;
-            sdram_cmd_forwarded <= 1;
-        end
-
-        // Burst write data forwarding: delay by 1 cycle after slave updates
-        wr_data_fwd_d1 <= ram1_word_wr_data_next;
-        if (wr_data_fwd_d1) begin
-            ram1_word_data <= sdram_slave_wdata;
-            ram1_word_wstrb <= sdram_slave_wstrb;
-        end
-    end
-
-    // AXI4 bridge master (must stay alive during reset for APF save flush & data load)
-    axi_bridge_master bridge_axi_m (
+    // Bridge master (must stay alive during reset for APF save flush & data load)
+    bridge_master bridge_m (
         .clk(clk_cpu),
         .reset_n(1'b1),
         .fifo_q(bridge_wr_fifo_q),
         .fifo_empty(bridge_wr_fifo_empty),
         .fifo_rdreq(bridge_wr_fifo_drain),
-        // Bridge SDRAM reads disabled: saves now use CRAM1 with dedicated
-        // FIFO-based read/write paths (no AXI/SDRAM involvement).
         .bridge_rd_req(1'b0),
         .bridge_rd_addr(bridge_addr_ram_clk[25:2]),
         .bridge_rd_data(bridge_axi_rd_data),
         .bridge_rd_done(bridge_axi_rd_done),
-        .m_axi_arvalid(bridge_m_arvalid), .m_axi_arready(bridge_m_arready),
-        .m_axi_araddr(bridge_m_araddr),   .m_axi_arlen(bridge_m_arlen),
-        .m_axi_rvalid(bridge_m_rvalid),   .m_axi_rdata(bridge_m_rdata),
-        .m_axi_rresp(bridge_m_rresp),     .m_axi_rlast(bridge_m_rlast),
-        .m_axi_awvalid(bridge_m_awvalid), .m_axi_awready(bridge_m_awready),
-        .m_axi_awaddr(bridge_m_awaddr),   .m_axi_awlen(bridge_m_awlen),
-        .m_axi_wvalid(bridge_m_wvalid),   .m_axi_wready(bridge_m_wready),
-        .m_axi_wdata(bridge_m_wdata),     .m_axi_wstrb(bridge_m_wstrb),
-        .m_axi_wlast(bridge_m_wlast),
-        .m_axi_bvalid(bridge_m_bvalid),   .m_axi_bresp(bridge_m_bresp),
+        .m_rd(bridge_m_rd),             .m_wr(bridge_m_wr),
+        .m_addr(bridge_m_addr),         .m_wdata(bridge_m_wdata),
+        .m_wstrb(bridge_m_wstrb),
+        .m_burst_len(bridge_m_burst_len), .m_burst_wr_len(bridge_m_burst_wr_len),
+        .m_rdata(bridge_m_rdata),       .m_busy(bridge_m_busy),
+        .m_accepted(bridge_m_accepted), .m_rdata_valid(bridge_m_rdata_valid),
         .idle(bridge_m_idle),
         .wr_idle(bridge_m_wr_idle)
     );
 
-    // AXI4 SDRAM arbiter (must stay alive during reset for APF save flush & data load)
-    axi_sdram_arbiter sdram_arb (
+    // Word-level SDRAM arbiter (must stay alive during reset for APF save flush)
+    // Replaces: axi_sdram_arbiter + axi_sdram_slave + pulse adapter
+    wire [31:0] arb_sdram_wdata;
+    wire [31:0] arb_sdram_wdata_direct;  // Combinational path for burst writes
+    wire [3:0]  arb_sdram_wstrb_direct;
+    word_sdram_arbiter sdram_arb (
         .clk(clk_cpu),
         .reset_n(1'b1),
-        // M0: Audio DMA (highest priority)
-        .m0_arvalid(adma_m_arvalid), .m0_arready(adma_m_arready),
-        .m0_araddr(adma_m_araddr),   .m0_arlen(adma_m_arlen),
-        .m0_rvalid(adma_m_rvalid),   .m0_rdata(adma_m_rdata),
-        .m0_rresp(adma_m_rresp),     .m0_rlast(adma_m_rlast),
-        .m0_awvalid(1'b0), .m0_awready(),
-        .m0_awaddr(32'b0),  .m0_awlen(8'b0),
-        .m0_wvalid(1'b0),  .m0_wready(),
-        .m0_wdata(32'b0),   .m0_wstrb(4'b0),
-        .m0_wlast(1'b0),
-        .m0_bvalid(),       .m0_bresp(),
+        // M0: Audio DMA (highest priority, read-only)
+        .m0_rd(adma_m_rd),         .m0_addr(adma_m_addr),
+        .m0_burst_len(adma_m_burst_len),
+        .m0_rdata(adma_m_rdata),   .m0_busy(adma_m_busy),
+        .m0_accepted(adma_m_accepted), .m0_rdata_valid(adma_m_rdata_valid),
         // M1: DMA engine
-        .m1_arvalid(dma_m_arvalid), .m1_arready(dma_m_arready),
-        .m1_araddr(dma_m_araddr),   .m1_arlen(dma_m_arlen),
-        .m1_rvalid(dma_m_rvalid),   .m1_rdata(dma_m_rdata),
-        .m1_rresp(dma_m_rresp),     .m1_rlast(dma_m_rlast),
-        .m1_awvalid(dma_m_awvalid), .m1_awready(dma_m_awready),
-        .m1_awaddr(dma_m_awaddr),   .m1_awlen(dma_m_awlen),
-        .m1_wvalid(dma_m_wvalid),   .m1_wready(dma_m_wready),
-        .m1_wdata(dma_m_wdata),     .m1_wstrb(dma_m_wstrb),
-        .m1_wlast(dma_m_wlast),
-        .m1_bvalid(dma_m_bvalid),   .m1_bresp(dma_m_bresp),
+        .m1_rd(dma_m_rd),           .m1_wr(dma_m_wr),
+        .m1_addr(dma_m_addr),       .m1_wdata(dma_m_wdata),
+        .m1_wstrb(dma_m_wstrb),
+        .m1_burst_len(dma_m_burst_len), .m1_burst_wr_len(dma_m_burst_wr_len),
+        .m1_rdata(dma_m_rdata),     .m1_busy(dma_m_busy),
+        .m1_accepted(dma_m_accepted), .m1_rdata_valid(dma_m_rdata_valid),
+        .m1_wr_data_next(dma_m_wr_data_next),
         // M2: CPU
-        .m2_arvalid(cpu_m_sdram_arvalid), .m2_arready(cpu_m_sdram_arready),
-        .m2_araddr(cpu_m_sdram_araddr),   .m2_arlen(cpu_m_sdram_arlen),
-        .m2_rvalid(cpu_m_sdram_rvalid),   .m2_rdata(cpu_m_sdram_rdata),
-        .m2_rresp(cpu_m_sdram_rresp),     .m2_rlast(cpu_m_sdram_rlast),
-        .m2_awvalid(cpu_m_sdram_awvalid), .m2_awready(cpu_m_sdram_awready),
-        .m2_awaddr(cpu_m_sdram_awaddr),   .m2_awlen(cpu_m_sdram_awlen),
-        .m2_wvalid(cpu_m_sdram_wvalid),   .m2_wready(cpu_m_sdram_wready),
-        .m2_wdata(cpu_m_sdram_wdata),     .m2_wstrb(cpu_m_sdram_wstrb),
-        .m2_wlast(cpu_m_sdram_wlast),
-        .m2_bvalid(cpu_m_sdram_bvalid),   .m2_bresp(cpu_m_sdram_bresp),
+        .m2_rd(cpu_m_sdram_rd),      .m2_wr(cpu_m_sdram_wr),
+        .m2_addr(cpu_m_sdram_addr),  .m2_wdata(cpu_m_sdram_wdata),
+        .m2_wstrb(cpu_m_sdram_wstrb),
+        .m2_burst_len(cpu_m_sdram_burst_len), .m2_burst_wr_len(cpu_m_sdram_burst_wr_len),
+        .m2_rdata(cpu_m_sdram_rdata), .m2_busy(cpu_m_sdram_busy),
+        .m2_accepted(cpu_m_sdram_accepted), .m2_rdata_valid(cpu_m_sdram_rdata_valid),
+        .m2_wr_data_next(cpu_m_sdram_wr_data_next),
         // M3: Bridge (lowest priority)
-        .m3_arvalid(bridge_m_arvalid), .m3_arready(bridge_m_arready),
-        .m3_araddr(bridge_m_araddr),   .m3_arlen(bridge_m_arlen),
-        .m3_rvalid(bridge_m_rvalid),   .m3_rdata(bridge_m_rdata),
-        .m3_rresp(bridge_m_rresp),     .m3_rlast(bridge_m_rlast),
-        .m3_awvalid(bridge_m_awvalid), .m3_awready(bridge_m_awready),
-        .m3_awaddr(bridge_m_awaddr),   .m3_awlen(bridge_m_awlen),
-        .m3_wvalid(bridge_m_wvalid),   .m3_wready(bridge_m_wready),
-        .m3_wdata(bridge_m_wdata),     .m3_wstrb(bridge_m_wstrb),
-        .m3_wlast(bridge_m_wlast),
-        .m3_bvalid(bridge_m_bvalid),   .m3_bresp(bridge_m_bresp),
-        // Slave output (to axi_sdram_slave)
-        .s_arvalid(arb_s_arvalid), .s_arready(arb_s_arready),
-        .s_araddr(arb_s_araddr),   .s_arlen(arb_s_arlen),
-        .s_rvalid(arb_s_rvalid),   .s_rdata(arb_s_rdata),
-        .s_rresp(arb_s_rresp),     .s_rlast(arb_s_rlast),
-        .s_awvalid(arb_s_awvalid), .s_awready(arb_s_awready),
-        .s_awaddr(arb_s_awaddr),   .s_awlen(arb_s_awlen),
-        .s_wvalid(arb_s_wvalid),   .s_wready(arb_s_wready),
-        .s_wdata(arb_s_wdata),     .s_wstrb(arb_s_wstrb),
-        .s_wlast(arb_s_wlast),
-        .s_bvalid(arb_s_bvalid),   .s_bresp(arb_s_bresp)
-    );
-
-    // AXI4 SDRAM slave (must stay alive during reset for APF save flush & data load)
-    axi_sdram_slave sdram_axi_slave (
-        .clk(clk_cpu),
-        .reset_n(1'b1),
-        .s_axi_arvalid(arb_s_arvalid),
-        .s_axi_arready(arb_s_arready),
-        .s_axi_araddr(arb_s_araddr),
-        .s_axi_arlen(arb_s_arlen),
-        .s_axi_rvalid(arb_s_rvalid),
-        .s_axi_rready(1'b1),
-        .s_axi_rdata(arb_s_rdata),
-        .s_axi_rresp(arb_s_rresp),
-        .s_axi_rlast(arb_s_rlast),
-        .s_axi_awvalid(arb_s_awvalid),
-        .s_axi_awready(arb_s_awready),
-        .s_axi_awaddr(arb_s_awaddr),
-        .s_axi_awlen(arb_s_awlen),
-        .s_axi_wvalid(arb_s_wvalid),
-        .s_axi_wready(arb_s_wready),
-        .s_axi_wdata(arb_s_wdata),
-        .s_axi_wstrb(arb_s_wstrb),
-        .s_axi_wlast(arb_s_wlast),
-        .s_axi_bvalid(arb_s_bvalid),
-        .s_axi_bready(1'b1),
-        .s_axi_bresp(arb_s_bresp),
-        .sdram_rd(sdram_slave_rd),
-        .sdram_wr(sdram_slave_wr),
-        .sdram_addr(sdram_slave_addr),
-        .sdram_wdata(sdram_slave_wdata),
-        .sdram_wstrb(sdram_slave_wstrb),
-        .sdram_burst_len(sdram_slave_burst_len),
-        .sdram_burst_wr_len(sdram_slave_burst_wr_len),
-        .sdram_rdata(ram1_word_q),
-        .sdram_busy(ram1_word_busy),
-        .sdram_accepted(sdram_accepted_r),
+        .m3_rd(bridge_m_rd),         .m3_wr(bridge_m_wr),
+        .m3_addr(bridge_m_addr),     .m3_wdata(bridge_m_wdata),
+        .m3_wstrb(bridge_m_wstrb),
+        .m3_burst_len(bridge_m_burst_len), .m3_burst_wr_len(bridge_m_burst_wr_len),
+        .m3_rdata(bridge_m_rdata),   .m3_busy(bridge_m_busy),
+        .m3_accepted(bridge_m_accepted), .m3_rdata_valid(bridge_m_rdata_valid),
+        .m3_wr_data_next(bridge_m_wr_data_next),
+        // io_sdram word interface
+        .sdram_rd(ram1_word_rd),     .sdram_wr(ram1_word_wr),
+        .sdram_addr(ram1_word_addr), .sdram_wdata(arb_sdram_wdata),
+        .sdram_wstrb(ram1_word_wstrb),
+        .sdram_burst_len(ram1_word_burst_len),
+        .sdram_burst_wr_len(ram1_word_burst_wr_len),
+        .sdram_rdata(ram1_word_q),   .sdram_busy(ram1_word_busy),
         .sdram_rdata_valid(ram1_word_q_valid),
-        .sdram_wr_data_next(sdram_slave_wr_data_next),
-        .sdram_next_wdata(sdram_slave_next_wdata),
-        .sdram_next_wstrb(sdram_slave_next_wstrb)
+        .sdram_wr_data_next(ram1_word_wr_data_next),
+        .sdram_wdata_direct(arb_sdram_wdata_direct),
+        .sdram_wstrb_direct(arb_sdram_wstrb_direct)
     );
+    assign ram1_word_data = arb_sdram_wdata;
 
-    // AXI4 PSRAM slave
-    axi_psram_slave cpu_psram_axi (
-        .clk(clk_cpu),
-        .reset_n(reset_n),
-        .s_axi_arvalid(cpu_m_psram_arvalid),
-        .s_axi_arready(cpu_m_psram_arready),
-        .s_axi_araddr(cpu_m_psram_araddr),
-        .s_axi_arlen(cpu_m_psram_arlen),
-        .s_axi_rvalid(cpu_m_psram_rvalid),
-        .s_axi_rready(1'b1),
-        .s_axi_rdata(cpu_m_psram_rdata),
-        .s_axi_rresp(cpu_m_psram_rresp),
-        .s_axi_rlast(cpu_m_psram_rlast),
-        .s_axi_awvalid(cpu_m_psram_awvalid),
-        .s_axi_awready(cpu_m_psram_awready),
-        .s_axi_awaddr(cpu_m_psram_awaddr),
-        .s_axi_awlen(cpu_m_psram_awlen),
-        .s_axi_wvalid(cpu_m_psram_wvalid),
-        .s_axi_wready(cpu_m_psram_wready),
-        .s_axi_wdata(cpu_m_psram_wdata),
-        .s_axi_wstrb(cpu_m_psram_wstrb),
-        .s_axi_wlast(cpu_m_psram_wlast),
-        .s_axi_bvalid(cpu_m_psram_bvalid),
-        .s_axi_bready(1'b1),
-        .s_axi_bresp(cpu_m_psram_bresp),
-        .psram_rd(cpu_psram_rd),
-        .psram_wr(cpu_psram_wr),
-        .psram_addr(cpu_psram_addr),
-        .psram_wdata(cpu_psram_wdata),
-        .psram_wstrb(cpu_psram_wstrb),
-        .psram_rdata(cpu_psram_rdata),
-        .psram_busy(cpu_psram_busy),
-        .psram_rdata_valid(cpu_psram_rdata_valid),
-        .psram_burst_rd(cpu_psram_burst_rd),
-        .psram_burst_len(cpu_psram_burst_len),
-        .psram_burst_rdata_valid(cpu_psram_burst_rdata_valid),
-        .psram_burst_rdata(cpu_psram_burst_rdata),
-    );
+    // PSRAM: cpu_system connects directly to psram_controller (no AXI slave wrapper)
 
     // Terminal display (40x30 characters, 320x240 pixels)
     wire [23:0] terminal_pixel_color;
@@ -2583,13 +2344,11 @@ wire [12:0] adma_ring_wptr;
 wire [12:0] adma_ring_rptr;
 wire        adma_sample_wr;
 wire [31:0] adma_sample_data;
-wire        adma_m_arvalid, adma_m_arready;
-wire [31:0] adma_m_araddr;
-wire [7:0]  adma_m_arlen;
-wire        adma_m_rvalid;
+wire        adma_m_rd;
+wire [23:0] adma_m_addr;
+wire [3:0]  adma_m_burst_len;
 wire [31:0] adma_m_rdata;
-wire [1:0]  adma_m_rresp;
-wire        adma_m_rlast;
+wire        adma_m_busy, adma_m_accepted, adma_m_rdata_valid;
 
 wire        audio_mux_wr = adma_enable ? adma_sample_wr : audio_sample_wr;
 wire [31:0] audio_mux_data = adma_enable ? adma_sample_data : audio_sample_data;
@@ -2623,12 +2382,10 @@ audio_dma adma (
     .fifo_full(audio_fifo_full),
     .sample_wr(adma_sample_wr),
     .sample_data(adma_sample_data),
-    .m_arvalid(adma_m_arvalid), .m_arready(adma_m_arready),
-    .m_araddr(adma_m_araddr), .m_arlen(adma_m_arlen),
-    .m_arsize(), .m_arburst(),
-    .m_rvalid(adma_m_rvalid), .m_rready(),
-    .m_rdata(adma_m_rdata), .m_rresp(adma_m_rresp),
-    .m_rlast(adma_m_rlast)
+    .m_rd(adma_m_rd),           .m_addr(adma_m_addr),
+    .m_burst_len(adma_m_burst_len),
+    .m_rdata(adma_m_rdata),     .m_busy(adma_m_busy),
+    .m_accepted(adma_m_accepted), .m_rdata_valid(adma_m_rdata_valid)
 );
 
 
@@ -2726,8 +2483,8 @@ io_sdram isr0 (
     .word_busy  ( ram1_word_busy ),
     .word_q_valid ( ram1_word_q_valid ),
     .word_wr_data_next ( ram1_word_wr_data_next ),
-    .burst_wr_direct_data ( sdram_slave_wdata ),
-    .burst_wr_direct_strb ( sdram_slave_wstrb )
+    .burst_wr_direct_data ( arb_sdram_wdata_direct ),
+    .burst_wr_direct_strb ( arb_sdram_wstrb_direct )
 );
 
 

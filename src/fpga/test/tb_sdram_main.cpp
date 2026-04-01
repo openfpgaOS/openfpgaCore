@@ -32,9 +32,8 @@ static void tick() {
 
 static void reset() {
     tb->reset_n = 0;
-    tb->s_axi_arvalid = 0;
-    tb->s_axi_awvalid = 0;
-    tb->s_axi_wvalid = 0;
+    tb->m_rd = 0;
+    tb->m_wr = 0;
     for (int i = 0; i < 100; i++)
         tick();
     tb->reset_n = 1;
@@ -44,67 +43,57 @@ static void reset() {
 }
 
 static void idle(int cycles) {
-    tb->s_axi_arvalid = 0;
-    tb->s_axi_awvalid = 0;
-    tb->s_axi_wvalid = 0;
+    tb->m_rd = 0;
+    tb->m_wr = 0;
     for (int i = 0; i < cycles; i++)
         tick();
 }
 
-// ---- AXI Write Transaction ----
+// ---- Word-Level Write Transaction ----
 // Writes N words starting at byte_addr. For single word, len=0.
 static bool axi_write(uint32_t byte_addr, const uint32_t *data, int len, int timeout = 2000) {
-    int awlen = len;  // AWLEN = number of beats - 1
     int beats = len + 1;
 
-    // Phase 1: AW channel
-    tb->s_axi_awvalid = 1;
-    tb->s_axi_awaddr = byte_addr;
-    tb->s_axi_awlen = awlen;
-    // Also present first W beat
-    tb->s_axi_wvalid = 1;
-    tb->s_axi_wdata = data[0];
-    tb->s_axi_wstrb = 0xF;
-    tb->s_axi_wlast = (beats == 1);
+    // Issue write command
+    tb->m_wr = 1;
+    tb->m_addr = byte_addr >> 2;  // Word address
+    tb->m_wdata = data[0];
+    tb->m_wstrb = 0xF;
+    tb->m_burst_wr_len = len & 0xF;
 
-    int beat = 0;
-    bool aw_done = false;
-    bool w_done = false;
+    bool accepted = false;
+    int beat = 1;  // Beat 0 is with the command
+    bool busy_seen = false;
 
     for (int t = 0; t < timeout; t++) {
         tick();
 
-        // AW handshake
-        if (!aw_done && tb->s_axi_awready) {
-            aw_done = true;
-            tb->s_axi_awvalid = 0;
+        if (!accepted && tb->m_accepted) {
+            accepted = true;
+            tb->m_wr = 0;
         }
 
-        // W handshake
-        if (!w_done && tb->s_axi_wready) {
+        // For burst writes: provide next data when requested
+        if (accepted && tb->m_wr_data_next && beat < beats) {
+            tb->m_wdata = data[beat];
             beat++;
-            if (beat >= beats) {
-                w_done = true;
-                tb->s_axi_wvalid = 0;
-            } else {
-                tb->s_axi_wdata = data[beat];
-                tb->s_axi_wlast = (beat == beats - 1);
-            }
         }
 
-        // B response
-        if (tb->s_axi_bvalid) {
-            tb->s_axi_awvalid = 0;
-            tb->s_axi_wvalid = 0;
-            idle(2);
-            return true;
+        // Track completion via busy
+        if (accepted) {
+            if (tb->m_busy) busy_seen = true;
+            if (busy_seen && !tb->m_busy) {
+                if (beat < beats)
+                    printf("  WARNING: burst wr %d/%d beats before !busy (addr=0x%08x)\n", beat, beats, byte_addr);
+                idle(2);
+                return true;
+            }
         }
     }
 
-    printf("  TIMEOUT: axi_write addr=0x%08x len=%d (aw=%d w_beat=%d/%d)\n",
-           byte_addr, awlen, aw_done, beat, beats);
-    tb->s_axi_awvalid = 0;
-    tb->s_axi_wvalid = 0;
+    printf("  TIMEOUT: write addr=0x%08x len=%d (accepted=%d beat=%d/%d)\n",
+           byte_addr, len, accepted, beat, beats);
+    tb->m_wr = 0;
     return false;
 }
 
@@ -113,42 +102,40 @@ static bool axi_write_word(uint32_t byte_addr, uint32_t data) {
     return axi_write(byte_addr, &data, 0);
 }
 
-// ---- AXI Read Transaction ----
+// ---- Word-Level Read Transaction ----
 // Reads N words starting at byte_addr. For single word, len=0.
 static bool axi_read(uint32_t byte_addr, uint32_t *data, int len, int timeout = 2000) {
-    int arlen = len;
     int beats = len + 1;
 
-    tb->s_axi_arvalid = 1;
-    tb->s_axi_araddr = byte_addr;
-    tb->s_axi_arlen = arlen;
+    tb->m_rd = 1;
+    tb->m_addr = byte_addr >> 2;  // Word address
+    tb->m_burst_len = len & 0xF;
 
-    bool ar_done = false;
+    bool accepted = false;
     int beat = 0;
 
     for (int t = 0; t < timeout; t++) {
         tick();
 
-        if (!ar_done && tb->s_axi_arready) {
-            ar_done = true;
-            tb->s_axi_arvalid = 0;
+        if (!accepted && tb->m_accepted) {
+            accepted = true;
+            tb->m_rd = 0;
         }
 
-        if (tb->s_axi_rvalid) {
+        if (tb->m_rdata_valid) {
             if (beat < beats)
-                data[beat] = tb->s_axi_rdata;
+                data[beat] = tb->m_rdata;
             beat++;
-            if (tb->s_axi_rlast) {
-                tb->s_axi_arvalid = 0;
+            if (beat >= beats) {
                 idle(2);
-                return (beat == beats);
+                return true;
             }
         }
     }
 
-    printf("  TIMEOUT: axi_read addr=0x%08x len=%d (ar=%d beats=%d/%d)\n",
-           byte_addr, arlen, ar_done, beat, beats);
-    tb->s_axi_arvalid = 0;
+    printf("  TIMEOUT: read addr=0x%08x len=%d (accepted=%d beats=%d/%d busy=%d)\n",
+           byte_addr, len, accepted, beat, beats, tb->m_busy);
+    tb->m_rd = 0;
     return false;
 }
 
@@ -282,22 +269,26 @@ static void test_byte_strobes() {
 
     // Partial write: only byte 0
     uint32_t partial = 0x000000AA;
-    tb->s_axi_awvalid = 1;
-    tb->s_axi_awaddr = 0x10005000;
-    tb->s_axi_awlen = 0;
-    tb->s_axi_wvalid = 1;
-    tb->s_axi_wdata = partial;
-    tb->s_axi_wstrb = 0x1;  // Only byte 0
-    tb->s_axi_wlast = 1;
+    tb->m_wr = 1;
+    tb->m_addr = 0x10005000 >> 2;
+    tb->m_wdata = partial;
+    tb->m_wstrb = 0x1;  // Only byte 0
+    tb->m_burst_wr_len = 0;
 
+    bool bs_accepted = false;
+    bool bs_busy = false;
     for (int t = 0; t < 500; t++) {
         tick();
-        if (tb->s_axi_awready) tb->s_axi_awvalid = 0;
-        if (tb->s_axi_wready) tb->s_axi_wvalid = 0;
-        if (tb->s_axi_bvalid) break;
+        if (!bs_accepted && tb->m_accepted) {
+            bs_accepted = true;
+            tb->m_wr = 0;
+        }
+        if (bs_accepted) {
+            if (tb->m_busy) bs_busy = true;
+            if (bs_busy && !tb->m_busy) break;
+        }
     }
-    tb->s_axi_awvalid = 0;
-    tb->s_axi_wvalid = 0;
+    tb->m_wr = 0;
     idle(5);
 
     uint32_t val = axi_read_word(0x10005000);
