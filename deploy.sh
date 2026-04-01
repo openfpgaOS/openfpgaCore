@@ -19,26 +19,22 @@ DEST="$1"
 if [ -n "$DEST" ] && [ -f "$DEST/src/sdk/sdk.mk" ]; then
     echo -e "${CYAN}Deploying to SDK: $DEST${RESET}"
 
-    # ── Runtime (gitignored binaries) ─────────────────────────────
+    # Validate build/ exists (populated by 'make' or 'make flash')
+    BUILD_DIR="build/Cores/ThinkElastic.openfpgaOS"
+    if [ ! -f "$BUILD_DIR/bitstream.rbf_r" ]; then
+        echo "Error: $BUILD_DIR/bitstream.rbf_r not found. Run 'make' first."
+        exit 1
+    fi
+
+    # ── Runtime (gitignored binaries) — sourced from build/ ──────
     RUNTIME="$DEST/runtime"
     mkdir -p "$RUNTIME"
 
-    # Bitstream (pre-convert to RBF_R)
-    RBF=src/fpga/targets/pocket/output_files/ap_core.rbf
-    if [ -f "$RBF" ]; then
-        if [ ! -x tools/reverse_bits ]; then
-            gcc -O2 -o tools/reverse_bits tools/reverse_bits.c
-        fi
-        tools/reverse_bits "$RBF" "$RUNTIME/bitstream.rbf_r"
+    cp "$BUILD_DIR/bitstream.rbf_r" "$RUNTIME/" && \
         echo -e "  ${GREEN}✓${RESET} bitstream.rbf_r"
-    fi
-
-    # Loader
-    [ -f src/chip32/pocket/loader.bin ] && cp src/chip32/pocket/loader.bin "$RUNTIME/" && \
+    cp "$BUILD_DIR/loader.bin" "$RUNTIME/" && \
         echo -e "  ${GREEN}✓${RESET} loader.bin"
-
-    # OS binary
-    [ -f src/firmware/os/os.bin ] && cp src/firmware/os/os.bin "$RUNTIME/" && \
+    cp "build/Assets/openfpgaos/common/os.bin" "$RUNTIME/" && \
         echo -e "  ${GREEN}✓${RESET} os.bin"
 
     # ── Core configs → dist/sdk/core/ ─────────────────────────────
