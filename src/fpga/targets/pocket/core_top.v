@@ -597,7 +597,7 @@ psram_controller #(
     .cram_a(cram0_a),
     .cram_dq(cram0_dq),
     .cram_wait(cram0_wait),
-    .cram_clk(cram0_clk),
+    .cram_clk(),             // PLL drives cram0_clk directly
     .cram_adv_n(cram0_adv_n),
     .cram_cre(cram0_cre),
     .cram_ce0_n(cram0_ce0_n),
@@ -654,7 +654,7 @@ psram_controller #(
     .cram_a(cram1_a),
     .cram_dq(cram1_dq),
     .cram_wait(cram1_wait),
-    .cram_clk(cram1_clk),
+    .cram_clk(),             // clk_74a drives cram1_clk directly
     .cram_adv_n(cram1_adv_n),
     .cram_cre(cram1_cre),
     .cram_ce0_n(cram1_ce0_n),
@@ -2705,7 +2705,10 @@ mf_pllram_133 mp_ram (
 
 assign clk_cpu = clk_ram_controller;
 
-// CRAM CLK pins are now driven by the individual psram_controller instances
+// Drive CRAM clock pins from PLL outputs (not from psram_controller —
+// psram.sv's cram_clk output stays low, it doesn't generate the clock)
+assign cram0_clk = clk_cram;
+assign cram1_clk = clk_74a;
 
 // SDRAM controller
 io_sdram isr0 (
