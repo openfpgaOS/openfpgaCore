@@ -498,7 +498,7 @@ assign link_sd_i = port_tran_sd;
 // BCR Initialization FSM
 // Configures both CRAM chips for synchronous burst mode before CPU starts.
 // BCR value 0x641F: sync mode, latency code 4 (≥105MHz), continuous burst.
-// With psram_controller_32, both chips are configured in lockstep (2 phases: CE0, CE1).
+// CRAM0 BCR config only — CRAM1 runs in clk_74a domain with its own controller.
 // ============================================================
 reg         bcr_init_done;
 reg [2:0]   bcr_state;
@@ -506,7 +506,7 @@ reg         bcr_config_en;
 reg [15:0]  bcr_config_data;
 reg         bcr_config_bank;
 
-wire        psram32_raw_busy;
+wire        psram0_raw_busy;
 
 localparam BCR_VALUE = 16'h641F;
 
@@ -540,7 +540,7 @@ always @(posedge clk_ram_controller) begin
         end
 
         BCR_ST_CFG_CE0: begin
-            if (!psram32_raw_busy) begin
+            if (!psram0_raw_busy) begin
                 bcr_config_en <= 1;
                 bcr_config_data <= BCR_VALUE;
                 bcr_config_bank <= 0;  // CE0 on both chips simultaneously
@@ -549,12 +549,12 @@ always @(posedge clk_ram_controller) begin
         end
 
         BCR_ST_WAIT_CE0: begin
-            if (!psram32_raw_busy && !bcr_config_en)
+            if (!psram0_raw_busy && !bcr_config_en)
                 bcr_state <= BCR_ST_CFG_CE1;
         end
 
         BCR_ST_CFG_CE1: begin
-            if (!psram32_raw_busy) begin
+            if (!psram0_raw_busy) begin
                 bcr_config_en <= 1;
                 bcr_config_data <= BCR_VALUE;
                 bcr_config_bank <= 1;  // CE1 on both chips simultaneously
@@ -563,7 +563,7 @@ always @(posedge clk_ram_controller) begin
         end
 
         BCR_ST_WAIT_CE1: begin
-            if (!psram32_raw_busy && !bcr_config_en)
+            if (!psram0_raw_busy && !bcr_config_en)
                 bcr_state <= BCR_ST_DONE;
         end
 
@@ -574,17 +574,16 @@ always @(posedge clk_ram_controller) begin
 end
 
 // ============================================================
-// 32-bit Dual PSRAM Controller (CRAM0 + CRAM1 in lockstep)
-// CRAM0 = bits [15:0], CRAM1 = bits [31:16]
+// PSRAM Controller for CRAM0 (16MB, app cached data)
 // ============================================================
-wire        psram32_burst_rd;
-wire [5:0]  psram32_burst_len;
-wire        psram32_burst_rdata_valid;
-wire [31:0] psram32_burst_rdata;
+wire        psram0_burst_rd;
+wire [5:0]  psram0_burst_len;
+wire        psram0_burst_rdata_valid;
+wire [31:0] psram0_burst_rdata;
 
-psram_controller_32 #(
+psram_controller #(
     .CLOCK_SPEED(100.0)
-) psram32 (
+) psram0 (
     .clk(clk_ram_controller),
     .reset_n(1'b1),
     .word_rd(psram_mux_rd),
@@ -595,42 +594,83 @@ psram_controller_32 #(
     .word_q(psram_mux_rdata),
     .word_busy(psram_mux_busy),
     .word_q_valid(psram_mux_rdata_valid),
-    // CRAM0 (low 16 bits)
-    .cram0_a(cram0_a),
-    .cram0_dq(cram0_dq),
-    .cram0_wait(cram0_wait),
-    .cram0_clk(),    // PLL drives cram0_clk directly
-    .cram0_adv_n(cram0_adv_n),
-    .cram0_cre(cram0_cre),
-    .cram0_ce0_n(cram0_ce0_n),
-    .cram0_ce1_n(cram0_ce1_n),
-    .cram0_oe_n(cram0_oe_n),
-    .cram0_we_n(cram0_we_n),
-    .cram0_ub_n(cram0_ub_n),
-    .cram0_lb_n(cram0_lb_n),
-    // CRAM1 (high 16 bits)
-    .cram1_a(cram1_a),
-    .cram1_dq(cram1_dq),
-    .cram1_wait(cram1_wait),
-    .cram1_clk(),    // PLL drives cram1_clk directly
-    .cram1_adv_n(cram1_adv_n),
-    .cram1_cre(cram1_cre),
-    .cram1_ce0_n(cram1_ce0_n),
-    .cram1_ce1_n(cram1_ce1_n),
-    .cram1_oe_n(cram1_oe_n),
-    .cram1_we_n(cram1_we_n),
-    .cram1_ub_n(cram1_ub_n),
-    .cram1_lb_n(cram1_lb_n),
-    // Config
+    .cram_a(cram0_a),
+    .cram_dq(cram0_dq),
+    .cram_wait(cram0_wait),
+    .cram_clk(cram0_clk),
+    .cram_adv_n(cram0_adv_n),
+    .cram_cre(cram0_cre),
+    .cram_ce0_n(cram0_ce0_n),
+    .cram_ce1_n(cram0_ce1_n),
+    .cram_oe_n(cram0_oe_n),
+    .cram_we_n(cram0_we_n),
+    .cram_ub_n(cram0_ub_n),
+    .cram_lb_n(cram0_lb_n),
     .config_en(bcr_config_en),
     .config_data(bcr_config_data),
     .config_bank_sel(bcr_config_bank),
-    // Burst
-    .burst_rd(psram32_burst_rd),
-    .burst_len(psram32_burst_len),
-    .burst_rdata_valid(psram32_burst_rdata_valid),
-    .burst_rdata(psram32_burst_rdata),
-    .raw_busy(psram32_raw_busy),
+    .burst_rd(psram0_burst_rd),
+    .burst_len(psram0_burst_len),
+    .burst_rdata_valid(psram0_burst_rdata_valid),
+    .burst_rdata(psram0_burst_rdata),
+    .raw_busy(psram0_raw_busy),
+    .dbg_wait_seen(),
+    .dbg_wait_cycles(),
+    .dbg_burst_count(),
+    .dbg_stale_count()
+);
+
+// ============================================================
+// PSRAM Controller for CRAM1 (16MB, save data only — clk_74a domain)
+// ============================================================
+wire        psram1_rd;
+wire        psram1_wr;
+wire [21:0] psram1_addr;
+wire [31:0] psram1_wdata;
+wire [3:0]  psram1_wstrb;
+wire [31:0] psram1_rdata;
+wire        psram1_busy;
+wire        psram1_rdata_valid;
+
+// CRAM1 reset: sync pll_ram_locked into clk_74a
+reg [2:0] pll_ram_locked_74a_sync;
+always @(posedge clk_74a)
+    pll_ram_locked_74a_sync <= {pll_ram_locked_74a_sync[1:0], pll_ram_locked};
+wire psram1_reset_n = pll_ram_locked_74a_sync[2];
+
+psram_controller #(
+    .CLOCK_SPEED(74.25)
+) psram1_inst (
+    .clk(clk_74a),
+    .reset_n(psram1_reset_n),
+    .word_rd(psram1_rd),
+    .word_wr(psram1_wr),
+    .word_addr(psram1_addr),
+    .word_data(psram1_wdata),
+    .word_wstrb(psram1_wstrb),
+    .word_q(psram1_rdata),
+    .word_busy(psram1_busy),
+    .word_q_valid(psram1_rdata_valid),
+    .cram_a(cram1_a),
+    .cram_dq(cram1_dq),
+    .cram_wait(cram1_wait),
+    .cram_clk(cram1_clk),
+    .cram_adv_n(cram1_adv_n),
+    .cram_cre(cram1_cre),
+    .cram_ce0_n(cram1_ce0_n),
+    .cram_ce1_n(cram1_ce1_n),
+    .cram_oe_n(cram1_oe_n),
+    .cram_we_n(cram1_we_n),
+    .cram_ub_n(cram1_ub_n),
+    .cram_lb_n(cram1_lb_n),
+    .config_en(1'b0),
+    .config_data(16'b0),
+    .config_bank_sel(1'b0),
+    .burst_rd(1'b0),
+    .burst_len(6'd0),
+    .burst_rdata_valid(),
+    .burst_rdata(),
+    .raw_busy(),
     .dbg_wait_seen(),
     .dbg_wait_cycles(),
     .dbg_burst_count(),
@@ -814,10 +854,10 @@ wire [31:0] cpu_psram_burst_rdata;
 
 
 // Address decode: cpu_psram_addr[25:22] = original addr[27:24]
-// CRAM0 and CRAM1 are now a single 32-bit-wide memory (psram_controller_32)
 wire [3:0] mem_target_sel = cpu_psram_addr[25:22];
-wire cpu_psram_sel_cram = (mem_target_sel == 4'h0) || (mem_target_sel == 4'h8)
-                        || (mem_target_sel == 4'h1) || (mem_target_sel == 4'h9);
+wire cpu_psram_sel_cram0 = (mem_target_sel == 4'h0) || (mem_target_sel == 4'h8);
+wire cpu_psram_sel_cram1 = (mem_target_sel == 4'h1) || (mem_target_sel == 4'h9);
+wire cpu_psram_sel_cram = cpu_psram_sel_cram0;  // CRAM0 only for cached access
 wire cpu_psram_sel_sram = (mem_target_sel == 4'hA);
 
 // Muxed PSRAM signals (bridge or CPU)
@@ -1081,7 +1121,7 @@ wire bridge_wr_skid_nonempty = bridge_wr_skid_nonempty_sync[2];
 // Include CRAM write activity — bridge must finish draining CRAM FIFOs
 // before allcomplete goes high, or apps read uninitialized save data.
 wire bridge_wr_idle = !bridge_wr_skid_nonempty && bridge_m_wr_idle
-                    && !cram0_bridge_wr_active;
+                    && !cram0_bridge_wr_active && !bridge_cram1_active;
 
 // Bridge DMA active tracking
 reg bridge_dma_active;
@@ -1168,120 +1208,109 @@ always @(posedge clk_74a) begin
     end
 end
 
-// CRAM1 bridge read: With unified psram_controller_32, CRAM1 reads
-// (bridge addr 0x30xxxxxx) go through the same controller as CRAM0.
-// We use a request/response FIFO pair just like before, but the drain
-// FSM reads from the unified psram_controller_32 via the mux.
-wire        cram1_rd_req_fifo_full;
+// ============================================================
+// Bridge CRAM1 Direct Write (clk_74a — no FIFO needed)
+// ============================================================
+wire bridge_cram1_wr_detect = bridge_wr && (bridge_addr[31:24] == 8'h30);
 
-reg         bridge_cram1_rd;
-reg  [31:0] bridge_cram1_rd_captured;
-wire        cram1_rd_resp_empty;
-wire [31:0] cram1_rd_resp_q;
-reg         cram1_rd_resp_pop;
+reg        bridge_cram1_wr_pending;
+reg        bridge_cram1_wr_started;
+reg        bridge_cram1_wr_pulse;
+reg [21:0] bridge_cram1_wr_addr;
+reg [31:0] bridge_cram1_wr_data;
 
 always @(posedge clk_74a) begin
-    cram1_rd_resp_pop <= 0;
-
-    if (!bridge_cram1_rd && bridge_rd && (bridge_addr[31:24] == 8'h30)) begin
-        bridge_cram1_rd <= 1;
-    end
-
-    if (bridge_cram1_rd && !cram1_rd_resp_empty) begin
-        bridge_cram1_rd_captured <= cram1_rd_resp_q;
-        cram1_rd_resp_pop <= 1;
-        bridge_cram1_rd <= 0;
-    end
-end
-
-wire cram1_rd_req_push = !bridge_cram1_rd && bridge_rd
-                        && (bridge_addr[31:24] == 8'h30)
-                        && !cram1_rd_req_fifo_full;
-wire [21:0] cram1_rd_req_data = bridge_addr[23:2];
-
-// CRAM1 bridge read FIFOs (request + response) — kept for bridge compatibility.
-// The drain FSM uses the unified psram_controller_32 via psram_mux signals.
-wire        cram1_rd_req_fifo_empty;
-wire [21:0] cram1_rd_req_fifo_q;
-wire        cram1_rd_req_drain;
-
-dcfifo cram1_rd_req_fifo (
-    .wrclk   (clk_74a),
-    .wrreq   (cram1_rd_req_push),
-    .data    (cram1_rd_req_data),
-    .wrfull  (cram1_rd_req_fifo_full),
-    .rdclk   (clk_ram_controller),
-    .rdreq   (cram1_rd_req_drain),
-    .q       (cram1_rd_req_fifo_q),
-    .rdempty (cram1_rd_req_fifo_empty),
-    .aclr    (1'b0)
-);
-defparam cram1_rd_req_fifo.intended_device_family = "Cyclone V",
-    cram1_rd_req_fifo.lpm_numwords  = 64,
-    cram1_rd_req_fifo.lpm_showahead = "ON",
-    cram1_rd_req_fifo.lpm_type      = "dcfifo",
-    cram1_rd_req_fifo.lpm_width     = 22,
-    cram1_rd_req_fifo.lpm_widthu    = 6,
-    cram1_rd_req_fifo.overflow_checking  = "ON",
-    cram1_rd_req_fifo.underflow_checking = "ON",
-    cram1_rd_req_fifo.rdsync_delaypipe   = 5,
-    cram1_rd_req_fifo.wrsync_delaypipe   = 5,
-    cram1_rd_req_fifo.use_eab       = "ON";
-
-// CRAM1 read drain FSM — reads from unified controller
-reg        cram1_rd_pending;
-reg        cram1_rd_started;
-reg [21:0] cram1_rd_addr_r;
-reg        cram1_rd_resp_push;
-reg [31:0] cram1_rd_resp_wdata;
-
-assign cram1_rd_req_drain = !cram1_rd_req_fifo_empty && !cram1_rd_pending;
-
-always @(posedge clk_ram_controller) begin
-    cram1_rd_resp_push <= 0;
-
-    if (!cram1_rd_pending) begin
-        if (!cram1_rd_req_fifo_empty) begin
-            cram1_rd_addr_r <= cram1_rd_req_fifo_q;
-            cram1_rd_pending <= 1;
-            cram1_rd_started <= 0;
-        end
-    end else begin
-        if (!cram1_rd_started && psram_mux_busy)
-            cram1_rd_started <= 1;
-        if (psram_mux_rdata_valid) begin
-            cram1_rd_resp_wdata <= psram_mux_rdata;
-            cram1_rd_resp_push <= 1;
-            cram1_rd_pending <= 0;
-            cram1_rd_started <= 0;
+    bridge_cram1_wr_pulse <= 0;
+    if (bridge_cram1_wr_detect && !bridge_cram1_wr_pending) begin
+        bridge_cram1_wr_pending <= 1;
+        bridge_cram1_wr_started <= 0;
+        bridge_cram1_wr_pulse <= 1;
+        bridge_cram1_wr_addr <= bridge_addr[23:2];
+        bridge_cram1_wr_data <= bridge_wr_data;
+    end else if (bridge_cram1_wr_pending) begin
+        if (!bridge_cram1_wr_started && psram1_busy)
+            bridge_cram1_wr_started <= 1;
+        else if (bridge_cram1_wr_started && !psram1_busy) begin
+            bridge_cram1_wr_pending <= 0;
+            bridge_cram1_wr_started <= 0;
         end
     end
 end
 
-dcfifo cram1_rd_resp_fifo (
-    .wrclk   (clk_ram_controller),
-    .wrreq   (cram1_rd_resp_push),
-    .data    (cram1_rd_resp_wdata),
-    .rdclk   (clk_74a),
-    .rdreq   (cram1_rd_resp_pop),
-    .q       (cram1_rd_resp_q),
-    .rdempty (cram1_rd_resp_empty),
-    .aclr    (1'b0),
-    .wrfull  (), .wrempty (), .rdfull (), .rdusedw (), .wrusedw ()
-);
-defparam cram1_rd_resp_fifo.intended_device_family = "Cyclone V",
-    cram1_rd_resp_fifo.lpm_numwords  = 4,
-    cram1_rd_resp_fifo.lpm_showahead = "ON",
-    cram1_rd_resp_fifo.lpm_type      = "dcfifo",
-    cram1_rd_resp_fifo.lpm_width     = 32,
-    cram1_rd_resp_fifo.lpm_widthu    = 2,
-    cram1_rd_resp_fifo.overflow_checking  = "ON",
-    cram1_rd_resp_fifo.underflow_checking = "ON",
-    cram1_rd_resp_fifo.rdsync_delaypipe   = 5,
-    cram1_rd_resp_fifo.wrsync_delaypipe   = 5,
-    cram1_rd_resp_fifo.use_eab       = "OFF";
+// ============================================================
+// Bridge CRAM1 Direct Read (clk_74a)
+// ============================================================
+reg prev_bridge_rd_for_cram1;
+always @(posedge clk_74a)
+    prev_bridge_rd_for_cram1 <= bridge_rd && (bridge_addr[31:24] == 8'h30);
+wire bridge_cram1_rd_detect = !prev_bridge_rd_for_cram1 && bridge_rd && (bridge_addr[31:24] == 8'h30);
 
-wire [31:0] cram1_rd_resp_data = bridge_cram1_rd_captured;
+reg        bridge_cram1_rd_pending;
+reg        bridge_cram1_rd_started;
+reg        bridge_cram1_rd_pulse;
+reg [21:0] bridge_cram1_rd_addr;
+reg [31:0] cram1_rd_resp_data;
+
+always @(posedge clk_74a) begin
+    bridge_cram1_rd_pulse <= 0;
+    if (bridge_cram1_rd_detect && !bridge_cram1_rd_pending && !bridge_cram1_wr_pending) begin
+        bridge_cram1_rd_pending <= 1;
+        bridge_cram1_rd_started <= 0;
+        bridge_cram1_rd_pulse <= 1;
+        bridge_cram1_rd_addr <= bridge_addr[23:2];
+    end else if (bridge_cram1_rd_pending) begin
+        if (!bridge_cram1_rd_started && psram1_busy)
+            bridge_cram1_rd_started <= 1;
+        if (psram1_rdata_valid) begin
+            cram1_rd_resp_data <= psram1_rdata;
+            bridge_cram1_rd_pending <= 0;
+            bridge_cram1_rd_started <= 0;
+        end
+    end
+end
+
+wire bridge_cram1_active = bridge_cram1_wr_pending | bridge_cram1_rd_pending;
+
+// ============================================================
+// CPU <-> CRAM1 Clock Domain Crossing
+// ============================================================
+wire        cdc_psram1_rd, cdc_psram1_wr;
+wire [21:0] cdc_psram1_addr;
+wire [31:0] cdc_psram1_wdata;
+wire [3:0]  cdc_psram1_wstrb;
+wire [31:0] cdc_cpu_rdata;
+wire        cdc_cpu_busy;
+wire        cdc_cpu_rdata_valid;
+
+cpu_psram1_cdc cdc_psram1 (
+    .clk_cpu(clk_cpu),
+    .cpu_rd(cpu_psram_rd & cpu_psram_sel_cram1),
+    .cpu_wr(cpu_psram_wr & cpu_psram_sel_cram1),
+    .cpu_addr(cpu_psram_addr[21:0]),
+    .cpu_wdata(cpu_psram_wdata),
+    .cpu_wstrb(cpu_psram_wstrb),
+    .cpu_rdata(cdc_cpu_rdata),
+    .cpu_busy(cdc_cpu_busy),
+    .cpu_rdata_valid(cdc_cpu_rdata_valid),
+    .clk_74a(clk_74a),
+    .psram_rd(cdc_psram1_rd),
+    .psram_wr(cdc_psram1_wr),
+    .psram_addr(cdc_psram1_addr),
+    .psram_wdata(cdc_psram1_wdata),
+    .psram_wstrb(cdc_psram1_wstrb),
+    .psram_rdata(psram1_rdata),
+    .psram_busy(psram1_busy),
+    .psram_rdata_valid(psram1_rdata_valid),
+    .bridge_active(bridge_cram1_active)
+);
+
+// CRAM1 mux (clk_74a): bridge > CDC'd CPU
+assign psram1_rd = bridge_cram1_rd_pulse ? 1'b1 : bridge_cram1_active ? 1'b0 : cdc_psram1_rd;
+assign psram1_wr = bridge_cram1_wr_pulse ? 1'b1 : bridge_cram1_active ? 1'b0 : cdc_psram1_wr;
+assign psram1_addr = bridge_cram1_wr_pending ? bridge_cram1_wr_addr :
+                     bridge_cram1_rd_pending ? bridge_cram1_rd_addr : cdc_psram1_addr;
+assign psram1_wdata = bridge_cram1_wr_pending ? bridge_cram1_wr_data : cdc_psram1_wdata;
+assign psram1_wstrb = bridge_cram1_wr_pending ? 4'b1111 : cdc_psram1_wstrb;
 
 // 4-stage synchronizer for SDRAM bridge reads
 reg bridge_rd_sync1, bridge_rd_sync2, bridge_rd_sync3, bridge_rd_sync4;
@@ -1314,12 +1343,10 @@ end
 
 // ============================================================
 // Bridge CRAM0 Write Path: dcfifo (clk_74a -> clk_ram_controller)
-// Same FIFO-based pattern as CRAM1 for bulk dataslot loads.
+// FIFO-based pattern for bulk dataslot loads to CRAM0.
 // ============================================================
-// Accept bridge writes to both CRAM0 (0x20) and CRAM1 (0x30) regions —
-// with psram_controller_32, both go to the unified controller
-wire bridge_cram0_wr_detect = bridge_wr && ((bridge_addr[31:24] == 8'h20)
-                                         || (bridge_addr[31:24] == 8'h30));
+// Accept bridge writes to CRAM0 (0x20) region only — CRAM1 (0x30) handled directly
+wire bridge_cram0_wr_detect = bridge_wr && (bridge_addr[31:24] == 8'h20);
 
 // Skid buffer (4-entry) in clk_74a domain
 localparam integer CRAM0_WR_SKID_DEPTH = 4;
@@ -1426,7 +1453,7 @@ always @(posedge clk_ram_controller) begin
 end
 
 wire cram0_bridge_wr_active = cram0_wr_pending | !cram0_wr_fifo_empty | cram0_wr_skid_nonempty;
-wire cram_bridge_active = cram0_bridge_wr_active | cram1_rd_pending;
+wire cram_bridge_active = cram0_bridge_wr_active;
 
 // ============================================================
 // Bridge SRAM Write Path: dcfifo (clk_74a -> clk_ram_controller)
@@ -1539,23 +1566,20 @@ end
 
 wire sram_bridge_wr_active = sram_wr_pending | !sram_wr_fifo_empty;
 
-// CRAM mux: Bridge FIFO drain has priority, then CRAM1 bridge reads, then CPU
+// CRAM0 mux: Bridge FIFO drain has priority, then CPU
 wire cpu_cram_rd = cpu_psram_rd & cpu_psram_sel_cram;
 wire cpu_cram_wr = cpu_psram_wr & cpu_psram_sel_cram;
 wire cpu_cram_burst_rd = cpu_psram_burst_rd & cpu_psram_sel_cram;
 
-assign psram_mux_rd = (cram1_rd_pending && !cram0_wr_pending) ? 1'b1 :
-                      cram_bridge_active ? 1'b0 : cpu_cram_rd;
+assign psram_mux_rd = cram_bridge_active ? 1'b0 : cpu_cram_rd;
 assign psram_mux_wr = cram0_wr_pending ? 1'b1 : (cram_bridge_active ? 1'b0 : cpu_cram_wr);
-assign psram_mux_addr = cram0_wr_pending ? cram0_wr_addr_r :
-                         cram1_rd_pending ? cram1_rd_addr_r :
-                         cpu_psram_addr[21:0];
+assign psram_mux_addr = cram0_wr_pending ? cram0_wr_addr_r : cpu_psram_addr[21:0];
 assign psram_mux_wdata = cram0_wr_pending ? cram0_wr_data_r : cpu_psram_wdata;
 assign psram_mux_wstrb = cram0_wr_pending ? 4'b1111 : cpu_psram_wstrb;
 
 // CRAM burst read routing (disabled when bridge active)
-assign psram32_burst_rd  = cram_bridge_active ? 1'b0 : cpu_cram_burst_rd;
-assign psram32_burst_len = cpu_psram_burst_len;
+assign psram0_burst_rd  = cram_bridge_active ? 1'b0 : cpu_cram_burst_rd;
+assign psram0_burst_len = cpu_psram_burst_len;
 
 
 // SRAM mux: bridge write drain has priority, CPU when bridge idle
@@ -1566,24 +1590,27 @@ assign sram_word_wdata = sram_wr_pending ? sram_wr_data_r : cpu_psram_wdata;
 assign sram_word_wstrb = sram_wr_pending ? 4'b1111 : cpu_psram_wstrb;
 
 // Read data / busy / valid mux back to axi_psram_slave
-// With psram_controller_32, CRAM0+CRAM1 are unified — no separate mux needed
-assign cpu_psram_rdata = cpu_psram_sel_sram ? sram_word_rdata : psram_mux_rdata;
+assign cpu_psram_rdata = cpu_psram_sel_sram ? sram_word_rdata :
+                         cpu_psram_sel_cram1 ? cdc_cpu_rdata : psram_mux_rdata;
 
-// Per-target busy mux: CRAM (unified) or SRAM
-reg psram_busy_sel_sram;  // 0=cram, 1=sram
-always @(posedge clk_ram_controller)
-    if (!cpu_psram_busy)
-        psram_busy_sel_sram <= cpu_psram_sel_sram;
+// Per-target busy mux: CRAM0, CRAM1 (via CDC), or SRAM
+reg [1:0] psram_busy_sel;
+always @(posedge clk_cpu)
+    if (cpu_psram_rd || cpu_psram_wr)
+        psram_busy_sel <= cpu_psram_sel_sram ? 2'd1 :
+                          cpu_psram_sel_cram1 ? 2'd2 : 2'd0;
 
-assign cpu_psram_busy = psram_busy_sel_sram ? sram_word_busy :
-                                              (cram_bridge_active | psram_mux_busy);
+assign cpu_psram_busy = (psram_busy_sel == 2'd1) ? sram_word_busy :
+                        (psram_busy_sel == 2'd2) ? cdc_cpu_busy :
+                        (cram_bridge_active | psram_mux_busy);
 
 assign cpu_psram_rdata_valid = cpu_psram_sel_sram ? sram_word_rdata_valid :
-                                                    psram_mux_rdata_valid;
+                               cpu_psram_sel_cram1 ? cdc_cpu_rdata_valid :
+                               psram_mux_rdata_valid;
 
 // Burst read data / valid mux — single CRAM controller
-assign cpu_psram_burst_rdata_valid = psram32_burst_rdata_valid;
-assign cpu_psram_burst_rdata = psram32_burst_rdata;
+assign cpu_psram_burst_rdata_valid = psram0_burst_rdata_valid;
+assign cpu_psram_burst_rdata = psram0_burst_rdata;
 
 
 
@@ -2678,10 +2705,7 @@ mf_pllram_133 mp_ram (
 
 assign clk_cpu = clk_ram_controller;
 
-// Drive CRAM CLK pins from 105MHz PLL output after BCR init completes.
-// PLL clock always on (PocketQuake confirmed: BCR config works with clock running)
-assign cram0_clk = clk_cram;
-assign cram1_clk = clk_cram;
+// CRAM CLK pins are now driven by the individual psram_controller instances
 
 // SDRAM controller
 io_sdram isr0 (
