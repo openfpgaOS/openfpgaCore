@@ -2,31 +2,35 @@
 # openfpgaOS Deploy Script
 #
 # Usage:
-#   ./deploy                          Deploy to Pocket SD card (auto-detect)
-#   ./deploy /path/to/openfpgaOS-SDK  Deploy runtime + apps to SDK folder
+#   ./deploy.sh                          Deploy to Pocket SD card (auto-detect)
+#   ./deploy.sh /path/to/openfpgaOS-SDK  Update SDK runtime + deploy to SD card
+#
+# Both paths: package build/ from source artifacts, then deploy.
+# No rebuilding — just copies what's already been compiled.
 #
 set -e
 
 GREEN='\033[92m'
 CYAN='\033[96m'
+YELLOW='\033[93m'
 RESET='\033[0m'
 
 DEST="$1"
 
 # ════════════════════════════════════════════════════════════════════
-# Deploy to SDK folder
+# Step 1: Always package build/ from source artifacts
+# ════════════════════════════════════════════════════════════════════
+echo -e "${CYAN}Packaging build/ from source artifacts...${RESET}"
+make package
+echo ""
+
+# ════════════════════════════════════════════════════════════════════
+# Step 2 (optional): Update SDK runtime if SDK path given
 # ════════════════════════════════════════════════════════════════════
 if [ -n "$DEST" ] && [ -f "$DEST/src/sdk/sdk.mk" ]; then
-    echo -e "${CYAN}Deploying to SDK: $DEST${RESET}"
+    echo -e "${CYAN}Updating SDK: $DEST${RESET}"
 
-    # Validate build/ exists (populated by 'make' or 'make flash')
     BUILD_DIR="build/Cores/ThinkElastic.openfpgaOS"
-    if [ ! -f "$BUILD_DIR/bitstream.rbf_r" ]; then
-        echo "Error: $BUILD_DIR/bitstream.rbf_r not found. Run 'make' first."
-        exit 1
-    fi
-
-    # ── Runtime (gitignored binaries) — sourced from build/ ──────
     RUNTIME="$DEST/runtime"
     mkdir -p "$RUNTIME"
 
@@ -37,14 +41,14 @@ if [ -n "$DEST" ] && [ -f "$DEST/src/sdk/sdk.mk" ]; then
     cp "build/Assets/openfpgaos/common/os.bin" "$RUNTIME/" && \
         echo -e "  ${GREEN}✓${RESET} os.bin"
 
-    # ── Core configs → dist/sdk/core/ ─────────────────────────────
+    # Core configs
     mkdir -p "$DEST/dist/sdk/core"
     for f in "$BUILD_DIR"/*.json "$BUILD_DIR"/icon.bin; do
         [ -f "$f" ] && cp "$f" "$DEST/dist/sdk/core/"
     done
     echo -e "  ${GREEN}✓${RESET} Core configs"
 
-    # ── Platform files → dist/sdk/platform/ ────────────────────────
+    # Platform files
     mkdir -p "$DEST/dist/sdk/platform/_images"
     [ -f build/Platforms/openfpgaos.json ] && \
         cp build/Platforms/openfpgaos.json "$DEST/dist/sdk/platform/"
@@ -52,43 +56,33 @@ if [ -n "$DEST" ] && [ -f "$DEST/src/sdk/sdk.mk" ]; then
         cp build/Platforms/_images/openfpgaos.bin "$DEST/dist/sdk/platform/_images/"
     echo -e "  ${GREEN}✓${RESET} Platform files"
 
-    # ── SDK API headers (committed) ────────────────────────────────
+    # SDK API headers
     mkdir -p "$DEST/src/sdk/include" "$DEST/src/sdk/libc"
     for f in src/firmware/api/of*.h; do
         [ -f "$f" ] && cp "$f" "$DEST/src/sdk/include/"
     done
-    # Move libc jump table to libc/
     [ -f "$DEST/src/sdk/include/of_libc.h" ] && mv "$DEST/src/sdk/include/of_libc.h" "$DEST/src/sdk/libc/"
     echo -e "  ${GREEN}✓${RESET} SDK API headers"
 
-    # ── Libc headers (must match of_libc.h signatures) ───────────
+    # Libc headers
     for f in src/firmware/api/libc_include/*.h; do
         [ -f "$f" ] && cp "$f" "$DEST/src/sdk/libc/"
     done
-    # Also copy subdirectories (sys/stat.h, etc.)
     for d in src/firmware/api/libc_include/*/; do
         [ -d "$d" ] || continue
         subdir=$(basename "$d")
         mkdir -p "$DEST/src/sdk/libc/$subdir"
         cp "$d"*.h "$DEST/src/sdk/libc/$subdir/" 2>/dev/null
     done
-    # Fix include paths: OS uses "../of_*.h", SDK has them in include/
     sed -i 's|"../of_\([^"]*\)"|"of_\1"|g' "$DEST"/src/sdk/libc/*.h 2>/dev/null
     echo -e "  ${GREEN}✓${RESET} Libc headers"
 
-    # ── CRT objects — rebuilt by SDK's own Makefile, not here ──────
-
-    # App source lives in the SDK repo (single source of truth).
-    # deploy.sh only syncs runtime, configs, and API headers.
-    echo -e "  ${GREEN}✓${RESET} Apps maintained in SDK (not synced)"
-
-
-    echo -e "\n${GREEN}SDK deploy complete!${RESET}"
-    exit 0
+    echo -e "  ${GREEN}✓${RESET} SDK updated"
+    echo ""
 fi
 
 # ════════════════════════════════════════════════════════════════════
-# Deploy to Pocket SD card (original behavior)
+# Step 3: Always deploy to Pocket SD card
 # ════════════════════════════════════════════════════════════════════
 DID_MOUNT=0
 
@@ -128,14 +122,20 @@ if [ -z "$POCKET_SD" ]; then
 fi
 
 if [ -z "$POCKET_SD" ]; then
-    echo "Error: No Analogue Pocket SD card found"
-    echo "Usage: $0 [/path/to/openfpgaOS-SDK]"
-    exit 1
+    echo -e "${YELLOW}No SD card found — SDK updated but SD card not deployed.${RESET}"
+    echo "Insert SD card and run: ./deploy.sh"
+    exit 0
 fi
 
-echo "Found Pocket SD card at: $POCKET_SD"
+echo -e "${CYAN}Deploying to SD card: $POCKET_SD${RESET}"
 
-rsync -av --checksum build/ "$POCKET_SD/"
+# If SDK path given, use SDK deploy (includes apps)
+if [ -n "$DEST" ] && [ -f "$DEST/scripts/deploy.sh" ]; then
+    bash "$DEST/scripts/deploy.sh" "$POCKET_SD"
+else
+    # Direct deploy from build/
+    rsync -av --checksum build/ "$POCKET_SD/"
+fi
 
 sync
 
@@ -144,4 +144,4 @@ if [ "$DID_MOUNT" = "1" ]; then
     udisksctl unmount -b "$dev" --no-user-interaction
 fi
 
-echo -e "${GREEN}Deploy complete${RESET}"
+echo -e "\n${GREEN}Deploy complete!${RESET}"
