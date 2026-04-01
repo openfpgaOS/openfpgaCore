@@ -495,23 +495,80 @@ assign link_sck_i = port_tran_sck;
 assign link_sd_i = port_tran_sd;
 
 // ============================================================
-// No BCR — both CRAM chips run in async mode (no sync burst).
-// bcr_init_done gates CPU reset and bridge drain — set after PLL lock.
+// BCR Initialization FSM — configures CRAM0 for sync burst mode
+// (Matching PocketQuake's proven approach)
 // ============================================================
-reg bcr_init_done;
-initial bcr_init_done = 0;
-always @(posedge clk_ram_controller)
-    if (pll_ram_locked) bcr_init_done <= 1;
+localparam BCR_VALUE = 16'h641F;
+
+localparam [3:0] BCR_IDLE       = 4'd0;
+localparam [3:0] BCR_CE0_START  = 4'd1;
+localparam [3:0] BCR_CE0_BUSY   = 4'd2;
+localparam [3:0] BCR_CE0_WAIT   = 4'd3;
+localparam [3:0] BCR_CE1_START  = 4'd4;
+localparam [3:0] BCR_CE1_BUSY   = 4'd5;
+localparam [3:0] BCR_CE1_WAIT   = 4'd6;
+localparam [3:0] BCR_DONE       = 4'd7;
+
+reg        bcr_config_en = 0;
+reg [15:0] bcr_config_data = 0;
+reg        bcr_bank_sel = 0;
+reg        bcr_init_done = 0;
+reg [3:0]  bcr_state = BCR_IDLE;
+wire       psram0_raw_busy;
+
+always @(posedge clk_ram_controller) begin
+    bcr_config_en <= 1'b0;
+
+    case (bcr_state)
+        BCR_IDLE: begin
+            bcr_init_done <= 1'b0;
+            // Wait for PLL lock AND APF reset release before configuring.
+            // psram_controller held in reset by reset_n_apf — must be out
+            // of reset or psram_raw_busy never rises and we deadlock.
+            if (pll_ram_locked && reset_n_apf)
+                bcr_state <= BCR_CE0_START;
+        end
+
+        BCR_CE0_START: begin
+            if (!psram0_raw_busy) begin
+                bcr_config_en <= 1'b1;
+                bcr_config_data <= BCR_VALUE;
+                bcr_bank_sel <= 1'b0;
+                bcr_state <= BCR_CE0_BUSY;
+            end
+        end
+        BCR_CE0_BUSY: if (psram0_raw_busy) bcr_state <= BCR_CE0_WAIT;
+        BCR_CE0_WAIT: if (!psram0_raw_busy) bcr_state <= BCR_CE1_START;
+
+        BCR_CE1_START: begin
+            if (!psram0_raw_busy) begin
+                bcr_config_en <= 1'b1;
+                bcr_config_data <= BCR_VALUE;
+                bcr_bank_sel <= 1'b1;
+                bcr_state <= BCR_CE1_BUSY;
+            end
+        end
+        BCR_CE1_BUSY: if (psram0_raw_busy) bcr_state <= BCR_CE1_WAIT;
+        BCR_CE1_WAIT: if (!psram0_raw_busy) bcr_state <= BCR_DONE;
+
+        BCR_DONE: bcr_init_done <= 1'b1;
+    endcase
+end
 
 // ============================================================
 // PSRAM Controller for CRAM0 (16MB, app cached data)
+// Two-phase halfword access with BCR + sync burst (matching PocketQuake)
 // ============================================================
-// CRAM0: PocketDoom's proven controller — async two-phase, no BCR
-psram_cram0 #(
+wire        psram0_burst_rd;
+wire [5:0]  psram0_burst_len;
+wire        psram0_burst_rdata_valid;
+wire [31:0] psram0_burst_rdata;
+
+psram_controller #(
     .CLOCK_SPEED(100.0)
 ) psram0 (
     .clk(clk_ram_controller),
-    .reset_n(1'b1),
+    .reset_n(reset_n_apf),
     .word_rd(psram_mux_rd),
     .word_wr(psram_mux_wr),
     .word_addr(psram_mux_addr),
@@ -531,7 +588,19 @@ psram_cram0 #(
     .cram_oe_n(cram0_oe_n),
     .cram_we_n(cram0_we_n),
     .cram_ub_n(cram0_ub_n),
-    .cram_lb_n(cram0_lb_n)
+    .cram_lb_n(cram0_lb_n),
+    .config_en(bcr_config_en),
+    .config_data(bcr_config_data),
+    .config_bank_sel(bcr_bank_sel),
+    .burst_rd(psram0_burst_rd),
+    .burst_len(psram0_burst_len),
+    .burst_rdata_valid(psram0_burst_rdata_valid),
+    .burst_rdata(psram0_burst_rdata),
+    .raw_busy(psram0_raw_busy),
+    .dbg_wait_seen(),
+    .dbg_wait_cycles(),
+    .dbg_burst_count(),
+    .dbg_stale_count()
 );
 
 // ============================================================
@@ -1481,7 +1550,8 @@ assign psram_mux_wdata = cram0_wr_pending ? cram0_wr_data_r : cpu_psram_wdata;
 assign psram_mux_wstrb = cram0_wr_pending ? 4'b1111 : cpu_psram_wstrb;
 
 // CRAM burst read routing (disabled when bridge active)
-// Burst reads disabled — CRAM0 uses async two-phase (no BCR)
+assign psram0_burst_rd  = cram_bridge_active ? 1'b0 : cpu_cram_burst_rd;
+assign psram0_burst_len = cpu_psram_burst_len;
 
 
 // SRAM mux: bridge write drain has priority, CPU when bridge idle
@@ -1513,9 +1583,8 @@ assign cpu_psram_rdata_valid = (psram_target_sel == 2'd1) ? sram_word_rdata_vali
                                psram_mux_rdata_valid;
 
 // Burst read data / valid mux — single CRAM controller
-// No burst — axi_psram_slave uses single-word reads for cache fills
-assign cpu_psram_burst_rdata_valid = 1'b0;
-assign cpu_psram_burst_rdata = 32'b0;
+assign cpu_psram_burst_rdata_valid = psram0_burst_rdata_valid;
+assign cpu_psram_burst_rdata = psram0_burst_rdata;
 
 
 

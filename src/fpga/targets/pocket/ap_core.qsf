@@ -767,7 +767,7 @@ set_global_assignment -name VERILOG_FILE ../../common/uart_tx.v
 set_global_assignment -name VERILOG_FILE ../../common/uart_rx.v
 set_global_assignment -name VERILOG_FILE io_sdram.v
 set_global_assignment -name VERILOG_FILE mf_pllram_133.v
-set_global_assignment -name VERILOG_FILE ../../common/psram_cram0.v
+set_global_assignment -name VERILOG_FILE ../../common/psram_controller.v
 set_global_assignment -name VERILOG_FILE ../../common/psram_cram1.v
 set_global_assignment -name VERILOG_FILE ../../common/cpu_psram1_cdc.v
 set_global_assignment -name SYSTEMVERILOG_FILE ../../common/psram.sv
