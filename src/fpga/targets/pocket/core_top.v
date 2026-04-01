@@ -1078,7 +1078,10 @@ always @(posedge clk_ram_controller) begin
 end
 wire bridge_wr_skid_nonempty = bridge_wr_skid_nonempty_sync[2];
 
-wire bridge_wr_idle = !bridge_wr_skid_nonempty && bridge_m_wr_idle;
+// Include CRAM write activity — bridge must finish draining CRAM FIFOs
+// before allcomplete goes high, or apps read uninitialized save data.
+wire bridge_wr_idle = !bridge_wr_skid_nonempty && bridge_m_wr_idle
+                    && !cram0_bridge_wr_active;
 
 // Bridge DMA active tracking
 reg bridge_dma_active;
