@@ -608,7 +608,7 @@ psram_controller #(
     .cram_a(cram0_a),
     .cram_dq(cram0_dq),
     .cram_wait(cram0_wait),
-    .cram_clk(),    // PLL drives cram0_clk directly
+    .cram_clk(cram0_clk),
     .cram_adv_n(cram0_adv_n),
     .cram_cre(cram0_cre),
     .cram_ce0_n(cram0_ce0_n),
@@ -659,7 +659,7 @@ psram_controller #(
     .cram_a(cram1_a),
     .cram_dq(cram1_dq),
     .cram_wait(cram1_wait),
-    .cram_clk(),    // clk_74a drives cram1_clk directly
+    .cram_clk(cram1_clk),
     .cram_adv_n(cram1_adv_n),
     .cram_cre(cram1_cre),
     .cram_ce0_n(cram1_ce0_n),
@@ -2712,8 +2712,7 @@ assign clk_cpu = clk_ram_controller;
 
 // Drive CRAM0 CLK from 105MHz PLL output, CRAM1 CLK from 74.25MHz clk_74a.
 // PLL clock always on (PocketQuake confirmed: BCR config works with clock running)
-assign cram0_clk = clk_cram;
-assign cram1_clk = clk_74a;
+// cram0_clk and cram1_clk now driven by their respective psram_controller instances
 
 // SDRAM controller
 io_sdram isr0 (
