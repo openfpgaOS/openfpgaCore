@@ -638,7 +638,8 @@ always @(posedge clk_74a)
     pll_ram_locked_74a_sync <= {pll_ram_locked_74a_sync[1:0], pll_ram_locked};
 wire psram1_reset_n = pll_ram_locked_74a_sync[2];
 
-psram_controller #(
+// Use PocketDoom's proven simple controller for CRAM1 (async only, no BCR)
+psram_controller_simple #(
     .CLOCK_SPEED(74.25)
 ) psram1_inst (
     .clk(clk_74a),
@@ -662,19 +663,7 @@ psram_controller #(
     .cram_oe_n(cram1_oe_n),
     .cram_we_n(cram1_we_n),
     .cram_ub_n(cram1_ub_n),
-    .cram_lb_n(cram1_lb_n),
-    .config_en(1'b0),
-    .config_data(16'b0),
-    .config_bank_sel(1'b0),
-    .burst_rd(1'b0),
-    .burst_len(6'd0),
-    .burst_rdata_valid(),
-    .burst_rdata(),
-    .raw_busy(),
-    .dbg_wait_seen(),
-    .dbg_wait_cycles(),
-    .dbg_burst_count(),
-    .dbg_stale_count()
+    .cram_lb_n(cram1_lb_n)
 );
 
 // SRAM controller (256 KB) - tristate handled at top level
@@ -1590,22 +1579,24 @@ assign sram_word_wdata = sram_wr_pending ? sram_wr_data_r : cpu_psram_wdata;
 assign sram_word_wstrb = sram_wr_pending ? 4'b1111 : cpu_psram_wstrb;
 
 // Read data / busy / valid mux back to axi_psram_slave
-assign cpu_psram_rdata = cpu_psram_sel_sram ? sram_word_rdata :
-                         cpu_psram_sel_cram1 ? cdc_cpu_rdata : psram_mux_rdata;
-
-// Per-target busy mux: CRAM0, CRAM1 (via CDC), or SRAM
-reg [1:0] psram_busy_sel;
+// Per-target mux: latch selector on request, use for ALL feedback
+// (busy, rdata, rdata_valid). Combinational selectors are stale by the
+// time data arrives from CDC adapter (~22 cycles later).
+reg [1:0] psram_target_sel;  // 0=cram0, 1=sram, 2=cram1
 always @(posedge clk_cpu)
     if (cpu_psram_rd || cpu_psram_wr)
-        psram_busy_sel <= cpu_psram_sel_sram ? 2'd1 :
-                          cpu_psram_sel_cram1 ? 2'd2 : 2'd0;
+        psram_target_sel <= cpu_psram_sel_sram ? 2'd1 :
+                            cpu_psram_sel_cram1 ? 2'd2 : 2'd0;
 
-assign cpu_psram_busy = (psram_busy_sel == 2'd1) ? sram_word_busy :
-                        (psram_busy_sel == 2'd2) ? cdc_cpu_busy :
+assign cpu_psram_rdata = (psram_target_sel == 2'd1) ? sram_word_rdata :
+                         (psram_target_sel == 2'd2) ? cdc_cpu_rdata : psram_mux_rdata;
+
+assign cpu_psram_busy = (psram_target_sel == 2'd1) ? sram_word_busy :
+                        (psram_target_sel == 2'd2) ? cdc_cpu_busy :
                         (cram_bridge_active | psram_mux_busy);
 
-assign cpu_psram_rdata_valid = cpu_psram_sel_sram ? sram_word_rdata_valid :
-                               cpu_psram_sel_cram1 ? cdc_cpu_rdata_valid :
+assign cpu_psram_rdata_valid = (psram_target_sel == 2'd1) ? sram_word_rdata_valid :
+                               (psram_target_sel == 2'd2) ? cdc_cpu_rdata_valid :
                                psram_mux_rdata_valid;
 
 // Burst read data / valid mux — single CRAM controller
