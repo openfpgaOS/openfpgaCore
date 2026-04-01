@@ -1287,13 +1287,17 @@ wire bridge_cram1_wr_detect = bridge_wr && (bridge_addr[31:24] == 8'h30);
 
 reg        bridge_cram1_wr_pending;
 reg        bridge_cram1_wr_started;
+reg        bridge_cram1_wr_pulse;  // Single-cycle write pulse to controller
 reg [21:0] bridge_cram1_wr_addr;
 reg [31:0] bridge_cram1_wr_data;
 
 always @(posedge clk_74a) begin
+    bridge_cram1_wr_pulse <= 0;  // Default: deassert
+
     if (bridge_cram1_wr_detect && !bridge_cram1_wr_pending) begin
         bridge_cram1_wr_pending <= 1;
         bridge_cram1_wr_started <= 0;
+        bridge_cram1_wr_pulse <= 1;  // Single-cycle pulse
         bridge_cram1_wr_addr <= bridge_addr[23:2];
         bridge_cram1_wr_data <= bridge_wr_data;
     end else if (bridge_cram1_wr_pending) begin
@@ -1316,13 +1320,17 @@ wire bridge_cram1_rd_detect = !prev_bridge_rd_for_cram1 && bridge_rd && (bridge_
 
 reg        bridge_cram1_rd_pending;
 reg        bridge_cram1_rd_started;
+reg        bridge_cram1_rd_pulse;  // Single-cycle read pulse
 reg [21:0] bridge_cram1_rd_addr;
 reg [31:0] cram1_rd_resp_data;
 
 always @(posedge clk_74a) begin
+    bridge_cram1_rd_pulse <= 0;
+
     if (bridge_cram1_rd_detect && !bridge_cram1_rd_pending && !bridge_cram1_wr_pending) begin
         bridge_cram1_rd_pending <= 1;
         bridge_cram1_rd_started <= 0;
+        bridge_cram1_rd_pulse <= 1;  // Single-cycle pulse
         bridge_cram1_rd_addr <= bridge_addr[23:2];
     end else if (bridge_cram1_rd_pending) begin
         if (!bridge_cram1_rd_started && psram1_busy)
@@ -1639,8 +1647,8 @@ cpu_psram1_cdc cdc_psram1 (
     .bridge_active(bridge_cram1_active)
 );
 
-assign psram1_rd = bridge_cram1_rd_pending ? 1'b1 : bridge_cram1_active ? 1'b0 : cdc_psram1_rd;
-assign psram1_wr = bridge_cram1_wr_pending ? 1'b1 : bridge_cram1_active ? 1'b0 : cdc_psram1_wr;
+assign psram1_rd = bridge_cram1_rd_pulse ? 1'b1 : bridge_cram1_active ? 1'b0 : cdc_psram1_rd;
+assign psram1_wr = bridge_cram1_wr_pulse ? 1'b1 : bridge_cram1_active ? 1'b0 : cdc_psram1_wr;
 assign psram1_addr = bridge_cram1_wr_pending ? bridge_cram1_wr_addr :
                      bridge_cram1_rd_pending ? bridge_cram1_rd_addr : cdc_psram1_addr;
 assign psram1_wdata = bridge_cram1_wr_pending ? bridge_cram1_wr_data : cdc_psram1_wdata;
