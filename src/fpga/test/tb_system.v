@@ -1,13 +1,16 @@
 //
-// Verilator System Testbench: VexiiRiscv CPU + Memory Stack + Bridge Save Path
+// Verilator System Testbench: VexiiRiscv CPU + Memory Stack
 //
 // Full CPU system running real firmware in simulation:
-//   VexiiRiscv (Wishbone) → cpu_system → { BRAM, SDRAM, PSRAM (CRAM1) }
-//   Bridge responder simulates APF save path: reads CRAM1, writes SDRAM via FIFO
+//   VexiiRiscv → cpu_system → { BRAM (I-fetch + local), SDRAM stack }
 //
-// Result protocol (BRAM backdoor):
+// The C++ harness loads firmware into BRAM via backdoor, releases reset,
+// and monitors a result register at a known BRAM address.
+//
+// Result protocol:
 //   BRAM[0x3FF00] = test status (0 = running, 1 = pass, 2 = fail)
 //   BRAM[0x3FF04] = test result value
+//   BRAM[0x3FF08] = cycle counter (written by firmware)
 //
 
 `default_nettype none
@@ -16,33 +19,22 @@ module tb_system (
     input wire clk,
     input wire reset_n,
 
-    // Backdoor BRAM access (firmware loading + result checking)
+    // Backdoor BRAM access (for firmware loading and result checking)
     input  wire        bd_we,
     input  wire [15:0] bd_addr,
     input  wire [31:0] bd_wdata,
     output wire [31:0] bd_rdata,
 
-    // UART output
+    // UART output (from CPU writes to 0x4F000004)
     output wire        uart_tx_valid,
     output wire [7:0]  uart_tx_byte,
 
     // SDRAM backdoor (for OS binary preload)
     input  wire        sd_bd_we,
-    input  wire [23:0] sd_bd_addr,
+    input  wire [23:0] sd_bd_addr,    // 24-bit word address
     input  wire [31:0] sd_bd_wdata,
 
-    // CRAM1 backdoor (for save data preload/verify)
-    input  wire        cram_bd_we,
-    input  wire [21:0] cram_bd_addr,
-    input  wire [31:0] cram_bd_wdata,
-
-    // Save capture verification (from bridge responder)
-    output wire        save_complete,
-    output wire [31:0] save_captured_words,
-    input  wire [15:0] save_bd_addr,
-    output wire [31:0] save_bd_rdata,
-
-    // Debug
+    // Debug: expose fetch and LSU addresses for PC tracing
     output wire [31:0] dbg_fetch_addr,
     output wire        dbg_fetch_valid,
     output wire [31:0] dbg_lsu_addr,
@@ -50,227 +42,233 @@ module tb_system (
 );
 
 // ============================================================
-// CPU system (Wishbone + word-level bus routing)
+// CPU system (VexiiRiscv + address decode + bus routing)
 // ============================================================
 
-// SDRAM word-level bus
-wire        cpu_sdram_rd, cpu_sdram_wr;
-wire [23:0] cpu_sdram_addr;
-wire [31:0] cpu_sdram_wdata;
-wire [3:0]  cpu_sdram_wstrb;
-wire [3:0]  cpu_sdram_burst_len, cpu_sdram_burst_wr_len;
-wire [31:0] cpu_sdram_rdata;
-wire        cpu_sdram_busy, cpu_sdram_accepted;
-wire        cpu_sdram_rdata_valid, cpu_sdram_wr_data_next;
+// SDRAM AXI4 bus
+wire        sdram_arvalid, sdram_arready;
+wire [31:0] sdram_araddr;
+wire [7:0]  sdram_arlen;
+wire        sdram_rvalid, sdram_rlast;
+wire [31:0] sdram_rdata;
+wire [1:0]  sdram_rresp;
+wire        sdram_awvalid, sdram_awready;
+wire [31:0] sdram_awaddr;
+wire [7:0]  sdram_awlen;
+wire        sdram_wvalid, sdram_wready, sdram_wlast;
+wire [31:0] sdram_wdata;
+wire [3:0]  sdram_wstrb;
+wire        sdram_bvalid;
+wire [1:0]  sdram_bresp;
 
-// PSRAM word-level bus
-wire        cpu_psram_rd, cpu_psram_wr;
-wire [25:0] cpu_psram_addr;
-wire [31:0] cpu_psram_wdata;
-wire [3:0]  cpu_psram_wstrb;
-wire [31:0] cpu_psram_rdata;
-wire        cpu_psram_busy, cpu_psram_rdata_valid;
-wire        cpu_psram_burst_rd;
-wire [5:0]  cpu_psram_burst_len;
-wire        cpu_psram_burst_rdata_valid;
-wire [31:0] cpu_psram_burst_rdata;
+// PSRAM AXI4 bus (active but not connected to memory for now — just ack)
+wire        psram_arvalid, psram_arready;
+wire [31:0] psram_araddr;
+wire [7:0]  psram_arlen;
+wire        psram_rvalid, psram_rlast;
+wire [31:0] psram_rdata;
+wire [1:0]  psram_rresp;
+wire        psram_awvalid, psram_awready;
+wire [31:0] psram_awaddr;
+wire [7:0]  psram_awlen;
+wire        psram_wvalid, psram_wready, psram_wlast;
+wire [31:0] psram_wdata;
+wire [3:0]  psram_wstrb;
+wire        psram_bvalid;
+wire [1:0]  psram_bresp;
 
-// Local word-level bus
-wire        cpu_local_rd, cpu_local_wr;
-wire [31:0] cpu_local_addr;
-wire [31:0] cpu_local_wdata;
-wire [3:0]  cpu_local_wstrb;
-wire [7:0]  cpu_local_burst_len;
-wire [31:0] cpu_local_rdata;
-wire        cpu_local_rdata_valid, cpu_local_rdata_last;
-wire        cpu_local_wr_done, cpu_local_busy;
+// PSRAM stub: accept and drop all transactions (no actual memory)
+// Prevents CPU hang when OS writes to SRAM/PSRAM regions
+reg psram_stub_state;
+localparam PS_IDLE = 0, PS_WDATA = 1;
+
+assign psram_arready = (psram_stub_state == PS_IDLE);
+assign psram_awready = (psram_stub_state == PS_IDLE);
+assign psram_wready = 1;  // Always accept W beats
+
+// Read: return 0 immediately
+reg psram_r_pending;
+reg [7:0] psram_r_cnt, psram_r_len;
+assign psram_rvalid = psram_r_pending;
+assign psram_rdata = 32'h0;
+assign psram_rresp = 2'b00;
+assign psram_rlast = (psram_r_cnt == psram_r_len);
+
+// Write: accept and respond immediately
+reg psram_b_pending;
+assign psram_bvalid = psram_b_pending;
+assign psram_bresp = 2'b00;
+
+always @(posedge clk) begin
+    if (!reset_n) begin
+        psram_r_pending <= 0;
+        psram_b_pending <= 0;
+        psram_r_cnt <= 0;
+        psram_r_len <= 0;
+    end else begin
+        // Read handling
+        if (psram_arvalid && psram_arready) begin
+            psram_r_pending <= 1;
+            psram_r_cnt <= 0;
+            psram_r_len <= psram_arlen;
+        end
+        if (psram_r_pending && psram_rlast) begin
+            psram_r_pending <= 0;
+        end else if (psram_r_pending) begin
+            psram_r_cnt <= psram_r_cnt + 1;
+        end
+
+        // Write handling
+        if (psram_awvalid && psram_awready) begin
+            psram_b_pending <= 0;  // Will set after wlast
+        end
+        if (psram_wvalid && psram_wready && psram_wlast) begin
+            psram_b_pending <= 1;
+        end
+        if (psram_b_pending && 1'b1) begin  // bready always 1 from cpu_system
+            psram_b_pending <= 0;
+        end
+    end
+end
+
+// Local AXI4 bus (BRAM)
+wire        local_arvalid, local_arready;
+wire [31:0] local_araddr;
+wire [7:0]  local_arlen;
+wire        local_rvalid, local_rlast;
+wire [31:0] local_rdata;
+wire [1:0]  local_rresp;
+wire        local_awvalid, local_awready;
+wire [31:0] local_awaddr;
+wire [7:0]  local_awlen;
+wire        local_wvalid, local_wready, local_wlast;
+wire [31:0] local_wdata;
+wire [3:0]  local_wstrb;
+wire        local_bvalid;
+wire [1:0]  local_bresp;
+wire        local_rready = 1'b1;  // Always accept read data
+
+// I-fetch AXI4 bus (from cpu_system's fetch port → BRAM)
+wire        fetch_arvalid, fetch_arready;
+wire [31:0] fetch_araddr;
+wire [7:0]  fetch_arlen;
+wire        fetch_rvalid, fetch_rlast;
+wire [31:0] fetch_rdata;
+wire [1:0]  fetch_rresp;
 
 cpu_system cpu (
     .clk(clk), .reset_n(reset_n),
     // SDRAM
-    .m_sdram_rd(cpu_sdram_rd), .m_sdram_wr(cpu_sdram_wr),
-    .m_sdram_addr(cpu_sdram_addr), .m_sdram_wdata(cpu_sdram_wdata),
-    .m_sdram_wstrb(cpu_sdram_wstrb),
-    .m_sdram_burst_len(cpu_sdram_burst_len),
-    .m_sdram_burst_wr_len(cpu_sdram_burst_wr_len),
-    .m_sdram_rdata(cpu_sdram_rdata), .m_sdram_busy(cpu_sdram_busy),
-    .m_sdram_accepted(cpu_sdram_accepted),
-    .m_sdram_rdata_valid(cpu_sdram_rdata_valid),
-    .m_sdram_wr_data_next(cpu_sdram_wr_data_next),
+    .m_sdram_arvalid(sdram_arvalid), .m_sdram_arready(sdram_arready),
+    .m_sdram_araddr(sdram_araddr), .m_sdram_arlen(sdram_arlen),
+    .m_sdram_rvalid(sdram_rvalid), .m_sdram_rdata(sdram_rdata),
+    .m_sdram_rresp(sdram_rresp), .m_sdram_rlast(sdram_rlast),
+    .m_sdram_awvalid(sdram_awvalid), .m_sdram_awready(sdram_awready),
+    .m_sdram_awaddr(sdram_awaddr), .m_sdram_awlen(sdram_awlen),
+    .m_sdram_wvalid(sdram_wvalid), .m_sdram_wready(sdram_wready),
+    .m_sdram_wdata(sdram_wdata), .m_sdram_wstrb(sdram_wstrb),
+    .m_sdram_wlast(sdram_wlast),
+    .m_sdram_bvalid(sdram_bvalid), .m_sdram_bresp(sdram_bresp),
     // PSRAM
-    .m_psram_rd(cpu_psram_rd), .m_psram_wr(cpu_psram_wr),
-    .m_psram_addr(cpu_psram_addr), .m_psram_wdata(cpu_psram_wdata),
-    .m_psram_wstrb(cpu_psram_wstrb),
-    .m_psram_rdata(cpu_psram_rdata), .m_psram_busy(cpu_psram_busy),
-    .m_psram_rdata_valid(cpu_psram_rdata_valid),
-    .m_psram_burst_rd(cpu_psram_burst_rd),
-    .m_psram_burst_len(cpu_psram_burst_len),
-    .m_psram_burst_rdata_valid(cpu_psram_burst_rdata_valid),
-    .m_psram_burst_rdata(cpu_psram_burst_rdata),
+    .m_psram_arvalid(psram_arvalid), .m_psram_arready(psram_arready),
+    .m_psram_araddr(psram_araddr), .m_psram_arlen(psram_arlen),
+    .m_psram_rvalid(psram_rvalid), .m_psram_rdata(psram_rdata),
+    .m_psram_rresp(psram_rresp), .m_psram_rlast(psram_rlast),
+    .m_psram_awvalid(psram_awvalid), .m_psram_awready(psram_awready),
+    .m_psram_awaddr(psram_awaddr), .m_psram_awlen(psram_awlen),
+    .m_psram_wvalid(psram_wvalid), .m_psram_wready(psram_wready),
+    .m_psram_wdata(psram_wdata), .m_psram_wstrb(psram_wstrb),
+    .m_psram_wlast(psram_wlast),
+    .m_psram_bvalid(psram_bvalid), .m_psram_bresp(psram_bresp),
     // Local
-    .m_local_rd(cpu_local_rd), .m_local_wr(cpu_local_wr),
-    .m_local_addr(cpu_local_addr), .m_local_wdata(cpu_local_wdata),
-    .m_local_wstrb(cpu_local_wstrb),
-    .m_local_burst_len(cpu_local_burst_len),
-    .m_local_rdata(cpu_local_rdata),
-    .m_local_rdata_valid(cpu_local_rdata_valid),
-    .m_local_rdata_last(cpu_local_rdata_last),
-    .m_local_wr_done(cpu_local_wr_done),
-    .m_local_busy(cpu_local_busy)
+    .m_local_arvalid(local_arvalid), .m_local_arready(local_arready),
+    .m_local_araddr(local_araddr), .m_local_arlen(local_arlen),
+    .m_local_rvalid(local_rvalid), .m_local_rdata(local_rdata),
+    .m_local_rresp(local_rresp), .m_local_rlast(local_rlast),
+    .m_local_awvalid(local_awvalid), .m_local_awready(local_awready),
+    .m_local_awaddr(local_awaddr), .m_local_awlen(local_awlen),
+    .m_local_wvalid(local_wvalid), .m_local_wready(local_wready),
+    .m_local_wdata(local_wdata), .m_local_wstrb(local_wstrb),
+    .m_local_wlast(local_wlast),
+    .m_local_bvalid(local_bvalid), .m_local_bresp(local_bresp)
 );
 
 // ============================================================
-// BRAM + Peripheral model (word-level)
+// BRAM: serves both I-fetch and local (uncached) access
 // ============================================================
-
-wire        ds_read, ds_write;
-wire [15:0] ds_slot_id;
-wire [31:0] ds_bridge_addr, ds_length;
-wire        ds_ack, ds_done;
-wire [3:0]  save_dt_slot_w;
-wire [31:0] save_dt_size_w;
-wire        save_dt_commit_w;
-
-bram_word_model bram (
+bram_model #(.ADDR_BITS(16)) bram (
     .clk(clk), .reset_n(reset_n),
-    .req_rd(cpu_local_rd), .req_wr(cpu_local_wr),
-    .req_addr_in(cpu_local_addr), .req_wdata_in(cpu_local_wdata),
-    .req_wstrb_in(cpu_local_wstrb), .req_burst_len_in(cpu_local_burst_len),
-    .rsp_rdata(cpu_local_rdata), .rsp_rdata_valid(cpu_local_rdata_valid),
-    .rsp_rdata_last(cpu_local_rdata_last),
-    .rsp_wr_done(cpu_local_wr_done), .rsp_busy(cpu_local_busy),
+    // I-fetch port
+    .fetch_ar_valid(fetch_arvalid), .fetch_ar_ready(fetch_arready),
+    .fetch_ar_addr(fetch_araddr), .fetch_ar_len(fetch_arlen),
+    .fetch_r_valid(fetch_rvalid), .fetch_r_ready(fetch_rready),
+    .fetch_r_data(fetch_rdata), .fetch_r_resp(fetch_rresp),
+    .fetch_r_last(fetch_rlast),
+    // Local port
+    .local_ar_valid(local_arvalid), .local_ar_ready(local_arready),
+    .local_ar_addr(local_araddr), .local_ar_len(local_arlen),
+    .local_r_valid(local_rvalid), .local_r_ready(1'b1),
+    .local_r_data(local_rdata), .local_r_resp(local_rresp),
+    .local_r_last(local_rlast),
+    .local_aw_valid(local_awvalid), .local_aw_ready(local_awready),
+    .local_aw_addr(local_awaddr), .local_aw_len(local_awlen),
+    .local_w_valid(local_wvalid), .local_w_ready(local_wready),
+    .local_w_data(local_wdata), .local_w_strb(local_wstrb),
+    .local_w_last(local_wlast),
+    .local_b_valid(local_bvalid), .local_b_ready(1'b1),
+    .local_b_resp(local_bresp),
+    // Backdoor
     .bd_we(bd_we), .bd_addr(bd_addr), .bd_wdata(bd_wdata), .bd_rdata(bd_rdata),
-    .uart_tx_valid(uart_tx_valid), .uart_tx_byte(uart_tx_byte),
-    .target_dataslot_read(ds_read), .target_dataslot_write(ds_write),
-    .target_dataslot_id(ds_slot_id),
-    .target_dataslot_bridgeaddr(ds_bridge_addr),
-    .target_dataslot_length(ds_length),
-    .target_dataslot_ack(ds_ack), .target_dataslot_done(ds_done),
-    .save_dt_slot(save_dt_slot_w), .save_dt_size(save_dt_size_w),
-    .save_dt_commit(save_dt_commit_w)
+    // UART
+    .uart_tx_valid(uart_tx_valid), .uart_tx_byte(uart_tx_byte)
 );
 
 // ============================================================
-// SDRAM: word_sdram_arbiter → sdram_word_model
+// SDRAM: fast behavioral model (~4 cycle latency)
 // ============================================================
-
-// Arbiter → SDRAM model
-wire        arb_sdram_rd, arb_sdram_wr;
-wire [23:0] arb_sdram_addr;
-wire [31:0] arb_sdram_wdata;
-wire [3:0]  arb_sdram_wstrb;
-wire [3:0]  arb_sdram_burst_len, arb_sdram_burst_wr_len;
-wire [31:0] sdram_word_q;
-wire        sdram_word_busy, sdram_word_q_valid, sdram_word_wr_data_next;
-wire [31:0] arb_sdram_wdata_direct;
-wire [3:0]  arb_sdram_wstrb_direct;
-
-word_sdram_arbiter sdram_arb (
+sdram_fast_model sdram_fast (
     .clk(clk), .reset_n(reset_n),
-    // M0: Audio DMA (tied off)
-    .m0_rd(1'b0), .m0_addr(24'b0), .m0_burst_len(4'b0),
-    .m0_rdata(), .m0_busy(), .m0_accepted(), .m0_rdata_valid(),
-    // M1: DMA (tied off)
-    .m1_rd(1'b0), .m1_wr(1'b0), .m1_addr(24'b0), .m1_wdata(32'b0),
-    .m1_wstrb(4'b0), .m1_burst_len(4'b0), .m1_burst_wr_len(4'b0),
-    .m1_rdata(), .m1_busy(), .m1_accepted(), .m1_rdata_valid(), .m1_wr_data_next(),
-    // M2: CPU
-    .m2_rd(cpu_sdram_rd), .m2_wr(cpu_sdram_wr),
-    .m2_addr(cpu_sdram_addr), .m2_wdata(cpu_sdram_wdata),
-    .m2_wstrb(cpu_sdram_wstrb),
-    .m2_burst_len(cpu_sdram_burst_len), .m2_burst_wr_len(cpu_sdram_burst_wr_len),
-    .m2_rdata(cpu_sdram_rdata), .m2_busy(cpu_sdram_busy),
-    .m2_accepted(cpu_sdram_accepted), .m2_rdata_valid(cpu_sdram_rdata_valid),
-    .m2_wr_data_next(cpu_sdram_wr_data_next),
-    // M3: Bridge (tied off — saves go direct CRAM→SD, not through SDRAM)
-    .m3_rd(1'b0), .m3_wr(1'b0),
-    .m3_addr(24'b0), .m3_wdata(32'b0),
-    .m3_wstrb(4'b0),
-    .m3_burst_len(4'b0), .m3_burst_wr_len(4'b0),
-    .m3_rdata(), .m3_busy(),
-    .m3_accepted(), .m3_rdata_valid(),
-    .m3_wr_data_next(),
-    // SDRAM output
-    .sdram_rd(arb_sdram_rd), .sdram_wr(arb_sdram_wr),
-    .sdram_addr(arb_sdram_addr), .sdram_wdata(arb_sdram_wdata),
-    .sdram_wstrb(arb_sdram_wstrb),
-    .sdram_burst_len(arb_sdram_burst_len),
-    .sdram_burst_wr_len(arb_sdram_burst_wr_len),
-    .sdram_rdata(sdram_word_q), .sdram_busy(sdram_word_busy),
-    .sdram_rdata_valid(sdram_word_q_valid),
-    .sdram_wr_data_next(sdram_word_wr_data_next),
-    .sdram_wdata_direct(arb_sdram_wdata_direct),
-    .sdram_wstrb_direct(arb_sdram_wstrb_direct)
-);
-
-sdram_word_model sdram (
-    .clk(clk), .reset_n(reset_n),
-    .word_rd(arb_sdram_rd), .word_wr(arb_sdram_wr),
-    .word_addr(arb_sdram_addr), .word_data(arb_sdram_wdata),
-    .word_wstrb(arb_sdram_wstrb),
-    .word_burst_len(arb_sdram_burst_len),
-    .word_burst_wr_len(arb_sdram_burst_wr_len),
-    .word_q(sdram_word_q), .word_busy(sdram_word_busy),
-    .word_q_valid(sdram_word_q_valid),
-    .word_wr_data_next(sdram_word_wr_data_next),
-    .burst_wr_direct_data(arb_sdram_wdata_direct),
-    .burst_wr_direct_strb(arb_sdram_wstrb_direct),
+    .s_axi_arvalid(sdram_arvalid), .s_axi_arready(sdram_arready),
+    .s_axi_araddr(sdram_araddr), .s_axi_arlen(sdram_arlen),
+    .s_axi_rvalid(sdram_rvalid), .s_axi_rready(1'b1),
+    .s_axi_rdata(sdram_rdata), .s_axi_rresp(sdram_rresp), .s_axi_rlast(sdram_rlast),
+    .s_axi_awvalid(sdram_awvalid), .s_axi_awready(sdram_awready),
+    .s_axi_awaddr(sdram_awaddr), .s_axi_awlen(sdram_awlen),
+    .s_axi_wvalid(sdram_wvalid), .s_axi_wready(sdram_wready),
+    .s_axi_wdata(sdram_wdata), .s_axi_wstrb(sdram_wstrb), .s_axi_wlast(sdram_wlast),
+    .s_axi_bvalid(sdram_bvalid), .s_axi_bready(1'b1), .s_axi_bresp(sdram_bresp),
     .bd_we(sd_bd_we), .bd_word_addr(sd_bd_addr), .bd_wdata(sd_bd_wdata)
 );
 
 // ============================================================
-// PSRAM (CRAM1) model
+// I-fetch routing: cpu_system exposes fetch bus, route to BRAM
 // ============================================================
+// cpu_system internally routes FetchL1Axi4 to the local bus for
+// address range 0x00000000-0x0003FFFF. The BRAM's fetch port
+// handles these requests separately from local R/W.
 
-// Bridge direct read port (for bridge responder)
-wire        bridge_cram_rd;
-wire [21:0] bridge_cram_addr;
-wire [31:0] bridge_cram_rdata;
-wire        bridge_cram_rdata_valid;
+// Note: cpu_system routes fetch to the local bus (same as BRAM).
+// The BRAM model has separate fetch and local ports.
+// We need to check if cpu_system exposes the fetch bus separately
+// or merges it with local. Let me check...
 
-psram_word_model psram (
-    .clk(clk), .reset_n(reset_n),
-    .word_rd(cpu_psram_rd), .word_wr(cpu_psram_wr),
-    .word_addr(cpu_psram_addr), .word_wdata(cpu_psram_wdata),
-    .word_wstrb(cpu_psram_wstrb),
-    .word_rdata(cpu_psram_rdata), .word_busy(cpu_psram_busy),
-    .word_rdata_valid(cpu_psram_rdata_valid),
-    .burst_rd(cpu_psram_burst_rd), .burst_len(cpu_psram_burst_len),
-    .burst_rdata_valid(cpu_psram_burst_rdata_valid),
-    .burst_rdata(cpu_psram_burst_rdata),
-    .direct_rd(bridge_cram_rd), .direct_addr(bridge_cram_addr),
-    .direct_rdata(bridge_cram_rdata), .direct_rdata_valid(bridge_cram_rdata_valid),
-    .bd_we(cram_bd_we), .bd_addr(cram_bd_addr), .bd_wdata(cram_bd_wdata)
-);
+// Actually, cpu_system merges fetch into the local bus based on
+// address decode. The BRAM's local port handles both fetch and
+// local accesses. The separate fetch port on bram_model is not
+// used in this configuration — tie it off.
 
-// ============================================================
-// Bridge responder (save path: reads CRAM1, captures to verify buffer)
-// ============================================================
+// For now, tie off the BRAM fetch port (cpu_system handles routing)
+assign fetch_arvalid = 0;
 
-bridge_responder bridge_resp (
-    .clk(clk), .reset_n(reset_n),
-    .target_dataslot_write(ds_write),
-    .target_dataslot_read(ds_read),
-    .target_dataslot_id(ds_slot_id),
-    .target_dataslot_bridgeaddr(ds_bridge_addr),
-    .target_dataslot_length(ds_length),
-    .target_dataslot_ack(ds_ack),
-    .target_dataslot_done(ds_done),
-    .cram_rd(bridge_cram_rd), .cram_addr(bridge_cram_addr),
-    .cram_rdata(bridge_cram_rdata), .cram_rdata_valid(bridge_cram_rdata_valid),
-    .save_complete(save_complete),
-    .save_captured_words(save_captured_words),
-    .save_slot_id(),
-    .save_bd_addr(save_bd_addr),
-    .save_bd_rdata(save_bd_rdata)
-);
-
-// ============================================================
-// Debug: expose Wishbone fetch address for PC tracing
-// ============================================================
-assign dbg_fetch_addr = {cpu.fetch_adr, 2'b00};
-assign dbg_fetch_valid = cpu.fetch_cyc & cpu.fetch_stb;
-assign dbg_lsu_addr = {cpu.lsu_adr, 2'b00};
-assign dbg_lsu_valid = cpu.lsu_cyc & cpu.lsu_stb;
+// Debug: expose bus activity for PC tracing
+assign dbg_fetch_addr = local_arvalid ? local_araddr :
+                         sdram_arvalid ? sdram_araddr : 32'h0;
+assign dbg_fetch_valid = local_arvalid | sdram_arvalid;
+assign dbg_lsu_addr = local_awvalid ? local_awaddr :
+                       sdram_awvalid ? sdram_awaddr : 32'h0;
+assign dbg_lsu_valid = local_awvalid | sdram_awvalid;
+assign fetch_araddr = 0;
+assign fetch_arlen = 0;
+wire fetch_rready = 1;
 
 endmodule

@@ -755,18 +755,21 @@ set_global_assignment -name MIF_FILE ../../common/font_rom.mif
 set_global_assignment -name MIF_FILE ../../common/vram_init.mif
 set_global_assignment -name MIF_FILE firmware.mif
 set_global_assignment -name VERILOG_FILE ../../common/cpu_system.v
-set_global_assignment -name VERILOG_FILE ../../common/periph_slave.v
+set_global_assignment -name VERILOG_FILE ../../common/axi_periph_slave.v
 # tile_engine.v and sprite_engine.v removed — rendering done in software
 set_global_assignment -name VERILOG_FILE ../../common/sram_controller.v
-set_global_assignment -name VERILOG_FILE ../../common/word_sdram_arbiter.v
+set_global_assignment -name VERILOG_FILE ../../common/axi_sdram_slave.v
+set_global_assignment -name VERILOG_FILE ../../common/axi_psram_slave.v
+set_global_assignment -name VERILOG_FILE ../../common/axi_sdram_arbiter.v
 set_global_assignment -name VERILOG_FILE ../../common/dma_engine.v
-set_global_assignment -name VERILOG_FILE ../../common/bridge_master.v
+set_global_assignment -name VERILOG_FILE ../../common/axi_bridge_master.v
 set_global_assignment -name VERILOG_FILE ../../common/uart_tx.v
 set_global_assignment -name VERILOG_FILE ../../common/uart_rx.v
 set_global_assignment -name VERILOG_FILE io_sdram.v
 set_global_assignment -name VERILOG_FILE mf_pllram_133.v
 set_global_assignment -name VERILOG_FILE ../../common/psram_controller.v
 set_global_assignment -name VERILOG_FILE ../../common/psram_controller_32.v
+set_global_assignment -name VERILOG_FILE ../../common/cpu_psram1_cdc.v
 set_global_assignment -name SYSTEMVERILOG_FILE ../../common/psram.sv
 set_global_assignment -name VERILOG_FILE mf_linebuf.v
 set_global_assignment -name VERILOG_FILE ../../vendor/vexriscv/VexiiRiscv_Full.v
