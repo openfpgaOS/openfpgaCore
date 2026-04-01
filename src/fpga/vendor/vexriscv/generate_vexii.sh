@@ -32,11 +32,11 @@ sbt "runMain vexiiriscv.Generate \
       --with-rvm --with-rva --with-rvf --with-rvc \
       --with-rvZcbm --with-rvZcbz \
       --with-fetch-l1 --fetch-l1-sets=512 --fetch-l1-ways=1 --fetch-l1-refill-count=2 \
-      --fetch-l1-hardware-prefetch=nl --fetch-axi4 \
+      --fetch-l1-hardware-prefetch=nl --fetch-wishbone \
       --with-lsu-l1 --lsu-l1-sets=1024 --lsu-l1-ways=2 \
       --lsu-l1-refill-count=2 --lsu-l1-writeback-count=2 \
       --lsu-l1-store-buffer-slots=4 --lsu-l1-store-buffer-ops=32 \
-      --lsu-l1-axi4 \
+      --lsu-l1-wishbone \
       --lsu-software-prefetch --lsu-hardware-prefetch rpt \
       --with-btb --btb-sets=256 --relaxed-btb --relaxed-btb-hit \
       --with-gshare --with-ras \
