@@ -572,86 +572,17 @@ always @(posedge clk_ram_controller) begin
     endcase
 end
 
-// ============================================================
-// BCR Initialization FSM — CRAM1 (clk_74a, 74.25 MHz)
-// Separate FSM configures CRAM1 independently on its own clock domain.
-// ============================================================
-reg         bcr1_init_done;
-reg [2:0]   bcr1_state;
-reg         bcr1_config_en;
-reg [15:0]  bcr1_config_data;
-reg         bcr1_config_bank;
+// CRAM1 does NOT need BCR init — it only does async single-word access for saves.
+// BCR is only needed for sync burst mode (CRAM0).
+wire bcr_init_done = bcr0_init_done;
 
 wire        psram1_raw_busy;
 
-// Sync pll_ram_locked into clk_74a domain
+// Sync pll_ram_locked into clk_74a for CRAM1 reset
 reg [2:0] pll_ram_locked_74a_sync;
 always @(posedge clk_74a)
     pll_ram_locked_74a_sync <= {pll_ram_locked_74a_sync[1:0], pll_ram_locked};
 wire pll_ram_locked_74a = pll_ram_locked_74a_sync[2];
-
-initial begin
-    bcr1_init_done = 0;
-    bcr1_state = BCR_ST_IDLE;
-    bcr1_config_en = 0;
-    bcr1_config_data = 0;
-    bcr1_config_bank = 0;
-end
-
-always @(posedge clk_74a) begin
-    bcr1_config_en <= 0;  // single-cycle pulse
-
-    case (bcr1_state)
-        BCR_ST_IDLE: begin
-            bcr1_state <= BCR_ST_WAIT_LOCK;
-        end
-
-        BCR_ST_WAIT_LOCK: begin
-            if (pll_ram_locked_74a)
-                bcr1_state <= BCR_ST_CFG_CE0;
-        end
-
-        BCR_ST_CFG_CE0: begin
-            if (!psram1_raw_busy) begin
-                bcr1_config_en <= 1;
-                bcr1_config_data <= BCR_VALUE;
-                bcr1_config_bank <= 0;  // CE0
-                bcr1_state <= BCR_ST_WAIT_CE0;
-            end
-        end
-
-        BCR_ST_WAIT_CE0: begin
-            if (!psram1_raw_busy && !bcr1_config_en)
-                bcr1_state <= BCR_ST_CFG_CE1;
-        end
-
-        BCR_ST_CFG_CE1: begin
-            if (!psram1_raw_busy) begin
-                bcr1_config_en <= 1;
-                bcr1_config_data <= BCR_VALUE;
-                bcr1_config_bank <= 1;  // CE1
-                bcr1_state <= BCR_ST_WAIT_CE1;
-            end
-        end
-
-        BCR_ST_WAIT_CE1: begin
-            if (!psram1_raw_busy && !bcr1_config_en)
-                bcr1_state <= BCR_ST_DONE;
-        end
-
-        BCR_ST_DONE: begin
-            bcr1_init_done <= 1;
-        end
-    endcase
-end
-
-// bcr_init_done = AND of both inits completing (sync CRAM1 done into clk_ram_controller)
-reg [2:0] bcr1_done_sync;
-always @(posedge clk_ram_controller)
-    bcr1_done_sync <= {bcr1_done_sync[1:0], bcr1_init_done};
-wire bcr1_init_done_ram = bcr1_done_sync[2];
-
-wire bcr_init_done = bcr0_init_done & bcr1_init_done_ram;
 
 // ============================================================
 // CRAM0 PSRAM Controller (clk_ram_controller, 100 MHz)
@@ -737,9 +668,9 @@ psram_controller #(
     .cram_we_n(cram1_we_n),
     .cram_ub_n(cram1_ub_n),
     .cram_lb_n(cram1_lb_n),
-    .config_en(bcr1_config_en),
-    .config_data(bcr1_config_data),
-    .config_bank_sel(bcr1_config_bank),
+    .config_en(1'b0),        // No BCR — CRAM1 uses async mode only (saves)
+    .config_data(16'b0),
+    .config_bank_sel(1'b0),
     .burst_rd(1'b0),          // Burst not used for CRAM1 (save access is single-word)
     .burst_len(6'd0),
     .burst_rdata_valid(),
