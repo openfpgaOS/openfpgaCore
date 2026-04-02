@@ -1,5 +1,12 @@
 /*
- * openfpgaOS Video HAL Implementation
+ * openfpgaOS Video HAL Implementation — Triple-buffered
+ *
+ * Three framebuffers in SDRAM. Hardware tracks which buffer is being
+ * displayed and which is queued ("ready") for the next vsync.  The CPU
+ * picks its own draw target from whichever buffer is free.
+ *
+ * of_video_flip()      — non-blocking: queues draw buffer, picks new draw target
+ * of_video_flip_wait() — blocking: flip then wait for vsync (frame-locked)
  */
 
 #include "video.h"
@@ -7,51 +14,68 @@
 #include "cache.h"
 #include "../os_string.h"
 
-/* Track which buffer is currently the draw target */
-static int draw_buffer_index = 1;  /* Start drawing to buffer 1, displaying buffer 0 */
+static const uint32_t fb_addr[3] = { FB0_BASE, FB1_BASE, FB2_BASE };
+
+/* Software-tracked buffer roles */
+static int buf_display = 0;   /* buffer the hardware is scanning out        */
+static int buf_draw    = 1;   /* buffer the CPU is drawing into             */
+static int buf_ready   = -1;  /* buffer queued for next vsync (-1 = none)   */
+
+/* Check whether a pending swap has completed and update software state. */
+static void sync_swap_state(void) {
+    if (buf_ready >= 0 && !(FB_SWAP_CTRL & 1)) {
+        buf_display = buf_ready;
+        buf_ready = -1;
+    }
+}
 
 void of_video_init(void) {
-    /* Set framebuffer display mode */
     SYS_DISPLAY_MODE = DISPLAY_MODE_FRAMEBUFFER;
 
-    /* Set initial buffer assignments */
-    draw_buffer_index = 1;
+    buf_display = 0;
+    buf_draw    = 1;
+    buf_ready   = -1;
 
-    /* Clear both framebuffers */
     memset((void *)FB0_BASE, 0, FB_SIZE);
     memset((void *)FB1_BASE, 0, FB_SIZE);
+    memset((void *)FB2_BASE, 0, FB_SIZE);
 }
 
 uint8_t *of_video_get_surface(void) {
-    return (uint8_t *)(draw_buffer_index ? FB1_BASE : FB0_BASE);
+    return (uint8_t *)fb_addr[buf_draw];
 }
 
 void of_video_flush_cache(void) {
-    /* Clean the draw buffer so scanout sees latest pixels */
-    uint8_t *fb = (uint8_t *)(draw_buffer_index ? FB1_BASE : FB0_BASE);
-    of_cache_clean_range(fb, 320 * 240 * 2);  /* 16-bit mode worst case */
+    of_cache_clean_range((uint8_t *)fb_addr[buf_draw], 320 * 240 * 2);
 }
 
 void of_video_flip(void) {
-    /* Clean D-cache for draw buffer so scanout sees latest pixels */
-    uint8_t *fb = (uint8_t *)(draw_buffer_index ? FB1_BASE : FB0_BASE);
-    of_cache_clean_range(fb, 320 * 240 * 2);  /* 16-bit mode worst case */
+    /* Refresh our view of hardware state */
+    sync_swap_state();
 
-    /* Request swap at next vsync */
-    FB_SWAP_CTRL = 1;
+    /* Flush draw buffer so scanout sees the pixels */
+    of_cache_clean_range((uint8_t *)fb_addr[buf_draw], 320 * 240 * 2);
 
-    /* Wait for vsync to actually perform the swap before toggling.
-     * Without this, the game can start drawing to what the FPGA
-     * is still displaying, causing flicker on fast frames. */
-    while (FB_SWAP_CTRL & 1) {}
+    /* Queue draw buffer for display at next vsync.
+     * Write format: bits[2:1] = buffer index, bit[0] = trigger */
+    FB_SWAP_CTRL = (buf_draw << 1) | 1;
 
-    /* Now the FPGA has swapped — safe to toggle draw target */
-    draw_buffer_index ^= 1;
+    int old_draw = buf_draw;
+
+    if (buf_ready >= 0) {
+        /* A previously queued buffer was replaced — recycle it */
+        buf_draw = buf_ready;
+    } else {
+        /* Pick the free buffer: the one not displaying and not just queued */
+        buf_draw = 3 - buf_display - old_draw;
+    }
+
+    buf_ready = old_draw;
 }
 
 void of_video_wait_flip(void) {
-    /* Poll until swap completes (bit 0 clears) */
     while (FB_SWAP_CTRL & 1) {}
+    sync_swap_state();
 }
 
 void of_video_flip_wait(void) {

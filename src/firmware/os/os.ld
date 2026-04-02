@@ -3,7 +3,7 @@
  *
  * Memory layout:
  * - BRAM:     0x00000000 (192KB) - Bootloader + trap handler + hot code
- * - SDRAM:    0x10200000 (2MB)   - OS kernel code + data + BSS
+ * - SDRAM:    0x10300000 (1MB)   - OS kernel code + data + BSS
  * - App area: 0x10400000+        - Dynamically loaded application
  * - Terminal: 0x20000000 (8KB)
  * - SysRegs:  0x40000000
@@ -13,13 +13,13 @@ ENTRY(_start)
 
 MEMORY {
     BRAM      (rwx) : ORIGIN = 0x00000000, LENGTH = 192K
-    SDRAM     (rwx) : ORIGIN = 0x10200000, LENGTH = 2M
+    SDRAM     (rwx) : ORIGIN = 0x10300000, LENGTH = 1M
 }
 
 /* Layout symbols */
 __sdram_base = 0x10000000;
 __sdram_size = 64M;
-__os_entry = 0x10200000;
+__os_entry = 0x10300000;
 __app_load_base = 0x10400000;
 
 SECTIONS {

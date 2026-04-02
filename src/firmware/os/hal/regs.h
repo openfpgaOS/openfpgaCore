@@ -35,13 +35,15 @@
 
 #define FB0_BASE            0x10000000      /* Framebuffer 0 */
 #define FB1_BASE            0x10100000      /* Framebuffer 1 */
+#define FB2_BASE            0x10200000      /* Framebuffer 2 */
+#define FB_COUNT            3
 #define FB_WIDTH            320
 #define FB_HEIGHT           240
 #define FB_STRIDE           320             /* 8-bit indexed, 1 byte/pixel */
 #define FB_SIZE             (FB_WIDTH * FB_HEIGHT)
 
-#define DMA_BUFFER          0x10180000      /* 512KB DMA bounce buffer (cached) */
-#define DMA_BUFFER_UNCACHED 0x50180000      /* Same region, D-cache bypass */
+#define DMA_BUFFER          0x10280000      /* 512KB DMA bounce buffer (cached) */
+#define DMA_BUFFER_UNCACHED 0x50280000      /* Same region, D-cache bypass */
 #define DMA_CHUNK_SIZE      (512 * 1024)
 
 #define INTERACT_BASE       0x103FE000      /* APF interact settings (4KB) */
@@ -93,9 +95,11 @@
 #define   COLOR_MODE_RGB555     4   /* 15-bit direct (X1R5G5B5, 2 bytes/pixel) */
 #define   COLOR_MODE_RGBA5551   5   /* 15-bit + alpha (R5G5B5A1, 2 bytes/pixel) */
 
-/* Framebuffer control (double-buffered) */
+/* Framebuffer control (triple-buffered)
+ * FB_SWAP_CTRL write: bit[0]=trigger, bits[2:1]=buffer index to display at next vsync
+ * FB_SWAP_CTRL read:  bit[0]=pending, bits[2:1]=current display buffer index */
 #define FB_DISPLAY_ADDR     REG32(SYSREG_BASE + 0x10)
-#define FB_DRAW_ADDR        REG32(SYSREG_BASE + 0x14)
+#define FB_DISPLAY_IDX      REG32(SYSREG_BASE + 0x14)
 #define FB_SWAP_CTRL        REG32(SYSREG_BASE + 0x18)
 
 /* Data slot / DMA interface */
@@ -355,6 +359,7 @@ static inline uint32_t cpu_to_bridge(void *addr) {
 #define OF_MEM_SDRAM_UNCACHED_BASE  SDRAM_UNCACHED_BASE
 #define OF_MEM_FB0_BASE             FB0_BASE
 #define OF_MEM_FB1_BASE             FB1_BASE
+#define OF_MEM_FB2_BASE             FB2_BASE
 #define OF_MEM_DMA_BUFFER           DMA_BUFFER
 #define OF_MEM_DMA_CHUNK_SIZE       DMA_CHUNK_SIZE
 #define OF_MEM_CRAM0_BASE           CRAM0_BASE
@@ -373,7 +378,7 @@ static inline uint32_t cpu_to_bridge(void *addr) {
 #define OF_REG_SYS_CYCLE_HI         SYS_CYCLE_HI
 #define OF_REG_SYS_DISPLAY_MODE     SYS_DISPLAY_MODE
 #define OF_REG_FB_DISPLAY_ADDR      FB_DISPLAY_ADDR
-#define OF_REG_FB_DRAW_ADDR         FB_DRAW_ADDR
+#define OF_REG_FB_DISPLAY_IDX       FB_DISPLAY_IDX
 #define OF_REG_FB_SWAP_CTRL         FB_SWAP_CTRL
 #define OF_REG_DS_SLOT_ID           DS_SLOT_ID
 #define OF_REG_DS_SLOT_OFFSET       DS_SLOT_OFFSET

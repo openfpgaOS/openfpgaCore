@@ -70,7 +70,7 @@ All functions are declared in `of.h` (which includes all subsystem headers) as `
 
 ### Video — `of_video.h`
 
-320x240 framebuffer, double-buffered. Default: 8-bit indexed with 256-color palette.
+320x240 framebuffer, triple-buffered. Default: 8-bit indexed with 256-color palette.
 
 ```c
 void of_video_init(void);                          // Initialize video

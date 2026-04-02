@@ -1,6 +1,6 @@
 /*
  * openfpgaOS Video HAL
- * 320x240 8-bit indexed color, double-buffered, hardware palette
+ * 320x240 8-bit indexed color, triple-buffered, hardware palette
  */
 
 #ifndef OFOS_VIDEO_H

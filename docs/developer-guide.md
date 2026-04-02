@@ -853,7 +853,8 @@ Exit the application and return to the OS. The OS will halt the CPU. On the Pock
 | `0x10000000` | `0x13FFFFFF` | 64 MB | SDRAM | D-cache | Main memory (apps, data, framebuffers) |
 | `0x10000000` | `0x100BFFFF` | 768 KB | FB0 | D-cache | Framebuffer 0 (320x240) |
 | `0x10100000` | `0x101BFFFF` | 768 KB | FB1 | D-cache | Framebuffer 1 (320x240) |
-| `0x10180000` | `0x101FFFFF` | 512 KB | DMA | D-cache | DMA bounce buffer |
+| `0x10200000` | `0x102BFFFF` | 768 KB | FB2 | D-cache | Framebuffer 2 (320x240) |
+| `0x10280000` | `0x102FFFFF` | 512 KB | DMA | D-cache | DMA bounce buffer |
 | `0x10400000` | -- | -- | App | D-cache | Application load address |
 | `0x20000000` | `0x200004AF` | 1200 B | Term VRAM | Uncached | Terminal character buffer (40x30) |
 | `0x30000000` | `0x30FFFFFF` | 16 MB | CRAM0 | D-cache | Cellular RAM bank 0 (cached) |
@@ -890,8 +891,8 @@ SDRAM similarly has a cached window (`0x10xxxxxx`) and uncached alias (`0x50xxxx
 | `0x08` | `SYS_CYCLE_HI` | R | Cycle counter (high 32 bits) |
 | `0x0C` | `SYS_DISPLAY_MODE` | W | 0 = terminal, 1 = framebuffer |
 | `0x10` | `FB_DISPLAY_ADDR` | R/W | Display framebuffer base (SDRAM offset) |
-| `0x14` | `FB_DRAW_ADDR` | R/W | Draw framebuffer base (SDRAM offset) |
-| `0x18` | `FB_SWAP_CTRL` | W | Write 1 to queue buffer swap at vsync |
+| `0x14` | `FB_DISPLAY_IDX` | R | Current display buffer index (0-2) |
+| `0x18` | `FB_SWAP_CTRL` | R/W | Write: `(idx<<1)\|1` queues buffer idx for vsync. Read: `{disp_idx[2:1], pending[0]}` |
 | `0x20` | `DS_SLOT_ID` | W | Data slot ID for DMA operation |
 | `0x24` | `DS_SLOT_OFFSET` | W | Byte offset within data slot |
 | `0x28` | `DS_BRIDGE_ADDR` | W | Bridge address for DMA target |

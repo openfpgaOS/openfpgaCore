@@ -230,15 +230,17 @@ reg [31:0] ds_resp_addr_reg;
 reg [7:0] pal_index_reg;
 reg dma_started;  // Latched high on DMA_CTRL write, cleared when DMA engine busy
 
-// Double-buffered framebuffer
+// Triple-buffered framebuffer
 localparam FB_ADDR_0 = 25'h0000000;
 localparam FB_ADDR_1 = 25'h0080000;
-reg fb_display_idx;
-reg fb_draw_idx;
+localparam FB_ADDR_2 = 25'h0100000;
+reg [1:0] fb_display_idx;
+reg [1:0] fb_ready_idx;
 reg fb_swap_pending;
 
-wire [24:0] fb_display_addr_reg = fb_display_idx ? FB_ADDR_1 : FB_ADDR_0;
-wire [24:0] fb_draw_addr_reg    = fb_draw_idx    ? FB_ADDR_1 : FB_ADDR_0;
+wire [24:0] fb_display_addr_reg = (fb_display_idx == 2'd0) ? FB_ADDR_0 :
+                                   (fb_display_idx == 2'd1) ? FB_ADDR_1 :
+                                                              FB_ADDR_2;
 
 assign display_mode = display_mode_reg;
 assign color_mode = color_mode_reg;
@@ -315,8 +317,8 @@ always @(posedge clk) begin
         cycle_counter <= 0;
         display_mode_reg <= 0;
         color_mode_reg <= 0;
-        fb_display_idx <= 1'b0;
-        fb_draw_idx <= 1'b1;
+        fb_display_idx <= 2'd0;
+        fb_ready_idx <= 2'd0;
         fb_swap_pending <= 1'b0;
         pal_wr <= 0;
         pal_addr <= 0;
@@ -382,6 +384,7 @@ always @(posedge clk) begin
                 6'b000011: display_mode_reg <= req_wdata[1:0];
                 6'b011100: color_mode_reg <= req_wdata[2:0];  // offset 0x70
                 6'b000110: if (req_wdata[0]) begin
+                    fb_ready_idx <= req_wdata[2:1];
                     fb_swap_pending <= 1'b1;
                 end
                 6'b001000: ds_slot_id_reg <= req_wdata[15:0];
@@ -452,10 +455,9 @@ always @(posedge clk) begin
             endcase
         end
 
-        // Double buffer vsync swap
+        // Triple buffer vsync swap
         if (fb_swap_pending && vsync_rising) begin
-            fb_display_idx <= fb_draw_idx;
-            fb_draw_idx <= ~fb_draw_idx;
+            fb_display_idx <= fb_ready_idx;
             fb_swap_pending <= 1'b0;
         end
     end
@@ -470,8 +472,8 @@ always @(*) begin
         6'b000011: sysreg_rdata = {30'b0, display_mode_reg};
         6'b011100: sysreg_rdata = {29'b0, color_mode_reg};
         6'b000100: sysreg_rdata = {7'b0, fb_display_addr_reg};
-        6'b000101: sysreg_rdata = {7'b0, fb_draw_addr_reg};
-        6'b000110: sysreg_rdata = {31'b0, fb_swap_pending};
+        6'b000101: sysreg_rdata = {30'b0, fb_display_idx};
+        6'b000110: sysreg_rdata = {29'b0, fb_display_idx, fb_swap_pending};
         6'b001000: sysreg_rdata = {16'b0, ds_slot_id_reg};
         6'b001001: sysreg_rdata = ds_slot_offset_reg;
         6'b001010: sysreg_rdata = ds_bridge_addr_reg;
