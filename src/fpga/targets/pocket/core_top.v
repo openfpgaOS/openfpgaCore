@@ -776,7 +776,7 @@ wire        psram_mux_rdata_valid;
 // Audio output interface
 wire        audio_sample_wr;
 wire [31:0] audio_sample_data;
-wire [11:0] audio_fifo_level;
+wire [10:0] audio_fifo_level;
 wire        audio_fifo_full;
 
 // OPL3 (YMF262) hardware interface

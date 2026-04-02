@@ -21,9 +21,10 @@ ofOS is a minimal operating system for the Analogue Pocket FPGA handheld. It run
 |---------------------------|--------|------------------------------------------|
 | `0x00000000 - 0x0000FFFF` | 64 KB  | BRAM -- bootloader, trap handler, hot code |
 | `0x10000000 - 0x100FFFFF` | 1 MB   | Framebuffer 0 (320x240, 8-bit indexed)   |
-| `0x10100000 - 0x101FFFFF` | 1 MB   | Framebuffer 1 (double buffer)            |
-| `0x10180000 - 0x101FFFFF` | 512 KB | DMA bounce buffer                        |
-| `0x10200000 - 0x103FFFFF` | 2 MB   | OS kernel (code + data + BSS)            |
+| `0x10100000 - 0x101FFFFF` | 1 MB   | Framebuffer 1 (triple buffer)            |
+| `0x10200000 - 0x102FFFFF` | 1 MB   | Framebuffer 2 (triple buffer)            |
+| `0x10280000 - 0x102FFFFF` | 512 KB | DMA bounce buffer                        |
+| `0x10300000 - 0x103FFFFF` | 1 MB   | OS kernel (code + data + BSS)            |
 | `0x10400000+`             | ~48 MB | Application load area + heap             |
 | `0x39000000 - 0x3927FFFF` | 2.5 MB | Save region (10 × 256 KB slots, CRAM1 uncached) |
 | `0x13F80000`              |        | Application stack top                    |
@@ -148,7 +149,7 @@ The HAL is organized into 11 independent modules:
 
 | Module | Header | Description |
 |--------|--------|-------------|
-| `fb` | `hal/fb.h` | Framebuffer (320x240, 8-bit indexed, double-buffered) |
+| `fb` | `hal/fb.h` | Framebuffer (320x240, 8-bit indexed, triple-buffered) |
 | `audio` | `hal/audio.h` | PCM audio FIFO + OPL3 FM synthesis |
 | `input` | `hal/input.h` | Controller polling with edge detection (2 players) |
 | `save` | `hal/save.h` | Nonvolatile save slots (10 × 256 KB, CRAM1 PSRAM) |

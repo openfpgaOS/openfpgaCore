@@ -30,7 +30,7 @@ module audio_dma (
     output reg  [12:0] ring_rptr,     // Hardware read pointer (entry index)
 
     // Audio FIFO status (from audio_output, clk_sys domain)
-    input  wire [11:0] fifo_level,
+    input  wire [10:0] fifo_level,
     input  wire        fifo_full,
 
     // Audio FIFO write (to audio_output)
@@ -67,7 +67,7 @@ wire [12:0] ring_mask = (13'd1 << ring_size_log) - 13'd1;
 wire ring_has_data = (ring_rptr != ring_wptr);
 
 // FIFO has space? Keep a margin to avoid overflow during AXI latency
-wire fifo_has_space = (fifo_level < 12'd3840) && !fifo_full;
+wire fifo_has_space = (fifo_level < 12'd1920) && !fifo_full;
 
 // FSM
 localparam S_IDLE = 2'd0;

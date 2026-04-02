@@ -16,7 +16,7 @@ Initializes all subsystems in order: timer, terminal, dataslot, input, audio, fr
 
 ## Framebuffer (`hal/fb.h`)
 
-320x240 8-bit indexed color, double-buffered with hardware palette and vsync-synchronized swap.
+320x240 8-bit indexed color, triple-buffered with hardware palette and vsync-synchronized swap.
 
 ### Functions
 
