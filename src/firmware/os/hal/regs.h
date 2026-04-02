@@ -21,7 +21,7 @@
  * ====================================================================== */
 
 #define BRAM_BASE           0x00000000
-#define BRAM_SIZE           (64 * 1024)
+#define BRAM_SIZE           (32 * 1024)
 
 /* App BRAM region — available for app hot code after OS sections.
  * Top 512 bytes reserved for trap handler stack frame. */
