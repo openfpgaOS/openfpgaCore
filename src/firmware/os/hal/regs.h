@@ -26,7 +26,7 @@
 /* App BRAM region — available for app hot code after OS sections.
  * Top 512 bytes reserved for trap handler stack frame. */
 #define APP_BRAM_BASE       0x00002000
-#define APP_BRAM_END        (BRAM_BASE + BRAM_SIZE - 512)  /* 0x0000FE00 */
+#define APP_BRAM_END        (BRAM_BASE + BRAM_SIZE - 512)  /* 0x00007E00 */
 #define APP_BRAM_SIZE       (APP_BRAM_END - APP_BRAM_BASE)
 
 #define SDRAM_BASE          0x10000000
