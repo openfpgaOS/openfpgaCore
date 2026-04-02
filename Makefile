@@ -42,7 +42,7 @@ REVERSE_BITS = tools/reverse_bits
 all: package
 
 # Full build - compile FPGA, firmware, and package
-full: fpga firmware package
+full: fpga firmware chip32 package
 
 # Firmware source files for dependency tracking
 FW_SOURCES = $(wildcard $(OS_DIR)/hal/*.c $(OS_DIR)/targets/$(TARGET)/*.c $(OS_DIR)/targets/$(TARGET)/boot/*.c $(OS_DIR)/targets/$(TARGET)/boot/*.S $(OS_DIR)/kernel/*.c $(OS_DIR)/*.ld)
