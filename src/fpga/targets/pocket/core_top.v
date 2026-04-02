@@ -522,10 +522,8 @@ always @(posedge clk_ram_controller) begin
     case (bcr_state)
         BCR_IDLE: begin
             bcr_init_done <= 1'b0;
-            // Wait for PLL lock AND APF reset release before configuring.
-            // psram_controller held in reset by reset_n_apf — must be out
-            // of reset or psram_raw_busy never rises and we deadlock.
-            if (pll_ram_locked && reset_n_apf)
+            // Wait for PLL lock before configuring PSRAM.
+            if (pll_ram_locked)
                 bcr_state <= BCR_CE0_START;
         end
 
@@ -568,7 +566,7 @@ psram_controller #(
     .CLOCK_SPEED(100.0)
 ) psram0 (
     .clk(clk_ram_controller),
-    .reset_n(reset_n_apf),
+    .reset_n(1'b1),
     .word_rd(psram_mux_rd),
     .word_wr(psram_mux_wr),
     .word_addr(psram_mux_addr),
