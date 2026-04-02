@@ -99,7 +99,7 @@ ALL_C_SRCS = $(BOOT_SRCS_C) $(HAL_SRCS) $(TARGET_SRCS) $(KERNEL_SRCS)
 OBJS = $(ALL_C_SRCS:.c=.o) $(BOOT_SRCS_S:.S=.o) $(HAL_SRCS_S:.S=.o)
 
 # RAM size for MIF generation
-RAM_WORDS = 16384
+RAM_WORDS = 8192
 
 # Default target
 all: $(FW_TARGET).bin $(FW_TARGET).mif $(FW_TARGET).lst os.bin
