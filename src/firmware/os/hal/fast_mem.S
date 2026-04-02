@@ -54,11 +54,20 @@ memcpy:
     andi    t1, t1, 3
     bnez    t1, .Lcpy_byte
 
-    /* Need >= 64 bytes and 64B-aligned dest for cbo.zero path */
+    /* Need >= 64 bytes for cbo.zero path */
     li      t1, 64
     bltu    a2, t1, .Lcpy_32_enter
 
-    /* Handle unaligned head: copy bytes until dest is 64B-aligned */
+    /* cbo.zero only safe on cached regions (SDRAM 0x10-0x13, PSRAM 0x30-0x37) */
+    srli    t1, a0, 26
+    li      t2, 4             /* 0x10-0x13 */
+    beq     t1, t2, .Lcpy_align_check
+    srli    t1, a0, 27
+    li      t2, 6             /* 0x30-0x37 */
+    bne     t1, t2, .Lcpy_32_enter
+
+.Lcpy_align_check:
+    /* Handle unaligned head: copy words until dest is 64B-aligned */
     andi    t1, a0, 63
     beqz    t1, .Lcpy_64_zero
 
