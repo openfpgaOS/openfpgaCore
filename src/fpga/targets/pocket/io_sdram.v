@@ -162,6 +162,7 @@ synch_3 s1(reset_n, reset_n_s, controller_clk);
     reg     [10:0]  length;
     wire    [10:0]  length_next = length - 'h1;
     reg             enable_dq_read, enable_dq_read_1, enable_dq_read_2, enable_dq_read_3, enable_dq_read_4, enable_dq_read_5;
+    reg     [2:0]   bl8_beat_count;  // Counts 0-7 for BL=8 data beats
     reg             enable_dq_read_toggle;
 
     reg             enable_data_done, enable_data_done_1, enable_data_done_2, enable_data_done_3, enable_data_done_4;
@@ -311,7 +312,7 @@ always @(posedge controller_clk) begin
             dc <= 0;
             cmd <= CMD_LMR;
             phy_ba <= 'b00;
-            phy_a <= 13'b000000_011_0_001; // CAS 3, burst length 2, sequential
+            phy_a <= 13'b000000_011_0_011; // CAS 3, burst length 8, sequential
 
             state <= ST_BOOT_4;
         end
@@ -505,10 +506,9 @@ always @(posedge controller_clk) begin
         phy_dq_oe <= 1;
         phy_dq_out <= word_data_captured[15:0];
         phy_dqm <= ~word_wstrb_captured[1:0];
+        bl8_beat_count <= 3'd1;
 
-        // Request word N+1 during low-half output.
-        // Slave sees it next cycle, updates sdram_wdata.
-        // Data arrives on direct bus at ST_WRITE_5.
+        // Request next word during low-half output
         if (wr_burst_remaining > 0)
             word_wr_data_next <= 1;
 
@@ -520,13 +520,41 @@ always @(posedge controller_clk) begin
         phy_dq_oe <= 1;
         phy_dq_out <= word_data_captured[31:16];
         phy_dqm <= ~word_wstrb_captured[3:2];
+        bl8_beat_count <= 3'd2;
 
-        if (wr_burst_remaining > 0) begin
+        state <= ST_WRITE_5;
+    end
+    // BL=8: output remaining 6 halfwords (3 more words or DQM-masked padding)
+    ST_WRITE_5: begin
+        phy_dq_oe <= 1;
+        bl8_beat_count <= bl8_beat_count + 3'd1;
+
+        if (wr_burst_remaining > 0 && bl8_beat_count[0] == 0) begin
+            // Even beat: low halfword of next word
+            word_data_captured <= burst_wr_direct_data;
+            word_wstrb_captured <= burst_wr_direct_strb;
+            phy_dq_out <= burst_wr_direct_data[15:0];
+            phy_dqm <= ~burst_wr_direct_strb[1:0];
+        end else if (wr_burst_remaining > 0 && bl8_beat_count[0] == 1) begin
+            // Odd beat: high halfword
+            phy_dq_out <= word_data_captured[31:16];
+            phy_dqm <= ~word_wstrb_captured[3:2];
             wr_burst_remaining <= wr_burst_remaining - 4'd1;
             addr <= addr + 2'd2;
-            state <= ST_WRITE_5;  // 1 gap cycle then capture
+            if (wr_burst_remaining > 1)
+                word_wr_data_next <= 1;
         end else begin
-            state <= ST_WRITE_4;
+            // No more data: mask remaining BL=8 beats
+            phy_dqm <= 2'b11;
+            phy_dq_out <= 16'd0;
+        end
+
+        if (bl8_beat_count == 3'd7) begin
+            // BL=8 burst complete
+            if (wr_burst_remaining > 0)
+                state <= ST_WRITE_2;  // More words to write
+            else
+                state <= ST_WRITE_4;  // Done
         end
     end
     ST_WRITE_4: begin
@@ -534,14 +562,6 @@ always @(posedge controller_clk) begin
         if(dc == TIMING_WRITE-1+1) begin
             state <= ST_IDLE;
         end
-    end
-    // 3 cycles/word burst write: request in WRITE_2, gap in WRITE_5, capture+loop.
-    ST_WRITE_5: begin
-        phy_dq_oe <= 1;
-        phy_dqm <= 2'b00;
-        word_data_captured <= burst_wr_direct_data;
-        word_wstrb_captured <= burst_wr_direct_strb;
-        state <= ST_WRITE_2;
     end
     ST_WRITE_6: begin
         state <= ST_WRITE_2;
@@ -578,29 +598,35 @@ always @(posedge controller_clk) begin
         phy_a <= addr[9:0]; // A0-A9 column address
         cmd <= CMD_READ;
 
-        enable_dq_read <= 1;  // First BL=2 data beat
+        enable_dq_read <= 1;  // First BL=8 data beat
+        bl8_beat_count <= 3'd1;
 
-        length <= length - 1'b1;
-        addr <= addr + 2'd2;  // BL=2: skip 2 half-word addresses per READ
-
-        // Always go to ST_READ_3 for second BL=2 data beat
         state <= ST_READ_3;
     end
     ST_READ_3: begin
-        // Second BL=2 data beat
+        // BL=8: stream 8 halfwords (4 words) per READ command
         enable_dq_read <= 1;
+        bl8_beat_count <= bl8_beat_count + 3'd1;
 
-        if(length == 0) begin
-            // All READs issued, drain pipeline
-            read_newrow <= 0;
-            state <= ST_READ_5;
-        end else if(addr[9:0] <= 10'd1) begin
-            // Near end of row, need to activate next row
-            read_newrow <= 1;
-            state <= ST_READ_5;
-        end else begin
-            // More READs needed (burst mode)
-            state <= ST_READ_2;
+        if (bl8_beat_count == 3'd7) begin
+            // Last beat of BL=8 burst — advance address
+            addr <= addr + 4'd8;      // BL=8: skip 8 halfword addresses per READ
+
+            // Subtract 4 words (or remaining if < 4)
+            if (length <= 11'd4) begin
+                length <= 11'd0;
+                read_newrow <= 0;
+                state <= ST_READ_5;
+            end else begin
+                length <= length - 3'd4;
+                if (addr[9:0] + 4'd8 > 10'd1016) begin
+                    // Near end of row, need new row
+                    read_newrow <= 1;
+                    state <= ST_READ_5;
+                end else begin
+                    state <= ST_READ_2;
+                end
+            end
         end
     end
     ST_READ_5: begin
