@@ -143,8 +143,8 @@ always @(posedge clk or posedge reset) begin
                 burst_len <= s_axi_arlen;
                 beat_count <= 0;
                 is_sram_target <= addr_is_sram;
-                // SRAM: single-word async reads; CRAM0: sync burst reads
-                state <= addr_is_sram ? S_RD_CMD : S_RD_BURST;
+                // All reads use single-word async path (no sync burst)
+                state <= S_RD_CMD;
             end else if (s_axi_awvalid) begin
                 s_axi_awready <= 1;
                 addr_r <= s_axi_awaddr;
