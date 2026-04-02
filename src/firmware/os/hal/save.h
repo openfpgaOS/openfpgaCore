@@ -8,7 +8,7 @@
 
 #include <stdint.h>
 
-#define SAVE_MAX_SLOTS      11
+#define SAVE_MAX_SLOTS      10
 #define SAVE_SLOT_SIZE      0x40000     /* 256KB per slot (fully usable by app) */
 #define SAVE_REGION_ADDR    0x39000000  /* CRAM1 uncached — bridge accesses PSRAM directly */
 
