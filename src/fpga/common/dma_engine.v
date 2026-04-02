@@ -122,11 +122,41 @@ always @(posedge clk or posedge reset) begin
         end
 
         S_CALC: begin
-            // burst length: min(16, remaining_words) - 1
-            if (remaining[31:6] != 0)  // >= 64 bytes = 16 words
-                burst_len <= 5'd15;
-            else
-                burst_len <= remaining[5:2] - 5'd1;
+            // burst length: min(16, remaining_words, words_to_row_end) - 1
+            //
+            // SDRAM has 10-bit column address (1024 x 16-bit = 512 x 32-bit
+            // words per row = 2048 bytes). io_sdram does NOT handle row
+            // crossing mid-burst, so we must split at row boundaries.
+            //
+            // 32-bit word column = addr[10:2] (9 bits, 0-511).
+            // A 16-word burst crosses the boundary when column >= 497,
+            // i.e. addr[10:6] == 5'b11111 && addr[5:2] != 0.
+            // Words to boundary = 16 - addr[5:2].
+            begin : calc_burst
+                reg [4:0] max_words;
+                reg [4:0] src_room, dst_room;
+
+                // Remaining words, capped at 16
+                if (remaining[31:6] != 0)
+                    max_words = 5'd16;
+                else
+                    max_words = remaining[5:2];
+
+                // Words until next 512-word SDRAM row boundary (only
+                // matters when within last 15 words of the row)
+                src_room = (cur_src[10:6] == 5'h1F && cur_src[5:2] != 0)
+                         ? (5'd16 - {1'b0, cur_src[5:2]}) : 5'd16;
+                dst_room = (cur_dst[10:6] == 5'h1F && cur_dst[5:2] != 0)
+                         ? (5'd16 - {1'b0, cur_dst[5:2]}) : 5'd16;
+
+                // Clamp to row boundary (src for copy, dst always)
+                if (!is_fill && src_room < max_words)
+                    max_words = src_room;
+                if (dst_room < max_words)
+                    max_words = dst_room;
+
+                burst_len <= max_words - 5'd1;
+            end
             beat_idx <= 0;
             state <= is_fill ? S_WR_ADDR : S_RD_ADDR;
         end

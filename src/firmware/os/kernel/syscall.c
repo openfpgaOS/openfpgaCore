@@ -28,7 +28,7 @@ extern void *dlcalloc(size_t, size_t);
  * 4KB amortizes DMA overhead for small sequential reads
  * (e.g. BUILD engine LZW 2-byte length prefixes)
  * while keeping the static buffer in BSS small. */
-#define FD_READAHEAD_SIZE   4096
+#define FD_READAHEAD_SIZE   (32 * 1024)
 
 typedef struct {
     int      in_use;
@@ -431,6 +431,15 @@ static long sys_llseek(long fd, long off_hi, long off_lo,
         return -EINVAL;
 
     f->offset = (uint32_t)new_offset;
+
+    /* Invalidate read-ahead buffer only if the new offset falls outside
+     * the currently buffered range.  Forward seeks within the buffer
+     * (common pattern: skip a few bytes in a file) stay fast. */
+    if (ra_owner_fd == fd && ra_valid > 0) {
+        if (new_offset < (long)ra_file_off ||
+            new_offset >= (long)(ra_file_off + ra_valid))
+            ra_valid = 0;
+    }
 
     /* _llseek writes result to user pointer as 64-bit */
     if (result_ptr) {
@@ -923,6 +932,8 @@ long syscall_dispatch(long n, long a0, long a1, long a2,
     }
     if (n == OF_SYS_DMA_WAIT) {
         dma_wait();
+        /* Evict D-cache so CPU sees DMA-written data */
+        of_cache_flush_dcache();
         return 0;
     }
     if (n == OF_SYS_DMA_BUSY)
@@ -942,6 +953,14 @@ void syscall_init(uintptr_t heap_start) {
     fd_table[FD_STDERR].in_use = 1;
     brk_base = heap_start;
     current_brk = heap_start;
+
+    /* Reset file slot registry (apps re-register on startup) */
+    file_slot_count = 0;
+    memset(file_slots, 0, sizeof(file_slots));
+
+    /* Reset read-ahead buffer */
+    ra_owner_fd = -1;
+    ra_valid = 0;
 
     /* Load file slot table from CRAM1 (populated by Chip32 loader) */
     file_slot_load_table();

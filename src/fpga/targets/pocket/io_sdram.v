@@ -102,6 +102,9 @@ assign {phy_ras, phy_cas, phy_we} = cmd;
     localparam      ST_WRITE_5          = 'd25;
     localparam      ST_WRITE_6          = 'd26;
     localparam      ST_WRITE_7          = 'd27;
+    localparam      ST_WRITE_4_NEWROW   = 'd28;
+    localparam      ST_WRITE_4_NR_PRECHG = 'd29;
+    localparam      ST_WRITE_4_NR_ACT   = 'd10;
 
     localparam      ST_READ_0           = 'd30;
     localparam      ST_READ_1           = 'd31;
@@ -524,7 +527,14 @@ always @(posedge controller_clk) begin
         if (wr_burst_remaining > 0) begin
             wr_burst_remaining <= wr_burst_remaining - 4'd1;
             addr <= addr + 2'd2;
-            state <= ST_WRITE_5;  // 1 gap cycle then capture
+            if ((addr[9:0] + 10'd2) <= 10'd1) begin
+                // Next write would cross SDRAM row boundary.
+                // Must finish current write, precharge, activate
+                // new row, then continue burst.
+                state <= ST_WRITE_4_NEWROW;
+            end else begin
+                state <= ST_WRITE_5;  // 1 gap cycle then capture
+            end
         end else begin
             state <= ST_WRITE_4;
         end
@@ -533,6 +543,43 @@ always @(posedge controller_clk) begin
         phy_dqm <= 2'b00;
         if(dc == TIMING_WRITE-1+1) begin
             state <= ST_IDLE;
+        end
+    end
+    // Row-crossing for burst writes: finish tWR, precharge, activate new row, resume.
+    ST_WRITE_4_NEWROW: begin
+        phy_dqm <= 2'b00;
+        if(dc == TIMING_WRITE-1+1) begin
+            // Precharge current bank
+            cmd <= CMD_PRECHG;
+            phy_a[10] <= 0;
+            row_open <= 0;
+            dc <= 0;
+            state <= ST_WRITE_4_NR_PRECHG;
+        end
+    end
+    ST_WRITE_4_NR_PRECHG: begin
+        if(dc == TIMING_PRECHARGE-1) begin
+            // Activate new row
+            phy_ba <= addr[24:23];
+            phy_a <= addr[22:10];
+            cmd <= CMD_ACT;
+            row_open <= 1;
+            open_bank <= addr[24:23];
+            open_row <= addr[22:10];
+            open_timer <= 4'd0;
+            dc <= 0;
+            state <= ST_WRITE_4_NR_ACT;
+        end
+    end
+    ST_WRITE_4_NR_ACT: begin
+        phy_a[10] <= 1'b0;
+        if(dc == TIMING_ACT_RW-1) begin
+            dc <= 0;
+            // Capture next word data then resume writing
+            word_data_captured <= burst_wr_direct_data;
+            word_wstrb_captured <= burst_wr_direct_strb;
+            phy_dq_oe <= 1;
+            state <= ST_WRITE_2;
         end
     end
     // 3 cycles/word burst write: request in WRITE_2, gap in WRITE_5, capture+loop.

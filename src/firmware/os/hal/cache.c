@@ -86,38 +86,42 @@ void of_cache_flush(void) {
     of_cache_invalidate_icache();
 }
 
+/* Convert cached address (0x10xxxxxx) to uncached alias (0x50xxxxxx).
+ * Returns unmodified if not in the cached SDRAM range. */
+static inline uint32_t to_uncached(uint32_t addr) {
+    if ((addr & 0xF0000000) == SDRAM_BASE)
+        return (addr & ~0xF0000000) | SDRAM_UNCACHED_BASE;
+    return addr;
+}
+
 void dma_copy(void *dst, const void *src, uint32_t len) {
     if (len == 0) return;
-    /* Flush src dirty lines to SDRAM so DMA reads correct data */
-    dcache_evict_range((void *)src, len);
-    /* Evict dst lines so CPU doesn't hold stale copies */
-    dcache_evict_range(dst, len);
-    /* Start DMA and wait */
-    dma_start_copy((uint32_t)(uintptr_t)dst,
-                   (uint32_t)(uintptr_t)src, len);
+    /* Evict both src (flush dirty data to SDRAM) and dst (prevent
+     * stale dirty lines from writing back over DMA results) */
+    dcache_evict_all();
+    dma_start_copy(to_uncached((uint32_t)(uintptr_t)dst),
+                   to_uncached((uint32_t)(uintptr_t)src), len);
     dma_wait();
+    dcache_evict_all();
 }
 
 void dma_fill(void *dst, uint32_t value, uint32_t len) {
     if (len == 0) return;
-    /* Evict dst lines so CPU doesn't hold stale copies */
-    dcache_evict_range(dst, len);
-    dma_start_fill((uint32_t)(uintptr_t)dst, value, len);
+    dcache_evict_all();
+    dma_start_fill(to_uncached((uint32_t)(uintptr_t)dst), value, len);
     dma_wait();
+    dcache_evict_all();
 }
 
 void dma_copy_async(void *dst, const void *src, uint32_t len) {
     if (len == 0) return;
-    dcache_evict_range((void *)src, len);
-    dcache_evict_range(dst, len);
-    dma_start_copy((uint32_t)(uintptr_t)dst,
-                   (uint32_t)(uintptr_t)src, len);
-    /* Returns without waiting — caller must call dma_wait() */
+    dcache_evict_all();
+    dma_start_copy(to_uncached((uint32_t)(uintptr_t)dst),
+                   to_uncached((uint32_t)(uintptr_t)src), len);
 }
 
 void dma_fill_async(void *dst, uint32_t value, uint32_t len) {
     if (len == 0) return;
-    dcache_evict_range(dst, len);
-    dma_start_fill((uint32_t)(uintptr_t)dst, value, len);
-    /* Returns without waiting — caller must call dma_wait() */
+    dcache_evict_all();
+    dma_start_fill(to_uncached((uint32_t)(uintptr_t)dst), value, len);
 }

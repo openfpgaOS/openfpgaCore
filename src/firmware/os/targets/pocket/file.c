@@ -71,14 +71,21 @@ static inline void call_idle_hook(void) {
     __asm__ volatile("csrw mtval, %0"  :: "r"(saved_mtval));
 }
 
+static int file_op_count;
+
 static int file_wait_complete(void) {
     uint32_t timeout;
+
+    file_op_count++;
 
     /* Wait for ACK */
     timeout = DMA_TIMEOUT;
     while (!(DS_STATUS & DS_STATUS_ACK)) {
-        if (--timeout == 0)
+        if (--timeout == 0) {
+            of_term_printf("[bridge timeout ACK #%d st=%02x]\n",
+                        file_op_count, DS_STATUS & 0x3F);
             return OF_ERR_TIMEOUT;
+        }
         if ((timeout & 0x3FF) == 0) {
             of_mixer_pump();
             of_audio_drain();
@@ -89,8 +96,11 @@ static int file_wait_complete(void) {
     /* Wait for DONE */
     timeout = DMA_TIMEOUT;
     while (!(DS_STATUS & DS_STATUS_DONE)) {
-        if (--timeout == 0)
+        if (--timeout == 0) {
+            of_term_printf("[bridge timeout DONE #%d st=%02x]\n",
+                        file_op_count, DS_STATUS & 0x3F);
             return OF_ERR_TIMEOUT;
+        }
         if ((timeout & 0x3FF) == 0) {
             of_mixer_pump();
             of_audio_drain();
@@ -108,8 +118,11 @@ static int file_wait_complete(void) {
      * the dispatch guard sees target_ack_s still high. */
     timeout = DMA_TIMEOUT;
     while (!(DS_STATUS & DS_STATUS_READY)) {
-        if (--timeout == 0)
+        if (--timeout == 0) {
+            of_term_printf("[bridge timeout READY #%d st=%02x]\n",
+                        file_op_count, DS_STATUS & 0x3F);
             return OF_ERR_TIMEOUT;
+        }
     }
 
     return 0;
