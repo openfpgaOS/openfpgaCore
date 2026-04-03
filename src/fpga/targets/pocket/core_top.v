@@ -1112,11 +1112,14 @@ always @(posedge clk_74a) begin
 end
 
 // ============================================================
-// Bridge CRAM1 Direct Write (clk_74a — no FIFO needed)
+// Bridge CRAM1 Direct Write (clk_74a)
+// Accept immediately (bridge bus must not stall), defer PSRAM
+// access until CDC is idle to prevent response theft.
 // ============================================================
 wire bridge_cram1_wr_detect = bridge_wr && (bridge_addr[31:24] == 8'h30);
 
 reg        bridge_cram1_wr_pending;
+reg        bridge_cram1_wr_deferred;  // accepted but not yet issued to PSRAM
 reg        bridge_cram1_wr_started;
 reg        bridge_cram1_wr_pulse;
 reg [21:0] bridge_cram1_wr_addr;
@@ -1124,13 +1127,29 @@ reg [31:0] bridge_cram1_wr_data;
 
 always @(posedge clk_74a) begin
     bridge_cram1_wr_pulse <= 0;
+
+    // Accept new write request
     if (bridge_cram1_wr_detect && !bridge_cram1_wr_pending) begin
         bridge_cram1_wr_pending <= 1;
         bridge_cram1_wr_started <= 0;
-        bridge_cram1_wr_pulse <= 1;
         bridge_cram1_wr_addr <= bridge_addr[23:2];
         bridge_cram1_wr_data <= bridge_wr_data;
-    end else if (bridge_cram1_wr_pending) begin
+        if (!cdc_psram1_inflight && !psram1_busy) begin
+            bridge_cram1_wr_pulse <= 1;
+            bridge_cram1_wr_deferred <= 0;
+        end else begin
+            bridge_cram1_wr_deferred <= 1;
+        end
+    end
+
+    // Deferred issue: CDC finished, PSRAM idle — now issue
+    if (bridge_cram1_wr_deferred && !cdc_psram1_inflight && !psram1_busy) begin
+        bridge_cram1_wr_pulse <= 1;
+        bridge_cram1_wr_deferred <= 0;
+    end
+
+    // Wait for PSRAM completion (busy HIGH → LOW)
+    if (bridge_cram1_wr_pending && !bridge_cram1_wr_deferred) begin
         if (!bridge_cram1_wr_started && psram1_busy)
             bridge_cram1_wr_started <= 1;
         else if (bridge_cram1_wr_started && !psram1_busy) begin
@@ -1142,6 +1161,7 @@ end
 
 // ============================================================
 // Bridge CRAM1 Direct Read (clk_74a)
+// Same pattern: accept immediately, defer PSRAM access.
 // ============================================================
 reg prev_bridge_rd_for_cram1;
 always @(posedge clk_74a)
@@ -1149,6 +1169,7 @@ always @(posedge clk_74a)
 wire bridge_cram1_rd_detect = !prev_bridge_rd_for_cram1 && bridge_rd && (bridge_addr[31:24] == 8'h30);
 
 reg        bridge_cram1_rd_pending;
+reg        bridge_cram1_rd_deferred;
 reg        bridge_cram1_rd_started;
 reg        bridge_cram1_rd_pulse;
 reg [21:0] bridge_cram1_rd_addr;
@@ -1156,14 +1177,28 @@ reg [31:0] cram1_rd_resp_data;
 
 always @(posedge clk_74a) begin
     bridge_cram1_rd_pulse <= 0;
+
+    // Accept new read request
     if (bridge_cram1_rd_detect && !bridge_cram1_rd_pending && !bridge_cram1_wr_pending) begin
         bridge_cram1_rd_pending <= 1;
         bridge_cram1_rd_started <= 0;
-        bridge_cram1_rd_pulse <= 1;
         bridge_cram1_rd_addr <= bridge_addr[23:2];
-    end else if (bridge_cram1_rd_pending) begin
-        if (!bridge_cram1_rd_started && psram1_busy)
-            bridge_cram1_rd_started <= 1;
+        if (!cdc_psram1_inflight && !psram1_busy) begin
+            bridge_cram1_rd_pulse <= 1;
+            bridge_cram1_rd_deferred <= 0;
+        end else begin
+            bridge_cram1_rd_deferred <= 1;
+        end
+    end
+
+    // Deferred issue
+    if (bridge_cram1_rd_deferred && !cdc_psram1_inflight && !psram1_busy) begin
+        bridge_cram1_rd_pulse <= 1;
+        bridge_cram1_rd_deferred <= 0;
+    end
+
+    // Wait for PSRAM response
+    if (bridge_cram1_rd_pending && !bridge_cram1_rd_deferred) begin
         if (psram1_rdata_valid) begin
             cram1_rd_resp_data <= psram1_rdata;
             bridge_cram1_rd_pending <= 0;
@@ -1185,6 +1220,12 @@ wire [31:0] cdc_cpu_rdata;
 wire        cdc_cpu_busy;
 wire        cdc_cpu_rdata_valid;
 
+// Bridge requesting: same-cycle detection for CDC hold-off
+wire bridge_cram1_requesting = bridge_cram1_wr_detect ||
+    (!prev_bridge_rd_for_cram1 && bridge_rd && (bridge_addr[31:24] == 8'h30));
+
+wire cdc_psram1_inflight;
+
 cpu_psram1_cdc cdc_psram1 (
     .clk_cpu(clk_cpu),
     .cpu_rd(cpu_psram_rd & cpu_psram_sel_cram1),
@@ -1204,10 +1245,12 @@ cpu_psram1_cdc cdc_psram1 (
     .psram_rdata(psram1_rdata),
     .psram_busy(psram1_busy),
     .psram_rdata_valid(psram1_rdata_valid),
-    .bridge_active(bridge_cram1_active)
+    .bridge_active(bridge_cram1_active),
+    .bridge_requesting(bridge_cram1_requesting),
+    .cdc_inflight(cdc_psram1_inflight)
 );
 
-// CRAM1 mux (clk_74a): bridge > CDC'd CPU
+// CRAM1 mux (clk_74a): mutual exclusion between bridge and CDC
 assign psram1_rd = bridge_cram1_rd_pulse ? 1'b1 : bridge_cram1_active ? 1'b0 : cdc_psram1_rd;
 assign psram1_wr = bridge_cram1_wr_pulse ? 1'b1 : bridge_cram1_active ? 1'b0 : cdc_psram1_wr;
 assign psram1_addr = bridge_cram1_wr_pending ? bridge_cram1_wr_addr :

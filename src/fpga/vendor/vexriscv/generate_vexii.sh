@@ -40,13 +40,14 @@ sbt "runMain vexiiriscv.Generate \
       --lsu-software-prefetch --lsu-hardware-prefetch rpt \
       --with-btb --btb-sets=256 --relaxed-btb --relaxed-btb-hit \
       --with-gshare --with-ras \
-      --regfile-async --allow-bypass-from=1 \
-      --relaxed-src \
+      --regfile-async --allow-bypass-from=2 \
+      --relaxed-src --relaxed-branch \
       --reset-vector=0 \
       --region base=0,size=8000,main=1,exe=1 \
       --region base=10000000,size=4000000,main=1,exe=1 \
       --region base=20000000,size=10000000,main=0,exe=0 \
-      --region base=30000000,size=8000000,main=1,exe=1 \
+      --region base=30000000,size=1000000,main=1,exe=1 \
+      --region base=31000000,size=7000000,main=1,exe=0 \
       --region base=38000000,size=8000000,main=0,exe=0 \
       --region base=40000000,size=40000000,main=0,exe=0"
 
@@ -54,7 +55,8 @@ sbt "runMain vexiiriscv.Generate \
 #   0x00000000  32KB  BRAM region    (cached, executable)
 #   0x10000000  64MB  SDRAM          (cached, executable)
 #   0x20000000 256MB  VRAM/reserved  (uncached, non-exec)
-#   0x30000000 128MB  CRAM cached    (cached, executable)
+#   0x30000000  16MB  CRAM0 cached   (cached, executable)
+#   0x31000000 112MB  CRAM1+         (D-cached, non-exec) — read-only cache for bridge DMA data
 #   0x38000000 128MB  CRAM uncached  (uncached, non-exec)
 #   0x40000000   1GB  IO + SDRAM_UC  (uncached, non-exec) — covers 0x50000000 SDRAM uncached alias
 

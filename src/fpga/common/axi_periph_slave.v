@@ -383,12 +383,18 @@ always @(posedge clk) begin
         // Guard: must see signal LOW before accepting HIGH, to prevent
         // capturing stale ACK/DONE from the previous command that
         // hasn't fully deasserted through the CDC yet.
+        //
+        // Note: ds_done_seen_low is NOT gated on ds_ack_latched.
+        // The bridge clears done (DATASLOTOP) before the host ACKs.
+        // If the bridge completes fast, done goes LOW→HIGH before
+        // ACK arrives. Gating on ds_ack_latched would miss the LOW
+        // transition and hang forever waiting for DONE.
         if (ds_cmd_active) begin
             if (!target_ack_s && !ds_ack_latched)
                 ds_ack_seen_low <= 1;
             if (ds_ack_seen_low && target_ack_s && !ds_ack_latched)
                 ds_ack_latched <= 1;
-            if (!target_done_s && ds_ack_latched && !ds_done_latched)
+            if (!target_done_s && !ds_done_latched)
                 ds_done_seen_low <= 1;
             if (ds_done_seen_low && target_done_s && ds_ack_latched && !ds_done_latched) begin
                 ds_done_latched <= 1;
@@ -532,6 +538,17 @@ always @(*) begin
         6'b111011: sysreg_rdata = {19'b0, adma_ring_rptr};
         // Datatable slot size query (0x90): bit 31 = valid, bits 30:0 = data
         6'b100100: sysreg_rdata = {dt_query_valid, dt_query_data[30:0]};
+        // Bridge debug (0x94): internal latch state for diagnosing DMA hangs
+        6'b100101: sysreg_rdata = {24'b0,
+            target_dataslot_read,   // bit 7: command signal (CPU domain)
+            target_done_s,          // bit 6: done CDC output
+            target_ack_s,           // bit 5: ack CDC output
+            ds_done_latched,        // bit 4
+            ds_done_seen_low,       // bit 3
+            ds_ack_latched,         // bit 2
+            ds_ack_seen_low,        // bit 1
+            ds_cmd_active           // bit 0
+        };
         // Audio DMA IRQ registers (0xF0-0xF4)
         6'b111100: sysreg_rdata = {15'b0, adma_irq_enable, 8'b0, adma_threshold};
         6'b111101: sysreg_rdata = {16'b0, 3'b0, audio_fifo_level, 4'b0, adma_irq_pending};

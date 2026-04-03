@@ -174,6 +174,12 @@
 /* Datatable slot size query (0x90) — write slot entry address, read result */
 #define DT_QUERY            REG32(SYSREG_BASE + 0x90)
 
+/* Bridge debug (0x94) — internal latch state for DMA diagnostics
+ * bit 0: ds_cmd_active    bit 1: ds_ack_seen_low   bit 2: ds_ack_latched
+ * bit 3: ds_done_seen_low bit 4: ds_done_latched   bit 5: target_ack_s
+ * bit 6: target_done_s    bit 7: target_dataslot_read */
+#define DS_DEBUG            REG32(SYSREG_BASE + 0x94)
+
 /* Audio DMA IRQ (0xF0-0xF4) */
 #define ADMA_IRQ_CTRL       REG32(SYSREG_BASE + 0xF0)
 #define   ADMA_IRQ_EN       (1 << 16)

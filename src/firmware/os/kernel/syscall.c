@@ -48,16 +48,17 @@ static fd_entry_t fd_table[MAX_FDS];
  * On hit, data is served directly from CRAM1 — no bridge DMA needed.
  * On miss, the LRU entry is evicted and refilled via bridge DMA.
  *
- * Layout in CRAM1 (after save region):
- *   0x39280000 + N*32KB  = entry N data (uncached alias for bridge DMA)
- *   0x31280000 + N*32KB  = entry N data (cached alias for CPU reads)
+ * Bridge DMA writes to CRAM1 (PSRAM bus, zero SDRAM contention).
+ * CPU reads via the 0x31 cached alias — D-cache fills on first
+ * access (one CDC read per 64B line), then all hits are single-cycle.
+ * Lines are read-only (CPU never writes to 0x31), so eviction just
+ * drops clean lines — no CDC writeback, no bridge contention.
  * ====================================================================== */
 
 #define IO_CACHE_ENTRIES    8
 #define IO_CACHE_BLOCK_SIZE (32 * 1024)
-#define IO_CACHE_BASE_UC   0x39300000   /* uncached: bridge DMA target */
-#define IO_CACHE_BASE_C    0x31300000   /* cached: CPU read path */
-#define IO_CACHE_BRIDGE    0x30300000   /* bridge address for DMA */
+#define IO_CACHE_CACHED     0x31300000  /* CRAM1 cached alias (CPU D-cache reads) */
+#define IO_CACHE_BRIDGE     0x30300000  /* CRAM1 bridge address (DMA target) */
 
 typedef struct {
     uint32_t slot_id;       /* data slot this block belongs to */
@@ -96,29 +97,25 @@ static int io_cache_evict(void) {
     return best;
 }
 
-/* Get the cached-alias pointer for entry N */
+/* Get pointer to entry N's D-cached CRAM1 data */
 static inline const uint8_t *io_cache_data(int entry) {
-    return (const uint8_t *)(IO_CACHE_BASE_C + entry * IO_CACHE_BLOCK_SIZE);
+    return (const uint8_t *)(IO_CACHE_CACHED + entry * IO_CACHE_BLOCK_SIZE);
 }
 
-/* Fill a cache entry via bridge DMA directly to CRAM1.
- * Bypasses of_file_read to avoid its SDRAM cache flush — the DMA
- * target is uncached CRAM1 (PSRAM bus), so no CPU cache lines
- * need eviction. This keeps the SDRAM bus idle during bridge DMA. */
+/* Fill a cache entry: bridge DMA → CRAM1, invalidate D-cache, done.
+ * No CPU copy needed — reads go through D-cache on the 0x31 alias. */
 static int io_cache_fill(int entry, uint32_t slot_id,
                           uint32_t aligned_off, uint32_t fill) {
     uint32_t bridge_dst = IO_CACHE_BRIDGE + entry * IO_CACHE_BLOCK_SIZE;
-    void *cached_ptr = (void *)(IO_CACHE_BASE_C + entry * IO_CACHE_BLOCK_SIZE);
+    void *cached_ptr = (void *)(IO_CACHE_CACHED + entry * IO_CACHE_BLOCK_SIZE);
 
-    /* Invalidate cached alias so CPU sees fresh DMA data */
+    /* Invalidate D-cache BEFORE DMA so no stale lines remain */
     of_cache_inval_range(cached_ptr, fill);
 
-    /* Bridge DMA: SD card → CRAM1 (PSRAM bus, zero SDRAM contention).
-     * Uses raw DMA — no cache flush needed for uncached CRAM1 target. */
     int rc = of_file_read_raw(slot_id, aligned_off, bridge_dst, fill);
     if (rc < 0) return rc;
 
-    /* Invalidate cached alias again — bridge wrote behind D-cache */
+    /* Invalidate AFTER DMA — bridge wrote CRAM1 behind D-cache */
     of_cache_inval_range(cached_ptr, fill);
 
     io_cache[entry].slot_id = slot_id;
@@ -673,14 +670,9 @@ static long of_save_syscall(long n, long a0, long a1, long a2, long a3) {
 
 long syscall_dispatch(long n, long a0, long a1, long a2,
                       long a3, long a4, long a5) {
-    /* Check for shutdown handshake on every syscall entry */
-    of_check_shutdown();
-
-    /* Auto-pump mixer on syscall entry — keeps audio alive during
-     * blocking operations. Skip video/audio syscalls to avoid
-     * delaying frame flips and causing FB flicker. */
-    if (n < 0x1000 || n >= 0x1020)
-        of_mixer_pump_auto();
+    /* Mixer auto-pump and shutdown check removed — SDRAM writes from of_mixer_pump
+     * cause bus contention that stalls bridge DMA and PSRAM writebacks.
+     * Apps that need continuous audio should pump explicitly. */
 
     switch (n) {
     case SYS_brk:           return sys_brk(a0);

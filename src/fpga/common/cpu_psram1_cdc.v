@@ -34,8 +34,10 @@ module cpu_psram1_cdc (
     input  wire        psram_busy,
     input  wire        psram_rdata_valid,
 
-    // Bridge activity (clk_74a domain) — hold off CPU when bridge is active
-    input  wire        bridge_active
+    // Bridge coordination (clk_74a domain)
+    input  wire        bridge_active,      // hold off CPU when bridge owns PSRAM
+    input  wire        bridge_requesting,  // same-cycle bridge request detection
+    output wire        cdc_inflight        // CDC has a PSRAM request in flight
 );
 
 // ============================================
@@ -119,6 +121,8 @@ localparam P_DONE    = 2'd3;
 reg [1:0] p_state;
 reg       p_started;
 
+assign cdc_inflight = (p_state != P_IDLE);
+
 always @(posedge clk_74a) begin
     psram_rd <= 1'b0;  // default: deassert
     psram_wr <= 1'b0;
@@ -126,8 +130,9 @@ always @(posedge clk_74a) begin
     case (p_state)
 
     P_IDLE: begin
-        // New request? req_toggle (synced) differs from ack_toggle
-        if (req_seen != ack_toggle && !bridge_active && !psram_busy) begin
+        // New request? req_toggle (synced) differs from ack_toggle.
+        // Hold off if bridge is active OR requesting on this cycle.
+        if (req_seen != ack_toggle && !bridge_active && !bridge_requesting && !psram_busy) begin
             psram_addr  <= lat_addr;
             psram_wdata <= lat_wdata;
             psram_wstrb <= lat_wstrb;

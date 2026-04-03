@@ -86,7 +86,7 @@ static int file_wait_complete(void) {
             return OF_ERR_TIMEOUT;
         }
         if ((timeout & 0xFFFFF) == 0)
-            of_term_printf(".");  /* heartbeat: visible every ~10ms */
+            of_term_printf(".");
         if ((timeout & 0x3FF) == 0)
             call_idle_hook();
     }
