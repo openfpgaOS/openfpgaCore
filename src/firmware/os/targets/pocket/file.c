@@ -82,12 +82,13 @@ static int file_wait_complete(void) {
     timeout = DMA_TIMEOUT;
     while (!(DS_STATUS & DS_STATUS_ACK)) {
         if (--timeout == 0) {
-            of_term_printf("[bridge timeout ACK #%d st=%02x]\n",
+            of_term_printf("[ACK timeout #%d st=%02x]\n",
                         file_op_count, DS_STATUS & 0x3F);
             return OF_ERR_TIMEOUT;
         }
+        if ((timeout & 0xFFFFF) == 0)
+            of_term_printf(".");  /* heartbeat: visible every ~10ms */
         if ((timeout & 0x3FF) == 0) {
-            of_mixer_pump();
             of_audio_drain();
             call_idle_hook();
         }
@@ -102,7 +103,6 @@ static int file_wait_complete(void) {
             return OF_ERR_TIMEOUT;
         }
         if ((timeout & 0x3FF) == 0) {
-            of_mixer_pump();
             of_audio_drain();
             call_idle_hook();
         }
@@ -178,6 +178,17 @@ int of_file_read(uint32_t slot_id, uint32_t slot_offset,
 
     of_cache_flush_range(dest, length);
 
+    /* Wait for bridge to be idle before issuing a new command.
+     * Without this, the FPGA dispatch guard silently drops the command
+     * if target_ack_s is still high from a previous operation (CDC lag),
+     * and file_wait_complete hangs waiting for an ACK that never comes. */
+    {
+        uint32_t wait = DMA_TIMEOUT;
+        while (!(DS_STATUS & DS_STATUS_READY)) {
+            if (--wait == 0) return OF_ERR_TIMEOUT;
+        }
+    }
+
     DS_SLOT_ID     = slot_id;
     DS_SLOT_OFFSET = slot_offset;
     DS_BRIDGE_ADDR = bridge_addr;
@@ -196,11 +207,12 @@ int of_file_read(uint32_t slot_id, uint32_t slot_offset,
  * operation that writes to CRAM. The bridge bypasses the CPU
  * entirely, so cached reads would return stale data. */
 void of_file_inval_cram(uint32_t bridge_addr, uint32_t length) {
-    /* Bridge addresses 0x00000000-0x00FFFFFF map to CRAM0 (CPU 0x30000000)
+    /* Bridge addresses 0x20000000-0x20FFFFFF map to CRAM0 (CPU 0x30000000)
      * Bridge addresses 0x30000000-0x30FFFFFF map to CRAM1 (CPU 0x31000000)
      * Invalidate the cached alias so CPU reads see fresh bridge data. */
-    if (bridge_addr < 0x01000000) {
-        of_cache_inval_range((void *)(CRAM0_BASE + bridge_addr), length);
+    if (bridge_addr >= 0x20000000 && bridge_addr < 0x21000000) {
+        uint32_t offset = bridge_addr - 0x20000000;
+        of_cache_inval_range((void *)(CRAM0_BASE + offset), length);
     } else if (bridge_addr >= 0x30000000 && bridge_addr < 0x31000000) {
         uint32_t offset = bridge_addr - 0x30000000;
         of_cache_inval_range((void *)(CRAM1_BASE + offset), length);
@@ -208,8 +220,32 @@ void of_file_inval_cram(uint32_t bridge_addr, uint32_t length) {
 }
 
 long of_file_size(uint32_t slot_id) {
-    (void)slot_id;
-    return -1;  /* TODO: implement via Chip32 register bank */
+    /* Read file size from APF datatable via hardware query register.
+     * Datatable layout: each data slot has 2 entries (flags, size).
+     * Slot N size is at entry N*2+1.  Entries 15+ are save slot sizes,
+     * so only data slots 0-6 (entries 0-13) are valid. */
+    if (slot_id > 6)
+        return -1;
+
+    /* Toggle-based CDC: writing DT_QUERY flips a toggle bit. The
+     * clk_74a domain detects the change, reads the datatable BRAM,
+     * and tags the result with the captured toggle. The result
+     * register reads {toggle_match[31], size[30:0]} — bit 31 is
+     * high only when the result corresponds to THIS query. */
+    DT_QUERY = slot_id * 2 + 1;
+
+    /* Poll until bit 31 (toggle match) indicates fresh result */
+    uint32_t val;
+    for (int i = 0; i < 1000; i++) {
+        val = DT_QUERY;
+        if (val & 0x80000000)
+            break;
+    }
+    if (!(val & 0x80000000))
+        return -1;
+
+    uint32_t size = val & 0x7FFFFFFF;
+    return (size > 0) ? (long)size : -1;
 }
 
 /*
@@ -225,6 +261,14 @@ int of_file_get_name(uint32_t slot_id, char *name_out, uint32_t name_max) {
         ((volatile uint32_t *)DMA_BUFFER)[i] = 0;
 
     fence();
+
+    /* Wait for bridge idle */
+    {
+        uint32_t wait = DMA_TIMEOUT;
+        while (!(DS_STATUS & DS_STATUS_READY)) {
+            if (--wait == 0) return OF_ERR_TIMEOUT;
+        }
+    }
 
     /* The response struct is at bridge address of DMA_BUFFER.
      * APF writes: offset 0 = status, offset 4+ = filename (null-terminated) */
@@ -257,6 +301,14 @@ int of_file_get_name(uint32_t slot_id, char *name_out, uint32_t name_max) {
 }
 
 int of_file_slot_write(uint32_t slot_id, uint32_t bridge_addr, uint32_t length) {
+    /* Wait for bridge idle before issuing command */
+    {
+        uint32_t wait = DMA_TIMEOUT;
+        while (!(DS_STATUS & DS_STATUS_READY)) {
+            if (--wait == 0) return OF_ERR_TIMEOUT;
+        }
+    }
+
     DS_SLOT_ID     = slot_id;
     DS_SLOT_OFFSET = 0;
     DS_BRIDGE_ADDR = bridge_addr;
@@ -268,6 +320,14 @@ int of_file_slot_write(uint32_t slot_id, uint32_t bridge_addr, uint32_t length) 
 
 int of_file_slot_write_at(uint32_t slot_id, uint32_t slot_offset,
                            uint32_t bridge_addr, uint32_t length) {
+    /* Wait for bridge idle before issuing command */
+    {
+        uint32_t wait = DMA_TIMEOUT;
+        while (!(DS_STATUS & DS_STATUS_READY)) {
+            if (--wait == 0) return OF_ERR_TIMEOUT;
+        }
+    }
+
     DS_SLOT_ID     = slot_id;
     DS_SLOT_OFFSET = slot_offset;
     DS_BRIDGE_ADDR = bridge_addr;

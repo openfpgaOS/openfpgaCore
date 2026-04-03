@@ -223,6 +223,8 @@ static long sys_read(long fd, long buf, long count) {
         long sz = of_file_size(f->slot_id);
         if (sz > 0)
             f->size = (uint32_t)sz;
+        else
+            return 0;  /* slot has no data — EOF immediately */
     }
 
     uint32_t to_read = (uint32_t)count;
@@ -912,32 +914,6 @@ long syscall_dispatch(long n, long a0, long a1, long a2,
         return of_lzw_compress((const uint8_t *)a0, (int32_t)a1, (uint8_t *)a2);
     if (n == OF_SYS_LZW_UNCOMPRESS)
         return of_lzw_uncompress((const uint8_t *)a0, (int32_t)a1, (uint8_t *)a2);
-
-    /* DMA engine syscalls (0x10F0+) */
-    if (n == OF_SYS_DMA_COPY) {
-        dma_copy((void *)a0, (const void *)a1, (uint32_t)a2);
-        return 0;
-    }
-    if (n == OF_SYS_DMA_FILL) {
-        dma_fill((void *)a0, (uint32_t)a1, (uint32_t)a2);
-        return 0;
-    }
-    if (n == OF_SYS_DMA_COPY_ASYNC) {
-        dma_copy_async((void *)a0, (const void *)a1, (uint32_t)a2);
-        return 0;
-    }
-    if (n == OF_SYS_DMA_FILL_ASYNC) {
-        dma_fill_async((void *)a0, (uint32_t)a1, (uint32_t)a2);
-        return 0;
-    }
-    if (n == OF_SYS_DMA_WAIT) {
-        dma_wait();
-        /* Evict D-cache so CPU sees DMA-written data */
-        of_cache_flush_dcache();
-        return 0;
-    }
-    if (n == OF_SYS_DMA_BUSY)
-        return (DMA_STATUS & DMA_STATUS_BUSY) ? 1 : 0;
 
     return -ENOSYS;
 }
