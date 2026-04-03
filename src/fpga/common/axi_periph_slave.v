@@ -55,6 +55,9 @@ module axi_periph_slave (
     input wire         target_dataslot_done,
     input wire [2:0]   target_dataslot_err,
 
+    // Bridge write drain status (for pacing DMA reads)
+    input wire         bridge_wr_idle,
+
     // Terminal memory interface
     output wire        term_mem_valid,
     output wire [31:0] term_mem_addr,
@@ -88,7 +91,7 @@ module axi_periph_slave (
     // Audio output interface
     output reg         audio_sample_wr,
     output reg  [31:0] audio_sample_data,
-    input wire  [7:0]  audio_fifo_level,
+    input wire  [8:0]  audio_fifo_level,
     input wire         audio_fifo_full,
 
     // Link MMIO interface
@@ -143,9 +146,12 @@ module axi_periph_slave (
 
     // Audio DMA IRQ
     output reg         adma_irq_enable,
-    output reg  [7:0]  adma_threshold,
+    output reg  [8:0]  adma_threshold,
     input  wire        adma_irq_pending,
     output reg         adma_irq_clear,
+
+    // Hardware timer interrupt
+    output wire        timer_irq,
 
     // Datatable slot size query (toggle-based CDC to clk_74a)
     output reg  [9:0]  dt_query_addr,
@@ -239,6 +245,13 @@ reg [31:0] ds_param_addr_reg;
 reg [31:0] ds_resp_addr_reg;
 
 reg [7:0] pal_index_reg;
+
+// Hardware timer — countdown with auto-reload
+reg [31:0] timer_period;
+reg [31:0] timer_counter;
+reg        timer_enable;
+reg        timer_irq_pending;
+assign timer_irq = timer_irq_pending & timer_enable;
 
 // Triple-buffered framebuffer
 localparam FB_ADDR_0 = 25'h0000000;
@@ -365,6 +378,10 @@ always @(posedge clk) begin
         adma_irq_enable <= 0;
         adma_threshold <= 0;
         adma_irq_clear <= 0;
+        timer_period <= 0;
+        timer_counter <= 0;
+        timer_enable <= 0;
+        timer_irq_pending <= 0;
         dt_query_addr <= 0;
         dt_query_toggle <= 0;
     end else begin
@@ -372,6 +389,16 @@ always @(posedge clk) begin
         pal_wr <= 0;
         save_dt_commit <= 0;
         adma_irq_clear <= 0;
+
+        // Hardware timer countdown
+        if (timer_enable && timer_period != 0) begin
+            if (timer_counter == 0) begin
+                timer_counter <= timer_period - 1;
+                timer_irq_pending <= 1;
+            end else begin
+                timer_counter <= timer_counter - 1;
+            end
+        end
 
         if (target_ack_s) begin
             target_dataslot_read <= 0;
@@ -466,6 +493,16 @@ always @(posedge clk) begin
                     shutdown_ack <= req_wdata[0];
                 end
 
+                // Hardware timer (0xB4-0xB8)
+                6'b101101: begin  // TIMER_PERIOD (0xB4)
+                    timer_period <= req_wdata;
+                    timer_counter <= req_wdata - 1;
+                end
+                6'b101110: begin  // TIMER_CTRL (0xB8)
+                    timer_enable <= req_wdata[0];
+                    if (req_wdata[1]) timer_irq_pending <= 0;
+                end
+
                 // Datatable slot size query (0x90)
                 6'b100100: begin
                     dt_query_addr <= req_wdata[9:0];
@@ -483,7 +520,7 @@ always @(posedge clk) begin
 
                 // Audio DMA IRQ registers (0xF0-0xF4)
                 6'b111100: begin
-                    adma_threshold <= req_wdata[7:0];
+                    adma_threshold <= req_wdata[8:0];
                     adma_irq_enable <= req_wdata[16];
                 end
                 6'b111101: adma_irq_clear <= req_wdata[0];
@@ -518,7 +555,7 @@ always @(*) begin
         6'b001100: sysreg_rdata = ds_param_addr_reg;
         6'b001101: sysreg_rdata = ds_resp_addr_reg;
         6'b001110: sysreg_rdata = 32'h0;
-        6'b001111: sysreg_rdata = {26'b0, ~target_ack_s, ds_err_latched, ds_done_latched, ds_ack_latched};
+        6'b001111: sysreg_rdata = {25'b0, bridge_wr_idle, ~target_ack_s, ds_err_latched, ds_done_latched, ds_ack_latched};
         6'b010000: sysreg_rdata = {24'b0, pal_index_reg};
         6'b010001: sysreg_rdata = 32'h0;
         6'b010100: sysreg_rdata = cont1_key_s;
@@ -531,6 +568,10 @@ always @(*) begin
         // Tile/sprite registers (readback) — return 0, engines removed
         // Shutdown handshake
         6'b101100: sysreg_rdata = {31'b0, shutdown_pending};  // SYS_SHUTDOWN (0xB0)
+        // Hardware timer (0xB4-0xBC)
+        6'b101101: sysreg_rdata = timer_period;
+        6'b101110: sysreg_rdata = {30'b0, timer_irq_pending, timer_enable};
+        6'b101111: sysreg_rdata = timer_counter;
         // Audio DMA registers (0xE0-0xEC)
         6'b111000: sysreg_rdata = adma_ring_base;
         6'b111001: sysreg_rdata = {15'b0, adma_enable, 3'b0, adma_ring_size_log};
@@ -550,8 +591,8 @@ always @(*) begin
             ds_cmd_active           // bit 0
         };
         // Audio DMA IRQ registers (0xF0-0xF4)
-        6'b111100: sysreg_rdata = {15'b0, adma_irq_enable, 8'b0, adma_threshold};
-        6'b111101: sysreg_rdata = {16'b0, 3'b0, audio_fifo_level, 4'b0, adma_irq_pending};
+        6'b111100: sysreg_rdata = {15'b0, adma_irq_enable, 7'b0, adma_threshold};
+        6'b111101: sysreg_rdata = {16'b0, 2'b0, audio_fifo_level, 4'b0, adma_irq_pending};
         default: sysreg_rdata = 32'h0;
     endcase
 end
@@ -598,7 +639,7 @@ wire [31:0] uart_rdata = (req_addr[3:2] == 2'b00) ? {14'b0, uart_rx_count, 5'b0,
                           32'h0;
 
 wire [31:0] periph_rd_mux = reg_sysreg ? sysreg_rdata :
-                             reg_audio  ? {23'b0, audio_fifo_full, audio_fifo_level} :
+                             reg_audio  ? {22'b0, audio_fifo_full, audio_fifo_level} :
                              reg_link   ? link_reg_rdata :
                              reg_uart   ? uart_rdata :
                              32'h0;

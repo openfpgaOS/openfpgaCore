@@ -201,7 +201,9 @@ memset:
     andi    t1, a0, 3
     bnez    t1, .Lset_byte
 
-    /* Zero fill with cbo.zero — only for c==0, cached, aligned, >= 64B */
+    /* cbo.zero disabled — investigating D-cache stall on CRAM1 reads.
+     * Fall through to plain stores for all fills including zero. */
+    j       .Lset_sw_enter
     bnez    a1, .Lset_sw_enter
     li      t1, 64
     bltu    a2, t1, .Lset_sw_enter

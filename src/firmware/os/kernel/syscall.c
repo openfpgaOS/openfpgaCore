@@ -15,6 +15,23 @@ extern void *dlrealloc(void *, size_t);
 extern void *dlcalloc(size_t, size_t);
 
 /* ======================================================================
+ * Timer / Signal state
+ * ====================================================================== */
+
+#define SIGALRM 14
+
+static void (*sigalrm_handler)(int) = NULL;
+static void (*timer_callback)(void) = NULL;
+
+/* Called from irq_handler() on machine timer interrupt */
+void timer_isr_callback(void) {
+    if (timer_callback)
+        timer_callback();
+    if (sigalrm_handler)
+        sigalrm_handler(SIGALRM);
+}
+
+/* ======================================================================
  * File descriptor table
  * ====================================================================== */
 
@@ -705,8 +722,48 @@ long syscall_dispatch(long n, long a0, long a1, long a2,
     case SYS_gettid:        return 1;
     case SYS_set_tid_address: return 1;
 
-    case SYS_rt_sigaction:   return 0;
+    case SYS_rt_sigaction: {
+        /* a0=signum, a1=act, a2=oldact, a3=sigsetsize */
+        if (a0 == SIGALRM) {
+            if (a2) {
+                uint32_t *old = (uint32_t *)a2;
+                old[0] = (uint32_t)(uintptr_t)sigalrm_handler;
+            }
+            if (a1) {
+                uint32_t *act = (uint32_t *)a1;
+                sigalrm_handler = (void (*)(int))(uintptr_t)act[0];
+            }
+        }
+        return 0;
+    }
     case SYS_rt_sigprocmask: return 0;
+
+    case SYS_setitimer: {
+        /* a0=which (ITIMER_REAL=0), a1=new itimerval, a2=old itimerval */
+        if (a0 != 0) return -EINVAL;
+        if (a2) memset((void *)a2, 0, 16);  /* zero old value */
+        if (a1) {
+            uint32_t *nv = (uint32_t *)a1;
+            uint32_t sec  = nv[0];  /* it_interval.tv_sec */
+            uint32_t usec = nv[1];  /* it_interval.tv_usec */
+            uint64_t cycles = (uint64_t)sec * CPU_FREQ_HZ
+                            + (uint64_t)usec * (CPU_FREQ_HZ / 1000000);
+            if (cycles == 0) {
+                /* Check it_value too */
+                sec  = nv[2];
+                usec = nv[3];
+                cycles = (uint64_t)sec * CPU_FREQ_HZ
+                       + (uint64_t)usec * (CPU_FREQ_HZ / 1000000);
+            }
+            if (cycles == 0) {
+                TIMER_CTRL = 0;  /* disarm */
+            } else {
+                TIMER_PERIOD = (uint32_t)(cycles > 0xFFFFFFFF ? 0xFFFFFFFF : cycles);
+                TIMER_CTRL = TIMER_CTRL_ENABLE;
+            }
+        }
+        return 0;
+    }
 
     case SYS_statx: {
         /* Minimal statx: musl on riscv32 uses this instead of fstat.
@@ -797,6 +854,21 @@ long syscall_dispatch(long n, long a0, long a1, long a2,
     }
     if (n == OF_SYS_TIMER_DELAY_MS) {
         of_timer_delay_ms((uint32_t)a0);
+        return 0;
+    }
+    if (n == OF_SYS_TIMER_SET_CALLBACK) {
+        timer_callback = (void (*)(void))a0;
+        if (a0 && a1 > 0) {
+            TIMER_PERIOD = CPU_FREQ_HZ / (uint32_t)a1;
+            TIMER_CTRL = TIMER_CTRL_ENABLE;
+        } else {
+            TIMER_CTRL = 0;
+        }
+        return 0;
+    }
+    if (n == OF_SYS_TIMER_STOP) {
+        TIMER_CTRL = 0;
+        timer_callback = NULL;
         return 0;
     }
 

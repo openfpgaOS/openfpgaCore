@@ -776,7 +776,7 @@ wire        psram_mux_rdata_valid;
 // Audio output interface
 wire        audio_sample_wr;
 wire [31:0] audio_sample_data;
-wire [7:0]  audio_fifo_level;
+wire [8:0]  audio_fifo_level;
 wire        audio_fifo_full;
 
 // OPL3 (YMF262) hardware interface
@@ -1197,9 +1197,9 @@ always @(posedge clk_74a) begin
         bridge_cram1_rd_deferred <= 0;
     end
 
-    // Wait for PSRAM response
+    // Wait for PSRAM response (filtered to bridge-owned reads only)
     if (bridge_cram1_rd_pending && !bridge_cram1_rd_deferred) begin
-        if (psram1_rdata_valid) begin
+        if (psram1_rdata_valid_for_bridge) begin
             cram1_rd_resp_data <= psram1_rdata;
             bridge_cram1_rd_pending <= 0;
             bridge_cram1_rd_started <= 0;
@@ -1244,14 +1244,35 @@ cpu_psram1_cdc cdc_psram1 (
     .psram_wstrb(cdc_psram1_wstrb),
     .psram_rdata(psram1_rdata),
     .psram_busy(psram1_busy),
-    .psram_rdata_valid(psram1_rdata_valid),
+    .psram_rdata_valid(psram1_rdata_valid_for_cdc),
     .bridge_active(bridge_cram1_active),
     .bridge_requesting(bridge_cram1_requesting),
     .cdc_inflight(cdc_psram1_inflight)
 );
 
-// CRAM1 mux (clk_74a): mutual exclusion between bridge and CDC
-assign psram1_rd = bridge_cram1_rd_pulse ? 1'b1 : bridge_cram1_active ? 1'b0 : cdc_psram1_rd;
+// CRAM1 mux (clk_74a): ownership tracking prevents response theft.
+// Track who owns the current in-flight PSRAM read. Set on the cycle
+// psram1_rd fires, locked until rdata_valid returns.
+reg        psram1_rd_owner;     // 0=CDC, 1=bridge
+reg        psram1_rd_inflight;  // a read is being processed by PSRAM
+always @(posedge clk_74a) begin
+    if (!psram1_rd_inflight && psram1_rd) begin
+        psram1_rd_inflight <= 1'b1;
+        psram1_rd_owner <= bridge_cram1_rd_pulse;
+    end
+    if (psram1_rdata_valid)
+        psram1_rd_inflight <= 1'b0;
+end
+
+// Filter rdata_valid to the locked owner — no response theft
+wire psram1_rdata_valid_for_cdc    = psram1_rdata_valid && !psram1_rd_owner;
+wire psram1_rdata_valid_for_bridge = psram1_rdata_valid &&  psram1_rd_owner;
+
+// Block new reads while one is inflight
+assign psram1_rd = psram1_rd_inflight ? 1'b0
+                 : bridge_cram1_rd_pulse ? 1'b1
+                 : bridge_cram1_active ? 1'b0
+                 : cdc_psram1_rd;
 assign psram1_wr = bridge_cram1_wr_pulse ? 1'b1 : bridge_cram1_active ? 1'b0 : cdc_psram1_wr;
 assign psram1_addr = bridge_cram1_wr_pending ? bridge_cram1_wr_addr :
                      bridge_cram1_rd_pending ? bridge_cram1_rd_addr : cdc_psram1_addr;
@@ -2033,7 +2054,8 @@ assign video_hs = vidout_hs;
         .m_local_wlast(cpu_m_local_wlast),
         .m_local_bvalid(cpu_m_local_bvalid),
         .m_local_bresp(cpu_m_local_bresp),
-        .int_m_external(adma_irq)
+        .int_m_external(adma_irq),
+        .int_m_timer(timer_irq)
     );
 
     // AXI4 peripheral slave
@@ -2071,6 +2093,7 @@ assign video_hs = vidout_hs;
         .cont2_key(p2_controls),
         .cont2_joy(p2_joypad),
         .cont2_trig(p2_trigger),
+        .bridge_wr_idle(bridge_wr_idle),
         .target_dataslot_ack(target_dataslot_ack),
         .target_dataslot_done(target_dataslot_done_safe),
         .target_dataslot_err(target_dataslot_err),
@@ -2158,6 +2181,7 @@ assign video_hs = vidout_hs;
         .adma_threshold(adma_threshold),
         .adma_irq_pending(adma_irq_pending),
         .adma_irq_clear(adma_irq_clear),
+        .timer_irq(timer_irq),
         // Datatable slot size query
         .dt_query_addr(cpu_dt_query_addr),
         .dt_query_toggle(cpu_dt_query_toggle),
@@ -2590,10 +2614,11 @@ wire [31:0] adma_m_rdata;
 wire [1:0]  adma_m_rresp;
 wire        adma_m_rlast;
 wire        adma_irq_enable;
-wire [7:0]  adma_threshold;
+wire [8:0]  adma_threshold;
 wire        adma_irq_clear;
 wire        adma_irq;
 wire        adma_irq_pending = adma_irq;
+wire        timer_irq;
 
 wire        audio_mux_wr = adma_enable ? adma_sample_wr : audio_sample_wr;
 wire [31:0] audio_mux_data = adma_enable ? adma_sample_data : audio_sample_data;

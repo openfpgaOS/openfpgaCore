@@ -120,6 +120,7 @@
 #define   DS_STATUS_ERR_MASK 0x1C   /* bits [4:2] */
 #define   DS_STATUS_ERR_SHIFT 2
 #define   DS_STATUS_READY   (1 << 5)  /* live: bridge idle, ready for new command */
+#define   DS_STATUS_WR_IDLE (1 << 6)  /* live: all bridge writes drained to memory */
 
 /* Palette (256-color indexed) */
 #define PAL_INDEX           REG32(SYSREG_BASE + 0x40)
@@ -164,6 +165,13 @@
 #define   SHUTDOWN_PENDING  (1 << 0)    /* Read: bridge requests shutdown */
 #define   SHUTDOWN_ACK      (1 << 0)    /* Write: CPU acknowledges shutdown */
 
+/* Hardware timer (0xB4-0xBC) — countdown with auto-reload, drives int_m_timer */
+#define TIMER_PERIOD        REG32(SYSREG_BASE + 0xB4)  /* Reload value (CPU cycles) */
+#define TIMER_CTRL          REG32(SYSREG_BASE + 0xB8)  /* [0]=enable, [1]=irq_pending (W1C) */
+#define TIMER_COUNTER       REG32(SYSREG_BASE + 0xBC)  /* Current countdown (read-only) */
+#define   TIMER_CTRL_ENABLE   (1 << 0)
+#define   TIMER_CTRL_W1C_IRQ  (1 << 1)
+
 /* Audio DMA engine (0xE0) — reads from SDRAM ring buffer, feeds audio FIFO */
 #define ADMA_RING_BASE      REG32(SYSREG_BASE + 0xE0)  /* SDRAM byte address of ring */
 #define ADMA_RING_CFG       REG32(SYSREG_BASE + 0xE4)  /* [12:0]=size_log2, [16]=enable */
@@ -201,9 +209,9 @@
 #define AUDIO_BASE          0x4C000000
 #define AUDIO_SAMPLE        REG32(AUDIO_BASE + 0x00)    /* Write: stereo sample */
 #define AUDIO_STATUS        REG32(AUDIO_BASE + 0x00)    /* Read: FIFO status */
-#define   AUDIO_FIFO_LEVEL_MASK  0xFF                   /* bits [7:0] */
-#define   AUDIO_FIFO_FULL        (1 << 8)
-#define AUDIO_FIFO_DEPTH    256
+#define   AUDIO_FIFO_LEVEL_MASK  0x1FF                  /* bits [8:0] */
+#define   AUDIO_FIFO_FULL        (1 << 9)
+#define AUDIO_FIFO_DEPTH    512
 
 /* ======================================================================
  * Link Cable (0x4D000000)

@@ -90,9 +90,21 @@ SRAM_TOP = tb_sram
 SRAM_DIR = obj_dir_sram
 
 # ============================================================
+# CRAM1 CDC (bridge collision test)
+# ============================================================
+CDC_SRCS = \
+	tb_cram1_cdc.v \
+	psram_word_model.v \
+	$(COMMON_DIR)/cpu_psram1_cdc.v
+
+CDC_CPP = tb_cram1_cdc_main.cpp
+CDC_TOP = tb_cram1_cdc
+CDC_DIR = obj_dir_cdc
+
+# ============================================================
 # Targets
 # ============================================================
-.PHONY: all sdram psram psram-rtl sram run run-psram run-sram build clean
+.PHONY: all sdram psram psram-rtl sram cdc run run-psram run-sram build clean
 
 all: sdram psram sram
 # psram-rtl disabled: requires burst write ports not in current RTL
@@ -137,6 +149,14 @@ $(SRAM_DIR)/V$(SRAM_TOP): $(SRAM_SRCS) $(SRAM_CPP)
 
 run-sram: sram
 
+# --- CRAM1 CDC ---
+cdc: $(CDC_DIR)/V$(CDC_TOP)
+	./$(CDC_DIR)/V$(CDC_TOP)
+
+$(CDC_DIR)/V$(CDC_TOP): $(CDC_SRCS) $(CDC_CPP)
+	$(VERILATOR) $(VERILATOR_FLAGS) --timing --top-module $(CDC_TOP) --Mdir $(CDC_DIR) \
+		$(CDC_SRCS) $(CDC_CPP)
+
 # --- Clean ---
 clean:
-	rm -rf $(SDRAM_DIR) $(PSRAM_DIR) $(PSRAM_RTL_DIR) $(SRAM_DIR) io_sdram_test.v psram_test.sv psram_controller_test.v
+	rm -rf $(SDRAM_DIR) $(PSRAM_DIR) $(PSRAM_RTL_DIR) $(SRAM_DIR) $(CDC_DIR) io_sdram_test.v psram_test.sv psram_controller_test.v

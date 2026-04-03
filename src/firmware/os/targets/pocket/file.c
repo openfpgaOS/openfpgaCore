@@ -115,7 +115,20 @@ static int file_wait_complete(void) {
     while (!(DS_STATUS & DS_STATUS_READY)) {
         if (--timeout == 0) {
             of_term_printf("[bridge timeout READY #%d st=%02x]\n",
-                        file_op_count, DS_STATUS & 0x3F);
+                        file_op_count, DS_STATUS & 0x7F);
+            return OF_ERR_TIMEOUT;
+        }
+    }
+
+    /* Wait for all bridge write data to drain to memory.
+     * READY means the command state machine is idle, but SDRAM skid
+     * buffer and CRAM write queues may still have pending data.
+     * WR_IDLE = skid empty + bridge master idle + CRAM0/CRAM1 idle. */
+    timeout = DMA_TIMEOUT;
+    while (!(DS_STATUS & DS_STATUS_WR_IDLE)) {
+        if (--timeout == 0) {
+            of_term_printf("[bridge timeout WR_IDLE #%d st=%02x]\n",
+                        file_op_count, DS_STATUS & 0x7F);
             return OF_ERR_TIMEOUT;
         }
     }

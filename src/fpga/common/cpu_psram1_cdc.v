@@ -147,7 +147,9 @@ always @(posedge clk_74a) begin
 
     P_WAIT: begin
         // Wait for psram_controller handshake: busy rises then falls (write),
-        // or rdata_valid pulses (read)
+        // or rdata_valid pulses (read).
+        // Only accept rdata_valid when bridge is NOT active — if bridge
+        // is active, the response belongs to the bridge, not us.
         if (!p_started && psram_busy)
             p_started <= 1'b1;
 
