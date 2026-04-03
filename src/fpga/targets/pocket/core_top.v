@@ -1839,7 +1839,13 @@ wire shutdown_pending_cpu;
 wire shutdown_ack_74a;
 
 synch_3 sync_shutdown_pending(shutdown_pending_74a, shutdown_pending_cpu, clk_ram_controller);
-synch_3 sync_shutdown_ack(shutdown_ack_cpu, shutdown_ack_74a, clk_74a);
+
+// Auto-ack shutdown: OR the CPU's ack with shutdown_pending itself.
+// This gives the bridge immediate acknowledgment so it never times out
+// and hard-resets the core. The CPU can still flush saves via the
+// SYS_SHUTDOWN register, but the bridge won't wait for it.
+wire shutdown_ack_combined = shutdown_ack_cpu | shutdown_pending_cpu;
+synch_3 sync_shutdown_ack(shutdown_ack_combined, shutdown_ack_74a, clk_74a);
 
 core_bridge_cmd icb (
 

@@ -687,9 +687,8 @@ static long of_save_syscall(long n, long a0, long a1, long a2, long a3) {
 
 long syscall_dispatch(long n, long a0, long a1, long a2,
                       long a3, long a4, long a5) {
-    /* Mixer auto-pump and shutdown check removed — SDRAM writes from of_mixer_pump
-     * cause bus contention that stalls bridge DMA and PSRAM writebacks.
-     * Apps that need continuous audio should pump explicitly. */
+    /* Shutdown handshake is auto-acked in FPGA (core_top.v) —
+     * no CPU involvement needed. */
 
     switch (n) {
     case SYS_brk:           return sys_brk(a0);
