@@ -137,18 +137,13 @@ module axi_periph_slave (
     input wire         shutdown_pending,
     output reg         shutdown_ack,
 
-    // Audio DMA control
-    output reg         adma_enable,
-    output reg  [31:0] adma_ring_base,
-    output reg  [12:0] adma_ring_size_log,
-    output reg  [12:0] adma_ring_wptr,
-    input  wire [12:0] adma_ring_rptr,
-
-    // Audio DMA IRQ
-    output reg         adma_irq_enable,
-    output reg  [8:0]  adma_threshold,
-    input  wire        adma_irq_pending,
-    output reg         adma_irq_clear,
+    // Hardware mixer voice interface
+    output reg         mix_voice_wr,
+    output reg  [2:0]  mix_voice_field,
+    output reg  [4:0]  mix_voice_sel,
+    output reg  [31:0] mix_voice_wdata,
+    output reg         mix_enable,
+    input  wire [4:0]  mix_active_count,
 
     // Hardware timer interrupt
     output wire        timer_irq,
@@ -371,13 +366,11 @@ always @(posedge clk) begin
         ds_done_seen_low <= 1;
         ds_err_latched <= 0;
         shutdown_ack <= 0;
-        adma_enable <= 0;
-        adma_ring_base <= 0;
-        adma_ring_size_log <= 0;
-        adma_ring_wptr <= 0;
-        adma_irq_enable <= 0;
-        adma_threshold <= 0;
-        adma_irq_clear <= 0;
+        mix_voice_wr <= 0;
+        mix_voice_field <= 0;
+        mix_voice_sel <= 0;
+        mix_voice_wdata <= 0;
+        mix_enable <= 0;
         timer_period <= 0;
         timer_counter <= 0;
         timer_enable <= 0;
@@ -388,7 +381,7 @@ always @(posedge clk) begin
         cycle_counter <= cycle_counter + 1;
         pal_wr <= 0;
         save_dt_commit <= 0;
-        adma_irq_clear <= 0;
+        mix_voice_wr <= 0;
 
         // Hardware timer countdown
         if (timer_enable && timer_period != 0) begin
@@ -510,20 +503,29 @@ always @(posedge clk) begin
                 end
 
 
-                // Audio DMA registers (0xE0-0xEC)
-                6'b111000: adma_ring_base <= req_wdata;
-                6'b111001: begin
-                    adma_ring_size_log <= req_wdata[12:0];
-                    adma_enable <= req_wdata[16];
+                // Hardware mixer registers (0xC0-0xD8)
+                6'b110000: mix_voice_sel <= req_wdata[4:0];        // MIX_VOICE_SEL (0xC0)
+                6'b110001: begin                                    // MIX_VOICE_ADDR (0xC4)
+                    mix_voice_wr <= 1;
+                    mix_voice_field <= 3'd0;
+                    mix_voice_wdata <= req_wdata;
                 end
-                6'b111010: adma_ring_wptr <= req_wdata[12:0];
-
-                // Audio DMA IRQ registers (0xF0-0xF4)
-                6'b111100: begin
-                    adma_threshold <= req_wdata[8:0];
-                    adma_irq_enable <= req_wdata[16];
+                6'b110010: begin                                    // MIX_VOICE_LEN (0xC8)
+                    mix_voice_wr <= 1;
+                    mix_voice_field <= 3'd1;
+                    mix_voice_wdata <= req_wdata;
                 end
-                6'b111101: adma_irq_clear <= req_wdata[0];
+                6'b110011: begin                                    // MIX_VOICE_RATE (0xCC)
+                    mix_voice_wr <= 1;
+                    mix_voice_field <= 3'd2;
+                    mix_voice_wdata <= req_wdata;
+                end
+                6'b110100: begin                                    // MIX_VOICE_CTRL (0xD0)
+                    mix_voice_wr <= 1;
+                    mix_voice_field <= 3'd3;
+                    mix_voice_wdata <= req_wdata;
+                end
+                6'b110101: mix_enable <= req_wdata[0];              // MIX_CTRL (0xD4)
 
                 default: ;
             endcase
@@ -572,11 +574,9 @@ always @(*) begin
         6'b101101: sysreg_rdata = timer_period;
         6'b101110: sysreg_rdata = {30'b0, timer_irq_pending, timer_enable};
         6'b101111: sysreg_rdata = timer_counter;
-        // Audio DMA registers (0xE0-0xEC)
-        6'b111000: sysreg_rdata = adma_ring_base;
-        6'b111001: sysreg_rdata = {15'b0, adma_enable, 3'b0, adma_ring_size_log};
-        6'b111010: sysreg_rdata = {19'b0, adma_ring_wptr};
-        6'b111011: sysreg_rdata = {19'b0, adma_ring_rptr};
+        // Hardware mixer registers (0xC0-0xD8)
+        6'b110101: sysreg_rdata = {31'b0, mix_enable};              // MIX_CTRL (0xD4)
+        6'b110110: sysreg_rdata = {27'b0, mix_active_count};        // MIX_STATUS (0xD8)
         // Datatable slot size query (0x90): bit 31 = valid, bits 30:0 = data
         6'b100100: sysreg_rdata = {dt_query_valid, dt_query_data[30:0]};
         // Bridge debug (0x94): internal latch state for diagnosing DMA hangs
@@ -590,9 +590,6 @@ always @(*) begin
             ds_ack_seen_low,        // bit 1
             ds_cmd_active           // bit 0
         };
-        // Audio DMA IRQ registers (0xF0-0xF4)
-        6'b111100: sysreg_rdata = {15'b0, adma_irq_enable, 7'b0, adma_threshold};
-        6'b111101: sysreg_rdata = {16'b0, 2'b0, audio_fifo_level, 4'b0, adma_irq_pending};
         default: sysreg_rdata = 32'h0;
     endcase
 end

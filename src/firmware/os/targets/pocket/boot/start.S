@@ -27,6 +27,13 @@ _start:
     la t0, _start
     csrw mtvec, t0
 
+    /* Enable machine interrupts: MTIE (bit 7) + MEIE (bit 11) in mie,
+     * then set mstatus.MIE (bit 3) to enable global interrupt delivery */
+    li t0, (1 << 7) | (1 << 11)
+    csrw mie, t0
+    li t0, (1 << 3)
+    csrs mstatus, t0
+
     /* Initialize thread pointer (tp) for musl TLS.
      * musl's __pthread_self() returns (tp - sizeof(struct __pthread)).
      * struct __pthread is ~120 bytes on riscv32. Point tp past the

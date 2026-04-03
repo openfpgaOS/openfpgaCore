@@ -172,27 +172,20 @@
 #define   TIMER_CTRL_ENABLE   (1 << 0)
 #define   TIMER_CTRL_W1C_IRQ  (1 << 1)
 
-/* Audio DMA engine (0xE0) — reads from SDRAM ring buffer, feeds audio FIFO */
-#define ADMA_RING_BASE      REG32(SYSREG_BASE + 0xE0)  /* SDRAM byte address of ring */
-#define ADMA_RING_CFG       REG32(SYSREG_BASE + 0xE4)  /* [12:0]=size_log2, [16]=enable */
-#define ADMA_RING_WPTR      REG32(SYSREG_BASE + 0xE8)  /* Write pointer (entry index) */
-#define ADMA_RING_RPTR      REG32(SYSREG_BASE + 0xEC)  /* Read pointer (read-only) */
-#define   ADMA_ENABLE       (1 << 16)
+/* Hardware PCM mixer (0xC0-0xD8) — 32-voice CRAM1-backed */
+#define MIX_VOICE_SEL       REG32(SYSREG_BASE + 0xC0)  /* Voice index 0-31 */
+#define MIX_VOICE_ADDR      REG32(SYSREG_BASE + 0xC4)  /* CRAM1 word address */
+#define MIX_VOICE_LEN       REG32(SYSREG_BASE + 0xC8)  /* Length (16-bit halfwords) */
+#define MIX_VOICE_RATE      REG32(SYSREG_BASE + 0xCC)  /* Rate (0.16 fixed-point) */
+#define MIX_VOICE_CTRL      REG32(SYSREG_BASE + 0xD0)  /* [0]=active [1]=loop [7:4]=vol */
+#define MIX_CTRL            REG32(SYSREG_BASE + 0xD4)  /* [0]=enable */
+#define MIX_STATUS          REG32(SYSREG_BASE + 0xD8)  /* [4:0]=active voices */
 
 /* Datatable slot size query (0x90) — write slot entry address, read result */
 #define DT_QUERY            REG32(SYSREG_BASE + 0x90)
 
-/* Bridge debug (0x94) — internal latch state for DMA diagnostics
- * bit 0: ds_cmd_active    bit 1: ds_ack_seen_low   bit 2: ds_ack_latched
- * bit 3: ds_done_seen_low bit 4: ds_done_latched   bit 5: target_ack_s
- * bit 6: target_done_s    bit 7: target_dataslot_read */
+/* Bridge debug (0x94) — internal latch state for DMA diagnostics */
 #define DS_DEBUG            REG32(SYSREG_BASE + 0x94)
-
-/* Audio DMA IRQ (0xF0-0xF4) */
-#define ADMA_IRQ_CTRL       REG32(SYSREG_BASE + 0xF0)
-#define   ADMA_IRQ_EN       (1 << 16)
-#define ADMA_IRQ_STATUS     REG32(SYSREG_BASE + 0xF4)
-#define   ADMA_IRQ_PENDING  (1 << 0)
 
 
 /* Tile/Sprite constants */

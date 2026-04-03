@@ -126,6 +126,18 @@ static int io_cache_fill(int entry, uint32_t slot_id,
     uint32_t bridge_dst = IO_CACHE_BRIDGE + entry * IO_CACHE_BLOCK_SIZE;
     void *cached_ptr = (void *)(IO_CACHE_CACHED + entry * IO_CACHE_BLOCK_SIZE);
 
+    /* Let the hardware mixer top up the audio FIFO before we claim
+     * CRAM1 for bridge DMA.  The mixer reads CRAM1 via the same CDC
+     * adapter, so bridge writes block it.  Waiting until the FIFO is
+     * at least half full guarantees ~5 ms of audio runway — more than
+     * enough for a 32 KB bridge transfer (~0.4 ms). */
+    if (MIX_STATUS & 0x1F) {  /* any active voices? */
+        uint32_t deadline = of_timer_get_us() + 5000;  /* 5 ms max wait */
+        while ((AUDIO_STATUS & AUDIO_FIFO_LEVEL_MASK) < 256) {
+            if (of_timer_get_us() > deadline) break;
+        }
+    }
+
     /* Invalidate D-cache BEFORE DMA so no stale lines remain */
     of_cache_inval_range(cached_ptr, fill);
 

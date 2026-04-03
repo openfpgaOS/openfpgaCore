@@ -46,6 +46,7 @@
 #define SYS_clock_gettime64 403     /* riscv32 — musl sends this, not 113 */
 #define SYS_clock_getres64  406     /* riscv32 — musl sends this, not 114 */
 #define SYS_futex           422     /* musl FILE locking */
+#define SYS_setitimer       103
 #define SYS_rt_sigaction    134
 #define SYS_rt_sigprocmask  135
 #define SYS_getpid          172

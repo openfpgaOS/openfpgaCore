@@ -7,33 +7,57 @@
 
 void of_audio_init(void) {
     of_opl_reset();
+    /* Enable hardware mixer (voices start inactive) */
+    MIX_CTRL = 1;
+
+
 }
 
-/* IRQ handler — called from trap entry for external interrupts */
+/* IRQ handler — called from trap entry for all hardware interrupts.
+ * Dispatches based on mcause code: 7=timer, 11=external. */
+extern void timer_isr_callback(void);
+
 void irq_handler(void *frame) {
-    (void)frame;
+    uint32_t *f = (uint32_t *)frame;
+    uint32_t mcause = f[33];  /* offset 132 / 4 */
+    uint32_t code = mcause & 0x7FFFFFFF;
+
+    if (code == 7) {
+        /* Machine timer interrupt — clear pending, call callback */
+        TIMER_CTRL = TIMER_CTRL_ENABLE | TIMER_CTRL_W1C_IRQ;
+        timer_isr_callback();
+    }
+    /* External interrupt (code 11) unused — mixer runs autonomously */
 }
+
+/* Scratch buffer in CRAM1 for of_audio_write() convenience wrapper.
+ * Located at end of CRAM1 save region to avoid conflicts with app samples. */
+#define AUDIO_SCRATCH_CRAM1   0x39F00000  /* Last 1MB of CRAM1, uncached alias */
+#define AUDIO_SCRATCH_VOICE   31          /* Dedicated voice for of_audio_write */
+#define AUDIO_SCRATCH_MAX     (256 * 1024)  /* 256K samples max */
 
 int of_audio_write(const int16_t *samples, int count) {
-    int written = 0;
+    if (count <= 0 || !samples) return 0;
+    if (count > (int)(AUDIO_SCRATCH_MAX)) count = AUDIO_SCRATCH_MAX;
 
-    for (int i = 0; i < count; i++) {
-        if (AUDIO_STATUS & AUDIO_FIFO_FULL)
-            break;
+    /* Convert stereo interleaved to mono (average L+R) into CRAM1 scratch */
+    volatile int16_t *dest = (volatile int16_t *)AUDIO_SCRATCH_CRAM1;
+    for (int i = 0; i < count; i++)
+        dest[i] = (int16_t)(((int32_t)samples[i * 2] + samples[i * 2 + 1]) >> 1);
 
-        /* Pack L/R 16-bit samples into one 32-bit word */
-        uint32_t left  = (uint16_t)samples[i * 2];
-        uint32_t right = (uint16_t)samples[i * 2 + 1];
-        AUDIO_SAMPLE = (right << 16) | left;
-        written++;
-    }
+    /* Play via mixer voice 31 */
+    MIX_VOICE_SEL = AUDIO_SCRATCH_VOICE;
+    MIX_VOICE_ADDR = (AUDIO_SCRATCH_CRAM1 - 0x39000000) >> 2;
+    MIX_VOICE_LEN = count;
+    MIX_VOICE_RATE = 0x10000;  /* 1:1 (48kHz native) */
+    MIX_VOICE_CTRL = (15 << 4) | 1;  /* vol=15 (full), active=1 */
 
-    return written;
+    return count;
 }
 
 int of_audio_get_free(void) {
-    int level = AUDIO_STATUS & AUDIO_FIFO_LEVEL_MASK;
-    return AUDIO_FIFO_DEPTH - level;
+    /* Always report space available — mixer handles buffering */
+    return AUDIO_SCRATCH_MAX;
 }
 
 

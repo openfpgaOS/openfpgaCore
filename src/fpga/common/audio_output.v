@@ -15,7 +15,7 @@ module audio_output (
     // CPU write interface (SFX samples)
     input  wire        sample_wr,     // Write strobe (one clk_sys cycle)
     input  wire [31:0] sample_data,   // {left[15:0], right[15:0]}
-    output wire [7:0]  fifo_level,    // Write-side fill level
+    output wire [8:0]  fifo_level,    // Write-side fill level
     output wire        fifo_full,
 
     // OPL3 hardware audio input (from opl3_wrapper, clk_audio domain)
@@ -57,11 +57,11 @@ dcfifo dcfifo_audio (
     .aclr    (~reset_n)
 );
 defparam dcfifo_audio.intended_device_family = "Cyclone V",
-    dcfifo_audio.lpm_numwords  = 256,
+    dcfifo_audio.lpm_numwords  = 512,
     dcfifo_audio.lpm_showahead = "OFF",
     dcfifo_audio.lpm_type      = "dcfifo",
     dcfifo_audio.lpm_width     = 32,
-    dcfifo_audio.lpm_widthu    = 8,
+    dcfifo_audio.lpm_widthu    = 9,
     dcfifo_audio.overflow_checking  = "ON",
     dcfifo_audio.underflow_checking = "ON",
     dcfifo_audio.rdsync_delaypipe   = 5,
@@ -167,39 +167,6 @@ wire [15:0] mix_clamp_l = (out_l > 18'sd32767)  ? 16'h7FFF :
 wire [15:0] mix_clamp_r = (out_r > 18'sd32767)  ? 16'h7FFF :
                            (out_r < -18'sd32768) ? 16'h8000 :
                            out_r[15:0];
-
-// ============================================
-// IIR low-pass filter + DC blocker + audio mix
-// (ported from openfpgaOS audio filter chain)
-// ============================================
-wire [15:0] filt_out_l;
-wire [15:0] filt_out_r;
-
-audio_filters #(.CLK_RATE(12288000)) audio_filt (
-    .clk       (clk_audio),
-    .reset     (~reset_n),
-
-    // Filter coefficients — light low-pass (~12 kHz cutoff)
-    .flt_rate  (32'd11000000),
-    .cx        (40'd16777216),
-    .cx0       (8'd3),
-    .cx1       (8'd3),
-    .cx2       (8'd1),
-    .cy0       (-24'd5765342),
-    .cy1       ( 24'd5285916),
-    .cy2       (-24'd1611482),
-
-    // Audio mix controls (passthrough, no attenuation)
-    .att       (5'b0),
-    .mix       (2'b0),
-
-    .is_signed (1'b1),
-    .core_l    (mix_clamp_l),
-    .core_r    (mix_clamp_r),
-
-    .audio_l   (filt_out_l),
-    .audio_r   (filt_out_r)
-);
 
 // Latch mixer output on audio_pop (48 kHz) for stable I2S serialization.
 reg [15:0] active_l = 16'h0;

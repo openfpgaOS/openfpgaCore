@@ -67,6 +67,8 @@ extern "C" {
 #define OF_SYS_TIMER_GET_MS            0x1071
 #define OF_SYS_TIMER_DELAY_US          0x1072
 #define OF_SYS_TIMER_DELAY_MS          0x1073
+#define OF_SYS_TIMER_SET_CALLBACK      0x1074
+#define OF_SYS_TIMER_STOP              0x1075
 
 /* File (data slots) */
 #define OF_SYS_FILE_READ               0x1080

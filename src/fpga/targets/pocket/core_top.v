@@ -996,7 +996,7 @@ dcfifo bridge_wr_fifo (
     .rdreq   (bridge_wr_fifo_drain),
     .q       (bridge_wr_fifo_q),
     .rdempty (bridge_wr_fifo_empty),
-    .aclr    (~reset_n_apf),
+    .aclr    (~pll_core_locked_s),
     .wrusedw (),
     .wrempty (),
     .rdfull  (),
@@ -1226,11 +1226,18 @@ wire bridge_cram1_requesting = bridge_cram1_wr_detect ||
 
 wire cdc_psram1_inflight;
 
+// CRAM1 arbiter: CPU has priority, mixer fills gaps
+wire cram1_cpu_rd = cpu_psram_rd & cpu_psram_sel_cram1;
+wire cram1_cpu_wr = cpu_psram_wr & cpu_psram_sel_cram1;
+wire cram1_arb_rd = cram1_cpu_rd | (mix_cram1_rd & !cram1_cpu_rd & !cram1_cpu_wr);
+wire cram1_arb_wr = cram1_cpu_wr;
+wire [21:0] cram1_arb_addr = (cram1_cpu_rd | cram1_cpu_wr) ? cpu_psram_addr[21:0] : mix_cram1_addr;
+
 cpu_psram1_cdc cdc_psram1 (
     .clk_cpu(clk_cpu),
-    .cpu_rd(cpu_psram_rd & cpu_psram_sel_cram1),
-    .cpu_wr(cpu_psram_wr & cpu_psram_sel_cram1),
-    .cpu_addr(cpu_psram_addr[21:0]),
+    .cpu_rd(cram1_arb_rd),
+    .cpu_wr(cram1_arb_wr),
+    .cpu_addr(cram1_arb_addr),
     .cpu_wdata(cpu_psram_wdata),
     .cpu_wstrb(cpu_psram_wstrb),
     .cpu_rdata(cdc_cpu_rdata),
@@ -1371,7 +1378,7 @@ dcfifo cram0_wr_fifo (
     .rdreq   (cram0_wr_fifo_drain),
     .q       (cram0_wr_fifo_q),
     .rdempty (cram0_wr_fifo_empty),
-    .aclr    (~reset_n_apf),
+    .aclr    (~pll_core_locked_s),
     .wrusedw (), .wrempty (), .rdfull (), .rdusedw ()
 );
 defparam cram0_wr_fifo.intended_device_family = "Cyclone V",
@@ -1485,7 +1492,7 @@ dcfifo sram_wr_fifo (
     .rdreq   (sram_wr_fifo_drain),
     .q       (sram_wr_fifo_q),
     .rdempty (sram_wr_fifo_empty),
-    .aclr    (~reset_n_apf),
+    .aclr    (~pll_core_locked_s),
     .wrusedw (), .wrempty (), .rdfull (), .rdusedw ()
 );
 defparam sram_wr_fifo.intended_device_family = "Cyclone V",
@@ -2060,7 +2067,7 @@ assign video_hs = vidout_hs;
         .m_local_wlast(cpu_m_local_wlast),
         .m_local_bvalid(cpu_m_local_bvalid),
         .m_local_bresp(cpu_m_local_bresp),
-        .int_m_external(adma_irq),
+        .int_m_external(1'b0),
         .int_m_timer(timer_irq)
     );
 
@@ -2178,15 +2185,12 @@ assign video_hs = vidout_hs;
         // Shutdown handshake
         .shutdown_pending(shutdown_pending_cpu),
         .shutdown_ack(shutdown_ack_cpu),
-        .adma_enable(adma_enable),
-        .adma_ring_base(adma_ring_base),
-        .adma_ring_size_log(adma_ring_size_log),
-        .adma_ring_wptr(adma_ring_wptr),
-        .adma_ring_rptr(adma_ring_rptr),
-        .adma_irq_enable(adma_irq_enable),
-        .adma_threshold(adma_threshold),
-        .adma_irq_pending(adma_irq_pending),
-        .adma_irq_clear(adma_irq_clear),
+        .mix_voice_wr(mix_voice_wr),
+        .mix_voice_field(mix_voice_field),
+        .mix_voice_sel(mix_voice_sel),
+        .mix_voice_wdata(mix_voice_wdata),
+        .mix_enable(mix_enable),
+        .mix_active_count(mix_active_count),
         .timer_irq(timer_irq),
         // Datatable slot size query
         .dt_query_addr(cpu_dt_query_addr),
@@ -2263,11 +2267,11 @@ assign video_hs = vidout_hs;
     axi_sdram_arbiter sdram_arb (
         .clk(clk_cpu),
         .reset_n(1'b1),
-        // M0: Audio DMA (highest priority)
-        .m0_arvalid(adma_m_arvalid), .m0_arready(adma_m_arready),
-        .m0_araddr(adma_m_araddr),   .m0_arlen(adma_m_arlen),
-        .m0_rvalid(adma_m_rvalid),   .m0_rdata(adma_m_rdata),
-        .m0_rresp(adma_m_rresp),     .m0_rlast(adma_m_rlast),
+        // M0: unused (audio DMA removed — mixer uses CRAM1)
+        .m0_arvalid(1'b0), .m0_arready(),
+        .m0_araddr(32'b0),  .m0_arlen(8'b0),
+        .m0_rvalid(),       .m0_rdata(),
+        .m0_rresp(),        .m0_rlast(),
         .m0_awvalid(1'b0), .m0_awready(),
         .m0_awaddr(32'b0),  .m0_awlen(8'b0),
         .m0_wvalid(1'b0),  .m0_wready(),
@@ -2604,38 +2608,26 @@ opl3_wrapper opl3 (
 //
 // Audio output (dcfifo + I2S) with OPL3 mixing
 //
-// Audio DMA control signals
-wire        adma_enable;
-wire [31:0] adma_ring_base;
-wire [12:0] adma_ring_size_log;
-wire [12:0] adma_ring_wptr;
-wire [12:0] adma_ring_rptr;
-wire        adma_sample_wr;
-wire [31:0] adma_sample_data;
-wire        adma_m_arvalid, adma_m_arready;
-wire [31:0] adma_m_araddr;
-wire [7:0]  adma_m_arlen;
-wire        adma_m_rvalid;
-wire [31:0] adma_m_rdata;
-wire [1:0]  adma_m_rresp;
-wire        adma_m_rlast;
-wire        adma_irq_enable;
-wire [8:0]  adma_threshold;
-wire        adma_irq_clear;
-wire        adma_irq;
-wire        adma_irq_pending = adma_irq;
+// Hardware mixer
+wire        mix_enable;
+wire        mix_voice_wr;
+wire [2:0]  mix_voice_field;
+wire [4:0]  mix_voice_sel;
+wire [31:0] mix_voice_wdata;
+wire [4:0]  mix_active_count;
+wire        mix_sample_wr;
+wire [31:0] mix_sample_data;
+wire        mix_cram1_rd;
+wire [21:0] mix_cram1_addr;
 wire        timer_irq;
-
-wire        audio_mux_wr = adma_enable ? adma_sample_wr : audio_sample_wr;
-wire [31:0] audio_mux_data = adma_enable ? adma_sample_data : audio_sample_data;
 
 audio_output audio_out (
     .clk_sys      (clk_cpu),
     .clk_audio    (clk_core_12288),
     .reset_n      (reset_n),
 
-    .sample_wr    (audio_mux_wr),
-    .sample_data  (audio_mux_data),
+    .sample_wr    (mix_sample_wr),
+    .sample_data  (mix_sample_data),
     .fifo_level   (audio_fifo_level),
     .fifo_full    (audio_fifo_full),
 
@@ -2647,27 +2639,22 @@ audio_output audio_out (
     .audio_dac    (audio_dac)
 );
 
-audio_dma adma (
+audio_mixer mixer (
     .clk(clk_cpu), .reset_n(reset_n),
-    .enable(adma_enable),
-    .ring_base(adma_ring_base),
-    .ring_size_log(adma_ring_size_log),
-    .ring_wptr(adma_ring_wptr),
-    .ring_rptr(adma_ring_rptr),
-    .irq_enable(adma_irq_enable),
-    .threshold(adma_threshold),
-    .irq_clear(adma_irq_clear),
-    .irq(adma_irq),
+    .mixer_enable(mix_enable),
+    .voice_wr(mix_voice_wr),
+    .voice_field(mix_voice_field),
+    .voice_sel(mix_voice_sel),
+    .voice_wdata(mix_voice_wdata),
+    .cram1_rd(mix_cram1_rd),
+    .cram1_addr(mix_cram1_addr),
+    .cram1_rdata(cdc_cpu_rdata),
+    .cram1_busy(cdc_cpu_busy),
+    .cram1_rdata_valid(cdc_cpu_rdata_valid),
+    .sample_wr(mix_sample_wr),
+    .sample_data(mix_sample_data),
     .fifo_level(audio_fifo_level),
-    .fifo_full(audio_fifo_full),
-    .sample_wr(adma_sample_wr),
-    .sample_data(adma_sample_data),
-    .m_arvalid(adma_m_arvalid), .m_arready(adma_m_arready),
-    .m_araddr(adma_m_araddr), .m_arlen(adma_m_arlen),
-    .m_arsize(), .m_arburst(),
-    .m_rvalid(adma_m_rvalid), .m_rready(),
-    .m_rdata(adma_m_rdata), .m_rresp(adma_m_rresp),
-    .m_rlast(adma_m_rlast)
+    .active_count(mix_active_count)
 );
 
 

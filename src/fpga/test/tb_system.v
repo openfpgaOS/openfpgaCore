@@ -217,7 +217,8 @@ cpu_system cpu (
     .m_local_wdata(local_wdata), .m_local_wstrb(local_wstrb),
     .m_local_wlast(local_wlast),
     .m_local_bvalid(local_bvalid), .m_local_bresp(local_bresp),
-    .int_m_external(1'b0)
+    .int_m_external(1'b0),
+    .int_m_timer(1'b0)
 );
 
 // ============================================================
