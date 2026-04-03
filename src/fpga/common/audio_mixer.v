@@ -122,6 +122,9 @@ altsyncram #(
 //   field 2 (rate) → offset 2, field 3 (ctrl) → offset 3
 // When ctrl is written with active=1, also clear pos_int and pos_frac.
 
+// Voice active flags — register, not BRAM (avoids write race on deactivation)
+reg [31:0] voice_active;
+
 // CPU write state — serviced by FSM
 reg        cpu_wr_pending;
 reg        cpu_clear_pos;
@@ -207,6 +210,7 @@ always @(posedge clk) begin
         vtbl_a_addr <= 0;
         vtbl_a_data <= 0;
         vtbl_b_addr <= 0;
+        voice_active <= 32'd0;
         cpu_wr_pending <= 0;
         cpu_clear_pos <= 0;
         cpu_clear_base <= 0;
@@ -220,6 +224,10 @@ always @(posedge clk) begin
             vtbl_a_wr <= 1;
             vtbl_a_addr <= {voice_sel, voice_field};
             vtbl_a_data <= voice_wdata;
+            // If writing ctrl, update active flag register
+            if (voice_field == 3'd3) begin
+                voice_active[voice_sel] <= voice_wdata[0];
+            end
             // If writing ctrl with active=1, queue position clear
             if (voice_field == 3'd3 && voice_wdata[0]) begin
                 cpu_clear_pos <= 1;
@@ -273,7 +281,7 @@ always @(posedge clk) begin
                 cur_loop   <= vtbl_b_data[1];
                 cur_vol    <= vtbl_b_data[7:4];
 
-                if (!vtbl_b_data[0]) begin
+                if (!voice_active[cur_voice]) begin
                     // Voice inactive — skip
                     if (cur_voice == 5'd31)
                         state <= S_OUTPUT;
@@ -326,10 +334,7 @@ always @(posedge clk) begin
                         // Check if position (read in phase 3, now latched) is past end
                         if (cur_pos_int >= cur_len) begin  // cur_pos_int updated last cycle
                             // Deactivate voice — skip read/accumulate
-                            vtbl_a_wr <= 1;
-                            vtbl_a_addr <= {cur_voice, VTBL_CTRL[2:0]};
-                            vtbl_a_data <= 32'd0;
-                            fsm_wr_active <= 1;
+                            voice_active[cur_voice] <= 0;
                             if (cur_voice == 5'd31)
                                 state <= S_OUTPUT;
                             else begin
@@ -378,8 +383,9 @@ always @(posedge clk) begin
                         vtbl_a_data <= 32'd0;
                     end else begin
                         // Deactivate voice
-                        vtbl_a_addr <= {cur_voice, VTBL_CTRL[2:0]};
-                        vtbl_a_data <= 32'd0;  // active=0
+                        voice_active[cur_voice] <= 0;
+                        vtbl_a_addr <= {cur_voice, VTBL_POS_INT[2:0]};
+                        vtbl_a_data <= {10'd0, new_pos_int};
                     end
                 end else begin
                     vtbl_a_addr <= {cur_voice, VTBL_POS_INT[2:0]};
