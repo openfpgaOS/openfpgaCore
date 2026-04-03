@@ -54,7 +54,6 @@ extern "C" {
 #include "of_terminal.h"
 #include "of_tile.h"
 #include "of_cache.h"
-#include "of_dma.h"
 #include "of_interact.h"
 #include "of_mixer.h"
 #include "of_codec.h"

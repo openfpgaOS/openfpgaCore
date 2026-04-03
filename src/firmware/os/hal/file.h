@@ -60,6 +60,12 @@ int of_file_slot_write(uint32_t slot_id, uint32_t bridge_addr, uint32_t length);
 int of_file_slot_write_at(uint32_t slot_id, uint32_t slot_offset,
                            uint32_t bridge_addr, uint32_t length);
 
+/* Raw bridge DMA: issue a read command and wait for completion.
+ * No cache flush — caller is responsible for cache coherency.
+ * Used by I/O cache for CRAM1 targets where no SDRAM flush is needed. */
+int of_file_read_raw(uint32_t slot_id, uint32_t slot_offset,
+                      uint32_t bridge_addr, uint32_t length);
+
 /* Invalidate D-cache for CRAM cached aliases after bridge writes.
  * Call after any bridge operation that writes to CRAM (dataslot load,
  * save restore) so CPU reads via 0x30/0x31 see fresh data. */

@@ -68,8 +68,44 @@ module video_CRT_scanout_indexed_BRAM (
     reg [31:0] bram_rd_data;
     reg [7:0] write_ptr;
 
-    // Palette RAM: 256 entries x 24-bit RGB
-    reg [23:0] palette [0:255];
+    // Palette RAM: 256 entries x 24-bit RGB (BRAM, dual-port)
+    // Port A: write from CPU (pal_wr)
+    // Port B: read for pixel lookup (palette_index)
+    reg [7:0] pal_rd_addr;
+    wire [23:0] pal_rd_data;
+
+    altsyncram #(
+        .operation_mode("DUAL_PORT"),
+        .width_a(24),
+        .widthad_a(8),
+        .width_b(24),
+        .widthad_b(8),
+        .numwords_a(256),
+        .numwords_b(256),
+        .clock_enable_input_a("BYPASS"),
+        .clock_enable_input_b("BYPASS"),
+        .clock_enable_output_b("BYPASS"),
+        .outdata_reg_b("UNREGISTERED"),
+        .intended_device_family("Cyclone V"),
+        .lpm_type("altsyncram"),
+        .power_up_uninitialized("FALSE")
+    ) palette_ram (
+        .clock0(clk_sdram),
+        .address_a(pal_addr),
+        .data_a(pal_data),
+        .wren_a(pal_wr),
+        .clock1(clk_video),
+        .address_b(pal_rd_addr),
+        .q_b(pal_rd_data),
+        .wren_b(1'b0),
+        .aclr0(1'b0), .aclr1(1'b0),
+        .addressstall_a(1'b0), .addressstall_b(1'b0),
+        .byteena_a(1'b1), .byteena_b(1'b1),
+        .clocken0(1'b1), .clocken1(1'b1),
+        .clocken2(1'b1), .clocken3(1'b1),
+        .data_b(24'b0), .eccstatus(),
+        .q_a(), .rden_a(1'b0), .rden_b(1'b1)
+    );
 
     // Use 32-bit burst mode
     assign burst_32bit = 1'b1;
@@ -79,14 +115,6 @@ module video_CRT_scanout_indexed_BRAM (
     always @(posedge clk_sdram) begin
         color_mode_sdram_s1 <= color_mode;
         color_mode_sdram <= color_mode_sdram_s1;
-    end
-
-    // =========================================
-    // Palette write
-    // =========================================
-    always @(posedge clk_sdram) begin
-        if (pal_wr)
-            palette[pal_addr] <= pal_data;
     end
 
     // =========================================
@@ -131,11 +159,10 @@ module video_CRT_scanout_indexed_BRAM (
 
     // Pipeline stage registers
     reg [3:0] sub_pixel_q;  // 4 bits needed for 2-bit mode (16 pixels/word)
-    reg hactive_q1, hactive_q2;
-    reg vactive_q1, vactive_q2;
-    reg [7:0] palette_index;
+    reg hactive_q1, hactive_q2, hactive_q3;
+    reg vactive_q1, vactive_q2, vactive_q3;
     reg [23:0] direct_color;
-    reg use_direct;
+    reg use_direct, use_direct_q;
 
     // Barrel-shift pixel extraction (combinational, fed into STAGE 2 registers)
     wire [31:0] shifted_8 = bram_rd_data >> {sub_pixel_q[1:0], 3'b0};  // byte select
@@ -159,13 +186,12 @@ module video_CRT_scanout_indexed_BRAM (
         hactive_q1 <= in_hactive;
         vactive_q1 <= in_vactive_display;
 
-        // STAGE 2: Pixel decode (uses latched sub_pixel_q matching bram_rd_data)
-        // Barrel-shift wires (defined above) replace large case-mux trees.
+        // STAGE 2: Pixel decode — feed palette BRAM address or latch direct color
         use_direct <= 0;
         case (color_mode)
-            MODE_8BIT: palette_index <= shifted_8[7:0];
-            MODE_4BIT: palette_index <= {4'b0, shifted_4[3:0]};
-            MODE_2BIT: palette_index <= {6'b0, shifted_2[1:0]};
+            MODE_8BIT: pal_rd_addr <= shifted_8[7:0];
+            MODE_4BIT: pal_rd_addr <= {4'b0, shifted_4[3:0]};
+            MODE_2BIT: pal_rd_addr <= {6'b0, shifted_2[1:0]};
 
             MODE_RGB565: begin
                 use_direct <= 1;
@@ -185,18 +211,23 @@ module video_CRT_scanout_indexed_BRAM (
                     direct_color <= 24'h000000;
             end
 
-            default: palette_index <= shifted_8[7:0];
+            default: pal_rd_addr <= shifted_8[7:0];
         endcase
 
         hactive_q2 <= hactive_q1;
         vactive_q2 <= vactive_q1;
 
-        // STAGE 3: Output (palette lookup or direct)
-        if (hactive_q2 && vactive_q2) begin
-            if (use_direct)
+        // STAGE 3: Palette BRAM data available (1-cycle read latency)
+        use_direct_q <= use_direct;
+        hactive_q3 <= hactive_q2;
+        vactive_q3 <= vactive_q2;
+
+        // STAGE 4: Output (palette BRAM result or direct)
+        if (hactive_q3 && vactive_q3) begin
+            if (use_direct_q)
                 pixel_color <= direct_color;
             else
-                pixel_color <= palette[palette_index];
+                pixel_color <= pal_rd_data;
         end else begin
             pixel_color <= 24'h000000;
         end

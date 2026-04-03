@@ -6,6 +6,7 @@
 #include "terminal.h"
 #include "regs.h"
 #include <stdarg.h>
+#include <string.h>
 
 static int term_col = 0;
 static int term_row = 0;
@@ -86,20 +87,19 @@ void of_term_clear(void) {
 }
 
 void of_term_scroll(void) {
-    /* Move all rows up by 1 (both char and color) */
-    for (int row = 0; row < TERM_ROWS - 1; row++) {
-        for (int col = 0; col < TERM_COLS; col++) {
-            term_write_char(col, row, term_read_char(col, row + 1));
-            term_write_color(col, row, term_read_color(col, row + 1));
-        }
-    }
+    volatile uint8_t *vram  = (volatile uint8_t *)TERM_VRAM_BASE;
+    volatile uint8_t *color = (volatile uint8_t *)TERM_COLOR_BASE;
+    int stride = TERM_COLS;
+    int total  = stride * (TERM_ROWS - 1);
+
+    /* Move all rows up by 1 */
+    memmove((void *)vram,  (void *)(vram  + stride), total);
+    memmove((void *)color, (void *)(color + stride), total);
 
     /* Clear bottom row */
-    uint8_t color = term_color_byte(term_fg, term_bg);
-    for (int col = 0; col < TERM_COLS; col++) {
-        term_write_char(col, TERM_ROWS - 1, ' ');
-        term_write_color(col, TERM_ROWS - 1, color);
-    }
+    uint8_t clr = term_color_byte(term_fg, term_bg);
+    memset((void *)(vram  + total), ' ', stride);
+    memset((void *)(color + total), clr, stride);
 }
 
 /* Handle a completed CSI sequence: \033[params...X */
@@ -188,16 +188,9 @@ void of_term_enable_uart_mirror(void) { uart_mirror_on = 1; }
 void term_emit_char(char c) {
     uint8_t color = term_color_byte(term_fg, term_bg);
 
-    /* UART console mirror — skip STX (0x02) to avoid confusing PHDP parser.
-     * Brief spin-wait for TX ready to prevent dropped characters. */
-    if (uart_mirror_on && c != 0x02) {
-        for (int i = 0; i < 1000; i++) {
-            if (UART_STATUS & UART_TX_RDY) {
-                UART_TX_DATA = (uint8_t)c;
-                break;
-            }
-        }
-    }
+    /* UART console mirror — fire-and-forget, drop if TX busy */
+    if (uart_mirror_on && c != 0x02 && (UART_STATUS & UART_TX_RDY))
+        UART_TX_DATA = (uint8_t)c;
 
     if (c == '\n') {
         term_col = 0;

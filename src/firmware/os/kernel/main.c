@@ -14,8 +14,8 @@
 #define OS_SLOT_ID      1       /* OS binary (loaded by bootloader) */
 #define APP_SLOT_ID     2       /* Application ELF binary */
 
-/* App load address (after OS region) */
-#define APP_LOAD_ADDR   0x10400000
+/* App load address (after OS region, in CRAM0) */
+#define APP_LOAD_ADDR   0x30100000
 
 /* Symbols from linker script */
 extern char __os_bss_end[];
@@ -104,8 +104,8 @@ void os_main(void) {
 
     status_ok();
 
-    /* Set heap to after the app's BSS */
-    syscall_init(app.bss_end);
+    /* Heap in SDRAM after framebuffers + DMA buffer (code/data in CRAM0) */
+    syscall_init(DMA_BUFFER + DMA_CHUNK_SIZE);
 
     /* Populate libc jump table for the app */
     libc_table_init();

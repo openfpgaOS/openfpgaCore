@@ -3,8 +3,8 @@
  *
  * Memory layout:
  * - BRAM:     0x00000000 (32KB) - Bootloader + trap handler + hot code
- * - SDRAM:    0x10300000 (1MB)   - OS kernel code + data + BSS
- * - App area: 0x10400000+        - Dynamically loaded application
+ * - CRAM0:    0x30000000 (1MB)  - OS kernel code + data + BSS
+ * - App area: 0x30100000+       - Dynamically loaded application (CRAM0)
  * - Terminal: 0x20000000 (8KB)
  * - SysRegs:  0x40000000
  */
@@ -13,14 +13,14 @@ ENTRY(_start)
 
 MEMORY {
     BRAM      (rwx) : ORIGIN = 0x00000000, LENGTH = 32K
-    SDRAM     (rwx) : ORIGIN = 0x10300000, LENGTH = 1M
+    CRAM0     (rwx) : ORIGIN = 0x30000000, LENGTH = 1M
 }
 
 /* Layout symbols */
 __sdram_base = 0x10000000;
 __sdram_size = 64M;
-__os_entry = 0x10300000;
-__app_load_base = 0x10400000;
+__os_entry = 0x30000000;
+__app_load_base = 0x30100000;
 
 SECTIONS {
     /* Bootloader code - in BRAM, runs at startup */
@@ -49,6 +49,8 @@ SECTIONS {
         __bss_start = .;
         *(.bss.boot*)
         *(.sbss.boot*)
+        targets/pocket/boot/boot.o(.bss*)
+        targets/pocket/boot/boot.o(.sbss*)
         . = ALIGN(4);
         __bss_end = .;
     } > BRAM
@@ -80,7 +82,7 @@ SECTIONS {
         KEEP(*(.srodata*))
         . = ALIGN(4);
         __text_end = .;
-    } > SDRAM
+    } > CRAM0
 
     .data : {
         __data_start = .;
@@ -88,7 +90,7 @@ SECTIONS {
         KEEP(*(.sdata*))
         . = ALIGN(4);
         __data_end = .;
-    } > SDRAM
+    } > CRAM0
 
     /* os.bin = .text + .data */
     __os_load_addr = __os_entry;
@@ -103,7 +105,7 @@ SECTIONS {
         *(COMMON)
         . = ALIGN(4);
         __os_bss_end = .;
-    } > SDRAM
+    } > CRAM0
 
     /* Memory regions */
     __os_heap_start = __os_bss_end;
@@ -136,5 +138,5 @@ SECTIONS {
 
     ASSERT(__fastdata_end <= __app_bram_start, "OS BRAM overflow: OS sections exceed 8KB reserved region")
     ASSERT(__fastdata_end <= (__stack_top - 8192), "BRAM overflow: insufficient stack headroom")
-    ASSERT(__os_bss_end <= 0x103FF000, "OS too large: overlaps libc jump table at 0x103FF000")
+    ASSERT(__os_bss_end <= 0x300FF000, "OS too large: exceeds 1MB CRAM0 OS region")
 }

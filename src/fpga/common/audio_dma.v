@@ -30,8 +30,14 @@ module audio_dma (
     output reg  [12:0] ring_rptr,     // Hardware read pointer (entry index)
 
     // Audio FIFO status (from audio_output, clk_sys domain)
-    input  wire [10:0] fifo_level,
+    input  wire [7:0]  fifo_level,
     input  wire        fifo_full,
+
+    // IRQ interface
+    input  wire        irq_enable,
+    input  wire [7:0]  threshold,
+    input  wire        irq_clear,
+    output wire        irq,
 
     // Audio FIFO write (to audio_output)
     output reg         sample_wr,
@@ -67,7 +73,7 @@ wire [12:0] ring_mask = (13'd1 << ring_size_log) - 13'd1;
 wire ring_has_data = (ring_rptr != ring_wptr);
 
 // FIFO has space? Keep a margin to avoid overflow during AXI latency
-wire fifo_has_space = (fifo_level < 12'd1920) && !fifo_full;
+wire fifo_has_space = (fifo_level < 8'd224) && !fifo_full;
 
 // FSM
 localparam S_IDLE = 2'd0;
@@ -121,5 +127,17 @@ always @(posedge clk or negedge reset_n) begin
         endcase
     end
 end
+
+// IRQ: fires when FIFO level drops to/below threshold
+reg irq_pending;
+always @(posedge clk or negedge reset_n) begin
+    if (!reset_n)
+        irq_pending <= 1'b0;
+    else if (irq_clear)
+        irq_pending <= 1'b0;
+    else if (enable && irq_enable && (fifo_level <= threshold))
+        irq_pending <= 1'b1;
+end
+assign irq = irq_pending & irq_enable;
 
 endmodule

@@ -88,7 +88,7 @@ module axi_periph_slave (
     // Audio output interface
     output reg         audio_sample_wr,
     output reg  [31:0] audio_sample_data,
-    input wire  [10:0] audio_fifo_level,
+    input wire  [7:0]  audio_fifo_level,
     input wire         audio_fifo_full,
 
     // Link MMIO interface
@@ -134,20 +134,24 @@ module axi_periph_slave (
     input wire         shutdown_pending,
     output reg         shutdown_ack,
 
-    // DMA engine interface
-    output reg  [31:0] dma_src,
-    output reg  [31:0] dma_dst,
-    output reg  [31:0] dma_len,
-    output reg         dma_start,
-    output reg         dma_fill_mode,
-    input wire         dma_busy,
-
     // Audio DMA control
     output reg         adma_enable,
     output reg  [31:0] adma_ring_base,
     output reg  [12:0] adma_ring_size_log,
     output reg  [12:0] adma_ring_wptr,
-    input  wire [12:0] adma_ring_rptr
+    input  wire [12:0] adma_ring_rptr,
+
+    // Audio DMA IRQ
+    output reg         adma_irq_enable,
+    output reg  [7:0]  adma_threshold,
+    input  wire        adma_irq_pending,
+    output reg         adma_irq_clear,
+
+    // Datatable slot size query (toggle-based CDC to clk_74a)
+    output reg  [9:0]  dt_query_addr,
+    output reg         dt_query_toggle,   // toggles on each new query
+    input  wire [31:0] dt_query_data,
+    input  wire        dt_query_valid
 );
 
 wire reset = ~reset_n;
@@ -235,7 +239,6 @@ reg [31:0] ds_param_addr_reg;
 reg [31:0] ds_resp_addr_reg;
 
 reg [7:0] pal_index_reg;
-reg dma_started;  // Latched high on DMA_CTRL write, cleared when DMA engine busy
 
 // Triple-buffered framebuffer
 localparam FB_ADDR_0 = 25'h0000000;
@@ -316,6 +319,7 @@ reg sysreg_wr_fire;
 reg ds_cmd_active;
 reg ds_ack_latched;
 reg ds_done_latched;
+reg ds_ack_seen_low;    // Must see ACK go low before accepting new ACK (prevents stale capture)
 reg ds_done_seen_low;   // Must see DONE go low before accepting new DONE (prevents stale capture)
 reg [2:0] ds_err_latched;
 
@@ -350,26 +354,24 @@ always @(posedge clk) begin
         ds_cmd_active <= 0;
         ds_ack_latched <= 0;
         ds_done_latched <= 0;
+        ds_ack_seen_low <= 1;
         ds_done_seen_low <= 1;
         ds_err_latched <= 0;
         shutdown_ack <= 0;
-        dma_src <= 0;
-        dma_dst <= 0;
-        dma_len <= 0;
-        dma_start <= 0;
-        dma_fill_mode <= 0;
-        dma_started <= 0;
         adma_enable <= 0;
         adma_ring_base <= 0;
         adma_ring_size_log <= 0;
         adma_ring_wptr <= 0;
+        adma_irq_enable <= 0;
+        adma_threshold <= 0;
+        adma_irq_clear <= 0;
+        dt_query_addr <= 0;
+        dt_query_toggle <= 0;
     end else begin
         cycle_counter <= cycle_counter + 1;
         pal_wr <= 0;
         save_dt_commit <= 0;
-        dma_start <= 0;
-        // Clear dma_started once DMA engine reports busy
-        if (dma_started && dma_busy) dma_started <= 0;
+        adma_irq_clear <= 0;
 
         if (target_ack_s) begin
             target_dataslot_read <= 0;
@@ -378,12 +380,17 @@ always @(posedge clk) begin
         end
 
         // Latch ACK/DONE from bridge only during active command.
-        // ACK always precedes DONE in the bridge FSM, so requiring
-        // ds_ack_latched prevents capturing stale DONE.
+        // Guard: must see signal LOW before accepting HIGH, to prevent
+        // capturing stale ACK/DONE from the previous command that
+        // hasn't fully deasserted through the CDC yet.
         if (ds_cmd_active) begin
-            if (target_ack_s && !ds_ack_latched)
+            if (!target_ack_s && !ds_ack_latched)
+                ds_ack_seen_low <= 1;
+            if (ds_ack_seen_low && target_ack_s && !ds_ack_latched)
                 ds_ack_latched <= 1;
-            if (target_done_s && ds_ack_latched && !ds_done_latched) begin
+            if (!target_done_s && ds_ack_latched && !ds_done_latched)
+                ds_done_seen_low <= 1;
+            if (ds_done_seen_low && target_done_s && ds_ack_latched && !ds_done_latched) begin
                 ds_done_latched <= 1;
                 ds_err_latched <= target_err_s;
                 ds_cmd_active <= 0;
@@ -427,6 +434,7 @@ always @(posedge clk) begin
                         ds_cmd_active <= 1;
                         ds_ack_latched <= 0;
                         ds_done_latched <= 0;
+                        ds_ack_seen_low <= 0;
                         ds_done_seen_low <= 0;
                         ds_err_latched <= 0;
                     end
@@ -452,15 +460,12 @@ always @(posedge clk) begin
                     shutdown_ack <= req_wdata[0];
                 end
 
-                // DMA engine registers (0xC0-0xD0)
-                6'b110000: dma_src <= req_wdata;          // DMA_SRC (0xC0)
-                6'b110001: dma_dst <= req_wdata;          // DMA_DST (0xC4)
-                6'b110010: dma_len <= req_wdata;          // DMA_LEN (0xC8)
-                6'b110011: begin                           // DMA_CTRL (0xCC)
-                    dma_fill_mode <= req_wdata[1];
-                    dma_start <= 1;
-                    dma_started <= 1;  // Stays high until DMA engine is busy
+                // Datatable slot size query (0x90)
+                6'b100100: begin
+                    dt_query_addr <= req_wdata[9:0];
+                    dt_query_toggle <= ~dt_query_toggle;
                 end
+
 
                 // Audio DMA registers (0xE0-0xEC)
                 6'b111000: adma_ring_base <= req_wdata;
@@ -469,6 +474,13 @@ always @(posedge clk) begin
                     adma_enable <= req_wdata[16];
                 end
                 6'b111010: adma_ring_wptr <= req_wdata[12:0];
+
+                // Audio DMA IRQ registers (0xF0-0xF4)
+                6'b111100: begin
+                    adma_threshold <= req_wdata[7:0];
+                    adma_irq_enable <= req_wdata[16];
+                end
+                6'b111101: adma_irq_clear <= req_wdata[0];
 
                 default: ;
             endcase
@@ -513,17 +525,16 @@ always @(*) begin
         // Tile/sprite registers (readback) — return 0, engines removed
         // Shutdown handshake
         6'b101100: sysreg_rdata = {31'b0, shutdown_pending};  // SYS_SHUTDOWN (0xB0)
-        // DMA engine registers (0xC0-0xD0)
-        6'b110000: sysreg_rdata = dma_src;
-        6'b110001: sysreg_rdata = dma_dst;
-        6'b110010: sysreg_rdata = dma_len;
-        6'b110011: sysreg_rdata = 32'h0;
-        6'b110100: sysreg_rdata = {31'b0, dma_busy | dma_started};  // DMA_STATUS (0xD0)
         // Audio DMA registers (0xE0-0xEC)
         6'b111000: sysreg_rdata = adma_ring_base;
         6'b111001: sysreg_rdata = {15'b0, adma_enable, 3'b0, adma_ring_size_log};
         6'b111010: sysreg_rdata = {19'b0, adma_ring_wptr};
         6'b111011: sysreg_rdata = {19'b0, adma_ring_rptr};
+        // Datatable slot size query (0x90): bit 31 = valid, bits 30:0 = data
+        6'b100100: sysreg_rdata = {dt_query_valid, dt_query_data[30:0]};
+        // Audio DMA IRQ registers (0xF0-0xF4)
+        6'b111100: sysreg_rdata = {15'b0, adma_irq_enable, 8'b0, adma_threshold};
+        6'b111101: sysreg_rdata = {16'b0, 3'b0, audio_fifo_level, 4'b0, adma_irq_pending};
         default: sysreg_rdata = 32'h0;
     endcase
 end
@@ -570,7 +581,7 @@ wire [31:0] uart_rdata = (req_addr[3:2] == 2'b00) ? {14'b0, uart_rx_count, 5'b0,
                           32'h0;
 
 wire [31:0] periph_rd_mux = reg_sysreg ? sysreg_rdata :
-                             reg_audio  ? {19'b0, audio_fifo_full, audio_fifo_level} :
+                             reg_audio  ? {23'b0, audio_fifo_full, audio_fifo_level} :
                              reg_link   ? link_reg_rdata :
                              reg_uart   ? uart_rdata :
                              32'h0;

@@ -20,25 +20,6 @@ int of_audio_write(const int16_t *samples, int count);
 /* Get number of free entries in audio FIFO */
 int of_audio_get_free(void);
 
-/* ======================================================================
- * Audio Ring Buffer (kernel-side auto-drain)
- *
- * Apps enqueue samples into a ring buffer via syscall.
- * The kernel drains the ring buffer to the hardware FIFO during
- * any blocking wait (DMA, bridge, etc.) — no app callback needed.
- * ====================================================================== */
-
-/* Enqueue stereo sample pairs into the kernel ring buffer.
- * samples: interleaved L/R int16_t pairs
- * count: number of stereo pairs
- * Returns number of pairs actually enqueued. */
-int of_audio_enqueue(const int16_t *samples, int count);
-
-/* Get number of free entries in the ring buffer */
-int of_audio_ring_free(void);
-
-/* Drain ring buffer to hardware FIFO (called from kernel polling loops) */
-void of_audio_drain(void);
 
 /* ======================================================================
  * OPL (YMF262 OPL3) FM Synthesizer

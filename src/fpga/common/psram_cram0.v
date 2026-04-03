@@ -66,7 +66,8 @@ reg psram_write_low_byte;
 
 // Instantiate the 16-bit PSRAM controller
 psram #(
-    .CLOCK_SPEED(CLOCK_SPEED)
+    .CLOCK_SPEED(CLOCK_SPEED),
+    .MAX_ACCESS_TIME_FROM_ADV(80)  // Extra margin for 100 MHz async reads
 ) psram_inst (
     .clk(clk),
 

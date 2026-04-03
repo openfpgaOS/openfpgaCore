@@ -93,35 +93,3 @@ static inline uint32_t to_uncached(uint32_t addr) {
         return (addr & ~0xF0000000) | SDRAM_UNCACHED_BASE;
     return addr;
 }
-
-void dma_copy(void *dst, const void *src, uint32_t len) {
-    if (len == 0) return;
-    /* Evict both src (flush dirty data to SDRAM) and dst (prevent
-     * stale dirty lines from writing back over DMA results) */
-    dcache_evict_all();
-    dma_start_copy(to_uncached((uint32_t)(uintptr_t)dst),
-                   to_uncached((uint32_t)(uintptr_t)src), len);
-    dma_wait();
-    dcache_evict_all();
-}
-
-void dma_fill(void *dst, uint32_t value, uint32_t len) {
-    if (len == 0) return;
-    dcache_evict_all();
-    dma_start_fill(to_uncached((uint32_t)(uintptr_t)dst), value, len);
-    dma_wait();
-    dcache_evict_all();
-}
-
-void dma_copy_async(void *dst, const void *src, uint32_t len) {
-    if (len == 0) return;
-    dcache_evict_all();
-    dma_start_copy(to_uncached((uint32_t)(uintptr_t)dst),
-                   to_uncached((uint32_t)(uintptr_t)src), len);
-}
-
-void dma_fill_async(void *dst, uint32_t value, uint32_t len) {
-    if (len == 0) return;
-    dcache_evict_all();
-    dma_start_fill(to_uncached((uint32_t)(uintptr_t)dst), value, len);
-}

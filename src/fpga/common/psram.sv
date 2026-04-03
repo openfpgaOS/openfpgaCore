@@ -397,7 +397,7 @@ module psram #(
       end
       STATE_READ_DATA_RECEIVED: begin
         read_avail <= 1;
-        data_out <= cram_dq_r;  // Use posedge IOB-captured value
+        data_out <= cram_dq_r;  // IOB-captured value
 
         state <= STATE_NONE;
         cram_ce0_n <= 1;

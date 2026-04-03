@@ -24,12 +24,6 @@ extern void *dlcalloc(size_t, size_t);
 #define FD_STDERR       2
 #define FD_FIRST_FREE   3
 
-/* Read-ahead buffer size — must match ra_buf_storage[].
- * 4KB amortizes DMA overhead for small sequential reads
- * (e.g. BUILD engine LZW 2-byte length prefixes)
- * while keeping the static buffer in BSS small. */
-#define FD_READAHEAD_SIZE   (32 * 1024)
-
 typedef struct {
     int      in_use;
     uint32_t slot_id;       /* APF data slot ID */
@@ -41,15 +35,99 @@ typedef struct {
     uint32_t write_max;     /* High-water mark: max (offset) after any write */
 } fd_entry_t;
 
-/* Shared read-ahead buffer — reduces DMA count by caching the last
- * 4KB read.  Static BSS allocation, separate from DMA_BUFFER. */
-#define RA_BUF_SIZE  FD_READAHEAD_SIZE
-static uint8_t   ra_buf_storage[RA_BUF_SIZE];
-static uint32_t  ra_file_off;   /* File offset of ra_buf_storage[0] */
-static uint32_t  ra_valid;      /* Bytes of valid data in buffer */
-static int       ra_owner_fd = -1;
-
 static fd_entry_t fd_table[MAX_FDS];
+
+/* ======================================================================
+ * I/O cache — LRU read cache in CRAM1 (PSRAM, bridge-speed)
+ *
+ * Bridge DMA writes to CRAM1 at 74.25 MHz (bridge clock) with zero
+ * SDRAM contention. The CPU reads cached data from the CRAM1 cached
+ * alias (0x31xxxxxx) through D-cache for fast sequential access.
+ *
+ * Each entry holds one 32KB block, keyed by (slot_id, aligned_offset).
+ * On hit, data is served directly from CRAM1 — no bridge DMA needed.
+ * On miss, the LRU entry is evicted and refilled via bridge DMA.
+ *
+ * Layout in CRAM1 (after save region):
+ *   0x39280000 + N*32KB  = entry N data (uncached alias for bridge DMA)
+ *   0x31280000 + N*32KB  = entry N data (cached alias for CPU reads)
+ * ====================================================================== */
+
+#define IO_CACHE_ENTRIES    8
+#define IO_CACHE_BLOCK_SIZE (32 * 1024)
+#define IO_CACHE_BASE_UC   0x39300000   /* uncached: bridge DMA target */
+#define IO_CACHE_BASE_C    0x31300000   /* cached: CPU read path */
+#define IO_CACHE_BRIDGE    0x30300000   /* bridge address for DMA */
+
+typedef struct {
+    uint32_t slot_id;       /* data slot this block belongs to */
+    uint32_t file_off;      /* file offset (aligned to IO_CACHE_BLOCK_SIZE) */
+    uint32_t valid;         /* bytes of valid data in this block */
+    uint32_t lru;           /* access counter — higher = more recent */
+} io_cache_entry_t;
+
+static io_cache_entry_t io_cache[IO_CACHE_ENTRIES];
+static uint32_t io_lru_counter;
+
+/* Find a cache entry matching (slot, aligned_off), or return -1 */
+static int io_cache_lookup(uint32_t slot_id, uint32_t aligned_off) {
+    for (int i = 0; i < IO_CACHE_ENTRIES; i++) {
+        if (io_cache[i].valid > 0 &&
+            io_cache[i].slot_id == slot_id &&
+            io_cache[i].file_off == aligned_off) {
+            io_cache[i].lru = ++io_lru_counter;
+            return i;
+        }
+    }
+    return -1;
+}
+
+/* Find the LRU entry to evict */
+static int io_cache_evict(void) {
+    int best = 0;
+    uint32_t oldest = io_cache[0].lru;
+    for (int i = 1; i < IO_CACHE_ENTRIES; i++) {
+        if (io_cache[i].valid == 0) return i;  /* prefer empty slot */
+        if (io_cache[i].lru < oldest) {
+            oldest = io_cache[i].lru;
+            best = i;
+        }
+    }
+    return best;
+}
+
+/* Get the cached-alias pointer for entry N */
+static inline const uint8_t *io_cache_data(int entry) {
+    return (const uint8_t *)(IO_CACHE_BASE_C + entry * IO_CACHE_BLOCK_SIZE);
+}
+
+/* Fill a cache entry via bridge DMA directly to CRAM1.
+ * Bypasses of_file_read to avoid its SDRAM cache flush — the DMA
+ * target is uncached CRAM1 (PSRAM bus), so no CPU cache lines
+ * need eviction. This keeps the SDRAM bus idle during bridge DMA. */
+static int io_cache_fill(int entry, uint32_t slot_id,
+                          uint32_t aligned_off, uint32_t fill) {
+    uint32_t bridge_dst = IO_CACHE_BRIDGE + entry * IO_CACHE_BLOCK_SIZE;
+    void *cached_ptr = (void *)(IO_CACHE_BASE_C + entry * IO_CACHE_BLOCK_SIZE);
+
+    /* Invalidate cached alias so CPU sees fresh DMA data */
+    of_cache_inval_range(cached_ptr, fill);
+
+    /* Bridge DMA: SD card → CRAM1 (PSRAM bus, zero SDRAM contention).
+     * Uses raw DMA — no cache flush needed for uncached CRAM1 target. */
+    int rc = of_file_read_raw(slot_id, aligned_off, bridge_dst, fill);
+    if (rc < 0) return rc;
+
+    /* Invalidate cached alias again — bridge wrote behind D-cache */
+    of_cache_inval_range(cached_ptr, fill);
+
+    io_cache[entry].slot_id = slot_id;
+    io_cache[entry].file_off = aligned_off;
+    io_cache[entry].valid = fill;
+    io_cache[entry].lru = ++io_lru_counter;
+
+    return 0;
+}
 
 /* ======================================================================
  * File slot registry -- maps filenames to APF data slot IDs
@@ -234,58 +312,50 @@ static long sys_read(long fd, long buf, long count) {
         to_read = f->size - f->offset;
     }
 
-    /* Read-ahead buffering: serve small reads from a cached buffer
-     * to avoid per-call bridge DMA overhead (critical for BUILD engine
-     * LZW format which reads 2-byte length prefixes repeatedly). */
-
-    /* Switch read-ahead buffer ownership if needed */
-    if (ra_owner_fd != fd) {
-        ra_valid = 0;
-        ra_owner_fd = fd;
-    }
+    /* I/O cache: serve reads from CRAM1-backed LRU cache.
+     * Each cache block is 32KB, keyed by (slot_id, aligned_offset).
+     * Bridge DMA goes to CRAM1 (PSRAM bus) — zero SDRAM contention.
+     * CPU reads from CRAM1 cached alias through D-cache. */
 
     uint8_t *dst = (uint8_t *)buf;
     uint32_t done = 0;
 
     while (done < to_read) {
-        /* Serve from read-ahead buffer if offset is in range */
-        if (ra_valid > 0 &&
-            f->offset >= ra_file_off &&
-            f->offset < ra_file_off + ra_valid) {
-            uint32_t buf_off = f->offset - ra_file_off;
-            uint32_t avail = ra_valid - buf_off;
-            uint32_t n = to_read - done;
-            if (n > avail) n = avail;
-            memcpy(dst + done, ra_buf_storage + buf_off, n);
-            f->offset += n;
-            done += n;
-            continue;
-        }
+        uint32_t aligned_off = f->offset & ~(IO_CACHE_BLOCK_SIZE - 1);
+        uint32_t buf_off = f->offset - aligned_off;
 
-        /* Refill read-ahead buffer via DMA */
-        uint32_t fill = RA_BUF_SIZE;
-        if (f->size > 0 && f->offset + fill > f->size)
-            fill = f->size - f->offset;
-        if (fill == 0) break;
+        /* Look up in I/O cache */
+        int entry = io_cache_lookup(f->slot_id, aligned_off);
 
-        int rc = of_file_read(f->slot_id, f->offset,
-                               (void *)DMA_BUFFER, fill);
-        if (rc < 0) {
-            if (f->size == 0) {
-                f->size = f->offset;
-                break;
+        if (entry < 0) {
+            /* Cache miss — evict LRU and fill from bridge DMA */
+            entry = io_cache_evict();
+
+            uint32_t fill = IO_CACHE_BLOCK_SIZE;
+            if (f->size > 0 && aligned_off + fill > f->size)
+                fill = f->size - aligned_off;
+            if (fill == 0) break;
+
+            int rc = io_cache_fill(entry, f->slot_id, aligned_off, fill);
+            if (rc < 0) {
+                if (f->size == 0) {
+                    f->size = f->offset;
+                    break;
+                }
+                if (done > 0) break;
+                return (long)rc;
             }
-            if (done > 0) break;
-            return (long)rc;
         }
 
-        /* Copy from uncached alias to read-ahead buffer */
-        volatile uint8_t *src = (volatile uint8_t *)DMA_BUFFER_UNCACHED;
-        for (uint32_t i = 0; i < fill; i++)
-            ra_buf_storage[i] = src[i];
-        ra_file_off = f->offset;
-        ra_valid = fill;
-        /* Loop back to serve from buffer */
+        /* Serve from cache entry */
+        uint32_t avail = io_cache[entry].valid - buf_off;
+        uint32_t n = to_read - done;
+        if (n > avail) n = avail;
+        if (n == 0) break;
+
+        memcpy(dst + done, io_cache_data(entry) + buf_off, n);
+        f->offset += n;
+        done += n;
     }
 
     return (long)done;
@@ -401,12 +471,6 @@ static long sys_close(long fd) {
             of_save_flush_size(fd_table[fd].save_slot, flush_sz);
     }
 
-    /* Invalidate read-ahead if this fd owned it */
-    if (ra_owner_fd == fd) {
-        ra_owner_fd = -1;
-        ra_valid = 0;
-    }
-
     fd_table[fd].in_use = 0;
     return 0;
 }
@@ -414,11 +478,11 @@ static long sys_close(long fd) {
 /* _llseek: (fd, offset_hi, offset_lo, &result, whence) — riscv32 uses this */
 static long sys_llseek(long fd, long off_hi, long off_lo,
                        long result_ptr, long whence) {
+    (void)off_hi; /* 32-bit offsets only */
     if (fd < 0 || fd >= MAX_FDS || !fd_table[fd].in_use)
         return -EBADF;
 
     fd_entry_t *f = &fd_table[fd];
-    /* We only support 32-bit offsets — ignore off_hi */
     long offset = off_lo;
     long new_offset;
 
@@ -434,14 +498,8 @@ static long sys_llseek(long fd, long off_hi, long off_lo,
 
     f->offset = (uint32_t)new_offset;
 
-    /* Invalidate read-ahead buffer only if the new offset falls outside
-     * the currently buffered range.  Forward seeks within the buffer
-     * (common pattern: skip a few bytes in a file) stay fast. */
-    if (ra_owner_fd == fd && ra_valid > 0) {
-        if (new_offset < (long)ra_file_off ||
-            new_offset >= (long)(ra_file_off + ra_valid))
-            ra_valid = 0;
-    }
+    /* I/O cache is keyed by (slot_id, aligned_offset) — seeks just
+     * change f->offset and the cache naturally serves the right block. */
 
     /* _llseek writes result to user pointer as 64-bit */
     if (result_ptr) {
@@ -763,12 +821,6 @@ long syscall_dispatch(long n, long a0, long a1, long a2,
     if (n == OF_SYS_GET_VERSION)
         return OF_API_VERSION;
 
-    /* Audio ring buffer: enqueue samples for kernel-side drain */
-    if (n == OF_SYS_AUDIO_ENQUEUE)
-        return of_audio_enqueue((const int16_t *)a0, (int)a1);
-    if (n == OF_SYS_AUDIO_RING_FREE)
-        return of_audio_ring_free();
-
     /* Idle hook: register a function called during DMA waits */
     if (n == OF_SYS_SET_IDLE_HOOK) {
         of_file_set_idle_hook((void (*)(void))a0);
@@ -934,9 +986,9 @@ void syscall_init(uintptr_t heap_start) {
     file_slot_count = 0;
     memset(file_slots, 0, sizeof(file_slots));
 
-    /* Reset read-ahead buffer */
-    ra_owner_fd = -1;
-    ra_valid = 0;
+    /* Reset I/O cache */
+    memset(io_cache, 0, sizeof(io_cache));
+    io_lru_counter = 0;
 
     /* Load file slot table from CRAM1 (populated by Chip32 loader) */
     file_slot_load_table();

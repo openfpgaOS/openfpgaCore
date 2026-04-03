@@ -131,7 +131,6 @@ module bram_word_model (
                 8'h08: read_data = fast_cycle[63:32];        // SYS_CYCLE_HI
                 8'h3C: read_data = {24'd0, ds_ready, 3'b000, ds_done_latched, ds_ack_latched, 2'b00};  // DS_STATUS
                 8'h68: read_data = 32'h00000000;             // SYS_GAME_ID
-                8'hD0: read_data = 32'h00000000;             // DMA_STATUS: idle
                 default: read_data = 32'h00000000;
                 endcase
             end else if (a[31:20] == 12'h000)

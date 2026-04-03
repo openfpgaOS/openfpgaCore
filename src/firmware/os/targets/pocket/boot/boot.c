@@ -14,9 +14,9 @@
 
 #include "../hal/regs.h"
 
-/* Debug variables (read by misaligned trap handler) */
-volatile unsigned int pd_dbg_stage = 0;
-volatile unsigned int pd_dbg_info = 0;
+/* Debug variables (read by misaligned trap handler) — must be in BRAM */
+volatile unsigned int __attribute__((section(".bss.boot"))) pd_dbg_stage;
+volatile unsigned int __attribute__((section(".bss.boot"))) pd_dbg_info;
 
 /* Data slot IDs */
 #define OS_SLOT_ID      1       /* OS binary */
@@ -462,17 +462,24 @@ static int boot_dma_read(uint32_t slot_id, uint32_t slot_offset,
 __attribute__((section(".text.boot")))
 static int boot_load_os_sd(void *dest, uint32_t total) {
     uint32_t done = 0;
-    uint32_t base_bridge = (uint32_t)(uintptr_t)dest - SDRAM_BASE;
+    /* Bridge DMA to SDRAM bounce, then CPU-copy to CRAM0 */
+    uint32_t bounce_bridge = DMA_BUFFER - SDRAM_BASE;
+    volatile uint32_t *bounce = (volatile uint32_t *)DMA_BUFFER;
+    uint32_t *cram_dst = (uint32_t *)dest;
 
     while (done < total) {
         uint32_t chunk = total - done;
         if (chunk > DMA_CHUNK_SIZE)
             chunk = DMA_CHUNK_SIZE;
 
-        int rc = boot_dma_read(OS_SLOT_ID, done,
-                               base_bridge + done, chunk);
+        int rc = boot_dma_read(OS_SLOT_ID, done, bounce_bridge, chunk);
         if (rc < 0)
             return rc;
+
+        uint32_t words = (chunk + 3) / 4;
+        for (uint32_t i = 0; i < words; i++)
+            cram_dst[done / 4 + i] = bounce[i];
+
         done += chunk;
     }
     return 0;

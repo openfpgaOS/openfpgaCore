@@ -160,6 +160,7 @@ _trap_entry:
 
     /* Check mcause: is this an ecall (syscall)? */
     lw t0, 132(sp)      /* mcause */
+    bltz t0, _irq_handler      /* bit 31 set = interrupt */
     li t1, 11           /* Environment call from M-mode */
     beq t0, t1, _ecall_handler
 
@@ -171,6 +172,14 @@ _trap_entry:
     beqz a0, _fatal_trap
 
     /* Handled - restore and return */
+    j _trap_restore
+
+_irq_handler:
+    /* Machine external interrupt (mcause = 0x8000000B)
+     * No need to advance mepc — mret returns to interrupted insn */
+    mv a0, sp
+    la t0, irq_handler
+    jalr ra, t0
     j _trap_restore
 
 _ecall_handler:

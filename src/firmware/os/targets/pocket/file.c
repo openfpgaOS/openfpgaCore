@@ -54,7 +54,6 @@ void of_check_shutdown(void) {
  * return path. Note: the hook must NOT use syscalls that
  * trigger file I/O (would recurse into file_wait_complete). */
 static inline void call_idle_hook(void) {
-    of_check_shutdown();
     if (!idle_hook) return;
 
     /* Save trap CSRs that ecall would clobber */
@@ -88,10 +87,8 @@ static int file_wait_complete(void) {
         }
         if ((timeout & 0xFFFFF) == 0)
             of_term_printf(".");  /* heartbeat: visible every ~10ms */
-        if ((timeout & 0x3FF) == 0) {
-            of_audio_drain();
+        if ((timeout & 0x3FF) == 0)
             call_idle_hook();
-        }
     }
 
     /* Wait for DONE */
@@ -102,10 +99,8 @@ static int file_wait_complete(void) {
                         file_op_count, DS_STATUS & 0x3F);
             return OF_ERR_TIMEOUT;
         }
-        if ((timeout & 0x3FF) == 0) {
-            of_audio_drain();
+        if ((timeout & 0x3FF) == 0)
             call_idle_hook();
-        }
     }
 
     /* Check error bits */
@@ -145,49 +140,31 @@ int of_file_read(uint32_t slot_id, uint32_t slot_offset,
                   void *dest, uint32_t length) {
     uint32_t dest_addr = (uintptr_t)dest;
 
-    /* For SDRAM destinations: bounce through CRAM to avoid SDRAM contention.
-     * Bridge writes to CRAM (PSRAM bus), then DMA copies CRAM→SDRAM. */
-    /* TODO: CRAM bounce buffer for file reads — disabled pending investigation.
-     * When enabled, bridge writes to CRAM instead of SDRAM to avoid contention.
-     * Currently causes ELF load failures (cache invalidation or bridge timing). */
-    if (0 && addr_is_sdram(dest_addr) && length <= FILE_BOUNCE_SIZE) {
-        /* Invalidate CRAM bounce region in D-cache */
-        of_cache_inval_range((void *)FILE_BOUNCE_CPU, length);
+    /* CRAM0 destinations: bounce through SDRAM (direct bridge DMA to CRAM0 unreliable) */
+    if (dest_addr >= 0x30000000 && dest_addr < 0x31000000 && length <= FILE_BOUNCE_SIZE) {
+        uint32_t bounce_bridge = DMA_BUFFER - SDRAM_BASE;
 
-        /* Bridge DMA: SD → CRAM (PSRAM bus, SDRAM free for app) */
+        of_cache_flush_range((void *)DMA_BUFFER, length);
+
         DS_SLOT_ID     = slot_id;
         DS_SLOT_OFFSET = slot_offset;
-        DS_BRIDGE_ADDR = FILE_BOUNCE_BRIDGE;
+        DS_BRIDGE_ADDR = bounce_bridge;
         DS_LENGTH      = length;
         DS_COMMAND     = OF_FILE_CMD_READ;
 
         int rc = file_wait_complete();
         if (rc < 0) return rc;
 
-        /* Invalidate CRAM in D-cache (bridge wrote behind our back) */
-        of_cache_inval_range((void *)FILE_BOUNCE_CPU, length);
-
-        /* Copy CRAM → SDRAM via CPU memcpy */
-        memcpy(dest, (const void *)FILE_BOUNCE_CPU, length);
+        of_cache_inval_range((void *)DMA_BUFFER, length);
+        memcpy(dest, (const void *)DMA_BUFFER, length);
 
         return 0;
     }
 
-    /* Direct path: non-SDRAM destinations or fallback */
+    /* Direct path: SDRAM and other destinations */
     uint32_t bridge_addr = cpu_to_bridge(dest);
 
     of_cache_flush_range(dest, length);
-
-    /* Wait for bridge to be idle before issuing a new command.
-     * Without this, the FPGA dispatch guard silently drops the command
-     * if target_ack_s is still high from a previous operation (CDC lag),
-     * and file_wait_complete hangs waiting for an ACK that never comes. */
-    {
-        uint32_t wait = DMA_TIMEOUT;
-        while (!(DS_STATUS & DS_STATUS_READY)) {
-            if (--wait == 0) return OF_ERR_TIMEOUT;
-        }
-    }
 
     DS_SLOT_ID     = slot_id;
     DS_SLOT_OFFSET = slot_offset;
@@ -206,6 +183,26 @@ int of_file_read(uint32_t slot_id, uint32_t slot_offset,
 /* Invalidate D-cache for CRAM cached aliases after any bridge
  * operation that writes to CRAM. The bridge bypasses the CPU
  * entirely, so cached reads would return stale data. */
+int of_file_read_raw(uint32_t slot_id, uint32_t slot_offset,
+                      uint32_t bridge_addr, uint32_t length) {
+    /* Wait for bridge idle — the dispatch guard silently drops
+     * commands if target_ack_s is still high from a previous op. */
+    {
+        uint32_t wait = DMA_TIMEOUT;
+        while (!(DS_STATUS & DS_STATUS_READY)) {
+            if (--wait == 0) return OF_ERR_TIMEOUT;
+        }
+    }
+
+    DS_SLOT_ID     = slot_id;
+    DS_SLOT_OFFSET = slot_offset;
+    DS_BRIDGE_ADDR = bridge_addr;
+    DS_LENGTH      = length;
+    DS_COMMAND     = OF_FILE_CMD_READ;
+
+    return file_wait_complete();
+}
+
 void of_file_inval_cram(uint32_t bridge_addr, uint32_t length) {
     /* Bridge addresses 0x20000000-0x20FFFFFF map to CRAM0 (CPU 0x30000000)
      * Bridge addresses 0x30000000-0x30FFFFFF map to CRAM1 (CPU 0x31000000)

@@ -34,6 +34,11 @@ module tb_system (
     input  wire [23:0] sd_bd_addr,    // 24-bit word address
     input  wire [31:0] sd_bd_wdata,
 
+    // PSRAM/CRAM0 backdoor (for OS binary preload)
+    input  wire        ps_bd_we,
+    input  wire [23:0] ps_bd_addr,
+    input  wire [31:0] ps_bd_wdata,
+
     // Debug: expose fetch and LSU addresses for PC tracing
     output wire [31:0] dbg_fetch_addr,
     output wire        dbg_fetch_valid,
@@ -77,57 +82,78 @@ wire [3:0]  psram_wstrb;
 wire        psram_bvalid;
 wire [1:0]  psram_bresp;
 
-// PSRAM stub: accept and drop all transactions (no actual memory)
-// Prevents CPU hang when OS writes to SRAM/PSRAM regions
-reg psram_stub_state;
-localparam PS_IDLE = 0, PS_WDATA = 1;
+// PSRAM memory model: 16 MB backing store for CRAM0 (OS + app code)
+// AXI4 addresses arrive as 0x30xxxxxx (CRAM0) or 0x31xxxxxx (CRAM1)
+// from cpu_system. Word address = addr[23:2].
+reg [31:0] psram_mem [0:4194303];  // 16 MW = 16 MB (CRAM0 only)
 
-assign psram_arready = (psram_stub_state == PS_IDLE);
-assign psram_awready = (psram_stub_state == PS_IDLE);
-assign psram_wready = 1;  // Always accept W beats
+// Backdoor write port for preloading OS binary
+always @(posedge clk)
+    if (ps_bd_we) psram_mem[ps_bd_addr[21:0]] <= ps_bd_wdata;
 
-// Read: return 0 immediately
+// Read FSM
 reg psram_r_pending;
 reg [7:0] psram_r_cnt, psram_r_len;
+reg [31:0] psram_r_addr;
+assign psram_arready = !psram_r_pending;
 assign psram_rvalid = psram_r_pending;
-assign psram_rdata = 32'h0;
+assign psram_rdata = psram_mem[psram_r_addr[23:2]];
 assign psram_rresp = 2'b00;
 assign psram_rlast = (psram_r_cnt == psram_r_len);
 
-// Write: accept and respond immediately
+// Write FSM
+reg psram_w_active;
+reg [31:0] psram_w_addr;
 reg psram_b_pending;
+assign psram_awready = !psram_w_active && !psram_b_pending;
+assign psram_wready = psram_w_active;
 assign psram_bvalid = psram_b_pending;
 assign psram_bresp = 2'b00;
 
 always @(posedge clk) begin
     if (!reset_n) begin
         psram_r_pending <= 0;
-        psram_b_pending <= 0;
         psram_r_cnt <= 0;
         psram_r_len <= 0;
+        psram_r_addr <= 0;
+        psram_w_active <= 0;
+        psram_w_addr <= 0;
+        psram_b_pending <= 0;
     end else begin
         // Read handling
         if (psram_arvalid && psram_arready) begin
             psram_r_pending <= 1;
             psram_r_cnt <= 0;
             psram_r_len <= psram_arlen;
-        end
-        if (psram_r_pending && psram_rlast) begin
-            psram_r_pending <= 0;
+            psram_r_addr <= psram_araddr;
         end else if (psram_r_pending) begin
-            psram_r_cnt <= psram_r_cnt + 1;
+            if (psram_rlast) begin
+                psram_r_pending <= 0;
+            end else begin
+                psram_r_cnt <= psram_r_cnt + 1;
+                psram_r_addr <= psram_r_addr + 4;
+            end
         end
 
         // Write handling
         if (psram_awvalid && psram_awready) begin
-            psram_b_pending <= 0;  // Will set after wlast
+            psram_w_active <= 1;
+            psram_w_addr <= psram_awaddr;
         end
-        if (psram_wvalid && psram_wready && psram_wlast) begin
-            psram_b_pending <= 1;
+        if (psram_w_active && psram_wvalid) begin
+            // Byte-strobe write
+            if (psram_wstrb[0]) psram_mem[psram_w_addr[23:2]][7:0]   <= psram_wdata[7:0];
+            if (psram_wstrb[1]) psram_mem[psram_w_addr[23:2]][15:8]  <= psram_wdata[15:8];
+            if (psram_wstrb[2]) psram_mem[psram_w_addr[23:2]][23:16] <= psram_wdata[23:16];
+            if (psram_wstrb[3]) psram_mem[psram_w_addr[23:2]][31:24] <= psram_wdata[31:24];
+            psram_w_addr <= psram_w_addr + 4;
+            if (psram_wlast) begin
+                psram_w_active <= 0;
+                psram_b_pending <= 1;
+            end
         end
-        if (psram_b_pending && 1'b1) begin  // bready always 1 from cpu_system
+        if (psram_b_pending)
             psram_b_pending <= 0;
-        end
     end
 end
 
@@ -190,7 +216,8 @@ cpu_system cpu (
     .m_local_wvalid(local_wvalid), .m_local_wready(local_wready),
     .m_local_wdata(local_wdata), .m_local_wstrb(local_wstrb),
     .m_local_wlast(local_wlast),
-    .m_local_bvalid(local_bvalid), .m_local_bresp(local_bresp)
+    .m_local_bvalid(local_bvalid), .m_local_bresp(local_bresp),
+    .int_m_external(1'b0)
 );
 
 // ============================================================

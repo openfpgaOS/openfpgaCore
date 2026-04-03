@@ -407,18 +407,18 @@ wire crt_blankn;
 assign crt_csync = ~(HSync ^ VSync);
 assign crt_blankn   = ~(crt_hblank | crt_vblank);
 
-// Analogizer/UART cart pin mux: UART owns bank0 + pin31 when Analogizer is disabled
+// Analogizer/UART cart pin mux: SNAC owns bank0 + pin31 when active, else UART
 wire [7:4] ana_cart_bank0;
 wire       ana_cart_bank0_dir;
 wire       ana_cart_pin31;
 wire       ana_cart_pin31_dir;
+wire       snac_active = analogizer_ena && (snac_cont_type != 5'h0);
 
-// UART always owns cart pins (Analogizer disabled for debug builds)
-// TODO: add runtime switch when Analogizer + UART coexistence is needed
-assign cart_tran_bank0     = {uart_tx_serial, uart_tx_serial, uart_tx_serial, uart_tx_serial};
-assign cart_tran_bank0_dir = 1'b1;   // output for UART TX
-assign cart_tran_pin31     = 1'bZ;    // input for UART RX
-assign cart_tran_pin31_dir = 1'b0;   // input
+assign cart_tran_bank0     = snac_active ? ana_cart_bank0 :
+                             {uart_tx_serial, uart_tx_serial, uart_tx_serial, uart_tx_serial};
+assign cart_tran_bank0_dir = snac_active ? ana_cart_bank0_dir : 1'b1;
+assign cart_tran_pin31     = snac_active ? ana_cart_pin31 : 1'bZ;
+assign cart_tran_pin31_dir = snac_active ? ana_cart_pin31_dir : 1'b0;
 
 openFPGA_Pocket_Analogizer #(
     .MASTER_CLK_FREQ(49_152_000),
@@ -776,7 +776,7 @@ wire        psram_mux_rdata_valid;
 // Audio output interface
 wire        audio_sample_wr;
 wire [31:0] audio_sample_data;
-wire [10:0] audio_fifo_level;
+wire [7:0]  audio_fifo_level;
 wire        audio_fifo_full;
 
 // OPL3 (YMF262) hardware interface
@@ -996,7 +996,7 @@ dcfifo bridge_wr_fifo (
     .rdreq   (bridge_wr_fifo_drain),
     .q       (bridge_wr_fifo_q),
     .rdempty (bridge_wr_fifo_empty),
-    .aclr    (1'b0),
+    .aclr    (~reset_n_apf),
     .wrusedw (),
     .wrempty (),
     .rdfull  (),
@@ -1307,7 +1307,7 @@ dcfifo cram0_wr_fifo (
     .rdreq   (cram0_wr_fifo_drain),
     .q       (cram0_wr_fifo_q),
     .rdempty (cram0_wr_fifo_empty),
-    .aclr    (1'b0),
+    .aclr    (~reset_n_apf),
     .wrusedw (), .wrempty (), .rdfull (), .rdusedw ()
 );
 defparam cram0_wr_fifo.intended_device_family = "Cyclone V",
@@ -1421,7 +1421,7 @@ dcfifo sram_wr_fifo (
     .rdreq   (sram_wr_fifo_drain),
     .q       (sram_wr_fifo_q),
     .rdempty (sram_wr_fifo_empty),
-    .aclr    (1'b0),
+    .aclr    (~reset_n_apf),
     .wrusedw (), .wrempty (), .rdfull (), .rdusedw ()
 );
 defparam sram_wr_fifo.intended_device_family = "Cyclone V",
@@ -1702,13 +1702,70 @@ always @(posedge clk_74a) begin
         save_sizes[save_dt_slot_sync] <= save_dt_size_sync;
 end
 
-// Cycling FSM: continuously write per-slot sizes to datatable
+// Datatable slot size query: CDC from CPU (clk_ram_controller) → clk_74a → back
+wire [9:0]  cpu_dt_query_addr;
+wire        cpu_dt_query_toggle;
+wire [31:0] cpu_dt_query_data;
+wire        cpu_dt_query_valid;
+
+// CDC: toggle-based request from CPU to clk_74a
+reg [2:0] dt_toggle_sync = 3'b000;
+always @(posedge clk_74a)
+    dt_toggle_sync <= {dt_toggle_sync[1:0], cpu_dt_query_toggle};
+wire dt_req_rise = dt_toggle_sync[1] ^ dt_toggle_sync[2];  // any change = new request
+
+// Latch query address (stable before req rises)
+reg [9:0] dt_addr_latch;
+always @(posedge clk_ram_controller)
+    dt_addr_latch <= cpu_dt_query_addr;
+reg [9:0] dt_addr_sync;
+always @(posedge clk_74a)
+    dt_addr_sync <= dt_addr_latch;
+
+// Query state machine: pause cycling FSM, read datatable, resume
+reg        dt_reading = 0;
+reg [31:0] dt_result = 0;
+reg        dt_result_toggle = 1;  // init opposite of dt_query_toggle (0) so valid starts low
+reg [1:0]  dt_read_cnt = 0;
+
+// CDC: result + toggle back to CPU domain
+reg [31:0] dt_result_sync1, dt_result_sync2;
+reg        dt_rtoggle_sync1, dt_rtoggle_sync2;
+always @(posedge clk_ram_controller) begin
+    dt_result_sync1 <= dt_result;
+    dt_result_sync2 <= dt_result_sync1;
+    dt_rtoggle_sync1 <= dt_result_toggle;
+    dt_rtoggle_sync2 <= dt_rtoggle_sync1;
+end
+assign cpu_dt_query_data = dt_result_sync2;
+assign cpu_dt_query_valid = (dt_rtoggle_sync2 == cpu_dt_query_toggle);
+
+// Cycling FSM: continuously write per-slot sizes to datatable,
+// pausing briefly for CPU datatable reads.
 reg [3:0] save_dt_idx;
 always @(posedge clk_74a) begin
-    datatable_wren <= 1;
-    datatable_addr <= 10'd15 + {6'd0, save_dt_idx[3:0]} * 10'd2;
-    datatable_data <= save_sizes[save_dt_idx];
-    save_dt_idx <= (save_dt_idx == 4'd9) ? 4'd0 : save_dt_idx + 4'd1;
+    if (dt_req_rise) begin
+        // CPU requested a datatable read — pause cycling, set read address
+        dt_reading <= 1;
+        dt_read_cnt <= 0;
+        datatable_wren <= 0;
+        datatable_addr <= dt_addr_sync;
+    end else if (dt_reading) begin
+        datatable_wren <= 0;
+        dt_read_cnt <= dt_read_cnt + 1;
+        if (dt_read_cnt == 2'd1) begin
+            // BRAM output valid after 1 cycle — capture result + toggle
+            dt_result <= datatable_q;
+            dt_result_toggle <= dt_toggle_sync[2];
+            dt_reading <= 0;
+        end
+    end else begin
+        // Normal cycling: write save sizes
+        datatable_wren <= 1;
+        datatable_addr <= 10'd15 + {6'd0, save_dt_idx[3:0]} * 10'd2;
+        datatable_data <= save_sizes[save_dt_idx];
+        save_dt_idx <= (save_dt_idx == 4'd9) ? 4'd0 : save_dt_idx + 4'd1;
+    end
 end
 
 // Shutdown handshake CDC
@@ -1932,7 +1989,8 @@ assign video_hs = vidout_hs;
         .m_local_wstrb(cpu_m_local_wstrb),
         .m_local_wlast(cpu_m_local_wlast),
         .m_local_bvalid(cpu_m_local_bvalid),
-        .m_local_bresp(cpu_m_local_bresp)
+        .m_local_bresp(cpu_m_local_bresp),
+        .int_m_external(adma_irq)
     );
 
     // AXI4 peripheral slave
@@ -2048,60 +2106,23 @@ assign video_hs = vidout_hs;
         // Shutdown handshake
         .shutdown_pending(shutdown_pending_cpu),
         .shutdown_ack(shutdown_ack_cpu),
-        // DMA engine
-        .dma_src(dma_src_w),
-        .dma_dst(dma_dst_w),
-        .dma_len(dma_len_w),
-        .dma_start(dma_start_w),
-        .dma_fill_mode(dma_fill_mode_w),
-        .dma_busy(dma_busy_w),
         .adma_enable(adma_enable),
         .adma_ring_base(adma_ring_base),
         .adma_ring_size_log(adma_ring_size_log),
         .adma_ring_wptr(adma_ring_wptr),
-        .adma_ring_rptr(adma_ring_rptr)
+        .adma_ring_rptr(adma_ring_rptr),
+        .adma_irq_enable(adma_irq_enable),
+        .adma_threshold(adma_threshold),
+        .adma_irq_pending(adma_irq_pending),
+        .adma_irq_clear(adma_irq_clear),
+        // Datatable slot size query
+        .dt_query_addr(cpu_dt_query_addr),
+        .dt_query_toggle(cpu_dt_query_toggle),
+        .dt_query_data(cpu_dt_query_data),
+        .dt_query_valid(cpu_dt_query_valid)
     );
 
-    // DMA engine — memory-to-memory copy/fill via SDRAM arbiter M1
-    wire [31:0] dma_src_w, dma_dst_w, dma_len_w;
-    wire        dma_start_w, dma_fill_mode_w, dma_busy_w;
-    wire        dma_m_arvalid, dma_m_arready;
-    wire [31:0] dma_m_araddr;
-    wire [7:0]  dma_m_arlen;
-    wire        dma_m_rvalid;
-    wire [31:0] dma_m_rdata;
-    wire [1:0]  dma_m_rresp;
-    wire        dma_m_rlast;
-    wire        dma_m_awvalid, dma_m_awready;
-    wire [31:0] dma_m_awaddr;
-    wire [7:0]  dma_m_awlen;
-    wire        dma_m_wvalid, dma_m_wready;
-    wire [31:0] dma_m_wdata;
-    wire [3:0]  dma_m_wstrb;
-    wire        dma_m_wlast;
-    wire        dma_m_bvalid;
-    wire [1:0]  dma_m_bresp;
-
-    dma_engine dma_inst (
-        .clk(clk_cpu),
-        .reset_n(reset_n),
-        .src_addr(dma_src_w),
-        .dst_addr(dma_dst_w),
-        .length(dma_len_w),
-        .start(dma_start_w),
-        .fill_mode(dma_fill_mode_w),
-        .busy(dma_busy_w),
-        .m_arvalid(dma_m_arvalid), .m_arready(dma_m_arready),
-        .m_araddr(dma_m_araddr),   .m_arlen(dma_m_arlen),
-        .m_rvalid(dma_m_rvalid),   .m_rdata(dma_m_rdata),
-        .m_rresp(dma_m_rresp),     .m_rlast(dma_m_rlast),
-        .m_awvalid(dma_m_awvalid), .m_awready(dma_m_awready),
-        .m_awaddr(dma_m_awaddr),   .m_awlen(dma_m_awlen),
-        .m_wvalid(dma_m_wvalid),   .m_wready(dma_m_wready),
-        .m_wdata(dma_m_wdata),     .m_wstrb(dma_m_wstrb),
-        .m_wlast(dma_m_wlast),
-        .m_bvalid(dma_m_bvalid),   .m_bresp(dma_m_bresp)
-    );
+    // DMA engine removed — apps use CPU memcpy instead
 
     // Slave → io_sdram pulse adapter
     reg sdram_accepted_r;
@@ -2180,17 +2201,17 @@ assign video_hs = vidout_hs;
         .m0_wdata(32'b0),   .m0_wstrb(4'b0),
         .m0_wlast(1'b0),
         .m0_bvalid(),       .m0_bresp(),
-        // M1: DMA engine
-        .m1_arvalid(dma_m_arvalid), .m1_arready(dma_m_arready),
-        .m1_araddr(dma_m_araddr),   .m1_arlen(dma_m_arlen),
-        .m1_rvalid(dma_m_rvalid),   .m1_rdata(dma_m_rdata),
-        .m1_rresp(dma_m_rresp),     .m1_rlast(dma_m_rlast),
-        .m1_awvalid(dma_m_awvalid), .m1_awready(dma_m_awready),
-        .m1_awaddr(dma_m_awaddr),   .m1_awlen(dma_m_awlen),
-        .m1_wvalid(dma_m_wvalid),   .m1_wready(dma_m_wready),
-        .m1_wdata(dma_m_wdata),     .m1_wstrb(dma_m_wstrb),
-        .m1_wlast(dma_m_wlast),
-        .m1_bvalid(dma_m_bvalid),   .m1_bresp(dma_m_bresp),
+        // M1: unused (DMA engine removed)
+        .m1_arvalid(1'b0), .m1_arready(),
+        .m1_araddr(32'b0),  .m1_arlen(8'b0),
+        .m1_rvalid(),       .m1_rdata(),
+        .m1_rresp(),        .m1_rlast(),
+        .m1_awvalid(1'b0), .m1_awready(),
+        .m1_awaddr(32'b0),  .m1_awlen(8'b0),
+        .m1_wvalid(1'b0),  .m1_wready(),
+        .m1_wdata(32'b0),   .m1_wstrb(4'b0),
+        .m1_wlast(1'b0),
+        .m1_bvalid(),       .m1_bresp(),
         // M2: CPU
         .m2_arvalid(cpu_m_sdram_arvalid), .m2_arready(cpu_m_sdram_arready),
         .m2_araddr(cpu_m_sdram_araddr),   .m2_arlen(cpu_m_sdram_arlen),
@@ -2525,6 +2546,11 @@ wire        adma_m_rvalid;
 wire [31:0] adma_m_rdata;
 wire [1:0]  adma_m_rresp;
 wire        adma_m_rlast;
+wire        adma_irq_enable;
+wire [7:0]  adma_threshold;
+wire        adma_irq_clear;
+wire        adma_irq;
+wire        adma_irq_pending = adma_irq;
 
 wire        audio_mux_wr = adma_enable ? adma_sample_wr : audio_sample_wr;
 wire [31:0] audio_mux_data = adma_enable ? adma_sample_data : audio_sample_data;
@@ -2554,6 +2580,10 @@ audio_dma adma (
     .ring_size_log(adma_ring_size_log),
     .ring_wptr(adma_ring_wptr),
     .ring_rptr(adma_ring_rptr),
+    .irq_enable(adma_irq_enable),
+    .threshold(adma_threshold),
+    .irq_clear(adma_irq_clear),
+    .irq(adma_irq),
     .fifo_level(audio_fifo_level),
     .fifo_full(audio_fifo_full),
     .sample_wr(adma_sample_wr),

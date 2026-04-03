@@ -57,6 +57,15 @@ static void sdram_write(uint32_t word_addr, uint32_t data) {
     tb->sd_bd_we = 0;
 }
 
+// PSRAM/CRAM0 backdoor write (word address relative to CRAM0 base 0x30000000)
+static void psram_write(uint32_t word_addr, uint32_t data) {
+    tb->ps_bd_we = 1;
+    tb->ps_bd_addr = word_addr;
+    tb->ps_bd_wdata = data;
+    tick();
+    tb->ps_bd_we = 0;
+}
+
 static uint32_t bram_read(uint32_t word_addr) {
     tb->bd_addr = word_addr;
     tb->eval();
@@ -83,6 +92,32 @@ static int load_sdram_binary(const char *path, uint32_t word_offset) {
         for (int b = 0; b < 4 && (i + b) < size; b++)
             word |= (uint32_t)buf[i + b] << (b * 8);
         sdram_write(word_offset + i / 4, word);
+    }
+
+    free(buf);
+    return 0;
+}
+
+// Load raw binary into PSRAM/CRAM0 (word address offset from CRAM0 base)
+static int load_psram_binary(const char *path, uint32_t word_offset) {
+    FILE *f = fopen(path, "rb");
+    if (!f) { printf("ERROR: can't open %s\n", path); return -1; }
+
+    fseek(f, 0, SEEK_END);
+    long size = ftell(f);
+    fseek(f, 0, SEEK_SET);
+
+    printf("Loading %s into CRAM0 (%ld bytes, %ld words)\n", path, size, size / 4);
+
+    uint8_t *buf = (uint8_t *)malloc(size);
+    fread(buf, 1, size, f);
+    fclose(f);
+
+    for (long i = 0; i < size; i += 4) {
+        uint32_t word = 0;
+        for (int b = 0; b < 4 && (i + b) < size; b++)
+            word |= (uint32_t)buf[i + b] << (b * 8);
+        psram_write(word_offset + i / 4, word);
     }
 
     free(buf);
@@ -207,6 +242,9 @@ int main(int argc, char **argv) {
     tb->sd_bd_we = 0;
     tb->sd_bd_addr = 0;
     tb->sd_bd_wdata = 0;
+    tb->ps_bd_we = 0;
+    tb->ps_bd_addr = 0;
+    tb->ps_bd_wdata = 0;
     for (int i = 0; i < 10; i++) tick();
 
     // Load firmware
@@ -214,7 +252,8 @@ int main(int argc, char **argv) {
         printf("Loading boot: ");
         if (load_binary(bram_path) < 0) return 1;
         if (sdram_path) {
-            if (load_sdram_binary(sdram_path, 0x80000) < 0) return 1;
+            /* OS loads to CRAM0 at 0x30000000 (word offset 0) */
+            if (load_psram_binary(sdram_path, 0) < 0) return 1;
         }
         // Load app ELF: headers at DMA_BUFFER, segments at target address
         if (app_elf_path) {
@@ -235,17 +274,29 @@ int main(int argc, char **argv) {
                     uint32_t p_offset = phdr[4]|(phdr[5]<<8)|(phdr[6]<<16)|(phdr[7]<<24);
                     uint32_t p_vaddr = phdr[8]|(phdr[9]<<8)|(phdr[10]<<16)|(phdr[11]<<24);
                     uint32_t p_filesz = phdr[16]|(phdr[17]<<8)|(phdr[18]<<16)|(phdr[19]<<24);
-                    if (p_filesz == 0 || p_vaddr < 0x10000000) continue;
-                    uint32_t sdram_word_off = (p_vaddr - 0x10000000) / 4;
+                    if (p_filesz == 0) continue;
                     printf("Preloading ELF segment: 0x%08x (%d bytes)\n", p_vaddr, p_filesz);
                     fseek(ef, p_offset, SEEK_SET);
                     uint8_t *sbuf = (uint8_t *)malloc(p_filesz);
                     fread(sbuf, 1, p_filesz, ef);
-                    for (uint32_t i = 0; i < p_filesz; i += 4) {
-                        uint32_t word = 0;
-                        for (int b = 0; b < 4 && (i+b) < p_filesz; b++)
-                            word |= (uint32_t)sbuf[i+b] << (b*8);
-                        sdram_write(sdram_word_off + i/4, word);
+                    if (p_vaddr >= 0x30000000 && p_vaddr < 0x31000000) {
+                        /* CRAM0 segment */
+                        uint32_t psram_word_off = (p_vaddr - 0x30000000) / 4;
+                        for (uint32_t i = 0; i < p_filesz; i += 4) {
+                            uint32_t word = 0;
+                            for (int b = 0; b < 4 && (i+b) < p_filesz; b++)
+                                word |= (uint32_t)sbuf[i+b] << (b*8);
+                            psram_write(psram_word_off + i/4, word);
+                        }
+                    } else if (p_vaddr >= 0x10000000) {
+                        /* SDRAM segment */
+                        uint32_t sdram_word_off = (p_vaddr - 0x10000000) / 4;
+                        for (uint32_t i = 0; i < p_filesz; i += 4) {
+                            uint32_t word = 0;
+                            for (int b = 0; b < 4 && (i+b) < p_filesz; b++)
+                                word |= (uint32_t)sbuf[i+b] << (b*8);
+                            sdram_write(sdram_word_off + i/4, word);
+                        }
                     }
                     free(sbuf);
                 }
@@ -277,6 +328,11 @@ int main(int argc, char **argv) {
         if (!bram_path && i % 1000 == 999) {
             status = bram_read(RESULT_STATUS_ADDR);
             if (status != 0) break;
+        }
+        // PC sampling — print every 50K cycles
+        if (i % 50000 == 49999) {
+            uint32_t pc = tb->dbg_fetch_addr;
+            fprintf(stderr, "[cycle %7d] PC=0x%08x\n", i+1, pc);
         }
         // Progress indicator
         if (i > 100000 && i % 500000 == 499999) {

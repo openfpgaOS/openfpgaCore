@@ -185,7 +185,6 @@ always @(posedge clk) begin
             8'h08: local_r_data <= fast_cycle[63:32]; // SYS_CYCLE_HI
             8'h3C: local_r_data <= 32'h00000023;  // DS_STATUS: ACK+DONE+READY
             8'h68: local_r_data <= 32'h00000000;  // SYS_GAME_ID
-            8'hD0: local_r_data <= 32'h00000000;  // DMA_STATUS: idle
             default: local_r_data <= 32'h00000000;
             endcase
         end else if (l_raddr[31:20] == 12'h000)
