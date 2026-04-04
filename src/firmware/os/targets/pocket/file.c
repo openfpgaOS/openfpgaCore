@@ -137,7 +137,6 @@ static int file_wait_complete(void) {
 }
 
 /* Check if address is in SDRAM (DMA-capable) range */
-#define FILE_BOUNCE_SIZE    DMA_CHUNK_SIZE  /* 512KB max per DMA */
 
 int of_file_read(uint32_t slot_id, uint32_t slot_offset,
                   void *dest, uint32_t length) {
@@ -153,7 +152,7 @@ int of_file_read(uint32_t slot_id, uint32_t slot_offset,
         DS_SLOT_OFFSET = slot_offset;
         DS_BRIDGE_ADDR = bridge_addr;
         DS_LENGTH      = length;
-        DS_COMMAND     = OF_FILE_CMD_READ;
+        DS_COMMAND     = DS_CMD_READ;
 
         int rc = file_wait_complete();
 
@@ -171,9 +170,9 @@ int of_file_read(uint32_t slot_id, uint32_t slot_offset,
 
     DS_SLOT_ID     = slot_id;
     DS_SLOT_OFFSET = slot_offset;
-    DS_BRIDGE_ADDR = 0x30000000;  /* CRAM1 base in bridge space */
+    DS_BRIDGE_ADDR = CRAM1_BRIDGE;  /* CRAM1 base in bridge space */
     DS_LENGTH      = length;
-    DS_COMMAND     = OF_FILE_CMD_READ;
+    DS_COMMAND     = DS_CMD_READ;
 
     int rc = file_wait_complete();
     if (rc < 0) return rc;
@@ -202,7 +201,7 @@ int of_file_read_raw(uint32_t slot_id, uint32_t slot_offset,
     DS_SLOT_OFFSET = slot_offset;
     DS_BRIDGE_ADDR = bridge_addr;
     DS_LENGTH      = length;
-    DS_COMMAND     = OF_FILE_CMD_READ;
+    DS_COMMAND     = DS_CMD_READ;
 
     return file_wait_complete();
 }
@@ -211,11 +210,11 @@ void of_file_inval_cram(uint32_t bridge_addr, uint32_t length) {
     /* Bridge addresses 0x20000000-0x20FFFFFF map to CRAM0 (CPU 0x30000000)
      * Bridge addresses 0x30000000-0x30FFFFFF map to CRAM1 (CPU 0x31000000)
      * Invalidate the cached alias so CPU reads see fresh bridge data. */
-    if (bridge_addr >= 0x20000000 && bridge_addr < 0x21000000) {
-        uint32_t offset = bridge_addr - 0x20000000;
+    if (bridge_addr >= CRAM0_BRIDGE && bridge_addr < CRAM0_BRIDGE + CRAM_SIZE) {
+        uint32_t offset = bridge_addr - CRAM0_BRIDGE;
         of_cache_inval_range((void *)(CRAM0_BASE + offset), length);
-    } else if (bridge_addr >= 0x30000000 && bridge_addr < 0x31000000) {
-        uint32_t offset = bridge_addr - 0x30000000;
+    } else if (bridge_addr >= CRAM1_BRIDGE && bridge_addr < CRAM1_BRIDGE + CRAM_SIZE) {
+        uint32_t offset = bridge_addr - CRAM1_BRIDGE;
         of_cache_inval_range((void *)(CRAM1_BASE + offset), length);
     }
 }
@@ -274,7 +273,7 @@ int of_file_get_name(uint32_t slot_id, char *name_out, uint32_t name_max) {
     /* Response struct at CRAM1 base in bridge address space.
      * APF writes: offset 0 = status, offset 4+ = filename (null-terminated) */
     DS_SLOT_ID     = slot_id;
-    DS_RESP_ADDR   = 0x30000000;  /* CRAM1 in bridge space */
+    DS_RESP_ADDR   = CRAM1_BRIDGE;  /* CRAM1 in bridge space */
     DS_COMMAND     = DS_CMD_GETFILE;
 
     int rc = file_wait_complete();
@@ -314,7 +313,7 @@ int of_file_slot_write(uint32_t slot_id, uint32_t bridge_addr, uint32_t length) 
     DS_SLOT_OFFSET = 0;
     DS_BRIDGE_ADDR = bridge_addr;
     DS_LENGTH      = length;
-    DS_COMMAND     = OF_FILE_CMD_WRITE;
+    DS_COMMAND     = DS_CMD_WRITE;
 
     return file_wait_complete();
 }
@@ -333,7 +332,7 @@ int of_file_slot_write_at(uint32_t slot_id, uint32_t slot_offset,
     DS_SLOT_OFFSET = slot_offset;
     DS_BRIDGE_ADDR = bridge_addr;
     DS_LENGTH      = length;
-    DS_COMMAND     = OF_FILE_CMD_WRITE;
+    DS_COMMAND     = DS_CMD_WRITE;
 
     return file_wait_complete();
 }
@@ -346,8 +345,8 @@ int of_file_read_chunked(uint32_t slot_id, uint32_t slot_offset,
 
     while (done < total) {
         uint32_t chunk = total - done;
-        if (chunk > FILE_BOUNCE_SIZE)
-            chunk = FILE_BOUNCE_SIZE;
+        if (chunk > DMA_CHUNK_SIZE)
+            chunk = DMA_CHUNK_SIZE;
 
         /* of_file_read handles CRAM bounce automatically for SDRAM dests */
         int rc = of_file_read(slot_id, slot_offset + done,

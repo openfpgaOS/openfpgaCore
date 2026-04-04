@@ -9,11 +9,6 @@
 #include <stdint.h>
 #include "../../api/of_error.h"
 
-/* File commands (written to DS_COMMAND register) */
-#define OF_FILE_CMD_READ       1
-#define OF_FILE_CMD_WRITE      2
-#define OF_FILE_CMD_OPENFILE   3
-
 /* Initialize file subsystem */
 void of_file_init(void);
 

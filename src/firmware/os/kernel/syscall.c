@@ -178,15 +178,6 @@ typedef struct {
 static file_slot_entry_t file_slots[MAX_FILE_SLOTS];
 static int file_slot_count;
 
-/* Probe data slots 1-6 to see which have files loaded.
- * Registers them so fopen("slot:N") works. Filename-based lookup
- * (fopen("game.dat")) requires apps to call of_file_slot_register(). */
-void file_slot_load_table(void) {
-    /* Nothing to probe at init — the bridge getfile command requires
-     * dedicated BRAM mapping not yet implemented. Apps can register
-     * filenames with of_file_slot_register() or use fopen("slot:N"). */
-}
-
 void file_slot_register(uint32_t slot_id, const char *filename) {
     if (file_slot_count >= MAX_FILE_SLOTS)
         return;
@@ -1064,7 +1055,4 @@ void syscall_init(uintptr_t heap_start) {
     /* Reset I/O cache */
     memset(io_cache, 0, sizeof(io_cache));
     io_lru_counter = 0;
-
-    /* Load file slot table from CRAM1 (populated by Chip32 loader) */
-    file_slot_load_table();
 }

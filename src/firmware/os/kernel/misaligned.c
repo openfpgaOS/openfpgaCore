@@ -4,6 +4,7 @@
  */
 
 #include "../hal/terminal.h"
+#include "../hal/regs.h"
 /* Debug variables (defined in main.c) */
 extern volatile unsigned int pd_dbg_stage;
 extern volatile unsigned int pd_dbg_info;
@@ -37,15 +38,12 @@ typedef struct {
 #define CAUSE_LOAD_MISALIGNED   4
 #define CAUSE_STORE_MISALIGNED  6
 
-/* Valid memory regions for emulation */
-#define BRAM_START      0x00000000
-#define BRAM_END        0x00010000
-#define SDRAM_START     0x10000000
-#define SDRAM_END       0x14000000
-#define PSRAM_START     0x30000000
-#define PSRAM_END       0x38000000
-#define SDRAM_UC_START  0x50000000  /* Uncached SDRAM alias */
-#define SDRAM_UC_END    0x54000000
+/* Valid memory regions for emulation (derived from hal/regs.h) */
+#define BRAM_END_ADDR       (BRAM_BASE + BRAM_SIZE)
+#define SDRAM_END_ADDR      (SDRAM_BASE + SDRAM_SIZE)
+#define CRAM_CACHED_START   CRAM0_BASE
+#define CRAM_CACHED_END     CRAM0_UNCACHED          /* 0x38000000 */
+#define SDRAM_UC_END_ADDR   (SDRAM_UNCACHED_BASE + SDRAM_SIZE)
 
 /* Check if address range is in valid memory */
 __attribute__((section(".text.boot")))
@@ -54,13 +52,13 @@ static int addr_valid(unsigned int addr, unsigned int len) {
     /* Check for overflow */
     if (end < addr) return 0;
     /* BRAM */
-    if (end < BRAM_END) return 1;  /* BRAM_START is 0, unsigned addr always >= 0 */
+    if (end < BRAM_END_ADDR) return 1;  /* BRAM_BASE is 0, unsigned addr always >= 0 */
     /* SDRAM (cached) */
-    if (addr >= SDRAM_START && end < SDRAM_END) return 1;
-    /* PSRAM */
-    if (addr >= PSRAM_START && end < PSRAM_END) return 1;
+    if (addr >= SDRAM_BASE && end < SDRAM_END_ADDR) return 1;
+    /* CRAM (cached: CRAM0 + CRAM1) */
+    if (addr >= CRAM_CACHED_START && end < CRAM_CACHED_END) return 1;
     /* SDRAM (uncached alias — used for PAK data) */
-    if (addr >= SDRAM_UC_START && end < SDRAM_UC_END) return 1;
+    if (addr >= SDRAM_UNCACHED_BASE && end < SDRAM_UC_END_ADDR) return 1;
     return 0;
 }
 

@@ -47,7 +47,7 @@ int of_audio_write(const int16_t *samples, int count) {
 
     /* Play via mixer voice 31 */
     MIX_VOICE_SEL = AUDIO_SCRATCH_VOICE;
-    MIX_VOICE_ADDR = (AUDIO_SCRATCH_CRAM1 - 0x39000000) >> 2;
+    MIX_VOICE_ADDR = (AUDIO_SCRATCH_CRAM1 - CRAM1_UNCACHED) >> 2;
     MIX_VOICE_LEN = count;
     MIX_VOICE_RATE = 0x10000;  /* 1:1 (48kHz native) */
     MIX_VOICE_CTRL = (15 << 4) | 1;  /* vol=15 (full), active=1 */

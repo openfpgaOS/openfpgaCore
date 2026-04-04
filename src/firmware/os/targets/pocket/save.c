@@ -88,7 +88,7 @@ int of_save_flush_size(int slot, uint32_t size) {
     SAVE_DT_SIZE = size;           /* writing SIZE triggers the commit */
 
     /* Tell the bridge to save the slot data to .sav file */
-    uint32_t bridge_addr = 0x30000000 + (uint32_t)slot * SAVE_SLOT_SIZE;
+    uint32_t bridge_addr = CRAM1_BRIDGE + (uint32_t)slot * SAVE_SLOT_SIZE;
     return of_file_slot_write(10 + (uint32_t)slot, bridge_addr, size);
 }
 

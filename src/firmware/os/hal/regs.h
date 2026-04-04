@@ -59,14 +59,14 @@
 #define CRAM1_UNCACHED      0x39000000      /* CRAM1 uncached (D-cache bypass) */
 #define CRAM_SIZE           (16 * 1024 * 1024)
 
+#define CRAM0_BRIDGE        0x20000000      /* CRAM0 in bridge address space */
+#define CRAM1_BRIDGE        0x30000000      /* CRAM1 in bridge address space */
+
 #define AUDIO_RING_ADDR     0x3A000000      /* Audio ring buffer in SRAM (32KB, separate bus) */
 
 #define SRAM_BASE           0x3A000000      /* SRAM uncached */
 #define SRAM_SIZE           (256 * 1024)
 
-/* Legacy alias */
-#define PSRAM_BASE          CRAM0_BASE
-#define PSRAM_SIZE          CRAM_SIZE
 
 /* ======================================================================
  * System Registers (0x40000000)
@@ -334,10 +334,10 @@ static inline uint32_t sdram_to_bridge(void *addr) {
 
 static inline uint32_t cpu_to_bridge(void *addr) {
     uint32_t a = (uint32_t)addr;
-    if (a >= 0x39000000 && a < 0x3A000000) return (a - 0x39000000) + 0x30000000; /* CRAM1 uncached */
-    if (a >= 0x38000000 && a < 0x39000000) return (a - 0x38000000) + 0x20000000; /* CRAM0 uncached */
-    if (a >= 0x31000000 && a < 0x32000000) return (a - 0x31000000) + 0x30000000; /* CRAM1 cached */
-    if (a >= 0x30000000 && a < 0x31000000) return (a - 0x30000000) + 0x20000000; /* CRAM0 cached */
+    if (a >= CRAM1_UNCACHED && a < CRAM1_UNCACHED + CRAM_SIZE) return (a - CRAM1_UNCACHED) + CRAM1_BRIDGE; /* CRAM1 uncached */
+    if (a >= CRAM0_UNCACHED && a < CRAM0_UNCACHED + CRAM_SIZE) return (a - CRAM0_UNCACHED) + CRAM0_BRIDGE; /* CRAM0 uncached */
+    if (a >= CRAM1_BASE && a < CRAM1_BASE + CRAM_SIZE) return (a - CRAM1_BASE) + CRAM1_BRIDGE; /* CRAM1 cached */
+    if (a >= CRAM0_BASE && a < CRAM0_BASE + CRAM_SIZE) return (a - CRAM0_BASE) + CRAM0_BRIDGE; /* CRAM0 cached */
     return a - SDRAM_BASE; /* SDRAM */
 }
 
