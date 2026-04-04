@@ -761,24 +761,6 @@ static long of_input_syscall(long n, long a0, long a1) {
     }
 }
 
-static long of_save_syscall(long n, long a0, long a1, long a2, long a3) {
-    switch (n) {
-    case OF_SYS_SAVE_READ:
-        return of_save_read((int)a0, (void *)a1, (uint32_t)a2, (uint32_t)a3);
-    case OF_SYS_SAVE_WRITE:
-        return of_save_write((int)a0, (const void *)a1, (uint32_t)a2, (uint32_t)a3);
-    case OF_SYS_SAVE_FLUSH:
-        of_save_flush((int)a0);
-        return 0;
-    case OF_SYS_SAVE_FLUSH_SIZE:
-        return of_save_flush_size((int)a0, (uint32_t)a1);
-    case OF_SYS_SAVE_ERASE:
-        of_save_erase((int)a0);
-        return 0;
-    default:
-        return -ENOSYS;
-    }
-}
 
 /* ======================================================================
  * Main syscall dispatch (called from trap handler via ecall)
@@ -911,9 +893,6 @@ long syscall_dispatch(long n, long a0, long a1, long a2,
         return of_audio_syscall(n, a0, a1);
     if (n >= 0x1020 && n < 0x1030)
         return of_input_syscall(n, a0, a1);
-    if (n >= 0x1030 && n < 0x1040)
-        return of_save_syscall(n, a0, a1, a2, a3);
-
     if (n == OF_SYS_ANALOGIZER_GET_STATE) {
         if (a0)
             memcpy((void *)a0, of_analogizer_get_state(),
@@ -923,35 +902,10 @@ long syscall_dispatch(long n, long a0, long a1, long a2,
     if (n == OF_SYS_ANALOGIZER_IS_ENABLED)
         return of_analogizer_is_enabled();
 
-    if (n == OF_SYS_TERM_PUTCHAR) {
-        of_term_putchar((char)a0);
-        return 0;
-    }
-    if (n == OF_SYS_TERM_CLEAR) {
-        of_term_clear();
-        return 0;
-    }
-    if (n == OF_SYS_TERM_SET_POS) {
-        of_term_set_pos((int)a0, (int)a1);
-        return 0;
-    }
-
     /* Networking syscalls (0x1060+) — replaces link cable */
     if (n >= 0x1060 && n <= 0x106A)
         return of_net_syscall(n, a0, a1, a2);
 
-    if (n == OF_SYS_TIMER_GET_US)
-        return (long)of_timer_get_us();
-    if (n == OF_SYS_TIMER_GET_MS)
-        return (long)of_timer_get_ms();
-    if (n == OF_SYS_TIMER_DELAY_US) {
-        of_timer_delay_us((uint32_t)a0);
-        return 0;
-    }
-    if (n == OF_SYS_TIMER_DELAY_MS) {
-        of_timer_delay_ms((uint32_t)a0);
-        return 0;
-    }
     if (n == OF_SYS_TIMER_SET_CALLBACK) {
         timer_callback = (void (*)(void))a0;
         if (a0 && a1 > 0) {
@@ -968,51 +922,8 @@ long syscall_dispatch(long n, long a0, long a1, long a2,
         return 0;
     }
 
-    if (n == OF_SYS_FILE_READ) {
-        /* Direct DMA syscall — of_file_read handles all cache
-         * coherency via cache eviction (before and after). */
-        return of_file_read((uint32_t)a0, (uint32_t)a1,
-                             (void *)a2, (uint32_t)a3);
-    }
-
-    if (n == OF_SYS_FILE_SIZE)
-        return of_file_size((uint32_t)a0);
-
     if (n == OF_SYS_GET_VERSION)
         return OF_API_VERSION;
-
-    /* Idle hook: register a function called during DMA waits */
-    if (n == OF_SYS_SET_IDLE_HOOK) {
-        of_file_set_idle_hook((void (*)(void))a0);
-        return 0;
-    }
-
-    /* File slot query: count */
-    if (n == OF_SYS_FILE_SLOT_COUNT)
-        return file_slot_count;
-
-    /* File slot register: a0 = slot_id, a1 = pointer to filename string */
-    if (n == OF_SYS_FILE_SLOT_REGISTER) {
-        if (a1)
-            file_slot_register((uint32_t)a0, (const char *)a1);
-        return 0;
-    }
-
-    /* File slot query: get entry
-     * a0 = index, a1 = pointer to { uint32_t slot_id; char name[32]; } */
-    if (n == OF_SYS_FILE_SLOT_GET) {
-        int idx = (int)a0;
-        if (idx < 0 || idx >= file_slot_count)
-            return -1;
-        if (a1) {
-            uint32_t *out = (uint32_t *)a1;
-            out[0] = file_slots[idx].slot_id;
-            char *name = (char *)&out[1];
-            for (int i = 0; i < FILE_SLOT_NAME_MAX; i++)
-                name[i] = file_slots[idx].filename[i];
-        }
-        return 0;
-    }
 
     /* Tile engine syscalls (0x1090+) */
     if (n >= 0x1090 && n < 0x10A0) {
