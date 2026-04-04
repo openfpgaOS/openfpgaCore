@@ -462,26 +462,24 @@ static int boot_dma_read(uint32_t slot_id, uint32_t slot_offset,
 __attribute__((section(".text.boot")))
 static int boot_load_os_sd(void *dest, uint32_t total) {
     uint32_t done = 0;
-    /* Bridge DMA to SDRAM bounce, then CPU-copy to CRAM0 */
-    uint32_t bounce_bridge = DMA_BUFFER - SDRAM_BASE;
-    volatile uint32_t *bounce = (volatile uint32_t *)DMA_BUFFER;
-    uint32_t *cram_dst = (uint32_t *)dest;
+    /* Direct DMA to CRAM0 — CPU runs from BRAM during boot, no conflict. */
+    uint32_t bridge_base = cpu_to_bridge(dest);
 
     while (done < total) {
         uint32_t chunk = total - done;
         if (chunk > DMA_CHUNK_SIZE)
             chunk = DMA_CHUNK_SIZE;
 
-        int rc = boot_dma_read(OS_SLOT_ID, done, bounce_bridge, chunk);
+        int rc = boot_dma_read(OS_SLOT_ID, done, bridge_base + done, chunk);
         if (rc < 0)
             return rc;
 
-        uint32_t words = (chunk + 3) / 4;
-        for (uint32_t i = 0; i < words; i++)
-            cram_dst[done / 4 + i] = bounce[i];
-
         done += chunk;
     }
+
+    /* Flush D-cache — bridge wrote directly, bypassing CPU cache */
+    flush_dcache();
+
     return 0;
 }
 

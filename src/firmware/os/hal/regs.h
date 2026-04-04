@@ -42,9 +42,7 @@
 #define FB_STRIDE           320             /* 8-bit indexed, 1 byte/pixel */
 #define FB_SIZE             (FB_WIDTH * FB_HEIGHT)
 
-#define DMA_BUFFER          0x10280000      /* 512KB DMA bounce buffer (cached) */
-#define DMA_BUFFER_UNCACHED 0x50280000      /* Same region, D-cache bypass */
-#define DMA_CHUNK_SIZE      (512 * 1024)
+#define DMA_CHUNK_SIZE      (512 * 1024)    /* Max bridge DMA per transfer */
 
 #define INTERACT_BASE       0x103FE000      /* APF interact settings (4KB) */
 #define INTERACT_UNCACHED   0x503FE000      /* Uncached alias */
@@ -356,7 +354,6 @@ static inline uint32_t cpu_to_bridge(void *addr) {
 #define OF_MEM_FB0_BASE             FB0_BASE
 #define OF_MEM_FB1_BASE             FB1_BASE
 #define OF_MEM_FB2_BASE             FB2_BASE
-#define OF_MEM_DMA_BUFFER           DMA_BUFFER
 #define OF_MEM_DMA_CHUNK_SIZE       DMA_CHUNK_SIZE
 #define OF_MEM_CRAM0_BASE           CRAM0_BASE
 #define OF_MEM_CRAM1_BASE           CRAM1_BASE

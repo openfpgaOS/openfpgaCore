@@ -33,8 +33,8 @@ void of_file_init(void) {
      * state machine (clears stale ACK/DONE from bootloader's DMA).
      * Without this, musl's fread hangs because the bridge doesn't
      * properly ACK the first command from the OS.
-     * Read 4 bytes from slot 1 (os.bin) into DMA_BUFFER — harmless. */
-    of_file_read(1, 0, (void *)DMA_BUFFER, 4);
+     * Read 4 bytes from slot 1 (os.bin) into CRAM1 scratch — harmless. */
+    of_file_read(1, 0, (void *)CRAM1_BASE, 4);
     of_cache_flush_dcache();
 }
 
@@ -137,58 +137,49 @@ static int file_wait_complete(void) {
 }
 
 /* Check if address is in SDRAM (DMA-capable) range */
-static int addr_is_sdram(uint32_t addr) {
-    return (addr >= SDRAM_BASE && addr < SDRAM_BASE + SDRAM_SIZE);
-}
-
-/* CRAM bounce buffer for file reads — avoids SDRAM contention.
- * Bridge writes to CRAM (PSRAM bus), CPU copies CRAM→SDRAM.
- * During bridge write, SDRAM is free for the app.
- * CRAM0: 512KB at bridge 0x20000000, CPU 0x30000000 (cached). */
-#define FILE_BOUNCE_BRIDGE  0x20000000
-#define FILE_BOUNCE_CPU     CRAM0_BASE
-#define FILE_BOUNCE_SIZE    DMA_CHUNK_SIZE  /* 512KB */
+#define FILE_BOUNCE_SIZE    DMA_CHUNK_SIZE  /* 512KB max per DMA */
 
 int of_file_read(uint32_t slot_id, uint32_t slot_offset,
                   void *dest, uint32_t length) {
     uint32_t dest_addr = (uintptr_t)dest;
 
-    /* CRAM0 destinations: bounce through SDRAM (direct bridge DMA to CRAM0 unreliable) */
-    if (dest_addr >= 0x30000000 && dest_addr < 0x31000000 && length <= FILE_BOUNCE_SIZE) {
-        uint32_t bounce_bridge = DMA_BUFFER - SDRAM_BASE;
+    /* CRAM1 destinations: bridge writes directly, no copy needed. */
+    if (dest_addr >= CRAM1_BASE && dest_addr < CRAM1_BASE + CRAM_SIZE) {
+        uint32_t bridge_addr = cpu_to_bridge(dest);
 
-        of_cache_flush_range((void *)DMA_BUFFER, length);
+        of_cache_inval_range(dest, length);
 
         DS_SLOT_ID     = slot_id;
         DS_SLOT_OFFSET = slot_offset;
-        DS_BRIDGE_ADDR = bounce_bridge;
+        DS_BRIDGE_ADDR = bridge_addr;
         DS_LENGTH      = length;
         DS_COMMAND     = OF_FILE_CMD_READ;
 
         int rc = file_wait_complete();
-        if (rc < 0) return rc;
 
-        of_cache_inval_range((void *)DMA_BUFFER, length);
-        memcpy(dest, (const void *)DMA_BUFFER, length);
+        of_cache_inval_range(dest, length);
 
-        return 0;
+        return rc;
     }
 
-    /* Direct path: SDRAM and other destinations */
-    uint32_t bridge_addr = cpu_to_bridge(dest);
-
-    of_cache_flush_range(dest, length);
+    /* All other destinations: bridge DMAs to CRAM1 scratch area,
+     * CPU copies to final destination.
+     * The hot path (fread/fopen) uses the I/O cache in syscall.c
+     * which already reads through CRAM1 directly — this path is
+     * for boot, ELF loading, and direct of_file_read API calls. */
+    of_cache_inval_range((void *)CRAM1_BASE, length);
 
     DS_SLOT_ID     = slot_id;
     DS_SLOT_OFFSET = slot_offset;
-    DS_BRIDGE_ADDR = bridge_addr;
+    DS_BRIDGE_ADDR = 0x30000000;  /* CRAM1 base in bridge space */
     DS_LENGTH      = length;
     DS_COMMAND     = OF_FILE_CMD_READ;
 
     int rc = file_wait_complete();
+    if (rc < 0) return rc;
 
-    of_cache_inval_range(dest, length);
-    of_file_inval_cram(bridge_addr, length);
+    of_cache_inval_range((void *)CRAM1_BASE, length);
+    memcpy(dest, (const void *)CRAM1_BASE, length);
 
     return rc;
 }
@@ -265,10 +256,10 @@ long of_file_size(uint32_t slot_id) {
  * Filename is written to `name_out` (max `name_max` chars).
  */
 int of_file_get_name(uint32_t slot_id, char *name_out, uint32_t name_max) {
-    /* Clear response buffer */
-    volatile uint8_t *resp = (volatile uint8_t *)DMA_BUFFER_UNCACHED;
+    /* Clear response buffer in CRAM1 (uncached for bridge visibility) */
+    volatile uint8_t *resp = (volatile uint8_t *)CRAM1_UNCACHED;
     for (int i = 0; i < 256; i++)
-        ((volatile uint32_t *)DMA_BUFFER)[i] = 0;
+        ((volatile uint32_t *)CRAM1_UNCACHED)[i] = 0;
 
     fence();
 
@@ -280,10 +271,10 @@ int of_file_get_name(uint32_t slot_id, char *name_out, uint32_t name_max) {
         }
     }
 
-    /* The response struct is at bridge address of DMA_BUFFER.
+    /* Response struct at CRAM1 base in bridge address space.
      * APF writes: offset 0 = status, offset 4+ = filename (null-terminated) */
     DS_SLOT_ID     = slot_id;
-    DS_RESP_ADDR   = sdram_to_bridge((void *)DMA_BUFFER);
+    DS_RESP_ADDR   = 0x30000000;  /* CRAM1 in bridge space */
     DS_COMMAND     = DS_CMD_GETFILE;
 
     int rc = file_wait_complete();

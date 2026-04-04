@@ -87,29 +87,24 @@ typedef struct {
  * ELF Loading Implementation
  * ====================================================================== */
 
-/* Read bytes from data slot into a buffer via DMA bounce buffer.
- * of_file_read() handles cache invalidation via conflict eviction. */
+/* Read bytes from data slot into a buffer.
+ * Bounces through CRAM1 because buf is typically on the stack (BRAM),
+ * which isn't in the bridge address space. */
 static int elf_read(uint32_t slot_id, uint32_t offset, void *buf, uint32_t len) {
     if (len > DMA_CHUNK_SIZE)
         return -1;
 
-    int rc = of_file_read(slot_id, offset, (void *)DMA_BUFFER, len);
+    int rc = of_file_read(slot_id, offset, (void *)CRAM1_BASE, len);
     if (rc < 0)
         return rc;
 
-    /* DMA_BUFFER cache lines were invalidated by of_file_read(),
-     * so this read fetches fresh DMA data from SDRAM. */
-    uint8_t *src = (uint8_t *)DMA_BUFFER;
-    uint8_t *dst = (uint8_t *)buf;
-    for (uint32_t i = 0; i < len; i++)
-        dst[i] = src[i];
-
+    memcpy(buf, (const void *)CRAM1_BASE, len);
     return 0;
 }
 
-/* Copy ELF data to BRAM via DMA bounce buffer.
- * DMA can only target SDRAM (bridge address space), so we DMA to the
- * bounce buffer in SDRAM, then CPU-copy to the BRAM address. */
+/* Copy ELF data to BRAM.
+ * BRAM is not in the bridge address space, so of_file_read bounces
+ * through CRAM1 and copies to the BRAM address. */
 static int elf_copy_to_bram(uint32_t slot_id, uint32_t file_offset,
                             uintptr_t bram_addr, uint32_t len) {
     uint32_t done = 0;
@@ -119,15 +114,9 @@ static int elf_copy_to_bram(uint32_t slot_id, uint32_t file_offset,
             chunk = DMA_CHUNK_SIZE;
 
         int rc = of_file_read(slot_id, file_offset + done,
-                               (void *)DMA_BUFFER, chunk);
+                               (void *)(bram_addr + done), chunk);
         if (rc < 0)
             return rc;
-
-        /* CPU-copy from DMA buffer to BRAM (cache invalidated by of_file_read) */
-        uint8_t *src = (uint8_t *)DMA_BUFFER;
-        uint8_t *dst = (uint8_t *)(bram_addr + done);
-        for (uint32_t i = 0; i < chunk; i++)
-            dst[i] = src[i];
 
         done += chunk;
     }
