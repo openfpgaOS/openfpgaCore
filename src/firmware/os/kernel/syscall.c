@@ -644,6 +644,16 @@ static long sys_clock_getres(long clk_id, long tp) {
     return 0;
 }
 
+static long sys_clock_nanosleep(long clk_id, long flags,
+                                long rqtp, long rmtp) {
+    (void)clk_id; (void)flags; (void)rmtp;
+    struct { uint32_t tv_sec; uint32_t tv_nsec; } *ts = (void *)rqtp;
+    if (!ts) return 0;
+    uint32_t us = ts->tv_sec * 1000000 + ts->tv_nsec / 1000;
+    if (us > 0) of_timer_delay_us(us);
+    return 0;
+}
+
 static long sys_mmap2(long addr, long length, long prot,
                       long flags, long fd, long pgoffset) {
     (void)addr; (void)prot; (void)flags; (void)fd; (void)pgoffset;
@@ -793,6 +803,8 @@ __attribute__((used)) long syscall_dispatch(long n, long a0, long a1, long a2,
     case SYS_clock_getres:      /* legacy 114 */
     case SYS_clock_getres64:    /* 406 — riscv32 musl sends this */
         return sys_clock_getres(a0, a1);
+    case SYS_clock_nanosleep:   /* 115 — usleep/nanosleep */
+        return sys_clock_nanosleep(a0, a1, a2, a3);
     case SYS_mmap2:         return sys_mmap2(a0, a1, a2, a3, a4, a5);
     case SYS_munmap:        return sys_munmap(a0, a1);
     case SYS_mprotect:      return 0;
