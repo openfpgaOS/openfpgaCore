@@ -172,6 +172,10 @@ static int io_cache_fill(int entry, uint32_t slot_id,
 #define MAX_FILE_SLOTS      16
 #define FILE_SLOT_NAME_MAX  24
 
+#define FTAB_ADDR           0x39280000  /* CRAM1 uncached */
+#define FTAB_MAGIC          0x46544142  /* "FTAB" */
+#define FTAB_ENTRY_SIZE     32          /* slot_id(4) + name_len(4) + name(24) */
+
 typedef struct {
     uint32_t slot_id;
     char     filename[FILE_SLOT_NAME_MAX];
@@ -269,7 +273,54 @@ struct linux_dirent64 {
 
 #define DT_REG  8
 
+/* Load file slot table from FTAB written by Chip32 loader.
+ * Returns number of entries loaded, or 0 if FTAB not found. */
+static int ftab_load(void) {
+    volatile uint32_t *ftab = (volatile uint32_t *)FTAB_ADDR;
+
+    if (ftab[0] != FTAB_MAGIC)
+        return 0;
+
+    uint32_t count = ftab[1];
+    if (count > MAX_FILE_SLOTS)
+        count = MAX_FILE_SLOTS;
+
+    volatile uint8_t *entries = (volatile uint8_t *)(FTAB_ADDR + 8);
+    int loaded = 0;
+
+    for (uint32_t i = 0; i < count; i++) {
+        volatile uint32_t *e = (volatile uint32_t *)(entries + i * FTAB_ENTRY_SIZE);
+        uint32_t slot_id = e[0];
+        uint32_t name_len = e[1];
+
+        /* Build name: use FTAB name if present, else "slot:N" */
+        char name[FILE_SLOT_NAME_MAX];
+        if (name_len > 0 && name_len < FILE_SLOT_NAME_MAX) {
+            volatile char *src = (volatile char *)(e + 2);
+            for (uint32_t j = 0; j < name_len; j++)
+                name[j] = src[j];
+            name[name_len] = '\0';
+        } else {
+            name[0] = 's'; name[1] = 'l'; name[2] = 'o';
+            name[3] = 't'; name[4] = ':';
+            name[5] = '0' + (char)(slot_id % 10);
+            name[6] = '\0';
+        }
+
+        if (file_slot_lookup(name) < 0) {
+            file_slot_register(slot_id, name);
+            loaded++;
+        }
+    }
+    return loaded;
+}
+
+/* Populate file slot registry from FTAB (preferred) or bridge probe (fallback). */
 static void dir_probe_slots(void) {
+    if (ftab_load() > 0)
+        return;  /* FTAB had entries — done */
+
+    /* No FTAB — try bridge probe with short timeout */
     char name[FILE_SLOT_NAME_MAX];
     for (uint32_t slot = 0; slot < MAX_DATA_SLOTS; slot++) {
         if (of_file_get_name(slot, name, sizeof(name)) == 0 && name[0]) {

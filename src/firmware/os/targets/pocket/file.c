@@ -264,21 +264,29 @@ int of_file_get_name(uint32_t slot_id, char *name_out, uint32_t name_max) {
 
     /* Wait for bridge idle */
     {
-        uint32_t wait = DMA_TIMEOUT;
+        uint32_t wait = 500000;  /* ~5ms — getfile is fast */
         while (!(DS_STATUS & DS_STATUS_READY)) {
             if (--wait == 0) return OF_ERR_TIMEOUT;
         }
     }
 
-    /* Response struct at CRAM1 base in bridge address space.
-     * APF writes: offset 0 = status, offset 4+ = filename (null-terminated) */
     DS_SLOT_ID     = slot_id;
     DS_RESP_ADDR   = CRAM1_SCRATCH_BRIDGE;
     DS_COMMAND     = DS_CMD_GETFILE;
 
-    int rc = file_wait_complete();
-    if (rc < 0)
-        return rc;
+    /* Short timeout — getfile should complete in <1ms.
+     * Empty/invalid slots may never respond. */
+    {
+        uint32_t wait = 500000;  /* ~5ms */
+        while (!(DS_STATUS & DS_STATUS_DONE)) {
+            if (--wait == 0) return OF_ERR_TIMEOUT;
+        }
+        /* Wait for ready */
+        wait = 500000;
+        while (!(DS_STATUS & DS_STATUS_READY)) {
+            if (--wait == 0) return OF_ERR_TIMEOUT;
+        }
+    }
 
     /* The APF getfile response struct (get_dataslot_file_t):
      * offset 0x00: uint32_t status

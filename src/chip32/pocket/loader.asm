@@ -28,6 +28,11 @@ constant cram1_base     = 0x30000000
 constant slot_stride    = 0x40000       // 256KB physical slot spacing
 constant slot_max_size  = 0x40000       // 256KB max per slot
 
+// FTAB (file table) in CRAM1 scratch region
+constant ftab_base      = 0x30280000    // Bridge address for FTAB
+constant ftab_magic     = 0x46544142    // "FTAB"
+constant ftab_entry_sz  = 32           // slot_id(4) + name_len(4) + name(24)
+
 // FPGA save-size bridge addresses
 constant save_size_all  = 0xF0000000
 constant save_size_base = 0xF0000010
@@ -127,6 +132,53 @@ save_next:
                 add r12,#1
                 cmp r6,#20
                 jp nz,save_loop
+
+// ====================================================================
+// Build file table (FTAB) in CRAM1 scratch region
+// Probes data slots 0-6, writes filename for each loaded slot.
+// Format: magic(4) + count(4) + entries[count]
+//   entry: slot_id(4) + name_len(4) + name(24, padded)
+// ====================================================================
+build_ftab:
+                ld r4,#ftab_base
+                ld r5,#ftab_magic
+                pmpw r4,r5              // Write magic "FTAB"
+                add r4,#4
+                ld r11,#0               // Entry count = 0
+                add r4,#4               // Skip count field (fill later)
+
+                ld r6,#0                // Slot ID = 0
+ftab_loop:
+                ld r0,r6
+                open r0,r1
+                jp nz,ftab_skip         // open failed → no file
+                close
+                cmp r1,#5
+                jp z,ftab_skip          // status 5 = missing
+                cmp r1,#0
+                jp z,ftab_skip          // status 0 = empty
+
+                // Slot has a file — write FTAB entry
+                // slot_id
+                pmpw r4,r6
+                add r4,#4
+                // name_len = 0 (OS will use "slot:N" as fallback)
+                ld r5,#0
+                pmpw r4,r5
+                add r4,#4
+                // Skip 24 bytes of name (zeroed by OS or unused)
+                add r4,#24
+                add r11,#1              // count++
+
+ftab_skip:
+                add r6,#1
+                cmp r6,#7               // Slots 0-6
+                jp nz,ftab_loop
+
+                // Write count back at ftab_base + 4
+                ld r4,#ftab_base
+                add r4,#4
+                pmpw r4,r11
 
 // ====================================================================
 // Hand off to core
