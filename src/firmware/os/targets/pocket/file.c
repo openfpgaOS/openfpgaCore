@@ -34,7 +34,7 @@ void of_file_init(void) {
      * Without this, musl's fread hangs because the bridge doesn't
      * properly ACK the first command from the OS.
      * Read 4 bytes from slot 1 (os.bin) into CRAM1 scratch — harmless. */
-    of_file_read(1, 0, (void *)CRAM1_BASE, 4);
+    of_file_read(1, 0, (void *)CRAM1_SCRATCH, 4);
     of_cache_flush_dcache();
 }
 
@@ -161,24 +161,24 @@ int of_file_read(uint32_t slot_id, uint32_t slot_offset,
         return rc;
     }
 
-    /* All other destinations: bridge DMAs to CRAM1 scratch area,
-     * CPU copies to final destination.
+    /* All other destinations: bridge DMAs to CRAM1 scratch area
+     * (between save slots and I/O cache), CPU copies to dest.
      * The hot path (fread/fopen) uses the I/O cache in syscall.c
      * which already reads through CRAM1 directly — this path is
      * for boot, ELF loading, and direct of_file_read API calls. */
-    of_cache_inval_range((void *)CRAM1_BASE, length);
+    of_cache_inval_range((void *)CRAM1_SCRATCH, length);
 
     DS_SLOT_ID     = slot_id;
     DS_SLOT_OFFSET = slot_offset;
-    DS_BRIDGE_ADDR = CRAM1_BRIDGE;  /* CRAM1 base in bridge space */
+    DS_BRIDGE_ADDR = CRAM1_SCRATCH_BRIDGE;
     DS_LENGTH      = length;
     DS_COMMAND     = DS_CMD_READ;
 
     int rc = file_wait_complete();
     if (rc < 0) return rc;
 
-    of_cache_inval_range((void *)CRAM1_BASE, length);
-    memcpy(dest, (const void *)CRAM1_BASE, length);
+    of_cache_inval_range((void *)CRAM1_SCRATCH, length);
+    memcpy(dest, (const void *)CRAM1_SCRATCH, length);
 
     return rc;
 }
@@ -255,10 +255,10 @@ long of_file_size(uint32_t slot_id) {
  * Filename is written to `name_out` (max `name_max` chars).
  */
 int of_file_get_name(uint32_t slot_id, char *name_out, uint32_t name_max) {
-    /* Clear response buffer in CRAM1 (uncached for bridge visibility) */
-    volatile uint8_t *resp = (volatile uint8_t *)CRAM1_UNCACHED;
+    /* Clear response buffer in CRAM1 scratch (uncached for bridge visibility) */
+    volatile uint8_t *resp = (volatile uint8_t *)CRAM1_SCRATCH_UNCACHED;
     for (int i = 0; i < 256; i++)
-        ((volatile uint32_t *)CRAM1_UNCACHED)[i] = 0;
+        ((volatile uint32_t *)CRAM1_SCRATCH_UNCACHED)[i] = 0;
 
     fence();
 
@@ -273,7 +273,7 @@ int of_file_get_name(uint32_t slot_id, char *name_out, uint32_t name_max) {
     /* Response struct at CRAM1 base in bridge address space.
      * APF writes: offset 0 = status, offset 4+ = filename (null-terminated) */
     DS_SLOT_ID     = slot_id;
-    DS_RESP_ADDR   = CRAM1_BRIDGE;  /* CRAM1 in bridge space */
+    DS_RESP_ADDR   = CRAM1_SCRATCH_BRIDGE;
     DS_COMMAND     = DS_CMD_GETFILE;
 
     int rc = file_wait_complete();

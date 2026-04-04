@@ -94,11 +94,11 @@ static int elf_read(uint32_t slot_id, uint32_t offset, void *buf, uint32_t len) 
     if (len > DMA_CHUNK_SIZE)
         return -1;
 
-    int rc = of_file_read(slot_id, offset, (void *)CRAM1_BASE, len);
+    int rc = of_file_read(slot_id, offset, (void *)CRAM1_SCRATCH, len);
     if (rc < 0)
         return rc;
 
-    memcpy(buf, (const void *)CRAM1_BASE, len);
+    memcpy(buf, (const void *)CRAM1_SCRATCH, len);
     return 0;
 }
 
