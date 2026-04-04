@@ -14,7 +14,9 @@
 #define OS_SLOT_ID      1       /* OS binary (loaded by bootloader) */
 #define APP_SLOT_ID     2       /* Application ELF binary */
 
-/* App load address (after OS region, in CRAM0) */
+/* Fallback load address for PIE (ET_DYN) apps that have vaddrs relative to 0.
+ * ET_EXEC apps linked at a nonzero base (e.g. 0x10400000 SDRAM) ignore this
+ * and use their own absolute vaddrs.  Matches __app_load_base in os.ld. */
 #define APP_LOAD_ADDR   0x30100000
 
 /* Symbols from linker script */

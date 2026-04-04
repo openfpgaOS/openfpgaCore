@@ -453,7 +453,10 @@ static int boot_dma_read(uint32_t slot_id, uint32_t slot_offset,
     uint32_t err = (DS_STATUS & DS_STATUS_ERR_MASK) >> DS_STATUS_ERR_SHIFT;
     if (err) return -(int)err;
 
-    /* Post-DMA settle */
+    /* Post-DMA settle: the bridge needs a short delay after DONE before
+     * the next command is accepted.  A fence alone is insufficient because
+     * the bridge status register is on a different clock domain; this
+     * busy-loop gives the bridge logic time to deassert internal busy. */
     for (volatile int i = 0; i < 32; i++) {}
 
     return 0;

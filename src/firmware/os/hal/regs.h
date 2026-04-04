@@ -67,6 +67,11 @@
 #define SRAM_BASE           0x3A000000      /* SRAM uncached */
 #define SRAM_SIZE           (256 * 1024)
 
+/* Runtime stack layout (must match os.ld) */
+#define RUNTIME_STACK_TOP   0x14000000      /* Top of SDRAM */
+#define RUNTIME_STACK_SIZE  (512 * 1024)
+#define APP_STACK_TOP       (RUNTIME_STACK_TOP - RUNTIME_STACK_SIZE)  /* 0x13F80000 */
+
 
 /* ======================================================================
  * System Registers (0x40000000)
@@ -313,7 +318,9 @@ static inline void fence(void) {
 
 static inline void fence_i(void) {
     __asm__ volatile("fence");
-    __asm__ volatile(".word 0x0000100f");  /* fence.i */
+    /* fence.i (Zifencei) — encoded as .word because -march does not
+     * include Zifencei so the assembler won't accept the mnemonic. */
+    __asm__ volatile(".word 0x0000100f");
 }
 
 /* Convert CPU SDRAM address to uncached alias */

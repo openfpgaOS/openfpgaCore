@@ -284,7 +284,7 @@ int elf_load(uint32_t slot_id, uintptr_t load_addr,
     result->entry     = load_base + ehdr.e_entry;
     result->load_base = load_base;
     result->bss_end   = (bss_end + 15) & ~15;  /* Align to 16 bytes */
-    result->stack_top = 0x13F80000;             /* Below save region */
+    result->stack_top = APP_STACK_TOP;           /* Below OS runtime stack */
 
     return 0;
 }
