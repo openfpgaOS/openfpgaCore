@@ -66,4 +66,8 @@ int of_file_read_raw(uint32_t slot_id, uint32_t slot_offset,
  * save restore) so CPU reads via 0x30/0x31 see fresh data. */
 void of_file_inval_cram(uint32_t bridge_addr, uint32_t length);
 
+/* Get the filename for a data slot from the bridge.
+ * Returns 0 on success, <0 on error or empty slot. */
+int of_file_get_name(uint32_t slot_id, char *name_out, uint32_t name_max);
+
 #endif /* OFOS_FILE_H */

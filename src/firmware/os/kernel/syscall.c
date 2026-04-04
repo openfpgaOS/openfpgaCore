@@ -50,6 +50,8 @@ typedef struct {
     int      is_save;       /* Is this a save file? */
     int      save_slot;     /* Save slot index (0-9) */
     uint32_t write_max;     /* High-water mark: max (offset) after any write */
+    int      is_dir;        /* Is this a directory FD? */
+    uint32_t dir_pos;       /* Current position in directory listing */
 } fd_entry_t;
 
 static fd_entry_t fd_table[MAX_FDS];
@@ -246,6 +248,75 @@ static uintptr_t brk_base;
 #define EACCES          13
 #define EMFILE          24
 #define ENAMETOOLONG    36
+#define ENOTDIR         20
+
+/* ======================================================================
+ * Directory listing — enumerate data slots via DS_CMD_GETFILE
+ *
+ * opendir("/") probes slots 0-6 for loaded files and auto-registers
+ * them in the file slot table.  getdents64 returns the entries.
+ * ====================================================================== */
+
+#define MAX_DATA_SLOTS  7   /* APF slots 0-6 */
+
+struct linux_dirent64 {
+    uint64_t d_ino;
+    int64_t  d_off;
+    uint16_t d_reclen;
+    uint8_t  d_type;
+    char     d_name[1];
+};
+
+#define DT_REG  8
+
+static void dir_probe_slots(void) {
+    char name[FILE_SLOT_NAME_MAX];
+    for (uint32_t slot = 0; slot < MAX_DATA_SLOTS; slot++) {
+        if (of_file_get_name(slot, name, sizeof(name)) == 0 && name[0]) {
+            if (file_slot_lookup(name) < 0)
+                file_slot_register(slot, name);
+        }
+    }
+}
+
+static long sys_getdents64(int fd, void *buf, uint32_t count) {
+    if (fd < 0 || fd >= MAX_FDS || !fd_table[fd].in_use)
+        return -EBADF;
+    fd_entry_t *f = &fd_table[fd];
+    if (!f->is_dir)
+        return -ENOTDIR;
+
+    uint8_t *out = (uint8_t *)buf;
+    uint32_t written = 0;
+    int pos = (int)f->dir_pos;
+
+    while (pos < file_slot_count) {
+        const char *name = file_slots[pos].filename;
+        uint32_t namelen = 0;
+        while (name[namelen]) namelen++;
+
+        uint32_t reclen = (8 + 8 + 2 + 1 + namelen + 1 + 7) & ~7;
+        if (written + reclen > count)
+            break;
+
+        struct linux_dirent64 *de = (struct linux_dirent64 *)(out + written);
+        de->d_ino = file_slots[pos].slot_id + 1;
+        de->d_off = pos + 1;
+        de->d_reclen = (uint16_t)reclen;
+        de->d_type = DT_REG;
+
+        char *dst = de->d_name;
+        for (uint32_t i = 0; i < namelen; i++)
+            dst[i] = name[i];
+        dst[namelen] = '\0';
+
+        written += reclen;
+        pos++;
+    }
+
+    f->dir_pos = (uint32_t)pos;
+    return (long)written;
+}
 
 /* ======================================================================
  * Linux syscall implementations
@@ -439,6 +510,15 @@ static long sys_openat(long dirfd, long pathname, long flags, long mode) {
     f->slot_id = 0;
     f->size = 0;
     f->write_max = 0;
+    f->is_dir = 0;
+    f->dir_pos = 0;
+
+    /* O_DIRECTORY — return a directory FD for getdents64 */
+    if (flags & 0200000) {  /* O_DIRECTORY = 0200000 on riscv */
+        dir_probe_slots();
+        f->is_dir = 1;
+        return fd;
+    }
 
     /* "slot:<N>" -- APF data slot (read-only) */
     if (prefix_match(path, "slot:", 5)) {
@@ -701,6 +781,7 @@ long syscall_dispatch(long n, long a0, long a1, long a2,
     case SYS_writev:        return sys_writev(a0, a1, a2);
     case SYS_openat:        return sys_openat(a0, a1, a2, a3);
     case SYS_close:         return sys_close(a0);
+    case SYS_getdents64:    return sys_getdents64((int)a0, (void *)a1, (uint32_t)a2);
     case SYS_lseek:         return sys_llseek(a0, a1, a2, a3, a4);
     case SYS_clock_gettime:     /* legacy 113 — kept for direct syscall callers */
     case SYS_clock_gettime64:   /* 403 — riscv32 musl sends this */

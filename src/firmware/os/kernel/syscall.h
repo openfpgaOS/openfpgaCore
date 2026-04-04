@@ -56,6 +56,7 @@
 #define SYS_mmap2           222
 #define SYS_mprotect        226
 #define SYS_madvise         233
+#define SYS_getdents64  61
 #define SYS_riscv_flush_icache 259
 
 /* ======================================================================
