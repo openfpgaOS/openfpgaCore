@@ -104,8 +104,8 @@ void os_main(void) {
 
     status_ok();
 
-    /* Heap in SDRAM after framebuffers + DMA buffer (code/data in CRAM0) */
-    syscall_init(DMA_BUFFER + DMA_CHUNK_SIZE);
+    /* Heap in SDRAM after app's BSS (app is loaded at 0x10400000+) */
+    syscall_init(app.bss_end);
 
     /* Populate libc jump table for the app */
     libc_table_init();

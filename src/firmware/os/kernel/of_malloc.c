@@ -39,6 +39,12 @@
 
 #define INSECURE 1
 
+/* Force trimming even though HAVE_MMAP is 0.
+ * Without this, dlmalloc sets trim threshold to MAX_SIZE_T and never
+ * returns memory via sbrk(-N). Large alloc/free cycles (e.g. 48MB probe)
+ * leave brk at the ceiling permanently, exhausting SDRAM. */
+#define DEFAULT_TRIM_THRESHOLD ((size_t)256U * (size_t)1024U)
+
 /* Use DL prefix to avoid conflict with musl's malloc */
 #define USE_DL_PREFIX 1
 

@@ -194,7 +194,7 @@ int elf_load(uint32_t slot_id, uintptr_t load_addr,
         }
     }
 
-    uintptr_t bss_end = load_addr;
+    uintptr_t bss_end = 0;
     uint32_t dynamic_offset = 0;
     uint32_t dynamic_size = 0;
 
