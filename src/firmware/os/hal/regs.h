@@ -62,10 +62,15 @@
 #define CRAM0_BRIDGE        0x20000000      /* CRAM0 in bridge address space */
 #define CRAM1_BRIDGE        0x30000000      /* CRAM1 in bridge address space */
 
-/* DMA scratch area in CRAM1 (between save slots and I/O cache, 512KB) */
-#define CRAM1_SCRATCH         (CRAM1_BASE + 0x00280000)     /* 0x31280000 cached */
-#define CRAM1_SCRATCH_UNCACHED (CRAM1_UNCACHED + 0x00280000) /* 0x39280000 uncached */
-#define CRAM1_SCRATCH_BRIDGE  (CRAM1_BRIDGE + 0x00280000)   /* 0x30280000 bridge */
+/* FTAB (file table) — written by Chip32 loader at boot (256 bytes) */
+#define CRAM1_FTAB            (CRAM1_BASE + 0x00280000)     /* 0x31280000 cached */
+#define CRAM1_FTAB_UNCACHED   (CRAM1_UNCACHED + 0x00280000) /* 0x39280000 uncached */
+#define CRAM1_FTAB_BRIDGE     (CRAM1_BRIDGE + 0x00280000)   /* 0x30280000 bridge */
+
+/* DMA scratch area in CRAM1 (after FTAB, before I/O cache) */
+#define CRAM1_SCRATCH         (CRAM1_BASE + 0x00290000)     /* 0x31290000 cached */
+#define CRAM1_SCRATCH_UNCACHED (CRAM1_UNCACHED + 0x00290000) /* 0x39290000 uncached */
+#define CRAM1_SCRATCH_BRIDGE  (CRAM1_BRIDGE + 0x00290000)   /* 0x30290000 bridge */
 
 #define AUDIO_RING_ADDR     0x3A000000      /* Audio ring buffer in SRAM (32KB, separate bus) */
 

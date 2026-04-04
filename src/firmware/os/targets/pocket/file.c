@@ -274,25 +274,27 @@ int of_file_get_name(uint32_t slot_id, char *name_out, uint32_t name_max) {
     DS_RESP_ADDR   = CRAM1_SCRATCH_BRIDGE;
     DS_COMMAND     = DS_CMD_GETFILE;
 
-    /* Short timeout — getfile should complete in <1ms.
-     * Empty/invalid slots may never respond. */
+    /* Getfile goes through the APF host (ARM) which reads from SD —
+     * allow up to ~50ms for the response. */
     {
-        uint32_t wait = 500000;  /* ~5ms */
+        uint32_t wait = 5000000;  /* ~50ms */
         while (!(DS_STATUS & DS_STATUS_DONE)) {
             if (--wait == 0) return OF_ERR_TIMEOUT;
         }
-        /* Wait for ready */
-        wait = 500000;
+        wait = 5000000;
         while (!(DS_STATUS & DS_STATUS_READY)) {
             if (--wait == 0) return OF_ERR_TIMEOUT;
         }
     }
 
-    /* The APF getfile response struct (get_dataslot_file_t):
-     * offset 0x00: uint32_t status
-     * offset 0x04: char filename[128] (null-terminated)
-     * offset 0x84: char path[128] (null-terminated) */
-    const char *filename = (const char *)(resp + 4);
+    /* Check result code (error bits = 1 means slot not defined) */
+    uint32_t err = (DS_STATUS & DS_STATUS_ERR_MASK) >> DS_STATUS_ERR_SHIFT;
+    if (err)
+        return -((int)err);
+
+    /* get_dataslot_file_t: 256-byte null-terminated full path string
+     * starting at offset 0 (e.g. "/Assets/abcd/common/data.bin") */
+    const char *filename = (const char *)resp;
 
     /* Extract basename (after last '/') */
     const char *base = filename;
