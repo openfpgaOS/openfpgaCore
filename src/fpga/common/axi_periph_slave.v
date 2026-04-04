@@ -144,6 +144,7 @@ module axi_periph_slave (
     output reg  [31:0] mix_voice_wdata,
     output reg         mix_enable,
     input  wire [4:0]  mix_active_count,
+    input  wire [21:0] mix_voice_pos,
 
     // Hardware timer interrupt
     output wire        timer_irq,
@@ -152,7 +153,10 @@ module axi_periph_slave (
     output reg  [9:0]  dt_query_addr,
     output reg         dt_query_toggle,   // toggles on each new query
     input  wire [31:0] dt_query_data,
-    input  wire        dt_query_valid
+    input  wire        dt_query_valid,
+
+    // VRR (Variable Refresh Rate) — CPU-writable V_TOTAL for video timing
+    output reg  [9:0]  vrr_v_total
 );
 
 wire reset = ~reset_n;
@@ -256,6 +260,10 @@ reg [1:0] fb_display_idx;
 reg [1:0] fb_ready_idx;
 reg fb_swap_pending;
 
+// VRR swap hold: skip N vsyncs before presenting a queued frame
+reg [3:0] vrr_swap_hold;     // firmware-written: vsyncs to skip per swap
+reg [3:0] vrr_hold_counter;  // counts down to 0 then swaps
+
 wire [24:0] fb_display_addr_reg = (fb_display_idx == 2'd0) ? FB_ADDR_0 :
                                    (fb_display_idx == 2'd1) ? FB_ADDR_1 :
                                                               FB_ADDR_2;
@@ -339,6 +347,8 @@ always @(posedge clk) begin
         fb_display_idx <= 2'd0;
         fb_ready_idx <= 2'd0;
         fb_swap_pending <= 1'b0;
+        vrr_swap_hold <= 4'd0;
+        vrr_hold_counter <= 4'd0;
         pal_wr <= 0;
         pal_addr <= 0;
         pal_data <= 0;
@@ -377,6 +387,7 @@ always @(posedge clk) begin
         timer_irq_pending <= 0;
         dt_query_addr <= 0;
         dt_query_toggle <= 0;
+        vrr_v_total <= 10'd262;
     end else begin
         cycle_counter <= cycle_counter + 1;
         pal_wr <= 0;
@@ -526,16 +537,42 @@ always @(posedge clk) begin
                     mix_voice_wdata <= req_wdata;
                 end
                 6'b110101: mix_enable <= req_wdata[0];              // MIX_CTRL (0xD4)
+                6'b110110: begin                                    // MIX_VOICE_VOL_LR (0xD8)
+                    mix_voice_wr <= 1;
+                    mix_voice_field <= 3'd6;
+                    mix_voice_wdata <= req_wdata;
+                end
+                6'b111001: begin                                    // MIX_VOICE_LOOP_END (0xE4)
+                    mix_voice_wr <= 1;
+                    mix_voice_field <= 3'd7;
+                    mix_voice_wdata <= req_wdata;
+                end
+                6'b111010: begin                                    // MIX_VOICE_POS_WR (0xE8)
+                    mix_voice_wr <= 1;
+                    mix_voice_field <= 3'd4;
+                    mix_voice_wdata <= req_wdata;
+                end
+
+                6'b110111: vrr_v_total <= req_wdata[9:0];          // VRR_V_TOTAL (0xDC)
+                6'b111000: vrr_swap_hold <= req_wdata[3:0];        // VRR_SWAP_HOLD (0xE0)
 
                 default: ;
             endcase
         end
 
-        // Triple buffer vsync swap
+        // Triple buffer vsync swap (with VRR hold support)
         if (fb_swap_pending && vsync_rising) begin
-            fb_display_idx <= fb_ready_idx;
-            fb_swap_pending <= 1'b0;
+            if (vrr_hold_counter > 0) begin
+                vrr_hold_counter <= vrr_hold_counter - 1;
+            end else begin
+                fb_display_idx <= fb_ready_idx;
+                fb_swap_pending <= 1'b0;
+            end
         end
+
+        // Reload hold counter when a new swap is queued
+        if (sysreg_wr_fire && req_addr[7:2] == 6'b000110 && req_wdata[0])
+            vrr_hold_counter <= vrr_swap_hold;
     end
 end
 
@@ -574,9 +611,12 @@ always @(*) begin
         6'b101101: sysreg_rdata = timer_period;
         6'b101110: sysreg_rdata = {30'b0, timer_irq_pending, timer_enable};
         6'b101111: sysreg_rdata = timer_counter;
-        // Hardware mixer registers (0xC0-0xD8)
+        // Hardware mixer registers (0xC0-0xE8)
+        6'b110100: sysreg_rdata = {10'b0, mix_voice_pos};           // MIX_VOICE_POS read (0xD0)
         6'b110101: sysreg_rdata = {31'b0, mix_enable};              // MIX_CTRL (0xD4)
         6'b110110: sysreg_rdata = {27'b0, mix_active_count};        // MIX_STATUS (0xD8)
+        6'b110111: sysreg_rdata = {22'b0, vrr_v_total};             // VRR_V_TOTAL (0xDC)
+        6'b111000: sysreg_rdata = {28'b0, vrr_swap_hold};           // VRR_SWAP_HOLD (0xE0)
         // Datatable slot size query (0x90): bit 31 = valid, bits 30:0 = data
         6'b100100: sysreg_rdata = {dt_query_valid, dt_query_data[30:0]};
         // Bridge debug (0x94): internal latch state for diagnosing DMA hangs

@@ -428,7 +428,7 @@ openFPGA_Pocket_Analogizer #(
     .i_rst(~reset_n),
     .i_ena(analogizer_ena),
     // Video interface (active but directly from our pipeline)
-    .video_clk(clk_core_12288), ////currently 12.25MHz
+    .video_clk(clk_vid),
     .analog_video_type(analogizer_video_type),       // 0 RGBS
     .R(vidout_rgb[23:16]),
     .G(vidout_rgb[15:8]),
@@ -1944,8 +1944,8 @@ core_bridge_cmd icb (
 
 
 // video generation
-assign video_rgb_clock = clk_core_12288;
-assign video_rgb_clock_90 = clk_core_12288_90deg;
+assign video_rgb_clock = clk_vid;
+assign video_rgb_clock_90 = clk_vid_90deg;
 assign video_rgb = video_rgb_core;
 assign video_de = vidout_de;
 assign video_skip = vidout_skip;
@@ -1982,6 +1982,15 @@ assign video_hs = vidout_hs;
     wire [1:0] display_mode;
     wire [2:0] color_mode;
     wire [24:0] fb_display_addr;
+
+    // VRR: firmware-written V_TOTAL
+    wire [9:0] vrr_v_total_cpu;
+    // CDC vrr_v_total (clk_cpu) → clk_vid (video timing)
+    reg [9:0] vrr_vt_sync1, vrr_vt_sync2;
+    always @(posedge clk_vid) begin
+        vrr_vt_sync1 <= vrr_v_total_cpu;
+        vrr_vt_sync2 <= vrr_vt_sync1;
+    end
 
     // Stub wires for axi_periph_slave tile/sprite register ports (no-ops).
     wire        tile_enable_w;
@@ -2191,12 +2200,14 @@ assign video_hs = vidout_hs;
         .mix_voice_wdata(mix_voice_wdata),
         .mix_enable(mix_enable),
         .mix_active_count(mix_active_count),
+        .mix_voice_pos(mix_voice_pos),
         .timer_irq(timer_irq),
         // Datatable slot size query
         .dt_query_addr(cpu_dt_query_addr),
         .dt_query_toggle(cpu_dt_query_toggle),
         .dt_query_data(cpu_dt_query_data),
-        .dt_query_valid(cpu_dt_query_valid)
+        .dt_query_valid(cpu_dt_query_valid),
+        .vrr_v_total(vrr_v_total_cpu)
     );
 
     // DMA engine removed — apps use CPU memcpy instead
@@ -2409,7 +2420,7 @@ assign video_hs = vidout_hs;
     wire        terminal_pixel_opaque;
 
     text_terminal terminal (
-        .clk(clk_core_12288),
+        .clk(clk_vid),
         .clk_cpu(clk_cpu),
         .reset_n(reset_n),
         .pixel_x({1'b0, visible_x[9:1]}),  // Halve doubled-X CRT resolution back to 320
@@ -2426,7 +2437,7 @@ assign video_hs = vidout_hs;
 
     // Line start signal for video scanout
     reg line_start;
-    always @(posedge clk_core_12288) begin
+    always @(posedge clk_vid) begin
         line_start <= (x_count == 0);
     end
 
@@ -2448,7 +2459,7 @@ assign video_hs = vidout_hs;
     wire        video_burst_data_done;
     
     video_CRT_scanout_indexed_BRAM  scanout (
-        .clk_video(clk_core_12288),
+        .clk_video(clk_vid),
         .reset_n(reset_n),
         .x_count(x_count),
         .y_count(y_count),
@@ -2470,12 +2481,12 @@ assign video_hs = vidout_hs;
     );
 
 
-        // ---  CRT 15.7kHz / 60Hz Parameters ---
-    localparam CRT_V_TOTAL  = CRT_V_SYNC + CRT_V_BPORCH + CRT_V_ACTIVE + CRT_V_FPORCH;
+        // ---  CRT 15.7kHz / VRR Parameters ---
     localparam CRT_V_SYNC   = 3;
-    localparam CRT_V_BPORCH = 15; //15;
-    localparam CRT_V_FPORCH = 4; //4;
+    localparam CRT_V_BPORCH = 15;
+    localparam CRT_V_FPORCH = 4;
     localparam CRT_V_ACTIVE = 240;
+    localparam CRT_V_TOTAL_DEFAULT = CRT_V_SYNC + CRT_V_BPORCH + CRT_V_ACTIVE + CRT_V_FPORCH; // 262
     localparam CRT_H_TOTAL  = CRT_H_SYNC + CRT_H_BPORCH + CRT_H_ACTIVE + CRT_H_FPORCH;
     localparam CRT_H_SYNC   = 58;
     localparam CRT_H_BPORCH = 62;
@@ -2484,15 +2495,25 @@ assign video_hs = vidout_hs;
     reg crt_hs, crt_vs, crt_de;
     reg crt_hblank, crt_vblank;
 
+    // VRR: dynamic V_TOTAL, latched at frame boundary from CPU register.
+    // Pocket scaler accepts 42-60 Hz → V_TOTAL range [262, 375].
+    // Video clock: 12.576 MHz / 800 H_TOTAL = 15720 lines/sec.
+    // 15720/262 = 60.0 Hz, 15720/375 = 41.9 Hz.
+    reg [9:0] crt_v_total;
+    wire [9:0] vrr_vt_safe = (vrr_vt_sync2 < 10'd262) ? 10'd262 :
+                              (vrr_vt_sync2 > 10'd375) ? 10'd375 :
+                              (vrr_vt_sync2 == 10'd0)  ? 10'd262 : vrr_vt_sync2;
+
     wire [9:0]  visible_x = x_count - CRT_H_SYNC - CRT_H_BPORCH;
     wire [9:0]  visible_y = y_count - CRT_V_SYNC - CRT_V_BPORCH;
 
-always @(posedge clk_core_12288 or negedge reset_n) begin
+always @(posedge clk_vid or negedge reset_n) begin
 
     if(~reset_n) begin
 
         x_count <= 0;
         y_count <= 0;
+        crt_v_total <= CRT_V_TOTAL_DEFAULT;
 
     end else begin
         vidout_de <= 0;
@@ -2509,8 +2530,9 @@ always @(posedge clk_core_12288 or negedge reset_n) begin
             x_count <= 0;
 
             y_count <= y_count + 1'b1;
-            if(y_count == CRT_V_TOTAL-1) begin
+            if(y_count == crt_v_total - 1) begin
                 y_count <= 0;
+                crt_v_total <= vrr_vt_safe; // latch new V_TOTAL at frame boundary
             end
         end
 
@@ -2615,6 +2637,7 @@ wire [2:0]  mix_voice_field;
 wire [4:0]  mix_voice_sel;
 wire [31:0] mix_voice_wdata;
 wire [4:0]  mix_active_count;
+wire [21:0] mix_voice_pos;
 wire        mix_sample_wr;
 wire [31:0] mix_sample_data;
 wire        mix_cram1_rd;
@@ -2654,16 +2677,19 @@ audio_mixer mixer (
     .sample_wr(mix_sample_wr),
     .sample_data(mix_sample_data),
     .fifo_level(audio_fifo_level),
-    .active_count(mix_active_count)
+    .active_count(mix_active_count),
+    .pos_readback(mix_voice_pos)
 );
 
 
 ///////////////////////////////////////////////
 
 
-    wire    clk_core_12288;
+    wire    clk_core_12288;         // 12.288 MHz — audio (48kHz-friendly)
     wire    clk_core_12288_90deg;
     wire    clk_core_49152;
+    wire    clk_vid;                // 12.576 MHz — video (exact 60 Hz)
+    wire    clk_vid_90deg;
     wire    clk_cpu;
     wire    clk_ram_controller;
     wire    clk_ram_chip;
@@ -2679,11 +2705,11 @@ mf_pllbase mp1 (
     .rst            ( 0 ),
 
     .outclk_0       ( clk_core_12288 ),
-    .outclk_1       ( clk_core_12288_90deg ),
+    .outclk_1       ( ),  // 12.288 MHz 90° — unused (video moved to clk_vid)
 
     .outclk_2       ( clk_core_49152),
-    .outclk_3       ( ),
-    .outclk_4       ( ),
+    .outclk_3       ( clk_vid ),
+    .outclk_4       ( clk_vid_90deg ),
 
     .locked         ( pll_core_locked )
 );

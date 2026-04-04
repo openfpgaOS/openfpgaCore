@@ -1088,8 +1088,42 @@ __attribute__((used)) long syscall_dispatch(long n, long a0, long a1, long a2,
         of_mixer_set_pan((int)a0, (int)a1);
         return 0;
     }
+    if (n == OF_SYS_MIXER_SET_LOOP) {
+        of_mixer_set_loop((int)a0, (int)a1, (int)a2);
+        return 0;
+    }
+    if (n == OF_SYS_MIXER_SET_RATE) {
+        of_mixer_set_rate((int)a0, (int)a1);
+        return 0;
+    }
+    if (n == OF_SYS_MIXER_SET_VOL_LR) {
+        of_mixer_set_vol_lr((int)a0, (int)a1, (int)a2);
+        return 0;
+    }
+    if (n == OF_SYS_MIXER_SET_BIDI) {
+        of_mixer_set_bidi((int)a0, (int)a1);
+        return 0;
+    }
+    if (n == OF_SYS_MIXER_GET_POSITION)
+        return of_mixer_get_position((int)a0);
+    if (n == OF_SYS_MIXER_SET_POSITION) {
+        of_mixer_set_position((int)a0, (int)a1);
+        return 0;
+    }
+    if (n == OF_SYS_MIXER_SET_VOICE) {
+        of_mixer_set_voice((int)a0, (int)a1, (int)a2, (int)a3);
+        return 0;
+    }
+    if (n == OF_SYS_MIXER_SET_RATE_RAW) {
+        of_mixer_set_rate_raw((int)a0, (uint32_t)a1);
+        return 0;
+    }
+    if (n == OF_SYS_MIXER_SET_VOICE_RAW) {
+        of_mixer_set_voice_raw((int)a0, (uint32_t)a1, (int)a2, (int)a3);
+        return 0;
+    }
 
-    /* Audio Codec syscalls (0x10D8+) */
+    /* Audio Codec syscalls */
     if (n == OF_SYS_CODEC_PARSE_VOC)
         return of_codec_parse_voc((const uint8_t *)a0, (uint32_t)a1,
                                   (of_codec_result_t *)a2);

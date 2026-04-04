@@ -26,7 +26,7 @@
 /* App BRAM region — available for app hot code after OS sections.
  * Top 512 bytes reserved for trap handler stack frame. */
 #define APP_BRAM_BASE       0x00002000
-#define APP_BRAM_END        (BRAM_BASE + BRAM_SIZE - 512)  /* 0x00007E00 */
+#define APP_BRAM_END        0x00007C00  /* Libc table at 0x7C00, trap stack at 0x7E00 */
 #define APP_BRAM_SIZE       (APP_BRAM_END - APP_BRAM_BASE)
 
 #define SDRAM_BASE          0x10000000
@@ -183,14 +183,29 @@
 #define   TIMER_CTRL_ENABLE   (1 << 0)
 #define   TIMER_CTRL_W1C_IRQ  (1 << 1)
 
-/* Hardware PCM mixer (0xC0-0xD8) — 32-voice CRAM1-backed */
-#define MIX_VOICE_SEL       REG32(SYSREG_BASE + 0xC0)  /* Voice index 0-31 */
-#define MIX_VOICE_ADDR      REG32(SYSREG_BASE + 0xC4)  /* CRAM1 word address */
-#define MIX_VOICE_LEN       REG32(SYSREG_BASE + 0xC8)  /* Length (16-bit halfwords) */
-#define MIX_VOICE_RATE      REG32(SYSREG_BASE + 0xCC)  /* Rate (0.16 fixed-point) */
-#define MIX_VOICE_CTRL      REG32(SYSREG_BASE + 0xD0)  /* [0]=active [1]=loop [7:4]=vol */
-#define MIX_CTRL            REG32(SYSREG_BASE + 0xD4)  /* [0]=enable */
-#define MIX_STATUS          REG32(SYSREG_BASE + 0xD8)  /* [4:0]=active voices */
+/* Hardware PCM mixer (0xC0-0xE8) — 32-voice CRAM1-backed */
+#define MIX_VOICE_SEL       REG32(SYSREG_BASE + 0xC0)  /* Write: voice index 0-31 */
+#define MIX_VOICE_ADDR      REG32(SYSREG_BASE + 0xC4)  /* Write: CRAM1 word address */
+#define MIX_VOICE_LEN       REG32(SYSREG_BASE + 0xC8)  /* Write: length (also sets LOOP_END default) */
+#define MIX_VOICE_RATE      REG32(SYSREG_BASE + 0xCC)  /* Write: rate (16.16 fixed-point) */
+#define MIX_VOICE_CTRL      REG32(SYSREG_BASE + 0xD0)  /* Write: [0]=active [1]=loop [2]=fmt16 [3]=bidi [4]=dir */
+#define MIX_VOICE_POS       REG32(SYSREG_BASE + 0xD0)  /* Read: position[21:0] for selected voice */
+#define MIX_CTRL            REG32(SYSREG_BASE + 0xD4)  /* RW: [0]=enable */
+#define MIX_VOICE_VOL_LR    REG32(SYSREG_BASE + 0xD8)  /* Write: {vol_r[15:8], vol_l[7:0]} */
+#define MIX_STATUS          REG32(SYSREG_BASE + 0xD8)  /* Read: [4:0]=active voices */
+#define MIX_VOICE_LOOP_END  REG32(SYSREG_BASE + 0xE4)  /* Write: loop end point[21:0] */
+#define MIX_VOICE_POS_WR    REG32(SYSREG_BASE + 0xE8)  /* Write: set position[21:0] */
+
+/* VRR (Variable Refresh Rate) — dynamic V_TOTAL for video timing (0xDC)
+ * Write: bits[9:0] = V_TOTAL line count (262–375, default 262)
+ * Read:  bits[9:0] = current V_TOTAL
+ * Pocket scaler accepts 42-60 Hz. RTL hard-clamps to [262, 375]. */
+#define VRR_V_TOTAL         REG32(SYSREG_BASE + 0xDC)
+
+/* VRR swap hold — skip N vsyncs before presenting a queued frame (0xE0)
+ * Write: bits[3:0] = number of vsyncs to skip (0=immediate, 1=skip one, etc.)
+ * Used for even frame pacing in the 30-40 FPS gap. */
+#define VRR_SWAP_HOLD       REG32(SYSREG_BASE + 0xE0)
 
 /* Datatable slot size query (0x90) — write slot entry address, read result */
 #define DT_QUERY            REG32(SYSREG_BASE + 0x90)
