@@ -166,6 +166,11 @@ $(HAL_DIR)/%.o: $(HAL_DIR)/%.c
 $(TARGET_DIR)/%.o: $(TARGET_DIR)/%.c
 	$(CC) $(OS_CFLAGS) -c -o $@ $<
 
+# syscall.c without LTO — LTO strips functions called only via
+# runtime-determined if-chains from the assembly trap handler.
+$(KERNEL_DIR)/syscall.o: $(KERNEL_DIR)/syscall.c
+	$(CC) $(filter-out -flto,$(OS_CFLAGS)) -c -o $@ $<
+
 $(KERNEL_DIR)/%.o: $(KERNEL_DIR)/%.c
 	$(CC) $(OS_CFLAGS) -c -o $@ $<
 

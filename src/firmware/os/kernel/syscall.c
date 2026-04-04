@@ -599,6 +599,12 @@ static long sys_llseek(long fd, long off_hi, long off_lo,
     long offset = off_lo;
     long new_offset;
 
+    /* Resolve file size on SEEK_END if not yet known */
+    if (whence == 2 && f->size == 0 && f->slot_id > 0) {
+        long sz = of_file_size(f->slot_id);
+        if (sz > 0) f->size = (uint32_t)sz;
+    }
+
     switch (whence) {
     case 0: new_offset = offset; break;
     case 1: new_offset = (long)f->offset + offset; break;
@@ -766,7 +772,7 @@ static long of_input_syscall(long n, long a0, long a1) {
  * Main syscall dispatch (called from trap handler via ecall)
  * ====================================================================== */
 
-long syscall_dispatch(long n, long a0, long a1, long a2,
+__attribute__((used)) long syscall_dispatch(long n, long a0, long a1, long a2,
                       long a3, long a4, long a5) {
     /* Shutdown handshake is auto-acked in FPGA (core_top.v) —
      * no CPU involvement needed. */
