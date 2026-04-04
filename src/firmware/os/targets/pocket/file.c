@@ -274,17 +274,21 @@ int of_file_get_name(uint32_t slot_id, char *name_out, uint32_t name_max) {
     DS_RESP_ADDR   = CRAM1_SCRATCH_BRIDGE;
     DS_COMMAND     = DS_CMD_GETFILE;
 
-    /* Wait for completion — ~50ms timeout.
-     * Note: 0x0190 completes on current Pocket firmware but the APF
-     * host does not write the response struct. Filenames are unavailable;
-     * dir_probe_slots falls back to "slot:N" names via datatable. */
+    /* Wait for command completion and all bridge writes to drain.
+     * The APF host fetches the filename from SD and writes the response
+     * struct back to the bridge address — WR_IDLE ensures the data
+     * has landed in memory before we read it. */
     {
-        uint32_t wait = 5000000;
+        uint32_t wait = 5000000;  /* ~50ms */
         while (!(DS_STATUS & DS_STATUS_DONE)) {
             if (--wait == 0) return OF_ERR_TIMEOUT;
         }
         wait = 5000000;
         while (!(DS_STATUS & DS_STATUS_READY)) {
+            if (--wait == 0) return OF_ERR_TIMEOUT;
+        }
+        wait = 5000000;
+        while (!(DS_STATUS & DS_STATUS_WR_IDLE)) {
             if (--wait == 0) return OF_ERR_TIMEOUT;
         }
     }
@@ -293,9 +297,12 @@ int of_file_get_name(uint32_t slot_id, char *name_out, uint32_t name_max) {
     if (err)
         return -((int)err);
 
+    /* Invalidate D-cache — bridge wrote to CRAM1 behind CPU cache */
+    of_cache_inval_range((void *)CRAM1_SCRATCH, 256);
+
     /* get_dataslot_file_t: 256-byte null-terminated full path string
      * at offset 0 (e.g. "/Assets/platform/common/data.bin") */
-    const char *filename = (const char *)resp;
+    const char *filename = (const char *)(CRAM1_SCRATCH);
 
     /* Extract basename (after last '/') */
     const char *base = filename;
