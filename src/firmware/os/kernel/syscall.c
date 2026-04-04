@@ -318,8 +318,8 @@ static long sys_read(long fd, long buf, long count) {
         long sz = of_file_size(f->slot_id);
         if (sz > 0)
             f->size = (uint32_t)sz;
-        else
-            return 0;  /* slot has no data — EOF immediately */
+        /* If size unknown (-1), leave f->size as 0 and read without
+         * bounds checking — the bridge returns short/zero when EOF. */
     }
 
     uint32_t to_read = (uint32_t)count;
