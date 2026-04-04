@@ -255,16 +255,16 @@ long of_file_size(uint32_t slot_id) {
  * Filename is written to `name_out` (max `name_max` chars).
  */
 int of_file_get_name(uint32_t slot_id, char *name_out, uint32_t name_max) {
-    /* Clear response buffer in CRAM1 scratch (uncached for bridge visibility) */
+    /* Response buffer in CRAM1 scratch (uncached for bridge visibility) */
     volatile uint8_t *resp = (volatile uint8_t *)CRAM1_SCRATCH_UNCACHED;
-    for (int i = 0; i < 256; i++)
+    for (int i = 0; i < 64; i++)
         ((volatile uint32_t *)CRAM1_SCRATCH_UNCACHED)[i] = 0;
 
-    fence();
+    __asm__ volatile("fence" ::: "memory");
 
     /* Wait for bridge idle */
     {
-        uint32_t wait = 500000;  /* ~5ms — getfile is fast */
+        uint32_t wait = 5000000;  /* ~50ms */
         while (!(DS_STATUS & DS_STATUS_READY)) {
             if (--wait == 0) return OF_ERR_TIMEOUT;
         }
@@ -274,10 +274,12 @@ int of_file_get_name(uint32_t slot_id, char *name_out, uint32_t name_max) {
     DS_RESP_ADDR   = CRAM1_SCRATCH_BRIDGE;
     DS_COMMAND     = DS_CMD_GETFILE;
 
-    /* Getfile goes through the APF host (ARM) which reads from SD —
-     * allow up to ~50ms for the response. */
+    /* Wait for completion — ~50ms timeout.
+     * Note: 0x0190 completes on current Pocket firmware but the APF
+     * host does not write the response struct. Filenames are unavailable;
+     * dir_probe_slots falls back to "slot:N" names via datatable. */
     {
-        uint32_t wait = 5000000;  /* ~50ms */
+        uint32_t wait = 5000000;
         while (!(DS_STATUS & DS_STATUS_DONE)) {
             if (--wait == 0) return OF_ERR_TIMEOUT;
         }
@@ -287,13 +289,12 @@ int of_file_get_name(uint32_t slot_id, char *name_out, uint32_t name_max) {
         }
     }
 
-    /* Check result code (error bits = 1 means slot not defined) */
     uint32_t err = (DS_STATUS & DS_STATUS_ERR_MASK) >> DS_STATUS_ERR_SHIFT;
     if (err)
         return -((int)err);
 
     /* get_dataslot_file_t: 256-byte null-terminated full path string
-     * starting at offset 0 (e.g. "/Assets/abcd/common/data.bin") */
+     * at offset 0 (e.g. "/Assets/platform/common/data.bin") */
     const char *filename = (const char *)resp;
 
     /* Extract basename (after last '/') */
