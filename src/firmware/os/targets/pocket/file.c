@@ -255,23 +255,29 @@ long of_file_size(uint32_t slot_id) {
  * Filename is written to `name_out` (max `name_max` chars).
  */
 int of_file_get_name(uint32_t slot_id, char *name_out, uint32_t name_max) {
-    /* Response buffer in CRAM1 scratch (uncached for bridge visibility) */
-    volatile uint8_t *resp = (volatile uint8_t *)CRAM1_SCRATCH_UNCACHED;
+    /* Response buffer in CRAM1 (bridge address 0x30xxxxxx).
+     * Try base address 0x30000000, page-aligned. */
+    #define GETFILE_CACHED    CRAM1_BASE                  /* 0x31000000 */
+    #define GETFILE_UNCACHED  CRAM1_UNCACHED              /* 0x39000000 */
+    #define GETFILE_BRIDGE    CRAM1_BRIDGE                /* 0x30000000 */
+    uint32_t bridge_addr = GETFILE_BRIDGE;
+    volatile uint32_t *resp32 = (volatile uint32_t *)GETFILE_UNCACHED;
     for (int i = 0; i < 64; i++)
-        ((volatile uint32_t *)CRAM1_SCRATCH_UNCACHED)[i] = 0;
+        resp32[i] = 0;
 
+    of_cache_inval_range((void *)GETFILE_CACHED, 256);
     __asm__ volatile("fence" ::: "memory");
 
     /* Wait for bridge idle */
     {
-        uint32_t wait = 5000000;  /* ~50ms */
+        uint32_t wait = 5000000;
         while (!(DS_STATUS & DS_STATUS_READY)) {
             if (--wait == 0) return OF_ERR_TIMEOUT;
         }
     }
 
     DS_SLOT_ID     = slot_id;
-    DS_RESP_ADDR   = CRAM1_SCRATCH_BRIDGE;
+    DS_RESP_ADDR   = bridge_addr;
     DS_COMMAND     = DS_CMD_GETFILE;
 
     /* Wait for command completion and all bridge writes to drain.
@@ -298,11 +304,10 @@ int of_file_get_name(uint32_t slot_id, char *name_out, uint32_t name_max) {
         return -((int)err);
 
     /* Invalidate D-cache — bridge wrote to CRAM1 behind CPU cache */
-    of_cache_inval_range((void *)CRAM1_SCRATCH, 256);
+    of_cache_inval_range((void *)GETFILE_CACHED, 256);
 
-    /* get_dataslot_file_t: 256-byte null-terminated full path string
-     * at offset 0 (e.g. "/Assets/platform/common/data.bin") */
-    const char *filename = (const char *)(CRAM1_SCRATCH);
+    /* Read via uncached alias to guarantee fresh data */
+    const char *filename = (const char *)GETFILE_UNCACHED;
 
     /* Extract basename (after last '/') */
     const char *base = filename;

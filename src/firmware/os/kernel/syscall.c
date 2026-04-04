@@ -8,6 +8,9 @@
 #include "../os_string.h"
 #include "../../api/of_version.h"
 
+/* Internal HAL functions (not exposed in public headers) */
+extern long of_file_size(uint32_t slot_id);
+
 /* dlmalloc functions (provided by of_malloc.c, USE_DL_PREFIX) */
 extern void *dlmalloc(size_t);
 extern void  dlfree(void *);
@@ -76,8 +79,8 @@ static fd_entry_t fd_table[MAX_FDS];
 
 #define IO_CACHE_ENTRIES    8
 #define IO_CACHE_BLOCK_SIZE (32 * 1024)
-#define IO_CACHE_CACHED     0x31300000  /* CRAM1 cached alias (CPU D-cache reads) */
-#define IO_CACHE_BRIDGE     0x30300000  /* CRAM1 bridge address (DMA target) */
+#define IO_CACHE_CACHED     (CRAM1_BASE + 0x00300000)    /* CPU D-cache reads */
+#define IO_CACHE_BRIDGE     (CRAM1_BRIDGE + 0x00300000) /* Bridge DMA target */
 
 typedef struct {
     uint32_t slot_id;       /* data slot this block belongs to */
@@ -599,7 +602,7 @@ static long sys_llseek(long fd, long off_hi, long off_lo,
     long offset = off_lo;
     long new_offset;
 
-    /* Resolve file size on SEEK_END if not yet known */
+    /* Resolve file size for SEEK_END */
     if (whence == 2 && f->size == 0 && f->slot_id > 0) {
         long sz = of_file_size(f->slot_id);
         if (sz > 0) f->size = (uint32_t)sz;
@@ -865,33 +868,77 @@ __attribute__((used)) long syscall_dispatch(long n, long a0, long a1, long a2,
     }
 
     case SYS_statx: {
-        /* Minimal statx: musl on riscv32 uses this instead of fstat.
-         * a0=dirfd, a1=path, a2=flags, a3=mask, a4=statxbuf
-         * For fstat: dirfd=fd, path="", flags=AT_EMPTY_PATH */
+        /* a0=dirfd, a1=path, a2=flags, a3=mask, a4=statxbuf
+         * Two modes:
+         *   fstat: dirfd=fd, path="", flags=AT_EMPTY_PATH
+         *   stat:  dirfd=AT_FDCWD, path="filename", flags=0 */
         long statx_fd = a0;
+        uint32_t file_size = 0;
+
         if (statx_fd >= 0 && statx_fd < MAX_FDS && fd_table[statx_fd].in_use) {
-            /* statx struct: offset 0x00=mask, 0x04=blksize, ...
-             * offset 0x28=stx_size (uint64_t) */
-            uint32_t *sx = (uint32_t *)a4;
-            memset(sx, 0, 256);
-            sx[0] = 0x7FF;  /* mask: all valid */
-            sx[10] = fd_table[statx_fd].size;  /* stx_size low 32 bits at offset 0x28 */
-            return 0;
+            /* fstat mode: use existing fd */
+            fd_entry_t *f = &fd_table[statx_fd];
+            if (f->size == 0 && f->slot_id > 0) {
+                long sz = of_file_size(f->slot_id);
+                if (sz > 0) f->size = (uint32_t)sz;
+            }
+            file_size = f->size;
+        } else if (a1) {
+            /* stat mode: open file by path, get size, close */
+            long fd = sys_openat(a0, a1, 0, 0);
+            if (fd >= 0) {
+                fd_entry_t *f = &fd_table[fd];
+                if (f->size == 0 && f->slot_id > 0) {
+                    long sz = of_file_size(f->slot_id);
+                    if (sz > 0) f->size = (uint32_t)sz;
+                }
+                file_size = f->size;
+                fd_table[fd].in_use = 0;
+            } else {
+                return -ENOENT;
+            }
+        } else {
+            return -EBADF;
         }
-        return -EBADF;
+
+        uint32_t *sx = (uint32_t *)a4;
+        memset(sx, 0, 256);
+        sx[0] = 0x7FF;         /* stx_mask (offset 0) */
+        sx[10] = file_size;    /* stx_size low 32 (offset 40) */
+        sx[11] = 0;            /* stx_size high 32 */
+        return 0;
     }
 
     case SYS_fstat: {
-        /* Legacy fstat (syscall 80) — kept for direct callers */
         if (a0 >= 0 && a0 < MAX_FDS && fd_table[a0].in_use) {
+            fd_entry_t *f = &fd_table[a0];
+            if (f->size == 0 && f->slot_id > 0) {
+                long sz = of_file_size(f->slot_id);
+                if (sz > 0) f->size = (uint32_t)sz;
+            }
             struct { uint64_t __pad[6]; uint32_t st_size; } *st = (void *)a1;
-            memset(st, 0, 128);  /* zero full struct (musl expects 128 bytes) */
-            st->st_size = fd_table[a0].size;
+            memset(st, 0, 128);
+            st->st_size = f->size;
             return 0;
         }
         return -EBADF;
     }
-    case SYS_fstatat:       return -ENOSYS;
+    case SYS_fstatat: {
+        /* a0=dirfd, a1=path, a2=statbuf, a3=flags */
+        /* Open the file, stat it, close */
+        long fd = sys_openat(a0, a1, 0, 0);
+        if (fd < 0) return fd;
+        fd_entry_t *f = &fd_table[fd];
+        if (f->size == 0 && f->slot_id > 0) {
+            long sz = of_file_size(f->slot_id);
+            if (sz > 0) f->size = (uint32_t)sz;
+        }
+        struct { uint64_t __pad[6]; uint32_t st_size; } *st = (void *)a2;
+        memset(st, 0, 128);
+        st->st_size = f->size;
+        fd_table[fd].in_use = 0;
+        return 0;
+    }
     case SYS_fcntl:         return -ENOSYS;
     case SYS_ioctl:         return 0;   /* stub — makes musl stdout line-buffered */
     case SYS_faccessat:     return -ENOSYS;

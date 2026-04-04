@@ -10,7 +10,7 @@
 
 #define SAVE_MAX_SLOTS      10
 #define SAVE_SLOT_SIZE      0x40000     /* 256KB per slot (fully usable by app) */
-#define SAVE_REGION_ADDR    0x39000000  /* CRAM1 uncached — bridge accesses PSRAM directly */
+#define SAVE_REGION_ADDR    CRAM1_UNCACHED  /* Bridge accesses PSRAM directly */
 
 /* Initialize save subsystem */
 void of_save_init(void);

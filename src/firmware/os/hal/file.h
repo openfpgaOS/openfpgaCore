@@ -37,11 +37,6 @@ int of_file_read(uint32_t slot_id, uint32_t slot_offset,
 int of_file_read_chunked(uint32_t slot_id, uint32_t slot_offset,
                           void *dest, uint32_t total);
 
-/* Get the size of a file slot in bytes.
- * Uses the bridge open-file command to query the slot.
- * Returns size on success, negative on error. */
-long of_file_size(uint32_t slot_id);
-
 /* Flush a data slot to SD card (Data Slot Write command).
  * Tells the bridge to read from bridge_addr and write to the slot's .sav file.
  * slot_id: APF data slot ID (10-19 for saves)

@@ -30,11 +30,10 @@ void irq_handler(void *frame) {
     /* External interrupt (code 11) unused — mixer runs autonomously */
 }
 
-/* Scratch buffer in CRAM1 for of_audio_write() convenience wrapper.
- * Located at end of CRAM1 save region to avoid conflicts with app samples. */
-#define AUDIO_SCRATCH_CRAM1   0x39F00000  /* Last 1MB of CRAM1, uncached alias */
-#define AUDIO_SCRATCH_VOICE   31          /* Dedicated voice for of_audio_write */
-#define AUDIO_SCRATCH_MAX     (256 * 1024)  /* 256K samples max */
+/* Scratch buffer in CRAM1 for of_audio_write() convenience wrapper. */
+#define AUDIO_SCRATCH_CRAM1   (CRAM1_UNCACHED + 0x00F00000)  /* Last 1MB of CRAM1 */
+#define AUDIO_SCRATCH_VOICE   31
+#define AUDIO_SCRATCH_MAX     (256 * 1024)
 
 int of_audio_write(const int16_t *samples, int count) {
     if (count <= 0 || !samples) return 0;
