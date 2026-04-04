@@ -839,12 +839,9 @@ long syscall_dispatch(long n, long a0, long a1, long a2,
         return 0;
     }
 
-    if (n == OF_SYS_LINK_SEND)
-        return of_link_send((uint32_t)a0);
-    if (n == OF_SYS_LINK_RECV)
-        return of_link_recv((uint32_t *)a0);
-    if (n == OF_SYS_LINK_GET_STATUS)
-        return (long)of_link_get_status();
+    /* Networking syscalls (0x1060+) — replaces link cable */
+    if (n >= 0x1060 && n <= 0x106A)
+        return of_net_syscall(n, a0, a1, a2);
 
     if (n == OF_SYS_TIMER_GET_US)
         return (long)of_timer_get_us();
@@ -1027,11 +1024,27 @@ long syscall_dispatch(long n, long a0, long a1, long a2,
         return of_codec_parse_wav((const uint8_t *)a0, (uint32_t)a1,
                                   (of_codec_result_t *)a2);
 
+    /* Mixer sample allocation (0x10DA+) */
+    if (n == OF_SYS_MIXER_ALLOC_SAMPLES)
+        return (long)of_mixer_alloc_samples((uint32_t)a0);
+    if (n == OF_SYS_MIXER_FREE_SAMPLES) {
+        of_mixer_free_samples();
+        return 0;
+    }
+
     /* LZW Compression syscalls (0x10E0+) */
     if (n == OF_SYS_LZW_COMPRESS)
         return of_lzw_compress((const uint8_t *)a0, (int32_t)a1, (uint8_t *)a2);
     if (n == OF_SYS_LZW_UNCOMPRESS)
         return of_lzw_uncompress((const uint8_t *)a0, (int32_t)a1, (uint8_t *)a2);
+
+    /* Interact (0x10F0) */
+    if (n == OF_SYS_INTERACT_GET) {
+        int index = (int)a0;
+        if (index < 0 || index >= 64) return 0;
+        volatile uint32_t *vars = (volatile uint32_t *)INTERACT_UNCACHED;
+        return (long)vars[index];
+    }
 
     return -ENOSYS;
 }

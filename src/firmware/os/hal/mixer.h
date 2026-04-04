@@ -43,4 +43,12 @@ void of_mixer_pump(void);
  * Cheap to call from any kernel code path. */
 void of_mixer_pump_auto(void);
 
+/* Allocate sample memory from CRAM1 pool (bump allocator).
+ * Returns pointer to 4-byte aligned CRAM1 buffer, or NULL if full.
+ * Pass the returned pointer to of_mixer_play(). */
+void *of_mixer_alloc_samples(uint32_t size);
+
+/* Reset sample allocator — frees all sample memory. */
+void of_mixer_free_samples(void);
+
 #endif /* OFOS_MIXER_H */

@@ -54,10 +54,10 @@ int of_mixer_play(const uint8_t *pcm_u8, uint32_t sample_count,
      * Accepts both cached (0x31xxxxxx) and uncached (0x39xxxxxx) aliases. */
     uint32_t cpu_addr = (uint32_t)(uintptr_t)pcm_u8;
     uint32_t cram1_offset;
-    if (cpu_addr >= 0x39000000 && cpu_addr < 0x3A000000)
-        cram1_offset = cpu_addr - 0x39000000;
+    if (cpu_addr >= CRAM1_UNCACHED && cpu_addr < CRAM1_UNCACHED + CRAM_SIZE)
+        cram1_offset = cpu_addr - CRAM1_UNCACHED;
     else
-        cram1_offset = cpu_addr - 0x31000000;
+        cram1_offset = cpu_addr - CRAM1_BASE;
     uint32_t cram1_word_addr = cram1_offset >> 2;
 
     MIX_VOICE_SEL = best;
@@ -112,3 +112,32 @@ int of_mixer_voice_active(int voice)
 /* No-op: hardware mixer runs autonomously */
 void of_mixer_pump_auto(void) { }
 void of_mixer_pump(void) { }
+
+/* ======================================================================
+ * Sample memory bump allocator
+ *
+ * CRAM1 layout:
+ *   0x31000000-0x3133FFFF  Save slots + I/O cache (reserved by kernel)
+ *   0x31400000-0x31EFFFFF  Sample pool (this allocator)
+ *   0x31F00000-0x31FFFFFF  Audio scratch, voice 31 (reserved)
+ * ====================================================================== */
+
+#define SAMPLE_POOL_BASE  (CRAM1_BASE + 0x00400000)   /* 0x31400000 */
+#define SAMPLE_POOL_END   (CRAM1_BASE + 0x00F00000)   /* 0x31F00000 */
+
+static uint32_t sample_pool_head = SAMPLE_POOL_BASE;
+
+void *of_mixer_alloc_samples(uint32_t size)
+{
+    size = (size + 3) & ~3;  /* 4-byte align for mixer word addressing */
+    if (sample_pool_head + size > SAMPLE_POOL_END)
+        return (void *)0;
+    void *ptr = (void *)sample_pool_head;
+    sample_pool_head += size;
+    return ptr;
+}
+
+void of_mixer_free_samples(void)
+{
+    sample_pool_head = SAMPLE_POOL_BASE;
+}

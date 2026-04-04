@@ -69,6 +69,7 @@ BOOT_SRCS_S = $(BOOT_DIR)/start.S
 HAL_SRCS = $(HAL_DIR)/hal.c \
            $(HAL_DIR)/cache.c \
            $(HAL_DIR)/mixer.c \
+           $(HAL_DIR)/net.c \
            $(HAL_DIR)/codec.c \
            $(HAL_DIR)/lzw.c
 

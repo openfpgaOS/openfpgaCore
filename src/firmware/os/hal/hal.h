@@ -16,6 +16,7 @@
 #include "timer.h"
 #include "cache.h"
 #include "link.h"
+#include "net.h"
 #include "tile.h"
 #include "mixer.h"
 #include "codec.h"

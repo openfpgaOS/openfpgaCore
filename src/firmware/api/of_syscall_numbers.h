@@ -57,10 +57,18 @@ extern "C" {
 #define OF_SYS_TERM_PRINTF             0x1052
 #define OF_SYS_TERM_SET_POS            0x1053
 
-/* Link cable */
-#define OF_SYS_LINK_SEND               0x1060
-#define OF_SYS_LINK_RECV               0x1061
-#define OF_SYS_LINK_GET_STATUS         0x1062
+/* Networking (replaces Link cable) */
+#define OF_SYS_NET_HOST_START          0x1060
+#define OF_SYS_NET_JOIN                0x1061
+#define OF_SYS_NET_STOP                0x1062
+#define OF_SYS_NET_STATUS              0x1063
+#define OF_SYS_NET_CLIENT_COUNT        0x1064
+#define OF_SYS_NET_SEND_TO             0x1065
+#define OF_SYS_NET_RECV_FROM           0x1066
+#define OF_SYS_NET_BROADCAST           0x1067
+#define OF_SYS_NET_SEND                0x1068
+#define OF_SYS_NET_RECV                0x1069
+#define OF_SYS_NET_POLL                0x106A
 
 /* Timer */
 #define OF_SYS_TIMER_GET_US            0x1070
@@ -124,9 +132,16 @@ extern "C" {
 #define OF_SYS_CODEC_PARSE_VOC         0x10D8
 #define OF_SYS_CODEC_PARSE_WAV         0x10D9
 
+/* Mixer sample allocation */
+#define OF_SYS_MIXER_ALLOC_SAMPLES     0x10DA
+#define OF_SYS_MIXER_FREE_SAMPLES      0x10DB
+
 /* LZW Compression */
 #define OF_SYS_LZW_COMPRESS            0x10E0
 #define OF_SYS_LZW_UNCOMPRESS          0x10E1
+
+/* Interact */
+#define OF_SYS_INTERACT_GET            0x10F0
 
 #ifdef __cplusplus
 }
