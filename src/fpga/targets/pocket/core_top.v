@@ -2147,6 +2147,9 @@ assign video_hs = vidout_hs;
         .mix_irq_pending(mix_irq_pending),
         .timer_irq(timer_irq),
         .uart_rx_irq(uart_rx_irq),
+        .link_irq(link_irq),
+        .mix_voice_end_irq(mix_voice_end_irq),
+        .ext_irq(ext_irq),
         // Datatable slot size query
         .dt_query_addr(cpu_dt_query_addr),
         .dt_query_toggle(cpu_dt_query_toggle),
@@ -2572,9 +2575,7 @@ wire [21:0] mix_cram1_addr;
 wire        timer_irq;
 wire        uart_rx_irq;
 wire        link_irq;
-// External IRQ disabled until firmware registers a handler and enables it.
-// These are level-triggered — an unhandled high source causes an IRQ storm.
-wire        ext_irq = 1'b0;  // TODO: add IRQ enable mask register
+wire        ext_irq;  // Masked combination from axi_periph_slave
 
 audio_output audio_out (
     .clk_sys      (clk_cpu),

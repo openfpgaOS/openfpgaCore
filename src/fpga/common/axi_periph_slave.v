@@ -133,6 +133,11 @@ module axi_periph_slave (
     output wire        timer_irq,
     output wire        uart_rx_irq,
 
+    // External IRQ masking
+    input  wire        link_irq,
+    input  wire        mix_voice_end_irq,
+    output wire        ext_irq,
+
     // Datatable slot size query (toggle-based CDC to clk_74a)
     output reg  [9:0]  dt_query_addr,
     output reg         dt_query_toggle,   // toggles on each new query
@@ -229,11 +234,17 @@ reg        timer_irq_pending;
 assign timer_irq = timer_irq_pending & timer_enable;
 assign uart_rx_irq = !uart_rx_empty;  // IRQ when UART RX FIFO has data
 
+// External IRQ mask — bits[2:0] = {mix_voice_end, link, uart_rx}
+reg [2:0] irq_mask;
+assign ext_irq = (uart_rx_irq & irq_mask[0]) |
+                 (link_irq & irq_mask[1]) |
+                 (mix_voice_end_irq & irq_mask[2]);
+
 // Triple-buffered framebuffer
-localparam FB_ADDR_0 = 25'h0000000;
-localparam FB_ADDR_1 = 25'h0080000;
-localparam FB_ADDR_2 = 25'h0100000;
-localparam TERM_FB_ADDR = 25'h0180000;  // 0x10300000 — dedicated terminal FB
+localparam FB_ADDR_0 = 25'h0000000;  // CPU 0x10000000
+localparam FB_ADDR_1 = 25'h0100000;  // CPU 0x10100000
+localparam FB_ADDR_2 = 25'h0200000;  // CPU 0x10200000
+localparam TERM_FB_ADDR = 25'h0300000;  // CPU 0x10300000
 reg [1:0] fb_display_idx;
 reg [1:0] fb_ready_idx;
 reg fb_swap_pending;
@@ -365,6 +376,7 @@ always @(posedge clk) begin
         timer_counter <= 0;
         timer_enable <= 0;
         timer_irq_pending <= 0;
+        irq_mask <= 3'b0;
         dt_query_addr <= 0;
         dt_query_toggle <= 0;
         vrr_v_total <= 10'd262;
@@ -549,6 +561,7 @@ always @(posedge clk) begin
                     mix_voice_wdata <= req_wdata;
                 end
                 6'b111110: mix_irq_clear_wr <= 1;                   // MIX_IRQ_CLEAR (0xF8) W1C
+                6'b111111: irq_mask <= req_wdata[2:0];             // IRQ_MASK (0xFC)
 
                 6'b110111: vrr_v_total <= req_wdata[9:0];          // VRR_V_TOTAL (0xDC)
                 6'b111000: vrr_swap_hold <= req_wdata[3:0];        // VRR_SWAP_HOLD (0xE0)
@@ -613,6 +626,7 @@ always @(*) begin
         6'b110101: sysreg_rdata = {31'b0, mix_enable};              // MIX_CTRL (0xD4)
         6'b110110: sysreg_rdata = {27'b0, mix_active_count};        // MIX_STATUS (0xD8)
         6'b111110: sysreg_rdata = mix_irq_pending;                   // MIX_IRQ_PENDING (0xF8)
+        6'b111111: sysreg_rdata = {29'b0, irq_mask};               // IRQ_MASK (0xFC)
         6'b110111: sysreg_rdata = {22'b0, vrr_v_total};             // VRR_V_TOTAL (0xDC)
         6'b111000: sysreg_rdata = {28'b0, vrr_swap_hold};           // VRR_SWAP_HOLD (0xE0)
         // Datatable slot size query (0x90): bit 31 = valid, bits 30:0 = data

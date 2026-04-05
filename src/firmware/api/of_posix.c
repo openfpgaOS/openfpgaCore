@@ -130,36 +130,10 @@ int access(const char *path, int mode) {
 /* exit/abort handled in stdlib.h via ecall(93) → kernel switches to terminal FB */
 int mkdir(const char *p, int m){ (void)p; (void)m; return 0; }
 
-/* stat/fstat: use lseek to determine file size.
- * No ecall — uses the JT functions which are known working. */
-int stat(const char *path, struct _of_stat *buf) {
-    int fd = JT->open(path, 0);
-    if (fd < 0) return -1;
-    /* Save pos, seek end, restore — all through musl's lseek */
-    long long sz = JT->lseek(fd, 0, 2);  /* SEEK_END */
-    JT->close(fd);
-    if (buf) {
-        buf->st_size = (sz > 0) ? (unsigned int)sz : 0;
-        buf->st_mode = 0100644;
-        buf->st_mtime = 0;
-    }
-    return 0;
-}
-
-int fstat(int fd, struct _of_stat *buf) {
-    if (fd < 0) return -1;
-    /* For fstat, save current position, seek to end, restore */
-    long long pos = JT->lseek(fd, 0, 1);  /* SEEK_CUR */
-    long long sz  = JT->lseek(fd, 0, 2);  /* SEEK_END */
-    if (pos >= 0)
-        JT->lseek(fd, pos, 0);            /* SEEK_SET restore */
-    if (buf) {
-        buf->st_size = (sz > 0) ? (unsigned int)sz : 0;
-        buf->st_mode = 0100644;
-        buf->st_mtime = 0;
-    }
-    return 0;
-}
+/* stat/fstat: delegate to musl via jump table.
+ * musl handles the kernel struct layout internally. */
+int stat(const char *path, struct _of_stat *buf)  { return JT->stat(path, (void *)buf); }
+int fstat(int fd, struct _of_stat *buf)            { return JT->fstat(fd, (void *)buf); }
 void *alloca(unsigned int sz)  { return __builtin_alloca(sz); }
 int min(int a, int b)          { return a < b ? a : b; }
 int max(int a, int b)          { return a > b ? a : b; }

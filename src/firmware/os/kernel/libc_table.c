@@ -20,6 +20,7 @@
 #include <ctype.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <sys/stat.h>
 
 
 void libc_table_init(void) {
@@ -141,6 +142,8 @@ void libc_table_init(void) {
     t->read     = (int (*)(int, void *, unsigned int))read;
     t->write    = (int (*)(int, const void *, unsigned int))write;
     t->lseek    = (long long (*)(int, long long, int))lseek;
+    t->fstat    = (int (*)(int, void *))fstat;
+    t->stat     = (int (*)(const char *, void *))stat;
 
     /* Disable stdio buffering so printf() output appears immediately.
      * Without this, musl's stdout is line-buffered and holds output

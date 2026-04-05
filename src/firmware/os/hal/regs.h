@@ -185,6 +185,12 @@
 #define MIX_IRQ_PENDING      REG32(SYSREG_BASE + 0xF8)  /* Read: voice-end bitmask */
 #define MIX_IRQ_CLEAR        REG32(SYSREG_BASE + 0xF8)  /* Write: W1C */
 
+/* External IRQ mask (0xFC) — bits[2:0] = {mix_voice_end, link, uart_rx} enable */
+#define IRQ_MASK             REG32(SYSREG_BASE + 0xFC)
+#define   IRQ_MASK_UART_RX   (1 << 0)
+#define   IRQ_MASK_LINK      (1 << 1)
+#define   IRQ_MASK_MIX_VOICE (1 << 2)
+
 /* VRR (Variable Refresh Rate) — dynamic V_TOTAL for video timing (0xDC)
  * Write: bits[9:0] = V_TOTAL line count (262–375, default 262)
  * Read:  bits[9:0] = current V_TOTAL
