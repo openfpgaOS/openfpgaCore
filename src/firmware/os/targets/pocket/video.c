@@ -157,7 +157,8 @@ void of_video_init(void) {
     VRR_V_TOTAL = VRR_VT_DEFAULT;
     VRR_SWAP_HOLD = 0;
 
-    /* Clear FBs via uncached alias so scanout sees zeros immediately */
+    /* Clear FBs via uncached alias — may not fully bypass D-cache (PMA issue).
+     * Acceptable at boot: of_term_init() switches to terminal FB immediately. */
     memset((void *)(FB0_BASE - SDRAM_BASE + SDRAM_UNCACHED_BASE), 0, FB_SIZE);
     memset((void *)(FB1_BASE - SDRAM_BASE + SDRAM_UNCACHED_BASE), 0, FB_SIZE);
     memset((void *)(FB2_BASE - SDRAM_BASE + SDRAM_UNCACHED_BASE), 0, FB_SIZE);

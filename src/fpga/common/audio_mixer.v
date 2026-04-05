@@ -142,9 +142,6 @@ reg [31:0] voice_active;
 reg        cpu_wr_pending;
 reg        cpu_clear_pos;
 reg [8:0]  cpu_clear_base;
-reg        cpu_init_loopend;
-reg        cpu_init_loopstart;
-reg [21:0] cpu_init_len;
 
 reg        fsm_wr_active;
 
@@ -240,11 +237,17 @@ wire signed [23:0] prod_r = raw_sample * $signed({1'b0, log_vol_r});
 wire signed [15:0] scaled_l = prod_l[23:8];
 wire signed [15:0] scaled_r = prod_r[23:8];
 
+// Mix-down: attenuate to prevent clipping.
+// Shift right by 1 (÷2) — headroom for multi-voice mixing.
+// Combined with log volume curve (x²/256), 4 voices at vol=180 ≈ full scale.
+wire signed [31:0] mix_l = accum_l >>> 1;
+wire signed [31:0] mix_r = accum_r >>> 1;
+
 // Output clamp
-wire [15:0] clamp_l = (accum_l > 32'sd32767)  ? 16'h7FFF :
-                      (accum_l < -32'sd32768) ? 16'h8000 : accum_l[15:0];
-wire [15:0] clamp_r = (accum_r > 32'sd32767)  ? 16'h7FFF :
-                      (accum_r < -32'sd32768) ? 16'h8000 : accum_r[15:0];
+wire [15:0] clamp_l = (mix_l > 32'sd32767)  ? 16'h7FFF :
+                      (mix_l < -32'sd32768) ? 16'h8000 : mix_l[15:0];
+wire [15:0] clamp_r = (mix_r > 32'sd32767)  ? 16'h7FFF :
+                      (mix_r < -32'sd32768) ? 16'h8000 : mix_r[15:0];
 
 // Volume ramp: step one channel toward target (minimized comparators)
 function [7:0] ramp_step;
@@ -287,9 +290,6 @@ always @(posedge clk) begin
         cpu_wr_pending <= 0;
         cpu_clear_pos <= 0;
         cpu_clear_base <= 0;
-        cpu_init_loopend <= 0;
-        cpu_init_loopstart <= 0;
-        cpu_init_len <= 0;
         fsm_wr_active <= 0;
         pos_readback <= 0;
         dir_changed <= 0;
@@ -310,15 +310,16 @@ always @(posedge clk) begin
             vtbl_a_data <= voice_wdata;
             if (voice_field == VTBL_CTRL)
                 voice_active[voice_sel] <= voice_wdata[0];
+            // Position auto-clear only on inactive→active transition.
+            // Allows set_loop/set_bidi to update active voices without restarting.
             if (voice_field == VTBL_CTRL && voice_wdata[0] && !voice_active[voice_sel]) begin
                 cpu_clear_pos <= 1;
                 cpu_clear_base <= {voice_sel, 4'd0};
             end
-            if (voice_field == VTBL_LEN) begin
-                cpu_init_loopend <= 1;
-                cpu_init_loopstart <= 1;
-                cpu_init_len <= voice_wdata[21:0];
-            end
+            // LEN write: no auto-init of LOOP_END/LOOP_START.
+            // Firmware sets loop points explicitly via of_mixer_set_loop.
+            // Auto-init caused a race: deferred writes overwrote firmware's
+            // loop points, corrupting looping samples.
         end else if (cpu_clear_pos && !fsm_wr_active) begin
             vtbl_a_wr <= 1;
             vtbl_a_addr <= {cpu_clear_base[8:4], VTBL_POS_INT};
@@ -330,16 +331,6 @@ always @(posedge clk) begin
             vtbl_a_addr <= {cpu_clear_base[8:4], VTBL_POS_FRAC};
             vtbl_a_data <= 32'd0;
             cpu_wr_pending <= 0;
-        end else if (cpu_init_loopend && !fsm_wr_active) begin
-            vtbl_a_wr <= 1;
-            vtbl_a_addr <= {voice_sel, VTBL_LOOP_END};
-            vtbl_a_data <= {10'd0, cpu_init_len};
-            cpu_init_loopend <= 0;
-        end else if (cpu_init_loopstart && !fsm_wr_active) begin
-            vtbl_a_wr <= 1;
-            vtbl_a_addr <= {voice_sel, VTBL_LOOP_START};
-            vtbl_a_data <= 32'd0;
-            cpu_init_loopstart <= 0;
         end else begin
             vtbl_a_wr <= 0;
         end
@@ -612,7 +603,7 @@ always @(posedge clk) begin
             S_OUTPUT: begin
                 fsm_wr_active <= 0;
                 sample_wr <= 1;
-                sample_data <= {clamp_r, clamp_l};
+                sample_data <= {clamp_l, clamp_r};  // {Left[15:0], Right[15:0]}
                 active_cnt <= voice_cnt;
                 state <= S_IDLE;
             end

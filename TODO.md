@@ -1,65 +1,99 @@
-# TODO — Post-session fixes
+# TODO
 
-## Critical (blocking Duke3D)
+## Known workarounds & hacks
 
-### ~~fstat/stat hanging~~ DONE
-- Added fstat/stat to jump table (slots 88-89, OF_LIBC_COUNT=90) pointing to musl's implementations
-- of_posix.c calls JT->fstat() with a 256-byte stack buffer, then extracts st_size from offset 40
-- Flow: app → of_posix.c (stack buffer) → musl fstat → ecall → kernel SYS_statx → writes 256B to stack buffer
+### Uncached alias (0x39/0x50) is unreliable
+- The VexiiRiscv PMA does not reliably bypass the D-cache for "uncached" aliases
+- **Workaround**: use cached alias + explicit D-cache clean (conflict eviction)
+- **Affected code**:
+  - `syscall.c:io_cache_data()` — uses cached 0x31 alias after DMA + invalidation
+  - `mixer.c` — sample pool at 0x39 uncached, but `of_mixer_play` does a clean before starting
+  - `audio.c:of_audio_write()` — writes to 0x39 scratch, flushes before playing
+  - `video.c:of_video_init()` — clears FBs via 0x50 uncached (works at boot, terminal takes over)
+  - `terminal.c` — writes glyphs to TERM_FB_BASE (0x50300000 uncached); may have coherency issues
+- **Proper fix**: investigate VexiiRiscv PMA configuration for the 0x38-0x39/0x50 ranges
+
+### Conflict eviction for D-cache management
+- No working `cbo.clean`/`cbo.inval` (Zicbom) — `cbo.zero` disabled due to CRAM1 stall
+- All D-cache operations use conflict eviction: read from EVICT_BASE to push out dirty lines
+- Works but is slow (~128KB read for a full flush) and imprecise
+- **Proper fix**: debug Zicbom instructions on VexiiRiscv, enable `cbo.clean`/`cbo.inval`
+
+### Mixer mix-down is a fixed ÷2 shift
+- `audio_mixer.v` shifts accumulator right by 1 before clamping
+- Prevents clipping with 2+ simultaneous voices but costs 6dB on single-voice playback
+- **Proper fix**: dynamic gain based on active voice count, or let firmware set a mix level register
+
+## Bugs to investigate
+
+### Blank screen after first few frames (Duke3D)
+- First frames display correctly, then screen goes blank
+- NOT VRR (disabled, same issue) — NOT address mismatch (HW uses 16-bit word addresses)
+- Possible causes:
+  1. fb_swap_pending never clears after first few swaps
+  2. Something writes TERM_FB_CTRL=1 → scanout switches to terminal FB
+  3. Loader not configuring framebuffer correctly on app start
+
+### Fmax below 100 MHz target
+- CPU clock (mp_ram out0): ~95 MHz best (seed-dependent)
+- clk_74a (bridge): ~67 MHz vs 74.25 MHz target
+- Need seed sweep to find one that closes timing
+- SDC constraints added (SDRAM I/O, clock groups) — helped from 89→95 MHz
+
+### CRAM1 read contention between CPU and mixer
+- Mixer and CPU share one CRAM1 read port via arbiter
+- `cdc_cpu_rdata_valid` fires for BOTH — mixer can't distinguish its own reads from CPU's
+- Works in practice (CPU rarely accesses CRAM1 during playback) but formally unsafe
+- Could cause audio glitches under heavy CRAM1 load
+
+## Completed
+
+### fstat/stat via ecall (was: hanging on lseek)
+- Jump table slots 88-89, musl fstat/stat via ecall
+- `of_posix.c` uses 256-byte stack buffer to absorb kernel SYS_statx write
 - Can't call kernel functions directly from app context (bridge ops need syscall trap)
 
-### Blank screen after first few frames
-- First frames display correctly, then screen goes blank
-- NOT VRR — disabled VRR, same issue
-- NOT address mismatch — HW uses 16-bit word addresses, values are correct
-- Possible causes to investigate:
-  1. Loader not using framebuffer correctly
-  2. fb_swap_pending never clears after first few swaps
-  3. Something writes TERM_FB_CTRL=1 after a few frames → scanout switches to terminal FB
+### IRQ mask register
+- `IRQ_MASK` at 0x400000FC, bits[2:0] = {mix_voice_end, link, uart_rx}
+- ext_irq driven by masked OR in axi_periph_slave (reset: all masked)
 
-### ~~ext_irq disabled~~ DONE
-- Fixed: added IRQ_MASK register at 0x400000FC, bits[2:0] = {mix, link, uart}
-- ext_irq now driven by masked OR in axi_periph_slave.v (reset default: all masked)
-- Firmware unmasks via IRQ_MASK after registering handler
+### Clock/timing fixes
+- SDC: RAM PLL outputs grouped together (were incorrectly async)
+- SDC: SDRAM I/O timing constraints added (dram_clk_pin)
+- VRR CDC: toggle handshake replaces bare 2-stage sync for 10-bit bus
+- reset_n synchronized to clk_vid domain (reset_n_vid)
 
-## Important (not blocking but should fix)
+### Mixer bugs fixed
+- `write_ctrl`: removed volume nibble from CTRL bits [7:4] (corrupted dir/bidi flags)
+- `audio.c:of_audio_write`: same CTRL volume bug fixed, added cache flush
+- Position auto-clear: only on inactive→active transition (was every CTRL write)
+- Loop auto-init race: removed deferred LOOP_END/LOOP_START writes from LEN handler
+- L/R channel swap: fixed mixer output to `{clamp_l, clamp_r}`
+- Sample pool: uncached alias + D-cache clean before play
+- `of_mixer_stop`: snaps volume to 0 before deactivating (reduces clicks)
 
-### APP_BRAM_END mismatch
-- OS regs.h: APP_BRAM_END = 0x7C00 (libc table at 0x7C00)
-- PocketDukeNukem-SDK app.ld: was 0x7E00, fixed to 0x5A00 (= 0x7C00 end)
-- openfpgaOS-SDK app.ld: already correct at 0x5C00
-- Verify Duke3D BRAM usage doesn't exceed new limit after rebuild
+### Video hardening
+- `of_video_init`: resets vid_display_mode, clears FBs via uncached alias
+- `of_video_wait_flip`: timeout prevents infinite hang if vsync stops
+- `of_video_flip`: waits for pending swap before queuing new one
 
-### of_video_init display mode switch
-- of_video_init() calls of_video_set_display_mode(FRAMEBUFFER) to switch from terminal FB to app FB
-- Changed to direct TERM_FB_CTRL = 0 to avoid side effects
-- Need to verify this actually switches the scanout on hardware
-
-### Investigate uncached alias overuse for framebuffers
-- of_video_init() currently clears FBs via uncached alias (0x50000000)
-  - Uncached writes bypass D-cache → go directly to SDRAM
-  - But this defeats write-combining and is very slow for large fills (76800 bytes × 3)
-  - The SDRAM controller sees single-word writes instead of burst-friendly cache-line flushes
-- of_video_flip() flushes via conflict eviction (cache.c) — correct but expensive
-- Questions to investigate:
-  1. Are uncached FB writes causing SDRAM bus contention with the video scanout?
-  2. Should FBs always be written cached + flushed (better throughput via write-back bursts)?
-  3. Terminal FB (TERM_FB_BASE = 0x50300000) uses uncached alias for all glyph blits —
-     is this causing visible tearing or SDRAM bandwidth starvation?
-  4. Could the uncached alias region (0x50000000) be misconfigured in the CPU's PMA
-     or address decoder, causing bus errors or stalls?
-  5. Profile: cached memset + flush vs uncached memset — which is faster for 76KB fill?
-- If uncached alias is the problem, switch of_video_init() back to cached writes + flush
-  (using of_cache_clean_range or a simpler full dcache flush)
+### I/O cache coherency
+- `io_cache_data` returns cached alias (0x31) instead of unreliable uncached (0x39)
+- After DMA + invalidation, first read misses and fetches fresh data
 
 ## Cleanup (lower priority)
 
 ### Remove dead bridge write FIFOs
-- bridge_wr_fifo (SDRAM): ~38 ALMs, 28K BRAM — never used, no firmware DMAs to SDRAM via bridge
+- bridge_wr_fifo (SDRAM): ~38 ALMs, 28K BRAM — never used
 - sram_wr_fifo (SRAM): ~35 ALMs, 24K BRAM — never used
-- See savings.md for details
 
 ### IRQ dispatcher testing
-- kernel/irq.c is new, untested on hardware
-- Need to verify timer IRQ still works (mcause 7 dispatch)
-- Need to test external IRQ (mcause 11) now that mask register is added
+- kernel/irq.c untested on hardware
+- Need to verify timer IRQ (mcause 7) and external IRQ (mcause 11) with mask register
+
+### APP_BRAM_END mismatch
+- Verify Duke3D BRAM usage doesn't exceed 0x7C00 limit after rebuild
+
+### VRR re-enable
+- VRR code exists but is disabled (`vrr_update()` commented out in of_video_flip)
+- Toggle handshake CDC is ready — needs testing after blank screen bug is fixed

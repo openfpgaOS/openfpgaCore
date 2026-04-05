@@ -99,6 +99,11 @@ int of_mixer_play(const uint8_t *pcm_s16, uint32_t sample_count,
     int v = volume & 0xFF;
     uint32_t rate = ((uint64_t)sample_rate << 16) / MIXER_OUTPUT_RATE;
 
+    /* Clean D-cache (write-back) — the "uncached" 0x39 alias may still
+     * be cached by the CPU. Without this, the mixer reads partially
+     * stale CRAM1 data. */
+    of_cache_clean_range((void *)pcm_s16, sample_count * 2);
+
     MIX_VOICE_SEL = voice;
     MIX_VOICE_ADDR = cram1_word_addr(pcm_s16);
     MIX_VOICE_LEN = sample_count;
@@ -120,6 +125,12 @@ void of_mixer_stop(int voice)
 {
     if (voice >= 0 && voice < MIXER_MAX_VOICES) {
         MIX_VOICE_SEL = voice;
+        /* Snap volume to 0 before deactivating to reduce click.
+         * The mixer will use vol=0 if it processes this voice before
+         * the CTRL=0 write takes effect on the next mix cycle. */
+        MIX_VOICE_VOL_LR = 0;
+        MIX_VOICE_VOL_TARGET = 0;
+        MIX_VOICE_VOL_RATE = 0;  /* instant */
         ctrl_shadow[voice] = 0;
         MIX_VOICE_CTRL = 0;
         voice_active_mask &= ~(1u << voice);
@@ -270,9 +281,9 @@ uint32_t of_mixer_poll_ended(void)
  * Sample memory bump allocator
  * ====================================================================== */
 
-/* Return uncached alias so app writes go directly to CRAM1 PSRAM,
- * visible to the hardware mixer without needing a D-cache flush.
- * The cached alias (0x31) has unreliable flush behavior. */
+/* Uncached alias (0x39) reduces cache pollution for large sample uploads,
+ * but the CPU may still cache these writes (PMA not fully enforced).
+ * of_mixer_play() does an explicit D-cache clean before starting a voice. */
 #define SAMPLE_POOL_BASE  (CRAM1_UNCACHED + 0x00400000)
 #define SAMPLE_POOL_END   (CRAM1_UNCACHED + 0x00F00000)
 

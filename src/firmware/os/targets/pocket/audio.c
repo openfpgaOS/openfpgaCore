@@ -4,16 +4,13 @@
 
 #include "audio.h"
 #include "regs.h"
+#include "cache.h"
 
 void of_audio_init(void) {
     of_opl_reset();
     /* Enable hardware mixer (voices start inactive) */
     MIX_CTRL = 1;
-
-
 }
-
-/* IRQ handler moved to kernel/irq.c */
 
 /* Scratch buffer in CRAM1 for of_audio_write() convenience wrapper. */
 #define AUDIO_SCRATCH_CRAM1   (CRAM1_UNCACHED + 0x00F00000)  /* Last 1MB of CRAM1 */
@@ -29,12 +26,18 @@ int of_audio_write(const int16_t *samples, int count) {
     for (int i = 0; i < count; i++)
         dest[i] = (int16_t)(((int32_t)samples[i * 2] + samples[i * 2 + 1]) >> 1);
 
+    /* Flush D-cache — uncached alias may still be cached */
+    of_cache_clean_range((void *)AUDIO_SCRATCH_CRAM1, count * 2);
+
     /* Play via mixer voice 31 */
     MIX_VOICE_SEL = AUDIO_SCRATCH_VOICE;
     MIX_VOICE_ADDR = (AUDIO_SCRATCH_CRAM1 - CRAM1_UNCACHED) >> 2;
     MIX_VOICE_LEN = count;
     MIX_VOICE_RATE = 0x10000;  /* 1:1 (48kHz native) */
-    MIX_VOICE_CTRL = (15 << 4) | 1;  /* vol=15 (full), active=1 */
+    MIX_VOICE_VOL_LR = 0xFFFF;       /* full volume L+R */
+    MIX_VOICE_VOL_TARGET = 0xFFFF;
+    MIX_VOICE_VOL_RATE = 0;          /* instant */
+    MIX_VOICE_CTRL = 1 | (1 << 2);   /* active + fmt16 */
 
     return count;
 }
