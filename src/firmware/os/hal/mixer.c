@@ -121,6 +121,38 @@ int of_mixer_play(const uint8_t *pcm_s16, uint32_t sample_count,
     return voice;
 }
 
+void of_mixer_retrigger(int voice, const uint8_t *pcm_s16,
+                       uint32_t sample_count, uint32_t sample_rate,
+                       int volume)
+{
+    if (voice < 0 || voice >= MIXER_MAX_VOICES || !pcm_s16 || sample_count == 0)
+        return;
+
+    int v = volume & 0xFF;
+    uint32_t rate = ((uint64_t)sample_rate << 16) / MIXER_OUTPUT_RATE;
+
+    of_cache_clean_range((void *)pcm_s16, sample_count * 2);
+
+    MIX_VOICE_SEL = voice;
+
+    /* Redirect sample pointer + reset position — voice stays active,
+     * no gap in audio output. FPGA picks up new ADDR/LEN on next cycle. */
+    MIX_VOICE_ADDR = cram1_word_addr(pcm_s16);
+    MIX_VOICE_LEN = sample_count;
+    MIX_VOICE_RATE = rate;
+    MIX_VOICE_POS_WR = 0;
+
+    /* Snap to new volume (no ramp on retrigger) */
+    MIX_VOICE_VOL_LR = (v << 8) | v;
+    MIX_VOICE_VOL_TARGET = (v << 8) | v;
+
+    /* Re-assert active + fmt16, clear loop (caller sets loop after) */
+    ctrl_shadow[voice] = CTRL_ACTIVE | CTRL_FMT16;
+    write_ctrl(voice);
+
+    voice_active_mask |= (1u << voice);
+}
+
 void of_mixer_stop(int voice)
 {
     if (voice >= 0 && voice < MIXER_MAX_VOICES) {

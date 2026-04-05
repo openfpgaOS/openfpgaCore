@@ -4,6 +4,7 @@
  */
 
 #include "syscall.h"
+#include "irq.h"
 #include "../hal/hal.h"
 #include "../os_string.h"
 #include "../../api/of_version.h"
@@ -24,12 +25,12 @@ extern void *dlcalloc(size_t, size_t);
 #define SIGALRM 14
 
 static void (*sigalrm_handler)(int) = NULL;
-static void (*timer_callback)(void) = NULL;
+void (*timer_callback_ptr)(void) = NULL;  /* non-static: accessed by services_table.c */
 
 /* Called from irq_handler() on machine timer interrupt */
 void timer_isr_callback(void) {
-    if (timer_callback)
-        timer_callback();
+    if (timer_callback_ptr)
+        timer_callback_ptr();
     if (sigalrm_handler)
         sigalrm_handler(SIGALRM);
 }
@@ -598,6 +599,26 @@ static long sys_close(long fd) {
     return 0;
 }
 
+/* Services table helpers — non-static so services_table.c can call them */
+long sys_openat_svc(const char *path) {
+    return sys_openat(-100, (long)path, 0, 0);
+}
+
+void sys_close_svc(int fd) {
+    sys_close((long)fd);
+}
+
+long sys_file_size_fd(int fd) {
+    if (fd < 0 || fd >= MAX_FDS || !fd_table[fd].in_use)
+        return -1;
+    fd_entry_t *f = &fd_table[fd];
+    if (f->size == 0 && f->slot_id > 0) {
+        long sz = of_file_size(f->slot_id);
+        if (sz > 0) f->size = (uint32_t)sz;
+    }
+    return (long)f->size;
+}
+
 /* _llseek: (fd, offset_hi, offset_lo, &result, whence) — riscv32 uses this */
 static long sys_llseek(long fd, long off_hi, long off_lo,
                        long result_ptr, long whence) {
@@ -747,6 +768,9 @@ static long of_video_syscall(long n, long a0, long a1, long a2) {
         return 0;
     case OF_SYS_VIDEO_VSYNC:
         of_video_vsync();
+        return 0;
+    case OF_SYS_VIDEO_SET_VSYNC_CALLBACK:
+        of_irq_register_vsync((void (*)(void))a0);
         return 0;
     default:
         return -ENOSYS;
@@ -994,7 +1018,7 @@ __attribute__((used)) long syscall_dispatch(long n, long a0, long a1, long a2,
     }
 
     if (n == OF_SYS_TIMER_SET_CALLBACK) {
-        timer_callback = (void (*)(void))a0;
+        timer_callback_ptr = (void (*)(void))a0;
         if (a0 && a1 > 0) {
             TIMER_PERIOD = CPU_FREQ_HZ / (uint32_t)a1;
             TIMER_CTRL = TIMER_CTRL_ENABLE;
@@ -1005,7 +1029,7 @@ __attribute__((used)) long syscall_dispatch(long n, long a0, long a1, long a2,
     }
     if (n == OF_SYS_TIMER_STOP) {
         TIMER_CTRL = 0;
-        timer_callback = NULL;
+        timer_callback_ptr = NULL;
         return 0;
     }
     if (n == OF_SYS_TIMER_GET_US)
@@ -1107,6 +1131,17 @@ __attribute__((used)) long syscall_dispatch(long n, long a0, long a1, long a2,
     if (n == OF_SYS_MIXER_POLL_ENDED)
         return (long)of_mixer_poll_ended();
 
+    if (n == OF_SYS_MIXER_SET_END_CALLBACK) {
+        of_irq_register_mixer_end((void (*)(uint32_t))a0);
+        return 0;
+    }
+
+    if (n == OF_SYS_MIXER_RETRIGGER) {
+        of_mixer_retrigger((int)a0, (const uint8_t *)a1,
+                           (uint32_t)a2, (uint32_t)a3, (int)a4);
+        return 0;
+    }
+
     /* Audio Codec syscalls */
     if (n == OF_SYS_CODEC_PARSE_VOC)
         return of_codec_parse_voc((const uint8_t *)a0, (uint32_t)a1,
@@ -1136,6 +1171,17 @@ __attribute__((used)) long syscall_dispatch(long n, long a0, long a1, long a2,
         volatile uint32_t *vars = (volatile uint32_t *)INTERACT_UNCACHED;
         return (long)vars[index];
     }
+
+    /* Async file I/O (0x10F1-0x10F3) */
+    if (n == OF_SYS_FILE_READ_ASYNC) {
+        return (long)of_file_read_async((uint32_t)a0, (uint32_t)a1,
+                                        (void *)a2, (uint32_t)a3,
+                                        (void (*)(int, int))a4);
+    }
+    if (n == OF_SYS_FILE_ASYNC_POLL)
+        return (long)of_file_async_poll();
+    if (n == OF_SYS_FILE_ASYNC_BUSY)
+        return (long)of_file_async_busy();
 
     return -ENOSYS;
 }

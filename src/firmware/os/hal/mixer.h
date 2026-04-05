@@ -17,6 +17,12 @@ void of_mixer_init(int max_voices, int output_rate);
 int of_mixer_play(const uint8_t *pcm_s16, uint32_t sample_count,
                   uint32_t sample_rate, int priority, int volume);
 
+/* Retrigger an existing voice with new sample data (no stop/start gap).
+ * Redirects ADDR/LEN/POS in-place — eliminates click on note retrigger. */
+void of_mixer_retrigger(int voice, const uint8_t *pcm_s16,
+                        uint32_t sample_count, uint32_t sample_rate,
+                        int volume);
+
 void of_mixer_stop(int voice);
 void of_mixer_stop_all(void);
 
