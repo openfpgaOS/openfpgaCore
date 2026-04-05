@@ -24,6 +24,10 @@ void of_video_wait_flip(void);
 /* Swap and wait (convenience: requests swap then blocks) */
 void of_video_flip_wait(void);
 
+/* Wait for next vertical blank without flipping buffers.
+ * Use for palette animations or effects at 60Hz. */
+void of_video_vsync(void);
+
 /* Set a single palette entry (index 0-255, RGB888) */
 void of_video_set_palette(uint8_t index, uint8_t r, uint8_t g, uint8_t b);
 

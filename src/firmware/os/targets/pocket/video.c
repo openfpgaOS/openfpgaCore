@@ -226,6 +226,18 @@ void of_video_flip_wait(void) {
     of_video_wait_flip();
 }
 
+void of_video_vsync(void) {
+    /* Request a swap to the current display buffer (visual no-op).
+     * Hardware still waits for vblank to "complete" the swap,
+     * giving us a bare vsync wait without cycling the triple buffer. */
+    FB_SWAP_CTRL = (buf_display << 1) | 1;
+
+    uint64_t deadline = read_cycles() + (CPU_FREQ_HZ / 30);
+    while (FB_SWAP_CTRL & 1) {
+        if (read_cycles() > deadline) break;
+    }
+}
+
 void of_video_set_palette(uint8_t index, uint8_t r, uint8_t g, uint8_t b) {
     PAL_INDEX = index;
     PAL_WRITE = ((uint32_t)r << 16) | ((uint32_t)g << 8) | b;

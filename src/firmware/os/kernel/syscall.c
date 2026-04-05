@@ -745,6 +745,9 @@ static long of_video_syscall(long n, long a0, long a1, long a2) {
     case OF_SYS_VIDEO_SET_PALETTE_VGA4:
         of_video_set_palette_vga4((const uint8_t *)a0, (int)a1);
         return 0;
+    case OF_SYS_VIDEO_VSYNC:
+        of_video_vsync();
+        return 0;
     default:
         return -ENOSYS;
     }
