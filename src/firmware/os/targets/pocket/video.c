@@ -145,6 +145,7 @@ void of_video_init(void) {
     buf_display = 0;
     buf_draw    = 1;
     buf_ready   = -1;
+    vid_display_mode = DISPLAY_MODE_FRAMEBUFFER;
 
     /* Initialize VRR state */
     vrr_last_flip = read_cycles();
@@ -156,9 +157,10 @@ void of_video_init(void) {
     VRR_V_TOTAL = VRR_VT_DEFAULT;
     VRR_SWAP_HOLD = 0;
 
-    memset((void *)FB0_BASE, 0, FB_SIZE);
-    memset((void *)FB1_BASE, 0, FB_SIZE);
-    memset((void *)FB2_BASE, 0, FB_SIZE);
+    /* Clear FBs via uncached alias so scanout sees zeros immediately */
+    memset((void *)(FB0_BASE - SDRAM_BASE + SDRAM_UNCACHED_BASE), 0, FB_SIZE);
+    memset((void *)(FB1_BASE - SDRAM_BASE + SDRAM_UNCACHED_BASE), 0, FB_SIZE);
+    memset((void *)(FB2_BASE - SDRAM_BASE + SDRAM_UNCACHED_BASE), 0, FB_SIZE);
 }
 
 uint8_t *of_video_get_surface(void) {
@@ -172,6 +174,12 @@ void of_video_flush_cache(void) {
 uint8_t *of_video_flip(void) {
     /* VRR disabled for debugging — TODO re-enable after fixing */
     /* vrr_update(); */
+
+    /* Wait for any pending swap to complete before queuing a new one.
+     * Without this, rapid flips (menus, loading screens) degenerate the
+     * triple buffer — buf_ready is always set, so we recycle the pending
+     * buffer instead of rotating through all three. */
+    of_video_wait_flip();
 
     /* Refresh our view of hardware state */
     sync_swap_state();
@@ -210,7 +218,11 @@ uint8_t *of_video_flip(void) {
 }
 
 void of_video_wait_flip(void) {
-    while (FB_SWAP_CTRL & 1) {}
+    /* Timeout after ~2 frames at 60Hz (~3.3M cycles) to prevent infinite hang */
+    uint64_t deadline = read_cycles() + (CPU_FREQ_HZ / 30);
+    while (FB_SWAP_CTRL & 1) {
+        if (read_cycles() > deadline) break;
+    }
     sync_swap_state();
 }
 

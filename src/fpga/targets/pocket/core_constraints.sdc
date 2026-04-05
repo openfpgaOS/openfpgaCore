@@ -13,9 +13,23 @@ set_clock_groups -asynchronous \
  -group { ic|mp1|mf_pllbase_inst|altera_pll_i|general[2].gpll~PLL_OUTPUT_COUNTER|divclk } \
  -group { ic|mp1|mf_pllbase_inst|altera_pll_i|general[3].gpll~PLL_OUTPUT_COUNTER|divclk \
           ic|mp1|mf_pllbase_inst|altera_pll_i|general[4].gpll~PLL_OUTPUT_COUNTER|divclk } \
- -group { ic|mp_ram|altera_pll_i|general[0].gpll~PLL_OUTPUT_COUNTER|divclk } \
- -group { ic|mp_ram|altera_pll_i|general[1].gpll~PLL_OUTPUT_COUNTER|divclk } \
- -group { ic|mp_ram|altera_pll_i|general[2].gpll~PLL_OUTPUT_COUNTER|divclk }
+ -group { ic|mp_ram|altera_pll_i|general[0].gpll~PLL_OUTPUT_COUNTER|divclk \
+          ic|mp_ram|altera_pll_i|general[1].gpll~PLL_OUTPUT_COUNTER|divclk \
+          ic|mp_ram|altera_pll_i|general[2].gpll~PLL_OUTPUT_COUNTER|divclk }
+
+# SDRAM I/O timing constraints
+# dram_clk is driven by clk_ram_chip (100 MHz, 243° phase shift from clk_ram_controller)
+create_generated_clock -name dram_clk_pin \
+  -source [get_pins {ic|mp_ram|altera_pll_i|general[1].gpll~PLL_OUTPUT_COUNTER|divclk}] \
+  [get_ports dram_clk]
+
+# SDRAM output delay: tDS(min)=1.5ns, tDH(min)=0.8ns for IS42S16160G-7TL
+set_output_delay -clock dram_clk_pin -max  3.0 [get_ports {dram_a[*] dram_ba[*] dram_dq[*] dram_dqm[*] dram_ras_n dram_cas_n dram_we_n dram_cke}]
+set_output_delay -clock dram_clk_pin -min -1.0 [get_ports {dram_a[*] dram_ba[*] dram_dq[*] dram_dqm[*] dram_ras_n dram_cas_n dram_we_n dram_cke}]
+
+# SDRAM input delay: tAC(max)=5.4ns for CL=3 at 143MHz, ~6ns at 100MHz
+set_input_delay -clock dram_clk_pin -max  6.0 [get_ports {dram_dq[*]}]
+set_input_delay -clock dram_clk_pin -min  1.0 [get_ports {dram_dq[*]}]
 
 # PSRAM sync burst timing constraints for CRAM0
 # CRAM0 clock comes from PLL outclk_2 (clk_cram)

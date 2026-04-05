@@ -979,6 +979,11 @@ __attribute__((used)) long syscall_dispatch(long n, long a0, long a1, long a2,
     if (n >= 0x1060 && n <= 0x106A)
         return of_net_syscall(n, a0, a1, a2);
 
+    if (n == OF_SYS_TERM_PUTCHAR) {
+        of_term_putchar((char)a0);
+        return 0;
+    }
+
     if (n == OF_SYS_TIMER_SET_CALLBACK) {
         timer_callback = (void (*)(void))a0;
         if (a0 && a1 > 0) {
@@ -992,6 +997,14 @@ __attribute__((used)) long syscall_dispatch(long n, long a0, long a1, long a2,
     if (n == OF_SYS_TIMER_STOP) {
         TIMER_CTRL = 0;
         timer_callback = NULL;
+        return 0;
+    }
+    if (n == OF_SYS_TIMER_GET_US)
+        return of_timer_get_us();
+    if (n == OF_SYS_TIMER_GET_MS)
+        return of_timer_get_ms();
+    if (n == OF_SYS_TIMER_DELAY_US) {
+        of_timer_delay_us((uint32_t)a0);
         return 0;
     }
 

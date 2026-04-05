@@ -1598,6 +1598,16 @@ assign cpu_psram_burst_rdata = 32'b0;
 
     wire reset_n = reset_n_apf & bcr_init_done;
 
+    // Synchronize reset deassertion to clk_vid domain
+    reg [1:0] reset_vid_sync;
+    wire reset_n_vid = reset_vid_sync[1];
+    always @(posedge clk_vid or negedge reset_n) begin
+        if (~reset_n)
+            reset_vid_sync <= 2'b0;
+        else
+            reset_vid_sync <= {reset_vid_sync[0], 1'b1};
+    end
+
     wire            bcr_init_done_s;
     synch_3 sync_bcr(bcr_init_done, bcr_init_done_s, clk_74a);
     wire            status_boot_done  = bcr_init_done_s;
@@ -1972,11 +1982,32 @@ assign video_hs = vidout_hs;
 
     // VRR: firmware-written V_TOTAL
     wire [9:0] vrr_v_total_cpu;
-    // CDC vrr_v_total (clk_cpu) → clk_vid (video timing)
-    reg [9:0] vrr_vt_sync1, vrr_vt_sync2;
-    always @(posedge clk_vid) begin
-        vrr_vt_sync1 <= vrr_v_total_cpu;
-        vrr_vt_sync2 <= vrr_vt_sync1;
+    // CDC vrr_v_total (clk_cpu → clk_vid) with toggle handshake
+    // Prevents bit-tearing on multi-bit bus crossing
+    reg        vrr_toggle_cpu;       // toggles in clk_cpu on each write
+    reg [9:0]  vrr_vt_hold;         // stable copy latched in clk_cpu
+    reg [2:0]  vrr_toggle_sync;     // 3-stage synchronizer in clk_vid
+    reg [9:0]  vrr_vt_sync2;        // output in clk_vid domain
+
+    always @(posedge clk_cpu or negedge reset_n) begin
+        if (~reset_n) begin
+            vrr_toggle_cpu <= 1'b0;
+            vrr_vt_hold <= CRT_V_TOTAL_DEFAULT;
+        end else if (vrr_vt_hold != vrr_v_total_cpu) begin
+            vrr_vt_hold <= vrr_v_total_cpu;
+            vrr_toggle_cpu <= ~vrr_toggle_cpu;
+        end
+    end
+
+    always @(posedge clk_vid or negedge reset_n_vid) begin
+        if (~reset_n_vid) begin
+            vrr_toggle_sync <= 3'b0;
+            vrr_vt_sync2 <= CRT_V_TOTAL_DEFAULT;
+        end else begin
+            vrr_toggle_sync <= {vrr_toggle_sync[1:0], vrr_toggle_cpu};
+            if (vrr_toggle_sync[2] != vrr_toggle_sync[1])
+                vrr_vt_sync2 <= vrr_vt_hold;  // stable — toggle edge means new value ready
+        end
     end
 
     // VexiiRiscv CPU system — AXI4 bus routing
@@ -2390,7 +2421,7 @@ assign video_hs = vidout_hs;
     
     video_CRT_scanout_indexed_BRAM  scanout (
         .clk_video(clk_vid),
-        .reset_n(reset_n),
+        .reset_n(reset_n_vid),
         .x_count(x_count),
         .y_count(y_count),
         .line_start(line_start),
@@ -2427,8 +2458,8 @@ assign video_hs = vidout_hs;
 
     // VRR: dynamic V_TOTAL, latched at frame boundary from CPU register.
     // Pocket scaler accepts 42-60 Hz → V_TOTAL range [262, 375].
-    // Video clock: 12.576 MHz / 800 H_TOTAL = 15720 lines/sec.
-    // 15720/262 = 60.0 Hz, 15720/375 = 41.9 Hz.
+    // Video clock: 12.5738 MHz / 780 H_TOTAL = 16120 lines/sec.
+    // 16120/262 = 61.5 Hz, 16120/375 = 43.0 Hz.
     reg [9:0] crt_v_total;
     wire [9:0] vrr_vt_safe = (vrr_vt_sync2 < 10'd262) ? 10'd262 :
                               (vrr_vt_sync2 > 10'd375) ? 10'd375 :
@@ -2437,9 +2468,9 @@ assign video_hs = vidout_hs;
     wire [9:0]  visible_x = x_count - CRT_H_SYNC - CRT_H_BPORCH;
     wire [9:0]  visible_y = y_count - CRT_V_SYNC - CRT_V_BPORCH;
 
-always @(posedge clk_vid or negedge reset_n) begin
+always @(posedge clk_vid or negedge reset_n_vid) begin
 
-    if(~reset_n) begin
+    if(~reset_n_vid) begin
 
         x_count <= 0;
         y_count <= 0;
@@ -2624,7 +2655,7 @@ audio_mixer mixer (
 
     wire    clk_core_12288;         // 12.288 MHz — audio (48kHz-friendly)
     wire    clk_core_49152;
-    wire    clk_vid;                // 12.576 MHz — video (exact 60 Hz)
+    wire    clk_vid;                // 12.5738 MHz — video (~61.5 Hz at V_TOTAL=262)
     wire    clk_vid_90deg;
     wire    clk_cpu;
     wire    clk_ram_controller;

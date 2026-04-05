@@ -241,10 +241,10 @@ assign ext_irq = (uart_rx_irq & irq_mask[0]) |
                  (mix_voice_end_irq & irq_mask[2]);
 
 // Triple-buffered framebuffer
-localparam FB_ADDR_0 = 25'h0000000;  // CPU 0x10000000
-localparam FB_ADDR_1 = 25'h0100000;  // CPU 0x10100000
-localparam FB_ADDR_2 = 25'h0200000;  // CPU 0x10200000
-localparam TERM_FB_ADDR = 25'h0300000;  // CPU 0x10300000
+localparam FB_ADDR_0 = 25'h0000000;  // CPU 0x10000000 (byte 0x000000)
+localparam FB_ADDR_1 = 25'h0080000;  // CPU 0x10100000 (byte 0x100000)
+localparam FB_ADDR_2 = 25'h0100000;  // CPU 0x10200000 (byte 0x200000)
+localparam TERM_FB_ADDR = 25'h0180000;  // CPU 0x10300000 (byte 0x300000)
 reg [1:0] fb_display_idx;
 reg [1:0] fb_ready_idx;
 reg fb_swap_pending;
