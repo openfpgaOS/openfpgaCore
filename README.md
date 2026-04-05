@@ -80,6 +80,27 @@ The codebase is split between portable code (`common/`, `hal/`, `kernel/`) and t
 3. `src/chip32/<name>/` — target-specific loader
 4. `make TARGET=<name>`
 
+## Design Approach
+
+openfpgaOS is a single-process bare-metal runtime with a Linux-compatible syscall ABI. There's no MMU, no scheduler, no kernel modules. The FPGA fabric acts as the driver layer — video scanout, audio mixing, and memory control are hardware state machines, not software.
+
+Apps are ELF binaries that call standard C functions (`fopen`, `malloc`, `printf`) through a jump table backed by musl libc. OS services (video, audio, input) use Linux syscall numbers handled by a minimal dispatcher. This means existing C codebases port with few changes — they don't know they're not on Linux.
+
+| | openfpgaOS | Linux | Zephyr/FreeRTOS | Newlib bare-metal | CP/M |
+|---|---|---|---|---|---|
+| Processes | 1 | Many | Threads | 1 | 1 |
+| MMU | No | Yes | Optional | No | No |
+| Syscall ABI | Linux subset | Linux | Custom | Custom stubs | BDOS |
+| Drivers | FPGA fabric | Kernel modules | HAL | BSP | BIOS |
+| libc | musl (jump table) | musl/glibc | Newlib (partial) | Newlib | None |
+| Kernel size | ~120 KB | Megabytes | 10-100 KB | N/A | ~8 KB |
+
+The closest historical analog is CP/M or MS-DOS: single-process, hardware-specific BIOS, apps call the OS through a fixed interface. The Linux syscall ABI is what makes porting practical.
+
+Trade-offs: no memory protection (apps are trusted), no concurrency (event callbacks instead of threads), no dynamic linking (jump table serves the same purpose with less overhead). These are deliberate choices for a platform where the CPU shares an FPGA with custom hardware and every ALM counts.
+
+See [architecture.md](architecture.md) for the roadmap (multi-target support, capability descriptors, async I/O).
+
 ## Documentation
 
 | Document | Description |

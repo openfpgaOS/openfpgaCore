@@ -1,268 +1,202 @@
 # openfpgaOS Makefile
 #
-# Build for a specific FPGA target. Default: pocket (Analogue Pocket)
-#
-#   make                Build firmware + apps for TARGET
-#   make fpga           Compile FPGA bitstream for TARGET
-#   make full           Full build (FPGA + firmware + package)
-#   make TARGET=mister  Build for MiSTer (when available)
+# Quick start:
+#   make              Show this help
+#   make full         Full build: cpu → firmware → FPGA → test → deploy
+#   make flash        Quick: firmware → patch bitstream → deploy
 
-# Target selection
+# ── Target ───────────────────────────────────────────────────────────
 TARGET ?= pocket
+TARGET_DIR = src/fpga/targets/$(TARGET)
+TARGETS = $(notdir $(wildcard src/fpga/targets/*))
 
-# Configuration
-CORE_NAME = ThinkElastic.openfpgaOS
-QUARTUS_PROJECT = ap_core
+# ── Paths ────────────────────────────────────────────────────────────
+CORE_NAME    = ThinkElastic.openfpgaOS
+OS_DIR       = src/firmware/os
+CHIP32_DIR   = src/chip32/$(TARGET)
+BUILD_DIR    = build
+RELEASE_DIR  = $(BUILD_DIR)/Cores/$(CORE_NAME)
+ASSETS_DIR   = $(BUILD_DIR)/Assets/openfpgaos/common
+TOOLS_DIR    = tools
+DIST_DIR     = dist/core
+REVERSE_BITS = $(TOOLS_DIR)/reverse_bits
 
-# Directories
-FPGA_DIR = src/fpga
-FPGA_TARGET_DIR = $(FPGA_DIR)/targets/$(TARGET)
-FIRMWARE_DIR = src/firmware
-OS_DIR = src/firmware/os
-CHIP32_DIR = src/chip32/$(TARGET)
-OUTPUT_DIR = build
-RELEASE_CORE_DIR = $(OUTPUT_DIR)/Cores/$(CORE_NAME)
-RELEASE_PLATFORMS_DIR = $(OUTPUT_DIR)/Platforms
-RELEASE_ASSETS_DIR = $(OUTPUT_DIR)/Assets/openfpgaos/common
-RELEASE_INSTANCE_DIR = $(OUTPUT_DIR)/Assets/openfpgaos/$(CORE_NAME)
+# ── Colors ───────────────────────────────────────────────────────────
+ifneq ($(shell tput colors 2>/dev/null),)
+C_LOGO  := \033[96m
+C_HEAD  := \033[1m
+C_CMD   := \033[93m
+C_OK    := \033[32m
+C_DIM   := \033[2m
+C_RESET := \033[0m
+else
+C_LOGO  :=
+C_HEAD  :=
+C_CMD   :=
+C_OK    :=
+C_DIM   :=
+C_RESET :=
+endif
 
-# Files
-BITSTREAM_SOURCE = $(FPGA_TARGET_DIR)/output_files/$(QUARTUS_PROJECT).rbf
-BITSTREAM_TARGET = $(RELEASE_CORE_DIR)/bitstream.rbf_r
-FIRMWARE_SOURCE = $(OS_DIR)/os.bin
-FIRMWARE_TARGET = $(RELEASE_ASSETS_DIR)/os.bin
-# JSON configuration files (in dist/core/)
-DIST_DIR = dist/core
-JSON_FILES = core.json video.json audio.json input.json data.json variants.json interact.json
+# ── Default ──────────────────────────────────────────────────────────
+all: help
 
-# Tools
-REVERSE_BITS = tools/reverse_bits
-
-# Default target - package without recompiling FPGA
-all: package
-
-# Full build - compile FPGA, firmware, and package
-full: fpga os chip32 package
-
-# Firmware source files for dependency tracking
-FW_SOURCES = $(wildcard $(OS_DIR)/hal/*.c $(OS_DIR)/targets/$(TARGET)/*.c $(OS_DIR)/targets/$(TARGET)/boot/*.c $(OS_DIR)/targets/$(TARGET)/boot/*.S $(OS_DIR)/kernel/*.c $(OS_DIR)/*.ld)
-FW_HEADERS = $(wildcard $(OS_DIR)/hal/*.h $(OS_DIR)/targets/$(TARGET)/*.h $(OS_DIR)/targets/$(TARGET)/boot/*.h $(OS_DIR)/kernel/*.h)
-FW_MIF = $(FPGA_TARGET_DIR)/firmware.mif
-
-# VexiiRiscv CPU generation (requires java + sbt)
-VEXII_DIR = $(FPGA_DIR)/vendor/vexriscv
-VEXII_SCRIPT = $(VEXII_DIR)/generate_vexii.sh
-VEXII_OUTPUT = $(VEXII_DIR)/VexiiRiscv_Full.v
-
-$(VEXII_OUTPUT): $(VEXII_SCRIPT)
-	@echo "Generating VexiiRiscv CPU..."
-	cd $(VEXII_DIR) && bash generate_vexii.sh
-	@echo "VexiiRiscv generation complete"
-
-cpu: $(VEXII_OUTPUT)
-
-# Compile FPGA with Quartus (builds firmware + CPU first)
-# Clears Quartus cache to ensure MIF changes are picked up
-fpga: $(FW_MIF) $(VEXII_OUTPUT) clean-fpga-cache
-	@echo "Compiling FPGA design..."
-	@if ! command -v quartus_sh >/dev/null 2>&1; then \
-		echo "Error: quartus_sh not found in PATH"; \
-		exit 1; \
-	fi
-	cd $(FPGA_TARGET_DIR) && quartus_sh --flow compile $(QUARTUS_PROJECT)
-	@echo "FPGA compilation complete"
-
-# Build firmware and install MIF to FPGA core directory (only when sources change)
-$(FW_MIF): $(FW_SOURCES) $(FW_HEADERS)
-	@echo "Building OS firmware and generating MIF..."
-	$(MAKE) -C $(OS_DIR) install
-	@echo "Firmware MIF ready for FPGA build"
-
-# Force rebuild of firmware MIF (for manual use)
-firmware-mif:
-	@echo "Building OS firmware and generating MIF..."
-	$(MAKE) -C $(OS_DIR) install
-	@echo "Firmware MIF ready for FPGA build"
-
-# Build OS
-os:
-	@echo "Building OS firmware..."
-	$(MAKE) -C $(OS_DIR)
-	@echo "OS firmware build complete"
-
-# Build OS + patch bitstream + package
-firmware: os firmware-update package
-
-# Build Chip32 loader
-chip32:
-	$(MAKE) -C $(CHIP32_DIR)
-
-# Package release (uses existing bitstream)
-package: $(REVERSE_BITS) check-bitstream release-dirs copy-bitstream copy-chip32 copy-firmware copy-json copy-platform copy-icon install-txt
+# ── Help ─────────────────────────────────────────────────────────────
+help:
+	@printf "$(C_LOGO)"
+	@echo "         ___  ___  ___ ___"
+	@echo "        / _ \\/ _ \\/ -_) _ \\"
+	@echo "        \\___/ .__/\\__/_//_/"
+	@echo "       ____/_/  ________"
+	@echo "      / __/ _ \\/ ___/ _ |"
+	@echo "     / _// ___/ (_ / __ |"
+	@echo "    /_/_/_/___\\___/_/ |_|"
+	@echo "   / __ \\/ __/"
+	@echo "  / /_/ /\\ \\"
+	@echo "  \\____/___/  OS"
+	@printf "$(C_RESET)\n"
+	@printf "  $(C_HEAD)Target: $(TARGET)$(C_RESET)\n\n"
+	@printf "  $(C_HEAD)Build:$(C_RESET)\n"
+	@printf "    $(C_CMD)make $(C_CMD)full$(C_RESET)             cpu → firmware → FPGA → test → deploy  $(C_DIM)(~9 min)$(C_RESET)\n"
+	@printf "    $(C_CMD)make $(C_CMD)build$(C_RESET)            Quartus incremental compile            $(C_DIM)(~7 min)$(C_RESET)\n"
+	@printf "    $(C_CMD)make $(C_CMD)firmware$(C_RESET)         Rebuild bootloader + os.bin            $(C_DIM)(~5 sec)$(C_RESET)\n"
+	@printf "    $(C_CMD)make $(C_CMD)cpu$(C_RESET)              Regenerate VexiiRiscv from SpinalHDL   $(C_DIM)(~15 sec)$(C_RESET)\n"
+	@printf "    $(C_CMD)make $(C_CMD)sweep$(C_RESET)            Seed sweep, pick best Fmax             $(C_DIM)(~7 min/seed)$(C_RESET)\n"
+	@printf "    $(C_CMD)make $(C_CMD)sweep $(C_CMD)SEEDS=$(C_CMD)1-10$(C_RESET) Custom range\n"
 	@echo ""
-	@echo "Build complete!"
-	@echo "Release package: $(OUTPUT_DIR)/"
+	@printf "  $(C_HEAD)Verification:$(C_RESET)\n"
+	@printf "    $(C_CMD)make $(C_CMD)test$(C_RESET)             Run Verilator test suite               $(C_DIM)(~30 sec)$(C_RESET)\n"
+	@printf "    $(C_CMD)make $(C_CMD)check$(C_RESET)            RTL check (Analysis & Synthesis)        $(C_DIM)(~45 sec)$(C_RESET)\n"
+	@printf "    $(C_CMD)make $(C_CMD)timing$(C_RESET)           Show Fmax and slack from last build\n"
 	@echo ""
-	@tree -L 4 $(OUTPUT_DIR) 2>/dev/null || find $(OUTPUT_DIR) -type f | sort
+	@printf "  $(C_HEAD)Deployment:$(C_RESET)\n"
+	@printf "    $(C_CMD)make $(C_CMD)sdk $(C_CMD)DEST=$(C_CMD)\"path\"$(C_RESET)  Sync headers + runtime to SDK repo(s)\n"
+	@printf "    $(C_CMD)make $(C_CMD)program$(C_RESET)          JTAG flash via USB Blaster (dev)\n"
+	@echo ""
+	@printf "  $(C_HEAD)Cleanup:$(C_RESET)\n"
+	@printf "    $(C_CMD)make $(C_CMD)clean$(C_RESET)            Remove all build artifacts\n"
+	@echo ""
 
-# Check that bitstream exists
-check-bitstream:
-	@if [ ! -f "$(BITSTREAM_SOURCE)" ]; then \
-		echo "Error: Bitstream not found at $(BITSTREAM_SOURCE)"; \
-		echo "Run 'make fpga' first or compile with Quartus"; \
+# ── Target validation ────────────────────────────────────────────────
+check-target:
+	@test -d $(TARGET_DIR) || { \
+		printf "$(C_ERR)Error: unknown target '$(TARGET)'$(C_RESET)\n"; \
+		printf "Available: $(TARGETS)\n"; \
 		exit 1; \
-	fi
+	}
 
-# Create release directory structure
-release-dirs:
-	@echo "Creating release directories..."
-	@rm -rf $(OUTPUT_DIR)
-	@mkdir -p $(RELEASE_CORE_DIR)
-	@mkdir -p $(RELEASE_PLATFORMS_DIR)/_images
-	@mkdir -p $(RELEASE_ASSETS_DIR)
+# ── Full build ───────────────────────────────────────────────────────
+full: check-target
+	@$(MAKE) -C $(TARGET_DIR) full
 
+# ── Seed sweep (default 1-30) ────────────────────────────────────────
+SEEDS ?= 1-30
+SWEEP_MIN = $(word 1,$(subst -, ,$(SEEDS)))
+SWEEP_MAX = $(word 2,$(subst -, ,$(SEEDS)))
 
-# Build bit reversal tool
+# ── Delegate to target Makefile ──────────────────────────────────────
+cpu firmware compile build check test timing program: check-target
+	@$(MAKE) -C $(TARGET_DIR) $@
+
+sweep: check-target
+	@$(MAKE) -C $(TARGET_DIR) sweep SWEEP_MIN=$(SWEEP_MIN) SWEEP_MAX=$(SWEEP_MAX)
+
+# ── Flash (firmware + patch + deploy) ────────────────────────────────
+flash: check-target
+	@$(MAKE) -C $(TARGET_DIR) flash
+	@$(MAKE) --no-print-directory package-only
+
+# ── Package ──────────────────────────────────────────────────────────
+package: $(REVERSE_BITS) package-dirs package-bitstream package-chip32 package-firmware package-json package-platform package-icon package-install
+	@echo ""
+	@printf "  $(C_OK)Package ready$(C_RESET) → $(BUILD_DIR)/\n"
+	@echo ""
+	@tree -L 4 $(BUILD_DIR) 2>/dev/null || find $(BUILD_DIR) -type f | sort
+
+# Lightweight package (skip checks, for use after flash)
+package-only: $(REVERSE_BITS) package-dirs package-bitstream package-chip32 package-firmware package-json package-platform package-icon package-install
+
+package-dirs:
+	@rm -rf $(BUILD_DIR)
+	@mkdir -p $(RELEASE_DIR) $(BUILD_DIR)/Platforms/_images $(ASSETS_DIR)
+
 $(REVERSE_BITS): tools/reverse_bits.c
-	@echo "Compiling bit reversal tool..."
-	gcc -O2 -o $@ $<
+	@gcc -O2 -o $@ $<
 
-# Convert and copy bitstream
-copy-bitstream: $(REVERSE_BITS)
-	@echo "Converting bitstream to RBF_R format..."
-	$(REVERSE_BITS) $(BITSTREAM_SOURCE) $(BITSTREAM_TARGET)
+package-bitstream: $(REVERSE_BITS)
+	@$(REVERSE_BITS) $(TARGET_DIR)/output_files/ap_core.rbf $(RELEASE_DIR)/bitstream.rbf_r
 
-# Copy Chip32 loader
-copy-chip32:
-	@echo "Copying Chip32 loader..."
-	cp $(CHIP32_DIR)/loader.bin $(RELEASE_CORE_DIR)/loader.bin
+package-chip32:
+	@cp $(CHIP32_DIR)/loader.bin $(RELEASE_DIR)/loader.bin
 
-# Copy firmware (os.bin)
-copy-firmware:
-	@echo "Copying os.bin..."
-	cp $(FIRMWARE_SOURCE) $(FIRMWARE_TARGET)
+package-firmware:
+	@cp $(OS_DIR)/os.bin $(RELEASE_DIR)/os.bin
+	@cp $(OS_DIR)/os.bin $(ASSETS_DIR)/os.bin
 
-# Copy JSON configuration files
-copy-json:
-	@echo "Copying configuration files..."
-	@for f in $(JSON_FILES); do \
-		cp $(DIST_DIR)/$$f $(RELEASE_CORE_DIR)/; \
+package-json:
+	@for f in core.json video.json audio.json input.json data.json variants.json interact.json; do \
+		cp $(DIST_DIR)/$$f $(RELEASE_DIR)/; \
 	done
 
-# Copy platform definition and images
-copy-platform:
-	@echo "Copying platform files..."
-	@cp dist/platforms/*.json $(RELEASE_PLATFORMS_DIR)/
-	@cp dist/platforms/_images/*.bin $(RELEASE_PLATFORMS_DIR)/_images/
+package-platform:
+	@cp dist/platforms/*.json $(BUILD_DIR)/Platforms/
+	@cp dist/platforms/_images/*.bin $(BUILD_DIR)/Platforms/_images/
 
-# Copy core icon if it exists
-copy-icon:
-	@if [ -f "dist/core/icon.bin" ]; then \
-		echo "Copying core icon..."; \
-		cp dist/core/icon.bin $(RELEASE_CORE_DIR)/; \
-	fi
+package-icon:
+	@test -f dist/core/icon.bin && cp dist/core/icon.bin $(RELEASE_DIR)/ || true
 
-# Generate installation instructions
 define INSTALL_TEXT
-Analogue Pocket Core Installation Instructions
-================================================
+openfpgaOS — Installation
 
-Core: $(CORE_NAME)
+1. Copy the contents of this folder to your SD card root (merge with existing)
+2. Power on your Analogue Pocket → Cores → $(CORE_NAME)
 
-Installation Steps:
--------------------
-
-1. Insert your Analogue Pocket's SD card into your computer
-
-2. Copy the entire contents of this release folder to your SD card root
-   - Merge with existing folders if they exist
-
-3. Safely eject the SD card and insert it back into your Analogue Pocket
-
-4. Power on your Analogue Pocket
-
-5. Navigate to the "Cores" menu and select "$(CORE_NAME)"
-
-Directory Structure:
---------------------
-Your SD card should have this structure:
-
-SD Card Root/
-+-- Assets/
-|   +-- openfpgaos/
-|       +-- common/
-|           +-- app.bin
-+-- Cores/
-|   +-- $(CORE_NAME)/
-|       +-- bitstream.rbf_r
-|       +-- core.json
-|       +-- video.json
-|       +-- audio.json
-|       +-- input.json
-|       +-- data.json
-|       +-- variants.json
-|       +-- interact.json
-|       +-- icon.bin
-+-- Platforms/
-    +-- _images/
-    |   +-- openfpgaos.bin
-    +-- openfpgaos.json
-
-Troubleshooting:
-----------------
-- Make sure the SD card is formatted as exFAT
-- Ensure your Analogue Pocket firmware is version 1.1 or later
-- Check that all files copied correctly without errors
-
-For more information, visit:
-https://www.analogue.co/developer
+For game development, use the SDK: https://github.com/ThinkElastic/openfpgaOS-SDK
 endef
 export INSTALL_TEXT
 
-install-txt:
-	@echo "Generating installation instructions..."
-	@echo "$$INSTALL_TEXT" > $(OUTPUT_DIR)/INSTALL.txt
+package-install:
+	@echo "$$INSTALL_TEXT" > $(BUILD_DIR)/INSTALL.txt
 
-# Clean all build artifacts
-clean:
-	@echo "Cleaning..."
-	rm -rf $(OUTPUT_DIR)
-	rm -f $(REVERSE_BITS)
-	rm -f $(VEXII_OUTPUT) $(VEXII_OUTPUT).bak
-	$(MAKE) -C $(OS_DIR) clean
-	$(MAKE) -C $(CHIP32_DIR) clean
-
-# Fast firmware update - only updates MIF in existing bitstream (no full recompile)
-# Use this when you only changed firmware and want a quick rebuild (~1 min vs ~15 min)
-firmware-update: $(FW_MIF)
-	@echo "Updating MIF in existing bitstream..."
-	@if [ ! -f "$(FPGA_TARGET_DIR)/output_files/$(QUARTUS_PROJECT).sof" ]; then \
-		echo "Error: No existing compile found. Run 'make fpga' first."; \
+# ── SDK sync ─────────────────────────────────────────────────────────
+sdk: check-target firmware
+	@test -n "$(DEST)" || { \
+		printf "$(C_ERR)Usage: make sdk DEST=\"path/to/sdk\"$(C_RESET)\n"; \
 		exit 1; \
-	fi
-	cd $(FPGA_TARGET_DIR) && quartus_cdb --update_mif $(QUARTUS_PROJECT)
-	cd $(FPGA_TARGET_DIR) && quartus_asm $(QUARTUS_PROJECT)
-	@echo "Firmware updated in bitstream"
+	}
+	@for dir in $(DEST); do \
+		test -d "$$dir/src/sdk" || { \
+			printf "$(C_ERR)SDK not found at $$dir$(C_RESET)\n"; \
+			continue; \
+		}; \
+		printf "$(C_HEAD)[sdk]$(C_RESET) $$dir\n"; \
+		cp src/firmware/api/of*.h "$$dir/src/sdk/include/"; \
+		printf "  $(C_OK)headers$(C_RESET)      → src/sdk/include/\n"; \
+		cp src/firmware/api/of_posix.c "$$dir/src/sdk/"; \
+		cp src/firmware/api/of_midi.c "$$dir/src/sdk/" 2>/dev/null || true; \
+		cp src/firmware/api/of_codec.c "$$dir/src/sdk/" 2>/dev/null || true; \
+		printf "  $(C_OK)api sources$(C_RESET)   → src/sdk/\n"; \
+		mkdir -p "$$dir/runtime"; \
+		if [ -f $(TARGET_DIR)/output_files/ap_core.rbf ]; then \
+			$(REVERSE_BITS) $(TARGET_DIR)/output_files/ap_core.rbf "$$dir/runtime/bitstream.rbf_r"; \
+			printf "  $(C_OK)bitstream$(C_RESET)    → runtime/\n"; \
+		fi; \
+		test -f $(OS_DIR)/os.bin && cp $(OS_DIR)/os.bin "$$dir/runtime/" && \
+			printf "  $(C_OK)os.bin$(C_RESET)       → runtime/\n" || true; \
+		test -f $(CHIP32_DIR)/loader.bin && cp $(CHIP32_DIR)/loader.bin "$$dir/runtime/" && \
+			printf "  $(C_OK)loader.bin$(C_RESET)   → runtime/\n" || true; \
+		printf "$(C_OK)[sdk] Done$(C_RESET) $$dir\n\n"; \
+	done
 
-# Alias for firmware-update
-fw: firmware-update package
+# ── Clean ────────────────────────────────────────────────────────────
+clean:
+	@$(MAKE) -C $(TARGET_DIR) clean-all
+	@$(MAKE) -C $(CHIP32_DIR) clean 2>/dev/null || true
+	@rm -rf $(BUILD_DIR)
+	@rm -f $(REVERSE_BITS)
 
-# Clean Quartus cache (forces MIF files to be re-read)
-clean-fpga-cache:
-	@echo "Clearing Quartus cache to pick up MIF changes..."
-	rm -rf $(FPGA_TARGET_DIR)/db $(FPGA_TARGET_DIR)/incremental_db
-
-# Clean FPGA build artifacts
-clean-fpga: clean-fpga-cache
-	@echo "Cleaning FPGA build artifacts..."
-	rm -f $(FPGA_TARGET_DIR)/output_files/*
-
-# Quick target (alias for package)
-quick: package
-
-# Program FPGA via JTAG (for development)
-program: $(FW_MIF)
-	@echo "Programming FPGA via JTAG..."
-	$(MAKE) -C $(FPGA_TARGET_DIR) program
-
-.PHONY: all full fpga cpu os firmware-mif firmware chip32 firmware-update fw package check-bitstream release-dirs copy-bitstream copy-chip32 copy-firmware copy-json copy-platform copy-icon install-txt clean clean-fpga-cache clean-fpga quick program
+.PHONY: all help check-target full cpu firmware compile build check test timing program sdk
+.PHONY: flash sweep
+.PHONY: package package-only package-dirs package-bitstream package-chip32
+.PHONY: package-firmware package-json package-platform package-icon package-install
+.PHONY: clean

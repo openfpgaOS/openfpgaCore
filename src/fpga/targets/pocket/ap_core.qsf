@@ -305,14 +305,7 @@ set_global_assignment -name ERROR_CHECK_FREQUENCY_DIVISOR 256
 set_global_assignment -name STRATIXV_CONFIGURATION_SCHEME "PASSIVE SERIAL"
 set_global_assignment -name CRC_ERROR_OPEN_DRAIN ON
 set_global_assignment -name ACTIVE_SERIAL_CLOCK FREQ_100MHZ
-set_global_assignment -name FITTER_EFFORT "AUTO FIT"
-set_global_assignment -name SEED 1
-set_global_assignment -name PHYSICAL_SYNTHESIS_REGISTER_DUPLICATION ON
-set_global_assignment -name PHYSICAL_SYNTHESIS_REGISTER_RETIMING ON
-set_global_assignment -name PHYSICAL_SYNTHESIS_COMBO_LOGIC ON
-set_global_assignment -name PHYSICAL_SYNTHESIS_EFFORT EXTRA
-set_global_assignment -name ROUTER_TIMING_OPTIMIZATION_LEVEL MAXIMUM
-set_global_assignment -name AUTO_RAM_TO_LCELL_CONVERSION ON
+set_global_assignment -name FITTER_EFFORT "STANDARD FIT"
 
 # Assembler Assignments
 # =====================
@@ -745,9 +738,6 @@ set_instance_assignment -name WEAK_PULL_UP_RESISTOR ON -to bridge_spimosi
 
 
 set_instance_assignment -name PARTITION_HIERARCHY root_partition -to | -section_id Top
-set_global_assignment -name VERILOG_FILE ../../common/jtframe_frac_cen.v
-set_global_assignment -name VERILOG_FILE ../../common/jtframe_resync.v
-set_global_assignment -name VERILOG_FILE ../../common/video_CRT_scanout_indexed_BRAM.v
 set_global_assignment -name QIP_FILE analogizer/analogizer.qip
 set_global_assignment -name QIP_FILE apf/apf.qip
 set_global_assignment -name QIP_FILE apf/mf_ddio_bidir_12.qip
@@ -757,31 +747,13 @@ set_global_assignment -name VERILOG_FILE ../../common/text_terminal.v
 set_global_assignment -name MIF_FILE ../../common/font_rom.mif
 set_global_assignment -name MIF_FILE ../../common/vram_init.mif
 set_global_assignment -name MIF_FILE firmware.mif
-set_global_assignment -name VERILOG_FILE ../../common/cpu_system.v
-set_global_assignment -name VERILOG_FILE ../../common/axi_periph_slave.v
 # tile_engine.v and sprite_engine.v removed — rendering done in software
-set_global_assignment -name VERILOG_FILE ../../common/sram_controller.v
-set_global_assignment -name VERILOG_FILE ../../common/axi_sdram_slave.v
-set_global_assignment -name VERILOG_FILE ../../common/axi_psram_slave.v
-set_global_assignment -name VERILOG_FILE ../../common/axi_sdram_arbiter.v
-set_global_assignment -name VERILOG_FILE ../../common/axi_bridge_master.v
-set_global_assignment -name VERILOG_FILE ../../common/uart_tx.v
-set_global_assignment -name VERILOG_FILE ../../common/uart_rx.v
 set_global_assignment -name VERILOG_FILE io_sdram.v
-set_global_assignment -name VERILOG_FILE mf_pllram_133.v
-set_global_assignment -name VERILOG_FILE ../../common/psram_cram0.v
-set_global_assignment -name VERILOG_FILE ../../common/psram_cram1.v
-set_global_assignment -name VERILOG_FILE ../../common/cpu_psram1_cdc.v
-set_global_assignment -name SYSTEMVERILOG_FILE ../../common/psram.sv
+set_global_assignment -name VERILOG_FILE ../../common/psram_controller.v
 set_global_assignment -name VERILOG_FILE mf_linebuf.v
-set_global_assignment -name VERILOG_FILE ../../vendor/vexriscv/VexiiRiscv_Full.v
-set_global_assignment -name SDC_FILE core_constraints.sdc
 set_global_assignment -name SIGNALTAP_FILE core/stp1.stp
 set_global_assignment -name QIP_FILE mf_pllbase.qip
 set_global_assignment -name SIP_FILE mf_pllbase.sip
-set_global_assignment -name VERILOG_FILE ../../common/audio_output.v
-set_global_assignment -name VERILOG_FILE ../../common/audio_mixer.v
-set_global_assignment -name VERILOG_FILE ../../common/link_mmio.v
 
 # Audio filter modules
 set_global_assignment -name SYSTEMVERILOG_FILE ../../common/audio/filters/audio_filters.sv
@@ -826,7 +798,6 @@ set_instance_assignment -name FAST_INPUT_REGISTER ON -to cram1_dq[14]
 set_instance_assignment -name FAST_INPUT_REGISTER ON -to cram1_dq[15]
 set_instance_assignment -name FAST_INPUT_REGISTER ON -to cram1_wait
 # OPL3 wrapper + Greg Taylor's opl3_fpga (YMF262, 18 voices)
-set_global_assignment -name VERILOG_FILE ../../common/opl3_wrapper.v
 set_global_assignment -name VERILOG_FILE ../../common/audio_upsample.v
 set_global_assignment -name SYSTEMVERILOG_FILE ../../vendor/opl3/opl3.sv
 set_global_assignment -name SYSTEMVERILOG_FILE ../../vendor/opl3/opl3_pkg.sv
@@ -848,7 +819,6 @@ set_global_assignment -name SYSTEMVERILOG_FILE ../../vendor/opl3/mem_multi_bank.
 set_global_assignment -name SYSTEMVERILOG_FILE ../../vendor/opl3/mem_multi_bank_reset.sv
 set_global_assignment -name SYSTEMVERILOG_FILE ../../vendor/opl3/mem_simple_dual_port.sv
 set_global_assignment -name SYSTEMVERILOG_FILE ../../vendor/opl3/mem_simple_dual_port_async_read.sv
-set_global_assignment -name VERILOG_FILE ../../vendor/opl3/afifo.v
 set_global_assignment -name SYSTEMVERILOG_FILE ../../vendor/opl3/reset_sync.sv
 set_global_assignment -name SYSTEMVERILOG_FILE ../../vendor/opl3/trick_sw_detection.sv
 set_global_assignment -name SYSTEMVERILOG_FILE ../../vendor/opl3/pipeline_sr.sv
@@ -861,5 +831,29 @@ set_global_assignment -name SYSTEMVERILOG_FILE ../../vendor/opl3/vibrato.sv
 set_global_assignment -name SYSTEMVERILOG_FILE ../../vendor/opl3/leds.sv
 set_global_assignment -name SYSTEMVERILOG_FILE ../../vendor/opl3/i2s.sv
 
-set_global_assignment -name EDA_SIMULATION_TOOL "QuestaSim (Verilog)"
-set_global_assignment -name EDA_OUTPUT_DATA_FORMAT "VERILOG HDL" -section_id eda_simulation
+# Source files added after initial commit
+set_global_assignment -name VERILOG_FILE ../../common/audio_mixer.v
+set_global_assignment -name VERILOG_FILE ../../common/audio_output.v
+set_global_assignment -name VERILOG_FILE ../../common/axi_bridge_master.v
+set_global_assignment -name VERILOG_FILE ../../common/axi_periph_slave.v
+set_global_assignment -name VERILOG_FILE ../../common/axi_psram_slave.v
+set_global_assignment -name VERILOG_FILE ../../common/axi_sdram_arbiter.v
+set_global_assignment -name VERILOG_FILE ../../common/axi_sdram_slave.v
+set_global_assignment -name VERILOG_FILE ../../common/cpu_psram1_cdc.v
+set_global_assignment -name VERILOG_FILE ../../common/cpu_system.v
+set_global_assignment -name VERILOG_FILE ../../common/jtframe_frac_cen.v
+set_global_assignment -name VERILOG_FILE ../../common/jtframe_resync.v
+set_global_assignment -name VERILOG_FILE ../../common/link_mmio.v
+set_global_assignment -name VERILOG_FILE ../../common/opl3_wrapper.v
+set_global_assignment -name VERILOG_FILE ../../common/psram_cram0.v
+set_global_assignment -name VERILOG_FILE ../../common/psram_cram1.v
+set_global_assignment -name SYSTEMVERILOG_FILE ../../common/psram.sv
+set_global_assignment -name VERILOG_FILE ../../common/sram_controller.v
+set_global_assignment -name VERILOG_FILE ../../common/uart_rx.v
+set_global_assignment -name VERILOG_FILE ../../common/uart_tx.v
+set_global_assignment -name VERILOG_FILE ../../common/video_CRT_scanout_indexed_BRAM.v
+set_global_assignment -name VERILOG_FILE ../../vendor/vexriscv/VexiiRiscv_Full.v
+set_global_assignment -name VERILOG_FILE ../../vendor/opl3/afifo.v
+set_global_assignment -name VERILOG_FILE mf_pllram_133.v
+set_global_assignment -name SDC_FILE core_constraints.sdc
+set_global_assignment -name SEED 1
