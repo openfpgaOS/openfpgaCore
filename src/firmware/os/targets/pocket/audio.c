@@ -13,22 +13,7 @@ void of_audio_init(void) {
 
 }
 
-/* IRQ handler — called from trap entry for all hardware interrupts.
- * Dispatches based on mcause code: 7=timer, 11=external. */
-extern void timer_isr_callback(void);
-
-void irq_handler(void *frame) {
-    uint32_t *f = (uint32_t *)frame;
-    uint32_t mcause = f[33];  /* offset 132 / 4 */
-    uint32_t code = mcause & 0x7FFFFFFF;
-
-    if (code == 7) {
-        /* Machine timer interrupt — clear pending, call callback */
-        TIMER_CTRL = TIMER_CTRL_ENABLE | TIMER_CTRL_W1C_IRQ;
-        timer_isr_callback();
-    }
-    /* External interrupt (code 11) unused — mixer runs autonomously */
-}
+/* IRQ handler moved to kernel/irq.c */
 
 /* Scratch buffer in CRAM1 for of_audio_write() convenience wrapper. */
 #define AUDIO_SCRATCH_CRAM1   (CRAM1_UNCACHED + 0x00F00000)  /* Last 1MB of CRAM1 */

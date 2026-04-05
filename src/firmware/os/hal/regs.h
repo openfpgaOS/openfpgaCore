@@ -36,6 +36,7 @@
 #define FB0_BASE            0x10000000      /* Framebuffer 0 */
 #define FB1_BASE            0x10100000      /* Framebuffer 1 */
 #define FB2_BASE            0x10200000      /* Framebuffer 2 */
+#define TERM_FB_BASE        0x50300000      /* Dedicated terminal framebuffer (uncached SDRAM) */
 #define FB_COUNT            3
 #define FB_WIDTH            320
 #define FB_HEIGHT           240
@@ -48,8 +49,7 @@
 #define INTERACT_UNCACHED   0x503FE000      /* Uncached alias */
 #define INTERACT_MAX_VARS   64              /* Max interact variables */
 
-#define TERM_VRAM_BASE      0x20000000      /* Terminal character VRAM */
-#define TERM_COLOR_BASE     0x20000800      /* Terminal color attribute VRAM */
+/* Terminal VRAM removed — terminal renders to TERM_FB_BASE in SDRAM */
 #define TERM_COLS           40
 #define TERM_ROWS           30
 
@@ -93,10 +93,11 @@
 #define   SYS_STATUS_ALLCOMPLETE    (1 << 1)
 #define SYS_CYCLE_LO        REG32(SYSREG_BASE + 0x04)
 #define SYS_CYCLE_HI        REG32(SYSREG_BASE + 0x08)
-#define SYS_DISPLAY_MODE    REG32(SYSREG_BASE + 0x0C)
+/* Terminal FB control: bit[0] = 1 scanout reads terminal FB, 0 = app FB */
+#define TERM_FB_CTRL        REG32(SYSREG_BASE + 0x0C)
 #define   DISPLAY_MODE_TERMINAL     0
 #define   DISPLAY_MODE_FRAMEBUFFER  1
-#define   DISPLAY_MODE_OVERLAY      2  /* White terminal text over framebuffer */
+#define   DISPLAY_MODE_OVERLAY      2
 
 #define SYS_COLOR_MODE      REG32(SYSREG_BASE + 0x70)
 #define   COLOR_MODE_8BIT       0   /* 8-bit indexed (256 colors, 1 byte/pixel) */
@@ -152,24 +153,7 @@
 /* Misc */
 #define SYS_GAME_ID         REG32(SYSREG_BASE + 0x68)
 
-/* Tile Engine (0x40000080) */
-#define TILE_CTRL           REG32(SYSREG_BASE + 0x80)
-#define   TILE_CTRL_ENABLE    (1 << 0)
-#define   TILE_CTRL_PRIORITY  (1 << 1)  /* 0=behind FB, 1=over FB */
-#define TILE_SCROLL         REG32(SYSREG_BASE + 0x84)
-#define TILE_MAP_ADDR       REG32(SYSREG_BASE + 0x88)
-#define TILE_MAP_DATA       REG32(SYSREG_BASE + 0x8C)
-#define TILE_CHR_ADDR       REG32(SYSREG_BASE + 0x90)
-#define TILE_CHR_DATA       REG32(SYSREG_BASE + 0x94)
-
-/* Sprite Engine (0x40000098) */
-#define SPR_CTRL            REG32(SYSREG_BASE + 0x98)
-#define   SPR_CTRL_ENABLE     (1 << 0)
-#define SPR_SAT_IDX         REG32(SYSREG_BASE + 0x9C)
-#define SPR_SAT_XY          REG32(SYSREG_BASE + 0xA0)
-#define SPR_SAT_ATTR        REG32(SYSREG_BASE + 0xA4)
-#define SPR_CHR_ADDR        REG32(SYSREG_BASE + 0xA8)
-#define SPR_CHR_DATA        REG32(SYSREG_BASE + 0xAC)
+/* Registers 0x80-0xAC reserved (tile/sprite engines removed) */
 
 /* Shutdown handshake (0xB0) */
 #define SYS_SHUTDOWN        REG32(SYSREG_BASE + 0xB0)
@@ -183,18 +167,23 @@
 #define   TIMER_CTRL_ENABLE   (1 << 0)
 #define   TIMER_CTRL_W1C_IRQ  (1 << 1)
 
-/* Hardware PCM mixer (0xC0-0xE8) — 32-voice CRAM1-backed */
-#define MIX_VOICE_SEL       REG32(SYSREG_BASE + 0xC0)  /* Write: voice index 0-31 */
-#define MIX_VOICE_ADDR      REG32(SYSREG_BASE + 0xC4)  /* Write: CRAM1 word address */
-#define MIX_VOICE_LEN       REG32(SYSREG_BASE + 0xC8)  /* Write: length (also sets LOOP_END default) */
-#define MIX_VOICE_RATE      REG32(SYSREG_BASE + 0xCC)  /* Write: rate (16.16 fixed-point) */
-#define MIX_VOICE_CTRL      REG32(SYSREG_BASE + 0xD0)  /* Write: [0]=active [1]=loop [2]=fmt16 [3]=bidi [4]=dir */
-#define MIX_VOICE_POS       REG32(SYSREG_BASE + 0xD0)  /* Read: position[21:0] for selected voice */
-#define MIX_CTRL            REG32(SYSREG_BASE + 0xD4)  /* RW: [0]=enable */
-#define MIX_VOICE_VOL_LR    REG32(SYSREG_BASE + 0xD8)  /* Write: {vol_r[15:8], vol_l[7:0]} */
-#define MIX_STATUS          REG32(SYSREG_BASE + 0xD8)  /* Read: [4:0]=active voices */
-#define MIX_VOICE_LOOP_END  REG32(SYSREG_BASE + 0xE4)  /* Write: loop end point[21:0] */
-#define MIX_VOICE_POS_WR    REG32(SYSREG_BASE + 0xE8)  /* Write: set position[21:0] */
+/* Hardware PCM mixer (0xC0-0xF8) — 32-voice CRAM1-backed */
+#define MIX_VOICE_SEL        REG32(SYSREG_BASE + 0xC0)  /* Write: voice index 0-31 */
+#define MIX_VOICE_ADDR       REG32(SYSREG_BASE + 0xC4)  /* Write: CRAM1 word address */
+#define MIX_VOICE_LEN        REG32(SYSREG_BASE + 0xC8)  /* Write: length (also sets LOOP_END/LOOP_START defaults) */
+#define MIX_VOICE_RATE       REG32(SYSREG_BASE + 0xCC)  /* Write: rate (16.16 fixed-point) */
+#define MIX_VOICE_CTRL       REG32(SYSREG_BASE + 0xD0)  /* Write: [0]=active [1]=loop [2]=fmt16 [3]=bidi [4]=dir */
+#define MIX_VOICE_POS        REG32(SYSREG_BASE + 0xD0)  /* Read: position[21:0] for selected voice */
+#define MIX_CTRL             REG32(SYSREG_BASE + 0xD4)  /* RW: [0]=enable */
+#define MIX_VOICE_VOL_LR     REG32(SYSREG_BASE + 0xD8)  /* Write: {vol_r[15:8], vol_l[7:0]} (current, ramped by HW) */
+#define MIX_STATUS           REG32(SYSREG_BASE + 0xD8)  /* Read: [4:0]=active voices */
+#define MIX_VOICE_LOOP_END   REG32(SYSREG_BASE + 0xE4)  /* Write: loop end point[21:0] */
+#define MIX_VOICE_POS_WR     REG32(SYSREG_BASE + 0xE8)  /* Write: set position[21:0] */
+#define MIX_VOICE_LOOP_START REG32(SYSREG_BASE + 0xEC)  /* Write: loop start point[21:0] */
+#define MIX_VOICE_VOL_TARGET REG32(SYSREG_BASE + 0xF0)  /* Write: {target_r[7:0], target_l[7:0]} */
+#define MIX_VOICE_VOL_RATE   REG32(SYSREG_BASE + 0xF4)  /* Write: ramp step size (0=instant) */
+#define MIX_IRQ_PENDING      REG32(SYSREG_BASE + 0xF8)  /* Read: voice-end bitmask */
+#define MIX_IRQ_CLEAR        REG32(SYSREG_BASE + 0xF8)  /* Write: W1C */
 
 /* VRR (Variable Refresh Rate) — dynamic V_TOTAL for video timing (0xDC)
  * Write: bits[9:0] = V_TOTAL line count (262–375, default 262)
@@ -213,13 +202,6 @@
 /* Bridge debug (0x94) — internal latch state for DMA diagnostics */
 #define DS_DEBUG            REG32(SYSREG_BASE + 0x94)
 
-
-/* Tile/Sprite constants */
-#define TILE_MAP_COLS       64
-#define TILE_MAP_ROWS       32
-#define TILE_SIZE           8       /* 8x8 pixels */
-#define TILE_MAX_TILES      256
-#define SPRITE_MAX          64
 
 /* ======================================================================
  * Audio FIFO (0x4C000000)
@@ -392,14 +374,14 @@ static inline uint32_t cpu_to_bridge(void *addr) {
 #define OF_MEM_CRAM_SIZE            CRAM_SIZE
 #define OF_MEM_SRAM_BASE            SRAM_BASE
 #define OF_MEM_SRAM_SIZE            SRAM_SIZE
-#define OF_MEM_TERM_VRAM_BASE       TERM_VRAM_BASE
+#define OF_MEM_TERM_FB_BASE         TERM_FB_BASE
 
 /* System registers */
 #define OF_REG_SYSREG_BASE          SYSREG_BASE
 #define OF_REG_SYS_STATUS           SYS_STATUS
 #define OF_REG_SYS_CYCLE_LO         SYS_CYCLE_LO
 #define OF_REG_SYS_CYCLE_HI         SYS_CYCLE_HI
-#define OF_REG_SYS_DISPLAY_MODE     SYS_DISPLAY_MODE
+#define OF_REG_TERM_FB_CTRL         TERM_FB_CTRL
 #define OF_REG_FB_DISPLAY_ADDR      FB_DISPLAY_ADDR
 #define OF_REG_FB_DISPLAY_IDX       FB_DISPLAY_IDX
 #define OF_REG_FB_SWAP_CTRL         FB_SWAP_CTRL
@@ -418,22 +400,6 @@ static inline uint32_t cpu_to_bridge(void *addr) {
 #define OF_REG_CONT2_JOY            CONT2_JOY
 #define OF_REG_CONT2_TRIG           CONT2_TRIG
 #define OF_REG_SYS_GAME_ID          SYS_GAME_ID
-
-/* Tile engine registers */
-#define OF_REG_TILE_CTRL            TILE_CTRL
-#define OF_REG_TILE_SCROLL          TILE_SCROLL
-#define OF_REG_TILE_MAP_ADDR        TILE_MAP_ADDR
-#define OF_REG_TILE_MAP_DATA        TILE_MAP_DATA
-#define OF_REG_TILE_CHR_ADDR        TILE_CHR_ADDR
-#define OF_REG_TILE_CHR_DATA        TILE_CHR_DATA
-
-/* Sprite engine registers */
-#define OF_REG_SPR_CTRL             SPR_CTRL
-#define OF_REG_SPR_SAT_IDX          SPR_SAT_IDX
-#define OF_REG_SPR_SAT_XY           SPR_SAT_XY
-#define OF_REG_SPR_SAT_ATTR         SPR_SAT_ATTR
-#define OF_REG_SPR_CHR_ADDR         SPR_CHR_ADDR
-#define OF_REG_SPR_CHR_DATA         SPR_CHR_DATA
 
 /* Audio registers */
 #define OF_REG_AUDIO_SAMPLE         AUDIO_SAMPLE

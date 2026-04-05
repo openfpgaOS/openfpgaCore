@@ -85,7 +85,6 @@ TARGET_SRCS = $(TARGET_DIR)/video.c \
               $(TARGET_DIR)/terminal.c \
               $(TARGET_DIR)/timer.c \
               $(TARGET_DIR)/link.c \
-              $(TARGET_DIR)/tile.c
 
 # Source files - Kernel
 KERNEL_SRCS = $(KERNEL_DIR)/main.c \
@@ -93,7 +92,8 @@ KERNEL_SRCS = $(KERNEL_DIR)/main.c \
               $(KERNEL_DIR)/loader.c \
               $(KERNEL_DIR)/misaligned.c \
               $(KERNEL_DIR)/libc_table.c \
-              $(KERNEL_DIR)/of_malloc.c
+              $(KERNEL_DIR)/of_malloc.c \
+              $(KERNEL_DIR)/irq.c
 
 # All sources
 ALL_C_SRCS = $(BOOT_SRCS_C) $(HAL_SRCS) $(TARGET_SRCS) $(KERNEL_SRCS)
@@ -169,6 +169,15 @@ $(TARGET_DIR)/%.o: $(TARGET_DIR)/%.c
 # syscall.c without LTO — LTO strips functions called only via
 # runtime-determined if-chains from the assembly trap handler.
 $(KERNEL_DIR)/syscall.o: $(KERNEL_DIR)/syscall.c
+	$(CC) $(filter-out -flto,$(OS_CFLAGS)) -c -o $@ $<
+
+# libc_table.c without LTO — writes to a hardcoded address (OF_LIBC_ADDR)
+# via cast, so LTO sees no observable side effects and strips the function.
+$(KERNEL_DIR)/libc_table.o: $(KERNEL_DIR)/libc_table.c
+	$(CC) $(filter-out -flto,$(OS_CFLAGS)) -c -o $@ $<
+
+# irq.c without LTO — called from assembly trap handler via function pointer.
+$(KERNEL_DIR)/irq.o: $(KERNEL_DIR)/irq.c
 	$(CC) $(filter-out -flto,$(OS_CFLAGS)) -c -o $@ $<
 
 $(KERNEL_DIR)/%.o: $(KERNEL_DIR)/%.c

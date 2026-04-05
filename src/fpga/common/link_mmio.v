@@ -46,7 +46,10 @@ module link_mmio #(
     output wire        link_sck_oe,
     input  wire        link_sd_i,
     output wire        link_sd_o,
-    output wire        link_sd_oe
+    output wire        link_sd_oe,
+
+    // Interrupt: asserted when RX FIFO has data
+    output wire        irq
 );
 
 function integer clog2;
@@ -161,6 +164,7 @@ assign link_so_oe  = ctrl_enable;
 assign link_sck_oe = ctrl_enable & ctrl_master;
 assign link_sd_o   = 1'b0;
 assign link_sd_oe  = 1'b0;
+assign irq         = ctrl_enable & ~rx_empty;  // IRQ when RX has data
 
 always @(*) begin
     reg_rdata = 32'd0;

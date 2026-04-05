@@ -15,8 +15,8 @@ void of_video_init(void);
 /* Get pointer to current draw buffer (write pixels here) */
 uint8_t *of_video_get_surface(void);
 
-/* Request vsync-synchronized buffer swap */
-void of_video_flip(void);
+/* Request vsync-synchronized buffer swap. Returns new back-buffer pointer. */
+uint8_t *of_video_flip(void);
 
 /* Block until pending swap completes */
 void of_video_wait_flip(void);
@@ -29,6 +29,11 @@ void of_video_set_palette(uint8_t index, uint8_t r, uint8_t g, uint8_t b);
 
 /* Load an entire 256-entry palette. Each entry is 0x00RRGGBB. */
 void of_video_set_palette_bulk(const uint32_t *palette, int count);
+
+/* Load palette from VGA 4-byte format: [B6,G6,R6,pad] per entry.
+ * Standard VGA DAC register order, used by BUILD engine, DOS games, etc.
+ * Kernel converts 6-bit → 8-bit in one pass. */
+void of_video_set_palette_vga4(const uint8_t *vga_pal, int count);
 
 /* Switch between terminal overlay and framebuffer mode */
 void of_video_set_display_mode(int mode);

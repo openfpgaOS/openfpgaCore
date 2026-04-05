@@ -43,10 +43,14 @@ static inline long long lseek(int fd, long long offset, int whence) {
     return __OF_JT->lseek(fd, offset, whence);
 }
 
+/* Time */
+unsigned int usleep(unsigned int us);
+unsigned int sleep(unsigned int sec);
+
 /* Minimal stubs */
 static inline int   getpid(void)        { return 1; }
 static inline int   isatty(int fd)      { (void)fd; return 0; }
-static inline int   access(const char *path, int mode) { (void)path; (void)mode; return -1; }
+int access(const char *path, int mode);
 
 #ifdef __cplusplus
 }

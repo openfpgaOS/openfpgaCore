@@ -63,6 +63,27 @@ void of_input_poll(void) {
     of_input_states[1].trigger_r = (trig2 >> 16) & 0xFFFF;
 }
 
+void of_input_poll_p0(of_input_state_t *out) {
+    uint32_t keys = CONT1_KEY;
+    uint32_t joy  = CONT1_JOY;
+    uint32_t trig = CONT1_TRIG;
+
+    of_input_states[0].buttons_pressed  = keys & ~prev_buttons[0];
+    of_input_states[0].buttons_released = ~keys & prev_buttons[0];
+    of_input_states[0].buttons = keys;
+    prev_buttons[0] = keys;
+
+    of_input_states[0].joy_lx = apply_deadzone((int8_t)(joy & 0xFF));
+    of_input_states[0].joy_ly = apply_deadzone((int8_t)((joy >> 8) & 0xFF));
+    of_input_states[0].joy_rx = apply_deadzone((int8_t)((joy >> 16) & 0xFF));
+    of_input_states[0].joy_ry = apply_deadzone((int8_t)((joy >> 24) & 0xFF));
+
+    of_input_states[0].trigger_l = trig & 0xFFFF;
+    of_input_states[0].trigger_r = (trig >> 16) & 0xFFFF;
+
+    *out = of_input_states[0];
+}
+
 const of_input_state_t *of_input_get_state(int player) {
     if (player < 0 || player >= INPUT_MAX_PLAYERS)
         return &of_input_states[0];

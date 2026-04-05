@@ -58,7 +58,6 @@ void os_main(void) {
     of_init();
 
     /* Boot stage: red logo = OS initializing */
-    SYS_DISPLAY_MODE = DISPLAY_MODE_TERMINAL;
     boot_logo("\033[91m");  /* red */
 
     of_term_enable_uart_mirror();

@@ -3,12 +3,12 @@
 #
 # Usage:
 #   ./deploy.sh                          Deploy to Pocket SD card (auto-detect)
-#   ./deploy.sh /path/to/openfpgaOS-SDK  Update SDK runtime + deploy to SD card
-#
-# Both paths: package build/ from source artifacts, then deploy.
-# No rebuilding — just copies what's already been compiled.
+#   ./deploy.sh /path/to/openfpgaOS-SDK  Update SDK runtime folder (no SD deploy)
 #
 set -e
+
+# Always run from repo root (where this script lives)
+cd "$(dirname "$0")"
 
 GREEN='\033[92m'
 CYAN='\033[96m'
@@ -18,72 +18,62 @@ RESET='\033[0m'
 DEST="$1"
 
 # ════════════════════════════════════════════════════════════════════
-# Step 1: Always package build/ from source artifacts
+# SDK runtime update — copy bitstream, loader, os.bin directly
 # ════════════════════════════════════════════════════════════════════
+if [ -n "$DEST" ] && [ -f "$DEST/src/sdk/sdk.mk" ]; then
+    echo -e "${CYAN}Rebuilding OS...${RESET}"
+    make os
+    echo ""
+
+    RUNTIME="$DEST/runtime"
+    BITSTREAM="src/fpga/targets/pocket/output_files/ap_core.rbf"
+    LOADER="src/chip32/pocket/loader.bin"
+    OS_BIN="src/firmware/os/os.bin"
+
+    echo -e "${CYAN}Updating SDK runtime: $RUNTIME${RESET}"
+    mkdir -p "$RUNTIME"
+
+    # Bitstream (reverse bits)
+    if [ -f "$BITSTREAM" ]; then
+        if [ ! -x tools/reverse_bits ]; then
+            gcc -O2 -o tools/reverse_bits tools/reverse_bits.c
+        fi
+        tools/reverse_bits "$BITSTREAM" "$RUNTIME/bitstream.rbf_r"
+        echo -e "  ${GREEN}✓${RESET} bitstream.rbf_r"
+    else
+        echo -e "  ${YELLOW}⚠${RESET} bitstream not found — run 'make fpga' first"
+    fi
+
+    # Loader
+    if [ -f "$LOADER" ]; then
+        cp "$LOADER" "$RUNTIME/"
+        echo -e "  ${GREEN}✓${RESET} loader.bin"
+    else
+        echo -e "  ${YELLOW}⚠${RESET} loader.bin not found — run 'make chip32' first"
+    fi
+
+    # OS
+    if [ -f "$OS_BIN" ]; then
+        cp "$OS_BIN" "$RUNTIME/"
+        echo -e "  ${GREEN}✓${RESET} os.bin"
+    else
+        echo -e "  ${YELLOW}⚠${RESET} os.bin not found"
+    fi
+
+    echo -e "\n${GREEN}SDK runtime updated!${RESET}"
+    exit 0
+fi
+
+# ════════════════════════════════════════════════════════════════════
+# SD card deploy — rebuild firmware, package, then copy to SD
+# ════════════════════════════════════════════════════════════════════
+echo -e "${CYAN}Rebuilding OS...${RESET}"
+make os
+echo ""
 echo -e "${CYAN}Packaging build/ from source artifacts...${RESET}"
 make package
 echo ""
 
-# ════════════════════════════════════════════════════════════════════
-# Step 2 (optional): Update SDK runtime if SDK path given
-# ════════════════════════════════════════════════════════════════════
-if [ -n "$DEST" ] && [ -f "$DEST/src/sdk/sdk.mk" ]; then
-    echo -e "${CYAN}Updating SDK: $DEST${RESET}"
-
-    BUILD_DIR="build/Cores/ThinkElastic.openfpgaOS"
-    RUNTIME="$DEST/runtime"
-    mkdir -p "$RUNTIME"
-
-    cp "$BUILD_DIR/bitstream.rbf_r" "$RUNTIME/" && \
-        echo -e "  ${GREEN}✓${RESET} bitstream.rbf_r"
-    cp "$BUILD_DIR/loader.bin" "$RUNTIME/" && \
-        echo -e "  ${GREEN}✓${RESET} loader.bin"
-    cp "build/Assets/openfpgaos/common/os.bin" "$RUNTIME/" && \
-        echo -e "  ${GREEN}✓${RESET} os.bin"
-
-    # Core configs
-    mkdir -p "$DEST/dist/sdk/core"
-    for f in "$BUILD_DIR"/*.json "$BUILD_DIR"/icon.bin; do
-        [ -f "$f" ] && cp "$f" "$DEST/dist/sdk/core/"
-    done
-    echo -e "  ${GREEN}✓${RESET} Core configs"
-
-    # Platform files
-    mkdir -p "$DEST/dist/sdk/platform/_images"
-    [ -f build/Platforms/openfpgaos.json ] && \
-        cp build/Platforms/openfpgaos.json "$DEST/dist/sdk/platform/"
-    [ -f build/Platforms/_images/openfpgaos.bin ] && \
-        cp build/Platforms/_images/openfpgaos.bin "$DEST/dist/sdk/platform/_images/"
-    echo -e "  ${GREEN}✓${RESET} Platform files"
-
-    # SDK API headers
-    mkdir -p "$DEST/src/sdk/include" "$DEST/src/sdk/libc"
-    for f in src/firmware/api/of*.h; do
-        [ -f "$f" ] && cp "$f" "$DEST/src/sdk/include/"
-    done
-    [ -f "$DEST/src/sdk/include/of_libc.h" ] && mv "$DEST/src/sdk/include/of_libc.h" "$DEST/src/sdk/libc/"
-    echo -e "  ${GREEN}✓${RESET} SDK API headers"
-
-    # Libc headers
-    for f in src/firmware/api/libc_include/*.h; do
-        [ -f "$f" ] && cp "$f" "$DEST/src/sdk/libc/"
-    done
-    for d in src/firmware/api/libc_include/*/; do
-        [ -d "$d" ] || continue
-        subdir=$(basename "$d")
-        mkdir -p "$DEST/src/sdk/libc/$subdir"
-        cp "$d"*.h "$DEST/src/sdk/libc/$subdir/" 2>/dev/null
-    done
-    sed -i 's|"../of_\([^"]*\)"|"of_\1"|g' "$DEST"/src/sdk/libc/*.h 2>/dev/null
-    echo -e "  ${GREEN}✓${RESET} Libc headers"
-
-    echo -e "  ${GREEN}✓${RESET} SDK updated"
-    echo ""
-fi
-
-# ════════════════════════════════════════════════════════════════════
-# Step 3: Always deploy to Pocket SD card
-# ════════════════════════════════════════════════════════════════════
 DID_MOUNT=0
 
 find_pocket_sd() {
@@ -122,21 +112,13 @@ if [ -z "$POCKET_SD" ]; then
 fi
 
 if [ -z "$POCKET_SD" ]; then
-    echo -e "${YELLOW}No SD card found — SDK updated but SD card not deployed.${RESET}"
+    echo -e "${YELLOW}No SD card found.${RESET}"
     echo "Insert SD card and run: ./deploy.sh"
     exit 0
 fi
 
 echo -e "${CYAN}Deploying to SD card: $POCKET_SD${RESET}"
-
-# If SDK path given, use SDK deploy (includes apps)
-if [ -n "$DEST" ] && [ -f "$DEST/scripts/deploy.sh" ]; then
-    bash "$DEST/scripts/deploy.sh" "$POCKET_SD"
-else
-    # Direct deploy from build/
-    rsync -av --checksum build/ "$POCKET_SD/"
-fi
-
+rsync -av --checksum build/ "$POCKET_SD/"
 sync
 
 if [ "$DID_MOUNT" = "1" ]; then

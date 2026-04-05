@@ -36,16 +36,10 @@ struct stat {
 #define S_IWRITE S_IWUSR
 #define S_IEXEC  S_IXUSR
 
-/* stat/fstat -- not supported, return -1 */
-static inline int stat(const char *path, struct stat *buf) {
-    (void)path; (void)buf;
-    return -1;
-}
-
-static inline int fstat(int fd, struct stat *buf) {
-    (void)fd; (void)buf;
-    return -1;
-}
+/* stat/fstat: implemented in of_posix.c via lseek */
+int stat(const char *path, struct stat *buf);
+int fstat(int fd, struct stat *buf);
+int mkdir(const char *path, mode_t mode);
 
 #ifdef __cplusplus
 }

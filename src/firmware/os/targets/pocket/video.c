@@ -12,6 +12,8 @@
 #include "video.h"
 #include "regs.h"
 #include "cache.h"
+#include "analogizer.h"
+#include "terminal.h"
 #include "../os_string.h"
 
 static const uint32_t fb_addr[3] = { FB0_BASE, FB1_BASE, FB2_BASE };
@@ -20,6 +22,113 @@ static const uint32_t fb_addr[3] = { FB0_BASE, FB1_BASE, FB2_BASE };
 static int buf_display = 0;   /* buffer the hardware is scanning out        */
 static int buf_draw    = 1;   /* buffer the CPU is drawing into             */
 static int buf_ready   = -1;  /* buffer queued for next vsync (-1 = none)   */
+
+/* Display mode (tracked here for overlay compositing in of_video_flip) */
+static int vid_display_mode = DISPLAY_MODE_FRAMEBUFFER;
+
+/* ---- VRR (Variable Refresh Rate) ---- */
+#define VRR_LINES_PER_SEC   15720u  /* 12576000 / 800 */
+#define VRR_HZ_MIN          42      /* 15720/375 ≈ 41.9 Hz */
+#define VRR_HZ_MAX          60      /* 15720/262 = 60.0 Hz (default) */
+#define VRR_VT_MIN          262     /* 60 Hz — Pocket scaler max */
+#define VRR_VT_MAX          375     /* ~42 Hz — Pocket scaler min */
+#define VRR_VT_DEFAULT      262
+#define VRR_VT_PAL          314     /* 15720/314 ≈ 50.06 Hz — PAL */
+#define VRR_STABLE_FRAMES   4       /* frames before applying a rate change */
+#define VRR_TOLERANCE       3       /* v_total jitter tolerance in lines */
+
+static uint64_t vrr_last_flip;
+static int      vrr_current_vt  = VRR_VT_DEFAULT;
+static int      vrr_pending_vt  = VRR_VT_DEFAULT;
+static int      vrr_stable_count;
+static int      vrr_skip_frames = 8;  /* skip initial frames to stabilize */
+static int      vrr_in_gap;           /* 1 = fps 30-40 gap, using swap hold */
+
+static int vrr_abs(int a, int b) { return a > b ? a - b : b - a; }
+
+static void vrr_update(void) {
+    uint64_t now = read_cycles();
+    uint64_t elapsed = now - vrr_last_flip;
+    vrr_last_flip = now;
+
+    /* Let the system stabilize before touching VRR */
+    if (vrr_skip_frames > 0) {
+        vrr_skip_frames--;
+        return;
+    }
+
+    /* Analogizer: use fixed PAL or NTSC timing instead of VRR */
+    if (of_analogizer_is_enabled()) {
+        int video_mode = of_analogizer_get_video_mode();
+        int target = (video_mode == ANLG_VIDEO_YC_PAL) ? VRR_VT_PAL : VRR_VT_DEFAULT;
+        if (vrr_current_vt != target) {
+            vrr_current_vt = target;
+            VRR_V_TOTAL = target;
+            VRR_SWAP_HOLD = 0;
+        }
+        return;
+    }
+
+    /* Only act on reasonable frame times: 7 fps .. 60 fps
+     * Below 7 fps no multiplier N=1..6 can reach 41 Hz, so leave VRR alone.
+     * Above 60 fps the content is already at or above the scaler max. */
+    uint64_t delta_min = CPU_FREQ_HZ / 60;   /*  1,666,666 cycles (~60 fps) */
+    uint64_t delta_max = CPU_FREQ_HZ / 7;    /* 14,285,714 cycles (~7 fps) */
+    if (elapsed < delta_min || elapsed > delta_max)
+        return;
+
+    uint32_t delta = (uint32_t)elapsed;
+
+    /* fps×10 for sub-Hz precision without floats */
+    uint32_t fps_x10 = (uint32_t)((uint64_t)CPU_FREQ_HZ * 10 / delta);
+
+    int new_vt = -1;  /* -1 = no valid target found */
+    int gap = 0;
+
+    /* Find smallest multiplier N where fps×N ∈ [41, 58] */
+    for (int n = 1; n <= 6; n++) {
+        uint32_t hz_x10 = fps_x10 * n;
+        if (hz_x10 > VRR_HZ_MAX * 10)
+            break;
+        if (hz_x10 >= VRR_HZ_MIN * 10) {
+            new_vt = (int)((uint64_t)delta * VRR_LINES_PER_SEC /
+                           ((uint32_t)n * CPU_FREQ_HZ));
+            if (new_vt < VRR_VT_MIN) new_vt = VRR_VT_MIN;
+            if (new_vt > VRR_VT_MAX) new_vt = VRR_VT_MAX;
+            break;
+        }
+    }
+
+    /* Gap: fps 30-40 where N=1 < 41 Hz, N=2 > 58 Hz.
+     * Use default refresh (58.6 Hz) + hold each frame for 2 vsyncs
+     * to get consistent ~29.3 FPS cadence with no judder. */
+    if (new_vt < 0 && fps_x10 >= 290) {
+        new_vt = VRR_VT_MIN;
+        gap = 1;
+    }
+
+    /* No valid target (fps too slow or too fast) — don't touch VRR */
+    if (new_vt < 0)
+        return;
+
+    /* Hysteresis: require consistent target for several frames */
+    if (vrr_abs(new_vt, vrr_pending_vt) <= VRR_TOLERANCE) {
+        if (++vrr_stable_count >= VRR_STABLE_FRAMES) {
+            if (vrr_abs(new_vt, vrr_current_vt) > VRR_TOLERANCE) {
+                vrr_current_vt = new_vt;
+                VRR_V_TOTAL = new_vt;
+            }
+            /* Update swap hold when gap state changes */
+            if (gap != vrr_in_gap) {
+                vrr_in_gap = gap;
+                VRR_SWAP_HOLD = gap ? 1 : 0;
+            }
+        }
+    } else {
+        vrr_pending_vt = new_vt;
+        vrr_stable_count = 1;
+    }
+}
 
 /* Check whether a pending swap has completed and update software state. */
 static void sync_swap_state(void) {
@@ -30,11 +139,22 @@ static void sync_swap_state(void) {
 }
 
 void of_video_init(void) {
-    SYS_DISPLAY_MODE = DISPLAY_MODE_FRAMEBUFFER;
+    /* Switch scanout to app triple-buffered FB */
+    TERM_FB_CTRL = 0;
 
     buf_display = 0;
     buf_draw    = 1;
     buf_ready   = -1;
+
+    /* Initialize VRR state */
+    vrr_last_flip = read_cycles();
+    vrr_current_vt = VRR_VT_DEFAULT;
+    vrr_pending_vt = VRR_VT_DEFAULT;
+    vrr_stable_count = 0;
+    vrr_skip_frames = 8;
+    vrr_in_gap = 0;
+    VRR_V_TOTAL = VRR_VT_DEFAULT;
+    VRR_SWAP_HOLD = 0;
 
     memset((void *)FB0_BASE, 0, FB_SIZE);
     memset((void *)FB1_BASE, 0, FB_SIZE);
@@ -49,9 +169,24 @@ void of_video_flush_cache(void) {
     of_cache_clean_range((uint8_t *)fb_addr[buf_draw], 320 * 240 * 2);
 }
 
-void of_video_flip(void) {
+uint8_t *of_video_flip(void) {
+    /* VRR disabled for debugging — TODO re-enable after fixing */
+    /* vrr_update(); */
+
     /* Refresh our view of hardware state */
     sync_swap_state();
+
+    /* Overlay mode: composite terminal FB over app draw buffer.
+     * Non-zero terminal pixels (text) overwrite app pixels. */
+    if (vid_display_mode == DISPLAY_MODE_OVERLAY) {
+        /* Read terminal FB through cached alias for performance */
+        const uint8_t *term = (const uint8_t *)(TERM_FB_BASE - SDRAM_UNCACHED_BASE + SDRAM_BASE);
+        uint8_t *app = (uint8_t *)fb_addr[buf_draw];
+        for (int i = 0; i < FB_WIDTH * FB_HEIGHT; i++) {
+            if (term[i])
+                app[i] = term[i];
+        }
+    }
 
     /* Flush draw buffer so scanout sees the pixels */
     of_cache_clean_range((uint8_t *)fb_addr[buf_draw], 320 * 240 * 2);
@@ -71,6 +206,7 @@ void of_video_flip(void) {
     }
 
     buf_ready = old_draw;
+    return (uint8_t *)fb_addr[buf_draw];
 }
 
 void of_video_wait_flip(void) {
@@ -94,8 +230,24 @@ void of_video_set_palette_bulk(const uint32_t *palette, int count) {
         PAL_WRITE = palette[i];
 }
 
+void of_video_set_palette_vga4(const uint8_t *vga_pal, int count) {
+    if (count > 256) count = 256;
+    PAL_INDEX = 0;
+    for (int i = 0; i < count; i++) {
+        /* VGA 4-byte format: [B6, G6, R6, pad] — 6-bit components */
+        uint32_t b = (vga_pal[0] * 255 + 31) / 63;
+        uint32_t g = (vga_pal[1] * 255 + 31) / 63;
+        uint32_t r = (vga_pal[2] * 255 + 31) / 63;
+        PAL_WRITE = (r << 16) | (g << 8) | b;
+        vga_pal += 4;
+    }
+}
+
 void of_video_set_display_mode(int mode) {
-    SYS_DISPLAY_MODE = mode;
+    vid_display_mode = mode;
+    /* Switch scanout between terminal FB and app triple-buffered FB */
+    TERM_FB_CTRL = (mode == DISPLAY_MODE_TERMINAL) ? 1 : 0;
+    of_term_set_display_mode(mode);
 }
 
 void of_video_clear(uint8_t color) {

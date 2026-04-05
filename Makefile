@@ -42,7 +42,7 @@ REVERSE_BITS = tools/reverse_bits
 all: package
 
 # Full build - compile FPGA, firmware, and package
-full: fpga firmware chip32 package
+full: fpga os chip32 package
 
 # Firmware source files for dependency tracking
 FW_SOURCES = $(wildcard $(OS_DIR)/hal/*.c $(OS_DIR)/targets/$(TARGET)/*.c $(OS_DIR)/targets/$(TARGET)/boot/*.c $(OS_DIR)/targets/$(TARGET)/boot/*.S $(OS_DIR)/kernel/*.c $(OS_DIR)/*.ld)
@@ -84,11 +84,14 @@ firmware-mif:
 	$(MAKE) -C $(OS_DIR) install
 	@echo "Firmware MIF ready for FPGA build"
 
-# Build firmware
-firmware:
+# Build OS
+os:
 	@echo "Building OS firmware..."
 	$(MAKE) -C $(OS_DIR)
 	@echo "OS firmware build complete"
+
+# Build OS + patch bitstream + package
+firmware: os firmware-update package
 
 # Build Chip32 loader
 chip32:
@@ -262,4 +265,4 @@ program: $(FW_MIF)
 	@echo "Programming FPGA via JTAG..."
 	$(MAKE) -C $(FPGA_TARGET_DIR) program
 
-.PHONY: all full fpga cpu firmware-mif firmware chip32 firmware-update fw package check-bitstream release-dirs copy-bitstream copy-chip32 copy-firmware copy-json copy-platform copy-icon install-txt clean clean-fpga-cache clean-fpga quick program
+.PHONY: all full fpga cpu os firmware-mif firmware chip32 firmware-update fw package check-bitstream release-dirs copy-bitstream copy-chip32 copy-firmware copy-json copy-platform copy-icon install-txt clean clean-fpga-cache clean-fpga quick program

@@ -5,8 +5,8 @@
  * address. Apps call standard C functions through this table, so they
  * don't need to statically link musl themselves.
  *
- * The table lives at 0x103FF000 (4KB below the app load address).
- * The OS linker script asserts that BSS doesn't overlap this region.
+ * The table lives at 0x7C00 in BRAM — fast access, no D-cache pollution.
+ * Must not overlap app BRAM (0x2000–0x7C00) or trap stack (0x7E00–0x8000).
  */
 
 #include "libc_table.h"

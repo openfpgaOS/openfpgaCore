@@ -1952,13 +1952,6 @@ assign video_skip = vidout_skip;
 assign video_vs = vidout_vs;
 assign video_hs = vidout_hs;
 
-    localparam  VID_V_BPORCH = 'd16;
-    localparam  VID_V_ACTIVE = 'd240;
-    localparam  VID_V_TOTAL = 'd512;
-    localparam  VID_H_BPORCH = 'd40;
-    localparam  VID_H_ACTIVE = 'd320;
-    localparam  VID_H_TOTAL = 'd400;
-
     reg [15:0]  frame_count;
 
     reg [9:0]   x_count;
@@ -1970,16 +1963,10 @@ assign video_hs = vidout_hs;
     reg         vidout_vs;
     reg         vidout_hs, vidout_hs_1;
 
-    // CPU to terminal interface signals
-    wire        term_mem_valid;
-    wire [31:0] term_mem_addr;
-    wire [31:0] term_mem_wdata;
-    wire [3:0]  term_mem_wstrb;
-    wire [31:0] term_mem_rdata;
-    wire        term_mem_ready;
+    // Terminal moved to software — no hardware VRAM interface
 
     // Display mode and framebuffer address from CPU
-    wire [1:0] display_mode;
+    // display_mode removed — terminal rendering in software
     wire [2:0] color_mode;
     wire [24:0] fb_display_addr;
 
@@ -1991,26 +1978,6 @@ assign video_hs = vidout_hs;
         vrr_vt_sync1 <= vrr_v_total_cpu;
         vrr_vt_sync2 <= vrr_vt_sync1;
     end
-
-    // Stub wires for axi_periph_slave tile/sprite register ports (no-ops).
-    wire        tile_enable_w;
-    wire        tile_priority_w;
-    wire [8:0]  tile_scroll_x_w;
-    wire [7:0]  tile_scroll_y_w;
-    wire        tilemap_wr_w;
-    wire [10:0] tilemap_waddr_w;
-    wire [15:0] tilemap_wdata_w;
-    wire        tilechar_wr_w;
-    wire [10:0] tilechar_waddr_w;
-    wire [31:0] tilechar_wdata_w;
-    wire        sprite_enable_w;
-    wire        sat_wr_w;
-    wire [5:0]  sat_idx_w;
-    wire [1:0]  sat_field_w;
-    wire [31:0] sat_wdata_w;
-    wire        sprchar_wr_w;
-    wire [10:0] sprchar_waddr_w;
-    wire [31:0] sprchar_wdata_w;
 
     // VexiiRiscv CPU system — AXI4 bus routing
     cpu_system cpu (
@@ -2076,7 +2043,7 @@ assign video_hs = vidout_hs;
         .m_local_wlast(cpu_m_local_wlast),
         .m_local_bvalid(cpu_m_local_bvalid),
         .m_local_bresp(cpu_m_local_bresp),
-        .int_m_external(1'b0),
+        .int_m_external(ext_irq),
         .int_m_timer(timer_irq)
     );
 
@@ -2119,15 +2086,9 @@ assign video_hs = vidout_hs;
         .target_dataslot_ack(target_dataslot_ack),
         .target_dataslot_done(target_dataslot_done_safe),
         .target_dataslot_err(target_dataslot_err),
-        // Terminal interface
-        .term_mem_valid(term_mem_valid),
-        .term_mem_addr(term_mem_addr),
-        .term_mem_wdata(term_mem_wdata),
-        .term_mem_wstrb(term_mem_wstrb),
-        .term_mem_rdata(term_mem_rdata),
-        .term_mem_ready(term_mem_ready),
+        // Terminal moved to software — no hardware VRAM
         // Display control
-        .display_mode(display_mode),
+        // display_mode removed — terminal rendering in software
         .color_mode(color_mode),
         .fb_display_addr(fb_display_addr),
         // Palette write interface
@@ -2171,26 +2132,6 @@ assign video_hs = vidout_hs;
         .save_dt_size(cpu_save_dt_size),
         .save_dt_commit(cpu_save_dt_commit),
         .app_id(app_id_sync2),
-        // Tile engine
-        .tile_enable(tile_enable_w),
-        .tile_priority(tile_priority_w),
-        .tile_scroll_x(tile_scroll_x_w),
-        .tile_scroll_y(tile_scroll_y_w),
-        .tilemap_wr(tilemap_wr_w),
-        .tilemap_waddr(tilemap_waddr_w),
-        .tilemap_wdata(tilemap_wdata_w),
-        .tilechar_wr(tilechar_wr_w),
-        .tilechar_waddr(tilechar_waddr_w),
-        .tilechar_wdata(tilechar_wdata_w),
-        // Sprite engine
-        .sprite_enable(sprite_enable_w),
-        .sat_wr(sat_wr_w),
-        .sat_idx(sat_idx_w),
-        .sat_field(sat_field_w),
-        .sat_wdata(sat_wdata_w),
-        .sprchar_wr(sprchar_wr_w),
-        .sprchar_waddr(sprchar_waddr_w),
-        .sprchar_wdata(sprchar_wdata_w),
         // Shutdown handshake
         .shutdown_pending(shutdown_pending_cpu),
         .shutdown_ack(shutdown_ack_cpu),
@@ -2201,7 +2142,11 @@ assign video_hs = vidout_hs;
         .mix_enable(mix_enable),
         .mix_active_count(mix_active_count),
         .mix_voice_pos(mix_voice_pos),
+        .mix_irq_clear_wr(mix_irq_clear_wr),
+        .mix_irq_clear_data(mix_irq_clear_data),
+        .mix_irq_pending(mix_irq_pending),
         .timer_irq(timer_irq),
+        .uart_rx_irq(uart_rx_irq),
         // Datatable slot size query
         .dt_query_addr(cpu_dt_query_addr),
         .dt_query_toggle(cpu_dt_query_toggle),
@@ -2415,25 +2360,7 @@ assign video_hs = vidout_hs;
         .psram_burst_rdata(cpu_psram_burst_rdata),
     );
 
-    // Terminal display (40x30 characters, 320x240 pixels)
-    wire [23:0] terminal_pixel_color;
-    wire        terminal_pixel_opaque;
-
-    text_terminal terminal (
-        .clk(clk_vid),
-        .clk_cpu(clk_cpu),
-        .reset_n(reset_n),
-        .pixel_x({1'b0, visible_x[9:1]}),  // Halve doubled-X CRT resolution back to 320
-        .pixel_y(visible_y),
-        .pixel_color(terminal_pixel_color),
-        .pixel_opaque(terminal_pixel_opaque),
-        .mem_valid(term_mem_valid),
-        .mem_addr(term_mem_addr),
-        .mem_wdata(term_mem_wdata),
-        .mem_wstrb(term_mem_wstrb),
-        .mem_rdata(term_mem_rdata),
-        .mem_ready(term_mem_ready)
-    );
+    // Terminal rendering moved to software (firmware renders to framebuffer)
 
     // Line start signal for video scanout
     reg line_start;
@@ -2571,13 +2498,8 @@ always @(posedge clk_vid or negedge reset_n) begin
                 // data enable. this is the active region of the line
                 vidout_de <= 1;
 
-                // Display mode: 0=terminal, 1=framebuffer, 2=overlay (white text over FB)
-                if (display_mode == 2'd0)
-                    vidout_rgb <= terminal_pixel_color;
-                else if (display_mode == 2'd2 && terminal_pixel_color == 24'hFFFFFF)
-                    vidout_rgb <= 24'hFFFFFF;
-                else
-                    vidout_rgb <= framebuffer_pixel_color;
+                // All display modes rendered to framebuffer by software
+                vidout_rgb <= framebuffer_pixel_color;
             end
         end
     end
@@ -2609,7 +2531,8 @@ link_mmio #(
     .link_sck_oe(link_sck_oe),
     .link_sd_i(link_sd_i),
     .link_sd_o(link_sd_out),
-    .link_sd_oe(link_sd_oe)
+    .link_sd_oe(link_sd_oe),
+    .irq(link_irq)
 );
 
 //
@@ -2633,16 +2556,25 @@ opl3_wrapper opl3 (
 // Hardware mixer
 wire        mix_enable;
 wire        mix_voice_wr;
-wire [2:0]  mix_voice_field;
+wire [3:0]  mix_voice_field;
 wire [4:0]  mix_voice_sel;
 wire [31:0] mix_voice_wdata;
 wire [4:0]  mix_active_count;
 wire [21:0] mix_voice_pos;
+wire        mix_irq_clear_wr;
+wire [31:0] mix_irq_clear_data;
+wire [31:0] mix_irq_pending;
+wire        mix_voice_end_irq;
 wire        mix_sample_wr;
 wire [31:0] mix_sample_data;
 wire        mix_cram1_rd;
 wire [21:0] mix_cram1_addr;
 wire        timer_irq;
+wire        uart_rx_irq;
+wire        link_irq;
+// External IRQ disabled until firmware registers a handler and enables it.
+// These are level-triggered — an unhandled high source causes an IRQ storm.
+wire        ext_irq = 1'b0;  // TODO: add IRQ enable mask register
 
 audio_output audio_out (
     .clk_sys      (clk_cpu),
@@ -2678,7 +2610,11 @@ audio_mixer mixer (
     .sample_data(mix_sample_data),
     .fifo_level(audio_fifo_level),
     .active_count(mix_active_count),
-    .pos_readback(mix_voice_pos)
+    .pos_readback(mix_voice_pos),
+    .irq_clear(mix_irq_clear_data),
+    .irq_clear_wr(mix_irq_clear_wr),
+    .voice_end_pending(mix_irq_pending),
+    .voice_end_irq(mix_voice_end_irq)
 );
 
 
@@ -2686,7 +2622,6 @@ audio_mixer mixer (
 
 
     wire    clk_core_12288;         // 12.288 MHz — audio (48kHz-friendly)
-    wire    clk_core_12288_90deg;
     wire    clk_core_49152;
     wire    clk_vid;                // 12.576 MHz — video (exact 60 Hz)
     wire    clk_vid_90deg;

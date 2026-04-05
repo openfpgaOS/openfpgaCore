@@ -59,8 +59,15 @@ void of_term_get_color(uint8_t *fg, uint8_t *bg);
 /* Set a single cell's character and color directly */
 void of_term_set_cell(int col, int row, char ch, uint8_t fg, uint8_t bg);
 
+/* Re-render entire terminal buffer to the current framebuffer surface.
+ * Call after of_video_flip() to sync triple-buffered content. */
+void of_term_redraw(void);
+
 /* Reset ANSI escape parser and restore default colors */
 void of_term_reset(void);
+
+/* Set terminal display mode: 0=terminal, 1=framebuffer, 2=overlay */
+void of_term_set_display_mode(int mode);
 
 /* Enable UART console mirror (call after PHDP handshake completes) */
 void of_term_enable_uart_mirror(void);

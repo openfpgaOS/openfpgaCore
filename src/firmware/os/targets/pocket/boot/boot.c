@@ -66,25 +66,41 @@ extern void switch_to_runtime_stack_and_call(void (*entry)(void), void *stack_to
 
 /* ---- All functions below are self-contained, no HAL calls ---- */
 
+/* Font in BRAM (.fastrodata) — defined in terminal.c */
+extern const uint8_t font8x8[2048];
+
 __attribute__((section(".text.boot")))
-static void boot_vram_putchar(int col, int row, char c) {
-    if (col < TERM_COLS && row < TERM_ROWS)
-        REG8(TERM_VRAM_BASE + row * TERM_COLS + col) = c;
+static void boot_fb_putchar(int col, int row, char c) {
+    if ((unsigned)col >= TERM_COLS || (unsigned)row >= TERM_ROWS) return;
+    volatile uint8_t *fb = (volatile uint8_t *)TERM_FB_BASE;
+    const uint8_t *glyph = &font8x8[(unsigned)(uint8_t)c * 8];
+    int px = col * 8;
+    int py = row * 8;
+    for (int y = 0; y < 8; y++) {
+        uint8_t bits = glyph[y];
+        volatile uint8_t *dst = &fb[(py + y) * 320 + px];
+        for (int x = 0; x < 8; x++) {
+            dst[x] = (bits & 0x80) ? 15 : 0;  /* white on black */
+            bits <<= 1;
+        }
+    }
 }
 
 __attribute__((section(".text.boot")))
-static void boot_vram_puts(int col, int row, const char *s) {
+static void boot_fb_puts(int col, int row, const char *s) {
     while (*s && col < TERM_COLS) {
-        boot_vram_putchar(col, row, *s);
+        boot_fb_putchar(col, row, *s);
         col++;
         s++;
     }
 }
 
 __attribute__((section(".text.boot")))
-static void boot_vram_clear_row(int row) {
-    for (int col = 0; col < TERM_COLS; col++)
-        boot_vram_putchar(col, row, ' ');
+static void boot_fb_clear_row(int row) {
+    if ((unsigned)row >= TERM_ROWS) return;
+    volatile uint8_t *fb = (volatile uint8_t *)TERM_FB_BASE;
+    for (int i = 0; i < 320 * 8; i++)
+        fb[row * 8 * 320 + i] = 0;
 }
 
 
@@ -381,8 +397,8 @@ static int phdp_stream_slot(volatile uint8_t *dest, uint32_t total_size,
             phdp_send(PHDP_REPORT_PROGRESS, prog, 4);
 
             /* Update OSD progress */
-            boot_vram_clear_row(14);
-            boot_vram_puts(0, 14, "UART: ");
+            boot_fb_clear_row(14);
+            boot_fb_puts(0, 14, "UART: ");
             /* Simple progress: show KB received */
             uint32_t kb = received / 1024;
             char numbuf[12];
@@ -396,8 +412,8 @@ static int phdp_stream_slot(volatile uint8_t *dest, uint32_t total_size,
                 while (tpos > 0) numbuf[npos++] = tmp[--tpos];
             }
             numbuf[npos] = '\0';
-            boot_vram_puts(6, 14, numbuf);
-            boot_vram_puts(6 + npos, 14, " KB");
+            boot_fb_puts(6, 14, numbuf);
+            boot_fb_puts(6 + npos, 14, " KB");
 
         } else if (cmd < 0) {
             /* Timeout — send NAK retry */
@@ -506,7 +522,13 @@ int main(void) {
     /* Brief delay for deferload to settle */
     for (volatile int i = 0; i < 100; i++) {}  // Shortened for fast sim
 
-    boot_vram_puts(0, 14, "Booting...");
+    /* Clear terminal framebuffer (scanout reads it by default via term_fb_active=1) */
+    {
+        volatile uint32_t *p = (volatile uint32_t *)TERM_FB_BASE;
+        for (int i = 0; i < (320 * 240) / 4; i++) p[i] = 0;
+    }
+
+    boot_fb_puts(0, 14, "Booting...");
 
     /* ── PHDP Discovery ─────────────────────────────────────────── */
     int debug_mode = 0;
@@ -518,23 +540,23 @@ int main(void) {
     */
 
     if (debug_mode) {
-        boot_vram_clear_row(14);
-        boot_vram_puts(0, 14, "Debug host connected");
+        boot_fb_clear_row(14);
+        boot_fb_puts(0, 14, "Debug host connected");
 
         uint32_t total_size = 0;
         uint16_t chunk_size = 0;
 
         if (phdp_request_override(OS_SLOT_ID, &total_size, &chunk_size)) {
             /* Stream OS binary over UART */
-            boot_vram_clear_row(14);
-            boot_vram_puts(0, 14, "Loading via UART...");
+            boot_fb_clear_row(14);
+            boot_fb_puts(0, 14, "Loading via UART...");
 
             volatile uint8_t *dest = (volatile uint8_t *)(uintptr_t)_os_load_addr;
             int rc = phdp_stream_slot(dest, total_size, chunk_size);
 
             if (rc < 0) {
-                boot_vram_clear_row(14);
-                boot_vram_puts(0, 14, "UART failed, trying SD...");
+                boot_fb_clear_row(14);
+                boot_fb_puts(0, 14, "UART failed, trying SD...");
                 goto load_from_sd;
             }
 
@@ -554,7 +576,7 @@ int main(void) {
             /* Wait for EXEC_START to finish transmitting */
             while (!(UART_STATUS & UART_TX_RDY)) {}
 
-            boot_vram_clear_row(14);
+            boot_fb_clear_row(14);
             goto start_os;
         }
         /* Host said USE_SD or timeout — fall through */
@@ -562,8 +584,8 @@ int main(void) {
 
 load_from_sd:
     /* ── Standard SD card boot ──────────────────────────────────── */
-    boot_vram_clear_row(14);
-    boot_vram_puts(0, 14, "Loading...");
+    boot_fb_clear_row(14);
+    boot_fb_puts(0, 14, "Loading...");
 
     pd_dbg_stage = 3;
 
@@ -572,15 +594,15 @@ load_from_sd:
     int rc = boot_load_os_sd(_os_load_addr, os_size);
 
     if (rc < 0) {
-        boot_vram_clear_row(14);
-        boot_vram_puts(0, 14, "Load failed E");
-        boot_vram_putchar(14, 14, '0' + (unsigned int)(-rc));
+        boot_fb_clear_row(14);
+        boot_fb_puts(0, 14, "Load failed E");
+        boot_fb_putchar(14, 14, '0' + (unsigned int)(-rc));
         pd_dbg_info = (unsigned int)(-rc);
         while (1) {}
     }
 
     pd_dbg_stage = 4;
-    boot_vram_clear_row(14);
+    boot_fb_clear_row(14);
 
 start_os:
     flush_dcache();

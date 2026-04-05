@@ -29,6 +29,9 @@ void of_input_poll(void);
 /* Get current state for a player (0 or 1) */
 const of_input_state_t *of_input_get_state(int player);
 
+/* Single-player fast path: poll hardware + return P0 state in one call */
+void of_input_poll_p0(of_input_state_t *out);
+
 /* Set analog stick dead zone (default 8000).
  * Stick values with absolute value below this threshold are zeroed. */
 void of_input_set_deadzone(int16_t deadzone);

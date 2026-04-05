@@ -79,8 +79,9 @@ static fd_entry_t fd_table[MAX_FDS];
 
 #define IO_CACHE_ENTRIES    8
 #define IO_CACHE_BLOCK_SIZE (32 * 1024)
-#define IO_CACHE_CACHED     (CRAM1_BASE + 0x00300000)    /* CPU D-cache reads */
-#define IO_CACHE_BRIDGE     (CRAM1_BRIDGE + 0x00300000) /* Bridge DMA target */
+#define IO_CACHE_CACHED     (CRAM1_BASE + 0x00300000)      /* CPU D-cache reads */
+#define IO_CACHE_UNCACHED   (CRAM1_UNCACHED + 0x00300000) /* CPU uncached reads */
+#define IO_CACHE_BRIDGE     (CRAM1_BRIDGE + 0x00300000)   /* Bridge DMA target */
 
 typedef struct {
     uint32_t slot_id;       /* data slot this block belongs to */
@@ -119,9 +120,9 @@ static int io_cache_evict(void) {
     return best;
 }
 
-/* Get pointer to entry N's D-cached CRAM1 data */
+/* Get pointer to entry N's CRAM1 data (uncached — guarantees coherency after DMA) */
 static inline const uint8_t *io_cache_data(int entry) {
-    return (const uint8_t *)(IO_CACHE_CACHED + entry * IO_CACHE_BLOCK_SIZE);
+    return (const uint8_t *)(IO_CACHE_UNCACHED + entry * IO_CACHE_BLOCK_SIZE);
 }
 
 /* Fill a cache entry: bridge DMA → CRAM1, invalidate D-cache, done.
@@ -710,8 +711,7 @@ static long of_video_syscall(long n, long a0, long a1, long a2) {
         of_video_init();
         return 0;
     case OF_SYS_VIDEO_FLIP:
-        of_video_flip();
-        return 0;
+        return (long)of_video_flip();
     case OF_SYS_VIDEO_WAIT_FLIP:
         of_video_wait_flip();
         return 0;
@@ -735,6 +735,9 @@ static long of_video_syscall(long n, long a0, long a1, long a2) {
         return 0;
     case OF_SYS_VIDEO_SET_COLOR_MODE:
         SYS_COLOR_MODE = (uint32_t)a0;
+        return 0;
+    case OF_SYS_VIDEO_SET_PALETTE_VGA4:
+        of_video_set_palette_vga4((const uint8_t *)a0, (int)a1);
         return 0;
     default:
         return -ENOSYS;
@@ -774,6 +777,9 @@ static long of_input_syscall(long n, long a0, long a1) {
     }
     case OF_SYS_INPUT_SET_DEADZONE:
         of_input_set_deadzone((int16_t)a0);
+        return 0;
+    case OF_SYS_INPUT_POLL_P0:
+        of_input_poll_p0((of_input_state_t *)a0);
         return 0;
     default:
         return -ENOSYS;
@@ -817,6 +823,8 @@ __attribute__((used)) long syscall_dispatch(long n, long a0, long a1, long a2,
 
     case SYS_exit:
     case SYS_exit_group:
+        /* Switch scanout back to terminal FB so user sees boot screen */
+        TERM_FB_CTRL = 1;
         while (1) {}
         return 0;
 
@@ -990,61 +998,9 @@ __attribute__((used)) long syscall_dispatch(long n, long a0, long a1, long a2,
     if (n == OF_SYS_GET_VERSION)
         return OF_API_VERSION;
 
-    /* Tile engine syscalls (0x1090+) */
-    if (n >= 0x1090 && n < 0x10A0) {
-        switch (n) {
-        case OF_SYS_TILE_ENABLE:
-            of_tile_enable((int)a0, (int)a1);
-            return 0;
-        case OF_SYS_TILE_SCROLL:
-            of_tile_scroll((int)a0, (int)a1);
-            return 0;
-        case OF_SYS_TILE_SET:
-            of_tile_set((int)a0, (int)a1, (uint16_t)a2);
-            return 0;
-        case OF_SYS_TILE_LOAD_MAP:
-            of_tile_load_map((const uint16_t *)a0, (int)a1, (int)a2,
-                             (int)a3, (int)a4);
-            return 0;
-        case OF_SYS_TILE_LOAD_CHR:
-            of_tile_load_chr((int)a0, (const void *)a1, (int)a2);
-            return 0;
-        default:
-            return -ENOSYS;
-        }
-    }
-
-    /* Sprite engine syscalls (0x10A0+) */
-    if (n >= 0x10A0 && n < 0x10B0) {
-        switch (n) {
-        case OF_SYS_SPRITE_ENABLE:
-            of_sprite_enable((int)a0);
-            return 0;
-        case OF_SYS_SPRITE_SET:
-            /* a0=index, a1=x, a2=y, a3=tile_id, a4=packed attrs:
-               [3:0]=palette, [4]=hflip, [5]=vflip, [6]=enable */
-            of_sprite_set((int)a0, (int)a1, (int)a2, (int)a3,
-                          (int)(a4 & 0xF),
-                          (int)((a4 >> 4) & 1),
-                          (int)((a4 >> 5) & 1),
-                          (int)((a4 >> 6) & 1));
-            return 0;
-        case OF_SYS_SPRITE_MOVE:
-            of_sprite_move((int)a0, (int)a1, (int)a2);
-            return 0;
-        case OF_SYS_SPRITE_LOAD_CHR:
-            of_sprite_load_chr((int)a0, (const void *)a1, (int)a2);
-            return 0;
-        case OF_SYS_SPRITE_HIDE:
-            of_sprite_hide((int)a0);
-            return 0;
-        case OF_SYS_SPRITE_HIDE_ALL:
-            of_sprite_hide_all();
-            return 0;
-        default:
-            return -ENOSYS;
-        }
-    }
+    /* Tile/sprite engine syscalls removed (0x1090-0x10AF) */
+    if (n >= 0x1090 && n < 0x10B0)
+        return -ENOSYS;
 
     /* Memory allocation syscalls (0x10C0+) */
     if (n == OF_SYS_MALLOC)
@@ -1122,6 +1078,12 @@ __attribute__((used)) long syscall_dispatch(long n, long a0, long a1, long a2,
         of_mixer_set_voice_raw((int)a0, (uint32_t)a1, (int)a2, (int)a3);
         return 0;
     }
+    if (n == OF_SYS_MIXER_SET_VOL_RATE) {
+        of_mixer_set_vol_rate((int)a0, (int)a1);
+        return 0;
+    }
+    if (n == OF_SYS_MIXER_POLL_ENDED)
+        return (long)of_mixer_poll_ended();
 
     /* Audio Codec syscalls */
     if (n == OF_SYS_CODEC_PARSE_VOC)

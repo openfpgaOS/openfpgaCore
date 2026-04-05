@@ -17,11 +17,30 @@ typedef uint32_t clock_t;
 
 #define CLOCKS_PER_SEC 1000
 
+/* POSIX clock IDs */
+#define CLOCK_REALTIME  0
+#define CLOCK_MONOTONIC 1
+
+struct timespec {
+    time_t tv_sec;
+    long   tv_nsec;
+};
+
+/* clock_gettime / clock_nanosleep — implemented via ecall in of_posix.c */
+int clock_gettime(int clk_id, struct timespec *tp);
+int clock_nanosleep(int clk_id, int flags, const struct timespec *req,
+                    struct timespec *rem);
+
 /* clock() returns milliseconds via of_time_ms */
 static inline clock_t clock(void) {
-    /* Use of_time_ms() -- caller must include of.h before this */
     extern uint32_t of_time_ms(void);
     return (clock_t)of_time_ms();
+}
+
+/* clock_us() returns microseconds via of_time_us */
+static inline uint32_t clock_us(void) {
+    extern uint32_t of_time_us(void);
+    return of_time_us();
 }
 
 static inline time_t time(time_t *t) {

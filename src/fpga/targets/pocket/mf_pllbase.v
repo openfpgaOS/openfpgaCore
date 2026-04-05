@@ -8,9 +8,11 @@
 module mf_pllbase (
 		input  wire  refclk,   //  refclk.clk
 		input  wire  rst,      //   reset.reset
-		output wire  outclk_0, // outclk0.clk
-		output wire  outclk_1, // outclk1.clk
-		output wire  outclk_2, // outclk2.clk
+		output wire  outclk_0, // outclk0.clk  12.288 MHz (audio)
+		output wire  outclk_1, // outclk1.clk  12.288 MHz 90° (audio)
+		output wire  outclk_2, // outclk2.clk  49.152 MHz
+		output wire  outclk_3, // outclk3.clk  12.576 MHz (video, 60 Hz)
+		output wire  outclk_4, // outclk4.clk  12.576 MHz 90° (video DDR)
 		output wire  locked    //  locked.export
 	);
 
@@ -20,6 +22,8 @@ module mf_pllbase (
 		.outclk_0 (outclk_0), // outclk0.clk
 		.outclk_1 (outclk_1), // outclk1.clk
 		.outclk_2 (outclk_2), // outclk2.clk
+		.outclk_3 (outclk_3), // outclk3.clk
+		.outclk_4 (outclk_4), // outclk4.clk
 		.locked   (locked)    //  locked.export
 	);
 

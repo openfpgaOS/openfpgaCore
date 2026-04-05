@@ -58,16 +58,7 @@ module axi_periph_slave (
     // Bridge write drain status (for pacing DMA reads)
     input wire         bridge_wr_idle,
 
-    // Terminal memory interface
-    output wire        term_mem_valid,
-    output wire [31:0] term_mem_addr,
-    output wire [31:0] term_mem_wdata,
-    output wire [3:0]  term_mem_wstrb,
-    input wire  [31:0] term_mem_rdata,
-    input wire         term_mem_ready,
-
     // Display control outputs
-    output wire [1:0]  display_mode,
     output wire [2:0]  color_mode,      // 0=8bit, 1=4bit, 2=2bit, 3=RGB565, 4=RGB555, 5=RGBA5551
     output wire [24:0] fb_display_addr,
 
@@ -122,32 +113,25 @@ module axi_periph_slave (
     // App ID from instance JSON memory_writes
     input wire  [31:0] app_id,
 
-    // Tile/sprite engines removed — stub outputs tied to 0
-    output wire        tile_enable,    output wire        tile_priority,
-    output wire [8:0]  tile_scroll_x,  output wire [7:0]  tile_scroll_y,
-    output wire        tilemap_wr,     output wire [10:0] tilemap_waddr,
-    output wire [15:0] tilemap_wdata,  output wire        tilechar_wr,
-    output wire [10:0] tilechar_waddr, output wire [31:0] tilechar_wdata,
-    output wire        sprite_enable,  output wire        sat_wr,
-    output wire [5:0]  sat_idx,        output wire [1:0]  sat_field,
-    output wire [31:0] sat_wdata,      output wire        sprchar_wr,
-    output wire [10:0] sprchar_waddr,  output wire [31:0] sprchar_wdata,
-
     // Shutdown handshake
     input wire         shutdown_pending,
     output reg         shutdown_ack,
 
     // Hardware mixer voice interface
     output reg         mix_voice_wr,
-    output reg  [2:0]  mix_voice_field,
+    output reg  [3:0]  mix_voice_field,
     output reg  [4:0]  mix_voice_sel,
     output reg  [31:0] mix_voice_wdata,
     output reg         mix_enable,
     input  wire [4:0]  mix_active_count,
     input  wire [21:0] mix_voice_pos,
+    output reg         mix_irq_clear_wr,
+    output wire [31:0] mix_irq_clear_data,
+    input  wire [31:0] mix_irq_pending,
 
     // Hardware timer interrupt
     output wire        timer_irq,
+    output wire        uart_rx_irq,
 
     // Datatable slot size query (toggle-based CDC to clk_74a)
     output reg  [9:0]  dt_query_addr,
@@ -167,14 +151,10 @@ wire reset = ~reset_n;
 wire [31:0] ar_addr = s_axi_araddr;
 wire [31:0] aw_addr = s_axi_awaddr;
 
-// Tile/sprite stub tie-offs (engines removed, rendering in software)
-assign tile_enable = 0;  assign tile_priority = 0;
-assign tile_scroll_x = 0; assign tile_scroll_y = 0;
-assign tilemap_wr = 0; assign tilemap_waddr = 0; assign tilemap_wdata = 0;
-assign tilechar_wr = 0; assign tilechar_waddr = 0; assign tilechar_wdata = 0;
-assign sprite_enable = 0; assign sat_wr = 0;
-assign sat_idx = 0; assign sat_field = 0; assign sat_wdata = 0;
-assign sprchar_wr = 0; assign sprchar_waddr = 0; assign sprchar_wdata = 0;
+// Mixer IRQ clear data passthrough
+assign mix_irq_clear_data = req_wdata;
+
+// Tile/sprite engines removed — registers 0x80-0xAC are no-ops
 
 // ============================================
 // BRAM (32KB = 8192 x 32-bit words)
@@ -223,17 +203,13 @@ altsyncram #(
 // ============================================
 // Terminal forwarding
 // ============================================
-assign term_mem_valid = term_pending;
-assign term_mem_addr  = req_addr;
-assign term_mem_wdata = req_wdata;
-assign term_mem_wstrb = is_write ? req_wstrb : 4'b0;
+// Terminal moved to software — no hardware VRAM forwarding
 
 // ============================================
 // System registers
 // ============================================
 reg [31:0] sysreg_rdata;
 reg [63:0] cycle_counter;
-reg [1:0] display_mode_reg /* synthesis preserve */;
 reg [2:0] color_mode_reg;
 
 reg [15:0] ds_slot_id_reg;
@@ -251,24 +227,27 @@ reg [31:0] timer_counter;
 reg        timer_enable;
 reg        timer_irq_pending;
 assign timer_irq = timer_irq_pending & timer_enable;
+assign uart_rx_irq = !uart_rx_empty;  // IRQ when UART RX FIFO has data
 
 // Triple-buffered framebuffer
 localparam FB_ADDR_0 = 25'h0000000;
 localparam FB_ADDR_1 = 25'h0080000;
 localparam FB_ADDR_2 = 25'h0100000;
+localparam TERM_FB_ADDR = 25'h0180000;  // 0x10300000 — dedicated terminal FB
 reg [1:0] fb_display_idx;
 reg [1:0] fb_ready_idx;
 reg fb_swap_pending;
+reg term_fb_active;  // 1=scanout reads terminal FB, 0=app triple-buffered FB
 
 // VRR swap hold: skip N vsyncs before presenting a queued frame
 reg [3:0] vrr_swap_hold;     // firmware-written: vsyncs to skip per swap
 reg [3:0] vrr_hold_counter;  // counts down to 0 then swaps
 
-wire [24:0] fb_display_addr_reg = (fb_display_idx == 2'd0) ? FB_ADDR_0 :
-                                   (fb_display_idx == 2'd1) ? FB_ADDR_1 :
-                                                              FB_ADDR_2;
+wire [24:0] fb_app_addr = (fb_display_idx == 2'd0) ? FB_ADDR_0 :
+                           (fb_display_idx == 2'd1) ? FB_ADDR_1 :
+                                                      FB_ADDR_2;
+wire [24:0] fb_display_addr_reg = term_fb_active ? TERM_FB_ADDR : fb_app_addr;
 
-assign display_mode = display_mode_reg;
 assign color_mode = color_mode_reg;
 assign fb_display_addr = fb_display_addr_reg;
 
@@ -342,11 +321,11 @@ reg [2:0] ds_err_latched;
 always @(posedge clk) begin
     if (reset) begin
         cycle_counter <= 0;
-        display_mode_reg <= 0;
         color_mode_reg <= 0;
         fb_display_idx <= 2'd0;
         fb_ready_idx <= 2'd0;
         fb_swap_pending <= 1'b0;
+        term_fb_active <= 1'b1;  // terminal FB visible by default at boot
         vrr_swap_hold <= 4'd0;
         vrr_hold_counter <= 4'd0;
         pal_wr <= 0;
@@ -381,6 +360,7 @@ always @(posedge clk) begin
         mix_voice_sel <= 0;
         mix_voice_wdata <= 0;
         mix_enable <= 0;
+        mix_irq_clear_wr <= 0;
         timer_period <= 0;
         timer_counter <= 0;
         timer_enable <= 0;
@@ -393,6 +373,7 @@ always @(posedge clk) begin
         pal_wr <= 0;
         save_dt_commit <= 0;
         mix_voice_wr <= 0;
+        mix_irq_clear_wr <= 0;
 
         // Hardware timer countdown
         if (timer_enable && timer_period != 0) begin
@@ -436,7 +417,7 @@ always @(posedge clk) begin
 
         if (sysreg_wr_fire) begin
             case (req_addr[7:2])
-                6'b000011: display_mode_reg <= req_wdata[1:0];
+                6'b000011: term_fb_active <= req_wdata[0];  // TERM_FB_CTRL
                 6'b011100: color_mode_reg <= req_wdata[2:0];  // offset 0x70
                 6'b000110: if (req_wdata[0]) begin
                     fb_ready_idx <= req_wdata[2:1];
@@ -514,44 +495,60 @@ always @(posedge clk) begin
                 end
 
 
-                // Hardware mixer registers (0xC0-0xD8)
+                // Hardware mixer registers (0xC0-0xF8)
                 6'b110000: mix_voice_sel <= req_wdata[4:0];        // MIX_VOICE_SEL (0xC0)
                 6'b110001: begin                                    // MIX_VOICE_ADDR (0xC4)
                     mix_voice_wr <= 1;
-                    mix_voice_field <= 3'd0;
+                    mix_voice_field <= 4'd0;
                     mix_voice_wdata <= req_wdata;
                 end
                 6'b110010: begin                                    // MIX_VOICE_LEN (0xC8)
                     mix_voice_wr <= 1;
-                    mix_voice_field <= 3'd1;
+                    mix_voice_field <= 4'd1;
                     mix_voice_wdata <= req_wdata;
                 end
                 6'b110011: begin                                    // MIX_VOICE_RATE (0xCC)
                     mix_voice_wr <= 1;
-                    mix_voice_field <= 3'd2;
+                    mix_voice_field <= 4'd2;
                     mix_voice_wdata <= req_wdata;
                 end
                 6'b110100: begin                                    // MIX_VOICE_CTRL (0xD0)
                     mix_voice_wr <= 1;
-                    mix_voice_field <= 3'd3;
+                    mix_voice_field <= 4'd3;
                     mix_voice_wdata <= req_wdata;
                 end
                 6'b110101: mix_enable <= req_wdata[0];              // MIX_CTRL (0xD4)
                 6'b110110: begin                                    // MIX_VOICE_VOL_LR (0xD8)
                     mix_voice_wr <= 1;
-                    mix_voice_field <= 3'd6;
+                    mix_voice_field <= 4'd6;
                     mix_voice_wdata <= req_wdata;
                 end
                 6'b111001: begin                                    // MIX_VOICE_LOOP_END (0xE4)
                     mix_voice_wr <= 1;
-                    mix_voice_field <= 3'd7;
+                    mix_voice_field <= 4'd7;
                     mix_voice_wdata <= req_wdata;
                 end
                 6'b111010: begin                                    // MIX_VOICE_POS_WR (0xE8)
                     mix_voice_wr <= 1;
-                    mix_voice_field <= 3'd4;
+                    mix_voice_field <= 4'd4;
                     mix_voice_wdata <= req_wdata;
                 end
+                6'b111011: begin                                    // MIX_VOICE_LOOP_START (0xEC)
+                    mix_voice_wr <= 1;
+                    mix_voice_field <= 4'd8;
+                    mix_voice_wdata <= req_wdata;
+                end
+                6'b111100: begin                                    // MIX_VOICE_VOL_TARGET (0xF0)
+                    mix_voice_wr <= 1;
+                    mix_voice_field <= 4'd9;
+                    mix_voice_wdata <= req_wdata;
+                end
+                6'b111101: begin                                    // MIX_VOICE_VOL_RATE (0xF4)
+                    mix_voice_wr <= 1;
+                    mix_voice_field <= 4'd10;
+                    mix_voice_wdata <= req_wdata;
+                end
+                6'b111110: mix_irq_clear_wr <= 1;                   // MIX_IRQ_CLEAR (0xF8) W1C
 
                 6'b110111: vrr_v_total <= req_wdata[9:0];          // VRR_V_TOTAL (0xDC)
                 6'b111000: vrr_swap_hold <= req_wdata[3:0];        // VRR_SWAP_HOLD (0xE0)
@@ -582,7 +579,7 @@ always @(*) begin
         6'b000000: sysreg_rdata = {30'b0, dataslot_allcomplete_s, 1'b1};
         6'b000001: sysreg_rdata = cycle_counter[31:0];
         6'b000010: sysreg_rdata = cycle_counter[63:32];
-        6'b000011: sysreg_rdata = {30'b0, display_mode_reg};
+        6'b000011: sysreg_rdata = {31'b0, term_fb_active};  // TERM_FB_CTRL
         6'b011100: sysreg_rdata = {29'b0, color_mode_reg};
         6'b000100: sysreg_rdata = {7'b0, fb_display_addr_reg};
         6'b000101: sysreg_rdata = {30'b0, fb_display_idx};
@@ -615,6 +612,7 @@ always @(*) begin
         6'b110100: sysreg_rdata = {10'b0, mix_voice_pos};           // MIX_VOICE_POS read (0xD0)
         6'b110101: sysreg_rdata = {31'b0, mix_enable};              // MIX_CTRL (0xD4)
         6'b110110: sysreg_rdata = {27'b0, mix_active_count};        // MIX_STATUS (0xD8)
+        6'b111110: sysreg_rdata = mix_irq_pending;                   // MIX_IRQ_PENDING (0xF8)
         6'b110111: sysreg_rdata = {22'b0, vrr_v_total};             // VRR_V_TOTAL (0xDC)
         6'b111000: sysreg_rdata = {28'b0, vrr_swap_hold};           // VRR_SWAP_HOLD (0xE0)
         // Datatable slot size query (0x90): bit 31 = valid, bits 30:0 = data
@@ -705,7 +703,7 @@ reg [7:0]  burst_count;
 
 // Region flags (latched on accept)
 reg reg_ram;
-reg reg_term;
+// reg_term removed — terminal in software
 reg reg_sysreg;
 reg reg_audio;
 reg reg_link;
@@ -714,8 +712,7 @@ reg reg_uart;
 
 wire beat_is_last = (burst_count == burst_len);
 
-// Terminal pending flag
-wire term_pending = (state == S_TERM);
+// Terminal moved to software (S_TERM state unused)
 
 // BRAM address mux (32KB: 13-bit word address = [14:2])
 wire [12:0] bram_next_word = req_addr[14:2] + 13'd1;
@@ -746,7 +743,6 @@ assign ram_wren = (state == S_BRAM_WR) && (|req_wstrb);
 // Region decode helpers
 // ============================================
 wire ar_dec_ram    = (ar_addr[31:18] == 14'b0);  // 192KB: 0x00000-0x2FFFF
-wire ar_dec_term   = (ar_addr[31:13] == 19'h10000);
 wire ar_dec_sysreg = (ar_addr[31:8]  == 24'h400000);
 wire ar_dec_audio  = (ar_addr[31:24] == 8'h4C);
 wire ar_dec_link   = (ar_addr[31:24] == 8'h4D);
@@ -754,7 +750,6 @@ wire ar_dec_opm    = (ar_addr[31:24] == 8'h4E);
 wire ar_dec_uart   = (ar_addr[31:24] == 8'h4F);
 
 wire aw_dec_ram    = (aw_addr[31:18] == 14'b0);  // 192KB: 0x00000-0x2FFFF
-wire aw_dec_term   = (aw_addr[31:13] == 19'h10000);
 wire aw_dec_sysreg = (aw_addr[31:8]  == 24'h400000);
 wire aw_dec_audio  = (aw_addr[31:24] == 8'h4C);
 wire aw_dec_link   = (aw_addr[31:24] == 8'h4D);
@@ -790,7 +785,6 @@ always @(posedge clk or posedge reset) begin
         burst_count <= 0;
 
         reg_ram <= 0;
-        reg_term <= 0;
         reg_sysreg <= 0;
         reg_audio <= 0;
         reg_link <= 0;
@@ -844,7 +838,6 @@ always @(posedge clk or posedge reset) begin
                 burst_count <= 0;
 
                 reg_ram    <= ar_dec_ram;
-                reg_term   <= ar_dec_term;
                 reg_sysreg <= ar_dec_sysreg;
                 reg_audio  <= ar_dec_audio;
                 reg_link   <= ar_dec_link;
@@ -853,8 +846,6 @@ always @(posedge clk or posedge reset) begin
 
                 if (ar_dec_ram)
                     state <= S_BRAM_RD;
-                else if (ar_dec_term)
-                    state <= S_TERM;
                 else begin
                     state <= S_PERIPH_RD;
                     if (ar_dec_link) begin
@@ -871,7 +862,6 @@ always @(posedge clk or posedge reset) begin
                 burst_count <= 0;
 
                 reg_ram    <= aw_dec_ram;
-                reg_term   <= aw_dec_term;
                 reg_sysreg <= aw_dec_sysreg;
                 reg_audio  <= aw_dec_audio;
                 reg_link   <= aw_dec_link;
@@ -885,8 +875,6 @@ always @(posedge clk or posedge reset) begin
 
                     if (aw_dec_ram)
                         state <= S_BRAM_WR;
-                    else if (aw_dec_term)
-                        state <= S_TERM;
                     else if (aw_dec_opm && |s_axi_wstrb) begin
                         // OPL write: issue request and wait for ack
                         opl_write_req <= 1;
@@ -976,35 +964,7 @@ always @(posedge clk or posedge reset) begin
             end
         end
 
-        // ============================================
-        // Terminal: wait for ready
-        // ============================================
-        S_TERM: begin
-            if (term_mem_ready) begin
-                if (is_write) begin
-                    burst_count <= burst_count + 1;
-                    if (beat_is_last) begin
-                        s_axi_bvalid <= 1;
-                        s_axi_bresp <= 2'b00;
-                        state <= S_IDLE;
-                    end else begin
-                        req_addr <= req_addr + 32'd4;
-                        state <= S_WR_NEXT;
-                    end
-                end else begin
-                    s_axi_rvalid <= 1;
-                    s_axi_rdata <= term_mem_rdata;
-                    s_axi_rresp <= 2'b00;
-                    s_axi_rlast <= beat_is_last;
-                    burst_count <= burst_count + 1;
-                    if (beat_is_last) begin
-                        state <= S_IDLE;
-                    end else begin
-                        req_addr <= req_addr + 32'd4;
-                    end
-                end
-            end
-        end
+        // S_TERM removed — terminal now rendered in software
 
         // ============================================
         // WR_NEXT: Accept next W beat
@@ -1017,8 +977,6 @@ always @(posedge clk or posedge reset) begin
 
                 if (reg_ram) begin
                     state <= S_BRAM_WR;
-                end else if (reg_term) begin
-                    state <= S_TERM;
                 end else if (reg_opm && |s_axi_wstrb) begin
                     opl_write_req <= 1;
                     opl_write_addr <= req_addr[3:2];

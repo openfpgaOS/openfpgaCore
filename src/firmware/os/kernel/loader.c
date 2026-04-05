@@ -137,10 +137,17 @@ static void process_rela(uintptr_t load_base, Elf32_Rela *rela, uint32_t count) 
     }
 }
 
+extern long of_file_size(uint32_t slot_id);
+
 int elf_load(uint32_t slot_id, uintptr_t load_addr,
              elf_load_result_t *result) {
     Elf32_Ehdr ehdr;
     int rc;
+
+    /* Check if slot has data before attempting DMA.
+     * An empty slot causes the bridge to never ACK, hanging forever. */
+    if (of_file_size(slot_id) <= 0)
+        return -1;
 
     /* Read ELF header */
     rc = elf_read(slot_id, 0, &ehdr, sizeof(ehdr));
