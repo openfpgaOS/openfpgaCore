@@ -120,9 +120,15 @@ static int io_cache_evict(void) {
     return best;
 }
 
-/* Get pointer to entry N's CRAM1 data (uncached — guarantees coherency after DMA) */
+/* Get pointer to entry N's CRAM1 data.
+ * Uses the CACHED alias — after io_cache_fill invalidates the D-cache,
+ * the first read causes a cache miss and fetches fresh DMA data from CRAM1.
+ * Subsequent reads within the same block hit the D-cache (fast).
+ * NOTE: the "uncached" 0x39 alias may still be cached if the PMA is not
+ * configured to bypass — using the cached alias with explicit invalidation
+ * is the only safe approach. */
 static inline const uint8_t *io_cache_data(int entry) {
-    return (const uint8_t *)(IO_CACHE_UNCACHED + entry * IO_CACHE_BLOCK_SIZE);
+    return (const uint8_t *)(IO_CACHE_CACHED + entry * IO_CACHE_BLOCK_SIZE);
 }
 
 /* Fill a cache entry: bridge DMA → CRAM1, invalidate D-cache, done.

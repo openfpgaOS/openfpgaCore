@@ -175,12 +175,6 @@ uint8_t *of_video_flip(void) {
     /* VRR disabled for debugging — TODO re-enable after fixing */
     /* vrr_update(); */
 
-    /* Wait for any pending swap to complete before queuing a new one.
-     * Without this, rapid flips (menus, loading screens) degenerate the
-     * triple buffer — buf_ready is always set, so we recycle the pending
-     * buffer instead of rotating through all three. */
-    of_video_wait_flip();
-
     /* Refresh our view of hardware state */
     sync_swap_state();
 

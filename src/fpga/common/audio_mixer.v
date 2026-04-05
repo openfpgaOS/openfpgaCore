@@ -310,7 +310,7 @@ always @(posedge clk) begin
             vtbl_a_data <= voice_wdata;
             if (voice_field == VTBL_CTRL)
                 voice_active[voice_sel] <= voice_wdata[0];
-            if (voice_field == VTBL_CTRL && voice_wdata[0]) begin
+            if (voice_field == VTBL_CTRL && voice_wdata[0] && !voice_active[voice_sel]) begin
                 cpu_clear_pos <= 1;
                 cpu_clear_base <= {voice_sel, 4'd0};
             end

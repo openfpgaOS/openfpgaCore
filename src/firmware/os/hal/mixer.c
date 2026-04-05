@@ -14,6 +14,7 @@
 
 #include "mixer.h"
 #include "regs.h"
+#include "cache.h"
 
 #define MIXER_MAX_VOICES     32
 #define MIXER_OUTPUT_RATE    48000
@@ -32,14 +33,22 @@ static uint32_t voice_active_mask;
  * the shadow first, then calls write_ctrl(). */
 static uint8_t ctrl_shadow[MIXER_MAX_VOICES];
 
+/* Sync software voice tracking with hardware voice-end events */
+static void sync_voice_mask(void) {
+    uint32_t ended = MIX_IRQ_PENDING;
+    if (ended) {
+        MIX_IRQ_CLEAR = ended;
+        voice_active_mask &= ~ended;
+    }
+}
+
 static inline int voice_valid(int voice) {
     return voice >= 0 && voice < MIXER_MAX_VOICES &&
            (voice_active_mask & (1u << voice));
 }
 
-static void write_ctrl(int voice, int vol_8bit) {
-    int hwvol = (vol_8bit >> 4) & 0xF;
-    MIX_VOICE_CTRL = (hwvol << 4) | ctrl_shadow[voice];
+static void write_ctrl(int voice) {
+    MIX_VOICE_CTRL = ctrl_shadow[voice];
 }
 
 void of_mixer_init(int max_voices, int output_rate)
@@ -75,6 +84,9 @@ int of_mixer_play(const uint8_t *pcm_s16, uint32_t sample_count,
     if (!mixer_initialized || !pcm_s16 || sample_count == 0)
         return -1;
 
+    /* Reclaim voices that hardware finished playing */
+    sync_voice_mask();
+
     int voice = -1;
     for (int i = 0; i < MIXER_SCRATCH_VOICE; i++) {
         if (!(voice_active_mask & (1u << i))) {
@@ -98,7 +110,7 @@ int of_mixer_play(const uint8_t *pcm_s16, uint32_t sample_count,
     MIX_VOICE_VOL_RATE = 1;  /* default: fast ramp for subsequent changes */
 
     ctrl_shadow[voice] = CTRL_ACTIVE | CTRL_FMT16;
-    write_ctrl(voice, v);
+    write_ctrl(voice);
 
     voice_active_mask |= (1u << voice);
     return voice;
@@ -130,7 +142,6 @@ void of_mixer_set_volume(int voice, int volume)
     int v = volume & 0xFF;
     MIX_VOICE_SEL = voice;
     MIX_VOICE_VOL_TARGET = (v << 8) | v;
-    write_ctrl(voice, v);
 }
 
 void of_mixer_set_pan(int voice, int pan)
@@ -140,13 +151,13 @@ void of_mixer_set_pan(int voice, int pan)
     int vol_r = pan;
     MIX_VOICE_SEL = voice;
     MIX_VOICE_VOL_TARGET = ((vol_r & 0xFF) << 8) | (vol_l & 0xFF);
-    write_ctrl(voice, (vol_l + vol_r) >> 1);
 }
 
 int of_mixer_voice_active(int voice)
 {
     if (voice < 0 || voice >= MIXER_MAX_VOICES)
         return 0;
+    sync_voice_mask();
     return (voice_active_mask & (1u << voice)) ? 1 : 0;
 }
 
@@ -170,7 +181,7 @@ void of_mixer_set_loop(int voice, int loop_start, int loop_end)
             MIX_VOICE_LOOP_END = loop_end;
         ctrl_shadow[voice] |= CTRL_LOOP;
     }
-    write_ctrl(voice, 0xFF);
+    write_ctrl(voice);
 }
 
 void of_mixer_set_rate(int voice, int sample_rate_hz)
@@ -203,7 +214,7 @@ void of_mixer_set_bidi(int voice, int enable)
         ctrl_shadow[voice] |= CTRL_BIDI;
     else
         ctrl_shadow[voice] &= ~CTRL_BIDI;
-    write_ctrl(voice, 0xFF);
+    write_ctrl(voice);
 }
 
 int of_mixer_get_position(int voice)
@@ -259,8 +270,11 @@ uint32_t of_mixer_poll_ended(void)
  * Sample memory bump allocator
  * ====================================================================== */
 
-#define SAMPLE_POOL_BASE  (CRAM1_BASE + 0x00400000)
-#define SAMPLE_POOL_END   (CRAM1_BASE + 0x00F00000)
+/* Return uncached alias so app writes go directly to CRAM1 PSRAM,
+ * visible to the hardware mixer without needing a D-cache flush.
+ * The cached alias (0x31) has unreliable flush behavior. */
+#define SAMPLE_POOL_BASE  (CRAM1_UNCACHED + 0x00400000)
+#define SAMPLE_POOL_END   (CRAM1_UNCACHED + 0x00F00000)
 
 static uint32_t sample_pool_head = SAMPLE_POOL_BASE;
 
