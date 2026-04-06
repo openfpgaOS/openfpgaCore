@@ -145,7 +145,16 @@ module axi_periph_slave (
     input  wire        dt_query_valid,
 
     // VRR (Variable Refresh Rate) — CPU-writable V_TOTAL for video timing
-    output reg  [9:0]  vrr_v_total
+    output reg  [9:0]  vrr_v_total,
+
+    // SNAC shifter / GPIO interface to cart pins
+    // Pin mapping: [0]=OUT1/bank1[6], [1]=OUT2/bank1[7],
+    //   [2]=IO3/bank0[4], [3]=IN7/bank0[5], [4]=bank0[6],
+    //   [5]=IN4/bank0[7], [6]=IO5/pin30, [7]=IO6/pin31
+    output wire [7:0]  snac_pin_out,      // output values to cart pins
+    output wire [7:0]  snac_pin_dir,      // direction: 1=output, 0=input
+    input  wire [7:0]  snac_pin_in,       // input values from cart pins
+    output wire        snac_enable        // 1=SNAC mode (cart pins from CPU), 0=UART mode
 );
 
 wire reset = ~reset_n;
@@ -159,7 +168,84 @@ wire [31:0] aw_addr = s_axi_awaddr;
 // Mixer IRQ clear data passthrough
 assign mix_irq_clear_data = req_wdata;
 
-// Tile/sprite engines removed — registers 0x80-0xAC are no-ops
+// ============================================
+// SNAC Shifter + GPIO (registers 0xA0-0xAC)
+// ============================================
+// SNAC_CTRL (0xA0): [0]=start, [5:1]=bit_count-1, [6]=latch_en, [7]=snac_en, [9:8]=mode
+// SNAC_DIV  (0xA4): [15:0]=clock divider half-period
+// SNAC_DATA (0xA8): write=TX data, read=RX data
+// SNAC_GPIO (0xAC): write=[7:0]=pin out, [15:8]=pin dir; read=[7:0]=pin in
+reg        snac_en_reg;
+reg [1:0]  snac_mode_reg;
+reg [15:0] snac_div_reg;
+reg [31:0] snac_tx_reg;
+reg [7:0]  snac_gpio_out_reg;
+reg [7:0]  snac_gpio_dir_reg;   // 0=input, 1=output; bits [1:0] always output
+reg        snac_start_pulse;
+
+wire        snac_busy;
+wire        snac_done;
+wire [31:0] snac_rx_data;
+wire        snac_shift_clk;
+wire        snac_shift_mosi;
+wire        snac_shift_latch;
+
+// Shifter MISO inputs — directly from synced pin inputs
+wire snac_miso_a = snac_pin_in[2];  // IO3/bank0[4] (Config A: DATA)
+wire snac_miso_b = snac_pin_in[5];  // IN4/bank0[7] (Config B: DAT)
+
+// Shift parameters latched from SNAC_CTRL write
+reg [4:0] snac_bit_count_reg;
+reg       snac_latch_en_reg;
+
+snac_shifter snac_shift (
+    .clk(clk),
+    .reset_n(reset_n),
+    .start(snac_start_pulse),
+    .bit_count(snac_bit_count_reg),
+    .latch_en(snac_latch_en_reg),
+    .mode(snac_mode_reg),
+    .clk_div(snac_div_reg),
+    .tx_data(snac_tx_reg),
+    .rx_data(snac_rx_data),
+    .busy(snac_busy),
+    .done(snac_done),
+    .shift_clk(snac_shift_clk),
+    .shift_mosi(snac_shift_mosi),
+    .shift_latch(snac_shift_latch),
+    .miso_a(snac_miso_a),
+    .miso_b(snac_miso_b)
+);
+
+// SNAC pin output mux: shifter overrides GPIO when busy
+// Config A: shifter drives [0]=CLK, [1]=LATCH
+// Config B: shifter drives [2]=CLK, [7]=CMD(MOSI)
+reg [7:0] snac_pin_out_mux;
+reg [7:0] snac_pin_dir_mux;
+
+always @(*) begin
+    snac_pin_out_mux = snac_gpio_out_reg;
+    snac_pin_dir_mux = snac_gpio_dir_reg | 8'b00000011; // bits [1:0] always output
+    if (snac_busy) begin
+        if (snac_mode_reg == 2'b00) begin
+            // Config A: CLK on [0], LATCH on [1]
+            snac_pin_out_mux[0] = snac_shift_clk;
+            snac_pin_out_mux[1] = snac_shift_latch;
+            snac_pin_dir_mux[0] = 1'b1;
+            snac_pin_dir_mux[1] = 1'b1;
+        end else begin
+            // Config B: CLK on [2](IO3/bank0[4]), MOSI on [7](IO6/pin31)
+            snac_pin_out_mux[2] = snac_shift_clk;
+            snac_pin_out_mux[7] = snac_shift_mosi;
+            snac_pin_dir_mux[2] = 1'b1;
+            snac_pin_dir_mux[7] = 1'b1;
+        end
+    end
+end
+
+assign snac_pin_out = snac_pin_out_mux;
+assign snac_pin_dir = snac_pin_dir_mux;
+assign snac_enable  = snac_en_reg;
 
 // ============================================
 // BRAM (32KB = 8192 x 32-bit words)
@@ -234,14 +320,42 @@ reg        timer_irq_pending;
 assign timer_irq = timer_irq_pending & timer_enable;
 assign uart_rx_irq = !uart_rx_empty;  // IRQ when UART RX FIFO has data
 
-// External IRQ mask — bits[2:0] = {mix_voice_end, link, uart_rx}
-reg [2:0] irq_mask;
+// External IRQ mask — bits[3:0] = {vsync, mix_voice_end, link, uart_rx}
+reg [3:0] irq_mask;
+reg vsync_irq_pending;
 assign ext_irq = (uart_rx_irq & irq_mask[0]) |
                  (link_irq & irq_mask[1]) |
-                 (mix_voice_end_irq & irq_mask[2]);
+                 (mix_voice_end_irq & irq_mask[2]) |
+                 (vsync_irq_pending & irq_mask[3]);
 
 // Triple-buffered framebuffer
 // 25-bit SDRAM half-word addresses (16-bit bus, byte addr = word addr × 2)
+// Hardware feature flags — read-only, derived from variant defines at synthesis time
+// Bit  0: Mixer (32-voice PCM)       Bit  4: GPU 2D (reserved)
+// Bit  1: OPL3 (YMF262)              Bit  5: GPU 3D (reserved)
+// Bit  2: Link cable                  Bit  6: MIDI (reserved)
+// Bit  3: Analogizer                  Bit  7: WiFi (reserved)
+// Bit  8: FPU (RISC-V F ext)         Bit  9: Save slots
+localparam [31:0] HW_FEATURES =
+`ifdef EXCLUDE_MIXER
+    32'h0000_0000
+`else
+    32'h0000_0001
+`endif
+    |
+`ifdef EXCLUDE_OPL3
+    32'h0000_0000
+`else
+    32'h0000_0002
+`endif
+    |
+`ifdef EXCLUDE_LINK
+    32'h0000_0000
+`else
+    32'h0000_0004
+`endif
+    | 32'h0000_0308;  // Analogizer(3) + FPU(8) + Save slots(9) — always present
+
 localparam FB_ADDR_0 = 25'h0000000;     // byte 0x000000 → CPU 0x10000000
 localparam FB_ADDR_1 = 25'h0080000;     // byte 0x100000 → CPU 0x10100000
 localparam FB_ADDR_2 = 25'h0100000;     // byte 0x200000 → CPU 0x10200000
@@ -377,16 +491,27 @@ always @(posedge clk) begin
         timer_counter <= 0;
         timer_enable <= 0;
         timer_irq_pending <= 0;
-        irq_mask <= 3'b0;
+        irq_mask <= 4'b0;
+        vsync_irq_pending <= 0;
         dt_query_addr <= 0;
         dt_query_toggle <= 0;
         vrr_v_total <= 10'd262;
+        snac_en_reg <= 0;
+        snac_mode_reg <= 0;
+        snac_div_reg <= 16'd499;  // default: 100KHz at 100MHz
+        snac_tx_reg <= 0;
+        snac_gpio_out_reg <= 8'hFF; // idle high
+        snac_gpio_dir_reg <= 8'h03; // bits [1:0] output by default (OUT1, OUT2)
+        snac_start_pulse <= 0;
+        snac_bit_count_reg <= 0;
+        snac_latch_en_reg <= 0;
     end else begin
         cycle_counter <= cycle_counter + 1;
         pal_wr <= 0;
         save_dt_commit <= 0;
         mix_voice_wr <= 0;
         mix_irq_clear_wr <= 0;
+        snac_start_pulse <= 0;
 
         // Hardware timer countdown
         if (timer_enable && timer_period != 0) begin
@@ -484,8 +609,23 @@ always @(posedge clk) begin
                     save_dt_commit <= 1;
                 end
 
-                // Tile/sprite registers (0x80-0xAC) — no-ops, engines removed
-                // Writes to these addresses are silently ignored.
+                // SNAC Shifter + GPIO registers (0xA0-0xAC)
+                6'b101000: begin  // SNAC_CTRL (0xA0)
+                    snac_en_reg   <= req_wdata[7];
+                    snac_mode_reg <= req_wdata[9:8];
+                    // Start a shift if bit[0] set and shifter not busy
+                    if (req_wdata[0] && !snac_busy) begin
+                        snac_start_pulse  <= 1;
+                        snac_bit_count_reg <= req_wdata[5:1];
+                        snac_latch_en_reg  <= req_wdata[6];
+                    end
+                end
+                6'b101001: snac_div_reg <= req_wdata[15:0];   // SNAC_DIV (0xA4)
+                6'b101010: snac_tx_reg  <= req_wdata;          // SNAC_DATA (0xA8)
+                6'b101011: begin                                // SNAC_GPIO (0xAC)
+                    snac_gpio_out_reg <= req_wdata[7:0];
+                    snac_gpio_dir_reg <= req_wdata[15:8];
+                end
 
                 6'b101100: begin  // SYS_SHUTDOWN (0xB0)
                     shutdown_ack <= req_wdata[0];
@@ -562,7 +702,8 @@ always @(posedge clk) begin
                     mix_voice_wdata <= req_wdata;
                 end
                 6'b111110: mix_irq_clear_wr <= 1;                   // MIX_IRQ_CLEAR (0xF8) W1C
-                6'b111111: irq_mask <= req_wdata[2:0];             // IRQ_MASK (0xFC)
+                6'b100111: vsync_irq_pending <= 0;                    // VSYNC_IRQ_CLEAR (0x9C) W1C
+                6'b111111: irq_mask <= req_wdata[3:0];             // IRQ_MASK (0xFC)
 
                 6'b110111: vrr_v_total <= req_wdata[9:0];          // VRR_V_TOTAL (0xDC)
                 6'b111000: vrr_swap_hold <= req_wdata[3:0];        // VRR_SWAP_HOLD (0xE0)
@@ -570,6 +711,10 @@ always @(posedge clk) begin
                 default: ;
             endcase
         end
+
+        // Vsync IRQ — set on every vsync rising edge, cleared by W1C at 0x9C
+        if (vsync_rising)
+            vsync_irq_pending <= 1'b1;
 
         // Triple buffer vsync swap (with VRR hold support)
         if (fb_swap_pending && vsync_rising) begin
@@ -615,7 +760,11 @@ always @(*) begin
         6'b011000: sysreg_rdata = cont2_joy_s;
         6'b011001: sysreg_rdata = {16'b0, cont2_trig_s};
         6'b011010: sysreg_rdata = app_id;
-        // Tile/sprite registers (readback) — return 0, engines removed
+        // SNAC Shifter + GPIO registers (0xA0-0xAC)
+        6'b101000: sysreg_rdata = {22'b0, snac_mode_reg, snac_en_reg, 6'b0, snac_busy};  // SNAC_CTRL
+        6'b101001: sysreg_rdata = {16'b0, snac_div_reg};                                   // SNAC_DIV
+        6'b101010: sysreg_rdata = snac_rx_data;                                             // SNAC_DATA (RX)
+        6'b101011: sysreg_rdata = {16'b0, snac_pin_dir, snac_pin_in};                      // SNAC_GPIO (read: input + dir)
         // Shutdown handshake
         6'b101100: sysreg_rdata = {31'b0, shutdown_pending};  // SYS_SHUTDOWN (0xB0)
         // Hardware timer (0xB4-0xBC)
@@ -627,7 +776,7 @@ always @(*) begin
         6'b110101: sysreg_rdata = {31'b0, mix_enable};              // MIX_CTRL (0xD4)
         6'b110110: sysreg_rdata = {27'b0, mix_active_count};        // MIX_STATUS (0xD8)
         6'b111110: sysreg_rdata = mix_irq_pending;                   // MIX_IRQ_PENDING (0xF8)
-        6'b111111: sysreg_rdata = {29'b0, irq_mask};               // IRQ_MASK (0xFC)
+        6'b111111: sysreg_rdata = {28'b0, irq_mask};               // IRQ_MASK (0xFC)
         6'b110111: sysreg_rdata = {22'b0, vrr_v_total};             // VRR_V_TOTAL (0xDC)
         6'b111000: sysreg_rdata = {28'b0, vrr_swap_hold};           // VRR_SWAP_HOLD (0xE0)
         // Datatable slot size query (0x90): bit 31 = valid, bits 30:0 = data
@@ -643,6 +792,8 @@ always @(*) begin
             ds_ack_seen_low,        // bit 1
             ds_cmd_active           // bit 0
         };
+        6'b100110: sysreg_rdata = HW_FEATURES;                    // HW_FEATURES (0x98)
+        6'b100111: sysreg_rdata = {31'b0, vsync_irq_pending};   // VSYNC_IRQ_PENDING (0x9C)
         default: sysreg_rdata = 32'h0;
     endcase
 end

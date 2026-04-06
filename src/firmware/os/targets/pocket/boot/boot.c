@@ -119,13 +119,13 @@ static void flush_icache(void) {
 }
 
 /* Flush D-cache by conflict eviction.
- * Reads through 128KB from the top of SDRAM to force all dirty lines
- * out of the 2-way set-associative cache (1024 sets x 2 ways x 64B = 128KB). */
+ * Reads through 64KB from the top of SDRAM to force all dirty lines
+ * out of the 4-way set-associative cache (256 sets x 4 ways x 64B = 64KB). */
 __attribute__((section(".text.boot")))
 static void flush_dcache(void) {
     __asm__ volatile("fence" ::: "memory");
-    volatile char *p = (volatile char *)(SDRAM_BASE + SDRAM_SIZE - 131072);
-    for (uint32_t i = 0; i < 131072; i += 64)
+    volatile char *p = (volatile char *)(SDRAM_BASE + SDRAM_SIZE - 65536);
+    for (uint32_t i = 0; i < 65536; i += 64)
         (void)p[i];
     __asm__ volatile("fence" ::: "memory");
 }

@@ -26,7 +26,7 @@
 /* App BRAM region — available for app hot code after OS sections.
  * Top 512 bytes reserved for trap handler stack frame. */
 #define APP_BRAM_BASE       0x00002000
-#define APP_BRAM_END        0x00007C00  /* Libc table at 0x7C00, trap stack at 0x7E00 */
+#define APP_BRAM_END        0x00007800  /* Caps at 0x7800, libc at 0x7C00, trap stack at 0x7E00 */
 #define APP_BRAM_SIZE       (APP_BRAM_END - APP_BRAM_BASE)
 
 #define SDRAM_BASE          0x10000000
@@ -153,7 +153,58 @@
 /* Misc */
 #define SYS_GAME_ID         REG32(SYSREG_BASE + 0x68)
 
-/* Registers 0x80-0xAC reserved (tile/sprite engines removed) */
+/* SNAC Shifter + GPIO (0xA0-0xAC) — software-driven SNAC controller interface
+ * Replaces hardware protocol FSMs with a generic SPI/shift register master.
+ * CPU bit-bangs controller protocols (NES/SNES/PSX/PCE) via this interface. */
+#define SNAC_CTRL           REG32(SYSREG_BASE + 0xA0)
+#define SNAC_DIV            REG32(SYSREG_BASE + 0xA4)
+#define SNAC_DATA           REG32(SYSREG_BASE + 0xA8)
+#define SNAC_GPIO           REG32(SYSREG_BASE + 0xAC)
+
+/* SNAC_CTRL write bits */
+#define   SNAC_CTRL_START       (1 << 0)    /* Start shift (self-clearing) */
+#define   SNAC_CTRL_BITCNT_SHIFT 1          /* bits [5:1] = bit_count - 1 */
+#define   SNAC_CTRL_LATCH       (1 << 6)    /* Pulse LATCH before shifting */
+#define   SNAC_CTRL_ENABLE      (1 << 7)    /* 1=SNAC mode, 0=UART mode */
+#define   SNAC_CTRL_MODE_SHIFT  8           /* bits [9:8]: 00=CfgA, 01=CfgB */
+#define   SNAC_CTRL_MODE_A      (0 << 8)    /* Config A: NES/SNES/DB15 */
+#define   SNAC_CTRL_MODE_B      (1 << 8)    /* Config B: PSX */
+/* SNAC_CTRL read bits */
+#define   SNAC_CTRL_BUSY        (1 << 0)    /* Shift in progress */
+
+/* SNAC_DIV: [15:0] = half-period in CPU clocks.
+ * Shift clock freq = CPU_FREQ / (2 * (div + 1))
+ * e.g., div=499 → 100 KHz, div=199 → 250 KHz, div=49 → 1 MHz */
+
+/* SNAC_DATA: write = TX shift-out data, read = RX shifted-in data */
+
+/* SNAC_GPIO write: [7:0]=pin output values, [15:8]=pin directions (1=out)
+ * SNAC_GPIO read:  [7:0]=pin input values,  [15:8]=pin directions
+ * Pin mapping:
+ *   [0] = OUT1  (bank1[6]) — always output
+ *   [1] = OUT2  (bank1[7]) — always output
+ *   [2] = IO3   (bank0[4]) — CfgA: DATA_IN, CfgB: CLK_OUT
+ *   [3] = IN7   (bank0[5]) — CfgA: DATA4,   CfgB: IRQ10
+ *   [4] =        bank0[6]  — CfgB: ACK_IN
+ *   [5] = IN4   (bank0[7]) — CfgA: DATA2,   CfgB: DAT_IN
+ *   [6] = IO5   (pin30)    — CfgA: CLK2,    CfgB: ACK_IN
+ *   [7] = IO6   (pin31)    — CfgA: DATA3,   CfgB: CMD_OUT
+ */
+#define   SNAC_PIN_OUT1     (1 << 0)
+#define   SNAC_PIN_OUT2     (1 << 1)
+#define   SNAC_PIN_IO3      (1 << 2)
+#define   SNAC_PIN_IN7      (1 << 3)
+#define   SNAC_PIN_BK06     (1 << 4)
+#define   SNAC_PIN_IN4      (1 << 5)
+#define   SNAC_PIN_IO5      (1 << 6)
+#define   SNAC_PIN_IO6      (1 << 7)
+/* Direction bits in [15:8] — same mapping, shifted left 8 */
+#define   SNAC_DIR_IO3      (1 << 10)
+#define   SNAC_DIR_IN7      (1 << 11)
+#define   SNAC_DIR_BK06     (1 << 12)
+#define   SNAC_DIR_IN4      (1 << 13)
+#define   SNAC_DIR_IO5      (1 << 14)
+#define   SNAC_DIR_IO6      (1 << 15)
 
 /* Shutdown handshake (0xB0) */
 #define SYS_SHUTDOWN        REG32(SYSREG_BASE + 0xB0)
@@ -185,11 +236,15 @@
 #define MIX_IRQ_PENDING      REG32(SYSREG_BASE + 0xF8)  /* Read: voice-end bitmask */
 #define MIX_IRQ_CLEAR        REG32(SYSREG_BASE + 0xF8)  /* Write: W1C */
 
-/* External IRQ mask (0xFC) — bits[2:0] = {mix_voice_end, link, uart_rx} enable */
+/* Vsync IRQ pending (0x9C) — read: bit 0 = pending, write: W1C clears */
+#define VSYNC_IRQ_PENDING    REG32(SYSREG_BASE + 0x9C)
+
+/* External IRQ mask (0xFC) — bits[3:0] = {vsync, mix_voice_end, link, uart_rx} enable */
 #define IRQ_MASK             REG32(SYSREG_BASE + 0xFC)
 #define   IRQ_MASK_UART_RX   (1 << 0)
 #define   IRQ_MASK_LINK      (1 << 1)
 #define   IRQ_MASK_MIX_VOICE (1 << 2)
+#define   IRQ_MASK_VSYNC     (1 << 3)
 
 /* VRR (Variable Refresh Rate) — dynamic V_TOTAL for video timing (0xDC)
  * Write: bits[9:0] = V_TOTAL line count (262–375, default 262)
@@ -207,6 +262,19 @@
 
 /* Bridge debug (0x94) — internal latch state for DMA diagnostics */
 #define DS_DEBUG            REG32(SYSREG_BASE + 0x94)
+
+/* Hardware features (0x98) — read-only, set at synthesis time in RTL */
+#define HW_FEATURES         REG32(SYSREG_BASE + 0x98)
+#define   HW_FEAT_MIXER       (1 << 0)
+#define   HW_FEAT_OPL3        (1 << 1)
+#define   HW_FEAT_LINK        (1 << 2)
+#define   HW_FEAT_ANALOGIZER  (1 << 3)
+#define   HW_FEAT_GPU_2D      (1 << 4)
+#define   HW_FEAT_GPU_3D      (1 << 5)
+#define   HW_FEAT_MIDI        (1 << 6)
+#define   HW_FEAT_WIFI        (1 << 7)
+#define   HW_FEAT_FPU         (1 << 8)
+#define   HW_FEAT_SAVE_SLOTS  (1 << 9)
 
 
 /* ======================================================================
@@ -406,6 +474,7 @@ static inline uint32_t cpu_to_bridge(void *addr) {
 #define OF_REG_CONT2_JOY            CONT2_JOY
 #define OF_REG_CONT2_TRIG           CONT2_TRIG
 #define OF_REG_SYS_GAME_ID          SYS_GAME_ID
+#define OF_REG_HW_FEATURES          HW_FEATURES
 
 /* Audio registers */
 #define OF_REG_AUDIO_SAMPLE         AUDIO_SAMPLE

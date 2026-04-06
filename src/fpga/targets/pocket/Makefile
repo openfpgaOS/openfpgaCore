@@ -94,17 +94,43 @@ firmware:
 	@printf "$(C_OK)[fw] Done$(C_RESET)\n"
 
 # ── FPGA compile ─────────────────────────────────────────────────────
+
+# Variant defines — set via VARIANT_DEFS for core variant builds.
+# Example: VARIANT_DEFS="EXCLUDE_OPL3 EXCLUDE_LINK" makes a lite build.
+VARIANT_DEFS ?=
+VERILOG_MACROS = $(foreach d,$(VARIANT_DEFS),--verilog_macro="$(d)")
+
 compile:
 	@printf "$(C_HEAD)[fpga]$(C_RESET) Compiling (this takes a while)...\n"
 	@rm -rf db incremental_db
-	@quartus_sh --flow compile $(PROJECT)
+	@quartus_sh --flow compile $(PROJECT) $(VERILOG_MACROS)
 	@printf "$(C_OK)[fpga] Done$(C_RESET)\n"
 
 # Incremental compile (keeps Quartus cache)
 build:
 	@printf "$(C_HEAD)[fpga]$(C_RESET) Incremental compile...\n"
-	@quartus_sh --flow compile $(PROJECT)
+	@quartus_sh --flow compile $(PROJECT) $(VERILOG_MACROS)
 	@printf "$(C_OK)[fpga] Done$(C_RESET)\n"
+
+# ── Core variant builds ──────────────────────────────────────────────
+# variant-full:  All hardware (mixer + OPL3 + link + analogizer)
+# variant-lite:  Mixer only (no OPL3/link — smaller, better timing)
+# variant-3d:    Mixer + future GPU3D (no OPL3 — ALMs freed for rasterizer)
+
+variant-full: firmware
+	@printf "$(C_HEAD)[variant]$(C_RESET) Building FULL variant...\n"
+	@rm -rf db incremental_db
+	@quartus_sh --flow compile $(PROJECT)
+
+variant-lite: firmware
+	@printf "$(C_HEAD)[variant]$(C_RESET) Building LITE variant (no OPL3, no link)...\n"
+	@rm -rf db incremental_db
+	@quartus_sh --flow compile $(PROJECT) --verilog_macro="EXCLUDE_OPL3" --verilog_macro="EXCLUDE_LINK"
+
+variant-3d: firmware
+	@printf "$(C_HEAD)[variant]$(C_RESET) Building 3D variant (no OPL3)...\n"
+	@rm -rf db incremental_db
+	@quartus_sh --flow compile $(PROJECT) --verilog_macro="EXCLUDE_OPL3"
 
 # ── Test ─────────────────────────────────────────────────────────────
 test:

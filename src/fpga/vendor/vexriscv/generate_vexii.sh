@@ -4,12 +4,12 @@
 # RV32IMAFCB + Zicbom (cache block management)
 #
 # Current VexiiRiscv_Full.v config:
-#   I-cache: 32KB (256 sets x 2 ways x 64B line, 2-way set-associative)
-#   D-cache: 128KB (1024 sets x 2 ways x 64B line, write-back, 2-way set-associative)
+#   I-cache: 64KB (512 sets x 2 ways x 64B line, 2-way set-associative)
+#   D-cache: 64KB (256 sets x 4 ways x 64B line, write-back, 4-way set-associative)
 #   Branch: BTB + GShare + RAS
 #   FPU: single-precision (F extension)
 #   Cache mgmt: Zicbom enabled in hardware
-#   Store buffer: 2 slots, 32 ops
+#   Store buffer: 4 slots, 32 ops
 #
 # Prerequisites: java, sbt
 # Usage: ./generate_vexii.sh
@@ -31,9 +31,9 @@ sbt "runMain vexiiriscv.Generate \
       --xlen=32 \
       --with-rvm --with-rva --with-rvf --with-rvc \
       --with-rvZcbm \
-      --with-fetch-l1 --fetch-l1-sets=1024 --fetch-l1-ways=1 --fetch-l1-refill-count=2 \
+      --with-fetch-l1 --fetch-l1-sets=512 --fetch-l1-ways=2 --fetch-l1-refill-count=2 \
       --fetch-l1-hardware-prefetch=nl --fetch-axi4 \
-      --with-lsu-l1 --lsu-l1-sets=1024 --lsu-l1-ways=2 \
+      --with-lsu-l1 --lsu-l1-sets=256 --lsu-l1-ways=4 \
       --lsu-l1-refill-count=2 --lsu-l1-writeback-count=2 \
       --lsu-l1-store-buffer-slots=4 --lsu-l1-store-buffer-ops=32 \
       --lsu-l1-axi4 \

@@ -7,6 +7,8 @@
 #include "syscall.h"
 #include "loader.h"
 #include "libc_table.h"
+#include "caps_table.h"
+#include "services_table.h"
 #include <stddef.h>
 #include <string.h>
 
@@ -112,6 +114,18 @@ void os_main(void) {
     libc_table_init();
 
     of_term_puts("  Libc init......... ");
+    status_ok();
+
+    /* Populate capability descriptor for the app */
+    caps_table_init(app.bss_end);
+
+    of_term_puts("  Caps init......... ");
+    status_ok();
+
+    /* Populate OS services table (direct function pointers) */
+    services_table_init();
+
+    of_term_puts("  Services init..... ");
     status_ok();
 
     of_timer_delay_ms(300);

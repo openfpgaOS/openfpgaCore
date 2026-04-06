@@ -188,11 +188,14 @@ int of_file_read(uint32_t slot_id, uint32_t slot_offset,
  * entirely, so cached reads would return stale data. */
 int of_file_read_raw(uint32_t slot_id, uint32_t slot_offset,
                       uint32_t bridge_addr, uint32_t length) {
-    /* Wait for bridge idle — the dispatch guard silently drops
-     * commands if target_ack_s is still high from a previous op. */
+    /* Wait for bridge fully idle — READY (cmd FSM idle) AND WR_IDLE
+     * (all write data drained).  Both must be true before issuing a
+     * new command, otherwise the dispatch guard may silently drop it
+     * if target_ack_s hasn't fully deasserted through the CDC. */
     {
         uint32_t wait = DMA_TIMEOUT;
-        while (!(DS_STATUS & DS_STATUS_READY)) {
+        while ((DS_STATUS & (DS_STATUS_READY | DS_STATUS_WR_IDLE))
+               != (DS_STATUS_READY | DS_STATUS_WR_IDLE)) {
             if (--wait == 0) return OF_ERR_TIMEOUT;
         }
     }
@@ -201,8 +204,22 @@ int of_file_read_raw(uint32_t slot_id, uint32_t slot_offset,
     DS_SLOT_OFFSET = slot_offset;
     DS_BRIDGE_ADDR = bridge_addr;
     DS_LENGTH      = length;
+    fence();
     DS_COMMAND     = DS_CMD_READ;
 
+    /* Verify command was accepted — if the dispatch guard dropped it,
+     * ds_cmd_active won't be set and ACK will never come.  Retry once. */
+    fence();
+    for (int i = 0; i < 100; i++) {
+        uint32_t st = DS_STATUS;
+        if (st & DS_STATUS_ACK)  goto accepted;  /* ACK already */
+        if (!(st & DS_STATUS_READY)) goto accepted;  /* cmd_active set → READY cleared */
+    }
+    /* Command likely dropped — retry */
+    fence();
+    DS_COMMAND = DS_CMD_READ;
+
+accepted:
     return file_wait_complete();
 }
 
@@ -381,4 +398,83 @@ int of_file_read_chunked(uint32_t slot_id, uint32_t slot_offset,
     }
 
     return 0;
+}
+
+/* ======================================================================
+ * Async file read — non-blocking DMA with callback
+ * ====================================================================== */
+
+static struct {
+    int      active;
+    int      token;
+    uint32_t length;
+    void    *dest;
+    void   (*callback)(int token, int result);
+} async_state;
+
+static int async_token_counter;
+
+int of_file_read_async(uint32_t slot_id, uint32_t slot_offset,
+                       void *dest, uint32_t length,
+                       void (*callback)(int token, int result)) {
+    if (async_state.active)
+        return OF_ERR_BUSY;
+
+    uint32_t bridge_addr = cpu_to_bridge(dest);
+
+    /* Pre-invalidate cache for the DMA target */
+    of_cache_inval_range(dest, length);
+
+    /* Fire the DMA */
+    DS_SLOT_ID     = slot_id;
+    DS_SLOT_OFFSET = slot_offset;
+    DS_BRIDGE_ADDR = bridge_addr;
+    DS_LENGTH      = length;
+    DS_COMMAND     = DS_CMD_READ;
+
+    /* Record pending state */
+    int token = async_token_counter++;
+    async_state.active   = 1;
+    async_state.token    = token;
+    async_state.length   = length;
+    async_state.dest     = dest;
+    async_state.callback = callback;
+
+    return token;
+}
+
+int of_file_async_poll(void) {
+    if (!async_state.active)
+        return 0;
+
+    uint32_t st = DS_STATUS;
+
+    /* Still waiting for ACK or DONE */
+    if (!(st & DS_STATUS_DONE))
+        return 0;
+
+    /* Check error */
+    uint32_t err = (st & DS_STATUS_ERR_MASK) >> DS_STATUS_ERR_SHIFT;
+    int result = err ? -((int)err) : 0;
+
+    /* Wait for bridge idle + writes drained (fast, non-blocking spin) */
+    while (!(DS_STATUS & DS_STATUS_READY)) {}
+    while (!(DS_STATUS & DS_STATUS_WR_IDLE)) {}
+
+    /* Post-invalidate cache */
+    of_cache_inval_range(async_state.dest, async_state.length);
+
+    /* Clear state before callback (callback may start another read) */
+    int token = async_state.token;
+    void (*cb)(int, int) = async_state.callback;
+    async_state.active = 0;
+
+    if (cb)
+        cb(token, result);
+
+    return 1;
+}
+
+int of_file_async_busy(void) {
+    return async_state.active;
 }

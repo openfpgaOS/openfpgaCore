@@ -82,6 +82,7 @@ TARGET_SRCS = $(TARGET_DIR)/video.c \
               $(TARGET_DIR)/save.c \
               $(TARGET_DIR)/file.c \
               $(TARGET_DIR)/analogizer.c \
+              $(TARGET_DIR)/snac.c \
               $(TARGET_DIR)/terminal.c \
               $(TARGET_DIR)/timer.c \
               $(TARGET_DIR)/link.c \
@@ -92,6 +93,8 @@ KERNEL_SRCS = $(KERNEL_DIR)/main.c \
               $(KERNEL_DIR)/loader.c \
               $(KERNEL_DIR)/misaligned.c \
               $(KERNEL_DIR)/libc_table.c \
+              $(KERNEL_DIR)/caps_table.c \
+              $(KERNEL_DIR)/services_table.c \
               $(KERNEL_DIR)/of_malloc.c \
               $(KERNEL_DIR)/irq.c
 
@@ -174,6 +177,16 @@ $(KERNEL_DIR)/syscall.o: $(KERNEL_DIR)/syscall.c
 # libc_table.c without LTO — writes to a hardcoded address (OF_LIBC_ADDR)
 # via cast, so LTO sees no observable side effects and strips the function.
 $(KERNEL_DIR)/libc_table.o: $(KERNEL_DIR)/libc_table.c
+	$(CC) $(filter-out -flto,$(OS_CFLAGS)) -c -o $@ $<
+
+# caps_table.c without LTO — writes to a hardcoded address (OF_CAPS_ADDR)
+# via cast, so LTO sees no observable side effects and strips the function.
+$(KERNEL_DIR)/caps_table.o: $(KERNEL_DIR)/caps_table.c
+	$(CC) $(filter-out -flto,$(OS_CFLAGS)) -c -o $@ $<
+
+# services_table.c without LTO — writes to a hardcoded address (OF_SVC_ADDR)
+# via cast, so LTO sees no observable side effects and strips the function.
+$(KERNEL_DIR)/services_table.o: $(KERNEL_DIR)/services_table.c
 	$(CC) $(filter-out -flto,$(OS_CFLAGS)) -c -o $@ $<
 
 # irq.c without LTO — called from assembly trap handler via function pointer.

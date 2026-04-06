@@ -11,8 +11,11 @@
 #define IRQ_SRC_UART_RX     (1 << 0)
 #define IRQ_SRC_LINK_RX     (1 << 1)
 #define IRQ_SRC_MIX_VOICE   (1 << 2)
+#define IRQ_SRC_VSYNC       (1 << 3)
 
 void of_irq_init(void);
 void of_irq_register_external(void (*cb)(uint32_t source));
+void of_irq_register_vsync(void (*cb)(void));
+void of_irq_register_mixer_end(void (*cb)(uint32_t ended_mask));
 
 #endif /* OFOS_IRQ_H */

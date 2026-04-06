@@ -836,6 +836,7 @@ set_global_assignment -name VERILOG_FILE ../../common/audio_mixer.v
 set_global_assignment -name VERILOG_FILE ../../common/audio_output.v
 set_global_assignment -name VERILOG_FILE ../../common/axi_bridge_master.v
 set_global_assignment -name VERILOG_FILE ../../common/axi_periph_slave.v
+set_global_assignment -name VERILOG_FILE ../../common/snac_shifter.v
 set_global_assignment -name VERILOG_FILE ../../common/axi_psram_slave.v
 set_global_assignment -name VERILOG_FILE ../../common/axi_sdram_arbiter.v
 set_global_assignment -name VERILOG_FILE ../../common/axi_sdram_slave.v
@@ -856,4 +857,4 @@ set_global_assignment -name VERILOG_FILE ../../vendor/vexriscv/VexiiRiscv_Full.v
 set_global_assignment -name VERILOG_FILE ../../vendor/opl3/afifo.v
 set_global_assignment -name VERILOG_FILE mf_pllram_133.v
 set_global_assignment -name SDC_FILE core_constraints.sdc
-set_global_assignment -name SEED 1
+set_global_assignment -name SEED 3

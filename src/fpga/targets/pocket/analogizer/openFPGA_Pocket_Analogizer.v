@@ -92,82 +92,36 @@ module openFPGA_Pocket_Analogizer #(parameter MASTER_CLK_FREQ=50_000_000, parame
 	input wire ce_pix,
 	input wire scandoubler, //logic for disable/enable the scandoubler
 	input wire [2:0] fx, //0 disable, 1 scanlines 25%, 2 scanlines 50%, 3 scanlines 75%, 4 hq2x
-	//SNAC interface
-    input wire conf_AB,              //0 conf. A(default), 1 conf. B (see graph above)
-    input wire [4:0] game_cont_type, //0-15 Conf. A, 16-31 Conf. B
-    output wire [15:0] p1_btn_state,
-	output wire [31:0] p1_joy_state,
-    output wire [15:0] p2_btn_state,
-	output wire [31:0] p2_joy_state,
-    output wire [15:0] p3_btn_state,
-    output wire [15:0] p4_btn_state,
-	//PSX rumble interface joy1, joy2
-    input [1:0] i_VIB_SW1,  //  Vibration SW  VIB_SW[0] Small Moter OFF 0:ON  1:
-                                //VIB_SW[1] Bic Moter   OFF 0:ON  1(Dualshook Only)
-	input [7:0] i_VIB_DAT1,  //  Vibration(Bic Moter)Data   8'H00-8'HFF (Dualshook Only)
-    input [1:0] i_VIB_SW2,
-	input [7:0] i_VIB_DAT2, 
-	// 
-	output wire busy, 
-	//Pocket Analogizer IO interface to the cartridge port
+	// SNAC cart pin pass-through (driven by CPU SNAC shifter/GPIO)
+	input wire [7:4] snac_bank0_out,     // CPU-driven output values for bank0[7:4]
+	input wire       snac_bank0_dir,     // 1=output, 0=input (whole nibble)
+	input wire [7:6] snac_bank1_76_out,  // CPU-driven output values for bank1[7:6]
+	input wire       snac_pin30_out,
+	input wire       snac_pin30_dir,
+	input wire       snac_pin31_out,
+	input wire       snac_pin31_dir,
+	//Pocket Analogizer IO interface — video output on bank1-3
 	inout   wire    [7:0]   cart_tran_bank2,
 	output  wire            cart_tran_bank2_dir,
 	inout   wire    [7:0]   cart_tran_bank3,
 	output  wire            cart_tran_bank3_dir,
 	inout   wire    [7:0]   cart_tran_bank1,
 	output  wire            cart_tran_bank1_dir,
-	inout   wire    [7:4]   cart_tran_bank0,
-	output  wire            cart_tran_bank0_dir,
-	inout   wire            cart_tran_pin30,
-	output  wire            cart_tran_pin30_dir,
-	output  wire            cart_pin30_pwroff_reset,
-	inout   wire            cart_tran_pin31,
-	output  wire            cart_tran_pin31_dir,
     //debug
 	output wire [3:0] DBG_TX,
     output wire o_stb
 );
-	wire [7:4] CART_BK0_OUT ;
-    wire [7:4] CART_BK0_IN ;
-    wire CART_BK0_DIR ; 
-    wire [7:6] CART_BK1_OUT_P76 ;
-    wire CART_PIN30_OUT ;
-    wire CART_PIN30_IN ;
-    wire CART_PIN30_DIR ; 
-    wire CART_PIN31_OUT ;
-    wire CART_PIN31_IN ;
-    wire CART_PIN31_DIR ;
+	// SNAC hardware FSMs removed — pins now driven by CPU SNAC shifter/GPIO
+	wire [7:4] CART_BK0_OUT    = snac_bank0_out;
+	wire       CART_BK0_DIR    = snac_bank0_dir;
+	wire [7:6] CART_BK1_OUT_P76 = snac_bank1_76_out;
+	wire       CART_PIN30_OUT  = snac_pin30_out;
+	wire       CART_PIN30_DIR  = snac_pin30_dir;
+	wire       CART_PIN31_OUT  = snac_pin31_out;
+	wire       CART_PIN31_DIR  = snac_pin31_dir;
 
-	openFPGA_Pocket_Analogizer_SNAC #(.MASTER_CLK_FREQ(MASTER_CLK_FREQ)) snac
-	(
-		.i_clk(i_clk),
-		.i_rst(i_rst),
-		.conf_AB(conf_AB),              //0 conf. A(default), 1 conf. B (see graph above)
-		.game_cont_type(game_cont_type), //0-15 Conf. A, 16-31 Conf. B
-		//.game_cont_sample_rate(game_cont_sample_rate), //0 compatibility mode (slowest), 1 normal mode, 2 fast mode, 3 superfast mode
-		.p1_btn_state(p1_btn_state),
-		.p1_joy_state(p1_joy_state),
-		.p2_btn_state(p2_btn_state),
-		.p2_joy_state(p2_joy_state),
-		.p3_btn_state(p3_btn_state),
-		.p4_btn_state(p4_btn_state),
-		.i_VIB_SW1(i_VIB_SW1), .i_VIB_DAT1(i_VIB_DAT1), .i_VIB_SW2(i_VIB_SW2), .i_VIB_DAT2(i_VIB_DAT2), 
-		.busy(busy),    
-		//SNAC Pocket cartridge port interface (see graph above)   
-		.CART_BK0_OUT(CART_BK0_OUT),
-		.CART_BK0_IN(CART_BK0_IN),
-		.CART_BK0_DIR(CART_BK0_DIR), 
-		.CART_BK1_OUT_P76(CART_BK1_OUT_P76),
-		.CART_PIN30_OUT(CART_PIN30_OUT),
-		.CART_PIN30_IN(CART_PIN30_IN),
-		.CART_PIN30_DIR(CART_PIN30_DIR), 
-		.CART_PIN31_OUT(CART_PIN31_OUT),
-		.CART_PIN31_IN(CART_PIN31_IN),
-		.CART_PIN31_DIR(CART_PIN31_DIR),
-		//debug
-		.DBG_TX(DBG_TX),
-    	.o_stb(o_stb)
-	); 
+	assign DBG_TX = 4'b0;
+	assign o_stb  = 1'b0;
 
 	//Choose type of analog video type of signal
 	reg [5:0] Rout, Gout, Bout /* synthesis preserve */;
@@ -354,27 +308,15 @@ scanlines_analogizer #(0) VGA_scanlines
 );
 
 
-	//infer tri-state buffers for cartridge data signals
-	//BK0
-	assign cart_tran_bank0         = i_rst | ~i_ena ? 4'hf : ((CART_BK0_DIR) ? CART_BK0_OUT : 4'hZ);     //on reset state set ouput value to 4'hf
-	assign cart_tran_bank0_dir     = i_rst | ~i_ena ? 1'b1 : CART_BK0_DIR;                              //on reset state set pin dir to output
-	assign CART_BK0_IN             = cart_tran_bank0;
-	//BK3
-	assign cart_tran_bank3         = i_rst | ~i_ena ? 8'hzz : {Rout[5:0],HsyncOut,VsyncOut};                          //on reset state set ouput value to 8'hZ
-	assign cart_tran_bank3_dir     = i_rst | ~i_ena ? 1'b0  : 1'b1;                                     //on reset state set pin dir to input
-	//BK2
-	assign cart_tran_bank2         = i_rst | ~i_ena ? 8'hzz : {Bout[0],BLANKnOut,Gout[5:0]};                          //on reset state set ouput value to 8'hZ
-	assign cart_tran_bank2_dir     = i_rst | ~i_ena ? 1'b0  : 1'b1;                                     //on reset state set pin dir to input
-	//BK1
-	assign cart_tran_bank1         = i_rst | ~i_ena ? 8'hzz : {CART_BK1_OUT_P76,video_clk,Bout[5:1]};      //on reset state set ouput value to 8'hZ
-	assign cart_tran_bank1_dir     = i_rst | ~i_ena ? 1'b0  : 1'b1;                                     //on reset state set pin dir to input
-	//PIN30
-	assign cart_tran_pin30         = i_rst | ~i_ena ? 1'bz : ((CART_PIN30_DIR) ? CART_PIN30_OUT : 1'bZ); //on reset state set ouput value to 4'hf
-	assign cart_tran_pin30_dir     = i_rst | ~i_ena ? 1'b0 : CART_PIN30_DIR;                              //on reset state set pin dir to output
-	assign CART_PIN30_IN           = cart_tran_pin30;
-	assign cart_pin30_pwroff_reset = i_rst | ~i_ena ? 1'b0 : 1'b1;                                      //1'b1 (GPIO USE)
-	//PIN31
-	assign cart_tran_pin31         = i_rst | ~i_ena ? 1'bz : ((CART_PIN31_DIR) ? CART_PIN31_OUT : 1'bZ); //on reset state set ouput value to 4'hf
-	assign cart_tran_pin31_dir     = i_rst | ~i_ena ? 1'b0 : CART_PIN31_DIR;                            //on reset state set pin dir to input
-	assign CART_PIN31_IN           = cart_tran_pin31;
+	// Tri-state buffers for video output cart pins (bank1-3)
+	// Bank0, pin30, pin31 now driven by core_top SNAC/UART mux.
+	//BK3 — Video: R[5:0], Hsync, Vsync
+	assign cart_tran_bank3         = i_rst | ~i_ena ? 8'hzz : {Rout[5:0],HsyncOut,VsyncOut};
+	assign cart_tran_bank3_dir     = i_rst | ~i_ena ? 1'b0  : 1'b1;
+	//BK2 — Video: B[0], /BLANK, G[5:0]
+	assign cart_tran_bank2         = i_rst | ~i_ena ? 8'hzz : {Bout[0],BLANKnOut,Gout[5:0]};
+	assign cart_tran_bank2_dir     = i_rst | ~i_ena ? 1'b0  : 1'b1;
+	//BK1 — Video: [5:0]=B[5:1]+clk, [7:6]=SNAC OUT1/OUT2
+	assign cart_tran_bank1         = i_rst | ~i_ena ? 8'hzz : {CART_BK1_OUT_P76,video_clk,Bout[5:1]};
+	assign cart_tran_bank1_dir     = i_rst | ~i_ena ? 1'b0  : 1'b1;
 endmodule

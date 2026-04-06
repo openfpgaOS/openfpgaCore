@@ -236,105 +236,16 @@ end
     wire [23:0] video_rgb_core;
     assign video_rgb_core = (pocket_blank_screen) ? 24'h000000: vidout_rgb;
 
-    //switch between Analogizer SNAC and Pocket Controls for P1-P4 (P3,P4 when uses PCEngine Multitap)
-    wire [15:0] p1_btn, p2_btn;
-    wire [31:0] p1_joy, p2_joy;
-
-    reg [31:0] p1_controls, p2_controls;
-    reg [31:0] p1_joypad, p2_joypad;
-    reg [15:0] p1_trigger, p2_trigger;
-
-    always @(posedge clk_74a) begin
-        if((snac_cont_type == 5'h0) || (analogizer_ena == 1'b0)) begin //SNAC is disabled
-            p1_controls <= cont1_key;
-            p1_joypad   <= cont1_joy;
-            p1_trigger  <= cont1_trig;
-            p2_controls <= cont2_key;
-            p2_joypad   <= cont2_joy;
-            p2_trigger  <= cont2_trig;
-        end
-        else begin
-        case(snac_cont_assignment[1:0])
-        2'h0: begin  //SNAC P1 -> Pocket P1
-            p1_controls <= p1_btn;
-            p1_joypad   <= p1_joy;
-            p1_trigger  <= 15'h00;
-
-            p2_controls <= cont2_key;
-            p2_joypad   <= cont2_joy;
-            p2_trigger  <= cont2_trig;
-            end
-        2'h1: begin  //SNAC P1 -> Pocket P2
-            p1_controls <= cont1_key;
-            p1_joypad   <= cont1_joy;
-            p1_trigger  <= cont1_trig;
-
-            p2_controls <= p1_btn;
-            p2_joypad   <= p2_joy;
-            p2_trigger  <= 15'h00;
-            end
-        2'h2: begin //SNAC P1 -> Pocket P1, SNAC P2 -> Pocket P2
-            p1_controls <= p1_btn;
-            p1_joypad <= p1_joy;
-            p1_trigger <= 15'h00;
-            p2_controls <= p2_btn;
-            p2_joypad <= p2_joy;
-            p2_trigger <= 15'h00;
-            end
-        2'h3: begin //SNAC P1 -> Pocket P2, SNAC P2 -> Pocket P1
-            p1_controls <= p2_btn;
-            p1_joypad <= p2_joy;
-            p1_trigger <= 15'h00;
-            p2_controls <= p1_btn;
-            p2_joypad <= p1_joy;
-            p2_trigger <= 15'h00;
-            end
-        default: begin 
-            p1_controls <= cont1_key;
-            p1_joypad   <= cont1_joy;
-            p1_trigger  <= cont1_trig;
-
-            p2_controls <= cont2_key;
-            p2_joypad   <= cont2_joy;
-            p2_trigger  <= cont2_trig;
-            end
-        endcase
-        end
-    end
-
-    wire [15:0] p1_btn_CK, p2_btn_CK;
-    wire [31:0] p1_joy_CK, p2_joy_CK;
-    synch_3 #(
-    .WIDTH(16)
-    ) p1b_s (
-        p1_btn_CK,
-        p1_btn,
-        clk_74a
-    );
-
-    synch_3 #(
-        .WIDTH(16)
-    ) p2b_s (
-        p2_btn_CK,
-        p2_btn,
-        clk_74a
-    );
-
-    synch_3 #(
-    .WIDTH(32)
-    ) p3b_s (
-        p1_joy_CK,
-        p1_joy,
-        clk_74a
-    );
-        
-    synch_3 #(
-        .WIDTH(32)
-    ) p4b_s (
-        p2_joy_CK,
-        p2_joy,
-        clk_74a
-    );
+    // Controller inputs: SNAC mux removed — firmware handles SNAC→Pocket mapping.
+    // APF Pocket controllers pass through directly to the CPU.
+    // When SNAC is active, firmware reads the SNAC shifter and writes
+    // parsed button data into its own input state (of_input_states[]).
+    wire [31:0] p1_controls = cont1_key;
+    wire [31:0] p1_joypad   = cont1_joy;
+    wire [15:0] p1_trigger  = cont1_trig;
+    wire [31:0] p2_controls = cont2_key;
+    wire [31:0] p2_joypad   = cont2_joy;
+    wire [15:0] p2_trigger  = cont2_trig;
 
     reg [2:0] fx /* synthesis preserve */;
     always @(posedge clk_core_49152) begin
@@ -407,29 +318,69 @@ wire crt_blankn;
 assign crt_csync = ~(HSync ^ VSync);
 assign crt_blankn   = ~(crt_hblank | crt_vblank);
 
-// Analogizer/UART cart pin mux: SNAC owns bank0 + pin31 when active, else UART
-wire [7:4] ana_cart_bank0;
-wire       ana_cart_bank0_dir;
-wire       ana_cart_pin31;
-wire       ana_cart_pin31_dir;
-wire       snac_active = analogizer_ena && (snac_cont_type != 5'h0);
+// ============================================================
+// SNAC GPIO / UART cart pin mux
+// CPU-controlled via snac_enable from axi_periph_slave.
+// When snac_enable=1: cart pins driven by CPU SNAC shifter/GPIO
+// When snac_enable=0: bank0=UART TX, pin31=UART RX (high-Z input)
+// ============================================================
+wire [7:0] snac_pin_out;
+wire [7:0] snac_pin_dir;
+wire [7:0] snac_pin_in;
+wire       snac_enable;
 
-assign cart_tran_bank0     = snac_active ? ana_cart_bank0 :
-                             {uart_tx_serial, uart_tx_serial, uart_tx_serial, uart_tx_serial};
-assign cart_tran_bank0_dir = snac_active ? ana_cart_bank0_dir : 1'b1;
-assign cart_tran_pin31     = snac_active ? ana_cart_pin31 : 1'bZ;
-assign cart_tran_pin31_dir = snac_active ? ana_cart_pin31_dir : 1'b0;
+// Map SNAC GPIO bits to physical cart pin names:
+//   [0]=OUT1/bank1[6], [1]=OUT2/bank1[7],
+//   [2]=IO3/bank0[4],  [3]=IN7/bank0[5],
+//   [4]=bank0[6],      [5]=IN4/bank0[7],
+//   [6]=IO5/pin30,     [7]=IO6/pin31
 
+// SNAC pin readback: cart pin inputs fed back to periph_slave
+assign snac_pin_in = {
+    cart_tran_pin31,        // [7] IO6/pin31
+    cart_tran_pin30,        // [6] IO5/pin30
+    cart_tran_bank0[7],     // [5] IN4
+    cart_tran_bank0[6],     // [4]
+    cart_tran_bank0[5],     // [3] IN7
+    cart_tran_bank0[4],     // [2] IO3
+    1'b0,                   // [1] OUT2 readback (output-only, no read)
+    1'b0                    // [0] OUT1 readback (output-only, no read)
+};
+
+// Cart pin assignments: SNAC vs UART mode
+// bank0[7:4]: SNAC GPIO outputs or UART TX (replicated)
+assign cart_tran_bank0     = snac_enable ?
+    {snac_pin_out[5], snac_pin_out[4], snac_pin_out[3], snac_pin_out[2]} :
+    {uart_tx_serial, uart_tx_serial, uart_tx_serial, uart_tx_serial};
+assign cart_tran_bank0_dir = snac_enable ?
+    (snac_pin_dir[5] | snac_pin_dir[4] | snac_pin_dir[3] | snac_pin_dir[2]) :
+    1'b1;  // UART TX is always output
+
+// pin31: SNAC GPIO or UART RX (high-Z input)
+assign cart_tran_pin31     = snac_enable ?
+    (snac_pin_dir[7] ? snac_pin_out[7] : 1'bZ) :
+    1'bZ;
+assign cart_tran_pin31_dir = snac_enable ? snac_pin_dir[7] : 1'b0;
+
+// pin30: always SNAC (not shared with UART)
+assign cart_tran_pin30     = snac_pin_dir[6] ? snac_pin_out[6] : 1'bZ;
+assign cart_tran_pin30_dir = snac_enable ? snac_pin_dir[6] : 1'b0;
+assign cart_pin30_pwroff_reset = snac_enable ? 1'b1 : 1'b0;
+
+// UART RX gating: when SNAC active, feed idle-high to UART RX to prevent garbage
+wire uart_rx_serial = snac_enable ? 1'b1 : cart_tran_pin31;
+
+// Analogizer: video output only — SNAC pins now driven by CPU through above mux
 openFPGA_Pocket_Analogizer #(
     .MASTER_CLK_FREQ(49_152_000),
     .LINE_LENGTH(640)
 ) analogizer (
-    .i_clk(clk_core_49152), //currently 50MHz
+    .i_clk(clk_core_49152),
     .i_rst(~reset_n),
     .i_ena(analogizer_ena),
-    // Video interface (active but directly from our pipeline)
+    // Video interface
     .video_clk(clk_vid),
-    .analog_video_type(analogizer_video_type),       // 0 RGBS
+    .analog_video_type(analogizer_video_type),
     .R(vidout_rgb[23:16]),
     .G(vidout_rgb[15:8]),
     .B(vidout_rgb[7:0]),
@@ -438,44 +389,27 @@ openFPGA_Pocket_Analogizer #(
     .BLANKn(crt_blankn),
     .Hsync(HSync),
     .Vsync(VSync),
-    .Csync(crt_csync ),
-    // Y/C encoder (unused)
+    .Csync(crt_csync),
     .CHROMA_PHASE_INC(CHROMA_PHASE_INC),
     .PALFLAG(PALFLAG),
-    // Scandoubler (unused)
     .ce_pix(1'b1),
     .scandoubler(1'b1),
-    .fx(fx), //0 disable, 1 scanlines 25%, 2 scanlines 50%, 3 scanlines 75%, 4 hq2x
-    // SNAC controller interface
-    .conf_AB(snac_cont_type >= 5'd16),  //0 conf. A(default), 1 conf. B (see graph above)
-    .game_cont_type(snac_cont_type),
-    .p1_btn_state(p1_btn_CK),
-    .p1_joy_state(p1_joy_CK),
-    .p2_btn_state(p2_btn_CK),
-    .p2_joy_state(p2_joy_CK),
-    .p3_btn_state(),
-    .p4_btn_state(),
-    // Rumble (unused)
-    .i_VIB_SW1(2'b0),
-    .i_VIB_DAT1(8'h0),
-    .i_VIB_SW2(2'b0),
-    .i_VIB_DAT2(8'h0),
-    // Status
-    .busy(),
-    // Cartridge port (directly driven by Analogizer)
+    .fx(fx),
+    // SNAC cart pin pass-through from CPU GPIO
+    .snac_bank0_out({snac_pin_out[5], snac_pin_out[4], snac_pin_out[3], snac_pin_out[2]}),
+    .snac_bank0_dir(snac_pin_dir[5] | snac_pin_dir[4] | snac_pin_dir[3] | snac_pin_dir[2]),
+    .snac_bank1_76_out({snac_pin_out[1], snac_pin_out[0]}),
+    .snac_pin30_out(snac_pin_out[6]),
+    .snac_pin30_dir(snac_pin_dir[6]),
+    .snac_pin31_out(snac_pin_out[7]),
+    .snac_pin31_dir(snac_pin_dir[7]),
+    // Cartridge port (video output on bank1-3, SNAC on bank0/pin30/pin31)
     .cart_tran_bank2(cart_tran_bank2),
     .cart_tran_bank2_dir(cart_tran_bank2_dir),
     .cart_tran_bank3(cart_tran_bank3),
     .cart_tran_bank3_dir(cart_tran_bank3_dir),
     .cart_tran_bank1(cart_tran_bank1),
     .cart_tran_bank1_dir(cart_tran_bank1_dir),
-    .cart_tran_bank0(ana_cart_bank0),
-    .cart_tran_bank0_dir(ana_cart_bank0_dir),
-    .cart_tran_pin30(cart_tran_pin30),
-    .cart_tran_pin30_dir(cart_tran_pin30_dir),
-    .cart_pin30_pwroff_reset(cart_pin30_pwroff_reset),
-    .cart_tran_pin31(ana_cart_pin31),
-    .cart_tran_pin31_dir(ana_cart_pin31_dir),
     // Debug
     .DBG_TX(),
     .o_stb()
@@ -650,7 +584,7 @@ uart_tx #(.CLKS_PER_BIT(45)) uart_tx_inst (
 
 uart_rx #(.CLKS_PER_BIT(45)) uart_rx_inst (
     .i_Clock(clk_cpu),
-    .i_Rx_Serial(cart_tran_pin31),  // DevKey Pin 31 = UART RX
+    .i_Rx_Serial(uart_rx_serial),  // Gated: idle-high when SNAC active
     .o_Rx_DV(uart_rx_dv),
     .o_Rx_Byte(uart_rx_byte)
 );
@@ -2186,7 +2120,12 @@ assign video_hs = vidout_hs;
         .dt_query_toggle(cpu_dt_query_toggle),
         .dt_query_data(cpu_dt_query_data),
         .dt_query_valid(cpu_dt_query_valid),
-        .vrr_v_total(vrr_v_total_cpu)
+        .vrr_v_total(vrr_v_total_cpu),
+        // SNAC shifter / GPIO
+        .snac_pin_out(snac_pin_out),
+        .snac_pin_dir(snac_pin_dir),
+        .snac_pin_in(snac_pin_in),
+        .snac_enable(snac_enable)
     );
 
     // DMA engine removed — apps use CPU memcpy instead
@@ -2542,6 +2481,7 @@ end
 //
 // Link MMIO peripheral
 //
+`ifndef EXCLUDE_LINK
 link_mmio #(
     .CLK_HZ(100000000),
     .SCK_HZ(256000),
@@ -2568,10 +2508,15 @@ link_mmio #(
     .link_sd_oe(link_sd_oe),
     .irq(link_irq)
 );
+`else
+assign link_reg_rdata = 32'b0;
+assign link_irq = 1'b0;
+`endif
 
 //
 // OPL3 hardware synthesizer (Greg Taylor's opl3_fpga)
 //
+`ifndef EXCLUDE_OPL3
 opl3_wrapper opl3 (
     .clk            (clk_cpu),
     .clk_opl        (clk_core_12288),
@@ -2583,6 +2528,11 @@ opl3_wrapper opl3 (
     .opl_audio_out      (opl_audio_out),
     .opl_sample_toggle  (opl_sample_toggle)
 );
+`else
+assign opl_ack = 1'b1;
+assign opl_audio_out = 16'b0;
+assign opl_sample_toggle = 1'b0;
+`endif
 
 //
 // Audio output (dcfifo + I2S) with OPL3 mixing
@@ -2626,6 +2576,7 @@ audio_output audio_out (
     .audio_dac    (audio_dac)
 );
 
+`ifndef EXCLUDE_MIXER
 audio_mixer mixer (
     .clk(clk_cpu), .reset_n(reset_n),
     .mixer_enable(mix_enable),
@@ -2648,6 +2599,16 @@ audio_mixer mixer (
     .voice_end_pending(mix_irq_pending),
     .voice_end_irq(mix_voice_end_irq)
 );
+`else
+assign mix_cram1_rd = 1'b0;
+assign mix_cram1_addr = 24'b0;
+assign mix_sample_wr = 1'b0;
+assign mix_sample_data = 16'b0;
+assign mix_active_count = 5'b0;
+assign mix_voice_pos = 22'b0;
+assign mix_irq_pending = 32'b0;
+assign mix_voice_end_irq = 1'b0;
+`endif
 
 
 ///////////////////////////////////////////////

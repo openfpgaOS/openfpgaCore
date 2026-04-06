@@ -65,4 +65,25 @@ void of_file_inval_cram(uint32_t bridge_addr, uint32_t length);
  * Returns 0 on success, <0 on error or empty slot. */
 int of_file_get_name(uint32_t slot_id, char *name_out, uint32_t name_max);
 
+/* ======================================================================
+ * Async file read — non-blocking DMA with callback on completion
+ * ====================================================================== */
+
+/* Start a non-blocking file read. Returns a token (>= 0) on success,
+ * or negative error if a read is already in flight.
+ * The callback is called with (token, bytes_read) when the DMA completes.
+ * Only one async read can be in flight at a time (bridge limitation).
+ * dest must be in CRAM1 (direct DMA target). */
+int of_file_read_async(uint32_t slot_id, uint32_t slot_offset,
+                       void *dest, uint32_t length,
+                       void (*callback)(int token, int result));
+
+/* Poll async read progress. Call from your main loop or idle hook.
+ * Returns 1 if a read completed (callback was invoked), 0 if still
+ * pending or no async read in flight. */
+int of_file_async_poll(void);
+
+/* Check if an async read is currently in flight. */
+int of_file_async_busy(void);
+
 #endif /* OFOS_FILE_H */
