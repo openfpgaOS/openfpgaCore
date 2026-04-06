@@ -27,7 +27,7 @@ BOOT_DIR = targets/$(TARGET)/boot
 # Compiler flags
 ARCH = rv32imafc
 ABI = ilp32f
-CFLAGS = -march=$(ARCH) -mabi=$(ABI) -Os -Wall -Wextra
+CFLAGS = -march=$(ARCH) -mabi=$(ABI) -Os -Wall -Wextra -fdiagnostics-color=always
 CFLAGS += -ffreestanding -nostdlib -nostartfiles
 CFLAGS += -ffunction-sections -fdata-sections
 CFLAGS += -fno-builtin
