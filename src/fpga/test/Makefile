@@ -190,6 +190,7 @@ gpu-lite: $(GPU_LITE_DIR)/V$(GPU_TOP)
 $(GPU_LITE_DIR)/V$(GPU_TOP): $(GPU_SRCS) $(GPU_CPP)
 	$(VERILATOR) $(VERILATOR_FLAGS) --top-module $(GPU_TOP) --Mdir $(GPU_LITE_DIR) \
 		+define+GPU_VARIANT_LITE \
+		-CFLAGS -DGPU_PERSP_IMPL \
 		-I$(COMMON_DIR) \
 		$(GPU_SRCS) $(GPU_CPP)
 

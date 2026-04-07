@@ -48,13 +48,26 @@
 `endif
 
 // ----------------------------------------------------------------------------
+// Derived: GPU_PERSP_IMPL — perspective span path is actually implemented.
+// The implementation requires the pipelined fragment processor (S_FRAG_PIPE)
+// so it currently only exists in LITE. Full has GPU_FEAT_PERSP_SPAN visible
+// to the rest of the system but no functional path — this will be addressed
+// when Full's triangle rasterizer is refactored to feed S_FRAG_PIPE.
+// ----------------------------------------------------------------------------
+`ifdef GPU_FEAT_PERSP_SPAN
+  `ifdef GPU_FEAT_FRAG_PIPELINE
+    `define GPU_PERSP_IMPL
+  `endif
+`endif
+
+// ----------------------------------------------------------------------------
 // Derived: any feature that needs the registered DSP + reciprocal LUT
 // (currently triangle setup and perspective span 1/z lookup)
 // ----------------------------------------------------------------------------
 `ifdef GPU_FEAT_TRIANGLE
   `define GPU_HAS_RECIP_LUT
 `else
-  `ifdef GPU_FEAT_PERSP_SPAN
+  `ifdef GPU_PERSP_IMPL
     `define GPU_HAS_RECIP_LUT
   `endif
 `endif

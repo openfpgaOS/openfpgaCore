@@ -1,7 +1,7 @@
 /*
  * Verilator C++ Test Harness for GPU Core
  *
- * Tests Phase 1 span rasteriser: ring buffer protocol, command decode,
+ * Tests the GPU span/triangle rasteriser: ring buffer protocol, command decode,
  * texture cache, colormap BRAM, framebuffer writes, clear, fence sync.
  *
  * Uses a simplified SDRAM model (flat 4MB) and SRAM model (256KB)
@@ -655,6 +655,175 @@ static void test_tex_cache_miss() {
     check_byte("cache_px31",  31, 0x20);
 }
 
+#ifdef GPU_PERSP_IMPL
+// =====================================================================
+// Perspective Span Tests
+// =====================================================================
+//
+// Perspective spans use the same DRAW_SPAN command, with the SPAN_PERSP
+// flag bit set and pay_buf[12..17] populated with projection-space
+// (s/z, t/z, 1/z) initial values + per-pixel deltas.
+//
+// The GPU computes:
+//     z          = 1 / (1/z)
+//     s_anchor   = (s/z) * z
+//     t_anchor   = (t/z) * z
+// at both ends of each 16-pixel segment, derives an affine slope, and
+// feeds the slope into the existing pipelined fragment processor.
+//
+// SPAN_PERSP = bit 5 → flag value 0x20.
+
+// Helper to submit one persp span (writes 18-word DRAW_SPAN payload).
+static void persp_draw_span(uint32_t fb_addr,
+                             uint32_t tex_addr,
+                             uint16_t count,
+                             uint8_t  light,
+                             uint16_t tex_width,
+                             int32_t  sdivz,    int32_t tdivz,
+                             int32_t  zi_persp,
+                             int32_t  sdivz_step, int32_t tdivz_step,
+                             int32_t  zi_step) {
+    ring_cmd(0x40, 18);
+    ring_write(fb_addr);
+    ring_write(tex_addr);
+    ring_write(0);                 // s (unused in persp)
+    ring_write(0);                 // t (unused in persp)
+    ring_write(0);                 // sstep (unused in persp)
+    ring_write(0);                 // tstep (unused in persp)
+    // count, light, flags = COLORMAP|PERSP
+    ring_write(((uint32_t)count << 16) |
+               ((uint32_t)light << 8) |
+               (0x01 | 0x20));
+    ring_write((1u << 16) | tex_width);  // fb_stride=1, tex_width
+    ring_write(0);                 // tex_shift, tex_bits
+    ring_write(0); ring_write(0); ring_write(0);  // z_addr, zi, zistep
+    ring_write((uint32_t)sdivz);
+    ring_write((uint32_t)tdivz);
+    ring_write((uint32_t)zi_persp);
+    ring_write((uint32_t)sdivz_step);
+    ring_write((uint32_t)tdivz_step);
+    ring_write((uint32_t)zi_step);
+}
+
+// Test P1: persp span with constant 1/z = 1.0
+// Should be equivalent to an affine span: at z=1, s=s/z and slope=sZstep.
+// Texture is [0..15], 16 pixels, sZstep=1.0 → expect texels 0..15.
+static void test_persp_constant_z() {
+    printf("TEST: Persp span — constant 1/z (affine equivalent)\n");
+    gpu_init();
+
+    // Identity colormap
+    for (int i = 0; i < 256; i++) { mmio_write(8, i); mmio_write(9, i); }
+
+    ring_cmd(0x23, 2); ring_write(FB_BASE_BYTE); ring_write(320);
+    ring_cmd(0x10, 2); ring_write((1 << 16) | 0x00); ring_write(0);
+
+    // 16-byte texture: [0,1,2,3, 4,5,6,7, ...]
+    for (int w = 0; w < 4; w++) {
+        uint32_t v = (w*4) | ((w*4+1) << 8) | ((w*4+2) << 16) | ((w*4+3) << 24);
+        sdram_write((TEX_BASE_BYTE >> 2) + w, v);
+    }
+
+    // 16 pixels, persp constant z=1 (zinv=1.0=0x10000, zi_step=0)
+    // sdivz starts at 0, sdivz_step = 1.0 → s_anchor at pos N = N*1.0
+    persp_draw_span(FB_BASE_BYTE, TEX_BASE_BYTE,
+                    /*count*/16, /*light*/0, /*tex_width*/16,
+                    /*sdivz*/0,         /*tdivz*/0,
+                    /*zi_persp*/0x10000,
+                    /*sdivz_step*/0x10000, /*tdivz_step*/0,
+                    /*zi_step*/0);
+
+    bool ok = gpu_finish();
+    check("persp_const_done", ok ? 1 : 0, 1);
+
+    for (int i = 0; i < 16; i++) {
+        char name[32];
+        snprintf(name, sizeof(name), "persp_const_px%d", i);
+        check_byte(name, i, (uint8_t)i);
+    }
+}
+
+// Test P2: persp span across the segment boundary (32 pixels, const z)
+// Exercises the slot-A → slot-B swap with constant z, so the answer is
+// still affine: texels 0..31.
+static void test_persp_two_segments() {
+    printf("TEST: Persp span — segment swap, constant 1/z (32 pixels)\n");
+    gpu_init();
+
+    for (int i = 0; i < 256; i++) { mmio_write(8, i); mmio_write(9, i); }
+
+    ring_cmd(0x23, 2); ring_write(FB_BASE_BYTE); ring_write(320);
+    ring_cmd(0x10, 2); ring_write((1 << 16) | 0x00); ring_write(0);
+
+    // 32-byte texture
+    for (int w = 0; w < 8; w++) {
+        uint32_t v = (w*4) | ((w*4+1) << 8) | ((w*4+2) << 16) | ((w*4+3) << 24);
+        sdram_write((TEX_BASE_BYTE >> 2) + w, v);
+    }
+
+    persp_draw_span(FB_BASE_BYTE, TEX_BASE_BYTE,
+                    /*count*/32, /*light*/0, /*tex_width*/32,
+                    /*sdivz*/0,         /*tdivz*/0,
+                    /*zi_persp*/0x10000,
+                    /*sdivz_step*/0x10000, /*tdivz_step*/0,
+                    /*zi_step*/0);
+
+    bool ok = gpu_finish();
+    check("persp_2seg_done", ok ? 1 : 0, 1);
+
+    // Spot check: first, segment boundary, last
+    check_byte("persp_2seg_px0",  0,  0);
+    check_byte("persp_2seg_px15", 15, 15);
+    check_byte("persp_2seg_px16", 16, 16);  // first px of segment 1
+    check_byte("persp_2seg_px17", 17, 17);
+    check_byte("persp_2seg_px31", 31, 31);
+}
+
+// Test P3: persp span with varying 1/z — verify pixel 0 anchor matches
+// hand-computed (s/z) * (1 / (1/z)).
+//
+// Setup: zinv goes from 1.0 (z=1) to 2.0 (z=0.5) over 16 pixels.
+// sdivz = 0 at pos 0, sdivz_step set so s/z = x/16 at pos x (sZ_step =
+// 1/16 = 0x1000 in 16.16). So:
+//   pos 0 : s/z = 0,    1/z = 1.0  → s = 0
+//   pos 16: s/z = 1.0,  1/z = 2.0  → s = (1.0)*(1/2) = 0.5
+//   slope = (0.5 - 0) / 16 = 0.03125 = 0x800 in 16.16
+//
+// Pixel 0 should sample texel 0; pixel 15 samples texel floor(15*0.03125) = 0.
+// Set up the texture so a few different texel values sit at low indices.
+static void test_persp_varying_z() {
+    printf("TEST: Persp span — varying 1/z (anchor sanity check)\n");
+    gpu_init();
+
+    for (int i = 0; i < 256; i++) { mmio_write(8, i); mmio_write(9, i); }
+
+    ring_cmd(0x23, 2); ring_write(FB_BASE_BYTE); ring_write(320);
+    ring_cmd(0x10, 2); ring_write((1 << 16) | 0x00); ring_write(0);
+
+    // Texture: each byte = its own index. 16 bytes is enough.
+    for (int w = 0; w < 4; w++) {
+        uint32_t v = (w*4) | ((w*4+1) << 8) | ((w*4+2) << 16) | ((w*4+3) << 24);
+        sdram_write((TEX_BASE_BYTE >> 2) + w, v);
+    }
+
+    // Persp params: 16 pixels, zinv from 1.0 → 2.0, sdivz from 0 → 1.0
+    persp_draw_span(FB_BASE_BYTE, TEX_BASE_BYTE,
+                    /*count*/16, /*light*/0, /*tex_width*/16,
+                    /*sdivz*/0,           /*tdivz*/0,
+                    /*zi_persp*/0x10000,
+                    /*sdivz_step*/0x1000, /*tdivz_step*/0,    // 1/16 per pixel
+                    /*zi_step*/0x1000);                       // 1/16 per pixel
+
+    bool ok = gpu_finish();
+    check("persp_var_done", ok ? 1 : 0, 1);
+
+    // All pixels in segment 0 should sample s = anchor + N*slope.
+    // anchor=0, slope=0.03125 → all s_int.high = 0 → texel 0.
+    check_byte("persp_var_px0",  0,  0);
+    check_byte("persp_var_px15", 15, 0);
+}
+#endif // GPU_PERSP_IMPL
+
 #ifdef GPU_FEAT_TRIANGLE
 // =====================================================================
 // Triangle Test Helpers
@@ -1100,7 +1269,7 @@ int main(int argc, char **argv) {
     tb->trace(trace, 99);
     trace->open("gpu_test.vcd");
 
-    printf("=== GPU Core Test Suite (Phase 1 + 2) ===\n\n");
+    printf("=== GPU Core Test Suite ===\n\n");
 
     reset();
     printf("GPU initialized (%lu cycles)\n\n", (unsigned long)(sim_time / 2));
@@ -1118,8 +1287,16 @@ int main(int argc, char **argv) {
     test_multiple_commands();
     test_tex_cache_miss();
 
+#ifdef GPU_PERSP_IMPL
+    // Perspective spans (Lite only — Full's triangle FSM doesn't share the
+    // pipelined fragment processor yet)
+    test_persp_constant_z();
+    test_persp_two_segments();
+    test_persp_varying_z();
+#endif
+
 #ifdef GPU_FEAT_TRIANGLE
-    // Phase 2: Triangle tests (Full variant only)
+    // Triangle tests (Full variant only)
     test_triangle_flat();
     test_triangle_degenerate();
     test_triangle_textured();

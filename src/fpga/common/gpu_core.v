@@ -1,5 +1,5 @@
 //
-// GPU Core — Phase 1: Span Rasterizer
+// GPU Core — span + triangle rasterizer
 //
 // Asynchronous 2D/3D GPU for openfpgaOS.  Reads commands from a ring
 // buffer in SDRAM, rasterises spans (textured, colormapped, depth-tested),
@@ -185,11 +185,34 @@ always @(posedge clk) begin
 end
 
 // MMIO read mux
+//
+// GPU_STATUS (offset 0x14, reg_addr 5) layout — extended for hardware
+// debug. Original two LSBs preserved so legacy code keeps working.
+//   [ 0]    busy           — !ring_empty || (state != S_IDLE)
+//   [ 1]    ring_empty     — (rdptr == wrptr)
+//   [ 7: 2] state          — main FSM state (S_IDLE..S_FRAG_PIPE)
+//   [ 8]    m_wr_awvalid   — FB write address in flight on M1
+//   [ 9]    tex_arvalid    — tex cache miss in flight (M0 read pending)
+//   [10]    tex_arready    — arbiter has granted M0 this cycle
+//   [11]    tex_rvalid     — tex cache receiving response
+//   [12]    fp_pipe_stall  — pipelined frag processor stalled
 always @(*) begin
     case (reg_addr)
         4'd1:    reg_rdata = {16'b0, ring_wrptr};
         4'd4:    reg_rdata = {16'b0, ring_rdptr};
-        4'd5:    reg_rdata = {30'b0, ring_empty, busy};
+        4'd5:    reg_rdata = {19'b0,
+`ifdef GPU_FEAT_FRAG_PIPELINE
+                              fp_pipe_stall,
+`else
+                              1'b0,
+`endif
+                              tex_axi_rvalid,
+                              tex_axi_arready,
+                              tex_axi_arvalid,
+                              m_wr_awvalid,
+                              state,
+                              ring_empty,
+                              busy};
         4'd6:    reg_rdata = fence_reached;
         4'd7:    reg_rdata = stat_pixels;
         4'd11:   reg_rdata = stat_spans;
@@ -213,11 +236,55 @@ always @(posedge clk) begin
 end
 
 // Port B: GPU read
+// HOLD cmap_rd_data during pipeline stalls (fp_pipe_stall). Otherwise the
+// BRAM keeps reading the LATEST cmap_rd_addr (= the next pixel in p2 after
+// the one currently in p2b), and by the time the stall clears, cmap_rd_data
+// has been clobbered with the wrong pixel's colormap entry. Gating the
+// always block keeps cmap_rd_data stable for the pixel currently in p2b,
+// which is what the post-stall p3 <- p2b shift captures. (Manifested as
+// pixels right before each FB word boundary getting their successor's
+// colormap value once the perspective span path's longer initial stall
+// made the timing reproducible.)
 reg [13:0] cmap_rd_addr;
 reg [7:0]  cmap_rd_data;
+`ifdef GPU_FEAT_FRAG_PIPELINE
+always @(posedge clk) begin
+    if (!fp_pipe_stall)
+        cmap_rd_data <= cmap_bram[cmap_rd_addr];
+end
+`else
 always @(posedge clk) begin
     cmap_rd_data <= cmap_bram[cmap_rd_addr];
 end
+`endif
+
+// ================================================================
+// Shared DSP multiply + reciprocal LUT
+// ================================================================
+// Used by triangle setup (Full) AND perspective span setup (Lite/Full).
+// Wrapped in GPU_HAS_RECIP_LUT (defined in gpu_features.vh whenever
+// GPU_FEAT_TRIANGLE or GPU_FEAT_PERSP_SPAN is enabled).
+`ifdef GPU_HAS_RECIP_LUT
+// Registered DSP multiply (18×18 maps to one Cyclone V DSP block)
+reg signed [31:0] dsp_a;
+reg signed [31:0] dsp_b;
+(* multstyle = "dsp" *) reg signed [63:0] dsp_p;
+always @(posedge clk) dsp_p <= dsp_a * dsp_b;
+
+// Reciprocal LUT: 256 × 16-bit in M10K (saves ~250 ALMs vs registers).
+// Registered read port: set recip_rd_addr, result in recip_rd_data next cycle.
+// Stored value: recip_lut[i] = 0x400000 / (256 + i) → 16-bit Q14
+// (i.e. recip_lut[0] = 16384 = 1.0 in Q14, recip_lut[255] ≈ 0.502).
+(* ramstyle = "M10K" *) reg [15:0] recip_lut [0:255];
+reg [7:0]  recip_rd_addr;
+reg [15:0] recip_rd_data;
+always @(posedge clk) recip_rd_data <= recip_lut[recip_rd_addr];
+integer ri;
+initial begin
+    for (ri = 0; ri < 256; ri = ri + 1)
+        recip_lut[ri] = (4194304) / (256 + ri);
+end
+`endif // GPU_HAS_RECIP_LUT
 
 // ================================================================
 // Texture Cache instance
@@ -367,7 +434,7 @@ localparam S_CLEAR_ZB       = 6'd23;
 localparam S_CLEAR_ZB_WAIT  = 6'd24;
 localparam S_SPAN_TEX_CALC = 6'd25;  // Pipeline stage 2: finish tex addr
 
-// Phase 2: triangle rasterisation states
+// Triangle rasterisation states (Full variant)
 localparam S_TRI_LOAD      = 6'd26;  // Extract vertices from payload
 localparam S_TRI_SETUP     = 6'd27;  // Sequential edge/gradient computation
 localparam S_TRI_BBOX      = 6'd28;  // Compute bounding box, clip to screen
@@ -382,6 +449,28 @@ reg [5:0] state;
 // Command decoding
 reg [7:0]  cmd_type;
 reg [23:0] cmd_payload_words;
+
+// Pre-decoded one-hot dispatch flags. Set in S_DECODE based on the
+// registered cmd_type and consumed in S_EXECUTE. Pre-decoding shortens
+// the combinational path from cmd_type to the per-command state regs
+// (notably sp_tstep, which had a -0.6 ns critical path through the
+// 8-bit case decoder before this change).
+reg cmd_is_nop;
+reg cmd_is_fence;
+reg cmd_is_clear;
+reg cmd_is_set_texture;
+reg cmd_is_set_depth_func;
+reg cmd_is_set_blend;
+reg cmd_is_set_alpha_ref;
+reg cmd_is_set_fb;
+reg cmd_is_set_zb;
+reg cmd_is_set_shade;
+reg cmd_is_draw_span;
+reg cmd_is_draw_spans;
+`ifdef GPU_FEAT_TRIANGLE
+reg cmd_is_draw_triangles;
+reg cmd_is_draw_indexed;
+`endif
 
 // Payload buffer — up to 20 words (largest = DRAW_SPAN at 18)
 reg [31:0] pay_buf [0:23];
@@ -521,9 +610,195 @@ wire [31:0] fp_tex_addr_full = p0_mode
     : p0_shift_addr;
 
 assign tex_req_valid = (state == S_FRAG_PIPE) && p0_valid
-                    && !fp_pipe_stall;
+                    && !fp_pipe_stall && !persp_issue_stall;
 assign tex_req_addr  = fp_tex_addr_full[25:0];
 assign tex_req_wide  = 1'b0;
+
+// ----------------------------------------------------------------
+// Perspective span — projection-space state + segment setup
+// ----------------------------------------------------------------
+// Quake-style 16-pixel affine subdivision. The span command supplies
+// (s/z)_start, (t/z)_start, (1/z)_start and their per-pixel deltas in
+// projection space (sdivz, tdivz, zi_persp + their *_step). Per 16-pixel
+// segment, the GPU computes:
+//
+//   z       = 1 / (1/z)               -- via M10K reciprocal LUT
+//   s_anchor = (s/z) * z              -- via shared DSP
+//   t_anchor = (t/z) * z
+//
+// at both ends of the segment, derives an affine slope, and feeds those
+// slopes into the existing pipelined fragment processor as the per-pixel
+// (sp_s, sp_sstep, sp_t, sp_tstep). Within a segment the path is identical
+// to affine spans — the perspective math only runs in the segment-setup
+// (PSS) sub-FSM described below.
+//
+// Slot model:
+//   slot A (sp_s/sp_t/sp_sstep/sp_tstep, sp_seg_left)  — currently rendering
+//   slot B (persp_pend_*)                              — next segment, pre-computed
+//
+// At span start the PSS runs three passes back-to-back:
+//   1. ANCHOR_ONLY  — compute s_anchor at pos 0 (no projection-space advance)
+//   2. SLOPE_TO_A   — advance proj state by 16, compute s_anchor at pos 16,
+//                     derive slope, fill slot A
+//   3. SLOPE_TO_B   — advance proj state by 16, compute s_anchor at pos 32,
+//                     derive slope, fill slot B
+//
+// Passes 1+2 stall the issue stage (`persp_issue_stall = persp_active &&
+// !persp_seg_a_ready`). Pass 3 runs in parallel with the issue stage rendering
+// segment 0 — its 7-cycle latency is well inside the 16-pixel segment, so
+// slot B is ready by the time the issue stage finishes segment 0 and needs
+// to swap.
+//
+// On segment boundary: when load_p0 fires for the last pixel of segment N
+// (sp_seg_left == 0), the issue stage swaps slot B into slot A (sp_s,
+// sp_sstep, etc), clears persp_seg_b_ready, and the PSS scheduler picks up
+// segment N+2 in slot B.
+`ifdef GPU_PERSP_IMPL
+// Projection-space accumulators (advance by 16 each PSS run).
+// Loaded from pay_buf[12..14] / pay_buf[15..17] in CMD_DRAW_SPAN.
+reg signed [31:0] sp_sZ;        // s/z, 16.16 signed
+reg signed [31:0] sp_tZ;        // t/z, 16.16 signed
+reg signed [31:0] sp_zinv;      // 1/z, 16.16 (always positive)
+reg signed [31:0] sp_sZstep;    // d(s/z)/dx, per-pixel
+reg signed [31:0] sp_tZstep;    // d(t/z)/dx, per-pixel
+reg signed [31:0] sp_zinv_step; // d(1/z)/dx, per-pixel
+
+// Active when the current span has SPAN_PERSP set. Latched at CMD_DRAW_SPAN.
+reg        persp_active;
+
+// Pixels remaining in the current 16-pixel affine sub-segment, AFTER the
+// pixel currently being issued. Counts 15 → 0 within a segment. When
+// load_p0 fires with sp_seg_left == 0, slot B is swapped into slot A.
+reg [3:0]  sp_seg_left;
+
+// Slot A readiness: sp_s/sp_t/sp_sstep/sp_tstep are valid (PSS pass 2 done).
+// Until set, the issue stage stalls (persp_issue_stall=1).
+reg        persp_seg_a_ready;
+
+// Anchor sample at the START of the current segment (= persp_pos_0 after
+// pass 1, becomes persp_pos_16 after pass 2, persp_pos_32 after pass 3, …).
+// Used by the next PSS pass as the slope baseline.
+reg signed [31:0] persp_anchor_s;
+reg signed [31:0] persp_anchor_t;
+
+// First-pass marker: pass 1 (ANCHOR_ONLY) has produced persp_anchor_s/t.
+// Cleared at span start, set after PSS_FINAL of pass 1.
+reg        persp_first_done;
+
+// Pending slot (slot B): the next segment, pre-computed in parallel.
+reg signed [31:0] persp_pend_s;
+reg signed [31:0] persp_pend_t;
+reg signed [31:0] persp_pend_sstep;
+reg signed [31:0] persp_pend_tstep;
+reg        persp_seg_b_ready;
+
+// PSS — segment-setup sub-FSM. Runs alongside the issue stage (and fbss)
+// inside S_FRAG_PIPE. Drives dsp_a/dsp_b and recip_rd_addr; reads
+// dsp_p / recip_rd_data. ~9 cycles per pass on the regular path (8 on
+// the no-advance first pass).
+//
+// Setup-side pipeline (PSS_ADV → PSS_CLZ → PSS_TOP8) is split into 3
+// register-bounded stages because the original 1-cycle combinational
+// chain (sp_zinv → +step<<4 → abs → 32-line CLZ casez → 32-bit barrel
+// shift → top8 → recip_rd_addr) was the worst critical path in the
+// design with -3.451 ns slack at 50 MHz. The split is:
+//   PSS_ADV    : sp_zinv += step<<4; register persp_zinv_abs_r
+//   PSS_CLZ    : compute CLZ from registered abs; register persp_clz
+//   PSS_TOP8   : compute top8 from (abs << clz); write recip_rd_addr
+// PSS_RECIP_NA shares the same PSS_CLZ → PSS_TOP8 tail by registering
+// abs of un-advanced sp_zinv into persp_zinv_abs_r and falling through.
+localparam PSS_IDLE      = 4'd0;
+localparam PSS_ADV       = 4'd1;  // stage 1: advance proj coords; register abs
+localparam PSS_CLZ       = 4'd2;  // stage 2: compute CLZ from registered abs
+localparam PSS_TOP8      = 4'd3;  // stage 3: compute top8; write recip_rd_addr
+localparam PSS_RECIP_W   = 4'd4;  // BRAM read latency
+localparam PSS_MUL_S     = 4'd5;  // capture recip_rd_data → recip_q16; dsp set
+localparam PSS_MUL_S_W   = 4'd6;  // DSP pipeline delay
+localparam PSS_MUL_T     = 4'd7;  // capture dsp_p as s_end; dsp set for tZ mul
+localparam PSS_MUL_T_W   = 4'd8;  // DSP pipeline delay
+localparam PSS_FINAL     = 4'd9;  // capture dsp_p as t_end; commit per pass
+localparam PSS_RECIP_NA  = 4'd10; // ANCHOR_ONLY entry — register abs without advance
+reg [3:0] persp_pss;
+
+// PSS pass type — what PSS_FINAL should do with the computed (s_end, t_end).
+localparam PSS_PASS_ANCHOR = 2'd0;  // pass 1: anchor only → persp_anchor_s/t
+localparam PSS_PASS_TO_A   = 2'd1;  // pass 2: derive slope, fill slot A
+localparam PSS_PASS_TO_B   = 2'd2;  // pass 3+: derive slope, fill slot B (pending)
+reg [1:0] persp_pass;
+
+// Latched values across PSS pipeline stages.
+reg [31:0] persp_zinv_abs_r;   // |sp_zinv| latched after PSS_ADV / PSS_RECIP_NA
+reg [4:0]  persp_clz;          // CLZ of persp_zinv_abs_r, latched after PSS_CLZ
+reg signed [31:0] persp_recip_q16;  // Q16.16 reciprocal, latched at PSS_MUL_S
+reg signed [31:0] persp_s_end;      // captured at PSS_MUL_T from dsp_p
+
+// Stall the issue stage while slot A isn't ready (passes 1+2 still running).
+// Slot B not being ready is handled separately inside the load_p0 gate.
+wire persp_issue_stall = persp_active && !persp_seg_a_ready;
+
+// Combinational |sp_zinv| variants. PSS_ADV uses the post-advance value
+// (sp_zinv + 16 pixels of step); PSS_RECIP_NA uses the un-advanced value
+// (first pass only). Both are registered into persp_zinv_abs_r so the
+// downstream CLZ/top8 stages don't include the 32-bit add in their
+// timing path.
+wire signed [31:0] sp_zinv_advanced = sp_zinv + (sp_zinv_step <<< 4);
+wire        [31:0] persp_zinv_abs   = sp_zinv_advanced[31]
+                                    ? -sp_zinv_advanced
+                                    :  sp_zinv_advanced;
+wire        [31:0] persp_zinv_abs_na = sp_zinv[31] ? -sp_zinv : sp_zinv;
+
+// CLZ helper — combinational casez. Returns leading-zero count for 32-bit.
+function [4:0] persp_clz_fn;
+    input [31:0] v;
+    begin
+        casez (v)
+            32'b1???????????????????????????????: persp_clz_fn = 5'd0;
+            32'b01??????????????????????????????: persp_clz_fn = 5'd1;
+            32'b001?????????????????????????????: persp_clz_fn = 5'd2;
+            32'b0001????????????????????????????: persp_clz_fn = 5'd3;
+            32'b00001???????????????????????????: persp_clz_fn = 5'd4;
+            32'b000001??????????????????????????: persp_clz_fn = 5'd5;
+            32'b0000001?????????????????????????: persp_clz_fn = 5'd6;
+            32'b00000001????????????????????????: persp_clz_fn = 5'd7;
+            32'b000000001???????????????????????: persp_clz_fn = 5'd8;
+            32'b0000000001??????????????????????: persp_clz_fn = 5'd9;
+            32'b00000000001?????????????????????: persp_clz_fn = 5'd10;
+            32'b000000000001????????????????????: persp_clz_fn = 5'd11;
+            32'b0000000000001???????????????????: persp_clz_fn = 5'd12;
+            32'b00000000000001??????????????????: persp_clz_fn = 5'd13;
+            32'b000000000000001?????????????????: persp_clz_fn = 5'd14;
+            32'b0000000000000001????????????????: persp_clz_fn = 5'd15;
+            32'b00000000000000001???????????????: persp_clz_fn = 5'd16;
+            32'b000000000000000001??????????????: persp_clz_fn = 5'd17;
+            32'b0000000000000000001?????????????: persp_clz_fn = 5'd18;
+            32'b00000000000000000001????????????: persp_clz_fn = 5'd19;
+            32'b000000000000000000001???????????: persp_clz_fn = 5'd20;
+            32'b0000000000000000000001??????????: persp_clz_fn = 5'd21;
+            32'b00000000000000000000001?????????: persp_clz_fn = 5'd22;
+            32'b000000000000000000000001????????: persp_clz_fn = 5'd23;
+            32'b0000000000000000000000001???????: persp_clz_fn = 5'd24;
+            32'b00000000000000000000000001??????: persp_clz_fn = 5'd25;
+            32'b000000000000000000000000001?????: persp_clz_fn = 5'd26;
+            32'b0000000000000000000000000001????: persp_clz_fn = 5'd27;
+            32'b00000000000000000000000000001???: persp_clz_fn = 5'd28;
+            32'b000000000000000000000000000001??: persp_clz_fn = 5'd29;
+            32'b0000000000000000000000000000001?: persp_clz_fn = 5'd30;
+            default: persp_clz_fn = 5'd31;
+        endcase
+    end
+endfunction
+
+// CLZ wire computed from the REGISTERED abs value during PSS_CLZ.
+wire [4:0] persp_clz_pipe = persp_clz_fn(persp_zinv_abs_r);
+// top8 = bits[30:23] of (persp_zinv_abs_r << persp_clz). Computed during
+// PSS_TOP8 from the REGISTERED abs and the REGISTERED clz, so the variable
+// barrel shift sits between two register banks instead of in front of a
+// 32-line CLZ casez (which was the old critical path).
+wire [31:0] persp_norm_pipe = persp_zinv_abs_r << persp_clz;
+wire [7:0]  persp_top8_pipe = persp_norm_pipe[30:23];
+`else
+wire persp_issue_stall = 1'b0;
+`endif // GPU_PERSP_IMPL
 `endif // GPU_FEAT_FRAG_PIPELINE
 
 // FB write accumulator
@@ -545,7 +820,7 @@ reg [17:0] clear_remaining;   // Words remaining to clear
 reg [31:0] batch_remaining;   // Spans remaining in batch
 
 // ================================================================
-// Phase 2: Triangle Registers
+// Triangle Registers (Full variant)
 // ================================================================
 
 // tri_active: 1 = fragment pipeline returns to triangle path. Read by span
@@ -598,24 +873,6 @@ reg        tri_det_sign;       // 1 if det was negative
 
 // Precomputed differences (used across setup steps)
 reg signed [15:0] dX10, dY10, dX20, dY20;
-
-// Registered DSP multiply (18×18 maps to one Cyclone V DSP block)
-reg signed [31:0] dsp_a;
-reg signed [31:0] dsp_b;
-(* multstyle = "dsp" *) reg signed [63:0] dsp_p;
-always @(posedge clk) dsp_p <= dsp_a * dsp_b;
-
-// Reciprocal LUT: 256 × 16-bit in M10K (saves ~250 ALMs vs registers).
-// Registered read port: set recip_rd_addr, result in recip_rd_data next cycle.
-(* ramstyle = "M10K" *) reg [15:0] recip_lut [0:255];
-reg [7:0]  recip_rd_addr;
-reg [15:0] recip_rd_data;
-always @(posedge clk) recip_rd_data <= recip_lut[recip_rd_addr];
-integer ri;
-initial begin
-    for (ri = 0; ri < 256; ri = ri + 1)
-        recip_lut[ri] = (4194304) / (256 + ri);
-end
 
 // Triangle stats
 reg [31:0] stat_triangles;
@@ -692,6 +949,14 @@ always @(posedge clk) begin
         stat_spans <= 0;
         cmd_type <= 0;
         cmd_payload_words <= 0;
+        cmd_is_nop <= 0; cmd_is_fence <= 0; cmd_is_clear <= 0;
+        cmd_is_set_texture <= 0; cmd_is_set_depth_func <= 0;
+        cmd_is_set_blend <= 0; cmd_is_set_alpha_ref <= 0;
+        cmd_is_set_fb <= 0; cmd_is_set_zb <= 0; cmd_is_set_shade <= 0;
+        cmd_is_draw_span <= 0; cmd_is_draw_spans <= 0;
+`ifdef GPU_FEAT_TRIANGLE
+        cmd_is_draw_triangles <= 0; cmd_is_draw_indexed <= 0;
+`endif
         pay_idx <= 0;
         pay_remaining <= 0;
         frag_discard <= 0;
@@ -721,6 +986,28 @@ always @(posedge clk) begin
         fbss_pend_valid <= 0; fbss_pend_color <= 0; fbss_pend_addr <= 0;
         src_mode <= SRC_SPAN;
         src_done <= 0;
+`ifdef GPU_PERSP_IMPL
+        sp_sZ <= 0; sp_tZ <= 0; sp_zinv <= 0;
+        sp_sZstep <= 0; sp_tZstep <= 0; sp_zinv_step <= 0;
+        persp_active <= 0;
+        sp_seg_left <= 0;
+        persp_seg_a_ready <= 0;
+        persp_anchor_s <= 0; persp_anchor_t <= 0;
+        persp_first_done <= 0;
+        persp_pend_s <= 0; persp_pend_t <= 0;
+        persp_pend_sstep <= 0; persp_pend_tstep <= 0;
+        persp_seg_b_ready <= 0;
+        persp_pss <= PSS_IDLE;
+        persp_pass <= PSS_PASS_ANCHOR;
+        persp_zinv_abs_r <= 0;
+        persp_clz <= 0;
+        persp_recip_q16 <= 0;
+        persp_s_end <= 0;
+`endif
+`endif
+`ifdef GPU_HAS_RECIP_LUT
+        dsp_a <= 0; dsp_b <= 0;
+        recip_rd_addr <= 0;
 `endif
 `ifdef GPU_FEAT_TRIANGLE
         tri_active <= 0;
@@ -733,7 +1020,6 @@ always @(posedge clk) begin
         tri_clz <= 0;
         tri_det_sign <= 0;
         stat_triangles <= 0;
-        dsp_a <= 0; dsp_b <= 0;
 `endif
         // State registers
         st_tex_addr <= 0; st_tex_width <= 0; st_tex_height <= 0;
@@ -791,6 +1077,28 @@ always @(posedge clk) begin
         // Decode — start reading payload words from BRAM
         // ============================================================
         S_DECODE: begin
+            // Pre-decode cmd_type into one-hot dispatch flags. The case
+            // expression in S_EXECUTE used to compare cmd_type directly,
+            // which built a long combinational chain into the per-command
+            // state-reg writes (notably sp_tstep). Doing the decode here
+            // shortens the S_EXECUTE path to a 1-bit flag check.
+            cmd_is_nop            <= (cmd_type == CMD_NOP);
+            cmd_is_fence          <= (cmd_type == CMD_FENCE);
+            cmd_is_clear          <= (cmd_type == CMD_CLEAR);
+            cmd_is_set_texture    <= (cmd_type == CMD_SET_TEXTURE);
+            cmd_is_set_depth_func <= (cmd_type == CMD_SET_DEPTH_FUNC);
+            cmd_is_set_blend      <= (cmd_type == CMD_SET_BLEND);
+            cmd_is_set_alpha_ref  <= (cmd_type == CMD_SET_ALPHA_REF);
+            cmd_is_set_fb         <= (cmd_type == CMD_SET_FB);
+            cmd_is_set_zb         <= (cmd_type == CMD_SET_ZB);
+            cmd_is_set_shade      <= (cmd_type == CMD_SET_SHADE);
+            cmd_is_draw_span      <= (cmd_type == CMD_DRAW_SPAN);
+            cmd_is_draw_spans     <= (cmd_type == CMD_DRAW_SPANS);
+`ifdef GPU_FEAT_TRIANGLE
+            cmd_is_draw_triangles <= (cmd_type == CMD_DRAW_TRIANGLES);
+            cmd_is_draw_indexed   <= (cmd_type == CMD_DRAW_INDEXED);
+`endif
+
             if (cmd_payload_words == 0) begin
                 state <= S_EXECUTE;
             end else begin
@@ -822,26 +1130,26 @@ always @(posedge clk) begin
         end
 
         // ============================================================
-        // Execute command
+        // Execute command — uses pre-decoded one-hot dispatch flags
+        // (cmd_is_*) instead of comparing cmd_type, to keep the
+        // combinational chain to per-command state regs short.
         // ============================================================
         S_EXECUTE: begin
-            case (cmd_type)
+            if (cmd_is_nop) state <= S_IDLE;
 
-            CMD_NOP: state <= S_IDLE;
-
-            CMD_FENCE: begin
+            else if (cmd_is_fence) begin
                 fence_reached <= pay_buf[0];
                 state <= S_IDLE;
             end
 
-            CMD_CLEAR: begin
+            else if (cmd_is_clear) begin
                 clear_flags <= pay_buf[0][17:16];
                 clear_color <= pay_buf[0][15:0];
                 clear_depth <= pay_buf[1][15:0];
                 state       <= S_CLEAR_INIT;
             end
 
-            CMD_SET_TEXTURE: begin
+            else if (cmd_is_set_texture) begin
                 st_tex_addr   <= pay_buf[0];
                 st_tex_width  <= pay_buf[1][31:16];
                 st_tex_height <= pay_buf[1][15:0];
@@ -851,39 +1159,39 @@ always @(posedge clk) begin
                 state <= S_IDLE;
             end
 
-            CMD_SET_DEPTH_FUNC: begin
+            else if (cmd_is_set_depth_func) begin
                 st_depth_func <= pay_buf[0][2:0];
                 state <= S_IDLE;
             end
 
-            CMD_SET_BLEND: begin
+            else if (cmd_is_set_blend) begin
                 st_blend_mode <= pay_buf[0][1:0];
                 state <= S_IDLE;
             end
 
-            CMD_SET_ALPHA_REF: begin
+            else if (cmd_is_set_alpha_ref) begin
                 st_alpha_ref <= pay_buf[0][7:0];
                 state <= S_IDLE;
             end
 
-            CMD_SET_FB: begin
+            else if (cmd_is_set_fb) begin
                 st_fb_addr   <= pay_buf[0];
                 st_fb_stride <= pay_buf[1][15:0];
                 state <= S_IDLE;
             end
 
-            CMD_SET_ZB: begin
+            else if (cmd_is_set_zb) begin
                 st_zb_addr   <= pay_buf[0];
                 st_zb_stride <= pay_buf[1][15:0];
                 state <= S_IDLE;
             end
 
-            CMD_SET_SHADE: begin
+            else if (cmd_is_set_shade) begin
                 st_gouraud <= pay_buf[0][0];
                 state <= S_IDLE;
             end
 
-            CMD_DRAW_SPAN: begin
+            else if (cmd_is_draw_span) begin
                 // Load span parameters from payload
                 sp_fb_addr   <= pay_buf[0];
                 sp_tex_addr  <= pay_buf[1];
@@ -902,6 +1210,22 @@ always @(posedge clk) begin
                 sp_zi        <= pay_buf[10];
                 sp_zistep    <= pay_buf[11];
                 stat_spans   <= stat_spans + 32'd1;
+`ifdef GPU_PERSP_IMPL
+                // Perspective params (only used if SPAN_PERSP flag set)
+                sp_sZ         <= pay_buf[12];
+                sp_tZ         <= pay_buf[13];
+                sp_zinv       <= pay_buf[14];
+                sp_sZstep     <= pay_buf[15];
+                sp_tZstep     <= pay_buf[16];
+                sp_zinv_step  <= pay_buf[17];
+                persp_active      <= pay_buf[6][SPAN_PERSP];  // bit 5 of flags
+                persp_first_done  <= 0;
+                persp_seg_a_ready <= 0;
+                persp_seg_b_ready <= 0;
+                persp_pss         <= PSS_IDLE;
+                persp_pass        <= PSS_PASS_ANCHOR;
+                sp_seg_left       <= 0;
+`endif
 `ifdef GPU_FEAT_FRAG_PIPELINE
                 src_mode     <= SRC_SPAN;
                 src_done     <= 0;
@@ -911,7 +1235,7 @@ always @(posedge clk) begin
 `endif
             end
 
-            CMD_DRAW_SPANS: begin
+            else if (cmd_is_draw_spans) begin
                 // Batch: first word is span count, then N×18 words
                 batch_remaining <= pay_buf[0] - 32'd1;
                 // First span starts at pay_buf[1..18]
@@ -932,6 +1256,21 @@ always @(posedge clk) begin
                 sp_zi        <= pay_buf[11];
                 sp_zistep    <= pay_buf[12];
                 stat_spans   <= stat_spans + 32'd1;
+`ifdef GPU_PERSP_IMPL
+                sp_sZ         <= pay_buf[13];
+                sp_tZ         <= pay_buf[14];
+                sp_zinv       <= pay_buf[15];
+                sp_sZstep     <= pay_buf[16];
+                sp_tZstep     <= pay_buf[17];
+                sp_zinv_step  <= pay_buf[18];
+                persp_active      <= pay_buf[7][SPAN_PERSP];
+                persp_first_done  <= 0;
+                persp_seg_a_ready <= 0;
+                persp_seg_b_ready <= 0;
+                persp_pss         <= PSS_IDLE;
+                persp_pass        <= PSS_PASS_ANCHOR;
+                sp_seg_left       <= 0;
+`endif
 `ifdef GPU_FEAT_FRAG_PIPELINE
                 src_mode     <= SRC_SPAN;
                 src_done     <= 0;
@@ -942,16 +1281,16 @@ always @(posedge clk) begin
             end
 
 `ifdef GPU_FEAT_TRIANGLE
-            CMD_DRAW_TRIANGLES: begin
+            else if (cmd_is_draw_triangles) begin
                 // pay_buf[0] = vertex_count (must be 3 for one triangle)
                 // pay_buf[1..6] = vertex 0, [7..12] = vertex 1, [13..18] = vertex 2
                 state <= S_TRI_LOAD;
             end
 
-            CMD_DRAW_INDEXED: begin
+            else if (cmd_is_draw_indexed) begin
                 // pay_buf[0] = vert_count, pay_buf[1] = idx_count
                 // pay_buf[2..N] = vertices, then indices packed 2 per word
-                // Phase 2: extract 3 vertices via index lookup from pay_buf
+                // Extract 3 vertices via index lookup from pay_buf
                 begin : indexed_load
                     reg [15:0] i0, i1, i2;
                     reg [4:0] vbase;  // word offset where vertices start
@@ -987,8 +1326,7 @@ always @(posedge clk) begin
             end
 `endif // GPU_FEAT_TRIANGLE
 
-            default: state <= S_IDLE;
-            endcase
+            else state <= S_IDLE;
         end
 
         // ============================================================
@@ -1015,7 +1353,7 @@ always @(posedge clk) begin
         S_SPAN_TEX_CALC: begin
             tex_req_valid <= 1;
             tex_req_addr  <= tex_addr_final[25:0];
-            tex_req_wide  <= 1'b0;  // I8 for Phase 1
+            tex_req_wide  <= 1'b0;  // I8 (span path is always 8-bit indexed)
             state         <= S_SPAN_TEX_REQ;
         end
 
@@ -1211,8 +1549,19 @@ always @(posedge clk) begin
             issue_committed = tex_req_valid && tex_req_ready;
             // Load p0 with the next pixel when: we just committed (so the
             // current p0 is shifting out), OR p0 is empty (priming).
+            // Persp gating:
+            //   * !persp_issue_stall: slot A must be loaded (pass 2 done).
+            //   * If sp_seg_left == 0 (last px of segment), slot B must be
+            //     ready so the swap can fire in the same cycle.
             load_p0         = (issue_committed || !p0_valid)
-                           && (sp_count != 16'd0) && !src_done;
+                           && (sp_count != 16'd0) && !src_done
+`ifdef GPU_PERSP_IMPL
+                           && !persp_issue_stall
+                           && (!persp_active
+                               || sp_seg_left != 4'd0
+                               || persp_seg_b_ready)
+`endif
+                           ;
             span_last_issue = (sp_count == 16'd1);
 
             // ----------------------------------------------------------
@@ -1290,14 +1639,39 @@ always @(posedge clk) begin
                     tx_mul_q <= $signed({{1'b0}, sp_t[31:16]})
                               * $signed({1'b0, sp_tex_width});
 
-                    // Advance span source
-                    sp_s       <= sp_s + sp_sstep;
-                    sp_t       <= sp_t + sp_tstep;
+                    // Advance span source. For perspective spans, the s/t
+                    // path is segmented: within a segment we step by the
+                    // affine sub-slope (sp_sstep), and at the segment
+                    // boundary (sp_seg_left == 0) we swap in the pre-
+                    // computed slot B (persp_pend_*).
                     sp_fb_addr <= sp_fb_addr + {{16{sp_fb_stride[15]}}, sp_fb_stride};
                     sp_zi      <= sp_zi + sp_zistep;
                     sp_z_addr  <= sp_z_addr + 32'd2;
                     sp_count   <= sp_count - 16'd1;
                     if (span_last_issue) src_done <= 1;
+`ifdef GPU_PERSP_IMPL
+                    if (persp_active) begin
+                        if (sp_seg_left == 4'd0) begin
+                            // Segment boundary — swap pending into current.
+                            sp_s              <= persp_pend_s;
+                            sp_t              <= persp_pend_t;
+                            sp_sstep          <= persp_pend_sstep;
+                            sp_tstep          <= persp_pend_tstep;
+                            sp_seg_left       <= 4'd15;
+                            persp_seg_b_ready <= 0;  // PSS will refill
+                        end else begin
+                            sp_s        <= sp_s + sp_sstep;
+                            sp_t        <= sp_t + sp_tstep;
+                            sp_seg_left <= sp_seg_left - 4'd1;
+                        end
+                    end else begin
+                        sp_s <= sp_s + sp_sstep;
+                        sp_t <= sp_t + sp_tstep;
+                    end
+`else
+                    sp_s <= sp_s + sp_sstep;
+                    sp_t <= sp_t + sp_tstep;
+`endif
                 end else if (issue_committed) begin
                     // Committed but no more pixels to load — drain p0
                     p0_valid <= 0;
@@ -1401,12 +1775,174 @@ always @(posedge clk) begin
                 default: fbss <= FBSS_IDLE;
             endcase
 
+`ifdef GPU_PERSP_IMPL
+            // ----------------------------------------------------------
+            // PSS — perspective segment-setup sub-FSM
+            // ----------------------------------------------------------
+            // Runs alongside the issue stage and fbss. Uses the shared
+            // dsp_a/dsp_b/dsp_p multiplier and recip_lut. Drives slots
+            // A and B with affine sub-segment slopes derived from the
+            // projection-space (s/z, t/z, 1/z) accumulators.
+            //
+            // Pass type (persp_pass):
+            //   PSS_PASS_ANCHOR  pass 1, span start: anchor at pos 0
+            //   PSS_PASS_TO_A    pass 2: derive slot A slopes from anchor → pos 16
+            //   PSS_PASS_TO_B    pass 3+: derive slot B slopes (fills pending)
+            case (persp_pss)
+                PSS_IDLE: begin
+                    // Schedule next pass when persp is active.
+                    if (persp_active) begin
+                        if (!persp_first_done) begin
+                            persp_pass <= PSS_PASS_ANCHOR;
+                            persp_pss  <= PSS_RECIP_NA;
+                        end else if (!persp_seg_a_ready) begin
+                            persp_pass <= PSS_PASS_TO_A;
+                            persp_pss  <= PSS_ADV;
+                        end else if (!persp_seg_b_ready
+                                  && (sp_count > 16'd16 || sp_seg_left != 4'd0)) begin
+                            // Only fill slot B if there's a future segment
+                            // that will swap it in. (sp_count includes the
+                            // current segment's remaining pixels.)
+                            persp_pass <= PSS_PASS_TO_B;
+                            persp_pss  <= PSS_ADV;
+                        end
+                    end
+                end
+
+                PSS_ADV: begin
+                    // Stage 1 of pipelined setup: advance projection-space
+                    // accumulators by 16 pixels and register |sp_zinv_new|.
+                    // Splitting the old single-cycle (advance → CLZ → top8 →
+                    // recip_rd_addr) chain into ADV / CLZ / TOP8 closes the
+                    // 50 MHz timing path that was failing by -3.45 ns.
+                    sp_sZ            <= sp_sZ   + (sp_sZstep   <<< 4);
+                    sp_tZ            <= sp_tZ   + (sp_tZstep   <<< 4);
+                    sp_zinv          <= sp_zinv_advanced;
+                    persp_zinv_abs_r <= persp_zinv_abs;
+                    persp_pss        <= PSS_CLZ;
+                end
+
+                PSS_RECIP_NA: begin
+                    // First-pass entry: no advance, but register |sp_zinv|
+                    // into the same pipeline reg so we can fall through the
+                    // shared CLZ / TOP8 stages.
+                    persp_zinv_abs_r <= persp_zinv_abs_na;
+                    persp_pss        <= PSS_CLZ;
+                end
+
+                PSS_CLZ: begin
+                    // Stage 2: compute leading-zero count of the registered
+                    // abs value and register it. Inputs are FF outputs;
+                    // output is a FF input — the casez sits between two
+                    // register banks.
+                    persp_clz <= persp_clz_pipe;
+                    persp_pss <= PSS_TOP8;
+                end
+
+                PSS_TOP8: begin
+                    // Stage 3: compute the top-8 normalized bits (the recip
+                    // LUT index) from the registered abs and clz, and write
+                    // recip_rd_addr. Variable barrel shift is the only
+                    // combinational chain in this stage.
+                    recip_rd_addr <= persp_top8_pipe;
+                    persp_pss     <= PSS_RECIP_W;
+                end
+
+                PSS_RECIP_W: begin
+                    // BRAM read latency — recip_rd_data valid next cycle.
+                    persp_pss <= PSS_MUL_S;
+                end
+
+                PSS_MUL_S: begin : mul_s_blk
+                    // Compute Q16.16 reciprocal from LUT mantissa + clz shift,
+                    // latch it, kick the first multiply (sp_sZ * recip).
+                    reg signed [31:0] recip_q16;
+                    if (persp_clz >= 5'd13)
+                        recip_q16 = $signed({16'b0, recip_rd_data})
+                                  <<< (persp_clz - 5'd13);
+                    else
+                        recip_q16 = $signed({16'b0, recip_rd_data})
+                                  >>> (5'd13 - persp_clz);
+                    persp_recip_q16 <= recip_q16;
+                    dsp_a           <= sp_sZ;
+                    dsp_b           <= recip_q16;
+                    persp_pss       <= PSS_MUL_S_W;
+                end
+
+                PSS_MUL_S_W: begin
+                    persp_pss <= PSS_MUL_T;
+                end
+
+                PSS_MUL_T: begin
+                    // dsp_p now holds sp_sZ * recip — capture as s_end.
+                    persp_s_end <= dsp_p[47:16];
+                    // Kick the second multiply (sp_tZ * recip).
+                    dsp_a       <= sp_tZ;
+                    dsp_b       <= persp_recip_q16;
+                    persp_pss   <= PSS_MUL_T_W;
+                end
+
+                PSS_MUL_T_W: begin
+                    persp_pss <= PSS_FINAL;
+                end
+
+                PSS_FINAL: begin : pss_final_blk
+                    // dsp_p now holds sp_tZ * recip — t_end.
+                    reg signed [31:0] t_end;
+                    t_end = dsp_p[47:16];
+                    case (persp_pass)
+                        PSS_PASS_ANCHOR: begin
+                            // Pass 1: just store the anchor at pos 0.
+                            persp_anchor_s   <= persp_s_end;
+                            persp_anchor_t   <= t_end;
+                            persp_first_done <= 1;
+                        end
+                        PSS_PASS_TO_A: begin
+                            // Pass 2: derive slot A slopes from anchor → pos 16.
+                            sp_s              <= persp_anchor_s;
+                            sp_t              <= persp_anchor_t;
+                            sp_sstep          <= ($signed(persp_s_end)
+                                                - $signed(persp_anchor_s)) >>> 4;
+                            sp_tstep          <= ($signed(t_end)
+                                                - $signed(persp_anchor_t)) >>> 4;
+                            sp_seg_left       <= 4'd15;
+                            persp_anchor_s    <= persp_s_end;
+                            persp_anchor_t    <= t_end;
+                            persp_seg_a_ready <= 1;
+                        end
+                        PSS_PASS_TO_B: begin
+                            // Pass 3+: derive slot B (pending) slopes.
+                            persp_pend_s      <= persp_anchor_s;
+                            persp_pend_t      <= persp_anchor_t;
+                            persp_pend_sstep  <= ($signed(persp_s_end)
+                                                - $signed(persp_anchor_s)) >>> 4;
+                            persp_pend_tstep  <= ($signed(t_end)
+                                                - $signed(persp_anchor_t)) >>> 4;
+                            persp_anchor_s    <= persp_s_end;
+                            persp_anchor_t    <= t_end;
+                            persp_seg_b_ready <= 1;
+                        end
+                        default: ;
+                    endcase
+                    persp_pss <= PSS_IDLE;
+                end
+
+                default: persp_pss <= PSS_IDLE;
+            endcase
+`endif // GPU_PERSP_IMPL
+
             // ----------------------------------------------------------
             // Drain detection — when source done and pipe empty, flush.
             // ----------------------------------------------------------
             if (src_done && !p0_valid && !p1_valid && !p2_valid && !p2b_valid
                          && !p3_valid && fbss == FBSS_IDLE) begin
                 src_done <= 0;
+`ifdef GPU_PERSP_IMPL
+                persp_active      <= 0;  // disarm so PSS doesn't keep running
+                persp_seg_a_ready <= 0;
+                persp_seg_b_ready <= 0;
+                persp_first_done  <= 0;
+`endif
                 state    <= S_FB_FLUSH;
             end
         end

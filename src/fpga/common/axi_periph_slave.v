@@ -393,7 +393,7 @@ localparam [31:0] HW_FEATURES =
     32'h0000_0000
 `endif
     |
-`ifdef GPU_FEAT_PERSP_SPAN
+`ifdef GPU_PERSP_IMPL
     32'h0000_2000      // GPU perspective spans (bit 13)
 `else
     32'h0000_0000
