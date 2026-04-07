@@ -76,7 +76,7 @@ All functions are declared in `of.h` (which includes all subsystem headers) as `
 void of_video_init(void);                          // Initialize video
 uint8_t *of_video_surface(void);                   // Get draw buffer pointer
 void of_video_flip(void);                          // Swap buffers at vsync
-void of_video_sync(void);                          // Wait for flip to complete
+void of_video_wait_flip(void);                     // Wait for flip to complete
 void of_video_clear(uint8_t color);                // Fill with palette index
 void of_video_pixel(int x, int y, uint8_t color);  // Set pixel (bounds-checked)
 void of_video_flush(void);                         // Flush D-cache
@@ -275,15 +275,11 @@ void of_sprite_hide(int id);
 void of_sprite_hide_all(void);
 ```
 
-### Link Cable — `of_link.h`
+### Networking — `of_net.h`
 
-GB/GBC-compatible serial link at 256 kHz.
-
-```c
-int of_link_send(uint32_t data);
-int of_link_recv(uint32_t *data);
-uint32_t of_link_status(void);
-```
+Host/join sessions, broadcast and unicast messages between cores. See
+`of_net.h` for the full API (`of_net_host_start`, `of_net_join`,
+`of_net_send`, `of_net_recv`, `of_net_broadcast`, etc.).
 
 ### Analogizer — `of_analogizer.h`
 
@@ -292,7 +288,7 @@ int of_analogizer_enabled(void);
 uint32_t of_analogizer_state(void);
 ```
 
-### BRAM Hot Path — `of_bram.h`
+### Fast RAM Hot Path — `of_fastram.h`
 
 Place inner loops in on-chip BRAM for zero-latency execution (~55 KB available):
 
@@ -339,7 +335,7 @@ int main(void) {
         of_video_clear(0);
         of_fill_rect(x, y, 16, 16, 255);
         of_video_flip();
-        of_video_sync();
+        of_video_wait_flip();
     }
 }
 ```

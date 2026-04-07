@@ -150,10 +150,25 @@ static int alloc_voice(int priority)
             }
         }
         if (voice >= 0) {
+            /* Fast hardware fade-out before deactivating to eliminate
+             * the click from snapping the sample value to silence.
+             * Step 1: set target=0 with fast ramp.
+             * Step 2: wait long enough for the ramp to actually complete.
+             *         At RATE=8, vol drops from 255 to 0 in 32 sample
+             *         periods × 21μs/sample ≈ 670μs.
+             * Step 3: deactivate the voice. */
             MIX_VOICE_SEL = voice;
-            MIX_VOICE_VOL_LR = 0;
             MIX_VOICE_VOL_TARGET = 0;
-            MIX_VOICE_VOL_RATE = 0;
+            MIX_VOICE_VOL_RATE = 8;
+
+            /* Busy-wait for the ramp to complete. ~700μs at 100MHz =
+             * ~70000 cycles. This only runs when stealing a voice, which
+             * is rare (only when all 31 voices are busy). */
+            for (volatile int w = 0; w < 7000; w++) {
+                __asm__ volatile("nop");
+            }
+
+            MIX_VOICE_SEL = voice;
             ctrl_shadow[voice] = 0;
             MIX_VOICE_CTRL = 0;
         }
@@ -393,7 +408,7 @@ void of_mixer_set_voice_raw(int voice, uint32_t rate_fp16, int vol_l, int vol_r)
     MIX_VOICE_VOL_TARGET = ((vol_r & 0xFF) << 8) | (vol_l & 0xFF);
 }
 
-void of_mixer_set_vol_rate(int voice, int rate)
+void of_mixer_set_volume_ramp(int voice, int rate)
 {
     if (!voice_in_range(voice)) return;
     MIX_VOICE_SEL = voice;

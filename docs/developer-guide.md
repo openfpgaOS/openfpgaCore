@@ -316,11 +316,11 @@ fb[y * OF_SCREEN_W + x] = color_index;
 #### `void of_video_flip(void)`
 Queue a buffer swap. The swap happens at the next vertical blank. Returns immediately -- the CPU can start drawing the next frame while the display shows the previous one.
 
-#### `void of_video_sync(void)`
+#### `void of_video_wait_flip(void)`
 Block until the last `of_video_flip()` completes. Use this to pace your game loop to vsync:
 ```c
 of_video_flip();
-of_video_sync();  // Waits for vsync, then returns
+of_video_wait_flip();  // Waits for vsync, then returns
 ```
 
 #### `void of_video_clear(uint8_t color)`
@@ -1142,7 +1142,7 @@ while (1) {
     update();
     render();
     of_video_flip();
-    of_video_sync();  // Blocks until vsync
+    of_video_wait_flip();  // Blocks until vsync
 }
 ```
 Guaranteed 60 FPS if your frame fits in the budget. Drops to 30 FPS if it doesn't.
@@ -1206,7 +1206,7 @@ void show_image(void) {
             fb[(oy + y) * OF_SCREEN_W + ox + x] = pixels[y * w + x];
 
     of_video_flip();
-    of_video_sync();
+    of_video_wait_flip();
 }
 ```
 
@@ -1243,7 +1243,7 @@ int main(void) {
                 fb[(player_y + dy) * OF_SCREEN_W + player_x + dx] = 1;
 
         of_video_flip();
-        of_video_sync();
+        of_video_wait_flip();
     }
 }
 ```

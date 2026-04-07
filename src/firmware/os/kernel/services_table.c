@@ -131,7 +131,7 @@ void services_table_init(void) {
     svc->mixer_set_position  = of_mixer_set_position;
     svc->mixer_set_voice     = of_mixer_set_voice;
     svc->mixer_set_voice_raw = of_mixer_set_voice_raw;
-    svc->mixer_set_vol_rate  = of_mixer_set_vol_rate;
+    svc->mixer_set_volume_ramp = of_mixer_set_volume_ramp;
     svc->mixer_poll_ended    = of_mixer_poll_ended;
     svc->mixer_alloc_samples = of_mixer_alloc_samples;
     svc->mixer_free_samples  = of_mixer_free_samples;

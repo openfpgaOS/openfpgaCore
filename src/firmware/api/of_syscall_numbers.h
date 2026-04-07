@@ -44,7 +44,7 @@ extern "C" {
 #define OF_SYS_INPUT_SET_DEADZONE      0x1022
 #define OF_SYS_INPUT_POLL_P0           0x1023
 
-/* Save — handled internally by fclose() */
+/* Save -- exposed via POSIX fopen/fwrite("save:N", ...); see of_save.h */
 
 /* Analogizer */
 #define OF_SYS_ANALOGIZER_GET_STATE    0x1040
@@ -67,14 +67,15 @@ extern "C" {
 /* Terminal */
 #define OF_SYS_TERM_PUTCHAR            0x1070
 
-/* Timer (time/delay via POSIX clock_gettime/usleep) */
+/* Timer -- periodic callback + raw time queries.
+ * (POSIX clock_gettime / usleep route through these too via of_posix.c.) */
 #define OF_SYS_TIMER_SET_CALLBACK      0x1074
 #define OF_SYS_TIMER_STOP              0x1075
 #define OF_SYS_TIMER_GET_US            0x1076
 #define OF_SYS_TIMER_GET_MS            0x1077
 #define OF_SYS_TIMER_DELAY_US          0x1078
 
-/* File — handled internally by fread/fseek */
+/* File I/O -- buffered I/O via POSIX fread/fseek; raw async syscalls below. */
 
 /* Tile engine */
 #define OF_SYS_TILE_ENABLE             0x1090
@@ -94,7 +95,6 @@ extern "C" {
 /* Version */
 #define OF_SYS_GET_VERSION             0x10B0
 
-/* Idle hook — internal, called during DMA waits */
 
 /* Memory allocation */
 #define OF_SYS_MALLOC                  0x10C0
@@ -122,7 +122,7 @@ extern "C" {
 #define OF_SYS_MIXER_FREE_SAMPLES      0x10E0
 #define OF_SYS_MIXER_SET_RATE_RAW      0x10E1
 #define OF_SYS_MIXER_SET_VOICE_RAW     0x10E2
-#define OF_SYS_MIXER_SET_VOL_RATE      0x10E3
+#define OF_SYS_MIXER_SET_VOLUME_RAMP   0x10E3
 #define OF_SYS_MIXER_POLL_ENDED        0x10E4
 #define OF_SYS_MIXER_SET_END_CALLBACK  0x10E9
 #define OF_SYS_MIXER_RETRIGGER         0x10EA
@@ -142,6 +142,9 @@ extern "C" {
 #define OF_SYS_FILE_READ_ASYNC         0x10F1
 #define OF_SYS_FILE_ASYNC_POLL         0x10F2
 #define OF_SYS_FILE_ASYNC_BUSY         0x10F3
+
+/* Process control -- handled via Linux-compat syscalls in kernel/syscall.c */
+#define OF_SYS_EXIT                    93   /* Linux SYS_exit */
 
 #ifdef __cplusplus
 }

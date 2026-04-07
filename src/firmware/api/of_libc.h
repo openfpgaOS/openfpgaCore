@@ -95,8 +95,8 @@ struct of_libc_table {
     double (*sqrt)(double);
 
     /* ================================================================
-     * Extended entries (added in count=83 expansion)
-     * Old apps (count<=52) ignore these; new apps check count >= 83.
+     * Extended entries -- append-only. Old apps with smaller `count`
+     * ignore these; new apps check `count` for compatibility.
      * ================================================================ */
 
     /* -- string extended (7) -- */
@@ -139,7 +139,7 @@ struct of_libc_table {
     int (*isprint)(int);
 
     /* ================================================================
-     * POSIX I/O (5) — raw file descriptors for game engine ports
+     * POSIX I/O (7) -- raw file descriptors for game engine ports
      * ================================================================ */
     int  (*open)(const char *, int, ...);
     int  (*close)(int);

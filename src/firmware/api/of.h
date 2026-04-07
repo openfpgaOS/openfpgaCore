@@ -49,7 +49,7 @@ extern "C" {
 #include "of_timer.h"
 #include "of_file.h"
 #include "of_save.h"
-#include "of_link.h"
+#include "of_net.h"
 #include "of_analogizer.h"
 #include "of_terminal.h"
 #include "of_tile.h"
@@ -58,10 +58,15 @@ extern "C" {
 #include "of_mixer.h"
 #include "of_codec.h"
 #include "of_lzw.h"
-#include "of_bram.h"
+#include "of_fastram.h"
 #include "of_midi.h"
 #include "of_caps.h"
 #include "of_services.h"
+/* Note: of_gpu.h and of_libc.h are intentionally NOT included here.
+ *   - of_gpu.h has per-app static state (ring buffer pointers); include
+ *     it from exactly one TU.
+ *   - of_libc.h is internal -- apps use <stdio.h>/<string.h>/etc. which
+ *     resolve through the OS jump table at -I libc_include. */
 
 /* ======================================================================
  * System
@@ -70,7 +75,7 @@ extern "C" {
 #ifndef OF_PC
 
 static inline void of_exit(void) {
-    __of_syscall0(93); /* SYS_exit */
+    __of_syscall0(OF_SYS_EXIT);
     __builtin_unreachable();
 }
 

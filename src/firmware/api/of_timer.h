@@ -30,10 +30,17 @@ static inline void of_timer_stop(void) {
     OF_SVC->timer_stop();
 }
 
+/* Free-running monotonic time queries (linkable, defined in of_posix.c).
+ * Use these from C++ TUs or where the inline-via-libc path is unavailable. */
+unsigned int of_time_us(void);
+unsigned int of_time_ms(void);
+
 #else /* OF_PC */
 
 static inline void of_timer_set_callback(void (*fn)(void), uint32_t hz) { (void)fn; (void)hz; }
 static inline void of_timer_stop(void) { }
+unsigned int of_time_us(void);
+unsigned int of_time_ms(void);
 
 #endif /* OF_PC */
 

@@ -1124,8 +1124,8 @@ __attribute__((used)) long syscall_dispatch(long n, long a0, long a1, long a2,
         of_mixer_set_voice_raw((int)a0, (uint32_t)a1, (int)a2, (int)a3);
         return 0;
     }
-    if (n == OF_SYS_MIXER_SET_VOL_RATE) {
-        of_mixer_set_vol_rate((int)a0, (int)a1);
+    if (n == OF_SYS_MIXER_SET_VOLUME_RAMP) {
+        of_mixer_set_volume_ramp((int)a0, (int)a1);
         return 0;
     }
     if (n == OF_SYS_MIXER_POLL_ENDED)

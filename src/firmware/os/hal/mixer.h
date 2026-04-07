@@ -71,7 +71,7 @@ void of_mixer_set_voice(int voice, int sample_rate_hz, int vol_l, int vol_r);
 void of_mixer_set_voice_raw(int voice, uint32_t rate_fp16, int vol_l, int vol_r);
 
 /* Volume ramp speed (0=instant, 1=fast ~5ms, higher=slower) */
-void of_mixer_set_vol_rate(int voice, int rate);
+void of_mixer_set_volume_ramp(int voice, int rate);
 
 /* Poll for ended voices. Returns bitmask of voices that finished
  * since last poll. Clears the hardware IRQ bits and updates

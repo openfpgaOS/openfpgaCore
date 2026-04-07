@@ -19,6 +19,20 @@ typedef enum {
     OF_ERR_NOMEM    = -6,
 } of_error_t;
 
+/* Boolean parameter constants -- pass these to APIs that take an `int
+ * enable` / `int loop` / `int hflip` flag for self-documenting call sites:
+ *   of_tile_enable(OF_ENABLE, 0);
+ *   of_midi_play(data, len, OF_LOOP);
+ */
+#define OF_DISABLE  0
+#define OF_ENABLE   1
+#define OF_OFF      0
+#define OF_ON       1
+#define OF_NO       0
+#define OF_YES      1
+#define OF_ONCE     0
+#define OF_LOOP     1
+
 #ifdef __cplusplus
 }
 #endif
