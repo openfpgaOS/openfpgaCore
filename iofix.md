@@ -69,7 +69,6 @@ Reducing the 64KB memset to 4KB doesn't help.
 
 ### VexiiRiscv PMA
 - CRAM1 (0x31+): main=1 exe=0 (D-cacheable, not executable)
-- Zicboz removed (cbo.zero disabled in hardware and software)
 
 ## What we don't know
 
@@ -115,12 +114,11 @@ Reducing the 64KB memset to 4KB doesn't help.
 - `src/firmware/os/targets/pocket/file.c` — file_wait_complete, of_file_read_raw
 - `src/firmware/os/targets/pocket/audio.c` — ring buffer removed, IRQ handler
 - `src/firmware/os/hal/regs.h` — DS_DEBUG, DS_STATUS_WR_IDLE, timer regs
-- `src/firmware/os/hal/fast_mem.S` — cbo.zero disabled
 - `src/fpga/common/axi_periph_slave.v` — DS_DEBUG, WR_IDLE, ds_done fix
 - `src/fpga/common/cpu_psram1_cdc.v` — mutual exclusion, cdc_inflight
 - `src/fpga/targets/pocket/core_top.v` — ownership tracking, deferred bridge,
   auto-ack shutdown
-- `src/fpga/vendor/vexriscv/generate_vexii.sh` — PMA, no Zicboz
+- `src/fpga/vendor/vexriscv/generate_vexii.sh` — PMA
 - `src/fpga/test/tb_cram1_cdc.v` — Verilator collision test
 - `iofix.md` — this file
 

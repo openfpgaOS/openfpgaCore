@@ -6,11 +6,10 @@
  *   - D-cache: 64KB, 4-way, 64B lines, write-back
  *   - Store buffer: 4 slots — LLSS interleaving prevents stalls
  *   - Zicbom: cbo.clean/flush/inval
- *   - Zicboz: cbo.zero (allocate zeroed line, no SDRAM read)
  *
  * Strategy:
- *   memset zero:     cbo.zero (allocate + zero, no read)
- *   memset non-zero: plain stores (cbo.zero + overwrite is slower)
+ *   memset:          plain 16-word unrolled stores (store buffer
+ *                    handles write-allocate pipelining)
  *   memcpy:          cbo.inval on dest (drop dirty, no writeback),
  *                    then load src + store dest (write-allocate is
  *                    cheap when we're writing the full line)
@@ -22,13 +21,6 @@
 .macro CBO_INVAL reg
     .if \reg == 10   /* a0 */
     .word 0x0005200F
-    .endif
-.endm
-
-/* cbo.zero (reg): allocate cache line filled with zeros, no SDRAM read. */
-.macro CBO_ZERO reg
-    .if \reg == 10   /* a0 */
-    .word 0x0045200F
     .endif
 .endm
 
@@ -181,9 +173,8 @@ memcpy:
 /* ================================================================
  * memset(dest, c, n) — returns dest
  *
- * c==0, 64B-aligned, cached: cbo.zero (no SDRAM read, no stores)
- * c!=0: plain 16-word unrolled stores (fastest — store buffer
- *       handles write-allocate pipelining, cbo.zero overhead not worth it)
+ * Plain 16-word unrolled stores. The store buffer handles
+ * write-allocate pipelining, so this is the fastest approach we have.
  * ================================================================ */
 .global memset
 memset:
@@ -201,48 +192,6 @@ memset:
     andi    t1, a0, 3
     bnez    t1, .Lset_byte
 
-    /* cbo.zero disabled — investigating D-cache stall on CRAM1 reads.
-     * Fall through to plain stores for all fills including zero. */
-    j       .Lset_sw_enter
-    bnez    a1, .Lset_sw_enter
-    li      t1, 64
-    bltu    a2, t1, .Lset_sw_enter
-
-    /* Check cached region */
-    srli    t1, a0, 26
-    li      t2, 4
-    beq     t1, t2, .Lset_zero_align
-    srli    t1, a0, 27
-    li      t2, 6
-    bne     t1, t2, .Lset_sw_enter
-
-.Lset_zero_align:
-    /* Head: store zeros until 64B-aligned */
-    andi    t1, a0, 63
-    beqz    t1, .Lset_zero_64
-    li      t2, 64
-    sub     t1, t2, t1
-    bgeu    t1, a2, .Lset_sw_enter
-.Lset_zero_head:
-    sw      zero, 0(a0)
-    addi    a0, a0, 4
-    addi    a2, a2, -4
-    addi    t1, t1, -4
-    bnez    t1, .Lset_zero_head
-
-    /* cbo.zero: one instruction per 64B line, no SDRAM read */
-.Lset_zero_64:
-    li      t1, 64
-.Lset_zero_loop:
-    CBO_ZERO 10
-    addi    a0, a0, 64
-    addi    a2, a2, -64
-    bgeu    a2, t1, .Lset_zero_loop
-    beqz    a2, .Lset_done
-    j       .Lset_4
-
-    /* Non-zero fill: plain 16-word unrolled stores */
-.Lset_sw_enter:
     li      t1, 64
     bltu    a2, t1, .Lset_32
 .Lset_64:

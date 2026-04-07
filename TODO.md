@@ -16,7 +16,6 @@
 ### Zicbom `cbo.clean` is extremely slow (~825 cycles per line)
 - Measured: 1200 lines × 825 cycles = 990,000 cycles ≈ 9.9ms — unusable for per-frame flushes
 - `cbo.inval` works fine (used in `fast_mem.S` memcpy) — invalidation path has no writeback, so no stall
-- `cbo.zero` disabled due to CRAM1 stall — separate issue
 - **Workaround**: `video.c` returns uncached FB pointer from `of_video_get_surface()`, flip does no flush
 - **CBM Scala source** (`LsuL1Plugin.scala:1034-1056`):
   - `CBM_REDO := askCbm` — always replays on dirty lines (line 1035)
