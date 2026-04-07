@@ -102,9 +102,25 @@ CDC_TOP = tb_cram1_cdc
 CDC_DIR = obj_dir_cdc
 
 # ============================================================
+# GPU
+# ============================================================
+GPU_SRCS = \
+	tb_gpu.v \
+	$(COMMON_DIR)/gpu_core.v \
+	$(COMMON_DIR)/gpu_tex_cache.v
+
+GPU_CPP = tb_gpu_main.cpp
+GPU_TOP = tb_gpu
+# Separate Verilator output dirs for the Lite and Full GPU test binaries.
+# Both build from the same gpu_core.v sources but with different
+# +define+GPU_VARIANT_* macros, exercising both ifdef paths.
+GPU_LITE_DIR = obj_dir_gpu_lite
+GPU_FULL_DIR = obj_dir_gpu_full
+
+# ============================================================
 # Targets
 # ============================================================
-.PHONY: all sdram psram psram-rtl sram cdc run run-psram run-sram build clean
+.PHONY: all sdram psram psram-rtl sram cdc gpu gpu-lite gpu-full run run-psram run-sram build clean
 
 all: sdram psram sram
 # psram-rtl disabled: requires burst write ports not in current RTL
@@ -157,6 +173,37 @@ $(CDC_DIR)/V$(CDC_TOP): $(CDC_SRCS) $(CDC_CPP)
 	$(VERILATOR) $(VERILATOR_FLAGS) --timing --top-module $(CDC_TOP) --Mdir $(CDC_DIR) \
 		$(CDC_SRCS) $(CDC_CPP)
 
+# --- GPU ---
+# Two binaries: gpu-lite (default Pocket variant, span renderer only) and
+# gpu-full (everything, including triangle rasterizer). Both share the same
+# Verilog sources and same C++ test bench; ifdef'd code in gpu_core.v and
+# tb_gpu_main.cpp selects which features compile in.
+#
+# `make gpu` runs both, in order. Lite first so a Lite-only failure shows
+# clearly without the longer Full output flooding the terminal.
+gpu: gpu-lite gpu-full
+
+gpu-lite: $(GPU_LITE_DIR)/V$(GPU_TOP)
+	@printf "\n=== GPU LITE variant ===\n"
+	./$(GPU_LITE_DIR)/V$(GPU_TOP)
+
+$(GPU_LITE_DIR)/V$(GPU_TOP): $(GPU_SRCS) $(GPU_CPP)
+	$(VERILATOR) $(VERILATOR_FLAGS) --top-module $(GPU_TOP) --Mdir $(GPU_LITE_DIR) \
+		+define+GPU_VARIANT_LITE \
+		-I$(COMMON_DIR) \
+		$(GPU_SRCS) $(GPU_CPP)
+
+gpu-full: $(GPU_FULL_DIR)/V$(GPU_TOP)
+	@printf "\n=== GPU FULL variant ===\n"
+	./$(GPU_FULL_DIR)/V$(GPU_TOP)
+
+$(GPU_FULL_DIR)/V$(GPU_TOP): $(GPU_SRCS) $(GPU_CPP)
+	$(VERILATOR) $(VERILATOR_FLAGS) --top-module $(GPU_TOP) --Mdir $(GPU_FULL_DIR) \
+		+define+GPU_VARIANT_FULL \
+		-CFLAGS -DGPU_FEAT_TRIANGLE \
+		-I$(COMMON_DIR) \
+		$(GPU_SRCS) $(GPU_CPP)
+
 # --- Clean ---
 clean:
-	rm -rf $(SDRAM_DIR) $(PSRAM_DIR) $(PSRAM_RTL_DIR) $(SRAM_DIR) $(CDC_DIR) io_sdram_test.v psram_test.sv psram_controller_test.v
+	rm -rf $(SDRAM_DIR) $(PSRAM_DIR) $(PSRAM_RTL_DIR) $(SRAM_DIR) $(CDC_DIR) $(GPU_LITE_DIR) $(GPU_FULL_DIR) obj_dir_gpu io_sdram_test.v psram_test.sv psram_controller_test.v

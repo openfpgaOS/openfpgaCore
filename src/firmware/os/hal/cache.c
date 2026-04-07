@@ -2,12 +2,15 @@
  * openfpgaOS Cache Management HAL
  *
  * VexiiRiscv D-cache: 64KB, 4-way set-associative, write-back, 64B lines
- * (256 sets x 4 ways x 64B).
+ * (256 sets × 4 ways × 64B).
  *
- * Uses targeted conflict eviction for range operations: only touches
- * the cache sets that overlap the target range, instead of sweeping
- * all 256 sets.
+ * Range operations (clean, invalidate) use Zicbom instructions (cbo.clean,
+ * cbo.inval) which operate on a single cache line by address. These only
+ * touch lines that overlap the target range, preserving all other cached
+ * data.
  *
+ * Full eviction (flush_dcache) still uses conflict eviction as a fallback
+ * for situations where we need to flush everything (e.g. code loading).
  */
 
 #include "cache.h"
@@ -18,45 +21,30 @@
 #define DCACHE_WAYS       4
 #define DCACHE_TOTAL      (DCACHE_SETS * DCACHE_WAYS * DCACHE_LINE_SIZE)  /* 64KB */
 
-/* One stride = all lines in one way = 256 sets × 64B = 16KB */
-#define DCACHE_STRIDE     (DCACHE_SETS * DCACHE_LINE_SIZE)
-
 /* Eviction region: top of SDRAM, above all active data */
 #define EVICT_BASE  (SDRAM_BASE + SDRAM_SIZE - DCACHE_TOTAL)
 
 void of_cache_init(void) { }
 
-/* Evict specific cache sets covering [addr, addr+size).
- * 4-way set-associative: set index = bits [13:6] of address.
- * Must read 4 addresses per set (different tags) to evict all ways. */
-static void dcache_evict_range(void *addr, uint32_t size) {
-    __asm__ volatile("fence" ::: "memory");
-
-    uintptr_t start = (uintptr_t)addr & ~(DCACHE_LINE_SIZE - 1);
-    uintptr_t end   = ((uintptr_t)addr + size + DCACHE_LINE_SIZE - 1)
-                      & ~(DCACHE_LINE_SIZE - 1);
-    uint32_t lines = (end - start) / DCACHE_LINE_SIZE;
-
-    if (lines >= DCACHE_SETS) {
-        /* Full eviction: read 64KB to fill all 256 sets × 4 ways */
-        volatile char *p = (volatile char *)EVICT_BASE;
-        for (uint32_t i = 0; i < DCACHE_TOTAL; i += DCACHE_LINE_SIZE)
-            (void)p[i];
-    } else {
-        /* Targeted: touch all 4 ways of each overlapping set */
-        for (uintptr_t a = start; a < end; a += DCACHE_LINE_SIZE) {
-            uint32_t set = (a >> 6) & (DCACHE_SETS - 1);
-            uint32_t off = set * DCACHE_LINE_SIZE;
-            (void)*(volatile char *)(EVICT_BASE + off);
-            (void)*(volatile char *)(EVICT_BASE + DCACHE_STRIDE + off);
-            (void)*(volatile char *)(EVICT_BASE + DCACHE_STRIDE * 2 + off);
-            (void)*(volatile char *)(EVICT_BASE + DCACHE_STRIDE * 3 + off);
-        }
-    }
-
-    __asm__ volatile("fence" ::: "memory");
+/* cbo.clean: write back dirty line at addr, keep line valid in cache.
+ * Encoding: .insn i 0x0F, 2, x0, rs1, 0x001 */
+static inline void cbo_clean(uintptr_t addr) {
+    __asm__ volatile(".insn i 0x0F, 2, x0, %0, 0x001" :: "r"(addr) : "memory");
 }
 
+/* cbo.inval: invalidate cache line at addr, discard dirty data.
+ * Encoding: .insn i 0x0F, 2, x0, rs1, 0x000 */
+static inline void cbo_inval(uintptr_t addr) {
+    __asm__ volatile(".insn i 0x0F, 2, x0, %0, 0x000" :: "r"(addr) : "memory");
+}
+
+/* cbo.flush: write back dirty line at addr, then invalidate.
+ * Encoding: .insn i 0x0F, 2, x0, rs1, 0x002 */
+static inline void cbo_flush(uintptr_t addr) {
+    __asm__ volatile(".insn i 0x0F, 2, x0, %0, 0x002" :: "r"(addr) : "memory");
+}
+
+/* Full eviction via conflict reads — used only for flush_dcache(). */
 static void dcache_evict_all(void) {
     __asm__ volatile("fence" ::: "memory");
     volatile char *p = (volatile char *)EVICT_BASE;
@@ -66,15 +54,30 @@ static void dcache_evict_all(void) {
 }
 
 void of_cache_inval_range(void *addr, uint32_t size) {
-    dcache_evict_range(addr, size);
+    uintptr_t a   = (uintptr_t)addr & ~(DCACHE_LINE_SIZE - 1);
+    uintptr_t end = ((uintptr_t)addr + size + DCACHE_LINE_SIZE - 1)
+                    & ~(DCACHE_LINE_SIZE - 1);
+    for (; a < end; a += DCACHE_LINE_SIZE)
+        cbo_inval(a);
+    __asm__ volatile("fence" ::: "memory");
 }
 
 void of_cache_clean_range(void *addr, uint32_t size) {
-    dcache_evict_range(addr, size);
+    uintptr_t a   = (uintptr_t)addr & ~(DCACHE_LINE_SIZE - 1);
+    uintptr_t end = ((uintptr_t)addr + size + DCACHE_LINE_SIZE - 1)
+                    & ~(DCACHE_LINE_SIZE - 1);
+    for (; a < end; a += DCACHE_LINE_SIZE)
+        cbo_clean(a);
+    __asm__ volatile("fence" ::: "memory");
 }
 
 void of_cache_flush_range(void *addr, uint32_t size) {
-    dcache_evict_range(addr, size);
+    uintptr_t a   = (uintptr_t)addr & ~(DCACHE_LINE_SIZE - 1);
+    uintptr_t end = ((uintptr_t)addr + size + DCACHE_LINE_SIZE - 1)
+                    & ~(DCACHE_LINE_SIZE - 1);
+    for (; a < end; a += DCACHE_LINE_SIZE)
+        cbo_flush(a);
+    __asm__ volatile("fence" ::: "memory");
 }
 
 void of_cache_flush_dcache(void) {

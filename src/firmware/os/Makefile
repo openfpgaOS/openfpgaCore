@@ -70,6 +70,7 @@ HAL_SRCS = $(HAL_DIR)/hal.c \
            $(HAL_DIR)/cache.c \
            $(HAL_DIR)/mixer.c \
            $(HAL_DIR)/net.c \
+           $(HAL_DIR)/link.c \
            $(HAL_DIR)/codec.c \
            $(HAL_DIR)/lzw.c
 
@@ -85,7 +86,6 @@ TARGET_SRCS = $(TARGET_DIR)/video.c \
               $(TARGET_DIR)/snac.c \
               $(TARGET_DIR)/terminal.c \
               $(TARGET_DIR)/timer.c \
-              $(TARGET_DIR)/link.c \
 
 # Source files - Kernel
 KERNEL_SRCS = $(KERNEL_DIR)/main.c \

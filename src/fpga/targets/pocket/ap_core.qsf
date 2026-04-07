@@ -743,11 +743,8 @@ set_global_assignment -name QIP_FILE apf/apf.qip
 set_global_assignment -name QIP_FILE apf/mf_ddio_bidir_12.qip
 set_global_assignment -name VERILOG_FILE core_top.v
 set_global_assignment -name VERILOG_FILE core_bridge_cmd.v
-set_global_assignment -name VERILOG_FILE ../../common/text_terminal.v
-set_global_assignment -name MIF_FILE ../../common/font_rom.mif
-set_global_assignment -name MIF_FILE ../../common/vram_init.mif
 set_global_assignment -name MIF_FILE firmware.mif
-# tile_engine.v and sprite_engine.v removed — rendering done in software
+# text_terminal.v, tile_engine.v, sprite_engine.v removed — rendering in software
 set_global_assignment -name VERILOG_FILE io_sdram.v
 set_global_assignment -name VERILOG_FILE ../../common/psram_controller.v
 set_global_assignment -name VERILOG_FILE mf_linebuf.v
@@ -756,11 +753,7 @@ set_global_assignment -name QIP_FILE mf_pllbase.qip
 set_global_assignment -name SIP_FILE mf_pllbase.sip
 
 # Audio filter modules
-set_global_assignment -name SYSTEMVERILOG_FILE ../../common/audio/filters/audio_filters.sv
-set_global_assignment -name SYSTEMVERILOG_FILE ../../common/audio/filters/dc_blocker.sv
-set_global_assignment -name SYSTEMVERILOG_FILE ../../common/audio/filters/iir_filter.sv
-set_global_assignment -name SYSTEMVERILOG_FILE ../../common/audio/filters/iir_filter_tap.sv
-set_global_assignment -name SYSTEMVERILOG_FILE ../../common/audio/filters/audio_mix.sv
+# audio_filters removed — never instantiated (OpenGateware template leftover)
 
 # PSRAM sync burst: IOB input registers for fast data capture
 set_instance_assignment -name FAST_INPUT_REGISTER ON -to cram0_dq[0]
@@ -834,7 +827,9 @@ set_global_assignment -name SYSTEMVERILOG_FILE ../../vendor/opl3/i2s.sv
 # Source files added after initial commit
 set_global_assignment -name VERILOG_FILE ../../common/audio_mixer.v
 set_global_assignment -name VERILOG_FILE ../../common/audio_output.v
-set_global_assignment -name VERILOG_FILE ../../common/axi_bridge_master.v
+set_global_assignment -name VERILOG_FILE ../../common/gpu_core.v
+set_global_assignment -name VERILOG_FILE ../../common/gpu_tex_cache.v
+# axi_bridge_master.v removed — bridge DMA uses CRAM1 only
 set_global_assignment -name VERILOG_FILE ../../common/axi_periph_slave.v
 set_global_assignment -name VERILOG_FILE ../../common/snac_shifter.v
 set_global_assignment -name VERILOG_FILE ../../common/axi_psram_slave.v
@@ -844,7 +839,7 @@ set_global_assignment -name VERILOG_FILE ../../common/cpu_psram1_cdc.v
 set_global_assignment -name VERILOG_FILE ../../common/cpu_system.v
 set_global_assignment -name VERILOG_FILE ../../common/jtframe_frac_cen.v
 set_global_assignment -name VERILOG_FILE ../../common/jtframe_resync.v
-set_global_assignment -name VERILOG_FILE ../../common/link_mmio.v
+set_global_assignment -name VERILOG_FILE ../../common/link_lite.v
 set_global_assignment -name VERILOG_FILE ../../common/opl3_wrapper.v
 set_global_assignment -name VERILOG_FILE ../../common/psram_cram0.v
 set_global_assignment -name VERILOG_FILE ../../common/psram_cram1.v
@@ -857,4 +852,4 @@ set_global_assignment -name VERILOG_FILE ../../vendor/vexriscv/VexiiRiscv_Full.v
 set_global_assignment -name VERILOG_FILE ../../vendor/opl3/afifo.v
 set_global_assignment -name VERILOG_FILE mf_pllram_133.v
 set_global_assignment -name SDC_FILE core_constraints.sdc
-set_global_assignment -name SEED 3
+set_global_assignment -name SEED 8

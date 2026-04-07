@@ -776,25 +776,11 @@ wire [3:0]  arb_s_wstrb;
 wire        arb_s_bvalid;
 wire [1:0]  arb_s_bresp;
 
-// Bridge AXI4 master (from axi_bridge_master to axi_sdram_arbiter)
-wire        bridge_m_arvalid, bridge_m_arready;
-wire [31:0] bridge_m_araddr;
-wire [7:0]  bridge_m_arlen;
-wire        bridge_m_rvalid, bridge_m_rlast;
-wire [31:0] bridge_m_rdata;
-wire [1:0]  bridge_m_rresp;
-wire        bridge_m_awvalid, bridge_m_awready;
-wire [31:0] bridge_m_awaddr;
-wire [7:0]  bridge_m_awlen;
-wire        bridge_m_wvalid, bridge_m_wready, bridge_m_wlast;
-wire [31:0] bridge_m_wdata;
-wire [3:0]  bridge_m_wstrb;
-wire        bridge_m_bvalid;
-wire [1:0]  bridge_m_bresp;
-wire        bridge_m_idle;
-wire        bridge_m_wr_idle;
-wire [31:0] bridge_axi_rd_data;
-wire        bridge_axi_rd_done;
+// Bridge SDRAM path removed — all bridge DMA now goes through CRAM1.
+// M3 on SDRAM arbiter tied off.
+wire bridge_m_wr_idle = 1'b1;
+wire [31:0] bridge_axi_rd_data = 32'b0;
+wire        bridge_axi_rd_done = 1'b0;
 
 
 // ============================================================
@@ -862,103 +848,9 @@ always @(posedge clk_74a) begin
     end
 end
 
-// ============================================================
-// Bridge SDRAM Write CDC: dcfifo (clk_74a -> clk_ram_controller)
-// ============================================================
-localparam integer BRIDGE_WR_SKID_DEPTH = 4;
-wire        bridge_sdram_wr = bridge_wr && (bridge_addr[31:26] == 6'b000000);
-
-wire        bridge_wr_fifo_wrreq;
-wire        bridge_wr_fifo_full;
-wire [55:0] bridge_wr_fifo_wdata;
-wire        bridge_wr_fifo_drain;
-wire        bridge_wr_fifo_empty;
-wire [55:0] bridge_wr_fifo_q;
-reg [55:0]  bridge_wr_skid_data [0:BRIDGE_WR_SKID_DEPTH-1];
-reg [1:0]   bridge_wr_skid_wrptr;
-reg [1:0]   bridge_wr_skid_rdptr;
-reg [2:0]   bridge_wr_skid_count;
-wire        bridge_wr_skid_empty = (bridge_wr_skid_count == 0);
-wire        bridge_wr_skid_nonempty_74a = !bridge_wr_skid_empty;
-wire        bridge_wr_skid_pop = !bridge_wr_skid_empty && !bridge_wr_fifo_full;
-wire [55:0] bridge_wr_skid_head =
-            (bridge_wr_skid_rdptr == 2'd0) ? bridge_wr_skid_data[0] :
-            (bridge_wr_skid_rdptr == 2'd1) ? bridge_wr_skid_data[1] :
-            (bridge_wr_skid_rdptr == 2'd2) ? bridge_wr_skid_data[2] :
-                                             bridge_wr_skid_data[3];
-wire        bridge_wr_skid_push = bridge_sdram_wr;
-wire        bridge_wr_skid_has_space = (bridge_wr_skid_count != 3'd4);
-wire        bridge_wr_skid_push_ok = bridge_wr_skid_push &&
-                                     (bridge_wr_skid_has_space || bridge_wr_skid_pop);
-assign bridge_wr_fifo_wrreq = bridge_wr_skid_pop;
-assign bridge_wr_fifo_wdata = bridge_wr_skid_head;
-
-always @(posedge clk_74a) begin
-    if (!reset_n_apf) begin
-        bridge_wr_skid_wrptr <= 2'd0;
-        bridge_wr_skid_rdptr <= 2'd0;
-        bridge_wr_skid_count <= 3'd0;
-    end else begin
-        if (bridge_wr_skid_pop) begin
-            bridge_wr_skid_rdptr <= bridge_wr_skid_rdptr + 2'd1;
-        end
-
-        if (bridge_wr_skid_push_ok) begin
-            case (bridge_wr_skid_wrptr)
-                2'd0: bridge_wr_skid_data[0] <= {bridge_addr[25:2], bridge_wr_data[31:0]};
-                2'd1: bridge_wr_skid_data[1] <= {bridge_addr[25:2], bridge_wr_data[31:0]};
-                2'd2: bridge_wr_skid_data[2] <= {bridge_addr[25:2], bridge_wr_data[31:0]};
-                default: bridge_wr_skid_data[3] <= {bridge_addr[25:2], bridge_wr_data[31:0]};
-            endcase
-            bridge_wr_skid_wrptr <= bridge_wr_skid_wrptr + 2'd1;
-        end
-
-        case ({bridge_wr_skid_push_ok, bridge_wr_skid_pop})
-            2'b10: bridge_wr_skid_count <= bridge_wr_skid_count + 3'd1;
-            2'b01: bridge_wr_skid_count <= bridge_wr_skid_count - 3'd1;
-            default: ;
-        endcase
-    end
-end
-
-dcfifo bridge_wr_fifo (
-    .wrclk   (clk_74a),
-    .wrreq   (bridge_wr_fifo_wrreq),
-    .data    (bridge_wr_fifo_wdata),
-    .wrfull  (bridge_wr_fifo_full),
-    .rdclk   (clk_ram_controller),
-    .rdreq   (bridge_wr_fifo_drain),
-    .q       (bridge_wr_fifo_q),
-    .rdempty (bridge_wr_fifo_empty),
-    .aclr    (~pll_core_locked_s),
-    .wrusedw (),
-    .wrempty (),
-    .rdfull  (),
-    .rdusedw ()
-);
-defparam bridge_wr_fifo.intended_device_family = "Cyclone V",
-    bridge_wr_fifo.lpm_numwords  = 512,
-    bridge_wr_fifo.lpm_showahead = "ON",
-    bridge_wr_fifo.lpm_type      = "dcfifo",
-    bridge_wr_fifo.lpm_width     = 56,
-    bridge_wr_fifo.lpm_widthu    = 9,
-    bridge_wr_fifo.overflow_checking  = "ON",
-    bridge_wr_fifo.underflow_checking = "ON",
-    bridge_wr_fifo.rdsync_delaypipe   = 5,
-    bridge_wr_fifo.wrsync_delaypipe   = 5,
-    bridge_wr_fifo.use_eab       = "ON";
-
-// Synchronize skid-queue nonempty flag into RAM clock domain
-reg [2:0] bridge_wr_skid_nonempty_sync;
-always @(posedge clk_ram_controller) begin
-    bridge_wr_skid_nonempty_sync <= {bridge_wr_skid_nonempty_sync[1:0], bridge_wr_skid_nonempty_74a};
-end
-wire bridge_wr_skid_nonempty = bridge_wr_skid_nonempty_sync[2];
-
-// Include CRAM write activity — bridge must finish draining CRAM FIFOs
-// before allcomplete goes high, or apps read uninitialized save data.
-wire bridge_wr_idle = !bridge_wr_skid_nonempty && bridge_m_wr_idle
-                    && !cram0_bridge_wr_active && !bridge_cram1_active;
+// Bridge SDRAM write path removed — OS loads via CRAM1 bounce.
+// bridge_wr_idle: only need to wait for CRAM1 activity now.
+wire bridge_wr_idle = bridge_m_wr_idle && !bridge_cram1_active;
 
 // Bridge DMA active tracking
 reg bridge_dma_active;
@@ -1209,12 +1101,18 @@ end
 wire psram1_rdata_valid_for_cdc    = psram1_rdata_valid && !psram1_rd_owner;
 wire psram1_rdata_valid_for_bridge = psram1_rdata_valid &&  psram1_rd_owner;
 
-// Block new reads while one is inflight
+// Block new reads while one is inflight, but never block an in-flight CDC request
 assign psram1_rd = psram1_rd_inflight ? 1'b0
                  : bridge_cram1_rd_pulse ? 1'b1
-                 : bridge_cram1_active ? 1'b0
+                 : (bridge_cram1_active && !cdc_psram1_inflight) ? 1'b0
                  : cdc_psram1_rd;
-assign psram1_wr = bridge_cram1_wr_pulse ? 1'b1 : bridge_cram1_active ? 1'b0 : cdc_psram1_wr;
+// Never block a CDC write that is already in flight — if the bridge
+// activates after the CDC entered P_WAIT, the mux was eating the CDC's
+// psram_wr pulse, causing psram_busy to never rise and deadlocking
+// the CPU on fence.
+assign psram1_wr = bridge_cram1_wr_pulse ? 1'b1
+                 : (bridge_cram1_active && !cdc_psram1_inflight) ? 1'b0
+                 : cdc_psram1_wr;
 assign psram1_addr = bridge_cram1_wr_pending ? bridge_cram1_wr_addr :
                      bridge_cram1_rd_pending ? bridge_cram1_rd_addr : cdc_psram1_addr;
 assign psram1_wdata = bridge_cram1_wr_pending ? bridge_cram1_wr_data : cdc_psram1_wdata;
@@ -1249,252 +1147,40 @@ always @(posedge clk_ram_controller) begin
     end
 end
 
-// ============================================================
-// Bridge CRAM0 Write Path: dcfifo (clk_74a -> clk_ram_controller)
-// FIFO-based pattern for bulk dataslot loads to CRAM0.
-// ============================================================
-// Accept bridge writes to CRAM0 (0x20) region only — CRAM1 (0x30) handled directly
-wire bridge_cram0_wr_detect = bridge_wr && (bridge_addr[31:24] == 8'h20);
+// Bridge CRAM0 + SRAM write paths removed.
+// OS now bounces all bridge DMA through CRAM1, then CPU copies to CRAM0.
+// SRAM bridge was never used by firmware.
+wire cram_bridge_active = 1'b0;
 
 // Skid buffer (4-entry) in clk_74a domain
-localparam integer CRAM0_WR_SKID_DEPTH = 4;
-reg [55:0] cram0_wr_skid_data [0:CRAM0_WR_SKID_DEPTH-1];
-reg [1:0]  cram0_wr_skid_wrptr;
-reg [1:0]  cram0_wr_skid_rdptr;
-reg [2:0]  cram0_wr_skid_count;
-wire       cram0_wr_skid_empty = (cram0_wr_skid_count == 0);
-wire       cram0_wr_skid_nonempty_74a = !cram0_wr_skid_empty;
-wire       cram0_wr_skid_pop = !cram0_wr_skid_empty && !cram0_wr_fifo_full;
-wire [55:0] cram0_wr_skid_head =
-            (cram0_wr_skid_rdptr == 2'd0) ? cram0_wr_skid_data[0] :
-            (cram0_wr_skid_rdptr == 2'd1) ? cram0_wr_skid_data[1] :
-            (cram0_wr_skid_rdptr == 2'd2) ? cram0_wr_skid_data[2] :
-                                             cram0_wr_skid_data[3];
-wire       cram0_wr_skid_push = bridge_cram0_wr_detect;
-wire       cram0_wr_skid_has_space = (cram0_wr_skid_count != 3'd4);
-wire       cram0_wr_skid_push_ok = cram0_wr_skid_push &&
-                                   (cram0_wr_skid_has_space || cram0_wr_skid_pop);
-
-wire       cram0_wr_fifo_full;
-wire       cram0_wr_fifo_empty;
-wire [55:0] cram0_wr_fifo_q;
-
-always @(posedge clk_74a) begin
-    if (cram0_wr_skid_pop)
-        cram0_wr_skid_rdptr <= cram0_wr_skid_rdptr + 2'd1;
-
-    if (cram0_wr_skid_push_ok) begin
-        case (cram0_wr_skid_wrptr)
-            2'd0: cram0_wr_skid_data[0] <= {bridge_addr[23:2], 2'b00, bridge_wr_data[31:0]};
-            2'd1: cram0_wr_skid_data[1] <= {bridge_addr[23:2], 2'b00, bridge_wr_data[31:0]};
-            2'd2: cram0_wr_skid_data[2] <= {bridge_addr[23:2], 2'b00, bridge_wr_data[31:0]};
-            default: cram0_wr_skid_data[3] <= {bridge_addr[23:2], 2'b00, bridge_wr_data[31:0]};
-        endcase
-        cram0_wr_skid_wrptr <= cram0_wr_skid_wrptr + 2'd1;
-    end
-
-    case ({cram0_wr_skid_push_ok, cram0_wr_skid_pop})
-        2'b10: cram0_wr_skid_count <= cram0_wr_skid_count + 3'd1;
-        2'b01: cram0_wr_skid_count <= cram0_wr_skid_count - 3'd1;
-        default: ;
-    endcase
-end
-
-// Async FIFO: clk_74a -> clk_ram_controller (512 entries, 56-bit)
-wire cram0_wr_fifo_drain;
-
-dcfifo cram0_wr_fifo (
-    .wrclk   (clk_74a),
-    .wrreq   (cram0_wr_skid_pop),
-    .data    (cram0_wr_skid_head),
-    .wrfull  (cram0_wr_fifo_full),
-    .rdclk   (clk_ram_controller),
-    .rdreq   (cram0_wr_fifo_drain),
-    .q       (cram0_wr_fifo_q),
-    .rdempty (cram0_wr_fifo_empty),
-    .aclr    (~pll_core_locked_s),
-    .wrusedw (), .wrempty (), .rdfull (), .rdusedw ()
-);
-defparam cram0_wr_fifo.intended_device_family = "Cyclone V",
-    cram0_wr_fifo.lpm_numwords  = 512,
-    cram0_wr_fifo.lpm_showahead = "ON",
-    cram0_wr_fifo.lpm_type      = "dcfifo",
-    cram0_wr_fifo.lpm_width     = 56,
-    cram0_wr_fifo.lpm_widthu    = 9,
-    cram0_wr_fifo.overflow_checking  = "ON",
-    cram0_wr_fifo.underflow_checking = "ON",
-    cram0_wr_fifo.rdsync_delaypipe   = 5,
-    cram0_wr_fifo.wrsync_delaypipe   = 5,
-    cram0_wr_fifo.use_eab       = "ON";
-
-// Synchronize skid-queue nonempty flag into RAM clock domain
-reg [2:0] cram0_wr_skid_nonempty_sync;
-always @(posedge clk_ram_controller) begin
-    cram0_wr_skid_nonempty_sync <= {cram0_wr_skid_nonempty_sync[1:0], cram0_wr_skid_nonempty_74a};
-end
-wire cram0_wr_skid_nonempty = cram0_wr_skid_nonempty_sync[2];
-
-// CRAM0 write drain FSM
-reg        cram0_wr_pending;
-reg        cram0_wr_started;
-reg [21:0] cram0_wr_addr_r;
-reg [31:0] cram0_wr_data_r;
-
-assign cram0_wr_fifo_drain = !cram0_wr_fifo_empty && !cram0_wr_pending && bcr_init_done;
-
-always @(posedge clk_ram_controller) begin
-    if (!cram0_wr_pending) begin
-        if (!cram0_wr_fifo_empty && bcr_init_done) begin
-            cram0_wr_addr_r <= cram0_wr_fifo_q[55:34];
-            cram0_wr_data_r <= cram0_wr_fifo_q[31:0];
-            cram0_wr_pending <= 1;
-            cram0_wr_started <= 0;
-        end
-    end else begin
-        if (!cram0_wr_started && psram_mux_busy) begin
-            cram0_wr_started <= 1;
-        end else if (cram0_wr_started && !psram_mux_busy) begin
-            cram0_wr_pending <= 0;
-            cram0_wr_started <= 0;
-        end
-    end
-end
-
-wire cram0_bridge_wr_active = cram0_wr_pending | !cram0_wr_fifo_empty | cram0_wr_skid_nonempty;
-wire cram_bridge_active = cram0_bridge_wr_active;
-
-// ============================================================
-// Bridge SRAM Write Path: dcfifo (clk_74a -> clk_ram_controller)
-// Enables file reads to bounce through SRAM (256KB, separate bus)
-// to avoid SDRAM/PSRAM contention during bridge DMA.
-// Bridge address 0x3Axxxxxx → SRAM.
-// ============================================================
-wire bridge_sram_wr_detect = bridge_wr && (bridge_addr[31:24] == 8'h3A);
-
-// Skid buffer (4-entry) in clk_74a domain
-localparam integer SRAM_WR_SKID_DEPTH = 4;
-reg [55:0] sram_wr_skid_data [0:SRAM_WR_SKID_DEPTH-1];
-reg [1:0]  sram_wr_skid_wrptr;
-reg [1:0]  sram_wr_skid_rdptr;
-reg [2:0]  sram_wr_skid_count;
-wire       sram_wr_skid_empty = (sram_wr_skid_count == 0);
-wire       sram_wr_skid_pop = !sram_wr_skid_empty && !sram_wr_fifo_full;
-wire [55:0] sram_wr_skid_head =
-            (sram_wr_skid_rdptr == 2'd0) ? sram_wr_skid_data[0] :
-            (sram_wr_skid_rdptr == 2'd1) ? sram_wr_skid_data[1] :
-            (sram_wr_skid_rdptr == 2'd2) ? sram_wr_skid_data[2] :
-                                             sram_wr_skid_data[3];
-wire       sram_wr_skid_push = bridge_sram_wr_detect;
-wire       sram_wr_skid_has_space = (sram_wr_skid_count != 3'd4);
-wire       sram_wr_skid_push_ok = sram_wr_skid_push &&
-                                  (sram_wr_skid_has_space || sram_wr_skid_pop);
-
-wire       sram_wr_fifo_full;
-wire       sram_wr_fifo_empty;
-wire [55:0] sram_wr_fifo_q;
-
-always @(posedge clk_74a) begin
-    if (sram_wr_skid_pop)
-        sram_wr_skid_rdptr <= sram_wr_skid_rdptr + 2'd1;
-
-    if (sram_wr_skid_push_ok) begin
-        case (sram_wr_skid_wrptr)
-            2'd0: sram_wr_skid_data[0] <= {bridge_addr[23:2], 2'b00, bridge_wr_data[31:0]};
-            2'd1: sram_wr_skid_data[1] <= {bridge_addr[23:2], 2'b00, bridge_wr_data[31:0]};
-            2'd2: sram_wr_skid_data[2] <= {bridge_addr[23:2], 2'b00, bridge_wr_data[31:0]};
-            default: sram_wr_skid_data[3] <= {bridge_addr[23:2], 2'b00, bridge_wr_data[31:0]};
-        endcase
-        sram_wr_skid_wrptr <= sram_wr_skid_wrptr + 2'd1;
-    end
-
-    case ({sram_wr_skid_push_ok, sram_wr_skid_pop})
-        2'b10: sram_wr_skid_count <= sram_wr_skid_count + 3'd1;
-        2'b01: sram_wr_skid_count <= sram_wr_skid_count - 3'd1;
-        default: ;
-    endcase
-end
-
-// Async FIFO: clk_74a -> clk_ram_controller
-wire sram_wr_fifo_drain;
-
-dcfifo sram_wr_fifo (
-    .wrclk   (clk_74a),
-    .wrreq   (sram_wr_skid_pop),
-    .data    (sram_wr_skid_head),
-    .wrfull  (sram_wr_fifo_full),
-    .rdclk   (clk_ram_controller),
-    .rdreq   (sram_wr_fifo_drain),
-    .q       (sram_wr_fifo_q),
-    .rdempty (sram_wr_fifo_empty),
-    .aclr    (~pll_core_locked_s),
-    .wrusedw (), .wrempty (), .rdfull (), .rdusedw ()
-);
-defparam sram_wr_fifo.intended_device_family = "Cyclone V",
-    sram_wr_fifo.lpm_numwords  = 512,
-    sram_wr_fifo.lpm_showahead = "ON",
-    sram_wr_fifo.lpm_type      = "dcfifo",
-    sram_wr_fifo.lpm_width     = 56,
-    sram_wr_fifo.lpm_widthu    = 9,
-    sram_wr_fifo.overflow_checking  = "ON",
-    sram_wr_fifo.underflow_checking = "ON",
-    sram_wr_fifo.rdsync_delaypipe   = 5,
-    sram_wr_fifo.wrsync_delaypipe   = 5,
-    sram_wr_fifo.use_eab       = "ON";
-
-// SRAM write drain FSM
-reg        sram_wr_pending;
-reg        sram_wr_started;
-reg [21:0] sram_wr_addr_r;
-reg [31:0] sram_wr_data_r;
-
-initial begin
-    sram_wr_pending = 0;
-    sram_wr_started = 0;
-end
-
-assign sram_wr_fifo_drain = !sram_wr_fifo_empty && !sram_wr_pending;
-
-always @(posedge clk_ram_controller) begin
-    if (!sram_wr_pending) begin
-        if (!sram_wr_fifo_empty) begin
-            sram_wr_addr_r <= sram_wr_fifo_q[55:34];
-            sram_wr_data_r <= sram_wr_fifo_q[31:0];
-            sram_wr_pending <= 1;
-            sram_wr_started <= 0;
-        end
-    end else begin
-        if (!sram_wr_started && sram_word_busy)
-            sram_wr_started <= 1;
-        else if (sram_wr_started && !sram_word_busy) begin
-            sram_wr_pending <= 0;
-            sram_wr_started <= 0;
-        end
-    end
-end
-
-wire sram_bridge_wr_active = sram_wr_pending | !sram_wr_fifo_empty;
+// (CRAM0 + SRAM bridge drain paths removed — see CRAM1 bounce above)
 
 // CRAM0 mux: Bridge FIFO drain has priority, then CPU
 wire cpu_cram_rd = cpu_psram_rd & cpu_psram_sel_cram;
 wire cpu_cram_wr = cpu_psram_wr & cpu_psram_sel_cram;
 wire cpu_cram_burst_rd = cpu_psram_burst_rd & cpu_psram_sel_cram;
 
-assign psram_mux_rd = cram_bridge_active ? 1'b0 : cpu_cram_rd;
-assign psram_mux_wr = cram0_wr_pending ? 1'b1 : (cram_bridge_active ? 1'b0 : cpu_cram_wr);
-assign psram_mux_addr = cram0_wr_pending ? cram0_wr_addr_r : cpu_psram_addr[21:0];
-assign psram_mux_wdata = cram0_wr_pending ? cram0_wr_data_r : cpu_psram_wdata;
-assign psram_mux_wstrb = cram0_wr_pending ? 4'b1111 : cpu_psram_wstrb;
+// CRAM0 mux: CPU only (bridge drain removed)
+assign psram_mux_rd = cpu_cram_rd;
+assign psram_mux_wr = cpu_cram_wr;
+assign psram_mux_addr = cpu_psram_addr[21:0];
+assign psram_mux_wdata = cpu_psram_wdata;
+assign psram_mux_wstrb = cpu_psram_wstrb;
 
 // CRAM burst read routing (disabled when bridge active)
 // Burst reads disabled — CRAM0 uses async two-phase (no BCR)
 
 
-// SRAM mux: bridge write drain has priority, CPU when bridge idle
-assign sram_word_rd = sram_bridge_wr_active ? 1'b0 : (cpu_psram_rd & cpu_psram_sel_sram);
-assign sram_word_wr = sram_wr_pending ? 1'b1 : (sram_bridge_wr_active ? 1'b0 : (cpu_psram_wr & cpu_psram_sel_sram));
-assign sram_word_addr = sram_wr_pending ? sram_wr_addr_r : cpu_psram_addr[21:0];
-assign sram_word_wdata = sram_wr_pending ? sram_wr_data_r : cpu_psram_wdata;
-assign sram_word_wstrb = sram_wr_pending ? 4'b1111 : cpu_psram_wstrb;
+// SRAM mux: GPU > CPU (bridge drain removed)
+wire cpu_sram_rd = cpu_psram_rd & cpu_psram_sel_sram;
+wire cpu_sram_wr = cpu_psram_wr & cpu_psram_sel_sram;
+wire gpu_sram_active = gpu_sram_rd | gpu_sram_wr;
+
+assign sram_word_rd    = gpu_sram_active ? gpu_sram_rd    : cpu_sram_rd;
+assign sram_word_wr    = gpu_sram_active ? gpu_sram_wr    : cpu_sram_wr;
+assign sram_word_addr  = gpu_sram_active ? gpu_sram_addr  : cpu_psram_addr[21:0];
+assign sram_word_wdata = gpu_sram_active ? gpu_sram_wdata : cpu_psram_wdata;
+assign sram_word_wstrb = gpu_sram_active ? gpu_sram_wstrb : cpu_psram_wstrb;
 
 // Read data / busy / valid mux back to axi_psram_slave
 // Per-target mux: latch selector on request, use for ALL feedback
@@ -1511,7 +1197,7 @@ assign cpu_psram_rdata = (psram_target_sel == 2'd1) ? sram_word_rdata :
 
 assign cpu_psram_busy = (psram_target_sel == 2'd1) ? sram_word_busy :
                         (psram_target_sel == 2'd2) ? cdc_cpu_busy :
-                        (cram_bridge_active | psram_mux_busy);
+                        psram_mux_busy;
 
 assign cpu_psram_rdata_valid = (psram_target_sel == 2'd1) ? sram_word_rdata_valid :
                                (psram_target_sel == 2'd2) ? cdc_cpu_rdata_valid :
@@ -2110,6 +1796,7 @@ assign video_hs = vidout_hs;
         .mix_irq_clear_wr(mix_irq_clear_wr),
         .mix_irq_clear_data(mix_irq_clear_data),
         .mix_irq_pending(mix_irq_pending),
+        .mix_voice_wr_stall(mix_voice_wr_stall),
         .timer_irq(timer_irq),
         .uart_rx_irq(uart_rx_irq),
         .link_irq(link_irq),
@@ -2125,7 +1812,12 @@ assign video_hs = vidout_hs;
         .snac_pin_out(snac_pin_out),
         .snac_pin_dir(snac_pin_dir),
         .snac_pin_in(snac_pin_in),
-        .snac_enable(snac_enable)
+        .snac_enable(snac_enable),
+        // GPU register interface
+        .gpu_reg_wr(gpu_reg_wr),
+        .gpu_reg_addr(gpu_reg_addr),
+        .gpu_reg_wdata(gpu_reg_wdata),
+        .gpu_reg_rdata(gpu_reg_rdata)
     );
 
     // DMA engine removed — apps use CPU memcpy instead
@@ -2165,59 +1857,34 @@ assign video_hs = vidout_hs;
         end
     end
 
-    // AXI4 bridge master (must stay alive during reset for APF save flush & data load)
-    axi_bridge_master bridge_axi_m (
-        .clk(clk_cpu),
-        .reset_n(1'b1),
-        .fifo_q(bridge_wr_fifo_q),
-        .fifo_empty(bridge_wr_fifo_empty),
-        .fifo_rdreq(bridge_wr_fifo_drain),
-        // Bridge SDRAM reads disabled: saves now use CRAM1 with dedicated
-        // FIFO-based read/write paths (no AXI/SDRAM involvement).
-        .bridge_rd_req(1'b0),
-        .bridge_rd_addr(bridge_addr_ram_clk[25:2]),
-        .bridge_rd_data(bridge_axi_rd_data),
-        .bridge_rd_done(bridge_axi_rd_done),
-        .m_axi_arvalid(bridge_m_arvalid), .m_axi_arready(bridge_m_arready),
-        .m_axi_araddr(bridge_m_araddr),   .m_axi_arlen(bridge_m_arlen),
-        .m_axi_rvalid(bridge_m_rvalid),   .m_axi_rdata(bridge_m_rdata),
-        .m_axi_rresp(bridge_m_rresp),     .m_axi_rlast(bridge_m_rlast),
-        .m_axi_awvalid(bridge_m_awvalid), .m_axi_awready(bridge_m_awready),
-        .m_axi_awaddr(bridge_m_awaddr),   .m_axi_awlen(bridge_m_awlen),
-        .m_axi_wvalid(bridge_m_wvalid),   .m_axi_wready(bridge_m_wready),
-        .m_axi_wdata(bridge_m_wdata),     .m_axi_wstrb(bridge_m_wstrb),
-        .m_axi_wlast(bridge_m_wlast),
-        .m_axi_bvalid(bridge_m_bvalid),   .m_axi_bresp(bridge_m_bresp),
-        .idle(bridge_m_idle),
-        .wr_idle(bridge_m_wr_idle)
-    );
+    // axi_bridge_master removed — all bridge DMA goes through CRAM1 now.
 
     // AXI4 SDRAM arbiter (must stay alive during reset for APF save flush & data load)
     axi_sdram_arbiter sdram_arb (
         .clk(clk_cpu),
         .reset_n(1'b1),
-        // M0: unused (audio DMA removed — mixer uses CRAM1)
-        .m0_arvalid(1'b0), .m0_arready(),
-        .m0_araddr(32'b0),  .m0_arlen(8'b0),
-        .m0_rvalid(),       .m0_rdata(),
-        .m0_rresp(),        .m0_rlast(),
+        // M0: GPU read master (ring fetch + texture cache fills)
+        .m0_arvalid(gpu_rd_arvalid), .m0_arready(gpu_rd_arready),
+        .m0_araddr(gpu_rd_araddr),   .m0_arlen(gpu_rd_arlen),
+        .m0_rvalid(gpu_rd_rvalid),   .m0_rdata(gpu_rd_rdata),
+        .m0_rresp(),                 .m0_rlast(gpu_rd_rlast),
         .m0_awvalid(1'b0), .m0_awready(),
         .m0_awaddr(32'b0),  .m0_awlen(8'b0),
         .m0_wvalid(1'b0),  .m0_wready(),
         .m0_wdata(32'b0),   .m0_wstrb(4'b0),
         .m0_wlast(1'b0),
         .m0_bvalid(),       .m0_bresp(),
-        // M1: unused (DMA engine removed)
+        // M1: GPU write master (framebuffer writes + clear DMA)
         .m1_arvalid(1'b0), .m1_arready(),
         .m1_araddr(32'b0),  .m1_arlen(8'b0),
         .m1_rvalid(),       .m1_rdata(),
         .m1_rresp(),        .m1_rlast(),
-        .m1_awvalid(1'b0), .m1_awready(),
-        .m1_awaddr(32'b0),  .m1_awlen(8'b0),
-        .m1_wvalid(1'b0),  .m1_wready(),
-        .m1_wdata(32'b0),   .m1_wstrb(4'b0),
-        .m1_wlast(1'b0),
-        .m1_bvalid(),       .m1_bresp(),
+        .m1_awvalid(gpu_wr_awvalid), .m1_awready(gpu_wr_awready),
+        .m1_awaddr(gpu_wr_awaddr),   .m1_awlen(gpu_wr_awlen),
+        .m1_wvalid(gpu_wr_wvalid),   .m1_wready(gpu_wr_wready),
+        .m1_wdata(gpu_wr_wdata),     .m1_wstrb(gpu_wr_wstrb),
+        .m1_wlast(gpu_wr_wlast),
+        .m1_bvalid(gpu_wr_bvalid),   .m1_bresp(),
         // M2: CPU
         .m2_arvalid(cpu_m_sdram_arvalid), .m2_arready(cpu_m_sdram_arready),
         .m2_araddr(cpu_m_sdram_araddr),   .m2_arlen(cpu_m_sdram_arlen),
@@ -2230,16 +1897,17 @@ assign video_hs = vidout_hs;
         .m2_wlast(cpu_m_sdram_wlast),
         .m2_bvalid(cpu_m_sdram_bvalid),   .m2_bresp(cpu_m_sdram_bresp),
         // M3: Bridge (lowest priority)
-        .m3_arvalid(bridge_m_arvalid), .m3_arready(bridge_m_arready),
-        .m3_araddr(bridge_m_araddr),   .m3_arlen(bridge_m_arlen),
-        .m3_rvalid(bridge_m_rvalid),   .m3_rdata(bridge_m_rdata),
-        .m3_rresp(bridge_m_rresp),     .m3_rlast(bridge_m_rlast),
-        .m3_awvalid(bridge_m_awvalid), .m3_awready(bridge_m_awready),
-        .m3_awaddr(bridge_m_awaddr),   .m3_awlen(bridge_m_awlen),
-        .m3_wvalid(bridge_m_wvalid),   .m3_wready(bridge_m_wready),
-        .m3_wdata(bridge_m_wdata),     .m3_wstrb(bridge_m_wstrb),
-        .m3_wlast(bridge_m_wlast),
-        .m3_bvalid(bridge_m_bvalid),   .m3_bresp(bridge_m_bresp),
+        // M3: Bridge (removed — tied off)
+        .m3_arvalid(1'b0), .m3_arready(),
+        .m3_araddr(32'b0),  .m3_arlen(8'b0),
+        .m3_rvalid(),       .m3_rdata(),
+        .m3_rresp(),        .m3_rlast(),
+        .m3_awvalid(1'b0), .m3_awready(),
+        .m3_awaddr(32'b0),  .m3_awlen(8'b0),
+        .m3_wvalid(1'b0),  .m3_wready(),
+        .m3_wdata(32'b0),   .m3_wstrb(4'b0),
+        .m3_wlast(1'b0),
+        .m3_bvalid(),       .m3_bresp(),
         // Slave output (to axi_sdram_slave)
         .s_arvalid(arb_s_arvalid), .s_arready(arb_s_arready),
         .s_araddr(arb_s_araddr),   .s_arlen(arb_s_arlen),
@@ -2482,21 +2150,17 @@ end
 // Link MMIO peripheral
 //
 `ifndef EXCLUDE_LINK
-link_mmio #(
+link_lite #(
     .CLK_HZ(100000000),
-    .SCK_HZ(256000),
-    .POLL_HZ(3000),
-    .FIFO_DEPTH(256)
+    .SCK_HZ(256000)
 ) link0 (
     .clk(clk_cpu),
     .reset_n(reset_n),
-
     .reg_wr(link_reg_wr),
     .reg_rd(link_reg_rd),
     .reg_addr(link_reg_addr),
     .reg_wdata(link_reg_wdata),
     .reg_rdata(link_reg_rdata),
-
     .link_si_i(link_si_i),
     .link_so_o(link_so_out),
     .link_so_oe(link_so_oe),
@@ -2549,6 +2213,7 @@ wire        mix_irq_clear_wr;
 wire [31:0] mix_irq_clear_data;
 wire [31:0] mix_irq_pending;
 wire        mix_voice_end_irq;
+wire        mix_voice_wr_stall;
 wire        mix_sample_wr;
 wire [31:0] mix_sample_data;
 wire        mix_cram1_rd;
@@ -2584,6 +2249,7 @@ audio_mixer mixer (
     .voice_field(mix_voice_field),
     .voice_sel(mix_voice_sel),
     .voice_wdata(mix_voice_wdata),
+    .voice_wr_stall(mix_voice_wr_stall),
     .cram1_rd(mix_cram1_rd),
     .cram1_addr(mix_cram1_addr),
     .cram1_rdata(cdc_cpu_rdata),
@@ -2608,6 +2274,115 @@ assign mix_active_count = 5'b0;
 assign mix_voice_pos = 22'b0;
 assign mix_irq_pending = 32'b0;
 assign mix_voice_end_irq = 1'b0;
+`endif
+
+// ============================================================
+// GPU — 3D Span Rasteriser
+// ============================================================
+wire        gpu_reg_wr;
+wire [3:0]  gpu_reg_addr;
+wire [31:0] gpu_reg_wdata;
+wire [31:0] gpu_reg_rdata;
+
+// GPU AXI4 read master (M0 on SDRAM arbiter)
+wire        gpu_rd_arvalid;
+wire        gpu_rd_arready;
+wire [31:0] gpu_rd_araddr;
+wire [7:0]  gpu_rd_arlen;
+wire        gpu_rd_rvalid;
+wire [31:0] gpu_rd_rdata;
+wire        gpu_rd_rlast;
+
+// GPU AXI4 write master (M1 on SDRAM arbiter)
+wire        gpu_wr_awvalid;
+wire        gpu_wr_awready;
+wire [31:0] gpu_wr_awaddr;
+wire [7:0]  gpu_wr_awlen;
+wire        gpu_wr_wvalid;
+wire        gpu_wr_wready;
+wire [31:0] gpu_wr_wdata;
+wire [3:0]  gpu_wr_wstrb;
+wire        gpu_wr_wlast;
+wire        gpu_wr_bvalid;
+
+// GPU SRAM interface (Z-buffer)
+wire        gpu_sram_rd;
+wire        gpu_sram_wr;
+wire [21:0] gpu_sram_addr;
+wire [31:0] gpu_sram_wdata;
+wire [3:0]  gpu_sram_wstrb;
+
+// GPU enable (from MMIO GPU_CTRL bit 0, directly in gpu_core)
+wire        gpu_busy;
+wire [31:0] gpu_fence_reached;
+wire [31:0] gpu_stat_pixels;
+wire [31:0] gpu_stat_spans;
+
+`ifndef EXCLUDE_GPU
+gpu_core gpu (
+    .clk(clk_cpu),
+    .reset_n(reset_n),
+    .gpu_enable(1'b1),
+    // AXI4 read master (ring fetch + texture)
+    .m_rd_arvalid(gpu_rd_arvalid),
+    .m_rd_arready(gpu_rd_arready),
+    .m_rd_araddr(gpu_rd_araddr),
+    .m_rd_arlen(gpu_rd_arlen),
+    .m_rd_rvalid(gpu_rd_rvalid),
+    .m_rd_rdata(gpu_rd_rdata),
+    .m_rd_rlast(gpu_rd_rlast),
+    // AXI4 write master (FB writes + clear)
+    .m_wr_awvalid(gpu_wr_awvalid),
+    .m_wr_awready(gpu_wr_awready),
+    .m_wr_awaddr(gpu_wr_awaddr),
+    .m_wr_awlen(gpu_wr_awlen),
+    .m_wr_wvalid(gpu_wr_wvalid),
+    .m_wr_wready(gpu_wr_wready),
+    .m_wr_wdata(gpu_wr_wdata),
+    .m_wr_wstrb(gpu_wr_wstrb),
+    .m_wr_wlast(gpu_wr_wlast),
+    .m_wr_bvalid(gpu_wr_bvalid),
+    // SRAM interface (Z-buffer)
+    .sram_rd(gpu_sram_rd),
+    .sram_wr(gpu_sram_wr),
+    .sram_addr(gpu_sram_addr),
+    .sram_wdata(gpu_sram_wdata),
+    .sram_wstrb(gpu_sram_wstrb),
+    .sram_rdata(sram_word_rdata),
+    .sram_busy(sram_word_busy),
+    .sram_rdata_valid(sram_word_rdata_valid),
+    // MMIO registers
+    .reg_wr(gpu_reg_wr),
+    .reg_addr(gpu_reg_addr),
+    .reg_wdata(gpu_reg_wdata),
+    .reg_rdata(gpu_reg_rdata),
+    // Status
+    .busy(gpu_busy),
+    .fence_reached(gpu_fence_reached),
+    .stat_pixels(gpu_stat_pixels),
+    .stat_spans(gpu_stat_spans)
+);
+`else
+assign gpu_rd_arvalid = 1'b0;
+assign gpu_rd_araddr  = 32'b0;
+assign gpu_rd_arlen   = 8'b0;
+assign gpu_wr_awvalid = 1'b0;
+assign gpu_wr_awaddr  = 32'b0;
+assign gpu_wr_awlen   = 8'b0;
+assign gpu_wr_wvalid  = 1'b0;
+assign gpu_wr_wdata   = 32'b0;
+assign gpu_wr_wstrb   = 4'b0;
+assign gpu_wr_wlast   = 1'b0;
+assign gpu_sram_rd    = 1'b0;
+assign gpu_sram_wr    = 1'b0;
+assign gpu_sram_addr  = 22'b0;
+assign gpu_sram_wdata = 32'b0;
+assign gpu_sram_wstrb = 4'b0;
+assign gpu_busy       = 1'b0;
+assign gpu_fence_reached = 32'b0;
+assign gpu_stat_pixels = 32'b0;
+assign gpu_stat_spans  = 32'b0;
+assign gpu_reg_rdata   = 32'b0;
 `endif
 
 

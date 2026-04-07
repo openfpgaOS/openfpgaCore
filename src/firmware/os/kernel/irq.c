@@ -14,11 +14,13 @@ extern void timer_isr_callback(void);
 static void (*external_cb)(uint32_t source);
 static void (*vsync_cb)(void);
 static void (*mixer_end_cb)(uint32_t ended_mask);
+static void (*link_rx_cb)(uint32_t word);
 
 void of_irq_init(void) {
     external_cb = 0;
     vsync_cb = 0;
     mixer_end_cb = 0;
+    link_rx_cb = 0;
 }
 
 void of_irq_register_external(void (*cb)(uint32_t source)) {
@@ -39,6 +41,14 @@ void of_irq_register_mixer_end(void (*cb)(uint32_t ended_mask)) {
         IRQ_MASK |= IRQ_MASK_MIX_VOICE;
     else
         IRQ_MASK &= ~IRQ_MASK_MIX_VOICE;
+}
+
+void of_irq_register_link_rx(void (*cb)(uint32_t word)) {
+    link_rx_cb = cb;
+    if (cb)
+        IRQ_MASK |= IRQ_MASK_LINK;
+    else
+        IRQ_MASK &= ~IRQ_MASK_LINK;
 }
 
 /*
@@ -70,13 +80,22 @@ void irq_handler(void *frame) {
             source |= IRQ_SRC_MIX_VOICE;
         }
 
+        /* Link: rx_ready flag (cleared by reading RX_DATA) */
+        if (LINK_STATUS & LINK_STATUS_RX_READY)
+            source |= IRQ_SRC_LINK_RX;
+
         /* Vsync: check pending, W1C clear */
         if (VSYNC_IRQ_PENDING) {
             VSYNC_IRQ_PENDING = 1;  /* W1C */
             source |= IRQ_SRC_VSYNC;
         }
 
-        /* Dispatch: vsync and mixer have dedicated callbacks */
+        /* Dispatch: dedicated callbacks */
+        if ((source & IRQ_SRC_LINK_RX) && link_rx_cb) {
+            uint32_t word = LINK_RX_DATA;  /* read clears rx_ready + IRQ */
+            link_rx_cb(word);
+        }
+
         if ((source & IRQ_SRC_VSYNC) && vsync_cb)
             vsync_cb();
 

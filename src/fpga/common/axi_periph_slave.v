@@ -11,6 +11,8 @@
 
 `default_nettype none
 
+`include "gpu_features.vh"
+
 module axi_periph_slave (
     input wire clk,
     input wire reset_n,
@@ -127,6 +129,7 @@ module axi_periph_slave (
     input  wire [21:0] mix_voice_pos,
     output reg         mix_irq_clear_wr,
     output wire [31:0] mix_irq_clear_data,
+    input  wire        mix_voice_wr_stall,  // mixer can't accept write — hold bvalid
     input  wire [31:0] mix_irq_pending,
 
     // Hardware timer interrupt
@@ -154,7 +157,13 @@ module axi_periph_slave (
     output wire [7:0]  snac_pin_out,      // output values to cart pins
     output wire [7:0]  snac_pin_dir,      // direction: 1=output, 0=input
     input  wire [7:0]  snac_pin_in,       // input values from cart pins
-    output wire        snac_enable        // 1=SNAC mode (cart pins from CPU), 0=UART mode
+    output wire        snac_enable,        // 1=SNAC mode (cart pins from CPU), 0=UART mode
+
+    // GPU register interface
+    output reg         gpu_reg_wr,
+    output reg  [3:0]  gpu_reg_addr,
+    output reg  [31:0] gpu_reg_wdata,
+    input  wire [31:0] gpu_reg_rdata
 );
 
 wire reset = ~reset_n;
@@ -331,11 +340,14 @@ assign ext_irq = (uart_rx_irq & irq_mask[0]) |
 // Triple-buffered framebuffer
 // 25-bit SDRAM half-word addresses (16-bit bus, byte addr = word addr × 2)
 // Hardware feature flags — read-only, derived from variant defines at synthesis time
-// Bit  0: Mixer (32-voice PCM)       Bit  4: GPU 2D (reserved)
-// Bit  1: OPL3 (YMF262)              Bit  5: GPU 3D (reserved)
-// Bit  2: Link cable                  Bit  6: MIDI (reserved)
-// Bit  3: Analogizer                  Bit  7: WiFi (reserved)
-// Bit  8: FPU (RISC-V F ext)         Bit  9: Save slots
+// Bit  0: Mixer (32-voice PCM)        Bit  8: FPU (RISC-V F ext)
+// Bit  1: OPL3 (YMF262)               Bit  9: Save slots
+// Bit  2: Link cable                  Bit 10: GPU vertex color
+// Bit  3: Analogizer                  Bit 11: GPU bilinear filter
+// Bit  4: GPU span renderer (always)  Bit 12: GPU alpha blending
+// Bit  5: GPU triangle rasterizer     Bit 13: GPU perspective spans
+// Bit  6: MIDI (reserved)             Bit 14: GPU pipelined fragments
+// Bit  7: WiFi (reserved)
 localparam [31:0] HW_FEATURES =
 `ifdef EXCLUDE_MIXER
     32'h0000_0000
@@ -353,6 +365,44 @@ localparam [31:0] HW_FEATURES =
     32'h0000_0000
 `else
     32'h0000_0004
+`endif
+    |
+    32'h0000_0010      // GPU span renderer — always present in any variant
+    |
+`ifdef GPU_FEAT_TRIANGLE
+    32'h0000_0020      // GPU triangle rasterizer (bit 5)
+`else
+    32'h0000_0000
+`endif
+    |
+`ifdef GPU_FEAT_VCOLOR
+    32'h0000_0400      // GPU vertex color (bit 10)
+`else
+    32'h0000_0000
+`endif
+    |
+`ifdef GPU_FEAT_BILINEAR
+    32'h0000_0800      // GPU bilinear filter (bit 11)
+`else
+    32'h0000_0000
+`endif
+    |
+`ifdef GPU_FEAT_ALPHA
+    32'h0000_1000      // GPU alpha blending (bit 12)
+`else
+    32'h0000_0000
+`endif
+    |
+`ifdef GPU_FEAT_PERSP_SPAN
+    32'h0000_2000      // GPU perspective spans (bit 13)
+`else
+    32'h0000_0000
+`endif
+    |
+`ifdef GPU_FEAT_FRAG_PIPELINE
+    32'h0000_4000      // GPU pipelined fragment processor (bit 14)
+`else
+    32'h0000_0000
 `endif
     | 32'h0000_0308;  // Analogizer(3) + FPU(8) + Save slots(9) — always present
 
@@ -843,6 +893,7 @@ wire [31:0] periph_rd_mux = reg_sysreg ? sysreg_rdata :
                              reg_audio  ? {22'b0, audio_fifo_full, audio_fifo_level} :
                              reg_link   ? link_reg_rdata :
                              reg_uart   ? uart_rdata :
+                             reg_gpu    ? gpu_reg_rdata :
                              32'h0;
 
 // ============================================
@@ -875,6 +926,7 @@ reg reg_audio;
 reg reg_link;
 reg reg_opm;
 reg reg_uart;
+reg reg_gpu;
 
 wire beat_is_last = (burst_count == burst_len);
 
@@ -914,6 +966,7 @@ wire ar_dec_audio  = (ar_addr[31:24] == 8'h4C);
 wire ar_dec_link   = (ar_addr[31:24] == 8'h4D);
 wire ar_dec_opm    = (ar_addr[31:24] == 8'h4E);
 wire ar_dec_uart   = (ar_addr[31:24] == 8'h4F);
+wire ar_dec_gpu    = (ar_addr[31:24] == 8'h4A);
 
 wire aw_dec_ram    = (aw_addr[31:18] == 14'b0);  // 192KB: 0x00000-0x2FFFF
 wire aw_dec_sysreg = (aw_addr[31:8]  == 24'h400000);
@@ -921,6 +974,7 @@ wire aw_dec_audio  = (aw_addr[31:24] == 8'h4C);
 wire aw_dec_link   = (aw_addr[31:24] == 8'h4D);
 wire aw_dec_opm    = (aw_addr[31:24] == 8'h4E);
 wire aw_dec_uart   = (aw_addr[31:24] == 8'h4F);
+wire aw_dec_gpu    = (aw_addr[31:24] == 8'h4A);
 
 // ============================================
 // OPL write request tracking
@@ -955,6 +1009,8 @@ always @(posedge clk or posedge reset) begin
         reg_audio <= 0;
         reg_link <= 0;
         reg_opm <= 0;
+        reg_gpu <= 0;
+        gpu_reg_wr <= 0;
         reg_uart <= 0;
 
         sysreg_wr_fire <= 0;
@@ -983,6 +1039,7 @@ always @(posedge clk or posedge reset) begin
         uart_tx_dv <= 0;
         link_reg_wr <= 0;
         link_reg_rd <= 0;
+        gpu_reg_wr <= 0;
 
         // OPL ack clears request
         if (opl_ack) begin
@@ -1009,6 +1066,7 @@ always @(posedge clk or posedge reset) begin
                 reg_link   <= ar_dec_link;
                 reg_opm    <= ar_dec_opm;
                 reg_uart   <= ar_dec_uart;
+                reg_gpu    <= ar_dec_gpu;
 
                 if (ar_dec_ram)
                     state <= S_BRAM_RD;
@@ -1017,6 +1075,9 @@ always @(posedge clk or posedge reset) begin
                     if (ar_dec_link) begin
                         link_reg_addr <= ar_addr[6:2];
                         link_reg_rd <= 1;
+                    end
+                    if (ar_dec_gpu) begin
+                        gpu_reg_addr <= ar_addr[5:2];
                     end
                 end
 
@@ -1033,6 +1094,7 @@ always @(posedge clk or posedge reset) begin
                 reg_link   <= aw_dec_link;
                 reg_opm    <= aw_dec_opm;
                 reg_uart   <= aw_dec_uart;
+                reg_gpu    <= aw_dec_gpu;
 
                 if (s_axi_wvalid) begin
                     s_axi_wready <= 1;
@@ -1060,6 +1122,11 @@ always @(posedge clk or posedge reset) begin
                             link_reg_wr <= 1;
                             link_reg_addr <= aw_addr[6:2];
                             link_reg_wdata <= s_axi_wdata;
+                        end
+                        if (aw_dec_gpu && |s_axi_wstrb) begin
+                            gpu_reg_wr <= 1;
+                            gpu_reg_addr <= aw_addr[5:2];
+                            gpu_reg_wdata <= s_axi_wdata;
                         end
                     end
                 end else begin
@@ -1165,6 +1232,11 @@ always @(posedge clk or posedge reset) begin
                     if (reg_uart && |s_axi_wstrb && req_addr[3:2] == 2'b01) begin
                         uart_tx_byte <= s_axi_wdata[7:0];
                         uart_tx_dv <= 1;
+                    end
+                    if (reg_gpu && |s_axi_wstrb) begin
+                        gpu_reg_wr <= 1;
+                        gpu_reg_addr <= req_addr[5:2];
+                        gpu_reg_wdata <= s_axi_wdata;
                     end
                 end
             end

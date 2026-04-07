@@ -13,11 +13,23 @@
   - `terminal.c` — writes glyphs to TERM_FB_BASE (0x50300000 uncached); may have coherency issues
 - **Proper fix**: investigate VexiiRiscv PMA configuration for the 0x38-0x39/0x50 ranges
 
-### Conflict eviction for D-cache management
-- No working `cbo.clean`/`cbo.inval` (Zicbom) — `cbo.zero` disabled due to CRAM1 stall
-- All D-cache operations use conflict eviction: read from EVICT_BASE to push out dirty lines
-- Works but is slow (~128KB read for a full flush) and imprecise
-- **Proper fix**: debug Zicbom instructions on VexiiRiscv, enable `cbo.clean`/`cbo.inval`
+### Zicbom `cbo.clean` is extremely slow (~825 cycles per line)
+- Measured: 1200 lines × 825 cycles = 990,000 cycles ≈ 9.9ms — unusable for per-frame flushes
+- `cbo.inval` works fine (used in `fast_mem.S` memcpy) — invalidation path has no writeback, so no stall
+- `cbo.zero` disabled due to CRAM1 stall — separate issue
+- **Workaround**: `video.c` returns uncached FB pointer from `of_video_get_surface()`, flip does no flush
+- **CBM Scala source** (`LsuL1Plugin.scala:1034-1056`):
+  - `CBM_REDO := askCbm` — always replays on dirty lines (line 1035)
+  - `doCbm` requires `!writeback.full` — blocks if writeback queue full (line 977)
+  - Writeback queue is only 2 slots deep (`--lsu-l1-writeback-count=2` in `generate_vexii.sh`)
+  - Each dirty cbo.clean: push writeback → REDO → replay → see clean → complete
+- **The math doesn't add up**: 2-slot queue × ~60 cycles/writeback should give ~60 cy/line steady-state (0.7ms total), not 825 cy/line (9.9ms). The extra ~750 cycles/line is somewhere deeper:
+  - AXI4 write adapter BVALID response path?
+  - Bus arbitration stalls with video scanout bursts?
+  - Writeback data read serializing with AXI4 write?
+  - Pipeline replay overhead higher than expected?
+- **Next step**: Verilator trace of a single `cbo.clean` writeback to find where the stalls are
+- **Scala change to try**: increase `--lsu-l1-writeback-count` from 2 to 4 or 8 to see if throughput improves, or check if the pipeline replay cost dominates
 
 ### Mixer mix-down is a fixed ÷2 shift
 - `audio_mixer.v` shifts accumulator right by 1 before clamping

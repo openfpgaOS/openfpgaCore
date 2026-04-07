@@ -137,6 +137,10 @@ void services_table_init(void) {
     svc->mixer_free_samples  = of_mixer_free_samples;
     svc->mixer_set_end_callback = svc_mixer_set_end_callback;
     svc->mixer_retrigger     = of_mixer_retrigger;
+    svc->mixer_play_8bit     = of_mixer_play_8bit;
+    svc->mixer_set_group     = of_mixer_set_group;
+    svc->mixer_set_group_volume = of_mixer_set_group_volume;
+    svc->mixer_set_master_volume = of_mixer_set_master_volume;
 
     /* Audio */
     svc->audio_init     = of_audio_init;
@@ -144,6 +148,10 @@ void services_table_init(void) {
     svc->audio_get_free = of_audio_get_free;
     svc->opl_write      = of_opl_write;
     svc->opl_reset      = of_opl_reset;
+    svc->audio_stream_open  = of_audio_stream_open;
+    svc->audio_stream_write = of_audio_stream_write;
+    svc->audio_stream_ready = of_audio_stream_ready;
+    svc->audio_stream_close = of_audio_stream_close;
 
     /* Timer */
     svc->timer_set_callback = svc_timer_set_callback;

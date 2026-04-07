@@ -1,6 +1,6 @@
 /*
- * openfpgaOS Link Cable HAL
- * GB/GBC link cable serial communication (256 kHz, full-duplex)
+ * openfpgaOS Link Cable HAL (link_lite)
+ * IRQ-driven serial link — 1-word TX/RX, software ring buffer in BRAM.
  */
 
 #ifndef OFOS_LINK_H
@@ -8,29 +8,29 @@
 
 #include <stdint.h>
 
-/* Link cable status */
-#define LINK_STATUS_CONNECTED   (1 << 0)
-#define LINK_STATUS_TX_READY    (1 << 1)
-#define LINK_STATUS_RX_READY    (1 << 2)
+#define LINK_MODE_SLAVE   0
+#define LINK_MODE_MASTER  1
 
-/* Initialize link cable subsystem */
-void of_link_init(void);
+/* Initialise link cable. mode: LINK_MODE_MASTER drives SCK, SLAVE listens. */
+void of_link_init(int mode);
 
-/* Send a 32-bit word over the link cable.
- * Returns 0 on success, -1 if TX FIFO is full. */
-int of_link_send(uint32_t data);
+/* Shut down link cable and deregister IRQ. */
+void of_link_stop(void);
 
-/* Receive a 32-bit word from the link cable.
- * Returns 0 on success and stores in *data, -1 if no data available. */
-int of_link_recv(uint32_t *data);
+/* Send a 32-bit word. Returns 0 on success, -1 if TX busy. */
+int of_link_send(uint32_t word);
 
-/* Get link cable status flags */
-uint32_t of_link_get_status(void);
+/* Receive a 32-bit word. Returns 0 and stores in *word, -1 if empty. */
+int of_link_recv(uint32_t *word);
 
-/* Check if link cable is connected */
-int of_link_is_connected(void);
+/* Number of words available in the RX software buffer. */
+int of_link_rx_available(void);
 
-/* Flush TX FIFO (wait for all pending sends to complete) */
-void of_link_flush(void);
+/* 1 if TX is idle and ready for a new word. */
+int of_link_tx_ready(void);
+
+/* Register a callback for received words (called from ISR context).
+ * Pass NULL to disable. Data is still buffered regardless. */
+void of_link_set_recv_callback(void (*cb)(uint32_t word));
 
 #endif /* OFOS_LINK_H */

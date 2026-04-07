@@ -139,7 +139,7 @@ static void flush_dcache(void) {
  * the peripheral exists. If the bus hangs, we never get here. */
 static int uart_available __attribute__((section(".bss.boot")));  /* 0 = untested */
 
-__attribute__((section(".text.boot")))
+__attribute__((section(".text.boot"), unused))
 static int uart_probe(void) {
     if (uart_available) return uart_available;  /* already probed (1=yes, 2=no) */
     /* The UART status register always has bit 0 = 1 when present */
@@ -291,7 +291,7 @@ static int phdp_recv(uint32_t timeout_cycles, uint32_t *out_len) {
  * Returns 1 if host connected, 0 if timeout (boot from SD).
  * ====================================================================== */
 
-__attribute__((section(".text.boot")))
+__attribute__((section(".text.boot"), unused))
 static int phdp_discover(void) {
     /* EVT_BOOT_ALIVE payload: Core ID (4B) + Version (2B) + Max Chunk (2B) */
     uint8_t alive_payload[8];
@@ -480,24 +480,32 @@ static int boot_dma_read(uint32_t slot_id, uint32_t slot_offset,
 
 __attribute__((section(".text.boot")))
 static int boot_load_os_sd(void *dest, uint32_t total) {
+    /* Bounce through CRAM1: bridge DMA → CRAM1, then CPU copies → CRAM0.
+     * This eliminates the need for a CRAM0 bridge write path in the FPGA,
+     * saving ~80 ALMs + 1 M10K.  The copy adds ~25ms (negligible at boot). */
+    uint32_t bounce_bridge = CRAM1_SCRATCH_BRIDGE;
+    volatile uint8_t *bounce_src = (volatile uint8_t *)CRAM1_SCRATCH_UNCACHED;
+    volatile uint8_t *cram0_dst = (volatile uint8_t *)(uintptr_t)dest;
     uint32_t done = 0;
-    /* Direct DMA to CRAM0 — CPU runs from BRAM during boot, no conflict. */
-    uint32_t bridge_base = cpu_to_bridge(dest);
 
     while (done < total) {
         uint32_t chunk = total - done;
         if (chunk > DMA_CHUNK_SIZE)
             chunk = DMA_CHUNK_SIZE;
 
-        int rc = boot_dma_read(OS_SLOT_ID, done, bridge_base + done, chunk);
+        /* Bridge DMA: SD card → CRAM1 scratch */
+        int rc = boot_dma_read(OS_SLOT_ID, done, bounce_bridge, chunk);
         if (rc < 0)
             return rc;
 
+        /* CPU copy: CRAM1 (uncached) → CRAM0 (word-at-a-time) */
+        volatile uint32_t *src32 = (volatile uint32_t *)bounce_src;
+        volatile uint32_t *dst32 = (volatile uint32_t *)&cram0_dst[done];
+        for (uint32_t i = 0; i < chunk / 4; i++)
+            dst32[i] = src32[i];
+
         done += chunk;
     }
-
-    /* Flush D-cache — bridge wrote directly, bypassing CPU cache */
-    flush_dcache();
 
     return 0;
 }

@@ -17,6 +17,8 @@
 #include "../os_string.h"
 
 static const uint32_t fb_addr[3] = { FB0_BASE, FB1_BASE, FB2_BASE };
+/* Uncached FB aliases — available for future GPU/DMA use:
+ * (FB0_BASE - SDRAM_BASE + SDRAM_UNCACHED_BASE), etc. */
 
 /* Software-tracked buffer roles */
 static int buf_display = 0;   /* buffer the hardware is scanning out        */
@@ -25,6 +27,18 @@ static int buf_ready   = -1;  /* buffer queued for next vsync (-1 = none)   */
 
 /* Display mode (tracked here for overlay compositing in of_video_flip) */
 static int vid_display_mode = DISPLAY_MODE_FRAMEBUFFER;
+
+/* Palette shadow — needed to dim the app palette in overlay mode.
+ * Hardware palette is write-only so we track it here. */
+static uint32_t pal_shadow[256];
+
+/* VGA bright colors for overlay terminal text (palette indices 240-255) */
+static const uint32_t overlay_term_pal[16] = {
+    0x000000, 0x0000AA, 0x00AA00, 0x00AAAA,  /*  0-3: black, dk blue/green/cyan */
+    0xAA0000, 0xAA00AA, 0xAA5500, 0xAAAAAA,  /*  4-7: dk red/magenta, brown, lt gray */
+    0x555555, 0x5555FF, 0x55FF55, 0x55FFFF,  /*  8-11: dk gray, blue, green, cyan */
+    0xFF5555, 0xFF55FF, 0xFFFF55, 0xFFFFFF,  /* 12-15: red, magenta, yellow, white */
+};
 
 /* ---- VRR (Variable Refresh Rate) ---- */
 #define VRR_LINES_PER_SEC   15720u  /* 12576000 / 800 */
@@ -169,30 +183,35 @@ uint8_t *of_video_get_surface(void) {
 }
 
 void of_video_flush_cache(void) {
-    of_cache_clean_range((uint8_t *)fb_addr[buf_draw], 320 * 240 * 2);
+    /* Rely on natural D-cache eviction — the FB (76KB) exceeds the
+     * cache (64KB), so rendering itself evicts most lines.  A fence
+     * drains the 4-slot store buffer to ensure recent writes are
+     * at least in the cache (and on eviction path to SDRAM). */
+    __asm__ volatile("" ::: "memory"); /* compiler barrier only */
 }
 
 uint8_t *of_video_flip(void) {
-    /* VRR disabled for debugging — TODO re-enable after fixing */
-    /* vrr_update(); */
+    vrr_update();
 
     /* Refresh our view of hardware state */
     sync_swap_state();
 
-    /* Overlay mode: composite terminal FB over app draw buffer.
-     * Non-zero terminal pixels (text) overwrite app pixels. */
+    /* Overlay mode: composite terminal text over app draw buffer.
+     * App pixels use the dimmed palette (set in overlay_install_palette).
+     * Terminal text pixels are remapped to 240-255 (bright VGA colors). */
     if (vid_display_mode == DISPLAY_MODE_OVERLAY) {
-        /* Read terminal FB through cached alias for performance */
         const uint8_t *term = (const uint8_t *)(TERM_FB_BASE - SDRAM_UNCACHED_BASE + SDRAM_BASE);
         uint8_t *app = (uint8_t *)fb_addr[buf_draw];
         for (int i = 0; i < FB_WIDTH * FB_HEIGHT; i++) {
             if (term[i])
-                app[i] = term[i];
+                app[i] = 240 + (term[i] & 0x0F);
         }
     }
 
-    /* Flush draw buffer so scanout sees the pixels */
-    of_cache_clean_range((uint8_t *)fb_addr[buf_draw], 320 * 240 * 2);
+    /* No explicit cache flush. The FB (76KB) exceeds the D-cache (64KB),
+     * so rendering naturally evicts most dirty lines to SDRAM.  A fence
+     * drains the store buffer so recent writes reach the cache. */
+    __asm__ volatile("" ::: "memory"); /* compiler barrier only */
 
     /* Queue draw buffer for display at next vsync.
      * Write format: bits[2:1] = buffer index, bit[0] = trigger */
@@ -238,34 +257,79 @@ void of_video_vsync(void) {
     }
 }
 
+/* Install overlay palette: dim app colors by 50%, bright terminal at 240-255 */
+static void overlay_install_palette(void) {
+    PAL_INDEX = 0;
+    for (int i = 0; i < 240; i++) {
+        uint32_t c = pal_shadow[i];
+        uint32_t r = (c >> 16) & 0xFF;
+        uint32_t g = (c >>  8) & 0xFF;
+        uint32_t b =  c        & 0xFF;
+        PAL_WRITE = ((r >> 1) << 16) | ((g >> 1) << 8) | (b >> 1);
+    }
+    for (int i = 0; i < 16; i++)
+        PAL_WRITE = overlay_term_pal[i];
+}
+
+/* Restore original app palette from shadow */
+static void overlay_restore_palette(void) {
+    PAL_INDEX = 0;
+    for (int i = 0; i < 256; i++)
+        PAL_WRITE = pal_shadow[i];
+}
+
 void of_video_set_palette(uint8_t index, uint8_t r, uint8_t g, uint8_t b) {
-    PAL_INDEX = index;
-    PAL_WRITE = ((uint32_t)r << 16) | ((uint32_t)g << 8) | b;
+    uint32_t rgb = ((uint32_t)r << 16) | ((uint32_t)g << 8) | b;
+    pal_shadow[index] = rgb;
+    if (vid_display_mode == DISPLAY_MODE_OVERLAY) {
+        overlay_install_palette();
+    } else {
+        PAL_INDEX = index;
+        PAL_WRITE = rgb;
+    }
 }
 
 void of_video_set_palette_bulk(const uint32_t *palette, int count) {
-    PAL_INDEX = 0;
     for (int i = 0; i < count && i < 256; i++)
-        PAL_WRITE = palette[i];
+        pal_shadow[i] = palette[i];
+    if (vid_display_mode == DISPLAY_MODE_OVERLAY) {
+        overlay_install_palette();
+    } else {
+        PAL_INDEX = 0;
+        for (int i = 0; i < count && i < 256; i++)
+            PAL_WRITE = palette[i];
+    }
 }
 
 void of_video_set_palette_vga4(const uint8_t *vga_pal, int count) {
     if (count > 256) count = 256;
-    PAL_INDEX = 0;
     for (int i = 0; i < count; i++) {
-        /* VGA 4-byte format: [B6, G6, R6, pad] — 6-bit components */
-        uint32_t b = (vga_pal[0] * 255 + 31) / 63;
-        uint32_t g = (vga_pal[1] * 255 + 31) / 63;
-        uint32_t r = (vga_pal[2] * 255 + 31) / 63;
-        PAL_WRITE = (r << 16) | (g << 8) | b;
-        vga_pal += 4;
+        uint32_t b = (vga_pal[i * 4 + 0] * 255 + 31) / 63;
+        uint32_t g = (vga_pal[i * 4 + 1] * 255 + 31) / 63;
+        uint32_t r = (vga_pal[i * 4 + 2] * 255 + 31) / 63;
+        pal_shadow[i] = (r << 16) | (g << 8) | b;
+    }
+    if (vid_display_mode == DISPLAY_MODE_OVERLAY) {
+        overlay_install_palette();
+    } else {
+        PAL_INDEX = 0;
+        for (int i = 0; i < count; i++)
+            PAL_WRITE = pal_shadow[i];
     }
 }
 
 void of_video_set_display_mode(int mode) {
+    int prev = vid_display_mode;
     vid_display_mode = mode;
     /* Switch scanout between terminal FB and app triple-buffered FB */
     TERM_FB_CTRL = (mode == DISPLAY_MODE_TERMINAL) ? 1 : 0;
+
+    /* Overlay mode: dim app palette, install bright terminal colors */
+    if (mode == DISPLAY_MODE_OVERLAY && prev != DISPLAY_MODE_OVERLAY)
+        overlay_install_palette();
+    else if (mode != DISPLAY_MODE_OVERLAY && prev == DISPLAY_MODE_OVERLAY)
+        overlay_restore_palette();
+
     of_term_set_display_mode(mode);
 }
 

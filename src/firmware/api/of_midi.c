@@ -916,8 +916,11 @@ int of_midi_init(void) {
     /* Enable OPL3 mode: register 0x105 bit 0 */
     of_audio_opl_write(0x105, 0x01);
 
-    /* Enable waveform select */
+    /* Enable waveform select on BOTH banks. Bank 1's WSE is at 0x101 —
+     * without this, OPL3 channels 9-17 ignore waveform select bits in
+     * operator registers and fall back to sine waves (organ sound). */
     of_audio_opl_write(0x01, 0x20);
+    of_audio_opl_write(0x101, 0x20);
 
     M.inited = 1;
     M.playing = 0;

@@ -14,5 +14,5 @@ void of_init(void) {
     of_file_init();
     of_save_init();
     of_analogizer_init();
-    of_link_init();
+    of_link_init(LINK_MODE_SLAVE);
 }

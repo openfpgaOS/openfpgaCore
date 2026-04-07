@@ -91,6 +91,11 @@ cpu:
 firmware:
 	@printf "$(C_HEAD)[fw]$(C_RESET) Building firmware...\n"
 	@$(MAKE) -C $(FW_DIR) clean all install
+	@if [ -f output_files/$(PROJECT).sof ]; then \
+		printf "$(C_HEAD)[fw]$(C_RESET) Patching bitstream with new bootloader...\n"; \
+		quartus_cdb $(PROJECT) --update_mif > /dev/null 2>&1; \
+		quartus_asm $(PROJECT) > /dev/null 2>&1; \
+	fi
 	@printf "$(C_OK)[fw] Done$(C_RESET)\n"
 
 # ── FPGA compile ─────────────────────────────────────────────────────
@@ -106,9 +111,13 @@ compile:
 	@quartus_sh --flow compile $(PROJECT) $(VERILOG_MACROS)
 	@printf "$(C_OK)[fpga] Done$(C_RESET)\n"
 
-# Incremental compile (keeps Quartus cache)
+# Full compile with fresh placement (clears incremental DB first)
+# Pocket only ships the Lite GPU variant — no GPU_VARIANT_* macro is passed,
+# so gpu_features.vh defaults to GPU_VARIANT_LITE. The Full GPU variant is
+# kept compilable for Verilator coverage and future hardware targets.
 build:
-	@printf "$(C_HEAD)[fpga]$(C_RESET) Incremental compile...\n"
+	@printf "$(C_HEAD)[fpga]$(C_RESET) Clean compile (GPU = Lite)...\n"
+	@rm -rf db incremental_db
 	@quartus_sh --flow compile $(PROJECT) $(VERILOG_MACROS)
 	@printf "$(C_OK)[fpga] Done$(C_RESET)\n"
 
@@ -139,9 +148,11 @@ test:
 	@printf "$(C_OK)[test] Done$(C_RESET)\n"
 
 # ── RTL check ────────────────────────────────────────────────────────
+# Honors VARIANT_DEFS so you can `VARIANT_DEFS="GPU_VARIANT_FULL" make check`
+# to sanity-check the Full GPU path even though Pocket only ships Lite.
 check:
 	@printf "$(C_HEAD)[check]$(C_RESET) Analysis & Synthesis...\n"
-	@quartus_map $(PROJECT)
+	@quartus_map $(PROJECT) $(VERILOG_MACROS)
 	@printf "$(C_OK)[check] Done$(C_RESET)\n"
 
 # ── Deploy ───────────────────────────────────────────────────────────
@@ -173,11 +184,21 @@ program:
 # ── Timing report ────────────────────────────────────────────────────
 timing:
 	@printf "$(C_HEAD)Fmax Summary (Slow 85°C):$(C_RESET)\n"
+	@printf "  %-12s %-12s %s\n" "Achieved" "Target" "Clock"
+	@printf "  %-12s %-12s %s\n" "--------" "------" "-----"
 	@grep -E "^\; [0-9]" output_files/$(PROJECT).sta.rpt 2>/dev/null | head -6 | while IFS=';' read _ fmax rfmax clock _rest; do \
 		fmax=$$(echo "$$fmax" | xargs); \
 		clock=$$(echo "$$clock" | xargs); \
 		short=$$(echo "$$clock" | sed 's/.*mp_ram.*general\[\([0-9]\)\].*/ram_out\1/' | sed 's/.*mp1.*general\[\([0-9]\)\].*/pll_out\1/' | sed 's/.*bridge_spiclk/spi/' | sed 's/.*clk_74a/clk_74a/'); \
-		printf "  %-12s %s\n" "$$fmax" "$$short"; \
+		case "$$short" in \
+			ram_out[0-2]) target="100.00 MHz" ;; \
+			pll_out[01])  target="12.29 MHz" ;; \
+			pll_out2)     target="49.15 MHz" ;; \
+			pll_out[34])  target="12.57 MHz" ;; \
+			clk_74a|spi)  target="74.25 MHz" ;; \
+			*)            target="—" ;; \
+		esac; \
+		printf "  %-12s %-12s %s\n" "$$fmax" "$$target" "$$short"; \
 	done
 	@echo ""
 	@printf "$(C_HEAD)Setup Slack (Slow 85°C, worst per clock):$(C_RESET)\n"

@@ -20,6 +20,22 @@ int of_audio_write(const int16_t *samples, int count);
 /* Get number of free entries in audio FIFO */
 int of_audio_get_free(void);
 
+/* ======================================================================
+ * Streaming Audio (ping-pong double-buffered)
+ * ====================================================================== */
+
+/* Open a stream. sample_rate is the input rate (resampled to 48kHz). */
+int of_audio_stream_open(int sample_rate);
+
+/* Write mono 16-bit signed samples. Up to 32K samples per call.
+ * Returns number of samples written. */
+int of_audio_stream_write(const int16_t *samples, int count);
+
+/* Check if the next write buffer is available (non-blocking). */
+int of_audio_stream_ready(void);
+
+/* Stop streaming and release voices. */
+void of_audio_stream_close(void);
 
 /* ======================================================================
  * OPL (YMF262 OPL3) FM Synthesizer

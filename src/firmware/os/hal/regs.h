@@ -236,6 +236,16 @@
 #define MIX_IRQ_PENDING      REG32(SYSREG_BASE + 0xF8)  /* Read: voice-end bitmask */
 #define MIX_IRQ_CLEAR        REG32(SYSREG_BASE + 0xF8)  /* Write: W1C */
 
+/* Link-lite peripheral (0x4D000000) — IRQ-driven, 1-word TX/RX */
+#define LINK_BASE            0x4D000000
+#define LINK_CTRL            REG32(LINK_BASE + 0x00)  /* RW: [0]=enable [1]=reset [2]=master */
+#define LINK_STATUS          REG32(LINK_BASE + 0x00)  /* R: [0]=enable [2]=master [4]=tx_empty [5]=rx_ready */
+#define LINK_TX_DATA         REG32(LINK_BASE + 0x04)  /* W: word to transmit */
+#define LINK_RX_DATA         REG32(LINK_BASE + 0x08)  /* R: received word (clears rx_ready) */
+#define LINK_DIVISOR         REG32(LINK_BASE + 0x0C)  /* W: half-period clock divider */
+#define   LINK_STATUS_TX_EMPTY  (1 << 4)
+#define   LINK_STATUS_RX_READY  (1 << 5)
+
 /* Vsync IRQ pending (0x9C) — read: bit 0 = pending, write: W1C clears */
 #define VSYNC_IRQ_PENDING    REG32(SYSREG_BASE + 0x9C)
 
@@ -265,16 +275,21 @@
 
 /* Hardware features (0x98) — read-only, set at synthesis time in RTL */
 #define HW_FEATURES         REG32(SYSREG_BASE + 0x98)
-#define   HW_FEAT_MIXER       (1 << 0)
-#define   HW_FEAT_OPL3        (1 << 1)
-#define   HW_FEAT_LINK        (1 << 2)
-#define   HW_FEAT_ANALOGIZER  (1 << 3)
-#define   HW_FEAT_GPU_2D      (1 << 4)
-#define   HW_FEAT_GPU_3D      (1 << 5)
-#define   HW_FEAT_MIDI        (1 << 6)
-#define   HW_FEAT_WIFI        (1 << 7)
-#define   HW_FEAT_FPU         (1 << 8)
-#define   HW_FEAT_SAVE_SLOTS  (1 << 9)
+#define   HW_FEAT_MIXER         (1 << 0)
+#define   HW_FEAT_OPL3          (1 << 1)
+#define   HW_FEAT_LINK          (1 << 2)
+#define   HW_FEAT_ANALOGIZER    (1 << 3)
+#define   HW_FEAT_GPU_SPAN      (1 << 4)   /* GPU span renderer (always set) */
+#define   HW_FEAT_GPU_TRIANGLE  (1 << 5)   /* GPU triangle rasterizer (Full) */
+#define   HW_FEAT_MIDI          (1 << 6)
+#define   HW_FEAT_WIFI          (1 << 7)
+#define   HW_FEAT_FPU           (1 << 8)
+#define   HW_FEAT_SAVE_SLOTS    (1 << 9)
+#define   HW_FEAT_GPU_VCOLOR    (1 << 10)  /* GPU vertex color (Full) */
+#define   HW_FEAT_GPU_BILINEAR  (1 << 11)  /* GPU bilinear filtering (Full) */
+#define   HW_FEAT_GPU_ALPHA     (1 << 12)  /* GPU alpha blending (Full) */
+#define   HW_FEAT_GPU_PERSP     (1 << 13)  /* GPU perspective spans (Lite/Full) */
+#define   HW_FEAT_GPU_FRAGPIPE  (1 << 14)  /* GPU 1-px/cycle frag pipeline (Lite/Full) */
 
 
 /* ======================================================================

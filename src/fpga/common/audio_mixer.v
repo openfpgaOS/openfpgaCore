@@ -36,6 +36,11 @@ module audio_mixer (
     input wire [4:0]  voice_sel,     // selected voice index
     input wire [31:0] voice_wdata,
 
+    // Back-pressure: HIGH when the mixer cannot accept a CPU write
+    // (FSM owns port A and deferred latch is full). AXI slave must
+    // hold bvalid=0 until this drops.
+    output wire       voice_wr_stall,
+
     // CRAM1 read interface (shared with CPU via arbiter)
     output reg         cram1_rd,
     output reg  [21:0] cram1_addr,
@@ -144,6 +149,24 @@ reg        cpu_clear_pos;
 reg [8:0]  cpu_clear_base;
 
 reg        fsm_wr_active;
+
+// CPU write FIFO: absorbs bursts of register writes while the FSM
+// owns BRAM port A. 8-deep is enough for of_mixer_play (6 writes)
+// + of_mixer_set_loop (3 writes) back-to-back.
+localparam WRFIFO_DEPTH = 8;
+localparam WRFIFO_BITS  = 3;  // log2(8)
+
+reg [40:0] wrfifo [0:WRFIFO_DEPTH-1];  // {field[3:0], sel[4:0], data[31:0]} = 41 bits
+reg [WRFIFO_BITS:0] wrfifo_wr_ptr;     // extra bit for full/empty detection
+reg [WRFIFO_BITS:0] wrfifo_rd_ptr;
+
+wire wrfifo_empty = (wrfifo_wr_ptr == wrfifo_rd_ptr);
+wire wrfifo_full  = (wrfifo_wr_ptr[WRFIFO_BITS] != wrfifo_rd_ptr[WRFIFO_BITS]) &&
+                    (wrfifo_wr_ptr[WRFIFO_BITS-1:0] == wrfifo_rd_ptr[WRFIFO_BITS-1:0]);
+
+// Back-pressure: high when FIFO is full. AXI slave should stall.
+// (Currently unused — FIFO depth is sufficient for all bursts.)
+assign voice_wr_stall = wrfifo_full;
 
 // ============================================
 // Mixer FSM
@@ -295,6 +318,8 @@ always @(posedge clk) begin
         dir_changed <= 0;
         new_dir <= 0;
         voice_end_pending <= 32'd0;
+        wrfifo_wr_ptr <= 0;
+        wrfifo_rd_ptr <= 0;
     end else begin
         sample_wr <= 0;
         cram1_rd <= 0;
@@ -303,23 +328,53 @@ always @(posedge clk) begin
         if (irq_clear_wr)
             voice_end_pending <= voice_end_pending & ~irq_clear;
 
-        // CPU writes go directly to BRAM port A (when FSM isn't using it)
-        if (voice_wr && !fsm_wr_active) begin
+        // Push CPU writes into FIFO when:
+        //   - FSM owns port A (can't write directly), OR
+        //   - FIFO already has pending entries (preserves write order)
+        // Without the second condition, a direct write could jump ahead
+        // of older queued writes, corrupting voice setup sequences.
+        if (voice_wr && (fsm_wr_active || !wrfifo_empty) && !wrfifo_full) begin
+            wrfifo[wrfifo_wr_ptr[WRFIFO_BITS-1:0]] <= {voice_field, voice_sel, voice_wdata};
+            wrfifo_wr_ptr <= wrfifo_wr_ptr + 1;
+        end
+
+        // CPU writes go directly to BRAM port A only when FSM is idle
+        // AND the FIFO is empty (no older writes to drain first).
+        if (voice_wr && !fsm_wr_active && wrfifo_empty) begin
             vtbl_a_wr <= 1;
             vtbl_a_addr <= {voice_sel, voice_field};
             vtbl_a_data <= voice_wdata;
             if (voice_field == VTBL_CTRL)
                 voice_active[voice_sel] <= voice_wdata[0];
-            // Position auto-clear only on inactive→active transition.
-            // Allows set_loop/set_bidi to update active voices without restarting.
             if (voice_field == VTBL_CTRL && voice_wdata[0] && !voice_active[voice_sel]) begin
                 cpu_clear_pos <= 1;
                 cpu_clear_base <= {voice_sel, 4'd0};
             end
-            // LEN write: no auto-init of LOOP_END/LOOP_START.
-            // Firmware sets loop points explicitly via of_mixer_set_loop.
-            // Auto-init caused a race: deferred writes overwrote firmware's
-            // loop points, corrupting looping samples.
+        end else if (!wrfifo_empty && !fsm_wr_active) begin
+            // Drain one FIFO entry to BRAM.
+            // Entry format: {field[3:0], sel[4:0], data[31:0]} = 41 bits
+            //   [40:37]=field, [36:32]=sel, [31:0]=data
+            begin : fifo_pop
+                reg [40:0] fe;
+                reg [3:0]  ff;
+                reg [4:0]  fs;
+                reg [31:0] fd;
+                fe = wrfifo[wrfifo_rd_ptr[WRFIFO_BITS-1:0]];
+                ff = fe[40:37];
+                fs = fe[36:32];
+                fd = fe[31:0];
+                vtbl_a_wr  <= 1;
+                vtbl_a_addr <= {fs, ff};
+                vtbl_a_data <= fd;
+                if (ff == VTBL_CTRL) begin
+                    voice_active[fs] <= fd[0];
+                    if (fd[0] && !voice_active[fs]) begin
+                        cpu_clear_pos  <= 1;
+                        cpu_clear_base <= {fs, 4'd0};
+                    end
+                end
+            end
+            wrfifo_rd_ptr <= wrfifo_rd_ptr + 1;
         end else if (cpu_clear_pos && !fsm_wr_active) begin
             vtbl_a_wr <= 1;
             vtbl_a_addr <= {cpu_clear_base[8:4], VTBL_POS_INT};
@@ -583,6 +638,10 @@ always @(posedge clk) begin
                     cur_voice <= cur_voice + 1;
                     vtbl_b_addr <= {cur_voice + 5'd1, VTBL_CTRL};
                     state <= S_RD_CTRL;
+                    // Release port A between voices so the CPU write FIFO
+                    // can drain during the next voice's read-only states
+                    // (S_RD_CTRL through S_ACCUM, ~30 cycles).
+                    fsm_wr_active <= 0;
                 end
             end
 
@@ -597,6 +656,8 @@ always @(posedge clk) begin
                     cur_voice <= cur_voice + 1;
                     vtbl_b_addr <= {cur_voice + 5'd1, VTBL_CTRL};
                     state <= S_RD_CTRL;
+                    // Release port A between voices (same as S_WR_FRAC).
+                    fsm_wr_active <= 0;
                 end
             end
 

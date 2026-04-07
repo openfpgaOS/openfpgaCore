@@ -17,5 +17,6 @@ void of_irq_init(void);
 void of_irq_register_external(void (*cb)(uint32_t source));
 void of_irq_register_vsync(void (*cb)(void));
 void of_irq_register_mixer_end(void (*cb)(uint32_t ended_mask));
+void of_irq_register_link_rx(void (*cb)(uint32_t word));
 
 #endif /* OFOS_IRQ_H */

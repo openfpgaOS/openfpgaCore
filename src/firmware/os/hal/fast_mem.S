@@ -3,7 +3,7 @@
  * Pinned in BRAM (.fasttext) for 0-wait-state access.
  *
  * VexiiRiscv pipeline notes:
- *   - D-cache: 128KB, 2-way, 64B lines, write-back
+ *   - D-cache: 64KB, 4-way, 64B lines, write-back
  *   - Store buffer: 4 slots — LLSS interleaving prevents stalls
  *   - Zicbom: cbo.clean/flush/inval
  *   - Zicboz: cbo.zero (allocate zeroed line, no SDRAM read)

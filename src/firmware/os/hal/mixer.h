@@ -17,6 +17,10 @@ void of_mixer_init(int max_voices, int output_rate);
 int of_mixer_play(const uint8_t *pcm_s16, uint32_t sample_count,
                   uint32_t sample_rate, int priority, int volume);
 
+/* Play 8-bit signed mono PCM from CRAM1. Returns voice index or -1. */
+int of_mixer_play_8bit(const uint8_t *pcm_s8, uint32_t sample_count,
+                       uint32_t sample_rate, int priority, int volume);
+
 /* Retrigger an existing voice with new sample data (no stop/start gap).
  * Redirects ADDR/LEN/POS in-place — eliminates click on note retrigger. */
 void of_mixer_retrigger(int voice, const uint8_t *pcm_s16,
@@ -73,6 +77,16 @@ void of_mixer_set_vol_rate(int voice, int rate);
  * since last poll. Clears the hardware IRQ bits and updates
  * software voice tracking. */
 uint32_t of_mixer_poll_ended(void);
+
+/* Group / master volume */
+#define OF_MIXER_GROUP_SFX   0
+#define OF_MIXER_GROUP_MUSIC 1
+#define OF_MIXER_GROUP_VOICE 2
+#define OF_MIXER_GROUP_AUX   3
+
+void of_mixer_set_group(int voice, int group);
+void of_mixer_set_group_volume(int group, int volume);
+void of_mixer_set_master_volume(int volume);
 
 /* Sample memory bump allocator */
 void *of_mixer_alloc_samples(uint32_t size);

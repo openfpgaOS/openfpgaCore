@@ -48,9 +48,8 @@ int of_net_status(void)
 int of_net_client_count(void)
 {
     if (net_state != OF_NET_HOSTING) return 0;
-    /* On Pocket: 1 client max if link cable connected */
-    uint32_t st = of_link_get_status();
-    return (st & LINK_STATUS_CONNECTED) ? 1 : 0;
+    /* On Pocket: 1 client max if link has received data */
+    return of_link_rx_available() > 0 ? 1 : 0;
 }
 
 /* Send a byte buffer over the link (length-prefix framing) */
