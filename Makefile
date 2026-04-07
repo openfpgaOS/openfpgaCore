@@ -2,8 +2,10 @@
 #
 # Quick start:
 #   make              Show this help
-#   make full         Full build: cpu → firmware → FPGA → test → deploy
-#   make flash        Quick: firmware → patch bitstream → deploy
+#   make full         os → build → test
+#   make build        Quartus clean compile (auto-runs cpu if missing)
+#   make firmware     Bootloader + os.bin + bitstream MIF patch
+#   make os           Just os.bin → build/
 
 # ── Target ───────────────────────────────────────────────────────────
 TARGET ?= pocket
@@ -57,24 +59,19 @@ help:
 	@printf "$(C_RESET)\n"
 	@printf "  $(C_HEAD)Target: $(TARGET)$(C_RESET)\n\n"
 	@printf "  $(C_HEAD)Build:$(C_RESET)\n"
-	@printf "    $(C_CMD)make $(C_CMD)full$(C_RESET)             cpu → firmware → FPGA → test → deploy  $(C_DIM)(~9 min)$(C_RESET)\n"
-	@printf "    $(C_CMD)make $(C_CMD)build$(C_RESET)            Quartus incremental compile            $(C_DIM)(~7 min)$(C_RESET)\n"
-	@printf "    $(C_CMD)make $(C_CMD)firmware$(C_RESET)         Rebuild bootloader + os.bin            $(C_DIM)(~5 sec)$(C_RESET)\n"
-	@printf "    $(C_CMD)make $(C_CMD)cpu$(C_RESET)              Regenerate VexiiRiscv from SpinalHDL   $(C_DIM)(~15 sec)$(C_RESET)\n"
-	@printf "    $(C_CMD)make $(C_CMD)sweep$(C_RESET)            Seed sweep, pick best Fmax             $(C_DIM)(~7 min/seed)$(C_RESET)\n"
-	@printf "    $(C_CMD)make $(C_CMD)sweep $(C_CMD)SEEDS=$(C_CMD)1-10$(C_RESET) Custom range\n"
+	@printf "    $(C_CMD)make $(C_CMD)full$(C_RESET)              bootloader → os → build → test     $(C_DIM)(~9 min)$(C_RESET)\n"
+	@printf "    $(C_CMD)make $(C_CMD)build$(C_RESET)             cpu → compile → reverse bits       $(C_DIM)(~7 min)$(C_RESET)\n"
+	@printf "    $(C_CMD)make $(C_CMD)firmware$(C_RESET)          bootloader → os → MIF patch        $(C_DIM)(~10 sec)$(C_RESET)\n"
+	@printf "    $(C_CMD)make $(C_CMD)os$(C_RESET)                Builds os.bin                      $(C_DIM)(~5 sec)$(C_RESET)\n"
+	@printf "    $(C_CMD)make $(C_CMD)clean$(C_RESET)             Remove all build artifacts\n"
 	@echo ""
-	@printf "  $(C_HEAD)Verification:$(C_RESET)\n"
-	@printf "    $(C_CMD)make $(C_CMD)test$(C_RESET)             Run Verilator test suite               $(C_DIM)(~30 sec)$(C_RESET)\n"
-	@printf "    $(C_CMD)make $(C_CMD)check$(C_RESET)            RTL check (Analysis & Synthesis)        $(C_DIM)(~45 sec)$(C_RESET)\n"
-	@printf "    $(C_CMD)make $(C_CMD)timing$(C_RESET)           Show Fmax and slack from last build\n"
-	@echo ""
-	@printf "  $(C_HEAD)Deployment:$(C_RESET)\n"
-	@printf "    $(C_CMD)make $(C_CMD)sdk $(C_CMD)DEST=$(C_CMD)\"path\"$(C_RESET)  Sync headers + runtime to SDK repo(s)\n"
-	@printf "    $(C_CMD)make $(C_CMD)program$(C_RESET)          JTAG flash via USB Blaster (dev)\n"
-	@echo ""
-	@printf "  $(C_HEAD)Cleanup:$(C_RESET)\n"
-	@printf "    $(C_CMD)make $(C_CMD)clean$(C_RESET)            Remove all build artifacts\n"
+	@printf "  $(C_HEAD)Development:$(C_RESET)\n"
+	@printf "    $(C_CMD)make $(C_CMD)test$(C_RESET)              Run Verilator test suite           $(C_DIM)(~30 sec)$(C_RESET)\n"
+	@printf "    $(C_CMD)make $(C_CMD)check$(C_RESET)             RTL check (Analysis & Synthesis)   $(C_DIM)(~45 sec)$(C_RESET)\n"
+	@printf "    $(C_CMD)make $(C_CMD)timing$(C_RESET)            Show Fmax and slack from last build\n"
+	@printf "    $(C_CMD)make $(C_CMD)sweep $(C_CMD)SEEDS=$(C_CMD)1-30$(C_RESET)  Seed sweep, pick best Fmax         $(C_DIM)(~7 min/seed)$(C_RESET)\n"
+	@printf "    $(C_CMD)make $(C_CMD)sdk $(C_CMD)DEST=$(C_CMD)\"path\"$(C_RESET)   Sync headers + runtime to SDK repo(s)\n"
+	@printf "    $(C_CMD)make $(C_CMD)program$(C_RESET)           JTAG program via USB Blaster\n"
 	@echo ""
 
 # ── Target validation ────────────────────────────────────────────────
@@ -95,16 +92,14 @@ SWEEP_MIN = $(word 1,$(subst -, ,$(SEEDS)))
 SWEEP_MAX = $(word 2,$(subst -, ,$(SEEDS)))
 
 # ── Delegate to target Makefile ──────────────────────────────────────
-cpu firmware compile build check test timing program: check-target
+cpu bootloader firmware os compile build check test timing program: check-target
 	@$(MAKE) -C $(TARGET_DIR) $@
 
 sweep: check-target
 	@$(MAKE) -C $(TARGET_DIR) sweep SWEEP_MIN=$(SWEEP_MIN) SWEEP_MAX=$(SWEEP_MAX)
 
-# ── Flash (firmware + patch + deploy) ────────────────────────────────
-flash: check-target
-	@$(MAKE) -C $(TARGET_DIR) flash
-	@$(MAKE) --no-print-directory package-only
+# `flash` removed — use `make firmware` instead. The two targets did
+# the same thing (firmware build + MIF patch + bitstream re-install).
 
 # ── Package ──────────────────────────────────────────────────────────
 package: $(REVERSE_BITS) package-dirs package-bitstream package-chip32 package-firmware package-json package-platform package-icon package-install
@@ -159,7 +154,7 @@ package-install:
 	@echo "$$INSTALL_TEXT" > $(BUILD_DIR)/INSTALL.txt
 
 # ── SDK sync ─────────────────────────────────────────────────────────
-sdk: check-target firmware
+sdk: check-target
 	@test -n "$(DEST)" || { \
 		printf "$(C_ERR)Usage: make sdk DEST=\"path/to/sdk\"$(C_RESET)\n"; \
 		exit 1; \
@@ -195,8 +190,8 @@ clean:
 	@rm -rf $(BUILD_DIR)
 	@rm -f $(REVERSE_BITS)
 
-.PHONY: all help check-target full cpu firmware compile build check test timing program sdk
-.PHONY: flash sweep
+.PHONY: all help check-target full cpu bootloader firmware os compile build check test timing program sdk
+.PHONY: sweep
 .PHONY: package package-only package-dirs package-bitstream package-chip32
 .PHONY: package-firmware package-json package-platform package-icon package-install
 .PHONY: clean

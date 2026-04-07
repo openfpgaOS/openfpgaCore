@@ -46,55 +46,94 @@ endif
 all: help
 
 # ── Full build ───────────────────────────────────────────────────────
-full: cpu firmware compile test deploy summary
+# bootloader → os → build → test. `build` itself auto-runs the cpu
+# generation (file-target rule below) when VexiiRiscv_Full.v is missing.
+full: bootloader os build test summary
 
 # ── Help ─────────────────────────────────────────────────────────────
 help:
 	@printf "$(C_LOGO)"
 	@echo "  openfpgaOS — $(TARGET)"
 	@printf "$(C_RESET)\n"
-	@printf "  $(C_HEAD)Full build:$(C_RESET)\n"
-	@printf "    $(C_CMD)make $(C_CMD)full$(C_RESET)             cpu → firmware → compile → test → deploy   $(C_DIM)(~9 min)$(C_RESET)\n"
+	@printf "  $(C_HEAD)Build:$(C_RESET)\n"
+	@printf "    $(C_CMD)make $(C_CMD)full$(C_RESET)              bootloader → os → build → test     $(C_DIM)(~9 min)$(C_RESET)\n"
+	@printf "    $(C_CMD)make $(C_CMD)build$(C_RESET)             cpu → compile → reverse bits       $(C_DIM)(~7 min)$(C_RESET)\n"
+	@printf "    $(C_CMD)make $(C_CMD)firmware$(C_RESET)          bootloader → os → MIF patch        $(C_DIM)(~10 sec)$(C_RESET)\n"
+	@printf "    $(C_CMD)make $(C_CMD)os$(C_RESET)                Builds os.bin                      $(C_DIM)(~5 sec)$(C_RESET)\n"
+	@printf "    $(C_CMD)make $(C_CMD)clean$(C_RESET)             Remove all build artifacts\n"
 	@echo ""
-	@printf "  $(C_HEAD)Incremental:$(C_RESET)\n"
-	@printf "    $(C_CMD)make $(C_CMD)flash$(C_RESET)            Firmware → patch bitstream → deploy        $(C_DIM)(~10 sec)$(C_RESET)\n"
-	@printf "    $(C_CMD)make $(C_CMD)build$(C_RESET)            Quartus incremental compile                $(C_DIM)(~7 min)$(C_RESET)\n"
-	@printf "    $(C_CMD)make $(C_CMD)firmware$(C_RESET)         Rebuild bootloader + os.bin                $(C_DIM)(~5 sec)$(C_RESET)\n"
-	@printf "    $(C_CMD)make $(C_CMD)cpu$(C_RESET)              Regenerate VexiiRiscv from SpinalHDL       $(C_DIM)(~15 sec)$(C_RESET)\n"
-	@echo ""
-	@printf "  $(C_HEAD)Verification:$(C_RESET)\n"
-	@printf "    $(C_CMD)make $(C_CMD)test$(C_RESET)             Run Verilator test suite                   $(C_DIM)(~30 sec)$(C_RESET)\n"
-	@printf "    $(C_CMD)make $(C_CMD)check$(C_RESET)            RTL check (Analysis & Synthesis)           $(C_DIM)(~45 sec)$(C_RESET)\n"
-	@printf "    $(C_CMD)make $(C_CMD)timing$(C_RESET)           Show Fmax and slack from last build\n"
-	@echo ""
-	@printf "  $(C_HEAD)Deployment:$(C_RESET)\n"
-	@printf "    $(C_CMD)make $(C_CMD)deploy$(C_RESET)           Copy bitstream + os.bin to build/\n"
-	@printf "    $(C_CMD)make $(C_CMD)program$(C_RESET)          JTAG flash via USB Blaster (dev)\n"
-	@echo ""
-	@printf "  $(C_HEAD)Seed sweep:$(C_RESET)\n"
-	@printf "    $(C_CMD)make $(C_CMD)sweep$(C_RESET)            Try seeds 1-30, report best Fmax           $(C_DIM)(~7 min/seed)$(C_RESET)\n"
-	@printf "    $(C_CMD)make $(C_CMD)sweep-results$(C_RESET)    Show results from previous sweep\n"
-	@printf "    $(C_CMD)make $(C_CMD)sweep-best$(C_RESET)       Rebuild with the best seed\n"
-	@echo ""
-	@printf "  $(C_HEAD)Cleanup:$(C_RESET)\n"
-	@printf "    $(C_CMD)make $(C_CMD)clean$(C_RESET)            Remove all build artifacts\n"
+	@printf "  $(C_HEAD)Development:$(C_RESET)\n"
+	@printf "    $(C_CMD)make $(C_CMD)test$(C_RESET)              Run Verilator test suite           $(C_DIM)(~30 sec)$(C_RESET)\n"
+	@printf "    $(C_CMD)make $(C_CMD)check$(C_RESET)             RTL check (Analysis & Synthesis)   $(C_DIM)(~45 sec)$(C_RESET)\n"
+	@printf "    $(C_CMD)make $(C_CMD)timing$(C_RESET)            Show Fmax and slack from last build\n"
+	@printf "    $(C_CMD)make $(C_CMD)sweep $(C_CMD)SEEDS=$(C_CMD)1-30$(C_RESET)  Try seeds, report best Fmax        $(C_DIM)(~7 min/seed)$(C_RESET)\n"
+	@printf "    $(C_CMD)make $(C_CMD)sdk $(C_CMD)DEST=$(C_CMD)\"path\"$(C_RESET)   Sync headers + runtime to SDK repo(s)\n"
+	@printf "    $(C_CMD)make $(C_CMD)program$(C_RESET)           JTAG program via USB Blaster\n"
 	@echo ""
 
-# ── CPU generation ───────────────────────────────────────────────────
-cpu:
-	@printf "$(C_HEAD)[cpu]$(C_RESET) Generating VexiiRiscv...\n"
+# ── CPU generation (file target) ─────────────────────────────────────
+# $(VEXII_OUT) = src/fpga/vendor/vexriscv/VexiiRiscv_Full.v. Generated
+# from SpinalHDL by generate_vexii.sh. Not tracked in git — anyone
+# checking out fresh will trigger the recipe automatically the first
+# time `make build` (or anything else that needs it) runs.
+$(VEXII_OUT):
+	@printf "$(C_HEAD)[cpu]$(C_RESET) Generating VexiiRiscv (file missing)...\n"
 	@cd $(VEXII_DIR) && bash ../generate_vexii.sh
 	@cp $(VEXII_DIR)/VexiiRiscv.v $(VEXII_OUT)
 	@printf "$(C_OK)[cpu] Done$(C_RESET)\n"
 
-# ── Firmware ─────────────────────────────────────────────────────────
-firmware:
-	@printf "$(C_HEAD)[fw]$(C_RESET) Building firmware...\n"
-	@$(MAKE) -C $(FW_DIR) clean all install
+# Phony alias to force regeneration: rm $(VEXII_OUT) then `make cpu`,
+# or just `make cpu` after deleting the file. Keeps muscle memory alive.
+cpu: $(VEXII_OUT)
+
+# ── Build artifact installers ───────────────────────────────────────
+#
+# Each substantive build step (os/build/firmware) calls one of these to
+# refresh its output in $(RELEASE_DIR) so build/ always matches the
+# latest in-tree binary. The SDK / SD-card sync runs separately against
+# build/.
+install-os: $(FW_DIR)/os.bin
+	@mkdir -p $(RELEASE_DIR) $(ASSETS_DIR)
+	@cp $(FW_DIR)/os.bin $(RELEASE_DIR)/os.bin
+	@cp $(FW_DIR)/os.bin $(ASSETS_DIR)/os.bin
+	@printf "  $(C_OK)os.bin$(C_RESET)     → $(RELEASE_DIR)/\n"
+
+install-bitstream: $(REVERSE_BITS) output_files/$(PROJECT).rbf
+	@mkdir -p $(RELEASE_DIR)
+	@$(REVERSE_BITS) output_files/$(PROJECT).rbf $(RELEASE_DIR)/bitstream.rbf_r > /dev/null
+	@printf "  $(C_OK)bitstream$(C_RESET)  → $(RELEASE_DIR)/\n"
+
+# ── Bootloader / OS / Firmware ──────────────────────────────────────
+#
+# Two source artifacts:
+#   - bootloader (firmware.mif): baked into the FPGA BRAM, runs at
+#     reset, loads os.bin from CRAM/SD into SDRAM, jumps to it.
+#   - os.bin: loaded by the bootloader; everything you actually run.
+#
+# Three targets:
+#   `bootloader` — rebuild firmware.mif and copy into the pocket dir
+#                  (where Quartus picks it up at the next compile).
+#   `os`         — rebuild os.bin and install into build/.
+#   `firmware`   — bootloader → os → MIF patch. The MIF patch updates
+#                  any existing .sof in place so you don't need to
+#                  re-run Quartus just to ship a new bootloader.
+bootloader:
+	@printf "$(C_HEAD)[boot]$(C_RESET) Building bootloader (firmware.mif)...\n"
+	@$(MAKE) -C $(FW_DIR) install
+	@printf "$(C_OK)[boot] Done$(C_RESET)\n"
+
+os:
+	@printf "$(C_HEAD)[os]$(C_RESET) Building os.bin...\n"
+	@$(MAKE) -C $(FW_DIR) os.bin
+	@$(MAKE) --no-print-directory install-os
+	@printf "$(C_OK)[os] Done$(C_RESET)\n"
+
+firmware: bootloader os
 	@if [ -f output_files/$(PROJECT).sof ]; then \
-		printf "$(C_HEAD)[fw]$(C_RESET) Patching bitstream with new bootloader...\n"; \
+		printf "$(C_HEAD)[fw]$(C_RESET) Patching .sof MIF with new bootloader...\n"; \
 		quartus_cdb $(PROJECT) --update_mif > /dev/null 2>&1; \
 		quartus_asm $(PROJECT) > /dev/null 2>&1; \
+		$(MAKE) --no-print-directory install-bitstream; \
 	fi
 	@printf "$(C_OK)[fw] Done$(C_RESET)\n"
 
@@ -105,20 +144,20 @@ firmware:
 VARIANT_DEFS ?=
 VERILOG_MACROS = $(foreach d,$(VARIANT_DEFS),--verilog_macro="$(d)")
 
-compile:
-	@printf "$(C_HEAD)[fpga]$(C_RESET) Compiling (this takes a while)...\n"
-	@rm -rf db incremental_db
-	@quartus_sh --flow compile $(PROJECT) $(VERILOG_MACROS)
-	@printf "$(C_OK)[fpga] Done$(C_RESET)\n"
+# `compile` is kept as an alias for `build` so old muscle memory and
+# anything that calls `make compile` still works. Both run a clean
+# Quartus full compile (rm -rf db incremental_db + quartus_sh --flow).
+compile: build
 
 # Full compile with fresh placement (clears incremental DB first)
 # Pocket only ships the Lite GPU variant — no GPU_VARIANT_* macro is passed,
 # so gpu_features.vh defaults to GPU_VARIANT_LITE. The Full GPU variant is
 # kept compilable for Verilator coverage and future hardware targets.
-build:
+build: $(VEXII_OUT)
 	@printf "$(C_HEAD)[fpga]$(C_RESET) Clean compile (GPU = Lite)...\n"
 	@rm -rf db incremental_db
 	@quartus_sh --flow compile $(PROJECT) $(VERILOG_MACROS)
+	@$(MAKE) --no-print-directory install-bitstream
 	@printf "$(C_OK)[fpga] Done$(C_RESET)\n"
 
 # ── Core variant builds ──────────────────────────────────────────────
@@ -156,24 +195,26 @@ check:
 	@printf "$(C_OK)[check] Done$(C_RESET)\n"
 
 # ── Deploy ───────────────────────────────────────────────────────────
-deploy: $(REVERSE_BITS)
-	@printf "$(C_HEAD)[deploy]$(C_RESET)\n"
-	@$(REVERSE_BITS) output_files/$(PROJECT).rbf $(RELEASE_DIR)/bitstream.rbf_r > /dev/null
-	@cp $(FW_DIR)/os.bin $(RELEASE_DIR)/os.bin
-	@cp $(FW_DIR)/os.bin $(ASSETS_DIR)/os.bin
-	@printf "  $(C_OK)bitstream$(C_RESET)  → build/\n"
-	@printf "  $(C_OK)os.bin$(C_RESET)     → build/\n"
+# `deploy` is now an explicit no-op that just refreshes both artifacts
+# in build/ from whatever is currently on disk. Mostly useful as a
+# top-level "make sure build/ matches the source tree" command. The
+# individual build targets (os, build, firmware) already install their
+# own outputs as a post-step, so you only need this if you want to
+# re-sync without rebuilding anything.
+deploy: install-os install-bitstream
+	@printf "$(C_OK)[deploy] Done$(C_RESET)\n"
 
-# ── Flash (firmware-only, fast) ──────────────────────────────────────
-flash: firmware $(REVERSE_BITS)
-	@printf "$(C_HEAD)[flash]$(C_RESET) Patching bitstream...\n"
-	@quartus_cdb $(PROJECT) --update_mif > /dev/null 2>&1
-	@quartus_asm $(PROJECT) > /dev/null 2>&1
-	@$(REVERSE_BITS) output_files/$(PROJECT).rbf $(RELEASE_DIR)/bitstream.rbf_r > /dev/null
-	@cp $(FW_DIR)/os.bin $(RELEASE_DIR)/os.bin
-	@cp $(FW_DIR)/os.bin $(ASSETS_DIR)/os.bin
-	@printf "  $(C_OK)bitstream$(C_RESET)  → build/\n"
-	@printf "  $(C_OK)os.bin$(C_RESET)     → build/\n"
+# `flash` removed — `firmware` now does the same thing (it builds os,
+# patches the .sof's MIF, and reinstalls the bitstream + os.bin to
+# build/). The old `flash` was identical except for the recipe order.
+
+# ── SDK sync (delegates to top-level Makefile) ───────────────────────
+# Lets you run `make sdk DEST=path/to/sdk` from this directory and
+# have it forward to the openfpgaOS root, where the actual sync logic
+# lives (it copies of_*.h into <DEST>/src/sdk/include and the runtime
+# files into <DEST>/runtime).
+sdk:
+	@$(MAKE) -C $(ROOT_DIR) sdk DEST="$(DEST)"
 
 # ── JTAG program ─────────────────────────────────────────────────────
 program:
@@ -276,5 +317,5 @@ clean:
 # Alias for root Makefile compatibility
 clean-all: clean
 
-.PHONY: all full help cpu firmware compile build test check deploy flash program
-.PHONY: timing summary sweep clean clean-all
+.PHONY: all full help cpu bootloader firmware os compile build test check deploy sdk program
+.PHONY: install-os install-bitstream timing summary sweep clean clean-all
