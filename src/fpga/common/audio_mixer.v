@@ -56,8 +56,11 @@ module audio_mixer (
     // Status
     output wire [4:0]  active_count,
 
-    // Position read-back (latched for voice_sel during mix)
-    output reg  [21:0] pos_readback,
+    // Position read-back — mux over a per-voice latched array so a
+    // CPU SEL switch returns the selected voice's latest position
+    // immediately, rather than waiting up to one mixer cycle (~20us)
+    // for the FSM to re-scan that voice.
+    output wire [21:0] pos_readback,
 
     // Voice-end IRQ
     input  wire [31:0] irq_clear,     // W1C from CPU
@@ -151,10 +154,10 @@ reg [8:0]  cpu_clear_base;
 reg        fsm_wr_active;
 
 // CPU write FIFO: absorbs bursts of register writes while the FSM
-// owns BRAM port A. 8-deep is enough for of_mixer_play (6 writes)
-// + of_mixer_set_loop (3 writes) back-to-back.
-localparam WRFIFO_DEPTH = 8;
-localparam WRFIFO_BITS  = 3;  // log2(8)
+// owns BRAM port A. 32-deep handles multiple back-to-back of_mixer_play
+// calls (6 writes each) plus retrigger (8 writes) and stress-test loops.
+localparam WRFIFO_DEPTH = 32;
+localparam WRFIFO_BITS  = 5;  // log2(32)
 
 reg [40:0] wrfifo [0:WRFIFO_DEPTH-1];  // {field[3:0], sel[4:0], data[31:0]} = 41 bits
 reg [WRFIFO_BITS:0] wrfifo_wr_ptr;     // extra bit for full/empty detection
@@ -167,6 +170,13 @@ wire wrfifo_full  = (wrfifo_wr_ptr[WRFIFO_BITS] != wrfifo_rd_ptr[WRFIFO_BITS]) &
 // Back-pressure: high when FIFO is full. AXI slave should stall.
 // (Currently unused — FIFO depth is sufficient for all bursts.)
 assign voice_wr_stall = wrfifo_full;
+
+// Combinational signal: the FSM is in a state that WILL write port A
+// this cycle. Used by the drain logic to avoid racing with the FSM
+// for vtbl_a_wr (the FSM's non-blocking assignment runs later in the
+// always block and would silently override the drain's write).
+wire fsm_writing_now = (state == S_VOL_RAMP) || (state == S_WR_POS) ||
+                       (state == S_WR_FRAC)  || (state == S_WR_DIR);
 
 // ============================================
 // Mixer FSM
@@ -218,6 +228,13 @@ reg [7:0]  cur_vol_rate;
 reg        new_dir;
 reg        dir_changed;
 reg        pos_wrapped;  // set in S_WR_POS when loop/end triggered
+
+// Per-voice position latch — mirrored from BRAM each time the FSM
+// reads a voice's POS_INT (once per mixer cycle). Muxed to pos_readback
+// so a CPU SEL switch returns the selected voice's latest sample
+// position without waiting up to ~20us for the next FSM visit.
+reg [21:0] voice_pos_latch [0:31];
+assign pos_readback = voice_pos_latch[voice_sel];
 
 // Pipeline registers
 reg signed [15:0] pipe_scaled_l;
@@ -314,7 +331,6 @@ always @(posedge clk) begin
         cpu_clear_pos <= 0;
         cpu_clear_base <= 0;
         fsm_wr_active <= 0;
-        pos_readback <= 0;
         dir_changed <= 0;
         new_dir <= 0;
         voice_end_pending <= 32'd0;
@@ -328,19 +344,23 @@ always @(posedge clk) begin
         if (irq_clear_wr)
             voice_end_pending <= voice_end_pending & ~irq_clear;
 
-        // Push CPU writes into FIFO when:
-        //   - FSM owns port A (can't write directly), OR
-        //   - FIFO already has pending entries (preserves write order)
-        // Without the second condition, a direct write could jump ahead
-        // of older queued writes, corrupting voice setup sequences.
-        if (voice_wr && (fsm_wr_active || !wrfifo_empty) && !wrfifo_full) begin
+        // Push CPU writes into FIFO when the direct-write path is unavailable:
+        //   - FSM owns port A this cycle (fsm_writing_now) — combinational
+        //     guard matching line 350; without this, a write arriving in the
+        //     exact cycle the FSM enters S_WR_* (before fsm_wr_active is
+        //     re-asserted) was silently dropped, losing voice setup writes.
+        //   - fsm_wr_active (registered, spans multi-voice write sequences), OR
+        //   - FIFO already has pending entries (preserves write order —
+        //     without this, a direct write could jump ahead of older queued
+        //     writes, corrupting voice setup sequences).
+        if (voice_wr && (fsm_wr_active || fsm_writing_now || !wrfifo_empty) && !wrfifo_full) begin
             wrfifo[wrfifo_wr_ptr[WRFIFO_BITS-1:0]] <= {voice_field, voice_sel, voice_wdata};
             wrfifo_wr_ptr <= wrfifo_wr_ptr + 1;
         end
 
         // CPU writes go directly to BRAM port A only when FSM is idle
         // AND the FIFO is empty (no older writes to drain first).
-        if (voice_wr && !fsm_wr_active && wrfifo_empty) begin
+        if (voice_wr && !fsm_wr_active && !fsm_writing_now && wrfifo_empty) begin
             vtbl_a_wr <= 1;
             vtbl_a_addr <= {voice_sel, voice_field};
             vtbl_a_data <= voice_wdata;
@@ -350,7 +370,7 @@ always @(posedge clk) begin
                 cpu_clear_pos <= 1;
                 cpu_clear_base <= {voice_sel, 4'd0};
             end
-        end else if (!wrfifo_empty && !fsm_wr_active) begin
+        end else if (!wrfifo_empty && !fsm_wr_active && !fsm_writing_now) begin
             // Drain one FIFO entry to BRAM.
             // Entry format: {field[3:0], sel[4:0], data[31:0]} = 41 bits
             //   [40:37]=field, [36:32]=sel, [31:0]=data
@@ -375,13 +395,13 @@ always @(posedge clk) begin
                 end
             end
             wrfifo_rd_ptr <= wrfifo_rd_ptr + 1;
-        end else if (cpu_clear_pos && !fsm_wr_active) begin
+        end else if (cpu_clear_pos && !fsm_wr_active && !fsm_writing_now) begin
             vtbl_a_wr <= 1;
             vtbl_a_addr <= {cpu_clear_base[8:4], VTBL_POS_INT};
             vtbl_a_data <= 32'd0;
             cpu_clear_pos <= 0;
             cpu_wr_pending <= 1;
-        end else if (cpu_wr_pending && !fsm_wr_active) begin
+        end else if (cpu_wr_pending && !fsm_wr_active && !fsm_writing_now) begin
             vtbl_a_wr <= 1;
             vtbl_a_addr <= {cpu_clear_base[8:4], VTBL_POS_FRAC};
             vtbl_a_data <= 32'd0;
@@ -458,8 +478,10 @@ always @(posedge clk) begin
                     end
                     4'd3: begin  // POS_INT
                         cur_pos_int <= vtbl_b_data[21:0];
-                        if (cur_voice == voice_sel)
-                            pos_readback <= vtbl_b_data[21:0];
+                        /* Mirror every voice's position into the per-voice
+                         * latch array so pos_readback can mux it out
+                         * immediately when the CPU switches voice_sel. */
+                        voice_pos_latch[cur_voice] <= vtbl_b_data[21:0];
                         vtbl_b_addr <= {cur_voice, VTBL_POS_FRAC};
                         bram_rd_phase <= 4;
                         state <= S_RD_FIELDS;

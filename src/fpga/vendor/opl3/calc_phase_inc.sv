@@ -65,6 +65,15 @@ module calc_phase_inc
     logic [PIPELINE_DELAY:1] vib_p;
     logic [$clog2(30)-1:0] multiplier_p1 = 0;
 
+    /* YMF262 phase-step formula: phase_step = fnum * 2^block * mult
+     * The multiplier_p1 table below stores 2x the canonical mult values
+     * (e.g. mult=1 → 2, for mult=0.5 → 1), so a single `>> 1` cancels
+     * that doubling: (fnum << block) / 2 × (2 × mult) = fnum × 2^block × mult.
+     * For fnum=345, block=4, mult=1 this gives 5520, matching the required
+     * middle-C phase step of 5518.1 at a 49716 Hz sample rate. A previous
+     * `>> 2` attempt dropped the result an octave — the audible "too high"
+     * it was chasing came from the old hand-written bank's patch values,
+     * not from the RTL math. */
     always_comb pre_mult_p0 = (fnum << block) >> 1;
 
     always_ff @(posedge clk)

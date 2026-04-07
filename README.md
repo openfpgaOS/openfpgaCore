@@ -123,11 +123,13 @@ See [architecture.md](architecture.md) for the roadmap (multi-target support, ca
 | openFPGA framework | — | Analogue |
 | musl libc | MIT | Rich Felker |
 | jtframe utilities | GPL-3.0 | Jose Tejada |
+| DMXOPL GM instrument bank | GPL-2.0 | sneakernets et al. |
 
 ## Acknowledgments
 
 - [SpinalHDL/VexiiRiscv](https://github.com/SpinalHDL/VexiiRiscv) — RISC-V CPU core (Charles Papon)
 - [Greg Taylor](https://github.com/gtaylormb/opl3_fpga) — OPL3 FPGA synthesizer
+- [DMXOPL](https://github.com/sneakernets/DMXOPL) — General MIDI OPL3 instrument bank used by `of_midi` (converted from `GENMIDI.op2` via `tools/op2_to_bank.py`)
 - [RndMnkIII](https://github.com/RndMnkIII) — Analogizer adapter
 - [Analogue](https://www.analogue.co/developer) — Pocket openFPGA framework
 - [musl libc](https://musl.libc.org/) — C library (Rich Felker)
