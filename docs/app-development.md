@@ -2,7 +2,12 @@
 
 ## Overview
 
-Applications are ELF binaries compiled with a RISC-V cross-compiler. They run on the VexRiscv CPU at 100 MHz and communicate with the OS kernel via `ecall` syscalls. The SDK wraps all syscalls in inline C functions.
+Applications are ELF binaries compiled with a RISC-V cross-compiler. They run on the VexRiscv CPU at 100 MHz and communicate with the OS kernel through two `ecall`-based interfaces:
+
+1. **Linux RISC-V syscalls** for everything POSIX (`read`, `write`, `brk`, `openat`, `clock_gettime`, ...). Apps statically link **upstream musl libc** unmodified, and musl emits these syscalls itself. The kernel implements the small subset musl actually uses.
+2. **openfpgaOS SBI vendor extensions** (`OF_EID_*`, see `docs/syscall-abi.md`) for the platform-specific subsystems — video framebuffer, audio mixer, GPU, MIDI, etc. The SDK wraps these in inline `static` functions in `of_*.h`.
+
+There is **no custom libc shim layer**. Apps build against unmodified musl headers and link `musl/lib/libc.a` like any standard riscv32 musl-static program.
 
 For game development, use the [openfpgaOS SDK](https://github.com/ThinkElastic/openfpgaOS-SDK). This document covers the internals for OS contributors.
 
@@ -36,19 +41,32 @@ int main(void) {
 
 ### Build Requirements
 
-- RISC-V GCC: `riscv64-elf-gcc` or `riscv64-unknown-elf-gcc`
+- RISC-V GCC: `riscv64-elf-gcc` (the bare-metal toolchain — we don't need the Linux variant)
 - Architecture: `rv32imafc` with `ilp32f` ABI
-- CRT: `crt/start.S` (entry point) and `crt/app.ld` (linker script)
-- Flags: `-ffreestanding -nostdlib -nostartfiles`
+- musl static library: built once into `src/firmware/musl/lib/libc.a`
+- Flags: `-nostartfiles -nostdlib` plus `-lc -lgcc` at link time
+
+A ready-to-use template lives at `src/firmware/api/Makefile.fpga`:
+
+```sh
+make -f /path/to/openfpgaOS/src/firmware/api/Makefile.fpga \
+     APP=mygame SRCS="main.c world.c"
+```
+
+Resulting `mygame.elf` is loaded and executed by the kernel ELF loader.
 
 ### Entry Point
 
-The CRT startup (`crt/start.S`) provides `_start` which calls `main()`. When `main()` returns, the CRT issues `SYS_exit` (syscall 93) to halt. The OS sets up the stack, arguments, and BSS before jumping to `_start`.
+musl provides `_start` (`src/firmware/musl/crt/crt1.c`) which initializes the C runtime, calls `__libc_start_main`, and then `main()`. When `main()` returns, musl emits `SYS_exit_group` (syscall 94) which the kernel handles in `linux_dispatch()`. No custom CRT is needed.
+
+The kernel ELF loader sets up the stack pointer, copies the program segments to their target VAs, zeros BSS, applies relocations (for PIE/`ET_DYN` apps), and jumps to `e_entry`. From musl's perspective the environment looks exactly like Linux.
 
 ### Memory Layout
 
 ```
-0x00002000 - 0x0000FDFF   BRAM app region (55 KB) — OF_FASTTEXT code
+0x00002000 - 0x0000F7FF   BRAM app region (54 KB) — OF_FASTTEXT code
+0x00007800                 of_capabilities struct (read-only)
+0x00007A00                 of_services_table (read-only function pointers)
 0x10400000 - 0x13BFFFFF   App code + data (48 MB SDRAM)
 0x13C00000 - 0x13F7FFFF   Heap (grows up via brk)
 0x13F80000                 Stack top (grows down)
@@ -56,13 +74,38 @@ The CRT startup (`crt/start.S`) provides `_start` which calls `main()`. When `ma
 
 ### Heap
 
-Managed via the `brk` syscall. Starts after BSS, grows upward. Upper bound is the save region. `malloc()` / `free()` are provided by the OS kernel (dlmalloc) and accessible via the libc jump table.
+Managed by **musl's malloc** (`mallocng`), which calls `SYS_brk` (and optionally `SYS_mmap2`) under the hood. The kernel's `linux_dispatch()` honors `brk` against a heap region carved out of SDRAM. There is no separate kernel-side allocator exposed to apps.
 
 ### Standard C Library
 
-The OS kernel exports 88 libc functions via a jump table at `0x103FF000` (including POSIX I/O: open, close, read, write, lseek). SDK apps include thin wrappers in `libc/stdio.h`, `libc/stdlib.h`, etc. that forward to this table. No musl or newlib is needed in the app build.
+Apps statically link the bundled **upstream musl 1.2.5**, built once for `rv32imafc/ilp32f` and stashed at `src/firmware/musl/lib/libc.a`. Standard headers come from `src/firmware/musl/include/`. There is **no SDK-shim libc** — `<stdio.h>`, `<stdlib.h>`, `<string.h>`, `<math.h>`, `<unistd.h>`, etc. are all upstream musl.
 
-For game ports that need full POSIX compatibility, apps can link against musl libc instead. musl's syscalls go through the same `ecall` mechanism.
+This is the same model every Alpine/Void Linux musl-static binary uses. The cost is ~50–100 KB per app for the formatter / allocator / math; the benefit is zero ongoing fork maintenance and full musl compatibility (every libc feature works, future musl updates flow through unchanged).
+
+The Linux syscalls musl emits are handled by the kernel's `linux_dispatch()` in `src/firmware/os/kernel/syscall.c`. The implemented subset is:
+
+| Syscall                | Used by                                  |
+|------------------------|------------------------------------------|
+| `brk` (214)            | musl mallocng heap growth                |
+| `mmap2` (222)          | large allocations / aligned allocations  |
+| `munmap` (215)         | matching unmap                           |
+| `writev`/`write` (66/64) | stdio output                           |
+| `readv`/`read` (65/63) | stdio input                              |
+| `openat` (56) / `close` (57) | file I/O                           |
+| `lseek` (62)           | seeking                                  |
+| `statx` (291)          | rv32 musl uses statx, not fstat          |
+| `getdents64` (61)      | opendir / readdir                        |
+| `clock_gettime64` (403) | rv32 musl 64-bit clock                  |
+| `clock_getres64` (406) | matching                                 |
+| `clock_nanosleep` (115) | sleep / nanosleep                       |
+| `exit_group`/`exit` (94/93) | exit                                |
+| `set_tid_address` (96) | called once at startup                   |
+| `rt_sigaction`/`rt_sigprocmask` | signal stubs (no-op)            |
+| `ioctl` (29)           | musl stdout buffering detection          |
+| `futex` (422)          | musl FILE locking (single-threaded)      |
+| `riscv_flush_icache` (259) | JIT / loaders                        |
+
+Adding a new POSIX call means appending one case to `linux_dispatch()`.
 
 ## API Reference
 
@@ -237,23 +280,33 @@ fclose(f);
 Low-level:
 
 ```c
-int  of_save_read(int slot, void *buf, uint32_t offset, uint32_t len);
-int  of_save_write(int slot, const void *buf, uint32_t offset, uint32_t len);
-void of_save_flush(int slot);                   // Flush full 256 KB
-int  of_save_flush_size(int slot, uint32_t sz); // Flush only what was written
-void of_save_erase(int slot);
+/* Use POSIX file I/O with the "save:N" path scheme.
+ * fclose() automatically flushes written data to SD card. */
+FILE *f = fopen("save:0", "wb");
+fwrite(state, 1, sizeof(state), f);
+fclose(f);
+
+f = fopen("save:0", "rb");
+fread(state, 1, sizeof(state), f);
+fclose(f);
 ```
 
 ### Terminal — `of_terminal.h`
 
 40x30 text console with CP437 character set and box-drawing characters.
+Use standard `printf()` (provided by statically-linked musl, which writes to the
+terminal device); use ANSI escape sequences for cursor control, color,
+and screen clear. The `ACS_*` constants in `of_terminal.h` give CP437
+box-drawing characters for use with `printf("%c", ACS_VLINE)`.
 
 ```c
-void of_print(const char *s);
-void of_print_char(char c);
-void of_print_clear(void);
-void of_print_at(int col, int row);
-printf("Score: %d\n", score);                  // Also works
+#include <stdio.h>
+#include "of_terminal.h"
+
+printf("\033[2J\033[H");                        /* clear, home */
+printf("\033[%d;%dH", row + 1, col + 1);        /* set cursor */
+printf("Score: %d\n", score);
+printf("%c%c%c\n", ACS_ULCORNER, ACS_HLINE, ACS_URCORNER);
 ```
 
 ### Tile Engine — `of_tile.h`

@@ -171,11 +171,12 @@ The load address `0x10400000` places the app at SDRAM + 4 MB, after the two fram
 
 ```c
 #include "of.h"
+#include <stdio.h>
 
 int main(void) {
-    of_print_clear();
-    of_print("Hello from openfpgaOS!\n");
-    of_print("Press START to continue...\n");
+    printf("\033[2J\033[H");  /* clear screen, home cursor */
+    printf("Hello from openfpgaOS!\n");
+    printf("Press START to continue...\n");
 
     while (1) {
         of_input_poll();
@@ -777,29 +778,19 @@ if (of_link_recv(&remote_state) == 0) {
 
 A 40x30 text console overlaid on the display. The terminal is the default display mode before `of_video_init()` is called. Useful for debug output and simple text-mode applications.
 
-#### `void of_print(const char *s)`
-Print a null-terminated string. Supports `\n` for newlines.
-
-#### `void of_print_char(char c)`
-Print a single character.
-
-#### `void of_print_clear(void)`
-Clear the terminal and reset the cursor to (0, 0).
-
-#### `void of_print_at(int col, int row)`
-Set the cursor position. Column 0--39, row 0--29.
-
 #### Debug Printing
 
-Standard `printf()` is available via the libc jump table and prints to the terminal:
+Apps statically link upstream musl, so `printf()` is available the
+moment you `#include <stdio.h>`. Output goes through `SYS_writev` to
+the kernel, which writes to the terminal device. Use ANSI escape
+sequences for cursor control, color, and screen clear.
 
 ```c
 #include <stdio.h>
+printf("\033[2J\033[H");                       /* clear + home */
+printf("\033[%d;%dH", row + 1, col + 1);       /* cursor to (col,row) */
 printf("Score: %d  Health: %d\n", score, health);
-printf("Position: (%.1f, %.1f)\n", x, y);
 ```
-
-For terminal-only output without stdio, use `of_print()` and `of_print_char()`.
 
 ---
 

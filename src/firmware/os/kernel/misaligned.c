@@ -382,7 +382,7 @@ __attribute__((section(".text.boot")))
 void fatal_trap(trap_frame_t *frame) {
     (void)frame;
     /* Just freeze — don't write anything to display.
-     * The last of_print output on terminal will remain visible. */
+     * The last printf output on terminal will remain visible. */
     for(;;) { __asm__ volatile(""); }
 
     /* Snapshot before anything that might trap */

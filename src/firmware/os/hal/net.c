@@ -131,21 +131,21 @@ int of_net_poll(void)
     return (int)rx_head;
 }
 
-/* Syscall dispatcher */
-long of_net_syscall(long n, long a0, long a1, long a2)
+/* SBI vendor dispatcher for OF_EID_NET. Switches on FID. */
+long of_net_dispatch(long fid, long a0, long a1, long a2)
 {
-    switch (n) {
-    case OF_SYS_NET_HOST_START:  return of_net_host_start();
-    case OF_SYS_NET_JOIN:        return of_net_join();
-    case OF_SYS_NET_STOP:        of_net_stop(); return 0;
-    case OF_SYS_NET_STATUS:      return of_net_status();
-    case OF_SYS_NET_CLIENT_COUNT:return of_net_client_count();
-    case OF_SYS_NET_SEND_TO:     return of_net_send_to((int)a0, (const void *)a1, (size_t)a2);
-    case OF_SYS_NET_RECV_FROM:   return of_net_recv_from((int)a0, (void *)a1, (size_t)a2);
-    case OF_SYS_NET_BROADCAST:   return of_net_broadcast((const void *)a0, (size_t)a1);
-    case OF_SYS_NET_SEND:        return of_net_send((const void *)a0, (size_t)a1);
-    case OF_SYS_NET_RECV:        return of_net_recv((void *)a0, (size_t)a1);
-    case OF_SYS_NET_POLL:        return of_net_poll();
-    default: return -1;
+    switch (fid) {
+    case OF_NET_FID_HOST_START:   return of_net_host_start();
+    case OF_NET_FID_JOIN:         return of_net_join();
+    case OF_NET_FID_STOP:         of_net_stop(); return 0;
+    case OF_NET_FID_STATUS:       return of_net_status();
+    case OF_NET_FID_CLIENT_COUNT: return of_net_client_count();
+    case OF_NET_FID_SEND_TO:      return of_net_send_to((int)a0, (const void *)a1, (size_t)a2);
+    case OF_NET_FID_RECV_FROM:    return of_net_recv_from((int)a0, (void *)a1, (size_t)a2);
+    case OF_NET_FID_BROADCAST:    return of_net_broadcast((const void *)a0, (size_t)a1);
+    case OF_NET_FID_SEND:         return of_net_send((const void *)a0, (size_t)a1);
+    case OF_NET_FID_RECV:         return of_net_recv((void *)a0, (size_t)a1);
+    case OF_NET_FID_POLL:         return of_net_poll();
+    default: return -2 /* OF_ERR_NOT_SUPPORTED */;
     }
 }

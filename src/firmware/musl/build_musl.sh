@@ -77,11 +77,25 @@ CFLAGS="-march=rv32imafc -mabi=ilp32f -O2 -ffunction-sections -fdata-sections" \
     CROSS_COMPILE="${CROSS}" \
     CC="${CROSS}gcc"
 
-# Build and install
-make -j$(nproc)
+# Build everything (libraries + crt object files) and install.
+# `make all` is the default target and includes lib/crt1.o, lib/crti.o,
+# lib/crtn.o, lib/Scrt1.o -- these are required for static-linking SDK
+# apps that use the standard musl _start → __libc_start_main entry path.
+make -j$(nproc) all
 make install
+
+# Sanity check: the install must include the crt object files. Without
+# crt1.o, SDK apps can't be linked (no _start symbol).
+for crt in crt1.o crti.o crtn.o; do
+    if [ ! -f "${INSTALL_DIR}/lib/${crt}" ]; then
+        echo "ERROR: ${INSTALL_DIR}/lib/${crt} missing after install" >&2
+        echo "       SDK apps will fail to link without this file." >&2
+        exit 1
+    fi
+done
 
 echo ""
 echo "musl ${MUSL_VERSION} installed to ${INSTALL_DIR}"
-echo "  Headers: ${INSTALL_DIR}/include/"
-echo "  Library: ${INSTALL_DIR}/lib/libc.a"
+echo "  Headers:  ${INSTALL_DIR}/include/"
+echo "  Library:  ${INSTALL_DIR}/lib/libc.a"
+echo "  CRT:      ${INSTALL_DIR}/lib/crt1.o, crti.o, crtn.o"

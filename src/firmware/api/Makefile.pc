@@ -20,6 +20,8 @@ APP ?= app
 SRCS ?= main.c
 
 CFLAGS += -DOF_PC -I$(API_DIR) -O2 -g -Wall -Wextra $(SDL_CFLAGS)
+CFLAGS += -falign-functions=64 -falign-loops=64
+CFLAGS += -fno-tree-loop-distribute-patterns
 LDFLAGS += $(SDL_LIBS) -lm
 
 all: $(APP)

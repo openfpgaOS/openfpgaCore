@@ -73,7 +73,7 @@ static void *__kernel_sbrk(intptr_t increment) {
     return (void *)cur;
 }
 
-#include "../../api/dlmalloc.c"
+#include "dlmalloc.c"
 
 /* Override musl's malloc/free/realloc/calloc with dlmalloc.
  * musl's internal code (fopen, fprintf, etc.) calls malloc directly,

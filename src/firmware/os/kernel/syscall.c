@@ -560,7 +560,7 @@ static long sys_openat(long dirfd, long pathname, long flags, long mode) {
     if (prefix_match(path, "save:", 5) || prefix_match(path, "save_", 5)) {
         const char *p = path + 5;
         int slot = parse_int(&p);
-        if (slot < 0 || slot >= SAVE_MAX_SLOTS) {
+        if (slot < 0 || slot >= (int)SAVE_MAX_SLOTS) {
             fd_table[fd].in_use = 0;
             return -EINVAL;
         }
@@ -659,18 +659,46 @@ static long sys_llseek(long fd, long off_hi, long off_lo,
     return 0;  /* _llseek returns 0 on success, -1 on error */
 }
 
+/* Legacy 32-bit timespec layout (8 bytes): tv_sec + tv_nsec are both
+ * 32-bit. Used by direct callers of SYS_clock_* (113/114/115). */
+struct ts32 { uint32_t tv_sec; uint32_t tv_nsec; };
+
+/* time64 timespec layout (16 bytes): int64 tv_sec + long tv_nsec, with
+ * 4 bytes of tail padding so the struct is 16-byte aligned. riscv32
+ * musl sends this for SYS_clock_*64 (403/406/407). Reading it with the
+ * 32-bit layout would alias tv_nsec onto the high half of tv_sec and
+ * silently corrupt every clock-related syscall. */
+struct ts64 { int64_t tv_sec; int32_t tv_nsec; int32_t _pad; };
+
 static long sys_clock_gettime(long clk_id, long tp) {
     (void)clk_id;
-    struct { uint32_t tv_sec; uint32_t tv_nsec; } *ts = (void *)tp;
+    struct ts32 *ts = (void *)tp;
     uint32_t ns;
     ts->tv_sec = of_timer_get_seconds(&ns);
     ts->tv_nsec = ns;
     return 0;
 }
 
+static long sys_clock_gettime_time64(long clk_id, long tp) {
+    (void)clk_id;
+    struct ts64 *ts = (void *)tp;
+    if (!ts) return 0;
+    uint32_t ns;
+    ts->tv_sec = (int64_t)of_timer_get_seconds(&ns);
+    ts->tv_nsec = (int32_t)ns;
+    return 0;
+}
+
 static long sys_clock_getres(long clk_id, long tp) {
     (void)clk_id;
-    struct { uint32_t tv_sec; uint32_t tv_nsec; } *ts = (void *)tp;
+    struct ts32 *ts = (void *)tp;
+    if (ts) { ts->tv_sec = 0; ts->tv_nsec = 10; }
+    return 0;
+}
+
+static long sys_clock_getres_time64(long clk_id, long tp) {
+    (void)clk_id;
+    struct ts64 *ts = (void *)tp;
     if (ts) { ts->tv_sec = 0; ts->tv_nsec = 10; }
     return 0;
 }
@@ -678,9 +706,22 @@ static long sys_clock_getres(long clk_id, long tp) {
 static long sys_clock_nanosleep(long clk_id, long flags,
                                 long rqtp, long rmtp) {
     (void)clk_id; (void)flags; (void)rmtp;
-    struct { uint32_t tv_sec; uint32_t tv_nsec; } *ts = (void *)rqtp;
+    struct ts32 *ts = (void *)rqtp;
     if (!ts) return 0;
     uint32_t us = ts->tv_sec * 1000000 + ts->tv_nsec / 1000;
+    if (us > 0) of_timer_delay_us(us);
+    return 0;
+}
+
+static long sys_clock_nanosleep_time64(long clk_id, long flags,
+                                       long rqtp, long rmtp) {
+    (void)clk_id; (void)flags; (void)rmtp;
+    struct ts64 *ts = (void *)rqtp;
+    if (!ts) return 0;
+    /* Clamp tv_sec to 32 bits — the hardware timer wraps at ~71 minutes
+     * either way, so a longer requested sleep can't be honored anyway. */
+    uint32_t sec = (uint32_t)(ts->tv_sec & 0xFFFFFFFF);
+    uint32_t us  = sec * 1000000u + (uint32_t)ts->tv_nsec / 1000u;
     if (us > 0) of_timer_delay_us(us);
     return 0;
 }
@@ -731,91 +772,98 @@ static long sys_readv(long fd, long iov_ptr, long iovcnt) {
  * openfpgaOS HAL syscall implementations
  * ====================================================================== */
 
-static long of_video_syscall(long n, long a0, long a1, long a2) {
-    (void)a2;
-    switch (n) {
-    case OF_SYS_VIDEO_INIT:
+/* ----------------------------------------------------------------------------
+ * Per-subsystem dispatchers for the SBI vendor extensions.
+ *
+ * Each takes the FID (a6) plus the call args. They return a long (the
+ * raw value, or the negative error to be reported as sbiret.error).
+ * The top-level dispatcher wraps this into struct of_sbiret.
+ * ---------------------------------------------------------------------------- */
+
+static long of_video_dispatch(long fid, long a0, long a1) {
+    switch (fid) {
+    case OF_VIDEO_FID_INIT:
         of_video_init();
         return 0;
-    case OF_SYS_VIDEO_FLIP:
+    case OF_VIDEO_FID_FLIP:
         return (long)of_video_flip();
-    case OF_SYS_VIDEO_WAIT_FLIP:
+    case OF_VIDEO_FID_WAIT_FLIP:
         of_video_wait_flip();
         return 0;
-    case OF_SYS_VIDEO_SET_PALETTE:
+    case OF_VIDEO_FID_SET_PALETTE:
         of_video_set_palette((uint8_t)a0, (uint8_t)(a1 >> 16),
-                       (uint8_t)(a1 >> 8), (uint8_t)a1);
+                             (uint8_t)(a1 >> 8), (uint8_t)a1);
         return 0;
-    case OF_SYS_VIDEO_GET_SURFACE:
+    case OF_VIDEO_FID_GET_SURFACE:
         return (long)of_video_get_surface();
-    case OF_SYS_VIDEO_SET_DISPLAY_MODE:
+    case OF_VIDEO_FID_SET_DISPLAY_MODE:
         of_video_set_display_mode((int)a0);
         return 0;
-    case OF_SYS_VIDEO_CLEAR:
+    case OF_VIDEO_FID_CLEAR:
         of_video_clear((uint8_t)a0);
         return 0;
-    case OF_SYS_VIDEO_SET_PALETTE_BULK:
+    case OF_VIDEO_FID_SET_PALETTE_BULK:
         of_video_set_palette_bulk((const uint32_t *)a0, (int)a1);
         return 0;
-    case OF_SYS_VIDEO_FLUSH_CACHE:
+    case OF_VIDEO_FID_FLUSH_CACHE:
         of_video_flush_cache();
         return 0;
-    case OF_SYS_VIDEO_SET_COLOR_MODE:
+    case OF_VIDEO_FID_SET_COLOR_MODE:
         SYS_COLOR_MODE = (uint32_t)a0;
         return 0;
-    case OF_SYS_VIDEO_SET_PALETTE_VGA4:
+    case OF_VIDEO_FID_SET_PALETTE_VGA4:
         of_video_set_palette_vga4((const uint8_t *)a0, (int)a1);
         return 0;
-    case OF_SYS_VIDEO_VSYNC:
+    case OF_VIDEO_FID_VSYNC:
         of_video_vsync();
         return 0;
-    case OF_SYS_VIDEO_SET_VSYNC_CALLBACK:
+    case OF_VIDEO_FID_SET_VSYNC_CALLBACK:
         of_irq_register_vsync((void (*)(void))a0);
         return 0;
     default:
-        return -ENOSYS;
+        return OF_ERR_NOT_SUPPORTED;
     }
 }
 
-static long of_audio_syscall(long n, long a0, long a1) {
-    switch (n) {
-    case OF_SYS_AUDIO_WRITE:
+static long of_audio_dispatch(long fid, long a0, long a1) {
+    switch (fid) {
+    case OF_AUDIO_FID_WRITE:
         return of_audio_write((const int16_t *)a0, (int)a1);
-    case OF_SYS_AUDIO_GET_FREE:
+    case OF_AUDIO_FID_GET_FREE:
         return of_audio_get_free();
-    case OF_SYS_OPL_WRITE:
+    case OF_AUDIO_FID_OPL_WRITE:
         of_opl_write((uint16_t)a0, (uint8_t)a1);
         return 0;
-    case OF_SYS_OPL_RESET:
+    case OF_AUDIO_FID_OPL_RESET:
         of_opl_reset();
         return 0;
-    case OF_SYS_AUDIO_INIT:
+    case OF_AUDIO_FID_INIT:
         of_audio_init();
         return 0;
     default:
-        return -ENOSYS;
+        return OF_ERR_NOT_SUPPORTED;
     }
 }
 
-static long of_input_syscall(long n, long a0, long a1) {
-    switch (n) {
-    case OF_SYS_INPUT_POLL:
+static long of_input_dispatch(long fid, long a0, long a1) {
+    switch (fid) {
+    case OF_INPUT_FID_POLL:
         of_input_poll();
         return 0;
-    case OF_SYS_INPUT_GET_STATE: {
+    case OF_INPUT_FID_GET_STATE: {
         const of_input_state_t *state = of_input_get_state((int)a0);
         if (a1)
             memcpy((void *)a1, state, sizeof(of_input_state_t));
         return (long)state->buttons;
     }
-    case OF_SYS_INPUT_SET_DEADZONE:
+    case OF_INPUT_FID_SET_DEADZONE:
         of_input_set_deadzone((int16_t)a0);
         return 0;
-    case OF_SYS_INPUT_POLL_P0:
+    case OF_INPUT_FID_POLL_P0:
         of_input_poll_p0((of_input_state_t *)a0);
         return 0;
     default:
-        return -ENOSYS;
+        return OF_ERR_NOT_SUPPORTED;
     }
 }
 
@@ -824,8 +872,46 @@ static long of_input_syscall(long n, long a0, long a1) {
  * Main syscall dispatch (called from trap handler via ecall)
  * ====================================================================== */
 
-__attribute__((used)) long syscall_dispatch(long n, long a0, long a1, long a2,
-                      long a3, long a4, long a5) {
+/* Forward declaration of the SBI vendor dispatcher (defined below). */
+static long of_vendor_dispatch(long eid, long fid,
+                               long a0, long a1, long a2,
+                               long a3, long a4, long a5);
+
+/* Linux-compat dispatcher: a7 was the syscall number, return goes in a0.
+ * Wrapped by syscall_dispatch into sbiret { error=ret, value=0 } so the
+ * trap handler's unconditional store of a0/a1 still presents the right
+ * value to musl-built code (which only reads a0). */
+static long linux_dispatch(long n, long a0, long a1, long a2,
+                           long a3, long a4, long a5);
+
+__attribute__((used))
+struct of_sbiret syscall_dispatch(long a0, long a1, long a2, long a3,
+                                  long a4, long a5, long fid, long eid) {
+    /* SBI vendor extensions live in the openfpgaOS namespace. */
+    if (OF_EID_IS_VENDOR(eid)) {
+        long val = of_vendor_dispatch(eid, fid, a0, a1, a2, a3, a4, a5);
+        /* Convention: vendor helpers return either a non-negative value
+         * (success -> goes in sbiret.value) or one of the of_error.h
+         * negative codes (failure -> goes in sbiret.error). */
+        if (val < 0)
+            return (struct of_sbiret){ .error = val, .value = 0 };
+        return (struct of_sbiret){ .error = OF_OK, .value = val };
+    }
+
+    /* Otherwise this is a Linux-compat syscall (musl/POSIX path).
+     *
+     * Linux ABI returns the value (or negative errno) in a0 alone. The
+     * trap handler in start.S decides whether to write a1 back to the
+     * user frame based on the EID range -- for Linux-range EIDs it
+     * restores the user's original a1 (from a callee-saved register
+     * stashed before the C call), so anything we put in sbiret.value
+     * here is ignored. We pass 0 to make that intent explicit. */
+    long ret = linux_dispatch(eid, a0, a1, a2, a3, a4, a5);
+    return (struct of_sbiret){ .error = ret, .value = 0 };
+}
+
+static long linux_dispatch(long n, long a0, long a1, long a2,
+                           long a3, long a4, long a5) {
     /* Shutdown handshake is auto-acked in FPGA (core_top.v) —
      * no CPU involvement needed. */
 
@@ -839,14 +925,18 @@ __attribute__((used)) long syscall_dispatch(long n, long a0, long a1, long a2,
     case SYS_close:         return sys_close(a0);
     case SYS_getdents64:    return sys_getdents64((int)a0, (void *)a1, (uint32_t)a2);
     case SYS_lseek:         return sys_llseek(a0, a1, a2, a3, a4);
-    case SYS_clock_gettime:     /* legacy 113 — kept for direct syscall callers */
-    case SYS_clock_gettime64:   /* 403 — riscv32 musl sends this */
+    case SYS_clock_gettime:           /* legacy 113 — direct callers */
         return sys_clock_gettime(a0, a1);
-    case SYS_clock_getres:      /* legacy 114 */
-    case SYS_clock_getres64:    /* 406 — riscv32 musl sends this */
+    case SYS_clock_gettime64:         /* 403 — riscv32 musl */
+        return sys_clock_gettime_time64(a0, a1);
+    case SYS_clock_getres:            /* legacy 114 */
         return sys_clock_getres(a0, a1);
-    case SYS_clock_nanosleep:   /* 115 — usleep/nanosleep */
+    case SYS_clock_getres64:          /* 406 — riscv32 musl */
+        return sys_clock_getres_time64(a0, a1);
+    case SYS_clock_nanosleep:         /* legacy 115 */
         return sys_clock_nanosleep(a0, a1, a2, a3);
+    case SYS_clock_nanosleep_time64:  /* 407 — riscv32 musl usleep/nanosleep */
+        return sys_clock_nanosleep_time64(a0, a1, a2, a3);
     case SYS_mmap2:         return sys_mmap2(a0, a1, a2, a3, a4, a5);
     case SYS_munmap:        return sys_munmap(a0, a1);
     case SYS_mprotect:      return 0;
@@ -989,201 +1079,219 @@ __attribute__((used)) long syscall_dispatch(long n, long a0, long a1, long a2,
         return 0;
 
     default:
+        return -ENOSYS;
+    }
+}
+
+/* ----------------------------------------------------------------------------
+ * SBI vendor dispatcher (openfpgaOS extensions, EID >= OF_EID_BASE_VALUE)
+ *
+ * Top-level switch on EID, then a per-subsystem switch (or call to a
+ * helper) on FID. Adding a new function: append a FID to the matching
+ * enum in api/of_syscall_numbers.h, then add a case here.
+ * ---------------------------------------------------------------------------- */
+
+static long of_vendor_dispatch(long eid, long fid,
+                               long a0, long a1, long a2,
+                               long a3, long a4, long a5) {
+    (void)a5;  /* no current FID uses 6 args; reserved for future */
+    switch ((unsigned long)eid) {
+
+    case OF_EID_BASE:
+        switch (fid) {
+        case OF_BASE_FID_GET_VERSION:
+            return OF_API_VERSION;
+        }
+        break;
+
+    case OF_EID_VIDEO:
+        return of_video_dispatch(fid, a0, a1);
+
+    case OF_EID_AUDIO:
+        return of_audio_dispatch(fid, a0, a1);
+
+    case OF_EID_INPUT:
+        return of_input_dispatch(fid, a0, a1);
+
+    case OF_EID_ANALOGIZER:
+        switch (fid) {
+        case OF_ANALOGIZER_FID_IS_ENABLED:
+            return of_analogizer_is_enabled();
+        case OF_ANALOGIZER_FID_GET_STATE:
+            if (a0)
+                memcpy((void *)a0, of_analogizer_get_state(),
+                       sizeof(of_analogizer_state_t));
+            return of_analogizer_is_enabled();
+        }
+        break;
+
+    case OF_EID_NET:
+        return of_net_dispatch(fid, a0, a1, a2);
+
+    case OF_EID_TIMER:
+        switch (fid) {
+        case OF_TIMER_FID_SET_CALLBACK:
+            timer_callback_ptr = (void (*)(void))a0;
+            if (a0 && a1 > 0) {
+                TIMER_PERIOD = CPU_FREQ_HZ / (uint32_t)a1;
+                TIMER_CTRL = TIMER_CTRL_ENABLE;
+            } else {
+                TIMER_CTRL = 0;
+            }
+            return 0;
+        case OF_TIMER_FID_STOP:
+            TIMER_CTRL = 0;
+            timer_callback_ptr = NULL;
+            return 0;
+        case OF_TIMER_FID_GET_US:
+            return of_timer_get_us();
+        case OF_TIMER_FID_GET_MS:
+            return of_timer_get_ms();
+        case OF_TIMER_FID_DELAY_US:
+            of_timer_delay_us((uint32_t)a0);
+            return 0;
+        }
+        break;
+
+    case OF_EID_TILE:
+    case OF_EID_SPRITE:
+        /* Tile/sprite engine retired -- still occupies an EID for ABI
+         * stability but every FID returns NOT_SUPPORTED. */
+        return OF_ERR_NOT_SUPPORTED;
+
+    case OF_EID_MEMORY:
+        switch (fid) {
+        case OF_MEMORY_FID_MALLOC:
+            return (long)dlmalloc((size_t)a0);
+        case OF_MEMORY_FID_FREE:
+            dlfree((void *)a0);
+            return 0;
+        case OF_MEMORY_FID_REALLOC:
+            return (long)dlrealloc((void *)a0, (size_t)a1);
+        case OF_MEMORY_FID_CALLOC:
+            return (long)dlcalloc((size_t)a0, (size_t)a1);
+        }
+        break;
+
+    case OF_EID_MIXER:
+        switch (fid) {
+        case OF_MIXER_FID_INIT:
+            of_mixer_init((int)a0, (int)a1);
+            return 0;
+        case OF_MIXER_FID_PLAY:
+            return of_mixer_play((const uint8_t *)a0, (uint32_t)a1,
+                                 (uint32_t)a2, (int)a3, (int)a4);
+        case OF_MIXER_FID_STOP:
+            of_mixer_stop((int)a0);
+            return 0;
+        case OF_MIXER_FID_STOP_ALL:
+            of_mixer_stop_all();
+            return 0;
+        case OF_MIXER_FID_SET_VOLUME:
+            of_mixer_set_volume((int)a0, (int)a1);
+            return 0;
+        case OF_MIXER_FID_PUMP:
+            of_mixer_pump();
+            return 0;
+        case OF_MIXER_FID_VOICE_ACTIVE:
+            return of_mixer_voice_active((int)a0);
+        case OF_MIXER_FID_SET_PAN:
+            of_mixer_set_pan((int)a0, (int)a1);
+            return 0;
+        case OF_MIXER_FID_SET_LOOP:
+            of_mixer_set_loop((int)a0, (int)a1, (int)a2);
+            return 0;
+        case OF_MIXER_FID_SET_RATE:
+            of_mixer_set_rate((int)a0, (int)a1);
+            return 0;
+        case OF_MIXER_FID_SET_VOL_LR:
+            of_mixer_set_vol_lr((int)a0, (int)a1, (int)a2);
+            return 0;
+        case OF_MIXER_FID_SET_BIDI:
+            of_mixer_set_bidi((int)a0, (int)a1);
+            return 0;
+        case OF_MIXER_FID_GET_POSITION:
+            return of_mixer_get_position((int)a0);
+        case OF_MIXER_FID_SET_POSITION:
+            of_mixer_set_position((int)a0, (int)a1);
+            return 0;
+        case OF_MIXER_FID_SET_VOICE:
+            of_mixer_set_voice((int)a0, (int)a1, (int)a2, (int)a3);
+            return 0;
+        case OF_MIXER_FID_ALLOC_SAMPLES:
+            return (long)of_mixer_alloc_samples((uint32_t)a0);
+        case OF_MIXER_FID_FREE_SAMPLES:
+            of_mixer_free_samples();
+            return 0;
+        case OF_MIXER_FID_SET_RATE_RAW:
+            of_mixer_set_rate_raw((int)a0, (uint32_t)a1);
+            return 0;
+        case OF_MIXER_FID_SET_VOICE_RAW:
+            of_mixer_set_voice_raw((int)a0, (uint32_t)a1, (int)a2, (int)a3);
+            return 0;
+        case OF_MIXER_FID_SET_VOLUME_RAMP:
+            of_mixer_set_volume_ramp((int)a0, (int)a1);
+            return 0;
+        case OF_MIXER_FID_POLL_ENDED:
+            return (long)of_mixer_poll_ended();
+        case OF_MIXER_FID_SET_END_CALLBACK:
+            of_irq_register_mixer_end((void (*)(uint32_t))a0);
+            return 0;
+        case OF_MIXER_FID_RETRIGGER:
+            of_mixer_retrigger((int)a0, (const uint8_t *)a1,
+                               (uint32_t)a2, (uint32_t)a3, (int)a4);
+            return 0;
+        }
+        break;
+
+    case OF_EID_CODEC:
+        switch (fid) {
+        case OF_CODEC_FID_PARSE_VOC:
+            return of_codec_parse_voc((const uint8_t *)a0, (uint32_t)a1,
+                                      (of_codec_result_t *)a2);
+        case OF_CODEC_FID_PARSE_WAV:
+            return of_codec_parse_wav((const uint8_t *)a0, (uint32_t)a1,
+                                      (of_codec_result_t *)a2);
+        }
+        break;
+
+    case OF_EID_LZW:
+        switch (fid) {
+        case OF_LZW_FID_COMPRESS:
+            return of_lzw_compress((const uint8_t *)a0, (int32_t)a1,
+                                   (uint8_t *)a2);
+        case OF_LZW_FID_UNCOMPRESS:
+            return of_lzw_uncompress((const uint8_t *)a0, (int32_t)a1,
+                                     (uint8_t *)a2);
+        }
+        break;
+
+    case OF_EID_INTERACT:
+        switch (fid) {
+        case OF_INTERACT_FID_GET: {
+            int index = (int)a0;
+            if (index < 0 || index >= 64) return 0;
+            volatile uint32_t *vars = (volatile uint32_t *)INTERACT_UNCACHED;
+            return (long)vars[index];
+        }
+        }
+        break;
+
+    case OF_EID_FILE:
+        switch (fid) {
+        case OF_FILE_FID_READ_ASYNC:
+            return (long)of_file_read_async((uint32_t)a0, (uint32_t)a1,
+                                            (void *)a2, (uint32_t)a3,
+                                            (void (*)(int, int))a4);
+        case OF_FILE_FID_ASYNC_POLL:
+            return (long)of_file_async_poll();
+        case OF_FILE_FID_ASYNC_BUSY:
+            return (long)of_file_async_busy();
+        }
         break;
     }
 
-    /* openfpgaOS HAL syscalls (0x1000+) */
-    if (n >= 0x1000 && n < 0x1010)
-        return of_video_syscall(n, a0, a1, a2);
-    if (n >= 0x1010 && n < 0x1020)
-        return of_audio_syscall(n, a0, a1);
-    if (n >= 0x1020 && n < 0x1030)
-        return of_input_syscall(n, a0, a1);
-    if (n == OF_SYS_ANALOGIZER_GET_STATE) {
-        if (a0)
-            memcpy((void *)a0, of_analogizer_get_state(),
-                   sizeof(of_analogizer_state_t));
-        return of_analogizer_is_enabled();
-    }
-    if (n == OF_SYS_ANALOGIZER_IS_ENABLED)
-        return of_analogizer_is_enabled();
-
-    /* Networking syscalls (0x1060+) — replaces link cable */
-    if (n >= 0x1060 && n <= 0x106A)
-        return of_net_syscall(n, a0, a1, a2);
-
-    if (n == OF_SYS_TERM_PUTCHAR) {
-        of_term_putchar((char)a0);
-        return 0;
-    }
-
-    if (n == OF_SYS_TIMER_SET_CALLBACK) {
-        timer_callback_ptr = (void (*)(void))a0;
-        if (a0 && a1 > 0) {
-            TIMER_PERIOD = CPU_FREQ_HZ / (uint32_t)a1;
-            TIMER_CTRL = TIMER_CTRL_ENABLE;
-        } else {
-            TIMER_CTRL = 0;
-        }
-        return 0;
-    }
-    if (n == OF_SYS_TIMER_STOP) {
-        TIMER_CTRL = 0;
-        timer_callback_ptr = NULL;
-        return 0;
-    }
-    if (n == OF_SYS_TIMER_GET_US)
-        return of_timer_get_us();
-    if (n == OF_SYS_TIMER_GET_MS)
-        return of_timer_get_ms();
-    if (n == OF_SYS_TIMER_DELAY_US) {
-        of_timer_delay_us((uint32_t)a0);
-        return 0;
-    }
-
-    if (n == OF_SYS_GET_VERSION)
-        return OF_API_VERSION;
-
-    /* Tile/sprite engine syscalls removed (0x1090-0x10AF) */
-    if (n >= 0x1090 && n < 0x10B0)
-        return -ENOSYS;
-
-    /* Memory allocation syscalls (0x10C0+) */
-    if (n == OF_SYS_MALLOC)
-        return (long)dlmalloc((size_t)a0);
-    if (n == OF_SYS_FREE) {
-        dlfree((void *)a0);
-        return 0;
-    }
-    if (n == OF_SYS_REALLOC)
-        return (long)dlrealloc((void *)a0, (size_t)a1);
-    if (n == OF_SYS_CALLOC)
-        return (long)dlcalloc((size_t)a0, (size_t)a1);
-
-    /* Audio Mixer syscalls (0x10D0+) */
-    if (n == OF_SYS_MIXER_INIT) {
-        of_mixer_init((int)a0, (int)a1);
-        return 0;
-    }
-    if (n == OF_SYS_MIXER_PLAY)
-        return of_mixer_play((const uint8_t *)a0, (uint32_t)a1,
-                             (uint32_t)a2, (int)a3, (int)a4);
-    if (n == OF_SYS_MIXER_STOP) {
-        of_mixer_stop((int)a0);
-        return 0;
-    }
-    if (n == OF_SYS_MIXER_STOP_ALL) {
-        of_mixer_stop_all();
-        return 0;
-    }
-    if (n == OF_SYS_MIXER_SET_VOLUME) {
-        of_mixer_set_volume((int)a0, (int)a1);
-        return 0;
-    }
-    if (n == OF_SYS_MIXER_PUMP) {
-        of_mixer_pump();
-        return 0;
-    }
-    if (n == OF_SYS_MIXER_VOICE_ACTIVE)
-        return of_mixer_voice_active((int)a0);
-    if (n == OF_SYS_MIXER_SET_PAN) {
-        of_mixer_set_pan((int)a0, (int)a1);
-        return 0;
-    }
-    if (n == OF_SYS_MIXER_SET_LOOP) {
-        of_mixer_set_loop((int)a0, (int)a1, (int)a2);
-        return 0;
-    }
-    if (n == OF_SYS_MIXER_SET_RATE) {
-        of_mixer_set_rate((int)a0, (int)a1);
-        return 0;
-    }
-    if (n == OF_SYS_MIXER_SET_VOL_LR) {
-        of_mixer_set_vol_lr((int)a0, (int)a1, (int)a2);
-        return 0;
-    }
-    if (n == OF_SYS_MIXER_SET_BIDI) {
-        of_mixer_set_bidi((int)a0, (int)a1);
-        return 0;
-    }
-    if (n == OF_SYS_MIXER_GET_POSITION)
-        return of_mixer_get_position((int)a0);
-    if (n == OF_SYS_MIXER_SET_POSITION) {
-        of_mixer_set_position((int)a0, (int)a1);
-        return 0;
-    }
-    if (n == OF_SYS_MIXER_SET_VOICE) {
-        of_mixer_set_voice((int)a0, (int)a1, (int)a2, (int)a3);
-        return 0;
-    }
-    if (n == OF_SYS_MIXER_SET_RATE_RAW) {
-        of_mixer_set_rate_raw((int)a0, (uint32_t)a1);
-        return 0;
-    }
-    if (n == OF_SYS_MIXER_SET_VOICE_RAW) {
-        of_mixer_set_voice_raw((int)a0, (uint32_t)a1, (int)a2, (int)a3);
-        return 0;
-    }
-    if (n == OF_SYS_MIXER_SET_VOLUME_RAMP) {
-        of_mixer_set_volume_ramp((int)a0, (int)a1);
-        return 0;
-    }
-    if (n == OF_SYS_MIXER_POLL_ENDED)
-        return (long)of_mixer_poll_ended();
-
-    if (n == OF_SYS_MIXER_SET_END_CALLBACK) {
-        of_irq_register_mixer_end((void (*)(uint32_t))a0);
-        return 0;
-    }
-
-    if (n == OF_SYS_MIXER_RETRIGGER) {
-        of_mixer_retrigger((int)a0, (const uint8_t *)a1,
-                           (uint32_t)a2, (uint32_t)a3, (int)a4);
-        return 0;
-    }
-
-    /* Audio Codec syscalls */
-    if (n == OF_SYS_CODEC_PARSE_VOC)
-        return of_codec_parse_voc((const uint8_t *)a0, (uint32_t)a1,
-                                  (of_codec_result_t *)a2);
-    if (n == OF_SYS_CODEC_PARSE_WAV)
-        return of_codec_parse_wav((const uint8_t *)a0, (uint32_t)a1,
-                                  (of_codec_result_t *)a2);
-
-    /* Mixer sample allocation (0x10DA+) */
-    if (n == OF_SYS_MIXER_ALLOC_SAMPLES)
-        return (long)of_mixer_alloc_samples((uint32_t)a0);
-    if (n == OF_SYS_MIXER_FREE_SAMPLES) {
-        of_mixer_free_samples();
-        return 0;
-    }
-
-    /* LZW Compression syscalls (0x10E0+) */
-    if (n == OF_SYS_LZW_COMPRESS)
-        return of_lzw_compress((const uint8_t *)a0, (int32_t)a1, (uint8_t *)a2);
-    if (n == OF_SYS_LZW_UNCOMPRESS)
-        return of_lzw_uncompress((const uint8_t *)a0, (int32_t)a1, (uint8_t *)a2);
-
-    /* Interact (0x10F0) */
-    if (n == OF_SYS_INTERACT_GET) {
-        int index = (int)a0;
-        if (index < 0 || index >= 64) return 0;
-        volatile uint32_t *vars = (volatile uint32_t *)INTERACT_UNCACHED;
-        return (long)vars[index];
-    }
-
-    /* Async file I/O (0x10F1-0x10F3) */
-    if (n == OF_SYS_FILE_READ_ASYNC) {
-        return (long)of_file_read_async((uint32_t)a0, (uint32_t)a1,
-                                        (void *)a2, (uint32_t)a3,
-                                        (void (*)(int, int))a4);
-    }
-    if (n == OF_SYS_FILE_ASYNC_POLL)
-        return (long)of_file_async_poll();
-    if (n == OF_SYS_FILE_ASYNC_BUSY)
-        return (long)of_file_async_busy();
-
-    return -ENOSYS;
+    return OF_ERR_NOT_SUPPORTED;
 }
 
 /* ======================================================================

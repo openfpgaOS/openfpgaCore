@@ -1,6 +1,17 @@
 /*
  * openfpgaOS Syscall Interface
- * Linux-compatible syscall numbers + openfpgaOS HAL extensions
+ *
+ * Two namespaces share the same ecall instruction:
+ *
+ *   1. Linux-compatible syscall numbers (used by musl/POSIX). EIDs in
+ *      this range follow the Linux ABI: a7 = number, return in a0.
+ *
+ *   2. openfpgaOS SBI vendor extensions (EID >= OF_EID_BASE_VALUE,
+ *      defined in api/of_syscall_numbers.h). These follow the RISC-V
+ *      SBI calling convention: a7 = EID, a6 = FID, returns
+ *      sbiret { error, value } in {a0, a1}.
+ *
+ * The kernel detects the EID range and routes accordingly.
  */
 
 #ifndef OFOS_SYSCALL_H
@@ -8,6 +19,7 @@
 
 #include <stdint.h>
 #include "../../api/of_syscall_numbers.h"
+#include "../../api/of_syscall.h"
 
 /* ======================================================================
  * Linux-compatible syscall numbers (RISC-V ABI)
@@ -43,8 +55,9 @@
 #define SYS_clock_getres    114     /* legacy alias */
 #define SYS_clock_nanosleep 115     /* legacy alias */
 #define SYS_statx           291     /* riscv32 fstat replacement */
-#define SYS_clock_gettime64 403     /* riscv32 — musl sends this, not 113 */
-#define SYS_clock_getres64  406     /* riscv32 — musl sends this, not 114 */
+#define SYS_clock_gettime64    403  /* riscv32 — musl sends this, not 113 */
+#define SYS_clock_getres64     406  /* riscv32 — musl sends this, not 114 */
+#define SYS_clock_nanosleep_time64 407 /* riscv32 — musl sends this, not 115 */
 #define SYS_futex           422     /* musl FILE locking */
 #define SYS_setitimer       103
 #define SYS_rt_sigaction    134
@@ -61,10 +74,15 @@
 
 /* ======================================================================
  * Syscall dispatch (called from trap handler)
+ *
+ * Argument order matches the assembly trap handler in start.S, which
+ * loads them straight from the saved trap frame into a0..a7 with no
+ * shuffling. The C ABI returns small structs in a0/a1, which the trap
+ * handler then writes back to the user's saved a0/a1 slots.
  * ====================================================================== */
 
-long syscall_dispatch(long n, long a0, long a1, long a2,
-                      long a3, long a4, long a5);
+struct of_sbiret syscall_dispatch(long a0, long a1, long a2, long a3,
+                                  long a4, long a5, long fid, long eid);
 
 void syscall_init(uintptr_t heap_start);
 

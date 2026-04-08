@@ -7,10 +7,11 @@
 #define OFOS_SAVE_H
 
 #include <stdint.h>
+#include "regs.h"
 
-#define SAVE_MAX_SLOTS      10
-#define SAVE_SLOT_SIZE      0x40000     /* 256KB per slot (fully usable by app) */
-#define SAVE_REGION_ADDR    CRAM1_UNCACHED  /* Bridge accesses PSRAM directly */
+#define SAVE_MAX_SLOTS      OF_TARGET_SAVE_MAX_SLOTS
+#define SAVE_SLOT_SIZE      OF_TARGET_SAVE_SLOT_SIZE
+#define SAVE_REGION_ADDR    OF_TARGET_SAVE_REGION_ADDR
 
 /* Initialize save subsystem */
 void of_save_init(void);

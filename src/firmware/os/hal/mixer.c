@@ -468,12 +468,6 @@ void of_mixer_set_master_volume(int volume)
  * Sample memory bump allocator
  * ====================================================================== */
 
-/* Uncached alias (0x39) reduces cache pollution for large sample uploads,
- * but the CPU may still cache these writes (PMA not fully enforced).
- * of_mixer_play() does an explicit D-cache clean before starting a voice. */
-#define SAMPLE_POOL_BASE  (CRAM1_UNCACHED + 0x00400000)
-#define SAMPLE_POOL_END   (CRAM1_UNCACHED + 0x00F00000)
-
 static uint32_t sample_pool_head = SAMPLE_POOL_BASE;
 
 void *of_mixer_alloc_samples(uint32_t size)

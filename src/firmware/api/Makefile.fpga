@@ -1,0 +1,76 @@
+# openfpgaOS FPGA App Build Template
+#
+# Build an SDK application for the Analogue Pocket target. Apps statically
+# link upstream musl libc through the bundled riscv32-elf-gcc toolchain;
+# the openfpgaOS kernel implements the Linux RISC-V syscall surface that
+# musl emits via ecall, so standard <stdio.h> / <stdlib.h> / <math.h>
+# functions Just Work without any custom shim layer.
+#
+# Usage from an app directory:
+#   make -f /path/to/openfpgaOS/src/firmware/api/Makefile.fpga \
+#        APP=mygame SRCS="main.c world.c"
+#
+# Required: SDK_ROOT must point at the top of the openfpgaOS source tree
+# (auto-detected if this Makefile lives in $(SDK_ROOT)/src/firmware/api/).
+
+# ─── Locate the SDK ──────────────────────────────────────────────────────
+API_DIR  := $(dir $(lastword $(MAKEFILE_LIST)))
+SDK_ROOT ?= $(abspath $(API_DIR)/../../..)
+MUSL_DIR := $(SDK_ROOT)/src/firmware/musl
+
+# Sanity check
+ifeq ($(wildcard $(MUSL_DIR)/lib/libc.a),)
+$(error musl static library not found at $(MUSL_DIR)/lib/libc.a -- \
+    set SDK_ROOT to the openfpgaOS source root)
+endif
+
+# ─── Toolchain ───────────────────────────────────────────────────────────
+CROSS  ?= riscv64-elf-
+CC      = $(CROSS)gcc
+LD      = $(CROSS)gcc
+OBJCOPY = $(CROSS)objcopy
+
+ARCH_FLAGS = -march=rv32imafc -mabi=ilp32f
+
+# ─── Flags ───────────────────────────────────────────────────────────────
+APP  ?= app
+SRCS ?= main.c
+
+CFLAGS += $(ARCH_FLAGS) \
+          -Os -g -ffunction-sections -fdata-sections \
+          -fno-builtin -fno-strict-aliasing \
+          -falign-functions=64 -falign-loops=64 \
+          -fno-tree-loop-distribute-patterns \
+          -Wall -Wextra \
+          -I$(API_DIR) \
+          -I$(MUSL_DIR)/include
+
+LDFLAGS += $(ARCH_FLAGS) \
+           -nostdlib -static \
+           -Wl,--gc-sections \
+           -Wl,-Map=$(APP).map \
+           -L$(MUSL_DIR)/lib
+
+# musl crt + static libc + libgcc (compiler runtime helpers).
+# crt1.o provides _start, which initializes the C runtime and calls main.
+# crti.o / crtn.o bracket .init and .fini sections for static constructors.
+CRT_OBJS = $(MUSL_DIR)/lib/crt1.o $(MUSL_DIR)/lib/crti.o $(MUSL_DIR)/lib/crtn.o
+LIBS = -lc -lgcc
+
+# ─── Build ───────────────────────────────────────────────────────────────
+OBJS = $(SRCS:.c=.o)
+
+all: $(APP).elf
+
+$(APP).elf: $(OBJS)
+	$(LD) $(LDFLAGS) -o $@ $(CRT_OBJS) $(OBJS) $(LIBS)
+	@echo "Built $@:"
+	@$(CROSS)size $@
+
+%.o: %.c
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+clean:
+	rm -f $(OBJS) $(APP).elf $(APP).map
+
+.PHONY: all clean

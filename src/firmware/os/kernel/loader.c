@@ -299,37 +299,73 @@ int elf_load(uint32_t slot_id, uintptr_t load_addr,
 /* Assembly helper to switch stack and jump to entry */
 extern void switch_to_runtime_stack_and_call(void (*entry)(void), void *stack_top);
 
+/* Linux ELF auxiliary vector tags -- the subset musl actually consults
+ * during __init_libc / __init_tls. Pushing at least AT_PAGESZ is mandatory
+ * for musl's mallocng to work: mallocng uses libc.page_size in size and
+ * alignment calculations, and a zero page_size produces divide-by-zero
+ * (silent wraparound on rv32) and infinite loops in the allocator.
+ *
+ * AT_RANDOM is consumed by __init_ssp for the stack canary; passing NULL
+ * is handled (it falls back to a deterministic seed) but pushing the slot
+ * keeps musl on the well-trodden path.
+ */
+#define AT_NULL    0
+#define AT_PAGESZ  6
+#define AT_HWCAP  16
+#define AT_RANDOM 25
+
 void elf_exec(const elf_load_result_t *result,
               int argc, char **argv) {
-    (void)argc; (void)argv;
-
-    /* Set up initial stack frame for the app.
-     * musl's _start expects:
-     *   sp+0: argc
-     *   sp+4: argv[0]
-     *   sp+8: argv[1]
-     *   ...
-     *   sp+4*(argc+1): NULL (argv terminator)
-     *   sp+4*(argc+2): NULL (envp terminator)
-     *   sp+4*(argc+3): NULL (auxv terminator)
+    /* Set up the standard SysV ELF initial stack for the app:
+     *
+     *   sp -> argc                                   (1 word)
+     *         argv[0..argc-1]                        (argc words)
+     *         NULL                                   (argv terminator)
+     *         envp[0..]                              (0 entries here)
+     *         NULL                                   (envp terminator)
+     *         auxv[0..N-1]                           (type, value) pairs
+     *         AT_NULL, 0                             (auxv terminator)
+     *
+     * musl's _start (rv32 crt_arch.h) does `mv a0, sp` then `tail _start_c`,
+     * and _start_c reads argc/argv/envp/auxv from a0 in that order.
      */
     uint32_t *sp = (uint32_t *)result->stack_top;
 
-    /* Push auxv terminator */
+    /* Push in reverse: top of memory first, sp ends pointing at argc.
+     * Each pair below pushes value first, then type, since stack grows
+     * down -- so the type ends up at the lower address (read first). */
+
+    /* AT_NULL terminator (must be last in memory) */
     *(--sp) = 0;
+    *(--sp) = AT_NULL;
+
+    /* AT_RANDOM: pointer to 16 bytes of "random" data for stack canary.
+     * NULL is acceptable -- musl's __init_ssp handles it by seeding from
+     * the address of __stack_chk_guard. */
+    *(--sp) = 0;
+    *(--sp) = AT_RANDOM;
+
+    /* AT_HWCAP: hardware capability bitmask. We don't expose any caps
+     * via auxv (apps that care use of_caps.h instead). */
+    *(--sp) = 0;
+    *(--sp) = AT_HWCAP;
+
+    /* AT_PAGESZ: musl mallocng REQUIRES this -- without it page_size is
+     * 0 and the allocator misbehaves (loops, returns NULL, or corrupts). */
+    *(--sp) = 4096;
+    *(--sp) = AT_PAGESZ;
+
+    /* envp terminator (no envp entries) */
     *(--sp) = 0;
 
-    /* Push envp terminator */
+    /* argv terminator */
     *(--sp) = 0;
 
-    /* Push argv terminator */
-    *(--sp) = 0;
-
-    /* Push argv entries (reverse order) */
+    /* argv entries (reverse order so argv[0] ends up at lowest addr) */
     for (int i = argc - 1; i >= 0; i--)
         *(--sp) = (uint32_t)argv[i];
 
-    /* Push argc */
+    /* argc */
     *(--sp) = (uint32_t)argc;
 
     /* Jump to entry point with the new stack */

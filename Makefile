@@ -154,9 +154,36 @@ package-install:
 	@echo "$$INSTALL_TEXT" > $(BUILD_DIR)/INSTALL.txt
 
 # ── SDK sync ─────────────────────────────────────────────────────────
+#
+# Push the canonical SDK files from the OS source tree (the source of
+# truth) into one or more SDK checkouts. Replaces the SDK's contents:
+#
+#   src/sdk/include/of_*.h     <- src/firmware/api/of_*.h
+#   src/sdk/sdk.mk             <- src/firmware/api/sdk.mk
+#   src/sdk/app.ld             <- src/firmware/api/app.ld
+#   src/sdk/of_midi.c          <- src/firmware/api/of_midi.c
+#   src/sdk/musl/include/      <- src/firmware/musl/include/
+#   src/sdk/musl/lib/          <- src/firmware/musl/lib/
+#                                  (libc.a, libm.a, crt1.o, crti.o, crtn.o)
+#   runtime/bitstream.rbf_r    <- pocket build output
+#   runtime/os.bin             <- kernel build output
+#   runtime/loader.bin         <- chip32 loader
+#
+# Stale files retired in earlier OS-source cleanups (libc/, of_libc.h,
+# of_link.h, of_bram.h, of_posix.c, crt/start.S, ...) are removed from
+# the SDK so the new musl-static build path takes effect cleanly.
+#
 sdk: check-target
 	@test -n "$(DEST)" || { \
 		printf "$(C_ERR)Usage: make sdk DEST=\"path/to/sdk\"$(C_RESET)\n"; \
+		exit 1; \
+	}
+	@test -f src/firmware/musl/lib/libc.a || { \
+		printf "$(C_ERR)musl not built -- run src/firmware/musl/build_musl.sh first$(C_RESET)\n"; \
+		exit 1; \
+	}
+	@test -f src/firmware/musl/lib/crt1.o || { \
+		printf "$(C_ERR)musl crt1.o missing -- rerun build_musl.sh$(C_RESET)\n"; \
 		exit 1; \
 	}
 	@for dir in $(DEST); do \
@@ -165,21 +192,52 @@ sdk: check-target
 			continue; \
 		}; \
 		printf "$(C_HEAD)[sdk]$(C_RESET) $$dir\n"; \
+		\
+		# Headers \
 		cp src/firmware/api/of*.h "$$dir/src/sdk/include/"; \
-		printf "  $(C_OK)headers$(C_RESET)      → src/sdk/include/\n"; \
-		cp src/firmware/api/of_posix.c "$$dir/src/sdk/"; \
-		cp src/firmware/api/of_midi.c "$$dir/src/sdk/" 2>/dev/null || true; \
-		cp src/firmware/api/of_codec.c "$$dir/src/sdk/" 2>/dev/null || true; \
-		printf "  $(C_OK)api sources$(C_RESET)   → src/sdk/\n"; \
+		# SDL2 compatibility shim (header-only) \
+		mkdir -p "$$dir/src/sdk/include/SDL2"; \
+		cp src/firmware/api/SDL2/*.h "$$dir/src/sdk/include/SDL2/" 2>/dev/null || true; \
+		printf "  $(C_OK)headers + SDL2$(C_RESET) → src/sdk/include/\n"; \
+		\
+		# Build rules + linker script \
+		cp src/firmware/api/sdk.mk "$$dir/src/sdk/sdk.mk"; \
+		cp src/firmware/api/app.ld "$$dir/src/sdk/app.ld"; \
+		printf "  $(C_OK)sdk.mk + app.ld$(C_RESET) → src/sdk/\n"; \
+		\
+		# Optional helper sources (large standalone modules / opt-in) \
+		cp src/firmware/api/of_midi.c   "$$dir/src/sdk/" 2>/dev/null || true; \
+		cp src/firmware/api/of_cxxabi.cpp "$$dir/src/sdk/" 2>/dev/null || true; \
+		\
+		# musl headers + static library + crt objects \
+		mkdir -p "$$dir/src/sdk/musl/include" "$$dir/src/sdk/musl/lib"; \
+		rsync -a --delete src/firmware/musl/include/ "$$dir/src/sdk/musl/include/"; \
+		cp src/firmware/musl/lib/libc.a    "$$dir/src/sdk/musl/lib/"; \
+		cp src/firmware/musl/lib/libm.a    "$$dir/src/sdk/musl/lib/" 2>/dev/null || true; \
+		cp src/firmware/musl/lib/crt1.o    "$$dir/src/sdk/musl/lib/"; \
+		cp src/firmware/musl/lib/crti.o    "$$dir/src/sdk/musl/lib/"; \
+		cp src/firmware/musl/lib/crtn.o    "$$dir/src/sdk/musl/lib/"; \
+		printf "  $(C_OK)musl$(C_RESET)           → src/sdk/musl/\n"; \
+		\
+		# Remove stale files retired in OS-source cleanups \
+		rm -rf  "$$dir/src/sdk/libc"; \
+		rm -f   "$$dir/src/sdk/of_posix.c" "$$dir/src/sdk/of_posix.o"; \
+		rm -f   "$$dir/src/sdk/include/of_libc.h" \
+		        "$$dir/src/sdk/include/of_link.h" \
+		        "$$dir/src/sdk/include/of_bram.h"; \
+		rm -rf  "$$dir/src/sdk/crt"; \
+		printf "  $(C_OK)stale cleanup$(C_RESET)  → libc/, of_posix.c, crt/, retired headers\n"; \
+		\
+		# Runtime binaries (bitstream, kernel, loader) \
 		mkdir -p "$$dir/runtime"; \
 		if [ -f $(TARGET_DIR)/output_files/ap_core.rbf ]; then \
 			$(REVERSE_BITS) $(TARGET_DIR)/output_files/ap_core.rbf "$$dir/runtime/bitstream.rbf_r"; \
-			printf "  $(C_OK)bitstream$(C_RESET)    → runtime/\n"; \
+			printf "  $(C_OK)bitstream$(C_RESET)      → runtime/\n"; \
 		fi; \
 		test -f $(OS_DIR)/os.bin && cp $(OS_DIR)/os.bin "$$dir/runtime/" && \
-			printf "  $(C_OK)os.bin$(C_RESET)       → runtime/\n" || true; \
+			printf "  $(C_OK)os.bin$(C_RESET)         → runtime/\n" || true; \
 		test -f $(CHIP32_DIR)/loader.bin && cp $(CHIP32_DIR)/loader.bin "$$dir/runtime/" && \
-			printf "  $(C_OK)loader.bin$(C_RESET)   → runtime/\n" || true; \
+			printf "  $(C_OK)loader.bin$(C_RESET)     → runtime/\n" || true; \
 		printf "$(C_OK)[sdk] Done$(C_RESET) $$dir\n\n"; \
 	done
 

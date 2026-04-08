@@ -120,7 +120,7 @@ static inline void of_mixer_set_voice_raw(int voice, uint32_t rate_fp16,
  * volume transitions when of_mixer_set_volume()/set_vol_lr() change.
  * `rate` is a hardware-specific step value (higher = faster). */
 static inline void of_mixer_set_volume_ramp(int voice, int rate) {
-    OF_SVC->mixer_set_volume_ramp(voice, rate);
+    OF_SVC->mixer_set_vol_rate(voice, rate);
 }
 
 static inline uint32_t of_mixer_poll_ended(void) {

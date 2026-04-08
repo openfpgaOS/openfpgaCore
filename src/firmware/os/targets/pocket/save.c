@@ -50,7 +50,7 @@ void of_save_init(void) {
 }
 
 int of_save_read(int slot, void *buf, uint32_t offset, uint32_t len) {
-    if (slot < 0 || slot >= SAVE_MAX_SLOTS)
+    if (slot < 0 || slot >= (int)SAVE_MAX_SLOTS)
         return -1;
     if (offset + len > SAVE_SLOT_SIZE)
         return -1;
@@ -64,7 +64,7 @@ int of_save_read(int slot, void *buf, uint32_t offset, uint32_t len) {
 }
 
 int of_save_write(int slot, const void *buf, uint32_t offset, uint32_t len) {
-    if (slot < 0 || slot >= SAVE_MAX_SLOTS)
+    if (slot < 0 || slot >= (int)SAVE_MAX_SLOTS)
         return -1;
     if (offset + len > SAVE_SLOT_SIZE)
         return -1;
@@ -78,7 +78,7 @@ int of_save_write(int slot, const void *buf, uint32_t offset, uint32_t len) {
 }
 
 int of_save_flush_size(int slot, uint32_t size) {
-    if (slot < 0 || slot >= SAVE_MAX_SLOTS)
+    if (slot < 0 || slot >= (int)SAVE_MAX_SLOTS)
         return -1;
     if (size > SAVE_SLOT_SIZE)
         size = SAVE_SLOT_SIZE;
@@ -97,7 +97,7 @@ int of_save_flush(int slot) {
 }
 
 void of_save_update_crc(int slot) {
-    if (slot < 0 || slot >= SAVE_MAX_SLOTS)
+    if (slot < 0 || slot >= (int)SAVE_MAX_SLOTS)
         return;
 
     volatile uint8_t *base = slot_base(slot);
@@ -109,7 +109,7 @@ void of_save_update_crc(int slot) {
 }
 
 int of_save_check(int slot) {
-    if (slot < 0 || slot >= SAVE_MAX_SLOTS)
+    if (slot < 0 || slot >= (int)SAVE_MAX_SLOTS)
         return -1;
 
     volatile save_meta_t *meta = slot_meta(slot);
@@ -131,7 +131,7 @@ uint32_t of_save_get_size(int slot) {
 }
 
 void of_save_erase(int slot) {
-    if (slot < 0 || slot >= SAVE_MAX_SLOTS)
+    if (slot < 0 || slot >= (int)SAVE_MAX_SLOTS)
         return;
 
     volatile uint32_t *dst = (volatile uint32_t *)slot_base(slot);

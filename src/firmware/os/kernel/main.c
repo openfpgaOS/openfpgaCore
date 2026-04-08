@@ -6,7 +6,6 @@
 #include "../hal/hal.h"
 #include "syscall.h"
 #include "loader.h"
-#include "libc_table.h"
 #include "caps_table.h"
 #include "services_table.h"
 #include <stddef.h>
@@ -110,11 +109,9 @@ void os_main(void) {
     /* Heap in SDRAM after app's BSS (app is loaded at 0x10400000+) */
     syscall_init(app.bss_end);
 
-    /* Populate libc jump table for the app */
-    libc_table_init();
-
-    of_term_puts("  Libc init......... ");
-    status_ok();
+    /* Apps statically link musl and emit Linux syscalls via ecall.
+     * The kernel's linux_dispatch() in syscall.c handles them; no
+     * libc jump table is needed any more. */
 
     /* Populate capability descriptor for the app */
     caps_table_init(app.bss_end);

@@ -190,35 +190,77 @@ _irq_handler:
     j _trap_restore
 
 _ecall_handler:
-    /* Syscall dispatch:
-     * a7 (x17) = syscall number
-     * a0-a5 (x10-x15) = arguments
-     * Return value goes in a0 (x10) */
+    /* SBI-style syscall dispatch (see api/of_syscall.h for the full ABI).
+     *
+     *   User registers on entry:
+     *     a7 = EID (extension id) -- subsystem, or Linux syscall number
+     *     a6 = FID (function id)  -- ignored for Linux-compat EIDs
+     *     a0..a5 = up to six call arguments
+     *
+     *   Return:
+     *     - SBI vendor calls: a0 = sbiret.error, a1 = sbiret.value
+     *     - Linux compat calls: a0 = return value, a1 PRESERVED unchanged
+     *
+     * Why a1 must be preserved on the Linux path: musl's syscall_arch.h
+     * declares only `a0` as the ecall output, so the compiler is free
+     * to assume a1 (and every other a-reg) survives the syscall. If we
+     * clobber a1, any musl code with a live value in a1 across a syscall
+     * sees that value silently corrupted -- which manifests as immediate
+     * hangs in any non-trivial musl-built code.
+     *
+     * The C dispatcher takes 8 arguments which fit exactly in a0..a7.
+     * No shuffling needed: copy them straight from the trap frame.
+     *
+     *   struct of_sbiret syscall_dispatch(
+     *       long arg0, long arg1, long arg2, long arg3,
+     *       long arg4, long arg5, long fid,  long eid);
+     *           a0       a1       a2       a3
+     *           a4       a5       a6       a7
+     *
+     * We stash the user's original a1 and the EID in callee-saved
+     * registers (s0, s1) BEFORE calling the C dispatcher. The C ABI
+     * guarantees s0/s1 are preserved across the call, so we get them
+     * back intact and can decide which value to write to a1.
+     */
     lw a0, 40(sp)       /* original a0 (x10) */
     lw a1, 44(sp)       /* original a1 (x11) */
     lw a2, 48(sp)       /* original a2 (x12) */
     lw a3, 52(sp)       /* original a3 (x13) */
     lw a4, 56(sp)       /* original a4 (x14) */
     lw a5, 60(sp)       /* original a5 (x15) */
-    lw a6, 68(sp)       /* original a7 (x17) = syscall number */
+    lw a6, 64(sp)       /* original a6 (x16) = FID */
+    lw a7, 68(sp)       /* original a7 (x17) = EID */
 
-    /* Call: long syscall_dispatch(long n, long a0..a5) */
-    /* Move a7 to first argument position, shift others */
-    mv t0, a0
-    mv a0, a6           /* n = a7 (syscall number) */
-    mv a6, a5
-    mv a5, a4
-    mv a4, a3
-    mv a3, a2
-    mv a2, a1
-    mv a1, t0           /* a0 = original a0 */
-    /* a2..a6 already shifted */
+    /* Stash original a1 and EID in callee-saved regs for use after the
+     * C call. The user's saved s0/s1 in the trap frame are untouched --
+     * the restore step at _trap_restore reloads them from the frame. */
+    mv s0, a1           /* preserve user a1 */
+    mv s1, a7           /* preserve EID for the post-call branch */
 
     la t0, syscall_dispatch
     jalr ra, t0
+    /* sbiret returned in a0/a1: a0 = error/value, a1 = SBI value */
 
-    /* Store return value in trap frame's a0 (x10) position */
+    /* Always write the primary return value to user a0. */
     sw a0, 40(sp)
+
+    /* Decide what goes in user a1:
+     *   - SBI vendor call (EID >= OF_EID_BASE_VALUE = 0xC0DE0000):
+     *       write the C function's a1 (sbiret.value)
+     *   - Linux compat call (EID below the vendor range):
+     *       restore the user's original a1 unchanged
+     *
+     * 0xC0DE0000 has the high bit set, so an unsigned compare suffices:
+     * any EID below the vendor range fails the bgeu and falls through
+     * to the "restore original" branch. */
+    li t0, 0xC0DE0000
+    bgeu s1, t0, 1f
+    /* Linux path -- restore original a1 from s0 */
+    sw s0, 44(sp)
+    j 2f
+1:  /* SBI vendor path -- write the returned sbiret.value */
+    sw a1, 44(sp)
+2:
 
     /* Advance mepc past the ecall instruction (4 bytes) */
     lw t0, 128(sp)

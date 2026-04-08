@@ -622,7 +622,11 @@ SDL_GameControllerGetStringForButton(SDL_GameControllerButton b) {
  * ====================================================================== */
 
 static inline uint32_t SDL_GetTicks(void) { return of_time_ms(); }
-static inline void SDL_Delay(uint32_t ms) { of_delay_ms(ms); }
+static inline void SDL_Delay(uint32_t ms) {
+    /* musl-static path: usleep takes microseconds. */
+    extern int usleep(unsigned int);
+    usleep(ms * 1000u);
+}
 
 /* ======================================================================
  * Audio
@@ -711,7 +715,8 @@ static inline void SDL_MixAudioFormat(uint8_t *dst, const uint8_t *src,
     int16_t *d = (int16_t *)dst;
     for (uint32_t i = 0; i < len/2; i++) {
         int32_t m = (int32_t)d[i] + (((int32_t)s[i] * vol) >> 7);
-        if (m > 32767) m = 32767; if (m < -32768) m = -32768;
+        if (m > 32767) m = 32767;
+        if (m < -32768) m = -32768;
         d[i] = (int16_t)m;
     }
 }

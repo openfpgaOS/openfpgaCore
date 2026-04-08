@@ -33,7 +33,7 @@ int  of_net_recv(void *data, size_t len);
 /* Poll network state — call frequently */
 int  of_net_poll(void);
 
-/* Syscall dispatcher (called from syscall.c) */
-long of_net_syscall(long n, long a0, long a1, long a2);
+/* SBI vendor dispatcher for OF_EID_NET (called from syscall.c) */
+long of_net_dispatch(long fid, long a0, long a1, long a2);
 
 #endif /* OFOS_NET_H */

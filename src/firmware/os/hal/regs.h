@@ -1,12 +1,13 @@
 /*
  * openfpgaOS Hardware Register Definitions
- * Complete register map for Analogue Pocket FPGA peripherals
+ * Generic SoC register map plus target-selected platform constants.
  */
 
 #ifndef OFOS_REGS_H
 #define OFOS_REGS_H
 
 #include <stdint.h>
+#include "platform.h"
 
 /* ======================================================================
  * Register access macros
@@ -20,65 +21,70 @@
  * Memory Map
  * ====================================================================== */
 
-#define BRAM_BASE           0x00000000
-#define BRAM_SIZE           (32 * 1024)
+#define BRAM_BASE           OF_TARGET_BRAM_BASE
+#define BRAM_SIZE           OF_TARGET_BRAM_SIZE
 
 /* App BRAM region — available for app hot code after OS sections.
  * Top 512 bytes reserved for trap handler stack frame. */
-#define APP_BRAM_BASE       0x00002000
-#define APP_BRAM_END        0x00007800  /* Caps at 0x7800, libc at 0x7C00, trap stack at 0x7E00 */
+#define APP_BRAM_BASE       OF_TARGET_APP_BRAM_BASE
+#define APP_BRAM_END        OF_TARGET_APP_BRAM_END  /* Caps at 0x7800, libc at 0x7C00, trap stack at 0x7E00 */
 #define APP_BRAM_SIZE       (APP_BRAM_END - APP_BRAM_BASE)
 
-#define SDRAM_BASE          0x10000000
-#define SDRAM_SIZE          (64 * 1024 * 1024)
-#define SDRAM_UNCACHED_BASE 0x50000000      /* D-cache bypass alias */
+#define SDRAM_BASE          OF_TARGET_SDRAM_BASE
+#define SDRAM_SIZE          OF_TARGET_SDRAM_SIZE
+#define SDRAM_UNCACHED_BASE OF_TARGET_SDRAM_UNCACHED_BASE      /* D-cache bypass alias */
 
-#define FB0_BASE            0x10000000      /* Framebuffer 0 */
-#define FB1_BASE            0x10100000      /* Framebuffer 1 */
-#define FB2_BASE            0x10200000      /* Framebuffer 2 */
-#define TERM_FB_BASE        0x50300000      /* Dedicated terminal framebuffer (uncached SDRAM) */
-#define FB_COUNT            3
-#define FB_WIDTH            320
-#define FB_HEIGHT           240
-#define FB_STRIDE           320             /* 8-bit indexed, 1 byte/pixel */
+#define FB0_BASE            OF_TARGET_FB0_BASE      /* Framebuffer 0 */
+#define FB1_BASE            OF_TARGET_FB1_BASE      /* Framebuffer 1 */
+#define FB2_BASE            OF_TARGET_FB2_BASE      /* Framebuffer 2 */
+#define TERM_FB_BASE        OF_TARGET_TERM_FB_BASE  /* Dedicated terminal framebuffer */
+#define FB_COUNT            OF_TARGET_FB_COUNT
+#define FB_WIDTH            OF_TARGET_FB_WIDTH
+#define FB_HEIGHT           OF_TARGET_FB_HEIGHT
+#define FB_STRIDE           OF_TARGET_FB_STRIDE
 #define FB_SIZE             (FB_WIDTH * FB_HEIGHT)
 
-#define DMA_CHUNK_SIZE      (512 * 1024)    /* Max bridge DMA per transfer */
+#define DMA_CHUNK_SIZE      OF_TARGET_DMA_CHUNK_SIZE    /* Max transfer per target file op */
 
-#define INTERACT_BASE       0x103FE000      /* APF interact settings (4KB) */
-#define INTERACT_UNCACHED   0x503FE000      /* Uncached alias */
-#define INTERACT_MAX_VARS   64              /* Max interact variables */
+#define INTERACT_BASE       OF_TARGET_INTERACT_BASE
+#define INTERACT_UNCACHED   OF_TARGET_INTERACT_UNCACHED
+#define INTERACT_MAX_VARS   OF_TARGET_INTERACT_MAX_VARS
 
 /* Terminal VRAM removed — terminal renders to TERM_FB_BASE in SDRAM */
 #define TERM_COLS           40
 #define TERM_ROWS           30
 
-#define CRAM0_BASE          0x30000000      /* CRAM0 cached */
-#define CRAM1_BASE          0x31000000      /* CRAM1 cached */
-#define CRAM0_UNCACHED      0x38000000      /* CRAM0 uncached (D-cache bypass) */
-#define CRAM1_UNCACHED      0x39000000      /* CRAM1 uncached (D-cache bypass) */
-#define CRAM_SIZE           (16 * 1024 * 1024)
+#define CRAM0_BASE          OF_TARGET_CRAM0_BASE      /* CRAM0 cached */
+#define CRAM1_BASE          OF_TARGET_CRAM1_BASE      /* CRAM1 cached */
+#define CRAM0_UNCACHED      OF_TARGET_CRAM0_UNCACHED  /* CRAM0 uncached (D-cache bypass) */
+#define CRAM1_UNCACHED      OF_TARGET_CRAM1_UNCACHED  /* CRAM1 uncached (D-cache bypass) */
+#define CRAM_SIZE           OF_TARGET_CRAM_SIZE
 
-#define CRAM0_BRIDGE        0x20000000      /* CRAM0 in bridge address space */
-#define CRAM1_BRIDGE        0x30000000      /* CRAM1 in bridge address space */
+#define CRAM0_BRIDGE        OF_TARGET_CRAM0_BRIDGE      /* CRAM0 in bridge address space */
+#define CRAM1_BRIDGE        OF_TARGET_CRAM1_BRIDGE      /* CRAM1 in bridge address space */
 
 /* FTAB (file table) — written by Chip32 loader at boot (256 bytes) */
-#define CRAM1_FTAB            (CRAM1_BASE + 0x00280000)     /* 0x31280000 cached */
-#define CRAM1_FTAB_UNCACHED   (CRAM1_UNCACHED + 0x00280000) /* 0x39280000 uncached */
-#define CRAM1_FTAB_BRIDGE     (CRAM1_BRIDGE + 0x00280000)   /* 0x30280000 bridge */
+#define CRAM1_FTAB            (CRAM1_BASE + OF_TARGET_CRAM1_FTAB_OFFSET)
+#define CRAM1_FTAB_UNCACHED   (CRAM1_UNCACHED + OF_TARGET_CRAM1_FTAB_OFFSET)
+#define CRAM1_FTAB_BRIDGE     (CRAM1_BRIDGE + OF_TARGET_CRAM1_FTAB_OFFSET)
 
 /* DMA scratch area in CRAM1 (after FTAB, before I/O cache) */
-#define CRAM1_SCRATCH         (CRAM1_BASE + 0x00290000)     /* 0x31290000 cached */
-#define CRAM1_SCRATCH_UNCACHED (CRAM1_UNCACHED + 0x00290000) /* 0x39290000 uncached */
-#define CRAM1_SCRATCH_BRIDGE  (CRAM1_BRIDGE + 0x00290000)   /* 0x30290000 bridge */
+#define CRAM1_SCRATCH         (CRAM1_BASE + OF_TARGET_CRAM1_SCRATCH_OFFSET)
+#define CRAM1_SCRATCH_UNCACHED (CRAM1_UNCACHED + OF_TARGET_CRAM1_SCRATCH_OFFSET)
+#define CRAM1_SCRATCH_BRIDGE  (CRAM1_BRIDGE + OF_TARGET_CRAM1_SCRATCH_OFFSET)
 
-#define SRAM_BASE           0x3A000000      /* SRAM uncached */
-#define SRAM_SIZE           (256 * 1024)
+#define SRAM_BASE           OF_TARGET_SRAM_BASE      /* SRAM uncached */
+#define SRAM_SIZE           OF_TARGET_SRAM_SIZE
 
 /* Runtime stack layout (must match os.ld) */
-#define RUNTIME_STACK_TOP   0x14000000      /* Top of SDRAM */
-#define RUNTIME_STACK_SIZE  (512 * 1024)
+#define RUNTIME_STACK_TOP   OF_TARGET_RUNTIME_STACK_TOP
+#define RUNTIME_STACK_SIZE  OF_TARGET_RUNTIME_STACK_SIZE
 #define APP_STACK_TOP       (RUNTIME_STACK_TOP - RUNTIME_STACK_SIZE)  /* 0x13F80000 */
+
+/* Sample memory pool for the shared mixer allocator. */
+#define SAMPLE_POOL_BASE    OF_TARGET_SAMPLE_BASE
+#define SAMPLE_POOL_SIZE    OF_TARGET_SAMPLE_SIZE
+#define SAMPLE_POOL_END     (SAMPLE_POOL_BASE + SAMPLE_POOL_SIZE)
 
 
 /* ======================================================================
@@ -390,7 +396,7 @@
  * CPU Constants
  * ====================================================================== */
 
-#define CPU_FREQ_HZ         100000000   /* 100 MHz */
+#define CPU_FREQ_HZ         OF_TARGET_CPU_FREQ_HZ
 
 /* ======================================================================
  * Inline helpers
@@ -415,6 +421,10 @@ static inline void fence_i(void) {
     /* fence.i (Zifencei) — encoded as .word because -march does not
      * include Zifencei so the assembler won't accept the mnemonic. */
     __asm__ volatile(".word 0x0000100f");
+}
+
+static inline int hw_feature_present(uint32_t feature) {
+    return (HW_FEATURES & feature) != 0;
 }
 
 /* Convert CPU SDRAM address to uncached alias */
@@ -501,4 +511,3 @@ static inline uint32_t cpu_to_bridge(void *addr) {
 #define OF_REG_LINK_BASE            LINK_BASE
 
 #endif /* OFOS_REGS_H */
-
