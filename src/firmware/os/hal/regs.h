@@ -328,11 +328,15 @@
 
 /* UART (0x4F000000) — DevKey debug serial, 2 Mbaud 8N1 */
 #define UART_BASE           0x4F000000
-#define UART_STATUS         REG32(UART_BASE + 0x00)     /* Read: bit0=1, bit1=TX ready, bit2=RX valid */
-#define UART_TX_DATA        REG32(UART_BASE + 0x04)     /* Write: send byte [7:0] */
-#define UART_RX_DATA        REG32(UART_BASE + 0x08)     /* Read: received byte (clears valid) */
-#define   UART_TX_RDY       (1 << 1)
-#define   UART_RX_AVAIL     (1 << 2)
+#define UART_STATUS         REG32(UART_BASE + 0x00)     /* Read status bits */
+#define UART_TX_DATA        REG32(UART_BASE + 0x04)     /* Write: push byte to TX FIFO */
+#define UART_RX_DATA        REG32(UART_BASE + 0x08)     /* Read: received byte (pops RX FIFO) */
+#define   UART_TX_RDY       (1 << 1)  /* TX FIFO has space (poll before write) */
+#define   UART_RX_AVAIL     (1 << 2)  /* RX FIFO has at least one byte */
+#define   UART_TX_IDLE      (1 << 3)  /* TX FIFO empty AND uart_tx not shifting
+                                       * (use this to wait for all output to
+                                       * fully drain before, e.g., entering a
+                                       * low-power state or jumping to OS) */
 
 /* ======================================================================
  * Analogizer (Bridge registers, accessible via interact.json settings)

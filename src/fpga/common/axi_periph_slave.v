@@ -852,7 +852,7 @@ end
 // Peripheral read data mux
 // ============================================
 // ============================================
-// UART RX FIFO — 256-byte buffer so CPU doesn't have to read every byte within 10μs
+// UART RX FIFO — 1024-byte buffer so CPU doesn't have to read every byte within 10μs
 // ============================================
 reg [7:0]  uart_rx_fifo [0:1023];
 reg [9:0]  uart_rx_wr_ptr;
@@ -881,13 +881,78 @@ always @(posedge clk) begin
     end
 end
 
+// ============================================
+// UART TX FIFO — 32-byte buffer so the CPU can burst writes without
+// dropping bytes when uart_tx is still shifting the previous byte.
+// At 2 Mbaud each byte takes ~5us / ~500 cycles to drain; the kernel
+// can produce control characters (newlines, escape codes) far faster
+// than that, so a fire-and-forget UART_TX_DATA write would lose ~60%
+// of chars in tight bursts. The FIFO absorbs the rate mismatch.
+// ============================================
+reg [7:0]  uart_tx_fifo [0:31];
+reg [4:0]  uart_tx_wr_ptr;
+reg [4:0]  uart_tx_rd_ptr;
+wire [4:0] uart_tx_count = uart_tx_wr_ptr - uart_tx_rd_ptr;
+wire       uart_tx_fifo_empty = (uart_tx_wr_ptr == uart_tx_rd_ptr);
+wire       uart_tx_fifo_full  = (uart_tx_count == 5'd31);
+// Aggregate idle = FIFO empty AND uart_tx not currently shifting.
+// Boot stub uses this for "wait for last PHDP byte to drain" semantics.
+wire       uart_tx_idle = uart_tx_fifo_empty && !uart_tx_active;
+
+// CPU-side write: pulse uart_tx_fifo_we when CPU writes UART_TX_DATA
+// (in the FSM section below). FIFO push happens here.
+reg uart_tx_fifo_we;
+reg [7:0] uart_tx_fifo_din;
+
+always @(posedge clk) begin
+    if (reset) begin
+        uart_tx_wr_ptr <= 0;
+        uart_tx_rd_ptr <= 0;
+        uart_tx_dv     <= 0;
+        uart_tx_byte   <= 0;
+    end else begin
+        // Default: deassert one-cycle pulse
+        uart_tx_dv <= 0;
+
+        // Push from CPU side (drop silently if full -- matches existing
+        // fire-and-forget software behavior, never blocks the AXI bus).
+        if (uart_tx_fifo_we && !uart_tx_fifo_full) begin
+            uart_tx_fifo[uart_tx_wr_ptr[4:0]] <= uart_tx_fifo_din;
+            uart_tx_wr_ptr <= uart_tx_wr_ptr + 5'd1;
+        end
+
+        // Drain into uart_tx whenever it's idle and we have something
+        // to send. uart_tx samples i_Tx_DV on the rising edge and
+        // immediately asserts uart_tx_active, so this auto-clears next
+        // cycle and won't double-pulse.
+        if (!uart_tx_fifo_empty && !uart_tx_active && !uart_tx_dv) begin
+            uart_tx_byte <= uart_tx_fifo[uart_tx_rd_ptr[4:0]];
+            uart_tx_dv   <= 1'b1;
+            uart_tx_rd_ptr <= uart_tx_rd_ptr + 5'd1;
+        end
+    end
+end
+
 // UART read data mux:
-//   0x4F000000 (offset 0x00): status — bit0=1, bit1=TX ready, bit2=RX valid, [15:8]=FIFO count
+//   0x4F000000 (offset 0x00): status
+//     bit 0  = 1                 (UART present marker)
+//     bit 1  = ~uart_tx_fifo_full (TX has space — this is what software polls
+//                                  before writing UART_TX_DATA. With the new
+//                                  TX FIFO, "ready" means "FIFO has space",
+//                                  not "uart_tx is idle")
+//     bit 2  = uart_rx_valid     (RX has data)
+//     bit 3  = uart_tx_idle      (FIFO empty AND uart_tx not shifting; for
+//                                  callers that need to wait for ALL output
+//                                  to fully drain, e.g. boot stub PHDP exit)
+//     bits [17:8]  = uart_rx_count (RX FIFO depth, 10 bits)
+//     bits [22:18] = uart_tx_count (TX FIFO depth, 5 bits)
 //   0x4F000004 (offset 0x04): TX data (write-only, reads as 0)
 //   0x4F000008 (offset 0x08): RX data (read pops from FIFO)
-wire [31:0] uart_rdata = (req_addr[3:2] == 2'b00) ? {14'b0, uart_rx_count, 5'b0, uart_rx_valid, ~uart_tx_active, 1'b1} :
-                          (req_addr[3:2] == 2'b10) ? {24'b0, uart_rx_data} :
-                          32'h0;
+wire [31:0] uart_rdata = (req_addr[3:2] == 2'b00) ?
+        {9'b0, uart_tx_count, uart_rx_count, 4'b0,
+         uart_tx_idle, uart_rx_valid, ~uart_tx_fifo_full, 1'b1}
+    : (req_addr[3:2] == 2'b10) ? {24'b0, uart_rx_data}
+    : 32'h0;
 
 wire [31:0] periph_rd_mux = reg_sysreg ? sysreg_rdata :
                              reg_audio  ? {22'b0, audio_fifo_full, audio_fifo_level} :
@@ -1016,8 +1081,8 @@ always @(posedge clk or posedge reset) begin
         sysreg_wr_fire <= 0;
         audio_sample_wr <= 0;
         audio_sample_data <= 0;
-        uart_tx_dv <= 0;
-        uart_tx_byte <= 0;
+        uart_tx_fifo_we  <= 0;
+        uart_tx_fifo_din <= 0;
         link_reg_wr <= 0;
         link_reg_rd <= 0;
         link_reg_addr <= 0;
@@ -1036,7 +1101,7 @@ always @(posedge clk or posedge reset) begin
         s_axi_bvalid <= 0;
         sysreg_wr_fire <= 0;
         audio_sample_wr <= 0;
-        uart_tx_dv <= 0;
+        uart_tx_fifo_we <= 0;
         link_reg_wr <= 0;
         link_reg_rd <= 0;
         gpu_reg_wr <= 0;
@@ -1230,8 +1295,12 @@ always @(posedge clk or posedge reset) begin
                         link_reg_wdata <= s_axi_wdata;
                     end
                     if (reg_uart && |s_axi_wstrb && req_addr[3:2] == 2'b01) begin
-                        uart_tx_byte <= s_axi_wdata[7:0];
-                        uart_tx_dv <= 1;
+                        // Push into the TX FIFO; the FIFO drain block
+                        // hands bytes to uart_tx asynchronously. Drops
+                        // silently if FIFO is full -- matches the prior
+                        // fire-and-forget software contract.
+                        uart_tx_fifo_din <= s_axi_wdata[7:0];
+                        uart_tx_fifo_we  <= 1;
                     end
                     if (reg_gpu && |s_axi_wstrb) begin
                         gpu_reg_wr <= 1;

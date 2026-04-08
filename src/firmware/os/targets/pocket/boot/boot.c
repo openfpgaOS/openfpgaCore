@@ -597,8 +597,13 @@ int main(void) {
             extern volatile int uart_mirror_on;
             uart_mirror_on = 1;
 
-            /* Wait for EXEC_START to finish transmitting */
-            while (!(UART_STATUS & UART_TX_RDY)) {}
+            /* Wait for EXEC_START to finish FULLY transmitting before
+             * jumping to the OS. With the TX FIFO, UART_TX_RDY just
+             * means "FIFO has space", which is set the moment the
+             * AXI write completes -- not what we want here. Use
+             * UART_TX_IDLE which only asserts when the FIFO is empty
+             * AND uart_tx is not currently shifting. */
+            while (!(UART_STATUS & UART_TX_IDLE)) {}
 
             boot_fb_clear_row(14);
             goto start_os;
