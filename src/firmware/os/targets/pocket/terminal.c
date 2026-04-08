@@ -385,7 +385,14 @@ void of_term_enable_uart_mirror(void) { uart_mirror_on = 1; }
 void term_emit_char(char c) {
     uint8_t color = term_color_byte(term_fg, term_bg);
 
-    /* UART console mirror -- fire-and-forget, drop if TX busy */
+    /* UART console mirror -- fire-and-forget, drop if TX busy.
+     * Multiple attempts to add back-pressure here (per-char spin-wait
+     * via UART_STATUS macro, per-char spin-wait via explicit volatile
+     * pointer, post-write fence, post-write fixed-cycle dead loop)
+     * have all caused either kernel hangs or boot stub DMA failures
+     * downstream. Until we understand the interaction, this stays
+     * fire-and-forget and the dropped chars after consecutive \n
+     * are accepted as a known limitation. */
     if (uart_mirror_on && c != 0x02 && (UART_STATUS & UART_TX_RDY))
         UART_TX_DATA = (uint8_t)c;
 
