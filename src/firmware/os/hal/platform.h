@@ -61,6 +61,8 @@ typedef struct {
     uint32_t save_region_addr;
     uint32_t save_slot_size;
     uint32_t save_max_slots;
+
+    uint32_t gpu_base;          /* GPU MMIO window base, 0 if no GPU */
 } of_target_platform_t;
 
 const of_target_platform_t *of_target_platform_get(void);

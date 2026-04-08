@@ -23,17 +23,20 @@ __os_entry = 0x30000000;
 __app_load_base = 0x30100000;
 
 SECTIONS {
-    /* Bootloader code - in BRAM, runs at startup */
+    /* Bootloader code - in BRAM, runs at startup.
+     * Boot-critical object files are matched by name (not directory)
+     * so the link works for any target's targets/<name>/{terminal,boot}.o
+     * without editing the linker script. The actual terminal/boot
+     * implementations are per-target -- see targets/<name>/. */
     .boot : {
         KEEP(*(.text.start))
         *(.text.boot*)
-        /* Boot-critical object files */
-        targets/pocket/terminal.o(.text*)
-        targets/pocket/terminal.o(.rodata*)
-        targets/pocket/terminal.o(.srodata*)
-        targets/pocket/boot/boot.o(.text*)
-        targets/pocket/boot/boot.o(.rodata*)
-        targets/pocket/boot/boot.o(.srodata*)
+        */terminal.o(.text*)
+        */terminal.o(.rodata*)
+        */terminal.o(.srodata*)
+        */boot/boot.o(.text*)
+        */boot/boot.o(.rodata*)
+        */boot/boot.o(.srodata*)
         *(.rodata.boot*)
         . = ALIGN(4);
     } > BRAM
@@ -49,8 +52,8 @@ SECTIONS {
         __bss_start = .;
         *(.bss.boot*)
         *(.sbss.boot*)
-        targets/pocket/boot/boot.o(.bss*)
-        targets/pocket/boot/boot.o(.sbss*)
+        */boot/boot.o(.bss*)
+        */boot/boot.o(.sbss*)
         . = ALIGN(4);
         __bss_end = .;
     } > BRAM

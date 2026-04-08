@@ -1,24 +1,22 @@
 /*
  * openfpgaOS Input HAL
- * Unified controller abstraction for Pocket, Dock, and Analogizer (SNAC)
+ * Unified controller abstraction for Pocket, Dock, and Analogizer (SNAC).
+ *
+ * The OF_BTN_* button bitmasks and the of_input_state_t struct are
+ * defined in api/of_input.h -- the SDK header is the canonical source
+ * for both. Per-target HAL implementations are responsible for
+ * translating native register layouts into this format. On Pocket the
+ * native APF format happens to match OF_BTN_* bit-for-bit (no
+ * translation), but a future MiSTer port would remap here.
  */
 
 #ifndef OFOS_INPUT_H
 #define OFOS_INPUT_H
 
 #include <stdint.h>
+#include "../../api/of_input_types.h"
 
-#define INPUT_MAX_PLAYERS   2
-
-typedef struct {
-    uint32_t buttons;           /* Button bitmask (BTN_* from regs.h) */
-    uint32_t buttons_pressed;   /* Newly pressed since last poll */
-    uint32_t buttons_released;  /* Newly released since last poll */
-    int16_t  joy_lx, joy_ly;   /* Left stick (-128 to 127) */
-    int16_t  joy_rx, joy_ry;   /* Right stick (-128 to 127) */
-    uint16_t trigger_l;         /* Left analog trigger (0-65535) */
-    uint16_t trigger_r;         /* Right analog trigger (0-65535) */
-} of_input_state_t;
+#define INPUT_MAX_PLAYERS   OF_MAX_PLAYERS
 
 /* Initialize input subsystem */
 void of_input_init(void);

@@ -10,6 +10,7 @@
 
 #include "snac.h"
 #include "regs.h"
+#include "../../hal/input.h"  /* OF_BTN_* canonical layout */
 
 static snac_controller_t snac_state[2];
 static uint8_t active_type;
@@ -37,39 +38,39 @@ static void poll_serlatch(int bits) {
     uint16_t buttons = 0;
 
     if (active_type == SNAC_NES) {
-        if (raw & 0x80) buttons |= BTN_A;
-        if (raw & 0x40) buttons |= BTN_B;
-        if (raw & 0x20) buttons |= BTN_SELECT;
-        if (raw & 0x10) buttons |= BTN_START;
-        if (raw & 0x08) buttons |= BTN_DPAD_UP;
-        if (raw & 0x04) buttons |= BTN_DPAD_DOWN;
-        if (raw & 0x02) buttons |= BTN_DPAD_LEFT;
-        if (raw & 0x01) buttons |= BTN_DPAD_RIGHT;
+        if (raw & 0x80) buttons |= OF_BTN_A;
+        if (raw & 0x40) buttons |= OF_BTN_B;
+        if (raw & 0x20) buttons |= OF_BTN_SELECT;
+        if (raw & 0x10) buttons |= OF_BTN_START;
+        if (raw & 0x08) buttons |= OF_BTN_UP;
+        if (raw & 0x04) buttons |= OF_BTN_DOWN;
+        if (raw & 0x02) buttons |= OF_BTN_LEFT;
+        if (raw & 0x01) buttons |= OF_BTN_RIGHT;
     } else if (active_type == SNAC_SNES || active_type == SNAC_SNES_SWAP) {
-        if (raw & 0x8000) buttons |= BTN_B;
-        if (raw & 0x4000) buttons |= BTN_Y;
-        if (raw & 0x2000) buttons |= BTN_SELECT;
-        if (raw & 0x1000) buttons |= BTN_START;
-        if (raw & 0x0800) buttons |= BTN_DPAD_UP;
-        if (raw & 0x0400) buttons |= BTN_DPAD_DOWN;
-        if (raw & 0x0200) buttons |= BTN_DPAD_LEFT;
-        if (raw & 0x0100) buttons |= BTN_DPAD_RIGHT;
-        if (raw & 0x0080) buttons |= BTN_A;
-        if (raw & 0x0040) buttons |= BTN_X;
-        if (raw & 0x0020) buttons |= BTN_L1;
-        if (raw & 0x0010) buttons |= BTN_R1;
+        if (raw & 0x8000) buttons |= OF_BTN_B;
+        if (raw & 0x4000) buttons |= OF_BTN_Y;
+        if (raw & 0x2000) buttons |= OF_BTN_SELECT;
+        if (raw & 0x1000) buttons |= OF_BTN_START;
+        if (raw & 0x0800) buttons |= OF_BTN_UP;
+        if (raw & 0x0400) buttons |= OF_BTN_DOWN;
+        if (raw & 0x0200) buttons |= OF_BTN_LEFT;
+        if (raw & 0x0100) buttons |= OF_BTN_RIGHT;
+        if (raw & 0x0080) buttons |= OF_BTN_A;
+        if (raw & 0x0040) buttons |= OF_BTN_X;
+        if (raw & 0x0020) buttons |= OF_BTN_L1;
+        if (raw & 0x0010) buttons |= OF_BTN_R1;
 
         if (active_type == SNAC_SNES_SWAP) {
             /* Swap A/B and X/Y */
-            uint16_t a = buttons & BTN_A;
-            uint16_t b = buttons & BTN_B;
-            uint16_t x = buttons & BTN_X;
-            uint16_t y = buttons & BTN_Y;
-            buttons &= ~(BTN_A | BTN_B | BTN_X | BTN_Y);
-            if (a) buttons |= BTN_B;
-            if (b) buttons |= BTN_A;
-            if (x) buttons |= BTN_Y;
-            if (y) buttons |= BTN_X;
+            uint16_t a = buttons & OF_BTN_A;
+            uint16_t b = buttons & OF_BTN_B;
+            uint16_t x = buttons & OF_BTN_X;
+            uint16_t y = buttons & OF_BTN_Y;
+            buttons &= ~(OF_BTN_A | OF_BTN_B | OF_BTN_X | OF_BTN_Y);
+            if (a) buttons |= OF_BTN_B;
+            if (b) buttons |= OF_BTN_A;
+            if (x) buttons |= OF_BTN_Y;
+            if (y) buttons |= OF_BTN_X;
         }
     } else {
         /* DB15: direct mapping (active-high, 12 bits) */
@@ -148,22 +149,22 @@ static void poll_psx(int analog) {
     uint16_t raw = ~(((uint16_t)btn_hi << 8) | btn_lo);
     uint16_t buttons = 0;
 
-    if (raw & 0x0001) buttons |= BTN_SELECT;
-    if (raw & 0x0002) buttons |= BTN_L3;
-    if (raw & 0x0004) buttons |= BTN_R3;
-    if (raw & 0x0008) buttons |= BTN_START;
-    if (raw & 0x0010) buttons |= BTN_DPAD_UP;
-    if (raw & 0x0020) buttons |= BTN_DPAD_RIGHT;
-    if (raw & 0x0040) buttons |= BTN_DPAD_DOWN;
-    if (raw & 0x0080) buttons |= BTN_DPAD_LEFT;
-    if (raw & 0x0100) buttons |= BTN_L2;
-    if (raw & 0x0200) buttons |= BTN_R2;
-    if (raw & 0x0400) buttons |= BTN_L1;
-    if (raw & 0x0800) buttons |= BTN_R1;
-    if (raw & 0x1000) buttons |= BTN_Y;       /* Triangle */
-    if (raw & 0x2000) buttons |= BTN_B;       /* Circle */
-    if (raw & 0x4000) buttons |= BTN_A;       /* Cross */
-    if (raw & 0x8000) buttons |= BTN_X;       /* Square */
+    if (raw & 0x0001) buttons |= OF_BTN_SELECT;
+    if (raw & 0x0002) buttons |= OF_BTN_L3;
+    if (raw & 0x0004) buttons |= OF_BTN_R3;
+    if (raw & 0x0008) buttons |= OF_BTN_START;
+    if (raw & 0x0010) buttons |= OF_BTN_UP;
+    if (raw & 0x0020) buttons |= OF_BTN_RIGHT;
+    if (raw & 0x0040) buttons |= OF_BTN_DOWN;
+    if (raw & 0x0080) buttons |= OF_BTN_LEFT;
+    if (raw & 0x0100) buttons |= OF_BTN_L2;
+    if (raw & 0x0200) buttons |= OF_BTN_R2;
+    if (raw & 0x0400) buttons |= OF_BTN_L1;
+    if (raw & 0x0800) buttons |= OF_BTN_R1;
+    if (raw & 0x1000) buttons |= OF_BTN_Y;       /* Triangle */
+    if (raw & 0x2000) buttons |= OF_BTN_B;       /* Circle */
+    if (raw & 0x4000) buttons |= OF_BTN_A;       /* Cross */
+    if (raw & 0x8000) buttons |= OF_BTN_X;       /* Square */
 
     snac_state[0].buttons = buttons;
     /* Analog: PSX sticks center at 128, range 0-255 → map to -128..+127 */
@@ -211,14 +212,14 @@ static void poll_pce(int sixbtn) {
     nib0 = ~nib0 & 0x0F;
     nib1 = ~nib1 & 0x0F;
 
-    if (nib0 & 0x01) buttons |= BTN_DPAD_UP;
-    if (nib0 & 0x02) buttons |= BTN_DPAD_RIGHT;
-    if (nib0 & 0x04) buttons |= BTN_DPAD_DOWN;
-    if (nib0 & 0x08) buttons |= BTN_DPAD_LEFT;
-    if (nib1 & 0x01) buttons |= BTN_A;       /* I */
-    if (nib1 & 0x02) buttons |= BTN_B;       /* II */
-    if (nib1 & 0x04) buttons |= BTN_SELECT;
-    if (nib1 & 0x08) buttons |= BTN_START;   /* Run */
+    if (nib0 & 0x01) buttons |= OF_BTN_UP;
+    if (nib0 & 0x02) buttons |= OF_BTN_RIGHT;
+    if (nib0 & 0x04) buttons |= OF_BTN_DOWN;
+    if (nib0 & 0x08) buttons |= OF_BTN_LEFT;
+    if (nib1 & 0x01) buttons |= OF_BTN_A;       /* I */
+    if (nib1 & 0x02) buttons |= OF_BTN_B;       /* II */
+    if (nib1 & 0x04) buttons |= OF_BTN_SELECT;
+    if (nib1 & 0x08) buttons |= OF_BTN_START;   /* Run */
 
     if (sixbtn) {
         /* 6-button: third and fourth nibbles via additional SEL toggles */
@@ -237,10 +238,10 @@ static void poll_pce(int sixbtn) {
         nib3 = ~nib3 & 0x0F;
 
         /* 6-btn extra: III=X, IV=Y, V=L1, VI=R1 */
-        if (nib2 & 0x01) buttons |= BTN_X;
-        if (nib2 & 0x02) buttons |= BTN_Y;
-        if (nib2 & 0x04) buttons |= BTN_L1;
-        if (nib2 & 0x08) buttons |= BTN_R1;
+        if (nib2 & 0x01) buttons |= OF_BTN_X;
+        if (nib2 & 0x02) buttons |= OF_BTN_Y;
+        if (nib2 & 0x04) buttons |= OF_BTN_L1;
+        if (nib2 & 0x08) buttons |= OF_BTN_R1;
     }
 
     snac_state[0].buttons = buttons;

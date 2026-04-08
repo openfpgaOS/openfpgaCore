@@ -1,23 +1,33 @@
 /*
  * openfpgaOS Capability Descriptor Table
  *
- * Populates the of_capabilities struct at a fixed BRAM address before
- * launching the application. Apps read this struct to discover the
- * platform, memory layout, and available hardware features.
+ * Populates a static of_capabilities struct in kernel BSS during boot
+ * and exposes it via caps_table_get(). The pointer is handed to apps
+ * through the AT_OF_CAPS auxv tag in elf_exec(), so an app never has
+ * to know where the struct lives -- it just calls of_get_caps() (which
+ * returns the auxv-supplied pointer) and reads it like any other
+ * read-only blob.
  *
- * The struct lives at 0x7800 in BRAM — fast access, no D-cache pollution.
- * Must not overlap app BRAM (0x2000-0x7800) or trap stack region.
+ * The struct is plain BSS in the OS .data region, so it ends up in
+ * CRAM0 alongside the rest of the kernel. Apps read it through the
+ * cached path; the kernel writes it once at boot and never touches
+ * it again, so there's no coherency concern.
  */
 
 #include "caps_table.h"
+#include "services_table.h"
 #include "../../api/of_caps.h"
 #include "../../api/of_services.h"
 #include "../../api/of_version.h"
 #include "../hal/regs.h"
 
+/* Single source of truth for the app-visible cap struct. Lives in BSS
+ * (zero-initialized at boot), populated by caps_table_init(). */
+static struct of_capabilities g_caps;
+
 void caps_table_init(uintptr_t heap_base) {
     const of_target_platform_t *platform = of_target_platform_get();
-    struct of_capabilities *caps = (struct of_capabilities *)OF_CAPS_ADDR;
+    struct of_capabilities *caps = &g_caps;
     uint32_t features = HW_FEATURES;
 
     caps->magic   = OF_CAPS_MAGIC;
@@ -49,5 +59,17 @@ void caps_table_init(uintptr_t heap_base) {
     /* OS info */
     caps->os_version      = OF_API_VERSION;
     caps->cpu_freq_hz     = platform->cpu_freq_hz;
-    caps->services_table  = OF_SVC_ADDR;
+    /* Legacy field: still pointed at the services table for any old app
+     * that reads it. New apps get the same pointer via AT_OF_SVC. */
+    caps->services_table  = (uint32_t)(uintptr_t)services_table_get();
+
+    /* v2 fields: memory bases for inline accessors that previously
+     * baked the addresses into every app .elf. */
+    caps->sdram_base          = platform->sdram_base;
+    caps->sdram_uncached_base = platform->sdram_uncached_base;
+    caps->gpu_base            = platform->gpu_base;
+}
+
+const struct of_capabilities *caps_table_get(void) {
+    return &g_caps;
 }

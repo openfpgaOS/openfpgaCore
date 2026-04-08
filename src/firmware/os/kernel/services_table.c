@@ -1,9 +1,12 @@
 /*
  * openfpgaOS OS Services Table
  *
- * Populates a table of function pointers at 0x7A00 in BRAM. Apps call
- * OS services through this table with zero syscall overhead (~2 cycles
- * indirect call vs ~50 cycles ecall trap entry/exit).
+ * Populates a static table of function pointers in kernel BSS. Apps
+ * call OS services through this table with zero syscall overhead
+ * (~2 cycles indirect call vs ~50 cycles ecall trap entry/exit).
+ *
+ * The table address is handed to apps through the AT_OF_SVC auxv tag
+ * in elf_exec(), so an app never has to know where the table lives.
  *
  * Where the SDK API signature differs from the HAL, thin wrappers
  * adapt the calling convention (e.g., video_set_palette packs RGB).
@@ -86,8 +89,16 @@ static long svc_file_size_fd(int fd) {
  * Table population
  * ====================================================================== */
 
+/* Single source of truth for the app-visible services table. Lives in
+ * BSS (zero-initialized at boot), populated by services_table_init(). */
+static struct of_services_table g_svc;
+
+const struct of_services_table *services_table_get(void) {
+    return &g_svc;
+}
+
 void services_table_init(void) {
-    struct of_services_table *svc = (struct of_services_table *)OF_SVC_ADDR;
+    struct of_services_table *svc = &g_svc;
 
     svc->magic   = OF_SVC_MAGIC;
     svc->version = OF_SVC_VERSION;

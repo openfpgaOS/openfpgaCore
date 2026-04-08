@@ -94,7 +94,7 @@ void os_main(void) {
 
         while (1) {
             of_input_poll();
-            if (of_input_is_pressed(0, BTN_START)) {
+            if (of_input_is_pressed(0, OF_BTN_START)) {
                 of_term_puts("\n  Retrying...");
                 rc = elf_load(APP_SLOT_ID, APP_LOAD_ADDR, &app);
                 if (rc == 0)
@@ -113,16 +113,17 @@ void os_main(void) {
      * The kernel's linux_dispatch() in syscall.c handles them; no
      * libc jump table is needed any more. */
 
+    /* Populate OS services table first -- caps_table.c reads its
+     * address to fill the legacy caps->services_table field. */
+    services_table_init();
+
+    of_term_puts("  Services init..... ");
+    status_ok();
+
     /* Populate capability descriptor for the app */
     caps_table_init(app.bss_end);
 
     of_term_puts("  Caps init......... ");
-    status_ok();
-
-    /* Populate OS services table (direct function pointers) */
-    services_table_init();
-
-    of_term_puts("  Services init..... ");
     status_ok();
 
     of_timer_delay_ms(300);

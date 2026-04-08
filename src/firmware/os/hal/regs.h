@@ -371,26 +371,15 @@
 #define ANLG_VIDEO_POCKET_OFF       0x8
 
 /* ======================================================================
- * Pocket Controller Button Bits (cont1_key / cont2_key)
- * Matches Analogue Pocket APF controller format
+ * Controller Button Bits
+ *
+ * The canonical button bitmasks live in api/of_input.h as OF_BTN_*.
+ * The Analogue Pocket APF native register layout in CONT1_KEY /
+ * CONT2_KEY happens to match OF_BTN_* bit-for-bit, so no translation
+ * is needed in the Pocket input HAL -- the raw register can be passed
+ * straight through. A future target with a different native layout
+ * must translate to OF_BTN_* in its own targets/<name>/input.c.
  * ====================================================================== */
-
-#define BTN_DPAD_UP         (1 << 0)
-#define BTN_DPAD_DOWN       (1 << 1)
-#define BTN_DPAD_LEFT       (1 << 2)
-#define BTN_DPAD_RIGHT      (1 << 3)
-#define BTN_A               (1 << 4)
-#define BTN_B               (1 << 5)
-#define BTN_X               (1 << 6)
-#define BTN_Y               (1 << 7)
-#define BTN_L1              (1 << 8)
-#define BTN_R1              (1 << 9)
-#define BTN_L2              (1 << 10)
-#define BTN_R2              (1 << 11)
-#define BTN_L3              (1 << 12)
-#define BTN_R3              (1 << 13)
-#define BTN_SELECT          (1 << 14)
-#define BTN_START           (1 << 15)
 
 /* ======================================================================
  * CPU Constants

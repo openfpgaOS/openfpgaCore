@@ -56,6 +56,8 @@ static const of_target_platform_t g_target_platform = {
     .save_region_addr = OF_TARGET_SAVE_REGION_ADDR,
     .save_slot_size = OF_TARGET_SAVE_SLOT_SIZE,
     .save_max_slots = OF_TARGET_SAVE_MAX_SLOTS,
+
+    .gpu_base = OF_TARGET_GPU_BASE,
 };
 
 const of_target_platform_t *of_target_platform_get(void)

@@ -178,16 +178,6 @@ $(TARGET_DIR)/%.o: $(TARGET_DIR)/%.c
 $(KERNEL_DIR)/syscall.o: $(KERNEL_DIR)/syscall.c
 	$(CC) $(filter-out -flto,$(OS_CFLAGS)) -c -o $@ $<
 
-# caps_table.c without LTO — writes to a hardcoded address (OF_CAPS_ADDR)
-# via cast, so LTO sees no observable side effects and strips the function.
-$(KERNEL_DIR)/caps_table.o: $(KERNEL_DIR)/caps_table.c
-	$(CC) $(filter-out -flto,$(OS_CFLAGS)) -c -o $@ $<
-
-# services_table.c without LTO — writes to a hardcoded address (OF_SVC_ADDR)
-# via cast, so LTO sees no observable side effects and strips the function.
-$(KERNEL_DIR)/services_table.o: $(KERNEL_DIR)/services_table.c
-	$(CC) $(filter-out -flto,$(OS_CFLAGS)) -c -o $@ $<
-
 # irq.c without LTO — called from assembly trap handler via function pointer.
 $(KERNEL_DIR)/irq.o: $(KERNEL_DIR)/irq.c
 	$(CC) $(filter-out -flto,$(OS_CFLAGS)) -c -o $@ $<
@@ -215,4 +205,11 @@ rebuild: clean all
 mem: $(FW_TARGET).elf
 	$(SIZE) -A -x $(FW_TARGET).elf
 
-.PHONY: all clean rebuild install mem
+# Run the SDK app portability acceptance checks. See
+# tools/check_api_portability.sh for what it verifies. Catches
+# regressions in the API contract that would prevent a single SDK
+# app .elf from running on multiple targets.
+check-api:
+	@bash ../../../tools/check_api_portability.sh
+
+.PHONY: all clean rebuild install mem check-api

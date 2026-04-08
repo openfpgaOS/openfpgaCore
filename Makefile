@@ -205,6 +205,13 @@ sdk: check-target
 		cp src/firmware/api/app.ld "$$dir/src/sdk/app.ld"; \
 		printf "  $(C_OK)sdk.mk + app.ld$(C_RESET) → src/sdk/\n"; \
 		\
+		# Mandatory SDK runtime: of_init.c is auto-linked into every \
+		# app and contains the load-bearing constructor that reads the \
+		# AT_OF_CAPS / AT_OF_SVC auxv tags into _of_caps_ptr / _of_svc_ptr. \
+		# Apps will segfault on the first of_get_caps() if this is stale. \
+		cp src/firmware/api/of_init.c "$$dir/src/sdk/of_init.c"; \
+		printf "  $(C_OK)of_init.c$(C_RESET)      → src/sdk/\n"; \
+		\
 		# Optional helper sources (large standalone modules / opt-in) \
 		cp src/firmware/api/of_midi.c   "$$dir/src/sdk/" 2>/dev/null || true; \
 		cp src/firmware/api/of_cxxabi.cpp "$$dir/src/sdk/" 2>/dev/null || true; \
@@ -238,6 +245,13 @@ sdk: check-target
 			printf "  $(C_OK)os.bin$(C_RESET)         → runtime/\n" || true; \
 		test -f $(CHIP32_DIR)/loader.bin && cp $(CHIP32_DIR)/loader.bin "$$dir/runtime/" && \
 			printf "  $(C_OK)loader.bin$(C_RESET)     → runtime/\n" || true; \
+		\
+		# .sof for JTAG reset via quartus_pgm. scripts/debug.sh in the \
+		# SDK consumer reloads this over JTAG between push and stream so \
+		# the core comes up clean before the new ELF runs. \
+		test -f $(TARGET_DIR)/output_files/ap_core.sof && \
+			cp $(TARGET_DIR)/output_files/ap_core.sof "$$dir/runtime/" && \
+			printf "  $(C_OK)ap_core.sof$(C_RESET)    → runtime/ (JTAG reset)\n" || true; \
 		printf "$(C_OK)[sdk] Done$(C_RESET) $$dir\n\n"; \
 	done
 

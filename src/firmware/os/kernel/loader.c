@@ -4,8 +4,12 @@
  */
 
 #include "loader.h"
+#include "caps_table.h"
+#include "services_table.h"
 #include "../hal/hal.h"
+#include "../hal/platform.h"
 #include "../os_string.h"
+#include "../../api/of_app_abi.h"
 
 /* ======================================================================
  * ELF32 Header Definitions (minimal, no external headers needed)
@@ -82,6 +86,39 @@ typedef struct {
  * ====================================================================== */
 
 /* APP_BRAM_BASE/END defined in hal/regs.h (single source of truth) */
+
+/* openfpgaOS App Virtual Memory Map v1 -- see docs/app-virtual-map.md.
+ * Hardcoded here (rather than coming from target_platform.h) because
+ * the contract is the SAME on every target -- it's the app's view of
+ * memory, not the kernel's. The loader rejects any PT_LOAD outside
+ * these ranges so a non-conformant app fails fast instead of silently
+ * scribbling on whatever happens to be at its addresses on this
+ * target. */
+#define APP_VMAP_V1_BRAM_BASE   0x00002000u
+#define APP_VMAP_V1_BRAM_END    0x00007800u
+#define APP_VMAP_V1_SDRAM_BASE  0x10400000u
+#define APP_VMAP_V1_SDRAM_END   0x13400000u  /* 48 MB window */
+
+static int seg_in_app_vmap(uint32_t vaddr, uint32_t memsz) {
+    /* Empty segments (memsz == 0) are vacuously in-range. */
+    if (memsz == 0)
+        return 1;
+    uint32_t end = vaddr + memsz;
+    if (vaddr >= APP_VMAP_V1_BRAM_BASE && end <= APP_VMAP_V1_BRAM_END)
+        return 1;
+    if (vaddr >= APP_VMAP_V1_SDRAM_BASE && end <= APP_VMAP_V1_SDRAM_END)
+        return 1;
+    return 0;
+}
+
+/* Does the current target expose physical RAM that covers the v1
+ * APP_BRAM range? Pocket: yes. A future BRAM-less target sets
+ * app_bram_base = app_bram_end = 0 in its target_platform.h. */
+static int target_has_app_bram(void) {
+    const of_target_platform_t *plat = of_target_platform_get();
+    return plat->app_bram_base <= APP_VMAP_V1_BRAM_BASE &&
+           plat->app_bram_end  >= APP_VMAP_V1_BRAM_END;
+}
 
 /* ======================================================================
  * ELF Loading Implementation
@@ -203,9 +240,27 @@ int elf_load(uint32_t slot_id, uintptr_t load_addr,
             return -5;
 
         if (phdr.p_type == PT_LOAD) {
-            /* Check if this segment targets BRAM (VMA in app BRAM range) */
-            if (phdr.p_vaddr >= APP_BRAM_BASE &&
-                phdr.p_vaddr < APP_BRAM_END) {
+            /* Reject segments outside the app virtual memory map v1.
+             * ET_DYN apps with vaddr=0 are exempt (load_base shifts
+             * them into range below). */
+            if (ehdr.e_type != ET_DYN &&
+                !seg_in_app_vmap(phdr.p_vaddr, phdr.p_memsz)) {
+                return -7;  /* PT_LOAD outside app virtual map v1 */
+            }
+            /* Check if this segment targets the app BRAM hot region.
+             * Use the v1 contract constants -- they are the same on
+             * every target, even targets that can't back them. */
+            if (phdr.p_vaddr >= APP_VMAP_V1_BRAM_BASE &&
+                phdr.p_vaddr < APP_VMAP_V1_BRAM_END) {
+                /* Refuse to load an OF_FASTTEXT app on a target that
+                 * has no real BRAM in the v1 region. The alternative
+                 * (load to LMA in SDRAM) would leave VMA-relative
+                 * symbol references dangling, which would crash hard
+                 * the moment any FASTTEXT function was called -- a
+                 * silent failure mode that is worse than refusing. */
+                if (!target_has_app_bram())
+                    return -8;  /* OF_FASTTEXT segment, target lacks BRAM */
+
                 /* BRAM segment: DMA to bounce buffer, CPU-copy to BRAM */
                 if (phdr.p_filesz > 0) {
                     rc = elf_copy_to_bram(slot_id, phdr.p_offset,
@@ -338,6 +393,18 @@ void elf_exec(const elf_load_result_t *result,
     /* AT_NULL terminator (must be last in memory) */
     *(--sp) = 0;
     *(--sp) = AT_NULL;
+
+    /* AT_OF_SVC: pointer to the OS services table. Apps look this up
+     * via getauxval() in the SDK init constructor instead of reading
+     * a fixed BRAM address, so the same .elf can run on targets with
+     * different memory layouts. See of_app_abi.h. */
+    *(--sp) = (uint32_t)(uintptr_t)services_table_get();
+    *(--sp) = AT_OF_SVC;
+
+    /* AT_OF_CAPS: pointer to the of_capabilities descriptor. Same
+     * mechanism as AT_OF_SVC -- removes the need for OF_CAPS_ADDR. */
+    *(--sp) = (uint32_t)(uintptr_t)caps_table_get();
+    *(--sp) = AT_OF_CAPS;
 
     /* AT_RANDOM: pointer to 16 bytes of "random" data for stack canary.
      * NULL is acceptable -- musl's __init_ssp handles it by seeding from
