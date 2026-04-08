@@ -69,6 +69,19 @@ extern void switch_to_runtime_stack_and_call(void (*entry)(void), void *stack_to
 /* Font in BRAM (.fastrodata) — defined in terminal.c */
 extern const uint8_t font8x8[2048];
 
+/* Initialize palette[15] = white so the boot stub's "white-on-black"
+ * pixel writes (palette index 15) are actually visible. The OS's
+ * of_term_init() later overwrites this as part of the full VGA
+ * palette setup; until then palette[15] is whatever the RTL reset
+ * gives (typically zero = black), and loader text comes out as
+ * black-on-black = invisible. palette[0] is left as the RTL default
+ * (which is zero / black on this target) to save BRAM space. */
+__attribute__((section(".text.boot")))
+static void boot_palette_init(void) {
+    PAL_INDEX = 15;
+    PAL_WRITE = 0xFFFFFF;
+}
+
 __attribute__((section(".text.boot")))
 static void boot_fb_putchar(int col, int row, char c) {
     if ((unsigned)col >= TERM_COLS || (unsigned)row >= TERM_ROWS) return;
@@ -530,6 +543,11 @@ int main(void) {
     /* Brief delay for deferload to settle */
     for (volatile int i = 0; i < 100; i++) {}  // Shortened for fast sim
 
+    /* Initialize the palette entries the boot stub uses (0 = black,
+     * 15 = white). Without this the loader text is invisible because
+     * the RTL palette is uninitialized at reset. */
+    boot_palette_init();
+
     /* Clear terminal framebuffer (scanout reads it by default via term_fb_active=1) */
     {
         volatile uint32_t *p = (volatile uint32_t *)TERM_FB_BASE;
@@ -541,11 +559,9 @@ int main(void) {
     /* ── PHDP Discovery ─────────────────────────────────────────── */
     int debug_mode = 0;
 
-    /* Skip PHDP for fast boot — uncomment for debug host support:
     if (uart_probe()) {
         debug_mode = phdp_discover();
     }
-    */
 
     if (debug_mode) {
         boot_fb_clear_row(14);

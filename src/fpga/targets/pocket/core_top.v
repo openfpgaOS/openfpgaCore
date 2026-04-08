@@ -563,7 +563,10 @@ sram_controller #(
 
 // ============================================================
 // UART (2 Mbaud, 8N1) — DevKey/Cartridge debug interface
-// CLKS_PER_BIT = 90 MHz / 2000000 = 45
+// CLKS_PER_BIT = 100 MHz / 2000000 = 50
+// (clk_cpu is 100 MHz from mf_pllram_133.v output_clock_frequency0;
+//  any future PLL change must update this divisor or the host will
+//  see a baud-rate mismatch and silently drop every byte.)
 // ============================================================
 wire        uart_tx_serial;
 wire        uart_tx_active;
@@ -573,7 +576,7 @@ wire [7:0]  uart_tx_byte;
 wire        uart_rx_dv;
 wire [7:0]  uart_rx_byte;
 
-uart_tx #(.CLKS_PER_BIT(45)) uart_tx_inst (
+uart_tx #(.CLKS_PER_BIT(50)) uart_tx_inst (
     .i_Clock(clk_cpu),
     .i_Tx_DV(uart_tx_dv),
     .i_Tx_Byte(uart_tx_byte),
@@ -582,7 +585,7 @@ uart_tx #(.CLKS_PER_BIT(45)) uart_tx_inst (
     .o_Tx_Done(uart_tx_done)
 );
 
-uart_rx #(.CLKS_PER_BIT(45)) uart_rx_inst (
+uart_rx #(.CLKS_PER_BIT(50)) uart_rx_inst (
     .i_Clock(clk_cpu),
     .i_Rx_Serial(uart_rx_serial),  // Gated: idle-high when SNAC active
     .o_Rx_DV(uart_rx_dv),
