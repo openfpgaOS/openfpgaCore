@@ -11,6 +11,7 @@
 #include "input.h"
 #include "save.h"
 #include "file.h"
+#include "disk.h"
 #include "analogizer.h"
 #include "terminal.h"
 #include "timer.h"

@@ -12,7 +12,7 @@
 #include "net.h"
 #include "link.h"
 #include "regs.h"
-#include "../../api/of_syscall_numbers.h"
+#include "of_syscall_numbers.h"
 
 #define NET_RX_BUF_SIZE  4096
 

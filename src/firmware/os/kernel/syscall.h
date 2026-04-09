@@ -18,8 +18,8 @@
 #define OFOS_SYSCALL_H
 
 #include <stdint.h>
-#include "../../api/of_syscall_numbers.h"
-#include "../../api/of_syscall.h"
+#include "of_syscall_numbers.h"
+#include "of_syscall.h"
 
 /* ======================================================================
  * Linux-compatible syscall numbers (RISC-V ABI)

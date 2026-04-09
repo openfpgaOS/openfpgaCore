@@ -69,6 +69,24 @@ void os_main(void) {
     of_term_puts("  HAL init.......... ");
     status_ok();
 
+    /* Disk backend banner: SD = production (green), UART = debug
+     * host attached (yellow), none = file I/O will fail (red).
+     * Labels are left-aligned with the OK / FAIL column above and
+     * pointer-compared so renames don't break the colour. */
+    {
+        const of_disk_driver_t *active = of_disk_active();
+        const char *colour = "\033[91m";
+        const char *label  = "none";
+        if (active == &of_disk_bridge) {
+            colour = "\033[92m";
+            label  = "SD";
+        } else if (active == &of_disk_boot) {
+            colour = "\033[93m";
+            label  = "UART";
+        }
+        of_term_printf("  Disk backend...... %s%s\033[0m\n", colour, label);
+    }
+
     /* Initialize syscall subsystem */
     uintptr_t heap_start = ((uintptr_t)__os_bss_end + 15) & ~15;
     syscall_init(heap_start);

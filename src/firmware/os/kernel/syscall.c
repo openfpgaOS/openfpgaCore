@@ -7,7 +7,7 @@
 #include "irq.h"
 #include "../hal/hal.h"
 #include "../os_string.h"
-#include "../../api/of_version.h"
+#include "of_version.h"
 
 /* Internal HAL functions (not exposed in public headers) */
 extern long of_file_size(uint32_t slot_id);

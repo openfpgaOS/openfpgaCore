@@ -13,6 +13,30 @@
  */
 
 #include "../hal/regs.h"
+#include "phdp_proto.h"
+#include "boot_disk.h"
+#include "of_error.h"
+
+/* Boot-side storage for the shared PHDP codec. Both must live in
+ * BRAM (.bss.boot) — the codec references them by name through the
+ * PHDP_BUF / PHDP_SEQ macros, so the compiler emits direct accesses
+ * with no parameter setup overhead. */
+static uint8_t phdp_buf[PHDP_BUF_SIZE] __attribute__((section(".bss.boot")));
+static uint8_t phdp_seq                __attribute__((section(".bss.boot")));
+
+/* Pull in shared codec helpers as static copies tagged with the
+ * .text.boot section attribute so they live in BRAM alongside the
+ * rest of the bootloader. SHARED_ATTR + PHDP_BUF/PHDP_SEQ are
+ * consumed by each .inc.c. */
+#define SHARED_ATTR __attribute__((section(".text.boot")))
+#define PHDP_BUF    phdp_buf
+#define PHDP_SEQ    phdp_seq
+#include "uart_poll.inc.c"
+#include "phdp_codec.inc.c"
+#include "dcache_evict.inc.c"
+#undef PHDP_SEQ
+#undef PHDP_BUF
+#undef SHARED_ATTR
 
 /* Debug variables (read by misaligned trap handler) — must be in BRAM */
 volatile unsigned int __attribute__((section(".bss.boot"))) pd_dbg_stage;
@@ -34,30 +58,8 @@ extern char _os_copy_size[];
 extern void os_main(void);
 extern void switch_to_runtime_stack_and_call(void (*entry)(void), void *stack_top);
 
-/* ======================================================================
- * PHDP protocol constants (must match phdp_proto.h on host side)
- * ====================================================================== */
-#define PHDP_STX                0x02
-#define PHDP_HEADER_SIZE        7
-#define PHDP_CRC_SIZE           2
-#define PHDP_MAX_CHUNK          512     /* Keep small — bootloader runs from 8KB BRAM */
-
-#define PHDP_EVT_BOOT_ALIVE    0x01
-#define PHDP_CMD_CLIENT_READY  0x02
-#define PHDP_REQ_OVERRIDE      0x10
-#define PHDP_RES_STREAM        0x11
-#define PHDP_RES_USE_SD        0x12
-#define PHDP_DATA_CHUNK        0x20
-#define PHDP_REPORT_PROGRESS   0x21
-#define PHDP_CMD_NAK_RETRY     0x22
-#define PHDP_EVT_EXEC_START    0x31
-
-/* Core ID and version for EVT_BOOT_ALIVE */
-#define PHDP_CORE_ID            0x4F464F53  /* "OFOS" */
-#define PHDP_VERSION            0x0100
-#define PHDP_MAX_CHUNK_SIZE     512
-
-/* Timeouts in CPU cycles (100 MHz) */
+/* PHDP wire constants come from shared/phdp_proto.h. Boot-specific
+ * timing constants stay here so the host has nothing to coordinate. */
 #define PHDP_DISCOVERY_CYCLES   (25000000)      /* 250ms — fast fallback to SD */
 #define PHDP_ALIVE_INTERVAL     (5000000)       /* 50ms between broadcasts */
 #define PHDP_OVERRIDE_CYCLES    (20000000)      /* 200ms */
@@ -131,173 +133,25 @@ static void flush_icache(void) {
     __asm__ volatile(".word 0x0000100f");  /* fence.i */
 }
 
-/* Flush D-cache by conflict eviction.
- * Reads through 64KB from the top of SDRAM to force all dirty lines
- * out of the 4-way set-associative cache (256 sets x 4 ways x 64B = 64KB). */
-__attribute__((section(".text.boot")))
-static void flush_dcache(void) {
-    __asm__ volatile("fence" ::: "memory");
-    volatile char *p = (volatile char *)(SDRAM_BASE + SDRAM_SIZE - 65536);
-    for (uint32_t i = 0; i < 65536; i += 64)
-        (void)p[i];
-    __asm__ volatile("fence" ::: "memory");
-}
+/* uart_putc/uart_getc, phdp_crc16/phdp_send/phdp_recv, and
+ * flush_dcache_evict are pulled in from shared/*.inc.c at the top of
+ * this file. The boot-only state they need (sequence counter, packet
+ * buffer, UART probe latch) lives here so it can be tagged .bss.boot
+ * and end up in BRAM. */
 
-/* ======================================================================
- * UART helpers (polling, no interrupts)
- * ====================================================================== */
-
-/* Quick check if UART hardware is present and responsive.
- * Reads UART_STATUS once — if it returns a sane value (bit 0 = 1),
- * the peripheral exists. If the bus hangs, we never get here. */
 static int uart_available __attribute__((section(".bss.boot")));  /* 0 = untested */
 
 __attribute__((section(".text.boot"), unused))
 static int uart_probe(void) {
     if (uart_available) return uart_available;  /* already probed (1=yes, 2=no) */
-    /* The UART status register always has bit 0 = 1 when present */
     uint32_t status = UART_STATUS;
     uart_available = (status & 1) ? 1 : 2;
     return (uart_available == 1);
 }
 
-__attribute__((section(".text.boot")))
-static void uart_putc(uint8_t c) {
-    /* Timeout: ~100us at 100MHz. Never block boot. */
-    for (int i = 0; i < 10000; i++) {
-        if (UART_STATUS & UART_TX_RDY) {
-            UART_TX_DATA = c;
-            return;
-        }
-    }
-}
-
-/* Try to read one byte. Returns 1 if got a byte, 0 if nothing available. */
-__attribute__((section(".text.boot")))
-static int uart_getc(uint8_t *c) {
-    if (UART_STATUS & UART_RX_AVAIL) {
-        *c = (uint8_t)(UART_RX_DATA & 0xFF);
-        return 1;
-    }
-    return 0;
-}
-
-/* ======================================================================
- * PHDP CRC-16/CCITT
- * ====================================================================== */
-
-__attribute__((section(".text.boot")))
-static uint16_t phdp_crc16(const uint8_t *data, uint32_t len) {
-    uint16_t crc = 0xFFFF;
-    for (uint32_t i = 0; i < len; i++) {
-        crc ^= (uint16_t)data[i] << 8;
-        for (int j = 0; j < 8; j++)
-            crc = (crc & 0x8000) ? (crc << 1) ^ 0x1021 : crc << 1;
-    }
-    return crc;
-}
-
-/* ======================================================================
- * PHDP packet TX
- * ====================================================================== */
-
-static uint8_t phdp_seq __attribute__((section(".bss.boot")));
-
-/* Packet buffer — must be in BRAM, not SDRAM (bootloader runs before SDRAM init).
- * 4KB chunk + 9 bytes header/CRC. */
-static uint8_t phdp_buf[PHDP_HEADER_SIZE + PHDP_MAX_CHUNK + PHDP_CRC_SIZE]
-    __attribute__((section(".bss.boot")));
-
-__attribute__((section(".text.boot")))
-static void phdp_send(uint8_t cmd, const void *payload, uint32_t len) {
-    phdp_buf[0] = PHDP_STX;
-    phdp_buf[1] = phdp_seq++;
-    phdp_buf[2] = cmd;
-    phdp_buf[3] = (len >>  0) & 0xFF;
-    phdp_buf[4] = (len >>  8) & 0xFF;
-    phdp_buf[5] = (len >> 16) & 0xFF;
-    phdp_buf[6] = (len >> 24) & 0xFF;
-
-    if (len > 0 && payload) {
-        const uint8_t *src = (const uint8_t *)payload;
-        for (uint32_t i = 0; i < len; i++)
-            phdp_buf[PHDP_HEADER_SIZE + i] = src[i];
-    }
-
-    uint32_t body = PHDP_HEADER_SIZE + len;
-    uint16_t crc = phdp_crc16(phdp_buf, body);
-    phdp_buf[body + 0] = (crc >> 0) & 0xFF;
-    phdp_buf[body + 1] = (crc >> 8) & 0xFF;
-
-    uint32_t total = body + PHDP_CRC_SIZE;
-    for (uint32_t i = 0; i < total; i++)
-        uart_putc(phdp_buf[i]);
-}
-
-/* ======================================================================
- * PHDP packet RX (blocking with timeout)
- * ====================================================================== */
-
-/* Try to receive a complete packet into phdp_buf.
- * Returns the command byte on success, or -1 on timeout.
- * Payload is at phdp_buf + PHDP_HEADER_SIZE, length in *out_len. */
-__attribute__((section(".text.boot")))
-static int phdp_recv(uint32_t timeout_cycles, uint32_t *out_len) {
-    uint32_t start = SYS_CYCLE_LO;
-    uint32_t pos = 0;
-    uint32_t payload_len = 0;
-    uint32_t need = PHDP_HEADER_SIZE;  /* first, collect header */
-    int have_header = 0;
-
-    while ((SYS_CYCLE_LO - start) < timeout_cycles) {
-        uint8_t c;
-        if (!uart_getc(&c))
-            continue;
-
-        /* Sync: wait for STX at position 0 */
-        if (pos == 0 && c != PHDP_STX)
-            continue;
-
-        phdp_buf[pos++] = c;
-
-        if (!have_header && pos == PHDP_HEADER_SIZE) {
-            /* Parse header */
-            payload_len = (uint32_t)phdp_buf[3]
-                        | ((uint32_t)phdp_buf[4] << 8)
-                        | ((uint32_t)phdp_buf[5] << 16)
-                        | ((uint32_t)phdp_buf[6] << 24);
-
-            if (payload_len > PHDP_MAX_CHUNK) {
-                /* Invalid — restart sync */
-                pos = 0;
-                continue;
-            }
-            need = PHDP_HEADER_SIZE + payload_len + PHDP_CRC_SIZE;
-            have_header = 1;
-        }
-
-        if (have_header && pos == need) {
-            /* Validate CRC */
-            uint32_t body = PHDP_HEADER_SIZE + payload_len;
-            uint16_t expected = phdp_crc16(phdp_buf, body);
-            uint16_t got = (uint16_t)phdp_buf[body]
-                         | ((uint16_t)phdp_buf[body + 1] << 8);
-
-            if (expected != got) {
-                /* CRC mismatch — restart sync */
-                pos = 0;
-                have_header = 0;
-                need = PHDP_HEADER_SIZE;
-                continue;
-            }
-
-            if (out_len) *out_len = payload_len;
-            return (int)phdp_buf[2];  /* CMD byte */
-        }
-    }
-
-    return -1;  /* timeout */
-}
+/* phdp_buf / phdp_seq live at the top of this file (above the
+ * shared/*.inc.c includes) so the codec sees them via PHDP_BUF /
+ * PHDP_SEQ. */
 
 /* ======================================================================
  * PHDP discovery — Phase I
@@ -314,8 +168,8 @@ static int phdp_discover(void) {
     alive_payload[3] = (PHDP_CORE_ID >> 24) & 0xFF;
     alive_payload[4] = (PHDP_VERSION >>  0) & 0xFF;
     alive_payload[5] = (PHDP_VERSION >>  8) & 0xFF;
-    alive_payload[6] = (PHDP_MAX_CHUNK_SIZE >> 0) & 0xFF;
-    alive_payload[7] = (PHDP_MAX_CHUNK_SIZE >> 8) & 0xFF;
+    alive_payload[6] = (PHDP_MAX_CHUNK >> 0) & 0xFF;
+    alive_payload[7] = (PHDP_MAX_CHUNK >> 8) & 0xFF;
 
     uint32_t disc_start = SYS_CYCLE_LO;
     uint32_t last_alive = 0;
@@ -352,94 +206,166 @@ static int phdp_request_override(uint8_t slot_id,
     /* Send REQ_OVERRIDE */
     phdp_send(PHDP_REQ_OVERRIDE, &slot_id, 1);
 
-    /* Wait for response */
-    uint32_t len = 0;
-    int cmd = phdp_recv(PHDP_OVERRIDE_CYCLES, &len);
+    /* Loop expecting RES_STREAM, dropping any other packet that may
+     * already be in flight (e.g. a stale DATA_CHUNK left in the FIFO
+     * from a prior size query). Bounded so a flapping link still
+     * times out instead of spinning forever. */
+    for (int attempts = 0; attempts < 16; attempts++) {
+        uint32_t len = 0;
+        int cmd = phdp_recv(PHDP_OVERRIDE_CYCLES, &len);
 
-    if (cmd == PHDP_RES_STREAM && len >= 6) {
-        uint8_t *p = phdp_buf + PHDP_HEADER_SIZE;
-        *total_size = (uint32_t)p[0]
-                    | ((uint32_t)p[1] << 8)
-                    | ((uint32_t)p[2] << 16)
-                    | ((uint32_t)p[3] << 24);
-        *chunk_size = (uint16_t)p[4]
-                    | ((uint16_t)p[5] << 8);
+        if (cmd < 0) return 0;                /* timeout */
+        if (cmd == PHDP_RES_USE_SD) return 0; /* host has nothing queued */
 
-        /* Validate */
-        if (*total_size > 16 * 1024 * 1024) return 0;
-        if (*chunk_size > PHDP_MAX_CHUNK) *chunk_size = PHDP_MAX_CHUNK;
-        return 1;
+        if (cmd == PHDP_RES_STREAM && len >= 6) {
+            uint8_t *p = phdp_buf + PHDP_HEADER_SIZE;
+            *total_size = (uint32_t)p[0]
+                        | ((uint32_t)p[1] << 8)
+                        | ((uint32_t)p[2] << 16)
+                        | ((uint32_t)p[3] << 24);
+            *chunk_size = (uint16_t)p[4]
+                        | ((uint16_t)p[5] << 8);
+
+            if (*total_size > 16 * 1024 * 1024) return 0;
+            if (*chunk_size > PHDP_MAX_CHUNK) *chunk_size = PHDP_MAX_CHUNK;
+            return 1;
+        }
+        /* Other cmd (likely stale DATA_CHUNK) → ignore and re-recv */
     }
-
-    return 0;  /* RES_USE_SD or timeout */
+    return 0;
 }
 
 /* ======================================================================
- * PHDP streaming — Phase III
- * Receives DATA_CHUNK packets and writes to dest.
- * Returns 0 on success, <0 on error.
- * ====================================================================== */
-
+ * PHDP chunk loop — shared between boot streaming and OS-callable read
+ * ======================================================================
+ *
+ * Caller must have already issued REQ_OVERRIDE and parsed the
+ * RES_STREAM total_size. This routine drives the DATA_CHUNK loop and
+ * window-copies the intersection of each chunk with the requested
+ * range [slot_offset, slot_offset+length) into dest. The host
+ * streams the whole slot from offset 0; chunks outside the window
+ * are ACKed but not copied. The loop drains to received==total_size
+ * (even when the window is already satisfied) so the host cleanly
+ * finishes the stream and returns to READY. Returns 0 on success,
+ * OF_ERR_TIMEOUT on a NAK loop, OF_ERR_IO if the stream ends short. */
 __attribute__((section(".text.boot")))
-static int phdp_stream_slot(volatile uint8_t *dest, uint32_t total_size,
-                             uint16_t chunk_size) {
-    (void)chunk_size;  /* used by host for pacing, Pocket accepts any size <= MAX_CHUNK */
+static int phdp_chunk_loop(uint32_t slot_offset, uint32_t length,
+                           uint32_t total_size, void *dest) {
+    uint8_t *d = (uint8_t *)dest;
     uint32_t received = 0;
+    uint32_t copied = 0;
     int retries = 0;
 
     while (received < total_size) {
-        /* Wait for DATA_CHUNK */
-        uint32_t len = 0;
-        int cmd = phdp_recv(PHDP_CHUNK_CYCLES, &len);
+        uint32_t clen = 0;
+        int c = phdp_recv(PHDP_CHUNK_CYCLES, &clen);
 
-        if (cmd == PHDP_DATA_CHUNK && len > 0) {
-            /* Write payload to destination memory */
+        if (c == PHDP_DATA_CHUNK && clen > 0) {
             uint8_t *src = phdp_buf + PHDP_HEADER_SIZE;
-            for (uint32_t i = 0; i < len; i++)
-                dest[received + i] = src[i];
 
-            received += len;
+            uint32_t chunk_end = received + clen;
+            uint32_t want_end  = slot_offset + length;
+            if (slot_offset + copied < chunk_end && want_end > received) {
+                uint32_t s = (slot_offset + copied > received) ? (slot_offset + copied) : received;
+                uint32_t e = (want_end < chunk_end) ? want_end : chunk_end;
+                uint32_t off_in_chunk = s - received;
+                uint32_t off_in_dest  = s - slot_offset;
+                for (uint32_t i = 0; i < e - s; i++)
+                    d[off_in_dest + i] = src[off_in_chunk + i];
+                copied += (e - s);
+            }
+
+            received += clen;
             retries = 0;
 
-            /* Send REPORT_PROGRESS (flow control ACK) */
             uint8_t prog[4];
             prog[0] = (received >>  0) & 0xFF;
             prog[1] = (received >>  8) & 0xFF;
             prog[2] = (received >> 16) & 0xFF;
             prog[3] = (received >> 24) & 0xFF;
             phdp_send(PHDP_REPORT_PROGRESS, prog, 4);
-
-            /* Update OSD progress */
-            boot_fb_clear_row(14);
-            boot_fb_puts(0, 14, "UART: ");
-            /* Simple progress: show KB received */
-            uint32_t kb = received / 1024;
-            char numbuf[12];
-            int npos = 0;
-            if (kb == 0) {
-                numbuf[npos++] = '0';
-            } else {
-                char tmp[10];
-                int tpos = 0;
-                while (kb > 0) { tmp[tpos++] = '0' + (kb % 10); kb /= 10; }
-                while (tpos > 0) numbuf[npos++] = tmp[--tpos];
-            }
-            numbuf[npos] = '\0';
-            boot_fb_puts(6, 14, numbuf);
-            boot_fb_puts(6 + npos, 14, " KB");
-
-        } else if (cmd < 0) {
-            /* Timeout — send NAK retry */
+        } else if (c < 0) {
             retries++;
-            if (retries >= PHDP_MAX_RETRIES) return -1;
-
+            if (retries >= PHDP_MAX_RETRIES) return OF_ERR_TIMEOUT;
             uint8_t nak_seq = phdp_seq - 1;
             phdp_send(PHDP_CMD_NAK_RETRY, &nak_seq, 1);
         }
         /* Ignore other commands during streaming */
     }
 
-    return 0;
+    return (copied == length) ? 0 : OF_ERR_IO;
+}
+
+/* ======================================================================
+ * Boot-ROM disk service — exported for the OS
+ * ======================================================================
+ *
+ * BRAM is preserved after the jump to os_main, so these symbols
+ * stay reachable. The kernel calls boot_disk_read / boot_disk_size
+ * via the of_disk_boot backend wrapper (targets/pocket/disk_boot.c)
+ * to stream data slot reads without ever linking the wire-protocol
+ * code into os.bin. boot_disk_available is set when the boot ROM
+ * has successfully streamed os.bin via the UART channel; the OS
+ * dispatcher checks it to decide whether the channel is usable.
+ *
+ * This is the only piece of BRAM code intended to outlive boot. */
+
+__attribute__((section(".bss.boot")))
+volatile int boot_disk_available;
+
+/* Save/restore the M-mode external interrupt enable bit so the
+ * kernel's irq.c can't drain UART_RX_DATA out from under us. */
+__attribute__((section(".text.boot")))
+static uint32_t boot_mie_disable(void) {
+    uint32_t prev;
+    __asm__ volatile("csrrci %0, mstatus, 0x8" : "=r"(prev));
+    return prev & 0x8;
+}
+__attribute__((section(".text.boot")))
+static void boot_mie_restore(uint32_t prev) {
+    if (prev) __asm__ volatile("csrrsi zero, mstatus, 0x8");
+}
+
+/* Read [slot_offset, slot_offset+length) from data slot `slot_id`
+ * into `dest`. Issues REQ_OVERRIDE, then runs the shared chunk loop.
+ * Owns MIE masking so the OS irq handler can't drain UART_RX_DATA
+ * from underneath the polled receiver. */
+__attribute__((section(".text.boot")))
+int boot_disk_read(uint32_t slot_id, uint32_t slot_offset,
+                   void *dest, uint32_t length) {
+    uint32_t mie = boot_mie_disable();
+
+    uint32_t total = 0;
+    uint16_t chunk = 0;
+    if (!phdp_request_override((uint8_t)slot_id, &total, &chunk)) {
+        boot_mie_restore(mie);
+        return OF_ERR_IO;
+    }
+    if (slot_offset + length > total) {
+        boot_mie_restore(mie);
+        return OF_ERR_INVALID_PARAM;
+    }
+
+    int rc = phdp_chunk_loop(slot_offset, length, total, dest);
+    boot_mie_restore(mie);
+    return rc;
+}
+
+/* Query slot size without consuming the stream. Returns the size
+ * from RES_STREAM and leaves the host mid-stream; the next
+ * boot_disk_read for the same slot restarts via a fresh
+ * REQ_OVERRIDE, and phdp_request_override skips any stale chunks
+ * left in the FIFO. */
+__attribute__((section(".text.boot")))
+long boot_disk_size(uint32_t slot_id) {
+    uint32_t mie = boot_mie_disable();
+
+    uint32_t total = 0;
+    uint16_t chunk = 0;
+    int ok = phdp_request_override((uint8_t)slot_id, &total, &chunk);
+
+    boot_mie_restore(mie);
+    return ok ? (long)total : -1;
 }
 
 /* ======================================================================
@@ -576,13 +502,19 @@ int main(void) {
             boot_fb_puts(0, 14, "Loading via UART...");
 
             volatile uint8_t *dest = (volatile uint8_t *)(uintptr_t)_os_load_addr;
-            int rc = phdp_stream_slot(dest, total_size, chunk_size);
+            (void)chunk_size;
+            int rc = phdp_chunk_loop(0, total_size, total_size, (void *)dest);
 
             if (rc < 0) {
                 boot_fb_clear_row(14);
                 boot_fb_puts(0, 14, "UART failed, trying SD...");
                 goto load_from_sd;
             }
+
+            /* phdpd is alive — let the OS know it can keep using the
+             * boot ROM's disk channel for app-slot loads after this
+             * point. of_disk_init() reads boot_disk_available. */
+            boot_disk_available = 1;
 
             /* Send EVT_EXEC_START */
             uint8_t exec_payload[4];
@@ -634,7 +566,7 @@ load_from_sd:
     boot_fb_clear_row(14);
 
 start_os:
-    flush_dcache();
+    flush_dcache_evict();
     flush_icache();
     clear_os_bss();
 

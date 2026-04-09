@@ -23,6 +23,8 @@ HAL_DIR = hal
 TARGET_DIR = targets/$(TARGET)
 KERNEL_DIR = kernel
 BOOT_DIR = targets/$(TARGET)/boot
+API_DIR = ../api
+SHARED_DIR = shared
 
 # Compiler flags
 ARCH = rv32imafc
@@ -36,7 +38,7 @@ CFLAGS += -fsingle-precision-constant
 CFLAGS += -falign-functions=64 -falign-loops=64
 # Don't auto-rewrite plain loops as memset/memcpy calls.
 CFLAGS += -fno-tree-loop-distribute-patterns
-CFLAGS += -I. -I$(HAL_DIR) -I$(TARGET_DIR) -I$(KERNEL_DIR) -I$(BOOT_DIR)
+CFLAGS += -I. -I$(HAL_DIR) -I$(TARGET_DIR) -I$(KERNEL_DIR) -I$(BOOT_DIR) -I$(API_DIR) -I$(SHARED_DIR)
 CFLAGS += -MMD -MP
 
 # OS kernel flags (optimized for speed)
@@ -77,7 +79,8 @@ HAL_SRCS = $(HAL_DIR)/hal.c \
            $(HAL_DIR)/net.c \
            $(HAL_DIR)/link.c \
            $(HAL_DIR)/codec.c \
-           $(HAL_DIR)/lzw.c
+           $(HAL_DIR)/lzw.c \
+           $(HAL_DIR)/disk.c
 
 HAL_SRCS_S = $(HAL_DIR)/fast_mem.S
 
@@ -91,6 +94,7 @@ TARGET_SRCS = $(TARGET_DIR)/video.c \
               $(TARGET_DIR)/snac.c \
               $(TARGET_DIR)/terminal.c \
               $(TARGET_DIR)/timer.c \
+              $(TARGET_DIR)/disk_boot.c \
 
 # Source files - Kernel
 KERNEL_SRCS = $(KERNEL_DIR)/main.c \

@@ -14,7 +14,7 @@
 
 #include "services_table.h"
 #include "irq.h"
-#include "../../api/of_services.h"
+#include "of_services.h"
 #include "../hal/hal.h"
 #include "../hal/regs.h"
 

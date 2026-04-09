@@ -14,7 +14,7 @@
 #define OFOS_INPUT_H
 
 #include <stdint.h>
-#include "../../api/of_input_types.h"
+#include "of_input_types.h"
 
 #define INPUT_MAX_PLAYERS   OF_MAX_PLAYERS
 

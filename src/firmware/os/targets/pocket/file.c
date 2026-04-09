@@ -4,6 +4,7 @@
  */
 
 #include "file.h"
+#include "disk.h"
 #include "audio.h"
 #include "mixer.h"
 #include "cache.h"
@@ -22,6 +23,11 @@
  * stack and continues from there instead of resetting to _stack_top. */
 static void (*idle_hook)(void);
 
+/* Forward decl: bridge backend implementation lives below, but
+ * of_file_init's warmup DMA needs to call it directly. */
+static int bridge_read_impl(uint32_t slot_id, uint32_t slot_offset,
+                            void *dest, uint32_t length);
+
 void of_file_set_idle_hook(void (*hook)(void)) {
     idle_hook = hook;
 }
@@ -29,13 +35,15 @@ void of_file_set_idle_hook(void (*hook)(void)) {
 void of_file_init(void) {
     idle_hook = (void *)0;
 
-    /* Warmup: the first bridge DMA after boot resets the bridge command
-     * state machine (clears stale ACK/DONE from bootloader's DMA).
-     * Without this, musl's fread hangs because the bridge doesn't
-     * properly ACK the first command from the OS.
-     * Read 4 bytes from slot 1 (os.bin) into CRAM1 scratch — harmless. */
-    of_file_read(1, 0, (void *)CRAM1_SCRATCH, 4);
-    of_cache_flush_dcache();
+    /* Bridge warmup: first DMA after boot resets the bridge command
+     * state machine. Read 4 bytes from slot 1 into CRAM1 scratch.
+     * Skipped when the bridge isn't the active backend, since the
+     * boot ROM channel may have been picked because the bridge is
+     * wedged. The dispatcher must run before of_file_init — see hal.c. */
+    if (of_disk_active() == &of_disk_bridge) {
+        bridge_read_impl(1, 0, (void *)CRAM1_SCRATCH, 4);
+        of_cache_flush_dcache();
+    }
 }
 
 /* Check for shutdown handshake: if the bridge wants to shut down,
@@ -138,8 +146,11 @@ static int file_wait_complete(void) {
 
 /* Check if address is in SDRAM (DMA-capable) range */
 
-int of_file_read(uint32_t slot_id, uint32_t slot_offset,
-                  void *dest, uint32_t length) {
+/* Bridge backend implementation for the disk HAL. Exported through
+ * of_disk_bridge so the dispatcher in hal/disk.c can route reads
+ * here when the boot ROM disk channel is unavailable. */
+static int bridge_read_impl(uint32_t slot_id, uint32_t slot_offset,
+                             void *dest, uint32_t length) {
     uint32_t dest_addr = (uintptr_t)dest;
 
     /* CRAM1 destinations: bridge writes directly, no copy needed. */
@@ -181,6 +192,40 @@ int of_file_read(uint32_t slot_id, uint32_t slot_offset,
     memcpy(dest, (const void *)CRAM1_SCRATCH, length);
 
     return rc;
+}
+
+/* of_disk_bridge probe — the bridge is "available" if the data slot
+ * command FSM is in READY state. Cheap and side-effect-free. After a
+ * successful probe the dispatcher will route reads through
+ * bridge_read_impl above.
+ *
+ * Note this still returns 1 even if the SD card is wedged — there is
+ * no SD-card-level liveness check from the CPU side. The boot ROM
+ * channel is probed first precisely so that dev workflows can bypass a hung
+ * SD/bridge entirely. */
+static int bridge_probe(void) {
+    return (DS_STATUS & DS_STATUS_READY) ? 1 : 0;
+}
+
+/* Bridge backend size: delegates to of_file_size, which queries
+ * the APF datatable through the bridge. Returns -1 on empty slot. */
+long of_file_size(uint32_t slot_id);
+static long bridge_size_impl(uint32_t slot_id) {
+    return of_file_size(slot_id);
+}
+
+const of_disk_driver_t of_disk_bridge = {
+    .name  = "SD",
+    .probe = bridge_probe,
+    .read  = bridge_read_impl,
+    .size  = bridge_size_impl,
+};
+
+/* Public of_file_read — thin wrapper around the disk dispatcher.
+ * Routes to whichever backend was selected at of_disk_init time. */
+int of_file_read(uint32_t slot_id, uint32_t slot_offset,
+                  void *dest, uint32_t length) {
+    return of_disk_read(slot_id, slot_offset, dest, length);
 }
 
 /* Invalidate D-cache for CRAM cached aliases after any bridge

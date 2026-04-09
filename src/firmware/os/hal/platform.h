@@ -10,7 +10,7 @@
 #define OFOS_PLATFORM_H
 
 #include <stdint.h>
-#include "../../api/of_caps.h"
+#include "of_caps.h"
 #include "target_platform.h"
 
 typedef struct {

@@ -9,7 +9,7 @@
 #include "../hal/hal.h"
 #include "../hal/platform.h"
 #include "../os_string.h"
-#include "../../api/of_app_abi.h"
+#include "of_app_abi.h"
 
 /* ======================================================================
  * ELF32 Header Definitions (minimal, no external headers needed)
@@ -174,16 +174,16 @@ static void process_rela(uintptr_t load_base, Elf32_Rela *rela, uint32_t count) 
     }
 }
 
-extern long of_file_size(uint32_t slot_id);
-
 int elf_load(uint32_t slot_id, uintptr_t load_addr,
              elf_load_result_t *result) {
     Elf32_Ehdr ehdr;
     int rc;
 
-    /* Check if slot has data before attempting DMA.
-     * An empty slot causes the bridge to never ACK, hanging forever. */
-    if (of_file_size(slot_id) <= 0)
+    /* Bail out cleanly on missing slots. The bridge backend's read
+     * hangs forever on an empty slot (no ACK), so we always check
+     * size first; the dispatcher routes the query to whichever
+     * backend is active. */
+    if (of_disk_size(slot_id) <= 0)
         return -1;
 
     /* Read ELF header */

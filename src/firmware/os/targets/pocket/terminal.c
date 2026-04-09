@@ -376,7 +376,7 @@ static void esc_dispatch(char cmd) {
     }
 }
 
-/* UART console mirror -- enabled after PHDP handshake */
+/* UART console mirror -- enabled after the boot-time debug-host handshake */
 volatile int uart_mirror_on __attribute__((section(".bss.boot")));
 
 void of_term_enable_uart_mirror(void) { uart_mirror_on = 1; }

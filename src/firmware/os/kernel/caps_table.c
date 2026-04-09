@@ -16,9 +16,9 @@
 
 #include "caps_table.h"
 #include "services_table.h"
-#include "../../api/of_caps.h"
-#include "../../api/of_services.h"
-#include "../../api/of_version.h"
+#include "of_caps.h"
+#include "of_services.h"
+#include "of_version.h"
 #include "../hal/regs.h"
 
 /* Single source of truth for the app-visible cap struct. Lives in BSS

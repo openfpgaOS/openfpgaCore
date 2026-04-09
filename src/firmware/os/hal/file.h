@@ -7,7 +7,7 @@
 #define OFOS_FILE_H
 
 #include <stdint.h>
-#include "../../api/of_error.h"
+#include "of_error.h"
 
 /* Initialize file subsystem */
 void of_file_init(void);

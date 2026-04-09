@@ -69,7 +69,7 @@ void of_term_reset(void);
 /* Set terminal display mode: 0=terminal, 1=framebuffer, 2=overlay */
 void of_term_set_display_mode(int mode);
 
-/* Enable UART console mirror (call after PHDP handshake completes) */
+/* Enable UART console mirror (call after the debug-host handshake completes) */
 void of_term_enable_uart_mirror(void);
 
 #endif /* OFOS_TERMINAL_H */

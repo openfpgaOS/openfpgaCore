@@ -12,6 +12,10 @@ void of_init(void) {
     of_video_init();
     of_term_init();
     of_input_init();
+    /* of_disk_init must run before of_file_init: the latter's
+     * bridge warmup DMA only fires when the bridge is the active
+     * backend, and that's decided here. */
+    of_disk_init();
     of_file_init();
 
     if (features & (HW_FEAT_MIXER | HW_FEAT_OPL3))
