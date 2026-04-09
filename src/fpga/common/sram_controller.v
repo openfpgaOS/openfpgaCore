@@ -141,7 +141,12 @@ module sram_controller #(
 
                 ST_WR_HI_PULSE: begin
                     sram_we_n <= 1'b0;
-                    wait_cnt <= WAIT_CYCLES[3:0] - 1'b1;
+                    // Page-mode HI write: same page as the LO write that
+                    // just completed, so use the shorter PAGE_CYCLES hold
+                    // time instead of a full WAIT_CYCLES (mirrors the
+                    // page-mode optimization the read path already uses).
+                    // Saves 3 cycles per 32-bit write at 100 MHz.
+                    wait_cnt <= PAGE_CYCLES[3:0] - 1'b1;
                     state <= ST_WR_HI_HOLD;
                 end
 
