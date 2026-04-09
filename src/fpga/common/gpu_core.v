@@ -196,14 +196,29 @@ end
 //   [10]    tex_arready    — arbiter has granted M0 this cycle
 //   [11]    tex_rvalid     — tex cache receiving response
 //   [12]    fp_pipe_stall  — pipelined frag processor stalled
+//   [15:13] tex_state      — gpu_tex_cache FSM state (S_PIPE..S_FILL_OUT)
+//   [16]    tex_pipe_valid — tex cache pipe stage 2 holds a valid req
+//   [20:17] fbss           — FB sub-FSM state (FBSS_IDLE..FBSS_ZWRWAIT)
+//   [21]    p1_valid       — pipelined frag processor stage 1 valid
+//   [22]    p3_valid       — pipelined frag processor stage 3 valid
+//   [23]    m_wr_wvalid    — W beat in flight on M1
+//   [24]    m_wr_bvalid    — B response received this cycle
 always @(*) begin
     case (reg_addr)
         4'd1:    reg_rdata = {16'b0, ring_wrptr};
         4'd4:    reg_rdata = {16'b0, ring_rdptr};
-        4'd5:    reg_rdata = {19'b0,
+        4'd5:    reg_rdata = {7'b0,
+                              m_wr_bvalid,
+                              m_wr_wvalid,
 `ifdef GPU_FEAT_FRAG_PIPELINE
+                              p3_valid,
+                              p1_valid,
+                              fbss,
+                              tex_dbg_pipe_valid,
+                              tex_dbg_state,
                               fp_pipe_stall,
 `else
+                              1'b0, 1'b0, 4'b0, 1'b0, 3'b0,
                               1'b0,
 `endif
                               tex_axi_rvalid,
@@ -312,6 +327,9 @@ wire        tex_axi_rvalid;
 wire [31:0] tex_axi_rdata;
 wire        tex_axi_rlast;
 
+wire [2:0] tex_dbg_state;
+wire       tex_dbg_pipe_valid;
+
 gpu_tex_cache tex_cache (
     .clk(clk),
     .reset_n(reset_n),
@@ -328,7 +346,9 @@ gpu_tex_cache tex_cache (
     .axi_arlen(tex_axi_arlen),
     .axi_rvalid(tex_axi_rvalid),
     .axi_rdata(tex_axi_rdata),
-    .axi_rlast(tex_axi_rlast)
+    .axi_rlast(tex_axi_rlast),
+    .dbg_state(tex_dbg_state),
+    .dbg_pipe_valid(tex_dbg_pipe_valid)
 );
 
 // ================================================================

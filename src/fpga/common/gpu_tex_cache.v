@@ -43,8 +43,15 @@ module gpu_tex_cache (
     output reg  [7:0]  axi_arlen,
     input wire         axi_rvalid,
     input wire  [31:0] axi_rdata,
-    input wire         axi_rlast
+    input wire         axi_rlast,
+
+    // Debug — exposed in GPU_STATUS for hang diagnosis
+    output wire [2:0]  dbg_state,
+    output wire        dbg_pipe_valid
 );
+
+assign dbg_state      = state;
+assign dbg_pipe_valid = pipe_valid;
 
 //   addr[3:0]   = byte offset within 16-byte line
 //   addr[13:4]  = set index (10 bits, 1024 sets)
@@ -95,13 +102,23 @@ wire pipe_miss = (state == S_PIPE) && pipe_valid && !(rd_valid && (rd_tag == pip
 // is busy filling, or flush is asserted. The condition is purely
 // combinational — the consumer must check req_ready in the same cycle it
 // asserts req_valid.
-assign req_ready = (state == S_PIPE) && !pipe_miss && !flush;
+//
+// Also ready in S_FILL_OUT: while we're holding a fill response, a new
+// request from the consumer is the implicit ack that the response was
+// captured, and we can immediately roll the new request into pipe_addr
+// (it'll resolve as a hit on the freshly-filled line, or trigger a new
+// fill, on the next S_PIPE cycle).
+assign req_ready = ((state == S_PIPE) && !pipe_miss && !flush)
+                || ((state == S_FILL_OUT) && !flush);
 
 // ---- Combinational response (hot path) ----
 // Hit responses are emitted combinationally: 1-cycle req→resp latency.
-// Miss/fill responses are emitted via fill_resp_valid (1-cycle registered
-// pulse) — the resp_data assign below picks the fill_target_word for that
-// cycle because pipe_hit is false (state != S_PIPE during S_FILL_OUT).
+// Miss/fill responses are emitted via fill_resp_valid which is now HELD
+// (not pulsed) until the consumer captures it (signalled by it issuing
+// a new req_valid). This is required because the consumer's pipeline can
+// be stalled by an unrelated downstream condition (e.g. FB write flush
+// in fbss != IDLE) on the exact cycle a fill completes — pulsing the
+// response for one cycle would silently drop it and deadlock the pipe.
 reg fill_resp_valid;
 
 assign resp_valid = pipe_hit || fill_resp_valid;
@@ -168,9 +185,13 @@ always @(posedge clk) begin
         lat_addr    <= 0;
         lat_wide    <= 0;
     end else begin
-        // Defaults
-        fill_resp_valid <= 0;
-        if (flush) valid <= {SETS{1'b0}};
+        // Defaults — fill_resp_valid is HELD across cycles in S_FILL_OUT,
+        // so the only place it gets cleared is when we leave that state
+        // (either by accepting a new req or by flush).
+        if (flush) begin
+            valid <= {SETS{1'b0}};
+            fill_resp_valid <= 0;
+        end
 
         case (state)
         S_PIPE: begin
@@ -215,16 +236,30 @@ always @(posedge clk) begin
                 if (axi_rlast) begin
                     tag_mem[lat_set] <= lat_tag;
                     valid[lat_set]   <= 1'b1;
-                    state <= S_FILL_OUT;
+                    fill_resp_valid  <= 1;
+                    state            <= S_FILL_OUT;
                 end
             end
         end
 
         S_FILL_OUT: begin
-            // 1-cycle pulse — combinational resp_data assign picks fill_*_word
-            // since pipe_hit is false (state != S_PIPE this cycle).
-            fill_resp_valid <= 1;
-            state           <= S_PIPE;
+            // Hold fill_resp_valid + fill_target_word until the consumer
+            // issues a new request (the implicit ack). The combinational
+            // resp_data path picks fill_*_word here because pipe_hit is
+            // false (state != S_PIPE while we're in S_FILL_OUT).
+            //
+            // While we wait, the RAM read of req_addr's set is happening
+            // continuously in the unconditional always block at the top
+            // of the file — by the time we transition to S_PIPE on the
+            // cycle the consumer accepts, rd_tag/rd_data are already the
+            // values for the new req_addr.
+            if (req_valid && req_ready) begin
+                pipe_valid      <= 1;
+                pipe_addr       <= req_addr;
+                pipe_wide       <= req_wide;
+                fill_resp_valid <= 0;
+                state           <= S_PIPE;
+            end
         end
 
         default: state <= S_PIPE;
