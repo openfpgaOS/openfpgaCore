@@ -429,18 +429,122 @@ assign link_sck_i = port_tran_sck;
 assign link_sd_i = port_tran_sd;
 
 // ============================================================
-// No BCR — both CRAM chips run in async mode (no sync burst).
-// bcr_init_done gates CPU reset and bridge drain — set after PLL lock.
+// CRAM0 BCR sanity reset
 // ============================================================
-reg bcr_init_done;
-initial bcr_init_done = 0;
-always @(posedge clk_ram_controller)
-    if (pll_ram_locked) bcr_init_done <= 1;
+// Both CRAM0 dies (CE0 and CE1) get the AS1C8M16PL POR-default
+// BCR (0x9D1F = async page mode, fixed-latency code 3, WAIT
+// active high, drive strength 1/2, no-wrap continuous burst)
+// written via CRE on every boot.
+//
+// Why this exists: BCR state lives on the chip, NOT in the FPGA.
+// FPGA reconfig (e.g., quartus_pgm reload) does NOT reset the
+// chip's BCR. If a previous bitstream ever wrote BCR to a
+// different mode (e.g., sync burst at 0x641F) and then a
+// subsequent bitstream that expects async mode is loaded, the
+// async-mode controller can't talk to a sync-mode chip and the
+// CPU's first instruction fetch from CRAM0 wedges silently. The
+// only way out without this defensive write is a true Pocket
+// power-cycle (Vcc removed). 2026-04-08 spent ~6 hours debugging
+// exactly this failure mode after an earlier sync-burst experiment
+// left the chip in 0x641F mode.
+//
+// The FSM runs once after PLL lock and gates bcr_init_done (which
+// in turn gates the CPU reset deassertion at line 1222) until both
+// dies have been written. ~20 cycles total at 100 MHz = 200 ns of
+// boot delay. Negligible.
+//
+// CE# safety: the FSM never asserts a second config_en pulse until
+// it has observed cpu_psram_raw_busy fall back to 0, which means
+// the driver has reached STATE_CONFIG_HOLD_END (lines 446-447 of
+// psram_cram0_drv.sv) and BOTH CE0# and CE1# are deasserted again.
+// The driver itself never asserts both CE# in the same state — see
+// STATE_CONFIG_CRE_SETUP, lines 421-424. Therefore the die 0 → die 1
+// handoff cannot create bus contention.
+// ============================================================
+wire        cpu_psram_raw_busy;
+reg [2:0]   bcr_init_state;
+reg         bcr_init_config_en;
+reg         bcr_init_bank_sel;
+reg         bcr_init_done;
+
+localparam [2:0] BCR_ST_WAIT_PLL    = 3'd0;
+localparam [2:0] BCR_ST_PULSE_DIE0  = 3'd1;
+localparam [2:0] BCR_ST_BUSY_DIE0   = 3'd2;
+localparam [2:0] BCR_ST_IDLE_DIE0   = 3'd3;
+localparam [2:0] BCR_ST_PULSE_DIE1  = 3'd4;
+localparam [2:0] BCR_ST_BUSY_DIE1   = 3'd5;
+localparam [2:0] BCR_ST_IDLE_DIE1   = 3'd6;
+localparam [2:0] BCR_ST_DONE        = 3'd7;
+
+// AS1C8M16PL POR-default BCR value:
+//   bit 15    = 1   async page mode (NOT sync burst)
+//   bit 14    = 0   fixed initial latency
+//   bits 13-11= 011 latency code 3 (4 clocks)
+//   bit 10    = 1   WAIT active high (matches psram_cram0_drv expectations)
+//   bit 9     = 1   reserved-as-1
+//   bit 8     = 0   WAIT asserted during delay
+//   bit 7     = 1   reserved-as-1
+//   bit 6     = 0   reserved
+//   bits 5-4  = 01  drive strength 1/2
+//   bit 3     = 1   no-wrap burst (don't care in async)
+//   bits 2-0  = 111 continuous burst (don't care in async)
+localparam [15:0] BCR_VALUE = 16'h9D1F;
+
+initial begin
+    bcr_init_state     = BCR_ST_WAIT_PLL;
+    bcr_init_config_en = 1'b0;
+    bcr_init_bank_sel  = 1'b0;
+    bcr_init_done      = 1'b0;
+end
+
+always @(posedge clk_ram_controller) begin
+    bcr_init_config_en <= 1'b0;  // single-cycle pulse default
+    case (bcr_init_state)
+        BCR_ST_WAIT_PLL:
+            if (pll_ram_locked)
+                bcr_init_state <= BCR_ST_PULSE_DIE0;
+
+        BCR_ST_PULSE_DIE0: begin
+            bcr_init_bank_sel  <= 1'b0;
+            bcr_init_config_en <= 1'b1;
+            bcr_init_state     <= BCR_ST_BUSY_DIE0;
+        end
+        BCR_ST_BUSY_DIE0:
+            // Wait for the wrapper's raw_busy to rise — confirms the
+            // driver picked up config_en and is sequencing CRE/WE#.
+            if (cpu_psram_raw_busy)
+                bcr_init_state <= BCR_ST_IDLE_DIE0;
+        BCR_ST_IDLE_DIE0:
+            // Wait for raw_busy to fall — driver finished the chip-side
+            // CRE/WE# sequence. Now safe to issue the next config.
+            if (!cpu_psram_raw_busy)
+                bcr_init_state <= BCR_ST_PULSE_DIE1;
+
+        BCR_ST_PULSE_DIE1: begin
+            bcr_init_bank_sel  <= 1'b1;
+            bcr_init_config_en <= 1'b1;
+            bcr_init_state     <= BCR_ST_BUSY_DIE1;
+        end
+        BCR_ST_BUSY_DIE1:
+            if (cpu_psram_raw_busy)
+                bcr_init_state <= BCR_ST_IDLE_DIE1;
+        BCR_ST_IDLE_DIE1:
+            if (!cpu_psram_raw_busy) begin
+                bcr_init_done  <= 1'b1;
+                bcr_init_state <= BCR_ST_DONE;
+            end
+
+        BCR_ST_DONE:
+            ; // sticky
+    endcase
+end
 
 // ============================================================
 // PSRAM Controller for CRAM0 (16MB, app cached data)
 // ============================================================
-// CRAM0: PocketDoom's proven controller — async two-phase, no BCR
+// CRAM0: PocketDoom's proven controller — async two-phase, with
+// the BCR sanity reset above ensuring the chip is in async mode
+// regardless of what mode the previous bitstream left it in.
 psram_cram0 #(
     .CLOCK_SPEED(100.0)
 ) psram0 (
@@ -465,7 +569,12 @@ psram_cram0 #(
     .cram_oe_n(cram0_oe_n),
     .cram_we_n(cram0_we_n),
     .cram_ub_n(cram0_ub_n),
-    .cram_lb_n(cram0_lb_n)
+    .cram_lb_n(cram0_lb_n),
+    // BCR config write (driven by the BCR_ST_* FSM above)
+    .config_en(bcr_init_config_en),
+    .config_data(BCR_VALUE),
+    .config_bank_sel(bcr_init_bank_sel),
+    .raw_busy(cpu_psram_raw_busy)
 );
 
 // ============================================================

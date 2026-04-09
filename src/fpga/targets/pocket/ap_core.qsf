@@ -844,6 +844,7 @@ set_global_assignment -name VERILOG_FILE ../../common/opl3_wrapper.v
 set_global_assignment -name VERILOG_FILE ../../common/psram_cram0.v
 set_global_assignment -name VERILOG_FILE ../../common/psram_cram1.v
 set_global_assignment -name SYSTEMVERILOG_FILE ../../common/psram.sv
+set_global_assignment -name SYSTEMVERILOG_FILE ../../common/psram_cram0_drv.sv
 set_global_assignment -name VERILOG_FILE ../../common/sram_controller.v
 set_global_assignment -name VERILOG_FILE ../../common/uart_rx.v
 set_global_assignment -name VERILOG_FILE ../../common/uart_tx.v
@@ -852,4 +853,4 @@ set_global_assignment -name VERILOG_FILE ../../vendor/vexriscv/VexiiRiscv_Full.v
 set_global_assignment -name VERILOG_FILE ../../vendor/opl3/afifo.v
 set_global_assignment -name VERILOG_FILE mf_pllram_133.v
 set_global_assignment -name SDC_FILE core_constraints.sdc
-set_global_assignment -name SEED 88
+set_global_assignment -name SEED 30

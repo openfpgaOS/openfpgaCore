@@ -56,7 +56,8 @@ PSRAM_RTL_SRCS = \
 	$(COMMON_DIR)/axi_psram_slave.v \
 	$(COMMON_DIR)/sram_controller.v \
 	psram_controller_test.v \
-	psram_test.sv
+	psram_test.sv \
+	psram_cram0_drv_test.sv
 
 PSRAM_RTL_CPP = tb_psram_full_main.cpp
 PSRAM_RTL_TOP = tb_psram_full
@@ -70,12 +71,48 @@ psram_test.sv: $(COMMON_DIR)/psram.sv
 	  -e 's/cram_dq_r <= cram_dq;/cram_dq_r <= cram_dq_in;/' \
 	  $< > $@
 
+# Same transform on the CRAM0-only fork (psram_cram0_drv.sv) — needed
+# because psram_controller_test.v (a CRAM0 wrapper) now instantiates
+# `psram_cram0_drv` instead of `psram` after the driver-fork refactor.
+psram_cram0_drv_test.sv: $(COMMON_DIR)/psram_cram0_drv.sv
+	sed \
+	  -e 's/inout wire \[15:0\] cram_dq,/input  wire [15:0] cram_dq_in,\n    output wire [15:0] cram_dq_out,\n    output wire        cram_dq_oe,/' \
+	  -e "s/assign cram_dq = data_out_en ? cram_data : 16'hZZ;/assign cram_dq_out = cram_data;\n  assign cram_dq_oe = data_out_en;/" \
+	  -e 's/cram_dq_r <= cram_dq;/cram_dq_r <= cram_dq_in;/' \
+	  $< > $@
+
 psram_controller_test.v: $(COMMON_DIR)/psram_controller.v
 	sed \
 	  -e 's/^module psram_controller/module psram_controller_test/' \
 	  -e 's/inout  wire \[15:0\]  cram_dq,/input  wire [15:0]  cram_dq_in,\n    output wire [15:0]  cram_dq_out,\n    output wire         cram_dq_oe,/' \
 	  -e 's/\.cram_dq(cram_dq),/.cram_dq_in(cram_dq_in),\n    .cram_dq_out(cram_dq_out),\n    .cram_dq_oe(cram_dq_oe),/' \
 	  $< > $@
+
+# CRAM0 wrapper test variant — same DQ-split transform as the
+# controller, plus a module rename so both psram_cram0 and the test
+# variant can coexist if a future test ever needs both. Used by
+# tb_psram_cram0 to validate item 1B / 1A / 1E edits to psram_cram0.v
+# before the FPGA build.
+psram_cram0_test.v: $(COMMON_DIR)/psram_cram0.v
+	sed \
+	  -e 's/^module psram_cram0/module psram_cram0_test/' \
+	  -e 's/inout  wire \[15:0\]  cram_dq,/input  wire [15:0]  cram_dq_in,\n    output wire [15:0]  cram_dq_out,\n    output wire         cram_dq_oe,/' \
+	  -e 's/\.cram_dq(cram_dq),/.cram_dq_in(cram_dq_in),\n    .cram_dq_out(cram_dq_out),\n    .cram_dq_oe(cram_dq_oe),/' \
+	  $< > $@
+
+# ============================================================
+# PSRAM CRAM0 wrapper (real psram_cram0 + real driver + cram_chip_model)
+# Drives the word-level interface that the CPU uses on the FPGA.
+# ============================================================
+PSRAM_CRAM0_SRCS = \
+	tb_psram_cram0.v \
+	cram_chip_model.v \
+	psram_cram0_test.v \
+	psram_cram0_drv_test.sv
+
+PSRAM_CRAM0_CPP = tb_psram_cram0_main.cpp
+PSRAM_CRAM0_TOP = tb_psram_cram0
+PSRAM_CRAM0_DIR = obj_dir_psram_cram0
 
 # ============================================================
 # SRAM
@@ -120,9 +157,9 @@ GPU_FULL_DIR = obj_dir_gpu_full
 # ============================================================
 # Targets
 # ============================================================
-.PHONY: all sdram psram psram-rtl sram cdc gpu gpu-lite gpu-full run run-psram run-sram build clean
+.PHONY: all sdram psram psram-rtl psram-cram0 sram cdc gpu gpu-lite gpu-full run run-psram run-sram build clean
 
-all: sdram psram sram
+all: sdram psram psram-cram0 sram
 # psram-rtl disabled: requires burst write ports not in current RTL
 
 # --- SDRAM ---
@@ -146,6 +183,14 @@ $(PSRAM_DIR)/V$(PSRAM_TOP): $(PSRAM_SRCS) $(PSRAM_CPP)
 		$(PSRAM_SRCS) $(PSRAM_CPP)
 
 run-psram: psram
+
+# --- PSRAM CRAM0 wrapper ---
+psram-cram0: $(PSRAM_CRAM0_DIR)/V$(PSRAM_CRAM0_TOP)
+	./$(PSRAM_CRAM0_DIR)/V$(PSRAM_CRAM0_TOP)
+
+$(PSRAM_CRAM0_DIR)/V$(PSRAM_CRAM0_TOP): $(PSRAM_CRAM0_SRCS) $(PSRAM_CRAM0_CPP)
+	$(VERILATOR) $(VERILATOR_FLAGS) --top-module $(PSRAM_CRAM0_TOP) --Mdir $(PSRAM_CRAM0_DIR) \
+		$(PSRAM_CRAM0_SRCS) $(PSRAM_CRAM0_CPP)
 
 # --- PSRAM Full-RTL ---
 psram-rtl: $(PSRAM_RTL_DIR)/V$(PSRAM_RTL_TOP)
@@ -207,4 +252,4 @@ $(GPU_FULL_DIR)/V$(GPU_TOP): $(GPU_SRCS) $(GPU_CPP)
 
 # --- Clean ---
 clean:
-	rm -rf $(SDRAM_DIR) $(PSRAM_DIR) $(PSRAM_RTL_DIR) $(SRAM_DIR) $(CDC_DIR) $(GPU_LITE_DIR) $(GPU_FULL_DIR) obj_dir_gpu io_sdram_test.v psram_test.sv psram_controller_test.v
+	rm -rf $(SDRAM_DIR) $(PSRAM_DIR) $(PSRAM_RTL_DIR) $(PSRAM_CRAM0_DIR) $(SRAM_DIR) $(CDC_DIR) $(GPU_LITE_DIR) $(GPU_FULL_DIR) obj_dir_gpu io_sdram_test.v psram_test.sv psram_cram0_drv_test.sv psram_controller_test.v psram_cram0_test.v

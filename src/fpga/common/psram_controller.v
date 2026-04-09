@@ -124,8 +124,9 @@ always @(posedge clk or negedge reset_n) begin
     end
 end
 
-// Instantiate the 16-bit PSRAM controller
-psram #(
+// Instantiate the 16-bit PSRAM controller (CRAM0-only fork — see
+// psram_cram0_drv.sv).
+psram_cram0_drv #(
     .CLOCK_SPEED(CLOCK_SPEED)
 ) psram_inst (
     .clk(clk),

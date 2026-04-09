@@ -1,0 +1,529 @@
+// MIT License
+
+// Copyright (c) 2022 Adam Gastineau
+
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+//
+////////////////////////////////////////////////////////////////////////////////
+//
+// CRAM0-only fork of psram.sv. Created so the CRAM0 path can be
+// iterated on without affecting CRAM1 (save data). The original
+// `psram` module in `psram.sv` is now exclusively used by
+// `psram_cram1.v` and should not be edited. All file-scope symbols
+// are uniquely suffixed (`_c0`) so both files can compile together
+// without redefinition.
+
+function integer rtoi_c0(input integer x);
+  return x;
+endfunction
+
+`define CEIL_C0(x) ((rtoi_c0(x) > x) ? rtoi_c0(x) : rtoi_c0(x) + 1)
+`define MAX_C0(x, y) ((x > y) ? x : y)
+
+module psram_cram0_drv #(
+    parameter CLOCK_SPEED = 100.0,  // Clock speed in megahertz
+
+    // -- Shared async --
+    parameter MIN_ADV_N_PULSE = 5, // Minimum time (ns) for adv_n to be held low to latch address (t_vp)
+    parameter MIN_ADDRESS_SETUP_BEFORE_ADV_HIGH = 5, // Minimum time (ns) for address to be asserted before adv_n goes high again (t_avs)
+    parameter MIN_ADDRESS_HOLD_AFTER_ADV_HIGH = 2, // Minimum time (ns) for address to be held after adv_n goes high (t_avh)
+    parameter MIN_CE_BEFORE_ADV_HIGH = 7, // Minimum time (ns) for bank to be enabled (ce#_n low) before adv_n goes high (t_cvs)
+
+    // -- Writes --
+    parameter MIN_DATA_SETUP_BEFORE_WE_HIGH = 20, // Minimum time (ns) for data to write to be set up before we_n goes high (t_dw)
+    parameter MIN_DATA_AFTER_ADDR_UNLATCHED = 8, // Minimum time (ns) until data should be asserted after addr unlatch. This isn't in the spec, so I'm guessing
+    parameter MIN_WRITE_PULSE = 45, // Minimum time (ns) for we_n to be held low to latch data (t_wp)
+    parameter MIN_WRITE_TIME_FROM_ADV = 70, // Minimum time (ns) for write to complete after adv_n goes low (after setup) (t_aw)
+
+    // -- Async reads (for non-sync-burst instances like CRAM1) --
+    parameter MIN_OE_AFTER_ADDR_UNLATCHED = 3, // Minimum time (ns) until oe_n goes low after addr unlatch
+    parameter MAX_ACCESS_TIME_FROM_ADV = 70, // Maximum time (ns) for valid data to appear after adv_n goes low
+
+    // -- Sync burst --
+    parameter SYNC_LATENCY = 4  // Fixed latency count; WAIT gating handles row boundary crossings only
+) (
+    input wire clk,
+
+    input wire bank_sel,
+    input wire [21:0] addr,
+
+    input wire write_en,
+    input wire [15:0] data_in,
+    input wire write_high_byte,
+    input wire write_low_byte,
+
+    input wire read_en,              // Async single-word read (for non-sync-burst instances)
+
+    input wire sync_burst_en,        // Start synchronous burst read (single-cycle pulse)
+    input wire [5:0] sync_burst_len, // Number of 16-bit reads minus 1 (max 63)
+
+    input wire config_en,            // Write BCR register (single-cycle pulse)
+    input wire [15:0] config_data,   // BCR value to write
+
+    output reg read_avail,
+    output reg [15:0] data_out,
+
+    output reg busy,
+
+    // Debug outputs (sticky counters, cleared on sync_burst_en)
+    output reg        dbg_wait_seen,     // Sticky: WAIT was HIGH during STATE_SYNC_DATA
+    output reg [15:0] dbg_wait_cycles,   // Total cycles WAIT HIGH during STATE_SYNC_DATA
+    output reg [15:0] dbg_burst_count,   // Completed sync bursts since last clear
+    output reg [15:0] dbg_stale_count,   // Bursts where first h0 in cram_dq_r == prev burst's last
+
+    // PSRAM signals
+    output reg [21:16] cram_a,
+    inout wire [15:0] cram_dq,
+    input wire cram_wait,
+    output reg cram_clk = 0,
+    output reg cram_adv_n = 1,
+    output reg cram_cre = 0,
+    output reg cram_ce0_n = 1,
+    output reg cram_ce1_n = 1,
+    output reg cram_oe_n = 1,
+    output reg cram_we_n = 1,
+    output reg cram_ub_n = 1,
+    output reg cram_lb_n = 1
+);
+
+  localparam PERIOD = 1000.0 / CLOCK_SPEED;  // In nanoseconds
+
+  // -- Shared cycle counts --
+  localparam ADV_PULSE_CYCLE_COUNT =
+  `CEIL_C0(MIN_ADV_N_PULSE / PERIOD);
+  // 2 ns added for setup times. This will vary based on the fitter and hardware, but hopefully is correct
+  localparam ADDRESS_SETUP_BEFORE_ADV_CYCLE_COUNT =
+  `CEIL_C0((MIN_ADDRESS_SETUP_BEFORE_ADV_HIGH + 2) / PERIOD);
+
+  localparam CE_BEFORE_ADV_CYCLE_COUNT =
+  `CEIL_C0((MIN_CE_BEFORE_ADV_HIGH) / PERIOD);
+
+  localparam ADV_CYCLE_COUNT =
+  `MAX_C0(`MAX_C0(ADV_PULSE_CYCLE_COUNT, ADDRESS_SETUP_BEFORE_ADV_CYCLE_COUNT),
+       CE_BEFORE_ADV_CYCLE_COUNT);
+  localparam ADDR_HOLD_AFTER_ADV_CYCLE_COUNT =
+  `CEIL_C0(MIN_ADDRESS_HOLD_AFTER_ADV_HIGH / PERIOD);
+
+  // -- Write cycle counts
+  localparam DATA_SETUP_BEFORE_WE_ENDS_CYCLE_COUNT =
+  `CEIL_C0(MIN_DATA_SETUP_BEFORE_WE_HIGH / PERIOD);
+
+  localparam DATA_AFTER_ADDR_UNLATCH_CYCLE_COUNT =
+  `CEIL_C0(MIN_DATA_AFTER_ADDR_UNLATCHED / PERIOD);
+
+  localparam WRITE_PULSE_CYCLE_COUNT =
+  `CEIL_C0(MIN_WRITE_PULSE / PERIOD);
+
+  localparam TOTAL_WRITE_CYCLE_COUNT =
+  `CEIL_C0(`MAX_C0(MIN_WRITE_TIME_FROM_ADV, MIN_WRITE_PULSE) / PERIOD);
+
+  // -- Async read cycle counts --
+  localparam OE_AFTER_ADDR_UNLATCH_CYCLE_COUNT =
+  `CEIL_C0(MIN_OE_AFTER_ADDR_UNLATCHED / PERIOD);
+
+  localparam TOTAL_READ_CYCLE_COUNT =
+  `CEIL_C0(MAX_ACCESS_TIME_FROM_ADV / PERIOD);
+
+  localparam STATE_NONE = 0;
+
+  // -- Write states --
+
+  localparam WRITE_INITIAL_COUNT = 1;
+
+  localparam STATE_WRITE_ADV_END = WRITE_INITIAL_COUNT - 1 + ADV_CYCLE_COUNT;
+
+  localparam STATE_WRITE_ADDR_LATCH_END = STATE_WRITE_ADV_END + ADDR_HOLD_AFTER_ADV_CYCLE_COUNT;
+
+  localparam STATE_WRITE_DATA_START = STATE_WRITE_ADDR_LATCH_END + DATA_AFTER_ADDR_UNLATCH_CYCLE_COUNT;
+
+  localparam STATE_WRITE_DATA_END = WRITE_INITIAL_COUNT + TOTAL_WRITE_CYCLE_COUNT;
+
+  // -- Async read states (for non-sync-burst instances) --
+  localparam READ_INITIAL_COUNT = 20;
+  localparam STATE_READ_ADV_END = READ_INITIAL_COUNT - 1 + ADV_CYCLE_COUNT;
+  localparam STATE_READ_ADDR_LATCH_END = STATE_READ_ADV_END + ADDR_HOLD_AFTER_ADV_CYCLE_COUNT;
+  localparam STATE_READ_DATA_ENABLE = STATE_READ_ADDR_LATCH_END + OE_AFTER_ADDR_UNLATCH_CYCLE_COUNT;
+  localparam STATE_READ_DATA_RECEIVED = READ_INITIAL_COUNT + TOTAL_READ_CYCLE_COUNT;
+
+  // -- Config write states (CRE-controlled BCR register write) --
+  // CRE must be HIGH ≥20ns before CE# falls (tCRES). We assert CRE two cycles early
+  // to guarantee 20ns setup even with IOB register timing differences.
+  localparam STATE_CONFIG_CRE_WAIT  = 48;  // Extra CRE hold cycle (auto-increments to 49)
+  localparam STATE_CONFIG_CRE_SETUP = 49;  // CE#/ADV#/WE#/address asserted (CRE already high)
+  localparam STATE_CONFIG_START = 50;       // CE#, ADV#, WE#, address driven
+  localparam STATE_CONFIG_ADV_END = STATE_CONFIG_START + ADV_CYCLE_COUNT - 1;
+  localparam STATE_CONFIG_HOLD_END = STATE_CONFIG_START + TOTAL_WRITE_CYCLE_COUNT;
+
+  // -- Sync burst read states (explicit state assignments) --
+  localparam STATE_SYNC_CE_SETUP = 59;  // CE# asserted, address loaded, ADV# still HIGH
+  localparam STATE_SYNC_SETUP = 60;     // ADV# goes LOW (CE# already stable for 1 cycle)
+  localparam STATE_SYNC_WAIT  = 61;
+  localparam STATE_SYNC_DATA  = 62;
+  localparam STATE_SYNC_END   = 63;
+
+
+  initial begin
+    $info("Instantiated PSRAM with the following settings:");
+    $info("  Clock speed: %f MHz with period %f ns", CLOCK_SPEED, PERIOD);
+    $info("  Writes:");
+    $info("    STATE_WRITE_ADV_END: %d", STATE_WRITE_ADV_END);
+    $info("    STATE_WRITE_ADDR_LATCH_END: %d", STATE_WRITE_ADDR_LATCH_END);
+    $info("    STATE_WRITE_DATA_START: %d", STATE_WRITE_DATA_START);
+    $info("    STATE_WRITE_DATA_END: %d", STATE_WRITE_DATA_END);
+    $info("");
+    $info("  Total write time: %d cycles", TOTAL_WRITE_CYCLE_COUNT);
+    $info("  Config write:");
+    $info("    STATE_CONFIG_START: %d", STATE_CONFIG_START);
+    $info("    STATE_CONFIG_ADV_END: %d", STATE_CONFIG_ADV_END);
+    $info("    STATE_CONFIG_HOLD_END: %d", STATE_CONFIG_HOLD_END);
+    $info("  Sync burst:");
+    $info("    SYNC_LATENCY: %d", SYNC_LATENCY);
+  end
+
+  reg [7:0] state = STATE_NONE;
+
+  // If 1, route cram_data reg to cram_dq
+  reg data_out_en = 0;
+  reg [15:0] cram_data;
+
+  reg [15:0] latched_data_in;
+
+  // Sync burst counters
+  reg [5:0] latency_counter;
+  reg [5:0] burst_counter;
+
+  // Debug counters (no reset — accumulate until power cycle)
+  initial begin
+    dbg_wait_seen = 0;
+    dbg_wait_cycles = 0;
+    dbg_burst_count = 0;
+  end
+
+  // Stale-detection diagnostic: track whether cram_dq_r holds stale data
+  // on the first valid capture of each burst.
+  reg [15:0] prev_burst_last_dq;   // Last cram_dq_r from previous burst
+  reg        first_capture_pending; // Waiting for first data capture
+  initial begin
+    prev_burst_last_dq = 16'h0;
+    first_capture_pending = 0;
+    dbg_stale_count = 0;
+  end
+
+  assign cram_dq = data_out_en ? cram_data : 16'hZZ;
+
+  // Posedge IOB capture registers for sync burst read data.
+  // FAST_INPUT_REGISTER in QSF guarantees IOB placement on posedge.
+  reg [15:0] cram_dq_r;
+  reg cram_wait_r;
+  always @(posedge clk) begin
+    cram_dq_r <= cram_dq;
+    cram_wait_r <= cram_wait;  // WAIT active HIGH (BCR bit10=1), during delay (bit8=0): HIGH=invalid, LOW=valid
+  end
+
+  // Fabric pipeline registers for sync burst data path.
+  // WAIT and DQ both transition on the same PSRAM CLK edge, but have different
+  // output delays (tCW vs tCKD, both 2-5.5ns).  The gap from PSRAM CLK edge
+  // to the next FPGA posedge is only ~3.8ns (9524ps - 5714ps phase).  When
+  // tCW < 3.8ns < tCKD, the IOB captures WAIT=LOW one posedge before DQ has
+  // valid data, causing the FSM to read stale DQ.  Adding one fabric pipeline
+  // stage ensures WAIT and DQ are always from the same IOB capture, with a
+  // full extra clock cycle (~9.5ns) of margin.
+  reg [15:0] cram_dq_r2;
+  reg cram_wait_r2;
+  always @(posedge clk) begin
+    cram_dq_r2 <= cram_dq_r;
+    cram_wait_r2 <= cram_wait_r;
+  end
+
+  always @(posedge clk) begin
+    if (state != STATE_NONE) begin
+      // If we are not at STATE_NONE, increment state (overridden by explicit assignments)
+      state <= state + 1;
+    end
+
+    if (state == STATE_NONE) begin
+      // We are only busy when not in STATE_NONE
+      busy <= 0;
+    end else begin
+      busy <= 1;
+    end
+
+    // Default: clear pulsed outputs every cycle
+    read_avail <= 0;
+
+    case (state)
+      STATE_NONE: begin
+
+        cram_clk   <= 0;
+        cram_adv_n <= 1;
+        cram_cre   <= 0;
+        cram_ce0_n <= 1;
+        cram_ce1_n <= 1;
+        cram_oe_n  <= 1;
+        cram_we_n  <= 1;
+        cram_ub_n  <= 1;
+        cram_lb_n  <= 1;
+
+        if (write_en) begin
+          // Enter write_init
+          state <= WRITE_INITIAL_COUNT;
+
+          if (bank_sel) cram_ce1_n <= 0;
+          else cram_ce0_n <= 0;
+
+          // Set address and output on dq
+          cram_a <= addr[21:16];
+          cram_data <= addr[15:0];
+          data_out_en <= 1;
+          // Store data in for future use
+          latched_data_in <= data_in;
+
+          // Enable write
+          cram_we_n <= 0;
+
+          // Enable address latching
+          cram_adv_n <= 0;
+
+          if (write_high_byte) cram_ub_n <= 0;
+          if (write_low_byte) cram_lb_n <= 0;
+
+          // Set busy now instead of waiting for the state change
+          busy <= 1;
+        end else if (config_en) begin
+          // BCR config write via CRE — assert CRE two cycles early for ≥20ns tCRES
+          // State 48 (CRE_WAIT): CRE high, auto-increments to 49 (CRE_SETUP)
+          // State 49 (CRE_SETUP): CE#, ADV#, WE#, address asserted
+          state <= STATE_CONFIG_CRE_WAIT;
+          cram_cre <= 1;    // CRE high, 20ns before CE# falls (at state 49)
+          busy <= 1;
+        end else if (read_en) begin
+          // Async single-word read
+          state <= READ_INITIAL_COUNT;
+
+          if (bank_sel) cram_ce1_n <= 0;
+          else cram_ce0_n <= 0;
+
+          cram_a <= addr[21:16];
+          cram_data <= addr[15:0];
+          data_out_en <= 1;
+
+          cram_adv_n <= 0;
+          cram_ub_n <= 0;
+          cram_lb_n <= 0;
+
+          busy <= 1;
+        end else if (sync_burst_en) begin
+          // Synchronous burst read — CE# setup phase.
+          // Assert CE# and load address ONE cycle before ADV# goes LOW.
+          // This guarantees tCSP (CE# setup to CLK) is met at the PSRAM CLK
+          // edge where the address is latched.
+          state <= STATE_SYNC_CE_SETUP;
+
+          if (bank_sel) cram_ce1_n <= 0;
+          else cram_ce0_n <= 0;
+
+          // Pre-load address on DQ/A bus (ADV# stays HIGH this cycle)
+          cram_a <= addr[21:16];
+          cram_data <= addr[15:0];
+          data_out_en <= 1;
+
+          cram_adv_n <= 1;  // ADV# HIGH — address not latched yet
+          cram_we_n <= 1;   // WE# high for read
+          cram_oe_n <= 1;   // OE# high during address phase
+          cram_ub_n <= 0;
+          cram_lb_n <= 0;
+
+          latency_counter <= SYNC_LATENCY[5:0];
+          burst_counter <= sync_burst_len;
+          first_capture_pending <= 1;
+          busy <= 1;
+        end
+      end
+
+      // ============================================
+      // Async writes (unchanged)
+      // ============================================
+      STATE_WRITE_ADV_END: begin
+        // Continue holding address after setting adv high
+        cram_adv_n <= 1;
+      end
+      STATE_WRITE_ADDR_LATCH_END: begin
+        // No longer sending address data on cram_dq
+        data_out_en <= 0;
+      end
+      STATE_WRITE_DATA_START: begin
+        // Provide data to write
+        data_out_en <= 1;
+        cram_data   <= latched_data_in;
+      end
+      STATE_WRITE_DATA_END: begin
+        state <= STATE_NONE;
+
+        data_out_en <= 0;
+
+        // Unlatch write enable and banks
+        cram_we_n <= 1;
+
+        cram_ce0_n <= 1;
+        cram_ce1_n <= 1;
+
+        cram_ub_n <= 1;
+        cram_lb_n <= 1;
+
+        // Clear busy now, so we don't have to wait for the state change
+        busy <= 0;
+      end
+
+      // ============================================
+      // Async reads (for non-sync-burst instances)
+      // ============================================
+      STATE_READ_ADV_END: begin
+        cram_adv_n <= 1;
+      end
+      STATE_READ_ADDR_LATCH_END: begin
+        data_out_en <= 0;
+      end
+      STATE_READ_DATA_ENABLE: begin
+        cram_oe_n <= 0;
+      end
+      STATE_READ_DATA_RECEIVED: begin
+        read_avail <= 1;
+        data_out <= cram_dq_r;  // IOB-captured value
+
+        state <= STATE_NONE;
+        cram_ce0_n <= 1;
+        cram_ce1_n <= 1;
+        cram_ub_n <= 1;
+        cram_lb_n <= 1;
+        cram_oe_n <= 1;
+        busy <= 0;
+      end
+
+      // ============================================
+      // Config write states (BCR register via CRE)
+      // ============================================
+      STATE_CONFIG_CRE_SETUP: begin
+        // CRE is already HIGH from previous cycle. Now assert CE#, ADV#, WE#, address.
+        if (bank_sel) cram_ce1_n <= 0;
+        else cram_ce0_n <= 0;
+
+        cram_a <= {2'b00, 2'b10, 2'b00};  // A[21:16] with A[19]=1 (BCR select for 64Mbit die)
+        cram_data <= config_data;          // BCR value on DQ[15:0] = A[15:0]
+        data_out_en <= 1;
+
+        cram_we_n <= 0;   // WE# low for write
+        cram_adv_n <= 0;  // ADV# low to latch address
+        // Auto-increment → STATE_CONFIG_START (50) → STATE_CONFIG_ADV_END
+      end
+
+      STATE_CONFIG_ADV_END: begin
+        // Address latched, deassert ADV#
+        cram_adv_n <= 1;
+      end
+
+      STATE_CONFIG_HOLD_END: begin
+        // Config write complete — release everything
+        state <= STATE_NONE;
+        data_out_en <= 0;
+        cram_we_n <= 1;
+        cram_cre <= 0;
+        cram_ce0_n <= 1;
+        cram_ce1_n <= 1;
+        busy <= 0;
+      end
+
+      // ============================================
+      // Synchronous burst read states
+      // ============================================
+      STATE_SYNC_CE_SETUP: begin
+        // CE# is now LOW (asserted previous cycle), address is on the bus.
+        // Assert ADV# LOW to begin the address latch phase.
+        // The next PSRAM CLK rising edge will see CE# with a full cycle of setup.
+        cram_adv_n <= 0;  // ADV# low — address will be latched on next PSRAM CLK edge
+        state <= STATE_SYNC_SETUP;
+      end
+
+      STATE_SYNC_SETUP: begin
+        // Address was driven in STATE_NONE, ADV# is low.
+        // Deassert ADV# (address latched), release DQ, assert OE#
+        cram_adv_n <= 1;
+        data_out_en <= 0;  // Release DQ bus for CRAM to drive
+        cram_oe_n <= 0;    // OE# low for read
+        latency_counter <= latency_counter - 6'd1;
+        state <= STATE_SYNC_WAIT;
+      end
+
+      STATE_SYNC_WAIT: begin
+        // Wait for initial access latency
+        if (latency_counter == 6'd0) begin
+          state <= STATE_SYNC_DATA;
+        end else begin
+          latency_counter <= latency_counter - 6'd1;
+          state <= STATE_SYNC_WAIT;  // Explicit: stay here
+        end
+      end
+
+      STATE_SYNC_DATA: begin
+        // Use pipeline registers (cram_dq_r2/cram_wait_r2) to guarantee
+        // WAIT and DQ are from the same IOB capture posedge.
+        if (cram_wait_r2) begin
+          // WAIT HIGH — initial latency or row boundary crossing pause.
+          dbg_wait_seen <= 1'b1;
+          dbg_wait_cycles <= dbg_wait_cycles + 16'd1;
+          state <= STATE_SYNC_DATA;
+        end else begin
+          // WAIT LOW — data valid, capture halfword
+          read_avail <= 1;
+          data_out <= cram_dq_r2;
+
+          // Stale detection: on first capture, check if data matches
+          // the last halfword from the previous burst
+          if (first_capture_pending) begin
+            first_capture_pending <= 0;
+            if (cram_dq_r2 == prev_burst_last_dq)
+              dbg_stale_count <= dbg_stale_count + 16'd1;
+          end
+
+          if (burst_counter == 6'd0) begin
+            // Last halfword — save for stale detection on next burst
+            prev_burst_last_dq <= cram_dq_r2;
+            state <= STATE_SYNC_END;
+          end else begin
+            burst_counter <= burst_counter - 6'd1;
+            state <= STATE_SYNC_DATA;  // Explicit: stay here
+          end
+        end
+      end
+
+      STATE_SYNC_END: begin
+        // Burst complete — release everything
+        dbg_burst_count <= dbg_burst_count + 16'd1;
+        state <= STATE_NONE;
+        cram_ce0_n <= 1;
+        cram_ce1_n <= 1;
+        cram_oe_n <= 1;
+        cram_ub_n <= 1;
+        cram_lb_n <= 1;
+        busy <= 0;
+      end
+
+    endcase
+  end
+
+endmodule

@@ -5,7 +5,7 @@
 `default_nettype none
 
 module psram_cram0 #(
-    parameter CLOCK_SPEED = 48.0  // MHz - same as CPU/SDRAM for simple integration
+    parameter CLOCK_SPEED = 100.0  // MHz - matches CPU / SDRAM / mp_ram PLL
 ) (
     input wire clk,
     input wire reset_n,
@@ -32,7 +32,27 @@ module psram_cram0 #(
     output wire         cram_oe_n,
     output wire         cram_we_n,
     output wire         cram_ub_n,
-    output wire         cram_lb_n
+    output wire         cram_lb_n,
+
+    // BCR config write — single-cycle pulse on config_en with the
+    // BCR value on config_data and the target die on config_bank_sel.
+    // The wrapper drives the underlying psram_cram0_drv's CRE / WE# /
+    // address-on-DQ sequence and holds bank_sel = config_bank_sel for
+    // the duration of the chip-side config write. Used by core_top's
+    // BCR-init FSM at boot to write the AS1C8M16PL POR-default BCR
+    // (0x9D1F = async page mode) into both CRAM0 dies. Defends
+    // against the failure mode where a previous bitstream left the
+    // chip in sync-burst mode and a subsequent async-mode bitstream
+    // can't talk to it until the user power-cycles.
+    input  wire         config_en,
+    input  wire  [15:0] config_data,
+    input  wire         config_bank_sel,
+
+    // Raw psram_cram0_drv busy — surfaced so core_top's BCR-init
+    // FSM can wait for the chip-side config-write to drain without
+    // confusing it with word_busy (which gates only async word
+    // transactions).
+    output wire         raw_busy
 );
 
 // State machine for 32-bit to 16-bit conversion
@@ -59,19 +79,61 @@ reg [21:0] psram_addr;
 reg [15:0] psram_data_in;
 wire [15:0] psram_data_out;
 wire psram_busy;
+assign raw_busy = psram_busy;
 wire psram_read_avail;
 reg psram_bank_sel;
 reg psram_write_high_byte;
 reg psram_write_low_byte;
 
-// Instantiate the 16-bit PSRAM controller
-psram #(
+// ============================================================
+// BCR config_in_progress handshake
+// ============================================================
+// When core_top pulses config_en, latch the requested bank_sel and
+// hold it through the entire chip-side config write. The driver
+// reads bank_sel only during STATE_CONFIG_CRE_SETUP, several cycles
+// after config_en goes low, so we MUST hold the value until the
+// driver's busy has risen and fallen again.
+//
+// Sequence:
+//   - config_en pulses → latch config_bank_sel, set in_progress=1
+//   - driver enters STATE_CONFIG_CRE_WAIT, busy goes 1 (config_saw_busy)
+//   - driver finishes (STATE_CONFIG_HOLD_END → STATE_NONE), busy goes 0
+//   - in_progress drops, normal psram_bank_sel resumes
+reg config_bank_sel_latched;
+reg config_in_progress;
+reg config_saw_busy;
+
+always @(posedge clk or negedge reset_n) begin
+    if (!reset_n) begin
+        config_bank_sel_latched <= 1'b0;
+        config_in_progress <= 1'b0;
+        config_saw_busy <= 1'b0;
+    end else if (config_en) begin
+        config_bank_sel_latched <= config_bank_sel;
+        config_in_progress <= 1'b1;
+        config_saw_busy <= 1'b0;
+    end else if (config_in_progress) begin
+        if (psram_busy)
+            config_saw_busy <= 1'b1;
+        else if (config_saw_busy)
+            config_in_progress <= 1'b0;  // busy rose then fell → done
+    end
+end
+
+// Instantiate the 16-bit PSRAM controller (CRAM0-only fork — see
+// psram_cram0_drv.sv. The original `psram` module in psram.sv is
+// now exclusively for the CRAM1 / save-data path.)
+psram_cram0_drv #(
     .CLOCK_SPEED(CLOCK_SPEED),
-    .MAX_ACCESS_TIME_FROM_ADV(80)  // Extra margin for 100 MHz async reads
+    .MAX_ACCESS_TIME_FROM_ADV(80)  // ns — 70 ns chip spec + 10 ns margin at 100 MHz
 ) psram_inst (
     .clk(clk),
 
-    .bank_sel(psram_bank_sel),
+    // bank_sel: during a BCR config write, force the latched value
+    // so the wrapper's normal psram_bank_sel (which tracks the most
+    // recent async word_addr) doesn't accidentally re-target the
+    // wrong die mid-config-write.
+    .bank_sel(config_in_progress ? config_bank_sel_latched : psram_bank_sel),
     .addr(psram_addr),
 
     .write_en(psram_write_en),
@@ -80,6 +142,18 @@ psram #(
     .write_low_byte(psram_write_low_byte),
 
     .read_en(psram_read_en),
+
+    // Sync burst inputs — kept tied off in this build (we use the
+    // async two-phase path); the driver supports them and the FSM
+    // is in psram_cram0_drv.sv if a future change wants sync burst.
+    .sync_burst_en(1'b0),
+    .sync_burst_len(6'd0),
+
+    // BCR config — wired straight through. The driver handles the
+    // CRE / WE# / address-on-DQ sequence on the next STATE_NONE.
+    .config_en(config_en),
+    .config_data(config_data),
+
     .read_avail(psram_read_avail),
     .data_out(psram_data_out),
 
