@@ -480,7 +480,7 @@ int main(void) {
         for (int i = 0; i < (320 * 240) / 4; i++) p[i] = 0;
     }
 
-    boot_fb_puts(0, 14, "Booting...");
+    boot_fb_puts(0, 0, "Booting...");
 
     /* ── PHDP Discovery ─────────────────────────────────────────── */
     int debug_mode = 0;
@@ -490,24 +490,24 @@ int main(void) {
     }
 
     if (debug_mode) {
-        boot_fb_clear_row(14);
-        boot_fb_puts(0, 14, "Debug host connected");
+        boot_fb_clear_row(0);
+        boot_fb_puts(0, 0, "Debug host connected");
 
         uint32_t total_size = 0;
         uint16_t chunk_size = 0;
 
         if (phdp_request_override(OS_SLOT_ID, &total_size, &chunk_size)) {
             /* Stream OS binary over UART */
-            boot_fb_clear_row(14);
-            boot_fb_puts(0, 14, "Loading via UART...");
+            boot_fb_clear_row(0);
+            boot_fb_puts(0, 0, "Loading via UART...");
 
             volatile uint8_t *dest = (volatile uint8_t *)(uintptr_t)_os_load_addr;
             (void)chunk_size;
             int rc = phdp_chunk_loop(0, total_size, total_size, (void *)dest);
 
             if (rc < 0) {
-                boot_fb_clear_row(14);
-                boot_fb_puts(0, 14, "UART failed, trying SD...");
+                boot_fb_clear_row(0);
+                boot_fb_puts(0, 0, "UART failed, trying SD...");
                 goto load_from_sd;
             }
 
@@ -537,7 +537,7 @@ int main(void) {
              * AND uart_tx is not currently shifting. */
             while (!(UART_STATUS & UART_TX_IDLE)) {}
 
-            boot_fb_clear_row(14);
+            boot_fb_clear_row(0);
             goto start_os;
         }
         /* Host said USE_SD or timeout — fall through */
@@ -545,8 +545,8 @@ int main(void) {
 
 load_from_sd:
     /* ── Standard SD card boot ──────────────────────────────────── */
-    boot_fb_clear_row(14);
-    boot_fb_puts(0, 14, "Loading...");
+    boot_fb_clear_row(0);
+    boot_fb_puts(0, 0, "Loading...");
 
     pd_dbg_stage = 3;
 
@@ -555,15 +555,15 @@ load_from_sd:
     int rc = boot_load_os_sd(_os_load_addr, os_size);
 
     if (rc < 0) {
-        boot_fb_clear_row(14);
-        boot_fb_puts(0, 14, "Load failed E");
-        boot_fb_putchar(14, 14, '0' + (unsigned int)(-rc));
+        boot_fb_clear_row(0);
+        boot_fb_puts(0, 0, "Load failed E");
+        boot_fb_putchar(14, 0, '0' + (unsigned int)(-rc));
         pd_dbg_info = (unsigned int)(-rc);
         while (1) {}
     }
 
     pd_dbg_stage = 4;
-    boot_fb_clear_row(14);
+    boot_fb_clear_row(0);
 
 start_os:
     flush_dcache_evict();

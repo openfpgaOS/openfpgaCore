@@ -31,7 +31,7 @@ static void boot_logo(const char *color) {
         of_term_clear();
         logo_drawn = 1;
     }
-    of_term_set_pos(0, 0);
+    of_term_puts("\033[H");  /* cursor home */
     of_term_puts(color);
     of_term_putchar('\n');
     of_term_puts("       ___  ___  ___ ___\n");
@@ -146,8 +146,16 @@ void os_main(void) {
 
     of_timer_delay_ms(300);
 
-    /* Boot stage: blue logo = launching app */
-    boot_logo("\033[94m");  /* blue */
+    /* Boot stage: blue logo = launching app. Save/restore cursor so
+     * the redraw (which jumps to 0,0) doesn't leave the cursor inside
+     * the logo -- otherwise the app's first writes overwrite the
+     * status messages below it. */
+    {
+        int saved_col, saved_row;
+        of_term_get_pos(&saved_col, &saved_row);
+        boot_logo("\033[94m");  /* blue */
+        of_term_set_pos(saved_col, saved_row);
+    }
     of_timer_delay_ms(200);
 
     /* Execute the app */
