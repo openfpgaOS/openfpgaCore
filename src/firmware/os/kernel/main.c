@@ -84,7 +84,7 @@ void os_main(void) {
             colour = "\033[93m";
             label  = "UART";
         }
-        of_term_printf("  Disk backend...... %s%s\033[0m\n", colour, label);
+        of_term_printf("  Disk backend......  %s%s\033[0m\n", colour, label);
     }
 
     /* Initialize syscall subsystem */
