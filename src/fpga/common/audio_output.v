@@ -19,7 +19,8 @@ module audio_output (
     output wire        fifo_full,
 
     // OPL3 hardware audio input (from opl3_wrapper, clk_audio domain)
-    input  wire signed [15:0] opl_audio_in,
+    input  wire signed [15:0] opl_audio_in_l,
+    input  wire signed [15:0] opl_audio_in_r,
     input  wire               opl_toggle_in,   // toggles on each new OPL sample
 
     // I2S output
@@ -121,52 +122,137 @@ end
 wire signed [15:0] sfx_l = fifo_empty ? hold_l : $signed(fifo_l);
 wire signed [15:0] sfx_r = fifo_empty ? hold_r : $signed(fifo_r);
 
-// OPL3 synchronous FIFO (same clk_audio domain — no CDC needed).
-// OPL3 produces at ~49.7 kHz, I2S consumes at 48 kHz.
-// FIFO absorbs the rate difference and smooths register-write bursts.
-// When full: drop incoming sample. When empty: hold last value.
-// 5-bit pointers for 16-entry FIFO: MSB distinguishes full from empty.
-reg signed [15:0] opl_fifo [0:15];
-reg [4:0] opl_fifo_wr = 5'd0;
-reg [4:0] opl_fifo_rd = 5'd0;
-wire       opl_fifo_empty = (opl_fifo_wr == opl_fifo_rd);
-wire       opl_fifo_full  = (opl_fifo_wr[3:0] == opl_fifo_rd[3:0]) &&
-                             (opl_fifo_wr[4]   != opl_fifo_rd[4]);
+// ============================================
+// OPL3 sample-rate conversion: ~49,749 Hz → 48,000 Hz
+// ============================================
+// OPL3 produces stereo at 12,288,000/247 ≈ 49,749 Hz.  I2S consumes at
+// 48,000 Hz.  A small FIFO absorbs jitter; a consumer-driven SRC pops
+// 1 or 2 samples per output tick and linearly interpolates between the
+// two most recent samples (A, B) using a 2.16 fixed-point phase.
+//
+// Resample step: 12,288,000 * 65,536 / (247 * 48,000) = 67,924 (0.16 FP).
+localparam [16:0] OPL_RESAMPLE_STEP = 17'd67924;  // 1.036× in 1.16 FP
 
-// Detect new OPL3 sample via toggle edge (same clock domain, single FF)
-reg opl_tog_prev;
+// --- Producer: OPL → 4-entry stereo FIFO (owns opl_wr_ptr, opl_tog_prev) ---
+reg [31:0] opl_fifo [0:3];   // packed {L[15:0], R[15:0]}
+reg [2:0]  opl_wr_ptr = 3'd0;
+reg [2:0]  opl_rd_ptr = 3'd0;  // declared here, driven only by consumer block
+wire       opl_fifo_full = (opl_wr_ptr[1:0] == opl_rd_ptr[1:0]) &&
+                            (opl_wr_ptr[2]   != opl_rd_ptr[2]);
+reg        opl_tog_prev = 1'b0;
+
 always @(posedge clk_audio) begin
-    opl_tog_prev <= opl_toggle_in;
-    if (opl_toggle_in != opl_tog_prev && !opl_fifo_full) begin
-        opl_fifo[opl_fifo_wr[3:0]] <= opl_audio_in;
-        opl_fifo_wr <= opl_fifo_wr + 5'd1;
+    if (!reset_n) begin
+        opl_wr_ptr   <= 3'd0;
+        opl_tog_prev <= 1'b0;
+    end else begin
+        opl_tog_prev <= opl_toggle_in;
+        if (opl_toggle_in != opl_tog_prev && !opl_fifo_full) begin
+            opl_fifo[opl_wr_ptr[1:0]] <= {opl_audio_in_l, opl_audio_in_r};
+            opl_wr_ptr <= opl_wr_ptr + 3'd1;
+        end
     end
 end
 
-// Read from FIFO on audio_pop, hold last value if empty
-reg signed [15:0] opl_current = 16'sd0;
+// --- Consumer: phase-driven SRC (owns opl_rd_ptr, opl_phase, A/B) ---
+reg signed [15:0] opl_a_l = 16'sh0, opl_a_r = 16'sh0;
+reg signed [15:0] opl_b_l = 16'sh0, opl_b_r = 16'sh0;
+reg        [17:0] opl_phase = 18'd0;   // 2.16 fixed-point
+
+wire [2:0] opl_fifo_avail = opl_wr_ptr - opl_rd_ptr;
+
 always @(posedge clk_audio) begin
-    if (audio_pop && !opl_fifo_empty) begin
-        opl_current <= opl_fifo[opl_fifo_rd[3:0]];
-        opl_fifo_rd <= opl_fifo_rd + 5'd1;
+    if (!reset_n) begin
+        opl_a_l    <= 16'sh0;  opl_a_r <= 16'sh0;
+        opl_b_l    <= 16'sh0;  opl_b_r <= 16'sh0;
+        opl_phase  <= 18'd0;
+        opl_rd_ptr <= 3'd0;
+    end else if (audio_pop) begin
+        begin : opl_src_advance
+            reg [17:0] new_phase;
+            reg [1:0]  wanted, actual;
+
+            new_phase = opl_phase + {1'b0, OPL_RESAMPLE_STEP};
+            // Cap wanted at 2 — handles sustained underrun where debt > 2
+            wanted = (new_phase[17:16] > 2'd2) ? 2'd2 : new_phase[17:16];
+
+            // Clamp to available FIFO entries (full 3-bit compare)
+            actual = ({1'b0, wanted} <= opl_fifo_avail) ? wanted :
+                     opl_fifo_avail[1:0];
+
+            if (actual == 2'd1) begin
+                opl_a_l <= opl_b_l;
+                opl_a_r <= opl_b_r;
+                opl_b_l <= $signed(opl_fifo[opl_rd_ptr[1:0]][31:16]);
+                opl_b_r <= $signed(opl_fifo[opl_rd_ptr[1:0]][15:0]);
+                opl_rd_ptr <= opl_rd_ptr + 3'd1;
+            end else if (actual == 2'd2) begin
+                begin : double_pop
+                    reg [2:0] rd1, rd2;
+                    rd1 = opl_rd_ptr;
+                    rd2 = opl_rd_ptr + 3'd1;
+                    opl_a_l <= $signed(opl_fifo[rd1[1:0]][31:16]);
+                    opl_a_r <= $signed(opl_fifo[rd1[1:0]][15:0]);
+                    opl_b_l <= $signed(opl_fifo[rd2[1:0]][31:16]);
+                    opl_b_r <= $signed(opl_fifo[rd2[1:0]][15:0]);
+                    opl_rd_ptr <= opl_rd_ptr + 3'd2;
+                end
+            end
+
+            // Subtract consumed intervals; keep fractional remainder + debt.
+            // Only advance phase when we actually consumed samples —
+            // otherwise the accumulator runs away and the LERP fraction
+            // wraps, producing distortion.
+            if (actual > 0)
+                opl_phase <= new_phase - {actual, 16'd0};
+        end
     end
 end
 
-// SFX at 1x, OPL at 1.5x (x + x/2), hard clamp on sum.
-wire signed [16:0] opl_15x = {opl_current[15], opl_current}
-                            + {{2{opl_current[15]}}, opl_current[15:1]};
-wire signed [16:0] mix_l = {sfx_l[15], sfx_l} + opl_15x;
-wire signed [16:0] mix_r = {sfx_r[15], sfx_r} + opl_15x;
+// Linear interpolation between A and B using fractional phase [15:0]
+wire [15:0]        opl_frac   = opl_phase[15:0];
+wire signed [16:0] opl_diff_l = {opl_b_l[15], opl_b_l} - {opl_a_l[15], opl_a_l};
+wire signed [16:0] opl_diff_r = {opl_b_r[15], opl_b_r} - {opl_a_r[15], opl_a_r};
+wire signed [16:0] opl_frac_s = $signed({1'b0, opl_frac});
+wire signed [33:0] opl_prod_l = opl_diff_l * opl_frac_s;
+wire signed [33:0] opl_prod_r = opl_diff_r * opl_frac_s;
+wire signed [16:0] opl_off_l  = $signed(opl_prod_l[32:16]);
+wire signed [16:0] opl_off_r  = $signed(opl_prod_r[32:16]);
+wire signed [16:0] opl_wide_l = {opl_a_l[15], opl_a_l} + opl_off_l;
+wire signed [16:0] opl_wide_r = {opl_a_r[15], opl_a_r} + opl_off_r;
+wire signed [15:0] opl_lerp_l = opl_wide_l[15:0];
+wire signed [15:0] opl_lerp_r = opl_wide_r[15:0];
 
-// 1.5x post-mix boost (x + x/2) to raise overall volume.
-wire signed [17:0] out_l = {mix_l[16], mix_l} + {{2{mix_l[16]}}, mix_l[16:1]};
-wire signed [17:0] out_r = {mix_r[16], mix_r} + {{2{mix_r[16]}}, mix_r[16:1]};
-wire [15:0] mix_clamp_l = (out_l > 18'sd32767)  ? 16'h7FFF :
-                           (out_l < -18'sd32768) ? 16'h8000 :
-                           out_l[15:0];
-wire [15:0] mix_clamp_r = (out_r > 18'sd32767)  ? 16'h7FFF :
-                           (out_r < -18'sd32768) ? 16'h8000 :
-                           out_r[15:0];
+// ============================================
+// Final mix: PCM (sfx) + OPL3 stereo
+// ============================================
+// No OPL pre-boost.  OPL at >>>3 (0.125×) enters the mix directly.
+// Net: PCM = 0.5 × 1.25 post = 0.625×.  OPL = 0.125 × 1.25 post = 0.156×.
+wire signed [17:0] mix_l = {{2{sfx_l[15]}}, sfx_l} + {{2{opl_lerp_l[15]}}, opl_lerp_l};
+wire signed [17:0] mix_r = {{2{sfx_r[15]}}, sfx_r} + {{2{opl_lerp_r[15]}}, opl_lerp_r};
+
+// 1.25× post-mix boost (x + x>>>2) — into 19-bit before soft sat.
+wire signed [18:0] out_l = {mix_l[17], mix_l} + {{3{mix_l[17]}}, mix_l[17:2]};
+wire signed [18:0] out_r = {mix_r[17], mix_r} + {{3{mix_r[17]}}, mix_r[17:2]};
+// Soft saturation: linear below 75% threshold, 2:1 compression above.
+function [15:0] soft_sat;
+    input signed [18:0] x;
+    reg signed [18:0] y;
+    begin
+        if (x > 19'sd24576)
+            y = 19'sd24576 + ((x - 19'sd24576) >>> 1);
+        else if (x < -19'sd24576)
+            y = -19'sd24576 + ((x + 19'sd24576) >>> 1);
+        else
+            y = x;
+        soft_sat = (y > 19'sd32767)  ? 16'h7FFF :
+                   (y < -19'sd32768) ? 16'h8000 :
+                   y[15:0];
+    end
+endfunction
+
+wire [15:0] mix_clamp_l = soft_sat(out_l);
+wire [15:0] mix_clamp_r = soft_sat(out_r);
 
 // Latch mixer output on audio_pop (48 kHz) for stable I2S serialization.
 reg [15:0] active_l = 16'h0;

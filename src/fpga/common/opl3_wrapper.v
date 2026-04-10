@@ -20,7 +20,8 @@ module opl3_wrapper (
     input  wire [7:0]  opl_write_data,
     output reg         opl_ack,        // delayed ACK (stalls CPU until ready)
     // Audio output (clk_opl domain)
-    output reg  signed [15:0] opl_audio_out,
+    output reg  signed [15:0] opl_audio_out_l,
+    output reg  signed [15:0] opl_audio_out_r,
     output reg                opl_sample_toggle
 );
 
@@ -138,10 +139,19 @@ opl3 opl3_core (
 // Same clock domain as audio_output's clk_audio — no CDC needed.
 always @(posedge clk_opl or negedge reset_n) begin
     if (!reset_n) begin
-        opl_audio_out     <= 16'sd0;
+        opl_audio_out_l   <= 16'sd0;
+        opl_audio_out_r   <= 16'sd0;
         opl_sample_toggle <= 1'b0;
-    end else if (sample_valid) begin
-        opl_audio_out     <= sample_l >>> 3;
+    end else if (sample_valid) begin : opl_clamp
+        reg signed [20:0] sc_l, sc_r;
+        sc_l = $signed(sample_l) >>> 3;
+        sc_r = $signed(sample_r) >>> 3;
+        opl_audio_out_l <= (sc_l > 21'sd32767)  ? 16'sh7FFF :
+                           (sc_l < -21'sd32768) ? 16'sh8000 :
+                           sc_l[15:0];
+        opl_audio_out_r <= (sc_r > 21'sd32767)  ? 16'sh7FFF :
+                           (sc_r < -21'sd32768) ? 16'sh8000 :
+                           sc_r[15:0];
         opl_sample_toggle <= ~opl_sample_toggle;
     end
 end

@@ -189,8 +189,7 @@ localparam S_RD_CTRL    = 5'd4;
 localparam S_RD_CTRL_W  = 5'd5;
 localparam S_RD_FIELDS  = 5'd6;
 localparam S_RD_FIELDS_W= 5'd7;
-localparam S_CRAM_REQ   = 5'd8;
-localparam S_CRAM_WAIT  = 5'd9;
+// (states 8-9 retired — was S_CRAM_REQ/WAIT, now S_TAP_CHECK..S_HERMITE_3)
 localparam S_SCALE      = 5'd10;
 localparam S_MULTIPLY   = 5'd11;
 localparam S_ACCUM      = 5'd17;
@@ -199,6 +198,13 @@ localparam S_WR_POS     = 5'd13;
 localparam S_WR_FRAC    = 5'd14;
 localparam S_OUTPUT     = 5'd15;
 localparam S_WR_DIR     = 5'd16;
+localparam S_TAP_CHECK  = 5'd18;
+localparam S_TAP_FETCH  = 5'd19;
+localparam S_TAP_WAIT   = 5'd20;
+localparam S_TAP_NEXT   = 5'd21;
+localparam S_HERMITE_1  = 5'd22;
+localparam S_HERMITE_2  = 5'd23;
+localparam S_HERMITE_3  = 5'd24;
 
 reg [4:0]  state;
 reg [4:0]  cur_voice;
@@ -249,31 +255,137 @@ wire [21:0] new_pos_int = new_pos[37:16];
 wire [15:0] new_pos_frac = new_pos[15:0];
 wire rev_underflow = cur_dir && new_pos[37];
 
-// Sample selection
-wire signed [15:0] raw_sample_16 = cur_pos_int[0]
-                                  ? $signed(cram1_rdata[31:16])
-                                  : $signed(cram1_rdata[15:0]);
+// ============================================
+// 4-point Hermite resampler
+// ============================================
 
-wire [1:0] byte_sel = cur_pos_int[1:0];
-wire signed [7:0] raw_byte = byte_sel == 2'd0 ? $signed(cram1_rdata[7:0])   :
-                              byte_sel == 2'd1 ? $signed(cram1_rdata[15:8])  :
-                              byte_sel == 2'd2 ? $signed(cram1_rdata[23:16]) :
-                                                 $signed(cram1_rdata[31:24]);
-wire signed [15:0] raw_sample_8 = {raw_byte, 8'd0};
-wire signed [15:0] raw_sample = cur_fmt16 ? raw_sample_16 : raw_sample_8;
+// --- CRAM sample extraction (combinational, reused by tap fetch) ---
+// Extract a 16-bit signed sample from a 32-bit CRAM word given a
+// sample-space position.  For 16-bit: pos[0] selects hi/lo half.
+// For 8-bit: pos[1:0] selects one of 4 bytes, shifted to 16-bit.
+function signed [15:0] extract_sample;
+    input [31:0] word;
+    input [21:0] pos;
+    input        fmt16;
+    reg [1:0] bs;
+    begin
+        if (fmt16)
+            extract_sample = pos[0] ? $signed(word[31:16])
+                                    : $signed(word[15:0]);
+        else begin
+            bs = pos[1:0];
+            extract_sample = {(bs == 2'd0 ? $signed(word[7:0])   :
+                               bs == 2'd1 ? $signed(word[15:8])  :
+                               bs == 2'd2 ? $signed(word[23:16]) :
+                                            $signed(word[31:24])), 8'd0};
+        end
+    end
+endfunction
 
-// Log volume LUT: x² >> 8 precomputed (replaces 2 combinational multipliers)
+// CRAM word address for a given sample position
+function [21:0] cram_word_addr;
+    input [21:0] base;
+    input [21:0] pos;
+    input        fmt16;
+    begin
+        cram_word_addr = fmt16 ? base + {1'b0, pos[21:1]}
+                               : base + {2'b0, pos[21:2]};
+    end
+endfunction
+
+// --- 4 Hermite taps ---
+reg signed [15:0] tap_m1, tap_0, tap_1, tap_2;
+
+// --- Tap cache: 64-bit wide × 32 entries (packed {t2,t1,t0,tm1}) ---
+reg [63:0] tap_cache [0:31];
+reg [22:0] tap_tag   [0:31];   // {last_dir[22], last_pos_int[21:0]}
+reg [31:0] cache_valid;
+
+// --- Tap fetch state ---
+reg [1:0]  fetch_tap_idx;   // which tap are we fetching (0=m1,1=0,2=1,3=2)
+reg [2:0]  fetch_count;     // how many taps still to fetch
+reg [21:0] fetch_pos;       // resolved address for current tap
+reg [21:0] last_cram_word;  // last CRAM word address fetched (for same-word opt)
+reg [31:0] last_cram_data;  // last CRAM data read
+reg        last_cram_valid; // is last_cram_data usable
+
+// --- Boundary-aware tap address resolver ---
+// Given a sample offset relative to cur_pos_int, resolve the actual
+// sample address accounting for loop/end boundaries.
+// Resolve a tap address for Hermite interpolation.  Offsets are small
+// (−1 to +2), so overshoot past boundaries is at most 2 samples —
+// simple wrap/reflect/clamp, no division needed.
+function [21:0] resolve_tap_addr;
+    input signed [2:0] offset;   // -1, 0, +1, +2
+    input [21:0] pos;            // cur_pos_int
+    input [21:0] len;
+    input [21:0] loop_s, loop_e;
+    input        is_loop, is_bidi, is_dir;
+    reg signed [23:0] raw;
+    begin
+        // Compute raw position (direction-aware)
+        if (is_bidi && is_dir)
+            raw = {2'b0, pos} - {{21{offset[2]}}, offset};
+        else
+            raw = {2'b0, pos} + {{21{offset[2]}}, offset};
+
+        if (!is_loop) begin
+            // One-shot: clamp to [0, len-1]
+            if (raw < 0) resolve_tap_addr = 22'd0;
+            else if (raw >= {2'b0, len}) resolve_tap_addr = len - 22'd1;
+            else resolve_tap_addr = raw[21:0];
+        end else if (!is_bidi) begin
+            // Forward loop: wrap within [loop_s, loop_e).
+            // Overshoot is at most 2, so one wrap suffices.
+            if (raw >= {2'b0, loop_e})
+                resolve_tap_addr = loop_s + (raw[21:0] - loop_e);
+            else if (raw < {2'b0, loop_s})
+                resolve_tap_addr = loop_e - 22'd1 - (loop_s - 22'd1 - raw[21:0]);
+            else if (raw < 0) resolve_tap_addr = 22'd0;
+            else resolve_tap_addr = raw[21:0];
+        end else begin
+            // Bidi: reflect at boundaries
+            if (raw >= {2'b0, loop_e})
+                resolve_tap_addr = loop_e - 22'd1 - (raw[21:0] - loop_e);
+            else if (raw < {2'b0, loop_s})
+                resolve_tap_addr = loop_s + (loop_s - raw[21:0]);
+            else if (raw < 0) resolve_tap_addr = 22'd0;
+            else resolve_tap_addr = raw[21:0];
+        end
+    end
+endfunction
+
+// Resolved addresses for all 4 taps (combinational, used in S_TAP_FETCH)
+reg [21:0] tap_addrs [0:3];
+
+// --- Hermite polynomial evaluation (pipelined) ---
+// Catmull-Rom: result = ((a*t + b)*t + c)*t + d
+// Coefficients computed from taps, evaluation via Horner in 3 stages.
+reg signed [17:0] h_a, h_b, h_c, h_d;
+reg signed [17:0] h_stage;     // intermediate Horner accumulator
+reg signed [15:0] hermite_sample;
+
+wire signed [16:0] h_t = $signed({1'b0, cur_pos_frac});
+
+// Coefficient computation (done in S_TAP_NEXT after all taps loaded):
+//   a = (-x_m1 + 3*x_0 - 3*x_1 + x_2) / 2
+//   b = (2*x_m1 - 5*x_0 + 4*x_1 - x_2) / 2
+//   c = (-x_m1 + x_1) / 2
+//   d = x_0
+// Use wide intermediates to avoid overflow (tap values up to ±32767,
+// 5*32767 = 163835, needs 18+ bits).
+
+// --- Log volume LUT ---
 reg [7:0] log_vol_lut [0:255];
 integer _i;
 initial for (_i = 0; _i < 256; _i = _i + 1)
     log_vol_lut[_i] = (_i * _i) >> 8;
 
-// Registered LUT outputs (read in S_SCALE, used in S_ACCUM)
 reg [7:0] log_vol_l, log_vol_r;
 
-// Stereo volume scaling with log curve
-wire signed [23:0] prod_l = raw_sample * $signed({1'b0, log_vol_l});
-wire signed [23:0] prod_r = raw_sample * $signed({1'b0, log_vol_r});
+// Stereo volume scaling (uses Hermite output)
+wire signed [23:0] prod_l = hermite_sample * $signed({1'b0, log_vol_l});
+wire signed [23:0] prod_r = hermite_sample * $signed({1'b0, log_vol_r});
 wire signed [15:0] scaled_l = prod_l[23:8];
 wire signed [15:0] scaled_r = prod_r[23:8];
 
@@ -327,6 +439,7 @@ always @(posedge clk) begin
         vtbl_a_data <= 0;
         vtbl_b_addr <= 0;
         voice_active <= 32'd0;
+        cache_valid <= 32'd0;
         cpu_wr_pending <= 0;
         cpu_clear_pos <= 0;
         cpu_clear_base <= 0;
@@ -334,6 +447,10 @@ always @(posedge clk) begin
         dir_changed <= 0;
         new_dir <= 0;
         voice_end_pending <= 32'd0;
+        fetch_tap_idx <= 0;
+        fetch_count <= 0;
+        last_cram_valid <= 0;
+        hermite_sample <= 16'sh0;
         wrfifo_wr_ptr <= 0;
         wrfifo_rd_ptr <= 0;
     end else begin
@@ -366,6 +483,10 @@ always @(posedge clk) begin
             vtbl_a_data <= voice_wdata;
             if (voice_field == VTBL_CTRL)
                 voice_active[voice_sel] <= voice_wdata[0];
+            // Invalidate tap cache on fields that affect sample data
+            if (voice_field == VTBL_CTRL || voice_field == VTBL_ADDR ||
+                voice_field == VTBL_LOOP_START || voice_field == VTBL_LOOP_END)
+                cache_valid[voice_sel] <= 1'b0;
             if (voice_field == VTBL_CTRL && voice_wdata[0] && !voice_active[voice_sel]) begin
                 cpu_clear_pos <= 1;
                 cpu_clear_base <= {voice_sel, 4'd0};
@@ -393,6 +514,10 @@ always @(posedge clk) begin
                         cpu_clear_base <= {fs, 4'd0};
                     end
                 end
+                // Invalidate tap cache on fields that affect sample data
+                if (ff == VTBL_CTRL || ff == VTBL_ADDR ||
+                    ff == VTBL_LOOP_START || ff == VTBL_LOOP_END)
+                    cache_valid[fs] <= 1'b0;
             end
             wrfifo_rd_ptr <= wrfifo_rd_ptr + 1;
         end else if (cpu_clear_pos && !fsm_wr_active && !fsm_writing_now) begin
@@ -531,26 +656,192 @@ always @(posedge clk) begin
                                 state <= S_RD_CTRL;
                             end
                         end else
-                            state <= S_CRAM_REQ;
+                            state <= S_TAP_CHECK;
                     end
-                    default: state <= S_CRAM_REQ;
+                    default: state <= S_TAP_CHECK;
                 endcase
             end
 
-            // ---- CRAM1 read ----
-            S_CRAM_REQ: begin
-                if (!cram1_busy) begin
-                    cram1_rd <= 1;
-                    cram1_addr <= cur_fmt16
-                        ? cur_addr + {1'b0, cur_pos_int[21:1]}
-                        : cur_addr + {2'b0, cur_pos_int[21:2]};
-                    state <= S_CRAM_WAIT;
+            // ---- Hermite tap cache check ----
+            S_TAP_CHECK: begin
+                // Read cached taps + tag for this voice
+                begin : tap_check_block
+                    reg [63:0] cached;
+                    reg [22:0] tag;
+                    reg [21:0] last_pos;
+                    reg        last_dir;
+                    reg        hit_same, hit_fwd, hit_rev;
+                    cached   = tap_cache[cur_voice];
+                    tag      = tap_tag[cur_voice];
+                    last_pos = tag[21:0];
+                    last_dir = tag[22];
+
+                    hit_same = cache_valid[cur_voice] &&
+                               (cur_pos_int == last_pos) &&
+                               (cur_dir == last_dir);
+                    hit_fwd  = cache_valid[cur_voice] &&
+                               (cur_pos_int == last_pos + 22'd1) &&
+                               !cur_dir && !last_dir;
+                    hit_rev  = cache_valid[cur_voice] &&
+                               (cur_pos_int + 22'd1 == last_pos) &&
+                               cur_dir && last_dir;
+
+                    if (hit_same) begin
+                        // All 4 taps valid from cache — straight to Hermite
+                        tap_m1 <= $signed(cached[15:0]);
+                        tap_0  <= $signed(cached[31:16]);
+                        tap_1  <= $signed(cached[47:32]);
+                        tap_2  <= $signed(cached[63:48]);
+                        state <= S_TAP_NEXT;
+                    end else if (hit_fwd) begin
+                        // Shift forward: reuse 3 taps, fetch tap_2
+                        tap_m1 <= $signed(cached[31:16]);   // old tap_0
+                        tap_0  <= $signed(cached[47:32]);   // old tap_1
+                        tap_1  <= $signed(cached[63:48]);   // old tap_2
+                        fetch_tap_idx <= 2'd3;  // fetch tap_2 only
+                        fetch_count <= 3'd1;
+                        last_cram_valid <= 0;
+                        state <= S_TAP_FETCH;
+                    end else if (hit_rev) begin
+                        // Shift backward: reuse 3 taps, fetch tap_m1
+                        tap_0  <= $signed(cached[15:0]);    // old tap_m1
+                        tap_1  <= $signed(cached[31:16]);   // old tap_0
+                        tap_2  <= $signed(cached[47:32]);   // old tap_1
+                        fetch_tap_idx <= 2'd0;  // fetch tap_m1 only
+                        fetch_count <= 3'd1;
+                        last_cram_valid <= 0;
+                        state <= S_TAP_FETCH;
+                    end else begin
+                        // Cache miss — fetch all 4 taps
+                        fetch_tap_idx <= 2'd0;
+                        fetch_count <= 3'd4;
+                        last_cram_valid <= 0;
+                        state <= S_TAP_FETCH;
+                    end
                 end
             end
 
-            S_CRAM_WAIT: begin
-                if (cram1_rdata_valid)
-                    state <= S_SCALE;
+            // ---- Fetch one tap from CRAM ----
+            S_TAP_FETCH: begin
+                // Resolve address for current tap
+                begin : tap_fetch_block
+                    reg signed [2:0] offset;
+                    reg [21:0] addr;
+                    reg [21:0] word_addr;
+                    case (fetch_tap_idx)
+                        2'd0: offset = -3'sd1;
+                        2'd1: offset = 3'sd0;
+                        2'd2: offset = 3'sd1;
+                        2'd3: offset = 3'sd2;
+                    endcase
+                    addr = resolve_tap_addr(offset, cur_pos_int, cur_len,
+                        cur_loop_start, cur_loop_end, cur_loop, cur_bidi, cur_dir);
+                    fetch_pos <= addr;
+                    tap_addrs[fetch_tap_idx] <= addr;
+                    word_addr = cram_word_addr(cur_addr, addr, cur_fmt16);
+
+                    // Same-word optimization: reuse last CRAM read if possible
+                    if (last_cram_valid && word_addr == last_cram_word) begin
+                        // Extract sample from cached CRAM word
+                        case (fetch_tap_idx)
+                            2'd0: tap_m1 <= extract_sample(last_cram_data, addr, cur_fmt16);
+                            2'd1: tap_0  <= extract_sample(last_cram_data, addr, cur_fmt16);
+                            2'd2: tap_1  <= extract_sample(last_cram_data, addr, cur_fmt16);
+                            2'd3: tap_2  <= extract_sample(last_cram_data, addr, cur_fmt16);
+                        endcase
+                        state <= S_TAP_NEXT;
+                    end else if (!cram1_busy) begin
+                        cram1_rd <= 1;
+                        cram1_addr <= word_addr;
+                        last_cram_word <= word_addr;
+                        state <= S_TAP_WAIT;
+                    end
+                end
+            end
+
+            // ---- Wait for CRAM response ----
+            S_TAP_WAIT: begin
+                if (cram1_rdata_valid) begin
+                    last_cram_data <= cram1_rdata;
+                    last_cram_valid <= 1;
+                    case (fetch_tap_idx)
+                        2'd0: tap_m1 <= extract_sample(cram1_rdata, fetch_pos, cur_fmt16);
+                        2'd1: tap_0  <= extract_sample(cram1_rdata, fetch_pos, cur_fmt16);
+                        2'd2: tap_1  <= extract_sample(cram1_rdata, fetch_pos, cur_fmt16);
+                        2'd3: tap_2  <= extract_sample(cram1_rdata, fetch_pos, cur_fmt16);
+                    endcase
+                    state <= S_TAP_NEXT;
+                end
+            end
+
+            // ---- Advance to next tap or compute Hermite coefficients ----
+            S_TAP_NEXT: begin
+                fetch_count <= fetch_count - 3'd1;
+                if (fetch_count <= 3'd1) begin
+                    // All taps loaded — write cache and compute coefficients
+                    tap_cache[cur_voice] <= {tap_2, tap_1, tap_0, tap_m1};
+                    tap_tag[cur_voice]   <= {cur_dir, cur_pos_int};
+                    cache_valid[cur_voice] <= 1'b1;
+
+                    // Hermite coefficients (Catmull-Rom):
+                    //   a = (-x_m1 + 3*x_0 - 3*x_1 + x_2) / 2
+                    //   b = (2*x_m1 - 5*x_0 + 4*x_1 - x_2) / 2
+                    //   c = (-x_m1 + x_1) / 2
+                    //   d = x_0
+                    begin : coeff_calc
+                        reg signed [18:0] s_m1, s_0, s_1, s_2;
+                        s_m1 = {{3{tap_m1[15]}}, tap_m1};
+                        s_0  = {{3{tap_0[15]}},  tap_0};
+                        s_1  = {{3{tap_1[15]}},  tap_1};
+                        s_2  = {{3{tap_2[15]}},  tap_2};
+                        h_a <= (-s_m1 + 3*s_0 - 3*s_1 + s_2) >>> 1;
+                        h_b <= (2*s_m1 - 5*s_0 + 4*s_1 - s_2) >>> 1;
+                        h_c <= (-s_m1 + s_1) >>> 1;
+                        h_d <= s_0;
+                    end
+                    state <= S_HERMITE_1;
+                end else begin
+                    // More taps to fetch
+                    fetch_tap_idx <= fetch_tap_idx + 2'd1;
+                    state <= S_TAP_FETCH;
+                end
+            end
+
+            // ---- Hermite Horner evaluation: 3 pipelined stages ----
+            // result = ((a*t + b)*t + c)*t + d
+
+            S_HERMITE_1: begin
+                // h_stage = a*t >> 16 + b
+                begin : horner_1
+                    reg signed [34:0] p;
+                    p = h_a * h_t;
+                    h_stage <= $signed(p[34:16]) + h_b;
+                end
+                state <= S_HERMITE_2;
+            end
+
+            S_HERMITE_2: begin
+                // h_stage = h_stage*t >> 16 + c
+                begin : horner_2
+                    reg signed [34:0] p;
+                    p = h_stage * h_t;
+                    h_stage <= $signed(p[34:16]) + h_c;
+                end
+                state <= S_HERMITE_3;
+            end
+
+            S_HERMITE_3: begin
+                // result = h_stage*t >> 16 + d, clamp to 16-bit
+                begin : horner_3
+                    reg signed [34:0] p;
+                    reg signed [18:0] result;
+                    p = h_stage * h_t;
+                    result = $signed(p[34:16]) + {{1{h_d[17]}}, h_d};
+                    hermite_sample <= (result > 19'sd32767)  ? 16'sh7FFF :
+                                     (result < -19'sd32768) ? 16'sh8000 :
+                                     result[15:0];
+                end
+                state <= S_SCALE;
             end
 
             // ---- Pipeline stage 1: log volume LUT lookup ----
@@ -624,7 +915,7 @@ always @(posedge clk) begin
                     end
                 end else if (cur_loop && !cur_bidi) begin
                     if (new_pos_int >= cur_loop_end) begin
-                        vtbl_a_data <= {10'd0, cur_loop_start};
+                        vtbl_a_data <= {10'd0, cur_loop_start + (new_pos_int - cur_loop_end)};
                         pos_wrapped <= 1;
                     end else
                         vtbl_a_data <= {10'd0, new_pos_int};
@@ -644,9 +935,11 @@ always @(posedge clk) begin
                 vtbl_a_addr <= {cur_voice, VTBL_POS_FRAC};
 
                 if (pos_wrapped) begin
-                    // Loop wrap or voice end — reset or skip frac
-                    vtbl_a_wr <= cur_loop;  // write 0 if looping, skip if ended
-                    vtbl_a_data <= 32'd0;
+                    vtbl_a_wr <= cur_loop;  // write frac if looping, skip if ended
+                    // Preserve fractional position for forward loops (overshoot
+                    // carried over in S_WR_POS). Bidi wraps still clamp POS_INT
+                    // to the boundary, so reset frac to avoid mismatched state.
+                    vtbl_a_data <= (cur_loop && !cur_bidi) ? {16'd0, new_pos_frac} : 32'd0;
                 end else begin
                     vtbl_a_wr <= 1;
                     vtbl_a_data <= {16'd0, new_pos_frac};

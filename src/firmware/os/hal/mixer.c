@@ -47,13 +47,15 @@ static uint8_t group_shadow[MIXER_MAX_VOICES];        /* group index per voice *
 static uint8_t group_vol[MIXER_NUM_GROUPS];            /* 0-255 per group */
 static uint8_t master_vol;
 
-/* Sync software voice tracking with hardware voice-end events */
+/* Sync software voice tracking with hardware voice-end events.
+ * Peek only — do NOT clear IRQ bits here.  poll_ended() is the
+ * sole consumer so that app-level completion callbacks always fire.
+ * Without this, alloc_voice() steals end events before the app's
+ * audio pump sees them, leaving stale owner tracking that kills
+ * the wrong voices later. */
 static void sync_voice_mask(void) {
     uint32_t ended = MIX_IRQ_PENDING;
-    if (ended) {
-        MIX_IRQ_CLEAR = ended;
-        voice_active_mask &= ~ended;
-    }
+    voice_active_mask &= ~ended;
 }
 
 /* Bounds-only check — like the Amiga's Paula, register writes always
@@ -76,8 +78,48 @@ static void write_ctrl(int voice) {
     MIX_VOICE_CTRL = ctrl;
 }
 
+/* Equal-power pan: quarter-cosine/sine, 256 entries.
+ * pan_cos[i] = round(cos(i * π / 510) * 255), pan_sin[i] = round(sin(i * π / 510) * 255)
+ * At center (128): both ≈ 181 (0.707 × 256). */
+static const uint8_t pan_cos[256] = {
+    255,255,255,255,255,255,255,255,255,255,255,254,254,254,254,254,
+    254,254,253,253,253,253,253,252,252,252,252,251,251,251,251,250,
+    250,250,249,249,249,248,248,248,247,247,247,246,246,245,245,244,
+    244,243,243,243,242,242,241,241,240,239,239,238,238,237,237,236,
+    235,235,234,234,233,232,232,231,230,230,229,228,228,227,226,225,
+    225,224,223,222,222,221,220,219,218,218,217,216,215,214,213,213,
+    212,211,210,209,208,207,206,205,204,203,203,202,201,200,199,198,
+    197,196,195,194,193,192,191,190,188,187,186,185,184,183,182,181,
+    180,179,178,176,175,174,173,172,171,169,168,167,166,165,164,162,
+    161,160,159,157,156,155,154,152,151,150,149,147,146,145,143,142,
+    141,140,138,137,136,134,133,132,130,129,128,126,125,123,122,121,
+    119,118,116,115,114,112,111,109,108,107,105,104,102,101, 99, 98,
+     96, 95, 94, 92, 91, 89, 88, 86, 85, 83, 82, 80, 79, 77, 76, 74,
+     73, 71, 70, 68, 67, 65, 64, 62, 61, 59, 58, 56, 55, 53, 51, 50,
+     48, 47, 45, 44, 42, 41, 39, 38, 36, 34, 33, 31, 30, 28, 27, 25,
+     24, 22, 20, 19, 17, 16, 14, 13, 11,  9,  8,  6,  5,  3,  2,  0,
+};
+static const uint8_t pan_sin[256] = {
+      0,  2,  3,  5,  6,  8,  9, 11, 13, 14, 16, 17, 19, 20, 22, 24,
+     25, 27, 28, 30, 31, 33, 34, 36, 38, 39, 41, 42, 44, 45, 47, 48,
+     50, 51, 53, 55, 56, 58, 59, 61, 62, 64, 65, 67, 68, 70, 71, 73,
+     74, 76, 77, 79, 80, 82, 83, 85, 86, 88, 89, 91, 92, 94, 95, 96,
+     98, 99,101,102,104,105,107,108,109,111,112,114,115,116,118,119,
+    121,122,123,125,126,127,129,130,132,133,134,136,137,138,140,141,
+    142,143,145,146,147,149,150,151,152,154,155,156,157,159,160,161,
+    162,164,165,166,167,168,169,171,172,173,174,175,176,178,179,180,
+    181,182,183,184,185,186,187,188,190,191,192,193,194,195,196,197,
+    198,199,200,201,202,203,203,204,205,206,207,208,209,210,211,212,
+    213,213,214,215,216,217,218,218,219,220,221,222,222,223,224,225,
+    225,226,227,228,228,229,230,230,231,232,232,233,234,234,235,235,
+    236,237,237,238,238,239,239,240,241,241,242,242,243,243,243,244,
+    244,245,245,246,246,247,247,247,248,248,248,249,249,249,250,250,
+    250,251,251,251,251,252,252,252,252,253,253,253,253,253,254,254,
+    254,254,254,254,254,255,255,255,255,255,255,255,255,255,255,255,
+};
+
 /* Compute stereo volume target from voice vol × group vol × master vol + pan.
- * Pan 0=left, 128=center, 255=right. At center, both channels = full volume. */
+ * Pan 0=left, 128=center, 255=right. Equal-power curve (constant energy). */
 static void apply_vol_pan(int voice)
 {
     /* Chain: voice × group × master (all 0-255, result 0-255) */
@@ -86,10 +128,8 @@ static void apply_vol_pan(int voice)
     v = (v * master_vol) / 255;
 
     int p = pan_shadow[voice];
-    int vol_l = (p < 128) ? v : (v * (255 - p)) / 127;
-    int vol_r = (p > 128) ? v : (v * p) / 128;
-    if (vol_l > 255) vol_l = 255;
-    if (vol_r > 255) vol_r = 255;
+    int vol_l = (v * pan_cos[p]) >> 8;
+    int vol_r = (v * pan_sin[p]) >> 8;
     MIX_VOICE_VOL_TARGET = ((vol_r & 0xFF) << 8) | (vol_l & 0xFF);
 }
 
@@ -195,6 +235,7 @@ static int play_internal(const uint8_t *pcm, uint32_t sample_count,
 
     MIX_VOICE_SEL = voice;
     MIX_VOICE_ADDR = cram1_word_addr(pcm);
+    MIX_VOICE_POS_WR = 0;
     MIX_VOICE_LEN = sample_count;
     MIX_VOICE_RATE = rate;
 
@@ -209,6 +250,12 @@ static int play_internal(const uint8_t *pcm, uint32_t sample_count,
 
     priority_shadow[voice] = priority;
     ctrl_shadow[voice] = CTRL_ACTIVE | (fmt16 ? CTRL_FMT16 : 0);
+
+    /* Clear stale end-event from a previous play on this voice slot.
+     * sync_voice_mask() no longer clears IRQs (it peeks), so an old
+     * end bit could still be set.  Without this, poll_ended() would
+     * see the stale bit and immediately mark this voice as dead. */
+    MIX_IRQ_CLEAR = (1u << voice);
 
     /* Set mask BEFORE write_ctrl — write_ctrl strips CTRL_ACTIVE
      * for voices not in voice_active_mask (safety for set_loop/set_bidi). */

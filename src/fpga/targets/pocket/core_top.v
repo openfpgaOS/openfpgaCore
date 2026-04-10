@@ -840,7 +840,8 @@ wire        opl_write_req;
 wire [1:0]  opl_write_addr;
 wire [7:0]  opl_write_data;
 wire        opl_ack;
-wire signed [15:0] opl_audio_out;
+wire signed [15:0] opl_audio_out_l;
+wire signed [15:0] opl_audio_out_r;
 wire               opl_sample_toggle;
 
 // Link MMIO register interface
@@ -2318,12 +2319,14 @@ opl3_wrapper opl3 (
     .opl_write_addr (opl_write_addr),
     .opl_write_data (opl_write_data),
     .opl_ack            (opl_ack),
-    .opl_audio_out      (opl_audio_out),
+    .opl_audio_out_l    (opl_audio_out_l),
+    .opl_audio_out_r    (opl_audio_out_r),
     .opl_sample_toggle  (opl_sample_toggle)
 );
 `else
 assign opl_ack = 1'b1;
-assign opl_audio_out = 16'b0;
+assign opl_audio_out_l = 16'sh0;
+assign opl_audio_out_r = 16'sh0;
 assign opl_sample_toggle = 1'b0;
 `endif
 
@@ -2362,7 +2365,8 @@ audio_output audio_out (
     .fifo_level   (audio_fifo_level),
     .fifo_full    (audio_fifo_full),
 
-    .opl_audio_in     (opl_audio_out),
+    .opl_audio_in_l     (opl_audio_out_l),
+    .opl_audio_in_r     (opl_audio_out_r),
     .opl_toggle_in    (opl_sample_toggle),
 
     .audio_mclk   (audio_mclk),
