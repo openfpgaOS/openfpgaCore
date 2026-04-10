@@ -20,6 +20,7 @@
  * ====================================================================== */
 
 /* Mock CRAM1 region: 11 slots × 256KB + metadata */
+#define MOCK_CRAM1_BASE     0x39000000u
 #define MOCK_CRAM1_SIZE     (12 * 0x40000)  /* Extra for metadata */
 static uint8_t mock_cram1[MOCK_CRAM1_SIZE];
 
@@ -123,7 +124,7 @@ static void mock_reg_write(uint32_t addr, uint32_t val) {
 
 /* Redirect memory accesses for CRAM1 region */
 static volatile uint8_t *mock_cram1_ptr(uint32_t addr) {
-    uint32_t offset = addr - 0x39000000;
+    uint32_t offset = addr - MOCK_CRAM1_BASE;
     assert(offset < MOCK_CRAM1_SIZE);
     return (volatile uint8_t *)&mock_cram1[offset];
 }
@@ -137,7 +138,7 @@ static volatile uint8_t *mock_cram1_ptr(uint32_t addr) {
 
 #define SAVE_MAX_SLOTS      11
 #define SAVE_SLOT_SIZE      0x40000
-#define SAVE_REGION_ADDR    0x39000000
+#define SAVE_REGION_ADDR    MOCK_CRAM1_BASE
 #define SAVE_CRC_MAGIC      0x4F465356
 
 typedef struct {

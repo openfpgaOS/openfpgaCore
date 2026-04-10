@@ -43,7 +43,7 @@ A complete reference for building applications on the openfpgaOS platform for An
 | **CRAM0** | 16 MB cellular RAM (cached or uncached) |
 | **CRAM1** | 16 MB cellular RAM (cached or uncached) |
 | **SRAM** | 256 KB static RAM (uncached) |
-| **BRAM** | 64 KB on-chip (OS kernel) |
+| **BRAM** | 32 KB on-chip (OS kernel) |
 | **Save** | Nonvolatile, CRAM1 PSRAM-backed, 10 × 256 KB save slots, persisted to SD via Chip32 |
 | **Link** | Bidirectional 32-bit link cable port |
 | **Dock** | Supported (HDMI output, USB controllers) |
@@ -840,7 +840,7 @@ Exit the application and return to the OS. The OS will halt the CPU. On the Pock
 
 | Start | End | Size | Region | Cache | Description |
 |-------|-----|------|--------|-------|-------------|
-| `0x00000000` | `0x0000FFFF` | 64 KB | BRAM | -- | On-chip RAM (OS kernel) |
+| `0x00000000` | `0x00007FFF` | 32 KB | BRAM | -- | On-chip RAM (OS kernel) |
 | `0x10000000` | `0x13FFFFFF` | 64 MB | SDRAM | D-cache | Main memory (apps, data, framebuffers) |
 | `0x10000000` | `0x100BFFFF` | 768 KB | FB0 | D-cache | Framebuffer 0 (320x240) |
 | `0x10100000` | `0x101BFFFF` | 768 KB | FB1 | D-cache | Framebuffer 1 (320x240) |

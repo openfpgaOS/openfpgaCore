@@ -1,7 +1,7 @@
 //
 // Peripheral Slave (openfpgaOS)
 // Handles all local/peripheral accesses from the CPU:
-//   - BRAM (64KB, burst reads for I-cache line fills)
+//   - BRAM (32KB, burst reads for I-cache line fills)
 //   - System registers (cycle counter, display, palette, dataslot, controllers)
 //   - Terminal forwarding
 //   - Audio/Link/OPL register dispatch
@@ -154,7 +154,7 @@ assign sat_idx = 0; assign sat_field = 0; assign sat_wdata = 0;
 assign sprchar_wr = 0; assign sprchar_waddr = 0; assign sprchar_wdata = 0;
 
 // ============================================
-// BRAM (64KB = 16384 x 32-bit words)
+// BRAM (32KB = 8192 x 32-bit words)
 // ============================================
 wire [31:0] ram_rdata;
 reg  [13:0] ram_addr_mux;
@@ -597,7 +597,7 @@ assign rsp_busy = (state != S_IDLE);
 // Terminal pending flag
 wire term_pending = (state == S_TERM);
 
-// BRAM address mux (64KB: 14-bit word address = [15:2])
+// BRAM address mux (32KB BRAM; mux is [15:2] but bit 14 aliases)
 wire [13:0] bram_next_word = req_addr[15:2] + 14'd1;
 
 always @(*) begin

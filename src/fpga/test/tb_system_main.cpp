@@ -208,8 +208,8 @@ static const uint32_t fw_selftest[] = {
     0x0000006F,  // 60: j     .               # infinite loop
 };
 
-// Result register address within 64KB BRAM (word address)
-#define RESULT_STATUS_ADDR  (0xFF00 / 4)  // 0xFF00 < 0x10000 (64KB)
+// Result register address within 32KB BRAM (word address, aliases via [14:2])
+#define RESULT_STATUS_ADDR  (0xFF00 / 4)  // 0xFF00 aliases into 32KB BRAM
 #define RESULT_VALUE_ADDR   (0xFF04 / 4)
 
 int main(int argc, char **argv) {

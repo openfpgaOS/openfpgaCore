@@ -19,7 +19,7 @@ ofOS is a minimal operating system for the Analogue Pocket FPGA handheld. It run
 
 | Address Range             | Size   | Description                              |
 |---------------------------|--------|------------------------------------------|
-| `0x00000000 - 0x0000FFFF` | 64 KB  | BRAM -- bootloader, trap handler, hot code |
+| `0x00000000 - 0x00007FFF` | 32 KB  | BRAM -- bootloader, trap handler, hot code |
 | `0x10000000 - 0x100FFFFF` | 1 MB   | Framebuffer 0 (320x240, 8-bit indexed)   |
 | `0x10100000 - 0x101FFFFF` | 1 MB   | Framebuffer 1 (triple buffer)            |
 | `0x10200000 - 0x102FFFFF` | 1 MB   | Framebuffer 2 (triple buffer)            |

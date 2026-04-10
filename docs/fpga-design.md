@@ -24,7 +24,7 @@ core_top.v                                    Top-level (APF integration)
 +-- link_mmio.v                               Link cable serial transceiver
 +-- io_sdram.v                                SDRAM controller
 +-- psram_controller.v                        PSRAM controller
-+-- bram.v                                    64 KB block RAM
++-- bram.v                                    32 KB block RAM
 +-- openFPGA_Pocket_Analogizer.v              Analogizer adapter (RndMnkIII)
     +-- scandoubler.v                         Video scandoubler
     +-- rgb2YPbPr.v                           Color space conversion

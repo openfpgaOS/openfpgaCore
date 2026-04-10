@@ -1,7 +1,7 @@
 //
 // AXI4 Peripheral Slave (openfpgaOS)
 // Handles all local/peripheral accesses from the CPU:
-//   - BRAM (64KB, burst reads for I-cache line fills)
+//   - BRAM (32KB, burst reads for I-cache line fills)
 //   - System registers (cycle counter, display, palette, dataslot, controllers)
 //   - Terminal forwarding
 //   - Audio/Link/OPL register dispatch
@@ -776,8 +776,10 @@ always @(posedge clk) begin
             end
         end
 
-        // Reload hold counter when a new swap is queued
-        if (sysreg_wr_fire && req_addr[7:2] == 6'b000110 && req_wdata[0])
+        // Reload hold counter only for a fresh swap — not when replacing
+        // an already-pending one, otherwise fast-flipping apps starve the
+        // countdown and the display never updates.
+        if (sysreg_wr_fire && req_addr[7:2] == 6'b000110 && req_wdata[0] && !fb_swap_pending)
             vrr_hold_counter <= vrr_swap_hold;
     end
 end
