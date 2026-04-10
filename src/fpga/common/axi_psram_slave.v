@@ -92,6 +92,10 @@ wire beat_is_last = (beat_count == burst_len);
 
 // SRAM: addr[27:24] == 0xA (no burst support, async only)
 wire addr_is_sram  = (s_axi_araddr[27:24] == 4'hA);
+// CRAM0 occupies 0x30xxxxxx (cached) and 0x38xxxxxx (uncached) — bits [27:24] = 0 or 8.
+// CRAM1 occupies 0x31xxxxxx and 0x39xxxxxx and goes through cpu_psram1_cdc which has
+// no burst data path wired in core_top.v, so CRAM1 reads must stay on the async S_RD_CMD path.
+wire addr_is_cram0 = (s_axi_araddr[27:24] == 4'h0) || (s_axi_araddr[27:24] == 4'h8);
 
 always @(posedge clk or posedge reset) begin
     if (reset) begin
@@ -143,13 +147,9 @@ always @(posedge clk or posedge reset) begin
                 burst_len <= s_axi_arlen;
                 beat_count <= 0;
                 is_sram_target <= addr_is_sram;
-`ifdef PSRAM_BURST_ENABLE
-                // CRAM targets use sync burst; SRAM falls back to single-word
-                state <= addr_is_sram ? S_RD_CMD : S_RD_BURST;
-`else
-                // All reads use single-word async path (no sync burst)
-                state <= S_RD_CMD;
-`endif
+                // Only CRAM0 has the burst data path wired in core_top.v.
+                // CRAM1 (via CDC) and SRAM stay on the async single-word path.
+                state <= addr_is_cram0 ? S_RD_BURST : S_RD_CMD;
             end else if (s_axi_awvalid) begin
                 s_axi_awready <= 1;
                 addr_r <= s_axi_awaddr;
