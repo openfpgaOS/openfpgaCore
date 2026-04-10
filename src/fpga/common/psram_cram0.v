@@ -48,6 +48,12 @@ module psram_cram0 #(
     input  wire  [15:0] config_data,
     input  wire         config_bank_sel,
 
+    // Sync burst read interface (active only with PSRAM_BURST_ENABLE)
+    input  wire         burst_rd,       // single-cycle pulse
+    input  wire  [5:0]  burst_len,      // 32-bit words minus 1
+    output reg          burst_rdata_valid,
+    output reg   [31:0] burst_rdata,
+
     // Raw psram_cram0_drv busy — surfaced so core_top's BCR-init
     // FSM can wait for the chip-side config-write to drain without
     // confusing it with word_busy (which gates only async word
@@ -64,6 +70,9 @@ localparam [3:0] ST_HI_START  = 4'd4;
 localparam [3:0] ST_HI_BUSY   = 4'd5;  // Wait for busy to go high
 localparam [3:0] ST_HI_WAIT   = 4'd6;  // Wait for busy to go low
 localparam [3:0] ST_DONE      = 4'd7;
+localparam [3:0] ST_BURST_START = 4'd8;   // Issue sync_burst_en to driver
+localparam [3:0] ST_BURST_LO   = 4'd9;   // Wait for low halfword read_avail
+localparam [3:0] ST_BURST_HI   = 4'd10;  // Wait for high halfword, assemble word
 
 reg [3:0] state;
 reg is_write;
@@ -71,6 +80,10 @@ reg [31:0] latched_data;
 reg [21:0] latched_addr;
 reg latched_chip_sel;
 reg [3:0] latched_wstrb;
+
+// Burst read tracking
+reg [5:0]  burst_words_rem;    // 32-bit words remaining (including current)
+reg [15:0] burst_lo_half;      // latched low halfword during burst
 
 // Signals to psram module
 reg psram_write_en;
@@ -84,6 +97,10 @@ wire psram_read_avail;
 reg psram_bank_sel;
 reg psram_write_high_byte;
 reg psram_write_low_byte;
+
+// Sync burst control (driven by burst FSM states)
+reg sync_burst_en_r;
+reg [5:0] sync_burst_len_r;
 
 // ============================================================
 // BCR config_in_progress handshake
@@ -143,11 +160,10 @@ psram_cram0_drv #(
 
     .read_en(psram_read_en),
 
-    // Sync burst inputs — kept tied off in this build (we use the
-    // async two-phase path); the driver supports them and the FSM
-    // is in psram_cram0_drv.sv if a future change wants sync burst.
-    .sync_burst_en(1'b0),
-    .sync_burst_len(6'd0),
+    // Sync burst inputs — driven by burst FSM when PSRAM_BURST_ENABLE
+    // is defined, otherwise tied off (async two-phase path only).
+    .sync_burst_en(sync_burst_en_r),
+    .sync_burst_len(sync_burst_len_r),
 
     // BCR config — wired straight through. The driver handles the
     // CRE / WE# / address-on-DQ sequence on the next STATE_NONE.
@@ -200,17 +216,32 @@ always @(posedge clk or negedge reset_n) begin
         psram_bank_sel <= 1'b0;
         psram_write_high_byte <= 1'b1;
         psram_write_low_byte <= 1'b1;
+        sync_burst_en_r <= 1'b0;
+        sync_burst_len_r <= 6'd0;
+        burst_words_rem <= 6'd0;
+        burst_lo_half <= 16'd0;
+        burst_rdata_valid <= 1'b0;
+        burst_rdata <= 32'b0;
     end else begin
         // Default: clear single-cycle signals
         psram_write_en <= 1'b0;
         psram_read_en <= 1'b0;
         word_q_valid <= 1'b0;
+        sync_burst_en_r <= 1'b0;
+        burst_rdata_valid <= 1'b0;
 
         case (state)
             ST_IDLE: begin
                 word_busy <= 1'b0;
 
-                if (word_wr || word_rd) begin
+                if (burst_rd) begin
+                    // Sync burst read: each 32-bit word = 2 halfwords
+                    word_busy <= 1'b1;
+                    latched_addr <= word_addr;
+                    latched_chip_sel <= word_addr[21];
+                    burst_words_rem <= burst_len + 6'd1;
+                    state <= ST_BURST_START;
+                end else if (word_wr || word_rd) begin
                     word_busy <= 1'b1;
                     is_write <= word_wr;
                     latched_data <= word_data;
@@ -301,6 +332,43 @@ always @(posedge clk or negedge reset_n) begin
                     word_q_valid <= 1'b1;  // Pulse valid on read completion
                 end
                 state <= ST_IDLE;
+            end
+
+            // ============================================
+            // Sync burst read path (PSRAM_BURST_ENABLE)
+            // ============================================
+            ST_BURST_START: begin
+                // Issue sync burst to driver: 2 halfwords per 32-bit word
+                psram_bank_sel <= latched_chip_sel;
+                psram_addr <= {latched_addr[20:0], 1'b0};  // halfword base
+                sync_burst_en_r <= 1'b1;
+                // Each 32-bit word = 2 x 16-bit reads; len = total halfwords - 1
+                sync_burst_len_r <= {burst_words_rem[4:0], 1'b1};  // words*2 - 1
+                state <= ST_BURST_LO;
+            end
+
+            ST_BURST_LO: begin
+                // Wait for low halfword from sync burst stream
+                if (psram_read_avail) begin
+                    burst_lo_half <= psram_data_out;
+                    state <= ST_BURST_HI;
+                end
+            end
+
+            ST_BURST_HI: begin
+                // Wait for high halfword, assemble 32-bit word
+                if (psram_read_avail) begin
+                    burst_rdata <= {psram_data_out, burst_lo_half};
+                    burst_rdata_valid <= 1'b1;
+                    burst_words_rem <= burst_words_rem - 6'd1;
+                    if (burst_words_rem == 6'd1) begin
+                        // Last word delivered
+                        word_busy <= 1'b0;
+                        state <= ST_IDLE;
+                    end else begin
+                        state <= ST_BURST_LO;
+                    end
+                end
             end
 
             default: state <= ST_IDLE;

@@ -488,7 +488,12 @@ localparam [2:0] BCR_ST_DONE        = 3'd7;
 //   bits 5-4  = 01  drive strength 1/2
 //   bit 3     = 1   no-wrap burst (don't care in async)
 //   bits 2-0  = 111 continuous burst (don't care in async)
+`ifdef PSRAM_BURST_ENABLE
+// Sync burst mode: bit 15 = 0 (sync burst), rest unchanged
+localparam [15:0] BCR_VALUE = 16'h1D1F;
+`else
 localparam [15:0] BCR_VALUE = 16'h9D1F;
+`endif
 
 initial begin
     bcr_init_state     = BCR_ST_WAIT_PLL;
@@ -570,6 +575,11 @@ psram_cram0 #(
     .cram_we_n(cram0_we_n),
     .cram_ub_n(cram0_ub_n),
     .cram_lb_n(cram0_lb_n),
+    // Sync burst read (active only with PSRAM_BURST_ENABLE define)
+    .burst_rd(cpu_cram_burst_rd),
+    .burst_len(cpu_psram_burst_len),
+    .burst_rdata_valid(cram0_burst_rdata_valid),
+    .burst_rdata(cram0_burst_rdata),
     // BCR config write (driven by the BCR_ST_* FSM above)
     .config_en(bcr_init_config_en),
     .config_data(BCR_VALUE),
@@ -1315,10 +1325,17 @@ assign cpu_psram_rdata_valid = (psram_target_sel == 2'd1) ? sram_word_rdata_vali
                                (psram_target_sel == 2'd2) ? cdc_cpu_rdata_valid :
                                psram_mux_rdata_valid;
 
-// Burst read data / valid mux — single CRAM controller
-// No burst — axi_psram_slave uses single-word reads for cache fills
+// Burst read data from CRAM0 wrapper
+wire cram0_burst_rdata_valid;
+wire [31:0] cram0_burst_rdata;
+
+`ifdef PSRAM_BURST_ENABLE
+assign cpu_psram_burst_rdata_valid = cram0_burst_rdata_valid;
+assign cpu_psram_burst_rdata = cram0_burst_rdata;
+`else
 assign cpu_psram_burst_rdata_valid = 1'b0;
 assign cpu_psram_burst_rdata = 32'b0;
+`endif
 
 
 

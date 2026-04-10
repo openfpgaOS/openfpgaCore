@@ -15,7 +15,9 @@
 
 `default_nettype none
 
-module axi_sdram_arbiter (
+module axi_sdram_arbiter #(
+    parameter [3:0] CPU_FAIR_THRESHOLD = 4'd8  // Force CPU grant after this many GPU-only grants
+) (
     input wire clk,
     input wire reset_n,
 
@@ -135,28 +137,50 @@ localparam ST_WR   = 2'd2;  // Write transaction active (AW→W→B)
 reg [1:0] arb_state;
 reg [1:0] grant;  // 0=M0(Span), 1=M1(DMA), 2=M2(CPU), 3=M3(Bridge)
 
+// Fairness: deficit counter prevents GPU from starving the CPU.
+// Increments each time a GPU master (M0/M1) wins while the CPU
+// has a pending request. When it reaches the threshold, the CPU
+// is granted unconditionally. Resets when the CPU gets a grant
+// or has no pending request.
+reg [3:0] gpu_deficit;
+wire cpu_pending = m2_arvalid | m2_awvalid;
+
 // Grant arbitration — registered for timing
 always @(posedge clk or posedge reset) begin
     if (reset) begin
         arb_state <= ST_IDLE;
         grant <= 0;
+        gpu_deficit <= 0;
     end else begin
         case (arb_state)
         ST_IDLE: begin
-            // Fixed priority: M0 > M1 > M3 (Bridge) > M2 (CPU)
-            // Bridge before CPU so save readback/flush isn't starved.
-            if (m0_arvalid) begin
+            // Fairness override: if GPU has won too many times while CPU
+            // was waiting, force a CPU grant to prevent starvation.
+            if (cpu_pending && gpu_deficit >= CPU_FAIR_THRESHOLD) begin
+                grant <= 2'd2;
+                gpu_deficit <= 0;
+                if (m2_arvalid)
+                    arb_state <= ST_RD;
+                else
+                    arb_state <= ST_WR;
+            end
+            // Normal priority: M0 > M1 > M3 (Bridge) > M2 (CPU)
+            else if (m0_arvalid) begin
                 grant <= 2'd0;
                 arb_state <= ST_RD;
+                if (cpu_pending) gpu_deficit <= gpu_deficit + 4'd1;
             end else if (m0_awvalid) begin
                 grant <= 2'd0;
                 arb_state <= ST_WR;
+                if (cpu_pending) gpu_deficit <= gpu_deficit + 4'd1;
             end else if (m1_arvalid) begin
                 grant <= 2'd1;
                 arb_state <= ST_RD;
+                if (cpu_pending) gpu_deficit <= gpu_deficit + 4'd1;
             end else if (m1_awvalid) begin
                 grant <= 2'd1;
                 arb_state <= ST_WR;
+                if (cpu_pending) gpu_deficit <= gpu_deficit + 4'd1;
             end else if (m3_arvalid) begin
                 grant <= 2'd3;
                 arb_state <= ST_RD;
@@ -166,9 +190,14 @@ always @(posedge clk or posedge reset) begin
             end else if (m2_arvalid) begin
                 grant <= 2'd2;
                 arb_state <= ST_RD;
+                gpu_deficit <= 0;
             end else if (m2_awvalid) begin
                 grant <= 2'd2;
                 arb_state <= ST_WR;
+                gpu_deficit <= 0;
+            end else begin
+                // No requests pending — reset deficit
+                gpu_deficit <= 0;
             end
         end
 
