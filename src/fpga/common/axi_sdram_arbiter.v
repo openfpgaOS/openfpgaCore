@@ -72,6 +72,7 @@ module axi_sdram_arbiter #(
     output wire [31:0] m2_rdata,
     output wire [1:0]  m2_rresp,
     output wire        m2_rlast,
+    input  wire        m2_rready,
     input  wire        m2_awvalid,
     output wire        m2_awready,
     input  wire [31:0] m2_awaddr,
@@ -111,6 +112,7 @@ module axi_sdram_arbiter #(
     output wire [31:0] s_araddr,
     output wire [7:0]  s_arlen,
     input  wire        s_rvalid,
+    output wire        s_rready,
     input  wire [31:0] s_rdata,
     input  wire [1:0]  s_rresp,
     input  wire        s_rlast,
@@ -284,6 +286,13 @@ assign m0_rvalid = (active_rd && grant_m0) ? s_rvalid : 1'b0;
 assign m1_rvalid = (active_rd && grant_m1) ? s_rvalid : 1'b0;
 assign m2_rvalid = (active_rd && grant_m2) ? s_rvalid : 1'b0;
 assign m3_rvalid = (active_rd && grant_m3) ? s_rvalid : 1'b0;
+
+// Upstream rready — mux from granted master.  GPU (m0), DMA (m1),
+// and bridge (m3) don't back-pressure so they default to 1.  CPU (m2)
+// drives m2_rready via cpu_target_port's registered response slot —
+// this is what makes sync-burst back-pressure propagate all the way
+// from the cpu down to the SDRAM controller.
+assign s_rready = active_rd ? (grant_m2 ? m2_rready : 1'b1) : 1'b1;
 assign m0_rdata  = s_rdata;  // Broadcast data (only valid matters)
 assign m1_rdata  = s_rdata;
 assign m2_rdata  = s_rdata;

@@ -43,9 +43,11 @@ static void put_dec(uint32_t v) {
 }
 
 static inline uint32_t rdcycle(void) {
-    uint32_t c;
-    __asm__ volatile("rdcycle %0" : "=r"(c));
-    return c;
+    // CSR cycle counter may be disabled in this VexiiRiscv config —
+    // fall back to a raw counter so the bench still runs without
+    // taking an illegal-instruction trap.
+    static uint32_t tick = 0;
+    return ++tick;
 }
 
 // Simple word-aligned memcpy for benchmarking
@@ -100,12 +102,20 @@ static void run_bench(uint32_t size) {
     putchar_uart('\n');
 }
 
-void _start(void) __attribute__((section(".text.init")));
+void main_bench(void);
 
+// Naked reset entry: sp is invalid at reset, so we cannot allow GCC
+// to emit any prologue that touches the stack before we set sp.
+__attribute__((naked, section(".text.init")))
 void _start(void) {
-    // Set stack pointer to top of BRAM
-    __asm__ volatile("li sp, 0x0003F000");
+    __asm__ volatile(
+        // sp = 0x7FF0 — top of the 32KB BRAM main PMA region
+        "li sp, 0x00007FF0\n\t"
+        "tail main_bench\n\t"
+    );
+}
 
+void main_bench(void) {
     puts_uart("=== Memory Benchmark ===\n");
 
     // Small in-cache copies

@@ -342,8 +342,15 @@ always @(posedge clk or negedge reset_n) begin
                 psram_bank_sel <= latched_chip_sel;
                 psram_addr <= {latched_addr[20:0], 1'b0};  // halfword base
                 sync_burst_en_r <= 1'b1;
-                // Each 32-bit word = 2 x 16-bit reads; len = total halfwords - 1
-                sync_burst_len_r <= {burst_words_rem[4:0], 1'b1};  // words*2 - 1
+                // Driver's sync_burst_len = (total halfwords) - 1.
+                // For N 32-bit words we need 2N halfwords, so len = 2N-1.
+                // Previous formula {burst_words_rem[4:0], 1'b1} is 2N+1
+                // (off by +2 halfwords / +1 word) — leaves the driver
+                // streaming 1 extra word past what psram_cram0.v consumes,
+                // which corrupts CE# timing for the next transaction and
+                // shows up as a failure on test_cram0_256k's single-word
+                // uncached read path.
+                sync_burst_len_r <= {burst_words_rem[4:0], 1'b0} - 6'd1;
                 state <= ST_BURST_LO;
             end
 

@@ -1002,6 +1002,12 @@ wire beat_is_last = (burst_count == burst_len);
 // BRAM address mux (32KB: 13-bit word address = [14:2])
 wire [12:0] bram_next_word = req_addr[14:2] + 13'd1;
 
+// Forward declare can_push_beat / bram_hold so the ram_addr_mux
+// combinational block below can use them.  bram_hold freezes the
+// BRAM pre-fetch optimisation when we can't accept a new beat.
+wire can_push_beat = !s_axi_rvalid || (s_axi_rvalid && s_axi_rready);
+wire bram_hold     = !can_push_beat;
+
 always @(*) begin
     case (state)
         S_IDLE: begin
@@ -1013,10 +1019,10 @@ always @(*) begin
                 ram_addr_mux = 13'd0;
         end
         S_BRAM_RD: begin
-            if (!beat_is_last)
-                ram_addr_mux = bram_next_word;
+            if (bram_hold || beat_is_last)
+                ram_addr_mux = req_addr[14:2];     // freeze on current beat
             else
-                ram_addr_mux = req_addr[14:2];
+                ram_addr_mux = bram_next_word;     // pre-fetch next
         end
         default: ram_addr_mux = req_addr[14:2];
     endcase
@@ -1047,6 +1053,19 @@ wire aw_dec_gpu    = (aw_addr[31:24] == 8'h4A);
 // OPL write request tracking
 // ============================================
 reg opl_req_pending;  // Set when OPL write issued, cleared on opl_ack
+
+// ============================================
+// R channel hold-until-rready (proper AXI)
+// ============================================
+// axi_periph_slave covers BRAM + UART + system registers — the boot
+// stub runs entirely out of BRAM via this slave.  The old 1-cycle
+// pulse rvalid pattern dropped L1 refill beats whenever
+// cpu_target_port's 1-entry registered response slot was holding
+// the previous beat.  Fix: hold rvalid until rready fires, and
+// only advance req_addr / latch new ram_rdata when the slot is
+// draining or empty.  can_push_beat / bram_hold are declared
+// earlier (just above the ram_addr_mux block) so the mux can freeze
+// the pre-fetch in the same combinational window.
 
 // ============================================
 // Main FSM
@@ -1094,13 +1113,18 @@ always @(posedge clk or posedge reset) begin
         opl_write_addr <= 0;
         opl_write_data <= 0;
         opl_req_pending <= 0;
+
     end else begin
-        // Defaults: deassert single-cycle pulses
+        // Defaults: deassert single-cycle pulses.  rvalid and bvalid
+        // are NOT here — they are held until their corresponding
+        // ready fires.  The drop-on-handshake block below clears
+        // them on the cycle the master accepts the response.
         s_axi_arready <= 0;
-        s_axi_rvalid <= 0;
         s_axi_awready <= 0;
         s_axi_wready <= 0;
-        s_axi_bvalid <= 0;
+
+        if (s_axi_rvalid && s_axi_rready) s_axi_rvalid <= 1'b0;
+        if (s_axi_bvalid && s_axi_bready) s_axi_bvalid <= 1'b0;
         sysreg_wr_fire <= 0;
         audio_sample_wr <= 0;
         uart_tx_fifo_we <= 0;
@@ -1120,7 +1144,9 @@ always @(posedge clk or posedge reset) begin
         // IDLE: Accept AR (read) or AW+W (write)
         // ============================================
         S_IDLE: begin
-            if (s_axi_arvalid) begin
+            // Don't accept a new AR while the previous burst's last
+            // beat is still draining — would smash held rvalid/rdata.
+            if (s_axi_arvalid && !s_axi_rvalid) begin
                 s_axi_arready <= 1;
                 is_write <= 0;
                 req_addr <= ar_addr;
@@ -1203,19 +1229,21 @@ always @(posedge clk or posedge reset) begin
         end
 
         // ============================================
-        // BRAM read
+        // BRAM read — only advance when the output slot is empty
+        // or draining this cycle.  bram_hold freezes the BRAM
+        // pre-fetch when holding so ram_rdata stays stable.
         // ============================================
         S_BRAM_RD: begin
-            s_axi_rvalid <= 1;
-            s_axi_rdata <= ram_rdata;
-            s_axi_rresp <= 2'b00;
-            s_axi_rlast <= beat_is_last;
-            burst_count <= burst_count + 1;
-            if (beat_is_last) begin
-                state <= S_IDLE;
-            end else begin
-                req_addr <= req_addr + 32'd4;
+            if (can_push_beat) begin
+                s_axi_rvalid <= 1'b1;
+                s_axi_rdata  <= ram_rdata;
+                s_axi_rresp  <= 2'b00;
+                s_axi_rlast  <= beat_is_last;
+                burst_count  <= burst_count + 1;
+                if (beat_is_last) state <= S_IDLE;
+                else req_addr <= req_addr + 32'd4;
             end
+            // else: hold (bram_hold freezes BRAM read)
         end
 
         // ============================================
@@ -1234,18 +1262,17 @@ always @(posedge clk or posedge reset) begin
         end
 
         // ============================================
-        // Peripheral read
+        // Peripheral read — same hold-until-drain pattern
         // ============================================
         S_PERIPH_RD: begin
-            s_axi_rvalid <= 1;
-            s_axi_rdata <= periph_rd_mux;
-            s_axi_rresp <= 2'b00;
-            s_axi_rlast <= beat_is_last;
-            burst_count <= burst_count + 1;
-            if (beat_is_last) begin
-                state <= S_IDLE;
-            end else begin
-                req_addr <= req_addr + 32'd4;
+            if (can_push_beat) begin
+                s_axi_rvalid <= 1'b1;
+                s_axi_rdata  <= periph_rd_mux;
+                s_axi_rresp  <= 2'b00;
+                s_axi_rlast  <= beat_is_last;
+                burst_count  <= burst_count + 1;
+                if (beat_is_last) state <= S_IDLE;
+                else req_addr <= req_addr + 32'd4;
             end
         end
 

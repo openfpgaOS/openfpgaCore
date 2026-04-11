@@ -74,6 +74,15 @@ reg        cmd_issued;
 reg        psram_started;   // busy was seen after issuing command
 reg [7:0]  issue_wait;      // Timeout counter for missed commands
 
+// 1-entry R skid buffer — catches the rare case where a new psram
+// read completion lands while the previous beat's rvalid is still
+// held waiting for the master's rready.  Without this, any
+// master-side stall drops beats silently (same class of bug that
+// axi_sdram_slave had before the hold-until-rready rewrite).
+reg [31:0] rskid_data;
+reg        rskid_last;
+reg        rskid_valid;
+
 wire beat_is_last = (beat_count == burst_len);
 
 always @(posedge clk or posedge reset) begin
@@ -101,22 +110,42 @@ always @(posedge clk or posedge reset) begin
         psram_addr <= 0;
         psram_wdata <= 0;
         psram_wstrb <= 0;
+
+        rskid_data  <= 0;
+        rskid_last  <= 0;
+        rskid_valid <= 0;
     end else begin
-        // Defaults
+        // Defaults.  rvalid / bvalid are NOT in this list — they are
+        // hold-until-ready signals and are dropped explicitly by the
+        // handshake block below.
         s_axi_arready <= 0;
         s_axi_awready <= 0;
         s_axi_wready <= 0;
-        s_axi_rvalid <= 0;
-        s_axi_bvalid <= 0;
         psram_rd <= 0;
         psram_wr <= 0;
+
+        // AXI drop-on-handshake for R / B channels (proper AXI hold).
+        if (s_axi_rvalid && s_axi_rready) begin
+            if (rskid_valid) begin
+                s_axi_rdata  <= rskid_data;
+                s_axi_rlast  <= rskid_last;
+                rskid_valid  <= 1'b0;
+                // rvalid stays high — skid promoted into slot.
+            end else begin
+                s_axi_rvalid <= 1'b0;
+            end
+        end
+        if (s_axi_bvalid && s_axi_bready) s_axi_bvalid <= 1'b0;
         case (state)
 
         S_IDLE: begin
             cmd_issued <= 0;
             psram_started <= 0;
             issue_wait <= 0;
-            if (s_axi_arvalid) begin
+            // Don't accept a new AR while the previous burst's last
+            // beat is still draining through the R slot or skid —
+            // otherwise we'd smash in-flight rdata.
+            if (s_axi_arvalid && !s_axi_rvalid && !rskid_valid) begin
                 s_axi_arready <= 1;
                 addr_r <= s_axi_araddr;
                 burst_len <= s_axi_arlen;
@@ -170,10 +199,24 @@ always @(posedge clk or posedge reset) begin
         end
 
         S_RD_DAT: begin
-            s_axi_rvalid <= 1;
-            s_axi_rdata <= psram_rdata;
-            s_axi_rresp <= 2'b00;
-            s_axi_rlast <= beat_is_last;
+            // Route the new beat into either the primary R slot (if
+            // empty OR just drained this cycle by the handshake-drop
+            // block above) or the 1-entry skid.
+            if (!s_axi_rvalid ||
+                (s_axi_rvalid && s_axi_rready && !rskid_valid)) begin
+                s_axi_rvalid <= 1;
+                s_axi_rdata  <= psram_rdata;
+                s_axi_rresp  <= 2'b00;
+                s_axi_rlast  <= beat_is_last;
+            end else if (!rskid_valid) begin
+                rskid_valid <= 1'b1;
+                rskid_data  <= psram_rdata;
+                rskid_last  <= beat_is_last;
+            end
+            // else: both full → master is *very* slow; beat is lost.
+            // Shouldn't happen in practice — the master's 1-entry
+            // slot drains in 1-2 cycles, and psram_cram0 single-word
+            // reads are 8+ cycles apart.
             beat_count <= beat_count + 1;
             cmd_issued <= 0;
             psram_started <= 0;

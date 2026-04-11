@@ -65,6 +65,8 @@ wire [31:0] sdram_wdata;
 wire [3:0]  sdram_wstrb;
 wire        sdram_bvalid;
 wire [1:0]  sdram_bresp;
+// Per-target R-channel back-pressure from cpu_system (new plumbing).
+wire sdram_rready, cram0_rready, cram1_rready, sram_rready, local_rready;
 
 // CRAM0 / CRAM1 / SRAM AXI4 buses — per-chip fan-out from cpu_system.
 // We only give CRAM0 a real behavioral model (so preloaded OS / app
@@ -101,80 +103,185 @@ wire        sram_wlast;
 wire        sram_arready, sram_awready;
 
 // ============================================================
-// CRAM0 behavioral model: 16 MB backing store for OS + app code.
-// C++ harness preloads via ps_bd_we / ps_bd_addr / ps_bd_wdata.
+// CRAM0: REAL stack — axi_cram0_slave → psram_cram0_test →
+// psram_cram0_drv → cram_chip_model.  This replaces the behavioral
+// cram0_mem[] from earlier and makes boot simulation actually
+// exercise the sync-burst RTL that runs on hardware.
+//
+// ps_bd_we / ps_bd_addr / ps_bd_wdata write the OS binary through
+// cram_chip_model's backdoor (32-bit word wide, bank-bit in addr[21]).
+// Harness also drives bcr_config_en via `bcr_config_pulse` below to
+// sequence the BCR init that core_top.v's BCR_ST_* FSM would do on
+// real hardware.
 // ============================================================
-reg [31:0] cram0_mem [0:4194303];  // 16 MW = 16 MB
 
-// Backdoor write port for preloading OS binary
-always @(posedge clk)
-    if (ps_bd_we) cram0_mem[ps_bd_addr[21:0]] <= ps_bd_wdata;
+// psram_cram0 → axi_cram0_slave wires
+wire        c0_psram_rd, c0_psram_wr;
+wire [25:0] c0_psram_addr;
+wire [31:0] c0_psram_wdata;
+wire [3:0]  c0_psram_wstrb;
+wire [31:0] c0_psram_rdata;
+wire        c0_psram_busy, c0_psram_rdata_valid;
+wire        c0_psram_burst_rd;
+wire [5:0]  c0_psram_burst_len;
+wire [31:0] c0_psram_burst_rdata;
+wire        c0_psram_burst_rdata_valid;
 
-// Read FSM
-reg cram0_r_pending;
-reg [7:0] cram0_r_cnt, cram0_r_len;
-reg [31:0] cram0_r_addr;
-assign cram0_arready = !cram0_r_pending;
-assign cram0_rvalid = cram0_r_pending;
-assign cram0_rdata = cram0_mem[cram0_r_addr[23:2]];
-assign cram0_rresp = 2'b00;
-assign cram0_rlast = (cram0_r_cnt == cram0_r_len);
+// CRAM0 physical pins
+wire [21:16] cram_a;
+wire [15:0]  cram_ctrl_dq_out;
+wire         cram_ctrl_dq_oe;
+wire [15:0]  cram_chip_dq_out;
+wire [15:0]  cram_dq_to_ctrl;
+wire         cram_wait, cram_clk_unused;
+wire         cram_adv_n, cram_cre;
+wire         cram_ce0_n, cram_ce1_n;
+wire         cram_oe_n, cram_we_n;
+wire         cram_ub_n, cram_lb_n;
 
-// Write FSM
-reg cram0_w_active;
-reg [31:0] cram0_w_addr;
-reg cram0_b_pending;
-assign cram0_awready = !cram0_w_active && !cram0_b_pending;
-assign cram0_wready = cram0_w_active;
-assign cram0_bvalid = cram0_b_pending;
-assign cram0_bresp = 2'b00;
+assign cram_dq_to_ctrl = cram_ctrl_dq_oe ? cram_ctrl_dq_out : cram_chip_dq_out;
 
-always @(posedge clk) begin
+// BCR init FSM — replicates the core_top.v BCR_ST_* sequence.  Runs
+// immediately after reset_n rises, issues BCR config pulses to both
+// chip banks, then sets bcr_init_done.  CPU reset is gated below so
+// VexiiRiscv doesn't start fetching until the chip is in sync burst
+// mode.
+reg [2:0]  bcr_init_state;
+reg        bcr_config_en;
+reg        bcr_config_bank;
+reg        bcr_init_done;
+localparam [2:0] BCR_IDLE   = 3'd0;
+localparam [2:0] BCR_PULSE0 = 3'd1;
+localparam [2:0] BCR_WAIT0  = 3'd2;
+localparam [2:0] BCR_PULSE1 = 3'd3;
+localparam [2:0] BCR_WAIT1  = 3'd4;
+localparam [2:0] BCR_DONE   = 3'd5;
+reg        bcr_saw_busy;
+wire       cram_raw_busy;  // from psram_cram0_test
+
+always @(posedge clk or negedge reset_n) begin
     if (!reset_n) begin
-        cram0_r_pending <= 0;
-        cram0_r_cnt <= 0;
-        cram0_r_len <= 0;
-        cram0_r_addr <= 0;
-        cram0_w_active <= 0;
-        cram0_w_addr <= 0;
-        cram0_b_pending <= 0;
+        bcr_init_state  <= BCR_IDLE;
+        bcr_config_en   <= 1'b0;
+        bcr_config_bank <= 1'b0;
+        bcr_init_done   <= 1'b0;
+        bcr_saw_busy    <= 1'b0;
     end else begin
-        // Read handling
-        if (cram0_arvalid && cram0_arready) begin
-            cram0_r_pending <= 1;
-            cram0_r_cnt <= 0;
-            cram0_r_len <= cram0_arlen;
-            cram0_r_addr <= cram0_araddr;
-        end else if (cram0_r_pending) begin
-            if (cram0_rlast) begin
-                cram0_r_pending <= 0;
-            end else begin
-                cram0_r_cnt <= cram0_r_cnt + 1;
-                cram0_r_addr <= cram0_r_addr + 4;
+        bcr_config_en <= 1'b0;
+        case (bcr_init_state)
+            BCR_IDLE: bcr_init_state <= BCR_PULSE0;
+            BCR_PULSE0: begin
+                bcr_config_bank <= 1'b0;
+                bcr_config_en   <= 1'b1;
+                bcr_saw_busy    <= 1'b0;
+                bcr_init_state  <= BCR_WAIT0;
             end
-        end
-
-        // Write handling
-        if (cram0_awvalid && cram0_awready) begin
-            cram0_w_active <= 1;
-            cram0_w_addr <= cram0_awaddr;
-        end
-        if (cram0_w_active && cram0_wvalid) begin
-            // Byte-strobe write
-            if (cram0_wstrb[0]) cram0_mem[cram0_w_addr[23:2]][7:0]   <= cram0_wdata[7:0];
-            if (cram0_wstrb[1]) cram0_mem[cram0_w_addr[23:2]][15:8]  <= cram0_wdata[15:8];
-            if (cram0_wstrb[2]) cram0_mem[cram0_w_addr[23:2]][23:16] <= cram0_wdata[23:16];
-            if (cram0_wstrb[3]) cram0_mem[cram0_w_addr[23:2]][31:24] <= cram0_wdata[31:24];
-            cram0_w_addr <= cram0_w_addr + 4;
-            if (cram0_wlast) begin
-                cram0_w_active <= 0;
-                cram0_b_pending <= 1;
+            BCR_WAIT0: begin
+                if (cram_raw_busy) bcr_saw_busy <= 1'b1;
+                else if (bcr_saw_busy) bcr_init_state <= BCR_PULSE1;
             end
-        end
-        if (cram0_b_pending)
-            cram0_b_pending <= 0;
+            BCR_PULSE1: begin
+                bcr_config_bank <= 1'b1;
+                bcr_config_en   <= 1'b1;
+                bcr_saw_busy    <= 1'b0;
+                bcr_init_state  <= BCR_WAIT1;
+            end
+            BCR_WAIT1: begin
+                if (cram_raw_busy) bcr_saw_busy <= 1'b1;
+                else if (bcr_saw_busy) bcr_init_state <= BCR_DONE;
+            end
+            BCR_DONE: bcr_init_done <= 1'b1;
+        endcase
     end
 end
+
+// CRAM0 AXI slave — DUT for the whole burst read path
+axi_cram0_slave cram0_axi (
+    .clk    (clk),
+    .reset_n(reset_n),
+    .s_axi_arvalid(cram0_arvalid), .s_axi_arready(cram0_arready),
+    .s_axi_araddr (cram0_araddr),  .s_axi_arlen  (cram0_arlen),
+    .s_axi_rvalid (cram0_rvalid),  .s_axi_rready (cram0_rready),
+    .s_axi_rdata  (cram0_rdata),
+    .s_axi_rresp  (cram0_rresp),   .s_axi_rlast  (cram0_rlast),
+    .s_axi_awvalid(cram0_awvalid), .s_axi_awready(cram0_awready),
+    .s_axi_awaddr (cram0_awaddr),  .s_axi_awlen  (cram0_awlen),
+    .s_axi_wvalid (cram0_wvalid),  .s_axi_wready (cram0_wready),
+    .s_axi_wdata  (cram0_wdata),   .s_axi_wstrb  (cram0_wstrb),
+    .s_axi_wlast  (cram0_wlast),
+    .s_axi_bvalid (cram0_bvalid),  .s_axi_bready (1'b1),
+    .s_axi_bresp  (cram0_bresp),
+
+    .psram_rd         (c0_psram_rd),
+    .psram_wr         (c0_psram_wr),
+    .psram_addr       (c0_psram_addr),
+    .psram_wdata      (c0_psram_wdata),
+    .psram_wstrb      (c0_psram_wstrb),
+    .psram_rdata      (c0_psram_rdata),
+    .psram_busy       (c0_psram_busy),
+    .psram_rdata_valid(c0_psram_rdata_valid),
+
+    .psram_burst_rd         (c0_psram_burst_rd),
+    .psram_burst_len        (c0_psram_burst_len),
+    .psram_burst_rdata      (c0_psram_burst_rdata),
+    .psram_burst_rdata_valid(c0_psram_burst_rdata_valid)
+);
+
+psram_cram0_test #(.CLOCK_SPEED(100.0)) cram0_wrap (
+    .clk    (clk),
+    .reset_n(reset_n),
+    .word_rd   (c0_psram_rd),
+    .word_wr   (c0_psram_wr),
+    .word_addr (c0_psram_addr[21:0]),
+    .word_data (c0_psram_wdata),
+    .word_wstrb(c0_psram_wstrb),
+    .word_q    (c0_psram_rdata),
+    .word_busy (c0_psram_busy),
+    .word_q_valid(c0_psram_rdata_valid),
+    .burst_rd          (c0_psram_burst_rd),
+    .burst_len         (c0_psram_burst_len),
+    .burst_rdata_valid (c0_psram_burst_rdata_valid),
+    .burst_rdata       (c0_psram_burst_rdata),
+    .config_en      (bcr_config_en),
+    .config_data    (16'h641F),
+    .config_bank_sel(bcr_config_bank),
+    .raw_busy       (cram_raw_busy),
+    .cram_a    (cram_a),
+    .cram_dq_in(cram_dq_to_ctrl),
+    .cram_dq_out(cram_ctrl_dq_out),
+    .cram_dq_oe(cram_ctrl_dq_oe),
+    .cram_wait (cram_wait),
+    .cram_clk  (cram_clk_unused),
+    .cram_adv_n(cram_adv_n), .cram_cre(cram_cre),
+    .cram_ce0_n(cram_ce0_n), .cram_ce1_n(cram_ce1_n),
+    .cram_oe_n (cram_oe_n),  .cram_we_n (cram_we_n),
+    .cram_ub_n (cram_ub_n),  .cram_lb_n (cram_lb_n)
+);
+
+cram_chip_model #(.POWERUP_CYCLES(8'd16)) cram_chip (
+    .clk         (clk),
+    .cram_clk    (clk),
+    .reset_n     (reset_n),
+    .cram_a      (cram_a),
+    .cram_dq_in  (cram_ctrl_dq_oe ? cram_ctrl_dq_out : 16'h0),
+    .cram_dq_out (cram_chip_dq_out),
+    .cram_dq_oe  (cram_ctrl_dq_oe),
+    .cram_wait_out(cram_wait),
+    .cram_adv_n  (cram_adv_n),
+    .cram_cre    (cram_cre),
+    .cram_ce0_n  (cram_ce0_n),
+    .cram_ce1_n  (cram_ce1_n),
+    .cram_oe_n   (cram_oe_n),
+    .cram_we_n   (cram_we_n),
+    .cram_ub_n   (cram_ub_n),
+    .cram_lb_n   (cram_lb_n),
+    .cram_wr_strobe(1'b0),
+    // Backdoor: 32-bit word writes from C++ harness during reset
+    .bd_we        (ps_bd_we),
+    .bd_word_addr (ps_bd_addr[20:0]),
+    .bd_wdata_word(ps_bd_wdata),
+    .error_count (/* unused */)
+);
 
 // CRAM1 stub — ack everything with zero data
 assign cram1_arready = 1'b1;
@@ -213,7 +320,6 @@ wire [31:0] local_wdata;
 wire [3:0]  local_wstrb;
 wire        local_bvalid;
 wire [1:0]  local_bresp;
-wire        local_rready = 1'b1;  // Always accept read data
 
 // I-fetch AXI4 bus (from cpu_system's fetch port → BRAM)
 wire        fetch_arvalid, fetch_arready;
@@ -223,12 +329,16 @@ wire        fetch_rvalid, fetch_rlast;
 wire [31:0] fetch_rdata;
 wire [1:0]  fetch_rresp;
 
+// Gate CPU reset on BCR init done — matches core_top.v's
+//   wire reset_n = reset_n_apf & bcr_init_done;
+wire cpu_reset_n = reset_n & bcr_init_done;
 cpu_system cpu (
-    .clk(clk), .reset_n(reset_n),
+    .clk(clk), .reset_n(cpu_reset_n),
     // SDRAM
     .m_sdram_arvalid(sdram_arvalid), .m_sdram_arready(sdram_arready),
     .m_sdram_araddr(sdram_araddr), .m_sdram_arlen(sdram_arlen),
-    .m_sdram_rvalid(sdram_rvalid), .m_sdram_rdata(sdram_rdata),
+    .m_sdram_rvalid(sdram_rvalid), .m_sdram_rready(sdram_rready),
+    .m_sdram_rdata(sdram_rdata),
     .m_sdram_rresp(sdram_rresp), .m_sdram_rlast(sdram_rlast),
     .m_sdram_awvalid(sdram_awvalid), .m_sdram_awready(sdram_awready),
     .m_sdram_awaddr(sdram_awaddr), .m_sdram_awlen(sdram_awlen),
@@ -239,7 +349,8 @@ cpu_system cpu (
     // CRAM0 (backed by cram0_mem[])
     .m_cram0_arvalid(cram0_arvalid), .m_cram0_arready(cram0_arready),
     .m_cram0_araddr(cram0_araddr), .m_cram0_arlen(cram0_arlen),
-    .m_cram0_rvalid(cram0_rvalid), .m_cram0_rdata(cram0_rdata),
+    .m_cram0_rvalid(cram0_rvalid), .m_cram0_rready(cram0_rready),
+    .m_cram0_rdata(cram0_rdata),
     .m_cram0_rresp(cram0_rresp), .m_cram0_rlast(cram0_rlast),
     .m_cram0_awvalid(cram0_awvalid), .m_cram0_awready(cram0_awready),
     .m_cram0_awaddr(cram0_awaddr), .m_cram0_awlen(cram0_awlen),
@@ -250,7 +361,8 @@ cpu_system cpu (
     // CRAM1 (stub ack)
     .m_cram1_arvalid(cram1_arvalid), .m_cram1_arready(cram1_arready),
     .m_cram1_araddr(cram1_araddr), .m_cram1_arlen(cram1_arlen),
-    .m_cram1_rvalid(cram1_rvalid), .m_cram1_rdata(cram1_rdata),
+    .m_cram1_rvalid(cram1_rvalid), .m_cram1_rready(cram1_rready),
+    .m_cram1_rdata(cram1_rdata),
     .m_cram1_rresp(cram1_rresp), .m_cram1_rlast(cram1_rlast),
     .m_cram1_awvalid(cram1_awvalid), .m_cram1_awready(cram1_awready),
     .m_cram1_awaddr(cram1_awaddr), .m_cram1_awlen(cram1_awlen),
@@ -261,7 +373,8 @@ cpu_system cpu (
     // SRAM (stub ack)
     .m_sram_arvalid(sram_arvalid), .m_sram_arready(sram_arready),
     .m_sram_araddr(sram_araddr), .m_sram_arlen(sram_arlen),
-    .m_sram_rvalid(sram_rvalid), .m_sram_rdata(sram_rdata),
+    .m_sram_rvalid(sram_rvalid), .m_sram_rready(sram_rready),
+    .m_sram_rdata(sram_rdata),
     .m_sram_rresp(sram_rresp), .m_sram_rlast(sram_rlast),
     .m_sram_awvalid(sram_awvalid), .m_sram_awready(sram_awready),
     .m_sram_awaddr(sram_awaddr), .m_sram_awlen(sram_awlen),
@@ -272,7 +385,8 @@ cpu_system cpu (
     // Local
     .m_local_arvalid(local_arvalid), .m_local_arready(local_arready),
     .m_local_araddr(local_araddr), .m_local_arlen(local_arlen),
-    .m_local_rvalid(local_rvalid), .m_local_rdata(local_rdata),
+    .m_local_rvalid(local_rvalid), .m_local_rready(local_rready),
+    .m_local_rdata(local_rdata),
     .m_local_rresp(local_rresp), .m_local_rlast(local_rlast),
     .m_local_awvalid(local_awvalid), .m_local_awready(local_awready),
     .m_local_awaddr(local_awaddr), .m_local_awlen(local_awlen),
@@ -298,7 +412,7 @@ bram_model #(.ADDR_BITS(16)) bram (
     // Local port
     .local_ar_valid(local_arvalid), .local_ar_ready(local_arready),
     .local_ar_addr(local_araddr), .local_ar_len(local_arlen),
-    .local_r_valid(local_rvalid), .local_r_ready(1'b1),
+    .local_r_valid(local_rvalid), .local_r_ready(local_rready),
     .local_r_data(local_rdata), .local_r_resp(local_rresp),
     .local_r_last(local_rlast),
     .local_aw_valid(local_awvalid), .local_aw_ready(local_awready),
@@ -321,7 +435,7 @@ sdram_fast_model sdram_fast (
     .clk(clk), .reset_n(reset_n),
     .s_axi_arvalid(sdram_arvalid), .s_axi_arready(sdram_arready),
     .s_axi_araddr(sdram_araddr), .s_axi_arlen(sdram_arlen),
-    .s_axi_rvalid(sdram_rvalid), .s_axi_rready(1'b1),
+    .s_axi_rvalid(sdram_rvalid), .s_axi_rready(sdram_rready),
     .s_axi_rdata(sdram_rdata), .s_axi_rresp(sdram_rresp), .s_axi_rlast(sdram_rlast),
     .s_axi_awvalid(sdram_awvalid), .s_axi_awready(sdram_awready),
     .s_axi_awaddr(sdram_awaddr), .s_axi_awlen(sdram_awlen),

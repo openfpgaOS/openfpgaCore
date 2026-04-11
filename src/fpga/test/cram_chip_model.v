@@ -42,9 +42,33 @@ module cram_chip_model #(
     input  wire        cram_lb_n,
     input  wire        cram_wr_strobe,  // Pulse: capture current DQ data for burst write
 
+    // Backdoor preload port (test-only, for C++ harness).
+    // Writes a 32-bit word as two halfwords (low=bit 0 of halfword
+    // addr, high=bit 1) so the host can stream a full word per cycle.
+    // bd_word_addr: bit 20 selects bank, bits 19:0 are WORD index
+    // within that bank (two halfwords per word).
+    input  wire        bd_we,
+    input  wire [20:0] bd_word_addr,
+    input  wire [31:0] bd_wdata_word,
+
     // Error reporting
     output reg  [15:0] error_count
 );
+
+// Split 32-bit word into two halfwords at 2*word_idx and 2*word_idx+1.
+// Word addressing is packed: halfword_idx = {word_idx[18:0], lo_hi}
+// within the selected bank.
+always @(posedge clk) begin
+    if (bd_we) begin
+        if (bd_word_addr[20]) begin
+            mem1[{bd_word_addr[18:0], 1'b0}] <= bd_wdata_word[15:0];
+            mem1[{bd_word_addr[18:0], 1'b1}] <= bd_wdata_word[31:16];
+        end else begin
+            mem0[{bd_word_addr[18:0], 1'b0}] <= bd_wdata_word[15:0];
+            mem0[{bd_word_addr[18:0], 1'b1}] <= bd_wdata_word[31:16];
+        end
+    end
+end
 
 // Memory: 2 banks, 20-bit addressing per bank (1M × 16 = 2MB per bank)
 localparam BANK_BITS = 20;

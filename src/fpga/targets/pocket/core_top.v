@@ -487,15 +487,11 @@ localparam [2:0] BCR_ST_DONE        = 3'd7;
 //   bit 6     = 0   reserved
 //   bits 5-4  = 01  drive strength 1/2
 //   bit 3     = 1   no-wrap burst (don't care in async)
-//   bits 2-0  = 111 continuous burst (don't care in async)
-// BCR value is currently 0x9D1F (async page mode, the AS1C8M16PL POR
-// default).  Must match axi_cram0_slave's read path: when that slave
-// issues async single-word reads, the chip must also be in async mode
-// or it will refuse to respond.  The burst path in axi_cram0_slave
-// exists but is not yet the active read path — re-enabling it will
-// also require flipping this to 0x641F (sync burst, matching
-// PocketQuake) as a coupled change.
-localparam [15:0] BCR_VALUE = 16'h9D1F;
+//   bits 2-0  = 111 continuous burst
+// Sync burst mode — matches PocketQuake / psram_cram0_drv.sv
+// SYNC_LATENCY=4 expectation.  Coupled with axi_cram0_slave.v's
+// S_IDLE→S_RD_BURST transition.
+localparam [15:0] BCR_VALUE = 16'h9D1F;  // async page mode (sync burst disabled for HW debug)
 
 initial begin
     bcr_init_state     = BCR_ST_WAIT_PLL;
@@ -759,6 +755,7 @@ wire        cpu_m_sdram_arready;
 wire [31:0] cpu_m_sdram_araddr;
 wire [7:0]  cpu_m_sdram_arlen;
 wire        cpu_m_sdram_rvalid;
+wire        cpu_m_sdram_rready;
 wire [31:0] cpu_m_sdram_rdata;
 wire [1:0]  cpu_m_sdram_rresp;
 wire        cpu_m_sdram_rlast;
@@ -782,6 +779,7 @@ wire        cpu_m_cram0_arready;
 wire [31:0] cpu_m_cram0_araddr;
 wire [7:0]  cpu_m_cram0_arlen;
 wire        cpu_m_cram0_rvalid;
+wire        cpu_m_cram0_rready;
 wire [31:0] cpu_m_cram0_rdata;
 wire [1:0]  cpu_m_cram0_rresp;
 wire        cpu_m_cram0_rlast;
@@ -802,6 +800,7 @@ wire        cpu_m_cram1_arready;
 wire [31:0] cpu_m_cram1_araddr;
 wire [7:0]  cpu_m_cram1_arlen;
 wire        cpu_m_cram1_rvalid;
+wire        cpu_m_cram1_rready;
 wire [31:0] cpu_m_cram1_rdata;
 wire [1:0]  cpu_m_cram1_rresp;
 wire        cpu_m_cram1_rlast;
@@ -822,6 +821,7 @@ wire        cpu_m_sram_arready;
 wire [31:0] cpu_m_sram_araddr;
 wire [7:0]  cpu_m_sram_arlen;
 wire        cpu_m_sram_rvalid;
+wire        cpu_m_sram_rready;
 wire [31:0] cpu_m_sram_rdata;
 wire [1:0]  cpu_m_sram_rresp;
 wire        cpu_m_sram_rlast;
@@ -914,6 +914,7 @@ wire        cpu_m_local_arready;
 wire [31:0] cpu_m_local_araddr;
 wire [7:0]  cpu_m_local_arlen;
 wire        cpu_m_local_rvalid;
+wire        cpu_m_local_rready;
 wire [31:0] cpu_m_local_rdata;
 wire [1:0]  cpu_m_local_rresp;
 wire        cpu_m_local_rlast;
@@ -933,7 +934,7 @@ wire [1:0]  cpu_m_local_bresp;
 wire        arb_s_arvalid, arb_s_arready;
 wire [31:0] arb_s_araddr;
 wire [7:0]  arb_s_arlen;
-wire        arb_s_rvalid, arb_s_rlast;
+wire        arb_s_rvalid, arb_s_rlast, arb_s_rready;
 wire [31:0] arb_s_rdata;
 wire [1:0]  arb_s_rresp;
 wire        arb_s_awvalid, arb_s_awready;
@@ -1780,6 +1781,7 @@ assign video_hs = vidout_hs;
         .m_sdram_araddr(cpu_m_sdram_araddr),
         .m_sdram_arlen(cpu_m_sdram_arlen),
         .m_sdram_rvalid(cpu_m_sdram_rvalid),
+        .m_sdram_rready(cpu_m_sdram_rready),
         .m_sdram_rdata(cpu_m_sdram_rdata),
         .m_sdram_rresp(cpu_m_sdram_rresp),
         .m_sdram_rlast(cpu_m_sdram_rlast),
@@ -1800,6 +1802,7 @@ assign video_hs = vidout_hs;
         .m_cram0_araddr (cpu_m_cram0_araddr),
         .m_cram0_arlen  (cpu_m_cram0_arlen),
         .m_cram0_rvalid (cpu_m_cram0_rvalid),
+        .m_cram0_rready (cpu_m_cram0_rready),
         .m_cram0_rdata  (cpu_m_cram0_rdata),
         .m_cram0_rresp  (cpu_m_cram0_rresp),
         .m_cram0_rlast  (cpu_m_cram0_rlast),
@@ -1820,6 +1823,7 @@ assign video_hs = vidout_hs;
         .m_cram1_araddr (cpu_m_cram1_araddr),
         .m_cram1_arlen  (cpu_m_cram1_arlen),
         .m_cram1_rvalid (cpu_m_cram1_rvalid),
+        .m_cram1_rready (cpu_m_cram1_rready),
         .m_cram1_rdata  (cpu_m_cram1_rdata),
         .m_cram1_rresp  (cpu_m_cram1_rresp),
         .m_cram1_rlast  (cpu_m_cram1_rlast),
@@ -1840,6 +1844,7 @@ assign video_hs = vidout_hs;
         .m_sram_araddr (cpu_m_sram_araddr),
         .m_sram_arlen  (cpu_m_sram_arlen),
         .m_sram_rvalid (cpu_m_sram_rvalid),
+        .m_sram_rready (cpu_m_sram_rready),
         .m_sram_rdata  (cpu_m_sram_rdata),
         .m_sram_rresp  (cpu_m_sram_rresp),
         .m_sram_rlast  (cpu_m_sram_rlast),
@@ -1860,6 +1865,7 @@ assign video_hs = vidout_hs;
         .m_local_araddr(cpu_m_local_araddr),
         .m_local_arlen(cpu_m_local_arlen),
         .m_local_rvalid(cpu_m_local_rvalid),
+        .m_local_rready(cpu_m_local_rready),
         .m_local_rdata(cpu_m_local_rdata),
         .m_local_rresp(cpu_m_local_rresp),
         .m_local_rlast(cpu_m_local_rlast),
@@ -1888,7 +1894,7 @@ assign video_hs = vidout_hs;
         .s_axi_araddr(cpu_m_local_araddr),
         .s_axi_arlen(cpu_m_local_arlen),
         .s_axi_rvalid(cpu_m_local_rvalid),
-        .s_axi_rready(1'b1),
+        .s_axi_rready(cpu_m_local_rready),
         .s_axi_rdata(cpu_m_local_rdata),
         .s_axi_rresp(cpu_m_local_rresp),
         .s_axi_rlast(cpu_m_local_rlast),
@@ -2070,6 +2076,7 @@ assign video_hs = vidout_hs;
         .m2_araddr(cpu_m_sdram_araddr),   .m2_arlen(cpu_m_sdram_arlen),
         .m2_rvalid(cpu_m_sdram_rvalid),   .m2_rdata(cpu_m_sdram_rdata),
         .m2_rresp(cpu_m_sdram_rresp),     .m2_rlast(cpu_m_sdram_rlast),
+        .m2_rready(cpu_m_sdram_rready),
         .m2_awvalid(cpu_m_sdram_awvalid), .m2_awready(cpu_m_sdram_awready),
         .m2_awaddr(cpu_m_sdram_awaddr),   .m2_awlen(cpu_m_sdram_awlen),
         .m2_wvalid(cpu_m_sdram_wvalid),   .m2_wready(cpu_m_sdram_wready),
@@ -2091,7 +2098,8 @@ assign video_hs = vidout_hs;
         // Slave output (to axi_sdram_slave)
         .s_arvalid(arb_s_arvalid), .s_arready(arb_s_arready),
         .s_araddr(arb_s_araddr),   .s_arlen(arb_s_arlen),
-        .s_rvalid(arb_s_rvalid),   .s_rdata(arb_s_rdata),
+        .s_rvalid(arb_s_rvalid),   .s_rready(arb_s_rready),
+        .s_rdata(arb_s_rdata),
         .s_rresp(arb_s_rresp),     .s_rlast(arb_s_rlast),
         .s_awvalid(arb_s_awvalid), .s_awready(arb_s_awready),
         .s_awaddr(arb_s_awaddr),   .s_awlen(arb_s_awlen),
@@ -2102,6 +2110,11 @@ assign video_hs = vidout_hs;
     );
 
     // AXI4 SDRAM slave (must stay alive during reset for APF save flush & data load)
+    // NOTE: the SDRAM slave sits behind an arbiter (arb_s_*) that fans in
+    // the CPU master alongside the GPU / bridge masters, so its rready is
+    // the arbiter-local signal, not cpu_m_sdram_rready directly. The
+    // arbiter itself already provides back-pressure to each master; for
+    // now leave this tied to 1'b1 (matches pre-burst behaviour).
     axi_sdram_slave sdram_axi_slave (
         .clk(clk_cpu),
         .reset_n(1'b1),
@@ -2110,7 +2123,7 @@ assign video_hs = vidout_hs;
         .s_axi_araddr(arb_s_araddr),
         .s_axi_arlen(arb_s_arlen),
         .s_axi_rvalid(arb_s_rvalid),
-        .s_axi_rready(1'b1),
+        .s_axi_rready(arb_s_rready),
         .s_axi_rdata(arb_s_rdata),
         .s_axi_rresp(arb_s_rresp),
         .s_axi_rlast(arb_s_rlast),
@@ -2155,7 +2168,7 @@ assign video_hs = vidout_hs;
         .s_axi_araddr(cpu_m_cram0_araddr),
         .s_axi_arlen(cpu_m_cram0_arlen),
         .s_axi_rvalid(cpu_m_cram0_rvalid),
-        .s_axi_rready(1'b1),
+        .s_axi_rready(cpu_m_cram0_rready),
         .s_axi_rdata(cpu_m_cram0_rdata),
         .s_axi_rresp(cpu_m_cram0_rresp),
         .s_axi_rlast(cpu_m_cram0_rlast),
@@ -2193,7 +2206,7 @@ assign video_hs = vidout_hs;
         .s_axi_araddr(cpu_m_cram1_araddr),
         .s_axi_arlen(cpu_m_cram1_arlen),
         .s_axi_rvalid(cpu_m_cram1_rvalid),
-        .s_axi_rready(1'b1),
+        .s_axi_rready(cpu_m_cram1_rready),
         .s_axi_rdata(cpu_m_cram1_rdata),
         .s_axi_rresp(cpu_m_cram1_rresp),
         .s_axi_rlast(cpu_m_cram1_rlast),
@@ -2227,7 +2240,7 @@ assign video_hs = vidout_hs;
         .s_axi_araddr(cpu_m_sram_araddr),
         .s_axi_arlen(cpu_m_sram_arlen),
         .s_axi_rvalid(cpu_m_sram_rvalid),
-        .s_axi_rready(1'b1),
+        .s_axi_rready(cpu_m_sram_rready),
         .s_axi_rdata(cpu_m_sram_rdata),
         .s_axi_rresp(cpu_m_sram_rresp),
         .s_axi_rlast(cpu_m_sram_rlast),

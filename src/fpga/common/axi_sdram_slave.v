@@ -94,6 +94,16 @@ assign sdram_next_wdata = next_wdata;
 assign sdram_next_wstrb = next_wstrb;
 reg        started;      // accepted seen, waiting for completion
 
+// 2-entry skid buffer (primary R slot + skid) so that back-pressure
+// from the master doesn't drop sdram_rdata_valid pulses.  Required now
+// that cpu_target_port has a registered response slot that can
+// transiently lower rready mid-burst.  Without this, 1-cycle
+// rdata_valid pulses get silently lost when rvalid is still held from
+// the previous beat.
+reg [31:0] rskid_data;
+reg        rskid_last;
+reg        rskid_valid;
+
 wire beat_is_last = (beat_count == burst_len);
 
 always @(posedge clk or posedge reset) begin
@@ -126,25 +136,48 @@ always @(posedge clk or posedge reset) begin
         next_wstrb <= 0;
         wready_given <= 0;
         wr_busy_seen <= 0;
+
+        rskid_data  <= 0;
+        rskid_last  <= 0;
+        rskid_valid <= 0;
     end else begin
-        // Defaults: deassert single-cycle signals
+        // Defaults: deassert single-cycle signals.  rvalid and bvalid
+        // are NOT in this list — they are "hold until *ready" signals
+        // and are explicitly dropped on their respective handshakes
+        // below.
         s_axi_arready <= 0;
         s_axi_awready <= 0;
         s_axi_wready <= 0;
-        s_axi_rvalid <= 0;
-        s_axi_bvalid <= 0;
         sdram_rd <= 0;
         sdram_wr <= 0;
         sdram_burst_len <= 0;
         sdram_burst_wr_len <= 0;
+
+        // AXI handshake drop-on-accept for rvalid.  When the master
+        // consumes a beat, either drain the skid into the R slot or
+        // clear the slot so the next sdram_rdata_valid pulse can land.
+        if (s_axi_rvalid && s_axi_rready) begin
+            if (rskid_valid) begin
+                s_axi_rdata  <= rskid_data;
+                s_axi_rlast  <= rskid_last;
+                rskid_valid  <= 1'b0;
+                // rvalid stays high — skid is promoted into the slot.
+            end else begin
+                s_axi_rvalid <= 1'b0;
+            end
+        end
+        if (s_axi_bvalid && s_axi_bready) s_axi_bvalid <= 1'b0;
 
         case (state)
 
         S_IDLE: begin
             cmd_issued <= 0;
             started <= 0;
-            // Reads have priority over writes
-            if (s_axi_arvalid) begin
+            // Reads have priority over writes.  Don't accept a new AR
+            // while the previous burst's last beat is still draining
+            // through the R slot or skid — otherwise we'd smash the
+            // held rvalid/rdata with the new burst's first beat.
+            if (s_axi_arvalid && !s_axi_rvalid && !rskid_valid) begin
                 s_axi_arready <= 1;
                 addr_r <= s_axi_araddr;
                 burst_len <= s_axi_arlen;
@@ -207,20 +240,37 @@ always @(posedge clk or posedge reset) begin
         end
 
         S_RD_DAT: begin
-            // Wait for read data. Gate with started to prevent
-            // capturing peripheral data before our command was accepted.
+            // Wait for read data.  Gate with started to prevent
+            // capturing peripheral data before our command was
+            // accepted.  Incoming sdram_rdata_valid pulses route to
+            // either the primary R slot (if empty OR just drained
+            // this cycle by the handshake-drop block above) or the
+            // 1-entry skid.  If both are full the beat is lost —
+            // shouldn't happen once rready is properly propagated
+            // through the arbiter.
             if (started && sdram_rdata_valid) begin
-                s_axi_rvalid <= 1;
-                s_axi_rdata <= sdram_rdata;
-                s_axi_rresp <= 2'b00;  // OKAY
-                s_axi_rlast <= beat_is_last;
+                // "slot_free_next_cycle" accounts for the handshake-drop
+                // block above which may be draining the slot in the
+                // same cycle.  If a drop is happening, the new beat
+                // can land directly into the slot.
+                if (!s_axi_rvalid ||
+                    (s_axi_rvalid && s_axi_rready && !rskid_valid)) begin
+                    s_axi_rvalid <= 1;
+                    s_axi_rdata  <= sdram_rdata;
+                    s_axi_rresp  <= 2'b00;
+                    s_axi_rlast  <= beat_is_last;
+                end else if (!rskid_valid) begin
+                    rskid_valid <= 1'b1;
+                    rskid_data  <= sdram_rdata;
+                    rskid_last  <= beat_is_last;
+                end
+                // else: both full → overflow. Guarded by rready propagation.
                 beat_count <= beat_count + 1;
                 if (beat_is_last) begin
-                    state <= S_IDLE;
                     cmd_issued <= 0;
-                    started <= 0;
+                    started    <= 0;
+                    state      <= S_IDLE;
                 end
-                // For burst: SDRAM controller sends subsequent words automatically
             end
         end
 

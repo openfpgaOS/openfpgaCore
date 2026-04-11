@@ -60,21 +60,21 @@ module sdram_fast_model (
     assign s_axi_rresp = 2'b00;  // OKAY
     assign s_axi_bresp = 2'b00;  // OKAY
 
-    // 32MB = 8M words of 32 bits
-    // Address is byte-addressed on AXI, word index = addr[24:2]
-    reg [31:0] mem [0:8388607];  // 8M x 32
+    // 64MB = 16M words of 32 bits (matches sim target's SDRAM_SIZE).
+    // Address is byte-addressed on AXI, word index = addr[25:2].
+    reg [31:0] mem [0:16777215];  // 16M x 32
 
     // Read state machine
     localparam R_IDLE = 0, R_DATA = 1;
     reg        r_state;
-    reg [22:0] r_addr;    // word address (23 bits for 8M words)
+    reg [23:0] r_addr;    // word address (24 bits for 16M words)
     reg [7:0]  r_cnt;
     reg [7:0]  r_len;
 
     // Write state machine
     localparam W_IDLE = 0, W_DATA = 1, W_RESP = 2;
     reg [1:0]  w_state;
-    reg [22:0] w_addr;
+    reg [23:0] w_addr;
     reg [7:0]  w_cnt;
     reg [7:0]  w_len;
 
@@ -96,7 +96,7 @@ module sdram_fast_model (
                     s_axi_rlast <= 0;
                     if (s_axi_arvalid && s_axi_arready) begin
                         // Accept read address — start delivering data next cycle
-                        r_addr <= s_axi_araddr[24:2];
+                        r_addr <= s_axi_araddr[25:2];
                         r_len <= s_axi_arlen;
                         r_cnt <= 0;
                         s_axi_arready <= 0;
@@ -148,7 +148,7 @@ module sdram_fast_model (
                 W_IDLE: begin
                     s_axi_bvalid <= 0;
                     if (s_axi_awvalid && s_axi_awready) begin
-                        w_addr <= s_axi_awaddr[24:2];
+                        w_addr <= s_axi_awaddr[25:2];
                         w_len <= s_axi_awlen;
                         w_cnt <= 0;
                         s_axi_awready <= 0;
@@ -190,7 +190,7 @@ module sdram_fast_model (
 
         // Backdoor write (from C++ harness, active during reset or runtime)
         if (bd_we) begin
-            mem[bd_word_addr[22:0]] <= bd_wdata;
+            mem[bd_word_addr[23:0]] <= bd_wdata;
         end
     end
 

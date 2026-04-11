@@ -116,6 +116,7 @@ module cpu_target_port (
     output reg  [7:0]  m_arlen,
 
     input  wire        m_rvalid,
+    output wire        m_rready,
     input  wire [31:0] m_rdata,
     input  wire [1:0]  m_rresp,
     input  wire        m_rlast,
@@ -259,11 +260,12 @@ always @(posedge clk or posedge reset) begin
         end
 
         RD_R: begin
-            if (m_rvalid) begin
-                // Latch beat into the owning master's registered response.
-                // This write comes after the top-of-block default-clear
-                // assignment, so if mem_rready was also high this cycle,
-                // the new beat correctly overwrites the cleared value.
+            // Only accept a new beat when our per-master registered
+            // response slot is actually free.  If it's still holding
+            // data the master hasn't consumed yet, leave m_rready low
+            // (via the combinational assignment below) so the slave
+            // holds its rvalid until we catch up — no beats are dropped.
+            if (m_rvalid && m_rready) begin
                 if (rd_active_is_mem) begin
                     mem_rvalid_r <= 1'b1;
                     mem_rdata_r  <= m_rdata;
@@ -480,6 +482,23 @@ assign mem_bresp_contrib  = mem_bvalid_r ? mem_bresp_r : 2'b0;
 
 assign per_bvalid_contrib = per_bvalid_r;
 assign per_bresp_contrib  = per_bvalid_r ? per_bresp_r : 2'b0;
+
+// ============================================================
+// Slave-side R channel back-pressure
+// ============================================================
+// Drive m_rready true when either we're not currently servicing a read
+// (RD_IDLE / RD_AR — the slave should never be driving m_rvalid anyway),
+// or we're in RD_R and the owning master's registered response slot is
+// empty or will be freed this cycle by the master's own ready pulse.
+//
+// Without this the slave's rvalid pulses during a fast sync burst were
+// overwriting mem_rvalid_r while the CPU was still holding the previous
+// beat, silently dropping data and wedging the L1 refill FSM.
+assign m_rready = (rd_state == RD_R)
+                  ? (rd_active_is_mem
+                        ? (!mem_rvalid_r || mem_rready)
+                        : (!per_rvalid_r || per_rready))
+                  : 1'b1;
 
 // ============================================================
 // Global busy outputs

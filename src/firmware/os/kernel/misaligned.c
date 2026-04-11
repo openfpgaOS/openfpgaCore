@@ -379,46 +379,37 @@ static void trap_line(const char *label, unsigned int val) {
 
 /* Fatal trap handler - called when we can't handle the exception */
 __attribute__((section(".text.boot")))
+/* Dump an unsigned hex word to UART (8 digits, MSB first).
+ * Uses raw MMIO so it works even when the terminal / HAL is gone. */
+static void trap_uart_hex(uint32_t v) {
+    volatile unsigned *utx = (volatile unsigned *)0x4F000004;
+    for (int i = 28; i >= 0; i -= 4) {
+        unsigned n = (v >> i) & 0xF;
+        *utx = (n < 10) ? ('0' + n) : ('a' + n - 10);
+    }
+}
+
+static void trap_uart_puts(const char *s) {
+    volatile unsigned *utx = (volatile unsigned *)0x4F000004;
+    while (*s) *utx = (unsigned)*s++;
+}
+
 void fatal_trap(trap_frame_t *frame) {
-    (void)frame;
-    /* Just freeze — don't write anything to display.
-     * The last printf output on terminal will remain visible. */
-    for(;;) { __asm__ volatile(""); }
-
-    /* Snapshot before anything that might trap */
-    trap_frame_t snap = *frame;
-    unsigned int dbg_stage = pd_dbg_stage;
-    unsigned int dbg_info = pd_dbg_info;
-    unsigned int handled = misaligned_count;
-
-    /* Clear screen: white-on-black for all cells */
-    for (int i = 0; i < TRAP_COLS * TRAP_ROWS; i++) {
-        (*(volatile unsigned char *)(TRAP_VRAM + i)) = ' ';
-        (*(volatile unsigned char *)(TRAP_COLOR + i)) = TRAP_ATTR;
-    }
-
-    trap_col = 0;
-    trap_row = 1;
-
-    trap_puts("  !! CPU TRAP !!\n\n");
-    trap_line("  mcause: ", snap.mcause);
-    trap_line("  mepc:   ", snap.mepc);
-    trap_line("  mtval:  ", snap.mtval);
-    trap_line("  sp:     ", snap.regs[2]);
-    trap_line("  ra:     ", snap.regs[1]);
-    trap_line("  stage:  ", dbg_stage);
-    trap_line("  info:   ", dbg_info);
-    trap_puts("  handled: ");
-    trap_uint(handled);
-    trap_putchar('\n');
-
-    if (addr_valid(snap.mepc, 4)) {
-        unsigned int instr = read_byte(snap.mepc) |
-                             (read_byte(snap.mepc + 1) << 8) |
-                             (read_byte(snap.mepc + 2) << 16) |
-                             (read_byte(snap.mepc + 3) << 24);
-        trap_line("  instr:  ", instr);
-    }
+    /* Shout cause/mepc/mtval to UART first so the host sees it even
+     * if the terminal / screen has been torn down.  Format:
+     *   !T:<mcause> p=<mepc> t=<mtval> s=<sp> r=<ra>\n
+     */
+    trap_uart_puts("!T:");
+    trap_uart_hex(frame->mcause);
+    trap_uart_puts(" p=");
+    trap_uart_hex(frame->mepc);
+    trap_uart_puts(" t=");
+    trap_uart_hex(frame->mtval);
+    trap_uart_puts(" s=");
+    trap_uart_hex(frame->regs[2]);
+    trap_uart_puts(" r=");
+    trap_uart_hex(frame->regs[1]);
+    trap_uart_puts("\n");
 
     /* Halt forever — use asm to prevent compiler from optimizing this away */
     __asm__ volatile("1: j 1b");
