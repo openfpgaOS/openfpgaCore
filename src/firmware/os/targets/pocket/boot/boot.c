@@ -457,6 +457,27 @@ __attribute__((section(".text.boot")))
 int main(void) {
     pd_dbg_stage = 1;
 
+#if OF_TARGET_PLATFORM_ID == OF_PLATFORM_SIM
+    /* Sim target: the Verilator harness preloads os.bin into CRAM0 via
+     * a backdoor port before releasing reset, so there's no PHDP peer,
+     * no SD card, and nothing to wait for.  Skip directly to start_os
+     * (caches + BSS clear + jump) — no framebuffer, no UART probe, no
+     * PHDP discovery.  Keeps the fast-iteration loop tight.
+     *
+     * Enable UART mirroring so the OS's of_terminal writes are also
+     * sent to the UART — tb_system_main.cpp prints UART bytes to
+     * stdout, giving us visibility into OS boot / testdemo progress.
+     *
+     * NOTE: flush_dcache_evict in start_os currently hangs under
+     * sdram_fast_model around iteration ~800 of its 1024-line sweep,
+     * for reasons not yet debugged.  Running the built-in selftest
+     * (./Vtb_system [cycles]) bypasses this entirely and is currently
+     * the best way to exercise cpu_system changes against this sim. */
+    extern volatile int uart_mirror_on;
+    uart_mirror_on = 1;
+    goto start_os;
+#endif
+
     /* Wait for APF bridge */
     unsigned int start_wait = SYS_CYCLE_LO;
     while (!(SYS_STATUS & SYS_STATUS_ALLCOMPLETE)) {

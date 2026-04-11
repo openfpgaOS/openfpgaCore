@@ -27,13 +27,13 @@ SECTIONS {
     .boot : {
         KEEP(*(.text.start))
         *(.text.boot*)
-        /* Boot-critical object files */
-        targets/pocket/terminal.o(.text*)
-        targets/pocket/terminal.o(.rodata*)
-        targets/pocket/terminal.o(.srodata*)
-        targets/pocket/boot/boot.o(.text*)
-        targets/pocket/boot/boot.o(.rodata*)
-        targets/pocket/boot/boot.o(.srodata*)
+        /* Boot-critical object files — match any target (pocket, sim, ...) */
+        targets/*/terminal.o(.text*)
+        targets/*/terminal.o(.rodata*)
+        targets/*/terminal.o(.srodata*)
+        targets/*/boot/boot.o(.text*)
+        targets/*/boot/boot.o(.rodata*)
+        targets/*/boot/boot.o(.srodata*)
         *(.rodata.boot*)
         . = ALIGN(4);
     } > BRAM
@@ -49,8 +49,8 @@ SECTIONS {
         __bss_start = .;
         *(.bss.boot*)
         *(.sbss.boot*)
-        targets/pocket/boot/boot.o(.bss*)
-        targets/pocket/boot/boot.o(.sbss*)
+        targets/*/boot/boot.o(.bss*)
+        targets/*/boot/boot.o(.sbss*)
         . = ALIGN(4);
         __bss_end = .;
     } > BRAM
