@@ -834,6 +834,7 @@ set_global_assignment -name SYSTEMVERILOG_FILE ../../vendor/opl3/i2s.sv
 
 # Source files added after initial commit
 set_global_assignment -name VERILOG_FILE ../../common/audio_mixer.v
+set_global_assignment -name VERILOG_FILE ../../common/audio_mixer_cdc.v
 set_global_assignment -name VERILOG_FILE ../../common/audio_output.v
 set_global_assignment -name VERILOG_FILE ../../common/gpu_core.v
 set_global_assignment -name VERILOG_FILE ../../common/gpu_tex_cache.v

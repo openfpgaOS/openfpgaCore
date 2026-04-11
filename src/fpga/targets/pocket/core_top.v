@@ -1177,18 +1177,17 @@ wire bridge_cram1_requesting = bridge_cram1_wr_detect ||
 
 wire cdc_psram1_inflight;
 
-// CRAM1 arbiter: CPU has priority, mixer fills gaps
+// CPU CRAM1 path — goes through cpu_psram1_cdc.  The mixer is no longer
+// part of this arbiter: it lives in clk_74a now and joins via a separate
+// clk_74a-side arbiter at the psram1_inst port (see below).
 wire cram1_cpu_rd = cpu_psram_rd & cpu_psram_sel_cram1;
 wire cram1_cpu_wr = cpu_psram_wr & cpu_psram_sel_cram1;
-wire cram1_arb_rd = cram1_cpu_rd | (mix_cram1_rd & !cram1_cpu_rd & !cram1_cpu_wr);
-wire cram1_arb_wr = cram1_cpu_wr;
-wire [21:0] cram1_arb_addr = (cram1_cpu_rd | cram1_cpu_wr) ? cpu_psram_addr[21:0] : mix_cram1_addr;
 
 cpu_psram1_cdc cdc_psram1 (
     .clk_cpu(clk_cpu),
-    .cpu_rd(cram1_arb_rd),
-    .cpu_wr(cram1_arb_wr),
-    .cpu_addr(cram1_arb_addr),
+    .cpu_rd(cram1_cpu_rd),
+    .cpu_wr(cram1_cpu_wr),
+    .cpu_addr(cpu_psram_addr[21:0]),
     .cpu_wdata(cpu_psram_wdata),
     .cpu_wstrb(cpu_psram_wstrb),
     .cpu_rdata(cdc_cpu_rdata),
@@ -1209,37 +1208,48 @@ cpu_psram1_cdc cdc_psram1 (
 );
 
 // CRAM1 mux (clk_74a): ownership tracking prevents response theft.
-// Track who owns the current in-flight PSRAM read. Set on the cycle
-// psram1_rd fires, locked until rdata_valid returns.
-reg        psram1_rd_owner;     // 0=CDC, 1=bridge
-reg        psram1_rd_inflight;  // a read is being processed by PSRAM
+// Three potential owners on the read path: CDC (CPU traffic), bridge,
+// mixer (audio_mixer_cdc now runs in clk_74a and reads CRAM1 directly).
+// Track who owns the current in-flight PSRAM read so rdata_valid only
+// fires for the correct source.
+reg [1:0]  psram1_rd_owner;      // 0=CDC, 1=bridge, 2=mixer
+reg        psram1_rd_inflight;
+localparam [1:0] OWN_CDC    = 2'd0;
+localparam [1:0] OWN_BRIDGE = 2'd1;
+localparam [1:0] OWN_MIXER  = 2'd2;
+
 always @(posedge clk_74a) begin
     if (!psram1_rd_inflight && psram1_rd) begin
         psram1_rd_inflight <= 1'b1;
-        psram1_rd_owner <= bridge_cram1_rd_pulse;
+        // Priority mirrors the psram1_rd mux below: bridge > CDC > mixer
+        if (bridge_cram1_rd_pulse)           psram1_rd_owner <= OWN_BRIDGE;
+        else if (cdc_psram1_rd)              psram1_rd_owner <= OWN_CDC;
+        else                                 psram1_rd_owner <= OWN_MIXER;
     end
     if (psram1_rdata_valid)
         psram1_rd_inflight <= 1'b0;
 end
 
 // Filter rdata_valid to the locked owner — no response theft
-wire psram1_rdata_valid_for_cdc    = psram1_rdata_valid && !psram1_rd_owner;
-wire psram1_rdata_valid_for_bridge = psram1_rdata_valid &&  psram1_rd_owner;
+wire psram1_rdata_valid_for_cdc    = psram1_rdata_valid && (psram1_rd_owner == OWN_CDC);
+wire psram1_rdata_valid_for_bridge = psram1_rdata_valid && (psram1_rd_owner == OWN_BRIDGE);
+wire psram1_rdata_valid_for_mixer  = psram1_rdata_valid && (psram1_rd_owner == OWN_MIXER);
 
-// Block new reads while one is inflight, but never block an in-flight CDC request
+// Read mux: bridge > CDC > mixer.  Block new reads while one is inflight,
+// but never block an in-flight CDC request.
 assign psram1_rd = psram1_rd_inflight ? 1'b0
                  : bridge_cram1_rd_pulse ? 1'b1
                  : (bridge_cram1_active && !cdc_psram1_inflight) ? 1'b0
-                 : cdc_psram1_rd;
-// Never block a CDC write that is already in flight — if the bridge
-// activates after the CDC entered P_WAIT, the mux was eating the CDC's
-// psram_wr pulse, causing psram_busy to never rise and deadlocking
-// the CPU on fence.
+                 : cdc_psram1_rd ? 1'b1
+                 : cram1_mix_rd;
+// Never block a CDC write that is already in flight.
 assign psram1_wr = bridge_cram1_wr_pulse ? 1'b1
                  : (bridge_cram1_active && !cdc_psram1_inflight) ? 1'b0
                  : cdc_psram1_wr;
 assign psram1_addr = bridge_cram1_wr_pending ? bridge_cram1_wr_addr :
-                     bridge_cram1_rd_pending ? bridge_cram1_rd_addr : cdc_psram1_addr;
+                     bridge_cram1_rd_pending ? bridge_cram1_rd_addr :
+                     (cdc_psram1_rd | cdc_psram1_wr) ? cdc_psram1_addr :
+                     {cram1_mix_addr};
 assign psram1_wdata = bridge_cram1_wr_pending ? bridge_cram1_wr_data : cdc_psram1_wdata;
 assign psram1_wstrb = bridge_cram1_wr_pending ? 4'b1111 : cdc_psram1_wstrb;
 
@@ -2356,8 +2366,11 @@ wire        uart_rx_irq;
 wire        link_irq;
 wire        ext_irq;  // Masked combination from axi_periph_slave
 
+// audio_output.clk_sys moved to clk_74a so the mixer→FIFO push side is
+// same-domain with the (now clk_74a) audio_mixer.  audio_output's internal
+// clk_sys→clk_audio CDC handles the 74.25 MHz → 12.288 MHz DAC crossing.
 audio_output audio_out (
-    .clk_sys      (clk_cpu),
+    .clk_sys      (clk_74a),
     .clk_audio    (clk_core_12288),
     .reset_n      (reset_n),
 
@@ -2375,30 +2388,49 @@ audio_output audio_out (
     .audio_dac    (audio_dac)
 );
 
+// Reads psram1_rdata directly (clk_74a) via audio_mixer_cdc's clk_74a
+// interface.  The mixer's CRAM1 requests are gated by the clk_74a arbiter
+// below (cram1_mix_* signals) and share the psram1_inst port with the
+// CPU-side cpu_psram1_cdc.
+wire        cram1_mix_rd;
+wire [21:0] cram1_mix_addr;
+
 `ifndef EXCLUDE_MIXER
-audio_mixer mixer (
-    .clk(clk_cpu), .reset_n(reset_n),
-    .mixer_enable(mix_enable),
-    .voice_wr(mix_voice_wr),
-    .voice_field(mix_voice_field),
-    .voice_sel(mix_voice_sel),
-    .voice_wdata(mix_voice_wdata),
-    .voice_wr_stall(mix_voice_wr_stall),
-    .cram1_rd(mix_cram1_rd),
-    .cram1_addr(mix_cram1_addr),
-    .cram1_rdata(cdc_cpu_rdata),
-    .cram1_busy(cdc_cpu_busy),
-    .cram1_rdata_valid(cdc_cpu_rdata_valid),
-    .sample_wr(mix_sample_wr),
-    .sample_data(mix_sample_data),
-    .fifo_level(audio_fifo_level),
-    .active_count(mix_active_count),
-    .pos_readback(mix_voice_pos),
-    .irq_clear(mix_irq_clear_data),
-    .irq_clear_wr(mix_irq_clear_wr),
-    .voice_end_pending(mix_irq_pending),
-    .voice_end_irq(mix_voice_end_irq)
+audio_mixer_cdc mixer_cdc (
+    .clk_cpu            (clk_cpu),
+    .clk_74a            (clk_74a),
+    .reset_n            (reset_n),
+
+    // CPU-side control (clk_cpu)
+    .mixer_enable       (mix_enable),
+    .voice_wr           (mix_voice_wr),
+    .voice_field        (mix_voice_field),
+    .voice_sel          (mix_voice_sel),
+    .voice_wdata        (mix_voice_wdata),
+    .voice_wr_stall     (mix_voice_wr_stall),
+
+    .irq_clear          (mix_irq_clear_data),
+    .irq_clear_wr       (mix_irq_clear_wr),
+    .voice_end_pending  (mix_irq_pending),
+    .voice_end_irq      (mix_voice_end_irq),
+
+    .active_count       (mix_active_count),
+    .pos_readback       (mix_voice_pos),
+
+    // CRAM1 (clk_74a)
+    .cram1_rd           (cram1_mix_rd),
+    .cram1_addr         (cram1_mix_addr),
+    .cram1_rdata        (psram1_rdata),
+    .cram1_busy         (psram1_busy),
+    .cram1_rdata_valid  (psram1_rdata_valid_for_mixer),
+
+    // Audio output (clk_74a)
+    .sample_wr          (mix_sample_wr),
+    .sample_data        (mix_sample_data),
+    .fifo_level         (audio_fifo_level)
 );
+assign mix_cram1_rd   = cram1_mix_rd;
+assign mix_cram1_addr = cram1_mix_addr;
 `else
 assign mix_cram1_rd = 1'b0;
 assign mix_cram1_addr = 24'b0;
