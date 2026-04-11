@@ -136,10 +136,23 @@ end
 
 wire vwr_cdc_busy = (vwr_req_toggle_cpu != vwr_ack_toggle_cpu_sync[2]);
 
-// Signals into audio_mixer (clk_74a domain)
+// Signals into audio_mixer (clk_74a domain).
+//
+// voice_sel is passed THROUGH from the clk_cpu input (not via the
+// vwr_sel_cpu_lat latch) because it drives the per-voice position-
+// readback mux inside audio_mixer.v.  The readback path is a pure
+// combinational lookup keyed by voice_sel, so a CPU write to MIX_VOICE_SEL
+// (which does NOT pulse voice_wr in axi_periph_slave.v) must still
+// reach the mixer's selector immediately — otherwise the next
+// MIX_VOICE_POS read returns whichever voice was last selected via a
+// voice_wr write instead of the freshly-selected one.  audio_mixer.v
+// already handles voice_sel as a slow/stable cross-domain signal; it
+// only CDCs the voice_wr pulse itself.  Keeping the latched field and
+// wdata is still fine for the write path — those only need to be
+// stable when voice_wr_sync fires.
 wire        mixer_voice_wr    = vwr_req_edge_74a;
 wire [3:0]  mixer_voice_field = vwr_field_cpu_lat;  // stable by time of edge sync
-wire [4:0]  mixer_voice_sel   = vwr_sel_cpu_lat;
+wire [4:0]  mixer_voice_sel   = voice_sel;          // direct passthrough (see comment)
 wire [31:0] mixer_voice_wdata = vwr_wdata_cpu_lat;
 
 // ============================================================

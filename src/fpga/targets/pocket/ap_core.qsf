@@ -849,6 +849,7 @@ set_global_assignment -name VERILOG_FILE ../../common/axi_sdram_arbiter.v
 set_global_assignment -name VERILOG_FILE ../../common/axi_sdram_slave.v
 set_global_assignment -name VERILOG_FILE ../../common/cpu_psram1_cdc.v
 set_global_assignment -name VERILOG_FILE ../../common/cpu_system.v
+set_global_assignment -name VERILOG_FILE ../../common/cpu_target_port.v
 set_global_assignment -name VERILOG_FILE ../../common/jtframe_frac_cen.v
 set_global_assignment -name VERILOG_FILE ../../common/jtframe_resync.v
 set_global_assignment -name VERILOG_FILE ../../common/link_lite.v
