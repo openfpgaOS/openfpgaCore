@@ -488,19 +488,12 @@ localparam [2:0] BCR_ST_DONE        = 3'd7;
 //   bits 5-4  = 01  drive strength 1/2
 //   bit 3     = 1   no-wrap burst (don't care in async)
 //   bits 2-0  = 111 continuous burst (don't care in async)
-// Sync burst mode: BCR 0x641F
-//   bit 15   = 0  sync burst mode
-//   bit 14   = 1  fixed latency (driver expects SYNC_LATENCY=4)
-//   bits13-11= 100 latency code 4
-//   bit 10   = 1  WAIT active-high
-//   bit 8    = 0  WAIT asserted during delay (not one-before)
-//   bits 5-4 = 01 half-drive strength
-//   bit 3    = 1  no-wrap burst
-//   bits 2-0 = 111 continuous burst
-// Only CRAM0 reads use the sync burst path (CRAM1 routes through CDC
-// without burst wiring; see axi_psram_slave.v). Writes remain async
-// single-word — the chip accepts async writes in sync burst mode.
-localparam [15:0] BCR_VALUE = 16'h641F;
+`ifdef PSRAM_BURST_ENABLE
+// Sync burst mode: bit 15 = 0 (sync burst), rest unchanged
+localparam [15:0] BCR_VALUE = 16'h1D1F;
+`else
+localparam [15:0] BCR_VALUE = 16'h9D1F;
+`endif
 
 initial begin
     bcr_init_state     = BCR_ST_WAIT_PLL;
@@ -1337,8 +1330,13 @@ assign cpu_psram_rdata_valid = (psram_target_sel == 2'd1) ? sram_word_rdata_vali
 wire cram0_burst_rdata_valid;
 wire [31:0] cram0_burst_rdata;
 
+`ifdef PSRAM_BURST_ENABLE
 assign cpu_psram_burst_rdata_valid = cram0_burst_rdata_valid;
 assign cpu_psram_burst_rdata = cram0_burst_rdata;
+`else
+assign cpu_psram_burst_rdata_valid = 1'b0;
+assign cpu_psram_burst_rdata = 32'b0;
+`endif
 
 
 

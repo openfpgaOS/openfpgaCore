@@ -39,7 +39,10 @@ io_sdram_test.v: $(TARGET_DIR)/io_sdram.v
 PSRAM_SRCS = \
 	tb_psram.v \
 	psram_backend_model.v \
-	$(COMMON_DIR)/axi_psram_slave.v
+	$(COMMON_DIR)/axi_psram_slave.v \
+	$(COMMON_DIR)/axi_cram0_slave.v \
+	$(COMMON_DIR)/axi_cram1_slave.v \
+	$(COMMON_DIR)/axi_sram_slave.v
 
 PSRAM_CPP = tb_psram_main.cpp
 PSRAM_TOP = tb_psram
@@ -54,6 +57,9 @@ PSRAM_RTL_SRCS = \
 	sram_chip_model.v \
 	async_fifo.v \
 	$(COMMON_DIR)/axi_psram_slave.v \
+	$(COMMON_DIR)/axi_cram0_slave.v \
+	$(COMMON_DIR)/axi_cram1_slave.v \
+	$(COMMON_DIR)/axi_sram_slave.v \
 	$(COMMON_DIR)/sram_controller.v \
 	psram_controller_test.v \
 	psram_test.sv \

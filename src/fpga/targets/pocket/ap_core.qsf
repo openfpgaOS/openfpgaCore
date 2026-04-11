@@ -841,6 +841,9 @@ set_global_assignment -name VERILOG_FILE ../../common/gpu_tex_cache.v
 set_global_assignment -name VERILOG_FILE ../../common/axi_periph_slave.v
 set_global_assignment -name VERILOG_FILE ../../common/snac_shifter.v
 set_global_assignment -name VERILOG_FILE ../../common/axi_psram_slave.v
+set_global_assignment -name VERILOG_FILE ../../common/axi_cram0_slave.v
+set_global_assignment -name VERILOG_FILE ../../common/axi_cram1_slave.v
+set_global_assignment -name VERILOG_FILE ../../common/axi_sram_slave.v
 set_global_assignment -name VERILOG_FILE ../../common/axi_sdram_arbiter.v
 set_global_assignment -name VERILOG_FILE ../../common/axi_sdram_slave.v
 set_global_assignment -name VERILOG_FILE ../../common/cpu_psram1_cdc.v

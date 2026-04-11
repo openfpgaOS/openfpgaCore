@@ -156,7 +156,7 @@ compile: build
 build: $(VEXII_OUT) bootloader
 	@printf "$(C_HEAD)[fpga]$(C_RESET) Clean compile (GPU = Lite)...\n"
 	@rm -rf db incremental_db
-	@quartus_sh --flow compile $(PROJECT)
+	@quartus_sh --flow compile $(PROJECT) $(VERILOG_MACROS)
 	@$(MAKE) --no-print-directory install-bitstream
 	@printf "$(C_OK)[fpga] Done$(C_RESET)\n"
 

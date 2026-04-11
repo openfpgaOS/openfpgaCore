@@ -1,13 +1,36 @@
 //
-// AXI4 Slave Wrapper for PSRAM (psram_controller word interface)
+// AXI4 PSRAM Slave Router
 //
-// Converts AXI4 transactions to the psram_controller word-level protocol.
-// CRAM0 and CRAM1 reads use sync burst mode (1 hardware burst per AXI read).
-// SRAM reads fall back to single-word operations (no burst support).
-// Writes use single-word operations.
+// Thin wrapper around three target-specific slaves:
+//   axi_cram0_slave  — CRAM0  (0x30/0x38)
+//   axi_cram1_slave  — CRAM1  (0x31/0x39, via cpu_psram1_cdc)
+//   axi_sram_slave   — SRAM   (0x3A)
 //
-// Address mapping: psram_addr[25:22] carries addr[27:24] for target decode:
-//   0x0/0x8 → CRAM0, 0x1/0x9 → CRAM1, 0xA → SRAM
+// External interface matches the legacy single-FSM axi_psram_slave so the
+// surrounding cpu_system / core_top.v wiring is unchanged.
+//
+// Routing strategy (kept deliberately simple because cpu_system upstream
+// serializes one PSRAM transaction at a time, so only one sub-slave is ever
+// non-idle):
+//
+//   * AR / AW are gated per target (only the matching sub-slave sees the
+//     valid signal).  Without this each sub-slave would attempt to claim
+//     every transaction.
+//   * W beats are passed through to all sub-slaves unchanged.  Sub-slaves
+//     only enter their write path on AW handshake, so an idle sub-slave
+//     ignores wvalid; only the one that just claimed the AW will react.
+//   * R-ready / B-ready are passed through unchanged for the same reason.
+//   * arready / awready / wready / rvalid / bvalid from the sub-slaves are
+//     OR'd back to the master (only one is non-zero at a time).
+//   * rdata / rresp / rlast / bresp are muxed by the latched active target.
+//   * The shared psram_rd / psram_wr / psram_addr / psram_wdata / psram_wstrb
+//     outputs are driven by whichever sub-slave is currently pulsing rd/wr;
+//     OR for the rd/wr pulses themselves and a small mux for addr/wdata/wstrb
+//     selected by those pulses.
+//
+// Sync burst (psram_burst_*) is currently disabled at all sub-slaves; the
+// burst signals are tied off here.  When CRAM0 burst is re-enabled the
+// burst signals from axi_cram0_slave will be wired through.
 //
 
 `default_nettype none
@@ -16,296 +39,274 @@ module axi_psram_slave (
     input wire clk,
     input wire reset_n,
 
-    // AXI4 Slave interface
-    // AR channel (read address)
+    // ===== AXI4 Slave interface (external — same as legacy) =====
     input  wire        s_axi_arvalid,
-    output reg         s_axi_arready,
+    output wire        s_axi_arready,
     input  wire [31:0] s_axi_araddr,
     input  wire [7:0]  s_axi_arlen,
 
-    // R channel (read data)
-    output reg         s_axi_rvalid,
+    output wire        s_axi_rvalid,
     input  wire        s_axi_rready,
-    output reg  [31:0] s_axi_rdata,
-    output reg  [1:0]  s_axi_rresp,
-    output reg         s_axi_rlast,
+    output wire [31:0] s_axi_rdata,
+    output wire [1:0]  s_axi_rresp,
+    output wire        s_axi_rlast,
 
-    // AW channel (write address)
     input  wire        s_axi_awvalid,
-    output reg         s_axi_awready,
+    output wire        s_axi_awready,
     input  wire [31:0] s_axi_awaddr,
     input  wire [7:0]  s_axi_awlen,
 
-    // W channel (write data)
     input  wire        s_axi_wvalid,
-    output reg         s_axi_wready,
+    output wire        s_axi_wready,
     input  wire [31:0] s_axi_wdata,
     input  wire [3:0]  s_axi_wstrb,
     input  wire        s_axi_wlast,
 
-    // B channel (write response)
-    output reg         s_axi_bvalid,
+    output wire        s_axi_bvalid,
     input  wire        s_axi_bready,
-    output reg  [1:0]  s_axi_bresp,
+    output wire [1:0]  s_axi_bresp,
 
-    // PSRAM word interface (single-word reads/writes, to psram_controller via mux)
-    output reg         psram_rd,
-    output reg         psram_wr,
-    output reg  [25:0] psram_addr,
-    output reg  [31:0] psram_wdata,
-    output reg  [3:0]  psram_wstrb,
+    // ===== Shared PSRAM word interface (downstream mux in core_top.v) =====
+    output wire        psram_rd,
+    output wire        psram_wr,
+    output wire [25:0] psram_addr,
+    output wire [31:0] psram_wdata,
+    output wire [3:0]  psram_wstrb,
     input  wire [31:0] psram_rdata,
     input  wire        psram_busy,
     input  wire        psram_rdata_valid,
 
-    // PSRAM sync burst read interface (to psram_controller)
-    output reg         psram_burst_rd,
-    output reg  [5:0]  psram_burst_len,
+    // ===== CRAM0 sync burst read interface (unused while burst disabled) =====
+    output wire        psram_burst_rd,
+    output wire [5:0]  psram_burst_len,
     input  wire        psram_burst_rdata_valid,
     input  wire [31:0] psram_burst_rdata
 );
 
-wire reset = ~reset_n;
+// ============================================================
+// Address decode (combinational)
+// ============================================================
+wire ar_is_cram0 = (s_axi_araddr[27:24] == 4'h0) || (s_axi_araddr[27:24] == 4'h8);
+wire ar_is_cram1 = (s_axi_araddr[27:24] == 4'h1) || (s_axi_araddr[27:24] == 4'h9);
+wire ar_is_sram  = (s_axi_araddr[27:24] == 4'hA);
 
-// FSM states
-localparam S_IDLE       = 4'd0;
-localparam S_RD_BURST   = 4'd1;  // Issue burst_rd for CRAM targets
-localparam S_RD_STREAM  = 4'd2;  // Stream burst data to AXI R channel
-localparam S_RD_CMD     = 4'd3;  // Single-word read for SRAM fallback
-localparam S_WR_CMD     = 4'd4;  // Issue word_wr, wait for busy
-localparam S_WR_WAIT    = 4'd5;  // Wait for !busy (write done)
-localparam S_WR_NEXT    = 4'd6;  // Accept next W beat
-localparam S_RD_DAT     = 4'd7;  // Present single-word read data on R channel
+wire aw_is_cram0 = (s_axi_awaddr[27:24] == 4'h0) || (s_axi_awaddr[27:24] == 4'h8);
+wire aw_is_cram1 = (s_axi_awaddr[27:24] == 4'h1) || (s_axi_awaddr[27:24] == 4'h9);
+wire aw_is_sram  = (s_axi_awaddr[27:24] == 4'hA);
 
-reg [3:0] state;
+// ============================================================
+// Sub-slave wires
+// ============================================================
+wire        c0_arready, c0_awready, c0_wready;
+wire        c0_rvalid, c0_rlast, c0_bvalid;
+wire [31:0] c0_rdata;
+wire [1:0]  c0_rresp, c0_bresp;
+wire        c0_psram_rd, c0_psram_wr;
+wire [25:0] c0_psram_addr;
+wire [31:0] c0_psram_wdata;
+wire [3:0]  c0_psram_wstrb;
 
-// Transaction tracking
-reg [7:0]  burst_len;
-reg [7:0]  beat_count;
-reg [31:0] addr_r;
-reg        cmd_issued;
-reg        psram_started;   // busy was seen after issuing command
-reg [7:0]  issue_wait;      // Timeout counter for missed commands
-reg        is_sram_target;  // Latched: current read targets SRAM (no burst)
+wire        c1_arready, c1_awready, c1_wready;
+wire        c1_rvalid, c1_rlast, c1_bvalid;
+wire [31:0] c1_rdata;
+wire [1:0]  c1_rresp, c1_bresp;
+wire        c1_psram_rd, c1_psram_wr;
+wire [25:0] c1_psram_addr;
+wire [31:0] c1_psram_wdata;
+wire [3:0]  c1_psram_wstrb;
 
-wire beat_is_last = (beat_count == burst_len);
+wire        sr_arready, sr_awready, sr_wready;
+wire        sr_rvalid, sr_rlast, sr_bvalid;
+wire [31:0] sr_rdata;
+wire [1:0]  sr_rresp, sr_bresp;
+wire        sr_psram_rd, sr_psram_wr;
+wire [25:0] sr_psram_addr;
+wire [31:0] sr_psram_wdata;
+wire [3:0]  sr_psram_wstrb;
 
-// SRAM: addr[27:24] == 0xA (no burst support, async only)
-wire addr_is_sram  = (s_axi_araddr[27:24] == 4'hA);
-// CRAM0 occupies 0x30xxxxxx (cached) and 0x38xxxxxx (uncached) — bits [27:24] = 0 or 8.
-// CRAM1 occupies 0x31xxxxxx and 0x39xxxxxx and goes through cpu_psram1_cdc which has
-// no burst data path wired in core_top.v, so CRAM1 reads must stay on the async S_RD_CMD path.
-wire addr_is_cram0 = (s_axi_araddr[27:24] == 4'h0) || (s_axi_araddr[27:24] == 4'h8);
+// ============================================================
+// Master-facing aggregations
+// ============================================================
+// Because cpu_system upstream serializes one transaction at a time, only
+// one sub-slave is ever in a non-idle state.  We can OR all of their valid /
+// ready signals and mux response data by whichever one is currently
+// asserting valid.  No latched "active target" register needed.
 
-always @(posedge clk or posedge reset) begin
-    if (reset) begin
-        state <= S_IDLE;
-        burst_len <= 0;
-        beat_count <= 0;
-        addr_r <= 0;
-        cmd_issued <= 0;
-        psram_started <= 0;
-        issue_wait <= 0;
-        is_sram_target <= 0;
+assign s_axi_arready = c0_arready | c1_arready | sr_arready;
+assign s_axi_awready = c0_awready | c1_awready | sr_awready;
+assign s_axi_wready  = c0_wready  | c1_wready  | sr_wready;
 
-        s_axi_arready <= 0;
-        s_axi_rvalid <= 0;
-        s_axi_rdata <= 0;
-        s_axi_rresp <= 0;
-        s_axi_rlast <= 0;
-        s_axi_awready <= 0;
-        s_axi_wready <= 0;
-        s_axi_bvalid <= 0;
-        s_axi_bresp <= 0;
+assign s_axi_rvalid  = c0_rvalid  | c1_rvalid  | sr_rvalid;
+assign s_axi_rdata   = c0_rvalid  ? c0_rdata
+                     : c1_rvalid  ? c1_rdata
+                     :              sr_rdata;
+assign s_axi_rresp   = c0_rvalid  ? c0_rresp
+                     : c1_rvalid  ? c1_rresp
+                     :              sr_rresp;
+assign s_axi_rlast   = c0_rvalid  ? c0_rlast
+                     : c1_rvalid  ? c1_rlast
+                     :              sr_rlast;
 
-        psram_rd <= 0;
-        psram_wr <= 0;
-        psram_addr <= 0;
-        psram_wdata <= 0;
-        psram_wstrb <= 0;
-        psram_burst_rd <= 0;
-        psram_burst_len <= 0;
-    end else begin
-        // Defaults
-        s_axi_arready <= 0;
-        s_axi_awready <= 0;
-        s_axi_wready <= 0;
-        s_axi_rvalid <= 0;
-        s_axi_bvalid <= 0;
-        psram_rd <= 0;
-        psram_wr <= 0;
-        psram_burst_rd <= 0;
-        case (state)
+assign s_axi_bvalid  = c0_bvalid  | c1_bvalid  | sr_bvalid;
+assign s_axi_bresp   = c0_bvalid  ? c0_bresp
+                     : c1_bvalid  ? c1_bresp
+                     :              sr_bresp;
 
-        S_IDLE: begin
-            cmd_issued <= 0;
-            psram_started <= 0;
-            issue_wait <= 0;
-            if (s_axi_arvalid) begin
-                s_axi_arready <= 1;
-                addr_r <= s_axi_araddr;
-                burst_len <= s_axi_arlen;
-                beat_count <= 0;
-                is_sram_target <= addr_is_sram;
-                // Only CRAM0 has the burst data path wired in core_top.v.
-                // CRAM1 (via CDC) and SRAM stay on the async single-word path.
-                state <= addr_is_cram0 ? S_RD_BURST : S_RD_CMD;
-            end else if (s_axi_awvalid) begin
-                s_axi_awready <= 1;
-                addr_r <= s_axi_awaddr;
-                burst_len <= s_axi_awlen;
-                beat_count <= 0;
-                if (s_axi_wvalid) begin
-                    s_axi_wready <= 1;
-                    psram_wdata <= s_axi_wdata;
-                    psram_wstrb <= s_axi_wstrb;
-                    state <= S_WR_CMD;
-                end else begin
-                    state <= S_WR_NEXT;
-                end
-            end
-        end
+// ============================================================
+// Shared PSRAM word interface
+// ============================================================
+// rd/wr pulses are one-cycle assertions from whichever sub-slave is issuing
+// a command.  At most one is high at a time, so OR them.
+assign psram_rd = c0_psram_rd | c1_psram_rd | sr_psram_rd;
+assign psram_wr = c0_psram_wr | c1_psram_wr | sr_psram_wr;
 
-        // ============================================
-        // Read path — sync burst (CRAM targets only)
-        // ============================================
-        S_RD_BURST: begin
-            if (!cmd_issued) begin
-                if (!psram_busy) begin
-                    psram_burst_rd <= 1;
-                    psram_addr <= addr_r[27:2];
-                    psram_burst_len <= burst_len[5:0];
-                    cmd_issued <= 1;
-                    state <= S_RD_STREAM;
-                end
-            end
-        end
+// addr/wdata/wstrb are registered persistently in each sub-slave; mux them
+// using the rd/wr pulse from the same sub-slave so the right values reach
+// the backend on the cycle the command is issued.
+wire c0_drives = c0_psram_rd | c0_psram_wr;
+wire c1_drives = c1_psram_rd | c1_psram_wr;
 
-        S_RD_STREAM: begin
-            if (s_axi_rvalid && s_axi_rready) begin
-                beat_count <= beat_count + 1;
-                if (beat_is_last) begin
-                    cmd_issued <= 0;
-                    state <= S_IDLE;
-                end else if (psram_burst_rdata_valid) begin
-                    s_axi_rvalid <= 1;
-                    s_axi_rdata <= psram_burst_rdata;
-                    s_axi_rresp <= 2'b00;
-                    s_axi_rlast <= ((beat_count + 8'd1) == burst_len);
-                end
-            end else if (s_axi_rvalid) begin
-                s_axi_rvalid <= 1;
-            end else if (psram_burst_rdata_valid) begin
-                s_axi_rvalid <= 1;
-                s_axi_rdata <= psram_burst_rdata;
-                s_axi_rresp <= 2'b00;
-                s_axi_rlast <= beat_is_last;
-            end
-        end
+assign psram_addr  = c0_drives ? c0_psram_addr
+                   : c1_drives ? c1_psram_addr
+                   :             sr_psram_addr;
+assign psram_wdata = c0_drives ? c0_psram_wdata
+                   : c1_drives ? c1_psram_wdata
+                   :             sr_psram_wdata;
+assign psram_wstrb = c0_drives ? c0_psram_wstrb
+                   : c1_drives ? c1_psram_wstrb
+                   :             sr_psram_wstrb;
 
-        // ============================================
-        // Read path — single word (SRAM fallback)
-        // ============================================
-        S_RD_CMD: begin
-            if (!cmd_issued) begin
-                if (!psram_busy) begin
-                    psram_rd <= 1;
-                    psram_addr <= addr_r[27:2];
-                    cmd_issued <= 1;
-                    psram_started <= 0;
-                    issue_wait <= 0;
-                end
-            end else begin
-                if (!psram_started) begin
-                    if (psram_busy) begin
-                        psram_started <= 1;
-                        issue_wait <= 0;
-                    end else begin
-                        issue_wait <= issue_wait + 1;
-                        if (&issue_wait) begin
-                            cmd_issued <= 0;
-                            issue_wait <= 0;
-                        end
-                    end
-                end
-                if (psram_rdata_valid) begin
-                    state <= S_RD_DAT;
-                end
-            end
-        end
+// Burst interface — currently unused.
+assign psram_burst_rd  = 1'b0;
+assign psram_burst_len = 6'b0;
 
-        S_RD_DAT: begin
-            s_axi_rvalid <= 1;
-            s_axi_rdata <= psram_rdata;
-            s_axi_rresp <= 2'b00;
-            s_axi_rlast <= beat_is_last;
-            beat_count <= beat_count + 1;
-            cmd_issued <= 0;
-            psram_started <= 0;
-            if (beat_is_last) begin
-                state <= S_IDLE;
-            end else begin
-                addr_r <= addr_r + 32'd4;
-                state <= S_RD_CMD;
-            end
-        end
+// ============================================================
+// Sub-slave instantiations
+// ============================================================
+//
+// All sub-slaves see the same s_axi_araddr / s_axi_awaddr / s_axi_wdata,
+// etc.  Only their *_arvalid and *_awvalid are gated by target match;
+// everything else is passed through unchanged because cpu_system upstream
+// serializes one transaction at a time.
 
-        // ============================================
-        // Write path (single word per PSRAM access)
-        // ============================================
-        S_WR_CMD: begin
-            if (!cmd_issued) begin
-                if (!psram_busy) begin
-                    psram_wr <= 1;
-                    psram_addr <= addr_r[27:2];
-                    cmd_issued <= 1;
-                    psram_started <= 0;
-                    issue_wait <= 0;
-                end
-            end else begin
-                if (!psram_started && psram_busy) begin
-                    psram_started <= 1;
-                    issue_wait <= 0;
-                end else if (!psram_started) begin
-                    issue_wait <= issue_wait + 1;
-                    if (&issue_wait) begin
-                        cmd_issued <= 0;
-                        issue_wait <= 0;
-                    end
-                end else if (psram_started && !psram_busy) begin
-                    state <= S_WR_WAIT;
-                end
-            end
-        end
+axi_cram0_slave u_cram0 (
+    .clk        (clk),
+    .reset_n    (reset_n),
 
-        S_WR_WAIT: begin
-            beat_count <= beat_count + 1;
-            cmd_issued <= 0;
-            psram_started <= 0;
-            if (beat_is_last) begin
-                s_axi_bvalid <= 1;
-                s_axi_bresp <= 2'b00;
-                state <= S_IDLE;
-            end else begin
-                addr_r <= addr_r + 32'd4;
-                state <= S_WR_NEXT;
-            end
-        end
+    .s_axi_arvalid (s_axi_arvalid & ar_is_cram0),
+    .s_axi_arready (c0_arready),
+    .s_axi_araddr  (s_axi_araddr),
+    .s_axi_arlen   (s_axi_arlen),
 
-        S_WR_NEXT: begin
-            if (s_axi_wvalid) begin
-                s_axi_wready <= 1;
-                psram_wdata <= s_axi_wdata;
-                psram_wstrb <= s_axi_wstrb;
-                state <= S_WR_CMD;
-            end
-        end
+    .s_axi_rvalid  (c0_rvalid),
+    .s_axi_rready  (s_axi_rready),
+    .s_axi_rdata   (c0_rdata),
+    .s_axi_rresp   (c0_rresp),
+    .s_axi_rlast   (c0_rlast),
 
-        // ============================================
-        default: state <= S_IDLE;
+    .s_axi_awvalid (s_axi_awvalid & aw_is_cram0),
+    .s_axi_awready (c0_awready),
+    .s_axi_awaddr  (s_axi_awaddr),
+    .s_axi_awlen   (s_axi_awlen),
 
-        endcase
-    end
-end
+    .s_axi_wvalid  (s_axi_wvalid),
+    .s_axi_wready  (c0_wready),
+    .s_axi_wdata   (s_axi_wdata),
+    .s_axi_wstrb   (s_axi_wstrb),
+    .s_axi_wlast   (s_axi_wlast),
+
+    .s_axi_bvalid  (c0_bvalid),
+    .s_axi_bready  (s_axi_bready),
+    .s_axi_bresp   (c0_bresp),
+
+    .psram_rd          (c0_psram_rd),
+    .psram_wr          (c0_psram_wr),
+    .psram_addr        (c0_psram_addr),
+    .psram_wdata       (c0_psram_wdata),
+    .psram_wstrb       (c0_psram_wstrb),
+    .psram_rdata       (psram_rdata),
+    .psram_busy        (psram_busy),
+    .psram_rdata_valid (psram_rdata_valid)
+);
+
+axi_cram1_slave u_cram1 (
+    .clk        (clk),
+    .reset_n    (reset_n),
+
+    .s_axi_arvalid (s_axi_arvalid & ar_is_cram1),
+    .s_axi_arready (c1_arready),
+    .s_axi_araddr  (s_axi_araddr),
+    .s_axi_arlen   (s_axi_arlen),
+
+    .s_axi_rvalid  (c1_rvalid),
+    .s_axi_rready  (s_axi_rready),
+    .s_axi_rdata   (c1_rdata),
+    .s_axi_rresp   (c1_rresp),
+    .s_axi_rlast   (c1_rlast),
+
+    .s_axi_awvalid (s_axi_awvalid & aw_is_cram1),
+    .s_axi_awready (c1_awready),
+    .s_axi_awaddr  (s_axi_awaddr),
+    .s_axi_awlen   (s_axi_awlen),
+
+    .s_axi_wvalid  (s_axi_wvalid),
+    .s_axi_wready  (c1_wready),
+    .s_axi_wdata   (s_axi_wdata),
+    .s_axi_wstrb   (s_axi_wstrb),
+    .s_axi_wlast   (s_axi_wlast),
+
+    .s_axi_bvalid  (c1_bvalid),
+    .s_axi_bready  (s_axi_bready),
+    .s_axi_bresp   (c1_bresp),
+
+    .psram_rd          (c1_psram_rd),
+    .psram_wr          (c1_psram_wr),
+    .psram_addr        (c1_psram_addr),
+    .psram_wdata       (c1_psram_wdata),
+    .psram_wstrb       (c1_psram_wstrb),
+    .psram_rdata       (psram_rdata),
+    .psram_busy        (psram_busy),
+    .psram_rdata_valid (psram_rdata_valid)
+);
+
+axi_sram_slave u_sram (
+    .clk        (clk),
+    .reset_n    (reset_n),
+
+    .s_axi_arvalid (s_axi_arvalid & ar_is_sram),
+    .s_axi_arready (sr_arready),
+    .s_axi_araddr  (s_axi_araddr),
+    .s_axi_arlen   (s_axi_arlen),
+
+    .s_axi_rvalid  (sr_rvalid),
+    .s_axi_rready  (s_axi_rready),
+    .s_axi_rdata   (sr_rdata),
+    .s_axi_rresp   (sr_rresp),
+    .s_axi_rlast   (sr_rlast),
+
+    .s_axi_awvalid (s_axi_awvalid & aw_is_sram),
+    .s_axi_awready (sr_awready),
+    .s_axi_awaddr  (s_axi_awaddr),
+    .s_axi_awlen   (s_axi_awlen),
+
+    .s_axi_wvalid  (s_axi_wvalid),
+    .s_axi_wready  (sr_wready),
+    .s_axi_wdata   (s_axi_wdata),
+    .s_axi_wstrb   (s_axi_wstrb),
+    .s_axi_wlast   (s_axi_wlast),
+
+    .s_axi_bvalid  (sr_bvalid),
+    .s_axi_bready  (s_axi_bready),
+    .s_axi_bresp   (sr_bresp),
+
+    .psram_rd          (sr_psram_rd),
+    .psram_wr          (sr_psram_wr),
+    .psram_addr        (sr_psram_addr),
+    .psram_wdata       (sr_psram_wdata),
+    .psram_wstrb       (sr_psram_wstrb),
+    .psram_rdata       (psram_rdata),
+    .psram_busy        (psram_busy),
+    .psram_rdata_valid (psram_rdata_valid)
+);
 
 endmodule
