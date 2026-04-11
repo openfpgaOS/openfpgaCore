@@ -66,96 +66,137 @@ wire [3:0]  sdram_wstrb;
 wire        sdram_bvalid;
 wire [1:0]  sdram_bresp;
 
-// PSRAM AXI4 bus (active but not connected to memory for now — just ack)
-wire        psram_arvalid, psram_arready;
-wire [31:0] psram_araddr;
-wire [7:0]  psram_arlen;
-wire        psram_rvalid, psram_rlast;
-wire [31:0] psram_rdata;
-wire [1:0]  psram_rresp;
-wire        psram_awvalid, psram_awready;
-wire [31:0] psram_awaddr;
-wire [7:0]  psram_awlen;
-wire        psram_wvalid, psram_wready, psram_wlast;
-wire [31:0] psram_wdata;
-wire [3:0]  psram_wstrb;
-wire        psram_bvalid;
-wire [1:0]  psram_bresp;
+// CRAM0 / CRAM1 / SRAM AXI4 buses — per-chip fan-out from cpu_system.
+// We only give CRAM0 a real behavioral model (so preloaded OS / app
+// binaries can be read back); CRAM1 and SRAM are minimal ack stubs.
+wire        cram0_arvalid, cram0_arready;
+wire [31:0] cram0_araddr;
+wire [7:0]  cram0_arlen;
+wire        cram0_rvalid, cram0_rlast;
+wire [31:0] cram0_rdata;
+wire [1:0]  cram0_rresp;
+wire        cram0_awvalid, cram0_awready;
+wire [31:0] cram0_awaddr;
+wire [7:0]  cram0_awlen;
+wire        cram0_wvalid, cram0_wready, cram0_wlast;
+wire [31:0] cram0_wdata;
+wire [3:0]  cram0_wstrb;
+wire        cram0_bvalid;
+wire [1:0]  cram0_bresp;
 
-// PSRAM memory model: 16 MB backing store for CRAM0 (OS + app code)
-// AXI4 addresses arrive as 0x30xxxxxx (CRAM0) or 0x31xxxxxx (CRAM1)
-// from cpu_system. Word address = addr[23:2].
-reg [31:0] psram_mem [0:4194303];  // 16 MW = 16 MB (CRAM0 only)
+// CRAM1 / SRAM ack-only stubs — declare master-driven signals and
+// slave-driven ready/resp signals both up front.
+wire        cram1_arvalid, cram1_awvalid, cram1_wvalid;
+wire [31:0] cram1_araddr, cram1_awaddr, cram1_wdata;
+wire [7:0]  cram1_arlen,  cram1_awlen;
+wire [3:0]  cram1_wstrb;
+wire        cram1_wlast;
+wire        cram1_arready, cram1_awready;
+
+wire        sram_arvalid, sram_awvalid, sram_wvalid;
+wire [31:0] sram_araddr, sram_awaddr, sram_wdata;
+wire [7:0]  sram_arlen, sram_awlen;
+wire [3:0]  sram_wstrb;
+wire        sram_wlast;
+wire        sram_arready, sram_awready;
+
+// ============================================================
+// CRAM0 behavioral model: 16 MB backing store for OS + app code.
+// C++ harness preloads via ps_bd_we / ps_bd_addr / ps_bd_wdata.
+// ============================================================
+reg [31:0] cram0_mem [0:4194303];  // 16 MW = 16 MB
 
 // Backdoor write port for preloading OS binary
 always @(posedge clk)
-    if (ps_bd_we) psram_mem[ps_bd_addr[21:0]] <= ps_bd_wdata;
+    if (ps_bd_we) cram0_mem[ps_bd_addr[21:0]] <= ps_bd_wdata;
 
 // Read FSM
-reg psram_r_pending;
-reg [7:0] psram_r_cnt, psram_r_len;
-reg [31:0] psram_r_addr;
-assign psram_arready = !psram_r_pending;
-assign psram_rvalid = psram_r_pending;
-assign psram_rdata = psram_mem[psram_r_addr[23:2]];
-assign psram_rresp = 2'b00;
-assign psram_rlast = (psram_r_cnt == psram_r_len);
+reg cram0_r_pending;
+reg [7:0] cram0_r_cnt, cram0_r_len;
+reg [31:0] cram0_r_addr;
+assign cram0_arready = !cram0_r_pending;
+assign cram0_rvalid = cram0_r_pending;
+assign cram0_rdata = cram0_mem[cram0_r_addr[23:2]];
+assign cram0_rresp = 2'b00;
+assign cram0_rlast = (cram0_r_cnt == cram0_r_len);
 
 // Write FSM
-reg psram_w_active;
-reg [31:0] psram_w_addr;
-reg psram_b_pending;
-assign psram_awready = !psram_w_active && !psram_b_pending;
-assign psram_wready = psram_w_active;
-assign psram_bvalid = psram_b_pending;
-assign psram_bresp = 2'b00;
+reg cram0_w_active;
+reg [31:0] cram0_w_addr;
+reg cram0_b_pending;
+assign cram0_awready = !cram0_w_active && !cram0_b_pending;
+assign cram0_wready = cram0_w_active;
+assign cram0_bvalid = cram0_b_pending;
+assign cram0_bresp = 2'b00;
 
 always @(posedge clk) begin
     if (!reset_n) begin
-        psram_r_pending <= 0;
-        psram_r_cnt <= 0;
-        psram_r_len <= 0;
-        psram_r_addr <= 0;
-        psram_w_active <= 0;
-        psram_w_addr <= 0;
-        psram_b_pending <= 0;
+        cram0_r_pending <= 0;
+        cram0_r_cnt <= 0;
+        cram0_r_len <= 0;
+        cram0_r_addr <= 0;
+        cram0_w_active <= 0;
+        cram0_w_addr <= 0;
+        cram0_b_pending <= 0;
     end else begin
         // Read handling
-        if (psram_arvalid && psram_arready) begin
-            psram_r_pending <= 1;
-            psram_r_cnt <= 0;
-            psram_r_len <= psram_arlen;
-            psram_r_addr <= psram_araddr;
-        end else if (psram_r_pending) begin
-            if (psram_rlast) begin
-                psram_r_pending <= 0;
+        if (cram0_arvalid && cram0_arready) begin
+            cram0_r_pending <= 1;
+            cram0_r_cnt <= 0;
+            cram0_r_len <= cram0_arlen;
+            cram0_r_addr <= cram0_araddr;
+        end else if (cram0_r_pending) begin
+            if (cram0_rlast) begin
+                cram0_r_pending <= 0;
             end else begin
-                psram_r_cnt <= psram_r_cnt + 1;
-                psram_r_addr <= psram_r_addr + 4;
+                cram0_r_cnt <= cram0_r_cnt + 1;
+                cram0_r_addr <= cram0_r_addr + 4;
             end
         end
 
         // Write handling
-        if (psram_awvalid && psram_awready) begin
-            psram_w_active <= 1;
-            psram_w_addr <= psram_awaddr;
+        if (cram0_awvalid && cram0_awready) begin
+            cram0_w_active <= 1;
+            cram0_w_addr <= cram0_awaddr;
         end
-        if (psram_w_active && psram_wvalid) begin
+        if (cram0_w_active && cram0_wvalid) begin
             // Byte-strobe write
-            if (psram_wstrb[0]) psram_mem[psram_w_addr[23:2]][7:0]   <= psram_wdata[7:0];
-            if (psram_wstrb[1]) psram_mem[psram_w_addr[23:2]][15:8]  <= psram_wdata[15:8];
-            if (psram_wstrb[2]) psram_mem[psram_w_addr[23:2]][23:16] <= psram_wdata[23:16];
-            if (psram_wstrb[3]) psram_mem[psram_w_addr[23:2]][31:24] <= psram_wdata[31:24];
-            psram_w_addr <= psram_w_addr + 4;
-            if (psram_wlast) begin
-                psram_w_active <= 0;
-                psram_b_pending <= 1;
+            if (cram0_wstrb[0]) cram0_mem[cram0_w_addr[23:2]][7:0]   <= cram0_wdata[7:0];
+            if (cram0_wstrb[1]) cram0_mem[cram0_w_addr[23:2]][15:8]  <= cram0_wdata[15:8];
+            if (cram0_wstrb[2]) cram0_mem[cram0_w_addr[23:2]][23:16] <= cram0_wdata[23:16];
+            if (cram0_wstrb[3]) cram0_mem[cram0_w_addr[23:2]][31:24] <= cram0_wdata[31:24];
+            cram0_w_addr <= cram0_w_addr + 4;
+            if (cram0_wlast) begin
+                cram0_w_active <= 0;
+                cram0_b_pending <= 1;
             end
         end
-        if (psram_b_pending)
-            psram_b_pending <= 0;
+        if (cram0_b_pending)
+            cram0_b_pending <= 0;
     end
 end
+
+// CRAM1 stub — ack everything with zero data
+assign cram1_arready = 1'b1;
+assign cram1_awready = 1'b1;
+wire        cram1_rvalid = 1'b0;
+wire [31:0] cram1_rdata  = 32'b0;
+wire [1:0]  cram1_rresp  = 2'b00;
+wire        cram1_rlast  = 1'b0;
+wire        cram1_wready = 1'b1;
+wire        cram1_bvalid = 1'b0;
+wire [1:0]  cram1_bresp  = 2'b00;
+
+// SRAM stub — ack everything with zero data
+assign sram_arready = 1'b1;
+assign sram_awready = 1'b1;
+wire        sram_rvalid  = 1'b0;
+wire [31:0] sram_rdata   = 32'b0;
+wire [1:0]  sram_rresp   = 2'b00;
+wire        sram_rlast   = 1'b0;
+wire        sram_wready  = 1'b1;
+wire        sram_bvalid  = 1'b0;
+wire [1:0]  sram_bresp   = 2'b00;
 
 // Local AXI4 bus (BRAM)
 wire        local_arvalid, local_arready;
@@ -195,17 +236,39 @@ cpu_system cpu (
     .m_sdram_wdata(sdram_wdata), .m_sdram_wstrb(sdram_wstrb),
     .m_sdram_wlast(sdram_wlast),
     .m_sdram_bvalid(sdram_bvalid), .m_sdram_bresp(sdram_bresp),
-    // PSRAM
-    .m_psram_arvalid(psram_arvalid), .m_psram_arready(psram_arready),
-    .m_psram_araddr(psram_araddr), .m_psram_arlen(psram_arlen),
-    .m_psram_rvalid(psram_rvalid), .m_psram_rdata(psram_rdata),
-    .m_psram_rresp(psram_rresp), .m_psram_rlast(psram_rlast),
-    .m_psram_awvalid(psram_awvalid), .m_psram_awready(psram_awready),
-    .m_psram_awaddr(psram_awaddr), .m_psram_awlen(psram_awlen),
-    .m_psram_wvalid(psram_wvalid), .m_psram_wready(psram_wready),
-    .m_psram_wdata(psram_wdata), .m_psram_wstrb(psram_wstrb),
-    .m_psram_wlast(psram_wlast),
-    .m_psram_bvalid(psram_bvalid), .m_psram_bresp(psram_bresp),
+    // CRAM0 (backed by cram0_mem[])
+    .m_cram0_arvalid(cram0_arvalid), .m_cram0_arready(cram0_arready),
+    .m_cram0_araddr(cram0_araddr), .m_cram0_arlen(cram0_arlen),
+    .m_cram0_rvalid(cram0_rvalid), .m_cram0_rdata(cram0_rdata),
+    .m_cram0_rresp(cram0_rresp), .m_cram0_rlast(cram0_rlast),
+    .m_cram0_awvalid(cram0_awvalid), .m_cram0_awready(cram0_awready),
+    .m_cram0_awaddr(cram0_awaddr), .m_cram0_awlen(cram0_awlen),
+    .m_cram0_wvalid(cram0_wvalid), .m_cram0_wready(cram0_wready),
+    .m_cram0_wdata(cram0_wdata), .m_cram0_wstrb(cram0_wstrb),
+    .m_cram0_wlast(cram0_wlast),
+    .m_cram0_bvalid(cram0_bvalid), .m_cram0_bresp(cram0_bresp),
+    // CRAM1 (stub ack)
+    .m_cram1_arvalid(cram1_arvalid), .m_cram1_arready(cram1_arready),
+    .m_cram1_araddr(cram1_araddr), .m_cram1_arlen(cram1_arlen),
+    .m_cram1_rvalid(cram1_rvalid), .m_cram1_rdata(cram1_rdata),
+    .m_cram1_rresp(cram1_rresp), .m_cram1_rlast(cram1_rlast),
+    .m_cram1_awvalid(cram1_awvalid), .m_cram1_awready(cram1_awready),
+    .m_cram1_awaddr(cram1_awaddr), .m_cram1_awlen(cram1_awlen),
+    .m_cram1_wvalid(cram1_wvalid), .m_cram1_wready(cram1_wready),
+    .m_cram1_wdata(cram1_wdata), .m_cram1_wstrb(cram1_wstrb),
+    .m_cram1_wlast(cram1_wlast),
+    .m_cram1_bvalid(cram1_bvalid), .m_cram1_bresp(cram1_bresp),
+    // SRAM (stub ack)
+    .m_sram_arvalid(sram_arvalid), .m_sram_arready(sram_arready),
+    .m_sram_araddr(sram_araddr), .m_sram_arlen(sram_arlen),
+    .m_sram_rvalid(sram_rvalid), .m_sram_rdata(sram_rdata),
+    .m_sram_rresp(sram_rresp), .m_sram_rlast(sram_rlast),
+    .m_sram_awvalid(sram_awvalid), .m_sram_awready(sram_awready),
+    .m_sram_awaddr(sram_awaddr), .m_sram_awlen(sram_awlen),
+    .m_sram_wvalid(sram_wvalid), .m_sram_wready(sram_wready),
+    .m_sram_wdata(sram_wdata), .m_sram_wstrb(sram_wstrb),
+    .m_sram_wlast(sram_wlast),
+    .m_sram_bvalid(sram_bvalid), .m_sram_bresp(sram_bresp),
     // Local
     .m_local_arvalid(local_arvalid), .m_local_arready(local_arready),
     .m_local_araddr(local_araddr), .m_local_arlen(local_arlen),
@@ -288,13 +351,22 @@ sdram_fast_model sdram_fast (
 // For now, tie off the BRAM fetch port (cpu_system handles routing)
 assign fetch_arvalid = 0;
 
-// Debug: expose bus activity for PC tracing
+// Debug: expose bus activity for PC tracing.
+// PSRAM is included so CRAM0 (OS code at 0x30000000) instruction
+// fetches are visible — without this, anything running in CRAM0
+// looks like a hang because the read goes through the psram bus.
 assign dbg_fetch_addr = local_arvalid ? local_araddr :
-                         sdram_arvalid ? sdram_araddr : 32'h0;
-assign dbg_fetch_valid = local_arvalid | sdram_arvalid;
+                         sdram_arvalid ? sdram_araddr :
+                         cram0_arvalid ? cram0_araddr :
+                         cram1_arvalid ? cram1_araddr :
+                         sram_arvalid  ? sram_araddr  : 32'h0;
+assign dbg_fetch_valid = local_arvalid | sdram_arvalid | cram0_arvalid | cram1_arvalid | sram_arvalid;
 assign dbg_lsu_addr = local_awvalid ? local_awaddr :
-                       sdram_awvalid ? sdram_awaddr : 32'h0;
-assign dbg_lsu_valid = local_awvalid | sdram_awvalid;
+                       sdram_awvalid ? sdram_awaddr :
+                       cram0_awvalid ? cram0_awaddr :
+                       cram1_awvalid ? cram1_awaddr :
+                       sram_awvalid  ? sram_awaddr  : 32'h0;
+assign dbg_lsu_valid = local_awvalid | sdram_awvalid | cram0_awvalid | cram1_awvalid | sram_awvalid;
 assign fetch_araddr = 0;
 assign fetch_arlen = 0;
 wire fetch_rready = 1;

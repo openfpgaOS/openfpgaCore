@@ -557,14 +557,14 @@ psram_cram0 #(
 ) psram0 (
     .clk(clk_ram_controller),
     .reset_n(1'b1),
-    .word_rd(psram_mux_rd),
-    .word_wr(psram_mux_wr),
-    .word_addr(psram_mux_addr),
-    .word_data(psram_mux_wdata),
-    .word_wstrb(psram_mux_wstrb),
-    .word_q(psram_mux_rdata),
-    .word_busy(psram_mux_busy),
-    .word_q_valid(psram_mux_rdata_valid),
+    .word_rd(c0_psram_rd),
+    .word_wr(c0_psram_wr),
+    .word_addr(c0_psram_addr[21:0]),
+    .word_data(c0_psram_wdata),
+    .word_wstrb(c0_psram_wstrb),
+    .word_q(c0_psram_rdata),
+    .word_busy(c0_psram_busy),
+    .word_q_valid(c0_psram_rdata_valid),
     .cram_a(cram0_a),
     .cram_dq(cram0_dq),
     .cram_wait(cram0_wait),
@@ -578,10 +578,10 @@ psram_cram0 #(
     .cram_ub_n(cram0_ub_n),
     .cram_lb_n(cram0_lb_n),
     // Sync burst read (active only with PSRAM_BURST_ENABLE define)
-    .burst_rd(cpu_cram_burst_rd),
-    .burst_len(cpu_psram_burst_len),
-    .burst_rdata_valid(cram0_burst_rdata_valid),
-    .burst_rdata(cram0_burst_rdata),
+    .burst_rd(c0_psram_burst_rd),
+    .burst_len(c0_psram_burst_len),
+    .burst_rdata_valid(c0_psram_burst_rdata_valid),
+    .burst_rdata(c0_psram_burst_rdata),
     // BCR config write (driven by the BCR_ST_* FSM above)
     .config_en(bcr_init_config_en),
     .config_data(BCR_VALUE),
@@ -775,61 +775,105 @@ wire        cpu_m_sdram_bvalid;
 wire [1:0]  cpu_m_sdram_bresp;
 
 // CPU AXI4 master → axi_psram_slave
-wire        cpu_m_psram_arvalid;
-wire        cpu_m_psram_arready;
-wire [31:0] cpu_m_psram_araddr;
-wire [7:0]  cpu_m_psram_arlen;
-wire        cpu_m_psram_rvalid;
-wire [31:0] cpu_m_psram_rdata;
-wire [1:0]  cpu_m_psram_rresp;
-wire        cpu_m_psram_rlast;
-wire        cpu_m_psram_awvalid;
-wire        cpu_m_psram_awready;
-wire [31:0] cpu_m_psram_awaddr;
-wire [7:0]  cpu_m_psram_awlen;
-wire        cpu_m_psram_wvalid;
-wire        cpu_m_psram_wready;
-wire [31:0] cpu_m_psram_wdata;
-wire [3:0]  cpu_m_psram_wstrb;
-wire        cpu_m_psram_wlast;
-wire        cpu_m_psram_bvalid;
-wire [1:0]  cpu_m_psram_bresp;
+// Per-chip AXI4 master wires between cpu_system and the three standalone
+// sub-slaves (CRAM0, CRAM1, SRAM).  Concurrent fabrics — no shared bus.
+wire        cpu_m_cram0_arvalid;
+wire        cpu_m_cram0_arready;
+wire [31:0] cpu_m_cram0_araddr;
+wire [7:0]  cpu_m_cram0_arlen;
+wire        cpu_m_cram0_rvalid;
+wire [31:0] cpu_m_cram0_rdata;
+wire [1:0]  cpu_m_cram0_rresp;
+wire        cpu_m_cram0_rlast;
+wire        cpu_m_cram0_awvalid;
+wire        cpu_m_cram0_awready;
+wire [31:0] cpu_m_cram0_awaddr;
+wire [7:0]  cpu_m_cram0_awlen;
+wire        cpu_m_cram0_wvalid;
+wire        cpu_m_cram0_wready;
+wire [31:0] cpu_m_cram0_wdata;
+wire [3:0]  cpu_m_cram0_wstrb;
+wire        cpu_m_cram0_wlast;
+wire        cpu_m_cram0_bvalid;
+wire [1:0]  cpu_m_cram0_bresp;
 
-// axi_psram_slave → memory target mux (word-level)
-// psram_addr[25:22] carries addr[27:24] for CRAM0/CRAM1/SRAM decode:
-//   0x0 or 0x8 → CRAM0, 0x1 or 0x9 → CRAM1, 0xA → SRAM
-wire        cpu_psram_rd;
-wire        cpu_psram_wr;
-wire [25:0] cpu_psram_addr;
-wire [31:0] cpu_psram_wdata;
-wire [3:0]  cpu_psram_wstrb;
-wire [31:0] cpu_psram_rdata;
-wire        cpu_psram_busy;
-wire        cpu_psram_rdata_valid;
+wire        cpu_m_cram1_arvalid;
+wire        cpu_m_cram1_arready;
+wire [31:0] cpu_m_cram1_araddr;
+wire [7:0]  cpu_m_cram1_arlen;
+wire        cpu_m_cram1_rvalid;
+wire [31:0] cpu_m_cram1_rdata;
+wire [1:0]  cpu_m_cram1_rresp;
+wire        cpu_m_cram1_rlast;
+wire        cpu_m_cram1_awvalid;
+wire        cpu_m_cram1_awready;
+wire [31:0] cpu_m_cram1_awaddr;
+wire [7:0]  cpu_m_cram1_awlen;
+wire        cpu_m_cram1_wvalid;
+wire        cpu_m_cram1_wready;
+wire [31:0] cpu_m_cram1_wdata;
+wire [3:0]  cpu_m_cram1_wstrb;
+wire        cpu_m_cram1_wlast;
+wire        cpu_m_cram1_bvalid;
+wire [1:0]  cpu_m_cram1_bresp;
 
-// Burst read interface from axi_psram_slave
-wire        cpu_psram_burst_rd;
-wire [5:0]  cpu_psram_burst_len;
-wire        cpu_psram_burst_rdata_valid;
-wire [31:0] cpu_psram_burst_rdata;
+wire        cpu_m_sram_arvalid;
+wire        cpu_m_sram_arready;
+wire [31:0] cpu_m_sram_araddr;
+wire [7:0]  cpu_m_sram_arlen;
+wire        cpu_m_sram_rvalid;
+wire [31:0] cpu_m_sram_rdata;
+wire [1:0]  cpu_m_sram_rresp;
+wire        cpu_m_sram_rlast;
+wire        cpu_m_sram_awvalid;
+wire        cpu_m_sram_awready;
+wire [31:0] cpu_m_sram_awaddr;
+wire [7:0]  cpu_m_sram_awlen;
+wire        cpu_m_sram_wvalid;
+wire        cpu_m_sram_wready;
+wire [31:0] cpu_m_sram_wdata;
+wire [3:0]  cpu_m_sram_wstrb;
+wire        cpu_m_sram_wlast;
+wire        cpu_m_sram_bvalid;
+wire [1:0]  cpu_m_sram_bresp;
 
+// axi_psram_slave exposes per-chip backend wires — CRAM0, CRAM1, and
+// SRAM are three independent physical backends (two separate PSRAM
+// chips + on-chip M10K) so they can service transactions in parallel.
+// No shared bus, no psram_target_sel latch.
+wire        c0_psram_rd;
+wire        c0_psram_wr;
+wire [25:0] c0_psram_addr;
+wire [31:0] c0_psram_wdata;
+wire [3:0]  c0_psram_wstrb;
+wire [31:0] c0_psram_rdata;
+wire        c0_psram_busy;
+wire        c0_psram_rdata_valid;
+wire        c0_psram_burst_rd;
+wire [5:0]  c0_psram_burst_len;
+wire        c0_psram_burst_rdata_valid;
+wire [31:0] c0_psram_burst_rdata;
 
-// Address decode: cpu_psram_addr[25:22] = original addr[27:24]
-wire [3:0] mem_target_sel = cpu_psram_addr[25:22];
-wire cpu_psram_sel_cram0 = (mem_target_sel == 4'h0) || (mem_target_sel == 4'h8);
-wire cpu_psram_sel_cram1 = (mem_target_sel == 4'h1) || (mem_target_sel == 4'h9);
-wire cpu_psram_sel_cram = cpu_psram_sel_cram0;  // CRAM0 only for cached access
-wire cpu_psram_sel_sram = (mem_target_sel == 4'hA);
+wire        c1_psram_rd;
+wire        c1_psram_wr;
+wire [25:0] c1_psram_addr;
+wire [31:0] c1_psram_wdata;
+wire [3:0]  c1_psram_wstrb;
+wire [31:0] c1_psram_rdata;
+wire        c1_psram_busy;
+wire        c1_psram_rdata_valid;
+
+wire        sr_psram_rd;
+wire        sr_psram_wr;
+wire [25:0] sr_psram_addr;
+wire [31:0] sr_psram_wdata;
+wire [3:0]  sr_psram_wstrb;
+wire [31:0] sr_psram_rdata;
+wire        sr_psram_busy;
+wire        sr_psram_rdata_valid;
 
 // Muxed PSRAM signals (bridge or CPU)
-wire        psram_mux_rd;
-wire        psram_mux_wr;
-wire [21:0] psram_mux_addr;
-wire [31:0] psram_mux_wdata;
-wire [3:0]  psram_mux_wstrb;
-wire [31:0] psram_mux_rdata;
-wire        psram_mux_busy;
-wire        psram_mux_rdata_valid;
+// psram_mux_* removed — per-chip backends wire directly to each sub-slave
 
 // Audio output interface
 wire        audio_sample_wr;
@@ -1179,20 +1223,19 @@ wire cdc_psram1_inflight;
 
 // CPU CRAM1 path — goes through cpu_psram1_cdc.  The mixer is no longer
 // part of this arbiter: it lives in clk_74a now and joins via a separate
-// clk_74a-side arbiter at the psram1_inst port (see below).
-wire cram1_cpu_rd = cpu_psram_rd & cpu_psram_sel_cram1;
-wire cram1_cpu_wr = cpu_psram_wr & cpu_psram_sel_cram1;
-
+// clk_74a-side arbiter at the psram1_inst port (see below).  The
+// axi_psram_slave router already gates these signals by CRAM1 address
+// match, so no extra AND is needed here.
 cpu_psram1_cdc cdc_psram1 (
     .clk_cpu(clk_cpu),
-    .cpu_rd(cram1_cpu_rd),
-    .cpu_wr(cram1_cpu_wr),
-    .cpu_addr(cpu_psram_addr[21:0]),
-    .cpu_wdata(cpu_psram_wdata),
-    .cpu_wstrb(cpu_psram_wstrb),
-    .cpu_rdata(cdc_cpu_rdata),
-    .cpu_busy(cdc_cpu_busy),
-    .cpu_rdata_valid(cdc_cpu_rdata_valid),
+    .cpu_rd(c1_psram_rd),
+    .cpu_wr(c1_psram_wr),
+    .cpu_addr(c1_psram_addr[21:0]),
+    .cpu_wdata(c1_psram_wdata),
+    .cpu_wstrb(c1_psram_wstrb),
+    .cpu_rdata(c1_psram_rdata),
+    .cpu_busy(c1_psram_busy),
+    .cpu_rdata_valid(c1_psram_rdata_valid),
     .clk_74a(clk_74a),
     .psram_rd(cdc_psram1_rd),
     .psram_wr(cdc_psram1_wr),
@@ -1287,67 +1330,23 @@ end
 // SRAM bridge was never used by firmware.
 wire cram_bridge_active = 1'b0;
 
-// Skid buffer (4-entry) in clk_74a domain
-// (CRAM0 + SRAM bridge drain paths removed — see CRAM1 bounce above)
-
-// CRAM0 mux: Bridge FIFO drain has priority, then CPU
-wire cpu_cram_rd = cpu_psram_rd & cpu_psram_sel_cram;
-wire cpu_cram_wr = cpu_psram_wr & cpu_psram_sel_cram;
-wire cpu_cram_burst_rd = cpu_psram_burst_rd & cpu_psram_sel_cram;
-
-// CRAM0 mux: CPU only (bridge drain removed)
-assign psram_mux_rd = cpu_cram_rd;
-assign psram_mux_wr = cpu_cram_wr;
-assign psram_mux_addr = cpu_psram_addr[21:0];
-assign psram_mux_wdata = cpu_psram_wdata;
-assign psram_mux_wstrb = cpu_psram_wstrb;
-
-// CRAM burst read routing (disabled when bridge active)
-// Burst reads disabled — CRAM0 uses async two-phase (no BCR)
-
-
-// SRAM mux: GPU > CPU (bridge drain removed)
-wire cpu_sram_rd = cpu_psram_rd & cpu_psram_sel_sram;
-wire cpu_sram_wr = cpu_psram_wr & cpu_psram_sel_sram;
+// SRAM mux: GPU has priority over the CPU path (GPU tile lookups drive
+// sram_word_* directly; when GPU is idle the SRAM sub-slave wins).
+// sr_psram_* comes from axi_psram_slave's u_sram instance and is already
+// only active for CRAM_BASE address-decoded SRAM transactions, so no
+// explicit CPU-side gating is needed.
 wire gpu_sram_active = gpu_sram_rd | gpu_sram_wr;
 
-assign sram_word_rd    = gpu_sram_active ? gpu_sram_rd    : cpu_sram_rd;
-assign sram_word_wr    = gpu_sram_active ? gpu_sram_wr    : cpu_sram_wr;
-assign sram_word_addr  = gpu_sram_active ? gpu_sram_addr  : cpu_psram_addr[21:0];
-assign sram_word_wdata = gpu_sram_active ? gpu_sram_wdata : cpu_psram_wdata;
-assign sram_word_wstrb = gpu_sram_active ? gpu_sram_wstrb : cpu_psram_wstrb;
+assign sram_word_rd    = gpu_sram_active ? gpu_sram_rd    : sr_psram_rd;
+assign sram_word_wr    = gpu_sram_active ? gpu_sram_wr    : sr_psram_wr;
+assign sram_word_addr  = gpu_sram_active ? gpu_sram_addr  : sr_psram_addr[21:0];
+assign sram_word_wdata = gpu_sram_active ? gpu_sram_wdata : sr_psram_wdata;
+assign sram_word_wstrb = gpu_sram_active ? gpu_sram_wstrb : sr_psram_wstrb;
 
-// Read data / busy / valid mux back to axi_psram_slave
-// Per-target mux: latch selector on request, use for ALL feedback
-// (busy, rdata, rdata_valid). Combinational selectors are stale by the
-// time data arrives from CDC adapter (~22 cycles later).
-reg [1:0] psram_target_sel;  // 0=cram0, 1=sram, 2=cram1
-// NOTE: include cpu_psram_burst_rd in the trigger — CRAM0 reads use the
-// burst path now, and if we only watch cpu_psram_rd/wr the selector stays
-// stale across a burst read and the downstream busy mux picks the wrong
-// target's busy signal (hanging S_RD_BURST waiting for !psram_busy).
-always @(posedge clk_cpu)
-    if (cpu_psram_rd || cpu_psram_wr || cpu_psram_burst_rd)
-        psram_target_sel <= cpu_psram_sel_sram ? 2'd1 :
-                            cpu_psram_sel_cram1 ? 2'd2 : 2'd0;
-
-assign cpu_psram_rdata = (psram_target_sel == 2'd1) ? sram_word_rdata :
-                         (psram_target_sel == 2'd2) ? cdc_cpu_rdata : psram_mux_rdata;
-
-assign cpu_psram_busy = (psram_target_sel == 2'd1) ? sram_word_busy :
-                        (psram_target_sel == 2'd2) ? cdc_cpu_busy :
-                        psram_mux_busy;
-
-assign cpu_psram_rdata_valid = (psram_target_sel == 2'd1) ? sram_word_rdata_valid :
-                               (psram_target_sel == 2'd2) ? cdc_cpu_rdata_valid :
-                               psram_mux_rdata_valid;
-
-// Burst read data from CRAM0 wrapper
-wire cram0_burst_rdata_valid;
-wire [31:0] cram0_burst_rdata;
-
-assign cpu_psram_burst_rdata_valid = cram0_burst_rdata_valid;
-assign cpu_psram_burst_rdata = cram0_burst_rdata;
+// SRAM return data path back to the sub-slave — no mux, direct wire.
+assign sr_psram_rdata       = sram_word_rdata;
+assign sr_psram_busy        = sram_word_busy;
+assign sr_psram_rdata_valid = sram_word_rdata_valid;
 
 
 
@@ -1795,26 +1794,66 @@ assign video_hs = vidout_hs;
         .m_sdram_wlast(cpu_m_sdram_wlast),
         .m_sdram_bvalid(cpu_m_sdram_bvalid),
         .m_sdram_bresp(cpu_m_sdram_bresp),
-        // PSRAM AXI4 master interface
-        .m_psram_arvalid(cpu_m_psram_arvalid),
-        .m_psram_arready(cpu_m_psram_arready),
-        .m_psram_araddr(cpu_m_psram_araddr),
-        .m_psram_arlen(cpu_m_psram_arlen),
-        .m_psram_rvalid(cpu_m_psram_rvalid),
-        .m_psram_rdata(cpu_m_psram_rdata),
-        .m_psram_rresp(cpu_m_psram_rresp),
-        .m_psram_rlast(cpu_m_psram_rlast),
-        .m_psram_awvalid(cpu_m_psram_awvalid),
-        .m_psram_awready(cpu_m_psram_awready),
-        .m_psram_awaddr(cpu_m_psram_awaddr),
-        .m_psram_awlen(cpu_m_psram_awlen),
-        .m_psram_wvalid(cpu_m_psram_wvalid),
-        .m_psram_wready(cpu_m_psram_wready),
-        .m_psram_wdata(cpu_m_psram_wdata),
-        .m_psram_wstrb(cpu_m_psram_wstrb),
-        .m_psram_wlast(cpu_m_psram_wlast),
-        .m_psram_bvalid(cpu_m_psram_bvalid),
-        .m_psram_bresp(cpu_m_psram_bresp),
+        // CRAM0 AXI4 master interface
+        .m_cram0_arvalid(cpu_m_cram0_arvalid),
+        .m_cram0_arready(cpu_m_cram0_arready),
+        .m_cram0_araddr (cpu_m_cram0_araddr),
+        .m_cram0_arlen  (cpu_m_cram0_arlen),
+        .m_cram0_rvalid (cpu_m_cram0_rvalid),
+        .m_cram0_rdata  (cpu_m_cram0_rdata),
+        .m_cram0_rresp  (cpu_m_cram0_rresp),
+        .m_cram0_rlast  (cpu_m_cram0_rlast),
+        .m_cram0_awvalid(cpu_m_cram0_awvalid),
+        .m_cram0_awready(cpu_m_cram0_awready),
+        .m_cram0_awaddr (cpu_m_cram0_awaddr),
+        .m_cram0_awlen  (cpu_m_cram0_awlen),
+        .m_cram0_wvalid (cpu_m_cram0_wvalid),
+        .m_cram0_wready (cpu_m_cram0_wready),
+        .m_cram0_wdata  (cpu_m_cram0_wdata),
+        .m_cram0_wstrb  (cpu_m_cram0_wstrb),
+        .m_cram0_wlast  (cpu_m_cram0_wlast),
+        .m_cram0_bvalid (cpu_m_cram0_bvalid),
+        .m_cram0_bresp  (cpu_m_cram0_bresp),
+        // CRAM1 AXI4 master interface
+        .m_cram1_arvalid(cpu_m_cram1_arvalid),
+        .m_cram1_arready(cpu_m_cram1_arready),
+        .m_cram1_araddr (cpu_m_cram1_araddr),
+        .m_cram1_arlen  (cpu_m_cram1_arlen),
+        .m_cram1_rvalid (cpu_m_cram1_rvalid),
+        .m_cram1_rdata  (cpu_m_cram1_rdata),
+        .m_cram1_rresp  (cpu_m_cram1_rresp),
+        .m_cram1_rlast  (cpu_m_cram1_rlast),
+        .m_cram1_awvalid(cpu_m_cram1_awvalid),
+        .m_cram1_awready(cpu_m_cram1_awready),
+        .m_cram1_awaddr (cpu_m_cram1_awaddr),
+        .m_cram1_awlen  (cpu_m_cram1_awlen),
+        .m_cram1_wvalid (cpu_m_cram1_wvalid),
+        .m_cram1_wready (cpu_m_cram1_wready),
+        .m_cram1_wdata  (cpu_m_cram1_wdata),
+        .m_cram1_wstrb  (cpu_m_cram1_wstrb),
+        .m_cram1_wlast  (cpu_m_cram1_wlast),
+        .m_cram1_bvalid (cpu_m_cram1_bvalid),
+        .m_cram1_bresp  (cpu_m_cram1_bresp),
+        // SRAM AXI4 master interface
+        .m_sram_arvalid(cpu_m_sram_arvalid),
+        .m_sram_arready(cpu_m_sram_arready),
+        .m_sram_araddr (cpu_m_sram_araddr),
+        .m_sram_arlen  (cpu_m_sram_arlen),
+        .m_sram_rvalid (cpu_m_sram_rvalid),
+        .m_sram_rdata  (cpu_m_sram_rdata),
+        .m_sram_rresp  (cpu_m_sram_rresp),
+        .m_sram_rlast  (cpu_m_sram_rlast),
+        .m_sram_awvalid(cpu_m_sram_awvalid),
+        .m_sram_awready(cpu_m_sram_awready),
+        .m_sram_awaddr (cpu_m_sram_awaddr),
+        .m_sram_awlen  (cpu_m_sram_awlen),
+        .m_sram_wvalid (cpu_m_sram_wvalid),
+        .m_sram_wready (cpu_m_sram_wready),
+        .m_sram_wdata  (cpu_m_sram_wdata),
+        .m_sram_wstrb  (cpu_m_sram_wstrb),
+        .m_sram_wlast  (cpu_m_sram_wlast),
+        .m_sram_bvalid (cpu_m_sram_bvalid),
+        .m_sram_bresp  (cpu_m_sram_bresp),
         // Local peripheral AXI4 master interface
         .m_local_arvalid(cpu_m_local_arvalid),
         .m_local_arready(cpu_m_local_arready),
@@ -2103,43 +2142,115 @@ assign video_hs = vidout_hs;
         .sdram_next_wstrb(sdram_slave_next_wstrb)
     );
 
-    // AXI4 PSRAM slave
-    axi_psram_slave cpu_psram_axi (
+    // Per-chip AXI4 sub-slaves — directly instantiated (no shared
+    // axi_psram_slave router).  cpu_system gives each chip its own
+    // AXI master port, so CRAM0, CRAM1, and SRAM service transactions
+    // concurrently on their independent physical backends.
+
+    axi_cram0_slave cpu_cram0_axi (
         .clk(clk_cpu),
         .reset_n(reset_n),
-        .s_axi_arvalid(cpu_m_psram_arvalid),
-        .s_axi_arready(cpu_m_psram_arready),
-        .s_axi_araddr(cpu_m_psram_araddr),
-        .s_axi_arlen(cpu_m_psram_arlen),
-        .s_axi_rvalid(cpu_m_psram_rvalid),
+        .s_axi_arvalid(cpu_m_cram0_arvalid),
+        .s_axi_arready(cpu_m_cram0_arready),
+        .s_axi_araddr(cpu_m_cram0_araddr),
+        .s_axi_arlen(cpu_m_cram0_arlen),
+        .s_axi_rvalid(cpu_m_cram0_rvalid),
         .s_axi_rready(1'b1),
-        .s_axi_rdata(cpu_m_psram_rdata),
-        .s_axi_rresp(cpu_m_psram_rresp),
-        .s_axi_rlast(cpu_m_psram_rlast),
-        .s_axi_awvalid(cpu_m_psram_awvalid),
-        .s_axi_awready(cpu_m_psram_awready),
-        .s_axi_awaddr(cpu_m_psram_awaddr),
-        .s_axi_awlen(cpu_m_psram_awlen),
-        .s_axi_wvalid(cpu_m_psram_wvalid),
-        .s_axi_wready(cpu_m_psram_wready),
-        .s_axi_wdata(cpu_m_psram_wdata),
-        .s_axi_wstrb(cpu_m_psram_wstrb),
-        .s_axi_wlast(cpu_m_psram_wlast),
-        .s_axi_bvalid(cpu_m_psram_bvalid),
+        .s_axi_rdata(cpu_m_cram0_rdata),
+        .s_axi_rresp(cpu_m_cram0_rresp),
+        .s_axi_rlast(cpu_m_cram0_rlast),
+        .s_axi_awvalid(cpu_m_cram0_awvalid),
+        .s_axi_awready(cpu_m_cram0_awready),
+        .s_axi_awaddr(cpu_m_cram0_awaddr),
+        .s_axi_awlen(cpu_m_cram0_awlen),
+        .s_axi_wvalid(cpu_m_cram0_wvalid),
+        .s_axi_wready(cpu_m_cram0_wready),
+        .s_axi_wdata(cpu_m_cram0_wdata),
+        .s_axi_wstrb(cpu_m_cram0_wstrb),
+        .s_axi_wlast(cpu_m_cram0_wlast),
+        .s_axi_bvalid(cpu_m_cram0_bvalid),
         .s_axi_bready(1'b1),
-        .s_axi_bresp(cpu_m_psram_bresp),
-        .psram_rd(cpu_psram_rd),
-        .psram_wr(cpu_psram_wr),
-        .psram_addr(cpu_psram_addr),
-        .psram_wdata(cpu_psram_wdata),
-        .psram_wstrb(cpu_psram_wstrb),
-        .psram_rdata(cpu_psram_rdata),
-        .psram_busy(cpu_psram_busy),
-        .psram_rdata_valid(cpu_psram_rdata_valid),
-        .psram_burst_rd(cpu_psram_burst_rd),
-        .psram_burst_len(cpu_psram_burst_len),
-        .psram_burst_rdata_valid(cpu_psram_burst_rdata_valid),
-        .psram_burst_rdata(cpu_psram_burst_rdata),
+        .s_axi_bresp(cpu_m_cram0_bresp),
+        .psram_rd          (c0_psram_rd),
+        .psram_wr          (c0_psram_wr),
+        .psram_addr        (c0_psram_addr),
+        .psram_wdata       (c0_psram_wdata),
+        .psram_wstrb       (c0_psram_wstrb),
+        .psram_rdata       (c0_psram_rdata),
+        .psram_busy        (c0_psram_busy),
+        .psram_rdata_valid (c0_psram_rdata_valid),
+        .psram_burst_rd          (c0_psram_burst_rd),
+        .psram_burst_len         (c0_psram_burst_len),
+        .psram_burst_rdata       (c0_psram_burst_rdata),
+        .psram_burst_rdata_valid (c0_psram_burst_rdata_valid)
+    );
+
+    axi_cram1_slave cpu_cram1_axi (
+        .clk(clk_cpu),
+        .reset_n(reset_n),
+        .s_axi_arvalid(cpu_m_cram1_arvalid),
+        .s_axi_arready(cpu_m_cram1_arready),
+        .s_axi_araddr(cpu_m_cram1_araddr),
+        .s_axi_arlen(cpu_m_cram1_arlen),
+        .s_axi_rvalid(cpu_m_cram1_rvalid),
+        .s_axi_rready(1'b1),
+        .s_axi_rdata(cpu_m_cram1_rdata),
+        .s_axi_rresp(cpu_m_cram1_rresp),
+        .s_axi_rlast(cpu_m_cram1_rlast),
+        .s_axi_awvalid(cpu_m_cram1_awvalid),
+        .s_axi_awready(cpu_m_cram1_awready),
+        .s_axi_awaddr(cpu_m_cram1_awaddr),
+        .s_axi_awlen(cpu_m_cram1_awlen),
+        .s_axi_wvalid(cpu_m_cram1_wvalid),
+        .s_axi_wready(cpu_m_cram1_wready),
+        .s_axi_wdata(cpu_m_cram1_wdata),
+        .s_axi_wstrb(cpu_m_cram1_wstrb),
+        .s_axi_wlast(cpu_m_cram1_wlast),
+        .s_axi_bvalid(cpu_m_cram1_bvalid),
+        .s_axi_bready(1'b1),
+        .s_axi_bresp(cpu_m_cram1_bresp),
+        .psram_rd          (c1_psram_rd),
+        .psram_wr          (c1_psram_wr),
+        .psram_addr        (c1_psram_addr),
+        .psram_wdata       (c1_psram_wdata),
+        .psram_wstrb       (c1_psram_wstrb),
+        .psram_rdata       (c1_psram_rdata),
+        .psram_busy        (c1_psram_busy),
+        .psram_rdata_valid (c1_psram_rdata_valid)
+    );
+
+    axi_sram_slave cpu_sram_axi (
+        .clk(clk_cpu),
+        .reset_n(reset_n),
+        .s_axi_arvalid(cpu_m_sram_arvalid),
+        .s_axi_arready(cpu_m_sram_arready),
+        .s_axi_araddr(cpu_m_sram_araddr),
+        .s_axi_arlen(cpu_m_sram_arlen),
+        .s_axi_rvalid(cpu_m_sram_rvalid),
+        .s_axi_rready(1'b1),
+        .s_axi_rdata(cpu_m_sram_rdata),
+        .s_axi_rresp(cpu_m_sram_rresp),
+        .s_axi_rlast(cpu_m_sram_rlast),
+        .s_axi_awvalid(cpu_m_sram_awvalid),
+        .s_axi_awready(cpu_m_sram_awready),
+        .s_axi_awaddr(cpu_m_sram_awaddr),
+        .s_axi_awlen(cpu_m_sram_awlen),
+        .s_axi_wvalid(cpu_m_sram_wvalid),
+        .s_axi_wready(cpu_m_sram_wready),
+        .s_axi_wdata(cpu_m_sram_wdata),
+        .s_axi_wstrb(cpu_m_sram_wstrb),
+        .s_axi_wlast(cpu_m_sram_wlast),
+        .s_axi_bvalid(cpu_m_sram_bvalid),
+        .s_axi_bready(1'b1),
+        .s_axi_bresp(cpu_m_sram_bresp),
+        .psram_rd          (sr_psram_rd),
+        .psram_wr          (sr_psram_wr),
+        .psram_addr        (sr_psram_addr),
+        .psram_wdata       (sr_psram_wdata),
+        .psram_wstrb       (sr_psram_wstrb),
+        .psram_rdata       (sr_psram_rdata),
+        .psram_busy        (sr_psram_busy),
+        .psram_rdata_valid (sr_psram_rdata_valid)
     );
 
     // Terminal rendering moved to software (firmware renders to framebuffer)
