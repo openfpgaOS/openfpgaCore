@@ -17,9 +17,23 @@
 #define OF_TARGET_SDRAM_SIZE           (64u * 1024u * 1024u)
 #define OF_TARGET_SDRAM_UNCACHED_BASE  0x50000000u
 
-#define OF_TARGET_FB0_BASE             0x10000000u
-#define OF_TARGET_FB1_BASE             0x10100000u
-#define OF_TARGET_FB2_BASE             0x10200000u
+/* App framebuffers live at the uncached SDRAM alias (0x50xxxxxx) so CPU
+ * pixel writes go straight through p_axi to SDRAM, bypassing the L1 D$.
+ * This avoids cache pollution: without the alias, a 76 KB triple buffer
+ * thrashes the 64 KB L1 and evicts real app working-set data.  The
+ * scanout engine and GPU access the same physical SDRAM via their own
+ * paths (scanout has hardcoded FB_ADDR_0/1/2 constants in
+ * axi_periph_slave.v; GPU writes pass through axi_sdram_slave's [25:2]
+ * address mask which ignores the upper alias bits), so the CPU-side
+ * alias is transparent to hardware.
+ *
+ * Trade-off: full-frame memset/memcpy into the FB is slower (~20 MB/s
+ * uncached vs ~100+ MB/s cached writeback-bound), but dirty-rect apps
+ * keep L1 available for real working-set data instead of wasting it
+ * on pixels the scanout just reads back anyway. */
+#define OF_TARGET_FB0_BASE             0x50000000u
+#define OF_TARGET_FB1_BASE             0x50100000u
+#define OF_TARGET_FB2_BASE             0x50200000u
 #define OF_TARGET_FB_COUNT             3u
 #define OF_TARGET_FB_WIDTH             320u
 #define OF_TARGET_FB_HEIGHT            240u

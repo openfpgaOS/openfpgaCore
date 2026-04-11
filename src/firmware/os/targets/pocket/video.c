@@ -171,11 +171,11 @@ void of_video_init(void) {
     VRR_V_TOTAL = VRR_VT_DEFAULT;
     VRR_SWAP_HOLD = 0;
 
-    /* Clear FBs via uncached alias — may not fully bypass D-cache (PMA issue).
-     * Acceptable at boot: of_term_init() switches to terminal FB immediately. */
-    memset((void *)(FB0_BASE - SDRAM_BASE + SDRAM_UNCACHED_BASE), 0, FB_SIZE);
-    memset((void *)(FB1_BASE - SDRAM_BASE + SDRAM_UNCACHED_BASE), 0, FB_SIZE);
-    memset((void *)(FB2_BASE - SDRAM_BASE + SDRAM_UNCACHED_BASE), 0, FB_SIZE);
+    /* FBs are at the uncached SDRAM alias (FBn_BASE = 0x50xxxxxx); these
+     * memsets write straight through p_axi to SDRAM without touching L1. */
+    memset((void *)FB0_BASE, 0, FB_SIZE);
+    memset((void *)FB1_BASE, 0, FB_SIZE);
+    memset((void *)FB2_BASE, 0, FB_SIZE);
 }
 
 uint8_t *of_video_get_surface(void) {
@@ -183,11 +183,10 @@ uint8_t *of_video_get_surface(void) {
 }
 
 void of_video_flush_cache(void) {
-    /* Rely on natural D-cache eviction — the FB (76KB) exceeds the
-     * cache (64KB), so rendering itself evicts most lines.  A fence
-     * drains the 4-slot store buffer to ensure recent writes are
-     * at least in the cache (and on eviction path to SDRAM). */
-    __asm__ volatile("" ::: "memory"); /* compiler barrier only */
+    /* No-op: FBs now live at the uncached SDRAM alias (0x50xxxxxx), so
+     * pixel writes go through p_axi straight to SDRAM and never enter
+     * the L1 D-cache.  Nothing to flush.  Kept in the HAL surface for
+     * ABI compatibility with apps built before the FB region moved. */
 }
 
 uint8_t *of_video_flip(void) {

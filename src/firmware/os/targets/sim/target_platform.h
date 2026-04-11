@@ -43,9 +43,10 @@
 #define OF_TARGET_SDRAM_SIZE           (64u * 1024u * 1024u)
 #define OF_TARGET_SDRAM_UNCACHED_BASE  0x50000000u
 
-#define OF_TARGET_FB0_BASE             0x10000000u
-#define OF_TARGET_FB1_BASE             0x10100000u
-#define OF_TARGET_FB2_BASE             0x10200000u
+/* Match pocket target: FBs at uncached SDRAM alias to bypass L1 D$ */
+#define OF_TARGET_FB0_BASE             0x50000000u
+#define OF_TARGET_FB1_BASE             0x50100000u
+#define OF_TARGET_FB2_BASE             0x50200000u
 #define OF_TARGET_FB_COUNT             3u
 #define OF_TARGET_FB_WIDTH             320u
 #define OF_TARGET_FB_HEIGHT            240u
