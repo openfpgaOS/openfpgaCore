@@ -162,8 +162,9 @@ assign psram_wr = c0_psram_wr | c1_psram_wr | sr_psram_wr;
 
 // addr/wdata/wstrb are registered persistently in each sub-slave; mux them
 // using the rd/wr pulse from the same sub-slave so the right values reach
-// the backend on the cycle the command is issued.
-wire c0_drives = c0_psram_rd | c0_psram_wr;
+// the backend on the cycle the command is issued.  For CRAM0 include the
+// sync burst pulse as well — that's the path it now uses for reads.
+wire c0_drives = c0_psram_rd | c0_psram_wr | c0_psram_burst_rd;
 wire c1_drives = c1_psram_rd | c1_psram_wr;
 
 assign psram_addr  = c0_drives ? c0_psram_addr
@@ -176,9 +177,12 @@ assign psram_wstrb = c0_drives ? c0_psram_wstrb
                    : c1_drives ? c1_psram_wstrb
                    :             sr_psram_wstrb;
 
-// Burst interface — currently unused.
-assign psram_burst_rd  = 1'b0;
-assign psram_burst_len = 6'b0;
+// Burst interface — driven by the CRAM0 sub-slave.  CRAM1 and SRAM do not
+// have burst paths; only axi_cram0_slave drives these signals.
+wire        c0_psram_burst_rd;
+wire [5:0]  c0_psram_burst_len;
+assign psram_burst_rd  = c0_psram_burst_rd;
+assign psram_burst_len = c0_psram_burst_len;
 
 // ============================================================
 // Sub-slave instantiations
@@ -226,7 +230,12 @@ axi_cram0_slave u_cram0 (
     .psram_wstrb       (c0_psram_wstrb),
     .psram_rdata       (psram_rdata),
     .psram_busy        (psram_busy),
-    .psram_rdata_valid (psram_rdata_valid)
+    .psram_rdata_valid (psram_rdata_valid),
+
+    .psram_burst_rd          (c0_psram_burst_rd),
+    .psram_burst_len         (c0_psram_burst_len),
+    .psram_burst_rdata       (psram_burst_rdata),
+    .psram_burst_rdata_valid (psram_burst_rdata_valid)
 );
 
 axi_cram1_slave u_cram1 (

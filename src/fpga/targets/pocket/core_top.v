@@ -488,12 +488,14 @@ localparam [2:0] BCR_ST_DONE        = 3'd7;
 //   bits 5-4  = 01  drive strength 1/2
 //   bit 3     = 1   no-wrap burst (don't care in async)
 //   bits 2-0  = 111 continuous burst (don't care in async)
-`ifdef PSRAM_BURST_ENABLE
-// Sync burst mode: bit 15 = 0 (sync burst), rest unchanged
-localparam [15:0] BCR_VALUE = 16'h1D1F;
-`else
+// BCR value is currently 0x9D1F (async page mode, the AS1C8M16PL POR
+// default).  Must match axi_cram0_slave's read path: when that slave
+// issues async single-word reads, the chip must also be in async mode
+// or it will refuse to respond.  The burst path in axi_cram0_slave
+// exists but is not yet the active read path — re-enabling it will
+// also require flipping this to 0x641F (sync burst, matching
+// PocketQuake) as a coupled change.
 localparam [15:0] BCR_VALUE = 16'h9D1F;
-`endif
 
 initial begin
     bcr_init_state     = BCR_ST_WAIT_PLL;
@@ -1310,8 +1312,12 @@ assign sram_word_wstrb = gpu_sram_active ? gpu_sram_wstrb : cpu_psram_wstrb;
 // (busy, rdata, rdata_valid). Combinational selectors are stale by the
 // time data arrives from CDC adapter (~22 cycles later).
 reg [1:0] psram_target_sel;  // 0=cram0, 1=sram, 2=cram1
+// NOTE: include cpu_psram_burst_rd in the trigger — CRAM0 reads use the
+// burst path now, and if we only watch cpu_psram_rd/wr the selector stays
+// stale across a burst read and the downstream busy mux picks the wrong
+// target's busy signal (hanging S_RD_BURST waiting for !psram_busy).
 always @(posedge clk_cpu)
-    if (cpu_psram_rd || cpu_psram_wr)
+    if (cpu_psram_rd || cpu_psram_wr || cpu_psram_burst_rd)
         psram_target_sel <= cpu_psram_sel_sram ? 2'd1 :
                             cpu_psram_sel_cram1 ? 2'd2 : 2'd0;
 
@@ -1330,13 +1336,8 @@ assign cpu_psram_rdata_valid = (psram_target_sel == 2'd1) ? sram_word_rdata_vali
 wire cram0_burst_rdata_valid;
 wire [31:0] cram0_burst_rdata;
 
-`ifdef PSRAM_BURST_ENABLE
 assign cpu_psram_burst_rdata_valid = cram0_burst_rdata_valid;
 assign cpu_psram_burst_rdata = cram0_burst_rdata;
-`else
-assign cpu_psram_burst_rdata_valid = 1'b0;
-assign cpu_psram_burst_rdata = 32'b0;
-`endif
 
 
 
