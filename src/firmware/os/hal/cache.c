@@ -4,13 +4,13 @@
  * VexiiRiscv D-cache: 64KB, 4-way set-associative, write-back, 64B lines
  * (256 sets × 4 ways × 64B).
  *
- * Range operations (clean, invalidate) use Zicbom instructions (cbo.clean,
- * cbo.inval) which operate on a single cache line by address. These only
- * touch lines that overlap the target range, preserving all other cached
- * data.
- *
- * Full eviction (flush_dcache) still uses conflict eviction as a fallback
- * for situations where we need to flush everything (e.g. code loading).
+ * Zicbom (cbo.clean/inval/flush) is NOT available in this build — it is
+ * mutually exclusive with the LsuL1 coherency hub we depend on, per the
+ * `assert(!withCoherency)` in VexiiRiscv's LsuL1Plugin. Range ops
+ * therefore fall back to a full D$ conflict-eviction sweep. This is
+ * heavy-handed (kills the whole working set per call), but correct.
+ * Callers should prefer the uncached SDRAM alias (0x50xxxxxx) for
+ * DMA-coherent regions so they don't need these helpers in the hot path.
  */
 
 #include "cache.h"
@@ -26,25 +26,9 @@
 
 void of_cache_init(void) { }
 
-/* cbo.clean: write back dirty line at addr, keep line valid in cache.
- * Encoding: .insn i 0x0F, 2, x0, rs1, 0x001 */
-static inline void cbo_clean(uintptr_t addr) {
-    __asm__ volatile(".insn i 0x0F, 2, x0, %0, 0x001" :: "r"(addr) : "memory");
-}
-
-/* cbo.inval: invalidate cache line at addr, discard dirty data.
- * Encoding: .insn i 0x0F, 2, x0, rs1, 0x000 */
-static inline void cbo_inval(uintptr_t addr) {
-    __asm__ volatile(".insn i 0x0F, 2, x0, %0, 0x000" :: "r"(addr) : "memory");
-}
-
-/* cbo.flush: write back dirty line at addr, then invalidate.
- * Encoding: .insn i 0x0F, 2, x0, rs1, 0x002 */
-static inline void cbo_flush(uintptr_t addr) {
-    __asm__ volatile(".insn i 0x0F, 2, x0, %0, 0x002" :: "r"(addr) : "memory");
-}
-
-/* Full eviction via conflict reads — used only for flush_dcache(). */
+/* Full eviction via conflict reads. Reads DCACHE_TOTAL bytes from a
+ * dedicated region at the top of SDRAM, guaranteed to evict every line
+ * in the D$ regardless of the range the caller asked about. */
 static void dcache_evict_all(void) {
     __asm__ volatile("fence" ::: "memory");
     volatile char *p = (volatile char *)EVICT_BASE;
@@ -54,30 +38,18 @@ static void dcache_evict_all(void) {
 }
 
 void of_cache_inval_range(void *addr, uint32_t size) {
-    uintptr_t a   = (uintptr_t)addr & ~(DCACHE_LINE_SIZE - 1);
-    uintptr_t end = ((uintptr_t)addr + size + DCACHE_LINE_SIZE - 1)
-                    & ~(DCACHE_LINE_SIZE - 1);
-    for (; a < end; a += DCACHE_LINE_SIZE)
-        cbo_inval(a);
-    __asm__ volatile("fence" ::: "memory");
+    (void)addr; (void)size;
+    dcache_evict_all();
 }
 
 void of_cache_clean_range(void *addr, uint32_t size) {
-    uintptr_t a   = (uintptr_t)addr & ~(DCACHE_LINE_SIZE - 1);
-    uintptr_t end = ((uintptr_t)addr + size + DCACHE_LINE_SIZE - 1)
-                    & ~(DCACHE_LINE_SIZE - 1);
-    for (; a < end; a += DCACHE_LINE_SIZE)
-        cbo_clean(a);
-    __asm__ volatile("fence" ::: "memory");
+    (void)addr; (void)size;
+    dcache_evict_all();
 }
 
 void of_cache_flush_range(void *addr, uint32_t size) {
-    uintptr_t a   = (uintptr_t)addr & ~(DCACHE_LINE_SIZE - 1);
-    uintptr_t end = ((uintptr_t)addr + size + DCACHE_LINE_SIZE - 1)
-                    & ~(DCACHE_LINE_SIZE - 1);
-    for (; a < end; a += DCACHE_LINE_SIZE)
-        cbo_flush(a);
-    __asm__ volatile("fence" ::: "memory");
+    (void)addr; (void)size;
+    dcache_evict_all();
 }
 
 void of_cache_flush_dcache(void) {

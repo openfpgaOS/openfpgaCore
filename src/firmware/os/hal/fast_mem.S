@@ -17,11 +17,11 @@
  *   memmove bwd:     word-aligned backward copy
  */
 
-/* cbo.inval (reg): invalidate cache line, drop dirty data. */
+/* cbo.inval macro — no-op on this build (Zicbom not enabled in the
+ * VexiiRiscv config, since Zcbm is incompatible with the coherency hub
+ * we rely on). The 64B memcpy path still works; it just pays for the
+ * write-allocate miss instead of dropping the dirty line up front. */
 .macro CBO_INVAL reg
-    .if \reg == 10   /* a0 */
-    .word 0x0005200F
-    .endif
 .endm
 
 .section .fasttext, "ax"
