@@ -2643,9 +2643,18 @@ mf_pllram_133 mp_ram (
 assign clk_cpu = clk_ram_controller;
 
 // Drive CRAM clock pins from PLL outputs (not from psram_controller —
-// psram.sv's cram_clk output stays low, it doesn't generate the clock)
+// psram.sv's cram_clk output stays low, it doesn't generate the clock).
+//
+// Both CRAM1 and CRAM0 share clk_cram (100 MHz, 5500 ps phase shift):
+// CRAM1 is the same chip family as CRAM0 (AS1C8M16PL, rated 100 MHz+),
+// and a faster, phase-shifted chip clock is the prerequisite for any
+// future sync-burst BCR mode on CRAM1 (audio_dma).  Today's async-only
+// CRAM1 access ignores cram_clk regardless of frequency, so the change
+// is functionally a no-op for the current code path.  Was clk_74a
+// historically — that was a legacy choice from when CRAM1 was strictly
+// async-only and never planned to need a coherent chip clock.
 assign cram0_clk = clk_cram;
-assign cram1_clk = clk_74a;
+assign cram1_clk = clk_cram;
 
 // SDRAM controller
 io_sdram isr0 (
