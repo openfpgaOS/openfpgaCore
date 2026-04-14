@@ -570,14 +570,12 @@ cram0_controller #(
     .cram_we_n(cram0_we_n),
     .cram_ub_n(cram0_ub_n),
     .cram_lb_n(cram0_lb_n),
-    // Sync burst read — HARD-DISABLED at the instantiation.
-    // axi_cram0_slave also routes all reads through the async
-    // S_RD_CMD path (never S_RD_BURST), so psram_burst_rd is never
-    // pulsed, but tying burst_rd=0 here guarantees the burst FSM
-    // in cram0_controller can never trigger — useful while
-    // debugging SDRAM-load corruption to rule out burst-path
-    // interactions.  c0_psram_burst_rd output of the slave is
-    // harmlessly left wired (it just never pulses).
+    // Sync burst read — dormant.  The burst FSM inside
+    // cram0_controller is kept available for future re-enablement;
+    // axi_cram0_slave currently has no burst path, so burst_rd stays
+    // tied low here.  To re-enable: restore the burst ports on
+    // axi_cram0_slave (see commit history) and drive burst_rd /
+    // burst_len from the slave instead of these constants.
     .burst_rd(1'b0),
     .burst_len(6'd0),
     .burst_rdata_valid(),
@@ -978,10 +976,6 @@ wire [3:0]  c0_psram_wstrb;
 wire [31:0] c0_psram_rdata;
 wire        c0_psram_busy;
 wire        c0_psram_rdata_valid;
-wire        c0_psram_burst_rd;
-wire [5:0]  c0_psram_burst_len;
-wire        c0_psram_burst_rdata_valid;
-wire [31:0] c0_psram_burst_rdata;
 
 wire        c1_psram_rd;
 wire        c1_psram_wr;
@@ -2189,11 +2183,7 @@ assign video_hs = vidout_hs;
         .psram_wstrb       (c0_psram_wstrb),
         .psram_rdata       (c0_psram_rdata),
         .psram_busy        (c0_psram_busy),
-        .psram_rdata_valid (c0_psram_rdata_valid),
-        .psram_burst_rd          (c0_psram_burst_rd),
-        .psram_burst_len         (c0_psram_burst_len),
-        .psram_burst_rdata       (c0_psram_burst_rdata),
-        .psram_burst_rdata_valid (c0_psram_burst_rdata_valid)
+        .psram_rdata_valid (c0_psram_rdata_valid)
     );
 
     axi_cram1_slave cpu_cram1_axi (

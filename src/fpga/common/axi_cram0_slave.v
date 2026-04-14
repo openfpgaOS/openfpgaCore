@@ -52,9 +52,10 @@ module axi_cram0_slave (
     output reg  [1:0]  s_axi_bresp,
 
     // PSRAM single-word interface — all reads and writes flow through
-    // this path.  The burst outputs below are dead signals kept only
-    // until the FSM states that reference them are stripped (see
-    // S_RD_BURST / S_RD_STREAM / S_RD_RESP_DRAIN).
+    // this path.  To re-enable burst later, restore the psram_burst_*
+    // ports, the S_RD_BURST / S_RD_STREAM states, and route S_IDLE →
+    // S_RD_BURST on `s_axi_arvalid` (see cram0_controller.v for the
+    // controller-side burst FSM that is still in place).
     output reg         psram_rd,
     output reg         psram_wr,
     output reg  [25:0] psram_addr,
@@ -62,16 +63,7 @@ module axi_cram0_slave (
     output reg  [3:0]  psram_wstrb,
     input  wire [31:0] psram_rdata,
     input  wire        psram_busy,
-    input  wire        psram_rdata_valid,
-
-    // Dead — unused since burst was disabled.  Left connected so the
-    // port list stays binary-compatible with core_top.v's existing
-    // instantiation; a future cleanup pass will strip these and the
-    // dead burst FSM states together.
-    output reg         psram_burst_rd,
-    output reg  [5:0]  psram_burst_len,
-    input  wire [31:0] psram_burst_rdata,
-    input  wire        psram_burst_rdata_valid
+    input  wire        psram_rdata_valid
 );
 
 wire reset = ~reset_n;
@@ -79,18 +71,15 @@ wire reset = ~reset_n;
 // =================================================================
 // FSM states
 // =================================================================
-localparam S_IDLE           = 4'd0;
-localparam S_RD_BURST       = 4'd1;   // DEAD — burst disabled
-localparam S_RD_STREAM      = 4'd2;   // DEAD — burst disabled
-localparam S_RD_RESP_DRAIN  = 4'd3;   // DEAD — never reached
-localparam S_WR_NEXT        = 4'd4;   // wait for next W beat, same-cycle capture
-localparam S_WR_CMD         = 4'd5;   // issue psram_wr to the controller
-localparam S_WR_WAIT        = 4'd6;   // wait for psram_busy to return low
-localparam S_WR_RESP        = 4'd7;   // hold bvalid until bready
-localparam S_RD_CMD         = 4'd8;   // async single-word read command
-localparam S_RD_DAT         = 4'd9;   // async single-word read data
+localparam S_IDLE     = 3'd0;
+localparam S_WR_NEXT  = 3'd1;   // wait for next W beat, same-cycle capture
+localparam S_WR_CMD   = 3'd2;   // issue psram_wr to the controller
+localparam S_WR_WAIT  = 3'd3;   // wait for psram_busy to return low
+localparam S_WR_RESP  = 3'd4;   // hold bvalid until bready
+localparam S_RD_CMD   = 3'd5;   // async single-word read command
+localparam S_RD_DAT   = 3'd6;   // async single-word read data
 
-reg [3:0] state;
+reg [2:0] state;
 
 // =================================================================
 // Transaction tracking
@@ -105,21 +94,12 @@ reg        wlast_seen;      // master asserted wlast on current burst
 wire beat_is_last_internal = (beat_count == burst_len);
 
 // =================================================================
-// Sync-burst read pipeline (2-entry FIFO: R slot + skid)
+// Async read pipeline — 1-entry skid so S_RD_DAT can park a beat
+// when the master isn't ready yet.
 // =================================================================
-// Slot 0 = currently presented on the AXI R channel
-// Slot 1 = skid buffer parking the next word during a master stall
-// rx_count tracks received beats; used to tag rlast at ingress so the
-// tag travels with the beat into whichever slot it lands in.
 reg [31:0] skid_data;
 reg        skid_last;
 reg        skid_valid;
-reg [7:0]  rx_count;
-
-wire rx_is_last       = (rx_count == burst_len);
-wire rd_handshake     = s_axi_rvalid && s_axi_rready;
-wire rd_new_beat      = psram_burst_rdata_valid &&
-                        ((state == S_RD_STREAM) || (state == S_RD_RESP_DRAIN));
 
 // =================================================================
 // Main FSM
@@ -149,13 +129,10 @@ always @(posedge clk or posedge reset) begin
         psram_addr       <= 26'b0;
         psram_wdata      <= 32'b0;
         psram_wstrb      <= 4'b0;
-        psram_burst_rd   <= 1'b0;
-        psram_burst_len  <= 6'b0;
 
         skid_data        <= 32'b0;
         skid_last        <= 1'b0;
         skid_valid       <= 1'b0;
-        rx_count         <= 8'b0;
     end else begin
         // -------------------------------------------------------------
         // Single-cycle pulse defaults.  The valid outputs (rvalid,
@@ -166,7 +143,6 @@ always @(posedge clk or posedge reset) begin
         s_axi_awready    <= 1'b0;
         psram_rd         <= 1'b0;
         psram_wr         <= 1'b0;
-        psram_burst_rd   <= 1'b0;
 
         // -------------------------------------------------------------
         // AXI handshake "drop on accept" drivers.  Once we assert a
@@ -192,9 +168,8 @@ always @(posedge clk or posedge reset) begin
                 addr_r        <= s_axi_araddr;
                 burst_len     <= s_axi_arlen;
                 beat_count    <= 8'b0;
-                rx_count      <= 8'b0;
                 skid_valid    <= 1'b0;
-                state         <= S_RD_CMD;   // was S_RD_BURST — sync burst disabled
+                state         <= S_RD_CMD;
             end else if (s_axi_awvalid) begin
                 s_axi_awready <= 1'b1;
                 addr_r        <= s_axi_awaddr;
@@ -216,99 +191,9 @@ always @(posedge clk or posedge reset) begin
         end
 
         // =============================================================
-        // Read path — sync burst
-        // =============================================================
-        S_RD_BURST: begin
-            // Issue the burst command to psram_cram0.  The deterministic
-            // controller must accept it in one pulse — if it doesn't,
-            // the bug is in psram_cram0 and gets fixed there.
-            if (!cmd_issued) begin
-                if (!psram_busy) begin
-                    psram_burst_rd  <= 1'b1;
-                    psram_addr      <= addr_r[27:2];
-                    psram_burst_len <= burst_len[5:0];
-                    cmd_issued      <= 1'b1;
-                    state           <= S_RD_STREAM;
-                end
-            end
-        end
-
-        S_RD_STREAM: begin
-            // Two-entry FIFO logic: primary (R slot) + skid.
-            // Handles each combination of {rd_new_beat, rd_handshake}.
-
-            if (rd_new_beat && !rd_handshake) begin
-                // Push only
-                if (!s_axi_rvalid) begin
-                    s_axi_rvalid <= 1'b1;
-                    s_axi_rdata  <= psram_burst_rdata;
-                    s_axi_rresp  <= 2'b00;
-                    s_axi_rlast  <= rx_is_last;
-                end else if (!skid_valid) begin
-                    skid_valid <= 1'b1;
-                    skid_data  <= psram_burst_rdata;
-                    skid_last  <= rx_is_last;
-                end
-                // else both full → overflow. Test suite will catch it.
-                rx_count <= rx_count + 8'd1;
-            end else if (!rd_new_beat && rd_handshake) begin
-                // Pop only — promote skid if present.
-                beat_count <= beat_count + 8'd1;
-                if (beat_is_last_internal) begin
-                    // Final beat consumed — burst is done.
-                    // rvalid was cleared by the handshake-drop block,
-                    // skid should already be empty.
-                    cmd_issued <= 1'b0;
-                    skid_valid <= 1'b0;
-                    state      <= S_IDLE;
-                end else if (skid_valid) begin
-                    s_axi_rvalid <= 1'b1;
-                    s_axi_rdata  <= skid_data;
-                    s_axi_rresp  <= 2'b00;
-                    s_axi_rlast  <= skid_last;
-                    skid_valid   <= 1'b0;
-                end
-            end else if (rd_new_beat && rd_handshake) begin
-                // Simultaneous push + pop
-                beat_count <= beat_count + 8'd1;
-                rx_count   <= rx_count   + 8'd1;
-                if (beat_is_last_internal) begin
-                    cmd_issued <= 1'b0;
-                    skid_valid <= 1'b0;
-                    state      <= S_IDLE;
-                end else if (skid_valid) begin
-                    // R slot ← skid, skid ← new
-                    s_axi_rvalid <= 1'b1;
-                    s_axi_rdata  <= skid_data;
-                    s_axi_rresp  <= 2'b00;
-                    s_axi_rlast  <= skid_last;
-                    skid_data    <= psram_burst_rdata;
-                    skid_last    <= rx_is_last;
-                    // skid_valid stays 1
-                end else begin
-                    // Skid empty — new data straight into R slot
-                    s_axi_rvalid <= 1'b1;
-                    s_axi_rdata  <= psram_burst_rdata;
-                    s_axi_rresp  <= 2'b00;
-                    s_axi_rlast  <= rx_is_last;
-                end
-            end
-            // else (!rd_new_beat && !rd_handshake): quiescent hold.
-        end
-
-        S_RD_RESP_DRAIN: begin
-            // Reserved for future use if we ever decouple the burst
-            // state machine from the drain state; for now S_RD_STREAM
-            // handles both push and pop.  Left in place so we don't
-            // renumber states while debugging.
-            state <= S_IDLE;
-        end
-
-        // =============================================================
-        // Async single-word read path (re-enabled to work around an
-        // HW timing issue in the sync-burst datapath).  Each AXI beat
-        // issues one psram_rd pulse and waits for psram_rdata_valid.
-        // Multi-beat AXI reads loop: S_RD_CMD → S_RD_DAT → S_RD_CMD.
+        // Async single-word read path.  Each AXI beat issues one
+        // psram_rd pulse and waits for psram_rdata_valid.  Multi-beat
+        // AXI reads loop: S_RD_CMD → S_RD_DAT → S_RD_CMD.
         // =============================================================
         S_RD_CMD: begin
             if (!cmd_issued) begin
