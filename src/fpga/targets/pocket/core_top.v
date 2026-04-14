@@ -1,7 +1,7 @@
 //
 // User core top-level (openfpgaOS)
 //
-// VexiiRiscv CPU with AXI4 bus architecture, OPL2 sound synthesis.
+// VexiiRiscv CPU with AXI4 bus architecture, 48-voice PCM mixer.
 // Instantiated by the real top-level: apf_top
 //
 
@@ -456,7 +456,7 @@ assign link_sd_i = port_tran_sd;
 // CE# safety: the FSM never asserts a second config_en pulse until
 // it has observed cpu_psram_raw_busy fall back to 0, which means
 // the driver has reached STATE_CONFIG_HOLD_END (lines 446-447 of
-// psram_cram0_drv.sv) and BOTH CE0# and CE1# are deasserted again.
+// cram0_phy.sv) and BOTH CE0# and CE1# are deasserted again.
 // The driver itself never asserts both CE# in the same state — see
 // STATE_CONFIG_CRE_SETUP, lines 421-424. Therefore the die 0 → die 1
 // handoff cannot create bus contention.
@@ -480,7 +480,7 @@ localparam [2:0] BCR_ST_DONE        = 3'd7;
 //   bit 15    = 1   async page mode (NOT sync burst)
 //   bit 14    = 0   fixed initial latency
 //   bits 13-11= 011 latency code 3 (4 clocks)
-//   bit 10    = 1   WAIT active high (matches psram_cram0_drv expectations)
+//   bit 10    = 1   WAIT active high (matches cram0_phy expectations)
 //   bit 9     = 1   reserved-as-1
 //   bit 8     = 0   WAIT asserted during delay
 //   bit 7     = 1   reserved-as-1
@@ -488,10 +488,10 @@ localparam [2:0] BCR_ST_DONE        = 3'd7;
 //   bits 5-4  = 01  drive strength 1/2
 //   bit 3     = 1   no-wrap burst (don't care in async)
 //   bits 2-0  = 111 continuous burst
-// Sync burst mode — matches PocketQuake / psram_cram0_drv.sv
+// Sync burst mode — matches PocketQuake / cram0_phy.sv
 // SYNC_LATENCY=4 expectation.  Coupled with axi_cram0_slave.v's
 // S_IDLE→S_RD_BURST transition.
-localparam [15:0] BCR_VALUE = 16'h9D1F;  // async page mode (sync burst disabled for HW debug)
+localparam [15:0] BCR_VALUE = 16'h9D1F;  // async page mode
 
 initial begin
     bcr_init_state     = BCR_ST_WAIT_PLL;
@@ -548,7 +548,7 @@ end
 // CRAM0: PocketDoom's proven controller — async two-phase, with
 // the BCR sanity reset above ensuring the chip is in async mode
 // regardless of what mode the previous bitstream left it in.
-psram_cram0 #(
+cram0_controller #(
     .CLOCK_SPEED(100.0)
 ) psram0 (
     .clk(clk_ram_controller),
@@ -597,39 +597,102 @@ wire [31:0] psram1_rdata;
 wire        psram1_busy;
 wire        psram1_rdata_valid;
 
-// CRAM1 reset: sync pll_ram_locked into clk_74a
-reg [2:0] pll_ram_locked_74a_sync;
-always @(posedge clk_74a)
-    pll_ram_locked_74a_sync <= {pll_ram_locked_74a_sync[1:0], pll_ram_locked};
-wire psram1_reset_n = pll_ram_locked_74a_sync[2];
+// CRAM1 reset: sync pll_ram_locked into clk_cpu
+reg [2:0] pll_ram_locked_cpu_sync;
+always @(posedge clk_cpu)
+    pll_ram_locked_cpu_sync <= {pll_ram_locked_cpu_sync[1:0], pll_ram_locked};
+wire psram1_reset_n = pll_ram_locked_cpu_sync[2];
 
-// CRAM1: saves only, async, 32-bit via two-phase, on clk_74a (bridge clock)
-psram_cram1 #(
-    .CLOCK_SPEED(74.25)
-) psram1_inst (
-    .clk(clk_74a),
-    .reset_n(psram1_reset_n),
+// ============================================================
+// CRAM1: dual-controller pin mux.  No CDC on any data path.
+//   Controller A (clk_cpu, 100 MHz): CPU + mixer (hot path)
+//   Controller B (clk_74a, 74.25 MHz): bridge DMA (cold path)
+// Pin mux selects B when bridge_cram1_active, A otherwise.
+// One dead cycle on each transition (registered mux).
+// ============================================================
+
+// Sync bridge_active into clk_cpu so controller A knows to idle.
+reg [2:0] brg_active_cpu_sync;
+always @(posedge clk_cpu)
+    brg_active_cpu_sync <= {brg_active_cpu_sync[1:0], bridge_cram1_active};
+wire brg_active_cpu = brg_active_cpu_sync[2];
+
+// Physical signals from each controller (active-low directly from cram1_controller)
+wire [21:16] c1a_a, c1b_a;
+wire [15:0]  c1a_dq_out, c1b_dq_out;
+wire         c1a_dq_oe,  c1b_dq_oe;
+wire         c1a_adv_n, c1b_adv_n;
+wire         c1a_cre,   c1b_cre;
+wire         c1a_ce0_n, c1b_ce0_n;
+wire         c1a_ce1_n, c1b_ce1_n;
+wire         c1a_oe_n,  c1b_oe_n;
+wire         c1a_we_n,  c1b_we_n;
+wire         c1a_ub_n,  c1b_ub_n;
+wire         c1a_lb_n,  c1b_lb_n;
+
+// Controller A: CPU + mixer (clk_cpu)
+cram1_controller #(.CLOCK_SPEED(100)) psram1_a (
+    .clk(clk_cpu), .reset_n(psram1_reset_n),
     .word_rd(psram1_rd),
     .word_wr(psram1_wr),
-    .word_addr(psram1_addr),
-    .word_data(psram1_wdata),
+    .word_addr(psram1_addr), .word_data(psram1_wdata),
     .word_wstrb(psram1_wstrb),
-    .word_q(psram1_rdata),
-    .word_busy(psram1_busy),
+    .word_q(psram1_rdata), .word_busy(psram1_busy),
     .word_q_valid(psram1_rdata_valid),
-    .cram_a(cram1_a),
-    .cram_dq(cram1_dq),
-    .cram_wait(cram1_wait),
-    .cram_clk(),             // clk_74a drives cram1_clk directly
-    .cram_adv_n(cram1_adv_n),
-    .cram_cre(cram1_cre),
-    .cram_ce0_n(cram1_ce0_n),
-    .cram_ce1_n(cram1_ce1_n),
-    .cram_oe_n(cram1_oe_n),
-    .cram_we_n(cram1_we_n),
-    .cram_ub_n(cram1_ub_n),
-    .cram_lb_n(cram1_lb_n)
+    .cram_a(c1a_a), .cram_dq_out(c1a_dq_out), .cram_dq_oe(c1a_dq_oe),
+    .cram_dq_in(cram1_dq), .cram_wait(cram1_wait), .cram_clk(),
+    .cram_adv_n(c1a_adv_n), .cram_cre(c1a_cre),
+    .cram_ce0_n(c1a_ce0_n), .cram_ce1_n(c1a_ce1_n),
+    .cram_oe_n(c1a_oe_n), .cram_we_n(c1a_we_n),
+    .cram_ub_n(c1a_ub_n), .cram_lb_n(c1a_lb_n)
 );
+
+// Controller B: bridge (clk_74a)
+cram1_controller #(.CLOCK_SPEED(74.25)) psram1_b (
+    .clk(clk_74a), .reset_n(psram1_reset_n),
+    .word_rd(brg_psram_rd), .word_wr(brg_psram_wr),
+    .word_addr(brg_psram_addr), .word_data(brg_psram_wdata),
+    .word_wstrb(4'b1111),
+    .word_q(brg_psram_rdata), .word_busy(brg_psram_busy),
+    .word_q_valid(brg_psram_rdata_valid),
+    .cram_a(c1b_a), .cram_dq_out(c1b_dq_out), .cram_dq_oe(c1b_dq_oe),
+    .cram_dq_in(cram1_dq), .cram_wait(cram1_wait), .cram_clk(),
+    .cram_adv_n(c1b_adv_n), .cram_cre(c1b_cre),
+    .cram_ce0_n(c1b_ce0_n), .cram_ce1_n(c1b_ce1_n),
+    .cram_oe_n(c1b_oe_n), .cram_we_n(c1b_we_n),
+    .cram_ub_n(c1b_ub_n), .cram_lb_n(c1b_lb_n)
+);
+
+// Pin mux with safe transitions: never switch while controller A is busy.
+// Flipping mid-transaction would cut A's pins and leave the CRAM1 chip
+// in an inconsistent state (half-completed write, stale data, etc.).
+//   - A→B: wait for A to be idle (psram1_busy == 0) before switching
+//   - B→A: bridge is on clk_74a; when brg_active_cpu drops, the bridge
+//          FSM has already completed (pending flags cleared), safe.
+reg cram1_pin_sel;  // 0=A (cpu/mixer), 1=B (bridge)
+always @(posedge clk_cpu) begin
+    if (!reset_n) begin
+        cram1_pin_sel <= 1'b0;
+    end else begin
+        if (!cram1_pin_sel && brg_active_cpu && !psram1_busy)
+            cram1_pin_sel <= 1'b1;
+        else if (cram1_pin_sel && !brg_active_cpu)
+            cram1_pin_sel <= 1'b0;
+    end
+end
+
+assign cram1_a     = cram1_pin_sel ? c1b_a     : c1a_a;
+assign cram1_dq    = (cram1_pin_sel ? c1b_dq_oe : c1a_dq_oe)
+                   ? (cram1_pin_sel ? c1b_dq_out : c1a_dq_out)
+                   : 16'hZZZZ;
+assign cram1_adv_n = cram1_pin_sel ? c1b_adv_n : c1a_adv_n;
+assign cram1_cre   = cram1_pin_sel ? c1b_cre   : c1a_cre;
+assign cram1_ce0_n = cram1_pin_sel ? c1b_ce0_n : c1a_ce0_n;
+assign cram1_ce1_n = cram1_pin_sel ? c1b_ce1_n : c1a_ce1_n;
+assign cram1_oe_n  = cram1_pin_sel ? c1b_oe_n  : c1a_oe_n;
+assign cram1_we_n  = cram1_pin_sel ? c1b_we_n  : c1a_we_n;
+assign cram1_ub_n  = cram1_pin_sel ? c1b_ub_n  : c1a_ub_n;
+assign cram1_lb_n  = cram1_pin_sel ? c1b_lb_n  : c1a_lb_n;
 
 // SRAM controller (256 KB) - tristate handled at top level
 wire [16:0] sram_a_w;
@@ -816,26 +879,21 @@ wire        cpu_m_cram1_wlast;
 wire        cpu_m_cram1_bvalid;
 wire [1:0]  cpu_m_cram1_bresp;
 
-wire        cpu_m_sram_arvalid;
-wire        cpu_m_sram_arready;
-wire [31:0] cpu_m_sram_araddr;
-wire [7:0]  cpu_m_sram_arlen;
-wire        cpu_m_sram_rvalid;
-wire        cpu_m_sram_rready;
-wire [31:0] cpu_m_sram_rdata;
-wire [1:0]  cpu_m_sram_rresp;
-wire        cpu_m_sram_rlast;
-wire        cpu_m_sram_awvalid;
-wire        cpu_m_sram_awready;
-wire [31:0] cpu_m_sram_awaddr;
-wire [7:0]  cpu_m_sram_awlen;
-wire        cpu_m_sram_wvalid;
-wire        cpu_m_sram_wready;
-wire [31:0] cpu_m_sram_wdata;
-wire [3:0]  cpu_m_sram_wstrb;
-wire        cpu_m_sram_wlast;
-wire        cpu_m_sram_bvalid;
-wire [1:0]  cpu_m_sram_bresp;
+// SRAM stub: responds to any CPU access with SLVERR (prevents AXI hang).
+// Tracks outstanding AR/AW transactions and returns one response each.
+wire cpu_m_sram_stub_arvalid;   // from cpu_system (unused output)
+wire cpu_m_sram_stub_awvalid;
+reg  cpu_m_sram_stub_rvalid;
+reg  cpu_m_sram_stub_bvalid;
+always @(posedge clk_cpu) begin
+    if (!reset_n) begin
+        cpu_m_sram_stub_rvalid <= 0;
+        cpu_m_sram_stub_bvalid <= 0;
+    end else begin
+        cpu_m_sram_stub_rvalid <= cpu_m_sram_stub_arvalid;
+        cpu_m_sram_stub_bvalid <= cpu_m_sram_stub_awvalid;
+    end
+end
 
 // axi_psram_slave exposes per-chip backend wires — CRAM0, CRAM1, and
 // SRAM are three independent physical backends (two separate PSRAM
@@ -863,14 +921,7 @@ wire [31:0] c1_psram_rdata;
 wire        c1_psram_busy;
 wire        c1_psram_rdata_valid;
 
-wire        sr_psram_rd;
-wire        sr_psram_wr;
-wire [25:0] sr_psram_addr;
-wire [31:0] sr_psram_wdata;
-wire [3:0]  sr_psram_wstrb;
-wire [31:0] sr_psram_rdata;
-wire        sr_psram_busy;
-wire        sr_psram_rdata_valid;
+// SRAM CPU path removed — GPU has exclusive direct access (Z-buffer).
 
 // Muxed PSRAM signals (bridge or CPU)
 // psram_mux_* removed — per-chip backends wire directly to each sub-slave
@@ -880,15 +931,6 @@ wire        audio_sample_wr;
 wire [31:0] audio_sample_data;
 wire [8:0]  audio_fifo_level;
 wire        audio_fifo_full;
-
-// OPL3 (YMF262) hardware interface
-wire        opl_write_req;
-wire [1:0]  opl_write_addr;
-wire [7:0]  opl_write_data;
-wire        opl_ack;
-wire signed [15:0] opl_audio_out_l;
-wire signed [15:0] opl_audio_out_r;
-wire               opl_sample_toggle;
 
 // Link MMIO register interface
 wire        link_reg_wr;
@@ -946,37 +988,29 @@ wire [3:0]  arb_s_wstrb;
 wire        arb_s_bvalid;
 wire [1:0]  arb_s_bresp;
 
-// Bridge SDRAM path removed — all bridge DMA now goes through CRAM1.
-// M3 on SDRAM arbiter tied off.
-wire bridge_m_wr_idle = 1'b1;
-wire [31:0] bridge_axi_rd_data = 32'b0;
-wire        bridge_axi_rd_done = 1'b0;
-
+// Bridge SDRAM path fully removed — all bridge DMA goes through CRAM1.
 
 // ============================================================
-// Bridge read data mux
+// Bridge read data mux (registered — one cycle after bridge_rd)
 // ============================================================
-always @(*) begin
+always @(posedge clk_74a) begin
     casex(bridge_addr)
         default: begin
             bridge_rd_data <= 0;
-        end
-        32'b000000xx_xxxxxxxx_xxxxxxxx_xxxxxxxx: begin
-            bridge_rd_data <= bridge_rd_data_captured;
         end
         32'h30xxxxxx: begin
             bridge_rd_data <= cram1_rd_resp_data;
         end
 
-        32'hF7000000: begin 
+        32'hF7000000: begin
         //the byte order is inverted because the bridge_endian_little = 1
         bridge_rd_data <= {analogizer_settings[7:0],analogizer_settings[15:8],analogizer_settings[23:16],analogizer_settings[31:24]};
         end
-        32'hF7000004: begin 
+        32'hF7000004: begin
         //the byte order is inverted because the bridge_endian_little = 1
         bridge_rd_data <= {signed_hoff[7:0],signed_hoff[15:8],signed_hoff[23:16],signed_hoff[31:24]}; //signed_hoff;
         end
-        32'hF7000008: begin 
+        32'hF7000008: begin
         //the byte order is inverted because the bridge_endian_little = 1
         bridge_rd_data <= {signed_voff[7:0],signed_voff[15:8],signed_voff[23:16],signed_voff[31:24]}; //signed_voff;
         end
@@ -1019,8 +1053,8 @@ always @(posedge clk_74a) begin
 end
 
 // Bridge SDRAM write path removed — OS loads via CRAM1 bounce.
-// bridge_wr_idle: only need to wait for CRAM1 activity now.
-wire bridge_wr_idle = bridge_m_wr_idle && !bridge_cram1_active;
+// bridge_wr_idle: true when no CRAM1 bridge op is in flight.
+wire bridge_wr_idle = !bridge_cram1_active;
 
 // Bridge DMA active tracking
 reg bridge_dma_active;
@@ -1086,268 +1120,165 @@ always @(posedge clk_ram_controller) begin
     end
 end
 
-// Bridge SDRAM read handshake CDC
-reg [31:0] bridge_addr_captured;
-reg bridge_sdram_rd;
-reg [31:0] bridge_addr_ram_clk;
-reg bridge_rd_done;
-reg bridge_rd_done_sync1, bridge_rd_done_sync2;
-reg [31:0] bridge_rd_data_captured;
-
-always @(posedge clk_74a) begin
-    bridge_rd_done_sync1 <= bridge_rd_done;
-    bridge_rd_done_sync2 <= bridge_rd_done_sync1;
-
-    if (bridge_rd_done_sync2) bridge_sdram_rd <= 0;
-
-    // SDRAM read (0x00-0x03) — single-word handshake
-    if (!bridge_sdram_rd && bridge_rd && bridge_addr[31:26] == 6'b000000) begin
-        bridge_sdram_rd <= 1;
-        bridge_addr_captured <= bridge_addr;
-    end
-end
+// Bridge SDRAM read path fully removed — bridge never reads SDRAM.
 
 // ============================================================
-// Bridge CRAM1 Direct Write (clk_74a)
-// Accept immediately (bridge bus must not stall), defer PSRAM
-// access until CDC is idle to prevent response theft.
+// Bridge CRAM1: native clk_74a controller (no CDC)
+//
+// Bridge has its own cram1_controller instance running on clk_74a.
+// CPU + mixer have a separate instance on clk_cpu.
+// A pin-level mux selects which controller drives the CRAM1
+// chip based on bridge_cram1_active.  No CDC on any data path.
 // ============================================================
 wire bridge_cram1_wr_detect = bridge_wr && (bridge_addr[31:24] == 8'h30);
 
-reg        bridge_cram1_wr_pending;
-reg        bridge_cram1_wr_deferred;  // accepted but not yet issued to PSRAM
-reg        bridge_cram1_wr_started;
-reg        bridge_cram1_wr_pulse;
-reg [21:0] bridge_cram1_wr_addr;
-reg [31:0] bridge_cram1_wr_data;
-
-always @(posedge clk_74a) begin
-    bridge_cram1_wr_pulse <= 0;
-
-    // Accept new write request
-    if (bridge_cram1_wr_detect && !bridge_cram1_wr_pending) begin
-        bridge_cram1_wr_pending <= 1;
-        bridge_cram1_wr_started <= 0;
-        bridge_cram1_wr_addr <= bridge_addr[23:2];
-        bridge_cram1_wr_data <= bridge_wr_data;
-        if (!cdc_psram1_inflight && !psram1_busy) begin
-            bridge_cram1_wr_pulse <= 1;
-            bridge_cram1_wr_deferred <= 0;
-        end else begin
-            bridge_cram1_wr_deferred <= 1;
-        end
-    end
-
-    // Deferred issue: CDC finished, PSRAM idle — now issue
-    if (bridge_cram1_wr_deferred && !cdc_psram1_inflight && !psram1_busy) begin
-        bridge_cram1_wr_pulse <= 1;
-        bridge_cram1_wr_deferred <= 0;
-    end
-
-    // Wait for PSRAM completion (busy HIGH → LOW)
-    if (bridge_cram1_wr_pending && !bridge_cram1_wr_deferred) begin
-        if (!bridge_cram1_wr_started && psram1_busy)
-            bridge_cram1_wr_started <= 1;
-        else if (bridge_cram1_wr_started && !psram1_busy) begin
-            bridge_cram1_wr_pending <= 0;
-            bridge_cram1_wr_started <= 0;
-        end
-    end
-end
-
-// ============================================================
-// Bridge CRAM1 Direct Read (clk_74a)
-// Same pattern: accept immediately, defer PSRAM access.
-// ============================================================
 reg prev_bridge_rd_for_cram1;
 always @(posedge clk_74a)
     prev_bridge_rd_for_cram1 <= bridge_rd && (bridge_addr[31:24] == 8'h30);
 wire bridge_cram1_rd_detect = !prev_bridge_rd_for_cram1 && bridge_rd && (bridge_addr[31:24] == 8'h30);
 
-reg        bridge_cram1_rd_pending;
-reg        bridge_cram1_rd_deferred;
-reg        bridge_cram1_rd_started;
-reg        bridge_cram1_rd_pulse;
-reg [21:0] bridge_cram1_rd_addr;
+// Bridge command interface (clk_74a, directly to controller B)
+reg        brg_psram_rd;
+reg        brg_psram_wr;
+reg [21:0] brg_psram_addr;
+reg [31:0] brg_psram_wdata;
+wire [31:0] brg_psram_rdata;
+wire        brg_psram_busy;
+wire        brg_psram_rdata_valid;
 reg [31:0] cram1_rd_resp_data;
 
-always @(posedge clk_74a) begin
-    bridge_cram1_rd_pulse <= 0;
+// Bridge CRAM1 command FSM (clk_74a).
+// Accept-then-issue pattern: latch addr/data immediately, defer the
+// psram command pulse until controller B is idle.  This prevents the
+// 1-cycle race where the detect fires while word_busy is dropping but
+// the controller hasn't reached ST_IDLE yet.
+reg        bridge_cram1_wr_pending;
+reg        bridge_cram1_wr_issued;   // command pulse sent to controller
+reg        bridge_cram1_wr_started;  // controller went busy
+reg        bridge_cram1_rd_pending;
+reg        bridge_cram1_rd_issued;
+reg [21:0] brg_lat_addr;
+reg [31:0] brg_lat_data;
 
-    // Accept new read request
+always @(posedge clk_74a) begin
+    brg_psram_rd <= 0;
+    brg_psram_wr <= 0;
+
+    // Accept write — latch immediately, issue later when idle
+    if (bridge_cram1_wr_detect && !bridge_cram1_wr_pending && !bridge_cram1_rd_pending) begin
+        bridge_cram1_wr_pending <= 1;
+        bridge_cram1_wr_issued  <= 0;
+        bridge_cram1_wr_started <= 0;
+        brg_lat_addr  <= bridge_addr[23:2];
+        brg_lat_data  <= bridge_wr_data;
+    end
+
+    // Issue deferred write when controller is idle
+    if (bridge_cram1_wr_pending && !bridge_cram1_wr_issued && !brg_psram_busy) begin
+        brg_psram_wr   <= 1;
+        brg_psram_addr <= brg_lat_addr;
+        brg_psram_wdata <= brg_lat_data;
+        bridge_cram1_wr_issued <= 1;
+    end
+
+    // Write completion: busy HIGH → LOW
+    if (bridge_cram1_wr_pending && bridge_cram1_wr_issued) begin
+        if (!bridge_cram1_wr_started && brg_psram_busy)
+            bridge_cram1_wr_started <= 1;
+        else if (bridge_cram1_wr_started && !brg_psram_busy) begin
+            bridge_cram1_wr_pending <= 0;
+            bridge_cram1_wr_issued  <= 0;
+            bridge_cram1_wr_started <= 0;
+        end
+    end
+
+    // Accept read — latch immediately, issue later when idle
     if (bridge_cram1_rd_detect && !bridge_cram1_rd_pending && !bridge_cram1_wr_pending) begin
         bridge_cram1_rd_pending <= 1;
-        bridge_cram1_rd_started <= 0;
-        bridge_cram1_rd_addr <= bridge_addr[23:2];
-        if (!cdc_psram1_inflight && !psram1_busy) begin
-            bridge_cram1_rd_pulse <= 1;
-            bridge_cram1_rd_deferred <= 0;
-        end else begin
-            bridge_cram1_rd_deferred <= 1;
-        end
+        bridge_cram1_rd_issued  <= 0;
+        brg_lat_addr <= bridge_addr[23:2];
     end
 
-    // Deferred issue
-    if (bridge_cram1_rd_deferred && !cdc_psram1_inflight && !psram1_busy) begin
-        bridge_cram1_rd_pulse <= 1;
-        bridge_cram1_rd_deferred <= 0;
+    // Issue deferred read when controller is idle
+    if (bridge_cram1_rd_pending && !bridge_cram1_rd_issued && !brg_psram_busy) begin
+        brg_psram_rd   <= 1;
+        brg_psram_addr <= brg_lat_addr;
+        bridge_cram1_rd_issued <= 1;
     end
 
-    // Wait for PSRAM response (filtered to bridge-owned reads only)
-    if (bridge_cram1_rd_pending && !bridge_cram1_rd_deferred) begin
-        if (psram1_rdata_valid_for_bridge) begin
-            cram1_rd_resp_data <= psram1_rdata;
-            bridge_cram1_rd_pending <= 0;
-            bridge_cram1_rd_started <= 0;
-        end
+    // Read completion
+    if (bridge_cram1_rd_pending && bridge_cram1_rd_issued && brg_psram_rdata_valid) begin
+        cram1_rd_resp_data <= brg_psram_rdata;
+        bridge_cram1_rd_pending <= 0;
+        bridge_cram1_rd_issued  <= 0;
     end
 end
 
 wire bridge_cram1_active = bridge_cram1_wr_pending | bridge_cram1_rd_pending;
 
 // ============================================================
-// CPU <-> CRAM1 Clock Domain Crossing
+// CRAM1 mux (clk_cpu) — CPU + mixer only, no bridge
 // ============================================================
-wire        cdc_psram1_rd, cdc_psram1_wr;
-wire [21:0] cdc_psram1_addr;
-wire [31:0] cdc_psram1_wdata;
-wire [3:0]  cdc_psram1_wstrb;
-wire [31:0] cdc_cpu_rdata;
-wire        cdc_cpu_busy;
-wire        cdc_cpu_rdata_valid;
 
-// Bridge requesting: same-cycle detection for CDC hold-off
-wire bridge_cram1_requesting = bridge_cram1_wr_detect ||
-    (!prev_bridge_rd_for_cram1 && bridge_rd && (bridge_addr[31:24] == 8'h30));
+// Controller busy IS the inflight indicator — no separate tracker needed.
+// Block new rd/wr commands whenever the controller is busy.  The controller's
+// ST_IDLE only samples word_rd/word_wr; any pulse issued while busy would be
+// dropped, causing phantom "inflight" state.
+//
+// Owner is captured when the rd pulse was issued.  rdata_valid later uses
+// the captured owner to route the response to CPU or mixer.
+reg psram1_rd_owner;   // 0=CPU, 1=mixer
 
-wire cdc_psram1_inflight;
+// Mixer read acceptance — asserted on the cycle the mux actually passes
+// the mixer's cram1_mix_rd pulse through to the controller.  Used by the
+// mixer to know its read was not suppressed by a CPU collision.
+wire cram1_mix_rd_accepted = psram1_rd & ~c1_psram_rd;
 
-// CPU CRAM1 path — goes through cpu_psram1_cdc.  The mixer is no longer
-// part of this arbiter: it lives in clk_74a now and joins via a separate
-// clk_74a-side arbiter at the psram1_inst port (see below).  The
-// axi_psram_slave router already gates these signals by CRAM1 address
-// match, so no extra AND is needed here.
-cpu_psram1_cdc cdc_psram1 (
-    .clk_cpu(clk_cpu),
-    .cpu_rd(c1_psram_rd),
-    .cpu_wr(c1_psram_wr),
-    .cpu_addr(c1_psram_addr[21:0]),
-    .cpu_wdata(c1_psram_wdata),
-    .cpu_wstrb(c1_psram_wstrb),
-    .cpu_rdata(c1_psram_rdata),
-    .cpu_busy(c1_psram_busy),
-    .cpu_rdata_valid(c1_psram_rdata_valid),
-    .clk_74a(clk_74a),
-    .psram_rd(cdc_psram1_rd),
-    .psram_wr(cdc_psram1_wr),
-    .psram_addr(cdc_psram1_addr),
-    .psram_wdata(cdc_psram1_wdata),
-    .psram_wstrb(cdc_psram1_wstrb),
-    .psram_rdata(psram1_rdata),
-    .psram_busy(psram1_busy),
-    .psram_rdata_valid(psram1_rdata_valid_for_cdc),
-    .bridge_active(bridge_cram1_active),
-    .bridge_requesting(bridge_cram1_requesting),
-    .cdc_inflight(cdc_psram1_inflight)
-);
-
-// CRAM1 mux (clk_74a): ownership tracking prevents response theft.
-// Three potential owners on the read path: CDC (CPU traffic), bridge,
-// mixer (audio_mixer_cdc now runs in clk_74a and reads CRAM1 directly).
-// Track who owns the current in-flight PSRAM read so rdata_valid only
-// fires for the correct source.
-reg [1:0]  psram1_rd_owner;      // 0=CDC, 1=bridge, 2=mixer
-reg        psram1_rd_inflight;
-localparam [1:0] OWN_CDC    = 2'd0;
-localparam [1:0] OWN_BRIDGE = 2'd1;
-localparam [1:0] OWN_MIXER  = 2'd2;
-
-always @(posedge clk_74a) begin
-    if (!psram1_rd_inflight && psram1_rd) begin
-        psram1_rd_inflight <= 1'b1;
-        // Priority mirrors the psram1_rd mux below: bridge > CDC > mixer
-        if (bridge_cram1_rd_pulse)           psram1_rd_owner <= OWN_BRIDGE;
-        else if (cdc_psram1_rd)              psram1_rd_owner <= OWN_CDC;
-        else                                 psram1_rd_owner <= OWN_MIXER;
-    end
-    if (psram1_rdata_valid)
-        psram1_rd_inflight <= 1'b0;
+always @(posedge clk_cpu) begin
+    if (psram1_rd)
+        psram1_rd_owner <= c1_psram_rd ? 1'b0 : 1'b1;
 end
 
-// Filter rdata_valid to the locked owner — no response theft
-wire psram1_rdata_valid_for_cdc    = psram1_rdata_valid && (psram1_rd_owner == OWN_CDC);
-wire psram1_rdata_valid_for_bridge = psram1_rdata_valid && (psram1_rd_owner == OWN_BRIDGE);
-wire psram1_rdata_valid_for_mixer  = psram1_rdata_valid && (psram1_rd_owner == OWN_MIXER);
+wire psram1_rdata_valid_for_cpu   = psram1_rdata_valid && !psram1_rd_owner;
+wire psram1_rdata_valid_for_mixer = psram1_rdata_valid &&  psram1_rd_owner;
 
-// Read mux: bridge > CDC > mixer.  Block new reads while one is inflight,
-// but never block an in-flight CDC request.
-assign psram1_rd = psram1_rd_inflight ? 1'b0
-                 : bridge_cram1_rd_pulse ? 1'b1
-                 : (bridge_cram1_active && !cdc_psram1_inflight) ? 1'b0
-                 : cdc_psram1_rd ? 1'b1
+// CPU AXI slave feedback — busy when controller busy OR bridge wants pins
+// (gating new ops so controller A drains naturally for safe pin handover).
+assign c1_psram_busy        = psram1_busy | brg_active_cpu;
+assign c1_psram_rdata       = psram1_rdata;
+assign c1_psram_rdata_valid = psram1_rdata_valid_for_cpu;
+
+// Write: CPU only (mixer doesn't write).  Block when controller busy or
+// when bridge is requesting the pins.
+assign psram1_wr = psram1_busy     ? 1'b0
+                 : brg_active_cpu  ? 1'b0
+                 : c1_psram_wr;
+
+// Read: block when controller busy, a write is being issued, or bridge
+// wants the pins.  CPU > mixer priority.
+assign psram1_rd = psram1_wr       ? 1'b0
+                 : psram1_busy     ? 1'b0
+                 : brg_active_cpu  ? 1'b0
+                 : c1_psram_rd     ? 1'b1
                  : cram1_mix_rd;
-// Never block a CDC write that is already in flight.
-assign psram1_wr = bridge_cram1_wr_pulse ? 1'b1
-                 : (bridge_cram1_active && !cdc_psram1_inflight) ? 1'b0
-                 : cdc_psram1_wr;
-assign psram1_addr = bridge_cram1_wr_pending ? bridge_cram1_wr_addr :
-                     bridge_cram1_rd_pending ? bridge_cram1_rd_addr :
-                     (cdc_psram1_rd | cdc_psram1_wr) ? cdc_psram1_addr :
-                     {cram1_mix_addr};
-assign psram1_wdata = bridge_cram1_wr_pending ? bridge_cram1_wr_data : cdc_psram1_wdata;
-assign psram1_wstrb = bridge_cram1_wr_pending ? 4'b1111 : cdc_psram1_wstrb;
 
-// 4-stage synchronizer for SDRAM bridge reads
-reg bridge_rd_sync1, bridge_rd_sync2, bridge_rd_sync3, bridge_rd_sync4;
-reg [31:0] bridge_addr_sync1, bridge_addr_sync2;
+assign psram1_addr  = (c1_psram_rd | c1_psram_wr) ? c1_psram_addr[21:0] : cram1_mix_addr;
+assign psram1_wdata = c1_psram_wdata;
+assign psram1_wstrb = c1_psram_wstrb;
 
-always @(posedge clk_ram_controller) begin
-    bridge_rd_sync1 <= bridge_sdram_rd;
-    bridge_rd_sync2 <= bridge_rd_sync1;
-    bridge_rd_sync3 <= bridge_rd_sync2;
-    bridge_rd_sync4 <= bridge_rd_sync3;
-
-    if (bridge_rd_sync2 && !bridge_rd_sync3) begin
-        bridge_addr_sync1 <= bridge_addr_captured;
-    end
-    bridge_addr_sync2 <= bridge_addr_sync1;
-
-    if (bridge_rd_sync3 && !bridge_rd_sync4) begin
-        bridge_addr_ram_clk <= bridge_addr_sync2;
-    end
-
-    // SDRAM read complete → capture data
-    if (bridge_axi_rd_done) begin
-        bridge_rd_data_captured <= bridge_axi_rd_data;
-        bridge_rd_done <= 1;
-    end
-    if (!bridge_rd_sync1) begin
-        bridge_rd_done <= 0;
-    end
-end
+// Bridge SDRAM read 4-stage sync removed — no bridge SDRAM reads.
 
 // Bridge CRAM0 + SRAM write paths removed.
 // OS now bounces all bridge DMA through CRAM1, then CPU copies to CRAM0.
 // SRAM bridge was never used by firmware.
 wire cram_bridge_active = 1'b0;
 
-// SRAM mux: GPU has priority over the CPU path (GPU tile lookups drive
-// sram_word_* directly; when GPU is idle the SRAM sub-slave wins).
-// sr_psram_* comes from axi_psram_slave's u_sram instance and is already
-// only active for CRAM_BASE address-decoded SRAM transactions, so no
-// explicit CPU-side gating is needed.
-wire gpu_sram_active = gpu_sram_rd | gpu_sram_wr;
-
-assign sram_word_rd    = gpu_sram_active ? gpu_sram_rd    : sr_psram_rd;
-assign sram_word_wr    = gpu_sram_active ? gpu_sram_wr    : sr_psram_wr;
-assign sram_word_addr  = gpu_sram_active ? gpu_sram_addr  : sr_psram_addr[21:0];
-assign sram_word_wdata = gpu_sram_active ? gpu_sram_wdata : sr_psram_wdata;
-assign sram_word_wstrb = gpu_sram_active ? gpu_sram_wstrb : sr_psram_wstrb;
-
-// SRAM return data path back to the sub-slave — no mux, direct wire.
-assign sr_psram_rdata       = sram_word_rdata;
-assign sr_psram_busy        = sram_word_busy;
-assign sr_psram_rdata_valid = sram_word_rdata_valid;
+// SRAM: GPU-exclusive direct access (Z-buffer). No CPU path, no mux.
+assign sram_word_rd    = gpu_sram_rd;
+assign sram_word_wr    = gpu_sram_wr;
+assign sram_word_addr  = gpu_sram_addr;
+assign sram_word_wdata = gpu_sram_wdata;
+assign sram_word_wstrb = gpu_sram_wstrb;
 
 
 
@@ -1838,27 +1769,29 @@ assign video_hs = vidout_hs;
         .m_cram1_wlast  (cpu_m_cram1_wlast),
         .m_cram1_bvalid (cpu_m_cram1_bvalid),
         .m_cram1_bresp  (cpu_m_cram1_bresp),
-        // SRAM AXI4 master interface
-        .m_sram_arvalid(cpu_m_sram_arvalid),
-        .m_sram_arready(cpu_m_sram_arready),
-        .m_sram_araddr (cpu_m_sram_araddr),
-        .m_sram_arlen  (cpu_m_sram_arlen),
-        .m_sram_rvalid (cpu_m_sram_rvalid),
-        .m_sram_rready (cpu_m_sram_rready),
-        .m_sram_rdata  (cpu_m_sram_rdata),
-        .m_sram_rresp  (cpu_m_sram_rresp),
-        .m_sram_rlast  (cpu_m_sram_rlast),
-        .m_sram_awvalid(cpu_m_sram_awvalid),
-        .m_sram_awready(cpu_m_sram_awready),
-        .m_sram_awaddr (cpu_m_sram_awaddr),
-        .m_sram_awlen  (cpu_m_sram_awlen),
-        .m_sram_wvalid (cpu_m_sram_wvalid),
-        .m_sram_wready (cpu_m_sram_wready),
-        .m_sram_wdata  (cpu_m_sram_wdata),
-        .m_sram_wstrb  (cpu_m_sram_wstrb),
-        .m_sram_wlast  (cpu_m_sram_wlast),
-        .m_sram_bvalid (cpu_m_sram_bvalid),
-        .m_sram_bresp  (cpu_m_sram_bresp),
+        // SRAM port: GPU-exclusive.  CPU accesses get immediate SLVERR
+        // (prevents AXI deadlock — old tie-off accepted requests but
+        // never responded, hanging the CPU).
+        .m_sram_arvalid(cpu_m_sram_stub_arvalid),
+        .m_sram_arready(1'b1),
+        .m_sram_araddr (),
+        .m_sram_arlen  (),
+        .m_sram_rvalid (cpu_m_sram_stub_rvalid),
+        .m_sram_rready (),
+        .m_sram_rdata  (32'hDEADDEAD),
+        .m_sram_rresp  (2'b10),      // SLVERR
+        .m_sram_rlast  (1'b1),
+        .m_sram_awvalid(cpu_m_sram_stub_awvalid),
+        .m_sram_awready(1'b1),
+        .m_sram_awaddr (),
+        .m_sram_awlen  (),
+        .m_sram_wvalid (),
+        .m_sram_wready (1'b1),
+        .m_sram_wdata  (),
+        .m_sram_wstrb  (),
+        .m_sram_wlast  (),
+        .m_sram_bvalid (cpu_m_sram_stub_bvalid),
+        .m_sram_bresp  (2'b10),      // SLVERR
         // Local peripheral AXI4 master interface
         .m_local_arvalid(cpu_m_local_arvalid),
         .m_local_arready(cpu_m_local_arready),
@@ -1954,11 +1887,6 @@ assign video_hs = vidout_hs;
         .link_reg_addr(link_reg_addr),
         .link_reg_wdata(link_reg_wdata),
         .link_reg_rdata(link_reg_rdata),
-        // OPM hardware interface
-        .opl_write_req(opl_write_req),
-        .opl_write_addr(opl_write_addr),
-        .opl_write_data(opl_write_data),
-        .opl_ack(opl_ack),
         // UART
         .uart_tx_dv(uart_tx_dv),
         .uart_tx_byte(uart_tx_byte),
@@ -1982,7 +1910,6 @@ assign video_hs = vidout_hs;
         .mix_irq_clear_wr(mix_irq_clear_wr),
         .mix_irq_clear_data(mix_irq_clear_data),
         .mix_irq_pending(mix_irq_pending),
-        .mix_voice_wr_stall(mix_voice_wr_stall),
         .timer_irq(timer_irq),
         .uart_rx_irq(uart_rx_irq),
         .link_irq(link_irq),
@@ -2232,39 +2159,7 @@ assign video_hs = vidout_hs;
         .psram_rdata_valid (c1_psram_rdata_valid)
     );
 
-    axi_sram_slave cpu_sram_axi (
-        .clk(clk_cpu),
-        .reset_n(reset_n),
-        .s_axi_arvalid(cpu_m_sram_arvalid),
-        .s_axi_arready(cpu_m_sram_arready),
-        .s_axi_araddr(cpu_m_sram_araddr),
-        .s_axi_arlen(cpu_m_sram_arlen),
-        .s_axi_rvalid(cpu_m_sram_rvalid),
-        .s_axi_rready(cpu_m_sram_rready),
-        .s_axi_rdata(cpu_m_sram_rdata),
-        .s_axi_rresp(cpu_m_sram_rresp),
-        .s_axi_rlast(cpu_m_sram_rlast),
-        .s_axi_awvalid(cpu_m_sram_awvalid),
-        .s_axi_awready(cpu_m_sram_awready),
-        .s_axi_awaddr(cpu_m_sram_awaddr),
-        .s_axi_awlen(cpu_m_sram_awlen),
-        .s_axi_wvalid(cpu_m_sram_wvalid),
-        .s_axi_wready(cpu_m_sram_wready),
-        .s_axi_wdata(cpu_m_sram_wdata),
-        .s_axi_wstrb(cpu_m_sram_wstrb),
-        .s_axi_wlast(cpu_m_sram_wlast),
-        .s_axi_bvalid(cpu_m_sram_bvalid),
-        .s_axi_bready(1'b1),
-        .s_axi_bresp(cpu_m_sram_bresp),
-        .psram_rd          (sr_psram_rd),
-        .psram_wr          (sr_psram_wr),
-        .psram_addr        (sr_psram_addr),
-        .psram_wdata       (sr_psram_wdata),
-        .psram_wstrb       (sr_psram_wstrb),
-        .psram_rdata       (sr_psram_rdata),
-        .psram_busy        (sr_psram_busy),
-        .psram_rdata_valid (sr_psram_rdata_valid)
-    );
+    // axi_sram_slave removed — SRAM is GPU-exclusive (Z-buffer).
 
     // Terminal rendering moved to software (firmware renders to framebuffer)
 
@@ -2443,44 +2338,20 @@ assign link_irq = 1'b0;
 `endif
 
 //
-// OPL3 hardware synthesizer (Greg Taylor's opl3_fpga)
-//
-`ifndef EXCLUDE_OPL3
-opl3_wrapper opl3 (
-    .clk            (clk_cpu),
-    .clk_opl        (clk_core_12288),
-    .reset_n        (reset_n),
-    .opl_write_req  (opl_write_req),
-    .opl_write_addr (opl_write_addr),
-    .opl_write_data (opl_write_data),
-    .opl_ack            (opl_ack),
-    .opl_audio_out_l    (opl_audio_out_l),
-    .opl_audio_out_r    (opl_audio_out_r),
-    .opl_sample_toggle  (opl_sample_toggle)
-);
-`else
-assign opl_ack = 1'b1;
-assign opl_audio_out_l = 16'sh0;
-assign opl_audio_out_r = 16'sh0;
-assign opl_sample_toggle = 1'b0;
-`endif
-
-//
-// Audio output (dcfifo + I2S) with OPL3 mixing
+// Audio output (dcfifo + I2S)
 //
 // Hardware mixer
 wire        mix_enable;
 wire        mix_voice_wr;
 wire [3:0]  mix_voice_field;
-wire [4:0]  mix_voice_sel;
+wire [5:0]  mix_voice_sel;
 wire [31:0] mix_voice_wdata;
-wire [4:0]  mix_active_count;
+wire [5:0]  mix_active_count;
 wire [21:0] mix_voice_pos;
 wire        mix_irq_clear_wr;
-wire [31:0] mix_irq_clear_data;
-wire [31:0] mix_irq_pending;
+wire [47:0] mix_irq_clear_data;
+wire [47:0] mix_irq_pending;
 wire        mix_voice_end_irq;
-wire        mix_voice_wr_stall;
 wire        mix_sample_wr;
 wire [31:0] mix_sample_data;
 wire        mix_cram1_rd;
@@ -2490,11 +2361,11 @@ wire        uart_rx_irq;
 wire        link_irq;
 wire        ext_irq;  // Masked combination from axi_periph_slave
 
-// audio_output.clk_sys moved to clk_74a so the mixer→FIFO push side is
-// same-domain with the (now clk_74a) audio_mixer.  audio_output's internal
-// clk_sys→clk_audio CDC handles the 74.25 MHz → 12.288 MHz DAC crossing.
+// audio_output: dcfifo bridges clk_cpu → clk_audio (12.288 MHz).
+// Mixer and audio_output both run on clk_cpu now — no CDC on the
+// sample push path.
 audio_output audio_out (
-    .clk_sys      (clk_74a),
+    .clk_sys      (clk_cpu),
     .clk_audio    (clk_core_12288),
     .reset_n      (reset_n),
 
@@ -2503,66 +2374,58 @@ audio_output audio_out (
     .fifo_level   (audio_fifo_level),
     .fifo_full    (audio_fifo_full),
 
-    .opl_audio_in_l     (opl_audio_out_l),
-    .opl_audio_in_r     (opl_audio_out_r),
-    .opl_toggle_in    (opl_sample_toggle),
-
     .audio_mclk   (audio_mclk),
     .audio_lrck   (audio_lrck),
     .audio_dac    (audio_dac)
 );
 
-// Reads psram1_rdata directly (clk_74a) via audio_mixer_cdc's clk_74a
-// interface.  The mixer's CRAM1 requests are gated by the clk_74a arbiter
-// below (cram1_mix_* signals) and share the psram1_inst port with the
-// CPU-side cpu_psram1_cdc.
+// audio_mixer runs directly on clk_cpu — no CDC wrapper needed.
+// CPU voice config, CRAM1 data, and audio output are all same-domain.
 wire        cram1_mix_rd;
 wire [21:0] cram1_mix_addr;
 
 `ifndef EXCLUDE_MIXER
-audio_mixer_cdc mixer_cdc (
-    .clk_cpu            (clk_cpu),
-    .clk_74a            (clk_74a),
+audio_mixer mixer_inst (
+    .clk                (clk_cpu),
     .reset_n            (reset_n),
 
-    // CPU-side control (clk_cpu)
     .mixer_enable       (mix_enable),
+
     .voice_wr           (mix_voice_wr),
     .voice_field        (mix_voice_field),
     .voice_sel          (mix_voice_sel),
+    .voice_sel_rd       (mix_voice_sel),
     .voice_wdata        (mix_voice_wdata),
-    .voice_wr_stall     (mix_voice_wr_stall),
 
-    .irq_clear          (mix_irq_clear_data),
-    .irq_clear_wr       (mix_irq_clear_wr),
-    .voice_end_pending  (mix_irq_pending),
-    .voice_end_irq      (mix_voice_end_irq),
+    .cram1_rd           (cram1_mix_rd),
+    .cram1_addr         (cram1_mix_addr),
+    .cram1_rdata        (psram1_rdata),
+    .cram1_busy         (psram1_busy | brg_active_cpu | c1_psram_rd | c1_psram_wr),
+    .cram1_rdata_valid  (psram1_rdata_valid_for_mixer),
+    .cram1_rd_accepted  (cram1_mix_rd_accepted),
+
+    .sample_wr          (mix_sample_wr),
+    .sample_data        (mix_sample_data),
+    .fifo_level         (audio_fifo_level),
 
     .active_count       (mix_active_count),
     .pos_readback       (mix_voice_pos),
 
-    // CRAM1 (clk_74a)
-    .cram1_rd           (cram1_mix_rd),
-    .cram1_addr         (cram1_mix_addr),
-    .cram1_rdata        (psram1_rdata),
-    .cram1_busy         (psram1_busy),
-    .cram1_rdata_valid  (psram1_rdata_valid_for_mixer),
-
-    // Audio output (clk_74a)
-    .sample_wr          (mix_sample_wr),
-    .sample_data        (mix_sample_data),
-    .fifo_level         (audio_fifo_level)
+    .irq_clear          (mix_irq_clear_data),
+    .irq_clear_wr       (mix_irq_clear_wr),
+    .voice_end_pending  (mix_irq_pending),
+    .voice_end_irq      (mix_voice_end_irq)
 );
 assign mix_cram1_rd   = cram1_mix_rd;
 assign mix_cram1_addr = cram1_mix_addr;
 `else
 assign mix_cram1_rd = 1'b0;
-assign mix_cram1_addr = 24'b0;
+assign mix_cram1_addr = 22'b0;
 assign mix_sample_wr = 1'b0;
-assign mix_sample_data = 16'b0;
-assign mix_active_count = 5'b0;
+assign mix_sample_data = 32'b0;
+assign mix_active_count = 6'b0;
 assign mix_voice_pos = 22'b0;
-assign mix_irq_pending = 32'b0;
+assign mix_irq_pending = 48'b0;
 assign mix_voice_end_irq = 1'b0;
 `endif
 
