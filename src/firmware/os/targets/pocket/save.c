@@ -47,6 +47,20 @@ static volatile save_meta_t *slot_meta(int slot) {
 }
 
 void of_save_init(void) {
+    /* Populate save_prefetch's per-slot base-address table.
+     *
+     * SAVE_SLOT_BASE[N] = N * (SAVE_SLOT_SIZE / 4)  (CRAM1 word
+     * address — slots are byte-addressed in firmware but the FPGA
+     * controller indexes 32-bit words).  256 KB / 4 B = 64 K words =
+     * 0x10000 word stride per slot.
+     *
+     * The FPGA save_prefetch module reads these whenever APF asserts
+     * dataslot_requestread, then issues a sync burst from CRAM1 to
+     * its 32-word ring BRAM ahead of the bridge_rd strobes.  Without
+     * this init, every entry stays 0 and slot N>0 reads would fetch
+     * from slot 0 — overwriting save N's SD file with garbage. */
+    for (uint32_t n = 0; n < SAVE_MAX_SLOTS; n++)
+        SAVE_SLOT_BASE(n) = n * (SAVE_SLOT_SIZE / 4u);
 }
 
 int of_save_read(int slot, void *buf, uint32_t offset, uint32_t len) {

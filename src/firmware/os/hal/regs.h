@@ -224,8 +224,8 @@
 #define   TIMER_CTRL_ENABLE   (1 << 0)
 #define   TIMER_CTRL_W1C_IRQ  (1 << 1)
 
-/* Hardware PCM mixer (0xC0-0xF8) — 32-voice CRAM1-backed */
-#define MIX_VOICE_SEL        REG32(SYSREG_BASE + 0xC0)  /* Write: voice index 0-31 */
+/* Hardware PCM mixer (0x80-0x88, 0xC0-0xF8) — 48-voice CRAM1-backed */
+#define MIX_VOICE_SEL        REG32(SYSREG_BASE + 0xC0)  /* Write: voice index 0-47 */
 #define MIX_VOICE_ADDR       REG32(SYSREG_BASE + 0xC4)  /* Write: CRAM1 word address */
 #define MIX_VOICE_LEN        REG32(SYSREG_BASE + 0xC8)  /* Write: length (also sets LOOP_END/LOOP_START defaults) */
 #define MIX_VOICE_RATE       REG32(SYSREG_BASE + 0xCC)  /* Write: rate (16.16 fixed-point) */
@@ -233,14 +233,29 @@
 #define MIX_VOICE_POS        REG32(SYSREG_BASE + 0xD0)  /* Read: position[21:0] for selected voice */
 #define MIX_CTRL             REG32(SYSREG_BASE + 0xD4)  /* RW: [0]=enable */
 #define MIX_VOICE_VOL_LR     REG32(SYSREG_BASE + 0xD8)  /* Write: {vol_r[15:8], vol_l[7:0]} (current, ramped by HW) */
-#define MIX_STATUS           REG32(SYSREG_BASE + 0xD8)  /* Read: [4:0]=active voices */
+#define MIX_STATUS           REG32(SYSREG_BASE + 0xD8)  /* Read: [5:0]=active voices */
 #define MIX_VOICE_LOOP_END   REG32(SYSREG_BASE + 0xE4)  /* Write: loop end point[21:0] */
 #define MIX_VOICE_POS_WR     REG32(SYSREG_BASE + 0xE8)  /* Write: set position[21:0] */
 #define MIX_VOICE_LOOP_START REG32(SYSREG_BASE + 0xEC)  /* Write: loop start point[21:0] */
 #define MIX_VOICE_VOL_TARGET REG32(SYSREG_BASE + 0xF0)  /* Write: {target_r[7:0], target_l[7:0]} */
 #define MIX_VOICE_VOL_RATE   REG32(SYSREG_BASE + 0xF4)  /* Write: ramp step size (0=instant) */
-#define MIX_IRQ_PENDING      REG32(SYSREG_BASE + 0xF8)  /* Read: voice-end bitmask */
+#define MIX_IRQ_PENDING      REG32(SYSREG_BASE + 0xF8)  /* Read: voice-end bitmask [31:0] */
 #define MIX_IRQ_CLEAR        REG32(SYSREG_BASE + 0xF8)  /* Write: W1C */
+
+/* Mixer extension registers (0x100+) */
+#define MIX_VOICE_FILTER_FC  REG32(SYSREG_BASE + 0x100) /* Write: Q0.16 SVF cutoff coefficient */
+#define MIX_VOICE_FILTER_Q   REG32(SYSREG_BASE + 0x104) /* Write: {enable[8], Q[7:0]} */
+#define MIX_IRQ_PENDING_HI   REG32(SYSREG_BASE + 0x108) /* Read: voice-end bitmask [47:32] */
+#define MIX_IRQ_CLEAR_HI     REG32(SYSREG_BASE + 0x108) /* Write: W1C for bits [47:32] */
+
+/* Save-slot prefetch base table (0x110..0x134, 10 entries × 22-bit
+ * CRAM1 word addresses).  Written once at boot by of_save_init().
+ * save_prefetch (clk_74a, FPGA) reads these on dataslot_requestread
+ * to pre-fill its ring BRAM ahead of APF's bridge_rd strobes — fixes
+ * the ~25-cycle CRAM1 access vs ~4-cycle APF capture mismatch that
+ * was persisting garbage to every SD-side save word.  Index N maps to
+ * bridge save slot N (matches APF's dataslot_requestread_id). */
+#define SAVE_SLOT_BASE(n)    REG32(SYSREG_BASE + 0x110 + ((n) * 4))
 
 /* Link-lite peripheral (0x4D000000) — IRQ-driven, 1-word TX/RX */
 #define LINK_BASE            0x4D000000
@@ -282,12 +297,12 @@
 /* Hardware features (0x98) — read-only, set at synthesis time in RTL */
 #define HW_FEATURES         REG32(SYSREG_BASE + 0x98)
 #define   HW_FEAT_MIXER         (1 << 0)
-#define   HW_FEAT_OPL3          (1 << 1)
+#define   HW_FEAT_OPL3          (1 << 1)   /* removed, reserved */
 #define   HW_FEAT_LINK          (1 << 2)
 #define   HW_FEAT_ANALOGIZER    (1 << 3)
 #define   HW_FEAT_GPU_SPAN      (1 << 4)   /* GPU span renderer (always set) */
 #define   HW_FEAT_GPU_TRIANGLE  (1 << 5)   /* GPU triangle rasterizer (Full) */
-#define   HW_FEAT_MIDI          (1 << 6)
+#define   HW_FEAT_MIDI          (1 << 6)   /* MIDI playback (any backend) */
 #define   HW_FEAT_WIFI          (1 << 7)
 #define   HW_FEAT_FPU           (1 << 8)
 #define   HW_FEAT_SAVE_SLOTS    (1 << 9)
@@ -296,6 +311,7 @@
 #define   HW_FEAT_GPU_ALPHA     (1 << 12)  /* GPU alpha blending (Full) */
 #define   HW_FEAT_GPU_PERSP     (1 << 13)  /* GPU perspective spans (Lite/Full) */
 #define   HW_FEAT_GPU_FRAGPIPE  (1 << 14)  /* GPU 1-px/cycle frag pipeline (Lite/Full) */
+#define   HW_FEAT_MIDI_SMP      (1 << 15)  /* Sample-based MIDI synthesis */
 
 
 /* ======================================================================
@@ -315,16 +331,6 @@
 
 #define LINK_BASE           0x4D000000
 #define LINK_REG(n)         REG32(LINK_BASE + ((n) << 2))
-
-/* ======================================================================
- * OPL3 (YMF262) Sound Synthesis (0x4E000000)
- * ====================================================================== */
-
-#define OPL_BASE            0x4E000000
-#define OPL_ADDR            REG32(OPL_BASE + 0x00)      /* Bank 0 address register */
-#define OPL_DATA            REG32(OPL_BASE + 0x04)      /* Bank 0 data register */
-#define OPL_ADDR2           REG32(OPL_BASE + 0x08)      /* Bank 1 address register */
-#define OPL_DATA2           REG32(OPL_BASE + 0x0C)      /* Bank 1 data register */
 
 /* UART (0x4F000000) — DevKey debug serial, 2 Mbaud 8N1 */
 #define UART_BASE           0x4F000000
@@ -497,9 +503,6 @@ static inline uint32_t cpu_to_bridge(void *addr) {
 /* Audio registers */
 #define OF_REG_AUDIO_SAMPLE         AUDIO_SAMPLE
 #define OF_REG_AUDIO_STATUS         AUDIO_STATUS
-#define OF_REG_OPL_ADDR             OPL_ADDR
-#define OF_REG_OPL_DATA             OPL_DATA
-
 /* Link registers */
 #define OF_REG_LINK_BASE            LINK_BASE
 
