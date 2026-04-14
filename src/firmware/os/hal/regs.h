@@ -242,6 +242,15 @@
 #define MIX_IRQ_PENDING      REG32(SYSREG_BASE + 0xF8)  /* Read: voice-end bitmask [31:0] */
 #define MIX_IRQ_CLEAR        REG32(SYSREG_BASE + 0xF8)  /* Write: W1C */
 
+/* OPL3 was removed from the FPGA build but audio.c still references
+ * these macros (uncommitted in-progress firmware work).  Stub them
+ * to a discarded write-only location so audio.c compiles — actual
+ * OPL writes are silently no-ops until the OPL peripheral comes back. */
+#define OPL_ADDR             (*(volatile uint8_t *)(SYSREG_BASE + 0x1F0))
+#define OPL_DATA             (*(volatile uint8_t *)(SYSREG_BASE + 0x1F1))
+#define OPL_ADDR2            (*(volatile uint8_t *)(SYSREG_BASE + 0x1F2))
+#define OPL_DATA2            (*(volatile uint8_t *)(SYSREG_BASE + 0x1F3))
+
 /* Mixer extension registers (0x100+) */
 #define MIX_VOICE_FILTER_FC  REG32(SYSREG_BASE + 0x100) /* Write: Q0.16 SVF cutoff coefficient */
 #define MIX_VOICE_FILTER_Q   REG32(SYSREG_BASE + 0x104) /* Write: {enable[8], Q[7:0]} */

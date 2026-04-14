@@ -215,9 +215,13 @@ always @(posedge clk) begin
                     default: bcr_configured_latency <= 4'd4;
                 endcase
                 bcr_valid <= 1;
-                // Validate expected BCR value
-                if (latched_addr[15:0] != 16'h641F) begin
-                    $display("[%0t] CRAM WARNING: unexpected BCR value 0x%04x (expected 0x641F)",
+                // Validate expected BCR value — production code writes
+                // 0x9D1F (async page mode).  The sim-only sync-burst
+                // exercises in this file still expect 0x641F, so accept
+                // either without warning.
+                if (latched_addr[15:0] != 16'h9D1F &&
+                    latched_addr[15:0] != 16'h641F) begin
+                    $display("[%0t] CRAM WARNING: unexpected BCR value 0x%04x",
                              $time, latched_addr[15:0]);
                 end
                 state <= ST_IDLE;

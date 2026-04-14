@@ -4,7 +4,7 @@
 
 `default_nettype none
 
-module psram_cram0 #(
+module cram0_controller #(
     parameter CLOCK_SPEED = 100.0  // MHz - matches CPU / SDRAM / mp_ram PLL
 ) (
     input wire clk,

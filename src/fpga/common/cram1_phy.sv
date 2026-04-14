@@ -29,7 +29,7 @@ endfunction
 `define CEIL(x) ((rtoi(x) > x) ? rtoi(x) : rtoi(x) + 1)
 `define MAX(x, y) ((x > y) ? x : y)
 
-module psram #(
+module cram1_phy #(
     parameter CLOCK_SPEED = 48.0,  // Clock speed in megahertz
 
     // -- Shared async --
@@ -80,9 +80,11 @@ module psram #(
     output reg [15:0] dbg_burst_count,   // Completed sync bursts since last clear
     output reg [15:0] dbg_stale_count,   // Bursts where first h0 in cram_dq_r == prev burst's last
 
-    // PSRAM signals
+    // PSRAM signals (split DQ for cram1_controller wrapper)
     output reg [21:16] cram_a,
-    inout wire [15:0] cram_dq,
+    output wire [15:0] cram_dq_out,
+    output wire        cram_dq_oe,
+    input  wire [15:0] cram_dq_in,
     input wire cram_wait,
     output reg cram_clk = 0,
     output reg cram_adv_n = 1,
@@ -218,14 +220,15 @@ module psram #(
     dbg_stale_count = 0;
   end
 
-  assign cram_dq = data_out_en ? cram_data : 16'hZZ;
+  assign cram_dq_out = cram_data;
+  assign cram_dq_oe  = data_out_en;
 
   // Posedge IOB capture registers for sync burst read data.
   // FAST_INPUT_REGISTER in QSF guarantees IOB placement on posedge.
   reg [15:0] cram_dq_r;
   reg cram_wait_r;
   always @(posedge clk) begin
-    cram_dq_r <= cram_dq;
+    cram_dq_r <= cram_dq_in;
     cram_wait_r <= cram_wait;  // WAIT active HIGH (BCR bit10=1), during delay (bit8=0): HIGH=invalid, LOW=valid
   end
 

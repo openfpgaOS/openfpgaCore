@@ -6,7 +6,10 @@
 //                                → sram_controller           → sram_chip_model
 //
 // Target mux replicated from core_top.v (simplified: no bridge activity).
-// BCR init FSM configures both CRAM chips for sync burst mode before tests begin.
+// CRAM chips stay in their POR-default async page mode (BCR 0x9D1F)
+// — matches production core_top.  The sync-burst exercises in this
+// testbench drive the chips into 0x641F at sim time and are unrelated
+// to production behavior.
 //
 
 `default_nettype none

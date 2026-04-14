@@ -1,14 +1,14 @@
 //
-// AXI4 Slave for CRAM0 — async single-word reads + same-cycle W capture
-// writes.  Sync-burst read datapath is wired but disabled (S_IDLE
-// routes reads to S_RD_CMD, not S_RD_BURST).
+// AXI4 Slave for CRAM0 — async single-word reads + same-cycle W
+// capture writes.  CRAM0 operates in async page mode (BCR 0x9D1F);
+// sync-burst is not used.
 //
 // Read path (async, single word per AXI beat):
 //     S_IDLE → S_RD_CMD → S_RD_DAT → (loop for next beat) → S_IDLE
-//   Each AXI beat issues one psram_rd pulse to the underlying
-//   psram_cram0 wrapper and waits for psram_rdata_valid.  R channel
-//   uses hold-until-rready with a 1-entry skid buffer so master
-//   back-pressure doesn't drop beats.
+//   Each AXI beat issues one psram_rd pulse to cram0_controller and
+//   waits for psram_rdata_valid.  R channel uses hold-until-rready
+//   with a 1-entry skid buffer so master back-pressure doesn't drop
+//   beats.
 //
 // Write path (single-word per PSRAM access):
 //     S_IDLE → S_WR_NEXT → S_WR_CMD → S_WR_WAIT → (loop) → S_WR_RESP → S_IDLE
@@ -16,13 +16,6 @@
 //     presented together (bundled AW+W master), else S_WR_NEXT waits
 //     for the next W beat and captures on the cycle wvalid is seen.
 //   - S_WR_RESP holds s_axi_bvalid until the master asserts bready.
-//
-// Sync-burst read datapath (S_RD_BURST / S_RD_STREAM + 2-entry skid
-// FIFO on psram_burst_rdata_valid) is kept in place for future use —
-// re-enabling is a one-line change in S_IDLE (S_RD_CMD → S_RD_BURST)
-// and bumping BCR_VALUE in core_top.v from 0x9D1F to 0x641F.  Left
-// disabled until the HW sync-burst timing race can be debugged with
-// SignalTap.
 //
 
 `default_nettype none
@@ -58,9 +51,10 @@ module axi_cram0_slave (
     input  wire        s_axi_bready,
     output reg  [1:0]  s_axi_bresp,
 
-    // PSRAM single-word interface (writes + legacy async read fallback).
-    // psram_rd is kept wired for the per-target mux; the sync-burst
-    // path uses psram_burst_rd instead.
+    // PSRAM single-word interface — all reads and writes flow through
+    // this path.  The burst outputs below are dead signals kept only
+    // until the FSM states that reference them are stripped (see
+    // S_RD_BURST / S_RD_STREAM / S_RD_RESP_DRAIN).
     output reg         psram_rd,
     output reg         psram_wr,
     output reg  [25:0] psram_addr,
@@ -70,7 +64,10 @@ module axi_cram0_slave (
     input  wire        psram_busy,
     input  wire        psram_rdata_valid,
 
-    // PSRAM sync burst read interface (CRAM0 only)
+    // Dead — unused since burst was disabled.  Left connected so the
+    // port list stays binary-compatible with core_top.v's existing
+    // instantiation; a future cleanup pass will strip these and the
+    // dead burst FSM states together.
     output reg         psram_burst_rd,
     output reg  [5:0]  psram_burst_len,
     input  wire [31:0] psram_burst_rdata,
@@ -83,9 +80,9 @@ wire reset = ~reset_n;
 // FSM states
 // =================================================================
 localparam S_IDLE           = 4'd0;
-localparam S_RD_BURST       = 4'd1;   // issue sync burst command (disabled)
-localparam S_RD_STREAM      = 4'd2;   // receive burst beats via 2-entry FIFO
-localparam S_RD_RESP_DRAIN  = 4'd3;   // reserved / unused
+localparam S_RD_BURST       = 4'd1;   // DEAD — burst disabled
+localparam S_RD_STREAM      = 4'd2;   // DEAD — burst disabled
+localparam S_RD_RESP_DRAIN  = 4'd3;   // DEAD — never reached
 localparam S_WR_NEXT        = 4'd4;   // wait for next W beat, same-cycle capture
 localparam S_WR_CMD         = 4'd5;   // issue psram_wr to the controller
 localparam S_WR_WAIT        = 4'd6;   // wait for psram_busy to return low

@@ -31,8 +31,21 @@ src/fpga/*.qws
 src/fpga/*.bak
 src/fpga/targets/*/firmware.mif
 
+# Verilator build artifacts
+src/fpga/test/obj_dir*/
+src/fpga/test/*.vcd
+*.vcd
+
+# Quartus per-seed logs (kept as loose files outside db/)
+src/fpga/targets/*/output_files/seed_*_compile.log
+src/fpga/targets/*/output_files/seed_*_sta.log
+
+# SignalTap captures
+*.stp
+
 # Build tools (compiled from source)
 tools/reverse_bits
+tools/sf2_to_ofsf
 
 # Editor/IDE
 *.swp
@@ -52,4 +65,8 @@ src/fpga/vendor/vexriscv/VexiiRiscv/
 
 # macOS
 .DS_Store
+._*
 src/fpga/vendor/vexriscv/VexiiRiscv_Full.v
+
+# Editor scratch
+.codex

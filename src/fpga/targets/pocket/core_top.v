@@ -488,9 +488,6 @@ localparam [2:0] BCR_ST_DONE        = 3'd7;
 //   bits 5-4  = 01  drive strength 1/2
 //   bit 3     = 1   no-wrap burst (don't care in async)
 //   bits 2-0  = 111 continuous burst
-// Sync burst mode — matches PocketQuake / cram0_phy.sv
-// SYNC_LATENCY=4 expectation.  Coupled with axi_cram0_slave.v's
-// S_IDLE→S_RD_BURST transition.
 localparam [15:0] BCR_VALUE = 16'h9D1F;  // async page mode
 
 initial begin
@@ -573,11 +570,18 @@ cram0_controller #(
     .cram_we_n(cram0_we_n),
     .cram_ub_n(cram0_ub_n),
     .cram_lb_n(cram0_lb_n),
-    // Sync burst read (active only with PSRAM_BURST_ENABLE define)
-    .burst_rd(c0_psram_burst_rd),
-    .burst_len(c0_psram_burst_len),
-    .burst_rdata_valid(c0_psram_burst_rdata_valid),
-    .burst_rdata(c0_psram_burst_rdata),
+    // Sync burst read — HARD-DISABLED at the instantiation.
+    // axi_cram0_slave also routes all reads through the async
+    // S_RD_CMD path (never S_RD_BURST), so psram_burst_rd is never
+    // pulsed, but tying burst_rd=0 here guarantees the burst FSM
+    // in cram0_controller can never trigger — useful while
+    // debugging SDRAM-load corruption to rule out burst-path
+    // interactions.  c0_psram_burst_rd output of the slave is
+    // harmlessly left wired (it just never pulses).
+    .burst_rd(1'b0),
+    .burst_len(6'd0),
+    .burst_rdata_valid(),
+    .burst_rdata(),
     // BCR config write (driven by the BCR_ST_* FSM above)
     .config_en(bcr_init_config_en),
     .config_data(BCR_VALUE),
@@ -2650,20 +2654,21 @@ mf_pllram_133 mp_ram (
 
 assign clk_cpu = clk_ram_controller;
 
-// Drive CRAM clock pins from PLL outputs (not from psram_controller —
-// psram.sv's cram_clk output stays low, it doesn't generate the clock).
+// Drive CRAM clock pins from PLL outputs (the controller's cram_clk
+// output stays low; the chip clock is generated here).
 //
-// CRAM0 runs on clk_cram (100 MHz, 5500 ps phase shift) because CRAM0
-// is in sync-burst BCR and needs a phase relationship between chip
-// and controller for setup/hold on DQ sampling.
+// CRAM0: clk_cram (100 MHz, 5500 ps phase shift).  The phase shift
+// tunes the DQ sampling window for the Pocket's board traces and
+// was kept even after CRAM0 was reverted from sync-burst to async
+// page mode — async reads still latch DQ relative to cram_clk on
+// the AS1C8M16PL.
 //
-// CRAM1 stays on clk_74a (74.25 MHz, no phase shift).  Attempting to
-// switch CRAM1 to clk_cram as a "future-proofing" change broke ELF
-// loads on real hardware — the chip doesn't truly ignore cram_clk
-// in async BCR, and the phase shift tuned for CRAM0's board traces
-// is wrong for CRAM1's.  When audio_dma needs sync burst on CRAM1,
-// the chip clock choice (+ SDC + PLL phase) will require lab
-// measurement of CRAM1's actual Tco; don't change it speculatively.
+// CRAM1: clk_74a (74.25 MHz, no phase shift).  Attempting to switch
+// CRAM1 to clk_cram as a "future-proofing" change broke ELF loads
+// on real hardware — the chip doesn't fully ignore cram_clk in
+// async mode, and the phase shift tuned for CRAM0 is wrong for
+// CRAM1's routing.  Any future move to sync burst on CRAM1 will
+// require lab measurement of its actual Tco before changing this.
 assign cram0_clk = clk_cram;
 assign cram1_clk = clk_74a;
 

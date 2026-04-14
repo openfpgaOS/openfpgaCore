@@ -10,15 +10,13 @@
 //     pulse per 32-bit word, burst_busy held throughout) but no
 //     dependency on cram_clk timing or BCR state.
 //
-// Why async-only: switching the chip to sync-burst BCR (0x641F) was
-// tried in an earlier revision (commit bfd1ed0) and broke CRAM1 reads
-// on real hardware — the cram1_clk pin runs from a different clock
-// than psram1_a (cpu/mixer) and the SDC false-paths the I/O.  Sync
-// burst would need a phase-shifted PLL output for cram1_clk plus
-// proper input/output_delay constraints mirroring CRAM0 — a separate
-// scoped project for when audio_dma actually needs the bandwidth.
-// Save_prefetch (the only burst consumer today) is fine with N async
-// reads: 16-word burst at 74.25 MHz takes ~5.4 µs, vs. APF's ms-scale
+// Why async-only: sync-burst BCR (0x641F) was tried (commit bfd1ed0)
+// and broke CRAM1 reads on real hardware — cram1_clk runs from a
+// different clock than psram1_a (cpu/mixer) and the SDC false-paths
+// the I/O.  Sync burst would require a phase-shifted PLL output for
+// cram1_clk plus input/output_delay constraints mirroring CRAM0.
+// The one burst consumer today (save_prefetch) is fine with N async
+// reads: 16-word burst at 74.25 MHz takes ~5.4 µs vs. APF's ms-scale
 // dataslot_requestread → first bridge_rd window — 200× headroom.
 //
 // Physical-layer protocol lives in cram1_phy.sv.
