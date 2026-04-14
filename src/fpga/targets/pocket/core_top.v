@@ -681,7 +681,7 @@ cram1_controller #(.CLOCK_SPEED(74.25)) psram1_b (
     .word_rd(brg_psram_rd), .word_wr(brg_psram_wr),
     .word_addr(brg_psram_addr), .word_data(brg_psram_wdata),
     .word_wstrb(4'b1111),
-    .word_q(brg_psram_rdata), .word_busy(brg_psram_busy),
+    .word_q(brg_psram_rdata), .word_busy(brg_psram_word_busy),
     .word_q_valid(brg_psram_rdata_valid),
     .burst_rd(psram1_b_burst_rd),
     .burst_addr(psram1_b_burst_addr),
@@ -1213,7 +1213,15 @@ wire bridge_cram1_wr_detect = bridge_wr && (bridge_addr[31:24] == 8'h30);
 reg        brg_psram_wr;
 reg [21:0] brg_psram_addr;
 reg [31:0] brg_psram_wdata;
-wire        brg_psram_busy;
+wire        brg_psram_word_busy;
+
+// Bridge write FSM must not fire while the controller is in *any*
+// non-idle state — including the middle of a save_prefetch burst.
+// psram1_b.word_busy only tracks word_wr / word_rd activity and stays
+// LOW during a burst.  A bridge_wr issued mid-burst would be silently
+// dropped (controller not in ST_IDLE) and the FSM would deadlock
+// waiting for busy to rise on a transaction that never started.
+wire        brg_psram_busy = brg_psram_word_busy | psram1_b_burst_busy;
 
 // Read-side word ports of psram1_b are unused now (save_prefetch uses
 // burst_rd instead); tie inputs and ignore outputs.
@@ -2645,16 +2653,19 @@ assign clk_cpu = clk_ram_controller;
 // Drive CRAM clock pins from PLL outputs (not from psram_controller —
 // psram.sv's cram_clk output stays low, it doesn't generate the clock).
 //
-// Both CRAM1 and CRAM0 share clk_cram (100 MHz, 5500 ps phase shift):
-// CRAM1 is the same chip family as CRAM0 (AS1C8M16PL, rated 100 MHz+),
-// and a faster, phase-shifted chip clock is the prerequisite for any
-// future sync-burst BCR mode on CRAM1 (audio_dma).  Today's async-only
-// CRAM1 access ignores cram_clk regardless of frequency, so the change
-// is functionally a no-op for the current code path.  Was clk_74a
-// historically — that was a legacy choice from when CRAM1 was strictly
-// async-only and never planned to need a coherent chip clock.
+// CRAM0 runs on clk_cram (100 MHz, 5500 ps phase shift) because CRAM0
+// is in sync-burst BCR and needs a phase relationship between chip
+// and controller for setup/hold on DQ sampling.
+//
+// CRAM1 stays on clk_74a (74.25 MHz, no phase shift).  Attempting to
+// switch CRAM1 to clk_cram as a "future-proofing" change broke ELF
+// loads on real hardware — the chip doesn't truly ignore cram_clk
+// in async BCR, and the phase shift tuned for CRAM0's board traces
+// is wrong for CRAM1's.  When audio_dma needs sync burst on CRAM1,
+// the chip clock choice (+ SDC + PLL phase) will require lab
+// measurement of CRAM1's actual Tco; don't change it speculatively.
 assign cram0_clk = clk_cram;
-assign cram1_clk = clk_cram;
+assign cram1_clk = clk_74a;
 
 // SDRAM controller
 io_sdram isr0 (

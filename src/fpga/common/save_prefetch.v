@@ -28,6 +28,14 @@
 
 module save_prefetch #(
     parameter NUM_SLOTS = 10,
+    // APF's dataslot ID where save slot 0 starts.  openfpgaOS firmware
+    // uses IDs 10..19 for its 10 save slots (see of_save_flush_size in
+    // save.c: `10 + slot`).  dataslot_requestread can fire for OTHER
+    // dataslot reads too (BIOS/ROM/config fetches with IDs 0..9),
+    // which must NOT trigger save_prefetch — arming for the wrong
+    // slot would corrupt unrelated bridge_rd paths at 0x30xxxxxx.
+    // The valid range is [SAVE_DT_FIRST, SAVE_DT_FIRST+NUM_SLOTS).
+    parameter SAVE_DT_FIRST = 10,
     parameter RING_DEPTH_LOG2 = 5,           // 32-word ring (1 M10K)
     parameter BURST_WORDS    = 16,           // cap per design constraint
     parameter REFILL_THRESHOLD = 16          // refill when free >= this
@@ -121,8 +129,17 @@ wire [21:0] bridge_word_addr     = bridge_addr[23:2];
 wire        bridge_addr_match    = bridge_in_save_range
                                  && (bridge_word_addr == expected_word_addr);
 
-// Slot-id range check (only IDs < NUM_SLOTS have a base entry).
-wire        slot_id_in_range = (dataslot_requestread_id < NUM_SLOTS);
+// Slot-id range check — only APF IDs in [SAVE_DT_FIRST,
+// SAVE_DT_FIRST+NUM_SLOTS) are save reads we should handle.  IDs
+// outside this range come from OTHER dataslot operations (BIOS/ROM
+// loads, config fetches, etc.) and must be ignored here; arming for
+// them would redirect their later bridge_rd fetches through our
+// (wrong-slot) ring BRAM.
+wire        slot_id_in_range = (dataslot_requestread_id >= SAVE_DT_FIRST)
+                            && (dataslot_requestread_id <  SAVE_DT_FIRST + NUM_SLOTS);
+// Index into slot_base_addr_flat is 0-based within the save range,
+// so subtract SAVE_DT_FIRST from the raw APF id.
+wire [3:0]  slot_idx = dataslot_requestread_id[3:0] - SAVE_DT_FIRST[3:0];
 
 // =====================================================
 // Burst tracking.
@@ -183,7 +200,9 @@ always @(posedge clk or negedge reset_n) begin
         // -----------------------------------------------------------
         if (dataslot_requestread && slot_id_in_range) begin
             // Slice slot N's 22-bit base out of the packed bus.
-            slot_start_word  <= slot_base_addr_flat[dataslot_requestread_id[3:0]*22 +: 22];
+            // Use the 0-based slot index (id - SAVE_DT_FIRST), not
+            // the raw APF id — table is indexed 0..NUM_SLOTS-1.
+            slot_start_word  <= slot_base_addr_flat[slot_idx*22 +: 22];
             consumed_count   <= {CTR_BITS{1'b0}};
             fetched_count    <= {CTR_BITS{1'b0}};
             armed            <= 1'b1;
