@@ -630,6 +630,26 @@ wire         c1a_we_n,  c1b_we_n;
 wire         c1a_ub_n,  c1b_ub_n;
 wire         c1a_lb_n,  c1b_lb_n;
 
+// BCR-init done flags from each controller instance.  Both controllers
+// run the same BCR write sequence internally at reset; whichever holds
+// the pin mux at the moment actually reaches the chip.  At reset the
+// mux defaults to A, so A's BCR write is the one that sticks.  B's
+// BCR state machine still progresses so its gating (bcr_init_done)
+// releases at roughly the same time.
+wire        psram1_a_bcr_done;
+wire        psram1_b_bcr_done;
+
+// Burst read interface — only wired for psram1_b (used by save_prefetch
+// on clk_74a).  psram1_a ties burst_rd=0 since CPU/mixer don't issue
+// sync bursts.  Wires declared here so the instantiation lists below
+// can reference them.
+wire        psram1_b_burst_rd;
+wire [21:0] psram1_b_burst_addr;
+wire [4:0]  psram1_b_burst_len;
+wire [31:0] psram1_b_burst_q;
+wire        psram1_b_burst_q_valid;
+wire        psram1_b_burst_busy;
+
 // Controller A: CPU + mixer (clk_cpu)
 cram1_controller #(.CLOCK_SPEED(100)) psram1_a (
     .clk(clk_cpu), .reset_n(psram1_reset_n),
@@ -639,6 +659,13 @@ cram1_controller #(.CLOCK_SPEED(100)) psram1_a (
     .word_wstrb(psram1_wstrb),
     .word_q(psram1_rdata), .word_busy(psram1_busy),
     .word_q_valid(psram1_rdata_valid),
+    .burst_rd(1'b0),
+    .burst_addr(22'd0),
+    .burst_len(5'd0),
+    .burst_q(),
+    .burst_q_valid(),
+    .burst_busy(),
+    .bcr_init_done(psram1_a_bcr_done),
     .cram_a(c1a_a), .cram_dq_out(c1a_dq_out), .cram_dq_oe(c1a_dq_oe),
     .cram_dq_in(cram1_dq), .cram_wait(cram1_wait), .cram_clk(),
     .cram_adv_n(c1a_adv_n), .cram_cre(c1a_cre),
@@ -647,7 +674,8 @@ cram1_controller #(.CLOCK_SPEED(100)) psram1_a (
     .cram_ub_n(c1a_ub_n), .cram_lb_n(c1a_lb_n)
 );
 
-// Controller B: bridge (clk_74a)
+// Controller B: bridge (clk_74a).  Step 1 ties burst ports off;
+// step 4 will wire them to save_prefetch.
 cram1_controller #(.CLOCK_SPEED(74.25)) psram1_b (
     .clk(clk_74a), .reset_n(psram1_reset_n),
     .word_rd(brg_psram_rd), .word_wr(brg_psram_wr),
@@ -655,6 +683,13 @@ cram1_controller #(.CLOCK_SPEED(74.25)) psram1_b (
     .word_wstrb(4'b1111),
     .word_q(brg_psram_rdata), .word_busy(brg_psram_busy),
     .word_q_valid(brg_psram_rdata_valid),
+    .burst_rd(psram1_b_burst_rd),
+    .burst_addr(psram1_b_burst_addr),
+    .burst_len(psram1_b_burst_len),
+    .burst_q(psram1_b_burst_q),
+    .burst_q_valid(psram1_b_burst_q_valid),
+    .burst_busy(psram1_b_burst_busy),
+    .bcr_init_done(psram1_b_bcr_done),
     .cram_a(c1b_a), .cram_dq_out(c1b_dq_out), .cram_dq_oe(c1b_dq_oe),
     .cram_dq_in(cram1_dq), .cram_wait(cram1_wait), .cram_clk(),
     .cram_adv_n(c1b_adv_n), .cram_cre(c1b_cre),
@@ -662,6 +697,12 @@ cram1_controller #(.CLOCK_SPEED(74.25)) psram1_b (
     .cram_oe_n(c1b_oe_n), .cram_we_n(c1b_we_n),
     .cram_ub_n(c1b_ub_n), .cram_lb_n(c1b_lb_n)
 );
+
+// Burst-port tie-offs for step 1 (save_prefetch not yet instantiated).
+// Step 4 will delete these and wire save_prefetch instead.
+assign psram1_b_burst_rd   = 1'b0;
+assign psram1_b_burst_addr = 22'd0;
+assign psram1_b_burst_len  = 5'd0;
 
 // Pin mux with safe transitions: never switch while controller A is busy.
 // Flipping mid-transaction would cut A's pins and leave the CRAM1 chip
