@@ -55,8 +55,11 @@ set_input_delay -clock cram0_clk_pin -min 1.0 [get_ports {cram0_dq[*] cram0_wait
 set_output_delay -clock clk_74a -max 2.0 [get_ports {cram1_a[*] cram1_adv_n cram1_cre cram1_ce0_n cram1_ce1_n cram1_oe_n cram1_we_n cram1_ub_n cram1_lb_n}]
 set_output_delay -clock clk_74a -min -1.0 [get_ports {cram1_a[*] cram1_adv_n cram1_cre cram1_ce0_n cram1_ce1_n cram1_oe_n cram1_we_n cram1_ub_n cram1_lb_n}]
 set_false_path -to [get_ports {cram1_dq[*]}]
-set_input_delay -clock clk_74a -max 8.0 [get_ports {cram1_dq[*] cram1_wait}]
-set_input_delay -clock clk_74a -min 1.0 [get_ports {cram1_dq[*] cram1_wait}]
+# cram1_wait is an async ready/busy status line — goes through a 2-FF
+# synchronizer in cram1_phy, so clk_74a-relative setup is meaningless.
+set_false_path -from [get_ports cram1_wait]
+set_input_delay -clock clk_74a -max 8.0 [get_ports {cram1_dq[*]}]
+set_input_delay -clock clk_74a -min 1.0 [get_ports {cram1_dq[*]}]
 
 # CRAM1 clock pin is now driven by clk_74a assign (not PLL).
 # Declare it as false path — the async psram controller handles its own timing.

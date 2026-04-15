@@ -32,14 +32,14 @@ sbt "runMain vexiiriscv.soc.openfpgaos.GenOpenFpgaVexii \
       --with-rvm --with-rva --with-rvf --with-rvc \
       --with-fetch-l1 --fetch-l1-sets=512 --fetch-l1-ways=2 --fetch-l1-refill-count=2 \
       --fetch-l1-hardware-prefetch=nl \
-      --with-lsu-l1 --lsu-l1-sets=256 --lsu-l1-ways=4 \
+      --with-lsu-l1 --lsu-l1-sets=512 --lsu-l1-ways=2 \
       --lsu-l1-refill-count=2 --lsu-l1-writeback-count=2 \
       --lsu-l1-store-buffer-slots=4 --lsu-l1-store-buffer-ops=32 \
       --lsu-software-prefetch --lsu-hardware-prefetch rpt \
       --with-btb --btb-sets=256 --relaxed-btb --relaxed-btb-hit \
       --with-gshare --with-ras \
-      --regfile-async --allow-bypass-from=2 \
-      --relaxed-src --relaxed-branch \
+      --regfile-async --allow-bypass-from=3 \
+      --relaxed-src --relaxed-branch --relaxed-shift \
       --reset-vector=0 \
       --region base=0,size=8000,main=1,exe=1 \
       --region base=10000000,size=4000000,main=1,exe=1 \
