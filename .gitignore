@@ -36,6 +36,14 @@ src/fpga/test/obj_dir*/
 src/fpga/test/*.vcd
 *.vcd
 
+# Verilator-generated test source variants (produced on demand by
+# the test Makefile's sed rules)
+src/fpga/test/io_sdram_test.v
+src/fpga/test/psram_test.sv
+src/fpga/test/psram_cram0_drv_test.sv
+src/fpga/test/psram_controller_test.v
+src/fpga/test/psram_cram0_test.v
+
 # Quartus per-seed logs (kept as loose files outside db/)
 src/fpga/targets/*/output_files/seed_*_compile.log
 src/fpga/targets/*/output_files/seed_*_sta.log
