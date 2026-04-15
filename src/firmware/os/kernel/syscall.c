@@ -831,12 +831,6 @@ static long of_audio_dispatch(long fid, long a0, long a1) {
         return of_audio_write((const int16_t *)a0, (int)a1);
     case OF_AUDIO_FID_GET_FREE:
         return of_audio_get_free();
-    case OF_AUDIO_FID_OPL_WRITE:
-        of_opl_write((uint16_t)a0, (uint8_t)a1);
-        return 0;
-    case OF_AUDIO_FID_OPL_RESET:
-        of_opl_reset();
-        return 0;
     case OF_AUDIO_FID_INIT:
         of_audio_init();
         return 0;

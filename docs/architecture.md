@@ -34,7 +34,6 @@ ofOS is a minimal operating system for the Analogue Pocket FPGA handheld. It run
 | `0x40000000`              | 256 B  | System registers                         |
 | `0x4C000000`              | 8 B    | Audio FIFO                               |
 | `0x4D000000`              | 256 B  | Link cable MMIO                          |
-| `0x4E000000`              | 16 B   | OPL3 registers (YMF262, 2 banks)         |
 | `0x50000000 - 0x53FFFFFF` | 64 MB  | SDRAM uncached alias (D-cache bypass)    |
 | `0xF7000000`              |        | Analogizer bridge registers              |
 
@@ -105,7 +104,7 @@ The OS and applications are separate binaries with a clean syscall boundary:
 |  FPGA Hardware                                       |
 |  - MMIO registers at 0x40000000+                     |
 |  - DMA via APF bridge                                |
-|  - Framebuffer, audio FIFO, OPL3, link cable         |
+|  - Framebuffer, audio FIFO, mixer, link cable        |
 +-----------------------------------------------------+
 ```
 
@@ -150,7 +149,7 @@ The HAL is organized into 11 independent modules:
 | Module | Header | Description |
 |--------|--------|-------------|
 | `fb` | `hal/fb.h` | Framebuffer (320x240, 8-bit indexed, triple-buffered) |
-| `audio` | `hal/audio.h` | PCM audio FIFO + OPL3 FM synthesis |
+| `audio` | `hal/audio.h` | 48 kHz PCM audio FIFO (32-voice mixer backs it) |
 | `input` | `hal/input.h` | Controller polling with edge detection (2 players) |
 | `save` | `hal/save.h` | Nonvolatile save slots (10 × 256 KB, CRAM1 PSRAM) |
 | `dataslot` | `hal/dataslot.h` | APF bridge file I/O (DMA read/write) |

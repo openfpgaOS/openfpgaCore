@@ -18,7 +18,7 @@ void of_init(void) {
     of_disk_init();
     of_file_init();
 
-    if (features & (HW_FEAT_MIXER | HW_FEAT_OPL3))
+    if (features & HW_FEAT_MIXER)
         of_audio_init();
     if (features & HW_FEAT_SAVE_SLOTS)
         of_save_init();

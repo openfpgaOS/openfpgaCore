@@ -11,7 +11,6 @@ static int audio_buf_idx;
 static int audio_ever_written;
 
 void of_audio_init(void) {
-    of_opl_reset();
     /* Enable hardware mixer (voices start inactive) */
     MIX_CTRL = 1;
     audio_buf_idx = 0;
@@ -156,22 +155,3 @@ void of_audio_stream_close(void) {
     stream_active = 0;
 }
 
-void of_opl_write(uint16_t reg, uint8_t val) {
-    if (reg & 0x100) {
-        /* Bank 1 */
-        OPL_ADDR2 = reg & 0xFF;
-        OPL_DATA2 = val;
-    } else {
-        /* Bank 0 */
-        OPL_ADDR = reg;
-        OPL_DATA = val;
-    }
-}
-
-void of_opl_reset(void) {
-    /* Clear all OPL registers (both banks) */
-    for (int i = 0; i < 256; i++) {
-        of_opl_write(i, 0);
-        of_opl_write(0x100 + i, 0);
-    }
-}

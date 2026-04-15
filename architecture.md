@@ -107,7 +107,6 @@ struct of_capabilities {
 
 // Hardware feature flags — app checks before using optional hardware
 #define HW_MIXER        (1 << 0)   // PCM hardware mixer present
-#define HW_OPL3         (1 << 1)   // OPL3 FM synthesis
 #define HW_LINK         (1 << 2)   // Link cable / serial port
 #define HW_ANALOGIZER   (1 << 3)   // Analog video output
 #define HW_GPU_2D       (1 << 4)   // 2D sprite/tile engine (future)
@@ -146,10 +145,8 @@ int width = OF_CAPS->fb_width;
 ```c
 // App gracefully adapts to available hardware
 void init_audio(void) {
-    if (OF_CAPS->hw_features & HW_OPL3) {
-        init_opl3_music();
-    } else if (OF_CAPS->hw_features & HW_MIXER) {
-        init_pcm_music();   // MOD/WAV fallback
+    if (OF_CAPS->hw_features & HW_MIXER) {
+        init_pcm_music();   // MOD/WAV/MIDI via sample synth
     }
     // else: no audio — game still runs
 }
@@ -213,7 +210,7 @@ Apps don't change at all. They see the same jump table, same syscalls, same capa
 ## 5. Core variants (same target, different hardware)
 
 ### Problem
-FPGA resources are finite. A "full" bitstream with OPL3 + mixer + link + analogizer may not fit or may fail timing. Users want to choose: "I don't need OPL3, give me more BRAM for samples" or "I want a 3D GPU but can drop the link cable."
+FPGA resources are finite. A "full" bitstream with every optional peripheral may not fit or may fail timing. Users want to choose: "I don't need the link cable, give me more BRAM for sample data" or "I want a 3D GPU and can drop the analogizer."
 
 ### Design
 
@@ -221,9 +218,9 @@ Core variants are different bitstreams for the same target, with different `hw_f
 
 ```
 cores/
-    openfpgaOS-full.rbf       — mixer + OPL3 + link + analogizer
+    openfpgaOS-full.rbf       — mixer + link + analogizer
     openfpgaOS-lite.rbf       — mixer only (better timing, smaller)
-    openfpgaOS-3d.rbf         — mixer + GPU3D (no OPL3, uses those ALMs for rasterizer)
+    openfpgaOS-3d.rbf         — mixer + GPU3D (ALMs freed for rasterizer)
 ```
 
 Each bitstream populates `of_capabilities.hw_features` and `core_variant` at boot. The OS kernel is the same binary — it probes `hw_features` to know what hardware to initialize:
@@ -237,7 +234,6 @@ void of_init(void) {
     of_term_init();
     of_input_init();
     if (CAPS->hw_features & HW_MIXER) of_audio_init();
-    if (CAPS->hw_features & HW_OPL3)  of_opl_init();
     if (CAPS->hw_features & HW_LINK)  of_link_init();
     of_file_init();
     of_save_init();

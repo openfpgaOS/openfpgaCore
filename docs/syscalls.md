@@ -80,8 +80,6 @@ Color modes: 0=8-bit indexed, 1=4-bit indexed, 2=2-bit indexed, 3=RGB565, 4=RGB5
 |--------|------|-----------|---------|
 | 0x1010 | `AUDIO_WRITE` | `a0`=samples ptr (int16_t stereo), `a1`=count | Samples written |
 | 0x1011 | `AUDIO_GET_FREE` | -- | Free space in FIFO |
-| 0x1012 | `OPL_WRITE` | `a0`=register (0x000-0x1FF), `a1`=value | 0 |
-| 0x1013 | `OPL_RESET` | -- | 0 |
 | 0x1014 | `AUDIO_INIT` | -- | 0 |
 
 ### Input (0x1020-0x1022)

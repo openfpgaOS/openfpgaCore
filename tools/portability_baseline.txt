@@ -121,7 +121,7 @@ BRAM address) and HOW the app finds it (auxv vs hardcoded constant).
 
 OUT OF SCOPE FOR THIS PLAN (covered by Rev. 2 of the report)
 =============================================================
-- hal/regs.h still hardcodes SYSREG_BASE/AUDIO_BASE/LINK_BASE/OPL_BASE/
+- hal/regs.h still hardcodes SYSREG_BASE/AUDIO_BASE/LINK_BASE/
   UART_BASE/ANALOGIZER_BRIDGE_BASE — these are kernel-internal and
   don't affect SDK app portability. They block common-os.bin, not
   common-app.elf.

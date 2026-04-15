@@ -85,11 +85,9 @@ make          # full: cpu → firmware → compile → test → deploy, ~9 min
 
 ## User Constraints (from memory)
 
-- **Do not exclude OPL3** from any build
 - **Do not** run differential/partial builds unless asked
 - **Do not** revert or stash user changes
 - **Do not** push without explicit permission
-- OPL3 and other audio WIP is off-limits
 
 ## Recommended Next Move
 

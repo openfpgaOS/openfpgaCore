@@ -78,12 +78,10 @@ struct of_services_table {
     void      (*mixer_free_samples)(void);
     void      (*mixer_set_end_callback)(void (*cb)(uint32_t ended_mask));
 
-    /* -- Audio (5) -- */
+    /* -- Audio (3) -- */
     void      (*audio_init)(void);
     int       (*audio_write)(const int16_t *samples, int count);
     int       (*audio_get_free)(void);
-    void      (*opl_write)(uint16_t reg, uint8_t val);
-    void      (*opl_reset)(void);
 
     /* -- Timer (5) -- */
     void      (*timer_set_callback)(void (*cb)(void), uint32_t hz);

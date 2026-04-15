@@ -18,9 +18,8 @@ core_top.v                                    Top-level (APF integration)
 |
 +-- video_CRT_scanout_indexed_BRAM.v          Multi-mode video scanout (6 color modes)
 +-- text_terminal.v                           40x30 character overlay
-+-- audio_output.v                            I2S output + OPL3/SFX mixing
-+-- opl3_wrapper.v                            OPL3 FM synthesis (clock domain bridge)
-|   +-- opl3/                                 YMF262 core (Greg Taylor)
++-- audio_output.v                            I2S output stage (dcfifo + serializer)
++-- audio_mixer.v                             32-voice PCM mixer (16-bit, SVF filter)
 +-- link_mmio.v                               Link cable serial transceiver
 +-- io_sdram.v                                SDRAM controller
 +-- psram_controller.v                        PSRAM controller
@@ -75,20 +74,11 @@ Implemented in `audio_output.v`.
 | 0x00 | `AUDIO_SAMPLE` | W | Stereo sample (left:right, 16-bit each) |
 | 0x00 | `AUDIO_STATUS` | R | [11:0] FIFO level, [12] full |
 
-The audio pipeline mixes CPU-written PCM samples with the OPL3 output in hardware, producing a 48 kHz I2S stream.
-
-## OPL3 / YMF262 (0x4E000000)
-
-Implemented in `opl3_wrapper.v`, bridging the CPU clock domain (100 MHz) to the OPL3 clock (12.288 MHz). Uses Greg Taylor's bit-true YMF262 implementation. Full OPL3 mode with 18 two-operator channels across both register banks.
-
-| Offset | Name | R/W | Description |
-|--------|------|-----|-------------|
-| 0x00 | `OPL_ADDR` | W | Bank 0 register address |
-| 0x04 | `OPL_DATA` | W | Bank 0 register data |
-| 0x08 | `OPL_ADDR2` | W | Bank 1 register address |
-| 0x0C | `OPL_DATA2` | W | Bank 1 register data |
-
-The firmware's `of_opl_write(uint16_t reg, uint8_t val)` automatically routes registers 0x000-0x0FF to bank 0 and 0x100-0x1FF to bank 1. OPL3 mode is enabled by writing register 0x105 bit 0. The wrapper handles clock domain crossing via a write-request/ack handshake with the OPL3 core.
+The audio output stage is just a dual-clock FIFO bridging `clk_cpu`
+(mixer output) to `clk_audio` (12.288 MHz), followed by an I2S
+serializer.  All voice mixing, pitch/pan/volume/SVF filtering, and
+sample fetch happen inside `audio_mixer.v` on `clk_cpu` — the output
+stage sees a pre-mixed stereo stream at 48 kHz.
 
 ## Link Cable (0x4D000000)
 

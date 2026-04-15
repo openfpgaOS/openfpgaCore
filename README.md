@@ -1,6 +1,6 @@
 # openfpgaOS
 
-A game development platform for the [Analogue Pocket](https://www.analogue.co/pocket). Write C, compile, copy to SD, run — no 45-minute FPGA synthesis. A RISC-V soft CPU on the Cyclone V FPGA runs your code at 100 MHz with hardware-accelerated video, FM audio, and controller input.
+A game development platform for the [Analogue Pocket](https://www.analogue.co/pocket). Write C, compile, copy to SD, run — no 45-minute FPGA synthesis. A RISC-V soft CPU on the Cyclone V FPGA runs your code at 100 MHz with hardware-accelerated video, sample-based audio, and controller input.
 
 ## Features
 
@@ -8,8 +8,8 @@ A game development platform for the [Analogue Pocket](https://www.analogue.co/po
 - **Sub-second iteration** — compile C, copy ELF to SD, run. No FPGA synthesis required
 - **VexRiscv RISC-V CPU** — rv32imafc at 100 MHz, AXI4 bus, 32 KB D-cache + 8 KB I-cache, hardware FPU
 - **320×240 double-buffered video** — 6 color modes (8/4/2-bit indexed, RGB565, RGB555, RGBA5551), 256-entry palette
-- **OPL3 FM synthesis** — 18-channel hardware YMF262 (both register banks) + 48 kHz stereo PCM mixer
-- **MIDI playback** — `of_midi` library with built-in GM instrument bank, Format 0+1, non-blocking pump
+- **32-voice PCM mixer** — 16-bit signed samples, per-voice pitch/pan/volume/SVF filter, 48 kHz stereo I2S output
+- **Sample-based MIDI** — `of_midi` library renders Standard MIDI Files (Format 0/1) through `of_smp_voice`; ships with a Roland SC-55-derived `.ofsf` General MIDI bank at `assets/banks/sc55.ofsf`
 - **Save system** — 10 × 256 KB save slots, CRAM1 PSRAM backed to SD via Chip32
 - **96 MB+ memory** — 64 MB SDRAM, 16 MB CRAM0, 16 MB CRAM1, 256 KB SRAM
 - **2-player input** — d-pad, ABXY, L/R shoulders, analog sticks, triggers
@@ -54,7 +54,7 @@ openfpgaOS/
 ├── src/
 │   ├── fpga/
 │   │   ├── common/              ← portable RTL (CPU, bus, video, audio engines)
-│   │   ├── vendor/              ← third-party IP (VexRiscv, OPL3 YMF262)
+│   │   ├── vendor/              ← third-party IP (VexRiscv)
 │   │   └── targets/pocket/     ← Analogue Pocket (APF, core_top, PLLs)
 │   ├── firmware/
 │   │   └── os/
@@ -117,19 +117,15 @@ See [architecture.md](architecture.md) for the roadmap (multi-target support, ca
 | Component | License | Author |
 |-----------|---------|--------|
 | openfpgaOS (FPGA, firmware, OS) | MIT | ThinkElastic |
-| OPL3 synthesizer (YMF262) | LGPL | Greg Taylor |
 | VexiiRiscv CPU | MIT | SpinalHDL / Charles Papon |
 | Analogizer adapter | — | RndMnkIII |
 | openFPGA framework | — | Analogue |
 | musl libc | MIT | Rich Felker |
 | jtframe utilities | GPL-3.0 | Jose Tejada |
-| DMXOPL GM instrument bank | GPL-2.0 | sneakernets et al. |
 
 ## Acknowledgments
 
 - [SpinalHDL/VexiiRiscv](https://github.com/SpinalHDL/VexiiRiscv) — RISC-V CPU core (Charles Papon)
-- [Greg Taylor](https://github.com/gtaylormb/opl3_fpga) — OPL3 FPGA synthesizer
-- [DMXOPL](https://github.com/sneakernets/DMXOPL) — General MIDI OPL3 instrument bank used by `of_midi` (converted from `GENMIDI.op2` via `tools/op2_to_bank.py`)
 - [RndMnkIII](https://github.com/RndMnkIII) — Analogizer adapter
 - [Analogue](https://www.analogue.co/developer) — Pocket openFPGA framework
 - [musl libc](https://musl.libc.org/) — C library (Rich Felker)

@@ -386,7 +386,6 @@ Changes:
 
 - evaluate whether SDRAM-board-only is sufficient or whether DDR3 should be used for bulk assets
 - tune cache policy and sample pool placement
-- decide whether OPL3 stays enabled by default on MiSTer
 - add variant feature gating through `hw_features`
 - optionally add MiSTer-native niceties such as RTC, more controllers, or network-backed features
 

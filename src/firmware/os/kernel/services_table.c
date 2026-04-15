@@ -157,8 +157,6 @@ void services_table_init(void) {
     svc->audio_init     = of_audio_init;
     svc->audio_write    = of_audio_write;
     svc->audio_get_free = of_audio_get_free;
-    svc->opl_write      = of_opl_write;
-    svc->opl_reset      = of_opl_reset;
     svc->audio_stream_open  = of_audio_stream_open;
     svc->audio_stream_write = of_audio_stream_write;
     svc->audio_stream_ready = of_audio_stream_ready;

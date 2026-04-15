@@ -160,40 +160,54 @@ void of_video_blit_letterbox(const uint8_t *src, int src_w, int src_h);
 
 ### Audio — `of_audio.h`
 
-48 kHz stereo PCM + hardware OPL3 (YMF262) FM synthesis with 18 channels (both register banks).
+48 kHz stereo PCM over the hardware FIFO, plus a double-buffered
+streaming path for music and voice.
 
 ```c
 void of_audio_init(void);
-int  of_audio_enqueue(const int16_t *samples, int count);  // Stereo pairs
-int  of_audio_ring_free(void);                              // Free samples in ring
-void of_audio_opl_write(uint16_t reg, uint8_t val);        // OPL3 register write
-void of_audio_opl_reset(void);                              // Reset OPL3
+int  of_audio_write(const int16_t *samples, int count);     // Interleaved L/R
+int  of_audio_free(void);                                    // Free space in FIFO
+
+int  of_audio_stream_open(int sample_rate);                  // Mono stream, resampled to 48 kHz
+int  of_audio_stream_write(const int16_t *samples, int n);
+int  of_audio_stream_ready(void);
+void of_audio_stream_close(void);
 ```
 
-Registers `0x00`-`0xFF` target bank 0 (channels 0-8), `0x100`-`0x1FF` target bank 1 (channels 9-17). Enable OPL3 mode by writing `of_audio_opl_write(0x105, 0x01)`.
+### MIDI Playback — `of_midi.h` + `of_smp_bank.h`
 
-### MIDI Playback — `of_midi.h`
-
-Plays Standard MIDI Files (Format 0 and 1) through all 18 OPL3 channels. Non-blocking design driven by `of_time_us()`. Includes a built-in General MIDI instrument bank (128 melodic + 47 percussion).
+Plays Standard MIDI Files (Format 0/1) through the 32-voice PCM mixer
+using a pre-resolved `.ofsf` sample bank.  The repo ships an SC-55-derived
+General MIDI bank at `assets/banks/sc55.ofsf` (~3 MB, drop it onto SD
+and reference it with the file API).
 
 ```c
-of_midi_init();                              // Reset OPL3 + enable OPL3 mode
+of_smp_bank_load("slot:10/sc55.ofsf");       // Load bank into CRAM1 (once, at init)
+of_midi_init();                              // Init voice engine
+
 of_midi_play(midi_data, midi_len, 1);        // Start playback (1 = loop)
 of_midi_pump();                              // Call each frame
 of_midi_stop();                              // Stop and silence
-of_midi_pause();                             // Freeze playback
-of_midi_resume();                            // Resume from pause
+of_midi_pause();
+of_midi_resume();
 of_midi_set_volume(200);                     // Master volume 0-255
-of_midi_load_bank(custom_bank);              // Custom GM bank (NULL = built-in)
 
 int playing = of_midi_playing();
 int paused  = of_midi_paused();
 int vol     = of_midi_get_volume();
 ```
 
-**Error codes:** `OF_MIDI_OK` (0), `OF_MIDI_ERR_NOT_INIT` (-1), `OF_MIDI_ERR_BAD_HDR` (-2), `OF_MIDI_ERR_FORMAT` (-3), `OF_MIDI_ERR_NO_TRACKS` (-4), `OF_MIDI_ERR_PLAYING` (-5).
+**Error codes:** `OF_MIDI_OK` (0), `OF_MIDI_ERR_NOT_INIT` (-1),
+`OF_MIDI_ERR_BAD_HDR` (-2), `OF_MIDI_ERR_FORMAT` (-3),
+`OF_MIDI_ERR_NO_TRACKS` (-4), `OF_MIDI_ERR_PLAYING` (-5),
+`OF_MIDI_ERR_NO_BANK` (-6, forgot to call `of_smp_bank_load`).
 
-**Custom instrument bank:** 175 instruments x 11 bytes = 1,925 bytes. Format per instrument: `[FB/CNT, mod_AVEK, mod_TL, mod_ARDR, mod_SLRR, mod_WS, car_AVEK, car_TL, car_ARDR, car_SLRR, car_WS]`. Programs 0-127 are melodic (GM order), 128-174 are percussion (GM drum map notes 35-81).
+**Custom banks:** convert your own SF2 with `tools/sf2_to_ofsf`:
+
+```bash
+cd tools && make
+./sf2_to_ofsf your_sound_font.sf2 your_bank.ofsf
+```
 
 ### Audio Mixer — `of_mixer.h`
 

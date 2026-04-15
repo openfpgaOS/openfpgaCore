@@ -4,7 +4,7 @@
 //   - BRAM (32KB, burst reads for I-cache line fills)
 //   - System registers (cycle counter, display, palette, dataslot, controllers)
 //   - Terminal forwarding
-//   - Audio/Link register dispatch
+//   - Audio / Link register dispatch
 //
 // AXI4 slave (NOT AXI4-Lite) — iBus issues burst reads to BRAM for I-cache fills.
 //
@@ -378,14 +378,14 @@ assign ext_irq = (uart_rx_irq & irq_mask[0]) |
 // Triple-buffered framebuffer
 // 25-bit SDRAM half-word addresses (16-bit bus, byte addr = word addr × 2)
 // Hardware feature flags — read-only, derived from variant defines at synthesis time
-// Bit  0: Mixer (48-voice PCM)        Bit  8: FPU (RISC-V F ext)
-// Bit  1: (removed, was OPL3)         Bit  9: Save slots
+// Bit  0: Mixer (32-voice PCM)        Bit  8: FPU (RISC-V F ext)
+// Bit  1: (reserved)                  Bit  9: Save slots
 // Bit  2: Link cable                  Bit 10: GPU vertex color
 // Bit  3: Analogizer                  Bit 11: GPU bilinear filter
 // Bit  4: GPU span renderer (always)  Bit 12: GPU alpha blending
 // Bit  5: GPU triangle rasterizer     Bit 13: GPU perspective spans
-// Bit  6: MIDI                        Bit 14: GPU pipelined fragments
-// Bit  7: WiFi (reserved)             Bit 15: MIDI sample-playback
+// Bit  6: MIDI (sample-based synth)   Bit 14: GPU pipelined fragments
+// Bit  7: WiFi (reserved)             Bit 15: (reserved)
 localparam [31:0] HW_FEATURES =
 `ifdef EXCLUDE_MIXER
     32'h0000_0000
@@ -436,7 +436,7 @@ localparam [31:0] HW_FEATURES =
 `else
     32'h0000_0000
 `endif
-    | 32'h0000_8348;  // MIDI_SMP(15) + Analogizer(3) + MIDI(6) + FPU(8) + Save slots(9) — always present
+    | 32'h0000_0348;  // Analogizer(3) + MIDI(6) + FPU(8) + Save slots(9) — always present
 
 localparam FB_ADDR_0 = 25'h0000000;     // byte 0x000000 → CPU 0x10000000
 localparam FB_ADDR_1 = 25'h0080000;     // byte 0x100000 → CPU 0x10100000

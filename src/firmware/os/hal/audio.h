@@ -1,6 +1,6 @@
 /*
  * openfpgaOS Audio HAL
- * 48kHz stereo I2S output via hardware FIFO + OPL (YMF262 OPL3) FM synthesizer
+ * 48 kHz stereo I2S output via hardware FIFO.
  */
 
 #ifndef OFOS_AUDIO_H
@@ -36,17 +36,5 @@ int of_audio_stream_ready(void);
 
 /* Stop streaming and release voices. */
 void of_audio_stream_close(void);
-
-/* ======================================================================
- * OPL (YMF262 OPL3) FM Synthesizer
- * ====================================================================== */
-
-/* Write a value to an OPL register.
- * Registers 0x00-0xFF target bank 0, 0x100-0x1FF target bank 1.
- * CPU stalls automatically during write timing. */
-void of_opl_write(uint16_t reg, uint8_t val);
-
-/* Reset OPL (clear all registers) */
-void of_opl_reset(void);
 
 #endif /* OFOS_AUDIO_H */

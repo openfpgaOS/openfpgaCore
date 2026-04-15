@@ -11,7 +11,7 @@ A complete reference for building applications on the openfpgaOS platform for An
    - [Video](#video)
    - [Input](#input)
    - [Audio -- PCM](#audio----pcm)
-   - [Audio -- OPL3 (FM Synthesis)](#audio----opl3-fm-synthesis)
+   - [MIDI Playback](#midi-playback)
    - [Timer](#timer)
    - [Save Files](#save-files)
    - [File I/O (Data Slots)](#file-io-data-slots)
@@ -36,8 +36,8 @@ A complete reference for building applications on the openfpgaOS platform for An
 | **CPU** | VexRiscv RV32IMAFC @ 100 MHz |
 | **Display** | 320x240, 8-bit indexed color, 256-entry palette |
 | **Framebuffer** | Double-buffered, vsync-swapped |
-| **Audio** | YMF262 (OPL3) FM synthesis, 18 voices |
-| **PCM** | 48 kHz stereo FIFO, 4096 sample pairs |
+| **Audio** | 48 kHz stereo FIFO + 32-voice hardware PCM mixer (16-bit, SVF filter) |
+| **MIDI** | Sample-based synthesis via `.ofsf` banks (SC-55 bank included) |
 | **Input** | 2 controllers: d-pad, ABXY, L1/R1, L2/R2, L3/R3, Select, Start, dual sticks, analog triggers |
 | **SDRAM** | 64 MB (cached) |
 | **CRAM0** | 16 MB cellular RAM (cached or uncached) |
@@ -52,7 +52,7 @@ A complete reference for building applications on the openfpgaOS platform for An
 ### Why This Platform
 
 - **Sub-second iteration**: Write C, compile, copy ELF to SD, run. No 45-minute FPGA synthesis.
-- **Real hardware**: Not an emulator. FPGA-implemented video scanout, FM synthesis, controller interface.
+- **Real hardware**: Not an emulator. FPGA-implemented video scanout, PCM mixer, controller interface.
 - **One header API**: `#include "of.h"` and start writing a game. No init ceremony, no framework.
 - **Portable**: Same binary runs on Pocket, Dock, and with Analogizer.
 
@@ -244,21 +244,22 @@ int main(void) {
 ```c
 #include "of.h"
 
-// Play a note on OPL3 channel 0
+static int16_t beep_buf[1024];  // 21 ms of mono 48 kHz
+
+static void fill_beep(void) {
+    // 440 Hz square wave
+    for (int i = 0; i < 1024; i++)
+        beep_buf[i] = ((i / 54) & 1) ? 12000 : -12000;
+}
+
 static void play_beep(void) {
-    // Simple sine-wave patch on channel 0 (2-op mode)
-    of_audio_opl_write(0x20, 0x01);   // Op1: AM=0, VIB=0, EG=0, KSR=0, MULT=1
-    of_audio_opl_write(0x40, 0x10);   // Op1: KSL=0, TL=16
-    of_audio_opl_write(0x60, 0xF0);   // Op1: AR=15, DR=0
-    of_audio_opl_write(0x80, 0x77);   // Op1: SL=7, RR=7
-    of_audio_opl_write(0xA0, 0x98);   // F-Number low (A4 ~440 Hz)
-    of_audio_opl_write(0xB0, 0x31);   // KEY-ON, Block=4, F-Number high
-    of_audio_opl_write(0xC0, 0x01);   // Feedback=0, Connection=1 (additive)
+    of_mixer_play(beep_buf, 1024, 48000, /*loop=*/0, /*volume=*/200);
 }
 
 int main(void) {
     of_video_init();
-    of_audio_opl_reset();
+    of_mixer_init();
+    fill_beep();
 
     of_video_palette(0, 0x000000);
     of_video_palette(1, 0x00FF00);
@@ -270,7 +271,6 @@ int main(void) {
             play_beep();
 
         of_video_clear(0);
-        // Simple visual feedback
         if (of_btn(OF_BTN_A)) {
             uint8_t *fb = of_video_surface();
             for (int y = 100; y < 140; y++)
@@ -471,57 +471,13 @@ while (of_audio_free() > 0) {
 
 ---
 
-### Audio -- OPL3 (FM Synthesis)
-
-The platform includes a hardware YMF262 (OPL3) FM synthesis chip with 18 voices. Each voice has 2 operators (4 in 4-op mode). This is the same chip used in Sound Blaster 16 and many DOS games. Greg Taylor's bit-true FPGA implementation runs at 12.288 MHz with 48 kHz output.
-
-#### `void of_audio_opl_write(uint16_t reg, uint8_t val)`
-Write to an OPL3 register. Registers `0x00`-`0xFF` target bank 0 (channels 0-8), `0x100`-`0x1FF` target bank 1 (channels 9-17). The hardware handles write timing automatically.
-
-To enable full OPL3 mode (18 channels): `of_audio_opl_write(0x105, 0x01)`.
-
-Common registers:
-
-| Register | Description |
-|----------|-------------|
-| `0x01` | Test / Waveform select enable |
-| `0x04` | Timer control / OPL3 mode enable |
-| `0x08` | CSW / Note-Sel |
-| `0x20-0x35` | AM/VIB/EG/KSR/MULT per operator |
-| `0x40-0x55` | KSL/TL (Key Scale Level + Total Level) per operator |
-| `0x60-0x75` | AR/DR (Attack + Decay Rate) per operator |
-| `0x80-0x95` | SL/RR (Sustain Level + Release Rate) per operator |
-| `0xA0-0xA8` | F-Number (low 8 bits) per channel |
-| `0xB0-0xB8` | Key On + Block + F-Number (high 2 bits) per channel |
-| `0xC0-0xC8` | Feedback/Connection per channel |
-| `0xE0-0xF5` | Waveform select per operator |
-
-#### `void of_audio_opl_reset(void)`
-Silence all voices and reset all OPL3 registers (both banks). Call at startup and when stopping music.
-
-#### Playing a Note (Quick Reference)
-
-```c
-// 1. Set up operator parameters for channel 0
-of_audio_opl_write(0x20, 0x01);   // Op1: AM=0, VIB=0, EG=0, KSR=0, MULT=1
-of_audio_opl_write(0x40, 0x10);   // Op1: KSL=0, TL=16 (volume)
-of_audio_opl_write(0x60, 0xF0);   // Op1: AR=15, DR=0 (fast attack)
-of_audio_opl_write(0x80, 0x77);   // Op1: SL=7, RR=7
-of_audio_opl_write(0xC0, 0x31);   // FB=0, Connection=1, L+R output
-
-// 2. Set frequency and key on (A4 ~440 Hz, Block 4)
-of_audio_opl_write(0xA0, 0x98);   // F-Number low byte
-of_audio_opl_write(0xB0, 0x31);   // KEY-ON + Block=4 + F-Number high
-
-// 3. Key off
-of_audio_opl_write(0xB0, 0x11);   // Clear KEY-ON bit, keep frequency
-```
-
----
-
 ### MIDI Playback
 
-The `of_midi` library plays Standard MIDI Files through all 18 OPL3 channels with a built-in General MIDI instrument bank. Non-blocking — call `of_midi_pump()` each frame.
+The `of_midi` library renders Standard MIDI Files (Format 0/1)
+through the 32-voice PCM mixer using a pre-resolved `.ofsf` sample
+bank.  The repo ships an SC-55-derived General MIDI bank at
+`assets/banks/sc55.ofsf` — drop it on the SD card and load it via
+`of_smp_bank_load()`.
 
 ```c
 #include "of.h"
@@ -530,6 +486,9 @@ The `of_midi` library plays Standard MIDI Files through all 18 OPL3 channels wit
 static uint8_t midi_data[256*1024] __attribute__((aligned(512)));
 
 int main(void) {
+    // Load the bank once (it lives in CRAM1 for mixer DMA).
+    of_smp_bank_load("slot:10/sc55.ofsf");
+
     of_file_slot_register(3, "music.mid");
     FILE *f = fopen("music.mid", "rb");
     uint32_t n = fread(midi_data, 1, sizeof(midi_data), f);
@@ -540,7 +499,6 @@ int main(void) {
 
     while (1) {
         of_midi_pump();
-        // ... game logic ...
         of_delay_ms(1);
     }
 }
@@ -550,39 +508,31 @@ int main(void) {
 
 | Function | Description |
 |----------|-------------|
-| `of_midi_init()` | Reset OPL3, enable 18-channel mode |
+| `of_smp_bank_load(path)` | Load an `.ofsf` bank into CRAM1 (call once). |
+| `of_midi_init()` | Init voice engine + reset channel state |
 | `of_midi_play(data, len, loop)` | Start playback. Returns `OF_MIDI_OK` or error. |
-| `of_midi_stop()` | Stop and silence all channels |
+| `of_midi_stop()` | Stop and silence all voices |
 | `of_midi_pause()` / `of_midi_resume()` | Freeze/unfreeze event processing |
-| `of_midi_pump()` | Process pending events (call each frame) |
+| `of_midi_pump()` | Advance envelopes + process events (call each frame) |
 | `of_midi_playing()` / `of_midi_paused()` | Query state |
-| `of_midi_set_volume(0-255)` | Master volume (scales carrier TL) |
+| `of_midi_set_volume(0-255)` | Master volume |
 | `of_midi_get_volume()` | Get current master volume |
-| `of_midi_load_bank(bank)` | Custom GM bank (NULL = restore built-in) |
 
-**Features:** Format 0 + Format 1, velocity scaling, channel volume (CC7), pan (CC10), pitch bend (±2 semitones), tempo changes, looping.
+**Features:** Format 0 + Format 1, velocity scaling, channel volume
+(CC7), expression (CC11), pan (CC10), sustain pedal (CC64), mod wheel
+(CC1), filter cutoff (CC74) and resonance (CC71), pitch bend, tempo
+changes, looping.  Up to 48 simultaneous voices with DAHDSR envelopes
+and dual LFOs.
 
-**Custom instrument bank format:** 175 instruments x 11 bytes. Per instrument: `[FB/CNT, mod_AVEK, mod_TL, mod_ARDR, mod_SLRR, mod_WS, car_AVEK, car_TL, car_ARDR, car_SLRR, car_WS]`. Programs 0-127 = melodic (GM order), 128-174 = percussion (GM drum map notes 35-81).
+**Custom banks:** use `tools/sf2_to_ofsf` to convert any SF2
+SoundFont:
 
-#### OPL3 F-Number Calculation
-
-The OPL3 uses a 10-bit F-Number and 3-bit Block (octave) to set pitch:
-
+```bash
+cd tools && make
+./sf2_to_ofsf your_font.sf2 your_bank.ofsf
 ```
-F-Number = frequency * 2^(20 - Block) / 49716
-```
 
-Common F-Numbers (Block 4):
-
-| Note | F-Number | Hex |
-|------|----------|-----|
-| C4 | 262 | 0x106 |
-| D4 | 294 | 0x126 |
-| E4 | 330 | 0x14A |
-| F4 | 349 | 0x15D |
-| G4 | 392 | 0x188 |
-| A4 | 440 | 0x1B8 |
-| B4 | 494 | 0x1EE |
+See `src/firmware/api/of_smp_bank.h` for the `.ofsf` layout.
 
 ---
 
@@ -856,7 +806,6 @@ Exit the application and return to the OS. The OS will halt the CPU. On the Pock
 | `0x40000000` | `0x4000006F` | 112 B | SysRegs | Uncached | System registers |
 | `0x4C000000` | `0x4C000003` | 4 B | Audio | Uncached | Audio FIFO |
 | `0x4D000000` | -- | -- | Link | Uncached | Link cable registers |
-| `0x4E000000` | `0x4E00000F` | 16 B | OPL3 | Uncached | YMF262 FM synthesis (2 banks) |
 | `0x50000000` | `0x53FFFFFF` | 64 MB | SDRAM | Uncached | SDRAM (D-cache bypass alias) |
 
 ### Cached vs Uncached Access
@@ -908,15 +857,6 @@ SDRAM similarly has a cached window (`0x10xxxxxx`) and uncached alias (`0x50xxxx
 |--------|------|-----|-------------|
 | `0x00` | `AUDIO_SAMPLE` | W | Write: 32-bit stereo sample (L[31:16], R[15:0]) |
 | `0x00` | `AUDIO_STATUS` | R | Read: Bits 11:0 = FIFO level, Bit 12 = full |
-
-### OPL3 / YMF262 (`0x4E000000`)
-
-| Offset | Name | R/W | Description |
-|--------|------|-----|-------------|
-| `0x00` | `OPL_ADDR` | W | Bank 0 register address |
-| `0x04` | `OPL_DATA` | W | Bank 0 register data |
-| `0x08` | `OPL_ADDR2` | W | Bank 1 register address (4-op / channels 10-17) |
-| `0x0C` | `OPL_DATA2` | W | Bank 1 register data |
 
 ---
 
@@ -1239,13 +1179,17 @@ int main(void) {
 }
 ```
 
-### MIDI Playback with OPL3
+### Sample-Based MIDI Playback
 
-See `src/firmware/apps/mididemo/main.c` for a complete MIDI player implementation featuring:
-- General MIDI instrument mapping to OPL3 patches
-- MIDI note to OPL3 F-Number/Block conversion
-- 18-voice allocation with LRU stealing
+See the SDK `mididemo` app for a complete player implementation:
+- Load an `.ofsf` bank via `of_smp_bank_load()`
+- Parse Standard MIDI Files with `of_midi_play()`
+- Up to 48 voices with DAHDSR envelopes and dual LFOs
 - Real-time terminal display of channel activity
+
+Convert your own SoundFont (SF2) to `.ofsf` with `tools/sf2_to_ofsf`;
+the repo ships an SC-55-derived General MIDI bank at
+`assets/banks/sc55.ofsf`.
 
 ### Two-Player Input
 

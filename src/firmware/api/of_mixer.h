@@ -3,7 +3,8 @@
  *
  * 32-voice hardware mixer. Mixing runs entirely in FPGA fabric —
  * zero CPU cost during playback.
- * Output: 48kHz stereo via audio FIFO, mixed with OPL3 FM synthesis.
+ * Output: 48 kHz stereo via audio FIFO.  Sample-based MIDI synthesis
+ * (of_midi / of_smp_voice) drives this mixer directly.
  *
  * Usage:
  *   1. Call of_mixer_init()

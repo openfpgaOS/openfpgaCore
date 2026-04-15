@@ -117,23 +117,6 @@ int audio_fifo_level(void);
 ```
 Returns current FIFO fill level.
 
-### OPL3 FM Synthesis (YMF262)
-
-```c
-void opl_write(uint8_t reg, uint8_t val);
-```
-Write to an OPL3 bank 0 register. The hardware handles timing.
-
-```c
-void opl_write2(uint8_t reg, uint8_t val);
-```
-Write to an OPL3 bank 1 register (4-op mode, channels 10-17).
-
-```c
-void opl_reset(void);
-```
-Reset OPL3 by clearing all registers across both banks.
-
 ---
 
 ## Input (`hal/input.h`)
