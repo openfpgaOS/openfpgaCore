@@ -248,15 +248,6 @@
 #define MIX_IRQ_PENDING_HI   REG32(SYSREG_BASE + 0x108) /* Read: voice-end bitmask [47:32] */
 #define MIX_IRQ_CLEAR_HI     REG32(SYSREG_BASE + 0x108) /* Write: W1C for bits [47:32] */
 
-/* Save-slot prefetch base table (0x110..0x134, 10 entries × 22-bit
- * CRAM1 word addresses).  Written once at boot by of_save_init().
- * save_prefetch (clk_74a, FPGA) reads these on dataslot_requestread
- * to pre-fill its ring BRAM ahead of APF's bridge_rd strobes — fixes
- * the ~25-cycle CRAM1 access vs ~4-cycle APF capture mismatch that
- * was persisting garbage to every SD-side save word.  Index N maps to
- * bridge save slot N (matches APF's dataslot_requestread_id). */
-#define SAVE_SLOT_BASE(n)    REG32(SYSREG_BASE + 0x110 + ((n) * 4))
-
 /* Link-lite peripheral (0x4D000000) — IRQ-driven, 1-word TX/RX */
 #define LINK_BASE            0x4D000000
 #define LINK_CTRL            REG32(LINK_BASE + 0x00)  /* RW: [0]=enable [1]=reset [2]=master */

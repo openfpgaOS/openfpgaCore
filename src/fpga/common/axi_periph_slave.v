@@ -13,14 +13,7 @@
 
 `include "gpu_features.vh"
 
-module axi_periph_slave #(
-    // Number of save slots backed by save_prefetch's base-address
-    // table.  Bumping this up extends the SAVE_SLOT_BASE register
-    // window starting at 0x110; cap is 16 (the byte-addressable space
-    // 0x110..0x14C inside the upper-page register window) before
-    // overlapping unrelated reserved bytes.
-    parameter NUM_SAVE_SLOTS = 10
-) (
+module axi_periph_slave (
     input wire clk,
     input wire reset_n,
 
@@ -163,16 +156,7 @@ module axi_periph_slave #(
     output reg         gpu_reg_wr,
     output reg  [3:0]  gpu_reg_addr,
     output reg  [31:0] gpu_reg_wdata,
-    input  wire [31:0] gpu_reg_rdata,
-
-    // Save-slot prefetch base table (NUM_SAVE_SLOTS × 22-bit CRAM1
-    // word addresses, packed flat — slot N at bits [N*22+21:N*22]).
-    // CPU writes via SAVE_SLOT_BASE registers at 0x110+N*4; the
-    // save_prefetch module on clk_74a consumes the resulting flat
-    // bus.  Cross-clock by snapshot: these are static, written once
-    // at boot, so a synch_3 on each bit isn't required — they settle
-    // long before any dataslot_requestread fires.
-    output wire [NUM_SAVE_SLOTS*22-1:0] save_slot_base_flat
+    input  wire [31:0] gpu_reg_rdata
 );
 
 wire reset = ~reset_n;
@@ -188,32 +172,6 @@ wire [31:0] aw_addr = s_axi_awaddr;
 // mix_irq_clear_wr fires on either write; the CDC toggle handshake delivers the latched value.
 reg [47:0] mix_irq_clear_lat;
 assign mix_irq_clear_data = mix_irq_clear_lat;
-
-// Save-slot prefetch base-address table.  NUM_SAVE_SLOTS entries ×
-// 22-bit CRAM1 word addresses.  CPU writes once at boot via
-// SAVE_SLOT_BASE[N] (0x110 + N*4); save_prefetch on clk_74a indexes
-// by dataslot id.  Reset / write / read use the same parameter so a
-// single number drives the entire fan-out.
-reg [21:0] save_slot_base [0:NUM_SAVE_SLOTS-1];
-
-// Address window inside the upper-page register space:
-//   req_addr[8] == 1 selects the upper page.
-//   req_addr[7:2] = base_index_in_words .. base_index + NUM-1.
-// Using parameter math keeps the constant in lockstep with the
-// reg-array depth, so changing NUM_SAVE_SLOTS automatically extends
-// or shrinks the decoded window.
-localparam [5:0] SAVE_BASE_REG = 6'd4;   // 0x110 byte → req_addr[7:2] = 4
-wire        save_slot_addr_hit = req_addr[8]
-                              && (req_addr[7:2] >= SAVE_BASE_REG)
-                              && (req_addr[7:2] <  SAVE_BASE_REG + NUM_SAVE_SLOTS[5:0]);
-wire [3:0]  save_slot_idx      = req_addr[5:2] - SAVE_BASE_REG[3:0];
-
-genvar gss;
-generate
-    for (gss = 0; gss < NUM_SAVE_SLOTS; gss = gss + 1) begin : g_save_slot
-        assign save_slot_base_flat[gss*22 +: 22] = save_slot_base[gss];
-    end
-endgenerate
 
 // ============================================
 // SNAC Shifter + GPIO (registers 0xA0-0xAC)
@@ -592,13 +550,6 @@ always @(posedge clk) begin
         snac_start_pulse <= 0;
         snac_bit_count_reg <= 0;
         snac_latch_en_reg <= 0;
-        // Save-slot prefetch base table — zero at reset.  Firmware
-        // populates real values during boot.  A zero entry just means
-        // save_prefetch will start fetching from CRAM1 word 0 if APF
-        // ever issues a dataslot_requestread for that slot before
-        // firmware has run, which is harmless.
-        for (rsi = 0; rsi < NUM_SAVE_SLOTS; rsi = rsi + 1)
-            save_slot_base[rsi] <= 22'd0;
     end else begin
         cycle_counter <= cycle_counter + 1;
         pal_wr <= 0;
@@ -823,12 +774,6 @@ always @(posedge clk) begin
 
                 default: ;
             endcase
-
-            // SAVE_SLOT_BASE[N] writes — handled OUTSIDE the case so
-            // a single range comparison + indexed assignment scales
-            // with NUM_SAVE_SLOTS instead of N hand-rolled cases.
-            if (save_slot_addr_hit)
-                save_slot_base[save_slot_idx] <= req_wdata[21:0];
         end
 
         // Vsync IRQ — set on every vsync rising edge, cleared by W1C at 0x9C
@@ -917,14 +862,7 @@ always @(*) begin
         7'b0_100111: sysreg_rdata = {31'b0, vsync_irq_pending};   // VSYNC_IRQ_PENDING (0x9C)
         // Extended mixer registers (0x100-0x108)
         7'b1_000010: sysreg_rdata = {16'b0, mix_irq_pending[47:32]};  // MIX_IRQ_PENDING_HI (0x108)
-        default: begin
-            // SAVE_SLOT_BASE[N] readback — same range/index logic as
-            // the writer.  Falls through to 0 when out-of-range.
-            if (save_slot_addr_hit)
-                sysreg_rdata = {10'b0, save_slot_base[save_slot_idx]};
-            else
-                sysreg_rdata = 32'h0;
-        end
+        default: sysreg_rdata = 32'h0;
     endcase
 end
 

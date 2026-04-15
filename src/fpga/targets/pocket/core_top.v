@@ -641,16 +641,11 @@ wire         c1a_lb_n,  c1b_lb_n;
 wire        psram1_a_bcr_done;
 wire        psram1_b_bcr_done;
 
-// Burst read interface — only wired for psram1_b (used by save_prefetch
-// on clk_74a).  psram1_a ties burst_rd=0 since CPU/mixer don't issue
-// sync bursts.  Wires declared here so the instantiation lists below
-// can reference them.
-wire        psram1_b_burst_rd;
-wire [21:0] psram1_b_burst_addr;
-wire [4:0]  psram1_b_burst_len;
-wire [31:0] psram1_b_burst_q;
-wire        psram1_b_burst_q_valid;
-wire        psram1_b_burst_busy;
+// CRAM1 burst is currently unused on both controllers — the bridge
+// uses the simple word_rd FSM (bridge_cram1_rd_detect, below) and
+// the CPU/mixer side never bursts.  The burst FSM inside
+// cram1_controller is left in place for possible future use; both
+// instantiations tie burst inputs to 0.
 
 // Controller A: CPU + mixer (clk_cpu)
 cram1_controller #(.CLOCK_SPEED(100)) psram1_a (
@@ -676,8 +671,8 @@ cram1_controller #(.CLOCK_SPEED(100)) psram1_a (
     .cram_ub_n(c1a_ub_n), .cram_lb_n(c1a_lb_n)
 );
 
-// Controller B: bridge (clk_74a).  Step 1 ties burst ports off;
-// step 4 will wire them to save_prefetch.
+// Controller B: bridge (clk_74a).  Burst inputs tied off — bridge
+// reads use the simple bridge_cram1_rd_detect FSM below.
 cram1_controller #(.CLOCK_SPEED(74.25)) psram1_b (
     .clk(clk_74a), .reset_n(psram1_reset_n),
     .word_rd(brg_psram_rd), .word_wr(brg_psram_wr),
@@ -685,12 +680,12 @@ cram1_controller #(.CLOCK_SPEED(74.25)) psram1_b (
     .word_wstrb(4'b1111),
     .word_q(brg_psram_rdata), .word_busy(brg_psram_word_busy),
     .word_q_valid(brg_psram_rdata_valid),
-    .burst_rd(psram1_b_burst_rd),
-    .burst_addr(psram1_b_burst_addr),
-    .burst_len(psram1_b_burst_len),
-    .burst_q(psram1_b_burst_q),
-    .burst_q_valid(psram1_b_burst_q_valid),
-    .burst_busy(psram1_b_burst_busy),
+    .burst_rd(1'b0),
+    .burst_addr(22'd0),
+    .burst_len(5'd0),
+    .burst_q(),
+    .burst_q_valid(),
+    .burst_busy(),
     .bcr_init_done(psram1_b_bcr_done),
     .cram_a(c1b_a), .cram_dq_out(c1b_dq_out), .cram_dq_oe(c1b_dq_oe),
     .cram_dq_in(cram1_dq), .cram_wait(cram1_wait), .cram_clk(),
@@ -698,38 +693,6 @@ cram1_controller #(.CLOCK_SPEED(74.25)) psram1_b (
     .cram_ce0_n(c1b_ce0_n), .cram_ce1_n(c1b_ce1_n),
     .cram_oe_n(c1b_oe_n), .cram_we_n(c1b_we_n),
     .cram_ub_n(c1b_ub_n), .cram_lb_n(c1b_lb_n)
-);
-
-// ============================================================
-// save_prefetch — replaces the old single-word bridge_cram1_rd FSM.
-// Lives on clk_74a (same as psram1_b and the bridge); bridges the
-// ~30-cycle CRAM1 access vs. ~4-cycle APF capture window mismatch by
-// pre-fetching the slot into a 32-word ring BRAM on the
-// dataslot_requestread pre-trigger.
-// ============================================================
-wire        save_prefetch_in_range = (bridge_addr[31:24] == 8'h30);
-wire [31:0] save_prefetch_rd_data;
-wire [10*22-1:0] save_slot_base_flat;
-
-save_prefetch sp (
-    .clk(clk_74a),
-    .reset_n(psram1_reset_n),
-
-    .bridge_rd          (bridge_rd),
-    .bridge_addr        (bridge_addr),
-    .bridge_rd_data     (save_prefetch_rd_data),
-
-    .dataslot_requestread    (dataslot_requestread),
-    .dataslot_requestread_id (dataslot_requestread_id),
-
-    .slot_base_addr_flat(save_slot_base_flat),
-
-    .burst_rd      (psram1_b_burst_rd),
-    .burst_addr    (psram1_b_burst_addr),
-    .burst_len     (psram1_b_burst_len),
-    .burst_q       (psram1_b_burst_q),
-    .burst_q_valid (psram1_b_burst_q_valid),
-    .burst_busy    (psram1_b_burst_busy)
 );
 
 // Pin mux with safe transitions: never switch while controller A is busy.
@@ -1064,11 +1027,11 @@ always @(posedge clk_74a) begin
             bridge_rd_data <= 0;
         end
         32'h30xxxxxx: begin
-            // Save-slot range: served by save_prefetch's combinational
-            // BRAM port-B output.  Replaces the old single-word
-            // bridge_cram1_rd FSM (cram1_rd_resp_data) which couldn't
-            // meet APF's 4-cycle capture window.  See save_prefetch.v.
-            bridge_rd_data <= save_prefetch_rd_data;
+            // CRAM1 bridge read — single-word async path through
+            // psram1_b.  cram1_rd_resp_data holds the most recently
+            // completed bridge_rd response (one cycle late vs APF's
+            // capture window — see comment in the FSM below).
+            bridge_rd_data <= cram1_rd_resp_data;
         end
 
         32'hF7000000: begin
@@ -1194,55 +1157,64 @@ end
 // ============================================================
 // Bridge CRAM1: native clk_74a (no CDC)
 //
-// Two independent paths into psram1_b:
-//   - Writes: bridge_cram1_wr_detect → word_wr (this block, below)
-//   - Reads:  save_prefetch → burst_rd  (instantiated above)
+// Two paths into psram1_b, both via the simple word interface:
+//   - Writes: bridge_cram1_wr_detect → word_wr
+//   - Reads:  bridge_cram1_rd_detect → word_rd → cram1_rd_resp_data
 //
 // The pin-level mux on the CRAM1 chip switches between psram1_a
 // (CPU + mixer on clk_cpu) and psram1_b (bridge on clk_74a) when
-// bridge_cram1_active rises.  bridge_cram1_active now includes both
-// the write FSM's pending flag AND save_prefetch's burst activity
-// (burst_busy on psram1_b), so the pin mux flips for either kind of
-// bridge-side access.
+// bridge_cram1_active rises (bridge has a read or write pending).
 // ============================================================
 wire bridge_cram1_wr_detect = bridge_wr && (bridge_addr[31:24] == 8'h30);
 
-// Bridge write command interface (clk_74a, directly to controller B).
+// Edge-detect the read so we accept exactly one read per bridge_rd
+// pulse (APF can hold bridge_rd HIGH for several cycles).
+reg prev_bridge_rd_for_cram1;
+always @(posedge clk_74a)
+    prev_bridge_rd_for_cram1 <= bridge_rd && (bridge_addr[31:24] == 8'h30);
+wire bridge_cram1_rd_detect = !prev_bridge_rd_for_cram1 && bridge_rd && (bridge_addr[31:24] == 8'h30);
+
+// Bridge command interface (clk_74a, directly to controller B).
+reg        brg_psram_rd;
 reg        brg_psram_wr;
 reg [21:0] brg_psram_addr;
 reg [31:0] brg_psram_wdata;
 wire        brg_psram_word_busy;
-
-// Bridge write FSM must not fire while the controller is in *any*
-// non-idle state — including the middle of a save_prefetch burst.
-// psram1_b.word_busy only tracks word_wr / word_rd activity and stays
-// LOW during a burst.  A bridge_wr issued mid-burst would be silently
-// dropped (controller not in ST_IDLE) and the FSM would deadlock
-// waiting for busy to rise on a transaction that never started.
-wire        brg_psram_busy = brg_psram_word_busy | psram1_b_burst_busy;
-
-// Read-side word ports of psram1_b are unused now (save_prefetch uses
-// burst_rd instead); tie inputs and ignore outputs.
-wire        brg_psram_rd = 1'b0;
 wire [31:0] brg_psram_rdata;
 wire        brg_psram_rdata_valid;
+reg [31:0] cram1_rd_resp_data;
 
-// Bridge CRAM1 write FSM (clk_74a).
+// brg_psram_busy mirrors the controller's word_busy.  No burst path
+// exists on psram1_b in this revision, so we don't need to OR in a
+// burst-busy term — leaving it word-only keeps the wr FSM clear of
+// the bug where save_prefetch's burst_busy would pin this HIGH and
+// stall every dataslot operation through the done-tracking quiet
+// counter (bridge_wr_idle below feeds it).
+wire        brg_psram_busy = brg_psram_word_busy;
+
+// Bridge CRAM1 command FSM (clk_74a).
 // Accept-then-issue pattern: latch addr/data immediately, defer the
 // psram command pulse until controller B is idle.  This prevents the
 // 1-cycle race where the detect fires while word_busy is dropping but
 // the controller hasn't reached ST_IDLE yet.
+//
+// Reads and writes share the latched-addr register and are mutually
+// exclusive — APF never interleaves them within a single dataslot
+// transaction.
 reg        bridge_cram1_wr_pending;
 reg        bridge_cram1_wr_issued;   // command pulse sent to controller
 reg        bridge_cram1_wr_started;  // controller went busy
+reg        bridge_cram1_rd_pending;
+reg        bridge_cram1_rd_issued;
 reg [21:0] brg_lat_addr;
 reg [31:0] brg_lat_data;
 
 always @(posedge clk_74a) begin
+    brg_psram_rd <= 0;
     brg_psram_wr <= 0;
 
     // Accept write — latch immediately, issue later when idle
-    if (bridge_cram1_wr_detect && !bridge_cram1_wr_pending) begin
+    if (bridge_cram1_wr_detect && !bridge_cram1_wr_pending && !bridge_cram1_rd_pending) begin
         bridge_cram1_wr_pending <= 1;
         bridge_cram1_wr_issued  <= 0;
         bridge_cram1_wr_started <= 0;
@@ -1268,13 +1240,38 @@ always @(posedge clk_74a) begin
             bridge_cram1_wr_started <= 0;
         end
     end
+
+    // Accept read — latch immediately, issue later when idle.  This
+    // is the simple single-word path — APF's ~4-cycle bridge_rd
+    // capture window vs ~25-30 cycle CRAM1 access means the first
+    // read for any given address will return whatever was previously
+    // latched in cram1_rd_resp_data.  Acceptable for app/file load
+    // (host sees stale word, retries via the higher-level protocol);
+    // not great for save flushing (would write garbage to SD).
+    // save_prefetch existed to fix the save-flush case but had a
+    // global side-effect; removed for now.
+    if (bridge_cram1_rd_detect && !bridge_cram1_rd_pending && !bridge_cram1_wr_pending) begin
+        bridge_cram1_rd_pending <= 1;
+        bridge_cram1_rd_issued  <= 0;
+        brg_lat_addr <= bridge_addr[23:2];
+    end
+
+    // Issue deferred read when controller is idle
+    if (bridge_cram1_rd_pending && !bridge_cram1_rd_issued && !brg_psram_busy) begin
+        brg_psram_rd   <= 1;
+        brg_psram_addr <= brg_lat_addr;
+        bridge_cram1_rd_issued <= 1;
+    end
+
+    // Read completion
+    if (bridge_cram1_rd_pending && bridge_cram1_rd_issued && brg_psram_rdata_valid) begin
+        cram1_rd_resp_data <= brg_psram_rdata;
+        bridge_cram1_rd_pending <= 0;
+        bridge_cram1_rd_issued  <= 0;
+    end
 end
 
-// Bridge needs the chip pins whenever EITHER the write FSM is active OR
-// save_prefetch is mid-burst.  Without the burst term, the pin mux
-// would switch back to psram1_a (CPU side) mid-burst and corrupt the
-// chip-side timing of the in-flight sync burst.
-wire bridge_cram1_active = bridge_cram1_wr_pending | psram1_b_burst_busy;
+wire bridge_cram1_active = bridge_cram1_wr_pending | bridge_cram1_rd_pending;
 
 // ============================================================
 // CRAM1 mux (clk_cpu) — CPU + mixer only, no bridge
@@ -1990,12 +1987,7 @@ assign video_hs = vidout_hs;
         .gpu_reg_wr(gpu_reg_wr),
         .gpu_reg_addr(gpu_reg_addr),
         .gpu_reg_wdata(gpu_reg_wdata),
-        .gpu_reg_rdata(gpu_reg_rdata),
-        // Save-slot prefetch base table (SAVE_SLOT_BASE[N] at 0x110+N*4
-        // — 10 entries × 22 bits, packed flat).  Drives save_prefetch's
-        // base lookup on clk_74a.  Static after firmware boot init, so
-        // no CDC needed; the 220 bits cross domains by snapshot.
-        .save_slot_base_flat(save_slot_base_flat)
+        .gpu_reg_rdata(gpu_reg_rdata)
     );
 
     // DMA engine removed — apps use CPU memcpy instead
