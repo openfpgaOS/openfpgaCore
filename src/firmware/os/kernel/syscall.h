@@ -91,7 +91,7 @@ void syscall_init(uintptr_t heap_start);
  * queries size + filename, and populates the file_slot registry so
  * fopen("name.wad") resolves and opendir("/") lists every slot.
  * Returns the number of slots with data registered. */
-int syscall_fs_init(void);
+int filesystem_init(void);
 
 /* Register a file slot mapping (slot_id → filename).
  * Called by the loader after parsing the instance JSON. */

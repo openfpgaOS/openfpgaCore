@@ -132,13 +132,6 @@ void os_main(void) {
      * The kernel's linux_dispatch() in syscall.c handles them; no
      * libc jump table is needed any more. */
 
-    /* FS init: open every data slot (required for deferload:true) and
-     * populate the filename→slot map so apps can fopen() by name. */
-    of_term_puts("  FS init........... ");
-    int fs_slots = syscall_fs_init();
-    of_term_printf(" \033[92m%d slot%s\033[0m\n",
-                   fs_slots, fs_slots == 1 ? "" : "s");
-
     /* Populate OS services table first -- caps_table.c reads its
      * address to fill the legacy caps->services_table field. */
     services_table_init();
@@ -151,6 +144,14 @@ void os_main(void) {
 
     of_term_puts("  Caps init......... ");
     status_ok();
+
+    /* Filesystem init — last step before handing control to the app.
+     * Opens every data slot (required for deferload:true) and populates
+     * the filename→slot map so apps can fopen() by name. */
+    of_term_puts("  Filesystem init... ");
+    int fs_slots = filesystem_init();
+    of_term_printf(" \033[92m%d slot%s\033[0m\n",
+                   fs_slots, fs_slots == 1 ? "" : "s");
 
     of_timer_delay_ms(300);
 

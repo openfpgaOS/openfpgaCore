@@ -316,7 +316,7 @@ static void dir_probe_slots(void) {
 /* Public filesystem init — eager FTAB population at boot time. See
  * syscall.h for rationale.  Returns the number of slots that had data
  * (matches what apps will see via opendir). */
-int syscall_fs_init(void) {
+int filesystem_init(void) {
     int before = file_slot_count;
     dir_probe_slots();
     return file_slot_count - before;
