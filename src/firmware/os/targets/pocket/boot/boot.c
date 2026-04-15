@@ -383,7 +383,7 @@ static int boot_dma_read(uint32_t slot_id, uint32_t slot_offset,
     /* Wait for bridge to be idle before issuing a new command. */
     timeout = BOOT_DMA_TIMEOUT;
     while (!(DS_STATUS & DS_STATUS_READY)) {
-        if (--timeout == 0) return -3;
+        if (--timeout == 0) { pd_dbg_info = DS_STATUS; return -3; }
     }
 
     DS_SLOT_ID     = slot_id;
@@ -395,13 +395,13 @@ static int boot_dma_read(uint32_t slot_id, uint32_t slot_offset,
     /* Wait for ACK */
     timeout = BOOT_DMA_TIMEOUT;
     while (!(DS_STATUS & DS_STATUS_ACK)) {
-        if (--timeout == 0) return -1;
+        if (--timeout == 0) { pd_dbg_info = DS_STATUS; return -1; }
     }
 
     /* Wait for DONE */
     timeout = BOOT_DMA_TIMEOUT;
     while (!(DS_STATUS & DS_STATUS_DONE)) {
-        if (--timeout == 0) return -2;
+        if (--timeout == 0) { pd_dbg_info = DS_STATUS; return -2; }
     }
 
     /* Check error */
@@ -579,7 +579,15 @@ load_from_sd:
         boot_fb_clear_row(0);
         boot_fb_puts(0, 0, "Load failed E");
         boot_fb_putchar(14, 0, '0' + (unsigned int)(-rc));
-        pd_dbg_info = (unsigned int)(-rc);
+        /* pd_dbg_info now holds DS_STATUS captured at timeout — show
+         * the bottom byte as 2 hex chars after the error digit so we
+         * can see which bridge handshake bit was stuck.
+         * Bits: 0=ACK 1=DONE 2-4=ERR 5=READY 6=WR_IDLE. */
+        unsigned st = pd_dbg_info & 0xFF;
+        unsigned h = (st >> 4) & 0xF;
+        unsigned l = st & 0xF;
+        boot_fb_putchar(16, 0, (h < 10) ? ('0' + h) : ('a' + h - 10));
+        boot_fb_putchar(17, 0, (l < 10) ? ('0' + l) : ('a' + l - 10));
         while (1) {}
     }
 

@@ -215,30 +215,33 @@ always @(posedge clk or negedge reset_n) begin
         end else begin
 
             // -------------------------------------------------------
-            // 2) Bridge read consume / address-match check.
-            //    Hit  → advance read pointer (one word served).
-            //    Miss → APF jumped (different slot, replay, etc.):
-            //           re-anchor at the new bridge_addr so the next
-            //           prefetch starts there.  This first read still
-            //           returns 0 (combinational mux above), which is
-            //           the documented "first word stale" edge case.
+            // 2) Bridge read consume.
+            //    Only advance when (a) we're armed, (b) the address
+            //    matches what the prefetcher is serving, and (c) we
+            //    actually have data buffered.  Stray bridge_rd
+            //    cycles in the 0x30xxxxxx range that don't match
+            //    expected_word_addr — including ALL bridge_rd
+            //    cycles that arrive while !armed — are ignored.
+            //
+            //    Critical: do NOT re-anchor on a miss.  An earlier
+            //    revision treated mismatch as "APF jumped slots,
+            //    re-arm here", but APF can hit 0x30xxxxxx for
+            //    reasons unrelated to save reads (host-side debug
+            //    pings, datatable scans, etc.).  Auto-arming on
+            //    those queued endless bursts that pinned
+            //    psram1_b_burst_busy HIGH, which kept
+            //    bridge_cram1_active HIGH, which kept bridge_wr_idle
+            //    LOW — and the upstream done-tracking FSM in
+            //    core_top.v needs bridge_wr_idle HIGH for
+            //    DS_DONE_QUIET_CYCLES (1023) consecutive cycles
+            //    before propagating target_dataslot_done to the
+            //    firmware.  Net result: every dataslot read
+            //    (boot SD load, app load, file open, save flush)
+            //    timed out with DONE never asserting.
             // -------------------------------------------------------
-            if (bridge_rd && bridge_in_save_range) begin
-                if (bridge_addr_match && depth != {CTR_BITS{1'b0}}) begin
-                    consumed_count <= consumed_count + 1'b1;
-                end else if (!bridge_addr_match) begin
-                    slot_start_word  <= bridge_word_addr;
-                    consumed_count   <= {CTR_BITS{1'b0}};
-                    fetched_count    <= {CTR_BITS{1'b0}};
-                    armed            <= 1'b1;
-                    burst_inflight   <= 1'b0;
-                    burst_saw_busy   <= 1'b0;
-                    burst_words_left <= 5'd0;
-                end
-                // bridge_addr_match && depth==0 — underrun.  Hold
-                // pointers; APF gets bridge_rd_data=0.  The refill
-                // logic below will issue a burst; APF should retry
-                // (or the upstream caller treats 0 as "not ready").
+            if (bridge_rd && bridge_in_save_range && armed
+                && bridge_addr_match && depth != {CTR_BITS{1'b0}}) begin
+                consumed_count <= consumed_count + 1'b1;
             end
 
             // -------------------------------------------------------
