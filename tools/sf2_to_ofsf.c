@@ -37,8 +37,11 @@
 /* ------------------------------------------------------------------ */
 
 #define OFSF_MAGIC      0x4F465346
-#define OFSF_VERSION    1
+#define OFSF_VERSION    2
 #define OFSF_PRESET_COUNT 256
+
+#define OFSF_NAME_MAX   32
+#define OFSF_AUTHOR_MAX 32
 
 #define OFSF_LOOP_NONE    0
 #define OFSF_LOOP_FORWARD 1
@@ -53,6 +56,8 @@ typedef struct __attribute__((packed)) {
     uint32_t sample_data_size;
     uint32_t flags;
     uint32_t reserved;
+    char     bank_name[OFSF_NAME_MAX];
+    char     bank_author[OFSF_AUTHOR_MAX];
 } ofsf_header_t;
 
 typedef struct __attribute__((packed)) {
@@ -114,7 +119,7 @@ typedef struct __attribute__((packed)) {
 
 /* Compile-time check: zone must be exactly 80 bytes */
 _Static_assert(sizeof(ofsf_zone_t) == 80, "ofsf_zone_t must be 80 bytes");
-_Static_assert(sizeof(ofsf_header_t) == 32, "ofsf_header_t must be 32 bytes");
+_Static_assert(sizeof(ofsf_header_t) == 96, "ofsf_header_t must be 96 bytes (v2)");
 _Static_assert(sizeof(ofsf_preset_t) == 4, "ofsf_preset_t must be 4 bytes");
 
 /* ------------------------------------------------------------------ */
@@ -295,6 +300,10 @@ static int g_sample_cap;
 static uint32_t g_max_size  = 0;        /* 0 = no limit */
 static uint32_t g_sample_rate = 0;      /* 0 = auto-detect from first sample */
 
+/* Metadata pulled from SF2 INFO LIST (INAM/IENG), null-terminated. */
+static char g_bank_name[OFSF_NAME_MAX];
+static char g_bank_author[OFSF_AUTHOR_MAX];
+
 /* ------------------------------------------------------------------ */
 /* Helpers                                                            */
 /* ------------------------------------------------------------------ */
@@ -468,6 +477,31 @@ static void parse_sf2(void)
 
     const uint8_t *riff_start = d + 12;
     const uint8_t *riff_end   = d + 8 + riff_size;
+
+    /* INFO LIST is optional — pull INAM (bank name) and IENG (author).
+     * Each sub-chunk is a NUL-terminated ASCII string; we copy at most
+     * OFSF_NAME_MAX-1 / OFSF_AUTHOR_MAX-1 bytes and ensure termination. */
+    {
+        uint32_t info_size;
+        const uint8_t *info = find_list(fourcc("INFO"), riff_start, riff_end, &info_size);
+        if (info) {
+            const uint8_t *info_end = info + info_size;
+            uint32_t cs;
+            const uint8_t *p;
+            p = find_chunk(fourcc("INAM"), info, info_end, &cs);
+            if (p && cs > 0) {
+                uint32_t n = cs < OFSF_NAME_MAX - 1 ? cs : OFSF_NAME_MAX - 1;
+                memcpy(g_bank_name, p, n);
+                g_bank_name[n] = '\0';
+            }
+            p = find_chunk(fourcc("IENG"), info, info_end, &cs);
+            if (p && cs > 0) {
+                uint32_t n = cs < OFSF_AUTHOR_MAX - 1 ? cs : OFSF_AUTHOR_MAX - 1;
+                memcpy(g_bank_author, p, n);
+                g_bank_author[n] = '\0';
+            }
+        }
+    }
 
     /* Find sdta LIST */
     uint32_t sdta_size;
@@ -1190,6 +1224,8 @@ static void write_output(const char *path)
     hdr.sample_data_size  = sample_blob_size;
     hdr.flags             = 0;
     hdr.reserved          = 0;
+    memcpy(hdr.bank_name,   g_bank_name,   sizeof(hdr.bank_name));
+    memcpy(hdr.bank_author, g_bank_author, sizeof(hdr.bank_author));
 
     if (fwrite(&hdr, sizeof(hdr), 1, f) != 1)
         die("write error on header");

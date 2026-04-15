@@ -6,12 +6,13 @@
  * of_midi_pump() from your game loop or idle hook.
  *
  * Requirements:
- *   - A .ofsf bank must be loaded first via of_smp_bank_load().
- *     Use the SC-55-derived bank in assets/banks/sc55.ofsf, or roll
- *     your own with tools/sf2_to_ofsf.
+ *   - A .ofsf bank must be staged in a data slot. The kernel detects
+ *     and loads it at boot — no app-side init is required. Ship the
+ *     SC-55-derived bank in assets/banks/sc55.ofsf, or roll your own
+ *     with tools/sf2_to_ofsf. Users can swap the file to pick a
+ *     different SoundFont.
  *
  * Usage:
- *   of_smp_bank_load("slot:10/sc55.ofsf");
  *   of_midi_init();
  *   of_midi_play(midi_data, midi_len, 1);  // loop
  *   while (1) {

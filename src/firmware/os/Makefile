@@ -104,7 +104,8 @@ KERNEL_SRCS = $(KERNEL_DIR)/main.c \
               $(KERNEL_DIR)/caps_table.c \
               $(KERNEL_DIR)/services_table.c \
               $(KERNEL_DIR)/of_malloc.c \
-              $(KERNEL_DIR)/irq.c
+              $(KERNEL_DIR)/irq.c \
+              $(KERNEL_DIR)/bank_preload.c
 
 # All sources
 ALL_C_SRCS = $(BOOT_SRCS_C) $(HAL_SRCS) $(TARGET_SRCS) $(KERNEL_SRCS)

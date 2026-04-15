@@ -14,6 +14,7 @@
 
 #include "services_table.h"
 #include "irq.h"
+#include "bank_preload.h"
 #include "of_services.h"
 #include "../hal/hal.h"
 #include "../hal/regs.h"
@@ -185,4 +186,13 @@ void services_table_init(void) {
 
     /* Filesystem */
     svc->file_slot_register = file_slot_register;
+
+    /* SoundFont preload -- filled in by bank_preload() post-init */
+    svc->smp_bank_preload_base = NULL;
+    svc->smp_bank_preload_size = 0;
+}
+
+void services_table_set_smp_bank(const void *base, uint32_t size) {
+    g_svc.smp_bank_preload_base = base;
+    g_svc.smp_bank_preload_size = size;
 }

@@ -97,4 +97,10 @@ int filesystem_init(void);
  * Called by the loader after parsing the instance JSON. */
 void file_slot_register(uint32_t slot_id, const char *filename);
 
+/* File slot enumeration for boot-time scans (e.g. SoundFont preload).
+ * idx in [0, file_slot_get_count()); fills *slot_id_out and returns the
+ * NUL-terminated basename. Returns NULL if idx is out of range. */
+int         file_slot_get_count(void);
+const char *file_slot_get(int idx, uint32_t *slot_id_out);
+
 #endif /* OFOS_SYSCALL_H */

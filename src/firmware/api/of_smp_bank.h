@@ -19,17 +19,24 @@ extern "C" {
 #include <stdint.h>
 
 #define OFSF_MAGIC      0x4F465346  /* 'OFSF' */
-#define OFSF_VERSION    1
+#define OFSF_VERSION    2
 
 #define OFSF_PRESET_COUNT   256     /* 128 melodic (bank 0) + 128 drum (bank 128) */
+
+/* Metadata strings (null-terminated, truncated if longer) */
+#define OFSF_NAME_MAX       32
+#define OFSF_AUTHOR_MAX     32
 
 /* Loop modes */
 #define OFSF_LOOP_NONE      0
 #define OFSF_LOOP_FORWARD   1
 #define OFSF_LOOP_BIDI      3
 
-/* ---- File header (32 bytes) ---- */
-
+/* ---- File header (96 bytes) ----
+ *
+ * bank_name and bank_author are pulled from the SF2 INFO LIST (INAM/IENG)
+ * by sf2_to_ofsf so the OS can display them at boot without opening the
+ * SF2 source. */
 typedef struct __attribute__((packed)) {
     uint32_t magic;             /* OFSF_MAGIC */
     uint32_t version;           /* OFSF_VERSION */
@@ -39,6 +46,8 @@ typedef struct __attribute__((packed)) {
     uint32_t sample_data_size;  /* sample blob size in bytes */
     uint32_t flags;             /* reserved, 0 */
     uint32_t reserved;
+    char     bank_name[OFSF_NAME_MAX];     /* v2: SF2 INAM, null-terminated */
+    char     bank_author[OFSF_AUTHOR_MAX]; /* v2: SF2 IENG, null-terminated */
 } ofsf_header_t;
 
 /* ---- Preset index (256 x 4 bytes = 1024 bytes) ---- */
@@ -110,10 +119,12 @@ typedef struct __attribute__((packed)) {
     uint8_t  _pad[3];
 } ofsf_zone_t;
 
-/* ---- Loader API ---- */
+/* ---- Runtime API ----
+ *
+ * No load/unload: the kernel auto-loads a .ofsf file staged in any data
+ * slot at boot, and an SDK constructor binds this module to it before
+ * main() runs. Apps just use the query functions below. */
 
-int                  of_smp_bank_load(const char *path);
-void                 of_smp_bank_unload(void);
 const ofsf_header_t *of_smp_bank_get(void);
 const void          *of_smp_bank_sample_base(void);
 

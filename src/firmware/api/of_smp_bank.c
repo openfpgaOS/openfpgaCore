@@ -1,81 +1,41 @@
 /*
- * of_smp_bank.c -- .ofsf runtime bank loader
+ * of_smp_bank.c -- .ofsf runtime bank reader
  *
- * Loads a pre-built .ofsf bank from SD into the CRAM1 sample pool.
- * No parsing beyond header validation — the zone table and samples
- * are already in their final layout.
+ * The kernel auto-loads the first .ofsf it finds in a data slot at boot
+ * and hands the buffer to apps via OF_SVC->smp_bank_preload_base. This
+ * file just binds our static preset/zone/sample pointers to that buffer
+ * inside an SDK constructor, so apps can call of_smp_zone_lookup and
+ * of_smp_bank_get without any explicit init step.
  */
 
 #include "include/of_smp_bank.h"
-#include "include/of_mixer.h"
-#include "include/of_cache.h"
 #include "include/of_services.h"
 
-#include <string.h>
-#include <stdio.h>
+#include <stdint.h>
 
 static const ofsf_header_t *loaded_header;
 static const ofsf_preset_t *loaded_presets;
 static const ofsf_zone_t   *loaded_zones;
 static const void           *sample_base;   /* absolute CRAM1 address of sample blob */
-static int                   bank_loaded;
 
-int of_smp_bank_load(const char *path)
+/* Priority 102: runs after of_init.c (101) has captured OF_SVC from auxv,
+ * but before any app constructor or main(). */
+__attribute__((constructor(102)))
+static void bank_autobind(void)
 {
-    if (bank_loaded)
-        of_smp_bank_unload();
+    const void *buf = OF_SVC->smp_bank_preload_base;
+    if (!buf) return;
 
-    FILE *f = fopen(path, "rb");
-    if (!f) return -10;
-    fseek(f, 0, SEEK_END);
-    long fsize = ftell(f);
-    fseek(f, 0, SEEK_SET);
-    if (fsize <= 0) { fclose(f); return -11; }
-
-    /* Allocate from CRAM1 — the mixer hardware can only DMA from CRAM1 */
-    void *buf = of_mixer_alloc_samples((uint32_t)fsize);
-    if (!buf) { fclose(f); return -2; }
-
-    /* Read entire file into CRAM1 */
-    uint8_t *dst = (uint8_t *)buf;
-    long remaining = fsize;
-    while (remaining > 0) {
-        long n = (long)fread(dst, 1, remaining > 4096 ? 4096 : remaining, f);
-        if (n <= 0) { fclose(f); return -4; }
-        dst += n;
-        remaining -= n;
-    }
-    fclose(f);
-
-    /* Flush D-cache — CRAM1 cached writes must reach SRAM before
-     * the mixer hardware DMA reads them. */
-    of_cache_flush();
-
-    /* Validate header */
     const ofsf_header_t *hdr = (const ofsf_header_t *)buf;
     if (hdr->magic != OFSF_MAGIC || hdr->version != OFSF_VERSION)
-        return -5;
+        return;
 
-    /* Set up pointers into the loaded data */
     const uint8_t *base = (const uint8_t *)buf;
     loaded_header  = hdr;
     loaded_presets = (const ofsf_preset_t *)(base + sizeof(ofsf_header_t));
     loaded_zones   = (const ofsf_zone_t *)(base + sizeof(ofsf_header_t) +
                       OFSF_PRESET_COUNT * sizeof(ofsf_preset_t));
     sample_base    = base + hdr->sample_data_offset;
-
-    bank_loaded = 1;
-    return 0;
-}
-
-void of_smp_bank_unload(void)
-{
-    loaded_header  = 0;
-    loaded_presets = 0;
-    loaded_zones   = 0;
-    sample_base    = 0;
-    bank_loaded    = 0;
-    of_mixer_free_samples();
 }
 
 const ofsf_header_t *of_smp_bank_get(void)
@@ -91,7 +51,7 @@ const void *of_smp_bank_sample_base(void)
 int of_smp_zone_lookup(int bank, int program, int key, int velocity,
                        const ofsf_zone_t **zones_out, int max_zones)
 {
-    if (!bank_loaded || !loaded_presets || !loaded_zones)
+    if (!loaded_header || !loaded_presets || !loaded_zones)
         return 0;
     if (program < 0 || program > 127)
         return 0;

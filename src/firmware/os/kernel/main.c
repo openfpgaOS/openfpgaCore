@@ -8,6 +8,7 @@
 #include "loader.h"
 #include "caps_table.h"
 #include "services_table.h"
+#include "bank_preload.h"
 #include <stddef.h>
 #include <string.h>
 
@@ -152,6 +153,10 @@ void os_main(void) {
     int fs_slots = filesystem_init();
     of_term_printf(" \033[92m%d slot%s\033[0m\n",
                    fs_slots, fs_slots == 1 ? "" : "s");
+
+    /* Auto-load a .ofsf SoundFont if one is present in a data slot.
+     * Silent when no bank is staged; emits its own boot line otherwise. */
+    bank_preload();
 
     of_timer_delay_ms(300);
 

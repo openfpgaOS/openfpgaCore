@@ -241,6 +241,18 @@ static int file_slot_lookup(const char *path) {
     return -1;
 }
 
+int file_slot_get_count(void) {
+    return file_slot_count;
+}
+
+const char *file_slot_get(int idx, uint32_t *slot_id_out) {
+    if (idx < 0 || idx >= file_slot_count)
+        return NULL;
+    if (slot_id_out)
+        *slot_id_out = file_slots[idx].slot_id;
+    return file_slots[idx].filename;
+}
+
 /* ======================================================================
  * Heap (brk) management
  * ====================================================================== */
@@ -317,9 +329,6 @@ static void dir_probe_slots(void) {
             name[6] = '\0';
         }
 
-        of_term_printf("    slot %d  %7d  %s\n",
-                       (int)slot, (int)sz, name);
-
         if (file_slot_lookup(name) < 0)
             file_slot_register(slot, name);
     }
@@ -330,7 +339,6 @@ static void dir_probe_slots(void) {
  * (matches what apps will see via opendir). */
 int filesystem_init(void) {
     int before = file_slot_count;
-    of_term_putchar('\n');
     dir_probe_slots();
     return file_slot_count - before;
 }
