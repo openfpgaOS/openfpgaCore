@@ -16,9 +16,9 @@
 #include "regs.h"
 #include "cache.h"
 
-#define MIXER_MAX_VOICES     32
+#define MIXER_MAX_VOICES     48
 #define MIXER_OUTPUT_RATE    48000
-#define MIXER_SCRATCH_VOICE  31
+#define MIXER_SCRATCH_VOICE  47
 
 /* CTRL register bits */
 #define CTRL_ACTIVE  (1 << 0)
@@ -27,7 +27,24 @@
 #define CTRL_BIDI    (1 << 3)
 
 static int mixer_initialized;
-static uint32_t voice_active_mask;
+/* 48 voices split across two 32-bit MMIO IRQ registers (low = [0..31],
+ * high = [32..47]).  We mirror that in software as a 64-bit mask. */
+static uint64_t voice_active_mask;
+
+static inline uint64_t read_irq_pending(void)
+{
+    uint32_t lo = MIX_IRQ_PENDING;
+    uint32_t hi = MIX_IRQ_PENDING_HI;
+    return ((uint64_t)hi << 32) | lo;
+}
+
+static inline void write_irq_clear(uint64_t mask)
+{
+    uint32_t lo = (uint32_t)mask;
+    uint32_t hi = (uint32_t)(mask >> 32);
+    if (lo) MIX_IRQ_CLEAR    = lo;
+    if (hi) MIX_IRQ_CLEAR_HI = hi;
+}
 
 /* Shadow CTRL per voice — every function that modifies CTRL updates
  * the shadow first, then calls write_ctrl(). */
@@ -54,8 +71,7 @@ static uint8_t master_vol;
  * audio pump sees them, leaving stale owner tracking that kills
  * the wrong voices later. */
 static void sync_voice_mask(void) {
-    uint32_t ended = MIX_IRQ_PENDING;
-    voice_active_mask &= ~ended;
+    voice_active_mask &= ~read_irq_pending();
 }
 
 /* Bounds-only check — like the Amiga's Paula, register writes always
@@ -73,7 +89,7 @@ static void write_ctrl(int voice) {
      * Strip ACTIVE for voices not in the software mask — this lets
      * set_loop/set_bidi update BRAM flags without accidentally
      * triggering an inactive→active transition in the RTL. */
-    if (!(voice_active_mask & (1u << voice)))
+    if (!(voice_active_mask & ((uint64_t)1 << voice)))
         ctrl &= ~CTRL_ACTIVE;
     MIX_VOICE_CTRL = ctrl;
 }
@@ -149,8 +165,9 @@ void of_mixer_init(int max_voices, int output_rate)
     for (int i = 0; i < MIXER_NUM_GROUPS; i++)
         group_vol[i] = 255;
     master_vol = 255;
-    /* Clear any pending IRQs */
-    MIX_IRQ_CLEAR = 0xFFFFFFFF;
+    /* Clear any pending IRQs (both halves) */
+    MIX_IRQ_CLEAR    = 0xFFFFFFFF;
+    MIX_IRQ_CLEAR_HI = 0xFFFFFFFF;
     MIX_CTRL = 1;
     voice_active_mask = 0;
     mixer_initialized = 1;
@@ -174,7 +191,7 @@ static int alloc_voice(int priority)
     /* First pass: find a free voice */
     int voice = -1;
     for (int i = 0; i < MIXER_SCRATCH_VOICE; i++) {
-        if (!(voice_active_mask & (1u << i))) {
+        if (!(voice_active_mask & ((uint64_t)1 << i))) {
             voice = i;
             break;
         }
@@ -255,11 +272,11 @@ static int play_internal(const uint8_t *pcm, uint32_t sample_count,
      * sync_voice_mask() no longer clears IRQs (it peeks), so an old
      * end bit could still be set.  Without this, poll_ended() would
      * see the stale bit and immediately mark this voice as dead. */
-    MIX_IRQ_CLEAR = (1u << voice);
+    write_irq_clear((uint64_t)1 << voice);
 
     /* Set mask BEFORE write_ctrl — write_ctrl strips CTRL_ACTIVE
      * for voices not in voice_active_mask (safety for set_loop/set_bidi). */
-    voice_active_mask |= (1u << voice);
+    voice_active_mask |= ((uint64_t)1 << voice);
     write_ctrl(voice);
     return voice;
 }
@@ -294,7 +311,7 @@ void of_mixer_retrigger(int voice, const uint8_t *pcm_s16,
      * sync_voice_mask() sees the old end event and clears our mask bit,
      * causing set_volume/set_rate/etc. to silently fail (voice_valid()
      * returns false) and of_mixer_play() to steal this voice. */
-    MIX_IRQ_CLEAR = (1u << voice);
+    write_irq_clear((uint64_t)1 << voice);
 
     /* Guard LEN: the FSM runs concurrently and checks pos >= len every
      * mix cycle.  Setting LEN to max first prevents the FSM from killing
@@ -314,7 +331,7 @@ void of_mixer_retrigger(int voice, const uint8_t *pcm_s16,
 
     /* Re-assert active + fmt16, clear loop (caller sets loop after) */
     ctrl_shadow[voice] = CTRL_ACTIVE | CTRL_FMT16;
-    voice_active_mask |= (1u << voice);
+    voice_active_mask |= ((uint64_t)1 << voice);
     write_ctrl(voice);
 }
 
@@ -330,7 +347,7 @@ void of_mixer_stop(int voice)
         MIX_VOICE_VOL_RATE = 0;  /* instant */
         ctrl_shadow[voice] = 0;
         MIX_VOICE_CTRL = 0;
-        voice_active_mask &= ~(1u << voice);
+        voice_active_mask &= ~((uint64_t)1 << voice);
     }
 }
 
@@ -365,7 +382,7 @@ int of_mixer_voice_active(int voice)
     if (voice < 0 || voice >= MIXER_MAX_VOICES)
         return 0;
     sync_voice_mask();
-    return (voice_active_mask & (1u << voice)) ? 1 : 0;
+    return (voice_active_mask & ((uint64_t)1 << voice)) ? 1 : 0;
 }
 
 /* No-op: hardware mixer runs autonomously */
@@ -474,13 +491,16 @@ void of_mixer_set_volume_ramp(int voice, int rate)
 
 uint32_t of_mixer_poll_ended(void)
 {
-    uint32_t mask = MIX_IRQ_PENDING;
+    /* Read + clear both halves so voices 32-47 are reclaimed correctly.
+     * The public API bitmask is 32-bit, so the high half is only used
+     * to keep voice_active_mask in sync — callers relying on the
+     * returned bitmask see voices 0-31 only. */
+    uint64_t mask = read_irq_pending();
     if (mask) {
-        MIX_IRQ_CLEAR = mask;
-        /* Update software tracking */
+        write_irq_clear(mask);
         voice_active_mask &= ~mask;
     }
-    return mask;
+    return (uint32_t)mask;
 }
 
 /* ======================================================================
@@ -502,7 +522,7 @@ void of_mixer_set_group_volume(int group, int volume)
     group_vol[group] = volume & 0xFF;
     /* Reapply volume to all active voices in this group */
     for (int i = 0; i < MIXER_MAX_VOICES; i++) {
-        if (group_shadow[i] == group && (voice_active_mask & (1u << i))) {
+        if (group_shadow[i] == group && (voice_active_mask & ((uint64_t)1 << i))) {
             MIX_VOICE_SEL = i;
             apply_vol_pan(i);
         }
@@ -514,7 +534,7 @@ void of_mixer_set_master_volume(int volume)
     master_vol = volume & 0xFF;
     /* Reapply volume to all active voices */
     for (int i = 0; i < MIXER_MAX_VOICES; i++) {
-        if (voice_active_mask & (1u << i)) {
+        if (voice_active_mask & ((uint64_t)1 << i)) {
             MIX_VOICE_SEL = i;
             apply_vol_pan(i);
         }

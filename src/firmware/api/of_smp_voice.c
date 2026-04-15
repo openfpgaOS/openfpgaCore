@@ -356,7 +356,6 @@ static void voice_cleanup_stolen(void)
 #define HW_MIDI_VOICES 45
 static int hw_voice_next;
 static int hw_voices[HW_MIDI_VOICES];
-static int16_t *hw_silence;
 
 static int hw_voice_alloc(void)
 {
@@ -394,31 +393,6 @@ static int hw_voice_alloc(void)
     if (phys >= 0)
         of_mixer_stop(phys);
     return hv;
-}
-
-static int hw_voice_ensure(int hv)
-{
-    if (hv < 0 || hv >= HW_MIDI_VOICES)
-        return -1;
-    if (hw_voices[hv] >= 0)
-        return hw_voices[hv];
-
-    if (!hw_silence) {
-        hw_silence = (int16_t *)of_mixer_alloc_samples(4);
-        if (hw_silence) {
-            hw_silence[0] = 0;
-            hw_silence[1] = 0;
-            of_cache_flush();
-        }
-    }
-
-    if (!hw_silence)
-        return -1;
-
-    hw_voices[hv] = of_mixer_play((const uint8_t *)hw_silence, 2, 48000, 0, 0);
-    if (hw_voices[hv] >= 0)
-        of_mixer_set_loop(hw_voices[hv], 0, 2);
-    return hw_voices[hv];
 }
 
 /* ------------------------------------------------------------------ */
