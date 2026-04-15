@@ -56,10 +56,9 @@ wire uart_tx_active = 1'b0;
 wire uart_rx_dv = 1'b0;
 wire [7:0] uart_rx_byte = 8'b0;
 wire shutdown_pending = 1'b0;
-wire [4:0] mix_active_count = 5'b0;
+wire [5:0] mix_active_count = 6'b0;
 wire [21:0] mix_voice_pos = 22'b0;
-wire mix_voice_wr_stall = 1'b0;
-wire [31:0] mix_irq_pending = 32'b0;
+wire [47:0] mix_irq_pending = 48'b0;
 wire [31:0] dt_query_data = 32'b0;
 wire dt_query_valid = 1'b0;
 wire [7:0] snac_pin_in = 8'b0;
@@ -158,7 +157,6 @@ axi_periph_slave dut (
     .mix_voice_pos   (mix_voice_pos),
     .mix_irq_clear_wr(),
     .mix_irq_clear_data(),
-    .mix_voice_wr_stall(mix_voice_wr_stall),
     .mix_irq_pending (mix_irq_pending),
 
     .timer_irq  (),
