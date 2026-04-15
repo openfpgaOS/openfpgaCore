@@ -46,9 +46,11 @@ endif
 all: help
 
 # ── Full build ───────────────────────────────────────────────────────
-# bootloader → os → build → test. `build` itself auto-runs the cpu
+# bootloader → os → build → summary. `build` itself auto-runs the cpu
 # generation (file-target rule below) when VexiiRiscv_Full.v is missing.
-full: bootloader os build test summary
+# Verilator tests are NOT part of a full build — run them explicitly
+# via `make test` when you've changed RTL.
+full: bootloader os build summary
 
 # ── Help ─────────────────────────────────────────────────────────────
 help:
@@ -56,7 +58,7 @@ help:
 	@echo "  openfpgaOS — $(TARGET)"
 	@printf "$(C_RESET)\n"
 	@printf "  $(C_HEAD)Build:$(C_RESET)\n"
-	@printf "    $(C_CMD)make $(C_CMD)full$(C_RESET)              bootloader → os → build → test     $(C_DIM)(~9 min)$(C_RESET)\n"
+	@printf "    $(C_CMD)make $(C_CMD)full$(C_RESET)              bootloader → os → build            $(C_DIM)(~9 min)$(C_RESET)\n"
 	@printf "    $(C_CMD)make $(C_CMD)build$(C_RESET)             cpu → compile → reverse bits       $(C_DIM)(~7 min)$(C_RESET)\n"
 	@printf "    $(C_CMD)make $(C_CMD)firmware$(C_RESET)          bootloader → os → MIF patch        $(C_DIM)(~10 sec)$(C_RESET)\n"
 	@printf "    $(C_CMD)make $(C_CMD)os$(C_RESET)                Builds os.bin                      $(C_DIM)(~5 sec)$(C_RESET)\n"
