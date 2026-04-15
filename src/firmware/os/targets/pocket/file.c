@@ -231,6 +231,42 @@ int of_file_read(uint32_t slot_id, uint32_t slot_offset,
 /* Invalidate D-cache for CRAM cached aliases after any bridge
  * operation that writes to CRAM. The bridge bypasses the CPU
  * entirely, so cached reads would return stale data. */
+/* Tell APF to open a deferload data slot.  Required for any slot the
+ * openFPGA manifest declares with "deferload": true — APF registers
+ * only the filename at boot and doesn't populate the datatable size
+ * or back the slot with a read context until this command runs.
+ *
+ * Issuing it on a non-deferload slot is a no-op on the APF side and
+ * is safe.  Callers should run it once per fopen() on a slot:N path. */
+int of_file_openfile(uint32_t slot_id) {
+    /* Same idle wait as of_file_read_raw — command dispatch is dropped
+     * silently unless both READY and WR_IDLE are high. */
+    {
+        uint32_t wait = DMA_TIMEOUT;
+        while ((DS_STATUS & (DS_STATUS_READY | DS_STATUS_WR_IDLE))
+               != (DS_STATUS_READY | DS_STATUS_WR_IDLE)) {
+            if (--wait == 0) return OF_ERR_TIMEOUT;
+        }
+    }
+
+    DS_SLOT_ID = slot_id;
+    fence();
+    DS_COMMAND = DS_CMD_OPENFILE;
+
+    fence();
+    for (int i = 0; i < 100; i++) {
+        uint32_t st = DS_STATUS;
+        if (st & DS_STATUS_ACK)  goto accepted;
+        if (!(st & DS_STATUS_READY)) goto accepted;
+    }
+    /* Retry once if the dispatch guard dropped it */
+    fence();
+    DS_COMMAND = DS_CMD_OPENFILE;
+
+accepted:
+    return file_wait_complete();
+}
+
 int of_file_read_raw(uint32_t slot_id, uint32_t slot_offset,
                       uint32_t bridge_addr, uint32_t length) {
     /* Wait for bridge fully idle — READY (cmd FSM idle) AND WR_IDLE

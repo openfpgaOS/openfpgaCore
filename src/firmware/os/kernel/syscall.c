@@ -11,6 +11,7 @@
 
 /* Internal HAL functions (not exposed in public headers) */
 extern long of_file_size(uint32_t slot_id);
+extern int  of_file_openfile(uint32_t slot_id);
 
 /* dlmalloc functions (provided by of_malloc.c, USE_DL_PREFIX) */
 extern void *dlmalloc(size_t);
@@ -287,6 +288,12 @@ struct linux_dirent64 {
 static void dir_probe_slots(void) {
     char name[FILE_SLOT_NAME_MAX];
     for (uint32_t slot = 0; slot < MAX_DATA_SLOTS; slot++) {
+        /* Deferload slots (openFPGA.json "deferload": true) register
+         * only the filename at boot — size and get-name return empty
+         * until APF opens the file. Issue openfile first so every
+         * slot with actual content shows up in the listing. No-op
+         * for non-deferload slots. */
+        of_file_openfile(slot);
         long sz = of_file_size(slot);
         if (sz <= 0) continue;
 
@@ -553,6 +560,10 @@ static long sys_openat(long dirfd, long pathname, long flags, long mode) {
         int slot = parse_int(&p);
         f->slot_id = (uint32_t)slot;
         f->size = 0;  /* Resolved lazily on first read */
+        /* Tell APF to actually open the file. Required for deferload
+         * slots — without this the datatable size is 0 and reads past
+         * the first ~16 KB silently fail. Harmless on non-deferload. */
+        of_file_openfile((uint32_t)slot);
         return fd;
     }
 
@@ -575,6 +586,7 @@ static long sys_openat(long dirfd, long pathname, long flags, long mode) {
     if (slot >= 0) {
         f->slot_id = (uint32_t)slot;
         f->size = 0;  /* Resolved lazily on first read */
+        of_file_openfile((uint32_t)slot);
         return fd;
     }
 
