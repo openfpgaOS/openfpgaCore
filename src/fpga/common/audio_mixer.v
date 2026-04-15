@@ -178,10 +178,15 @@ localparam S_RD_CTRL_W   = 5'd5;
 localparam S_RD_FIELDS   = 5'd6;
 localparam S_RD_FIELDS_W = 5'd7;
 // Tap fetch (3-stage pipeline: resolve addr → compute word → cache/CRAM):
-localparam S_TAP_RD      = 5'd8;   // issue tap cache BRAM read
-localparam S_TAP_CHECK   = 5'd9;   // check cache hit
-localparam S_TAP_FETCH   = 5'd10;  // resolve_tap_addr (registered)
-localparam S_TAP_ADDR    = 5'd11;  // cram_word_addr (registered)
+localparam S_TAP_RD        = 5'd8;   // issue tap cache BRAM read
+localparam S_TAP_CHECK     = 5'd9;   // check cache hit
+// Tap-address resolve is split across two cycles so the 24-bit raw add
+// and the bounds/wrap mux don't share a 100 MHz cycle:
+//   CALC : raw = cur_pos_int ± offset (registered into tap_raw)
+//   FETCH: bounds-check + wrap/reflect → tap_fetch_addr
+localparam S_TAP_FETCH_CALC = 5'd31; // registered 24-bit raw position
+localparam S_TAP_FETCH     = 5'd10; // bounds + wrap → tap_fetch_addr
+localparam S_TAP_ADDR      = 5'd11;  // cram_word_addr (registered)
 localparam S_TAP_CRAM    = 5'd12;  // cache hit? extract : issue CRAM read
 localparam S_TAP_WAIT    = 5'd13;  // wait for CRAM response
 localparam S_TAP_NEXT    = 5'd14;  // advance tap index or start Hermite
@@ -196,7 +201,11 @@ localparam S_HERMITE_4   = 5'd20;  // clamp to 16-bit
 localparam S_SCALE       = 5'd21;  // log volume v²/256
 localparam S_MULTIPLY    = 5'd22;  // sample × volume (DSP)
 localparam S_ACCUM       = 5'd23;  // accumulate into stereo mix
-localparam S_VOL_RAMP    = 5'd24;  // step volume toward target
+// Volume ramp is split into CALC + WR so the ramp_step / compare /
+// vtbl_a_data write-mux chain doesn't all land in one 100 MHz cycle.
+// CALC registers the stepped values; WR issues the voice-table write.
+localparam S_VOL_RAMP    = 5'd24;  // S_VOL_RAMP_CALC: step toward target
+localparam S_VOL_RAMP_WR = 5'd30;  // commit ramped VOL_LR to voice table
 localparam S_WR_POS      = 5'd25;  // write back position
 localparam S_WR_FRAC     = 5'd26;  // write back fractional pos
 localparam S_WR_DIR      = 5'd27;  // write back direction
@@ -233,6 +242,11 @@ reg [21:0] cur_loop_start;
 reg [7:0]  cur_target_l;
 reg [7:0]  cur_target_r;
 reg [7:0]  cur_vol_rate;
+
+// Registered ramp outputs — broken out so the ramp_step → vtbl_a_data
+// chain is split across two cycles (fixes 100 MHz Fmax violation).
+reg [7:0]  ramp_new_l;
+reg [7:0]  ramp_new_r;
 
 reg        new_dir;
 reg        dir_changed;
@@ -363,49 +377,46 @@ reg        last_cram_valid; // is last_cram_data usable
 // Resolve a tap address for Hermite interpolation.  Offsets are small
 // (−1 to +2), so overshoot past boundaries is at most 2 samples —
 // simple wrap/reflect/clamp, no division needed.
-function [21:0] resolve_tap_addr;
-    input signed [2:0] offset;   // -1, 0, +1, +2
-    input [21:0] pos;            // cur_pos_int
+//
+// Two-stage pipeline (see S_TAP_FETCH_CALC / S_TAP_FETCH):
+//   stage 1: tap_raw = cur_pos_int ± offset (24-bit signed)
+//   stage 2: this function = bounds + wrap/reflect on the registered raw.
+function [21:0] resolve_tap_raw;
+    input signed [23:0] raw;
     input [21:0] len;
     input [21:0] loop_s, loop_e;
-    input        is_loop, is_bidi, is_dir;
-    reg signed [23:0] raw;
+    input        is_loop, is_bidi;
     begin
-        // Compute raw position (direction-aware)
-        if (is_bidi && is_dir)
-            raw = {2'b0, pos} - {{21{offset[2]}}, offset};
-        else
-            raw = {2'b0, pos} + {{21{offset[2]}}, offset};
-
         if (!is_loop) begin
             // One-shot: clamp to [0, len-1]
-            if (raw < 0) resolve_tap_addr = 22'd0;
-            else if (raw >= {2'b0, len}) resolve_tap_addr = len - 22'd1;
-            else resolve_tap_addr = raw[21:0];
+            if (raw < 0) resolve_tap_raw = 22'd0;
+            else if (raw >= {2'b0, len}) resolve_tap_raw = len - 22'd1;
+            else resolve_tap_raw = raw[21:0];
         end else if (!is_bidi) begin
             // Forward loop: wrap within [loop_s, loop_e).
             // Overshoot is at most 2, so one wrap suffices.
             if (raw >= {2'b0, loop_e})
-                resolve_tap_addr = loop_s + (raw[21:0] - loop_e);
+                resolve_tap_raw = loop_s + (raw[21:0] - loop_e);
             else if (raw < {2'b0, loop_s})
-                resolve_tap_addr = loop_e - 22'd1 - (loop_s - 22'd1 - raw[21:0]);
-            else if (raw < 0) resolve_tap_addr = 22'd0;
-            else resolve_tap_addr = raw[21:0];
+                resolve_tap_raw = loop_e - 22'd1 - (loop_s - 22'd1 - raw[21:0]);
+            else if (raw < 0) resolve_tap_raw = 22'd0;
+            else resolve_tap_raw = raw[21:0];
         end else begin
             // Bidi: reflect at boundaries
             if (raw >= {2'b0, loop_e})
-                resolve_tap_addr = loop_e - 22'd1 - (raw[21:0] - loop_e);
+                resolve_tap_raw = loop_e - 22'd1 - (raw[21:0] - loop_e);
             else if (raw < {2'b0, loop_s})
-                resolve_tap_addr = loop_s + (loop_s - raw[21:0]);
-            else if (raw < 0) resolve_tap_addr = 22'd0;
-            else resolve_tap_addr = raw[21:0];
+                resolve_tap_raw = loop_s + (loop_s - raw[21:0]);
+            else if (raw < 0) resolve_tap_raw = 22'd0;
+            else resolve_tap_raw = raw[21:0];
         end
     end
 endfunction
 
 // Resolved addresses for all 4 taps
 reg [21:0] tap_addrs [0:3];
-// Pipeline regs: S_TAP_FETCH → S_TAP_ADDR → S_TAP_CRAM
+// Pipeline regs: S_TAP_FETCH_CALC → S_TAP_FETCH → S_TAP_ADDR → S_TAP_CRAM
+reg signed [23:0] tap_raw;       // registered raw (pos ± offset)
 reg [21:0] tap_fetch_addr;      // resolved sample address
 reg [21:0] tap_fetch_word;
 
@@ -485,12 +496,15 @@ always @(posedge clk) begin
         vtbl_a_wr <= 0;
         vtbl_a_addr <= 0;
         vtbl_a_data <= 0;
+        ramp_new_l <= 0;
+        ramp_new_r <= 0;
         voice_active <= 48'd0;
         cache_valid <= 48'd0;
         dir_changed <= 0;
         new_dir <= 0;
         voice_end_pending <= 48'd0;
         fetch_tap_idx <= 0;
+        tap_raw <= 0;
         fetch_count <= 0;
         last_cram_valid <= 0;
         tcache_a_wr <= 0;
@@ -705,7 +719,7 @@ always @(posedge clk) begin
                         fetch_tap_idx <= 2'd3;
                         fetch_count <= 3'd1;
                         last_cram_valid <= 0;
-                        state <= S_TAP_FETCH;
+                        state <= S_TAP_FETCH_CALC;
                     end else if (hit_rev) begin
                         tap_0  <= $signed(cached[15:0]);
                         tap_1  <= $signed(cached[31:16]);
@@ -713,31 +727,46 @@ always @(posedge clk) begin
                         fetch_tap_idx <= 2'd0;
                         fetch_count <= 3'd1;
                         last_cram_valid <= 0;
-                        state <= S_TAP_FETCH;
+                        state <= S_TAP_FETCH_CALC;
                     end else begin
                         fetch_tap_idx <= 2'd0;
                         fetch_count <= 3'd4;
                         last_cram_valid <= 0;
-                        state <= S_TAP_FETCH;
+                        state <= S_TAP_FETCH_CALC;
                     end
                 end
             end
 
-            // ---- Resolve tap address (pipeline stage 1) ----
-            // Only resolve_tap_addr here — registered into tap_fetch_addr.
-            // cram_word_addr deferred to S_TAP_ADDR (next cycle).
-            S_TAP_FETCH: begin
-                begin : tap_fetch_block
+            // ---- Tap address stage 1: compute raw (pos ± offset) ----
+            // Registered into tap_raw so the 24-bit add + Decoder
+            // (offset mux) don't share a cycle with the bounds/wrap
+            // logic in S_TAP_FETCH.
+            S_TAP_FETCH_CALC: begin
+                begin : tap_raw_block
                     reg signed [2:0] offset;
-                    reg [21:0] addr;
                     case (fetch_tap_idx)
                         2'd0: offset = -3'sd1;
                         2'd1: offset = 3'sd0;
                         2'd2: offset = 3'sd1;
                         2'd3: offset = 3'sd2;
                     endcase
-                    addr = resolve_tap_addr(offset, cur_pos_int, cur_len,
-                        cur_loop_start, cur_loop_end, cur_loop, cur_bidi, cur_dir);
+                    if (cur_bidi && cur_dir)
+                        tap_raw <= {2'b0, cur_pos_int} - {{21{offset[2]}}, offset};
+                    else
+                        tap_raw <= {2'b0, cur_pos_int} + {{21{offset[2]}}, offset};
+                end
+                state <= S_TAP_FETCH;
+            end
+
+            // ---- Tap address stage 2: bounds + wrap/reflect ----
+            // Uses registered tap_raw from the previous cycle.  Result
+            // is registered into tap_fetch_addr.  cram_word_addr is
+            // deferred to S_TAP_ADDR (next cycle).
+            S_TAP_FETCH: begin
+                begin : tap_fetch_block
+                    reg [21:0] addr;
+                    addr = resolve_tap_raw(tap_raw, cur_len,
+                        cur_loop_start, cur_loop_end, cur_loop, cur_bidi);
                     tap_fetch_addr <= addr;
                     fetch_pos <= addr;
                     tap_addrs[fetch_tap_idx] <= addr;
@@ -811,7 +840,7 @@ always @(posedge clk) begin
                 end else begin
                     // More taps to fetch
                     fetch_tap_idx <= fetch_tap_idx + 2'd1;
-                    state <= S_TAP_FETCH;
+                    state <= S_TAP_FETCH_CALC;
                 end
             end
 
@@ -912,27 +941,31 @@ always @(posedge clk) begin
                 state <= S_VOL_RAMP;
             end
 
-            // ---- Volume ramp: step VOL_LR toward VOL_TARGET ----
+            // ---- Volume ramp stage 1: compute stepped values ----
+            // Registered into ramp_new_l/r so the ramp_step comparator
+            // chain doesn't feed directly into the 32-bit vtbl_a_data
+            // write mux (that combined path is the 100 MHz Fmax offender).
             S_VOL_RAMP: begin
                 if (cur_vol_rate == 8'd0) begin
                     // Instant: snap to target
-                    if (cur_vol_l != cur_target_l || cur_vol_r != cur_target_r) begin
-                        vtbl_a_wr <= 1;
-                        vtbl_a_addr <= {cur_voice, VTBL_VOL_LR};
-                        vtbl_a_data <= {16'd0, cur_target_r, cur_target_l};
-                    end
+                    ramp_new_l <= cur_target_l;
+                    ramp_new_r <= cur_target_r;
                 end else begin
-                    // Ramp: step toward target
-                    begin : ramp_block
-                        reg [7:0] new_l, new_r;
-                        new_l = ramp_step(cur_vol_l, cur_target_l, cur_vol_rate);
-                        new_r = ramp_step(cur_vol_r, cur_target_r, cur_vol_rate);
-                        if (new_l != cur_vol_l || new_r != cur_vol_r) begin
-                            vtbl_a_wr <= 1;
-                            vtbl_a_addr <= {cur_voice, VTBL_VOL_LR};
-                            vtbl_a_data <= {16'd0, new_r, new_l};
-                        end
-                    end
+                    // Ramp: one step toward target
+                    ramp_new_l <= ramp_step(cur_vol_l, cur_target_l, cur_vol_rate);
+                    ramp_new_r <= ramp_step(cur_vol_r, cur_target_r, cur_vol_rate);
+                end
+                state <= S_VOL_RAMP_WR;
+            end
+
+            // ---- Volume ramp stage 2: write back if changed ----
+            // Compare is now register-to-register (short path) and the
+            // write mux sees only the already-registered ramp_new_*.
+            S_VOL_RAMP_WR: begin
+                if (ramp_new_l != cur_vol_l || ramp_new_r != cur_vol_r) begin
+                    vtbl_a_wr <= 1;
+                    vtbl_a_addr <= {cur_voice, VTBL_VOL_LR};
+                    vtbl_a_data <= {16'd0, ramp_new_r, ramp_new_l};
                 end
                 state <= S_WR_POS;
             end

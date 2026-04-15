@@ -47,9 +47,14 @@ set_input_delay -clock cram0_clk_pin -min 1.0 [get_ports {cram0_dq[*] cram0_wait
 
 # CRAM1: runs on clk_74a (bridge clock), async access only — no sync burst.
 # The psram controller handles its own timing with state machine delays.
-# Relaxed output delay: async PSRAM doesn't need tight setup to clock edge.
-set_output_delay -clock clk_74a -max 2.0 [get_ports {cram1_a[*] cram1_dq[*] cram1_adv_n cram1_cre cram1_ce0_n cram1_ce1_n cram1_oe_n cram1_we_n cram1_ub_n cram1_lb_n}]
-set_output_delay -clock clk_74a -min -1.0 [get_ports {cram1_a[*] cram1_dq[*] cram1_adv_n cram1_cre cram1_ce0_n cram1_ce1_n cram1_oe_n cram1_we_n cram1_ub_n cram1_lb_n}]
+# DQ is latched by the chip on we_n / oe_n edges, not by clk_74a, so
+# declare the DQ pad paths as false: clk_74a-relative setup/hold is
+# meaningless for async-written data. Address/control keep the 2.0 ns
+# bound so their fabric-to-pad delay stays bounded relative to we_n
+# assertion (which does track clk_74a).
+set_output_delay -clock clk_74a -max 2.0 [get_ports {cram1_a[*] cram1_adv_n cram1_cre cram1_ce0_n cram1_ce1_n cram1_oe_n cram1_we_n cram1_ub_n cram1_lb_n}]
+set_output_delay -clock clk_74a -min -1.0 [get_ports {cram1_a[*] cram1_adv_n cram1_cre cram1_ce0_n cram1_ce1_n cram1_oe_n cram1_we_n cram1_ub_n cram1_lb_n}]
+set_false_path -to [get_ports {cram1_dq[*]}]
 set_input_delay -clock clk_74a -max 8.0 [get_ports {cram1_dq[*] cram1_wait}]
 set_input_delay -clock clk_74a -min 1.0 [get_ports {cram1_dq[*] cram1_wait}]
 
