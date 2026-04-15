@@ -28,7 +28,7 @@ extern "C" {
 #include <stdint.h>
 #include <stddef.h>
 
-#define OF_MIXER_MAX_VOICES  32
+#define OF_MIXER_MAX_VOICES  48
 #define OF_MIXER_OUTPUT_RATE 48000
 
 /* Convert sample rate in Hz to 16.16 fixed-point for raw API.
