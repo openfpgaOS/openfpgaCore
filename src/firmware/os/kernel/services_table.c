@@ -152,6 +152,7 @@ void services_table_init(void) {
     svc->mixer_set_group     = of_mixer_set_group;
     svc->mixer_set_group_volume = of_mixer_set_group_volume;
     svc->mixer_set_master_volume = of_mixer_set_master_volume;
+    svc->mixer_set_filter    = of_mixer_set_filter;
 
     /* Audio */
     svc->audio_init     = of_audio_init;

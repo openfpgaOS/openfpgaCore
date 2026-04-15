@@ -88,6 +88,13 @@ void of_mixer_set_group(int voice, int group);
 void of_mixer_set_group_volume(int group, int volume);
 void of_mixer_set_master_volume(int volume);
 
+/* Per-voice SVF low-pass filter.
+ *   cutoff_q016 : Q0.16 SVF cutoff coefficient (raw register value).
+ *                 65535 ≈ wide-open, lower values close it down.
+ *   q           : 0..255 resonance (lower = more damping in HW).
+ *   enable      : 0 = bypass, 1 = filter active. */
+void of_mixer_set_filter(int voice, int cutoff_q016, int q, int enable);
+
 /* Sample memory bump allocator */
 void *of_mixer_alloc_samples(uint32_t size);
 void of_mixer_free_samples(void);

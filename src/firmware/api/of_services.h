@@ -113,6 +113,7 @@ struct of_services_table {
     void      (*mixer_set_group)(int voice, int group);
     void      (*mixer_set_group_volume)(int group, int volume);
     void      (*mixer_set_master_volume)(int volume);
+    void      (*mixer_set_filter)(int voice, int cutoff_q016, int q, int enable);
     int       (*audio_stream_open)(int sample_rate);
     int       (*audio_stream_write)(const int16_t *samples, int count);
     int       (*audio_stream_ready)(void);

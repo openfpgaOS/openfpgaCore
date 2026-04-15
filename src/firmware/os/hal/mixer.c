@@ -525,6 +525,18 @@ void of_mixer_set_master_volume(int volume)
     }
 }
 
+void of_mixer_set_filter(int voice, int cutoff_q016, int q, int enable)
+{
+    if (!voice_in_range(voice)) return;
+    if (cutoff_q016 < 0)     cutoff_q016 = 0;
+    if (cutoff_q016 > 65535) cutoff_q016 = 65535;
+    if (q < 0)   q = 0;
+    if (q > 255) q = 255;
+    MIX_VOICE_SEL       = voice;
+    MIX_VOICE_FILTER_FC = (uint32_t)cutoff_q016;
+    MIX_VOICE_FILTER_Q  = ((enable ? 1u : 0u) << 8) | (uint32_t)q;
+}
+
 /* ======================================================================
  * Sample memory bump allocator
  * ====================================================================== */

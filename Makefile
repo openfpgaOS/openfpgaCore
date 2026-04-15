@@ -193,28 +193,26 @@ sdk: check-target
 		}; \
 		printf "$(C_HEAD)[sdk]$(C_RESET) $$dir\n"; \
 		\
-		# Headers \
-		cp src/firmware/api/of*.h "$$dir/src/sdk/include/"; \
-		# SDL2 compatibility shim (header-only) \
-		mkdir -p "$$dir/src/sdk/include/SDL2"; \
-		cp src/firmware/api/SDL2/*.h "$$dir/src/sdk/include/SDL2/" 2>/dev/null || true; \
+		# Headers — all .h recursively under src/firmware/api/ (includes \
+		# the SDL2/ subtree) mirror into the SDK's include/.  --delete so \
+		# retired headers vanish from the SDK on their own. \
+		rsync -a --delete \
+			--include='*/' --include='*.h' --exclude='*' \
+			src/firmware/api/ "$$dir/src/sdk/include/"; \
 		printf "  $(C_OK)headers + SDL2$(C_RESET) → src/sdk/include/\n"; \
 		\
-		# Build rules + linker script \
-		cp src/firmware/api/sdk.mk "$$dir/src/sdk/sdk.mk"; \
-		cp src/firmware/api/app.ld "$$dir/src/sdk/app.ld"; \
-		printf "  $(C_OK)sdk.mk + app.ld$(C_RESET) → src/sdk/\n"; \
-		\
-		# Mandatory SDK runtime: of_init.c is auto-linked into every \
-		# app and contains the load-bearing constructor that reads the \
-		# AT_OF_CAPS / AT_OF_SVC auxv tags into _of_caps_ptr / _of_svc_ptr. \
-		# Apps will segfault on the first of_get_caps() if this is stale. \
-		cp src/firmware/api/of_init.c "$$dir/src/sdk/of_init.c"; \
-		printf "  $(C_OK)of_init.c$(C_RESET)      → src/sdk/\n"; \
-		\
-		# Optional helper sources (large standalone modules / opt-in) \
-		cp src/firmware/api/of_midi.c   "$$dir/src/sdk/" 2>/dev/null || true; \
-		cp src/firmware/api/of_cxxabi.cpp "$$dir/src/sdk/" 2>/dev/null || true; \
+		# OS-owned files at src/sdk/ top level: opt-in SDK sources \
+		# (of_*.c, of_*.cpp), build rules (sdk.mk), and linker script \
+		# (app.ld).  --delete + --include/--exclude filters make this a \
+		# one-way mirror of exactly these patterns — pc/ and platforms/ \
+		# subdirs live alongside and are SDK-owned, so they're left \
+		# alone because they don't match any --include. \
+		rsync -a --delete \
+			--include='of_*.c' --include='of_*.cpp' \
+			--include='sdk.mk' --include='app.ld' \
+			--exclude='*' \
+			src/firmware/api/ "$$dir/src/sdk/"; \
+		printf "  $(C_OK)sources + sdk.mk + app.ld$(C_RESET) → src/sdk/\n"; \
 		\
 		# musl headers + static library + crt objects \
 		mkdir -p "$$dir/src/sdk/musl/include" "$$dir/src/sdk/musl/lib"; \
@@ -226,14 +224,10 @@ sdk: check-target
 		cp src/firmware/musl/lib/crtn.o    "$$dir/src/sdk/musl/lib/"; \
 		printf "  $(C_OK)musl$(C_RESET)           → src/sdk/musl/\n"; \
 		\
-		# Remove stale files retired in OS-source cleanups \
-		rm -rf  "$$dir/src/sdk/libc"; \
-		rm -f   "$$dir/src/sdk/of_posix.c" "$$dir/src/sdk/of_posix.o"; \
-		rm -f   "$$dir/src/sdk/include/of_libc.h" \
-		        "$$dir/src/sdk/include/of_link.h" \
-		        "$$dir/src/sdk/include/of_bram.h"; \
-		rm -rf  "$$dir/src/sdk/crt"; \
-		printf "  $(C_OK)stale cleanup$(C_RESET)  → libc/, of_posix.c, crt/, retired headers\n"; \
+		# Legacy directories that used to live under src/sdk/ — the \
+		# rsync above won't touch them because they're outside its \
+		# filter, so nuke them here once. \
+		rm -rf  "$$dir/src/sdk/libc" "$$dir/src/sdk/crt"; \
 		\
 		# Runtime binaries (bitstream, kernel, loader) \
 		mkdir -p "$$dir/runtime"; \
@@ -245,6 +239,10 @@ sdk: check-target
 			printf "  $(C_OK)os.bin$(C_RESET)         → runtime/\n" || true; \
 		test -f $(CHIP32_DIR)/loader.bin && cp $(CHIP32_DIR)/loader.bin "$$dir/runtime/" && \
 			printf "  $(C_OK)loader.bin$(C_RESET)     → runtime/\n" || true; \
+		\
+		# SC-55 General MIDI bank (for of_midi playback). \
+		test -f assets/banks/sc55.ofsf && cp assets/banks/sc55.ofsf "$$dir/runtime/bank.ofsf" && \
+			printf "  $(C_OK)sc55.ofsf$(C_RESET)      → runtime/bank.ofsf\n" || true; \
 		\
 		# .sof for JTAG reset via quartus_pgm. scripts/debug.sh in the \
 		# SDK consumer reloads this over JTAG between push and stream so \
