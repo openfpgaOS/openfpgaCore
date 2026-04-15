@@ -27,16 +27,14 @@ fi
 echo "Generating VexiiRiscv with Zicbom..."
 cd "$VEXII_DIR"
 
-sbt "runMain vexiiriscv.Generate \
+sbt "runMain vexiiriscv.soc.openfpgaos.GenOpenFpgaVexii \
       --xlen=32 \
       --with-rvm --with-rva --with-rvf --with-rvc \
-      --with-rvZcbm \
       --with-fetch-l1 --fetch-l1-sets=512 --fetch-l1-ways=2 --fetch-l1-refill-count=2 \
-      --fetch-l1-hardware-prefetch=nl --fetch-axi4 \
+      --fetch-l1-hardware-prefetch=nl \
       --with-lsu-l1 --lsu-l1-sets=256 --lsu-l1-ways=4 \
       --lsu-l1-refill-count=2 --lsu-l1-writeback-count=2 \
       --lsu-l1-store-buffer-slots=4 --lsu-l1-store-buffer-ops=32 \
-      --lsu-l1-axi4 \
       --lsu-software-prefetch --lsu-hardware-prefetch rpt \
       --with-btb --btb-sets=256 --relaxed-btb --relaxed-btb-hit \
       --with-gshare --with-ras \
@@ -60,19 +58,11 @@ sbt "runMain vexiiriscv.Generate \
 #   0x38000000 128MB  CRAM uncached  (uncached, non-exec)
 #   0x40000000   1GB  IO + SDRAM_UC  (uncached, non-exec) — covers 0x50000000 SDRAM uncached alias
 
-OUTPUT="$VEXII_DIR/VexiiRiscv.v"
-if [ -f "$OUTPUT" ]; then
-    if [ -f "$SCRIPT_DIR/VexiiRiscv_Full.v" ]; then
-        cp "$SCRIPT_DIR/VexiiRiscv_Full.v" "$SCRIPT_DIR/VexiiRiscv_Full.v.bak"
-        echo "Backed up old VexiiRiscv_Full.v"
-    fi
-    cp "$OUTPUT" "$SCRIPT_DIR/VexiiRiscv_Full.v"
-    echo ""
-    echo "Done! Copied to VexiiRiscv_Full.v"
-    echo "Extensions: RV32IMAFCB + Zicbom"
-    echo "Cache mgmt: Zicbom enabled in hardware"
-    echo "Store buffer: 2 slots, 32 ops"
-else
-    echo "ERROR: VexiiRiscv.v not found after generation"
+OUTPUT="$VEXII_DIR/OpenFpgaVexii.v"
+if [ ! -f "$OUTPUT" ]; then
+    echo "ERROR: OpenFpgaVexii.v not found after generation"
     exit 1
 fi
+echo ""
+echo "Done! Generated $OUTPUT"
+echo "Extensions: RV32IMAFCB + Zicbom"
