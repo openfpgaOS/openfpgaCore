@@ -231,42 +231,6 @@ int of_file_read(uint32_t slot_id, uint32_t slot_offset,
 /* Invalidate D-cache for CRAM cached aliases after any bridge
  * operation that writes to CRAM. The bridge bypasses the CPU
  * entirely, so cached reads would return stale data. */
-/* Tell APF to open a deferload data slot.  Required for any slot the
- * openFPGA manifest declares with "deferload": true — APF registers
- * only the filename at boot and doesn't populate the datatable size
- * or back the slot with a read context until this command runs.
- *
- * Issuing it on a non-deferload slot is a no-op on the APF side and
- * is safe.  Callers should run it once per fopen() on a slot:N path. */
-int of_file_openfile(uint32_t slot_id) {
-    /* Same idle wait as of_file_read_raw — command dispatch is dropped
-     * silently unless both READY and WR_IDLE are high. */
-    {
-        uint32_t wait = DMA_TIMEOUT;
-        while ((DS_STATUS & (DS_STATUS_READY | DS_STATUS_WR_IDLE))
-               != (DS_STATUS_READY | DS_STATUS_WR_IDLE)) {
-            if (--wait == 0) return OF_ERR_TIMEOUT;
-        }
-    }
-
-    DS_SLOT_ID = slot_id;
-    fence();
-    DS_COMMAND = DS_CMD_OPENFILE;
-
-    fence();
-    for (int i = 0; i < 100; i++) {
-        uint32_t st = DS_STATUS;
-        if (st & DS_STATUS_ACK)  goto accepted;
-        if (!(st & DS_STATUS_READY)) goto accepted;
-    }
-    /* Retry once if the dispatch guard dropped it */
-    fence();
-    DS_COMMAND = DS_CMD_OPENFILE;
-
-accepted:
-    return file_wait_complete();
-}
-
 int of_file_read_raw(uint32_t slot_id, uint32_t slot_offset,
                       uint32_t bridge_addr, uint32_t length) {
     /* Wait for bridge fully idle — READY (cmd FSM idle) AND WR_IDLE
@@ -319,10 +283,21 @@ void of_file_inval_cram(uint32_t bridge_addr, uint32_t length) {
 
 long of_file_size(uint32_t slot_id) {
     /* Read file size from APF datatable via hardware query register.
-     * Datatable layout: each data slot has 2 entries (flags, size).
-     * Slot N size is at entry N*2+1.  Entries 15+ are save slot sizes,
-     * so only data slots 0-6 (entries 0-13) are valid. */
-    if (slot_id > 6)
+     *
+     * IMPORTANT: APF's datatable is indexed by ARRAY POSITION in
+     * data.json (DT_QUERY), while DS_CMD_READ and DS_CMD_GETFILE use
+     * the `id` field. To keep the kernel trivial and let fopen by
+     * filename work, data.json MUST be arranged so array[N].id == N
+     * for every data slot the core uses.
+     *
+     * When adding a new slot, insert it at position matching its id
+     * (don't just append) so callers can use one number throughout.
+     * Save slots (id >= 10) live past the data-slot range and are
+     * handled separately via of_save_*.
+     *
+     * Each datatable entry is 2 words (flags, size), so slot N's size
+     * lives at entry N*2+1. APF supports up to 32 data slots. */
+    if (slot_id >= 32)
         return -1;
 
     /* Toggle-based CDC: writing DT_QUERY flips a toggle bit. The
@@ -363,6 +338,23 @@ int of_file_get_name(uint32_t slot_id, char *name_out, uint32_t name_max) {
     for (int i = 0; i < 64; i++)
         resp32[i] = 0;
 
+    of_cache_inval_range((void *)GETFILE_CACHED, 256);
+    __asm__ volatile("fence" ::: "memory");
+
+    /* Prime APF's internal slot state with a throw-away 4-byte read.
+     * Empirically, APF only returns a valid filename from GETFILE after
+     * the slot has been touched by DS_CMD_READ via the bridge. Slots
+     * loaded exclusively through the boot-ROM path (e.g. the OS binary
+     * via the bootloader) or slots never yet accessed return an empty
+     * response struct. The primer read is 4 bytes at offset 0; the data
+     * is discarded. rc is ignored — if the read fails, GETFILE will
+     * also fail cleanly below. */
+    (void)of_file_read_raw(slot_id, 0, bridge_addr, 4);
+
+    /* Re-clear the response buffer — the primer read landed its 4 bytes
+     * there, and we want GETFILE to start from known zeros. */
+    for (int i = 0; i < 64; i++)
+        resp32[i] = 0;
     of_cache_inval_range((void *)GETFILE_CACHED, 256);
     __asm__ volatile("fence" ::: "memory");
 

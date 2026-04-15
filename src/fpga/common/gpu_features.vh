@@ -2,7 +2,7 @@
 // gpu_features.vh — GPU variant → feature flag derivation
 // ----------------------------------------------------------------------------
 // Define exactly one of:
-//   GPU_VARIANT_LITE   — Quake/Doom/Duke3D path: span renderer only
+//   GPU_VARIANT_LITE   — 2.5D software-renderer path: span renderer only
 //   GPU_VARIANT_FULL   — Everything: triangles, vcolor, bilinear, alpha
 //
 // Default (no variant macro defined) is GPU_VARIANT_LITE because the only
@@ -22,10 +22,10 @@
 `endif
 
 // ----------------------------------------------------------------------------
-// LITE variant: span renderer for Quake/Doom/Duke3D
+// LITE variant: span renderer for 2.5D software engines
 // ----------------------------------------------------------------------------
 `ifdef GPU_VARIANT_LITE
-  `define GPU_FEAT_PERSP_SPAN      // Quake-style 16-px perspective subdivision
+  `define GPU_FEAT_PERSP_SPAN      // 16-px perspective-subdivision span renderer
   `define GPU_FEAT_FRAG_PIPELINE   // 1-pixel/cycle pipelined fragment processor
   // Triangles, vcolor, bilinear, alpha intentionally absent.
 `endif

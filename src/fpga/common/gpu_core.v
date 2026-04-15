@@ -637,7 +637,8 @@ assign tex_req_wide  = 1'b0;
 // ----------------------------------------------------------------
 // Perspective span — projection-space state + segment setup
 // ----------------------------------------------------------------
-// Quake-style 16-pixel affine subdivision. The span command supplies
+// 16-pixel affine subdivision (perspective-correct at segment ends,
+// linear interpolation within each segment). The span command supplies
 // (s/z)_start, (t/z)_start, (1/z)_start and their per-pixel deltas in
 // projection space (sdivz, tdivz, zi_persp + their *_step). Per 16-pixel
 // segment, the GPU computes:

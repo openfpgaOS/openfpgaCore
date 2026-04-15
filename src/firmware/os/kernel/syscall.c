@@ -11,7 +11,6 @@
 
 /* Internal HAL functions (not exposed in public headers) */
 extern long of_file_size(uint32_t slot_id);
-extern int  of_file_openfile(uint32_t slot_id);
 
 /* dlmalloc functions (provided by of_malloc.c, USE_DL_PREFIX) */
 extern void *dlmalloc(size_t);
@@ -270,7 +269,7 @@ static uintptr_t brk_base;
  * them in the file slot table.  getdents64 returns the entries.
  * ====================================================================== */
 
-#define MAX_DATA_SLOTS  7   /* APF slots 0-6 */
+#define MAX_DATA_SLOTS  32  /* APF supports up to 32 data slots per core */
 
 struct linux_dirent64 {
     uint64_t d_ino;
@@ -287,29 +286,42 @@ struct linux_dirent64 {
  * (avoids bridge timeout on empty slots). */
 static void dir_probe_slots(void) {
     char name[FILE_SLOT_NAME_MAX];
-    for (uint32_t slot = 0; slot < MAX_DATA_SLOTS; slot++) {
-        /* Deferload slots (openFPGA.json "deferload": true) register
-         * only the filename at boot — size and get-name return empty
-         * until APF opens the file. Issue openfile first so every
-         * slot with actual content shows up in the listing. No-op
-         * for non-deferload slots. */
-        of_file_openfile(slot);
+    /* Slot 0 is reserved by APF (never carries core-visible data).
+     * Walk 1..MAX_DATA_SLOTS-1. Only populated slots (sz>0) are
+     * reported — empty entries are skipped silently. */
+    for (uint32_t slot = 1; slot < MAX_DATA_SLOTS; slot++) {
+        name[0] = '\0';
         long sz = of_file_size(slot);
         if (sz <= 0) continue;
 
-        /* Try to get real filename from bridge */
-        if (of_file_get_name(slot, name, sizeof(name)) == 0 && name[0]) {
-            if (file_slot_lookup(name) < 0)
-                file_slot_register(slot, name);
-        } else {
-            /* Fallback: register as "slot:N" */
+        /* Retry GETFILE a few times — empirically APF sometimes needs
+         * several attempts before it populates the response struct,
+         * particularly for slots that were consumed by the boot-ROM
+         * path rather than a prior DS_CMD_READ. */
+        int got_name = 0;
+        int get_rc = -1;
+        for (int attempt = 0; attempt < 4; attempt++) {
+            get_rc = of_file_get_name(slot, name, sizeof(name));
+            if (get_rc == 0 && name[0]) {
+                got_name = 1;
+                break;
+            }
+        }
+        if (!got_name) {
+            /* Fallback name — APF has no filename record for this
+             * slot, but DT_QUERY confirms it holds data. Register
+             * under "slot:N" so the slot is still reachable. */
             name[0] = 's'; name[1] = 'l'; name[2] = 'o';
             name[3] = 't'; name[4] = ':';
             name[5] = '0' + (char)(slot % 10);
             name[6] = '\0';
-            if (file_slot_lookup(name) < 0)
-                file_slot_register(slot, name);
         }
+
+        of_term_printf("    slot %d  %7d  %s\n",
+                       (int)slot, (int)sz, name);
+
+        if (file_slot_lookup(name) < 0)
+            file_slot_register(slot, name);
     }
 }
 
@@ -318,6 +330,7 @@ static void dir_probe_slots(void) {
  * (matches what apps will see via opendir). */
 int filesystem_init(void) {
     int before = file_slot_count;
+    of_term_putchar('\n');
     dir_probe_slots();
     return file_slot_count - before;
 }
@@ -556,9 +569,13 @@ static long sys_openat(long dirfd, long pathname, long flags, long mode) {
     f->is_dir = 0;
     f->dir_pos = 0;
 
-    /* O_DIRECTORY — return a directory FD for getdents64 */
+    /* O_DIRECTORY — return a directory FD for getdents64.
+     * filesystem_init() already populated file_slots at boot; probe
+     * lazily only if the FTAB is empty (e.g. sim target without a
+     * boot-time init). */
     if (flags & 0200000) {  /* O_DIRECTORY = 0200000 on riscv */
-        dir_probe_slots();
+        if (file_slot_count == 0)
+            dir_probe_slots();
         f->is_dir = 1;
         return fd;
     }
@@ -569,10 +586,6 @@ static long sys_openat(long dirfd, long pathname, long flags, long mode) {
         int slot = parse_int(&p);
         f->slot_id = (uint32_t)slot;
         f->size = 0;  /* Resolved lazily on first read */
-        /* Tell APF to actually open the file. Required for deferload
-         * slots — without this the datatable size is 0 and reads past
-         * the first ~16 KB silently fail. Harmless on non-deferload. */
-        of_file_openfile((uint32_t)slot);
         return fd;
     }
 
@@ -595,7 +608,6 @@ static long sys_openat(long dirfd, long pathname, long flags, long mode) {
     if (slot >= 0) {
         f->slot_id = (uint32_t)slot;
         f->size = 0;  /* Resolved lazily on first read */
-        of_file_openfile((uint32_t)slot);
         return fd;
     }
 

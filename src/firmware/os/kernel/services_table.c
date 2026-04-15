@@ -72,6 +72,7 @@ static void svc_video_set_vsync_callback(void (*cb)(void)) {
 extern long sys_openat_svc(const char *path);
 extern void sys_close_svc(int fd);
 extern long sys_file_size_fd(int fd);
+extern void file_slot_register(uint32_t slot_id, const char *filename);
 
 static long svc_file_size(const char *path) {
     long fd = sys_openat_svc(path);
@@ -181,4 +182,7 @@ void services_table_init(void) {
     /* File */
     svc->file_size    = svc_file_size;
     svc->file_size_fd = svc_file_size_fd;
+
+    /* Filesystem */
+    svc->file_slot_register = file_slot_register;
 }

@@ -542,9 +542,9 @@ end
 // ============================================================
 // PSRAM Controller for CRAM0 (16MB, app cached data)
 // ============================================================
-// CRAM0: PocketDoom's proven controller — async two-phase, with
-// the BCR sanity reset above ensuring the chip is in async mode
-// regardless of what mode the previous bitstream left it in.
+// CRAM0: async two-phase controller, with the BCR sanity reset above
+// ensuring the chip is in async mode regardless of what mode the
+// previous bitstream left it in.
 cram0_controller #(
     .CLOCK_SPEED(100.0)
 ) psram0 (

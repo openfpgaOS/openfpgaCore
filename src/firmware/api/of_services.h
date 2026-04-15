@@ -118,6 +118,14 @@ struct of_services_table {
     int       (*audio_stream_write)(const int16_t *samples, int count);
     int       (*audio_stream_ready)(void);
     void      (*audio_stream_close)(void);
+
+    /* -- Filesystem (1) -- append-only, ABI-stable --
+     *    Register a filename→slot mapping for fopen() by name.
+     *    The openFPGA manifest identifies data slots by numeric id;
+     *    this service lets apps tell the kernel which id holds which
+     *    filename so fopen() by name resolves correctly. Overwrites
+     *    any prior mapping for the same filename. Max 16 entries. */
+    void      (*file_slot_register)(uint32_t slot_id, const char *filename);
 };
 
 #ifndef OF_PC

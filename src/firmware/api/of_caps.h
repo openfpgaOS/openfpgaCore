@@ -49,7 +49,7 @@ extern "C" {
 #define OF_HW_GPU_VCOLOR    (1 << 10)   /* GPU vertex color interpolation */
 #define OF_HW_GPU_BILINEAR  (1 << 11)   /* GPU bilinear texture filter */
 #define OF_HW_GPU_ALPHA     (1 << 12)   /* GPU alpha / additive blending */
-#define OF_HW_GPU_PERSP     (1 << 13)   /* GPU perspective spans (Quake-style) */
+#define OF_HW_GPU_PERSP     (1 << 13)   /* GPU perspective-correct spans */
 #define OF_HW_GPU_FRAGPIPE  (1 << 14)   /* GPU 1-px/cycle fragment pipeline */
 
 /* Convenience: all the GPU bits an app might care about for renderer choice. */

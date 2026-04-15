@@ -595,6 +595,16 @@ always @(posedge clk) begin
                 ds_done_latched <= 1;
                 ds_err_latched <= target_err_s;
                 ds_cmd_active <= 0;
+                /* Deassert the command-type trigger once the bridge
+                 * says DONE, so the next DS_COMMAND write generates a
+                 * fresh 0→1 edge for core_bridge_cmd.v's edge detector.
+                 * Without this, back-to-back same-type commands
+                 * (e.g. two GETFILEs) never fire the second queue and
+                 * time out waiting for ACK. */
+                target_dataslot_read     <= 0;
+                target_dataslot_write    <= 0;
+                target_dataslot_openfile <= 0;
+                target_dataslot_getfile  <= 0;
             end
         end
 
