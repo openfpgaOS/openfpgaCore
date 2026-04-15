@@ -1,6 +1,6 @@
-// PSRAM Controller wrapper for VexRiscv CPU
+// CRAM0 Controller wrapper for VexRiscv CPU
 // Provides 32-bit word interface using two 16-bit PSRAM accesses
-// Uses the psram.sv module from analogue-pocket-utils
+// Uses the cram1_phy module (CRAM0/CRAM1 share the AS1C8M16PL phy).
 
 `default_nettype none
 

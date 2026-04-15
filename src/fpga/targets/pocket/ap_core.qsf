@@ -817,7 +817,6 @@ set_global_assignment -name VERILOG_FILE ../../common/jtframe_resync.v
 set_global_assignment -name VERILOG_FILE ../../common/link_lite.v
 set_global_assignment -name VERILOG_FILE ../../common/cram0_controller.v
 set_global_assignment -name VERILOG_FILE ../../common/cram1_controller.v
-set_global_assignment -name VERILOG_FILE ../../common/save_prefetch.v
 set_global_assignment -name SYSTEMVERILOG_FILE ../../common/cram0_phy.sv
 set_global_assignment -name SYSTEMVERILOG_FILE ../../common/cram1_phy.sv
 set_global_assignment -name VERILOG_FILE ../../common/sram_controller.v

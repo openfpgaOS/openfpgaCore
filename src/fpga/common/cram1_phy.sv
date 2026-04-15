@@ -80,7 +80,9 @@ module cram1_phy #(
     output reg [15:0] dbg_burst_count,   // Completed sync bursts since last clear
     output reg [15:0] dbg_stale_count,   // Bursts where first h0 in cram_dq_r == prev burst's last
 
-    // PSRAM signals (split DQ for cram1_controller wrapper)
+    // PSRAM signals (split DQ — top-level pin mux drives cram_dq with
+    // the active controller's output enable, so the controller exposes
+    // out/oe/in separately).
     output reg [21:16] cram_a,
     output wire [15:0] cram_dq_out,
     output wire        cram_dq_oe,

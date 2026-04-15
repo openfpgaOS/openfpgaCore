@@ -105,7 +105,7 @@ void os_main(void) {
 
     if (rc < 0) {
         status_fail();
-        of_term_putchar('\n');
+        of_term_printf("  rc=%d\n", rc);
         of_term_puts("  \033[93mNo application found.\033[0m\n\n");
         of_term_puts("  Place .elf in data slot 2\n");
         of_term_puts("  and press START to retry.\n");
@@ -117,6 +117,7 @@ void os_main(void) {
                 rc = elf_load(APP_SLOT_ID, APP_LOAD_ADDR, &app);
                 if (rc == 0)
                     break;
+                of_term_printf(" rc=%d\n", rc);
                 status_fail();
             }
         }

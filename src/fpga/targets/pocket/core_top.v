@@ -775,10 +775,12 @@ sram_controller #(
 
 // ============================================================
 // UART (2 Mbaud, 8N1) — DevKey/Cartridge debug interface
-// CLKS_PER_BIT = 100 MHz / 2000000 = 50
-// (clk_cpu is 100 MHz from mf_pllram_133.v output_clock_frequency0;
-//  any future PLL change must update this divisor or the host will
-//  see a baud-rate mismatch and silently drop every byte.)
+// CLKS_PER_BIT = clk_cpu / 2_000_000.  clk_cpu is set in
+// mf_pllram_133.v output_clock_frequency0; any change there MUST
+// update this divisor, or the host will see a baud-rate mismatch
+// and silently drop every byte.
+//   100 MHz → 50  ← current
+//    90 MHz → 45
 // ============================================================
 wire        uart_tx_serial;
 wire        uart_tx_active;

@@ -1,16 +1,13 @@
 //
 // AXI4 Slave for CRAM1 (single-word async only).
 //
-// This slave runs on clk_cpu and talks to the cpu-side CRAM1 port
-// (psram1_a in core_top), which is the CPU/mixer controller running
-// on clk_cpu.  CRAM1 stays in async page mode (POR-default BCR
-// 0x9D1F — no BCR write), so all reads and writes are single-word
-// async commands.  The save_prefetch module sits on a separate
-// burst_rd interface into the same controller.
+// CRAM1 sits behind cpu_psram1_cdc and is accessed at clk_74a from a CPU
+// domain at clk_cpu. There's no sync burst data path wired through the CDC,
+// so all reads are single-word async commands.  Writes are also single-word.
 //
-// Word-level downstream signals: psram_rd / psram_wr / psram_addr /
-// psram_wdata / psram_wstrb / psram_rdata / psram_busy /
-// psram_rdata_valid.
+// External AXI4 interface; outputs the same psram_controller word-level
+// signals as the legacy axi_psram_slave (psram_rd / psram_wr / psram_addr /
+// psram_wdata / psram_wstrb / psram_rdata / psram_busy / psram_rdata_valid).
 //
 
 `default_nettype none
@@ -218,8 +215,8 @@ always @(posedge clk or posedge reset) begin
             end
             // else: both full → master is *very* slow; beat is lost.
             // Shouldn't happen in practice — the master's 1-entry
-            // slot drains in 1-2 cycles, and CRAM1 single-word reads
-            // are 8+ cycles apart.
+            // slot drains in 1-2 cycles, and psram_cram0 single-word
+            // reads are 8+ cycles apart.
             beat_count <= beat_count + 1;
             cmd_issued <= 0;
             psram_started <= 0;
