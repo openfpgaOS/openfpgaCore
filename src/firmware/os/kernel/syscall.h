@@ -86,6 +86,13 @@ struct of_sbiret syscall_dispatch(long a0, long a1, long a2, long a3,
 
 void syscall_init(uintptr_t heap_start);
 
+/* Filesystem init — issues DS_CMD_OPENFILE on every data slot (0-6)
+ * so APF opens backing files (required for "deferload":true slots),
+ * queries size + filename, and populates the file_slot registry so
+ * fopen("name.wad") resolves and opendir("/") lists every slot.
+ * Returns the number of slots with data registered. */
+int syscall_fs_init(void);
+
 /* Register a file slot mapping (slot_id → filename).
  * Called by the loader after parsing the instance JSON. */
 void file_slot_register(uint32_t slot_id, const char *filename);
