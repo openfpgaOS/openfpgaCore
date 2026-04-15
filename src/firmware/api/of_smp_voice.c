@@ -259,6 +259,19 @@ static int32_t lfo_advance(lfo_state_t *l)
 static void voice_force_off(int idx);
 static void voice_cleanup_stolen(void);
 
+/* Reclaim a slot for immediate reuse: free the hardware mixer voice and
+ * mark the slot inactive.  voice_alloc's steal passes call this so the
+ * caller (smp_voice_note_on) can write fresh state without leaking the
+ * previous hardware voice. */
+static void voice_reclaim(int idx)
+{
+    smp_voice_t *v = &voices[idx];
+    if (v->mixer_voice >= 0)
+        of_mixer_stop(v->mixer_voice);
+    v->mixer_voice = -1;
+    v->active = 0;
+}
+
 static int voice_alloc(void)
 {
     /* Pass 1: find a free slot */
@@ -267,45 +280,53 @@ static int voice_alloc(void)
             return i;
     }
 
-    /* Pass 2: steal ENV_DONE (oldest first) */
+    /* Pass 2: steal ENV_DONE (oldest first).  Skip STEAL_PENDING slots —
+     * voice_cleanup_stolen owns those and will free them next tick. */
     int best = -1;
     uint32_t best_age = UINT32_MAX;
     for (int i = 0; i < SMP_MAX_VOICES; i++) {
-        if (voices[i].vol_env.stage == ENV_DONE && voices[i].age < best_age) {
-            best = i;
-            best_age = voices[i].age;
-        }
-    }
-    if (best >= 0)
-        return best;
-
-    /* Pass 3: steal ENV_RELEASE (oldest first) */
-    best_age = UINT32_MAX;
-    for (int i = 0; i < SMP_MAX_VOICES; i++) {
-        if (voices[i].vol_env.stage == ENV_RELEASE && voices[i].age < best_age) {
+        if (voices[i].active != STEAL_PENDING &&
+            voices[i].vol_env.stage == ENV_DONE && voices[i].age < best_age) {
             best = i;
             best_age = voices[i].age;
         }
     }
     if (best >= 0) {
-        voice_force_off(best);
+        voice_reclaim(best);
+        return best;
+    }
+
+    /* Pass 3: steal ENV_RELEASE (oldest first) */
+    best_age = UINT32_MAX;
+    for (int i = 0; i < SMP_MAX_VOICES; i++) {
+        if (voices[i].active != STEAL_PENDING &&
+            voices[i].vol_env.stage == ENV_RELEASE && voices[i].age < best_age) {
+            best = i;
+            best_age = voices[i].age;
+        }
+    }
+    if (best >= 0) {
+        voice_reclaim(best);
         return best;
     }
 
     /* Pass 4: steal any (oldest first) */
     best_age = UINT32_MAX;
     for (int i = 0; i < SMP_MAX_VOICES; i++) {
-        if (voices[i].age < best_age) {
+        if (voices[i].active != STEAL_PENDING && voices[i].age < best_age) {
             best = i;
             best_age = voices[i].age;
         }
     }
     if (best >= 0)
-        voice_force_off(best);
+        voice_reclaim(best);
 
     return best;
 }
 
+/* Schedule a voice for shutdown without reusing its slot.  Used by
+ * kill_exclusive_class — the new note allocates a fresh slot and the
+ * old one fades out via voice_cleanup_stolen on the next tick. */
 static void voice_force_off(int idx)
 {
     smp_voice_t *v = &voices[idx];
