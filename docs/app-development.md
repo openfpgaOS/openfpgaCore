@@ -176,7 +176,7 @@ void of_audio_stream_close(void);
 
 ### MIDI Playback — `of_midi.h` + `of_smp_bank.h`
 
-Plays Standard MIDI Files (Format 0/1) through the 32-voice PCM mixer
+Plays Standard MIDI Files (Format 0/1) through the 48-voice PCM mixer
 using a pre-resolved `.ofsf` sample bank.  The repo ships an SC-55-derived
 General MIDI bank at `assets/banks/sc55.ofsf` (~3 MB, drop it onto SD
 and reference it with the file API).

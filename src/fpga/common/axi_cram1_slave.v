@@ -1,13 +1,12 @@
 //
 // AXI4 Slave for CRAM1 (single-word async only).
 //
-// CRAM1 sits behind cpu_psram1_cdc and is accessed at clk_74a from a CPU
-// domain at clk_cpu. There's no sync burst data path wired through the CDC,
-// so all reads are single-word async commands.  Writes are also single-word.
+// CRAM1 is accessed via cram1_controller (psram1_a on clk_cpu). All reads
+// are single-word async commands. Writes are also single-word.
 //
-// External AXI4 interface; outputs the same psram_controller word-level
-// signals as the legacy axi_psram_slave (psram_rd / psram_wr / psram_addr /
-// psram_wdata / psram_wstrb / psram_rdata / psram_busy / psram_rdata_valid).
+// External AXI4 interface; outputs word-level signals
+// (psram_rd / psram_wr / psram_addr / psram_wdata / psram_wstrb /
+// psram_rdata / psram_busy / psram_rdata_valid) to cram1_controller.
 //
 
 `default_nettype none

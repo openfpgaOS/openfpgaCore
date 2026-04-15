@@ -336,7 +336,7 @@ assign ext_irq = (uart_rx_irq & irq_mask[0]) |
 // Triple-buffered framebuffer
 // 25-bit SDRAM half-word addresses (16-bit bus, byte addr = word addr × 2)
 // Hardware feature flags — read-only, derived from variant defines at synthesis time
-// Bit  0: Mixer (32-voice PCM)        Bit  8: FPU (RISC-V F ext)
+// Bit  0: Mixer (48-voice PCM)        Bit  8: FPU (RISC-V F ext)
 // Bit  1: (reserved)                  Bit  9: Save slots
 // Bit  2: Link cable                  Bit 10: GPU vertex color
 // Bit  3: Analogizer                  Bit 11: GPU bilinear filter

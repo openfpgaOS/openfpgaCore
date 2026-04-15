@@ -13,16 +13,17 @@ core_top.v                                    Top-level (APF integration)
 |   +-- axi_periph_slave.v                    BRAM + system registers + palette + controllers
 |   +-- axi_sdram_slave.v                     SDRAM AXI4 slave (burst support)
 |   +-- axi_sdram_arbiter.v                   CPU/video SDRAM arbitration
-|   +-- axi_psram_slave.v                     PSRAM AXI4 slave
-|   +-- axi_bridge_master.v                   APF bridge AXI4 master
+|   +-- axi_cram0_slave.v                     CRAM0 AXI4 slave
+|   +-- axi_cram1_slave.v                     CRAM1 AXI4 slave (saves/bridge)
 |
 +-- video_CRT_scanout_indexed_BRAM.v          Multi-mode video scanout (6 color modes)
 +-- text_terminal.v                           40x30 character overlay
 +-- audio_output.v                            I2S output stage (dcfifo + serializer)
-+-- audio_mixer.v                             32-voice PCM mixer (16-bit, SVF filter)
++-- audio_mixer.v                             48-voice PCM mixer (16-bit, SVF filter)
 +-- link_mmio.v                               Link cable serial transceiver
 +-- io_sdram.v                                SDRAM controller
-+-- psram_controller.v                        PSRAM controller
++-- cram0_controller.v / cram0_phy.sv         CRAM0 PSRAM controller
++-- cram1_controller.v / cram1_phy.sv         CRAM1 PSRAM controller
 +-- bram.v                                    32 KB block RAM
 +-- openFPGA_Pocket_Analogizer.v              Analogizer adapter (RndMnkIII)
     +-- scandoubler.v                         Video scandoubler

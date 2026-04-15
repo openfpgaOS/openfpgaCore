@@ -25,8 +25,7 @@ bursty writes. The same-cycle pattern is proven across the legacy
 
 ### Burst completion: saw-busy gate
 
-**Where:** `src/fpga/common/save_prefetch.v`, `cram1_controller.v`
-burst path.
+**Where:** `src/fpga/common/cram1_controller.v` burst path.
 
 **What:** After issuing a burst request, the consumer must observe
 `burst_busy == 1` first, *then* wait for the `!burst_busy` edge. Polling
@@ -75,9 +74,8 @@ the sync-burst external contract (one `q_valid` per 32-bit word,
 CRAM1 reads on real hardware — `cram1_clk` runs from a different clock
 than the controller (`psram1_a` on `clk_cpu`) and the SDC false-paths
 that I/O. Proper sync-burst would need a phase-shifted PLL output for
-`cram1_clk` plus matching `input_delay`/`output_delay`. The only burst
-consumer today (save_prefetch) is bandwidth-headroomed 200× on async,
-so the work isn't justified.
+`cram1_clk` plus matching `input_delay`/`output_delay`. No current
+consumer needs the extra bandwidth, so the work isn't justified.
 
 ### CRAM clock pin assignments
 

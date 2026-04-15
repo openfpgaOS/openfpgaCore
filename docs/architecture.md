@@ -149,7 +149,7 @@ The HAL is organized into 11 independent modules:
 | Module | Header | Description |
 |--------|--------|-------------|
 | `fb` | `hal/fb.h` | Framebuffer (320x240, 8-bit indexed, triple-buffered) |
-| `audio` | `hal/audio.h` | 48 kHz PCM audio FIFO (32-voice mixer backs it) |
+| `audio` | `hal/audio.h` | 48 kHz PCM audio FIFO (48-voice mixer backs it) |
 | `input` | `hal/input.h` | Controller polling with edge detection (2 players) |
 | `save` | `hal/save.h` | Nonvolatile save slots (10 × 256 KB, CRAM1 PSRAM) |
 | `dataslot` | `hal/dataslot.h` | APF bridge file I/O (DMA read/write) |

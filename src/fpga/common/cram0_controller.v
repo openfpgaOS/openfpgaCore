@@ -137,9 +137,8 @@ always @(posedge clk or negedge reset_n) begin
     end
 end
 
-// Instantiate the 16-bit PSRAM controller (CRAM0-only fork — see
-// psram_cram0_drv.sv. The original `psram` module in psram.sv is
-// now exclusively for the CRAM1 / save-data path.)
+// Instantiate the 16-bit PSRAM PHY (CRAM0-only, psram_cram0_drv
+// module defined in cram0_phy.sv).
 psram_cram0_drv #(
     .CLOCK_SPEED(CLOCK_SPEED),
     .MAX_ACCESS_TIME_FROM_ADV(80)  // ns — 70 ns chip spec + 10 ns margin at 100 MHz

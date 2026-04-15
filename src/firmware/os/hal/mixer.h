@@ -1,7 +1,7 @@
 /*
  * openfpgaOS Hardware Mixer HAL
  *
- * 32-voice hardware PCM mixer with stereo 8-bit volume,
+ * 48-voice hardware PCM mixer with stereo 8-bit volume,
  * 16.16 fixed-point resampling, forward/bidi looping,
  * 16-bit and 8-bit signed sample support.
  */

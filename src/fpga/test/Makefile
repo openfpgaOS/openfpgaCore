@@ -46,18 +46,6 @@ SRAM_TOP = tb_sram
 SRAM_DIR = obj_dir_sram
 
 # ============================================================
-# CRAM1 CDC (bridge collision test)
-# ============================================================
-CDC_SRCS = \
-	tb_cram1_cdc.v \
-	psram_word_model.v \
-	$(COMMON_DIR)/cpu_psram1_cdc.v
-
-CDC_CPP = tb_cram1_cdc_main.cpp
-CDC_TOP = tb_cram1_cdc
-CDC_DIR = obj_dir_cdc
-
-# ============================================================
 # GPU
 # ============================================================
 GPU_SRCS = \
@@ -76,7 +64,7 @@ GPU_FULL_DIR = obj_dir_gpu_full
 # ============================================================
 # Targets
 # ============================================================
-.PHONY: all sdram sram cdc gpu gpu-lite gpu-full run run-sram build clean
+.PHONY: all sdram sram gpu gpu-lite gpu-full run run-sram build clean
 
 all: sdram sram
 
@@ -101,14 +89,6 @@ $(SRAM_DIR)/V$(SRAM_TOP): $(SRAM_SRCS) $(SRAM_CPP)
 		$(SRAM_SRCS) $(SRAM_CPP)
 
 run-sram: sram
-
-# --- CRAM1 CDC ---
-cdc: $(CDC_DIR)/V$(CDC_TOP)
-	./$(CDC_DIR)/V$(CDC_TOP)
-
-$(CDC_DIR)/V$(CDC_TOP): $(CDC_SRCS) $(CDC_CPP)
-	$(VERILATOR) $(VERILATOR_FLAGS) --timing --top-module $(CDC_TOP) --Mdir $(CDC_DIR) \
-		$(CDC_SRCS) $(CDC_CPP)
 
 # --- GPU ---
 # Two binaries: gpu-lite (default Pocket variant, span renderer only) and
@@ -144,4 +124,4 @@ $(GPU_FULL_DIR)/V$(GPU_TOP): $(GPU_SRCS) $(GPU_CPP)
 
 # --- Clean ---
 clean:
-	rm -rf $(SDRAM_DIR) $(SRAM_DIR) $(CDC_DIR) $(GPU_LITE_DIR) $(GPU_FULL_DIR) obj_dir_gpu io_sdram_test.v
+	rm -rf $(SDRAM_DIR) $(SRAM_DIR) $(GPU_LITE_DIR) $(GPU_FULL_DIR) obj_dir_gpu obj_dir_cdc io_sdram_test.v

@@ -1,6 +1,6 @@
 /*
  * openfpgaOS Hardware Mixer HAL
- * Configures the 32-voice CRAM1 hardware mixer via MMIO registers.
+ * Configures the 48-voice CRAM1 hardware mixer via MMIO registers.
  * All mixing happens in FPGA fabric — zero CPU cost during playback.
  *
  * Hardware features:
@@ -428,14 +428,10 @@ int of_mixer_get_position(int voice)
 {
     if (!voice_in_range(voice)) return 0;
     MIX_VOICE_SEL = voice;
-    /* Multi-bit CDC guard: the audio_mixer runs in clk_74a and each bit
-     * of pos_readback is synced independently by audio_mixer_cdc.v.
-     * During a counter increment that spans a carry boundary (e.g.,
-     * 0x0FFF -> 0x1000) a single read can return a garbage mix of
-     * old/new bits.  Re-read until two consecutive samples agree —
-     * in steady state this resolves in one extra read, and the voice
-     * only advances ~1 sample per ~1500 clk_74a cycles at 48kHz so
-     * convergence is fast even in the worst case. */
+    /* Two-read consistency check: the voice position counter updates
+     * asynchronously to CPU reads, so a single read can straddle a
+     * carry boundary (e.g. 0x0FFF -> 0x1000) and return a mix of
+     * old/new bits. Re-read until two consecutive samples agree. */
     int prev = MIX_VOICE_POS & 0x3FFFFF;
     for (int i = 0; i < 16; i++) {
         int now = MIX_VOICE_POS & 0x3FFFFF;
