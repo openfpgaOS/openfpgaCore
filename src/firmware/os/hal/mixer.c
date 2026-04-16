@@ -18,7 +18,9 @@
 
 #define MIXER_MAX_VOICES     48
 #define MIXER_OUTPUT_RATE    48000
-#define MIXER_SCRATCH_VOICE  47
+/* Voice 31 is reserved as scratch for of_audio_write() in targets/pocket/audio.c.
+ * alloc_voice skips it so the two mechanisms don't collide. */
+#define MIXER_SCRATCH_VOICE  31
 
 /* CTRL register bits */
 #define CTRL_ACTIVE  (1 << 0)
@@ -190,7 +192,8 @@ static int alloc_voice(int priority)
 
     /* First pass: find a free voice */
     int voice = -1;
-    for (int i = 0; i < MIXER_SCRATCH_VOICE; i++) {
+    for (int i = 0; i < MIXER_MAX_VOICES; i++) {
+        if (i == MIXER_SCRATCH_VOICE) continue;
         if (!(voice_active_mask & ((uint64_t)1 << i))) {
             voice = i;
             break;
@@ -200,7 +203,8 @@ static int alloc_voice(int priority)
     /* Second pass: steal lowest-priority voice if no free voice available */
     if (voice < 0) {
         int lowest_pri = priority;
-        for (int i = 0; i < MIXER_SCRATCH_VOICE; i++) {
+        for (int i = 0; i < MIXER_MAX_VOICES; i++) {
+            if (i == MIXER_SCRATCH_VOICE) continue;
             if (priority_shadow[i] < lowest_pri) {
                 lowest_pri = priority_shadow[i];
                 voice = i;
@@ -248,7 +252,9 @@ static int play_internal(const uint8_t *pcm, uint32_t sample_count,
     uint32_t rate = ((uint64_t)sample_rate << 16) / MIXER_OUTPUT_RATE;
     uint32_t byte_size = fmt16 ? sample_count * 2 : sample_count;
 
-    of_cache_clean_range((void *)pcm, byte_size);
+    uint32_t addr = (uint32_t)(uintptr_t)pcm;
+    if (addr < CRAM1_UNCACHED || addr >= CRAM1_UNCACHED + CRAM_SIZE)
+        of_cache_clean_range((void *)pcm, byte_size);
 
     MIX_VOICE_SEL = voice;
     MIX_VOICE_ADDR = cram1_word_addr(pcm);
@@ -303,7 +309,11 @@ void of_mixer_retrigger(int voice, const uint8_t *pcm_s16,
     int v = volume & 0xFF;
     uint32_t rate = ((uint64_t)sample_rate << 16) / MIXER_OUTPUT_RATE;
 
-    of_cache_clean_range((void *)pcm_s16, sample_count * 2);
+    {
+        uint32_t a = (uint32_t)(uintptr_t)pcm_s16;
+        if (a < CRAM1_UNCACHED || a >= CRAM1_UNCACHED + CRAM_SIZE)
+            of_cache_clean_range((void *)pcm_s16, sample_count * 2);
+    }
 
     MIX_VOICE_SEL = voice;
 
