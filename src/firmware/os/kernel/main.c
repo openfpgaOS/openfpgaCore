@@ -35,16 +35,16 @@ static void boot_logo(const char *color) {
     of_term_puts("\033[H");  /* cursor home */
     of_term_puts(color);
     of_term_putchar('\n');
-    of_term_puts("       ___  ___  ___ ___\n");
-    of_term_puts("      / _ \\/ _ \\/ -_) _ \\\n");
-    of_term_puts("      \\___/ .__/\\__/_//_/\n");
-    of_term_puts("     ____/_/  ________\n");
-    of_term_puts("    / __/ _ \\/ ___/ _ |\n");
-    of_term_puts("   / _// ___/ (_ / __ |\n");
-    of_term_puts("  /_/_/_/___\\___/_/ |_|\n");
-    of_term_puts(" / __ \\/ __/\n");
-    of_term_puts("/ /_/ /\\ \\\n");
-    of_term_puts("\\____/___/  \033[93mv0.2\033[0m\n\n");
+    of_term_puts("         ___  ___  ___ ___\n");
+    of_term_puts("        / _ \\/ _ \\/ -_) _ \\\n");
+    of_term_puts("        \\___/ .__/\\__/_//_/\n");
+    of_term_puts("       ____/_/  ________\n");
+    of_term_puts("      / __/ _ \\/ ___/ _ |\n");
+    of_term_puts("     / _// ___/ (_ / __ |\n");
+    of_term_puts("    /_/_/_/___\\___/_/ |_|\n");
+    of_term_puts("   / __ \\/ __/\n");
+    of_term_puts("  / /_/ /\\ \\\n");
+    of_term_puts("  \\____/___/  \033[93mv0.3\033[0m\n\n");
 }
 
 static void status_ok(void) {

@@ -257,8 +257,20 @@ const char *file_slot_get(int idx, uint32_t *slot_id_out) {
  * Heap (brk) management
  * ====================================================================== */
 
+/* Heap layout — brk grows up from brk_base, mmap grows down from
+ * mmap_bottom. The two ranges never overlap: sys_brk rejects requests
+ * above mmap_bottom and sys_mmap2 rejects requests below current_brk.
+ * Previously both shared current_brk, which let a later sys_mmap2
+ * advance current_brk past a live mmap region — then musl's mallocng
+ * (which caches the kernel brk locally) would re-extend the brk heap
+ * back into addresses already handed out as mmap, corrupting both. */
 uintptr_t current_brk;
 static uintptr_t brk_base;
+static uintptr_t mmap_bottom;
+
+/* Exposed to of_malloc.c's __kernel_sbrk so the kernel-side dlmalloc
+ * can't grow the heap past a live mmap allocation. */
+uintptr_t of_brk_limit(void) { return mmap_bottom; }
 
 /* ======================================================================
  * Error codes
@@ -394,9 +406,20 @@ static long sys_brk(long addr) {
 
     if (new_brk < brk_base)
         return (long)current_brk;
-    if (new_brk >= SAVE_REGION_ADDR)
+    /* Refuse to grow into the mmap region. Returning the old break
+     * signals failure per the Linux brk(2) contract; musl's sbrk()
+     * will surface it as ENOMEM. */
+    if (new_brk > mmap_bottom)
         return (long)current_brk;
 
+    /* Linux guarantees brk-extended pages are zero-filled via the
+     * page-fault handler. On bare metal the SDRAM retains whatever
+     * it last held (prior app's heap, framebuffer pixels, etc.),
+     * which trips code and allocators that implicitly assume fresh
+     * memory starts at zero. Zero the new range here to match the
+     * POSIX contract. */
+    if (new_brk > current_brk)
+        memset((void *)current_brk, 0, new_brk - current_brk);
     current_brk = new_brk;
     return (long)current_brk;
 }
@@ -770,13 +793,18 @@ static long sys_clock_nanosleep_time64(long clk_id, long flags,
 static long sys_mmap2(long addr, long length, long prot,
                       long flags, long fd, long pgoffset) {
     (void)addr; (void)prot; (void)flags; (void)fd; (void)pgoffset;
-    uintptr_t aligned = (current_brk + 4095) & ~4095;
-    uintptr_t new_brk = aligned + (uintptr_t)length;
-    if (new_brk >= SAVE_REGION_ADDR)
+    if (length <= 0)
+        return -EINVAL;
+    /* Carve from the top down so the mmap arena can't collide with
+     * a later brk() extension. mmap_bottom is seeded page-aligned at
+     * init, so subtracting a page-aligned length preserves alignment. */
+    uintptr_t len_aligned = ((uintptr_t)length + 4095) & ~4095;
+    if (len_aligned > mmap_bottom - current_brk)
         return -ENOMEM;
-    current_brk = new_brk;
-    memset((void *)aligned, 0, (size_t)length);
-    return (long)aligned;
+    uintptr_t base = mmap_bottom - len_aligned;
+    memset((void *)base, 0, len_aligned);
+    mmap_bottom = base;
+    return (long)base;
 }
 
 static long sys_munmap(long addr, long length) {
@@ -1338,8 +1366,14 @@ void syscall_init(uintptr_t heap_start) {
     fd_table[FD_STDIN].in_use = 1;
     fd_table[FD_STDOUT].in_use = 1;
     fd_table[FD_STDERR].in_use = 1;
-    brk_base = heap_start;
+    brk_base    = heap_start;
     current_brk = heap_start;
+    /* mmap grows down from the top of the app's portable SDRAM window
+     * (0x10400000 + 48 MB = 0x13400000, per docs/app-virtual-map.md and
+     * loader.c's APP_VMAP_V1_SDRAM_END). Using SAVE_REGION_ADDR here
+     * would land mmap allocations in CRAM1 PSRAM, which is shared with
+     * the mixer sample pool and save system — not usable as general RAM. */
+    mmap_bottom = 0x13400000u;   /* page-aligned */
 
     /* Reset file slot registry (apps re-register on startup) */
     file_slot_count = 0;

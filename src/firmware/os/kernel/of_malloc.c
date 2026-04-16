@@ -51,12 +51,12 @@
 #define EINVAL 22
 #define ENOMEM 12
 
-/* Kernel-side sbrk: calls sys_brk directly (no ecall needed) */
+/* Kernel-side sbrk: mutates the same current_brk syscall.c tracks.
+ * Must respect mmap_bottom (the top of the brk heap, below which live
+ * app mmap allocations) so kernel dlmalloc can't grow into an mmap'd
+ * page. */
 extern uintptr_t current_brk;
-
-/* Heap cannot grow past the save region (0x13C00000).
- * Stack is above that at 0x13F80000. */
-#define HEAP_LIMIT 0x13C00000
+extern uintptr_t of_brk_limit(void);  /* returns current mmap_bottom */
 
 __attribute__((noinline))
 static void *__kernel_sbrk(intptr_t increment) {
@@ -67,8 +67,8 @@ static void *__kernel_sbrk(intptr_t increment) {
     uintptr_t new_brk = cur + increment;
     if (new_brk < cur && increment > 0)
         return (void *)-1;  /* overflow */
-    if (new_brk > HEAP_LIMIT)
-        return (void *)-1;  /* out of memory */
+    if (new_brk > of_brk_limit())
+        return (void *)-1;  /* would collide with mmap region */
     *brk = new_brk;
     return (void *)cur;
 }

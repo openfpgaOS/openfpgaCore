@@ -64,6 +64,10 @@ int bank_preload(void) {
     if (g_bank_base)
         return 0;
 
+    /* Print the label up front so the user sees it while the scan +
+     * DMA are in flight — a 3 MB .ofsf takes noticeable time to load. */
+    of_term_puts("  SoundFont init.... ");
+
     uint32_t    slot_id = 0;
     const char *name    = NULL;
     int         count   = file_slot_get_count();
@@ -97,27 +101,26 @@ int bank_preload(void) {
         }
     }
 
+
     if (!name) {
-        of_term_puts("  SoundFont init...  \033[93mno bank\033[0m\n");
+        of_term_puts(" \033[93mNONE\033[0m\n");
         return -1;
     }
 
     long sz = of_file_size(slot_id);
     if (sz <= 0) {
-        of_term_printf("  SoundFont init...  \033[91mslot %u size=%ld\033[0m\n",
-                       (unsigned)slot_id, sz);
+        of_term_puts(" \033[93mNONE\033[0m\n");
         return -2;
     }
 
     void *buf = of_mixer_alloc_samples((uint32_t)sz);
     if (!buf) {
-        of_term_printf("  SoundFont init...  \033[91mCRAM1 alloc %lu failed\033[0m\n",
-                       (unsigned long)sz);
+        of_term_puts(" \033[93mNONE\033[0m\n");
         return -3;
     }
 
     if (of_file_read_chunked(slot_id, 0, buf, (uint32_t)sz) < 0) {
-        of_term_puts("  SoundFont init...  \033[91mread failed\033[0m\n");
+        of_term_puts(" \033[93mNONE\033[0m\n");
         return -4;
     }
 
@@ -126,8 +129,7 @@ int bank_preload(void) {
 
     const ofsf_header_t *hdr = (const ofsf_header_t *)buf;
     if (hdr->magic != OFSF_MAGIC || hdr->version != OFSF_VERSION) {
-        of_term_printf("  SoundFont init...  \033[91mbad hdr magic=%08x ver=%u\033[0m\n",
-                       (unsigned)hdr->magic, (unsigned)hdr->version);
+        of_term_puts(" \033[93mNONE\033[0m\n");
         return -5;
     }
 
@@ -135,31 +137,6 @@ int bank_preload(void) {
     g_bank_size = (uint32_t)sz;
     services_table_set_smp_bank(buf, (uint32_t)sz);
 
-    /* Boot line: "  SoundFont init... <name> by <author>" — terminal is
-     * 40 cols, so strip a trailing ".sf2" from the embedded INAM (which
-     * often carries the source filename verbatim) to leave room. */
-    of_term_puts("  SoundFont init... ");
-    const char *display = hdr->bank_name[0] ? hdr->bank_name : name;
-    int dlen = 0;
-    while (display[dlen]) dlen++;
-    if (dlen >= 4) {
-        const char *tail = display + dlen - 4;
-        if ((tail[0] == '.') &&
-            ((tail[1] | 0x20) == 's') &&
-            ((tail[2] | 0x20) == 'f') &&
-            (tail[3] == '2')) {
-            /* Print without the ".sf2" suffix */
-            for (int i = 0; i < dlen - 4; i++)
-                of_term_putchar(display[i]);
-        } else {
-            of_term_puts(display);
-        }
-    } else {
-        of_term_puts(display);
-    }
-    if (hdr->bank_author[0])
-        of_term_printf(" by %s", hdr->bank_author);
-    of_term_puts("\n");
-
+    of_term_puts(" \033[92mOK\033[0m\n");
     return 0;
 }
