@@ -171,11 +171,16 @@ void of_video_init(void) {
     VRR_V_TOTAL = VRR_VT_DEFAULT;
     VRR_SWAP_HOLD = 0;
 
-    /* FBs are at the uncached SDRAM alias (FBn_BASE = 0x50xxxxxx); these
-     * memsets write straight through p_axi to SDRAM without touching L1. */
+    /* FBs live at the CACHED SDRAM alias (FBn_BASE = 0x10xxxxxx) — these
+     * memsets populate L1 D$ dirty lines. Clean ranges after each so
+     * whichever buffer HW starts scanning sees zeros in SDRAM, not
+     * whatever stale data happens to still be in SDRAM at boot. */
     memset((void *)FB0_BASE, 0, FB_SIZE);
     memset((void *)FB1_BASE, 0, FB_SIZE);
     memset((void *)FB2_BASE, 0, FB_SIZE);
+    of_cache_clean_range((void *)FB0_BASE, FB_SIZE);
+    of_cache_clean_range((void *)FB1_BASE, FB_SIZE);
+    of_cache_clean_range((void *)FB2_BASE, FB_SIZE);
 }
 
 uint8_t *of_video_get_surface(void) {
@@ -183,10 +188,7 @@ uint8_t *of_video_get_surface(void) {
 }
 
 void of_video_flush_cache(void) {
-    /* No-op: FBs now live at the uncached SDRAM alias (0x50xxxxxx), so
-     * pixel writes go through p_axi straight to SDRAM and never enter
-     * the L1 D-cache.  Nothing to flush.  Kept in the HAL surface for
-     * ABI compatibility with apps built before the FB region moved. */
+    of_cache_clean_range((void *)fb_addr[buf_draw], FB_SIZE);
 }
 
 uint8_t *of_video_flip(void) {
@@ -199,7 +201,7 @@ uint8_t *of_video_flip(void) {
      * App pixels use the dimmed palette (set in overlay_install_palette).
      * Terminal text pixels are remapped to 240-255 (bright VGA colors). */
     if (vid_display_mode == DISPLAY_MODE_OVERLAY) {
-        const uint8_t *term = (const uint8_t *)(TERM_FB_BASE - SDRAM_UNCACHED_BASE + SDRAM_BASE);
+        const uint8_t *term = (const uint8_t *)TERM_FB_BASE;
         uint8_t *app = (uint8_t *)fb_addr[buf_draw];
         for (int i = 0; i < FB_WIDTH * FB_HEIGHT; i++) {
             if (term[i])
@@ -207,10 +209,9 @@ uint8_t *of_video_flip(void) {
         }
     }
 
-    /* No explicit cache flush. The FB (76KB) exceeds the D-cache (64KB),
-     * so rendering naturally evicts most dirty lines to SDRAM.  A fence
-     * drains the store buffer so recent writes reach the cache. */
-    __asm__ volatile("" ::: "memory"); /* compiler barrier only */
+    /* Flush dirty FB lines to SDRAM so the scanout DMA sees them.
+     * 1,200 cache lines × ~7 cycles per cbo.clean ≈ 84 µs. */
+    of_cache_clean_range((void *)fb_addr[buf_draw], FB_SIZE);
 
     /* Queue draw buffer for display at next vsync.
      * Write format: bits[2:1] = buffer index, bit[0] = trigger */

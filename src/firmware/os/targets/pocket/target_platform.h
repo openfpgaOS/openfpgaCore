@@ -27,13 +27,13 @@
  * address mask which ignores the upper alias bits), so the CPU-side
  * alias is transparent to hardware.
  *
- * Trade-off: full-frame memset/memcpy into the FB is slower (~20 MB/s
- * uncached vs ~100+ MB/s cached writeback-bound), but dirty-rect apps
- * keep L1 available for real working-set data instead of wasting it
- * on pixels the scanout just reads back anyway. */
-#define OF_TARGET_FB0_BASE             0x50000000u
-#define OF_TARGET_FB1_BASE             0x50100000u
-#define OF_TARGET_FB2_BASE             0x50200000u
+ * With Zicbom enabled, FBs live at the CACHED SDRAM alias (0x10xxxxxx)
+ * so pixel writes hit the L1 D-cache at ~1 cycle/word. of_video_flip()
+ * issues a cbo.clean range flush (~84 µs for 76 KB) before handing the
+ * buffer to the scanout DMA. */
+#define OF_TARGET_FB0_BASE             0x10000000u
+#define OF_TARGET_FB1_BASE             0x10100000u
+#define OF_TARGET_FB2_BASE             0x10200000u
 #define OF_TARGET_FB_COUNT             3u
 #define OF_TARGET_FB_WIDTH             320u
 #define OF_TARGET_FB_HEIGHT            240u
