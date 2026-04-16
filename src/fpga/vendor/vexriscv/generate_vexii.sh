@@ -36,6 +36,7 @@ sbt "runMain vexiiriscv.soc.openfpgaos.GenOpenFpgaVexii \
       --lsu-l1-refill-count=2 --lsu-l1-writeback-count=2 \
       --lsu-l1-store-buffer-slots=4 --lsu-l1-store-buffer-ops=32 \
       --lsu-software-prefetch --lsu-hardware-prefetch rpt \
+      --with-rvZcbm \
       --with-btb --btb-sets=256 --relaxed-btb --relaxed-btb-hit \
       --with-gshare --with-ras \
       --regfile-async --allow-bypass-from=3 \
@@ -45,7 +46,7 @@ sbt "runMain vexiiriscv.soc.openfpgaos.GenOpenFpgaVexii \
       --region base=10000000,size=4000000,main=1,exe=1 \
       --region base=20000000,size=10000000,main=0,exe=0 \
       --region base=30000000,size=1000000,main=1,exe=1 \
-      --region base=31000000,size=7000000,main=1,exe=0 \
+      --region base=31000000,size=7000000,main=0,exe=0 \
       --region base=38000000,size=8000000,main=0,exe=0 \
       --region base=40000000,size=40000000,main=0,exe=0"
 
@@ -54,7 +55,7 @@ sbt "runMain vexiiriscv.soc.openfpgaos.GenOpenFpgaVexii \
 #   0x10000000  64MB  SDRAM          (cached, executable)
 #   0x20000000 256MB  VRAM/reserved  (uncached, non-exec)
 #   0x30000000  16MB  CRAM0 cached   (cached, executable)
-#   0x31000000 112MB  CRAM1+         (D-cached, non-exec) — read-only cache for bridge DMA data
+#   0x31000000 112MB  CRAM1+         (uncached, non-exec) — mixer DMA + bridge; NOT cacheable
 #   0x38000000 128MB  CRAM uncached  (uncached, non-exec)
 #   0x40000000   1GB  IO + SDRAM_UC  (uncached, non-exec) — covers 0x50000000 SDRAM uncached alias
 

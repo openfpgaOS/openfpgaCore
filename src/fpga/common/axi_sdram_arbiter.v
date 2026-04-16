@@ -139,11 +139,11 @@ localparam ST_WR   = 2'd2;  // Write transaction active (AW→W→B)
 reg [1:0] arb_state;
 reg [1:0] grant;  // 0=M0(Span), 1=M1(DMA), 2=M2(CPU), 3=M3(Bridge)
 
-// Fairness: deficit counter prevents GPU from starving the CPU.
-// Increments each time a GPU master (M0/M1) wins while the CPU
-// has a pending request. When it reaches the threshold, the CPU
-// is granted unconditionally. Resets when the CPU gets a grant
-// or has no pending request.
+// Fairness: deficit counter prevents higher-priority masters from
+// starving the CPU.  Increments each time any non-CPU master
+// (M0/M1/M3) wins while the CPU has a pending request.  When it
+// reaches the threshold, the CPU is granted unconditionally.
+// Resets when the CPU gets a grant or has no pending request.
 reg [3:0] gpu_deficit;
 wire cpu_pending = m2_arvalid | m2_awvalid;
 
@@ -186,9 +186,11 @@ always @(posedge clk or posedge reset) begin
             end else if (m3_arvalid) begin
                 grant <= 2'd3;
                 arb_state <= ST_RD;
+                if (cpu_pending) gpu_deficit <= gpu_deficit + 4'd1;
             end else if (m3_awvalid) begin
                 grant <= 2'd3;
                 arb_state <= ST_WR;
+                if (cpu_pending) gpu_deficit <= gpu_deficit + 4'd1;
             end else if (m2_arvalid) begin
                 grant <= 2'd2;
                 arb_state <= ST_RD;

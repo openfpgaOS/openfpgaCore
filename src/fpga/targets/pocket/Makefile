@@ -50,7 +50,7 @@ all: help
 # generation (file-target rule below) when VexiiRiscv_Full.v is missing.
 # Verilator tests are NOT part of a full build — run them explicitly
 # via `make test` when you've changed RTL.
-full: bootloader os build summary
+full: cpu bootloader os build summary
 
 # ── Help ─────────────────────────────────────────────────────────────
 help:

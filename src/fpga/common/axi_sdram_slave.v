@@ -308,7 +308,20 @@ always @(posedge clk or posedge reset) begin
             // Streaming burst write: when io_sdram signals wr_data_next,
             // accept the next W beat and update sdram_wdata.
             // io_sdram has 3 gap cycles (ST_WRITE_5/6/7) to let data propagate.
-            if (sdram_wr_data_next) begin
+            // Track when io_sdram actually starts (word_busy goes high)
+            // — required because sdram_busy lags sdram_accepted by a
+            // few cycles; without the gate we'd false-complete during
+            // the request-to-busy window.  Completion (wr_busy_seen &&
+            // !sdram_busy) takes priority over the wr_data_next pull
+            // so the beat_count increment can't collide.
+            if (sdram_busy) wr_busy_seen <= 1;
+            if (wr_busy_seen && !sdram_busy) begin
+                cmd_issued <= 0;
+                started <= 0;
+                s_axi_bvalid <= 1;
+                s_axi_bresp <= 2'b00;
+                state <= S_IDLE;
+            end else if (sdram_wr_data_next) begin
                 beat_count <= beat_count + 1;
                 if (s_axi_wvalid) begin
                     s_axi_wready <= 1;
@@ -316,33 +329,16 @@ always @(posedge clk or posedge reset) begin
                     sdram_wstrb <= s_axi_wstrb;
                 end
             end
-            // Track when io_sdram actually starts (word_busy goes high)
-            if (sdram_busy) wr_busy_seen <= 1;
-            // io_sdram returns to IDLE when burst is done
-            if (wr_busy_seen && !sdram_busy) begin
-                beat_count <= beat_count + 1;
+        end
+
+        S_WR_DON: begin
+            // Wait for single-word write completion (burst_len == 0 only).
+            if (started && !sdram_busy) begin
                 cmd_issued <= 0;
                 started <= 0;
                 s_axi_bvalid <= 1;
                 s_axi_bresp <= 2'b00;
                 state <= S_IDLE;
-            end
-        end
-
-        S_WR_DON: begin
-            // Wait for single write completion
-            if (started && !sdram_busy) begin
-                beat_count <= beat_count + 1;
-                cmd_issued <= 0;
-                started <= 0;
-                if (beat_is_last) begin
-                    s_axi_bvalid <= 1;
-                    s_axi_bresp <= 2'b00;
-                    state <= S_IDLE;
-                end else begin
-                    addr_r <= addr_r + 32'd4;
-                    state <= S_WR_NEXT;
-                end
             end
         end
 

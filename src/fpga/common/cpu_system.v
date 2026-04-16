@@ -1,36 +1,36 @@
 //
-// VexiiRiscv CPU System — target-parallel AXI4 router (Unlock 1).
+// VexiiRiscv CPU System — 3-master × 5-target AXI4 router.
 //
-// Two CPU AXI4 master inputs (mem_axi cached, p_axi uncached) fan out
-// to three downstream slaves (SDRAM / PSRAM / LOCAL).  Each target is
-// handled by an independent `cpu_target_port` instance that has its
-// own read and write sub-FSMs, so up to SIX transactions can be in
-// flight simultaneously (one read + one write per target).
+// Three CPU AXI4 master inputs fan out to five downstream slaves.
+// Each target is handled by an independent `cpu_target_port` with its
+// own read and write sub-FSMs, so many transactions can overlap as
+// long as they hit distinct target ports:
 //
-// Concretely, the following can all run in parallel:
-//   - mem_axi read  → SDRAM   }
-//   - mem_axi write → PSRAM   }  6 independent sub-FSMs
-//   - p_axi  read   → LOCAL   }
-//   - mem_axi write → SDRAM   }  (same master, same target — blocked
-//                             }   on per-target read FSM contention)
+//   i_axi   (L1 I$ refills, read-only)    ───┐
+//   mem_axi (L1 D$ + cbo.*)                  │
+//   p_axi   (uncached LSU IO)                ├──→  5 target ports
+//                                            │     (SDRAM / CRAM0 /
+//                                            │      CRAM1 / SRAM /
+//                                            │      LOCAL)
+//                                            │
 //
-// Per-target arbitration: mem_axi has priority over p_axi with a
-// round-robin tie-break (last_grant_*_mem flag inside cpu_target_port).
-// Same as the legacy serialized FSM's behaviour.
+// Parallelism:
+//   - Different (master, target) pairs run fully in parallel.  An
+//     I-fetch to SDRAM can overlap a D-load to CRAM0 and a bridge MMIO
+//     access to LOCAL simultaneously.
+//   - Within a single target port, at most ONE transaction is in flight
+//     (the downstream slave is single-FSM).  Multiple masters contending
+//     for the same target are round-robin arbitrated inside the port.
+//   - Per-(master, direction) global serialization keeps responses
+//     in-order on the master side — responses for the same AXI ID class
+//     cannot overtake each other even if they hit different targets.
 //
 // Address decode → target:
 //    0x10000000–0x13FFFFFF, 0x50000000–0x53FFFFFF → SDRAM
-//    0x30000000–0x3FFFFFFF                        → PSRAM (routed to
-//                                                   axi_psram_slave's
-//                                                   internal per-target
-//                                                   sub-slaves)
+//    0x30000000 / 0x38000000                      → CRAM0
+//    0x31000000 / 0x39000000                      → CRAM1
+//    0x3A000000                                   → SRAM
 //    everything else                              → LOCAL
-//
-// Master-facing aggregation: each *_contrib signal from the three
-// target ports is OR'd together.  Since a master's arvalid/awvalid is
-// routed to at most one target at a time (address decode is a 3-way
-// mux), only one target port ever drives a given master's ready or
-// response signal high.
 //
 
 `default_nettype none
@@ -65,7 +65,7 @@ module cpu_system (
     input  wire        m_sdram_bvalid,
     input  wire [1:0]  m_sdram_bresp,
 
-    // ---- CRAM0 AXI4 master (PSRAM chip #0, app code/data) --------
+    // ---- CRAM0 AXI4 master ---------------------------------------
     output wire        m_cram0_arvalid,
     input  wire        m_cram0_arready,
     output wire [31:0] m_cram0_araddr,
@@ -87,7 +87,7 @@ module cpu_system (
     input  wire        m_cram0_bvalid,
     input  wire [1:0]  m_cram0_bresp,
 
-    // ---- CRAM1 AXI4 master (PSRAM chip #1, saves/audio/files) ----
+    // ---- CRAM1 AXI4 master ---------------------------------------
     output wire        m_cram1_arvalid,
     input  wire        m_cram1_arready,
     output wire [31:0] m_cram1_araddr,
@@ -109,7 +109,7 @@ module cpu_system (
     input  wire        m_cram1_bvalid,
     input  wire [1:0]  m_cram1_bresp,
 
-    // ---- SRAM AXI4 master (on-chip, ~256KB) ----------------------
+    // ---- SRAM AXI4 master ----------------------------------------
     output wire        m_sram_arvalid,
     input  wire        m_sram_arready,
     output wire [31:0] m_sram_araddr,
@@ -166,11 +166,30 @@ wire reset = ~reset_n;
 
 // ============================================================
 // CPU AXI4 master ports (from OpenFpgaVexii top)
-// mem_axi : cached path, has 2-bit id (lsuL1 source bit + 1)
-// p_axi   : uncached LSU IO, no id
+// i_axi  : read-only, 1-bit id (I$ refills)
+// mem_axi: full R/W, 2-bit id (D$ refills/writebacks + cbo.*)
+// p_axi  : full R/W, no id    (uncached LSU IO)
 // ============================================================
 
-// mem_axi
+// i_axi
+wire        i_arvalid;  wire        i_arready;
+wire [31:0] i_araddr;
+wire [0:0]  i_arid;
+wire [7:0]  i_arlen;
+wire [2:0]  i_arsize;   wire [1:0]  i_arburst;
+wire        i_rvalid;   wire        i_rready;
+wire [31:0] i_rdata;
+wire [0:0]  i_rid;      wire [1:0]  i_rresp;
+wire        i_rlast;
+
+// i_axi has AW/W/B ports on the CPU top but VexiiRiscv ties them off
+// internally (read-only bridge), so the cpu_system side only connects R.
+wire        i_awvalid_tie;
+wire        i_wvalid_tie;
+wire [0:0]  i_bid_tie;
+wire [1:0]  i_bresp_tie;
+
+// mem_axi (D$ cached)
 wire        mem_arvalid;  wire        mem_arready;
 wire [31:0] mem_araddr;
 wire [1:0]  mem_arid;
@@ -193,7 +212,7 @@ wire        mem_wlast;
 wire        mem_bvalid;   wire        mem_bready;
 wire [1:0]  mem_bid;      wire [1:0]  mem_bresp;
 
-// p_axi
+// p_axi (uncached IO)
 wire        per_arvalid;  wire        per_arready;
 wire [31:0] per_araddr;
 wire [7:0]  per_arlen;
@@ -221,76 +240,108 @@ OpenFpgaVexii cpu (
     .int_m_software(1'b0),
     .int_m_external(int_m_external),
 
-    .mem_axi_awvalid  (mem_awvalid),
-    .mem_axi_awready  (mem_awready),
-    .mem_axi_awaddr   (mem_awaddr),
-    .mem_axi_awid     (mem_awid),
-    .mem_axi_awlen    (mem_awlen),
-    .mem_axi_awsize   (mem_awsize),
-    .mem_axi_awburst  (mem_awburst),
-    .mem_axi_awallStrb(mem_awallStrb),
-    .mem_axi_wvalid   (mem_wvalid),
-    .mem_axi_wready   (mem_wready),
-    .mem_axi_wdata    (mem_wdata),
-    .mem_axi_wstrb    (mem_wstrb),
-    .mem_axi_wlast    (mem_wlast),
-    .mem_axi_bvalid   (mem_bvalid),
-    .mem_axi_bready   (mem_bready),
-    .mem_axi_bid      (mem_bid),
-    .mem_axi_bresp    (mem_bresp),
-    .mem_axi_arvalid  (mem_arvalid),
-    .mem_axi_arready  (mem_arready),
-    .mem_axi_araddr   (mem_araddr),
-    .mem_axi_arid     (mem_arid),
-    .mem_axi_arlen    (mem_arlen),
-    .mem_axi_arsize   (mem_arsize),
-    .mem_axi_arburst  (mem_arburst),
-    .mem_axi_rvalid   (mem_rvalid),
-    .mem_axi_rready   (mem_rready),
-    .mem_axi_rdata    (mem_rdata),
-    .mem_axi_rid      (mem_rid),
-    .mem_axi_rresp    (mem_rresp),
-    .mem_axi_rlast    (mem_rlast),
+    // i_axi (read only; AW/W/B are tied off by the CPU, left unconnected)
+    .i_axi_awvalid  (i_awvalid_tie),
+    .i_axi_awready  (1'b0),
+    .i_axi_awaddr   (),
+    .i_axi_awid     (),
+    .i_axi_awlen    (),
+    .i_axi_awsize   (),
+    .i_axi_awburst  (),
+    .i_axi_awallStrb(),
+    .i_axi_wvalid   (i_wvalid_tie),
+    .i_axi_wready   (1'b0),
+    .i_axi_wdata    (),
+    .i_axi_wstrb    (),
+    .i_axi_wlast    (),
+    .i_axi_bvalid   (1'b0),
+    .i_axi_bready   (),
+    .i_axi_bid      (i_bid_tie),
+    .i_axi_bresp    (i_bresp_tie),
+    .i_axi_arvalid  (i_arvalid),
+    .i_axi_arready  (i_arready),
+    .i_axi_araddr   (i_araddr),
+    .i_axi_arid     (i_arid),
+    .i_axi_arlen    (i_arlen),
+    .i_axi_arsize   (i_arsize),
+    .i_axi_arburst  (i_arburst),
+    .i_axi_rvalid   (i_rvalid),
+    .i_axi_rready   (i_rready),
+    .i_axi_rdata    (i_rdata),
+    .i_axi_rid      (i_rid),
+    .i_axi_rresp    (i_rresp),
+    .i_axi_rlast    (i_rlast),
 
-    .p_axi_awvalid    (per_awvalid),
-    .p_axi_awready    (per_awready),
-    .p_axi_awaddr     (per_awaddr),
-    .p_axi_awlen      (per_awlen),
-    .p_axi_awsize     (per_awsize),
-    .p_axi_awburst    (per_awburst),
-    .p_axi_awallStrb  (per_awallStrb),
-    .p_axi_wvalid     (per_wvalid),
-    .p_axi_wready     (per_wready),
-    .p_axi_wdata      (per_wdata),
-    .p_axi_wstrb      (per_wstrb),
-    .p_axi_wlast      (per_wlast),
-    .p_axi_bvalid     (per_bvalid),
-    .p_axi_bready     (per_bready),
-    .p_axi_bresp      (per_bresp),
-    .p_axi_arvalid    (per_arvalid),
-    .p_axi_arready    (per_arready),
-    .p_axi_araddr     (per_araddr),
-    .p_axi_arlen      (per_arlen),
-    .p_axi_arsize     (per_arsize),
-    .p_axi_arburst    (per_arburst),
-    .p_axi_rvalid     (per_rvalid),
-    .p_axi_rready     (per_rready),
-    .p_axi_rdata      (per_rdata),
-    .p_axi_rresp      (per_rresp),
-    .p_axi_rlast      (per_rlast)
+    // d_axi maps to our "mem" class
+    .d_axi_awvalid  (mem_awvalid),
+    .d_axi_awready  (mem_awready),
+    .d_axi_awaddr   (mem_awaddr),
+    .d_axi_awid     (mem_awid),
+    .d_axi_awlen    (mem_awlen),
+    .d_axi_awsize   (mem_awsize),
+    .d_axi_awburst  (mem_awburst),
+    .d_axi_awallStrb(mem_awallStrb),
+    .d_axi_wvalid   (mem_wvalid),
+    .d_axi_wready   (mem_wready),
+    .d_axi_wdata    (mem_wdata),
+    .d_axi_wstrb    (mem_wstrb),
+    .d_axi_wlast    (mem_wlast),
+    .d_axi_bvalid   (mem_bvalid),
+    .d_axi_bready   (mem_bready),
+    .d_axi_bid      (mem_bid),
+    .d_axi_bresp    (mem_bresp),
+    .d_axi_arvalid  (mem_arvalid),
+    .d_axi_arready  (mem_arready),
+    .d_axi_araddr   (mem_araddr),
+    .d_axi_arid     (mem_arid),
+    .d_axi_arlen    (mem_arlen),
+    .d_axi_arsize   (mem_arsize),
+    .d_axi_arburst  (mem_arburst),
+    .d_axi_rvalid   (mem_rvalid),
+    .d_axi_rready   (mem_rready),
+    .d_axi_rdata    (mem_rdata),
+    .d_axi_rid      (mem_rid),
+    .d_axi_rresp    (mem_rresp),
+    .d_axi_rlast    (mem_rlast),
+
+    // p_axi (uncached)
+    .p_axi_awvalid  (per_awvalid),
+    .p_axi_awready  (per_awready),
+    .p_axi_awaddr   (per_awaddr),
+    .p_axi_awlen    (per_awlen),
+    .p_axi_awsize   (per_awsize),
+    .p_axi_awburst  (per_awburst),
+    .p_axi_awallStrb(per_awallStrb),
+    .p_axi_wvalid   (per_wvalid),
+    .p_axi_wready   (per_wready),
+    .p_axi_wdata    (per_wdata),
+    .p_axi_wstrb    (per_wstrb),
+    .p_axi_wlast    (per_wlast),
+    .p_axi_bvalid   (per_bvalid),
+    .p_axi_bready   (per_bready),
+    .p_axi_bresp    (per_bresp),
+    .p_axi_arvalid  (per_arvalid),
+    .p_axi_arready  (per_arready),
+    .p_axi_araddr   (per_araddr),
+    .p_axi_arlen    (per_arlen),
+    .p_axi_arsize   (per_arsize),
+    .p_axi_arburst  (per_arburst),
+    .p_axi_rvalid   (per_rvalid),
+    .p_axi_rready   (per_rready),
+    .p_axi_rdata    (per_rdata),
+    .p_axi_rresp    (per_rresp),
+    .p_axi_rlast    (per_rlast)
 );
 
 // ============================================================
 // Address decode → target select
 // ============================================================
-// Target IDs (5 total) — expanded from 3 to split PSRAM into its
-// three physical backends (CRAM0, CRAM1, SRAM) so each can run in
-// parallel.
+// Target IDs (5 total).
 //   0 — SDRAM   (0x10xxxxxx cached, 0x50xxxxxx uncached alias)
-//   1 — CRAM0   (0x30xxxxxx cached, 0x38xxxxxx uncached, PSRAM chip 0)
-//   2 — CRAM1   (0x31xxxxxx,       0x39xxxxxx uncached, PSRAM chip 1)
+//   1 — CRAM0   (0x30xxxxxx cached, 0x38xxxxxx uncached)
+//   2 — CRAM1   (0x31xxxxxx,        0x39xxxxxx uncached)
 //   3 — SRAM    (0x3Axxxxxx uncached, on-chip 256KB)
-//   4 — LOCAL   (0x00xxxxxx BRAM, 0x40/0x4F peripherals, 0x20 term FB)
+//   4 — LOCAL   (BRAM, peripherals, term FB, etc.)
 function [2:0] decode_target;
     input [31:0] addr;
     begin
@@ -303,34 +354,36 @@ function [2:0] decode_target;
         else if (addr[31:24] == 8'h3A)
             decode_target = 3'd3;   // SRAM
         else
-            decode_target = 3'd4;   // LOCAL (BRAM, peripherals, etc.)
+            decode_target = 3'd4;   // LOCAL
     end
 endfunction
 
+wire [2:0] i_ar_target   = decode_target(i_araddr);
 wire [2:0] mem_ar_target = decode_target(mem_araddr);
 wire [2:0] mem_aw_target = decode_target(mem_awaddr);
 wire [2:0] per_ar_target = decode_target(per_araddr);
 wire [2:0] per_aw_target = decode_target(per_awaddr);
 
-// Per-target per-master busy signals (see cpu_target_port.v)
-wire sdram_mem_rd_busy, sdram_mem_wr_busy, sdram_per_rd_busy, sdram_per_wr_busy;
-wire cram0_mem_rd_busy, cram0_mem_wr_busy, cram0_per_rd_busy, cram0_per_wr_busy;
-wire cram1_mem_rd_busy, cram1_mem_wr_busy, cram1_per_rd_busy, cram1_per_wr_busy;
-wire sram_mem_rd_busy,  sram_mem_wr_busy,  sram_per_rd_busy,  sram_per_wr_busy;
-wire local_mem_rd_busy, local_mem_wr_busy, local_per_rd_busy, local_per_wr_busy;
+// Per-(master, target) busy signals (see cpu_target_port.v)
+wire sdram_i_rd_busy, sdram_mem_rd_busy, sdram_mem_wr_busy, sdram_per_rd_busy, sdram_per_wr_busy;
+wire cram0_i_rd_busy, cram0_mem_rd_busy, cram0_mem_wr_busy, cram0_per_rd_busy, cram0_per_wr_busy;
+wire cram1_i_rd_busy, cram1_mem_rd_busy, cram1_mem_wr_busy, cram1_per_rd_busy, cram1_per_wr_busy;
+wire sram_i_rd_busy,  sram_mem_rd_busy,  sram_mem_wr_busy,  sram_per_rd_busy,  sram_per_wr_busy;
+wire local_i_rd_busy, local_mem_rd_busy, local_mem_wr_busy, local_per_rd_busy, local_per_wr_busy;
 
-// Per-(master, direction) serialization — a master can only have ONE
-// outstanding read (and one outstanding write) across all target ports,
-// so responses for the same ID class always return in the order they
-// were issued.  Combined with within-port R/W mutual exclusion in
-// cpu_target_port.v, this means at most one transaction is live on any
-// given slave while still allowing up to 5 concurrent transactions
-// across the target ports (SDRAM / CRAM0 / CRAM1 / SRAM / LOCAL) —
-// each served by its own physical backend.
+// Per-(master, direction) global serialization — keeps responses in-order
+// per master even though they may come back from different target ports.
+wire global_i_rd_busy   = sdram_i_rd_busy   | cram0_i_rd_busy   | cram1_i_rd_busy   | sram_i_rd_busy   | local_i_rd_busy;
 wire global_mem_rd_busy = sdram_mem_rd_busy | cram0_mem_rd_busy | cram1_mem_rd_busy | sram_mem_rd_busy | local_mem_rd_busy;
 wire global_mem_wr_busy = sdram_mem_wr_busy | cram0_mem_wr_busy | cram1_mem_wr_busy | sram_mem_wr_busy | local_mem_wr_busy;
 wire global_per_rd_busy = sdram_per_rd_busy | cram0_per_rd_busy | cram1_per_rd_busy | sram_per_rd_busy | local_per_rd_busy;
 wire global_per_wr_busy = sdram_per_wr_busy | cram0_per_wr_busy | cram1_per_wr_busy | sram_per_wr_busy | local_per_wr_busy;
+
+wire i_ar_is_sdram = i_arvalid && (i_ar_target == 3'd0) && !global_i_rd_busy;
+wire i_ar_is_cram0 = i_arvalid && (i_ar_target == 3'd1) && !global_i_rd_busy;
+wire i_ar_is_cram1 = i_arvalid && (i_ar_target == 3'd2) && !global_i_rd_busy;
+wire i_ar_is_sram  = i_arvalid && (i_ar_target == 3'd3) && !global_i_rd_busy;
+wire i_ar_is_local = i_arvalid && (i_ar_target == 3'd4) && !global_i_rd_busy;
 
 wire mem_ar_is_sdram = mem_arvalid && (mem_ar_target == 3'd0) && !global_mem_rd_busy;
 wire mem_ar_is_cram0 = mem_arvalid && (mem_ar_target == 3'd1) && !global_mem_rd_busy;
@@ -357,73 +410,60 @@ wire per_aw_is_local = per_awvalid && (per_aw_target == 3'd4) && !global_per_wr_
 // ============================================================
 // Per-target contribution wires
 // ============================================================
-// Each target port drives these; at most one is high per master per
-// signal because the selection signals are mutually exclusive.
-
-// SDRAM port contributions
-wire        sdram_mem_arready, sdram_per_arready;
-wire        sdram_mem_rvalid;  wire [31:0] sdram_mem_rdata;
-wire [1:0]  sdram_mem_rid;     wire [1:0]  sdram_mem_rresp;
-wire        sdram_mem_rlast;
-wire        sdram_per_rvalid;  wire [31:0] sdram_per_rdata;
-wire [1:0]  sdram_per_rresp;   wire        sdram_per_rlast;
+// SDRAM
+wire        sdram_i_arready,   sdram_mem_arready,   sdram_per_arready;
+wire        sdram_i_rvalid;    wire [31:0] sdram_i_rdata;   wire [0:0] sdram_i_rid;   wire [1:0] sdram_i_rresp;   wire sdram_i_rlast;
+wire        sdram_mem_rvalid;  wire [31:0] sdram_mem_rdata; wire [1:0] sdram_mem_rid; wire [1:0] sdram_mem_rresp; wire sdram_mem_rlast;
+wire        sdram_per_rvalid;  wire [31:0] sdram_per_rdata; wire [1:0] sdram_per_rresp; wire sdram_per_rlast;
 wire        sdram_mem_awready, sdram_per_awready;
 wire        sdram_mem_wready,  sdram_per_wready;
-wire        sdram_mem_bvalid;  wire [1:0]  sdram_mem_bid;
-wire [1:0]  sdram_mem_bresp;
+wire        sdram_mem_bvalid;  wire [1:0]  sdram_mem_bid;   wire [1:0] sdram_mem_bresp;
 wire        sdram_per_bvalid;  wire [1:0]  sdram_per_bresp;
 
-// CRAM0 port contributions
-wire        cram0_mem_arready, cram0_per_arready;
-wire        cram0_mem_rvalid;  wire [31:0] cram0_mem_rdata;
-wire [1:0]  cram0_mem_rid;     wire [1:0]  cram0_mem_rresp;
-wire        cram0_mem_rlast;
-wire        cram0_per_rvalid;  wire [31:0] cram0_per_rdata;
-wire [1:0]  cram0_per_rresp;   wire        cram0_per_rlast;
+// CRAM0
+wire        cram0_i_arready,   cram0_mem_arready,   cram0_per_arready;
+wire        cram0_i_rvalid;    wire [31:0] cram0_i_rdata;   wire [0:0] cram0_i_rid;   wire [1:0] cram0_i_rresp;   wire cram0_i_rlast;
+wire        cram0_mem_rvalid;  wire [31:0] cram0_mem_rdata; wire [1:0] cram0_mem_rid; wire [1:0] cram0_mem_rresp; wire cram0_mem_rlast;
+wire        cram0_per_rvalid;  wire [31:0] cram0_per_rdata; wire [1:0] cram0_per_rresp; wire cram0_per_rlast;
 wire        cram0_mem_awready, cram0_per_awready;
 wire        cram0_mem_wready,  cram0_per_wready;
-wire        cram0_mem_bvalid;  wire [1:0]  cram0_mem_bid;
-wire [1:0]  cram0_mem_bresp;
+wire        cram0_mem_bvalid;  wire [1:0]  cram0_mem_bid;   wire [1:0] cram0_mem_bresp;
 wire        cram0_per_bvalid;  wire [1:0]  cram0_per_bresp;
 
-// CRAM1 port contributions
-wire        cram1_mem_arready, cram1_per_arready;
-wire        cram1_mem_rvalid;  wire [31:0] cram1_mem_rdata;
-wire [1:0]  cram1_mem_rid;     wire [1:0]  cram1_mem_rresp;
-wire        cram1_mem_rlast;
-wire        cram1_per_rvalid;  wire [31:0] cram1_per_rdata;
-wire [1:0]  cram1_per_rresp;   wire        cram1_per_rlast;
+// CRAM1
+wire        cram1_i_arready,   cram1_mem_arready,   cram1_per_arready;
+wire        cram1_i_rvalid;    wire [31:0] cram1_i_rdata;   wire [0:0] cram1_i_rid;   wire [1:0] cram1_i_rresp;   wire cram1_i_rlast;
+wire        cram1_mem_rvalid;  wire [31:0] cram1_mem_rdata; wire [1:0] cram1_mem_rid; wire [1:0] cram1_mem_rresp; wire cram1_mem_rlast;
+wire        cram1_per_rvalid;  wire [31:0] cram1_per_rdata; wire [1:0] cram1_per_rresp; wire cram1_per_rlast;
 wire        cram1_mem_awready, cram1_per_awready;
 wire        cram1_mem_wready,  cram1_per_wready;
-wire        cram1_mem_bvalid;  wire [1:0]  cram1_mem_bid;
-wire [1:0]  cram1_mem_bresp;
+wire        cram1_mem_bvalid;  wire [1:0]  cram1_mem_bid;   wire [1:0] cram1_mem_bresp;
 wire        cram1_per_bvalid;  wire [1:0]  cram1_per_bresp;
 
-// SRAM port contributions
-wire        sram_mem_arready,  sram_per_arready;
-wire        sram_mem_rvalid;   wire [31:0] sram_mem_rdata;
-wire [1:0]  sram_mem_rid;      wire [1:0]  sram_mem_rresp;
-wire        sram_mem_rlast;
-wire        sram_per_rvalid;   wire [31:0] sram_per_rdata;
-wire [1:0]  sram_per_rresp;    wire        sram_per_rlast;
-wire        sram_mem_awready,  sram_per_awready;
-wire        sram_mem_wready,   sram_per_wready;
-wire        sram_mem_bvalid;   wire [1:0]  sram_mem_bid;
-wire [1:0]  sram_mem_bresp;
-wire        sram_per_bvalid;   wire [1:0]  sram_per_bresp;
+// SRAM
+wire        sram_i_arready,   sram_mem_arready,   sram_per_arready;
+wire        sram_i_rvalid;    wire [31:0] sram_i_rdata;    wire [0:0] sram_i_rid;    wire [1:0] sram_i_rresp;    wire sram_i_rlast;
+wire        sram_mem_rvalid;  wire [31:0] sram_mem_rdata;  wire [1:0] sram_mem_rid;  wire [1:0] sram_mem_rresp;  wire sram_mem_rlast;
+wire        sram_per_rvalid;  wire [31:0] sram_per_rdata;  wire [1:0] sram_per_rresp; wire sram_per_rlast;
+wire        sram_mem_awready, sram_per_awready;
+wire        sram_mem_wready,  sram_per_wready;
+wire        sram_mem_bvalid;  wire [1:0]  sram_mem_bid;    wire [1:0] sram_mem_bresp;
+wire        sram_per_bvalid;  wire [1:0]  sram_per_bresp;
 
-// LOCAL port contributions
-wire        local_mem_arready, local_per_arready;
-wire        local_mem_rvalid;  wire [31:0] local_mem_rdata;
-wire [1:0]  local_mem_rid;     wire [1:0]  local_mem_rresp;
-wire        local_mem_rlast;
-wire        local_per_rvalid;  wire [31:0] local_per_rdata;
-wire [1:0]  local_per_rresp;   wire        local_per_rlast;
+// LOCAL
+wire        local_i_arready,   local_mem_arready,   local_per_arready;
+wire        local_i_rvalid;    wire [31:0] local_i_rdata;   wire [0:0] local_i_rid;   wire [1:0] local_i_rresp;   wire local_i_rlast;
+wire        local_mem_rvalid;  wire [31:0] local_mem_rdata; wire [1:0] local_mem_rid; wire [1:0] local_mem_rresp; wire local_mem_rlast;
+wire        local_per_rvalid;  wire [31:0] local_per_rdata; wire [1:0] local_per_rresp; wire local_per_rlast;
 wire        local_mem_awready, local_per_awready;
 wire        local_mem_wready,  local_per_wready;
-wire        local_mem_bvalid;  wire [1:0]  local_mem_bid;
-wire [1:0]  local_mem_bresp;
+wire        local_mem_bvalid;  wire [1:0]  local_mem_bid;   wire [1:0] local_mem_bresp;
 wire        local_per_bvalid;  wire [1:0]  local_per_bresp;
+
+// ============================================================
+// Helper macro for instantiating a cpu_target_port
+// ============================================================
+// Instantiations below are verbose but all follow the same template.
 
 // ============================================================
 // SDRAM target port
@@ -432,12 +472,24 @@ cpu_target_port port_sdram (
     .clk    (clk),
     .reset_n(reset_n),
 
+    .i_rd_select  (i_ar_is_sdram),
     .mem_rd_select(mem_ar_is_sdram),
     .per_rd_select(per_ar_is_sdram),
     .mem_wr_select(mem_aw_is_sdram),
     .per_wr_select(per_aw_is_sdram),
 
-    // mem side
+    .i_arvalid         (i_arvalid),
+    .i_arready_contrib (sdram_i_arready),
+    .i_araddr          (i_araddr),
+    .i_arid            (i_arid),
+    .i_arlen           (i_arlen),
+    .i_rvalid_contrib  (sdram_i_rvalid),
+    .i_rdata_contrib   (sdram_i_rdata),
+    .i_rid_contrib     (sdram_i_rid),
+    .i_rresp_contrib   (sdram_i_rresp),
+    .i_rlast_contrib   (sdram_i_rlast),
+    .i_rready          (i_rready),
+
     .mem_arvalid         (mem_arvalid),
     .mem_arready_contrib (sdram_mem_arready),
     .mem_araddr          (mem_araddr),
@@ -464,7 +516,6 @@ cpu_target_port port_sdram (
     .mem_bresp_contrib   (sdram_mem_bresp),
     .mem_bready          (mem_bready),
 
-    // per side
     .per_arvalid         (per_arvalid),
     .per_arready_contrib (sdram_per_arready),
     .per_araddr          (per_araddr),
@@ -487,7 +538,6 @@ cpu_target_port port_sdram (
     .per_bresp_contrib   (sdram_per_bresp),
     .per_bready          (per_bready),
 
-    // slave (SDRAM)
     .m_arvalid (m_sdram_arvalid),
     .m_arready (m_sdram_arready),
     .m_araddr  (m_sdram_araddr),
@@ -509,6 +559,7 @@ cpu_target_port port_sdram (
     .m_bvalid  (m_sdram_bvalid),
     .m_bresp   (m_sdram_bresp),
 
+    .i_rd_busy  (sdram_i_rd_busy),
     .mem_rd_busy(sdram_mem_rd_busy),
     .mem_wr_busy(sdram_mem_wr_busy),
     .per_rd_busy(sdram_per_rd_busy),
@@ -516,16 +567,29 @@ cpu_target_port port_sdram (
 );
 
 // ============================================================
-// CRAM0 target port (PSRAM chip #0)
+// CRAM0 target port
 // ============================================================
 cpu_target_port port_cram0 (
     .clk    (clk),
     .reset_n(reset_n),
 
+    .i_rd_select  (i_ar_is_cram0),
     .mem_rd_select(mem_ar_is_cram0),
     .per_rd_select(per_ar_is_cram0),
     .mem_wr_select(mem_aw_is_cram0),
     .per_wr_select(per_aw_is_cram0),
+
+    .i_arvalid         (i_arvalid),
+    .i_arready_contrib (cram0_i_arready),
+    .i_araddr          (i_araddr),
+    .i_arid            (i_arid),
+    .i_arlen           (i_arlen),
+    .i_rvalid_contrib  (cram0_i_rvalid),
+    .i_rdata_contrib   (cram0_i_rdata),
+    .i_rid_contrib     (cram0_i_rid),
+    .i_rresp_contrib   (cram0_i_rresp),
+    .i_rlast_contrib   (cram0_i_rlast),
+    .i_rready          (i_rready),
 
     .mem_arvalid         (mem_arvalid),
     .mem_arready_contrib (cram0_mem_arready),
@@ -596,6 +660,7 @@ cpu_target_port port_cram0 (
     .m_bvalid  (m_cram0_bvalid),
     .m_bresp   (m_cram0_bresp),
 
+    .i_rd_busy  (cram0_i_rd_busy),
     .mem_rd_busy(cram0_mem_rd_busy),
     .mem_wr_busy(cram0_mem_wr_busy),
     .per_rd_busy(cram0_per_rd_busy),
@@ -603,16 +668,29 @@ cpu_target_port port_cram0 (
 );
 
 // ============================================================
-// CRAM1 target port (PSRAM chip #1)
+// CRAM1 target port
 // ============================================================
 cpu_target_port port_cram1 (
     .clk    (clk),
     .reset_n(reset_n),
 
+    .i_rd_select  (i_ar_is_cram1),
     .mem_rd_select(mem_ar_is_cram1),
     .per_rd_select(per_ar_is_cram1),
     .mem_wr_select(mem_aw_is_cram1),
     .per_wr_select(per_aw_is_cram1),
+
+    .i_arvalid         (i_arvalid),
+    .i_arready_contrib (cram1_i_arready),
+    .i_araddr          (i_araddr),
+    .i_arid            (i_arid),
+    .i_arlen           (i_arlen),
+    .i_rvalid_contrib  (cram1_i_rvalid),
+    .i_rdata_contrib   (cram1_i_rdata),
+    .i_rid_contrib     (cram1_i_rid),
+    .i_rresp_contrib   (cram1_i_rresp),
+    .i_rlast_contrib   (cram1_i_rlast),
+    .i_rready          (i_rready),
 
     .mem_arvalid         (mem_arvalid),
     .mem_arready_contrib (cram1_mem_arready),
@@ -683,6 +761,7 @@ cpu_target_port port_cram1 (
     .m_bvalid  (m_cram1_bvalid),
     .m_bresp   (m_cram1_bresp),
 
+    .i_rd_busy  (cram1_i_rd_busy),
     .mem_rd_busy(cram1_mem_rd_busy),
     .mem_wr_busy(cram1_mem_wr_busy),
     .per_rd_busy(cram1_per_rd_busy),
@@ -690,16 +769,29 @@ cpu_target_port port_cram1 (
 );
 
 // ============================================================
-// SRAM target port (on-chip M10K-backed SRAM, 256 KB)
+// SRAM target port
 // ============================================================
 cpu_target_port port_sram (
     .clk    (clk),
     .reset_n(reset_n),
 
+    .i_rd_select  (i_ar_is_sram),
     .mem_rd_select(mem_ar_is_sram),
     .per_rd_select(per_ar_is_sram),
     .mem_wr_select(mem_aw_is_sram),
     .per_wr_select(per_aw_is_sram),
+
+    .i_arvalid         (i_arvalid),
+    .i_arready_contrib (sram_i_arready),
+    .i_araddr          (i_araddr),
+    .i_arid            (i_arid),
+    .i_arlen           (i_arlen),
+    .i_rvalid_contrib  (sram_i_rvalid),
+    .i_rdata_contrib   (sram_i_rdata),
+    .i_rid_contrib     (sram_i_rid),
+    .i_rresp_contrib   (sram_i_rresp),
+    .i_rlast_contrib   (sram_i_rlast),
+    .i_rready          (i_rready),
 
     .mem_arvalid         (mem_arvalid),
     .mem_arready_contrib (sram_mem_arready),
@@ -721,7 +813,7 @@ cpu_target_port port_sram (
     .mem_wready_contrib  (sram_mem_wready),
     .mem_wdata           (mem_wdata),
     .mem_wstrb           (mem_wstrb),
-    .mem_wlast           (mem_wlast),
+    .mem_wlast            (mem_wlast),
     .mem_bvalid_contrib  (sram_mem_bvalid),
     .mem_bid_contrib     (sram_mem_bid),
     .mem_bresp_contrib   (sram_mem_bresp),
@@ -770,6 +862,7 @@ cpu_target_port port_sram (
     .m_bvalid  (m_sram_bvalid),
     .m_bresp   (m_sram_bresp),
 
+    .i_rd_busy  (sram_i_rd_busy),
     .mem_rd_busy(sram_mem_rd_busy),
     .mem_wr_busy(sram_mem_wr_busy),
     .per_rd_busy(sram_per_rd_busy),
@@ -783,10 +876,23 @@ cpu_target_port port_local (
     .clk    (clk),
     .reset_n(reset_n),
 
+    .i_rd_select  (i_ar_is_local),
     .mem_rd_select(mem_ar_is_local),
     .per_rd_select(per_ar_is_local),
     .mem_wr_select(mem_aw_is_local),
     .per_wr_select(per_aw_is_local),
+
+    .i_arvalid         (i_arvalid),
+    .i_arready_contrib (local_i_arready),
+    .i_araddr          (i_araddr),
+    .i_arid            (i_arid),
+    .i_arlen           (i_arlen),
+    .i_rvalid_contrib  (local_i_rvalid),
+    .i_rdata_contrib   (local_i_rdata),
+    .i_rid_contrib     (local_i_rid),
+    .i_rresp_contrib   (local_i_rresp),
+    .i_rlast_contrib   (local_i_rlast),
+    .i_rready          (i_rready),
 
     .mem_arvalid         (mem_arvalid),
     .mem_arready_contrib (local_mem_arready),
@@ -857,6 +963,7 @@ cpu_target_port port_local (
     .m_bvalid  (m_local_bvalid),
     .m_bresp   (m_local_bresp),
 
+    .i_rd_busy  (local_i_rd_busy),
     .mem_rd_busy(local_mem_rd_busy),
     .mem_wr_busy(local_mem_wr_busy),
     .per_rd_busy(local_per_rd_busy),
@@ -870,6 +977,7 @@ cpu_target_port port_local (
 // inputs are mutually exclusive per master (address decode picks exactly
 // one target).
 
+assign i_arready   = sdram_i_arready   | cram0_i_arready   | cram1_i_arready   | sram_i_arready   | local_i_arready;
 assign mem_arready = sdram_mem_arready | cram0_mem_arready | cram1_mem_arready | sram_mem_arready | local_mem_arready;
 assign per_arready = sdram_per_arready | cram0_per_arready | cram1_per_arready | sram_per_arready | local_per_arready;
 assign mem_awready = sdram_mem_awready | cram0_mem_awready | cram1_mem_awready | sram_mem_awready | local_mem_awready;
@@ -877,7 +985,30 @@ assign per_awready = sdram_per_awready | cram0_per_awready | cram1_per_awready |
 assign mem_wready  = sdram_mem_wready  | cram0_mem_wready  | cram1_mem_wready  | sram_mem_wready  | local_mem_wready;
 assign per_wready  = sdram_per_wready  | cram0_per_wready  | cram1_per_wready  | sram_per_wready  | local_per_wready;
 
-// mem R channel: mux rdata/rid/rresp/rlast based on which port drives valid
+// i R channel
+assign i_rvalid = sdram_i_rvalid | cram0_i_rvalid | cram1_i_rvalid | sram_i_rvalid | local_i_rvalid;
+assign i_rdata  = sdram_i_rvalid ? sdram_i_rdata
+                : cram0_i_rvalid ? cram0_i_rdata
+                : cram1_i_rvalid ? cram1_i_rdata
+                : sram_i_rvalid  ? sram_i_rdata
+                : local_i_rdata;
+assign i_rid    = sdram_i_rvalid ? sdram_i_rid
+                : cram0_i_rvalid ? cram0_i_rid
+                : cram1_i_rvalid ? cram1_i_rid
+                : sram_i_rvalid  ? sram_i_rid
+                : local_i_rid;
+assign i_rresp  = sdram_i_rvalid ? sdram_i_rresp
+                : cram0_i_rvalid ? cram0_i_rresp
+                : cram1_i_rvalid ? cram1_i_rresp
+                : sram_i_rvalid  ? sram_i_rresp
+                : local_i_rresp;
+assign i_rlast  = sdram_i_rvalid ? sdram_i_rlast
+                : cram0_i_rvalid ? cram0_i_rlast
+                : cram1_i_rvalid ? cram1_i_rlast
+                : sram_i_rvalid  ? sram_i_rlast
+                : local_i_rlast;
+
+// mem R channel
 assign mem_rvalid = sdram_mem_rvalid | cram0_mem_rvalid | cram1_mem_rvalid | sram_mem_rvalid | local_mem_rvalid;
 assign mem_rdata  = sdram_mem_rvalid ? sdram_mem_rdata
                   : cram0_mem_rvalid ? cram0_mem_rdata

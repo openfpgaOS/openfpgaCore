@@ -570,12 +570,10 @@ cram0_controller #(
     .cram_we_n(cram0_we_n),
     .cram_ub_n(cram0_ub_n),
     .cram_lb_n(cram0_lb_n),
-    // Sync burst read — dormant.  The burst FSM inside
-    // cram0_controller is kept available for future re-enablement;
-    // axi_cram0_slave currently has no burst path, so burst_rd stays
-    // tied low here.  To re-enable: restore the burst ports on
-    // axi_cram0_slave (see commit history) and drive burst_rd /
-    // burst_len from the slave instead of these constants.
+    // Sync burst read path in cram0_controller is unused — the AXI
+    // slave issues one async single-word read per AXI beat.  Tie the
+    // burst-request ports off and leave the burst response outputs
+    // disconnected.
     .burst_rd(1'b0),
     .burst_len(6'd0),
     .burst_rdata_valid(),

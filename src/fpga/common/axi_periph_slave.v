@@ -572,6 +572,7 @@ always @(posedge clk) begin
             target_dataslot_read <= 0;
             target_dataslot_write <= 0;
             target_dataslot_openfile <= 0;
+            target_dataslot_getfile <= 0;
         end
 
         // Latch ACK/DONE from bridge only during active command.
@@ -1035,7 +1036,10 @@ wire bram_hold     = !can_push_beat;
 always @(*) begin
     case (state)
         S_IDLE: begin
-            if (s_axi_arvalid && !s_axi_awvalid)
+            // Priority matches the FSM's AR-before-AW arbitration below.
+            // A mismatch here would mis-prefetch when both AR and AW are
+            // valid simultaneously.
+            if (s_axi_arvalid)
                 ram_addr_mux = ar_addr[14:2];
             else if (s_axi_awvalid)
                 ram_addr_mux = aw_addr[14:2];
@@ -1057,14 +1061,14 @@ assign ram_wren = (state == S_BRAM_WR) && (|req_wstrb);
 // ============================================
 // Region decode helpers
 // ============================================
-wire ar_dec_ram    = (ar_addr[31:18] == 14'b0);  // 192KB: 0x00000-0x2FFFF
+wire ar_dec_ram    = (ar_addr[31:15] == 17'b0); // 32KB: 0x00000-0x07FFF
 wire ar_dec_sysreg = (ar_addr[31:8]  == 24'h400000);
 wire ar_dec_audio  = (ar_addr[31:24] == 8'h4C);
 wire ar_dec_link   = (ar_addr[31:24] == 8'h4D);
 wire ar_dec_uart   = (ar_addr[31:24] == 8'h4F);
 wire ar_dec_gpu    = (ar_addr[31:24] == 8'h4A);
 
-wire aw_dec_ram    = (aw_addr[31:18] == 14'b0);  // 192KB: 0x00000-0x2FFFF
+wire aw_dec_ram    = (aw_addr[31:15] == 17'b0); // 32KB: 0x00000-0x07FFF
 wire aw_dec_sysreg = (aw_addr[31:8]  == 24'h400000);
 wire aw_dec_audio  = (aw_addr[31:24] == 8'h4C);
 wire aw_dec_link   = (aw_addr[31:24] == 8'h4D);
@@ -1218,6 +1222,13 @@ always @(posedge clk or posedge reset) begin
                             gpu_reg_wr <= 1;
                             gpu_reg_addr <= aw_addr[5:2];
                             gpu_reg_wdata <= s_axi_wdata;
+                        end
+                        if (aw_dec_uart && |s_axi_wstrb && aw_addr[3:2] == 2'b01) begin
+                            // UART_TX_DATA (offset 0x04): push into TX FIFO.
+                            // Mirrors the S_WR_NEXT path so bundled AW+W
+                            // writes don't drop the byte.
+                            uart_tx_fifo_din <= s_axi_wdata[7:0];
+                            uart_tx_fifo_we  <= 1;
                         end
                     end
                 end else begin
