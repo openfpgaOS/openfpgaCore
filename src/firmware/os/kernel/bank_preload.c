@@ -83,25 +83,6 @@ int bank_preload(void) {
         }
     }
 
-    /* Second pass: APF's filename lookup sometimes returns nothing and
-     * dir_probe_slots falls back to "slot:N" — sniff the file's first 4
-     * bytes for the OFSF magic so we can still identify the bank. */
-    if (!name) {
-        for (int i = 0; i < count; i++) {
-            uint32_t sid;
-            const char *bn = file_slot_get(i, &sid);
-            if (!bn) continue;
-            long sz = of_file_size(sid);
-            if (sz <= 0) continue;
-            if (slot_has_ofsf_magic(sid, (uint32_t)sz)) {
-                slot_id = sid;
-                name    = bn;
-                break;
-            }
-        }
-    }
-
-
     if (!name) {
         of_term_puts(" \033[93mNONE\033[0m\n");
         return -1;
