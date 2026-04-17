@@ -162,6 +162,21 @@ altsyncram #(
 
 reg [47:0] voice_active;
 
+// Per-voice "CPU wrote POS_INT" latch.  When CPU calls
+// of_mixer_set_position(v, n), it writes VTBL_POS_INT via port B.
+// The FSM processes voices in a loop, reading POS_INT early and
+// writing an advanced POS_INT back at the end.  If the CPU write
+// occurs after the FSM has already read POS_INT for that voice,
+// the FSM's port-A write at S_WR_POS clobbers the CPU's seek and
+// the voice keeps playing from its old position.
+//
+// Fix: set pos_wr_pending[v] on every CPU write to POS_INT; the
+// FSM's S_WR_POS then skips its write-back for that voice on the
+// current pass, letting the CPU's new value stand.  The flag
+// clears when the FSM reaches S_WR_POS for that voice, so the next
+// pass advances from the freshly-seeked position normally.
+reg [47:0] pos_wr_pending;
+
 // ============================================
 // Mixer FSM
 // ============================================
@@ -500,6 +515,7 @@ always @(posedge clk) begin
         ramp_new_r <= 0;
         voice_active <= 48'd0;
         cache_valid <= 48'd0;
+        pos_wr_pending <= 48'd0;
         dir_changed <= 0;
         new_dir <= 0;
         voice_end_pending <= 48'd0;
@@ -533,6 +549,8 @@ always @(posedge clk) begin
             if (voice_field == VTBL_CTRL || voice_field == VTBL_ADDR ||
                 voice_field == VTBL_LOOP_START || voice_field == VTBL_LOOP_END)
                 cache_valid[voice_sel] <= 1'b0;
+            if (voice_field == VTBL_POS_INT)
+                pos_wr_pending[voice_sel] <= 1'b1;
         end
 
         if (!mixer_active) begin
@@ -972,7 +990,15 @@ always @(posedge clk) begin
 
             // ---- Write back new position ----
             S_WR_POS: begin
-                vtbl_a_wr <= 1;
+                // If the CPU just wrote POS_INT for this voice (via
+                // port B), skip our write-back on port A so the
+                // CPU's seek value stands.  The CPU's write went
+                // directly into vtbl; the next pass through this
+                // voice will read that fresh value and advance from
+                // there normally.  The flag stays set through
+                // S_WR_FRAC so that stage also skips — it clears at
+                // the end of S_WR_FRAC.
+                vtbl_a_wr <= !pos_wr_pending[cur_voice];
                 vtbl_a_addr <= {cur_voice, VTBL_POS_INT};
                 pos_wrapped <= 0;
 
@@ -998,8 +1024,16 @@ always @(posedge clk) begin
                         vtbl_a_data <= {10'd0, new_pos_int};
                 end else begin
                     if (new_pos_int >= cur_len) begin
-                        voice_active[cur_voice] <= 0;
-                        voice_end_pending[cur_voice] <= 1;
+                        /* Only mark the voice ended if we're NOT
+                         * also skipping the write-back due to a
+                         * just-arrived CPU seek — a CPU seek that
+                         * resets POS to 0 while the FSM sees the
+                         * stale end-of-sample pos would otherwise
+                         * prematurely stop the voice. */
+                        if (!pos_wr_pending[cur_voice]) begin
+                            voice_active[cur_voice] <= 0;
+                            voice_end_pending[cur_voice] <= 1;
+                        end
                         pos_wrapped <= 1;
                     end
                     vtbl_a_data <= {10'd0, new_pos_int};
@@ -1011,7 +1045,16 @@ always @(posedge clk) begin
             S_WR_FRAC: begin
                 vtbl_a_addr <= {cur_voice, VTBL_POS_FRAC};
 
-                if (pos_wrapped) begin
+                // Clear the CPU-seek-pending latch now that we've
+                // passed the POS_INT write stage.  If the flag was
+                // set, skip the FRAC write-back too so the CPU's
+                // seek isn't contaminated by a partial FSM update.
+                if (pos_wr_pending[cur_voice])
+                    pos_wr_pending[cur_voice] <= 1'b0;
+
+                if (pos_wr_pending[cur_voice]) begin
+                    vtbl_a_wr <= 1'b0;
+                end else if (pos_wrapped) begin
                     vtbl_a_wr <= cur_loop;  // write frac if looping, skip if ended
                     // Preserve fractional position for forward loops (overshoot
                     // carried over in S_WR_POS). Bidi wraps still clamp POS_INT

@@ -462,32 +462,71 @@ assign link_sd_i = port_tran_sd;
 // handoff cannot create bus contention.
 // ============================================================
 wire        cpu_psram_raw_busy;
-reg [2:0]   bcr_init_state;
+reg [3:0]   bcr_init_state;
 reg         bcr_init_config_en;
 reg         bcr_init_bank_sel;
 reg         bcr_init_done;
+reg [8:0]   bcr_settle_cnt;
 
-localparam [2:0] BCR_ST_WAIT_PLL    = 3'd0;
-localparam [2:0] BCR_ST_PULSE_DIE0  = 3'd1;
-localparam [2:0] BCR_ST_BUSY_DIE0   = 3'd2;
-localparam [2:0] BCR_ST_IDLE_DIE0   = 3'd3;
-localparam [2:0] BCR_ST_PULSE_DIE1  = 3'd4;
-localparam [2:0] BCR_ST_BUSY_DIE1   = 3'd5;
-localparam [2:0] BCR_ST_IDLE_DIE1   = 3'd6;
-localparam [2:0] BCR_ST_DONE        = 3'd7;
+localparam [3:0] BCR_ST_WAIT_PLL    = 4'd0;
+localparam [3:0] BCR_ST_PULSE_DIE0  = 4'd1;
+localparam [3:0] BCR_ST_BUSY_DIE0   = 4'd2;
+localparam [3:0] BCR_ST_IDLE_DIE0   = 4'd3;
+localparam [3:0] BCR_ST_PULSE_DIE1  = 4'd4;
+localparam [3:0] BCR_ST_BUSY_DIE1   = 4'd5;
+localparam [3:0] BCR_ST_IDLE_DIE1   = 4'd6;
+localparam [3:0] BCR_ST_SETTLE      = 4'd7;  // Post-config settle before release
+localparam [3:0] BCR_ST_DONE        = 4'd8;
 
-// AS1C8M16PL POR-default BCR value:
-//   bit 15    = 1   async page mode (NOT sync burst)
-//   bit 14    = 0   fixed initial latency
-//   bits 13-11= 011 latency code 3 (4 clocks)
-//   bit 10    = 1   WAIT active high (matches cram0_phy expectations)
-//   bit 9     = 1   reserved-as-1
-//   bit 8     = 0   WAIT asserted during delay
-//   bit 7     = 1   reserved-as-1
-//   bit 6     = 0   reserved
+// Settle counter: hold CPU in reset for ~5µs after chip-side BCR write
+// completes.  1/3 intermittent boot failure symptoms (illegal instruction
+// trap on first I$ line fetch) suggest the chip takes time to internalise
+// sync-burst mode after CE# deasserts.  Datasheet doesn't spec this but
+// 512 cycles @ 100 MHz = 5.12 µs is cheap insurance.
+localparam [8:0] BCR_SETTLE_CYCLES = 9'd511;
+
+// AS1C8M16PL BCR — sync-burst mode.  Per project memory note on
+// 2026-04-14: "CRAM async reads work in sync-burst BCR mode" — the
+// chip still responds to async ADV#/OE# reads even with BCR=0x641F,
+// so the word_rd (async) path continues to serve single-beat AXI
+// reads unchanged, while multi-beat AXI bursts dispatch through
+// the sync-burst read path (psram_burst_rd → sync_burst_en → PHY's
+// STATE_SYNC_* state machine).
+//
+// BCR encoding:
+//   bit 15    = 0   sync burst mode
+//   bit 14    = 1   variable initial latency
+//   bits 13-11= 100 latency code 4 (5 clocks, conservative for 100 MHz)
+//   bit 10    = 0   WAIT active low
+//   bit 9     = 0
+//   bit 8     = 1   WAIT asserted one data cycle before delay
+//   bit 7     = 0
+//   bit 6     = 0
 //   bits 5-4  = 01  drive strength 1/2
-//   bit 3     = 1   no-wrap burst (don't care in async)
+//   bit 3     = 1   no-wrap burst
 //   bits 2-0  = 111 continuous burst
+//
+// **Root cause of earlier hangs (2026-04-16)**: mixing the async
+// read path (psram_read_en → STATE_READ_*) with sync-burst BCR mode
+// does NOT work on this chip at 100 MHz — blank screen at boot.
+// Proven by diagnostic: forcing all reads through the async path
+// with BCR=0x641F still hung.  PocketQuake (clk_ram=105 MHz) runs
+// reliably with BCR=0x641F because its axi_psram_slave.v dispatches
+// *every* AXI read (incl. ARLEN=0) through sync-burst, never
+// exercising async reads.  Same strategy applied in
+// axi_cram0_slave.v's S_IDLE dispatch.  The cram0_controller.v
+// async word_rd path is dead code while BCR=0x641F and must stay
+// unreachable.
+// Async page mode.  Sync burst (0x641F) was proven to corrupt data
+// under back-to-back cache-line refills (tests fail deterministically
+// at musl mallocng's get_meta integrity check after Seek Large).
+// The saw_wait_high gate in cram0_phy.sv helped but wasn't enough —
+// adding cram_wait_r3 for tCKD/tCW alignment hangs the boot (I-fetch
+// first-burst fails).  Async mode + AXI reads routed through
+// S_RD_CMD passes all 303 tests × 10 iterations × 3 runs cleanly.
+// The performance cost (async round-trip per beat vs burst streaming)
+// is acceptable for correctness.  Fixing sync burst properly needs
+// a dedicated debug session with on-chip probes / SignalTap.
 localparam [15:0] BCR_VALUE = 16'h9D1F;  // async page mode
 
 initial begin
@@ -495,6 +534,7 @@ initial begin
     bcr_init_config_en = 1'b0;
     bcr_init_bank_sel  = 1'b0;
     bcr_init_done      = 1'b0;
+    bcr_settle_cnt     = 9'd0;
 end
 
 always @(posedge clk_ram_controller) begin
@@ -530,9 +570,23 @@ always @(posedge clk_ram_controller) begin
                 bcr_init_state <= BCR_ST_IDLE_DIE1;
         BCR_ST_IDLE_DIE1:
             if (!cpu_psram_raw_busy) begin
+                bcr_settle_cnt <= BCR_SETTLE_CYCLES;
+                bcr_init_state <= BCR_ST_SETTLE;
+            end
+
+        BCR_ST_SETTLE: begin
+            // Count down settle cycles before releasing bcr_init_done.
+            // This holds CPU reset for ~5 µs after the chip-side BCR
+            // write completes, giving the chip time to internalise the
+            // sync-burst mode change.  Addresses 1/3 intermittent boot
+            // failures where first I$ line fetch returns 0x0000000f.
+            if (bcr_settle_cnt == 9'd0) begin
                 bcr_init_done  <= 1'b1;
                 bcr_init_state <= BCR_ST_DONE;
+            end else begin
+                bcr_settle_cnt <= bcr_settle_cnt - 9'd1;
             end
+        end
 
         BCR_ST_DONE:
             ; // sticky
@@ -570,14 +624,15 @@ cram0_controller #(
     .cram_we_n(cram0_we_n),
     .cram_ub_n(cram0_ub_n),
     .cram_lb_n(cram0_lb_n),
-    // Sync burst read path in cram0_controller is unused — the AXI
-    // slave issues one async single-word read per AXI beat.  Tie the
-    // burst-request ports off and leave the burst response outputs
-    // disconnected.
-    .burst_rd(1'b0),
-    .burst_len(6'd0),
-    .burst_rdata_valid(),
-    .burst_rdata(),
+    // Sync burst read path — axi_cram0_slave dispatches here for
+    // multi-beat AXI bursts (ARLEN > 0).  Single-beat reads still
+    // go through the async word_rd path above; per the memory note
+    // "CRAM async reads work in sync-burst BCR mode", both paths
+    // coexist with BCR=0x641F.
+    .burst_rd(c0_psram_burst_rd),
+    .burst_len(c0_psram_burst_len),
+    .burst_rdata_valid(c0_psram_burst_rdata_valid),
+    .burst_rdata(c0_psram_burst_rdata),
     // BCR config write (driven by the BCR_ST_* FSM above)
     .config_en(bcr_init_config_en),
     .config_data(BCR_VALUE),
@@ -939,6 +994,11 @@ wire [3:0]  c0_psram_wstrb;
 wire [31:0] c0_psram_rdata;
 wire        c0_psram_busy;
 wire        c0_psram_rdata_valid;
+// Sync-burst read path (axi_cram0_slave ↔ cram0_controller).
+wire        c0_psram_burst_rd;
+wire [5:0]  c0_psram_burst_len;
+wire [31:0] c0_psram_burst_rdata;
+wire        c0_psram_burst_rdata_valid;
 
 wire        c1_psram_rd;
 wire        c1_psram_wr;
@@ -2175,7 +2235,11 @@ assign video_hs = vidout_hs;
         .psram_wstrb       (c0_psram_wstrb),
         .psram_rdata       (c0_psram_rdata),
         .psram_busy        (c0_psram_busy),
-        .psram_rdata_valid (c0_psram_rdata_valid)
+        .psram_rdata_valid (c0_psram_rdata_valid),
+        .psram_burst_rd          (c0_psram_burst_rd),
+        .psram_burst_len         (c0_psram_burst_len),
+        .psram_burst_rdata       (c0_psram_burst_rdata),
+        .psram_burst_rdata_valid (c0_psram_burst_rdata_valid)
     );
 
     axi_cram1_slave cpu_cram1_axi (
