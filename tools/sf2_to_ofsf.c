@@ -876,18 +876,25 @@ static void resolve_preset(int phdr_index)
 {
     const sf2_phdr_t *ph = &g_sf2.phdr[phdr_index];
 
-    /* Compute preset slot: bank 0 -> melodic 0..127, bank 128 -> drum 128..255 */
+    /* Compute preset slot: bank 0 -> melodic 0..127, bank 128 -> drum 128..255
+     *
+     * Variation banks (bank 1..127) exist in SF2 as alternate timbres of the
+     * GM preset (e.g. SC-55 has bank 0 "Synth Bass 2", bank 8 "Synth Bass 4",
+     * bank 16 "Rubber Bass" — all at preset 39).  Our runtime lookup only
+     * supports bank 0 / bank 128, so merging variations into the bank 0 slot
+     * would silently stack every variation's zones onto GM preset 39, producing
+     * polyphonic layering at wrong pitches (e.g. bass notes drone an octave
+     * low because three unrelated bass instruments play simultaneously).
+     *
+     * Skip them cleanly — the MIDI file can't select them anyway. */
     int slot;
     if (ph->bank == 128) {
         slot = 128 + (ph->preset & 127);
     } else if (ph->bank == 0) {
         slot = ph->preset & 127;
     } else {
-        /* We only support bank 0 and bank 128 in the 256-slot index.
-           Map other banks to bank 0 with a warning. */
-        fprintf(stderr, "  warning: preset '%.*s' bank %d mapped to bank 0 slot %d\n",
-                20, ph->name, ph->bank, ph->preset & 127);
-        slot = ph->preset & 127;
+        /* Variation bank — not reachable by runtime, skip. */
+        return;
     }
 
     int bag_start = ph->bag_ndx;
@@ -1153,15 +1160,52 @@ static void write_output(const char *path)
         else
             oz->root_key = sh->original_key;
 
-        /* Tuning */
-        oz->fine_tune = (int8_t)g->val[GEN_fineTune];
-        oz->coarse_tune = (int8_t)g->val[GEN_coarseTune];
+        /* Tuning.
+         *
+         * Combine four sources of pitch offset into the single
+         * (coarse_tune, fine_tune) pair the runtime applies at note-on:
+         *   1. SF2 GEN_coarseTune  (semitones)
+         *   2. SF2 GEN_fineTune    (cents)
+         *   3. Sample-header pitch correction (cents)
+         *   4. Per-sample rate correction — CRITICAL.  OFSF stores a
+         *      single global sample_rate but SF2 allows each sample to
+         *      have its own rate in the shdr chunk.  If this sample's
+         *      actual rate differs from the OFSF global rate, the
+         *      mixer will pitch-shift it at playback; we compensate by
+         *      adding the equivalent tuning cents here so root_key
+         *      maps to the same audible pitch either way.
+         *
+         *      shift_cents = 1200 * log2(actual_sr / global_sr)
+         *
+         *      Typical symptom when this is missing:  bass patches
+         *      that use higher-rate samples than the converter's
+         *      auto-picked global rate play ~1 octave too low
+         *      (actual_sr > global_sr → mixer under-pitches the
+         *      sample). */
+        int rate_cents = 0;
+        if (sh->sample_rate > 0 && sh->sample_rate != sample_rate) {
+            double ratio = (double)sh->sample_rate / (double)sample_rate;
+            rate_cents = (int)lround(1200.0 * log2(ratio));
+        }
 
-        /* Add sample header correction to fine tune */
-        int total_fine = (int)oz->fine_tune + (int)sh->correction;
-        if (total_fine > 99) total_fine = 99;
-        if (total_fine < -99) total_fine = -99;
-        oz->fine_tune = (int8_t)total_fine;
+        int total_cents = (int)g->val[GEN_coarseTune] * 100
+                        + (int)g->val[GEN_fineTune]
+                        + (int)sh->correction
+                        + rate_cents;
+
+        /* Split total cents into semitones + remainder, normalizing so
+         * |fine| <= 99 (the int8_t field width guaranteed by the
+         * OFSF format). */
+        int coarse = total_cents / 100;
+        int fine   = total_cents - coarse * 100;
+        if (fine >  99) { fine -= 100; coarse++; }
+        if (fine < -99) { fine += 100; coarse--; }
+
+        if (coarse >  127) coarse =  127;
+        if (coarse < -128) coarse = -128;
+
+        oz->coarse_tune = (int8_t)coarse;
+        oz->fine_tune   = (int8_t)fine;
 
         /* Volume envelope */
         oz->vol_delay   = g->val[GEN_delayVolEnv];

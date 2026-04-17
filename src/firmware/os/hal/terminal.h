@@ -72,4 +72,8 @@ void of_term_set_display_mode(int mode);
 /* Enable UART console mirror (call after the debug-host handshake completes) */
 void of_term_enable_uart_mirror(void);
 
+/* Drain the UART TX ring buffer into the UART FIFO.  Called from the
+ * machine-timer ISR — bounded work per call (32 bytes max). */
+void of_term_uart_drain(void);
+
 #endif /* OFOS_TERMINAL_H */
