@@ -825,7 +825,12 @@ static long sys_clock_nanosleep_time64(long clk_id, long flags,
  * MMAP_SLOTS sized for test workloads and typical musl mallocng
  * behaviour (tens of concurrent large allocations); bump if needed.
  * ----------------------------------------------------------------- */
-#define MMAP_SLOTS 64
+/* Sized for mallocng's slab-per-size-class arenas: musl's allocator
+ * mmaps a fresh slab the first time any size class is touched, so an
+ * app pulling in many small allocations of diverse sizes can easily
+ * hold ~70+ concurrent slabs.  256 keeps headroom for a heavy workload
+ * without costing much BSS (12 B per slot). */
+#define MMAP_SLOTS 256
 
 typedef struct {
     uintptr_t base;     /* 0 = slot unused */
@@ -1572,12 +1577,19 @@ void syscall_init(uintptr_t heap_start) {
     fd_table[FD_STDERR].in_use = 1;
     brk_base    = heap_start;
     current_brk = heap_start;
-    /* mmap grows down from the top of the app's portable SDRAM window
-     * (0x10400000 + 48 MB = 0x13400000, per docs/app-virtual-map.md and
-     * loader.c's APP_VMAP_V1_SDRAM_END). Using SAVE_REGION_ADDR here
-     * would land mmap allocations in CRAM1 PSRAM, which is shared with
-     * the mixer sample pool and save system — not usable as general RAM. */
-    mmap_bottom = 0x13400000u;   /* page-aligned */
+    /* mmap grows down from APP_STACK_TOP - APP_STACK_SIZE.  The window
+     * nominally ends at APP_VMAP_V1_SDRAM_END (0x13400000) for
+     * portability, but on-target SDRAM extends further, and we let
+     * mmap reclaim that tail so memory-hungry workloads don't run
+     * out in the 48 MB portable window.  APP_VMAP_V1_SDRAM_END still
+     * bounds PT_LOAD segments — just not mmap.
+     *
+     * Strict inequality vs APP_STACK_TOP is critical: sys_mmap2
+     * zero-fills every carved region, and if mmap_bottom == stack
+     * top the first mmap wipes whatever stack frames the app
+     * already pushed.  Reserve the same 512 KB stack span used
+     * above 0x13F80000 for the OS runtime stack. */
+    mmap_bottom = 0x13F00000u;   /* APP_STACK_TOP - 512 KB */
 
     /* Reset mmap region tracker — the previous app's allocations
      * are no longer reachable once current_brk/mmap_bottom are
