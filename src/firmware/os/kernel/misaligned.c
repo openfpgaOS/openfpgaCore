@@ -45,14 +45,31 @@ typedef struct {
 #define CRAM_CACHED_END     CRAM0_UNCACHED          /* 0x38000000 */
 #define SDRAM_UC_END_ADDR   (SDRAM_UNCACHED_BASE + SDRAM_SIZE)
 
-/* Check if address range is in valid memory */
+/* Check if address range is in valid memory that the APP is allowed
+ * to touch via an emulated misaligned access.  The BRAM window below
+ * APP_BRAM_BASE holds the boot ROM, trap vectors, _ecall_handler and
+ * _trap_restore code — a bogus app pointer (uninitialised FILE *,
+ * stack garbage, NULL+offset) with low-address misalignment can land
+ * here.  If the misaligned handler "helpfully" emulates a store to
+ * those addresses via byte writes, it corrupts the trap path itself
+ * and the next exception blows up in code that no longer exists.
+ *
+ * The 0x147 trap (app's __stdio_write error path storing to a FILE *
+ * that was 0x147) proved this: the emulated stores rewrote bytes
+ * inside _ecall_handler, which then misbehaved on the next syscall.
+ *
+ * Reject OS-BRAM stores/loads here — the app sees the original
+ * misaligned trap turned into a fatal_trap instead of silently
+ * scribbling kernel code. */
 __attribute__((section(".text.boot")))
 static int addr_valid(unsigned int addr, unsigned int len) {
     unsigned int end = addr + len - 1;
     /* Check for overflow */
     if (end < addr) return 0;
-    /* BRAM */
-    if (end < BRAM_END_ADDR) return 1;  /* BRAM_BASE is 0, unsigned addr always >= 0 */
+    /* BRAM — only the app's window is emulatable. OS BRAM
+     * (< APP_BRAM_BASE, and > APP_BRAM_END which is the kernel
+     * trap stack) is off-limits. */
+    if (addr >= APP_BRAM_BASE && end < APP_BRAM_END) return 1;
     /* SDRAM (cached) */
     if (addr >= SDRAM_BASE && end < SDRAM_END_ADDR) return 1;
     /* CRAM (cached: CRAM0 + CRAM1) */

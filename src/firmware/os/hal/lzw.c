@@ -2,21 +2,32 @@
  * openfpgaOS LZW Compression
  * Ported from PocketDukeNukem/Engine/src/filesystem.c (Build engine format).
  * Uses safe byte-level reads for RISC-V alignment.
- * Work buffers are allocated internally via malloc/free.
+ *
+ * Work buffers are file-scope statics, sized once and reused across
+ * every call.  The previous per-call malloc/free through kernel
+ * dlmalloc was fragile: syscall_init() is called twice (boot + app
+ * load) with different heap bases, but dlmalloc's internal
+ * malloc_state isn't reset, so after the second init its top-chunk
+ * pointer and the actual brk region diverge.  The first few
+ * malloc(~34 KB) calls would land in an inconsistent slab and
+ * intermittently return NULL — exactly the LZW "rand ok" failure
+ * reported in issue.md.  Static buffers sidestep the heap entirely.
+ *
+ * Non-reentrant: the two entry points (compress / uncompress) share
+ * the same buffers.  Safe because kernel syscalls don't nest and
+ * firmware never interleaves LZW calls.
  */
 
 #include "lzw.h"
 #include <string.h>
 
-/* Use dlmalloc directly — kernel HAL code runs inside the syscall handler,
- * so calling musl's malloc would issue ecall (re-entering the trap) AND
- * conflict with dlmalloc over the shared brk heap. */
-extern void *dlmalloc(unsigned int);
-extern void  dlfree(void *);
-#define malloc dlmalloc
-#define free   dlfree
-
 #define LZWSIZE 16384
+#define LZWBUFSZ (LZWSIZE + (LZWSIZE >> 4))   /* 17408 bytes */
+
+static uint8_t lzwbuf1[LZWBUFSZ];             /*  17408 B */
+static short   lzwbuf2[LZWBUFSZ];             /*  34816 B */
+static short   lzwbuf3[LZWBUFSZ];             /*  34816 B */
+                                              /* ~85 KB total in .bss */
 
 /* Safe unaligned reads/writes (byte-level, no alignment issues on RISC-V) */
 static inline int32_t read_le32(const void *p) {
@@ -45,16 +56,6 @@ int32_t of_lzw_compress(const uint8_t *in, int32_t in_len, uint8_t *out)
 
     int32_t i, addr, newaddr, addrcnt, zx;
     int32_t bytecnt1, bitcnt, numbits, oneupnumbits;
-
-    /* Allocate work buffers */
-    int bufsz = LZWSIZE + (LZWSIZE >> 4);
-    uint8_t *lzwbuf1 = (uint8_t *)malloc(bufsz);
-    short *lzwbuf2 = (short *)malloc(bufsz * 2);
-    short *lzwbuf3 = (short *)malloc(bufsz * 2);
-    if (!lzwbuf1 || !lzwbuf2 || !lzwbuf3) {
-        free(lzwbuf1); free(lzwbuf2); free(lzwbuf3);
-        return -1;
-    }
 
     for(i=255;i>=0;i--) { lzwbuf1[i] = (uint8_t)i; lzwbuf3[i] = (short)((i+1)&255); }
     /* Clear lzwbuf2 to all 0xFFFF (-1 as short) */
@@ -114,7 +115,6 @@ int32_t of_lzw_compress(const uint8_t *in, int32_t in_len, uint8_t *out)
         result = in_len+4;
     }
 
-    free(lzwbuf1); free(lzwbuf2); free(lzwbuf3);
     return result;
 }
 
@@ -134,16 +134,6 @@ int32_t of_lzw_uncompress(const uint8_t *in, int32_t comp_len, uint8_t *out)
         int32_t uncompleng = (int32_t)read_le16(&in[0]);
         memcpy(out, in + 4, uncompleng);
         return uncompleng;
-    }
-
-    /* Allocate work buffers */
-    int bufsz = LZWSIZE + (LZWSIZE >> 4);
-    uint8_t *lzwbuf1 = (uint8_t *)malloc(bufsz);
-    short *lzwbuf2 = (short *)malloc(bufsz * 2);
-    short *lzwbuf3 = (short *)malloc(bufsz * 2);
-    if (!lzwbuf1 || !lzwbuf2 || !lzwbuf3) {
-        free(lzwbuf1); free(lzwbuf2); free(lzwbuf3);
-        return -1;
     }
 
     for(i=255;i>=0;i--) { lzwbuf2[i] = (short)i; lzwbuf3[i] = (short)i; }
@@ -171,6 +161,5 @@ int32_t of_lzw_uncompress(const uint8_t *in, int32_t comp_len, uint8_t *out)
 
     int32_t result = (int32_t)read_le16(&in[0]); /* uncompleng */
 
-    free(lzwbuf1); free(lzwbuf2); free(lzwbuf3);
     return result;
 }

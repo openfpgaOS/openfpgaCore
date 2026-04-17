@@ -39,11 +39,12 @@
 
 #define INSECURE 1
 
-/* Force trimming even though HAVE_MMAP is 0.
- * Without this, dlmalloc sets trim threshold to MAX_SIZE_T and never
- * returns memory via sbrk(-N). Large alloc/free cycles (e.g. 48MB probe)
- * leave brk at the ceiling permanently, exhausting SDRAM. */
-#define DEFAULT_TRIM_THRESHOLD ((size_t)256U * (size_t)1024U)
+/* dlmalloc's default trim threshold is now harmless: the kernel heap
+ * is a fixed BSS array, not a shared brk region.  Trim shrinks our
+ * private kernel_brk back into the array, which is safe because no
+ * other allocator touches it.  Leaving dlmalloc's default (MAX_SIZE_T,
+ * i.e. trim disabled) because with a fixed-size region there's
+ * nothing to return to the OS anyway. */
 
 /* Use DL prefix to avoid conflict with musl's malloc */
 #define USE_DL_PREFIX 1
@@ -51,25 +52,48 @@
 #define EINVAL 22
 #define ENOMEM 12
 
-/* Kernel-side sbrk: mutates the same current_brk syscall.c tracks.
- * Must respect mmap_bottom (the top of the brk heap, below which live
- * app mmap allocations) so kernel dlmalloc can't grow into an mmap'd
- * page. */
-extern uintptr_t current_brk;
-extern uintptr_t of_brk_limit(void);  /* returns current mmap_bottom */
+/* Dedicated kernel heap — fully separate from the app's brk.
+ *
+ * Previously __kernel_sbrk moved syscall.c's current_brk, which the
+ * app's musl also grows via the sys_brk syscall.  syscall_init() is
+ * called twice (boot, then app load) and reseeds current_brk each
+ * time, but dlmalloc's internal malloc_state (top chunk, free-lists)
+ * keeps its cached pointers from the first init, so after app load
+ * dlmalloc would hand out memory that belongs to the app's heap
+ * (state mismatch → corruption or NULL returns).  See issue.md
+ * (LZW intermittent failure) for a concrete symptom.
+ *
+ * Giving dlmalloc its own heap region eliminates the sharing: the
+ * app's current_brk is app-only, dlmalloc's kernel_brk is kernel-
+ * only, and resetting one has no effect on the other.  The region
+ * sits in CRAM0 .bss alongside the OS image (plenty of headroom
+ * under the 1 MB OS limit).
+ *
+ * Sized for dlmalloc's current callers (only OF_EID_MEMORY syscalls;
+ * the kernel's own musl overrides resolve to dlmalloc but the kernel
+ * never actually calls malloc after the LZW static-buffer fix).  If
+ * apps start relying on OF_MEMORY_FID_* heavily, bump KERNEL_HEAP_SIZE
+ * — it's only constrained by the os.ld 1 MB CRAM0 budget. */
+#define KERNEL_HEAP_SIZE (128u * 1024u)   /* 128 KB */
+
+static uint8_t     kernel_heap[KERNEL_HEAP_SIZE] __attribute__((aligned(16)));
+static uintptr_t   kernel_brk;            /* lazily initialised on first sbrk */
 
 __attribute__((noinline))
 static void *__kernel_sbrk(intptr_t increment) {
-    volatile uintptr_t *brk = &current_brk;
-    uintptr_t cur = *brk;
+    if (kernel_brk == 0)
+        kernel_brk = (uintptr_t)kernel_heap;
+    uintptr_t cur = kernel_brk;
     if (increment == 0)
         return (void *)cur;
     uintptr_t new_brk = cur + increment;
-    if (new_brk < cur && increment > 0)
-        return (void *)-1;  /* overflow */
-    if (new_brk > of_brk_limit())
-        return (void *)-1;  /* would collide with mmap region */
-    *brk = new_brk;
+    if (increment > 0 && new_brk < cur)
+        return (void *)-1;   /* overflow */
+    if (new_brk > (uintptr_t)kernel_heap + KERNEL_HEAP_SIZE)
+        return (void *)-1;   /* region exhausted */
+    if (new_brk < (uintptr_t)kernel_heap)
+        return (void *)-1;   /* trim below start — dlmalloc bug */
+    kernel_brk = new_brk;
     return (void *)cur;
 }
 

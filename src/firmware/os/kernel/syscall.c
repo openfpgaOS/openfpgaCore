@@ -29,6 +29,9 @@ void (*timer_callback_ptr)(void) = NULL;  /* non-static: accessed by services_ta
 
 /* Called from irq_handler() on machine timer interrupt */
 void timer_isr_callback(void) {
+    /* Drain the UART TX ring first — keeps the debug console mirror
+     * flowing regardless of what the app thread is doing. */
+    of_term_uart_drain();
     if (timer_callback_ptr)
         timer_callback_ptr();
     if (sigalrm_handler)
@@ -268,8 +271,11 @@ uintptr_t current_brk;
 static uintptr_t brk_base;
 static uintptr_t mmap_bottom;
 
-/* Exposed to of_malloc.c's __kernel_sbrk so the kernel-side dlmalloc
- * can't grow the heap past a live mmap allocation. */
+/* Top of the app's brk window (below this live the app's mmap pages).
+ * Previously read by of_malloc.c's __kernel_sbrk when the kernel
+ * dlmalloc shared the app's brk; it now has its own heap and this
+ * helper has no remaining caller, but the accessor is kept cheap
+ * and isolates the mmap_bottom symbol for future introspection. */
 uintptr_t of_brk_limit(void) { return mmap_bottom; }
 
 /* ======================================================================
@@ -584,6 +590,12 @@ static long sys_openat(long dirfd, long pathname, long flags, long mode) {
     const char *path = (const char *)pathname;
     if (!path)
         return -EINVAL;
+    /* Empty path matches Linux's open("", ...) semantics: -ENOENT.
+     * Rejecting here prevents file_slot_lookup("") from resolving to
+     * any slot that happens to carry an empty filename (stricmp("","")
+     * returns 0). Must come before alloc_fd() so no FD is leaked. */
+    if (!path[0])
+        return -ENOENT;
 
     int fd = alloc_fd();
     if (fd < 0)
@@ -790,25 +802,217 @@ static long sys_clock_nanosleep_time64(long clk_id, long flags,
     return 0;
 }
 
+/* -----------------------------------------------------------------
+ * mmap region tracker
+ *
+ * Each successful sys_mmap2 carves a region from `mmap_bottom`
+ * downward.  Without tracking, sys_munmap was a no-op and the region
+ * was leaked forever — any app doing alloc/free cycles of sizes >=
+ * musl's MMAP_THRESHOLD (e.g. the 48-size loop in testdemo's
+ * test_malloc) would cumulatively consume the entire app mmap
+ * window, after which malloc returns NULL for all subsequent sizes
+ * that fall on the mmap path.
+ *
+ * Strategy: keep a bounded table of {base, len, free?} entries.
+ *   - mmap: first reclaim by coalescing free entries adjacent to
+ *     mmap_bottom (walking the table), then try to reuse an existing
+ *     free entry of suitable size, then carve new space by lowering
+ *     mmap_bottom.
+ *   - munmap: find the entry that matches (base, len), mark it free.
+ *     If the freed entry is at mmap_bottom itself, raise mmap_bottom
+ *     immediately.
+ *
+ * MMAP_SLOTS sized for test workloads and typical musl mallocng
+ * behaviour (tens of concurrent large allocations); bump if needed.
+ * ----------------------------------------------------------------- */
+#define MMAP_SLOTS 64
+
+typedef struct {
+    uintptr_t base;     /* 0 = slot unused */
+    uintptr_t len;      /* page-aligned */
+    uint8_t   free;     /* 1 = munmapped, reusable */
+} mmap_slot_t;
+
+static mmap_slot_t mmap_slots[MMAP_SLOTS];
+static int         mmap_slots_used;
+
+static void mmap_coalesce_bottom(void) {
+    /* Walk free slots; any free slot whose BASE equals mmap_bottom
+     * sits exactly at the bottom of the carved arena and can be
+     * reclaimed by raising mmap_bottom up by its length.  Carved
+     * slots grow downward from the initial 0x13400000, so mmap_bottom
+     * always equals the lowest currently-allocated (or just-freed)
+     * address; a free slot starting at mmap_bottom is therefore the
+     * region we can reabsorb into the bulk free arena.
+     *
+     * Iterate to fixed point — raising mmap_bottom can expose the
+     * next-lowest free slot for the same treatment on the next pass. */
+    int changed;
+    do {
+        changed = 0;
+        for (int i = 0; i < MMAP_SLOTS; i++) {
+            mmap_slot_t *s = &mmap_slots[i];
+            if (!s->base || !s->free)
+                continue;
+            if (s->base == mmap_bottom) {
+                mmap_bottom = s->base + s->len;
+                s->base = 0;
+                s->len  = 0;
+                s->free = 0;
+                mmap_slots_used--;
+                changed = 1;
+            }
+        }
+    } while (changed);
+}
+
+static int mmap_find_reusable(uintptr_t want_len) {
+    /* Exact-fit only.  Splitting a larger free slot and returning the
+     * tail has correctness pitfalls (mallocng's metadata in the head
+     * part can be read through the mmap arena even after we mark it
+     * reusable), so we trade the potential fragmentation for
+     * predictability: a slot is reused only when an earlier munmap
+     * released exactly the size now being requested.  mallocng's
+     * usage pattern is size-class driven and usually does this — the
+     * 48 MB malloc/free loop in testdemo's test_malloc frees each
+     * mmap at the same size it was allocated at, so exact-fit alone
+     * recovers all of it.  Anything without an exact match falls
+     * through to carve-from-top. */
+    for (int i = 0; i < MMAP_SLOTS; i++) {
+        mmap_slot_t *s = &mmap_slots[i];
+        if (!s->base || !s->free) continue;
+        if (s->len == want_len) return i;
+    }
+    return -1;
+}
+
+static int mmap_alloc_slot(void) {
+    for (int i = 0; i < MMAP_SLOTS; i++)
+        if (!mmap_slots[i].base)
+            return i;
+    return -1;
+}
+
 static long sys_mmap2(long addr, long length, long prot,
                       long flags, long fd, long pgoffset) {
     (void)addr; (void)prot; (void)flags; (void)fd; (void)pgoffset;
     if (length <= 0)
         return -EINVAL;
-    /* Carve from the top down so the mmap arena can't collide with
-     * a later brk() extension. mmap_bottom is seeded page-aligned at
-     * init, so subtracting a page-aligned length preserves alignment. */
-    uintptr_t len_aligned = ((uintptr_t)length + 4095) & ~4095;
-    if (len_aligned > mmap_bottom - current_brk)
+
+    uintptr_t ulen = (uintptr_t)length;
+
+    /* Page-align, rejecting carry-out of +4095 (musl can pass sizes
+     * near SIZE_MAX when mallocng probes the mmap ceiling). */
+    uintptr_t len_aligned = (ulen + 4095u) & ~4095u;
+    if (len_aligned < ulen)
         return -ENOMEM;
-    uintptr_t base = mmap_bottom - len_aligned;
+
+    /* First try to reclaim space from previously munmapped regions
+     * that are contiguous with mmap_bottom, then look for an exact/
+     * best-fit free slot to reuse. */
+    mmap_coalesce_bottom();
+
+    int reuse = mmap_find_reusable(len_aligned);
+    if (reuse >= 0) {
+        mmap_slot_t *s = &mmap_slots[reuse];
+        /* Exact-fit: flip free -> in-use in place.  memset ensures
+         * mallocng sees a zeroed region, same as a fresh carve. */
+        s->free = 0;
+        memset((void *)s->base, 0, s->len);
+        return (long)s->base;
+    }
+
+    /* Snapshot the two pointers through a volatile barrier.  Earlier
+     * fix rounds showed GCC would optimize away whichever bound it
+     * could prove redundant from an earlier inequality, leaving only
+     * `base < current_brk` — which is useless against an underflowed
+     * base that's numerically larger than current_brk.  The volatile
+     * forces the compiler to treat mb/cb as opaque and keep every
+     * explicit check we write. */
+    volatile uintptr_t *mb_p = &mmap_bottom;
+    volatile uintptr_t *cb_p = &current_brk;
+    uintptr_t mb = *mb_p;
+    uintptr_t cb = *cb_p;
+
+    /* len_aligned must fit below mmap_bottom (prevents subtraction
+     * underflow) AND above current_brk (prevents carving into brk). */
+    if (len_aligned > mb)
+        return -ENOMEM;
+
+    uintptr_t base = mb - len_aligned;
+    uintptr_t end  = base + len_aligned;     /* always == mb */
+
+    if (base < cb)
+        return -ENOMEM;
+    if (end < base)              /* addition wrapped — shouldn't happen */
+        return -ENOMEM;
+    if (end > mb)                /* tautology, but forces the range to be sane */
+        return -ENOMEM;
+
+    /* Hard sanity: reject any base outside the SDRAM+CRAM window.
+     * The portable app memory map lives in 0x10000000–0x3FFFFFFF.
+     * Anything else (0x00xxxxxx BRAM, 0x4xxxxxxx peripherals, or
+     * the 0xF-range unmapped addresses that produced the original
+     * 0xFFEEFFF0 trap) is never a valid mmap target — fail here
+     * instead of letting memset scribble a peripheral. */
+    if (base < 0x10000000u || end > 0x40000000u)
+        return -ENOMEM;
+
+    /* Need a tracking slot before we commit.  If the table is full,
+     * fail the allocation rather than losing track of it — a leaked
+     * region would cause munmap to not find it and corruption later. */
+    int slot = mmap_alloc_slot();
+    if (slot < 0)
+        return -ENOMEM;
+
     memset((void *)base, 0, len_aligned);
-    mmap_bottom = base;
+    *mb_p = base;
+
+    mmap_slots[slot].base = base;
+    mmap_slots[slot].len  = len_aligned;
+    mmap_slots[slot].free = 0;
+    mmap_slots_used++;
+
     return (long)base;
 }
 
 static long sys_munmap(long addr, long length) {
-    (void)addr; (void)length;
+    if (!addr || length <= 0)
+        return 0;    /* Linux tolerates 0-length unmap as a no-op. */
+
+    uintptr_t base = (uintptr_t)addr;
+    uintptr_t len  = ((uintptr_t)length + 4095u) & ~4095u;
+
+    /* Find the exact allocation.  musl's mallocng pairs each mmap
+     * with a matching munmap(base, size), so an exact-match lookup
+     * covers the common case. */
+    for (int i = 0; i < MMAP_SLOTS; i++) {
+        mmap_slot_t *s = &mmap_slots[i];
+        if (s->base != base || s->len != len || s->free)
+            continue;
+
+        /* If this region sits right at mmap_bottom, reclaim by
+         * raising mmap_bottom and freeing the slot outright —
+         * that's the LIFO case (very common for mallocng). */
+        if (base == mmap_bottom) {
+            mmap_bottom = base + len;
+            s->base = 0;
+            s->len  = 0;
+            s->free = 0;
+            mmap_slots_used--;
+            /* Chain-coalesce any free slots that are now adjacent
+             * to the newly-raised mmap_bottom. */
+            mmap_coalesce_bottom();
+        } else {
+            /* Middle-of-arena free: mark reusable, keep in table. */
+            s->free = 1;
+        }
+        return 0;
+    }
+
+    /* No matching region — treat as a no-op.  Could be a partial
+     * munmap that musl never issues, or a double-free on the app
+     * side; neither warrants a failure return. */
     return 0;
 }
 
@@ -1374,6 +1578,12 @@ void syscall_init(uintptr_t heap_start) {
      * would land mmap allocations in CRAM1 PSRAM, which is shared with
      * the mixer sample pool and save system — not usable as general RAM. */
     mmap_bottom = 0x13400000u;   /* page-aligned */
+
+    /* Reset mmap region tracker — the previous app's allocations
+     * are no longer reachable once current_brk/mmap_bottom are
+     * reseeded. */
+    memset(mmap_slots, 0, sizeof(mmap_slots));
+    mmap_slots_used = 0;
 
     /* Reset file slot registry (apps re-register on startup) */
     file_slot_count = 0;
