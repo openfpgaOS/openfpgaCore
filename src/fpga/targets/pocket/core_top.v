@@ -517,17 +517,19 @@ localparam [8:0] BCR_SETTLE_CYCLES = 9'd511;
 // axi_cram0_slave.v's S_IDLE dispatch.  The cram0_controller.v
 // async word_rd path is dead code while BCR=0x641F and must stay
 // unreachable.
-// Async page mode.  Sync burst (0x641F) was proven to corrupt data
-// under back-to-back cache-line refills (tests fail deterministically
-// at musl mallocng's get_meta integrity check after Seek Large).
-// The saw_wait_high gate in cram0_phy.sv helped but wasn't enough —
-// adding cram_wait_r3 for tCKD/tCW alignment hangs the boot (I-fetch
-// first-burst fails).  Async mode + AXI reads routed through
-// S_RD_CMD passes all 303 tests × 10 iterations × 3 runs cleanly.
-// The performance cost (async round-trip per beat vs burst streaming)
-// is acceptable for correctness.  Fixing sync burst properly needs
-// a dedicated debug session with on-chip probes / SignalTap.
-localparam [15:0] BCR_VALUE = 16'h9D1F;  // async page mode
+//
+// 2026-04-16 (async fallback): Sync burst corrupted data under
+// back-to-back cache-line refills (get_meta trap after Seek Large).
+// Temporarily flipped to 0x9D1F (async page) to unblock testing.
+//
+// 2026-04-17 (sync-burst re-enable): The os.ld split-memory change
+// moves OS .data / .rodata / .bss into SDRAM, so CRAM0 now only
+// serves i_axi instruction fetches from a single CPU master.  The
+// suspected root cause (i_axi + mem_axi multi-port interleaving on
+// CRAM0) is gone, so we re-enable sync burst (0x641F) to regain
+// the burst streaming performance that 0x9D1F gives up.  If sync
+// burst corruption returns, the split-memory hypothesis is wrong.
+localparam [15:0] BCR_VALUE = 16'h641F;  // sync burst mode
 
 initial begin
     bcr_init_state     = BCR_ST_WAIT_PLL;

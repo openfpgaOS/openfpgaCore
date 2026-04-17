@@ -220,13 +220,15 @@ always @(posedge clk or posedge reset) begin
                 addr_r        <= s_axi_araddr;
                 burst_len     <= s_axi_arlen;
                 beat_count    <= 8'b0;
-                // All reads go through the async single-word path
-                // (S_RD_CMD → S_RD_DAT, one psram_rd pulse per AXI
-                // beat).  Sync burst produced deterministic musl
-                // mallocng corruption after Seek Large; see BCR
-                // comment in core_top.v for the investigation
-                // summary.  Pairs with BCR=0x9D1F in core_top.v.
-                state <= S_RD_CMD;
+                // Dispatch *every* AXI read through the sync-burst
+                // path (PocketQuake strategy — every ARLEN goes
+                // through sync_burst_en → STATE_SYNC_*).  Pairs with
+                // BCR=0x641F in core_top.v.  The os.ld split-memory
+                // change means CRAM0 only serves i_axi, so the
+                // multi-port interleaving that previously corrupted
+                // sync-burst refills is gone.  See BCR_VALUE comment
+                // in core_top.v for the full history.
+                state <= S_RD_BRST_CMD;
             end else if (s_axi_awvalid) begin
                 s_axi_awready <= 1'b1;
                 addr_r        <= s_axi_awaddr;

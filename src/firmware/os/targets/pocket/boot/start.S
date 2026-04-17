@@ -373,4 +373,4 @@ switch_to_runtime_stack_and_call:
 .global __tls_base
 .align 4
 __tls_base:
-    .space 512      /* Must fit struct __pthread (~120B) + TLS data */
+    .space 384      /* Must fit struct __pthread (~120B) + TLS data */

@@ -153,9 +153,16 @@ $(FW_TARGET).mif: $(FW_TARGET).elf
 	@echo "END;" >> $@
 	@echo "Generated $@ with $$(hexdump -v -e '1/4 "%08X\n"' boot.bin | wc -l) words of BRAM image"
 
-# OS binary (loaded by bootloader via deferload)
+# OS binary (loaded by bootloader via deferload).  Includes the
+# split-memory sections: .text stays in CRAM0, .osdata_rodata and
+# .osdata_data have their LMA packed into CRAM0 right after .text
+# (AT> CRAM0 in os.ld).  The bootloader splits the blob at runtime
+# and streams the .rodata / .data portion directly to its SDRAM VMA.
 os.bin: $(FW_TARGET).elf
-	$(OBJCOPY) -O binary --only-section=.text --only-section=.data $< $@
+	$(OBJCOPY) -O binary \
+		--only-section=.text \
+		--only-section=.osdata \
+		$< $@
 	@echo "Generated $@ ($$(wc -c < $@) bytes)"
 
 # Disassembly
@@ -163,8 +170,15 @@ $(FW_TARGET).lst: $(FW_TARGET).elf
 	$(OBJDUMP) -d -S $< > $@
 
 # Compile rules
+#
+# Boot C sources use tighter function alignment than the rest of
+# the firmware (-falign-functions=4 vs =64) because the BRAM budget
+# is only 8 KB for .boot + .boot_bss + .fasttext and the 64-byte
+# alignment pads push .fasttext past the APP_BRAM_BASE (0x2000)
+# assertion.  The boot code isn't performance-critical (runs once),
+# so losing the I-cache line alignment is fine.
 $(BOOT_DIR)/%.o: $(BOOT_DIR)/%.c
-	$(CC) $(CFLAGS) -c -o $@ $<
+	$(CC) $(filter-out -falign-functions=64 -falign-loops=64,$(CFLAGS)) -falign-functions=4 -falign-loops=4 -c -o $@ $<
 
 $(BOOT_DIR)/%.o: $(BOOT_DIR)/%.S
 	$(AS) $(ASFLAGS) -c -o $@ $<

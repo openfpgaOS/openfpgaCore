@@ -52,7 +52,10 @@ volatile unsigned int __attribute__((section(".bss.boot"))) pd_dbg_info;
 extern char _os_bss_start[], _os_bss_end[];
 extern char _runtime_stack_top[];
 extern char _os_load_addr[];
+extern char _os_text_size[];
 extern char _os_copy_size[];
+extern char _osdata_init_vma_start[];
+extern char _osdata_init_size[];
 
 /* OS entry point */
 extern void os_main(void);
@@ -119,13 +122,11 @@ static void boot_fb_clear_row(int row) {
 }
 
 
-__attribute__((section(".text.boot")))
-static void clear_os_bss(void) {
-    unsigned int *p = (unsigned int *)_os_bss_start;
-    unsigned int *end = (unsigned int *)_os_bss_end;
-    while (p < end)
-        *p++ = 0;
-}
+/* os_finalize_memory() lives in OS .text (CRAM0) so it adds zero BRAM
+ * cost. Defined in kernel/main.c. It only zeroes .bss — the .rodata
+ * and .data init image has already been streamed to its SDRAM VMA by
+ * the load path, so no copy is needed here. */
+extern void os_finalize_memory(void *bss_start, void *bss_end);
 
 __attribute__((section(".text.boot")))
 static void flush_icache(void) {
@@ -418,13 +419,20 @@ static int boot_dma_read(uint32_t slot_id, uint32_t slot_offset,
 }
 
 __attribute__((section(".text.boot")))
-static int boot_load_os_sd(void *dest, uint32_t total) {
-    /* Bounce through CRAM1: bridge DMA → CRAM1, then CPU copies → CRAM0.
-     * This eliminates the need for a CRAM0 bridge write path in the FPGA,
-     * saving ~80 ALMs + 1 M10K.  The copy adds ~25ms (negligible at boot). */
+static int boot_load_os_sd(uint32_t total) {
+    /* Bounce through CRAM1: bridge DMA → CRAM1, then CPU copies to
+     * its final home. Split-memory layout (see os.ld):
+     *   bytes [0, text_size)          → CRAM0 via uncached alias 0x38xxxxxx
+     *                                   (CRAM0 is removed from the d_axi
+     *                                   PMA, so cached writes would trap)
+     *   bytes [text_size, copy_size)  → SDRAM at __osdata_init_vma_start */
     uint32_t bounce_bridge = CRAM1_SCRATCH_BRIDGE;
     volatile uint8_t *bounce_src = (volatile uint8_t *)CRAM1_SCRATCH_UNCACHED;
-    volatile uint8_t *cram0_dst = (volatile uint8_t *)(uintptr_t)dest;
+    uint32_t text_size = (uint32_t)(uintptr_t)_os_text_size;
+    volatile uint8_t *text_dst =
+        (volatile uint8_t *)((uintptr_t)_os_load_addr | 0x08000000u);
+    volatile uint8_t *osdata_dst =
+        (volatile uint8_t *)(uintptr_t)_osdata_init_vma_start;
     uint32_t done = 0;
 
     while (done < total) {
@@ -437,11 +445,14 @@ static int boot_load_os_sd(void *dest, uint32_t total) {
         if (rc < 0)
             return rc;
 
-        /* CPU copy: CRAM1 (uncached) → CRAM0 (word-at-a-time) */
         volatile uint32_t *src32 = (volatile uint32_t *)bounce_src;
-        volatile uint32_t *dst32 = (volatile uint32_t *)&cram0_dst[done];
-        for (uint32_t i = 0; i < chunk / 4; i++)
-            dst32[i] = src32[i];
+        for (uint32_t i = 0; i < chunk / 4; i++) {
+            uint32_t off = done + i * 4;
+            volatile uint32_t *dst32 = (off < text_size)
+                ? (volatile uint32_t *)&text_dst[off]
+                : (volatile uint32_t *)&osdata_dst[off - text_size];
+            *dst32 = src32[i];
+        }
 
         done += chunk;
     }
@@ -522,9 +533,37 @@ int main(void) {
             boot_fb_clear_row(0);
             boot_fb_puts(0, 0, "Loading via UART...");
 
-            volatile uint8_t *dest = (volatile uint8_t *)(uintptr_t)_os_load_addr;
+            /* Split-memory PHDP stream:
+             *   bytes [0, text_size)       → CRAM0 uncached alias 0x38xxxxxx
+             *   bytes [text_size, total)   → SDRAM __osdata_init_vma_start
+             * Matches boot_load_os_sd for the SD path — CRAM0 is removed
+             * from d_axi so cached writes would trap. */
             (void)chunk_size;
-            int rc = phdp_chunk_loop(0, total_size, total_size, (void *)dest);
+            uint32_t text_size = (uint32_t)(uintptr_t)_os_text_size;
+            uint8_t *text_dst = (uint8_t *)((uintptr_t)_os_load_addr | 0x08000000u);
+            uint8_t *osdata_dst = (uint8_t *)(uintptr_t)_osdata_init_vma_start;
+            int rc = 0;
+            if (text_size > 0) {
+                rc = phdp_chunk_loop(0, text_size, total_size, text_dst);
+            }
+            if (rc == 0 && text_size < total_size) {
+                /* The host streams the whole slot from offset 0. The
+                 * first call above consumed bytes [0, text_size) into
+                 * text_dst but left the rest of the stream in flight.
+                 * The second call has to re-request with a fresh
+                 * REQ_OVERRIDE so the host restarts the stream from 0,
+                 * then we copy only the [text_size, total) window. */
+                uint32_t total2 = 0;
+                uint16_t chunk2 = 0;
+                if (!phdp_request_override(OS_SLOT_ID, &total2, &chunk2)) {
+                    rc = OF_ERR_IO;
+                } else {
+                    (void)chunk2;
+                    rc = phdp_chunk_loop(text_size, total_size - text_size,
+                                         total_size,
+                                         osdata_dst);
+                }
+            }
 
             if (rc < 0) {
                 boot_fb_clear_row(0);
@@ -573,7 +612,7 @@ load_from_sd:
 
     uint32_t os_size = (uint32_t)(uintptr_t)_os_copy_size;
 
-    int rc = boot_load_os_sd(_os_load_addr, os_size);
+    int rc = boot_load_os_sd(os_size);
 
     if (rc < 0) {
         boot_fb_clear_row(0);
@@ -595,9 +634,18 @@ load_from_sd:
     boot_fb_clear_row(0);
 
 start_os:
+    /* uart_mirror_on is armed by the PHDP path above and by
+     * of_term_enable_uart_mirror() in kernel/main.c for SD boot.
+     *
+     * Split-memory model (os.ld): OS .text is in CRAM0 (single
+     * master, i_axi only); OS .rodata / .data / .bss live in SDRAM.
+     * The load path already streamed .rodata / .data directly to
+     * their SDRAM VMA, so only .bss remains to be zeroed.
+     * os_finalize_memory() (located in CRAM0, not BRAM) does that
+     * without touching CRAM0 as data. */
     flush_dcache_evict();
     flush_icache();
-    clear_os_bss();
+    os_finalize_memory((void *)_os_bss_start, (void *)_os_bss_end);
 
     pd_dbg_stage = 5;
 

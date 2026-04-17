@@ -24,6 +24,19 @@
 /* Symbols from linker script */
 extern char __os_bss_end[];
 
+/* Zero OS .bss in SDRAM. Lives in OS .text (CRAM0) so it adds zero
+ * BRAM cost. Called by the BRAM bootloader AFTER .rodata/.data have
+ * been streamed directly to their SDRAM VMA by the load path, so
+ * only .bss remains to be cleared. Uses only stack locals and the
+ * pointer arguments, so it is safe to invoke before .bss is zeroed. */
+__attribute__((noinline, section(".text.os_finalize_memory")))
+void os_finalize_memory(void *bss_start, void *bss_end) {
+    uint32_t *bss = (uint32_t *)bss_start;
+    uint32_t *bend = (uint32_t *)bss_end;
+    while (bss < bend)
+        *bss++ = 0;
+}
+
 /* Draw boot logo. First call clears screen, subsequent calls just recolor. */
 static int logo_drawn = 0;
 
