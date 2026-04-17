@@ -73,6 +73,7 @@ localparam [3:0] ST_DONE      = 4'd7;
 localparam [3:0] ST_BURST_START = 4'd8;   // Issue sync_burst_en to driver
 localparam [3:0] ST_BURST_LO   = 4'd9;   // Wait for low halfword read_avail
 localparam [3:0] ST_BURST_HI   = 4'd10;  // Wait for high halfword, assemble word
+localparam [3:0] ST_BURST_DONE = 4'd11;  // Wait for PHY to finish (busy drop)
 
 reg [3:0] state;
 reg is_write;
@@ -368,12 +369,24 @@ always @(posedge clk or negedge reset_n) begin
                     burst_rdata_valid <= 1'b1;
                     burst_words_rem <= burst_words_rem - 6'd1;
                     if (burst_words_rem == 6'd1) begin
-                        // Last word delivered
-                        word_busy <= 1'b0;
-                        state <= ST_IDLE;
+                        // Last word delivered — wait for PHY to
+                        // finish STATE_SYNC_END + CE# deassertion
+                        // before releasing word_busy.  Dropping
+                        // word_busy while PHY is still busy lets the
+                        // AXI slave fire a new burst_rd that hits
+                        // the PHY mid-cleanup and corrupts data.
+                        // Matches PocketQuake's ST_BURST_DONE gate.
+                        state <= ST_BURST_DONE;
                     end else begin
                         state <= ST_BURST_LO;
                     end
+                end
+            end
+
+            ST_BURST_DONE: begin
+                if (!psram_busy) begin
+                    word_busy <= 1'b0;
+                    state <= ST_IDLE;
                 end
             end
 

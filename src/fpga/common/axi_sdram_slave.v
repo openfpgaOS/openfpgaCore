@@ -94,15 +94,22 @@ assign sdram_next_wdata = next_wdata;
 assign sdram_next_wstrb = next_wstrb;
 reg        started;      // accepted seen, waiting for completion
 
-// 2-entry skid buffer (primary R slot + skid) so that back-pressure
-// from the master doesn't drop sdram_rdata_valid pulses.  Required now
-// that cpu_target_port has a registered response slot that can
-// transiently lower rready mid-burst.  Without this, 1-cycle
-// rdata_valid pulses get silently lost when rvalid is still held from
-// the previous beat.
-reg [31:0] rskid_data;
-reg        rskid_last;
-reg        rskid_valid;
+// 3-entry response pipeline (primary R slot + 2 skid entries) so
+// back-pressure from the master doesn't drop sdram_rdata_valid pulses.
+// cpu_target_port's registered response slot can transiently lower
+// rready mid-burst, and in the 3-master topology one master's slow
+// rready holds m_rready low for every beat until it drains.  SDRAM
+// streams at 1 beat/cycle, so a K-cycle master stall fills at most
+// K-1 downstream buffers.  3 buffers → tolerant of up to 2 cycles of
+// back-pressure before we'd have to drop, which is wider than anything
+// observed on VexiiRiscv L1 refills.
+//
+// Invariant: entries are always contiguous from the slot toward skid2
+// (rskid2_valid implies rskid_valid implies s_axi_rvalid).  Pushes fill
+// the first empty position; drains shift toward the slot.
+reg [31:0] rskid_data,  rskid2_data;
+reg        rskid_last,  rskid2_last;
+reg        rskid_valid, rskid2_valid;
 
 wire beat_is_last = (beat_count == burst_len);
 
@@ -137,9 +144,12 @@ always @(posedge clk or posedge reset) begin
         wready_given <= 0;
         wr_busy_seen <= 0;
 
-        rskid_data  <= 0;
-        rskid_last  <= 0;
-        rskid_valid <= 0;
+        rskid_data   <= 0;
+        rskid_last   <= 0;
+        rskid_valid  <= 0;
+        rskid2_data  <= 0;
+        rskid2_last  <= 0;
+        rskid2_valid <= 0;
     end else begin
         // Defaults: deassert single-cycle signals.  rvalid and bvalid
         // are NOT in this list — they are "hold until *ready" signals
@@ -153,18 +163,23 @@ always @(posedge clk or posedge reset) begin
         sdram_burst_len <= 0;
         sdram_burst_wr_len <= 0;
 
-        // AXI handshake drop-on-accept for rvalid.  When the master
-        // consumes a beat, either drain the skid into the R slot or
-        // clear the slot so the next sdram_rdata_valid pulse can land.
+        // AXI handshake drain-and-shift for R: on every accepted beat,
+        // shift the skid chain one position toward the slot.  A push
+        // below may override one of the positions on the same cycle
+        // (non-blocking last-wins), which is how we handle concurrent
+        // drain+push without breaking the contiguous-valid invariant.
         if (s_axi_rvalid && s_axi_rready) begin
             if (rskid_valid) begin
-                s_axi_rdata  <= rskid_data;
-                s_axi_rlast  <= rskid_last;
-                rskid_valid  <= 1'b0;
-                // rvalid stays high — skid is promoted into the slot.
+                s_axi_rdata <= rskid_data;
+                s_axi_rlast <= rskid_last;
+                // s_axi_rvalid stays 1 — skid promoted into slot.
             end else begin
                 s_axi_rvalid <= 1'b0;
             end
+            rskid_data   <= rskid2_data;
+            rskid_last   <= rskid2_last;
+            rskid_valid  <= rskid2_valid;
+            rskid2_valid <= 1'b0;
         end
         if (s_axi_bvalid && s_axi_bready) s_axi_bvalid <= 1'b0;
 
@@ -173,11 +188,17 @@ always @(posedge clk or posedge reset) begin
         S_IDLE: begin
             cmd_issued <= 0;
             started <= 0;
-            // Reads have priority over writes.  Don't accept a new AR
-            // while the previous burst's last beat is still draining
-            // through the R slot or skid — otherwise we'd smash the
-            // held rvalid/rdata with the new burst's first beat.
-            if (s_axi_arvalid && !s_axi_rvalid && !rskid_valid) begin
+            // Reads have priority over writes.  Accept a new AR as soon
+            // as the skid chain is empty — the old last beat may still
+            // be held in s_axi_rvalid/rdata, but upstream m_rready
+            // back-pressure plus the 3-entry pipeline ensure the new
+            // burst's first beats don't clobber it (SDRAM delivers
+            // beat 0 ~5-6 cycles after the command, by which time the
+            // master has almost certainly drained the held beat).
+            // Pairs with cpu_target_port's last-beat pre-grant to
+            // close the inter-burst gap.  The skid-empty check implies
+            // skid2-empty too (contiguous-valid invariant).
+            if (s_axi_arvalid && !rskid_valid) begin
                 s_axi_arready <= 1;
                 addr_r <= s_axi_araddr;
                 burst_len <= s_axi_arlen;
@@ -240,31 +261,57 @@ always @(posedge clk or posedge reset) begin
         end
 
         S_RD_DAT: begin
-            // Wait for read data.  Gate with started to prevent
-            // capturing peripheral data before our command was
-            // accepted.  Incoming sdram_rdata_valid pulses route to
-            // either the primary R slot (if empty OR just drained
-            // this cycle by the handshake-drop block above) or the
-            // 1-entry skid.  If both are full the beat is lost —
-            // shouldn't happen once rready is properly propagated
-            // through the arbiter.
+            // Gate with started to prevent capturing peripheral data
+            // before our command was accepted.  An incoming
+            // sdram_rdata_valid pulse is placed at the earliest empty
+            // position in the drain-shifted pipeline (slot / skid /
+            // skid2).  When the handshake block above shifts on the
+            // same cycle, the shifted post-drain state drives the
+            // target selection so the invariant stays contiguous.
             if (started && sdram_rdata_valid) begin
-                // "slot_free_next_cycle" accounts for the handshake-drop
-                // block above which may be draining the slot in the
-                // same cycle.  If a drop is happening, the new beat
-                // can land directly into the slot.
-                if (!s_axi_rvalid ||
-                    (s_axi_rvalid && s_axi_rready && !rskid_valid)) begin
-                    s_axi_rvalid <= 1;
-                    s_axi_rdata  <= sdram_rdata;
-                    s_axi_rresp  <= 2'b00;
-                    s_axi_rlast  <= beat_is_last;
-                end else if (!rskid_valid) begin
-                    rskid_valid <= 1'b1;
-                    rskid_data  <= sdram_rdata;
-                    rskid_last  <= beat_is_last;
+                if (s_axi_rvalid && s_axi_rready) begin
+                    // Drain-overlap path: post-shift state is
+                    // (S'=rskid_valid, K'=rskid2_valid, K2'=0).
+                    if (!rskid_valid) begin
+                        // Slot will be empty after shift → push to slot.
+                        s_axi_rvalid <= 1'b1;
+                        s_axi_rdata  <= sdram_rdata;
+                        s_axi_rresp  <= 2'b00;
+                        s_axi_rlast  <= beat_is_last;
+                    end else if (!rskid2_valid) begin
+                        // Skid will be empty after shift → push to skid.
+                        rskid_valid <= 1'b1;
+                        rskid_data  <= sdram_rdata;
+                        rskid_last  <= beat_is_last;
+                    end else begin
+                        // Full chain shifting — skid2 vacates → push there.
+                        rskid2_valid <= 1'b1;
+                        rskid2_data  <= sdram_rdata;
+                        rskid2_last  <= beat_is_last;
+                    end
+                end else begin
+                    // No drain this cycle: push into first empty slot.
+                    if (!s_axi_rvalid) begin
+                        s_axi_rvalid <= 1'b1;
+                        s_axi_rdata  <= sdram_rdata;
+                        s_axi_rresp  <= 2'b00;
+                        s_axi_rlast  <= beat_is_last;
+                    end else if (!rskid_valid) begin
+                        rskid_valid <= 1'b1;
+                        rskid_data  <= sdram_rdata;
+                        rskid_last  <= beat_is_last;
+                    end else if (!rskid2_valid) begin
+                        rskid2_valid <= 1'b1;
+                        rskid2_data  <= sdram_rdata;
+                        rskid2_last  <= beat_is_last;
+                    end
+                    // else: all three full — drop (invariant broken by
+                    // pathological back-pressure).  beat_count still
+                    // advances so the FSM clears — master will hang
+                    // waiting on the lost beat, which is observable at
+                    // the bus and forces the backpressure assumption
+                    // to be revisited.
                 end
-                // else: both full → overflow. Guarded by rready propagation.
                 beat_count <= beat_count + 1;
                 if (beat_is_last) begin
                     cmd_issued <= 0;

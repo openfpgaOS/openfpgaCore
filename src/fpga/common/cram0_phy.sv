@@ -225,12 +225,26 @@ module psram_cram0_drv #(
     dbg_stale_count = 0;
   end
 
+  // Saw-WAIT-high capture gate.  Between bursts the chip's WAIT
+  // pin is not driven (CE# HIGH, chip idle) and the IOB captures
+  // whatever the pin floats to.  If that idle level is LOW, at
+  // STATE_SYNC_DATA entry the pipeline still shows WAIT=LOW from
+  // the pre-burst interval — without the gate, the FSM reads it
+  // as "data valid" and captures stale DQ.  The gate pairs with
+  // the cram_wait_r3/cram_dq_r2 alignment to produce correct
+  // capture timing on every burst.
+  reg saw_wait_high;
+  initial saw_wait_high = 0;
+
   assign cram_dq = data_out_en ? cram_data : 16'hZZ;
 
   // Posedge IOB capture registers for sync burst read data.
   // FAST_INPUT_REGISTER in QSF guarantees IOB placement on posedge.
-  reg [15:0] cram_dq_r;
-  reg cram_wait_r;
+  // Initialise to WAIT=HIGH (invalid) so the fabric pipeline never
+  // observes a stale LOW from uninit registers during the first few
+  // cycles after PLL lock — matters for first-burst reliability.
+  reg [15:0] cram_dq_r = 16'h0000;
+  reg cram_wait_r = 1'b1;
   always @(posedge clk) begin
     cram_dq_r <= cram_dq;
     cram_wait_r <= cram_wait;  // WAIT active HIGH (BCR bit10=1), during delay (bit8=0): HIGH=invalid, LOW=valid
@@ -244,8 +258,8 @@ module psram_cram0_drv #(
   // valid data, causing the FSM to read stale DQ.  Adding one fabric pipeline
   // stage ensures WAIT and DQ are always from the same IOB capture, with a
   // full extra clock cycle (~9.5ns) of margin.
-  reg [15:0] cram_dq_r2;
-  reg cram_wait_r2;
+  reg [15:0] cram_dq_r2 = 16'h0000;
+  reg cram_wait_r2 = 1'b1;
   always @(posedge clk) begin
     cram_dq_r2 <= cram_dq_r;
     cram_wait_r2 <= cram_wait_r;
@@ -352,6 +366,7 @@ module psram_cram0_drv #(
           latency_counter <= SYNC_LATENCY[5:0];
           burst_counter <= sync_burst_len;
           first_capture_pending <= 1;
+          saw_wait_high <= 0;       /* reset gate for this burst */
           busy <= 1;
         end
       end
@@ -480,12 +495,18 @@ module psram_cram0_drv #(
       end
 
       STATE_SYNC_DATA: begin
-        // Use pipeline registers (cram_dq_r2/cram_wait_r2) to guarantee
-        // WAIT and DQ are from the same IOB capture posedge.
+        // Capture decision uses cram_wait_r2 / cram_dq_r2 (both
+        // 2-stage pipelined).  The saw_wait_high gate suppresses any
+        // LOW that could be stale from the pre-burst idle interval.
         if (cram_wait_r2) begin
           // WAIT HIGH — initial latency or row boundary crossing pause.
+          saw_wait_high <= 1'b1;
           dbg_wait_seen <= 1'b1;
           dbg_wait_cycles <= dbg_wait_cycles + 16'd1;
+          state <= STATE_SYNC_DATA;
+        end else if (!saw_wait_high) begin
+          // WAIT LOW but we haven't seen HIGH yet — stale idle-period
+          // capture; spin until the chip asserts WAIT.
           state <= STATE_SYNC_DATA;
         end else begin
           // WAIT LOW — data valid, capture halfword

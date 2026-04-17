@@ -231,8 +231,15 @@ always @(*) begin
     endcase
 end
 
-wire no_wr_in_flight = (wr_state == WR_IDLE) && !mem_bvalid_r && !per_bvalid_r;
-wire no_rd_in_flight = (rd_state == RD_IDLE) && !i_rvalid_r && !mem_rvalid_r && !per_rvalid_r;
+// Serialization between rd and wr sub-FSMs on this port.  The
+// downstream slave is single-FSM so only one direction can be in-
+// flight through it at a time.  We intentionally do NOT gate on the
+// registered response slots (mem_bvalid_r, i/mem/per_rvalid_r) — a
+// pending response is a master-side handshake that doesn't occupy
+// the slave, and cpu_system's global_*_busy already prevents a new
+// same-master transaction from overwriting a sticky response slot.
+wire no_wr_in_flight = (wr_state == WR_IDLE);
+wire no_rd_in_flight = (rd_state == RD_IDLE);
 wire rd_can_start    = (rd_state == RD_IDLE) && no_wr_in_flight && any_rd;
 
 wire rd_grant_i   = rd_can_start && (rd_next_owner == OWN_I)   && i_rd_select;
@@ -240,6 +247,22 @@ wire rd_grant_mem = rd_can_start && (rd_next_owner == OWN_MEM) && mem_rd_select;
 wire rd_grant_per = rd_can_start && (rd_next_owner == OWN_PER) && per_rd_select;
 
 wire rd_beat_is_last = (rd_burst_count == rd_burst_len);
+
+// --- Zero-gap pre-grant ----------------------------------------------------
+// When the last beat of a burst is accepted in RD_R, a pending next request
+// is normally held until the FSM returns to RD_IDLE (1 dead cycle).  If the
+// arbiter would grant a new master next cycle anyway, skip that dead cycle
+// by asserting m_arvalid directly from the last-beat cycle.  Safe because:
+//   - wr_can_start requires (rd_state == RD_IDLE), which is never true
+//     during RD_R, so writes can't collide.
+//   - Back-pressure chain (port slot → m_rready → slave skid) still
+//     protects against overflow when the new burst's first beats arrive
+//     before the old last beat drains from the master's registered slot.
+wire rd_last_accept    = (rd_state == RD_R) && m_rvalid && m_rready && rd_beat_is_last;
+wire rd_pregrant_avail = no_wr_in_flight && any_rd;
+wire rd_pregrant_i   = rd_last_accept && rd_pregrant_avail && (rd_next_owner == OWN_I)   && i_rd_select;
+wire rd_pregrant_mem = rd_last_accept && rd_pregrant_avail && (rd_next_owner == OWN_MEM) && mem_rd_select;
+wire rd_pregrant_per = rd_last_accept && rd_pregrant_avail && (rd_next_owner == OWN_PER) && per_rd_select;
 
 always @(posedge clk or posedge reset) begin
     if (reset) begin
@@ -343,8 +366,44 @@ always @(posedge clk or posedge reset) begin
                 end
                 endcase
                 rd_burst_count <= rd_burst_count + 8'd1;
-                if (rd_beat_is_last)
-                    rd_state <= RD_IDLE;
+                if (rd_beat_is_last) begin
+                    // Pre-grant path: skip the RD_IDLE dead cycle when a
+                    // next owner is already requesting.  Last assignment
+                    // wins for rd_burst_count / rd_burst_len — the new
+                    // burst's values below override the increment above.
+                    if (rd_pregrant_i) begin
+                        rd_active      <= OWN_I;
+                        rd_active_iid  <= i_arid;
+                        rd_burst_len   <= i_arlen;
+                        rd_burst_count <= 8'b0;
+                        m_arvalid      <= 1'b1;
+                        m_araddr       <= i_araddr;
+                        m_arlen        <= i_arlen;
+                        last_grant_rd  <= OWN_I;
+                        rd_state       <= RD_AR;
+                    end else if (rd_pregrant_mem) begin
+                        rd_active      <= OWN_MEM;
+                        rd_active_id   <= mem_arid;
+                        rd_burst_len   <= mem_arlen;
+                        rd_burst_count <= 8'b0;
+                        m_arvalid      <= 1'b1;
+                        m_araddr       <= mem_araddr;
+                        m_arlen        <= mem_arlen;
+                        last_grant_rd  <= OWN_MEM;
+                        rd_state       <= RD_AR;
+                    end else if (rd_pregrant_per) begin
+                        rd_active      <= OWN_PER;
+                        rd_burst_len   <= per_arlen;
+                        rd_burst_count <= 8'b0;
+                        m_arvalid      <= 1'b1;
+                        m_araddr       <= per_araddr;
+                        m_arlen        <= per_arlen;
+                        last_grant_rd  <= OWN_PER;
+                        rd_state       <= RD_AR;
+                    end else begin
+                        rd_state <= RD_IDLE;
+                    end
+                end
             end
         end
 
@@ -353,10 +412,11 @@ always @(posedge clk or posedge reset) begin
     end
 end
 
-// Single-cycle arready pulses — combinational from grant.
-wire rd_i_arready_pulse   = rd_grant_i;
-wire rd_mem_arready_pulse = rd_grant_mem;
-wire rd_per_arready_pulse = rd_grant_per;
+// Single-cycle arready pulses — combinational from grant.  Also fires on
+// the zero-gap pre-grant path so the granted master sees its AR consumed.
+wire rd_i_arready_pulse   = rd_grant_i   || rd_pregrant_i;
+wire rd_mem_arready_pulse = rd_grant_mem || rd_pregrant_mem;
+wire rd_per_arready_pulse = rd_grant_per || rd_pregrant_per;
 
 // ============================================================
 // Write sub-FSM — 2-way (mem / per); i_axi never writes.
