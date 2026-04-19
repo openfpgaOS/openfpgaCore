@@ -1570,25 +1570,19 @@ always @(posedge clk or negedge reset_n) begin
                     mm_p_sub       <= 5'd5;
                 end
                 5'd5: begin
-                    // DEBUG: Phase 5c ramp1 multiply forced to 0 to test
-                    // whether mod-env contribution is the wrong-instruments
-                    // bug.  Reverts MM_PITCH_ACCUM to LFO0+LFO1 only.
+                    // Three parallel multiplies (LFO0+LFO1+RAMP1 into pitch).
+                    // Operands are all FFs (FF→DSP→FF path only).
                     mm_mul0_raw <= mm_lfo0_out  * s_lfo0_pitch;
                     mm_mul1_raw <= mm_lfo1_out  * s_lfo1_pitch;
-                    mm_mul2_raw <= 36'sd0;
+                    mm_mul2_raw <= mm_ramp1_out * s_ramp1_pitch;
                     mm_p_sub    <= 5'd6;
                 end
                 5'd6: begin
-                    mm_pitch_acc <= {{16{mm_mul0_raw[35]}}, mm_mul0_raw[35:16]};
+                    mm_pitch_acc <= mm_mul0_raw[35:16] + mm_mul2_raw[35:16];
                     mm_p_sub <= 5'd7;
                 end
                 5'd7: begin
-                    /* Sign-extend the 20-bit product slice manually —
-                     * Verilog treats [35:16] as unsigned by default and
-                     * zero-extends, flipping negative LFO contributions
-                     * to positive cents. */
-                    mm_pitch_acc <= mm_pitch_acc +
-                                    {{16{mm_mul1_raw[35]}}, mm_mul1_raw[35:16]};
+                    mm_pitch_acc <= mm_pitch_acc + mm_mul1_raw[35:16];
                     mm_p_sub <= 5'd8;
                 end
                 5'd8: begin
@@ -1618,13 +1612,16 @@ always @(posedge clk or negedge reset_n) begin
         end else begin
             case (mm_f_sub)
                 5'd1: begin
-                    // DEBUG: Phase 5c ramp1 multiply forced to 0.
+                    // Phase 5c: parallel multiplies for LFO0×lfo0_filter
+                    // and RAMP1×ramp1_filter.  s_* are pre-registered
+                    // (stage 7) and mm_ramp1_out is set by RAMP1_STEP
+                    // at stage 4, so this cycle is clean FF→DSP→FF.
                     mm_mul1_raw <= mm_lfo0_out  * s_lfo0_filter;
-                    mm_mul2_raw <= 36'sd0;
+                    mm_mul2_raw <= mm_ramp1_out * s_ramp1_filter;
                     mm_f_sub <= 5'd2;
                 end
                 5'd2: begin
-                    mm_filter_acc <= {{16{mm_mul1_raw[35]}}, mm_mul1_raw[35:16]};
+                    mm_filter_acc <= mm_mul1_raw[35:16] + mm_mul2_raw[35:16];
                     mm_f_sub <= 5'd3;
                 end
                 5'd3: begin
