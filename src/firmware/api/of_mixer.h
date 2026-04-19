@@ -1,7 +1,7 @@
 /*
  * of_mixer.h -- Hardware PCM Mixer API for openfpgaOS
  *
- * 48-voice hardware mixer. Mixing runs entirely in FPGA fabric —
+ * 32-voice hardware mixer. Mixing runs entirely in FPGA fabric —
  * zero CPU cost during playback.
  * Output: 48 kHz stereo via audio FIFO.  Sample-based MIDI synthesis
  * (of_midi / of_smp_voice) drives this mixer directly.
@@ -28,7 +28,7 @@ extern "C" {
 #include <stdint.h>
 #include <stddef.h>
 
-#define OF_MIXER_MAX_VOICES  48
+#define OF_MIXER_MAX_VOICES  32
 #define OF_MIXER_OUTPUT_RATE 48000
 
 /* Convert sample rate in Hz to 16.16 fixed-point for raw API.

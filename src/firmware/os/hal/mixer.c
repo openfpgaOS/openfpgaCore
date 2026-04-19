@@ -1,6 +1,6 @@
 /*
  * openfpgaOS Hardware Mixer HAL
- * Configures the 48-voice CRAM1 hardware mixer via MMIO registers.
+ * Configures the 32-voice CRAM1 hardware mixer via MMIO registers.
  * All mixing happens in FPGA fabric — zero CPU cost during playback.
  *
  * Hardware features:
@@ -16,7 +16,7 @@
 #include "regs.h"
 #include "cache.h"
 
-#define MIXER_MAX_VOICES     48
+#define MIXER_MAX_VOICES     32
 #define MIXER_OUTPUT_RATE    48000
 /* Voice 31 is reserved as scratch for of_audio_write() in targets/pocket/audio.c.
  * alloc_voice skips it so the two mechanisms don't collide. */
@@ -29,23 +29,19 @@
 #define CTRL_BIDI    (1 << 3)
 
 static int mixer_initialized;
-/* 48 voices split across two 32-bit MMIO IRQ registers (low = [0..31],
- * high = [32..47]).  We mirror that in software as a 64-bit mask. */
-static uint64_t voice_active_mask;
+/* 32 voices fit in a single 32-bit MMIO IRQ register.  The SW shadow is
+ * kept as uint32_t to match.  The legacy _HI registers are stubbed to 0
+ * by the slave at 32 voices and no longer referenced here. */
+static uint32_t voice_active_mask;
 
-static inline uint64_t read_irq_pending(void)
+static inline uint32_t read_irq_pending(void)
 {
-    uint32_t lo = MIX_IRQ_PENDING;
-    uint32_t hi = MIX_IRQ_PENDING_HI;
-    return ((uint64_t)hi << 32) | lo;
+    return MIX_IRQ_PENDING;
 }
 
-static inline void write_irq_clear(uint64_t mask)
+static inline void write_irq_clear(uint32_t mask)
 {
-    uint32_t lo = (uint32_t)mask;
-    uint32_t hi = (uint32_t)(mask >> 32);
-    if (lo) MIX_IRQ_CLEAR    = lo;
-    if (hi) MIX_IRQ_CLEAR_HI = hi;
+    if (mask) MIX_IRQ_CLEAR = mask;
 }
 
 /* Shadow CTRL per voice — every function that modifies CTRL updates
@@ -66,12 +62,31 @@ static uint8_t group_shadow[MIXER_MAX_VOICES];        /* group index per voice *
 static uint8_t group_vol[MIXER_NUM_GROUPS];            /* 0-255 per group */
 static uint8_t master_vol;
 
-/* Sync software voice tracking with hardware voice-end events.
- * Peek only — do NOT clear IRQ bits here.  poll_ended() is the
- * sole consumer so that app-level completion callbacks always fire.
- * Without this, alloc_voice() steals end events before the app's
- * audio pump sees them, leaving stale owner tracking that kills
- * the wrong voices later. */
+/* Brief IRQ-disabled critical section so the IRQ handler doesn't
+ * land between read-modify-write of voice_active_mask. */
+static inline uint32_t irq_save(void) {
+    uint32_t s;
+    asm volatile("csrrci %0, mstatus, 8" : "=r"(s));
+    return s;
+}
+static inline void irq_restore(uint32_t s) {
+    if (s & (1u << 3))
+        asm volatile("csrsi mstatus, 8");
+}
+
+/* Called from irq.c when MIX_IRQ_PENDING fires.  Clears the SW shadow
+ * mask atomically with the HW W1C so a subsequent alloc_voice doesn't
+ * see a leaked stale bit.  Public via mixer_irq_clear_voices().  The
+ * mask is uint64_t for ABI stability with prior 48-voice builds; the
+ * upper 32 bits are always 0 at 32 voices. */
+void mixer_irq_clear_voices(uint64_t mask) {
+    voice_active_mask &= ~(uint32_t)mask;
+}
+
+/* Lightweight reconciliation — used only by code paths that don't
+ * have IRQs enabled (rare).  When IRQs are running normally the
+ * shadow stays in sync via mixer_irq_clear_voices(), so this peek
+ * is a no-op in steady state. */
 static void sync_voice_mask(void) {
     voice_active_mask &= ~read_irq_pending();
 }
@@ -91,7 +106,7 @@ static void write_ctrl(int voice) {
      * Strip ACTIVE for voices not in the software mask — this lets
      * set_loop/set_bidi update BRAM flags without accidentally
      * triggering an inactive→active transition in the RTL. */
-    if (!(voice_active_mask & ((uint64_t)1 << voice)))
+    if (!(voice_active_mask & (1u << voice)))
         ctrl &= ~CTRL_ACTIVE;
     MIX_VOICE_CTRL = ctrl;
 }
@@ -167,9 +182,8 @@ void of_mixer_init(int max_voices, int output_rate)
     for (int i = 0; i < MIXER_NUM_GROUPS; i++)
         group_vol[i] = 255;
     master_vol = 255;
-    /* Clear any pending IRQs (both halves) */
-    MIX_IRQ_CLEAR    = 0xFFFFFFFF;
-    MIX_IRQ_CLEAR_HI = 0xFFFFFFFF;
+    /* Clear any pending IRQs */
+    MIX_IRQ_CLEAR = 0xFFFFFFFF;
     MIX_CTRL = 1;
     voice_active_mask = 0;
     mixer_initialized = 1;
@@ -194,7 +208,7 @@ static int alloc_voice(int priority)
     int voice = -1;
     for (int i = 0; i < MIXER_MAX_VOICES; i++) {
         if (i == MIXER_SCRATCH_VOICE) continue;
-        if (!(voice_active_mask & ((uint64_t)1 << i))) {
+        if (!(voice_active_mask & (1u << i))) {
             voice = i;
             break;
         }
@@ -278,11 +292,19 @@ static int play_internal(const uint8_t *pcm, uint32_t sample_count,
      * sync_voice_mask() no longer clears IRQs (it peeks), so an old
      * end bit could still be set.  Without this, poll_ended() would
      * see the stale bit and immediately mark this voice as dead. */
-    write_irq_clear((uint64_t)1 << voice);
+    write_irq_clear(1u << voice);
 
     /* Set mask BEFORE write_ctrl — write_ctrl strips CTRL_ACTIVE
-     * for voices not in voice_active_mask (safety for set_loop/set_bidi). */
-    voice_active_mask |= ((uint64_t)1 << voice);
+     * for voices not in voice_active_mask (safety for set_loop/set_bidi).
+     * Brief IRQ-disabled critical section so the IRQ handler can't
+     * land between the read and write — otherwise a "voice ended"
+     * IRQ for an unrelated voice could clear bits that the |=
+     * just set, leaking ownership. */
+    {
+        uint32_t s = irq_save();
+        voice_active_mask |= (1u << voice);
+        irq_restore(s);
+    }
     write_ctrl(voice);
     return voice;
 }
@@ -321,7 +343,7 @@ void of_mixer_retrigger(int voice, const uint8_t *pcm_s16,
      * sync_voice_mask() sees the old end event and clears our mask bit,
      * causing set_volume/set_rate/etc. to silently fail (voice_valid()
      * returns false) and of_mixer_play() to steal this voice. */
-    write_irq_clear((uint64_t)1 << voice);
+    write_irq_clear(1u << voice);
 
     /* Guard LEN: the FSM runs concurrently and checks pos >= len every
      * mix cycle.  Setting LEN to max first prevents the FSM from killing
@@ -341,7 +363,11 @@ void of_mixer_retrigger(int voice, const uint8_t *pcm_s16,
 
     /* Re-assert active + fmt16, clear loop (caller sets loop after) */
     ctrl_shadow[voice] = CTRL_ACTIVE | CTRL_FMT16;
-    voice_active_mask |= ((uint64_t)1 << voice);
+    {
+        uint32_t s = irq_save();
+        voice_active_mask |= (1u << voice);
+        irq_restore(s);
+    }
     write_ctrl(voice);
 }
 
@@ -357,7 +383,7 @@ void of_mixer_stop(int voice)
         MIX_VOICE_VOL_RATE = 0;  /* instant */
         ctrl_shadow[voice] = 0;
         MIX_VOICE_CTRL = 0;
-        voice_active_mask &= ~((uint64_t)1 << voice);
+        voice_active_mask &= ~(1u << voice);
     }
 }
 
@@ -392,7 +418,7 @@ int of_mixer_voice_active(int voice)
     if (voice < 0 || voice >= MIXER_MAX_VOICES)
         return 0;
     sync_voice_mask();
-    return (voice_active_mask & ((uint64_t)1 << voice)) ? 1 : 0;
+    return (voice_active_mask & (1u << voice)) ? 1 : 0;
 }
 
 /* No-op: hardware mixer runs autonomously */
@@ -501,16 +527,12 @@ void of_mixer_set_volume_ramp(int voice, int rate)
 
 uint32_t of_mixer_poll_ended(void)
 {
-    /* Read + clear both halves so voices 32-47 are reclaimed correctly.
-     * The public API bitmask is 32-bit, so the high half is only used
-     * to keep voice_active_mask in sync — callers relying on the
-     * returned bitmask see voices 0-31 only. */
-    uint64_t mask = read_irq_pending();
+    uint32_t mask = read_irq_pending();
     if (mask) {
         write_irq_clear(mask);
         voice_active_mask &= ~mask;
     }
-    return (uint32_t)mask;
+    return mask;
 }
 
 /* ======================================================================
@@ -532,7 +554,7 @@ void of_mixer_set_group_volume(int group, int volume)
     group_vol[group] = volume & 0xFF;
     /* Reapply volume to all active voices in this group */
     for (int i = 0; i < MIXER_MAX_VOICES; i++) {
-        if (group_shadow[i] == group && (voice_active_mask & ((uint64_t)1 << i))) {
+        if (group_shadow[i] == group && (voice_active_mask & (1u << i))) {
             MIX_VOICE_SEL = i;
             apply_vol_pan(i);
         }
@@ -544,7 +566,7 @@ void of_mixer_set_master_volume(int volume)
     master_vol = volume & 0xFF;
     /* Reapply volume to all active voices */
     for (int i = 0; i < MIXER_MAX_VOICES; i++) {
-        if (voice_active_mask & ((uint64_t)1 << i)) {
+        if (voice_active_mask & (1u << i)) {
             MIX_VOICE_SEL = i;
             apply_vol_pan(i);
         }

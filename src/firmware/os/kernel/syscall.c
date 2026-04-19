@@ -83,9 +83,15 @@ static fd_entry_t fd_table[MAX_FDS];
 
 #define IO_CACHE_ENTRIES    8
 #define IO_CACHE_BLOCK_SIZE (32 * 1024)
-#define IO_CACHE_CACHED     (CRAM1_BASE + 0x00300000)      /* CPU D-cache reads */
-#define IO_CACHE_UNCACHED   (CRAM1_UNCACHED + 0x00300000) /* CPU uncached reads */
-#define IO_CACHE_BRIDGE     (CRAM1_BRIDGE + 0x00300000)   /* Bridge DMA target */
+/* The bounce buffer now lives in SDRAM at 0x10380000 (256 KB,
+ * sandwiched between the unused tail of TERM_FB and INTERACT_BASE).
+ * The bridge_to_sdram fabric module sniffs writes whose address starts
+ * with 0x10 and replays them on the SDRAM arbiter's M3 port — fully
+ * bypassing the CRAM1 controller that races with the audio mixer. */
+#define IO_CACHE_BASE       0x10380000u
+#define IO_CACHE_CACHED     (IO_CACHE_BASE)                /* CPU cached reads */
+#define IO_CACHE_UNCACHED   (IO_CACHE_BASE)                /* SDRAM has no uncached alias */
+#define IO_CACHE_BRIDGE     (IO_CACHE_BASE)                /* Bridge writes here too */
 
 typedef struct {
     uint32_t slot_id;       /* data slot this block belongs to */
@@ -135,24 +141,19 @@ static inline const uint8_t *io_cache_data(int entry) {
     return (const uint8_t *)(IO_CACHE_CACHED + entry * IO_CACHE_BLOCK_SIZE);
 }
 
-/* Fill a cache entry: bridge DMA → CRAM1, invalidate D-cache, done.
- * No CPU copy needed — reads go through D-cache on the 0x31 alias. */
+/* Fill a cache entry: bridge DMA → SDRAM, invalidate D-cache, done.
+ * No CPU copy needed — reads go through D-cache on the same address.
+ *
+ * Bridge writes hit the new bridge_to_sdram fabric path (M3 of the
+ * SDRAM arbiter) and never touch CRAM1, so the audio mixer never
+ * contends with the file I/O bounce.  The FIFO pre-fill wait and
+ * MIX_CRAM1_INHIBIT brackets that the previous CRAM1 path required
+ * are gone — SDRAM has its own arbiter and the bridge slot is
+ * lowest priority. */
 static int io_cache_fill(int entry, uint32_t slot_id,
                           uint32_t aligned_off, uint32_t fill) {
     uint32_t bridge_dst = IO_CACHE_BRIDGE + entry * IO_CACHE_BLOCK_SIZE;
     void *cached_ptr = (void *)(IO_CACHE_CACHED + entry * IO_CACHE_BLOCK_SIZE);
-
-    /* Let the hardware mixer top up the audio FIFO before we claim
-     * CRAM1 for bridge DMA.  The mixer reads CRAM1 via the same CDC
-     * adapter, so bridge writes block it.  Waiting until the FIFO is
-     * at least half full guarantees ~5 ms of audio runway — more than
-     * enough for a 32 KB bridge transfer (~0.4 ms). */
-    if (MIX_STATUS & 0x1F) {  /* any active voices? */
-        uint32_t deadline = of_timer_get_us() + 5000;  /* 5 ms max wait */
-        while ((AUDIO_STATUS & AUDIO_FIFO_LEVEL_MASK) < 256) {
-            if (of_timer_get_us() > deadline) break;
-        }
-    }
 
     /* Invalidate D-cache BEFORE DMA so no stale lines remain */
     of_cache_inval_range(cached_ptr, fill);
@@ -160,7 +161,7 @@ static int io_cache_fill(int entry, uint32_t slot_id,
     int rc = of_file_read_raw(slot_id, aligned_off, bridge_dst, fill);
     if (rc < 0) return rc;
 
-    /* Invalidate AFTER DMA — bridge wrote CRAM1 behind D-cache */
+    /* Invalidate AFTER DMA — bridge wrote SDRAM behind D-cache */
     of_cache_inval_range(cached_ptr, fill);
 
     io_cache[entry].slot_id = slot_id;
@@ -534,6 +535,9 @@ static long sys_read(long fd, long buf, long count) {
         if (n > avail) n = avail;
         if (n == 0) break;
 
+        /* The bounce buffer is now in SDRAM (bridge_to_sdram fabric
+         * path); reads no longer transit CRAM1 and the mixer doesn't
+         * compete for this bus, so the inhibit bracket is gone. */
         memcpy(dst + done, io_cache_data(entry) + buf_off, n);
         f->offset += n;
         done += n;

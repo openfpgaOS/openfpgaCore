@@ -10,6 +10,12 @@
 /* Timer ISR callback — lives in syscall.c (handles timer_callback + sigalrm) */
 extern void timer_isr_callback(void);
 
+/* Mixer-side helper that updates the SW shadow voice_active_mask to
+ * match the HW IRQ pending bits we just observed.  Has to run BEFORE
+ * the W1C below so a simultaneous play_internal observing the
+ * shadow doesn't reuse a slot that the fabric just retired. */
+extern void mixer_irq_clear_voices(unsigned long long mask);
+
 /* IRQ callbacks */
 static void (*external_cb)(uint32_t source);
 static void (*vsync_cb)(void);
@@ -73,9 +79,13 @@ void irq_handler(void *frame) {
         if (UART_STATUS & UART_RX_AVAIL)
             source |= IRQ_SRC_UART_RX;
 
-        /* Mixer voice-end: read pending mask, W1C clear */
+        /* Mixer voice-end: read pending mask, sync the SW shadow,
+         * then W1C clear.  Order matters — see mixer_irq_clear_voices()
+         * comment.  At AWE_MAX_VOICES = 32 the HI half of the mask is
+         * always 0; we still pass a 64-bit value for ABI stability. */
         uint32_t mix_ended = MIX_IRQ_PENDING;
         if (mix_ended) {
+            mixer_irq_clear_voices((unsigned long long)mix_ended);
             MIX_IRQ_CLEAR = mix_ended;
             source |= IRQ_SRC_MIX_VOICE;
         }

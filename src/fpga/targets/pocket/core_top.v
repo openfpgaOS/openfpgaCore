@@ -756,17 +756,38 @@ cram1_controller #(.CLOCK_SPEED(74.25)) psram1_b (
 //   - A→B: wait for A to be idle (psram1_busy == 0) before switching
 //   - B→A: bridge is on clk_74a; when brg_active_cpu drops, the bridge
 //          FSM has already completed (pending flags cleared), safe.
-reg cram1_pin_sel;  // 0=A (cpu/mixer), 1=B (bridge)
+//
+// Plus a clk_cpu→clk_74a grant handshake: pins_granted_cpu rises one
+// cycle after the mux switches A→B; that signal is sync'd back to
+// clk_74a as pins_granted_b, and bridge controller B refuses to issue
+// any psram pulse until it sees the grant.  This eliminates the
+// "bridge drives pins before the mux connects them" race that was
+// causing intermittent CRAM1 reads/writes to land on the chip with
+// the early cycles of the controller B FSM elided.  Also gates
+// controller A's word_rd / word_wr inputs by !cram1_pin_sel so A
+// can't start a transaction while pins are mux'd to B.
+reg cram1_pin_sel;     // 0=A (cpu/mixer), 1=B (bridge)
+reg pins_granted_cpu;  // 1 = mux is at B, bridge B may proceed
 always @(posedge clk_cpu) begin
     if (!reset_n) begin
-        cram1_pin_sel <= 1'b0;
+        cram1_pin_sel    <= 1'b0;
+        pins_granted_cpu <= 1'b0;
     end else begin
-        if (!cram1_pin_sel && brg_active_cpu && !psram1_busy)
-            cram1_pin_sel <= 1'b1;
-        else if (cram1_pin_sel && !brg_active_cpu)
-            cram1_pin_sel <= 1'b0;
+        if (!cram1_pin_sel && brg_active_cpu && !psram1_busy) begin
+            cram1_pin_sel    <= 1'b1;
+            pins_granted_cpu <= 1'b1;
+        end else if (cram1_pin_sel && !brg_active_cpu) begin
+            cram1_pin_sel    <= 1'b0;
+            pins_granted_cpu <= 1'b0;
+        end
     end
 end
+
+// Sync grant from clk_cpu → clk_74a so bridge B can gate its issue.
+reg [1:0] pins_granted_b_sync;
+always @(posedge clk_74a)
+    pins_granted_b_sync <= {pins_granted_b_sync[0], pins_granted_cpu};
+wire pins_granted_b = pins_granted_b_sync[1];
 
 assign cram1_a     = cram1_pin_sel ? c1b_a     : c1a_a;
 assign cram1_dq    = (cram1_pin_sel ? c1b_dq_oe : c1a_dq_oe)
@@ -1284,8 +1305,13 @@ always @(posedge clk_74a) begin
         brg_lat_data  <= bridge_wr_data;
     end
 
-    // Issue deferred write when controller is idle
-    if (bridge_cram1_wr_pending && !bridge_cram1_wr_issued && !brg_psram_busy) begin
+    // Issue deferred write when controller is idle AND mux has granted
+    // the pins to controller B.  Without the grant gate the bridge would
+    // start driving pins ~3 clk_cpu cycles before the mux actually
+    // connects them — chip would see only the tail of the write strobe
+    // and corrupt the cell.
+    if (bridge_cram1_wr_pending && !bridge_cram1_wr_issued && !brg_psram_busy
+        && pins_granted_b) begin
         brg_psram_wr   <= 1;
         brg_psram_addr <= brg_lat_addr;
         brg_psram_wdata <= brg_lat_data;
@@ -1318,8 +1344,11 @@ always @(posedge clk_74a) begin
         brg_lat_addr <= bridge_addr[23:2];
     end
 
-    // Issue deferred read when controller is idle
-    if (bridge_cram1_rd_pending && !bridge_cram1_rd_issued && !brg_psram_busy) begin
+    // Issue deferred read when controller is idle AND pins are granted.
+    // (Same race as the write path — bridge would otherwise drive pins
+    // before the mux has actually connected them.)
+    if (bridge_cram1_rd_pending && !bridge_cram1_rd_issued && !brg_psram_busy
+        && pins_granted_b) begin
         brg_psram_rd   <= 1;
         brg_psram_addr <= brg_lat_addr;
         bridge_cram1_rd_issued <= 1;
@@ -1367,17 +1396,20 @@ assign c1_psram_busy        = psram1_busy | brg_active_cpu;
 assign c1_psram_rdata       = psram1_rdata;
 assign c1_psram_rdata_valid = psram1_rdata_valid_for_cpu;
 
-// Write: CPU only (mixer doesn't write).  Block when controller busy or
-// when bridge is requesting the pins.
+// Write: CPU only (mixer doesn't write).  Block when controller busy,
+// when bridge is requesting the pins, or when the mux is at B (pins
+// mux'd away — controller A's state machine would race the chip).
 assign psram1_wr = psram1_busy     ? 1'b0
                  : brg_active_cpu  ? 1'b0
+                 : cram1_pin_sel   ? 1'b0
                  : c1_psram_wr;
 
-// Read: block when controller busy, a write is being issued, or bridge
-// wants the pins.  CPU > mixer priority.
+// Read: block when controller busy, a write is being issued, bridge
+// wants the pins, or pins are mux'd to B.  CPU > mixer priority.
 assign psram1_rd = psram1_wr       ? 1'b0
                  : psram1_busy     ? 1'b0
                  : brg_active_cpu  ? 1'b0
+                 : cram1_pin_sel   ? 1'b0
                  : c1_psram_rd     ? 1'b1
                  : cram1_mix_rd;
 
@@ -2049,7 +2081,118 @@ assign video_hs = vidout_hs;
         .gpu_reg_wr(gpu_reg_wr),
         .gpu_reg_addr(gpu_reg_addr),
         .gpu_reg_wdata(gpu_reg_wdata),
-        .gpu_reg_rdata(gpu_reg_rdata)
+        .gpu_reg_rdata(gpu_reg_rdata),
+        // AWE coprocessor (Phase 1: register file + note-on FSM,
+        // no per-tick processing yet)
+        .awe_voice_state_wr(awe_voice_state_wr),
+        .awe_voice_state_addr(awe_voice_state_addr),
+        .awe_voice_state_wdata(awe_voice_state_wdata),
+        .awe_chan_wr(awe_chan_wr),
+        .awe_chan_addr(awe_chan_addr),
+        .awe_chan_wdata(awe_chan_wdata),
+        .awe_mm_wr(awe_mm_wr),
+        .awe_mm_voice(awe_mm_voice),
+        .awe_mm_field(awe_mm_field),
+        .awe_mm_wdata(awe_mm_wdata),
+        .mix_cram1_inhibit(mix_cram1_inhibit),
+        .awe_global_wr(awe_global_wr),
+        .awe_global_addr(awe_global_addr),
+        .awe_global_wdata(awe_global_wdata),
+        .awe_note_on(awe_note_on),
+        .awe_note_on_voice(awe_note_on_voice),
+        .awe_note_off(awe_note_off),
+        .awe_note_off_voice(awe_note_off_voice),
+        .awe_voice_stop_strobe(awe_voice_stop_strobe),
+        .awe_voice_stop_voice(awe_voice_stop_voice),
+        .awe_ramp1_trig_pulse(awe_ramp1_trig_pulse),
+        .awe_ramp1_voice_reg(awe_ramp1_voice_reg),
+        .awe_ramp1_stage_reg(awe_ramp1_stage_reg),
+        .awe_ramp1_rate_reg(awe_ramp1_rate_reg),
+        .awe_mix_voice_wr(awe_mix_voice_wr),
+        .awe_mix_voice_field(awe_mix_voice_field),
+        .awe_mix_voice_sel(awe_mix_voice_sel),
+        .awe_mix_voice_wdata(awe_mix_voice_wdata),
+        .awe_active_mask(awe_active_mask),
+        .awe_tick_count(awe_tick_count)
+    );
+
+    // ----------------------------------------------------------------
+    // AWE coprocessor — Phase 1 wires
+    // ----------------------------------------------------------------
+    // periph_slave generates the windowed CPU writes; audio_awe owns
+    // voice-state RAM, channel bank, globals, and the NOTE_ON FSM that
+    // emits mixer writes.  Mixer-write priority mux lives inside
+    // periph_slave (sees both streams; AWE wins).
+    wire        awe_voice_state_wr;
+    wire [10:0] awe_voice_state_addr;
+    wire [31:0] awe_voice_state_wdata;
+    wire        awe_chan_wr;
+    wire [5:0]  awe_chan_addr;
+    wire [31:0] awe_chan_wdata;
+    wire        awe_mm_wr;
+    wire [5:0]  awe_mm_voice;
+    wire [2:0]  awe_mm_field;
+    wire [15:0] awe_mm_wdata;
+    wire        awe_global_wr;
+    wire [3:0]  awe_global_addr;
+    wire [31:0] awe_global_wdata;
+    wire        awe_note_on;
+    wire [5:0]  awe_note_on_voice;
+    wire        awe_note_off;
+    wire [5:0]  awe_note_off_voice;
+    wire        awe_voice_stop_strobe;
+    wire [5:0]  awe_voice_stop_voice;
+    wire        awe_ramp1_trig_pulse;
+    wire [5:0]  awe_ramp1_voice_reg;
+    wire [3:0]  awe_ramp1_stage_reg;
+    wire [31:0] awe_ramp1_rate_reg;
+    wire        awe_mix_voice_wr;
+    wire [3:0]  awe_mix_voice_field;
+    wire [5:0]  awe_mix_voice_sel;
+    wire [31:0] awe_mix_voice_wdata;
+    wire [31:0] awe_active_mask;
+    wire [31:0] awe_tick_count;
+    wire [7:0]  awe_reverb_level;
+    wire [7:0]  awe_reverb_feedback;
+    wire [7:0]  awe_chorus_level;
+    wire [15:0] awe_chorus_rate;
+    wire [7:0]  awe_chorus_depth;
+    wire        mix_cram1_inhibit;
+
+    audio_awe awe_inst (
+        .clk(clk_cpu),
+        .reset_n(reset_n),
+        .cpu_voice_state_wr(awe_voice_state_wr),
+        .cpu_voice_state_addr(awe_voice_state_addr),
+        .cpu_voice_state_wdata(awe_voice_state_wdata),
+        .cpu_chan_wr(awe_chan_wr),
+        .cpu_chan_addr(awe_chan_addr),
+        .cpu_chan_wdata(awe_chan_wdata),
+        .cpu_mm_wr(awe_mm_wr),
+        .cpu_mm_voice(awe_mm_voice),
+        .cpu_mm_field(awe_mm_field),
+        .cpu_mm_wdata(awe_mm_wdata),
+        .cpu_global_wr(awe_global_wr),
+        .cpu_global_addr(awe_global_addr),
+        .cpu_global_wdata(awe_global_wdata),
+        .cpu_note_on(awe_note_on),
+        .cpu_note_on_voice(awe_note_on_voice),
+        .cpu_note_off(awe_note_off),
+        .cpu_note_off_voice(awe_note_off_voice),
+        .cpu_voice_stop(awe_voice_stop_strobe),
+        .cpu_voice_stop_voice(awe_voice_stop_voice),
+        .cpu_ramp1_trig(awe_ramp1_trig_pulse),
+        .cpu_ramp1_voice(awe_ramp1_voice_reg),
+        .cpu_ramp1_stage(awe_ramp1_stage_reg),
+        .cpu_ramp1_rate(awe_ramp1_rate_reg),
+        .awe_mix_voice_wr(awe_mix_voice_wr),
+        .awe_mix_voice_field(awe_mix_voice_field),
+        .awe_mix_voice_sel(awe_mix_voice_sel),
+        .awe_mix_voice_wdata(awe_mix_voice_wdata),
+        .active_mask(awe_active_mask),
+        .tick_count(awe_tick_count),
+        .reverb_wet_level(awe_reverb_level),
+        .reverb_feedback(awe_reverb_feedback)
     );
 
     // DMA engine removed — apps use CPU memcpy instead
@@ -2129,18 +2272,21 @@ assign video_hs = vidout_hs;
         .m2_wdata(cpu_m_sdram_wdata),     .m2_wstrb(cpu_m_sdram_wstrb),
         .m2_wlast(cpu_m_sdram_wlast),
         .m2_bvalid(cpu_m_sdram_bvalid),   .m2_bresp(cpu_m_sdram_bresp),
-        // M3: Bridge (lowest priority)
-        // M3: Bridge (removed — tied off)
+        // M3: Bridge → SDRAM write path (clk_74a → clk_cpu via FIFO).
+        // Only writes are wired; bridge reads of SDRAM still go via
+        // the CRAM1 fallback (read corruption isn't observed because
+        // mixer reads + bridge reads naturally serialize through the
+        // controller).
         .m3_arvalid(1'b0), .m3_arready(),
         .m3_araddr(32'b0),  .m3_arlen(8'b0),
         .m3_rvalid(),       .m3_rdata(),
         .m3_rresp(),        .m3_rlast(),
-        .m3_awvalid(1'b0), .m3_awready(),
-        .m3_awaddr(32'b0),  .m3_awlen(8'b0),
-        .m3_wvalid(1'b0),  .m3_wready(),
-        .m3_wdata(32'b0),   .m3_wstrb(4'b0),
-        .m3_wlast(1'b0),
-        .m3_bvalid(),       .m3_bresp(),
+        .m3_awvalid(brg_sdram_awvalid), .m3_awready(brg_sdram_awready),
+        .m3_awaddr(brg_sdram_awaddr),   .m3_awlen(brg_sdram_awlen),
+        .m3_wvalid(brg_sdram_wvalid),   .m3_wready(brg_sdram_wready),
+        .m3_wdata(brg_sdram_wdata),     .m3_wstrb(brg_sdram_wstrb),
+        .m3_wlast(brg_sdram_wlast),
+        .m3_bvalid(brg_sdram_bvalid),   .m3_bresp(),
         // Slave output (to axi_sdram_slave)
         .s_arvalid(arb_s_arvalid), .s_arready(arb_s_arready),
         .s_araddr(arb_s_araddr),   .s_arlen(arb_s_arlen),
@@ -2468,8 +2614,8 @@ wire [31:0] mix_voice_wdata;
 wire [5:0]  mix_active_count;
 wire [21:0] mix_voice_pos;
 wire        mix_irq_clear_wr;
-wire [47:0] mix_irq_clear_data;
-wire [47:0] mix_irq_pending;
+wire [31:0] mix_irq_clear_data;
+wire [31:0] mix_irq_pending;
 wire        mix_voice_end_irq;
 wire        mix_sample_wr;
 wire [31:0] mix_sample_data;
@@ -2533,7 +2679,13 @@ audio_mixer mixer_inst (
     .irq_clear          (mix_irq_clear_data),
     .irq_clear_wr       (mix_irq_clear_wr),
     .voice_end_pending  (mix_irq_pending),
-    .voice_end_irq      (mix_voice_end_irq)
+    .voice_end_irq      (mix_voice_end_irq),
+    .reverb_wet_level   (awe_reverb_level),
+    .reverb_feedback    (awe_reverb_feedback),
+    .chorus_wet_level   (awe_chorus_level),
+    .chorus_lfo_rate    (awe_chorus_rate),
+    .chorus_lfo_depth   (awe_chorus_depth),
+    .cram1_inhibit      (mix_cram1_inhibit)
 );
 assign mix_cram1_rd   = cram1_mix_rd;
 assign mix_cram1_addr = cram1_mix_addr;
@@ -2576,6 +2728,42 @@ wire [31:0] gpu_wr_wdata;
 wire [3:0]  gpu_wr_wstrb;
 wire        gpu_wr_wlast;
 wire        gpu_wr_bvalid;
+
+// Bridge → SDRAM AXI4 write master (M3 on SDRAM arbiter).  Sniffs
+// bridge writes whose top byte == 0x10 (SDRAM range) and CDC-replays
+// them into the SDRAM controller, eliminating the CRAM1 bounce that
+// races with audio mixer reads.
+wire        brg_sdram_awvalid;
+wire        brg_sdram_awready;
+wire [31:0] brg_sdram_awaddr;
+wire [7:0]  brg_sdram_awlen;
+wire        brg_sdram_wvalid;
+wire        brg_sdram_wready;
+wire [31:0] brg_sdram_wdata;
+wire [3:0]  brg_sdram_wstrb;
+wire        brg_sdram_wlast;
+wire        brg_sdram_bvalid;
+
+bridge_to_sdram brg_sdram (
+    .clk_bridge      (clk_74a),
+    .reset_n         (reset_n),
+    .bridge_addr     (bridge_addr),
+    .bridge_wr       (bridge_wr),
+    .bridge_wr_data  (bridge_wr_data),
+    .fifo_full       (),
+    .clk_axi         (clk_cpu),
+    .m_awvalid       (brg_sdram_awvalid),
+    .m_awready       (brg_sdram_awready),
+    .m_awaddr        (brg_sdram_awaddr),
+    .m_awlen         (brg_sdram_awlen),
+    .m_wvalid        (brg_sdram_wvalid),
+    .m_wready        (brg_sdram_wready),
+    .m_wdata         (brg_sdram_wdata),
+    .m_wstrb         (brg_sdram_wstrb),
+    .m_wlast         (brg_sdram_wlast),
+    .m_bvalid        (brg_sdram_bvalid),
+    .m_bready        ()
+);
 
 // GPU SRAM interface (Z-buffer)
 wire        gpu_sram_rd;

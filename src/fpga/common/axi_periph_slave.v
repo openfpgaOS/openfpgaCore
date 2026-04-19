@@ -114,16 +114,20 @@ module axi_periph_slave (
     output reg         shutdown_ack,
 
     // Hardware mixer voice interface
-    output reg         mix_voice_wr,
-    output reg  [3:0]  mix_voice_field,
-    output reg  [5:0]  mix_voice_sel,
-    output reg  [31:0] mix_voice_wdata,
+    // Driven by a final mux that gives priority to AWE-emitted writes
+    // (see awe_mix_voice_* below) over CPU-direct register writes.
+    // The internal cpu_mix_voice_* regs hold the CPU-direct stream;
+    // the assigns near the bottom of this module do the priority mux.
+    output wire        mix_voice_wr,
+    output wire [3:0]  mix_voice_field,
+    output wire [5:0]  mix_voice_sel,
+    output wire [31:0] mix_voice_wdata,
     output reg         mix_enable,
     input  wire [5:0]  mix_active_count,
     input  wire [21:0] mix_voice_pos,
     output reg         mix_irq_clear_wr,
-    output wire [47:0] mix_irq_clear_data,
-    input  wire [47:0] mix_irq_pending,
+    output wire [31:0] mix_irq_clear_data,
+    input  wire [31:0] mix_irq_pending,
 
     // Hardware timer interrupt
     output wire        timer_irq,
@@ -156,7 +160,46 @@ module axi_periph_slave (
     output reg         gpu_reg_wr,
     output reg  [3:0]  gpu_reg_addr,
     output reg  [31:0] gpu_reg_wdata,
-    input  wire [31:0] gpu_reg_rdata
+    input  wire [31:0] gpu_reg_rdata,
+
+    // AWE coprocessor register interface (Phase 1)
+    // Outputs drive audio_awe's CPU-facing inputs.  Inputs accept
+    // mixer-write requests AWE generates from its NOTE_ON FSM, which
+    // are muxed onto mix_voice_* with priority over CPU-direct writes.
+    output reg         mix_cram1_inhibit,      // Phase 6a: pause mixer CRAM1 reads for file I/O
+    output reg         awe_voice_state_wr,
+    output reg  [10:0] awe_voice_state_addr,    // {voice[5:0], word[4:0]}
+    output reg  [31:0] awe_voice_state_wdata,
+    output reg         awe_chan_wr,
+    output reg  [5:0]  awe_chan_addr,           // {channel[3:0], word[1:0]}
+    output reg  [31:0] awe_chan_wdata,
+    // Mod-matrix scale writes (Phase 4).
+    output reg         awe_mm_wr,
+    output reg  [5:0]  awe_mm_voice,
+    output reg  [2:0]  awe_mm_field,
+    output reg  [15:0] awe_mm_wdata,
+    output reg         awe_global_wr,
+    output reg  [3:0]  awe_global_addr,
+    output reg  [31:0] awe_global_wdata,
+    output reg         awe_note_on,
+    output reg  [5:0]  awe_note_on_voice,
+    output reg         awe_note_off,
+    output reg  [5:0]  awe_note_off_voice,
+    output reg         awe_voice_stop_strobe,
+    output reg  [5:0]  awe_voice_stop_voice,
+    // Phase 5c — Ramp1 (mod env) trigger.  CPU writes the rate to
+    // AWE_RAMP1_RATE first, then writes {voice, stage} to
+    // AWE_RAMP1_TRIGGER which pulses awe_ramp1_trig.
+    output reg         awe_ramp1_trig_pulse,
+    output reg  [5:0]  awe_ramp1_voice_reg,
+    output reg  [3:0]  awe_ramp1_stage_reg,
+    output reg  [31:0] awe_ramp1_rate_reg,
+    input  wire        awe_mix_voice_wr,
+    input  wire [3:0]  awe_mix_voice_field,
+    input  wire [5:0]  awe_mix_voice_sel,
+    input  wire [31:0] awe_mix_voice_wdata,
+    input  wire [31:0] awe_active_mask,
+    input  wire [31:0] awe_tick_count
 );
 
 wire reset = ~reset_n;
@@ -170,8 +213,24 @@ wire [31:0] aw_addr = s_axi_awaddr;
 // Mixer IRQ clear data passthrough
 // Mixer IRQ clear data: latched 48-bit value set by IRQ_CLEAR (lo) or IRQ_CLEAR_HI (hi) writes.
 // mix_irq_clear_wr fires on either write; the CDC toggle handshake delivers the latched value.
-reg [47:0] mix_irq_clear_lat;
+reg [31:0] mix_irq_clear_lat;
 assign mix_irq_clear_data = mix_irq_clear_lat;
+
+// Internal CPU-direct mixer-write stream — the case statement in the
+// always block updates these.  The final output (mix_voice_*) is the
+// priority mux of (awe_mix_voice_* > cpu_mix_voice_*); see assigns
+// after the always block.
+reg         cpu_mix_voice_wr;
+reg  [3:0]  cpu_mix_voice_field;
+reg  [5:0]  cpu_mix_voice_sel;
+reg  [31:0] cpu_mix_voice_wdata;
+
+// AWE-windowed-write address registers.  AWE_VOICE_LOAD_ADDR sets the
+// cursor; AWE_VOICE_LOAD_DATA writes through to audio_awe and auto-
+// increments the word part of the cursor so awe_voice_load() can do
+// 32 sequential writes after one address set-up.
+reg  [10:0] awe_voice_load_addr_reg;   // {voice[5:0], word[4:0]}
+reg  [5:0]  awe_chan_load_addr_reg;    // {channel[3:0], word[1:0]}
 
 // ============================================
 // SNAC Shifter + GPIO (registers 0xA0-0xAC)
@@ -525,13 +584,13 @@ always @(posedge clk) begin
         ds_done_seen_low <= 1;
         ds_err_latched <= 0;
         shutdown_ack <= 0;
-        mix_voice_wr <= 0;
-        mix_voice_field <= 0;
-        mix_voice_sel <= 0;
-        mix_voice_wdata <= 0;
+        cpu_mix_voice_wr <=0;
+        cpu_mix_voice_field <=0;
+        cpu_mix_voice_sel <=0;
+        cpu_mix_voice_wdata <=0;
         mix_enable <= 0;
         mix_irq_clear_wr <= 0;
-        mix_irq_clear_lat <= 48'd0;
+        mix_irq_clear_lat <= 32'd0;
         timer_period <= 0;
         timer_counter <= 0;
         timer_enable <= 0;
@@ -550,13 +609,49 @@ always @(posedge clk) begin
         snac_start_pulse <= 0;
         snac_bit_count_reg <= 0;
         snac_latch_en_reg <= 0;
+        // AWE coprocessor reset
+        awe_voice_state_wr      <= 0;
+        awe_voice_state_addr    <= 0;
+        awe_voice_state_wdata   <= 0;
+        awe_chan_wr             <= 0;
+        awe_chan_addr           <= 0;
+        awe_chan_wdata          <= 0;
+        awe_mm_wr               <= 0;
+        awe_mm_voice            <= 0;
+        awe_mm_field            <= 0;
+        awe_mm_wdata            <= 0;
+        awe_global_wr           <= 0;
+        awe_global_addr         <= 0;
+        awe_global_wdata        <= 0;
+        awe_note_on             <= 0;
+        awe_note_on_voice       <= 0;
+        awe_note_off            <= 0;
+        awe_note_off_voice      <= 0;
+        awe_voice_stop_strobe   <= 0;
+        awe_voice_stop_voice    <= 0;
+        awe_voice_load_addr_reg <= 11'd0;
+        awe_chan_load_addr_reg  <= 6'd0;
+        awe_ramp1_trig_pulse    <= 1'b0;
+        awe_ramp1_voice_reg     <= 6'd0;
+        awe_ramp1_stage_reg     <= 4'd0;
+        awe_ramp1_rate_reg      <= 32'd0;
+        mix_cram1_inhibit       <= 1'b0;
     end else begin
         cycle_counter <= cycle_counter + 1;
         pal_wr <= 0;
         save_dt_commit <= 0;
-        mix_voice_wr <= 0;
+        cpu_mix_voice_wr <=0;
         mix_irq_clear_wr <= 0;
         snac_start_pulse <= 0;
+        // AWE strobes are 1-cycle pulses, default low.
+        awe_voice_state_wr    <= 0;
+        awe_chan_wr           <= 0;
+        awe_mm_wr             <= 0;
+        awe_global_wr         <= 0;
+        awe_note_on           <= 0;
+        awe_note_off          <= 0;
+        awe_voice_stop_strobe <= 0;
+        awe_ramp1_trig_pulse  <= 0;
 
         // Hardware timer countdown
         if (timer_enable && timer_period != 0) begin
@@ -705,60 +800,60 @@ always @(posedge clk) begin
 
 
                 // Hardware mixer registers (0xC0-0xF8)
-                7'b0_110000: mix_voice_sel <= req_wdata[5:0];        // MIX_VOICE_SEL (0xC0)
+                7'b0_110000: cpu_mix_voice_sel <=req_wdata[5:0];        // MIX_VOICE_SEL (0xC0)
                 7'b0_110001: begin                                    // MIX_VOICE_ADDR (0xC4)
-                    mix_voice_wr <= 1;
-                    mix_voice_field <= 4'd0;
-                    mix_voice_wdata <= req_wdata;
+                    cpu_mix_voice_wr <=1;
+                    cpu_mix_voice_field <=4'd0;
+                    cpu_mix_voice_wdata <=req_wdata;
                 end
                 7'b0_110010: begin                                    // MIX_VOICE_LEN (0xC8)
-                    mix_voice_wr <= 1;
-                    mix_voice_field <= 4'd1;
-                    mix_voice_wdata <= req_wdata;
+                    cpu_mix_voice_wr <=1;
+                    cpu_mix_voice_field <=4'd1;
+                    cpu_mix_voice_wdata <=req_wdata;
                 end
                 7'b0_110011: begin                                    // MIX_VOICE_RATE (0xCC)
-                    mix_voice_wr <= 1;
-                    mix_voice_field <= 4'd2;
-                    mix_voice_wdata <= req_wdata;
+                    cpu_mix_voice_wr <=1;
+                    cpu_mix_voice_field <=4'd2;
+                    cpu_mix_voice_wdata <=req_wdata;
                 end
                 7'b0_110100: begin                                    // MIX_VOICE_CTRL (0xD0)
-                    mix_voice_wr <= 1;
-                    mix_voice_field <= 4'd3;
-                    mix_voice_wdata <= req_wdata;
+                    cpu_mix_voice_wr <=1;
+                    cpu_mix_voice_field <=4'd3;
+                    cpu_mix_voice_wdata <=req_wdata;
                 end
                 7'b0_110101: mix_enable <= req_wdata[0];              // MIX_CTRL (0xD4)
                 7'b0_110110: begin                                    // MIX_VOICE_VOL_LR (0xD8)
-                    mix_voice_wr <= 1;
-                    mix_voice_field <= 4'd6;
-                    mix_voice_wdata <= req_wdata;
+                    cpu_mix_voice_wr <=1;
+                    cpu_mix_voice_field <=4'd6;
+                    cpu_mix_voice_wdata <=req_wdata;
                 end
                 7'b0_111001: begin                                    // MIX_VOICE_LOOP_END (0xE4)
-                    mix_voice_wr <= 1;
-                    mix_voice_field <= 4'd7;
-                    mix_voice_wdata <= req_wdata;
+                    cpu_mix_voice_wr <=1;
+                    cpu_mix_voice_field <=4'd7;
+                    cpu_mix_voice_wdata <=req_wdata;
                 end
                 7'b0_111010: begin                                    // MIX_VOICE_POS_WR (0xE8)
-                    mix_voice_wr <= 1;
-                    mix_voice_field <= 4'd4;
-                    mix_voice_wdata <= req_wdata;
+                    cpu_mix_voice_wr <=1;
+                    cpu_mix_voice_field <=4'd4;
+                    cpu_mix_voice_wdata <=req_wdata;
                 end
                 7'b0_111011: begin                                    // MIX_VOICE_LOOP_START (0xEC)
-                    mix_voice_wr <= 1;
-                    mix_voice_field <= 4'd8;
-                    mix_voice_wdata <= req_wdata;
+                    cpu_mix_voice_wr <=1;
+                    cpu_mix_voice_field <=4'd8;
+                    cpu_mix_voice_wdata <=req_wdata;
                 end
                 7'b0_111100: begin                                    // MIX_VOICE_VOL_TARGET (0xF0)
-                    mix_voice_wr <= 1;
-                    mix_voice_field <= 4'd9;
-                    mix_voice_wdata <= req_wdata;
+                    cpu_mix_voice_wr <=1;
+                    cpu_mix_voice_field <=4'd9;
+                    cpu_mix_voice_wdata <=req_wdata;
                 end
                 7'b0_111101: begin                                    // MIX_VOICE_VOL_RATE (0xF4)
-                    mix_voice_wr <= 1;
-                    mix_voice_field <= 4'd10;
-                    mix_voice_wdata <= req_wdata;
+                    cpu_mix_voice_wr <=1;
+                    cpu_mix_voice_field <=4'd10;
+                    cpu_mix_voice_wdata <=req_wdata;
                 end
                 7'b0_111110: begin                                    // MIX_IRQ_CLEAR (0xF8) W1C
-                    mix_irq_clear_lat <= {16'b0, req_wdata};
+                    mix_irq_clear_lat <= req_wdata;
                     mix_irq_clear_wr <= 1;
                 end
                 7'b0_100111: vsync_irq_pending <= 0;                    // VSYNC_IRQ_CLEAR (0x9C) W1C
@@ -769,18 +864,110 @@ always @(posedge clk) begin
 
                 // Extended mixer registers (0x100-0x108)
                 7'b1_000000: begin                                    // MIX_VOICE_FILTER_FC (0x100)
-                    mix_voice_wr <= 1;
-                    mix_voice_field <= 4'd11;
-                    mix_voice_wdata <= req_wdata;
+                    cpu_mix_voice_wr <=1;
+                    cpu_mix_voice_field <=4'd11;
+                    cpu_mix_voice_wdata <=req_wdata;
                 end
                 7'b1_000001: begin                                    // MIX_VOICE_FILTER_Q (0x104)
-                    mix_voice_wr <= 1;
-                    mix_voice_field <= 4'd12;
-                    mix_voice_wdata <= req_wdata;
+                    cpu_mix_voice_wr <=1;
+                    cpu_mix_voice_field <=4'd12;
+                    cpu_mix_voice_wdata <=req_wdata;
                 end
-                7'b1_000010: begin                                    // MIX_IRQ_CLEAR_HI (0x108) W1C
-                    mix_irq_clear_lat <= {req_wdata[15:0], 32'b0};
-                    mix_irq_clear_wr <= 1;
+                7'b1_000011: begin                                    // MIX_CRAM1_INHIBIT (0x10C)
+                    mix_cram1_inhibit <= req_wdata[0];
+                end
+
+                // ----------------------------------------------------
+                // AWE coprocessor registers (Phase 1, 0x110-0x140)
+                // 0x108 MIX_IRQ_CLEAR_HI / 0x110 AWE_CTRL / 0x138 PRESET /
+                // 0x13C PRESET / 0x140 INTERP_DEFAULT all dropped in the
+                // Phase 8 ALM hunt — fabric never read them.
+                // ----------------------------------------------------
+                7'b1_000101: begin                                    // AWE_NOTE_ON (0x114)
+                    awe_note_on       <= 1'b1;
+                    awe_note_on_voice <= req_wdata[5:0];
+                end
+                7'b1_000110: begin                                    // AWE_NOTE_OFF (0x118)
+                    awe_note_off       <= 1'b1;
+                    awe_note_off_voice <= req_wdata[5:0];
+                end
+                7'b1_000111: begin                                    // AWE_VOICE_STOP (0x11C)
+                    awe_voice_stop_strobe <= 1'b1;
+                    awe_voice_stop_voice  <= req_wdata[5:0];
+                end
+                7'b1_001000: begin                                    // AWE_VOICE_LOAD_ADDR (0x120)
+                    awe_voice_load_addr_reg <= req_wdata[10:0];
+                end
+                7'b1_001001: begin                                    // AWE_VOICE_LOAD_DATA (0x124)
+                    awe_voice_state_wr    <= 1'b1;
+                    awe_voice_state_addr  <= awe_voice_load_addr_reg;
+                    awe_voice_state_wdata <= req_wdata;
+                    // Auto-increment word part of the cursor.  Wraps
+                    // within the 32-word voice slot — caller must
+                    // re-set ADDR before crossing voice boundaries.
+                    awe_voice_load_addr_reg[4:0] <= awe_voice_load_addr_reg[4:0] + 5'd1;
+                end
+                7'b1_001010: begin                                    // AWE_CHAN_LOAD_ADDR (0x128)
+                    awe_chan_load_addr_reg <= req_wdata[5:0];
+                end
+                7'b1_001011: begin                                    // AWE_CHAN_LOAD_DATA (0x12C)
+                    awe_chan_wr    <= 1'b1;
+                    awe_chan_addr  <= awe_chan_load_addr_reg;
+                    awe_chan_wdata <= req_wdata;
+                    awe_chan_load_addr_reg[1:0] <= awe_chan_load_addr_reg[1:0] + 2'd1;
+                end
+                7'b1_001100: begin                                    // AWE_MASTER_VOL (0x130)
+                    awe_global_wr    <= 1'b1;
+                    awe_global_addr  <= 4'd0;
+                    awe_global_wdata <= req_wdata;
+                end
+                7'b1_001101: begin                                    // AWE_BEND_RANGE (0x134)
+                    awe_global_wr    <= 1'b1;
+                    awe_global_addr  <= 4'd1;
+                    awe_global_wdata <= req_wdata;
+                end
+                7'b1_010100: begin                                    // AWE_HW_ENVELOPE (0x150)
+                    awe_global_wr    <= 1'b1;
+                    awe_global_addr  <= 4'd5;
+                    awe_global_wdata <= req_wdata;
+                end
+                7'b1_010101: begin                                    // AWE_MM_WRITE (0x154)
+                    // Packed: data_s16 << 16 | field[10:8] | voice[5:0]
+                    awe_mm_wr    <= 1'b1;
+                    awe_mm_voice <= req_wdata[5:0];
+                    awe_mm_field <= req_wdata[10:8];
+                    awe_mm_wdata <= req_wdata[31:16];
+                end
+                7'b1_010110: begin                                    // AWE_REVERB_LEVEL    (0x158)
+                    awe_global_wr    <= 1'b1;
+                    awe_global_addr  <= 4'd6;
+                    awe_global_wdata <= req_wdata;
+                end
+                7'b1_010111: begin                                    // AWE_REVERB_FEEDBACK (0x15C)
+                    awe_global_wr    <= 1'b1;
+                    awe_global_addr  <= 4'd7;
+                    awe_global_wdata <= req_wdata;
+                end
+                7'b1_011000: begin                                    // AWE_CHORUS_LEVEL    (0x160)
+                    awe_global_wr    <= 1'b1;
+                    awe_global_addr  <= 4'd8;
+                    awe_global_wdata <= req_wdata;
+                end
+                7'b1_011001: begin                                    // AWE_CHORUS_RATE     (0x164)
+                    awe_global_wr    <= 1'b1;
+                    awe_global_addr  <= 4'd9;
+                    awe_global_wdata <= req_wdata;
+                end
+                7'b1_011010: begin                                    // AWE_CHORUS_DEPTH    (0x168)
+                    awe_global_wr    <= 1'b1;
+                    awe_global_addr  <= 4'd10;
+                    awe_global_wdata <= req_wdata;
+                end
+                7'b1_011011: awe_ramp1_rate_reg <= req_wdata;          // AWE_RAMP1_RATE      (0x16C)
+                7'b1_011100: begin                                    // AWE_RAMP1_TRIGGER   (0x170)
+                    awe_ramp1_trig_pulse <= 1'b1;
+                    awe_ramp1_voice_reg  <= req_wdata[5:0];
+                    awe_ramp1_stage_reg  <= req_wdata[11:8];
                 end
 
                 default: ;
@@ -872,7 +1059,10 @@ always @(*) begin
         7'b0_100110: sysreg_rdata = HW_FEATURES;                    // HW_FEATURES (0x98)
         7'b0_100111: sysreg_rdata = {31'b0, vsync_irq_pending};   // VSYNC_IRQ_PENDING (0x9C)
         // Extended mixer registers (0x100-0x108)
-        7'b1_000010: sysreg_rdata = {16'b0, mix_irq_pending[47:32]};  // MIX_IRQ_PENDING_HI (0x108)
+        7'b1_000010: sysreg_rdata = 32'b0;                           // MIX_IRQ_PENDING_HI (0x108) — obsolete at 32 voices
+        7'b1_010001: sysreg_rdata = awe_active_mask[31:0];           // AWE_ACTIVE_MASK_LO (0x144)
+        7'b1_010010: sysreg_rdata = 32'b0;                           // AWE_ACTIVE_MASK_HI (0x148) — obsolete at 32 voices
+        7'b1_010011: sysreg_rdata = awe_tick_count;                  // AWE_TICK_COUNT    (0x14C)
         default: sysreg_rdata = 32'h0;
     endcase
 end
@@ -1062,14 +1252,19 @@ assign ram_wren = (state == S_BRAM_WR) && (|req_wstrb);
 // Region decode helpers
 // ============================================
 wire ar_dec_ram    = (ar_addr[31:15] == 17'b0); // 32KB: 0x00000-0x07FFF
-wire ar_dec_sysreg = (ar_addr[31:8]  == 24'h400000);
+// sysreg covers 0x40000000-0x400001FF (512 bytes / 128 word slots) so the
+// case statement on req_addr[8:2] reaches every defined slot, including
+// the extended mixer regs (0x100-0x108) and the AWE registers (0x110-0x148).
+// Pre-AWE this was 24'h400000 (256 bytes) — silently dropped MIX_VOICE_FILTER*
+// writes at 0x100+; the SW path's filter calls were no-ops.
+wire ar_dec_sysreg = (ar_addr[31:9]  == 23'h200000);
 wire ar_dec_audio  = (ar_addr[31:24] == 8'h4C);
 wire ar_dec_link   = (ar_addr[31:24] == 8'h4D);
 wire ar_dec_uart   = (ar_addr[31:24] == 8'h4F);
 wire ar_dec_gpu    = (ar_addr[31:24] == 8'h4A);
 
 wire aw_dec_ram    = (aw_addr[31:15] == 17'b0); // 32KB: 0x00000-0x07FFF
-wire aw_dec_sysreg = (aw_addr[31:8]  == 24'h400000);
+wire aw_dec_sysreg = (aw_addr[31:9]  == 23'h200000);
 wire aw_dec_audio  = (aw_addr[31:24] == 8'h4C);
 wire aw_dec_link   = (aw_addr[31:24] == 8'h4D);
 wire aw_dec_uart   = (aw_addr[31:24] == 8'h4F);
@@ -1346,5 +1541,20 @@ always @(posedge clk or posedge reset) begin
         endcase
     end
 end
+
+// =================================================================
+// Mixer-write priority mux (AWE > CPU-direct)
+// =================================================================
+// Phase 1's audio_awe.v issues short bursts of mixer writes (~9
+// fields × 2 cycles = ~18 cycles) on each NOTE_ON.  We give those
+// writes priority over the CPU's MIX_VOICE_* register stream because
+// (a) the SDK only uses one path or the other for a given voice, so
+// in practice they don't collide, and (b) if they ever did, dropping
+// a CPU-direct write is safer than dropping AWE's note-on burst
+// halfway through (the voice would end up half-programmed).
+assign mix_voice_wr    = awe_mix_voice_wr | cpu_mix_voice_wr;
+assign mix_voice_field = awe_mix_voice_wr ? awe_mix_voice_field : cpu_mix_voice_field;
+assign mix_voice_sel   = awe_mix_voice_wr ? awe_mix_voice_sel   : cpu_mix_voice_sel;
+assign mix_voice_wdata = awe_mix_voice_wr ? awe_mix_voice_wdata : cpu_mix_voice_wdata;
 
 endmodule

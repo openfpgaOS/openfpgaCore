@@ -245,8 +245,43 @@
 /* Mixer extension registers (0x100+) */
 #define MIX_VOICE_FILTER_FC  REG32(SYSREG_BASE + 0x100) /* Write: Q0.16 SVF cutoff coefficient */
 #define MIX_VOICE_FILTER_Q   REG32(SYSREG_BASE + 0x104) /* Write: {enable[8], Q[7:0]} */
-#define MIX_IRQ_PENDING_HI   REG32(SYSREG_BASE + 0x108) /* Read: voice-end bitmask [47:32] */
-#define MIX_IRQ_CLEAR_HI     REG32(SYSREG_BASE + 0x108) /* Write: W1C for bits [47:32] */
+#define MIX_CRAM1_INHIBIT    REG32(SYSREG_BASE + 0x10C) /* W: bit 0 = pause mixer CRAM1 reads (Phase 6a) */
+/* MIX_IRQ_PENDING_HI / MIX_IRQ_CLEAR_HI removed in Phase 8 — voice
+ * count is 32 so the upper half is always zero. */
+
+/* AWE coprocessor registers (0x110+).  See of_awe.h for the awe_voice_t struct. */
+#define AWE_NOTE_ON          REG32(SYSREG_BASE + 0x114) /* W: data[5:0] = voice id strobe */
+#define AWE_NOTE_OFF         REG32(SYSREG_BASE + 0x118) /* W: data[5:0] = voice id strobe */
+#define AWE_VOICE_STOP       REG32(SYSREG_BASE + 0x11C) /* W: data[5:0] = voice id strobe */
+#define AWE_VOICE_LOAD_ADDR  REG32(SYSREG_BASE + 0x120) /* W: {voice[5:0], word[4:0]} cursor */
+#define AWE_VOICE_LOAD_DATA  REG32(SYSREG_BASE + 0x124) /* W: data; auto-incs word cursor */
+#define AWE_CHAN_LOAD_ADDR   REG32(SYSREG_BASE + 0x128) /* W: {ch[3:0], word[1:0]} cursor */
+#define AWE_CHAN_LOAD_DATA   REG32(SYSREG_BASE + 0x12C) /* W: data; auto-incs word cursor */
+#define AWE_MASTER_VOL       REG32(SYSREG_BASE + 0x130) /* W: 0..255 */
+#define AWE_BEND_RANGE       REG32(SYSREG_BASE + 0x134) /* W: cents */
+/* 0x110 AWE_CTRL / 0x138 AWE_REVERB_PRESET / 0x13C AWE_CHORUS_PRESET /
+ * 0x140 AWE_INTERP_DEFAULT removed in Phase 8 — fabric never read them. */
+#define AWE_ACTIVE_MASK_LO   REG32(SYSREG_BASE + 0x144) /* R: voices [31:0] active */
+#define AWE_ACTIVE_MASK_HI   REG32(SYSREG_BASE + 0x148) /* R: voices [47:32] active (always 0 at 32 voices) */
+#define AWE_TICK_COUNT       REG32(SYSREG_BASE + 0x14C) /* R: 1 kHz tick counter (Phase 2) */
+#define AWE_HW_ENVELOPE      REG32(SYSREG_BASE + 0x150) /* W: bit 0 = HW envelope enable (Phase 3) */
+#define AWE_MM_WRITE         REG32(SYSREG_BASE + 0x154) /* W: Phase 4 mod-matrix scale
+                                                         *    [31:16] = s16 scale
+                                                         *    [10:8]  = field (0..4)
+                                                         *    [5:0]   = voice (0..47) */
+#define AWE_REVERB_LEVEL     REG32(SYSREG_BASE + 0x158) /* W: Phase 6a reverb wet mix 0..255 */
+#define AWE_REVERB_FEEDBACK  REG32(SYSREG_BASE + 0x15C) /* W: Phase 6a reverb feedback  0..255 */
+#define AWE_CHORUS_LEVEL     REG32(SYSREG_BASE + 0x160) /* W: Phase 6b chorus wet mix 0..255 */
+#define AWE_CHORUS_RATE      REG32(SYSREG_BASE + 0x164) /* W: Phase 6b chorus LFO incr per sample, Q16 */
+#define AWE_CHORUS_DEPTH     REG32(SYSREG_BASE + 0x168) /* W: Phase 6b chorus LFO swing in samples 0..255 */
+/* Phase 5c — Ramp1 (mod env) trigger.  Two-write protocol:
+ *   1. Write rate (Q16.16 incr per ms tick) to AWE_RAMP1_RATE.
+ *   2. Write {stage[11:8], voice[5:0]} to AWE_RAMP1_TRIGGER.
+ *      stage = ENV_ATTACK (2)  → restart from level=0 with given rate
+ *      stage = ENV_RELEASE (6) → fade from current level
+ *      stage = ENV_DONE (7)    → snap to 0 and stop  */
+#define AWE_RAMP1_RATE       REG32(SYSREG_BASE + 0x16C)
+#define AWE_RAMP1_TRIGGER    REG32(SYSREG_BASE + 0x170)
 
 /* Link-lite peripheral (0x4D000000) — IRQ-driven, 1-word TX/RX */
 #define LINK_BASE            0x4D000000

@@ -148,6 +148,12 @@ static void control_change(int ch, int cc, int val) {
         M.brightness[ch] = (uint8_t)val;
         smp_voice_update_filter(ch, val, M.resonance[ch]);
         break;
+    case 91: /* Reverb send (CC91) */
+        smp_voice_update_reverb_send(ch, val);
+        break;
+    case 93: /* Chorus send (CC93) */
+        smp_voice_update_chorus_send(ch, val);
+        break;
     case 120: /* All Sound Off */
     case 123: /* All Notes Off */
         smp_voice_all_off(ch);
@@ -355,13 +361,12 @@ int of_midi_play(const uint8_t *data, uint32_t len, int loop) {
     M.paused       = 0;
     M.last_pump_us = of_time_us();
 
-    /* Drive the pump from the machine-timer ISR at 500 Hz.  This makes
-     * the envelope / LFO / event-dispatch cadence completely independent
-     * of the main thread — printf, framebuffer blits, and usleep jitter
-     * no longer steal ticks from the mixer.  Re-entry is avoided by
-     * having the main thread not call of_midi_pump() while playback is
-     * active (the ISR owns it). */
-    of_timer_set_callback(of_midi_pump, 500);
+    /* DEBUG: 100 Hz still hangs occasionally (~3 demo loops between
+     * crashes).  Drop to 50 Hz to test whether even fewer trap entries
+     * eliminates the accumulation.  Combined with the 2 ms PUMP_BUDGET_US
+     * cap below, total ISR CPU load is at most 50 × 2 ms = 100 ms/sec
+     * = 10 % CPU. */
+    of_timer_set_callback(of_midi_pump, 50);
     return OF_MIDI_OK;
 }
 
@@ -401,15 +406,30 @@ void of_midi_pump(void) {
 
     if (elapsed > 0) {
         M.tick_accum_us += (uint32_t)elapsed;
+
+        /* OVERRUN GUARD.  Cap the ENTIRE pump call (envelope ticks +
+         * MIDI event dispatch below) to PUMP_BUDGET_US of wall-clock
+         * work.  Both loops re-check the budget every iteration; on
+         * overrun we drop unprocessed envelope accumulation AND stop
+         * dispatching MIDI events for this call.  Avoids ISR-monopoly
+         * starvation of the main thread. */
+        const uint32_t PUMP_BUDGET_US = 2000;   /* 2 ms hard cap */
+        uint32_t pump_start_us = OF_SVC->timer_get_us();
+
         int tick_budget = 250;
         int ticks_fired = 0;
+        int overrun = 0;
         while (M.tick_accum_us >= 2000 && tick_budget > 0) {
             smp_voice_tick();
             M.tick_accum_us -= 2000;
             tick_budget--;
             ticks_fired++;
+            if ((OF_SVC->timer_get_us() - pump_start_us) > PUMP_BUDGET_US) {
+                overrun = 1;
+                break;
+            }
         }
-        int budget_exceeded = (tick_budget == 0);
+        int budget_exceeded = (tick_budget == 0) || overrun;
         if (budget_exceeded)
             M.tick_accum_us = 0;
         smp_voice_tick_record_pump((uint32_t)elapsed, ticks_fired,
@@ -430,8 +450,15 @@ void of_midi_pump(void) {
                 process_event(t);
                 if (!t->done) read_next_delta(t);
                 safety--;
+                /* Same overrun cap as the envelope loop.  Pending MIDI
+                 * events stay queued (their pending_us is still <=0)
+                 * so the next pump call picks them up — no notes lost,
+                 * just delayed. */
+                if ((OF_SVC->timer_get_us() - pump_start_us) > PUMP_BUDGET_US)
+                    goto pump_done;
             }
         }
+        pump_done: ;
 
         if (!any_active) {
             if (M.looping) {

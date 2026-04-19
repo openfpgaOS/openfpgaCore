@@ -1,7 +1,7 @@
 /*
  * of_smp_voice.h -- Software voice engine for sample-based MIDI synthesis.
  *
- * Manages up to 48 simultaneous sample voices with DAHDSR envelopes
+ * Manages up to 32 simultaneous sample voices with DAHDSR envelopes
  * and dual LFOs, driving the hardware PCM mixer.  All math is
  * fixed-point Q16.16; designed to run in a 1 kHz ISR on RV32IMFC.
  */
@@ -47,6 +47,11 @@ typedef struct {
     uint8_t midi_ch;
     uint8_t note;
     uint8_t velocity;
+    uint8_t voice_base_vol;  /* Pre-baked at note-on: (vel_scale × initial_attn_scale) >> 8.
+                               * Same 0..255 field the AWE fabric reads from voice-state RAM so
+                               * SW and HW compose paths can be bit-identical once HW takes over
+                               * (Phase 3).  Collapsing the two multiplies into one slot also
+                               * drops a per-tick multiply from the SW path. */
     uint8_t sustain_held; /* CC64 holding this note in sustain */
     int mixer_voice;      /* hardware mixer voice index */
     env_state_t vol_env;
@@ -142,9 +147,65 @@ void smp_voice_update_bend(int midi_ch, int bend);
 void smp_voice_update_mod(int midi_ch, int mod_depth);
 void smp_voice_update_sustain(int midi_ch, int sustain_on);
 void smp_voice_update_filter(int midi_ch, int brightness, int resonance);
+/* CC91 (reverb send) and CC93 (chorus send), 0..127 MIDI scaled to 0..255
+ * for the AWE backend.  SW-only path stores the value but does not act on
+ * it — the SW mixer has no per-voice send paths. */
+void smp_voice_update_reverb_send(int midi_ch, int send_0_127);
+void smp_voice_update_chorus_send(int midi_ch, int send_0_127);
 void smp_voice_all_off(int midi_ch);
 void smp_voice_all_off_global(void);
 void smp_voice_set_master_volume(int vol);
+
+/* AWE-backend redirect (Phase 5).  When enabled, note_on / note_off /
+ * per-channel CC updates route through the AWE coprocessor (fabric
+ * envelope, LFOs, mod-matrix, VOL_COMPOSE, PITCH_COMPOSE) instead of
+ * the per-tick SW voice engine.  of_smp_voice's tick pump becomes a
+ * no-op; only MIDI parsing remains on the CPU.  Disable to fall back
+ * to SW mixing. */
+void smp_voice_enable_awe_backend(int on);
+int  smp_voice_awe_backend_enabled(void);
+
+/* ------------------------------------------------------------------ */
+/* Mixer-write trace (OF_TRACE_MIXER_WRITES)                          */
+/* ------------------------------------------------------------------ */
+/* Compile with -DOF_TRACE_MIXER_WRITES to log every rate / vol / filter
+ * mixer write the voice engine performs into an in-memory ring buffer.
+ * Used for bit-identical pre/post-refactor verification (Phase 0 AWE
+ * bake-time migration, future HW-migration phases, etc.) by replaying
+ * a deterministic MIDI clip before and after a change and diffing the
+ * dumped traces.
+ *
+ * Zero overhead when the flag is not defined — the API symbols exist
+ * but are no-ops. */
+
+#define SMP_TRACE_OP_RATE        1u   /* arg0=rate_fp16 */
+#define SMP_TRACE_OP_VOL_LR      2u   /* arg0=vol_l, arg1=vol_r */
+#define SMP_TRACE_OP_VOICE_RAW   3u   /* arg0=rate_fp16, arg1=vol_l, arg2=vol_r */
+#define SMP_TRACE_OP_FILTER      4u   /* arg0=cutoff_q016, arg1=q, arg2=enable */
+
+typedef struct {
+    uint32_t seq;       /* monotonic sequence number since last reset */
+    uint8_t  op;        /* SMP_TRACE_OP_* */
+    uint8_t  voice;     /* hardware mixer voice index */
+    uint16_t _pad;
+    uint32_t arg0;
+    uint32_t arg1;
+    uint32_t arg2;
+} smp_mixer_trace_entry_t;
+
+/* Zero the ring and the sequence counter. */
+void smp_mixer_trace_reset(void);
+
+/* Copy up to `max` oldest-first entries into `out`.  Returns the number
+ * copied (0 if out==NULL or tracing is disabled).  Entries older than
+ * the ring capacity are dropped; the returned count never exceeds the
+ * smaller of `max` and the ring capacity. */
+uint32_t smp_mixer_trace_dump(smp_mixer_trace_entry_t *out, uint32_t max);
+
+/* Total entries recorded since reset (including ones overwritten by
+ * ring wrap) — lets the caller detect wrap so it can warn / run a
+ * shorter clip. */
+uint32_t smp_mixer_trace_total(void);
 
 #ifdef __cplusplus
 }

@@ -1,8 +1,8 @@
 //
-// Hardware PCM Mixer — 48 voices from CRAM1
+// Hardware PCM Mixer — 32 voices from CRAM1
 //
 // Reads signed mono samples (16-bit or 8-bit) from CRAM1, resamples via
-// Hermite (Catmull-Rom) interpolation with 16.16 fixed-point positioning,
+// 2-tap linear interpolation with 16.16 fixed-point positioning,
 // mixes with per-voice stereo 8-bit volume (log curve v²/256), and writes
 // packed stereo pairs to the audio FIFO for I2S output.
 //
@@ -11,10 +11,11 @@
 //
 // Voice descriptors stored in dual-port BRAM (3 M10K blocks).
 // CPU writes via indirect register interface (select voice, write field).
-// Mixer FSM reads all 48 voices sequentially each sample period.
+// Mixer FSM reads all 32 voices sequentially each sample period.
 //
 // Per-voice features:
-//   - Hermite (Catmull-Rom) 4-tap sample interpolation
+//   - 2-tap linear sample interpolation (cheap, ALM-budget-friendly;
+//     cubic Hermite removed in Phase 8 ALM hunt)
 //   - 8-bit stereo volume with log curve (VOL_L, VOL_R)
 //   - Hardware volume ramp (VOL_TARGET + VOL_RATE)
 //   - 16.16 fixed-point resampling
@@ -66,10 +67,34 @@ module audio_mixer (
     output wire [21:0] pos_readback,
 
     // Voice-end IRQ
-    input  wire [47:0] irq_clear,     // W1C from CPU
+    input  wire [31:0] irq_clear,     // W1C from CPU
     input  wire        irq_clear_wr,
-    output reg  [47:0] voice_end_pending,
-    output wire        voice_end_irq
+    output reg  [31:0] voice_end_pending,
+    output wire        voice_end_irq,
+
+    // Phase 6a — reverb bus controls.  Global wet/feedback level
+    // (0..255 each).  Default zeros = bypass; CPU wires them via new
+    // AWE MMIO (AWE_REVERB_LEVEL / AWE_REVERB_FEEDBACK).
+    input  wire [7:0] reverb_wet_level,
+    input  wire [7:0] reverb_feedback,
+    // Phase 6b — chorus bus controls.  level = wet/dry mix (0..255),
+    // rate = LFO phase increment per sample (Q16, 0 = no modulation),
+    // depth = peak swing of the read-pointer offset in samples.
+    input  wire [7:0] chorus_wet_level,
+    input  wire [15:0] chorus_lfo_rate,
+    input  wire [7:0] chorus_lfo_depth,
+    // Phase 6b complete: per-voice send levels.  When voice_field
+    // == 13 (REVERB_SEND) / 14 (CHORUS_SEND), voice_wdata[7:0] lands
+    // here.  Default 0xFF at reset == "full send" so existing apps
+    // that don't drive these still hear reverb/chorus.
+
+    // CRAM1 inhibit — when asserted, the tap-fetch path stops issuing
+    // new cram1_rd pulses.  Already-fetched Hermite taps continue to
+    // feed the output so voices don't glitch (4 × 16-bit taps per
+    // voice ≈ 80 µs of headroom at 48 kHz).  The kernel wraps its
+    // bridge→CRAM1→SDRAM file-I/O bounces with this bit to avoid the
+    // mixer/CPU arbiter race documented for the Doom port.
+    input  wire       cram1_inhibit
 );
 
 wire mixer_active = reset_n & mixer_enable;
@@ -122,11 +147,11 @@ wire        vtbl_b_wr   = voice_wr;
 altsyncram #(
     .operation_mode("BIDIR_DUAL_PORT"),
     .width_a(32),
-    .widthad_a(10),
+    .widthad_a(9),
     .width_b(32),
-    .widthad_b(10),
-    .numwords_a(768),
-    .numwords_b(768),
+    .widthad_b(9),
+    .numwords_a(512),
+    .numwords_b(512),
     .clock_enable_input_a("BYPASS"),
     .clock_enable_input_b("BYPASS"),
     .clock_enable_output_a("BYPASS"),
@@ -160,7 +185,7 @@ altsyncram #(
     .eccstatus()
 );
 
-reg [47:0] voice_active;
+reg [31:0] voice_active;
 
 // Per-voice "CPU wrote POS_INT" latch.  When CPU calls
 // of_mixer_set_position(v, n), it writes VTBL_POS_INT via port B.
@@ -175,7 +200,7 @@ reg [47:0] voice_active;
 // current pass, letting the CPU's new value stand.  The flag
 // clears when the FSM reaches S_WR_POS for that voice, so the next
 // pass advances from the freshly-seeked position normally.
-reg [47:0] pos_wr_pending;
+reg [31:0] pos_wr_pending;
 
 // ============================================
 // Mixer FSM
@@ -187,31 +212,42 @@ localparam S_IDLE        = 5'd0;
 localparam S_CPU_WR      = 5'd1;
 localparam S_CPU_CLR1    = 5'd2;
 localparam S_CPU_CLR2    = 5'd3;
+// Phase 6a: two states pipeline the reverb pre-output path.
+//   S_REVERB  — q_b just valid; register the 24-bit multiply outputs
+//               (wet = tap × wet_level, fb = tap × feedback).
+//   S_REVERB2 — shift the registered products and form wet_reg + the
+//               clamped new-tap.  S_OUTPUT only has to do a 16-bit
+//               add + clamp against mix_l/r.
+// State reg was widened to 6 bits to make room; the existing 32
+// states below are untouched.
+localparam S_REVERB      = 6'd32;
+localparam S_REVERB2     = 6'd33;
 // Voice field read (BRAM pipeline):
 localparam S_RD_CTRL     = 5'd4;
 localparam S_RD_CTRL_W   = 5'd5;
 localparam S_RD_FIELDS   = 5'd6;
 localparam S_RD_FIELDS_W = 5'd7;
-// Tap fetch (3-stage pipeline: resolve addr → compute word → cache/CRAM):
-localparam S_TAP_RD        = 5'd8;   // issue tap cache BRAM read
-localparam S_TAP_CHECK     = 5'd9;   // check cache hit
-// Tap-address resolve is split across two cycles so the 24-bit raw add
-// and the bounds/wrap mux don't share a 100 MHz cycle:
+// Tap fetch (2-tap linear: resolve addr → compute word → CRAM read):
 //   CALC : raw = cur_pos_int ± offset (registered into tap_raw)
 //   FETCH: bounds-check + wrap/reflect → tap_fetch_addr
-localparam S_TAP_FETCH_CALC = 5'd31; // registered 24-bit raw position
-localparam S_TAP_FETCH     = 5'd10; // bounds + wrap → tap_fetch_addr
-localparam S_TAP_ADDR      = 5'd11;  // cram_word_addr (registered)
-localparam S_TAP_CRAM    = 5'd12;  // cache hit? extract : issue CRAM read
-localparam S_TAP_WAIT    = 5'd13;  // wait for CRAM response
-localparam S_TAP_NEXT    = 5'd14;  // advance tap index or start Hermite
-// Hermite interpolation (6-stage pipeline):
-localparam S_HERMITE_0A  = 5'd15;  // coefficient partial sums
-localparam S_HERMITE_0B  = 5'd16;  // coefficient combine + shift
-localparam S_HERMITE_1   = 5'd17;  // Horner: a*t + b
-localparam S_HERMITE_2   = 5'd18;  // Horner: *t + c
-localparam S_HERMITE_3   = 5'd19;  // Horner: *t + d
-localparam S_HERMITE_4   = 5'd20;  // clamp to 16-bit
+localparam S_TAP_FETCH_CALC = 5'd31;
+localparam S_TAP_FETCH     = 5'd10;
+localparam S_TAP_ADDR      = 5'd11;
+localparam S_TAP_CRAM      = 5'd12;
+localparam S_TAP_WAIT      = 5'd13;
+localparam S_TAP_NEXT      = 5'd14;
+// Linear interpolation (3-stage pipeline): result = tap_0 + (tap_1 - tap_0) * frac
+//   S_LERP1: lerp_diff      <= tap_1 - tap_0  (17-bit subtract registered)
+//   S_LERP2: lerp_diff_prod <= lerp_diff * cur_pos_frac  (DSP-mapped multiply)
+//   S_LERP3: interp_sample  <= tap_0 + lerp_diff_prod[31:16]  (16-bit add)
+// Three stages keep each cycle FF→logic→FF short enough for 100 MHz —
+// the 2-stage variant put subtract+multiply in one cycle and was the
+// post-hunt -5 ns critical path on clk_cpu.
+localparam S_LERP1         = 5'd15;
+localparam S_LERP2         = 5'd16;
+localparam S_LERP3         = 5'd17;
+// Slots 5'd8, 5'd9, 5'd18–5'd20 freed by the cubic-Hermite removal —
+// available for future stages without widening the state register.
 // Volume + mix:
 localparam S_SCALE       = 5'd21;  // log volume v²/256
 localparam S_MULTIPLY    = 5'd22;  // sample × volume (DSP)
@@ -233,11 +269,11 @@ localparam S_OUTPUT      = 5'd28;  // clamp + push to audio FIFO
 // has the usual 2-cycle latency to settle into S_RD_CTRL_W.
 localparam S_NEXT_VOICE  = 5'd29;
 
-reg [4:0]  state;
-reg [5:0]  cur_voice;
+reg [5:0]  state;  // widened from 5-bit for Phase 6a reverb states
+reg [4:0]  cur_voice;
 reg signed [31:0] accum_l, accum_r;
 reg [5:0]  voice_cnt;
-reg [5:0]  active_cnt;
+reg [4:0]  active_cnt;
 assign active_count = active_cnt;
 
 // Latched voice fields during mix
@@ -268,11 +304,38 @@ reg        dir_changed;
 reg        pos_wrapped;  // set in S_WR_POS when loop/end triggered
 
 // Per-voice position latch — mirrored from BRAM each time the FSM
-// reads a voice's POS_INT (once per mixer cycle). Muxed to pos_readback
-// so a CPU SEL switch returns the selected voice's latest sample
-// position without waiting up to ~20us for the next FSM visit.
-reg [21:0] voice_pos_latch [0:47];
-assign pos_readback = voice_pos_latch[voice_sel_rd];
+// reads a voice's POS_INT (once per mixer cycle).  CPU reads the
+// selected voice's latest sample position via voice_sel_rd → pos_readback.
+//
+// Backed by an M10K (DUAL_PORT, sync-read on port B) instead of a
+// 32×22 LUT-RAM array.  Trades the 32:1 mux fanout (~150 ALMs) for
+// one cycle of read latency on pos_readback, which the CPU's MMIO
+// path already absorbs.  Port A: FSM mirror writes; port B: CPU read.
+reg  [4:0]  pos_latch_wr_addr;
+reg  [21:0] pos_latch_wr_data;
+reg         pos_latch_wr_en;
+
+altsyncram #(
+    .operation_mode("DUAL_PORT"),
+    .width_a(22), .widthad_a(5), .numwords_a(32),
+    .width_b(22), .widthad_b(5), .numwords_b(32),
+    .outdata_reg_a("UNREGISTERED"), .outdata_reg_b("UNREGISTERED"),
+    .address_reg_b("CLOCK0"),
+    .read_during_write_mode_mixed_ports("OLD_DATA"),
+    .rdcontrol_reg_b("CLOCK0"),
+    .intended_device_family("Cyclone V"), .lpm_type("altsyncram"),
+    .clock_enable_input_a("BYPASS"),  .clock_enable_input_b("BYPASS"),
+    .clock_enable_output_a("BYPASS"), .clock_enable_output_b("BYPASS"),
+    .power_up_uninitialized("FALSE")
+) voice_pos_latch_ram (
+    .clock0(clk),
+    .address_a(pos_latch_wr_addr),
+    .data_a(pos_latch_wr_data),
+    .wren_a(pos_latch_wr_en),
+    .address_b(voice_sel_rd[4:0]),
+    .q_b(pos_readback),
+    .clocken0(1'b1)
+);
 
 // (pipe_scaled removed — volume multiply now registered in S_MULTIPLY)
 
@@ -323,64 +386,14 @@ function [21:0] cram_word_addr;
     end
 endfunction
 
-// --- 4 Hermite taps ---
-reg signed [15:0] tap_m1, tap_0, tap_1, tap_2;
+// --- 2 linear-interp taps ---
+// tap_0 = sample at cur_pos_int, tap_1 = sample at next position
+// (cur_pos_int + 1 forward, cur_pos_int - 1 in bidi reverse).
+reg signed [15:0] tap_0, tap_1;
 
-// --- Tap cache in BRAM: 48 entries × 88 bits = {valid, tag[22:0], data[63:0]} ---
-// Port A: FSM writes (cache update in S_TAP_NEXT, invalidation from CPU writes)
-// Port B: FSM reads (issued in S_TAP_RD, data available in S_TAP_CHECK)
-reg  [87:0] tcache_a_data;
-reg  [5:0]  tcache_a_addr;
-reg         tcache_a_wr;
-wire [87:0] tcache_b_data;
-reg  [5:0]  tcache_b_addr;
-
-altsyncram #(
-    .operation_mode("DUAL_PORT"),
-    .width_a(88),
-    .widthad_a(6),
-    .width_b(88),
-    .widthad_b(6),
-    .numwords_a(48),
-    .numwords_b(48),
-    .clock_enable_input_a("BYPASS"),
-    .clock_enable_input_b("BYPASS"),
-    .clock_enable_output_b("BYPASS"),
-    .outdata_reg_b("UNREGISTERED"),
-    .read_during_write_mode_mixed_ports("OLD_DATA"),
-    .intended_device_family("Cyclone V"),
-    .lpm_type("altsyncram"),
-    .power_up_uninitialized("FALSE")
-) tap_cache_ram (
-    .clock0(clk),
-    .address_a(tcache_a_addr),
-    .data_a(tcache_a_data),
-    .wren_a(tcache_a_wr),
-    .clock1(clk),
-    .address_b(tcache_b_addr),
-    .q_b(tcache_b_data),
-    .wren_b(1'b0),
-    .aclr0(1'b0), .aclr1(1'b0),
-    .addressstall_a(1'b0), .addressstall_b(1'b0),
-    .byteena_a(1'b1), .byteena_b(1'b1),
-    .clocken0(1'b1), .clocken1(1'b1),
-    .clocken2(1'b1), .clocken3(1'b1),
-    .data_b(88'b0), .eccstatus(),
-    .q_a(), .rden_a(1'b0), .rden_b(1'b1)
-);
-
-// Valid bits stay in registers (48 bits = negligible ALMs) so
-// invalidation doesn't need a read-modify-write through the BRAM.
-reg [47:0] cache_valid;
-
-// Registered cache read result — latched in S_TAP_RD to break
-// the BRAM-output → Add → hit_fwd critical path on clk_74a.
-reg [22:0] tcache_rd_tag;
-reg [63:0] tcache_rd_data;
-
-// --- Tap fetch state ---
-reg [1:0]  fetch_tap_idx;   // which tap are we fetching (0=m1,1=0,2=1,3=2)
-reg [2:0]  fetch_count;     // how many taps still to fetch
+// --- Tap fetch state (linear: 2 taps per voice) ---
+reg        fetch_tap_idx;   // which tap are we fetching (0 or 1)
+reg [1:0]  fetch_count;     // how many taps still to fetch (1 or 2)
 reg [21:0] fetch_pos;       // resolved address for current tap
 reg [21:0] last_cram_word;  // last CRAM word address fetched (for same-word opt)
 reg [31:0] last_cram_data;  // last CRAM data read
@@ -428,34 +441,20 @@ function [21:0] resolve_tap_raw;
     end
 endfunction
 
-// Resolved addresses for all 4 taps
-reg [21:0] tap_addrs [0:3];
 // Pipeline regs: S_TAP_FETCH_CALC → S_TAP_FETCH → S_TAP_ADDR → S_TAP_CRAM
 reg signed [23:0] tap_raw;       // registered raw (pos ± offset)
-reg [21:0] tap_fetch_addr;      // resolved sample address
+reg [21:0] tap_fetch_addr;       // resolved sample address
 reg [21:0] tap_fetch_word;
 
-// --- Hermite polynomial evaluation (pipelined) ---
-// Catmull-Rom: result = ((a*t + b)*t + c)*t + d
-// Coefficients computed from taps, evaluation via Horner in 3 stages.
-reg signed [17:0] h_a, h_b, h_c, h_d;
-reg signed [17:0] h_stage;     // intermediate Horner accumulator
-// Pipeline regs for Hermite coefficient split (S_TAP_NEXT → 0A → 0B)
-reg signed [18:0] h_p_m1, h_p_0, h_p_1, h_p_2;
-reg signed [19:0] h_a_hi, h_a_lo;  // partial sums for h_a
-reg signed [19:0] h_b_hi, h_b_lo;  // partial sums for h_b
-reg signed [18:0] h_raw;        // pre-clamp Horner result (S_HERMITE_3 → 4)
-reg signed [15:0] hermite_sample;
-
-wire signed [16:0] h_t = $signed({1'b0, cur_pos_frac});
-
-// Coefficient computation (done in S_TAP_NEXT after all taps loaded):
-//   a = (-x_m1 + 3*x_0 - 3*x_1 + x_2) / 2
-//   b = (2*x_m1 - 5*x_0 + 4*x_1 - x_2) / 2
-//   c = (-x_m1 + x_1) / 2
-//   d = x_0
-// Use wide intermediates to avoid overflow (tap values up to ±32767,
-// 5*32767 = 163835, needs 18+ bits).
+// --- Linear interp pipeline ---
+// result = tap_0 + ((tap_1 - tap_0) * frac) >> 16
+//   S_LERP1: lerp_diff      <= tap_1 - tap_0  (s17)
+//   S_LERP2: lerp_diff_prod <= lerp_diff * cur_pos_frac  (s17 × u16 → s33, DSP)
+//   S_LERP3: interp_sample  <= tap_0 + lerp_diff_prod[31:16]
+// Linear output stays bounded by [tap_0, tap_1] so no clamp needed.
+reg signed [16:0] lerp_diff;
+reg signed [32:0] lerp_diff_prod;
+reg signed [15:0] interp_sample;
 
 // --- Log volume curve: v²/256 computed inline (cheaper than 256-entry LUT) ---
 reg [7:0] log_vol_l, log_vol_r;
@@ -469,11 +468,198 @@ reg signed [15:0] scaled_l, scaled_r;
 wire signed [31:0] mix_l = accum_l >>> 2;
 wire signed [31:0] mix_r = accum_r >>> 2;
 
-// Output clamp
-wire [15:0] clamp_l = (mix_l > 32'sd32767)  ? 16'h7FFF :
-                      (mix_l < -32'sd32768) ? 16'h8000 : mix_l[15:0];
-wire [15:0] clamp_r = (mix_r > 32'sd32767)  ? 16'h7FFF :
-                      (mix_r < -32'sd32768) ? 16'h8000 : mix_r[15:0];
+// ================================================================
+// Phase 6a — global reverb delay bus
+// ================================================================
+// 1024-sample × 16-bit mono delay line backed by altsyncram (≈ 21 ms
+// at 48 kHz, 2 M10K blocks).  Each sample output reads the oldest
+// tap, writes a new tap = mono(mix) + feedback × tap_old, then
+// mixes tap_old back into both output channels at reverb_wet_level.
+// DUAL_PORT: port A writes, port B reads; a one-cycle head state
+// (S_REVERB) captures the port-B read before S_OUTPUT consumes it.
+reg  [9:0]          rev_w_ptr;
+reg  signed [15:0]  rev_tap;              // latched old tap (port B q)
+reg  [9:0]          rev_rd_addr;
+reg  [9:0]          rev_wr_addr;
+reg  signed [15:0]  rev_wr_data;
+reg                 rev_wr_en;
+wire signed [15:0]  rev_q;
+
+// Phase 6a pipeline registers — split the 16×8 multiply from the
+// add+clamp so each cycle stays within 10 ns at 100 MHz.
+//   S_REVERB  : rev_*_prod_reg <= rev_q × coefficient
+//   S_REVERB2 : rev_wet_reg / rev_new_reg <= shifted + clamped product
+//   S_OUTPUT  : sample_data <= clamp(mix_l/r + rev_wet_reg)
+reg  signed [23:0]  rev_wet_prod_reg;
+reg  signed [23:0]  rev_fb_prod_reg;
+reg  signed [15:0]  rev_mono_in_reg;
+reg  signed [15:0]  rev_wet_reg;
+reg  signed [15:0]  rev_new_reg;
+
+altsyncram #(
+    .operation_mode("DUAL_PORT"),
+    .width_a(16), .widthad_a(10), .numwords_a(1024),
+    .width_b(16), .widthad_b(10), .numwords_b(1024),
+    .outdata_reg_a("UNREGISTERED"),
+    .outdata_reg_b("UNREGISTERED"),
+    .address_reg_b("CLOCK0"),
+    .read_during_write_mode_mixed_ports("OLD_DATA"),
+    .rdcontrol_reg_b("CLOCK0"),
+    .intended_device_family("Cyclone V"),
+    .lpm_type("altsyncram"),
+    .clock_enable_input_a("BYPASS"),
+    .clock_enable_input_b("BYPASS"),
+    .clock_enable_output_a("BYPASS"),
+    .clock_enable_output_b("BYPASS"),
+    .power_up_uninitialized("FALSE")
+) reverb_delay (
+    .clock0(clk),
+    // Port A: writes (DUAL_PORT convention).
+    .address_a(rev_wr_addr),
+    .data_a(rev_wr_data),
+    .wren_a(rev_wr_en),
+    // Port B: reads — sync address register feeds q_b next cycle.
+    .address_b(rev_rd_addr),
+    .q_b(rev_q),
+    .clocken0(1'b1)
+);
+
+// Per-voice-send accumulators feed the delay-line inputs (Phase 6b
+// complete).  Shift down to compensate for 32-voice headroom (~÷4)
+// and clamp to 16-bit before writing.
+wire signed [31:0] rev_mono_in_s32 = reverb_in_acc >>> 2;
+wire signed [15:0] rev_mono_in     =
+    (rev_mono_in_s32 > 32'sd32767)  ? 16'h7FFF :
+    (rev_mono_in_s32 < -32'sd32768) ? 16'h8000 : rev_mono_in_s32[15:0];
+
+wire signed [31:0] chor_in_s32 = chorus_in_acc >>> 2;
+wire signed [15:0] chor_in     =
+    (chor_in_s32 > 32'sd32767)  ? 16'h7FFF :
+    (chor_in_s32 < -32'sd32768) ? 16'h8000 : chor_in_s32[15:0];
+
+// S_REVERB latches rev_q into rev_tap AND registers the derived wet
+// and new-tap values.  The combinational pipe reads rev_q directly
+// (fresh from altsyncram) so no nonblocking-assign hazard.
+wire signed [23:0] rev_fb_prod   = rev_q * $signed({1'b0, reverb_feedback});
+wire signed [15:0] rev_fb_scaled = rev_fb_prod[23:8];
+wire signed [16:0] rev_new_s17   = rev_mono_in + rev_fb_scaled;
+wire signed [15:0] rev_new_clp   =
+    (rev_new_s17 >  17'sd32767)  ? 16'h7FFF :
+    (rev_new_s17 < -17'sd32768)  ? 16'h8000 : rev_new_s17[15:0];
+
+wire signed [23:0] rev_wet_prod  = rev_q * $signed({1'b0, reverb_wet_level});
+wire signed [15:0] rev_wet       = rev_wet_prod[23:8];
+
+// ================================================================
+// Phase 6b — global chorus delay bus
+// ================================================================
+// 512-sample × 16-bit mono delay (~10.6 ms at 48 kHz, 1 M10K).  An
+// LFO-modulated read pointer wobbles inside ±chorus_lfo_depth
+// samples around the current write position, producing the classic
+// chorus "shimmer".  No feedback loop — chorus shouldn't self-
+// oscillate.  Same DUAL_PORT pattern as reverb_delay.
+reg  [8:0]          chor_w_ptr;
+reg  signed [15:0]  chor_tap;
+reg  [8:0]          chor_rd_addr;
+reg  [8:0]          chor_wr_addr;
+reg  signed [15:0]  chor_wr_data;
+reg                 chor_wr_en;
+wire signed [15:0]  chor_q;
+
+// LFO state — 16-bit phase accumulator, increment per sample.  Top
+// bit picks the direction; the rest forms a triangle wave that
+// scales chorus_lfo_depth.
+reg  [15:0]         chor_lfo_phase;
+
+// Triangle: phase[15] = 0 → ramp up (+),  phase[15] = 1 → ramp down.
+// Use signed cast on the absolute value; max swing = ±127 samples.
+wire signed [15:0]  chor_lfo_swing =
+    chor_lfo_phase[15] ? -$signed({1'b0, chor_lfo_phase[14:7]})
+                       :  $signed({1'b0, chor_lfo_phase[14:7]});
+wire signed [15:0]  chor_offset_samples =
+    (chor_lfo_swing * $signed({1'b0, chorus_lfo_depth})) >>> 7;
+// Read pointer = write pointer minus delay center plus modulated swing.
+// Delay center = numwords/2 = 256 to keep room for ± modulation.
+wire [8:0]          chor_rd_ptr_next =
+    chor_w_ptr - 9'd256 + chor_offset_samples[8:0];
+
+altsyncram #(
+    .operation_mode("DUAL_PORT"),
+    .width_a(16), .widthad_a(9), .numwords_a(512),
+    .width_b(16), .widthad_b(9), .numwords_b(512),
+    .outdata_reg_a("UNREGISTERED"),
+    .outdata_reg_b("UNREGISTERED"),
+    .address_reg_b("CLOCK0"),
+    .read_during_write_mode_mixed_ports("OLD_DATA"),
+    .rdcontrol_reg_b("CLOCK0"),
+    .intended_device_family("Cyclone V"),
+    .lpm_type("altsyncram"),
+    .clock_enable_input_a("BYPASS"),
+    .clock_enable_input_b("BYPASS"),
+    .clock_enable_output_a("BYPASS"),
+    .clock_enable_output_b("BYPASS"),
+    .power_up_uninitialized("FALSE")
+) chorus_delay (
+    .clock0(clk),
+    .address_a(chor_wr_addr),
+    .data_a(chor_wr_data),
+    .wren_a(chor_wr_en),
+    .address_b(chor_rd_addr),
+    .q_b(chor_q),
+    .clocken0(1'b1)
+);
+
+// Chorus has no feedback — write data is just the dry mono input.
+wire signed [23:0] chor_wet_prod = chor_q * $signed({1'b0, chorus_wet_level});
+wire signed [15:0] chor_wet      = chor_wet_prod[23:8];
+
+reg  signed [23:0]  chor_wet_prod_reg;   // S_REVERB stage A captures
+reg  signed [15:0]  chor_wet_reg;        // S_REVERB2 stage B applies
+
+// =====================================================================
+// Per-voice send levels (Phase 6b complete)
+// =====================================================================
+// SF2 reverb_send / chorus_send per voice — drives how much of each
+// voice's sample contributes to the wet bus that feeds the delay
+// lines.  Default 0xFF at reset means existing apps that don't set
+// these still get full reverb/chorus contribution from every voice.
+//
+// AWE's SEND_COMPOSE stage (or app code) writes them via mixer
+// fields 13 (REVERB_SEND) and 14 (CHORUS_SEND).
+reg [7:0]  voice_reverb_send [0:31];
+reg [7:0]  voice_chorus_send [0:31];
+
+// Wet-bus accumulators — running sum per sample of voice_sample ×
+// voice_send during the S_ACCUM/S_VOL_RAMP/S_VOL_RAMP_WR scan.
+// The full chain (sample_sum → mult → shift → add → acc) is too long
+// for one cycle at 100 MHz, so it's split:
+//   S_ACCUM        : mono_voice_reg <= scaled_l + scaled_r;
+//                    captured_send  <= voice_send[cur_voice]
+//   S_VOL_RAMP     : prod_reg <= mono_voice_reg × captured_send
+//   S_VOL_RAMP_WR  : acc <= acc + prod_reg[24:8]    (>>> 8)
+reg signed [31:0]  reverb_in_acc;
+reg signed [31:0]  chorus_in_acc;
+reg signed [16:0]  mono_voice_reg;       // scaled_l + scaled_r (s17)
+reg [7:0]          voice_rev_send_reg;
+reg [7:0]          voice_chr_send_reg;
+reg signed [24:0]  reverb_prod_reg;      // s17 × u8 → s25
+reg signed [24:0]  chorus_prod_reg;
+
+integer pv_init;
+initial begin
+    for (pv_init = 0; pv_init < 32; pv_init = pv_init + 1) begin
+        voice_reverb_send[pv_init] = 8'hFF;
+        voice_chorus_send[pv_init] = 8'hFF;
+    end
+end
+
+// Output clamp — combine dry + reverb wet + chorus wet, clamp.
+wire signed [31:0] out_l_s32 = mix_l + rev_wet_reg + chor_wet_reg;
+wire signed [31:0] out_r_s32 = mix_r + rev_wet_reg + chor_wet_reg;
+wire [15:0] clamp_l = (out_l_s32 > 32'sd32767)  ? 16'h7FFF :
+                      (out_l_s32 < -32'sd32768) ? 16'h8000 : out_l_s32[15:0];
+wire [15:0] clamp_r = (out_r_s32 > 32'sd32767)  ? 16'h7FFF :
+                      (out_r_s32 < -32'sd32768) ? 16'h8000 : out_r_s32[15:0];
 
 // Volume ramp: step one channel toward target (minimized comparators)
 function [7:0] ramp_step;
@@ -513,28 +699,55 @@ always @(posedge clk) begin
         vtbl_a_data <= 0;
         ramp_new_l <= 0;
         ramp_new_r <= 0;
-        voice_active <= 48'd0;
-        cache_valid <= 48'd0;
-        pos_wr_pending <= 48'd0;
+        voice_active <= 32'd0;
+        pos_wr_pending <= 32'd0;
         dir_changed <= 0;
         new_dir <= 0;
-        voice_end_pending <= 48'd0;
+        voice_end_pending <= 32'd0;
+        rev_w_ptr   <= 10'd0;
+        rev_rd_addr <= 10'd0;
+        rev_wr_addr <= 10'd0;
+        rev_wr_data <= 16'd0;
+        rev_wr_en   <= 1'b0;
+        rev_tap          <= 16'd0;
+        rev_wet_prod_reg <= 24'd0;
+        rev_fb_prod_reg  <= 24'd0;
+        rev_mono_in_reg  <= 16'd0;
+        rev_wet_reg      <= 16'd0;
+        rev_new_reg      <= 16'd0;
+        chor_w_ptr       <= 9'd0;
+        chor_rd_addr     <= 9'd0;
+        chor_wr_addr     <= 9'd0;
+        chor_wr_data     <= 16'd0;
+        chor_wr_en       <= 1'b0;
+        chor_tap         <= 16'd0;
+        chor_lfo_phase   <= 16'd0;
+        chor_wet_prod_reg<= 24'd0;
+        chor_wet_reg     <= 16'd0;
+        reverb_in_acc    <= 32'd0;
+        chorus_in_acc    <= 32'd0;
+        mono_voice_reg     <= 17'sd0;
+        voice_rev_send_reg <= 8'd0;
+        voice_chr_send_reg <= 8'd0;
+        reverb_prod_reg    <= 25'sd0;
+        chorus_prod_reg    <= 25'sd0;
         fetch_tap_idx <= 0;
         tap_raw <= 0;
         fetch_count <= 0;
         last_cram_valid <= 0;
-        tcache_a_wr <= 0;
-        tcache_a_addr <= 0;
-        tcache_a_data <= 0;
-        tcache_b_addr <= 0;
-        tcache_rd_tag <= 0;
-        tcache_rd_data <= 0;
-        hermite_sample <= 16'sh0;
+        lerp_diff      <= 17'sd0;
+        lerp_diff_prod <= 33'sd0;
+        interp_sample  <= 16'sh0;
+        pos_latch_wr_en   <= 1'b0;
+        pos_latch_wr_addr <= 5'd0;
+        pos_latch_wr_data <= 22'd0;
     end else begin
         sample_wr <= 0;
         cram1_rd <= 0;
-        tcache_a_wr <= 0;
         vtbl_a_wr <= 0;   // default: port A reads; FSM write states override to 1
+        pos_latch_wr_en <= 1'b0;  // 1-cycle write strobe; FSM overrides
+        rev_wr_en  <= 0;   // delay-line write pulses only in S_OUTPUT
+        chor_wr_en <= 0;
 
         // Voice-end IRQ clear (W1C)
         if (irq_clear_wr)
@@ -546,11 +759,12 @@ always @(posedge clk) begin
         if (voice_wr) begin
             if (voice_field == VTBL_CTRL)
                 voice_active[voice_sel] <= voice_wdata[0];
-            if (voice_field == VTBL_CTRL || voice_field == VTBL_ADDR ||
-                voice_field == VTBL_LOOP_START || voice_field == VTBL_LOOP_END)
-                cache_valid[voice_sel] <= 1'b0;
             if (voice_field == VTBL_POS_INT)
                 pos_wr_pending[voice_sel] <= 1'b1;
+            if (voice_field == 4'd13)
+                voice_reverb_send[voice_sel] <= voice_wdata[7:0];
+            if (voice_field == 4'd14)
+                voice_chorus_send[voice_sel] <= voice_wdata[7:0];
         end
 
         if (!mixer_active) begin
@@ -562,6 +776,8 @@ always @(posedge clk) begin
                 if (fifo_level < 9'd480) begin
                     accum_l <= 0;
                     accum_r <= 0;
+                    reverb_in_acc <= 0;
+                    chorus_in_acc <= 0;
                     cur_voice <= 0;
                     voice_cnt <= 0;
                     vtbl_a_addr <= {6'd0, VTBL_CTRL};
@@ -584,11 +800,11 @@ always @(posedge clk) begin
                 cur_dir    <= vtbl_a_q[4];
 
                 if (!voice_active[cur_voice]) begin
-                    if (cur_voice == 6'd47)
-                        state <= S_OUTPUT;
+                    if (cur_voice == 5'd31)
+                        state <= S_REVERB;
                     else begin
-                        cur_voice <= cur_voice + 6'd1;
-                        vtbl_a_addr <= {cur_voice + 6'd1, VTBL_CTRL};
+                        cur_voice <= cur_voice + 5'd1;
+                        vtbl_a_addr <= {cur_voice + 5'd1, VTBL_CTRL};
                         state <= S_RD_CTRL;
                     end
                 end else begin
@@ -624,10 +840,12 @@ always @(posedge clk) begin
                     end
                     4'd3: begin  // POS_INT
                         cur_pos_int <= vtbl_a_q[21:0];
-                        /* Mirror every voice's position into the per-voice
-                         * latch array so pos_readback can mux it out
-                         * immediately when the CPU switches voice_sel. */
-                        voice_pos_latch[cur_voice] <= vtbl_a_q[21:0];
+                        /* Mirror every voice's position into the M10K
+                         * latch so the CPU's pos_readback returns the
+                         * latest sample position when SEL changes. */
+                        pos_latch_wr_addr <= cur_voice;
+                        pos_latch_wr_data <= vtbl_a_q[21:0];
+                        pos_latch_wr_en   <= 1'b1;
                         vtbl_a_addr <= {cur_voice, VTBL_POS_FRAC};
                         bram_rd_phase <= 4;
                         state <= S_RD_FIELDS;
@@ -669,109 +887,49 @@ always @(posedge clk) begin
                         if (cur_pos_int >= cur_len) begin
                             voice_active[cur_voice] <= 0;
                             voice_end_pending[cur_voice] <= 1;
-                            if (cur_voice == 6'd47)
-                                state <= S_OUTPUT;
+                            if (cur_voice == 5'd31)
+                                state <= S_REVERB;
                             else begin
-                                cur_voice <= cur_voice + 6'd1;
-                                vtbl_a_addr <= {cur_voice + 6'd1, VTBL_CTRL};
+                                cur_voice <= cur_voice + 5'd1;
+                                vtbl_a_addr <= {cur_voice + 5'd1, VTBL_CTRL};
                                 state <= S_RD_CTRL;
                             end
                         end else begin
-                            // Voice still active — go straight to tap fetch
-                            // (filter BRAM reads removed)
-                            tcache_b_addr <= cur_voice;
-                            state <= S_TAP_RD;
+                            // Voice still active — start the 2-tap fetch
+                            // for linear interpolation.  No cache: per-voice
+                            // re-fetch is cheap enough for the 32-voice scan.
+                            fetch_tap_idx   <= 1'd0;
+                            fetch_count     <= 2'd2;
+                            last_cram_valid <= 1'b0;
+                            state           <= S_TAP_FETCH_CALC;
                         end
                     end
                     default: begin
-                        tcache_b_addr <= cur_voice;
-                        state <= S_TAP_RD;
+                        fetch_tap_idx   <= 1'd0;
+                        fetch_count     <= 2'd2;
+                        last_cram_valid <= 1'b0;
+                        state           <= S_TAP_FETCH_CALC;
                     end
                 endcase
             end
 
-            // ---- Tap cache BRAM read wait ----
-            // tcache_b_addr was set in the previous state; BRAM output
-            // (tcache_b_data) is valid this cycle. Register it here so
-            // the hit_fwd/hit_rev comparisons in S_TAP_CHECK start from
-            // FFs instead of raw BRAM output.
-            S_TAP_RD: begin
-                tcache_rd_tag  <= tcache_b_data[86:64];
-                tcache_rd_data <= tcache_b_data[63:0];
-                state <= S_TAP_CHECK;
-            end
-
-            // ---- Hermite tap cache check (reads BRAM output) ----
-            S_TAP_CHECK: begin
-                begin : tap_check_block
-                    reg [63:0] cached;
-                    reg [22:0] tag;
-                    reg [21:0] last_pos;
-                    reg        last_dir;
-                    reg        hit_same, hit_fwd, hit_rev;
-                    cached   = tcache_rd_data;
-                    tag      = tcache_rd_tag;
-                    last_pos = tag[21:0];
-                    last_dir = tag[22];
-
-                    hit_same = cache_valid[cur_voice] &&
-                               (cur_pos_int == last_pos) &&
-                               (cur_dir == last_dir);
-                    hit_fwd  = cache_valid[cur_voice] &&
-                               (cur_pos_int == last_pos + 22'd1) &&
-                               !cur_dir && !last_dir;
-                    hit_rev  = cache_valid[cur_voice] &&
-                               (cur_pos_int + 22'd1 == last_pos) &&
-                               cur_dir && last_dir;
-
-                    if (hit_same) begin
-                        tap_m1 <= $signed(cached[15:0]);
-                        tap_0  <= $signed(cached[31:16]);
-                        tap_1  <= $signed(cached[47:32]);
-                        tap_2  <= $signed(cached[63:48]);
-                        state <= S_TAP_NEXT;
-                    end else if (hit_fwd) begin
-                        tap_m1 <= $signed(cached[31:16]);
-                        tap_0  <= $signed(cached[47:32]);
-                        tap_1  <= $signed(cached[63:48]);
-                        fetch_tap_idx <= 2'd3;
-                        fetch_count <= 3'd1;
-                        last_cram_valid <= 0;
-                        state <= S_TAP_FETCH_CALC;
-                    end else if (hit_rev) begin
-                        tap_0  <= $signed(cached[15:0]);
-                        tap_1  <= $signed(cached[31:16]);
-                        tap_2  <= $signed(cached[47:32]);
-                        fetch_tap_idx <= 2'd0;
-                        fetch_count <= 3'd1;
-                        last_cram_valid <= 0;
-                        state <= S_TAP_FETCH_CALC;
-                    end else begin
-                        fetch_tap_idx <= 2'd0;
-                        fetch_count <= 3'd4;
-                        last_cram_valid <= 0;
-                        state <= S_TAP_FETCH_CALC;
-                    end
-                end
-            end
-
             // ---- Tap address stage 1: compute raw (pos ± offset) ----
-            // Registered into tap_raw so the 24-bit add + Decoder
-            // (offset mux) don't share a cycle with the bounds/wrap
-            // logic in S_TAP_FETCH.
+            // Linear interp uses 2 taps: offset 0 (tap_0) and offset 1
+            // (tap_1).  In bidi-reverse mode tap_1 lives at pos-1.
+            // Registered into tap_raw so the 22-bit add + offset mux
+            // don't share a cycle with the bounds/wrap logic in S_TAP_FETCH.
             S_TAP_FETCH_CALC: begin
                 begin : tap_raw_block
-                    reg signed [2:0] offset;
-                    case (fetch_tap_idx)
-                        2'd0: offset = -3'sd1;
-                        2'd1: offset = 3'sd0;
-                        2'd2: offset = 3'sd1;
-                        2'd3: offset = 3'sd2;
-                    endcase
+                    // Linear interp: offset is 0 or +1; bidi-reverse
+                    // subtracts.  Single-bit offset, no sign extension.
+                    reg [21:0] off22;
+                    off22 = {21'd0, fetch_tap_idx};
                     if (cur_bidi && cur_dir)
-                        tap_raw <= {2'b0, cur_pos_int} - {{21{offset[2]}}, offset};
+                        tap_raw <= $signed({2'b0, cur_pos_int}) -
+                                   $signed({2'b0, off22});
                     else
-                        tap_raw <= {2'b0, cur_pos_int} + {{21{offset[2]}}, offset};
+                        tap_raw <= $signed({2'b0, cur_pos_int}) +
+                                   $signed({2'b0, off22});
                 end
                 state <= S_TAP_FETCH;
             end
@@ -787,14 +945,12 @@ always @(posedge clk) begin
                         cur_loop_start, cur_loop_end, cur_loop, cur_bidi);
                     tap_fetch_addr <= addr;
                     fetch_pos <= addr;
-                    tap_addrs[fetch_tap_idx] <= addr;
                 end
                 state <= S_TAP_ADDR;
             end
 
             // ---- Compute CRAM word addr (pipeline stage 2) ----
             // tap_fetch_addr is registered; cram_word_addr is one add.
-            // Register the result — cache check + issue in S_TAP_WAIT reuse.
             S_TAP_ADDR: begin
                 tap_fetch_word <= cram_word_addr(cur_addr, tap_fetch_addr, cur_fmt16);
                 state <= S_TAP_CRAM;
@@ -802,20 +958,20 @@ always @(posedge clk) begin
 
             S_TAP_CRAM: begin
                 if (last_cram_valid && tap_fetch_word == last_cram_word) begin
-                    case (fetch_tap_idx)
-                        2'd0: tap_m1 <= extract_sample(last_cram_data, tap_fetch_addr, cur_fmt16);
-                        2'd1: tap_0  <= extract_sample(last_cram_data, tap_fetch_addr, cur_fmt16);
-                        2'd2: tap_1  <= extract_sample(last_cram_data, tap_fetch_addr, cur_fmt16);
-                        2'd3: tap_2  <= extract_sample(last_cram_data, tap_fetch_addr, cur_fmt16);
-                    endcase
+                    if (fetch_tap_idx == 1'd0)
+                        tap_0 <= extract_sample(last_cram_data, tap_fetch_addr, cur_fmt16);
+                    else
+                        tap_1 <= extract_sample(last_cram_data, tap_fetch_addr, cur_fmt16);
                     state <= S_TAP_NEXT;
                 end else begin
                     cram1_addr <= tap_fetch_word;
                     last_cram_word <= tap_fetch_word;
                     // Assert read request; only advance when mux confirms
                     // the pulse was actually accepted (not suppressed by
-                    // a colliding CPU access).
-                    if (!cram1_busy) cram1_rd <= 1;
+                    // a colliding CPU access).  cram1_inhibit holds us
+                    // here without issuing a read so the CPU can run a
+                    // bulk CRAM1 bounce unchallenged.
+                    if (!cram1_busy && !cram1_inhibit) cram1_rd <= 1;
                     if (cram1_rd_accepted) begin
                         cram1_rd <= 0;
                         state <= S_TAP_WAIT;
@@ -828,103 +984,53 @@ always @(posedge clk) begin
                 if (cram1_rdata_valid) begin
                     last_cram_data <= cram1_rdata;
                     last_cram_valid <= 1;
-                    case (fetch_tap_idx)
-                        2'd0: tap_m1 <= extract_sample(cram1_rdata, fetch_pos, cur_fmt16);
-                        2'd1: tap_0  <= extract_sample(cram1_rdata, fetch_pos, cur_fmt16);
-                        2'd2: tap_1  <= extract_sample(cram1_rdata, fetch_pos, cur_fmt16);
-                        2'd3: tap_2  <= extract_sample(cram1_rdata, fetch_pos, cur_fmt16);
-                    endcase
+                    if (fetch_tap_idx == 1'd0)
+                        tap_0 <= extract_sample(cram1_rdata, fetch_pos, cur_fmt16);
+                    else
+                        tap_1 <= extract_sample(cram1_rdata, fetch_pos, cur_fmt16);
                     state <= S_TAP_NEXT;
                 end
             end
 
-            // ---- Advance to next tap or start Hermite pipeline ----
+            // ---- Advance to next tap or start linear interp ----
             S_TAP_NEXT: begin
-                fetch_count <= fetch_count - 3'd1;
-                if (fetch_count <= 3'd1) begin
-                    // All taps loaded — write cache BRAM, sign-extend into
-                    // pipeline regs.  Actual coefficient arithmetic moves to
-                    // S_HERMITE_0 to meet 100 MHz timing.
-                    tcache_a_wr   <= 1;
-                    tcache_a_addr <= cur_voice;
-                    tcache_a_data <= {1'b0, {cur_dir, cur_pos_int}, tap_2, tap_1, tap_0, tap_m1};
-                    cache_valid[cur_voice] <= 1'b1;
-
-                    h_p_m1 <= {{3{tap_m1[15]}}, tap_m1};
-                    h_p_0  <= {{3{tap_0[15]}},  tap_0};
-                    h_p_1  <= {{3{tap_1[15]}},  tap_1};
-                    h_p_2  <= {{3{tap_2[15]}},  tap_2};
-                    state  <= S_HERMITE_0A;
+                fetch_count <= fetch_count - 2'd1;
+                if (fetch_count <= 2'd1) begin
+                    // Both taps loaded — start linear interp pipeline.
+                    state <= S_LERP1;
                 end else begin
                     // More taps to fetch
-                    fetch_tap_idx <= fetch_tap_idx + 2'd1;
+                    fetch_tap_idx <= fetch_tap_idx + 1'd1;
                     state <= S_TAP_FETCH_CALC;
                 end
             end
 
-            // ---- Hermite coefficient computation (2-stage pipeline) ----
-            // Catmull-Rom:  a = (-m1 + 3*x0 - 3*x1 + x2)/2
-            //               b = (2*m1 - 5*x0 + 4*x1 - x2)/2
-            //               c = (-m1 + x1)/2     d = x0
-            // Stage 0A: partial sums (~2 adder levels each)
-            S_HERMITE_0A: begin
-                h_a_hi <= -h_p_m1 + 3*h_p_0;    // -m1 + 3*x0
-                h_a_lo <= -3*h_p_1 + h_p_2;      // -3*x1 + x2
-                h_b_hi <= 2*h_p_m1 - 5*h_p_0;    // 2*m1 - 5*x0
-                h_b_lo <= 4*h_p_1 - h_p_2;       // 4*x1 - x2
-                h_c <= (-h_p_m1 + h_p_1) >>> 1;  // simple, fits here
-                h_d <= h_p_0[17:0];
-                state <= S_HERMITE_0B;
+            // ---- Linear interp stage 1: tap_1 - tap_0 (s17 register) ----
+            // Split out from the multiply so subtract-then-multiply isn't
+            // a single 100 MHz cycle.  The 2-stage version was the
+            // post-cleanup -5 ns critical path on clk_cpu.
+            S_LERP1: begin
+                lerp_diff <= $signed({tap_1[15], tap_1}) -
+                             $signed({tap_0[15], tap_0});
+                state <= S_LERP2;
             end
 
-            // Stage 0B: combine partial sums + shift
-            S_HERMITE_0B: begin
-                h_a <= (h_a_hi + h_a_lo) >>> 1;
-                h_b <= (h_b_hi + h_b_lo) >>> 1;
-                state <= S_HERMITE_1;
+            // ---- Linear interp stage 2: diff × frac (DSP-inferred) ----
+            // s17 × u16 → s33 product.  Maps to one DSP block, so the
+            // multiply alone is a clean FF→DSP→FF cycle.
+            S_LERP2: begin
+                lerp_diff_prod <= lerp_diff *
+                                  $signed({1'b0, cur_pos_frac});
+                state <= S_LERP3;
             end
 
-            // ---- Hermite Horner evaluation: 3 pipelined stages ----
-            // result = ((a*t + b)*t + c)*t + d
-
-            S_HERMITE_1: begin
-                // h_stage = a*t >> 16 + b
-                begin : horner_1
-                    reg signed [34:0] p;
-                    p = h_a * h_t;
-                    h_stage <= $signed(p[34:16]) + h_b;
-                end
-                state <= S_HERMITE_2;
-            end
-
-            S_HERMITE_2: begin
-                // h_stage = h_stage*t >> 16 + c
-                begin : horner_2
-                    reg signed [34:0] p;
-                    p = h_stage * h_t;
-                    h_stage <= $signed(p[34:16]) + h_c;
-                end
-                state <= S_HERMITE_3;
-            end
-
-            S_HERMITE_3: begin
-                // h_raw = h_stage*t >> 16 + d (multiply + add only)
-                begin : horner_3
-                    reg signed [34:0] p;
-                    p = h_stage * h_t;
-                    h_raw <= $signed(p[34:16]) + {{1{h_d[17]}}, h_d};
-                end
-                state <= S_HERMITE_4;
-            end
-
-            S_HERMITE_4: begin
-                // Clamp h_raw to signed 16-bit
-                hermite_sample <= (h_raw > 19'sd32767)  ? 16'sh7FFF :
-                                  (h_raw < -19'sd32768) ? 16'sh8000 :
-                                  h_raw[15:0];
+            // ---- Linear interp stage 3: tap_0 + diff_prod[31:16] ----
+            // Final 16-bit add lands the interpolated sample.  Linear
+            // output is bounded by [tap_0, tap_1] so no clamp.
+            S_LERP3: begin
+                interp_sample <= tap_0 + lerp_diff_prod[31:16];
                 state <= S_SCALE;
             end
-
 
             // ---- Pipeline stage 1: log volume curve v²/256 ----
             S_SCALE: begin
@@ -942,8 +1048,8 @@ always @(posedge clk) begin
             S_MULTIPLY: begin
                 begin : vol_mul
                     reg signed [23:0] pl, pr;
-                    pl = hermite_sample * $signed({1'b0, log_vol_l});
-                    pr = hermite_sample * $signed({1'b0, log_vol_r});
+                    pl = interp_sample * $signed({1'b0, log_vol_l});
+                    pr = interp_sample * $signed({1'b0, log_vol_r});
                     scaled_l <= pl[23:8];
                     scaled_r <= pr[23:8];
                 end
@@ -954,6 +1060,14 @@ always @(posedge clk) begin
             S_ACCUM: begin
                 accum_l <= accum_l + {{16{scaled_l[15]}}, scaled_l};
                 accum_r <= accum_r + {{16{scaled_r[15]}}, scaled_r};
+                // Phase 6b: stage A of the wet-bus pipe — register
+                // the mono mix and capture this voice's send levels.
+                // Multiply happens in S_VOL_RAMP, accumulate in
+                // S_VOL_RAMP_WR.  Splitting it keeps each cycle's
+                // FF→logic→FF window short enough for 100 MHz.
+                mono_voice_reg     <= scaled_l + scaled_r;        // s16 + s16 → s17
+                voice_rev_send_reg <= voice_reverb_send[cur_voice];
+                voice_chr_send_reg <= voice_chorus_send[cur_voice];
                 voice_cnt <= voice_cnt + 1;
                 dir_changed <= 0;
                 state <= S_VOL_RAMP;
@@ -973,6 +1087,11 @@ always @(posedge clk) begin
                     ramp_new_l <= ramp_step(cur_vol_l, cur_target_l, cur_vol_rate);
                     ramp_new_r <= ramp_step(cur_vol_r, cur_target_r, cur_vol_rate);
                 end
+                // Phase 6b stage B of the wet-bus pipe: register the
+                // mono × send products (one DSP each).  Accumulate
+                // happens in S_VOL_RAMP_WR.
+                reverb_prod_reg <= mono_voice_reg * $signed({1'b0, voice_rev_send_reg});
+                chorus_prod_reg <= mono_voice_reg * $signed({1'b0, voice_chr_send_reg});
                 state <= S_VOL_RAMP_WR;
             end
 
@@ -985,6 +1104,13 @@ always @(posedge clk) begin
                     vtbl_a_addr <= {cur_voice, VTBL_VOL_LR};
                     vtbl_a_data <= {16'd0, ramp_new_r, ramp_new_l};
                 end
+                // Phase 6b stage C: shift product down by 8 (compensate
+                // for u8 send scale) and add to the wet accumulator.
+                // Sign-extend s17 product slice into the s32 acc.
+                reverb_in_acc <= reverb_in_acc +
+                                 {{15{reverb_prod_reg[24]}}, reverb_prod_reg[24:8]};
+                chorus_in_acc <= chorus_in_acc +
+                                 {{15{chorus_prod_reg[24]}}, chorus_prod_reg[24:8]};
                 state <= S_WR_POS;
             end
 
@@ -1067,10 +1193,10 @@ always @(posedge clk) begin
 
                 if (dir_changed)
                     state <= S_WR_DIR;
-                else if (cur_voice == 6'd47)
-                    state <= S_OUTPUT;
+                else if (cur_voice == 5'd31)
+                    state <= S_REVERB;
                 else begin
-                    cur_voice <= cur_voice + 6'd1;
+                    cur_voice <= cur_voice + 5'd1;
                     state <= S_NEXT_VOICE;
                 end
             end
@@ -1080,10 +1206,10 @@ always @(posedge clk) begin
                 vtbl_a_addr <= {cur_voice, VTBL_CTRL};
                 vtbl_a_data <= {27'd0, new_dir, cur_bidi, cur_fmt16, cur_loop, 1'b1};
 
-                if (cur_voice == 6'd47)
-                    state <= S_OUTPUT;
+                if (cur_voice == 5'd31)
+                    state <= S_REVERB;
                 else begin
-                    cur_voice <= cur_voice + 6'd1;
+                    cur_voice <= cur_voice + 5'd1;
                     state <= S_NEXT_VOICE;
                 end
             end
@@ -1096,10 +1222,55 @@ always @(posedge clk) begin
                 state <= S_RD_CTRL;
             end
 
+            S_REVERB: begin
+                // Pipe stage A: rev_q just valid from the M10K.  Kick
+                // off the two 16×8 multiplies into pipeline regs, and
+                // latch the current mono input for use in stage B.
+                rev_tap          <= rev_q;
+                rev_wet_prod_reg <= rev_q * $signed({1'b0, reverb_wet_level});
+                rev_fb_prod_reg  <= rev_q * $signed({1'b0, reverb_feedback});
+                rev_mono_in_reg  <= rev_mono_in;
+                // Chorus runs in parallel: its q_b is also valid this
+                // cycle (we addressed it from the previous S_OUTPUT).
+                chor_tap          <= chor_q;
+                chor_wet_prod_reg <= chor_q * $signed({1'b0, chorus_wet_level});
+                state             <= S_REVERB2;
+            end
+
+            S_REVERB2: begin
+                // Pipe stage B: products are registered; shift them
+                // down by 8 and clamp to form the 16-bit wet mix and
+                // new-tap values that S_OUTPUT consumes.  The saw
+                // chain here is short (1 add + 1 clamp per reg).
+                rev_wet_reg <= rev_wet_prod_reg[23:8];
+                rev_new_reg <= ((rev_mono_in_reg + rev_fb_prod_reg[23:8]) >  17'sd32767) ? 16'h7FFF :
+                               ((rev_mono_in_reg + rev_fb_prod_reg[23:8]) < -17'sd32768) ? 16'h8000 :
+                               (rev_mono_in_reg + rev_fb_prod_reg[23:8]);
+                chor_wet_reg <= chor_wet_prod_reg[23:8];
+                state        <= S_OUTPUT;
+            end
+
             S_OUTPUT: begin
                 sample_wr <= 1;
                 sample_data <= {clamp_l, clamp_r};  // {Left[15:0], Right[15:0]}
                 active_cnt <= voice_cnt;
+                // Commit the pipelined new reverb tap into the delay
+                // line and advance the circular pointer; pre-address
+                // the next read so NEXT sample's S_REVERB has q_b valid.
+                rev_wr_addr <= rev_w_ptr;
+                rev_wr_data <= rev_new_reg;
+                rev_wr_en   <= 1'b1;
+                rev_w_ptr   <= rev_w_ptr + 10'd1;
+                rev_rd_addr <= rev_w_ptr + 10'd1;
+                // Chorus delay: write dry mono in, advance pointers,
+                // step the LFO phase by chorus_lfo_rate.  Read pointer
+                // is the LFO-modulated offset around the new write head.
+                chor_wr_addr   <= chor_w_ptr;
+                chor_wr_data   <= chor_in;        // dedicated per-voice chorus send accumulator
+                chor_wr_en     <= 1'b1;
+                chor_w_ptr     <= chor_w_ptr + 9'd1;
+                chor_rd_addr   <= chor_rd_ptr_next;
+                chor_lfo_phase <= chor_lfo_phase + chorus_lfo_rate;
                 state <= S_IDLE;
             end
 

@@ -752,6 +752,7 @@ set_global_assignment -name QIP_FILE apf/mf_ddio_bidir_12.qip
 set_global_assignment -name VERILOG_FILE core_top.v
 set_global_assignment -name VERILOG_FILE core_bridge_cmd.v
 set_global_assignment -name MIF_FILE firmware.mif
+set_global_assignment -name MIF_FILE ../../common/cents_to_mult.mif
 # text_terminal.v, tile_engine.v, sprite_engine.v removed — rendering in software
 set_global_assignment -name VERILOG_FILE io_sdram.v
 set_global_assignment -name VERILOG_FILE mf_linebuf.v
@@ -800,6 +801,8 @@ set_instance_assignment -name FAST_INPUT_REGISTER ON -to cram1_wait
 
 # Source files added after initial commit
 set_global_assignment -name VERILOG_FILE ../../common/audio_mixer.v
+set_global_assignment -name VERILOG_FILE ../../common/audio_awe.v
+set_global_assignment -name VERILOG_FILE ../../common/bridge_to_sdram.v
 set_global_assignment -name VERILOG_FILE ../../common/audio_output.v
 set_global_assignment -name VERILOG_FILE ../../common/gpu_core.v
 set_global_assignment -name VERILOG_FILE ../../common/gpu_tex_cache.v
@@ -827,3 +830,7 @@ set_global_assignment -name VERILOG_FILE ../../vendor/vexriscv/VexiiRiscv/OpenFp
 set_global_assignment -name VERILOG_FILE mf_pllram_133.v
 set_global_assignment -name SDC_FILE core_constraints.sdc
 set_global_assignment -name SEED 4
+# Phase 5 fitter-tuning experiments (see session 2026-04-18).  All
+# Quartus knobs we tried — RESOURCE_SHARING, REGISTER_RETIMING,
+# REGISTER_DUPLICATION, ramstyle=MLAB, seed 11 — ended up worse
+# than baseline once we were above 94% ALMs.  Keep the defaults.

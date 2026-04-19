@@ -18,6 +18,7 @@
 #include "of_services.h"
 #include "../hal/hal.h"
 #include "../hal/regs.h"
+#include "../hal/awe.h"
 
 /* ======================================================================
  * Wrappers for SDK/HAL signature mismatches
@@ -190,6 +191,34 @@ void services_table_init(void) {
     /* SoundFont preload -- filled in by bank_preload() post-init */
     svc->smp_bank_preload_base = NULL;
     svc->smp_bank_preload_size = 0;
+
+    /* AWE coprocessor (Phase 1) */
+    awe_init();
+    svc->awe_voice_load              = of_awe_voice_load_impl;
+    svc->awe_voice_trigger           = of_awe_voice_trigger_impl;
+    svc->awe_voice_release           = of_awe_voice_release_impl;
+    svc->awe_voice_stop              = of_awe_voice_stop_impl;
+    svc->awe_channel_set_volume      = of_awe_channel_set_volume_impl;
+    svc->awe_channel_set_expression  = of_awe_channel_set_expression_impl;
+    svc->awe_channel_set_pan         = of_awe_channel_set_pan_impl;
+    svc->awe_channel_set_bend        = of_awe_channel_set_bend_impl;
+    svc->awe_channel_set_mod         = of_awe_channel_set_mod_impl;
+    svc->awe_channel_set_sustain     = of_awe_channel_set_sustain_impl;
+    svc->awe_channel_set_brightness  = of_awe_channel_set_brightness_impl;
+    svc->awe_channel_set_resonance   = of_awe_channel_set_resonance_impl;
+    svc->awe_channel_set_reverb_send = of_awe_channel_set_reverb_send_impl;
+    svc->awe_channel_set_chorus_send = of_awe_channel_set_chorus_send_impl;
+    svc->awe_set_master_volume       = of_awe_set_master_volume_impl;
+    svc->awe_set_bend_range          = of_awe_set_bend_range_impl;
+    svc->awe_active_mask             = of_awe_active_mask_impl;
+    svc->awe_tick_count              = of_awe_tick_count_impl;
+    svc->awe_set_hw_envelope         = of_awe_set_hw_envelope_impl;
+    svc->awe_set_reverb_level        = of_awe_set_reverb_level_impl;
+    svc->awe_set_reverb_feedback     = of_awe_set_reverb_feedback_impl;
+    svc->awe_set_chorus_level        = of_awe_set_chorus_level_impl;
+    svc->awe_set_chorus_rate         = of_awe_set_chorus_rate_impl;
+    svc->awe_set_chorus_depth        = of_awe_set_chorus_depth_impl;
+    svc->awe_ramp1_trigger           = of_awe_ramp1_trigger_impl;
 }
 
 void services_table_set_smp_bank(const void *base, uint32_t size) {
