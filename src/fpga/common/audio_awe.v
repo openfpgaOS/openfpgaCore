@@ -726,6 +726,16 @@ localparam [4:0] SUB_IDLE = 5'd0;
 // segment and clears the bit.
 reg [31:0] noff_pending;
 
+/* Pulse from RAMP0_STEP when a voice's volume envelope reaches
+ * ENV_DONE.  Consumed by the active_mask always block so the SDK's
+ * voice-stealer can reclaim slots only after the voice has TRULY
+ * retired (release-ramp completed), not the moment cpu_note_off
+ * fires.  Without this, hw_envelope=1 voices get their active_mask
+ * bit cleared by cpu_note_off → SDK reuses the slot mid-release →
+ * audible cut-off + click. */
+reg        ramp0_done_pulse;
+reg [4:0]  ramp0_done_voice;
+
 // Change-detect cache for VOL_COMPOSE — only emit mixer writes when
 // the composed vol_l/r differs from the prior tick's value for this
 // voice.  Keeps the mixer write port mostly idle at steady state.
@@ -858,6 +868,8 @@ always @(posedge clk or negedge reset_n) begin
         ramp1_meta_wr_fsm  <= 1'b0;
         ramp1_level_wr_fsm <= 1'b0;
         noff_pending  <= 32'd0;
+        ramp0_done_pulse <= 1'b0;
+        ramp0_done_voice <= 5'd0;
         stage_done    <= 1'b0;
         seq_vstate_wr   <= 1'b0;
         seq_vstate_addr <= 11'd0;
@@ -886,6 +898,7 @@ always @(posedge clk or negedge reset_n) begin
         pitch_mix_wr  <= 1'b0;
         filt_mix_wr   <= 1'b0;
         send_mix_wr   <= 1'b0;
+        ramp0_done_pulse <= 1'b0;  // 1-cycle pulse — see ENV_DONE in RAMP0_STEP
 
         // Prescaler (Phase 2 unchanged).
         if (seq_prescaler == 17'd0)
@@ -1096,6 +1109,11 @@ always @(posedge clk or negedge reset_n) begin
                             ramp_stage_new <= ENV_DONE;
                             ramp_rate      <= 32'd0;
                             ramp0_sub      <= 5'd12;
+                            /* Voice fully retired — pulse the
+                             * active_mask clear handler so the SDK's
+                             * voice-stealer can reclaim this slot. */
+                            ramp0_done_pulse <= 1'b1;
+                            ramp0_done_voice <= seq_voice;
                         end else begin
                             ramp_level <= ramp_sub_lvl;
                             ramp0_sub  <= 5'd15;
@@ -1578,11 +1596,22 @@ always @(posedge clk or negedge reset_n) begin
                     mm_p_sub    <= 5'd6;
                 end
                 5'd6: begin
-                    mm_pitch_acc <= mm_mul0_raw[35:16] + mm_mul2_raw[35:16];
+                    /* Sign-extend 36-bit signed product slices [35:16].
+                     * Verilog default treats `[35:16]` as UNSIGNED and
+                     * zero-extends, flipping every negative LFO/RAMP1
+                     * cents contribution to a large positive value.
+                     * On instruments with mod-LFO vibrato (electric
+                     * guitar, brass, strings) this turns the smooth
+                     * ±cents oscillation into one-sided spikes that
+                     * sound clipped/wrong.  Manual sign-ext restores
+                     * the negative half cycles. */
+                    mm_pitch_acc <= {{16{mm_mul0_raw[35]}}, mm_mul0_raw[35:16]}
+                                  + {{16{mm_mul2_raw[35]}}, mm_mul2_raw[35:16]};
                     mm_p_sub <= 5'd7;
                 end
                 5'd7: begin
-                    mm_pitch_acc <= mm_pitch_acc + mm_mul1_raw[35:16];
+                    mm_pitch_acc <= mm_pitch_acc +
+                                    {{16{mm_mul1_raw[35]}}, mm_mul1_raw[35:16]};
                     mm_p_sub <= 5'd8;
                 end
                 5'd8: begin
@@ -1621,7 +1650,11 @@ always @(posedge clk or negedge reset_n) begin
                     mm_f_sub <= 5'd2;
                 end
                 5'd2: begin
-                    mm_filter_acc <= mm_mul1_raw[35:16] + mm_mul2_raw[35:16];
+                    /* Same sign-ext as MM_PITCH_ACCUM — slice [35:16]
+                     * of a 36-bit signed product is UNSIGNED in
+                     * Verilog without the manual replication. */
+                    mm_filter_acc <= {{16{mm_mul1_raw[35]}}, mm_mul1_raw[35:16]}
+                                   + {{16{mm_mul2_raw[35]}}, mm_mul2_raw[35:16]};
                     mm_f_sub <= 5'd3;
                 end
                 5'd3: begin
@@ -2026,14 +2059,20 @@ always @(posedge clk or negedge reset_n) begin
         noteon_mix_wr <= 1'b0;
 
         // NOTE_OFF / VOICE_STOP: clear the voice's bit in active_mask.
-        // Phase 1 doesn't emit any mixer writes for these — the SW
-        // path still manages mixer-stop / volume-fade via the existing
-        // mixer API.  This bookkeeping is what the active_mask
-        // readback returns to the SDK's voice-stealer.
-        if (cpu_note_off)
+        //
+        //   hw_envelope OFF: cpu_note_off is treated as a hard stop
+        //     (no fabric envelope), so clear the bit immediately.
+        //   hw_envelope ON:  cpu_note_off only triggers RAMP0 RELEASE
+        //     (via noff_pending below); the voice keeps playing while
+        //     the release ramps down.  Don't clear active_mask here —
+        //     wait for ramp0_done_pulse from RAMP0_STEP when ENV_DONE
+        //     is reached.
+        if (cpu_note_off && !hw_envelope_enable)
             active_mask[cpu_note_off_voice] <= 1'b0;
         if (cpu_voice_stop)
             active_mask[cpu_voice_stop_voice] <= 1'b0;
+        if (ramp0_done_pulse)
+            active_mask[ramp0_done_voice] <= 1'b0;
 
         case (fsm_state)
             S_IDLE: begin
