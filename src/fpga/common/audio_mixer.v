@@ -529,8 +529,15 @@ reg signed [15:0] scaled_l, scaled_r;
 // Mix-down: attenuate to prevent clipping.
 // Shift right by 2 (÷4) — headroom for 48-voice mixing.
 // Combined with log volume curve (x²/256), 6 voices at vol=180 ≈ full scale.
-wire signed [31:0] mix_l = accum_l >>> 2;
-wire signed [31:0] mix_r = accum_r >>> 2;
+// Mix-down: divide by 8 so that 32 voices each near peak fit
+// comfortably under int16.  Was >>> 2 (÷4) when the mixer was
+// throughput-limited and only ~12 voices reached peak in any
+// given sample period; the per-voice prefetch landed and now ALL
+// 32 voices can simultaneously be processed at full envelope, so
+// the sum amplitude doubled vs the old budget — ÷8 restores the
+// original headroom margin.
+wire signed [31:0] mix_l = accum_l >>> 3;
+wire signed [31:0] mix_r = accum_r >>> 3;
 
 // ================================================================
 // Phase 6a — global reverb delay bus
@@ -591,12 +598,12 @@ altsyncram #(
 // Per-voice-send accumulators feed the delay-line inputs (Phase 6b
 // complete).  Shift down to compensate for 32-voice headroom (~÷4)
 // and clamp to 16-bit before writing.
-wire signed [31:0] rev_mono_in_s32 = reverb_in_acc >>> 2;
+wire signed [31:0] rev_mono_in_s32 = reverb_in_acc >>> 3;  // matches main mix headroom
 wire signed [15:0] rev_mono_in     =
     (rev_mono_in_s32 > 32'sd32767)  ? 16'h7FFF :
     (rev_mono_in_s32 < -32'sd32768) ? 16'h8000 : rev_mono_in_s32[15:0];
 
-wire signed [31:0] chor_in_s32 = chorus_in_acc >>> 2;
+wire signed [31:0] chor_in_s32 = chorus_in_acc >>> 3;
 wire signed [15:0] chor_in     =
     (chor_in_s32 > 32'sd32767)  ? 16'h7FFF :
     (chor_in_s32 < -32'sd32768) ? 16'h8000 : chor_in_s32[15:0];
