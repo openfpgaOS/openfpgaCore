@@ -223,6 +223,14 @@ always @(posedge clk or negedge reset_n) begin
                  * three command channels (word_wr / word_rd / burst_rd)
                  * accept commands. */
                 if (config_en) begin
+                    /* Latch the requested die into psram_bank_sel.  PHY
+                     * samples bank_sel in STATE_CONFIG_CRE_SETUP which
+                     * happens several cycles AFTER the one-cycle config_en
+                     * pulse — so we can't rely on the phy_bank_sel mux
+                     * (which only holds config_bank_sel through during the
+                     * pulse).  Without this latch, every die-1 BCR write
+                     * silently lands on die 0 and die 1 stays in async POR. */
+                    psram_bank_sel <= config_bank_sel;
                     state <= ST_CFG_PULSE;
                 end else if (burst_rd) begin
                     burst_busy <= 1'b1;

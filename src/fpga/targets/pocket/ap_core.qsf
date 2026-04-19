@@ -803,6 +803,7 @@ set_instance_assignment -name FAST_INPUT_REGISTER ON -to cram1_wait
 set_global_assignment -name VERILOG_FILE ../../common/audio_mixer.v
 set_global_assignment -name VERILOG_FILE ../../common/audio_awe.v
 set_global_assignment -name VERILOG_FILE ../../common/bridge_to_sdram.v
+set_global_assignment -name VERILOG_FILE ../../common/bridge_to_cram1.v
 set_global_assignment -name VERILOG_FILE ../../common/audio_output.v
 set_global_assignment -name VERILOG_FILE ../../common/gpu_core.v
 set_global_assignment -name VERILOG_FILE ../../common/gpu_tex_cache.v
