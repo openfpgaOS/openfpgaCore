@@ -111,39 +111,6 @@ void os_main(void) {
     /* Brief pause to show banner */
     of_timer_delay_ms(800);
 
-    /* ----- CRAM1 diagnostic --------------------------------------------
-     * Post-BCR self-test: distinguishes Mode 1 (BCR-init never completed,
-     * chip still in async POR → sync-burst reads hang) from Mode 2 (BCR
-     * set, but the controller's async WRITE path broke in sync-burst BCR
-     * mode → writes silently corrupt).
-     *
-     * Each step emits a progress marker so we can tell exactly where a
-     * hang occurs over UART.
-     */
-    of_term_puts("  CRAM1 diag wr1.... ");
-    volatile uint32_t *c1 = (volatile uint32_t *)0x39000000;  /* uncached */
-    c1[0] = 0xDEADBEEFu;
-    of_term_puts("ok\n");
-
-    of_term_puts("  CRAM1 diag rd1.... ");
-    uint32_t v0 = c1[0];
-    of_term_printf("0x%08x %s\n", v0,
-                   v0 == 0xDEADBEEFu ? "\033[92mPASS\033[0m"
-                                     : "\033[91mFAIL\033[0m");
-
-    of_term_puts("  CRAM1 diag wr2.... ");
-    c1[1] = 0xA5A5A5A5u;
-    c1[2] = 0x5A5A5A5Au;
-    c1[3] = 0x12345678u;
-    of_term_puts("ok\n");
-
-    of_term_puts("  CRAM1 diag rd2.... ");
-    uint32_t v1 = c1[1], v2 = c1[2], v3 = c1[3];
-    of_term_printf("0x%08x 0x%08x 0x%08x %s\n", v1, v2, v3,
-                   (v1 == 0xA5A5A5A5u && v2 == 0x5A5A5A5Au &&
-                    v3 == 0x12345678u) ? "\033[92mPASS\033[0m"
-                                       : "\033[91mFAIL\033[0m");
-
     /* Load application ELF */
     of_term_puts("  Loading app....... ");
 
