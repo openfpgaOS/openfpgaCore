@@ -1306,36 +1306,30 @@ bridge_to_cram1 bridge_cram1_inst (
 // CRAM1 mux (clk_cpu) — CPU + mixer only, no bridge
 // ============================================================
 
-// Three-master arbiter for controller A's word_rd/word_wr inputs:
+// Two-master arbiter for controller A's word_rd/word_wr inputs:
 //   priority 1 = bridge_req_rd / bridge_req_wr  (bridge_to_cram1)
 //   priority 2 = c1_psram_rd   / c1_psram_wr    (CPU AXI)
-//   priority 3 = cram1_mix_rd                   (audio mixer)
+//
+// Mixer is now a SEPARATE master on the burst_rd port (per-voice
+// 8-word prefetch lives inside the controller's burst FSM).  Owner
+// tracking only distinguishes CPU vs bridge for word_rd responses;
+// burst responses route directly back to the mixer.
 //
 // Block all new commands when controller is busy or BCR-init is not
-// done.  The controller's ST_IDLE only samples word_rd/word_wr; any
-// pulse issued while busy would be dropped, causing phantom inflight
-// state.  CPU reset only releases ~600 cycles into boot, so the
+// done.  CPU reset only releases ~600 cycles into boot, so the
 // BCR-done gate is essentially always satisfied by the time CPU
 // touches CRAM1; bridge_to_cram1's req FIFO buffers any early
 // activity until the controller is ready.
-reg [1:0] psram1_rd_owner;   // 00=CPU, 01=mixer, 10=bridge
-
-// Mixer read acceptance — asserted on the cycle the controller picks
-// up the mixer's cram1_mix_rd pulse (no higher-priority master beat
-// it).  Used by the mixer to know its read was not suppressed.
-wire cram1_mix_rd_accepted = psram1_rd & ~c1_psram_rd & ~bridge_req_rd;
+reg psram1_rd_owner;   // 0 = CPU, 1 = bridge
 
 always @(posedge clk_cpu) begin
     if (psram1_rd) begin
-        psram1_rd_owner <= bridge_req_rd ? 2'b10
-                         : c1_psram_rd   ? 2'b00
-                                         : 2'b01;
+        psram1_rd_owner <= bridge_req_rd;
     end
 end
 
-wire psram1_rdata_valid_for_cpu    = psram1_rdata_valid && (psram1_rd_owner == 2'b00);
-wire psram1_rdata_valid_for_mixer  = psram1_rdata_valid && (psram1_rd_owner == 2'b01);
-wire psram1_rdata_valid_for_bridge = psram1_rdata_valid && (psram1_rd_owner == 2'b10);
+wire psram1_rdata_valid_for_cpu    = psram1_rdata_valid && !psram1_rd_owner;
+wire psram1_rdata_valid_for_bridge = psram1_rdata_valid &&  psram1_rd_owner;
 
 // CPU AXI slave feedback — busy when controller busy.  No more pin-mux
 // gating term needed (single-controller architecture).
@@ -1349,17 +1343,17 @@ assign psram1_wr = psram1_busy     ? 1'b0
                  : bridge_req_wr   ? 1'b1
                  : c1_psram_wr;
 
-// Reads: bridge > CPU > mixer.
+// Reads (word_rd path): bridge > CPU.  Mixer goes through burst_rd
+// (wired directly to the controller's burst port — see psram1_a
+// instantiation).
 assign psram1_rd = psram1_wr       ? 1'b0
                  : psram1_busy     ? 1'b0
                  : !cram1_bcr_done ? 1'b0
                  : bridge_req_rd   ? 1'b1
-                 : c1_psram_rd     ? 1'b1
-                 : cram1_mix_rd;
+                 : c1_psram_rd;
 
 assign psram1_addr  = bridge_req_rd | bridge_req_wr ? bridge_req_addr
-                    : (c1_psram_rd | c1_psram_wr)   ? c1_psram_addr[21:0]
-                                                    : cram1_mix_addr;
+                                                    : c1_psram_addr[21:0];
 assign psram1_wdata = bridge_req_wr ? bridge_req_wdata : c1_psram_wdata;
 assign psram1_wstrb = bridge_req_wr ? 4'b1111         : c1_psram_wstrb;
 
@@ -2565,8 +2559,6 @@ wire [31:0] mix_irq_pending;
 wire        mix_voice_end_irq;
 wire        mix_sample_wr;
 wire [31:0] mix_sample_data;
-wire        mix_cram1_rd;
-wire [21:0] mix_cram1_addr;
 wire        timer_irq;
 wire        uart_rx_irq;
 wire        link_irq;
@@ -2592,9 +2584,8 @@ audio_output audio_out (
 
 // audio_mixer runs directly on clk_cpu — no CDC wrapper needed.
 // CPU voice config, CRAM1 data, and audio output are all same-domain.
-wire        cram1_mix_rd;
-wire [21:0] cram1_mix_addr;
-
+// CRAM1 access is via the controller's burst_rd port (per-voice 8-word
+// prefetch); old single-word path retired with the cache landing.
 `ifndef EXCLUDE_MIXER
 audio_mixer mixer_inst (
     .clk                (clk_cpu),
@@ -2608,12 +2599,18 @@ audio_mixer mixer_inst (
     .voice_sel_rd       (mix_voice_sel),
     .voice_wdata        (mix_voice_wdata),
 
-    .cram1_rd           (cram1_mix_rd),
-    .cram1_addr         (cram1_mix_addr),
-    .cram1_rdata        (psram1_rdata),
-    .cram1_busy         (psram1_busy | bridge_req_rd | bridge_req_wr | c1_psram_rd | c1_psram_wr),
-    .cram1_rdata_valid  (psram1_rdata_valid_for_mixer),
-    .cram1_rd_accepted  (cram1_mix_rd_accepted),
+    /* Mixer now uses CRAM1 burst-read interface only (per-voice 8-word
+     * prefetch cache).  Old word_rd interface was retired with the
+     * cache landing — every tap fetch goes through the cache, which
+     * refills via burst_rd whenever the requested word is outside
+     * the current per-voice 8-word window. */
+    .cram1_burst_rd      (psram1_burst_rd),
+    .cram1_burst_addr    (psram1_burst_addr),
+    .cram1_burst_len     (psram1_burst_len),
+    .cram1_burst_q       (psram1_burst_q),
+    .cram1_burst_q_valid (psram1_burst_q_valid),
+    .cram1_burst_busy    (psram1_burst_busy),
+    .cram1_busy          (psram1_busy | bridge_req_rd | bridge_req_wr | c1_psram_rd | c1_psram_wr),
 
     .sample_wr          (mix_sample_wr),
     .sample_data        (mix_sample_data),
@@ -2633,11 +2630,7 @@ audio_mixer mixer_inst (
     .chorus_lfo_depth   (awe_chorus_depth),
     .cram1_inhibit      (mix_cram1_inhibit)
 );
-assign mix_cram1_rd   = cram1_mix_rd;
-assign mix_cram1_addr = cram1_mix_addr;
 `else
-assign mix_cram1_rd = 1'b0;
-assign mix_cram1_addr = 22'b0;
 assign mix_sample_wr = 1'b0;
 assign mix_sample_data = 32'b0;
 assign mix_active_count = 6'b0;
