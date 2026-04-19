@@ -409,22 +409,28 @@ reg [21:0] fetch_pos;       // resolved address for current tap
 // {voice[4:0], idx[2:0]}.  Port A: prefetch FSM writes 8 consecutive
 // words on each refill.  Port B: tap-fetch reads on demand.
 //
-// Per-voice metadata (lightweight registers, no RAM):
-//   cache_base[v]  = word address mapped to cache[v][0]
-//   cache_valid[v] = cache contains a complete burst response
+// Per-voice metadata, packed for compactness:
+//   cache_base   — 32×22-bit MLAB.  Asynchronous read keeps the
+//                  hit/miss check + cache_b_addr generation
+//                  combinational from cur_voice, so the M10K read
+//                  for a hit kicks off in S_TAP_ADDR (via the
+//                  combinational cache_b_addr below) and lands at
+//                  cache_b_q one cycle later for S_TAP_WAIT.
+//   cache_valid  — single 32-bit bitmap.  cheaper than a 32-entry
+//                  reg array and lets bit-set/clear stay one-hot.
 //
 // Invalidated on voice activation (note-on edge) so a re-used slot
 // can't read stale samples from the previous tenant.
 //
-// Cache hit = cache_valid[v] && (tap_word - cache_base[v]) < 8.
+// Cache hit = cache_valid_bm[v] && (tap_word - cache_base[v]) < 8.
 // Miss kicks a burst_rd at tap_word; controller streams 8 words back
 // over ~16 cycles via burst_q_valid pulses.
-reg [21:0] cache_base [0:31];
-reg        cache_valid [0:31];
+(* ramstyle = "MLAB" *) reg [21:0] cache_base [0:31];
+reg [31:0] cache_valid_bm;
 
 (* ramstyle = "M10K" *) reg [31:0] mix_cache [0:255];
-reg [7:0]  cache_b_addr;
 reg [31:0] cache_b_q;
+
 /* Port A write: combinationally driven by the burst stream — every
  * cram1_burst_q_valid pulse writes one word into the per-voice cache
  * window at addr {pf_voice, pf_idx}.  pf_idx advances per pulse in
@@ -433,6 +439,20 @@ reg [31:0] cache_b_q;
 wire [7:0]  cache_a_addr = {pf_voice, pf_idx};
 wire [31:0] cache_a_data = cram1_burst_q;
 wire        cache_a_we   = cram1_burst_q_valid;
+
+/* Combinational lookup — the SAME cycle that tap_fetch_word becomes
+ * valid (S_TAP_ADDR's posedge end), the cache window's start (cache_base
+ * via MLAB async read) is also visible, so cache_b_addr settles within
+ * the cycle.  M10K port-B reads the addr presented at the posedge,
+ * data lands in cache_b_q at the NEXT posedge — perfectly aligned with
+ * the FSM transitioning S_TAP_CRAM (cycle X) → S_TAP_WAIT (cycle X+1). */
+wire [21:0] cur_cache_base = cache_base[cur_voice];
+wire [2:0]  cache_off3      = tap_fetch_word[2:0] - cur_cache_base[2:0];
+wire [7:0]  cache_b_addr    = {cur_voice, cache_off3};
+wire        cache_hit       = cache_valid_bm[cur_voice]
+                            && (tap_fetch_word >= cur_cache_base)
+                            && ((tap_fetch_word - cur_cache_base) < 22'd8);
+
 always @(posedge clk) begin
     if (cache_a_we) mix_cache[cache_a_addr] <= cache_a_data;
     cache_b_q <= mix_cache[cache_b_addr];
@@ -442,9 +462,6 @@ end
 reg [4:0]  pf_voice;          // voice the prefetch is for
 reg [2:0]  pf_idx;            // 0..7 word index within burst
 reg [21:0] pf_base_word;      // burst base address (= cache_base[pf_voice])
-
-// Working regs for the cache lookup → sample extraction path.
-reg [2:0]  tap_cache_offset;  // computed offset into cache for this tap
 
 // --- Boundary-aware tap address resolver ---
 // Given a sample offset relative to cur_pos_int, resolve the actual
@@ -744,8 +761,6 @@ always @(posedge clk) begin
         pf_voice  <= 5'd0;
         pf_idx    <= 3'd0;
         pf_base_word <= 22'd0;
-        tap_cache_offset <= 3'd0;
-        cache_b_addr <= 8'd0;
         active_cnt <= 0;
         voice_cnt <= 0;
         vtbl_a_wr <= 0;
@@ -788,10 +803,9 @@ always @(posedge clk) begin
         fetch_tap_idx <= 0;
         tap_raw <= 0;
         fetch_count <= 0;
-        for (i = 0; i < 32; i = i + 1) begin
-            cache_valid[i] <= 1'b0;
+        cache_valid_bm <= 32'd0;
+        for (i = 0; i < 32; i = i + 1)
             cache_base[i]  <= 22'd0;
-        end
         lerp_diff      <= 17'sd0;
         lerp_diff_prod <= 33'sd0;
         interp_sample  <= 16'sh0;
@@ -821,13 +835,13 @@ always @(posedge clk) begin
                  * for the first ~16 output ticks until the cache base
                  * comparison forced a refill. */
                 if (voice_wdata[0] && !voice_active[voice_sel])
-                    cache_valid[voice_sel] <= 1'b0;
+                    cache_valid_bm[voice_sel] <= 1'b0;
                 voice_active[voice_sel] <= voice_wdata[0];
             end
             if (voice_field == VTBL_POS_INT) begin
                 /* CPU repositioning a voice (loop-jump, scrub) — drop
                  * the cache so we re-fetch from the new pos. */
-                cache_valid[voice_sel] <= 1'b0;
+                cache_valid_bm[voice_sel] <= 1'b0;
                 pos_wr_pending[voice_sel] <= 1'b1;
             end
             if (voice_field == 4'd13)
@@ -1024,26 +1038,23 @@ always @(posedge clk) begin
             end
 
             // ---- Cache lookup -----------------------------------------
-            // hit  = cache_valid[v] && tap_word in [base, base+8)
-            // hit  → drive port-B read addr, wait one cycle for q
-            // miss → set up prefetch (cache_base[v] = tap_word), kick
-            //        burst FSM and wait for it to complete
+            // cache_hit (combinational, computed from cur_voice +
+            // tap_fetch_word + cache_base/cache_valid_bm) is already
+            // settled at the S_TAP_CRAM cycle, AND cache_b_addr (also
+            // combinational) is presented to the M10K port-B address
+            // pin THIS cycle, so cache_b_q lands at S_TAP_WAIT one
+            // cycle later — exactly the latency built into the FSM.
+            // hit  → S_TAP_WAIT consumes cache_b_q
+            // miss → kick burst_rd at tap_fetch_word, wait for fill
             S_TAP_CRAM: begin
-                if (cache_valid[cur_voice] &&
-                    tap_fetch_word >= cache_base[cur_voice] &&
-                    (tap_fetch_word - cache_base[cur_voice]) < 22'd8)
-                begin
-                    tap_cache_offset <= tap_fetch_word[2:0] -
-                                        cache_base[cur_voice][2:0];
-                    cache_b_addr <= {cur_voice, tap_fetch_word[2:0] -
-                                                cache_base[cur_voice][2:0]};
-                    state <= S_TAP_WAIT;     // re-use as cache-read-latency
+                if (cache_hit) begin
+                    state <= S_TAP_WAIT;
                 end else if (!cram1_busy && !cram1_inhibit) begin
                     /* Miss — anchor cache_base at tap_word so the burst
                      * starts here.  Voice's tap will be at offset 0 of
                      * the new cache window. */
                     cache_base[cur_voice] <= tap_fetch_word;
-                    cache_valid[cur_voice] <= 1'b0;   // stale until burst lands
+                    cache_valid_bm[cur_voice] <= 1'b0;   // stale until burst lands
                     pf_voice            <= cur_voice;
                     pf_idx              <= 3'd0;
                     pf_base_word        <= tap_fetch_word;
@@ -1057,9 +1068,12 @@ always @(posedge clk) begin
 
             // ---- Tap extract from cache (1-cycle M10K read latency) ---
             S_TAP_WAIT: begin
-                /* cache_b_q now reflects mix_cache[{cur_voice, offset}].
-                 * Extract the requested 16-bit sample using tap_fetch_addr
-                 * (its low bit selects high/low halfword for fmt16). */
+                /* cache_b_q now reflects mix_cache[cache_b_addr] from
+                 * the previous cycle (the M10K's registered output).
+                 * Because cache_b_addr is combinational from
+                 * cur_voice + tap_fetch_word + cache_base, it was stable
+                 * during the S_TAP_CRAM cycle and the M10K's read fired
+                 * at that posedge.  Result is here now. */
                 if (fetch_tap_idx == 1'd0)
                     tap_0 <= extract_sample(cache_b_q, fetch_pos, cur_fmt16);
                 else
@@ -1075,7 +1089,7 @@ always @(posedge clk) begin
                 cram1_burst_rd <= 1'b0;   // pulse already issued
                 if (cram1_burst_q_valid) begin
                     if (pf_idx == 3'd7) begin
-                        cache_valid[pf_voice] <= 1'b1;
+                        cache_valid_bm[pf_voice] <= 1'b1;
                         state <= S_TAP_CRAM;   // retry — will hit now
                     end else begin
                         pf_idx <= pf_idx + 3'd1;

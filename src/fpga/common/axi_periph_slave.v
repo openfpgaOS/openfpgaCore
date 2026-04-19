@@ -1016,7 +1016,9 @@ always @(*) begin
         7'b0_001110: sysreg_rdata = 32'h0;
         7'b0_001111: sysreg_rdata = {25'b0, bridge_wr_idle, ~target_ack_s, ds_err_latched, ds_done_latched, ds_ack_latched};
         7'b0_010000: sysreg_rdata = {24'b0, pal_index_reg};
-        7'b0_010001: sysreg_rdata = 32'h0;
+        // 0x44 (PAL_DATA write) doesn't have a meaningful read-back —
+        // case row dropped to save the comparator LUT.  Reads return 0
+        // via the default branch.
         7'b0_010100: sysreg_rdata = cont1_key_s;
         7'b0_010101: sysreg_rdata = cont1_joy_s;
         7'b0_010110: sysreg_rdata = {16'b0, cont1_trig_s};
@@ -1058,10 +1060,11 @@ always @(*) begin
         };
         7'b0_100110: sysreg_rdata = HW_FEATURES;                    // HW_FEATURES (0x98)
         7'b0_100111: sysreg_rdata = {31'b0, vsync_irq_pending};   // VSYNC_IRQ_PENDING (0x9C)
-        // Extended mixer registers (0x100-0x108)
-        7'b1_000010: sysreg_rdata = 32'b0;                           // MIX_IRQ_PENDING_HI (0x108) — obsolete at 32 voices
+        // 0x108 MIX_IRQ_PENDING_HI / 0x148 AWE_ACTIVE_MASK_HI dropped —
+        // both were placeholders for 48-voice mode that never shipped.
+        // 32 voices fit entirely in the LO halves.  Removing the rows
+        // shaves two 7-bit comparators from the read decoder.
         7'b1_010001: sysreg_rdata = awe_active_mask[31:0];           // AWE_ACTIVE_MASK_LO (0x144)
-        7'b1_010010: sysreg_rdata = 32'b0;                           // AWE_ACTIVE_MASK_HI (0x148) — obsolete at 32 voices
         7'b1_010011: sysreg_rdata = awe_tick_count;                  // AWE_TICK_COUNT    (0x14C)
         default: sysreg_rdata = 32'h0;
     endcase
