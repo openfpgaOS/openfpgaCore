@@ -216,6 +216,17 @@ module cram1_phy #(
   // on the first valid capture of each burst.
   reg [15:0] prev_burst_last_dq;   // Last cram_dq_r from previous burst
   reg        first_capture_pending; // Waiting for first data capture
+
+  /* saw_wait_high gate — same as cram0_phy.sv.  Between bursts, the
+   * chip's WAIT pin is not driven (CE# HIGH, chip idle) and the IOB
+   * captures whatever the pin floats to.  If that idle level is LOW,
+   * STATE_SYNC_DATA's first cram_wait_r2 read still shows LOW from
+   * the pre-burst interval — the FSM would interpret it as "data
+   * valid" and capture STALE DQ.  Spin until we see WAIT HIGH at
+   * least once (proving the chip has taken control of the pin),
+   * then accept the next LOW transition as real data. */
+  reg        saw_wait_high;
+  initial    saw_wait_high = 0;
   initial begin
     prev_burst_last_dq = 16'h0;
     first_capture_pending = 0;
@@ -350,6 +361,7 @@ module cram1_phy #(
           latency_counter <= SYNC_LATENCY[5:0];
           burst_counter <= sync_burst_len;
           first_capture_pending <= 1;
+          saw_wait_high <= 0;       /* reset gate for this burst */
           busy <= 1;
         end
       end
@@ -478,12 +490,18 @@ module cram1_phy #(
       end
 
       STATE_SYNC_DATA: begin
-        // Use pipeline registers (cram_dq_r2/cram_wait_r2) to guarantee
-        // WAIT and DQ are from the same IOB capture posedge.
+        // Capture decision uses cram_wait_r2 / cram_dq_r2 (both
+        // 2-stage pipelined).  The saw_wait_high gate suppresses any
+        // LOW that could be stale from the pre-burst idle interval.
         if (cram_wait_r2) begin
           // WAIT HIGH — initial latency or row boundary crossing pause.
+          saw_wait_high <= 1'b1;
           dbg_wait_seen <= 1'b1;
           dbg_wait_cycles <= dbg_wait_cycles + 16'd1;
+          state <= STATE_SYNC_DATA;
+        end else if (!saw_wait_high) begin
+          // WAIT LOW but we haven't seen HIGH yet — stale idle-period
+          // capture; spin until the chip asserts WAIT.
           state <= STATE_SYNC_DATA;
         end else begin
           // WAIT LOW — data valid, capture halfword

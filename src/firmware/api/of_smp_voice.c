@@ -909,12 +909,24 @@ void smp_voice_enable_awe_backend(int on)
         of_awe_set_hw_envelope(1);
         memset(awe_slot_used,    0, sizeof(awe_slot_used));
         memset(awe_slot_sustain, 0, sizeof(awe_slot_sustain));
-        /* Push current per-channel send state into the AWE chan_bank so
-         * SEND_COMPOSE has non-zero sends from the first tick.  Without
-         * this seed, reverb/chorus stay silent until a CC91/CC93 arrives
-         * — a MIDI file that never sends them (or sends them only at
-         * the start, before the backend was enabled) would play dry. */
+        /* Push the FULL per-channel CC state into the AWE chan_bank so
+         * VOL_COMPOSE / PITCH_COMPOSE / FILTER_COMPOSE / SEND_COMPOSE
+         * have correct values from the first tick.  Without this,
+         * channels that hadn't received an explicit CC7 / CC11 had
+         * vol=0/expr=0 in chan_bank → VOL_COMPOSE computed
+         * (env_vol × voice_base_vol × 0_combined) >> N = 0 → silent
+         * voice on those channels.  Same fix for pan/bend/etc. so the
+         * other compose stages start with the SDK's tracked state
+         * instead of zeros. */
         for (int i = 0; i < 16; i++) {
+            of_awe_channel_set_volume(i, ch_volume[i]);
+            of_awe_channel_set_expression(i, ch_expression[i]);
+            of_awe_channel_set_pan(i, ch_pan[i]);
+            of_awe_channel_set_bend(i, ch_bend[i]);
+            of_awe_channel_set_mod(i, ch_mod_depth[i]);
+            of_awe_channel_set_sustain(i, ch_sustain[i]);
+            of_awe_channel_set_brightness(i, ch_brightness[i]);
+            of_awe_channel_set_resonance(i, ch_resonance[i]);
             int rs = (ch_reverb_send[i] * 255) / 127;
             int cs = (ch_chorus_send[i] * 255) / 127;
             of_awe_channel_set_reverb_send(i, rs);
