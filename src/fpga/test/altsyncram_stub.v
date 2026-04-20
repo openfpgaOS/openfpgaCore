@@ -32,7 +32,28 @@ module altsyncram #(
     parameter clock_enable_input_b = "BYPASS",
     parameter clock_enable_output_a = "BYPASS",
     parameter clock_enable_output_b = "BYPASS",
-    parameter power_up_uninitialized = "FALSE"
+    parameter power_up_uninitialized = "FALSE",
+    parameter address_reg_b = "CLOCK1",
+    parameter rdcontrol_reg_b = "CLOCK1",
+    parameter address_aclr_a = "NONE",
+    parameter address_aclr_b = "NONE",
+    parameter outdata_aclr_a = "NONE",
+    parameter outdata_aclr_b = "NONE",
+    parameter byteena_aclr_a = "NONE",
+    parameter byteena_aclr_b = "NONE",
+    parameter byte_size = 8,
+    parameter wrcontrol_aclr_a = "NONE",
+    parameter wrcontrol_aclr_b = "NONE",
+    parameter wrcontrol_wraddress_reg_b = "CLOCK1",
+    parameter indata_aclr_a = "NONE",
+    parameter indata_aclr_b = "NONE",
+    parameter indata_reg_b = "CLOCK1",
+    parameter ram_block_type = "AUTO",
+    parameter init_file_layout = "PORT_A",
+    parameter maximum_depth = 0,
+    parameter enable_ecc = "FALSE",
+    parameter clock_enable_core_a = "USE_INPUT_CLKEN",
+    parameter clock_enable_core_b = "USE_INPUT_CLKEN"
 )(
     input  wire                     clock0,
     input  wire [widthad_a-1:0]     address_a,
@@ -95,9 +116,10 @@ always @(posedge clock0) begin
     q_a_reg <= mem[address_a];
 end
 
-// Port B — clock1 (only for BIDIR_DUAL_PORT)
+// Port B — clock1.  In DUAL_PORT mode port-A is write-only (no q_a) and
+// port-B is read-only (q_b).  In BIDIR_DUAL_PORT both ports do R/W.
 always @(posedge clock1) begin
-    if (operation_mode == "BIDIR_DUAL_PORT" && wren_b) begin
+    if ((operation_mode == "BIDIR_DUAL_PORT") && wren_b) begin
         if (width_byteena_b == 1) begin
             if (byteena_b[0]) mem[address_b] <= data_b;
         end else begin
@@ -107,7 +129,7 @@ always @(posedge clock1) begin
             if (width_byteena_b > 3 && byteena_b[3])   mem[address_b][31:24] <= data_b[31:24];
         end
     end
-    if (operation_mode == "BIDIR_DUAL_PORT")
+    if (operation_mode == "BIDIR_DUAL_PORT" || operation_mode == "DUAL_PORT")
         q_b_reg <= mem[address_b];
 end
 

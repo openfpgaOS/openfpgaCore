@@ -346,9 +346,9 @@
 #define AUDIO_BASE          0x4C000000
 #define AUDIO_SAMPLE        REG32(AUDIO_BASE + 0x00)    /* Write: stereo sample */
 #define AUDIO_STATUS        REG32(AUDIO_BASE + 0x00)    /* Read: FIFO status */
-#define   AUDIO_FIFO_LEVEL_MASK  0x1FF                  /* bits [8:0] */
-#define   AUDIO_FIFO_FULL        (1 << 9)
-#define AUDIO_FIFO_DEPTH    512
+#define   AUDIO_FIFO_LEVEL_MASK  0x3FF                  /* bits [9:0] */
+#define   AUDIO_FIFO_FULL        (1 << 10)
+#define AUDIO_FIFO_DEPTH    1024
 
 /* ======================================================================
  * Link Cable (0x4D000000)

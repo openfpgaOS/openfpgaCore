@@ -394,21 +394,35 @@ static void trap_line(const char *label, unsigned int val) {
     trap_putchar('\n');
 }
 
-/* Fatal trap handler - called when we can't handle the exception */
+/* Fatal trap handler — called when we can't handle the exception.
+ *
+ * Writes to UART MMIO (0x4F000004) *must* poll UART_STATUS.TX_RDY
+ * (bit 1) at 0x4F000000 before each byte.  The fabric UART is a
+ * single-byte passthrough (TX FIFO was removed for ALM budget); writing
+ * while TX is still shifting simply drops the byte — which is why
+ * earlier trap dumps lost characters and appeared "buffered" on the
+ * host side.  Bounded poll (~8000 cycles ≈ 16× byte-time at 2 Mbaud)
+ * so a wedged UART still lets the infinite loop engage instead of
+ * hanging the dump forever. */
 __attribute__((section(".text.boot")))
-/* Dump an unsigned hex word to UART (8 digits, MSB first).
- * Uses raw MMIO so it works even when the terminal / HAL is gone. */
-static void trap_uart_hex(uint32_t v) {
+static inline void trap_uart_putb(unsigned c) {
+    volatile unsigned *ust = (volatile unsigned *)0x4F000000;
     volatile unsigned *utx = (volatile unsigned *)0x4F000004;
+    for (int i = 0; i < 8000; i++) {
+        if (*ust & 0x2u) break;  /* UART_TX_RDY */
+    }
+    *utx = c;
+}
+
+static void trap_uart_hex(uint32_t v) {
     for (int i = 28; i >= 0; i -= 4) {
         unsigned n = (v >> i) & 0xF;
-        *utx = (n < 10) ? ('0' + n) : ('a' + n - 10);
+        trap_uart_putb((n < 10) ? ('0' + n) : ('a' + n - 10));
     }
 }
 
 static void trap_uart_puts(const char *s) {
-    volatile unsigned *utx = (volatile unsigned *)0x4F000004;
-    while (*s) *utx = (unsigned)*s++;
+    while (*s) trap_uart_putb((unsigned)*s++);
 }
 
 void fatal_trap(trap_frame_t *frame) {

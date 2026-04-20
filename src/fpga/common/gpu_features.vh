@@ -22,11 +22,23 @@
 `endif
 
 // ----------------------------------------------------------------------------
-// LITE variant: span renderer for 2.5D software engines
+// LITE variant: minimal GPU framework for software-rendering engines
 // ----------------------------------------------------------------------------
+// Doom + Duke3D both render in software (CPU writes to framebuffer) and
+// never dispatch GPU commands.  GPU_FEAT_PERSP_SPAN + GPU_FEAT_FRAG_PIPELINE
+// were 2.5D-engine helpers (perspective subdivision + 1-px/cycle fragment
+// writer); nothing in the current app set uses them, so they're disabled
+// here to free ~500–800 ALMs + 1 M10K (recip_lut) for the rest of the
+// design.
+//
+// Important: the FULL variant intentionally does NOT use FRAG_PIPELINE — its
+// triangle rasterizer relies on the sequential S_SPAN_* fragment FSM.  So
+// turning these off in LITE puts the GPU on the same fragment path that a
+// future HW triangle rasterizer would build on.  Re-enable the defines
+// below when an app actually needs them, or switch to GPU_VARIANT_FULL.
 `ifdef GPU_VARIANT_LITE
-  `define GPU_FEAT_PERSP_SPAN      // 16-px perspective-subdivision span renderer
-  `define GPU_FEAT_FRAG_PIPELINE   // 1-pixel/cycle pipelined fragment processor
+  // `define GPU_FEAT_PERSP_SPAN      // 16-px perspective-subdivision span renderer
+  // `define GPU_FEAT_FRAG_PIPELINE   // 1-pixel/cycle pipelined fragment processor
   // Triangles, vcolor, bilinear, alpha intentionally absent.
 `endif
 

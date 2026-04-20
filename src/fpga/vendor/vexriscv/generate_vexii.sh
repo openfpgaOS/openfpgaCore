@@ -39,7 +39,7 @@ sbt "runMain vexiiriscv.soc.openfpgaos.GenOpenFpgaVexii \
       --with-rvZcbm \
       --with-btb --btb-sets=256 --relaxed-btb --relaxed-btb-hit \
       --with-gshare --with-ras \
-      --regfile-async --allow-bypass-from=3 \
+      --regfile-async --allow-bypass-from=2 \
       --relaxed-src --relaxed-branch --relaxed-shift \
       --reset-vector=0 \
       --region base=0,size=8000,main=1,exe=1 \

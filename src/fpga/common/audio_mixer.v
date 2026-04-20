@@ -60,7 +60,7 @@ module audio_mixer (
     // Audio FIFO interface
     output reg         sample_wr,
     output reg  [31:0] sample_data,
-    input  wire [8:0]  fifo_level,
+    input  wire [9:0]  fifo_level,
 
     // Status
     output wire [5:0]  active_count,
@@ -422,9 +422,10 @@ reg [21:0] fetch_pos;       // resolved address for current tap
 // Invalidated on voice activation (note-on edge) so a re-used slot
 // can't read stale samples from the previous tenant.
 //
-// Cache hit = cache_valid_bm[v] && (tap_word - cache_base[v]) < 8.
-// Miss kicks a burst_rd at tap_word; controller streams 8 words back
-// over ~16 cycles via burst_q_valid pulses.
+// Cache hit = cache_valid_bm[v] && tap_word[21:3] == cache_base[v][21:3].
+// (Windows are 8-word aligned, see comment at cur_cache_base_hi.)
+// Miss kicks a burst_rd at the aligned address; controller streams 8
+// words back over ~16 cycles via burst_q_valid pulses.
 (* ramstyle = "MLAB" *) reg [21:0] cache_base [0:31];
 reg [31:0] cache_valid_bm;
 
@@ -445,13 +446,21 @@ wire        cache_a_we   = cram1_burst_q_valid;
  * via MLAB async read) is also visible, so cache_b_addr settles within
  * the cycle.  M10K port-B reads the addr presented at the posedge,
  * data lands in cache_b_q at the NEXT posedge — perfectly aligned with
- * the FSM transitioning S_TAP_CRAM (cycle X) → S_TAP_WAIT (cycle X+1). */
-wire [21:0] cur_cache_base = cache_base[cur_voice];
-wire [2:0]  cache_off3      = tap_fetch_word[2:0] - cur_cache_base[2:0];
-wire [7:0]  cache_b_addr    = {cur_voice, cache_off3};
-wire        cache_hit       = cache_valid_bm[cur_voice]
-                            && (tap_fetch_word >= cur_cache_base)
-                            && ((tap_fetch_word - cur_cache_base) < 22'd8);
+ * the FSM transitioning S_TAP_CRAM (cycle X) → S_TAP_WAIT (cycle X+1).
+ *
+ * Timing trick: cache windows are 8-word aligned (cache_base[2:0] == 0
+ * by construction in the miss handler), so the hit check reduces to a
+ * 19-bit equality and cache_off3 is just tap_fetch_word[2:0].  Without
+ * the alignment the path included a 22-bit (tap - base) subtractor +
+ * comparator that pushed the cur_voice → cache_base critical path past
+ * 12 ns.  Pre-aligning the burst start may fetch up to 7 words before
+ * the actual tap; PSRAM bursts are 8 cycles either way so it costs
+ * nothing in CRAM bandwidth. */
+wire [18:0] cur_cache_base_hi = cache_base[cur_voice][21:3];
+wire        cache_hit         = cache_valid_bm[cur_voice]
+                              && (tap_fetch_word[21:3] == cur_cache_base_hi);
+wire [2:0]  cache_off3        = tap_fetch_word[2:0];
+wire [7:0]  cache_b_addr      = {cur_voice, cache_off3};
 
 always @(posedge clk) begin
     if (cache_a_we) mix_cache[cache_a_addr] <= cache_a_data;
@@ -856,7 +865,7 @@ always @(posedge clk) begin
             case (state)
 
             S_IDLE: begin
-                if (fifo_level < 9'd480) begin
+                if (fifo_level < 10'd960) begin
                     accum_l <= 0;
                     accum_r <= 0;
                     reverb_in_acc <= 0;
@@ -1050,15 +1059,18 @@ always @(posedge clk) begin
                 if (cache_hit) begin
                     state <= S_TAP_WAIT;
                 end else if (!cram1_busy && !cram1_inhibit) begin
-                    /* Miss — anchor cache_base at tap_word so the burst
-                     * starts here.  Voice's tap will be at offset 0 of
-                     * the new cache window. */
-                    cache_base[cur_voice] <= tap_fetch_word;
+                    /* Miss — anchor cache_base at the 8-word boundary
+                     * containing tap_word.  Forcing low 3 bits to 0
+                     * lets the hit check be a 19-bit equality (see
+                     * comments at cur_cache_base_hi).  cache_b_addr
+                     * uses tap_fetch_word[2:0] directly so the voice's
+                     * tap lands at the correct slot in the cache. */
+                    cache_base[cur_voice] <= {tap_fetch_word[21:3], 3'b000};
                     cache_valid_bm[cur_voice] <= 1'b0;   // stale until burst lands
                     pf_voice            <= cur_voice;
                     pf_idx              <= 3'd0;
-                    pf_base_word        <= tap_fetch_word;
-                    cram1_burst_addr    <= tap_fetch_word;
+                    pf_base_word        <= {tap_fetch_word[21:3], 3'b000};
+                    cram1_burst_addr    <= {tap_fetch_word[21:3], 3'b000};
                     cram1_burst_len     <= 5'd7;       // 8 words
                     cram1_burst_rd      <= 1'b1;       // single-cycle pulse
                     state <= S_PF_WAIT;

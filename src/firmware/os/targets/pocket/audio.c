@@ -17,6 +17,8 @@ void of_audio_init(void) {
     audio_ever_written = 0;
 }
 
+// TODO(audio_review): The Pocket implementation of of_audio_write() does not write
+// to the hardware audio FIFO directly. Fix this or redefine the API.
 /* Ping-pong scratch buffers in CRAM1 for of_audio_write(). */
 #define AUDIO_SCRATCH_CRAM1   (CRAM1_UNCACHED + 0x00F00000)  /* Last 1MB of CRAM1 */
 #define AUDIO_SCRATCH_HALF    (256 * 1024)                    /* 256K samples per buffer */
@@ -68,6 +70,8 @@ int of_audio_get_free(void) {
 /* ======================================================================
  * Streaming audio (ping-pong voices 29+30)
  * ====================================================================== */
+// TODO(audio_review): Voices 29 and 30 can collide with normal mixer playback.
+// Streaming ownership needs to be reconciled with mixer.c allocator which only protects voice 31.
 
 #define STREAM_VOICE_A    29
 #define STREAM_VOICE_B    30

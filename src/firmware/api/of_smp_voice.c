@@ -568,6 +568,8 @@ static void compute_vol_lr(smp_voice_t *v, int *out_l, int *out_r)
  * Skip the HW write when the integer-rounded HW cutoff value is unchanged:
  * cents-level jitter often collapses to the same Q0.16 HW number, and a
  * redundant write still perturbs the filter on the HW side. */
+// TODO(audio_review): Software filter update logic is running, but the mixer RTL
+// does not implement it. The filter control stack is carrying cost without hardware behavior.
 static void filter_update(smp_voice_t *v)
 {
     const ofsf_zone_t *z = v->zone;
@@ -892,8 +894,14 @@ static void awe_all_off(int midi_ch)
 
 static void awe_all_off_global(void)
 {
+    /* Stop EVERY slot, not just SDK-tracked ones.  Apps can program a
+     * voice via of_awe_voice_load/trigger without going through the
+     * SDK's slot tracker (mididemo's MODE_AWE does this with voice 31).
+     * Those "ghost" voices stay active in the fabric and sum into the
+     * mix when the SDK thinks everything is silent — manifests as loud
+     * distortion the next time of_midi_play starts.  Stopping the full
+     * range guarantees a silent baseline. */
     for (int i = 0; i < AWE_SLOTS; i++) {
-        if (!awe_slot_used[i]) continue;
         of_awe_voice_stop(i);
         awe_slot_used[i] = 0;
     }
@@ -901,41 +909,12 @@ static void awe_all_off_global(void)
 
 void smp_voice_enable_awe_backend(int on)
 {
-    awe_backend_enabled = on ? 1 : 0;
-    if (on) {
-        /* HW envelope advance must be on for any of the fabric
-         * per-tick work to run.  The services_table_init() left this
-         * off so the SW path isn't double-driven. */
-        of_awe_set_hw_envelope(1);
-        memset(awe_slot_used,    0, sizeof(awe_slot_used));
-        memset(awe_slot_sustain, 0, sizeof(awe_slot_sustain));
-        /* Push the FULL per-channel CC state into the AWE chan_bank so
-         * VOL_COMPOSE / PITCH_COMPOSE / FILTER_COMPOSE / SEND_COMPOSE
-         * have correct values from the first tick.  Without this,
-         * channels that hadn't received an explicit CC7 / CC11 had
-         * vol=0/expr=0 in chan_bank → VOL_COMPOSE computed
-         * (env_vol × voice_base_vol × 0_combined) >> N = 0 → silent
-         * voice on those channels.  Same fix for pan/bend/etc. so the
-         * other compose stages start with the SDK's tracked state
-         * instead of zeros. */
-        for (int i = 0; i < 16; i++) {
-            of_awe_channel_set_volume(i, ch_volume[i]);
-            of_awe_channel_set_expression(i, ch_expression[i]);
-            of_awe_channel_set_pan(i, ch_pan[i]);
-            of_awe_channel_set_bend(i, ch_bend[i]);
-            of_awe_channel_set_mod(i, ch_mod_depth[i]);
-            of_awe_channel_set_sustain(i, ch_sustain[i]);
-            of_awe_channel_set_brightness(i, ch_brightness[i]);
-            of_awe_channel_set_resonance(i, ch_resonance[i]);
-            int rs = (ch_reverb_send[i] * 255) / 127;
-            int cs = (ch_chorus_send[i] * 255) / 127;
-            of_awe_channel_set_reverb_send(i, rs);
-            of_awe_channel_set_chorus_send(i, cs);
-        }
-    } else {
-        of_awe_set_hw_envelope(0);
-        awe_all_off_global();
-    }
+    /* AWE coprocessor retired — the fabric no longer instantiates it.
+     * Existing apps may still call this with on=1; force SW always.
+     * The CPU-driven smp_voice engine handles envelope/LFO/filter
+     * advance in C and writes the mixer directly via of_mixer_*. */
+    (void)on;
+    awe_backend_enabled = 0;
 }
 
 int smp_voice_awe_backend_enabled(void)
@@ -1213,20 +1192,19 @@ void smp_voice_tick(void)
             }
         }
 
-        /* Envelopes and LFOs advance twice per outer tick (effective
-         * 1 kHz), but we must also sample pitch at 1 kHz — writing RATE
-         * only once per outer tick produces an audible 2 ms staircase
-         * on fast pitch modulation (short mod_env_to_pitch sweeps, fast
-         * vibratos, snappy pitch bends).  HW RATE snaps (no ramp), so
-         * we interleave a mid-tick compute_pitch between the two halves
-         * of the advance sequence.  Volume is handled only at the end
-         * because the mixer already ramps between VOL writes. */
+        /* Caller fires this tick at 1 kHz (every 1 ms — matches
+         * of_smp_tables.c's envelope baking).  Advance envelopes
+         * and LFOs ONCE per call.  The previous "advance twice
+         * per call" pattern existed because the pump used to fire
+         * at 500 Hz and the inner double-step compensated to reach
+         * effective 1 kHz; with 1 kHz pump the second pass would
+         * make envelopes 2× too fast (snappy attacks, premature
+         * releases). */
         env_advance(&v->vol_env, z, 1);
         env_advance(&v->mod_env, z, 0);
         lfo_advance(&v->mod_lfo);
         lfo_advance(&v->vib_lfo);
 
-        /* Mid-tick pitch update (1 kHz sampling) */
         if (v->mixer_voice >= 0 && v->vol_env.stage != ENV_DONE) {
             uint32_t rate_mid = compute_pitch(v);
             if (rate_mid != prev_rate[i]) {
@@ -1235,17 +1213,8 @@ void smp_voice_tick(void)
                 prev_rate[i] = rate_mid;
                 stat_rate_writes++;
             }
-            /* Mid-tick filter update — run at 1 kHz (matches pitch) so
-             * cents-level cutoff sweeps from mod_lfo_to_filter /
-             * mod_env_to_filter change in smaller steps and produce
-             * smaller SVF state-variable transients. */
             filter_update(v);
         }
-
-        env_advance(&v->vol_env, z, 1);
-        env_advance(&v->mod_env, z, 0);
-        lfo_advance(&v->mod_lfo);
-        lfo_advance(&v->vib_lfo);
 
         if (v->vol_env.stage == ENV_DONE) {
             if (v->mixer_voice >= 0)

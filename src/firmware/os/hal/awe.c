@@ -223,13 +223,36 @@ void of_awe_voice_load_impl(int voice, const struct awe_voice_t *v)
      * makes the snap a no-op and the voice plays at the requested
      * level.  Without these the voice is silenced by the previous
      * tenant's stale target (typically 0 from voice_force_off). */
+    /* Word 5 is shared between two readers in the fabric:
+     *   - the NOTE_ON FSM reads it as VOL_TARGET (mixer field 5)
+     *   - the VOL_COMPOSE sub-FSM reads it as
+     *     { pan_base[31:16], voice_base_vol[15:8], midi_ch[7:0] }
+     * Writing vol_lr here clobbered voice_base_vol with the (already
+     * pan-split) right-channel level so VOL_COMPOSE multiplied by the
+     * wrong factor every tick — mostly inaudible in mididemo (where
+     * vol_r happens to ≈ requested base vol) but catastrophic in Doom
+     * where pan-split + ch_vol attenuation makes vol_r tiny relative
+     * to base, and every CC-driven update stomps the field again.
+     *
+     * Pack word 5 with the layout VOL_COMPOSE expects.  VOL_TARGET is
+     * already initialised by VOL_COMPOSE on the first tick (it computes
+     * env_vol×base×ch×master) so the NOTE_ON-time VOL_TARGET seed is
+     * unnecessary — we leave the mixer's vol_target at whatever it
+     * comes up at and let VOL_COMPOSE drive it from tick 1.  pan_base
+     * for now stays at 0 (centre); SDK-side compose_vol_lr already
+     * folds the SF2 pan into vol_l/vol_r so the fabric only needs the
+     * residual MIDI-pan, which we hand it via channel CC10. */
+    uint32_t midi_bv_pan = ((uint32_t)0 << 16)                       /* pan_base = 0 */
+                         | ((uint32_t)v->voice_base_vol << 8)        /* voice_base_vol */
+                         | (uint32_t)(v->midi_channel & 0xFF);       /* midi_ch */
+
     vstate_set_cursor(voice, VW_BASE);
     vstate_write(base_word);                        /* W0  BASE */
     vstate_write(v->length);                        /* W1  LEN */
     vstate_write(mixer_rate);                       /* W2  RATE */
-    vstate_write(0);                                /* W3  POS_INT (start at sample 0) */
+    vstate_write(0);                                /* W3  POS_INT */
     vstate_write(vol_lr);                           /* W4  VOL_LR */
-    vstate_write(vol_lr);                           /* W5  VOL_TARGET = VOL_LR */
+    vstate_write(midi_bv_pan);                      /* W5  {pan,bv,ch} for VOL_COMPOSE */
     vstate_write(0);                                /* W6  VOL_RATE = 0 (instant) */
     vstate_write(v->loop_end);                      /* W7  LOOP_END */
     vstate_write(v->loop_start);                    /* W8  LOOP_START */
@@ -237,6 +260,19 @@ void of_awe_voice_load_impl(int voice, const struct awe_voice_t *v)
     vstate_write(((uint32_t)(filter_enable ? 1 : 0) << 8)
                  | (uint32_t)q_hw);                 /* W10 FILTER_Q */
     vstate_write(ctrl);                             /* W11 CTRL (last) */
+
+    /* Seed mixer VOL_TARGET = VOL_LR via the CPU-direct path so the
+     * mixer plays at the correct level from the very first sample
+     * (otherwise it would snap to whatever the previous tenant left
+     * in vol_target until VOL_COMPOSE writes the correct value on
+     * the next 1 kHz tick — up to 1 ms of audio at the wrong level
+     * = audible click on every note-on).  The AWE→mixer mux gives
+     * AWE priority but we're not in a NOTE_ON FSM cycle here so the
+     * direct write lands.  No race with VOL_COMPOSE either — this
+     * runs from CPU thread BEFORE the trigger that activates the
+     * sequencer for this voice. */
+    MIX_VOICE_SEL = voice;
+    MIX_VOICE_VOL_TARGET = vol_lr;
 
     /* --------------------------------------------------------------
      * Phase 3: RAMP0 (volume envelope) state + baked DAHDSR params.

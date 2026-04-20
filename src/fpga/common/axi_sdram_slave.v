@@ -352,28 +352,54 @@ always @(posedge clk or posedge reset) begin
         end
 
         S_WR_BURST: begin
-            // Streaming burst write: when io_sdram signals wr_data_next,
-            // accept the next W beat and update sdram_wdata.
-            // io_sdram has 3 gap cycles (ST_WRITE_5/6/7) to let data propagate.
-            // Track when io_sdram actually starts (word_busy goes high)
-            // — required because sdram_busy lags sdram_accepted by a
-            // few cycles; without the gate we'd false-complete during
-            // the request-to-busy window.  Completion (wr_busy_seen &&
-            // !sdram_busy) takes priority over the wr_data_next pull
-            // so the beat_count increment can't collide.
+            /* Streaming burst write with one-beat pre-staging.
+             *
+             * Problem solved: io_sdram latches burst_wr_direct_data
+             * (== sdram_wdata) at its ST_WRITE_5, ~3 cycles after the
+             * wr_data_next pulse in ST_WRITE_2.  The old code only
+             * updated sdram_wdata on the pulse AND only if wvalid was
+             * high right then.  Under CPU cache-line writebacks (16
+             * beats through a 4-slot store buffer), wvalid can dip for
+             * a cycle — io_sdram then captured the previous beat's
+             * stale sdram_wdata and wrote it to the next address.
+             *
+             * Fix: decouple beat acceptance from pull timing.  Accept
+             * the next W beat into next_wdata whenever we have room
+             * (wready_given tracks slot-full), then promote into
+             * sdram_wdata on the wr_data_next pulse.  One beat of
+             * headroom handles any normal master-side wvalid jitter. */
             if (sdram_busy) wr_busy_seen <= 1;
             if (wr_busy_seen && !sdram_busy) begin
                 cmd_issued <= 0;
                 started <= 0;
+                wready_given <= 0;
                 s_axi_bvalid <= 1;
                 s_axi_bresp <= 2'b00;
                 state <= S_IDLE;
-            end else if (sdram_wr_data_next) begin
-                beat_count <= beat_count + 1;
-                if (s_axi_wvalid) begin
-                    s_axi_wready <= 1;
-                    sdram_wdata <= s_axi_wdata;
-                    sdram_wstrb <= s_axi_wstrb;
+            end else begin
+                /* Pre-stage: capture W beat into next_wdata the cycle it
+                 * arrives, decoupled from io_sdram's pull rate. */
+                if (s_axi_wvalid && !wready_given) begin
+                    next_wdata   <= s_axi_wdata;
+                    next_wstrb   <= s_axi_wstrb;
+                    wready_given <= 1'b1;
+                    s_axi_wready <= 1'b1;
+                end
+
+                /* Promote pre-staged beat into sdram_wdata on io_sdram's
+                 * pull so ST_WRITE_5 captures fresh data. */
+                if (sdram_wr_data_next) begin
+                    beat_count <= beat_count + 1;
+                    if (wready_given) begin
+                        sdram_wdata  <= next_wdata;
+                        sdram_wstrb  <= next_wstrb;
+                        wready_given <= 1'b0;
+                    end
+                    /* else: genuine underrun — no pre-staged beat ready.
+                     * sdram_wdata keeps its prior value and io_sdram
+                     * would write stale.  Should be unreachable in
+                     * practice with 1 beat of buffering versus the
+                     * ~3-cycle pull→capture window. */
                 end
             end
         end

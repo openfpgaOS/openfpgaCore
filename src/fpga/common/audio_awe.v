@@ -2026,7 +2026,12 @@ function [3:0] word_to_field(input [4:0] widx);
         5'd2:  word_to_field = 4'd2;   // RATE
         5'd3:  word_to_field = 4'd4;   // POS_INT
         5'd4:  word_to_field = 4'd6;   // VOL_LR
-        5'd5:  word_to_field = 4'd9;   // VOL_TARGET (must match VOL_LR)
+        // W5 is { pan_base, voice_base_vol, midi_ch } for VOL_COMPOSE —
+        // NOT a mixer field.  Map to 15 so the NOTE_ON emit is a no-op
+        // mixer write (field 15 has no consumer in the mixer voice
+        // table). VOL_TARGET is driven by VOL_COMPOSE every tick from
+        // env_vol×base×ch×master, so the initial seed was redundant.
+        5'd5:  word_to_field = 4'd15;
         5'd6:  word_to_field = 4'd10;  // VOL_RATE   (0 = instant snap)
         5'd7:  word_to_field = 4'd7;   // LOOP_END
         5'd8:  word_to_field = 4'd8;   // LOOP_START

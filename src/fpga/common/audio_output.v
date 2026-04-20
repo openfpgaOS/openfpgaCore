@@ -15,7 +15,7 @@ module audio_output (
     // CPU write interface (PCM samples from hardware mixer)
     input  wire        sample_wr,     // Write strobe (one clk_sys cycle)
     input  wire [31:0] sample_data,   // {left[15:0], right[15:0]}
-    output wire [8:0]  fifo_level,    // Write-side fill level
+    output wire [9:0]  fifo_level,    // Write-side fill level (0..1024)
     output wire        fifo_full,
 
     // I2S output
@@ -53,11 +53,11 @@ dcfifo dcfifo_audio (
     .aclr    (~reset_n)
 );
 defparam dcfifo_audio.intended_device_family = "Cyclone V",
-    dcfifo_audio.lpm_numwords  = 512,
+    dcfifo_audio.lpm_numwords  = 1024,
     dcfifo_audio.lpm_showahead = "OFF",
     dcfifo_audio.lpm_type      = "dcfifo",
     dcfifo_audio.lpm_width     = 32,
-    dcfifo_audio.lpm_widthu    = 9,
+    dcfifo_audio.lpm_widthu    = 10,
     dcfifo_audio.overflow_checking  = "ON",
     dcfifo_audio.underflow_checking = "ON",
     dcfifo_audio.rdsync_delaypipe   = 5,

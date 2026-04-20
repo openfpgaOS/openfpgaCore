@@ -1065,7 +1065,7 @@ wire        c1_psram_rdata_valid;
 // Audio output interface
 wire        audio_sample_wr;
 wire [31:0] audio_sample_data;
-wire [8:0]  audio_fifo_level;
+wire [9:0]  audio_fifo_level;
 wire        audio_fifo_full;
 
 // Link MMIO register interface
@@ -2022,118 +2022,16 @@ assign video_hs = vidout_hs;
         .gpu_reg_addr(gpu_reg_addr),
         .gpu_reg_wdata(gpu_reg_wdata),
         .gpu_reg_rdata(gpu_reg_rdata),
-        // AWE coprocessor (Phase 1: register file + note-on FSM,
-        // no per-tick processing yet)
-        .awe_voice_state_wr(awe_voice_state_wr),
-        .awe_voice_state_addr(awe_voice_state_addr),
-        .awe_voice_state_wdata(awe_voice_state_wdata),
-        .awe_chan_wr(awe_chan_wr),
-        .awe_chan_addr(awe_chan_addr),
-        .awe_chan_wdata(awe_chan_wdata),
-        .awe_mm_wr(awe_mm_wr),
-        .awe_mm_voice(awe_mm_voice),
-        .awe_mm_field(awe_mm_field),
-        .awe_mm_wdata(awe_mm_wdata),
-        .mix_cram1_inhibit(mix_cram1_inhibit),
-        .awe_global_wr(awe_global_wr),
-        .awe_global_addr(awe_global_addr),
-        .awe_global_wdata(awe_global_wdata),
-        .awe_note_on(awe_note_on),
-        .awe_note_on_voice(awe_note_on_voice),
-        .awe_note_off(awe_note_off),
-        .awe_note_off_voice(awe_note_off_voice),
-        .awe_voice_stop_strobe(awe_voice_stop_strobe),
-        .awe_voice_stop_voice(awe_voice_stop_voice),
-        .awe_ramp1_trig_pulse(awe_ramp1_trig_pulse),
-        .awe_ramp1_voice_reg(awe_ramp1_voice_reg),
-        .awe_ramp1_stage_reg(awe_ramp1_stage_reg),
-        .awe_ramp1_rate_reg(awe_ramp1_rate_reg),
-        .awe_mix_voice_wr(awe_mix_voice_wr),
-        .awe_mix_voice_field(awe_mix_voice_field),
-        .awe_mix_voice_sel(awe_mix_voice_sel),
-        .awe_mix_voice_wdata(awe_mix_voice_wdata),
-        .awe_active_mask(awe_active_mask),
-        .awe_tick_count(awe_tick_count)
+        .mix_cram1_inhibit(mix_cram1_inhibit)
     );
 
-    // ----------------------------------------------------------------
-    // AWE coprocessor — Phase 1 wires
-    // ----------------------------------------------------------------
-    // periph_slave generates the windowed CPU writes; audio_awe owns
-    // voice-state RAM, channel bank, globals, and the NOTE_ON FSM that
-    // emits mixer writes.  Mixer-write priority mux lives inside
-    // periph_slave (sees both streams; AWE wins).
-    wire        awe_voice_state_wr;
-    wire [10:0] awe_voice_state_addr;
-    wire [31:0] awe_voice_state_wdata;
-    wire        awe_chan_wr;
-    wire [5:0]  awe_chan_addr;
-    wire [31:0] awe_chan_wdata;
-    wire        awe_mm_wr;
-    wire [5:0]  awe_mm_voice;
-    wire [2:0]  awe_mm_field;
-    wire [15:0] awe_mm_wdata;
-    wire        awe_global_wr;
-    wire [3:0]  awe_global_addr;
-    wire [31:0] awe_global_wdata;
-    wire        awe_note_on;
-    wire [5:0]  awe_note_on_voice;
-    wire        awe_note_off;
-    wire [5:0]  awe_note_off_voice;
-    wire        awe_voice_stop_strobe;
-    wire [5:0]  awe_voice_stop_voice;
-    wire        awe_ramp1_trig_pulse;
-    wire [5:0]  awe_ramp1_voice_reg;
-    wire [3:0]  awe_ramp1_stage_reg;
-    wire [31:0] awe_ramp1_rate_reg;
-    wire        awe_mix_voice_wr;
-    wire [3:0]  awe_mix_voice_field;
-    wire [5:0]  awe_mix_voice_sel;
-    wire [31:0] awe_mix_voice_wdata;
-    wire [31:0] awe_active_mask;
-    wire [31:0] awe_tick_count;
-    wire [7:0]  awe_reverb_level;
-    wire [7:0]  awe_reverb_feedback;
-    wire [7:0]  awe_chorus_level;
-    wire [15:0] awe_chorus_rate;
-    wire [7:0]  awe_chorus_depth;
+    wire [7:0]  awe_reverb_level     = 8'd0;
+    wire [7:0]  awe_reverb_feedback  = 8'd0;
+    wire [7:0]  awe_chorus_level     = 8'd0;
+    wire [15:0] awe_chorus_rate      = 16'd0;
+    wire [7:0]  awe_chorus_depth     = 8'd0;
+
     wire        mix_cram1_inhibit;
-
-    audio_awe awe_inst (
-        .clk(clk_cpu),
-        .reset_n(reset_n),
-        .cpu_voice_state_wr(awe_voice_state_wr),
-        .cpu_voice_state_addr(awe_voice_state_addr),
-        .cpu_voice_state_wdata(awe_voice_state_wdata),
-        .cpu_chan_wr(awe_chan_wr),
-        .cpu_chan_addr(awe_chan_addr),
-        .cpu_chan_wdata(awe_chan_wdata),
-        .cpu_mm_wr(awe_mm_wr),
-        .cpu_mm_voice(awe_mm_voice),
-        .cpu_mm_field(awe_mm_field),
-        .cpu_mm_wdata(awe_mm_wdata),
-        .cpu_global_wr(awe_global_wr),
-        .cpu_global_addr(awe_global_addr),
-        .cpu_global_wdata(awe_global_wdata),
-        .cpu_note_on(awe_note_on),
-        .cpu_note_on_voice(awe_note_on_voice),
-        .cpu_note_off(awe_note_off),
-        .cpu_note_off_voice(awe_note_off_voice),
-        .cpu_voice_stop(awe_voice_stop_strobe),
-        .cpu_voice_stop_voice(awe_voice_stop_voice),
-        .cpu_ramp1_trig(awe_ramp1_trig_pulse),
-        .cpu_ramp1_voice(awe_ramp1_voice_reg),
-        .cpu_ramp1_stage(awe_ramp1_stage_reg),
-        .cpu_ramp1_rate(awe_ramp1_rate_reg),
-        .awe_mix_voice_wr(awe_mix_voice_wr),
-        .awe_mix_voice_field(awe_mix_voice_field),
-        .awe_mix_voice_sel(awe_mix_voice_sel),
-        .awe_mix_voice_wdata(awe_mix_voice_wdata),
-        .active_mask(awe_active_mask),
-        .tick_count(awe_tick_count),
-        .reverb_wet_level(awe_reverb_level),
-        .reverb_feedback(awe_reverb_feedback)
-    );
 
     // DMA engine removed — apps use CPU memcpy instead
 
@@ -2564,6 +2462,9 @@ wire        uart_rx_irq;
 wire        link_irq;
 wire        ext_irq;  // Masked combination from axi_periph_slave
 
+// TODO(audio_review): The raw audio MMIO write path (audio_sample_wr) from
+// axi_periph_slave exists but is not fed into audio_output.
+// Decide whether to wire it up or remove the dead surface entirely.
 // audio_output: dcfifo bridges clk_cpu → clk_audio (12.288 MHz).
 // Mixer and audio_output both run on clk_cpu now — no CDC on the
 // sample push path.

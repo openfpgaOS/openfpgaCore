@@ -1,6 +1,10 @@
 /*
  * of_audio.h -- Audio subsystem API for openfpgaOS
  *
+ * TODO(audio_review): The PCM API is no longer honest. This is documented
+ * as a stereo FIFO path but actually uses the mono scratch mixer voice.
+ * Decide whether to restore true FIFO writes or redefine this API.
+ * 
  * 48 kHz stereo PCM over the hardware FIFO, plus a double-buffered
  * streaming path for music and voice.  MIDI playback is layered on
  * top of the PCM mixer via of_midi.h / of_smp_voice.h.

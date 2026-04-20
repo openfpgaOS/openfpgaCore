@@ -199,6 +199,8 @@ static uint32_t cram1_word_addr(const void *ptr) {
     return offset >> 2;
 }
 
+// TODO(audio_review): Voice ownership is fragmented across tracking systems.
+// Also, the allocator only protects voice 31. Stream voices 29/30 used in audio.c are unprotected.
 /* Allocate a voice, handling priority-based stealing. Returns voice index or -1. */
 static int alloc_voice(int priority)
 {
@@ -573,6 +575,8 @@ void of_mixer_set_master_volume(int volume)
     }
 }
 
+// TODO(audio_review): Filter plumbing exists here, but the mixer RTL (audio_mixer.v)
+// does not implement it in the sample path. Remove dead filter control paths or implement them.
 void of_mixer_set_filter(int voice, int cutoff_q016, int q, int enable)
 {
     if (!voice_in_range(voice)) return;

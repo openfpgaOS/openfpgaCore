@@ -381,71 +381,40 @@ volatile int uart_mirror_on __attribute__((section(".bss.boot")));
 
 void of_term_enable_uart_mirror(void) { uart_mirror_on = 1; }
 
-/* ── UART TX ring buffer ──────────────────────────────────────────────
- * Kernel-owned SPSC (single-producer, single-consumer) ring for the
- * debug UART console mirror.  The producer is the terminal path
- * (term_emit_char, called from sys_write via per-char loop).  The
- * consumer is of_term_uart_drain(), called from the machine-timer
- * ISR once per tick (500 Hz while MIDI is active).
+/* ── UART TX — synchronous, unbuffered ────────────────────────────────
+ * Direct poll-and-write: each char waits for the FPGA UART to accept
+ * the byte, then writes UART_TX_DATA.  No ring buffer, no ISR drain,
+ * no batching — every printf char shows up on the wire before
+ * term_emit_char returns.  Use this when you need real-time visibility
+ * (audio glitch debugging, crash diagnostics).
  *
- * Rationale: previously term_emit_char wrote UART_TX_DATA inline and
- * silently dropped bytes when the 32-byte TX FIFO was full.  That is
- * non-blocking at the CPU level, but long printf bursts (stats dump)
- * still stall the main thread because each char pays syscall + FB
- * blit cost, and dropped mirror bytes corrupt the console output.
- * Moving the UART write to an ISR-drained ring buffer decouples the
- * printf caller from the UART's baud-rate timing entirely.
- *
- * SPSC correctness: head is only written by the producer, tail only
- * by the ISR drainer.  Each side reads the other's pointer without
- * needing locks — no race on head/tail ordering.  The byte write to
- * ring[] is ordered before the head bump by a compiler barrier; a
- * single-hart RISC-V keeps stores in-order at the core so no fence
- * is needed for the ISR to observe the byte. */
-#define UART_TX_RING_SIZE  4096u
-#define UART_TX_RING_MASK  (UART_TX_RING_SIZE - 1u)
-static uint8_t            uart_tx_ring[UART_TX_RING_SIZE];
-static volatile uint32_t  uart_tx_head;   /* producer writes */
-static volatile uint32_t  uart_tx_tail;   /* ISR writes */
-
-static inline void uart_tx_enqueue(uint8_t c) {
-    uint32_t h = uart_tx_head;
-    uint32_t t = uart_tx_tail;
-    /* Drop if full — same semantics as the prior fire-and-forget path,
-     * but triggered only on sustained overflow (4 KB worth of pending
-     * bytes). */
-    if ((h - t) >= UART_TX_RING_SIZE) return;
-    uart_tx_ring[h & UART_TX_RING_MASK] = c;
-    __asm__ volatile("" ::: "memory");  /* ensure byte store before head */
-    uart_tx_head = h + 1;
-}
-
-/* Drain pending ring bytes into the UART TX FIFO.  Bounded work per
- * call so the ISR stays short: at 500 Hz × 32 bytes = 16 KB/s drain,
- * comfortably above any realistic mirror rate. */
+ * Cost: at 2 Mbaud each byte takes ~5 µs to shift out, so a 100-byte
+ * printf blocks the caller for ~500 µs.  Acceptable for diagnostics;
+ * the ring path can be reinstated if printf-heavy hot paths get too
+ * slow.  The poll has a bounded retry (~64 cycles) so a stuck UART
+ * never hangs the kernel — if the byte can't be accepted it's
+ * dropped, matching the prior fire-and-forget overflow semantics. */
 void of_term_uart_drain(void) {
-    uint32_t t = uart_tx_tail;
-    uint32_t h = uart_tx_head;
-    int budget = 32;
-    while (t != h && budget-- > 0 && (UART_STATUS & UART_TX_RDY)) {
-        UART_TX_DATA = uart_tx_ring[t & UART_TX_RING_MASK];
-        t++;
-    }
-    uart_tx_tail = t;
+    /* No-op kept for ABI compatibility — the timer ISR still calls
+     * this; with no ring there is nothing to drain. */
 }
 
 /* Emit a raw character (no escape processing). */
 void term_emit_char(char c) {
     uint8_t color = term_color_byte(term_fg, term_bg);
 
-    /* UART console mirror — enqueue into kernel ring.  Drained both
-     * from the timer ISR (bulk) and inline here so bytes still flow
-     * when no app has armed the machine timer (e.g. boot banner,
-     * early-boot printf before setitimer).  Non-blocking.  Overflow
-     * drops (ring is 4 KB). */
+    /* UART console mirror — synchronous: poll TX_RDY then write.
+     * No buffering, immediate output.  Each byte takes ~500 cycles
+     * to shift out at 2 Mbaud (100 MHz / 50 CLKS_PER_BIT × 10 bits).
+     * Loop bound = 2000 cycles ≈ 4× byte time — generous enough to
+     * cover a back-to-back byte plus jitter, but never hangs. */
     if (uart_mirror_on && c != 0x02) {
-        uart_tx_enqueue((uint8_t)c);
-        of_term_uart_drain();
+        for (int i = 0; i < 2000; i++) {
+            if (UART_STATUS & UART_TX_RDY) {
+                UART_TX_DATA = (uint8_t)c;
+                break;
+            }
+        }
     }
 
     if (c == '\n') {

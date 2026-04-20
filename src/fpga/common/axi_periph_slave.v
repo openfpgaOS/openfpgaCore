@@ -82,9 +82,10 @@ module axi_periph_slave (
     output reg  [31:0] target_buffer_resp_struct,
 
     // Audio output interface
+    // TODO(audio_review): Raw audio MMIO write path exists but core_top ignores it.
     output reg         audio_sample_wr,
     output reg  [31:0] audio_sample_data,
-    input wire  [8:0]  audio_fifo_level,
+    input wire  [9:0]  audio_fifo_level,
     input wire         audio_fifo_full,
 
     // Link MMIO interface
@@ -113,11 +114,6 @@ module axi_periph_slave (
     input wire         shutdown_pending,
     output reg         shutdown_ack,
 
-    // Hardware mixer voice interface
-    // Driven by a final mux that gives priority to AWE-emitted writes
-    // (see awe_mix_voice_* below) over CPU-direct register writes.
-    // The internal cpu_mix_voice_* regs hold the CPU-direct stream;
-    // the assigns near the bottom of this module do the priority mux.
     output wire        mix_voice_wr,
     output wire [3:0]  mix_voice_field,
     output wire [5:0]  mix_voice_sel,
@@ -162,44 +158,7 @@ module axi_periph_slave (
     output reg  [31:0] gpu_reg_wdata,
     input  wire [31:0] gpu_reg_rdata,
 
-    // AWE coprocessor register interface (Phase 1)
-    // Outputs drive audio_awe's CPU-facing inputs.  Inputs accept
-    // mixer-write requests AWE generates from its NOTE_ON FSM, which
-    // are muxed onto mix_voice_* with priority over CPU-direct writes.
-    output reg         mix_cram1_inhibit,      // Phase 6a: pause mixer CRAM1 reads for file I/O
-    output reg         awe_voice_state_wr,
-    output reg  [10:0] awe_voice_state_addr,    // {voice[5:0], word[4:0]}
-    output reg  [31:0] awe_voice_state_wdata,
-    output reg         awe_chan_wr,
-    output reg  [5:0]  awe_chan_addr,           // {channel[3:0], word[1:0]}
-    output reg  [31:0] awe_chan_wdata,
-    // Mod-matrix scale writes (Phase 4).
-    output reg         awe_mm_wr,
-    output reg  [5:0]  awe_mm_voice,
-    output reg  [2:0]  awe_mm_field,
-    output reg  [15:0] awe_mm_wdata,
-    output reg         awe_global_wr,
-    output reg  [3:0]  awe_global_addr,
-    output reg  [31:0] awe_global_wdata,
-    output reg         awe_note_on,
-    output reg  [5:0]  awe_note_on_voice,
-    output reg         awe_note_off,
-    output reg  [5:0]  awe_note_off_voice,
-    output reg         awe_voice_stop_strobe,
-    output reg  [5:0]  awe_voice_stop_voice,
-    // Phase 5c — Ramp1 (mod env) trigger.  CPU writes the rate to
-    // AWE_RAMP1_RATE first, then writes {voice, stage} to
-    // AWE_RAMP1_TRIGGER which pulses awe_ramp1_trig.
-    output reg         awe_ramp1_trig_pulse,
-    output reg  [5:0]  awe_ramp1_voice_reg,
-    output reg  [3:0]  awe_ramp1_stage_reg,
-    output reg  [31:0] awe_ramp1_rate_reg,
-    input  wire        awe_mix_voice_wr,
-    input  wire [3:0]  awe_mix_voice_field,
-    input  wire [5:0]  awe_mix_voice_sel,
-    input  wire [31:0] awe_mix_voice_wdata,
-    input  wire [31:0] awe_active_mask,
-    input  wire [31:0] awe_tick_count
+    output reg         mix_cram1_inhibit
 );
 
 wire reset = ~reset_n;
@@ -216,21 +175,10 @@ wire [31:0] aw_addr = s_axi_awaddr;
 reg [31:0] mix_irq_clear_lat;
 assign mix_irq_clear_data = mix_irq_clear_lat;
 
-// Internal CPU-direct mixer-write stream — the case statement in the
-// always block updates these.  The final output (mix_voice_*) is the
-// priority mux of (awe_mix_voice_* > cpu_mix_voice_*); see assigns
-// after the always block.
 reg         cpu_mix_voice_wr;
 reg  [3:0]  cpu_mix_voice_field;
 reg  [5:0]  cpu_mix_voice_sel;
 reg  [31:0] cpu_mix_voice_wdata;
-
-// AWE-windowed-write address registers.  AWE_VOICE_LOAD_ADDR sets the
-// cursor; AWE_VOICE_LOAD_DATA writes through to audio_awe and auto-
-// increments the word part of the cursor so awe_voice_load() can do
-// 32 sequential writes after one address set-up.
-reg  [10:0] awe_voice_load_addr_reg;   // {voice[5:0], word[4:0]}
-reg  [5:0]  awe_chan_load_addr_reg;    // {channel[3:0], word[1:0]}
 
 // ============================================
 // SNAC Shifter + GPIO (registers 0xA0-0xAC)
@@ -609,32 +557,6 @@ always @(posedge clk) begin
         snac_start_pulse <= 0;
         snac_bit_count_reg <= 0;
         snac_latch_en_reg <= 0;
-        // AWE coprocessor reset
-        awe_voice_state_wr      <= 0;
-        awe_voice_state_addr    <= 0;
-        awe_voice_state_wdata   <= 0;
-        awe_chan_wr             <= 0;
-        awe_chan_addr           <= 0;
-        awe_chan_wdata          <= 0;
-        awe_mm_wr               <= 0;
-        awe_mm_voice            <= 0;
-        awe_mm_field            <= 0;
-        awe_mm_wdata            <= 0;
-        awe_global_wr           <= 0;
-        awe_global_addr         <= 0;
-        awe_global_wdata        <= 0;
-        awe_note_on             <= 0;
-        awe_note_on_voice       <= 0;
-        awe_note_off            <= 0;
-        awe_note_off_voice      <= 0;
-        awe_voice_stop_strobe   <= 0;
-        awe_voice_stop_voice    <= 0;
-        awe_voice_load_addr_reg <= 11'd0;
-        awe_chan_load_addr_reg  <= 6'd0;
-        awe_ramp1_trig_pulse    <= 1'b0;
-        awe_ramp1_voice_reg     <= 6'd0;
-        awe_ramp1_stage_reg     <= 4'd0;
-        awe_ramp1_rate_reg      <= 32'd0;
         mix_cram1_inhibit       <= 1'b0;
     end else begin
         cycle_counter <= cycle_counter + 1;
@@ -643,15 +565,6 @@ always @(posedge clk) begin
         cpu_mix_voice_wr <=0;
         mix_irq_clear_wr <= 0;
         snac_start_pulse <= 0;
-        // AWE strobes are 1-cycle pulses, default low.
-        awe_voice_state_wr    <= 0;
-        awe_chan_wr           <= 0;
-        awe_mm_wr             <= 0;
-        awe_global_wr         <= 0;
-        awe_note_on           <= 0;
-        awe_note_off          <= 0;
-        awe_voice_stop_strobe <= 0;
-        awe_ramp1_trig_pulse  <= 0;
 
         // Hardware timer countdown
         if (timer_enable && timer_period != 0) begin
@@ -863,6 +776,7 @@ always @(posedge clk) begin
                 7'b0_111000: vrr_swap_hold <= req_wdata[3:0];        // VRR_SWAP_HOLD (0xE0)
 
                 // Extended mixer registers (0x100-0x108)
+                // TODO(audio_review): Filter feature is available through MMIO but audio_mixer.v doesn't consume it.
                 7'b1_000000: begin                                    // MIX_VOICE_FILTER_FC (0x100)
                     cpu_mix_voice_wr <=1;
                     cpu_mix_voice_field <=4'd11;
@@ -875,99 +789,6 @@ always @(posedge clk) begin
                 end
                 7'b1_000011: begin                                    // MIX_CRAM1_INHIBIT (0x10C)
                     mix_cram1_inhibit <= req_wdata[0];
-                end
-
-                // ----------------------------------------------------
-                // AWE coprocessor registers (Phase 1, 0x110-0x140)
-                // 0x108 MIX_IRQ_CLEAR_HI / 0x110 AWE_CTRL / 0x138 PRESET /
-                // 0x13C PRESET / 0x140 INTERP_DEFAULT all dropped in the
-                // Phase 8 ALM hunt — fabric never read them.
-                // ----------------------------------------------------
-                7'b1_000101: begin                                    // AWE_NOTE_ON (0x114)
-                    awe_note_on       <= 1'b1;
-                    awe_note_on_voice <= req_wdata[5:0];
-                end
-                7'b1_000110: begin                                    // AWE_NOTE_OFF (0x118)
-                    awe_note_off       <= 1'b1;
-                    awe_note_off_voice <= req_wdata[5:0];
-                end
-                7'b1_000111: begin                                    // AWE_VOICE_STOP (0x11C)
-                    awe_voice_stop_strobe <= 1'b1;
-                    awe_voice_stop_voice  <= req_wdata[5:0];
-                end
-                7'b1_001000: begin                                    // AWE_VOICE_LOAD_ADDR (0x120)
-                    awe_voice_load_addr_reg <= req_wdata[10:0];
-                end
-                7'b1_001001: begin                                    // AWE_VOICE_LOAD_DATA (0x124)
-                    awe_voice_state_wr    <= 1'b1;
-                    awe_voice_state_addr  <= awe_voice_load_addr_reg;
-                    awe_voice_state_wdata <= req_wdata;
-                    // Auto-increment word part of the cursor.  Wraps
-                    // within the 32-word voice slot — caller must
-                    // re-set ADDR before crossing voice boundaries.
-                    awe_voice_load_addr_reg[4:0] <= awe_voice_load_addr_reg[4:0] + 5'd1;
-                end
-                7'b1_001010: begin                                    // AWE_CHAN_LOAD_ADDR (0x128)
-                    awe_chan_load_addr_reg <= req_wdata[5:0];
-                end
-                7'b1_001011: begin                                    // AWE_CHAN_LOAD_DATA (0x12C)
-                    awe_chan_wr    <= 1'b1;
-                    awe_chan_addr  <= awe_chan_load_addr_reg;
-                    awe_chan_wdata <= req_wdata;
-                    awe_chan_load_addr_reg[1:0] <= awe_chan_load_addr_reg[1:0] + 2'd1;
-                end
-                7'b1_001100: begin                                    // AWE_MASTER_VOL (0x130)
-                    awe_global_wr    <= 1'b1;
-                    awe_global_addr  <= 4'd0;
-                    awe_global_wdata <= req_wdata;
-                end
-                7'b1_001101: begin                                    // AWE_BEND_RANGE (0x134)
-                    awe_global_wr    <= 1'b1;
-                    awe_global_addr  <= 4'd1;
-                    awe_global_wdata <= req_wdata;
-                end
-                7'b1_010100: begin                                    // AWE_HW_ENVELOPE (0x150)
-                    awe_global_wr    <= 1'b1;
-                    awe_global_addr  <= 4'd5;
-                    awe_global_wdata <= req_wdata;
-                end
-                7'b1_010101: begin                                    // AWE_MM_WRITE (0x154)
-                    // Packed: data_s16 << 16 | field[10:8] | voice[5:0]
-                    awe_mm_wr    <= 1'b1;
-                    awe_mm_voice <= req_wdata[5:0];
-                    awe_mm_field <= req_wdata[10:8];
-                    awe_mm_wdata <= req_wdata[31:16];
-                end
-                7'b1_010110: begin                                    // AWE_REVERB_LEVEL    (0x158)
-                    awe_global_wr    <= 1'b1;
-                    awe_global_addr  <= 4'd6;
-                    awe_global_wdata <= req_wdata;
-                end
-                7'b1_010111: begin                                    // AWE_REVERB_FEEDBACK (0x15C)
-                    awe_global_wr    <= 1'b1;
-                    awe_global_addr  <= 4'd7;
-                    awe_global_wdata <= req_wdata;
-                end
-                7'b1_011000: begin                                    // AWE_CHORUS_LEVEL    (0x160)
-                    awe_global_wr    <= 1'b1;
-                    awe_global_addr  <= 4'd8;
-                    awe_global_wdata <= req_wdata;
-                end
-                7'b1_011001: begin                                    // AWE_CHORUS_RATE     (0x164)
-                    awe_global_wr    <= 1'b1;
-                    awe_global_addr  <= 4'd9;
-                    awe_global_wdata <= req_wdata;
-                end
-                7'b1_011010: begin                                    // AWE_CHORUS_DEPTH    (0x168)
-                    awe_global_wr    <= 1'b1;
-                    awe_global_addr  <= 4'd10;
-                    awe_global_wdata <= req_wdata;
-                end
-                7'b1_011011: awe_ramp1_rate_reg <= req_wdata;          // AWE_RAMP1_RATE      (0x16C)
-                7'b1_011100: begin                                    // AWE_RAMP1_TRIGGER   (0x170)
-                    awe_ramp1_trig_pulse <= 1'b1;
-                    awe_ramp1_voice_reg  <= req_wdata[5:0];
-                    awe_ramp1_stage_reg  <= req_wdata[11:8];
                 end
 
                 default: ;
@@ -1060,12 +881,6 @@ always @(*) begin
         };
         7'b0_100110: sysreg_rdata = HW_FEATURES;                    // HW_FEATURES (0x98)
         7'b0_100111: sysreg_rdata = {31'b0, vsync_irq_pending};   // VSYNC_IRQ_PENDING (0x9C)
-        // 0x108 MIX_IRQ_PENDING_HI / 0x148 AWE_ACTIVE_MASK_HI dropped —
-        // both were placeholders for 48-voice mode that never shipped.
-        // 32 voices fit entirely in the LO halves.  Removing the rows
-        // shaves two 7-bit comparators from the read decoder.
-        7'b1_010001: sysreg_rdata = awe_active_mask[31:0];           // AWE_ACTIVE_MASK_LO (0x144)
-        7'b1_010011: sysreg_rdata = awe_tick_count;                  // AWE_TICK_COUNT    (0x14C)
         default: sysreg_rdata = 32'h0;
     endcase
 end
@@ -1104,80 +919,49 @@ always @(posedge clk) begin
 end
 
 // ============================================
-// UART TX FIFO — 32-byte buffer so the CPU can burst writes without
-// dropping bytes when uart_tx is still shifting the previous byte.
-// At 2 Mbaud each byte takes ~5us / ~500 cycles to drain; the kernel
-// can produce control characters (newlines, escape codes) far faster
-// than that, so a fire-and-forget UART_TX_DATA write would lose ~60%
-// of chars in tight bursts. The FIFO absorbs the rate mismatch.
+// UART TX — single-byte passthrough.  The kernel maintains its own
+// software TX ring (terminal.c uart_tx_ring) and polls UART_TX_RDY
+// before each write, so the FPGA-side FIFO would just duplicate
+// that buffering for ~50 ALMs.  Drop it: pulse uart_tx_dv with the
+// CPU's write data when uart_tx is idle, drop the byte if not.
 // ============================================
-reg [7:0]  uart_tx_fifo [0:31];
-reg [4:0]  uart_tx_wr_ptr;
-reg [4:0]  uart_tx_rd_ptr;
-wire [4:0] uart_tx_count = uart_tx_wr_ptr - uart_tx_rd_ptr;
-wire       uart_tx_fifo_empty = (uart_tx_wr_ptr == uart_tx_rd_ptr);
-wire       uart_tx_fifo_full  = (uart_tx_count == 5'd31);
-// Aggregate idle = FIFO empty AND uart_tx not currently shifting.
-// Boot stub uses this for "wait for last PHDP byte to drain" semantics.
-wire       uart_tx_idle = uart_tx_fifo_empty && !uart_tx_active;
+reg uart_tx_fifo_we;       // pulse from FSM on UART_TX_DATA write
+reg [7:0] uart_tx_fifo_din; // CPU's write data, latched
 
-// CPU-side write: pulse uart_tx_fifo_we when CPU writes UART_TX_DATA
-// (in the FSM section below). FIFO push happens here.
-reg uart_tx_fifo_we;
-reg [7:0] uart_tx_fifo_din;
+wire uart_tx_idle = !uart_tx_active;
+wire uart_tx_rdy  = !uart_tx_active;
 
 always @(posedge clk) begin
     if (reset) begin
-        uart_tx_wr_ptr <= 0;
-        uart_tx_rd_ptr <= 0;
-        uart_tx_dv     <= 0;
-        uart_tx_byte   <= 0;
+        uart_tx_dv   <= 0;
+        uart_tx_byte <= 0;
     end else begin
-        // Default: deassert one-cycle pulse
         uart_tx_dv <= 0;
-
-        // Push from CPU side (drop silently if full -- matches existing
-        // fire-and-forget software behavior, never blocks the AXI bus).
-        if (uart_tx_fifo_we && !uart_tx_fifo_full) begin
-            uart_tx_fifo[uart_tx_wr_ptr[4:0]] <= uart_tx_fifo_din;
-            uart_tx_wr_ptr <= uart_tx_wr_ptr + 5'd1;
-        end
-
-        // Drain into uart_tx whenever it's idle and we have something
-        // to send. uart_tx samples i_Tx_DV on the rising edge and
-        // immediately asserts uart_tx_active, so this auto-clears next
-        // cycle and won't double-pulse.
-        if (!uart_tx_fifo_empty && !uart_tx_active && !uart_tx_dv) begin
-            uart_tx_byte <= uart_tx_fifo[uart_tx_rd_ptr[4:0]];
+        if (uart_tx_fifo_we && !uart_tx_active) begin
+            uart_tx_byte <= uart_tx_fifo_din;
             uart_tx_dv   <= 1'b1;
-            uart_tx_rd_ptr <= uart_tx_rd_ptr + 5'd1;
         end
     end
 end
 
 // UART read data mux:
 //   0x4F000000 (offset 0x00): status
-//     bit 0  = 1                 (UART present marker)
-//     bit 1  = ~uart_tx_fifo_full (TX has space — this is what software polls
-//                                  before writing UART_TX_DATA. With the new
-//                                  TX FIFO, "ready" means "FIFO has space",
-//                                  not "uart_tx is idle")
-//     bit 2  = uart_rx_valid     (RX has data)
-//     bit 3  = uart_tx_idle      (FIFO empty AND uart_tx not shifting; for
-//                                  callers that need to wait for ALL output
-//                                  to fully drain, e.g. boot stub PHDP exit)
-//     bits [17:8]  = uart_rx_count (RX FIFO depth, 10 bits)
-//     bits [22:18] = uart_tx_count (TX FIFO depth, 5 bits)
+//     bit 0  = 1               (UART present marker)
+//     bit 1  = uart_tx_rdy     (TX accepts a byte right now)
+//     bit 2  = uart_rx_valid   (RX has data)
+//     bit 3  = uart_tx_idle    (uart_tx not shifting; same as TX_RDY now
+//                               that the FPGA TX FIFO is gone)
+//     bits [17:8] = uart_rx_count (RX FIFO depth, 10 bits)
 //   0x4F000004 (offset 0x04): TX data (write-only, reads as 0)
 //   0x4F000008 (offset 0x08): RX data (read pops from FIFO)
 wire [31:0] uart_rdata = (req_addr[3:2] == 2'b00) ?
-        {9'b0, uart_tx_count, uart_rx_count, 4'b0,
-         uart_tx_idle, uart_rx_valid, ~uart_tx_fifo_full, 1'b1}
+        {14'b0, uart_rx_count, 4'b0,
+         uart_tx_idle, uart_rx_valid, uart_tx_rdy, 1'b1}
     : (req_addr[3:2] == 2'b10) ? {24'b0, uart_rx_data}
     : 32'h0;
 
 wire [31:0] periph_rd_mux = reg_sysreg ? sysreg_rdata :
-                             reg_audio  ? {22'b0, audio_fifo_full, audio_fifo_level} :
+                             reg_audio  ? {21'b0, audio_fifo_full, audio_fifo_level} :
                              reg_link   ? link_reg_rdata :
                              reg_uart   ? uart_rdata :
                              reg_gpu    ? gpu_reg_rdata :
@@ -1545,19 +1329,9 @@ always @(posedge clk or posedge reset) begin
     end
 end
 
-// =================================================================
-// Mixer-write priority mux (AWE > CPU-direct)
-// =================================================================
-// Phase 1's audio_awe.v issues short bursts of mixer writes (~9
-// fields × 2 cycles = ~18 cycles) on each NOTE_ON.  We give those
-// writes priority over the CPU's MIX_VOICE_* register stream because
-// (a) the SDK only uses one path or the other for a given voice, so
-// in practice they don't collide, and (b) if they ever did, dropping
-// a CPU-direct write is safer than dropping AWE's note-on burst
-// halfway through (the voice would end up half-programmed).
-assign mix_voice_wr    = awe_mix_voice_wr | cpu_mix_voice_wr;
-assign mix_voice_field = awe_mix_voice_wr ? awe_mix_voice_field : cpu_mix_voice_field;
-assign mix_voice_sel   = awe_mix_voice_wr ? awe_mix_voice_sel   : cpu_mix_voice_sel;
-assign mix_voice_wdata = awe_mix_voice_wr ? awe_mix_voice_wdata : cpu_mix_voice_wdata;
+assign mix_voice_wr    = cpu_mix_voice_wr;
+assign mix_voice_field = cpu_mix_voice_field;
+assign mix_voice_sel   = cpu_mix_voice_sel;
+assign mix_voice_wdata = cpu_mix_voice_wdata;
 
 endmodule

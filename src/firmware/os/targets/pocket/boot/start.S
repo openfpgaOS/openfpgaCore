@@ -77,6 +77,13 @@ halt:
  *   f0-f31  (32 words) at sp+140 .. sp+264
  * ======================================== */
 _trap_entry:
+    /* Drain the CPU store buffer before any ISR-side work.  Prevents
+     * a pre-trap pending SDRAM store from racing with the new stores
+     * an ISR body is about to issue — observed as random single-word
+     * corruption of Doom-owned memory when the timer ISR writes any
+     * SDRAM-resident global under concurrent GPU/bridge bus traffic. */
+    fence
+
     /* Save current sp to mscratch */
     csrw mscratch, sp
 
@@ -344,6 +351,11 @@ _trap_restore:
 
     /* Restore original sp */
     csrr sp, mscratch
+
+    /* Drain the store buffer before returning to interrupted code so
+     * the ISR's stores hit memory in order before main-thread stores
+     * resume.  Pairs with the fence at _trap_entry. */
+    fence
 
     mret
 

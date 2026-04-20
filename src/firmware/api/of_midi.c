@@ -46,7 +46,7 @@ static struct {
 
     uint32_t us_per_beat;
     uint32_t last_pump_us;
-    uint32_t tick_accum_us;   /* accumulates until >= 1000 us → one voice tick */
+    uint32_t tick_accum_us;   /* accumulates until >= 1000 µs → one voice tick (matches of_smp_tables.c 1 kHz envelope rate) */
 
     midi_track_t tracks[MIDI_MAX_TRACKS];
 
@@ -416,12 +416,18 @@ void of_midi_pump(void) {
         const uint32_t PUMP_BUDGET_US = 2000;   /* 2 ms hard cap */
         uint32_t pump_start_us = OF_SVC->timer_get_us();
 
-        int tick_budget = 250;
+        /* of_smp_tables.c bakes envelope rates assuming 1 kHz (1 ms/tick),
+         * so smp_voice_tick MUST fire every 1000 µs.  Half-rate (every
+         * 2 ms) made every attack/decay/release run at 2× duration —
+         * audible as muddy notes that overlap into the next tone.
+         * Doubled the tick budget so a moderate polyphony burst still
+         * stays inside the pump-side wall-clock cap. */
+        int tick_budget = 500;
         int ticks_fired = 0;
         int overrun = 0;
-        while (M.tick_accum_us >= 2000 && tick_budget > 0) {
+        while (M.tick_accum_us >= 1000 && tick_budget > 0) {
             smp_voice_tick();
-            M.tick_accum_us -= 2000;
+            M.tick_accum_us -= 1000;
             tick_budget--;
             ticks_fired++;
             if ((OF_SVC->timer_get_us() - pump_start_us) > PUMP_BUDGET_US) {

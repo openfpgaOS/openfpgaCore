@@ -33,94 +33,14 @@
 #endif
 
 /* ------------------------------------------------------------------ */
-/* OFSF output format (must match of_smp_bank.h exactly)              */
+/* OFSF output format -- shared with the runtime via headers in the   */
+/* firmware tree.  Compile with -I../src/firmware/api so the converter */
+/* writes byte-identical structures and uses the SAME bake math the    */
+/* runtime would have invoked at note-on.                              */
 /* ------------------------------------------------------------------ */
 
-#define OFSF_MAGIC      0x4F465346
-#define OFSF_VERSION    2
-#define OFSF_PRESET_COUNT 256
-
-#define OFSF_NAME_MAX   32
-#define OFSF_AUTHOR_MAX 32
-
-#define OFSF_LOOP_NONE    0
-#define OFSF_LOOP_FORWARD 1
-#define OFSF_LOOP_BIDI    3
-
-typedef struct __attribute__((packed)) {
-    uint32_t magic;
-    uint32_t version;
-    uint32_t sample_rate;
-    uint32_t zone_count;
-    uint32_t sample_data_offset;
-    uint32_t sample_data_size;
-    uint32_t flags;
-    uint32_t reserved;
-    char     bank_name[OFSF_NAME_MAX];
-    char     bank_author[OFSF_AUTHOR_MAX];
-} ofsf_header_t;
-
-typedef struct __attribute__((packed)) {
-    uint16_t zone_start;
-    uint16_t zone_count;
-} ofsf_preset_t;
-
-typedef struct __attribute__((packed)) {
-    uint8_t  key_lo;
-    uint8_t  key_hi;
-    uint8_t  vel_lo;
-    uint8_t  vel_hi;
-
-    uint32_t sample_offset;
-    uint32_t sample_length;
-    uint32_t loop_start;
-    uint32_t loop_end;
-
-    uint8_t  loop_mode;
-    uint8_t  root_key;
-    int8_t   fine_tune;
-    int8_t   coarse_tune;
-
-    int16_t  vol_delay;
-    int16_t  vol_attack;
-    int16_t  vol_hold;
-    int16_t  vol_decay;
-    int16_t  vol_sustain;
-    int16_t  vol_release;
-
-    int16_t  mod_delay;
-    int16_t  mod_attack;
-    int16_t  mod_hold;
-    int16_t  mod_decay;
-    int16_t  mod_sustain;
-    int16_t  mod_release;
-    int16_t  mod_env_to_pitch;
-    int16_t  mod_env_to_filter;
-
-    int16_t  mod_lfo_delay;
-    int16_t  mod_lfo_freq;
-    int16_t  mod_lfo_to_pitch;
-    int16_t  mod_lfo_to_filter;
-    int16_t  mod_lfo_to_volume;
-
-    int16_t  vib_lfo_delay;
-    int16_t  vib_lfo_freq;
-    int16_t  vib_lfo_to_pitch;
-
-    int16_t  initial_fc;
-    int16_t  initial_q;
-
-    int16_t  initial_attn;
-    int16_t  pan;
-
-    uint8_t  exclusive_class;
-    uint8_t  _pad[3];
-} ofsf_zone_t;
-
-/* Compile-time check: zone must be exactly 80 bytes */
-_Static_assert(sizeof(ofsf_zone_t) == 80, "ofsf_zone_t must be 80 bytes");
-_Static_assert(sizeof(ofsf_header_t) == 96, "ofsf_header_t must be 96 bytes (v2)");
-_Static_assert(sizeof(ofsf_preset_t) == 4, "ofsf_preset_t must be 4 bytes");
+#include "of_smp_bank.h"
+#include "of_smp_tables.h"
 
 /* ------------------------------------------------------------------ */
 /* SF2 structures                                                     */
@@ -1005,6 +925,84 @@ static int zone_compare(const void *a, const void *b)
     return (int)va - (int)vb;
 }
 
+/* Baked DAHDSR / LFO results.  Returned by value so callers can assign
+ * into packed OFSF fields without taking the address of a packed member
+ * (which raises -Waddress-of-packed-member with strict GCC). */
+typedef struct {
+    uint32_t delay_ticks;
+    uint32_t attack_rate;
+    uint32_t hold_ticks;
+    uint32_t decay_rate;
+    uint32_t sustain_level;
+    uint32_t release_ticks;
+} baked_env_t;
+
+typedef struct {
+    uint32_t delay_ticks;
+    uint32_t rate;
+} baked_lfo_t;
+
+/* Bake one DAHDSR group (vol or mod) into the OFSF v3 fields.  Uses the
+ * runtime conversion helpers from of_smp_tables so the output is
+ * bit-identical to whatever the runtime would have computed at note-on
+ * (or at the ATTACK→HOLD→DECAY transition for the decay rate). */
+static baked_env_t bake_envelope(int16_t delay_tc, int16_t attack_tc,
+                                 int16_t hold_tc,  int16_t decay_tc,
+                                 int16_t sustain_cb, int16_t release_tc)
+{
+    baked_env_t r;
+
+    /* Delay / hold can legitimately be 0 — runtime treats that as
+     * "skip stage", so don't clamp. */
+    r.delay_ticks = (uint32_t)smp_timecents_to_ticks(delay_tc);
+    r.hold_ticks  = (uint32_t)smp_timecents_to_ticks(hold_tc);
+
+    /* Attack: rate = 0x10000 / max(1, ticks); clamp result ≥ 1 to match
+     * runtime env_init's `if (e->rate < 1) e->rate = 1;`. */
+    int32_t atk_t = smp_timecents_to_ticks(attack_tc);
+    if (atk_t < 1) atk_t = 1;
+    uint32_t a_rate = (uint32_t)0x10000 / (uint32_t)atk_t;
+    if (a_rate < 1) a_rate = 1;
+    r.attack_rate = a_rate;
+
+    /* Sustain level (Q16.16 0..0x10000) needed before decay rate. */
+    int32_t sus = smp_cb_to_level(sustain_cb);
+    r.sustain_level = (uint32_t)sus;
+
+    /* Decay rate assumes a complete attack: at ATTACK→HOLD/DECAY the
+     * runtime clamps e->level to exactly 0x10000, so the per-tick
+     * decrement is (0x10000 - sus_level) / decay_ticks.  If runtime
+     * ever needed a different start level it would re-divide; today
+     * it doesn't. */
+    int32_t dec_t = smp_timecents_to_ticks(decay_tc);
+    if (dec_t < 1) dec_t = 1;
+    int32_t delta = 0x10000 - sus;
+    if (delta < 0) delta = 0;
+    uint32_t d_rate = (uint32_t)delta / (uint32_t)dec_t;
+    if (d_rate < 1) d_rate = 1;
+    r.decay_rate = d_rate;
+
+    /* Release rate is current_level / release_ticks, computed at
+     * note-off when the level is known.  Bake the (clamped) tick count;
+     * runtime divides. */
+    int32_t rel_t = smp_timecents_to_ticks(release_tc);
+    if (rel_t < 1) rel_t = 1;
+    r.release_ticks = (uint32_t)rel_t;
+
+    return r;
+}
+
+/* Bake one LFO into delay_ticks + per-tick phase increment. */
+static baked_lfo_t bake_lfo(int16_t delay_tc, int16_t freq_cents)
+{
+    baked_lfo_t r;
+    int32_t d = smp_timecents_to_ticks(delay_tc);
+    if (d < 0) d = 0;
+    r.delay_ticks = (uint32_t)d;
+    r.rate        = smp_lfo_freq_cents_to_rate(freq_cents);
+    return r;
+}
+
 static void write_output(const char *path)
 {
     /* Sort zones by preset slot */
@@ -1207,43 +1205,66 @@ static void write_output(const char *path)
         oz->coarse_tune = (int8_t)coarse;
         oz->fine_tune   = (int8_t)fine;
 
-        /* Volume envelope */
-        oz->vol_delay   = g->val[GEN_delayVolEnv];
-        oz->vol_attack  = g->val[GEN_attackVolEnv];
-        oz->vol_hold    = g->val[GEN_holdVolEnv];
-        oz->vol_decay   = g->val[GEN_decayVolEnv];
-        oz->vol_sustain = g->val[GEN_sustainVolEnv];
-        oz->vol_release = g->val[GEN_releaseVolEnv];
+        /* Volume envelope (DAHDSR) -- pre-baked to ticks/rates/level. */
+        {
+            baked_env_t e = bake_envelope(
+                g->val[GEN_delayVolEnv],   g->val[GEN_attackVolEnv],
+                g->val[GEN_holdVolEnv],    g->val[GEN_decayVolEnv],
+                g->val[GEN_sustainVolEnv], g->val[GEN_releaseVolEnv]);
+            oz->vol_delay_ticks   = e.delay_ticks;
+            oz->vol_attack_rate   = e.attack_rate;
+            oz->vol_hold_ticks    = e.hold_ticks;
+            oz->vol_decay_rate    = e.decay_rate;
+            oz->vol_sustain_level = e.sustain_level;
+            oz->vol_release_ticks = e.release_ticks;
+        }
 
-        /* Modulation envelope */
-        oz->mod_delay   = g->val[GEN_delayModEnv];
-        oz->mod_attack  = g->val[GEN_attackModEnv];
-        oz->mod_hold    = g->val[GEN_holdModEnv];
-        oz->mod_decay   = g->val[GEN_decayModEnv];
-        oz->mod_sustain = g->val[GEN_sustainModEnv];
-        oz->mod_release = g->val[GEN_releaseModEnv];
+        /* Modulation envelope (DAHDSR) -- same shape. */
+        {
+            baked_env_t e = bake_envelope(
+                g->val[GEN_delayModEnv],   g->val[GEN_attackModEnv],
+                g->val[GEN_holdModEnv],    g->val[GEN_decayModEnv],
+                g->val[GEN_sustainModEnv], g->val[GEN_releaseModEnv]);
+            oz->mod_delay_ticks   = e.delay_ticks;
+            oz->mod_attack_rate   = e.attack_rate;
+            oz->mod_hold_ticks    = e.hold_ticks;
+            oz->mod_decay_rate    = e.decay_rate;
+            oz->mod_sustain_level = e.sustain_level;
+            oz->mod_release_ticks = e.release_ticks;
+        }
+
+        /* Modulation envelope routing (cents — runtime accumulator). */
         oz->mod_env_to_pitch  = g->val[GEN_modEnvToPitch];
         oz->mod_env_to_filter = g->val[GEN_modEnvToFilterFc];
 
-        /* Modulation LFO */
-        oz->mod_lfo_delay     = g->val[GEN_delayModLFO];
-        oz->mod_lfo_freq      = g->val[GEN_freqModLFO];
+        /* Modulation LFO -- delay/rate baked, mod amounts kept as cents. */
+        {
+            baked_lfo_t l = bake_lfo(g->val[GEN_delayModLFO],
+                                     g->val[GEN_freqModLFO]);
+            oz->mod_lfo_delay_ticks = l.delay_ticks;
+            oz->mod_lfo_rate        = l.rate;
+        }
         oz->mod_lfo_to_pitch  = g->val[GEN_modLfoToPitch];
         oz->mod_lfo_to_filter = g->val[GEN_modLfoToFilterFc];
-        oz->mod_lfo_to_volume = g->val[GEN_modLfoToVolume];
+        /* GEN_modLfoToVolume dropped in OFSF v3 — never read at runtime. */
 
-        /* Vibrato LFO */
-        oz->vib_lfo_delay     = g->val[GEN_delayVibLFO];
-        oz->vib_lfo_freq      = g->val[GEN_freqVibLFO];
-        oz->vib_lfo_to_pitch  = g->val[GEN_vibLfoToPitch];
+        /* Vibrato LFO. */
+        {
+            baked_lfo_t l = bake_lfo(g->val[GEN_delayVibLFO],
+                                     g->val[GEN_freqVibLFO]);
+            oz->vib_lfo_delay_ticks = l.delay_ticks;
+            oz->vib_lfo_rate        = l.rate;
+        }
+        oz->vib_lfo_to_pitch = g->val[GEN_vibLfoToPitch];
+        oz->_pad_vib         = 0;
 
-        /* Filter */
+        /* Filter (cents / centibels — runtime accumulator + per-channel CC). */
         oz->initial_fc = g->val[GEN_initialFilterFc];
         oz->initial_q  = g->val[GEN_initialFilterQ];
 
-        /* Output */
-        oz->initial_attn = g->val[GEN_initialAttenuation];
-        oz->pan          = g->val[GEN_pan];
+        /* Output -- initial attenuation baked to 0..255 linear scale. */
+        oz->initial_attn_scale = smp_cb_to_attn_scale(g->val[GEN_initialAttenuation]);
+        oz->pan                = g->val[GEN_pan];
 
         /* Exclusive class */
         oz->exclusive_class = (uint8_t)g->val[GEN_exclusiveClass];

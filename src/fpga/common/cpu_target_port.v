@@ -481,6 +481,13 @@ always @(posedge clk or posedge reset) begin
         if (per_bready) per_bvalid_r <= 1'b0;
 
         case (wr_state)
+        // WR_IDLE bundles W into the same cycle as AW when the master
+        // already has wvalid up — for single-beat MMIO writes (the
+        // common case for AWE voice loads, ~36 writes per note_on)
+        // this skips the WR_AW intermediate state, saving 1 cycle per
+        // write at the master-side handshake.  WR_AW handles the
+        // unbundled case (W arrives later) by dropping awready and
+        // falling through to WR_W to pull W normally.
         WR_IDLE: begin
             m_awvalid <= 1'b0;
             m_wvalid  <= 1'b0;
@@ -494,6 +501,13 @@ always @(posedge clk or posedge reset) begin
                 m_awlen           <= mem_awlen;
                 last_grant_wr_mem <= 1'b1;
                 wr_state          <= WR_AW;
+                if (mem_wvalid) begin
+                    m_wvalid <= 1'b1;
+                    m_wdata  <= mem_wdata;
+                    m_wstrb  <= mem_wstrb;
+                    m_wlast  <= mem_wlast;
+                    wr_mem_wready_pulse <= 1'b1;
+                end
             end else if (wr_grant_per) begin
                 wr_active_is_mem  <= 1'b0;
                 wr_active_id      <= 2'b0;
@@ -504,13 +518,34 @@ always @(posedge clk or posedge reset) begin
                 m_awlen           <= per_awlen;
                 last_grant_wr_mem <= 1'b0;
                 wr_state          <= WR_AW;
+                if (per_wvalid) begin
+                    m_wvalid <= 1'b1;
+                    m_wdata  <= per_wdata;
+                    m_wstrb  <= per_wstrb;
+                    m_wlast  <= per_wlast;
+                    wr_per_wready_pulse <= 1'b1;
+                end
             end
         end
 
+        // WR_AW dual-purpose: handles AW handshake AND (when bundled
+        // from WR_IDLE) the W handshake too.  If m_awready+m_wready
+        // both fire here, advance to WR_B directly.
         WR_AW: begin
-            if (m_awready) begin
-                m_awvalid <= 1'b0;
-                wr_state  <= WR_W;
+            if (m_awready) m_awvalid <= 1'b0;
+
+            if (m_wready && m_wvalid) begin
+                m_wvalid <= 1'b0;
+                wr_burst_count <= wr_burst_count + 8'd1;
+                if (wr_beat_is_last) begin
+                    if (m_awready || !m_awvalid)
+                        wr_state <= WR_B;
+                    // else: AW not done yet, stay in WR_AW until awready
+                end else begin
+                    wr_state <= WR_W;
+                end
+            end else if (m_awready && !m_wvalid) begin
+                wr_state <= WR_W;
             end
         end
 
