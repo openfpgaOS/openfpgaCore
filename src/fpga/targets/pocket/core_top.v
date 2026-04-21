@@ -696,15 +696,25 @@ reg         cram1_bcr_config_en;
 reg         cram1_bcr_bank_sel;
 reg         cram1_bcr_done;
 
-// Mixer-side burst interface (wired in audio_mixer instantiation
-// below).  Mixer issues an N-word prefetch burst per voice; the
-// 32-bit words stream out on psram1_burst_q with q_valid.
+// CRAM1 burst interface — owned by axi_cram1_slave, which uses it for
+// AXI multi-beat reads (CPU L1 D$ line fills).  One sync-burst command
+// returns up to 32 consecutive words, turning a 16-beat line fill into
+// a single ~30-cycle controller transaction.
 wire        psram1_burst_rd;
 wire [21:0] psram1_burst_addr;
 wire [4:0]  psram1_burst_len;
 wire [31:0] psram1_burst_q;
 wire        psram1_burst_q_valid;
 wire        psram1_burst_busy;
+
+// MMIO handshake — cram1_burst_mmio is retired (broken saw-busy gate).
+// axi_periph_slave still decodes the 0x4E000000 region for ABI
+// stability; responses are inert.
+wire        cram1_burst_mmio_addr_wr;
+wire [21:0] cram1_burst_mmio_addr_wdata;
+wire        cram1_burst_mmio_data_rd;
+wire        cram1_burst_mmio_busy    = 1'b0;
+wire [31:0] cram1_burst_mmio_data_q  = 32'hDEADBEEF;
 
 // Bridge → controller A interface (clk_cpu side of bridge_to_cram1)
 wire        bridge_req_rd;
@@ -1972,6 +1982,17 @@ assign video_hs = vidout_hs;
         .audio_sample_data(audio_sample_data),
         .audio_fifo_level(audio_fifo_level),
         .audio_fifo_full(audio_fifo_full),
+        // Audio DMA control (SDRAM ring → audio_output)
+        .audio_dma_base(audio_dma_base),
+        .audio_dma_len(audio_dma_len),
+        .audio_dma_enable(audio_dma_enable),
+        .audio_dma_read_ptr(audio_dma_read_ptr),
+        // CRAM1 burst prefetch MMIO (SW mixer sample cache refill)
+        .cram1_burst_addr_wr   (cram1_burst_mmio_addr_wr),
+        .cram1_burst_addr_wdata(cram1_burst_mmio_addr_wdata),
+        .cram1_burst_data_rd   (cram1_burst_mmio_data_rd),
+        .cram1_burst_busy      (cram1_burst_mmio_busy),
+        .cram1_burst_data_q    (cram1_burst_mmio_data_q),
         // Link MMIO interface
         .link_reg_wr(link_reg_wr),
         .link_reg_rd(link_reg_rd),
@@ -1991,20 +2012,9 @@ assign video_hs = vidout_hs;
         // Shutdown handshake
         .shutdown_pending(shutdown_pending_cpu),
         .shutdown_ack(shutdown_ack_cpu),
-        .mix_voice_wr(mix_voice_wr),
-        .mix_voice_field(mix_voice_field),
-        .mix_voice_sel(mix_voice_sel),
-        .mix_voice_wdata(mix_voice_wdata),
-        .mix_enable(mix_enable),
-        .mix_active_count(mix_active_count),
-        .mix_voice_pos(mix_voice_pos),
-        .mix_irq_clear_wr(mix_irq_clear_wr),
-        .mix_irq_clear_data(mix_irq_clear_data),
-        .mix_irq_pending(mix_irq_pending),
         .timer_irq(timer_irq),
         .uart_rx_irq(uart_rx_irq),
         .link_irq(link_irq),
-        .mix_voice_end_irq(mix_voice_end_irq),
         .ext_irq(ext_irq),
         // Datatable slot size query
         .dt_query_addr(cpu_dt_query_addr),
@@ -2021,17 +2031,8 @@ assign video_hs = vidout_hs;
         .gpu_reg_wr(gpu_reg_wr),
         .gpu_reg_addr(gpu_reg_addr),
         .gpu_reg_wdata(gpu_reg_wdata),
-        .gpu_reg_rdata(gpu_reg_rdata),
-        .mix_cram1_inhibit(mix_cram1_inhibit)
+        .gpu_reg_rdata(gpu_reg_rdata)
     );
-
-    wire [7:0]  awe_reverb_level     = 8'd0;
-    wire [7:0]  awe_reverb_feedback  = 8'd0;
-    wire [7:0]  awe_chorus_level     = 8'd0;
-    wire [15:0] awe_chorus_rate      = 16'd0;
-    wire [7:0]  awe_chorus_depth     = 8'd0;
-
-    wire        mix_cram1_inhibit;
 
     // DMA engine removed — apps use CPU memcpy instead
 
@@ -2125,6 +2126,15 @@ assign video_hs = vidout_hs;
         .m3_wdata(brg_sdram_wdata),     .m3_wstrb(brg_sdram_wstrb),
         .m3_wlast(brg_sdram_wlast),
         .m3_bvalid(brg_sdram_bvalid),   .m3_bresp(),
+        // M4: Audio DMA (read-only, *lowest* priority).  The ring
+        // carries ~85 ms of buffered audio, so audio can tolerate long
+        // gaps without glitching.  Bottom priority keeps the CPU / GPU
+        // first in line for their own fetches — audio getting scraps
+        // is still >> its <1 % bandwidth requirement.
+        .m4_arvalid(audio_m_arvalid), .m4_arready(audio_m_arready),
+        .m4_araddr(audio_m_araddr),   .m4_arlen(audio_m_arlen),
+        .m4_rvalid(audio_m_rvalid),   .m4_rdata(audio_m_rdata),
+        .m4_rresp(),                  .m4_rlast(audio_m_rlast),
         // Slave output (to axi_sdram_slave)
         .s_arvalid(arb_s_arvalid), .s_arready(arb_s_arready),
         .s_araddr(arb_s_araddr),   .s_arlen(arb_s_arlen),
@@ -2259,7 +2269,15 @@ assign video_hs = vidout_hs;
         .psram_wstrb       (c1_psram_wstrb),
         .psram_rdata       (c1_psram_rdata),
         .psram_busy        (c1_psram_busy),
-        .psram_rdata_valid (c1_psram_rdata_valid)
+        .psram_rdata_valid (c1_psram_rdata_valid),
+        // Burst port — drives the cram1_controller's sync-burst read
+        // interface for AXI multi-beat reads (CPU L1 D$ line fills).
+        .psram_burst_rd      (psram1_burst_rd),
+        .psram_burst_addr    (psram1_burst_addr),
+        .psram_burst_len     (psram1_burst_len),
+        .psram_burst_q       (psram1_burst_q),
+        .psram_burst_q_valid (psram1_burst_q_valid),
+        .psram_burst_busy    (psram1_burst_busy)
     );
 
     // axi_sram_slave removed — SRAM is GPU-exclusive (Z-buffer).
@@ -2443,38 +2461,74 @@ assign link_irq = 1'b0;
 //
 // Audio output (dcfifo + I2S)
 //
-// Hardware mixer
-wire        mix_enable;
-wire        mix_voice_wr;
-wire [3:0]  mix_voice_field;
-wire [5:0]  mix_voice_sel;
-wire [31:0] mix_voice_wdata;
-wire [5:0]  mix_active_count;
-wire [21:0] mix_voice_pos;
-wire        mix_irq_clear_wr;
-wire [31:0] mix_irq_clear_data;
-wire [31:0] mix_irq_pending;
-wire        mix_voice_end_irq;
-wire        mix_sample_wr;
-wire [31:0] mix_sample_data;
+// Hardware mixer retired — CPU writes stereo samples directly via
+// AUDIO_BASE MMIO (axi_periph_slave drives audio_sample_wr/data).
+// dcfifo bridges clk_cpu → clk_audio (12.288 MHz).
+//
 wire        timer_irq;
 wire        uart_rx_irq;
 wire        link_irq;
 wire        ext_irq;  // Masked combination from axi_periph_slave
 
-// TODO(audio_review): The raw audio MMIO write path (audio_sample_wr) from
-// axi_periph_slave exists but is not fed into audio_output.
-// Decide whether to wire it up or remove the dead surface entirely.
-// audio_output: dcfifo bridges clk_cpu → clk_audio (12.288 MHz).
-// Mixer and audio_output both run on clk_cpu now — no CDC on the
-// sample push path.
+// Audio DMA (SDRAM → audio_output).  MMIO-programmed base/len/enable
+// from axi_periph_slave; reads via a dedicated AXI master port (M4)
+// on the SDRAM arbiter so it never contends with the CPU or bridge on
+// CRAM1.  Output muxed into audio_output below so direct CPU writes
+// to AUDIO_SAMPLE still work when DMA is disabled.
+wire        dma_sample_wr;
+wire [31:0] dma_sample_data;
+wire [13:0] audio_dma_read_ptr;
+wire [31:0] audio_dma_base;
+wire [13:0] audio_dma_len;
+wire        audio_dma_enable;
+
+wire        audio_m_arvalid;
+wire        audio_m_arready;
+wire [31:0] audio_m_araddr;
+wire [7:0]  audio_m_arlen;
+wire        audio_m_rvalid;
+wire [31:0] audio_m_rdata;
+wire        audio_m_rlast;
+
+audio_dma audio_dma_inst (
+    .clk           (clk_cpu),
+    .reset_n       (reset_n),
+    .enable        (audio_dma_enable),
+    .ring_base     (audio_dma_base),
+    .ring_len      (audio_dma_len),
+    .read_ptr      (audio_dma_read_ptr),
+    .m_axi_arvalid (audio_m_arvalid),
+    .m_axi_arready (audio_m_arready),
+    .m_axi_araddr  (audio_m_araddr),
+    .m_axi_arlen   (audio_m_arlen),
+    .m_axi_rvalid  (audio_m_rvalid),
+    .m_axi_rdata   (audio_m_rdata),
+    .m_axi_rlast   (audio_m_rlast),
+    .sample_wr     (dma_sample_wr),
+    .sample_data   (dma_sample_data),
+    .fifo_level    (audio_fifo_level)
+);
+
+// cram1_burst_mmio removed — the burst_rd port on cram1_controller is
+// now owned by axi_cram1_slave (drives bursts for CPU L1 D$ line fills).
+// The MMIO-driven burst path hung the ISR on a saw-busy gate race from
+// C; the AXI path handshakes natively.  MMIO decode in axi_periph_slave
+// stays so a stray write to 0x4E000000 is a harmless no-op (busy tied
+// to 0, data_q returns a poison constant).
+
+// MMIO write and DMA are mutually exclusive — firmware uses one or the
+// other.  Simple OR/mux keeps either path working.  If both fire on the
+// same cycle (shouldn't happen in practice), DMA wins.
+wire        out_sample_wr   = dma_sample_wr | audio_sample_wr;
+wire [31:0] out_sample_data = dma_sample_wr ? dma_sample_data : audio_sample_data;
+
 audio_output audio_out (
     .clk_sys      (clk_cpu),
     .clk_audio    (clk_core_12288),
     .reset_n      (reset_n),
 
-    .sample_wr    (mix_sample_wr),
-    .sample_data  (mix_sample_data),
+    .sample_wr    (out_sample_wr),
+    .sample_data  (out_sample_data),
     .fifo_level   (audio_fifo_level),
     .fifo_full    (audio_fifo_full),
 
@@ -2482,63 +2536,6 @@ audio_output audio_out (
     .audio_lrck   (audio_lrck),
     .audio_dac    (audio_dac)
 );
-
-// audio_mixer runs directly on clk_cpu — no CDC wrapper needed.
-// CPU voice config, CRAM1 data, and audio output are all same-domain.
-// CRAM1 access is via the controller's burst_rd port (per-voice 8-word
-// prefetch); old single-word path retired with the cache landing.
-`ifndef EXCLUDE_MIXER
-audio_mixer mixer_inst (
-    .clk                (clk_cpu),
-    .reset_n            (reset_n),
-
-    .mixer_enable       (mix_enable),
-
-    .voice_wr           (mix_voice_wr),
-    .voice_field        (mix_voice_field),
-    .voice_sel          (mix_voice_sel),
-    .voice_sel_rd       (mix_voice_sel),
-    .voice_wdata        (mix_voice_wdata),
-
-    /* Mixer now uses CRAM1 burst-read interface only (per-voice 8-word
-     * prefetch cache).  Old word_rd interface was retired with the
-     * cache landing — every tap fetch goes through the cache, which
-     * refills via burst_rd whenever the requested word is outside
-     * the current per-voice 8-word window. */
-    .cram1_burst_rd      (psram1_burst_rd),
-    .cram1_burst_addr    (psram1_burst_addr),
-    .cram1_burst_len     (psram1_burst_len),
-    .cram1_burst_q       (psram1_burst_q),
-    .cram1_burst_q_valid (psram1_burst_q_valid),
-    .cram1_burst_busy    (psram1_burst_busy),
-    .cram1_busy          (psram1_busy | bridge_req_rd | bridge_req_wr | c1_psram_rd | c1_psram_wr),
-
-    .sample_wr          (mix_sample_wr),
-    .sample_data        (mix_sample_data),
-    .fifo_level         (audio_fifo_level),
-
-    .active_count       (mix_active_count),
-    .pos_readback       (mix_voice_pos),
-
-    .irq_clear          (mix_irq_clear_data),
-    .irq_clear_wr       (mix_irq_clear_wr),
-    .voice_end_pending  (mix_irq_pending),
-    .voice_end_irq      (mix_voice_end_irq),
-    .reverb_wet_level   (awe_reverb_level),
-    .reverb_feedback    (awe_reverb_feedback),
-    .chorus_wet_level   (awe_chorus_level),
-    .chorus_lfo_rate    (awe_chorus_rate),
-    .chorus_lfo_depth   (awe_chorus_depth),
-    .cram1_inhibit      (mix_cram1_inhibit)
-);
-`else
-assign mix_sample_wr = 1'b0;
-assign mix_sample_data = 32'b0;
-assign mix_active_count = 6'b0;
-assign mix_voice_pos = 22'b0;
-assign mix_irq_pending = 48'b0;
-assign mix_voice_end_irq = 1'b0;
-`endif
 
 // ============================================================
 // GPU — 3D Span Rasteriser

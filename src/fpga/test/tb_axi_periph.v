@@ -56,15 +56,11 @@ wire uart_tx_active = 1'b0;
 wire uart_rx_dv = 1'b0;
 wire [7:0] uart_rx_byte = 8'b0;
 wire shutdown_pending = 1'b0;
-wire [5:0] mix_active_count = 6'b0;
-wire [21:0] mix_voice_pos = 22'b0;
-wire [47:0] mix_irq_pending = 48'b0;
 wire [31:0] dt_query_data = 32'b0;
 wire dt_query_valid = 1'b0;
 wire [7:0] snac_pin_in = 8'b0;
 wire [31:0] gpu_reg_rdata = 32'b0;
 wire link_irq = 1'b0;
-wire mix_voice_end_irq = 1'b0;
 wire bridge_wr_idle = 1'b1;
 wire dataslot_allcomplete = 1'b1;
 wire vsync = 1'b0;
@@ -148,22 +144,10 @@ axi_periph_slave dut (
     .shutdown_pending(shutdown_pending),
     .shutdown_ack   (),
 
-    .mix_voice_wr    (),
-    .mix_voice_field (),
-    .mix_voice_sel   (),
-    .mix_voice_wdata (),
-    .mix_enable      (),
-    .mix_active_count(mix_active_count),
-    .mix_voice_pos   (mix_voice_pos),
-    .mix_irq_clear_wr(),
-    .mix_irq_clear_data(),
-    .mix_irq_pending (mix_irq_pending),
-
     .timer_irq  (),
     .uart_rx_irq(),
 
     .link_irq        (link_irq),
-    .mix_voice_end_irq(mix_voice_end_irq),
     .ext_irq         (),
 
     .dt_query_addr  (),

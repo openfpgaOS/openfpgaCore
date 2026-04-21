@@ -94,7 +94,12 @@ typedef struct {
  * these ranges so a non-conformant app fails fast instead of silently
  * scribbling on whatever happens to be at its addresses on this
  * target. */
-#define APP_VMAP_V1_BRAM_BASE   0x00002000u
+/* APP_VMAP_V1_BRAM_BASE widened from 0x2000 to 0x4000 when the OS
+ * fastdata region was extended to hold ISR-written audio state (see
+ * os.ld comment).  All apps must be rebuilt against the matching
+ * api/app.ld / api/of_caps.h.  Older app binaries will be rejected
+ * by seg_in_app_vmap() with error -7. */
+#define APP_VMAP_V1_BRAM_BASE   0x00004000u
 #define APP_VMAP_V1_BRAM_END    0x00007800u
 #define APP_VMAP_V1_SDRAM_BASE  0x10400000u
 #define APP_VMAP_V1_SDRAM_END   0x13400000u  /* 48 MB window */

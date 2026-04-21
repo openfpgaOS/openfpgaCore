@@ -1,119 +1,40 @@
 /*
- * openfpgaOS Hardware Mixer HAL
- * Configures the 32-voice CRAM1 hardware mixer via MMIO registers.
- * All mixing happens in FPGA fabric — zero CPU cost during playback.
+ * openfpgaOS mixer HAL — CPU-side software mixing
+ * -----------------------------------------------
+ * Thin wrapper over swmixer.c.  The public of_mixer_* API is preserved
+ * so apps continue to work unchanged; every call ends up mutating a
+ * swmixer_voice_t struct.  The swmixer_tick() is driven from the 1 kHz
+ * timer ISR (irq.c → swmixer_tick()).
  *
- * Hardware features:
- *   - 8-bit stereo volume with log curve and hardware ramp
- *   - 16.16 fixed-point resampling
- *   - Forward and bidirectional looping with LOOP_START/LOOP_END
- *   - 16-bit or 8-bit signed sample format
- *   - Position read-back and write
- *   - Voice-end IRQ (per-voice bitmask, W1C)
+ * Hardware mixer retired along with audio_mixer.v / audio_awe.v.
  */
 
 #include "mixer.h"
+#include "swmixer.h"
 #include "regs.h"
-#include "cache.h"
 
-#define MIXER_MAX_VOICES     32
-#define MIXER_OUTPUT_RATE    48000
-/* Voice 31 is reserved as scratch for of_audio_write() in targets/pocket/audio.c.
- * alloc_voice skips it so the two mechanisms don't collide. */
+#define MIXER_MAX_VOICES     SWMIXER_MAX_VOICES
+#define MIXER_OUTPUT_RATE    SWMIXER_OUTPUT_RATE
+
+/* Reserve voice 31 for the pocket `of_audio_*` stereo stream path, so
+ * SFX playback never steals it.  of_audio takes it directly via
+ * swmixer_voice(31). */
 #define MIXER_SCRATCH_VOICE  31
 
-/* CTRL register bits */
-#define CTRL_ACTIVE  (1 << 0)
-#define CTRL_LOOP    (1 << 1)
-#define CTRL_FMT16   (1 << 2)
-#define CTRL_BIDI    (1 << 3)
+/* Shadow state that isn't a direct field on swmixer_voice_t. */
+static int8_t  priority_shadow[MIXER_MAX_VOICES];
+static uint8_t vol_shadow[MIXER_MAX_VOICES];   /* master-scaled 0..255 */
+static uint8_t pan_shadow[MIXER_MAX_VOICES];   /* 0=L, 128=C, 255=R */
+static uint8_t group_shadow[MIXER_MAX_VOICES];
 
-static int mixer_initialized;
-/* 32 voices fit in a single 32-bit MMIO IRQ register.  The SW shadow is
- * kept as uint32_t to match.  The legacy _HI registers are stubbed to 0
- * by the slave at 32 voices and no longer referenced here. */
-static uint32_t voice_active_mask;
-
-static inline uint32_t read_irq_pending(void)
-{
-    return MIX_IRQ_PENDING;
-}
-
-static inline void write_irq_clear(uint32_t mask)
-{
-    if (mask) MIX_IRQ_CLEAR = mask;
-}
-
-/* Shadow CTRL per voice — every function that modifies CTRL updates
- * the shadow first, then calls write_ctrl(). */
-static uint8_t ctrl_shadow[MIXER_MAX_VOICES];
-
-/* Shadow volume and pan per voice — pan scales the base volume so
- * center pan doesn't halve the output level. */
-static uint8_t vol_shadow[MIXER_MAX_VOICES];
-static uint8_t pan_shadow[MIXER_MAX_VOICES];
-
-/* Priority per voice for voice stealing (higher = harder to steal) */
-static int8_t priority_shadow[MIXER_MAX_VOICES];
-
-/* Volume groups: per-voice group assignment + per-group and master scaling */
 #define MIXER_NUM_GROUPS 4
-static uint8_t group_shadow[MIXER_MAX_VOICES];        /* group index per voice */
-static uint8_t group_vol[MIXER_NUM_GROUPS];            /* 0-255 per group */
+static uint8_t group_vol[MIXER_NUM_GROUPS];
 static uint8_t master_vol;
 
-/* Brief IRQ-disabled critical section so the IRQ handler doesn't
- * land between read-modify-write of voice_active_mask. */
-static inline uint32_t irq_save(void) {
-    uint32_t s;
-    asm volatile("csrrci %0, mstatus, 8" : "=r"(s));
-    return s;
-}
-static inline void irq_restore(uint32_t s) {
-    if (s & (1u << 3))
-        asm volatile("csrsi mstatus, 8");
-}
-
-/* Called from irq.c when MIX_IRQ_PENDING fires.  Clears the SW shadow
- * mask atomically with the HW W1C so a subsequent alloc_voice doesn't
- * see a leaked stale bit.  Public via mixer_irq_clear_voices().  The
- * mask is uint64_t for ABI stability with prior 48-voice builds; the
- * upper 32 bits are always 0 at 32 voices. */
-void mixer_irq_clear_voices(uint64_t mask) {
-    voice_active_mask &= ~(uint32_t)mask;
-}
-
-/* Lightweight reconciliation — used only by code paths that don't
- * have IRQs enabled (rare).  When IRQs are running normally the
- * shadow stays in sync via mixer_irq_clear_voices(), so this peek
- * is a no-op in steady state. */
-static void sync_voice_mask(void) {
-    voice_active_mask &= ~read_irq_pending();
-}
-
-/* Bounds-only check — like the Amiga's Paula, register writes always
- * go through regardless of DMA state.  Writing to a dead voice just
- * updates BRAM; the FSM ignores it until the voice is reactivated.
- * The old voice_active_mask check silently dropped effect commands
- * (volume, rate, pan, loop) after a sample ended naturally. */
-static inline int voice_in_range(int voice) {
-    return voice >= 0 && voice < MIXER_MAX_VOICES;
-}
-
-static void write_ctrl(int voice) {
-    uint8_t ctrl = ctrl_shadow[voice];
-    /* Never reactivate a dead voice via a parameter update.
-     * Strip ACTIVE for voices not in the software mask — this lets
-     * set_loop/set_bidi update BRAM flags without accidentally
-     * triggering an inactive→active transition in the RTL. */
-    if (!(voice_active_mask & (1u << voice)))
-        ctrl &= ~CTRL_ACTIVE;
-    MIX_VOICE_CTRL = ctrl;
-}
+static int mixer_initialized;
 
 /* Equal-power pan: quarter-cosine/sine, 256 entries.
- * pan_cos[i] = round(cos(i * π / 510) * 255), pan_sin[i] = round(sin(i * π / 510) * 255)
- * At center (128): both ≈ 181 (0.707 × 256). */
+ * pan_cos[i] ≈ cos(i·π/510)·255, pan_sin[i] ≈ sin(i·π/510)·255. */
 static const uint8_t pan_cos[256] = {
     255,255,255,255,255,255,255,255,255,255,255,254,254,254,254,254,
     254,254,253,253,253,253,253,252,252,252,252,251,251,251,251,250,
@@ -151,11 +72,8 @@ static const uint8_t pan_sin[256] = {
     254,254,254,254,254,255,255,255,255,255,255,255,255,255,255,255,
 };
 
-/* Compute stereo volume target from voice vol × group vol × master vol + pan.
- * Pan 0=left, 128=center, 255=right. Equal-power curve (constant energy). */
 static void apply_vol_pan(int voice)
 {
-    /* Chain: voice × group × master (all 0-255, result 0-255) */
     int v = vol_shadow[voice];
     v = (v * group_vol[group_shadow[voice]]) / 255;
     v = (v * master_vol) / 255;
@@ -163,151 +81,101 @@ static void apply_vol_pan(int voice)
     int p = pan_shadow[voice];
     int vol_l = (v * pan_cos[p]) >> 8;
     int vol_r = (v * pan_sin[p]) >> 8;
-    MIX_VOICE_VOL_TARGET = ((vol_r & 0xFF) << 8) | (vol_l & 0xFF);
+
+    swmixer_voice_t *sv = swmixer_voice(voice);
+    if (!sv) return;
+    sv->vol_l_tgt = (uint8_t)(vol_l & 0xFF);
+    sv->vol_r_tgt = (uint8_t)(vol_r & 0xFF);
+}
+
+static inline int voice_in_range(int voice)
+{
+    return voice >= 0 && voice < MIXER_MAX_VOICES;
 }
 
 void of_mixer_init(int max_voices, int output_rate)
 {
     (void)max_voices;
     (void)output_rate;
+    swmixer_init();
     for (int i = 0; i < MIXER_MAX_VOICES; i++) {
-        MIX_VOICE_SEL = i;
-        MIX_VOICE_CTRL = 0;
-        ctrl_shadow[i] = 0;
         vol_shadow[i] = 255;
         pan_shadow[i] = 128;
         priority_shadow[i] = 0;
         group_shadow[i] = 0;
     }
-    for (int i = 0; i < MIXER_NUM_GROUPS; i++)
-        group_vol[i] = 255;
+    for (int i = 0; i < MIXER_NUM_GROUPS; i++) group_vol[i] = 255;
     master_vol = 255;
-    /* Clear any pending IRQs */
-    MIX_IRQ_CLEAR = 0xFFFFFFFF;
-    MIX_CTRL = 1;
-    voice_active_mask = 0;
     mixer_initialized = 1;
 }
 
-static uint32_t cram1_word_addr(const void *ptr) {
-    uint32_t a = (uint32_t)(uintptr_t)ptr;
-    uint32_t offset;
-    if (a >= CRAM1_UNCACHED && a < CRAM1_UNCACHED + CRAM_SIZE)
-        offset = a - CRAM1_UNCACHED;
-    else
-        offset = a - CRAM1_BASE;
-    return offset >> 2;
-}
-
-// TODO(audio_review): Voice ownership is fragmented across tracking systems.
-// Also, the allocator only protects voice 31. Stream voices 29/30 used in audio.c are unprotected.
-/* Allocate a voice, handling priority-based stealing. Returns voice index or -1. */
+/* Allocate a voice, handling priority-based stealing. */
 static int alloc_voice(int priority)
 {
-    sync_voice_mask();
-
-    /* First pass: find a free voice */
-    int voice = -1;
+    /* First pass: a free slot. */
     for (int i = 0; i < MIXER_MAX_VOICES; i++) {
         if (i == MIXER_SCRATCH_VOICE) continue;
-        if (!(voice_active_mask & (1u << i))) {
-            voice = i;
-            break;
+        swmixer_voice_t *sv = swmixer_voice(i);
+        if (!sv->active) return i;
+    }
+    /* Second pass: steal lowest-priority voice strictly below this one. */
+    int victim = -1;
+    int lowest = priority;
+    for (int i = 0; i < MIXER_MAX_VOICES; i++) {
+        if (i == MIXER_SCRATCH_VOICE) continue;
+        if (priority_shadow[i] < lowest) {
+            lowest = priority_shadow[i];
+            victim = i;
         }
     }
-
-    /* Second pass: steal lowest-priority voice if no free voice available */
-    if (voice < 0) {
-        int lowest_pri = priority;
-        for (int i = 0; i < MIXER_MAX_VOICES; i++) {
-            if (i == MIXER_SCRATCH_VOICE) continue;
-            if (priority_shadow[i] < lowest_pri) {
-                lowest_pri = priority_shadow[i];
-                voice = i;
-            }
-        }
-        if (voice >= 0) {
-            /* Fast hardware fade-out before deactivating to eliminate
-             * the click from snapping the sample value to silence.
-             * Step 1: set target=0 with fast ramp.
-             * Step 2: wait long enough for the ramp to actually complete.
-             *         At RATE=8, vol drops from 255 to 0 in 32 sample
-             *         periods × 21μs/sample ≈ 670μs.
-             * Step 3: deactivate the voice. */
-            MIX_VOICE_SEL = voice;
-            MIX_VOICE_VOL_TARGET = 0;
-            MIX_VOICE_VOL_RATE = 8;
-
-            /* Busy-wait for the ramp to complete. ~700μs at 100MHz =
-             * ~70000 cycles. This only runs when stealing a voice, which
-             * is rare (only when all 31 voices are busy). */
-            for (volatile int w = 0; w < 7000; w++) {
-                __asm__ volatile("nop");
-            }
-
-            MIX_VOICE_SEL = voice;
-            ctrl_shadow[voice] = 0;
-            MIX_VOICE_CTRL = 0;
-        }
+    if (victim >= 0) {
+        /* Quick fade-out then deactivate — same click avoidance as the
+         * retired HW ramp.  Nothing to busy-wait for: the next tick will
+         * ramp vol to 0 before the new sample starts at target vol. */
+        swmixer_voice_t *sv = swmixer_voice(victim);
+        sv->vol_l_tgt = sv->vol_r_tgt = 0;
+        sv->vol_rate = 16;  /* fast */
     }
-    return voice;
+    return victim;
 }
 
-/* Common play implementation for both 8-bit and 16-bit samples. */
-static int play_internal(const uint8_t *pcm, uint32_t sample_count,
+static int play_internal(const void *pcm, uint32_t sample_count,
                          uint32_t sample_rate, int priority, int volume,
                          int fmt16)
 {
-    if (!mixer_initialized || !pcm || sample_count == 0)
-        return -1;
-
+    if (!mixer_initialized || !pcm || sample_count == 0) return -1;
     int voice = alloc_voice(priority);
     if (voice < 0) return -1;
 
-    int v = volume & 0xFF;
     uint32_t rate = ((uint64_t)sample_rate << 16) / MIXER_OUTPUT_RATE;
-    uint32_t byte_size = fmt16 ? sample_count * 2 : sample_count;
+    int v = volume & 0xFF;
 
-    uint32_t addr = (uint32_t)(uintptr_t)pcm;
-    if (addr < CRAM1_UNCACHED || addr >= CRAM1_UNCACHED + CRAM_SIZE)
-        of_cache_clean_range((void *)pcm, byte_size);
-
-    MIX_VOICE_SEL = voice;
-    MIX_VOICE_ADDR = cram1_word_addr(pcm);
-    MIX_VOICE_POS_WR = 0;
-    MIX_VOICE_LEN = sample_count;
-    MIX_VOICE_RATE = rate;
+    swmixer_voice_t *sv = swmixer_voice(voice);
+    sv->sample = pcm;
+    sv->len = sample_count;
+    sv->loop_start = 0;
+    sv->loop_end = sample_count;
+    sv->pos_int = 0;
+    sv->pos_frac = 0;
+    sv->rate_fp16 = rate;
+    sv->fmt16 = fmt16 ? 1 : 0;
+    sv->stereo = 0;
+    sv->loop_mode = SWMIXER_LOOP_NONE;
+    sv->dir_rev = 0;
+    sv->end_pending = 0;
 
     vol_shadow[voice] = v;
     pan_shadow[voice] = 128;
-    /* Soft fade-in: start at 0, ramp to target.
-     * Rate=8 → ramp from 0 to 255 in 32 sample periods ≈ 0.67ms.
-     * Eliminates click at sample start without audible attack delay. */
-    MIX_VOICE_VOL_LR = 0;
-    MIX_VOICE_VOL_TARGET = (v << 8) | v;
-    MIX_VOICE_VOL_RATE = 8;
-
     priority_shadow[voice] = priority;
-    ctrl_shadow[voice] = CTRL_ACTIVE | (fmt16 ? CTRL_FMT16 : 0);
 
-    /* Clear stale end-event from a previous play on this voice slot.
-     * sync_voice_mask() no longer clears IRQs (it peeks), so an old
-     * end bit could still be set.  Without this, poll_ended() would
-     * see the stale bit and immediately mark this voice as dead. */
-    write_irq_clear(1u << voice);
+    /* Start at 0, ramp to target — soft fade-in, same rationale as the
+     * old HW ramp (avoids click at sample start).  Ramp rate 8 ≈ 0.67 ms
+     * to full volume. */
+    sv->vol_l_cur = sv->vol_r_cur = 0;
+    sv->vol_rate = 8;
+    apply_vol_pan(voice);
 
-    /* Set mask BEFORE write_ctrl — write_ctrl strips CTRL_ACTIVE
-     * for voices not in voice_active_mask (safety for set_loop/set_bidi).
-     * Brief IRQ-disabled critical section so the IRQ handler can't
-     * land between the read and write — otherwise a "voice ended"
-     * IRQ for an unrelated voice could clear bits that the |=
-     * just set, leaking ownership. */
-    {
-        uint32_t s = irq_save();
-        voice_active_mask |= (1u << voice);
-        irq_restore(s);
-    }
-    write_ctrl(voice);
+    sv->active = 1;
     return voice;
 }
 
@@ -324,86 +192,50 @@ int of_mixer_play_8bit(const uint8_t *pcm_s8, uint32_t sample_count,
 }
 
 void of_mixer_retrigger(int voice, const uint8_t *pcm_s16,
-                       uint32_t sample_count, uint32_t sample_rate,
-                       int volume)
+                        uint32_t sample_count, uint32_t sample_rate,
+                        int volume)
 {
-    if (voice < 0 || voice >= MIXER_MAX_VOICES || !pcm_s16 || sample_count == 0)
-        return;
-
+    if (!voice_in_range(voice) || !pcm_s16 || sample_count == 0) return;
     int v = volume & 0xFF;
     uint32_t rate = ((uint64_t)sample_rate << 16) / MIXER_OUTPUT_RATE;
 
-    {
-        uint32_t a = (uint32_t)(uintptr_t)pcm_s16;
-        if (a < CRAM1_UNCACHED || a >= CRAM1_UNCACHED + CRAM_SIZE)
-            of_cache_clean_range((void *)pcm_s16, sample_count * 2);
-    }
+    swmixer_voice_t *sv = swmixer_voice(voice);
+    sv->sample = pcm_s16;
+    sv->len = sample_count;
+    sv->loop_start = 0;
+    sv->loop_end = sample_count;
+    sv->pos_int = 0;
+    sv->pos_frac = 0;
+    sv->rate_fp16 = rate;
+    sv->fmt16 = 1;
+    sv->stereo = 0;
+    sv->loop_mode = SWMIXER_LOOP_NONE;
+    sv->dir_rev = 0;
+    sv->end_pending = 0;
 
-    MIX_VOICE_SEL = voice;
-
-    /* Clear stale voice-end IRQ from previous sample.  Without this,
-     * sync_voice_mask() sees the old end event and clears our mask bit,
-     * causing set_volume/set_rate/etc. to silently fail (voice_valid()
-     * returns false) and of_mixer_play() to steal this voice. */
-    write_irq_clear(1u << voice);
-
-    /* Guard LEN: the FSM runs concurrently and checks pos >= len every
-     * mix cycle.  Setting LEN to max first prevents the FSM from killing
-     * the voice while we update ADDR/POS (it can't reach 4M samples in
-     * the few microseconds we need).  Real LEN is written last. */
-    MIX_VOICE_LEN = 0x3FFFFF;
-    MIX_VOICE_ADDR = cram1_word_addr(pcm_s16);
-    MIX_VOICE_POS_WR = 0;
-    MIX_VOICE_RATE = rate;
-    MIX_VOICE_LEN = sample_count;
-
-    /* Snap to new volume (no ramp on retrigger) */
     vol_shadow[voice] = v;
     pan_shadow[voice] = 128;
-    MIX_VOICE_VOL_LR = (v << 8) | v;
-    MIX_VOICE_VOL_TARGET = (v << 8) | v;
-
-    /* Re-assert active + fmt16, clear loop (caller sets loop after) */
-    ctrl_shadow[voice] = CTRL_ACTIVE | CTRL_FMT16;
-    {
-        uint32_t s = irq_save();
-        voice_active_mask |= (1u << voice);
-        irq_restore(s);
-    }
-    write_ctrl(voice);
+    sv->vol_l_cur = sv->vol_r_cur = v;
+    sv->vol_rate = 0;
+    apply_vol_pan(voice);
+    sv->active = 1;
 }
 
 void of_mixer_stop(int voice)
 {
-    if (voice >= 0 && voice < MIXER_MAX_VOICES) {
-        MIX_VOICE_SEL = voice;
-        /* Snap volume to 0 before deactivating to reduce click.
-         * The mixer will use vol=0 if it processes this voice before
-         * the CTRL=0 write takes effect on the next mix cycle. */
-        MIX_VOICE_VOL_LR = 0;
-        MIX_VOICE_VOL_TARGET = 0;
-        MIX_VOICE_VOL_RATE = 0;  /* instant */
-        ctrl_shadow[voice] = 0;
-        MIX_VOICE_CTRL = 0;
-        voice_active_mask &= ~(1u << voice);
-    }
+    if (!voice_in_range(voice)) return;
+    swmixer_stop(voice);
 }
 
 void of_mixer_stop_all(void)
 {
-    for (int i = 0; i < MIXER_MAX_VOICES; i++) {
-        MIX_VOICE_SEL = i;
-        ctrl_shadow[i] = 0;
-        MIX_VOICE_CTRL = 0;
-    }
-    voice_active_mask = 0;
+    swmixer_stop_all();
 }
 
 void of_mixer_set_volume(int voice, int volume)
 {
     if (!voice_in_range(voice)) return;
     vol_shadow[voice] = volume & 0xFF;
-    MIX_VOICE_SEL = voice;
     apply_vol_pan(voice);
 }
 
@@ -411,142 +243,132 @@ void of_mixer_set_pan(int voice, int pan)
 {
     if (!voice_in_range(voice)) return;
     pan_shadow[voice] = pan & 0xFF;
-    MIX_VOICE_SEL = voice;
     apply_vol_pan(voice);
 }
 
 int of_mixer_voice_active(int voice)
 {
-    if (voice < 0 || voice >= MIXER_MAX_VOICES)
-        return 0;
-    sync_voice_mask();
-    return (voice_active_mask & (1u << voice)) ? 1 : 0;
+    if (!voice_in_range(voice)) return 0;
+    return swmixer_voice(voice)->active ? 1 : 0;
 }
 
-/* No-op: hardware mixer runs autonomously */
-void of_mixer_pump_auto(void) { }
-void of_mixer_pump(void) { }
-
-/* ======================================================================
- * Voice control
- * ====================================================================== */
+/* Main-thread mix pump.  Called by the app (Doom's opl_Poll, SDL audio
+ * callback, etc.) when it has CPU to spare.  Each tick mixes one
+ * 48-sample block into the CRAM1 DMA ring; we keep mixing until the
+ * ring is about half-full, catching up from whatever rendering hogged
+ * the CPU since the last pump.  Running mixing here (not in the timer
+ * ISR) keeps the renderer's cache warm — a 1 kHz ISR mix was evicting
+ * Doom's hot working set every millisecond and starving the renderer
+ * to 0.1 fps.  The DMA ring absorbs up to 85 ms of timing jitter. */
+void of_mixer_pump(void)
+{
+    extern void swmixer_tick(void);
+    extern uint32_t swmixer_ring_gap(void);
+    /* Mix until the ring is ~half full.  The swmixer_tick body already
+     * early-returns if it'd lap the consumer, so an unbounded loop is
+     * safe; we cap at a sane upper bound anyway to avoid pathological
+     * long pumps if the consumer is somehow stalled. */
+    for (int i = 0; i < 128; i++) {
+        if (swmixer_ring_gap() >= SWMIXER_OUTPUT_RATE / 24)  /* ~42 ms */
+            break;
+        swmixer_tick();
+    }
+}
+void of_mixer_pump_auto(void) { of_mixer_pump(); }
 
 void of_mixer_set_loop(int voice, int loop_start, int loop_end)
 {
     if (!voice_in_range(voice)) return;
-    MIX_VOICE_SEL = voice;
+    swmixer_voice_t *sv = swmixer_voice(voice);
     if (loop_start < 0) {
-        ctrl_shadow[voice] &= ~(CTRL_LOOP | CTRL_BIDI);
+        sv->loop_mode = SWMIXER_LOOP_NONE;
     } else {
-        MIX_VOICE_LOOP_START = loop_start;
-        if (loop_end > 0)
-            MIX_VOICE_LOOP_END = loop_end;
-        ctrl_shadow[voice] |= CTRL_LOOP;
+        sv->loop_start = (uint32_t)loop_start;
+        if (loop_end > 0) sv->loop_end = (uint32_t)loop_end;
+        if (sv->loop_mode == SWMIXER_LOOP_NONE)
+            sv->loop_mode = SWMIXER_LOOP_FORWARD;
     }
-    write_ctrl(voice);
 }
 
 void of_mixer_set_rate(int voice, int sample_rate_hz)
 {
     if (!voice_in_range(voice)) return;
     uint32_t rate = ((uint64_t)sample_rate_hz << 16) / MIXER_OUTPUT_RATE;
-    MIX_VOICE_SEL = voice;
-    MIX_VOICE_RATE = rate;
+    swmixer_voice(voice)->rate_fp16 = rate;
 }
 
 void of_mixer_set_rate_raw(int voice, uint32_t rate_fp16)
 {
     if (!voice_in_range(voice)) return;
-    MIX_VOICE_SEL = voice;
-    MIX_VOICE_RATE = rate_fp16;
+    swmixer_voice(voice)->rate_fp16 = rate_fp16;
 }
 
 void of_mixer_set_vol_lr(int voice, int vol_l, int vol_r)
 {
     if (!voice_in_range(voice)) return;
-    MIX_VOICE_SEL = voice;
-    MIX_VOICE_VOL_TARGET = ((vol_r & 0xFF) << 8) | (vol_l & 0xFF);
+    swmixer_voice_t *sv = swmixer_voice(voice);
+    sv->vol_l_tgt = (uint8_t)(vol_l & 0xFF);
+    sv->vol_r_tgt = (uint8_t)(vol_r & 0xFF);
 }
 
 void of_mixer_set_bidi(int voice, int enable)
 {
     if (!voice_in_range(voice)) return;
-    MIX_VOICE_SEL = voice;
-    if (enable)
-        ctrl_shadow[voice] |= CTRL_BIDI;
-    else
-        ctrl_shadow[voice] &= ~CTRL_BIDI;
-    write_ctrl(voice);
+    swmixer_voice_t *sv = swmixer_voice(voice);
+    if (enable) sv->loop_mode = SWMIXER_LOOP_BIDI;
+    else if (sv->loop_mode == SWMIXER_LOOP_BIDI)
+        sv->loop_mode = SWMIXER_LOOP_FORWARD;
 }
 
 int of_mixer_get_position(int voice)
 {
     if (!voice_in_range(voice)) return 0;
-    MIX_VOICE_SEL = voice;
-    /* Two-read consistency check: the voice position counter updates
-     * asynchronously to CPU reads, so a single read can straddle a
-     * carry boundary (e.g. 0x0FFF -> 0x1000) and return a mix of
-     * old/new bits. Re-read until two consecutive samples agree. */
-    int prev = MIX_VOICE_POS & 0x3FFFFF;
-    for (int i = 0; i < 16; i++) {
-        int now = MIX_VOICE_POS & 0x3FFFFF;
-        if (now == prev) return now;
-        prev = now;
-    }
-    return prev;
+    return (int)(swmixer_voice(voice)->pos_int & 0x3FFFFF);
 }
 
 void of_mixer_set_position(int voice, int sample_offset)
 {
     if (!voice_in_range(voice)) return;
-    MIX_VOICE_SEL = voice;
-    MIX_VOICE_POS_WR = sample_offset;
+    swmixer_voice_t *sv = swmixer_voice(voice);
+    sv->pos_int = (uint32_t)sample_offset;
+    sv->pos_frac = 0;
 }
 
 void of_mixer_set_voice(int voice, int sample_rate_hz, int vol_l, int vol_r)
 {
     if (!voice_in_range(voice)) return;
     uint32_t rate = ((uint64_t)sample_rate_hz << 16) / MIXER_OUTPUT_RATE;
-    MIX_VOICE_SEL = voice;
-    MIX_VOICE_RATE = rate;
-    MIX_VOICE_VOL_TARGET = ((vol_r & 0xFF) << 8) | (vol_l & 0xFF);
+    swmixer_voice_t *sv = swmixer_voice(voice);
+    sv->rate_fp16 = rate;
+    sv->vol_l_tgt = (uint8_t)(vol_l & 0xFF);
+    sv->vol_r_tgt = (uint8_t)(vol_r & 0xFF);
 }
 
 void of_mixer_set_voice_raw(int voice, uint32_t rate_fp16, int vol_l, int vol_r)
 {
     if (!voice_in_range(voice)) return;
-    MIX_VOICE_SEL = voice;
-    MIX_VOICE_RATE = rate_fp16;
-    MIX_VOICE_VOL_TARGET = ((vol_r & 0xFF) << 8) | (vol_l & 0xFF);
+    swmixer_voice_t *sv = swmixer_voice(voice);
+    sv->rate_fp16 = rate_fp16;
+    sv->vol_l_tgt = (uint8_t)(vol_l & 0xFF);
+    sv->vol_r_tgt = (uint8_t)(vol_r & 0xFF);
 }
 
 void of_mixer_set_volume_ramp(int voice, int rate)
 {
     if (!voice_in_range(voice)) return;
-    MIX_VOICE_SEL = voice;
-    MIX_VOICE_VOL_RATE = rate & 0xFF;
+    swmixer_voice(voice)->vol_rate = (uint8_t)(rate & 0xFF);
 }
 
 uint32_t of_mixer_poll_ended(void)
 {
-    uint32_t mask = read_irq_pending();
-    if (mask) {
-        write_irq_clear(mask);
-        voice_active_mask &= ~mask;
-    }
-    return mask;
+    return swmixer_poll_ended();
 }
-
-/* ======================================================================
- * Group / master volume
- * ====================================================================== */
 
 void of_mixer_set_group(int voice, int group)
 {
     if (!voice_in_range(voice)) return;
     if (group < 0 || group >= MIXER_NUM_GROUPS) return;
-    group_shadow[voice] = group;
-    MIX_VOICE_SEL = voice;
+    group_shadow[voice] = (uint8_t)group;
     apply_vol_pan(voice);
 }
 
@@ -554,52 +376,36 @@ void of_mixer_set_group_volume(int group, int volume)
 {
     if (group < 0 || group >= MIXER_NUM_GROUPS) return;
     group_vol[group] = volume & 0xFF;
-    /* Reapply volume to all active voices in this group */
     for (int i = 0; i < MIXER_MAX_VOICES; i++) {
-        if (group_shadow[i] == group && (voice_active_mask & (1u << i))) {
-            MIX_VOICE_SEL = i;
+        if (group_shadow[i] == group && swmixer_voice(i)->active)
             apply_vol_pan(i);
-        }
     }
 }
 
 void of_mixer_set_master_volume(int volume)
 {
     master_vol = volume & 0xFF;
-    /* Reapply volume to all active voices */
     for (int i = 0; i < MIXER_MAX_VOICES; i++) {
-        if (voice_active_mask & (1u << i)) {
-            MIX_VOICE_SEL = i;
-            apply_vol_pan(i);
-        }
+        if (swmixer_voice(i)->active) apply_vol_pan(i);
     }
 }
 
-// TODO(audio_review): Filter plumbing exists here, but the mixer RTL (audio_mixer.v)
-// does not implement it in the sample path. Remove dead filter control paths or implement them.
+/* Filter surface removed — the hardware mixer never implemented it, and
+ * the CPU mixer doesn't either (intentional, see audio.md §5).  Kept as
+ * a no-op so older app binaries link cleanly.  If per-voice filtering is
+ * reintroduced it belongs in swmixer_tick()'s inner loop. */
 void of_mixer_set_filter(int voice, int cutoff_q016, int q, int enable)
 {
-    if (!voice_in_range(voice)) return;
-    if (cutoff_q016 < 0)     cutoff_q016 = 0;
-    if (cutoff_q016 > 65535) cutoff_q016 = 65535;
-    if (q < 0)   q = 0;
-    if (q > 255) q = 255;
-    MIX_VOICE_SEL       = voice;
-    MIX_VOICE_FILTER_FC = (uint32_t)cutoff_q016;
-    MIX_VOICE_FILTER_Q  = ((enable ? 1u : 0u) << 8) | (uint32_t)q;
+    (void)voice; (void)cutoff_q016; (void)q; (void)enable;
 }
 
-/* ======================================================================
- * Sample memory bump allocator
- * ====================================================================== */
-
+/* Sample memory bump allocator — unchanged, still CRAM1. */
 static uint32_t sample_pool_head = SAMPLE_POOL_BASE;
 
 void *of_mixer_alloc_samples(uint32_t size)
 {
     size = (size + 3) & ~3;
-    if (sample_pool_head + size > SAMPLE_POOL_END)
-        return (void *)0;
+    if (sample_pool_head + size > SAMPLE_POOL_END) return (void *)0;
     void *ptr = (void *)sample_pool_head;
     sample_pool_head += size;
     return ptr;

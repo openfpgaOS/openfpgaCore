@@ -10,22 +10,19 @@
 /* Timer ISR callback — lives in syscall.c (handles timer_callback + sigalrm) */
 extern void timer_isr_callback(void);
 
-/* Mixer-side helper that updates the SW shadow voice_active_mask to
- * match the HW IRQ pending bits we just observed.  Has to run BEFORE
- * the W1C below so a simultaneous play_internal observing the
- * shadow doesn't reuse a slot that the fabric just retired. */
-extern void mixer_irq_clear_voices(unsigned long long mask);
+/* Software mixer tick — produces one 48-sample block and pushes it to
+ * the audio FIFO.  Fires from the 1 kHz timer ISR.  Declared here to
+ * avoid dragging all of swmixer.h into the kernel IRQ TU. */
+extern void swmixer_tick(void);
 
 /* IRQ callbacks */
 static void (*external_cb)(uint32_t source);
 static void (*vsync_cb)(void);
-static void (*mixer_end_cb)(uint32_t ended_mask);
 static void (*link_rx_cb)(uint32_t word);
 
 void of_irq_init(void) {
     external_cb = 0;
     vsync_cb = 0;
-    mixer_end_cb = 0;
     link_rx_cb = 0;
 }
 
@@ -41,12 +38,11 @@ void of_irq_register_vsync(void (*cb)(void)) {
         IRQ_MASK &= ~IRQ_MASK_VSYNC;
 }
 
+/* Voice-end IRQ retired with the hardware mixer.  Ended voices are now
+ * reported synchronously via of_mixer_poll_ended(); the registration
+ * call is preserved for ABI but accepts and drops the callback. */
 void of_irq_register_mixer_end(void (*cb)(uint32_t ended_mask)) {
-    mixer_end_cb = cb;
-    if (cb)
-        IRQ_MASK |= IRQ_MASK_MIX_VOICE;
-    else
-        IRQ_MASK &= ~IRQ_MASK_MIX_VOICE;
+    (void)cb;
 }
 
 void of_irq_register_link_rx(void (*cb)(uint32_t word)) {
@@ -67,28 +63,21 @@ void irq_handler(void *frame) {
     uint32_t code = mcause & 0x7FFFFFFF;
 
     if (code == 7) {
-        /* Machine timer interrupt — clear pending, call callback */
+        /* Machine timer interrupt — clear pending, mix + run app
+         * callback.  swmixer_tick writes 48 stereo pairs into the
+         * SDRAM DMA ring and cbo.cleans the three cache lines; the
+         * audio_dma AXI M4 master streams from there to the dcfifo. */
         TIMER_CTRL = TIMER_CTRL_ENABLE | TIMER_CTRL_W1C_IRQ;
+        swmixer_tick();
         timer_isr_callback();
     }
 
     if (code == 11) {
-        /* Machine external interrupt — UART RX, link, mixer voice-end, vsync */
+        /* Machine external interrupt — UART RX, link, vsync. */
         uint32_t source = 0;
 
         if (UART_STATUS & UART_RX_AVAIL)
             source |= IRQ_SRC_UART_RX;
-
-        /* Mixer voice-end: read pending mask, sync the SW shadow,
-         * then W1C clear.  Order matters — see mixer_irq_clear_voices()
-         * comment.  At AWE_MAX_VOICES = 32 the HI half of the mask is
-         * always 0; we still pass a 64-bit value for ABI stability. */
-        uint32_t mix_ended = MIX_IRQ_PENDING;
-        if (mix_ended) {
-            mixer_irq_clear_voices((unsigned long long)mix_ended);
-            MIX_IRQ_CLEAR = mix_ended;
-            source |= IRQ_SRC_MIX_VOICE;
-        }
 
         /* Link: rx_ready flag (cleared by reading RX_DATA) */
         if (LINK_STATUS & LINK_STATUS_RX_READY)
@@ -108,9 +97,6 @@ void irq_handler(void *frame) {
 
         if ((source & IRQ_SRC_VSYNC) && vsync_cb)
             vsync_cb();
-
-        if ((source & IRQ_SRC_MIX_VOICE) && mixer_end_cb)
-            mixer_end_cb(mix_ended);
 
         if (external_cb)
             external_cb(source);

@@ -27,8 +27,8 @@ int of_audio_get_free(void);
 /* Open a stream. sample_rate is the input rate (resampled to 48kHz). */
 int of_audio_stream_open(int sample_rate);
 
-/* Write mono 16-bit signed samples. Up to 32K samples per call.
- * Returns number of samples written. */
+/* Write interleaved stereo s16 sample pairs.
+ * Returns number of stereo pairs actually accepted. */
 int of_audio_stream_write(const int16_t *samples, int count);
 
 /* Check if the next write buffer is available (non-blocking). */

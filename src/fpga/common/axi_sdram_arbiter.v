@@ -1,14 +1,30 @@
 //
-// AXI4 SDRAM Arbiter — 4 Masters, Fixed Priority
+// AXI4 SDRAM Arbiter — 5 Masters, Fixed Priority
 //
-// Routes 4 AXI4 masters to 1 AXI4 slave (axi_sdram_slave).
-// Fixed priority: M0 (Span) > M1 (DMA) > M3 (Bridge) > M2 (CPU).
-// Bridge gets higher priority than CPU so the APF bridge can
-// read back nonvolatile save data from SDRAM at shutdown/flush
-// without being starved.  Bridge is idle during normal operation so this
-// has zero performance impact on the CPU.
-// Single outstanding transaction — grants one master at a time,
-// holds until read completes (R.rlast) or write completes (B.bvalid).
+// Routes 5 AXI4 masters to 1 AXI4 slave (axi_sdram_slave).
+// Fixed priority: M0 (Span) > M1 (GPU W/DMA) > M3 (Bridge) > M2 (CPU) > M4 (Audio).
+//
+// M4 (audio_dma) is *lowest* priority.  The DMA ring is sized for
+// ~85 ms of buffered audio, so even long gaps in bus availability
+// are absorbed without glitching.  Putting audio above CPU choked
+// Doom: every audio burst cost the CPU an arbitration round-trip,
+// and audio's 6000 bursts/sec × ~30 cycles compounded into a
+// measurable rendering slowdown even though the raw bandwidth was
+// <1 %.  Lowest priority gives audio scraps only — which is plenty —
+// and keeps the CPU first in line for its own fetches.
+//
+// Bridge (M3) gets higher priority than CPU so the APF bridge can
+// read back nonvolatile save data from SDRAM at shutdown/flush without
+// being starved.  Bridge is idle during normal operation so this has
+// zero performance impact on the CPU.
+//
+// CPU fairness: any GPU/bridge grant while CPU has a pending request
+// increments a deficit counter; once it reaches CPU_FAIR_THRESHOLD
+// the CPU is granted unconditionally.  M4 is below CPU so it never
+// contributes to the deficit.
+//
+// Single outstanding transaction — grants one master at a time, holds
+// until read completes (R.rlast) or write completes (B.bvalid).
 //
 // Pure register/LUT — 0 M10K.
 //
@@ -16,12 +32,12 @@
 `default_nettype none
 
 module axi_sdram_arbiter #(
-    parameter [3:0] CPU_FAIR_THRESHOLD = 4'd8  // Force CPU grant after this many GPU-only grants
+    parameter [3:0] CPU_FAIR_THRESHOLD = 4'd8  // Force CPU grant after this many non-CPU grants
 ) (
     input wire clk,
     input wire reset_n,
 
-    // Master 0: Span Rasterizer (highest priority)
+    // Master 0: Span Rasterizer
     input  wire        m0_arvalid,
     output wire        m0_arready,
     input  wire [31:0] m0_araddr,
@@ -85,7 +101,7 @@ module axi_sdram_arbiter #(
     output wire        m2_bvalid,
     output wire [1:0]  m2_bresp,
 
-    // Master 3: Bridge (lowest priority)
+    // Master 3: Bridge
     input  wire        m3_arvalid,
     output wire        m3_arready,
     input  wire [31:0] m3_araddr,
@@ -105,6 +121,16 @@ module axi_sdram_arbiter #(
     input  wire        m3_wlast,
     output wire        m3_bvalid,
     output wire [1:0]  m3_bresp,
+
+    // Master 4: Audio DMA (read-only, highest priority)
+    input  wire        m4_arvalid,
+    output wire        m4_arready,
+    input  wire [31:0] m4_araddr,
+    input  wire [7:0]  m4_arlen,
+    output wire        m4_rvalid,
+    output wire [31:0] m4_rdata,
+    output wire [1:0]  m4_rresp,
+    output wire        m4_rlast,
 
     // Slave port (to axi_sdram_slave)
     output wire        s_arvalid,
@@ -137,11 +163,11 @@ localparam ST_RD   = 2'd1;  // Read transaction active (AR→R)
 localparam ST_WR   = 2'd2;  // Write transaction active (AW→W→B)
 
 reg [1:0] arb_state;
-reg [1:0] grant;  // 0=M0(Span), 1=M1(DMA), 2=M2(CPU), 3=M3(Bridge)
+reg [2:0] grant;  // 0=M0(Span), 1=M1(DMA), 2=M2(CPU), 3=M3(Bridge), 4=M4(Audio)
 
 // Fairness: deficit counter prevents higher-priority masters from
 // starving the CPU.  Increments each time any non-CPU master
-// (M0/M1/M3) wins while the CPU has a pending request.  When it
+// (M0/M1/M3/M4) wins while the CPU has a pending request.  When it
 // reaches the threshold, the CPU is granted unconditionally.
 // Resets when the CPU gets a grant or has no pending request.
 reg [3:0] gpu_deficit;
@@ -151,54 +177,60 @@ wire cpu_pending = m2_arvalid | m2_awvalid;
 always @(posedge clk or posedge reset) begin
     if (reset) begin
         arb_state <= ST_IDLE;
-        grant <= 0;
+        grant <= 3'd0;
         gpu_deficit <= 0;
     end else begin
         case (arb_state)
         ST_IDLE: begin
-            // Fairness override: if GPU has won too many times while CPU
-            // was waiting, force a CPU grant to prevent starvation.
+            // Fairness override: if a non-CPU master has won too many
+            // times while CPU was waiting, force a CPU grant.
             if (cpu_pending && gpu_deficit >= CPU_FAIR_THRESHOLD) begin
-                grant <= 2'd2;
+                grant <= 3'd2;
                 gpu_deficit <= 0;
                 if (m2_arvalid)
                     arb_state <= ST_RD;
                 else
                     arb_state <= ST_WR;
             end
-            // Normal priority: M0 > M1 > M3 (Bridge) > M2 (CPU)
+            // Priority: M0 > M1 > M3 > M2 (CPU) > M4 (Audio)
             else if (m0_arvalid) begin
-                grant <= 2'd0;
+                grant <= 3'd0;
                 arb_state <= ST_RD;
                 if (cpu_pending) gpu_deficit <= gpu_deficit + 4'd1;
             end else if (m0_awvalid) begin
-                grant <= 2'd0;
+                grant <= 3'd0;
                 arb_state <= ST_WR;
                 if (cpu_pending) gpu_deficit <= gpu_deficit + 4'd1;
             end else if (m1_arvalid) begin
-                grant <= 2'd1;
+                grant <= 3'd1;
                 arb_state <= ST_RD;
                 if (cpu_pending) gpu_deficit <= gpu_deficit + 4'd1;
             end else if (m1_awvalid) begin
-                grant <= 2'd1;
+                grant <= 3'd1;
                 arb_state <= ST_WR;
                 if (cpu_pending) gpu_deficit <= gpu_deficit + 4'd1;
             end else if (m3_arvalid) begin
-                grant <= 2'd3;
+                grant <= 3'd3;
                 arb_state <= ST_RD;
                 if (cpu_pending) gpu_deficit <= gpu_deficit + 4'd1;
             end else if (m3_awvalid) begin
-                grant <= 2'd3;
+                grant <= 3'd3;
                 arb_state <= ST_WR;
                 if (cpu_pending) gpu_deficit <= gpu_deficit + 4'd1;
             end else if (m2_arvalid) begin
-                grant <= 2'd2;
+                grant <= 3'd2;
                 arb_state <= ST_RD;
                 gpu_deficit <= 0;
             end else if (m2_awvalid) begin
-                grant <= 2'd2;
+                grant <= 3'd2;
                 arb_state <= ST_WR;
                 gpu_deficit <= 0;
+            end else if (m4_arvalid) begin
+                /* Audio gets whatever's left after everyone else has
+                 * had their turn.  Never touches gpu_deficit — this
+                 * master is below CPU so it cannot starve the CPU. */
+                grant <= 3'd4;
+                arb_state <= ST_RD;
             end else begin
                 // No requests pending — reset deficit
                 gpu_deficit <= 0;
@@ -225,10 +257,11 @@ end
 // ============================================
 // Master → Slave channel mux (combinational)
 // ============================================
-wire grant_m0 = (grant == 2'd0);
-wire grant_m1 = (grant == 2'd1);
-wire grant_m2 = (grant == 2'd2);
-wire grant_m3 = (grant == 2'd3);
+wire grant_m0 = (grant == 3'd0);
+wire grant_m1 = (grant == 3'd1);
+wire grant_m2 = (grant == 3'd2);
+wire grant_m3 = (grant == 3'd3);
+wire grant_m4 = (grant == 3'd4);
 wire active_rd = (arb_state == ST_RD);
 wire active_wr = (arb_state == ST_WR);
 wire active = active_rd | active_wr;
@@ -241,17 +274,19 @@ wire active = active_rd | active_wr;
 wire rd_completing = active_rd && s_rvalid && s_rlast;
 wire wr_completing = active_wr && s_bvalid;
 
-// AR channel — masked on rlast to prevent slave from accepting a new read
+// AR channel — masked on rlast to prevent slave from accepting a new read.
+// M4 is read-only; default to its signals through the same mux fabric.
 assign s_arvalid = (active_rd && !rd_completing) ? (grant_m0 ? m0_arvalid :
                                                      grant_m1 ? m1_arvalid :
                                                      grant_m2 ? m2_arvalid :
-                                                                m3_arvalid) : 1'b0;
+                                                     grant_m3 ? m3_arvalid :
+                                                                m4_arvalid) : 1'b0;
 assign s_araddr  = grant_m0 ? m0_araddr  : grant_m1 ? m1_araddr  :
-                   grant_m2 ? m2_araddr  : m3_araddr;
+                   grant_m2 ? m2_araddr  : grant_m3 ? m3_araddr  : m4_araddr;
 assign s_arlen   = grant_m0 ? m0_arlen   : grant_m1 ? m1_arlen   :
-                   grant_m2 ? m2_arlen   : m3_arlen;
+                   grant_m2 ? m2_arlen   : grant_m3 ? m3_arlen   : m4_arlen;
 
-// AW channel — masked on bvalid to prevent slave from accepting a new write
+// AW channel — masked on bvalid.  M4 never writes.
 assign s_awvalid = (active_wr && !wr_completing) ? (grant_m0 ? m0_awvalid :
                                                      grant_m1 ? m1_awvalid :
                                                      grant_m2 ? m2_awvalid :
@@ -282,33 +317,38 @@ assign m0_arready = (active_rd && grant_m0) ? s_arready : 1'b0;
 assign m1_arready = (active_rd && grant_m1) ? s_arready : 1'b0;
 assign m2_arready = (active_rd && grant_m2) ? s_arready : 1'b0;
 assign m3_arready = (active_rd && grant_m3) ? s_arready : 1'b0;
+assign m4_arready = (active_rd && grant_m4) ? s_arready : 1'b0;
 
 // R channel — only to granted master during read
 assign m0_rvalid = (active_rd && grant_m0) ? s_rvalid : 1'b0;
 assign m1_rvalid = (active_rd && grant_m1) ? s_rvalid : 1'b0;
 assign m2_rvalid = (active_rd && grant_m2) ? s_rvalid : 1'b0;
 assign m3_rvalid = (active_rd && grant_m3) ? s_rvalid : 1'b0;
+assign m4_rvalid = (active_rd && grant_m4) ? s_rvalid : 1'b0;
 
 // Upstream rready — mux from granted master.  GPU (m0), DMA (m1),
-// and bridge (m3) don't back-pressure so they default to 1.  CPU (m2)
-// drives m2_rready via cpu_target_port's registered response slot —
-// this is what makes sync-burst back-pressure propagate all the way
-// from the cpu down to the SDRAM controller.
+// bridge (m3), and audio (m4) don't back-pressure so they default to 1.
+// CPU (m2) drives m2_rready via cpu_target_port's registered response
+// slot — this is what makes sync-burst back-pressure propagate all the
+// way from the cpu down to the SDRAM controller.
 assign s_rready = active_rd ? (grant_m2 ? m2_rready : 1'b1) : 1'b1;
 assign m0_rdata  = s_rdata;  // Broadcast data (only valid matters)
 assign m1_rdata  = s_rdata;
 assign m2_rdata  = s_rdata;
 assign m3_rdata  = s_rdata;
+assign m4_rdata  = s_rdata;
 assign m0_rresp  = s_rresp;
 assign m1_rresp  = s_rresp;
 assign m2_rresp  = s_rresp;
 assign m3_rresp  = s_rresp;
+assign m4_rresp  = s_rresp;
 assign m0_rlast  = s_rlast;
 assign m1_rlast  = s_rlast;
 assign m2_rlast  = s_rlast;
 assign m3_rlast  = s_rlast;
+assign m4_rlast  = s_rlast;
 
-// AW ready — only to granted master during write
+// AW ready — only to granted master during write (M4 never writes).
 assign m0_awready = (active_wr && grant_m0) ? s_awready : 1'b0;
 assign m1_awready = (active_wr && grant_m1) ? s_awready : 1'b0;
 assign m2_awready = (active_wr && grant_m2) ? s_awready : 1'b0;

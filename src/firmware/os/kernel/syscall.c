@@ -144,12 +144,10 @@ static inline const uint8_t *io_cache_data(int entry) {
 /* Fill a cache entry: bridge DMA → SDRAM, invalidate D-cache, done.
  * No CPU copy needed — reads go through D-cache on the same address.
  *
- * Bridge writes hit the new bridge_to_sdram fabric path (M3 of the
- * SDRAM arbiter) and never touch CRAM1, so the audio mixer never
- * contends with the file I/O bounce.  The FIFO pre-fill wait and
- * MIX_CRAM1_INHIBIT brackets that the previous CRAM1 path required
- * are gone — SDRAM has its own arbiter and the bridge slot is
- * lowest priority. */
+ * Bridge writes hit the bridge_to_sdram fabric path (M3 of the SDRAM
+ * arbiter) and never touch CRAM1, so file I/O doesn't contend with
+ * audio sample reads.  SDRAM has its own arbiter; the bridge slot
+ * runs at lowest priority. */
 static int io_cache_fill(int entry, uint32_t slot_id,
                           uint32_t aligned_off, uint32_t fill) {
     uint32_t bridge_dst = IO_CACHE_BRIDGE + entry * IO_CACHE_BLOCK_SIZE;

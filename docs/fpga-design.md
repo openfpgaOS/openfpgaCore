@@ -18,8 +18,7 @@ core_top.v                                    Top-level (APF integration)
 |
 +-- video_CRT_scanout_indexed_BRAM.v          Multi-mode video scanout (6 color modes)
 +-- text_terminal.v                           40x30 character overlay
-+-- audio_output.v                            I2S output stage (dcfifo + serializer)
-+-- audio_mixer.v                             48-voice PCM mixer (16-bit, SVF filter)
++-- audio_output.v                            48 kHz stereo dcfifo → I2S (CPU writes via AUDIO_BASE)
 +-- link_mmio.v                               Link cable serial transceiver
 +-- io_sdram.v                                SDRAM controller
 +-- cram0_controller.v / cram0_phy.sv         CRAM0 PSRAM controller
@@ -76,10 +75,11 @@ Implemented in `audio_output.v`.
 | 0x00 | `AUDIO_STATUS` | R | [11:0] FIFO level, [12] full |
 
 The audio output stage is just a dual-clock FIFO bridging `clk_cpu`
-(mixer output) to `clk_audio` (12.288 MHz), followed by an I2S
-serializer.  All voice mixing, pitch/pan/volume/SVF filtering, and
-sample fetch happen inside `audio_mixer.v` on `clk_cpu` — the output
-stage sees a pre-mixed stereo stream at 48 kHz.
+(CPU write side) to `clk_audio` (12.288 MHz), followed by an I2S
+serializer.  All voice mixing, pitch/pan/volume, and sample fetch
+happen in CPU software (`hal/swmixer.c`) — the output stage sees a
+pre-mixed stereo stream at 48 kHz pushed word-by-word via the
+`AUDIO_SAMPLE` MMIO register at 0x4C000000.
 
 ## Link Cable (0x4D000000)
 

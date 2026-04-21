@@ -116,14 +116,41 @@ AXI_PERIPH_DIR = obj_dir_axi_periph
 AXI_PERIPH_FLAGS = -Wno-WIDTHEXPAND -Wno-CASEINCOMPLETE -Wno-SYNCASYNCNET
 
 # ============================================================
+# Audio pipeline (audio_output.v + dcfifo stub)
+# ============================================================
+AUDIO_SRCS = \
+	tb_audio_pipeline.v \
+	dcfifo_stub.v \
+	$(COMMON_DIR)/audio_output.v
+
+AUDIO_CPP = tb_audio_pipeline_main.cpp
+AUDIO_TOP = tb_audio_pipeline
+AUDIO_DIR = obj_dir_audio_pipeline
+AUDIO_FLAGS = -Wno-WIDTHEXPAND -Wno-CASEINCOMPLETE -Wno-SYNCASYNCNET -Wno-UNOPTFLAT
+
+# ============================================================
+# cram1_burst_mmio (SW mixer's burst prefetch engine — DUT is the new
+# module introduced with the software mixer; CRAM1 controller is stubbed
+# with a fake burst responder so we can exercise the DUT in isolation).
+# ============================================================
+CRAM1_BURST_MMIO_SRCS = \
+	tb_cram1_burst_mmio.v \
+	$(COMMON_DIR)/cram1_burst_mmio.v
+
+CRAM1_BURST_MMIO_CPP  = tb_cram1_burst_mmio_main.cpp
+CRAM1_BURST_MMIO_TOP  = tb_cram1_burst_mmio
+CRAM1_BURST_MMIO_DIR  = obj_dir_cram1_burst_mmio
+CRAM1_BURST_MMIO_FLAGS = -Wno-WIDTHEXPAND -Wno-CASEINCOMPLETE -Wno-SYNCASYNCNET
+
+# ============================================================
 # Targets
 # ============================================================
 .PHONY: all sdram sram gpu gpu-lite gpu-full cram1-stress cram1-burst axi-periph \
-        run run-sram build clean
+        audio cram1-burst-mmio run run-sram build clean
 
 # `all` runs every passing test. Build-only debug harnesses
 # (cram1-burst, axi-periph) are intentionally excluded.
-all: sdram sram gpu cram1-stress
+all: sdram sram gpu cram1-stress audio cram1-burst-mmio
 
 # --- SDRAM ---
 sdram: $(SDRAM_DIR)/V$(SDRAM_TOP)
@@ -212,8 +239,31 @@ $(AXI_PERIPH_DIR)/V$(AXI_PERIPH_TOP): $(AXI_PERIPH_SRCS) $(AXI_PERIPH_CPP)
 		-I$(COMMON_DIR) \
 		$(AXI_PERIPH_SRCS) $(AXI_PERIPH_CPP)
 
+# --- Audio pipeline ---
+audio: $(AUDIO_DIR)/V$(AUDIO_TOP)
+	@printf "\n=== Audio pipeline (audio_output + dcfifo stub) ===\n"
+	./$(AUDIO_DIR)/V$(AUDIO_TOP)
+
+$(AUDIO_DIR)/V$(AUDIO_TOP): $(AUDIO_SRCS) $(AUDIO_CPP)
+	$(VERILATOR) $(VERILATOR_FLAGS) $(AUDIO_FLAGS) \
+		--top-module $(AUDIO_TOP) --Mdir $(AUDIO_DIR) \
+		-I$(COMMON_DIR) \
+		$(AUDIO_SRCS) $(AUDIO_CPP)
+
+# --- CRAM1 burst MMIO (SW mixer's cache refill engine) ---
+cram1-burst-mmio: $(CRAM1_BURST_MMIO_DIR)/V$(CRAM1_BURST_MMIO_TOP)
+	@printf "\n=== CRAM1 burst MMIO (cram1_burst_mmio.v + stub controller) ===\n"
+	./$(CRAM1_BURST_MMIO_DIR)/V$(CRAM1_BURST_MMIO_TOP)
+
+$(CRAM1_BURST_MMIO_DIR)/V$(CRAM1_BURST_MMIO_TOP): $(CRAM1_BURST_MMIO_SRCS) $(CRAM1_BURST_MMIO_CPP)
+	$(VERILATOR) $(VERILATOR_FLAGS) $(CRAM1_BURST_MMIO_FLAGS) \
+		--top-module $(CRAM1_BURST_MMIO_TOP) --Mdir $(CRAM1_BURST_MMIO_DIR) \
+		-I$(COMMON_DIR) \
+		$(CRAM1_BURST_MMIO_SRCS) $(CRAM1_BURST_MMIO_CPP)
+
 # --- Clean ---
 clean:
 	rm -rf $(SDRAM_DIR) $(SRAM_DIR) $(GPU_LITE_DIR) $(GPU_FULL_DIR) \
 	       $(CRAM1_STRESS_DIR) $(CRAM1_BURST_DIR) $(AXI_PERIPH_DIR) \
+	       $(AUDIO_DIR) $(CRAM1_BURST_MMIO_DIR) \
 	       obj_dir_gpu obj_dir_cdc io_sdram_test.v

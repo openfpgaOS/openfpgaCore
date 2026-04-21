@@ -36,7 +36,7 @@ A complete reference for building applications on the openfpgaOS platform for An
 | **CPU** | VexRiscv RV32IMAFC @ 100 MHz |
 | **Display** | 320x240, 8-bit indexed color, 256-entry palette |
 | **Framebuffer** | Double-buffered, vsync-swapped |
-| **Audio** | 48 kHz stereo FIFO + 48-voice hardware PCM mixer (16-bit, SVF filter) |
+| **Audio** | 48 kHz stereo FIFO + 32-voice CPU-side software mixer (16/8-bit PCM, linear interp) |
 | **MIDI** | Sample-based synthesis via `.ofsf` banks (SC-55 bank included) |
 | **Input** | 2 controllers: d-pad, ABXY, L1/R1, L2/R2, L3/R3, Select, Start, dual sticks, analog triggers |
 | **SDRAM** | 64 MB (cached) |
@@ -467,7 +467,7 @@ while (of_audio_free() > 0) {
 | Constant | Value | Description |
 |----------|-------|-------------|
 | `OF_AUDIO_RATE` | 48000 | Sample rate in Hz |
-| `OF_AUDIO_FIFO` | 4096 | FIFO depth (stereo pairs) |
+| `OF_AUDIO_FIFO` | 1024 | FIFO depth (stereo pairs) |
 
 ---
 

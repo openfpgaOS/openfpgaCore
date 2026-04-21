@@ -7,10 +7,11 @@
 
 #include <stdint.h>
 
-/* External IRQ source flags (bitmask passed to external callback) */
+/* External IRQ source flags (bitmask passed to external callback).
+ * Bit 2 (MIX_VOICE) was retired along with the hardware mixer; kept
+ * reserved so existing bit positions are stable. */
 #define IRQ_SRC_UART_RX     (1 << 0)
 #define IRQ_SRC_LINK_RX     (1 << 1)
-#define IRQ_SRC_MIX_VOICE   (1 << 2)
 #define IRQ_SRC_VSYNC       (1 << 3)
 
 void of_irq_init(void);

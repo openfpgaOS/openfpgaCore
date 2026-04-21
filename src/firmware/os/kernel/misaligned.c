@@ -442,6 +442,30 @@ void fatal_trap(trap_frame_t *frame) {
     trap_uart_hex(frame->regs[1]);
     trap_uart_puts("\n");
 
+    /* Dump 64 words of app stack around sp — lets us find where the
+     * corrupted return address came from.  Safe because we're on the
+     * trap stack in BRAM and the app's sp is in SDRAM. */
+    uintptr_t sp = frame->regs[2];
+    if (sp >= 0x10000000u && sp < 0x14000000u && (sp & 3) == 0) {
+        trap_uart_puts("stk:");
+        for (int i = 0; i < 64; i++) {
+            if ((i & 3) == 0) trap_uart_puts("\n ");
+            trap_uart_hex(((volatile uint32_t *)sp)[i]);
+            trap_uart_puts(" ");
+        }
+        trap_uart_puts("\n");
+    }
+
+    /* Also print the saved x-regs from the trap frame — gives us whatever
+     * was in ra/gp/fp/caller-saved regs at fault time. */
+    trap_uart_puts("regs:");
+    for (int i = 0; i < 16; i++) {
+        if ((i & 3) == 0) trap_uart_puts("\n ");
+        trap_uart_hex(frame->regs[i]);
+        trap_uart_puts(" ");
+    }
+    trap_uart_puts("\n");
+
     /* Halt forever — use asm to prevent compiler from optimizing this away */
     __asm__ volatile("1: j 1b");
 }

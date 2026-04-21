@@ -18,7 +18,17 @@
 #include "of_services.h"
 #include "../hal/hal.h"
 #include "../hal/regs.h"
-#include "../hal/awe.h"
+
+/* AWE fabric retired.  Service slots wired to no-op stubs so SDK apps
+ * built against the old ABI still link; they'll just silently do nothing. */
+struct awe_voice_t;
+static void     svc_awe_noop_i(int v)                          { (void)v; }
+static void     svc_awe_voice_load(int v, const struct awe_voice_t *p) { (void)v; (void)p; }
+static void     svc_awe_ch_int(int c, int x)                   { (void)c; (void)x; }
+static void     svc_awe_set_int(int v)                         { (void)v; }
+static uint64_t svc_awe_active_mask(void)                      { return 0; }
+static uint32_t svc_awe_tick_count(void)                       { return 0; }
+static void     svc_awe_ramp1_trigger(int v, int s, uint32_t r){ (void)v; (void)s; (void)r; }
 
 /* ======================================================================
  * Wrappers for SDK/HAL signature mismatches
@@ -46,9 +56,18 @@ static void svc_input_get_state(int player, void *out) {
 extern void (*timer_callback_ptr)(void);  /* from syscall.c */
 
 static void svc_timer_set_callback(void (*cb)(void), uint32_t hz) {
+    /* Pin the hardware timer at 1 kHz regardless of the app's requested
+     * rate.  swmixer_tick runs in the same ISR and MUST fire at 1 kHz
+     * (produces one 48-sample audio block per tick = 48000/sec, which
+     * matches audio_output's 48 kHz I2S drain).  Apps like of_midi that
+     * ask for 50 Hz still work correctly because of_midi_pump accumulates
+     * elapsed time and fires smp_voice_tick the appropriate number of
+     * times per wake — a faster wake rate just means one smp_voice_tick
+     * per pump instead of 20. */
+    (void)hz;
     timer_callback_ptr = cb;
-    if (cb && hz > 0) {
-        TIMER_PERIOD = CPU_FREQ_HZ / hz;
+    if (cb) {
+        TIMER_PERIOD = CPU_FREQ_HZ / 1000u;
         TIMER_CTRL = TIMER_CTRL_ENABLE;
     } else {
         TIMER_CTRL = 0;
@@ -192,33 +211,32 @@ void services_table_init(void) {
     svc->smp_bank_preload_base = NULL;
     svc->smp_bank_preload_size = 0;
 
-    /* AWE coprocessor (Phase 1) */
-    awe_init();
-    svc->awe_voice_load              = of_awe_voice_load_impl;
-    svc->awe_voice_trigger           = of_awe_voice_trigger_impl;
-    svc->awe_voice_release           = of_awe_voice_release_impl;
-    svc->awe_voice_stop              = of_awe_voice_stop_impl;
-    svc->awe_channel_set_volume      = of_awe_channel_set_volume_impl;
-    svc->awe_channel_set_expression  = of_awe_channel_set_expression_impl;
-    svc->awe_channel_set_pan         = of_awe_channel_set_pan_impl;
-    svc->awe_channel_set_bend        = of_awe_channel_set_bend_impl;
-    svc->awe_channel_set_mod         = of_awe_channel_set_mod_impl;
-    svc->awe_channel_set_sustain     = of_awe_channel_set_sustain_impl;
-    svc->awe_channel_set_brightness  = of_awe_channel_set_brightness_impl;
-    svc->awe_channel_set_resonance   = of_awe_channel_set_resonance_impl;
-    svc->awe_channel_set_reverb_send = of_awe_channel_set_reverb_send_impl;
-    svc->awe_channel_set_chorus_send = of_awe_channel_set_chorus_send_impl;
-    svc->awe_set_master_volume       = of_awe_set_master_volume_impl;
-    svc->awe_set_bend_range          = of_awe_set_bend_range_impl;
-    svc->awe_active_mask             = of_awe_active_mask_impl;
-    svc->awe_tick_count              = of_awe_tick_count_impl;
-    svc->awe_set_hw_envelope         = of_awe_set_hw_envelope_impl;
-    svc->awe_set_reverb_level        = of_awe_set_reverb_level_impl;
-    svc->awe_set_reverb_feedback     = of_awe_set_reverb_feedback_impl;
-    svc->awe_set_chorus_level        = of_awe_set_chorus_level_impl;
-    svc->awe_set_chorus_rate         = of_awe_set_chorus_rate_impl;
-    svc->awe_set_chorus_depth        = of_awe_set_chorus_depth_impl;
-    svc->awe_ramp1_trigger           = of_awe_ramp1_trigger_impl;
+    /* AWE coprocessor (retired — slots kept for ABI stability) */
+    svc->awe_voice_load              = svc_awe_voice_load;
+    svc->awe_voice_trigger           = svc_awe_noop_i;
+    svc->awe_voice_release           = svc_awe_noop_i;
+    svc->awe_voice_stop              = svc_awe_noop_i;
+    svc->awe_channel_set_volume      = svc_awe_ch_int;
+    svc->awe_channel_set_expression  = svc_awe_ch_int;
+    svc->awe_channel_set_pan         = svc_awe_ch_int;
+    svc->awe_channel_set_bend        = svc_awe_ch_int;
+    svc->awe_channel_set_mod         = svc_awe_ch_int;
+    svc->awe_channel_set_sustain     = svc_awe_ch_int;
+    svc->awe_channel_set_brightness  = svc_awe_ch_int;
+    svc->awe_channel_set_resonance   = svc_awe_ch_int;
+    svc->awe_channel_set_reverb_send = svc_awe_ch_int;
+    svc->awe_channel_set_chorus_send = svc_awe_ch_int;
+    svc->awe_set_master_volume       = svc_awe_set_int;
+    svc->awe_set_bend_range          = svc_awe_set_int;
+    svc->awe_active_mask             = svc_awe_active_mask;
+    svc->awe_tick_count              = svc_awe_tick_count;
+    svc->awe_set_hw_envelope         = svc_awe_set_int;
+    svc->awe_set_reverb_level        = svc_awe_set_int;
+    svc->awe_set_reverb_feedback     = svc_awe_set_int;
+    svc->awe_set_chorus_level        = svc_awe_set_int;
+    svc->awe_set_chorus_rate         = svc_awe_set_int;
+    svc->awe_set_chorus_depth        = svc_awe_set_int;
+    svc->awe_ramp1_trigger           = svc_awe_ramp1_trigger;
 }
 
 void services_table_set_smp_bank(const void *base, uint32_t size) {

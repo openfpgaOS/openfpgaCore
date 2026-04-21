@@ -224,64 +224,9 @@
 #define   TIMER_CTRL_ENABLE   (1 << 0)
 #define   TIMER_CTRL_W1C_IRQ  (1 << 1)
 
-/* Hardware PCM mixer (0x80-0x88, 0xC0-0xF8) — 48-voice CRAM1-backed */
-#define MIX_VOICE_SEL        REG32(SYSREG_BASE + 0xC0)  /* Write: voice index 0-47 */
-#define MIX_VOICE_ADDR       REG32(SYSREG_BASE + 0xC4)  /* Write: CRAM1 word address */
-#define MIX_VOICE_LEN        REG32(SYSREG_BASE + 0xC8)  /* Write: length (also sets LOOP_END/LOOP_START defaults) */
-#define MIX_VOICE_RATE       REG32(SYSREG_BASE + 0xCC)  /* Write: rate (16.16 fixed-point) */
-#define MIX_VOICE_CTRL       REG32(SYSREG_BASE + 0xD0)  /* Write: [0]=active [1]=loop [2]=fmt16 [3]=bidi [4]=dir */
-#define MIX_VOICE_POS        REG32(SYSREG_BASE + 0xD0)  /* Read: position[21:0] for selected voice */
-#define MIX_CTRL             REG32(SYSREG_BASE + 0xD4)  /* RW: [0]=enable */
-#define MIX_VOICE_VOL_LR     REG32(SYSREG_BASE + 0xD8)  /* Write: {vol_r[15:8], vol_l[7:0]} (current, ramped by HW) */
-#define MIX_STATUS           REG32(SYSREG_BASE + 0xD8)  /* Read: [5:0]=active voices */
-#define MIX_VOICE_LOOP_END   REG32(SYSREG_BASE + 0xE4)  /* Write: loop end point[21:0] */
-#define MIX_VOICE_POS_WR     REG32(SYSREG_BASE + 0xE8)  /* Write: set position[21:0] */
-#define MIX_VOICE_LOOP_START REG32(SYSREG_BASE + 0xEC)  /* Write: loop start point[21:0] */
-#define MIX_VOICE_VOL_TARGET REG32(SYSREG_BASE + 0xF0)  /* Write: {target_r[7:0], target_l[7:0]} */
-#define MIX_VOICE_VOL_RATE   REG32(SYSREG_BASE + 0xF4)  /* Write: ramp step size (0=instant) */
-#define MIX_IRQ_PENDING      REG32(SYSREG_BASE + 0xF8)  /* Read: voice-end bitmask [31:0] */
-#define MIX_IRQ_CLEAR        REG32(SYSREG_BASE + 0xF8)  /* Write: W1C */
-
-/* Mixer extension registers (0x100+) */
-#define MIX_VOICE_FILTER_FC  REG32(SYSREG_BASE + 0x100) /* Write: Q0.16 SVF cutoff coefficient */
-#define MIX_VOICE_FILTER_Q   REG32(SYSREG_BASE + 0x104) /* Write: {enable[8], Q[7:0]} */
-#define MIX_CRAM1_INHIBIT    REG32(SYSREG_BASE + 0x10C) /* W: bit 0 = pause mixer CRAM1 reads (Phase 6a) */
-/* MIX_IRQ_PENDING_HI / MIX_IRQ_CLEAR_HI removed in Phase 8 — voice
- * count is 32 so the upper half is always zero. */
-
-/* AWE coprocessor registers (0x110+).  See of_awe.h for the awe_voice_t struct. */
-#define AWE_NOTE_ON          REG32(SYSREG_BASE + 0x114) /* W: data[5:0] = voice id strobe */
-#define AWE_NOTE_OFF         REG32(SYSREG_BASE + 0x118) /* W: data[5:0] = voice id strobe */
-#define AWE_VOICE_STOP       REG32(SYSREG_BASE + 0x11C) /* W: data[5:0] = voice id strobe */
-#define AWE_VOICE_LOAD_ADDR  REG32(SYSREG_BASE + 0x120) /* W: {voice[5:0], word[4:0]} cursor */
-#define AWE_VOICE_LOAD_DATA  REG32(SYSREG_BASE + 0x124) /* W: data; auto-incs word cursor */
-#define AWE_CHAN_LOAD_ADDR   REG32(SYSREG_BASE + 0x128) /* W: {ch[3:0], word[1:0]} cursor */
-#define AWE_CHAN_LOAD_DATA   REG32(SYSREG_BASE + 0x12C) /* W: data; auto-incs word cursor */
-#define AWE_MASTER_VOL       REG32(SYSREG_BASE + 0x130) /* W: 0..255 */
-#define AWE_BEND_RANGE       REG32(SYSREG_BASE + 0x134) /* W: cents */
-/* 0x110 AWE_CTRL / 0x138 AWE_REVERB_PRESET / 0x13C AWE_CHORUS_PRESET /
- * 0x140 AWE_INTERP_DEFAULT removed in Phase 8 — fabric never read them. */
-#define AWE_ACTIVE_MASK_LO   REG32(SYSREG_BASE + 0x144) /* R: voices [31:0] active */
-#define AWE_ACTIVE_MASK_HI   REG32(SYSREG_BASE + 0x148) /* R: voices [47:32] active (always 0 at 32 voices) */
-#define AWE_TICK_COUNT       REG32(SYSREG_BASE + 0x14C) /* R: 1 kHz tick counter (Phase 2) */
-#define AWE_HW_ENVELOPE      REG32(SYSREG_BASE + 0x150) /* W: bit 0 = HW envelope enable (Phase 3) */
-#define AWE_MM_WRITE         REG32(SYSREG_BASE + 0x154) /* W: Phase 4 mod-matrix scale
-                                                         *    [31:16] = s16 scale
-                                                         *    [10:8]  = field (0..4)
-                                                         *    [5:0]   = voice (0..47) */
-#define AWE_REVERB_LEVEL     REG32(SYSREG_BASE + 0x158) /* W: Phase 6a reverb wet mix 0..255 */
-#define AWE_REVERB_FEEDBACK  REG32(SYSREG_BASE + 0x15C) /* W: Phase 6a reverb feedback  0..255 */
-#define AWE_CHORUS_LEVEL     REG32(SYSREG_BASE + 0x160) /* W: Phase 6b chorus wet mix 0..255 */
-#define AWE_CHORUS_RATE      REG32(SYSREG_BASE + 0x164) /* W: Phase 6b chorus LFO incr per sample, Q16 */
-#define AWE_CHORUS_DEPTH     REG32(SYSREG_BASE + 0x168) /* W: Phase 6b chorus LFO swing in samples 0..255 */
-/* Phase 5c — Ramp1 (mod env) trigger.  Two-write protocol:
- *   1. Write rate (Q16.16 incr per ms tick) to AWE_RAMP1_RATE.
- *   2. Write {stage[11:8], voice[5:0]} to AWE_RAMP1_TRIGGER.
- *      stage = ENV_ATTACK (2)  → restart from level=0 with given rate
- *      stage = ENV_RELEASE (6) → fade from current level
- *      stage = ENV_DONE (7)    → snap to 0 and stop  */
-#define AWE_RAMP1_RATE       REG32(SYSREG_BASE + 0x16C)
-#define AWE_RAMP1_TRIGGER    REG32(SYSREG_BASE + 0x170)
+/* Hardware mixer MMIO (0xC0-0x10C) and AWE coprocessor MMIO (0x110-0x170)
+ * were removed along with audio_mixer.v / audio_awe.v.  Audio now uses
+ * AUDIO_BASE stereo FIFO + CPU-side software mixer. */
 
 /* Link-lite peripheral (0x4D000000) — IRQ-driven, 1-word TX/RX */
 #define LINK_BASE            0x4D000000
@@ -296,11 +241,11 @@
 /* Vsync IRQ pending (0x9C) — read: bit 0 = pending, write: W1C clears */
 #define VSYNC_IRQ_PENDING    REG32(SYSREG_BASE + 0x9C)
 
-/* External IRQ mask (0xFC) — bits[3:0] = {vsync, mix_voice_end, link, uart_rx} enable */
+/* External IRQ mask (0xFC) — bits[3:0] = {vsync, reserved, link, uart_rx}.
+ * Bit 2 was the HW mixer voice-end IRQ; mixer retired, bit reserved. */
 #define IRQ_MASK             REG32(SYSREG_BASE + 0xFC)
 #define   IRQ_MASK_UART_RX   (1 << 0)
 #define   IRQ_MASK_LINK      (1 << 1)
-#define   IRQ_MASK_MIX_VOICE (1 << 2)
 #define   IRQ_MASK_VSYNC     (1 << 3)
 
 /* VRR (Variable Refresh Rate) — dynamic V_TOTAL for video timing (0xDC)
@@ -349,6 +294,27 @@
 #define   AUDIO_FIFO_LEVEL_MASK  0x3FF                  /* bits [9:0] */
 #define   AUDIO_FIFO_FULL        (1 << 10)
 #define AUDIO_FIFO_DEPTH    1024
+
+/* SDRAM → audio_output DMA (audio_dma.v).  Firmware allocates a ring
+ * in cached SDRAM and programs these regs; HW streams it continuously
+ * to the dcfifo at 48 kHz so the CPU is off the sample-accurate hot
+ * path.  CPU must cbo.clean each block after writing so the DMA
+ * master reads the fresh data. */
+
+/* CRAM1 burst prefetch MMIO (cram1_burst_mmio.v) — SW mixer fires an
+ * 8-word burst from CRAM1 and drains the 8 returned words into a
+ * voice-local cache, amortising the ~20-cycle uncached word latency. */
+#define CRAM1_BURST_BASE    0x4E000000u
+#define CRAM1_BURST_ADDR    REG32(CRAM1_BURST_BASE + 0x00)  /* W: 22-bit CRAM1 word addr */
+#define CRAM1_BURST_STATUS  REG32(CRAM1_BURST_BASE + 0x04)  /* R: bit 0 = busy */
+#define CRAM1_BURST_DATA    REG32(CRAM1_BURST_BASE + 0x08)  /* R: next word (auto-advance) */
+#define   CRAM1_BURST_BUSY  (1u << 0)
+
+#define AUDIO_DMA_BASE      REG32(AUDIO_BASE + 0x04)    /* Write: ring base (SDRAM byte addr) */
+#define AUDIO_DMA_LEN       REG32(AUDIO_BASE + 0x08)    /* Write: ring length (stereo pairs, mult of 8) */
+#define AUDIO_DMA_CTRL      REG32(AUDIO_BASE + 0x0C)    /* Write: bit 0 = enable */
+#define AUDIO_DMA_READ_PTR  REG32(AUDIO_BASE + 0x10)    /* Read: DMA's current pair index */
+#define   AUDIO_DMA_ENABLE  (1u << 0)
 
 /* ======================================================================
  * Link Cable (0x4D000000)

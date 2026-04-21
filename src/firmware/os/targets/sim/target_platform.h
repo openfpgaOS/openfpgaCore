@@ -36,7 +36,7 @@
 
 #define OF_TARGET_BRAM_BASE            0x00000000u
 #define OF_TARGET_BRAM_SIZE            (32u * 1024u)
-#define OF_TARGET_APP_BRAM_BASE        0x00002000u
+#define OF_TARGET_APP_BRAM_BASE        0x00004000u
 #define OF_TARGET_APP_BRAM_END         0x00007800u
 
 #define OF_TARGET_SDRAM_BASE           0x10000000u

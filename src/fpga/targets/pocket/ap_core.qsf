@@ -800,8 +800,9 @@ set_instance_assignment -name FAST_INPUT_REGISTER ON -to cram1_dq[15]
 set_instance_assignment -name FAST_INPUT_REGISTER ON -to cram1_wait
 
 # Source files added after initial commit
-set_global_assignment -name VERILOG_FILE ../../common/audio_mixer.v
-# audio_awe.v retired — CPU-driven SW voice engine replaces it.
+# audio_mixer.v and audio_awe.v retired — CPU-side software mixer replaces them.
+set_global_assignment -name VERILOG_FILE ../../common/audio_dma.v
+# cram1_burst_mmio.v retired — axi_cram1_slave now owns the burst port
 set_global_assignment -name VERILOG_FILE ../../common/bridge_to_sdram.v
 set_global_assignment -name VERILOG_FILE ../../common/bridge_to_cram1.v
 set_global_assignment -name VERILOG_FILE ../../common/audio_output.v
@@ -830,7 +831,7 @@ set_global_assignment -name VERILOG_FILE ../../common/video_CRT_scanout_indexed_
 set_global_assignment -name VERILOG_FILE ../../vendor/vexriscv/VexiiRiscv/OpenFpgaVexii.v
 set_global_assignment -name VERILOG_FILE mf_pllram_133.v
 set_global_assignment -name SDC_FILE core_constraints.sdc
-set_global_assignment -name SEED 20
+set_global_assignment -name SEED 11
 # Phase 5 fitter-tuning experiments (see session 2026-04-18).  All
 # Quartus knobs we tried — RESOURCE_SHARING, REGISTER_RETIMING,
 # REGISTER_DUPLICATION, ramstyle=MLAB, seed 11 — ended up worse

@@ -10,38 +10,21 @@
 #include "include/of_cache.h"
 #include "include/of_timer.h"
 #include "include/of_services.h"
-#include "include/of_awe.h"
+#include "include/of_fastram.h"
 #include <string.h>
 
 /* ------------------------------------------------------------------ */
 /* Static state                                                       */
 /* ------------------------------------------------------------------ */
 
-static smp_voice_t voices[SMP_MAX_VOICES];
-static uint32_t tick_counter;
+/* Voice + channel state pinned to BRAM (OF_FASTDATA → .app_fastdata for
+ * SDK apps, .fastdata for OS) — smp_voice_tick runs from the 1 kHz
+ * timer ISR and writes these every tick.  ISR SDRAM stores race with
+ * GPU/bridge bus traffic (see fence comment in start.S::_trap_entry);
+ * pinning to BRAM breaks the race. */
 
-/* ------------------------------------------------------------------ */
-/* AWE backend bookkeeping                                            */
-/* ------------------------------------------------------------------ */
-/* When awe_backend_enabled is non-zero, note_on / note_off / CC hooks
- * bypass the SW voice engine and drive the AWE coprocessor directly.
- * The fabric takes over per-tick work (envelope, LFO, mod-matrix,
- * compose); the CPU only has to parse MIDI + push note events. */
-#define AWE_SLOTS 32
-
-static int      awe_backend_enabled;
-static uint8_t  awe_slot_used   [AWE_SLOTS];   /* 1 = slot holds a note-on */
-static uint8_t  awe_slot_ch     [AWE_SLOTS];
-static uint8_t  awe_slot_note   [AWE_SLOTS];
-static uint8_t  awe_slot_sustain[AWE_SLOTS];   /* 1 = release deferred by CC64 */
-static uint8_t  awe_slot_excl   [AWE_SLOTS];   /* SF2 exclusive_class — drum cut-off */
-static uint32_t awe_slot_age    [AWE_SLOTS];
-/* Phase 5c — remember the zone's mod-env release ticks for awe_note_off.
- * Stored as ticks (not rate) because the SDK doesn't know the current
- * env level at note-off; we approximate the rate as 0x10000 / ticks
- * (assuming the env was at full peak) which is correct for the typical
- * case of note-off after attack completes. */
-static uint32_t awe_slot_mod_release_t[AWE_SLOTS];
+static OF_FASTDATA smp_voice_t voices[SMP_MAX_VOICES];
+static OF_FASTDATA uint32_t    tick_counter;
 
 /* ------------------------------------------------------------------ */
 /* Tick-cost probe (Task #10)                                         */
@@ -51,30 +34,32 @@ static uint32_t awe_slot_mod_release_t[AWE_SLOTS];
  * of_time_us(), which would nest-trap when smp_voice_tick runs from
  * the MIDI timer ISR). Stats are in microseconds. */
 
-static uint32_t tick_us_max;
-static uint32_t tick_us_last;
-static uint32_t tick_spike_count;
-static uint32_t tick_stat_count;
-static uint8_t  tick_active_peak;
-static uint8_t  tick_stage_sustain;
-static uint8_t  tick_stage_release;
-static uint8_t  tick_stage_decay;
-static uint8_t  tick_sustain_held;
-static uint8_t  tick_ch_active[16];
+/* Stats are incremented from the timer ISR — keep in BRAM with the rest
+ * of the ISR-touched state so we don't reintroduce the SDRAM race. */
+static OF_FASTDATA uint32_t tick_us_max;
+static OF_FASTDATA uint32_t tick_us_last;
+static OF_FASTDATA uint32_t tick_spike_count;
+static OF_FASTDATA uint32_t tick_stat_count;
+static OF_FASTDATA uint8_t  tick_active_peak;
+static OF_FASTDATA uint8_t  tick_stage_sustain;
+static OF_FASTDATA uint8_t  tick_stage_release;
+static OF_FASTDATA uint8_t  tick_stage_decay;
+static OF_FASTDATA uint8_t  tick_sustain_held;
+static OF_FASTDATA uint8_t  tick_ch_active[16];
 
 /* A/B/C instrumentation counters — see smp_tick_stats_t for descriptions.
- * These are incremented at actual HW-write sites (post-cache) and from
+ * Incremented at actual HW-write sites (post-cache) and from
  * smp_voice_tick_record_pump(), then snapshotted by get_stats and zeroed
- * by reset_stats. */
-static uint32_t stat_filter_writes;
-static uint32_t stat_rate_writes;
-static uint32_t stat_vol_writes;
-static uint32_t stat_pump_count;
-static uint32_t stat_pump_interval_max_us;
-static uint32_t stat_pump_interval_min_us = 0xFFFFFFFFu;
-static uint32_t stat_pump_burst_count;
-static uint32_t stat_pump_budget_exceeded;
-static uint16_t stat_cutoff_delta_max;
+ * by reset_stats.  All in BRAM: the writes happen in the ISR. */
+static OF_FASTDATA uint32_t stat_filter_writes;
+static OF_FASTDATA uint32_t stat_rate_writes;
+static OF_FASTDATA uint32_t stat_vol_writes;
+static OF_FASTDATA uint32_t stat_pump_count;
+static OF_FASTDATA uint32_t stat_pump_interval_max_us;
+static OF_FASTDATA uint32_t stat_pump_interval_min_us = 0xFFFFFFFFu;
+static OF_FASTDATA uint32_t stat_pump_burst_count;
+static OF_FASTDATA uint32_t stat_pump_budget_exceeded;
+static OF_FASTDATA uint16_t stat_cutoff_delta_max;
 
 /* 2 ms budget = 500 Hz tick rate. */
 #define SMP_TICK_SPIKE_US  2000u
@@ -208,22 +193,22 @@ void smp_voice_tick_record_pump(uint32_t elapsed_us, int ticks_fired,
 }
 
 /* Per-channel state (16 MIDI channels) */
-static int ch_volume[16];       /* CC7  (0-127) */
-static int ch_expression[16];   /* CC11 (0-127) */
-static int ch_pan[16];          /* CC10 (0-127, 64=center) */
-static int ch_bend[16];         /* -8192..+8191 */
-static int ch_mod_depth[16];    /* CC1  (0-127) */
-static int ch_sustain[16];      /* CC64 on/off */
-static int ch_brightness[16];   /* CC74 (0-127) */
-static int ch_resonance[16];    /* CC71 (0-127) */
-static int ch_reverb_send[16];  /* CC91 (0-127), default 40 = GM tasteful default */
-static int ch_chorus_send[16];  /* CC93 (0-127), default 0 */
-static int master_vol = 255;
+static OF_FASTDATA int ch_volume[16];        /* CC7  (0-127) */
+static OF_FASTDATA int ch_expression[16];    /* CC11 (0-127) */
+static OF_FASTDATA int ch_pan[16];           /* CC10 (0-127, 64=center) */
+static OF_FASTDATA int ch_bend[16];          /* -8192..+8191 */
+static OF_FASTDATA int ch_mod_depth[16];     /* CC1  (0-127) */
+static OF_FASTDATA int ch_sustain[16];       /* CC64 on/off */
+static OF_FASTDATA int ch_brightness[16];    /* CC74 (0-127) */
+static OF_FASTDATA int ch_resonance[16];     /* CC71 (0-127) */
+static OF_FASTDATA int ch_reverb_send[16];   /* CC91 (0-127), default 40 = GM tasteful default */
+static OF_FASTDATA int ch_chorus_send[16];   /* CC93 (0-127), default 0 */
+static OF_FASTDATA int master_vol = 255;
 
 /* Cached mixer state to avoid redundant CDC writes */
-static uint32_t prev_rate[SMP_MAX_VOICES];
-static int      prev_vol_l[SMP_MAX_VOICES];
-static int      prev_vol_r[SMP_MAX_VOICES];
+static OF_FASTDATA uint32_t prev_rate[SMP_MAX_VOICES];
+static OF_FASTDATA int      prev_vol_l[SMP_MAX_VOICES];
+static OF_FASTDATA int      prev_vol_r[SMP_MAX_VOICES];
 
 /* Voices pending steal (waiting for hardware fade-out) */
 #define STEAL_PENDING -2
@@ -673,254 +658,12 @@ static uint32_t compute_pitch(smp_voice_t *v)
 }
 
 /* ------------------------------------------------------------------ */
-/* AWE backend — note_on / note_off path                              */
+/* AWE backend retired — preserve ABI stubs for apps that still call  */
+/* smp_voice_enable_awe_backend / smp_voice_awe_backend_enabled.      */
 /* ------------------------------------------------------------------ */
 
-/* Sync awe_slot_used against the fabric's active_mask.  Fabric drops
- * bits on envelope DONE, but our bookkeeping only notices lazily.
- * Calling this at the top of note_on / note_off keeps the slot state
- * accurate so the voice stealer doesn't unnecessarily reclaim a slot
- * that just retired silently. */
-static void awe_sync_active(void)
-{
-    uint64_t mask = of_awe_active_mask();
-    for (int i = 0; i < AWE_SLOTS; i++) {
-        if (awe_slot_used[i] && !((mask >> i) & 1ull))
-            awe_slot_used[i] = 0;
-    }
-}
-
-/* SF2 exclusive_class enforcement.  When a new note in a non-zero
- * class arrives on a channel, kill any voice already playing in the
- * same class on the same channel.  This is the mechanism that makes
- * a closed hi-hat cut off an open hi-hat instead of overlapping. */
-static void awe_kill_exclusive_class(int midi_ch, uint8_t excl_class)
-{
-    if (excl_class == 0) return;
-    for (int i = 0; i < AWE_SLOTS; i++) {
-        if (!awe_slot_used[i])               continue;
-        if (awe_slot_ch[i]   != midi_ch)     continue;
-        if (awe_slot_excl[i] != excl_class)  continue;
-        of_awe_voice_stop(i);
-        awe_slot_used[i] = 0;
-    }
-}
-
-static int awe_voice_alloc(void)
-{
-    /* 1) Prefer a slot that the HAL has never touched. */
-    for (int i = 0; i < AWE_SLOTS; i++)
-        if (!awe_slot_used[i]) return i;
-
-    /* 2) Reclaim any slot whose envelope has run to completion in the
-     *    fabric (awe_active_mask is owned by the coprocessor and drops
-     *    the bit once the voice retires). */
-    uint64_t mask = of_awe_active_mask();
-    for (int i = 0; i < AWE_SLOTS; i++)
-        if (!((mask >> i) & 1ull)) {
-            awe_slot_used[i] = 0;
-            return i;
-        }
-
-    /* 3) Steal the oldest.  Matches the SW voice-stealer's preference
-     *    for long-lived notes. */
-    int      oldest     = 0;
-    uint32_t oldest_age = awe_slot_age[0];
-    for (int i = 1; i < AWE_SLOTS; i++) {
-        if (awe_slot_age[i] < oldest_age) {
-            oldest_age = awe_slot_age[i];
-            oldest     = i;
-        }
-    }
-    of_awe_voice_stop(oldest);
-    awe_slot_used[oldest] = 0;
-    return oldest;
-}
-
-static int awe_note_on(const ofsf_zone_t *zone, int midi_ch, int note,
-                       int velocity, const void *sample_base)
-{
-    const ofsf_header_t *hdr = of_smp_bank_get();
-    if (!hdr || !sample_base) return -1;
-
-    awe_sync_active();
-    awe_kill_exclusive_class(midi_ch, zone->exclusive_class);
-
-    int slot = awe_voice_alloc();
-    if (slot < 0) return -1;
-
-    awe_voice_t v;
-    memset(&v, 0, sizeof(v));
-    v.base         = (const uint8_t *)sample_base + zone->sample_offset;
-    v.length       = zone->sample_length;
-    v.loop_start   = zone->loop_start;
-    v.loop_end     = zone->loop_end;
-    v.loop_mode    = zone->loop_mode;
-    v.interp_mode  = AWE_INTERP_LINEAR;
-    v.fmt16        = 1;
-    v.midi_channel = (uint8_t)midi_ch;
-    v.pan_base     = zone->pan;
-    v.initial_fc   = zone->initial_fc;
-    v.initial_q    = zone->initial_q;
-
-    /* voice_base_vol = (vel_scale × initial_attn_scale) >> 8 — same
-     * formula smp_voice_note_on uses so audio amplitude matches. */
-    {
-        int vel_scale = (velocity * 2) + 1;
-        if (vel_scale > 255) vel_scale = 255;
-        int attn = zone->initial_attn_scale;
-        int bv   = (vel_scale * attn) >> 8;
-        if (bv > 255) bv = 255;
-        v.voice_base_vol = (uint8_t)bv;
-    }
-
-    /* base_rate = (sr/48000) × 2^(pitch_cents/1200) in Q16.16.  Mirrors
-     * the SW compute in smp_voice_note_on for bit-identical pitch. */
-    {
-        uint32_t sr        = hdr->sample_rate;
-        uint32_t base_fp16 = OF_MIXER_RATE_FP16(sr);
-        int32_t  cents     = ((int32_t)note - (int32_t)zone->root_key) * 100
-                           + (int32_t)zone->coarse_tune * 100
-                           + (int32_t)zone->fine_tune;
-        uint32_t mult = smp_cents_to_multiplier(cents);
-        v.base_rate = (uint32_t)(((uint64_t)base_fp16 * mult) >> 16);
-    }
-
-    /* DAHDSR */
-    v.vol_delay_ticks   = zone->vol_delay_ticks;
-    v.vol_attack_rate   = zone->vol_attack_rate;
-    v.vol_hold_ticks    = zone->vol_hold_ticks;
-    v.vol_decay_rate    = zone->vol_decay_rate;
-    v.vol_sustain_level = zone->vol_sustain_level;
-    v.vol_release_ticks = zone->vol_release_ticks;
-
-    /* Phase 4 LFOs + mod matrix */
-    v.lfo0.rate        = zone->mod_lfo_rate;
-    v.lfo0.delay_ticks = zone->mod_lfo_delay_ticks;
-    v.lfo0.waveform    = AWE_WAVE_TRIANGLE;
-    v.lfo1.rate        = zone->vib_lfo_rate;
-    v.lfo1.delay_ticks = zone->vib_lfo_delay_ticks;
-    v.lfo1.waveform    = AWE_WAVE_TRIANGLE;
-    v.mm.lfo0_pitch    = zone->mod_lfo_to_pitch;
-    v.mm.lfo0_filter   = zone->mod_lfo_to_filter;
-    v.mm.lfo1_pitch    = zone->vib_lfo_to_pitch;
-    /* mm.ramp1_pitch / ramp1_filter deferred to Phase 5c (RAMP1_STEP
-     * not wired yet; Phase 4 fabric ignores these fields). */
-
-    /* Sends — fabric SEND_COMPOSE reads chan_bank, not voice state, so
-     * keep these synced via channel writes elsewhere.  Storing them on
-     * the voice for ABI completeness. */
-    {
-        int rs = (ch_reverb_send[midi_ch] * 255) / 127;
-        int cs = (ch_chorus_send[midi_ch] * 255) / 127;
-        if (rs > 255) rs = 255;
-        if (cs > 255) cs = 255;
-        v.reverb_send = (uint8_t)rs;
-        v.chorus_send = (uint8_t)cs;
-    }
-
-    of_awe_voice_load(slot, &v);
-    of_awe_voice_trigger(slot);
-
-    /* Phase 5c — fire RAMP1 attack from the zone's mod-env attack rate.
-     * If the zone has no mod env (rate==0), skip the trigger so the
-     * level stays at 0 and the mod matrix contributes nothing. */
-    if (zone->mod_attack_rate > 0) {
-        of_awe_ramp1_trigger(slot, AWE_ENV_ATTACK, zone->mod_attack_rate);
-    }
-
-    awe_slot_used   [slot] = 1;
-    awe_slot_ch     [slot] = (uint8_t)midi_ch;
-    awe_slot_note   [slot] = (uint8_t)note;
-    awe_slot_sustain[slot] = 0;
-    awe_slot_excl   [slot] = zone->exclusive_class;
-    awe_slot_age    [slot] = tick_counter;
-    awe_slot_mod_release_t[slot] = zone->mod_release_ticks;
-    return slot;
-}
-
-static void awe_note_off(int midi_ch, int note)
-{
-    awe_sync_active();   /* clear bits the fabric retired */
-    for (int i = 0; i < AWE_SLOTS; i++) {
-        if (!awe_slot_used[i])            continue;
-        if (awe_slot_ch[i]   != midi_ch)  continue;
-        if (awe_slot_note[i] != note)     continue;
-
-        if (ch_sustain[midi_ch]) {
-            awe_slot_sustain[i] = 1;      /* hold until CC64 drops */
-        } else {
-            of_awe_voice_release(i);
-            /* Phase 5c — start mod-env RELEASE in lockstep with vol-env.
-             * Approximate rate as full-peak / ticks (see comment on
-             * awe_slot_mod_release_t).  Skip if zone has no mod env. */
-            if (awe_slot_mod_release_t[i] > 0) {
-                uint32_t rate = 0x10000u / awe_slot_mod_release_t[i];
-                if (rate < 1) rate = 1;
-                of_awe_ramp1_trigger(i, AWE_ENV_RELEASE, rate);
-            }
-            awe_slot_used[i] = 0;
-        }
-    }
-}
-
-static void awe_release_sustain(int midi_ch)
-{
-    for (int i = 0; i < AWE_SLOTS; i++) {
-        if (!awe_slot_used[i])           continue;
-        if (awe_slot_ch[i] != midi_ch)   continue;
-        if (!awe_slot_sustain[i])        continue;
-        of_awe_voice_release(i);
-        /* Phase 5c — sustain pedal lift fires the deferred mod release. */
-        if (awe_slot_mod_release_t[i] > 0) {
-            uint32_t rate = 0x10000u / awe_slot_mod_release_t[i];
-            if (rate < 1) rate = 1;
-            of_awe_ramp1_trigger(i, AWE_ENV_RELEASE, rate);
-        }
-        awe_slot_sustain[i] = 0;
-        awe_slot_used[i]    = 0;
-    }
-}
-
-static void awe_all_off(int midi_ch)
-{
-    for (int i = 0; i < AWE_SLOTS; i++) {
-        if (!awe_slot_used[i])         continue;
-        if (awe_slot_ch[i] != midi_ch) continue;
-        of_awe_voice_stop(i);
-        awe_slot_used[i] = 0;
-    }
-}
-
-static void awe_all_off_global(void)
-{
-    /* Stop EVERY slot, not just SDK-tracked ones.  Apps can program a
-     * voice via of_awe_voice_load/trigger without going through the
-     * SDK's slot tracker (mididemo's MODE_AWE does this with voice 31).
-     * Those "ghost" voices stay active in the fabric and sum into the
-     * mix when the SDK thinks everything is silent — manifests as loud
-     * distortion the next time of_midi_play starts.  Stopping the full
-     * range guarantees a silent baseline. */
-    for (int i = 0; i < AWE_SLOTS; i++) {
-        of_awe_voice_stop(i);
-        awe_slot_used[i] = 0;
-    }
-}
-
-void smp_voice_enable_awe_backend(int on)
-{
-    /* AWE coprocessor retired — the fabric no longer instantiates it.
-     * Existing apps may still call this with on=1; force SW always.
-     * The CPU-driven smp_voice engine handles envelope/LFO/filter
-     * advance in C and writes the mixer directly via of_mixer_*. */
-    (void)on;
-    awe_backend_enabled = 0;
-}
-
-int smp_voice_awe_backend_enabled(void)
-{
-    return awe_backend_enabled;
-}
+void smp_voice_enable_awe_backend(int on)       { (void)on; }
+int  smp_voice_awe_backend_enabled(void)        { return 0; }
 
 /* ------------------------------------------------------------------ */
 /* Public API                                                         */
@@ -955,9 +698,6 @@ int smp_voice_note_on(const ofsf_zone_t *zone, int midi_ch, int note,
 {
     if (!zone || midi_ch < 0 || midi_ch > 15 || velocity <= 0)
         return -1;
-
-    if (awe_backend_enabled)
-        return awe_note_on(zone, midi_ch, note, velocity, sample_base);
 
     kill_exclusive_class(midi_ch, zone->exclusive_class);
 
@@ -1124,10 +864,6 @@ int smp_voice_note_on(const ofsf_zone_t *zone, int midi_ch, int note,
 
 void smp_voice_note_off(int midi_ch, int note)
 {
-    if (awe_backend_enabled) {
-        awe_note_off(midi_ch, note);
-        return;
-    }
     for (int i = 0; i < SMP_MAX_VOICES; i++) {
         smp_voice_t *v = &voices[i];
         if (!v->active || v->active == STEAL_PENDING)
@@ -1146,15 +882,6 @@ void smp_voice_note_off(int midi_ch, int note)
 
 void smp_voice_tick(void)
 {
-    /* AWE backend takes over per-tick work (envelope / LFO / mod-matrix
-     * / VOL_COMPOSE / PITCH_COMPOSE) in fabric.  Only bump the counter
-     * so the voice-stealer's age heuristic still advances; the MIDI
-     * pump remains the sole CPU audio workload. */
-    if (awe_backend_enabled) {
-        tick_counter++;
-        return;
-    }
-
     uint32_t _probe_t0 = OF_SVC->timer_get_us();
     uint8_t  _probe_active = 0;
     uint8_t  _probe_sustain = 0;
@@ -1264,47 +991,30 @@ void smp_voice_update_volume(int midi_ch, int volume, int expression)
     if (midi_ch < 0 || midi_ch > 15) return;
     ch_volume[midi_ch]     = volume;
     ch_expression[midi_ch] = expression;
-    if (awe_backend_enabled) {
-        of_awe_channel_set_volume    (midi_ch, volume);
-        of_awe_channel_set_expression(midi_ch, expression);
-    }
 }
 
 void smp_voice_update_pan(int midi_ch, int pan)
 {
     if (midi_ch < 0 || midi_ch > 15) return;
     ch_pan[midi_ch] = pan;
-    if (awe_backend_enabled)
-        of_awe_channel_set_pan(midi_ch, pan);
 }
 
 void smp_voice_update_bend(int midi_ch, int bend)
 {
     if (midi_ch < 0 || midi_ch > 15) return;
     ch_bend[midi_ch] = bend;
-    if (awe_backend_enabled)
-        of_awe_channel_set_bend(midi_ch, bend);
 }
 
 void smp_voice_update_mod(int midi_ch, int mod_depth)
 {
     if (midi_ch < 0 || midi_ch > 15) return;
     ch_mod_depth[midi_ch] = mod_depth;
-    if (awe_backend_enabled)
-        of_awe_channel_set_mod(midi_ch, mod_depth);
 }
 
 void smp_voice_update_sustain(int midi_ch, int sustain_on)
 {
     if (midi_ch < 0 || midi_ch > 15) return;
     ch_sustain[midi_ch] = sustain_on;
-
-    if (awe_backend_enabled) {
-        of_awe_channel_set_sustain(midi_ch, sustain_on);
-        if (!sustain_on)
-            awe_release_sustain(midi_ch);
-        return;
-    }
 
     if (!sustain_on) {
         for (int i = 0; i < SMP_MAX_VOICES; i++) {
@@ -1324,10 +1034,6 @@ void smp_voice_update_filter(int midi_ch, int brightness, int resonance)
     if (midi_ch < 0 || midi_ch > 15) return;
     ch_brightness[midi_ch] = brightness;
     ch_resonance[midi_ch]  = resonance;
-    if (awe_backend_enabled) {
-        of_awe_channel_set_brightness(midi_ch, brightness);
-        of_awe_channel_set_resonance (midi_ch, resonance);
-    }
 }
 
 void smp_voice_update_reverb_send(int midi_ch, int send_0_127)
@@ -1336,10 +1042,6 @@ void smp_voice_update_reverb_send(int midi_ch, int send_0_127)
     if (send_0_127 < 0)   send_0_127 = 0;
     if (send_0_127 > 127) send_0_127 = 127;
     ch_reverb_send[midi_ch] = send_0_127;
-    if (awe_backend_enabled) {
-        int s = (send_0_127 * 255) / 127;
-        of_awe_channel_set_reverb_send(midi_ch, s);
-    }
 }
 
 void smp_voice_update_chorus_send(int midi_ch, int send_0_127)
@@ -1348,18 +1050,10 @@ void smp_voice_update_chorus_send(int midi_ch, int send_0_127)
     if (send_0_127 < 0)   send_0_127 = 0;
     if (send_0_127 > 127) send_0_127 = 127;
     ch_chorus_send[midi_ch] = send_0_127;
-    if (awe_backend_enabled) {
-        int s = (send_0_127 * 255) / 127;
-        of_awe_channel_set_chorus_send(midi_ch, s);
-    }
 }
 
 void smp_voice_all_off(int midi_ch)
 {
-    if (awe_backend_enabled) {
-        awe_all_off(midi_ch);
-        return;
-    }
     for (int i = 0; i < SMP_MAX_VOICES; i++) {
         smp_voice_t *v = &voices[i];
         if (v->active && v->active != STEAL_PENDING && v->midi_ch == midi_ch) {
@@ -1373,10 +1067,6 @@ void smp_voice_all_off(int midi_ch)
 
 void smp_voice_all_off_global(void)
 {
-    if (awe_backend_enabled) {
-        awe_all_off_global();
-        return;
-    }
     for (int i = 0; i < SMP_MAX_VOICES; i++) {
         smp_voice_t *v = &voices[i];
         if (v->active) {

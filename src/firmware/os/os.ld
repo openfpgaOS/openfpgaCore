@@ -165,8 +165,13 @@ SECTIONS {
     /* Stack at end of BRAM */
     __stack_top = ORIGIN(BRAM) + LENGTH(BRAM);
 
-    /* App BRAM region — must match APP_BRAM_BASE/END in hal/regs.h. */
-    __app_bram_start = 0x00002000;
+    /* App BRAM region — must match APP_BRAM_BASE/END in hal/regs.h.
+     * OS region extended from 0x2000 to 0x4000 (16 KB total) to hold
+     * swmixer + smp_voice hot state in .fastdata: the timer ISR writes
+     * both every tick, and ISR SDRAM writes race with GPU/bridge bus
+     * traffic (see start.S::_trap_entry comment).  Pinning in BRAM
+     * breaks the race. */
+    __app_bram_start = 0x00004000;
     __app_bram_end   = 0x00007800;  /* caps at 0x7800, libc at 0x7C00, trap stack at 0x7E00 */
 
     /* Provide symbols for C code */

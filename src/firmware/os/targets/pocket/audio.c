@@ -1,161 +1,138 @@
 /*
- * openfpgaOS Audio HAL Implementation
+ * openfpgaOS Pocket audio target — honest stereo PCM path.
+ *
+ * of_audio_write() pushes interleaved stereo s16 into an SDRAM ring
+ * buffer; swmixer voice 31 plays that ring at the configured source
+ * rate in forward-loop mode, so the stream composes with SF2 voices
+ * and mixer SFX into a single output through swmixer_tick().
+ *
+ * This replaces the old mono-scratch / ping-pong-voice-29-30 hack.
  */
 
 #include "audio.h"
 #include "regs.h"
-#include "cache.h"
+#include "swmixer.h"
 
-/* Forward declarations — used by of_audio_init */
-static int audio_buf_idx;
-static int audio_ever_written;
+/* Ring: 2048 stereo pairs = 16 KB = ~42 ms slack at 48 kHz. */
+#define AUDIO_RING_PAIRS  2048
 
-void of_audio_init(void) {
-    /* Enable hardware mixer (voices start inactive) */
-    MIX_CTRL = 1;
-    audio_buf_idx = 0;
-    audio_ever_written = 0;
+/* Interleaved L,R,L,R...  Lives in SDRAM (.bss); read by the mixer tick
+ * via the D-cache, same as every other sample buffer. */
+static int16_t  audio_ring[AUDIO_RING_PAIRS * 2];
+static uint32_t audio_write_idx;   /* next stereo pair to fill (mod AUDIO_RING_PAIRS) */
+
+#define AUDIO_VOICE  31
+
+static void configure_stream_voice(uint32_t rate_fp16)
+{
+    swmixer_voice_t *sv = swmixer_voice(AUDIO_VOICE);
+    if (!sv) return;
+    sv->sample     = audio_ring;
+    sv->len        = AUDIO_RING_PAIRS;
+    sv->loop_start = 0;
+    sv->loop_end   = AUDIO_RING_PAIRS;
+    sv->pos_int    = 0;
+    sv->pos_frac   = 0;
+    sv->rate_fp16  = rate_fp16;
+    sv->fmt16      = 1;
+    sv->stereo     = 1;
+    sv->loop_mode  = SWMIXER_LOOP_FORWARD;
+    sv->dir_rev    = 0;
+    sv->end_pending = 0;
+    sv->vol_l_cur = sv->vol_r_cur = 255;
+    sv->vol_l_tgt = sv->vol_r_tgt = 255;
+    sv->vol_rate  = 0;
+    sv->active    = 1;
 }
 
-// TODO(audio_review): The Pocket implementation of of_audio_write() does not write
-// to the hardware audio FIFO directly. Fix this or redefine the API.
-/* Ping-pong scratch buffers in CRAM1 for of_audio_write(). */
-#define AUDIO_SCRATCH_CRAM1   (CRAM1_UNCACHED + 0x00F00000)  /* Last 1MB of CRAM1 */
-#define AUDIO_SCRATCH_HALF    (256 * 1024)                    /* 256K samples per buffer */
-#define AUDIO_SCRATCH_VOICE   31
+void of_audio_init(void)
+{
+    for (int i = 0; i < AUDIO_RING_PAIRS * 2; i++) audio_ring[i] = 0;
+    audio_write_idx = 0;
+    /* Stream voice is dormant until the first write; of_mixer_init leaves
+     * it inactive.  configure_stream_voice() activates it on first use. */
+    swmixer_voice_t *sv = swmixer_voice(AUDIO_VOICE);
+    if (sv) sv->active = 0;
 
-int of_audio_write(const int16_t *samples, int count) {
-    if (count <= 0 || !samples) return 0;
-    if (count > (int)AUDIO_SCRATCH_HALF) count = AUDIO_SCRATCH_HALF;
+    /* Start the SDRAM → audio_output DMA.  HW now streams silence to
+     * I2S at 48 kHz; swmixer_tick() fills the ring with real audio as
+     * voices activate.  CPU is off the sample-accurate deadline — it
+     * just has to keep the ring non-empty, which 85 ms of buffering
+     * makes trivial. */
+    swmixer_dma_start();
 
-    /* Wait for previous buffer to finish if the scratch voice is still playing
-     * from the buffer we're about to overwrite. */
-    MIX_VOICE_SEL = AUDIO_SCRATCH_VOICE;
-    uint32_t scratch_addr = AUDIO_SCRATCH_CRAM1 + audio_buf_idx * AUDIO_SCRATCH_HALF * 2;
+    /* Timer stays disabled at boot.  Apps enable the 1 kHz tick themselves
+     * via of_timer_set_callback when they need MIDI / swmixer updates.
+     * Rationale: the app loader runs with ISR disabled, and ISR SDRAM
+     * stores race with the loader's concurrent SDRAM writes (see fence
+     * comment in start.S::_trap_entry).  Deferring the timer enable past
+     * app load closes that race. */
+}
 
-    /* Copy mono samples directly into CRAM1 scratch */
-    volatile int16_t *dest = (volatile int16_t *)scratch_addr;
-    for (int i = 0; i < count; i++)
-        dest[i] = samples[i];
+static inline uint32_t ring_room_pairs(void)
+{
+    swmixer_voice_t *sv = swmixer_voice(AUDIO_VOICE);
+    if (!sv || !sv->active) return AUDIO_RING_PAIRS;
+    uint32_t read_pair = sv->pos_int;
+    /* gap = pairs written but not yet consumed. */
+    uint32_t gap = (audio_write_idx + AUDIO_RING_PAIRS - read_pair) & (AUDIO_RING_PAIRS - 1);
+    /* Leave one pair unused so wrap is unambiguous. */
+    return AUDIO_RING_PAIRS - 1 - gap;
+}
 
-    /* Flush D-cache — uncached alias may still be cached */
-    of_cache_clean_range((void *)scratch_addr, count * 2);
+int of_audio_write(const int16_t *samples, int count)
+{
+    if (!samples || count <= 0) return 0;
 
-    /* Play via mixer voice 31 */
-    MIX_VOICE_SEL = AUDIO_SCRATCH_VOICE;
-    MIX_VOICE_ADDR = (scratch_addr - CRAM1_UNCACHED) >> 2;
-    MIX_VOICE_LEN = count;
-    MIX_VOICE_RATE = 0x10000;  /* 1:1 (48kHz native) */
-    MIX_VOICE_VOL_LR = 0xFFFF;       /* full volume L+R */
-    MIX_VOICE_VOL_TARGET = 0xFFFF;
-    MIX_VOICE_VOL_RATE = 0;          /* instant */
-    MIX_VOICE_CTRL = 1 | (1 << 2);   /* active + fmt16 */
+    swmixer_voice_t *sv = swmixer_voice(AUDIO_VOICE);
+    if (!sv || !sv->active) {
+        configure_stream_voice(0x10000);  /* default: 48 kHz 1:1 */
+    }
 
-    /* Swap to other half for next write */
-    audio_buf_idx ^= 1;
-    audio_ever_written = 1;
+    uint32_t room = ring_room_pairs();
+    if ((uint32_t)count > room) count = (int)room;
+    if (count <= 0) return 0;
 
+    uint32_t idx = audio_write_idx;
+    for (int i = 0; i < count; i++) {
+        audio_ring[(idx * 2)]     = samples[i * 2];      /* L */
+        audio_ring[(idx * 2) + 1] = samples[i * 2 + 1];  /* R */
+        idx = (idx + 1) & (AUDIO_RING_PAIRS - 1);
+    }
+    audio_write_idx = idx;
     return count;
 }
 
-int of_audio_get_free(void) {
-    if (!audio_ever_written)
-        return AUDIO_SCRATCH_HALF;  /* never written — always free */
-    if (MIX_IRQ_PENDING & (1u << AUDIO_SCRATCH_VOICE))
-        return AUDIO_SCRATCH_HALF;  /* voice finished */
-    return 0;  /* still playing */
+int of_audio_get_free(void)
+{
+    return (int)ring_room_pairs();
 }
 
-
-/* ======================================================================
- * Streaming audio (ping-pong voices 29+30)
- * ====================================================================== */
-// TODO(audio_review): Voices 29 and 30 can collide with normal mixer playback.
-// Streaming ownership needs to be reconciled with mixer.c allocator which only protects voice 31.
-
-#define STREAM_VOICE_A    29
-#define STREAM_VOICE_B    30
-#define STREAM_BUF_SIZE   (32 * 1024)   /* 32K samples per half (~0.67s at 48kHz) */
-#define STREAM_BUF_BASE   (CRAM1_UNCACHED + 0x00E00000)  /* Before scratch area */
-
-static int stream_active;
-static int stream_write_buf;   /* 0 or 1: which buffer is being filled */
-static int stream_writes_done; /* how many writes completed (0,1,2+) */
-static uint32_t stream_rate;
-
-int of_audio_stream_open(int sample_rate) {
-    if (stream_active) return -1;
-
-    stream_rate = ((uint64_t)sample_rate << 16) / 48000;
-    stream_write_buf = 0;
-    stream_writes_done = 0;
-    stream_active = 1;
-
-    /* Stop both stream voices */
-    MIX_VOICE_SEL = STREAM_VOICE_A;
-    MIX_VOICE_CTRL = 0;
-    MIX_VOICE_SEL = STREAM_VOICE_B;
-    MIX_VOICE_CTRL = 0;
-
-    /* Clear their IRQ bits */
-    MIX_IRQ_CLEAR = (1u << STREAM_VOICE_A) | (1u << STREAM_VOICE_B);
-
+/* Streaming wrapper: same ring, reconfigurable source rate for rate
+ * conversion in the swmixer tick. */
+int of_audio_stream_open(int sample_rate)
+{
+    if (sample_rate <= 0) return -1;
+    uint32_t rate = ((uint64_t)sample_rate << 16) / SWMIXER_OUTPUT_RATE;
+    for (int i = 0; i < AUDIO_RING_PAIRS * 2; i++) audio_ring[i] = 0;
+    audio_write_idx = 0;
+    configure_stream_voice(rate);
     return 0;
 }
 
-static void stream_start_voice(int voice, int buf_idx) {
-    uint32_t addr = STREAM_BUF_BASE + buf_idx * STREAM_BUF_SIZE * 2;
-    MIX_VOICE_SEL = voice;
-    MIX_VOICE_ADDR = (addr - CRAM1_UNCACHED) >> 2;
-    MIX_VOICE_LEN = STREAM_BUF_SIZE;
-    MIX_VOICE_RATE = stream_rate;
-    MIX_VOICE_VOL_LR = 0xFFFF;
-    MIX_VOICE_VOL_TARGET = 0xFFFF;
-    MIX_VOICE_VOL_RATE = 0;
-    MIX_VOICE_CTRL = (1 << 2) | 1;  /* active + fmt16 */
+int of_audio_stream_write(const int16_t *samples, int count)
+{
+    return of_audio_write(samples, count);
 }
 
-int of_audio_stream_write(const int16_t *samples, int count) {
-    if (!stream_active || !samples || count <= 0) return 0;
-    if (count > (int)STREAM_BUF_SIZE) count = STREAM_BUF_SIZE;
-
-    uint32_t addr = STREAM_BUF_BASE + stream_write_buf * STREAM_BUF_SIZE * 2;
-    volatile int16_t *dest = (volatile int16_t *)addr;
-    for (int i = 0; i < count; i++)
-        dest[i] = samples[i];
-
-    /* Pad remainder with silence if short */
-    for (int i = count; i < (int)STREAM_BUF_SIZE; i++)
-        dest[i] = 0;
-
-    of_cache_clean_range((void *)addr, STREAM_BUF_SIZE * 2);
-
-    /* Start the voice for this buffer */
-    int voice = (stream_write_buf == 0) ? STREAM_VOICE_A : STREAM_VOICE_B;
-    MIX_IRQ_CLEAR = (1u << voice);
-    stream_start_voice(voice, stream_write_buf);
-
-    stream_write_buf ^= 1;
-    stream_writes_done++;
-    return count;
+int of_audio_stream_ready(void)
+{
+    return of_audio_get_free() >= (AUDIO_RING_PAIRS / 4);
 }
 
-int of_audio_stream_ready(void) {
-    if (!stream_active) return 1;
-    /* First two writes always ready (filling both ping-pong buffers) */
-    if (stream_writes_done < 2) return 1;
-    /* After that, check if the target buffer's voice has finished */
-    int voice = (stream_write_buf == 0) ? STREAM_VOICE_A : STREAM_VOICE_B;
-    return (MIX_IRQ_PENDING & (1u << voice)) ? 1 : 0;
+void of_audio_stream_close(void)
+{
+    swmixer_voice_t *sv = swmixer_voice(AUDIO_VOICE);
+    if (sv) sv->active = 0;
+    audio_write_idx = 0;
 }
-
-void of_audio_stream_close(void) {
-    if (!stream_active) return;
-    MIX_VOICE_SEL = STREAM_VOICE_A;
-    MIX_VOICE_CTRL = 0;
-    MIX_VOICE_SEL = STREAM_VOICE_B;
-    MIX_VOICE_CTRL = 0;
-    MIX_IRQ_CLEAR = (1u << STREAM_VOICE_A) | (1u << STREAM_VOICE_B);
-    stream_active = 0;
-}
-
