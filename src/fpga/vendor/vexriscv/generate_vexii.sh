@@ -50,14 +50,13 @@ sbt "Test/runMain vexiiriscv.Generate \
       --lsu-software-prefetch --lsu-hardware-prefetch rpt \
       --with-btb --btb-sets=512 --relaxed-btb --relaxed-btb-hit \
       --with-gshare --with-ras \
-      --regfile-async --allow-bypass-from=0 \
+      --allow-bypass-from=0 \
       --relaxed-src \
       --reset-vector=0 \
       --region base=0,size=8000,main=0,exe=1 \
       --region base=10000000,size=4000000,main=1,exe=1 \
       --region base=20000000,size=10000000,main=0,exe=0 \
-      --region base=30000000,size=1000000,main=1,exe=1 \
-      --region base=38000000,size=8000000,main=0,exe=0 \
+      --region base=30000000,size=1000000,main=0,exe=0 \
       --region base=40000000,size=40000000,main=0,exe=0"
 
 OUTPUT="$VEXII_DIR/VexiiRiscv.v"
