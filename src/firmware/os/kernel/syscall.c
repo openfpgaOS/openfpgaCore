@@ -141,26 +141,21 @@ static inline const uint8_t *io_cache_data(int entry) {
     return (const uint8_t *)(IO_CACHE_CACHED + entry * IO_CACHE_BLOCK_SIZE);
 }
 
-/* Fill a cache entry: bridge DMA → SDRAM, invalidate D-cache, done.
- * No CPU copy needed — reads go through D-cache on the same address.
+/* Fill a cache entry via of_file_read, which bounces the bridge DMA
+ * through CRAM0 scratch and memcpys into the caller's SDRAM buffer.
  *
- * Bridge writes hit the bridge_to_sdram fabric path (M3 of the SDRAM
- * arbiter) and never touch CRAM1, so file I/O doesn't contend with
- * audio sample reads.  SDRAM has its own arbiter; the bridge slot
- * runs at lowest priority. */
+ * v2 arch: the direct bridge→SDRAM fabric path was retired with CRAM1,
+ * so the bridge can only write to CRAM0.  Using of_file_read lets the
+ * of_disk_bridge backend handle the mode flip + bounce once, instead of
+ * duplicating that sequence here.  The memcpy lands in SDRAM via the
+ * L1 D$, so subsequent reads from cached_ptr hit the cache coherently
+ * — no explicit invalidation needed. */
 static int io_cache_fill(int entry, uint32_t slot_id,
                           uint32_t aligned_off, uint32_t fill) {
-    uint32_t bridge_dst = IO_CACHE_BRIDGE + entry * IO_CACHE_BLOCK_SIZE;
     void *cached_ptr = (void *)(IO_CACHE_CACHED + entry * IO_CACHE_BLOCK_SIZE);
 
-    /* Invalidate D-cache BEFORE DMA so no stale lines remain */
-    of_cache_inval_range(cached_ptr, fill);
-
-    int rc = of_file_read_raw(slot_id, aligned_off, bridge_dst, fill);
+    int rc = of_file_read(slot_id, aligned_off, cached_ptr, fill);
     if (rc < 0) return rc;
-
-    /* Invalidate AFTER DMA — bridge wrote SDRAM behind D-cache */
-    of_cache_inval_range(cached_ptr, fill);
 
     io_cache[entry].slot_id = slot_id;
     io_cache[entry].file_off = aligned_off;
