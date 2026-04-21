@@ -61,12 +61,16 @@ void of_audio_init(void)
      * makes trivial. */
     swmixer_dma_start();
 
-    /* Timer stays disabled at boot.  Apps enable the 1 kHz tick themselves
-     * via of_timer_set_callback when they need MIDI / swmixer updates.
-     * Rationale: the app loader runs with ISR disabled, and ISR SDRAM
-     * stores race with the loader's concurrent SDRAM writes (see fence
-     * comment in start.S::_trap_entry).  Deferring the timer enable past
-     * app load closes that race. */
+    /* Enable the 1 kHz timer now.  Without this, apps that only use
+     * of_mixer_* (no of_timer_set_callback, no MIDI) never see
+     * swmixer_tick() run and voice state stays frozen at pos_int=0.
+     * Enabling it here means any call that goes through of_audio_init
+     * (which the OS invokes at boot for every target) gets a ticking
+     * mixer for free.  The app loader has already finished by the
+     * time of_audio_init runs, so the old "ISR vs loader SDRAM race"
+     * rationale no longer applies. */
+    TIMER_PERIOD = CPU_FREQ_HZ / 1000u;
+    TIMER_CTRL   = TIMER_CTRL_ENABLE;
 }
 
 static inline uint32_t ring_room_pairs(void)
