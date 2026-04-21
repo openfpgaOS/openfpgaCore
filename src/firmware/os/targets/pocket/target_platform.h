@@ -65,7 +65,16 @@
 /* SRAM is GPU-private in v2 — no AXI alias, not CPU-addressable. */
 /* (OF_TARGET_SRAM_BASE / OF_TARGET_SRAM_SIZE removed) */
 
-#define OF_TARGET_RUNTIME_STACK_TOP    0x14000000u
+/* Placed 16 MB below the SDRAM PMA end (0x14000000), matching
+ * PocketQuake's "conservative known-good SDRAM region" approach.
+ * VexiiRiscv's aggressive speculation (branch prediction, rpt
+ * prefetch when on, cache line ahead-fill) can issue loads several
+ * lines past the last committed one; with the stack top at the PMA
+ * edge those speculated addresses cross into unmapped memory and
+ * surface as architectural load access faults.  16 MB of headroom
+ * is more than any speculation window reaches and costs us nothing —
+ * the sample pool, mmap, and app load still fit. */
+#define OF_TARGET_RUNTIME_STACK_TOP    0x13000000u
 #define OF_TARGET_RUNTIME_STACK_SIZE   (512u * 1024u)
 
 /* Sample pool: 8 MB in SDRAM carved out of the top of the app's

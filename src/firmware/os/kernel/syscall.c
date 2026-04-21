@@ -1586,7 +1586,7 @@ void syscall_init(uintptr_t heap_start) {
      * top the first mmap wipes whatever stack frames the app
      * already pushed.  Reserve the same 512 KB stack span used
      * above 0x13F80000 for the OS runtime stack. */
-    mmap_bottom = 0x13F00000u;   /* APP_STACK_TOP - 512 KB */
+    mmap_bottom = 0x12F00000u;   /* APP_STACK_TOP (0x12F80000) - 512 KB */
 
     /* Reset mmap region tracker — the previous app's allocations
      * are no longer reachable once current_brk/mmap_bottom are
