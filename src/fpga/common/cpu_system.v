@@ -111,10 +111,12 @@ module cpu_system (
 wire reset = ~reset_n;
 
 // ============================================================
-// CPU AXI4 master ports (from OpenFpgaVexii top)
-// i_axi  : read-only, 1-bit id (I$ refills)
-// mem_axi: full R/W, 2-bit id (D$ refills/writebacks + cbo.*)
-// p_axi  : full R/W, no id    (uncached LSU IO)
+// CPU bus signals — maps the stock VexiiRiscv's three bus interfaces
+// onto our internal three-master router.
+//   i_axi   : FetchL1Axi4Plugin (read-only, I$ refills, 1-bit id)
+//   mem_axi : LsuL1Axi4Plugin   (full R/W, D$ refills/writebacks + cbo.*)
+//   p_axi   : LsuPlugin native cmd/rsp converted to single-beat AXI4
+//             (uncached LSU IO — MMIO, framebuffer writes, etc.)
 // ============================================================
 
 // i_axi
@@ -178,105 +180,177 @@ wire        per_wlast;
 wire        per_bvalid;   wire        per_bready;
 wire [1:0]  per_bresp;
 
-OpenFpgaVexii cpu (
-    .clk(clk),
+// ============================================================
+// Native LsuPlugin cmd/rsp bus → per_* AXI4 shim
+//
+// VexiiRiscv (stock Generate) exposes the uncached LSU path as a
+// non-AXI cmd/rsp bus.  We convert it to single-beat AXI4 here so
+// downstream cpu_target_ports keep their uniform interface.  The
+// CPU stalls on rsp, so one outstanding transaction max.
+// ============================================================
+wire        lsu_cmd_valid;
+wire        lsu_cmd_ready;
+wire        lsu_cmd_write;
+wire [31:0] lsu_cmd_addr;
+wire [31:0] lsu_cmd_data;
+wire [1:0]  lsu_cmd_size;   // AXI size: 0=1B, 1=2B, 2=4B
+wire [3:0]  lsu_cmd_mask;
+wire        lsu_rsp_valid;
+wire        lsu_rsp_error;
+wire [31:0] lsu_rsp_data;
+
+// Single-transaction tracker — one native cmd ↔ one AXI transaction.
+reg lsu_inflight_read;    // AR accepted, waiting for R
+reg lsu_inflight_write;   // AW+W accepted, waiting for B
+reg lsu_ar_sent;
+reg lsu_aw_sent, lsu_w_sent;
+
+always @(posedge clk or posedge reset) begin
+    if (reset) begin
+        lsu_inflight_read  <= 1'b0;
+        lsu_inflight_write <= 1'b0;
+        lsu_ar_sent        <= 1'b0;
+        lsu_aw_sent        <= 1'b0;
+        lsu_w_sent         <= 1'b0;
+    end else begin
+        // Read issue
+        if (per_arvalid && per_arready) lsu_ar_sent <= 1'b1;
+        if (per_rvalid  && per_rready && per_rlast) begin
+            lsu_inflight_read <= 1'b0;
+            lsu_ar_sent       <= 1'b0;
+        end else if (lsu_cmd_valid && !lsu_cmd_write && !lsu_inflight_read && !lsu_inflight_write) begin
+            lsu_inflight_read <= 1'b1;
+        end
+
+        // Write issue
+        if (per_awvalid && per_awready) lsu_aw_sent <= 1'b1;
+        if (per_wvalid  && per_wready)  lsu_w_sent  <= 1'b1;
+        if (per_bvalid  && per_bready) begin
+            lsu_inflight_write <= 1'b0;
+            lsu_aw_sent        <= 1'b0;
+            lsu_w_sent         <= 1'b0;
+        end else if (lsu_cmd_valid && lsu_cmd_write && !lsu_inflight_write && !lsu_inflight_read) begin
+            lsu_inflight_write <= 1'b1;
+        end
+    end
+end
+
+// AR channel — drive while we have a read in flight but AR not yet accepted.
+assign per_arvalid = lsu_inflight_read & ~lsu_ar_sent;
+assign per_araddr  = lsu_cmd_addr;
+assign per_arlen   = 8'd0;           // single beat
+assign per_arsize  = {1'b0, lsu_cmd_size};
+assign per_arburst = 2'b01;          // INCR
+assign per_rready  = 1'b1;           // always accept the single R beat
+
+// AW/W channels — single-beat write.
+assign per_awvalid    = lsu_inflight_write & ~lsu_aw_sent;
+assign per_awaddr     = lsu_cmd_addr;
+assign per_awlen      = 8'd0;
+assign per_awsize     = {1'b0, lsu_cmd_size};
+assign per_awburst    = 2'b01;
+assign per_awallStrb  = &lsu_cmd_mask;
+assign per_wvalid     = lsu_inflight_write & ~lsu_w_sent;
+assign per_wdata      = lsu_cmd_data;
+assign per_wstrb      = lsu_cmd_mask;
+assign per_wlast      = 1'b1;
+assign per_bready     = 1'b1;
+
+// Accept the native cmd once we've latched it into an in-flight state.
+assign lsu_cmd_ready =
+       (lsu_cmd_valid && !lsu_cmd_write && !lsu_inflight_read && !lsu_inflight_write)
+    || (lsu_cmd_valid &&  lsu_cmd_write && !lsu_inflight_read && !lsu_inflight_write);
+
+// Return the rsp beat when R or B lands.
+assign lsu_rsp_valid = (per_rvalid & per_rready & per_rlast)
+                     | (per_bvalid & per_bready);
+assign lsu_rsp_data  = per_rdata;
+assign lsu_rsp_error = lsu_inflight_read ? (per_rresp != 2'b00)
+                                         : (per_bresp != 2'b00);
+
+// i_axi AW/W/B tie-offs retained for backwards-compatible placeholders.
+assign i_awvalid_tie = 1'b0;
+assign i_wvalid_tie  = 1'b0;
+assign i_bid_tie     = 1'b0;
+assign i_bresp_tie   = 2'b00;
+
+VexiiRiscv cpu (
+    .clk  (clk),
     .reset(reset),
 
-    .int_m_timer   (int_m_timer),
-    .int_m_software(1'b0),
-    .int_m_external(int_m_external),
+    // Privileged time counter — tie to zero (we don't use rdtime from the CSR).
+    .PrivilegedPlugin_logic_rdtime(64'd0),
 
-    // i_axi (read only; AW/W/B are tied off by the CPU, left unconnected)
-    .i_axi_awvalid  (i_awvalid_tie),
-    .i_axi_awready  (1'b0),
-    .i_axi_awaddr   (),
-    .i_axi_awid     (),
-    .i_axi_awlen    (),
-    .i_axi_awsize   (),
-    .i_axi_awburst  (),
-    .i_axi_awallStrb(),
-    .i_axi_wvalid   (i_wvalid_tie),
-    .i_axi_wready   (1'b0),
-    .i_axi_wdata    (),
-    .i_axi_wstrb    (),
-    .i_axi_wlast    (),
-    .i_axi_bvalid   (1'b0),
-    .i_axi_bready   (),
-    .i_axi_bid      (i_bid_tie),
-    .i_axi_bresp    (i_bresp_tie),
-    .i_axi_arvalid  (i_arvalid),
-    .i_axi_arready  (i_arready),
-    .i_axi_araddr   (i_araddr),
-    .i_axi_arid     (i_arid),
-    .i_axi_arlen    (i_arlen),
-    .i_axi_arsize   (i_arsize),
-    .i_axi_arburst  (i_arburst),
-    .i_axi_rvalid   (i_rvalid),
-    .i_axi_rready   (i_rready),
-    .i_axi_rdata    (i_rdata),
-    .i_axi_rid      (i_rid),
-    .i_axi_rresp    (i_rresp),
-    .i_axi_rlast    (i_rlast),
+    .PrivilegedPlugin_logic_harts_0_int_m_timer   (int_m_timer),
+    .PrivilegedPlugin_logic_harts_0_int_m_software(1'b0),
+    .PrivilegedPlugin_logic_harts_0_int_m_external(int_m_external),
 
-    // d_axi maps to our "mem" class
-    .d_axi_awvalid  (mem_awvalid),
-    .d_axi_awready  (mem_awready),
-    .d_axi_awaddr   (mem_awaddr),
-    .d_axi_awid     (mem_awid),
-    .d_axi_awlen    (mem_awlen),
-    .d_axi_awsize   (mem_awsize),
-    .d_axi_awburst  (mem_awburst),
-    .d_axi_awallStrb(mem_awallStrb),
-    .d_axi_wvalid   (mem_wvalid),
-    .d_axi_wready   (mem_wready),
-    .d_axi_wdata    (mem_wdata),
-    .d_axi_wstrb    (mem_wstrb),
-    .d_axi_wlast    (mem_wlast),
-    .d_axi_bvalid   (mem_bvalid),
-    .d_axi_bready   (mem_bready),
-    .d_axi_bid      (mem_bid),
-    .d_axi_bresp    (mem_bresp),
-    .d_axi_arvalid  (mem_arvalid),
-    .d_axi_arready  (mem_arready),
-    .d_axi_araddr   (mem_araddr),
-    .d_axi_arid     (mem_arid),
-    .d_axi_arlen    (mem_arlen),
-    .d_axi_arsize   (mem_arsize),
-    .d_axi_arburst  (mem_arburst),
-    .d_axi_rvalid   (mem_rvalid),
-    .d_axi_rready   (mem_rready),
-    .d_axi_rdata    (mem_rdata),
-    .d_axi_rid      (mem_rid),
-    .d_axi_rresp    (mem_rresp),
-    .d_axi_rlast    (mem_rlast),
+    // FetchL1Axi4 (I-cache refills, read-only)
+    .FetchL1Axi4Plugin_logic_axi_ar_valid        (i_arvalid),
+    .FetchL1Axi4Plugin_logic_axi_ar_ready        (i_arready),
+    .FetchL1Axi4Plugin_logic_axi_ar_payload_addr (i_araddr),
+    .FetchL1Axi4Plugin_logic_axi_ar_payload_id   (i_arid),
+    .FetchL1Axi4Plugin_logic_axi_ar_payload_len  (i_arlen),
+    .FetchL1Axi4Plugin_logic_axi_ar_payload_size (i_arsize),
+    .FetchL1Axi4Plugin_logic_axi_ar_payload_burst(i_arburst),
+    .FetchL1Axi4Plugin_logic_axi_ar_payload_cache(),
+    .FetchL1Axi4Plugin_logic_axi_ar_payload_prot (),
+    .FetchL1Axi4Plugin_logic_axi_r_valid         (i_rvalid),
+    .FetchL1Axi4Plugin_logic_axi_r_ready         (i_rready),
+    .FetchL1Axi4Plugin_logic_axi_r_payload_data  (i_rdata),
+    .FetchL1Axi4Plugin_logic_axi_r_payload_id    (i_rid),
+    .FetchL1Axi4Plugin_logic_axi_r_payload_resp  (i_rresp),
+    .FetchL1Axi4Plugin_logic_axi_r_payload_last  (i_rlast),
 
-    // p_axi (uncached)
-    .p_axi_awvalid  (per_awvalid),
-    .p_axi_awready  (per_awready),
-    .p_axi_awaddr   (per_awaddr),
-    .p_axi_awlen    (per_awlen),
-    .p_axi_awsize   (per_awsize),
-    .p_axi_awburst  (per_awburst),
-    .p_axi_awallStrb(per_awallStrb),
-    .p_axi_wvalid   (per_wvalid),
-    .p_axi_wready   (per_wready),
-    .p_axi_wdata    (per_wdata),
-    .p_axi_wstrb    (per_wstrb),
-    .p_axi_wlast    (per_wlast),
-    .p_axi_bvalid   (per_bvalid),
-    .p_axi_bready   (per_bready),
-    .p_axi_bresp    (per_bresp),
-    .p_axi_arvalid  (per_arvalid),
-    .p_axi_arready  (per_arready),
-    .p_axi_araddr   (per_araddr),
-    .p_axi_arlen    (per_arlen),
-    .p_axi_arsize   (per_arsize),
-    .p_axi_arburst  (per_arburst),
-    .p_axi_rvalid   (per_rvalid),
-    .p_axi_rready   (per_rready),
-    .p_axi_rdata    (per_rdata),
-    .p_axi_rresp    (per_rresp),
-    .p_axi_rlast    (per_rlast)
+    // LsuL1Axi4 (D-cache refills/writebacks + cbo.*)
+    .LsuL1Axi4Plugin_logic_axi_aw_valid        (mem_awvalid),
+    .LsuL1Axi4Plugin_logic_axi_aw_ready        (mem_awready),
+    .LsuL1Axi4Plugin_logic_axi_aw_payload_addr (mem_awaddr),
+    .LsuL1Axi4Plugin_logic_axi_aw_payload_id   (mem_awid),
+    .LsuL1Axi4Plugin_logic_axi_aw_payload_len  (mem_awlen),
+    .LsuL1Axi4Plugin_logic_axi_aw_payload_size (mem_awsize),
+    .LsuL1Axi4Plugin_logic_axi_aw_payload_burst(mem_awburst),
+    .LsuL1Axi4Plugin_logic_axi_aw_payload_cache(),
+    .LsuL1Axi4Plugin_logic_axi_aw_payload_prot (),
+    .LsuL1Axi4Plugin_logic_axi_w_valid         (mem_wvalid),
+    .LsuL1Axi4Plugin_logic_axi_w_ready         (mem_wready),
+    .LsuL1Axi4Plugin_logic_axi_w_payload_data  (mem_wdata),
+    .LsuL1Axi4Plugin_logic_axi_w_payload_strb  (mem_wstrb),
+    .LsuL1Axi4Plugin_logic_axi_w_payload_last  (mem_wlast),
+    .LsuL1Axi4Plugin_logic_axi_b_valid         (mem_bvalid),
+    .LsuL1Axi4Plugin_logic_axi_b_ready         (mem_bready),
+    .LsuL1Axi4Plugin_logic_axi_b_payload_id    (mem_bid),
+    .LsuL1Axi4Plugin_logic_axi_b_payload_resp  (mem_bresp),
+    .LsuL1Axi4Plugin_logic_axi_ar_valid        (mem_arvalid),
+    .LsuL1Axi4Plugin_logic_axi_ar_ready        (mem_arready),
+    .LsuL1Axi4Plugin_logic_axi_ar_payload_addr (mem_araddr),
+    .LsuL1Axi4Plugin_logic_axi_ar_payload_id   (mem_arid),
+    .LsuL1Axi4Plugin_logic_axi_ar_payload_len  (mem_arlen),
+    .LsuL1Axi4Plugin_logic_axi_ar_payload_size (mem_arsize),
+    .LsuL1Axi4Plugin_logic_axi_ar_payload_burst(mem_arburst),
+    .LsuL1Axi4Plugin_logic_axi_ar_payload_cache(),
+    .LsuL1Axi4Plugin_logic_axi_ar_payload_prot (),
+    .LsuL1Axi4Plugin_logic_axi_r_valid         (mem_rvalid),
+    .LsuL1Axi4Plugin_logic_axi_r_ready         (mem_rready),
+    .LsuL1Axi4Plugin_logic_axi_r_payload_data  (mem_rdata),
+    .LsuL1Axi4Plugin_logic_axi_r_payload_id    (mem_rid),
+    .LsuL1Axi4Plugin_logic_axi_r_payload_resp  (mem_rresp),
+    .LsuL1Axi4Plugin_logic_axi_r_payload_last  (mem_rlast),
+
+    // LsuPlugin native IO bus (goes through the shim above to per_* AXI)
+    .LsuPlugin_logic_bus_cmd_valid           (lsu_cmd_valid),
+    .LsuPlugin_logic_bus_cmd_ready           (lsu_cmd_ready),
+    .LsuPlugin_logic_bus_cmd_payload_write   (lsu_cmd_write),
+    .LsuPlugin_logic_bus_cmd_payload_address (lsu_cmd_addr),
+    .LsuPlugin_logic_bus_cmd_payload_data    (lsu_cmd_data),
+    .LsuPlugin_logic_bus_cmd_payload_size    (lsu_cmd_size),
+    .LsuPlugin_logic_bus_cmd_payload_mask    (lsu_cmd_mask),
+    .LsuPlugin_logic_bus_cmd_payload_io      (),
+    .LsuPlugin_logic_bus_cmd_payload_fromHart(),
+    .LsuPlugin_logic_bus_cmd_payload_uopId   (),
+    .LsuPlugin_logic_bus_rsp_valid           (lsu_rsp_valid),
+    .LsuPlugin_logic_bus_rsp_payload_error   (lsu_rsp_error),
+    .LsuPlugin_logic_bus_rsp_payload_data    (lsu_rsp_data)
 );
 
 // ============================================================
