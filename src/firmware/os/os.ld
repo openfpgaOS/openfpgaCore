@@ -1,39 +1,33 @@
 /*
- * openfpgaOS Linker Script
+ * openfpgaOS Linker Script — v2 memory arch
  *
  * Memory layout:
  * - BRAM:     0x00000000 (32KB)   - Bootloader + trap handler + hot code
- * - CRAM0:    0x30000000 (1MB)    - OS kernel code (.text only)
- * - OSDATA:   0x10320000 (768KB)  - OS data + rodata + BSS in SDRAM
+ * - OSDATA:   0x10320000 (768KB)  - OS code + data + rodata + BSS (ALL in SDRAM)
  * - Apps:     0x10400000+         - Dynamically loaded application (SDRAM)
  *
- * Split-memory rationale (2026-04-17): CRAM0 is accessed only by i_axi
- * (instruction fetches for .text) so it sees single-master traffic. OS
- * .data / .rodata / .bss live in SDRAM so d-cache (mem_axi) never
- * touches CRAM0 during runtime. This eliminates the i_axi+mem_axi
- * multi-port interleaving on CRAM0 that was suspected of causing
- * cache-line corruption in sync-burst mode.
+ * v2 rationale: CRAM1 retired entirely.  CRAM0 is bridge staging only
+ * (uncached + non-exec per PMA), so the OS kernel can no longer run
+ * from CRAM0.  Everything that used to live in CRAM0 (just OS .text)
+ * moves into the OSDATA region alongside .rodata/.data/.bss.
  *
- * LMA for .osdata_rodata / .osdata_data stays in CRAM0 (AT> CRAM0) so
- * os.bin remains a single contiguous blob. The bootloader splits the
- * blob at __os_text_size: bytes [0, __os_text_size) go to CRAM0
- * (OS .text) and bytes [__os_text_size, __os_copy_size) go directly
- * to SDRAM at __osdata_init_vma_start (the OS .rodata + .data init
- * image).  No post-load CRAM0→SDRAM copy.
+ * Boot flow: bridge DMAs os.bin into CRAM0 slot 1 scratch, then the
+ * BRAM bootloader flips CRAM0_MODE to CPU and memcpy's the whole blob
+ * into SDRAM at __osdata_vma start (== __os_entry).  Single
+ * contiguous copy — no CRAM0 destination anymore.
  */
 
 ENTRY(_start)
 
 MEMORY {
     BRAM      (rwx) : ORIGIN = 0x00000000, LENGTH = 32K
-    CRAM0     (rx)  : ORIGIN = 0x30000000, LENGTH = 1M
-    OSDATA    (rw)  : ORIGIN = 0x10320000, LENGTH = 768K
+    OSDATA    (rwx) : ORIGIN = 0x10320000, LENGTH = 768K
 }
 
 /* Layout symbols */
 __sdram_base = 0x10000000;
 __sdram_size = 64M;
-__os_entry = 0x30000000;
+__os_entry = 0x10320000;
 __app_load_base = 0x10400000;
 
 SECTIONS {
@@ -87,38 +81,21 @@ SECTIONS {
         __fastdata_end = .;
     } > BRAM
 
-    /* === CRAM0: OS kernel code (i_axi only) === */
-
-    .text __os_entry : {
-        __text_start = .;
-        KEEP(*(.text*))
-        /* Sweep up orphan .app_fasttext emitted by OS sources that
-         * decorate functions with OF_FASTTEXT (see hal/link.c). On
-         * this target BRAM is consumed by the bootloader, so these
-         * end up as regular i_axi code in CRAM0. */
-        KEEP(*(.app_fasttext*))
-        KEEP(*(.app_fastrodata*))
-        . = ALIGN(4);
-        __text_end = .;
-    } > CRAM0
-
-    /* === SDRAM: OS read-only + initialised data ===
-     * Merged into a single section (.osdata) to keep VMA and LMA
-     * boundaries bit-for-bit identical.  If we split .rodata and
-     * .data into separate output sections, ld may add alignment
-     * padding to the VMA side (e.g. 8-byte alignment inherited from
-     * a .data member) without matching padding in the LMA packing,
-     * which shifts every field in .data by the padding amount.
-     * The boot loader streams a contiguous blob from CRAM0 LMA to
-     * SDRAM VMA, so any VMA/LMA divergence is a memory-content bug.
-     *
-     * Alignment inside the merged section uses ALIGN(16) to satisfy
-     * the strongest object alignment without introducing boundary
-     * ambiguity between the rodata and data subranges. */
-    .osdata : {
+    /* === SDRAM: OS code + read-only + initialised data ===
+     * v2 arch: .text moves here from CRAM0 since CRAM0 is now
+     * non-executable (PMA exe=0).  The whole OS image (text + rodata
+     * + data) is packed into one contiguous section so boot.c can
+     * do a single memcpy from the CRAM0 scratch blob into SDRAM. */
+    .osdata __os_entry : {
         . = ALIGN(16);
         __osdata_lma        = LOADADDR(.osdata);
         __osdata_vma        = .;
+        __text_start        = .;
+        KEEP(*(.text*))
+        KEEP(*(.app_fasttext*))
+        KEEP(*(.app_fastrodata*))
+        . = ALIGN(16);
+        __text_end          = .;
         __osdata_rodata_vma = .;
         KEEP(*(.rodata*))
         KEEP(*(.srodata*))
@@ -130,17 +107,14 @@ SECTIONS {
         . = ALIGN(4);
         __osdata_data_vma_end = .;
         __osdata_vma_end      = .;
-    } > OSDATA AT> CRAM0
+    } > OSDATA
 
-    /* os.bin = .text + .osdata packed contiguously. The bootloader
-     * splits the blob by offset:
-     *   bytes [0, __os_text_size)           → CRAM0 0x30000000 (uncached alias)
-     *   bytes [__os_text_size, __os_copy_size) → SDRAM __osdata_init_vma_start
-     * Because .osdata is ONE section, VMA end - VMA start exactly
-     * equals LMA end - LMA start — no alignment padding mismatch. */
+    /* os.bin = .osdata (which includes .text, .rodata, .data).
+     * Bootloader reads the whole blob from CRAM0 slot 1 scratch and
+     * memcpy's it to SDRAM at __osdata_vma == __os_entry.  No split. */
     __os_load_addr          = __os_entry;
     __os_text_size          = __text_end - __text_start;
-    __os_copy_size          = LOADADDR(.osdata) + SIZEOF(.osdata) - __text_start;
+    __os_copy_size          = __osdata_vma_end - __osdata_vma;
     __osdata_init_vma_start = __osdata_vma;
     __osdata_init_size      = __osdata_vma_end - __osdata_vma;
 
@@ -193,8 +167,6 @@ SECTIONS {
 
     ASSERT(__fastdata_end <= __app_bram_start, "OS BRAM overflow: OS sections exceed 8KB reserved region")
     ASSERT(__fastdata_end <= (__stack_top - 8192), "BRAM overflow: insufficient stack headroom")
-    ASSERT((LOADADDR(.osdata) + SIZEOF(.osdata)) <= 0x300FF000,
-           "OS code+rodata+data too large: exceeds 1MB CRAM0 region")
     ASSERT(__os_bss_end <= (ORIGIN(OSDATA) + LENGTH(OSDATA)),
-           "OS .bss too large: exceeds OSDATA region in SDRAM")
+           "OS text+rodata+data+bss too large: exceeds OSDATA region in SDRAM")
 }

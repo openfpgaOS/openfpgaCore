@@ -420,21 +420,15 @@ static int boot_dma_read(uint32_t slot_id, uint32_t slot_offset,
 
 __attribute__((section(".text.boot")))
 static int boot_load_os_sd(uint32_t total) {
-    /* v2 arch: CRAM1 retired.  Bounce through CRAM0 scratch:
-     * bridge DMA → CRAM0, then CPU copies to its final home.
-     * Split-memory layout (see os.ld):
-     *   bytes [0, text_size)          → CRAM0 at _os_load_addr
-     *                                   (CRAM0 is uncached per PMA
-     *                                    at 0x30000000)
-     *   bytes [text_size, copy_size)  → SDRAM at __osdata_init_vma_start
-     *
-     * CRAM0_MODE ownership mux: the bridge master must own CRAM0 for
-     * the DMA, then the CPU takes over for the memcpy-out. */
+    /* v2 arch: CRAM1 retired, OS .text in SDRAM (CRAM0 is non-exec).
+     * Single-destination layout: bridge DMAs os.bin into CRAM0
+     * scratch, then the CPU copies the whole blob contiguously into
+     * SDRAM starting at __osdata_vma (== __os_entry).  No
+     * text-vs-data split needed since the linker put everything in
+     * one .osdata section. */
     uint32_t bounce_bridge = CRAM0_SCRATCH_BRIDGE;
     volatile uint8_t *bounce_src = (volatile uint8_t *)CRAM0_SCRATCH;
-    uint32_t text_size = (uint32_t)(uintptr_t)_os_text_size;
-    volatile uint8_t *text_dst = (volatile uint8_t *)(uintptr_t)_os_load_addr;
-    volatile uint8_t *osdata_dst =
+    volatile uint8_t *sdram_dst =
         (volatile uint8_t *)(uintptr_t)_osdata_init_vma_start;
     uint32_t done = 0;
 
@@ -450,18 +444,13 @@ static int boot_load_os_sd(uint32_t total) {
         if (rc < 0)
             return rc;
 
-        /* CPU reads CRAM0 scratch, writes to text_dst (still CRAM0)
-         * or osdata_dst (SDRAM).  Bridge side is idle here. */
+        /* CPU reads CRAM0 scratch, writes to SDRAM. */
         CRAM0_MODE = CRAM0_MODE_CPU;
         for (volatile int s = 0; s < 8; s++) {}  /* settle ~4 clk_74a */
         volatile uint32_t *src32 = (volatile uint32_t *)bounce_src;
-        for (uint32_t i = 0; i < chunk / 4; i++) {
-            uint32_t off = done + i * 4;
-            volatile uint32_t *dst32 = (off < text_size)
-                ? (volatile uint32_t *)&text_dst[off]
-                : (volatile uint32_t *)&osdata_dst[off - text_size];
-            *dst32 = src32[i];
-        }
+        volatile uint32_t *dst32 = (volatile uint32_t *)(sdram_dst + done);
+        for (uint32_t i = 0; i < chunk / 4; i++)
+            dst32[i] = src32[i];
 
         done += chunk;
     }
