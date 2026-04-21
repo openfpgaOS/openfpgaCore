@@ -20,6 +20,13 @@ VERILATOR_FLAGS = --cc --exe --build \
 	-CFLAGS "-std=c++17 -O2" \
 	--trace
 
+# Trace-free flags used by the heavyweight system tb (full CPU) — VCD
+# tracing is the dominant sim cost; leave it off so boot completes in
+# a few seconds instead of minutes.
+VERILATOR_FLAGS_NOTRACE = --cc --exe --build \
+	-Wall -Wno-fatal -Wno-BADVLTPRAGMA \
+	-CFLAGS "-std=c++17 -O2"
+
 # ============================================================
 # SDRAM
 # ============================================================
@@ -99,10 +106,40 @@ AUDIO_DIR = obj_dir_audio_pipeline
 AUDIO_FLAGS = -Wno-WIDTHEXPAND -Wno-CASEINCOMPLETE -Wno-SYNCASYNCNET -Wno-UNOPTFLAT
 
 # ============================================================
+# Full system bring-up — CPU + SDRAM + CRAM0 CDC + BRAM
+# ============================================================
+# Boots the OpenFpgaVexii through the v2 fabric, loads os.bin into the
+# simulated CRAM0, and prints anything the kernel pushes out UART.
+# Requires firmware.mif + os.bin to be present in ../../firmware/os/.
+SYSTEM_SRCS = \
+	tb_system.v \
+	bram_model.v \
+	sdram_fast_model.v \
+	cram0_sim_model.v \
+	$(COMMON_DIR)/cpu_system.v \
+	$(COMMON_DIR)/cpu_target_port.v \
+	$(COMMON_DIR)/cram0_cdc.v \
+	$(COMMON_DIR)/axi_sdram_arbiter.v \
+	$(COMMON_DIR)/axi_sdram_slave.v \
+	$(COMMON_DIR)/axi_periph_slave.v \
+	$(COMMON_DIR)/snac_shifter.v \
+	../vendor/vexriscv/VexiiRiscv/OpenFpgaVexii.v \
+	$(TARGET_DIR)/apf/common.v
+
+SYSTEM_CPP = tb_system_main.cpp
+SYSTEM_TOP = tb_system
+SYSTEM_DIR = obj_dir_system
+SYSTEM_FLAGS = -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC -Wno-CASEINCOMPLETE \
+               -Wno-SYNCASYNCNET -Wno-UNOPTFLAT -Wno-STMTDLY -Wno-PINMISSING \
+               -Wno-UNUSEDSIGNAL -Wno-UNDRIVEN -Wno-UNUSEDPARAM \
+               -Wno-CASEOVERLAP -Wno-SELRANGE -Wno-WIDTHCONCAT \
+               -Wno-MULTIDRIVEN -Wno-LATCH -Wno-IMPLICIT -Wno-ASCRANGE
+
+# ============================================================
 # Targets
 # ============================================================
 .PHONY: all sdram sram gpu gpu-lite gpu-full axi-periph \
-        audio run run-sram build clean
+        audio system run run-sram build clean
 
 # `all` runs every passing test. Build-only debug harnesses
 # (axi-periph) are intentionally excluded.
@@ -184,8 +221,19 @@ $(AUDIO_DIR)/V$(AUDIO_TOP): $(AUDIO_SRCS) $(AUDIO_CPP)
 		-I$(COMMON_DIR) \
 		$(AUDIO_SRCS) $(AUDIO_CPP)
 
+# --- System bring-up ---
+system: $(SYSTEM_DIR)/V$(SYSTEM_TOP)
+	@printf "\n=== system bring-up (tb_system) ===\n"
+	./$(SYSTEM_DIR)/V$(SYSTEM_TOP)
+
+$(SYSTEM_DIR)/V$(SYSTEM_TOP): $(SYSTEM_SRCS) $(SYSTEM_CPP)
+	$(VERILATOR) $(VERILATOR_FLAGS_NOTRACE) $(SYSTEM_FLAGS) \
+		--top-module $(SYSTEM_TOP) --Mdir $(SYSTEM_DIR) \
+		-I$(COMMON_DIR) -I$(TARGET_DIR) -I. \
+		$(SYSTEM_SRCS) $(SYSTEM_CPP)
+
 # --- Clean ---
 clean:
 	rm -rf $(SDRAM_DIR) $(SRAM_DIR) $(GPU_LITE_DIR) $(GPU_FULL_DIR) \
-	       $(AXI_PERIPH_DIR) $(AUDIO_DIR) \
+	       $(AXI_PERIPH_DIR) $(AUDIO_DIR) $(SYSTEM_DIR) \
 	       obj_dir_gpu obj_dir_cdc io_sdram_test.v

@@ -534,40 +534,15 @@ int main(void) {
             boot_fb_clear_row(0);
             boot_fb_puts(0, 0, "Loading via UART...");
 
-            /* Split-memory PHDP stream (v2 arch):
-             *   bytes [0, text_size)       → CRAM0 at _os_load_addr
-             *                                (uncached per PMA at 0x30xxxxxx)
-             *   bytes [text_size, total)   → SDRAM __osdata_init_vma_start
-             * Matches boot_load_os_sd for the SD path.  PHDP writes from
-             * the CPU side, so the mux needs CRAM0_MODE_CPU for text. */
+            /* v2 arch: OS is ONE contiguous section in SDRAM
+             * (__os_load_addr == __osdata_init_vma_start, same
+             * address).  No text/data split — stream the whole blob
+             * directly into SDRAM with a single phdp_chunk_loop call.
+             * PHDP writes the CPU directly to SDRAM; the CRAM0 mux
+             * is irrelevant here. */
             (void)chunk_size;
-            CRAM0_MODE = CRAM0_MODE_CPU;
-            for (volatile int s = 0; s < 8; s++) {}
-            uint32_t text_size = (uint32_t)(uintptr_t)_os_text_size;
-            uint8_t *text_dst = (uint8_t *)(uintptr_t)_os_load_addr;
-            uint8_t *osdata_dst = (uint8_t *)(uintptr_t)_osdata_init_vma_start;
-            int rc = 0;
-            if (text_size > 0) {
-                rc = phdp_chunk_loop(0, text_size, total_size, text_dst);
-            }
-            if (rc == 0 && text_size < total_size) {
-                /* The host streams the whole slot from offset 0. The
-                 * first call above consumed bytes [0, text_size) into
-                 * text_dst but left the rest of the stream in flight.
-                 * The second call has to re-request with a fresh
-                 * REQ_OVERRIDE so the host restarts the stream from 0,
-                 * then we copy only the [text_size, total) window. */
-                uint32_t total2 = 0;
-                uint16_t chunk2 = 0;
-                if (!phdp_request_override(OS_SLOT_ID, &total2, &chunk2)) {
-                    rc = OF_ERR_IO;
-                } else {
-                    (void)chunk2;
-                    rc = phdp_chunk_loop(text_size, total_size - text_size,
-                                         total_size,
-                                         osdata_dst);
-                }
-            }
+            uint8_t *os_dst = (uint8_t *)(uintptr_t)_os_load_addr;
+            int rc = phdp_chunk_loop(0, total_size, total_size, os_dst);
 
             if (rc < 0) {
                 boot_fb_clear_row(0);

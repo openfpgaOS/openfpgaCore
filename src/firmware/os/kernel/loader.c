@@ -130,19 +130,17 @@ static int target_has_app_bram(void) {
  * ====================================================================== */
 
 /* Read bytes from data slot into a buffer.
- * Bounces through CRAM0 scratch because buf is typically on the stack
- * (BRAM), which isn't in the bridge address space.
- * (v2 arch: CRAM1 retired, scratch moved to CRAM0.) */
+ * of_file_read / bridge_read_impl already handles the CRAM0 ↔ non-CRAM0
+ * bounce + CRAM0_MODE dance internally when dest isn't in CRAM0, so we
+ * just pass buf straight through.  Previously we stage-copied through
+ * CRAM0_SCRATCH ourselves and then memcpy'd to buf — but that left
+ * CRAM0_MODE at BRIDGE (bridge_read_impl's CRAM0-dest path), so the
+ * CPU memcpy read the mux's inactive side and returned garbage,
+ * which failed the ELF magic check with rc=-2. */
 static int elf_read(uint32_t slot_id, uint32_t offset, void *buf, uint32_t len) {
     if (len > DMA_CHUNK_SIZE)
         return -1;
-
-    int rc = of_file_read(slot_id, offset, (void *)CRAM0_SCRATCH, len);
-    if (rc < 0)
-        return rc;
-
-    memcpy(buf, (const void *)CRAM0_SCRATCH, len);
-    return 0;
+    return of_file_read(slot_id, offset, buf, len);
 }
 
 /* Copy ELF data to BRAM.
