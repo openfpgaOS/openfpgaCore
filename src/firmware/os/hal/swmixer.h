@@ -27,17 +27,13 @@
 
 #include <stdint.h>
 
-/* Voice pool cut 32→16 so the inner loop runs half as long when the
- * SF2 pump fires a dense passage.  Matches audio.md's target of
- * "16 SF2 voices".  of_mixer_play's voice-stealer handles the cap.
- * Doom's renderer needs the CPU back. */
-/* 16 voices is the nominal SF2 target but the ISR cost scales linearly
- * with voice count.  On this 100 MHz RV32 with the software mixer,
- * 16 active voices pushes the 1 kHz ISR to ~85 % CPU and starves Doom's
- * renderer.  Halving polyphony to 8 caps peak ISR ≈ 45 %; music loses
- * some density but melodies + bass remain intact, and Doom gets back
- * enough CPU to render the full demo loop smoothly. */
-#define SWMIXER_MAX_VOICES    8
+/* Must match OF_MIXER_MAX_VOICES in api/of_mixer.h — the public API
+ * promises 32 voices to apps.  Inactive voices cost one branch per
+ * tick; only active voices pay the per-sample mix cost, and on the v2
+ * arch sample reads are L1-hot after the first line-fill, so the peak
+ * ISR load with 32 simultaneously active voices is well within budget.
+ * of_mixer_play's priority stealer still caps polyphony in practice. */
+#define SWMIXER_MAX_VOICES    32
 #define SWMIXER_OUTPUT_RATE   48000
 #define SWMIXER_BLOCK_SAMPLES 48
 
