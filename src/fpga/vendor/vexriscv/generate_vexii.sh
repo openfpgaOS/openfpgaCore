@@ -45,22 +45,20 @@ sbt "runMain vexiiriscv.soc.openfpgaos.GenOpenFpgaVexii \
       --region base=0,size=8000,main=1,exe=1 \
       --region base=10000000,size=4000000,main=1,exe=1 \
       --region base=20000000,size=10000000,main=0,exe=0 \
-      --region base=30000000,size=1000000,main=1,exe=1 \
-      --region base=31000000,size=7000000,main=1,exe=0 \
-      --region base=38000000,size=8000000,main=0,exe=0 \
+      --region base=30000000,size=1000000,main=0,exe=0 \
       --region base=40000000,size=40000000,main=0,exe=0"
 
-# Memory regions:
-#   0x00000000  32KB  BRAM region    (cached, executable)
-#   0x10000000  64MB  SDRAM          (cached, executable)
-#   0x20000000 256MB  VRAM/reserved  (uncached, non-exec)
-#   0x30000000  16MB  CRAM0 cached   (cached, executable)
-#   0x31000000 112MB  CRAM1+         (cached, non-exec) — SW mixer reads samples
-#                                     via L1 D$ line-fill (native 8-word bursts),
-#                                     amortising uncached latency across ~16 samples
-#                                     per fetch; bridge still writes via 0x38 alias
-#   0x38000000 128MB  CRAM uncached  (uncached, non-exec)
-#   0x40000000   1GB  IO + SDRAM_UC  (uncached, non-exec) — covers 0x50000000 SDRAM uncached alias
+# Memory regions (v2: CRAM1 retired, CRAM0 on bridge clock via CDC):
+#   0x00000000  32KB   BRAM region       (cached, executable)
+#   0x10000000  64MB   SDRAM             (cached, executable) — OS, apps, heap, stack, FB, audio ring, samples
+#   0x20000000 256MB   VRAM/reserved     (uncached, non-exec)
+#   0x30000000  16MB   CRAM0             (uncached, non-exec) — bridge staging only; CPU memcpy's via CDC on save/load
+#   0x40000000   1GB   IO + SDRAM_UC     (uncached, non-exec) — covers 0x50000000 SDRAM uncached alias
+#
+# Retired regions:
+#   0x31000000 / 0x39000000 — CRAM1 cached / uncached aliases (chip removed from bitstream)
+#   0x38000000              — CRAM0 uncached alias (CRAM0 is uncached at 0x30000000 now, no alias needed)
+#   0x3A000000              — SRAM    (GPU-private, not on AXI)
 
 OUTPUT="$VEXII_DIR/OpenFpgaVexii.v"
 if [ ! -f "$OUTPUT" ]; then

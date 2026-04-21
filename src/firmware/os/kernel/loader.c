@@ -130,23 +130,24 @@ static int target_has_app_bram(void) {
  * ====================================================================== */
 
 /* Read bytes from data slot into a buffer.
- * Bounces through CRAM1 because buf is typically on the stack (BRAM),
- * which isn't in the bridge address space. */
+ * Bounces through CRAM0 scratch because buf is typically on the stack
+ * (BRAM), which isn't in the bridge address space.
+ * (v2 arch: CRAM1 retired, scratch moved to CRAM0.) */
 static int elf_read(uint32_t slot_id, uint32_t offset, void *buf, uint32_t len) {
     if (len > DMA_CHUNK_SIZE)
         return -1;
 
-    int rc = of_file_read(slot_id, offset, (void *)CRAM1_SCRATCH, len);
+    int rc = of_file_read(slot_id, offset, (void *)CRAM0_SCRATCH, len);
     if (rc < 0)
         return rc;
 
-    memcpy(buf, (const void *)CRAM1_SCRATCH, len);
+    memcpy(buf, (const void *)CRAM0_SCRATCH, len);
     return 0;
 }
 
 /* Copy ELF data to BRAM.
  * BRAM is not in the bridge address space, so of_file_read bounces
- * through CRAM1 and copies to the BRAM address. */
+ * through CRAM0 scratch and copies to the BRAM address. */
 static int elf_copy_to_bram(uint32_t slot_id, uint32_t file_offset,
                             uintptr_t bram_addr, uint32_t len) {
     uint32_t done = 0;

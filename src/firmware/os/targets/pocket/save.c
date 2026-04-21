@@ -1,16 +1,20 @@
 /*
- * openfpgaOS Save HAL Implementation
- * Nonvolatile CRAM1 (PSRAM) region, persisted to SD card by APF bridge.
- * Bridge reads/writes CRAM1 directly via dedicated FIFO paths in the FPGA.
+ * openfpgaOS Save HAL Implementation (v2 memory arch)
  *
- * CPU accesses CRAM1 via the uncached alias (0x39000000) so writes are
- * immediately visible to the bridge without D-cache flushing.
+ * Nonvolatile CRAM0 save-slot window, persisted to SD card by the APF
+ * bridge.  CRAM0 is uncached per PMA, so CPU writes/reads are
+ * immediately visible to the bridge without a D-cache dance.
  *
- * Layout in CRAM1 (starting at 0x39000000, mapped to bridge 0x30000000):
- *   [0x00000 .. 0x27FFFF]  Save data (10 slots × 256KB)
- *   [0x280000 ..]           Available for OS data (FTAB, config, etc.)
+ * The bridge and the CPU's CDC time-share the CRAM0 controller via the
+ * CRAM0_MODE mux: CPU owns CRAM0 while reading/writing save-slot data,
+ * bridge owns it during the DMA to/from the SD card (.sav file).
  *
- * Each slot is 256KB (SAVE_SLOT_SIZE = 0x40000).
+ * Layout in CRAM0 (window starts at OF_TARGET_CRAM0_SAVE_OFFSET from
+ * CRAM0_BASE — see target_platform.h):
+ *   [0x0       .. 0x27FFFF ]  Save data (10 slots × 256 KB)
+ *   [0x280000  .. ..        ]  Per-slot save_meta_t (CRC, magic)
+ *
+ * Each slot is 256 KB (SAVE_SLOT_SIZE = 0x40000).
  */
 
 #include "save.h"
@@ -46,9 +50,28 @@ static volatile save_meta_t *slot_meta(int slot) {
                                      (uint32_t)slot * sizeof(save_meta_t));
 }
 
+/* Settle delay after a CRAM0_MODE flip — ~4 clk_74a cycles is enough
+ * for the mux select to propagate before the next access lands. */
+static inline void cram0_mode_settle(void) {
+    for (volatile int s = 0; s < 8; s++) {}
+}
+
 void of_save_init(void) {
-    /* Nothing to set up on the FPGA side — bridge reads to CRAM1 go
-     * through the simple bridge_cram1_rd_detect FSM directly. */
+    /* v2 arch: nothing to set up on the FPGA side.  CRAM0 is shared
+     * between the bridge and the CPU via the CRAM0_MODE mux, flipped
+     * per-op by the save read/write/flush paths below. */
+}
+
+/* Take CPU ownership of CRAM0 for direct load/store access. */
+static inline void cram0_acquire_cpu(void) {
+    CRAM0_MODE = CRAM0_MODE_CPU;
+    cram0_mode_settle();
+}
+
+/* Hand CRAM0 back to the bridge so it can DMA save slots to/from SD. */
+static inline void cram0_release_to_bridge(void) {
+    CRAM0_MODE = CRAM0_MODE_BRIDGE;
+    cram0_mode_settle();
 }
 
 int of_save_read(int slot, void *buf, uint32_t offset, uint32_t len) {
@@ -57,6 +80,8 @@ int of_save_read(int slot, void *buf, uint32_t offset, uint32_t len) {
     if (offset + len > SAVE_SLOT_SIZE)
         return -1;
 
+    /* v2 arch: CPU must own CRAM0 during the copy-out. */
+    cram0_acquire_cpu();
     volatile uint8_t *src = slot_base(slot) + offset;
     uint8_t *dst = (uint8_t *)buf;
     for (uint32_t i = 0; i < len; i++)
@@ -71,6 +96,8 @@ int of_save_write(int slot, const void *buf, uint32_t offset, uint32_t len) {
     if (offset + len > SAVE_SLOT_SIZE)
         return -1;
 
+    /* v2 arch: CPU must own CRAM0 during the copy-in. */
+    cram0_acquire_cpu();
     volatile uint8_t *dst = slot_base(slot) + offset;
     const uint8_t *src = (const uint8_t *)buf;
     for (uint32_t i = 0; i < len; i++)
@@ -89,8 +116,11 @@ int of_save_flush_size(int slot, uint32_t size) {
     SAVE_DT_SLOT = (uint32_t)slot;
     SAVE_DT_SIZE = size;           /* writing SIZE triggers the commit */
 
-    /* Tell the bridge to save the slot data to .sav file */
-    uint32_t bridge_addr = CRAM1_BRIDGE + (uint32_t)slot * SAVE_SLOT_SIZE;
+    /* v2 arch: hand CRAM0 to the bridge for the SD-write DMA.  The
+     * slot base in bridge-space is CRAM0_BRIDGE + save offset + slot*size. */
+    cram0_release_to_bridge();
+    uint32_t save_bridge_base = CRAM0_BRIDGE + OF_TARGET_CRAM0_SAVE_OFFSET;
+    uint32_t bridge_addr = save_bridge_base + (uint32_t)slot * SAVE_SLOT_SIZE;
     return of_file_slot_write(10 + (uint32_t)slot, bridge_addr, size);
 }
 
@@ -102,6 +132,8 @@ void of_save_update_crc(int slot) {
     if (slot < 0 || slot >= (int)SAVE_MAX_SLOTS)
         return;
 
+    /* v2 arch: CPU needs CRAM0 for the CRC sweep + metadata store. */
+    cram0_acquire_cpu();
     volatile uint8_t *base = slot_base(slot);
     uint32_t crc = save_crc32(base, SAVE_SLOT_SIZE);
 
@@ -114,6 +146,7 @@ int of_save_check(int slot) {
     if (slot < 0 || slot >= (int)SAVE_MAX_SLOTS)
         return -1;
 
+    cram0_acquire_cpu();
     volatile save_meta_t *meta = slot_meta(slot);
 
     if (meta->magic != SAVE_CRC_MAGIC)
@@ -136,6 +169,7 @@ void of_save_erase(int slot) {
     if (slot < 0 || slot >= (int)SAVE_MAX_SLOTS)
         return;
 
+    cram0_acquire_cpu();
     volatile uint32_t *dst = (volatile uint32_t *)slot_base(slot);
     for (uint32_t i = 0; i < SAVE_SLOT_SIZE / 4; i++)
         dst[i] = 0xFFFFFFFF;

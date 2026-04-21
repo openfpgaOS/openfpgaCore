@@ -40,7 +40,7 @@ int of_file_read_chunked(uint32_t slot_id, uint32_t slot_offset,
 /* Flush a data slot to SD card (Data Slot Write command).
  * Tells the bridge to read from bridge_addr and write to the slot's .sav file.
  * slot_id: APF data slot ID (10-19 for saves)
- * bridge_addr: source address in bridge address space (0x30xxxxxx for CRAM1)
+ * bridge_addr: source address in bridge address space (0x20xxxxxx for CRAM0)
  * length: bytes to write
  * Returns 0 on success, negative on error. */
 int of_file_slot_write(uint32_t slot_id, uint32_t bridge_addr, uint32_t length);
@@ -52,7 +52,8 @@ int of_file_slot_write_at(uint32_t slot_id, uint32_t slot_offset,
 
 /* Raw bridge DMA: issue a read command and wait for completion.
  * No cache flush — caller is responsible for cache coherency.
- * Used by I/O cache for CRAM1 targets where no SDRAM flush is needed. */
+ * Used by I/O cache for CRAM0 targets where no SDRAM flush is needed
+ * (CRAM0 is uncached per PMA in v2 arch). */
 int of_file_read_raw(uint32_t slot_id, uint32_t slot_offset,
                       uint32_t bridge_addr, uint32_t length);
 
@@ -73,7 +74,7 @@ int of_file_get_name(uint32_t slot_id, char *name_out, uint32_t name_max);
  * or negative error if a read is already in flight.
  * The callback is called with (token, bytes_read) when the DMA completes.
  * Only one async read can be in flight at a time (bridge limitation).
- * dest must be in CRAM1 (direct DMA target). */
+ * dest must be in CRAM0 (direct DMA target). */
 int of_file_read_async(uint32_t slot_id, uint32_t slot_offset,
                        void *dest, uint32_t length,
                        void (*callback)(int token, int result));

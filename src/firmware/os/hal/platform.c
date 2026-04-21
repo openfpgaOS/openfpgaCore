@@ -34,18 +34,12 @@ static const of_target_platform_t g_target_platform = {
     .interact_uncached = OF_TARGET_INTERACT_UNCACHED,
     .interact_max_vars = OF_TARGET_INTERACT_MAX_VARS,
 
-    .cram0_base = OF_TARGET_CRAM0_BASE,
-    .cram1_base = OF_TARGET_CRAM1_BASE,
-    .cram0_uncached = OF_TARGET_CRAM0_UNCACHED,
-    .cram1_uncached = OF_TARGET_CRAM1_UNCACHED,
-    .cram_size = OF_TARGET_CRAM_SIZE,
-    .cram0_bridge = OF_TARGET_CRAM0_BRIDGE,
-    .cram1_bridge = OF_TARGET_CRAM1_BRIDGE,
-    .cram1_ftab_offset = OF_TARGET_CRAM1_FTAB_OFFSET,
-    .cram1_scratch_offset = OF_TARGET_CRAM1_SCRATCH_OFFSET,
-
-    .sram_base = OF_TARGET_SRAM_BASE,
-    .sram_size = OF_TARGET_SRAM_SIZE,
+    /* v2 memory arch: CRAM1 + SRAM retired. */
+    .cram0_base           = OF_TARGET_CRAM0_BASE,
+    .cram_size            = OF_TARGET_CRAM_SIZE,
+    .cram0_bridge         = OF_TARGET_CRAM0_BRIDGE,
+    .cram0_os_offset      = OF_TARGET_CRAM0_OS_OFFSET,
+    .cram0_scratch_offset = OF_TARGET_CRAM0_SCRATCH_OFFSET,
 
     .runtime_stack_top = OF_TARGET_RUNTIME_STACK_TOP,
     .runtime_stack_size = OF_TARGET_RUNTIME_STACK_SIZE,

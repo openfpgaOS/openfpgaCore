@@ -1,6 +1,7 @@
 /*
  * openfpgaOS Save File HAL
- * Nonvolatile CRAM1 (PSRAM)-backed save system (persisted to SD card by bridge)
+ * Nonvolatile CRAM0-window save system (persisted to SD card by bridge).
+ * v2 arch: CRAM1 retired, save slots moved into CRAM0 via CRAM0_MODE mux.
  */
 
 #ifndef OFOS_SAVE_H

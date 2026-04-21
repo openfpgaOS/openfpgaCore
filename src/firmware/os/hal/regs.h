@@ -54,27 +54,24 @@
 #define TERM_COLS           40
 #define TERM_ROWS           30
 
-#define CRAM0_BASE          OF_TARGET_CRAM0_BASE      /* CRAM0 cached */
-#define CRAM1_BASE          OF_TARGET_CRAM1_BASE      /* CRAM1 cached */
-#define CRAM0_UNCACHED      OF_TARGET_CRAM0_UNCACHED  /* CRAM0 uncached (D-cache bypass) */
-#define CRAM1_UNCACHED      OF_TARGET_CRAM1_UNCACHED  /* CRAM1 uncached (D-cache bypass) */
+/* v2 memory arch: CRAM1 retired.  CRAM0 is the only PSRAM kept, running
+ * on the APF bridge clock (clk_74a); CPU access is through a fabric-side
+ * CDC.  PMA marks 0x30000000 as uncached so there's no cache-coherency
+ * concern around the bridge writing behind the CPU. */
+#define CRAM0_BASE          OF_TARGET_CRAM0_BASE      /* CRAM0 (uncached) */
 #define CRAM_SIZE           OF_TARGET_CRAM_SIZE
 
-#define CRAM0_BRIDGE        OF_TARGET_CRAM0_BRIDGE      /* CRAM0 in bridge address space */
-#define CRAM1_BRIDGE        OF_TARGET_CRAM1_BRIDGE      /* CRAM1 in bridge address space */
+#define CRAM0_BRIDGE        OF_TARGET_CRAM0_BRIDGE    /* CRAM0 in bridge address space */
 
-/* FTAB (file table) — written by Chip32 loader at boot (256 bytes) */
-#define CRAM1_FTAB            (CRAM1_BASE + OF_TARGET_CRAM1_FTAB_OFFSET)
-#define CRAM1_FTAB_UNCACHED   (CRAM1_UNCACHED + OF_TARGET_CRAM1_FTAB_OFFSET)
-#define CRAM1_FTAB_BRIDGE     (CRAM1_BRIDGE + OF_TARGET_CRAM1_FTAB_OFFSET)
+/* FTAB (file table) — written by Chip32 loader at boot into CRAM0 (not CRAM1). */
+#define CRAM0_FTAB            (CRAM0_BASE + OF_TARGET_CRAM0_OS_OFFSET)
+#define CRAM0_FTAB_BRIDGE     (CRAM0_BRIDGE + OF_TARGET_CRAM0_OS_OFFSET)
 
-/* DMA scratch area in CRAM1 (after FTAB, before I/O cache) */
-#define CRAM1_SCRATCH         (CRAM1_BASE + OF_TARGET_CRAM1_SCRATCH_OFFSET)
-#define CRAM1_SCRATCH_UNCACHED (CRAM1_UNCACHED + OF_TARGET_CRAM1_SCRATCH_OFFSET)
-#define CRAM1_SCRATCH_BRIDGE  (CRAM1_BRIDGE + OF_TARGET_CRAM1_SCRATCH_OFFSET)
+/* DMA scratch area in CRAM0 (shared with bridge, managed via CRAM0_MODE). */
+#define CRAM0_SCRATCH         (CRAM0_BASE + OF_TARGET_CRAM0_SCRATCH_OFFSET)
+#define CRAM0_SCRATCH_BRIDGE  (CRAM0_BRIDGE + OF_TARGET_CRAM0_SCRATCH_OFFSET)
 
-#define SRAM_BASE           OF_TARGET_SRAM_BASE      /* SRAM uncached */
-#define SRAM_SIZE           OF_TARGET_SRAM_SIZE
+/* SRAM retired from AXI: GPU-private only.  No CPU-visible alias. */
 
 /* Runtime stack layout (must match os.ld) */
 #define RUNTIME_STACK_TOP   OF_TARGET_RUNTIME_STACK_TOP
@@ -301,14 +298,13 @@
  * path.  CPU must cbo.clean each block after writing so the DMA
  * master reads the fresh data. */
 
-/* CRAM1 burst prefetch MMIO (cram1_burst_mmio.v) — SW mixer fires an
- * 8-word burst from CRAM1 and drains the 8 returned words into a
- * voice-local cache, amortising the ~20-cycle uncached word latency. */
-#define CRAM1_BURST_BASE    0x4E000000u
-#define CRAM1_BURST_ADDR    REG32(CRAM1_BURST_BASE + 0x00)  /* W: 22-bit CRAM1 word addr */
-#define CRAM1_BURST_STATUS  REG32(CRAM1_BURST_BASE + 0x04)  /* R: bit 0 = busy */
-#define CRAM1_BURST_DATA    REG32(CRAM1_BURST_BASE + 0x08)  /* R: next word (auto-advance) */
-#define   CRAM1_BURST_BUSY  (1u << 0)
+/* CRAM0 ownership mux (v2 memory arch).  CRAM0 runs on the bridge
+ * clock (clk_74a) and is time-sliced between the APF bridge and the
+ * CPU's CDC by the single bit exposed here.  Firmware must drain the
+ * currently-selected master before flipping the bit. */
+#define CRAM0_MODE          REG32(0x4E000000u)
+#define   CRAM0_MODE_BRIDGE (0u << 0)   /* bridge drives CRAM0 controller (default) */
+#define   CRAM0_MODE_CPU    (1u << 0)   /* CPU's CDC drives CRAM0 controller */
 
 #define AUDIO_DMA_BASE      REG32(AUDIO_BASE + 0x04)    /* Write: ring base (SDRAM byte addr) */
 #define AUDIO_DMA_LEN       REG32(AUDIO_BASE + 0x08)    /* Write: ring length (stereo pairs, mult of 8) */
@@ -423,23 +419,21 @@ static inline volatile void *sdram_uncached(void *addr) {
 }
 
 /* Convert CPU address to bridge address (for DMA).
- * Bridge address space:
- *   0x00000000  SDRAM   (CPU 0x10000000)
- *   0x20000000  CRAM0   (CPU 0x30000000 cached / 0x38000000 uncached)
- *   0x30000000  CRAM1   (CPU 0x31000000 cached / 0x39000000 uncached)
- *   0x3A000000  SRAM    (CPU 0x3A000000 uncached)
- */
+ * Bridge address space (v2 memory arch):
+ *   0x00000000  SDRAM   (CPU 0x10000000, cached)
+ *   0x20000000  CRAM0   (CPU 0x30000000, uncached) — the only PSRAM left
+ *
+ * CRAM1 and SRAM are no longer CPU-addressable.  Bridge only touches
+ * CRAM0 directly; anything in SDRAM needs an explicit OS-side memcpy
+ * into CRAM0 first (see the CRAM0_MODE protocol in memory-arch-v2.md). */
 static inline uint32_t sdram_to_bridge(void *addr) {
     return (uint32_t)addr - SDRAM_BASE;
 }
 
 static inline uint32_t cpu_to_bridge(void *addr) {
     uint32_t a = (uint32_t)addr;
-    if (a >= CRAM1_UNCACHED && a < CRAM1_UNCACHED + CRAM_SIZE) return (a - CRAM1_UNCACHED) + CRAM1_BRIDGE; /* CRAM1 uncached */
-    if (a >= CRAM0_UNCACHED && a < CRAM0_UNCACHED + CRAM_SIZE) return (a - CRAM0_UNCACHED) + CRAM0_BRIDGE; /* CRAM0 uncached */
-    if (a >= CRAM1_BASE && a < CRAM1_BASE + CRAM_SIZE) return (a - CRAM1_BASE) + CRAM1_BRIDGE; /* CRAM1 cached */
-    if (a >= CRAM0_BASE && a < CRAM0_BASE + CRAM_SIZE) return (a - CRAM0_BASE) + CRAM0_BRIDGE; /* CRAM0 cached */
-    return a - SDRAM_BASE; /* SDRAM */
+    if (a >= CRAM0_BASE && a < CRAM0_BASE + CRAM_SIZE) return (a - CRAM0_BASE) + CRAM0_BRIDGE;
+    return a - SDRAM_BASE;
 }
 
 /* ======================================================================
@@ -457,12 +451,7 @@ static inline uint32_t cpu_to_bridge(void *addr) {
 #define OF_MEM_FB2_BASE             FB2_BASE
 #define OF_MEM_DMA_CHUNK_SIZE       DMA_CHUNK_SIZE
 #define OF_MEM_CRAM0_BASE           CRAM0_BASE
-#define OF_MEM_CRAM1_BASE           CRAM1_BASE
-#define OF_MEM_CRAM0_UNCACHED       CRAM0_UNCACHED
-#define OF_MEM_CRAM1_UNCACHED       CRAM1_UNCACHED
 #define OF_MEM_CRAM_SIZE            CRAM_SIZE
-#define OF_MEM_SRAM_BASE            SRAM_BASE
-#define OF_MEM_SRAM_SIZE            SRAM_SIZE
 #define OF_MEM_TERM_FB_BASE         TERM_FB_BASE
 
 /* System registers */

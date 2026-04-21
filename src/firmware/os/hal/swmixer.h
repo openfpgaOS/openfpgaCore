@@ -14,7 +14,8 @@
  *
  * Layout:
  *   - Voice state is held in plain C structs, owned by the CPU.
- *   - Sample data lives in CRAM1 as signed PCM, read via the D-cache.
+ *   - Sample data lives in the SDRAM sample pool as signed PCM,
+ *     read via the D-cache.  (v2 arch: moved from CRAM1 to SDRAM.)
  *   - DMA ring lives in SDRAM, written cached + cbo.clean flushed.
  *   - of_mixer_* HAL sits on top of this engine (see hal/mixer.c).
  *
@@ -47,7 +48,7 @@
 
 typedef struct {
     /* Sample data */
-    const void *sample;     /* CPU pointer to PCM blob (cached CRAM1 recommended) */
+    const void *sample;     /* CPU pointer to PCM blob in SDRAM sample pool */
     uint32_t    len;        /* total sample count */
     uint32_t    loop_start; /* sample index */
     uint32_t    loop_end;   /* sample index (exclusive) */

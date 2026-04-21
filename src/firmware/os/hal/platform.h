@@ -39,18 +39,12 @@ typedef struct {
     uint32_t interact_uncached;
     uint32_t interact_max_vars;
 
+    /* v2 memory arch: CRAM1 + SRAM retired, CRAM0 uncached at its base. */
     uint32_t cram0_base;
-    uint32_t cram1_base;
-    uint32_t cram0_uncached;
-    uint32_t cram1_uncached;
     uint32_t cram_size;
     uint32_t cram0_bridge;
-    uint32_t cram1_bridge;
-    uint32_t cram1_ftab_offset;
-    uint32_t cram1_scratch_offset;
-
-    uint32_t sram_base;
-    uint32_t sram_size;
+    uint32_t cram0_os_offset;
+    uint32_t cram0_scratch_offset;
 
     uint32_t runtime_stack_top;
     uint32_t runtime_stack_size;

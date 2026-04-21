@@ -13,11 +13,12 @@
 
 void of_mixer_init(int max_voices, int output_rate);
 
-/* Play 16-bit signed mono PCM from CRAM1. Returns voice index or -1. */
+/* Play 16-bit signed mono PCM from the SDRAM sample pool.
+ * Returns voice index or -1.  (v2 arch: samples moved from CRAM1 to SDRAM.) */
 int of_mixer_play(const uint8_t *pcm_s16, uint32_t sample_count,
                   uint32_t sample_rate, int priority, int volume);
 
-/* Play 8-bit signed mono PCM from CRAM1. Returns voice index or -1. */
+/* Play 8-bit signed mono PCM from the SDRAM sample pool. Returns voice index or -1. */
 int of_mixer_play_8bit(const uint8_t *pcm_s8, uint32_t sample_count,
                        uint32_t sample_rate, int priority, int volume);
 

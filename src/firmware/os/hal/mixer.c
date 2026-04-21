@@ -399,7 +399,8 @@ void of_mixer_set_filter(int voice, int cutoff_q016, int q, int enable)
     (void)voice; (void)cutoff_q016; (void)q; (void)enable;
 }
 
-/* Sample memory bump allocator — unchanged, still CRAM1. */
+/* Sample memory bump allocator — v2 arch: backed by SDRAM sample pool
+ * (OF_TARGET_SAMPLE_BASE, 8 MB).  API unchanged. */
 static uint32_t sample_pool_head = SAMPLE_POOL_BASE;
 
 void *of_mixer_alloc_samples(uint32_t size)

@@ -46,26 +46,41 @@
 #define OF_TARGET_INTERACT_UNCACHED    0x503FE000u
 #define OF_TARGET_INTERACT_MAX_VARS    64u
 
+/* CRAM0 — bridge staging only (v2 memory arch).  Runs on the APF
+ * bridge clock (clk_74a); CPU accesses go through a CDC in the FPGA
+ * fabric.  CPU-side alias is uncached (PMA main=0) at 0x30000000.
+ * CRAM1 was retired along with its two aliases and the CRAM0 uncached
+ * alias — there is now only one CRAM0 address. */
 #define OF_TARGET_CRAM0_BASE           0x30000000u
-#define OF_TARGET_CRAM1_BASE           0x31000000u
-#define OF_TARGET_CRAM0_UNCACHED       0x38000000u
-#define OF_TARGET_CRAM1_UNCACHED       0x39000000u
 #define OF_TARGET_CRAM_SIZE            (16u * 1024u * 1024u)
 #define OF_TARGET_CRAM0_BRIDGE         0x20000000u
-#define OF_TARGET_CRAM1_BRIDGE         0x30000000u
-#define OF_TARGET_CRAM1_FTAB_OFFSET    0x00280000u
-#define OF_TARGET_CRAM1_SCRATCH_OFFSET 0x00290000u
+/* APF data slot offset inside CRAM0 for OS boot payload (slot 1).
+ * The bootloader in BRAM reads from CRAM0_BASE + this and copies to
+ * SDRAM before jumping.  Save/load scratch lives at a separate
+ * offset so the two don't collide with an in-flight transfer. */
+#define OF_TARGET_CRAM0_OS_OFFSET      0x00000000u
+#define OF_TARGET_CRAM0_SAVE_OFFSET    0x00100000u   /* 1 MB in */
+#define OF_TARGET_CRAM0_SCRATCH_OFFSET 0x00200000u   /* 2 MB in — general-purpose bridge scratch */
 
-#define OF_TARGET_SRAM_BASE            0x3A000000u
-#define OF_TARGET_SRAM_SIZE            (256u * 1024u)
+/* SRAM is GPU-private in v2 — no AXI alias, not CPU-addressable. */
+/* (OF_TARGET_SRAM_BASE / OF_TARGET_SRAM_SIZE removed) */
 
 #define OF_TARGET_RUNTIME_STACK_TOP    0x14000000u
 #define OF_TARGET_RUNTIME_STACK_SIZE   (512u * 1024u)
 
-#define OF_TARGET_SAMPLE_BASE          (OF_TARGET_CRAM1_UNCACHED + 0x00400000u)
-#define OF_TARGET_SAMPLE_SIZE          (11u * 1024u * 1024u)
+/* Sample pool: 8 MB in SDRAM carved out of the top of the app's
+ * heap/mmap window so app load base (0x10400000) stays unchanged —
+ * existing app ELFs remain compatible.  The OS shifts mmap_bottom
+ * down by 8 MB so mmap never allocates into the sample region.
+ * Size is 2 MB of headroom over the SC-55 bank (~6 MB). */
+#define OF_TARGET_SAMPLE_BASE          0x13700000u
+#define OF_TARGET_SAMPLE_SIZE          (8u * 1024u * 1024u)
 
-#define OF_TARGET_SAVE_REGION_ADDR     OF_TARGET_CRAM1_UNCACHED
+/* Save region is now the CRAM0 save slot window — the OS copies an
+ * SDRAM save buffer into CRAM0 before asking the bridge to DMA it out
+ * to the APF data slot.  10 slots × 256 KB = 2.5 MB, starting at the
+ * CRAM0 save offset. */
+#define OF_TARGET_SAVE_REGION_ADDR     (OF_TARGET_CRAM0_BASE + OF_TARGET_CRAM0_SAVE_OFFSET)
 #define OF_TARGET_SAVE_SLOT_SIZE       0x00040000u
 #define OF_TARGET_SAVE_MAX_SLOTS       10u
 

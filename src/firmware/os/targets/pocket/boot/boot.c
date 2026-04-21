@@ -420,17 +420,20 @@ static int boot_dma_read(uint32_t slot_id, uint32_t slot_offset,
 
 __attribute__((section(".text.boot")))
 static int boot_load_os_sd(uint32_t total) {
-    /* Bounce through CRAM1: bridge DMA → CRAM1, then CPU copies to
-     * its final home. Split-memory layout (see os.ld):
-     *   bytes [0, text_size)          → CRAM0 via uncached alias 0x38xxxxxx
-     *                                   (CRAM0 is removed from the d_axi
-     *                                   PMA, so cached writes would trap)
-     *   bytes [text_size, copy_size)  → SDRAM at __osdata_init_vma_start */
-    uint32_t bounce_bridge = CRAM1_SCRATCH_BRIDGE;
-    volatile uint8_t *bounce_src = (volatile uint8_t *)CRAM1_SCRATCH_UNCACHED;
+    /* v2 arch: CRAM1 retired.  Bounce through CRAM0 scratch:
+     * bridge DMA → CRAM0, then CPU copies to its final home.
+     * Split-memory layout (see os.ld):
+     *   bytes [0, text_size)          → CRAM0 at _os_load_addr
+     *                                   (CRAM0 is uncached per PMA
+     *                                    at 0x30000000)
+     *   bytes [text_size, copy_size)  → SDRAM at __osdata_init_vma_start
+     *
+     * CRAM0_MODE ownership mux: the bridge master must own CRAM0 for
+     * the DMA, then the CPU takes over for the memcpy-out. */
+    uint32_t bounce_bridge = CRAM0_SCRATCH_BRIDGE;
+    volatile uint8_t *bounce_src = (volatile uint8_t *)CRAM0_SCRATCH;
     uint32_t text_size = (uint32_t)(uintptr_t)_os_text_size;
-    volatile uint8_t *text_dst =
-        (volatile uint8_t *)((uintptr_t)_os_load_addr | 0x08000000u);
+    volatile uint8_t *text_dst = (volatile uint8_t *)(uintptr_t)_os_load_addr;
     volatile uint8_t *osdata_dst =
         (volatile uint8_t *)(uintptr_t)_osdata_init_vma_start;
     uint32_t done = 0;
@@ -440,11 +443,17 @@ static int boot_load_os_sd(uint32_t total) {
         if (chunk > DMA_CHUNK_SIZE)
             chunk = DMA_CHUNK_SIZE;
 
-        /* Bridge DMA: SD card → CRAM1 scratch */
+        /* Bridge DMA: SD card → CRAM0 scratch */
+        CRAM0_MODE = CRAM0_MODE_BRIDGE;
+        for (volatile int s = 0; s < 8; s++) {}  /* settle ~4 clk_74a */
         int rc = boot_dma_read(OS_SLOT_ID, done, bounce_bridge, chunk);
         if (rc < 0)
             return rc;
 
+        /* CPU reads CRAM0 scratch, writes to text_dst (still CRAM0)
+         * or osdata_dst (SDRAM).  Bridge side is idle here. */
+        CRAM0_MODE = CRAM0_MODE_CPU;
+        for (volatile int s = 0; s < 8; s++) {}  /* settle ~4 clk_74a */
         volatile uint32_t *src32 = (volatile uint32_t *)bounce_src;
         for (uint32_t i = 0; i < chunk / 4; i++) {
             uint32_t off = done + i * 4;
@@ -457,6 +466,9 @@ static int boot_load_os_sd(uint32_t total) {
         done += chunk;
     }
 
+    /* Leave the mux in bridge mode — later code issuing bridge DMAs
+     * is the common case; one-off CPU reads flip it as needed. */
+    CRAM0_MODE = CRAM0_MODE_BRIDGE;
     return 0;
 }
 
@@ -533,14 +545,17 @@ int main(void) {
             boot_fb_clear_row(0);
             boot_fb_puts(0, 0, "Loading via UART...");
 
-            /* Split-memory PHDP stream:
-             *   bytes [0, text_size)       → CRAM0 uncached alias 0x38xxxxxx
+            /* Split-memory PHDP stream (v2 arch):
+             *   bytes [0, text_size)       → CRAM0 at _os_load_addr
+             *                                (uncached per PMA at 0x30xxxxxx)
              *   bytes [text_size, total)   → SDRAM __osdata_init_vma_start
-             * Matches boot_load_os_sd for the SD path — CRAM0 is removed
-             * from d_axi so cached writes would trap. */
+             * Matches boot_load_os_sd for the SD path.  PHDP writes from
+             * the CPU side, so the mux needs CRAM0_MODE_CPU for text. */
             (void)chunk_size;
+            CRAM0_MODE = CRAM0_MODE_CPU;
+            for (volatile int s = 0; s < 8; s++) {}
             uint32_t text_size = (uint32_t)(uintptr_t)_os_text_size;
-            uint8_t *text_dst = (uint8_t *)((uintptr_t)_os_load_addr | 0x08000000u);
+            uint8_t *text_dst = (uint8_t *)(uintptr_t)_os_load_addr;
             uint8_t *osdata_dst = (uint8_t *)(uintptr_t)_osdata_init_vma_start;
             int rc = 0;
             if (text_size > 0) {

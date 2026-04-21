@@ -36,20 +36,21 @@ void of_file_init(void) {
     idle_hook = (void *)0;
 
     /* Bridge warmup: first DMA after boot resets the bridge command
-     * state machine. Read 4 bytes from slot 1 into CRAM1 scratch.
+     * state machine. Read 4 bytes from slot 1 into CRAM0 scratch.
      * Skipped when the bridge isn't the active backend, since the
      * boot ROM channel may have been picked because the bridge is
-     * wedged. The dispatcher must run before of_file_init — see hal.c. */
+     * wedged. The dispatcher must run before of_file_init — see hal.c.
+     * (v2 arch: CRAM1 retired, scratch moved to CRAM0.) */
     if (of_disk_active() == &of_disk_bridge) {
-        bridge_read_impl(1, 0, (void *)CRAM1_SCRATCH, 4);
+        bridge_read_impl(1, 0, (void *)CRAM0_SCRATCH, 4);
         of_cache_flush_dcache();
     }
 }
 
 /* Check for shutdown handshake: if the bridge wants to shut down,
  * flush D-cache (framebuffer/DMA data in SDRAM) and acknowledge
- * so the bridge can proceed with reset. Save data in CRAM1 does
- * not need flushing — bridge reads it via dedicated FIFO. */
+ * so the bridge can proceed with reset. Save data in CRAM0 does
+ * not need flushing — CRAM0 is uncached per PMA. */
 void of_check_shutdown(void) {
     if (SYS_SHUTDOWN & SHUTDOWN_PENDING) {
         of_cache_flush_dcache();
@@ -130,8 +131,8 @@ static int file_wait_complete(void) {
 
     /* Wait for all bridge write data to drain to memory.
      * READY means the command state machine is idle, but SDRAM skid
-     * buffer and CRAM write queues may still have pending data.
-     * WR_IDLE = skid empty + bridge master idle + CRAM0/CRAM1 idle. */
+     * buffer and CRAM0 write queue may still have pending data.
+     * WR_IDLE = skid empty + bridge master idle + CRAM0 idle. */
     timeout = DMA_TIMEOUT;
     while (!(DS_STATUS & DS_STATUS_WR_IDLE)) {
         if (--timeout == 0) {
@@ -153,11 +154,16 @@ static int bridge_read_impl(uint32_t slot_id, uint32_t slot_offset,
                              void *dest, uint32_t length) {
     uint32_t dest_addr = (uintptr_t)dest;
 
-    /* CRAM1 destinations: bridge writes directly, no copy needed. */
-    if (dest_addr >= CRAM1_BASE && dest_addr < CRAM1_BASE + CRAM_SIZE) {
+    /* v2 arch: CRAM1 retired, scratch moved to CRAM0.  CRAM0 is
+     * uncached per PMA, so no D-cache invalidation is needed around
+     * bridge-written data there. */
+
+    /* CRAM0 destinations: bridge writes directly, no copy needed. */
+    if (dest_addr >= CRAM0_BASE && dest_addr < CRAM0_BASE + CRAM_SIZE) {
         uint32_t bridge_addr = cpu_to_bridge(dest);
 
-        of_cache_inval_range(dest, length);
+        CRAM0_MODE = CRAM0_MODE_BRIDGE;
+        for (volatile int s = 0; s < 8; s++) {}
 
         DS_SLOT_ID     = slot_id;
         DS_SLOT_OFFSET = slot_offset;
@@ -165,31 +171,27 @@ static int bridge_read_impl(uint32_t slot_id, uint32_t slot_offset,
         DS_LENGTH      = length;
         DS_COMMAND     = DS_CMD_READ;
 
-        int rc = file_wait_complete();
-
-        of_cache_inval_range(dest, length);
-
-        return rc;
+        return file_wait_complete();
     }
 
-    /* All other destinations: bridge DMAs to CRAM1 scratch area
-     * (between save slots and I/O cache), CPU copies to dest.
-     * The hot path (fread/fopen) uses the I/O cache in syscall.c
-     * which already reads through CRAM1 directly — this path is
-     * for boot, ELF loading, and direct of_file_read API calls. */
-    of_cache_inval_range((void *)CRAM1_SCRATCH, length);
+    /* All other destinations: bridge DMAs to CRAM0 scratch, CPU copies
+     * to dest.  This path is for boot, ELF loading, and direct
+     * of_file_read API calls. */
+    CRAM0_MODE = CRAM0_MODE_BRIDGE;
+    for (volatile int s = 0; s < 8; s++) {}
 
     DS_SLOT_ID     = slot_id;
     DS_SLOT_OFFSET = slot_offset;
-    DS_BRIDGE_ADDR = CRAM1_SCRATCH_BRIDGE;
+    DS_BRIDGE_ADDR = CRAM0_SCRATCH_BRIDGE;
     DS_LENGTH      = length;
     DS_COMMAND     = DS_CMD_READ;
 
     int rc = file_wait_complete();
     if (rc < 0) return rc;
 
-    of_cache_inval_range((void *)CRAM1_SCRATCH, length);
-    memcpy(dest, (const void *)CRAM1_SCRATCH, length);
+    CRAM0_MODE = CRAM0_MODE_CPU;
+    for (volatile int s = 0; s < 8; s++) {}
+    memcpy(dest, (const void *)CRAM0_SCRATCH, length);
 
     return rc;
 }
@@ -269,16 +271,11 @@ accepted:
 }
 
 void of_file_inval_cram(uint32_t bridge_addr, uint32_t length) {
-    /* Bridge addresses 0x20000000-0x20FFFFFF map to CRAM0 (CPU 0x30000000)
-     * Bridge addresses 0x30000000-0x30FFFFFF map to CRAM1 (CPU 0x31000000)
-     * Invalidate the cached alias so CPU reads see fresh bridge data. */
-    if (bridge_addr >= CRAM0_BRIDGE && bridge_addr < CRAM0_BRIDGE + CRAM_SIZE) {
-        uint32_t offset = bridge_addr - CRAM0_BRIDGE;
-        of_cache_inval_range((void *)(CRAM0_BASE + offset), length);
-    } else if (bridge_addr >= CRAM1_BRIDGE && bridge_addr < CRAM1_BRIDGE + CRAM_SIZE) {
-        uint32_t offset = bridge_addr - CRAM1_BRIDGE;
-        of_cache_inval_range((void *)(CRAM1_BASE + offset), length);
-    }
+    /* v2 arch: CRAM0 is uncached per PMA (and CRAM1 is gone), so no
+     * D-cache invalidation is needed for bridge-written CRAM data.
+     * Kept as a no-op so callers don't need to know the PMA policy. */
+    (void)bridge_addr;
+    (void)length;
 }
 
 long of_file_size(uint32_t slot_id) {
@@ -328,18 +325,25 @@ long of_file_size(uint32_t slot_id) {
  * Filename is written to `name_out` (max `name_max` chars).
  */
 int of_file_get_name(uint32_t slot_id, char *name_out, uint32_t name_max) {
-    /* Response buffer in CRAM1 (bridge address 0x30xxxxxx).
-     * Try base address 0x30000000, page-aligned. */
-    #define GETFILE_CACHED    CRAM1_BASE                  /* 0x31000000 */
-    #define GETFILE_UNCACHED  CRAM1_UNCACHED              /* 0x39000000 */
-    #define GETFILE_BRIDGE    CRAM1_BRIDGE                /* 0x30000000 */
+    /* v2 arch: response buffer lands in CRAM0 scratch (uncached per
+     * PMA, so no D-cache dance is needed).  Use a dedicated GETFILE
+     * offset so it can't collide with an in-flight bridge DMA that
+     * targets the lower part of CRAM0_SCRATCH. */
+    #define GETFILE_ADDR      CRAM0_SCRATCH
+    #define GETFILE_BRIDGE    CRAM0_SCRATCH_BRIDGE
     uint32_t bridge_addr = GETFILE_BRIDGE;
-    volatile uint32_t *resp32 = (volatile uint32_t *)GETFILE_UNCACHED;
+    volatile uint32_t *resp32 = (volatile uint32_t *)GETFILE_ADDR;
+
+    /* CPU-side scribble on CRAM0 — take ownership of the mux first. */
+    CRAM0_MODE = CRAM0_MODE_CPU;
+    for (volatile int s = 0; s < 8; s++) {}
     for (int i = 0; i < 64; i++)
         resp32[i] = 0;
-
-    of_cache_inval_range((void *)GETFILE_CACHED, 256);
     __asm__ volatile("fence" ::: "memory");
+
+    /* Hand the mux back to the bridge for the primer + GETFILE DMAs. */
+    CRAM0_MODE = CRAM0_MODE_BRIDGE;
+    for (volatile int s = 0; s < 8; s++) {}
 
     /* Prime APF's internal slot state with a throw-away 4-byte read.
      * Empirically, APF only returns a valid filename from GETFILE after
@@ -353,10 +357,13 @@ int of_file_get_name(uint32_t slot_id, char *name_out, uint32_t name_max) {
 
     /* Re-clear the response buffer — the primer read landed its 4 bytes
      * there, and we want GETFILE to start from known zeros. */
+    CRAM0_MODE = CRAM0_MODE_CPU;
+    for (volatile int s = 0; s < 8; s++) {}
     for (int i = 0; i < 64; i++)
         resp32[i] = 0;
-    of_cache_inval_range((void *)GETFILE_CACHED, 256);
     __asm__ volatile("fence" ::: "memory");
+    CRAM0_MODE = CRAM0_MODE_BRIDGE;
+    for (volatile int s = 0; s < 8; s++) {}
 
     /* Wait for bridge idle */
     {
@@ -393,11 +400,11 @@ int of_file_get_name(uint32_t slot_id, char *name_out, uint32_t name_max) {
     if (err)
         return -((int)err);
 
-    /* Invalidate D-cache — bridge wrote to CRAM1 behind CPU cache */
-    of_cache_inval_range((void *)GETFILE_CACHED, 256);
-
-    /* Read via uncached alias to guarantee fresh data */
-    const char *filename = (const char *)GETFILE_UNCACHED;
+    /* CRAM0 is uncached per PMA — no D-cache invalidation needed.
+     * Flip the mux back to the CPU so reads below go through our CDC. */
+    CRAM0_MODE = CRAM0_MODE_CPU;
+    for (volatile int s = 0; s < 8; s++) {}
+    const char *filename = (const char *)GETFILE_ADDR;
 
     /* Extract basename (after last '/') */
     const char *base = filename;

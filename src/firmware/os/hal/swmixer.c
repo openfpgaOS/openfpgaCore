@@ -65,79 +65,35 @@ static uint32_t        ended_mask                        OF_FASTDATA;
 static uint32_t        dma_write_idx                     OF_FASTDATA;
 static uint8_t         dma_enabled                       OF_FASTDATA;
 
-/* Per-voice 8-word (32-byte) CRAM1 sample cache.  Refilled via an
- * MMIO-triggered burst in cram1_burst_mmio.v.  32 bytes covers 16
- * 16-bit-mono samples, 8 16-bit-stereo pairs, or 32 8-bit-mono samples
- * — enough to amortise the burst over several mix iterations before
- * the next refill is needed. */
-#define VOICE_CACHE_INVALID 0xFFFFFFFFu
-static uint32_t     voice_cache_words[SWMIXER_MAX_VOICES][8] OF_FASTDATA;
-static uint32_t     voice_cache_tag[SWMIXER_MAX_VOICES]      OF_FASTDATA;
-/* Shadow of v->sample so we notice voice stealing (of_mixer_play
- * overwrites sample without stopping first) and invalidate the cache. */
-static const void  *voice_cache_sample_ptr[SWMIXER_MAX_VOICES] OF_FASTDATA;
+/* v2 arch: CRAM1 retired.  Sample data lives in the 8 MB SDRAM sample
+ * pool at OF_TARGET_SAMPLE_BASE (0x13700000).  Reads go through the L1
+ * D$ and the SDRAM bus at full CPU speed — the per-voice 8-word burst
+ * cache and cram1_burst_mmio side channel are no longer needed. */
 
 /* Block-scope accumulators — static so they don't blow the trap stack. */
 static int32_t accum_l[SWMIXER_BLOCK_SAMPLES]            OF_FASTDATA;
 static int32_t accum_r[SWMIXER_BLOCK_SAMPLES]            OF_FASTDATA;
 
-static inline void voice_cache_invalidate(int vi)
-{
-    voice_cache_tag[vi] = VOICE_CACHE_INVALID;
-}
-
-/* Fire an 8-word burst from CRAM1 at word_addr_aligned (bits [2:0]
- * must be zero) and drain the returned words into the voice's cache.
+/* Read a single sample from the SDRAM sample pool.
  *
- * The STATUS polling uses the saw-busy gate: first wait for busy to
- * rise (proves the FSM latched the request), then wait for it to fall
- * (proves the burst completed).  A naive `while (busy)` spin races
- * with the CPU's own p_axi pipeline — a LW issued right after the ST
- * can arrive at axi_periph_slave before the ST's side-effect pulse
- * propagates to cram1_burst_mmio, so the CPU would read busy=0 and
- * exit with stale FIFO contents (leading to 0x9F9F9F9F-pattern
- * garbage in voice caches and eventually in stored return addresses).
- * The fence() before the first poll also forces the CPU to drain the
- * ST through the memory system before issuing any reads. */
-static inline void voice_cache_refill(int vi, uint32_t word_addr_aligned)
-{
-    CRAM1_BURST_ADDR = word_addr_aligned;
-    fence();
-    while (!(CRAM1_BURST_STATUS & CRAM1_BURST_BUSY)) ;   /* busy=HIGH */
-    while (  CRAM1_BURST_STATUS & CRAM1_BURST_BUSY) ;    /* busy=LOW  */
-    voice_cache_words[vi][0] = CRAM1_BURST_DATA;
-    voice_cache_words[vi][1] = CRAM1_BURST_DATA;
-    voice_cache_words[vi][2] = CRAM1_BURST_DATA;
-    voice_cache_words[vi][3] = CRAM1_BURST_DATA;
-    voice_cache_words[vi][4] = CRAM1_BURST_DATA;
-    voice_cache_words[vi][5] = CRAM1_BURST_DATA;
-    voice_cache_words[vi][6] = CRAM1_BURST_DATA;
-    voice_cache_words[vi][7] = CRAM1_BURST_DATA;
-    voice_cache_tag[vi] = word_addr_aligned;
-}
-
-/* Read a single sample from CRAM1 via the cached alias at 0x31xxxxxx.
- *
- * PMA now marks the CRAM1 region cacheable (main=1), so the first read
- * in a 64-byte cache line pays a ~30-cycle burst line-fill through
- * axi_cram1_slave's burst port, and the remaining ~15 samples in the
- * same line hit the L1 D$ at ~1 cycle each.
+ * sample_byte_addr is a byte offset into the 8 MB pool.  PMA marks the
+ * SDRAM region cacheable, so the first read in a cache line pays a
+ * line-fill burst and subsequent samples in the same line hit L1 at
+ * ~1 cycle each.
  *
  * Hard bounds check: a corrupt voice (pos_int runaway, bad v->sample)
- * can produce sample_byte_addr far beyond CRAM1's 16 MB — adding it
- * to CRAM1_BASE wraps mod 2^32 and lands at an address PMA rejects,
- * giving a load access fault.  Clamping to silence here contains the
- * blast radius: the voice plays zeros until advance_phase retires it
- * or the mixer stops it, but the ISR never traps. */
+ * can produce an out-of-range offset.  Clamping to silence here
+ * contains the blast radius: the voice plays zeros until advance_phase
+ * retires it, but the ISR never takes a load access fault. */
 static inline int32_t voice_read_sample(int vi, uint32_t sample_byte_addr, int fmt16)
 {
     (void)vi;
-    if (sample_byte_addr > 0x00FFFFFCu) return 0;
-    const uint8_t *cram1 = (const uint8_t *)CRAM1_BASE;
+    if (sample_byte_addr >= OF_TARGET_SAMPLE_SIZE) return 0;
+    const uint8_t *base = (const uint8_t *)OF_TARGET_SAMPLE_BASE;
     if (fmt16) {
-        return *(const int16_t *)(cram1 + sample_byte_addr);
+        return *(const int16_t *)(base + sample_byte_addr);
     } else {
-        return (int32_t)(*(const int8_t *)(cram1 + sample_byte_addr)) << 8;
+        return (int32_t)(*(const int8_t *)(base + sample_byte_addr)) << 8;
     }
 }
 
@@ -148,16 +104,13 @@ static inline int16_t sat16(int32_t x)
     return (int16_t)x;
 }
 
-/* Sample byte offset inside the physical CRAM1 chip for the given
- * voice position.  Used as input to voice_read_sample.
- *
- * v->sample is a CPU pointer that may target either the cached
- * (0x31xxxxxx) or uncached (0x39xxxxxx) CRAM1 alias; both map to the
- * same 16 MB chip, so mask off the region bits and keep only the
- * low-24 byte offset that the CRAM1 controller uses. */
+/* Byte offset inside the SDRAM sample pool for the given voice
+ * position.  v->sample is a CPU pointer into the pool; subtracting
+ * the pool base gives the 0..SAMPLE_SIZE-1 offset voice_read_sample
+ * wants.  (v2 arch: CRAM1 retired, samples moved to SDRAM.) */
 static inline uint32_t voice_sample_byte(const swmixer_voice_t *v, uint32_t idx)
 {
-    uint32_t base = (uint32_t)v->sample & 0x00FFFFFFu;
+    uint32_t base = (uint32_t)v->sample - (uint32_t)OF_TARGET_SAMPLE_BASE;
     uint32_t stride = v->fmt16 ? (v->stereo ? 4u : 2u) : (v->stereo ? 2u : 1u);
     return base + idx * stride;
 }
@@ -170,8 +123,8 @@ static inline int32_t fetch_mono(int vi, const swmixer_voice_t *v, uint32_t idx)
 static inline void fetch_stereo(int vi, const swmixer_voice_t *v, uint32_t idx,
                                 int32_t *l, int32_t *r)
 {
-    /* Stereo samples are interleaved {L, R} in CRAM1.  Left is at the
-     * base byte offset, right is at +stride_per_channel. */
+    /* Stereo samples are interleaved {L, R} in the sample pool.
+     * Left is at the base byte offset, right is at +stride_per_channel. */
     uint32_t base_byte = voice_sample_byte(v, idx);
     uint32_t half = v->fmt16 ? 2u : 1u;
     *l = voice_read_sample(vi, base_byte,        v->fmt16);
@@ -234,12 +187,10 @@ static int advance_phase(swmixer_voice_t *v)
 
 void swmixer_init(void)
 {
+    /* v2 arch: no per-voice burst cache to invalidate — samples are
+     * read directly from the SDRAM pool via the L1 D$. */
     memset(voices, 0, sizeof(voices));
     ended_mask = 0;
-    for (int i = 0; i < SWMIXER_MAX_VOICES; i++) {
-        voice_cache_invalidate(i);
-        voice_cache_sample_ptr[i] = 0;
-    }
 }
 
 swmixer_voice_t *swmixer_voice(int idx)
@@ -256,10 +207,8 @@ void swmixer_stop(int idx)
     v->end_pending = 0;
     v->vol_l_cur = v->vol_r_cur = 0;
     v->vol_l_tgt = v->vol_r_tgt = 0;
-    /* Invalidate sample cache: the slot may be reused for a different
-     * sample on the next note-on, and we don't want the next voice to
-     * read stale data if its base happens to collide with this cache. */
-    voice_cache_invalidate(idx);
+    /* v2 arch: no burst cache to invalidate — the L1 D$ stays
+     * coherent via normal RAW ordering on the SDRAM sample pool. */
 }
 
 void swmixer_stop_all(void)
@@ -356,15 +305,6 @@ void swmixer_tick(void)
     for (int vi = 0; vi < SWMIXER_MAX_VOICES; vi++) {
         swmixer_voice_t *v = &voices[vi];
         if (!v->active) continue;
-
-        /* Voice stealing: of_mixer_play reconfigures the slot without
-         * calling swmixer_stop first, so check for a sample pointer
-         * change here and drop the stale cache.  Cheap — one compare
-         * per active voice per tick. */
-        if (voice_cache_sample_ptr[vi] != v->sample) {
-            voice_cache_invalidate(vi);
-            voice_cache_sample_ptr[vi] = v->sample;
-        }
 
         /* Fast path: no vol ramp in progress on either channel.
          * Most voices are in steady state (note-on fade-in reaches
@@ -472,7 +412,7 @@ void swmixer_tick(void)
     }
 }
 
-/* Initialise the CRAM1 → audio_output DMA.  Called from of_audio_init
+/* Initialise the SDRAM → audio_output DMA.  Called from of_audio_init
  * once the OS is up.  Zeroes the ring, programs the base/length, and
  * enables streaming.  Mixing starts producing samples as soon as the
  * timer ISR begins firing swmixer_tick. */
