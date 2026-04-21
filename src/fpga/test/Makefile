@@ -2,14 +2,14 @@
 #
 # `make all` (the default `make test` entry point) runs every test that
 # currently passes:
-#   sdram, sram, gpu (lite + full), cram1-stress
+#   sdram, sram, gpu (lite + full), audio
 #
 # Build-only / known-failing harnesses kept around for debugging:
 #   axi-periph    builds; cacheline-burst tests fail (off-by-one)
-#   cram1-burst   builds; burst_busy never asserts (controller bug)
 #
-# Stale orphan testbenches that referenced deleted RTL
-# (psram_cram0_test, etc.) have been removed.
+# v2 memory-arch: cram1 and cram1-burst-mmio tests retired with the
+# chip; cram1_controller.v / cram1_phy.sv / axi_cram1_slave.v /
+# cram1_burst_mmio.v are deleted from the RTL tree.
 
 COMMON_DIR = ../common
 TARGET_DIR = ../targets/pocket
@@ -71,36 +71,6 @@ GPU_LITE_DIR = obj_dir_gpu_lite
 GPU_FULL_DIR = obj_dir_gpu_full
 
 # ============================================================
-# CRAM1 stress (CPU + mixer concurrent reads through cram1_controller)
-# Self-checking; uses --timing for $finish / # delays in the testbench.
-# ============================================================
-CRAM1_STRESS_SRCS = \
-	tb_cram1_stress.v \
-	cram_chip_model.v \
-	$(COMMON_DIR)/cram1_controller.v \
-	$(COMMON_DIR)/cram1_phy.sv \
-	$(COMMON_DIR)/axi_cram1_slave.v
-
-CRAM1_STRESS_CPP = tb_cram1_stress_main.cpp
-CRAM1_STRESS_TOP = tb_cram1_stress
-CRAM1_STRESS_DIR = obj_dir_cram1_stress
-CRAM1_STRESS_FLAGS = --timing -Wno-WIDTHEXPAND -Wno-CASEINCOMPLETE -Wno-SYNCASYNCNET
-
-# ============================================================
-# CRAM1 burst (build-only — burst_busy never asserts in current RTL)
-# ============================================================
-CRAM1_BURST_SRCS = \
-	tb_cram1_burst.v \
-	cram_chip_model.v \
-	$(COMMON_DIR)/cram1_controller.v \
-	$(COMMON_DIR)/cram1_phy.sv
-
-CRAM1_BURST_CPP = tb_cram1_burst_main.cpp
-CRAM1_BURST_TOP = tb_cram1_burst
-CRAM1_BURST_DIR = obj_dir_cram1_burst
-CRAM1_BURST_FLAGS = -Wno-WIDTHEXPAND -Wno-CASEINCOMPLETE -Wno-SYNCASYNCNET
-
-# ============================================================
 # AXI periph (build-only — cacheline burst returns +1 off-by-one)
 # Uses altsyncram_stub.v in place of the Cyclone V altsyncram primitive.
 # ============================================================
@@ -129,28 +99,14 @@ AUDIO_DIR = obj_dir_audio_pipeline
 AUDIO_FLAGS = -Wno-WIDTHEXPAND -Wno-CASEINCOMPLETE -Wno-SYNCASYNCNET -Wno-UNOPTFLAT
 
 # ============================================================
-# cram1_burst_mmio (SW mixer's burst prefetch engine — DUT is the new
-# module introduced with the software mixer; CRAM1 controller is stubbed
-# with a fake burst responder so we can exercise the DUT in isolation).
-# ============================================================
-CRAM1_BURST_MMIO_SRCS = \
-	tb_cram1_burst_mmio.v \
-	$(COMMON_DIR)/cram1_burst_mmio.v
-
-CRAM1_BURST_MMIO_CPP  = tb_cram1_burst_mmio_main.cpp
-CRAM1_BURST_MMIO_TOP  = tb_cram1_burst_mmio
-CRAM1_BURST_MMIO_DIR  = obj_dir_cram1_burst_mmio
-CRAM1_BURST_MMIO_FLAGS = -Wno-WIDTHEXPAND -Wno-CASEINCOMPLETE -Wno-SYNCASYNCNET
-
-# ============================================================
 # Targets
 # ============================================================
-.PHONY: all sdram sram gpu gpu-lite gpu-full cram1-stress cram1-burst axi-periph \
-        audio cram1-burst-mmio run run-sram build clean
+.PHONY: all sdram sram gpu gpu-lite gpu-full axi-periph \
+        audio run run-sram build clean
 
 # `all` runs every passing test. Build-only debug harnesses
-# (cram1-burst, axi-periph) are intentionally excluded.
-all: sdram sram gpu cram1-stress audio cram1-burst-mmio
+# (axi-periph) are intentionally excluded.
+all: sdram sram gpu audio
 
 # --- SDRAM ---
 sdram: $(SDRAM_DIR)/V$(SDRAM_TOP)
@@ -206,28 +162,6 @@ $(GPU_FULL_DIR)/V$(GPU_TOP): $(GPU_SRCS) $(GPU_CPP)
 		-I$(COMMON_DIR) \
 		$(GPU_SRCS) $(GPU_CPP)
 
-# --- CRAM1 stress (passing) ---
-cram1-stress: $(CRAM1_STRESS_DIR)/V$(CRAM1_STRESS_TOP)
-	@printf "\n=== CRAM1 stress (CPU + mixer) ===\n"
-	./$(CRAM1_STRESS_DIR)/V$(CRAM1_STRESS_TOP)
-
-$(CRAM1_STRESS_DIR)/V$(CRAM1_STRESS_TOP): $(CRAM1_STRESS_SRCS) $(CRAM1_STRESS_CPP)
-	$(VERILATOR) $(VERILATOR_FLAGS) $(CRAM1_STRESS_FLAGS) \
-		--top-module $(CRAM1_STRESS_TOP) --Mdir $(CRAM1_STRESS_DIR) \
-		-I$(COMMON_DIR) \
-		$(CRAM1_STRESS_SRCS) $(CRAM1_STRESS_CPP)
-
-# --- CRAM1 burst (build-only debug; tests currently fail) ---
-cram1-burst: $(CRAM1_BURST_DIR)/V$(CRAM1_BURST_TOP)
-	@printf "\n=== CRAM1 burst (debug — known failures) ===\n"
-	./$(CRAM1_BURST_DIR)/V$(CRAM1_BURST_TOP) || true
-
-$(CRAM1_BURST_DIR)/V$(CRAM1_BURST_TOP): $(CRAM1_BURST_SRCS) $(CRAM1_BURST_CPP)
-	$(VERILATOR) $(VERILATOR_FLAGS) $(CRAM1_BURST_FLAGS) \
-		--top-module $(CRAM1_BURST_TOP) --Mdir $(CRAM1_BURST_DIR) \
-		-I$(COMMON_DIR) \
-		$(CRAM1_BURST_SRCS) $(CRAM1_BURST_CPP)
-
 # --- AXI periph (build-only debug; tests currently fail) ---
 axi-periph: $(AXI_PERIPH_DIR)/V$(AXI_PERIPH_TOP)
 	@printf "\n=== AXI periph (debug — known failures) ===\n"
@@ -250,20 +184,8 @@ $(AUDIO_DIR)/V$(AUDIO_TOP): $(AUDIO_SRCS) $(AUDIO_CPP)
 		-I$(COMMON_DIR) \
 		$(AUDIO_SRCS) $(AUDIO_CPP)
 
-# --- CRAM1 burst MMIO (SW mixer's cache refill engine) ---
-cram1-burst-mmio: $(CRAM1_BURST_MMIO_DIR)/V$(CRAM1_BURST_MMIO_TOP)
-	@printf "\n=== CRAM1 burst MMIO (cram1_burst_mmio.v + stub controller) ===\n"
-	./$(CRAM1_BURST_MMIO_DIR)/V$(CRAM1_BURST_MMIO_TOP)
-
-$(CRAM1_BURST_MMIO_DIR)/V$(CRAM1_BURST_MMIO_TOP): $(CRAM1_BURST_MMIO_SRCS) $(CRAM1_BURST_MMIO_CPP)
-	$(VERILATOR) $(VERILATOR_FLAGS) $(CRAM1_BURST_MMIO_FLAGS) \
-		--top-module $(CRAM1_BURST_MMIO_TOP) --Mdir $(CRAM1_BURST_MMIO_DIR) \
-		-I$(COMMON_DIR) \
-		$(CRAM1_BURST_MMIO_SRCS) $(CRAM1_BURST_MMIO_CPP)
-
 # --- Clean ---
 clean:
 	rm -rf $(SDRAM_DIR) $(SRAM_DIR) $(GPU_LITE_DIR) $(GPU_FULL_DIR) \
-	       $(CRAM1_STRESS_DIR) $(CRAM1_BURST_DIR) $(AXI_PERIPH_DIR) \
-	       $(AUDIO_DIR) $(CRAM1_BURST_MMIO_DIR) \
+	       $(AXI_PERIPH_DIR) $(AUDIO_DIR) \
 	       obj_dir_gpu obj_dir_cdc io_sdram_test.v

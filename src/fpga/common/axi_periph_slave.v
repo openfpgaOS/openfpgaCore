@@ -96,13 +96,12 @@ module axi_periph_slave (
     output reg         audio_dma_enable,
     input  wire [13:0] audio_dma_read_ptr,   // DMA's current position (readback)
 
-    // CRAM1 burst prefetch MMIO (0x4E000000 region) — SW mixer uses this
-    // to amortise sample fetches via 8-word bursts through cram1_controller.
-    output reg         cram1_burst_addr_wr,      // 1-cycle: WR 0x4E000000
-    output reg  [21:0] cram1_burst_addr_wdata,   // 22-bit CRAM1 word address
-    output reg         cram1_burst_data_rd,      // 1-cycle: RD 0x4E000008
-    input  wire        cram1_burst_busy,         // 1 while burst in flight
-    input  wire [31:0] cram1_burst_data_q,       // current FIFO head
+    // CRAM0 ownership mode register (0x4E000000 bit 0):
+    //   0 = bridge owns CRAM0 (APF load/save transfers drive the chip)
+    //   1 = CPU owns CRAM0 (AXI accesses go through cram0_cdc)
+    // Firmware flips this around explicit quiescent periods — see
+    // docs/memory-arch-v2.md §4 for the protocol.
+    output reg         cram0_mode,
 
     // Link MMIO interface
     output reg         link_reg_wr,
@@ -875,17 +874,14 @@ wire [31:0] audio_rdata = (req_addr[4:2] == 3'd0) ? {21'b0, audio_fifo_full, aud
                           (req_addr[4:2] == 3'd4) ? {18'b0, audio_dma_read_ptr} :
                           32'h0;
 
-/* CRAM1 burst prefetch read decode:
- *   0x00: (write-only — returns 0 on read)
- *   0x04: {31'b0, busy}
- *   0x08: current FIFO head (auto-advances on read, see pop pulse below) */
-wire [31:0] cram1_burst_rdata = (req_addr[3:2] == 2'd1) ? {31'b0, cram1_burst_busy} :
-                                (req_addr[3:2] == 2'd2) ? cram1_burst_data_q :
-                                32'h0;
+/* CRAM0 ownership mode read decode:
+ *   0x00: {31'b0, cram0_mode} — current owner (0=bridge, 1=CPU). */
+wire [31:0] cram0_mode_rdata = (req_addr[3:2] == 2'd0) ? {31'b0, cram0_mode} :
+                               32'h0;
 
 wire [31:0] periph_rd_mux = reg_sysreg ? sysreg_rdata :
                              reg_audio  ? audio_rdata :
-                             reg_cram1  ? cram1_burst_rdata :
+                             reg_cram0  ? cram0_mode_rdata :
                              reg_link   ? link_reg_rdata :
                              reg_uart   ? uart_rdata :
                              reg_gpu    ? gpu_reg_rdata :
@@ -917,7 +913,7 @@ reg reg_ram;
 // reg_term removed — terminal in software
 reg reg_sysreg;
 reg reg_audio;
-reg reg_cram1;
+reg reg_cram0;
 reg reg_link;
 reg reg_uart;
 reg reg_gpu;
@@ -963,8 +959,9 @@ assign ram_wren = (state == S_BRAM_WR) && (|req_wstrb);
 // ============================================
 // Region decode helpers
 // ============================================
-wire ar_dec_cram1  = (ar_addr[31:24] == 8'h4E);
-wire aw_dec_cram1  = (aw_addr[31:24] == 8'h4E);
+// 0x4E000000 region: CRAM0 ownership mode register (bit 0).
+wire ar_dec_cram0  = (ar_addr[31:24] == 8'h4E);
+wire aw_dec_cram0  = (aw_addr[31:24] == 8'h4E);
 
 wire ar_dec_ram    = (ar_addr[31:15] == 17'b0); // 32KB: 0x00000-0x07FFF
 // sysreg covers 0x40000000-0x400001FF (512 bytes / 128 word slots) so the
@@ -1024,7 +1021,7 @@ always @(posedge clk or posedge reset) begin
         reg_ram <= 0;
         reg_sysreg <= 0;
         reg_audio <= 0;
-        reg_cram1 <= 0;
+        reg_cram0 <= 0;
         reg_link <= 0;
         reg_gpu <= 0;
         gpu_reg_wr <= 0;
@@ -1036,9 +1033,7 @@ always @(posedge clk or posedge reset) begin
         audio_dma_base <= 32'd0;
         audio_dma_len <= 14'd0;
         audio_dma_enable <= 1'b0;
-        cram1_burst_addr_wr    <= 0;
-        cram1_burst_addr_wdata <= 22'd0;
-        cram1_burst_data_rd    <= 0;
+        cram0_mode <= 1'b0;     // bridge owns CRAM0 at reset
         uart_tx_fifo_we  <= 0;
         uart_tx_fifo_din <= 0;
         link_reg_wr <= 0;
@@ -1054,8 +1049,6 @@ always @(posedge clk or posedge reset) begin
         s_axi_arready <= 0;
         s_axi_awready <= 0;
         s_axi_wready <= 0;
-        cram1_burst_addr_wr <= 0;
-        cram1_burst_data_rd <= 0;
 
         if (s_axi_rvalid && s_axi_rready) s_axi_rvalid <= 1'b0;
         if (s_axi_bvalid && s_axi_bready) s_axi_bvalid <= 1'b0;
@@ -1084,7 +1077,7 @@ always @(posedge clk or posedge reset) begin
                 reg_ram    <= ar_dec_ram;
                 reg_sysreg <= ar_dec_sysreg;
                 reg_audio  <= ar_dec_audio;
-                reg_cram1  <= ar_dec_cram1;
+                reg_cram0  <= ar_dec_cram0;
                 reg_link   <= ar_dec_link;
 
                 reg_uart   <= ar_dec_uart;
@@ -1113,7 +1106,7 @@ always @(posedge clk or posedge reset) begin
                 reg_ram    <= aw_dec_ram;
                 reg_sysreg <= aw_dec_sysreg;
                 reg_audio  <= aw_dec_audio;
-                reg_cram1  <= aw_dec_cram1;
+                reg_cram0  <= aw_dec_cram0;
                 reg_link   <= aw_dec_link;
 
                 reg_uart   <= aw_dec_uart;
@@ -1146,10 +1139,9 @@ always @(posedge clk or posedge reset) begin
                                 default: ;
                             endcase
                         end
-                        if (aw_dec_cram1 && |s_axi_wstrb && aw_addr[3:2] == 2'd0) begin
-                            /* CRAM1_BURST + 0x00: fire an 8-word burst. */
-                            cram1_burst_addr_wr    <= 1;
-                            cram1_burst_addr_wdata <= s_axi_wdata[21:0];
+                        if (aw_dec_cram0 && |s_axi_wstrb && aw_addr[3:2] == 2'd0) begin
+                            /* CRAM0_MODE + 0x00: update owner bit. */
+                            cram0_mode <= s_axi_wdata[0];
                         end
                         if (aw_dec_link && |s_axi_wstrb) begin
                             link_reg_wr <= 1;
@@ -1221,8 +1213,7 @@ always @(posedge clk or posedge reset) begin
                 if (beat_is_last) state <= S_IDLE;
                 else req_addr <= req_addr + 32'd4;
                 /* Pop-pulse side effects on specific read addresses. */
-                if (reg_cram1 && req_addr[3:2] == 2'd2)
-                    cram1_burst_data_rd <= 1;
+                // cram0_mode is a simple read-mirror; no pop needed.
             end
         end
 
@@ -1270,9 +1261,8 @@ always @(posedge clk or posedge reset) begin
                             default: ;
                         endcase
                     end
-                    if (reg_cram1 && |s_axi_wstrb && req_addr[3:2] == 2'd0) begin
-                        cram1_burst_addr_wr    <= 1;
-                        cram1_burst_addr_wdata <= s_axi_wdata[21:0];
+                    if (reg_cram0 && |s_axi_wstrb && req_addr[3:2] == 2'd0) begin
+                        cram0_mode <= s_axi_wdata[0];
                     end
                     if (reg_link && |s_axi_wstrb) begin
                         link_reg_wr <= 1;

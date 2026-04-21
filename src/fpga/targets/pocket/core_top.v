@@ -84,18 +84,8 @@ output  wire            cram0_we_n,
 output  wire            cram0_ub_n,
 output  wire            cram0_lb_n,
 
-output  wire    [21:16] cram1_a,
-inout   wire    [15:0]  cram1_dq,
-input   wire            cram1_wait,
-output  wire            cram1_clk,
-output  wire            cram1_adv_n,
-output  wire            cram1_cre,
-output  wire            cram1_ce0_n,
-output  wire            cram1_ce1_n,
-output  wire            cram1_oe_n,
-output  wire            cram1_we_n,
-output  wire            cram1_ub_n,
-output  wire            cram1_lb_n,
+// cram1 chip retired in memory-arch v2 — pins are unassigned in the
+// qsf so this block is gone from the module port list.
 
 ///////////////////////////////////////////////////
 // sdram, 512mbit 16bit
@@ -429,36 +419,19 @@ assign link_sck_i = port_tran_sck;
 assign link_sd_i = port_tran_sd;
 
 // ============================================================
-// CRAM0 BCR sanity reset
+// CRAM0 BCR sanity reset (runs in clk_74a)
 // ============================================================
-// Both CRAM0 dies (CE0 and CE1) get the AS1C8M16PL POR-default
-// BCR (0x9D1F = async page mode, fixed-latency code 3, WAIT
-// active high, drive strength 1/2, no-wrap continuous burst)
-// written via CRE on every boot.
+// Both CRAM0 dies (CE0 and CE1) get the AS1C8M16PL BCR written via
+// CRE on every boot, guarding against a previous bitstream having
+// left the chip in a different mode (async page vs sync burst).
 //
-// Why this exists: BCR state lives on the chip, NOT in the FPGA.
-// FPGA reconfig (e.g., quartus_pgm reload) does NOT reset the
-// chip's BCR. If a previous bitstream ever wrote BCR to a
-// different mode (e.g., sync burst at 0x641F) and then a
-// subsequent bitstream that expects async mode is loaded, the
-// async-mode controller can't talk to a sync-mode chip and the
-// CPU's first instruction fetch from CRAM0 wedges silently. The
-// only way out without this defensive write is a true Pocket
-// power-cycle (Vcc removed). 2026-04-08 spent ~6 hours debugging
-// exactly this failure mode after an earlier sync-burst experiment
-// left the chip in 0x641F mode.
+// v2: FSM moves to clk_74a along with the cram0_controller.  The
+// CPU reset is still gated by bcr_init_done, synchronised into
+// clk_cpu via the existing synch_3 chain.
 //
-// The FSM runs once after PLL lock and gates bcr_init_done (which
-// in turn gates the CPU reset deassertion at line 1222) until both
-// dies have been written. ~20 cycles total at 100 MHz = 200 ns of
-// boot delay. Negligible.
-//
-// CE# safety: the FSM never asserts a second config_en pulse until
-// it has observed cpu_psram_raw_busy fall back to 0, which means
-// the driver has reached STATE_CONFIG_HOLD_END (lines 446-447 of
-// cram0_phy.sv) and BOTH CE0# and CE1# are deasserted again.
-// The driver itself never asserts both CE# in the same state — see
-// STATE_CONFIG_CRE_SETUP, lines 421-424. Therefore the die 0 → die 1
+// Dual-die safety: never assert a second config_en pulse until raw_busy
+// has risen and fallen again.  The PHY never asserts both CE# in the
+// same state (cram0_phy.sv STATE_CONFIG_CRE_SETUP), so die 0 → die 1
 // handoff cannot create bus contention.
 // ============================================================
 wire        cpu_psram_raw_busy;
@@ -478,25 +451,23 @@ localparam [3:0] BCR_ST_IDLE_DIE1   = 4'd6;
 localparam [3:0] BCR_ST_SETTLE      = 4'd7;  // Post-config settle before release
 localparam [3:0] BCR_ST_DONE        = 4'd8;
 
-// Settle counter: hold CPU in reset for ~5µs after chip-side BCR write
-// completes.  1/3 intermittent boot failure symptoms (illegal instruction
-// trap on first I$ line fetch) suggest the chip takes time to internalise
-// sync-burst mode after CE# deasserts.  Datasheet doesn't spec this but
-// 512 cycles @ 100 MHz = 5.12 µs is cheap insurance.
+// Settle counter: hold CPU in reset for a few µs after chip-side BCR
+// write completes — chip internalises sync-burst mode after CE#
+// deasserts.  511 cycles @ 74.25 MHz ≈ 6.9 µs — cheap insurance.
 localparam [8:0] BCR_SETTLE_CYCLES = 9'd511;
 
-// AS1C8M16PL BCR — sync-burst mode.  Per project memory note on
-// 2026-04-14: "CRAM async reads work in sync-burst BCR mode" — the
-// chip still responds to async ADV#/OE# reads even with BCR=0x641F,
-// so the word_rd (async) path continues to serve single-beat AXI
-// reads unchanged, while multi-beat AXI bursts dispatch through
-// the sync-burst read path (psram_burst_rd → sync_burst_en → PHY's
-// STATE_SYNC_* state machine).
+// AS1C8M16PL BCR — sync-burst mode at clk_74a.
 //
-// BCR encoding:
+// v2: cram0 runs at clk_74a (74.25 MHz) rather than clk_cpu (100 MHz).
+// At the slower clock, sync-burst latency code 4 (5 cycles) is more
+// than comfortable and async reads still work alongside it — the
+// chip doesn't care whether the adv/oe timing is driven by a 74 MHz
+// or 100 MHz controller.
+//
+// BCR encoding (unchanged from v1):
 //   bit 15    = 0   sync burst mode
 //   bit 14    = 1   variable initial latency
-//   bits 13-11= 100 latency code 4 (5 clocks, conservative for 100 MHz)
+//   bits 13-11= 100 latency code 4 (5 clocks)
 //   bit 10    = 0   WAIT active low
 //   bit 9     = 0
 //   bit 8     = 1   WAIT asserted one data cycle before delay
@@ -505,30 +476,6 @@ localparam [8:0] BCR_SETTLE_CYCLES = 9'd511;
 //   bits 5-4  = 01  drive strength 1/2
 //   bit 3     = 1   no-wrap burst
 //   bits 2-0  = 111 continuous burst
-//
-// **Root cause of earlier hangs (2026-04-16)**: mixing the async
-// read path (psram_read_en → STATE_READ_*) with sync-burst BCR mode
-// does NOT work on this chip at 100 MHz — blank screen at boot.
-// Proven by diagnostic: forcing all reads through the async path
-// with BCR=0x641F still hung.  PocketQuake (clk_ram=105 MHz) runs
-// reliably with BCR=0x641F because its axi_psram_slave.v dispatches
-// *every* AXI read (incl. ARLEN=0) through sync-burst, never
-// exercising async reads.  Same strategy applied in
-// axi_cram0_slave.v's S_IDLE dispatch.  The cram0_controller.v
-// async word_rd path is dead code while BCR=0x641F and must stay
-// unreachable.
-//
-// 2026-04-16 (async fallback): Sync burst corrupted data under
-// back-to-back cache-line refills (get_meta trap after Seek Large).
-// Temporarily flipped to 0x9D1F (async page) to unblock testing.
-//
-// 2026-04-17 (sync-burst re-enable): The os.ld split-memory change
-// moves OS .data / .rodata / .bss into SDRAM, so CRAM0 now only
-// serves i_axi instruction fetches from a single CPU master.  The
-// suspected root cause (i_axi + mem_axi multi-port interleaving on
-// CRAM0) is gone, so we re-enable sync burst (0x641F) to regain
-// the burst streaming performance that 0x9D1F gives up.  If sync
-// burst corruption returns, the split-memory hypothesis is wrong.
 localparam [15:0] BCR_VALUE = 16'h641F;  // sync burst mode
 
 initial begin
@@ -539,11 +486,17 @@ initial begin
     bcr_settle_cnt     = 9'd0;
 end
 
-always @(posedge clk_ram_controller) begin
+// PLL-locked sync into clk_74a (the new cram0 clock domain).
+reg [2:0] pll_ram_locked_74a_sync;
+always @(posedge clk_74a)
+    pll_ram_locked_74a_sync <= {pll_ram_locked_74a_sync[1:0], pll_ram_locked};
+wire pll_ram_locked_74a = pll_ram_locked_74a_sync[2];
+
+always @(posedge clk_74a) begin
     bcr_init_config_en <= 1'b0;  // single-cycle pulse default
     case (bcr_init_state)
         BCR_ST_WAIT_PLL:
-            if (pll_ram_locked)
+            if (pll_ram_locked_74a)
                 bcr_init_state <= BCR_ST_PULSE_DIE0;
 
         BCR_ST_PULSE_DIE0: begin
@@ -596,28 +549,100 @@ always @(posedge clk_ram_controller) begin
 end
 
 // ============================================================
-// PSRAM Controller for CRAM0 (16MB, app cached data)
+// CRAM0 ownership mux + controller (clk_74a domain)
 // ============================================================
-// CRAM0: async two-phase controller, with the BCR sanity reset above
-// ensuring the chip is in async mode regardless of what mode the
-// previous bitstream left it in.
+// Two clients want to drive the cram0 word-interface:
+//   1. The APF bridge, via the "bridge-native" word-rd/wr signals
+//      (bridge_addr + bridge_wr_data land in clk_74a).
+//   2. The CPU, via cram0_cdc which converts a clk_cpu AXI slave
+//      into the same word-interface in clk_74a.
+// Time-sliced by the axi_periph_slave's cram0_mode register (0 =
+// bridge, 1 = CPU).  Firmware is responsible for ensuring the
+// inactive side has no in-flight op when flipping the bit — see
+// docs/memory-arch-v2.md §4 for the protocol.
+// ============================================================
+
+// cram0_mode from axi_periph_slave (clk_cpu domain) synced to clk_74a.
+wire       cram0_mode_cpu;          // from axi_periph_slave
+reg [2:0]  cram0_mode_74a_sync;
+always @(posedge clk_74a)
+    cram0_mode_74a_sync <= {cram0_mode_74a_sync[1:0], cram0_mode_cpu};
+wire cram0_mode_74a = cram0_mode_74a_sync[2];
+
+// CPU-side word-interface (clk_74a, driven by cram0_cdc)
+wire        cpu_cram0_word_rd;
+wire        cpu_cram0_word_wr;
+wire [21:0] cpu_cram0_word_addr;
+wire [31:0] cpu_cram0_word_wdata;
+wire [3:0]  cpu_cram0_word_wstrb;
+wire [31:0] cpu_cram0_word_rdata;
+wire        cpu_cram0_word_busy;
+wire        cpu_cram0_word_rdata_valid;
+
+// Bridge-native word-interface (clk_74a).  Bridge writes/reads whose
+// top byte == 0x30 land here; the bridge_addr/bridge_wr_data/bridge_rd
+// pins are already clk_74a — no CDC needed.  We just repackage them
+// into a word-rd/wr pulse with an edge detector for bridge_rd.
+//
+// Address encoding: bridge_addr is a byte address into the CRAM0 window.
+// cram0_controller expects a 22-bit word address = byte_addr[23:2].
+wire bridge_cram0_range = (bridge_addr[31:24] == 8'h30);
+reg  bridge_rd_prev_74a;
+always @(posedge clk_74a) begin
+    bridge_rd_prev_74a <= bridge_rd && bridge_cram0_range;
+end
+wire bridge_cram0_rd_pulse = bridge_cram0_range && bridge_rd && !bridge_rd_prev_74a;
+wire bridge_cram0_wr_pulse = bridge_cram0_range && bridge_wr;
+
+// Mux word-interface inputs to the controller: pick the owning side.
+wire        mux_word_rd    = cram0_mode_74a ? cpu_cram0_word_rd    : bridge_cram0_rd_pulse;
+wire        mux_word_wr    = cram0_mode_74a ? cpu_cram0_word_wr    : bridge_cram0_wr_pulse;
+wire [21:0] mux_word_addr  = cram0_mode_74a ? cpu_cram0_word_addr  : bridge_addr[23:2];
+wire [31:0] mux_word_wdata = cram0_mode_74a ? cpu_cram0_word_wdata : bridge_wr_data;
+wire [3:0]  mux_word_wstrb = cram0_mode_74a ? cpu_cram0_word_wstrb : 4'b1111;
+
+// Controller response fans out to whichever owner asked for it.
+wire [31:0] ctrl_word_rdata;
+wire        ctrl_word_busy;
+wire        ctrl_word_rdata_valid;
+assign cpu_cram0_word_rdata       = ctrl_word_rdata;
+assign cpu_cram0_word_busy        = ctrl_word_busy;
+assign cpu_cram0_word_rdata_valid = ctrl_word_rdata_valid;
+
+// Bridge side of the word interface also reads the controller's rdata
+// (used for bridge 0x30xxxxxx read-backs below).
+wire [31:0] bridge_cram0_rdata      = ctrl_word_rdata;
+wire        bridge_cram0_rdata_valid= ctrl_word_rdata_valid;
+
+// Sync-burst read path — dead-path here because the bridge doesn't
+// issue multi-beat reads and the CPU-side cram0_cdc only dispatches
+// single-word reads.  Tied off to idle; preserves the cram0_controller
+// port list without pulling the sync-burst FSM into the design.
+wire        c0_burst_rd    = 1'b0;
+wire [5:0]  c0_burst_len   = 6'd0;
+wire [31:0] c0_burst_rdata; // unused
+wire        c0_burst_rdata_valid; // unused
+
+// ============================================================
+// PSRAM Controller for CRAM0 (16 MB, bridge scratch — clk_74a)
+// ============================================================
 cram0_controller #(
-    .CLOCK_SPEED(100.0)
+    .CLOCK_SPEED(74.25)
 ) psram0 (
-    .clk(clk_ram_controller),
-    .reset_n(1'b1),
-    .word_rd(c0_psram_rd),
-    .word_wr(c0_psram_wr),
-    .word_addr(c0_psram_addr[21:0]),
-    .word_data(c0_psram_wdata),
-    .word_wstrb(c0_psram_wstrb),
-    .word_q(c0_psram_rdata),
-    .word_busy(c0_psram_busy),
-    .word_q_valid(c0_psram_rdata_valid),
+    .clk(clk_74a),
+    .reset_n(pll_ram_locked_74a),
+    .word_rd(mux_word_rd),
+    .word_wr(mux_word_wr),
+    .word_addr(mux_word_addr),
+    .word_data(mux_word_wdata),
+    .word_wstrb(mux_word_wstrb),
+    .word_q(ctrl_word_rdata),
+    .word_busy(ctrl_word_busy),
+    .word_q_valid(ctrl_word_rdata_valid),
     .cram_a(cram0_a),
     .cram_dq(cram0_dq),
     .cram_wait(cram0_wait),
-    .cram_clk(),             // PLL drives cram0_clk directly
+    .cram_clk(),             // PLL / clk_74a drives cram0_clk directly
     .cram_adv_n(cram0_adv_n),
     .cram_cre(cram0_cre),
     .cram_ce0_n(cram0_ce0_n),
@@ -626,16 +651,10 @@ cram0_controller #(
     .cram_we_n(cram0_we_n),
     .cram_ub_n(cram0_ub_n),
     .cram_lb_n(cram0_lb_n),
-    // Sync burst read path — axi_cram0_slave dispatches here for
-    // multi-beat AXI bursts (ARLEN > 0).  Single-beat reads still
-    // go through the async word_rd path above; per the memory note
-    // "CRAM async reads work in sync-burst BCR mode", both paths
-    // coexist with BCR=0x641F.
-    .burst_rd(c0_psram_burst_rd),
-    .burst_len(c0_psram_burst_len),
-    .burst_rdata_valid(c0_psram_burst_rdata_valid),
-    .burst_rdata(c0_psram_burst_rdata),
-    // BCR config write (driven by the BCR_ST_* FSM above)
+    .burst_rd(c0_burst_rd),
+    .burst_len(c0_burst_len),
+    .burst_rdata_valid(c0_burst_rdata_valid),
+    .burst_rdata(c0_burst_rdata),
     .config_en(bcr_init_config_en),
     .config_data(BCR_VALUE),
     .config_bank_sel(bcr_init_bank_sel),
@@ -643,199 +662,45 @@ cram0_controller #(
 );
 
 // ============================================================
-// PSRAM Controller for CRAM1 (16MB, save data only — clk_74a domain)
+// CRAM0 CDC — CPU-side AXI slave (clk_cpu) → word-iface (clk_74a)
 // ============================================================
-wire        psram1_rd;
-wire        psram1_wr;
-wire [21:0] psram1_addr;
-wire [31:0] psram1_wdata;
-wire [3:0]  psram1_wstrb;
-wire [31:0] psram1_rdata;
-wire        psram1_busy;
-wire        psram1_rdata_valid;
+cram0_cdc cpu_cram0_axi (
+    .clk_cpu        (clk_cpu),
+    .reset_n_cpu    (reset_n),
 
-// CRAM1 reset: sync pll_ram_locked into clk_cpu
-reg [2:0] pll_ram_locked_cpu_sync;
-always @(posedge clk_cpu)
-    pll_ram_locked_cpu_sync <= {pll_ram_locked_cpu_sync[1:0], pll_ram_locked};
-wire psram1_reset_n = pll_ram_locked_cpu_sync[2];
+    .s_axi_arvalid  (cpu_m_cram0_arvalid),
+    .s_axi_arready  (cpu_m_cram0_arready),
+    .s_axi_araddr   (cpu_m_cram0_araddr),
+    .s_axi_arlen    (cpu_m_cram0_arlen),
+    .s_axi_rvalid   (cpu_m_cram0_rvalid),
+    .s_axi_rready   (cpu_m_cram0_rready),
+    .s_axi_rdata    (cpu_m_cram0_rdata),
+    .s_axi_rresp    (cpu_m_cram0_rresp),
+    .s_axi_rlast    (cpu_m_cram0_rlast),
+    .s_axi_awvalid  (cpu_m_cram0_awvalid),
+    .s_axi_awready  (cpu_m_cram0_awready),
+    .s_axi_awaddr   (cpu_m_cram0_awaddr),
+    .s_axi_awlen    (cpu_m_cram0_awlen),
+    .s_axi_wvalid   (cpu_m_cram0_wvalid),
+    .s_axi_wready   (cpu_m_cram0_wready),
+    .s_axi_wdata    (cpu_m_cram0_wdata),
+    .s_axi_wstrb    (cpu_m_cram0_wstrb),
+    .s_axi_wlast    (cpu_m_cram0_wlast),
+    .s_axi_bvalid   (cpu_m_cram0_bvalid),
+    .s_axi_bready   (1'b1),
+    .s_axi_bresp    (cpu_m_cram0_bresp),
 
-// ============================================================
-// CRAM1: single controller, single clock domain (clk_cpu).
-//
-// Three masters all funnel into ONE cram1_controller running in
-// clk_cpu (100 MHz) — same domain as the chip clock (cram1_clk =
-// clk_cpu).  No pin mux, no clock mux.  Bridge requests are CDC'd
-// from clk_74a → clk_cpu inside bridge_to_cram1.v, which exposes a
-// req_rd/req_wr/req_addr/req_wdata interface that arbitrates with
-// CPU and mixer below.
-//
-// Master priority for the controller's word_rd / word_wr inputs:
-//   1. Bridge req (rare but blocking — drains the OS file-IO FIFO)
-//   2. CPU AXI    (cache fills)
-//   3. Mixer      (per-voice tap fetches, can tolerate ~1 µs jitter)
-// ============================================================
-
-// Physical signals from controller A (active-low direct from cram1_controller)
-wire [21:16] c1a_a;
-wire [15:0]  c1a_dq_out;
-wire         c1a_dq_oe;
-wire         c1a_adv_n;
-wire         c1a_cre;
-wire         c1a_ce0_n;
-wire         c1a_ce1_n;
-wire         c1a_oe_n;
-wire         c1a_we_n;
-wire         c1a_ub_n;
-wire         c1a_lb_n;
-
-// BCR-init done flag and raw busy from controller A.
-wire        psram1_a_bcr_done;
-wire        psram1_a_raw_busy;
-reg         cram1_bcr_config_en;
-reg         cram1_bcr_bank_sel;
-reg         cram1_bcr_done;
-
-// CRAM1 burst interface — owned by axi_cram1_slave, which uses it for
-// AXI multi-beat reads (CPU L1 D$ line fills).  One sync-burst command
-// returns up to 32 consecutive words, turning a 16-beat line fill into
-// a single ~30-cycle controller transaction.
-wire        psram1_burst_rd;
-wire [21:0] psram1_burst_addr;
-wire [4:0]  psram1_burst_len;
-wire [31:0] psram1_burst_q;
-wire        psram1_burst_q_valid;
-wire        psram1_burst_busy;
-
-// MMIO handshake — cram1_burst_mmio is retired (broken saw-busy gate).
-// axi_periph_slave still decodes the 0x4E000000 region for ABI
-// stability; responses are inert.
-wire        cram1_burst_mmio_addr_wr;
-wire [21:0] cram1_burst_mmio_addr_wdata;
-wire        cram1_burst_mmio_data_rd;
-wire        cram1_burst_mmio_busy    = 1'b0;
-wire [31:0] cram1_burst_mmio_data_q  = 32'hDEADBEEF;
-
-// Bridge → controller A interface (clk_cpu side of bridge_to_cram1)
-wire        bridge_req_rd;
-wire        bridge_req_wr;
-wire [21:0] bridge_req_addr;
-wire [31:0] bridge_req_wdata;
-
-// Controller A: serves CPU + mixer + bridge (all clk_cpu)
-cram1_controller #(.CLOCK_SPEED(100)) psram1_a (
-    .clk(clk_cpu), .reset_n(psram1_reset_n),
-    .word_rd(psram1_rd),
-    .word_wr(psram1_wr),
-    .word_addr(psram1_addr), .word_data(psram1_wdata),
-    .word_wstrb(psram1_wstrb),
-    .word_q(psram1_rdata), .word_busy(psram1_busy),
-    .word_q_valid(psram1_rdata_valid),
-    .burst_rd(psram1_burst_rd),
-    .burst_addr(psram1_burst_addr),
-    .burst_len(psram1_burst_len),
-    .burst_q(psram1_burst_q),
-    .burst_q_valid(psram1_burst_q_valid),
-    .burst_busy(psram1_burst_busy),
-    .config_en(cram1_bcr_config_en),
-    .config_data(16'h641F),
-    .config_bank_sel(cram1_bcr_bank_sel),
-    .raw_busy(psram1_a_raw_busy),
-    .bcr_init_done(psram1_a_bcr_done),
-    .cram_a(c1a_a), .cram_dq_out(c1a_dq_out), .cram_dq_oe(c1a_dq_oe),
-    .cram_dq_in(cram1_dq), .cram_wait(cram1_wait), .cram_clk(),
-    .cram_adv_n(c1a_adv_n), .cram_cre(c1a_cre),
-    .cram_ce0_n(c1a_ce0_n), .cram_ce1_n(c1a_ce1_n),
-    .cram_oe_n(c1a_oe_n), .cram_we_n(c1a_we_n),
-    .cram_ub_n(c1a_ub_n), .cram_lb_n(c1a_lb_n)
+    .clk_bridge     (clk_74a),
+    .reset_n_bridge (pll_ram_locked_74a),
+    .b_word_rd      (cpu_cram0_word_rd),
+    .b_word_wr      (cpu_cram0_word_wr),
+    .b_word_addr    (cpu_cram0_word_addr),
+    .b_word_wdata   (cpu_cram0_word_wdata),
+    .b_word_wstrb   (cpu_cram0_word_wstrb),
+    .b_word_rdata   (cpu_cram0_word_rdata),
+    .b_word_busy    (cpu_cram0_word_busy),
+    .b_word_rdata_valid (cpu_cram0_word_rdata_valid)
 );
-
-// ============================================================
-// CRAM1 BCR-init FSM
-//
-// Programs the CRAM1 chip's Bus Configuration Register to 0x641F
-// (sync-burst mode, latency 4, no-wrap continuous burst).  Mirrors
-// the CRAM0 BCR FSM at lines 542-596 — same chip family
-// (AS1C8M16PL), same need to write both dies (CE0 and CE1), same
-// edge-detection on raw_busy to time the inter-die handoff.
-//
-// Doesn't gate CPU reset.  CRAM1 isn't in the boot path; the
-// BCR write completes ~50 cycles after pll_ram_locked rises,
-// well before any code touches CRAM1.  Bridge requests through
-// bridge_to_cram1 are still safely buffered in its req FIFO until
-// the controller is ready (ST_IDLE only accepts after BCR done).
-// Same dual-die safety: pulses for die 0 first, waits for the
-// PHY's busy to fall (acknowledges chip-side write done) before
-// pulsing die 1.  Driver never asserts both CE# in the same
-// cycle (per cram1_phy.sv STATE_CONFIG_CRE_SETUP).
-// ============================================================
-reg [3:0] cram1_bcr_state;
-localparam [3:0] C1_BCR_WAIT_PLL    = 4'd0;
-localparam [3:0] C1_BCR_PULSE_DIE0  = 4'd1;
-localparam [3:0] C1_BCR_BUSY_DIE0   = 4'd2;
-localparam [3:0] C1_BCR_IDLE_DIE0   = 4'd3;
-localparam [3:0] C1_BCR_PULSE_DIE1  = 4'd4;
-localparam [3:0] C1_BCR_BUSY_DIE1   = 4'd5;
-localparam [3:0] C1_BCR_IDLE_DIE1   = 4'd6;
-localparam [3:0] C1_BCR_DONE        = 4'd7;
-
-initial begin
-    cram1_bcr_state     = C1_BCR_WAIT_PLL;
-    cram1_bcr_config_en = 1'b0;
-    cram1_bcr_bank_sel  = 1'b0;
-    cram1_bcr_done      = 1'b0;
-end
-
-always @(posedge clk_cpu) begin
-    cram1_bcr_config_en <= 1'b0;  // single-cycle pulse default
-    case (cram1_bcr_state)
-        C1_BCR_WAIT_PLL:
-            if (psram1_reset_n)
-                cram1_bcr_state <= C1_BCR_PULSE_DIE0;
-
-        C1_BCR_PULSE_DIE0: begin
-            cram1_bcr_bank_sel  <= 1'b0;
-            cram1_bcr_config_en <= 1'b1;
-            cram1_bcr_state     <= C1_BCR_BUSY_DIE0;
-        end
-        C1_BCR_BUSY_DIE0:
-            if (psram1_a_raw_busy)
-                cram1_bcr_state <= C1_BCR_IDLE_DIE0;
-        C1_BCR_IDLE_DIE0:
-            if (!psram1_a_raw_busy)
-                cram1_bcr_state <= C1_BCR_PULSE_DIE1;
-
-        C1_BCR_PULSE_DIE1: begin
-            cram1_bcr_bank_sel  <= 1'b1;
-            cram1_bcr_config_en <= 1'b1;
-            cram1_bcr_state     <= C1_BCR_BUSY_DIE1;
-        end
-        C1_BCR_BUSY_DIE1:
-            if (psram1_a_raw_busy)
-                cram1_bcr_state <= C1_BCR_IDLE_DIE1;
-        C1_BCR_IDLE_DIE1:
-            if (!psram1_a_raw_busy) begin
-                cram1_bcr_done  <= 1'b1;
-                cram1_bcr_state <= C1_BCR_DONE;
-            end
-
-        C1_BCR_DONE: ;  // sticky
-    endcase
-end
-
-// Direct pin assignments — controller A drives the chip pins
-// unconditionally (no pin mux now that bridge access is CDC'd into
-// the same controller via bridge_to_cram1.v).
-assign cram1_a     = c1a_a;
-assign cram1_dq    = c1a_dq_oe ? c1a_dq_out : 16'hZZZZ;
-assign cram1_adv_n = c1a_adv_n;
-assign cram1_cre   = c1a_cre;
-assign cram1_ce0_n = c1a_ce0_n;
-assign cram1_ce1_n = c1a_ce1_n;
-assign cram1_oe_n  = c1a_oe_n;
-assign cram1_we_n  = c1a_we_n;
-assign cram1_ub_n  = c1a_ub_n;
-assign cram1_lb_n  = c1a_lb_n;
 
 // SRAM controller (256 KB) - tristate handled at top level
 wire [16:0] sram_a_w;
@@ -979,9 +844,9 @@ wire        cpu_m_sdram_wlast;
 wire        cpu_m_sdram_bvalid;
 wire [1:0]  cpu_m_sdram_bresp;
 
-// CPU AXI4 master → axi_psram_slave
-// Per-chip AXI4 master wires between cpu_system and the three standalone
-// sub-slaves (CRAM0, CRAM1, SRAM).  Concurrent fabrics — no shared bus.
+// CPU AXI4 master → cram0_cdc (clk_cpu slave side of the CDC).
+// Crosses into clk_74a inside cram0_cdc and drives the controller
+// via the mux block above when cram0_mode_74a=1.
 wire        cpu_m_cram0_arvalid;
 wire        cpu_m_cram0_arready;
 wire [31:0] cpu_m_cram0_araddr;
@@ -1003,74 +868,8 @@ wire        cpu_m_cram0_wlast;
 wire        cpu_m_cram0_bvalid;
 wire [1:0]  cpu_m_cram0_bresp;
 
-wire        cpu_m_cram1_arvalid;
-wire        cpu_m_cram1_arready;
-wire [31:0] cpu_m_cram1_araddr;
-wire [7:0]  cpu_m_cram1_arlen;
-wire        cpu_m_cram1_rvalid;
-wire        cpu_m_cram1_rready;
-wire [31:0] cpu_m_cram1_rdata;
-wire [1:0]  cpu_m_cram1_rresp;
-wire        cpu_m_cram1_rlast;
-wire        cpu_m_cram1_awvalid;
-wire        cpu_m_cram1_awready;
-wire [31:0] cpu_m_cram1_awaddr;
-wire [7:0]  cpu_m_cram1_awlen;
-wire        cpu_m_cram1_wvalid;
-wire        cpu_m_cram1_wready;
-wire [31:0] cpu_m_cram1_wdata;
-wire [3:0]  cpu_m_cram1_wstrb;
-wire        cpu_m_cram1_wlast;
-wire        cpu_m_cram1_bvalid;
-wire [1:0]  cpu_m_cram1_bresp;
-
-// SRAM stub: responds to any CPU access with SLVERR (prevents AXI hang).
-// Tracks outstanding AR/AW transactions and returns one response each.
-wire cpu_m_sram_stub_arvalid;   // from cpu_system (unused output)
-wire cpu_m_sram_stub_awvalid;
-reg  cpu_m_sram_stub_rvalid;
-reg  cpu_m_sram_stub_bvalid;
-always @(posedge clk_cpu) begin
-    if (!reset_n) begin
-        cpu_m_sram_stub_rvalid <= 0;
-        cpu_m_sram_stub_bvalid <= 0;
-    end else begin
-        cpu_m_sram_stub_rvalid <= cpu_m_sram_stub_arvalid;
-        cpu_m_sram_stub_bvalid <= cpu_m_sram_stub_awvalid;
-    end
-end
-
-// axi_psram_slave exposes per-chip backend wires — CRAM0, CRAM1, and
-// SRAM are three independent physical backends (two separate PSRAM
-// chips + on-chip M10K) so they can service transactions in parallel.
-// No shared bus, no psram_target_sel latch.
-wire        c0_psram_rd;
-wire        c0_psram_wr;
-wire [25:0] c0_psram_addr;
-wire [31:0] c0_psram_wdata;
-wire [3:0]  c0_psram_wstrb;
-wire [31:0] c0_psram_rdata;
-wire        c0_psram_busy;
-wire        c0_psram_rdata_valid;
-// Sync-burst read path (axi_cram0_slave ↔ cram0_controller).
-wire        c0_psram_burst_rd;
-wire [5:0]  c0_psram_burst_len;
-wire [31:0] c0_psram_burst_rdata;
-wire        c0_psram_burst_rdata_valid;
-
-wire        c1_psram_rd;
-wire        c1_psram_wr;
-wire [25:0] c1_psram_addr;
-wire [31:0] c1_psram_wdata;
-wire [3:0]  c1_psram_wstrb;
-wire [31:0] c1_psram_rdata;
-wire        c1_psram_busy;
-wire        c1_psram_rdata_valid;
-
 // SRAM CPU path removed — GPU has exclusive direct access (Z-buffer).
-
-// Muxed PSRAM signals (bridge or CPU)
-// psram_mux_* removed — per-chip backends wire directly to each sub-slave
+// CRAM1 removed — memory arch v2 retires the chip.
 
 // Audio output interface
 wire        audio_sample_wr;
@@ -1145,12 +944,13 @@ always @(posedge clk_74a) begin
             bridge_rd_data <= 0;
         end
         32'h30xxxxxx: begin
-            // CRAM1 bridge read — response comes from bridge_to_cram1's
-            // resp dcfifo (clk_cpu → clk_74a CDC), latched as
-            // cram1_bridge_rd_data on the clk_74a side.  Same one-cycle-
-            // late behaviour vs APF's capture window as the previous
-            // implementation.
-            bridge_rd_data <= cram1_bridge_rd_data;
+            // CRAM0 bridge read — controller runs natively in clk_74a
+            // so the rdata latch is same-cycle (controller returns data
+            // on a word_q_valid pulse; we capture it into bridge_rd_data).
+            // When firmware has set cram0_mode = BRIDGE, this is the
+            // path that serves APF dataslot readbacks.
+            if (bridge_cram0_rdata_valid)
+                bridge_rd_data <= bridge_cram0_rdata;
         end
 
         32'hF7000000: begin
@@ -1203,10 +1003,29 @@ always @(posedge clk_74a) begin
     end
 end
 
-// Bridge SDRAM write path removed — OS loads via CRAM1 bounce.
-// bridge_wr_idle: true when no CRAM1 bridge op is in flight.
-// Driven by bridge_to_cram1's CDC-aware drain detector.
-wire bridge_wr_idle = bridge_cram1_wr_idle;
+// Bridge SDRAM write path removed — bridge only touches CRAM0 now
+// and firmware synchronises mode flips explicitly.
+// bridge_wr_idle: true when no bridge-to-cram0 operation is in flight.
+// Conservative: reports busy whenever the controller is busy or a
+// bridge request is mid-handshake.
+reg  bridge_wr_seen_74a;
+always @(posedge clk_74a) begin
+    if (bridge_cram0_wr_pulse || bridge_cram0_rd_pulse)
+        bridge_wr_seen_74a <= 1'b1;
+    else if (!ctrl_word_busy && !bridge_wr && !bridge_rd)
+        bridge_wr_seen_74a <= 1'b0;
+end
+
+wire bridge_active_74a = bridge_wr_seen_74a
+                       | ctrl_word_busy
+                       | bridge_cram0_wr_pulse
+                       | bridge_cram0_rd_pulse;
+
+// Synchronise drain flag back to clk_cpu for the DS_DONE waiter.
+reg [2:0] bridge_active_cpu_sync;
+always @(posedge clk_cpu)
+    bridge_active_cpu_sync <= {bridge_active_cpu_sync[1:0], bridge_active_74a};
+wire bridge_wr_idle = ~bridge_active_cpu_sync[2];
 
 // Bridge DMA active tracking
 reg bridge_dma_active;
@@ -1272,107 +1091,8 @@ always @(posedge clk_ram_controller) begin
     end
 end
 
-// Bridge SDRAM read path fully removed — bridge never reads SDRAM.
-
-// ============================================================
-// Bridge → CRAM1 (CDC into clk_cpu)
-//
-// Bridge writes/reads to the 0x30xxxxxx range get queued in a
-// dcfifo on the clk_74a side, then consumed in the clk_cpu domain
-// where bridge_to_cram1's internal FSM drives the shared CRAM1
-// controller's word_rd / word_wr inputs (highest-priority master in
-// the arbitration block above).  Reads come back via a second
-// dcfifo to the clk_74a domain, exposed as cram1_bridge_rd_data
-// for the bridge_rd_data mux.
-// ============================================================
-wire [31:0] cram1_bridge_rd_data;
-wire        bridge_cram1_active;
-wire        bridge_cram1_wr_idle;
-
-bridge_to_cram1 bridge_cram1_inst (
-    // Bridge side (clk_74a)
-    .clk_bridge      (clk_74a),
-    .reset_n         (psram1_reset_n),
-    .bridge_addr     (bridge_addr),
-    .bridge_wr       (bridge_wr),
-    .bridge_rd       (bridge_rd),
-    .bridge_wr_data  (bridge_wr_data),
-    .bridge_rd_data  (cram1_bridge_rd_data),
-    .bridge_active   (bridge_cram1_active),
-    .bridge_wr_idle  (bridge_cram1_wr_idle),
-
-    // Controller A side (clk_cpu)
-    .clk_cpu         (clk_cpu),
-    .req_rd          (bridge_req_rd),
-    .req_wr          (bridge_req_wr),
-    .req_addr        (bridge_req_addr),
-    .req_wdata       (bridge_req_wdata),
-    .req_busy        (psram1_busy),
-    .req_rdata       (psram1_rdata),
-    .req_rdata_valid (psram1_rdata_valid_for_bridge)
-);
-
-// ============================================================
-// CRAM1 mux (clk_cpu) — CPU + mixer only, no bridge
-// ============================================================
-
-// Two-master arbiter for controller A's word_rd/word_wr inputs:
-//   priority 1 = bridge_req_rd / bridge_req_wr  (bridge_to_cram1)
-//   priority 2 = c1_psram_rd   / c1_psram_wr    (CPU AXI)
-//
-// Mixer is now a SEPARATE master on the burst_rd port (per-voice
-// 8-word prefetch lives inside the controller's burst FSM).  Owner
-// tracking only distinguishes CPU vs bridge for word_rd responses;
-// burst responses route directly back to the mixer.
-//
-// Block all new commands when controller is busy or BCR-init is not
-// done.  CPU reset only releases ~600 cycles into boot, so the
-// BCR-done gate is essentially always satisfied by the time CPU
-// touches CRAM1; bridge_to_cram1's req FIFO buffers any early
-// activity until the controller is ready.
-reg psram1_rd_owner;   // 0 = CPU, 1 = bridge
-
-always @(posedge clk_cpu) begin
-    if (psram1_rd) begin
-        psram1_rd_owner <= bridge_req_rd;
-    end
-end
-
-wire psram1_rdata_valid_for_cpu    = psram1_rdata_valid && !psram1_rd_owner;
-wire psram1_rdata_valid_for_bridge = psram1_rdata_valid &&  psram1_rd_owner;
-
-// CPU AXI slave feedback — busy when controller busy.  No more pin-mux
-// gating term needed (single-controller architecture).
-assign c1_psram_busy        = psram1_busy;
-assign c1_psram_rdata       = psram1_rdata;
-assign c1_psram_rdata_valid = psram1_rdata_valid_for_cpu;
-
-// Writes: bridge > CPU (mixer doesn't write).
-assign psram1_wr = psram1_busy     ? 1'b0
-                 : !cram1_bcr_done ? 1'b0
-                 : bridge_req_wr   ? 1'b1
-                 : c1_psram_wr;
-
-// Reads (word_rd path): bridge > CPU.  Mixer goes through burst_rd
-// (wired directly to the controller's burst port — see psram1_a
-// instantiation).
-assign psram1_rd = psram1_wr       ? 1'b0
-                 : psram1_busy     ? 1'b0
-                 : !cram1_bcr_done ? 1'b0
-                 : bridge_req_rd   ? 1'b1
-                 : c1_psram_rd;
-
-assign psram1_addr  = bridge_req_rd | bridge_req_wr ? bridge_req_addr
-                                                    : c1_psram_addr[21:0];
-assign psram1_wdata = bridge_req_wr ? bridge_req_wdata : c1_psram_wdata;
-assign psram1_wstrb = bridge_req_wr ? 4'b1111         : c1_psram_wstrb;
-
-// Bridge SDRAM read 4-stage sync removed — no bridge SDRAM reads.
-
-// Bridge CRAM0 + SRAM write paths removed.
-// OS now bounces all bridge DMA through CRAM1, then CPU copies to CRAM0.
-// SRAM bridge was never used by firmware.
-wire cram_bridge_active = 1'b0;
+// Bridge SDRAM read path fully removed — bridge never reads SDRAM in v2.
+// Bridge CRAM0 access lives in the ownership-mux block above.
 
 // SRAM: GPU-exclusive direct access (Z-buffer). No CPU path, no mux.
 assign sram_word_rd    = gpu_sram_rd;
@@ -1849,50 +1569,8 @@ assign video_hs = vidout_hs;
         .m_cram0_wlast  (cpu_m_cram0_wlast),
         .m_cram0_bvalid (cpu_m_cram0_bvalid),
         .m_cram0_bresp  (cpu_m_cram0_bresp),
-        // CRAM1 AXI4 master interface
-        .m_cram1_arvalid(cpu_m_cram1_arvalid),
-        .m_cram1_arready(cpu_m_cram1_arready),
-        .m_cram1_araddr (cpu_m_cram1_araddr),
-        .m_cram1_arlen  (cpu_m_cram1_arlen),
-        .m_cram1_rvalid (cpu_m_cram1_rvalid),
-        .m_cram1_rready (cpu_m_cram1_rready),
-        .m_cram1_rdata  (cpu_m_cram1_rdata),
-        .m_cram1_rresp  (cpu_m_cram1_rresp),
-        .m_cram1_rlast  (cpu_m_cram1_rlast),
-        .m_cram1_awvalid(cpu_m_cram1_awvalid),
-        .m_cram1_awready(cpu_m_cram1_awready),
-        .m_cram1_awaddr (cpu_m_cram1_awaddr),
-        .m_cram1_awlen  (cpu_m_cram1_awlen),
-        .m_cram1_wvalid (cpu_m_cram1_wvalid),
-        .m_cram1_wready (cpu_m_cram1_wready),
-        .m_cram1_wdata  (cpu_m_cram1_wdata),
-        .m_cram1_wstrb  (cpu_m_cram1_wstrb),
-        .m_cram1_wlast  (cpu_m_cram1_wlast),
-        .m_cram1_bvalid (cpu_m_cram1_bvalid),
-        .m_cram1_bresp  (cpu_m_cram1_bresp),
-        // SRAM port: GPU-exclusive.  CPU accesses get immediate SLVERR
-        // (prevents AXI deadlock — old tie-off accepted requests but
-        // never responded, hanging the CPU).
-        .m_sram_arvalid(cpu_m_sram_stub_arvalid),
-        .m_sram_arready(1'b1),
-        .m_sram_araddr (),
-        .m_sram_arlen  (),
-        .m_sram_rvalid (cpu_m_sram_stub_rvalid),
-        .m_sram_rready (),
-        .m_sram_rdata  (32'hDEADDEAD),
-        .m_sram_rresp  (2'b10),      // SLVERR
-        .m_sram_rlast  (1'b1),
-        .m_sram_awvalid(cpu_m_sram_stub_awvalid),
-        .m_sram_awready(1'b1),
-        .m_sram_awaddr (),
-        .m_sram_awlen  (),
-        .m_sram_wvalid (),
-        .m_sram_wready (1'b1),
-        .m_sram_wdata  (),
-        .m_sram_wstrb  (),
-        .m_sram_wlast  (),
-        .m_sram_bvalid (cpu_m_sram_stub_bvalid),
-        .m_sram_bresp  (2'b10),      // SLVERR
+        // CRAM1 + SRAM target ports retired in v2 (chip gone, SRAM is
+        // GPU-private).  cpu_system.v no longer exposes those ports.
         // Local peripheral AXI4 master interface
         .m_local_arvalid(cpu_m_local_arvalid),
         .m_local_arready(cpu_m_local_arready),
@@ -1987,12 +1665,8 @@ assign video_hs = vidout_hs;
         .audio_dma_len(audio_dma_len),
         .audio_dma_enable(audio_dma_enable),
         .audio_dma_read_ptr(audio_dma_read_ptr),
-        // CRAM1 burst prefetch MMIO (SW mixer sample cache refill)
-        .cram1_burst_addr_wr   (cram1_burst_mmio_addr_wr),
-        .cram1_burst_addr_wdata(cram1_burst_mmio_addr_wdata),
-        .cram1_burst_data_rd   (cram1_burst_mmio_data_rd),
-        .cram1_burst_busy      (cram1_burst_mmio_busy),
-        .cram1_burst_data_q    (cram1_burst_mmio_data_q),
+        // CRAM0 ownership mode (0 = bridge, 1 = CPU)
+        .cram0_mode            (cram0_mode_cpu),
         // Link MMIO interface
         .link_reg_wr(link_reg_wr),
         .link_reg_rd(link_reg_rd),
@@ -2071,70 +1745,50 @@ assign video_hs = vidout_hs;
         end
     end
 
-    // axi_bridge_master removed — all bridge DMA goes through CRAM1 now.
+    // axi_bridge_master removed — bridge writes no longer touch SDRAM.
+    // Bridge SDRAM path retired with v2: saves/loads bounce through
+    // CRAM0 (bridge-native clock), CPU then memcpys into SDRAM.
 
-    // AXI4 SDRAM arbiter (must stay alive during reset for APF save flush & data load)
+    // ============================================================
+    // AXI4 SDRAM arbiter (3 masters in v2: GPU, CPU, Audio)
+    // ============================================================
+    // GPU exposes separate AR (gpu_rd_*) and AW/W (gpu_wr_*) channels
+    // but they are never active simultaneously — the GPU FSM serialises
+    // its own reads and writes.  We drop both into the arbiter's M0
+    // master: only one channel fires at a time, the other is idle.
     axi_sdram_arbiter sdram_arb (
         .clk(clk_cpu),
         .reset_n(1'b1),
-        // M0: GPU read master (ring fetch + texture cache fills)
+        // M0: GPU (merged read + write)
         .m0_arvalid(gpu_rd_arvalid), .m0_arready(gpu_rd_arready),
         .m0_araddr(gpu_rd_araddr),   .m0_arlen(gpu_rd_arlen),
         .m0_rvalid(gpu_rd_rvalid),   .m0_rdata(gpu_rd_rdata),
         .m0_rresp(),                 .m0_rlast(gpu_rd_rlast),
-        .m0_awvalid(1'b0), .m0_awready(),
-        .m0_awaddr(32'b0),  .m0_awlen(8'b0),
-        .m0_wvalid(1'b0),  .m0_wready(),
-        .m0_wdata(32'b0),   .m0_wstrb(4'b0),
-        .m0_wlast(1'b0),
-        .m0_bvalid(),       .m0_bresp(),
-        // M1: GPU write master (framebuffer writes + clear DMA)
-        .m1_arvalid(1'b0), .m1_arready(),
-        .m1_araddr(32'b0),  .m1_arlen(8'b0),
-        .m1_rvalid(),       .m1_rdata(),
-        .m1_rresp(),        .m1_rlast(),
-        .m1_awvalid(gpu_wr_awvalid), .m1_awready(gpu_wr_awready),
-        .m1_awaddr(gpu_wr_awaddr),   .m1_awlen(gpu_wr_awlen),
-        .m1_wvalid(gpu_wr_wvalid),   .m1_wready(gpu_wr_wready),
-        .m1_wdata(gpu_wr_wdata),     .m1_wstrb(gpu_wr_wstrb),
-        .m1_wlast(gpu_wr_wlast),
-        .m1_bvalid(gpu_wr_bvalid),   .m1_bresp(),
-        // M2: CPU
-        .m2_arvalid(cpu_m_sdram_arvalid), .m2_arready(cpu_m_sdram_arready),
-        .m2_araddr(cpu_m_sdram_araddr),   .m2_arlen(cpu_m_sdram_arlen),
-        .m2_rvalid(cpu_m_sdram_rvalid),   .m2_rdata(cpu_m_sdram_rdata),
-        .m2_rresp(cpu_m_sdram_rresp),     .m2_rlast(cpu_m_sdram_rlast),
-        .m2_rready(cpu_m_sdram_rready),
-        .m2_awvalid(cpu_m_sdram_awvalid), .m2_awready(cpu_m_sdram_awready),
-        .m2_awaddr(cpu_m_sdram_awaddr),   .m2_awlen(cpu_m_sdram_awlen),
-        .m2_wvalid(cpu_m_sdram_wvalid),   .m2_wready(cpu_m_sdram_wready),
-        .m2_wdata(cpu_m_sdram_wdata),     .m2_wstrb(cpu_m_sdram_wstrb),
-        .m2_wlast(cpu_m_sdram_wlast),
-        .m2_bvalid(cpu_m_sdram_bvalid),   .m2_bresp(cpu_m_sdram_bresp),
-        // M3: Bridge → SDRAM write path (clk_74a → clk_cpu via FIFO).
-        // Only writes are wired; bridge reads of SDRAM still go via
-        // the CRAM1 fallback (read corruption isn't observed because
-        // mixer reads + bridge reads naturally serialize through the
-        // controller).
-        .m3_arvalid(1'b0), .m3_arready(),
-        .m3_araddr(32'b0),  .m3_arlen(8'b0),
-        .m3_rvalid(),       .m3_rdata(),
-        .m3_rresp(),        .m3_rlast(),
-        .m3_awvalid(brg_sdram_awvalid), .m3_awready(brg_sdram_awready),
-        .m3_awaddr(brg_sdram_awaddr),   .m3_awlen(brg_sdram_awlen),
-        .m3_wvalid(brg_sdram_wvalid),   .m3_wready(brg_sdram_wready),
-        .m3_wdata(brg_sdram_wdata),     .m3_wstrb(brg_sdram_wstrb),
-        .m3_wlast(brg_sdram_wlast),
-        .m3_bvalid(brg_sdram_bvalid),   .m3_bresp(),
-        // M4: Audio DMA (read-only, *lowest* priority).  The ring
-        // carries ~85 ms of buffered audio, so audio can tolerate long
-        // gaps without glitching.  Bottom priority keeps the CPU / GPU
-        // first in line for their own fetches — audio getting scraps
-        // is still >> its <1 % bandwidth requirement.
-        .m4_arvalid(audio_m_arvalid), .m4_arready(audio_m_arready),
-        .m4_araddr(audio_m_araddr),   .m4_arlen(audio_m_arlen),
-        .m4_rvalid(audio_m_rvalid),   .m4_rdata(audio_m_rdata),
-        .m4_rresp(),                  .m4_rlast(audio_m_rlast),
+        .m0_awvalid(gpu_wr_awvalid), .m0_awready(gpu_wr_awready),
+        .m0_awaddr(gpu_wr_awaddr),   .m0_awlen(gpu_wr_awlen),
+        .m0_wvalid(gpu_wr_wvalid),   .m0_wready(gpu_wr_wready),
+        .m0_wdata(gpu_wr_wdata),     .m0_wstrb(gpu_wr_wstrb),
+        .m0_wlast(gpu_wr_wlast),
+        .m0_bvalid(gpu_wr_bvalid),   .m0_bresp(),
+        // M1: CPU
+        .m1_arvalid(cpu_m_sdram_arvalid), .m1_arready(cpu_m_sdram_arready),
+        .m1_araddr(cpu_m_sdram_araddr),   .m1_arlen(cpu_m_sdram_arlen),
+        .m1_rvalid(cpu_m_sdram_rvalid),   .m1_rdata(cpu_m_sdram_rdata),
+        .m1_rresp(cpu_m_sdram_rresp),     .m1_rlast(cpu_m_sdram_rlast),
+        .m1_rready(cpu_m_sdram_rready),
+        .m1_awvalid(cpu_m_sdram_awvalid), .m1_awready(cpu_m_sdram_awready),
+        .m1_awaddr(cpu_m_sdram_awaddr),   .m1_awlen(cpu_m_sdram_awlen),
+        .m1_wvalid(cpu_m_sdram_wvalid),   .m1_wready(cpu_m_sdram_wready),
+        .m1_wdata(cpu_m_sdram_wdata),     .m1_wstrb(cpu_m_sdram_wstrb),
+        .m1_wlast(cpu_m_sdram_wlast),
+        .m1_bvalid(cpu_m_sdram_bvalid),   .m1_bresp(cpu_m_sdram_bresp),
+        // M2: Audio DMA (read-only, lowest priority).  The ring
+        // carries ~85 ms of buffered audio, so audio can absorb long
+        // arbitration gaps without glitching.
+        .m2_arvalid(audio_m_arvalid), .m2_arready(audio_m_arready),
+        .m2_araddr(audio_m_araddr),   .m2_arlen(audio_m_arlen),
+        .m2_rvalid(audio_m_rvalid),   .m2_rdata(audio_m_rdata),
+        .m2_rresp(),                  .m2_rlast(audio_m_rlast),
         // Slave output (to axi_sdram_slave)
         .s_arvalid(arb_s_arvalid), .s_arready(arb_s_arready),
         .s_araddr(arb_s_araddr),   .s_arlen(arb_s_arlen),
@@ -2195,92 +1849,12 @@ assign video_hs = vidout_hs;
         .sdram_next_wstrb(sdram_slave_next_wstrb)
     );
 
-    // Per-chip AXI4 sub-slaves — directly instantiated (no shared
-    // axi_psram_slave router).  cpu_system gives each chip its own
-    // AXI master port, so CRAM0, CRAM1, and SRAM service transactions
-    // concurrently on their independent physical backends.
-
-    axi_cram0_slave cpu_cram0_axi (
-        .clk(clk_cpu),
-        .reset_n(reset_n),
-        .s_axi_arvalid(cpu_m_cram0_arvalid),
-        .s_axi_arready(cpu_m_cram0_arready),
-        .s_axi_araddr(cpu_m_cram0_araddr),
-        .s_axi_arlen(cpu_m_cram0_arlen),
-        .s_axi_rvalid(cpu_m_cram0_rvalid),
-        .s_axi_rready(cpu_m_cram0_rready),
-        .s_axi_rdata(cpu_m_cram0_rdata),
-        .s_axi_rresp(cpu_m_cram0_rresp),
-        .s_axi_rlast(cpu_m_cram0_rlast),
-        .s_axi_awvalid(cpu_m_cram0_awvalid),
-        .s_axi_awready(cpu_m_cram0_awready),
-        .s_axi_awaddr(cpu_m_cram0_awaddr),
-        .s_axi_awlen(cpu_m_cram0_awlen),
-        .s_axi_wvalid(cpu_m_cram0_wvalid),
-        .s_axi_wready(cpu_m_cram0_wready),
-        .s_axi_wdata(cpu_m_cram0_wdata),
-        .s_axi_wstrb(cpu_m_cram0_wstrb),
-        .s_axi_wlast(cpu_m_cram0_wlast),
-        .s_axi_bvalid(cpu_m_cram0_bvalid),
-        .s_axi_bready(1'b1),
-        .s_axi_bresp(cpu_m_cram0_bresp),
-        .psram_rd          (c0_psram_rd),
-        .psram_wr          (c0_psram_wr),
-        .psram_addr        (c0_psram_addr),
-        .psram_wdata       (c0_psram_wdata),
-        .psram_wstrb       (c0_psram_wstrb),
-        .psram_rdata       (c0_psram_rdata),
-        .psram_busy        (c0_psram_busy),
-        .psram_rdata_valid (c0_psram_rdata_valid),
-        .psram_burst_rd          (c0_psram_burst_rd),
-        .psram_burst_len         (c0_psram_burst_len),
-        .psram_burst_rdata       (c0_psram_burst_rdata),
-        .psram_burst_rdata_valid (c0_psram_burst_rdata_valid)
-    );
-
-    axi_cram1_slave cpu_cram1_axi (
-        .clk(clk_cpu),
-        .reset_n(reset_n),
-        .s_axi_arvalid(cpu_m_cram1_arvalid),
-        .s_axi_arready(cpu_m_cram1_arready),
-        .s_axi_araddr(cpu_m_cram1_araddr),
-        .s_axi_arlen(cpu_m_cram1_arlen),
-        .s_axi_rvalid(cpu_m_cram1_rvalid),
-        .s_axi_rready(cpu_m_cram1_rready),
-        .s_axi_rdata(cpu_m_cram1_rdata),
-        .s_axi_rresp(cpu_m_cram1_rresp),
-        .s_axi_rlast(cpu_m_cram1_rlast),
-        .s_axi_awvalid(cpu_m_cram1_awvalid),
-        .s_axi_awready(cpu_m_cram1_awready),
-        .s_axi_awaddr(cpu_m_cram1_awaddr),
-        .s_axi_awlen(cpu_m_cram1_awlen),
-        .s_axi_wvalid(cpu_m_cram1_wvalid),
-        .s_axi_wready(cpu_m_cram1_wready),
-        .s_axi_wdata(cpu_m_cram1_wdata),
-        .s_axi_wstrb(cpu_m_cram1_wstrb),
-        .s_axi_wlast(cpu_m_cram1_wlast),
-        .s_axi_bvalid(cpu_m_cram1_bvalid),
-        .s_axi_bready(1'b1),
-        .s_axi_bresp(cpu_m_cram1_bresp),
-        .psram_rd          (c1_psram_rd),
-        .psram_wr          (c1_psram_wr),
-        .psram_addr        (c1_psram_addr),
-        .psram_wdata       (c1_psram_wdata),
-        .psram_wstrb       (c1_psram_wstrb),
-        .psram_rdata       (c1_psram_rdata),
-        .psram_busy        (c1_psram_busy),
-        .psram_rdata_valid (c1_psram_rdata_valid),
-        // Burst port — drives the cram1_controller's sync-burst read
-        // interface for AXI multi-beat reads (CPU L1 D$ line fills).
-        .psram_burst_rd      (psram1_burst_rd),
-        .psram_burst_addr    (psram1_burst_addr),
-        .psram_burst_len     (psram1_burst_len),
-        .psram_burst_q       (psram1_burst_q),
-        .psram_burst_q_valid (psram1_burst_q_valid),
-        .psram_burst_busy    (psram1_burst_busy)
-    );
-
-    // axi_sram_slave removed — SRAM is GPU-exclusive (Z-buffer).
+    // CRAM0 is now served by the cram0_cdc instance (declared at the
+    // top of the file with the CRAM0 controller block).  No per-chip
+    // AXI sub-slave is needed — the CDC *is* the CPU-side AXI slave.
+    //
+    // CRAM1 axi slave and pin fan-out retired with the chip.  SRAM is
+    // GPU-exclusive (Z-buffer) and has no CPU AXI surface.
 
     // Terminal rendering moved to software (firmware renders to framebuffer)
 
@@ -2509,12 +2083,8 @@ audio_dma audio_dma_inst (
     .fifo_level    (audio_fifo_level)
 );
 
-// cram1_burst_mmio removed — the burst_rd port on cram1_controller is
-// now owned by axi_cram1_slave (drives bursts for CPU L1 D$ line fills).
-// The MMIO-driven burst path hung the ISR on a saw-busy gate race from
-// C; the AXI path handshakes natively.  MMIO decode in axi_periph_slave
-// stays so a stray write to 0x4E000000 is a harmless no-op (busy tied
-// to 0, data_q returns a poison constant).
+// cram1_burst_mmio retired with CRAM1 chip; 0x4E000000 MMIO slot is
+// repurposed in v2 as the CRAM0 ownership mode bit (see axi_periph_slave).
 
 // MMIO write and DMA are mutually exclusive — firmware uses one or the
 // other.  Simple OR/mux keeps either path working.  If both fire on the
@@ -2566,41 +2136,8 @@ wire [3:0]  gpu_wr_wstrb;
 wire        gpu_wr_wlast;
 wire        gpu_wr_bvalid;
 
-// Bridge → SDRAM AXI4 write master (M3 on SDRAM arbiter).  Sniffs
-// bridge writes whose top byte == 0x10 (SDRAM range) and CDC-replays
-// them into the SDRAM controller, eliminating the CRAM1 bounce that
-// races with audio mixer reads.
-wire        brg_sdram_awvalid;
-wire        brg_sdram_awready;
-wire [31:0] brg_sdram_awaddr;
-wire [7:0]  brg_sdram_awlen;
-wire        brg_sdram_wvalid;
-wire        brg_sdram_wready;
-wire [31:0] brg_sdram_wdata;
-wire [3:0]  brg_sdram_wstrb;
-wire        brg_sdram_wlast;
-wire        brg_sdram_bvalid;
-
-bridge_to_sdram brg_sdram (
-    .clk_bridge      (clk_74a),
-    .reset_n         (reset_n),
-    .bridge_addr     (bridge_addr),
-    .bridge_wr       (bridge_wr),
-    .bridge_wr_data  (bridge_wr_data),
-    .fifo_full       (),
-    .clk_axi         (clk_cpu),
-    .m_awvalid       (brg_sdram_awvalid),
-    .m_awready       (brg_sdram_awready),
-    .m_awaddr        (brg_sdram_awaddr),
-    .m_awlen         (brg_sdram_awlen),
-    .m_wvalid        (brg_sdram_wvalid),
-    .m_wready        (brg_sdram_wready),
-    .m_wdata         (brg_sdram_wdata),
-    .m_wstrb         (brg_sdram_wstrb),
-    .m_wlast         (brg_sdram_wlast),
-    .m_bvalid        (brg_sdram_bvalid),
-    .m_bready        ()
-);
+// Bridge → SDRAM write path retired in v2 (bridge no longer touches
+// SDRAM; loads/saves bounce through CRAM0 and CPU memcpys the bytes).
 
 // GPU SRAM interface (Z-buffer)
 wire        gpu_sram_rd;
@@ -2727,29 +2264,14 @@ mf_pllram_133 mp_ram (
 
 assign clk_cpu = clk_ram_controller;
 
-// Drive CRAM clock pins from PLL outputs (the controller's cram_clk
-// output stays low; the chip clock is generated here).
+// Drive CRAM0 clock pin directly from clk_74a.  The controller now
+// runs in the clk_74a domain (v2 memory architecture), so the chip
+// CK and the controller FSM share the same clock tree with zero
+// cross-domain skew.  PocketQuake ran the chip at 74 MHz reliably
+// for years with this exact arrangement.
 //
-// CRAM0: clk_cram (100 MHz, 5500 ps phase shift).  The phase shift
-// tunes the DQ sampling window for the Pocket's board traces and
-// was kept even after CRAM0 was reverted from sync-burst to async
-// page mode — async reads still latch DQ relative to cram_clk on
-// the AS1C8M16PL.
-//
-// CRAM1: clk_74a (74.25 MHz, no phase shift).  Attempting to switch
-// CRAM1 to clk_cram as a "future-proofing" change broke ELF loads
-// on real hardware — the chip doesn't fully ignore cram_clk in
-// async mode, and the phase shift tuned for CRAM0 is wrong for
-// CRAM1's routing.  Any future move to sync burst on CRAM1 will
-// require lab measurement of its actual Tco before changing this.
-assign cram0_clk = clk_cram;
-/* CRAM1 chip CK now follows clk_cpu (100 MHz) — single-controller
- * architecture moves the bridge CDC into bridge_to_cram1.v so the
- * chip lives in one clock domain.  No more pin mux or runtime clock
- * mux on cram1_clk.  See note above for the original (pre-sync-burst)
- * rationale that picked clk_74a; that constraint is gone now that
- * controller A handles all CRAM1 traffic. */
-assign cram1_clk = clk_cpu;
+// CRAM1 retired in v2 — pin unassigned in the qsf.
+assign cram0_clk = clk_74a;
 
 // SDRAM controller
 io_sdram isr0 (

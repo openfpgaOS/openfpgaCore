@@ -129,38 +129,7 @@ set_location_assignment PIN_D6 -to cram0_oe_n
 set_location_assignment PIN_A7 -to cram0_ub_n
 set_location_assignment PIN_K7 -to cram0_wait
 set_location_assignment PIN_G8 -to cram0_we_n
-set_location_assignment PIN_Y3 -to cram1_a[21]
-set_location_assignment PIN_AA2 -to cram1_a[20]
-set_location_assignment PIN_L2 -to cram1_a[19]
-set_location_assignment PIN_N1 -to cram1_a[18]
-set_location_assignment PIN_U1 -to cram1_a[17]
-set_location_assignment PIN_U2 -to cram1_a[16]
-set_location_assignment PIN_U8 -to cram1_adv_n
-set_location_assignment PIN_N2 -to cram1_ce0_n
-set_location_assignment PIN_T8 -to cram1_ce1_n
-set_location_assignment PIN_W2 -to cram1_clk
-set_location_assignment PIN_T7 -to cram1_cre
-set_location_assignment PIN_W8 -to cram1_dq[15]
-set_location_assignment PIN_U6 -to cram1_dq[14]
-set_location_assignment PIN_R7 -to cram1_dq[13]
-set_location_assignment PIN_R6 -to cram1_dq[12]
-set_location_assignment PIN_P7 -to cram1_dq[11]
-set_location_assignment PIN_N6 -to cram1_dq[10]
-set_location_assignment PIN_C2 -to cram1_dq[9]
-set_location_assignment PIN_D3 -to cram1_dq[8]
-set_location_assignment PIN_V6 -to cram1_dq[7]
-set_location_assignment PIN_U7 -to cram1_dq[6]
-set_location_assignment PIN_M6 -to cram1_dq[5]
-set_location_assignment PIN_R5 -to cram1_dq[4]
-set_location_assignment PIN_P6 -to cram1_dq[3]
-set_location_assignment PIN_E2 -to cram1_dq[2]
-set_location_assignment PIN_G2 -to cram1_dq[1]
-set_location_assignment PIN_C1 -to cram1_dq[0]
-set_location_assignment PIN_L1 -to cram1_lb_n
-set_location_assignment PIN_M7 -to cram1_oe_n
-set_location_assignment PIN_G1 -to cram1_ub_n
-set_location_assignment PIN_W9 -to cram1_wait
-set_location_assignment PIN_AA1 -to cram1_we_n
+# cram1_* pin assignments retired with memory-arch v2.
 set_location_assignment PIN_J17 -to dram_a[12]
 set_location_assignment PIN_F15 -to dram_a[11]
 set_location_assignment PIN_C13 -to dram_a[10]
@@ -510,38 +479,7 @@ set_instance_assignment -name IO_STANDARD "1.8 V" -to cram0_a[18]
 set_instance_assignment -name IO_STANDARD "1.8 V" -to cram0_a[19]
 set_instance_assignment -name IO_STANDARD "1.8 V" -to cram0_a[20]
 set_instance_assignment -name IO_STANDARD "1.8 V" -to cram0_a[21]
-set_instance_assignment -name IO_STANDARD "1.8 V" -to cram1_we_n
-set_instance_assignment -name IO_STANDARD "1.8 V" -to cram1_ub_n
-set_instance_assignment -name IO_STANDARD "1.8 V" -to cram1_lb_n
-set_instance_assignment -name IO_STANDARD "1.8 V" -to cram1_dq[0]
-set_instance_assignment -name IO_STANDARD "1.8 V" -to cram1_dq[1]
-set_instance_assignment -name IO_STANDARD "1.8 V" -to cram1_dq[2]
-set_instance_assignment -name IO_STANDARD "1.8 V" -to cram1_dq[8]
-set_instance_assignment -name IO_STANDARD "1.8 V" -to cram1_dq[9]
-set_instance_assignment -name IO_STANDARD "1.8 V" -to cram1_clk
-set_instance_assignment -name IO_STANDARD "1.8 V" -to cram1_ce0_n
-set_instance_assignment -name IO_STANDARD "1.8 V" -to cram1_a[16]
-set_instance_assignment -name IO_STANDARD "1.8 V" -to cram1_a[17]
-set_instance_assignment -name IO_STANDARD "1.8 V" -to cram1_a[18]
-set_instance_assignment -name IO_STANDARD "1.8 V" -to cram1_a[19]
-set_instance_assignment -name IO_STANDARD "1.8 V" -to cram1_a[20]
-set_instance_assignment -name IO_STANDARD "1.8 V" -to cram1_a[21]
-set_instance_assignment -name IO_STANDARD "1.8 V" -to cram1_wait
-set_instance_assignment -name IO_STANDARD "1.8 V" -to cram1_oe_n
-set_instance_assignment -name IO_STANDARD "1.8 V" -to cram1_dq[3]
-set_instance_assignment -name IO_STANDARD "1.8 V" -to cram1_dq[4]
-set_instance_assignment -name IO_STANDARD "1.8 V" -to cram1_dq[5]
-set_instance_assignment -name IO_STANDARD "1.8 V" -to cram1_dq[6]
-set_instance_assignment -name IO_STANDARD "1.8 V" -to cram1_dq[7]
-set_instance_assignment -name IO_STANDARD "1.8 V" -to cram1_dq[10]
-set_instance_assignment -name IO_STANDARD "1.8 V" -to cram1_dq[11]
-set_instance_assignment -name IO_STANDARD "1.8 V" -to cram1_dq[12]
-set_instance_assignment -name IO_STANDARD "1.8 V" -to cram1_dq[13]
-set_instance_assignment -name IO_STANDARD "1.8 V" -to cram1_dq[14]
-set_instance_assignment -name IO_STANDARD "1.8 V" -to cram1_dq[15]
-set_instance_assignment -name IO_STANDARD "1.8 V" -to cram1_cre
-set_instance_assignment -name IO_STANDARD "1.8 V" -to cram1_ce1_n
-set_instance_assignment -name IO_STANDARD "1.8 V" -to cram1_adv_n
+# cram1_* IO_STANDARD assignments retired with memory-arch v2.
 set_instance_assignment -name IO_STANDARD "1.8 V" -to user1
 set_instance_assignment -name IO_STANDARD "1.8 V" -to user2
 set_instance_assignment -name IO_STANDARD "1.8 V" -to dbg_rx
@@ -573,7 +511,7 @@ set_instance_assignment -name OUTPUT_TERMINATION "SERIES 50 OHM WITHOUT CALIBRAT
 set_instance_assignment -name OUTPUT_TERMINATION "SERIES 50 OHM WITHOUT CALIBRATION" -to scal_auddac
 set_instance_assignment -name OUTPUT_TERMINATION "SERIES 50 OHM WITHOUT CALIBRATION" -to scal_audlrck
 set_instance_assignment -name OUTPUT_TERMINATION "SERIES 50 OHM WITHOUT CALIBRATION" -to vpll_feed
-set_instance_assignment -name OUTPUT_TERMINATION "SERIES 50 OHM WITHOUT CALIBRATION" -to cram1_clk
+# cram1_clk OUTPUT_TERMINATION retired with memory-arch v2.
 set_instance_assignment -name OUTPUT_TERMINATION "SERIES 50 OHM WITHOUT CALIBRATION" -to scal_clk
 set_instance_assignment -name CURRENT_STRENGTH_NEW 4MA -to dram_dqm[1]
 set_instance_assignment -name CURRENT_STRENGTH_NEW 4MA -to dram_dqm[0]
@@ -592,7 +530,6 @@ set_instance_assignment -name CURRENT_STRENGTH_NEW 4MA -to dram_dq[11]
 set_instance_assignment -name CURRENT_STRENGTH_NEW 4MA -to dram_dq[12]
 set_instance_assignment -name CURRENT_STRENGTH_NEW 4MA -to dram_dq[13]
 set_instance_assignment -name CURRENT_STRENGTH_NEW 4MA -to dram_dq[14]
-set_instance_assignment -name CURRENT_STRENGTH_NEW 4MA -to cram1_dq[15]
 set_instance_assignment -name CURRENT_STRENGTH_NEW 4MA -to dram_we_n
 set_instance_assignment -name CURRENT_STRENGTH_NEW 4MA -to dram_cas_n
 set_instance_assignment -name CURRENT_STRENGTH_NEW 4MA -to dram_ras_n
@@ -614,36 +551,7 @@ set_instance_assignment -name CURRENT_STRENGTH_NEW 4MA -to dram_a[9]
 set_instance_assignment -name CURRENT_STRENGTH_NEW 4MA -to dram_a[10]
 set_instance_assignment -name CURRENT_STRENGTH_NEW 4MA -to dram_a[11]
 set_instance_assignment -name CURRENT_STRENGTH_NEW 8MA -to dbg_tx
-set_instance_assignment -name CURRENT_STRENGTH_NEW 4MA -to cram1_we_n
-set_instance_assignment -name CURRENT_STRENGTH_NEW 4MA -to cram1_wait
-set_instance_assignment -name CURRENT_STRENGTH_NEW 4MA -to cram1_ub_n
-set_instance_assignment -name CURRENT_STRENGTH_NEW 4MA -to cram1_oe_n
-set_instance_assignment -name CURRENT_STRENGTH_NEW 4MA -to cram1_lb_n
-set_instance_assignment -name CURRENT_STRENGTH_NEW 4MA -to cram1_dq[0]
-set_instance_assignment -name CURRENT_STRENGTH_NEW 4MA -to cram1_dq[1]
-set_instance_assignment -name CURRENT_STRENGTH_NEW 4MA -to cram1_dq[2]
-set_instance_assignment -name CURRENT_STRENGTH_NEW 4MA -to cram1_dq[3]
-set_instance_assignment -name CURRENT_STRENGTH_NEW 4MA -to cram1_dq[4]
-set_instance_assignment -name CURRENT_STRENGTH_NEW 4MA -to cram1_dq[5]
-set_instance_assignment -name CURRENT_STRENGTH_NEW 4MA -to cram1_dq[6]
-set_instance_assignment -name CURRENT_STRENGTH_NEW 4MA -to cram1_dq[7]
-set_instance_assignment -name CURRENT_STRENGTH_NEW 4MA -to cram1_dq[8]
-set_instance_assignment -name CURRENT_STRENGTH_NEW 4MA -to cram1_dq[9]
-set_instance_assignment -name CURRENT_STRENGTH_NEW 4MA -to cram1_dq[10]
-set_instance_assignment -name CURRENT_STRENGTH_NEW 4MA -to cram1_dq[11]
-set_instance_assignment -name CURRENT_STRENGTH_NEW 4MA -to cram1_dq[12]
-set_instance_assignment -name CURRENT_STRENGTH_NEW 4MA -to cram1_dq[13]
-set_instance_assignment -name CURRENT_STRENGTH_NEW 4MA -to cram1_dq[14]
-set_instance_assignment -name CURRENT_STRENGTH_NEW 4MA -to cram1_cre
-set_instance_assignment -name CURRENT_STRENGTH_NEW 4MA -to cram1_ce1_n
-set_instance_assignment -name CURRENT_STRENGTH_NEW 4MA -to cram1_ce0_n
-set_instance_assignment -name CURRENT_STRENGTH_NEW 4MA -to cram1_adv_n
-set_instance_assignment -name CURRENT_STRENGTH_NEW 4MA -to cram1_a[16]
-set_instance_assignment -name CURRENT_STRENGTH_NEW 4MA -to cram1_a[17]
-set_instance_assignment -name CURRENT_STRENGTH_NEW 4MA -to cram1_a[18]
-set_instance_assignment -name CURRENT_STRENGTH_NEW 4MA -to cram1_a[19]
-set_instance_assignment -name CURRENT_STRENGTH_NEW 4MA -to cram1_a[20]
-set_instance_assignment -name CURRENT_STRENGTH_NEW 4MA -to cram1_a[21]
+# cram1_* CURRENT_STRENGTH assignments retired with memory-arch v2.
 set_instance_assignment -name CURRENT_STRENGTH_NEW 4MA -to cram0_we_n
 set_instance_assignment -name CURRENT_STRENGTH_NEW 4MA -to cram0_wait
 set_instance_assignment -name CURRENT_STRENGTH_NEW 4MA -to cram0_ub_n
@@ -781,38 +689,21 @@ set_instance_assignment -name FAST_INPUT_REGISTER ON -to cram0_dq[13]
 set_instance_assignment -name FAST_INPUT_REGISTER ON -to cram0_dq[14]
 set_instance_assignment -name FAST_INPUT_REGISTER ON -to cram0_dq[15]
 set_instance_assignment -name FAST_INPUT_REGISTER ON -to cram0_wait
-set_instance_assignment -name FAST_INPUT_REGISTER ON -to cram1_dq[0]
-set_instance_assignment -name FAST_INPUT_REGISTER ON -to cram1_dq[1]
-set_instance_assignment -name FAST_INPUT_REGISTER ON -to cram1_dq[2]
-set_instance_assignment -name FAST_INPUT_REGISTER ON -to cram1_dq[3]
-set_instance_assignment -name FAST_INPUT_REGISTER ON -to cram1_dq[4]
-set_instance_assignment -name FAST_INPUT_REGISTER ON -to cram1_dq[5]
-set_instance_assignment -name FAST_INPUT_REGISTER ON -to cram1_dq[6]
-set_instance_assignment -name FAST_INPUT_REGISTER ON -to cram1_dq[7]
-set_instance_assignment -name FAST_INPUT_REGISTER ON -to cram1_dq[8]
-set_instance_assignment -name FAST_INPUT_REGISTER ON -to cram1_dq[9]
-set_instance_assignment -name FAST_INPUT_REGISTER ON -to cram1_dq[10]
-set_instance_assignment -name FAST_INPUT_REGISTER ON -to cram1_dq[11]
-set_instance_assignment -name FAST_INPUT_REGISTER ON -to cram1_dq[12]
-set_instance_assignment -name FAST_INPUT_REGISTER ON -to cram1_dq[13]
-set_instance_assignment -name FAST_INPUT_REGISTER ON -to cram1_dq[14]
-set_instance_assignment -name FAST_INPUT_REGISTER ON -to cram1_dq[15]
-set_instance_assignment -name FAST_INPUT_REGISTER ON -to cram1_wait
+# cram1_dq / cram1_wait FAST_INPUT_REGISTER assignments retired with memory-arch v2.
 
 # Source files added after initial commit
 # audio_mixer.v and audio_awe.v retired — CPU-side software mixer replaces them.
 set_global_assignment -name VERILOG_FILE ../../common/audio_dma.v
-# cram1_burst_mmio.v retired — axi_cram1_slave now owns the burst port
-set_global_assignment -name VERILOG_FILE ../../common/bridge_to_sdram.v
-set_global_assignment -name VERILOG_FILE ../../common/bridge_to_cram1.v
+# cram1_controller.v / cram1_phy.sv / axi_cram1_slave.v / bridge_to_cram1.v /
+# cram1_burst_mmio.v / bridge_to_sdram.v retired in memory-arch v2.
 set_global_assignment -name VERILOG_FILE ../../common/audio_output.v
 set_global_assignment -name VERILOG_FILE ../../common/gpu_core.v
 set_global_assignment -name VERILOG_FILE ../../common/gpu_tex_cache.v
-# axi_bridge_master.v removed — bridge DMA uses CRAM1 only
 set_global_assignment -name VERILOG_FILE ../../common/axi_periph_slave.v
 set_global_assignment -name VERILOG_FILE ../../common/snac_shifter.v
-set_global_assignment -name VERILOG_FILE ../../common/axi_cram0_slave.v
-set_global_assignment -name VERILOG_FILE ../../common/axi_cram1_slave.v
+# axi_cram0_slave.v retained in source tree but not instantiated in v2;
+# cram0_cdc is the CPU-side AXI slave for CRAM0 and the controller is
+# driven by a simple owner mux.  File excluded from bitstream build.
 set_global_assignment -name VERILOG_FILE ../../common/axi_sdram_arbiter.v
 set_global_assignment -name VERILOG_FILE ../../common/axi_sdram_slave.v
 set_global_assignment -name VERILOG_FILE ../../common/cpu_system.v
@@ -821,9 +712,8 @@ set_global_assignment -name VERILOG_FILE ../../common/jtframe_frac_cen.v
 set_global_assignment -name VERILOG_FILE ../../common/jtframe_resync.v
 set_global_assignment -name VERILOG_FILE ../../common/link_lite.v
 set_global_assignment -name VERILOG_FILE ../../common/cram0_controller.v
-set_global_assignment -name VERILOG_FILE ../../common/cram1_controller.v
+set_global_assignment -name VERILOG_FILE ../../common/cram0_cdc.v
 set_global_assignment -name SYSTEMVERILOG_FILE ../../common/cram0_phy.sv
-set_global_assignment -name SYSTEMVERILOG_FILE ../../common/cram1_phy.sv
 set_global_assignment -name VERILOG_FILE ../../common/sram_controller.v
 set_global_assignment -name VERILOG_FILE ../../common/uart_rx.v
 set_global_assignment -name VERILOG_FILE ../../common/uart_tx.v
