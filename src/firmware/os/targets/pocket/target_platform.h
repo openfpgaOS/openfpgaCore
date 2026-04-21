@@ -65,7 +65,13 @@
 /* SRAM is GPU-private in v2 — no AXI alias, not CPU-addressable. */
 /* (OF_TARGET_SRAM_BASE / OF_TARGET_SRAM_SIZE removed) */
 
-#define OF_TARGET_RUNTIME_STACK_TOP    0x14000000u
+/* Must stay strictly below the SDRAM PMA end (0x14000000).  VexiiRiscv's
+ * rpt-based LSU hardware prefetcher stride-predicts past the last real
+ * stack load by a few cache lines; if that speculative address crosses
+ * the PMA boundary the CPU delivers a load access fault (seen as random
+ * mtval≈0x14000000 traps from e.g. term_emit_char during boot print).
+ * 64 KB of guard is generous relative to the prefetcher's reach. */
+#define OF_TARGET_RUNTIME_STACK_TOP    0x13FF0000u
 #define OF_TARGET_RUNTIME_STACK_SIZE   (512u * 1024u)
 
 /* Sample pool: 8 MB in SDRAM carved out of the top of the app's

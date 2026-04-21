@@ -446,11 +446,18 @@ void fatal_trap(trap_frame_t *frame) {
 
     /* Dump 64 words of app stack around sp — lets us find where the
      * corrupted return address came from.  Safe because we're on the
-     * trap stack in BRAM and the app's sp is in SDRAM. */
+     * trap stack in BRAM and the app's sp is in SDRAM.  Stop before
+     * reading past the SDRAM PMA end (0x14000000) so the dump itself
+     * can't trigger a recursive load access fault — that used to
+     * double-print the trap when sp was deep and 64 words crossed the
+     * PMA boundary. */
     uintptr_t sp = frame->regs[2];
     if (sp >= 0x10000000u && sp < 0x14000000u && (sp & 3) == 0) {
+        const uintptr_t sdram_end = 0x14000000u;
+        uint32_t max_words = (sdram_end - sp) >> 2;
+        if (max_words > 64) max_words = 64;
         trap_uart_puts("stk:");
-        for (int i = 0; i < 64; i++) {
+        for (uint32_t i = 0; i < max_words; i++) {
             if ((i & 3) == 0) trap_uart_puts("\n ");
             trap_uart_hex(((volatile uint32_t *)sp)[i]);
             trap_uart_puts(" ");
