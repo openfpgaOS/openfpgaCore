@@ -29,27 +29,37 @@ uint32_t of_timer_get_seconds(uint32_t *ns_out) {
     return sec;
 }
 
+/* swmixer_tick lives in the OS image; declare here so we can pump it
+ * from the busy-wait without pulling all of swmixer.h into this TU. */
+extern void swmixer_tick(void);
+
 void of_timer_delay_us(uint32_t us) {
     uint64_t target = read_cycles() + (uint64_t)us * (CPU_FREQ_HZ / 1000000);
 
-    /* usleep arrives through the ecall trap handler, which entered with
-     * mstatus.MIE=0 per RISC-V trap semantics.  If we spin here with MIE
-     * still masked, the 1 kHz timer ISR can't fire → swmixer_tick never
-     * runs → software-mixer voice state is frozen for the whole delay.
-     * Audible as: voices never reach their end, position reads stay at
-     * 0, and polyphony effectively degrades to "one voice forever".
-     * Re-enable MIE for the duration of the spin, save the prior bit so
-     * we restore it afterwards.  Nested IRQs are safe: the trap handler
-     * re-saves mepc/mcause into a fresh frame on every entry. */
-    uint32_t prev;
-    __asm__ volatile("csrrsi %0, mstatus, 0x8" : "=r"(prev));
+    /* usleep arrives through the ecall trap handler with mstatus.MIE=0.
+     * If we spin here with IRQs masked the 1 kHz timer ISR can't fire,
+     * swmixer_tick stops, and software-mixer voices freeze for the whole
+     * delay — audible as voices never ending and position reads stuck at
+     * 0.  Re-enabling MIE here is tempting but unsafe: start.S's trap
+     * entry unconditionally resets sp to _stack_top before allocating
+     * a new trap frame, so a nested IRQ would overwrite the outer
+     * syscall's trap frame and corrupt the saved mepc on mret.
+     *
+     * Safer: pump swmixer_tick directly from the busy-wait.  The tick
+     * is self-pacing — it checks the DMA ring gap at entry and
+     * early-returns once the producer has caught up to ~ring-size, so
+     * calling it more often than 1 kHz doesn't overproduce or advance
+     * voices faster than real time. */
+    const uint64_t cycles_per_ms = CPU_FREQ_HZ / 1000u;
+    uint64_t next_tick = read_cycles() + cycles_per_ms;
 
     while (read_cycles() < target) {
         of_check_shutdown();
+        if (read_cycles() >= next_tick) {
+            swmixer_tick();
+            next_tick += cycles_per_ms;
+        }
     }
-
-    if (!(prev & 0x8))
-        __asm__ volatile("csrci mstatus, 0x8");
 }
 
 void of_timer_delay_ms(uint32_t ms) {
