@@ -35,7 +35,7 @@ sbt "runMain vexiiriscv.soc.openfpgaos.GenOpenFpgaVexii \
       --with-lsu-l1 --lsu-l1-sets=512 --lsu-l1-ways=2 \
       --lsu-l1-refill-count=2 --lsu-l1-writeback-count=2 \
       --lsu-l1-store-buffer-slots=4 --lsu-l1-store-buffer-ops=32 \
-      --lsu-software-prefetch --lsu-hardware-prefetch rpt \
+      --lsu-hardware-prefetch none \
       --with-rvZcbm \
       --with-btb --btb-sets=256 --relaxed-btb --relaxed-btb-hit \
       --with-gshare --with-ras \

@@ -129,18 +129,10 @@ SECTIONS {
         __os_bss_end = .;
     } > OSDATA
 
-    /* Memory regions.
-     *
-     * __runtime_stack_top must sit inside the SDRAM PMA region
-     * [0x10000000, 0x14000000) with headroom for speculative reads.
-     * VexiiRiscv's rpt-based LSU hardware prefetcher can stride past the
-     * last real load by several cache lines; if that speculative address
-     * lands past 0x14000000 it triggers a load access fault even though
-     * no committed instruction touched it.  64 KB of guard below the PMA
-     * edge is comfortably more than the prefetcher's reach. */
+    /* Memory regions */
     __os_heap_start = __os_bss_end;
     __save_region = 0x13C00000;
-    __runtime_stack_top = 0x13FF0000;   /* PMA end - 64 KB prefetch guard */
+    __runtime_stack_top = 0x14000000;
     __runtime_stack_size = 512K;
     __runtime_stack_bottom = __runtime_stack_top - __runtime_stack_size;
 
