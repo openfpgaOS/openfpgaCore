@@ -580,13 +580,17 @@ wire        cpu_cram0_word_busy;
 wire        cpu_cram0_word_rdata_valid;
 
 // Bridge-native word-interface (clk_74a).  Bridge writes/reads whose
-// top byte == 0x30 land here; the bridge_addr/bridge_wr_data/bridge_rd
+// top byte == 0x20 land here; the bridge_addr/bridge_wr_data/bridge_rd
 // pins are already clk_74a — no CDC needed.  We just repackage them
 // into a word-rd/wr pulse with an edge detector for bridge_rd.
 //
 // Address encoding: bridge_addr is a byte address into the CRAM0 window.
 // cram0_controller expects a 22-bit word address = byte_addr[23:2].
-wire bridge_cram0_range = (bridge_addr[31:24] == 8'h30);
+// APF bridge targets CRAM0 at 0x20000000 in its own address space
+// (OF_TARGET_CRAM0_BRIDGE).  The CPU-side alias 0x30000000 is a
+// different thing — that's the CPU's MMU view, which lands on
+// cram0_cdc.  Don't confuse the two.
+wire bridge_cram0_range = (bridge_addr[31:24] == 8'h20);
 reg  bridge_rd_prev_74a;
 always @(posedge clk_74a) begin
     bridge_rd_prev_74a <= bridge_rd && bridge_cram0_range;
@@ -610,7 +614,7 @@ assign cpu_cram0_word_busy        = ctrl_word_busy;
 assign cpu_cram0_word_rdata_valid = ctrl_word_rdata_valid;
 
 // Bridge side of the word interface also reads the controller's rdata
-// (used for bridge 0x30xxxxxx read-backs below).
+// (used for bridge 0x20xxxxxx read-backs below).
 wire [31:0] bridge_cram0_rdata      = ctrl_word_rdata;
 wire        bridge_cram0_rdata_valid= ctrl_word_rdata_valid;
 
@@ -943,12 +947,14 @@ always @(posedge clk_74a) begin
         default: begin
             bridge_rd_data <= 0;
         end
-        32'h30xxxxxx: begin
+        32'h20xxxxxx: begin
             // CRAM0 bridge read — controller runs natively in clk_74a
             // so the rdata latch is same-cycle (controller returns data
             // on a word_q_valid pulse; we capture it into bridge_rd_data).
             // When firmware has set cram0_mode = BRIDGE, this is the
             // path that serves APF dataslot readbacks.
+            // Match 0x20xxxxxx — the CRAM0 bridge-space address is
+            // OF_TARGET_CRAM0_BRIDGE (CPU-side is 0x30xxxxxx, different).
             if (bridge_cram0_rdata_valid)
                 bridge_rd_data <= bridge_cram0_rdata;
         end
