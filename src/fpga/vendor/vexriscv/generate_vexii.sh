@@ -49,7 +49,7 @@ sbt "Test/runMain vexiiriscv.Generate \
       --lsu-l1-axi4 \
       --lsu-software-prefetch --lsu-hardware-prefetch rpt \
       --with-btb --btb-sets=512 --relaxed-btb --relaxed-btb-hit \
-      --with-gshare --with-ras \
+      --with-gshare --gshare-bytes=2048 --with-ras \
       --allow-bypass-from=0 \
       --relaxed-src \
       --reset-vector=0 \
