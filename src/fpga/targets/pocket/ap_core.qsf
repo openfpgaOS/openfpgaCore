@@ -692,7 +692,8 @@ set_instance_assignment -name FAST_INPUT_REGISTER ON -to cram0_wait
 # cram1_dq / cram1_wait FAST_INPUT_REGISTER assignments retired with memory-arch v2.
 
 # Source files added after initial commit
-# audio_mixer.v and audio_awe.v retired — CPU-side software mixer replaces them.
+# audio_mixer.v v2 — hardware voice mixer, SDRAM sample fetch (resurrected post-f11811c).
+set_global_assignment -name VERILOG_FILE ../../common/audio_mixer.v
 set_global_assignment -name VERILOG_FILE ../../common/audio_dma.v
 # cram1_controller.v / cram1_phy.sv / axi_cram1_slave.v / bridge_to_cram1.v /
 # cram1_burst_mmio.v / bridge_to_sdram.v retired in memory-arch v2.
