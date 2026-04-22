@@ -1598,8 +1598,8 @@ assign video_hs = vidout_hs;
         .m_local_wlast(cpu_m_local_wlast),
         .m_local_bvalid(cpu_m_local_bvalid),
         .m_local_bresp(cpu_m_local_bresp),
-        .int_m_external(ext_irq),
-        .int_m_timer(timer_irq)
+        .int_m_external(int_m_external_sync),
+        .int_m_timer(int_m_timer_sync)
     );
 
     // AXI4 peripheral slave
@@ -2049,6 +2049,28 @@ wire        timer_irq;
 wire        uart_rx_irq;
 wire        link_irq;
 wire        ext_irq;  // Masked combination from axi_periph_slave
+
+// ────────────────────────────────────────────────────────────────────
+// IRQ synchronizers — the stock VexiiRiscv PrivilegedPlugin latches
+// int_m_timer / int_m_external directly into mip.mtip / mip.meip with
+// NO internal synchronizer (see TilelinkVexiiRiscvFiber.bind(ctrl): in
+// fiber-land the binding goes through InterruptNode which inserts a
+// proper buffer, but we drive the raw Verilog ports).  Our ext_irq is
+// a combinational OR of several sources in axi_periph_slave, which can
+// glitch when irq_mask writes transition or when source edges land
+// near a clock.  A glitch caught by the meip flop turns into a
+// spurious external interrupt that corrupts the interrupted instruction
+// mid-commit (observed as t0/a1 carrying sp's value and faulting at
+// PMA boundaries like 0x8000 / 0x14000000).  Two-flop chain filters
+// combinational glitches and breaks the peripheral→CPU timing path.
+reg [1:0] ext_irq_sync;
+reg [1:0] timer_irq_sync;
+always @(posedge clk_cpu) begin
+    ext_irq_sync   <= {ext_irq_sync[0],   ext_irq};
+    timer_irq_sync <= {timer_irq_sync[0], timer_irq};
+end
+wire int_m_external_sync = ext_irq_sync[1];
+wire int_m_timer_sync    = timer_irq_sync[1];
 
 // Audio DMA (SDRAM → audio_output).  MMIO-programmed base/len/enable
 // from axi_periph_slave; reads via a dedicated AXI master port (M4)

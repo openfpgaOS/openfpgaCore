@@ -8,14 +8,16 @@
 .global _start
 
 _start:
-    /* Check if this is a trap (exception re-entry) or cold boot.
-     * On cold boot, mcause is 0. On exception, mcause is non-zero.
-     * IMPORTANT: must check BEFORE touching sp, otherwise we clobber
-     * the interrupted code's stack pointer on every trap/ecall. */
-    csrr t0, mcause
-    bnez t0, _trap_entry
+    /* Cold boot only.  We do NOT share this entry with the trap
+     * handler — doing so forces us to `csrr t0, mcause` before we can
+     * tell cold-boot-vs-trap apart, and that clobbers the interrupted
+     * code's t0.  On return via mret the restored t0 is the mcause
+     * value, which quietly corrupts any function that was holding a
+     * valid pointer in t0 when the trap fired (most visibly
+     * swmixer_tick, whose inner loop does `mv a3, t0` and then loads
+     * from a3 — so a3 becomes 0x80000007 after any timer IRQ). */
 
-    /* Cold boot only: set up stack pointer */
+    /* Set up stack pointer */
     lui sp, %hi(_stack_top)
     addi sp, sp, %lo(_stack_top)
 
@@ -23,8 +25,10 @@ _start:
     li t0, (3 << 13)
     csrs mstatus, t0
 
-    /* Set mtvec to point to our trap handler (address 0 = _start) */
-    la t0, _start
+    /* Set mtvec to the dedicated trap entry so t0 is preserved on
+     * trap delivery (nothing between mtvec and the save at
+     * _trap_entry touches any GPR). */
+    la t0, _trap_entry
     csrw mtvec, t0
 
     /* Enable machine interrupts: MTIE (bit 7) + MEIE (bit 11) in mie,
@@ -94,13 +98,22 @@ _trap_entry:
     /* Allocate trap frame: 272 bytes */
     addi sp, sp, -272
 
-    /* Save x1-x31 */
+    /* Save x1-x31.
+     *
+     * NOTE: x5 (= t0) MUST be saved before we clobber t0 with `csrr t0,
+     * mscratch` to read the interrupted sp.  Otherwise the saved value
+     * at frame[5] is the outer sp (not the outer t0), and on mret the
+     * interrupted code returns with t0 = sp — quietly corrupting every
+     * function that was mid-flight when the trap fired.  (Spent many
+     * hours chasing phantom "load access fault at 0x8000" in
+     * swmixer_tick because its t0-based accum_l iterator was
+     * restored wrong after each timer IRQ.) */
     sw x1,   4(sp)
+    sw x5,  20(sp)      /* save t0 BEFORE we overwrite it below */
     csrr t0, mscratch
     sw t0,   8(sp)      /* x2 (original sp) */
     sw x3,  12(sp)
     sw x4,  16(sp)
-    sw x5,  20(sp)
     sw x6,  24(sp)
     sw x7,  28(sp)
     sw x8,  32(sp)
