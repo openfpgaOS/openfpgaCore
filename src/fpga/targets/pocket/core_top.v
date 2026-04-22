@@ -1671,6 +1671,17 @@ assign video_hs = vidout_hs;
         .audio_dma_len(audio_dma_len),
         .audio_dma_enable(audio_dma_enable),
         .audio_dma_read_ptr(audio_dma_read_ptr),
+        // Hardware mixer MMIO ↔ audio_mixer
+        .mix_enable            (mixer_enable_mmio),
+        .mix_voice_wr          (mixer_voice_wr_mmio),
+        .mix_voice_sel         (mixer_voice_sel_mmio),
+        .mix_voice_field       (mixer_voice_field_mmio),
+        .mix_voice_wdata       (mixer_voice_wdata_mmio),
+        .mix_irq_clear_wr      (mixer_irq_clear_wr_mmio),
+        .mix_irq_clear         (mixer_irq_clear_mmio),
+        .mix_active_count      (mixer_active_count),
+        .mix_pos_readback      (mixer_pos_readback),
+        .mix_voice_end_pending (mixer_voice_end_pending),
         // CRAM0 ownership mode (0 = bridge, 1 = CPU)
         .cram0_mode            (cram0_mode_cpu),
         // Link MMIO interface
@@ -2119,10 +2130,8 @@ audio_dma audio_dma_inst (
 // ─── HW audio mixer ────────────────────────────────────────────────
 // Per-voice sample fetch from SDRAM via M3 on the arbiter; writes
 // stereo pairs directly into the audio_output dcfifo (parallel with
-// audio_dma for now — MMIO selects which path is live via
-// mixer_enable vs audio_dma_enable).  Voice-table write pins are
-// tied off here and will be driven from axi_periph_slave in
-// hw-mixer phase 4.
+// audio_dma — firmware selects which path is live via MIX_CTRL's
+// mix_enable bit vs audio_dma_enable).
 wire        mixer_arvalid;
 wire        mixer_arready;
 wire [31:0] mixer_araddr;
@@ -2139,20 +2148,25 @@ wire [21:0] mixer_pos_readback;
 wire [31:0] mixer_voice_end_pending;
 wire        mixer_voice_end_irq;
 
-// Phase-3 skeleton wiring.  Everything MMIO-driven is tied off here
-// and hooked up in phase 4.  With mixer_enable = 0 the FSM stalls in
-// S_IDLE and produces no samples, so the dcfifo sees only audio_dma
-// output — the system behaves identically to the pre-mixer path.
+// MMIO-driven voice programming signals (from axi_periph_slave).
+wire        mixer_enable_mmio;
+wire        mixer_voice_wr_mmio;
+wire [4:0]  mixer_voice_sel_mmio;
+wire [3:0]  mixer_voice_field_mmio;
+wire [31:0] mixer_voice_wdata_mmio;
+wire        mixer_irq_clear_wr_mmio;
+wire [31:0] mixer_irq_clear_mmio;
+
 audio_mixer audio_mixer_inst (
     .clk              (clk_cpu),
     .reset_n          (reset_n),
-    .mixer_enable     (1'b0),                 // phase 4 → MMIO bit
+    .mixer_enable     (mixer_enable_mmio),
     .sample_pool_base (32'h13700000),         // OF_TARGET_SAMPLE_BASE
-    .voice_wr         (1'b0),                 // phase 4 → axi_periph_slave
-    .voice_field      (4'd0),
-    .voice_sel        (5'd0),
-    .voice_sel_rd     (5'd0),
-    .voice_wdata      (32'd0),
+    .voice_wr         (mixer_voice_wr_mmio),
+    .voice_field      (mixer_voice_field_mmio),
+    .voice_sel        (mixer_voice_sel_mmio),
+    .voice_sel_rd     (mixer_voice_sel_mmio), // readback uses same latched SEL
+    .voice_wdata      (mixer_voice_wdata_mmio),
     .m_arvalid        (mixer_arvalid),
     .m_arready        (mixer_arready),
     .m_araddr         (mixer_araddr),
@@ -2167,8 +2181,8 @@ audio_mixer audio_mixer_inst (
     .fifo_level       (audio_fifo_level),
     .active_count     (mixer_active_count),
     .pos_readback     (mixer_pos_readback),
-    .irq_clear_wr     (1'b0),                 // phase 4 → MMIO
-    .irq_clear        (32'd0),
+    .irq_clear_wr     (mixer_irq_clear_wr_mmio),
+    .irq_clear        (mixer_irq_clear_mmio),
     .voice_end_pending(mixer_voice_end_pending),
     .voice_end_irq    (mixer_voice_end_irq)
 );
