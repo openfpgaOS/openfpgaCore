@@ -1788,13 +1788,19 @@ assign video_hs = vidout_hs;
         .m1_wdata(cpu_m_sdram_wdata),     .m1_wstrb(cpu_m_sdram_wstrb),
         .m1_wlast(cpu_m_sdram_wlast),
         .m1_bvalid(cpu_m_sdram_bvalid),   .m1_bresp(cpu_m_sdram_bresp),
-        // M2: Audio DMA (read-only, lowest priority).  The ring
-        // carries ~85 ms of buffered audio, so audio can absorb long
-        // arbitration gaps without glitching.
+        // M2: Audio DMA (read-only).  The ring carries ~85 ms of
+        // buffered audio, so audio can absorb arbitration gaps.
         .m2_arvalid(audio_m_arvalid), .m2_arready(audio_m_arready),
         .m2_araddr(audio_m_araddr),   .m2_arlen(audio_m_arlen),
         .m2_rvalid(audio_m_rvalid),   .m2_rdata(audio_m_rdata),
         .m2_rresp(),                  .m2_rlast(audio_m_rlast),
+        // M3: Audio Mixer (read-only, lowest priority) — per-voice
+        // sample fetches from the SDRAM sample pool.  Tied off for
+        // now; will be connected in HW-mixer phase 3.
+        .m3_arvalid(1'b0),            .m3_arready(),
+        .m3_araddr(32'd0),            .m3_arlen(8'd0),
+        .m3_rvalid(),                 .m3_rdata(),
+        .m3_rresp(),                  .m3_rlast(),
         // Slave output (to axi_sdram_slave)
         .s_arvalid(arb_s_arvalid), .s_arready(arb_s_arready),
         .s_araddr(arb_s_araddr),   .s_arlen(arb_s_arlen),
