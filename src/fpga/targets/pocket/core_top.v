@@ -1795,12 +1795,11 @@ assign video_hs = vidout_hs;
         .m2_rvalid(audio_m_rvalid),   .m2_rdata(audio_m_rdata),
         .m2_rresp(),                  .m2_rlast(audio_m_rlast),
         // M3: Audio Mixer (read-only, lowest priority) — per-voice
-        // sample fetches from the SDRAM sample pool.  Tied off for
-        // now; will be connected in HW-mixer phase 3.
-        .m3_arvalid(1'b0),            .m3_arready(),
-        .m3_araddr(32'd0),            .m3_arlen(8'd0),
-        .m3_rvalid(),                 .m3_rdata(),
-        .m3_rresp(),                  .m3_rlast(),
+        // sample fetches from the SDRAM sample pool.
+        .m3_arvalid(mixer_arvalid),   .m3_arready(mixer_arready),
+        .m3_araddr(mixer_araddr),     .m3_arlen(mixer_arlen),
+        .m3_rvalid(mixer_rvalid),     .m3_rdata(mixer_rdata),
+        .m3_rresp(mixer_rresp),       .m3_rlast(mixer_rlast),
         // Slave output (to axi_sdram_slave)
         .s_arvalid(arb_s_arvalid), .s_arready(arb_s_arready),
         .s_araddr(arb_s_araddr),   .s_arlen(arb_s_arlen),
@@ -2117,14 +2116,74 @@ audio_dma audio_dma_inst (
     .fifo_level    (audio_fifo_level)
 );
 
+// ─── HW audio mixer ────────────────────────────────────────────────
+// Per-voice sample fetch from SDRAM via M3 on the arbiter; writes
+// stereo pairs directly into the audio_output dcfifo (parallel with
+// audio_dma for now — MMIO selects which path is live via
+// mixer_enable vs audio_dma_enable).  Voice-table write pins are
+// tied off here and will be driven from axi_periph_slave in
+// hw-mixer phase 4.
+wire        mixer_arvalid;
+wire        mixer_arready;
+wire [31:0] mixer_araddr;
+wire [7:0]  mixer_arlen;
+wire        mixer_rvalid;
+wire [31:0] mixer_rdata;
+wire [1:0]  mixer_rresp;
+wire        mixer_rlast;
+wire        mixer_rready;
+wire        mixer_sample_wr;
+wire [31:0] mixer_sample_data;
+wire [5:0]  mixer_active_count;
+wire [21:0] mixer_pos_readback;
+wire [31:0] mixer_voice_end_pending;
+wire        mixer_voice_end_irq;
+
+// Phase-3 skeleton wiring.  Everything MMIO-driven is tied off here
+// and hooked up in phase 4.  With mixer_enable = 0 the FSM stalls in
+// S_IDLE and produces no samples, so the dcfifo sees only audio_dma
+// output — the system behaves identically to the pre-mixer path.
+audio_mixer audio_mixer_inst (
+    .clk              (clk_cpu),
+    .reset_n          (reset_n),
+    .mixer_enable     (1'b0),                 // phase 4 → MMIO bit
+    .sample_pool_base (32'h13700000),         // OF_TARGET_SAMPLE_BASE
+    .voice_wr         (1'b0),                 // phase 4 → axi_periph_slave
+    .voice_field      (4'd0),
+    .voice_sel        (5'd0),
+    .voice_sel_rd     (5'd0),
+    .voice_wdata      (32'd0),
+    .m_arvalid        (mixer_arvalid),
+    .m_arready        (mixer_arready),
+    .m_araddr         (mixer_araddr),
+    .m_arlen          (mixer_arlen),
+    .m_rvalid         (mixer_rvalid),
+    .m_rdata          (mixer_rdata),
+    .m_rresp          (mixer_rresp),
+    .m_rlast          (mixer_rlast),
+    .m_rready         (mixer_rready),
+    .sample_wr        (mixer_sample_wr),
+    .sample_data      (mixer_sample_data),
+    .fifo_level       (audio_fifo_level),
+    .active_count     (mixer_active_count),
+    .pos_readback     (mixer_pos_readback),
+    .irq_clear_wr     (1'b0),                 // phase 4 → MMIO
+    .irq_clear        (32'd0),
+    .voice_end_pending(mixer_voice_end_pending),
+    .voice_end_irq    (mixer_voice_end_irq)
+);
+
 // cram1_burst_mmio retired with CRAM1 chip; 0x4E000000 MMIO slot is
 // repurposed in v2 as the CRAM0 ownership mode bit (see axi_periph_slave).
 
-// MMIO write and DMA are mutually exclusive — firmware uses one or the
-// other.  Simple OR/mux keeps either path working.  If both fire on the
-// same cycle (shouldn't happen in practice), DMA wins.
-wire        out_sample_wr   = dma_sample_wr | audio_sample_wr;
-wire [31:0] out_sample_data = dma_sample_wr ? dma_sample_data : audio_sample_data;
+// Three-way merge into audio_output: DMA ring, direct CPU MMIO, and
+// the hardware mixer.  At most one is active at a time (firmware picks
+// via control bits), and all three drive `sample_wr` for a single cycle
+// only when their producer has a fresh sample.
+wire        out_sample_wr   = dma_sample_wr | audio_sample_wr | mixer_sample_wr;
+wire [31:0] out_sample_data = dma_sample_wr   ? dma_sample_data :
+                              mixer_sample_wr ? mixer_sample_data :
+                                                audio_sample_data;
 
 audio_output audio_out (
     .clk_sys      (clk_cpu),

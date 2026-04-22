@@ -157,13 +157,23 @@ altsyncram #(
     .eccstatus()
 );
 
-// Shadow active bit — updated whenever CPU writes CTRL (bit 0).  Used
-// to fast-skip inactive voices without a BRAM read.
+// Shadow active bit — updated when CPU writes CTRL (bit 0), or when
+// the FSM retires a one-shot voice (voice_end_clear_mask pulses high
+// for one cycle with bit `cur_voice` set).  CPU write wins if both
+// happen the same cycle.
 reg [31:0] voice_active;
+reg [31:0] voice_end_clear_mask;
 always @(posedge clk) begin
-    if (!reset_n) voice_active <= 32'd0;
-    else if (voice_wr && voice_field == VTBL_CTRL)
-        voice_active[voice_sel] <= voice_wdata[0];
+    if (!reset_n)
+        voice_active <= 32'd0;
+    else begin
+        // Start from "clear any bits the FSM flagged this cycle".
+        reg [31:0] next_active;
+        next_active = voice_active & ~voice_end_clear_mask;
+        if (voice_wr && voice_field == VTBL_CTRL)
+            next_active[voice_sel] = voice_wdata[0];
+        voice_active <= next_active;
+    end
 end
 
 assign voice_end_irq = |voice_end_pending;
@@ -323,9 +333,10 @@ endfunction
 // ============================================================
 always @(posedge clk) begin
     // Defaults each cycle.
-    vtbl_a_wr         <= 1'b0;
-    voice_end_set_mask <= 32'd0;
-    sample_wr         <= 1'b0;
+    vtbl_a_wr            <= 1'b0;
+    voice_end_set_mask   <= 32'd0;
+    voice_end_clear_mask <= 32'd0;
+    sample_wr            <= 1'b0;
 
     if (!reset_n) begin
         state            <= S_IDLE;
@@ -585,8 +596,9 @@ always @(posedge clk) begin
 
     // ---- Voice-end path (one-shot) ----
     S_VOICE_END: begin
-        // Clear active bit.
-        voice_active[cur_voice] <= 1'b0;
+        // Signal active-bit clear and IRQ set for this voice; actual
+        // voice_active update happens in the shadow always block.
+        voice_end_clear_mask[cur_voice] <= 1'b1;
         vtbl_a_addr <= {cur_voice, VTBL_CTRL};
         vtbl_a_data <= 32'd0;
         vtbl_a_wr   <= 1'b1;
