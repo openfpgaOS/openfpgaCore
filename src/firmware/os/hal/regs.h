@@ -221,9 +221,33 @@
 #define   TIMER_CTRL_ENABLE   (1 << 0)
 #define   TIMER_CTRL_W1C_IRQ  (1 << 1)
 
-/* Hardware mixer MMIO (0xC0-0x10C) and AWE coprocessor MMIO (0x110-0x170)
- * were removed along with audio_mixer.v / audio_awe.v.  Audio now uses
- * AUDIO_BASE stereo FIFO + CPU-side software mixer. */
+/* Hardware PCM mixer (0x80, 0xC0-0xF8) — 32 voices, SDRAM sample pool,
+ * linear interp, HW volume ramp, voice-end IRQ.  See audio_mixer.v v2.
+ * Programming model: write MIX_VOICE_SEL with the voice index, then
+ * write each field via its register (one bus cycle each). */
+#define MIX_CTRL             REG32(SYSREG_BASE + 0x80)  /* [0]=enable */
+#define MIX_LAST_SAMPLE      REG32(SYSREG_BASE + 0x84)  /* R: last pushed {L[15:0],R[15:0]} (debug) */
+#define MIX_SAMPLE_COUNT     REG32(SYSREG_BASE + 0x88)  /* R: monotonic sample-push counter (debug) */
+#define MIX_ACTIVE_MASK      REG32(SYSREG_BASE + 0x8C)  /* R: 32-bit active-voice bitmap (debug) */
+#define MIX_VOICE_SEL        REG32(SYSREG_BASE + 0xC0)  /* W: voice index 0-31 */
+#define MIX_VOICE_ADDR       REG32(SYSREG_BASE + 0xC4)  /* W: sample-pool byte offset */
+#define MIX_VOICE_LEN        REG32(SYSREG_BASE + 0xC8)  /* W: sample count */
+#define MIX_VOICE_RATE       REG32(SYSREG_BASE + 0xCC)  /* W: Q16.16 playback rate */
+#define MIX_VOICE_CTRL       REG32(SYSREG_BASE + 0xD0)  /* W: [0]=active [1]=stereo [2]=loop */
+#define MIX_VOICE_POS        REG32(SYSREG_BASE + 0xD4)  /* R: pos_int for selected voice */
+#define MIX_VOICE_VOL_LR     REG32(SYSREG_BASE + 0xD8)  /* W: {vol_r[15:8], vol_l[7:0]} */
+#define MIX_STATUS           REG32(SYSREG_BASE + 0xD8)  /* R: [5:0] active voice count */
+#define MIX_VOICE_LOOP_END   REG32(SYSREG_BASE + 0xE4)  /* W: loop_end (sample index) */
+#define MIX_VOICE_POS_WR     REG32(SYSREG_BASE + 0xE8)  /* W: set pos_int */
+#define MIX_VOICE_LOOP_START REG32(SYSREG_BASE + 0xEC)  /* W: loop_start (sample index) */
+#define MIX_VOICE_VOL_TARGET REG32(SYSREG_BASE + 0xF0)  /* W: {tgt_r[15:8], tgt_l[7:0]} */
+#define MIX_VOICE_VOL_RATE   REG32(SYSREG_BASE + 0xF4)  /* W: ramp step size (0=snap) */
+#define MIX_IRQ_PENDING      REG32(SYSREG_BASE + 0xF8)  /* R: voice-end bitmap */
+#define MIX_IRQ_CLEAR        REG32(SYSREG_BASE + 0xF8)  /* W: W1C bits */
+#define   MIX_CTRL_ENABLE       (1 << 0)
+#define   MIX_CTRL_BIT_ACTIVE   (1 << 0)
+#define   MIX_CTRL_BIT_STEREO   (1 << 1)
+#define   MIX_CTRL_BIT_LOOP     (1 << 2)
 
 /* Link-lite peripheral (0x4D000000) — IRQ-driven, 1-word TX/RX */
 #define LINK_BASE            0x4D000000
@@ -282,21 +306,16 @@
 
 
 /* ======================================================================
- * Audio FIFO (0x4C000000)
+ * Audio FIFO status (0x4C000000) — HW mixer drives the FIFO directly in
+ * v2.  Firmware reads AUDIO_STATUS only for diagnostics; AUDIO_SAMPLE
+ * and AUDIO_DMA_* have been retired (writes no-op, reads return 0).
  * ====================================================================== */
 
 #define AUDIO_BASE          0x4C000000
-#define AUDIO_SAMPLE        REG32(AUDIO_BASE + 0x00)    /* Write: stereo sample */
 #define AUDIO_STATUS        REG32(AUDIO_BASE + 0x00)    /* Read: FIFO status */
 #define   AUDIO_FIFO_LEVEL_MASK  0x3FF                  /* bits [9:0] */
 #define   AUDIO_FIFO_FULL        (1 << 10)
 #define AUDIO_FIFO_DEPTH    1024
-
-/* SDRAM → audio_output DMA (audio_dma.v).  Firmware allocates a ring
- * in cached SDRAM and programs these regs; HW streams it continuously
- * to the dcfifo at 48 kHz so the CPU is off the sample-accurate hot
- * path.  CPU must cbo.clean each block after writing so the DMA
- * master reads the fresh data. */
 
 /* CRAM0 ownership mux (v2 memory arch).  CRAM0 runs on the bridge
  * clock (clk_74a) and is time-sliced between the APF bridge and the
@@ -305,12 +324,6 @@
 #define CRAM0_MODE          REG32(0x4E000000u)
 #define   CRAM0_MODE_BRIDGE (0u << 0)   /* bridge drives CRAM0 controller (default) */
 #define   CRAM0_MODE_CPU    (1u << 0)   /* CPU's CDC drives CRAM0 controller */
-
-#define AUDIO_DMA_BASE      REG32(AUDIO_BASE + 0x04)    /* Write: ring base (SDRAM byte addr) */
-#define AUDIO_DMA_LEN       REG32(AUDIO_BASE + 0x08)    /* Write: ring length (stereo pairs, mult of 8) */
-#define AUDIO_DMA_CTRL      REG32(AUDIO_BASE + 0x0C)    /* Write: bit 0 = enable */
-#define AUDIO_DMA_READ_PTR  REG32(AUDIO_BASE + 0x10)    /* Read: DMA's current pair index */
-#define   AUDIO_DMA_ENABLE  (1u << 0)
 
 /* ======================================================================
  * Link Cable (0x4D000000)
@@ -480,8 +493,7 @@ static inline uint32_t cpu_to_bridge(void *addr) {
 #define OF_REG_SYS_GAME_ID          SYS_GAME_ID
 #define OF_REG_HW_FEATURES          HW_FEATURES
 
-/* Audio registers */
-#define OF_REG_AUDIO_SAMPLE         AUDIO_SAMPLE
+/* Audio registers (v2: HW mixer drives FIFO; only STATUS remains) */
 #define OF_REG_AUDIO_STATUS         AUDIO_STATUS
 /* Link registers */
 #define OF_REG_LINK_BASE            LINK_BASE

@@ -875,9 +875,7 @@ wire [1:0]  cpu_m_cram0_bresp;
 // SRAM CPU path removed — GPU has exclusive direct access (Z-buffer).
 // CRAM1 removed — memory arch v2 retires the chip.
 
-// Audio output interface
-wire        audio_sample_wr;
-wire [31:0] audio_sample_data;
+// Audio FIFO status — HW mixer drives the FIFO directly (v2).
 wire [9:0]  audio_fifo_level;
 wire        audio_fifo_full;
 
@@ -1661,16 +1659,9 @@ assign video_hs = vidout_hs;
         .target_dataslot_length(cpu_target_dataslot_length),
         .target_buffer_param_struct(cpu_target_buffer_param_struct),
         .target_buffer_resp_struct(cpu_target_buffer_resp_struct),
-        // Audio output interface
-        .audio_sample_wr(audio_sample_wr),
-        .audio_sample_data(audio_sample_data),
+        // Audio FIFO status (read-only; HW mixer drives the FIFO directly)
         .audio_fifo_level(audio_fifo_level),
         .audio_fifo_full(audio_fifo_full),
-        // Audio DMA control (SDRAM ring → audio_output)
-        .audio_dma_base(audio_dma_base),
-        .audio_dma_len(audio_dma_len),
-        .audio_dma_enable(audio_dma_enable),
-        .audio_dma_read_ptr(audio_dma_read_ptr),
         // Hardware mixer MMIO ↔ audio_mixer
         .mix_enable            (mixer_enable_mmio),
         .mix_voice_wr          (mixer_voice_wr_mmio),
@@ -1680,8 +1671,11 @@ assign video_hs = vidout_hs;
         .mix_irq_clear_wr      (mixer_irq_clear_wr_mmio),
         .mix_irq_clear         (mixer_irq_clear_mmio),
         .mix_active_count      (mixer_active_count),
+        .mix_active_mask       (mixer_active_mask),
         .mix_pos_readback      (mixer_pos_readback),
         .mix_voice_end_pending (mixer_voice_end_pending),
+        .mix_last_sample       (mixer_last_sample),
+        .mix_sample_count      (mixer_sample_count),
         // CRAM0 ownership mode (0 = bridge, 1 = CPU)
         .cram0_mode            (cram0_mode_cpu),
         // Link MMIO interface
@@ -1799,12 +1793,14 @@ assign video_hs = vidout_hs;
         .m1_wdata(cpu_m_sdram_wdata),     .m1_wstrb(cpu_m_sdram_wstrb),
         .m1_wlast(cpu_m_sdram_wlast),
         .m1_bvalid(cpu_m_sdram_bvalid),   .m1_bresp(cpu_m_sdram_bresp),
-        // M2: Audio DMA (read-only).  The ring carries ~85 ms of
-        // buffered audio, so audio can absorb arbitration gaps.
-        .m2_arvalid(audio_m_arvalid), .m2_arready(audio_m_arready),
-        .m2_araddr(audio_m_araddr),   .m2_arlen(audio_m_arlen),
-        .m2_rvalid(audio_m_rvalid),   .m2_rdata(audio_m_rdata),
-        .m2_rresp(),                  .m2_rlast(audio_m_rlast),
+        // M2: Retired — was the audio_dma ring read port in v1.  In v2
+        // the HW mixer (M3 below) is the sole audio producer; M2 tied
+        // off so the arbiter sees no requests on this slot.  A future
+        // pass can reduce the arbiter to 3 read masters.
+        .m2_arvalid(1'b0),            .m2_arready(),
+        .m2_araddr(32'd0),            .m2_arlen(8'd0),
+        .m2_rvalid(),                 .m2_rdata(),
+        .m2_rresp(),                  .m2_rlast(),
         // M3: Audio Mixer (read-only, lowest priority) — per-voice
         // sample fetches from the SDRAM sample pool.
         .m3_arvalid(mixer_arvalid),   .m3_arready(mixer_arready),
@@ -2088,50 +2084,10 @@ end
 wire int_m_external_sync = ext_irq_sync[1];
 wire int_m_timer_sync    = timer_irq_sync[1];
 
-// Audio DMA (SDRAM → audio_output).  MMIO-programmed base/len/enable
-// from axi_periph_slave; reads via a dedicated AXI master port (M4)
-// on the SDRAM arbiter so it never contends with the CPU or bridge on
-// CRAM1.  Output muxed into audio_output below so direct CPU writes
-// to AUDIO_SAMPLE still work when DMA is disabled.
-wire        dma_sample_wr;
-wire [31:0] dma_sample_data;
-wire [13:0] audio_dma_read_ptr;
-wire [31:0] audio_dma_base;
-wire [13:0] audio_dma_len;
-wire        audio_dma_enable;
-
-wire        audio_m_arvalid;
-wire        audio_m_arready;
-wire [31:0] audio_m_araddr;
-wire [7:0]  audio_m_arlen;
-wire        audio_m_rvalid;
-wire [31:0] audio_m_rdata;
-wire        audio_m_rlast;
-
-audio_dma audio_dma_inst (
-    .clk           (clk_cpu),
-    .reset_n       (reset_n),
-    .enable        (audio_dma_enable),
-    .ring_base     (audio_dma_base),
-    .ring_len      (audio_dma_len),
-    .read_ptr      (audio_dma_read_ptr),
-    .m_axi_arvalid (audio_m_arvalid),
-    .m_axi_arready (audio_m_arready),
-    .m_axi_araddr  (audio_m_araddr),
-    .m_axi_arlen   (audio_m_arlen),
-    .m_axi_rvalid  (audio_m_rvalid),
-    .m_axi_rdata   (audio_m_rdata),
-    .m_axi_rlast   (audio_m_rlast),
-    .sample_wr     (dma_sample_wr),
-    .sample_data   (dma_sample_data),
-    .fifo_level    (audio_fifo_level)
-);
-
 // ─── HW audio mixer ────────────────────────────────────────────────
 // Per-voice sample fetch from SDRAM via M3 on the arbiter; writes
-// stereo pairs directly into the audio_output dcfifo (parallel with
-// audio_dma — firmware selects which path is live via MIX_CTRL's
-// mix_enable bit vs audio_dma_enable).
+// stereo pairs directly into the audio_output dcfifo.  (audio_dma
+// retired in v2 — see line 2199 comment block.)
 wire        mixer_arvalid;
 wire        mixer_arready;
 wire [31:0] mixer_araddr;
@@ -2144,9 +2100,12 @@ wire        mixer_rready;
 wire        mixer_sample_wr;
 wire [31:0] mixer_sample_data;
 wire [5:0]  mixer_active_count;
+wire [31:0] mixer_active_mask;
 wire [21:0] mixer_pos_readback;
 wire [31:0] mixer_voice_end_pending;
 wire        mixer_voice_end_irq;
+wire [31:0] mixer_last_sample;
+wire [31:0] mixer_sample_count;
 
 // MMIO-driven voice programming signals (from axi_periph_slave).
 wire        mixer_enable_mmio;
@@ -2184,28 +2143,29 @@ audio_mixer audio_mixer_inst (
     .irq_clear_wr     (mixer_irq_clear_wr_mmio),
     .irq_clear        (mixer_irq_clear_mmio),
     .voice_end_pending(mixer_voice_end_pending),
-    .voice_end_irq    (mixer_voice_end_irq)
+    .voice_end_irq    (mixer_voice_end_irq),
+    .last_sample_data (mixer_last_sample),
+    .sample_count     (mixer_sample_count),
+    .voice_active_mask(mixer_active_mask)
 );
 
 // cram1_burst_mmio retired with CRAM1 chip; 0x4E000000 MMIO slot is
 // repurposed in v2 as the CRAM0 ownership mode bit (see axi_periph_slave).
 
-// Three-way merge into audio_output: DMA ring, direct CPU MMIO, and
-// the hardware mixer.  At most one is active at a time (firmware picks
-// via control bits), and all three drive `sample_wr` for a single cycle
-// only when their producer has a fresh sample.
-wire        out_sample_wr   = dma_sample_wr | audio_sample_wr | mixer_sample_wr;
-wire [31:0] out_sample_data = dma_sample_wr   ? dma_sample_data :
-                              mixer_sample_wr ? mixer_sample_data :
-                                                audio_sample_data;
-
+// v2 audio path: HW mixer is the sole producer into audio_output.
+// audio_dma retired (v1 pre-mixed-ring DMA) and the AUDIO_SAMPLE
+// direct-MMIO path retired — both fully deleted from the netlist.
+// The previous three-way mux had `audio_sample_data` as its default
+// branch, so a stale register latched a constant DC pair into the
+// FIFO whenever the mixer wasn't writing (observed: 00b1/0020 stuck
+// through an entire run).
 audio_output audio_out (
     .clk_sys      (clk_cpu),
     .clk_audio    (clk_core_12288),
     .reset_n      (reset_n),
 
-    .sample_wr    (out_sample_wr),
-    .sample_data  (out_sample_data),
+    .sample_wr    (mixer_sample_wr),
+    .sample_data  (mixer_sample_data),
     .fifo_level   (audio_fifo_level),
     .fifo_full    (audio_fifo_full),
 

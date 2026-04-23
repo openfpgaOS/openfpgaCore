@@ -448,7 +448,6 @@ wire [31:0] cont2_key = 32'b0;
 wire [31:0] cont2_joy = 32'b0;
 wire [15:0] cont2_trig = 16'b0;
 wire [31:0] app_id = 32'b0;
-wire [13:0] audio_dma_read_ptr = 14'b0;
 
 axi_periph_slave periph (
     .clk    (clk_cpu),
@@ -496,15 +495,8 @@ axi_periph_slave periph (
     .target_buffer_param_struct(),
     .target_buffer_resp_struct (),
 
-    .audio_sample_wr  (),
-    .audio_sample_data(),
     .audio_fifo_level (audio_fifo_level),
     .audio_fifo_full  (audio_fifo_full),
-
-    .audio_dma_base  (),
-    .audio_dma_len   (),
-    .audio_dma_enable(),
-    .audio_dma_read_ptr(audio_dma_read_ptr),
 
     .cram0_mode(cram0_mode_cpu),
 

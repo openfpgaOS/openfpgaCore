@@ -76,7 +76,6 @@ HAL_SRCS = $(HAL_DIR)/hal.c \
            $(HAL_DIR)/platform.c \
            $(HAL_DIR)/cache.c \
            $(HAL_DIR)/mixer.c \
-           $(HAL_DIR)/swmixer.c \
            $(HAL_DIR)/net.c \
            $(HAL_DIR)/link.c \
            $(HAL_DIR)/codec.c \

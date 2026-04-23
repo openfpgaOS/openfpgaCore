@@ -100,4 +100,22 @@ void of_mixer_set_filter(int voice, int cutoff_q016, int q, int enable);
 void *of_mixer_alloc_samples(uint32_t size);
 void of_mixer_free_samples(void);
 
+/* Save/restore mstatus.MIE around MIX_VOICE_SEL + MIX_VOICE_<field>
+ * sequences.  The 1 kHz timer ISR runs of_midi_pump which writes
+ * MIX_VOICE_SEL; a preempted sequence lands later writes on the
+ * wrong voice.  Any code writing SEL + another voice register must
+ * wrap the pair with save/restore. */
+static inline uint32_t of_mixer_irq_save(void)
+{
+    uint32_t prev;
+    __asm__ volatile("csrrci %0, mstatus, 0x8" : "=r"(prev));
+    return prev;
+}
+
+static inline void of_mixer_irq_restore(uint32_t prev)
+{
+    if (prev & 0x8u)
+        __asm__ volatile("csrrsi zero, mstatus, 0x8");
+}
+
 #endif /* OFOS_MIXER_H */

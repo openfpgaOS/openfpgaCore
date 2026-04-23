@@ -81,20 +81,12 @@ module axi_periph_slave (
     output reg  [31:0] target_buffer_param_struct,
     output reg  [31:0] target_buffer_resp_struct,
 
-    // Audio output interface — writes go straight to the audio_output dcfifo.
-    // CPU polls AUDIO_FIFO_LEVEL (read of AUDIO_BASE+0x00) to check for room
-    // before writing the next stereo sample pair (32 bits {L[15:0], R[15:0]}).
-    output reg         audio_sample_wr,
-    output reg  [31:0] audio_sample_data,
+    // Audio FIFO status.  v2 routes the HW mixer directly into
+    // audio_output, so the slave no longer drives sample writes — it
+    // only exposes fifo_level/full for readback (largely informational
+    // now; mixer manages its own rate-limiting).
     input wire  [9:0]  audio_fifo_level,
     input wire         audio_fifo_full,
-
-    // Audio DMA control (SDRAM ring → audio_output).  Firmware programs
-    // base + length + enable; HW stream consumes the ring continuously.
-    output reg  [31:0] audio_dma_base,       // SDRAM byte address of ring[0]
-    output reg  [13:0] audio_dma_len,        // ring length in stereo pairs (= words)
-    output reg         audio_dma_enable,
-    input  wire [13:0] audio_dma_read_ptr,   // DMA's current position (readback)
 
     // CRAM0 ownership mode register (0x4E000000 bit 0):
     //   0 = bridge owns CRAM0 (APF load/save transfers drive the chip)
@@ -116,8 +108,11 @@ module axi_periph_slave (
     output reg         mix_irq_clear_wr,
     output reg  [31:0] mix_irq_clear,
     input  wire [5:0]  mix_active_count,
+    input  wire [31:0] mix_active_mask,     // 32-bit active voice bitmap (debug)
     input  wire [21:0] mix_pos_readback,
     input  wire [31:0] mix_voice_end_pending,
+    input  wire [31:0] mix_last_sample,
+    input  wire [31:0] mix_sample_count,
 
     // Link MMIO interface
     output reg         link_reg_wr,
@@ -870,6 +865,9 @@ always @(*) begin
         7'b0_100111: sysreg_rdata = {31'b0, vsync_irq_pending};   // VSYNC_IRQ_PENDING (0x9C)
         // Hardware mixer readbacks
         7'b0_100000: sysreg_rdata = {31'b0, mix_enable};              // MIX_CTRL (0x80)
+        7'b0_100001: sysreg_rdata = mix_last_sample;                 // MIX_LAST_SAMPLE (0x84) debug
+        7'b0_100010: sysreg_rdata = mix_sample_count;                // MIX_SAMPLE_COUNT (0x88) debug
+        7'b0_100011: sysreg_rdata = mix_active_mask;                 // MIX_ACTIVE_MASK (0x8C) debug
         7'b0_110101: sysreg_rdata = {10'b0, mix_pos_readback};         // MIX_VOICE_POS (0xD4)
         7'b0_110110: sysreg_rdata = {26'b0, mix_active_count};          // MIX_STATUS    (0xD8)
         7'b0_111110: sysreg_rdata = mix_voice_end_pending;              // MIX_IRQ_PENDING (0xF8)
@@ -956,13 +954,8 @@ wire [31:0] uart_rdata = (req_addr[3:2] == 2'b00) ?
  *   0x00: {21'b0, fifo_full, fifo_level[9:0]}
  *   0x04: DMA ring_base (readback)
  *   0x08: DMA ring_len  (readback)
- *   0x0C: {31'b0, DMA enable}
- *   0x10: DMA read_ptr  (live — consumer position) */
+ *   0x04/0x08/0x0C/0x10: retired DMA registers, read as 0 */
 wire [31:0] audio_rdata = (req_addr[4:2] == 3'd0) ? {21'b0, audio_fifo_full, audio_fifo_level} :
-                          (req_addr[4:2] == 3'd1) ? audio_dma_base :
-                          (req_addr[4:2] == 3'd2) ? {18'b0, audio_dma_len} :
-                          (req_addr[4:2] == 3'd3) ? {31'b0, audio_dma_enable} :
-                          (req_addr[4:2] == 3'd4) ? {18'b0, audio_dma_read_ptr} :
                           32'h0;
 
 /* CRAM0 ownership mode read decode:
@@ -1119,11 +1112,6 @@ always @(posedge clk or posedge reset) begin
         reg_uart <= 0;
 
         sysreg_wr_fire <= 0;
-        audio_sample_wr <= 0;
-        audio_sample_data <= 0;
-        audio_dma_base <= 32'd0;
-        audio_dma_len <= 14'd0;
-        audio_dma_enable <= 1'b0;
         cram0_mode <= 1'b0;     // bridge owns CRAM0 at reset
         uart_tx_fifo_we  <= 0;
         uart_tx_fifo_din <= 0;
@@ -1144,7 +1132,6 @@ always @(posedge clk or posedge reset) begin
         if (s_axi_rvalid && s_axi_rready) s_axi_rvalid <= 1'b0;
         if (s_axi_bvalid && s_axi_bready) s_axi_bvalid <= 1'b0;
         sysreg_wr_fire <= 0;
-        audio_sample_wr <= 0;
         uart_tx_fifo_we <= 0;
         link_reg_wr <= 0;
         link_reg_rd <= 0;
@@ -1214,22 +1201,11 @@ always @(posedge clk or posedge reset) begin
                         state <= S_PERIPH_WR;
                         if (aw_dec_sysreg && |s_axi_wstrb)
                             sysreg_wr_fire <= 1;
-                        if (aw_dec_audio && |s_axi_wstrb) begin
-                            /* AUDIO_BASE + 0x00: stereo sample push to dcfifo.
-                             * AUDIO_BASE + 0x04: DMA ring_base (SDRAM byte addr).
-                             * AUDIO_BASE + 0x08: DMA ring_len (stereo pairs).
-                             * AUDIO_BASE + 0x0C: DMA enable (bit 0). */
-                            case (aw_addr[4:2])
-                                3'd0: begin
-                                    audio_sample_wr   <= 1;
-                                    audio_sample_data <= s_axi_wdata;
-                                end
-                                3'd1: audio_dma_base   <= s_axi_wdata;
-                                3'd2: audio_dma_len    <= s_axi_wdata[13:0];
-                                3'd3: audio_dma_enable <= s_axi_wdata[0];
-                                default: ;
-                            endcase
-                        end
+                        /* AUDIO_BASE writes retired in v2.  The HW mixer
+                         * drives audio_output directly via MIX_* registers.
+                         * aw_dec_audio address range left in place so that
+                         * legacy app writes to 0x4C000000 simply no-op
+                         * rather than raising a bus fault. */
                         if (aw_dec_cram0 && |s_axi_wstrb && aw_addr[3:2] == 2'd0) begin
                             /* CRAM0_MODE + 0x00: update owner bit. */
                             cram0_mode <= s_axi_wdata[0];
@@ -1340,18 +1316,9 @@ always @(posedge clk or posedge reset) begin
                     state <= S_PERIPH_WR;
                     if (reg_sysreg && |s_axi_wstrb)
                         sysreg_wr_fire <= 1;
-                    if (reg_audio && |s_axi_wstrb) begin
-                        case (req_addr[4:2])
-                            3'd0: begin
-                                audio_sample_wr   <= 1;
-                                audio_sample_data <= s_axi_wdata;
-                            end
-                            3'd1: audio_dma_base   <= s_axi_wdata;
-                            3'd2: audio_dma_len    <= s_axi_wdata[13:0];
-                            3'd3: audio_dma_enable <= s_axi_wdata[0];
-                            default: ;
-                        endcase
-                    end
+                    /* AUDIO_BASE writes retired in v2 — see the earlier
+                     * branch above.  No-op to stay compatible with any
+                     * legacy app probing 0x4C0000xx. */
                     if (reg_cram0 && |s_axi_wstrb && req_addr[3:2] == 2'd0) begin
                         cram0_mode <= s_axi_wdata[0];
                     end

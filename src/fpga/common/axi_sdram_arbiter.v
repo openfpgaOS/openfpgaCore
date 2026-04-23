@@ -4,21 +4,18 @@
 // Routes 4 AXI4 masters to 1 AXI4 slave (axi_sdram_slave):
 //   M0 = GPU      (span reads + framebuffer writes, merged upstream)
 //   M1 = CPU      (i + d + p merged through cpu_target_port)
-//   M2 = AudioDMA (audio_dma ring → audio_output, read-only) — legacy,
-//                  retired once the HW mixer takes over (phase 3)
+//   M2 = retired  (was AudioDMA; tied off at core_top — HW mixer now
+//                  drives audio directly).  Slot kept for arbiter ABI
+//                  stability; a future pass can drop it to 3 masters.
 //   M3 = AudioMix (audio_mixer per-voice sample fetch, read-only)
 //
-// Fixed priority: GPU > CPU > AudioDMA > AudioMix.
+// Fixed priority: GPU > CPU > (M2 unused) > AudioMix.
 //
 // CPU fairness counter (unchanged): any GPU/audio grant while the CPU
 // has a pending request increments a deficit; once it reaches
 // CPU_FAIR_THRESHOLD the CPU is granted unconditionally.  Audio is
 // BELOW CPU in priority, so it never contributes to the deficit —
 // matching the old 5-master layout where audio also sat below CPU.
-//
-// The audio DMA ring buffers ~85 ms of buffered samples so audio can
-// absorb arbitration delays without glitching.  This mirrors the old
-// behaviour; audio was "M4" in the 5-master layout.
 //
 // Single outstanding transaction — grants one master at a time, holds
 // until read completes (R.rlast) or write completes (B.bvalid).

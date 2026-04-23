@@ -646,8 +646,16 @@ static long sys_openat(long dirfd, long pathname, long flags, long mode) {
     /* Search file slot registry by basename (case-insensitive) */
     int slot = file_slot_lookup(path);
     if (slot >= 0) {
+        /* Reject registered names whose slot is unbacked (size == 0).
+         * Without this, fopen returns a valid FD and subsequent reads
+         * serve stale bytes from the I/O cache's bounce buffer. */
+        long sz = of_file_size(slot);
+        if (sz <= 0) {
+            fd_table[fd].in_use = 0;
+            return -ENOENT;
+        }
         f->slot_id = (uint32_t)slot;
-        f->size = 0;  /* Resolved lazily on first read */
+        f->size = (uint32_t)sz;
         return fd;
     }
 

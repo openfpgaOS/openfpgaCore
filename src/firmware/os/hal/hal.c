@@ -18,8 +18,10 @@ void of_init(void) {
     of_disk_init();
     of_file_init();
 
-    if (features & HW_FEAT_MIXER)
+    if (features & HW_FEAT_MIXER) {
+        of_mixer_init(32, 48000);
         of_audio_init();
+    }
     if (features & HW_FEAT_SAVE_SLOTS)
         of_save_init();
     if (features & HW_FEAT_ANALOGIZER)

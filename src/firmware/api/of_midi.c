@@ -332,13 +332,13 @@ int of_midi_init(void) {
     M.playing       = 0;
     M.paused        = 0;
     M.tick_accum_us = 0;
-    /* Default below full-scale to give the CPU mixer headroom for dense
-     * polyphony.  swmixer_tick() sums voices into s32 accumulators and
-     * saturates to s16 — at master=255 a 20-28 voice MIDI passage hard-
-     * clips at peaks and sounds like voice "breakup".  128 halves the
-     * per-voice peak so roughly 4× more concurrent voices fit without
-     * clipping.  Apps can raise it with of_midi_set_volume() if they
-     * know polyphony is low. */
+    /* Default below full-scale to give the mixer headroom for dense
+     * polyphony.  The HW mixer sums voices into s32 accumulators and
+     * saturates to s16 — at master=255 a 20-28 voice MIDI passage
+     * hard-clips at peaks and sounds like voice "breakup".  128 halves
+     * the per-voice peak so roughly 4× more concurrent voices fit
+     * without clipping.  Apps can raise it with of_midi_set_volume()
+     * if they know polyphony is low. */
     M.master_volume = 128;
     smp_voice_set_master_volume(M.master_volume);
     return OF_MIDI_OK;

@@ -105,8 +105,17 @@ int bank_preload(void) {
         return -4;
     }
 
-    /* Flush D-cache so the mixer DMA sees the data via the bridge alias. */
-    of_cache_flush();
+    /* Range-based cbo.flush (writeback + invalidate) of just the bank
+     * buffer.  The old of_cache_flush() relied on conflict-eviction over
+     * the top 64 KB of SDRAM, which only evicts one way of a 2-way LRU
+     * set reliably — leaving ~half of the bank still dirty in L1.  The
+     * HW mixer reads SDRAM on its own AXI master and would see zeros
+     * for any line that never made it out of cache.  cbo.flush is
+     * line-granular and guaranteed per Zicbom.  Follow with fence.i to
+     * also invalidate I-cache in case code sits in this region (no-op
+     * for data banks). */
+    of_cache_flush_range(buf, (uint32_t)sz);
+    of_cache_invalidate_icache();
 
     const ofsf_header_t *hdr = (const ofsf_header_t *)buf;
     if (hdr->magic != OFSF_MAGIC || hdr->version != OFSF_VERSION) {

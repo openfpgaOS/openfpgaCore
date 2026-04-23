@@ -57,13 +57,11 @@ extern void (*timer_callback_ptr)(void);  /* from syscall.c */
 
 static void svc_timer_set_callback(void (*cb)(void), uint32_t hz) {
     /* Pin the hardware timer at 1 kHz regardless of the app's requested
-     * rate.  swmixer_tick runs in the same ISR and MUST fire at 1 kHz
-     * (produces one 48-sample audio block per tick = 48000/sec, which
-     * matches audio_output's 48 kHz I2S drain).  Apps like of_midi that
-     * ask for 50 Hz still work correctly because of_midi_pump accumulates
-     * elapsed time and fires smp_voice_tick the appropriate number of
-     * times per wake — a faster wake rate just means one smp_voice_tick
-     * per pump instead of 20. */
+     * rate.  The HW audio mixer runs autonomously so it no longer drives
+     * the tick, but of_smp_tables still bakes MIDI envelopes at 1 kHz —
+     * the pump accumulates elapsed time and fires smp_voice_tick the
+     * appropriate number of times per wake, so 50 Hz MIDI callbacks
+     * still resolve correctly on a 1 kHz hardware tick. */
     (void)hz;
     timer_callback_ptr = cb;
     if (cb) {

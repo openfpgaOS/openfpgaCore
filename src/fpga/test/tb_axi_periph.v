@@ -119,8 +119,6 @@ axi_periph_slave dut (
     .target_buffer_param_struct(),
     .target_buffer_resp_struct (),
 
-    .audio_sample_wr  (),
-    .audio_sample_data(),
     .audio_fifo_level (audio_fifo_level),
     .audio_fifo_full  (audio_fifo_full),
 
