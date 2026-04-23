@@ -879,8 +879,12 @@ end
 // Peripheral read data mux
 // ============================================
 // ============================================
-// UART RX FIFO — 1024-byte buffer so CPU doesn't have to read every byte within 10μs
+// UART RX FIFO — 1024-byte buffer so CPU doesn't have to read every byte within 10μs.
+// Pin to M10K: without the hint Quartus can fall back to MLAB under ALM pressure
+// (each MLAB burns an ALM pair), so at 82% ALM util this 8 Kb array adds ~20-30
+// ALMs needlessly.  One M10K block is trivially cheap here.
 // ============================================
+(* ramstyle = "M10K" *)
 reg [7:0]  uart_rx_fifo [0:1023];
 reg [9:0]  uart_rx_wr_ptr;
 reg [9:0]  uart_rx_rd_ptr;

@@ -701,6 +701,28 @@ int smp_voice_note_on(const ofsf_zone_t *zone, int midi_ch, int note,
 
     kill_exclusive_class(midi_ch, zone->exclusive_class);
 
+    /* Same-channel same-note stealing: if this MIDI note is already
+     * sounding on this channel (envelope hasn't reached ENV_DONE),
+     * force-release the old voice before allocating a fresh one.
+     * Without this, rapid retriggers of the same note (common for
+     * sustained guitar/pad parts in Doom's MIDI) stack N copies of the
+     * same pitch at slightly different envelope phases — sounds like
+     * chorus/phaser/reverb instead of clean retrigger.  Drum channel
+     * (ch 9) is skipped because percussion zones often WANT overlap
+     * (hi-hat bounce etc.) and use SF2 exclusive_class for cutoffs
+     * when needed. */
+    if (midi_ch != 9) {
+        for (int i = 0; i < SMP_MAX_VOICES; i++) {
+            smp_voice_t *ov = &voices[i];
+            if (ov->active && ov->active != STEAL_PENDING &&
+                ov->midi_ch == midi_ch && ov->note == note &&
+                ov->vol_env.stage != ENV_DONE) {
+                env_start_release(&ov->vol_env, ov->zone->vol_release_ticks);
+                env_start_release(&ov->mod_env, ov->zone->mod_release_ticks);
+            }
+        }
+    }
+
     int idx = voice_alloc();
     if (idx < 0)
         return -1;
@@ -752,6 +774,8 @@ int smp_voice_note_on(const ofsf_zone_t *zone, int midi_ch, int note,
 
     int mhv = of_mixer_play(sample_ptr, zone->sample_length, sr, 0, 200);
     if (mhv < 0) { v->active = 0; return -1; }
+
+
     v->mixer_voice = mhv;
     of_mixer_set_rate_raw(mhv, v->base_rate_fp16);
     SMP_TRACE(SMP_TRACE_OP_RATE, mhv, v->base_rate_fp16, 0, 0);

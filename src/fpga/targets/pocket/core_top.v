@@ -1670,12 +1670,12 @@ assign video_hs = vidout_hs;
         .mix_voice_wdata       (mixer_voice_wdata_mmio),
         .mix_irq_clear_wr      (mixer_irq_clear_wr_mmio),
         .mix_irq_clear         (mixer_irq_clear_mmio),
-        .mix_active_count      (mixer_active_count),
-        .mix_active_mask       (mixer_active_mask),
-        .mix_pos_readback      (mixer_pos_readback),
-        .mix_voice_end_pending (mixer_voice_end_pending),
-        .mix_last_sample       (mixer_last_sample),
-        .mix_sample_count      (mixer_sample_count),
+        .mix_active_count      (mixer_active_count_r),
+        .mix_active_mask       (mixer_active_mask_r),
+        .mix_pos_readback      (mixer_pos_readback_r),
+        .mix_voice_end_pending (mixer_voice_end_pending_r),
+        .mix_last_sample       (mixer_last_sample_r),
+        .mix_sample_count      (mixer_sample_count_r),
         // CRAM0 ownership mode (0 = bridge, 1 = CPU)
         .cram0_mode            (cram0_mode_cpu),
         // Link MMIO interface
@@ -1716,7 +1716,7 @@ assign video_hs = vidout_hs;
         .gpu_reg_wr(gpu_reg_wr),
         .gpu_reg_addr(gpu_reg_addr),
         .gpu_reg_wdata(gpu_reg_wdata),
-        .gpu_reg_rdata(gpu_reg_rdata)
+        .gpu_reg_rdata(gpu_reg_rdata_r)
     );
 
     // DMA engine removed — apps use CPU memcpy instead
@@ -2107,6 +2107,29 @@ wire        mixer_voice_end_irq;
 wire [31:0] mixer_last_sample;
 wire [31:0] mixer_sample_count;
 
+/* 1-cycle register stage between audio_mixer status outputs and
+ * axi_periph_slave read mux.  The sysreg read mux in the periph slave
+ * is 128 entries wide and already fans in from GPU, timer, controllers
+ * and many other IPs; without a boundary register, Quartus was forced
+ * to cluster audio_mixer and axi_periph_slave in the same LAB region,
+ * which made the FPU critical path in VexiiRiscv worse because the
+ * CPU had to be squeezed in too.  Firmware MMIO reads already incur
+ * multi-cycle AXI handshake latency, so +1 cycle here is invisible. */
+reg [5:0]  mixer_active_count_r;
+reg [31:0] mixer_active_mask_r;
+reg [21:0] mixer_pos_readback_r;
+reg [31:0] mixer_voice_end_pending_r;
+reg [31:0] mixer_last_sample_r;
+reg [31:0] mixer_sample_count_r;
+always @(posedge clk_cpu) begin
+    mixer_active_count_r      <= mixer_active_count;
+    mixer_active_mask_r       <= mixer_active_mask;
+    mixer_pos_readback_r      <= mixer_pos_readback;
+    mixer_voice_end_pending_r <= mixer_voice_end_pending;
+    mixer_last_sample_r       <= mixer_last_sample;
+    mixer_sample_count_r      <= mixer_sample_count;
+end
+
 // MMIO-driven voice programming signals (from axi_periph_slave).
 wire        mixer_enable_mmio;
 wire        mixer_voice_wr_mmio;
@@ -2181,6 +2204,13 @@ wire        gpu_reg_wr;
 wire [3:0]  gpu_reg_addr;
 wire [31:0] gpu_reg_wdata;
 wire [31:0] gpu_reg_rdata;
+
+/* Same fitter-freedom register as the mixer boundary — breaks the
+ * combinational cone from gpu_core's register-file read to the sysreg
+ * read mux in axi_periph_slave.  1-cycle latency, invisible to firmware
+ * behind the AXI read handshake. */
+reg  [31:0] gpu_reg_rdata_r;
+always @(posedge clk_cpu) gpu_reg_rdata_r <= gpu_reg_rdata;
 
 // GPU AXI4 read master (M0 on SDRAM arbiter)
 wire        gpu_rd_arvalid;

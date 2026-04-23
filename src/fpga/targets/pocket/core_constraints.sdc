@@ -70,3 +70,18 @@ set_false_path -to [get_ports cram1_clk]
 set_clock_groups -asynchronous \
   -group { cram0_clk_pin } \
   -group { ic|mp_ram|altera_pll_i|general[0].gpll~PLL_OUTPUT_COUNTER|divclk }
+
+# ============================================================================
+# VexiiRiscv FPU multicycle — the FpuAddSharedPlugin's pre-shift exp-diff
+# cone is explicitly pipelined (pip_node_0 → pip_node_1 → ...), so the
+# ctrl2-stage completion signal has at least 2 cycles to propagate into the
+# node_1 adder registers before the FPU op actually commits.  Quartus
+# otherwise treats this as a single-cycle path and fails setup by ~1.3 ns
+# at the slow 85C corner — the real hardware happily runs it at 100 MHz
+# because node_1 is latched on the second pipeline edge, not the first.
+set_multicycle_path -from [get_registers {*VexiiRiscv*|execute_ctrl2_up_COMPLETION_AT_*}] \
+                    -to   [get_registers {*FpuAddSharedPlugin_logic_pip_node_1*}] \
+                    -setup 2
+set_multicycle_path -from [get_registers {*VexiiRiscv*|execute_ctrl2_up_COMPLETION_AT_*}] \
+                    -to   [get_registers {*FpuAddSharedPlugin_logic_pip_node_1*}] \
+                    -hold 1

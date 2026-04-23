@@ -194,16 +194,6 @@ static int play_internal(const void *pcm, uint32_t sample_count,
     extern volatile uint32_t play_counter_diag;
     play_counter_diag++;
 
-    /* DIAG: log any play with suspiciously short length. */
-    if (sample_count < 200) {
-        static int short_diag = 0;
-        if (short_diag < 20) {
-            of_term_printf("[SHORT play v=%d len=%u sr=%u]\n",
-                           voice, (unsigned)sample_count, (unsigned)sample_rate);
-            short_diag++;
-        }
-    }
-
     uint32_t rate = ((uint64_t)sample_rate << 16) / MIXER_OUTPUT_RATE;
 
     /* Force the sample data out to SDRAM before the HW mixer reads it.
@@ -331,16 +321,6 @@ void of_mixer_pump_auto(void) {}
 void of_mixer_set_loop(int voice, int loop_start, int loop_end)
 {
     if (!voice_in_range(voice)) return;
-
-    /* DIAG: report first 10 loop settings to see if loop_end is ~51. */
-    {
-        static int loop_diag = 0;
-        if (loop_diag < 10) {
-            of_term_printf("[setloop v=%d ls=%d le=%d]\n",
-                           voice, loop_start, loop_end);
-            loop_diag++;
-        }
-    }
 
     uint8_t cur = ctrl_shadow[voice];
     if (loop_start < 0) {
