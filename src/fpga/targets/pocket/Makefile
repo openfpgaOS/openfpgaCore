@@ -141,8 +141,11 @@ firmware: bootloader os
 
 # ── FPGA compile ─────────────────────────────────────────────────────
 
-# Variant defines — set via VARIANT_DEFS for core variant builds.
-# Example: VARIANT_DEFS="EXCLUDE_LINK" makes a lite build.
+# Optional build knobs forwarded to Quartus as --verilog_macro=<NAME>.
+# The GPU is a single-config core — VARIANT_DEFS is now used only for
+# optional debug flags like GPU_DEBUG / GPU_STATS (see gpu_config.vh).
+# Example: VARIANT_DEFS="GPU_DEBUG GPU_STATS" turns on the stray-write
+# latch + pixel/span counters.
 VARIANT_DEFS ?=
 VERILOG_MACROS = $(foreach d,$(VARIANT_DEFS),--verilog_macro="$(d)")
 
@@ -151,12 +154,14 @@ VERILOG_MACROS = $(foreach d,$(VARIANT_DEFS),--verilog_macro="$(d)")
 # Quartus full compile (rm -rf db incremental_db + quartus_sh --flow).
 compile: build
 
-# Full compile with fresh placement (clears incremental DB first)
-# Pocket only ships the Lite GPU variant — no GPU_VARIANT_* macro is passed,
-# so gpu_features.vh defaults to GPU_VARIANT_LITE. The Full GPU variant is
-# kept compilable for Verilator coverage and future hardware targets.
+# Full compile with fresh placement (clears incremental DB first).
+# The GPU is a single-config core (triangles + perspective spans +
+# pipelined fragment processor all unconditional, see gpu_config.vh).
+# VARIANT_DEFS is still honoured for optional debug knobs like
+#   VARIANT_DEFS="GPU_DEBUG GPU_STATS"
+# which enable the stray-write latch / pixel+span counters for bringup.
 build: $(VEXII_OUT) bootloader
-	@printf "$(C_HEAD)[fpga]$(C_RESET) Clean compile (GPU = Lite)...\n"
+	@printf "$(C_HEAD)[fpga]$(C_RESET) Clean compile...\n"
 	@rm -rf db incremental_db
 	@# quartus_sh --flow compile does not accept --verilog_macro at the top
 	@# level (that flag is only valid for quartus_map), so explicit stages
@@ -180,8 +185,8 @@ test:
 	@printf "$(C_OK)[test] Done$(C_RESET)\n"
 
 # ── RTL check ────────────────────────────────────────────────────────
-# Honors VARIANT_DEFS so you can `VARIANT_DEFS="GPU_VARIANT_FULL" make check`
-# to sanity-check the Full GPU path even though Pocket only ships Lite.
+# Quick map-only sanity check (no fit / asm / sta).  Pairs with
+# VARIANT_DEFS for debug-flag builds.
 check:
 	@printf "$(C_HEAD)[check]$(C_RESET) Analysis & Synthesis...\n"
 	@quartus_map $(PROJECT) $(VERILOG_MACROS)

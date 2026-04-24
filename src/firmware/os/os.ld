@@ -131,11 +131,11 @@ SECTIONS {
 
     /* Memory regions.
      *
-     * __runtime_stack_top is 16 MB below the SDRAM PMA end (0x14000000),
-     * matching PocketQuake's "conservative known-good SDRAM region"
-     * layout.  With the stack top at the PMA edge, speculative loads
-     * past the top (branch prediction paths, cache line ahead-fill)
-     * cross into unmapped memory and surface as architectural load
+     * __runtime_stack_top is 16 MB below the SDRAM PMA end (0x14000000) —
+     * a conservative known-good SDRAM region.  With the stack top at the
+     * PMA edge, speculative loads past the top (branch prediction paths,
+     * cache line ahead-fill) cross into unmapped memory and surface as
+     * architectural load
      * access faults.  16 MB of headroom is more than any speculation
      * window reaches. */
     __os_heap_start = __os_bss_end;

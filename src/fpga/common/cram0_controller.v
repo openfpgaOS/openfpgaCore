@@ -375,7 +375,6 @@ always @(posedge clk or negedge reset_n) begin
                         // word_busy while PHY is still busy lets the
                         // AXI slave fire a new burst_rd that hits
                         // the PHY mid-cleanup and corrupts data.
-                        // Matches PocketQuake's ST_BURST_DONE gate.
                         state <= ST_BURST_DONE;
                     end else begin
                         state <= ST_BURST_LO;

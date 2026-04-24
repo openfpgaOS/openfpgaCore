@@ -2,8 +2,8 @@
 # Generate VexiiRiscv for openfpgaOS using the stock vexiiriscv.Generate
 # entry point (no custom Scala wrapper).  FetchL1 and LsuL1 are exposed
 # directly as AXI4 masters; all region routing is handled by the fabric
-# downstream (cpu_system.v).  Matches PocketQuake's proven-stable
-# topology, with our current cache sizing and Zicbom retained.
+# downstream (cpu_system.v).  Cache sizing and Zicbom retained from the
+# pre-FMax openfpgaOS config.
 #
 # Config highlights:
 #   I-cache: 32 KB (256 sets × 2 ways × 64 B line, NL prefetch)
@@ -50,7 +50,7 @@ if [ ! -d "$VEXII_DIR" ]; then
     exit 1
 fi
 
-echo "Generating VexiiRiscv (stock Generate, Quake-topology, our cache sizing)..."
+echo "Generating VexiiRiscv (stock vexiiriscv.Generate, openfpgaOS cache sizing)..."
 cd "$VEXII_DIR"
 
 sbt "Test/runMain vexiiriscv.Generate \

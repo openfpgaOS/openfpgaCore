@@ -361,9 +361,10 @@ end
 // ================================================================
 // Shared DSP multiply + reciprocal LUT
 // ================================================================
-// Used by triangle setup (Full) AND perspective span setup (Lite/Full).
-// Wrapped in GPU_HAS_RECIP_LUT (defined in gpu_features.vh whenever
-// GPU_FEAT_TRIANGLE or GPU_FEAT_PERSP_SPAN is enabled).
+// Used by triangle setup AND perspective span setup — both are always
+// present in this single-config build.  The `ifdef guards are kept so
+// the bridging gpu_features.vh shim still resolves, but every flag it
+// defines is permanently on.
 `ifdef GPU_HAS_RECIP_LUT
 // Registered DSP multiply (18×18 maps to one Cyclone V DSP block)
 reg signed [31:0] dsp_a;
@@ -404,9 +405,9 @@ always @(posedge clk) dsp3_p <= dsp3_a * dsp3_b;
 // FFs to the DSP input pins.  Adds 1 cycle of latency (tri_ymin update
 // → tri_ymin_x_stride valid), absorbed by an extra S_TRI_MUL_WAIT2 step.
 //
-// Guarded on GPU_FEAT_TRIANGLE because the references (tri_ymin,
-// tri_A, tri_B, tri_xmin) are triangle-only regs; without the guard,
-// LITE + PERSP builds fail to compile.
+// Guarded on GPU_FEAT_TRIANGLE — references tri_ymin / tri_A / tri_B /
+// tri_xmin which live inside the same guard in the single-config
+// build (they were triangle-only regs in the old variant matrix too).
 reg signed [15:0] tri_ymin_dsp_in, st_fb_stride_dsp_in;
 always @(posedge clk) begin
     tri_ymin_dsp_in     <= tri_ymin;
@@ -426,7 +427,7 @@ end
 
 // Pre-registered A*px and B*py products for the S_TRI_ROW edge-init. The
 // original S_TRI_ROW expression `tri_A[i]*px + tri_B[i]*py + tri_C[i]` was
-// the worst critical path in the Lite build (DSP mult + two long carry
+// the worst critical path on the 100 MHz domain (DSP mult + two long carry
 // chains in one cycle, -1.603 ns at slow 85°C). Computing the two products
 // continuously into registers lets S_TRI_ROW do only a 3-way add — no DSP
 // in the same cycle — shortening the cone to a single carry chain. The
@@ -472,8 +473,9 @@ end
 // ================================================================
 // Texture Cache instance
 // ================================================================
-// tex_req_* drive: in Lite (FRAG_PIPELINE) these are combinational from the
-// pipeline issue logic; in Full they're regs written by the sequential FSM.
+// tex_req_* are combinational from the pipelined fragment processor's
+// issue logic (single configuration: pipelined fragment processor is
+// always on).
 `ifdef GPU_FEAT_FRAG_PIPELINE
 wire        tex_req_valid;
 wire [25:0] tex_req_addr;
@@ -626,7 +628,7 @@ localparam S_CLEAR_ZB       = 6'd23;
 localparam S_CLEAR_ZB_WAIT  = 6'd24;
 localparam S_SPAN_TEX_CALC = 6'd25;  // Pipeline stage 2: finish tex addr
 
-// Triangle rasterisation states (Full variant)
+// Triangle rasterisation states
 localparam S_TRI_LOAD      = 6'd26;  // Extract vertices from payload
 localparam S_TRI_SETUP     = 6'd27;  // Sequential edge/gradient computation
 localparam S_TRI_BBOX      = 6'd28;  // Compute bounding box, clip to screen
@@ -684,11 +686,11 @@ reg [15:0] frag_color;        // Output color (after colormap / combine)
 reg        frag_discard;      // Alpha test / skip-zero result
 
 // ================================================================
-// Pipelined Fragment Processor — stage registers (LITE only)
+// Pipelined Fragment Processor — stage registers
 // ================================================================
-// LITE-only path. Full keeps the sequential S_SPAN_* FSM for now because
-// its triangle rasterizer is intertwined with the old fragment states; the
-// triangle refactor is deferred.
+// Single fragment processor for spans and triangle-emitted spans.
+// Triangles are rasterised into per-row spans in S_TRI_PIX that feed
+// the same S_FRAG_PIPE path used by CMD_DRAW_SPAN.
 //
 // 4 logical stages, with combinational tex_req drive (1-cycle cache latency):
 //   S0 (Issue, comb):    drive tex_req_valid/addr from current sp_*. The
@@ -790,7 +792,7 @@ reg src_mode;
 reg src_done;            // source has issued its last pixel; pipeline draining
 
 // ----------------------------------------------------------------
-// Combinational tex_req drive (LITE pipeline only)
+// Combinational tex_req drive
 // ----------------------------------------------------------------
 // Drives tex_req from p0 (registered pre-issue metadata) and tx_mul_q
 // (registered DSP multiply output for that p0). The p0 stage exists so
@@ -1033,11 +1035,11 @@ reg [17:0] clear_remaining;   // Words remaining to clear
 // (AXI4 write handshakes managed per-state, no global tracking)
 
 // ================================================================
-// Triangle Registers (Full variant)
+// Triangle Registers
 // ================================================================
 
 // tri_active: 1 = fragment pipeline returns to triangle path. Read by span
-// states unconditionally; in LITE it's a constant 0 so the synthesizer folds
+// states unconditionally; synthesizer folds
 // away `tri_active ? S_TRI_PIX : S_SPAN_STEP` to just `S_SPAN_STEP`.
 `ifdef GPU_FEAT_TRIANGLE
 reg        tri_active;
@@ -1541,7 +1543,7 @@ always @(posedge clk) begin
 
 `ifdef GPU_FEAT_FRAG_PIPELINE
         // ============================================================
-        // Pipelined Fragment Processor (LITE)
+        // Pipelined Fragment Processor
         // ============================================================
         // Replaces the sequential S_SPAN_PIXEL..S_SPAN_STEP chain with a
         // 3-stage pipeline + a tail FB write sub-FSM:

@@ -1,3 +1,12 @@
+# Archived design log — variant matrix retired
+
+This file describes the old GPU variant system (GPU_VARIANT_LITE /
+GPU_VARIANT_FULL).  That system was retired in the single-config
+cleanup pass; see commits 8b98ec0 through b75ae53.  Kept for
+historical reference only — all terminology below is stale.
+
+---
+
 # GPU 3D — Variant System & Pipelined Fragment Processor
 
 Living design log for the GPU work in this session. Complements `upgrade.md`

@@ -2364,8 +2364,8 @@ assign clk_cpu = clk_ram_controller;
 // Drive CRAM0 clock pin directly from clk_74a.  The controller now
 // runs in the clk_74a domain (v2 memory architecture), so the chip
 // CK and the controller FSM share the same clock tree with zero
-// cross-domain skew.  PocketQuake ran the chip at 74 MHz reliably
-// for years with this exact arrangement.
+// cross-domain skew.  The CRAM chip is rated well above 74 MHz; the
+// shared-tree arrangement has been validated across many FMax runs.
 //
 // CRAM1 retired in v2 — pin unassigned in the qsf.
 assign cram0_clk = clk_74a;
