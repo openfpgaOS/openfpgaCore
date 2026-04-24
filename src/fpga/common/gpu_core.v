@@ -1170,23 +1170,10 @@ wire signed [31:0] grad_axis_b2 = grad_idx[0] ? {{16{dX10[15]}}, dX10}
 
 wire [15:0] sp_s_int = sp_s[31:16];
 wire [15:0] sp_t_int = sp_t[31:16];
-
-// Pipeline registers + tex-addr wires below are only referenced by the
-// old sequential S_SPAN_* path (ifndef GPU_FEAT_FRAG_PIPELINE).  In the
-// single-config build that path is preprocessed out, so these
-// declarations are dangling — the compiler folds them away.  Leaving
-// them visible so the dead-code block below still parses if someone
-// re-enables the sequential path for a future variant target.
-reg signed [15:0] tex_pipe_t_int;
-reg        [15:0] tex_pipe_width;
-reg        [31:0] tex_pipe_base;
-reg signed [15:0] tex_pipe_s_int;
-reg        [31:0] tex_pipe_shift_r;
-reg               tex_pipe_mode;
-wire [31:0] tex_mul_result = $signed(tex_pipe_t_int) * $signed({1'b0, tex_pipe_width});
-wire [31:0] tex_addr_final = tex_pipe_mode
-    ? (tex_pipe_base + tex_mul_result + {{16{tex_pipe_s_int[15]}}, tex_pipe_s_int})
-    : (tex_pipe_base + tex_pipe_shift_r);
+// tex_pipe_* / tex_mul_result / tex_addr_final removed along with the
+// sequential S_SPAN_* path they drove.  The pipelined fragment
+// processor uses tx_mul_q (the dedicated DSP-inferred register below)
+// for the per-pixel tex-coord multiply.
 
 // ================================================================
 // Main FSM body
@@ -1195,9 +1182,6 @@ always @(posedge clk) begin
     if (!reset_n) begin
         state <= S_IDLE;
         ring_rdptr <= 0;
-`ifndef GPU_FEAT_FRAG_PIPELINE
-        tex_req_valid <= 0;
-`endif
         m_wr_awvalid <= 0;
         m_wr_wvalid <= 0;
         sram_rd <= 0;
@@ -1222,12 +1206,6 @@ always @(posedge clk) begin
         pay_remaining <= 0;
         frag_discard <= 0;
         clear_flags <= 0;
-        tex_pipe_t_int <= 0;
-        tex_pipe_width <= 0;
-        tex_pipe_base <= 0;
-        tex_pipe_s_int <= 0;
-        tex_pipe_shift_r <= 0;
-        tex_pipe_mode <= 0;
 `ifdef GPU_FEAT_FRAG_PIPELINE
         // Pipelined fragment processor reset
         p0_valid <= 0; p0_light <= 0; p0_flags <= 0;
@@ -1295,9 +1273,6 @@ always @(posedge clk) begin
         st_zb_addr <= 0; st_zb_stride <= 640;
     end else begin
         // Default: deassert one-shot signals
-`ifndef GPU_FEAT_FRAG_PIPELINE
-        tex_req_valid <= 0;
-`endif
         sram_rd <= 0;
         sram_wr <= 0;
 
@@ -1534,202 +1509,6 @@ always @(posedge clk) begin
 
         // ============================================================
         // SPAN pixel loop
-`ifndef GPU_FEAT_FRAG_PIPELINE
-        // ============================================================
-        S_SPAN_PIXEL: begin
-            if (sp_count == 0) begin
-                // Span complete — flush FB accumulator
-                state <= S_FB_FLUSH;
-            end else begin
-                // Pipeline stage 1: register inputs + load shared DSP
-                tex_pipe_t_int   <= sp_t_int;
-                tex_pipe_width   <= sp_tex_width;
-                tex_pipe_base    <= sp_tex_addr;
-                tex_pipe_s_int   <= sp_s_int;
-                tex_pipe_shift_r <= tex_shift_result;
-                tex_pipe_mode    <= (sp_tex_width != 0);
-                state            <= S_SPAN_TEX_CALC;
-            end
-        end
-
-        // Pipeline stage 2: finish tex addr, submit to cache
-        S_SPAN_TEX_CALC: begin
-            tex_req_valid <= 1;
-            tex_req_addr  <= tex_addr_final[25:0];
-            tex_req_wide  <= 1'b0;  // I8 (span path is always 8-bit indexed)
-            state         <= S_SPAN_TEX_REQ;
-        end
-
-        S_SPAN_TEX_REQ: begin
-            if (tex_req_ready) begin
-                tex_req_valid <= 0;
-                state <= S_SPAN_TEX_WAIT;
-            end else begin
-                tex_req_valid <= 1;  // Hold until accepted
-            end
-        end
-
-        S_SPAN_TEX_WAIT: begin
-            if (tex_resp_valid) begin
-                frag_texel <= tex_resp_data[7:0];
-                frag_color <= tex_resp_data;
-
-                // Check skip-zero (transparency)
-                if (sp_flags[SPAN_SKIP_ZERO] && tex_resp_data[7:0] == 8'hFF) begin
-                    frag_discard <= 1;
-                    state <= tri_active ? S_TRI_PIX : S_SPAN_STEP;
-                end
-                // Colormap path
-                else if (sp_flags[SPAN_COLORMAP]) begin
-                    cmap_rd_addr <= {sp_light[5:0], tex_resp_data[7:0]};
-                    state <= S_SPAN_CMAP;
-                end
-                // No colormap — direct texel output
-                else begin
-                    frag_discard <= 0;
-                    if (sp_flags[SPAN_DEPTH_TEST] || sp_flags[SPAN_DEPTH_WRITE])
-                        state <= S_SPAN_ZREAD;
-                    else
-                        state <= S_SPAN_FB;
-                end
-            end
-        end
-
-        // ============================================================
-        // Colormap lookup (1-cycle BRAM read latency)
-        // ============================================================
-        S_SPAN_CMAP: begin
-            state <= S_SPAN_CMAP_WAIT;
-        end
-
-        S_SPAN_CMAP_WAIT: begin
-            frag_color   <= {8'b0, cmap_rd_data};
-            frag_discard <= 0;
-            if (sp_flags[SPAN_DEPTH_TEST] || sp_flags[SPAN_DEPTH_WRITE])
-                state <= S_SPAN_ZREAD;
-            else
-                state <= S_SPAN_FB;
-        end
-
-        // ============================================================
-        // Z-buffer read / compare / write
-        // ============================================================
-        S_SPAN_ZREAD: begin
-            if (!sram_busy) begin
-                sram_rd   <= 1;
-                sram_addr <= sp_z_addr[23:2];  // byte addr → word addr
-                state     <= S_SPAN_ZWAIT;
-            end
-        end
-
-        S_SPAN_ZWAIT: begin
-            if (sram_rdata_valid) begin
-                // Z-buffer stores 16-bit values; [1] selects high/low halfword.
-                // Compare uses sp_zi[31:16] directly — routing through a
-                // same-cycle reg gave the compare a stale value.
-                begin : z_compare
-                    reg [15:0] old_z;
-                    reg [15:0] new_z;
-                    old_z = sp_z_addr[1] ? sram_rdata[31:16] : sram_rdata[15:0];
-                    new_z = sp_zi[31:16];
-                    case (st_depth_func)
-                        3'd2: frag_discard <= !(new_z <  old_z);   // LESS
-                        3'd3: frag_discard <= !(new_z <= old_z);   // LEQUAL
-                        3'd4: frag_discard <= !(new_z == old_z);   // EQUAL
-                        3'd5: frag_discard <= !(new_z >= old_z);   // GEQUAL
-                        3'd6: frag_discard <= !(new_z >  old_z);   // GREATER
-                        3'd7: frag_discard <= !(new_z != old_z);   // NOTEQUAL
-                        3'd1: frag_discard <= 0;                    // ALWAYS
-                        default: frag_discard <= 0;                 // NONE
-                    endcase
-                end
-                state <= S_SPAN_ZCMP;
-            end
-        end
-
-        S_SPAN_ZCMP: begin
-            if (frag_discard) begin
-                state <= tri_active ? S_TRI_PIX : S_SPAN_STEP;
-            end else if (sp_flags[SPAN_DEPTH_WRITE] && !sram_busy) begin
-                // Write new Z value
-                sram_wr    <= 1;
-                sram_addr  <= sp_z_addr[23:2];  // byte addr → word addr
-                sram_wdata <= sp_z_addr[1]
-                    ? {sp_zi[31:16], sram_rdata[15:0]}
-                    : {sram_rdata[31:16], sp_zi[31:16]};
-                sram_wstrb <= sp_z_addr[1] ? 4'b1100 : 4'b0011;
-                state      <= S_SPAN_ZWWAIT;
-            end else begin
-                state <= S_SPAN_FB;
-            end
-        end
-
-        S_SPAN_ZWWAIT: begin
-            if (!sram_busy)
-                state <= S_SPAN_FB;
-        end
-
-        // ============================================================
-        // FB write — accumulate pixels, flush when word boundary crossed
-        // ============================================================
-        S_SPAN_FB: begin
-            if (!frag_discard) begin
-`ifdef GPU_STATS
-                stat_pixels <= stat_pixels + 32'd1;
-`endif
-
-                begin : fb_accumulate
-                    reg [31:0] pixel_word_addr;
-                    reg [1:0]  pixel_byte_lane;
-                    pixel_word_addr = sp_fb_addr & 32'hFFFFFFFC;
-                    pixel_byte_lane = sp_fb_addr[1:0];
-
-                    if (fb_acc_valid && fb_acc_addr != pixel_word_addr) begin
-                        // Different word — flush old accumulator first
-                        m_wr_awvalid <= 1;
-                        m_wr_awaddr  <= fb_acc_addr;
-                        m_wr_awlen   <= 0;
-                        m_wr_wvalid  <= 1;
-                        m_wr_wdata   <= fb_acc_data;
-                        m_wr_wstrb   <= fb_acc_mask;
-                        m_wr_wlast   <= 1;
-                        // Reset accumulator (pixel added after flush completes)
-                        fb_acc_addr  <= pixel_word_addr;
-                        fb_acc_data  <= 32'b0;
-                        fb_acc_mask  <= 4'b0;
-                        state <= S_FB_FLUSH_WAIT;
-                    end else begin
-                        // Same word (or first pixel) — accumulate
-                        fb_acc_valid <= 1;
-                        fb_acc_addr  <= pixel_word_addr;
-                        case (pixel_byte_lane)
-                            2'd0: begin fb_acc_data[7:0]   <= frag_color[7:0]; fb_acc_mask[0] <= 1; end
-                            2'd1: begin fb_acc_data[15:8]  <= frag_color[7:0]; fb_acc_mask[1] <= 1; end
-                            2'd2: begin fb_acc_data[23:16] <= frag_color[7:0]; fb_acc_mask[2] <= 1; end
-                            2'd3: begin fb_acc_data[31:24] <= frag_color[7:0]; fb_acc_mask[3] <= 1; end
-                        endcase
-                        state <= tri_active ? S_TRI_PIX : S_SPAN_STEP;
-                    end
-                end
-            end else begin
-                state <= tri_active ? S_TRI_PIX : S_SPAN_STEP;
-            end
-        end
-
-        // ============================================================
-        // Step to next pixel (span mode only)
-        // ============================================================
-        S_SPAN_STEP: begin
-            sp_s        <= sp_s + sp_sstep;
-            sp_t        <= sp_t + sp_tstep;
-            sp_fb_addr  <= sp_fb_addr + {{16{sp_fb_stride[15]}}, sp_fb_stride};
-            sp_count    <= sp_count - 16'd1;
-            sp_zi       <= sp_zi + sp_zistep;
-            sp_z_addr   <= sp_z_addr + 32'd2;
-            frag_discard <= 0;
-            state       <= S_SPAN_PIXEL;
-        end
-`endif // !GPU_FEAT_FRAG_PIPELINE (old SPAN states)
 
 `ifdef GPU_FEAT_FRAG_PIPELINE
         // ============================================================
