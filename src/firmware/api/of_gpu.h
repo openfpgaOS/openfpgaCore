@@ -270,7 +270,16 @@ static inline uint32_t of_gpu_fence(void) {
 
 static inline uint32_t of_gpu_submit(void) {
     uint32_t token = of_gpu_fence();
-    of_gpu_kick();
+    of_gpu_kick_verified();  /* verified kick: traps if GPU_RING_WRPTR
+                              * readback disagrees with _gpu_wrptr — a
+                              * lost MMIO write or a wrptr-masking bug
+                              * fires an illegal-instruction trap here
+                              * instead of waiting 5 s for of_gpu_wait's
+                              * timeout.  Switched in while chasing the
+                              * gpudemo freeze-after-N-frames issue:
+                              * fence_reached lags app token by exactly
+                              * 4 at trap time, ring_empty = 1 — the
+                              * handoff lost something. */
     return token;
 }
 
