@@ -42,7 +42,15 @@ module tb_axi_periph (
     // Observability / debug
     output wire [3:0]  dbg_state,
     output wire        dbg_bram_hold,
-    output wire        dbg_can_push_beat
+    output wire        dbg_can_push_beat,
+
+    // GPU MMIO outputs exposed so the harness can count pulses vs
+    // AXI writes submitted — the gpudemo freeze-after-N-frames
+    // investigation needs this to prove / disprove whether the AXI
+    // periph slave is dropping MMIO writes on the way to the GPU.
+    output wire        dbg_gpu_reg_wr,
+    output wire [3:0]  dbg_gpu_reg_addr,
+    output wire [31:0] dbg_gpu_reg_wdata
 );
 
 // Tie-offs for peripheral inputs we don't exercise.
@@ -160,9 +168,9 @@ axi_periph_slave dut (
     .snac_pin_in (snac_pin_in),
     .snac_enable (),
 
-    .gpu_reg_wr   (),
-    .gpu_reg_addr (),
-    .gpu_reg_wdata(),
+    .gpu_reg_wr   (dbg_gpu_reg_wr),
+    .gpu_reg_addr (dbg_gpu_reg_addr),
+    .gpu_reg_wdata(dbg_gpu_reg_wdata),
     .gpu_reg_rdata(gpu_reg_rdata)
 );
 

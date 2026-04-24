@@ -107,6 +107,228 @@ static void check_eq(const char *tag, uint32_t got, uint32_t expect) {
 }
 
 // ====================================================================
+// AXI single-word write with optional "bundled AW+W" behaviour.
+//   bundled=true:  drive AW+W on the same cycle (VexiiRiscv LSU pattern)
+//   bundled=false: drive AW first, wait one cycle, then drive W
+// Returns true if the B response came back; false on timeout.
+// ====================================================================
+static bool axi_write_single(uint32_t addr, uint32_t data, uint8_t wstrb = 0xF,
+                              bool bundled = true) {
+    tb->s_axi_awvalid = 1;
+    tb->s_axi_awaddr  = addr;
+    tb->s_axi_awlen   = 0;
+    if (bundled) {
+        tb->s_axi_wvalid = 1;
+        tb->s_axi_wdata  = data;
+        tb->s_axi_wstrb  = wstrb;
+        tb->s_axi_wlast  = 1;
+    } else {
+        tb->s_axi_wvalid = 0;
+    }
+
+    int cycles = 0;
+    bool aw_done = false, w_done = false;
+    while (cycles++ < 5000 && !(aw_done && w_done)) {
+        tb->eval();
+        if (tb->s_axi_awvalid && tb->s_axi_awready) aw_done = true;
+        if (tb->s_axi_wvalid  && tb->s_axi_wready ) w_done  = true;
+        tick();
+        if (aw_done) tb->s_axi_awvalid = 0;
+        if (w_done)  tb->s_axi_wvalid  = 0;
+        if (!bundled && aw_done && !w_done) {
+            // One cycle after AW handshake, drive W
+            tb->s_axi_wvalid = 1;
+            tb->s_axi_wdata  = data;
+            tb->s_axi_wstrb  = wstrb;
+            tb->s_axi_wlast  = 1;
+        }
+    }
+    if (!(aw_done && w_done)) {
+        printf("  WRITE 0x%08x: AW/W timeout (aw=%d w=%d)\n", addr, aw_done, w_done);
+        return false;
+    }
+    // Wait for B response
+    tb->s_axi_bready = 1;
+    cycles = 0;
+    bool b_done = false;
+    while (cycles++ < 1000 && !b_done) {
+        tb->eval();
+        if (tb->s_axi_bvalid && tb->s_axi_bready) b_done = true;
+        tick();
+    }
+    tb->s_axi_bready = 0;
+    if (!b_done) {
+        printf("  WRITE 0x%08x: B timeout\n", addr);
+        return false;
+    }
+    return true;
+}
+
+// ====================================================================
+// GPU MMIO hammer — stress the ring-BRAM write path
+// ====================================================================
+// Reproduce the CPU-side sequence that fills a GPU command.  Every
+// write to 0x4A000008 (GPU_RING_DATA) must produce exactly one
+// gpu_reg_wr pulse at the slave's output.  If any write is silently
+// dropped, our pulse count will lag the submission count and we've
+// found the CPU↔GPU MMIO loss the hardware freeze pointed at.
+//
+// Back-to-back variant: issue writes as fast as AXI will accept them
+// (bundled AW+W), with NO idle cycles between B response and the next
+// AW.  That's the worst-case pattern the CPU hits when bursting into
+// _gpu_ring_write() from an unrolled inner loop.
+
+static uint32_t g_gpu_wr_pulses = 0;
+static uint32_t g_gpu_last_wdata = 0;
+static uint32_t g_gpu_last_addr = 0xFFFFFFFF;
+
+static void count_gpu_pulses() {
+    // Sample gpu_reg_wr on every tick so we don't miss a 1-cycle pulse.
+    if (tb->dbg_gpu_reg_wr) {
+        g_gpu_wr_pulses++;
+        g_gpu_last_wdata = tb->dbg_gpu_reg_wdata;
+        g_gpu_last_addr  = tb->dbg_gpu_reg_addr;
+    }
+}
+
+// Override tick to also count gpu pulses.  Sample ONCE per clock cycle
+// (after the rising edge) — gpu_reg_wr is a posedge-driven reg that
+// holds high for one cycle; sampling on both edges double-counts.
+static void tick_and_count() {
+    tb->clk = 0;
+    tb->eval();
+    sim_time++;
+    tb->clk = 1;
+    tb->eval();
+    count_gpu_pulses();
+    sim_time++;
+    cycle_count++;
+}
+
+static bool axi_write_single_counted(uint32_t addr, uint32_t data,
+                                      bool bundled = true) {
+    tb->s_axi_awvalid = 1;
+    tb->s_axi_awaddr  = addr;
+    tb->s_axi_awlen   = 0;
+    if (bundled) {
+        tb->s_axi_wvalid = 1;
+        tb->s_axi_wdata  = data;
+        tb->s_axi_wstrb  = 0xF;
+        tb->s_axi_wlast  = 1;
+    } else {
+        tb->s_axi_wvalid = 0;
+    }
+
+    int cycles = 0;
+    bool aw_done = false, w_done = false;
+    while (cycles++ < 5000 && !(aw_done && w_done)) {
+        tb->eval();
+        if (tb->s_axi_awvalid && tb->s_axi_awready) aw_done = true;
+        if (tb->s_axi_wvalid  && tb->s_axi_wready ) w_done  = true;
+        tick_and_count();
+        if (aw_done) tb->s_axi_awvalid = 0;
+        if (w_done)  tb->s_axi_wvalid  = 0;
+        if (!bundled && aw_done && !w_done) {
+            tb->s_axi_wvalid = 1;
+            tb->s_axi_wdata  = data;
+            tb->s_axi_wstrb  = 0xF;
+            tb->s_axi_wlast  = 1;
+        }
+    }
+    if (!(aw_done && w_done)) return false;
+
+    tb->s_axi_bready = 1;
+    cycles = 0;
+    bool b_done = false;
+    while (cycles++ < 1000 && !b_done) {
+        tb->eval();
+        if (tb->s_axi_bvalid && tb->s_axi_bready) b_done = true;
+        tick_and_count();
+    }
+    tb->s_axi_bready = 0;
+    return b_done;
+}
+
+static void test_gpu_write_back_to_back(void) {
+    printf("test_gpu_write_back_to_back (hammer GPU_RING_DATA):\n");
+    const uint32_t GPU_RING_DATA = 0x4A000008u;
+    const int N = 1000;
+
+    g_gpu_wr_pulses = 0;
+    g_gpu_last_wdata = 0;
+    g_gpu_last_addr = 0xFFFFFFFF;
+
+    int submit_fail = 0;
+    for (int i = 0; i < N; i++) {
+        uint32_t data = 0xA5A50000u | (uint32_t)i;
+        if (!axi_write_single_counted(GPU_RING_DATA, data)) {
+            submit_fail++;
+            if (submit_fail < 5)
+                printf("  submit failed @ i=%d\n", i);
+        }
+    }
+    // Drain a few more cycles so any in-flight pulse lands.
+    for (int i = 0; i < 10; i++) tick_and_count();
+
+    printf("  %d AXI writes issued, %u gpu_reg_wr pulses seen\n",
+           N - submit_fail, g_gpu_wr_pulses);
+    printf("  last_addr=%u last_wdata=0x%08x\n",
+           g_gpu_last_addr, g_gpu_last_wdata);
+    check_eq("gpu-ring-data-pulses", g_gpu_wr_pulses, (uint32_t)(N - submit_fail));
+}
+
+// VexiiRiscv's LSU may not bundle AW+W on the same cycle for every
+// store — especially under back-pressure.  Try the AW-first / W-next
+// pattern that hits the S_WR_NEXT code path in the slave.
+static void test_gpu_write_split_aw_w(void) {
+    printf("test_gpu_write_split_aw_w (AW-first, W one cycle later):\n");
+    const uint32_t GPU_RING_DATA = 0x4A000008u;
+    const int N = 1000;
+
+    g_gpu_wr_pulses = 0;
+
+    int submit_fail = 0;
+    for (int i = 0; i < N; i++) {
+        uint32_t data = 0x5A5A0000u | (uint32_t)i;
+        if (!axi_write_single_counted(GPU_RING_DATA, data, /*bundled*/false)) {
+            submit_fail++;
+        }
+    }
+    for (int i = 0; i < 10; i++) tick_and_count();
+
+    printf("  %d AXI writes issued, %u gpu_reg_wr pulses seen\n",
+           N - submit_fail, g_gpu_wr_pulses);
+    check_eq("gpu-ring-data-pulses-split", g_gpu_wr_pulses, (uint32_t)(N - submit_fail));
+}
+
+// Writes to GPU_RING_WRPTR interleaved with GPU_RING_DATA — mimics
+// the _gpu_ring_write() + of_gpu_kick() pattern the SDK issues.
+// If the AW-decode latches differently between consecutive writes to
+// different registers, the pulse count should still match.
+static void test_gpu_write_mixed_addr(void) {
+    printf("test_gpu_write_mixed_addr (RING_DATA + RING_WRPTR interleaved):\n");
+    const uint32_t GPU_RING_DATA  = 0x4A000008u;
+    const uint32_t GPU_RING_WRPTR = 0x4A000004u;
+
+    g_gpu_wr_pulses = 0;
+    const int CHUNK = 19;   // one CMD_DRAW_SPAN worth
+    const int N_CMDS = 50;
+
+    for (int c = 0; c < N_CMDS; c++) {
+        for (int w = 0; w < CHUNK; w++) {
+            axi_write_single_counted(GPU_RING_DATA, 0xDEAD0000u | (c*CHUNK + w));
+        }
+        // Kick after each command
+        axi_write_single_counted(GPU_RING_WRPTR, (c + 1) * CHUNK * 4);
+    }
+    for (int i = 0; i < 10; i++) tick_and_count();
+
+    uint32_t expected = N_CMDS * (CHUNK + 1);
+    printf("  issued=%u pulses=%u\n", expected, g_gpu_wr_pulses);
+    check_eq("gpu-mixed-addr-pulses", g_gpu_wr_pulses, expected);
+}
+
+// ====================================================================
 // Tests
 // ====================================================================
 static void test_single_word_bram_read() {
@@ -236,6 +458,12 @@ int main(int argc, char **argv) {
     test_burst_with_backpressure();
     test_sysreg_polling();
     test_mixed_bram_periph();
+
+    // GPU MMIO hammer — probe the CPU↔GPU write path for dropped
+    // MMIO writes that tb_gpu's drop-sim showed wedge the GPU.
+    test_gpu_write_back_to_back();
+    test_gpu_write_split_aw_w();
+    test_gpu_write_mixed_addr();
 
     printf("\n=== Results: %d passed, %d failed ===\n", passes, fails);
     delete tb;
