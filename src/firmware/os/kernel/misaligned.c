@@ -416,6 +416,7 @@ static inline void trap_uart_putb(unsigned c) {
     *utx = c;
 }
 
+__attribute__((section(".text.boot")))
 static void trap_uart_hex(uint32_t v) {
     for (int i = 28; i >= 0; i -= 4) {
         unsigned n = (v >> i) & 0xF;
@@ -423,10 +424,12 @@ static void trap_uart_hex(uint32_t v) {
     }
 }
 
+__attribute__((section(".text.boot")))
 static void trap_uart_puts(const char *s) {
     while (*s) trap_uart_putb((unsigned)*s++);
 }
 
+__attribute__((section(".text.boot")))
 void fatal_trap(trap_frame_t *frame) {
     /* Shout cause/mepc/mtval to UART first so the host sees it even
      * if the terminal / screen has been torn down.  Format:
