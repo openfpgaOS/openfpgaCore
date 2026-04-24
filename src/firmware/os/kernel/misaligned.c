@@ -454,6 +454,33 @@ void fatal_trap(trap_frame_t *frame) {
     trap_uart_hex(frame->regs[1]);
     trap_uart_puts("\n");
 
+    /* Diagnostic: re-read memory at mepc DIRECTLY from SDRAM to tell us
+     * whether the corruption is in SDRAM (a DMA master — the GPU in LITE —
+     * wrote junk there) or in the I-cache path (cache returned bad bits).
+     *
+     *   cbo.inval the D-cache line → guarantees the subsequent volatile
+     *     load goes to DRAM, not cache.
+     *   Use the SDRAM uncached alias at 0x38000000-0x3FFFFFFF (if mepc
+     *     is in the cached 0x10000000 SDRAM window) so the load BYPASSES
+     *     both D-cache and I-cache and reads the real storage.
+     *
+     * If sdram_mem == mtval → SDRAM is physically corrupted.
+     * If sdram_mem != mtval && sdram_mem == expected → I-cache path bug.
+     */
+    uintptr_t mepc = frame->mepc;
+    if (mepc >= 0x10000000u && mepc < 0x14000000u && (mepc & 3) == 0) {
+        /* Word-aligned SDRAM text page — safe to read back. Remap to
+         * uncached alias (0x38000000 window is unmapped in PMA, but
+         * the SDRAM uncached alias is at 0x40000000 per generate_vexii.sh
+         * regions, so use that for a bypass load). */
+        __asm__ volatile(".insn i 0x0F, 2, x0, %0, 0" :: "r"(mepc) : "memory");
+        __asm__ volatile("fence" ::: "memory");
+        uint32_t sdram_word = *(volatile uint32_t *)mepc;
+        trap_uart_puts("sdram@mepc=");
+        trap_uart_hex(sdram_word);
+        trap_uart_puts("\n");
+    }
+
     /* Dump 64 words of app stack around sp — lets us find where the
      * corrupted return address came from.  Safe because we're on the
      * trap stack in BRAM and the app's sp is in SDRAM.  Stop before
