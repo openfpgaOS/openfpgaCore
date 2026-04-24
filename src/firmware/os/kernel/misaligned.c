@@ -471,16 +471,40 @@ void fatal_trap(trap_frame_t *frame) {
      * If sdram_mem != mtval && sdram_mem == expected → I-cache path bug.
      */
     uintptr_t mepc = frame->mepc;
-    if (mepc >= 0x10000000u && mepc < 0x14000000u && (mepc & 3) == 0) {
-        /* Word-aligned SDRAM text page — safe to read back. Remap to
-         * uncached alias (0x38000000 window is unmapped in PMA, but
-         * the SDRAM uncached alias is at 0x40000000 per generate_vexii.sh
-         * regions, so use that for a bypass load). */
-        __asm__ volatile(".insn i 0x0F, 2, x0, %0, 0" :: "r"(mepc) : "memory");
+    uintptr_t ra   = frame->regs[1];
+    if (mepc >= 0x10000000u && mepc < 0x14000000u) {
+        /* Round down to word boundary — RVC instructions can be at
+         * 2-byte alignment, but reads must be 4-byte.  Print 4 words
+         * spanning mepc so the actual fault and its neighbours are
+         * visible from the physical memory side. */
+        uintptr_t word0 = mepc & ~3u;
+        __asm__ volatile(".insn i 0x0F, 2, x0, %0, 0" :: "r"(word0)       : "memory");
+        __asm__ volatile(".insn i 0x0F, 2, x0, %0, 0" :: "r"(word0 + 64)  : "memory");
         __asm__ volatile("fence" ::: "memory");
-        uint32_t sdram_word = *(volatile uint32_t *)mepc;
-        trap_uart_puts("sdram@mepc=");
-        trap_uart_hex(sdram_word);
+        trap_uart_puts("sdram@mepc:");
+        for (int i = -2; i < 4; i++) {
+            uintptr_t a = word0 + i * 4;
+            if (a >= 0x10000000u && a < 0x14000000u) {
+                trap_uart_puts(" ");
+                trap_uart_hex(*(volatile uint32_t *)a);
+            }
+        }
+        trap_uart_puts("\n");
+    }
+    /* Also dump 4 words at ra (the caller). If the app's text got
+     * overwritten by a stray DMA, the jal at ra-4 will show garbage. */
+    if (ra >= 0x10000000u && ra < 0x14000000u) {
+        uintptr_t word0 = ra & ~3u;
+        __asm__ volatile(".insn i 0x0F, 2, x0, %0, 0" :: "r"(word0) : "memory");
+        __asm__ volatile("fence" ::: "memory");
+        trap_uart_puts("sdram@ra:");
+        for (int i = -2; i < 4; i++) {
+            uintptr_t a = word0 + i * 4;
+            if (a >= 0x10000000u && a < 0x14000000u) {
+                trap_uart_puts(" ");
+                trap_uart_hex(*(volatile uint32_t *)a);
+            }
+        }
         trap_uart_puts("\n");
     }
 
