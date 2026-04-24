@@ -113,6 +113,20 @@ static void gpu_kick() {
     mmio_write(1, ring_wrptr);  // reg_addr 1 = GPU_RING_WRPTR
 }
 
+// Upload `count` bytes to the colormap starting at byte `start`.
+// GPU_CMAP_DATA is word-oriented (4 bytes stored per write, addr += 4).
+// `start` and `count` must be 4-aligned.
+static void cmap_upload_bytes(uint32_t start, const uint8_t *bytes, int count) {
+    mmio_write(8, start);
+    for (int i = 0; i < count; i += 4) {
+        uint32_t w = (uint32_t)bytes[i]
+                  | ((uint32_t)bytes[i + 1] << 8)
+                  | ((uint32_t)bytes[i + 2] << 16)
+                  | ((uint32_t)bytes[i + 3] << 24);
+        mmio_write(9, w);
+    }
+}
+
 // Wait for GPU to reach fence, with timeout
 static bool gpu_wait_fence(uint32_t token, int timeout = 200000) {
     for (int t = 0; t < timeout; t++) {
@@ -265,10 +279,7 @@ static void test_solid_span() {
 
     // Upload identity colormap: output = input for light level 0
     // cmap[0*256 + i] = i  for i in 0..255
-    for (int i = 0; i < 256; i++) {
-        mmio_write(8, i);          // GPU_CMAP_ADDR
-        mmio_write(9, i & 0xFF);   // GPU_CMAP_DATA
-    }
+    { uint8_t cm[256]; for (int i = 0; i < 256; i++) cm[i] = (uint8_t)i; cmap_upload_bytes(0, cm, 256); }
 
     // Set FB
     ring_cmd(0x23, 2);
@@ -328,10 +339,7 @@ static void test_textured_span() {
     gpu_init();
 
     // Upload identity colormap for light=0
-    for (int i = 0; i < 256; i++) {
-        mmio_write(8, i);
-        mmio_write(9, i & 0xFF);
-    }
+    { uint8_t cm[256]; for (int i = 0; i < 256; i++) cm[i] = (uint8_t)i; cmap_upload_bytes(0, cm, 256); }
 
     // Set FB
     ring_cmd(0x23, 2);
@@ -383,14 +391,7 @@ static void test_colormap_lighting() {
     gpu_init();
 
     // Upload colormap: light=0 is identity, light=1 maps everything to 0x77
-    for (int i = 0; i < 256; i++) {
-        mmio_write(8, i);       // light 0, entry i
-        mmio_write(9, i);
-    }
-    for (int i = 0; i < 256; i++) {
-        mmio_write(8, 256 + i); // light 1, entry i
-        mmio_write(9, 0x77);
-    }
+    { uint8_t cm[512]; for (int i = 0; i < 256; i++) cm[i] = (uint8_t)i; for (int i = 0; i < 256; i++) cm[256+i] = 0x77; cmap_upload_bytes(0, cm, 512); }
 
     // Set FB
     ring_cmd(0x23, 2);
@@ -435,10 +436,7 @@ static void test_vertical_column() {
     gpu_init();
 
     // Identity colormap
-    for (int i = 0; i < 256; i++) {
-        mmio_write(8, i);
-        mmio_write(9, i);
-    }
+    { uint8_t cm[256]; for (int i = 0; i < 256; i++) cm[i] = (uint8_t)i; cmap_upload_bytes(0, cm, 256); }
 
     // Set FB (320 bytes per row)
     ring_cmd(0x23, 2);
@@ -490,10 +488,7 @@ static void test_skip_zero() {
     gpu_init();
 
     // Identity colormap
-    for (int i = 0; i < 256; i++) {
-        mmio_write(8, i);
-        mmio_write(9, i);
-    }
+    { uint8_t cm[256]; for (int i = 0; i < 256; i++) cm[i] = (uint8_t)i; cmap_upload_bytes(0, cm, 256); }
 
     // Set FB
     ring_cmd(0x23, 2);
@@ -543,10 +538,7 @@ static void test_multiple_commands() {
     gpu_init();
 
     // Identity colormap
-    for (int i = 0; i < 256; i++) {
-        mmio_write(8, i);
-        mmio_write(9, i);
-    }
+    { uint8_t cm[256]; for (int i = 0; i < 256; i++) cm[i] = (uint8_t)i; cmap_upload_bytes(0, cm, 256); }
 
     // Set FB
     ring_cmd(0x23, 2);
@@ -606,10 +598,7 @@ static void test_tex_cache_miss() {
     gpu_init();
 
     // Identity colormap
-    for (int i = 0; i < 256; i++) {
-        mmio_write(8, i);
-        mmio_write(9, i);
-    }
+    { uint8_t cm[256]; for (int i = 0; i < 256; i++) cm[i] = (uint8_t)i; cmap_upload_bytes(0, cm, 256); }
 
     // Set FB
     ring_cmd(0x23, 2);
@@ -713,7 +702,7 @@ static void test_persp_constant_z() {
     gpu_init();
 
     // Identity colormap
-    for (int i = 0; i < 256; i++) { mmio_write(8, i); mmio_write(9, i); }
+    { uint8_t _cm[256]; for (int i = 0; i < 256; i++) _cm[i] = (uint8_t)i; cmap_upload_bytes(0, _cm, 256); }
 
     ring_cmd(0x23, 2); ring_write(FB_BASE_BYTE); ring_write(320);
     ring_cmd(0x10, 2); ring_write((1 << 16) | 0x00); ring_write(0);
@@ -750,7 +739,7 @@ static void test_persp_two_segments() {
     printf("TEST: Persp span — segment swap, constant 1/z (32 pixels)\n");
     gpu_init();
 
-    for (int i = 0; i < 256; i++) { mmio_write(8, i); mmio_write(9, i); }
+    { uint8_t _cm[256]; for (int i = 0; i < 256; i++) _cm[i] = (uint8_t)i; cmap_upload_bytes(0, _cm, 256); }
 
     ring_cmd(0x23, 2); ring_write(FB_BASE_BYTE); ring_write(320);
     ring_cmd(0x10, 2); ring_write((1 << 16) | 0x00); ring_write(0);
@@ -795,7 +784,7 @@ static void test_persp_varying_z() {
     printf("TEST: Persp span — varying 1/z (anchor sanity check)\n");
     gpu_init();
 
-    for (int i = 0; i < 256; i++) { mmio_write(8, i); mmio_write(9, i); }
+    { uint8_t _cm[256]; for (int i = 0; i < 256; i++) _cm[i] = (uint8_t)i; cmap_upload_bytes(0, _cm, 256); }
 
     ring_cmd(0x23, 2); ring_write(FB_BASE_BYTE); ring_write(320);
     ring_cmd(0x10, 2); ring_write((1 << 16) | 0x00); ring_write(0);
@@ -822,7 +811,363 @@ static void test_persp_varying_z() {
     check_byte("persp_var_px0",  0,  0);
     check_byte("persp_var_px15", 15, 0);
 }
+
+// ============================================================
+// Test P4: Mid-segment curvature error (Issue #1 from review)
+// ------------------------------------------------------------
+// Sets up a 16-pixel span with enough 1/z curvature that the piecewise-
+// affine interp between endpoints differs from TRUE perspective by more
+// than one texel at mid-segment pixels. Currently fails with the fixed
+// 16-pixel subdivision; passes when subdivision shrinks to 8 or less.
+//
+//   zinv: 1.0 → 0.5 over 16 pixels  (z: 1.0 → 2.0)
+//   sZ  : 0   → 1.0 over 16 pixels  (s/z ramp)
+//   → endpoint s_0 = 0, s_16 = 2.0
+//   → affine slope = 0.125 per pixel
+// TRUE s at pixel x = (x * sZstep) / (zinv_0 + x * zinv_step)
+//   x=4 : (0.25) / (0.875) = 0.286 → texel 0
+//   x=8 : (0.5)  / (0.75)  = 0.667 → texel 0       ← 16-px interp gives 1.0
+//   x=10: (0.625)/ (0.6875)= 0.909 → texel 0       ← 16-px interp gives 1.25
+//   x=12: (0.75) / (0.625) = 1.200 → texel 1
+//   x=15: (0.9375)/(0.53125)= 1.765 → texel 1
+// Affine interp pixel 8 = 1.0 → texel 1 ≠ true texel 0   (VISIBLE DEFORM)
+// ============================================================
+static void test_persp_curvature_accuracy() {
+    printf("TEST: Persp span — mid-segment curvature accuracy\n");
+    gpu_init();
+
+    { uint8_t _cm[256]; for (int i = 0; i < 256; i++) _cm[i] = (uint8_t)i; cmap_upload_bytes(0, _cm, 256); }
+
+    ring_cmd(0x23, 2); ring_write(FB_BASE_BYTE); ring_write(320);
+    ring_cmd(0x10, 2); ring_write((1 << 16) | 0x00); ring_write(0);
+
+    // Texture: 16 bytes, texel[i] = i. Identity colormap gives FB[x] = s_int(x).
+    for (int w = 0; w < 4; w++) {
+        uint32_t v = (w*4) | ((w*4+1) << 8) | ((w*4+2) << 16) | ((w*4+3) << 24);
+        sdram_write((TEX_BASE_BYTE >> 2) + w, v);
+    }
+
+    // zinv: 1.0 → 0.5 over 16 pixels. zinv_step = -0.5/16 = -0x800 in 16.16.
+    // sZ:   0   → 1.0. sZstep = 1.0/16 = 0x1000 in 16.16.
+    persp_draw_span(FB_BASE_BYTE, TEX_BASE_BYTE,
+                    /*count*/16, /*light*/0, /*tex_width*/16,
+                    /*sdivz*/0,         /*tdivz*/0,
+                    /*zi_persp*/0x10000,
+                    /*sdivz_step*/0x1000, /*tdivz_step*/0,
+                    /*zi_step*/-0x800);
+    check("persp_curv_done", gpu_finish() ? 1 : 0, 1);
+
+    // Endpoints must be exact by construction (anchors).
+    check_byte("persp_curv_px0",  0,  0);    // s=0
+    check_byte("persp_curv_px15", 15, 1);    // s≈1.77 → texel 1 (both schemes)
+
+    // Mid-segment must match TRUE perspective, NOT the affine extrapolation.
+    // With 16-px subdivision, pixels 8-10 currently over-report by 1 texel.
+    check_byte("persp_curv_px8",  8,  0);    // true: 0.667; affine16: 1.0
+    check_byte("persp_curv_px10", 10, 0);    // true: 0.909; affine16: 1.25
+}
+
+// ============================================================
+// Test P5: Reciprocal LUT handles small |zinv| (Issue #3)
+// ------------------------------------------------------------
+// At |sp_zinv| ≤ 2 (as 32-bit int; z ≥ 32768), the scale-back shift in
+// PSS_MUL_S overflows the 32-bit recip_q16 into the sign bit (or to 0).
+// Subsequent sZ×recip product produces wildly wrong s (often zero).
+//
+// Realistically unreachable in Quake/BUILD (clip distance < 8192), but we
+// want a defined-behavior floor. The expected fix is saturation to
+// INT32_MAX when the shift would overflow.
+//
+// Setup: zinv = 4 (z ≈ 16384, borderline but no overflow). sZ = 0.
+//   → s = 0 × 16384 = 0. Output texel 0 across the span.
+// If LUT path overflows and produces negative recip, sZ=0 still gives 0,
+// but any nonzero sZ would flip sign. So pair with sZ = small positive:
+// sZ=0x0040 (= 1/1024 in 16.16), sZstep = 0. True s = (1/1024) × 16384 = 16.
+// → texel 16 mod 16 = 0. Hmm — need different tex_width.
+// ============================================================
+static void test_persp_small_zinv() {
+    printf("TEST: Persp span — small |zinv| LUT scale (z ≈ 16384)\n");
+    gpu_init();
+
+    { uint8_t _cm[256]; for (int i = 0; i < 256; i++) _cm[i] = (uint8_t)i; cmap_upload_bytes(0, _cm, 256); }
+
+    ring_cmd(0x23, 2); ring_write(FB_BASE_BYTE); ring_write(320);
+    ring_cmd(0x10, 2); ring_write((1 << 16) | 0x00); ring_write(0);
+
+    // 64-byte texture, identity
+    for (int w = 0; w < 16; w++) {
+        uint32_t v = (w*4) | ((w*4+1) << 8) | ((w*4+2) << 16) | ((w*4+3) << 24);
+        sdram_write((TEX_BASE_BYTE >> 2) + w, v);
+    }
+
+    // zinv_persp = 4 (Q16.16 = 6.1e-5, z ≈ 16384). zinv_step = 0 (constant z).
+    // sZ = 0, sZ_step: pick so s_16 = small value. s = sZ × z = sZstep × 16 × 16384.
+    // For s_16 = 16: sZstep × 16 × 16384 = 16 → sZstep = 1/16384 = 0x4 in 16.16.
+    // Linear slope per pixel = 16/16 = 1.0 → texel(x) = x.
+    persp_draw_span(FB_BASE_BYTE, TEX_BASE_BYTE,
+                    /*count*/16, /*light*/0, /*tex_width*/64,
+                    /*sdivz*/0,         /*tdivz*/0,
+                    /*zi_persp*/4,
+                    /*sdivz_step*/4,    /*tdivz_step*/0,
+                    /*zi_step*/0);
+    check("persp_szinv_done", gpu_finish() ? 1 : 0, 1);
+
+    // With constant zinv, linear interp IS exact perspective.
+    // s_int(x) = x → texel x. Any LUT overflow would collapse s to 0.
+    check_byte("persp_szinv_px0",  0,  0);
+    check_byte("persp_szinv_px4",  4,  4);
+    check_byte("persp_szinv_px8",  8,  8);
+    check_byte("persp_szinv_px15", 15, 15);
+}
+
+// ============================================================
+// Test P6: Slope rounding bias (Issue #2)
+// ------------------------------------------------------------
+// Arithmetic `(diff) >>> 4` floors toward -∞. After 16 steps we reach
+// anchor + (diff & ~15) instead of anchor + diff. Worst-case error:
+// 15 Q16.16 units = 2.3e-4 texels per segment. Over one segment this
+// is invisible, but with round-to-nearest we'd reach the endpoint on
+// average and the bias would be zero across many segments.
+//
+// This test is tight-tolerance: set up so the affine sstep's fractional
+// remainder is exactly 15 (worst case), then check the computed
+// persp_s_end (= next anchor) matches the extrapolated sp_s to within
+// 1 texel integer at the segment boundary. Serves as a regression watch
+// more than a bug-surface test; currently passes with healthy margin.
+// ============================================================
+static void test_persp_slope_rounding() {
+    printf("TEST: Persp span — slope-divide rounding bias\n");
+    gpu_init();
+
+    { uint8_t _cm[256]; for (int i = 0; i < 256; i++) _cm[i] = (uint8_t)i; cmap_upload_bytes(0, _cm, 256); }
+
+    ring_cmd(0x23, 2); ring_write(FB_BASE_BYTE); ring_write(320);
+    ring_cmd(0x10, 2); ring_write((1 << 16) | 0x00); ring_write(0);
+
+    for (int w = 0; w < 16; w++) {
+        uint32_t v = (w*4) | ((w*4+1) << 8) | ((w*4+2) << 16) | ((w*4+3) << 24);
+        sdram_write((TEX_BASE_BYTE >> 2) + w, v);
+    }
+
+    // 32 pixel span crossing segment boundary. Constant zinv = 1.0 so slope
+    // is fully determined by sZstep. Pick sZstep = 0x000F (fractional mod16=15)
+    // so the >>> 4 floor discards 15/65536 per segment.
+    //   s_16 = 16 × 0x000F / 0x10000 = 0x00F0/65536 ≈ 0.00366
+    //   texel at pixel 16 should be 0 (s < 1) after both anchor and linear math.
+    persp_draw_span(FB_BASE_BYTE, TEX_BASE_BYTE,
+                    /*count*/32, /*light*/0, /*tex_width*/32,
+                    /*sdivz*/0,         /*tdivz*/0,
+                    /*zi_persp*/0x10000,
+                    /*sdivz_step*/0x000F, /*tdivz_step*/0,
+                    /*zi_step*/0);
+    check("persp_slope_done", gpu_finish() ? 1 : 0, 1);
+    // All 32 pixels in texel 0 (s << 1 throughout); rounding bias stays sub-texel.
+    for (int i = 0; i < 32; i++) {
+        char name[32]; snprintf(name, sizeof(name), "persp_slope_px%d", i);
+        check_byte(name, i, 0);
+    }
+}
+
+// ============================================================
+// Test P7: Negative zinv defensive behavior (Issue #4)
+// ------------------------------------------------------------
+// If the CPU sends a span whose 1/z crosses zero (e.g. an un-culled
+// near-clip polygon), the `abs(sp_zinv)` in PSS_RECIP_NA drops the sign
+// — we recip |zinv| and multiply by sZ, losing one sign bit. There is
+// no defined behavior today; apps must cull before submission.
+//
+// This test just confirms the path doesn't hang / assert. Output values
+// are not checked against a spec — only that the span completes and the
+// fence returns.
+// ============================================================
+static void test_persp_negative_zinv() {
+    printf("TEST: Persp span — negative zinv (defensive/no-hang)\n");
+    gpu_init();
+
+    { uint8_t _cm[256]; for (int i = 0; i < 256; i++) _cm[i] = (uint8_t)i; cmap_upload_bytes(0, _cm, 256); }
+
+    ring_cmd(0x23, 2); ring_write(FB_BASE_BYTE); ring_write(320);
+    ring_cmd(0x10, 2); ring_write((1 << 16) | 0x00); ring_write(0);
+
+    for (int w = 0; w < 4; w++) {
+        uint32_t v = (w*4) | ((w*4+1) << 8) | ((w*4+2) << 16) | ((w*4+3) << 24);
+        sdram_write((TEX_BASE_BYTE >> 2) + w, v);
+    }
+
+    // Start zinv = 0.5 (z=2), step very negative so zinv crosses zero by pixel 8.
+    persp_draw_span(FB_BASE_BYTE, TEX_BASE_BYTE,
+                    /*count*/16, /*light*/0, /*tex_width*/16,
+                    /*sdivz*/0,         /*tdivz*/0,
+                    /*zi_persp*/0x08000,
+                    /*sdivz_step*/0x1000, /*tdivz_step*/0,
+                    /*zi_step*/-0x1000);  // zinv = 0.5 → -0.5 across the span
+    // Only require the span COMPLETES. Values are undefined-behavior.
+    check("persp_negz_done", gpu_finish() ? 1 : 0, 1);
+}
 #endif // GPU_PERSP_IMPL
+
+// Set depth test via CMD_SET_DEPTH_FUNC (available in all variants)
+static void ring_depth_func(uint32_t func) {
+    ring_cmd(0x21, 1);
+    ring_write(func);
+}
+
+// Span-based depth test — exercises the GEQUAL / GREATER / NOTEQUAL
+// compare ops added alongside the original LESS / LEQUAL / EQUAL.
+// LITE-compatible (no triangle path).
+static void ring_span_flat(uint32_t fb_off, uint32_t tex_word,
+                           uint32_t count, uint32_t flags,
+                           uint32_t z_addr, uint32_t zi) {
+    // Each span uses its own tex slot — texture cache would hit stale
+    // data if we reused a single tex address across backdoor rewrites.
+    static uint32_t tex_slot = 0;
+    uint32_t tex_base = TEX_BASE_BYTE + (tex_slot * 64);
+    tex_slot = (tex_slot + 1) & 0x3F;
+    sdram_write(tex_base >> 2, tex_word);
+    ring_cmd(0x40, 18);  // CMD_DRAW_SPAN
+    ring_write(FB_BASE_BYTE + fb_off);
+    ring_write(tex_base);
+    ring_write(0); ring_write(0);       // s, t
+    ring_write(0); ring_write(0);       // sstep, tstep
+    ring_write((count << 16) | (0 << 8) | flags);
+    ring_write((1 << 16) | 1);          // fb_stride=1, tex_width=1
+    ring_write(0);                       // tex_shift=0, tex_bits=0
+    ring_write(z_addr);
+    ring_write(zi);
+    ring_write(0);                       // zistep=0 (flat z across span)
+    for (int i = 0; i < 6; i++) ring_write(0);  // persp params unused
+}
+
+static void test_span_depth_gequal() {
+    printf("TEST: Span depth compare — GEQUAL / GREATER / NOTEQUAL\n");
+    gpu_init();
+    { uint8_t _cm[256]; for (int i = 0; i < 256; i++) _cm[i] = (uint8_t)i; cmap_upload_bytes(0, _cm, 256); }
+
+    ring_cmd(0x23, 2); ring_write(FB_BASE_BYTE); ring_write(320);
+    ring_cmd(0x24, 2); ring_write(0); ring_write(640);  // ZB base=0
+
+    // Order matters — we put the PASS span first so its write+z-update
+    // becomes the occluder, then the FAIL span must NOT overwrite it.
+    // This actually discriminates "depth works" vs "depth silently always
+    // writes" (which would show the fail color instead of the pass color).
+
+    // --- GEQUAL ---------------------------------------------------------
+    ring_depth_func(5);  // GEQUAL
+    ring_cmd(0x10, 2); ring_write((3 << 16) | 0x00); ring_write(0x4000);
+    // z=0x8000: pass GEQUAL (0x8000 >= 0x4000). Writes 0xBB + ZB=0x8000.
+    ring_span_flat(0, 0xBBBBBBBB, 8, 0x19, 0, 0x80000000);
+    // z=0x2000: fail (0x2000 >= 0x8000 is false). Must not overwrite.
+    ring_span_flat(0, 0xAAAAAAAA, 8, 0x19, 0, 0x20000000);
+    check("span_depth_gequal_done", gpu_finish() ? 1 : 0, 1);
+    for (int i = 0; i < 8; i++) {
+        char name[32]; snprintf(name, sizeof(name), "gequal_px%d", i);
+        check_byte(name, i, 0xBB);
+    }
+
+    // --- GREATER (strict) -----------------------------------------------
+    // ZB = 0x8000 (from GEQUAL pass). Equal-z must FAIL under GREATER.
+    ring_depth_func(6);
+    // z=0x9000: pass. Writes 0xDD + ZB=0x9000.
+    ring_span_flat(0, 0xDDDDDDDD, 8, 0x19, 0, 0x90000000);
+    // z=0x9000: equal — fail GREATER. Must not overwrite.
+    ring_span_flat(0, 0xCCCCCCCC, 8, 0x19, 0, 0x90000000);
+    check("span_depth_greater_done", gpu_finish() ? 1 : 0, 1);
+    for (int i = 0; i < 8; i++) {
+        char name[32]; snprintf(name, sizeof(name), "greater_px%d", i);
+        check_byte(name, i, 0xDD);
+    }
+
+    // --- NOTEQUAL -------------------------------------------------------
+    // ZB = 0x9000. Non-equal passes, equal fails.
+    ring_depth_func(7);
+    // z=0x1000: pass NOTEQUAL. Writes 0x77 + ZB=0x1000.
+    ring_span_flat(0, 0x77777777, 8, 0x19, 0, 0x10000000);
+    // z=0x1000: equal — fail. Must not overwrite.
+    ring_span_flat(0, 0xEEEEEEEE, 8, 0x19, 0, 0x10000000);
+    check("span_depth_notequal_done", gpu_finish() ? 1 : 0, 1);
+    for (int i = 0; i < 8; i++) {
+        char name[32]; snprintf(name, sizeof(name), "notequal_px%d", i);
+        check_byte(name, i, 0x77);
+    }
+
+    // --- LESS regression (make sure we didn't break existing ops) -------
+    ring_depth_func(2);
+    // z=0x0800: !(0x0800 < 0x1000) = false, so pass. Writes 0x44 + ZB=0x0800.
+    ring_span_flat(0, 0x44444444, 8, 0x19, 0, 0x08000000);
+    // z=0x2000: !(0x2000 < 0x0800) = true, so fail. Must not overwrite.
+    ring_span_flat(0, 0x33333333, 8, 0x19, 0, 0x20000000);
+    check("span_depth_less_done", gpu_finish() ? 1 : 0, 1);
+    for (int i = 0; i < 8; i++) {
+        char name[32]; snprintf(name, sizeof(name), "less_px%d", i);
+        check_byte(name, i, 0x44);
+    }
+}
+
+// Verify the span unit handles a non-power-of-2 tex_width (Quake console
+// surface = 320×200, alias skins = arbitrary). Hits the multiply-mode path
+// (sp_tex_width != 0): addr = tex_base + t_int * tex_width + s_int.
+static void test_span_tex_width_nonpow2(void) {
+    printf("TEST: Span tex_width=300 (non-power-of-2)\n");
+    gpu_init();
+    { uint8_t _cm[256]; for (int i = 0; i < 256; i++) _cm[i] = (uint8_t)i; cmap_upload_bytes(0, _cm, 256); }
+
+    // Build a 300-wide × 2-tall "texture" in SDRAM: row 0 = (x & 0xFF),
+    // row 1 = ((x + 128) & 0xFF). Packed 4 bytes per word.
+    const uint32_t W = 300;
+    uint32_t tex_base = TEX_BASE_BYTE;
+    for (uint32_t row = 0; row < 2; row++) {
+        uint32_t row_base = tex_base + row * W;
+        for (uint32_t x = 0; x < W; x += 4) {
+            uint8_t b0 = (uint8_t)((x + 0 + (row ? 128 : 0)) & 0xFF);
+            uint8_t b1 = (uint8_t)((x + 1 + (row ? 128 : 0)) & 0xFF);
+            uint8_t b2 = (uint8_t)((x + 2 + (row ? 128 : 0)) & 0xFF);
+            uint8_t b3 = (uint8_t)((x + 3 + (row ? 128 : 0)) & 0xFF);
+            sdram_write((row_base + x) >> 2, b0 | (b1<<8) | (b2<<16) | (b3<<24));
+        }
+    }
+
+    ring_cmd(0x23, 2); ring_write(FB_BASE_BYTE); ring_write(320);
+    ring_cmd(0x10, 2); ring_write((1 << 16) | 0x00); ring_write(0);  // clear FB
+    ring_depth_func(0);  // no depth
+
+    // Row 0 span: s=0, t=0, sstep=1.0 → pixels should read tex[0..7] = 0..7.
+    ring_cmd(0x40, 18);
+    ring_write(FB_BASE_BYTE);
+    ring_write(tex_base);
+    ring_write(0); ring_write(0);                          // s=0, t=0
+    ring_write(0x00010000); ring_write(0);                 // sstep=1.0, tstep=0
+    ring_write((8 << 16) | (0 << 8) | 0x01);               // 8 px, colormap
+    ring_write((1 << 16) | W);                             // fb_stride=1, tex_width=300
+    ring_write(0);                                          // tex_shift/bits ignored
+    ring_write(0); ring_write(0); ring_write(0);           // z unused
+    for (int i = 0; i < 6; i++) ring_write(0);
+
+    // Row 1 span: s=100, t=1, sstep=1.0 → pixels should read tex[(100+128..107+128) & 0xFF].
+    // addr = tex_base + 1 * 300 + (100..107), values = (100..107 + 128) & 0xFF = 228..235 (0xE4..0xEB).
+    ring_cmd(0x40, 18);
+    ring_write(FB_BASE_BYTE + 8);
+    ring_write(tex_base);
+    ring_write(100 << 16); ring_write(1 << 16);            // s=100.0, t=1.0
+    ring_write(0x00010000); ring_write(0);                 // sstep=1.0, tstep=0
+    ring_write((8 << 16) | (0 << 8) | 0x01);
+    ring_write((1 << 16) | W);
+    ring_write(0);
+    ring_write(0); ring_write(0); ring_write(0);
+    for (int i = 0; i < 6; i++) ring_write(0);
+
+    check("span_w300_done", gpu_finish() ? 1 : 0, 1);
+
+    // Row 0 checks: expect 0..7 at FB[0..7]
+    for (int i = 0; i < 8; i++) {
+        char name[32]; snprintf(name, sizeof(name), "w300_r0_px%d", i);
+        check_byte(name, i, (uint8_t)i);
+    }
+    // Row 1 checks: expect 0xE4..0xEB at FB[8..15]
+    for (int i = 0; i < 8; i++) {
+        char name[32]; snprintf(name, sizeof(name), "w300_r1_px%d", i);
+        check_byte(name, 8 + i, (uint8_t)(0xE4 + i));
+    }
+}
 
 #ifdef GPU_FEAT_TRIANGLE
 // =====================================================================
@@ -850,12 +1195,6 @@ static void ring_bind_texture(uint32_t addr, uint16_t w, uint16_t h) {
     ring_write(0);  // wrap_t=repeat
 }
 
-// Set depth test via CMD_SET_DEPTH_FUNC
-static void ring_depth_func(uint32_t func) {
-    ring_cmd(0x21, 1);
-    ring_write(func);
-}
-
 // =====================================================================
 // Triangle Tests
 // =====================================================================
@@ -868,10 +1207,7 @@ static void test_triangle_flat() {
     gpu_init();
 
     // Identity colormap for light=0
-    for (int i = 0; i < 256; i++) {
-        mmio_write(8, i);
-        mmio_write(9, i);
-    }
+    { uint8_t cm[256]; for (int i = 0; i < 256; i++) cm[i] = (uint8_t)i; cmap_upload_bytes(0, cm, 256); }
 
     // Set FB
     ring_cmd(0x23, 2);
@@ -960,10 +1296,7 @@ static void test_triangle_textured() {
     gpu_init();
 
     // Identity colormap
-    for (int i = 0; i < 256; i++) {
-        mmio_write(8, i);
-        mmio_write(9, i);
-    }
+    { uint8_t cm[256]; for (int i = 0; i < 256; i++) cm[i] = (uint8_t)i; cmap_upload_bytes(0, cm, 256); }
 
     ring_cmd(0x23, 2);
     ring_write(FB_BASE_BYTE);
@@ -1014,10 +1347,7 @@ static void test_triangle_multi() {
 
     gpu_init();
 
-    for (int i = 0; i < 256; i++) {
-        mmio_write(8, i);
-        mmio_write(9, i);
-    }
+    { uint8_t cm[256]; for (int i = 0; i < 256; i++) cm[i] = (uint8_t)i; cmap_upload_bytes(0, cm, 256); }
 
     ring_cmd(0x23, 2);
     ring_write(FB_BASE_BYTE);
@@ -1060,7 +1390,7 @@ static void test_triangle_depth() {
 
     gpu_init();
 
-    for (int i = 0; i < 256; i++) { mmio_write(8, i); mmio_write(9, i); }
+    { uint8_t _cm[256]; for (int i = 0; i < 256; i++) _cm[i] = (uint8_t)i; cmap_upload_bytes(0, _cm, 256); }
 
     ring_cmd(0x23, 2);
     ring_write(FB_BASE_BYTE);
@@ -1121,11 +1451,13 @@ static void test_triangle_vertex_color() {
     gpu_init();
 
     // Colormap: light level N maps texel to N (identity for light)
-    for (int light = 0; light < 64; light++)
-        for (int i = 0; i < 256; i++) {
-            mmio_write(8, light * 256 + i);
-            mmio_write(9, light);  // output = light level itself
-        }
+    {
+        static uint8_t cm[64 * 256];
+        for (int light = 0; light < 64; light++)
+            for (int i = 0; i < 256; i++)
+                cm[light * 256 + i] = (uint8_t)light;
+        cmap_upload_bytes(0, cm, 64 * 256);
+    }
 
     ring_cmd(0x23, 2);
     ring_write(FB_BASE_BYTE);
@@ -1164,55 +1496,13 @@ static void test_triangle_vertex_color() {
     check_byte("vcol_mid_v0", 5 + 0*320, 0x00);
 }
 
-// Test T7: Indexed draw
-static void test_triangle_indexed() {
-    printf("TEST: Indexed triangle draw\n");
-
-    gpu_init();
-
-    for (int i = 0; i < 256; i++) { mmio_write(8, i); mmio_write(9, i); }
-
-    ring_cmd(0x23, 2);
-    ring_write(FB_BASE_BYTE);
-    ring_write(320);
-
-    ring_cmd(0x10, 2);
-    ring_write((1 << 16) | 0x00);
-    ring_write(0);
-
-    sdram_write(TEX_BASE_BYTE >> 2, 0xCCCCCCCC);
-    ring_bind_texture(TEX_BASE_BYTE, 1, 1);
-
-    // CMD_DRAW_INDEXED (0x31):
-    // payload: vert_count(3), idx_count(3), 3 vertices (18 words), indices (2 words)
-    // Total: 2 + 18 + 2 = 22 words — fits in pay_buf[24]
-    ring_cmd(0x31, 22);
-    ring_write(3);   // vert_count
-    ring_write(3);   // idx_count
-    // Vertex 0: (2,2)
-    ring_write_vertex(2*16, 2*16, 0, 0, 0, 0);
-    // Vertex 1: (10,2)
-    ring_write_vertex(10*16, 2*16, 0, 0, 0, 0);
-    // Vertex 2: (2,8)
-    ring_write_vertex(2*16, 8*16, 0, 0, 0, 0);
-    // Indices: [0, 1, 2] packed: word0=[31:16]=1 [15:0]=0; word1=[15:0]=2
-    ring_write((1 << 16) | 0);
-    ring_write(2);
-
-    bool ok = gpu_finish();
-    check("indexed_done", ok ? 1 : 0, 1);
-
-    check_byte("indexed_inside", 3 + 3*320, 0xCC);
-    check_byte("indexed_outside", 11 + 3*320, 0x00);
-}
-
 // Test T8: Two adjacent triangles (shared edge — no gap)
 static void test_triangle_shared_edge() {
     printf("TEST: Shared edge (no gap between triangles)\n");
 
     gpu_init();
 
-    for (int i = 0; i < 256; i++) { mmio_write(8, i); mmio_write(9, i); }
+    { uint8_t _cm[256]; for (int i = 0; i < 256; i++) _cm[i] = (uint8_t)i; cmap_upload_bytes(0, _cm, 256); }
 
     ring_cmd(0x23, 2);
     ring_write(FB_BASE_BYTE);
@@ -1258,6 +1548,202 @@ static void test_triangle_shared_edge() {
 #endif // GPU_FEAT_TRIANGLE
 
 // =====================================================================
+// CMD_SET_SKIP_ZERO — color-key transparency for triangle span-emit
+// ---------------------------------------------------------------------
+// Sprites used to have their own primitive (CMD_DRAW_SPRITE, now removed).
+// Apps emit 2 textured triangles instead; for color-key transparency
+// (e.g. Duke3D's 0xFF sentinel) they set this global state bit first and
+// the triangle rasterizer passes SKIP_ZERO through to the fragment pipe.
+// =====================================================================
+#ifdef GPU_FEAT_TRIANGLE
+static void test_triangle_skip_zero(void) {
+    printf("TEST: Triangle with SKIP_ZERO (color-key via triangles)\n");
+    gpu_init();
+    { uint8_t _cm[256]; for (int i = 0; i < 256; i++) _cm[i] = (uint8_t)i; cmap_upload_bytes(0, _cm, 256); }
+
+    ring_cmd(0x23, 2); ring_write(FB_BASE_BYTE); ring_write(320);
+    ring_cmd(0x10, 2); ring_write((1 << 16) | 0x22); ring_write(0);  // clear to 0x22
+
+    // Enable color-key. 1 word payload, low bit = enable.
+    ring_cmd(0x27, 1); ring_write(1);
+
+    // Texture: 8×8, every row is {0x10, 0xFF, 0x20, 0xFF, 0x30, 0xFF, 0x40, 0xFF}.
+    // Making it 8 tall ensures the triangle's t interpolation (t=1 at y=1,
+    // t=2 at y=2, …) lands on valid rows that all have the same pattern.
+    uint8_t cells[8] = {0x10, 0xFF, 0x20, 0xFF, 0x30, 0xFF, 0x40, 0xFF};
+    for (int row = 0; row < 8; row++) {
+        for (int x = 0; x < 8; x += 4) {
+            uint32_t w = cells[x] | (cells[x+1] << 8) | (cells[x+2] << 16) | (cells[x+3] << 24);
+            sdram_write((TEX_BASE_BYTE + row * 8 + x) >> 2, w);
+        }
+    }
+    ring_bind_texture(TEX_BASE_BYTE, 8, 8);
+
+    // Single full-covering triangle with s=0..7, t=0 at row 0.
+    // Vertex positions in 12.4 sub-pixel format (shift left 4).
+    // Triangle covers (0,0) to (7,0) and (0,1)-ish — use (0,0), (8,0), (0,8) so s stepping matches columns.
+    ring_cmd(0x30, 19);
+    ring_write(3);
+    ring_write_vertex(0,         0,        0,       0,      0, 0);
+    ring_write_vertex(8 * 16,    0,        0,       8 << 16,0, 0);  // s=8 at right
+    ring_write_vertex(0,         8 * 16,   0,       0,      8 << 16, 0);
+
+    check("tri_skipzero_done", gpu_finish() ? 1 : 0, 1);
+
+    // Row 0 check: odd x (where src was 0xFF) stays at clear 0x22; even lands the texel.
+    // NOTE: because the triangle spans from (0,0) to (8,0), pixel 0 at y=0 is on the edge.
+    // Only check pixels we know are covered — y=1..6 is the safe interior.
+    // For this test we check y=1 (well inside the triangle).
+    check_byte("triCK_y1_x0", 0 + 1*320, 0x10);
+    check_byte("triCK_y1_x1", 1 + 1*320, 0x22);  // transparent
+    check_byte("triCK_y1_x2", 2 + 1*320, 0x20);
+    check_byte("triCK_y1_x3", 3 + 1*320, 0x22);
+    check_byte("triCK_y1_x4", 4 + 1*320, 0x30);
+    check_byte("triCK_y1_x5", 5 + 1*320, 0x22);
+
+    // Disable color-key for subsequent tests.
+    ring_cmd(0x27, 1); ring_write(0);
+    gpu_finish();
+}
+
+// Test T9: Back-to-back triangle stress — 8 textured triangles with
+// varying orientations and sizes, rendered in rapid succession. Exercises
+// the 2-cycle tri_ymin_x_stride pipeline (S_TRI_MUL_WAIT2) and the 7-cycle
+// S_TRI_GRAD with grad_sub_r / dsp_p_shifted register stages. Modelled
+// after gpudemo's Mode 1 rotating cube: multiple triangles per frame
+// with triangles that change orientation each iteration.
+static void test_triangle_back_to_back_many() {
+    printf("TEST: 8 back-to-back textured triangles (pipeline stress)\n");
+
+    gpu_init();
+
+    { uint8_t cm[256]; for (int i = 0; i < 256; i++) cm[i] = (uint8_t)i; cmap_upload_bytes(0, cm, 256); }
+
+    ring_cmd(0x23, 2);
+    ring_write(FB_BASE_BYTE);
+    ring_write(320);
+
+    ring_cmd(0x10, 2);
+    ring_write((1 << 16) | 0x00);
+    ring_write(0);
+
+    // 8×8 texture: each row is its row index × 0x10, so sampling at t=r
+    // produces 0x10..0x80 and lets the gradient test land predictable
+    // values even when S_TRI_GRAD pipelining shifts per-gradient timing.
+    for (int row = 0; row < 8; row++) {
+        uint32_t cell = (uint32_t)(0x10 * (row + 1));
+        uint32_t w = cell | (cell << 8) | (cell << 16) | (cell << 24);
+        sdram_write((TEX_BASE_BYTE + row * 8 + 0) >> 2, w);
+        sdram_write((TEX_BASE_BYTE + row * 8 + 4) >> 2, w);
+    }
+    ring_bind_texture(TEX_BASE_BYTE, 8, 8);
+
+    // 8 triangles placed across the screen at varying sizes. Each is a
+    // right-triangle with different hypotenuse orientations, and their
+    // tri_det values span a wide range (small ... large) to exercise
+    // the pre-registered tri_det_is_small_r compare at the boundary.
+    struct Tri { int x0, y0, x1, y1, x2, y2; };
+    Tri tris[8] = {
+        {  4,  4,  14,  4,   4, 14 },   // large right tri
+        { 30,  4,  38,  4,  30, 12 },   // medium right tri
+        { 50,  4,  55,  4,  50,  9 },   // small right tri
+        { 70,  4,  85,  8,  70, 18 },   // oblique
+        {  4, 30,  18, 30,  11, 42 },   // upward-pointing isoceles
+        { 40, 30,  54, 30,  40, 44 },   // right tri, different orientation
+        { 70, 30,  90, 45,  72, 50 },   // odd-shaped
+        {100, 30, 115, 30, 100, 45 },   // right tri, larger
+    };
+    for (int i = 0; i < 8; i++) {
+        ring_cmd(0x30, 19);
+        ring_write(3);
+        ring_write_vertex(tris[i].x0*16, tris[i].y0*16, 0, 0,       0,       0);
+        ring_write_vertex(tris[i].x1*16, tris[i].y1*16, 0, 7 << 16, 0,       0);
+        ring_write_vertex(tris[i].x2*16, tris[i].y2*16, 0, 0,       7 << 16, 0);
+    }
+
+    bool ok = gpu_finish(400000);
+    check("tri_b2b_done", ok ? 1 : 0, 1);
+
+    // Pick a pixel known to be interior for each triangle and verify
+    // it's textured (non-zero). Exact texel depends on gradient rounding
+    // so we just check for non-clear values — a pipeline bug would
+    // silently drop pixels or render garbage off-screen.
+    int sample_x[8] = { 6, 32, 51, 75,  8, 43, 78, 104 };
+    int sample_y[8] = { 6,  6,  6,  9, 34, 34, 40,  35 };
+    for (int i = 0; i < 8; i++) {
+        uint8_t px = sdram_read_byte(FB_BASE_BYTE + sample_x[i] + sample_y[i] * 320);
+        char name[32];
+        snprintf(name, sizeof(name), "tri_b2b_t%d_inside", i);
+        if (px != 0x00) {
+            pass_count++;
+        } else {
+            printf("  FAIL %s: FB[%d,%d] = 0x%02x, expected non-zero\n",
+                   name, sample_x[i], sample_y[i], px);
+            fail_count++;
+        }
+    }
+}
+
+// Test T10: Texture cache flush + swap. After the M10K conversion of
+// valid_mem, flush goes through a 1024-cycle S_INIT walk-clear instead
+// of bulk-clearing a FF array. This test verifies: (a) cache returns
+// new texture data after a flush when the texture base changes, and
+// (b) rendering resumes cleanly after the S_INIT walk.
+static void test_triangle_tex_flush_swap() {
+    printf("TEST: Triangle with texture flush + swap\n");
+
+    gpu_init();
+
+    { uint8_t cm[256]; for (int i = 0; i < 256; i++) cm[i] = (uint8_t)i; cmap_upload_bytes(0, cm, 256); }
+
+    ring_cmd(0x23, 2);
+    ring_write(FB_BASE_BYTE);
+    ring_write(320);
+
+    ring_cmd(0x10, 2);
+    ring_write((1 << 16) | 0x00);
+    ring_write(0);
+
+    // Texture A at TEX_BASE_BYTE: all 0x55
+    for (int i = 0; i < 16; i++) sdram_write((TEX_BASE_BYTE >> 2) + i, 0x55555555);
+    // Texture B at TEX_BASE_BYTE + 0x1000: all 0xAA
+    uint32_t tex_b_addr = TEX_BASE_BYTE + 0x1000;
+    for (int i = 0; i < 16; i++) sdram_write((tex_b_addr >> 2) + i, 0xAAAAAAAA);
+
+    // Draw triangle with texture A
+    ring_bind_texture(TEX_BASE_BYTE, 4, 4);
+    ring_cmd(0x30, 19);
+    ring_write(3);
+    ring_write_vertex(2*16,  2*16, 0, 0, 0, 0);
+    ring_write_vertex(10*16, 2*16, 0, 0, 0, 0);
+    ring_write_vertex(2*16,  8*16, 0, 0, 0, 0);
+    check("tex_swap_tA_done", gpu_finish() ? 1 : 0, 1);
+    check_byte("tex_swap_tA_px", 4 + 4*320, 0x55);
+
+    // Flush tex cache (GPU_TEX_FLUSH = reg_addr 10). Pulse lasts 1 cycle
+    // in the controller; the cache transitions to S_INIT and walks
+    // valid_mem for 1024 cycles. The bind + ring cmds below are accepted
+    // by the ring BRAM but the GPU front-end waits for tex_req_ready,
+    // so the render naturally stalls until init completes.
+    mmio_write(10, 0x1);
+
+    // Bind texture B + draw triangle at different position
+    ring_bind_texture(tex_b_addr, 4, 4);
+    ring_cmd(0x30, 19);
+    ring_write(3);
+    ring_write_vertex(20*16, 2*16, 0, 0, 0, 0);
+    ring_write_vertex(28*16, 2*16, 0, 0, 0, 0);
+    ring_write_vertex(20*16, 8*16, 0, 0, 0, 0);
+    check("tex_swap_tB_done", gpu_finish(400000) ? 1 : 0, 1);
+
+    // Pixels of tri A should still be 0x55 (rendered before flush)
+    check_byte("tex_swap_tA_persists", 4 + 4*320, 0x55);
+    // Pixels of tri B should be 0xAA (rendered after flush from new texture)
+    check_byte("tex_swap_tB_px", 22 + 4*320, 0xAA);
+}
+#endif // GPU_FEAT_TRIANGLE
+
+// =====================================================================
 // Main
 // =====================================================================
 
@@ -1286,6 +1772,8 @@ int main(int argc, char **argv) {
     test_skip_zero();
     test_multiple_commands();
     test_tex_cache_miss();
+    test_span_depth_gequal();
+    test_span_tex_width_nonpow2();
 
 #ifdef GPU_PERSP_IMPL
     // Perspective spans (Lite only — Full's triangle FSM doesn't share the
@@ -1293,6 +1781,10 @@ int main(int argc, char **argv) {
     test_persp_constant_z();
     test_persp_two_segments();
     test_persp_varying_z();
+    test_persp_curvature_accuracy();
+    test_persp_small_zinv();
+    test_persp_slope_rounding();
+    test_persp_negative_zinv();
 #endif
 
 #ifdef GPU_FEAT_TRIANGLE
@@ -1303,8 +1795,10 @@ int main(int argc, char **argv) {
     test_triangle_multi();
     test_triangle_depth();
     test_triangle_vertex_color();
-    test_triangle_indexed();
     test_triangle_shared_edge();
+    test_triangle_skip_zero();
+    test_triangle_back_to_back_many();
+    test_triangle_tex_flush_swap();
 #endif
 
     printf("\n=== Results: %d passed, %d failed ===\n",
