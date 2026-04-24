@@ -247,6 +247,20 @@ static inline void of_gpu_kick(void) {
     GPU_RING_WRPTR = _gpu_wrptr;
 }
 
+/* Debug-only: verify the kick landed.  Reads GPU_RING_WRPTR back and
+ * traps if the hardware's wrptr doesn't match what we just wrote.  If
+ * a future hang comes back with "gpu_status=0 ring_empty=1 but I just
+ * submitted a fence", calling this right after of_gpu_kick() will
+ * surface a lost MMIO write immediately instead of waiting 2 seconds
+ * for the of_gpu_wait timeout. */
+static inline void of_gpu_kick_verified(void) {
+    GPU_RING_WRPTR = _gpu_wrptr;
+    uint32_t rb = GPU_RING_WRPTR & 0xFFFF;
+    if (rb != (_gpu_wrptr & 0xFFFF)) {
+        __builtin_trap();
+    }
+}
+
 static inline uint32_t of_gpu_fence(void) {
     uint32_t token = _gpu_fence_next++;
     _gpu_cmd_header(GPU_CMD_FENCE, 1);
