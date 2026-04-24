@@ -669,9 +669,11 @@ reg cmd_is_draw_triangles;
 // (emitted as 2 triangles) get the transparency treatment.
 reg        st_skip_zero;
 
-// Payload buffer — up to 19 words used (CMD_DRAW_SPAN = 18, CMD_DRAW_TRIANGLE = 19)
-reg [31:0] pay_buf [0:18];
-reg [4:0]  pay_idx;        // index into pay_buf (saturates at 19 when draining overflow)
+// Payload streaming state — ring_rd_data is routed directly to each
+// destination reg in S_PAY_DATA; no intermediate pay_buf array.
+// pay_idx saturates at 19 (any payload word past that still drains the
+// ring via pay_remaining but has nowhere to go).
+reg [4:0]  pay_idx;
 reg [23:0] pay_remaining;  // total payload words still to consume from the ring
                            // (matches cmd_payload_words width so multi-triangle
                            //  commands drain completely without desyncing the ring)
@@ -1353,19 +1355,124 @@ always @(posedge clk) begin
         end
 
         // ============================================================
-        // Payload — read words from BRAM (1 word per cycle)
+        // Payload — stream words directly to destination regs
         // ============================================================
+        // No intermediate pay_buf.  Each cycle, ring_rd_data holds the
+        // current payload word (advanced by the 1-cycle BRAM read); we
+        // route it straight to the right state reg based on the
+        // registered command type and the payload-word index pay_idx.
+        // Destinations live in regs that already exist (sp_*, st_*,
+        // v_*, etc.), so the only storage cost is the 5-bit pay_idx
+        // counter and pay_remaining — we save the 19×32 pay_buf array.
+        //
+        // pay_idx saturates at 19: any payload word past index 19
+        // (e.g. padding at the end of an oversized DRAW_TRIANGLES batch)
+        // is still drained from the ring so ring_rdptr ends up at the
+        // next command header, but has no destination reg to write.
         S_PAY_DATA: begin
-            // ring_rd_data has the current payload word.  pay_buf stores
-            // only the first 19 words; anything past that is still drained
-            // from the ring (ring_rdptr keeps advancing) so the next
-            // command's header is at the right position — critical for
-            // oversized payloads (e.g. multi-triangle draws).
-            if (pay_idx < 5'd19)
-                pay_buf[pay_idx] <= ring_rd_data;
-            if (pay_idx != 5'd19)  // saturate at 19 so we never OOB the 19-entry array
+            if (pay_idx != 5'd19)
                 pay_idx <= pay_idx + 5'd1;
             pay_remaining <= pay_remaining - 24'd1;
+
+            // Per-command dispatch.  The if-else chain mirrors the pre-
+            // decoded cmd_is_* one-hot flags set in S_DECODE — keeps the
+            // combinational cone to each destination reg short.
+            if (cmd_is_fence) begin
+                if (pay_idx == 5'd0) fence_reached <= ring_rd_data;
+            end
+            else if (cmd_is_clear) begin
+                if (pay_idx == 5'd0) begin
+                    clear_flags <= ring_rd_data[17:16];
+                    clear_color <= ring_rd_data[15:0];
+                end else if (pay_idx == 5'd1) begin
+                    clear_depth <= ring_rd_data[15:0];
+                end
+            end
+            else if (cmd_is_set_texture) begin
+                if (pay_idx == 5'd0) st_tex_addr  <= ring_rd_data;
+                else if (pay_idx == 5'd1) st_tex_width <= ring_rd_data[31:16];
+                // tex_height / format / wrap_s / wrap_t payload fields
+                // ignored — the datapath is I8-only, no wrap logic.  The
+                // firmware still emits them so the on-ring layout is
+                // stable across core revisions.
+            end
+            else if (cmd_is_set_depth_func) begin
+                if (pay_idx == 5'd0) st_depth_func <= ring_rd_data[2:0];
+            end
+            else if (cmd_is_set_fb) begin
+                if (pay_idx == 5'd0) st_fb_addr   <= ring_rd_data;
+                else if (pay_idx == 5'd1) st_fb_stride <= ring_rd_data[15:0];
+            end
+            else if (cmd_is_set_zb) begin
+                if (pay_idx == 5'd0) st_zb_addr   <= ring_rd_data;
+                else if (pay_idx == 5'd1) st_zb_stride <= ring_rd_data[15:0];
+            end
+            else if (cmd_is_set_skip_zero) begin
+                if (pay_idx == 5'd0) st_skip_zero <= ring_rd_data[0];
+            end
+            else if (cmd_is_draw_span) begin
+                case (pay_idx)
+                    5'd0: sp_fb_addr   <= ring_rd_data;
+                    5'd1: sp_tex_addr  <= ring_rd_data;
+                    5'd2: sp_s         <= ring_rd_data;
+                    5'd3: sp_t         <= ring_rd_data;
+                    5'd4: sp_sstep     <= ring_rd_data;
+                    5'd5: sp_tstep     <= ring_rd_data;
+                    5'd6: begin
+                        sp_count <= ring_rd_data[31:16];
+                        sp_light <= ring_rd_data[15:8];
+                        sp_flags <= ring_rd_data[7:0];
+                    end
+                    5'd7: begin
+                        sp_fb_stride <= ring_rd_data[31:16];
+                        sp_tex_width <= ring_rd_data[15:0];
+                    end
+                    // pay_idx == 5'd8 reserved (was tex_shift / tex_bits
+                    //   for the deleted shift-mode tex path)
+                    5'd9:  sp_z_addr     <= ring_rd_data;
+                    5'd10: sp_zi         <= ring_rd_data;
+                    5'd11: sp_zistep     <= ring_rd_data;
+`ifdef GPU_PERSP_IMPL
+                    5'd12: sp_sZ         <= ring_rd_data;
+                    5'd13: sp_tZ         <= ring_rd_data;
+                    5'd14: sp_zinv       <= ring_rd_data;
+                    5'd15: sp_sZstep     <= ring_rd_data;
+                    5'd16: sp_tZstep     <= ring_rd_data;
+                    5'd17: sp_zinv_step  <= ring_rd_data;
+`endif
+                    default: ;
+                endcase
+            end
+`ifdef GPU_FEAT_TRIANGLE
+            else if (cmd_is_draw_triangles) begin
+                // pay_idx 0 = vertex count (ignored; must be 3).
+                // Vertex layout: 6 words each, packed as
+                //   word 0: {x, y} (12.4 subpixel each)
+                //   word 1: {z,  --}  (16-bit unsigned depth in [31:16])
+                //   word 2: {s,  --}  (sign-extended tex s)
+                //   word 3: {t,  --}  (sign-extended tex t)
+                //   word 4: reserved
+                //   word 5: {--, --, --, r}  (flat light in low byte)
+                case (pay_idx)
+                    5'd1: begin v_x[0] <= ring_rd_data[31:16]; v_y[0] <= ring_rd_data[15:0]; end
+                    5'd2: v_z[0] <= ring_rd_data[31:16];
+                    5'd3: v_s[0] <= ring_rd_data[31:16];
+                    5'd4: v_t[0] <= ring_rd_data[31:16];
+                    5'd6: v_r[0] <= ring_rd_data[7:0];
+                    5'd7: begin v_x[1] <= ring_rd_data[31:16]; v_y[1] <= ring_rd_data[15:0]; end
+                    5'd8: v_z[1] <= ring_rd_data[31:16];
+                    5'd9: v_s[1] <= ring_rd_data[31:16];
+                    5'd10: v_t[1] <= ring_rd_data[31:16];
+                    5'd12: v_r[1] <= ring_rd_data[7:0];
+                    5'd13: begin v_x[2] <= ring_rd_data[31:16]; v_y[2] <= ring_rd_data[15:0]; end
+                    5'd14: v_z[2] <= ring_rd_data[31:16];
+                    5'd15: v_s[2] <= ring_rd_data[31:16];
+                    5'd16: v_t[2] <= ring_rd_data[31:16];
+                    5'd18: v_r[2] <= ring_rd_data[7:0];
+                    default: ;
+                endcase
+            end
+`endif
 
             if (pay_remaining <= 24'd1) begin
                 state <= S_EXECUTE;
@@ -1376,96 +1483,32 @@ always @(posedge clk) begin
         end
 
         // ============================================================
-        // Execute command — uses pre-decoded one-hot dispatch flags
-        // (cmd_is_*) instead of comparing cmd_type, to keep the
-        // combinational chain to per-command state regs short.
+        // Execute command — dispatch to action state
         // ============================================================
+        // Payload is already in its destination state regs by the time
+        // we land here, so S_EXECUTE just picks the right action state
+        // (or returns to S_IDLE for fire-and-forget commands).  Any
+        // per-command setup that depends on payload values (e.g. the
+        // perspective sub-FSM bring-up from sp_flags[SPAN_PERSP]) runs
+        // here, reading the regs S_PAY_DATA just wrote.
         S_EXECUTE: begin
-            if (cmd_is_nop) state <= S_IDLE;
-
-            else if (cmd_is_fence) begin
-                fence_reached <= pay_buf[0];
+            if (cmd_is_nop || cmd_is_fence
+                || cmd_is_set_texture || cmd_is_set_depth_func
+                || cmd_is_set_fb || cmd_is_set_zb
+                || cmd_is_set_skip_zero) begin
                 state <= S_IDLE;
             end
-
             else if (cmd_is_clear) begin
-                clear_flags <= pay_buf[0][17:16];
-                clear_color <= pay_buf[0][15:0];
-                clear_depth <= pay_buf[1][15:0];
-                state       <= S_CLEAR_INIT;
+                state <= S_CLEAR_INIT;
             end
-
-            else if (cmd_is_set_texture) begin
-                st_tex_addr   <= pay_buf[0];
-                st_tex_width  <= pay_buf[1][31:16];
-                // tex_height / format / wrap_s / wrap_t fields in the
-                // CMD_SET_TEXTURE payload are currently ignored — the
-                // datapath hardcodes I8 format, uses tex_width only for
-                // the multiply-mode address, and doesn't implement wrap.
-                // The firmware of_gpu_bind_texture helper still emits
-                // them so the on-ring command layout stays stable.
-                state <= S_IDLE;
-            end
-
-            else if (cmd_is_set_depth_func) begin
-                st_depth_func <= pay_buf[0][2:0];
-                state <= S_IDLE;
-            end
-
-            // CMD_SET_BLEND (0x22) / CMD_SET_ALPHA_REF (0x26) removed — the
-            // datapath never looked at st_blend_mode / st_alpha_ref and no
-            // SDK app calls these helpers.  If blending is wanted later,
-            // add it back when the actual combine logic lands.
-
-            else if (cmd_is_set_fb) begin
-                st_fb_addr   <= pay_buf[0];
-                st_fb_stride <= pay_buf[1][15:0];
-                state <= S_IDLE;
-            end
-
-            else if (cmd_is_set_zb) begin
-                st_zb_addr   <= pay_buf[0];
-                st_zb_stride <= pay_buf[1][15:0];
-                state <= S_IDLE;
-            end
-
-            // CMD_SET_SHADE (0x25) removed — the vertex-colour (Gouraud)
-            // R gradient was dropped during the FMax push; st_gouraud is
-            // no longer read by the interpolator.
-
             else if (cmd_is_draw_span) begin
-                // Load span parameters from payload
-                sp_fb_addr   <= pay_buf[0];
-                sp_tex_addr  <= pay_buf[1];
-                sp_s         <= pay_buf[2];
-                sp_t         <= pay_buf[3];
-                sp_sstep     <= pay_buf[4];
-                sp_tstep     <= pay_buf[5];
-                sp_count     <= pay_buf[6][31:16];
-                sp_light     <= pay_buf[6][15:8];
-                sp_flags     <= pay_buf[6][7:0];
-                sp_fb_stride <= pay_buf[7][31:16];
-                sp_tex_width <= pay_buf[7][15:0];
-                // pay_buf[8] (tex_shift / tex_bits fields) reserved —
-                // the shift-mode tex address path was removed along with
-                // the sequential span FSM; multiply-mode is universal
-                // now.  Word stays in the on-ring layout so firmware
-                // doesn't need to change.
-                sp_z_addr    <= pay_buf[9];
-                sp_zi        <= pay_buf[10];
-                sp_zistep    <= pay_buf[11];
 `ifdef GPU_STATS
                 stat_spans   <= stat_spans + 32'd1;
 `endif
 `ifdef GPU_PERSP_IMPL
-                // Perspective params (only used if SPAN_PERSP flag set)
-                sp_sZ         <= pay_buf[12];
-                sp_tZ         <= pay_buf[13];
-                sp_zinv       <= pay_buf[14];
-                sp_sZstep     <= pay_buf[15];
-                sp_tZstep     <= pay_buf[16];
-                sp_zinv_step  <= pay_buf[17];
-                persp_active      <= pay_buf[6][SPAN_PERSP];  // bit 5 of flags
+                // sp_flags holds the flag byte written at pay_idx=6; its
+                // SPAN_PERSP bit arms the perspective sub-FSM.
+                persp_active      <= sp_flags[SPAN_PERSP];
                 persp_first_done  <= 0;
                 persp_seg_a_ready <= 0;
                 persp_seg_b_ready <= 0;
@@ -1481,29 +1524,15 @@ always @(posedge clk) begin
                 state        <= S_SPAN_PIXEL;
 `endif
             end
-
-            // CMD_DRAW_SPANS removed: the batch machinery was half-
-            // implemented — only the first span was loaded, batch_remaining
-            // was set but never consumed, so subsequent spans in the batch
-            // never ran.  Firmware should emit N separate CMD_DRAW_SPAN
-            // commands instead; the ring buffer handles the throughput
-            // just as well.  See pay_buf-drain fix in S_PAY_DATA for the
-            // general multi-word payload handling.
-
 `ifdef GPU_FEAT_TRIANGLE
             else if (cmd_is_draw_triangles) begin
-                // pay_buf[0] = vertex_count (must be 3 for one triangle)
-                // pay_buf[1..6] = vertex 0, [7..12] = vertex 1, [13..18] = vertex 2
+                // Vertices already loaded into v_*[] in S_PAY_DATA;
+                // S_TRI_LOAD used to do the load in a separate cycle
+                // but is now a pass-through state kept only for
+                // schedule compatibility (setup_step reset).
                 state <= S_TRI_LOAD;
             end
-
-`endif // GPU_FEAT_TRIANGLE
-
-            else if (cmd_is_set_skip_zero) begin
-                st_skip_zero <= pay_buf[0][0];
-                state <= S_IDLE;
-            end
-
+`endif
             else state <= S_IDLE;
         end
 
@@ -2177,24 +2206,13 @@ always @(posedge clk) begin
 
 `ifdef GPU_FEAT_TRIANGLE
         // ============================================================
-        // Triangle: Load vertices from payload
+        // Triangle: Load vertices — now a pass-through
         // ============================================================
+        // Vertices are streamed directly into v_*[] during S_PAY_DATA,
+        // so S_TRI_LOAD no longer touches the vertex regs.  Kept as a
+        // 1-cycle passthrough that resets setup_step and hands off to
+        // S_TRI_SETUP; callers still dispatch here from S_EXECUTE.
         S_TRI_LOAD: begin
-            // Vertex 0: pay_buf[1..6]
-            v_x[0] <= pay_buf[1][31:16]; v_y[0] <= pay_buf[1][15:0];
-            v_z[0] <= pay_buf[2][31:16];
-            v_s[0] <= pay_buf[3][31:16]; v_t[0] <= pay_buf[4][31:16];
-            v_r[0] <= pay_buf[6][7:0];
-            // Vertex 1: pay_buf[7..12]
-            v_x[1] <= pay_buf[7][31:16]; v_y[1] <= pay_buf[7][15:0];
-            v_z[1] <= pay_buf[8][31:16];
-            v_s[1] <= pay_buf[9][31:16]; v_t[1] <= pay_buf[10][31:16];
-            v_r[1] <= pay_buf[12][7:0];
-            // Vertex 2: pay_buf[13..18]
-            v_x[2] <= pay_buf[13][31:16]; v_y[2] <= pay_buf[13][15:0];
-            v_z[2] <= pay_buf[14][31:16];
-            v_s[2] <= pay_buf[15][31:16]; v_t[2] <= pay_buf[16][31:16];
-            v_r[2] <= pay_buf[18][7:0];
             setup_step <= 0;
             state <= S_TRI_SETUP;
         end
