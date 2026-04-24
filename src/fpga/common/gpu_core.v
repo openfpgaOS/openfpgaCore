@@ -242,17 +242,36 @@ end
 // Port A: CPU writes (via MMIO cmap_data register)
 // Port B: GPU reads (during fragment processing, 1-cycle latency)
 
-// 16 KB colormap — 4096 × 32-bit. CPU writes a full word per MMIO access
-// (was byte-at-a-time — dropped 3/4 of the upload on each write). The
-// write address ignores the low 2 bits; the CPU's little-endian word
-// byte-order lands directly in bit lanes [7:0]/[15:8]/[23:16]/[31:24].
+// 16 KB colormap — 4096 × 32-bit (word-wide) with byte-laneing on the
+// read side.  The CPU writes one full 32-bit word per GPU_CMAP_DATA MMIO
+// — write address increments by 4 bytes per word, so cmap_wr_addr[13:2]
+// gives the word index.  The CPU is little-endian, so reg_wdata byte 0
+// lands at cmap_rd_word[7:0], byte 1 at [15:8], etc.
+//
+// For byte-granular tail writes after the main word loop (CPU-side
+// `GPU_CMAP_DATA = data[i]` for the last few bytes of an unaligned
+// upload), only the low byte of reg_wdata has valid data; the upper 24
+// bits are whatever was last in the CPU register.  Build the lane using
+// cmap_wr_addr[1:0] so each byte lands in its correct position inside
+// the word, preserving bytes the upper 24 bits would otherwise clobber.
 reg [31:0] cmap_bram [0:4095];
 
-// Port A: CPU write (full 32-bit)
+// Port A: CPU write (full 32-bit for word writes; byte-selected for tail)
 wire cmap_cpu_wr = reg_wr && (reg_addr == 4'd9);
 always @(posedge clk) begin
-    if (cmap_cpu_wr)
-        cmap_bram[cmap_wr_addr[13:2]] <= reg_wdata;
+    if (cmap_cpu_wr) begin
+        if (cmap_wr_addr[1:0] == 2'd0) begin
+            cmap_bram[cmap_wr_addr[13:2]] <= reg_wdata;
+        end else begin
+            // Byte-granular tail: write only the targeted lane.
+            case (cmap_wr_addr[1:0])
+                2'd1: cmap_bram[cmap_wr_addr[13:2]][15: 8] <= reg_wdata[7:0];
+                2'd2: cmap_bram[cmap_wr_addr[13:2]][23:16] <= reg_wdata[7:0];
+                2'd3: cmap_bram[cmap_wr_addr[13:2]][31:24] <= reg_wdata[7:0];
+                default: ;
+            endcase
+        end
+    end
 end
 
 // Port B: GPU read
