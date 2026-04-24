@@ -144,9 +144,11 @@ firmware: bootloader os
 # Optional build knobs forwarded to Quartus as --verilog_macro=<NAME>.
 # The GPU is a single-config core — VARIANT_DEFS is now used only for
 # optional debug flags like GPU_DEBUG / GPU_STATS (see gpu_config.vh).
-# Example: VARIANT_DEFS="GPU_DEBUG GPU_STATS" turns on the stray-write
-# latch + pixel/span counters.
-VARIANT_DEFS ?=
+# GPU_DEBUG is on by default while we're chasing the gpudemo-freeze-
+# after-N-frames issue: its stray-write latch + trap readback is
+# cheap (~50 FFs) and the trap dump is useless without it.  Set
+# VARIANT_DEFS="" explicitly on the make line for a strip-out build.
+VARIANT_DEFS ?= GPU_DEBUG
 VERILOG_MACROS = $(foreach d,$(VARIANT_DEFS),--verilog_macro="$(d)")
 
 # `compile` is kept as an alias for `build` so old muscle memory and

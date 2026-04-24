@@ -498,8 +498,18 @@ void fatal_trap(trap_frame_t *frame) {
      * GPU_DBG_BADCNT at 0x4A000034 holds the total count of violations.
      * If hit=1, the GPU *did* write outside the FB — the user's
      * GPU-writing-somewhere hypothesis is confirmed. */
-    uint32_t gpu_bad = *(volatile uint32_t *)0x4A000030u;
-    uint32_t gpu_cnt = *(volatile uint32_t *)0x4A000034u;
+    uint32_t gpu_bad    = *(volatile uint32_t *)0x4A000030u;
+    uint32_t gpu_cnt    = *(volatile uint32_t *)0x4A000034u;
+    uint32_t gpu_status = *(volatile uint32_t *)0x4A000014u;
+    uint32_t gpu_rdptr  = *(volatile uint32_t *)0x4A000010u;
+    uint32_t gpu_fence  = *(volatile uint32_t *)0x4A000018u;
+    trap_uart_puts("gpu_status=");
+    trap_uart_hex(gpu_status);
+    trap_uart_puts(" rdptr=");
+    trap_uart_hex(gpu_rdptr);
+    trap_uart_puts(" fence=");
+    trap_uart_hex(gpu_fence);
+    trap_uart_puts("\n");
     trap_uart_puts("gpu_bad_waddr=");
     trap_uart_hex(gpu_bad);
     trap_uart_puts(" (hit=");

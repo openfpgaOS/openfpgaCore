@@ -265,8 +265,32 @@ static inline int of_gpu_fence_reached(uint32_t token) {
 }
 
 static inline void of_gpu_wait(uint32_t token) {
-    while (!of_gpu_fence_reached(token))
-        ;
+    /* ~2-second bounded spin — if the GPU hangs (fb_acc never flushes,
+     * tex cache stuck in fill, pipeline deadlocked), the old unbounded
+     * spin silently froze the machine with no diagnostic.  Timeout
+     * triggers an illegal-instruction trap so fatal_trap dumps the GPU
+     * state; the interesting registers to inspect on the trap side are:
+     *   GPU_STATUS    (0x14) — main state, pipeline flags, FBSS, tex
+     *   GPU_RING_RDPTR (0x10) — where the GPU last stopped fetching
+     *   GPU_DBG_BADWR  (0x30) — first stray M_WR address (GPU_DEBUG)
+     *
+     * Uses the rdcycle CSR (RV32I standard) so we don't depend on the
+     * OS timer MMIO. */
+    uint32_t start_lo, start_hi, tmp;
+    __asm__ volatile ("1: rdcycleh %0; rdcycle %1; rdcycleh %2; bne %0,%2,1b"
+                      : "=&r"(start_hi), "=&r"(start_lo), "=&r"(tmp));
+    while (!of_gpu_fence_reached(token)) {
+        uint32_t now_lo, now_hi;
+        __asm__ volatile ("1: rdcycleh %0; rdcycle %1; rdcycleh %2; bne %0,%2,1b"
+                          : "=&r"(now_hi), "=&r"(now_lo), "=&r"(tmp));
+        /* 100 MHz × 2 s = 200M cycles; bail on the high word to avoid
+         * a 64-bit subtract in the inner poll. */
+        uint64_t delta = (((uint64_t)now_hi << 32) | now_lo)
+                       - (((uint64_t)start_hi << 32) | start_lo);
+        if (delta > 200000000ull) {
+            __builtin_trap();  /* → illegal-instruction trap, mcause=2 */
+        }
+    }
 }
 
 static inline void of_gpu_finish(void) {
