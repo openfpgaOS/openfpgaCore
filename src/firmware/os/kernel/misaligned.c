@@ -430,17 +430,27 @@ static void trap_uart_puts(const char *s) {
 void fatal_trap(trap_frame_t *frame) {
     /* Shout cause/mepc/mtval to UART first so the host sees it even
      * if the terminal / screen has been torn down.  Format:
-     *   !T:<mcause> p=<mepc> t=<mtval> s=<sp> r=<ra>\n
-     */
-    trap_uart_puts("!T:");
+     *   ==TRAP==
+     *   mcause=<>  mepc=<>  mtval=<>  mstatus=<>
+     *   sp=<>  ra=<>
+     *
+     * Reading mstatus here (not from the frame — the trap entry
+     * doesn't save it) tells us MIE/MPIE/MPP at trap time, which
+     * pinpoints traps taken with IRQs masked / from nested context. */
+    uint32_t mstatus_v;
+    __asm__ volatile ("csrr %0, mstatus" : "=r"(mstatus_v));
+
+    trap_uart_puts("\n==TRAP==\nmcause=");
     trap_uart_hex(frame->mcause);
-    trap_uart_puts(" p=");
+    trap_uart_puts(" mepc=");
     trap_uart_hex(frame->mepc);
-    trap_uart_puts(" t=");
+    trap_uart_puts(" mtval=");
     trap_uart_hex(frame->mtval);
-    trap_uart_puts(" s=");
+    trap_uart_puts(" mstatus=");
+    trap_uart_hex(mstatus_v);
+    trap_uart_puts("\nsp=");
     trap_uart_hex(frame->regs[2]);
-    trap_uart_puts(" r=");
+    trap_uart_puts(" ra=");
     trap_uart_hex(frame->regs[1]);
     trap_uart_puts("\n");
 
@@ -465,15 +475,19 @@ void fatal_trap(trap_frame_t *frame) {
         trap_uart_puts("\n");
     }
 
-    /* Also print the saved x-regs from the trap frame — gives us whatever
-     * was in ra/gp/fp/caller-saved regs at fault time. */
+    /* Also print all 32 x-regs from the trap frame — gives us whatever
+     * was in ra/gp/fp/caller-saved/temp regs at fault time. */
     trap_uart_puts("regs:");
-    for (int i = 0; i < 16; i++) {
-        if ((i & 3) == 0) trap_uart_puts("\n ");
-        trap_uart_hex(frame->regs[i]);
+    for (int i = 0; i < 32; i++) {
+        if ((i & 3) == 0) {
+            trap_uart_puts("\n x");
+            trap_uart_hex((uint32_t)i);
+            trap_uart_puts(":");
+        }
         trap_uart_puts(" ");
+        trap_uart_hex(frame->regs[i]);
     }
-    trap_uart_puts("\n");
+    trap_uart_puts("\n==END==\n");
 
     /* Halt forever — use asm to prevent compiler from optimizing this away */
     __asm__ volatile("1: j 1b");
