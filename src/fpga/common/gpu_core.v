@@ -247,7 +247,7 @@ always @(*) begin
 end
 
 // ================================================================
-// Stray-write diagnostic
+// Stray-write diagnostic (gated behind GPU_DEBUG)
 // ================================================================
 // Latches the FIRST M_WR AXI write whose awaddr is outside the 4 MB
 // framebuffer band 0x10000000..0x103FFFFF.  That band covers the three
@@ -257,11 +257,14 @@ end
 // The latch holds the first violator; bad_waddr_count ticks on every
 // subsequent violation so the CPU can distinguish a one-shot glitch
 // from a sustained stream.
+//
+// Off by default (no ALM cost in production synth); enable via
+// +define+GPU_DEBUG when chasing DMA-corruption symptoms.
+`ifdef GPU_DEBUG
 reg [31:0] bad_waddr_latch;
 reg        bad_waddr_hit;
 reg [15:0] bad_waddr_count;
 wire       waddr_in_fb_band = (m_wr_awaddr[31:22] == 10'b0001_0000_00);
-// Sample on the cycle m_wr_awvalid rises (address is launched).
 reg        m_wr_awvalid_d;
 always @(posedge clk) begin
     if (reset_n == 1'b0) begin
@@ -271,7 +274,6 @@ always @(posedge clk) begin
         m_wr_awvalid_d  <= 1'b0;
     end else begin
         m_wr_awvalid_d <= m_wr_awvalid;
-        // Rising edge of awvalid (request launch) → sample addr.
         if (m_wr_awvalid && !m_wr_awvalid_d && !waddr_in_fb_band) begin
             if (!bad_waddr_hit) begin
                 bad_waddr_latch <= m_wr_awaddr;
@@ -282,6 +284,12 @@ always @(posedge clk) begin
         end
     end
 end
+`else
+// GPU_DEBUG off: MMIO reads of 0x30 / 0x34 return 0.
+wire [31:0] bad_waddr_latch = 32'b0;
+wire        bad_waddr_hit   = 1'b0;
+wire [15:0] bad_waddr_count = 16'b0;
+`endif
 
 // ================================================================
 // Colormap BRAM — 16 KB dual-port
@@ -1467,7 +1475,9 @@ always @(posedge clk) begin
                 sp_z_addr    <= pay_buf[9];
                 sp_zi        <= pay_buf[10];
                 sp_zistep    <= pay_buf[11];
+`ifdef GPU_STATS
                 stat_spans   <= stat_spans + 32'd1;
+`endif
 `ifdef GPU_PERSP_IMPL
                 // Perspective params (only used if SPAN_PERSP flag set)
                 sp_sZ         <= pay_buf[12];
@@ -1660,7 +1670,9 @@ always @(posedge clk) begin
         // ============================================================
         S_SPAN_FB: begin
             if (!frag_discard) begin
+`ifdef GPU_STATS
                 stat_pixels <= stat_pixels + 32'd1;
+`endif
 
                 begin : fb_accumulate
                     reg [31:0] pixel_word_addr;
@@ -1914,7 +1926,9 @@ always @(posedge clk) begin
                             fbss <= FBSS_FLUSH_W_RSP;
                         end else begin
                             // Fast path: accumulate into current word
+`ifdef GPU_STATS
                             stat_pixels  <= stat_pixels + 32'd1;
+`endif
                             fb_acc_valid <= 1;
                             fb_acc_addr  <= p3_word_addr;
                             case (p3_byte_lane)
@@ -1949,7 +1963,9 @@ always @(posedge clk) begin
                             pw_addr = fbss_pend_addr & 32'hFFFFFFFC;
                             pw_lane = fbss_pend_addr[1:0];
 
+`ifdef GPU_STATS
                             stat_pixels  <= stat_pixels + 32'd1;
+`endif
                             fb_acc_valid <= 1;
                             fb_acc_addr  <= pw_addr;
                             fb_acc_data  <= 32'b0;
@@ -2685,7 +2701,9 @@ always @(posedge clk) begin
             if (tri_xmin > tri_xmax || tri_ymin > tri_ymax) begin
                 state <= S_IDLE;
             end else begin
+`ifdef GPU_STATS
             stat_triangles <= stat_triangles + 32'd1;
+`endif
             tri_active <= 1;
             tri_cur_x <= tri_xmin;
             tri_cur_y <= tri_ymin;
@@ -2769,7 +2787,9 @@ always @(posedge clk) begin
                     sp_z_addr    <= tri_zb_row_addr + {tri_span_x_start, 1'b0};
                     sp_zi        <= tri_span_z_start;
                     sp_zistep    <= grad_z_dx <<< 4;
+`ifdef GPU_STATS
                     stat_spans   <= stat_spans + 32'd1;
+`endif
 `ifdef GPU_PERSP_IMPL
                     // Triangles are affine — disarm perspective.
                     persp_active      <= 0;

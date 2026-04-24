@@ -175,6 +175,7 @@ gpu: $(GPU_DIR)/V$(GPU_TOP)
 
 $(GPU_DIR)/V$(GPU_TOP): $(GPU_SRCS) $(GPU_CPP)
 	$(VERILATOR) $(VERILATOR_FLAGS) --top-module $(GPU_TOP) --Mdir $(GPU_DIR) \
+		+define+GPU_STATS +define+GPU_DEBUG \
 		-CFLAGS -DGPU_PERSP_IMPL \
 		-CFLAGS -DGPU_FEAT_TRIANGLE \
 		-I$(COMMON_DIR) \
