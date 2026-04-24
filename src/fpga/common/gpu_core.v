@@ -113,6 +113,9 @@ assign dbg_tri_det = 32'd0;
 //                             addr post-increments by 4)
 // 0x28  GPU_TEX_FLUSH   W   Flush texture cache (write any value)
 // 0x2C  GPU_STAT_SPANS  R   Span counter
+// 0x30  GPU_DBG_BADWR   R   First FB-range-violating M_WR awaddr since reset
+//                           (bit 0 = ever_violated flag; bits [31:2] = addr>>2)
+// 0x34  GPU_DBG_BADCNT  R   Count of M_WR writes outside 0x10000000..0x10400000
 
 // Ring BRAM: 16 KB = 4096 words, dual-port M10K
 // Port A: CPU writes via MMIO (GPU_RING_DATA)
@@ -232,8 +235,52 @@ always @(*) begin
         4'd6:    reg_rdata = fence_reached;
         4'd7:    reg_rdata = stat_pixels;
         4'd11:   reg_rdata = stat_spans;
+        // Debug: first FB-range-violating M_WR awaddr.  The GPU only ever
+        // should write to the framebuffer band (0x10000000..0x103FFFFF);
+        // if a stray address leaks out, latch it so the CPU can read it
+        // back after a crash.  bad_waddr_hit sits in bit 0 of the latch
+        // (addresses are word-aligned so bits[1:0] are always zero).
+        4'd12:   reg_rdata = {bad_waddr_latch[31:1], bad_waddr_hit};
+        4'd13:   reg_rdata = bad_waddr_count;
         default: reg_rdata = 32'b0;
     endcase
+end
+
+// ================================================================
+// Stray-write diagnostic
+// ================================================================
+// Latches the FIRST M_WR AXI write whose awaddr is outside the 4 MB
+// framebuffer band 0x10000000..0x103FFFFF.  That band covers the three
+// 320x240 framebuffers (0x10000000, 0x10100000, 0x10200000), the
+// terminal FB at 0x50300000 is never touched by the GPU, and app text
+// begins at 0x10400000 so any write >= 0x10400000 is a genuine escape.
+// The latch holds the first violator; bad_waddr_count ticks on every
+// subsequent violation so the CPU can distinguish a one-shot glitch
+// from a sustained stream.
+reg [31:0] bad_waddr_latch;
+reg        bad_waddr_hit;
+reg [15:0] bad_waddr_count;
+wire       waddr_in_fb_band = (m_wr_awaddr[31:22] == 10'b0001_0000_00);
+// Sample on the cycle m_wr_awvalid rises (address is launched).
+reg        m_wr_awvalid_d;
+always @(posedge clk) begin
+    if (reset_n == 1'b0) begin
+        bad_waddr_latch <= 32'b0;
+        bad_waddr_hit   <= 1'b0;
+        bad_waddr_count <= 16'b0;
+        m_wr_awvalid_d  <= 1'b0;
+    end else begin
+        m_wr_awvalid_d <= m_wr_awvalid;
+        // Rising edge of awvalid (request launch) → sample addr.
+        if (m_wr_awvalid && !m_wr_awvalid_d && !waddr_in_fb_band) begin
+            if (!bad_waddr_hit) begin
+                bad_waddr_latch <= m_wr_awaddr;
+                bad_waddr_hit   <= 1'b1;
+            end
+            if (bad_waddr_count != 16'hFFFF)
+                bad_waddr_count <= bad_waddr_count + 1'b1;
+        end
+    end
 end
 
 // ================================================================

@@ -491,6 +491,23 @@ void fatal_trap(trap_frame_t *frame) {
         }
         trap_uart_puts("\n");
     }
+    /* Read GPU's stray-write latch.  GPU_DBG_BADWR at 0x4A000030 holds
+     * the first M_WR AXI write whose address was outside the 4 MB
+     * framebuffer band (0x10000000..0x103FFFFF); bit 0 is the "ever
+     * fired" flag, bits [31:2] are the violating addr's word index.
+     * GPU_DBG_BADCNT at 0x4A000034 holds the total count of violations.
+     * If hit=1, the GPU *did* write outside the FB — the user's
+     * GPU-writing-somewhere hypothesis is confirmed. */
+    uint32_t gpu_bad = *(volatile uint32_t *)0x4A000030u;
+    uint32_t gpu_cnt = *(volatile uint32_t *)0x4A000034u;
+    trap_uart_puts("gpu_bad_waddr=");
+    trap_uart_hex(gpu_bad);
+    trap_uart_puts(" (hit=");
+    trap_uart_putb('0' + (gpu_bad & 1));
+    trap_uart_puts(" count=");
+    trap_uart_hex(gpu_cnt);
+    trap_uart_puts(")\n");
+
     /* Also dump 4 words at ra (the caller). If the app's text got
      * overwritten by a stray DMA, the jal at ra-4 will show garbage. */
     if (ra >= 0x10000000u && ra < 0x14000000u) {
