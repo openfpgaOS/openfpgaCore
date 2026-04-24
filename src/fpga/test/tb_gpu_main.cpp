@@ -1744,6 +1744,240 @@ static void test_triangle_tex_flush_swap() {
 #endif // GPU_FEAT_TRIANGLE
 
 // =====================================================================
+// gpudemo Mode 0 replay — reproduce the ~270-frame freeze in Verilator
+// =====================================================================
+//
+// gpudemo's Mode 0 renders a Wolfenstein-style raycaster.  Per frame:
+//   - ~60 horizontal floor spans   (SPAN_COLORMAP)
+//   - ~60 horizontal ceiling spans (SPAN_COLORMAP)
+//   - ~320 vertical wall spans     (SPAN_COLORMAP | SPAN_COLUMN)
+//   - 1 CMD_FENCE at the end
+//
+// On hardware the app freezes after ~108-300 frames with the GPU
+// drained to IDLE but fence_reached short of the app's target and
+// gpu_bad_waddr hit=1 (stray write caught outside the FB band).
+// This test replays the command pattern for many frames and watches
+// for:
+//   (a) fence lag between submissions and completions
+//   (b) any address escape outside 0x080000..0x08FFFF (our FB band
+//       in the scaled-down testbench address space)
+//   (c) timeouts in gpu_wait_fence
+//
+// If the hang reproduces here, we have a deterministic Verilator
+// repro and can trace every cycle at the freeze.  If it DOESN'T
+// reproduce, the bug is at the CPU↔GPU boundary (axi_periph_slave
+// or MMIO write race) which this harness doesn't exercise.
+
+/* Ring is 16 KB = 4096 words = 215 CMD_DRAW_SPAN commands max in flight.
+ * gpudemo's real Mode 0 submits ~440 spans per frame; it only works because
+ * the SDK's `_gpu_ring_ensure()` blocks until the GPU has drained enough.
+ * This simplified harness submits-then-waits, so we keep each frame below
+ * the ring size.  The FSM-level behaviour we're hunting (GPU drains to
+ * idle with fence lagging) doesn't depend on exactly 380 spans — any
+ * many-frames-in-sequence pattern will trip it if it's real. */
+static void submit_mode0_frame(uint32_t fb_base, uint32_t wall_tex, uint32_t floor_tex,
+                                int fb_cycle) {
+    const uint32_t SPAN_COLORMAP = 0x01;
+    const uint32_t SPAN_COLUMN   = 0x02;
+    /* Bind wall tex for the column pass. */
+    ring_cmd(0x20, 4);              // CMD_SET_TEXTURE
+    ring_write(wall_tex);
+    ring_write((64u << 16) | 64u);  // width=64, height=64
+    ring_write(0);
+    ring_write(0);
+    /* Point the GPU at the current FB buffer for this "frame". */
+    ring_cmd(0x23, 2);              // CMD_SET_FB
+    ring_write(fb_base);
+    ring_write(320);
+    /* 10 horizontal floor spans. */
+    for (int y = 120; y < 130; y++) {
+        ring_cmd(0x40, 18);         // CMD_DRAW_SPAN
+        ring_write(fb_base + y * 320);          // fb_addr
+        ring_write(floor_tex);                  // tex_addr
+        ring_write((uint32_t)(y * 0x1234));     // s (arbitrary walk)
+        ring_write((uint32_t)(fb_cycle * 0x55)); // t (varies per frame)
+        ring_write(0x00010000);                 // sstep = 1.0
+        ring_write(0x00000000);                 // tstep = 0
+        ring_write((320u << 16) | (0 << 8) | SPAN_COLORMAP);
+        ring_write((1u << 16) | 64u);           // fb_stride=1, tex_width=64
+        ring_write(0);
+        ring_write(0); ring_write(0); ring_write(0);
+        ring_write(0); ring_write(0); ring_write(0);
+        ring_write(0); ring_write(0); ring_write(0);
+    }
+    /* 50 vertical wall columns — 16-pixel tall at each x. */
+    for (int x = 0; x < 50; x++) {
+        int draw_start = 100;
+        int span_count = 16;
+        uint32_t col_fb = fb_base + draw_start * 320 + x;
+        ring_cmd(0x40, 18);
+        ring_write(col_fb);
+        ring_write(wall_tex);
+        ring_write((uint32_t)((x & 63) << 16));   // s = x mod tex width
+        ring_write(0);                            // t
+        ring_write(0);                            // sstep = 0 (column mode)
+        ring_write(0x00010000);                   // tstep = 1.0
+        ring_write(((uint32_t)span_count << 16) | (0 << 8)
+                   | SPAN_COLORMAP | SPAN_COLUMN);
+        ring_write((320u << 16) | 64u);           // fb_stride=320, tex_width=64
+        ring_write(0);
+        ring_write(0); ring_write(0); ring_write(0);
+        ring_write(0); ring_write(0); ring_write(0);
+        ring_write(0); ring_write(0); ring_write(0);
+    }
+}
+
+static void test_gpudemo_mode0_replay(void) {
+    printf("TEST: gpudemo Mode 0 replay (multi-frame raycaster command stream)\n");
+    gpu_init();
+
+    /* Identity colormap (light=0 row). */
+    { uint8_t cm[256]; for (int i = 0; i < 256; i++) cm[i] = (uint8_t)i; cmap_upload_bytes(0, cm, 256); }
+
+    /* Small non-trivial textures. */
+    const uint32_t WALL_TEX  = TEX_BASE_BYTE;
+    const uint32_t FLOOR_TEX = TEX_BASE_BYTE + 64 * 64;   /* 4 KB apart */
+    for (uint32_t w = 0; w < (64 * 64) / 4; w++) {
+        sdram_write((WALL_TEX  >> 2) + w, 0x80808080u + w);
+        sdram_write((FLOOR_TEX >> 2) + w, 0x40404040u + w);
+    }
+
+    /* Three FBs — rotate across frames like gpudemo's triple-buffer. */
+    const uint32_t FBS[3] = { FB_BASE_BYTE, FB_BASE_BYTE + 0x14000, FB_BASE_BYTE + 0x28000 };
+
+    const int N_FRAMES = 500;
+    int last_fence_ok = 0;
+    for (int f = 0; f < N_FRAMES; f++) {
+        submit_mode0_frame(FBS[f % 3], WALL_TEX, FLOOR_TEX, f);
+        bool ok = gpu_finish(500000);
+        if (!ok) {
+            printf("  FAIL: frame %d (%d/%04x) gpu_wait_fence timed out\n", f, f, f);
+            printf("  stats: stat_pixels=%u stat_spans=%u\n",
+                   tb->stat_pixels, tb->stat_spans);
+            fail_count++;
+            break;
+        }
+        last_fence_ok = f;
+        if ((f & 0x3F) == 0)
+            printf("  frame %d ok (stat_pixels=%u stat_spans=%u)\n",
+                   f, tb->stat_pixels, tb->stat_spans);
+    }
+    printf("  gpudemo replay: %d/%d frames completed\n", last_fence_ok + 1, N_FRAMES);
+    check("gpudemo_mode0_replay", last_fence_ok == N_FRAMES - 1 ? 1 : 0, 1);
+}
+
+// =====================================================================
+// Simulated-MMIO-drop variant of the gpudemo replay
+// =====================================================================
+// Hypothesis: on hardware, GPU_RING_DATA MMIO writes are occasionally
+// lost — some fence commands never reach the ring, so fence_reached
+// lags the app's target token.  Reproduce that symptom here by
+// deliberately skipping 1-in-N ring writes and confirm the GPU ends
+// up in the "drained to idle with fence short" state.
+//
+// If this test trips gpu_wait_fence timeout, it validates the
+// lost-MMIO theory — the real-hardware freeze matches what we see
+// when ring words are dropped.
+static int  drop_every_n = 0;  /* 0 = no drops; N = drop 1 in N writes */
+static int  drop_counter = 0;
+static void ring_write_maybe_drop(uint32_t w) {
+    drop_counter++;
+    if (drop_every_n > 0 && (drop_counter % drop_every_n) == 0) {
+        /* Simulate a lost MMIO write: still bump the app-side wrptr
+         * (so the KICK covers the "logical" range), but don't actually
+         * post the word to GPU_RING_DATA.  The ring_bram slot keeps
+         * whatever garbage / previous value was there. */
+        ring_wrptr = (ring_wrptr + 4) & ring_mask;
+        return;
+    }
+    ring_write(w);
+}
+
+static void submit_mode0_frame_dropy(uint32_t fb_base, uint32_t wall_tex,
+                                      uint32_t floor_tex, int fb_cycle) {
+    const uint32_t SPAN_COLORMAP = 0x01;
+    const uint32_t SPAN_COLUMN   = 0x02;
+    ring_cmd(0x20, 4);
+    ring_write_maybe_drop(wall_tex);
+    ring_write_maybe_drop((64u << 16) | 64u);
+    ring_write_maybe_drop(0);
+    ring_write_maybe_drop(0);
+    ring_cmd(0x23, 2);
+    ring_write_maybe_drop(fb_base);
+    ring_write_maybe_drop(320);
+    for (int y = 120; y < 130; y++) {
+        ring_cmd(0x40, 18);
+        ring_write_maybe_drop(fb_base + y * 320);
+        ring_write_maybe_drop(floor_tex);
+        ring_write_maybe_drop((uint32_t)(y * 0x1234));
+        ring_write_maybe_drop((uint32_t)(fb_cycle * 0x55));
+        ring_write_maybe_drop(0x00010000);
+        ring_write_maybe_drop(0);
+        ring_write_maybe_drop((320u << 16) | SPAN_COLORMAP);
+        ring_write_maybe_drop((1u << 16) | 64u);
+        ring_write_maybe_drop(0);
+        ring_write_maybe_drop(0); ring_write_maybe_drop(0); ring_write_maybe_drop(0);
+        ring_write_maybe_drop(0); ring_write_maybe_drop(0); ring_write_maybe_drop(0);
+        ring_write_maybe_drop(0); ring_write_maybe_drop(0); ring_write_maybe_drop(0);
+    }
+    for (int x = 0; x < 50; x++) {
+        uint32_t col_fb = fb_base + 100 * 320 + x;
+        ring_cmd(0x40, 18);
+        ring_write_maybe_drop(col_fb);
+        ring_write_maybe_drop(wall_tex);
+        ring_write_maybe_drop((uint32_t)((x & 63) << 16));
+        ring_write_maybe_drop(0);
+        ring_write_maybe_drop(0);
+        ring_write_maybe_drop(0x00010000);
+        ring_write_maybe_drop((16u << 16) | SPAN_COLORMAP | SPAN_COLUMN);
+        ring_write_maybe_drop((320u << 16) | 64u);
+        ring_write_maybe_drop(0);
+        ring_write_maybe_drop(0); ring_write_maybe_drop(0); ring_write_maybe_drop(0);
+        ring_write_maybe_drop(0); ring_write_maybe_drop(0); ring_write_maybe_drop(0);
+        ring_write_maybe_drop(0); ring_write_maybe_drop(0); ring_write_maybe_drop(0);
+    }
+}
+
+static void test_gpudemo_mode0_replay_with_drops(void) {
+    printf("TEST: gpudemo Mode 0 replay WITH simulated MMIO drops (1 in 500)\n");
+    gpu_init();
+    { uint8_t cm[256]; for (int i = 0; i < 256; i++) cm[i] = (uint8_t)i; cmap_upload_bytes(0, cm, 256); }
+    const uint32_t WALL_TEX  = TEX_BASE_BYTE;
+    const uint32_t FLOOR_TEX = TEX_BASE_BYTE + 64 * 64;
+    for (uint32_t w = 0; w < (64 * 64) / 4; w++) {
+        sdram_write((WALL_TEX  >> 2) + w, 0x80808080u + w);
+        sdram_write((FLOOR_TEX >> 2) + w, 0x40404040u + w);
+    }
+    const uint32_t FBS[3] = { FB_BASE_BYTE, FB_BASE_BYTE + 0x14000, FB_BASE_BYTE + 0x28000 };
+
+    drop_every_n = 500;   /* drop 1 in 500 ring-BRAM writes */
+    drop_counter = 0;
+
+    const int N_FRAMES = 100;
+    int last_ok = -1;
+    for (int f = 0; f < N_FRAMES; f++) {
+        submit_mode0_frame_dropy(FBS[f % 3], WALL_TEX, FLOOR_TEX, f);
+        bool ok = gpu_finish(500000);
+        if (!ok) {
+            printf("  FAIL @ frame %d: drops=%d (1 in %d), fence timeout\n",
+                   f, drop_counter / drop_every_n, drop_every_n);
+            printf("  state=%u stat_px=%u stat_spans=%u\n",
+                   tb->dbg_state, tb->stat_pixels, tb->stat_spans);
+            break;
+        }
+        last_ok = f;
+    }
+    drop_every_n = 0;  /* disable drops for subsequent tests */
+    printf("  drop-sim: %d/%d frames completed (%d MMIO writes dropped)\n",
+           last_ok + 1, N_FRAMES, drop_counter / (drop_every_n ? drop_every_n : 500));
+
+    /* Expected: if drops cause the hang, this test hits timeout early.
+     * If the GPU recovers (e.g. because garbage decodes as NOP and
+     * real fences still land), this passes and we learn the theory
+     * needs a different mechanism. */
+}
+
+// =====================================================================
 // Main
 // =====================================================================
 
@@ -1774,6 +2008,11 @@ int main(int argc, char **argv) {
     test_tex_cache_miss();
     test_span_depth_gequal();
     test_span_tex_width_nonpow2();
+
+    /* gpudemo Mode 0 replay — tries to reproduce the hardware freeze
+     * after ~300 frames in a deterministic Verilator environment. */
+    test_gpudemo_mode0_replay();
+    test_gpudemo_mode0_replay_with_drops();
 
 #ifdef GPU_PERSP_IMPL
     // Perspective spans (Lite only — Full's triangle FSM doesn't share the
