@@ -71,11 +71,7 @@ GPU_SRCS = \
 
 GPU_CPP = tb_gpu_main.cpp
 GPU_TOP = tb_gpu
-# Separate Verilator output dirs for the Lite and Full GPU test binaries.
-# Both build from the same gpu_core.v sources but with different
-# +define+GPU_VARIANT_* macros, exercising both ifdef paths.
-GPU_LITE_DIR = obj_dir_gpu_lite
-GPU_FULL_DIR = obj_dir_gpu_full
+GPU_DIR = obj_dir_gpu
 
 # ============================================================
 # AXI periph (build-only — cacheline burst returns +1 off-by-one)
@@ -138,7 +134,7 @@ SYSTEM_FLAGS = -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC -Wno-CASEINCOMPLETE \
 # ============================================================
 # Targets
 # ============================================================
-.PHONY: all sdram sram gpu gpu-lite gpu-full axi-periph \
+.PHONY: all sdram sram gpu axi-periph \
         audio system run run-sram build clean
 
 # `all` runs every passing test. Build-only debug harnesses
@@ -168,35 +164,18 @@ $(SRAM_DIR)/V$(SRAM_TOP): $(SRAM_SRCS) $(SRAM_CPP)
 run-sram: sram
 
 # --- GPU ---
-# Two binaries: gpu-lite (default Pocket variant, span renderer only) and
-# gpu-full (everything, including triangle rasterizer). Both share the same
-# Verilog sources and same C++ test bench; ifdef'd code in gpu_core.v and
-# tb_gpu_main.cpp selects which features compile in.
-#
-# `make gpu` runs both, in order. Lite first so a Lite-only failure shows
-# clearly without the longer Full output flooding the terminal.
-gpu: gpu-lite gpu-full
+# Single GPU build. Triangles + perspective spans + pipelined fragment
+# processor are all unconditional in the hardware (see gpu_config.vh).
+# The C++ test bench enables the triangle and persp test suites via
+# GPU_FEAT_TRIANGLE and GPU_PERSP_IMPL; those defines steer test
+# COMPILATION in tb_gpu_main.cpp, not RTL behaviour.
+gpu: $(GPU_DIR)/V$(GPU_TOP)
+	@printf "\n=== GPU tests ===\n"
+	./$(GPU_DIR)/V$(GPU_TOP)
 
-gpu-lite: $(GPU_LITE_DIR)/V$(GPU_TOP)
-	@printf "\n=== GPU LITE variant ===\n"
-	./$(GPU_LITE_DIR)/V$(GPU_TOP)
-
-$(GPU_LITE_DIR)/V$(GPU_TOP): $(GPU_SRCS) $(GPU_CPP)
-	$(VERILATOR) $(VERILATOR_FLAGS) --top-module $(GPU_TOP) --Mdir $(GPU_LITE_DIR) \
-		+define+GPU_VARIANT_LITE \
-		+define+GPU_FEAT_PERSP_SPAN \
-		+define+GPU_FEAT_FRAG_PIPELINE \
+$(GPU_DIR)/V$(GPU_TOP): $(GPU_SRCS) $(GPU_CPP)
+	$(VERILATOR) $(VERILATOR_FLAGS) --top-module $(GPU_TOP) --Mdir $(GPU_DIR) \
 		-CFLAGS -DGPU_PERSP_IMPL \
-		-I$(COMMON_DIR) \
-		$(GPU_SRCS) $(GPU_CPP)
-
-gpu-full: $(GPU_FULL_DIR)/V$(GPU_TOP)
-	@printf "\n=== GPU FULL variant ===\n"
-	./$(GPU_FULL_DIR)/V$(GPU_TOP)
-
-$(GPU_FULL_DIR)/V$(GPU_TOP): $(GPU_SRCS) $(GPU_CPP)
-	$(VERILATOR) $(VERILATOR_FLAGS) --top-module $(GPU_TOP) --Mdir $(GPU_FULL_DIR) \
-		+define+GPU_VARIANT_FULL \
 		-CFLAGS -DGPU_FEAT_TRIANGLE \
 		-I$(COMMON_DIR) \
 		$(GPU_SRCS) $(GPU_CPP)
@@ -236,6 +215,6 @@ $(SYSTEM_DIR)/V$(SYSTEM_TOP): $(SYSTEM_SRCS) $(SYSTEM_CPP)
 
 # --- Clean ---
 clean:
-	rm -rf $(SDRAM_DIR) $(SRAM_DIR) $(GPU_LITE_DIR) $(GPU_FULL_DIR) \
+	rm -rf $(SDRAM_DIR) $(SRAM_DIR) $(GPU_DIR) \
 	       $(AXI_PERIPH_DIR) $(AUDIO_DIR) $(SYSTEM_DIR) \
 	       obj_dir_gpu obj_dir_cdc io_sdram_test.v
