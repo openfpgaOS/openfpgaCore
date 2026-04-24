@@ -116,6 +116,9 @@ assign dbg_tri_det = 32'd0;
 // 0x30  GPU_DBG_BADWR   R   First FB-range-violating M_WR awaddr since reset
 //                           (bit 0 = ever_violated flag; bits [31:2] = addr>>2)
 // 0x34  GPU_DBG_BADCNT  R   Count of M_WR writes outside 0x10000000..0x10400000
+// 0x38  GPU_DBG_RINGWR  R   Total count of GPU_RING_DATA writes accepted —
+//                           compare against app's "words submitted" to detect
+//                           lost MMIO writes on the ring-BRAM port.  GPU_DEBUG.
 
 // Ring BRAM: 16 KB = 4096 words, dual-port M10K
 // Port A: CPU writes via MMIO (GPU_RING_DATA)
@@ -133,6 +136,15 @@ reg [13:0] cmap_wr_addr;       // Colormap auto-increment address
 reg        tex_flush_req;      // Pulse to flush texture cache
 reg        soft_reset;         // Pulse: resets FSM state + ring pointers
 reg        ring_reset;         // Pulse: reset ring_rdptr (from MMIO, consumed by FSM)
+`ifdef GPU_DEBUG
+// Monotonic counter of accepted GPU_RING_DATA writes.  Readable via
+// GPU_DBG_RINGWR (MMIO 0x38).  If the CPU tracks its own submitted-word
+// count, a mismatch proves the MMIO bus is dropping writes on the way
+// to this slave.
+reg [31:0] ring_wr_count;
+`else
+wire [31:0] ring_wr_count = 32'b0;
+`endif
 
 wire ring_empty = (ring_rdptr == ring_wrptr);
 wire [15:0] ring_mask = (RING_WORDS * 4) - 1;  // 0x3FFF for 16 KB
@@ -148,6 +160,9 @@ always @(posedge clk) begin
     if (!reset_n) begin
         ring_wrptr   <= 0;
         ring_wr_addr <= 0;
+`ifdef GPU_DEBUG
+        ring_wr_count <= 32'b0;
+`endif
         cmap_wr_addr <= 0;
         tex_flush_req <= 0;
         soft_reset <= 0;
@@ -172,6 +187,9 @@ always @(posedge clk) begin
                 4'd2: begin  // GPU_RING_DATA — write word, auto-increment
                     ring_bram[ring_wr_addr] <= reg_wdata;
                     ring_wr_addr <= ring_wr_addr + 1;
+`ifdef GPU_DEBUG
+                    ring_wr_count <= ring_wr_count + 32'd1;
+`endif
                 end
                 4'd8: begin  // GPU_CMAP_ADDR
                     cmap_wr_addr <= reg_wdata[13:0];
@@ -242,6 +260,7 @@ always @(*) begin
         // (addresses are word-aligned so bits[1:0] are always zero).
         4'd12:   reg_rdata = {bad_waddr_latch[31:1], bad_waddr_hit};
         4'd13:   reg_rdata = bad_waddr_count;
+        4'd14:   reg_rdata = ring_wr_count;
         default: reg_rdata = 32'b0;
     endcase
 end

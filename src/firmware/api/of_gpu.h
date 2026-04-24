@@ -203,10 +203,28 @@ static inline void _gpu_ring_ensure(uint32_t bytes) {
         ;
 }
 
+/* Mirror counter of GPU_RING_DATA writes — compared against the
+ * hardware's GPU_DBG_RINGWR (MMIO 0x38) to detect lost ring-BRAM
+ * MMIO writes.  Only accurate if nothing else writes GPU_RING_DATA
+ * (colormap upload uses a different register). */
+static uint32_t _gpu_ringwr_count;
+
 /* Write a word to the ring BRAM via MMIO (no cache issues). */
 static inline void _gpu_ring_write(uint32_t w) {
     GPU_RING_DATA = w;
     _gpu_wrptr = (_gpu_wrptr + 4) & _gpu_ring_mask;
+    _gpu_ringwr_count++;
+}
+
+/* Diagnostic: compare the app's submitted-word count against what the
+ * hardware has actually accepted.  If they disagree, some MMIO writes
+ * to GPU_RING_DATA were dropped on the way to the slave — trap
+ * immediately so the trap dump tells us exactly how many are missing. */
+static inline void of_gpu_verify_ringwr(void) {
+    uint32_t hw = *(volatile uint32_t *)0x4A000038u;  /* GPU_DBG_RINGWR */
+    if (hw != _gpu_ringwr_count) {
+        __builtin_trap();
+    }
 }
 
 static inline void _gpu_cmd_header(uint8_t cmd, uint32_t payload_words) {
@@ -254,6 +272,13 @@ static inline void of_gpu_kick(void) {
  * surface a lost MMIO write immediately instead of waiting 2 seconds
  * for the of_gpu_wait timeout. */
 static inline void of_gpu_kick_verified(void) {
+    /* First: confirm every GPU_RING_DATA write we made actually landed
+     * in the hardware's counter.  Lost ring-BRAM writes are the
+     * primary suspect for the gpudemo freeze — ring_empty goes true
+     * while fence_reached lags because garbage words in ring_bram
+     * look like NOP commands to the GPU and advance rdptr without
+     * ever hitting the fence we submitted. */
+    of_gpu_verify_ringwr();
     GPU_RING_WRPTR = _gpu_wrptr;
     uint32_t rb = GPU_RING_WRPTR & 0xFFFF;
     if (rb != (_gpu_wrptr & 0xFFFF)) {

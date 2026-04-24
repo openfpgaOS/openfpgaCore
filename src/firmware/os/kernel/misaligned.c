@@ -500,17 +500,23 @@ void fatal_trap(trap_frame_t *frame) {
      * GPU-writing-somewhere hypothesis is confirmed. */
     uint32_t gpu_bad    = *(volatile uint32_t *)0x4A000030u;
     uint32_t gpu_cnt    = *(volatile uint32_t *)0x4A000034u;
+    uint32_t gpu_ring_wr = *(volatile uint32_t *)0x4A000038u;
     uint32_t gpu_status = *(volatile uint32_t *)0x4A000014u;
     uint32_t gpu_rdptr  = *(volatile uint32_t *)0x4A000010u;
+    uint32_t gpu_wrptr  = *(volatile uint32_t *)0x4A000004u;
     uint32_t gpu_fence  = *(volatile uint32_t *)0x4A000018u;
     trap_uart_puts("gpu_status=");
     trap_uart_hex(gpu_status);
     trap_uart_puts(" rdptr=");
     trap_uart_hex(gpu_rdptr);
+    trap_uart_puts(" wrptr=");
+    trap_uart_hex(gpu_wrptr);
     trap_uart_puts(" fence=");
     trap_uart_hex(gpu_fence);
     trap_uart_puts("\n");
-    trap_uart_puts("gpu_bad_waddr=");
+    trap_uart_puts("gpu_ringwr_cnt=");
+    trap_uart_hex(gpu_ring_wr);
+    trap_uart_puts(" bad_waddr=");
     trap_uart_hex(gpu_bad);
     trap_uart_puts(" (hit=");
     trap_uart_putb('0' + (gpu_bad & 1));
