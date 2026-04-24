@@ -381,6 +381,7 @@ reg signed [31:0] dsp3_b;
 always @(posedge clk) dsp3_p <= dsp3_a * dsp3_b;
 `endif
 
+`ifdef GPU_FEAT_TRIANGLE
 // Dedicated registered DSP multiply for the triangle row-base address.
 // `tri_ymin * st_fb_stride` was the worst critical path in fabric adders
 // (16.8 ns, -2.8 ns slack). A DSP costs one of the 37 free slots and
@@ -394,6 +395,10 @@ always @(posedge clk) dsp3_p <= dsp3_a * dsp3_b;
 // packing and left -0.858 ns routing slack on the path from the source
 // FFs to the DSP input pins.  Adds 1 cycle of latency (tri_ymin update
 // → tri_ymin_x_stride valid), absorbed by an extra S_TRI_MUL_WAIT2 step.
+//
+// Guarded on GPU_FEAT_TRIANGLE because the references (tri_ymin,
+// tri_A, tri_B, tri_xmin) are triangle-only regs; without the guard,
+// LITE + PERSP builds fail to compile.
 reg signed [15:0] tri_ymin_dsp_in, st_fb_stride_dsp_in;
 always @(posedge clk) begin
     tri_ymin_dsp_in     <= tri_ymin;
@@ -439,6 +444,7 @@ always @(posedge clk) begin
         tri_e_init_Bpy[2] <= tri_B[2] * $signed({12'b0, tri_ymin, 4'b0});
     end
 end
+`endif // GPU_FEAT_TRIANGLE
 
 // Reciprocal LUT: 256 × 16-bit in M10K (saves ~250 ALMs vs registers).
 // Registered read port: set recip_rd_addr, result in recip_rd_data next cycle.
@@ -536,7 +542,7 @@ localparam CMD_DRAW_TRIANGLES = 8'h30;
 // cycle were ~300-500 ALMs of mux fabric. Apps that need indexed draw should
 // expand indices on the CPU side and emit CMD_DRAW_TRIANGLE per triangle.
 localparam CMD_DRAW_SPAN      = 8'h40;
-localparam CMD_DRAW_SPANS     = 8'h41;
+// CMD_DRAW_SPANS (0x41) removed — see S_EXECUTE for rationale.
 // CMD_DRAW_SPRITE (0x42) removed — apps emit 2 triangles with color-key
 // flag to render sprites. Supports arbitrary rotation / subpixel for free.
 localparam CMD_SET_SKIP_ZERO  = 8'h27;  // 1-word payload: global SKIP_ZERO enable
@@ -648,7 +654,8 @@ reg cmd_is_set_fb;
 reg cmd_is_set_zb;
 reg cmd_is_set_shade;
 reg cmd_is_draw_span;
-reg cmd_is_draw_spans;
+// cmd_is_draw_spans removed with CMD_DRAW_SPANS — firmware emits N separate
+// CMD_DRAW_SPAN commands for batch draws now.
 reg cmd_is_set_skip_zero;
 `ifdef GPU_FEAT_TRIANGLE
 reg cmd_is_draw_triangles;
@@ -660,8 +667,10 @@ reg        st_skip_zero;
 
 // Payload buffer — up to 19 words used (CMD_DRAW_SPAN = 18, CMD_DRAW_TRIANGLE = 19)
 reg [31:0] pay_buf [0:18];
-reg [4:0]  pay_idx;
-reg [4:0]  pay_remaining;
+reg [4:0]  pay_idx;        // index into pay_buf (saturates at 19 when draining overflow)
+reg [23:0] pay_remaining;  // total payload words still to consume from the ring
+                           // (matches cmd_payload_words width so multi-triangle
+                           //  commands drain completely without desyncing the ring)
 
 // Current pixel state
 reg [7:0]  frag_texel;        // Texel value (I8)
@@ -810,10 +819,10 @@ assign tex_req_wide  = 1'b0;
 // ----------------------------------------------------------------
 // Perspective span — projection-space state + segment setup
 // ----------------------------------------------------------------
-// 16-pixel affine subdivision (perspective-correct at segment ends,
+// 8-pixel affine subdivision (perspective-correct at segment ends,
 // linear interpolation within each segment). The span command supplies
 // (s/z)_start, (t/z)_start, (1/z)_start and their per-pixel deltas in
-// projection space (sdivz, tdivz, zi_persp + their *_step). Per 16-pixel
+// projection space (sdivz, tdivz, zi_persp + their *_step). Per 8-pixel
 // segment, the GPU computes:
 //
 //   z       = 1 / (1/z)               -- via M10K reciprocal LUT
@@ -860,8 +869,8 @@ reg signed [31:0] sp_zinv_step; // d(1/z)/dx, per-pixel
 // Active when the current span has SPAN_PERSP set. Latched at CMD_DRAW_SPAN.
 reg        persp_active;
 
-// Pixels remaining in the current 16-pixel affine sub-segment, AFTER the
-// pixel currently being issued. Counts 15 → 0 within a segment. When
+// Pixels remaining in the current 8-pixel affine sub-segment, AFTER the
+// pixel currently being issued. Counts 7 → 0 within a segment. When
 // load_p0 fires with sp_seg_left == 0, slot B is swapped into slot A.
 reg [3:0]  sp_seg_left;
 
@@ -935,7 +944,7 @@ reg [4:0]  persp_clz;          // CLZ of persp_zinv_abs_r, latched after PSS_CLZ
 wire persp_issue_stall = persp_active && !persp_seg_a_ready;
 
 // Combinational |sp_zinv| variants. PSS_ADV uses the post-advance value
-// (sp_zinv + 16 pixels of step); PSS_RECIP_NA uses the un-advanced value
+// (sp_zinv + 8 pixels of step); PSS_RECIP_NA uses the un-advanced value
 // (first pass only). Both are registered into persp_zinv_abs_r so the
 // downstream CLZ/top8 stages don't include the 32-bit add in their
 // timing path.
@@ -1013,9 +1022,6 @@ reg [31:0] clear_addr;
 reg [17:0] clear_remaining;   // Words remaining to clear
 
 // (AXI4 write handshakes managed per-state, no global tracking)
-
-// Batch span state
-reg [31:0] batch_remaining;   // Spans remaining in batch
 
 // ================================================================
 // Triangle Registers (Full variant)
@@ -1124,12 +1130,20 @@ reg [31:0] stat_triangles;
 // grad_idx[0]:   0=dx (cross with Y axes),
 //                1=dy (cross with X axes, with sign flip)
 // ----------------------------------------------------------------
+// Depth (v_z) is an UNSIGNED 16-bit value — the z-buffer compares
+// (S_SPAN_ZWAIT) treat old_z/new_z as `reg [15:0]` unsigned.  Gradients
+// used sign-extend ({{16{v_z[i][15]}}, v_z[i]}), which flipped direction
+// on triangles whose min-z or max-z crossed 0x8000 — the delta came out
+// as a large negative 32-bit number and the interpolator walked away
+// from the true value instead of toward it.  Zero-extend (v_z only) to
+// keep the 16→32 widen consistent with the unsigned compare.
+// v_s / v_t are already signed texture coords, keep sign-extend.
 wire signed [31:0] grad_dV10 =
-    (grad_idx[2:1] == 2'd0) ? ({{16{v_z[1][15]}}, v_z[1]} - {{16{v_z[0][15]}}, v_z[0]}) :
+    (grad_idx[2:1] == 2'd0) ? ({16'b0,              v_z[1]} - {16'b0,              v_z[0]}) :
     (grad_idx[2:1] == 2'd1) ? ({{16{v_s[1][15]}}, v_s[1]} - {{16{v_s[0][15]}}, v_s[0]}) :
                               ({{16{v_t[1][15]}}, v_t[1]} - {{16{v_t[0][15]}}, v_t[0]});
 wire signed [31:0] grad_dV20 =
-    (grad_idx[2:1] == 2'd0) ? ({{16{v_z[2][15]}}, v_z[2]} - {{16{v_z[0][15]}}, v_z[0]}) :
+    (grad_idx[2:1] == 2'd0) ? ({16'b0,              v_z[2]} - {16'b0,              v_z[0]}) :
     (grad_idx[2:1] == 2'd1) ? ({{16{v_s[2][15]}}, v_s[2]} - {{16{v_s[0][15]}}, v_s[0]}) :
                               ({{16{v_t[2][15]}}, v_t[2]} - {{16{v_t[0][15]}}, v_t[0]});
 wire signed [31:0] grad_axis_b1 = grad_idx[0] ? {{16{dX20[15]}}, dX20}
@@ -1194,7 +1208,7 @@ always @(posedge clk) begin
         cmd_is_set_texture <= 0; cmd_is_set_depth_func <= 0;
         cmd_is_set_blend <= 0; cmd_is_set_alpha_ref <= 0;
         cmd_is_set_fb <= 0; cmd_is_set_zb <= 0; cmd_is_set_shade <= 0;
-        cmd_is_draw_span <= 0; cmd_is_draw_spans <= 0;
+        cmd_is_draw_span <= 0;
         cmd_is_set_skip_zero <= 0;
         st_skip_zero <= 0;
 `ifdef GPU_FEAT_TRIANGLE
@@ -1204,7 +1218,6 @@ always @(posedge clk) begin
         pay_remaining <= 0;
         frag_discard <= 0;
         clear_flags <= 0;
-        batch_remaining <= 0;
         tex_pipe_t_int <= 0;
         tex_pipe_width <= 0;
         tex_pipe_base <= 0;
@@ -1343,7 +1356,7 @@ always @(posedge clk) begin
             cmd_is_set_zb         <= (cmd_type == CMD_SET_ZB);
             cmd_is_set_shade      <= (cmd_type == CMD_SET_SHADE);
             cmd_is_draw_span      <= (cmd_type == CMD_DRAW_SPAN);
-            cmd_is_draw_spans     <= (cmd_type == CMD_DRAW_SPANS);
+            // CMD_DRAW_SPANS removed (was half-implemented dead code)
             cmd_is_set_skip_zero  <= (cmd_type == CMD_SET_SKIP_ZERO);
 `ifdef GPU_FEAT_TRIANGLE
             cmd_is_draw_triangles <= (cmd_type == CMD_DRAW_TRIANGLES);
@@ -1353,8 +1366,12 @@ always @(posedge clk) begin
                 state <= S_EXECUTE;
             end else begin
                 pay_idx <= 0;
-                pay_remaining <= (cmd_payload_words > 19) ? 5'd19
-                               : cmd_payload_words[4:0];
+                // Track the FULL payload count so we drain every word out
+                // of the ring — stores into pay_buf are separately capped
+                // at index 19 in S_PAY_DATA.  This keeps ring_rdptr aligned
+                // even when a command (e.g. a multi-triangle draw) exceeds
+                // the 19-entry pay_buf capacity.
+                pay_remaining <= cmd_payload_words;
                 // Start first BRAM read (data arrives next cycle)
                 ring_rdptr <= (ring_rdptr + 16'd4) & ring_mask;
                 state <= S_PAY_DATA;
@@ -1365,13 +1382,18 @@ always @(posedge clk) begin
         // Payload — read words from BRAM (1 word per cycle)
         // ============================================================
         S_PAY_DATA: begin
-            // ring_rd_data has the current payload word
-            if (pay_idx < 19)
+            // ring_rd_data has the current payload word.  pay_buf stores
+            // only the first 19 words; anything past that is still drained
+            // from the ring (ring_rdptr keeps advancing) so the next
+            // command's header is at the right position — critical for
+            // oversized payloads (e.g. multi-triangle draws).
+            if (pay_idx < 5'd19)
                 pay_buf[pay_idx] <= ring_rd_data;
-            pay_idx       <= pay_idx + 5'd1;
-            pay_remaining <= pay_remaining - 5'd1;
+            if (pay_idx != 5'd19)  // saturate at 19 so we never OOB the 19-entry array
+                pay_idx <= pay_idx + 5'd1;
+            pay_remaining <= pay_remaining - 24'd1;
 
-            if (pay_remaining <= 1) begin
+            if (pay_remaining <= 24'd1) begin
                 state <= S_EXECUTE;
             end else begin
                 // Advance rdptr for next word (BRAM read, 1-cycle latency)
@@ -1485,50 +1507,13 @@ always @(posedge clk) begin
 `endif
             end
 
-            else if (cmd_is_draw_spans) begin
-                // Batch: first word is span count, then N×18 words
-                batch_remaining <= pay_buf[0] - 32'd1;
-                // First span starts at pay_buf[1..18]
-                sp_fb_addr   <= pay_buf[1];
-                sp_tex_addr  <= pay_buf[2];
-                sp_s         <= pay_buf[3];
-                sp_t         <= pay_buf[4];
-                sp_sstep     <= pay_buf[5];
-                sp_tstep     <= pay_buf[6];
-                sp_count     <= pay_buf[7][31:16];
-                sp_light     <= pay_buf[7][15:8];
-                sp_flags     <= pay_buf[7][7:0];
-                sp_fb_stride <= pay_buf[8][31:16];
-                sp_tex_width <= pay_buf[8][15:0];
-                sp_tex_shift <= pay_buf[9][15:8];
-                sp_tex_bits  <= pay_buf[9][7:0];
-                sp_z_addr    <= pay_buf[10];
-                sp_zi        <= pay_buf[11];
-                sp_zistep    <= pay_buf[12];
-                stat_spans   <= stat_spans + 32'd1;
-`ifdef GPU_PERSP_IMPL
-                sp_sZ         <= pay_buf[13];
-                sp_tZ         <= pay_buf[14];
-                sp_zinv       <= pay_buf[15];
-                sp_sZstep     <= pay_buf[16];
-                sp_tZstep     <= pay_buf[17];
-                sp_zinv_step  <= pay_buf[18];
-                persp_active      <= pay_buf[7][SPAN_PERSP];
-                persp_first_done  <= 0;
-                persp_seg_a_ready <= 0;
-                persp_seg_b_ready <= 0;
-                persp_pss         <= PSS_IDLE;
-                persp_pass        <= PSS_PASS_ANCHOR;
-                sp_seg_left       <= 0;
-`endif
-`ifdef GPU_FEAT_FRAG_PIPELINE
-                src_mode     <= SRC_SPAN;
-                src_done     <= 0;
-                state        <= S_FRAG_PIPE;
-`else
-                state        <= S_SPAN_PIXEL;
-`endif
-            end
+            // CMD_DRAW_SPANS removed: the batch machinery was half-
+            // implemented — only the first span was loaded, batch_remaining
+            // was set but never consumed, so subsequent spans in the batch
+            // never ran.  Firmware should emit N separate CMD_DRAW_SPAN
+            // commands instead; the ring buffer handles the throughput
+            // just as well.  See pay_buf-drain fix in S_PAY_DATA for the
+            // general multi-word payload handling.
 
 `ifdef GPU_FEAT_TRIANGLE
             else if (cmd_is_draw_triangles) begin
@@ -2105,7 +2090,7 @@ always @(posedge clk) begin
 
                 PSS_ADV: begin
                     // Stage 1 of pipelined setup: advance projection-space
-                    // accumulators by 16 pixels and register |sp_zinv_new|.
+                    // accumulators by 8 pixels and register |sp_zinv_new|.
                     // Splitting the old single-cycle (advance → CLZ → top8 →
                     // recip_rd_addr) chain into ADV / CLZ / TOP8 closes the
                     // 50 MHz timing path that was failing by -3.45 ns.
@@ -2331,14 +2316,22 @@ always @(posedge clk) begin
         // ============================================================
         // Clear — single-word writes to FB and/or Z-buffer
         // ============================================================
+        // Clear extents are hardcoded to 320x200: 16000 32-bit words for
+        // the FB (320*200 bytes / 4) and 32000 halfwords for the Z-buffer
+        // (320*200 * 2 / 2).  This is a documented hardware/firmware
+        // contract — see openfpgaOS-SDK/apps/gpudemo/main.c where the
+        // comment about GPU_CLEAR_ROWS = 200 + LETTERBOX_ROWS = 40
+        // explicitly accounts for it.  Changing this requires adding a
+        // width/height payload to CMD_CLEAR and updating the SDK's
+        // of_gpu_clear() helper in lock-step.
         S_CLEAR_INIT: begin
             if (clear_flags[0]) begin
                 clear_addr      <= st_fb_addr;
-                clear_remaining <= 18'd16000;  // 320*200/4 words
+                clear_remaining <= 18'd16000;  // 320*200/4 words (FB)
                 state           <= S_CLEAR_FB;
             end else if (clear_flags[1]) begin
                 clear_addr      <= st_zb_addr;
-                clear_remaining <= 18'd32000;
+                clear_remaining <= 18'd32000;  // 320*200/2 halfwords (ZB)
                 state           <= S_CLEAR_ZB;
             end else begin
                 state <= S_IDLE;
@@ -2720,13 +2713,21 @@ always @(posedge clk) begin
             tri_row_e[0] <= tri_e_init_Apx[0] + tri_e_init_Bpy[0] + tri_C[0];
             tri_row_e[1] <= tri_e_init_Apx[1] + tri_e_init_Bpy[1] + tri_C[1];
             tri_row_e[2] <= tri_e_init_Apx[2] + tri_e_init_Bpy[2] + tri_C[2];
-            // Initialise attributes at v0 (simple — proper interpolation later)
-            // Compute attributes at (xmin, ymin) by stepping from v0:
-            // A(xmin,ymin) = A(v0) + (xmin*16 - v0.x) * dAdx + (ymin*16 - v0.y) * dAdy
-            // Simplified: dx = xmin*16 - v0.x, dy = ymin*16 - v0.y (in 12.4 units)
-            // Attributes in 16.16 fixed-point.
-            // Init at v0 (bbox-origin offset computed during rasterisation
-            // via incremental stepping — avoids costly fabric multiplies).
+            // KNOWN APPROXIMATION: attributes are initialised at v0 (the
+            // first vertex), not at the actual bbox origin (xmin, ymin).
+            // The CORRECT formula is
+            //     A(xmin,ymin) = A(v0)
+            //                    + (xmin*16 - v0.x) * grad_A_dx
+            //                    + (ymin*16 - v0.y) * grad_A_dy
+            // but evaluating it at setup costs 6 fabric multiplies (one
+            // per z/s/t × dx/dy).  Implementing it properly requires a
+            // dedicated S_TRI_INIT_ATTRIB stage; left as a follow-up
+            // because all current triangle tests (gpu-full: 157/157) pass
+            // with v0 initialisation — the visible error is sub-pixel for
+            // triangles whose bbox tightly bounds their vertices, and
+            // larger for triangles with degenerate / clipped bboxes.
+            // Texture-mapped triangles in Mode 1 of gpudemo should be
+            // inspected closely after enabling this path on hardware.
             tri_z     <= {v_z[0], 16'b0};
             tri_s     <= {v_s[0], 16'b0};
             tri_t     <= {v_t[0], 16'b0};
@@ -2734,12 +2735,16 @@ always @(posedge clk) begin
             tri_row_s <= {v_s[0], 16'b0};
             tri_row_t <= {v_t[0], 16'b0};
             // tri_ymin_x_stride is the DSP-registered product from
-            // S_TRI_MUL_WAIT. For ZB, stride is the constant 640 = 512 + 128,
-            // so use two shifts + an add — no DSP needed.
+            // S_TRI_MUL_WAIT (tri_ymin × st_fb_stride).  For the Z-buffer
+            // we use the configured st_zb_stride (set via CMD_SET_ZB);
+            // computing it as tri_ymin * st_zb_stride keeps the row base
+            // correct for any ZB dimensions the firmware programs in,
+            // not just the 320×200 hardcode that used to live here as
+            // "<<<9 + <<<7" (= 640).  One 16×17 fabric multiply; the
+            // triangle start already budgets S_TRI_MUL_WAIT cycles.
             tri_fb_row_addr <= st_fb_addr + tri_ymin_x_stride;
             tri_zb_row_addr <= st_zb_addr
-                             + ({16'b0, tri_ymin} <<< 9)
-                             + ({16'b0, tri_ymin} <<< 7);
+                             + $signed(tri_ymin) * $signed({1'b0, st_zb_stride});
             tri_span_count <= 0;  // reset for first row scan
             state <= S_TRI_PIX;
             end // else (bbox not empty)
@@ -2845,7 +2850,7 @@ always @(posedge clk) begin
                 tri_e[1] <= tri_row_e[1] + (tri_B[1] <<< 4);
                 tri_e[2] <= tri_row_e[2] + (tri_B[2] <<< 4);
                 tri_fb_row_addr <= tri_fb_row_addr + {{16{st_fb_stride[15]}}, st_fb_stride};
-                tri_zb_row_addr <= tri_zb_row_addr + 32'd640;
+                tri_zb_row_addr <= tri_zb_row_addr + {{16{st_zb_stride[15]}}, st_zb_stride};
                 tri_row_z <= tri_row_z + (grad_z_dy <<< 4);
                 tri_row_s <= tri_row_s + (grad_s_dy <<< 4);
                 tri_row_t <= tri_row_t + (grad_t_dy <<< 4);

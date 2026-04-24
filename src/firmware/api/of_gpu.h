@@ -168,9 +168,13 @@ static uint32_t _gpu_base;
 #define GPU_CMD_SET_SHADE       0x25
 #define GPU_CMD_SET_ALPHA_REF   0x26
 #define GPU_CMD_DRAW_TRIANGLES  0x30
-#define GPU_CMD_DRAW_INDEXED    0x31
+/* GPU_CMD_DRAW_INDEXED (0x31) — removed from hardware.  Expand indices
+ * app-side and emit N copies of GPU_CMD_DRAW_TRIANGLES. */
 #define GPU_CMD_DRAW_SPAN       0x40
-#define GPU_CMD_DRAW_SPANS      0x41
+/* GPU_CMD_DRAW_SPANS (0x41) — removed from hardware (batch machinery
+ * was half-implemented, subsequent spans never ran).  Emit N separate
+ * GPU_CMD_DRAW_SPAN commands; the 16 KB ring buffer handles the
+ * throughput fine. */
 
 /* ================================================================
  * Ring Buffer State (app-side)

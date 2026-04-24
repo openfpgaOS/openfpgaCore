@@ -90,6 +90,14 @@ localparam S_INIT      = 3'd4;
 reg [2:0] state;
 reg [SET_BITS-1:0] init_counter;
 
+// Pending flush: `flush` is a 1-cycle CPU-generated pulse (from MMIO
+// GPU_TEX_FLUSH).  It arrives any cycle regardless of our FSM state.
+// If flush fires while we're in S_FILL_AR / S_FILL_DATA / S_FILL_OUT,
+// we can't immediately walk-clear valid_mem (we'd lose the in-flight
+// AXI burst).  Latch it and handle it on the next transition back to
+// S_PIPE.  Cleared when the flush actually kicks off the S_INIT walk.
+reg flush_pending;
+
 // ---- Stage 2 register: the request whose RAM read result is in rd_* now ----
 reg         pipe_valid;
 reg  [25:0] pipe_addr;
@@ -194,7 +202,13 @@ always @(posedge clk) begin
         fill_target_word <= 0;
         lat_addr    <= 0;
         lat_wide    <= 0;
+        flush_pending <= 1'b0;
     end else begin
+        // Latch any flush pulse regardless of state.  Cleared when we
+        // enter S_INIT below.
+        if (flush)
+            flush_pending <= 1'b1;
+
         case (state)
         // ----------------------------------------------------------------
         // S_INIT: walk through 1024 sets writing valid_mem[i] <= 0.
@@ -207,6 +221,7 @@ always @(posedge clk) begin
             valid_mem[init_counter] <= 1'b0;
             if (init_counter == {SET_BITS{1'b1}}) begin
                 state <= S_PIPE;
+                flush_pending <= 1'b0;  // walk-clear done, clear pending
             end
             init_counter <= init_counter + 1'b1;
         end
@@ -218,10 +233,11 @@ always @(posedge clk) begin
             // even if the consumer is stalled by some downstream condition
             // (e.g. FB write flush) and can't issue a new request immediately.
 
-            // Flush: go to S_INIT to walk-clear valid_mem. Assumes flush
-            // is only asserted when no AXI fill is in flight (software
-            // clears the cache between frames).
-            if (flush) begin
+            // Flush: go to S_INIT to walk-clear valid_mem.  Honoured here
+            // for both the live `flush` pulse and any `flush_pending`
+            // latched during a prior fill — the latch ensures a flush
+            // issued mid-fill isn't silently dropped.
+            if (flush || flush_pending) begin
                 state <= S_INIT;
                 init_counter <= 0;
                 fill_resp_valid <= 0;

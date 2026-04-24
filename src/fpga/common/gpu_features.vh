@@ -45,18 +45,20 @@
 // ----------------------------------------------------------------------------
 // FULL variant: everything in Lite, plus 3D triangles and extra blend/filter
 // ----------------------------------------------------------------------------
-// Note: GPU_FEAT_FRAG_PIPELINE is intentionally absent here. Full's triangle
-// rasterizer (S_TRI_PIX → S_TRI_FRAG → shared S_SPAN_*) currently relies on
-// the sequential fragment FSM. Refactoring it to feed the pipelined fragment
-// processor is deferred — Full keeps the old fragment path, which still
-// benefits from the new pipelined texture cache (its handshake is
-// backward-compatible, see gpu_tex_cache.v).
+// The FMax push (commit 9221830) rewrote the triangle rasterizer to emit
+// spans directly into S_FRAG_PIPE (the pipelined fragment processor) — the
+// old S_TRI_PIX → S_TRI_FRAG → S_SPAN_* chain is gone.  Because of that,
+// FULL now requires GPU_FEAT_FRAG_PIPELINE; without it, S_TRI_PIX
+// references src_mode/src_done/SRC_SPAN which only exist under the
+// frag-pipeline guard and the build fails.
+//
+// GPU_FEAT_VCOLOR / BILINEAR / ALPHA are kept as flags for future use but
+// don't currently steer code — vertex-colour was dropped during FMax
+// (grad_r_dx/dy removed), and bilinear/alpha are still placeholders.
 `ifdef GPU_VARIANT_FULL
   `define GPU_FEAT_TRIANGLE        // S_TRI_* edge-function rasterizer
-  `define GPU_FEAT_VCOLOR          // R gradient (Gouraud-shaded triangles)
-  `define GPU_FEAT_BILINEAR        // 4-tap texture filter (placeholder)
-  `define GPU_FEAT_ALPHA           // alpha / additive blend modes (placeholder)
-  `define GPU_FEAT_PERSP_SPAN      // also available in Full
+  `define GPU_FEAT_PERSP_SPAN      // perspective span setup (PSS) sub-FSM
+  `define GPU_FEAT_FRAG_PIPELINE   // pipelined fragment processor (required by FULL)
 `endif
 
 // ----------------------------------------------------------------------------
