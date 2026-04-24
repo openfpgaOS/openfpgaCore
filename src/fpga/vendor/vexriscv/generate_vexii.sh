@@ -15,13 +15,19 @@
 #            (jumpAt=1 — gives the fitter an extra cycle on BTB-hit paths)
 #   FPU    : single-precision (F extension)
 #   Zicbom : cache block management (cbo.clean/flush/inval)
-#   Bypass : --allow-bypass-from=2 (disabled — withBypasses is false
-#            unless allowBypassFrom==0, so any non-zero value turns off
-#            the early-ALU combinational bypass network; dependent ops
-#            read from the reg file instead of forwarding combinationally
-#            from ctrl4. Trades 1-2 cycle stalls on back-to-back deps for
-#            breaking the ctrl4-FPU → ctrl1-early-ALU cone that hit
-#            -1.990 ns slack on the 100 MHz domain.)
+#   Bypass : --allow-bypass-from=0 (full combinational bypass enabled)
+#            Bypass-from=2 disables the early-ALU bypass entirely and
+#            relies on stall insertion to resolve back-to-back RAWs.
+#            Hit a miscompare on hardware running gpudemo Mode 0:
+#              10324550: lui  a4, 0x1036e        ; a4 <= 0x1036e000
+#              10324554: sw   zero, -1772(a4)    ; trap, mtval=0x000000e3
+#            The SW's ctrl1 operand read saw a stale a4 (last value from
+#            the byte-write loop at 0x10324514) instead of the freshly
+#            LUI'd 0x1036e000, producing a misaligned effective address
+#            into BRAM space.  Reverting to bypass=0 restores the
+#            combinational ctrl4->ctrl1 forwarding; trades the -1.99 ns
+#            FPU F2I cone (which --relaxed-src already partly mitigates)
+#            for provably correct execution on the integer pipeline.
 #
 # Memory regions (PMA):
 #   0x00000000  32 KB  BRAM    — main=0, exe=1  (non-speculative, executable)
@@ -60,7 +66,7 @@ sbt "Test/runMain vexiiriscv.Generate \
       --lsu-software-prefetch --lsu-hardware-prefetch=none \
       --with-btb --btb-sets=256 --relaxed-btb --relaxed-btb-hit \
       --with-gshare --gshare-bytes=1024 --with-ras \
-      --allow-bypass-from=2 \
+      --allow-bypass-from=0 \
       --relaxed-src --relaxed-branch --relaxed-div \
       --reset-vector=0 \
       --region base=0,size=8000,main=0,exe=1 \
