@@ -584,8 +584,8 @@ reg [7:0]  sp_light;
 reg [7:0]  sp_flags;
 reg signed [15:0] sp_fb_stride;
 reg [15:0] sp_tex_width;
-reg [7:0]  sp_tex_shift;
-reg [7:0]  sp_tex_bits;
+// sp_tex_shift / sp_tex_bits removed with the shift-mode tex address
+// path.  pay_buf[8] is reserved in the CMD_DRAW_SPAN layout.
 reg [31:0] sp_z_addr;
 reg signed [31:0] sp_zi;
 reg signed [31:0] sp_zistep;
@@ -721,8 +721,7 @@ reg [31:0] p0_z_addr;
 reg [31:0] p0_zi;
 reg signed [15:0] p0_s_int;     // for the post-mul add
 reg [31:0] p0_tex_base;         // sp_tex_addr at issue time
-reg        p0_mode;             // 1 = multiply mode, 0 = shift mode
-reg [31:0] p0_shift_addr;       // pre-computed full addr for shift mode
+// p0_mode / p0_shift_addr removed — multiply-mode tex address is universal
 
 // DSP-pipelined texture multiply. Registered output gives the path a clean
 // register-to-register boundary that the fitter can pack into a DSP slice.
@@ -810,10 +809,14 @@ wire fbss_depth_entry = (fbss == FBSS_IDLE) && p3_valid && !p3_discard
                      && !p3_z_resolved;
 wire fp_pipe_stall = (p1_valid && !tex_resp_valid) || (fbss != FBSS_IDLE) || fbss_depth_entry;
 
-// Combinational tex address from p0 + DSP output
-wire [31:0] fp_tex_addr_full = p0_mode
-    ? (p0_tex_base + tx_mul_q + {{16{p0_s_int[15]}}, p0_s_int})
-    : p0_shift_addr;
+// Combinational tex address from p0 + DSP output.  Multiply-mode only
+// (sp_tex_width is always non-zero in every real caller — tested in
+// tb_gpu with tex_width ∈ {1, 16, 32, 64, 300} and in gpudemo with
+// tex_width = 64).  The old shift-mode p0_shift_addr path was dead
+// code; removing it saves the 32-bit 2:1 mux + the p0_shift_addr
+// register and its variable-barrel-shift update logic.
+wire [31:0] fp_tex_addr_full = p0_tex_base + tx_mul_q
+                             + {{16{p0_s_int[15]}}, p0_s_int};
 
 assign tex_req_valid = (state == S_FRAG_PIPE) && p0_valid
                     && !fp_pipe_stall && !persp_issue_stall;
@@ -1168,20 +1171,18 @@ wire signed [31:0] grad_axis_b2 = grad_idx[0] ? {{16{dX10[15]}}, dX10}
 wire [15:0] sp_s_int = sp_s[31:16];
 wire [15:0] sp_t_int = sp_t[31:16];
 
-// Shift mode (combinational, no multiply — fast)
-wire [31:0] t_shifted = sp_t >> sp_tex_shift;
-wire [31:0] tex_shift_result = (t_shifted << sp_tex_bits) | (sp_s >> (6'd32 - {1'b0, sp_tex_bits}));
-
-// Pipeline registers (written in S_SPAN_PIXEL)
-reg signed [15:0] tex_pipe_t_int;    // registered multiply input A
-reg        [15:0] tex_pipe_width;    // registered multiply input B
-reg        [31:0] tex_pipe_base;     // sp_tex_addr
-reg signed [15:0] tex_pipe_s_int;    // s integer part
-reg        [31:0] tex_pipe_shift_r;  // shift mode result (already computed)
-reg               tex_pipe_mode;     // 0=shift, 1=multiply
-
-// Tex addr multiply (combinational 16×16 — separate from setup DSP).
-// Sharing with the registered DSP would add 1 cycle latency per pixel.
+// Pipeline registers + tex-addr wires below are only referenced by the
+// old sequential S_SPAN_* path (ifndef GPU_FEAT_FRAG_PIPELINE).  In the
+// single-config build that path is preprocessed out, so these
+// declarations are dangling — the compiler folds them away.  Leaving
+// them visible so the dead-code block below still parses if someone
+// re-enables the sequential path for a future variant target.
+reg signed [15:0] tex_pipe_t_int;
+reg        [15:0] tex_pipe_width;
+reg        [31:0] tex_pipe_base;
+reg signed [15:0] tex_pipe_s_int;
+reg        [31:0] tex_pipe_shift_r;
+reg               tex_pipe_mode;
 wire [31:0] tex_mul_result = $signed(tex_pipe_t_int) * $signed({1'b0, tex_pipe_width});
 wire [31:0] tex_addr_final = tex_pipe_mode
     ? (tex_pipe_base + tex_mul_result + {{16{tex_pipe_s_int[15]}}, tex_pipe_s_int})
@@ -1231,7 +1232,7 @@ always @(posedge clk) begin
         // Pipelined fragment processor reset
         p0_valid <= 0; p0_light <= 0; p0_flags <= 0;
         p0_fb_addr <= 0; p0_z_addr <= 0; p0_zi <= 0;
-        p0_s_int <= 0; p0_tex_base <= 0; p0_mode <= 0; p0_shift_addr <= 0;
+        p0_s_int <= 0; p0_tex_base <= 0;
         tx_mul_q <= 0;
         p1_valid <= 0; p1_light <= 0; p1_flags <= 0;
         p1_fb_addr <= 0; p1_z_addr <= 0; p1_zi <= 0;
@@ -1470,8 +1471,11 @@ always @(posedge clk) begin
                 sp_flags     <= pay_buf[6][7:0];
                 sp_fb_stride <= pay_buf[7][31:16];
                 sp_tex_width <= pay_buf[7][15:0];
-                sp_tex_shift <= pay_buf[8][15:8];
-                sp_tex_bits  <= pay_buf[8][7:0];
+                // pay_buf[8] (tex_shift / tex_bits fields) reserved —
+                // the shift-mode tex address path was removed along with
+                // the sequential span FSM; multiply-mode is universal
+                // now.  Word stays in the on-ring layout so firmware
+                // doesn't need to change.
                 sp_z_addr    <= pay_buf[9];
                 sp_zi        <= pay_buf[10];
                 sp_zistep    <= pay_buf[11];
@@ -1832,12 +1836,8 @@ always @(posedge clk) begin
                     p0_zi        <= sp_zi;
                     p0_s_int     <= sp_s[31:16];
                     p0_tex_base  <= sp_tex_addr;
-                    p0_mode      <= (sp_tex_width != 16'd0);
-                    // Pre-compute shift-mode address combinationally and
-                    // register into p0; the multiply-mode path uses tx_mul_q.
-                    p0_shift_addr <= sp_tex_addr
-                        + (((sp_t >> sp_tex_shift) << sp_tex_bits)
-                          | (sp_s >> (6'd32 - {1'b0, sp_tex_bits})));
+                    // p0_mode / p0_shift_addr removed — multiply-mode
+                    // tex addressing (t * tex_width + s) is universal.
 
                     // DSP-pipelined multiply: registered output. The DSP
                     // slice will be inferred via the (* multstyle = "dsp" *)
@@ -2782,8 +2782,6 @@ always @(posedge clk) begin
                                    | (st_skip_zero ? 8'h04 : 8'h00);  // COLORMAP + DEPTH(maybe) + SKIP_ZERO(if set)
                     sp_fb_stride <= 16'd1;
                     sp_tex_width <= st_tex_width;
-                    sp_tex_shift <= 0;
-                    sp_tex_bits  <= 0;
                     sp_z_addr    <= tri_zb_row_addr + {tri_span_x_start, 1'b0};
                     sp_zi        <= tri_span_z_start;
                     sp_zistep    <= grad_z_dx <<< 4;
