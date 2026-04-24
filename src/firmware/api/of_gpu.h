@@ -279,35 +279,25 @@ static inline int of_gpu_fence_reached(uint32_t token) {
 }
 
 static inline void of_gpu_wait(uint32_t token) {
-    /* ~2-second bounded spin — if the GPU hangs (fb_acc never flushes,
-     * tex cache stuck in fill, pipeline deadlocked), the old unbounded
-     * spin silently froze the machine with no diagnostic.  Timeout
-     * triggers an illegal-instruction trap so fatal_trap dumps the GPU
-     * state; the interesting registers to inspect on the trap side are:
+    /* Bounded spin — if the GPU hangs (fb_acc never flushes, tex cache
+     * stuck in fill, pipeline deadlocked), the old unbounded spin
+     * silently froze the machine with no diagnostic.  Timeout triggers
+     * an illegal-instruction trap so fatal_trap dumps the GPU state;
+     * the registers to inspect on the trap side are:
      *   GPU_STATUS    (0x14) — main state, pipeline flags, FBSS, tex
      *   GPU_RING_RDPTR (0x10) — where the GPU last stopped fetching
      *   GPU_DBG_BADWR  (0x30) — first stray M_WR address (GPU_DEBUG)
      *
-     * Uses the M-mode mcycle CSR (0xB00) directly — the U-mode cycle
-     * alias (0xC00) is not implemented on this VexiiRiscv build and
-     * traps illegal-instruction immediately when accessed.  Runs in
-     * M-mode so mcycle is always legal. */
-    uint32_t start_lo, start_hi, tmp;
-    __asm__ volatile ("1: csrr %0, 0xB80\n"      /* mcycleh */
-                      "   csrr %1, 0xB00\n"      /* mcycle */
-                      "   csrr %2, 0xB80\n"
-                      "   bne %0, %2, 1b"
-                      : "=&r"(start_hi), "=&r"(start_lo), "=&r"(tmp));
+     * Uses a plain iteration counter rather than a cycle CSR: this
+     * VexiiRiscv build is compiled without --performance-counters so
+     * rdcycle / mcycle both trap illegal-instruction (mtval=0xc8002873
+     * / 0xb8002873 observed).  Iteration count of 50M with a ~10-cycle
+     * body gives roughly ~5 s of wait at 100 MHz — generous enough
+     * that normal fence completions always beat it, tight enough that
+     * a genuine hang surfaces quickly. */
+    uint32_t spins = 50000000u;
     while (!of_gpu_fence_reached(token)) {
-        uint32_t now_lo, now_hi;
-        __asm__ volatile ("1: csrr %0, 0xB80\n"
-                          "   csrr %1, 0xB00\n"
-                          "   csrr %2, 0xB80\n"
-                          "   bne %0, %2, 1b"
-                          : "=&r"(now_hi), "=&r"(now_lo), "=&r"(tmp));
-        uint64_t delta = (((uint64_t)now_hi << 32) | now_lo)
-                       - (((uint64_t)start_hi << 32) | start_lo);
-        if (delta > 200000000ull) {
+        if (--spins == 0) {
             __builtin_trap();  /* → illegal-instruction trap, mcause=2 */
         }
     }
