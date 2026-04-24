@@ -532,38 +532,37 @@ localparam CMD_FENCE          = 8'h02;
 localparam CMD_CLEAR          = 8'h10;
 localparam CMD_SET_TEXTURE    = 8'h20;
 localparam CMD_SET_DEPTH_FUNC = 8'h21;
-localparam CMD_SET_BLEND      = 8'h22;
 localparam CMD_SET_FB         = 8'h23;
 localparam CMD_SET_ZB         = 8'h24;
-localparam CMD_SET_SHADE      = 8'h25;
-localparam CMD_SET_ALPHA_REF  = 8'h26;
 localparam CMD_DRAW_TRIANGLES = 8'h30;
-// CMD_DRAW_INDEXED (0x31) removed — its 18 dynamic-indexed pay_buf reads per
-// cycle were ~300-500 ALMs of mux fabric. Apps that need indexed draw should
-// expand indices on the CPU side and emit CMD_DRAW_TRIANGLE per triangle.
 localparam CMD_DRAW_SPAN      = 8'h40;
-// CMD_DRAW_SPANS (0x41) removed — see S_EXECUTE for rationale.
-// CMD_DRAW_SPRITE (0x42) removed — apps emit 2 triangles with color-key
-// flag to render sprites. Supports arbitrary rotation / subpixel for free.
+// Removed commands (reserved opcodes, do not reuse):
+//   0x22 CMD_SET_BLEND      — no combine path in the datapath
+//   0x25 CMD_SET_SHADE      — Gouraud gradient dropped in the FMax push
+//   0x26 CMD_SET_ALPHA_REF  — no alpha test in the datapath
+//   0x31 CMD_DRAW_INDEXED   — ~400 ALMs of dynamic pay_buf mux fabric;
+//                             expand indices CPU-side and emit per-tri
+//   0x41 CMD_DRAW_SPANS     — batch machinery was half-implemented;
+//                             emit N separate CMD_DRAW_SPAN commands
+//   0x42 CMD_DRAW_SPRITE    — 2-triangle sprite is cheaper and rotates
 localparam CMD_SET_SKIP_ZERO  = 8'h27;  // 1-word payload: global SKIP_ZERO enable
 
 // ================================================================
 // GPU State Registers (sticky, set by SET_* commands)
 // ================================================================
+// Removed: st_tex_height / st_tex_format / st_tex_wrap_s / st_tex_wrap_t
+//          were parsed from CMD_SET_TEXTURE but never read by the
+//          datapath (format is I8-only, no wrap/clamp logic).
+//          st_blend_mode / st_alpha_ref / st_gouraud dropped with their
+//          respective SET commands; the blend/alpha/Gouraud paths never
+//          existed as functioning code.  Triangle light uses flat v0.r.
 reg [31:0] st_tex_addr;
 reg [15:0] st_tex_width;
-reg [15:0] st_tex_height;
-reg [1:0]  st_tex_format;      // 0=I8, 1=RGB565
-reg [1:0]  st_tex_wrap_s;
-reg [1:0]  st_tex_wrap_t;
 reg [2:0]  st_depth_func;      // 0=none,1=always,2=less,3=lequal,4=equal,5=gequal,6=greater,7=notequal
-reg [1:0]  st_blend_mode;
-reg [7:0]  st_alpha_ref;
 reg [31:0] st_fb_addr;
 reg [15:0] st_fb_stride;
 reg [31:0] st_zb_addr;
 reg [15:0] st_zb_stride;
-reg        st_gouraud;
 
 // ================================================================
 // Span Registers (loaded from command payload)
@@ -648,11 +647,8 @@ reg cmd_is_fence;
 reg cmd_is_clear;
 reg cmd_is_set_texture;
 reg cmd_is_set_depth_func;
-reg cmd_is_set_blend;
-reg cmd_is_set_alpha_ref;
 reg cmd_is_set_fb;
 reg cmd_is_set_zb;
-reg cmd_is_set_shade;
 reg cmd_is_draw_span;
 // cmd_is_draw_spans removed with CMD_DRAW_SPANS — firmware emits N separate
 // CMD_DRAW_SPAN commands for batch draws now.
@@ -1206,8 +1202,7 @@ always @(posedge clk) begin
         cmd_payload_words <= 0;
         cmd_is_nop <= 0; cmd_is_fence <= 0; cmd_is_clear <= 0;
         cmd_is_set_texture <= 0; cmd_is_set_depth_func <= 0;
-        cmd_is_set_blend <= 0; cmd_is_set_alpha_ref <= 0;
-        cmd_is_set_fb <= 0; cmd_is_set_zb <= 0; cmd_is_set_shade <= 0;
+        cmd_is_set_fb <= 0; cmd_is_set_zb <= 0;
         cmd_is_draw_span <= 0;
         cmd_is_set_skip_zero <= 0;
         st_skip_zero <= 0;
@@ -1285,12 +1280,10 @@ always @(posedge clk) begin
         tri_ymin_raw <= 0; tri_ymax_raw <= 0;
 `endif
         // State registers
-        st_tex_addr <= 0; st_tex_width <= 0; st_tex_height <= 0;
-        st_tex_format <= 0; st_tex_wrap_s <= 0; st_tex_wrap_t <= 0;
-        st_depth_func <= 0; st_blend_mode <= 0; st_alpha_ref <= 0;
+        st_tex_addr <= 0; st_tex_width <= 0;
+        st_depth_func <= 0;
         st_fb_addr <= 0; st_fb_stride <= 320;
         st_zb_addr <= 0; st_zb_stride <= 640;
-        st_gouraud <= 0;
     end else begin
         // Default: deassert one-shot signals
 `ifndef GPU_FEAT_FRAG_PIPELINE
@@ -1350,11 +1343,8 @@ always @(posedge clk) begin
             cmd_is_clear          <= (cmd_type == CMD_CLEAR);
             cmd_is_set_texture    <= (cmd_type == CMD_SET_TEXTURE);
             cmd_is_set_depth_func <= (cmd_type == CMD_SET_DEPTH_FUNC);
-            cmd_is_set_blend      <= (cmd_type == CMD_SET_BLEND);
-            cmd_is_set_alpha_ref  <= (cmd_type == CMD_SET_ALPHA_REF);
             cmd_is_set_fb         <= (cmd_type == CMD_SET_FB);
             cmd_is_set_zb         <= (cmd_type == CMD_SET_ZB);
-            cmd_is_set_shade      <= (cmd_type == CMD_SET_SHADE);
             cmd_is_draw_span      <= (cmd_type == CMD_DRAW_SPAN);
             // CMD_DRAW_SPANS removed (was half-implemented dead code)
             cmd_is_set_skip_zero  <= (cmd_type == CMD_SET_SKIP_ZERO);
@@ -1424,10 +1414,12 @@ always @(posedge clk) begin
             else if (cmd_is_set_texture) begin
                 st_tex_addr   <= pay_buf[0];
                 st_tex_width  <= pay_buf[1][31:16];
-                st_tex_height <= pay_buf[1][15:0];
-                st_tex_format <= pay_buf[2][17:16];
-                st_tex_wrap_s <= pay_buf[2][1:0];
-                st_tex_wrap_t <= pay_buf[3][1:0];
+                // tex_height / format / wrap_s / wrap_t fields in the
+                // CMD_SET_TEXTURE payload are currently ignored — the
+                // datapath hardcodes I8 format, uses tex_width only for
+                // the multiply-mode address, and doesn't implement wrap.
+                // The firmware of_gpu_bind_texture helper still emits
+                // them so the on-ring command layout stays stable.
                 state <= S_IDLE;
             end
 
@@ -1436,15 +1428,10 @@ always @(posedge clk) begin
                 state <= S_IDLE;
             end
 
-            else if (cmd_is_set_blend) begin
-                st_blend_mode <= pay_buf[0][1:0];
-                state <= S_IDLE;
-            end
-
-            else if (cmd_is_set_alpha_ref) begin
-                st_alpha_ref <= pay_buf[0][7:0];
-                state <= S_IDLE;
-            end
+            // CMD_SET_BLEND (0x22) / CMD_SET_ALPHA_REF (0x26) removed — the
+            // datapath never looked at st_blend_mode / st_alpha_ref and no
+            // SDK app calls these helpers.  If blending is wanted later,
+            // add it back when the actual combine logic lands.
 
             else if (cmd_is_set_fb) begin
                 st_fb_addr   <= pay_buf[0];
@@ -1458,10 +1445,9 @@ always @(posedge clk) begin
                 state <= S_IDLE;
             end
 
-            else if (cmd_is_set_shade) begin
-                st_gouraud <= pay_buf[0][0];
-                state <= S_IDLE;
-            end
+            // CMD_SET_SHADE (0x25) removed — the vertex-colour (Gouraud)
+            // R gradient was dropped during the FMax push; st_gouraud is
+            // no longer read by the interpolator.
 
             else if (cmd_is_draw_span) begin
                 // Load span parameters from payload

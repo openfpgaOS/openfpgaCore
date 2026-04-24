@@ -162,19 +162,17 @@ static uint32_t _gpu_base;
 #define GPU_CMD_CLEAR           0x10
 #define GPU_CMD_SET_TEXTURE     0x20
 #define GPU_CMD_SET_DEPTH_FUNC  0x21
-#define GPU_CMD_SET_BLEND       0x22
 #define GPU_CMD_SET_FB          0x23
 #define GPU_CMD_SET_ZB          0x24
-#define GPU_CMD_SET_SHADE       0x25
-#define GPU_CMD_SET_ALPHA_REF   0x26
 #define GPU_CMD_DRAW_TRIANGLES  0x30
-/* GPU_CMD_DRAW_INDEXED (0x31) — removed from hardware.  Expand indices
- * app-side and emit N copies of GPU_CMD_DRAW_TRIANGLES. */
 #define GPU_CMD_DRAW_SPAN       0x40
-/* GPU_CMD_DRAW_SPANS (0x41) — removed from hardware (batch machinery
- * was half-implemented, subsequent spans never ran).  Emit N separate
- * GPU_CMD_DRAW_SPAN commands; the 16 KB ring buffer handles the
- * throughput fine. */
+/* Reserved opcodes — do not reuse:
+ *   0x22 SET_BLEND      — no combine path in the datapath
+ *   0x25 SET_SHADE      — Gouraud gradient dropped in the FMax push
+ *   0x26 SET_ALPHA_REF  — no alpha test in the datapath
+ *   0x31 DRAW_INDEXED   — expand indices CPU-side and emit per-triangle
+ *   0x41 DRAW_SPANS     — half-implemented batch; emit N separate spans
+ *   0x42 DRAW_SPRITE    — 2-triangle sprite is cheaper and rotates */
 
 /* ================================================================
  * Ring Buffer State (app-side)
@@ -311,15 +309,10 @@ static inline void of_gpu_depth_test(of_gpu_depth_func_t func) {
     _gpu_ring_write((uint32_t)func);
 }
 
-static inline void of_gpu_blend(of_gpu_blend_t mode) {
-    _gpu_cmd_header(GPU_CMD_SET_BLEND, 1);
-    _gpu_ring_write((uint32_t)mode);
-}
-
-static inline void of_gpu_alpha_ref(uint8_t ref) {
-    _gpu_cmd_header(GPU_CMD_SET_ALPHA_REF, 1);
-    _gpu_ring_write((uint32_t)ref);
-}
+/* of_gpu_blend / of_gpu_alpha_ref / of_gpu_shade_mode helpers removed
+ * along with their underlying SET_BLEND / SET_ALPHA_REF / SET_SHADE
+ * commands — the datapath never implemented the corresponding combine,
+ * alpha-test, or Gouraud gradient logic. */
 
 static inline void of_gpu_bind_texture(const of_gpu_texture_t *tex) {
     _gpu_cmd_header(GPU_CMD_SET_TEXTURE, 4);
@@ -327,11 +320,6 @@ static inline void of_gpu_bind_texture(const of_gpu_texture_t *tex) {
     _gpu_ring_write(((uint32_t)tex->width << 16) | tex->height);
     _gpu_ring_write(((uint32_t)tex->format << 16) | tex->wrap_s);
     _gpu_ring_write((uint32_t)tex->wrap_t);
-}
-
-static inline void of_gpu_shade_mode(int gouraud) {
-    _gpu_cmd_header(GPU_CMD_SET_SHADE, 1);
-    _gpu_ring_write(gouraud ? 1 : 0);
 }
 
 /* ---- Draw commands ---- */
