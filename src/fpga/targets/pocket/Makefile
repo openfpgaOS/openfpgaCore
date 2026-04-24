@@ -158,7 +158,18 @@ compile: build
 build: $(VEXII_OUT) bootloader
 	@printf "$(C_HEAD)[fpga]$(C_RESET) Clean compile (GPU = Lite)...\n"
 	@rm -rf db incremental_db
-	@quartus_sh --flow compile $(PROJECT) $(VERILOG_MACROS)
+	@# quartus_sh --flow compile does not accept --verilog_macro at the top
+	@# level (that flag is only valid for quartus_map), so explicit stages
+	@# are used when VARIANT_DEFS is set. When unset, the faster --flow
+	@# form is still used.
+	@if [ -n "$(VARIANT_DEFS)" ]; then \
+		quartus_map $(PROJECT) $(VERILOG_MACROS) && \
+		quartus_fit $(PROJECT) && \
+		quartus_asm $(PROJECT) && \
+		quartus_sta $(PROJECT); \
+	else \
+		quartus_sh --flow compile $(PROJECT); \
+	fi
 	@$(MAKE) --no-print-directory install-bitstream
 	@printf "$(C_OK)[fpga] Done$(C_RESET)\n"
 

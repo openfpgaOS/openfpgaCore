@@ -62,12 +62,21 @@ localparam TAG_BITS   = 12;
 localparam LINE_WORDS = 4;
 
 // ---- Storage ----
-reg [SETS-1:0] valid;
+// Valid bits were previously `reg [SETS-1:0] valid` — 1024 flip-flops
+// with a 10-level fabric mux from `valid[addr_set]` into `rd_valid`.
+// That mux plus the carry out of the upstream tex-addr adder put
+// `tx_mul_q[0] → rd_valid` at -0.764 ns on the 100 MHz domain.
+// Moved to an M10K-backed 1024×1 RAM: one block, hardware-native read
+// path, and Quartus can reclaim ~256 ALMs the FF array was using.
+// Reset/flush walk through all 1024 sets via the new S_INIT state.
+(* ramstyle = "M10K" *) reg valid_mem [0:SETS-1];
 
 (* ramstyle = "M10K" *) reg [TAG_BITS-1:0] tag_mem [0:SETS-1];
 (* ramstyle = "M10K" *) reg [31:0] data_mem [0:SETS*LINE_WORDS-1];
 
 // ---- FSM ----
+// S_INIT       : walk sets 0..SETS-1 writing valid_mem=0 (entered on reset
+//                and on flush; M10K can't be bulk-cleared in one cycle)
 // S_PIPE       : normal pipelined operation, 1 req/cycle accepted on hits
 // S_FILL_AR    : issue AXI AR for missed line
 // S_FILL_DATA  : burst fill in progress
@@ -76,8 +85,10 @@ localparam S_PIPE      = 3'd0;
 localparam S_FILL_AR   = 3'd1;
 localparam S_FILL_DATA = 3'd2;
 localparam S_FILL_OUT  = 3'd3;
+localparam S_INIT      = 3'd4;
 
 reg [2:0] state;
+reg [SET_BITS-1:0] init_counter;
 
 // ---- Stage 2 register: the request whose RAM read result is in rd_* now ----
 reg         pipe_valid;
@@ -85,7 +96,6 @@ reg  [25:0] pipe_addr;
 reg         pipe_wide;
 
 wire [TAG_BITS-1:0] pipe_tag  = pipe_addr[25:14];
-wire [SET_BITS-1:0] pipe_set  = pipe_addr[13:4];
 wire [1:0]          pipe_byte = pipe_addr[1:0];
 
 // ---- RAM read result (1-cycle latency) ----
@@ -132,7 +142,7 @@ wire [1:0]          addr_word = req_addr[3:2];
 
 always @(posedge clk) begin
     rd_tag   <= tag_mem[addr_set];
-    rd_valid <= valid[addr_set];
+    rd_valid <= valid_mem[addr_set];
     rd_data  <= data_mem[{addr_set, addr_word}];
 end
 
@@ -171,7 +181,8 @@ assign resp_data = pipe_hit
 // ---- Main FSM ----
 always @(posedge clk) begin
     if (!reset_n) begin
-        state       <= S_PIPE;
+        state       <= S_INIT;
+        init_counter <= 0;
         pipe_valid  <= 0;
         pipe_addr   <= 0;
         pipe_wide   <= 0;
@@ -181,19 +192,25 @@ always @(posedge clk) begin
         axi_arlen   <= 0;
         fill_beat   <= 0;
         fill_target_word <= 0;
-        valid       <= {SETS{1'b0}};
         lat_addr    <= 0;
         lat_wide    <= 0;
     end else begin
-        // Defaults — fill_resp_valid is HELD across cycles in S_FILL_OUT,
-        // so the only place it gets cleared is when we leave that state
-        // (either by accepting a new req or by flush).
-        if (flush) begin
-            valid <= {SETS{1'b0}};
-            fill_resp_valid <= 0;
+        case (state)
+        // ----------------------------------------------------------------
+        // S_INIT: walk through 1024 sets writing valid_mem[i] <= 0.
+        // Entered on reset and on flush (flush can't bulk-clear an M10K
+        // the way the old FF array allowed). req_ready is already false
+        // in S_INIT because it only asserts in S_PIPE and S_FILL_OUT.
+        // 1024 cycles ≈ 10 µs at 100 MHz — negligible at boot/flush.
+        // ----------------------------------------------------------------
+        S_INIT: begin
+            valid_mem[init_counter] <= 1'b0;
+            if (init_counter == {SET_BITS{1'b1}}) begin
+                state <= S_PIPE;
+            end
+            init_counter <= init_counter + 1'b1;
         end
 
-        case (state)
         S_PIPE: begin
             // pipe_valid is HELD (no default clear). Hit path is fully
             // combinational (resp_valid wire above). Holding pipe_valid
@@ -201,6 +218,15 @@ always @(posedge clk) begin
             // even if the consumer is stalled by some downstream condition
             // (e.g. FB write flush) and can't issue a new request immediately.
 
+            // Flush: go to S_INIT to walk-clear valid_mem. Assumes flush
+            // is only asserted when no AXI fill is in flight (software
+            // clears the cache between frames).
+            if (flush) begin
+                state <= S_INIT;
+                init_counter <= 0;
+                fill_resp_valid <= 0;
+                pipe_valid <= 0;
+            end else
             // Miss handling clears pipe_valid as part of entering the fill.
             if (pipe_miss) begin
                 axi_arvalid <= 1;
@@ -234,10 +260,10 @@ always @(posedge clk) begin
                 if (fill_beat == lat_word) fill_target_word <= axi_rdata;
                 fill_beat <= fill_beat + 2'd1;
                 if (axi_rlast) begin
-                    tag_mem[lat_set] <= lat_tag;
-                    valid[lat_set]   <= 1'b1;
-                    fill_resp_valid  <= 1;
-                    state            <= S_FILL_OUT;
+                    tag_mem[lat_set]     <= lat_tag;
+                    valid_mem[lat_set]   <= 1'b1;
+                    fill_resp_valid      <= 1;
+                    state                <= S_FILL_OUT;
                 end
             end
         end

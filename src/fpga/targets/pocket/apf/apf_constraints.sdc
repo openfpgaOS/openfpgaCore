@@ -16,5 +16,8 @@ derive_pll_clocks
 # 
 
 
-# load in user constraints 
-read_sdc "core/core_constraints.sdc"
+# User constraints are loaded by ap_core.qsf
+# (`set_global_assignment -name SDC_FILE core_constraints.sdc`).
+# The original `read_sdc "core/core_constraints.sdc"` assumed a pre-flattening
+# layout with a ./core subdirectory and triggered Critical Warning (332012)
+# under the current tree layout.

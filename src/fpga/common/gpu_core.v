@@ -109,7 +109,8 @@ assign dbg_tri_det = 32'd0;
 // 0x18  GPU_FENCE       R   Last completed fence token
 // 0x1C  GPU_STAT_PIXELS R   Pixel counter
 // 0x20  GPU_CMAP_ADDR   W   Colormap write address (14-bit, auto-inc)
-// 0x24  GPU_CMAP_DATA   W   Colormap write data (byte)
+// 0x24  GPU_CMAP_DATA   W   Colormap write data (word — 4 bytes stored,
+//                             addr post-increments by 4)
 // 0x28  GPU_TEX_FLUSH   W   Flush texture cache (write any value)
 // 0x2C  GPU_STAT_SPANS  R   Span counter
 
@@ -172,8 +173,8 @@ always @(posedge clk) begin
                 4'd8: begin  // GPU_CMAP_ADDR
                     cmap_wr_addr <= reg_wdata[13:0];
                 end
-                4'd9: begin  // GPU_CMAP_DATA (auto-increment)
-                    cmap_wr_addr <= cmap_wr_addr + 14'd1;
+                4'd9: begin  // GPU_CMAP_DATA — 32-bit write, addr +=4 bytes
+                    cmap_wr_addr <= cmap_wr_addr + 14'd4;
                 end
                 4'd10: begin // GPU_TEX_FLUSH
                     tex_flush_req <= 1;
@@ -241,13 +242,17 @@ end
 // Port A: CPU writes (via MMIO cmap_data register)
 // Port B: GPU reads (during fragment processing, 1-cycle latency)
 
-reg [7:0] cmap_bram [0:16383];
+// 16 KB colormap — 4096 × 32-bit. CPU writes a full word per MMIO access
+// (was byte-at-a-time — dropped 3/4 of the upload on each write). The
+// write address ignores the low 2 bits; the CPU's little-endian word
+// byte-order lands directly in bit lanes [7:0]/[15:8]/[23:16]/[31:24].
+reg [31:0] cmap_bram [0:4095];
 
-// Port A: CPU write
+// Port A: CPU write (full 32-bit)
 wire cmap_cpu_wr = reg_wr && (reg_addr == 4'd9);
 always @(posedge clk) begin
     if (cmap_cpu_wr)
-        cmap_bram[cmap_wr_addr] <= reg_wdata[7:0];
+        cmap_bram[cmap_wr_addr[13:2]] <= reg_wdata;
 end
 
 // Port B: GPU read
@@ -262,16 +267,33 @@ end
 // made the timing reproducible.)
 reg [13:0] cmap_rd_addr;
 reg [7:0]  cmap_rd_data;
+// BRAM now 32-bit wide — registered read captures the word; a
+// combinational byte mux selects the lane using the low 2 bits of the
+// addr. Net latency from cmap_rd_addr update to cmap_rd_data is still
+// one cycle (same contract the pipeline expects).
+reg [31:0] cmap_rd_word;
+reg [1:0]  cmap_rd_lane;
 `ifdef GPU_FEAT_FRAG_PIPELINE
 always @(posedge clk) begin
-    if (!fp_pipe_stall)
-        cmap_rd_data <= cmap_bram[cmap_rd_addr];
+    if (!fp_pipe_stall) begin
+        cmap_rd_word <= cmap_bram[cmap_rd_addr[13:2]];
+        cmap_rd_lane <= cmap_rd_addr[1:0];
+    end
 end
 `else
 always @(posedge clk) begin
-    cmap_rd_data <= cmap_bram[cmap_rd_addr];
+    cmap_rd_word <= cmap_bram[cmap_rd_addr[13:2]];
+    cmap_rd_lane <= cmap_rd_addr[1:0];
 end
 `endif
+always @(*) begin
+    case (cmap_rd_lane)
+        2'd0: cmap_rd_data = cmap_rd_word[7:0];
+        2'd1: cmap_rd_data = cmap_rd_word[15:8];
+        2'd2: cmap_rd_data = cmap_rd_word[23:16];
+        2'd3: cmap_rd_data = cmap_rd_word[31:24];
+    endcase
+end
 
 // ================================================================
 // Shared DSP multiply + reciprocal LUT
@@ -285,6 +307,83 @@ reg signed [31:0] dsp_a;
 reg signed [31:0] dsp_b;
 (* multstyle = "dsp" *) reg signed [63:0] dsp_p;
 always @(posedge clk) dsp_p <= dsp_a * dsp_b;
+
+// Second + third DSP slots — used for parallel multiply pipelines. dsp2 is
+// shared between PSS (sZ×recip || tZ×recip) and triangle setup (parallel
+// edge-function C values, parallel gradient cross-multiplies). dsp3 is
+// triangle-setup-only: lets tri_C[0]/tri_C[1]/tri_C[2] compute concurrently
+// on all three DSPs, cutting S_TRI_SETUP from ~20 cycles to ~10.
+`ifdef GPU_HAS_RECIP_LUT
+reg signed [31:0] dsp2_a;
+reg signed [31:0] dsp2_b;
+(* multstyle = "dsp" *) reg signed [63:0] dsp2_p;
+always @(posedge clk) dsp2_p <= dsp2_a * dsp2_b;
+`endif
+`ifdef GPU_FEAT_TRIANGLE
+reg signed [31:0] dsp3_a;
+reg signed [31:0] dsp3_b;
+(* multstyle = "dsp" *) reg signed [63:0] dsp3_p;
+always @(posedge clk) dsp3_p <= dsp3_a * dsp3_b;
+`endif
+
+// Dedicated registered DSP multiply for the triangle row-base address.
+// `tri_ymin * st_fb_stride` was the worst critical path in fabric adders
+// (16.8 ns, -2.8 ns slack). A DSP costs one of the 37 free slots and
+// delivers the product.
+//
+// DSP input registers: tri_ymin / st_fb_stride are buffered through a
+// stand-alone always-clocked register near the DSP so Quartus can pack
+// those FFs into the Cyclone 10 DSP's built-in input flip-flops. Source
+// registers have state-gated writes (different clock-enables from the
+// unconditional tri_ymin_x_stride output), which prevented input-FF
+// packing and left -0.858 ns routing slack on the path from the source
+// FFs to the DSP input pins.  Adds 1 cycle of latency (tri_ymin update
+// → tri_ymin_x_stride valid), absorbed by an extra S_TRI_MUL_WAIT2 step.
+reg signed [15:0] tri_ymin_dsp_in, st_fb_stride_dsp_in;
+always @(posedge clk) begin
+    tri_ymin_dsp_in     <= tri_ymin;
+    st_fb_stride_dsp_in <= st_fb_stride;
+end
+// Drop the sign-extension: st_fb_stride is unsigned [15:0]; the
+// `{{16{st_fb_stride[15]}}, st_fb_stride}` made the operand 32 bits wide,
+// forcing Quartus to cascade two DSP18 blocks with a fabric hlmac
+// combine + fabric output reg.  Casting to 17-bit signed keeps the
+// multiply at 16×17 — fits in ONE DSP18 with all three FFs (two inputs
+// and output) packed inside the block.  Matches the unreset input-buffer
+// FFs so Quartus has a consistent control set.
+(* multstyle = "dsp" *) reg signed [31:0] tri_ymin_x_stride;
+always @(posedge clk) begin
+    tri_ymin_x_stride <= tri_ymin_dsp_in * $signed({1'b0, st_fb_stride_dsp_in});
+end
+
+// Pre-registered A*px and B*py products for the S_TRI_ROW edge-init. The
+// original S_TRI_ROW expression `tri_A[i]*px + tri_B[i]*py + tri_C[i]` was
+// the worst critical path in the Lite build (DSP mult + two long carry
+// chains in one cycle, -1.603 ns at slow 85°C). Computing the two products
+// continuously into registers lets S_TRI_ROW do only a 3-way add — no DSP
+// in the same cycle — shortening the cone to a single carry chain. The
+// update timing matches tri_ymin_x_stride: valid one cycle after tri_xmin/
+// tri_ymin latch in S_TRI_BBOX_CLAMP, i.e. during S_TRI_MUL_WAIT, so
+// triangle start latency is unchanged.
+(* multstyle = "dsp" *) reg signed [31:0] tri_e_init_Apx [0:2];
+(* multstyle = "dsp" *) reg signed [31:0] tri_e_init_Bpy [0:2];
+always @(posedge clk) begin
+    if (!reset_n) begin
+        tri_e_init_Apx[0] <= 0; tri_e_init_Apx[1] <= 0; tri_e_init_Apx[2] <= 0;
+        tri_e_init_Bpy[0] <= 0; tri_e_init_Bpy[1] <= 0; tri_e_init_Bpy[2] <= 0;
+    end else begin
+        // tri_xmin/tri_ymin are non-negative after clamping (S_TRI_BBOX_CLAMP),
+        // so the {xmin, 4'b0} / {ymin, 4'b0} 20-bit value zero-extends cleanly
+        // to 32-bit signed and the signed×signed DSP product matches the
+        // original px/py expression exactly.
+        tri_e_init_Apx[0] <= tri_A[0] * $signed({12'b0, tri_xmin, 4'b0});
+        tri_e_init_Apx[1] <= tri_A[1] * $signed({12'b0, tri_xmin, 4'b0});
+        tri_e_init_Apx[2] <= tri_A[2] * $signed({12'b0, tri_xmin, 4'b0});
+        tri_e_init_Bpy[0] <= tri_B[0] * $signed({12'b0, tri_ymin, 4'b0});
+        tri_e_init_Bpy[1] <= tri_B[1] * $signed({12'b0, tri_ymin, 4'b0});
+        tri_e_init_Bpy[2] <= tri_B[2] * $signed({12'b0, tri_ymin, 4'b0});
+    end
+end
 
 // Reciprocal LUT: 256 × 16-bit in M10K (saves ~250 ALMs vs registers).
 // Registered read port: set recip_rd_addr, result in recip_rd_data next cycle.
@@ -378,9 +477,14 @@ localparam CMD_SET_ZB         = 8'h24;
 localparam CMD_SET_SHADE      = 8'h25;
 localparam CMD_SET_ALPHA_REF  = 8'h26;
 localparam CMD_DRAW_TRIANGLES = 8'h30;
-localparam CMD_DRAW_INDEXED   = 8'h31;
+// CMD_DRAW_INDEXED (0x31) removed — its 18 dynamic-indexed pay_buf reads per
+// cycle were ~300-500 ALMs of mux fabric. Apps that need indexed draw should
+// expand indices on the CPU side and emit CMD_DRAW_TRIANGLE per triangle.
 localparam CMD_DRAW_SPAN      = 8'h40;
 localparam CMD_DRAW_SPANS     = 8'h41;
+// CMD_DRAW_SPRITE (0x42) removed — apps emit 2 triangles with color-key
+// flag to render sprites. Supports arbitrary rotation / subpixel for free.
+localparam CMD_SET_SKIP_ZERO  = 8'h27;  // 1-word payload: global SKIP_ZERO enable
 
 // ================================================================
 // GPU State Registers (sticky, set by SET_* commands)
@@ -391,7 +495,7 @@ reg [15:0] st_tex_height;
 reg [1:0]  st_tex_format;      // 0=I8, 1=RGB565
 reg [1:0]  st_tex_wrap_s;
 reg [1:0]  st_tex_wrap_t;
-reg [2:0]  st_depth_func;      // 0=none,1=always,2=less,3=lequal,4=equal
+reg [2:0]  st_depth_func;      // 0=none,1=always,2=less,3=lequal,4=equal,5=gequal,6=greater,7=notequal
 reg [1:0]  st_blend_mode;
 reg [7:0]  st_alpha_ref;
 reg [31:0] st_fb_addr;
@@ -459,10 +563,13 @@ localparam S_TRI_LOAD      = 6'd26;  // Extract vertices from payload
 localparam S_TRI_SETUP     = 6'd27;  // Sequential edge/gradient computation
 localparam S_TRI_BBOX      = 6'd28;  // Compute bounding box, clip to screen
 localparam S_TRI_ROW       = 6'd29;  // Initialise scanline row
-localparam S_TRI_PIX       = 6'd30;  // Test pixel / step X
-localparam S_TRI_FRAG      = 6'd31;  // Set up fragment for tex pipeline
+localparam S_TRI_PIX       = 6'd30;  // Scan row for inside-extent → emit span
+localparam S_TRI_ROW_NEXT  = 6'd31;  // Advance to next Y (after span drains)
 localparam S_TRI_GRAD      = 6'd32;  // Rolled gradient computation loop
 localparam S_FRAG_PIPE     = 6'd33;  // Unified pipelined fragment processor
+localparam S_TRI_MUL_WAIT  = 6'd34;  // wait for DSP input-register stage (+1 cycle from BBOX_CLAMP)
+localparam S_TRI_BBOX_CLAMP = 6'd35; // Clamp raw min/max to screen bounds
+localparam S_TRI_MUL_WAIT2 = 6'd36;  // wait for DSP output register (tri_ymin_x_stride valid)
 
 reg [5:0] state;
 
@@ -487,20 +594,23 @@ reg cmd_is_set_zb;
 reg cmd_is_set_shade;
 reg cmd_is_draw_span;
 reg cmd_is_draw_spans;
+reg cmd_is_set_skip_zero;
 `ifdef GPU_FEAT_TRIANGLE
 reg cmd_is_draw_triangles;
-reg cmd_is_draw_indexed;
 `endif
+// Global SKIP_ZERO (color-key at texel 0xFF) state — set via CMD_SET_SKIP_ZERO,
+// ORed into every triangle-emitted span's flags so color-keyed sprites
+// (emitted as 2 triangles) get the transparency treatment.
+reg        st_skip_zero;
 
-// Payload buffer — up to 20 words (largest = DRAW_SPAN at 18)
-reg [31:0] pay_buf [0:23];
+// Payload buffer — up to 19 words used (CMD_DRAW_SPAN = 18, CMD_DRAW_TRIANGLE = 19)
+reg [31:0] pay_buf [0:18];
 reg [4:0]  pay_idx;
 reg [4:0]  pay_remaining;
 
 // Current pixel state
 reg [7:0]  frag_texel;        // Texel value (I8)
 reg [15:0] frag_color;        // Output color (after colormap / combine)
-reg [15:0] frag_z;            // Fragment depth
 reg        frag_discard;      // Alpha test / skip-zero result
 
 // ================================================================
@@ -585,21 +695,24 @@ reg [31:0] p3_fb_addr;
 reg [31:0] p3_z_addr;
 reg [31:0] p3_zi;
 reg        p3_discard;
+reg        p3_z_resolved;     // 1 once FBSS has finished the depth detour for p3
 
 // FB write sub-FSM (lives within S3, pauses pipeline when not IDLE)
 localparam FBSS_IDLE        = 4'd0;
 localparam FBSS_FLUSH_AW    = 4'd1;  // emit AW, then resume into accumulate
 localparam FBSS_FLUSH_W_RSP = 4'd2;  // wait for W handshake + B response
-localparam FBSS_ZREAD       = 4'd3;  // (Full only) issue SRAM read for Z
-localparam FBSS_ZWAIT       = 4'd4;
-localparam FBSS_ZWRITE      = 4'd5;
-localparam FBSS_ZWRWAIT     = 4'd6;
+localparam FBSS_ZREAD       = 4'd3;  // issue SRAM read for depth compare
+localparam FBSS_ZWAIT       = 4'd4;  // receive read, compare, launch write if needed
+localparam FBSS_ZWRWAIT     = 4'd5;  // wait for SRAM write to complete
 reg [3:0] fbss;
 
 // Pending pixel queued during a flush — applied after AXI write completes.
 reg        fbss_pend_valid;
 reg [7:0]  fbss_pend_color;
 reg [31:0] fbss_pend_addr;
+
+// (fbss_z_rdata removed — ZWAIT now launches the SRAM write in the same
+// cycle it sees the read response, so sram_rdata is live when we need it.)
 
 // Source mode: which input feeds S0 each cycle.
 localparam SRC_SPAN     = 1'b0;
@@ -622,7 +735,12 @@ reg src_done;            // source has issued its last pixel; pipeline draining
 // DSP slice and the path from `tx_mul_q` register through the post-multiply
 // adds to the cache RAM port is short.
 
-wire fp_pipe_stall = (p1_valid && !tex_resp_valid) || (fbss != FBSS_IDLE);
+// Lookahead: if we'd enter a depth detour THIS cycle, also stall the pipeline
+// so p3 holds stable while FBSS walks ZREAD/ZWAIT/ZWRITE/ZWRWAIT.
+wire fbss_depth_entry = (fbss == FBSS_IDLE) && p3_valid && !p3_discard
+                     && (p3_flags[SPAN_DEPTH_TEST] || p3_flags[SPAN_DEPTH_WRITE])
+                     && !p3_z_resolved;
+wire fp_pipe_stall = (p1_valid && !tex_resp_valid) || (fbss != FBSS_IDLE) || fbss_depth_entry;
 
 // Combinational tex address from p0 + DSP output
 wire [31:0] fp_tex_addr_full = p0_mode
@@ -733,13 +851,17 @@ localparam PSS_ADV       = 4'd1;  // stage 1: advance proj coords; register abs
 localparam PSS_CLZ       = 4'd2;  // stage 2: compute CLZ from registered abs
 localparam PSS_TOP8      = 4'd3;  // stage 3: compute top8; write recip_rd_addr
 localparam PSS_RECIP_W   = 4'd4;  // BRAM read latency
-localparam PSS_MUL_S     = 4'd5;  // capture recip_rd_data → recip_q16; dsp set
-localparam PSS_MUL_S_W   = 4'd6;  // DSP pipeline delay
-localparam PSS_MUL_T     = 4'd7;  // capture dsp_p as s_end; dsp set for tZ mul
-localparam PSS_MUL_T_W   = 4'd8;  // DSP pipeline delay
-localparam PSS_FINAL     = 4'd9;  // capture dsp_p as t_end; commit per pass
-localparam PSS_RECIP_NA  = 4'd10; // ANCHOR_ONLY entry — register abs without advance
+localparam PSS_MUL       = 4'd5;  // kick BOTH dsp + dsp2 multiplies (operands pre-registered)
+localparam PSS_MUL_W     = 4'd6;  // DSP pipeline delay (shared, both multiplies)
+localparam PSS_FINAL     = 4'd7;  // capture both products; commit per pass
+localparam PSS_RECIP_NA  = 4'd8;  // ANCHOR_ONLY entry — register abs without advance
+localparam PSS_RECIP_SHIFT = 4'd9;  // stage between RECIP_W and MUL: compute recip_q16
+                                    // and register it, so PSS_MUL becomes a simple
+                                    // reg-to-reg load into dsp_b/dsp2_b instead of
+                                    // synthesizing a 32-bit variable barrel shift
+                                    // into the dsp2_b update mux (-0.661 ns cone).
 reg [3:0] persp_pss;
+reg signed [31:0] recip_q16_r;
 
 // PSS pass type — what PSS_FINAL should do with the computed (s_end, t_end).
 localparam PSS_PASS_ANCHOR = 2'd0;  // pass 1: anchor only → persp_anchor_s/t
@@ -750,8 +872,8 @@ reg [1:0] persp_pass;
 // Latched values across PSS pipeline stages.
 reg [31:0] persp_zinv_abs_r;   // |sp_zinv| latched after PSS_ADV / PSS_RECIP_NA
 reg [4:0]  persp_clz;          // CLZ of persp_zinv_abs_r, latched after PSS_CLZ
-reg signed [31:0] persp_recip_q16;  // Q16.16 reciprocal, latched at PSS_MUL_S
-reg signed [31:0] persp_s_end;      // captured at PSS_MUL_T from dsp_p
+// (persp_recip_q16, persp_s_end removed — both sZ and tZ multiplies now
+// run concurrently on dsp/dsp2, so PSS_FINAL reads dsp_p and dsp2_p together.)
 
 // Stall the issue stage while slot A isn't ready (passes 1+2 still running).
 // Slot B not being ready is handled separately inside the load_p0 gate.
@@ -762,7 +884,7 @@ wire persp_issue_stall = persp_active && !persp_seg_a_ready;
 // (first pass only). Both are registered into persp_zinv_abs_r so the
 // downstream CLZ/top8 stages don't include the 32-bit add in their
 // timing path.
-wire signed [31:0] sp_zinv_advanced = sp_zinv + (sp_zinv_step <<< 4);
+wire signed [31:0] sp_zinv_advanced = sp_zinv + (sp_zinv_step <<< 3);  // 8-pixel advance
 wire        [31:0] persp_zinv_abs   = sp_zinv_advanced[31]
                                     ? -sp_zinv_advanced
                                     :  sp_zinv_advanced;
@@ -867,24 +989,67 @@ reg signed [31:0] tri_A [0:2], tri_B [0:2], tri_C [0:2];
 reg signed [31:0] grad_z_dx, grad_z_dy;
 reg signed [31:0] grad_s_dx, grad_s_dy;
 reg signed [31:0] grad_t_dx, grad_t_dy;
-reg signed [31:0] grad_r_dx, grad_r_dy;
+// R gradient hard-wired to zero — Quake uses flat per-triangle light
+// (sp_light = v0.r). Keeping the 32-bit interpolator would cost ~200 ALMs.
 
 // Bounding box (integer pixel coords)
 reg signed [15:0] tri_xmin, tri_xmax, tri_ymin, tri_ymax;
+// Raw (pre-clamp) bbox in 12.4 subpixel space — registered in S_TRI_BBOX,
+// consumed by S_TRI_BBOX_CLAMP. Splitting the bbox compute in two halves
+// keeps each combinational chain shallow enough to hit the 10 ns target.
+reg signed [15:0] tri_xmin_raw, tri_xmax_raw, tri_ymin_raw, tri_ymax_raw;
 
 // Rasteriser current state
 reg signed [15:0] tri_cur_x, tri_cur_y;
 reg signed [31:0] tri_e [0:2];                  // edge function at current pixel
 reg signed [31:0] tri_row_e [0:2];              // edge function at row start
-reg signed [31:0] tri_z, tri_s, tri_t, tri_r;   // interpolated attribs
-reg signed [31:0] tri_row_z, tri_row_s, tri_row_t, tri_row_r;
+reg signed [31:0] tri_z, tri_s, tri_t;          // interpolated attribs
+reg signed [31:0] tri_row_z, tri_row_s, tri_row_t;
+
+// Span-emit scan state: captures the inside-triangle extent for the current
+// scanline, then builds one CMD_DRAW_SPAN-equivalent sp_* setup and hands it
+// to S_FRAG_PIPE. Convex triangles ⇒ the inside pixels are contiguous per row.
+reg [15:0]        tri_span_x_start;
+reg [15:0]        tri_span_count;
+reg signed [31:0] tri_span_s_start;
+reg signed [31:0] tri_span_t_start;
+reg signed [31:0] tri_span_z_start;
+
+// Pre-registered "|tri_det| < 16 or tri_det == 0" flag for setup_step 7.
+// Captures at end of step 6 (same cycle tri_det updates from dsp_p + dsp2_p),
+// reads directly from dsp_p/dsp2_p so the compare starts from the same
+// combinational value tri_det is about to latch. Step 7 then only needs
+// the single registered bit instead of synthesizing a 32-bit signed
+// compare whose output feeds the tri_det-update mux (-1.606 ns cone on
+// the 100 MHz domain — every bit of tri_det fed back into every bit).
+reg tri_det_is_small_r;
+
+// (CMD_DRAW_SPRITE was deleted — sprites now render as 2 triangles.
+// That path supports arbitrary rotation, subpixel corners, and floor
+// sprites for free, using ~540 fewer ALMs than the dedicated primitive.)
 
 // Setup state
 reg [6:0]  setup_step;
 // Rolled gradient loop state (replaces setup steps 20-56)
 reg [2:0]  grad_idx;          // 0..5: which of 6 gradients (Zdx,Zdy,Sdx,Sdy,Tdx,Tdy)
 reg [2:0]  grad_sub;          // 0..6: sub-cycle within current gradient
-reg signed [31:0] grad_partial; // first cross-product partial result
+// (grad_partial removed — both cross-products now run in parallel on dsp/dsp2)
+
+// Pre-registered `dsp_p >>> (29 - tri_clz)` for the gradient writeback.
+// The DSP MAC output (Mult0~add_lh_hlmac_pl) → 64-bit variable barrel
+// shift → grad_*_dx[*] register was the worst critical path (-1.128 ns
+// on 100 MHz). Capturing the shifted result in its own register adds one
+// sub-cycle per gradient (30 → 36 cycles total for the 6-gradient loop).
+reg signed [63:0] dsp_p_shifted;
+
+// Pre-registered gradient cross-product subtraction. The old flow drove
+// `dsp_a <= grad_idx[0] ? (dsp2_p - dsp_p) : (dsp_p - dsp2_p)` directly in
+// grad_sub=3'd2 — Quartus synthesized the 32-bit subtract + sign mux as
+// a fabric cone from the DSP1 output register into dsp_a's next-DSP
+// input (Mult1~add_lh_hlmac_pl[0][0] → dsp_a[20], -0.885 ns). Moving
+// the subtraction into its own registered stage turns the dsp_a load
+// into a simple reg-to-reg mux.
+reg signed [31:0] grad_sub_r;
 reg [31:0] tri_fb_row_addr;    // precomputed: st_fb_addr + cur_y * stride
 reg [31:0] tri_zb_row_addr;    // precomputed: st_zb_addr + cur_y * zb_stride
 reg signed [31:0] tri_det;
@@ -975,8 +1140,10 @@ always @(posedge clk) begin
         cmd_is_set_blend <= 0; cmd_is_set_alpha_ref <= 0;
         cmd_is_set_fb <= 0; cmd_is_set_zb <= 0; cmd_is_set_shade <= 0;
         cmd_is_draw_span <= 0; cmd_is_draw_spans <= 0;
+        cmd_is_set_skip_zero <= 0;
+        st_skip_zero <= 0;
 `ifdef GPU_FEAT_TRIANGLE
-        cmd_is_draw_triangles <= 0; cmd_is_draw_indexed <= 0;
+        cmd_is_draw_triangles <= 0;
 `endif
         pay_idx <= 0;
         pay_remaining <= 0;
@@ -1003,6 +1170,7 @@ always @(posedge clk) begin
         p2b_fb_addr <= 0; p2b_z_addr <= 0; p2b_zi <= 0; p2b_discard <= 0;
         p3_valid <= 0; p3_color <= 0; p3_flags <= 0;
         p3_fb_addr <= 0; p3_z_addr <= 0; p3_zi <= 0; p3_discard <= 0;
+        p3_z_resolved <= 0;
         fbss <= FBSS_IDLE;
         fbss_pend_valid <= 0; fbss_pend_color <= 0; fbss_pend_addr <= 0;
         src_mode <= SRC_SPAN;
@@ -1022,25 +1190,31 @@ always @(posedge clk) begin
         persp_pass <= PSS_PASS_ANCHOR;
         persp_zinv_abs_r <= 0;
         persp_clz <= 0;
-        persp_recip_q16 <= 0;
-        persp_s_end <= 0;
 `endif
 `endif
 `ifdef GPU_HAS_RECIP_LUT
         dsp_a <= 0; dsp_b <= 0;
+        dsp2_a <= 0; dsp2_b <= 0;
         recip_rd_addr <= 0;
 `endif
 `ifdef GPU_FEAT_TRIANGLE
+        dsp3_a <= 0; dsp3_b <= 0;
         tri_active <= 0;
         setup_step <= 0;
         grad_idx <= 0;
         grad_sub <= 0;
-        grad_partial <= 0;
         tri_det <= 0;
         tri_recip <= 0;
         tri_clz <= 0;
         tri_det_sign <= 0;
         stat_triangles <= 0;
+        tri_span_x_start <= 0;
+        tri_span_count <= 0;
+        tri_span_s_start <= 0;
+        tri_span_t_start <= 0;
+        tri_span_z_start <= 0;
+        tri_xmin_raw <= 0; tri_xmax_raw <= 0;
+        tri_ymin_raw <= 0; tri_ymax_raw <= 0;
 `endif
         // State registers
         st_tex_addr <= 0; st_tex_width <= 0; st_tex_height <= 0;
@@ -1115,16 +1289,16 @@ always @(posedge clk) begin
             cmd_is_set_shade      <= (cmd_type == CMD_SET_SHADE);
             cmd_is_draw_span      <= (cmd_type == CMD_DRAW_SPAN);
             cmd_is_draw_spans     <= (cmd_type == CMD_DRAW_SPANS);
+            cmd_is_set_skip_zero  <= (cmd_type == CMD_SET_SKIP_ZERO);
 `ifdef GPU_FEAT_TRIANGLE
             cmd_is_draw_triangles <= (cmd_type == CMD_DRAW_TRIANGLES);
-            cmd_is_draw_indexed   <= (cmd_type == CMD_DRAW_INDEXED);
 `endif
 
             if (cmd_payload_words == 0) begin
                 state <= S_EXECUTE;
             end else begin
                 pay_idx <= 0;
-                pay_remaining <= (cmd_payload_words > 24) ? 5'd24
+                pay_remaining <= (cmd_payload_words > 19) ? 5'd19
                                : cmd_payload_words[4:0];
                 // Start first BRAM read (data arrives next cycle)
                 ring_rdptr <= (ring_rdptr + 16'd4) & ring_mask;
@@ -1137,7 +1311,7 @@ always @(posedge clk) begin
         // ============================================================
         S_PAY_DATA: begin
             // ring_rd_data has the current payload word
-            if (pay_idx < 24)
+            if (pay_idx < 19)
                 pay_buf[pay_idx] <= ring_rd_data;
             pay_idx       <= pay_idx + 5'd1;
             pay_remaining <= pay_remaining - 5'd1;
@@ -1308,44 +1482,12 @@ always @(posedge clk) begin
                 state <= S_TRI_LOAD;
             end
 
-            else if (cmd_is_draw_indexed) begin
-                // pay_buf[0] = vert_count, pay_buf[1] = idx_count
-                // pay_buf[2..N] = vertices, then indices packed 2 per word
-                // Extract 3 vertices via index lookup from pay_buf
-                begin : indexed_load
-                    reg [15:0] i0, i1, i2;
-                    reg [4:0] vbase;  // word offset where vertices start
-                    reg [4:0] ibase;  // word offset where indices start
-                    vbase = 5'd2;
-                    ibase = vbase + pay_buf[0][4:0] * 5'd6;
-                    // Indices packed 2 per word: [31:16]=idx1, [15:0]=idx0
-                    i0 = pay_buf[ibase][15:0];
-                    i1 = pay_buf[ibase][31:16];
-                    i2 = pay_buf[ibase + 5'd1][15:0];
-                    // Copy indexed vertices into pay_buf[1..18] positions
-                    // so S_TRI_LOAD can read them normally
-                    pay_buf[1]  <= pay_buf[vbase + i0[2:0]*6];
-                    pay_buf[2]  <= pay_buf[vbase + i0[2:0]*6 + 1];
-                    pay_buf[3]  <= pay_buf[vbase + i0[2:0]*6 + 2];
-                    pay_buf[4]  <= pay_buf[vbase + i0[2:0]*6 + 3];
-                    pay_buf[5]  <= pay_buf[vbase + i0[2:0]*6 + 4];
-                    pay_buf[6]  <= pay_buf[vbase + i0[2:0]*6 + 5];
-                    pay_buf[7]  <= pay_buf[vbase + i1[2:0]*6];
-                    pay_buf[8]  <= pay_buf[vbase + i1[2:0]*6 + 1];
-                    pay_buf[9]  <= pay_buf[vbase + i1[2:0]*6 + 2];
-                    pay_buf[10] <= pay_buf[vbase + i1[2:0]*6 + 3];
-                    pay_buf[11] <= pay_buf[vbase + i1[2:0]*6 + 4];
-                    pay_buf[12] <= pay_buf[vbase + i1[2:0]*6 + 5];
-                    pay_buf[13] <= pay_buf[vbase + i2[2:0]*6];
-                    pay_buf[14] <= pay_buf[vbase + i2[2:0]*6 + 1];
-                    pay_buf[15] <= pay_buf[vbase + i2[2:0]*6 + 2];
-                    pay_buf[16] <= pay_buf[vbase + i2[2:0]*6 + 3];
-                    pay_buf[17] <= pay_buf[vbase + i2[2:0]*6 + 4];
-                    pay_buf[18] <= pay_buf[vbase + i2[2:0]*6 + 5];
-                end
-                state <= S_TRI_LOAD;
-            end
 `endif // GPU_FEAT_TRIANGLE
+
+            else if (cmd_is_set_skip_zero) begin
+                st_skip_zero <= pay_buf[0][0];
+                state <= S_IDLE;
+            end
 
             else state <= S_IDLE;
         end
@@ -1435,26 +1577,30 @@ always @(posedge clk) begin
         S_SPAN_ZREAD: begin
             if (!sram_busy) begin
                 sram_rd   <= 1;
-                sram_addr <= sp_z_addr[21:0];
+                sram_addr <= sp_z_addr[23:2];  // byte addr → word addr
                 state     <= S_SPAN_ZWAIT;
             end
         end
 
         S_SPAN_ZWAIT: begin
             if (sram_rdata_valid) begin
-                // Z-buffer stores 16-bit values; extract based on word alignment
-                // Z addr is a byte address; [1] selects high/low halfword
-                frag_z <= sp_zi[31:16];  // Current fragment Z (integer part)
-                // Compare
+                // Z-buffer stores 16-bit values; [1] selects high/low halfword.
+                // Compare uses sp_zi[31:16] directly — routing through a
+                // same-cycle reg gave the compare a stale value.
                 begin : z_compare
                     reg [15:0] old_z;
+                    reg [15:0] new_z;
                     old_z = sp_z_addr[1] ? sram_rdata[31:16] : sram_rdata[15:0];
+                    new_z = sp_zi[31:16];
                     case (st_depth_func)
-                        3'd2: frag_discard <= !(frag_z < old_z);     // LESS
-                        3'd3: frag_discard <= !(frag_z <= old_z);    // LEQUAL
-                        3'd4: frag_discard <= !(frag_z == old_z);    // EQUAL
-                        3'd1: frag_discard <= 0;                      // ALWAYS
-                        default: frag_discard <= 0;                   // NONE
+                        3'd2: frag_discard <= !(new_z <  old_z);   // LESS
+                        3'd3: frag_discard <= !(new_z <= old_z);   // LEQUAL
+                        3'd4: frag_discard <= !(new_z == old_z);   // EQUAL
+                        3'd5: frag_discard <= !(new_z >= old_z);   // GEQUAL
+                        3'd6: frag_discard <= !(new_z >  old_z);   // GREATER
+                        3'd7: frag_discard <= !(new_z != old_z);   // NOTEQUAL
+                        3'd1: frag_discard <= 0;                    // ALWAYS
+                        default: frag_discard <= 0;                 // NONE
                     endcase
                 end
                 state <= S_SPAN_ZCMP;
@@ -1467,7 +1613,7 @@ always @(posedge clk) begin
             end else if (sp_flags[SPAN_DEPTH_WRITE] && !sram_busy) begin
                 // Write new Z value
                 sram_wr    <= 1;
-                sram_addr  <= sp_z_addr[21:0];
+                sram_addr  <= sp_z_addr[23:2];  // byte addr → word addr
                 sram_wdata <= sp_z_addr[1]
                     ? {sp_zi[31:16], sram_rdata[15:0]}
                     : {sram_rdata[31:16], sp_zi[31:16]};
@@ -1591,13 +1737,14 @@ always @(posedge clk) begin
             if (!fp_pipe_stall) begin
                 // p3 <- p2b  (merges cmap result if cmap was used; cmap_rd_data
                 // is now valid because p2b gave us 1 extra cycle of latency)
-                p3_valid    <= p2b_valid;
-                p3_color    <= p2b_flags[SPAN_COLORMAP] ? cmap_rd_data : p2b_color;
-                p3_flags    <= p2b_flags;
-                p3_fb_addr  <= p2b_fb_addr;
-                p3_z_addr   <= p2b_z_addr;
-                p3_zi       <= p2b_zi;
-                p3_discard  <= p2b_discard;
+                p3_valid     <= p2b_valid;
+                p3_color     <= p2b_flags[SPAN_COLORMAP] ? cmap_rd_data : p2b_color;
+                p3_flags     <= p2b_flags;
+                p3_fb_addr   <= p2b_fb_addr;
+                p3_z_addr    <= p2b_z_addr;
+                p3_zi        <= p2b_zi;
+                p3_discard   <= p2b_discard;
+                p3_z_resolved <= 0;  // fresh pixel; FBSS must resolve depth if flagged
 
                 // p2b <- p2  (no-op shift, gives cmap BRAM time to read)
                 p2b_valid   <= p2_valid;
@@ -1678,7 +1825,7 @@ always @(posedge clk) begin
                             sp_t              <= persp_pend_t;
                             sp_sstep          <= persp_pend_sstep;
                             sp_tstep          <= persp_pend_tstep;
-                            sp_seg_left       <= 4'd15;
+                            sp_seg_left       <= 4'd7;  // 8-pixel segments
                             persp_seg_b_ready <= 0;  // PSS will refill
                         end else begin
                             sp_s        <= sp_s + sp_sstep;
@@ -1704,8 +1851,16 @@ always @(posedge clk) begin
             // ----------------------------------------------------------
             case (fbss)
                 FBSS_IDLE: begin
-                    // Process p3 if it has a non-discard pixel
-                    if (p3_valid && !p3_discard) begin : fb_acc_blk
+                    // Depth detour: if the pixel needs a z-test/write and we
+                    // haven't resolved it yet, peel off into FBSS_ZREAD.
+                    // fp_pipe_stall's `fbss_depth_entry` term holds p3 stable.
+                    if (p3_valid && !p3_discard
+                        && (p3_flags[SPAN_DEPTH_TEST] || p3_flags[SPAN_DEPTH_WRITE])
+                        && !p3_z_resolved) begin
+                        fbss <= FBSS_ZREAD;
+                    end
+                    // Process p3 if it has a non-discard pixel (and no pending depth work)
+                    else if (p3_valid && !p3_discard) begin : fb_acc_blk
                         p3_word_addr  = p3_fb_addr & 32'hFFFFFFFC;
                         p3_byte_lane  = p3_fb_addr[1:0];
                         p3_word_match = (fb_acc_valid && fb_acc_addr == p3_word_addr)
@@ -1793,6 +1948,69 @@ always @(posedge clk) begin
                     end
                 end
 
+                // --------------------------------------------------------
+                // Depth test/write detour — serialised on the shared Z SRAM.
+                // p3 is held stable via fbss != FBSS_IDLE stalling the pipe.
+                // --------------------------------------------------------
+                FBSS_ZREAD: begin
+                    if (!sram_busy) begin
+                        sram_rd   <= 1;
+                        sram_addr <= p3_z_addr[23:2];  // byte → word
+                        fbss      <= FBSS_ZWAIT;
+                    end
+                end
+
+                FBSS_ZWAIT: begin
+                    // Compare + z-write launch happen in the same cycle we see
+                    // the read response. Saves one state (FBSS_ZWRITE merged
+                    // here) and one cycle on depth-tested pixels.
+                    if (sram_rdata_valid) begin : fbss_z_cmp
+                        reg [15:0] old_z;
+                        reg [15:0] new_z;
+                        reg        pass;
+                        old_z = p3_z_addr[1] ? sram_rdata[31:16] : sram_rdata[15:0];
+                        new_z = p3_zi[31:16];
+                        case (st_depth_func)
+                            3'd1: pass = 1'b1;                  // ALWAYS
+                            3'd2: pass = (new_z <  old_z);      // LESS
+                            3'd3: pass = (new_z <= old_z);      // LEQUAL
+                            3'd4: pass = (new_z == old_z);      // EQUAL
+                            3'd5: pass = (new_z >= old_z);      // GEQUAL
+                            3'd6: pass = (new_z >  old_z);      // GREATER
+                            3'd7: pass = (new_z != old_z);      // NOTEQUAL
+                            default: pass = 1'b1;               // NONE — shouldn't reach here
+                        endcase
+
+                        if (p3_flags[SPAN_DEPTH_TEST] && !pass) begin
+                            // Fail: skip fb write + skip z write.
+                            p3_valid      <= 0;
+                            p3_z_resolved <= 1;
+                            fbss          <= FBSS_IDLE;
+                        end else if (p3_flags[SPAN_DEPTH_WRITE]) begin
+                            // Pass + write: launch SRAM write now, wait for
+                            // completion in FBSS_ZWRWAIT.
+                            sram_wr    <= 1;
+                            sram_addr  <= p3_z_addr[23:2];
+                            sram_wdata <= p3_z_addr[1]
+                                ? {p3_zi[31:16], sram_rdata[15:0]}
+                                : {sram_rdata[31:16], p3_zi[31:16]};
+                            sram_wstrb <= p3_z_addr[1] ? 4'b1100 : 4'b0011;
+                            fbss <= FBSS_ZWRWAIT;
+                        end else begin
+                            // Pass, no z-write — proceed straight to accumulate.
+                            p3_z_resolved <= 1;
+                            fbss          <= FBSS_IDLE;
+                        end
+                    end
+                end
+
+                FBSS_ZWRWAIT: begin
+                    if (!sram_busy) begin
+                        p3_z_resolved <= 1;
+                        fbss          <= FBSS_IDLE;
+                    end
+                end
+
                 default: fbss <= FBSS_IDLE;
             endcase
 
@@ -1820,8 +2038,8 @@ always @(posedge clk) begin
                             persp_pass <= PSS_PASS_TO_A;
                             persp_pss  <= PSS_ADV;
                         end else if (!persp_seg_b_ready
-                                  && (sp_count > 16'd16 || sp_seg_left != 4'd0)) begin
-                            // Only fill slot B if there's a future segment
+                                  && (sp_count > 16'd8 || sp_seg_left != 4'd0)) begin
+                            // Only fill slot B if there's a future 8-px segment
                             // that will swap it in. (sp_count includes the
                             // current segment's remaining pixels.)
                             persp_pass <= PSS_PASS_TO_B;
@@ -1836,8 +2054,8 @@ always @(posedge clk) begin
                     // Splitting the old single-cycle (advance → CLZ → top8 →
                     // recip_rd_addr) chain into ADV / CLZ / TOP8 closes the
                     // 50 MHz timing path that was failing by -3.45 ns.
-                    sp_sZ            <= sp_sZ   + (sp_sZstep   <<< 4);
-                    sp_tZ            <= sp_tZ   + (sp_tZstep   <<< 4);
+                    sp_sZ            <= sp_sZ   + (sp_sZstep   <<< 3);  // 8-pixel advance
+                    sp_tZ            <= sp_tZ   + (sp_tZstep   <<< 3);
                     sp_zinv          <= sp_zinv_advanced;
                     persp_zinv_abs_r <= persp_zinv_abs;
                     persp_pss        <= PSS_CLZ;
@@ -1871,63 +2089,63 @@ always @(posedge clk) begin
 
                 PSS_RECIP_W: begin
                     // BRAM read latency — recip_rd_data valid next cycle.
-                    persp_pss <= PSS_MUL_S;
+                    persp_pss <= PSS_RECIP_SHIFT;
                 end
 
-                PSS_MUL_S: begin : mul_s_blk
-                    // Compute Q16.16 reciprocal from LUT mantissa + clz shift,
-                    // latch it, kick the first multiply (sp_sZ * recip).
-                    reg signed [31:0] recip_q16;
+                PSS_RECIP_SHIFT: begin
+                    // Compute the Q16.16 reciprocal from LUT mantissa + clz
+                    // shift and LATCH it into recip_q16_r. Splitting this
+                    // out of PSS_MUL removes the variable 32-bit barrel
+                    // shifter from the dsp2_b update mux cone.
                     if (persp_clz >= 5'd13)
-                        recip_q16 = $signed({16'b0, recip_rd_data})
-                                  <<< (persp_clz - 5'd13);
+                        recip_q16_r <= $signed({16'b0, recip_rd_data})
+                                     <<< (persp_clz - 5'd13);
                     else
-                        recip_q16 = $signed({16'b0, recip_rd_data})
-                                  >>> (5'd13 - persp_clz);
-                    persp_recip_q16 <= recip_q16;
-                    dsp_a           <= sp_sZ;
-                    dsp_b           <= recip_q16;
-                    persp_pss       <= PSS_MUL_S_W;
+                        recip_q16_r <= $signed({16'b0, recip_rd_data})
+                                     >>> (5'd13 - persp_clz);
+                    persp_pss <= PSS_MUL;
                 end
 
-                PSS_MUL_S_W: begin
-                    persp_pss <= PSS_MUL_T;
+                PSS_MUL: begin
+                    // Kick BOTH multiplies (sZ×recip on dsp, tZ×recip on dsp2)
+                    // in parallel using the pre-registered recip_q16_r.
+                    // They land together at PSS_FINAL one DSP cycle later.
+                    dsp_a     <= sp_sZ;
+                    dsp_b     <= recip_q16_r;
+                    dsp2_a    <= sp_tZ;
+                    dsp2_b    <= recip_q16_r;
+                    persp_pss <= PSS_MUL_W;
                 end
 
-                PSS_MUL_T: begin
-                    // dsp_p now holds sp_sZ * recip — capture as s_end.
-                    persp_s_end <= dsp_p[47:16];
-                    // Kick the second multiply (sp_tZ * recip).
-                    dsp_a       <= sp_tZ;
-                    dsp_b       <= persp_recip_q16;
-                    persp_pss   <= PSS_MUL_T_W;
-                end
-
-                PSS_MUL_T_W: begin
+                PSS_MUL_W: begin
+                    // DSP pipeline delay — dsp_p and dsp2_p both update here.
                     persp_pss <= PSS_FINAL;
                 end
 
                 PSS_FINAL: begin : pss_final_blk
-                    // dsp_p now holds sp_tZ * recip — t_end.
+                    // dsp_p  = sZ × recip → s_end
+                    // dsp2_p = tZ × recip → t_end
+                    reg signed [31:0] s_end;
                     reg signed [31:0] t_end;
-                    t_end = dsp_p[47:16];
+                    s_end = dsp_p[47:16];
+                    t_end = dsp2_p[47:16];
                     case (persp_pass)
                         PSS_PASS_ANCHOR: begin
                             // Pass 1: just store the anchor at pos 0.
-                            persp_anchor_s   <= persp_s_end;
+                            persp_anchor_s   <= s_end;
                             persp_anchor_t   <= t_end;
                             persp_first_done <= 1;
                         end
                         PSS_PASS_TO_A: begin
-                            // Pass 2: derive slot A slopes from anchor → pos 16.
+                            // Pass 2: derive slot A slopes from anchor → pos 8.
                             sp_s              <= persp_anchor_s;
                             sp_t              <= persp_anchor_t;
-                            sp_sstep          <= ($signed(persp_s_end)
-                                                - $signed(persp_anchor_s)) >>> 4;
+                            sp_sstep          <= ($signed(s_end)
+                                                - $signed(persp_anchor_s)) >>> 3;
                             sp_tstep          <= ($signed(t_end)
-                                                - $signed(persp_anchor_t)) >>> 4;
-                            sp_seg_left       <= 4'd15;
-                            persp_anchor_s    <= persp_s_end;
+                                                - $signed(persp_anchor_t)) >>> 3;
+                            sp_seg_left       <= 4'd7;  // 8-pixel segments
+                            persp_anchor_s    <= s_end;
                             persp_anchor_t    <= t_end;
                             persp_seg_a_ready <= 1;
                         end
@@ -1935,11 +2153,11 @@ always @(posedge clk) begin
                             // Pass 3+: derive slot B (pending) slopes.
                             persp_pend_s      <= persp_anchor_s;
                             persp_pend_t      <= persp_anchor_t;
-                            persp_pend_sstep  <= ($signed(persp_s_end)
-                                                - $signed(persp_anchor_s)) >>> 4;
+                            persp_pend_sstep  <= ($signed(s_end)
+                                                - $signed(persp_anchor_s)) >>> 3;
                             persp_pend_tstep  <= ($signed(t_end)
-                                                - $signed(persp_anchor_t)) >>> 4;
-                            persp_anchor_s    <= persp_s_end;
+                                                - $signed(persp_anchor_t)) >>> 3;
+                            persp_anchor_s    <= s_end;
                             persp_anchor_t    <= t_end;
                             persp_seg_b_ready <= 1;
                         end
@@ -1954,6 +2172,9 @@ always @(posedge clk) begin
 
             // ----------------------------------------------------------
             // Drain detection — when source done and pipe empty, flush.
+            // If we're inside a triangle rasterisation, hand back to the
+            // row walker instead of flushing fb_acc (more rows may follow
+            // and fb_acc will keep coalescing writes).
             // ----------------------------------------------------------
             if (src_done && !p0_valid && !p1_valid && !p2_valid && !p2b_valid
                          && !p3_valid && fbss == FBSS_IDLE) begin
@@ -1964,7 +2185,12 @@ always @(posedge clk) begin
                 persp_seg_b_ready <= 0;
                 persp_first_done  <= 0;
 `endif
-                state    <= S_FB_FLUSH;
+`ifdef GPU_FEAT_TRIANGLE
+                if (tri_active)
+                    state <= S_TRI_ROW_NEXT;
+                else
+`endif
+                    state    <= S_FB_FLUSH;
             end
         end
 `endif // GPU_FEAT_FRAG_PIPELINE
@@ -2105,7 +2331,7 @@ always @(posedge clk) begin
                 state <= S_IDLE;
             else if (!sram_busy) begin
                 sram_wr    <= 1;
-                sram_addr  <= clear_addr[21:0];
+                sram_addr  <= clear_addr[23:2];  // byte addr → word addr
                 sram_wdata <= {clear_depth, clear_depth};
                 sram_wstrb <= 4'b1111;
                 state      <= S_CLEAR_ZB_WAIT;
@@ -2148,74 +2374,63 @@ always @(posedge clk) begin
         // Triangle: Sequential setup (edges, determinant, gradients)
         // ============================================================
         // DSP multiply has 1-cycle registered latency:
-        //   Step N:   set dsp_a, dsp_b
-        //   Step N+1: (pipeline, dsp computes)
-        //   Step N+2: read dsp_p
-        // Even steps set inputs, odd steps are pipeline delay, even+2 reads.
-        // We interleave useful work into the delay slots where possible.
+        // Parallel setup using 3 DSP slots (dsp, dsp2, dsp3):
+        //   Step 0: edges/diffs + launch C0/C1/C2 first-multiply in parallel
+        //   Step 2: capture partials; launch C0/C1/C2 second-multiply in parallel
+        //   Step 4: subtract → final C0/C1/C2; launch det parts (dsp + dsp2)
+        //   Step 6: det = dsp_p + dsp2_p
+        //   Step 7: degenerate check + CLZ of |det|
+        //   Step 8: write recip_rd_addr
+        //   Step 9: capture recip → transition to S_TRI_GRAD
+        // 10 cycles end-to-end vs 20 before (2× setup speedup).
         S_TRI_SETUP: begin
             setup_step <= setup_step + 7'd1;
             case (setup_step)
-            // --- Edges A, B + precompute diffs (no multiply needed) ---
             0: begin
                 tri_A[0] <= v_y[0] - v_y[1]; tri_B[0] <= v_x[1] - v_x[0];
                 tri_A[1] <= v_y[1] - v_y[2]; tri_B[1] <= v_x[2] - v_x[1];
                 tri_A[2] <= v_y[2] - v_y[0]; tri_B[2] <= v_x[0] - v_x[2];
                 dX10 <= v_x[1] - v_x[0]; dY10 <= v_y[1] - v_y[0];
                 dX20 <= v_x[2] - v_x[0]; dY20 <= v_y[2] - v_y[0];
-                // Set up C0 first multiply: v0.x * v1.y
-                dsp_a <= {{16{v_x[0][15]}}, v_x[0]};
-                dsp_b <= {{16{v_y[1][15]}}, v_y[1]};
+                // Parallel first-multiplies for C0, C1, C2
+                dsp_a  <= {{16{v_x[0][15]}}, v_x[0]}; dsp_b  <= {{16{v_y[1][15]}}, v_y[1]};
+                dsp2_a <= {{16{v_x[1][15]}}, v_x[1]}; dsp2_b <= {{16{v_y[2][15]}}, v_y[2]};
+                dsp3_a <= {{16{v_x[2][15]}}, v_x[2]}; dsp3_b <= {{16{v_y[0][15]}}, v_y[0]};
             end
-            1: begin end // DSP pipeline delay
-            2: begin // Read C0 partial; set up C0 second: v1.x * v0.y
-                tri_C[0] <= dsp_p[31:0];
-                dsp_a <= {{16{v_x[1][15]}}, v_x[1]};
-                dsp_b <= {{16{v_y[0][15]}}, v_y[0]};
+            1: begin end  // DSP pipeline delay
+            2: begin
+                // Capture 3 first-multiply partials
+                tri_C[0] <= dsp_p [31:0];
+                tri_C[1] <= dsp2_p[31:0];
+                tri_C[2] <= dsp3_p[31:0];
+                // Parallel second-multiplies
+                dsp_a  <= {{16{v_x[1][15]}}, v_x[1]}; dsp_b  <= {{16{v_y[0][15]}}, v_y[0]};
+                dsp2_a <= {{16{v_x[2][15]}}, v_x[2]}; dsp2_b <= {{16{v_y[1][15]}}, v_y[1]};
+                dsp3_a <= {{16{v_x[0][15]}}, v_x[0]}; dsp3_b <= {{16{v_y[2][15]}}, v_y[2]};
             end
-            3: begin end // pipeline delay
-            4: begin // C0 complete; set up C1 first: v1.x * v2.y
-                tri_C[0] <= tri_C[0] - dsp_p[31:0];
-                dsp_a <= {{16{v_x[1][15]}}, v_x[1]};
-                dsp_b <= {{16{v_y[2][15]}}, v_y[2]};
+            3: begin end
+            4: begin
+                // Subtract → final C0/C1/C2; launch det parts in parallel
+                tri_C[0] <= tri_C[0] - dsp_p [31:0];
+                tri_C[1] <= tri_C[1] - dsp2_p[31:0];
+                tri_C[2] <= tri_C[2] - dsp3_p[31:0];
+                dsp_a  <= tri_A[0]; dsp_b  <= {{16{dX20[15]}}, dX20};
+                dsp2_a <= tri_B[0]; dsp2_b <= {{16{dY20[15]}}, dY20};
             end
             5: begin end
-            6: begin // C1 partial; set up C1 second: v2.x * v1.y
-                tri_C[1] <= dsp_p[31:0];
-                dsp_a <= {{16{v_x[2][15]}}, v_x[2]};
-                dsp_b <= {{16{v_y[1][15]}}, v_y[1]};
+            6: begin
+                // det = A0*dX20 + B0*dY20  (both multiplies done in parallel)
+                tri_det <= dsp_p[31:0] + dsp2_p[31:0];
+                // Capture the small-det test on the same combinational
+                // value tri_det is latching, so step 7 sees a single
+                // registered bit instead of a 28-bit compare cone.
+                tri_det_is_small_r <= ($signed(dsp_p[31:0] + dsp2_p[31:0]) == 32'sd0)
+                                       || ($signed(dsp_p[31:0] + dsp2_p[31:0]) > -32'sd16
+                                           && $signed(dsp_p[31:0] + dsp2_p[31:0]) < 32'sd16);
             end
-            7: begin end
-            8: begin // C1 complete; set up C2 first: v2.x * v0.y
-                tri_C[1] <= tri_C[1] - dsp_p[31:0];
-                dsp_a <= {{16{v_x[2][15]}}, v_x[2]};
-                dsp_b <= {{16{v_y[0][15]}}, v_y[0]};
-            end
-            9: begin end
-            10: begin // C2 partial; set up C2 second: v0.x * v2.y
-                tri_C[2] <= dsp_p[31:0];
-                dsp_a <= {{16{v_x[0][15]}}, v_x[0]};
-                dsp_b <= {{16{v_y[2][15]}}, v_y[2]};
-            end
-            11: begin end
-            12: begin // C2 complete; set up det part 1: A0 * dX20
-                tri_C[2] <= tri_C[2] - dsp_p[31:0];
-                dsp_a <= tri_A[0];
-                dsp_b <= {{16{dX20[15]}}, dX20};
-            end
-            13: begin end
-            14: begin // det partial; set up det part 2: B0 * dY20
-                tri_det <= dsp_p[31:0];
-                dsp_a <= tri_B[0];
-                dsp_b <= {{16{dY20[15]}}, dY20};
-            end
-            15: begin end
-            16: begin // det complete
-                tri_det <= tri_det + dsp_p[31:0];
-            end
-            17: begin
-                // Check determinant: skip degenerate
-                if (tri_det == 0 || (tri_det > -16 && tri_det < 16)) begin
+            7: begin
+                // Check determinant: skip degenerate (uses registered compare)
+                if (tri_det_is_small_r) begin
                     state <= S_IDLE;
                     setup_step <= 0;
                 end else begin
@@ -2270,7 +2485,7 @@ always @(posedge clk) begin
                     end
                 end
             end
-            18: begin
+            8: begin
                 // Set M10K LUT read address (registered, 1-cycle latency)
                 begin : recip_addr_set
                     reg [31:0] abs_d, norm;
@@ -2279,7 +2494,7 @@ always @(posedge clk) begin
                     recip_rd_addr <= norm[30:23];
                 end
             end
-            19: begin
+            9: begin
                 // Capture M10K read result, then enter rolled gradient loop.
                 tri_recip <= recip_rd_data;
                 state <= S_TRI_GRAD;
@@ -2309,43 +2524,59 @@ always @(posedge clk) begin
         //   6: writeback shifted dsp_p to selected gradient register;
         //      advance grad_idx or transition to S_TRI_BBOX
         // ============================================================
+        // Parallel gradient loop: both cross-multiplies (dV10×axis_b1 and
+        // dV20×axis_b2) run simultaneously on dsp + dsp2. 7 sub-cycles ×
+        // 6 gradients = 42 cycles.
+        //   3'd0 launch parallel mul
+        //   3'd1 DSP pipeline delay
+        //   3'd2 capture grad_sub_r = dsp_p - dsp2_p (or reversed)
+        //   3'd3 load dsp_a <= grad_sub_r, launch recip mul
+        //   3'd4 DSP pipeline delay for recip mul
+        //   3'd5 capture dsp_p_shifted
+        //   3'd6 writeback grad_*_dx/dy
         S_TRI_GRAD: begin
             grad_sub <= grad_sub + 3'd1;
             case (grad_sub)
                 3'd0: begin
-                    dsp_a <= grad_dV10;
-                    dsp_b <= grad_axis_b1;
+                    // Launch both cross-multiplies in parallel.
+                    dsp_a  <= grad_dV10; dsp_b  <= grad_axis_b1;
+                    dsp2_a <= grad_dV20; dsp2_b <= grad_axis_b2;
                 end
-                3'd1: begin end
+                3'd1: begin end  // DSP pipeline delay
                 3'd2: begin
-                    grad_partial <= dsp_p[31:0];
-                    dsp_a <= grad_dV20;
-                    dsp_b <= grad_axis_b2;
+                    // Both DSP results are valid. Register the subtract +
+                    // sign mux into grad_sub_r so next cycle's dsp_a load
+                    // is just a reg-to-reg copy, not a 32-bit adder cone
+                    // feeding the DSP input pin.
+                    grad_sub_r <= grad_idx[0]
+                                ? ($signed(dsp2_p[31:0]) - $signed(dsp_p[31:0]))
+                                : ($signed(dsp_p[31:0])  - $signed(dsp2_p[31:0]));
                 end
-                3'd3: begin end
-                3'd4: begin
-                    // dx: cross = dV10*dY20 - dV20*dY10  → partial - dsp_p
-                    // dy: cross = dV20*dX10 - dV10*dX20  → dsp_p - partial
-                    dsp_a <= grad_idx[0] ? (dsp_p[31:0] - grad_partial)
-                                         : (grad_partial - dsp_p[31:0]);
+                3'd3: begin
+                    // Launch recip mul using the pre-registered subtract.
+                    dsp_a <= grad_sub_r;
                     dsp_b <= {{16{1'b0}}, tri_recip};
                 end
-                3'd5: begin end
+                3'd4: begin end  // DSP pipeline delay for recip mul
+                3'd5: begin
+                    // Capture the variable-shift result in its own register
+                    // so the grad-register writeback in 3'd6 doesn't have to
+                    // synthesize a 6-stage barrel shifter on the same cycle.
+                    dsp_p_shifted <= dsp_p >>> (6'd29 - tri_clz);
+                end
                 3'd6: begin
                     case (grad_idx)
-                        3'd0: grad_z_dx <= dsp_p >>> (6'd29 - tri_clz);
-                        3'd1: grad_z_dy <= dsp_p >>> (6'd29 - tri_clz);
-                        3'd2: grad_s_dx <= dsp_p >>> (6'd29 - tri_clz);
-                        3'd3: grad_s_dy <= dsp_p >>> (6'd29 - tri_clz);
-                        3'd4: grad_t_dx <= dsp_p >>> (6'd29 - tri_clz);
-                        3'd5: grad_t_dy <= dsp_p >>> (6'd29 - tri_clz);
+                        3'd0: grad_z_dx <= dsp_p_shifted;
+                        3'd1: grad_z_dy <= dsp_p_shifted;
+                        3'd2: grad_s_dx <= dsp_p_shifted;
+                        3'd3: grad_s_dy <= dsp_p_shifted;
+                        3'd4: grad_t_dx <= dsp_p_shifted;
+                        3'd5: grad_t_dy <= dsp_p_shifted;
                         default: ;
                     endcase
                     grad_sub <= 0;
                     if (grad_idx == 3'd5) begin
-                        // R gradient: set to 0 (per-vertex R uses v0 value).
-                        // Full R gradient computation costs ~200 ALMs.
-                        grad_r_dx <= 0; grad_r_dy <= 0;
+                        // No R gradient — sp_light comes from v_r[0] directly.
                         state <= S_TRI_BBOX;
                     end else begin
                         grad_idx <= grad_idx + 3'd1;
@@ -2356,11 +2587,13 @@ always @(posedge clk) begin
         end
 
         // ============================================================
-        // Triangle: Bounding box + clip to screen
+        // Triangle: Bounding box stage 1 — raw min/max of v_x[0..2], v_y[0..2]
+        // ------------------------------------------------------------
+        // Just the 3-way min/max, no clamp. Keeps the combinational depth
+        // to ~2 compares so the ~10 ns budget is easy.
         // ============================================================
         S_TRI_BBOX: begin
-            // Compute bbox (registered) — decision made in S_TRI_ROW
-            begin : bbox_calc
+            begin : bbox_raw
                 reg signed [15:0] xmin, xmax, ymin, ymax;
                 xmin = v_x[0]; xmax = v_x[0];
                 ymin = v_y[0]; ymax = v_y[0];
@@ -2372,12 +2605,42 @@ always @(posedge clk) begin
                 if (v_y[1] > ymax) ymax = v_y[1];
                 if (v_y[2] < ymin) ymin = v_y[2];
                 if (v_y[2] > ymax) ymax = v_y[2];
-                tri_xmin <= (xmin < 0) ? 16'd0 : (xmin >>> 4);
-                tri_xmax <= (xmax >>> 4 > 319) ? 16'd319 : (xmax >>> 4);
-                tri_ymin <= (ymin < 0) ? 16'd0 : (ymin >>> 4);
-                tri_ymax <= (ymax >>> 4 > 199) ? 16'd199 : (ymax >>> 4);
-                state <= S_TRI_ROW;
+                tri_xmin_raw <= xmin;
+                tri_xmax_raw <= xmax;
+                tri_ymin_raw <= ymin;
+                tri_ymax_raw <= ymax;
             end
+            state <= S_TRI_BBOX_CLAMP;
+        end
+
+        // ============================================================
+        // Triangle: Bounding box stage 2 — clamp to screen + >>4 (12.4→px)
+        // ------------------------------------------------------------
+        // Reads registered tri_*_raw, produces registered tri_xmin/xmax/
+        // ymin/ymax. Only a compare + mux + shift per axis — shallow.
+        // ============================================================
+        S_TRI_BBOX_CLAMP: begin
+            tri_xmin <= (tri_xmin_raw < 0) ? 16'd0 : (tri_xmin_raw >>> 4);
+            tri_xmax <= (tri_xmax_raw >>> 4 > 319) ? 16'd319 : (tri_xmax_raw >>> 4);
+            tri_ymin <= (tri_ymin_raw < 0) ? 16'd0 : (tri_ymin_raw >>> 4);
+            tri_ymax <= (tri_ymax_raw >>> 4 > 199) ? 16'd199 : (tri_ymax_raw >>> 4);
+            state <= S_TRI_MUL_WAIT;
+        end
+
+        // ============================================================
+        // Triangle: 2-cycle wait for tri_ymin_x_stride to be registered.
+        // With the DSP input-FF stage, tri_ymin_dsp_in / st_fb_stride_dsp_in
+        // capture on cycle N+1 (one cycle after S_TRI_BBOX_CLAMP), and
+        // the DSP output (tri_ymin_x_stride) is valid on cycle N+2. So
+        // S_TRI_ROW needs to fire on cycle N+3. Two wait states give it
+        // that margin and also let tri_e_init_Apx/Bpy settle fully.
+        // ============================================================
+        S_TRI_MUL_WAIT: begin
+            state <= S_TRI_MUL_WAIT2;
+        end
+
+        S_TRI_MUL_WAIT2: begin
+            state <= S_TRI_ROW;
         end
 
         // ============================================================
@@ -2392,18 +2655,16 @@ always @(posedge clk) begin
             tri_active <= 1;
             tri_cur_x <= tri_xmin;
             tri_cur_y <= tri_ymin;
-            // Evaluate edge functions at (xmin*16, ymin*16) in 12.4 space
-            begin : init_edges
-                reg signed [31:0] px, py;
-                px = {tri_xmin, 4'b0};  // pixel center in 12.4 (integer pixel << 4)
-                py = {tri_ymin, 4'b0};
-                tri_e[0] <= tri_A[0] * px + tri_B[0] * py + tri_C[0];
-                tri_e[1] <= tri_A[1] * px + tri_B[1] * py + tri_C[1];
-                tri_e[2] <= tri_A[2] * px + tri_B[2] * py + tri_C[2];
-                tri_row_e[0] <= tri_A[0] * px + tri_B[0] * py + tri_C[0];
-                tri_row_e[1] <= tri_A[1] * px + tri_B[1] * py + tri_C[1];
-                tri_row_e[2] <= tri_A[2] * px + tri_B[2] * py + tri_C[2];
-            end
+            // Evaluate edge functions at (xmin*16, ymin*16) in 12.4 space.
+            // tri_e_init_Apx/Bpy hold the A*px and B*py products registered
+            // during S_TRI_MUL_WAIT, so this is a pure 3-way add — one carry
+            // chain, no DSP — keeping the cone well inside the 10 ns budget.
+            tri_e[0]     <= tri_e_init_Apx[0] + tri_e_init_Bpy[0] + tri_C[0];
+            tri_e[1]     <= tri_e_init_Apx[1] + tri_e_init_Bpy[1] + tri_C[1];
+            tri_e[2]     <= tri_e_init_Apx[2] + tri_e_init_Bpy[2] + tri_C[2];
+            tri_row_e[0] <= tri_e_init_Apx[0] + tri_e_init_Bpy[0] + tri_C[0];
+            tri_row_e[1] <= tri_e_init_Apx[1] + tri_e_init_Bpy[1] + tri_C[1];
+            tri_row_e[2] <= tri_e_init_Apx[2] + tri_e_init_Bpy[2] + tri_C[2];
             // Initialise attributes at v0 (simple — proper interpolation later)
             // Compute attributes at (xmin, ymin) by stepping from v0:
             // A(xmin,ymin) = A(v0) + (xmin*16 - v0.x) * dAdx + (ymin*16 - v0.y) * dAdy
@@ -2414,101 +2675,131 @@ always @(posedge clk) begin
             tri_z     <= {v_z[0], 16'b0};
             tri_s     <= {v_s[0], 16'b0};
             tri_t     <= {v_t[0], 16'b0};
-            tri_r     <= {8'b0, v_r[0][7:0], 16'b0};
             tri_row_z <= {v_z[0], 16'b0};
             tri_row_s <= {v_s[0], 16'b0};
             tri_row_t <= {v_t[0], 16'b0};
-            tri_row_r <= {8'b0, v_r[0][7:0], 16'b0};
-            // tri_ymin is registered (from S_TRI_BBOX), so this multiply has
-            // registered inputs — Quartus can pipeline it through DSP.
-            tri_fb_row_addr <= st_fb_addr + (tri_ymin * {{16{st_fb_stride[15]}}, st_fb_stride});
-            tri_zb_row_addr <= st_zb_addr + (tri_ymin * 640);
+            // tri_ymin_x_stride is the DSP-registered product from
+            // S_TRI_MUL_WAIT. For ZB, stride is the constant 640 = 512 + 128,
+            // so use two shifts + an add — no DSP needed.
+            tri_fb_row_addr <= st_fb_addr + tri_ymin_x_stride;
+            tri_zb_row_addr <= st_zb_addr
+                             + ({16'b0, tri_ymin} <<< 9)
+                             + ({16'b0, tri_ymin} <<< 7);
+            tri_span_count <= 0;  // reset for first row scan
             state <= S_TRI_PIX;
             end // else (bbox not empty)
         end
 
         // ============================================================
-        // Triangle: Pixel test + step
+        // Triangle: Row scan — walk xmin..xmax finding the inside extent
+        // ------------------------------------------------------------
+        // Convex triangles → inside pixels are contiguous per row. Snapshot
+        // attribute values at x_start, count inside pixels, and at row end
+        // emit a single span into S_FRAG_PIPE via the SRC_SPAN path.
         // ============================================================
         S_TRI_PIX: begin
             if (tri_cur_x > tri_xmax) begin
-                // End of row
-                if (tri_cur_y >= tri_ymax) begin
-                    // Triangle done — flush FB
-                    tri_active <= 0;
-                    state <= S_FB_FLUSH;
+                // Row scan complete.
+                if (tri_span_count != 16'd0) begin
+                    // Emit one span for the inside extent of this row.
+                    sp_fb_addr   <= tri_fb_row_addr + {{16{1'b0}}, tri_span_x_start};
+                    sp_tex_addr  <= st_tex_addr;
+                    sp_s         <= tri_span_s_start;
+                    sp_t         <= tri_span_t_start;
+                    // Gradients in this file are computed per-SUB-PIXEL
+                    // (12.4 scaling). The fragment pipe steps sp_* per PIXEL.
+                    // Shift-left-4 converts sub-pixel → pixel rate, matching
+                    // how tri_s / tri_t / tri_z are advanced in S_TRI_PIX.
+                    sp_sstep     <= grad_s_dx <<< 4;
+                    sp_tstep     <= grad_t_dx <<< 4;
+                    sp_count     <= tri_span_count;
+                    sp_light     <= v_r[0];  // flat light: v0.r for all pixels
+                    sp_flags     <= (st_depth_func != 0 ? 8'h18 : 8'h00) | 8'h01
+                                   | (st_skip_zero ? 8'h04 : 8'h00);  // COLORMAP + DEPTH(maybe) + SKIP_ZERO(if set)
+                    sp_fb_stride <= 16'd1;
+                    sp_tex_width <= st_tex_width;
+                    sp_tex_shift <= 0;
+                    sp_tex_bits  <= 0;
+                    sp_z_addr    <= tri_zb_row_addr + {tri_span_x_start, 1'b0};
+                    sp_zi        <= tri_span_z_start;
+                    sp_zistep    <= grad_z_dx <<< 4;
+                    stat_spans   <= stat_spans + 32'd1;
+`ifdef GPU_PERSP_IMPL
+                    // Triangles are affine — disarm perspective.
+                    persp_active      <= 0;
+                    persp_seg_a_ready <= 0;
+                    persp_seg_b_ready <= 0;
+                    persp_first_done  <= 0;
+                    persp_pss         <= PSS_IDLE;
+                    sp_seg_left       <= 0;
+`endif
+                    src_mode <= SRC_SPAN;
+                    src_done <= 0;
+                    state    <= S_FRAG_PIPE;
+                    // tri_active stays 1; drain-detect routes back to S_TRI_ROW_NEXT
                 end else begin
-                    // Next row: step Y, reset X
-                    tri_cur_y <= tri_cur_y + 16'd1;
-                    tri_cur_x <= tri_xmin;
-                    // Step edge functions by B (Y step = 16 sub-pixels)
-                    tri_row_e[0] <= tri_row_e[0] + (tri_B[0] <<< 4);
-                    tri_row_e[1] <= tri_row_e[1] + (tri_B[1] <<< 4);
-                    tri_row_e[2] <= tri_row_e[2] + (tri_B[2] <<< 4);
-                    tri_e[0] <= tri_row_e[0] + (tri_B[0] <<< 4);
-                    tri_e[1] <= tri_row_e[1] + (tri_B[1] <<< 4);
-                    tri_e[2] <= tri_row_e[2] + (tri_B[2] <<< 4);
-                    // Step row base addresses
-                    tri_fb_row_addr <= tri_fb_row_addr + {{16{st_fb_stride[15]}}, st_fb_stride};
-                    tri_zb_row_addr <= tri_zb_row_addr + 32'd640;
-                    // Step attributes by Y gradient
-                    tri_row_z <= tri_row_z + (grad_z_dy <<< 4);
-                    tri_row_s <= tri_row_s + (grad_s_dy <<< 4);
-                    tri_row_t <= tri_row_t + (grad_t_dy <<< 4);
-                    tri_row_r <= tri_row_r + (grad_r_dy <<< 4);
-                    tri_z <= tri_row_z + (grad_z_dy <<< 4);
-                    tri_s <= tri_row_s + (grad_s_dy <<< 4);
-                    tri_t <= tri_row_t + (grad_t_dy <<< 4);
-                    tri_r <= tri_row_r + (grad_r_dy <<< 4);
+                    // No inside pixels this row — skip the FRAG_PIPE round-trip.
+                    state <= S_TRI_ROW_NEXT;
                 end
             end else if (!tri_e[0][31] && !tri_e[1][31] && !tri_e[2][31]) begin
-                // Inside triangle — set up fragment, enter tex pipeline
-                // Compute FB address
-                sp_fb_addr <= tri_fb_row_addr + {{16{1'b0}}, tri_cur_x};
-                sp_flags <= (st_depth_func != 0 ? 8'h18 : 8'h00) |
-                            8'h01;  // COLORMAP (always for I8 triangle path)
-                sp_light <= tri_r[23:16];  // integer part of 16.16 R
-                sp_z_addr <= tri_zb_row_addr + {tri_cur_x, 1'b0};
-                sp_zi <= tri_z;  // Z compare uses full 32-bit (upper 16 = integer Z)
-                // Set up tex pipeline + load shared DSP for tex multiply
-                tex_pipe_t_int  <= tri_t[31:16];
-                tex_pipe_width  <= st_tex_width;
-                tex_pipe_base   <= st_tex_addr;
-                tex_pipe_s_int  <= tri_s[31:16];
-                tex_pipe_shift_r <= 0;
-                tex_pipe_mode   <= 1;
-                state <= S_TRI_FRAG;
-            end else begin
-                // Outside triangle — step to next pixel
+                // Inside triangle — extend the span.
+                if (tri_span_count == 16'd0) begin
+                    tri_span_x_start <= tri_cur_x;
+                    tri_span_s_start <= tri_s;
+                    tri_span_t_start <= tri_t;
+                    tri_span_z_start <= tri_z;
+                end
+                tri_span_count <= tri_span_count + 16'd1;
                 tri_cur_x <= tri_cur_x + 16'd1;
-                tri_e[0] <= tri_e[0] + (tri_A[0] <<< 4);  // X step = 16 sub-pixels
+                tri_e[0] <= tri_e[0] + (tri_A[0] <<< 4);
                 tri_e[1] <= tri_e[1] + (tri_A[1] <<< 4);
                 tri_e[2] <= tri_e[2] + (tri_A[2] <<< 4);
                 tri_z <= tri_z + (grad_z_dx <<< 4);
                 tri_s <= tri_s + (grad_s_dx <<< 4);
                 tri_t <= tri_t + (grad_t_dx <<< 4);
-                tri_r <= tri_r + (grad_r_dx <<< 4);
+            end else begin
+                // Outside — step without recording.
+                tri_cur_x <= tri_cur_x + 16'd1;
+                tri_e[0] <= tri_e[0] + (tri_A[0] <<< 4);
+                tri_e[1] <= tri_e[1] + (tri_A[1] <<< 4);
+                tri_e[2] <= tri_e[2] + (tri_A[2] <<< 4);
+                tri_z <= tri_z + (grad_z_dx <<< 4);
+                tri_s <= tri_s + (grad_s_dx <<< 4);
+                tri_t <= tri_t + (grad_t_dx <<< 4);
             end
         end
 
         // ============================================================
-        // Triangle: Fragment setup → enter shared tex pipeline
+        // Triangle: Advance to next row (or end triangle)
+        // ------------------------------------------------------------
+        // Entered either directly from S_TRI_PIX on an empty row, or from
+        // the FRAG_PIPE drain detection once the row's span has drained.
         // ============================================================
-        S_TRI_FRAG: begin
-            // tex_pipe registers set in S_TRI_PIX, tex_addr_final available next cycle
-            tex_req_valid <= 1;
-            tex_req_addr  <= tex_addr_final[25:0];
-            tex_req_wide  <= (st_tex_format == 1);  // RGB565
-            // Step triangle rasteriser for when we return
-            tri_cur_x <= tri_cur_x + 16'd1;
-            tri_e[0] <= tri_e[0] + (tri_A[0] <<< 4);
-            tri_e[1] <= tri_e[1] + (tri_A[1] <<< 4);
-            tri_e[2] <= tri_e[2] + (tri_A[2] <<< 4);
-            tri_z <= tri_z + (grad_z_dx <<< 4);
-            tri_s <= tri_s + (grad_s_dx <<< 4);
-            tri_t <= tri_t + (grad_t_dx <<< 4);
-            tri_r <= tri_r + (grad_r_dx <<< 4);
-            state <= S_SPAN_TEX_REQ;
+        S_TRI_ROW_NEXT: begin
+            if (tri_cur_y >= tri_ymax) begin
+                // Triangle done — clear tri_active and flush fb_acc.
+                tri_active <= 0;
+                state      <= S_FB_FLUSH;
+            end else begin
+                tri_cur_y <= tri_cur_y + 16'd1;
+                tri_cur_x <= tri_xmin;
+                tri_row_e[0] <= tri_row_e[0] + (tri_B[0] <<< 4);
+                tri_row_e[1] <= tri_row_e[1] + (tri_B[1] <<< 4);
+                tri_row_e[2] <= tri_row_e[2] + (tri_B[2] <<< 4);
+                tri_e[0] <= tri_row_e[0] + (tri_B[0] <<< 4);
+                tri_e[1] <= tri_row_e[1] + (tri_B[1] <<< 4);
+                tri_e[2] <= tri_row_e[2] + (tri_B[2] <<< 4);
+                tri_fb_row_addr <= tri_fb_row_addr + {{16{st_fb_stride[15]}}, st_fb_stride};
+                tri_zb_row_addr <= tri_zb_row_addr + 32'd640;
+                tri_row_z <= tri_row_z + (grad_z_dy <<< 4);
+                tri_row_s <= tri_row_s + (grad_s_dy <<< 4);
+                tri_row_t <= tri_row_t + (grad_t_dy <<< 4);
+                tri_z <= tri_row_z + (grad_z_dy <<< 4);
+                tri_s <= tri_row_s + (grad_s_dy <<< 4);
+                tri_t <= tri_row_t + (grad_t_dy <<< 4);
+                tri_span_count <= 16'd0;
+                state <= S_TRI_PIX;
+            end
         end
 `endif // GPU_FEAT_TRIANGLE
 

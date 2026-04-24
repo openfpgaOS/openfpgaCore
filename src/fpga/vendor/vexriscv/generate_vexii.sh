@@ -6,12 +6,22 @@
 # topology, with our current cache sizing and Zicbom retained.
 #
 # Config highlights:
-#   I-cache: 64 KB (512 sets × 2 ways × 64 B line, NL prefetch)
-#   D-cache: 64 KB (512 sets × 2 ways × 64 B line, RPT prefetch)
-#   Branch : BTB 512 sets + GShare + RAS
+#   I-cache: 32 KB (256 sets × 2 ways × 64 B line, NL prefetch)
+#   D-cache: 32 KB (256 sets × 2 ways × 64 B line, NO HW prefetch —
+#            the `rpt` prefetcher speculated past PMA boundaries and
+#            surfaced bus faults to commit; disabling also frees ~N ALMs
+#            of prefetcher logic and reduces placement pressure.)
+#   Branch : BTB 256 sets + GShare 1 KB + RAS, relaxed branch pipeline
+#            (jumpAt=1 — gives the fitter an extra cycle on BTB-hit paths)
 #   FPU    : single-precision (F extension)
 #   Zicbom : cache block management (cbo.clean/flush/inval)
-#   Bypass : --allow-bypass-from=0 (conservative)
+#   Bypass : --allow-bypass-from=2 (disabled — withBypasses is false
+#            unless allowBypassFrom==0, so any non-zero value turns off
+#            the early-ALU combinational bypass network; dependent ops
+#            read from the reg file instead of forwarding combinationally
+#            from ctrl4. Trades 1-2 cycle stalls on back-to-back deps for
+#            breaking the ctrl4-FPU → ctrl1-early-ALU cone that hit
+#            -1.990 ns slack on the 100 MHz domain.)
 #
 # Memory regions (PMA):
 #   0x00000000  32 KB  BRAM    — main=0, exe=1  (non-speculative, executable)
@@ -41,17 +51,17 @@ sbt "Test/runMain vexiiriscv.Generate \
       --xlen=32 \
       --with-rvm --with-rva --with-rvf --with-rvc \
       --with-rvZcbm \
-      --with-fetch-l1 --fetch-l1-sets=512 --fetch-l1-ways=2 --fetch-l1-refill-count=2 \
+      --with-fetch-l1 --fetch-l1-sets=256 --fetch-l1-ways=2 --fetch-l1-refill-count=2 \
       --fetch-l1-hardware-prefetch=nl --fetch-axi4 \
-      --with-lsu-l1 --lsu-l1-sets=512 --lsu-l1-ways=2 \
+      --with-lsu-l1 --lsu-l1-sets=256 --lsu-l1-ways=2 \
       --lsu-l1-refill-count=2 --lsu-l1-writeback-count=2 \
       --lsu-l1-store-buffer-slots=2 --lsu-l1-store-buffer-ops=32 \
       --lsu-l1-axi4 \
-      --lsu-software-prefetch --lsu-hardware-prefetch rpt \
-      --with-btb --btb-sets=512 --relaxed-btb --relaxed-btb-hit \
-      --with-gshare --gshare-bytes=2048 --with-ras \
-      --allow-bypass-from=0 \
-      --relaxed-src \
+      --lsu-software-prefetch --lsu-hardware-prefetch=none \
+      --with-btb --btb-sets=256 --relaxed-btb --relaxed-btb-hit \
+      --with-gshare --gshare-bytes=1024 --with-ras \
+      --allow-bypass-from=2 \
+      --relaxed-src --relaxed-branch --relaxed-div \
       --reset-vector=0 \
       --region base=0,size=8000,main=0,exe=1 \
       --region base=10000000,size=4000000,main=1,exe=1 \

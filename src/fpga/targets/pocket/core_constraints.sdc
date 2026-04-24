@@ -4,18 +4,29 @@
 # put your clock groups in here as well as any net assignments
 #
 
+#
+# PLL output usage (must match core_top.v mp1/mp_ram instantiations):
+#   mp1 general[0] -> clk_core_12288   (audio 12.288 MHz)
+#   mp1 general[1] -> unconnected      (outclk_1 tied to no net)
+#   mp1 general[2] -> clk_core_49152
+#   mp1 general[3] -> clk_vid
+#   mp1 general[4] -> clk_vid_90deg
+#   mp_ram general[0] -> clk_ram_controller (100 MHz CPU/RAM)
+#   mp_ram general[1] -> clk_ram_chip       (100 MHz 243°)
+#   mp_ram general[2] -> clk_cram           (unconnected since v2 memory arch)
+#
+# Unused PLL counters are omitted from this group list — referencing them
+# triggered Critical Warning (332012) "unmatched clock" from Quartus.
 set_clock_groups -asynchronous \
  -group { bridge_spiclk } \
  -group { clk_74a } \
  -group { clk_74b } \
  -group { ic|mp1|mf_pllbase_inst|altera_pll_i|general[0].gpll~PLL_OUTPUT_COUNTER|divclk } \
- -group { ic|mp1|mf_pllbase_inst|altera_pll_i|general[1].gpll~PLL_OUTPUT_COUNTER|divclk } \
  -group { ic|mp1|mf_pllbase_inst|altera_pll_i|general[2].gpll~PLL_OUTPUT_COUNTER|divclk } \
  -group { ic|mp1|mf_pllbase_inst|altera_pll_i|general[3].gpll~PLL_OUTPUT_COUNTER|divclk \
           ic|mp1|mf_pllbase_inst|altera_pll_i|general[4].gpll~PLL_OUTPUT_COUNTER|divclk } \
  -group { ic|mp_ram|altera_pll_i|general[0].gpll~PLL_OUTPUT_COUNTER|divclk \
-          ic|mp_ram|altera_pll_i|general[1].gpll~PLL_OUTPUT_COUNTER|divclk \
-          ic|mp_ram|altera_pll_i|general[2].gpll~PLL_OUTPUT_COUNTER|divclk }
+          ic|mp_ram|altera_pll_i|general[1].gpll~PLL_OUTPUT_COUNTER|divclk }
 
 # SDRAM I/O timing
 # The io_sdram controller uses clk_ram_chip (243° phase shift) internally
@@ -34,10 +45,11 @@ set_output_delay -clock dram_clk_pin -min -1.0 [get_ports {dram_a[*] dram_ba[*] 
 # by the PLL phase relationship, not fitter placement.
 set_false_path -from [get_ports {dram_dq[*]}]
 
-# PSRAM sync burst timing constraints for CRAM0
-# CRAM0 clock comes from PLL outclk_2 (clk_cram)
+# PSRAM sync burst timing constraints for CRAM0.
+# Memory-arch v2: cram0_clk is a direct assign from clk_74a (core_top.v:2632),
+# so the pin clock derives 1:1 from the clk_74a input port.
 create_generated_clock -name cram0_clk_pin \
-  -source [get_pins {ic|mp_ram|altera_pll_i|general[2].gpll~PLL_OUTPUT_COUNTER|divclk}] \
+  -source [get_ports clk_74a] \
   [get_ports cram0_clk]
 
 set_output_delay -clock cram0_clk_pin -max 3.0 [get_ports {cram0_a[*] cram0_dq[*] cram0_adv_n cram0_cre cram0_ce0_n cram0_ce1_n cram0_oe_n cram0_we_n cram0_ub_n cram0_lb_n}]
@@ -45,31 +57,10 @@ set_output_delay -clock cram0_clk_pin -min -1.0 [get_ports {cram0_a[*] cram0_dq[
 set_input_delay -clock cram0_clk_pin -max 6.5 [get_ports {cram0_dq[*] cram0_wait}]
 set_input_delay -clock cram0_clk_pin -min 1.0 [get_ports {cram0_dq[*] cram0_wait}]
 
-# CRAM1: runs on clk_74a (bridge clock), async access only — no sync burst.
-# The psram controller handles its own timing with state machine delays.
-# DQ is latched by the chip on we_n / oe_n edges, not by clk_74a, so
-# declare the DQ pad paths as false: clk_74a-relative setup/hold is
-# meaningless for async-written data. Address/control keep the 2.0 ns
-# bound so their fabric-to-pad delay stays bounded relative to we_n
-# assertion (which does track clk_74a).
-set_output_delay -clock clk_74a -max 2.0 [get_ports {cram1_a[*] cram1_adv_n cram1_cre cram1_ce0_n cram1_ce1_n cram1_oe_n cram1_we_n cram1_ub_n cram1_lb_n}]
-set_output_delay -clock clk_74a -min -1.0 [get_ports {cram1_a[*] cram1_adv_n cram1_cre cram1_ce0_n cram1_ce1_n cram1_oe_n cram1_we_n cram1_ub_n cram1_lb_n}]
-set_false_path -to [get_ports {cram1_dq[*]}]
-# cram1_wait is an async ready/busy status line — goes through a 2-FF
-# synchronizer in cram1_phy, so clk_74a-relative setup is meaningless.
-set_false_path -from [get_ports cram1_wait]
-set_input_delay -clock clk_74a -max 8.0 [get_ports {cram1_dq[*]}]
-set_input_delay -clock clk_74a -min 1.0 [get_ports {cram1_dq[*]}]
-
-# CRAM1 clock pin is now driven by clk_74a assign (not PLL).
-# Declare it as false path — the async psram controller handles its own timing.
-set_false_path -to [get_ports cram1_clk]
-
-# CRAM0 clock pin vs controller clock: psram.sv has fabric pipeline registers
-# that handle the CDC. Declare as asynchronous.
-set_clock_groups -asynchronous \
-  -group { cram0_clk_pin } \
-  -group { ic|mp_ram|altera_pll_i|general[0].gpll~PLL_OUTPUT_COUNTER|divclk }
+# CRAM1 retired in memory-arch v2 — chip is not pin-assigned in ap_core.qsf
+# and the top-level ports have been removed. Old cram1_* IO/clock constraints
+# deleted here; referencing the retired ports produced "unresolved port"
+# warnings from Quartus.
 
 # ============================================================================
 # VexiiRiscv FPU multicycle — the FpuAddSharedPlugin's pre-shift exp-diff
