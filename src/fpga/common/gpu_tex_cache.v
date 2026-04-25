@@ -216,21 +216,27 @@ wire [1:0]          addr_word_a = req_addr[3:2];
 wire [SET_BITS-1:0] addr_set_b  = req_addr_b[13:4];
 wire [1:0]          addr_word_b = req_addr_b[3:2];
 
-// Single-writer rule: each rd_*_x register is written by exactly
-// one always block (this one), so Quartus is happy with M10K SDP
-// inference and there's no multi-driver synthesis error.  Two cases:
+// Quartus M10K-inference rule: each rd_*_x reg has exactly one source
+// (the M10K read), with a single read-address signal and a single
+// read-enable.  Two paths feed the read address and enable:
 //
-//   1. req_valid_x && req_ready_x — new request accepted on this
-//      port: latch the M10K read of (addr_set_x, addr_word_x).
-//      Standard SDP read-with-enable pattern.
+//   1. Consumer accept (req_valid_x && req_ready_x): read at
+//      (addr_set_x, addr_word_x).
 //
-//   2. else, exiting S_FILL_OUT on the no-ack path for this port:
-//      no consumer accept this cycle, so prime rd_*_x with the
-//      just-filled line (lat_tag + fill_target_word).  Mirrors
-//      the FSM's pipe_*_x <= lat_*_x update on the same posedge,
-//      so resp_valid_x stays alive in S_PIPE next cycle as a
-//      pipe_hit_x — exactly the timing the original consumer code
-//      expects, no extra cycle of stall.
+//   2. S_FILL_OUT no-ack prime: the FSM has just written
+//      tag_mem[lat_set] <= lat_tag, valid_mem[lat_set] <= 1, and
+//      the line's words into data_mem[{lat_set, *}] in the prior
+//      cycle (axi_rlast).  Read at (lat_set, lat_word) — the M10K
+//      already holds the correct values, so we don't need a non-RAM
+//      source.  This keeps the latch a clean SDP read pattern;
+//      Quartus infers M10K with no FF blowup.
+//
+// The previous version used `else if (prime_x) rd_*_x <= lat_tag/...`
+// — Quartus sees that as "rd_*_x is sometimes from RAM, sometimes
+// from non-RAM logic" and gives up on M10K inference, falling back
+// to FFs (Error 276003: "Cannot convert all sets of registers into
+// RAM megafunctions").  This version reads from M10K in both cases;
+// the address mux is fine in M10K's SDP interface.
 wire prime_a = (state == S_FILL_OUT) && (lat_port == 1'b0)
             && !flush && !flush_pending
             && !(req_valid && req_ready);
@@ -238,27 +244,27 @@ wire prime_b = (state == S_FILL_OUT) && (lat_port == 1'b1)
             && !flush && !flush_pending
             && !(req_valid_b && req_ready_b);
 
+wire [SET_BITS-1:0] read_set_a  = prime_a ? lat_set  : addr_set_a;
+wire [1:0]          read_word_a = prime_a ? lat_word : addr_word_a;
+wire                read_en_a   = (req_valid && req_ready) || prime_a;
+
+wire [SET_BITS-1:0] read_set_b  = prime_b ? lat_set  : addr_set_b;
+wire [1:0]          read_word_b = prime_b ? lat_word : addr_word_b;
+wire                read_en_b   = (req_valid_b && req_ready_b) || prime_b;
+
 always @(posedge clk) begin
-    if (req_valid && req_ready) begin
-        rd_tag_a   <= tag_mem[addr_set_a];
-        rd_valid_a <= valid_mem[addr_set_a];
-        rd_data_a  <= data_mem[{addr_set_a, addr_word_a}];
-    end else if (prime_a) begin
-        rd_tag_a   <= lat_tag;
-        rd_valid_a <= 1'b1;
-        rd_data_a  <= fill_target_word;
+    if (read_en_a) begin
+        rd_tag_a   <= tag_mem[read_set_a];
+        rd_valid_a <= valid_mem[read_set_a];
+        rd_data_a  <= data_mem[{read_set_a, read_word_a}];
     end
 end
 
 always @(posedge clk) begin
-    if (req_valid_b && req_ready_b) begin
-        rd_tag_b   <= tag_mem[addr_set_b];
-        rd_valid_b <= valid_mem[addr_set_b];
-        rd_data_b  <= data_mem[{addr_set_b, addr_word_b}];
-    end else if (prime_b) begin
-        rd_tag_b   <= lat_tag;
-        rd_valid_b <= 1'b1;
-        rd_data_b  <= fill_target_word;
+    if (read_en_b) begin
+        rd_tag_b   <= tag_mem[read_set_b];
+        rd_valid_b <= valid_mem[read_set_b];
+        rd_data_b  <= data_mem[{read_set_b, read_word_b}];
     end
 end
 
