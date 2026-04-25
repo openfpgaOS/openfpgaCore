@@ -1485,15 +1485,23 @@ static void test_triangle_vertex_color() {
     // Pixel (0,0): r=0 → colormap light 0 → output 0
     check_byte("vcol_v0", 0 + 0*320, 0x00);
 
-    // Debug: check a few pixels along the top edge
+    // Phase 4d — Gouraud now interpolates light per-pixel.  Expected
+    // values: light(x, 0) = (x * 30) / 10 = 3*x.  cmap[light * 256 +
+    // tex_value] = light, so FB[x, 0] should be 3*x ± LUT precision.
+    // Tolerance is ±1 because the recip LUT loses one unit on this
+    // particular determinant.
     for (int x = 0; x < 10; x++) {
         uint8_t v = sdram_read_byte(FB_BASE_BYTE + x + 0*320);
-        printf("  [vcol] px(%d,0) = 0x%02x\n", x, v);
+        uint8_t expected = (uint8_t)(3 * x);
+        int diff = (int)v - (int)expected;
+        if (diff < 0) diff = -diff;
+        if (diff <= 1) { pass_count++; }
+        else {
+            printf("  FAIL vcol_px(%d,0) = 0x%02x, expected ~0x%02x (±1)\n",
+                   x, v, expected);
+            fail_count++;
+        }
     }
-
-    // Pixel (5,0): R gradient disabled (ALM budget), uses v0 value = 0
-    // When R gradient is re-enabled, this should be ~15
-    check_byte("vcol_mid_v0", 5 + 0*320, 0x00);
 }
 
 // Test T8: Two adjacent triangles (shared edge — no gap)

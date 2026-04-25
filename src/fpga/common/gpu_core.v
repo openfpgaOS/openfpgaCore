@@ -607,7 +607,15 @@ reg [31:0] sp_tex_addr;
 reg signed [31:0] sp_s, sp_t;
 reg signed [31:0] sp_sstep, sp_tstep;
 reg [15:0] sp_count;
-reg [7:0]  sp_light;
+// Phase 4d — Gouraud-capable light.  sp_light_q is Q16.16; bits
+// [23:16] are the 8-bit value the fragment pipe sees as p0_light.
+// sp_light_step is signed Q16.16, the per-pixel x delta.  Direct
+// CMD_DRAW_SPAN payloads set sp_light_step = 0 (flat lighting,
+// bit-identical to the old 8-bit sp_light path); triangle span emit
+// loads sp_light_step from grad_r_dx<<<4 so light walks per pixel.
+reg signed [31:0] sp_light_q;
+reg signed [31:0] sp_light_step;
+wire [7:0]        sp_light = sp_light_q[23:16];
 reg [7:0]  sp_flags;
 reg signed [15:0] sp_fb_stride;
 reg [15:0] sp_tex_width;
@@ -1127,6 +1135,12 @@ reg signed [31:0] grad_t_dx, grad_t_dy;
 // meaningful when tri_persp_active; unused on affine triangles
 // (gradient loop skips computing them by exiting at grad_idx 5).
 reg signed [31:0] grad_w_dx, grad_w_dy;
+// Phase 4d — Gouraud.  Per-vertex `light` (the existing v_r byte)
+// becomes a gradient instead of a constant: span emit writes
+// sp_light_step alongside sp_light, fragment pipe walks it per-pixel.
+// Gradients are 32-bit Q16.16 to match the rest of the loop's DSP
+// schedule even though the underlying value is 8-bit.
+reg signed [31:0] grad_r_dx, grad_r_dy;
 // R gradient hard-wired to zero — Quake uses flat per-triangle light
 // (sp_light = v0.r). Keeping the 32-bit interpolator would cost ~200 ALMs.
 
@@ -1151,6 +1165,12 @@ reg signed [31:0] tri_row_z, tri_row_s, tri_row_t;
 // only).  Initialised in S_TRI_INIT_ATTRIB's round-3 just like the
 // others; advances per row in S_TRI_ROW_NEXT alongside z/s/t.
 reg signed [31:0] tri_row_w;
+// Phase 4d — Gouraud row-anchor and per-pixel walker for `light`.
+// Q16.16 fixed-point so the DSP gradient + 8-bit-per-pixel-step
+// arithmetic is uniform with the other attributes.  The fragment
+// pipeline takes bits [23:16] (the integer part) as the 8-bit light.
+reg signed [31:0] tri_row_r;
+reg signed [31:0] tri_r;
 // Bbox-origin attribute init (S_TRI_INIT_ATTRIB).  Pre-registered subpixel
 // deltas from v0 to (xmin, ymin) — fed into the rolled DSP schedule.
 reg signed [20:0] delta_x_subpix;
@@ -1170,6 +1190,10 @@ reg signed [31:0] tri_span_z_start;
 // Phase 4c.3 — snapshot of tri_w at first inside pixel.  Used only on
 // perspective triangles (sp_zinv source for the SPAN_PERSP path).
 reg signed [31:0] tri_span_w_start;
+// Phase 4d — snapshot of tri_r at first inside pixel.  Routed into
+// the new sp_light_q at span emit so per-pixel light walks correctly
+// from this anchor.
+reg signed [31:0] tri_span_r_start;
 
 // Pre-registered "|tri_det| < 16 or tri_det == 0" flag for setup_step 7.
 // Captures at end of step 6 (same cycle tri_det updates from dsp_p + dsp2_p),
@@ -1187,7 +1211,10 @@ reg tri_det_is_small_r;
 // Setup state
 reg [6:0]  setup_step;
 // Rolled gradient loop state (replaces setup steps 20-56)
-reg [2:0]  grad_idx;          // 0..5: which of 6 gradients (Zdx,Zdy,Sdx,Sdy,Tdx,Tdy)
+// 4-bit so the loop reaches r gradients (idx 8/9) on top of the
+// optional w pair (idx 6/7).  Mapping: idx[3:1] selects attribute
+// (z/s/t/w/r), idx[0] selects the dx vs dy axis.
+reg [3:0]  grad_idx;
 reg [2:0]  grad_sub;          // 0..6: sub-cycle within current gradient
 // (grad_partial removed — both cross-products now run in parallel on dsp/dsp2)
 
@@ -1233,38 +1260,44 @@ reg [31:0] stat_triangles;
 // from the true value instead of toward it.  Zero-extend (v_z only) to
 // keep the 16→32 widen consistent with the unsigned compare.
 // v_s / v_t are already signed texture coords, keep sign-extend.
-// Phase 4c.3 — grad_idx[2:1] selects which attribute pair the rolled
-// loop is computing this iteration:
-//   00 = z   (always)
-//   01 = s (affine) or s*w (persp)
-//   10 = t (affine) or t*w (persp)
-//   11 = w (persp only — exited before reaching this on affine)
+// Phase 4c.3 / 4d — grad_idx[3:1] selects which attribute pair the
+// rolled loop is computing this iteration:
+//   000 = z   (always)
+//   001 = s (affine) or s*w (persp)
+//   010 = t (affine) or t*w (persp)
+//   011 = w (persp only — skipped on affine via the exit condition
+//             below; reaches here as idx 6/7)
+//   100 = r (always — 8-bit light value, sign-extended/zero-extended
+//             into the Q16.16 datapath; idx 8/9)
 //
 // v_sw / v_tw are already Q16.16 (filled in S_TRI_PERSP_PREMUL); v_s /
-// v_t are 16-bit integer texcoords sign-extended to 32-bit.  v_z and
-// v_w stay in their native widths.
+// v_t are 16-bit integer texcoords sign-extended to 32-bit.  v_z stays
+// 16-bit unsigned; v_r 8-bit zero-extended into Q16.16 (so a delta of
+// 1 unit = 0x10000 ≈ a full per-pixel light step).
 wire signed [31:0] grad_dV10 =
-    (grad_idx[2:1] == 2'd0) ? ({16'b0, v_z[1]} - {16'b0, v_z[0]}) :
-    (grad_idx[2:1] == 2'd1) ? (tri_persp_active
+    (grad_idx[3:1] == 3'd0) ? ({16'b0, v_z[1]} - {16'b0, v_z[0]}) :
+    (grad_idx[3:1] == 3'd1) ? (tri_persp_active
                                  ? (v_sw[1] - v_sw[0])
                                  : ({{16{v_s[1][15]}}, v_s[1]}
                                   - {{16{v_s[0][15]}}, v_s[0]})) :
-    (grad_idx[2:1] == 2'd2) ? (tri_persp_active
+    (grad_idx[3:1] == 3'd2) ? (tri_persp_active
                                  ? (v_tw[1] - v_tw[0])
                                  : ({{16{v_t[1][15]}}, v_t[1]}
                                   - {{16{v_t[0][15]}}, v_t[0]})) :
-                              (v_w[1] - v_w[0]);
+    (grad_idx[3:1] == 3'd3) ? (v_w[1] - v_w[0]) :
+                              ({24'b0, v_r[1]} - {24'b0, v_r[0]});
 wire signed [31:0] grad_dV20 =
-    (grad_idx[2:1] == 2'd0) ? ({16'b0, v_z[2]} - {16'b0, v_z[0]}) :
-    (grad_idx[2:1] == 2'd1) ? (tri_persp_active
+    (grad_idx[3:1] == 3'd0) ? ({16'b0, v_z[2]} - {16'b0, v_z[0]}) :
+    (grad_idx[3:1] == 3'd1) ? (tri_persp_active
                                  ? (v_sw[2] - v_sw[0])
                                  : ({{16{v_s[2][15]}}, v_s[2]}
                                   - {{16{v_s[0][15]}}, v_s[0]})) :
-    (grad_idx[2:1] == 2'd2) ? (tri_persp_active
+    (grad_idx[3:1] == 3'd2) ? (tri_persp_active
                                  ? (v_tw[2] - v_tw[0])
                                  : ({{16{v_t[2][15]}}, v_t[2]}
                                   - {{16{v_t[0][15]}}, v_t[0]})) :
-                              (v_w[2] - v_w[0]);
+    (grad_idx[3:1] == 3'd3) ? (v_w[2] - v_w[0]) :
+                              ({24'b0, v_r[2]} - {24'b0, v_r[0]});
 wire signed [31:0] grad_axis_b1 = grad_idx[0] ? {{16{dX20[15]}}, dX20}
                                               : {{16{dY20[15]}}, dY20};
 wire signed [31:0] grad_axis_b2 = grad_idx[0] ? {{16{dX10[15]}}, dX10}
@@ -1380,12 +1413,17 @@ always @(posedge clk) begin
         tri_span_t_start <= 0;
         tri_span_z_start <= 0;
         tri_span_w_start <= 0;
+        tri_span_r_start <= 0;
         // Phase 4c.3 — perspective-walk regs.  Don't-care on affine
         // triangles, but need a deterministic reset value so post-
         // reset assertions stay clean.
         tri_w <= 0;
         tri_row_w <= 0;
         grad_w_dx <= 0; grad_w_dy <= 0;
+        // Phase 4d — Gouraud regs.
+        tri_r <= 0;
+        tri_row_r <= 0;
+        grad_r_dx <= 0; grad_r_dy <= 0;
         tri_xmin_raw <= 0; tri_xmax_raw <= 0;
         tri_ymin_raw <= 0; tri_ymax_raw <= 0;
 `endif
@@ -1541,7 +1579,10 @@ always @(posedge clk) begin
                     5'd5: sp_tstep     <= ring_rd_data;
                     5'd6: begin
                         sp_count <= ring_rd_data[31:16];
-                        sp_light <= ring_rd_data[15:8];
+                        // 8-bit flat light → Q16.16 (high byte clear,
+                        // low 16 bits zero; per-pixel step = 0).
+                        sp_light_q    <= {8'b0, ring_rd_data[15:8], 16'b0};
+                        sp_light_step <= 32'b0;
                         sp_flags <= ring_rd_data[7:0];
                     end
                     5'd7: begin
@@ -1786,6 +1827,11 @@ always @(posedge clk) begin
                     sp_zi      <= sp_zi + sp_zistep;
                     sp_z_addr  <= sp_z_addr + 32'd2;
                     sp_count   <= sp_count - 16'd1;
+                    // Phase 4d — per-pixel light step.  Direct
+                    // CMD_DRAW_SPAN payloads set sp_light_step = 0
+                    // (flat lighting unchanged); triangle Gouraud
+                    // spans walk through the gradient per pixel.
+                    sp_light_q <= sp_light_q + sp_light_step;
                     if (span_last_issue) src_done <= 1;
 `ifdef GPU_PERSP_IMPL
                     if (persp_active) begin
@@ -2521,15 +2567,33 @@ always @(posedge clk) begin
                 end
             end
             8: begin
-                // Set M10K LUT read address (registered, 1-cycle latency)
+                // Set M10K LUT read address (registered, 1-cycle latency).
+                // Phase 4b widened the LUT from 256 → 1024 entries (10-bit
+                // input); index slice grew from [30:23] to [30:21].  This
+                // line was missed in the original 4b commit — every
+                // triangle's tri_recip was reading the 8-bit-aligned entry
+                // and silently losing 2 bits of input precision (and worse,
+                // the OLD 8-bit value ended up zero-extended into a sparse
+                // index into the new LUT, returning unrelated entries).
                 begin : recip_addr_set
                     reg [31:0] abs_d, norm;
                     abs_d = tri_det[31] ? -tri_det : tri_det;
                     norm = abs_d << tri_clz;
-                    recip_rd_addr <= norm[30:23];
+                    recip_rd_addr <= norm[30:21];
                 end
             end
             9: begin
+                // BRAM read latency wait — recip_rd_addr was set at end
+                // of step 8.  recip_rd_data is registered, so the
+                // updated lookup result lands at end of this cycle.
+                // Without this wait, tri_recip captured stale data
+                // (always LUT[0] = 0x4000 on the first triangle, since
+                // recip_rd_addr resets to 0).  Latent bug from before
+                // 4d landed; existing tests passed because they only
+                // checked the span's start pixel, where gradients are
+                // multiplied by zero.
+            end
+            10: begin
                 // Capture M10K read result, then enter rolled gradient loop.
                 tri_recip <= recip_rd_data;
                 state <= S_TRI_GRAD;
@@ -2601,26 +2665,32 @@ always @(posedge clk) begin
                 end
                 3'd6: begin
                     case (grad_idx)
-                        3'd0: grad_z_dx <= dsp_p_shifted;
-                        3'd1: grad_z_dy <= dsp_p_shifted;
-                        3'd2: grad_s_dx <= dsp_p_shifted;
-                        3'd3: grad_s_dy <= dsp_p_shifted;
-                        3'd4: grad_t_dx <= dsp_p_shifted;
-                        3'd5: grad_t_dy <= dsp_p_shifted;
-                        // Phase 4c.3 — w gradients (perspective only).
-                        3'd6: grad_w_dx <= dsp_p_shifted;
-                        3'd7: grad_w_dy <= dsp_p_shifted;
+                        4'd0: grad_z_dx <= dsp_p_shifted;
+                        4'd1: grad_z_dy <= dsp_p_shifted;
+                        4'd2: grad_s_dx <= dsp_p_shifted;
+                        4'd3: grad_s_dy <= dsp_p_shifted;
+                        4'd4: grad_t_dx <= dsp_p_shifted;
+                        4'd5: grad_t_dy <= dsp_p_shifted;
+                        4'd6: grad_w_dx <= dsp_p_shifted;
+                        4'd7: grad_w_dy <= dsp_p_shifted;
+                        // Phase 4d — Gouraud r gradients (always
+                        // computed; light walks per-pixel in the
+                        // fragment pipe).
+                        4'd8: grad_r_dx <= dsp_p_shifted;
+                        4'd9: grad_r_dy <= dsp_p_shifted;
                         default: ;
                     endcase
                     grad_sub <= 0;
-                    // Affine triangles exit at idx 5 (no w needed); perspective
-                    // triangles continue through idx 7 to capture grad_w_dx/dy.
-                    if ((!tri_persp_active && grad_idx == 3'd5)
-                     || ( tri_persp_active && grad_idx == 3'd7)) begin
-                        // No R gradient — sp_light comes from v_r[0] directly.
+                    // Loop progression:
+                    //   idx 5 → 6 (persp) or jump to 8 (affine, skip w)
+                    //   idx 9 → exit
+                    if (grad_idx == 4'd9) begin
                         state <= S_TRI_BBOX;
+                    end else if (grad_idx == 4'd5 && !tri_persp_active) begin
+                        // Affine: skip w (idx 6/7), straight to r (idx 8/9).
+                        grad_idx <= 4'd8;
                     end else begin
-                        grad_idx <= grad_idx + 3'd1;
+                        grad_idx <= grad_idx + 4'd1;
                     end
                 end
                 default: ;
@@ -2753,28 +2823,47 @@ always @(posedge clk) begin
                 end
                 4'd5: init_step <= 4'd6;
                 4'd6: begin
-                    // Capture t.  Either transition out (affine path —
-                    // tri_row_w stays don't-care) or launch the w round.
+                    // Capture t.  On perspective triangles continue to
+                    // the w round; on affine triangles jump straight to
+                    // the r (Gouraud) round.
                     tri_row_t <= (tri_persp_active ? v_tw[0]
                                                    : {v_t[0], 16'b0})
                                + $signed(dsp_p[31:0])
                                + $signed(dsp2_p[31:0]);
                     if (tri_persp_active) begin
-                        // Round 3 (w) — only on perspective triangles.
+                        // Round 3 (w) — perspective only.
                         dsp_a  <= grad_w_dx;
                         dsp_b  <= {{11{delta_x_subpix[20]}}, delta_x_subpix};
                         dsp2_a <= grad_w_dy;
                         dsp2_b <= {{11{delta_y_subpix[20]}}, delta_y_subpix};
                         init_step <= 4'd7;
                     end else begin
-                        init_step <= 4'd0;
-                        state     <= S_TRI_ROW;
+                        // Affine: skip w; launch r round directly.
+                        dsp_a  <= grad_r_dx;
+                        dsp_b  <= {{11{delta_x_subpix[20]}}, delta_x_subpix};
+                        dsp2_a <= grad_r_dy;
+                        dsp2_b <= {{11{delta_y_subpix[20]}}, delta_y_subpix};
+                        init_step <= 4'd9;  // jump past w wait state
                     end
                 end
                 4'd7: init_step <= 4'd8;
                 4'd8: begin
-                    // Capture w; row 0 init complete on perspective path.
+                    // Capture w; launch r round (perspective path).
                     tri_row_w <= v_w[0]
+                               + $signed(dsp_p[31:0])
+                               + $signed(dsp2_p[31:0]);
+                    dsp_a  <= grad_r_dx;
+                    dsp_b  <= {{11{delta_x_subpix[20]}}, delta_x_subpix};
+                    dsp2_a <= grad_r_dy;
+                    dsp2_b <= {{11{delta_y_subpix[20]}}, delta_y_subpix};
+                    init_step <= 4'd9;
+                end
+                4'd9: init_step <= 4'd10;  // DSP pipeline delay
+                4'd10: begin
+                    // Capture r at bbox origin.  Q16.16: v_r[0] is 8-bit,
+                    // shifted into bits [23:16]; gradient products land
+                    // in bits [31:0].
+                    tri_row_r <= {8'b0, v_r[0], 16'b0}
                                + $signed(dsp_p[31:0])
                                + $signed(dsp2_p[31:0]);
                     init_step <= 4'd0;
@@ -2808,18 +2897,16 @@ always @(posedge clk) begin
             tri_row_e[0] <= tri_e_init_Apx[0] + tri_e_init_Bpy[0] + tri_C[0];
             tri_row_e[1] <= tri_e_init_Apx[1] + tri_e_init_Bpy[1] + tri_C[1];
             tri_row_e[2] <= tri_e_init_Apx[2] + tri_e_init_Bpy[2] + tri_C[2];
-            // tri_row_{z,s,t,w} were already evaluated at the bbox
-            // origin (xmin*16, ymin*16) by S_TRI_INIT_ATTRIB.  Copy
-            // into the current-pixel walk regs; the row regs are
-            // preserved so the per-row Y-step in S_TRI_ROW_NEXT keeps
-            // the bbox-origin anchor as it advances down the triangle.
-            // tri_row_w is don't-care on affine triangles (init'd to 0
-            // outside the persp branch in S_TRI_INIT_ATTRIB) — fragment
-            // pipe ignores tri_w when persp_active is 0.
+            // tri_row_{z,s,t,w,r} were evaluated at the bbox origin
+            // (xmin*16, ymin*16) by S_TRI_INIT_ATTRIB.  Copy into the
+            // current-pixel walk regs; the row regs are preserved so
+            // the per-row Y-step in S_TRI_ROW_NEXT keeps the bbox-
+            // origin anchor as it advances down the triangle.
             tri_z <= tri_row_z;
             tri_s <= tri_row_s;
             tri_t <= tri_row_t;
             tri_w <= tri_row_w;
+            tri_r <= tri_row_r;
             // tri_ymin_x_stride is the DSP-registered product from
             // S_TRI_MUL_WAIT (tri_ymin × st_fb_stride).  For the Z-buffer
             // we use the configured st_zb_stride (set via CMD_SET_ZB);
@@ -2859,7 +2946,11 @@ always @(posedge clk) begin
                     sp_sstep     <= grad_s_dx <<< 4;
                     sp_tstep     <= grad_t_dx <<< 4;
                     sp_count     <= tri_span_count;
-                    sp_light     <= v_r[0];  // flat light: v0.r for all pixels
+                    // Phase 4d — Gouraud: anchor at first inside pixel,
+                    // step per pixel.  grad_r_dx<<<4 converts subpixel-
+                    // x rate to pixel-x rate (matches sp_sstep / sp_tstep).
+                    sp_light_q    <= tri_span_r_start;
+                    sp_light_step <= grad_r_dx <<< 4;
                     // PERSP flag (bit 5) folds in when tri_persp_active.
                     sp_flags     <= (st_depth_func != 0 ? 8'h18 : 8'h00) | 8'h01
                                    | (st_skip_zero ? 8'h04 : 8'h00)
@@ -2925,6 +3016,7 @@ always @(posedge clk) begin
                     tri_span_t_start <= tri_t;
                     tri_span_z_start <= tri_z;
                     tri_span_w_start <= tri_w;
+                    tri_span_r_start <= tri_r;
                 end
                 tri_span_count <= tri_span_count + 16'd1;
                 tri_cur_x <= tri_cur_x + 16'd1;
@@ -2935,6 +3027,7 @@ always @(posedge clk) begin
                 tri_s <= tri_s + (grad_s_dx <<< 4);
                 tri_t <= tri_t + (grad_t_dx <<< 4);
                 tri_w <= tri_w + (grad_w_dx <<< 4);
+                tri_r <= tri_r + (grad_r_dx <<< 4);
             end else begin
                 // Outside — step without recording.
                 tri_cur_x <= tri_cur_x + 16'd1;
@@ -2945,6 +3038,7 @@ always @(posedge clk) begin
                 tri_s <= tri_s + (grad_s_dx <<< 4);
                 tri_t <= tri_t + (grad_t_dx <<< 4);
                 tri_w <= tri_w + (grad_w_dx <<< 4);
+                tri_r <= tri_r + (grad_r_dx <<< 4);
             end
         end
 
@@ -2974,10 +3068,12 @@ always @(posedge clk) begin
                 tri_row_s <= tri_row_s + (grad_s_dy <<< 4);
                 tri_row_t <= tri_row_t + (grad_t_dy <<< 4);
                 tri_row_w <= tri_row_w + (grad_w_dy <<< 4);
+                tri_row_r <= tri_row_r + (grad_r_dy <<< 4);
                 tri_z <= tri_row_z + (grad_z_dy <<< 4);
                 tri_s <= tri_row_s + (grad_s_dy <<< 4);
                 tri_t <= tri_row_t + (grad_t_dy <<< 4);
                 tri_w <= tri_row_w + (grad_w_dy <<< 4);
+                tri_r <= tri_row_r + (grad_r_dy <<< 4);
                 tri_span_count <= 16'd0;
                 state <= S_TRI_PIX;
             end
