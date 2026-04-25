@@ -1974,6 +1974,76 @@ static void test_triangle_tex_flush_swap() {
     // Pixels of tri B should be 0xAA (rendered after flush from new texture)
     check_byte("tex_swap_tB_px", 22 + 4*320, 0xAA);
 }
+// Bug-report 2026-04-25 part B — light=0 with COLORMAP must pass texels
+// through unchanged when cmap row 0 is identity.  Reported symptom on
+// Quake: textures render wrong even with all vertex.r = 0 and host_
+// colormap[0..255] uploaded as identity.  This test exercises the
+// exact path: identity row 0, all v_r = 0 → sp_light_q = 0 → cmap_rd_
+// addr = {6'b0, texel} → cmap[texel] should equal texel.
+static void test_triangle_light_zero_identity_cmap(void) {
+    printf("TEST: light=0 + identity colormap row 0 (Bug B repro)\n");
+
+    gpu_init();
+
+    // Identity row 0; row 1 deliberately wrong so any light leak is visible.
+    {
+        static uint8_t cm[2 * 256];
+        for (int i = 0; i < 256; i++) cm[i]       = (uint8_t)i;       // row 0
+        for (int i = 0; i < 256; i++) cm[256 + i] = 0xCC;              // row 1
+        cmap_upload_bytes(0, cm, 2 * 256);
+    }
+
+    ring_cmd(0x23, 2);
+    ring_write(FB_BASE_BYTE);
+    ring_write(320);
+
+    ring_cmd(0x10, 2);
+    ring_write((1 << 16) | 0x00);
+    ring_write(0);
+
+    // 16x16 texture: byte = (t<<4)|s — every texel is distinct.
+    for (int t = 0; t < 16; t++) {
+        for (int s = 0; s < 16; s += 4) {
+            uint32_t w = ((uint32_t)((t << 4) | (s + 3)) << 24)
+                       | ((uint32_t)((t << 4) | (s + 2)) << 16)
+                       | ((uint32_t)((t << 4) | (s + 1)) <<  8)
+                       | ((uint32_t)((t << 4) | (s + 0)) <<  0);
+            sdram_write((TEX_BASE_BYTE >> 2) + (t * 16 + s) / 4, w);
+        }
+    }
+    ring_bind_texture(TEX_BASE_BYTE, 16, 16);
+
+    // Triangle covers (0..7, 0..7) with affine s,t spanning 0..7 along
+    // each axis.  All v_r = 0 → sp_light_q stays 0 across the triangle.
+    ring_cmd(0x30, 19);
+    ring_write(3);
+    ring_write_vertex(0,    0,        0, 0,             0, 0);
+    ring_write_vertex(8*16, 0,        0, 8 << 16,       0, 0);
+    ring_write_vertex(0,    8*16, 0, 0,           8 << 16, 0);
+
+    bool ok = gpu_finish();
+    check("light0_done", ok ? 1 : 0, 1);
+
+    // Spot-check several pixels inside the triangle: each must read the
+    // texel that geometry plane gives, *unchanged* through the identity
+    // cmap row 0.  If the hardware accidentally indexed row 1, every
+    // pixel would be 0xCC instead.
+    for (int y = 0; y < 5; y++) {
+        for (int x = 0; x < 5 - y; x++) {
+            uint8_t expected = (uint8_t)((y << 4) | x);  // tex[t=y, s=x]
+            uint8_t got      = sdram_read_byte(FB_BASE_BYTE + x + y * 320);
+            if (got != expected) {
+                printf("  FAIL light0_(%d,%d): got=0x%02x expected=0x%02x\n",
+                       x, y, got, expected);
+                fail_count++;
+                return;
+            }
+        }
+    }
+    printf("  OK  light0_pixel_passthrough (all 15 pixels match)\n");
+    pass_count++;
+}
+
 // Mid-flight GPU_TEX_FLUSH — reproduce the BUILD/Duke3D freeze where
 // loadtile() does of_cache_clean_range + GPU_TEX_FLUSH=1 between
 // frames without first fencing the previous frame's spans.
@@ -2366,6 +2436,7 @@ int main(int argc, char **argv) {
     test_triangle_back_to_back_many();
     test_triangle_tex_flush_swap();
     test_triangle_tex_flush_midflight();
+    test_triangle_light_zero_identity_cmap();
 #endif
 
     printf("\n=== Results: %d passed, %d failed ===\n",

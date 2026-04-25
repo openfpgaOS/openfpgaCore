@@ -2419,9 +2419,18 @@ always @(posedge clk) begin
                 end
                 3'd1: premul_step <= 3'd2;  // DSP pipeline delay
                 3'd2: begin
-                    // Capture v0; launch v1
-                    v_sw[0] <= dsp_p [47:16];
-                    v_tw[0] <= dsp2_p[47:16];
+                    // Capture v0; launch v1.  dsp_a is sign-extended
+                    // v_s (Q16.0 signed 32-bit), dsp_b is v_w (Q16.16
+                    // signed 32-bit).  Their product is Q32.16 stored
+                    // as a 64-bit signed integer where the Q16.16
+                    // representation of (v_s × v_w) sits at bits
+                    // [31:0] — NOT [47:16] (the original commit had
+                    // this off by a factor of 2^16, which made every
+                    // perspective triangle's interpolated texcoords
+                    // wrong by the same factor).  See bug-report
+                    // 2026-04-25 part A for the symptom on Quake.
+                    v_sw[0] <= dsp_p [31:0];
+                    v_tw[0] <= dsp2_p[31:0];
                     dsp_a   <= {{16{v_s[1][15]}}, v_s[1]};
                     dsp_b   <= v_w[1];
                     dsp2_a  <= {{16{v_t[1][15]}}, v_t[1]};
@@ -2431,8 +2440,8 @@ always @(posedge clk) begin
                 3'd3: premul_step <= 3'd4;  // DSP pipeline delay
                 3'd4: begin
                     // Capture v1; launch v2
-                    v_sw[1] <= dsp_p [47:16];
-                    v_tw[1] <= dsp2_p[47:16];
+                    v_sw[1] <= dsp_p [31:0];
+                    v_tw[1] <= dsp2_p[31:0];
                     dsp_a   <= {{16{v_s[2][15]}}, v_s[2]};
                     dsp_b   <= v_w[2];
                     dsp2_a  <= {{16{v_t[2][15]}}, v_t[2]};
@@ -2442,8 +2451,8 @@ always @(posedge clk) begin
                 3'd5: premul_step <= 3'd6;  // DSP pipeline delay
                 3'd6: begin
                     // Capture v2; hand off to setup
-                    v_sw[2] <= dsp_p [47:16];
-                    v_tw[2] <= dsp2_p[47:16];
+                    v_sw[2] <= dsp_p [31:0];
+                    v_tw[2] <= dsp2_p[31:0];
                     premul_step <= 3'd0;
                     state <= S_TRI_SETUP;
                 end
