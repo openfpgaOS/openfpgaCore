@@ -67,7 +67,23 @@ wire shutdown_pending = 1'b0;
 wire [31:0] dt_query_data = 32'b0;
 wire dt_query_valid = 1'b0;
 wire [7:0] snac_pin_in = 8'b0;
-wire [31:0] gpu_reg_rdata = 32'b0;
+// Mock GPU register-read mux: returns a unique sentinel per address so
+// the harness can verify that each AR returns the data of the requested
+// register (catches the "read returns previous read's value" bug from
+// the registered gpu_reg_rdata_r boundary that was removed in core_top).
+reg  [31:0] gpu_reg_rdata;
+always @(*) begin
+    case (dbg_gpu_reg_addr)
+        4'd1:  gpu_reg_rdata = 32'h1111_1111;
+        4'd4:  gpu_reg_rdata = 32'h4444_4444;
+        4'd5:  gpu_reg_rdata = 32'h5555_5555;
+        4'd6:  gpu_reg_rdata = 32'h6666_6666;
+        4'd12: gpu_reg_rdata = 32'hCCCC_CCCC;
+        4'd13: gpu_reg_rdata = 32'hDDDD_DDDD;
+        4'd14: gpu_reg_rdata = 32'hEEEE_EEEE;
+        default: gpu_reg_rdata = 32'h0;
+    endcase
+end
 wire link_irq = 1'b0;
 wire bridge_wr_idle = 1'b1;
 wire dataslot_allcomplete = 1'b1;

@@ -445,6 +445,56 @@ static void test_mixed_bram_periph() {
     check_eq("mixed-32-ops", ok, 1);
 }
 
+// ====================================================================
+// GPU MMIO READ path — every AR to the GPU MMIO base must return the
+// data of the *requested* register, not a stale value from the prior
+// read.  The harness's gpu_reg_rdata mux returns a per-register sentinel
+// (4'd1=>0x11..11, 4'd4=>0x44..44, 4'd5=>0x55..55, etc.) so each beat
+// is unambiguously identifiable.  Originally caught the registered
+// `gpu_reg_rdata_r` pipeline boundary that off-by-one'd every read in
+// production.
+// ====================================================================
+static void test_gpu_read_addressing(void) {
+    printf("test_gpu_read_addressing (verify GPU MMIO returns the requested reg):\n");
+    struct { uint32_t addr; uint32_t expect; const char *tag; } cases[] = {
+        { 0x4A000004, 0x11111111, "gpu_rd_0x04_wrptr"      },
+        { 0x4A000010, 0x44444444, "gpu_rd_0x10_rdptr"      },
+        { 0x4A000014, 0x55555555, "gpu_rd_0x14_status"     },
+        { 0x4A000018, 0x66666666, "gpu_rd_0x18_fence"      },
+        { 0x4A000030, 0xCCCCCCCC, "gpu_rd_0x30_bad_waddr"  },
+        { 0x4A000034, 0xDDDDDDDD, "gpu_rd_0x34_bad_count"  },
+        { 0x4A000038, 0xEEEEEEEE, "gpu_rd_0x38_ringwr_cnt" },
+    };
+    for (size_t i = 0; i < sizeof(cases)/sizeof(cases[0]); i++) {
+        std::vector<uint32_t> r;
+        if (!axi_read_burst(cases[i].addr, 0, r)) {
+            printf("  FAIL %s: AR did not complete\n", cases[i].tag);
+            fails++; continue;
+        }
+        check_eq(cases[i].tag, r[0], cases[i].expect);
+    }
+
+    // Adversarial sequence — the off-by-one bug only manifested when
+    // a *prior* GPU read had primed a register's data into the latch.
+    // Issue every pair (a -> b) and verify each read returns its own
+    // expected value, never the prior read's.
+    printf("test_gpu_read_addressing (adversarial pairs):\n");
+    int ok = 1;
+    for (size_t i = 0; i < sizeof(cases)/sizeof(cases[0]); i++) {
+        for (size_t j = 0; j < sizeof(cases)/sizeof(cases[0]); j++) {
+            std::vector<uint32_t> r1, r2;
+            if (!axi_read_burst(cases[i].addr, 0, r1)) { ok = 0; break; }
+            if (!axi_read_burst(cases[j].addr, 0, r2)) { ok = 0; break; }
+            if (r2[0] != cases[j].expect) {
+                printf("  pair (%s -> %s): got=0x%08x expected=0x%08x\n",
+                       cases[i].tag, cases[j].tag, r2[0], cases[j].expect);
+                ok = 0;
+            }
+        }
+    }
+    check_eq("gpu-rd-adversarial-pairs", ok, 1);
+}
+
 int main(int argc, char **argv) {
     Verilated::commandArgs(argc, argv);
     tb = new Vtb_axi_periph;
@@ -464,6 +514,9 @@ int main(int argc, char **argv) {
     test_gpu_write_back_to_back();
     test_gpu_write_split_aw_w();
     test_gpu_write_mixed_addr();
+
+    // GPU MMIO read addressing — caught the registered-rdata off-by-one.
+    test_gpu_read_addressing();
 
     printf("\n=== Results: %d passed, %d failed ===\n", passes, fails);
     delete tb;

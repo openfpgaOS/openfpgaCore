@@ -1716,7 +1716,7 @@ assign video_hs = vidout_hs;
         .gpu_reg_wr(gpu_reg_wr),
         .gpu_reg_addr(gpu_reg_addr),
         .gpu_reg_wdata(gpu_reg_wdata),
-        .gpu_reg_rdata(gpu_reg_rdata_r)
+        .gpu_reg_rdata(gpu_reg_rdata)
     );
 
     // DMA engine removed — apps use CPU memcpy instead
@@ -2205,12 +2205,6 @@ wire [3:0]  gpu_reg_addr;
 wire [31:0] gpu_reg_wdata;
 wire [31:0] gpu_reg_rdata;
 
-/* Same fitter-freedom register as the mixer boundary — breaks the
- * combinational cone from gpu_core's register-file read to the sysreg
- * read mux in axi_periph_slave.  1-cycle latency, invisible to firmware
- * behind the AXI read handshake. */
-reg  [31:0] gpu_reg_rdata_r;
-always @(posedge clk_cpu) gpu_reg_rdata_r <= gpu_reg_rdata;
 
 // GPU AXI4 read master (M0 on SDRAM arbiter)
 wire        gpu_rd_arvalid;
