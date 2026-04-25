@@ -141,17 +141,31 @@ reg fill_resp_valid;
 
 assign resp_valid = pipe_hit || fill_resp_valid;
 
-// ---- Continuous RAM read (driven by req_addr, NOT pipe_addr) ----
-// The RAM reads whatever the consumer is presenting on req_addr this cycle;
-// the result lands in rd_* next cycle, by which time req_addr will have been
-// latched into pipe_addr. Stage 1 = address presentation; stage 2 = read use.
+// ---- Pipelined RAM read (latched only when consumer's req is accepted) ----
+// The RAM reads from the address the consumer is presenting; the result
+// lands in rd_* on the next clock, by which time req_addr has been
+// latched into pipe_addr.  Stage 1 = address presentation; stage 2 = read
+// use.
+//
+// Critical: gate the latch on req_valid && req_ready.  Without the gate,
+// rd_* track req_addr every cycle.  When the consumer's pipeline stalls
+// (e.g., FBSS in mid-write), pipe_addr is held but the consumer's
+// req_addr can drift to the NEXT pixel (because the GPU's p0 has already
+// advanced).  rd_* would re-latch from the new address while pipe_addr
+// still names the old one, so byte_from_rd would mis-select bytes.
+// Symptom on tb_gpu_floor_span: cache hits returned glitched bytes from
+// the wrong line whenever the FBSS sub-FSM stalled the pipe between
+// accept and capture.  Gating on accept holds rd_* stable while
+// pipe_addr is stable.
 wire [SET_BITS-1:0] addr_set  = req_addr[13:4];
 wire [1:0]          addr_word = req_addr[3:2];
 
 always @(posedge clk) begin
-    rd_tag   <= tag_mem[addr_set];
-    rd_valid <= valid_mem[addr_set];
-    rd_data  <= data_mem[{addr_set, addr_word}];
+    if (req_valid && req_ready) begin
+        rd_tag   <= tag_mem[addr_set];
+        rd_valid <= valid_mem[addr_set];
+        rd_data  <= data_mem[{addr_set, addr_word}];
+    end
 end
 
 // ---- Byte/halfword extraction from RAM hit (uses pipe_byte) ----

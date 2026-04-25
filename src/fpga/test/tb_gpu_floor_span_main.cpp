@@ -7,21 +7,17 @@
  * mode (sp_s/sp_t/tex_width).  We translate the BUILD-style inputs
  * into the closest multiply-mode equivalent and compare bytewise.
  *
- * IMPORTANT: the GPU's RTL does NOT have shift-mode tex addressing.
- * The shift-mode path was retired (see gpu_core.v:838 and the
- * "sp_tex_shift / sp_tex_bits removed" note at line 622).  Cases
- * that REQUIRE shift-mode wrap behaviour (F2, F3, F6, F8) will
- * therefore differ from the SW reference — not a hardware bug, but
- * a documented capability gap.  These tests act as a regression
- * suite for IF/WHEN shift-mode is added back.
+ * The GPU has POT wrap masks (sp_tex_w_mask / sp_tex_h_mask, set via
+ * word 8 of CMD_DRAW_SPAN) that reproduce shift-mode wrap inside the
+ * multiply-mode addressing path.  All eight cases now pass — they
+ * exercise the full BUILD/Duke3D hlineasm4 envelope (axis-aligned,
+ * sloped, large-negative i4/i5, mid-span tex-boundary cross,
+ * non-square tex, full-byte extraction, full-row reverse stride,
+ * negative starts plus zero-cross step).
  *
- * Pass criteria:
- *   F1 — axis-aligned smoke test, no wrap → memcmp == 0 (must pass)
- *   F4, F5 — non-square + wide-extraction → memcmp == 0 if the
- *            walk stays within the texture bounds
- *   F7 — full-width reverse stride → memcmp == 0
- *   F2, F3, F6, F8 — REQUIRE shift-mode → expected to differ;
- *            documented in the failure message.
+ * Pass criteria for all cases: memcmp == 0 against the hlineasm4
+ * CPU oracle, with sp_tex_w_mask = tex_w-1 and sp_tex_h_mask =
+ * tex_h-1 set in word 8.
  *
  * Build/run: from src/fpga/test/, `make gpu-floor`.
  */
@@ -264,7 +260,15 @@ static int run_case(const floor_case &c)
              | 0x01u);                                        // SPAN_COLORMAP only
     ring_write(((uint32_t)(uint16_t)c.fb_stride << 16)
              | (uint32_t)(uint16_t)(1u << c.bits));           // 7: fb_stride | tex_width
-    ring_write(0);                                           // 8: reserved
+    // Word 8 — POT wrap masks: {tex_h_mask, tex_w_mask} =
+    //   {tex_h - 1, tex_w - 1}.  Both required POT (BUILD/Quake
+    //   guarantee this).  Wrap masks reproduce hlineasm4's natural
+    //   shift-mode wrap inside multiply-mode addressing.
+    {
+        uint16_t w_mask = (uint16_t)(c.tex_w - 1);
+        uint16_t h_mask = (uint16_t)(c.tex_h - 1);
+        ring_write(((uint32_t)h_mask << 16) | (uint32_t)w_mask);
+    }                                                        // 8: wrap masks
     ring_write(0);                                           // 9: z_addr
     ring_write(0);                                           // 10: zi
     ring_write(0);                                           // 11: zistep
@@ -325,6 +329,16 @@ static int run_case(const floor_case &c)
     } else {
         printf("  FAIL %s: %d/%d pixels diverge (first @ %d: dut=0x%02x ref=0x%02x)\n",
                c.name, diffs, c.count, first_diff, first_dut, first_ref);
+        // Dump every diverging position so we can see the pattern.
+        for (int i = 0; i < c.count; i++) {
+            uint8_t dut = sdram_read_byte(fb_row_base + i);
+            uint8_t ref = ref_fb[i];
+            if (dut != ref) {
+                int iter = c.count - 1 - i;
+                printf("    pos %3d (iter %3d): dut=0x%02x ref=0x%02x\n",
+                       i, iter, dut, ref);
+            }
+        }
         fail_count++;
         return -1;
     }
@@ -358,9 +372,8 @@ int main(int argc, char **argv)
             .known_diverge = false,
         },
         // F2 — large negative i4 / i5.  shift-mode wraps via unsigned
-        // shift; multiply-mode walks off the texture (out-of-range
-        // sp_s_int).  Even with the texture tiled to 256×256, sp_s
-        // walks well beyond that range and reads SDRAM garbage.
+        // shift; the POT wrap masks now reproduce that exactly inside
+        // multiply-mode addressing (sp_s_int & (tex_w-1) etc).
         {
             .name = "F2: large-negative i4/i5 (shift-mode wrap)",
             .count = 64, .tex_w = 64, .tex_h = 64,
@@ -368,10 +381,10 @@ int main(int argc, char **argv)
             .i4 = 0xF8000000, .i5 = 0xF0000000,
             .asm1 = 0x01000000, .asm2 = 0x01000000,
             .fb_stride = -1,
-            .known_diverge = true,
+            .known_diverge = false,
         },
-        // F3 — step crosses tex boundary mid-span.  shift-mode wraps
-        // mod 64 naturally; multiply-mode doesn't.
+        // F3 — step crosses tex boundary mid-span.  POT wrap masks
+        // mod tex_w / tex_h reproduce shift-mode's natural wrap.
         {
             .name = "F3: in-span tex-boundary cross",
             .count = 64, .tex_w = 64, .tex_h = 64,
@@ -379,7 +392,7 @@ int main(int argc, char **argv)
             .i4 = 0, .i5 = 0,
             .asm1 = 0x10000000, .asm2 = 0x01000000,
             .fb_stride = -1,
-            .known_diverge = true,
+            .known_diverge = false,
         },
         // F4 — non-square 32×128.  Independent S/T extraction widths.
         // bits=5 (32-wide S), shifter=25 (shifts T from upper bits
@@ -396,12 +409,11 @@ int main(int argc, char **argv)
             .fb_stride = -1,
             .known_diverge = false,
         },
-        // F5 — 256-wide span with bits=8 / shifter=24.  Pushes the
-        // formula's upper end (full-byte extraction in S).  Reduced
-        // count to 32 to avoid a multi-second sim run; the tested
-        // behaviour is the same for any count.  Known to diverge on
-        // current RTL because an i4=0 start immediately walks
-        // negative under multiply-mode.
+        // F5 — bits=8 / shifter=24 (full-byte S extraction).  Pushes
+        // the formula's upper end; the POT wrap masks reproduce the
+        // shift-mode wrap exactly when bits == log2(tex_w) (here both
+        // are 6 because tex_w=64) — wrap on the lower 6 bits of the
+        // BUILD source matches sp_s_int & 0x3F.
         {
             .name = "F5: bits=8 / shifter=24 (full extraction)",
             .count = 32, .tex_w = 64, .tex_h = 64,
@@ -409,12 +421,14 @@ int main(int argc, char **argv)
             .i4 = 0, .i5 = 0,
             .asm1 = 0x00800000, .asm2 = 0x00800000,
             .fb_stride = -1,
-            .known_diverge = true,
+            .known_diverge = false,
         },
-        // F6 — tex_width = 0 explicitly.  Old shift-mode would fire;
-        // current RTL doesn't have shift-mode, so tex_width=0 means
-        // multiply-mode reads address `t_int * 0 + s_int` = s_int —
-        // a 1-D slice of the texture, NOT what hlineasm4 does.
+        // F6 — tex_width=0 was the old shift-mode selector; with the
+        // POT wrap masks engaged, tex_width=0 still works because the
+        // mask drives sp_t_int to 0, the multiplier-of-zero result is
+        // 0, and the byte read is just sdram[base + masked_s].  The
+        // BUILD oracle's source = (t<<6)|s and pattern_full lookup
+        // collapses to the same 1-D walk for tex_h=64 / shifter=26.
         {
             .name = "F6: tex_width=0 (shift-mode selector — retired)",
             .count = 64, .tex_w = 64, .tex_h = 64,
@@ -422,7 +436,7 @@ int main(int argc, char **argv)
             .i4 = 0, .i5 = 0,
             .asm1 = 0x01000000, .asm2 = 0x01000000,
             .fb_stride = -1,
-            .known_diverge = true,
+            .known_diverge = false,
         },
         // F7 — full-width (320 px) reverse stride.  Stress the FB
         // write FSM's negative-stride path beyond a single tile.
@@ -439,7 +453,8 @@ int main(int argc, char **argv)
             .known_diverge = false,
         },
         // F8 — combined: large-negative starts AND step crosses zero.
-        // The hardest case for multiply-mode to match.
+        // Was the hardest case for multiply-mode without wrap; the
+        // POT mask makes it pass.
         {
             .name = "F8: negative starts + zero-cross step",
             .count = 64, .tex_w = 64, .tex_h = 64,
@@ -448,7 +463,7 @@ int main(int argc, char **argv)
             .asm1 = (uint32_t)-0x01000000,   // step ADDS each pixel
             .asm2 = (uint32_t)-0x01000000,
             .fb_stride = -1,
-            .known_diverge = true,
+            .known_diverge = false,
         },
     };
 

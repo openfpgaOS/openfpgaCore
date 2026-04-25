@@ -619,8 +619,13 @@ wire [7:0]        sp_light = sp_light_q[23:16];
 reg [7:0]  sp_flags;
 reg signed [15:0] sp_fb_stride;
 reg [15:0] sp_tex_width;
-// sp_tex_shift / sp_tex_bits removed with the shift-mode tex address
-// path.  pay_buf[8] is reserved in the CMD_DRAW_SPAN layout.
+// POT wrap masks: sp_s_int & sp_tex_w_mask, sp_t_int & sp_tex_h_mask
+// before the address math.  Default 16'hFFFF (no-op) so callers that
+// don't set word 8 see the legacy multiply-mode behaviour.  The masks
+// reproduce BUILD's hlineasm4 shift-mode wrap exactly when tex_w/tex_h
+// are powers of two (always true for BUILD/Quake/Doom textures).
+reg [15:0] sp_tex_w_mask;
+reg [15:0] sp_tex_h_mask;
 reg [31:0] sp_z_addr;
 reg signed [31:0] sp_zi;
 reg signed [31:0] sp_zistep;
@@ -1444,6 +1449,7 @@ always @(posedge clk) begin
 `endif
         // State registers
         st_tex_addr <= 0; st_tex_width <= 0;
+        sp_tex_w_mask <= 16'hFFFF; sp_tex_h_mask <= 16'hFFFF;
         st_depth_func <= 0;
         st_fb_addr <= 0; st_fb_stride <= 320;
         st_zb_addr <= 0; st_zb_stride <= 640;
@@ -1604,8 +1610,18 @@ always @(posedge clk) begin
                         sp_fb_stride <= ring_rd_data[31:16];
                         sp_tex_width <= ring_rd_data[15:0];
                     end
-                    // pay_idx == 5'd8 reserved (was tex_shift / tex_bits
-                    //   for the deleted shift-mode tex path)
+                    5'd8: begin
+                        // POT wrap masks: low 16 = tex_w_mask (S),
+                        // high 16 = tex_h_mask (T).  Set to tex_w-1
+                        // / tex_h-1 to enable wrap; mask=0 means "no
+                        // wrap" (decoded to 0xFFFF — keeps backward
+                        // compat with legacy callers that wrote 0 to
+                        // the formerly-reserved word 8).
+                        sp_tex_w_mask <= (ring_rd_data[15:0]  == 16'd0)
+                                         ? 16'hFFFF : ring_rd_data[15:0];
+                        sp_tex_h_mask <= (ring_rd_data[31:16] == 16'd0)
+                                         ? 16'hFFFF : ring_rd_data[31:16];
+                    end
                     5'd9:  sp_z_addr     <= ring_rd_data;
                     5'd10: sp_zi         <= ring_rd_data;
                     5'd11: sp_zistep     <= ring_rd_data;
@@ -1822,15 +1838,17 @@ always @(posedge clk) begin
                     p0_fb_addr   <= sp_fb_addr;
                     p0_z_addr    <= sp_z_addr;
                     p0_zi        <= sp_zi;
-                    p0_s_int     <= sp_s[31:16];
+                    p0_s_int     <= sp_s[31:16] & sp_tex_w_mask;
                     p0_tex_base  <= sp_tex_addr;
                     // p0_mode / p0_shift_addr removed — multiply-mode
                     // tex addressing (t * tex_width + s) is universal.
+                    // POT wrap: mask sp_s_int / sp_t_int with sp_tex_*_mask.
+                    // Default mask 16'hFFFF is a no-op (legacy callers).
 
                     // DSP-pipelined multiply: registered output. The DSP
                     // slice will be inferred via the (* multstyle = "dsp" *)
                     // attribute on tx_mul_q's declaration.
-                    tx_mul_q <= $signed({{1'b0}, sp_t[31:16]})
+                    tx_mul_q <= $signed({1'b0, sp_t[31:16] & sp_tex_h_mask})
                               * $signed({1'b0, sp_tex_width});
 
                     // Advance span source. For perspective spans, the s/t

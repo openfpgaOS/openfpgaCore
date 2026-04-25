@@ -98,8 +98,14 @@ typedef struct {
     uint8_t  flags;
     int16_t  fb_stride;
     uint16_t tex_width;
-    uint8_t  tex_shift;
-    uint8_t  tex_bits;
+    /* POT wrap masks (tex_w - 1 / tex_h - 1).  0 means "no wrap" — the
+     * legacy default and what the formerly-reserved word 8 carried.
+     * Set both to (tex_w-1) and (tex_h-1) to reproduce BUILD/Quake-style
+     * shift-mode wrap inside the GPU's multiply-mode addressing.  Both
+     * dimensions must be powers of two.  Renamed from the dead
+     * tex_shift/tex_bits fields that fed the retired shift-mode path. */
+    uint16_t tex_w_mask;
+    uint16_t tex_h_mask;
     uint32_t z_addr;
     int32_t  zi;
     int32_t  zistep;
@@ -418,8 +424,11 @@ static inline void of_gpu_draw_span(const of_gpu_span_t *span) {
                     ((uint32_t)span->flags));
     _gpu_ring_write(((uint32_t)(uint16_t)span->fb_stride << 16) |
                     (uint32_t)span->tex_width);
-    _gpu_ring_write(((uint32_t)span->tex_shift << 8) |
-                    (uint32_t)span->tex_bits);
+    /* Word 8: POT wrap masks (high 16 = T, low 16 = S).  Both = 0
+     * means no wrap (legacy callers).  RTL decodes 0 as 0xFFFF
+     * internally so the addressing pass-through is unchanged. */
+    _gpu_ring_write(((uint32_t)span->tex_h_mask << 16) |
+                    (uint32_t)span->tex_w_mask);
     _gpu_ring_write(span->z_addr);
     _gpu_ring_write((uint32_t)span->zi);
     _gpu_ring_write((uint32_t)span->zistep);
