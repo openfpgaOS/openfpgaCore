@@ -132,7 +132,7 @@ SYSTEM_FLAGS = -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC -Wno-CASEINCOMPLETE \
 # ============================================================
 # Targets
 # ============================================================
-.PHONY: all sdram sram gpu gpu-floor axi-periph \
+.PHONY: all sdram sram gpu gpu-floor gpu-gpudemo axi-periph \
         audio system run run-sram build clean
 
 all: sdram sram gpu axi-periph audio
@@ -199,6 +199,25 @@ $(GPU_FLOOR_DIR)/V$(GPU_TOP): $(GPU_SRCS) $(GPU_FLOOR_CPP)
 		-I$(COMMON_DIR) \
 		$(GPU_SRCS) $(GPU_FLOOR_CPP)
 
+# --- gpudemo reproducer (long-running multi-span + textured triangle) ---
+# Mirrors openfpgaOS-SDK/src/apps/gpudemo's per-frame submission so we
+# can chase on-hardware hangs (commit 8ae32d6's "fps=0001" trap) in the
+# Verilator harness.  Run `make gpu-gpudemo` standalone.
+GPU_GPUDEMO_CPP = tb_gpu_gpudemo_main.cpp
+GPU_GPUDEMO_DIR = obj_dir_gpu_gpudemo
+gpu-gpudemo: $(GPU_GPUDEMO_DIR)/V$(GPU_TOP)
+	@printf "\n=== GPU gpudemo repro ===\n"
+	./$(GPU_GPUDEMO_DIR)/V$(GPU_TOP) || true
+
+$(GPU_GPUDEMO_DIR)/V$(GPU_TOP): $(GPU_SRCS) $(GPU_GPUDEMO_CPP)
+	$(VERILATOR) $(VERILATOR_FLAGS) --top-module $(GPU_TOP) \
+		--Mdir $(GPU_GPUDEMO_DIR) \
+		+define+GPU_STATS +define+GPU_DEBUG \
+		-CFLAGS -DGPU_PERSP_IMPL \
+		-CFLAGS -DGPU_FEAT_TRIANGLE \
+		-I$(COMMON_DIR) \
+		$(GPU_SRCS) $(GPU_GPUDEMO_CPP)
+
 # --- AXI periph slave ---
 axi-periph: $(AXI_PERIPH_DIR)/V$(AXI_PERIPH_TOP)
 	@printf "\n=== AXI periph slave ===\n"
@@ -235,5 +254,7 @@ $(SYSTEM_DIR)/V$(SYSTEM_TOP): $(SYSTEM_SRCS) $(SYSTEM_CPP)
 # --- Clean ---
 clean:
 	rm -rf $(SDRAM_DIR) $(SRAM_DIR) $(GPU_DIR) $(GPU_FLOOR_DIR) \
+	       $(GPU_GPUDEMO_DIR) \
 	       $(AXI_PERIPH_DIR) $(AUDIO_DIR) $(SYSTEM_DIR) \
-	       obj_dir_gpu obj_dir_gpu_floor obj_dir_cdc io_sdram_test.v
+	       obj_dir_gpu obj_dir_gpu_floor obj_dir_gpu_gpudemo \
+	       obj_dir_cdc io_sdram_test.v
