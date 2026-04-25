@@ -1596,6 +1596,101 @@ static void test_triangle_persp_premul_dormant(void) {
     check_byte("tri_premul_persp_pixel_written", 1 + 1 * 320, 0xAA);
 }
 
+// Phase 4c.3 / 4c.4 — perspective-correct triangle texture mapping.
+//
+// Renders the SAME geometry twice: once affine (w_i = 1.0 per vertex),
+// once perspective (one vertex has w = 0.5 to push it "far").  With
+// the SPAN_PERSP path now wired up for triangles, the two passes
+// must produce DIFFERENT framebuffers — at least at the midline of
+// the shared edge between the near and far vertices.
+//
+// Pre-fix: persp_active was hard-coded 0 for triangles, so the two
+// passes produced identical output.  Now persp_active = 1 when any
+// v_w != 0x10000, and the existing perspective-span machinery does
+// the divide.
+static void test_triangle_persp_vs_affine(void) {
+    printf("TEST: Triangle perspective vs affine (4c.4 — visible)\n");
+
+    auto render_one = [&](int32_t w0, int32_t w1, int32_t w2) {
+        gpu_init();
+        { uint8_t cm[256]; for (int i = 0; i < 256; i++) cm[i] = (uint8_t)i;
+          cmap_upload_bytes(0, cm, 256); }
+        ring_cmd(0x23, 2);
+        ring_write(FB_BASE_BYTE);
+        ring_write(320);
+        ring_cmd(0x10, 2);
+        ring_write((1 << 16) | 0x00);
+        ring_write(0);
+        // 16x16 distinctive texture: byte = (t<<4) | s.
+        for (int t = 0; t < 16; t++) {
+            for (int s = 0; s < 16; s += 4) {
+                uint32_t w = ((uint32_t)((t << 4) | (s + 3)) << 24)
+                           | ((uint32_t)((t << 4) | (s + 2)) << 16)
+                           | ((uint32_t)((t << 4) | (s + 1)) <<  8)
+                           | ((uint32_t)((t << 4) | (s + 0)) <<  0);
+                sdram_write((TEX_BASE_BYTE >> 2) + (t * 16 + s) / 4, w);
+            }
+        }
+        ring_bind_texture(TEX_BASE_BYTE, 16, 16);
+
+        auto write_v = [&](int16_t x, int16_t y, int32_t s, int32_t t, int32_t w) {
+            ring_write(((uint32_t)(uint16_t)x << 16) | (uint16_t)y);
+            ring_write(0);
+            ring_write((uint32_t)s);
+            ring_write((uint32_t)t);
+            ring_write((uint32_t)w);
+            ring_write(0);
+        };
+
+        // CCW right triangle covering pixels (0..7, 0..7).
+        ring_cmd(0x30, 19);
+        ring_write(3);
+        write_v(0,    0,           0,        0, w0);  // v0 (top-left)
+        write_v(8*16, 0,    8 << 16,        0, w1);  // v1 (top-right)
+        write_v(0,    8*16,       0, 8 << 16, w2);  // v2 (bottom-left)
+
+        return gpu_finish();
+    };
+
+    // Affine reference run.
+    bool ok_a = render_one(0x00010000, 0x00010000, 0x00010000);
+    check("tri_persp_affine_done", ok_a ? 1 : 0, 1);
+    uint8_t fb_aff[8][8];
+    for (int y = 0; y < 8; y++)
+        for (int x = 0; x < 8; x++)
+            fb_aff[y][x] = sdram_read_byte(FB_BASE_BYTE + x + y * 320);
+
+    // Perspective run: v1 has 1/W = 0.5 (= W = 2.0, "far").  The other
+    // two stay at W = 1 ("near").  Texcoords land differently along
+    // the v0→v1 edge.
+    bool ok_p = render_one(0x00010000, 0x00008000, 0x00010000);
+    check("tri_persp_persp_done", ok_p ? 1 : 0, 1);
+
+    // Count differing pixels inside the triangle.  Diagonal y < 8-x
+    // (open right edge) is the rough interior.
+    int diff_count = 0;
+    for (int y = 0; y < 8; y++) {
+        for (int x = 0; x < 8 - y; x++) {
+            uint8_t aff = fb_aff[y][x];
+            uint8_t per = sdram_read_byte(FB_BASE_BYTE + x + y * 320);
+            if (aff != per) diff_count++;
+        }
+    }
+
+    // A non-trivial number of pixels must differ.  The exact count
+    // depends on the fragment pipe's segment granularity; what matters
+    // is that perspective produces DIFFERENT output from affine when
+    // w varies between vertices.  Lower bound: a few pixels along the
+    // top edge near v1 should sample a different texel.
+    if (diff_count >= 4) {
+        pass_count++;
+        printf("  OK  tri_persp_diff_count=%d (>= 4)\n", diff_count);
+    } else {
+        fail_count++;
+        printf("  FAIL tri_persp_diff_count=%d, expected >= 4\n", diff_count);
+    }
+}
+
 // Phase 4a — bbox-origin attribute init.
 //
 // Triangle setup currently initialises tri_row_z/s/t at v0 instead of at the
@@ -2167,6 +2262,7 @@ int main(int argc, char **argv) {
     test_triangle_shared_edge();
     test_triangle_bbox_init();
     test_triangle_persp_premul_dormant();
+    test_triangle_persp_vs_affine();
     test_triangle_skip_zero();
     test_triangle_back_to_back_many();
     test_triangle_tex_flush_swap();
