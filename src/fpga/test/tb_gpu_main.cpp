@@ -1545,6 +1545,85 @@ static void test_triangle_shared_edge() {
     check_byte("shared_left", 2 + 2*320, 0xAA);
     check_byte("shared_right", 7 + 2*320, 0xAA);
 }
+// Phase 4a — bbox-origin attribute init.
+//
+// Triangle setup currently initialises tri_row_z/s/t at v0 instead of at the
+// bbox origin (xmin, ymin).  When v0 is not at the bbox corner — e.g. v0 is
+// the top-right of a right triangle whose bbox-origin is v1 — the per-pixel
+// walk drifts by a constant (xmin - v0.x) * grad_dx + (ymin - v0.y) * grad_dy.
+//
+// This test renders a 16x16-textured right triangle whose v0 sits at the
+// top-right corner.  v0.y == ymin (no Y bias), but v0.x != xmin so every
+// pixel's S coordinate is off by (xmin - v0.x) * grad_s_dx == 4.  Texture
+// is filled with byte = (t<<4)|s so a 4-step S offset is unambiguous.
+//
+// Pre-fix: pixel (4, 4) reads texel(s=0, t=0) = 0x00 instead of 0x04.
+// Post-fix: pixel (4, 4) reads texel(s=4, t=0) = 0x04.
+static void test_triangle_bbox_init(void) {
+    printf("TEST: Triangle bbox-origin attribute init (v0 != bbox.origin)\n");
+
+    gpu_init();
+
+    { uint8_t cm[256]; for (int i = 0; i < 256; i++) cm[i] = (uint8_t)i;
+      cmap_upload_bytes(0, cm, 256); }
+
+    ring_cmd(0x23, 2);
+    ring_write(FB_BASE_BYTE);
+    ring_write(320);
+
+    ring_cmd(0x10, 2);
+    ring_write((1 << 16) | 0x00);
+    ring_write(0);
+
+    // 16x16 texture: byte at (s, t) = (t << 4) | s.
+    for (int t = 0; t < 16; t++) {
+        for (int s = 0; s < 16; s += 4) {
+            uint32_t w = ((uint32_t)((t << 4) | (s + 3)) << 24)
+                       | ((uint32_t)((t << 4) | (s + 2)) << 16)
+                       | ((uint32_t)((t << 4) | (s + 1)) <<  8)
+                       | ((uint32_t)((t << 4) | (s + 0)) <<  0);
+            sdram_write((TEX_BASE_BYTE >> 2) + (t * 16 + s) / 4, w);
+        }
+    }
+    ring_bind_texture(TEX_BASE_BYTE, 16, 16);
+
+    // CCW right triangle, v0 NOT at bbox origin.
+    //   v0 = (8, 0) tex(s=8, t=0)   ← top-right (xmax, ymin) — non-origin v0
+    //   v1 = (0, 8) tex(s=0, t=8)   ← bottom-left
+    //   v2 = (0, 0) tex(s=0, t=0)   ← bbox origin (xmin, ymin)
+    // Cross-product (v1-v0) × (v2-v0) = +64 → CCW (no winding flip).
+    // bbox = (0..8, 0..8).  delta_x_subpix = -128 (= -8 pixels), delta_y = 0.
+    //
+    //   grad_s_dx = +1/pixel, grad_s_dy = 0.    Correct s(x,y) = x.
+    //   grad_t_dx = 0,        grad_t_dy = +1/pixel.  Correct t(x,y) = y.
+    //
+    //   Buggy at (xmin, ymin) initialises tri_row_s = v0.s = 8, t = 0.
+    //   Buggy s(x,y) = 8 + x (mod 16, since walk continues from v0.s).
+    //   Buggy t(x,y) = y      (matches correct because v0.y == ymin).
+    ring_cmd(0x30, 19);
+    ring_write(3);
+    ring_write_vertex(8*16, 0*16, 0, 8 << 16,        0, 0);  // v0
+    ring_write_vertex(0*16, 8*16, 0,        0, 8 << 16, 0);  // v1
+    ring_write_vertex(0*16, 0*16, 0,        0,        0, 0);  // v2
+
+    bool ok = gpu_finish();
+    check("tri_bbox_init_done", ok ? 1 : 0, 1);
+
+    // Pixel (1, 1) — interior near v2=(0,0).
+    //   correct s = 1, t = 1 → texel = (1<<4)|1 = 0x11
+    //   buggy   s = 9, t = 1 → 0x19
+    check_byte("tri_bbox_init_1_1", 1 + 1 * 320, 0x11);
+
+    // Pixel (2, 2).
+    //   correct s = 2, t = 2 → 0x22
+    //   buggy   s = 10, t = 2 → 0x2A
+    check_byte("tri_bbox_init_2_2", 2 + 2 * 320, 0x22);
+
+    // Pixel (3, 3).
+    //   correct s = 3, t = 3 → 0x33
+    //   buggy   s = 11, t = 3 → 0x3B
+    check_byte("tri_bbox_init_3_3", 3 + 3 * 320, 0x33);
+}
 #endif // GPU_FEAT_TRIANGLE
 
 // =====================================================================
@@ -2035,6 +2114,7 @@ int main(int argc, char **argv) {
     test_triangle_depth();
     test_triangle_vertex_color();
     test_triangle_shared_edge();
+    test_triangle_bbox_init();
     test_triangle_skip_zero();
     test_triangle_back_to_back_many();
     test_triangle_tex_flush_swap();

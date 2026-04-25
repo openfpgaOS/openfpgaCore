@@ -659,6 +659,7 @@ localparam S_FRAG_PIPE     = 6'd33;  // Unified pipelined fragment processor
 localparam S_TRI_MUL_WAIT  = 6'd34;  // wait for DSP input-register stage (+1 cycle from BBOX_CLAMP)
 localparam S_TRI_BBOX_CLAMP = 6'd35; // Clamp raw min/max to screen bounds
 localparam S_TRI_MUL_WAIT2 = 6'd36;  // wait for DSP output register (tri_ymin_x_stride valid)
+localparam S_TRI_INIT_ATTRIB = 6'd37; // Bbox-origin attribute init (z/s/t at xmin,ymin)
 
 reg [5:0] state;
 
@@ -1096,6 +1097,11 @@ reg signed [31:0] tri_e [0:2];                  // edge function at current pixe
 reg signed [31:0] tri_row_e [0:2];              // edge function at row start
 reg signed [31:0] tri_z, tri_s, tri_t;          // interpolated attribs
 reg signed [31:0] tri_row_z, tri_row_s, tri_row_t;
+// Bbox-origin attribute init (S_TRI_INIT_ATTRIB).  Pre-registered subpixel
+// deltas from v0 to (xmin, ymin) — fed into the rolled DSP schedule.
+reg signed [20:0] delta_x_subpix;
+reg signed [20:0] delta_y_subpix;
+reg [2:0]         init_step;
 
 // Span-emit scan state: captures the inside-triangle extent for the current
 // scanline, then builds one CMD_DRAW_SPAN-equivalent sp_* setup and hands it
@@ -1276,6 +1282,9 @@ always @(posedge clk) begin
         setup_step <= 0;
         grad_idx <= 0;
         grad_sub <= 0;
+        init_step <= 0;
+        delta_x_subpix <= 0;
+        delta_y_subpix <= 0;
         tri_det <= 0;
         tri_recip <= 0;
         tri_clz <= 0;
@@ -2504,11 +2513,88 @@ always @(posedge clk) begin
         // that margin and also let tri_e_init_Apx/Bpy settle fully.
         // ============================================================
         S_TRI_MUL_WAIT: begin
+            // Pre-register subpixel deltas (xmin*16 - v0.x, ymin*16 - v0.y)
+            // for the bbox-origin attribute init that runs in
+            // S_TRI_INIT_ATTRIB.  tri_xmin/tri_ymin are valid here (set at
+            // end of S_TRI_BBOX_CLAMP one cycle ago).  Sign-extending
+            // tri_xmin to 21 bits as positive (it's pixel-space, ≥ 0
+            // post-clamp) and v_x[0] / v_y[0] (12.4 signed subpixel) to 21
+            // bits.  Result range: roughly ±37 870 — well inside 21-bit
+            // signed.
+            delta_x_subpix <= $signed({1'b0, tri_xmin, 4'b0})
+                            - $signed({{5{v_x[0][15]}}, v_x[0]});
+            delta_y_subpix <= $signed({1'b0, tri_ymin, 4'b0})
+                            - $signed({{5{v_y[0][15]}}, v_y[0]});
             state <= S_TRI_MUL_WAIT2;
         end
 
         S_TRI_MUL_WAIT2: begin
-            state <= S_TRI_ROW;
+            state <= S_TRI_INIT_ATTRIB;
+        end
+
+        // ============================================================
+        // Triangle: Bbox-origin attribute init.
+        // ------------------------------------------------------------
+        // Computes tri_row_{z,s,t} at (xmin*16, ymin*16) instead of at v0:
+        //   tri_row_a = v_a[0] + grad_a_dx * delta_x_subpix
+        //                      + grad_a_dy * delta_y_subpix
+        //
+        // Uses dsp / dsp2 in parallel, 3 rounds (z, s, t) × 3 cycles each.
+        // Total 6 effective cycles + 1 commit = 7 cycles per triangle.
+        // Setup-time only — no per-pixel cost.
+        //
+        // Without this stage the row walk starts at v0 and accumulates a
+        // constant error of (xmin - v0.x) * grad_dx + (ymin - v0.y) *
+        // grad_dy across every pixel of the triangle.  Sub-pixel for tight
+        // bboxes; large for clipped/skinny triangles (the tilted-text /
+        // rotated-UI case in SDL2's RenderCopyEx, and the main contributor
+        // to the "warped at angles" report on 3D consumers).
+        // ============================================================
+        S_TRI_INIT_ATTRIB: begin
+            case (init_step)
+                3'd0: begin
+                    // Round 0 — z gradient × deltas, in parallel.
+                    dsp_a  <= grad_z_dx;
+                    dsp_b  <= {{11{delta_x_subpix[20]}}, delta_x_subpix};
+                    dsp2_a <= grad_z_dy;
+                    dsp2_b <= {{11{delta_y_subpix[20]}}, delta_y_subpix};
+                    init_step <= 3'd1;
+                end
+                3'd1: init_step <= 3'd2;  // DSP pipeline delay
+                3'd2: begin
+                    // Capture z + launch s.
+                    tri_row_z <= {v_z[0], 16'b0}
+                               + $signed(dsp_p[31:0])
+                               + $signed(dsp2_p[31:0]);
+                    dsp_a  <= grad_s_dx;
+                    dsp_b  <= {{11{delta_x_subpix[20]}}, delta_x_subpix};
+                    dsp2_a <= grad_s_dy;
+                    dsp2_b <= {{11{delta_y_subpix[20]}}, delta_y_subpix};
+                    init_step <= 3'd3;
+                end
+                3'd3: init_step <= 3'd4;  // DSP pipeline delay
+                3'd4: begin
+                    // Capture s + launch t.
+                    tri_row_s <= {v_s[0], 16'b0}
+                               + $signed(dsp_p[31:0])
+                               + $signed(dsp2_p[31:0]);
+                    dsp_a  <= grad_t_dx;
+                    dsp_b  <= {{11{delta_x_subpix[20]}}, delta_x_subpix};
+                    dsp2_a <= grad_t_dy;
+                    dsp2_b <= {{11{delta_y_subpix[20]}}, delta_y_subpix};
+                    init_step <= 3'd5;
+                end
+                3'd5: init_step <= 3'd6;  // DSP pipeline delay
+                3'd6: begin
+                    // Capture t.  Row 0 init is now complete.
+                    tri_row_t <= {v_t[0], 16'b0}
+                               + $signed(dsp_p[31:0])
+                               + $signed(dsp2_p[31:0]);
+                    init_step <= 3'd0;
+                    state     <= S_TRI_ROW;
+                end
+                default: ;
+            endcase
         end
 
         // ============================================================
@@ -2535,27 +2621,14 @@ always @(posedge clk) begin
             tri_row_e[0] <= tri_e_init_Apx[0] + tri_e_init_Bpy[0] + tri_C[0];
             tri_row_e[1] <= tri_e_init_Apx[1] + tri_e_init_Bpy[1] + tri_C[1];
             tri_row_e[2] <= tri_e_init_Apx[2] + tri_e_init_Bpy[2] + tri_C[2];
-            // KNOWN APPROXIMATION: attributes are initialised at v0 (the
-            // first vertex), not at the actual bbox origin (xmin, ymin).
-            // The CORRECT formula is
-            //     A(xmin,ymin) = A(v0)
-            //                    + (xmin*16 - v0.x) * grad_A_dx
-            //                    + (ymin*16 - v0.y) * grad_A_dy
-            // but evaluating it at setup costs 6 fabric multiplies (one
-            // per z/s/t × dx/dy).  Implementing it properly requires a
-            // dedicated S_TRI_INIT_ATTRIB stage; left as a follow-up
-            // because all current triangle tests (gpu-full: 157/157) pass
-            // with v0 initialisation — the visible error is sub-pixel for
-            // triangles whose bbox tightly bounds their vertices, and
-            // larger for triangles with degenerate / clipped bboxes.
-            // Texture-mapped triangles in Mode 1 of gpudemo should be
-            // inspected closely after enabling this path on hardware.
-            tri_z     <= {v_z[0], 16'b0};
-            tri_s     <= {v_s[0], 16'b0};
-            tri_t     <= {v_t[0], 16'b0};
-            tri_row_z <= {v_z[0], 16'b0};
-            tri_row_s <= {v_s[0], 16'b0};
-            tri_row_t <= {v_t[0], 16'b0};
+            // tri_row_{z,s,t} were already evaluated at the bbox origin
+            // (xmin*16, ymin*16) by S_TRI_INIT_ATTRIB.  Copy into the
+            // current-pixel walk regs; the row regs are preserved so the
+            // per-row Y-step in S_TRI_ROW_NEXT keeps the bbox-origin
+            // anchor as it advances down the triangle.
+            tri_z <= tri_row_z;
+            tri_s <= tri_row_s;
+            tri_t <= tri_row_t;
             // tri_ymin_x_stride is the DSP-registered product from
             // S_TRI_MUL_WAIT (tri_ymin × st_fb_stride).  For the Z-buffer
             // we use the configured st_zb_stride (set via CMD_SET_ZB);
