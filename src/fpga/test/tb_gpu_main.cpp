@@ -1545,6 +1545,57 @@ static void test_triangle_shared_edge() {
     check_byte("shared_left", 2 + 2*320, 0xAA);
     check_byte("shared_right", 7 + 2*320, 0xAA);
 }
+// Phase 4c.2 — perspective pre-multiply state (dormant consumer).
+//
+// Submitting a triangle with non-unit w now routes through
+// S_TRI_PERSP_PREMUL before S_TRI_SETUP.  Until 4c.3 wires v_sw/v_tw
+// into the gradient mux, those regs are unused and the triangle
+// renders affinely.
+//
+// Smoke test: submit a perspective triangle (w = 0x20000) and verify
+// the FSM completes without hanging, AND that some pixel inside the
+// triangle was actually written.  Guards against the new state
+// stalling forward progress.
+static void test_triangle_persp_premul_dormant(void) {
+    printf("TEST: Triangle perspective premul state (4c.2 — dormant)\n");
+
+    gpu_init();
+    { uint8_t cm[256]; for (int i = 0; i < 256; i++) cm[i] = (uint8_t)i;
+      cmap_upload_bytes(0, cm, 256); }
+    ring_cmd(0x23, 2);
+    ring_write(FB_BASE_BYTE);
+    ring_write(320);
+    ring_cmd(0x10, 2);
+    ring_write((1 << 16) | 0x00);
+    ring_write(0);
+    sdram_write(TEX_BASE_BYTE >> 2, 0xDDCCBBAA);
+    ring_bind_texture(TEX_BASE_BYTE, 1, 1);
+
+    auto write_v = [&](int16_t x, int16_t y, int32_t s, int32_t t, int32_t w) {
+        ring_write(((uint32_t)(uint16_t)x << 16) | (uint16_t)y);
+        ring_write(0);                 // z
+        ring_write((uint32_t)s);
+        ring_write((uint32_t)t);
+        ring_write((uint32_t)w);
+        ring_write(0);                 // r
+    };
+
+    // CCW triangle with non-unit w → premul state runs.  1×1 texture
+    // is constant 0xAA so any inside pixel must read 0xAA.
+    ring_cmd(0x30, 19);
+    ring_write(3);
+    write_v(8*16, 0,    0, 0, 0x00020000);
+    write_v(0,    8*16, 0, 0, 0x00020000);
+    write_v(0,    0,    0, 0, 0x00020000);
+
+    bool ok = gpu_finish();
+    check("tri_premul_persp_done", ok ? 1 : 0, 1);
+
+    // Pixel (1, 1) is firmly inside; with the affine path still being
+    // the live one, it must have been written from the 1×1 texture.
+    check_byte("tri_premul_persp_pixel_written", 1 + 1 * 320, 0xAA);
+}
+
 // Phase 4a — bbox-origin attribute init.
 //
 // Triangle setup currently initialises tri_row_z/s/t at v0 instead of at the
@@ -2115,6 +2166,7 @@ int main(int argc, char **argv) {
     test_triangle_vertex_color();
     test_triangle_shared_edge();
     test_triangle_bbox_init();
+    test_triangle_persp_premul_dormant();
     test_triangle_skip_zero();
     test_triangle_back_to_back_many();
     test_triangle_tex_flush_swap();

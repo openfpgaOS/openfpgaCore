@@ -666,6 +666,7 @@ localparam S_TRI_MUL_WAIT  = 6'd34;  // wait for DSP input-register stage (+1 cy
 localparam S_TRI_BBOX_CLAMP = 6'd35; // Clamp raw min/max to screen bounds
 localparam S_TRI_MUL_WAIT2 = 6'd36;  // wait for DSP output register (tri_ymin_x_stride valid)
 localparam S_TRI_INIT_ATTRIB = 6'd37; // Bbox-origin attribute init (z/s/t at xmin,ymin)
+localparam S_TRI_PERSP_PREMUL = 6'd38; // (Phase 4c.2) Pre-multiply v_s × v_w, v_t × v_w
 
 reg [5:0] state;
 
@@ -1089,6 +1090,27 @@ reg        [7:0]  v_r [0:2];                    // light / vertex color
 // the only live one.
 reg signed [31:0] v_w [0:2];
 
+// Phase 4c.2 — pre-multiplied texture coords for perspective.
+// v_sw[i] = v_s[i] × v_w[i] in Q16.16, computed in S_TRI_PERSP_PREMUL
+// before S_TRI_SETUP runs.  Linear-interpolating these in screen
+// space (instead of the raw v_s/v_t) is what makes texture sampling
+// perspective-correct: the SPAN_PERSP path then divides them back by
+// interpolated w in the fragment stage.  Affine triangles (all v_w ==
+// 0x10000) skip premul entirely — these regs go untouched.  Consumers
+// (gradient loop, span emit) light up in 4c.3.
+reg signed [31:0] v_sw [0:2];
+reg signed [31:0] v_tw [0:2];
+
+// Combinational: any vertex with non-unit w trips perspective.
+// 0x00010000 == 1.0 in Q16.16 == affine.
+wire tri_persp_active = (v_w[0] != 32'h00010000)
+                      || (v_w[1] != 32'h00010000)
+                      || (v_w[2] != 32'h00010000);
+
+// Pre-multiply round counter for S_TRI_PERSP_PREMUL.  3-bit because
+// each round is launch + wait + capture (matches S_TRI_INIT_ATTRIB).
+reg [2:0] premul_step;
+
 // Edge equation coefficients: E_i(x,y) = A_i*x + B_i*y + C_i
 reg signed [31:0] tri_A [0:2], tri_B [0:2], tri_C [0:2];
 
@@ -1300,6 +1322,7 @@ always @(posedge clk) begin
         init_step <= 0;
         delta_x_subpix <= 0;
         delta_y_subpix <= 0;
+        premul_step <= 0;
         tri_det <= 0;
         tri_recip <= 0;
         tri_clz <= 0;
@@ -2262,7 +2285,71 @@ always @(posedge clk) begin
         // S_TRI_SETUP; callers still dispatch here from S_EXECUTE.
         S_TRI_LOAD: begin
             setup_step <= 0;
-            state <= S_TRI_SETUP;
+            premul_step <= 0;
+            // When any vertex has non-unit w, run the pre-multiply pass
+            // first to populate v_sw/v_tw (consumed in 4c.3 by the
+            // gradient loop).  Affine triangles skip directly to
+            // S_TRI_SETUP — zero overhead on the common path.
+            state <= tri_persp_active ? S_TRI_PERSP_PREMUL : S_TRI_SETUP;
+        end
+
+        // ============================================================
+        // Triangle: Pre-multiply v_s × v_w, v_t × v_w  (Phase 4c.2)
+        // ------------------------------------------------------------
+        // 3 rounds × 3 cycles + 1 commit = 7 cycles.  dsp does s × w,
+        // dsp2 does t × w in parallel, one vertex per round.  Sliced
+        // as bits [47:16] of the 64-bit product so v_sw / v_tw are
+        // Q16.16 — same fixed-point scale as v_w itself, ready for
+        // the linear-gradient computation in S_TRI_GRAD (when 4c.3
+        // wires the mux).
+        //
+        // Pattern matches S_TRI_INIT_ATTRIB: launch on even step,
+        // wait on odd step, capture on the next even step (which also
+        // launches the next round).  2-cycle DSP pipeline: load at
+        // end of step N → valid at start of step N+2.
+        // ============================================================
+        S_TRI_PERSP_PREMUL: begin
+            case (premul_step)
+                3'd0: begin
+                    // Launch v0
+                    dsp_a  <= {{16{v_s[0][15]}}, v_s[0]};
+                    dsp_b  <= v_w[0];
+                    dsp2_a <= {{16{v_t[0][15]}}, v_t[0]};
+                    dsp2_b <= v_w[0];
+                    premul_step <= 3'd1;
+                end
+                3'd1: premul_step <= 3'd2;  // DSP pipeline delay
+                3'd2: begin
+                    // Capture v0; launch v1
+                    v_sw[0] <= dsp_p [47:16];
+                    v_tw[0] <= dsp2_p[47:16];
+                    dsp_a   <= {{16{v_s[1][15]}}, v_s[1]};
+                    dsp_b   <= v_w[1];
+                    dsp2_a  <= {{16{v_t[1][15]}}, v_t[1]};
+                    dsp2_b  <= v_w[1];
+                    premul_step <= 3'd3;
+                end
+                3'd3: premul_step <= 3'd4;  // DSP pipeline delay
+                3'd4: begin
+                    // Capture v1; launch v2
+                    v_sw[1] <= dsp_p [47:16];
+                    v_tw[1] <= dsp2_p[47:16];
+                    dsp_a   <= {{16{v_s[2][15]}}, v_s[2]};
+                    dsp_b   <= v_w[2];
+                    dsp2_a  <= {{16{v_t[2][15]}}, v_t[2]};
+                    dsp2_b  <= v_w[2];
+                    premul_step <= 3'd5;
+                end
+                3'd5: premul_step <= 3'd6;  // DSP pipeline delay
+                3'd6: begin
+                    // Capture v2; hand off to setup
+                    v_sw[2] <= dsp_p [47:16];
+                    v_tw[2] <= dsp2_p[47:16];
+                    premul_step <= 3'd0;
+                    state <= S_TRI_SETUP;
+                end
+                default: ;
+            endcase
         end
 
         // ============================================================
