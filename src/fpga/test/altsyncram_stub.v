@@ -3,9 +3,16 @@
 // BIDIR_DUAL_PORT (dual-clock) modes — enough for facade and
 // axi_periph_slave testbenches under Verilator.
 //
-// SINGLE_PORT: address-in → 1-cycle-delayed q_a, byte-enable writes.
-// BIDIR_DUAL_PORT: same on each port, with combinational q_a/q_b
-//   when outdata_reg_a/b == "UNREGISTERED" (matches Cyclone V M10K).
+// Cyclone V M10K timing model:
+//   The address is ALWAYS clocked (synchronous read), regardless of
+//   outdata_reg_*.  outdata_reg_a/b only controls the optional
+//   *output* pipeline register stage.
+//     UNREGISTERED → 1 cycle latency  (addr-reg → mem-read → q)
+//     REGISTERED   → 2 cycle latency  (addr-reg → mem-read → out-reg → q)
+//   Earlier versions of this stub returned `mem[address]` combinationally
+//   for UNREGISTERED mode, modelling 0-cycle reads — which doesn't match
+//   real hardware and causes consumers (like axi_periph_slave's burst
+//   pre-fetch) to read off-by-one in simulation while working on HW.
 //
 
 `default_nettype none
@@ -82,9 +89,13 @@ module altsyncram #(
 
 reg [width_a-1:0] mem [0:numwords_a-1] /*verilator public_flat_rw*/;
 
-// Registered shadow values for outdata_reg_*="REGISTERED" mode.
-reg [width_a-1:0] q_a_reg;
+// Stage-1 (address-register-clocked) and stage-2 (output-register-clocked)
+// shadow values.  Real M10K always has stage-1; stage-2 is controlled by
+// outdata_reg_*.
+reg [width_a-1:0] q_a_reg;      // post-stage-1 (1 cycle after addr)
 reg [width_b-1:0] q_b_reg;
+reg [width_a-1:0] q_a_reg2;     // post-stage-2 (only used when REGISTERED)
+reg [width_b-1:0] q_b_reg2;
 
 integer i;
 initial begin
@@ -92,8 +103,10 @@ initial begin
         mem[i] = 32'h00000013;  // NOP pattern (works as a default for
                                 // periph; facade overwrites before
                                 // reading, so init value is don't-care).
-    q_a_reg = {width_a{1'b0}};
-    q_b_reg = {width_b{1'b0}};
+    q_a_reg  = {width_a{1'b0}};
+    q_b_reg  = {width_b{1'b0}};
+    q_a_reg2 = {width_a{1'b0}};
+    q_b_reg2 = {width_b{1'b0}};
 end
 
 // Port A — clock0.  Writes always synchronous; q_a output may be
@@ -113,7 +126,8 @@ always @(posedge clock0) begin
             if (width_byteena_a > 3 && byteena_a[3])   mem[address_a][31:24] <= data_a[31:24];
         end
     end
-    q_a_reg <= mem[address_a];
+    q_a_reg  <= mem[address_a];
+    q_a_reg2 <= q_a_reg;
 end
 
 // Port B — clock1.  In DUAL_PORT mode port-A is write-only (no q_a) and
@@ -129,13 +143,17 @@ always @(posedge clock1) begin
             if (width_byteena_b > 3 && byteena_b[3])   mem[address_b][31:24] <= data_b[31:24];
         end
     end
-    if (operation_mode == "BIDIR_DUAL_PORT" || operation_mode == "DUAL_PORT")
-        q_b_reg <= mem[address_b];
+    if (operation_mode == "BIDIR_DUAL_PORT" || operation_mode == "DUAL_PORT") begin
+        q_b_reg  <= mem[address_b];
+        q_b_reg2 <= q_b_reg;
+    end
 end
 
-// Output mux: combinational vs registered per the parameter.
-assign q_a = (outdata_reg_a == "UNREGISTERED") ? mem[address_a] : q_a_reg;
-assign q_b = (outdata_reg_b == "UNREGISTERED") ? mem[address_b] : q_b_reg;
+// Output mux: 1-cycle (UNREGISTERED) vs 2-cycle (REGISTERED) latency.
+// Real M10K always has the address register; outdata_reg_* only adds
+// the optional pipeline register on top of that.
+assign q_a = (outdata_reg_a == "UNREGISTERED") ? q_a_reg : q_a_reg2;
+assign q_b = (outdata_reg_b == "UNREGISTERED") ? q_b_reg : q_b_reg2;
 
 assign eccstatus = 1'b0;
 

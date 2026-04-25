@@ -2,10 +2,7 @@
 #
 # `make all` (the default `make test` entry point) runs every test that
 # currently passes:
-#   sdram, sram, gpu (lite + full), audio
-#
-# Build-only / known-failing harnesses kept around for debugging:
-#   axi-periph    builds; cacheline-burst tests fail (off-by-one)
+#   sdram, sram, gpu, axi-periph, audio
 #
 # v2 memory-arch: cram1 and cram1-burst-mmio tests retired with the
 # chip; cram1_controller.v / cram1_phy.sv / axi_cram1_slave.v /
@@ -74,8 +71,9 @@ GPU_TOP = tb_gpu
 GPU_DIR = obj_dir_gpu
 
 # ============================================================
-# AXI periph (build-only — cacheline burst returns +1 off-by-one)
-# Uses altsyncram_stub.v in place of the Cyclone V altsyncram primitive.
+# AXI periph slave — BRAM read bursts, peripheral reads/writes, GPU MMIO
+# write hammer. Uses altsyncram_stub.v in place of the Cyclone V
+# altsyncram primitive (1-cycle latency, matching M10K).
 # ============================================================
 AXI_PERIPH_SRCS = \
 	tb_axi_periph.v \
@@ -137,9 +135,7 @@ SYSTEM_FLAGS = -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC -Wno-CASEINCOMPLETE \
 .PHONY: all sdram sram gpu axi-periph \
         audio system run run-sram build clean
 
-# `all` runs every passing test. Build-only debug harnesses
-# (axi-periph) are intentionally excluded.
-all: sdram sram gpu audio
+all: sdram sram gpu axi-periph audio
 
 # --- SDRAM ---
 sdram: $(SDRAM_DIR)/V$(SDRAM_TOP)
@@ -181,10 +177,10 @@ $(GPU_DIR)/V$(GPU_TOP): $(GPU_SRCS) $(GPU_CPP)
 		-I$(COMMON_DIR) \
 		$(GPU_SRCS) $(GPU_CPP)
 
-# --- AXI periph (build-only debug; tests currently fail) ---
+# --- AXI periph slave ---
 axi-periph: $(AXI_PERIPH_DIR)/V$(AXI_PERIPH_TOP)
-	@printf "\n=== AXI periph (debug — known failures) ===\n"
-	./$(AXI_PERIPH_DIR)/V$(AXI_PERIPH_TOP) || true
+	@printf "\n=== AXI periph slave ===\n"
+	./$(AXI_PERIPH_DIR)/V$(AXI_PERIPH_TOP)
 
 $(AXI_PERIPH_DIR)/V$(AXI_PERIPH_TOP): $(AXI_PERIPH_SRCS) $(AXI_PERIPH_CPP)
 	$(VERILATOR) $(VERILATOR_FLAGS) $(AXI_PERIPH_FLAGS) \

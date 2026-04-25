@@ -86,16 +86,25 @@ module altsyncram #(
 
 reg [width_a-1:0] mem [0:numwords_a-1] /*verilator public_flat_rw*/;
 
-// Registered shadow for outdata_reg_*="REGISTERED" mode.
+// Stage-1 (address-clocked) and stage-2 (output-clocked) shadows.  Real
+// Cyclone V M10K always has stage-1.  outdata_reg_* selects whether the
+// optional stage-2 register is enabled.  Earlier versions returned
+// `mem[address]` combinationally for UNREGISTERED — that's 0-cycle
+// latency and doesn't match silicon (which is 1-cycle even when the
+// output reg is bypassed).
 reg [width_a-1:0] q_a_reg;
 reg [width_b-1:0] q_b_reg;
+reg [width_a-1:0] q_a_reg2;
+reg [width_b-1:0] q_b_reg2;
 
 integer i;
 initial begin
     for (i = 0; i < numwords_a; i = i + 1)
         mem[i] = 32'h00000013;  // NOP pattern
-    q_a_reg = {width_a{1'b0}};
-    q_b_reg = {width_b{1'b0}};
+    q_a_reg  = {width_a{1'b0}};
+    q_b_reg  = {width_b{1'b0}};
+    q_a_reg2 = {width_a{1'b0}};
+    q_b_reg2 = {width_b{1'b0}};
     // tb_system_main.cpp preloads BRAM via the public_flat_rw mem[]
     // backdoor after parsing firmware.mif, so no $readmemh is needed
     // here.  Leaving it out keeps the module usable when the harness
@@ -117,7 +126,8 @@ always @(posedge clock0) begin
             if (width_byteena_a > 3 && byteena_a[3])   mem[address_a][31:24] <= data_a[31:24];
         end
     end
-    q_a_reg <= mem[address_a];
+    q_a_reg  <= mem[address_a];
+    q_a_reg2 <= q_a_reg;
 end
 
 always @(posedge clock1) begin
@@ -131,12 +141,17 @@ always @(posedge clock1) begin
             if (width_byteena_b > 3 && byteena_b[3])   mem[address_b][31:24] <= data_b[31:24];
         end
     end
-    if (operation_mode == "BIDIR_DUAL_PORT" || operation_mode == "DUAL_PORT")
-        q_b_reg <= mem[address_b];
+    if (operation_mode == "BIDIR_DUAL_PORT" || operation_mode == "DUAL_PORT") begin
+        q_b_reg  <= mem[address_b];
+        q_b_reg2 <= q_b_reg;
+    end
 end
 
-assign q_a = (outdata_reg_a == "UNREGISTERED") ? mem[address_a] : q_a_reg;
-assign q_b = (outdata_reg_b == "UNREGISTERED") ? mem[address_b] : q_b_reg;
+// 1-cycle (UNREGISTERED) vs 2-cycle (REGISTERED) latency.  Address is
+// always clocked on real M10K; outdata_reg_* only adds the optional
+// pipeline register.
+assign q_a = (outdata_reg_a == "UNREGISTERED") ? q_a_reg : q_a_reg2;
+assign q_b = (outdata_reg_b == "UNREGISTERED") ? q_b_reg : q_b_reg2;
 
 assign eccstatus = 1'b0;
 
