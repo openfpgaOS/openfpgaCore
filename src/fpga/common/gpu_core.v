@@ -1672,7 +1672,23 @@ always @(posedge clk) begin
 
             if (pay_remaining <= 24'd1) begin
                 state <= S_EXECUTE;
-            end else begin
+            end
+`ifdef GPU_FEAT_TRIANGLE
+            // Multi-triangle batch: end of this triangle's 18 vertex
+            // words (pay_idx=18 captured v_r[2]) and pay_remaining > 1
+            // means more triangles follow.  Kick this triangle now and
+            // hold ring_rdptr at the next triangle's v0 word 0 — BRAM
+            // re-reads that same address every cycle the FSM sits on
+            // it, so the value is primed for the re-entry at pay_idx=1
+            // (which is timed to read it via the standard 1-cycle BRAM
+            // latency: each "triangle-done mid-batch" exit advances
+            // ring_rdptr by 4 to consume v0_word_0 on the same posedge
+            // as the state transition back to S_PAY_DATA).
+            else if (cmd_is_draw_triangles && pay_idx == 5'd18) begin
+                state <= S_EXECUTE;
+            end
+`endif
+            else begin
                 // Advance rdptr for next word (BRAM read, 1-cycle latency)
                 ring_rdptr <= (ring_rdptr + 16'd4) & ring_mask;
             end
@@ -2215,6 +2231,7 @@ always @(posedge clk) begin
                     reg signed [31:0] t_end;
                     s_end = dsp_p[47:16];
                     t_end = dsp2_p[47:16];
+                    // (debug $display removed)
                     case (persp_pass)
                         PSS_PASS_ANCHOR: begin
                             // Pass 1: just store the anchor at pos 0.
@@ -2587,8 +2604,20 @@ always @(posedge clk) begin
             7: begin
                 // Check determinant: skip degenerate (uses registered compare)
                 if (tri_det_is_small_r) begin
-                    state <= S_IDLE;
                     setup_step <= 0;
+                    if (pay_remaining != 24'd0) begin
+                        // Mid-batch: advance ring_rdptr (consumes
+                        // v0_word_0 of next triangle on this posedge,
+                        // primes ring_rd_data for pay_idx=1) and jump
+                        // back to vertex-load.
+                        ring_rdptr <= (ring_rdptr + 16'd4) & ring_mask;
+                        pay_idx    <= 5'd1;
+                        state      <= S_PAY_DATA;
+                    end else begin
+                        // Last triangle in batch — flush any coalesced
+                        // pixels accumulated by earlier triangles.
+                        state <= S_FB_FLUSH;
+                    end
                 end else begin
                     tri_det_sign <= tri_det[31];
                     // If det < 0: negate all edges (ensure CCW winding)
@@ -2722,7 +2751,22 @@ always @(posedge clk) begin
                     // sign mux into grad_sub_r so next cycle's dsp_a load
                     // is just a reg-to-reg copy, not a 32-bit adder cone
                     // feeding the DSP input pin.
-                    grad_sub_r <= grad_idx[0]
+                    //
+                    // Sign correction for negative-det triangles: tri_A/B/C
+                    // were negated in S_TRI_SETUP step 7 to canonicalise the
+                    // edge equations to "inside iff e_i >= 0", but the dY/dX
+                    // operands feeding this DSP and v_sw / v_tw / v_z / v_r
+                    // are NOT negated.  The standard cross-product formula
+                    // therefore yields a result of the *original* signed-det
+                    // sign, which we then divide by the post-negation +|det|
+                    // (via tri_recip).  Result: the gradient is sign-inverted
+                    // for CW-winding triangles.  Symptom: half of Quake's
+                    // alias-model triangles render with mirrored textures
+                    // (and the corresponding row/column walks in the wrong
+                    // direction), since back-facing tris cross-product
+                    // negative.  Fix: XOR grad_idx[0] with tri_det_sign so
+                    // the subtract direction reverses when det was negative.
+                    grad_sub_r <= (grad_idx[0] ^ tri_det_sign)
                                 ? ($signed(dsp2_p[31:0]) - $signed(dsp_p[31:0]))
                                 : ($signed(dsp_p[31:0])  - $signed(dsp2_p[31:0]));
                 end
@@ -2739,15 +2783,23 @@ always @(posedge clk) begin
                     dsp_p_shifted <= dsp_p >>> (6'd29 - tri_clz);
                 end
                 3'd6: begin
+                    // Perspective Q-format fix.  v_sw / v_tw are Q16.16
+                    // (they include the Q16.16 v_w factor), whereas
+                    // affine v_s / v_t are Q16.0 sign-extended.  The
+                    // same shift constant therefore lands the perspective
+                    // gradient 2^16 too big — sp_sZ then overflows the
+                    // 32-bit register on the 8-pixel PSS_ADV and inverts
+                    // sign.  Shift perspective gradients down 16 bits.
+                    // w gradients are perspective-only by design.
                     case (grad_idx)
                         4'd0: grad_z_dx <= dsp_p_shifted;
                         4'd1: grad_z_dy <= dsp_p_shifted;
-                        4'd2: grad_s_dx <= dsp_p_shifted;
-                        4'd3: grad_s_dy <= dsp_p_shifted;
-                        4'd4: grad_t_dx <= dsp_p_shifted;
-                        4'd5: grad_t_dy <= dsp_p_shifted;
-                        4'd6: grad_w_dx <= dsp_p_shifted;
-                        4'd7: grad_w_dy <= dsp_p_shifted;
+                        4'd2: grad_s_dx <= tri_persp_active ? (dsp_p_shifted >>> 16) : dsp_p_shifted;
+                        4'd3: grad_s_dy <= tri_persp_active ? (dsp_p_shifted >>> 16) : dsp_p_shifted;
+                        4'd4: grad_t_dx <= tri_persp_active ? (dsp_p_shifted >>> 16) : dsp_p_shifted;
+                        4'd5: grad_t_dy <= tri_persp_active ? (dsp_p_shifted >>> 16) : dsp_p_shifted;
+                        4'd6: grad_w_dx <= dsp_p_shifted >>> 16;
+                        4'd7: grad_w_dy <= dsp_p_shifted >>> 16;
                         // Phase 4d — Gouraud r gradients (always
                         // computed; light walks per-pixel in the
                         // fragment pipe).
@@ -2954,7 +3006,16 @@ always @(posedge clk) begin
         S_TRI_ROW: begin
             // Check for empty bbox (using registered values from S_TRI_BBOX)
             if (tri_xmin > tri_xmax || tri_ymin > tri_ymax) begin
-                state <= S_IDLE;
+                if (pay_remaining != 24'd0) begin
+                    // Mid-batch: advance ring_rdptr (primes v0_word_0
+                    // for pay_idx=1) and jump back to vertex-load.
+                    ring_rdptr <= (ring_rdptr + 16'd4) & ring_mask;
+                    pay_idx    <= 5'd1;
+                    state      <= S_PAY_DATA;
+                end else begin
+                    // Last triangle in batch — flush coalesced pixels.
+                    state <= S_FB_FLUSH;
+                end
             end else begin
 `ifdef GPU_STATS
             stat_triangles <= stat_triangles + 32'd1;
@@ -3032,6 +3093,17 @@ always @(posedge clk) begin
                                    | (tri_persp_active ? 8'h20 : 8'h00);
                     sp_fb_stride <= 16'd1;
                     sp_tex_width <= st_tex_width;
+                    // Triangles use the bound texture's full extent — they
+                    // are NOT POT-wrap candidates the way BUILD-style spans
+                    // are.  Reset masks to no-wrap (0xFFFF) so a previous
+                    // CMD_DRAW_SPAN that set wrap masks doesn't bleed into
+                    // a subsequent DRAW_TRIANGLES (e.g. world span POT
+                    // mask = 63 inherited by an alias-skin triangle would
+                    // clip the 200-wide skin to 64 columns and produce
+                    // garbage).  Per-triangle masks would require a new
+                    // SET_TEXTURE field; for now fix the bleed.
+                    sp_tex_w_mask <= 16'hFFFF;
+                    sp_tex_h_mask <= 16'hFFFF;
                     sp_z_addr    <= tri_zb_row_addr + {tri_span_x_start, 1'b0};
                     sp_zi        <= tri_span_z_start;
                     sp_zistep    <= grad_z_dx <<< 4;
@@ -3064,7 +3136,18 @@ always @(posedge clk) begin
                         persp_seg_a_ready <= 0;
                         persp_seg_b_ready <= 0;
                         persp_first_done  <= 0;
-                        persp_pss         <= PSS_RECIP_NA;  // ANCHOR_ONLY entry
+                        // ANCHOR_ONLY entry: kick PSS_RECIP_NA pipeline.
+                        // Must also reset persp_pass to PASS_ANCHOR — left
+                        // stale at PASS_TO_B from the last iteration of the
+                        // previous row's PSS, the first PSS_FINAL of the new
+                        // row would otherwise execute the PASS_TO_B writeback
+                        // and pre-arm persp_seg_b_ready=1 with garbage
+                        // persp_pend_s (= the prior row's anchor).  Segment 2
+                        // of every row after the first then swapped that stale
+                        // value into sp_s — visible as a 50%+ pixel mismatch
+                        // jump at the second 8-pixel boundary.
+                        persp_pss         <= PSS_RECIP_NA;
+                        persp_pass        <= PSS_PASS_ANCHOR;
                         sp_seg_left       <= 0;
                     end else begin
                         persp_active      <= 0;
@@ -3125,9 +3208,21 @@ always @(posedge clk) begin
         // ============================================================
         S_TRI_ROW_NEXT: begin
             if (tri_cur_y >= tri_ymax) begin
-                // Triangle done — clear tri_active and flush fb_acc.
+                // Triangle done — clear tri_active.
                 tri_active <= 0;
-                state      <= S_FB_FLUSH;
+                if (pay_remaining != 24'd0) begin
+                    // Mid-batch: more triangles follow.  Advance
+                    // ring_rdptr (primes v0_word_0 for pay_idx=1) and
+                    // jump back to vertex-load.  Skip the FB flush so
+                    // fb_acc keeps coalescing across triangles that
+                    // touch the same FB word; word-change writes flush
+                    // mid-stream as before.
+                    ring_rdptr <= (ring_rdptr + 16'd4) & ring_mask;
+                    pay_idx    <= 5'd1;
+                    state      <= S_PAY_DATA;
+                end else begin
+                    state <= S_FB_FLUSH;
+                end
             end else begin
                 tri_cur_y <= tri_cur_y + 16'd1;
                 tri_cur_x <= tri_xmin;

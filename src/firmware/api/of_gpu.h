@@ -454,9 +454,38 @@ static inline void _gpu_write_vertex(const of_gpu_vertex_t *v) {
  * Draw triangles from a vertex array.
  * @param verts        Every 3 consecutive vertices form one triangle.
  * @param num_vertices Number of vertices (must be a multiple of 3).
+ *
+ * Emits one CMD_DRAW_TRIANGLES per triangle (1 count word + 3 verts ×
+ * 6 words = 19 payload words each).  Suitable when the surrounding
+ * GPU state changes between triangles (e.g. per-triangle texture).
  */
 static inline void of_gpu_draw_triangles(const of_gpu_vertex_t *verts,
                                           uint32_t num_vertices) {
+    for (uint32_t i = 0; i < num_vertices; i += 3) {
+        _gpu_cmd_header(GPU_CMD_DRAW_TRIANGLES, 19);
+        _gpu_ring_write(3);
+        _gpu_write_vertex(&verts[i + 0]);
+        _gpu_write_vertex(&verts[i + 1]);
+        _gpu_write_vertex(&verts[i + 2]);
+    }
+}
+
+/*
+ * Draw N triangles in a single batched DRAW_TRIANGLES command.
+ *
+ * Payload layout: 1 count word + N × 18 vertex words (6 per vertex).
+ * The GPU FSM renders each triangle as it streams in and re-enters the
+ * payload loop for the next one, so the only difference from the
+ * per-triangle helper above is one cmd_header + cmd_decode pass per
+ * batch instead of per triangle.
+ *
+ * Constraint: every triangle in the batch shares the currently bound
+ * texture and other GPU state.  Group triangles by state and submit
+ * each group as one batch to amortise the command overhead.
+ */
+static inline void of_gpu_draw_triangles_batch(const of_gpu_vertex_t *verts,
+                                                uint32_t num_vertices) {
+    if (num_vertices < 3 || (num_vertices % 3) != 0) return;
     _gpu_cmd_header(GPU_CMD_DRAW_TRIANGLES, 1 + num_vertices * 6);
     _gpu_ring_write(num_vertices);
     for (uint32_t i = 0; i < num_vertices; i++)
