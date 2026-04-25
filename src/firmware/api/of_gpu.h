@@ -174,6 +174,10 @@ static uint32_t _gpu_base;
 #define GPU_CMD_NOP             0x01
 #define GPU_CMD_FENCE           0x02
 #define GPU_CMD_CLEAR           0x10
+#define GPU_CMD_CLEAR_RECT      0x11  /* 3-word payload: start byte addr,
+                                       * {w,h}, {pad,color}. Color's low
+                                       * byte is replicated 4× per FB
+                                       * word, matching CMD_CLEAR. */
 #define GPU_CMD_SET_TEXTURE     0x20
 #define GPU_CMD_SET_DEPTH_FUNC  0x21
 #define GPU_CMD_SET_FB          0x23
@@ -459,6 +463,24 @@ static inline void of_gpu_clear(uint32_t flags, uint16_t color, uint16_t depth) 
     _gpu_cmd_header(GPU_CMD_CLEAR, 2);
     _gpu_ring_write((flags << 16) | color);
     _gpu_ring_write((uint32_t)depth);
+}
+
+/* Clear a rectangular region of the framebuffer to a constant color.
+ * Caller computes the start byte address (fb_base + y*stride + x); the
+ * GPU walks `h` rows × `w` bytes from there, advancing each row by the
+ * active st_fb_stride.  Color's low byte is replicated 4× per FB word
+ * (matches CMD_CLEAR's shape).  Word-aligned full-width strips
+ * (letterbox / status bar) hit the 4-byte fast path; arbitrary x/w
+ * paths byte-strobe the partial-word edges.  Used to retire the last
+ * per-frame CPU memset(frameplace, …) categories — see
+ * project_gpu_owns_framebuffer.md. */
+static inline void of_gpu_clear_rect(uint32_t start_byte_addr,
+                                      uint16_t w, uint16_t h,
+                                      uint8_t color) {
+    _gpu_cmd_header(GPU_CMD_CLEAR_RECT, 3);
+    _gpu_ring_write(start_byte_addr);
+    _gpu_ring_write(((uint32_t)w << 16) | (uint32_t)h);
+    _gpu_ring_write((uint32_t)color);
 }
 
 /*

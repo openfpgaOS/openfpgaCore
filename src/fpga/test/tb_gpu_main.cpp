@@ -285,6 +285,71 @@ static void test_clear_fb() {
     check_byte("clear_px_last", 63999, 0x42);
 }
 
+// Test 2b: CMD_CLEAR_RECT — partial-rect clear in three flavors:
+//   (1) word-aligned full-width strip (letterbox), 4-byte fast path.
+//   (2) byte-strobed partial-width rect (status-bar-ish), exercises
+//       the strobe mask on both edges.
+//   (3) single pixel (1×1).
+// FB pre-cleared to a sentinel; verify rect bytes = color, and a
+// representative sample of out-of-rect bytes still equal the sentinel.
+static void test_clear_rect(void) {
+    printf("TEST: CMD_CLEAR_RECT — letterbox + partial-width + 1×1\n");
+    gpu_init();
+    ring_cmd(0x23, 2); ring_write(FB_BASE_BYTE); ring_write(320);
+
+    // Pre-fill FB with a sentinel.
+    ring_cmd(0x10, 2); ring_write((1 << 16) | 0xAA); ring_write(0);
+
+    // (1) Letterbox strip: rows 5..14 (10 rows × 320 = 3200 bytes), x=0,
+    //     w=320, color=0x42.  Word-aligned start, word-multiple width.
+    ring_cmd(0x11, 3);                            // CMD_CLEAR_RECT
+    ring_write(FB_BASE_BYTE + 5 * 320);            // start = row 5, x = 0
+    ring_write((320u << 16) | 10u);                // {w, h}
+    ring_write(0x00000042u);                       // color = 0x42
+
+    // (2) Partial-width rect: rows 50..52 (3 rows), x=3 .. x=12 (10 bytes),
+    //     color=0x33.  Tests both leading-byte strobe (lane=3, 1 byte to
+    //     end of word 0) and trailing-byte strobe (3 bytes of word 4).
+    ring_cmd(0x11, 3);
+    ring_write(FB_BASE_BYTE + 50 * 320 + 3);       // start = row 50, x = 3
+    ring_write((10u << 16) | 3u);                  // {w=10, h=3}
+    ring_write(0x00000033u);                       // color = 0x33
+
+    // (3) Single pixel: row 100, x=200, w=1, h=1, color=0x77.
+    ring_cmd(0x11, 3);
+    ring_write(FB_BASE_BYTE + 100 * 320 + 200);
+    ring_write((1u << 16) | 1u);
+    ring_write(0x00000077u);
+
+    bool ok = gpu_finish();
+    check("clear_rect_done", ok ? 1 : 0, 1);
+
+    // Letterbox spot-checks: top row of rect, bottom row, middle.
+    check_byte("rect1_r5_x0",   5*320 + 0,     0x42);
+    check_byte("rect1_r5_x319", 5*320 + 319,   0x42);
+    check_byte("rect1_r9_x100", 9*320 + 100,   0x42);
+    check_byte("rect1_r14_x0",  14*320 + 0,    0x42);
+    check_byte("rect1_r14_x319",14*320 + 319,  0x42);
+    // Just outside letterbox.
+    check_byte("rect1_r4_x0",   4*320 + 0,     0xAA);
+    check_byte("rect1_r15_x0",  15*320 + 0,    0xAA);
+
+    // Partial-width spot-checks: x=3..12 should be 0x33, x=2 and x=13 not.
+    for (int dx = 3; dx <= 12; dx++)
+        check_byte("rect2_inside", 50*320 + dx, 0x33);
+    check_byte("rect2_r50_x2",   50*320 + 2,   0xAA);
+    check_byte("rect2_r50_x13",  50*320 + 13,  0xAA);
+    check_byte("rect2_r52_x12",  52*320 + 12,  0x33);
+    check_byte("rect2_r53_x5",   53*320 + 5,   0xAA);  // just below
+
+    // Single-pixel rect.
+    check_byte("rect3_pixel",     100*320 + 200, 0x77);
+    check_byte("rect3_left",      100*320 + 199, 0xAA);
+    check_byte("rect3_right",     100*320 + 201, 0xAA);
+    check_byte("rect3_above",      99*320 + 200, 0xAA);
+    check_byte("rect3_below",     101*320 + 200, 0xAA);
+}
+
 // Test 3: Simple untextured span (solid color via identity colormap)
 static void test_solid_span() {
     printf("TEST: Solid-color span (identity colormap)\n");
@@ -4140,6 +4205,7 @@ int main(int argc, char **argv) {
     if (trace) { trace->close(); delete trace; trace = nullptr; }
     test_set_fb_only();
     test_clear_fb();
+    test_clear_rect();
     test_solid_span();
     test_textured_span();
     test_colormap_lighting();

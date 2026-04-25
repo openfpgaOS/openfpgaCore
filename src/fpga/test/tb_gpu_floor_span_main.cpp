@@ -135,15 +135,19 @@ static void hlineasm4_ref(int numPixels, int /*shade*/,
 // =====================================================================
 // Setup helpers
 // =====================================================================
-// Identity colormap — 256 bytes uploaded to cmap row 0 via MMIO.
+// Identity colormap — 256 bytes preloaded into SDRAM at the slot-0
+// palookup base.  The on-chip cmap_bram was retired; the GPU now reads
+// palookup bytes through gpu_tex_cache port B, so tests preload the
+// table directly via the SDRAM backdoor.  PALOOKUP_BASE_BYTE matches
+// gpu_core.v's PALOOKUP_BASE localparam (= 0x100000).
+static const uint32_t PALOOKUP_BASE_BYTE = 0x00100000;
 static void upload_identity_cmap_row0() {
-    mmio_write(8, 0);  // GPU_CMAP_ADDR = 0
     for (int i = 0; i < 256; i += 4) {
         uint32_t w = (uint32_t)(uint8_t)(i + 0)
                    | ((uint32_t)(uint8_t)(i + 1) <<  8)
                    | ((uint32_t)(uint8_t)(i + 2) << 16)
                    | ((uint32_t)(uint8_t)(i + 3) << 24);
-        mmio_write(9, w);
+        sdram_write((PALOOKUP_BASE_BYTE + i) >> 2, w);
     }
 }
 

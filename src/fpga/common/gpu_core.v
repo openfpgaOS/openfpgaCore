@@ -686,6 +686,13 @@ end
 localparam CMD_NOP            = 8'h01;
 localparam CMD_FENCE          = 8'h02;
 localparam CMD_CLEAR          = 8'h10;
+localparam CMD_CLEAR_RECT     = 8'h11;  // 3-word payload: word0 = start byte
+                                          // addr (CPU pre-computes
+                                          // fb_base + y*stride + x);
+                                          // word1 = {w[31:16], h[15:0]};
+                                          // word2 = {16'b0, color[15:0]}
+                                          // — low 8 bits replicated 4×
+                                          // per word, matching CMD_CLEAR.
 localparam CMD_SET_TEXTURE    = 8'h20;
 localparam CMD_SET_DEPTH_FUNC = 8'h21;
 localparam CMD_SET_FB         = 8'h23;
@@ -809,6 +816,15 @@ localparam S_TRI_MUL_WAIT2 = 6'd36;  // wait for DSP output register (tri_ymin_x
 localparam S_TRI_INIT_ATTRIB = 6'd37; // Bbox-origin attribute init (z/s/t at xmin,ymin)
 localparam S_TRI_PERSP_PREMUL = 6'd38; // (Phase 4c.2) Pre-multiply v_s × v_w, v_t × v_w
 
+// Rect-clear states — for partial-rect FB clears (letterbox bars,
+// status-bar wipes, menu pane backgrounds).  Issues word-by-word AXI
+// writes through M_WR with byte-strobed partial-word edges; mirrors
+// CMD_CLEAR's per-word shape but driven by a (start_addr, w, h, color)
+// payload instead of the hardcoded 320×200 extent.
+localparam S_CLEAR_RECT       = 6'd39;  // entry: per-row setup (no-op if h=0)
+localparam S_CLEAR_RECT_WORD  = 6'd40;  // emit AXI write for current word
+localparam S_CLEAR_RECT_WAIT  = 6'd41;  // wait for AXI bvalid; advance addr/row
+
 reg [5:0] state;
 
 // Command decoding
@@ -823,6 +839,7 @@ reg [23:0] cmd_payload_words;
 reg cmd_is_nop;
 reg cmd_is_fence;
 reg cmd_is_clear;
+reg cmd_is_clear_rect;
 reg cmd_is_set_texture;
 reg cmd_is_set_depth_func;
 reg cmd_is_set_fb;
@@ -1274,6 +1291,21 @@ reg [15:0] clear_depth;
 reg [31:0] clear_addr;
 reg [17:0] clear_remaining;   // Words remaining to clear
 
+// Rect-clear state — for CMD_CLEAR_RECT.  cr_addr is the byte address
+// of the next byte to clear in the current row; cr_w_remaining counts
+// down per-word as we walk the row; cr_y_remaining is the row count.
+// cr_row_addr is the byte address of the current row's first byte and
+// is used to derive the next row's base via st_fb_stride.  cr_w_total
+// holds the rect width so each row resets cleanly.  The 8-bit cr_color
+// is just the low byte of CMD_CLEAR_RECT's color word, replicated
+// 4× per AXI write (matching CMD_CLEAR's shape).
+reg [31:0] cr_addr;
+reg [31:0] cr_row_addr;
+reg [15:0] cr_w_remaining;
+reg [15:0] cr_w_total;
+reg [15:0] cr_y_remaining;
+reg [7:0]  cr_color;
+
 // (AXI4 write handshakes managed per-state, no global tracking)
 
 // ================================================================
@@ -1544,6 +1576,10 @@ always @(posedge clk) begin
         cmd_type <= 0;
         cmd_payload_words <= 0;
         cmd_is_nop <= 0; cmd_is_fence <= 0; cmd_is_clear <= 0;
+        cmd_is_clear_rect <= 0;
+        cr_addr <= 0; cr_row_addr <= 0;
+        cr_w_remaining <= 0; cr_w_total <= 0;
+        cr_y_remaining <= 0; cr_color <= 0;
         cmd_is_set_texture <= 0; cmd_is_set_depth_func <= 0;
         cmd_is_set_fb <= 0; cmd_is_set_zb <= 0;
         cmd_is_draw_span <= 0;
@@ -1704,6 +1740,7 @@ always @(posedge clk) begin
             cmd_is_nop            <= (cmd_type == CMD_NOP);
             cmd_is_fence          <= (cmd_type == CMD_FENCE);
             cmd_is_clear          <= (cmd_type == CMD_CLEAR);
+            cmd_is_clear_rect     <= (cmd_type == CMD_CLEAR_RECT);
             cmd_is_set_texture    <= (cmd_type == CMD_SET_TEXTURE);
             cmd_is_set_depth_func <= (cmd_type == CMD_SET_DEPTH_FUNC);
             cmd_is_set_fb         <= (cmd_type == CMD_SET_FB);
@@ -1764,6 +1801,18 @@ always @(posedge clk) begin
                     clear_color <= ring_rd_data[15:0];
                 end else if (pay_idx == 5'd1) begin
                     clear_depth <= ring_rd_data[15:0];
+                end
+            end
+            else if (cmd_is_clear_rect) begin
+                if (pay_idx == 5'd0) begin
+                    cr_addr     <= ring_rd_data;
+                    cr_row_addr <= ring_rd_data;
+                end else if (pay_idx == 5'd1) begin
+                    cr_w_total     <= ring_rd_data[31:16];
+                    cr_w_remaining <= ring_rd_data[31:16];
+                    cr_y_remaining <= ring_rd_data[15:0];
+                end else if (pay_idx == 5'd2) begin
+                    cr_color <= ring_rd_data[7:0];
                 end
             end
             else if (cmd_is_set_texture) begin
@@ -1914,6 +1963,9 @@ always @(posedge clk) begin
             end
             else if (cmd_is_clear) begin
                 state <= S_CLEAR_INIT;
+            end
+            else if (cmd_is_clear_rect) begin
+                state <= S_CLEAR_RECT;
             end
             else if (cmd_is_draw_span) begin
 `ifdef GPU_STATS
@@ -2794,6 +2846,99 @@ always @(posedge clk) begin
                 clear_remaining <= clear_remaining - 18'd1;
                 clear_addr      <= clear_addr + 32'd4;
                 state           <= S_CLEAR_ZB;
+            end
+        end
+
+        // ============================================================
+        // CMD_CLEAR_RECT — partial-rect FB clear (letterbox bars,
+        // status-bar wipes, menu pane backgrounds, splash underlay).
+        // Walks h rows × w bytes through M_WR with byte-strobed
+        // partial-word edges.  Word-aligned full-width row strips hit
+        // the 4-byte fast path (cr_strobe = 4'b1111, 4 bytes per AXI
+        // burst); arbitrary x/w paths use the general byte-strobe.
+        //
+        // Stride is the active st_fb_stride.  CPU pre-computes the
+        // start byte address (fb_base + y*stride + x) so the GPU
+        // doesn't need a runtime multiply for the row-base derivation.
+        // ============================================================
+        S_CLEAR_RECT: begin
+            // Entry from S_EXECUTE.  cr_addr / cr_row_addr / cr_w_remaining
+            // / cr_w_total / cr_y_remaining / cr_color have already been
+            // loaded by S_PAY_DATA.  If the rect is empty (h=0 or w=0),
+            // bail straight back to idle — no AXI traffic.
+            if (cr_y_remaining == 16'd0 || cr_w_total == 16'd0)
+                state <= S_IDLE;
+            else
+                state <= S_CLEAR_RECT_WORD;
+        end
+
+        S_CLEAR_RECT_WORD: begin : clear_rect_word_blk
+            // Compute word-aligned addr + lane + bytes-this-word + strobe
+            // combinationally for the current cr_addr / cr_w_remaining.
+            // bytes_this_word = min(4 - lane, cr_w_remaining), capped at
+            // 4 (when lane=0 and the row has ≥4 bytes left).  Strobe is
+            // ((1 << bytes_this_word) - 1) << lane — the 4×4 lane×bytes
+            // combinations resolve to a single AND/OR mask in fitting.
+            reg  [1:0] cr_lane;
+            reg  [2:0] cr_bytes_this;     // 1..4
+            reg  [3:0] cr_strobe;
+            cr_lane = cr_addr[1:0];
+            cr_bytes_this = (cr_w_remaining >= 16'd4
+                             && cr_lane == 2'd0)
+                              ? 3'd4
+                              : ((cr_w_remaining >= {13'b0, 3'd4 - {1'b0, cr_lane}})
+                                  ? (3'd4 - {1'b0, cr_lane})
+                                  : cr_w_remaining[2:0]);
+            cr_strobe = ((4'b0001 << cr_bytes_this) - 4'b0001) << cr_lane;
+
+            m_wr_awvalid <= 1;
+            m_wr_awaddr  <= cr_addr & 32'hFFFFFFFC;
+            m_wr_awlen   <= 0;
+            m_wr_wvalid  <= 1;
+            m_wr_wdata   <= {cr_color, cr_color, cr_color, cr_color};
+            m_wr_wstrb   <= cr_strobe;
+            m_wr_wlast   <= 1;
+            state        <= S_CLEAR_RECT_WAIT;
+        end
+
+        S_CLEAR_RECT_WAIT: begin : clear_rect_wait_blk
+            // Mirror of S_CLEAR_FB_WAIT: drain AW + W; on B response,
+            // advance addr by the bytes we just wrote (computed the same
+            // way as S_CLEAR_RECT_WORD's cr_bytes_this), wrap to the
+            // next row at end-of-row, and finish the rect when the row
+            // counter expires.
+            reg  [1:0] cr_lane;
+            reg  [2:0] cr_bytes_this;
+            cr_lane = cr_addr[1:0];
+            cr_bytes_this = (cr_w_remaining >= 16'd4
+                             && cr_lane == 2'd0)
+                              ? 3'd4
+                              : ((cr_w_remaining >= {13'b0, 3'd4 - {1'b0, cr_lane}})
+                                  ? (3'd4 - {1'b0, cr_lane})
+                                  : cr_w_remaining[2:0]);
+
+            if (m_wr_awvalid && m_wr_awready) m_wr_awvalid <= 0;
+            if (m_wr_wvalid  && m_wr_wready ) m_wr_wvalid  <= 0;
+            if (m_wr_bvalid) begin
+                m_wr_awvalid <= 0;
+                m_wr_wvalid  <= 0;
+                if (cr_w_remaining <= {13'b0, cr_bytes_this}) begin
+                    // Last word in this row.  Advance to next row.
+                    if (cr_y_remaining == 16'd1) begin
+                        // Last row finished — rect done.
+                        state <= S_IDLE;
+                    end else begin
+                        cr_row_addr    <= cr_row_addr + {16'b0, st_fb_stride};
+                        cr_addr        <= cr_row_addr + {16'b0, st_fb_stride};
+                        cr_w_remaining <= cr_w_total;
+                        cr_y_remaining <= cr_y_remaining - 16'd1;
+                        state          <= S_CLEAR_RECT_WORD;
+                    end
+                end else begin
+                    cr_addr        <= cr_addr + {29'b0, cr_bytes_this};
+                    cr_w_remaining <= cr_w_remaining - {13'b0, cr_bytes_this};
+                    state          <= S_CLEAR_RECT_WORD;
+                end
             end
         end
 

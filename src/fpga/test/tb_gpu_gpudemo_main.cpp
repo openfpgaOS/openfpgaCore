@@ -164,14 +164,17 @@ static void clear_fb() {
     for (int i = 0; i < SCREEN_W * SCREEN_H / 4; i++)
         sdram_write((FB_BASE >> 2) + i, 0xCCCCCCCCu);
 }
+// Identity cmap preloaded into SDRAM at the slot-0 palookup base —
+// matches gpu_core.v's PALOOKUP_BASE = 0x100000.  cmap_bram retired in
+// favour of tex_cache port B reads from SDRAM.
+static const uint32_t PALOOKUP_BASE_BYTE = 0x00100000;
 static void upload_identity_cmap_row0() {
-    mmio_write(8, 0);  // GPU_CMAP_ADDR = 0
     for (int i = 0; i < 256; i += 4) {
         uint32_t w = (uint32_t)(uint8_t)(i + 0)
                    | ((uint32_t)(uint8_t)(i + 1) <<  8)
                    | ((uint32_t)(uint8_t)(i + 2) << 16)
                    | ((uint32_t)(uint8_t)(i + 3) << 24);
-        mmio_write(9, w);  // GPU_CMAP_DATA
+        sdram_write((PALOOKUP_BASE_BYTE + i) >> 2, w);
     }
 }
 
