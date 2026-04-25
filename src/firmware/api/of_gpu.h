@@ -77,12 +77,14 @@ typedef enum {
  * Span Flags
  * ================================================================ */
 
-#define OF_GPU_SPAN_COLORMAP    (1 << 0)
-#define OF_GPU_SPAN_COLUMN      (1 << 1)
-#define OF_GPU_SPAN_SKIP_ZERO   (1 << 2)
-#define OF_GPU_SPAN_DEPTH_TEST  (1 << 3)
-#define OF_GPU_SPAN_DEPTH_WRITE (1 << 4)
-#define OF_GPU_SPAN_PERSP       (1 << 5)
+#define OF_GPU_SPAN_COLORMAP     (1 << 0)
+#define OF_GPU_SPAN_COLUMN       (1 << 1)
+#define OF_GPU_SPAN_SKIP_ZERO    (1 << 2)
+#define OF_GPU_SPAN_DEPTH_TEST   (1 << 3)
+#define OF_GPU_SPAN_DEPTH_WRITE  (1 << 4)
+#define OF_GPU_SPAN_PERSP        (1 << 5)
+#define OF_GPU_SPAN_TRANSLUC     (1 << 6)
+#define OF_GPU_SPAN_TRANSLUC_REV (1 << 7)
 
 /* ================================================================
  * Data Structures
@@ -157,8 +159,11 @@ static uint32_t _gpu_base;
 #define GPU_STATUS              OF_GPU_REG(0x14)  /* R: {30'b0, ring_empty, busy} */
 #define GPU_FENCE_REACHED       OF_GPU_REG(0x18)  /* R: last completed fence token */
 #define GPU_STAT_PIXELS         OF_GPU_REG(0x1C)  /* R: pixel counter */
-#define GPU_CMAP_ADDR           OF_GPU_REG(0x20)  /* W: colormap write address (auto-inc) */
-#define GPU_CMAP_DATA           OF_GPU_REG(0x24)  /* W: colormap write data (byte) */
+#define GPU_CMAP_ADDR           OF_GPU_REG(0x20)  /* W: cmap/transluc write address (auto-inc).
+                                                      * bit 31 = target select (0=cmap, 1=transluc[]),
+                                                      * bits [14:0] = byte address within target. */
+#define GPU_CMAP_DATA           OF_GPU_REG(0x24)  /* W: cmap/transluc write data (32-bit word, addr += 4) */
+#define GPU_TRANSLUC_TARGET     (1u << 31)        /* OR into GPU_CMAP_ADDR to select transluc[] target */
 #define GPU_TEX_FLUSH           OF_GPU_REG(0x28)  /* W: flush texture cache */
 #define GPU_STAT_SPANS          OF_GPU_REG(0x2C)  /* R: span counter */
 
@@ -268,6 +273,20 @@ static inline void of_gpu_colormap_upload(const uint8_t *data, uint32_t size) {
         GPU_CMAP_DATA = src32[i];
     for (uint32_t i = words << 2; i < size; i++)
         GPU_CMAP_DATA = data[i];
+}
+
+/* See SDK of_gpu.h for full documentation.  Decimates BUILD's 64 KB
+ * transluc[256][256] to the fabric's 32 KB / 128×256 quantised LUT
+ * (low bit of source axis dropped) during the upload. */
+static inline void of_gpu_translucency_upload(const uint8_t *table, uint32_t size) {
+    if (size != 65536) return;
+    GPU_CMAP_ADDR = GPU_TRANSLUC_TARGET;
+    for (int s7 = 0; s7 < 128; s7++) {
+        const uint8_t *row = &table[(s7 << 1) << 8];
+        const uint32_t *row32 = (const uint32_t *)row;
+        for (int w = 0; w < 64; w++)
+            GPU_CMAP_DATA = row32[w];
+    }
 }
 
 static inline void of_gpu_kick(void) {

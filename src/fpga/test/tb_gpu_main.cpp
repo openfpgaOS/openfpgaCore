@@ -1133,6 +1133,232 @@ static void test_transluc_lut_basic(void) {
     else { pass_count++; printf("  OK  8 pixels match LUT(src,fb) reference\n"); }
 }
 
+// Helper: emit a SPAN_TRANSLUC + SPAN_COLORMAP span at the given fb_addr.
+// 1×1 texture with the given source byte; identity colormap assumed.
+static void transluc_emit_span(uint32_t fb_addr, uint8_t src_byte,
+                                uint16_t count, uint8_t extra_flags = 0) {
+    sdram_write(TEX_BASE_BYTE >> 2,
+        ((uint32_t)src_byte) | ((uint32_t)src_byte << 8)
+      | ((uint32_t)src_byte << 16) | ((uint32_t)src_byte << 24));
+    ring_cmd(0x20, 4);
+    ring_write(TEX_BASE_BYTE);
+    ring_write(((uint32_t)1 << 16) | 1);
+    ring_write(0);
+    ring_write(0);
+    ring_cmd(0x40, 18);
+    ring_write(fb_addr);
+    ring_write(TEX_BASE_BYTE);
+    ring_write(0); ring_write(0);
+    ring_write(0); ring_write(0);
+    ring_write(((uint32_t)count << 16) | (0 << 8) | (0x41 | extra_flags));
+    ring_write((1 << 16) | 1);
+    ring_write(0);
+    ring_write(0); ring_write(0); ring_write(0);
+    ring_write(0); ring_write(0); ring_write(0);
+    ring_write(0); ring_write(0); ring_write(0);
+}
+
+// Test TRL2: same span drawn twice. The second pass blends its own
+// first-pass output. Catches stale-cache / fb_acc not flushing between
+// spans, or transluc_rd_addr drift across the back-to-back submissions.
+static void test_transluc_overdraw(void) {
+    printf("TEST: transluc[] BLEND — overdraw (same span twice)\n");
+    gpu_init();
+
+    { uint8_t cm[256]; for (int i = 0; i < 256; i++) cm[i] = (uint8_t)i;
+      cmap_upload_bytes(0, cm, 256); }
+
+    // LUT: lut[(s7 << 8) | fb] = (s7 + fb) & 0xFF.  Idempotent only when
+    // s7 + fb stays bounded; second pass (re-blend) gives a different
+    // value — easy to verify it's NOT the first-pass result.
+    static uint8_t lut[32768];
+    for (int s7 = 0; s7 < 128; s7++)
+        for (int fb = 0; fb < 256; fb++)
+            lut[(s7 << 8) | fb] = (uint8_t)((s7 + fb) & 0xFF);
+    transluc_upload_full(lut);
+
+    ring_cmd(0x23, 2); ring_write(FB_BASE_BYTE); ring_write(320);
+
+    // Pre-fill 4 bytes of FB with sentinel 0x10.
+    sdram_write(FB_BASE_BYTE >> 2,
+        ((uint32_t)0x10) | ((uint32_t)0x10 << 8)
+      | ((uint32_t)0x10 << 16) | ((uint32_t)0x10 << 24));
+
+    // First pass: src=0x40 (s7=0x20).  Each pixel: lut[0x2010] = 0x30.
+    transluc_emit_span(FB_BASE_BYTE, 0x40, 4);
+    check("transluc_over_pass1_done", gpu_finish() ? 1 : 0, 1);
+
+    // Verify pass 1 wrote 0x30 to all 4 bytes.
+    bool pass1_ok = true;
+    for (int i = 0; i < 4; i++) {
+        uint8_t got = sdram_read_byte(FB_BASE_BYTE + i);
+        if (got != 0x30) { pass1_ok = false; printf("  FAIL pass1 px%d: got 0x%02x exp 0x30\n", i, got); }
+    }
+
+    // Second pass: same src.  Each pixel: lut[0x2030] = 0x50.
+    transluc_emit_span(FB_BASE_BYTE, 0x40, 4);
+    check("transluc_over_pass2_done", gpu_finish() ? 1 : 0, 1);
+
+    bool pass2_ok = true;
+    for (int i = 0; i < 4; i++) {
+        uint8_t got = sdram_read_byte(FB_BASE_BYTE + i);
+        if (got != 0x50) { pass2_ok = false; printf("  FAIL pass2 px%d: got 0x%02x exp 0x50\n", i, got); }
+    }
+
+    if (pass1_ok && pass2_ok) {
+        pass_count++;
+        printf("  OK  pass 1 → 0x30, pass 2 → 0x50 (re-blends own output)\n");
+    } else {
+        fail_count++;
+    }
+}
+
+// Test TRL3: alternating opaque + translucent spans on overlapping
+// destination words.  Catches the case where the BLEND pipeline's
+// state leaks into the IDLE fast path (e.g., transluc_rd_addr drifts
+// while idle, BLEND state regs not properly reset between fragments).
+static void test_transluc_no_blend_interleave(void) {
+    printf("TEST: transluc[] BLEND — opaque + translucent interleave\n");
+    gpu_init();
+
+    { uint8_t cm[256]; for (int i = 0; i < 256; i++) cm[i] = (uint8_t)i;
+      cmap_upload_bytes(0, cm, 256); }
+
+    static uint8_t lut[32768];
+    for (int s7 = 0; s7 < 128; s7++)
+        for (int fb = 0; fb < 256; fb++)
+            lut[(s7 << 8) | fb] = (uint8_t)((s7 ^ fb ^ 0xA5) & 0xFF);
+    transluc_upload_full(lut);
+
+    ring_cmd(0x23, 2); ring_write(FB_BASE_BYTE); ring_write(320);
+
+    // Pre-fill with 0x77.
+    for (int w = 0; w < 4; w++)
+        sdram_write((FB_BASE_BYTE >> 2) + w, 0x77777777);
+
+    // Alternate: opaque span at byte 0 (src=0x11, no TRANSLUC), then
+    // translucent span at byte 4 (src=0x22, TRANSLUC), then opaque at
+    // byte 8 (src=0x33), then translucent at byte 12 (src=0x44).  Each
+    // span has count=4 so they're word-aligned and don't share words.
+    // Distinct texture addresses per span so the GPU's texture cache
+    // can't return stale data across spans (cache doesn't invalidate
+    // on SDRAM-side overwrites of the same address).
+    auto opaque_span_at = [&](uint32_t fb_off, uint32_t tex_addr, uint8_t src) {
+        uint32_t v = ((uint32_t)src) | ((uint32_t)src << 8)
+                   | ((uint32_t)src << 16) | ((uint32_t)src << 24);
+        sdram_write(tex_addr >> 2, v);
+        ring_cmd(0x20, 4); ring_write(tex_addr);
+        ring_write(((uint32_t)1 << 16) | 1); ring_write(0); ring_write(0);
+        ring_cmd(0x40, 18);
+        ring_write(FB_BASE_BYTE + fb_off);
+        ring_write(tex_addr);
+        ring_write(0); ring_write(0); ring_write(0); ring_write(0);
+        ring_write(((uint32_t)4 << 16) | 0x01);  // COLORMAP only
+        ring_write((1 << 16) | 1); ring_write(0);
+        ring_write(0); ring_write(0); ring_write(0); ring_write(0);
+        ring_write(0); ring_write(0); ring_write(0); ring_write(0); ring_write(0);
+    };
+    auto transluc_span_at = [&](uint32_t fb_off, uint32_t tex_addr, uint8_t src) {
+        uint32_t v = ((uint32_t)src) | ((uint32_t)src << 8)
+                   | ((uint32_t)src << 16) | ((uint32_t)src << 24);
+        sdram_write(tex_addr >> 2, v);
+        ring_cmd(0x20, 4); ring_write(tex_addr);
+        ring_write(((uint32_t)1 << 16) | 1); ring_write(0); ring_write(0);
+        ring_cmd(0x40, 18);
+        ring_write(FB_BASE_BYTE + fb_off);
+        ring_write(tex_addr);
+        ring_write(0); ring_write(0); ring_write(0); ring_write(0);
+        ring_write(((uint32_t)4 << 16) | 0x41);  // COLORMAP|TRANSLUC
+        ring_write((1 << 16) | 1); ring_write(0);
+        ring_write(0); ring_write(0); ring_write(0); ring_write(0);
+        ring_write(0); ring_write(0); ring_write(0); ring_write(0); ring_write(0);
+    };
+
+    opaque_span_at  (0,  TEX_BASE_BYTE +    0, 0x11);
+    transluc_span_at(4,  TEX_BASE_BYTE +  256, 0x22);
+    opaque_span_at  (8,  TEX_BASE_BYTE +  512, 0x33);
+    transluc_span_at(12, TEX_BASE_BYTE +  768, 0x44);
+
+    bool ok = gpu_finish();
+    check("transluc_inter_done", ok ? 1 : 0, 1);
+    if (!ok) return;
+
+    bool any_fail = false;
+    auto expect_byte = [&](int off, uint8_t exp, const char *what) {
+        uint8_t got = sdram_read_byte(FB_BASE_BYTE + off);
+        if (got != exp) {
+            printf("  FAIL %s @byte%d: got 0x%02x exp 0x%02x\n", what, off, got, exp);
+            any_fail = true;
+        }
+    };
+    // Bytes 0..3 (opaque src=0x11): exact write of 0x11.
+    for (int i = 0; i < 4; i++) expect_byte(i, 0x11, "opa1");
+    // Bytes 4..7 (translucent src=0x22, fb=0x77): lut[(0x11<<8)|0x77] = 0x11^0x77^0xA5.
+    {
+        uint8_t exp = (0x11 ^ 0x77 ^ 0xA5) & 0xFF;
+        for (int i = 4; i < 8; i++) expect_byte(i, exp, "trl1");
+    }
+    // Bytes 8..11 (opaque src=0x33).
+    for (int i = 8; i < 12; i++) expect_byte(i, 0x33, "opa2");
+    // Bytes 12..15 (translucent src=0x44, fb=0x77): lut[(0x22<<8)|0x77].
+    {
+        uint8_t exp = (0x22 ^ 0x77 ^ 0xA5) & 0xFF;
+        for (int i = 12; i < 16; i++) expect_byte(i, exp, "trl2");
+    }
+    if (any_fail) fail_count++;
+    else { pass_count++; printf("  OK  16 bytes match (opaque + translucent interleaved)\n"); }
+}
+
+// Test TRL4: SPAN_TRANSLUC_REV variant.  Verifies the reversed key
+// composition  { fb[7:1], src }  vs forward  { src[7:1], fb }.
+static void test_transluc_reverse_key(void) {
+    printf("TEST: transluc[] BLEND — SPAN_TRANSLUC_REV key swap\n");
+    gpu_init();
+    { uint8_t cm[256]; for (int i = 0; i < 256; i++) cm[i] = (uint8_t)i;
+      cmap_upload_bytes(0, cm, 256); }
+
+    // LUT distinguishes axes: lut[hi:8 || lo:8] = hi (= 0..127, since
+    // bit 15 is unused for storage but the key is only 15 bits).
+    static uint8_t lut[32768];
+    for (int hi = 0; hi < 128; hi++)
+        for (int lo = 0; lo < 256; lo++)
+            lut[(hi << 8) | lo] = (uint8_t)hi;
+    transluc_upload_full(lut);
+
+    ring_cmd(0x23, 2); ring_write(FB_BASE_BYTE); ring_write(320);
+    sdram_write(FB_BASE_BYTE >> 2, 0x88888888);  // fb = 0x88 in every lane
+
+    // SPAN_TRANSLUC: key = { src[7:1], fb }.  src=0x42, src[7:1]=0x21
+    // → output = lut[0x2188] = 0x21.
+    transluc_emit_span(FB_BASE_BYTE, 0x42, 4);
+    check("transluc_rev_fwd_done", gpu_finish() ? 1 : 0, 1);
+    bool any_fail = false;
+    for (int i = 0; i < 4; i++) {
+        uint8_t got = sdram_read_byte(FB_BASE_BYTE + i);
+        if (got != 0x21) {
+            printf("  FAIL fwd byte%d: got 0x%02x exp 0x21\n", i, got);
+            any_fail = true;
+        }
+    }
+
+    // Reset FB.
+    sdram_write(FB_BASE_BYTE >> 2, 0x88888888);
+    // SPAN_TRANSLUC_REV (extra flags bit 7 = 0x80): key = { fb[7:1], src }.
+    // fb=0x88, fb[7:1]=0x44 → output = lut[(0x44<<8)|0x42] = 0x44.
+    transluc_emit_span(FB_BASE_BYTE, 0x42, 4, /*extra_flags*/ 0x80);
+    check("transluc_rev_rev_done", gpu_finish() ? 1 : 0, 1);
+    for (int i = 0; i < 4; i++) {
+        uint8_t got = sdram_read_byte(FB_BASE_BYTE + i);
+        if (got != 0x44) {
+            printf("  FAIL rev byte%d: got 0x%02x exp 0x44\n", i, got);
+            any_fail = true;
+        }
+    }
+
+    if (any_fail) fail_count++;
+    else { pass_count++; printf("  OK  forward and reverse key compositions both match\n"); }
+}
+
 // Set depth test via CMD_SET_DEPTH_FUNC (available in all variants)
 static void ring_depth_func(uint32_t func) {
     ring_cmd(0x21, 1);
@@ -3926,6 +4152,9 @@ int main(int argc, char **argv) {
     test_persp_slope_rounding();
     test_persp_negative_zinv();
     test_transluc_lut_basic();
+    test_transluc_overdraw();
+    test_transluc_no_blend_interleave();
+    test_transluc_reverse_key();
 #endif
 
 #ifdef GPU_FEAT_TRIANGLE
