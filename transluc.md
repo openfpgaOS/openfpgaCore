@@ -1,5 +1,48 @@
 # Fabric `transluc[]` blend unit — implementation plan
 
+## Status
+
+- **Stage 1** (LUT BRAM + MMIO target-select on `GPU_CMAP_ADDR/DATA`): **landed**.
+  `transluc_bram[0:8191]` (8 K × 32-bit = 32 KB) declared in `gpu_core.v`,
+  CPU writes routed when `cmap_wr_target` (bit 31 of the addr write) is
+  high. Tested via build + existing 301 passing GPU tests.
+- **Stage 2** (read port + span-flag definitions): **landed**.
+  `transluc_rd_addr` / `transluc_rd_data` registered read with the same
+  fp_pipe_stall hold pattern as the colormap. `SPAN_TRANSLUC` (bit 6)
+  and `SPAN_TRANSLUC_REV` (bit 7) localparams added.
+- **Stage 3** (FB read-modify-write + BLEND output mux + AXI-read
+  arbitration on M0): **pending**. The complete-stage implementation
+  is the remaining chunk and is scoped in the sections below.
+- **Stage 4** (Verilator tests + SDK API + BUILD integration): **pending**.
+
+The `transluc_rd_addr` driver is currently a placeholder reset only —
+no fragment-pipe stage feeds it yet. That arrives with stage 3.
+
+## Pre-RTL data — Duke3D `transluc[]` analysis
+
+Empirical row-dictionary feasibility check (see `/tmp/analyze_transluc.c`
++ `/tmp/approx_transluc.c`):
+
+- **246/256 unique rows** in Duke3D's exact 64 KB `transluc[]` —
+  row-dictionary saves only ~1 KB.
+- **Asymmetric** (`T[s,d] != T[d,s]` everywhere). Cannot store half.
+- **Row 0 is not identity** — no trivial src=0 shortcut.
+
+Approximation accuracy (RGB distance in BUILD's 6-bits-per-channel space,
+JND ≈ 3):
+
+| scheme | size | M10K | exact% | RGB-dist avg |
+|---|---|---|---|---|
+| exact 256×256 | 64 KB | ~64 | 100% | 0 |
+| **128×256** (drop src LSB) | **32 KB** | **~32** | **79.4%** | **1.3** |
+| 128×128 | 16 KB | ~16 | 51% | 3.4 |
+| 256×32 | 8 KB | ~8 | 18% | 10.3 |
+| 64×64 | 4 KB | ~4 | 17% | 7.5 |
+
+**Selected: 32 KB / 128×256.** Sub-JND average error, fits in 37 free
+M10K with 5 to spare. Visual indistinguishability vs exact in motion
+expected; spot-check pending hardware test.
+
 ## Review feedback
 
 The goal is good, but the current resource story is too optimistic for

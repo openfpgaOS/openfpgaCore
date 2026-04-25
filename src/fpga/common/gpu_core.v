@@ -132,7 +132,12 @@ reg [15:0] ring_wrptr;                    // CPU write pointer (byte offset, for
 reg [15:0] ring_rdptr;                    // GPU read pointer (byte offset)
 reg [31:0] ring_rd_data;                  // Port B read output (registered)
 
-reg [13:0] cmap_wr_addr;       // Colormap auto-increment address
+// CPU upload address for the colormap and transluc[] LUT.  Both targets
+// share GPU_CMAP_ADDR / GPU_CMAP_DATA on the MMIO; a 1-bit target-select
+// in bit 31 of the addr write picks colormap (0) or transluc (1).  The
+// 15-bit byte field is wide enough for the larger 32 KB transluc table.
+reg [14:0] cmap_wr_addr;       // Auto-increment byte address (cmap or transluc)
+reg        cmap_wr_target;     // 0 = colormap (16 KB), 1 = transluc[] (32 KB)
 reg        tex_flush_req;      // Pulse to flush texture cache
 reg        soft_reset;         // Pulse: resets FSM state + ring pointers
 reg        ring_reset;         // Pulse: reset ring_rdptr (from MMIO, consumed by FSM)
@@ -164,6 +169,7 @@ always @(posedge clk) begin
         ring_wr_count <= 32'b0;
 `endif
         cmap_wr_addr <= 0;
+        cmap_wr_target <= 0;
         tex_flush_req <= 0;
         soft_reset <= 0;
         ring_reset <= 0;
@@ -192,10 +198,13 @@ always @(posedge clk) begin
 `endif
                 end
                 4'd8: begin  // GPU_CMAP_ADDR
-                    cmap_wr_addr <= reg_wdata[13:0];
+                    // bit 31 selects target (0 = colormap, 1 = transluc[]);
+                    // bits [14:0] are the byte offset within that target.
+                    cmap_wr_addr   <= reg_wdata[14:0];
+                    cmap_wr_target <= reg_wdata[31];
                 end
-                4'd9: begin  // GPU_CMAP_DATA — 32-bit write, addr +=4 bytes
-                    cmap_wr_addr <= cmap_wr_addr + 14'd4;
+                4'd9: begin  // GPU_CMAP_DATA — 32-bit write, addr += 4 bytes
+                    cmap_wr_addr <= cmap_wr_addr + 15'd4;
                 end
                 4'd10: begin // GPU_TEX_FLUSH
                     tex_flush_req <= 1;
@@ -330,11 +339,39 @@ wire [15:0] bad_waddr_count = 16'b0;
 // never executes with the current hardware's 16 KB colormap.
 reg [31:0] cmap_bram [0:4095];
 
-// Port A: CPU write (full 32-bit)
-wire cmap_cpu_wr = reg_wr && (reg_addr == 4'd9);
+// Port A: CPU write (full 32-bit) — colormap target only.
+wire cmap_cpu_wr = reg_wr && (reg_addr == 4'd9) && !cmap_wr_target;
 always @(posedge clk) begin
     if (cmap_cpu_wr)
         cmap_bram[cmap_wr_addr[13:2]] <= reg_wdata;
+end
+
+// ================================================================
+// transluc[] LUT — 32 KB BUILD-style indexed-color blend table
+// ================================================================
+// Stored as 8192 × 32-bit words (32 M10K under the same Quartus
+// inference pattern that gives the 16 KB colormap 16 M10K — keep the
+// access pattern word-aligned, no byte-enables, or BRAM inference
+// collapses to FFs).  CPU loads via the shared GPU_CMAP_ADDR/DATA port
+// with the target-select bit set.
+//
+// Layout: 128-source × 256-destination quantised approximation of
+// BUILD's transluc[256][256].  Source axis is dropped to 7 bits (low
+// bit zeroed) — measured against Duke3D's table this is 79% byte-exact
+// vs the full 64 KB table with sub-JND average RGB error (1.3 in the
+// 6-bit-per-channel palette space).  Tradeoff documented in
+// transluc.md.  Address layout:
+//
+//   key[14:8] = shaded_src[7:1]   (7 bits — low bit dropped)
+//   key[7:0]  = fb_byte           (8 bits)
+//   word_addr = key[14:2]         (13 bits → 8192 words)
+//   byte_lane = key[1:0]
+reg [31:0] transluc_bram [0:8191];
+
+wire transluc_cpu_wr = reg_wr && (reg_addr == 4'd9) && cmap_wr_target;
+always @(posedge clk) begin
+    if (transluc_cpu_wr)
+        transluc_bram[cmap_wr_addr[14:2]] <= reg_wdata;
 end
 
 // Port B: GPU read
@@ -374,6 +411,46 @@ always @(*) begin
         2'd1: cmap_rd_data = cmap_rd_word[15:8];
         2'd2: cmap_rd_data = cmap_rd_word[23:16];
         2'd3: cmap_rd_data = cmap_rd_word[31:24];
+    endcase
+end
+
+// ================================================================
+// transluc[] LUT — Port B: GPU read
+// ================================================================
+// Same registered-read pattern as the colormap BRAM: a 13-bit word
+// address selects an 8K-word entry, a 2-bit lane selects the byte.
+// Held across fp_pipe_stall for the same reason cmap_rd_word is —
+// otherwise a stall mid-pipeline would let the LUT read drift to a
+// later pixel's index before the stalled stage captured this one.
+//
+// Address composition (computed by the BLEND stage when SPAN_TRANSLUC
+// is set on a fragment):
+//   transluc_rd_addr = { shaded_src[7:1], fb_byte[7:0] }   // 15 bits
+// (= 128 × 256 quantised LUT, dropping low bit of the source axis;
+// see transluc.md for the table-format rationale.)
+reg [14:0] transluc_rd_addr;
+reg [7:0]  transluc_rd_data;
+reg [31:0] transluc_rd_word;
+reg [1:0]  transluc_rd_lane;
+`ifdef GPU_FEAT_FRAG_PIPELINE
+always @(posedge clk) begin
+    if (!fp_pipe_stall) begin
+        transluc_rd_word <= transluc_bram[transluc_rd_addr[14:2]];
+        transluc_rd_lane <= transluc_rd_addr[1:0];
+    end
+end
+`else
+always @(posedge clk) begin
+    transluc_rd_word <= transluc_bram[transluc_rd_addr[14:2]];
+    transluc_rd_lane <= transluc_rd_addr[1:0];
+end
+`endif
+always @(*) begin
+    case (transluc_rd_lane)
+        2'd0: transluc_rd_data = transluc_rd_word[7:0];
+        2'd1: transluc_rd_data = transluc_rd_word[15:8];
+        2'd2: transluc_rd_data = transluc_rd_word[23:16];
+        2'd3: transluc_rd_data = transluc_rd_word[31:24];
     endcase
 end
 
@@ -631,12 +708,14 @@ reg signed [31:0] sp_zi;
 reg signed [31:0] sp_zistep;
 
 // Span flags
-localparam SPAN_COLORMAP   = 0;
-localparam SPAN_COLUMN     = 1;
-localparam SPAN_SKIP_ZERO  = 2;
-localparam SPAN_DEPTH_TEST = 3;
-localparam SPAN_DEPTH_WRITE= 4;
-localparam SPAN_PERSP      = 5;
+localparam SPAN_COLORMAP    = 0;
+localparam SPAN_COLUMN      = 1;
+localparam SPAN_SKIP_ZERO   = 2;
+localparam SPAN_DEPTH_TEST  = 3;
+localparam SPAN_DEPTH_WRITE = 4;
+localparam SPAN_PERSP       = 5;
+localparam SPAN_TRANSLUC    = 6;  // route p3_color through transluc[] LUT
+localparam SPAN_TRANSLUC_REV= 7;  // swap (src, fb) → (fb, src) in the key
 
 // ================================================================
 // Main FSM
@@ -1385,6 +1464,7 @@ always @(posedge clk) begin
         p3_valid <= 0; p3_color <= 0; p3_flags <= 0;
         p3_fb_addr <= 0; p3_z_addr <= 0; p3_zi <= 0; p3_discard <= 0;
         p3_z_resolved <= 0;
+        transluc_rd_addr <= 15'b0;
         fbss <= FBSS_IDLE;
         fbss_pend_valid <= 0; fbss_pend_color <= 0; fbss_pend_addr <= 0;
         src_mode <= SRC_SPAN;
