@@ -132,7 +132,7 @@ SYSTEM_FLAGS = -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC -Wno-CASEINCOMPLETE \
 # ============================================================
 # Targets
 # ============================================================
-.PHONY: all sdram sram gpu axi-periph \
+.PHONY: all sdram sram gpu gpu-floor axi-periph \
         audio system run run-sram build clean
 
 all: sdram sram gpu axi-periph audio
@@ -177,6 +177,28 @@ $(GPU_DIR)/V$(GPU_TOP): $(GPU_SRCS) $(GPU_CPP)
 		-I$(COMMON_DIR) \
 		$(GPU_SRCS) $(GPU_CPP)
 
+# --- GPU floor-span coverage (BUILD/Duke3D hlineasm4 vs GPU multiply) ---
+# Focused regression suite that drives CMD_DRAW_SPAN with BUILD-style
+# inputs and compares against a CPU-side hlineasm4 reference.  Some
+# cases (F2/F3/F6/F8) require shift-mode tex addressing that the RTL
+# retired — those XFAIL with a documented gap message instead of
+# counting as failures.  Run `make gpu-floor` standalone; intentionally
+# excluded from `make all` until the gap closes.
+GPU_FLOOR_CPP = tb_gpu_floor_span_main.cpp
+GPU_FLOOR_DIR = obj_dir_gpu_floor
+gpu-floor: $(GPU_FLOOR_DIR)/V$(GPU_TOP)
+	@printf "\n=== GPU floor-span coverage ===\n"
+	./$(GPU_FLOOR_DIR)/V$(GPU_TOP) || true
+
+$(GPU_FLOOR_DIR)/V$(GPU_TOP): $(GPU_SRCS) $(GPU_FLOOR_CPP)
+	$(VERILATOR) $(VERILATOR_FLAGS) --top-module $(GPU_TOP) \
+		--Mdir $(GPU_FLOOR_DIR) \
+		+define+GPU_STATS +define+GPU_DEBUG \
+		-CFLAGS -DGPU_PERSP_IMPL \
+		-CFLAGS -DGPU_FEAT_TRIANGLE \
+		-I$(COMMON_DIR) \
+		$(GPU_SRCS) $(GPU_FLOOR_CPP)
+
 # --- AXI periph slave ---
 axi-periph: $(AXI_PERIPH_DIR)/V$(AXI_PERIPH_TOP)
 	@printf "\n=== AXI periph slave ===\n"
@@ -212,6 +234,6 @@ $(SYSTEM_DIR)/V$(SYSTEM_TOP): $(SYSTEM_SRCS) $(SYSTEM_CPP)
 
 # --- Clean ---
 clean:
-	rm -rf $(SDRAM_DIR) $(SRAM_DIR) $(GPU_DIR) \
+	rm -rf $(SDRAM_DIR) $(SRAM_DIR) $(GPU_DIR) $(GPU_FLOOR_DIR) \
 	       $(AXI_PERIPH_DIR) $(AUDIO_DIR) $(SYSTEM_DIR) \
-	       obj_dir_gpu obj_dir_cdc io_sdram_test.v
+	       obj_dir_gpu obj_dir_gpu_floor obj_dir_cdc io_sdram_test.v
