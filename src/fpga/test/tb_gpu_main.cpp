@@ -113,18 +113,32 @@ static void gpu_kick() {
     mmio_write(1, ring_wrptr);  // reg_addr 1 = GPU_RING_WRPTR
 }
 
-// Upload `count` bytes to the colormap starting at byte `start`.
-// GPU_CMAP_DATA is word-oriented (4 bytes stored per write, addr += 4).
-// `start` and `count` must be 4-aligned.
-static void cmap_upload_bytes(uint32_t start, const uint8_t *bytes, int count) {
-    mmio_write(8, start);
+// Palookup layout (must match gpu_core.v's PALOOKUP_BASE / PALOOKUP_STRIDE
+// and the SDK's of_gpu_palookup_upload).  Slot 0 starts at byte 0x100000.
+static const uint32_t PALOOKUP_BASE_BYTE  = 0x00100000;
+static const uint32_t PALOOKUP_SLOT_STRIDE = 0x00004000;  // 16 KB per slot
+
+// Upload `count` bytes into a palookup slot at byte offset `start` within
+// the slot.  Replaces the prior MMIO-upload path that wrote the on-chip
+// cmap_bram; the GPU now reads palookups from SDRAM via tex_cache port B,
+// so tests preload directly through the SDRAM backdoor.  Default slot 0
+// preserves the old test API for callers that didn't care about slots.
+static void palookup_upload_to_slot(uint8_t slot, uint32_t start,
+                                    const uint8_t *bytes, int count) {
+    uint32_t base_byte = PALOOKUP_BASE_BYTE
+                       + (uint32_t)slot * PALOOKUP_SLOT_STRIDE
+                       + start;
     for (int i = 0; i < count; i += 4) {
         uint32_t w = (uint32_t)bytes[i]
                   | ((uint32_t)bytes[i + 1] << 8)
                   | ((uint32_t)bytes[i + 2] << 16)
                   | ((uint32_t)bytes[i + 3] << 24);
-        mmio_write(9, w);
+        sdram_write((base_byte + i) >> 2, w);
     }
+}
+
+static void cmap_upload_bytes(uint32_t start, const uint8_t *bytes, int count) {
+    palookup_upload_to_slot(0, start, bytes, count);
 }
 
 // Wait for GPU to reach fence, with timeout

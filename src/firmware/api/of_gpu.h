@@ -178,15 +178,41 @@ static uint32_t _gpu_base;
 #define GPU_CMD_SET_DEPTH_FUNC  0x21
 #define GPU_CMD_SET_FB          0x23
 #define GPU_CMD_SET_ZB          0x24
+#define GPU_CMD_SET_COLORMAP_ID 0x28  /* 1-word payload: [3:0] = palookup slot */
 #define GPU_CMD_DRAW_TRIANGLES  0x30
 #define GPU_CMD_DRAW_SPAN       0x40
 /* Reserved opcodes — do not reuse:
  *   0x22 SET_BLEND      — no combine path in the datapath
  *   0x25 SET_SHADE      — Gouraud gradient dropped in the FMax push
  *   0x26 SET_ALPHA_REF  — no alpha test in the datapath
+ *   0x27 SET_SKIP_ZERO  — used internally by the triangle path
  *   0x31 DRAW_INDEXED   — expand indices CPU-side and emit per-triangle
  *   0x41 DRAW_SPANS     — half-implemented batch; emit N separate spans
  *   0x42 DRAW_SPRITE    — 2-triangle sprite is cheaper and rotates */
+
+/* ================================================================
+ * Palookup (colormap) layout in SDRAM — must match gpu_core.v's
+ * PALOOKUP_BASE / PALOOKUP_STRIDE constants.
+ *
+ * Each slot holds a Quake/BUILD-shape shade × texel table.  Slot 0
+ * is the default (used by callers that don't issue CMD_SET_COLORMAP_ID,
+ * preserving single-palookup compatibility).  Up to 16 slots; the
+ * GPU reads palookup[slot][shade][texel] from
+ *   GPU_AXI_BASE + 0x100000 + slot*0x4000 + shade*256 + texel
+ * via gpu_tex_cache port B (the prior on-chip cmap_bram is retired).
+ *
+ * The CPU-visible address depends on how the target maps the GPU's
+ * AXI M0 into the CPU address space — apps should obtain it via the
+ * runtime caps descriptor and add the per-slot offset.  These
+ * constants encode the GPU-side AXI offset (0x100000) and per-slot
+ * stride; the kernel's caps descriptor adds the per-target physical
+ * base.  The lookup is target-portable as long as the kernel
+ * advertises a `palookup_base` field that maps the same 26-bit
+ * GPU AXI offset.
+ * ================================================================ */
+#define OF_GPU_PALOOKUP_AXI_OFFSET 0x00100000u  /* GPU AXI M0 byte addr of slot 0 */
+#define OF_GPU_PALOOKUP_STRIDE     0x00004000u  /* 16 KB per slot */
+#define OF_GPU_PALOOKUP_SLOTS      16
 
 /* ================================================================
  * Ring Buffer State (app-side)
@@ -278,6 +304,15 @@ static inline void of_gpu_colormap_upload(const uint8_t *data, uint32_t size) {
 /* See SDK of_gpu.h for full documentation.  Decimates BUILD's 64 KB
  * transluc[256][256] to the fabric's 32 KB / 128×256 quantised LUT
  * (low bit of source axis dropped) during the upload. */
+/* Select the active palookup slot for subsequent SPAN_COLORMAP draws.
+ * Sticky state — stays in effect until the next of_gpu_set_colormap_id().
+ * Default at GPU reset is slot 0 (matching the legacy single-palookup
+ * behaviour). */
+static inline void of_gpu_set_colormap_id(uint8_t slot) {
+    _gpu_cmd_header(GPU_CMD_SET_COLORMAP_ID, 1);
+    _gpu_ring_write((uint32_t)(slot & 0xF));
+}
+
 static inline void of_gpu_translucency_upload(const uint8_t *table, uint32_t size) {
     if (size != 65536) return;
     GPU_CMAP_ADDR = GPU_TRANSLUC_TARGET;

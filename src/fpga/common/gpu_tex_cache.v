@@ -111,8 +111,18 @@ localparam LINE_WORDS = 4;
 // S_FILL_AR    : issue AXI AR for missed line (lat_port selects which
 //                port's miss is being serviced)
 // S_FILL_DATA  : burst fill in progress
-// S_FILL_OUT   : emit response for the originally-missed addr to the
-//                requesting port (selected by lat_port), return to S_PIPE
+// S_FILL_OUT   : 1-cycle hold after axi_rlast to let the requesting
+//                consumer's PRE-edge of the next clock observe
+//                resp_valid_x=fill_resp_valid_x; transitions
+//                unconditionally to S_PIPE the cycle after — the OLD
+//                "wait for new req as ack" pattern deadlocks at
+//                end-of-span when the consumer's req_valid_x goes low
+//                and never returns (the last fragment's response gets
+//                pinned in S_FILL_OUT forever).  By exiting on a fixed
+//                1-cycle delay and re-priming pipe_*_x / rd_*_x for the
+//                just-filled line, the response continues to be
+//                visible as a pipe_hit_x in S_PIPE so a stalled
+//                consumer can capture whenever it's ready.
 localparam S_PIPE      = 3'd0;
 localparam S_FILL_AR   = 3'd1;
 localparam S_FILL_DATA = 3'd2;
@@ -152,39 +162,47 @@ reg                rd_valid_b;
 reg [31:0]         rd_data_b;
 
 // ---- Combinational hit / miss per port ----
-// Only meaningful in S_PIPE.  pipe_miss_x triggers a fill request when
-// the FSM next visits S_PIPE; while filling, the other port's hit path
-// is independent and stays alive.
-wire pipe_hit_a  = (state == S_PIPE) && pipe_valid_a &&  rd_valid_a && (rd_tag_a == pipe_tag_a);
-wire pipe_miss_a = (state == S_PIPE) && pipe_valid_a && !(rd_valid_a && (rd_tag_a == pipe_tag_a));
+// State-independent: a hit on port X depends only on its own pipe_valid_x
+// and the latched rd_*_x — those are registered before the fill starts,
+// so even while the FSM is busy filling for the other port, this port's
+// already-resolved response stays available.  Required for the dual-port
+// pipeline: when port A misses and goes to fill, port B's pipe_hit_b
+// must remain visible to its consumer (else resp_valid_b drops, the
+// fragment-pipeline's cmap_pipe_wait stays asserted, and we deadlock
+// even though port B's data is sitting in rd_data_b ready to deliver).
+//
+// The fill-trigger logic that consumes pipe_miss_x is gated on
+// (state == S_PIPE) inside the S_PIPE arm of the FSM below — that's the
+// only place we *act* on pipe_miss; the wires themselves are pure
+// combinational facts about the latched request.
+wire pipe_hit_a  = pipe_valid_a &&  rd_valid_a && (rd_tag_a == pipe_tag_a);
+wire pipe_miss_a = pipe_valid_a && !(rd_valid_a && (rd_tag_a == pipe_tag_a));
 
-wire pipe_hit_b  = (state == S_PIPE) && pipe_valid_b &&  rd_valid_b && (rd_tag_b == pipe_tag_b);
-wire pipe_miss_b = (state == S_PIPE) && pipe_valid_b && !(rd_valid_b && (rd_tag_b == pipe_tag_b));
+wire pipe_hit_b  = pipe_valid_b &&  rd_valid_b && (rd_tag_b == pipe_tag_b);
+wire pipe_miss_b = pipe_valid_b && !(rd_valid_b && (rd_tag_b == pipe_tag_b));
 
 // lat_port: 0 = A, 1 = B.  Captured on the cycle a miss enters S_FILL_AR
 // so the fill response is routed to the correct port.
 reg lat_port;
 
 // ---- Backpressure ----
-// Per-port req_ready.  Symmetric: each port asserts ready when
-//   - in S_PIPE, that port currently has no pending miss, and no flush
-//   - or in S_FILL_OUT serving THIS port (consumer's new req acks the
-//     held response and rolls into the new pipeline cycle)
-// During S_FILL_AR / S_FILL_DATA, both ports' req_ready drop.  Hits on
-// the *non-issuing* port that already landed in pipe_valid_x stay
-// served via the held response path (resp_valid_x stays high until the
-// consumer accepts).
-assign req_ready   = ((state == S_PIPE)     && !pipe_miss_a && !flush)
+// Per-port req_ready: ready in S_PIPE when no miss and no flush;
+// ALSO ready in S_FILL_OUT when serving this port — that lets the
+// consumer's first post-fill request roll into S_PIPE without an
+// extra latch cycle (the M10K read fires on accept and rd_*_x
+// updates correctly even though the FSM transitions S_FILL_OUT →
+// S_PIPE simultaneously).
+assign req_ready   = ((state == S_PIPE) && !pipe_miss_a && !flush)
                   || ((state == S_FILL_OUT) && (lat_port == 1'b0) && !flush);
-
-assign req_ready_b = ((state == S_PIPE)     && !pipe_miss_b && !flush)
+assign req_ready_b = ((state == S_PIPE) && !pipe_miss_b && !flush)
                   || ((state == S_FILL_OUT) && (lat_port == 1'b1) && !flush);
 
 // ---- Combinational responses (hot path) ----
-// Hit: 1-cycle req→resp.  Miss/fill: held until consumer captures.
-reg fill_resp_valid_a;
-reg fill_resp_valid_b;
-
+// Pipe-hit OR S_FILL_OUT held response.  fill_resp_valid_x is set at
+// axi_rlast and held through the 1-cycle S_FILL_OUT window so the
+// stalled consumer can still observe the response if it didn't shift
+// at the exact landing cycle.
+reg fill_resp_valid_a, fill_resp_valid_b;
 assign resp_valid   = pipe_hit_a || fill_resp_valid_a;
 assign resp_valid_b = pipe_hit_b || fill_resp_valid_b;
 
@@ -235,31 +253,32 @@ wire [7:0] byte_from_rd_b =
 wire [15:0] hw_from_rd_b = pipe_byte_b[1] ? rd_data_b[31:16] : rd_data_b[15:0];
 
 // ---- Miss state (latched copy of the missed request, single shared) ----
-// lat_port selects which port owns the in-flight fill.
+// lat_port selects which port owns the in-flight fill.  At axi_rlast the
+// fill machine writes lat_addr / lat_wide back into the requesting port's
+// pipe_*_x and rd_*_x, then transitions to S_PIPE; the response is then
+// served as a normal pipe_hit_x and resp_data_x is computed from rd_*_x.
 reg [25:0] lat_addr;
 reg        lat_wide;
 
 wire [TAG_BITS-1:0] lat_tag  = lat_addr[25:14];
 wire [SET_BITS-1:0] lat_set  = lat_addr[13:4];
 wire [1:0]          lat_word = lat_addr[3:2];
-wire [1:0]          lat_byte = lat_addr[1:0];
 
 reg [1:0]  fill_beat;
 reg [31:0] fill_target_word;
 
-wire [7:0] byte_from_fill =
-    (lat_byte == 2'd0) ? fill_target_word[7:0]   :
-    (lat_byte == 2'd1) ? fill_target_word[15:8]  :
-    (lat_byte == 2'd2) ? fill_target_word[23:16] : fill_target_word[31:24];
-wire [15:0] hw_from_fill = lat_byte[1] ? fill_target_word[31:16] : fill_target_word[15:0];
-
 // ---- Combinational resp_data per port ----
-// Hit-path uses that port's rd_*; fill-path uses fill_target_word
-// (only meaningful for whichever port lat_port selects).
+// Hit-path uses rd_*; S_FILL_OUT path uses fill_target_word (the word
+// captured at lat_word offset during the burst).
+wire [7:0] byte_from_fill =
+    (lat_addr[1:0] == 2'd0) ? fill_target_word[7:0]   :
+    (lat_addr[1:0] == 2'd1) ? fill_target_word[15:8]  :
+    (lat_addr[1:0] == 2'd2) ? fill_target_word[23:16] : fill_target_word[31:24];
+wire [15:0] hw_from_fill = lat_addr[1] ? fill_target_word[31:16] : fill_target_word[15:0];
+
 assign resp_data   = pipe_hit_a
     ? (pipe_wide_a ? hw_from_rd_a : {8'b0, byte_from_rd_a})
     : (lat_wide    ? hw_from_fill : {8'b0, byte_from_fill});
-
 assign resp_data_b = pipe_hit_b
     ? (pipe_wide_b ? hw_from_rd_b : {8'b0, byte_from_rd_b})
     : (lat_wide    ? hw_from_fill : {8'b0, byte_from_fill});
@@ -362,8 +381,6 @@ always @(posedge clk) begin
                 // change).
                 state <= S_INIT;
                 init_counter <= 0;
-                fill_resp_valid_a <= 0;
-                fill_resp_valid_b <= 0;
                 pipe_valid_a <= 0;
                 pipe_valid_b <= 0;
             end else begin
@@ -408,24 +425,27 @@ always @(posedge clk) begin
         end
 
         S_FILL_OUT: begin
-            // Hold fill_resp_valid_x (only the lat_port-selected one
-            // is high) + fill_target_word until the requesting
-            // consumer issues a new request — its req_valid_x acks
-            // the held response and rolls into a new pipeline cycle.
+            // Auto-transition to S_PIPE after a 1-cycle hold so end-of-
+            // span doesn't deadlock waiting for an ack-via-new-req.  In
+            // the same cycle, prime the requesting port's stage-2 regs
+            // so resp_valid_x continues to be served as a pipe_hit_x in
+            // S_PIPE — a stalled consumer that didn't capture the held
+            // fill_resp_valid_x in time still sees the response.
             //
-            // Same flush fast-exit rationale as the SDP version: if a
-            // flush is pending while we're holding the response, we
-            // need to re-init valid_mem.  Routing through S_PIPE
-            // first races flush_pending vs the consumer's next accept
-            // and can drop the new request.  Bypass S_PIPE.
+            // If the consumer DID issue a new req this cycle (the
+            // common case during steady-state pipelined operation):
+            // req_ready_x is high (S_FILL_OUT && lat_port == X), so the
+            // M10K-read latch fires and updates rd_*_x to the new
+            // addr's data.  pipe_*_x captures the new req's address.
+            // The held fill_resp_valid_x for the prior addr was already
+            // observed at PRE-edge of this cycle, so the consumer's
+            // shift captured it; the latch's new rd_*_x then becomes
+            // the basis of next cycle's pipe_hit_x.
             //
-            // Critical asymmetry: the *non-serving* port can keep
-            // serving its already-resolved hits during S_FILL_OUT
-            // (resp_valid_x is held high if pipe_hit_x was high
-            // entering this state).  Its consumer can also stall —
-            // we don't accept new requests on that port until we're
-            // back in S_PIPE.  This is the mirror of how S_PIPE's
-            // accept logic gates new requests on req_ready_x.
+            // If no new req: the prime sets pipe_*_x to lat_addr and
+            // rd_*_x to the just-filled line's word containing the
+            // requested byte.  Next cycle's pipe_hit_x carries the
+            // response forward in S_PIPE.
             if (flush || flush_pending) begin
                 state <= S_INIT;
                 init_counter <= 0;
@@ -433,18 +453,48 @@ always @(posedge clk) begin
                 fill_resp_valid_b <= 0;
                 pipe_valid_a <= 0;
                 pipe_valid_b <= 0;
-            end else if (lat_port == 1'b0 && req_valid && req_ready) begin
-                pipe_valid_a    <= 1;
-                pipe_addr_a     <= req_addr;
-                pipe_wide_a     <= req_wide;
-                fill_resp_valid_a <= 0;
-                state           <= S_PIPE;
-            end else if (lat_port == 1'b1 && req_valid_b && req_ready_b) begin
-                pipe_valid_b    <= 1;
-                pipe_addr_b     <= req_addr_b;
-                pipe_wide_b     <= req_wide_b;
-                fill_resp_valid_b <= 0;
-                state           <= S_PIPE;
+            end else begin
+                // Whether the consumer issued a new req this cycle or
+                // not, drive pipe_*_x for the requesting port.  In the
+                // ack-via-new-req case (req_valid && req_ready), pipe_*_x
+                // tracks the new addr and rd_*_x is updated by the
+                // separate latch always block on the same posedge.  In
+                // the no-ack case, pipe_*_x re-points to lat_addr and
+                // rd_*_x is primed with the just-filled line so the
+                // response continues to be served as a pipe_hit_x in
+                // S_PIPE.
+                if (lat_port == 1'b0) begin
+                    fill_resp_valid_a <= 0;
+                    if (req_valid && req_ready) begin
+                        pipe_valid_a <= 1;
+                        pipe_addr_a  <= req_addr;
+                        pipe_wide_a  <= req_wide;
+                        // rd_*_a updated by latch
+                    end else begin
+                        pipe_valid_a <= 1;
+                        pipe_addr_a  <= lat_addr;
+                        pipe_wide_a  <= lat_wide;
+                        rd_tag_a     <= lat_tag;
+                        rd_valid_a   <= 1'b1;
+                        rd_data_a    <= fill_target_word;
+                    end
+                end else begin
+                    fill_resp_valid_b <= 0;
+                    if (req_valid_b && req_ready_b) begin
+                        pipe_valid_b <= 1;
+                        pipe_addr_b  <= req_addr_b;
+                        pipe_wide_b  <= req_wide_b;
+                        // rd_*_b updated by latch
+                    end else begin
+                        pipe_valid_b <= 1;
+                        pipe_addr_b  <= lat_addr;
+                        pipe_wide_b  <= lat_wide;
+                        rd_tag_b     <= lat_tag;
+                        rd_valid_b   <= 1'b1;
+                        rd_data_b    <= fill_target_word;
+                    end
+                end
+                state <= S_PIPE;
             end
         end
 

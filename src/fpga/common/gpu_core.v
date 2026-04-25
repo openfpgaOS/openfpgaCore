@@ -337,14 +337,16 @@ wire [15:0] bad_waddr_count = 16'b0;
 // The SDK's colormap uploads are always word-aligned (`size = 64*256 =
 // 16384 = 4096 × 4`), so the byte-tail loop in of_gpu_colormap_upload
 // never executes with the current hardware's 16 KB colormap.
-reg [31:0] cmap_bram [0:4095];
-
-// Port A: CPU write (full 32-bit) — colormap target only.
-wire cmap_cpu_wr = reg_wr && (reg_addr == 4'd9) && !cmap_wr_target;
-always @(posedge clk) begin
-    if (cmap_cpu_wr)
-        cmap_bram[cmap_wr_addr[13:2]] <= reg_wdata;
-end
+// Colormap storage retired — palookups now live in SDRAM and reads go
+// through gpu_tex_cache port B.  CPU upload path is direct CPU→SDRAM
+// memcpy + cache flush; no MMIO involvement.  GPU_CMAP_ADDR / GPU_CMAP_DATA
+// remain wired (target-select bit 31) but only the transluc[] target is
+// now meaningful — the colormap target (bit 31 == 0) is a no-op write
+// (cmap_wr_addr still increments to keep the existing decoder shape, but
+// nothing latches the data).  See PALOOKUP_BASE / PALOOKUP_STRIDE up above
+// for the SDRAM layout; tex_cache port B is wired into the fragment pipe
+// below so the cmap-read path works the same byte-out-of-32-bit-word way
+// as the prior on-chip BRAM.
 
 // ================================================================
 // transluc[] LUT — 32 KB BUILD-style indexed-color blend table
@@ -374,45 +376,44 @@ always @(posedge clk) begin
         transluc_bram[cmap_wr_addr[14:2]] <= reg_wdata;
 end
 
-// Port B: GPU read
-// HOLD cmap_rd_data during pipeline stalls (fp_pipe_stall). Otherwise the
-// BRAM keeps reading the LATEST cmap_rd_addr (= the next pixel in p2 after
-// the one currently in p2b), and by the time the stall clears, cmap_rd_data
-// has been clobbered with the wrong pixel's colormap entry. Gating the
-// always block keeps cmap_rd_data stable for the pixel currently in p2b,
-// which is what the post-stall p3 <- p2b shift captures. (Manifested as
-// pixels right before each FB word boundary getting their successor's
-// colormap value once the perspective span path's longer initial stall
-// made the timing reproducible.)
-reg [13:0] cmap_rd_addr;
-reg [7:0]  cmap_rd_data;
-// BRAM now 32-bit wide — registered read captures the word; a
-// combinational byte mux selects the lane using the low 2 bits of the
-// addr. Net latency from cmap_rd_addr update to cmap_rd_data is still
-// one cycle (same contract the pipeline expects).
-reg [31:0] cmap_rd_word;
-reg [1:0]  cmap_rd_lane;
-`ifdef GPU_FEAT_FRAG_PIPELINE
-always @(posedge clk) begin
-    if (!fp_pipe_stall) begin
-        cmap_rd_word <= cmap_bram[cmap_rd_addr[13:2]];
-        cmap_rd_lane <= cmap_rd_addr[1:0];
-    end
-end
-`else
-always @(posedge clk) begin
-    cmap_rd_word <= cmap_bram[cmap_rd_addr[13:2]];
-    cmap_rd_lane <= cmap_rd_addr[1:0];
-end
-`endif
-always @(*) begin
-    case (cmap_rd_lane)
-        2'd0: cmap_rd_data = cmap_rd_word[7:0];
-        2'd1: cmap_rd_data = cmap_rd_word[15:8];
-        2'd2: cmap_rd_data = cmap_rd_word[23:16];
-        2'd3: cmap_rd_data = cmap_rd_word[31:24];
-    endcase
-end
+// Cmap read path — formerly cmap_bram, now routed through gpu_tex_cache
+// port B (added by the TDP conversion in commit 1 of the cmap-via-cache
+// plan).  The address pipeline is unchanged in spirit: at p1→p2 shift,
+// latch the SDRAM byte address for the upcoming p2 fragment's cmap
+// lookup; tex_cache port B accepts the request combinationally on cycle
+// p2; the byte response is available combinationally one cycle later
+// (resp_data_b[7:0] at p2b's cycle), exactly mirroring the prior
+// cmap_bram timing.  Misses (which the dedicated BRAM never had) stall
+// the pipeline via fp_pipe_stall's cmap_pipe_wait term until the fill
+// completes — see fp_pipe_stall below.
+//
+// PALOOKUP_BASE + (st_colormap_id << 14) anchors the slot; the per-pixel
+// term (light << 8 | texel) indexes within the slot.  Slot encoding
+// matches the SDK's of_gpu_palookup_upload() on the host side.
+reg [25:0] cmap_req_addr_reg;
+
+// resp_data_b is wired from gpu_tex_cache port B below; the byte falls out
+// of resp_data_b[7:0] (req_wide_b is tied to 0 so port B always returns
+// byte-mode responses).  No held-byte register needed because resp_data_b
+// is held by tex_cache itself across the consumer's stall window — same
+// contract port A uses.
+// Drive port B's req high whenever the fragment in p2 needs cmap.  The
+// address is in cmap_req_addr_reg (loaded at the p1→p2 shift).  The
+// existing held-response contract on tex_cache means we can hold
+// req_valid_b through the whole p2 cycle without re-issuing — accept
+// happens on the first cycle req_ready_b is high, subsequent cycles just
+// observe resp_valid_b stay high (until the next p1→p2 shift loads a new
+// addr and the next accept fires).
+wire        cmap_req_valid_b = p2_valid && p2_flags[SPAN_COLORMAP];
+wire        cmap_req_ready_b;
+wire        cmap_resp_valid_b;
+wire [15:0] cmap_resp_data_b;
+wire [7:0]  cmap_rd_data = cmap_resp_data_b[7:0];
+
+// (cmap_rd_data is now a continuous-assign wire above — no always block
+// needed.  The byte mux that previously selected a lane out of the 32-bit
+// cmap_bram word is now subsumed into tex_cache port B's resp_data_b,
+// which already returns the byte at req_addr_b[1:0] when req_wide_b == 0.)
 
 // ================================================================
 // transluc[] LUT — Port B: GPU read
@@ -602,13 +603,12 @@ wire        tex_axi_rlast;
 wire [2:0] tex_dbg_state;
 wire       tex_dbg_pipe_valid;
 
-// Port B is the dual-port read-only client added in commit 1 of the
-// "drop cmap_bram, route cmap reads through tex_cache" plan.  In this
-// commit it is tied off — gpu_core.v still drives cmap reads from the
-// dedicated cmap_bram below.  Commit 2 wires port B to the colormap
-// address path and removes cmap_bram entirely.  Tying req_valid_b to
-// 0 and ignoring resp_*_b makes the existing 311 gpu tests continue
-// to exercise port A unchanged.
+// Port B is wired to the cmap read path: cmap_req_addr_reg holds the
+// per-pixel SDRAM byte address; the request fires whenever p2 has a
+// SPAN_COLORMAP fragment.  Tex_cache returns the byte combinationally
+// in resp_data_b[7:0] (req_wide_b = 0 → byte mode).  Misses route through
+// the shared AXI fill machine; the consumer-side stall is enforced by
+// fp_pipe_stall's cmap_pipe_wait term.
 gpu_tex_cache tex_cache (
     .clk(clk),
     .reset_n(reset_n),
@@ -620,13 +620,13 @@ gpu_tex_cache tex_cache (
     .req_wide(tex_req_wide),
     .resp_valid(tex_resp_valid),
     .resp_data(tex_resp_data),
-    // Port B — tied off in commit 1, wired to cmap reads in commit 2
-    .req_valid_b(1'b0),
-    .req_ready_b(/* unused */),
-    .req_addr_b(26'b0),
+    // Port B — cmap reads (one byte per fragment, SDRAM-backed palookup)
+    .req_valid_b(cmap_req_valid_b),
+    .req_ready_b(cmap_req_ready_b),
+    .req_addr_b(cmap_req_addr_reg),
     .req_wide_b(1'b0),
-    .resp_valid_b(/* unused */),
-    .resp_data_b(/* unused */),
+    .resp_valid_b(cmap_resp_valid_b),
+    .resp_data_b(cmap_resp_data_b),
     .axi_arvalid(tex_axi_arvalid),
     .axi_arready(tex_axi_arready),
     .axi_araddr(tex_axi_araddr),
@@ -702,6 +702,11 @@ localparam CMD_DRAW_SPAN      = 8'h40;
 //                             emit N separate CMD_DRAW_SPAN commands
 //   0x42 CMD_DRAW_SPRITE    — 2-triangle sprite is cheaper and rotates
 localparam CMD_SET_SKIP_ZERO  = 8'h27;  // 1-word payload: global SKIP_ZERO enable
+localparam CMD_SET_COLORMAP_ID = 8'h28; // 1-word payload: [3:0] = palookup slot
+                                         // (selects which 16-KB palookup
+                                         // page in SDRAM the cmap reads
+                                         // index into; see PALOOKUP_BASE
+                                         // / PALOOKUP_STRIDE below)
 
 // ================================================================
 // GPU State Registers (sticky, set by SET_* commands)
@@ -826,6 +831,7 @@ reg cmd_is_draw_span;
 // cmd_is_draw_spans removed with CMD_DRAW_SPANS — firmware emits N separate
 // CMD_DRAW_SPAN commands for batch draws now.
 reg cmd_is_set_skip_zero;
+reg cmd_is_set_colormap_id;
 `ifdef GPU_FEAT_TRIANGLE
 reg cmd_is_draw_triangles;
 `endif
@@ -833,6 +839,24 @@ reg cmd_is_draw_triangles;
 // ORed into every triangle-emitted span's flags so color-keyed sprites
 // (emitted as 2 triangles) get the transparency treatment.
 reg        st_skip_zero;
+
+// Active palookup slot for colormap reads.  Updated by CMD_SET_COLORMAP_ID;
+// fed into the cmap address compute as the high bits of the SDRAM address
+// (PALOOKUP_BASE + (st_colormap_id << 14) + per-pixel offset).  4-bit means
+// 16 simultaneous palookup pages addressable, which is well above any real
+// Duke3D scene.  Default 0 keeps single-palookup callers working without
+// any new commands.
+reg [3:0]  st_colormap_id;
+
+// SDRAM address layout for palookups.  PALOOKUP_BASE is the byte offset of
+// slot 0; PALOOKUP_STRIDE is the spacing between slots.  Each slot is the
+// same 16 KB shape as the original on-chip cmap_bram (32 shade rows × 256
+// entries × 2 bytes = 16 KB Quake-shape; Duke3D uses 32 × 256 × 1 byte =
+// 8 KB but pads to 16 KB so the slot index multiplier is a clean shift).
+// Both are CPU-known constants so palookup uploads (CPU → SDRAM) and GPU
+// cmap reads agree on layout without any per-slot register state.
+localparam [25:0] PALOOKUP_BASE   = 26'h0100000;  // 1 MB into SDRAM
+localparam [25:0] PALOOKUP_STRIDE = 26'h0004000;  // 16 KB per slot
 
 // Payload streaming state — ring_rd_data is routed directly to each
 // destination reg in S_PAY_DATA; no intermediate pay_buf array.
@@ -1003,7 +1027,17 @@ reg src_done;            // source has issued its last pixel; pipeline draining
 wire fbss_depth_entry = (fbss == FBSS_IDLE) && p3_valid && !p3_discard
                      && (p3_flags[SPAN_DEPTH_TEST] || p3_flags[SPAN_DEPTH_WRITE])
                      && !p3_z_resolved;
-wire fp_pipe_stall = (p1_valid && !tex_resp_valid) || (fbss != FBSS_IDLE) || fbss_depth_entry;
+// cmap_pipe_wait: the p2b→p3 shift consumes cmap_rd_data (= resp_data_b
+// byte) for the fragment in p2b.  If that fragment had SPAN_COLORMAP set
+// and tex_cache port B isn't ready (miss in flight), stall the shift.
+// On hit this is always 0 because resp_valid_b is high combinationally
+// the same cycle pipe_addr_b matches.  See gpu_tex_cache.v for the held-
+// response semantics this relies on.
+wire cmap_pipe_wait = p2b_valid && p2b_flags[SPAN_COLORMAP] && !cmap_resp_valid_b;
+wire fp_pipe_stall = (p1_valid && !tex_resp_valid)
+                  || cmap_pipe_wait
+                  || (fbss != FBSS_IDLE)
+                  || fbss_depth_entry;
 
 // Combinational tex address from p0 + DSP output.  Multiply-mode only
 // (sp_tex_width is always non-zero in every real caller — tested in
@@ -1514,6 +1548,8 @@ always @(posedge clk) begin
         cmd_is_set_fb <= 0; cmd_is_set_zb <= 0;
         cmd_is_draw_span <= 0;
         cmd_is_set_skip_zero <= 0;
+        cmd_is_set_colormap_id <= 0;
+        st_colormap_id <= 4'b0;
         st_skip_zero <= 0;
 `ifdef GPU_FEAT_TRIANGLE
         cmd_is_draw_triangles <= 0;
@@ -1538,6 +1574,7 @@ always @(posedge clk) begin
         p3_fb_addr <= 0; p3_z_addr <= 0; p3_zi <= 0; p3_discard <= 0;
         p3_z_resolved <= 0;
         transluc_rd_addr <= 15'b0;
+        cmap_req_addr_reg <= 26'b0;
         fbss <= FBSS_IDLE;
         fbss_pend_valid <= 0; fbss_pend_color <= 0; fbss_pend_addr <= 0;
         blend_arvalid    <= 0;
@@ -1674,6 +1711,7 @@ always @(posedge clk) begin
             cmd_is_draw_span      <= (cmd_type == CMD_DRAW_SPAN);
             // CMD_DRAW_SPANS removed (was half-implemented dead code)
             cmd_is_set_skip_zero  <= (cmd_type == CMD_SET_SKIP_ZERO);
+            cmd_is_set_colormap_id <= (cmd_type == CMD_SET_COLORMAP_ID);
 `ifdef GPU_FEAT_TRIANGLE
             cmd_is_draw_triangles <= (cmd_type == CMD_DRAW_TRIANGLES);
 `endif
@@ -1749,6 +1787,9 @@ always @(posedge clk) begin
             end
             else if (cmd_is_set_skip_zero) begin
                 if (pay_idx == 5'd0) st_skip_zero <= ring_rd_data[0];
+            end
+            else if (cmd_is_set_colormap_id) begin
+                if (pay_idx == 5'd0) st_colormap_id <= ring_rd_data[3:0];
             end
             else if (cmd_is_draw_span) begin
                 case (pay_idx)
@@ -1867,7 +1908,8 @@ always @(posedge clk) begin
             if (cmd_is_nop || cmd_is_fence
                 || cmd_is_set_texture || cmd_is_set_depth_func
                 || cmd_is_set_fb || cmd_is_set_zb
-                || cmd_is_set_skip_zero) begin
+                || cmd_is_set_skip_zero
+                || cmd_is_set_colormap_id) begin
                 state <= S_IDLE;
             end
             else if (cmd_is_clear) begin
@@ -1988,8 +2030,16 @@ always @(posedge clk) begin
                     p2_zi      <= p1_zi;
                     p2_discard <= p1_flags[SPAN_SKIP_ZERO]
                                && (tex_resp_data[7:0] == 8'hFF);
-                    if (p1_flags[SPAN_COLORMAP])
-                        cmap_rd_addr <= {p1_light[5:0], tex_resp_data[7:0]};
+                    if (p1_flags[SPAN_COLORMAP]) begin
+                        // SDRAM byte address for the cmap lookup.  Slot
+                        // base + per-pixel (shade × 256 + texel).  The
+                        // (st_colormap_id << 14) factor is exactly
+                        // PALOOKUP_STRIDE when STRIDE = 16 KB; expressed
+                        // as a shift here to avoid a multiplier.
+                        cmap_req_addr_reg <= PALOOKUP_BASE
+                                           + {st_colormap_id, 14'b0}
+                                           + {12'b0, p1_light[5:0], tex_resp_data[7:0]};
+                    end
                 end
 
                 // p1 <- p0 (issue commit). Cache accepted our request this
