@@ -25,6 +25,7 @@ extern "C" {
 
 #ifndef OF_PC
 #include "of_caps.h"
+#include "of_cache.h"   /* of_cache_clean_range() — used by palookup upload */
 #endif
 
 /* ================================================================
@@ -295,14 +296,39 @@ static inline void of_gpu_init(void) {
     GPU_CTRL = 1;               /* enable */
 }
 
+/* Upload a palookup table to slot N in SDRAM.  The GPU now reads
+ * palookup bytes through gpu_tex_cache port B (the prior on-chip
+ * cmap_bram was retired); this helper writes the table directly to
+ * the SDRAM region the cache pulls from, then flushes the CPU L1
+ * lines so the GPU sees committed data.  16 KB per slot, up to 16
+ * slots (cf. OF_GPU_PALOOKUP_*).
+ *
+ * Slot selection at draw time is sticky: call of_gpu_set_colormap_id()
+ * to switch.  Reset default is slot 0, so callers that only ever use
+ * one palookup don't need to issue any new commands — the slot-0
+ * wrapper of_gpu_colormap_upload() below preserves the legacy single-
+ * palookup API. */
+static inline void of_gpu_palookup_upload(uint8_t slot, const uint8_t *data,
+                                           uint32_t size) {
+    if (slot >= OF_GPU_PALOOKUP_SLOTS || size > OF_GPU_PALOOKUP_STRIDE) return;
+    uint32_t sdram_base = of_get_caps()->sdram_base;
+    if (sdram_base == 0) return;  /* target without exposed SDRAM */
+    uint8_t *dst = (uint8_t *)(sdram_base
+                              + OF_GPU_PALOOKUP_AXI_OFFSET
+                              + (uint32_t)slot * OF_GPU_PALOOKUP_STRIDE);
+    /* Plain memcpy — palookup uploads are level-load events, not per-
+     * frame.  The of_cache_clean_range that follows ensures the writes
+     * reach SDRAM before the GPU's next tex_cache fill consumes them. */
+    for (uint32_t i = 0; i < size; i++) dst[i] = data[i];
+    of_cache_clean_range(dst, size);
+}
+
+/* Slot 0 wrapper — keeps the legacy of_gpu_colormap_upload() name
+ * working for callers that haven't been updated to multi-slot.  The
+ * GPU's reset default is slot 0, so single-palookup apps are
+ * unchanged. */
 static inline void of_gpu_colormap_upload(const uint8_t *data, uint32_t size) {
-    GPU_CMAP_ADDR = 0;
-    const uint32_t *src32 = (const uint32_t *)data;
-    uint32_t words = size >> 2;
-    for (uint32_t i = 0; i < words; i++)
-        GPU_CMAP_DATA = src32[i];
-    for (uint32_t i = words << 2; i < size; i++)
-        GPU_CMAP_DATA = data[i];
+    of_gpu_palookup_upload(0, data, size);
 }
 
 /* See SDK of_gpu.h for full documentation.  Decimates BUILD's 64 KB
