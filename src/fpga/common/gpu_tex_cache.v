@@ -233,17 +233,23 @@ always @(posedge clk) begin
             // even if the consumer is stalled by some downstream condition
             // (e.g. FB write flush) and can't issue a new request immediately.
 
-            // Flush: go to S_INIT to walk-clear valid_mem.  Honoured here
-            // for both the live `flush` pulse and any `flush_pending`
-            // latched during a prior fill — the latch ensures a flush
-            // issued mid-fill isn't silently dropped.
-            if (flush || flush_pending) begin
-                state <= S_INIT;
-                init_counter <= 0;
-                fill_resp_valid <= 0;
-                pipe_valid <= 0;
-            end else
-            // Miss handling clears pipe_valid as part of entering the fill.
+            // Priority order matters here.  Original code had `flush ||
+            // flush_pending` first, which would silently drop an in-flight
+            // miss request (consumer just issued, pipe_valid=1, miss
+            // detected this cycle): the flush branch yanks pipe_valid <= 0
+            // and transitions to S_INIT before the miss-fill path runs.
+            // Consumer's fragment pipeline is left waiting on a
+            // tex_resp_valid that never comes — fp_pipe_stall stays high,
+            // p1_valid holds, the span never retires, the fence after it
+            // never advances, of_gpu_finish() spins forever.  Symptom on
+            // hardware: BUILD/Duke3D loadtile() flushed the cache between
+            // frames without first fencing the prior frame's spans, the
+            // GPU froze on the next of_gpu_finish().
+            //
+            // Fix: pipe_miss takes priority over flush.  An in-flight miss
+            // runs through fill normally; flush_pending stays sticky and
+            // fires on the trip back through S_PIPE (or via the new
+            // S_FILL_OUT fast-exit added below).
             if (pipe_miss) begin
                 axi_arvalid <= 1;
                 axi_araddr  <= {6'b0, pipe_addr[25:4], 4'b0};
@@ -253,6 +259,15 @@ always @(posedge clk) begin
                 lat_addr    <= pipe_addr;
                 lat_wide    <= pipe_wide;
                 pipe_valid  <= 0;  // explicit clear on miss
+            end else if (flush || flush_pending) begin
+                // Safe to flush now: pipe_miss=0 means either pipe_valid=0
+                // (no in-flight request) or pipe_hit=1 (response is being
+                // served combinationally this cycle — consumer's shift
+                // captures it on the same posedge as our state change).
+                state <= S_INIT;
+                init_counter <= 0;
+                fill_resp_valid <= 0;
+                pipe_valid <= 0;
             end else if (req_valid && req_ready) begin
                 // Accept a new request — overwrites the held pipe state.
                 pipe_valid <= 1;
@@ -295,7 +310,19 @@ always @(posedge clk) begin
             // of the file — by the time we transition to S_PIPE on the
             // cycle the consumer accepts, rd_tag/rd_data are already the
             // values for the new req_addr.
-            if (req_valid && req_ready) begin
+            //
+            // Flush fast-exit: if a flush is pending, transition straight
+            // to S_INIT instead of waiting for the consumer's next
+            // request.  fill_resp_valid was high entering this state, so
+            // the consumer's fragment shift captured the response on its
+            // !fp_pipe_stall path the same cycle.  Routing through S_PIPE
+            // first (the original path) would race the flush_pending
+            // branch and drop the consumer's NEW request.  Bypass S_PIPE.
+            if (flush || flush_pending) begin
+                state <= S_INIT;
+                init_counter <= 0;
+                fill_resp_valid <= 0;
+            end else if (req_valid && req_ready) begin
                 pipe_valid      <= 1;
                 pipe_addr       <= req_addr;
                 pipe_wide       <= req_wide;

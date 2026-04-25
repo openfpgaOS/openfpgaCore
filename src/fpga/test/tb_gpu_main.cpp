@@ -1974,6 +1974,97 @@ static void test_triangle_tex_flush_swap() {
     // Pixels of tri B should be 0xAA (rendered after flush from new texture)
     check_byte("tex_swap_tB_px", 22 + 4*320, 0xAA);
 }
+// Mid-flight GPU_TEX_FLUSH — reproduce the BUILD/Duke3D freeze where
+// loadtile() does of_cache_clean_range + GPU_TEX_FLUSH=1 between
+// frames without first fencing the previous frame's spans.
+//
+// Pre-fix: when the flush pulse arrives while the cache is mid-
+// pipeline (a span's tex request just latched into pipe_addr but
+// resp_valid hasn't fired yet), the flush branch in S_PIPE clears
+// pipe_valid as it transitions to S_INIT.  The fragment processor
+// is left waiting on tex_resp_valid that never comes — fp_pipe_stall
+// stays high, p3 never retires, fb_acc never flushes, the fence
+// after this span never advances, of_gpu_finish hangs.
+//
+// Test plan: submit several textured triangles back-to-back to keep
+// the cache busy, then write GPU_TEX_FLUSH IMMEDIATELY after the
+// kick (without an intervening fence).  Then submit one more
+// triangle and a fence.  Pre-fix: gpu_finish times out.  Post-fix:
+// gpu_finish returns within a sane bound and pixels render.
+static void test_triangle_tex_flush_midflight(void) {
+    printf("TEST: GPU_TEX_FLUSH mid-flight (cache must not drop in-flight req)\n");
+
+    gpu_init();
+
+    { uint8_t cm[256]; for (int i = 0; i < 256; i++) cm[i] = (uint8_t)i;
+      cmap_upload_bytes(0, cm, 256); }
+
+    ring_cmd(0x23, 2);
+    ring_write(FB_BASE_BYTE);
+    ring_write(320);
+
+    ring_cmd(0x10, 2);
+    ring_write((1 << 16) | 0x00);
+    ring_write(0);
+
+    // Use a 64x64 texture so different pixels hit different cache
+    // lines and misses fire frequently — the bug requires the flush
+    // pulse to land while a miss is being filled (or while pipe_valid
+    // holds an in-flight request).  With a 1×1 texture, 99% of
+    // accesses are hits and the bug rarely triggers.
+    uint32_t tex_a_addr = TEX_BASE_BYTE;
+    uint32_t tex_b_addr = TEX_BASE_BYTE + 0x4000;
+    for (int i = 0; i < 64*64/4; i++) {
+        sdram_write((tex_a_addr >> 2) + i, 0xAA00AA00 ^ (uint32_t)i);
+        sdram_write((tex_b_addr >> 2) + i, 0x5500CC00 ^ (uint32_t)i);
+    }
+
+    ring_bind_texture(tex_a_addr, 64, 64);
+
+    // Submit a batch of large textured triangles that span many cache
+    // lines.  Each tri walks across the full 64-wide texture.  No
+    // fence between the batch and the flush.
+    for (int i = 0; i < 8; i++) {
+        ring_cmd(0x30, 19);
+        ring_write(3);
+        ring_write_vertex(0,        i * 4 * 16, 0,         0,             0, 0);
+        ring_write_vertex(64*16,    i * 4 * 16, 0, 64 << 16,             0, 0);
+        ring_write_vertex(0,    (i+4) * 4 * 16, 0,         0, 64 << 16, 0);
+    }
+    gpu_kick();
+
+    // Wait until the GPU has actually entered the fragment pipeline
+    // (some misses must be in flight).  Then issue isolated flush
+    // pulses spaced by ~50 cycles each, repeated dozens of times.
+    // Spacing matters: a continuous flush stream just keeps the cache
+    // in S_INIT, never letting pipe_valid get set to 1.  We need the
+    // gap so the cache can re-enter S_PIPE and start a real request,
+    // THEN a fresh flush pulse arrives — that's the pipe_valid=1 +
+    // flush race the bug needs.
+    for (int i = 0; i < 200; i++) tick();
+    // Cache walk = 1024 cycles; flush must be spaced > that for the
+    // cache to recover and do real fragment work between them.  Spam
+    // 8 spaced flushes — enough to land at multiple cache-state
+    // alignments without bloating the test.  Pre-fix any one badly-
+    // timed pulse hangs the pipeline; post-fix all complete cleanly.
+    for (int f = 0; f < 8; f++) {
+        mmio_write(10, 0x1);
+        for (int i = 0; i < 1500; i++) tick();
+    }
+
+    // Bind tex B and submit one more triangle + fence.  If any flush
+    // dropped an in-flight request, the fragment pipe hangs and
+    // gpu_finish times out.
+    ring_bind_texture(tex_b_addr, 64, 64);
+    ring_cmd(0x30, 19);
+    ring_write(3);
+    ring_write_vertex(80*16,  2*16, 0,        0,        0, 0);
+    ring_write_vertex(88*16,  2*16, 0, 4 << 16,        0, 0);
+    ring_write_vertex(80*16,  8*16, 0,        0, 4 << 16, 0);
+
+    bool ok = gpu_finish(2000000);
+    check("tri_flush_midflight_done", ok ? 1 : 0, 1);
+}
 #endif // GPU_FEAT_TRIANGLE
 
 // =====================================================================
@@ -2274,6 +2365,7 @@ int main(int argc, char **argv) {
     test_triangle_skip_zero();
     test_triangle_back_to_back_many();
     test_triangle_tex_flush_swap();
+    test_triangle_tex_flush_midflight();
 #endif
 
     printf("\n=== Results: %d passed, %d failed ===\n",
