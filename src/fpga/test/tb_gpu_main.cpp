@@ -1006,6 +1006,133 @@ static void test_persp_negative_zinv() {
 }
 #endif // GPU_PERSP_IMPL
 
+// =====================================================================
+// transluc[] BLEND tests (Stage 3 of fabric blend unit)
+// =====================================================================
+//
+// Upload a deterministic 32 KB transluc LUT, pre-fill the destination FB
+// word with a known background byte, and submit a SPAN_TRANSLUC span;
+// verify each output byte equals the LUT lookup of (src[7:1] << 8) | fb.
+//
+// LUT layout in fabric is 8K × 32-bit = 32 KB.  Address composition:
+//   key[14:8] = src[7:1]     (low bit of source axis dropped — 128×256 quant)
+//   key[7:0]  = fb_byte
+//   word_addr = key[14:2]    → 8K word entries
+//   byte_lane = key[1:0]
+//
+// Upload uses the shared GPU_CMAP_ADDR/DATA port with bit 31 of the
+// address set to select the transluc target.
+
+static void transluc_upload_word(uint32_t byte_addr, uint32_t word) {
+    // Target-select bit 31 = 1 selects transluc[].  byte_addr must be
+    // word-aligned.
+    mmio_write(8, (1u << 31) | (byte_addr & 0x7FFC));
+    mmio_write(9, word);
+}
+
+// Upload all 32 KB of transluc[] from a CPU-side byte array.  The CPU
+// table is indexed by (key[14:0]) — same layout the fabric expects.
+static void transluc_upload_full(const uint8_t *table32kb) {
+    mmio_write(8, (1u << 31));  // target=transluc, byte_addr=0
+    for (int byte_addr = 0; byte_addr < 32768; byte_addr += 4) {
+        uint32_t w = ((uint32_t)table32kb[byte_addr + 0] <<  0)
+                   | ((uint32_t)table32kb[byte_addr + 1] <<  8)
+                   | ((uint32_t)table32kb[byte_addr + 2] << 16)
+                   | ((uint32_t)table32kb[byte_addr + 3] << 24);
+        mmio_write(9, w);
+    }
+}
+
+// Test TRL1: deterministic LUT, single span, no fb_acc bypass case
+// (the destination word's pre-existing FB byte is set via SDRAM, fb_acc
+// is empty when the BLEND fragment arrives).
+static void test_transluc_lut_basic(void) {
+    printf("TEST: transluc[] BLEND — deterministic LUT, SDRAM-only FB read\n");
+
+    gpu_init();
+
+    // Identity colormap so the post-cmap source byte equals the texel.
+    {
+        uint8_t cm[256];
+        for (int i = 0; i < 256; i++) cm[i] = (uint8_t)i;
+        cmap_upload_bytes(0, cm, 256);
+    }
+
+    // Build a 32 KB LUT with a deterministic pattern that mixes both
+    // input axes: lut[(src[7:1] << 8) | fb] = (src[7:1] ^ fb ^ 0x5A).
+    // No two (src, fb) combos collide on the same output unless their
+    // bit-XOR sums to the same value.
+    static uint8_t lut[32768];
+    for (int s7 = 0; s7 < 128; s7++) {
+        for (int fb = 0; fb < 256; fb++) {
+            int key = (s7 << 8) | fb;
+            lut[key] = (uint8_t)((s7 ^ fb ^ 0x5A) & 0xFF);
+        }
+    }
+    transluc_upload_full(lut);
+
+    // FB stride 320, base = 0x80000.  Pre-fill 8 destination bytes with
+    // sentinel pattern 0x88, 0x99, 0xAA, ... (rotating).  Done by
+    // sdram_write at the FB word offset (4 bytes = 1 word).
+    const uint8_t bg[8] = { 0x88, 0x99, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF };
+    for (int w = 0; w < 2; w++) {
+        uint32_t word = ((uint32_t)bg[w*4 + 0] <<  0)
+                      | ((uint32_t)bg[w*4 + 1] <<  8)
+                      | ((uint32_t)bg[w*4 + 2] << 16)
+                      | ((uint32_t)bg[w*4 + 3] << 24);
+        sdram_write((FB_BASE_BYTE >> 2) + w, word);
+    }
+
+    // SET_FB
+    ring_cmd(0x23, 2);
+    ring_write(FB_BASE_BYTE);
+    ring_write(320);
+
+    // Bind a 1×1 texture with byte 0x42 (= source for every pixel).
+    sdram_write(TEX_BASE_BYTE >> 2, 0x42424242);
+    // Inline SET_TEXTURE (ring_bind_texture is declared further down in
+    // the file; the test predates that helper in source order).
+    ring_cmd(0x20, 4);
+    ring_write(TEX_BASE_BYTE);
+    ring_write(((uint32_t)1 << 16) | 1);
+    ring_write(0);
+    ring_write(0);
+
+    // Submit a span: 8 pixels, fb_addr=0, flags = COLORMAP|TRANSLUC.
+    // SPAN_COLORMAP=bit0=0x01, SPAN_TRANSLUC=bit6=0x40 → flags = 0x41.
+    ring_cmd(0x40, 18);
+    ring_write(FB_BASE_BYTE);       // fb_addr
+    ring_write(TEX_BASE_BYTE);      // tex_addr
+    ring_write(0); ring_write(0);   // s, t
+    ring_write(0); ring_write(0);   // sstep, tstep
+    ring_write(((uint32_t)8 << 16) | (0 << 8) | 0x41);  // count=8, light=0, flags=COLORMAP|TRANSLUC
+    ring_write((1 << 16) | 1);      // fb_stride=1, tex_width=1
+    ring_write(0);                  // wrap masks
+    ring_write(0); ring_write(0); ring_write(0);  // z unused
+    ring_write(0); ring_write(0); ring_write(0);  // persp unused
+    ring_write(0); ring_write(0); ring_write(0);
+
+    bool ok = gpu_finish();
+    check("transluc_basic_done", ok ? 1 : 0, 1);
+    if (!ok) return;
+
+    // For each output byte, compute expected = lut[(0x42[7:1] << 8) | bg[i]]
+    //   src=0x42 → src[7:1] = 0x21.  key_high = 0x21 << 8 = 0x2100.
+    int any_fail = 0;
+    for (int i = 0; i < 8; i++) {
+        int key      = (0x21 << 8) | bg[i];
+        uint8_t exp  = lut[key];
+        uint8_t got  = sdram_read_byte(FB_BASE_BYTE + i);
+        if (got != exp) {
+            printf("  FAIL pixel %d: got 0x%02x, expected lut[0x%04x]=0x%02x  (bg=0x%02x)\n",
+                   i, got, key, exp, bg[i]);
+            any_fail = 1;
+        }
+    }
+    if (any_fail) fail_count++;
+    else { pass_count++; printf("  OK  8 pixels match LUT(src,fb) reference\n"); }
+}
+
 // Set depth test via CMD_SET_DEPTH_FUNC (available in all variants)
 static void ring_depth_func(uint32_t func) {
     ring_cmd(0x21, 1);
@@ -3798,6 +3925,7 @@ int main(int argc, char **argv) {
     test_persp_small_zinv();
     test_persp_slope_rounding();
     test_persp_negative_zinv();
+    test_transluc_lut_basic();
 #endif
 
 #ifdef GPU_FEAT_TRIANGLE

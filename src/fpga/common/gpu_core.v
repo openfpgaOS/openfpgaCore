@@ -432,19 +432,19 @@ reg [14:0] transluc_rd_addr;
 reg [7:0]  transluc_rd_data;
 reg [31:0] transluc_rd_word;
 reg [1:0]  transluc_rd_lane;
-`ifdef GPU_FEAT_FRAG_PIPELINE
-always @(posedge clk) begin
-    if (!fp_pipe_stall) begin
-        transluc_rd_word <= transluc_bram[transluc_rd_addr[14:2]];
-        transluc_rd_lane <= transluc_rd_addr[1:0];
-    end
-end
-`else
+// Unlike cmap_rd_word, this BRAM read is NOT gated on fp_pipe_stall.
+// fbss != FBSS_IDLE asserts fp_pipe_stall during the entire BLEND
+// sub-flow (REQ → AR_WAIT → R_WAIT → LUT_WAIT → APPLY), but the BLEND
+// flow specifically REQUIRES the BRAM read to fire during LUT_WAIT —
+// transluc_rd_addr is set in BLEND_R_WAIT and the data must be
+// available by BLEND_APPLY two cycles later.  The cmap stall gate is
+// to prevent the cmap address from drifting to the next pipeline
+// pixel mid-stall; here transluc_rd_addr is only ever written by
+// BLEND_R_WAIT and the reset block, so there's no drift to gate.
 always @(posedge clk) begin
     transluc_rd_word <= transluc_bram[transluc_rd_addr[14:2]];
     transluc_rd_lane <= transluc_rd_addr[1:0];
 end
-`endif
 always @(*) begin
     case (transluc_rd_lane)
         2'd0: transluc_rd_data = transluc_rd_word[7:0];
@@ -624,17 +624,46 @@ gpu_tex_cache tex_cache (
 );
 
 // ================================================================
-// AXI4 Read Master — texture cache only (ring moved to M10K BRAM)
+// AXI4 Read Master — texture cache + translucent-blend FB readback
 // ================================================================
-// No arbiter needed: M0 is exclusively for texture cache fills.
+// Two consumers share M0: the texture cache (multi-beat line fills)
+// and the translucent-blend FB readback (single-beat, only fires when
+// SPAN_TRANSLUC is set on a fragment).  Arbitration is by FBSS state:
+// when fbss is in BLEND_AR_WAIT or BLEND_R_WAIT, BLEND owns the bus;
+// otherwise the texture cache does.  BLEND only enters its own AR_WAIT
+// state via FBSS_BLEND_REQ, which waits for the texture cache to be
+// fully idle (no AR pending, no R pending) — so the two never race for
+// the AR phase.
+wire blend_owns_m0 = (fbss == FBSS_BLEND_AR_WAIT)
+                  || (fbss == FBSS_BLEND_R_WAIT);
 
-assign m_rd_arvalid    = tex_axi_arvalid;
-assign m_rd_araddr     = tex_axi_araddr;
-assign m_rd_arlen      = tex_axi_arlen;
-assign tex_axi_arready = m_rd_arready;
-assign tex_axi_rvalid  = m_rd_rvalid;
+assign m_rd_arvalid    = blend_owns_m0 ? blend_arvalid : tex_axi_arvalid;
+assign m_rd_araddr     = blend_owns_m0 ? blend_araddr  : tex_axi_araddr;
+assign m_rd_arlen      = blend_owns_m0 ? 8'd0          : tex_axi_arlen;
+assign tex_axi_arready = blend_owns_m0 ? 1'b0          : m_rd_arready;
+assign tex_axi_rvalid  = blend_owns_m0 ? 1'b0          : m_rd_rvalid;
 assign tex_axi_rdata   = m_rd_rdata;
-assign tex_axi_rlast   = m_rd_rlast;
+assign tex_axi_rlast   = blend_owns_m0 ? 1'b0          : m_rd_rlast;
+
+wire blend_arready = blend_owns_m0 ? m_rd_arready : 1'b0;
+wire blend_rvalid  = blend_owns_m0 ? m_rd_rvalid  : 1'b0;
+wire [31:0] blend_rdata = m_rd_rdata;
+
+// Track texture-cache read-in-flight from gpu_core's vantage so
+// FBSS_BLEND_REQ knows when M0 is fully drained.  Set on the cycle
+// tex's AR is accepted (its handshake on M0); cleared on rlast.
+// Only counts cycles where blend_owns_m0=0 (= the bus is muxed to
+// tex), so the BLEND-side AR/R handshakes don't accidentally toggle it.
+always @(posedge clk) begin
+    if (!reset_n) begin
+        tex_m0_in_flight <= 1'b0;
+    end else if (!blend_owns_m0) begin
+        if (tex_axi_arvalid && m_rd_arready)
+            tex_m0_in_flight <= 1'b1;
+        else if (m_rd_rvalid && m_rd_rlast)
+            tex_m0_in_flight <= 1'b0;
+    end
+end
 
 // ================================================================
 // Command Types
@@ -894,7 +923,36 @@ localparam FBSS_FLUSH_W_RSP = 4'd2;  // wait for W handshake + B response
 localparam FBSS_ZREAD       = 4'd3;  // issue SRAM read for depth compare
 localparam FBSS_ZWAIT       = 4'd4;  // receive read, compare, launch write if needed
 localparam FBSS_ZWRWAIT     = 4'd5;  // wait for SRAM write to complete
+// Translucent-blend sub-flow.  Fragments with SPAN_TRANSLUC pass
+// through a read-modify-write path: read existing FB byte from SDRAM
+// (or bypass from fb_acc if same-word), compose a 15-bit key from the
+// shaded source and the FB byte, look up the blended byte in
+// transluc[], then accumulate that into fb_acc as usual.
+//   BLEND_REQ      — wait for M0 to be free of texture-cache traffic
+//   BLEND_AR_WAIT  — issue AR; m_rd_* muxed to BLEND while in this/R_WAIT
+//   BLEND_R_WAIT   — wait for R, capture rdata
+//   BLEND_LUT_WAIT — BRAM 1-cycle read latency for transluc_rd_data
+//   BLEND_APPLY    — write transluc_rd_data into fb_acc (cross-word
+//                    flush handled identically to the IDLE fast path)
+localparam FBSS_BLEND_REQ      = 4'd6;
+localparam FBSS_BLEND_AR_WAIT  = 4'd7;
+localparam FBSS_BLEND_R_WAIT   = 4'd8;
+localparam FBSS_BLEND_LUT_WAIT = 4'd9;
+localparam FBSS_BLEND_APPLY    = 4'd10;
 reg [3:0] fbss;
+
+// BLEND scratch state (latched at FBSS_IDLE → FBSS_BLEND_REQ).
+reg [7:0]  blend_src_color;       // shaded p3_color captured at entry
+reg [31:0] blend_word_addr;       // p3_word_addr captured at entry
+reg [1:0]  blend_byte_lane;       // p3_byte_lane captured at entry
+reg [7:0]  blend_p3_flags;        // captured for cross-word handling
+reg [31:0] blend_fb_word;         // SDRAM read result (or fb_acc merge)
+reg        blend_arvalid;
+reg [31:0] blend_araddr;
+
+// Tracks whether the texture cache currently has a read in flight on M0.
+// Used by FBSS_BLEND_REQ to wait for M0 to become idle before grabbing it.
+reg        tex_m0_in_flight;
 
 // Pending pixel queued during a flush — applied after AXI write completes.
 reg        fbss_pend_valid;
@@ -1467,6 +1525,13 @@ always @(posedge clk) begin
         transluc_rd_addr <= 15'b0;
         fbss <= FBSS_IDLE;
         fbss_pend_valid <= 0; fbss_pend_color <= 0; fbss_pend_addr <= 0;
+        blend_arvalid    <= 0;
+        blend_araddr     <= 0;
+        blend_src_color  <= 0;
+        blend_word_addr  <= 0;
+        blend_byte_lane  <= 0;
+        blend_p3_flags   <= 0;
+        blend_fb_word    <= 0;
         src_mode <= SRC_SPAN;
         src_done <= 0;
 `ifdef GPU_PERSP_IMPL
@@ -2004,6 +2069,21 @@ always @(posedge clk) begin
                         && !p3_z_resolved) begin
                         fbss <= FBSS_ZREAD;
                     end
+                    // Translucent detour: if SPAN_TRANSLUC is set, capture p3
+                    // state and run the read-modify-write blend flow.  The
+                    // blend result is written to fb_acc by FBSS_BLEND_APPLY,
+                    // so we deliberately do NOT touch fb_acc here.  fb_acc
+                    // state is frozen for the duration of the blend (fbss !=
+                    // IDLE keeps fp_pipe_stall asserted, so no new fragment
+                    // can advance to p3 and clobber it).
+                    else if (p3_valid && !p3_discard && p3_flags[SPAN_TRANSLUC]) begin
+                        blend_src_color <= p3_color;
+                        blend_word_addr <= p3_fb_addr & 32'hFFFFFFFC;
+                        blend_byte_lane <= p3_fb_addr[1:0];
+                        blend_p3_flags  <= p3_flags;
+                        fbss            <= FBSS_BLEND_REQ;
+                        if (fp_pipe_stall) p3_valid <= 0;
+                    end
                     // Process p3 if it has a non-discard pixel (and no pending depth work)
                     else if (p3_valid && !p3_discard) begin : fb_acc_blk
                         p3_word_addr  = p3_fb_addr & 32'hFFFFFFFC;
@@ -2157,6 +2237,121 @@ always @(posedge clk) begin
                     if (!sram_busy) begin
                         p3_z_resolved <= 1;
                         fbss          <= FBSS_IDLE;
+                    end
+                end
+
+                // --------------------------------------------------------
+                // Translucent-blend sub-flow (5 states).  Entry from
+                // FBSS_IDLE captured the pixel into blend_*; we now read
+                // the existing FB byte (from SDRAM, with fb_acc bypass for
+                // the same-word case), look up the blended byte in
+                // transluc[], then accumulate it into fb_acc using the
+                // same path as the IDLE fast path.
+                // --------------------------------------------------------
+                FBSS_BLEND_REQ: begin
+                    // Wait for the texture cache to be fully drained from M0
+                    // (no pending AR, no in-flight read) before grabbing the
+                    // bus.  blend_owns_m0 is gated on fbss state, so we
+                    // can't drive m_rd_arvalid until we transition.
+                    if (!tex_axi_arvalid && !tex_m0_in_flight) begin
+                        blend_arvalid <= 1;
+                        blend_araddr  <= blend_word_addr;
+                        fbss          <= FBSS_BLEND_AR_WAIT;
+                    end
+                end
+
+                FBSS_BLEND_AR_WAIT: begin
+                    if (blend_arready) begin
+                        blend_arvalid <= 0;
+                        fbss          <= FBSS_BLEND_R_WAIT;
+                    end
+                end
+
+                FBSS_BLEND_R_WAIT: begin
+                    if (blend_rvalid) begin : blend_r_capture
+                        // Compose the FB byte for the blend: prefer fb_acc's
+                        // pending lane data over the SDRAM read when fb_acc
+                        // has dirty data for our word + lane (same-word
+                        // bypass, handles back-to-back GPU translucent
+                        // overdraw correctly).
+                        reg [7:0] rdata_lane;
+                        reg [7:0] acc_lane;
+                        reg [7:0] fb_byte;
+                        case (blend_byte_lane)
+                            2'd0: begin rdata_lane = blend_rdata[7:0];   acc_lane = fb_acc_data[7:0];   end
+                            2'd1: begin rdata_lane = blend_rdata[15:8];  acc_lane = fb_acc_data[15:8];  end
+                            2'd2: begin rdata_lane = blend_rdata[23:16]; acc_lane = fb_acc_data[23:16]; end
+                            2'd3: begin rdata_lane = blend_rdata[31:24]; acc_lane = fb_acc_data[31:24]; end
+                        endcase
+                        fb_byte = (fb_acc_valid && fb_acc_addr == blend_word_addr
+                                   && fb_acc_mask[blend_byte_lane])
+                                ? acc_lane : rdata_lane;
+                        // Stash for diagnostics (not used downstream).
+                        blend_fb_word <= blend_rdata;
+                        // Drive transluc_rd_addr now so the BRAM read
+                        // happens during BLEND_LUT_WAIT and the data is
+                        // valid by the time BLEND_APPLY runs (one cycle
+                        // address-set + one cycle BRAM-read = two cycles).
+                        // Key layout (15 bits): { src[7:1], fb_byte }.  The
+                        // SPAN_TRANSLUC_REV variant swaps which axis loses
+                        // its low bit.  Source LSB drop is the 128×256
+                        // quantisation chosen in transluc.md.
+                        if (blend_p3_flags[SPAN_TRANSLUC_REV])
+                            transluc_rd_addr <= { fb_byte[7:1], blend_src_color };
+                        else
+                            transluc_rd_addr <= { blend_src_color[7:1], fb_byte };
+                        fbss <= FBSS_BLEND_LUT_WAIT;
+                    end
+                end
+
+                FBSS_BLEND_LUT_WAIT: begin
+                    // BRAM read latency: addr was set at end of BLEND_R_WAIT,
+                    // BRAM samples it during this cycle, transluc_rd_data is
+                    // valid by the start of BLEND_APPLY.
+                    fbss <= FBSS_BLEND_APPLY;
+                end
+
+                FBSS_BLEND_APPLY: begin : fbss_blend_apply_blk
+                    // transluc_rd_data is now valid.  Apply it to fb_acc
+                    // exactly like the IDLE fast path applies p3_color —
+                    // including the cross-word flush case.  Cannot just
+                    // re-enter IDLE because p3 may already have shifted
+                    // out (we cleared p3_valid on entry to BLEND_REQ).
+                    reg p3_word_match_b;
+                    p3_word_match_b = (fb_acc_valid && fb_acc_addr == blend_word_addr)
+                                   || !fb_acc_valid;
+                    if (!p3_word_match_b) begin
+                        // Cross-word: flush old fb_acc, queue blended byte
+                        // for re-application (same as FBSS_FLUSH_W_RSP path).
+                        m_wr_awvalid <= 1;
+                        m_wr_awaddr  <= fb_acc_addr;
+                        m_wr_awlen   <= 0;
+                        m_wr_wvalid  <= 1;
+                        m_wr_wdata   <= fb_acc_data;
+                        m_wr_wstrb   <= fb_acc_mask;
+                        m_wr_wlast   <= 1;
+
+                        fbss_pend_valid <= 1;
+                        fbss_pend_color <= transluc_rd_data;
+                        fbss_pend_addr  <= { blend_word_addr[31:2], blend_byte_lane };
+
+                        fb_acc_valid <= 0;
+                        fb_acc_mask  <= 4'b0;
+
+                        fbss <= FBSS_FLUSH_W_RSP;
+                    end else begin
+`ifdef GPU_STATS
+                        stat_pixels  <= stat_pixels + 32'd1;
+`endif
+                        fb_acc_valid <= 1;
+                        fb_acc_addr  <= blend_word_addr;
+                        case (blend_byte_lane)
+                            2'd0: begin fb_acc_data[7:0]   <= transluc_rd_data; fb_acc_mask[0] <= 1; end
+                            2'd1: begin fb_acc_data[15:8]  <= transluc_rd_data; fb_acc_mask[1] <= 1; end
+                            2'd2: begin fb_acc_data[23:16] <= transluc_rd_data; fb_acc_mask[2] <= 1; end
+                            2'd3: begin fb_acc_data[31:24] <= transluc_rd_data; fb_acc_mask[3] <= 1; end
+                        endcase
+                        fbss <= FBSS_IDLE;
                     end
                 end
 
