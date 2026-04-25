@@ -1081,6 +1081,13 @@ reg signed [15:0] v_x [0:2], v_y [0:2];       // 12.4 screen coords
 reg        [15:0] v_z [0:2];                    // 16-bit depth
 reg signed [15:0] v_s [0:2], v_t [0:2];        // tex coord integer part
 reg        [7:0]  v_r [0:2];                    // light / vertex color
+// Phase 4c.1 — perspective: v_w[i] is 1/W per vertex, Q16.16 fixed-
+// point.  0x00010000 == 1.0 == affine.  When all three vertices have
+// w == 0x00010000 we'll bypass the divide; otherwise the fragment
+// stage divides interpolated (s*w, t*w) by interpolated w.  In 4c.1
+// these are loaded but not yet consumed — the affine path is still
+// the only live one.
+reg signed [31:0] v_w [0:2];
 
 // Edge equation coefficients: E_i(x,y) = A_i*x + B_i*y + C_i
 reg signed [31:0] tri_A [0:2], tri_B [0:2], tri_C [0:2];
@@ -1489,23 +1496,26 @@ always @(posedge clk) begin
                 //   word 1: {z,  --}  (16-bit unsigned depth in [31:16])
                 //   word 2: {s,  --}  (sign-extended tex s)
                 //   word 3: {t,  --}  (sign-extended tex t)
-                //   word 4: reserved
+                //   word 4: w (1/W in Q16.16, 0x00010000 == affine)
                 //   word 5: {--, --, --, r}  (flat light in low byte)
                 case (pay_idx)
                     5'd1: begin v_x[0] <= ring_rd_data[31:16]; v_y[0] <= ring_rd_data[15:0]; end
                     5'd2: v_z[0] <= ring_rd_data[31:16];
                     5'd3: v_s[0] <= ring_rd_data[31:16];
                     5'd4: v_t[0] <= ring_rd_data[31:16];
+                    5'd5: v_w[0] <= ring_rd_data;
                     5'd6: v_r[0] <= ring_rd_data[7:0];
                     5'd7: begin v_x[1] <= ring_rd_data[31:16]; v_y[1] <= ring_rd_data[15:0]; end
                     5'd8: v_z[1] <= ring_rd_data[31:16];
                     5'd9: v_s[1] <= ring_rd_data[31:16];
                     5'd10: v_t[1] <= ring_rd_data[31:16];
+                    5'd11: v_w[1] <= ring_rd_data;
                     5'd12: v_r[1] <= ring_rd_data[7:0];
                     5'd13: begin v_x[2] <= ring_rd_data[31:16]; v_y[2] <= ring_rd_data[15:0]; end
                     5'd14: v_z[2] <= ring_rd_data[31:16];
                     5'd15: v_s[2] <= ring_rd_data[31:16];
                     5'd16: v_t[2] <= ring_rd_data[31:16];
+                    5'd17: v_w[2] <= ring_rd_data;
                     5'd18: v_r[2] <= ring_rd_data[7:0];
                     default: ;
                 endcase
