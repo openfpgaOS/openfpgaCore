@@ -47,7 +47,7 @@ all: help
 
 # ── Full build ───────────────────────────────────────────────────────
 # bootloader → os → build → summary. `build` itself auto-runs the cpu
-# generation (file-target rule below) when VexiiRiscv_Full.v is missing.
+# generation (file-target rule below) when VexiiRiscv.v is missing.
 # Verilator tests are NOT part of a full build — run them explicitly
 # via `make test` when you've changed RTL.
 full: cpu bootloader os build summary

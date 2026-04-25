@@ -102,7 +102,7 @@ AUDIO_FLAGS = -Wno-WIDTHEXPAND -Wno-CASEINCOMPLETE -Wno-SYNCASYNCNET -Wno-UNOPTF
 # ============================================================
 # Full system bring-up — CPU + SDRAM + CRAM0 CDC + BRAM
 # ============================================================
-# Boots the OpenFpgaVexii through the v2 fabric, loads os.bin into the
+# Boots the VexiiRiscv through the v2 fabric, loads os.bin into the
 # simulated CRAM0, and prints anything the kernel pushes out UART.
 # Requires firmware.mif + os.bin to be present in ../../firmware/os/.
 SYSTEM_SRCS = \
@@ -117,7 +117,7 @@ SYSTEM_SRCS = \
 	$(COMMON_DIR)/axi_sdram_slave.v \
 	$(COMMON_DIR)/axi_periph_slave.v \
 	$(COMMON_DIR)/snac_shifter.v \
-	../vendor/vexriscv/VexiiRiscv/OpenFpgaVexii.v \
+	../vendor/vexriscv/VexiiRiscv/VexiiRiscv.v \
 	$(TARGET_DIR)/apf/common.v
 
 SYSTEM_CPP = tb_system_main.cpp
