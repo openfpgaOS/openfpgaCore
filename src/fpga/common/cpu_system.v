@@ -205,6 +205,17 @@ reg lsu_inflight_write;   // AW+W accepted, waiting for B
 reg lsu_ar_sent;
 reg lsu_aw_sent, lsu_w_sent;
 
+// The native LSU cmd payload is only guaranteed stable until cmd_ready.
+// Hold a private copy while the downstream AXI target accepts AW/W/AR.
+reg        lsu_req_write;
+reg [31:0] lsu_req_addr;
+reg [31:0] lsu_req_data;
+reg [1:0]  lsu_req_size;
+reg [3:0]  lsu_req_mask;
+
+wire lsu_cmd_can_accept = !lsu_inflight_read && !lsu_inflight_write;
+wire lsu_cmd_fire = lsu_cmd_valid && lsu_cmd_can_accept;
+
 always @(posedge clk or posedge reset) begin
     if (reset) begin
         lsu_inflight_read  <= 1'b0;
@@ -212,13 +223,26 @@ always @(posedge clk or posedge reset) begin
         lsu_ar_sent        <= 1'b0;
         lsu_aw_sent        <= 1'b0;
         lsu_w_sent         <= 1'b0;
+        lsu_req_write      <= 1'b0;
+        lsu_req_addr       <= 32'b0;
+        lsu_req_data       <= 32'b0;
+        lsu_req_size       <= 2'b0;
+        lsu_req_mask       <= 4'b0;
     end else begin
+        if (lsu_cmd_fire) begin
+            lsu_req_write <= lsu_cmd_write;
+            lsu_req_addr  <= lsu_cmd_addr;
+            lsu_req_data  <= lsu_cmd_data;
+            lsu_req_size  <= lsu_cmd_size;
+            lsu_req_mask  <= lsu_cmd_mask;
+        end
+
         // Read issue
         if (per_arvalid && per_arready) lsu_ar_sent <= 1'b1;
         if (per_rvalid  && per_rready && per_rlast) begin
             lsu_inflight_read <= 1'b0;
             lsu_ar_sent       <= 1'b0;
-        end else if (lsu_cmd_valid && !lsu_cmd_write && !lsu_inflight_read && !lsu_inflight_write) begin
+        end else if (lsu_cmd_fire && !lsu_cmd_write) begin
             lsu_inflight_read <= 1'b1;
         end
 
@@ -229,7 +253,7 @@ always @(posedge clk or posedge reset) begin
             lsu_inflight_write <= 1'b0;
             lsu_aw_sent        <= 1'b0;
             lsu_w_sent         <= 1'b0;
-        end else if (lsu_cmd_valid && lsu_cmd_write && !lsu_inflight_write && !lsu_inflight_read) begin
+        end else if (lsu_cmd_fire && lsu_cmd_write) begin
             lsu_inflight_write <= 1'b1;
         end
     end
@@ -237,36 +261,34 @@ end
 
 // AR channel — drive while we have a read in flight but AR not yet accepted.
 assign per_arvalid = lsu_inflight_read & ~lsu_ar_sent;
-assign per_araddr  = lsu_cmd_addr;
+assign per_araddr  = lsu_req_addr;
 assign per_arlen   = 8'd0;           // single beat
-assign per_arsize  = {1'b0, lsu_cmd_size};
+assign per_arsize  = {1'b0, lsu_req_size};
 assign per_arburst = 2'b01;          // INCR
 assign per_rready  = 1'b1;           // always accept the single R beat
 
 // AW/W channels — single-beat write.
 assign per_awvalid    = lsu_inflight_write & ~lsu_aw_sent;
-assign per_awaddr     = lsu_cmd_addr;
+assign per_awaddr     = lsu_req_addr;
 assign per_awlen      = 8'd0;
-assign per_awsize     = {1'b0, lsu_cmd_size};
+assign per_awsize     = {1'b0, lsu_req_size};
 assign per_awburst    = 2'b01;
-assign per_awallStrb  = &lsu_cmd_mask;
+assign per_awallStrb  = &lsu_req_mask;
 assign per_wvalid     = lsu_inflight_write & ~lsu_w_sent;
-assign per_wdata      = lsu_cmd_data;
-assign per_wstrb      = lsu_cmd_mask;
+assign per_wdata      = lsu_req_data;
+assign per_wstrb      = lsu_req_mask;
 assign per_wlast      = 1'b1;
 assign per_bready     = 1'b1;
 
-// Accept the native cmd once we've latched it into an in-flight state.
-assign lsu_cmd_ready =
-       (lsu_cmd_valid && !lsu_cmd_write && !lsu_inflight_read && !lsu_inflight_write)
-    || (lsu_cmd_valid &&  lsu_cmd_write && !lsu_inflight_read && !lsu_inflight_write);
+// Accept exactly one native command, then hold its payload until response.
+assign lsu_cmd_ready = lsu_cmd_can_accept;
 
 // Return the rsp beat when R or B lands.
 assign lsu_rsp_valid = (per_rvalid & per_rready & per_rlast)
                      | (per_bvalid & per_bready);
 assign lsu_rsp_data  = per_rdata;
-assign lsu_rsp_error = lsu_inflight_read ? (per_rresp != 2'b00)
-                                         : (per_bresp != 2'b00);
+assign lsu_rsp_error = lsu_req_write ? (per_bresp != 2'b00)
+                                     : (per_rresp != 2'b00);
 
 // i_axi AW/W/B tie-offs retained for backwards-compatible placeholders.
 assign i_awvalid_tie = 1'b0;

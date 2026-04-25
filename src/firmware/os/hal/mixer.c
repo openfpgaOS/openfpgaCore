@@ -232,12 +232,23 @@ int of_mixer_play(const uint8_t *pcm_s16, uint32_t sample_count,
     return play_internal(pcm_s16, sample_count, sample_rate, priority, volume, 1);
 }
 
+/* HW v2 mixer is 16-bit-only (see audio_mixer.v).  We implement 8-bit
+ * playback by expanding s8 → s16 into a fresh sample-pool buffer and
+ * handing that to play_internal.  Costs one O(N) copy + 2× pool bytes
+ * per 8-bit sample; steady-state playback is identical to 16-bit. */
 int of_mixer_play_8bit(const uint8_t *pcm_s8, uint32_t sample_count,
                        uint32_t sample_rate, int priority, int volume)
 {
-    (void)pcm_s8; (void)sample_count; (void)sample_rate;
-    (void)priority; (void)volume;
-    return -1;   /* deferred — see audio_mixer.v header */
+    if (!pcm_s8 || sample_count == 0) return -1;
+
+    int16_t *s16 = (int16_t *)of_mixer_alloc_samples(sample_count * sizeof(int16_t));
+    if (!s16) return -1;
+
+    const int8_t *src = (const int8_t *)pcm_s8;
+    for (uint32_t i = 0; i < sample_count; i++)
+        s16[i] = (int16_t)((int16_t)src[i] << 8);
+
+    return play_internal(s16, sample_count, sample_rate, priority, volume, 1);
 }
 
 void of_mixer_retrigger(int voice, const uint8_t *pcm_s16,
