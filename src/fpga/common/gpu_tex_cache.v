@@ -216,26 +216,49 @@ wire [1:0]          addr_word_a = req_addr[3:2];
 wire [SET_BITS-1:0] addr_set_b  = req_addr_b[13:4];
 wire [1:0]          addr_word_b = req_addr_b[3:2];
 
-// Port A: read on accept; AND fill writes through this port.  Quartus
-// recognises the {if-write; else read} pattern as a single TDP port
-// with mixed read/write semantics.  data_mem write happens in
-// S_FILL_DATA below; we model the read here so the always block is
-// synth-friendly.
+// Single-writer rule: each rd_*_x register is written by exactly
+// one always block (this one), so Quartus is happy with M10K SDP
+// inference and there's no multi-driver synthesis error.  Two cases:
+//
+//   1. req_valid_x && req_ready_x — new request accepted on this
+//      port: latch the M10K read of (addr_set_x, addr_word_x).
+//      Standard SDP read-with-enable pattern.
+//
+//   2. else, exiting S_FILL_OUT on the no-ack path for this port:
+//      no consumer accept this cycle, so prime rd_*_x with the
+//      just-filled line (lat_tag + fill_target_word).  Mirrors
+//      the FSM's pipe_*_x <= lat_*_x update on the same posedge,
+//      so resp_valid_x stays alive in S_PIPE next cycle as a
+//      pipe_hit_x — exactly the timing the original consumer code
+//      expects, no extra cycle of stall.
+wire prime_a = (state == S_FILL_OUT) && (lat_port == 1'b0)
+            && !flush && !flush_pending
+            && !(req_valid && req_ready);
+wire prime_b = (state == S_FILL_OUT) && (lat_port == 1'b1)
+            && !flush && !flush_pending
+            && !(req_valid_b && req_ready_b);
+
 always @(posedge clk) begin
     if (req_valid && req_ready) begin
         rd_tag_a   <= tag_mem[addr_set_a];
         rd_valid_a <= valid_mem[addr_set_a];
         rd_data_a  <= data_mem[{addr_set_a, addr_word_a}];
+    end else if (prime_a) begin
+        rd_tag_a   <= lat_tag;
+        rd_valid_a <= 1'b1;
+        rd_data_a  <= fill_target_word;
     end
 end
 
-// Port B: read-only.  A separate always block keeps Quartus's TDP
-// recognition pattern clean.
 always @(posedge clk) begin
     if (req_valid_b && req_ready_b) begin
         rd_tag_b   <= tag_mem[addr_set_b];
         rd_valid_b <= valid_mem[addr_set_b];
         rd_data_b  <= data_mem[{addr_set_b, addr_word_b}];
+    end else if (prime_b) begin
+        rd_tag_b   <= lat_tag;
+        rd_valid_b <= 1'b1;
+        rd_data_b  <= fill_target_word;
     end
 end
 
@@ -463,20 +486,22 @@ always @(posedge clk) begin
                 // rd_*_x is primed with the just-filled line so the
                 // response continues to be served as a pipe_hit_x in
                 // S_PIPE.
+                // pipe_*_x is a single-writer reg (this FSM block);
+                // rd_*_x is updated by the M10K-read latch above using
+                // the prime_a / prime_b combinational signals which
+                // mirror the conditions here.  Single posedge T sees
+                // both pipe_*_x and rd_*_x land at their correct
+                // POST-edge values.
                 if (lat_port == 1'b0) begin
                     fill_resp_valid_a <= 0;
                     if (req_valid && req_ready) begin
                         pipe_valid_a <= 1;
                         pipe_addr_a  <= req_addr;
                         pipe_wide_a  <= req_wide;
-                        // rd_*_a updated by latch
                     end else begin
                         pipe_valid_a <= 1;
                         pipe_addr_a  <= lat_addr;
                         pipe_wide_a  <= lat_wide;
-                        rd_tag_a     <= lat_tag;
-                        rd_valid_a   <= 1'b1;
-                        rd_data_a    <= fill_target_word;
                     end
                 end else begin
                     fill_resp_valid_b <= 0;
@@ -484,14 +509,10 @@ always @(posedge clk) begin
                         pipe_valid_b <= 1;
                         pipe_addr_b  <= req_addr_b;
                         pipe_wide_b  <= req_wide_b;
-                        // rd_*_b updated by latch
                     end else begin
                         pipe_valid_b <= 1;
                         pipe_addr_b  <= lat_addr;
                         pipe_wide_b  <= lat_wide;
-                        rd_tag_b     <= lat_tag;
-                        rd_valid_b   <= 1'b1;
-                        rd_data_b    <= fill_target_word;
                     end
                 end
                 state <= S_PIPE;
