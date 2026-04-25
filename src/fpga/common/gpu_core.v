@@ -970,8 +970,22 @@ localparam PSS_RECIP_SHIFT = 4'd9;  // stage between RECIP_W and MUL: compute re
                                     // reg-to-reg load into dsp_b/dsp2_b instead of
                                     // synthesizing a 32-bit variable barrel shift
                                     // into the dsp2_b update mux (-0.661 ns cone).
+// Newton-Raphson refinement (bug-report 2026-04-25 part C).  The
+// 1024-entry LUT gives ~10-bit precision in 1/normalised; for Quake's
+// very-small 1/z values on oblique surfaces that loses ~3 bits of
+// useful precision and texcoords drift visibly across spans.  One
+// N-R iteration y1 = y0 * (2 - x*y0) doubles the precision to ~20
+// bits — well past Q16.16 — at the cost of 6 cycles per recip.
+// Reuses the existing dsp slot, no new DSPs.
+localparam PSS_NR_MUL_X    = 4'd10;  // launch x * y0
+localparam PSS_NR_MUL_X_W  = 4'd11;  // DSP pipeline delay
+localparam PSS_NR_SUB      = 4'd12;  // capture xy, register 2 - xy
+localparam PSS_NR_MUL_Y    = 4'd13;  // launch y0 * (2 - xy)
+localparam PSS_NR_MUL_Y_W  = 4'd14;  // DSP pipeline delay
+localparam PSS_NR_CAPTURE  = 4'd15;  // refined recip → recip_q16_r
 reg [3:0] persp_pss;
 reg signed [31:0] recip_q16_r;
+reg signed [31:0] nr_two_minus_xy;
 
 // PSS pass type — what PSS_FINAL should do with the computed (s_end, t_end).
 localparam PSS_PASS_ANCHOR = 2'd0;  // pass 1: anchor only → persp_anchor_s/t
@@ -1385,6 +1399,7 @@ always @(posedge clk) begin
         persp_pass <= PSS_PASS_ANCHOR;
         persp_zinv_abs_r <= 0;
         persp_clz <= 0;
+        nr_two_minus_xy <= 0;
 `endif
 `endif
 `ifdef GPU_HAS_RECIP_LUT
@@ -2123,6 +2138,39 @@ always @(posedge clk) begin
                     else
                         recip_q16_r <= $signed({16'b0, recip_rd_data})
                                      >>> (5'd13 - persp_clz);
+                    persp_pss <= PSS_NR_MUL_X;
+                end
+
+                // ----- Newton-Raphson iteration (bug-report 2026-04-25 #C)
+                // Goal: refine recip_q16_r (= y0, ~10-bit precision from
+                // the 1024-entry LUT) into a ~20-bit-precision Q16.16
+                // reciprocal via y1 = y0 * (2 - x * y0).  All math in
+                // signed Q16.16; products taken as dsp_p[47:16].
+                PSS_NR_MUL_X: begin
+                    // Launch x * y0 on dsp.  dsp2 idle this round.
+                    dsp_a <= $signed(persp_zinv_abs_r);
+                    dsp_b <= recip_q16_r;
+                    persp_pss <= PSS_NR_MUL_X_W;
+                end
+                PSS_NR_MUL_X_W: persp_pss <= PSS_NR_SUB;
+                PSS_NR_SUB: begin
+                    // dsp_p[47:16] = x * y0 in Q16.16 ≈ 1.0 (= 0x10000).
+                    // For a perfect y0, exactly 1.0; LUT precision causes
+                    // a small offset.  N-R uses (2 - x*y0) to "correct"
+                    // the offset on the next multiply.
+                    nr_two_minus_xy <= 32'h00020000 - $signed(dsp_p[47:16]);
+                    persp_pss <= PSS_NR_MUL_Y;
+                end
+                PSS_NR_MUL_Y: begin
+                    // Launch y0 * (2 - x * y0).
+                    dsp_a <= recip_q16_r;
+                    dsp_b <= nr_two_minus_xy;
+                    persp_pss <= PSS_NR_MUL_Y_W;
+                end
+                PSS_NR_MUL_Y_W: persp_pss <= PSS_NR_CAPTURE;
+                PSS_NR_CAPTURE: begin
+                    // Refined Q16.16 reciprocal.
+                    recip_q16_r <= dsp_p[47:16];
                     persp_pss <= PSS_MUL;
                 end
 
