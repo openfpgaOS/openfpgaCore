@@ -474,18 +474,24 @@ always @(posedge clk) begin
 end
 `endif // GPU_FEAT_TRIANGLE
 
-// Reciprocal LUT: 256 × 16-bit in M10K (saves ~250 ALMs vs registers).
-// Registered read port: set recip_rd_addr, result in recip_rd_data next cycle.
-// Stored value: recip_lut[i] = 0x400000 / (256 + i) → 16-bit Q14
-// (i.e. recip_lut[0] = 16384 = 1.0 in Q14, recip_lut[255] ≈ 0.502).
-(* ramstyle = "M10K" *) reg [15:0] recip_lut [0:255];
-reg [7:0]  recip_rd_addr;
+// Reciprocal LUT: 1024 × 16-bit in M10K (Phase 4b — widened from 256 to
+// 1024 to give 10-bit input precision instead of 8-bit, the simpler of
+// the two precision options the 2026-04-25 bug report called out).
+// 1024×16 doesn't fit in a single M10K (10 Kbits), so this synthesises
+// to 2 M10K blocks; FB/cmap/etc. unchanged.  Registered read port: set
+// recip_rd_addr, result in recip_rd_data next cycle.
+// Stored value: recip_lut[i] = 0x1000000 / (1024 + i) → 16-bit Q14
+// (i.e. recip_lut[0] = 16384 = 1.0 in Q14, recip_lut[1023] ≈ 0.501).
+// LUT output Q-format unchanged — the PSS_RECIP_SHIFT shift constant
+// (5'd13) is independent of the input bit-width, so no shift change.
+(* ramstyle = "M10K" *) reg [15:0] recip_lut [0:1023];
+reg [9:0]  recip_rd_addr;
 reg [15:0] recip_rd_data;
 always @(posedge clk) recip_rd_data <= recip_lut[recip_rd_addr];
 integer ri;
 initial begin
-    for (ri = 0; ri < 256; ri = ri + 1)
-        recip_lut[ri] = (4194304) / (256 + ri);
+    for (ri = 0; ri < 1024; ri = ri + 1)
+        recip_lut[ri] = (16777216) / (1024 + ri);
 end
 `endif // GPU_HAS_RECIP_LUT
 
@@ -1028,12 +1034,14 @@ endfunction
 
 // CLZ wire computed from the REGISTERED abs value during PSS_CLZ.
 wire [4:0] persp_clz_pipe = persp_clz_fn(persp_zinv_abs_r);
-// top8 = bits[30:23] of (persp_zinv_abs_r << persp_clz). Computed during
-// PSS_TOP8 from the REGISTERED abs and the REGISTERED clz, so the variable
+// top10 = bits[30:21] of (persp_zinv_abs_r << persp_clz). 10-bit input
+// to the widened reciprocal LUT (Phase 4b).  Computed during PSS_TOP8
+// from the REGISTERED abs and the REGISTERED clz, so the variable
 // barrel shift sits between two register banks instead of in front of a
-// 32-line CLZ casez (which was the old critical path).
+// 32-line CLZ casez (which was the old critical path).  Width grows by
+// 2 bits but the casez chain is unchanged.
 wire [31:0] persp_norm_pipe = persp_zinv_abs_r << persp_clz;
-wire [7:0]  persp_top8_pipe = persp_norm_pipe[30:23];
+wire [9:0]  persp_top8_pipe = persp_norm_pipe[30:21];
 `else
 wire persp_issue_stall = 1'b0;
 `endif // GPU_PERSP_IMPL
