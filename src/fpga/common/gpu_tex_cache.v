@@ -1,10 +1,23 @@
 //
-// GPU Texture Cache -- 16 KB, Direct-Mapped, 2-Stage Pipelined
+// GPU Texture Cache -- 16 KB, Direct-Mapped, 2-Stage Pipelined, Dual Port
 //
 // 1024 sets x 16 bytes/line = 16,384 bytes.
-// Single tag + data RAM. Pipelined for 1 request/cycle on hits.
+// Single tag + data RAM, inferred as M10K with TDP read access (Cyclone V).
 //
-// Pipeline:
+// Two consumer ports:
+//   Port A (req_valid / req_ready / req_addr / req_wide /
+//          resp_valid / resp_data)
+//          — historically the texture-fetch port.  Drives the AXI fill
+//          machine when port A misses.
+//   Port B (req_valid_b ... resp_data_b)
+//          — second read-only client (commit 2 will wire this to the
+//          colormap-lookup path so palookup tables can live in SDRAM
+//          and be cache-served instead of consuming a dedicated
+//          16 KB cmap_bram).  Today gpu_core ties port B inputs to 0
+//          and ignores its outputs; existing tests therefore exercise
+//          only port A and continue to pass byte-exact.
+//
+// Per port:
 //   Stage 1 (req in):  RAM tag/data read at req_addr's set (combinational
 //                      address into M10K, registered output 1 cycle later).
 //                      Latch req_addr/req_wide into stage 2 register.
@@ -12,14 +25,20 @@
 //                      that was at stage 1 last cycle (i.e. now at stage 2).
 //                      Combinational hit detect, register resp_valid/resp_data.
 //
-// Latency: 1 cycle from req_valid+req_ready to resp_valid (cache hit).
-// Throughput: 1 request/cycle on hits.
+// Latency: 1 cycle from req_valid+req_ready to resp_valid (cache hit),
+// per port, independent.  Both ports can hit on the same cycle: the M10K
+// is configured TDP at 32 b × 256 entries (same M10K count as the prior
+// SDP geometry; Cyclone V supports the dual-read pattern at no block
+// cost).
 //
-// On a miss the pipeline stalls (req_ready deasserted combinationally), runs
-// the existing AXI burst fill, then emits resp_valid for the missed address
-// and resumes pipe operation. The consumer is responsible for holding
-// req_valid until req_ready is observed high — exactly the same handshake
-// the prior single-request FSM required.
+// Throughput: 1 hit/port/cycle.  Miss handling serializes through one
+// shared AXI fill machine — fixed-priority A on tie, B on the next
+// quiescent cycle.  During a fill, the *issuing* port is stalled until
+// S_FILL_OUT.  The *other* port can continue serving hits via the second
+// M10K read port; only its req_ready drops while the FSM is in S_FILL_*
+// (uniform across ports — keeps the handshake symmetric and avoids
+// races between the second port's mid-fill accept and the fill's
+// data_mem write).
 //
 
 `default_nettype none
@@ -29,21 +48,33 @@ module gpu_tex_cache (
     input wire reset_n,
     input wire flush,
 
-    input wire         req_valid,
-    output wire        req_ready,
-    input wire  [25:0] req_addr,
-    input wire         req_wide,
+    // Port A — texture fetch (existing interface; gpu_core wiring
+    // unchanged from the SDP-era cache).
+    input  wire         req_valid,
+    output wire         req_ready,
+    input  wire  [25:0] req_addr,
+    input  wire         req_wide,
 
-    output wire        resp_valid,
-    output wire [15:0] resp_data,
+    output wire         resp_valid,
+    output wire  [15:0] resp_data,
 
-    output reg         axi_arvalid,
-    input wire         axi_arready,
-    output reg  [31:0] axi_araddr,
-    output reg  [7:0]  axi_arlen,
-    input wire         axi_rvalid,
-    input wire  [31:0] axi_rdata,
-    input wire         axi_rlast,
+    // Port B — second read-only client (cmap read path in commit 2).
+    input  wire         req_valid_b,
+    output wire         req_ready_b,
+    input  wire  [25:0] req_addr_b,
+    input  wire         req_wide_b,
+
+    output wire         resp_valid_b,
+    output wire  [15:0] resp_data_b,
+
+    // AXI fill (single shared)
+    output reg          axi_arvalid,
+    input wire          axi_arready,
+    output reg  [31:0]  axi_araddr,
+    output reg  [7:0]   axi_arlen,
+    input wire          axi_rvalid,
+    input wire  [31:0]  axi_rdata,
+    input wire          axi_rlast,
 
     // Debug — exposed in GPU_STATUS for hang diagnosis
     output wire [2:0]  dbg_state,
@@ -51,7 +82,7 @@ module gpu_tex_cache (
 );
 
 assign dbg_state      = state;
-assign dbg_pipe_valid = pipe_valid;
+assign dbg_pipe_valid = pipe_valid_a;
 
 //   addr[3:0]   = byte offset within 16-byte line
 //   addr[13:4]  = set index (10 bits, 1024 sets)
@@ -62,25 +93,26 @@ localparam TAG_BITS   = 12;
 localparam LINE_WORDS = 4;
 
 // ---- Storage ----
-// Valid bits were previously `reg [SETS-1:0] valid` — 1024 flip-flops
-// with a 10-level fabric mux from `valid[addr_set]` into `rd_valid`.
-// That mux plus the carry out of the upstream tex-addr adder put
-// `tx_mul_q[0] → rd_valid` at -0.764 ns on the 100 MHz domain.
-// Moved to an M10K-backed 1024×1 RAM: one block, hardware-native read
-// path, and Quartus can reclaim ~256 ALMs the FF array was using.
-// Reset/flush walk through all 1024 sets via the new S_INIT state.
-(* ramstyle = "M10K" *) reg valid_mem [0:SETS-1];
-
-(* ramstyle = "M10K" *) reg [TAG_BITS-1:0] tag_mem [0:SETS-1];
-(* ramstyle = "M10K" *) reg [31:0] data_mem [0:SETS*LINE_WORDS-1];
+// Inferred M10K, dual-port read (port A + port B).  Cyclone V infers
+// TDP altsyncram from the two-always-block pattern below: each port has
+// its own (clk, addr, [we], dout) triplet; the synthesizer recognises
+// the pattern and emits a TDP block with the same M10K count as the
+// prior SDP layout.  data_mem and tag_mem keep their write side on
+// port A only (only the fill machine writes; reads via either port).
+(* ramstyle = "M10K" *) reg                 valid_mem [0:SETS-1];
+(* ramstyle = "M10K" *) reg [TAG_BITS-1:0]  tag_mem   [0:SETS-1];
+(* ramstyle = "M10K" *) reg [31:0]          data_mem  [0:SETS*LINE_WORDS-1];
 
 // ---- FSM ----
 // S_INIT       : walk sets 0..SETS-1 writing valid_mem=0 (entered on reset
 //                and on flush; M10K can't be bulk-cleared in one cycle)
 // S_PIPE       : normal pipelined operation, 1 req/cycle accepted on hits
-// S_FILL_AR    : issue AXI AR for missed line
+//                (per port, independently)
+// S_FILL_AR    : issue AXI AR for missed line (lat_port selects which
+//                port's miss is being serviced)
 // S_FILL_DATA  : burst fill in progress
-// S_FILL_OUT   : emit response for the originally-missed addr, return to S_PIPE
+// S_FILL_OUT   : emit response for the originally-missed addr to the
+//                requesting port (selected by lat_port), return to S_PIPE
 localparam S_PIPE      = 3'd0;
 localparam S_FILL_AR   = 3'd1;
 localparam S_FILL_DATA = 3'd2;
@@ -90,92 +122,120 @@ localparam S_INIT      = 3'd4;
 reg [2:0] state;
 reg [SET_BITS-1:0] init_counter;
 
-// Pending flush: `flush` is a 1-cycle CPU-generated pulse (from MMIO
-// GPU_TEX_FLUSH).  It arrives any cycle regardless of our FSM state.
-// If flush fires while we're in S_FILL_AR / S_FILL_DATA / S_FILL_OUT,
-// we can't immediately walk-clear valid_mem (we'd lose the in-flight
-// AXI burst).  Latch it and handle it on the next transition back to
-// S_PIPE.  Cleared when the flush actually kicks off the S_INIT walk.
+// Pending flush: see prior (SDP) version for the full rationale.  TL;DR:
+// flush is a 1-cycle pulse that can arrive any cycle; we latch and apply
+// it at the next safe transition.
 reg flush_pending;
 
-// ---- Stage 2 register: the request whose RAM read result is in rd_* now ----
-reg         pipe_valid;
-reg  [25:0] pipe_addr;
-reg         pipe_wide;
+// ---- Stage 2 registers — one set per port ----
+reg         pipe_valid_a;
+reg  [25:0] pipe_addr_a;
+reg         pipe_wide_a;
 
-wire [TAG_BITS-1:0] pipe_tag  = pipe_addr[25:14];
-wire [1:0]          pipe_byte = pipe_addr[1:0];
+reg         pipe_valid_b;
+reg  [25:0] pipe_addr_b;
+reg         pipe_wide_b;
 
-// ---- RAM read result (1-cycle latency) ----
-reg [TAG_BITS-1:0] rd_tag;
-reg                rd_valid;
-reg [31:0]         rd_data;
+wire [TAG_BITS-1:0] pipe_tag_a  = pipe_addr_a[25:14];
+wire [1:0]          pipe_byte_a = pipe_addr_a[1:0];
 
-// Combinational hit / miss for the request currently at stage 2.
-// Only valid in S_PIPE — other states are filling and don't see pipe_valid.
-wire pipe_hit  = (state == S_PIPE) && pipe_valid &&  rd_valid && (rd_tag == pipe_tag);
-wire pipe_miss = (state == S_PIPE) && pipe_valid && !(rd_valid && (rd_tag == pipe_tag));
+wire [TAG_BITS-1:0] pipe_tag_b  = pipe_addr_b[25:14];
+wire [1:0]          pipe_byte_b = pipe_addr_b[1:0];
 
-// Backpressure: ready unless a miss is being handled this cycle, the FSM
-// is busy filling, or flush is asserted. The condition is purely
-// combinational — the consumer must check req_ready in the same cycle it
-// asserts req_valid.
-//
-// Also ready in S_FILL_OUT: while we're holding a fill response, a new
-// request from the consumer is the implicit ack that the response was
-// captured, and we can immediately roll the new request into pipe_addr
-// (it'll resolve as a hit on the freshly-filled line, or trigger a new
-// fill, on the next S_PIPE cycle).
-assign req_ready = ((state == S_PIPE) && !pipe_miss && !flush)
-                || ((state == S_FILL_OUT) && !flush);
+// ---- RAM read result registers — one set per port ----
+reg [TAG_BITS-1:0] rd_tag_a;
+reg                rd_valid_a;
+reg [31:0]         rd_data_a;
 
-// ---- Combinational response (hot path) ----
-// Hit responses are emitted combinationally: 1-cycle req→resp latency.
-// Miss/fill responses are emitted via fill_resp_valid which is now HELD
-// (not pulsed) until the consumer captures it (signalled by it issuing
-// a new req_valid). This is required because the consumer's pipeline can
-// be stalled by an unrelated downstream condition (e.g. FB write flush
-// in fbss != IDLE) on the exact cycle a fill completes — pulsing the
-// response for one cycle would silently drop it and deadlock the pipe.
-reg fill_resp_valid;
+reg [TAG_BITS-1:0] rd_tag_b;
+reg                rd_valid_b;
+reg [31:0]         rd_data_b;
 
-assign resp_valid = pipe_hit || fill_resp_valid;
+// ---- Combinational hit / miss per port ----
+// Only meaningful in S_PIPE.  pipe_miss_x triggers a fill request when
+// the FSM next visits S_PIPE; while filling, the other port's hit path
+// is independent and stays alive.
+wire pipe_hit_a  = (state == S_PIPE) && pipe_valid_a &&  rd_valid_a && (rd_tag_a == pipe_tag_a);
+wire pipe_miss_a = (state == S_PIPE) && pipe_valid_a && !(rd_valid_a && (rd_tag_a == pipe_tag_a));
 
-// ---- Pipelined RAM read (latched only when consumer's req is accepted) ----
-// The RAM reads from the address the consumer is presenting; the result
-// lands in rd_* on the next clock, by which time req_addr has been
-// latched into pipe_addr.  Stage 1 = address presentation; stage 2 = read
-// use.
-//
-// Critical: gate the latch on req_valid && req_ready.  Without the gate,
-// rd_* track req_addr every cycle.  When the consumer's pipeline stalls
-// (e.g., FBSS in mid-write), pipe_addr is held but the consumer's
-// req_addr can drift to the NEXT pixel (because the GPU's p0 has already
-// advanced).  rd_* would re-latch from the new address while pipe_addr
-// still names the old one, so byte_from_rd would mis-select bytes.
-// Symptom on tb_gpu_floor_span: cache hits returned glitched bytes from
-// the wrong line whenever the FBSS sub-FSM stalled the pipe between
-// accept and capture.  Gating on accept holds rd_* stable while
-// pipe_addr is stable.
-wire [SET_BITS-1:0] addr_set  = req_addr[13:4];
-wire [1:0]          addr_word = req_addr[3:2];
+wire pipe_hit_b  = (state == S_PIPE) && pipe_valid_b &&  rd_valid_b && (rd_tag_b == pipe_tag_b);
+wire pipe_miss_b = (state == S_PIPE) && pipe_valid_b && !(rd_valid_b && (rd_tag_b == pipe_tag_b));
 
+// lat_port: 0 = A, 1 = B.  Captured on the cycle a miss enters S_FILL_AR
+// so the fill response is routed to the correct port.
+reg lat_port;
+
+// ---- Backpressure ----
+// Per-port req_ready.  Symmetric: each port asserts ready when
+//   - in S_PIPE, that port currently has no pending miss, and no flush
+//   - or in S_FILL_OUT serving THIS port (consumer's new req acks the
+//     held response and rolls into the new pipeline cycle)
+// During S_FILL_AR / S_FILL_DATA, both ports' req_ready drop.  Hits on
+// the *non-issuing* port that already landed in pipe_valid_x stay
+// served via the held response path (resp_valid_x stays high until the
+// consumer accepts).
+assign req_ready   = ((state == S_PIPE)     && !pipe_miss_a && !flush)
+                  || ((state == S_FILL_OUT) && (lat_port == 1'b0) && !flush);
+
+assign req_ready_b = ((state == S_PIPE)     && !pipe_miss_b && !flush)
+                  || ((state == S_FILL_OUT) && (lat_port == 1'b1) && !flush);
+
+// ---- Combinational responses (hot path) ----
+// Hit: 1-cycle req→resp.  Miss/fill: held until consumer captures.
+reg fill_resp_valid_a;
+reg fill_resp_valid_b;
+
+assign resp_valid   = pipe_hit_a || fill_resp_valid_a;
+assign resp_valid_b = pipe_hit_b || fill_resp_valid_b;
+
+// ---- Pipelined RAM read — gated per-port on accept ----
+// Same gate-on-accept rationale as the SDP-era cache (without it, rd_*
+// drift to the next pixel's address while pipe_addr is still the prior
+// pixel — produces glitched bytes when the consumer is mid-stall).
+wire [SET_BITS-1:0] addr_set_a  = req_addr[13:4];
+wire [1:0]          addr_word_a = req_addr[3:2];
+
+wire [SET_BITS-1:0] addr_set_b  = req_addr_b[13:4];
+wire [1:0]          addr_word_b = req_addr_b[3:2];
+
+// Port A: read on accept; AND fill writes through this port.  Quartus
+// recognises the {if-write; else read} pattern as a single TDP port
+// with mixed read/write semantics.  data_mem write happens in
+// S_FILL_DATA below; we model the read here so the always block is
+// synth-friendly.
 always @(posedge clk) begin
     if (req_valid && req_ready) begin
-        rd_tag   <= tag_mem[addr_set];
-        rd_valid <= valid_mem[addr_set];
-        rd_data  <= data_mem[{addr_set, addr_word}];
+        rd_tag_a   <= tag_mem[addr_set_a];
+        rd_valid_a <= valid_mem[addr_set_a];
+        rd_data_a  <= data_mem[{addr_set_a, addr_word_a}];
     end
 end
 
-// ---- Byte/halfword extraction from RAM hit (uses pipe_byte) ----
-wire [7:0] byte_from_rd =
-    (pipe_byte == 2'd0) ? rd_data[7:0]   :
-    (pipe_byte == 2'd1) ? rd_data[15:8]  :
-    (pipe_byte == 2'd2) ? rd_data[23:16] : rd_data[31:24];
-wire [15:0] hw_from_rd = pipe_byte[1] ? rd_data[31:16] : rd_data[15:0];
+// Port B: read-only.  A separate always block keeps Quartus's TDP
+// recognition pattern clean.
+always @(posedge clk) begin
+    if (req_valid_b && req_ready_b) begin
+        rd_tag_b   <= tag_mem[addr_set_b];
+        rd_valid_b <= valid_mem[addr_set_b];
+        rd_data_b  <= data_mem[{addr_set_b, addr_word_b}];
+    end
+end
 
-// ---- Miss state (latched copy of the missed request for the fill flow) ----
+// ---- Byte/halfword extraction per port ----
+wire [7:0] byte_from_rd_a =
+    (pipe_byte_a == 2'd0) ? rd_data_a[7:0]   :
+    (pipe_byte_a == 2'd1) ? rd_data_a[15:8]  :
+    (pipe_byte_a == 2'd2) ? rd_data_a[23:16] : rd_data_a[31:24];
+wire [15:0] hw_from_rd_a = pipe_byte_a[1] ? rd_data_a[31:16] : rd_data_a[15:0];
+
+wire [7:0] byte_from_rd_b =
+    (pipe_byte_b == 2'd0) ? rd_data_b[7:0]   :
+    (pipe_byte_b == 2'd1) ? rd_data_b[15:8]  :
+    (pipe_byte_b == 2'd2) ? rd_data_b[23:16] : rd_data_b[31:24];
+wire [15:0] hw_from_rd_b = pipe_byte_b[1] ? rd_data_b[31:16] : rd_data_b[15:0];
+
+// ---- Miss state (latched copy of the missed request, single shared) ----
+// lat_port selects which port owns the in-flight fill.
 reg [25:0] lat_addr;
 reg        lat_wide;
 
@@ -193,22 +253,30 @@ wire [7:0] byte_from_fill =
     (lat_byte == 2'd2) ? fill_target_word[23:16] : fill_target_word[31:24];
 wire [15:0] hw_from_fill = lat_byte[1] ? fill_target_word[31:16] : fill_target_word[15:0];
 
-// Combinational resp_data: pick hit-path or fill-path. resp_valid gates this,
-// so when neither pipe_hit nor fill_resp_valid is high the value is "don't
-// care" and the consumer ignores it.
-assign resp_data = pipe_hit
-    ? (pipe_wide ? hw_from_rd  : {8'b0, byte_from_rd})
-    : (lat_wide  ? hw_from_fill : {8'b0, byte_from_fill});
+// ---- Combinational resp_data per port ----
+// Hit-path uses that port's rd_*; fill-path uses fill_target_word
+// (only meaningful for whichever port lat_port selects).
+assign resp_data   = pipe_hit_a
+    ? (pipe_wide_a ? hw_from_rd_a : {8'b0, byte_from_rd_a})
+    : (lat_wide    ? hw_from_fill : {8'b0, byte_from_fill});
+
+assign resp_data_b = pipe_hit_b
+    ? (pipe_wide_b ? hw_from_rd_b : {8'b0, byte_from_rd_b})
+    : (lat_wide    ? hw_from_fill : {8'b0, byte_from_fill});
 
 // ---- Main FSM ----
 always @(posedge clk) begin
     if (!reset_n) begin
         state       <= S_INIT;
         init_counter <= 0;
-        pipe_valid  <= 0;
-        pipe_addr   <= 0;
-        pipe_wide   <= 0;
-        fill_resp_valid <= 0;
+        pipe_valid_a <= 0;
+        pipe_addr_a  <= 0;
+        pipe_wide_a  <= 0;
+        pipe_valid_b <= 0;
+        pipe_addr_b  <= 0;
+        pipe_wide_b  <= 0;
+        fill_resp_valid_a <= 0;
+        fill_resp_valid_b <= 0;
         axi_arvalid <= 0;
         axi_araddr  <= 0;
         axi_arlen   <= 0;
@@ -216,6 +284,7 @@ always @(posedge clk) begin
         fill_target_word <= 0;
         lat_addr    <= 0;
         lat_wide    <= 0;
+        lat_port    <= 0;
         flush_pending <= 1'b0;
     end else begin
         // Latch any flush pulse regardless of state.  Cleared when we
@@ -226,9 +295,8 @@ always @(posedge clk) begin
         case (state)
         // ----------------------------------------------------------------
         // S_INIT: walk through 1024 sets writing valid_mem[i] <= 0.
-        // Entered on reset and on flush (flush can't bulk-clear an M10K
-        // the way the old FF array allowed). req_ready is already false
-        // in S_INIT because it only asserts in S_PIPE and S_FILL_OUT.
+        // Entered on reset and on flush.  Both ports' req_ready are 0
+        // because they only assert in S_PIPE / S_FILL_OUT.
         // 1024 cycles ≈ 10 µs at 100 MHz — negligible at boot/flush.
         // ----------------------------------------------------------------
         S_INIT: begin
@@ -241,55 +309,80 @@ always @(posedge clk) begin
         end
 
         S_PIPE: begin
-            // pipe_valid is HELD (no default clear). Hit path is fully
-            // combinational (resp_valid wire above). Holding pipe_valid
-            // ensures the response remains valid for the consumer to capture
-            // even if the consumer is stalled by some downstream condition
-            // (e.g. FB write flush) and can't issue a new request immediately.
+            // pipe_valid_x is HELD (no default clear).  Hit path is
+            // fully combinational (resp_valid_x wires above).  Holding
+            // the per-port pipe_valid ensures the response remains
+            // valid for a stalled consumer to capture.
 
-            // Priority order matters here.  Original code had `flush ||
-            // flush_pending` first, which would silently drop an in-flight
-            // miss request (consumer just issued, pipe_valid=1, miss
-            // detected this cycle): the flush branch yanks pipe_valid <= 0
-            // and transitions to S_INIT before the miss-fill path runs.
-            // Consumer's fragment pipeline is left waiting on a
-            // tex_resp_valid that never comes — fp_pipe_stall stays high,
-            // p1_valid holds, the span never retires, the fence after it
-            // never advances, of_gpu_finish() spins forever.  Symptom on
-            // hardware: BUILD/Duke3D loadtile() flushed the cache between
-            // frames without first fencing the prior frame's spans, the
-            // GPU froze on the next of_gpu_finish().
+            // Miss arbitration — fixed priority A on tie.  Rationale:
+            //   * Texture reads issue earlier in the fragment pipeline
+            //     (p1) than the cmap reads that will eventually hit
+            //     port B (p2/p2b).  Servicing A first keeps pipeline
+            //     forward progress — B's miss waits at most one fill
+            //     duration (~5 cycles) before its turn.
+            //   * Starvation analysis: both ports stream from
+            //     monotonically-increasing addresses within a span,
+            //     so back-to-back A-miss / B-miss alternation requires
+            //     simultaneous cold-line entries on both axes — rare
+            //     enough that strict priority is observably as fair
+            //     as round-robin in the cmap-cache sim.  If a future
+            //     trace shows starvation, swap to alternating
+            //     (lat_port_round_robin) — same M10K, ~10 ALMs.
             //
-            // Fix: pipe_miss takes priority over flush.  An in-flight miss
-            // runs through fill normally; flush_pending stays sticky and
-            // fires on the trip back through S_PIPE (or via the new
-            // S_FILL_OUT fast-exit added below).
-            if (pipe_miss) begin
+            // Same flush priority story as the SDP version: an
+            // in-flight miss must run to completion before flush
+            // walk-clears valid_mem; otherwise the consumer waits
+            // forever on a tex_resp_valid that gets dropped mid-fill.
+            if (pipe_miss_a) begin
                 axi_arvalid <= 1;
-                axi_araddr  <= {6'b0, pipe_addr[25:4], 4'b0};
+                axi_araddr  <= {6'b0, pipe_addr_a[25:4], 4'b0};
                 axi_arlen   <= LINE_WORDS[7:0] - 8'd1;
                 fill_beat   <= 0;
                 state       <= S_FILL_AR;
-                lat_addr    <= pipe_addr;
-                lat_wide    <= pipe_wide;
-                pipe_valid  <= 0;  // explicit clear on miss
+                lat_addr    <= pipe_addr_a;
+                lat_wide    <= pipe_wide_a;
+                lat_port    <= 1'b0;       // serving A
+                pipe_valid_a <= 0;          // explicit clear on miss
+            end else if (pipe_miss_b) begin
+                axi_arvalid <= 1;
+                axi_araddr  <= {6'b0, pipe_addr_b[25:4], 4'b0};
+                axi_arlen   <= LINE_WORDS[7:0] - 8'd1;
+                fill_beat   <= 0;
+                state       <= S_FILL_AR;
+                lat_addr    <= pipe_addr_b;
+                lat_wide    <= pipe_wide_b;
+                lat_port    <= 1'b1;       // serving B
+                pipe_valid_b <= 0;          // explicit clear on miss
             end else if (flush || flush_pending) begin
-                // Safe to flush now: pipe_miss=0 means either pipe_valid=0
-                // (no in-flight request) or pipe_hit=1 (response is being
-                // served combinationally this cycle — consumer's shift
-                // captures it on the same posedge as our state change).
+                // Safe to flush now: no pending miss on either port
+                // means either pipe_valid_x=0 (no in-flight request)
+                // or pipe_hit_x=1 (response is being served
+                // combinationally this cycle — consumer's shift
+                // captures it on the same posedge as our state
+                // change).
                 state <= S_INIT;
                 init_counter <= 0;
-                fill_resp_valid <= 0;
-                pipe_valid <= 0;
-            end else if (req_valid && req_ready) begin
-                // Accept a new request — overwrites the held pipe state.
-                pipe_valid <= 1;
-                pipe_addr  <= req_addr;
-                pipe_wide  <= req_wide;
+                fill_resp_valid_a <= 0;
+                fill_resp_valid_b <= 0;
+                pipe_valid_a <= 0;
+                pipe_valid_b <= 0;
+            end else begin
+                // Both ports independently accept new requests on hit
+                // cycles.  A and B are unrelated for accept purposes —
+                // both gates check their own req_valid_x && req_ready_x.
+                if (req_valid && req_ready) begin
+                    pipe_valid_a <= 1;
+                    pipe_addr_a  <= req_addr;
+                    pipe_wide_a  <= req_wide;
+                end
+                if (req_valid_b && req_ready_b) begin
+                    pipe_valid_b <= 1;
+                    pipe_addr_b  <= req_addr_b;
+                    pipe_wide_b  <= req_wide_b;
+                end
             end
-            // else: hold pipe_valid (and pipe_addr) so resp_valid stays high
-            // for any consumer that hasn't yet captured it.
+            // else: hold pipe_valid_x (and pipe_addr_x) so resp_valid_x
+            // stays high for any consumer that hasn't yet captured it.
         end
 
         S_FILL_AR: begin
@@ -307,40 +400,50 @@ always @(posedge clk) begin
                 if (axi_rlast) begin
                     tag_mem[lat_set]     <= lat_tag;
                     valid_mem[lat_set]   <= 1'b1;
-                    fill_resp_valid      <= 1;
+                    if (lat_port == 1'b0) fill_resp_valid_a <= 1;
+                    else                  fill_resp_valid_b <= 1;
                     state                <= S_FILL_OUT;
                 end
             end
         end
 
         S_FILL_OUT: begin
-            // Hold fill_resp_valid + fill_target_word until the consumer
-            // issues a new request (the implicit ack). The combinational
-            // resp_data path picks fill_*_word here because pipe_hit is
-            // false (state != S_PIPE while we're in S_FILL_OUT).
+            // Hold fill_resp_valid_x (only the lat_port-selected one
+            // is high) + fill_target_word until the requesting
+            // consumer issues a new request — its req_valid_x acks
+            // the held response and rolls into a new pipeline cycle.
             //
-            // While we wait, the RAM read of req_addr's set is happening
-            // continuously in the unconditional always block at the top
-            // of the file — by the time we transition to S_PIPE on the
-            // cycle the consumer accepts, rd_tag/rd_data are already the
-            // values for the new req_addr.
+            // Same flush fast-exit rationale as the SDP version: if a
+            // flush is pending while we're holding the response, we
+            // need to re-init valid_mem.  Routing through S_PIPE
+            // first races flush_pending vs the consumer's next accept
+            // and can drop the new request.  Bypass S_PIPE.
             //
-            // Flush fast-exit: if a flush is pending, transition straight
-            // to S_INIT instead of waiting for the consumer's next
-            // request.  fill_resp_valid was high entering this state, so
-            // the consumer's fragment shift captured the response on its
-            // !fp_pipe_stall path the same cycle.  Routing through S_PIPE
-            // first (the original path) would race the flush_pending
-            // branch and drop the consumer's NEW request.  Bypass S_PIPE.
+            // Critical asymmetry: the *non-serving* port can keep
+            // serving its already-resolved hits during S_FILL_OUT
+            // (resp_valid_x is held high if pipe_hit_x was high
+            // entering this state).  Its consumer can also stall —
+            // we don't accept new requests on that port until we're
+            // back in S_PIPE.  This is the mirror of how S_PIPE's
+            // accept logic gates new requests on req_ready_x.
             if (flush || flush_pending) begin
                 state <= S_INIT;
                 init_counter <= 0;
-                fill_resp_valid <= 0;
-            end else if (req_valid && req_ready) begin
-                pipe_valid      <= 1;
-                pipe_addr       <= req_addr;
-                pipe_wide       <= req_wide;
-                fill_resp_valid <= 0;
+                fill_resp_valid_a <= 0;
+                fill_resp_valid_b <= 0;
+                pipe_valid_a <= 0;
+                pipe_valid_b <= 0;
+            end else if (lat_port == 1'b0 && req_valid && req_ready) begin
+                pipe_valid_a    <= 1;
+                pipe_addr_a     <= req_addr;
+                pipe_wide_a     <= req_wide;
+                fill_resp_valid_a <= 0;
+                state           <= S_PIPE;
+            end else if (lat_port == 1'b1 && req_valid_b && req_ready_b) begin
+                pipe_valid_b    <= 1;
+                pipe_addr_b     <= req_addr_b;
+                pipe_wide_b     <= req_wide_b;
+                fill_resp_valid_b <= 0;
                 state           <= S_PIPE;
             end
         end

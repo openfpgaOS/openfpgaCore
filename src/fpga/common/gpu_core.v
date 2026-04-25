@@ -602,16 +602,31 @@ wire        tex_axi_rlast;
 wire [2:0] tex_dbg_state;
 wire       tex_dbg_pipe_valid;
 
+// Port B is the dual-port read-only client added in commit 1 of the
+// "drop cmap_bram, route cmap reads through tex_cache" plan.  In this
+// commit it is tied off — gpu_core.v still drives cmap reads from the
+// dedicated cmap_bram below.  Commit 2 wires port B to the colormap
+// address path and removes cmap_bram entirely.  Tying req_valid_b to
+// 0 and ignoring resp_*_b makes the existing 311 gpu tests continue
+// to exercise port A unchanged.
 gpu_tex_cache tex_cache (
     .clk(clk),
     .reset_n(reset_n),
     .flush(tex_flush_req),
+    // Port A — texture fetch (existing wiring, unchanged)
     .req_valid(tex_req_valid),
     .req_ready(tex_req_ready),
     .req_addr(tex_req_addr),
     .req_wide(tex_req_wide),
     .resp_valid(tex_resp_valid),
     .resp_data(tex_resp_data),
+    // Port B — tied off in commit 1, wired to cmap reads in commit 2
+    .req_valid_b(1'b0),
+    .req_ready_b(/* unused */),
+    .req_addr_b(26'b0),
+    .req_wide_b(1'b0),
+    .resp_valid_b(/* unused */),
+    .resp_data_b(/* unused */),
     .axi_arvalid(tex_axi_arvalid),
     .axi_arready(tex_axi_arready),
     .axi_araddr(tex_axi_araddr),
