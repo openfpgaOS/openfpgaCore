@@ -588,7 +588,7 @@ reg signed [31:0] sp_zistep;
 
 // Span flags
 localparam SPAN_COLORMAP    = 0;
-localparam SPAN_COLUMN      = 1;
+// bit 1 reserved (was SPAN_COLUMN — never wired)
 localparam SPAN_SKIP_ZERO   = 2;
 localparam SPAN_DEPTH_TEST  = 3;
 localparam SPAN_DEPTH_WRITE = 4;
