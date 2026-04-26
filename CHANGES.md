@@ -1,9 +1,74 @@
 # openfpgaOS — change log
 
 Per-commit fabric/firmware changes that downstream SDK sessions
-(openfpgaOS-SDK, PocketDukeNukem-SDK) should know about.  Format:
-one section per substantive landing, with **what shipped**, **what
-it unblocks downstream**, and **resource delta**.
+(openfpgaOS-SDK, PocketDukeNukem-SDK, Quake port) should know
+about.  Format: one section per substantive landing, with
+**what shipped**, **what it unblocks downstream**, and
+**resource delta**.
+
+---
+
+## 2026-04-25 — Lean restructure baseline (Phase 0)
+
+**Purpose.** Pinned baseline before the lean restructure
+(`docs/gpu_lean_plan.md`) starts.  Numbers below are the
+"before" snapshot; subsequent phase entries quote deltas
+against this.
+
+**Build recipe.** Quartus 25.1std.0, seed 13 (best of 1-30
+sweep), `VARIANT_DEFS=GPU_DEBUG` (the default Pocket Makefile
+setting at the time).  STA from `ap_core.sta.rpt` with the
+checked-in script.
+
+**Baseline snapshot:**
+
+| Resource | Used | Available | % |
+|---|---|---|---|
+| ALMs | 17,169 | 18,480 | 93% |
+| M10K | 220 | 308 | 71% |
+| DSP | 33 | 66 | 50% |
+| Memory bits | 1,654,584 | 3,153,920 | 52% |
+| Registers | 19,645 | — | — |
+| Pins | 224 | 224 | 100% |
+
+**Timing (Slow 1100mV 85C, mp_ram 100 MHz domain):**
+
+| Seed | Slack | Achieved Fmax |
+|---|---|---|
+| 13 (best) | -0.484 ns | 95.38 MHz |
+| `ap_core.sta.rpt` (canonical) | -0.911 ns | 91.65 MHz |
+| Worst seed | -1.765 ns | ~85 MHz |
+
+Design fails 100 MHz closure across all sampled seeds.  Best
+canonical figure (91.65 MHz) is what the lean restructure has
+to improve on.
+
+**Verilator pass counts:**
+
+| Suite | Passing | Failing |
+|---|---|---|
+| `tb_gpu` | 335 | 5 (regressions #59 #60 #61 + 2 pre-existing zi_step extreme tests) |
+| `tb_gpu_floor` | 1 | 7 (all #59 end-of-span manifestations except F8 reverse-stride) |
+| `tb_gpu_gpudemo` | 32 frames | 0 hung |
+
+**Lean restructure decisions** (from question pass Q1-Q15):
+- Triangles: KEEP.
+- Z-buffer: REMOVE (full deletion + SRAM Z controller tied off).
+- Legacy MMIO bundle: DELETE entirely (no backwards compat).
+- `CMD_CLEAR`: DELETE (consolidate into `CMD_CLEAR_RECT`).
+- Gouraud R-walk: DELETE (`v_r[3]`, `grad_r_*`, `sp_light_step`).
+- Open regressions #59/#60/#61: ACCEPT, document, defer.
+- `gpu_features.vh`: DELETE entirely (no variant matrix).
+- `GPU_DEBUG` + `GPU_STATS` macros: DELETE entirely.
+- Multi-cmap slots: KEEP at 16.
+- `CMD_SET_FB/_TEXTURE/_COLORMAP_ID`: KEEP separate.
+- POT mask path: KEEP.
+- PSS Newton-Raphson: REMOVE.
+- `SPAN_TRANSLUC_REV`: REMOVE.
+
+**Phase 1 + 2 expected savings:** ~980 ALMs + 1 DSP + free
+external SRAM Z-buffer chip.  Bitstream target ~16,200 / 18,480
+(~88%) post-Phase-2 with substantial SDRAM-Z-chip headroom.
 
 ---
 
