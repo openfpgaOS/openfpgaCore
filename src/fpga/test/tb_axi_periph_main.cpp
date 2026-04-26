@@ -461,9 +461,6 @@ static void test_gpu_read_addressing(void) {
         { 0x4A000010, 0x44444444, "gpu_rd_0x10_rdptr"      },
         { 0x4A000014, 0x55555555, "gpu_rd_0x14_status"     },
         { 0x4A000018, 0x66666666, "gpu_rd_0x18_fence"      },
-        { 0x4A000030, 0xCCCCCCCC, "gpu_rd_0x30_bad_waddr"  },
-        { 0x4A000034, 0xDDDDDDDD, "gpu_rd_0x34_bad_count"  },
-        { 0x4A000038, 0xEEEEEEEE, "gpu_rd_0x38_ringwr_cnt" },
     };
     for (size_t i = 0; i < sizeof(cases)/sizeof(cases[0]); i++) {
         std::vector<uint32_t> r;

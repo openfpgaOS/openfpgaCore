@@ -2240,8 +2240,6 @@ wire [3:0]  gpu_sram_wstrb;
 // GPU enable (from MMIO GPU_CTRL bit 0, directly in gpu_core)
 wire        gpu_busy;
 wire [31:0] gpu_fence_reached;
-wire [31:0] gpu_stat_pixels;
-wire [31:0] gpu_stat_spans;
 
 `ifndef EXCLUDE_GPU
 gpu_core gpu (
@@ -2283,9 +2281,7 @@ gpu_core gpu (
     .reg_rdata(gpu_reg_rdata),
     // Status
     .busy(gpu_busy),
-    .fence_reached(gpu_fence_reached),
-    .stat_pixels(gpu_stat_pixels),
-    .stat_spans(gpu_stat_spans)
+    .fence_reached(gpu_fence_reached)
 );
 `else
 assign gpu_rd_arvalid = 1'b0;
@@ -2305,8 +2301,6 @@ assign gpu_sram_wdata = 32'b0;
 assign gpu_sram_wstrb = 4'b0;
 assign gpu_busy       = 1'b0;
 assign gpu_fence_reached = 32'b0;
-assign gpu_stat_pixels = 32'b0;
-assign gpu_stat_spans  = 32'b0;
 assign gpu_reg_rdata   = 32'b0;
 `endif
 

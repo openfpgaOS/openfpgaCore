@@ -24,8 +24,6 @@ module tb_gpu (
     // Status outputs
     output wire        busy,
     output wire [31:0] fence_reached,
-    output wire [31:0] stat_pixels,
-    output wire [31:0] stat_spans,
     output wire [5:0]  dbg_state,
     output wire [5:0]  dbg_setup_step,
     output wire [31:0] dbg_tri_det,
@@ -120,8 +118,6 @@ gpu_core gpu (
     // Status
     .busy(busy),
     .fence_reached(fence_reached),
-    .stat_pixels(stat_pixels),
-    .stat_spans(stat_spans),
     .dbg_state(dbg_state),
     .dbg_setup_step(dbg_setup_step),
     .dbg_tri_det(dbg_tri_det)

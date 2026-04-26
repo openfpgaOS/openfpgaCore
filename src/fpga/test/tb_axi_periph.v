@@ -78,9 +78,6 @@ always @(*) begin
         4'd4:  gpu_reg_rdata = 32'h4444_4444;
         4'd5:  gpu_reg_rdata = 32'h5555_5555;
         4'd6:  gpu_reg_rdata = 32'h6666_6666;
-        4'd12: gpu_reg_rdata = 32'hCCCC_CCCC;
-        4'd13: gpu_reg_rdata = 32'hDDDD_DDDD;
-        4'd14: gpu_reg_rdata = 32'hEEEE_EEEE;
         default: gpu_reg_rdata = 32'h0;
     endcase
 end

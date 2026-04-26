@@ -153,9 +153,8 @@ static bool gpu_wait_fence(uint32_t token, int timeout = 200000) {
                    t, tb->dbg_state, tb->dbg_setup_step, (int32_t)tb->dbg_tri_det);
         }
     }
-    printf("  TIMEOUT: gpu_wait_fence token=%u reached=%u state=%u step=%u stat_px=%u stat_spans=%u\n",
-           token, tb->fence_reached, tb->dbg_state, tb->dbg_setup_step,
-           tb->stat_pixels, tb->stat_spans);
+    printf("  TIMEOUT: gpu_wait_fence token=%u reached=%u state=%u step=%u\n",
+           token, tb->fence_reached, tb->dbg_state, tb->dbg_setup_step);
     return false;
 }
 
@@ -405,10 +404,6 @@ static void test_solid_span() {
 
     // Pixel 8 should be 0x00 (cleared, not drawn)
     check_byte("span_px8_clear", 8, 0x00);
-
-    // Check stats
-    check("stat_pixels", tb->stat_pixels, 8);
-    check("stat_spans", tb->stat_spans, 1);
 }
 
 // Test 4: Textured span with stepping
@@ -1668,9 +1663,9 @@ static void test_triangle_flat() {
     check("tri_flat_done", ok ? 1 : 0, 1);
 
     // Debug: check what the GPU did
-    printf("  [debug] FB[642]=0x%02x stat_pixels=%u state=%u step=%u det=%d\n",
+    printf("  [debug] FB[642]=0x%02x state=%u step=%u det=%d\n",
            sdram_read_byte(FB_BASE_BYTE + 2 + 2*320),
-           tb->stat_pixels, tb->dbg_state, tb->dbg_setup_step, (int32_t)tb->dbg_tri_det);
+           tb->dbg_state, tb->dbg_setup_step, (int32_t)tb->dbg_tri_det);
 
     // Pixel (2,2) should be inside — it's at vertex v0
     check_byte("tri_px_2_2", 2 + 2*320, 0xAA);
@@ -3839,9 +3834,8 @@ static void test_triangle_batch_fan32(void) {
     bool ok = gpu_finish(2000000);
     check("batchfan_done", ok ? 1 : 0, 1);
     if (!ok) {
-        printf("  HUNG: state=%u step=%u stat_px=%u stat_spans=%u\n",
-               tb->dbg_state, tb->dbg_setup_step,
-               tb->stat_pixels, tb->stat_spans);
+        printf("  HUNG: state=%u step=%u\n",
+               tb->dbg_state, tb->dbg_setup_step);
         return;
     }
     // Sanity: center pixel must have rendered (every slice covers it).
@@ -3852,8 +3846,7 @@ static void test_triangle_batch_fan32(void) {
     } else {
         pass_count++;
     }
-    printf("  OK  batchfan rendered, stat_pixels=%u stat_spans=%u\n",
-           tb->stat_pixels, tb->stat_spans);
+    printf("  OK  batchfan rendered\n");
 }
 
 // Mid-flight GPU_TEX_FLUSH — reproduce the BUILD/Duke3D freeze where
@@ -4058,15 +4051,12 @@ static void test_gpudemo_mode0_replay(void) {
         bool ok = gpu_finish(500000);
         if (!ok) {
             printf("  FAIL: frame %d (%d/%04x) gpu_wait_fence timed out\n", f, f, f);
-            printf("  stats: stat_pixels=%u stat_spans=%u\n",
-                   tb->stat_pixels, tb->stat_spans);
             fail_count++;
             break;
         }
         last_fence_ok = f;
         if ((f & 0x3F) == 0)
-            printf("  frame %d ok (stat_pixels=%u stat_spans=%u)\n",
-                   f, tb->stat_pixels, tb->stat_spans);
+            printf("  frame %d ok\n", f);
     }
     printf("  gpudemo replay: %d/%d frames completed\n", last_fence_ok + 1, N_FRAMES);
     check("gpudemo_mode0_replay", last_fence_ok == N_FRAMES - 1 ? 1 : 0, 1);
@@ -4167,8 +4157,7 @@ static void test_gpudemo_mode0_replay_with_drops(void) {
         if (!ok) {
             printf("  FAIL @ frame %d: drops=%d (1 in %d), fence timeout\n",
                    f, drop_counter / drop_every_n, drop_every_n);
-            printf("  state=%u stat_px=%u stat_spans=%u\n",
-                   tb->dbg_state, tb->stat_pixels, tb->stat_spans);
+            printf("  state=%u\n", tb->dbg_state);
             break;
         }
         last_ok = f;

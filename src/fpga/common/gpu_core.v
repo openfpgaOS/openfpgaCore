@@ -78,9 +78,9 @@ module gpu_core (
     // ================================================================
     output wire        busy,
     output reg  [31:0] fence_reached,
-    output reg  [31:0] stat_pixels,
-    output reg  [31:0] stat_spans,
-    // Debug outputs (active during development, removed for synthesis)
+    // Verilator-only diagnostic outputs.  Quartus prunes unused module
+    // ports, so these cost zero ALMs in the bitstream; they exist only so
+    // tb_gpu can print state during trace.
     output wire [5:0]  dbg_state,
     output wire [5:0]  dbg_setup_step,
     output wire [31:0] dbg_tri_det
@@ -89,13 +89,8 @@ module gpu_core (
 wire active = reset_n & gpu_enable;
 
 assign dbg_state = state;
-`ifdef GPU_FEAT_TRIANGLE
 assign dbg_setup_step = setup_step;
 assign dbg_tri_det = tri_det;
-`else
-assign dbg_setup_step = 6'd0;
-assign dbg_tri_det = 32'd0;
-`endif
 
 // ================================================================
 // MMIO Register Map
@@ -107,18 +102,10 @@ assign dbg_tri_det = 32'd0;
 // 0x10  GPU_RING_RDPTR  R   GPU read pointer
 // 0x14  GPU_STATUS      R   {30'b0, ring_empty, busy}
 // 0x18  GPU_FENCE       R   Last completed fence token
-// 0x1C  GPU_STAT_PIXELS R   Pixel counter
 // 0x20  GPU_CMAP_ADDR   W   Colormap write address (14-bit, auto-inc)
 // 0x24  GPU_CMAP_DATA   W   Colormap write data (word — 4 bytes stored,
 //                             addr post-increments by 4)
 // 0x28  GPU_TEX_FLUSH   W   Flush texture cache (write any value)
-// 0x2C  GPU_STAT_SPANS  R   Span counter
-// 0x30  GPU_DBG_BADWR   R   First FB-range-violating M_WR awaddr since reset
-//                           (bit 0 = ever_violated flag; bits [31:2] = addr>>2)
-// 0x34  GPU_DBG_BADCNT  R   Count of M_WR writes outside 0x10000000..0x10400000
-// 0x38  GPU_DBG_RINGWR  R   Total count of GPU_RING_DATA writes accepted —
-//                           compare against app's "words submitted" to detect
-//                           lost MMIO writes on the ring-BRAM port.  GPU_DEBUG.
 
 // Ring BRAM: 16 KB = 4096 words, dual-port M10K
 // Port A: CPU writes via MMIO (GPU_RING_DATA)
@@ -141,15 +128,6 @@ reg        cmap_wr_target;     // 0 = colormap (16 KB), 1 = transluc[] (32 KB)
 reg        tex_flush_req;      // Pulse to flush texture cache
 reg        soft_reset;         // Pulse: resets FSM state + ring pointers
 reg        ring_reset;         // Pulse: reset ring_rdptr (from MMIO, consumed by FSM)
-`ifdef GPU_DEBUG
-// Monotonic counter of accepted GPU_RING_DATA writes.  Readable via
-// GPU_DBG_RINGWR (MMIO 0x38).  If the CPU tracks its own submitted-word
-// count, a mismatch proves the MMIO bus is dropping writes on the way
-// to this slave.
-reg [31:0] ring_wr_count;
-`else
-wire [31:0] ring_wr_count = 32'b0;
-`endif
 
 wire ring_empty = (ring_rdptr == ring_wrptr);
 wire [15:0] ring_mask = (RING_WORDS * 4) - 1;  // 0x3FFF for 16 KB
@@ -165,9 +143,6 @@ always @(posedge clk) begin
     if (!reset_n) begin
         ring_wrptr   <= 0;
         ring_wr_addr <= 0;
-`ifdef GPU_DEBUG
-        ring_wr_count <= 32'b0;
-`endif
         cmap_wr_addr <= 0;
         cmap_wr_target <= 0;
         tex_flush_req <= 0;
@@ -193,9 +168,6 @@ always @(posedge clk) begin
                 4'd2: begin  // GPU_RING_DATA — write word, auto-increment
                     ring_bram[ring_wr_addr] <= reg_wdata;
                     ring_wr_addr <= ring_wr_addr + 1;
-`ifdef GPU_DEBUG
-                    ring_wr_count <= ring_wr_count + 32'd1;
-`endif
                 end
                 4'd8: begin  // GPU_CMAP_ADDR
                     // bit 31 selects target (0 = colormap, 1 = transluc[]);
@@ -216,108 +188,15 @@ always @(posedge clk) begin
 end
 
 // MMIO read mux
-//
-// GPU_STATUS (offset 0x14, reg_addr 5) layout — extended for hardware
-// debug. Original two LSBs preserved so legacy code keeps working.
-//   [ 0]    busy           — !ring_empty || (state != S_IDLE)
-//   [ 1]    ring_empty     — (rdptr == wrptr)
-//   [ 7: 2] state          — main FSM state (S_IDLE..S_FRAG_PIPE)
-//   [ 8]    m_wr_awvalid   — FB write address in flight on M1
-//   [ 9]    tex_arvalid    — tex cache miss in flight (M0 read pending)
-//   [10]    tex_arready    — arbiter has granted M0 this cycle
-//   [11]    tex_rvalid     — tex cache receiving response
-//   [12]    fp_pipe_stall  — pipelined frag processor stalled
-//   [15:13] tex_state      — gpu_tex_cache FSM state (S_PIPE..S_FILL_OUT)
-//   [16]    tex_pipe_valid — tex cache pipe stage 2 holds a valid req
-//   [20:17] fbss           — FB sub-FSM state (FBSS_IDLE..FBSS_ZWRWAIT)
-//   [21]    p1_valid       — pipelined frag processor stage 1 valid
-//   [22]    p3_valid       — pipelined frag processor stage 3 valid
-//   [23]    m_wr_wvalid    — W beat in flight on M1
-//   [24]    m_wr_bvalid    — B response received this cycle
 always @(*) begin
     case (reg_addr)
         4'd1:    reg_rdata = {16'b0, ring_wrptr};
         4'd4:    reg_rdata = {16'b0, ring_rdptr};
-        4'd5:    reg_rdata = {7'b0,
-                              m_wr_bvalid,
-                              m_wr_wvalid,
-`ifdef GPU_FEAT_FRAG_PIPELINE
-                              p3_valid,
-                              p1_valid,
-                              fbss,
-                              tex_dbg_pipe_valid,
-                              tex_dbg_state,
-                              fp_pipe_stall,
-`else
-                              1'b0, 1'b0, 4'b0, 1'b0, 3'b0,
-                              1'b0,
-`endif
-                              tex_axi_rvalid,
-                              tex_axi_arready,
-                              tex_axi_arvalid,
-                              m_wr_awvalid,
-                              state,
-                              ring_empty,
-                              busy};
+        4'd5:    reg_rdata = {30'b0, ring_empty, busy};
         4'd6:    reg_rdata = fence_reached;
-        4'd7:    reg_rdata = stat_pixels;
-        4'd11:   reg_rdata = stat_spans;
-        // Debug: first FB-range-violating M_WR awaddr.  The GPU only ever
-        // should write to the framebuffer band (0x10000000..0x103FFFFF);
-        // if a stray address leaks out, latch it so the CPU can read it
-        // back after a crash.  bad_waddr_hit sits in bit 0 of the latch
-        // (addresses are word-aligned so bits[1:0] are always zero).
-        4'd12:   reg_rdata = {bad_waddr_latch[31:1], bad_waddr_hit};
-        4'd13:   reg_rdata = bad_waddr_count;
-        4'd14:   reg_rdata = ring_wr_count;
         default: reg_rdata = 32'b0;
     endcase
 end
-
-// ================================================================
-// Stray-write diagnostic (gated behind GPU_DEBUG)
-// ================================================================
-// Latches the FIRST M_WR AXI write whose awaddr is outside the 4 MB
-// framebuffer band 0x10000000..0x103FFFFF.  That band covers the three
-// 320x240 framebuffers (0x10000000, 0x10100000, 0x10200000), the
-// terminal FB at 0x50300000 is never touched by the GPU, and app text
-// begins at 0x10400000 so any write >= 0x10400000 is a genuine escape.
-// The latch holds the first violator; bad_waddr_count ticks on every
-// subsequent violation so the CPU can distinguish a one-shot glitch
-// from a sustained stream.
-//
-// Off by default (no ALM cost in production synth); enable via
-// +define+GPU_DEBUG when chasing DMA-corruption symptoms.
-`ifdef GPU_DEBUG
-reg [31:0] bad_waddr_latch;
-reg        bad_waddr_hit;
-reg [15:0] bad_waddr_count;
-wire       waddr_in_fb_band = (m_wr_awaddr[31:22] == 10'b0001_0000_00);
-reg        m_wr_awvalid_d;
-always @(posedge clk) begin
-    if (reset_n == 1'b0) begin
-        bad_waddr_latch <= 32'b0;
-        bad_waddr_hit   <= 1'b0;
-        bad_waddr_count <= 16'b0;
-        m_wr_awvalid_d  <= 1'b0;
-    end else begin
-        m_wr_awvalid_d <= m_wr_awvalid;
-        if (m_wr_awvalid && !m_wr_awvalid_d && !waddr_in_fb_band) begin
-            if (!bad_waddr_hit) begin
-                bad_waddr_latch <= m_wr_awaddr;
-                bad_waddr_hit   <= 1'b1;
-            end
-            if (bad_waddr_count != 16'hFFFF)
-                bad_waddr_count <= bad_waddr_count + 1'b1;
-        end
-    end
-end
-`else
-// GPU_DEBUG off: MMIO reads of 0x30 / 0x34 return 0.
-wire [31:0] bad_waddr_latch = 32'b0;
-wire        bad_waddr_hit   = 1'b0;
-wire [15:0] bad_waddr_count = 16'b0;
-`endif
 
 // ================================================================
 // Colormap BRAM — 16 KB dual-port
@@ -1480,9 +1359,6 @@ reg        tri_det_sign;       // 1 if det was negative
 // Precomputed differences (used across setup steps)
 reg signed [15:0] dX10, dY10, dX20, dY20;
 
-// Triangle stats
-reg [31:0] stat_triangles;
-
 // ----------------------------------------------------------------
 // Gradient loop operand selectors (S_TRI_GRAD)
 // grad_idx[2:1]: 00=Z, 01=S, 10=T  (selects vertex attribute)
@@ -1571,8 +1447,6 @@ always @(posedge clk) begin
         fb_acc_valid <= 0;
         fb_acc_mask <= 0;
         fence_reached <= 0;
-        stat_pixels <= 0;
-        stat_spans <= 0;
         cmd_type <= 0;
         cmd_payload_words <= 0;
         cmd_is_nop <= 0; cmd_is_fence <= 0; cmd_is_clear <= 0;
@@ -1659,7 +1533,6 @@ always @(posedge clk) begin
         tri_recip <= 0;
         tri_clz <= 0;
         tri_det_sign <= 0;
-        stat_triangles <= 0;
         tri_span_x_start <= 0;
         tri_span_count <= 0;
         tri_span_s_start <= 0;
@@ -1968,9 +1841,6 @@ always @(posedge clk) begin
                 state <= S_CLEAR_RECT;
             end
             else if (cmd_is_draw_span) begin
-`ifdef GPU_STATS
-                stat_spans   <= stat_spans + 32'd1;
-`endif
 `ifdef GPU_PERSP_IMPL
                 // sp_flags holds the flag byte written at pay_idx=6; its
                 // SPAN_PERSP bit arms the perspective sub-FSM.
@@ -2230,9 +2100,6 @@ always @(posedge clk) begin
                             fbss <= FBSS_FLUSH_W_RSP;
                         end else begin
                             // Fast path: accumulate into current word
-`ifdef GPU_STATS
-                            stat_pixels  <= stat_pixels + 32'd1;
-`endif
                             fb_acc_valid <= 1;
                             fb_acc_addr  <= p3_word_addr;
                             case (p3_byte_lane)
@@ -2267,9 +2134,6 @@ always @(posedge clk) begin
                             pw_addr = fbss_pend_addr & 32'hFFFFFFFC;
                             pw_lane = fbss_pend_addr[1:0];
 
-`ifdef GPU_STATS
-                            stat_pixels  <= stat_pixels + 32'd1;
-`endif
                             fb_acc_valid <= 1;
                             fb_acc_addr  <= pw_addr;
                             fb_acc_data  <= 32'b0;
@@ -2457,9 +2321,6 @@ always @(posedge clk) begin
 
                         fbss <= FBSS_FLUSH_W_RSP;
                     end else begin
-`ifdef GPU_STATS
-                        stat_pixels  <= stat_pixels + 32'd1;
-`endif
                         fb_acc_valid <= 1;
                         fb_acc_addr  <= blend_word_addr;
                         case (blend_byte_lane)
@@ -3502,9 +3363,6 @@ always @(posedge clk) begin
                     state <= S_FB_FLUSH;
                 end
             end else begin
-`ifdef GPU_STATS
-            stat_triangles <= stat_triangles + 32'd1;
-`endif
             tri_active <= 1;
             tri_cur_x <= tri_xmin;
             tri_cur_y <= tri_ymin;
@@ -3592,9 +3450,6 @@ always @(posedge clk) begin
                     sp_z_addr    <= tri_zb_row_addr + {tri_span_x_start, 1'b0};
                     sp_zi        <= tri_span_z_start;
                     sp_zistep    <= grad_z_dx <<< 4;
-`ifdef GPU_STATS
-                    stat_spans   <= stat_spans + 32'd1;
-`endif
 `ifdef GPU_PERSP_IMPL
                     // Phase 4c.4 — when perspective is active, route the
                     // triangle's row-walked attributes into the

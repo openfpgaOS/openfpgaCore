@@ -142,13 +142,8 @@ firmware: bootloader os
 # ── FPGA compile ─────────────────────────────────────────────────────
 
 # Optional build knobs forwarded to Quartus as --verilog_macro=<NAME>.
-# The GPU is a single-config core — VARIANT_DEFS is now used only for
-# optional debug flags like GPU_DEBUG / GPU_STATS (see gpu_config.vh).
-# GPU_DEBUG is on by default while we're chasing the gpudemo-freeze-
-# after-N-frames issue: its stray-write latch + trap readback is
-# cheap (~50 FFs) and the trap dump is useless without it.  Set
-# VARIANT_DEFS="" explicitly on the make line for a strip-out build.
-VARIANT_DEFS ?= GPU_DEBUG
+# Reserved for future per-build flags; empty by default.
+VARIANT_DEFS ?=
 VERILOG_MACROS = $(foreach d,$(VARIANT_DEFS),--verilog_macro="$(d)")
 
 # `compile` is kept as an alias for `build` so old muscle memory and
@@ -158,10 +153,7 @@ compile: build
 
 # Full compile with fresh placement (clears incremental DB first).
 # The GPU is a single-config core (triangles + perspective spans +
-# pipelined fragment processor all unconditional, see gpu_config.vh).
-# VARIANT_DEFS is still honoured for optional debug knobs like
-#   VARIANT_DEFS="GPU_DEBUG GPU_STATS"
-# which enable the stray-write latch / pixel+span counters for bringup.
+# pipelined fragment processor all unconditional).
 build: $(VEXII_OUT) bootloader
 	@printf "$(C_HEAD)[fpga]$(C_RESET) Clean compile...\n"
 	@rm -rf db incremental_db

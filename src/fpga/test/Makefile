@@ -161,7 +161,7 @@ run-sram: sram
 
 # --- GPU ---
 # Single GPU build. Triangles + perspective spans + pipelined fragment
-# processor are all unconditional in the hardware (see gpu_config.vh).
+# processor are all unconditional in the hardware.
 # The C++ test bench enables the triangle and persp test suites via
 # GPU_FEAT_TRIANGLE and GPU_PERSP_IMPL; those defines steer test
 # COMPILATION in tb_gpu_main.cpp, not RTL behaviour.
@@ -171,7 +171,6 @@ gpu: $(GPU_DIR)/V$(GPU_TOP)
 
 $(GPU_DIR)/V$(GPU_TOP): $(GPU_SRCS) $(GPU_CPP)
 	$(VERILATOR) $(VERILATOR_FLAGS) --top-module $(GPU_TOP) --Mdir $(GPU_DIR) \
-		+define+GPU_STATS +define+GPU_DEBUG \
 		-CFLAGS -DGPU_PERSP_IMPL \
 		-CFLAGS -DGPU_FEAT_TRIANGLE \
 		-I$(COMMON_DIR) \
@@ -193,7 +192,6 @@ gpu-floor: $(GPU_FLOOR_DIR)/V$(GPU_TOP)
 $(GPU_FLOOR_DIR)/V$(GPU_TOP): $(GPU_SRCS) $(GPU_FLOOR_CPP)
 	$(VERILATOR) $(VERILATOR_FLAGS) --top-module $(GPU_TOP) \
 		--Mdir $(GPU_FLOOR_DIR) \
-		+define+GPU_STATS +define+GPU_DEBUG \
 		-CFLAGS -DGPU_PERSP_IMPL \
 		-CFLAGS -DGPU_FEAT_TRIANGLE \
 		-I$(COMMON_DIR) \
@@ -212,7 +210,6 @@ gpu-gpudemo: $(GPU_GPUDEMO_DIR)/V$(GPU_TOP)
 $(GPU_GPUDEMO_DIR)/V$(GPU_TOP): $(GPU_SRCS) $(GPU_GPUDEMO_CPP)
 	$(VERILATOR) $(VERILATOR_FLAGS) --top-module $(GPU_TOP) \
 		--Mdir $(GPU_GPUDEMO_DIR) \
-		+define+GPU_STATS +define+GPU_DEBUG \
 		-CFLAGS -DGPU_PERSP_IMPL \
 		-CFLAGS -DGPU_FEAT_TRIANGLE \
 		-I$(COMMON_DIR) \
