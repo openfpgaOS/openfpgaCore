@@ -100,9 +100,8 @@ assign dbg_tri_det = tri_det;
 // 0x10  GPU_RING_RDPTR  R   GPU read pointer
 // 0x14  GPU_STATUS      R   {30'b0, ring_empty, busy}
 // 0x18  GPU_FENCE       R   Last completed fence token
-// 0x20  GPU_CMAP_ADDR   W   Colormap write address (14-bit, auto-inc)
-// 0x24  GPU_CMAP_DATA   W   Colormap write data (word — 4 bytes stored,
-//                             addr post-increments by 4)
+// 0x20  GPU_TRANSLUC_ADDR W   transluc[] write address (15-bit, auto-inc by 4)
+// 0x24  GPU_TRANSLUC_DATA W   transluc[] write data (32-bit word)
 // 0x28  GPU_TEX_FLUSH   W   Flush texture cache (write any value)
 
 // Ring BRAM: 16 KB = 4096 words, dual-port M10K
@@ -117,12 +116,12 @@ reg [15:0] ring_wrptr;                    // CPU write pointer (byte offset, for
 reg [15:0] ring_rdptr;                    // GPU read pointer (byte offset)
 reg [31:0] ring_rd_data;                  // Port B read output (registered)
 
-// CPU upload address for the colormap and transluc[] LUT.  Both targets
-// share GPU_CMAP_ADDR / GPU_CMAP_DATA on the MMIO; a 1-bit target-select
-// in bit 31 of the addr write picks colormap (0) or transluc (1).  The
-// 15-bit byte field is wide enough for the larger 32 KB transluc table.
-reg [14:0] cmap_wr_addr;       // Auto-increment byte address (cmap or transluc)
-reg        cmap_wr_target;     // 0 = colormap (16 KB), 1 = transluc[] (32 KB)
+// CPU upload address for the transluc[] LUT (32 KB).  Colormap storage
+// retired — palookups now live in SDRAM and the GPU reads them through
+// gpu_tex_cache port B; only transluc[] still lives in on-chip BRAM
+// because its random-access blend lookup pattern doesn't fit a single-
+// line cache.
+reg [14:0] transluc_wr_addr;   // Auto-increment byte address into transluc[]
 reg        tex_flush_req;      // Pulse to flush texture cache
 reg        soft_reset;         // Pulse: resets FSM state + ring pointers
 reg        ring_reset;         // Pulse: reset ring_rdptr (from MMIO, consumed by FSM)
@@ -141,8 +140,7 @@ always @(posedge clk) begin
     if (!reset_n) begin
         ring_wrptr   <= 0;
         ring_wr_addr <= 0;
-        cmap_wr_addr <= 0;
-        cmap_wr_target <= 0;
+        transluc_wr_addr <= 0;
         tex_flush_req <= 0;
         soft_reset <= 0;
         ring_reset <= 0;
@@ -167,14 +165,11 @@ always @(posedge clk) begin
                     ring_bram[ring_wr_addr] <= reg_wdata;
                     ring_wr_addr <= ring_wr_addr + 1;
                 end
-                4'd8: begin  // GPU_CMAP_ADDR
-                    // bit 31 selects target (0 = colormap, 1 = transluc[]);
-                    // bits [14:0] are the byte offset within that target.
-                    cmap_wr_addr   <= reg_wdata[14:0];
-                    cmap_wr_target <= reg_wdata[31];
+                4'd8: begin  // GPU_TRANSLUC_ADDR — byte offset into transluc[]
+                    transluc_wr_addr <= reg_wdata[14:0];
                 end
-                4'd9: begin  // GPU_CMAP_DATA — 32-bit write, addr += 4 bytes
-                    cmap_wr_addr <= cmap_wr_addr + 15'd4;
+                4'd9: begin  // GPU_TRANSLUC_DATA — 32-bit write, addr += 4
+                    transluc_wr_addr <= transluc_wr_addr + 15'd4;
                 end
                 4'd10: begin // GPU_TEX_FLUSH
                     tex_flush_req <= 1;
@@ -197,42 +192,13 @@ always @(*) begin
 end
 
 // ================================================================
-// Colormap BRAM — 16 KB dual-port
-// ================================================================
-// Port A: CPU writes (via MMIO cmap_data register)
-// Port B: GPU reads (during fragment processing, 1-cycle latency)
-
-// 16 KB colormap — 4096 × 32-bit. CPU writes a full word per MMIO access
-// (was byte-at-a-time — dropped 3/4 of the upload on each write). The
-// write address ignores the low 2 bits; the CPU's little-endian word
-// byte-order lands directly in bit lanes [7:0]/[15:8]/[23:16]/[31:24].
-//
-// Word-only writes (no byte-enable or partial-word case statements) —
-// Quartus needs a simple full-word `mem[a] <= d` pattern to infer M10K;
-// adding per-lane byte writes collapses the BRAM to ~131k discrete FFs
-// (observed: 16,547 → 145,565 total registers, fitter error 170011).
-// The SDK's colormap uploads are always word-aligned (`size = 64*256 =
-// 16384 = 4096 × 4`), so the byte-tail loop in of_gpu_colormap_upload
-// never executes with the current hardware's 16 KB colormap.
-// Colormap storage retired — palookups now live in SDRAM and reads go
-// through gpu_tex_cache port B.  CPU upload path is direct CPU→SDRAM
-// memcpy + cache flush; no MMIO involvement.  GPU_CMAP_ADDR / GPU_CMAP_DATA
-// remain wired (target-select bit 31) but only the transluc[] target is
-// now meaningful — the colormap target (bit 31 == 0) is a no-op write
-// (cmap_wr_addr still increments to keep the existing decoder shape, but
-// nothing latches the data).  See PALOOKUP_BASE / PALOOKUP_STRIDE up above
-// for the SDRAM layout; tex_cache port B is wired into the fragment pipe
-// below so the cmap-read path works the same byte-out-of-32-bit-word way
-// as the prior on-chip BRAM.
-
-// ================================================================
 // transluc[] LUT — 32 KB BUILD-style indexed-color blend table
 // ================================================================
-// Stored as 8192 × 32-bit words (32 M10K under the same Quartus
-// inference pattern that gives the 16 KB colormap 16 M10K — keep the
-// access pattern word-aligned, no byte-enables, or BRAM inference
-// collapses to FFs).  CPU loads via the shared GPU_CMAP_ADDR/DATA port
-// with the target-select bit set.
+// Stored as 8192 × 32-bit words (32 M10K under Quartus inference).
+// Keep the access pattern word-aligned with no byte-enables, or BRAM
+// inference collapses to FFs (the 16 KB colormap that used to live
+// here had this exact failure mode at 145k registers).  CPU loads via
+// GPU_TRANSLUC_ADDR / GPU_TRANSLUC_DATA on the MMIO.
 //
 // Layout: 128-source × 256-destination quantised approximation of
 // BUILD's transluc[256][256].  Source axis is dropped to 7 bits (low
@@ -247,10 +213,10 @@ end
 //   byte_lane = key[1:0]
 reg [31:0] transluc_bram [0:8191];
 
-wire transluc_cpu_wr = reg_wr && (reg_addr == 4'd9) && cmap_wr_target;
+wire transluc_cpu_wr = reg_wr && (reg_addr == 4'd9);
 always @(posedge clk) begin
     if (transluc_cpu_wr)
-        transluc_bram[cmap_wr_addr[14:2]] <= reg_wdata;
+        transluc_bram[transluc_wr_addr[14:2]] <= reg_wdata;
 end
 
 // Cmap read path — formerly cmap_bram, now routed through gpu_tex_cache

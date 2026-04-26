@@ -1092,13 +1092,11 @@ static void test_persp_negative_zinv() {
 //   word_addr = key[14:2]    → 8K word entries
 //   byte_lane = key[1:0]
 //
-// Upload uses the shared GPU_CMAP_ADDR/DATA port with bit 31 of the
-// address set to select the transluc target.
+// Upload uses the GPU_TRANSLUC_ADDR / GPU_TRANSLUC_DATA MMIO port.
 
 static void transluc_upload_word(uint32_t byte_addr, uint32_t word) {
-    // Target-select bit 31 = 1 selects transluc[].  byte_addr must be
-    // word-aligned.
-    mmio_write(8, (1u << 31) | (byte_addr & 0x7FFC));
+    // byte_addr must be word-aligned.
+    mmio_write(8, byte_addr & 0x7FFC);
     mmio_write(9, word);
 }
 
