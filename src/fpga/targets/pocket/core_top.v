@@ -1098,12 +1098,12 @@ end
 // Bridge SDRAM read path fully removed — bridge never reads SDRAM in v2.
 // Bridge CRAM0 access lives in the ownership-mux block above.
 
-// SRAM: GPU-exclusive direct access (Z-buffer). No CPU path, no mux.
-assign sram_word_rd    = gpu_sram_rd;
-assign sram_word_wr    = gpu_sram_wr;
-assign sram_word_addr  = gpu_sram_addr;
-assign sram_word_wdata = gpu_sram_wdata;
-assign sram_word_wstrb = gpu_sram_wstrb;
+// SRAM unused by the lean GPU (Z buffer dropped in Phase 2.3).  Tie off.
+assign sram_word_rd    = 1'b0;
+assign sram_word_wr    = 1'b0;
+assign sram_word_addr  = 22'b0;
+assign sram_word_wdata = 32'b0;
+assign sram_word_wstrb = 4'b0;
 
 
 
@@ -2231,11 +2231,7 @@ wire        gpu_wr_bvalid;
 // SDRAM; loads/saves bounce through CRAM0 and CPU memcpys the bytes).
 
 // GPU SRAM interface (Z-buffer)
-wire        gpu_sram_rd;
-wire        gpu_sram_wr;
-wire [21:0] gpu_sram_addr;
-wire [31:0] gpu_sram_wdata;
-wire [3:0]  gpu_sram_wstrb;
+// gpu_sram_* removed in Phase 2.3 — Z-buffer dropped.
 
 // GPU enable (from MMIO GPU_CTRL bit 0, directly in gpu_core)
 wire        gpu_busy;
@@ -2266,14 +2262,6 @@ gpu_core gpu (
     .m_wr_wlast(gpu_wr_wlast),
     .m_wr_bvalid(gpu_wr_bvalid),
     // SRAM interface (Z-buffer)
-    .sram_rd(gpu_sram_rd),
-    .sram_wr(gpu_sram_wr),
-    .sram_addr(gpu_sram_addr),
-    .sram_wdata(gpu_sram_wdata),
-    .sram_wstrb(gpu_sram_wstrb),
-    .sram_rdata(sram_word_rdata),
-    .sram_busy(sram_word_busy),
-    .sram_rdata_valid(sram_word_rdata_valid),
     // MMIO registers
     .reg_wr(gpu_reg_wr),
     .reg_addr(gpu_reg_addr),
@@ -2294,11 +2282,6 @@ assign gpu_wr_wvalid  = 1'b0;
 assign gpu_wr_wdata   = 32'b0;
 assign gpu_wr_wstrb   = 4'b0;
 assign gpu_wr_wlast   = 1'b0;
-assign gpu_sram_rd    = 1'b0;
-assign gpu_sram_wr    = 1'b0;
-assign gpu_sram_addr  = 22'b0;
-assign gpu_sram_wdata = 32'b0;
-assign gpu_sram_wstrb = 4'b0;
 assign gpu_busy       = 1'b0;
 assign gpu_fence_reached = 32'b0;
 assign gpu_reg_rdata   = 32'b0;

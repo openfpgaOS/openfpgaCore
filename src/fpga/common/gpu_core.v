@@ -52,18 +52,6 @@ module gpu_core (
     input  wire        m_wr_bvalid,
 
     // ================================================================
-    // SRAM word interface — Z-buffer
-    // ================================================================
-    output reg         sram_rd,
-    output reg         sram_wr,
-    output reg  [21:0] sram_addr,
-    output reg  [31:0] sram_wdata,
-    output reg  [3:0]  sram_wstrb,
-    input  wire [31:0] sram_rdata,
-    input  wire        sram_busy,
-    input  wire        sram_rdata_valid,
-
-    // ================================================================
     // MMIO Register Interface (from axi_periph_slave)
     // ================================================================
     input  wire        reg_wr,
@@ -517,9 +505,9 @@ localparam CMD_CLEAR_RECT     = 8'h11;  // 3-word payload: word0 = start byte
                                           // — low 8 bits replicated 4×
                                           // per word, matching CMD_CLEAR.
 localparam CMD_SET_TEXTURE    = 8'h20;
-localparam CMD_SET_DEPTH_FUNC = 8'h21;
+// 0x21 CMD_SET_DEPTH_FUNC retired with the Z-buffer in lean Phase 2.
 localparam CMD_SET_FB         = 8'h23;
-localparam CMD_SET_ZB         = 8'h24;
+// 0x24 CMD_SET_ZB           retired with the Z-buffer in lean Phase 2.
 localparam CMD_DRAW_TRIANGLES = 8'h30;
 localparam CMD_DRAW_SPAN      = 8'h40;
 // Removed commands (reserved opcodes, do not reuse):
@@ -549,11 +537,8 @@ localparam CMD_SET_COLORMAP_ID = 8'h28; // 1-word payload: [3:0] = palookup slot
 //          existed as functioning code.  Triangle light uses flat v0.r.
 reg [31:0] st_tex_addr;
 reg [15:0] st_tex_width;
-reg [2:0]  st_depth_func;      // 0=none,1=always,2=less,3=lequal,4=equal,5=gequal,6=greater,7=notequal
 reg [31:0] st_fb_addr;
 reg [15:0] st_fb_stride;
-reg [31:0] st_zb_addr;
-reg [15:0] st_zb_stride;
 
 // ================================================================
 // Span Registers (loaded from command payload)
@@ -582,16 +567,13 @@ reg [15:0] sp_tex_width;
 // are powers of two (always true for BUILD/Quake/Doom textures).
 reg [15:0] sp_tex_w_mask;
 reg [15:0] sp_tex_h_mask;
-reg [31:0] sp_z_addr;
-reg signed [31:0] sp_zi;
-reg signed [31:0] sp_zistep;
 
 // Span flags
 localparam SPAN_COLORMAP    = 0;
 // bit 1 reserved (was SPAN_COLUMN — never wired)
 localparam SPAN_SKIP_ZERO   = 2;
-localparam SPAN_DEPTH_TEST  = 3;
-localparam SPAN_DEPTH_WRITE = 4;
+// bit 3 reserved (was SPAN_DEPTH_TEST  — Z-buffer dropped in lean Phase 2)
+// bit 4 reserved (was SPAN_DEPTH_WRITE — Z-buffer dropped in lean Phase 2)
 localparam SPAN_PERSP       = 5;
 localparam SPAN_TRANSLUC    = 6;  // route p3_color through transluc[] LUT
 // bit 7 reserved (was SPAN_TRANSLUC_REV — REV variant dropped in lean Phase 2)
@@ -620,8 +602,7 @@ localparam S_FB_FLUSH_WAIT  = 6'd19;
 localparam S_CLEAR_INIT     = 6'd20;
 localparam S_CLEAR_FB       = 6'd21;
 localparam S_CLEAR_FB_WAIT  = 6'd22;
-localparam S_CLEAR_ZB       = 6'd23;
-localparam S_CLEAR_ZB_WAIT  = 6'd24;
+// 6'd23/24 (S_CLEAR_ZB / S_CLEAR_ZB_WAIT) retired with the Z-buffer.
 localparam S_SPAN_TEX_CALC = 6'd25;  // Pipeline stage 2: finish tex addr
 
 // Triangle rasterisation states
@@ -664,9 +645,7 @@ reg cmd_is_fence;
 reg cmd_is_clear;
 reg cmd_is_clear_rect;
 reg cmd_is_set_texture;
-reg cmd_is_set_depth_func;
 reg cmd_is_set_fb;
-reg cmd_is_set_zb;
 reg cmd_is_draw_span;
 // cmd_is_draw_spans removed with CMD_DRAW_SPANS — firmware emits N separate
 // CMD_DRAW_SPAN commands for batch draws now.
@@ -745,11 +724,8 @@ reg        p0_valid;
 reg [7:0]  p0_light;
 reg [7:0]  p0_flags;
 reg [31:0] p0_fb_addr;
-reg [31:0] p0_z_addr;
-reg [31:0] p0_zi;
 reg signed [15:0] p0_s_int;     // for the post-mul add
 reg [31:0] p0_tex_base;         // sp_tex_addr at issue time
-// p0_mode / p0_shift_addr removed — multiply-mode tex address is universal
 
 // DSP-pipelined texture multiply. Registered output gives the path a clean
 // register-to-register boundary that the fitter can pack into a DSP slice.
@@ -760,16 +736,12 @@ reg        p1_valid;
 reg [7:0]  p1_light;
 reg [7:0]  p1_flags;
 reg [31:0] p1_fb_addr;
-reg [31:0] p1_z_addr;
-reg [31:0] p1_zi;             // 16.16 z for compare/write
 
 reg        p2_valid;
 reg [7:0]  p2_color;          // tex result
 reg [7:0]  p2_light;
 reg [7:0]  p2_flags;
 reg [31:0] p2_fb_addr;
-reg [31:0] p2_z_addr;
-reg [31:0] p2_zi;
 reg        p2_discard;        // skip-zero outcome
 
 // p2b: 1-cycle delay between p2 (cmap addr issued) and p3 (cmap data captured).
@@ -779,26 +751,19 @@ reg        p2b_valid;
 reg [7:0]  p2b_color;
 reg [7:0]  p2b_flags;
 reg [31:0] p2b_fb_addr;
-reg [31:0] p2b_z_addr;
-reg [31:0] p2b_zi;
 reg        p2b_discard;
 
 reg        p3_valid;
 reg [7:0]  p3_color;          // final color (post-cmap if applicable)
 reg [7:0]  p3_flags;
 reg [31:0] p3_fb_addr;
-reg [31:0] p3_z_addr;
-reg [31:0] p3_zi;
 reg        p3_discard;
-reg        p3_z_resolved;     // 1 once FBSS has finished the depth detour for p3
 
 // FB write sub-FSM (lives within S3, pauses pipeline when not IDLE)
 localparam FBSS_IDLE        = 4'd0;
 localparam FBSS_FLUSH_AW    = 4'd1;  // emit AW, then resume into accumulate
 localparam FBSS_FLUSH_W_RSP = 4'd2;  // wait for W handshake + B response
-localparam FBSS_ZREAD       = 4'd3;  // issue SRAM read for depth compare
-localparam FBSS_ZWAIT       = 4'd4;  // receive read, compare, launch write if needed
-localparam FBSS_ZWRWAIT     = 4'd5;  // wait for SRAM write to complete
+// FBSS_ZREAD/ZWAIT/ZWRWAIT (3/4/5) retired with the Z-buffer in lean Phase 2.
 // Translucent-blend sub-flow.  Fragments with SPAN_TRANSLUC pass
 // through a read-modify-write path: read existing FB byte from SDRAM
 // (or bypass from fb_acc if same-word), compose a 15-bit key from the
@@ -859,11 +824,6 @@ reg src_done;            // source has issued its last pixel; pipeline draining
 // DSP slice and the path from `tx_mul_q` register through the post-multiply
 // adds to the cache RAM port is short.
 
-// Lookahead: if we'd enter a depth detour THIS cycle, also stall the pipeline
-// so p3 holds stable while FBSS walks ZREAD/ZWAIT/ZWRITE/ZWRWAIT.
-wire fbss_depth_entry = (fbss == FBSS_IDLE) && p3_valid && !p3_discard
-                     && (p3_flags[SPAN_DEPTH_TEST] || p3_flags[SPAN_DEPTH_WRITE])
-                     && !p3_z_resolved;
 // cmap_pipe_wait: the p2b→p3 shift consumes cmap_rd_data (= resp_data_b
 // byte) for the fragment in p2b.  If that fragment had SPAN_COLORMAP set
 // and tex_cache port B isn't ready (miss in flight), stall the shift.
@@ -873,8 +833,7 @@ wire fbss_depth_entry = (fbss == FBSS_IDLE) && p3_valid && !p3_discard
 wire cmap_pipe_wait = p2b_valid && p2b_flags[SPAN_COLORMAP] && !cmap_resp_valid_b;
 wire fp_pipe_stall = (p1_valid && !tex_resp_valid)
                   || cmap_pipe_wait
-                  || (fbss != FBSS_IDLE)
-                  || fbss_depth_entry;
+                  || (fbss != FBSS_IDLE);
 
 // Combinational tex address from p0 + DSP output.  Multiply-mode only
 // (sp_tex_width is always non-zero in every real caller — tested in
@@ -1265,7 +1224,6 @@ reg signed [63:0] dsp_p_shifted;
 // into a simple reg-to-reg mux.
 reg signed [31:0] grad_sub_r;
 reg [31:0] tri_fb_row_addr;    // precomputed: st_fb_addr + cur_y * stride
-reg [31:0] tri_zb_row_addr;    // precomputed: st_zb_addr + cur_y * zb_stride
 reg signed [31:0] tri_det;
 reg signed [15:0] tri_recip;  // scaled 1/|det| (fixed-point)
 reg [5:0]  tri_clz;           // leading zeros of |det|
@@ -1356,8 +1314,6 @@ always @(posedge clk) begin
         ring_rdptr <= 0;
         m_wr_awvalid <= 0;
         m_wr_wvalid <= 0;
-        sram_rd <= 0;
-        sram_wr <= 0;
         fb_acc_valid <= 0;
         fb_acc_mask <= 0;
         fence_reached <= 0;
@@ -1368,8 +1324,8 @@ always @(posedge clk) begin
         cr_addr <= 0; cr_row_addr <= 0;
         cr_w_remaining <= 0; cr_w_total <= 0;
         cr_y_remaining <= 0; cr_color <= 0;
-        cmd_is_set_texture <= 0; cmd_is_set_depth_func <= 0;
-        cmd_is_set_fb <= 0; cmd_is_set_zb <= 0;
+        cmd_is_set_texture <= 0;
+        cmd_is_set_fb <= 0;
         cmd_is_draw_span <= 0;
         cmd_is_set_skip_zero <= 0;
         cmd_is_set_colormap_id <= 0;
@@ -1382,18 +1338,17 @@ always @(posedge clk) begin
         clear_flags <= 0;
         // Pipelined fragment processor reset
         p0_valid <= 0; p0_light <= 0; p0_flags <= 0;
-        p0_fb_addr <= 0; p0_z_addr <= 0; p0_zi <= 0;
+        p0_fb_addr <= 0;
         p0_s_int <= 0; p0_tex_base <= 0;
         tx_mul_q <= 0;
         p1_valid <= 0; p1_light <= 0; p1_flags <= 0;
-        p1_fb_addr <= 0; p1_z_addr <= 0; p1_zi <= 0;
+        p1_fb_addr <= 0;
         p2_valid <= 0; p2_color <= 0; p2_light <= 0; p2_flags <= 0;
-        p2_fb_addr <= 0; p2_z_addr <= 0; p2_zi <= 0; p2_discard <= 0;
+        p2_fb_addr <= 0; p2_discard <= 0;
         p2b_valid <= 0; p2b_color <= 0; p2b_flags <= 0;
-        p2b_fb_addr <= 0; p2b_z_addr <= 0; p2b_zi <= 0; p2b_discard <= 0;
+        p2b_fb_addr <= 0; p2b_discard <= 0;
         p3_valid <= 0; p3_color <= 0; p3_flags <= 0;
-        p3_fb_addr <= 0; p3_z_addr <= 0; p3_zi <= 0; p3_discard <= 0;
-        p3_z_resolved <= 0;
+        p3_fb_addr <= 0; p3_discard <= 0;
         transluc_rd_addr <= 15'b0;
         cmap_req_addr_reg <= 26'b0;
         fbss <= FBSS_IDLE;
@@ -1456,14 +1411,8 @@ always @(posedge clk) begin
         // State registers
         st_tex_addr <= 0; st_tex_width <= 0;
         sp_tex_w_mask <= 16'hFFFF; sp_tex_h_mask <= 16'hFFFF;
-        st_depth_func <= 0;
         st_fb_addr <= 0; st_fb_stride <= 320;
-        st_zb_addr <= 0; st_zb_stride <= 640;
     end else begin
-        // Default: deassert one-shot signals
-        sram_rd <= 0;
-        sram_wr <= 0;
-
         // Ring reset: set rdptr to 0 (from MMIO ring_size write)
         if (ring_reset)
             ring_rdptr <= 0;
@@ -1515,9 +1464,7 @@ always @(posedge clk) begin
             cmd_is_clear          <= (cmd_type == CMD_CLEAR);
             cmd_is_clear_rect     <= (cmd_type == CMD_CLEAR_RECT);
             cmd_is_set_texture    <= (cmd_type == CMD_SET_TEXTURE);
-            cmd_is_set_depth_func <= (cmd_type == CMD_SET_DEPTH_FUNC);
             cmd_is_set_fb         <= (cmd_type == CMD_SET_FB);
-            cmd_is_set_zb         <= (cmd_type == CMD_SET_ZB);
             cmd_is_draw_span      <= (cmd_type == CMD_DRAW_SPAN);
             // CMD_DRAW_SPANS removed (was half-implemented dead code)
             cmd_is_set_skip_zero  <= (cmd_type == CMD_SET_SKIP_ZERO);
@@ -1594,16 +1541,9 @@ always @(posedge clk) begin
                 // firmware still emits them so the on-ring layout is
                 // stable across core revisions.
             end
-            else if (cmd_is_set_depth_func) begin
-                if (pay_idx == 5'd0) st_depth_func <= ring_rd_data[2:0];
-            end
             else if (cmd_is_set_fb) begin
                 if (pay_idx == 5'd0) st_fb_addr   <= ring_rd_data;
                 else if (pay_idx == 5'd1) st_fb_stride <= ring_rd_data[15:0];
-            end
-            else if (cmd_is_set_zb) begin
-                if (pay_idx == 5'd0) st_zb_addr   <= ring_rd_data;
-                else if (pay_idx == 5'd1) st_zb_stride <= ring_rd_data[15:0];
             end
             else if (cmd_is_set_skip_zero) begin
                 if (pay_idx == 5'd0) st_skip_zero <= ring_rd_data[0];
@@ -1643,15 +1583,12 @@ always @(posedge clk) begin
                         sp_tex_h_mask <= (ring_rd_data[31:16] == 16'd0)
                                          ? 16'hFFFF : ring_rd_data[31:16];
                     end
-                    5'd9:  sp_z_addr     <= ring_rd_data;
-                    5'd10: sp_zi         <= ring_rd_data;
-                    5'd11: sp_zistep     <= ring_rd_data;
-                    5'd12: sp_sZ         <= ring_rd_data;
-                    5'd13: sp_tZ         <= ring_rd_data;
-                    5'd14: sp_zinv       <= ring_rd_data;
-                    5'd15: sp_sZstep     <= ring_rd_data;
-                    5'd16: sp_tZstep     <= ring_rd_data;
-                    5'd17: sp_zinv_step  <= ring_rd_data;
+                    5'd9:  sp_sZ         <= ring_rd_data;
+                    5'd10: sp_tZ         <= ring_rd_data;
+                    5'd11: sp_zinv       <= ring_rd_data;
+                    5'd12: sp_sZstep     <= ring_rd_data;
+                    5'd13: sp_tZstep     <= ring_rd_data;
+                    5'd14: sp_zinv_step  <= ring_rd_data;
                     default: ;
                 endcase
             end
@@ -1720,8 +1657,8 @@ always @(posedge clk) begin
         // here, reading the regs S_PAY_DATA just wrote.
         S_EXECUTE: begin
             if (cmd_is_nop || cmd_is_fence
-                || cmd_is_set_texture || cmd_is_set_depth_func
-                || cmd_is_set_fb || cmd_is_set_zb
+                || cmd_is_set_texture
+                || cmd_is_set_fb
                 || cmd_is_set_skip_zero
                 || cmd_is_set_colormap_id) begin
                 state <= S_IDLE;
@@ -1808,18 +1745,13 @@ always @(posedge clk) begin
                 p3_color     <= p2b_flags[SPAN_COLORMAP] ? cmap_rd_data : p2b_color;
                 p3_flags     <= p2b_flags;
                 p3_fb_addr   <= p2b_fb_addr;
-                p3_z_addr    <= p2b_z_addr;
-                p3_zi        <= p2b_zi;
                 p3_discard   <= p2b_discard;
-                p3_z_resolved <= 0;  // fresh pixel; FBSS must resolve depth if flagged
 
                 // p2b <- p2  (no-op shift, gives cmap BRAM time to read)
                 p2b_valid   <= p2_valid;
                 p2b_color   <= p2_color;
                 p2b_flags   <= p2_flags;
                 p2b_fb_addr <= p2_fb_addr;
-                p2b_z_addr  <= p2_z_addr;
-                p2b_zi      <= p2_zi;
                 p2b_discard <= p2_discard;
 
                 // p2 <- p1  (captures tex_resp; issues cmap_rd_addr if needed)
@@ -1829,8 +1761,6 @@ always @(posedge clk) begin
                     p2_light   <= p1_light;
                     p2_flags   <= p1_flags;
                     p2_fb_addr <= p1_fb_addr;
-                    p2_z_addr  <= p1_z_addr;
-                    p2_zi      <= p1_zi;
                     p2_discard <= p1_flags[SPAN_SKIP_ZERO]
                                && (tex_resp_data[7:0] == 8'hFF);
                     if (p1_flags[SPAN_COLORMAP]) begin
@@ -1852,8 +1782,6 @@ always @(posedge clk) begin
                     p1_light   <= p0_light;
                     p1_flags   <= p0_flags;
                     p1_fb_addr <= p0_fb_addr;
-                    p1_z_addr  <= p0_z_addr;
-                    p1_zi      <= p0_zi;
                 end else begin
                     p1_valid <= 0;
                 end
@@ -1865,8 +1793,6 @@ always @(posedge clk) begin
                     p0_light     <= sp_light;
                     p0_flags     <= sp_flags;
                     p0_fb_addr   <= sp_fb_addr;
-                    p0_z_addr    <= sp_z_addr;
-                    p0_zi        <= sp_zi;
                     p0_s_int     <= sp_s[31:16] & sp_tex_w_mask;
                     p0_tex_base  <= sp_tex_addr;
                     // p0_mode / p0_shift_addr removed — multiply-mode
@@ -1886,8 +1812,6 @@ always @(posedge clk) begin
                     // boundary (sp_seg_left == 0) we swap in the pre-
                     // computed slot B (persp_pend_*).
                     sp_fb_addr <= sp_fb_addr + {{16{sp_fb_stride[15]}}, sp_fb_stride};
-                    sp_zi      <= sp_zi + sp_zistep;
-                    sp_z_addr  <= sp_z_addr + 32'd2;
                     sp_count   <= sp_count - 16'd1;
                     // Phase 4d — per-pixel light step.  Direct
                     // CMD_DRAW_SPAN payloads set sp_light_step = 0
@@ -1924,14 +1848,6 @@ always @(posedge clk) begin
             // ----------------------------------------------------------
             case (fbss)
                 FBSS_IDLE: begin
-                    // Depth detour: if the pixel needs a z-test/write and we
-                    // haven't resolved it yet, peel off into FBSS_ZREAD.
-                    // fp_pipe_stall's `fbss_depth_entry` term holds p3 stable.
-                    if (p3_valid && !p3_discard
-                        && (p3_flags[SPAN_DEPTH_TEST] || p3_flags[SPAN_DEPTH_WRITE])
-                        && !p3_z_resolved) begin
-                        fbss <= FBSS_ZREAD;
-                    end
                     // Translucent detour: if SPAN_TRANSLUC is set, capture p3
                     // state and run the read-modify-write blend flow.  The
                     // blend result is written to fb_acc by FBSS_BLEND_APPLY,
@@ -1939,7 +1855,7 @@ always @(posedge clk) begin
                     // state is frozen for the duration of the blend (fbss !=
                     // IDLE keeps fp_pipe_stall asserted, so no new fragment
                     // can advance to p3 and clobber it).
-                    else if (p3_valid && !p3_discard && p3_flags[SPAN_TRANSLUC]) begin
+                    if (p3_valid && !p3_discard && p3_flags[SPAN_TRANSLUC]) begin
                         blend_src_color <= p3_color;
                         blend_word_addr <= p3_fb_addr & 32'hFFFFFFFC;
                         blend_byte_lane <= p3_fb_addr[1:0];
@@ -2031,69 +1947,6 @@ always @(posedge clk) begin
                         // FBSS_IDLE branch handles "did we already process
                         // this p3?" via the conditional clear below.
                         fbss <= FBSS_IDLE;
-                    end
-                end
-
-                // --------------------------------------------------------
-                // Depth test/write detour — serialised on the shared Z SRAM.
-                // p3 is held stable via fbss != FBSS_IDLE stalling the pipe.
-                // --------------------------------------------------------
-                FBSS_ZREAD: begin
-                    if (!sram_busy) begin
-                        sram_rd   <= 1;
-                        sram_addr <= p3_z_addr[23:2];  // byte → word
-                        fbss      <= FBSS_ZWAIT;
-                    end
-                end
-
-                FBSS_ZWAIT: begin
-                    // Compare + z-write launch happen in the same cycle we see
-                    // the read response. Saves one state (FBSS_ZWRITE merged
-                    // here) and one cycle on depth-tested pixels.
-                    if (sram_rdata_valid) begin : fbss_z_cmp
-                        reg [15:0] old_z;
-                        reg [15:0] new_z;
-                        reg        pass;
-                        old_z = p3_z_addr[1] ? sram_rdata[31:16] : sram_rdata[15:0];
-                        new_z = p3_zi[31:16];
-                        case (st_depth_func)
-                            3'd1: pass = 1'b1;                  // ALWAYS
-                            3'd2: pass = (new_z <  old_z);      // LESS
-                            3'd3: pass = (new_z <= old_z);      // LEQUAL
-                            3'd4: pass = (new_z == old_z);      // EQUAL
-                            3'd5: pass = (new_z >= old_z);      // GEQUAL
-                            3'd6: pass = (new_z >  old_z);      // GREATER
-                            3'd7: pass = (new_z != old_z);      // NOTEQUAL
-                            default: pass = 1'b1;               // NONE — shouldn't reach here
-                        endcase
-
-                        if (p3_flags[SPAN_DEPTH_TEST] && !pass) begin
-                            // Fail: skip fb write + skip z write.
-                            p3_valid      <= 0;
-                            p3_z_resolved <= 1;
-                            fbss          <= FBSS_IDLE;
-                        end else if (p3_flags[SPAN_DEPTH_WRITE]) begin
-                            // Pass + write: launch SRAM write now, wait for
-                            // completion in FBSS_ZWRWAIT.
-                            sram_wr    <= 1;
-                            sram_addr  <= p3_z_addr[23:2];
-                            sram_wdata <= p3_z_addr[1]
-                                ? {p3_zi[31:16], sram_rdata[15:0]}
-                                : {sram_rdata[31:16], p3_zi[31:16]};
-                            sram_wstrb <= p3_z_addr[1] ? 4'b1100 : 4'b0011;
-                            fbss <= FBSS_ZWRWAIT;
-                        end else begin
-                            // Pass, no z-write — proceed straight to accumulate.
-                            p3_z_resolved <= 1;
-                            fbss          <= FBSS_IDLE;
-                        end
-                    end
-                end
-
-                FBSS_ZWRWAIT: begin
-                    if (!sram_busy) begin
-                        p3_z_resolved <= 1;
-                        fbss          <= FBSS_IDLE;
                     end
                 end
 
@@ -2508,10 +2361,6 @@ always @(posedge clk) begin
                 clear_addr      <= st_fb_addr;
                 clear_remaining <= 18'd16000;  // 320*200/4 words (FB)
                 state           <= S_CLEAR_FB;
-            end else if (clear_flags[1]) begin
-                clear_addr      <= st_zb_addr;
-                clear_remaining <= 18'd32000;  // 320*200/2 halfwords (ZB)
-                state           <= S_CLEAR_ZB;
             end else begin
                 state <= S_IDLE;
             end
@@ -2519,12 +2368,7 @@ always @(posedge clk) begin
 
         S_CLEAR_FB: begin
             if (clear_remaining == 0) begin
-                if (clear_flags[1]) begin
-                    clear_addr      <= st_zb_addr;
-                    clear_remaining <= 18'd32000;
-                    state           <= S_CLEAR_ZB;
-                end else
-                    state <= S_IDLE;
+                state <= S_IDLE;
             end else begin
                 // Single-word AXI4 write
                 m_wr_awvalid <= 1;
@@ -2550,26 +2394,6 @@ always @(posedge clk) begin
                 clear_remaining <= clear_remaining - 18'd1;
                 clear_addr      <= clear_addr + 32'd4;
                 state           <= S_CLEAR_FB;
-            end
-        end
-
-        S_CLEAR_ZB: begin
-            if (clear_remaining == 0)
-                state <= S_IDLE;
-            else if (!sram_busy) begin
-                sram_wr    <= 1;
-                sram_addr  <= clear_addr[23:2];  // byte addr → word addr
-                sram_wdata <= {clear_depth, clear_depth};
-                sram_wstrb <= 4'b1111;
-                state      <= S_CLEAR_ZB_WAIT;
-            end
-        end
-
-        S_CLEAR_ZB_WAIT: begin
-            if (!sram_busy) begin
-                clear_remaining <= clear_remaining - 18'd1;
-                clear_addr      <= clear_addr + 32'd4;
-                state           <= S_CLEAR_ZB;
             end
         end
 
@@ -3226,16 +3050,8 @@ always @(posedge clk) begin
             tri_t <= tri_row_t;
             tri_w <= tri_row_w;
             // tri_ymin_x_stride is the DSP-registered product from
-            // S_TRI_MUL_WAIT (tri_ymin × st_fb_stride).  For the Z-buffer
-            // we use the configured st_zb_stride (set via CMD_SET_ZB);
-            // computing it as tri_ymin * st_zb_stride keeps the row base
-            // correct for any ZB dimensions the firmware programs in,
-            // not just the 320×200 hardcode that used to live here as
-            // "<<<9 + <<<7" (= 640).  One 16×17 fabric multiply; the
-            // triangle start already budgets S_TRI_MUL_WAIT cycles.
+            // S_TRI_MUL_WAIT (tri_ymin × st_fb_stride).
             tri_fb_row_addr <= st_fb_addr + tri_ymin_x_stride;
-            tri_zb_row_addr <= st_zb_addr
-                             + $signed(tri_ymin) * $signed({1'b0, st_zb_stride});
             tri_span_count <= 0;  // reset for first row scan
             state <= S_TRI_PIX;
             end // else (bbox not empty)
@@ -3268,7 +3084,8 @@ always @(posedge clk) begin
                     sp_light_q    <= tri_span_r_start;
                     sp_light_step <= 32'b0;
                     // PERSP flag (bit 5) folds in when tri_persp_active.
-                    sp_flags     <= (st_depth_func != 0 ? 8'h18 : 8'h00) | 8'h01
+                    // bits 3/4 (DEPTH_TEST/WRITE) retired with the Z buffer.
+                    sp_flags     <= 8'h01
                                    | (st_skip_zero ? 8'h04 : 8'h00)
                                    | (tri_persp_active ? 8'h20 : 8'h00);
                     sp_fb_stride <= 16'd1;
@@ -3284,9 +3101,6 @@ always @(posedge clk) begin
                     // SET_TEXTURE field; for now fix the bleed.
                     sp_tex_w_mask <= 16'hFFFF;
                     sp_tex_h_mask <= 16'hFFFF;
-                    sp_z_addr    <= tri_zb_row_addr + {tri_span_x_start, 1'b0};
-                    sp_zi        <= tri_span_z_start;
-                    sp_zistep    <= grad_z_dx <<< 4;
                     // Phase 4c.4 — when perspective is active, route the
                     // triangle's row-walked attributes into the
                     // SPAN_PERSP path's perspective-source regs and arm
@@ -3406,7 +3220,6 @@ always @(posedge clk) begin
                 tri_e[1] <= tri_row_e[1] + (tri_B[1] <<< 4);
                 tri_e[2] <= tri_row_e[2] + (tri_B[2] <<< 4);
                 tri_fb_row_addr <= tri_fb_row_addr + {{16{st_fb_stride[15]}}, st_fb_stride};
-                tri_zb_row_addr <= tri_zb_row_addr + {{16{st_zb_stride[15]}}, st_zb_stride};
                 tri_row_z <= tri_row_z + (grad_z_dy <<< 4);
                 tri_row_s <= tri_row_s + (grad_s_dy <<< 4);
                 tri_row_t <= tri_row_t + (grad_t_dy <<< 4);

@@ -64,18 +64,6 @@ wire        gpu_wr_wlast;
 wire        gpu_wr_bvalid;
 
 // ============================================================
-// GPU SRAM signals
-// ============================================================
-wire        gpu_sram_rd;
-wire        gpu_sram_wr;
-wire [21:0] gpu_sram_addr;
-wire [31:0] gpu_sram_wdata;
-wire [3:0]  gpu_sram_wstrb;
-wire [31:0] sram_rdata;
-wire        sram_busy;
-wire        sram_rdata_valid;
-
-// ============================================================
 // GPU Core
 // ============================================================
 gpu_core gpu (
@@ -101,15 +89,6 @@ gpu_core gpu (
     .m_wr_wstrb(gpu_wr_wstrb),
     .m_wr_wlast(gpu_wr_wlast),
     .m_wr_bvalid(gpu_wr_bvalid),
-    // SRAM
-    .sram_rd(gpu_sram_rd),
-    .sram_wr(gpu_sram_wr),
-    .sram_addr(gpu_sram_addr),
-    .sram_wdata(gpu_sram_wdata),
-    .sram_wstrb(gpu_sram_wstrb),
-    .sram_rdata(sram_rdata),
-    .sram_busy(sram_busy),
-    .sram_rdata_valid(sram_rdata_valid),
     // MMIO
     .reg_wr(reg_wr),
     .reg_addr(reg_addr),
@@ -216,60 +195,6 @@ always @(posedge clk) begin
         // B response consumed (single cycle)
         if (wr_b_pending)
             wr_b_pending <= 0;
-    end
-end
-
-// ============================================================
-// Simplified SRAM Model (64K words, 2-cycle latency)
-// ============================================================
-reg [31:0] sram_mem [0:65535];
-reg        sram_busy_r;
-reg        sram_valid_r;
-reg [31:0] sram_rdata_r;
-reg        sram_pending_rd;
-reg [15:0] sram_pending_addr;
-reg [1:0]  sram_delay;
-
-assign sram_busy         = sram_busy_r;
-assign sram_rdata_valid  = sram_valid_r;
-assign sram_rdata        = sram_rdata_r;
-
-always @(posedge clk) begin
-    if (!reset_n) begin
-        sram_busy_r    <= 0;
-        sram_valid_r   <= 0;
-        sram_pending_rd <= 0;
-        sram_delay     <= 0;
-    end else begin
-        sram_valid_r <= 0;
-
-        if (!sram_busy_r) begin
-            if (gpu_sram_wr) begin
-                // Write: apply byte strobes
-                if (gpu_sram_wstrb[0]) sram_mem[gpu_sram_addr[15:0]][7:0]   <= gpu_sram_wdata[7:0];
-                if (gpu_sram_wstrb[1]) sram_mem[gpu_sram_addr[15:0]][15:8]  <= gpu_sram_wdata[15:8];
-                if (gpu_sram_wstrb[2]) sram_mem[gpu_sram_addr[15:0]][23:16] <= gpu_sram_wdata[23:16];
-                if (gpu_sram_wstrb[3]) sram_mem[gpu_sram_addr[15:0]][31:24] <= gpu_sram_wdata[31:24];
-                sram_busy_r <= 1;
-                sram_delay  <= 1;
-            end else if (gpu_sram_rd) begin
-                sram_pending_rd   <= 1;
-                sram_pending_addr <= gpu_sram_addr[15:0];
-                sram_busy_r       <= 1;
-                sram_delay        <= 2;  // Read takes 2 extra cycles
-            end
-        end else begin
-            if (sram_delay > 0) begin
-                sram_delay <= sram_delay - 1;
-            end else begin
-                sram_busy_r <= 0;
-                if (sram_pending_rd) begin
-                    sram_valid_r  <= 1;
-                    sram_rdata_r  <= sram_mem[sram_pending_addr];
-                    sram_pending_rd <= 0;
-                end
-            end
-        end
     end
 end
 

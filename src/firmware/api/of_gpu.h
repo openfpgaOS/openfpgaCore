@@ -33,7 +33,7 @@ extern "C" {
  * ================================================================ */
 
 #define OF_GPU_CLEAR_COLOR      (1 << 0)
-#define OF_GPU_CLEAR_DEPTH      (1 << 1)
+/* bit 1 reserved (was OF_GPU_CLEAR_DEPTH — Z buffer dropped) */
 
 #define OF_GPU_RING_SIZE        16384   /* 16 KB M10K BRAM ring */
 
@@ -44,29 +44,13 @@ extern "C" {
 #define OF_GPU_SC(x)            OF_GPU_SUBPIXEL(x)
 
 /* ================================================================
- * Enumerations
- * ================================================================ */
-
-typedef enum {
-    OF_GPU_DEPTH_NONE     = 0,
-    OF_GPU_DEPTH_ALWAYS   = 1,
-    OF_GPU_DEPTH_LESS     = 2,
-    OF_GPU_DEPTH_LEQUAL   = 3,
-    OF_GPU_DEPTH_EQUAL    = 4,
-    OF_GPU_DEPTH_GEQUAL   = 5,
-    OF_GPU_DEPTH_GREATER  = 6,
-    OF_GPU_DEPTH_NOTEQUAL = 7,
-} of_gpu_depth_func_t;
-
-/* ================================================================
  * Span Flags
  * ================================================================ */
 
 #define OF_GPU_SPAN_COLORMAP     (1 << 0)
 /* bit 1 reserved (was OF_GPU_SPAN_COLUMN — never wired in the RTL) */
 #define OF_GPU_SPAN_SKIP_ZERO    (1 << 2)
-#define OF_GPU_SPAN_DEPTH_TEST   (1 << 3)
-#define OF_GPU_SPAN_DEPTH_WRITE  (1 << 4)
+/* bits 3/4 reserved (were SPAN_DEPTH_TEST/WRITE — Z buffer dropped) */
 #define OF_GPU_SPAN_PERSP        (1 << 5)
 #define OF_GPU_SPAN_TRANSLUC     (1 << 6)
 /* bit 7 reserved (was OF_GPU_SPAN_TRANSLUC_REV — REV variant dropped) */
@@ -86,16 +70,11 @@ typedef struct {
     int16_t  fb_stride;
     uint16_t tex_width;
     /* POT wrap masks (tex_w - 1 / tex_h - 1).  0 means "no wrap" — the
-     * legacy default and what the formerly-reserved word 8 carried.
-     * Set both to (tex_w-1) and (tex_h-1) to reproduce BUILD/Quake-style
-     * shift-mode wrap inside the GPU's multiply-mode addressing.  Both
-     * dimensions must be powers of two.  Renamed from the dead
-     * tex_shift/tex_bits fields that fed the retired shift-mode path. */
+     * default for shift-free callers.  Set both to (tex_w-1) and
+     * (tex_h-1) to reproduce BUILD/Quake-style shift-mode wrap inside
+     * the GPU's multiply-mode addressing.  Both dimensions must be POT. */
     uint16_t tex_w_mask;
     uint16_t tex_h_mask;
-    uint32_t z_addr;
-    int32_t  zi;
-    int32_t  zistep;
     /* Perspective (optional, requires PERSP flag) */
     int32_t  sdivz, tdivz;
     int32_t  zi_persp;
@@ -156,9 +135,9 @@ static uint32_t _gpu_base;
                                        * byte is replicated 4× per FB
                                        * word, matching CMD_CLEAR. */
 #define GPU_CMD_SET_TEXTURE     0x20
-#define GPU_CMD_SET_DEPTH_FUNC  0x21
+/* 0x21 GPU_CMD_SET_DEPTH_FUNC retired in lean Phase 2.3 (Z dropped). */
 #define GPU_CMD_SET_FB          0x23
-#define GPU_CMD_SET_ZB          0x24
+/* 0x24 GPU_CMD_SET_ZB         retired in lean Phase 2.3 (Z dropped). */
 #define GPU_CMD_SET_COLORMAP_ID 0x28  /* 1-word payload: [3:0] = palookup slot */
 #define GPU_CMD_DRAW_TRIANGLES  0x30
 #define GPU_CMD_DRAW_SPAN       0x40
@@ -367,21 +346,9 @@ static inline void of_gpu_set_framebuffer(uint32_t addr, uint16_t stride) {
     _gpu_ring_write((uint32_t)stride);
 }
 
-static inline void of_gpu_set_zbuffer(uint32_t addr, uint16_t stride) {
-    _gpu_cmd_header(GPU_CMD_SET_ZB, 2);
-    _gpu_ring_write(addr);
-    _gpu_ring_write((uint32_t)stride);
-}
-
-static inline void of_gpu_depth_test(of_gpu_depth_func_t func) {
-    _gpu_cmd_header(GPU_CMD_SET_DEPTH_FUNC, 1);
-    _gpu_ring_write((uint32_t)func);
-}
-
-/* of_gpu_blend / of_gpu_alpha_ref / of_gpu_shade_mode helpers removed
- * along with their underlying SET_BLEND / SET_ALPHA_REF / SET_SHADE
- * commands — the datapath never implemented the corresponding combine,
- * alpha-test, or Gouraud gradient logic. */
+/* Z-buffer / depth-test API retired with the lean Z-removal in Phase 2.3.
+ * Quake / SDL2 / Doom-style renderers do their own visibility (BSP /
+ * paint-order); the GPU is now strictly a paint-order rasterizer. */
 
 static inline void of_gpu_bind_texture(const of_gpu_texture_t *tex) {
     _gpu_cmd_header(GPU_CMD_SET_TEXTURE, 2);
@@ -391,10 +358,12 @@ static inline void of_gpu_bind_texture(const of_gpu_texture_t *tex) {
 
 /* ---- Draw commands ---- */
 
-static inline void of_gpu_clear(uint32_t flags, uint16_t color, uint16_t depth) {
+/* Whole-FB clear.  flags bit 0 = clear color (the only flag still
+ * accepted; the bit-1 depth-clear path was retired with the Z buffer). */
+static inline void of_gpu_clear(uint32_t flags, uint16_t color) {
     _gpu_cmd_header(GPU_CMD_CLEAR, 2);
     _gpu_ring_write((flags << 16) | color);
-    _gpu_ring_write((uint32_t)depth);
+    _gpu_ring_write(0);  /* word 1 reserved (was depth value) */
 }
 
 /* Clear a rectangular region of the framebuffer to a constant color.
@@ -416,11 +385,11 @@ static inline void of_gpu_clear_rect(uint32_t start_byte_addr,
 }
 
 /*
- * Draw a single span.  18 payload words: 9 core + 3 depth + 6 perspective.
- * All fields always transmitted; GPU ignores depth/perspective unless flagged.
+ * Draw a single span.  15 payload words: 9 core + 6 perspective.
+ * GPU ignores the perspective words unless OF_GPU_SPAN_PERSP is set.
  */
 static inline void of_gpu_draw_span(const of_gpu_span_t *span) {
-    _gpu_cmd_header(GPU_CMD_DRAW_SPAN, 18);
+    _gpu_cmd_header(GPU_CMD_DRAW_SPAN, 15);
     _gpu_ring_write(span->fb_addr);
     _gpu_ring_write(span->tex_addr);
     _gpu_ring_write((uint32_t)span->s);
@@ -433,13 +402,9 @@ static inline void of_gpu_draw_span(const of_gpu_span_t *span) {
     _gpu_ring_write(((uint32_t)(uint16_t)span->fb_stride << 16) |
                     (uint32_t)span->tex_width);
     /* Word 8: POT wrap masks (high 16 = T, low 16 = S).  Both = 0
-     * means no wrap (legacy callers).  RTL decodes 0 as 0xFFFF
-     * internally so the addressing pass-through is unchanged. */
+     * means no wrap.  RTL decodes 0 as 0xFFFF internally. */
     _gpu_ring_write(((uint32_t)span->tex_h_mask << 16) |
                     (uint32_t)span->tex_w_mask);
-    _gpu_ring_write(span->z_addr);
-    _gpu_ring_write((uint32_t)span->zi);
-    _gpu_ring_write((uint32_t)span->zistep);
     _gpu_ring_write((uint32_t)span->sdivz);
     _gpu_ring_write((uint32_t)span->tdivz);
     _gpu_ring_write((uint32_t)span->zi_persp);

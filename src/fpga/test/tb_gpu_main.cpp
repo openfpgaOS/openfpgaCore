@@ -373,7 +373,7 @@ static void test_solid_span() {
     sdram_write(TEX_BASE_BYTE >> 2, 0xABABABAB);
 
     // Draw a horizontal span of 8 pixels at FB row 0
-    ring_cmd(0x40, 18);  // CMD_DRAW_SPAN, 18 payload words
+    ring_cmd(0x40, 15);  // CMD_DRAW_SPAN, 18 payload words
     ring_write(FB_BASE_BYTE);       // fb_addr
     ring_write(TEX_BASE_BYTE);      // tex_addr
     ring_write(0);                  // s = 0
@@ -386,8 +386,6 @@ static void test_solid_span() {
     ring_write((1 << 16) | 1);
     // tex_shift=0, tex_bits=0
     ring_write(0);
-    // z_addr, zi, zistep (unused)
-    ring_write(0); ring_write(0); ring_write(0);
     // perspective params (unused)
     ring_write(0); ring_write(0); ring_write(0);
     ring_write(0); ring_write(0); ring_write(0);
@@ -429,7 +427,7 @@ static void test_textured_span() {
     sdram_write(TEX_BASE_BYTE >> 2, 0x40302010);
 
     // Draw 4 pixels, stepping through texture (s=0, sstep=1.0 = 0x10000)
-    ring_cmd(0x40, 18);
+    ring_cmd(0x40, 15);
     ring_write(FB_BASE_BYTE);       // fb_addr
     ring_write(TEX_BASE_BYTE);      // tex_addr
     ring_write(0);                  // s = 0
@@ -442,8 +440,6 @@ static void test_textured_span() {
     ring_write((1 << 16) | 4);
     // tex_shift=0, tex_bits=0
     ring_write(0);
-    // z, zi, zistep
-    ring_write(0); ring_write(0); ring_write(0);
     // perspective
     ring_write(0); ring_write(0); ring_write(0);
     ring_write(0); ring_write(0); ring_write(0);
@@ -481,7 +477,7 @@ static void test_colormap_lighting() {
     sdram_write(TEX_BASE_BYTE >> 2, 0xAAAAAAAA);
 
     // Draw 4 pixels with light=1 (should all be 0x77)
-    ring_cmd(0x40, 18);
+    ring_cmd(0x40, 15);
     ring_write(FB_BASE_BYTE);
     ring_write(TEX_BASE_BYTE);
     ring_write(0); ring_write(0);    // s, t
@@ -527,7 +523,7 @@ static void test_vertical_column() {
 
     // Draw column of 4 pixels starting at column 5, row 0
     uint32_t col_fb_addr = FB_BASE_BYTE + 5;
-    ring_cmd(0x40, 18);
+    ring_cmd(0x40, 15);
     ring_write(col_fb_addr);
     ring_write(TEX_BASE_BYTE);
     ring_write(0); ring_write(0);
@@ -579,7 +575,7 @@ static void test_skip_zero() {
     sdram_write(TEX_BASE_BYTE >> 2, 0xFF22FF11);
 
     // Draw 4 pixels with SKIP_ZERO flag
-    ring_cmd(0x40, 18);
+    ring_cmd(0x40, 15);
     ring_write(FB_BASE_BYTE);
     ring_write(TEX_BASE_BYTE);
     ring_write(0); ring_write(0);
@@ -630,7 +626,7 @@ static void test_multiple_commands() {
     sdram_write((TEX_BASE_BYTE >> 2) + 4, 0xBBBBBBBB);
 
     // Span 1: 4 pixels at offset 0, texture A
-    ring_cmd(0x40, 18);
+    ring_cmd(0x40, 15);
     ring_write(FB_BASE_BYTE + 0);
     ring_write(TEX_BASE_BYTE);
     ring_write(0); ring_write(0);
@@ -643,7 +639,7 @@ static void test_multiple_commands() {
     ring_write(0); ring_write(0); ring_write(0);
 
     // Span 2: 4 pixels at offset 10, texture B
-    ring_cmd(0x40, 18);
+    ring_cmd(0x40, 15);
     ring_write(FB_BASE_BYTE + 10);
     ring_write(TEX_BASE_BYTE + 16);
     ring_write(0); ring_write(0);
@@ -696,7 +692,7 @@ static void test_tex_cache_miss() {
     }
 
     // Draw 32 pixels stepping through texture
-    ring_cmd(0x40, 18);
+    ring_cmd(0x40, 15);
     ring_write(FB_BASE_BYTE);
     ring_write(TEX_BASE_BYTE);
     ring_write(0); ring_write(0);
@@ -745,7 +741,7 @@ static void persp_draw_span(uint32_t fb_addr,
                              int32_t  zi_persp,
                              int32_t  sdivz_step, int32_t tdivz_step,
                              int32_t  zi_step) {
-    ring_cmd(0x40, 18);
+    ring_cmd(0x40, 15);
     ring_write(fb_addr);
     ring_write(tex_addr);
     ring_write(0);                 // s (unused in persp)
@@ -757,8 +753,7 @@ static void persp_draw_span(uint32_t fb_addr,
                ((uint32_t)light << 8) |
                (0x01 | 0x20));
     ring_write((1u << 16) | tex_width);  // fb_stride=1, tex_width
-    ring_write(0);                 // tex_shift, tex_bits
-    ring_write(0); ring_write(0); ring_write(0);  // z_addr, zi, zistep
+    ring_write(0);                 // wrap masks (default no-wrap)
     ring_write((uint32_t)sdivz);
     ring_write((uint32_t)tdivz);
     ring_write((uint32_t)zi_persp);
@@ -1170,7 +1165,7 @@ static void test_transluc_lut_basic(void) {
 
     // Submit a span: 8 pixels, fb_addr=0, flags = COLORMAP|TRANSLUC.
     // SPAN_COLORMAP=bit0=0x01, SPAN_TRANSLUC=bit6=0x40 → flags = 0x41.
-    ring_cmd(0x40, 18);
+    ring_cmd(0x40, 15);
     ring_write(FB_BASE_BYTE);       // fb_addr
     ring_write(TEX_BASE_BYTE);      // tex_addr
     ring_write(0); ring_write(0);   // s, t
@@ -1215,7 +1210,7 @@ static void transluc_emit_span(uint32_t fb_addr, uint8_t src_byte,
     ring_write(((uint32_t)1 << 16) | 1);
     ring_write(0);
     ring_write(0);
-    ring_cmd(0x40, 18);
+    ring_cmd(0x40, 15);
     ring_write(fb_addr);
     ring_write(TEX_BASE_BYTE);
     ring_write(0); ring_write(0);
@@ -1319,7 +1314,7 @@ static void test_transluc_no_blend_interleave(void) {
         sdram_write(tex_addr >> 2, v);
         ring_cmd(0x20, 4); ring_write(tex_addr);
         ring_write(((uint32_t)1 << 16) | 1); ring_write(0); ring_write(0);
-        ring_cmd(0x40, 18);
+        ring_cmd(0x40, 15);
         ring_write(FB_BASE_BYTE + fb_off);
         ring_write(tex_addr);
         ring_write(0); ring_write(0); ring_write(0); ring_write(0);
@@ -1334,7 +1329,7 @@ static void test_transluc_no_blend_interleave(void) {
         sdram_write(tex_addr >> 2, v);
         ring_cmd(0x20, 4); ring_write(tex_addr);
         ring_write(((uint32_t)1 << 16) | 1); ring_write(0); ring_write(0);
-        ring_cmd(0x40, 18);
+        ring_cmd(0x40, 15);
         ring_write(FB_BASE_BYTE + fb_off);
         ring_write(tex_addr);
         ring_write(0); ring_write(0); ring_write(0); ring_write(0);
@@ -1380,102 +1375,6 @@ static void test_transluc_no_blend_interleave(void) {
 }
 
 // Set depth test via CMD_SET_DEPTH_FUNC (available in all variants)
-static void ring_depth_func(uint32_t func) {
-    ring_cmd(0x21, 1);
-    ring_write(func);
-}
-
-// Span-based depth test — exercises the GEQUAL / GREATER / NOTEQUAL
-// compare ops added alongside the original LESS / LEQUAL / EQUAL.
-// LITE-compatible (no triangle path).
-static void ring_span_flat(uint32_t fb_off, uint32_t tex_word,
-                           uint32_t count, uint32_t flags,
-                           uint32_t z_addr, uint32_t zi) {
-    // Each span uses its own tex slot — texture cache would hit stale
-    // data if we reused a single tex address across backdoor rewrites.
-    static uint32_t tex_slot = 0;
-    uint32_t tex_base = TEX_BASE_BYTE + (tex_slot * 64);
-    tex_slot = (tex_slot + 1) & 0x3F;
-    sdram_write(tex_base >> 2, tex_word);
-    ring_cmd(0x40, 18);  // CMD_DRAW_SPAN
-    ring_write(FB_BASE_BYTE + fb_off);
-    ring_write(tex_base);
-    ring_write(0); ring_write(0);       // s, t
-    ring_write(0); ring_write(0);       // sstep, tstep
-    ring_write((count << 16) | (0 << 8) | flags);
-    ring_write((1 << 16) | 1);          // fb_stride=1, tex_width=1
-    ring_write(0);                       // tex_shift=0, tex_bits=0
-    ring_write(z_addr);
-    ring_write(zi);
-    ring_write(0);                       // zistep=0 (flat z across span)
-    for (int i = 0; i < 6; i++) ring_write(0);  // persp params unused
-}
-
-static void test_span_depth_gequal() {
-    printf("TEST: Span depth compare — GEQUAL / GREATER / NOTEQUAL\n");
-    gpu_init();
-    { uint8_t _cm[256]; for (int i = 0; i < 256; i++) _cm[i] = (uint8_t)i; cmap_upload_bytes(0, _cm, 256); }
-
-    ring_cmd(0x23, 2); ring_write(FB_BASE_BYTE); ring_write(320);
-    ring_cmd(0x24, 2); ring_write(0); ring_write(640);  // ZB base=0
-
-    // Order matters — we put the PASS span first so its write+z-update
-    // becomes the occluder, then the FAIL span must NOT overwrite it.
-    // This actually discriminates "depth works" vs "depth silently always
-    // writes" (which would show the fail color instead of the pass color).
-
-    // --- GEQUAL ---------------------------------------------------------
-    ring_depth_func(5);  // GEQUAL
-    ring_cmd(0x10, 2); ring_write((3 << 16) | 0x00); ring_write(0x4000);
-    // z=0x8000: pass GEQUAL (0x8000 >= 0x4000). Writes 0xBB + ZB=0x8000.
-    ring_span_flat(0, 0xBBBBBBBB, 8, 0x19, 0, 0x80000000);
-    // z=0x2000: fail (0x2000 >= 0x8000 is false). Must not overwrite.
-    ring_span_flat(0, 0xAAAAAAAA, 8, 0x19, 0, 0x20000000);
-    check("span_depth_gequal_done", gpu_finish() ? 1 : 0, 1);
-    for (int i = 0; i < 8; i++) {
-        char name[32]; snprintf(name, sizeof(name), "gequal_px%d", i);
-        check_byte(name, i, 0xBB);
-    }
-
-    // --- GREATER (strict) -----------------------------------------------
-    // ZB = 0x8000 (from GEQUAL pass). Equal-z must FAIL under GREATER.
-    ring_depth_func(6);
-    // z=0x9000: pass. Writes 0xDD + ZB=0x9000.
-    ring_span_flat(0, 0xDDDDDDDD, 8, 0x19, 0, 0x90000000);
-    // z=0x9000: equal — fail GREATER. Must not overwrite.
-    ring_span_flat(0, 0xCCCCCCCC, 8, 0x19, 0, 0x90000000);
-    check("span_depth_greater_done", gpu_finish() ? 1 : 0, 1);
-    for (int i = 0; i < 8; i++) {
-        char name[32]; snprintf(name, sizeof(name), "greater_px%d", i);
-        check_byte(name, i, 0xDD);
-    }
-
-    // --- NOTEQUAL -------------------------------------------------------
-    // ZB = 0x9000. Non-equal passes, equal fails.
-    ring_depth_func(7);
-    // z=0x1000: pass NOTEQUAL. Writes 0x77 + ZB=0x1000.
-    ring_span_flat(0, 0x77777777, 8, 0x19, 0, 0x10000000);
-    // z=0x1000: equal — fail. Must not overwrite.
-    ring_span_flat(0, 0xEEEEEEEE, 8, 0x19, 0, 0x10000000);
-    check("span_depth_notequal_done", gpu_finish() ? 1 : 0, 1);
-    for (int i = 0; i < 8; i++) {
-        char name[32]; snprintf(name, sizeof(name), "notequal_px%d", i);
-        check_byte(name, i, 0x77);
-    }
-
-    // --- LESS regression (make sure we didn't break existing ops) -------
-    ring_depth_func(2);
-    // z=0x0800: !(0x0800 < 0x1000) = false, so pass. Writes 0x44 + ZB=0x0800.
-    ring_span_flat(0, 0x44444444, 8, 0x19, 0, 0x08000000);
-    // z=0x2000: !(0x2000 < 0x0800) = true, so fail. Must not overwrite.
-    ring_span_flat(0, 0x33333333, 8, 0x19, 0, 0x20000000);
-    check("span_depth_less_done", gpu_finish() ? 1 : 0, 1);
-    for (int i = 0; i < 8; i++) {
-        char name[32]; snprintf(name, sizeof(name), "less_px%d", i);
-        check_byte(name, i, 0x44);
-    }
-}
-
 // Verify the span unit handles a non-power-of-2 tex_width (Quake console
 // surface = 320×200, alias skins = arbitrary). Hits the multiply-mode path
 // (sp_tex_width != 0): addr = tex_base + t_int * tex_width + s_int.
@@ -1501,10 +1400,9 @@ static void test_span_tex_width_nonpow2(void) {
 
     ring_cmd(0x23, 2); ring_write(FB_BASE_BYTE); ring_write(320);
     ring_cmd(0x10, 2); ring_write((1 << 16) | 0x00); ring_write(0);  // clear FB
-    ring_depth_func(0);  // no depth
 
     // Row 0 span: s=0, t=0, sstep=1.0 → pixels should read tex[0..7] = 0..7.
-    ring_cmd(0x40, 18);
+    ring_cmd(0x40, 15);
     ring_write(FB_BASE_BYTE);
     ring_write(tex_base);
     ring_write(0); ring_write(0);                          // s=0, t=0
@@ -1517,7 +1415,7 @@ static void test_span_tex_width_nonpow2(void) {
 
     // Row 1 span: s=100, t=1, sstep=1.0 → pixels should read tex[(100+128..107+128) & 0xFF].
     // addr = tex_base + 1 * 300 + (100..107), values = (100..107 + 128) & 0xFF = 228..235 (0xE4..0xEB).
-    ring_cmd(0x40, 18);
+    ring_cmd(0x40, 15);
     ring_write(FB_BASE_BYTE + 8);
     ring_write(tex_base);
     ring_write(100 << 16); ring_write(1 << 16);            // s=100.0, t=1.0
@@ -1754,66 +1652,6 @@ static void test_triangle_multi() {
     check_byte("tri1_outside", 10 + 3*320, 0x00);
     check_byte("tri2_inside", 21 + 3*320, 0xAA);
     check_byte("tri2_outside", 25 + 3*320, 0x00);
-}
-
-// Test T5: Depth-tested triangles (front occludes back)
-static void test_triangle_depth() {
-    printf("TEST: Depth-tested triangles\n");
-
-    gpu_init();
-
-    { uint8_t _cm[256]; for (int i = 0; i < 256; i++) _cm[i] = (uint8_t)i; cmap_upload_bytes(0, _cm, 256); }
-
-    ring_cmd(0x23, 2);
-    ring_write(FB_BASE_BYTE);
-    ring_write(320);
-
-    // Set depth test + Z-buffer address
-    ring_depth_func(2);
-    ring_cmd(0x24, 2);  // CMD_SET_ZB
-    ring_write(0);       // SRAM address 0
-    ring_write(640);     // stride = 320 pixels × 2 bytes
-
-    // Clear color + depth
-    ring_cmd(0x10, 2);
-    ring_write((3 << 16) | 0x00);  // CLEAR_COLOR | CLEAR_DEPTH
-    ring_write(0xFFFF);             // far depth
-
-    // Tex A: 0xAA (back triangle)
-    sdram_write(TEX_BASE_BYTE >> 2, 0xAAAAAAAA);
-    ring_bind_texture(TEX_BASE_BYTE, 1, 1);
-
-    // Back triangle at z=0x8000 (far), covers (2,2)-(10,2)-(2,8)
-    ring_cmd(0x30, 19);
-    ring_write(3);
-    ring_write_vertex(2*16, 2*16, 0x8000, 0, 0, 0);
-    ring_write_vertex(10*16, 2*16, 0x8000, 0, 0, 0);
-    ring_write_vertex(2*16, 8*16, 0x8000, 0, 0, 0);
-
-    // Tex B: 0xBB (front triangle)
-    sdram_write((TEX_BASE_BYTE >> 2) + 4, 0xBBBBBBBB);
-    ring_bind_texture(TEX_BASE_BYTE + 16, 1, 1);
-
-    // Front triangle at z=0x2000 (near), covers (4,3)-(8,3)-(4,6)
-    ring_cmd(0x30, 19);
-    ring_write(3);
-    ring_write_vertex(4*16, 3*16, 0x2000, 0, 0, 0);
-    ring_write_vertex(8*16, 3*16, 0x2000, 0, 0, 0);
-    ring_write_vertex(4*16, 6*16, 0x2000, 0, 0, 0);
-
-    bool ok = gpu_finish();
-    check("depth_done", ok ? 1 : 0, 1);
-
-    // Debug: check pixels in back triangle area
-    for (int x = 2; x < 10; x++) {
-        uint8_t v = sdram_read_byte(FB_BASE_BYTE + x + 3*320);
-        if (v) printf("  [depth] px(%d,3) = 0x%02x\n", x, v);
-    }
-
-    // Pixel (2,3): back triangle only → 0xAA
-    check_byte("depth_back", 2 + 3*320, 0xAA);
-    // Pixel (6,3): front triangle overdraws back → 0xBB (z=0x2000 < 0x8000)
-    check_byte("depth_front", 6 + 3*320, 0xBB);
 }
 
 // Test T8: Two adjacent triangles (shared edge — no gap)
@@ -2511,7 +2349,7 @@ static void test_triangle_batch_disjoint_fb(void) {
 // over-write of adjacent pixels).
 static void emit_solid_span(uint32_t fb_addr, uint32_t tex_addr,
                             uint16_t count) {
-    ring_cmd(0x40, 18);
+    ring_cmd(0x40, 15);
     ring_write(fb_addr);
     ring_write(tex_addr);
     ring_write(0);                 // s
@@ -2598,7 +2436,7 @@ static void test_span_partial_word_handoff(void) {
 // backward as well as forward.
 static void emit_solid_span_stride(uint32_t fb_addr, uint32_t tex_addr,
                                     uint16_t count, int16_t stride) {
-    ring_cmd(0x40, 18);
+    ring_cmd(0x40, 15);
     ring_write(fb_addr);
     ring_write(tex_addr);
     ring_write(0); ring_write(0);
@@ -2678,7 +2516,7 @@ static void test_span_back_to_back_columns(void) {
         ring_bind_texture(TEX_BASE_BYTE + col*4, 1, 1);
         // Column at fb_addr = base_byte + col, fb_stride=320 (next row),
         // count=H pixels going down screen.
-        ring_cmd(0x40, 18);
+        ring_cmd(0x40, 15);
         ring_write(FB_BASE_BYTE + col);
         ring_write(TEX_BASE_BYTE + col*4);
         ring_write(0); ring_write(0); ring_write(0); ring_write(0);
@@ -3250,7 +3088,7 @@ static void test_triangle_mask_bleed_from_span(void) {
 
     // First: a benign DRAW_SPAN that sets sp_tex_w_mask = 63.
     ring_bind_texture(TEX_BASE_BYTE, 64, 1);
-    ring_cmd(0x40, 18);
+    ring_cmd(0x40, 15);
     ring_write(FB_BASE_BYTE + 200*320);  // far row, won't overlap triangle
     ring_write(TEX_BASE_BYTE);
     ring_write(0); ring_write(0);
@@ -3872,7 +3710,7 @@ static void submit_mode0_frame(uint32_t fb_base, uint32_t wall_tex, uint32_t flo
     ring_write(320);
     /* 10 horizontal floor spans. */
     for (int y = 120; y < 130; y++) {
-        ring_cmd(0x40, 18);         // CMD_DRAW_SPAN
+        ring_cmd(0x40, 15);         // CMD_DRAW_SPAN
         ring_write(fb_base + y * 320);          // fb_addr
         ring_write(floor_tex);                  // tex_addr
         ring_write((uint32_t)(y * 0x1234));     // s (arbitrary walk)
@@ -3891,7 +3729,7 @@ static void submit_mode0_frame(uint32_t fb_base, uint32_t wall_tex, uint32_t flo
         int draw_start = 100;
         int span_count = 16;
         uint32_t col_fb = fb_base + draw_start * 320 + x;
-        ring_cmd(0x40, 18);
+        ring_cmd(0x40, 15);
         ring_write(col_fb);
         ring_write(wall_tex);
         ring_write((uint32_t)((x & 63) << 16));   // s = x mod tex width
@@ -3984,7 +3822,7 @@ static void submit_mode0_frame_dropy(uint32_t fb_base, uint32_t wall_tex,
     ring_write_maybe_drop(fb_base);
     ring_write_maybe_drop(320);
     for (int y = 120; y < 130; y++) {
-        ring_cmd(0x40, 18);
+        ring_cmd(0x40, 15);
         ring_write_maybe_drop(fb_base + y * 320);
         ring_write_maybe_drop(floor_tex);
         ring_write_maybe_drop((uint32_t)(y * 0x1234));
@@ -4000,7 +3838,7 @@ static void submit_mode0_frame_dropy(uint32_t fb_base, uint32_t wall_tex,
     }
     for (int x = 0; x < 50; x++) {
         uint32_t col_fb = fb_base + 100 * 320 + x;
-        ring_cmd(0x40, 18);
+        ring_cmd(0x40, 15);
         ring_write_maybe_drop(col_fb);
         ring_write_maybe_drop(wall_tex);
         ring_write_maybe_drop((uint32_t)((x & 63) << 16));
@@ -4084,7 +3922,6 @@ int main(int argc, char **argv) {
     test_skip_zero();
     test_multiple_commands();
     test_tex_cache_miss();
-    test_span_depth_gequal();
     test_span_tex_width_nonpow2();
 
     /* gpudemo Mode 0 replay — tries to reproduce the hardware freeze
@@ -4109,7 +3946,6 @@ int main(int argc, char **argv) {
     test_triangle_degenerate();
     test_triangle_textured();
     test_triangle_multi();
-    test_triangle_depth();
     test_triangle_shared_edge();
     test_triangle_bbox_init();
     test_triangle_persp_premul_dormant();
