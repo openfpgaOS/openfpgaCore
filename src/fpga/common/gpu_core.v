@@ -594,7 +594,7 @@ localparam SPAN_DEPTH_TEST  = 3;
 localparam SPAN_DEPTH_WRITE = 4;
 localparam SPAN_PERSP       = 5;
 localparam SPAN_TRANSLUC    = 6;  // route p3_color through transluc[] LUT
-localparam SPAN_TRANSLUC_REV= 7;  // swap (src, fb) → (fb, src) in the key
+// bit 7 reserved (was SPAN_TRANSLUC_REV — REV variant dropped in lean Phase 2)
 
 // ================================================================
 // Main FSM
@@ -2169,14 +2169,10 @@ always @(posedge clk) begin
                         // happens during BLEND_LUT_WAIT and the data is
                         // valid by the time BLEND_APPLY runs (one cycle
                         // address-set + one cycle BRAM-read = two cycles).
-                        // Key layout (15 bits): { src[7:1], fb_byte }.  The
-                        // SPAN_TRANSLUC_REV variant swaps which axis loses
-                        // its low bit.  Source LSB drop is the 128×256
-                        // quantisation chosen in transluc.md.
-                        if (blend_p3_flags[SPAN_TRANSLUC_REV])
-                            transluc_rd_addr <= { fb_byte[7:1], blend_src_color };
-                        else
-                            transluc_rd_addr <= { blend_src_color[7:1], fb_byte };
+                        // Key layout (15 bits): { src[7:1], fb_byte }.
+                        // Source LSB drop is the 128×256 quantisation
+                        // chosen in transluc.md.
+                        transluc_rd_addr <= { blend_src_color[7:1], fb_byte };
                         fbss <= FBSS_BLEND_LUT_WAIT;
                     end
                 end

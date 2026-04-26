@@ -1379,56 +1379,6 @@ static void test_transluc_no_blend_interleave(void) {
     else { pass_count++; printf("  OK  16 bytes match (opaque + translucent interleaved)\n"); }
 }
 
-// Test TRL4: SPAN_TRANSLUC_REV variant.  Verifies the reversed key
-// composition  { fb[7:1], src }  vs forward  { src[7:1], fb }.
-static void test_transluc_reverse_key(void) {
-    printf("TEST: transluc[] BLEND — SPAN_TRANSLUC_REV key swap\n");
-    gpu_init();
-    { uint8_t cm[256]; for (int i = 0; i < 256; i++) cm[i] = (uint8_t)i;
-      cmap_upload_bytes(0, cm, 256); }
-
-    // LUT distinguishes axes: lut[hi:8 || lo:8] = hi (= 0..127, since
-    // bit 15 is unused for storage but the key is only 15 bits).
-    static uint8_t lut[32768];
-    for (int hi = 0; hi < 128; hi++)
-        for (int lo = 0; lo < 256; lo++)
-            lut[(hi << 8) | lo] = (uint8_t)hi;
-    transluc_upload_full(lut);
-
-    ring_cmd(0x23, 2); ring_write(FB_BASE_BYTE); ring_write(320);
-    sdram_write(FB_BASE_BYTE >> 2, 0x88888888);  // fb = 0x88 in every lane
-
-    // SPAN_TRANSLUC: key = { src[7:1], fb }.  src=0x42, src[7:1]=0x21
-    // → output = lut[0x2188] = 0x21.
-    transluc_emit_span(FB_BASE_BYTE, 0x42, 4);
-    check("transluc_rev_fwd_done", gpu_finish() ? 1 : 0, 1);
-    bool any_fail = false;
-    for (int i = 0; i < 4; i++) {
-        uint8_t got = sdram_read_byte(FB_BASE_BYTE + i);
-        if (got != 0x21) {
-            printf("  FAIL fwd byte%d: got 0x%02x exp 0x21\n", i, got);
-            any_fail = true;
-        }
-    }
-
-    // Reset FB.
-    sdram_write(FB_BASE_BYTE >> 2, 0x88888888);
-    // SPAN_TRANSLUC_REV (extra flags bit 7 = 0x80): key = { fb[7:1], src }.
-    // fb=0x88, fb[7:1]=0x44 → output = lut[(0x44<<8)|0x42] = 0x44.
-    transluc_emit_span(FB_BASE_BYTE, 0x42, 4, /*extra_flags*/ 0x80);
-    check("transluc_rev_rev_done", gpu_finish() ? 1 : 0, 1);
-    for (int i = 0; i < 4; i++) {
-        uint8_t got = sdram_read_byte(FB_BASE_BYTE + i);
-        if (got != 0x44) {
-            printf("  FAIL rev byte%d: got 0x%02x exp 0x44\n", i, got);
-            any_fail = true;
-        }
-    }
-
-    if (any_fail) fail_count++;
-    else { pass_count++; printf("  OK  forward and reverse key compositions both match\n"); }
-}
-
 // Set depth test via CMD_SET_DEPTH_FUNC (available in all variants)
 static void ring_depth_func(uint32_t func) {
     ring_cmd(0x21, 1);
@@ -4213,7 +4163,6 @@ int main(int argc, char **argv) {
     test_transluc_lut_basic();
     test_transluc_overdraw();
     test_transluc_no_blend_interleave();
-    test_transluc_reverse_key();
 
     // Triangle tests
     test_triangle_flat();
