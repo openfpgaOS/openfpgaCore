@@ -1816,66 +1816,6 @@ static void test_triangle_depth() {
     check_byte("depth_front", 6 + 3*320, 0xBB);
 }
 
-// Test T6: Vertex color (R) interpolation
-static void test_triangle_vertex_color() {
-    printf("TEST: Vertex color interpolation\n");
-
-    gpu_init();
-
-    // Colormap: light level N maps texel to N (identity for light)
-    {
-        static uint8_t cm[64 * 256];
-        for (int light = 0; light < 64; light++)
-            for (int i = 0; i < 256; i++)
-                cm[light * 256 + i] = (uint8_t)light;
-        cmap_upload_bytes(0, cm, 64 * 256);
-    }
-
-    ring_cmd(0x23, 2);
-    ring_write(FB_BASE_BYTE);
-    ring_write(320);
-
-    ring_cmd(0x10, 2);
-    ring_write((1 << 16) | 0x00);
-    ring_write(0);
-
-    // 1x1 texture with value 0xFF (colormap selects based on light)
-    sdram_write(TEX_BASE_BYTE >> 2, 0xFFFFFFFF);
-    ring_bind_texture(TEX_BASE_BYTE, 1, 1);
-
-    // Triangle with varying vertex R: v0=0, v1=30, v2=0
-    // At midpoint x=5, R should interpolate to ~15
-    ring_cmd(0x30, 19);
-    ring_write(3);
-    ring_write_vertex(0, 0, 0, 0, 0, 0);       // r=0
-    ring_write_vertex(10*16, 0, 0, 0, 0, 30);   // r=30
-    ring_write_vertex(0, 10*16, 0, 0, 0, 0);    // r=0
-
-    bool ok = gpu_finish();
-    check("vcol_done", ok ? 1 : 0, 1);
-
-    // Pixel (0,0): r=0 → colormap light 0 → output 0
-    check_byte("vcol_v0", 0 + 0*320, 0x00);
-
-    // Phase 4d — Gouraud now interpolates light per-pixel.  Expected
-    // values: light(x, 0) = (x * 30) / 10 = 3*x.  cmap[light * 256 +
-    // tex_value] = light, so FB[x, 0] should be 3*x ± LUT precision.
-    // Tolerance is ±1 because the recip LUT loses one unit on this
-    // particular determinant.
-    for (int x = 0; x < 10; x++) {
-        uint8_t v = sdram_read_byte(FB_BASE_BYTE + x + 0*320);
-        uint8_t expected = (uint8_t)(3 * x);
-        int diff = (int)v - (int)expected;
-        if (diff < 0) diff = -diff;
-        if (diff <= 1) { pass_count++; }
-        else {
-            printf("  FAIL vcol_px(%d,0) = 0x%02x, expected ~0x%02x (±1)\n",
-                   x, v, expected);
-            fail_count++;
-        }
-    }
-}
-
 // Test T8: Two adjacent triangles (shared edge — no gap)
 static void test_triangle_shared_edge() {
     printf("TEST: Shared edge (no gap between triangles)\n");
@@ -4170,7 +4110,6 @@ int main(int argc, char **argv) {
     test_triangle_textured();
     test_triangle_multi();
     test_triangle_depth();
-    test_triangle_vertex_color();
     test_triangle_shared_edge();
     test_triangle_bbox_init();
     test_triangle_persp_premul_dormant();
