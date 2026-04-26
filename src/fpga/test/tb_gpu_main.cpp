@@ -718,7 +718,6 @@ static void test_tex_cache_miss() {
     check_byte("cache_px31",  31, 0x20);
 }
 
-#ifdef GPU_PERSP_IMPL
 // =====================================================================
 // Perspective Span Tests
 // =====================================================================
@@ -1078,7 +1077,6 @@ static void test_persp_negative_zinv() {
     // Only require the span COMPLETES. Values are undefined-behavior.
     check("persp_negz_done", gpu_finish() ? 1 : 0, 1);
 }
-#endif // GPU_PERSP_IMPL
 
 // =====================================================================
 // transluc[] BLEND tests (Stage 3 of fabric blend unit)
@@ -1596,7 +1594,6 @@ static void test_span_tex_width_nonpow2(void) {
     }
 }
 
-#ifdef GPU_FEAT_TRIANGLE
 // =====================================================================
 // Triangle Test Helpers
 // =====================================================================
@@ -2205,7 +2202,6 @@ static void test_triangle_bbox_init(void) {
     //   buggy   s = 11, t = 3 → 0x3B
     check_byte("tri_bbox_init_3_3", 3 + 3 * 320, 0x33);
 }
-#endif // GPU_FEAT_TRIANGLE
 
 // =====================================================================
 // CMD_SET_SKIP_ZERO — color-key transparency for triangle span-emit
@@ -2215,7 +2211,6 @@ static void test_triangle_bbox_init(void) {
 // (e.g. Duke3D's 0xFF sentinel) they set this global state bit first and
 // the triangle rasterizer passes SKIP_ZERO through to the fragment pipe.
 // =====================================================================
-#ifdef GPU_FEAT_TRIANGLE
 static void test_triangle_skip_zero(void) {
     printf("TEST: Triangle with SKIP_ZERO (color-key via triangles)\n");
     gpu_init();
@@ -3940,7 +3935,6 @@ static void test_triangle_tex_flush_midflight(void) {
     bool ok = gpu_finish(2000000);
     check("tri_flush_midflight_done", ok ? 1 : 0, 1);
 }
-#endif // GPU_FEAT_TRIANGLE
 
 // =====================================================================
 // gpudemo Mode 0 replay — reproduce the ~270-frame freeze in Verilator
@@ -4210,9 +4204,7 @@ int main(int argc, char **argv) {
     test_gpudemo_mode0_replay();
     test_gpudemo_mode0_replay_with_drops();
 
-#ifdef GPU_PERSP_IMPL
-    // Perspective spans (Lite only — Full's triangle FSM doesn't share the
-    // pipelined fragment processor yet)
+    // Perspective spans
     test_persp_constant_z();
     test_persp_two_segments();
     test_persp_varying_z();
@@ -4224,10 +4216,8 @@ int main(int argc, char **argv) {
     test_transluc_overdraw();
     test_transluc_no_blend_interleave();
     test_transluc_reverse_key();
-#endif
 
-#ifdef GPU_FEAT_TRIANGLE
-    // Triangle tests (Full variant only)
+    // Triangle tests
     test_triangle_flat();
     test_triangle_degenerate();
     test_triangle_textured();
@@ -4259,7 +4249,6 @@ int main(int argc, char **argv) {
     test_persp_quake_d_scan_repro();
     test_persp_tiny_zinv_precision();
     test_persp_sadjust_offset();
-#endif
 
     printf("\n=== Results: %d passed, %d failed ===\n",
            pass_count, fail_count);

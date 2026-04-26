@@ -11,7 +11,6 @@
 
 `default_nettype none
 
-`include "gpu_features.vh"
 
 module axi_periph_slave (
     input wire clk,
@@ -362,43 +361,13 @@ localparam [31:0] HW_FEATURES =
     32'h0000_0004
 `endif
     |
-    32'h0000_0010      // GPU span renderer — always present in any variant
+    32'h0000_0010      // GPU span renderer
     |
-`ifdef GPU_FEAT_TRIANGLE
     32'h0000_0020      // GPU triangle rasterizer (bit 5)
-`else
-    32'h0000_0000
-`endif
     |
-`ifdef GPU_FEAT_VCOLOR
-    32'h0000_0400      // GPU vertex color (bit 10)
-`else
-    32'h0000_0000
-`endif
-    |
-`ifdef GPU_FEAT_BILINEAR
-    32'h0000_0800      // GPU bilinear filter (bit 11)
-`else
-    32'h0000_0000
-`endif
-    |
-`ifdef GPU_FEAT_ALPHA
-    32'h0000_1000      // GPU alpha blending (bit 12)
-`else
-    32'h0000_0000
-`endif
-    |
-`ifdef GPU_PERSP_IMPL
     32'h0000_2000      // GPU perspective spans (bit 13)
-`else
-    32'h0000_0000
-`endif
     |
-`ifdef GPU_FEAT_FRAG_PIPELINE
     32'h0000_4000      // GPU pipelined fragment processor (bit 14)
-`else
-    32'h0000_0000
-`endif
     | 32'h0000_0348;  // Analogizer(3) + MIDI(6) + FPU(8) + Save slots(9) — always present
 
 localparam FB_ADDR_0 = 25'h0000000;     // byte 0x000000 → CPU 0x10000000

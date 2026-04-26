@@ -19,8 +19,6 @@
 
 `default_nettype none
 
-`include "gpu_features.vh"
-
 module gpu_core (
     input wire clk,
     input wire reset_n,
@@ -337,11 +335,7 @@ end
 // ================================================================
 // Shared DSP multiply + reciprocal LUT
 // ================================================================
-// Used by triangle setup AND perspective span setup — both are always
-// present in this single-config build.  The `ifdef guards are kept so
-// the bridging gpu_features.vh shim still resolves, but every flag it
-// defines is permanently on.
-`ifdef GPU_HAS_RECIP_LUT
+// Used by triangle setup AND perspective span setup.
 // Registered DSP multiply (18×18 maps to one Cyclone V DSP block)
 reg signed [31:0] dsp_a;
 reg signed [31:0] dsp_b;
@@ -353,20 +347,15 @@ always @(posedge clk) dsp_p <= dsp_a * dsp_b;
 // edge-function C values, parallel gradient cross-multiplies). dsp3 is
 // triangle-setup-only: lets tri_C[0]/tri_C[1]/tri_C[2] compute concurrently
 // on all three DSPs, cutting S_TRI_SETUP from ~20 cycles to ~10.
-`ifdef GPU_HAS_RECIP_LUT
 reg signed [31:0] dsp2_a;
 reg signed [31:0] dsp2_b;
 (* multstyle = "dsp" *) reg signed [63:0] dsp2_p;
 always @(posedge clk) dsp2_p <= dsp2_a * dsp2_b;
-`endif
-`ifdef GPU_FEAT_TRIANGLE
 reg signed [31:0] dsp3_a;
 reg signed [31:0] dsp3_b;
 (* multstyle = "dsp" *) reg signed [63:0] dsp3_p;
 always @(posedge clk) dsp3_p <= dsp3_a * dsp3_b;
-`endif
 
-`ifdef GPU_FEAT_TRIANGLE
 // Dedicated registered DSP multiply for the triangle row-base address.
 // `tri_ymin * st_fb_stride` was the worst critical path in fabric adders
 // (16.8 ns, -2.8 ns slack). A DSP costs one of the 37 free slots and
@@ -381,9 +370,6 @@ always @(posedge clk) dsp3_p <= dsp3_a * dsp3_b;
 // FFs to the DSP input pins.  Adds 1 cycle of latency (tri_ymin update
 // → tri_ymin_x_stride valid), absorbed by an extra S_TRI_MUL_WAIT2 step.
 //
-// Guarded on GPU_FEAT_TRIANGLE — references tri_ymin / tri_A / tri_B /
-// tri_xmin which live inside the same guard in the single-config
-// build (they were triangle-only regs in the old variant matrix too).
 reg signed [15:0] tri_ymin_dsp_in, st_fb_stride_dsp_in;
 always @(posedge clk) begin
     tri_ymin_dsp_in     <= tri_ymin;
@@ -429,7 +415,6 @@ always @(posedge clk) begin
         tri_e_init_Bpy[2] <= tri_B[2] * $signed({12'b0, tri_ymin, 4'b0});
     end
 end
-`endif // GPU_FEAT_TRIANGLE
 
 // Reciprocal LUT: 1024 × 16-bit in M10K (Phase 4b — widened from 256 to
 // 1024 to give 10-bit input precision instead of 8-bit, the simpler of
@@ -450,7 +435,6 @@ initial begin
     for (ri = 0; ri < 1024; ri = ri + 1)
         recip_lut[ri] = (16777216) / (1024 + ri);
 end
-`endif // GPU_HAS_RECIP_LUT
 
 // ================================================================
 // Texture Cache instance
@@ -458,15 +442,9 @@ end
 // tex_req_* are combinational from the pipelined fragment processor's
 // issue logic (single configuration: pipelined fragment processor is
 // always on).
-`ifdef GPU_FEAT_FRAG_PIPELINE
 wire        tex_req_valid;
 wire [25:0] tex_req_addr;
 wire        tex_req_wide;
-`else
-reg         tex_req_valid;
-reg  [25:0] tex_req_addr;
-reg         tex_req_wide;
-`endif
 wire        tex_req_ready;
 wire        tex_resp_valid;
 wire [15:0] tex_resp_data;
@@ -728,9 +706,7 @@ reg cmd_is_draw_span;
 // CMD_DRAW_SPAN commands for batch draws now.
 reg cmd_is_set_skip_zero;
 reg cmd_is_set_colormap_id;
-`ifdef GPU_FEAT_TRIANGLE
 reg cmd_is_draw_triangles;
-`endif
 // Global SKIP_ZERO (color-key at texel 0xFF) state — set via CMD_SET_SKIP_ZERO,
 // ORed into every triangle-emitted span's flags so color-keyed sprites
 // (emitted as 2 triangles) get the transparency treatment.
@@ -795,7 +771,6 @@ reg        frag_discard;      // Alpha test / skip-zero result
 //
 // Source mode: 0 = SPAN (sp_*). Triangle source mode is reserved but the
 // triangle refactor is deferred to a later phase.
-`ifdef GPU_FEAT_FRAG_PIPELINE
 // p0: pre-issue stage. Holds the pixel whose multiply (tx_mul_q) is being
 // computed by the registered DSP this cycle. p0 → p1 transition is the
 // "issue commit" event, gated on the cache asserting req_ready in the same
@@ -989,7 +964,6 @@ assign tex_req_wide  = 1'b0;
 // (sp_seg_left == 0), the issue stage swaps slot B into slot A (sp_s,
 // sp_sstep, etc), clears persp_seg_b_ready, and the PSS scheduler picks up
 // segment N+2 in slot B.
-`ifdef GPU_PERSP_IMPL
 // Projection-space accumulators (advance by 16 each PSS run).
 // Loaded from pay_buf[12..14] / pay_buf[15..17] in CMD_DRAW_SPAN.
 reg signed [31:0] sp_sZ;        // s/z, 16.16 signed
@@ -1152,10 +1126,6 @@ wire [4:0] persp_clz_pipe = persp_clz_fn(persp_zinv_abs_r);
 // 2 bits but the casez chain is unchanged.
 wire [31:0] persp_norm_pipe = persp_zinv_abs_r << persp_clz;
 wire [9:0]  persp_top8_pipe = persp_norm_pipe[30:21];
-`else
-wire persp_issue_stall = 1'b0;
-`endif // GPU_PERSP_IMPL
-`endif // GPU_FEAT_FRAG_PIPELINE
 
 // FB write accumulator
 reg [31:0] fb_acc_data;
@@ -1194,13 +1164,8 @@ reg [7:0]  cr_color;
 // tri_active: 1 = fragment pipeline returns to triangle path. Read by span
 // states unconditionally; synthesizer folds
 // away `tri_active ? S_TRI_PIX : S_SPAN_STEP` to just `S_SPAN_STEP`.
-`ifdef GPU_FEAT_TRIANGLE
 reg        tri_active;
-`else
-wire       tri_active = 1'b0;
-`endif
 
-`ifdef GPU_FEAT_TRIANGLE
 // Vertex data (extracted from pay_buf in S_TRI_LOAD)
 reg signed [15:0] v_x [0:2], v_y [0:2];       // 12.4 screen coords
 reg        [15:0] v_z [0:2];                    // 16-bit depth
@@ -1415,7 +1380,6 @@ wire signed [31:0] grad_axis_b1 = grad_idx[0] ? {{16{dX20[15]}}, dX20}
                                               : {{16{dY20[15]}}, dY20};
 wire signed [31:0] grad_axis_b2 = grad_idx[0] ? {{16{dX10[15]}}, dX10}
                                               : {{16{dY10[15]}}, dY10};
-`endif // GPU_FEAT_TRIANGLE
 
 // ================================================================
 // Texture Address Computation — 2-stage pipeline (DSP-friendly)
@@ -1461,14 +1425,11 @@ always @(posedge clk) begin
         cmd_is_set_colormap_id <= 0;
         st_colormap_id <= 4'b0;
         st_skip_zero <= 0;
-`ifdef GPU_FEAT_TRIANGLE
         cmd_is_draw_triangles <= 0;
-`endif
         pay_idx <= 0;
         pay_remaining <= 0;
         frag_discard <= 0;
         clear_flags <= 0;
-`ifdef GPU_FEAT_FRAG_PIPELINE
         // Pipelined fragment processor reset
         p0_valid <= 0; p0_light <= 0; p0_flags <= 0;
         p0_fb_addr <= 0; p0_z_addr <= 0; p0_zi <= 0;
@@ -1496,7 +1457,6 @@ always @(posedge clk) begin
         blend_fb_word    <= 0;
         src_mode <= SRC_SPAN;
         src_done <= 0;
-`ifdef GPU_PERSP_IMPL
         sp_sZ <= 0; sp_tZ <= 0; sp_zinv <= 0;
         sp_sZstep <= 0; sp_tZstep <= 0; sp_zinv_step <= 0;
         persp_active <= 0;
@@ -1512,14 +1472,9 @@ always @(posedge clk) begin
         persp_zinv_abs_r <= 0;
         persp_clz <= 0;
         nr_two_minus_xy <= 0;
-`endif
-`endif
-`ifdef GPU_HAS_RECIP_LUT
         dsp_a <= 0; dsp_b <= 0;
         dsp2_a <= 0; dsp2_b <= 0;
         recip_rd_addr <= 0;
-`endif
-`ifdef GPU_FEAT_TRIANGLE
         dsp3_a <= 0; dsp3_b <= 0;
         tri_active <= 0;
         setup_step <= 0;
@@ -1552,7 +1507,6 @@ always @(posedge clk) begin
         grad_r_dx <= 0; grad_r_dy <= 0;
         tri_xmin_raw <= 0; tri_xmax_raw <= 0;
         tri_ymin_raw <= 0; tri_ymax_raw <= 0;
-`endif
         // State registers
         st_tex_addr <= 0; st_tex_width <= 0;
         sp_tex_w_mask <= 16'hFFFF; sp_tex_h_mask <= 16'hFFFF;
@@ -1622,9 +1576,7 @@ always @(posedge clk) begin
             // CMD_DRAW_SPANS removed (was half-implemented dead code)
             cmd_is_set_skip_zero  <= (cmd_type == CMD_SET_SKIP_ZERO);
             cmd_is_set_colormap_id <= (cmd_type == CMD_SET_COLORMAP_ID);
-`ifdef GPU_FEAT_TRIANGLE
             cmd_is_draw_triangles <= (cmd_type == CMD_DRAW_TRIANGLES);
-`endif
 
             if (cmd_payload_words == 0) begin
                 state <= S_EXECUTE;
@@ -1748,18 +1700,15 @@ always @(posedge clk) begin
                     5'd9:  sp_z_addr     <= ring_rd_data;
                     5'd10: sp_zi         <= ring_rd_data;
                     5'd11: sp_zistep     <= ring_rd_data;
-`ifdef GPU_PERSP_IMPL
                     5'd12: sp_sZ         <= ring_rd_data;
                     5'd13: sp_tZ         <= ring_rd_data;
                     5'd14: sp_zinv       <= ring_rd_data;
                     5'd15: sp_sZstep     <= ring_rd_data;
                     5'd16: sp_tZstep     <= ring_rd_data;
                     5'd17: sp_zinv_step  <= ring_rd_data;
-`endif
                     default: ;
                 endcase
             end
-`ifdef GPU_FEAT_TRIANGLE
             else if (cmd_is_draw_triangles) begin
                 // pay_idx 0 = vertex count (ignored; must be 3).
                 // Vertex layout: 6 words each, packed as
@@ -1791,12 +1740,10 @@ always @(posedge clk) begin
                     default: ;
                 endcase
             end
-`endif
 
             if (pay_remaining <= 24'd1) begin
                 state <= S_EXECUTE;
             end
-`ifdef GPU_FEAT_TRIANGLE
             // Multi-triangle batch: end of this triangle's 18 vertex
             // words (pay_idx=18 captured v_r[2]) and pay_remaining > 1
             // means more triangles follow.  Kick this triangle now and
@@ -1810,7 +1757,6 @@ always @(posedge clk) begin
             else if (cmd_is_draw_triangles && pay_idx == 5'd18) begin
                 state <= S_EXECUTE;
             end
-`endif
             else begin
                 // Advance rdptr for next word (BRAM read, 1-cycle latency)
                 ring_rdptr <= (ring_rdptr + 16'd4) & ring_mask;
@@ -1841,7 +1787,6 @@ always @(posedge clk) begin
                 state <= S_CLEAR_RECT;
             end
             else if (cmd_is_draw_span) begin
-`ifdef GPU_PERSP_IMPL
                 // sp_flags holds the flag byte written at pay_idx=6; its
                 // SPAN_PERSP bit arms the perspective sub-FSM.
                 persp_active      <= sp_flags[SPAN_PERSP];
@@ -1851,16 +1796,10 @@ always @(posedge clk) begin
                 persp_pss         <= PSS_IDLE;
                 persp_pass        <= PSS_PASS_ANCHOR;
                 sp_seg_left       <= 0;
-`endif
-`ifdef GPU_FEAT_FRAG_PIPELINE
                 src_mode     <= SRC_SPAN;
                 src_done     <= 0;
                 state        <= S_FRAG_PIPE;
-`else
-                state        <= S_SPAN_PIXEL;
-`endif
             end
-`ifdef GPU_FEAT_TRIANGLE
             else if (cmd_is_draw_triangles) begin
                 // Vertices already loaded into v_*[] in S_PAY_DATA;
                 // S_TRI_LOAD used to do the load in a separate cycle
@@ -1868,14 +1807,12 @@ always @(posedge clk) begin
                 // schedule compatibility (setup_step reset).
                 state <= S_TRI_LOAD;
             end
-`endif
             else state <= S_IDLE;
         end
 
         // ============================================================
         // SPAN pixel loop
 
-`ifdef GPU_FEAT_FRAG_PIPELINE
         // ============================================================
         // Pipelined Fragment Processor
         // ============================================================
@@ -1908,12 +1845,10 @@ always @(posedge clk) begin
             //     ready so the swap can fire in the same cycle.
             load_p0         = (issue_committed || !p0_valid)
                            && (sp_count != 16'd0) && !src_done
-`ifdef GPU_PERSP_IMPL
                            && !persp_issue_stall
                            && (!persp_active
                                || sp_seg_left != 4'd0
                                || persp_seg_b_ready)
-`endif
                            ;
             span_last_issue = (sp_count == 16'd1);
 
@@ -2014,7 +1949,6 @@ always @(posedge clk) begin
                     // spans walk through the gradient per pixel.
                     sp_light_q <= sp_light_q + sp_light_step;
                     if (span_last_issue) src_done <= 1;
-`ifdef GPU_PERSP_IMPL
                     if (persp_active) begin
                         if (sp_seg_left == 4'd0) begin
                             // Segment boundary — swap pending into current.
@@ -2033,10 +1967,6 @@ always @(posedge clk) begin
                         sp_s <= sp_s + sp_sstep;
                         sp_t <= sp_t + sp_tstep;
                     end
-`else
-                    sp_s <= sp_s + sp_sstep;
-                    sp_t <= sp_t + sp_tstep;
-`endif
                 end else if (issue_committed) begin
                     // Committed but no more pixels to load — drain p0
                     p0_valid <= 0;
@@ -2336,7 +2266,6 @@ always @(posedge clk) begin
                 default: fbss <= FBSS_IDLE;
             endcase
 
-`ifdef GPU_PERSP_IMPL
             // ----------------------------------------------------------
             // PSS — perspective segment-setup sub-FSM
             // ----------------------------------------------------------
@@ -2524,7 +2453,6 @@ always @(posedge clk) begin
 
                 default: persp_pss <= PSS_IDLE;
             endcase
-`endif // GPU_PERSP_IMPL
 
             // ----------------------------------------------------------
             // Drain detection — when source done and pipe empty, flush.
@@ -2535,21 +2463,16 @@ always @(posedge clk) begin
             if (src_done && !p0_valid && !p1_valid && !p2_valid && !p2b_valid
                          && !p3_valid && fbss == FBSS_IDLE) begin
                 src_done <= 0;
-`ifdef GPU_PERSP_IMPL
                 persp_active      <= 0;  // disarm so PSS doesn't keep running
                 persp_seg_a_ready <= 0;
                 persp_seg_b_ready <= 0;
                 persp_first_done  <= 0;
-`endif
-`ifdef GPU_FEAT_TRIANGLE
                 if (tri_active)
                     state <= S_TRI_ROW_NEXT;
                 else
-`endif
                     state    <= S_FB_FLUSH;
             end
         end
-`endif // GPU_FEAT_FRAG_PIPELINE
 
         // ============================================================
         // FB flush — end-of-span or mid-span word boundary
@@ -2569,9 +2492,7 @@ always @(posedge clk) begin
                 fb_acc_mask  <= 0;
                 // End-of-primitive flush: return to idle. In FULL, also clear
                 // tri_active so we don't re-enter the triangle path.
-`ifdef GPU_FEAT_TRIANGLE
                 if (tri_active) tri_active <= 0;
-`endif
                 state <= S_IDLE;
             end
         end
@@ -2803,7 +2724,6 @@ always @(posedge clk) begin
             end
         end
 
-`ifdef GPU_FEAT_TRIANGLE
         // ============================================================
         // Triangle: Load vertices — now a pass-through
         // ============================================================
@@ -3450,7 +3370,6 @@ always @(posedge clk) begin
                     sp_z_addr    <= tri_zb_row_addr + {tri_span_x_start, 1'b0};
                     sp_zi        <= tri_span_z_start;
                     sp_zistep    <= grad_z_dx <<< 4;
-`ifdef GPU_PERSP_IMPL
                     // Phase 4c.4 — when perspective is active, route the
                     // triangle's row-walked attributes into the
                     // SPAN_PERSP path's perspective-source regs and arm
@@ -3497,7 +3416,6 @@ always @(posedge clk) begin
                         persp_pss         <= PSS_IDLE;
                         sp_seg_left       <= 0;
                     end
-`endif
                     src_mode <= SRC_SPAN;
                     src_done <= 0;
                     state    <= S_FRAG_PIPE;
@@ -3588,7 +3506,6 @@ always @(posedge clk) begin
                 state <= S_TRI_PIX;
             end
         end
-`endif // GPU_FEAT_TRIANGLE
 
         default: state <= S_IDLE;
         endcase
