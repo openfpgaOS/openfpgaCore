@@ -1289,6 +1289,20 @@ wire signed [31:0] grad_axis_b1 = grad_idx[0] ? {{16{dX20[15]}}, dX20}
 wire signed [31:0] grad_axis_b2 = grad_idx[0] ? {{16{dX10[15]}}, dX10}
                                               : {{16{dY10[15]}}, dY10};
 
+// Pipeline register on the dV10/dV20 mux outputs.  The combinational
+// chain `v_w[1..2] → 32-bit subtract → 5-way grad_idx mux → 2:1
+// tri_persp_active mux → dsp_a/dsp2_a register input` was 11.2 ns at
+// 100 MHz (-1.17 ns slack).  Registering it here breaks the path into
+// flop→mux→flop (free) and flop→DSP_in (clean), closing timing.
+// Updated every cycle; consumed by the S_TRI_GRAD loop at the
+// dsp_a/dsp2_a load (one cycle after grad_idx settles, hence the
+// added grad_sub=3'd7 settle cycle in the FSM below).
+reg signed [31:0] grad_dV10_r, grad_dV20_r;
+always @(posedge clk) begin
+    grad_dV10_r <= grad_dV10;
+    grad_dV20_r <= grad_dV20;
+end
+
 // ================================================================
 // Texture Address Computation — 2-stage pipeline (DSP-friendly)
 // ================================================================
@@ -2734,7 +2748,12 @@ always @(posedge clk) begin
                 tri_recip <= recip_rd_data;
                 state <= S_TRI_GRAD;
                 grad_idx <= 0;
-                grad_sub <= 0;
+                // Start at the settle sub-cycle so grad_dV10_r/dV20_r
+                // latch the new grad_idx=0 before sub_0 hands them to
+                // the DSPs.  Without this the very first iteration of
+                // the loop reads stale grad_dV*_r from the prior
+                // triangle's last grad_idx.
+                grad_sub <= 3'd7;
                 setup_step <= 0;
             end
             default: state <= S_IDLE;
@@ -2773,9 +2792,13 @@ always @(posedge clk) begin
             grad_sub <= grad_sub + 3'd1;
             case (grad_sub)
                 3'd0: begin
-                    // Launch both cross-multiplies in parallel.
-                    dsp_a  <= grad_dV10; dsp_b  <= grad_axis_b1;
-                    dsp2_a <= grad_dV20; dsp2_b <= grad_axis_b2;
+                    // Launch both cross-multiplies in parallel.  Reads
+                    // from the pipeline-registered grad_dV10_r/dV20_r
+                    // (one-cycle-behind copy of the deep mux output).
+                    // grad_idx is stable since sub-cycle 7, so the
+                    // registered values reflect the current iteration.
+                    dsp_a  <= grad_dV10_r; dsp_b  <= grad_axis_b1;
+                    dsp2_a <= grad_dV20_r; dsp2_b <= grad_axis_b2;
                 end
                 3'd1: begin end  // DSP pipeline delay
                 3'd2: begin
@@ -2814,6 +2837,14 @@ always @(posedge clk) begin
                     // synthesize a 6-stage barrel shifter on the same cycle.
                     dsp_p_shifted <= dsp_p >>> (6'd29 - tri_clz);
                 end
+                3'd7: begin
+                    // Settle cycle: grad_idx was advanced during 3'd6
+                    // (or this is the first iteration after S_TRI_BBOX),
+                    // so the deep grad_dV10/dV20 mux just changed
+                    // inputs.  Wait one cycle for grad_dV10_r/dV20_r
+                    // to latch the new value before sub-cycle 0 hands
+                    // them to the DSPs.  Loop transition handled below.
+                end
                 3'd6: begin
                     // Perspective Q-format fix.  v_sw / v_tw are Q16.16
                     // (they include the Q16.16 v_w factor), whereas
@@ -2834,7 +2865,8 @@ always @(posedge clk) begin
                         4'd7: grad_w_dy <= dsp_p_shifted >>> 16;
                         default: ;
                     endcase
-                    grad_sub <= 0;
+                    // grad_sub auto-increments to 3'd7 (settle cycle)
+                    // and then wraps to 0 — no explicit reset here.
                     // Loop progression:
                     //   idx 5 → 6 (persp) or exit (affine, skip w)
                     //   idx 7 → exit

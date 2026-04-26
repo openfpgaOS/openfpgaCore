@@ -395,6 +395,19 @@ reg signed [15:0] samp_l, samp_r;
 // is 2×mult + 3×add = ~25 ns, violating the 100 MHz budget.
 reg signed [16:0] lerp_l_reg, lerp_r_reg;
 
+// Pipeline register between LERP phase-0 (diff*frac multiply) and
+// phase-1 (tap0 + delta>>>16 add).  Without this split the multiplier
+// output feeds the +tap0 add in the same cycle, blowing the 100 MHz
+// timing budget by ~1 ns (tap1 → Mult → lerp_l_reg = 11 ns route).
+// With it the multiplier hits the DSP slice's built-in output reg
+// and cycle 2 is just a 17-bit add (~3 ns).
+reg signed [32:0] delta_l_reg, delta_r_reg;
+// 0 = compute delta = diff * pos_frac (this cycle), 1 = compute
+// lerp_l_reg = tap0 + (delta_*_reg >>> 16).  Costs +1 cycle in the
+// per-voice loop (~50 cycles × 24 voices × 1 kHz = 1.2 % of available
+// 100 MHz cycles — invisible).
+reg lerp_phase;
+
 // Pipeline registers between S_ADV_COMPUTE and S_ADVANCE — the raw
 // pos/frac advance (two chained 22-bit adders) gets its own cycle so
 // the wrap compare + subtract-add + pos_latch M10K write runs alone.
@@ -451,6 +464,7 @@ always @(posedge clk) begin
         m_arlen          <= 8'd0;
         last_sample_data <= 32'd0;
         sample_count     <= 32'd0;
+        lerp_phase       <= 1'b0;
     end else case (state)
 
     // ---- Idle: wait for FIFO to drop below half, then start new sample ----
@@ -629,26 +643,38 @@ always @(posedge clk) begin
         end
     end
 
-    // ---- Stage 1: linear interp (diff → mult by pos_frac → + tap0) ----
+    // ---- Stage 1: linear interp, split across two phases ----
+    // Phase 0: diff = tap1 - tap0; delta = diff * pos_frac → register.
+    // Phase 1: lerp = tap0 + (delta >>> 16) → register, advance state.
+    // The multiplier alone is the long route (Quartus packs it into a
+    // DSP slice with the output register absorbed); cycle 2's add is
+    // a clean 17-bit chain that closes timing easily at 100 MHz.
     S_LERP_INTERP: begin : lerp_interp_blk
         reg signed [16:0] diff_l, diff_r;
-        reg signed [32:0] delta_l, delta_r;
         begin
-            // (tap1 - tap0) * pos_frac[15:0], result scaled by 2^-16.
-            diff_l  = $signed({tap1_l[15], tap1_l}) - $signed({tap0_l[15], tap0_l});
-            diff_r  = $signed({tap1_r[15], tap1_r}) - $signed({tap0_r[15], tap0_r});
-            delta_l = diff_l * $signed({1'b0, cur_pos_frac});
-            delta_r = diff_r * $signed({1'b0, cur_pos_frac});
-            /* Use arithmetic shift (>>>) so the 33-bit signed `delta`
-             * is sign-extended when we slice off the fractional bits.
-             * A plain bit-slice `delta_l[31:16]` is UNSIGNED in Verilog,
-             * which poisons the whole `+` expression into unsigned and
-             * zero-extends `tap0_l` — for any negative tap0 the result
-             * is off by 65536 (caught by the mixer probe: voices were
-             * active but output was nonsense). */
-            lerp_l_reg <= $signed(tap0_l) + (delta_l >>> 16);
-            lerp_r_reg <= $signed(tap0_r) + (delta_r >>> 16);
-            state      <= S_LERP_MIX;
+            if (lerp_phase == 1'b0) begin
+                // Phase 0: subtract + multiply, register the 33-bit
+                // signed delta into delta_*_reg.  tap0_l/tap0_r hold
+                // stable across the next cycle so phase 1 can read them.
+                diff_l       = $signed({tap1_l[15], tap1_l}) - $signed({tap0_l[15], tap0_l});
+                diff_r       = $signed({tap1_r[15], tap1_r}) - $signed({tap0_r[15], tap0_r});
+                delta_l_reg <= diff_l * $signed({1'b0, cur_pos_frac});
+                delta_r_reg <= diff_r * $signed({1'b0, cur_pos_frac});
+                lerp_phase  <= 1'b1;
+            end else begin
+                // Phase 1: add the registered delta back onto tap0.
+                /* Use arithmetic shift (>>>) so the 33-bit signed `delta`
+                 * is sign-extended when we slice off the fractional bits.
+                 * A plain bit-slice `delta_l[31:16]` is UNSIGNED in Verilog,
+                 * which poisons the whole `+` expression into unsigned and
+                 * zero-extends `tap0_l` — for any negative tap0 the result
+                 * is off by 65536 (caught by the mixer probe: voices were
+                 * active but output was nonsense). */
+                lerp_l_reg <= $signed(tap0_l) + (delta_l_reg >>> 16);
+                lerp_r_reg <= $signed(tap0_r) + (delta_r_reg >>> 16);
+                lerp_phase <= 1'b0;
+                state      <= S_LERP_MIX;
+            end
         end
     end
 
