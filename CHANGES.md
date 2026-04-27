@@ -8,6 +8,62 @@ about.  Format: one section per substantive landing, with
 
 ---
 
+## 2026-04-27 — Doorbell-DMA port-A collision fix (Duke3D batch freeze)
+
+**What shipped.**
+
+- `gpu_core.v` adds a 1-deep skid buffer for DMA→ring_bram writes.
+  When a CPU MMIO write to `GPU_RING_DATA` (reg_addr=4'd2) collides
+  with a DMA R-beat in `DMA_S_R`, the previous mux silently picked DMA
+  and dropped the CPU's word while still incrementing `ring_wr_addr`.
+  The dropped CPU word produced a stale ring_bram cell that the
+  decoder later interpreted as a span's `sp_fb_addr` — and the GPU's
+  `m_wr_*` master then wrote pixels into CPU code/stack regions in
+  SDRAM, surfacing several frames later as `mcause=2` traps with PC
+  in unmapped SDRAM.  This was reproducible in
+  PocketDukeNukem-SDK / Duke3D batched-spans rendering within
+  ~5-10 seconds of a session
+  (`openfpgaOS-SDK/docs/bug-gpu-batch-dma-freeze.md`).
+- New behaviour: CPU MMIO always wins port-A in the cycle it fires.
+  The DMA beat parks in `dma_pend_*` and commits on the next cycle
+  (assuming no further collision).  `DMA_S_PUBLISH` waits for the
+  skid to drain before pulsing `dma_publish_wrptr`, so `ring_wrptr`
+  never advances past a ring_bram cell whose data is still parked.
+- New `dma_overflow_sticky` flag — exposed via `GPU_STATUS` bit 3 —
+  latches if a second collision arrives while the skid is still
+  occupied (back-to-back CPU MMIO + DMA beats).  This is rare but
+  not impossible; the SDK can poll the bit after a freeze repro to
+  confirm whether the fix was sufficient.
+
+**What it unblocks downstream.**
+
+- Duke3D (PocketDukeNukem-SDK) can drop the `1 ||` workaround at
+  `of_gpu_draw_spans_batch`'s `if (1 || _gpu_batch_buf == NULL)`
+  guard after deploying the new bitstream.  Re-enables the
+  doorbell-DMA path for batched span dispatch.  Note: per the bug
+  doc, the perf delta is ~0 fps because the DMA path's
+  `wait DMA_BUSY` was already eating the theoretical batching
+  win — but eliminates the freeze and removes a known hardware
+  race from the design.
+
+**API additions:**
+
+- `GPU_STATUS` bit 3 = `dma_overflow_sticky`.  Reads-only; clears
+  only on reset or `GPU_CTRL.ring_reset`.
+
+**Resource delta.**  ALMs +~50 (32-bit `dma_pend_data` + 1-bit
+`dma_pend_valid` + 1-bit `dma_overflow_sticky` + small mux + stall
+gate in `DMA_S_PUBLISH`).  M10K +0, DSP +0.
+
+**Verification.**  All five Verilator suites green (sdram 470 / sram 40
+/ gpu 377 / axi-periph 17 / mixer 8 = 912 / 0).  The fix is invisible
+to the existing testbenches because their single-master MMIO + stubbed
+SDRAM never reproduces the same-cycle CPU/DMA collision; hardware
+validation requires deploying to Pocket and re-enabling the SDK's
+DMA path (drop the `1 ||` guard) to confirm Duke3D no longer freezes.
+
+---
+
 ## 2026-04-27 — Per-span `colormap_id` in CMD_DRAW_SPAN(S_BATCH)
 
 **What shipped.**

@@ -108,7 +108,8 @@ assign dbg_frag = {sp_count[7:0],
 // 0x08  GPU_RING_DATA     W   Write next word to ring BRAM (auto-increment)
 // 0x0C  GPU_DMA_SRC       W   SDRAM byte address of command buffer to pull
 // 0x10  GPU_RING_RDPTR    R   GPU read pointer
-// 0x14  GPU_STATUS        R   {29'b0, dma_busy, ring_empty, busy}
+// 0x14  GPU_STATUS        R   bit0=busy, bit1=ring_empty, bit2=dma_busy,
+//                              bit3=dma_overflow_sticky, [15:8]=fsm_state
 // 0x18  GPU_FENCE         R   Last completed fence token
 // 0x1C  GPU_DMA_LEN       W   Word count to pull (max 4096)
 // 0x20  GPU_TRANSLUC_ADDR W   transluc[] write address (15-bit, auto-inc by 4)
@@ -173,19 +174,79 @@ always @(posedge clk)
     ring_rd_data <= ring_bram[ring_rdptr[RING_ADDR_BITS+1:2]];
 
 // DMA word-write into ring BRAM port A: asserted by the DMA FSM
-// when an R-beat lands (dma_state==DMA_S_R && m_rd_rvalid).  The wires
-// are driven below where the DMA FSM lives.
-wire        dma_ring_wr;
-wire [31:0] dma_ring_wdata;
+// when an R-beat lands (dma_state==DMA_S_R && m_rd_rvalid).  These
+// "raw" wires are driven below where the DMA FSM lives.
+wire        dma_ring_wr_raw;
+wire [31:0] dma_ring_wdata_raw;
+
+// ============================================================
+// Port-A collision skid (doorbell-DMA freeze fix)
+// ------------------------------------------------------------
+// gpu_core's m_rd_* AXI master has no `rready` — the slave
+// (sdram_arb) drives R-beats unconditionally and we MUST swallow
+// them on the cycle they arrive.  That collides with CPU MMIO
+// writes to GPU_RING_DATA: the previous mux gave DMA priority and
+// silently dropped the CPU's word while still advancing
+// ring_wr_addr by 1.  The dropped CPU word produced a stale
+// ring_bram cell that the decoder later interpreted as a span's
+// sp_fb_addr — and the GPU's m_wr_* wrote pixels into CPU code /
+// stack regions, manifesting as an mcause=2 trap several frames
+// later (PocketDukeNukem-SDK / Duke3D batched-spans freeze).
+//
+// Fix: 1-deep skid for DMA beats.  CPU MMIO always wins port-A in
+// the cycle it fires; the DMA beat parks in `dma_pend_*` and
+// commits on the next cycle (assuming no further collision).
+// `dma_overflow_sticky` latches if a second collision arrives
+// while the skid is still occupied — exposed via GPU_STATUS bit
+// 3 so the SDK can detect the (rare) double-collision case.
+// ============================================================
+wire cpu_ring_write = reg_wr && (reg_addr == 4'd2);
+
+reg        dma_pend_valid;
+reg [31:0] dma_pend_data;
+reg        dma_overflow_sticky;
+
+// Drain the skid whenever no CPU MMIO is colliding this cycle.
+wire dma_pend_drain = dma_pend_valid && !cpu_ring_write;
+// Park a fresh DMA beat only when CPU MMIO collides AND skid is empty.
+wire dma_pend_load  = dma_ring_wr_raw && cpu_ring_write && !dma_pend_valid;
+// Overflow: DMA beat arrives, CPU collides, skid already full.
+wire dma_pend_overflow = dma_ring_wr_raw && cpu_ring_write && dma_pend_valid;
+
+always @(posedge clk) begin
+    if (!reset_n) begin
+        dma_pend_valid      <= 1'b0;
+        dma_pend_data       <= 32'b0;
+        dma_overflow_sticky <= 1'b0;
+    end else begin
+        if (dma_pend_load) begin
+            dma_pend_valid <= 1'b1;
+            dma_pend_data  <= dma_ring_wdata_raw;
+        end else if (dma_pend_drain) begin
+            dma_pend_valid <= 1'b0;
+        end
+        if (dma_pend_overflow)
+            dma_overflow_sticky <= 1'b1;
+    end
+end
+
+// Effective DMA→ring write that drives port A.  Either the live
+// beat (no CPU collision, skid empty) or the parked beat (no CPU
+// collision, skid loaded).  If CPU collides AND beat fires, the
+// live beat goes to the skid and DMA does NOT commit this cycle —
+// CPU wins port-A, ring_wr_addr advances by 1 for the CPU write.
+wire        dma_ring_wr    = (dma_ring_wr_raw && !cpu_ring_write && !dma_pend_valid)
+                          || dma_pend_drain;
+wire [31:0] dma_ring_wdata = dma_pend_valid ? dma_pend_data : dma_ring_wdata_raw;
 
 // Canonical altsyncram-inferable single-port write to ring_bram.  The
 // always block has EXACTLY ONE `ring_bram[X] <= D` statement under a
 // single conditional — Quartus's M10K pattern matcher requires this
 // shape, otherwise the 4096×32 array gets thrown into LUT-based
-// registers and synthesis blows up by ~128 K FFs.  Data + enable are
-// muxed combinationally so DMA wins over a same-cycle MMIO ring write.
-wire        ring_a_we    = dma_ring_wr || (reg_wr && reg_addr == 4'd2);
-wire [31:0] ring_a_wdata = dma_ring_wr ? dma_ring_wdata : reg_wdata;
+// registers and synthesis blows up by ~128 K FFs.  CPU MMIO wins the
+// mux now (changed from the prior DMA-priority shape — see skid above).
+wire        ring_a_we    = cpu_ring_write || dma_ring_wr;
+wire [31:0] ring_a_wdata = cpu_ring_write ? reg_wdata : dma_ring_wdata;
 always @(posedge clk) begin
     if (ring_a_we)
         ring_bram[ring_wr_addr] <= ring_a_wdata;
@@ -275,9 +336,13 @@ always @(*) begin
         // GPU_STATUS now exposes the FSM state in bits[15:8] so a CPU
         // trap handler can dump where the decoder is stuck without
         // having to instrument the trap path with a dedicated MMIO
-        // probe.  Bits [7:3] reserved.  Bit 2 = dma_busy.  Bit 1 =
+        // probe.  Bits [7:4] reserved.  Bit 3 = dma_overflow_sticky
+        // (port-A skid full when a second CPU/DMA collision arrived —
+        // sticky so a single freeze repro can be confirmed via a
+        // post-trap GPU_STATUS read).  Bit 2 = dma_busy.  Bit 1 =
         // ring_empty.  Bit 0 = busy.
-        4'd5:    reg_rdata = {16'b0, 2'b0, state, 5'b0,
+        4'd5:    reg_rdata = {16'b0, 2'b0, state, 4'b0,
+                              dma_overflow_sticky,
                               dma_busy, ring_empty, busy};
         4'd6:    reg_rdata = fence_reached;
         default: reg_rdata = 32'b0;
@@ -653,8 +718,11 @@ wire [31:0] blend_rdata = m_rd_rdata;
 // R-beat, drives dma_ring_wr/dma_ring_wdata which the always-block
 // above splices into ring BRAM port A and auto-advances ring_wrptr.
 wire dma_bus_idle = !blend_owns_m0 && !tex_m0_in_flight;
-assign dma_ring_wr    = (dma_state == DMA_S_R) && m_rd_rvalid;
-assign dma_ring_wdata = m_rd_rdata;
+// _raw drivers from the DMA FSM — these feed the port-A skid above
+// (see "Port-A collision skid" comment block) which mediates between
+// live DMA beats, the parked beat, and CPU MMIO writes.
+assign dma_ring_wr_raw    = (dma_state == DMA_S_R) && m_rd_rvalid;
+assign dma_ring_wdata_raw = m_rd_rdata;
 
 always @(posedge clk) begin
     if (!reset_n) begin
@@ -733,11 +801,22 @@ always @(posedge clk) begin
         DMA_S_PUBLISH: begin
             // 1-cycle pulse to atomically lift ring_wrptr from its old
             // value (header position) to the post-DMA ring_wr_addr*4
-            // (covering header + every payload word in this kick).  The
-            // last DMA write completed on the previous edge, so
-            // ring_wr_addr has its final settled value here.
-            dma_publish_wrptr <= 1'b1;
-            dma_state         <= DMA_S_IDLE;
+            // (covering header + every payload word in this kick).
+            //
+            // CRITICAL: hold here while the port-A skid still has a
+            // parked DMA beat.  If the LAST DMA beat (m_rd_rlast cycle)
+            // collided with a CPU MMIO write to GPU_RING_DATA, the beat
+            // went into `dma_pend_*` and ring_bram's last cell hasn't
+            // been written yet.  Publishing ring_wrptr here would
+            // expose a ring position whose data is stale — exactly the
+            // failure mode this skid was added to fix.  Wait until the
+            // skid drains (next cycle with no further CPU collision)
+            // so ring_wr_addr's final value reflects the committed
+            // last beat.
+            if (!dma_pend_valid) begin
+                dma_publish_wrptr <= 1'b1;
+                dma_state         <= DMA_S_IDLE;
+            end
         end
 
         default: dma_state <= DMA_S_IDLE;
