@@ -834,6 +834,16 @@ reg signed [31:0] sp_light_q;
 reg signed [31:0] sp_light_step;
 wire [7:0]        sp_light = sp_light_q[23:16];
 reg [7:0]  sp_flags;
+// Per-span colormap_id.  Decoded from word 6 bits [31:28] at span dispatch
+// (count was previously 16 bits at [31:16]; now 12 bits at [27:16] with the
+// upper nibble repurposed as colormap_id).  When the wire-format field is
+// zero, sp_colormap_id is loaded from the sticky st_colormap_id default —
+// preserving bit-identical behaviour for callers that never set the field
+// (i.e. count <= 4095 with no upper-nibble use).  Triangle span emit copies
+// st_colormap_id into sp_colormap_id at S_TRI_PIX.  This is what eliminates
+// the "single colormap per batch" constraint in CMD_DRAW_SPANS_BATCH —
+// adjacent spans with different palookups coexist without a flush in between.
+reg [3:0]  sp_colormap_id;
 reg signed [15:0] sp_fb_stride;
 reg [15:0] sp_tex_width;
 // POT wrap masks: sp_s_int & sp_tex_w_mask, sp_t_int & sp_tex_h_mask
@@ -1881,10 +1891,18 @@ always @(posedge clk) begin
                     5'd4: sp_sstep     <= ring_rd_data;
                     5'd5: sp_tstep     <= ring_rd_data;
                     5'd6: begin
-                        sp_count <= ring_rd_data[31:16];
-                        sp_light_q    <= {8'b0, ring_rd_data[15:8], 16'b0};
-                        sp_light_step <= 32'b0;
-                        sp_flags <= ring_rd_data[7:0];
+                        // Word 6 packing: [31:28]=colormap_id, [27:16]=count
+                        // (12 bits, was 16), [15:8]=light, [7:0]=flags.
+                        // colormap_id == 0 falls back to the sticky default
+                        // (st_colormap_id) so existing single-colormap callers
+                        // that never set the field stay bit-identical.
+                        sp_count       <= {4'b0, ring_rd_data[27:16]};
+                        sp_colormap_id <= (ring_rd_data[31:28] != 4'b0)
+                                            ? ring_rd_data[31:28]
+                                            : st_colormap_id;
+                        sp_light_q     <= {8'b0, ring_rd_data[15:8], 16'b0};
+                        sp_light_step  <= 32'b0;
+                        sp_flags       <= ring_rd_data[7:0];
                     end
                     5'd7: begin
                         sp_fb_stride <= ring_rd_data[31:16];
@@ -1917,10 +1935,15 @@ always @(posedge clk) begin
                     5'd4: sp_sstep     <= ring_rd_data;
                     5'd5: sp_tstep     <= ring_rd_data;
                     5'd6: begin
-                        sp_count <= ring_rd_data[31:16];
-                        sp_light_q    <= {8'b0, ring_rd_data[15:8], 16'b0};
-                        sp_light_step <= 32'b0;
-                        sp_flags <= ring_rd_data[7:0];
+                        // Word 6 packing matches the single-span path; see
+                        // the cmd_is_draw_span branch for the full comment.
+                        sp_count       <= {4'b0, ring_rd_data[27:16]};
+                        sp_colormap_id <= (ring_rd_data[31:28] != 4'b0)
+                                            ? ring_rd_data[31:28]
+                                            : st_colormap_id;
+                        sp_light_q     <= {8'b0, ring_rd_data[15:8], 16'b0};
+                        sp_light_step  <= 32'b0;
+                        sp_flags       <= ring_rd_data[7:0];
                     end
                     5'd7: begin
                         sp_fb_stride <= ring_rd_data[31:16];
@@ -2137,11 +2160,15 @@ always @(posedge clk) begin
                     if (p1_flags[SPAN_COLORMAP]) begin
                         // SDRAM byte address for the cmap lookup.  Slot
                         // base + per-pixel (shade × 256 + texel).  The
-                        // (st_colormap_id << 14) factor is exactly
+                        // (sp_colormap_id << 14) factor is exactly
                         // PALOOKUP_STRIDE when STRIDE = 16 KB; expressed
                         // as a shift here to avoid a multiplier.
+                        // sp_colormap_id is per-span (loaded at span decode,
+                        // or copied from st_colormap_id by the triangle path)
+                        // so adjacent batched spans with different palookups
+                        // coexist without a CMD_SET_COLORMAP_ID flush.
                         cmap_req_addr_reg <= PALOOKUP_BASE
-                                           + {st_colormap_id, 14'b0}
+                                           + {sp_colormap_id, 14'b0}
                                            + {12'b0, p1_light[5:0], tex_resp_data[7:0]};
                     end
                 end
@@ -3510,6 +3537,12 @@ always @(posedge clk) begin
                     sp_sstep     <= grad_s_dx <<< 4;
                     sp_tstep     <= grad_t_dx <<< 4;
                     sp_count     <= tri_span_count;
+                    // Triangle path keeps using the sticky CMD_SET_COLORMAP_ID
+                    // default — there's no comparable spans-in-batch problem
+                    // for triangles since flat-shaded triangles already share
+                    // state across all fragments.  The per-span colormap_id
+                    // mechanism is for CMD_DRAW_SPAN(S_BATCH) only.
+                    sp_colormap_id <= st_colormap_id;
                     // Flat lighting per triangle — light = v_r[0], no walk.
                     sp_light_q    <= tri_span_r_start;
                     sp_light_step <= 32'b0;

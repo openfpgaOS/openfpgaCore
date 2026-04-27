@@ -584,6 +584,113 @@ static void test_colormap_stuck_address_repro() {
     }
 }
 
+// Per-span colormap_id: three spans submitted in one CMD_DRAW_SPANS_BATCH
+// with colormap_id = 0, 1, 2 must each render through the matching palookup
+// slot.  Pre-fix this required three separate batches with intervening
+// CMD_SET_COLORMAP_ID flushes; the wire-format change packs colormap_id
+// into word 6 bits [31:28] so adjacent batched spans coexist with
+// different palookups.
+static void test_span_per_colormap() {
+    printf("TEST: Per-span colormap_id (3 spans, 3 slots, 1 batch)\n");
+    gpu_init();
+
+    // Slot 0: identity row 0.  Slot 1: row 0 maps everything to 0x11.
+    // Slot 2: row 0 maps everything to 0x22.  Distinct 8-bit signatures.
+    {
+        uint8_t cm[256];
+        for (int i = 0; i < 256; i++) cm[i] = (uint8_t)i;
+        palookup_upload_to_slot(0, 0, cm, 256);
+        for (int i = 0; i < 256; i++) cm[i] = 0x11;
+        palookup_upload_to_slot(1, 0, cm, 256);
+        for (int i = 0; i < 256; i++) cm[i] = 0x22;
+        palookup_upload_to_slot(2, 0, cm, 256);
+    }
+
+    ring_cmd(0x23, 2); ring_write(FB_BASE_BYTE); ring_write(320);
+    ring_cmd(0x10, 2); ring_write((1 << 16) | 0x00); ring_write(0);
+
+    // Texture: byte[0] = 0xAB so identity slot 0 yields 0xAB.
+    sdram_write(TEX_BASE_BYTE >> 2, 0xABABABAB);
+
+    // CMD_DRAW_SPANS_BATCH: 3 spans × 15 words = 45 payload words.
+    ring_cmd(0x41, 45);
+    for (int slot = 0; slot < 3; slot++) {
+        // Each span writes 4 pixels at FB[slot*4 .. slot*4+3].
+        ring_write(FB_BASE_BYTE + slot * 4);
+        ring_write(TEX_BASE_BYTE);
+        ring_write(0); ring_write(0);    // s, t
+        ring_write(0); ring_write(0);    // sstep, tstep (sample texel 0 every pixel)
+        // Word 6: colormap_id in bits [31:28], count[27:16], light[15:8], flags[7:0].
+        // light=0 → cmap[slot][0][0xAB] = identity:0xAB / row0:0x11 / row0:0x22.
+        ring_write(((uint32_t)slot << 28) | (4u << 16) | (0u << 8) | 0x01u);
+        ring_write((1u << 16) | 1u);     // fb_stride=1, tex_width=1
+        ring_write(0);                   // wrap masks (no wrap)
+        ring_write(0); ring_write(0); ring_write(0);  // persp unused
+        ring_write(0); ring_write(0); ring_write(0);
+    }
+
+    bool ok = gpu_finish();
+    check("per_cmap_done", ok ? 1 : 0, 1);
+    // Slot 0 (identity) → 0xAB.  Slot 1 → 0x11.  Slot 2 → 0x22.
+    for (int i = 0; i < 4; i++) check_byte("per_cmap_slot0", i, 0xAB);
+    for (int i = 0; i < 4; i++) check_byte("per_cmap_slot1", 4 + i, 0x11);
+    for (int i = 0; i < 4; i++) check_byte("per_cmap_slot2", 8 + i, 0x22);
+}
+
+// Per-span colormap_id default fallback: when the wire-format field is 0
+// the span must use st_colormap_id (the sticky CMD_SET_COLORMAP_ID
+// default).  Preserves bit-identical behaviour for callers that never
+// set the new field — i.e. every existing single-colormap caller.
+static void test_span_default_colormap() {
+    printf("TEST: Per-span colormap_id default fallback (field==0 → sticky)\n");
+    gpu_init();
+
+    // Slot 5: row 0 maps everything to 0x55.  Slot 2: maps to 0x22.
+    {
+        uint8_t cm[256];
+        for (int i = 0; i < 256; i++) cm[i] = 0x55;
+        palookup_upload_to_slot(5, 0, cm, 256);
+        for (int i = 0; i < 256; i++) cm[i] = 0x22;
+        palookup_upload_to_slot(2, 0, cm, 256);
+    }
+
+    ring_cmd(0x23, 2); ring_write(FB_BASE_BYTE); ring_write(320);
+    ring_cmd(0x10, 2); ring_write((1 << 16) | 0x00); ring_write(0);
+
+    // Sticky default: slot 5.
+    ring_cmd(0x28, 1); ring_write(5);
+
+    // Texture: any non-zero byte (cmap row 0 maps it).
+    sdram_write(TEX_BASE_BYTE >> 2, 0x55555555);
+
+    // Span A: colormap_id field = 0 → falls back to st_colormap_id (5) → 0x55.
+    ring_cmd(0x40, 15);
+    ring_write(FB_BASE_BYTE);
+    ring_write(TEX_BASE_BYTE);
+    ring_write(0); ring_write(0); ring_write(0); ring_write(0);
+    ring_write((0u << 28) | (4u << 16) | (0u << 8) | 0x01u);
+    ring_write((1u << 16) | 1u);
+    ring_write(0);
+    ring_write(0); ring_write(0); ring_write(0);
+    ring_write(0); ring_write(0); ring_write(0);
+
+    // Span B: colormap_id field = 2 → overrides default → 0x22.
+    ring_cmd(0x40, 15);
+    ring_write(FB_BASE_BYTE + 4);
+    ring_write(TEX_BASE_BYTE);
+    ring_write(0); ring_write(0); ring_write(0); ring_write(0);
+    ring_write((2u << 28) | (4u << 16) | (0u << 8) | 0x01u);
+    ring_write((1u << 16) | 1u);
+    ring_write(0);
+    ring_write(0); ring_write(0); ring_write(0);
+    ring_write(0); ring_write(0); ring_write(0);
+
+    bool ok = gpu_finish();
+    check("def_cmap_done", ok ? 1 : 0, 1);
+    for (int i = 0; i < 4; i++) check_byte("def_cmap_sticky",   i, 0x55);
+    for (int i = 0; i < 4; i++) check_byte("def_cmap_override", 4 + i, 0x22);
+}
+
 // Test 6: Vertical column (fb_stride = 320)
 static void test_vertical_column() {
     printf("TEST: Vertical column span (fb_stride=320)\n");
@@ -4717,6 +4824,8 @@ int main(int argc, char **argv) {
     test_spans_batch_dma_sustained();
     test_colormap_lighting();
     test_colormap_stuck_address_repro();
+    test_span_per_colormap();
+    test_span_default_colormap();
     test_vertical_column();
     test_skip_zero();
     test_multiple_commands();

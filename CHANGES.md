@@ -8,6 +8,57 @@ about.  Format: one section per substantive landing, with
 
 ---
 
+## 2026-04-27 — Per-span `colormap_id` in CMD_DRAW_SPAN(S_BATCH)
+
+**What shipped.**
+
+- Word 6 wire format gains a 4-bit per-span `colormap_id` field at bits
+  [31:28].  Layout becomes `{colormap_id[3:0], count[11:0], light[7:0],
+  flags[7:0]}` — count narrows from 16 → 12 bits (max 4095, 8× headroom
+  on Pocket's 480-pixel-wide span).
+- Span decode (`gpu_core.v` `cmd_is_draw_span` + `cmd_is_draw_spans_batch`
+  paths) loads `sp_colormap_id` from the field.  When the field is 0 it
+  falls back to the sticky `st_colormap_id` (CMD_SET_COLORMAP_ID default)
+  — preserves bit-identical behaviour for every existing single-colormap
+  caller that never set it.
+- Cmap address gen at p1→p2 now reads `sp_colormap_id` instead of
+  `st_colormap_id`.  Triangle path (`S_TRI_PIX` span emit) copies
+  `st_colormap_id` into `sp_colormap_id` so flat-shaded triangles keep
+  using the sticky default.
+- SDK: new `uint8_t colormap_id` field in `of_gpu_span_t` (fits in
+  existing alignment slack, no struct-size growth).  C99 designated
+  initialisers default it to 0 → sticky-default path → bit-identical
+  behaviour for unmodified callers.
+
+**What it unblocks downstream.**
+
+- **Duke3D batched-spans:** the per-frame batch count drops from ~14
+  state-driven flushes to ~2 frame-boundary flushes.  Adjacent spans
+  with different `globalpal` palookups coexist in one
+  CMD_DRAW_SPANS_BATCH dispatch.  Eliminates the ~150 µs per-batch
+  fixed overhead × 14 batches = ~1.8 ms/frame ceiling.
+- The CMD_SET_COLORMAP_ID opcode is preserved as the default for
+  triangles + as the fallback for spans that ship `colormap_id == 0`.
+  Single-colormap apps (gpudemo, tests) keep working unchanged.
+
+**API additions:**
+
+- `of_gpu_span_t.colormap_id` (`uint8_t`, 4 LSBs used).
+- Wire format: word 6 high nibble = `colormap_id`, count narrowed to
+  12 bits.
+
+**Resource delta.**  ALMs +~5 (one 4-bit register `sp_colormap_id`,
+plus a 4-bit non-zero mux for the default-fallback).  M10K +0, DSP +0.
+
+**Verification.**  All five Verilator suites green (sdram 470 / sram 40
+/ gpu 377 / axi-periph 17 / mixer 8 = 912 / 0).  Two new tb_gpu tests:
+`test_span_per_colormap` (3 spans with colormap_id 0/1/2 in one batch
+each render through the matching slot) and `test_span_default_colormap`
+(span with colormap_id=0 falls back to the sticky CMD_SET_COLORMAP_ID
+default; span with colormap_id=2 overrides it).
+
+---
+
 ## 2026-04-25 — Lean restructure baseline (Phase 0)
 
 **Purpose.** Pinned baseline before the lean restructure
