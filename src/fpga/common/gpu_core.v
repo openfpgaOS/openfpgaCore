@@ -333,14 +333,25 @@ reg [25:0] cmap_req_addr_reg;
 // byte-mode responses).  No held-byte register needed because resp_data_b
 // is held by tex_cache itself across the consumer's stall window — same
 // contract port A uses.
-// Drive port B's req high whenever the fragment in p2 needs cmap.  The
-// address is in cmap_req_addr_reg (loaded at the p1→p2 shift).  The
-// existing held-response contract on tex_cache means we can hold
-// req_valid_b through the whole p2 cycle without re-issuing — accept
-// happens on the first cycle req_ready_b is high, subsequent cycles just
-// observe resp_valid_b stay high (until the next p1→p2 shift loads a new
-// addr and the next accept fires).
-wire        cmap_req_valid_b = p2_valid && p2_flags[SPAN_COLORMAP];
+// Drive port B's req high whenever the fragment in p2 needs cmap AND
+// the consumer pipeline is able to advance.  Gating on !fp_pipe_stall is
+// load-bearing: while the pipeline is stalled (FB write busy in fbss,
+// or downstream cmap response not yet ready) p2b is holding the pixel
+// whose response we need next, and `pipe_addr_b` MUST stay pinned to
+// that pixel's cmap addr.  Without the gate, the cache keeps accepting
+// new req_addr_b values (driven by the still-advancing cmap_req_addr_reg
+// from earlier shifts) and pipe_addr_b drifts past the pixel waiting in
+// p2b; when the stall releases and p3 captures p2b, cmap_rd_data is
+// computed from the WRONG pixel's lane and the FB byte is wrong.  This
+// surfaces as off-by-one byte-lane reads at lane 2 (visible in
+// triCK_y1_x2 / w300_r1_px6 + Duke3D rendering artifacts).
+//
+// Subtle: the underlying cache req_ready_b also self-gates (only true
+// in S_PIPE without miss, or in S_FILL_OUT for B), but that doesn't
+// help us — the cache happily accepts during a consumer stall, since
+// from its view the consumer is still presenting a valid req.
+wire        cmap_req_valid_b = p2_valid && p2_flags[SPAN_COLORMAP]
+                            && !fp_pipe_stall;
 wire        cmap_req_ready_b;
 wire        cmap_resp_valid_b;
 wire [15:0] cmap_resp_data_b;
