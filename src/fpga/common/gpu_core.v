@@ -334,24 +334,24 @@ reg [25:0] cmap_req_addr_reg;
 // is held by tex_cache itself across the consumer's stall window — same
 // contract port A uses.
 // Drive port B's req high whenever the fragment in p2 needs cmap AND
-// the consumer pipeline is able to advance.  Gating on !fp_pipe_stall is
-// load-bearing: while the pipeline is stalled (FB write busy in fbss,
-// or downstream cmap response not yet ready) p2b is holding the pixel
-// whose response we need next, and `pipe_addr_b` MUST stay pinned to
-// that pixel's cmap addr.  Without the gate, the cache keeps accepting
-// new req_addr_b values (driven by the still-advancing cmap_req_addr_reg
-// from earlier shifts) and pipe_addr_b drifts past the pixel waiting in
-// p2b; when the stall releases and p3 captures p2b, cmap_rd_data is
-// computed from the WRONG pixel's lane and the FB byte is wrong.  This
-// surfaces as off-by-one byte-lane reads at lane 2 (visible in
-// triCK_y1_x2 / w300_r1_px6 + Duke3D rendering artifacts).
+// the FB-write sub-FSM is idle.  Gating on `fbss == FBSS_IDLE` is
+// load-bearing: while fbss is mid-flush (cross-word FB write) the
+// pipeline shift is frozen but cmap_req_addr_reg / p2_valid look
+// "current" to the cache.  Without the gate, the cache keeps accepting
+// new req_addr_b values (driven by the still-stale cmap_req_addr_reg
+// from the pre-stall shifts) and pipe_addr_b drifts past the pixel
+// waiting in p2b; when the stall releases and p3 captures p2b,
+// cmap_rd_data is computed from the WRONG pixel's lane.  Surfaces as
+// off-by-one byte-lane reads (triCK_y1_x2, w300_r1_px6, Duke3D
+// rendering artifacts).
 //
-// Subtle: the underlying cache req_ready_b also self-gates (only true
-// in S_PIPE without miss, or in S_FILL_OUT for B), but that doesn't
-// help us — the cache happily accepts during a consumer stall, since
-// from its view the consumer is still presenting a valid req.
+// Why not gate on full !fp_pipe_stall: that ALSO catches the
+// cmap_pipe_wait + persp_issue_stall stalls, where cmap_req_addr_reg
+// is correctly tracking the pixel in p2 — gating there breaks the
+// segment-boundary handoff in 32-pixel persp spans (persp_2seg_px15).
+// The fbss-only gate is the minimum needed to plug the FB-flush race.
 wire        cmap_req_valid_b = p2_valid && p2_flags[SPAN_COLORMAP]
-                            && !fp_pipe_stall;
+                            && (fbss == FBSS_IDLE);
 wire        cmap_req_ready_b;
 wire        cmap_resp_valid_b;
 wire [15:0] cmap_resp_data_b;
