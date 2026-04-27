@@ -29,7 +29,8 @@
 `default_nettype none
 
 module axi_sdram_arbiter #(
-    parameter [3:0] CPU_FAIR_THRESHOLD = 4'd8  // Force CPU grant after this many non-CPU grants
+    parameter [3:0] CPU_FAIR_THRESHOLD   = 4'd8, // Force CPU grant after this many non-CPU grants
+    parameter [3:0] AUDIO_FAIR_THRESHOLD = 4'd4  // Force AudioMix grant after this many non-audio grants
 ) (
     input wire clk,
     input wire reset_n,
@@ -138,55 +139,87 @@ reg [1:0] grant;  // 0=GPU, 1=CPU, 2=AudioDMA, 3=AudioMix
 reg [3:0] gpu_deficit;
 wire cpu_pending = m1_arvalid | m1_awvalid;
 
+// Audio fairness: bounds the worst-case wait the AudioMix master can
+// experience.  Without this, GPU + CPU traffic can starve the audio
+// FSM during heavy frame rendering, draining the output dcfifo (1024
+// entries / ~21 ms) and producing framerate-correlated clicks.
+// Increments on every grant given to anyone-but-AudioMix while M3 has
+// a pending read.  Resets when AudioMix is granted or has no pending
+// request.  Threshold is 4 — at ARLEN=1 burst latency (~20 cycles)
+// that's ~80 cycles of worst-case wait, well under one 48 kHz sample
+// period (2083 cycles).
+reg [3:0] audio_deficit;
+wire audio_pending = m3_arvalid;
+
 // Grant arbitration — registered for timing
 always @(posedge clk or posedge reset) begin
     if (reset) begin
-        arb_state   <= ST_IDLE;
-        grant       <= 2'd0;
-        gpu_deficit <= 0;
+        arb_state     <= ST_IDLE;
+        grant         <= 2'd0;
+        gpu_deficit   <= 0;
+        audio_deficit <= 0;
     end else begin
         case (arb_state)
         ST_IDLE: begin
-            // Fairness override: force a CPU grant after too many
+            // Fairness override #1: force a CPU grant after too many
             // non-CPU grants while CPU was waiting.
             if (cpu_pending && gpu_deficit >= CPU_FAIR_THRESHOLD) begin
                 grant <= 2'd1;
                 gpu_deficit <= 0;
+                if (audio_pending) audio_deficit <= audio_deficit + 4'd1;
                 if (m1_arvalid)
                     arb_state <= ST_RD;
                 else
                     arb_state <= ST_WR;
+            end
+            // Fairness override #2: force an AudioMix grant after too
+            // many non-audio grants while M3 has a pending read.
+            // Sits BELOW the CPU override so a critical CPU stall still
+            // wins; in practice both deficits hit roughly the same time
+            // under heavy CPU+GPU load and tradeoff is harmless.
+            else if (audio_pending && audio_deficit >= AUDIO_FAIR_THRESHOLD) begin
+                grant <= 2'd3;
+                audio_deficit <= 0;
+                arb_state <= ST_RD;
+                if (cpu_pending) gpu_deficit <= gpu_deficit + 4'd1;
             end
             // Priority: GPU (M0) > CPU (M1) > Audio (M2)
             else if (m0_arvalid) begin
                 grant <= 2'd0;
                 arb_state <= ST_RD;
                 if (cpu_pending) gpu_deficit <= gpu_deficit + 4'd1;
+                if (audio_pending) audio_deficit <= audio_deficit + 4'd1;
             end else if (m0_awvalid) begin
                 grant <= 2'd0;
                 arb_state <= ST_WR;
                 if (cpu_pending) gpu_deficit <= gpu_deficit + 4'd1;
+                if (audio_pending) audio_deficit <= audio_deficit + 4'd1;
             end else if (m1_arvalid) begin
                 grant <= 2'd1;
                 arb_state <= ST_RD;
                 gpu_deficit <= 0;
+                if (audio_pending) audio_deficit <= audio_deficit + 4'd1;
             end else if (m1_awvalid) begin
                 grant <= 2'd1;
                 arb_state <= ST_WR;
                 gpu_deficit <= 0;
+                if (audio_pending) audio_deficit <= audio_deficit + 4'd1;
             end else if (m2_arvalid) begin
                 /* Audio DMA gets whatever's left after everyone else has
                  * had their turn.  Never touches gpu_deficit — this
                  * master is below CPU so it cannot starve the CPU. */
                 grant <= 2'd2;
                 arb_state <= ST_RD;
+                if (audio_pending) audio_deficit <= audio_deficit + 4'd1;
             end else if (m3_arvalid) begin
                 /* Audio Mixer — same rationale as M2, still below CPU. */
                 grant <= 2'd3;
                 arb_state <= ST_RD;
+                audio_deficit <= 0;
             end else begin
-                // No requests pending — reset deficit
-                gpu_deficit <= 0;
+                // No requests pending — reset both deficits
+                gpu_deficit   <= 0;
+                audio_deficit <= 0;
             end
         end
 

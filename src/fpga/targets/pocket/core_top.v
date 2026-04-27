@@ -598,10 +598,21 @@ end
 wire bridge_cram0_rd_pulse = bridge_cram0_range && bridge_rd && !bridge_rd_prev_74a;
 wire bridge_cram0_wr_pulse = bridge_cram0_range && bridge_wr;
 
+wire        c0_prefetch_active;
+wire        c0_prefetch_busy;
+wire        c0_prefetch_bridge_hit;
+wire [31:0] c0_prefetch_rd_data;
+wire        c0_prefetch_burst_rd;
+wire [21:0] c0_prefetch_burst_addr;
+wire [5:0]  c0_prefetch_burst_len;
+wire        bridge_cram0_direct_rd_pulse = bridge_cram0_rd_pulse && !c0_prefetch_active;
+
 // Mux word-interface inputs to the controller: pick the owning side.
-wire        mux_word_rd    = cram0_mode_74a ? cpu_cram0_word_rd    : bridge_cram0_rd_pulse;
+wire        mux_word_rd    = cram0_mode_74a ? cpu_cram0_word_rd    : bridge_cram0_direct_rd_pulse;
 wire        mux_word_wr    = cram0_mode_74a ? cpu_cram0_word_wr    : bridge_cram0_wr_pulse;
-wire [21:0] mux_word_addr  = cram0_mode_74a ? cpu_cram0_word_addr  : bridge_addr[23:2];
+wire [21:0] mux_word_addr  = cram0_mode_74a       ? cpu_cram0_word_addr
+                            : c0_prefetch_burst_rd ? c0_prefetch_burst_addr
+                                                    : bridge_addr[23:2];
 wire [31:0] mux_word_wdata = cram0_mode_74a ? cpu_cram0_word_wdata : bridge_wr_data;
 wire [3:0]  mux_word_wstrb = cram0_mode_74a ? cpu_cram0_word_wstrb : 4'b1111;
 
@@ -618,14 +629,14 @@ assign cpu_cram0_word_rdata_valid = ctrl_word_rdata_valid;
 wire [31:0] bridge_cram0_rdata      = ctrl_word_rdata;
 wire        bridge_cram0_rdata_valid= ctrl_word_rdata_valid;
 
-// Sync-burst read path — dead-path here because the bridge doesn't
-// issue multi-beat reads and the CPU-side cram0_cdc only dispatches
-// single-word reads.  Tied off to idle; preserves the cram0_controller
-// port list without pulling the sync-burst FSM into the design.
-wire        c0_burst_rd    = 1'b0;
-wire [5:0]  c0_burst_len   = 6'd0;
-wire [31:0] c0_burst_rdata; // unused
-wire        c0_burst_rdata_valid; // unused
+// Sync-burst read path used by the CRAM0 bridge prefetcher. APF bridge
+// reads have only a few cycles of data-capture slack, so target writes
+// must stream from this prefilled buffer instead of issuing direct
+// single-word PSRAM reads on bridge_rd.
+wire        c0_burst_rd    = !cram0_mode_74a && c0_prefetch_burst_rd;
+wire [5:0]  c0_burst_len   = c0_prefetch_burst_len;
+wire [31:0] c0_burst_rdata;
+wire        c0_burst_rdata_valid;
 
 // ============================================================
 // PSRAM Controller for CRAM0 (16 MB, bridge scratch — clk_74a)
@@ -946,14 +957,13 @@ always @(posedge clk_74a) begin
             bridge_rd_data <= 0;
         end
         32'h20xxxxxx: begin
-            // CRAM0 bridge read — controller runs natively in clk_74a
-            // so the rdata latch is same-cycle (controller returns data
-            // on a word_q_valid pulse; we capture it into bridge_rd_data).
-            // When firmware has set cram0_mode = BRIDGE, this is the
-            // path that serves APF dataslot readbacks.
-            // Match 0x20xxxxxx — the CRAM0 bridge-space address is
-            // OF_TARGET_CRAM0_BRIDGE (CPU-side is 0x30xxxxxx, different).
-            if (bridge_cram0_rdata_valid)
+            // APF samples read data before bridge_rd can complete a
+            // single-word PSRAM access. Dataslot writes therefore serve
+            // 0x20xxxxxx from the prefetch buffer; the direct readback
+            // path remains only for non-prefetched debug accesses.
+            if (c0_prefetch_bridge_hit)
+                bridge_rd_data <= c0_prefetch_rd_data;
+            else if (bridge_cram0_rdata_valid)
                 bridge_rd_data <= bridge_cram0_rdata;
         end
 
@@ -1022,6 +1032,7 @@ end
 
 wire bridge_active_74a = bridge_wr_seen_74a
                        | ctrl_word_busy
+                       | c0_prefetch_busy
                        | bridge_cram0_wr_pulse
                        | bridge_cram0_rd_pulse;
 
@@ -1244,18 +1255,74 @@ assign sram_word_wstrb = 4'b0;
         end
     end
 
+    wire target_dataslot_write_start_74a =
+        target_dataslot_write && !target_dataslot_write_1;
+    reg target_dataslot_write_start_d = 1'b0;
+    always @(posedge clk_74a)
+        target_dataslot_write_start_d <= target_dataslot_write_start_74a;
+
+    cram0_bridge_prefetch c0_bridge_prefetch (
+        .clk                ( clk_74a ),
+        .reset_n            ( pll_ram_locked_74a ),
+
+        // Delay the start by one clk_74a so the captured dataslot
+        // parameters above are visible to the prefetcher.
+        .start              ( target_dataslot_write_start_d ),
+        .start_bridge_addr  ( target_dataslot_bridgeaddr ),
+        .start_length       ( target_dataslot_length ),
+        .bridge_owner       ( !cram0_mode_74a ),
+
+        .bridge_rd_pulse    ( bridge_cram0_rd_pulse ),
+        .bridge_addr        ( bridge_addr ),
+        .bridge_hit         ( c0_prefetch_bridge_hit ),
+        .bridge_rd_data     ( c0_prefetch_rd_data ),
+
+        .active             ( c0_prefetch_active ),
+        .busy               ( c0_prefetch_busy ),
+
+        .burst_rd           ( c0_prefetch_burst_rd ),
+        .burst_addr         ( c0_prefetch_burst_addr ),
+        .burst_len          ( c0_prefetch_burst_len ),
+        .burst_rdata        ( c0_burst_rdata ),
+        .burst_rdata_valid  ( c0_burst_rdata_valid ),
+        .ctrl_busy          ( ctrl_word_busy )
+    );
+
     reg     [9:0]   datatable_addr;
     wire    [31:0]  datatable_q;
     reg             datatable_wren;
     reg     [31:0]  datatable_data;
 
-// Per-slot save sizes: 10-entry array, updated from two sources:
-//   1. Chip32 via pmpw to bridge 0xF0000000 (sets default for all slots)
+// Per-slot save sizes: 10-entry array, updated from three sources:
+//   1. APF datatable writes during automatic nonvolatile save-slot load
 //   2. CPU via SAVE_DT_SLOT/SAVE_DT_SIZE registers (sets individual slots)
-// The cycling FSM continuously writes these to the datatable.
+//   3. Legacy Chip32 pmpw writes to 0xF0000000/0xF0000010..0x34
+// The cycling FSM continuously writes these to the datatable so CPU-side
+// save-size commits are visible to later APF writeback.
 reg [31:0] save_sizes [0:9];
 integer si;
 initial for (si = 0; si < 10; si = si + 1) save_sizes[si] = 32'h00000000;
+
+wire [31:0] bridge_wr_data_native = bridge_endian_little ? {
+    bridge_wr_data[7:0],
+    bridge_wr_data[15:8],
+    bridge_wr_data[23:16],
+    bridge_wr_data[31:24]
+} : bridge_wr_data;
+
+wire bridge_datatable_write =
+    bridge_wr && (bridge_addr[31:24] == 8'hF8) && (bridge_addr[15:12] == 4'h2);
+wire [9:0] bridge_datatable_word = bridge_addr[11:2];
+
+// Saves are entries 8..17 in data.json. Each entry is two datatable words:
+// flags, size. Save0 size is word 17, save9 size is word 35.
+wire bridge_save_size_write =
+    bridge_datatable_write &&
+    (bridge_datatable_word >= 10'd17) &&
+    (bridge_datatable_word <= 10'd35) &&
+    bridge_datatable_word[0];
+wire [9:0] bridge_save_size_delta = bridge_datatable_word - 10'd17;
+wire [3:0] bridge_save_size_slot = bridge_save_size_delta[4:1];
 
 // CPU write: individual slot update via periph slave CDC
 wire [3:0]  cpu_save_dt_slot;
@@ -1285,12 +1352,15 @@ always @(posedge clk_74a) begin
     save_dt_size_sync <= save_dt_size_latch;
 end
 
-// Single driver for save_sizes: Chip32 or CPU updates
-//   Bridge 0xF0000000:        set ALL slots (bulk default)
-//   Bridge 0xF0000010..0x34:  set individual slot (0xF0000010 + slot*4)
+// Single driver for save_sizes: APF, CPU, or legacy Chip32 updates.
+//   APF datatable writes:     capture auto-loaded save sizes
+//   Bridge 0xF0000000:        legacy set ALL slots (bulk default)
+//   Bridge 0xF0000010..0x34:  legacy set individual slot
 //   CPU SAVE_DT_SLOT/SIZE:    set individual slot (via CDC)
 always @(posedge clk_74a) begin
-    if (bridge_wr && bridge_addr == 32'hF0000000)
+    if (bridge_save_size_write)
+        save_sizes[bridge_save_size_slot] <= bridge_wr_data_native;
+    else if (bridge_wr && bridge_addr == 32'hF0000000)
         for (si = 0; si < 10; si = si + 1)
             save_sizes[si] <= bridge_wr_data;
     else if (bridge_wr && bridge_addr[31:8] == 24'hF00000
@@ -1357,10 +1427,14 @@ always @(posedge clk_74a) begin
             dt_result_toggle <= dt_toggle_sync[2];
             dt_reading <= 0;
         end
+    end else if (bridge_datatable_write) begin
+        // Avoid racing APF's bridge-port datatable writes at startup.
+        datatable_wren <= 0;
     end else begin
-        // Normal cycling: write save sizes
+        // Normal cycling: write save sizes. Save slots start after data
+        // slots 0..7 in data.json, so save0's size field is word 17.
         datatable_wren <= 1;
-        datatable_addr <= 10'd15 + {6'd0, save_dt_idx[3:0]} * 10'd2;
+        datatable_addr <= 10'd17 + {6'd0, save_dt_idx[3:0]} * 10'd2;
         datatable_data <= save_sizes[save_dt_idx];
         save_dt_idx <= (save_dt_idx == 4'd9) ? 4'd0 : save_dt_idx + 4'd1;
     end
@@ -1662,20 +1736,27 @@ assign video_hs = vidout_hs;
         // Audio FIFO status (read-only; HW mixer drives the FIFO directly)
         .audio_fifo_level(audio_fifo_level),
         .audio_fifo_full(audio_fifo_full),
-        // Hardware mixer MMIO ↔ audio_mixer
-        .mix_enable            (mixer_enable_mmio),
-        .mix_voice_wr          (mixer_voice_wr_mmio),
-        .mix_voice_sel         (mixer_voice_sel_mmio),
-        .mix_voice_field       (mixer_voice_field_mmio),
-        .mix_voice_wdata       (mixer_voice_wdata_mmio),
-        .mix_irq_clear_wr      (mixer_irq_clear_wr_mmio),
-        .mix_irq_clear         (mixer_irq_clear_mmio),
-        .mix_active_count      (mixer_active_count_r),
-        .mix_active_mask       (mixer_active_mask_r),
-        .mix_pos_readback      (mixer_pos_readback_r),
-        .mix_voice_end_pending (mixer_voice_end_pending_r),
-        .mix_last_sample       (mixer_last_sample_r),
-        .mix_sample_count      (mixer_sample_count_r),
+        // Hardware mixer MMIO ↔ audio_mixer (flat addressing, 0x4B000000)
+        .mix_enable             (mixer_enable_mmio),
+        .mix_voice_wr           (mixer_voice_wr_mmio),
+        .mix_voice_sel          (mixer_voice_sel_mmio),
+        .mix_voice_field        (mixer_voice_field_mmio),
+        .mix_voice_wdata        (mixer_voice_wdata_mmio),
+        .mix_irq_clear_wr       (mixer_irq_clear_wr_mmio),
+        .mix_irq_clear          (mixer_irq_clear_mmio),
+        .mix_master_vol         (mixer_master_vol_mmio),
+        .mix_group_vol_0        (mixer_group_vol_0_mmio),
+        .mix_group_vol_1        (mixer_group_vol_1_mmio),
+        .mix_group_vol_2        (mixer_group_vol_2_mmio),
+        .mix_group_vol_3        (mixer_group_vol_3_mmio),
+        .mix_voice_group_packed (mixer_voice_group_packed_mmio),
+        .mix_voice_sel_rd       (mixer_voice_sel_rd_mmio),
+        .mix_active_count       (mixer_active_count_r),
+        .mix_active_mask        (mixer_active_mask_r),
+        .mix_pos_readback       (mixer_pos_readback_r),
+        .mix_voice_end_pending  (mixer_voice_end_pending_r),
+        .mix_last_sample        (mixer_last_sample_r),
+        .mix_sample_count       (mixer_sample_count_r),
         // CRAM0 ownership mode (0 = bridge, 1 = CPU)
         .cram0_mode            (cram0_mode_cpu),
         // Link MMIO interface
@@ -2138,6 +2219,13 @@ wire [3:0]  mixer_voice_field_mmio;
 wire [31:0] mixer_voice_wdata_mmio;
 wire        mixer_irq_clear_wr_mmio;
 wire [31:0] mixer_irq_clear_mmio;
+wire [7:0]  mixer_master_vol_mmio;
+wire [7:0]  mixer_group_vol_0_mmio;
+wire [7:0]  mixer_group_vol_1_mmio;
+wire [7:0]  mixer_group_vol_2_mmio;
+wire [7:0]  mixer_group_vol_3_mmio;
+wire [63:0] mixer_voice_group_packed_mmio;
+wire [4:0]  mixer_voice_sel_rd_mmio;
 
 audio_mixer audio_mixer_inst (
     .clk              (clk_cpu),
@@ -2147,8 +2235,14 @@ audio_mixer audio_mixer_inst (
     .voice_wr         (mixer_voice_wr_mmio),
     .voice_field      (mixer_voice_field_mmio),
     .voice_sel        (mixer_voice_sel_mmio),
-    .voice_sel_rd     (mixer_voice_sel_mmio), // readback uses same latched SEL
+    .voice_sel_rd     (mixer_voice_sel_rd_mmio), // combinational from read addr
     .voice_wdata      (mixer_voice_wdata_mmio),
+    .master_vol       (mixer_master_vol_mmio),
+    .group_vol_0      (mixer_group_vol_0_mmio),
+    .group_vol_1      (mixer_group_vol_1_mmio),
+    .group_vol_2      (mixer_group_vol_2_mmio),
+    .group_vol_3      (mixer_group_vol_3_mmio),
+    .voice_group_packed(mixer_voice_group_packed_mmio),
     .m_arvalid        (mixer_arvalid),
     .m_arready        (mixer_arready),
     .m_araddr         (mixer_araddr),

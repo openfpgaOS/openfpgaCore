@@ -277,33 +277,21 @@ long of_file_size(uint32_t slot);
 void of_set_idle_hook(void (*hook)(void));      // Background work during DMA
 ```
 
-### Save System — `of_save.h`
+### Save Files
 
-10 slots, 256 KB each, CRAM1 PSRAM backed to SD.
+10 slots, 256 KB each, staged in the CRAM0 save window and committed to SD card when a dirty save file is closed.
 
 ```c
-FILE *f = fopen("save_0", "wb");
+FILE *f = fopen("MyGame_0.sav", "wb");
 fwrite(data, sizeof(data), 1, f);
-fclose(f);                                      // Auto-flushes actual size
+fclose(f);
 
-FILE *f = fopen("save_0", "rb");
+FILE *f = fopen("MyGame_0.sav", "rb");
 fread(data, sizeof(data), 1, f);
 fclose(f);
 ```
 
-Low-level:
-
-```c
-/* Use POSIX file I/O with the "save:N" path scheme.
- * fclose() automatically flushes written data to SD card. */
-FILE *f = fopen("save:0", "wb");
-fwrite(state, 1, sizeof(state), f);
-fclose(f);
-
-f = fopen("save:0", "rb");
-fread(state, 1, sizeof(state), f);
-fclose(f);
-```
+Use POSIX file I/O with save filenames. Other APF data files are read-only.
 
 ### Terminal — `of_terminal.h`
 

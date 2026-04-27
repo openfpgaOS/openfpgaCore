@@ -44,7 +44,7 @@ A complete reference for building applications on the openfpgaOS platform for An
 | **CRAM1** | 16 MB cellular RAM (cached or uncached) |
 | **SRAM** | 256 KB static RAM (uncached) |
 | **BRAM** | 32 KB on-chip (OS kernel) |
-| **Save** | Nonvolatile, CRAM1 PSRAM-backed, 10 × 256 KB save slots, persisted to SD via Chip32 |
+| **Save** | Nonvolatile, CRAM0 save-window backed, 10 × 256 KB save slots, auto-loaded by APF and committed on close |
 | **Link** | Bidirectional 32-bit link cable port |
 | **Dock** | Supported (HDMI output, USB controllers) |
 | **Analogizer** | SNAC controllers + analog video output |
@@ -571,38 +571,23 @@ while (1) {
 
 ### Save Files
 
-Persistent storage backed by CRAM1 PSRAM, persisted to SD card by the APF bridge. 10 save slots of 256 KB each. The Chip32 loader creates seed save files on first boot.
+Persistent storage is staged in the CRAM0 save window and committed to SD card when a dirty save file is closed. There are 10 save slots of 256 KB each. APF auto-loads existing nonvolatile save files into the CRAM0 save window before the OS boots; missing optional saves appear as empty files to the app.
 
-**Preferred: use standard C file I/O.** The OS maps `fopen("save_N")` to save slot N automatically:
+**Preferred: use standard C file I/O.** Save filenames from the instance JSON open as writable files; other APF data files remain read-only:
 
 ```c
 /* Write a save */
-FILE *f = fopen("save_0", "wb");
+FILE *f = fopen("MyGame_0.sav", "wb");
 fwrite(&game_state, sizeof(game_state), 1, f);
-fclose(f);  /* auto-flushes to SD with actual written size */
+fclose(f);
 
 /* Read a save */
-FILE *f = fopen("save_0", "rb");
+FILE *f = fopen("MyGame_0.sav", "rb");
 fread(&game_state, sizeof(game_state), 1, f);
 fclose(f);
 ```
 
-The low-level `of_save_*` API is still available for advanced use:
-
-#### `int of_save_read(int slot, void *buf, uint32_t offset, uint32_t len)`
-Read `len` bytes from save slot `slot` (0-9) at byte `offset` into `buf`. Returns bytes read, or negative on error.
-
-#### `int of_save_write(int slot, const void *buf, uint32_t offset, uint32_t len)`
-Write `len` bytes to save slot `slot` at byte `offset` from `buf`. Returns bytes written, or negative on error.
-
-#### `void of_save_flush(int slot)`
-Force the save data to be persisted to SD card. Normally happens automatically on game swap and shutdown, but call this after critical writes (e.g., checkpoint save). Flushes the full 256 KB slot.
-
-#### `int of_save_flush_size(int slot, uint32_t size)`
-Flush only `size` bytes of the save slot to SD card. Use this when your save data is smaller than 256 KB to reduce write time.
-
-#### `void of_save_erase(int slot)`
-Fill the entire save slot with `0xFF`. Useful for "New Game" or factory reset.
+The compatibility aliases `save_0`/`save:0` through `save_9`/`save:9` still work, but new code should use the save filenames from the instance JSON. There is no public `of_save_*` API; the OS save HAL is internal to the POSIX file implementation.
 
 #### Example: Simple High Score
 
@@ -617,7 +602,7 @@ typedef struct {
 
 void load_high_score(uint32_t *score) {
     save_data_t data;
-    FILE *f = fopen("save_0", "rb");
+    FILE *f = fopen("MyGame_0.sav", "rb");
     if (f) {
         fread(&data, sizeof(data), 1, f);
         fclose(f);
@@ -629,10 +614,10 @@ void load_high_score(uint32_t *score) {
 
 void save_high_score(uint32_t score) {
     save_data_t data = { .magic = SAVE_MAGIC, .high_score = score };
-    FILE *f = fopen("save_0", "wb");
+    FILE *f = fopen("MyGame_0.sav", "wb");
     if (f) {
         fwrite(&data, sizeof(data), 1, f);
-        fclose(f);  /* auto-flushes with actual size written */
+        fclose(f);
     }
 }
 ```
@@ -641,12 +626,9 @@ void save_high_score(uint32_t score) {
 
 ### File I/O
 
-**Preferred: use standard C file I/O.** Register your data files at startup, then use `fopen` with the filename:
+**Preferred: use standard C file I/O.** The kernel auto-discovers APF filenames at boot, so apps can use `fopen` with the filename from the instance JSON:
 
 ```c
-/* Register data files at startup (maps filename → data slot ID) */
-of_file_slot_register(3, "game.dat");
-
 /* Open by name */
 FILE *f = fopen("game.dat", "rb");
 if (!f) {
@@ -664,11 +646,13 @@ void *buf = malloc(size);
 fread(buf, 1, size, f);
 fclose(f);
 
-/* Or access a slot directly without registration */
+/* Or access a slot directly */
 FILE *f = fopen("slot:3", "rb");
 ```
 
-The low-level API is still available for direct slot access:
+Read-only APF data files reject write opens. Save filenames ending in `_<N>.sav` map to writable save slots 0-9, and the `save_N` / `save:N` aliases remain available for compatibility.
+
+The low-level OS API is still available for direct slot access:
 
 #### `int of_file_read(uint32_t slot_id, uint32_t offset, void *dest, uint32_t length)`
 Read `length` bytes from data slot `slot_id` at byte `offset` into `dest`. The destination buffer **must be in SDRAM** (address >= `0x10000000`) and should be 512-byte aligned for best DMA performance.
@@ -677,6 +661,9 @@ Returns 0 on success, negative on error.
 
 #### `long of_file_size(uint32_t slot_id)`
 Get the size of a data slot in bytes. Returns negative on error.
+
+#### `long of_file_flags(uint32_t slot_id)`
+Get the APF datatable flags word for a data slot. Returns negative when the slot has no datatable entry.
 
 #### Data Slot IDs
 
@@ -689,7 +676,7 @@ Slot IDs are defined in `data.json`. The standard openfpgaOS slots are:
 | 3-6 | Application data files | any |
 | 10-19 | Save slots (nonvolatile, 256 KB each) | `.sav` |
 
-Slots 1-6 use deferred loading -- they're loaded on demand by the OS after boot. Save slots (10-19) are backed by CRAM1 PSRAM and persisted to SD card by the bridge.
+Slots 1-6 use deferred loading -- they're loaded on demand by the OS after boot. Save slots (10-19) use the CRAM0 save window and are persisted to SD card by the bridge.
 
 ---
 
@@ -1252,7 +1239,7 @@ static uint32_t calc_checksum(const game_save_t *s) {
 }
 
 int load_game(game_save_t *save) {
-    FILE *f = fopen("save_0", "rb");
+    FILE *f = fopen("MyGame_0.sav", "rb");
     if (!f) return -1;
     fread(save, sizeof(*save), 1, f);
     fclose(f);
@@ -1266,10 +1253,10 @@ void save_game(const game_save_t *save) {
     tmp.magic = 0xCAFEBABE;
     tmp.version = 1;
     tmp.checksum = calc_checksum(&tmp);
-    FILE *f = fopen("save_0", "wb");
+    FILE *f = fopen("MyGame_0.sav", "wb");
     if (f) {
         fwrite(&tmp, sizeof(tmp), 1, f);
-        fclose(f);  /* auto-flushes with actual size */
+        fclose(f);
     }
 }
 ```

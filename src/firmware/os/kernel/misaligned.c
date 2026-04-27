@@ -497,6 +497,8 @@ void fatal_trap(trap_frame_t *frame) {
     uint32_t gpu_fence  = *(volatile uint32_t *)0x4A000018u;
     trap_uart_puts("gpu_status=");
     trap_uart_hex(gpu_status);
+    trap_uart_puts(" state=");
+    trap_uart_hex((gpu_status >> 8) & 0x3F);   /* bits[13:8] = FSM state */
     trap_uart_puts(" rdptr=");
     trap_uart_hex(gpu_rdptr);
     trap_uart_puts(" wrptr=");

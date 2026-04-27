@@ -173,6 +173,8 @@ void services_table_init(void) {
     svc->mixer_set_group_volume = of_mixer_set_group_volume;
     svc->mixer_set_master_volume = of_mixer_set_master_volume;
     svc->mixer_set_filter    = of_mixer_set_filter;
+    svc->mixer_alloc_for_group = of_mixer_alloc_for_group;
+    svc->mixer_voice_group   = of_mixer_voice_group;
 
     /* Audio */
     svc->audio_init     = of_audio_init;
@@ -235,6 +237,14 @@ void services_table_init(void) {
     svc->awe_set_chorus_rate         = svc_awe_set_int;
     svc->awe_set_chorus_depth        = svc_awe_set_int;
     svc->awe_ramp1_trigger           = svc_awe_ramp1_trigger;
+
+    /* Cache (append-only).  cbo.flush per line — writes back AND
+     * invalidates dirty lines in the affected range so external AXI
+     * masters (GPU m_rd_*, audio mixer voice fetch, …) reading DRAM
+     * see the committed data.  Required because cbo.clean alone has
+     * been unreliable on this VexiiRiscv config (see
+     * project_audio_pan_flood / bank_preload comments). */
+    svc->cache_flush_range = of_cache_flush_range;
 }
 
 void services_table_set_smp_bank(const void *base, uint32_t size) {

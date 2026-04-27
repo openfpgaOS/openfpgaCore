@@ -9,9 +9,6 @@
 #include "../os_string.h"
 #include "of_version.h"
 
-/* Internal HAL functions (not exposed in public headers) */
-extern long of_file_size(uint32_t slot_id);
-
 /* dlmalloc functions (provided by of_malloc.c, USE_DL_PREFIX) */
 extern void *dlmalloc(size_t);
 extern void  dlfree(void *);
@@ -56,7 +53,7 @@ typedef struct {
     int      flags;         /* O_RDONLY, O_WRONLY, etc. */
     int      is_save;       /* Is this a save file? */
     int      save_slot;     /* Save slot index (0-9) */
-    uint32_t write_max;     /* High-water mark: max (offset) after any write */
+    int      dirty;         /* Save data/size needs bridge commit on close */
     int      is_dir;        /* Is this a directory FD? */
     uint32_t dir_pos;       /* Current position in directory listing */
 } fd_entry_t;
@@ -177,9 +174,16 @@ static int io_cache_fill(int entry, uint32_t slot_id,
  * of_file_slot_register() still works for backward compatibility.
  * ====================================================================== */
 
-#define MAX_FILE_SLOTS      16
+#define MAX_FILE_SLOTS      32
 #define FILE_SLOT_NAME_MAX  24
+#define SAVE_SLOT_ID_BASE   10u
 
+#define O_ACCMODE       03
+#define O_WRONLY        01
+#define O_RDWR          02
+#define O_TRUNC         01000
+#define O_APPEND        02000
+#define O_DIRECTORY     0200000
 
 typedef struct {
     uint32_t slot_id;
@@ -188,6 +192,10 @@ typedef struct {
 
 static file_slot_entry_t file_slots[MAX_FILE_SLOTS];
 static int file_slot_count;
+static uint32_t save_size_cache[SAVE_MAX_SLOTS];
+static uint8_t save_size_known[SAVE_MAX_SLOTS];
+
+static void save_size_cache_store(int save_slot, uint32_t size);
 
 void file_slot_register(uint32_t slot_id, const char *filename) {
     if (file_slot_count >= MAX_FILE_SLOTS)
@@ -238,6 +246,63 @@ static int file_slot_lookup(const char *path) {
     return -1;
 }
 
+static int save_slot_from_data_id(uint32_t slot_id) {
+    if (slot_id >= SAVE_SLOT_ID_BASE &&
+        slot_id < SAVE_SLOT_ID_BASE + (uint32_t)SAVE_MAX_SLOTS)
+        return (int)(slot_id - SAVE_SLOT_ID_BASE);
+    return -1;
+}
+
+static int open_flags_want_write(long flags) {
+    return ((flags & O_ACCMODE) != 0) || ((flags & O_TRUNC) != 0);
+}
+
+static void format_slot_name(char *name, uint32_t slot) {
+    name[0] = 's';
+    name[1] = 'l';
+    name[2] = 'o';
+    name[3] = 't';
+    name[4] = ':';
+    if (slot >= 10) {
+        name[5] = '0' + (char)(slot / 10);
+        name[6] = '0' + (char)(slot % 10);
+        name[7] = '\0';
+    } else {
+        name[5] = '0' + (char)slot;
+        name[6] = '\0';
+    }
+}
+
+static int save_slot_from_filename(const char *path) {
+    const char *name = path_basename(path);
+    int len = 0;
+    while (name[len])
+        len++;
+
+    if (len < 6)
+        return -1;
+
+    if (char_lower((unsigned char)name[len - 4]) != '.' ||
+        char_lower((unsigned char)name[len - 3]) != 's' ||
+        char_lower((unsigned char)name[len - 2]) != 'a' ||
+        char_lower((unsigned char)name[len - 1]) != 'v')
+        return -1;
+
+    int end = len - 4;
+    int start = end;
+    while (start > 0 && name[start - 1] >= '0' && name[start - 1] <= '9')
+        start--;
+
+    if (start == end || start == 0 || name[start - 1] != '_')
+        return -1;
+
+    int slot = 0;
+    for (int i = start; i < end; i++)
+        slot = slot * 10 + (name[i] - '0');
+
+    return (slot < (int)SAVE_MAX_SLOTS) ? slot : -1;
+}
+
 int file_slot_get_count(void) {
     return file_slot_count;
 }
@@ -285,6 +350,8 @@ uintptr_t of_brk_limit(void) { return mmap_bottom; }
 #define EMFILE          24
 #define ENAMETOOLONG    36
 #define ENOTDIR         20
+#define EIO             5
+#define EFAULT          14
 
 /* ======================================================================
  * Directory listing — enumerate data slots via DS_CMD_GETFILE
@@ -305,18 +372,22 @@ struct linux_dirent64 {
 
 #define DT_REG  8
 
-/* Probe data slots 0-6: check datatable for size, then try getfile
- * for the real filename. Slots with no data are skipped entirely
- * (avoids bridge timeout on empty slots). */
+/* Probe data slots: check datatable metadata, then try GETFILE for the
+ * real filename. Normal read-only slots need a non-zero size. Save slots
+ * are registered when their datatable flags exist, even if the current
+ * save file is logically empty. */
 static void dir_probe_slots(void) {
     char name[FILE_SLOT_NAME_MAX];
     /* Slot 0 is reserved by APF (never carries core-visible data).
-     * Walk 1..MAX_DATA_SLOTS-1. Only populated slots (sz>0) are
-     * reported — empty entries are skipped silently. */
+     * Walk 1..MAX_DATA_SLOTS-1 and skip entries with no datatable
+     * mapping or payload. */
     for (uint32_t slot = 1; slot < MAX_DATA_SLOTS; slot++) {
         name[0] = '\0';
         long sz = of_file_size(slot);
-        if (sz <= 0) continue;
+        long flags = of_file_flags(slot);
+        int save_slot = save_slot_from_data_id(slot);
+        if (sz <= 0 && (save_slot < 0 || flags <= 0))
+            continue;
 
         /* Retry GETFILE a few times — empirically APF sometimes needs
          * several attempts before it populates the response struct,
@@ -335,10 +406,7 @@ static void dir_probe_slots(void) {
             /* Fallback name — APF has no filename record for this
              * slot, but DT_QUERY confirms it holds data. Register
              * under "slot:N" so the slot is still reachable. */
-            name[0] = 's'; name[1] = 'l'; name[2] = 'o';
-            name[3] = 't'; name[4] = ':';
-            name[5] = '0' + (char)(slot % 10);
-            name[6] = '\0';
+            format_slot_name(name, slot);
         }
 
         if (file_slot_lookup(name) < 0)
@@ -441,12 +509,27 @@ static long sys_write(long fd, long buf, long count) {
     fd_entry_t *f = &fd_table[fd];
 
     if (f->is_save) {
+        if ((f->flags & O_ACCMODE) == 0)
+            return -EBADF;
+        if (f->flags & O_APPEND)
+            f->offset = f->size;
+
+        if (f->offset >= SAVE_SLOT_SIZE)
+            return 0;
+        uint32_t available = SAVE_SLOT_SIZE - f->offset;
+        uint32_t to_write = (uint32_t)count;
+        if (to_write > available)
+            to_write = available;
+
         int rc = of_save_write(f->save_slot, (const void *)buf,
-                           f->offset, (uint32_t)count);
+                           f->offset, to_write);
         if (rc > 0) {
             f->offset += rc;
-            if (f->offset > f->write_max)
-                f->write_max = f->offset;
+            if (f->offset > f->size)
+                f->size = f->offset;
+            f->dirty = 1;
+            save_size_cache_store(f->save_slot, f->size);
+            of_save_set_size(f->save_slot, f->size);
         }
         return rc;
     }
@@ -464,8 +547,17 @@ static long sys_read(long fd, long buf, long count) {
     fd_entry_t *f = &fd_table[fd];
 
     if (f->is_save) {
+        if ((f->flags & O_ACCMODE) == O_WRONLY)
+            return -EBADF;
+        if (f->offset >= f->size)
+            return 0;
+
+        uint32_t to_read = (uint32_t)count;
+        if (to_read > f->size - f->offset)
+            to_read = f->size - f->offset;
+
         int rc = of_save_read(f->save_slot, (void *)buf,
-                          f->offset, (uint32_t)count);
+                          f->offset, to_read);
         if (rc > 0)
             f->offset += rc;
         return rc;
@@ -571,15 +663,83 @@ static int prefix_match(const char *s, const char *prefix, int n) {
     return 1;
 }
 
+static uint32_t save_clamp_size(uint32_t size) {
+    return (size > SAVE_SLOT_SIZE) ? SAVE_SLOT_SIZE : size;
+}
+
+static void save_size_cache_store(int save_slot, uint32_t size) {
+    if (save_slot < 0 || save_slot >= (int)SAVE_MAX_SLOTS)
+        return;
+    save_size_cache[save_slot] = save_clamp_size(size);
+    save_size_known[save_slot] = 1;
+}
+
+/* Force a re-read from the HAL on the next save_current_size() call.
+ * Use after a HAL operation fails — the in-memory cache may no longer
+ * reflect what the bridge actually has on disk. */
+static void save_size_cache_invalidate(int save_slot) {
+    if (save_slot < 0 || save_slot >= (int)SAVE_MAX_SLOTS)
+        return;
+    save_size_known[save_slot] = 0;
+}
+
+static uint32_t save_current_size(int save_slot) {
+    if (save_slot < 0 || save_slot >= (int)SAVE_MAX_SLOTS)
+        return 0;
+
+    if (save_size_known[save_slot])
+        return save_size_cache[save_slot];
+
+    long sz = of_file_size(SAVE_SLOT_ID_BASE + (uint32_t)save_slot);
+    uint32_t size = 0;
+    if (sz > 0)
+        size = save_clamp_size((uint32_t)sz);
+
+    save_size_cache_store(save_slot, size);
+    return size;
+}
+
+static long open_save_fd(int fd, int save_slot, long flags) {
+    if (save_slot < 0 || save_slot >= (int)SAVE_MAX_SLOTS) {
+        fd_table[fd].in_use = 0;
+        return -EINVAL;
+    }
+
+    fd_entry_t *f = &fd_table[fd];
+    f->slot_id = SAVE_SLOT_ID_BASE + (uint32_t)save_slot;
+    f->is_save = 1;
+    f->save_slot = save_slot;
+    f->size = save_current_size(save_slot);
+
+    if (flags & O_TRUNC) {
+        /* Update the HAL first; only commit cached state if the HW
+         * accepted the truncation.  Otherwise a later close() would
+         * re-flush the bogus zero-size through a known-broken path. */
+        if (of_save_set_size(save_slot, 0) != 0) {
+            fd_table[fd].in_use = 0;
+            return -EIO;
+        }
+        f->size = 0;
+        f->dirty = 1;
+        save_size_cache_store(save_slot, 0);
+    }
+
+    if (flags & O_APPEND)
+        f->offset = f->size;
+
+    return fd;
+}
+
 /*
  * sys_openat -- Open a file by path.
  *
  * Path conventions:
- *   "slot:<N>"  Open APF data slot N (read-only).
- *   "save:<N>"  Open save slot N (read/write, 0-9).
+ *   "slot:<N>"  Open APF data slot N.
+ *   "save:<N>"  Open save slot N (backward-compatible alias).
+ *   filename    Open any registered data-slot filename.
  *
- * This lets musl's fopen("slot:3", "rb") work transparently, which
- * means any game can load assets via standard C file I/O.
+ * Read-only slots reject write opens. Save slots are read/write files
+ * backed by CRAM0 and committed through the bridge on close.
  */
 static long sys_openat(long dirfd, long pathname, long flags, long mode) {
     (void)dirfd;
@@ -605,7 +765,7 @@ static long sys_openat(long dirfd, long pathname, long flags, long mode) {
     f->save_slot = -1;
     f->slot_id = 0;
     f->size = 0;
-    f->write_max = 0;
+    f->dirty = 0;
     f->is_dir = 0;
     f->dir_pos = 0;
 
@@ -613,17 +773,29 @@ static long sys_openat(long dirfd, long pathname, long flags, long mode) {
      * filesystem_init() already populated file_slots at boot; probe
      * lazily only if the FTAB is empty (e.g. sim target without a
      * boot-time init). */
-    if (flags & 0200000) {  /* O_DIRECTORY = 0200000 on riscv */
+    if (flags & O_DIRECTORY) {
         if (file_slot_count == 0)
             dir_probe_slots();
         f->is_dir = 1;
         return fd;
     }
 
-    /* "slot:<N>" -- APF data slot (read-only) */
+    /* "slot:<N>" -- APF data slot. Save-slot IDs are writable; all
+     * other slots are read-only. */
     if (prefix_match(path, "slot:", 5)) {
         const char *p = path + 5;
+        if (*p < '0' || *p > '9') {
+            fd_table[fd].in_use = 0;
+            return -EINVAL;
+        }
         int slot = parse_int(&p);
+        int save_slot = save_slot_from_data_id((uint32_t)slot);
+        if (save_slot >= 0)
+            return open_save_fd(fd, save_slot, flags);
+        if (open_flags_want_write(flags)) {
+            fd_table[fd].in_use = 0;
+            return -EACCES;
+        }
         f->slot_id = (uint32_t)slot;
         f->size = 0;  /* Resolved lazily on first read */
         return fd;
@@ -632,20 +804,26 @@ static long sys_openat(long dirfd, long pathname, long flags, long mode) {
     /* "save:<N>" or "save_<N>" -- save slot (read/write, 256 KB) */
     if (prefix_match(path, "save:", 5) || prefix_match(path, "save_", 5)) {
         const char *p = path + 5;
-        int slot = parse_int(&p);
-        if (slot < 0 || slot >= (int)SAVE_MAX_SLOTS) {
+        if (*p < '0' || *p > '9') {
             fd_table[fd].in_use = 0;
             return -EINVAL;
         }
-        f->is_save = 1;
-        f->save_slot = slot;
-        f->size = SAVE_SLOT_SIZE;
-        return fd;
+        int slot = parse_int(&p);
+        return open_save_fd(fd, slot, flags);
     }
 
     /* Search file slot registry by basename (case-insensitive) */
     int slot = file_slot_lookup(path);
     if (slot >= 0) {
+        int save_slot = save_slot_from_data_id((uint32_t)slot);
+        if (save_slot >= 0)
+            return open_save_fd(fd, save_slot, flags);
+
+        if (open_flags_want_write(flags)) {
+            fd_table[fd].in_use = 0;
+            return -EACCES;
+        }
+
         /* Reject registered names whose slot is unbacked (size == 0).
          * Without this, fopen returns a valid FD and subsequent reads
          * serve stale bytes from the I/O cache's bounce buffer. */
@@ -659,6 +837,10 @@ static long sys_openat(long dirfd, long pathname, long flags, long mode) {
         return fd;
     }
 
+    int save_slot = save_slot_from_filename(path);
+    if (save_slot >= 0)
+        return open_save_fd(fd, save_slot, flags);
+
     /* Unknown path -- no filesystem */
     fd_table[fd].in_use = 0;
     return -ENOENT;
@@ -671,9 +853,21 @@ static long sys_close(long fd) {
         return -EBADF;
 
     if (fd_table[fd].is_save) {
-        uint32_t flush_sz = fd_table[fd].write_max;
-        if (flush_sz > 0)
-            of_save_flush_size(fd_table[fd].save_slot, flush_sz);
+        uint32_t save_size = fd_table[fd].size;
+        if (fd_table[fd].dirty) {
+            int rc = of_save_flush_size(fd_table[fd].save_slot, save_size);
+            /* POSIX: close() always closes the fd, even on flush
+             * failure (the app can't retry the flush via this fd).
+             * But only commit the new size to our cache if the HAL
+             * actually persisted it; otherwise invalidate so a
+             * future open() sees the on-disk size. */
+            if (rc == 0)
+                save_size_cache_store(fd_table[fd].save_slot, save_size);
+            else
+                save_size_cache_invalidate(fd_table[fd].save_slot);
+            fd_table[fd].in_use = 0;
+            return rc;
+        }
     }
 
     fd_table[fd].in_use = 0;
@@ -693,6 +887,8 @@ long sys_file_size_fd(int fd) {
     if (fd < 0 || fd >= MAX_FDS || !fd_table[fd].in_use)
         return -1;
     fd_entry_t *f = &fd_table[fd];
+    if (f->is_save)
+        return (long)f->size;
     if (f->size == 0 && f->slot_id > 0) {
         long sz = of_file_size(f->slot_id);
         if (sz > 0) f->size = (uint32_t)sz;
@@ -712,7 +908,7 @@ static long sys_llseek(long fd, long off_hi, long off_lo,
     long new_offset;
 
     /* Resolve file size for SEEK_END */
-    if (whence == 2 && f->size == 0 && f->slot_id > 0) {
+    if (whence == 2 && !f->is_save && f->size == 0 && f->slot_id > 0) {
         long sz = of_file_size(f->slot_id);
         if (sz > 0) f->size = (uint32_t)sz;
     }
@@ -1249,9 +1445,26 @@ static long linux_dispatch(long n, long a0, long a1, long a2,
     case SYS_rt_sigprocmask: return 0;
 
     case SYS_setitimer: {
-        /* a0=which (ITIMER_REAL=0), a1=new itimerval, a2=old itimerval */
+        /* a0=which (ITIMER_REAL=0), a1=new itimerval, a2=old itimerval.
+         * Both pointers come from userspace and feed kernel memory ops
+         * (memset to a2, 16-byte read from a1).  Reject anything
+         * outside the SDRAM window so a buggy/malicious app can't
+         * scribble MMIO or kernel BSS.  Range matches the mmap2 sanity
+         * check below (cached + uncached SDRAM + CRAM0). */
         if (a0 != 0) return -EINVAL;
-        if (a2) memset((void *)a2, 0, 16);  /* zero old value */
+        if (a1) {
+            unsigned long e = (unsigned long)a1 + 16;
+            if ((unsigned long)a1 < 0x10000000ul || e > 0x54000000ul ||
+                e < (unsigned long)a1)
+                return -EFAULT;
+        }
+        if (a2) {
+            unsigned long e = (unsigned long)a2 + 16;
+            if ((unsigned long)a2 < 0x10000000ul || e > 0x54000000ul ||
+                e < (unsigned long)a2)
+                return -EFAULT;
+            memset((void *)a2, 0, 16);  /* zero old value */
+        }
         if (a1) {
             uint32_t *nv = (uint32_t *)a1;
             uint32_t sec  = nv[0];  /* it_interval.tv_sec */
@@ -1451,75 +1664,7 @@ static long of_vendor_dispatch(long eid, long fid,
         break;
 
     case OF_EID_MIXER:
-        switch (fid) {
-        case OF_MIXER_FID_INIT:
-            of_mixer_init((int)a0, (int)a1);
-            return 0;
-        case OF_MIXER_FID_PLAY:
-            return of_mixer_play((const uint8_t *)a0, (uint32_t)a1,
-                                 (uint32_t)a2, (int)a3, (int)a4);
-        case OF_MIXER_FID_STOP:
-            of_mixer_stop((int)a0);
-            return 0;
-        case OF_MIXER_FID_STOP_ALL:
-            of_mixer_stop_all();
-            return 0;
-        case OF_MIXER_FID_SET_VOLUME:
-            of_mixer_set_volume((int)a0, (int)a1);
-            return 0;
-        case OF_MIXER_FID_PUMP:
-            of_mixer_pump();
-            return 0;
-        case OF_MIXER_FID_VOICE_ACTIVE:
-            return of_mixer_voice_active((int)a0);
-        case OF_MIXER_FID_SET_PAN:
-            of_mixer_set_pan((int)a0, (int)a1);
-            return 0;
-        case OF_MIXER_FID_SET_LOOP:
-            of_mixer_set_loop((int)a0, (int)a1, (int)a2);
-            return 0;
-        case OF_MIXER_FID_SET_RATE:
-            of_mixer_set_rate((int)a0, (int)a1);
-            return 0;
-        case OF_MIXER_FID_SET_VOL_LR:
-            of_mixer_set_vol_lr((int)a0, (int)a1, (int)a2);
-            return 0;
-        case OF_MIXER_FID_SET_BIDI:
-            of_mixer_set_bidi((int)a0, (int)a1);
-            return 0;
-        case OF_MIXER_FID_GET_POSITION:
-            return of_mixer_get_position((int)a0);
-        case OF_MIXER_FID_SET_POSITION:
-            of_mixer_set_position((int)a0, (int)a1);
-            return 0;
-        case OF_MIXER_FID_SET_VOICE:
-            of_mixer_set_voice((int)a0, (int)a1, (int)a2, (int)a3);
-            return 0;
-        case OF_MIXER_FID_ALLOC_SAMPLES:
-            return (long)of_mixer_alloc_samples((uint32_t)a0);
-        case OF_MIXER_FID_FREE_SAMPLES:
-            of_mixer_free_samples();
-            return 0;
-        case OF_MIXER_FID_SET_RATE_RAW:
-            of_mixer_set_rate_raw((int)a0, (uint32_t)a1);
-            return 0;
-        case OF_MIXER_FID_SET_VOICE_RAW:
-            of_mixer_set_voice_raw((int)a0, (uint32_t)a1, (int)a2, (int)a3);
-            return 0;
-        case OF_MIXER_FID_SET_VOLUME_RAMP:
-            of_mixer_set_volume_ramp((int)a0, (int)a1);
-            return 0;
-        case OF_MIXER_FID_POLL_ENDED:
-            return (long)of_mixer_poll_ended();
-        case OF_MIXER_FID_SET_END_CALLBACK:
-            of_irq_register_mixer_end((void (*)(uint32_t))a0);
-            return 0;
-        case OF_MIXER_FID_RETRIGGER:
-            of_mixer_retrigger((int)a0, (const uint8_t *)a1,
-                               (uint32_t)a2, (uint32_t)a3, (int)a4);
-            return 0;
-        }
-        break;
+        return of_mixer_dispatch(fid, a0, a1, a2, a3, a4);
 
     case OF_EID_CODEC:
         switch (fid) {

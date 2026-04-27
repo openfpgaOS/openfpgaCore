@@ -367,20 +367,30 @@ always @(posedge clk) begin
             //     (p1) than the cmap reads that will eventually hit
             //     port B (p2/p2b).  Servicing A first keeps pipeline
             //     forward progress — B's miss waits at most one fill
-            //     duration (~5 cycles) before its turn.
-            //   * Starvation analysis: both ports stream from
-            //     monotonically-increasing addresses within a span,
-            //     so back-to-back A-miss / B-miss alternation requires
-            //     simultaneous cold-line entries on both axes — rare
-            //     enough that strict priority is observably as fair
-            //     as round-robin in the cmap-cache sim.  If a future
-            //     trace shows starvation, swap to alternating
-            //     (lat_port_round_robin) — same M10K, ~10 ALMs.
+            //     duration before its turn.
             //
-            // Same flush priority story as the SDP version: an
-            // in-flight miss must run to completion before flush
-            // walk-clears valid_mem; otherwise the consumer waits
-            // forever on a tex_resp_valid that gets dropped mid-fill.
+            // Critical: the new-request accept blocks below MUST be
+            // outside the miss-priority chain.  The earlier shape — a
+            // chained if/elseif with the accepts in the trailing else
+            // — silently broke port B on real hardware: A misses
+            // dominate (fresh tex line per pixel under sparse access
+            // patterns + ~50-100 cycle SDRAM fills), so the FSM
+            // bounces between S_PIPE-for-1-cycle → S_FILL_AR → … →
+            // S_PIPE-for-1-cycle and the else branch never executes.
+            // Result: pipe_addr_b stuck at the very first accepted
+            // value, every cmap fragment reads the same byte, screen
+            // is uniform colour.  In Verilator the 2-cycle SDRAM stub
+            // is fast enough that S_PIPE windows are wide and B
+            // updates fine — the bug only manifests in synthesis
+            // against real DRAM latency.
+            //
+            // Splitting accepts out is safe: req_ready_x already
+            // gates on (state==S_PIPE && !pipe_miss_x && !flush), so
+            // the accepts fire only when this port is genuinely
+            // hitting and the FSM isn't transitioning to S_INIT for
+            // flush.  The miss branch's pipe_valid_x<=0 cannot race
+            // with an accept on the same port because req_ready_x is
+            // 0 whenever pipe_miss_x is 1.
             if (pipe_miss_a) begin
                 axi_arvalid <= 1;
                 axi_araddr  <= {6'b0, pipe_addr_a[25:4], 4'b0};
@@ -412,23 +422,23 @@ always @(posedge clk) begin
                 init_counter <= 0;
                 pipe_valid_a <= 0;
                 pipe_valid_b <= 0;
-            end else begin
-                // Both ports independently accept new requests on hit
-                // cycles.  A and B are unrelated for accept purposes —
-                // both gates check their own req_valid_x && req_ready_x.
-                if (req_valid && req_ready) begin
-                    pipe_valid_a <= 1;
-                    pipe_addr_a  <= req_addr;
-                    pipe_wide_a  <= req_wide;
-                end
-                if (req_valid_b && req_ready_b) begin
-                    pipe_valid_b <= 1;
-                    pipe_addr_b  <= req_addr_b;
-                    pipe_wide_b  <= req_wide_b;
-                end
             end
-            // else: hold pipe_valid_x (and pipe_addr_x) so resp_valid_x
-            // stays high for any consumer that hasn't yet captured it.
+
+            // Per-port new-request accepts — independent of the
+            // miss/flush priority block above.  req_ready_x already
+            // self-gates on the right combination of state /
+            // pipe_miss_x / flush, so this cannot accept while the
+            // FSM is mid-fill or about to flush.
+            if (req_valid && req_ready) begin
+                pipe_valid_a <= 1;
+                pipe_addr_a  <= req_addr;
+                pipe_wide_a  <= req_wide;
+            end
+            if (req_valid_b && req_ready_b) begin
+                pipe_valid_b <= 1;
+                pipe_addr_b  <= req_addr_b;
+                pipe_wide_b  <= req_wide_b;
+            end
         end
 
         S_FILL_AR: begin

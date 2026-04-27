@@ -27,6 +27,7 @@ module tb_gpu (
     output wire [5:0]  dbg_state,
     output wire [5:0]  dbg_setup_step,
     output wire [31:0] dbg_tri_det,
+    output wire [31:0] dbg_frag,
 
     // SDRAM backdoor write (preload textures, ring buffer, etc.)
     input  wire        bd_we,
@@ -99,7 +100,8 @@ gpu_core gpu (
     .fence_reached(fence_reached),
     .dbg_state(dbg_state),
     .dbg_setup_step(dbg_setup_step),
-    .dbg_tri_det(dbg_tri_det)
+    .dbg_tri_det(dbg_tri_det),
+    .dbg_frag(dbg_frag)
 );
 
 // ============================================================

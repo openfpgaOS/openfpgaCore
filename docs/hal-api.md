@@ -179,29 +179,29 @@ Query button state for a player.
 
 ## Save (`hal/save.h`)
 
-Nonvolatile CRAM1 PSRAM-backed save system. The APF bridge persists the save region to SD card. The Chip32 loader creates seed save files and configures the datatable at boot.
+Nonvolatile save system staged in the CRAM0 save window. APF auto-loads save slots into CRAM0 before OS boot, and the OS commits dirty save files through the bridge on `fclose()`.
 
-Apps should prefer standard C `fopen("save_N")`/`fwrite`/`fclose` — the OS maps these to save slots automatically and flushes with the actual written size on close.
+Apps should prefer standard C `fopen()`/`fwrite`/`fclose` using the save filename from the instance JSON. The OS maps save filenames to writable CRAM0 slots, keeps the APF datatable size current, and commits dirty saves through the bridge on `fclose()`.
 
 ```c
 int save_read(int slot, void *buf, uint32_t offset, uint32_t len);
 ```
-Read from save slot (0-9). Uses uncached CRAM1 alias for bridge coherency. Returns bytes read.
+Read from save slot (0-9). Uses the CRAM0 save window with explicit CPU/bridge ownership changes. Returns bytes read.
 
 ```c
 int save_write(int slot, const void *buf, uint32_t offset, uint32_t len);
 ```
-Write to save slot. Uses uncached CRAM1 alias. Returns bytes written.
+Write to save slot. Uses the CRAM0 save window with explicit CPU/bridge ownership changes. Returns bytes written.
 
 ```c
 void save_flush(int slot);
 ```
-Flush full slot (256 KB) to SD card via bridge.
+Force an immediate full-slot (256 KB) Data Slot Write via the bridge.
 
 ```c
 int save_flush_size(int slot, uint32_t size);
 ```
-Flush only `size` bytes of the slot. Used by `fclose()` to write the actual data size.
+Force an immediate Data Slot Write of only `size` bytes.
 
 ```c
 void save_erase(int slot);
@@ -219,7 +219,7 @@ Returns 0x40000 (256 KB per slot).
 |------|-------|
 | `SAVE_MAX_SLOTS` | 10 |
 | `SAVE_SLOT_SIZE` | 0x40000 (256 KB) |
-| `SAVE_REGION_ADDR` | 0x39000000 (CRAM1 uncached) |
+| `SAVE_REGION_ADDR` | 0x30100000 (CRAM0 CPU alias) |
 
 ---
 

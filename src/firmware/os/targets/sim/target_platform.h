@@ -65,17 +65,22 @@
 #define OF_TARGET_CRAM0_BRIDGE         0x20000000u
 #define OF_TARGET_CRAM0_OS_OFFSET      0x00000000u
 #define OF_TARGET_CRAM0_SAVE_OFFSET    0x00100000u
-#define OF_TARGET_CRAM0_SCRATCH_OFFSET 0x00200000u
+#define OF_TARGET_CRAM0_SCRATCH_OFFSET 0x00400000u
 
 #define OF_TARGET_RUNTIME_STACK_TOP    0x14000000u
 #define OF_TARGET_RUNTIME_STACK_SIZE   (512u * 1024u)
 
 #define OF_TARGET_SAMPLE_BASE          0x13700000u
+#define OF_TARGET_SAMPLE_BASE_UNCACHED 0x53700000u
 #define OF_TARGET_SAMPLE_SIZE          (8u * 1024u * 1024u)
 
 #define OF_TARGET_SAVE_REGION_ADDR     (OF_TARGET_CRAM0_BASE + OF_TARGET_CRAM0_SAVE_OFFSET)
 #define OF_TARGET_SAVE_SLOT_SIZE       0x00040000u
 #define OF_TARGET_SAVE_MAX_SLOTS       10u
+
+#if OF_TARGET_CRAM0_SCRATCH_OFFSET < (OF_TARGET_CRAM0_SAVE_OFFSET + OF_TARGET_SAVE_SLOT_SIZE * OF_TARGET_SAVE_MAX_SLOTS)
+#error "CRAM0 scratch overlaps the nonvolatile save-slot window"
+#endif
 
 /* Deliberate divergence from Pocket: GPU base shifted by 0x01000000
  * to validate that of_gpu.h reads it at runtime via of_get_caps()

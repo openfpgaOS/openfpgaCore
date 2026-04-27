@@ -100,6 +100,18 @@ AUDIO_DIR = obj_dir_audio_pipeline
 AUDIO_FLAGS = -Wno-WIDTHEXPAND -Wno-CASEINCOMPLETE -Wno-SYNCASYNCNET -Wno-UNOPTFLAT
 
 # ============================================================
+# Audio mixer (audio_mixer.v v3 — flat MMIO + HW group/master compose)
+# ============================================================
+MIXER_SRCS = \
+	tb_audio_mixer.v \
+	$(COMMON_DIR)/audio_mixer.v
+
+MIXER_CPP = tb_audio_mixer_main.cpp
+MIXER_TOP = tb_audio_mixer
+MIXER_DIR = obj_dir_audio_mixer
+MIXER_FLAGS = -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC -Wno-CASEINCOMPLETE -Wno-SYNCASYNCNET -Wno-UNOPTFLAT
+
+# ============================================================
 # Full system bring-up — CPU + SDRAM + CRAM0 CDC + BRAM
 # ============================================================
 # Boots the VexiiRiscv through the v2 fabric, loads os.bin into the
@@ -133,9 +145,9 @@ SYSTEM_FLAGS = -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC -Wno-CASEINCOMPLETE \
 # Targets
 # ============================================================
 .PHONY: all sdram sram gpu gpu-floor gpu-gpudemo axi-periph \
-        audio system run run-sram build clean
+        audio audio-mixer system run run-sram build clean
 
-all: sdram sram gpu axi-periph audio
+all: sdram sram gpu axi-periph audio audio-mixer
 
 # --- SDRAM ---
 sdram: $(SDRAM_DIR)/V$(SDRAM_TOP)
@@ -228,6 +240,17 @@ $(AUDIO_DIR)/V$(AUDIO_TOP): $(AUDIO_SRCS) $(AUDIO_CPP)
 		-I$(COMMON_DIR) \
 		$(AUDIO_SRCS) $(AUDIO_CPP)
 
+# --- Audio mixer (audio_mixer.v v3) ---
+audio-mixer: $(MIXER_DIR)/V$(MIXER_TOP)
+	@printf "\n=== Audio mixer (audio_mixer.v v3) ===\n"
+	./$(MIXER_DIR)/V$(MIXER_TOP)
+
+$(MIXER_DIR)/V$(MIXER_TOP): $(MIXER_SRCS) $(MIXER_CPP)
+	$(VERILATOR) $(VERILATOR_FLAGS) $(MIXER_FLAGS) \
+		--top-module $(MIXER_TOP) --Mdir $(MIXER_DIR) \
+		-I$(COMMON_DIR) \
+		$(MIXER_SRCS) $(MIXER_CPP)
+
 # --- System bring-up ---
 system: $(SYSTEM_DIR)/V$(SYSTEM_TOP)
 	@printf "\n=== system bring-up (tb_system) ===\n"
@@ -243,6 +266,6 @@ $(SYSTEM_DIR)/V$(SYSTEM_TOP): $(SYSTEM_SRCS) $(SYSTEM_CPP)
 clean:
 	rm -rf $(SDRAM_DIR) $(SRAM_DIR) $(GPU_DIR) $(GPU_FLOOR_DIR) \
 	       $(GPU_GPUDEMO_DIR) \
-	       $(AXI_PERIPH_DIR) $(AUDIO_DIR) $(SYSTEM_DIR) \
+	       $(AXI_PERIPH_DIR) $(AUDIO_DIR) $(MIXER_DIR) $(SYSTEM_DIR) \
 	       obj_dir_gpu obj_dir_gpu_floor obj_dir_gpu_gpudemo \
 	       obj_dir_cdc io_sdram_test.v

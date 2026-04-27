@@ -78,10 +78,16 @@
 #define RUNTIME_STACK_SIZE  OF_TARGET_RUNTIME_STACK_SIZE
 #define APP_STACK_TOP       (RUNTIME_STACK_TOP - RUNTIME_STACK_SIZE)  /* 0x13F80000 */
 
-/* Sample memory pool for the shared mixer allocator. */
-#define SAMPLE_POOL_BASE    OF_TARGET_SAMPLE_BASE
-#define SAMPLE_POOL_SIZE    OF_TARGET_SAMPLE_SIZE
-#define SAMPLE_POOL_END     (SAMPLE_POOL_BASE + SAMPLE_POOL_SIZE)
+/* Sample memory pool for the shared mixer allocator.  SAMPLE_POOL_BASE
+ * is the cached alias used by SFX uploads (paired with cbo.flush).
+ * SAMPLE_POOL_UNCACHED_BASE is the same physical region via the
+ * uncached SDRAM alias — used by the audio streaming ring (voice 31)
+ * to bypass the L1 D$ entirely so each store stalls on its AXI
+ * B-response and the HW mixer's sub-ms reads always see fresh data. */
+#define SAMPLE_POOL_BASE             OF_TARGET_SAMPLE_BASE
+#define SAMPLE_POOL_UNCACHED_BASE    OF_TARGET_SAMPLE_BASE_UNCACHED
+#define SAMPLE_POOL_SIZE             OF_TARGET_SAMPLE_SIZE
+#define SAMPLE_POOL_END              (SAMPLE_POOL_BASE + SAMPLE_POOL_SIZE)
 
 
 /* ======================================================================
@@ -221,29 +227,56 @@
 #define   TIMER_CTRL_ENABLE   (1 << 0)
 #define   TIMER_CTRL_W1C_IRQ  (1 << 1)
 
-/* Hardware PCM mixer (0x80, 0xC0-0xF8) — 32 voices, SDRAM sample pool,
- * linear interp, HW volume ramp, voice-end IRQ.  See audio_mixer.v v2.
- * Programming model: write MIX_VOICE_SEL with the voice index, then
- * write each field via its register (one bus cycle each). */
-#define MIX_CTRL             REG32(SYSREG_BASE + 0x80)  /* [0]=enable */
-#define MIX_LAST_SAMPLE      REG32(SYSREG_BASE + 0x84)  /* R: last pushed {L[15:0],R[15:0]} (debug) */
-#define MIX_SAMPLE_COUNT     REG32(SYSREG_BASE + 0x88)  /* R: monotonic sample-push counter (debug) */
-#define MIX_ACTIVE_MASK      REG32(SYSREG_BASE + 0x8C)  /* R: 32-bit active-voice bitmap (debug) */
-#define MIX_VOICE_SEL        REG32(SYSREG_BASE + 0xC0)  /* W: voice index 0-31 */
-#define MIX_VOICE_ADDR       REG32(SYSREG_BASE + 0xC4)  /* W: sample-pool byte offset */
-#define MIX_VOICE_LEN        REG32(SYSREG_BASE + 0xC8)  /* W: sample count */
-#define MIX_VOICE_RATE       REG32(SYSREG_BASE + 0xCC)  /* W: Q16.16 playback rate */
-#define MIX_VOICE_CTRL       REG32(SYSREG_BASE + 0xD0)  /* W: [0]=active [1]=stereo [2]=loop */
-#define MIX_VOICE_POS        REG32(SYSREG_BASE + 0xD4)  /* R: pos_int for selected voice */
-#define MIX_VOICE_VOL_LR     REG32(SYSREG_BASE + 0xD8)  /* W: {vol_r[15:8], vol_l[7:0]} */
-#define MIX_STATUS           REG32(SYSREG_BASE + 0xD8)  /* R: [5:0] active voice count */
-#define MIX_VOICE_LOOP_END   REG32(SYSREG_BASE + 0xE4)  /* W: loop_end (sample index) */
-#define MIX_VOICE_POS_WR     REG32(SYSREG_BASE + 0xE8)  /* W: set pos_int */
-#define MIX_VOICE_LOOP_START REG32(SYSREG_BASE + 0xEC)  /* W: loop_start (sample index) */
-#define MIX_VOICE_VOL_TARGET REG32(SYSREG_BASE + 0xF0)  /* W: {tgt_r[15:8], tgt_l[7:0]} */
-#define MIX_VOICE_VOL_RATE   REG32(SYSREG_BASE + 0xF4)  /* W: ramp step size (0=snap) */
-#define MIX_IRQ_PENDING      REG32(SYSREG_BASE + 0xF8)  /* R: voice-end bitmap */
-#define MIX_IRQ_CLEAR        REG32(SYSREG_BASE + 0xF8)  /* W: W1C bits */
+/* Hardware PCM mixer (0x48000000) — 32 voices, SDRAM sample pool,
+ * linear interp, HW volume ramp, voice-end IRQ, group/master volume
+ * composition.  See audio_mixer.v v3.
+ *
+ * Flat addressing — the address itself encodes voice + field, no SEL
+ * latch, no race window.  Each per-voice field gets a unique address
+ * so concurrent writes from main + ISR can't cross.
+ *
+ * Layout:
+ *   0x000–0x7FF  per-voice fields:  base + voice*64 + field*4
+ *   0x800–0x80F  group_vol[0..3]    (low byte used)
+ *   0x810        master_vol         (low byte used)
+ *   0x814–0x818  voice_group map    (32 voices × 2 bits packed in 2 words)
+ *   0x820        MIX_CTRL           [0]=enable
+ *   0x824        MIX_IRQ            R: pending bitmap   W: W1C bits
+ *   0x828        MIX_LAST_SAMPLE    R: last pushed {L,R}
+ *   0x82C        MIX_SAMPLE_COUNT   R: monotonic counter
+ *   0x830        MIX_ACTIVE_MASK    R: 32-bit voice bitmap
+ *   0x834        MIX_STATUS         R: [5:0] active count
+ *   0x880–0x8FF  per-voice POS_RD:  base + 0x880 + voice*4 (read-only)
+ *
+ * Address decode (axi_periph_slave):
+ *   addr[11]=0           per-voice field write (voice=addr[10:6], field=addr[5:2])
+ *   addr[11]=1, [7]=0    control regs            (addr[6:2] picks register)
+ *   addr[11]=1, [7]=1    per-voice POS read     (voice=addr[6:2])
+ */
+#define MIX_BASE             0x48000000u   /* 0x4A=GPU(pocket), 0x4B=GPU(sim) — mixer lives below */
+#define MIX_VOICE_FIELD(v, f)  REG32(MIX_BASE + ((v) << 6) + ((f) << 2))
+#define MIX_VOICE_ADDR(v)        MIX_VOICE_FIELD((v), 0)   /* W: sample-pool byte offset */
+#define MIX_VOICE_LEN(v)         MIX_VOICE_FIELD((v), 1)   /* W: sample count */
+#define MIX_VOICE_RATE(v)        MIX_VOICE_FIELD((v), 2)   /* W: Q16.16 playback rate */
+#define MIX_VOICE_CTRL(v)        MIX_VOICE_FIELD((v), 3)   /* W: [0]=active [1]=stereo [2]=loop */
+#define MIX_VOICE_POS_WR(v)      MIX_VOICE_FIELD((v), 4)   /* W: set pos_int (0 or jump) */
+#define MIX_VOICE_VOL_LR(v)      MIX_VOICE_FIELD((v), 6)   /* W: {vol_r[15:8], vol_l[7:0]} current */
+#define MIX_VOICE_LOOP_END(v)    MIX_VOICE_FIELD((v), 7)   /* W: loop_end sample index */
+#define MIX_VOICE_LOOP_START(v)  MIX_VOICE_FIELD((v), 8)   /* W: loop_start sample index */
+#define MIX_VOICE_VOL_TARGET(v)  MIX_VOICE_FIELD((v), 9)   /* W: {tgt_r[15:8], tgt_l[7:0]} */
+#define MIX_VOICE_VOL_RATE(v)    MIX_VOICE_FIELD((v), 10)  /* W: ramp step (0=snap) */
+#define MIX_GROUP_VOL(g)     REG32(MIX_BASE + 0x800 + ((g) << 2))
+#define MIX_MASTER_VOL       REG32(MIX_BASE + 0x810)
+#define MIX_VOICE_GROUP_LO   REG32(MIX_BASE + 0x814)  /* voices 0..15  packed 2 bits each */
+#define MIX_VOICE_GROUP_HI   REG32(MIX_BASE + 0x818)  /* voices 16..31 packed 2 bits each */
+#define MIX_CTRL             REG32(MIX_BASE + 0x820)  /* [0]=enable */
+#define MIX_IRQ_PENDING      REG32(MIX_BASE + 0x824)  /* R: voice-end bitmap */
+#define MIX_IRQ_CLEAR        REG32(MIX_BASE + 0x824)  /* W: W1C bits */
+#define MIX_LAST_SAMPLE      REG32(MIX_BASE + 0x828)  /* R: last pushed {L[15:0],R[15:0]} */
+#define MIX_SAMPLE_COUNT     REG32(MIX_BASE + 0x82C)  /* R: monotonic sample-push counter */
+#define MIX_ACTIVE_MASK      REG32(MIX_BASE + 0x830)  /* R: 32-bit active-voice bitmap */
+#define MIX_STATUS           REG32(MIX_BASE + 0x834)  /* R: [5:0] active voice count */
+#define MIX_VOICE_POS(v)     REG32(MIX_BASE + 0x880 + ((v) << 2))  /* R: pos_int per voice */
 #define   MIX_CTRL_ENABLE       (1 << 0)
 #define   MIX_CTRL_BIT_ACTIVE   (1 << 0)
 #define   MIX_CTRL_BIT_STEREO   (1 << 1)

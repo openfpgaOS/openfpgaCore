@@ -89,6 +89,19 @@ void of_mixer_set_group(int voice, int group);
 void of_mixer_set_group_volume(int group, int volume);
 void of_mixer_set_master_volume(int volume);
 
+/* Group-aware atomic alloc-and-tag.  Searches MUSIC slots ascending
+ * and every other group descending, so the two groups land at
+ * opposite ends of the slot range under low load.  Steal path
+ * prefers same-group victims before crossing groups.  Returns voice
+ * index or -1.  Voice 31 stays reserved for the of_audio stream. */
+int of_mixer_alloc_for_group(int group, const uint8_t *pcm_s16,
+                             uint32_t sample_count, uint32_t sample_rate,
+                             int priority, int volume);
+
+/* Read the group tag for a voice (-1 if voice index is out of range).
+ * Cheap shadow read; safe from ISR context. */
+int of_mixer_voice_group(int voice);
+
 /* Per-voice SVF low-pass filter.
  *   cutoff_q016 : Q0.16 SVF cutoff coefficient (raw register value).
  *                 65535 ≈ wide-open, lower values close it down.
@@ -100,22 +113,18 @@ void of_mixer_set_filter(int voice, int cutoff_q016, int q, int enable);
 void *of_mixer_alloc_samples(uint32_t size);
 void of_mixer_free_samples(void);
 
-/* Save/restore mstatus.MIE around MIX_VOICE_SEL + MIX_VOICE_<field>
- * sequences.  The 1 kHz timer ISR runs of_midi_pump which writes
- * MIX_VOICE_SEL; a preempted sequence lands later writes on the
- * wrong voice.  Any code writing SEL + another voice register must
- * wrap the pair with save/restore. */
-static inline uint32_t of_mixer_irq_save(void)
-{
-    uint32_t prev;
-    __asm__ volatile("csrrci %0, mstatus, 0x8" : "=r"(prev));
-    return prev;
-}
+/* SBI vendor dispatcher for OF_EID_MIXER.  Switches on FID; called
+ * from kernel/syscall.c.  Centralising here keeps every FID case next
+ * to its HAL function so a new mixer entry point can't be added to
+ * the enum without showing up in the dispatcher diff. */
+long of_mixer_dispatch(long fid, long a0, long a1,
+                       long a2, long a3, long a4);
 
-static inline void of_mixer_irq_restore(uint32_t prev)
-{
-    if (prev & 0x8u)
-        __asm__ volatile("csrrsi zero, mstatus, 0x8");
-}
+/* IRQ save/restore wrappers retired in v3 — flat MMIO writes are
+ * race-free on their own (each per-voice register has its own address
+ * so main thread + ISR never share a SEL latch).  Kept as no-ops so
+ * existing call sites compile unchanged. */
+static inline uint32_t of_mixer_irq_save(void)    { return 0; }
+static inline void     of_mixer_irq_restore(uint32_t prev) { (void)prev; }
 
 #endif /* OFOS_MIXER_H */

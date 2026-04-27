@@ -73,6 +73,25 @@ void of_cache_clean_range(void *addr, uint32_t size) {
     __asm__ volatile("fence" ::: "memory");
 }
 
+/* of_cache_flush_range issues cbo.flush per line.  The trailing fence
+ * orders subsequent CPU memory ops with respect to the flushed lines
+ * but does NOT wait for the AXI writeback to actually reach DRAM.
+ *
+ * On this 3-master CPU topology (i_axi + d_axi + p_axi), cached
+ * writes/writebacks ride d_axi while uncached accesses ride p_axi.
+ * The two masters synchronize only at the SDRAM arbiter, not inside
+ * the CPU — so a read on p_axi (uncached) cannot drain a write
+ * still buffered in d_axi's outgoing FIFO.  We tried that as an
+ * AXI-drain trailer; didn't work.
+ *
+ * For callers whose downstream HW (mixer, GPU, video controller)
+ * reads on the order of milliseconds after the flush, d_axi's
+ * write FIFO settles naturally before the read fires and cbo.flush
+ * is sufficient (this is the bank_preload, FB swap, palookup
+ * upload pattern).  For sub-millisecond gaps (audio stream voice
+ * 31 in audio.c), the only reliable path is to write through the
+ * uncached SDRAM alias from the start so each store stalls on its
+ * AXI B-response — see audio.c's audio_ring. */
 void of_cache_flush_range(void *addr, uint32_t size) {
     if (size == 0) return;
     __asm__ volatile("fence" ::: "memory");

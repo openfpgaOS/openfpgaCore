@@ -214,7 +214,8 @@ static void emit_triangle(int16_t x0, int16_t y0, uint16_t z0,
                           int32_t s2, int32_t t2,
                           uint8_t light)
 {
-    ring_cmd(0x41, 19);  // CMD_DRAW_TRIANGLES
+    ring_cmd(0x30, 19);  // CMD_DRAW_TRIANGLES (was 0x41 — now repurposed as
+                          // CMD_DRAW_SPANS_BATCH; triangle opcode moved to 0x30)
     ring_write(1);  // vertex count
     auto v = [light](int16_t x, int16_t y, uint16_t z, int32_t s, int32_t t) {
         ring_write(((uint32_t)(uint16_t)x << 16) | (uint16_t)y);  // word 0: x|y
@@ -319,15 +320,19 @@ static bool one_frame(int frame_no)
     bool ok = gpu_wait_fence(token, timeout);
     if (!ok) {
         uint32_t status = read_status();
-        printf("  FRAME %3d HANG: fence=%u not reached, status=0x%08x\n",
-               frame_no, token, status);
-        // Decode status for human consumption.
-        printf("    state=%u  ring_empty=%u  busy=%u\n",
-               (status >> 2) & 0x3F, (status >> 1) & 1, status & 1);
-        printf("    tex_state=%u  tex_pipe_valid=%u  fp_pipe_stall=%u\n",
-               (status >> 13) & 0x7, (status >> 16) & 1, (status >> 12) & 1);
-        printf("    fbss=%u  p1_valid=%u  p3_valid=%u\n",
-               (status >> 17) & 0xF, (status >> 21) & 1, (status >> 22) & 1);
+        uint32_t f      = tb->dbg_frag;
+        printf("  FRAME %3d HANG: fence=%u not reached, status=0x%08x dbg_frag=0x%08x\n",
+               frame_no, token, status, f);
+        // GPU_STATUS new layout: bit0=busy, 1=ring_empty, 2=dma_busy, [13:8]=state.
+        printf("    state=%u  ring_empty=%u  busy=%u  dma_busy=%u\n",
+               (status >> 8) & 0x3F, (status >> 1) & 1, status & 1, (status >> 2) & 1);
+        // dbg_frag layout — see gpu_core.v assign dbg_frag.
+        printf("    p0=%u p1=%u p2=%u p2b=%u p3=%u src_done=%u\n",
+               (f>>0)&1, (f>>1)&1, (f>>2)&1, (f>>3)&1, (f>>4)&1, (f>>5)&1);
+        printf("    tex_req_v=%u tex_req_r=%u fbss=%u dma_state=%u stall=%u\n",
+               (f>>6)&1, (f>>7)&1, (f>>8)&0xF, (f>>12)&3, (f>>15)&1);
+        printf("    tex_state=%u axi_ar=%u axi_r=%u cmap_resp=%u sp_count8=%u\n",
+               (f>>16)&7, (f>>19)&1, (f>>20)&1, (f>>21)&1, (f>>24)&0xFF);
     }
     return ok;
 }

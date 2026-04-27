@@ -278,44 +278,59 @@ void of_file_inval_cram(uint32_t bridge_addr, uint32_t length) {
     (void)length;
 }
 
-long of_file_size(uint32_t slot_id) {
-    /* Read file size from APF datatable via hardware query register.
-     *
-     * IMPORTANT: APF's datatable is indexed by ARRAY POSITION in
-     * data.json (DT_QUERY), while DS_CMD_READ and DS_CMD_GETFILE use
-     * the `id` field. To keep the kernel trivial and let fopen by
-     * filename work, data.json MUST be arranged so array[N].id == N
-     * for every data slot the core uses.
-     *
-     * When adding a new slot, insert it at position matching its id
-     * (don't just append) so callers can use one number throughout.
-     * Save slots (id >= 10) live past the data-slot range and are
-     * handled separately via of_save_*.
-     *
-     * Each datatable entry is 2 words (flags, size), so slot N's size
-     * lives at entry N*2+1. APF supports up to 32 data slots. */
-    if (slot_id >= 32)
-        return -1;
+static int datatable_entry_for_slot(uint32_t slot_id, uint32_t *entry_out) {
+    /* APF's datatable is indexed by array position in data.json, while
+     * DS_CMD_READ/GETFILE use the slot `id` field. openfpgaOS reserves
+     * ids 10-19 for the ten nonvolatile save slots, which are appended
+     * after entries 0-7 in data.json; ids 8 and 9 are intentionally
+     * unused in current templates. */
+    if (slot_id < 8) {
+        *entry_out = slot_id;
+        return 0;
+    }
 
+    if (slot_id >= 10 &&
+        slot_id < 10 + (uint32_t)OF_TARGET_SAVE_MAX_SLOTS) {
+        *entry_out = 8 + (slot_id - 10);
+        return 0;
+    }
+
+    return -1;
+}
+
+static long datatable_read_word(uint32_t word) {
     /* Toggle-based CDC: writing DT_QUERY flips a toggle bit. The
      * clk_74a domain detects the change, reads the datatable BRAM,
      * and tags the result with the captured toggle. The result
-     * register reads {toggle_match[31], size[30:0]} — bit 31 is
-     * high only when the result corresponds to THIS query. */
-    DT_QUERY = slot_id * 2 + 1;
+     * register reads {toggle_match[31], data[30:0]} — bit 31 is high
+     * only when the result corresponds to THIS query. */
+    DT_QUERY = word;
 
-    /* Poll until bit 31 (toggle match) indicates fresh result */
-    uint32_t val;
+    uint32_t val = 0;
     for (int i = 0; i < 1000; i++) {
         val = DT_QUERY;
         if (val & 0x80000000)
-            break;
+            return (long)(val & 0x7FFFFFFF);
     }
-    if (!(val & 0x80000000))
+
+    return -1;
+}
+
+long of_file_flags(uint32_t slot_id) {
+    uint32_t entry;
+    if (datatable_entry_for_slot(slot_id, &entry) < 0)
         return -1;
 
-    uint32_t size = val & 0x7FFFFFFF;
-    return (size > 0) ? (long)size : -1;
+    return datatable_read_word(entry * 2);
+}
+
+long of_file_size(uint32_t slot_id) {
+    uint32_t entry;
+    if (datatable_entry_for_slot(slot_id, &entry) < 0)
+        return -1;
+
+    long size = datatable_read_word(entry * 2 + 1);
+    return (size > 0) ? size : -1;
 }
 
 /*

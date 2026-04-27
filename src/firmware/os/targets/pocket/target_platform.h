@@ -60,7 +60,7 @@
  * offset so the two don't collide with an in-flight transfer. */
 #define OF_TARGET_CRAM0_OS_OFFSET      0x00000000u
 #define OF_TARGET_CRAM0_SAVE_OFFSET    0x00100000u   /* 1 MB in */
-#define OF_TARGET_CRAM0_SCRATCH_OFFSET 0x00200000u   /* 2 MB in — general-purpose bridge scratch */
+#define OF_TARGET_CRAM0_SCRATCH_OFFSET 0x00400000u   /* 4 MB in — above the 2.5 MB save window */
 
 /* SRAM is GPU-private in v2 — no AXI alias, not CPU-addressable. */
 /* (OF_TARGET_SRAM_BASE / OF_TARGET_SRAM_SIZE removed) */
@@ -81,8 +81,16 @@
  * heap/mmap window so app load base (0x10400000) stays unchanged —
  * existing app ELFs remain compatible.  The OS shifts mmap_bottom
  * down by 8 MB so mmap never allocates into the sample region.
- * Size is 2 MB of headroom over the SC-55 bank (~6 MB). */
+ * Size is 2 MB of headroom over the SC-55 bank (~6 MB).
+ *
+ * SAMPLE_BASE is the cached alias — used for SFX uploads that pair
+ * with cbo.flush.  SAMPLE_BASE_UNCACHED is the same physical region
+ * via the uncached SDRAM alias; required for the audio_ring (voice
+ * 31) where each store must stall on its AXI B-response so the HW
+ * mixer's sub-millisecond reads see the latest sample.  See
+ * hal/cache.c's flush-vs-uncached commentary. */
 #define OF_TARGET_SAMPLE_BASE          0x13700000u
+#define OF_TARGET_SAMPLE_BASE_UNCACHED 0x53700000u
 #define OF_TARGET_SAMPLE_SIZE          (8u * 1024u * 1024u)
 
 /* Save region is now the CRAM0 save slot window — the OS copies an
@@ -92,6 +100,10 @@
 #define OF_TARGET_SAVE_REGION_ADDR     (OF_TARGET_CRAM0_BASE + OF_TARGET_CRAM0_SAVE_OFFSET)
 #define OF_TARGET_SAVE_SLOT_SIZE       0x00040000u
 #define OF_TARGET_SAVE_MAX_SLOTS       10u
+
+#if OF_TARGET_CRAM0_SCRATCH_OFFSET < (OF_TARGET_CRAM0_SAVE_OFFSET + OF_TARGET_SAVE_SLOT_SIZE * OF_TARGET_SAVE_MAX_SLOTS)
+#error "CRAM0 scratch overlaps the nonvolatile save-slot window"
+#endif
 
 #define OF_TARGET_GPU_BASE             0x4A000000u
 

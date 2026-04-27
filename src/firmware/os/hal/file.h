@@ -66,6 +66,12 @@ void of_file_inval_cram(uint32_t bridge_addr, uint32_t length);
  * Returns 0 on success, <0 on error or empty slot. */
 int of_file_get_name(uint32_t slot_id, char *name_out, uint32_t name_max);
 
+/* Query APF datatable metadata for a data slot ID.
+ * APF exposes two words per datatable entry: flags, then current size.
+ * Returns the value on success, or <0 if the slot has no datatable entry. */
+long of_file_flags(uint32_t slot_id);
+long of_file_size(uint32_t slot_id);
+
 /* ======================================================================
  * Async file read — non-blocking DMA with callback on completion
  * ====================================================================== */

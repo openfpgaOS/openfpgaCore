@@ -94,18 +94,25 @@ module axi_periph_slave (
     // docs/memory-arch-v2.md §4 for the protocol.
     output reg         cram0_mode,
 
-    // Hardware audio mixer control (see audio_mixer.v).  Firmware
-    // writes voice state one field at a time:
-    //   1. MIX_VOICE_SEL (0xC0) → mix_voice_sel register
-    //   2. MIX_VOICE_{ADDR,LEN,RATE,CTRL,...} → pulse mix_voice_wr with
-    //      the matching field index and wdata
+    // Hardware audio mixer control (see audio_mixer.v v3, MMIO at 0x48000000).
+    // Flat addressing — MMIO address encodes voice and field directly:
+    //   addr[10:6] = voice index, addr[5:2] = vtbl field for per-voice writes
+    //   addr[11]=1, [7]=0      = control region (group/master/ctrl/irq/debug)
+    //   addr[11]=1, [7]=1      = per-voice POS_INT readback
     output reg         mix_enable,
     output reg         mix_voice_wr,
-    output reg  [4:0]  mix_voice_sel,
-    output reg  [3:0]  mix_voice_field,
+    output reg  [4:0]  mix_voice_sel,    // derived per-write from addr[10:6]
+    output reg  [3:0]  mix_voice_field,  // derived per-write from addr[5:2]
     output reg  [31:0] mix_voice_wdata,
     output reg         mix_irq_clear_wr,
     output reg  [31:0] mix_irq_clear,
+    output reg  [7:0]  mix_master_vol,
+    output reg  [7:0]  mix_group_vol_0,
+    output reg  [7:0]  mix_group_vol_1,
+    output reg  [7:0]  mix_group_vol_2,
+    output reg  [7:0]  mix_group_vol_3,
+    output reg [63:0]  mix_voice_group_packed,  // 32 voices × 2 bits LSB-first
+    output wire [4:0]  mix_voice_sel_rd,        // combinational from read addr (POS readback)
     input  wire [5:0]  mix_active_count,
     input  wire [31:0] mix_active_mask,     // 32-bit active voice bitmap (debug)
     input  wire [21:0] mix_pos_readback,
@@ -517,20 +524,15 @@ always @(posedge clk) begin
         snac_start_pulse <= 0;
         snac_bit_count_reg <= 0;
         snac_latch_en_reg <= 0;
-        mix_enable       <= 1'b0;
-        mix_voice_wr     <= 1'b0;
-        mix_voice_sel    <= 5'd0;
-        mix_voice_field  <= 4'd0;
-        mix_voice_wdata  <= 32'd0;
-        mix_irq_clear_wr <= 1'b0;
-        mix_irq_clear    <= 32'd0;
+        /* mix_*, reg_mixer reset live in the main FSM always block
+         * to avoid Quartus multi-driver errors (10028).  Verilator
+         * tolerates split drivers if the conflict is provably
+         * non-overlapping; Quartus does not. */
     end else begin
         cycle_counter <= cycle_counter + 1;
         pal_wr <= 0;
         save_dt_commit <= 0;
         snac_start_pulse <= 0;
-        mix_voice_wr     <= 1'b0;   // one-cycle pulse
-        mix_irq_clear_wr <= 1'b0;   // one-cycle pulse
 
         // Hardware timer countdown
         if (timer_enable && timer_period != 0) begin
@@ -678,69 +680,9 @@ always @(posedge clk) begin
                 end
 
 
-                // Hardware mixer voice table — 0xC0..0xF8.  The firmware
-                // selects a voice via MIX_VOICE_SEL then writes one
-                // field at a time via the remaining registers; each
-                // field write pulses mix_voice_wr for one cycle with
-                // the corresponding VTBL_* field index matching
-                // audio_mixer.v's voice table layout.
-                7'b0_100000: mix_enable       <= req_wdata[0];          // MIX_CTRL      (0x80) bit 0
-                7'b0_110000: mix_voice_sel    <= req_wdata[4:0];        // MIX_VOICE_SEL (0xC0)
-                7'b0_110001: begin                                       // MIX_VOICE_ADDR       (0xC4) → VTBL_ADDR=0
-                    mix_voice_field <= 4'd0;
-                    mix_voice_wdata <= req_wdata;
-                    mix_voice_wr    <= 1'b1;
-                end
-                7'b0_110010: begin                                       // MIX_VOICE_LEN        (0xC8) → VTBL_LEN=1
-                    mix_voice_field <= 4'd1;
-                    mix_voice_wdata <= req_wdata;
-                    mix_voice_wr    <= 1'b1;
-                end
-                7'b0_110011: begin                                       // MIX_VOICE_RATE       (0xCC) → VTBL_RATE=2
-                    mix_voice_field <= 4'd2;
-                    mix_voice_wdata <= req_wdata;
-                    mix_voice_wr    <= 1'b1;
-                end
-                7'b0_110100: begin                                       // MIX_VOICE_CTRL       (0xD0) → VTBL_CTRL=3
-                    mix_voice_field <= 4'd3;
-                    mix_voice_wdata <= req_wdata;
-                    mix_voice_wr    <= 1'b1;
-                end
-                7'b0_110110: begin                                       // MIX_VOICE_VOL_LR     (0xD8) → VTBL_VOL_LR=6
-                    mix_voice_field <= 4'd6;
-                    mix_voice_wdata <= req_wdata;
-                    mix_voice_wr    <= 1'b1;
-                end
-                7'b0_111001: begin                                       // MIX_VOICE_LOOP_END   (0xE4) → VTBL_LOOP_END=7
-                    mix_voice_field <= 4'd7;
-                    mix_voice_wdata <= req_wdata;
-                    mix_voice_wr    <= 1'b1;
-                end
-                7'b0_111010: begin                                       // MIX_VOICE_POS_WR     (0xE8) → VTBL_POS_INT=4
-                    mix_voice_field <= 4'd4;
-                    mix_voice_wdata <= req_wdata;
-                    mix_voice_wr    <= 1'b1;
-                end
-                7'b0_111011: begin                                       // MIX_VOICE_LOOP_START (0xEC) → VTBL_LOOP_START=8
-                    mix_voice_field <= 4'd8;
-                    mix_voice_wdata <= req_wdata;
-                    mix_voice_wr    <= 1'b1;
-                end
-                7'b0_111100: begin                                       // MIX_VOICE_VOL_TARGET (0xF0) → VTBL_VOL_TARGET=9
-                    mix_voice_field <= 4'd9;
-                    mix_voice_wdata <= req_wdata;
-                    mix_voice_wr    <= 1'b1;
-                end
-                7'b0_111101: begin                                       // MIX_VOICE_VOL_RATE   (0xF4) → VTBL_VOL_RATE=10
-                    mix_voice_field <= 4'd10;
-                    mix_voice_wdata <= req_wdata;
-                    mix_voice_wr    <= 1'b1;
-                end
-                7'b0_111110: begin                                       // MIX_IRQ_CLEAR        (0xF8) — W1C
-                    mix_irq_clear    <= req_wdata;
-                    mix_irq_clear_wr <= 1'b1;
-                end
-
+                // Hardware mixer moved to its own peripheral block at
+                // 0x48000000 (no back-compat for v3).  Old SYSREG slots
+                // 0x80, 0xC0–0xF8 are free for reuse.
                 7'b0_100111: vsync_irq_pending <= 0;                    // VSYNC_IRQ_CLEAR (0x9C) W1C
                 7'b0_111111: irq_mask <= req_wdata[3:0];             // IRQ_MASK (0xFC)
 
@@ -832,14 +774,7 @@ always @(*) begin
         };
         7'b0_100110: sysreg_rdata = HW_FEATURES;                    // HW_FEATURES (0x98)
         7'b0_100111: sysreg_rdata = {31'b0, vsync_irq_pending};   // VSYNC_IRQ_PENDING (0x9C)
-        // Hardware mixer readbacks
-        7'b0_100000: sysreg_rdata = {31'b0, mix_enable};              // MIX_CTRL (0x80)
-        7'b0_100001: sysreg_rdata = mix_last_sample;                 // MIX_LAST_SAMPLE (0x84) debug
-        7'b0_100010: sysreg_rdata = mix_sample_count;                // MIX_SAMPLE_COUNT (0x88) debug
-        7'b0_100011: sysreg_rdata = mix_active_mask;                 // MIX_ACTIVE_MASK (0x8C) debug
-        7'b0_110101: sysreg_rdata = {10'b0, mix_pos_readback};         // MIX_VOICE_POS (0xD4)
-        7'b0_110110: sysreg_rdata = {26'b0, mix_active_count};          // MIX_STATUS    (0xD8)
-        7'b0_111110: sysreg_rdata = mix_voice_end_pending;              // MIX_IRQ_PENDING (0xF8)
+        // Mixer readbacks moved to 0x48000000 (see mixer_rdata mux).
         default: sysreg_rdata = 32'h0;
     endcase
 end
@@ -936,12 +871,42 @@ wire [31:0] audio_rdata = (req_addr[4:2] == 3'd0) ? {21'b0, audio_fifo_full, aud
 wire [31:0] cram0_mode_rdata = (req_addr[3:2] == 2'd0) ? {31'b0, cram0_mode} :
                                32'h0;
 
+/* Mixer (0x4B) read decode.  The read mux fans in
+ *   - control regs (group/master/voice_group/ctrl/irq + read-only debug)
+ *   - per-voice POS readback
+ * The per-voice POS path needs voice_sel_rd driven combinationally to
+ * audio_mixer.v before this read mux fires, so the pos_latch[voice_sel_rd]
+ * mux there has settled.  audio_mixer's pos_latch is a plain reg array,
+ * so the indexed read is purely combinational — no extra cycle. */
+assign mix_voice_sel_rd = req_addr[6:2];
+
+wire mixer_per_voice_rd = (req_addr[11] == 1'b1) && (req_addr[7] == 1'b1);
+
+wire [31:0] mixer_rdata =
+    mixer_per_voice_rd ? {10'b0, mix_pos_readback} :
+    // Control region: addr[11]=1, [7]=0
+    (req_addr[6:2] == 5'h00) ? {24'b0, mix_master_vol}                       :  // 0x800
+    (req_addr[6:2] == 5'h01) ? {24'b0, mix_group_vol_0}                      :  // 0x804
+    (req_addr[6:2] == 5'h02) ? {24'b0, mix_group_vol_1}                      :  // 0x808
+    (req_addr[6:2] == 5'h03) ? {24'b0, mix_group_vol_2}                      :  // 0x80C
+    (req_addr[6:2] == 5'h04) ? {24'b0, mix_group_vol_3}                      :  // 0x810
+    (req_addr[6:2] == 5'h05) ? mix_voice_group_packed[31:0]                  :  // 0x814
+    (req_addr[6:2] == 5'h06) ? mix_voice_group_packed[63:32]                 :  // 0x818
+    (req_addr[6:2] == 5'h08) ? {31'b0, mix_enable}                            :  // 0x820
+    (req_addr[6:2] == 5'h09) ? mix_voice_end_pending                          :  // 0x824
+    (req_addr[6:2] == 5'h0A) ? mix_last_sample                                :  // 0x828
+    (req_addr[6:2] == 5'h0B) ? mix_sample_count                               :  // 0x82C
+    (req_addr[6:2] == 5'h0C) ? mix_active_mask                                :  // 0x830
+    (req_addr[6:2] == 5'h0D) ? {26'b0, mix_active_count}                      :  // 0x834
+    32'h0;
+
 wire [31:0] periph_rd_mux = reg_sysreg ? sysreg_rdata :
                              reg_audio  ? audio_rdata :
                              reg_cram0  ? cram0_mode_rdata :
                              reg_link   ? link_reg_rdata :
                              reg_uart   ? uart_rdata :
                              reg_gpu    ? gpu_reg_rdata :
+                             reg_mixer  ? mixer_rdata :
                              32'h0;
 
 // ============================================
@@ -974,6 +939,7 @@ reg reg_cram0;
 reg reg_link;
 reg reg_uart;
 reg reg_gpu;
+reg reg_mixer;
 
 wire beat_is_last = (burst_count == burst_len);
 
@@ -1031,6 +997,7 @@ wire ar_dec_audio  = (ar_addr[31:24] == 8'h4C);
 wire ar_dec_link   = (ar_addr[31:24] == 8'h4D);
 wire ar_dec_uart   = (ar_addr[31:24] == 8'h4F);
 wire ar_dec_gpu    = (ar_addr[31:24] == 8'h4A);
+wire ar_dec_mixer  = (ar_addr[31:24] == 8'h48);
 
 wire aw_dec_ram    = (aw_addr[31:15] == 17'b0); // 32KB: 0x00000-0x07FFF
 wire aw_dec_sysreg = (aw_addr[31:9]  == 23'h200000);
@@ -1038,6 +1005,7 @@ wire aw_dec_audio  = (aw_addr[31:24] == 8'h4C);
 wire aw_dec_link   = (aw_addr[31:24] == 8'h4D);
 wire aw_dec_uart   = (aw_addr[31:24] == 8'h4F);
 wire aw_dec_gpu    = (aw_addr[31:24] == 8'h4A);
+wire aw_dec_mixer  = (aw_addr[31:24] == 8'h48);
 
 // ============================================
 // R channel hold-until-rready (proper AXI)
@@ -1083,6 +1051,7 @@ always @(posedge clk or posedge reset) begin
         reg_gpu <= 0;
         gpu_reg_wr <= 0;
         reg_uart <= 0;
+        reg_mixer  <= 1'b0;
 
         sysreg_wr_fire <= 0;
         cram0_mode <= 1'b0;     // bridge owns CRAM0 at reset
@@ -1092,6 +1061,22 @@ always @(posedge clk or posedge reset) begin
         link_reg_rd <= 0;
         link_reg_addr <= 0;
         link_reg_wdata <= 0;
+
+        /* Mixer (0x48) state — kept in this always block so all the
+         * mix_* drivers live in one process (Quartus 10028). */
+        mix_enable             <= 1'b0;
+        mix_voice_wr           <= 1'b0;
+        mix_voice_sel          <= 5'd0;
+        mix_voice_field        <= 4'd0;
+        mix_voice_wdata        <= 32'd0;
+        mix_irq_clear_wr       <= 1'b0;
+        mix_irq_clear          <= 32'd0;
+        mix_master_vol         <= 8'hFF;
+        mix_group_vol_0        <= 8'hFF;
+        mix_group_vol_1        <= 8'hFF;
+        mix_group_vol_2        <= 8'hFF;
+        mix_group_vol_3        <= 8'hFF;
+        mix_voice_group_packed <= 64'd0;
 
     end else begin
         // Defaults: deassert single-cycle pulses.  rvalid and bvalid
@@ -1109,6 +1094,8 @@ always @(posedge clk or posedge reset) begin
         link_reg_wr <= 0;
         link_reg_rd <= 0;
         gpu_reg_wr <= 0;
+        mix_voice_wr     <= 1'b0;   // one-cycle pulse
+        mix_irq_clear_wr <= 1'b0;   // one-cycle pulse
 
         case (state)
 
@@ -1133,6 +1120,7 @@ always @(posedge clk or posedge reset) begin
 
                 reg_uart   <= ar_dec_uart;
                 reg_gpu    <= ar_dec_gpu;
+                reg_mixer  <= ar_dec_mixer;
 
                 if (ar_dec_ram)
                     state <= S_BRAM_RD;
@@ -1162,6 +1150,7 @@ always @(posedge clk or posedge reset) begin
 
                 reg_uart   <= aw_dec_uart;
                 reg_gpu    <= aw_dec_gpu;
+                reg_mixer  <= aw_dec_mixer;
 
                 if (s_axi_wvalid) begin
                     s_axi_wready <= 1;
@@ -1192,6 +1181,33 @@ always @(posedge clk or posedge reset) begin
                             gpu_reg_wr <= 1;
                             gpu_reg_addr <= aw_addr[5:2];
                             gpu_reg_wdata <= s_axi_wdata;
+                        end
+                        if (aw_dec_mixer && |s_axi_wstrb) begin
+                            if (aw_addr[11] == 1'b0) begin
+                                /* Per-voice field write: addr[10:6]=voice, addr[5:2]=field */
+                                mix_voice_wr    <= 1'b1;
+                                mix_voice_sel   <= aw_addr[10:6];
+                                mix_voice_field <= aw_addr[5:2];
+                                mix_voice_wdata <= s_axi_wdata;
+                            end else begin
+                                /* Control region (addr[11]=1, [7]=0).  POS read region
+                                 * (addr[11]=1, [7]=1) is read-only — writes drop. */
+                                if (aw_addr[7] == 1'b0) case (aw_addr[6:2])
+                                    5'h00: mix_master_vol         <= s_axi_wdata[7:0];          // 0x800
+                                    5'h01: mix_group_vol_0        <= s_axi_wdata[7:0];          // 0x804
+                                    5'h02: mix_group_vol_1        <= s_axi_wdata[7:0];          // 0x808
+                                    5'h03: mix_group_vol_2        <= s_axi_wdata[7:0];          // 0x80C
+                                    5'h04: mix_group_vol_3        <= s_axi_wdata[7:0];          // 0x810
+                                    5'h05: mix_voice_group_packed[31:0]  <= s_axi_wdata;        // 0x814
+                                    5'h06: mix_voice_group_packed[63:32] <= s_axi_wdata;        // 0x818
+                                    5'h08: mix_enable             <= s_axi_wdata[0];            // 0x820
+                                    5'h09: begin                                                  // 0x824 W1C
+                                        mix_irq_clear    <= s_axi_wdata;
+                                        mix_irq_clear_wr <= 1'b1;
+                                    end
+                                    default: ;
+                                endcase
+                            end
                         end
                         if (aw_dec_uart && |s_axi_wstrb && aw_addr[3:2] == 2'b01) begin
                             // UART_TX_DATA (offset 0x04): push into TX FIFO.
@@ -1312,6 +1328,30 @@ always @(posedge clk or posedge reset) begin
                         gpu_reg_wr <= 1;
                         gpu_reg_addr <= req_addr[5:2];
                         gpu_reg_wdata <= s_axi_wdata;
+                    end
+                    if (reg_mixer && |s_axi_wstrb) begin
+                        if (req_addr[11] == 1'b0) begin
+                            mix_voice_wr    <= 1'b1;
+                            mix_voice_sel   <= req_addr[10:6];
+                            mix_voice_field <= req_addr[5:2];
+                            mix_voice_wdata <= s_axi_wdata;
+                        end else if (req_addr[7] == 1'b0) begin
+                            case (req_addr[6:2])
+                                5'h00: mix_master_vol         <= s_axi_wdata[7:0];
+                                5'h01: mix_group_vol_0        <= s_axi_wdata[7:0];
+                                5'h02: mix_group_vol_1        <= s_axi_wdata[7:0];
+                                5'h03: mix_group_vol_2        <= s_axi_wdata[7:0];
+                                5'h04: mix_group_vol_3        <= s_axi_wdata[7:0];
+                                5'h05: mix_voice_group_packed[31:0]  <= s_axi_wdata;
+                                5'h06: mix_voice_group_packed[63:32] <= s_axi_wdata;
+                                5'h08: mix_enable             <= s_axi_wdata[0];
+                                5'h09: begin
+                                    mix_irq_clear    <= s_axi_wdata;
+                                    mix_irq_clear_wr <= 1'b1;
+                                end
+                                default: ;
+                            endcase
+                        end
                     end
                 end
             end

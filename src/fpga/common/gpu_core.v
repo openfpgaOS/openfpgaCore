@@ -69,7 +69,8 @@ module gpu_core (
     // tb_gpu can print state during trace.
     output wire [5:0]  dbg_state,
     output wire [5:0]  dbg_setup_step,
-    output wire [31:0] dbg_tri_det
+    output wire [31:0] dbg_tri_det,
+    output wire [31:0] dbg_frag
 );
 
 wire active = reset_n & gpu_enable;
@@ -77,20 +78,50 @@ wire active = reset_n & gpu_enable;
 assign dbg_state = state;
 assign dbg_setup_step = setup_step;
 assign dbg_tri_det = tri_det;
+// Packed fragment-pipe diagnostic.  bit0=p0_v, 1=p1_v, 2=p2_v, 3=p2b_v,
+// 4=p3_v, 5=src_done, 6=tex_req_valid, 7=tex_req_ready,
+// [11:8]=fbss[3:0], [13:12]=dma_state, [14]=cmd_is_draw_spans_batch,
+// [15]=fp_pipe_stall, [18:16]=tex_dbg_state, [19]=tex_axi_arvalid,
+// [20]=tex_axi_rvalid, [21]=cmap_resp_valid_b, [22]=persp_active,
+// [23]=tri_active, [31:24]=sp_count[7:0].
+assign dbg_frag = {sp_count[7:0],
+                   tri_active,
+                   persp_active,
+                   cmap_resp_valid_b,
+                   m_rd_rvalid,
+                   m_rd_arvalid,
+                   tex_dbg_state,
+                   fp_pipe_stall,
+                   cmd_is_draw_spans_batch,
+                   dma_state,
+                   fbss[3:0],
+                   tex_req_ready,
+                   tex_req_valid,
+                   src_done,
+                   p3_valid, p2b_valid, p2_valid, p1_valid, p0_valid};
 
 // ================================================================
 // MMIO Register Map
 // ================================================================
-// 0x00  GPU_CTRL        W   bit0=enable, bit1=soft_reset
-// 0x04  GPU_RING_WRPTR  W   CPU write pointer (byte offset into ring BRAM)
-// 0x08  GPU_RING_DATA   W   Write next word to ring BRAM (auto-increment)
-// 0x0C  (reserved)
-// 0x10  GPU_RING_RDPTR  R   GPU read pointer
-// 0x14  GPU_STATUS      R   {30'b0, ring_empty, busy}
-// 0x18  GPU_FENCE       R   Last completed fence token
+// 0x00  GPU_CTRL          W   bit0=enable, bit1=soft_reset, bit2=ring_reset
+// 0x04  GPU_RING_WRPTR    W   CPU write pointer (byte offset into ring BRAM)
+// 0x08  GPU_RING_DATA     W   Write next word to ring BRAM (auto-increment)
+// 0x0C  GPU_DMA_SRC       W   SDRAM byte address of command buffer to pull
+// 0x10  GPU_RING_RDPTR    R   GPU read pointer
+// 0x14  GPU_STATUS        R   {29'b0, dma_busy, ring_empty, busy}
+// 0x18  GPU_FENCE         R   Last completed fence token
+// 0x1C  GPU_DMA_LEN       W   Word count to pull (max 4096)
 // 0x20  GPU_TRANSLUC_ADDR W   transluc[] write address (15-bit, auto-inc by 4)
 // 0x24  GPU_TRANSLUC_DATA W   transluc[] write data (32-bit word)
-// 0x28  GPU_TEX_FLUSH   W   Flush texture cache (write any value)
+// 0x28  GPU_TEX_FLUSH     W   Flush texture cache (write any value)
+// 0x2C  GPU_DMA_KICK      W   Write 1 to fire DMA pull from (SRC, LEN)
+//
+// DMA pull semantics: fabric-side AXI INCR-burst read of LEN words from
+// SRC, streamed into the ring BRAM at the auto-incrementing wr_addr,
+// with ring_wrptr auto-advanced per word so the decoder picks them up
+// in parallel.  CPU is free as soon as KICK is written.  Bursts split
+// at the 256-beat AXI4 boundary internally.  Polls GPU_STATUS:dma_busy
+// to know when the SDRAM source buffer is safe to overwrite.
 
 // Ring BRAM: 16 KB = 4096 words, dual-port M10K
 // Port A: CPU writes via MMIO (GPU_RING_DATA)
@@ -114,6 +145,24 @@ reg        tex_flush_req;      // Pulse to flush texture cache
 reg        soft_reset;         // Pulse: resets FSM state + ring pointers
 reg        ring_reset;         // Pulse: reset ring_rdptr (from MMIO, consumed by FSM)
 
+// ---- Doorbell-DMA pull from SDRAM into ring BRAM ----
+// Latched on MMIO writes; consumed by the dedicated DMA FSM below.
+// dma_words_left counts words remaining in the entire kick; the FSM
+// re-issues an AR for each 256-beat sub-burst until the count drains.
+reg [31:0] dma_src_latched;       // SDRAM byte addr (from GPU_DMA_SRC)
+reg [12:0] dma_len_latched;       // Total words to pull (max 4096; 13-bit fits)
+reg        dma_kick;              // Pulse: latch SRC/LEN snapshot into burst regs
+localparam DMA_S_IDLE    = 2'd0;
+localparam DMA_S_AR      = 2'd1;
+localparam DMA_S_R       = 2'd2;
+localparam DMA_S_PUBLISH = 2'd3;  // 1-cycle pulse to publish ring_wrptr
+reg [1:0]  dma_state;
+reg        dma_publish_wrptr;     // 1-cycle pulse, latched by ring_wrptr
+reg [31:0] dma_burst_addr;        // SDRAM byte addr of next sub-burst
+reg [12:0] dma_words_left;        // Words remaining in the kick (across sub-bursts)
+reg [8:0]  dma_burst_words;       // Words remaining in current sub-burst (1..256)
+wire       dma_busy = (dma_state != DMA_S_IDLE) || dma_kick;
+
 wire ring_empty = (ring_rdptr == ring_wrptr);
 wire [15:0] ring_mask = (RING_WORDS * 4) - 1;  // 0x3FFF for 16 KB
 
@@ -123,44 +172,94 @@ assign busy = !ring_empty || (state != S_IDLE);
 always @(posedge clk)
     ring_rd_data <= ring_bram[ring_rdptr[RING_ADDR_BITS+1:2]];
 
-// MMIO write handling + ring BRAM port A (CPU write)
+// DMA word-write into ring BRAM port A: asserted by the DMA FSM
+// when an R-beat lands (dma_state==DMA_S_R && m_rd_rvalid).  The wires
+// are driven below where the DMA FSM lives.
+wire        dma_ring_wr;
+wire [31:0] dma_ring_wdata;
+
+// Canonical altsyncram-inferable single-port write to ring_bram.  The
+// always block has EXACTLY ONE `ring_bram[X] <= D` statement under a
+// single conditional — Quartus's M10K pattern matcher requires this
+// shape, otherwise the 4096×32 array gets thrown into LUT-based
+// registers and synthesis blows up by ~128 K FFs.  Data + enable are
+// muxed combinationally so DMA wins over a same-cycle MMIO ring write.
+wire        ring_a_we    = dma_ring_wr || (reg_wr && reg_addr == 4'd2);
+wire [31:0] ring_a_wdata = dma_ring_wr ? dma_ring_wdata : reg_wdata;
+always @(posedge clk) begin
+    if (ring_a_we)
+        ring_bram[ring_wr_addr] <= ring_a_wdata;
+end
+
+// MMIO write handling + ring_wr_addr management (BRAM index pointer).
+// The actual ring_bram write lives in the dedicated always block above
+// to keep its inference shape clean.
 always @(posedge clk) begin
     if (!reset_n) begin
-        ring_wrptr   <= 0;
-        ring_wr_addr <= 0;
+        ring_wrptr      <= 0;
+        ring_wr_addr    <= 0;
         transluc_wr_addr <= 0;
-        tex_flush_req <= 0;
-        soft_reset <= 0;
-        ring_reset <= 0;
+        tex_flush_req   <= 0;
+        soft_reset      <= 0;
+        ring_reset      <= 0;
+        dma_src_latched <= 32'd0;
+        dma_len_latched <= 13'd0;
+        dma_kick        <= 1'b0;
     end else begin
         tex_flush_req <= 0;
-        soft_reset <= 0;
-        ring_reset <= 0;
+        soft_reset    <= 0;
+        ring_reset    <= 0;
+        dma_kick      <= 1'b0;
+
+        // ring_wr_addr advances once per port-A write (CPU MMIO or DMA
+        // beat).  Keeping it here (not in the BRAM-write block) means
+        // the BRAM block stays canonical.
+        if (ring_a_we)
+            ring_wr_addr <= ring_wr_addr + 1'b1;
+
+        // DMA end-of-kick publishes ring_wrptr atomically (covering
+        // header + every payload word).  Otherwise the decoder doesn't
+        // see in-flight DMA words (it gates only S_IDLE on ring_empty).
+        if (dma_publish_wrptr)
+            ring_wrptr <= {2'b0, ring_wr_addr, 2'b0};
+            // ring_wr_addr (12 bits) << 2 → byte offset (14 bits),
+            // zero-extended to 16-bit ring_wrptr.  Always ≤ ring_mask
+            // (0x3FFF) since ring_wr_addr ≤ 0xFFF.
+
         if (reg_wr) begin
             case (reg_addr)
                 4'd0: begin  // GPU_CTRL: bit1=soft_reset, bit2=ring_reset
                     if (reg_wdata[1]) soft_reset <= 1;
                     if (reg_wdata[2]) begin
-                        ring_reset <= 1;
+                        ring_reset   <= 1;
                         ring_wr_addr <= 0;
-                        ring_wrptr <= 0;
+                        ring_wrptr   <= 0;
                     end
                 end
-                4'd1: begin  // GPU_RING_WRPTR — kick GPU
-                    ring_wrptr <= reg_wdata[15:0];
+                4'd1: begin  // GPU_RING_WRPTR — explicit kick
+                    if (!dma_ring_wr) ring_wrptr <= reg_wdata[15:0];
                 end
-                4'd2: begin  // GPU_RING_DATA — write word, auto-increment
-                    ring_bram[ring_wr_addr] <= reg_wdata;
-                    ring_wr_addr <= ring_wr_addr + 1;
+                // 4'd2 GPU_RING_DATA: ring_bram write happens in the
+                // dedicated BRAM-write always block above; ring_wr_addr
+                // increment is handled by the `ring_a_we` branch above.
+                4'd3: begin  // GPU_DMA_SRC
+                    dma_src_latched <= reg_wdata;
                 end
-                4'd8: begin  // GPU_TRANSLUC_ADDR — byte offset into transluc[]
+                4'd7: begin  // GPU_DMA_LEN — clamp to ring depth
+                    dma_len_latched <= reg_wdata[12:0];
+                end
+                4'd8: begin  // GPU_TRANSLUC_ADDR
                     transluc_wr_addr <= reg_wdata[14:0];
                 end
-                4'd9: begin  // GPU_TRANSLUC_DATA — 32-bit write, addr += 4
+                4'd9: begin  // GPU_TRANSLUC_DATA
                     transluc_wr_addr <= transluc_wr_addr + 15'd4;
                 end
                 4'd10: begin // GPU_TEX_FLUSH
                     tex_flush_req <= 1;
+                end
+                4'd11: begin // GPU_DMA_KICK — fire pull
+                    if (reg_wdata[0] && dma_state == DMA_S_IDLE)
+                        dma_kick <= 1'b1;
                 end
                 default: ;
             endcase
@@ -173,7 +272,13 @@ always @(*) begin
     case (reg_addr)
         4'd1:    reg_rdata = {16'b0, ring_wrptr};
         4'd4:    reg_rdata = {16'b0, ring_rdptr};
-        4'd5:    reg_rdata = {30'b0, ring_empty, busy};
+        // GPU_STATUS now exposes the FSM state in bits[15:8] so a CPU
+        // trap handler can dump where the decoder is stuck without
+        // having to instrument the trap path with a dedicated MMIO
+        // probe.  Bits [7:3] reserved.  Bit 2 = dma_busy.  Bit 1 =
+        // ring_empty.  Bit 0 = busy.
+        4'd5:    reg_rdata = {16'b0, 2'b0, state, 5'b0,
+                              dma_busy, ring_empty, busy};
         4'd6:    reg_rdata = fence_reached;
         default: reg_rdata = 32'b0;
     endcase
@@ -451,29 +556,155 @@ gpu_tex_cache tex_cache (
 
 // ================================================================
 // AXI4 Read Master — texture cache + translucent-blend FB readback
+//                    + doorbell-DMA command pull
 // ================================================================
-// Two consumers share M0: the texture cache (multi-beat line fills)
-// and the translucent-blend FB readback (single-beat, only fires when
-// SPAN_TRANSLUC is set on a fragment).  Arbitration is by FBSS state:
-// when fbss is in BLEND_AR_WAIT or BLEND_R_WAIT, BLEND owns the bus;
-// otherwise the texture cache does.  BLEND only enters its own AR_WAIT
-// state via FBSS_BLEND_REQ, which waits for the texture cache to be
-// fully idle (no AR pending, no R pending) — so the two never race for
-// the AR phase.
-wire blend_owns_m0 = (fbss == FBSS_BLEND_AR_WAIT)
-                  || (fbss == FBSS_BLEND_R_WAIT);
+// Three consumers share M0: the texture cache (multi-beat line fills),
+// the translucent-blend FB readback (single-beat, only fires when
+// SPAN_TRANSLUC is set on a fragment), and the doorbell-DMA puller
+// that streams a CPU-prepared command buffer from SDRAM into the ring
+// BRAM.  Arbitration is split between AR and R channels:
+//   * AR channel: DMA reserves as soon as it's in S_AR/S_R, so no
+//     new tex/blend AR is accepted while a DMA burst is being set up.
+//   * R channel: DMA only masks tex/blend R-beats while it's actually
+//     in S_R (the data phase).  While DMA waits in S_AR for
+//     `dma_bus_idle`, an in-flight tex burst MUST keep receiving its
+//     R-beats — masking them would leave the cache deadlocked in
+//     S_FILL_DATA after DMA's burst eventually starts.
+wire blend_owns_m0  = (fbss == FBSS_BLEND_AR_WAIT)
+                   || (fbss == FBSS_BLEND_R_WAIT);
+wire dma_owns_ar    = (dma_state == DMA_S_AR)
+                   || (dma_state == DMA_S_R);
+wire dma_owns_r     = (dma_state == DMA_S_R);
+// Legacy alias retained for places that conservatively want "DMA is
+// somehow active" (e.g. dma_busy in MMIO status).  Same coverage as
+// the old `dma_owns_m0`.
+wire dma_owns_m0    = (dma_state != DMA_S_IDLE);
 
-assign m_rd_arvalid    = blend_owns_m0 ? blend_arvalid : tex_axi_arvalid;
-assign m_rd_araddr     = blend_owns_m0 ? blend_araddr  : tex_axi_araddr;
-assign m_rd_arlen      = blend_owns_m0 ? 8'd0          : tex_axi_arlen;
-assign tex_axi_arready = blend_owns_m0 ? 1'b0          : m_rd_arready;
-assign tex_axi_rvalid  = blend_owns_m0 ? 1'b0          : m_rd_rvalid;
+reg         dma_arvalid;
+reg  [31:0] dma_araddr;
+reg  [7:0]  dma_arlen;
+
+// AR channel: dma_owns_ar wins (DMA reserves AR from the moment it
+// enters S_AR; new tex/blend ARs are rejected until DMA's burst has
+// fully drained back to S_IDLE).  R channel: dma_owns_r wins only
+// while DMA is actively in S_R — see comment block above for why.
+assign m_rd_arvalid    = dma_owns_ar   ? dma_arvalid
+                       : blend_owns_m0 ? blend_arvalid
+                       :                 tex_axi_arvalid;
+assign m_rd_araddr     = dma_owns_ar   ? dma_araddr
+                       : blend_owns_m0 ? blend_araddr
+                       :                 tex_axi_araddr;
+assign m_rd_arlen      = dma_owns_ar   ? dma_arlen
+                       : blend_owns_m0 ? 8'd0
+                       :                 tex_axi_arlen;
+assign tex_axi_arready = (dma_owns_ar || blend_owns_m0) ? 1'b0 : m_rd_arready;
+assign tex_axi_rvalid  = (dma_owns_r  || blend_owns_m0) ? 1'b0 : m_rd_rvalid;
 assign tex_axi_rdata   = m_rd_rdata;
-assign tex_axi_rlast   = blend_owns_m0 ? 1'b0          : m_rd_rlast;
+assign tex_axi_rlast   = (dma_owns_r  || blend_owns_m0) ? 1'b0 : m_rd_rlast;
 
-wire blend_arready = blend_owns_m0 ? m_rd_arready : 1'b0;
-wire blend_rvalid  = blend_owns_m0 ? m_rd_rvalid  : 1'b0;
+wire blend_arready = (blend_owns_m0 && !dma_owns_ar) ? m_rd_arready : 1'b0;
+wire blend_rvalid  = (blend_owns_m0 && !dma_owns_r ) ? m_rd_rvalid  : 1'b0;
 wire [31:0] blend_rdata = m_rd_rdata;
+
+// ---- Doorbell-DMA FSM ----
+// Streams dma_len_latched words from dma_src_latched into ring BRAM
+// port A, splitting at 256-beat AXI4 burst boundaries.  Enters DMA_S_AR
+// only when the M0 bus is idle (no blend in flight, no texture-cache
+// AR/R outstanding) so no fight for the bus mid-burst.  Per accepted
+// R-beat, drives dma_ring_wr/dma_ring_wdata which the always-block
+// above splices into ring BRAM port A and auto-advances ring_wrptr.
+wire dma_bus_idle = !blend_owns_m0 && !tex_m0_in_flight;
+assign dma_ring_wr    = (dma_state == DMA_S_R) && m_rd_rvalid;
+assign dma_ring_wdata = m_rd_rdata;
+
+always @(posedge clk) begin
+    if (!reset_n) begin
+        dma_state         <= DMA_S_IDLE;
+        dma_burst_addr    <= 32'd0;
+        dma_words_left    <= 13'd0;
+        dma_burst_words   <= 9'd0;
+        dma_arvalid       <= 1'b0;
+        dma_araddr        <= 32'd0;
+        dma_arlen         <= 8'd0;
+        dma_publish_wrptr <= 1'b0;
+    end else begin
+        dma_publish_wrptr <= 1'b0;     // one-cycle pulse default
+        case (dma_state)
+        DMA_S_IDLE: begin
+            dma_arvalid <= 1'b0;
+            if (dma_kick && dma_len_latched != 13'd0) begin
+                dma_burst_addr <= dma_src_latched;
+                dma_words_left <= dma_len_latched;
+                dma_state      <= DMA_S_AR;
+            end
+        end
+
+        DMA_S_AR: begin
+            if (dma_arvalid) begin
+                // AR asserted; wait for arready.  When the master accepts,
+                // drop arvalid and advance to the R phase.
+                if (m_rd_arready) begin
+                    dma_arvalid <= 1'b0;
+                    dma_state   <= DMA_S_R;
+                end
+            end else if (dma_bus_idle) begin
+                // Bus is idle and we haven't asserted yet: latch the burst
+                // size and assert AR next cycle.  Capped at 16 beats per
+                // sub-burst because axi_sdram_slave truncates arlen to 4
+                // bits (sdram_burst_len <= s_axi_arlen[3:0]).  Anything
+                // larger gets silently chopped → master sees rlast on
+                // beat 16 while expecting 256, AXI protocol violation
+                // and the FSM wedges.  16 beats × ~10 cycles each is
+                // fine throughput-wise: 1920 / 16 = 120 sub-bursts ×
+                // ~30 cycles AR-overhead = ~36 µs, still tiny vs
+                // per-MMIO span dispatch.
+                if (dma_words_left >= 13'd16) begin
+                    dma_arlen       <= 8'd15;
+                    dma_burst_words <= 9'd16;
+                end else begin
+                    dma_arlen       <= dma_words_left[7:0] - 8'd1;
+                    dma_burst_words <= {1'b0, dma_words_left[7:0]};
+                end
+                dma_araddr  <= dma_burst_addr;
+                dma_arvalid <= 1'b1;
+            end
+            // else: bus is busy (blend or tex active) — wait without
+            // asserting AR.  No state change.
+        end
+
+        DMA_S_R: begin
+            dma_arvalid <= 1'b0;
+            if (m_rd_rvalid) begin
+                dma_burst_words <= dma_burst_words - 9'd1;
+                dma_words_left  <= dma_words_left  - 13'd1;
+                dma_burst_addr  <= dma_burst_addr  + 32'd4;
+                if (m_rd_rlast) begin
+                    // Sub-burst complete.  Either we're done with the
+                    // whole kick (all words landed → publish ring_wrptr
+                    // so the decoder finally sees them), or there's
+                    // another sub-burst to issue without publishing yet.
+                    if (dma_words_left == 13'd1)
+                        dma_state <= DMA_S_PUBLISH;
+                    else
+                        dma_state <= DMA_S_AR;
+                end
+            end
+        end
+
+        DMA_S_PUBLISH: begin
+            // 1-cycle pulse to atomically lift ring_wrptr from its old
+            // value (header position) to the post-DMA ring_wr_addr*4
+            // (covering header + every payload word in this kick).  The
+            // last DMA write completed on the previous edge, so
+            // ring_wr_addr has its final settled value here.
+            dma_publish_wrptr <= 1'b1;
+            dma_state         <= DMA_S_IDLE;
+        end
+
+        default: dma_state <= DMA_S_IDLE;
+        endcase
+    end
+end
 
 // Track texture-cache read-in-flight from gpu_core's vantage so
 // FBSS_BLEND_REQ knows when M0 is fully drained.  Set on the cycle
@@ -508,16 +739,22 @@ localparam CMD_SET_TEXTURE    = 8'h20;
 // 0x21 CMD_SET_DEPTH_FUNC retired with the Z-buffer in lean Phase 2.
 localparam CMD_SET_FB         = 8'h23;
 // 0x24 CMD_SET_ZB           retired with the Z-buffer in lean Phase 2.
-localparam CMD_DRAW_TRIANGLES = 8'h30;
-localparam CMD_DRAW_SPAN      = 8'h40;
+localparam CMD_DRAW_TRIANGLES    = 8'h30;
+localparam CMD_DRAW_SPAN         = 8'h40;
+// Batched span dispatch: header payload_words = 15 * N (no count word —
+// N derives from header).  Decoder loops the existing CMD_DRAW_SPAN
+// fragment-pipe path once per 15-word span, returning to S_PAY_DATA
+// instead of S_IDLE between spans.  Saves both the per-span MMIO header
+// (one word out of 16) and — when paired with the doorbell-DMA path —
+// lets the CPU stream commands at cached-store speed instead of one
+// blocking AXI write per word.
+localparam CMD_DRAW_SPANS_BATCH  = 8'h41;
 // Removed commands (reserved opcodes, do not reuse):
 //   0x22 CMD_SET_BLEND      — no combine path in the datapath
 //   0x25 CMD_SET_SHADE      — Gouraud gradient dropped in the FMax push
 //   0x26 CMD_SET_ALPHA_REF  — no alpha test in the datapath
 //   0x31 CMD_DRAW_INDEXED   — ~400 ALMs of dynamic pay_buf mux fabric;
 //                             expand indices CPU-side and emit per-tri
-//   0x41 CMD_DRAW_SPANS     — batch machinery was half-implemented;
-//                             emit N separate CMD_DRAW_SPAN commands
 //   0x42 CMD_DRAW_SPRITE    — 2-triangle sprite is cheaper and rotates
 localparam CMD_SET_SKIP_ZERO  = 8'h27;  // 1-word payload: global SKIP_ZERO enable
 localparam CMD_SET_COLORMAP_ID = 8'h28; // 1-word payload: [3:0] = palookup slot
@@ -647,8 +884,12 @@ reg cmd_is_clear_rect;
 reg cmd_is_set_texture;
 reg cmd_is_set_fb;
 reg cmd_is_draw_span;
-// cmd_is_draw_spans removed with CMD_DRAW_SPANS — firmware emits N separate
-// CMD_DRAW_SPAN commands for batch draws now.
+// cmd_is_draw_spans_batch: 1 while processing a CMD_DRAW_SPANS_BATCH —
+// drives the per-span re-entry to S_PAY_DATA after each span renders.
+// span_field_idx counts 0..14 inside the current span's 15-word payload
+// (resets each span's start); used as the case index instead of pay_idx.
+reg cmd_is_draw_spans_batch;
+reg [4:0] span_field_idx;
 reg cmd_is_set_skip_zero;
 reg cmd_is_set_colormap_id;
 reg cmd_is_draw_triangles;
@@ -1150,6 +1391,13 @@ reg signed [15:0] tri_xmin_raw, tri_xmax_raw, tri_ymin_raw, tri_ymax_raw;
 
 // Rasteriser current state
 reg signed [15:0] tri_cur_x, tri_cur_y;
+// Pre-registered "tri_cur_x > tri_xmax" so S_TRI_PIX's branch reads a
+// single FF bit instead of a wide combinational cone (was mp_ram crit
+// path -1.27 ns: tri_xmax → 16-bit compare → branch enable selectors
+// → sp_tex_width mux → register, ~11 ns combinational).  Updated in
+// the same cycle tri_cur_x advances; row_done_r reflects the *next*
+// cycle's tri_cur_x value.
+reg               row_done_r;
 reg signed [31:0] tri_e [0:2];                  // edge function at current pixel
 reg signed [31:0] tri_row_e [0:2];              // edge function at row start
 reg signed [31:0] tri_z, tri_s, tri_t;          // interpolated attribs
@@ -1341,6 +1589,8 @@ always @(posedge clk) begin
         cmd_is_set_texture <= 0;
         cmd_is_set_fb <= 0;
         cmd_is_draw_span <= 0;
+        cmd_is_draw_spans_batch <= 0;
+        span_field_idx <= 0;
         cmd_is_set_skip_zero <= 0;
         cmd_is_set_colormap_id <= 0;
         st_colormap_id <= 4'b0;
@@ -1479,8 +1729,9 @@ always @(posedge clk) begin
             cmd_is_clear_rect     <= (cmd_type == CMD_CLEAR_RECT);
             cmd_is_set_texture    <= (cmd_type == CMD_SET_TEXTURE);
             cmd_is_set_fb         <= (cmd_type == CMD_SET_FB);
-            cmd_is_draw_span      <= (cmd_type == CMD_DRAW_SPAN);
-            // CMD_DRAW_SPANS removed (was half-implemented dead code)
+            cmd_is_draw_span        <= (cmd_type == CMD_DRAW_SPAN);
+            cmd_is_draw_spans_batch <= (cmd_type == CMD_DRAW_SPANS_BATCH);
+            span_field_idx          <= 5'd0;
             cmd_is_set_skip_zero  <= (cmd_type == CMD_SET_SKIP_ZERO);
             cmd_is_set_colormap_id <= (cmd_type == CMD_SET_COLORMAP_ID);
             cmd_is_draw_triangles <= (cmd_type == CMD_DRAW_TRIANGLES);
@@ -1575,8 +1826,6 @@ always @(posedge clk) begin
                     5'd5: sp_tstep     <= ring_rd_data;
                     5'd6: begin
                         sp_count <= ring_rd_data[31:16];
-                        // 8-bit flat light → Q16.16 (high byte clear,
-                        // low 16 bits zero; per-pixel step = 0).
                         sp_light_q    <= {8'b0, ring_rd_data[15:8], 16'b0};
                         sp_light_step <= 32'b0;
                         sp_flags <= ring_rd_data[7:0];
@@ -1586,12 +1835,6 @@ always @(posedge clk) begin
                         sp_tex_width <= ring_rd_data[15:0];
                     end
                     5'd8: begin
-                        // POT wrap masks: low 16 = tex_w_mask (S),
-                        // high 16 = tex_h_mask (T).  Set to tex_w-1
-                        // / tex_h-1 to enable wrap; mask=0 means "no
-                        // wrap" (decoded to 0xFFFF — keeps backward
-                        // compat with legacy callers that wrote 0 to
-                        // the formerly-reserved word 8).
                         sp_tex_w_mask <= (ring_rd_data[15:0]  == 16'd0)
                                          ? 16'hFFFF : ring_rd_data[15:0];
                         sp_tex_h_mask <= (ring_rd_data[31:16] == 16'd0)
@@ -1605,6 +1848,49 @@ always @(posedge clk) begin
                     5'd14: sp_zinv_step  <= ring_rd_data;
                     default: ;
                 endcase
+            end
+            else if (cmd_is_draw_spans_batch) begin
+                // Separate routing block keyed on span_field_idx (0..14
+                // wrapping per-span) so back-to-back spans inside a
+                // batch payload land their words in the correct sp_* slots.
+                case (span_field_idx)
+                    5'd0: sp_fb_addr   <= ring_rd_data;
+                    5'd1: sp_tex_addr  <= ring_rd_data;
+                    5'd2: sp_s         <= ring_rd_data;
+                    5'd3: sp_t         <= ring_rd_data;
+                    5'd4: sp_sstep     <= ring_rd_data;
+                    5'd5: sp_tstep     <= ring_rd_data;
+                    5'd6: begin
+                        sp_count <= ring_rd_data[31:16];
+                        sp_light_q    <= {8'b0, ring_rd_data[15:8], 16'b0};
+                        sp_light_step <= 32'b0;
+                        sp_flags <= ring_rd_data[7:0];
+                    end
+                    5'd7: begin
+                        sp_fb_stride <= ring_rd_data[31:16];
+                        sp_tex_width <= ring_rd_data[15:0];
+                    end
+                    5'd8: begin
+                        sp_tex_w_mask <= (ring_rd_data[15:0]  == 16'd0)
+                                         ? 16'hFFFF : ring_rd_data[15:0];
+                        sp_tex_h_mask <= (ring_rd_data[31:16] == 16'd0)
+                                         ? 16'hFFFF : ring_rd_data[31:16];
+                    end
+                    5'd9:  sp_sZ         <= ring_rd_data;
+                    5'd10: sp_tZ         <= ring_rd_data;
+                    5'd11: sp_zinv       <= ring_rd_data;
+                    5'd12: sp_sZstep     <= ring_rd_data;
+                    5'd13: sp_tZstep     <= ring_rd_data;
+                    5'd14: sp_zinv_step  <= ring_rd_data;
+                    default: ;
+                endcase
+
+                // Advance the per-span sub-counter, wrapping at 14 → 0
+                // so the next span's words land in the right slots.
+                if (span_field_idx == 5'd14)
+                    span_field_idx <= 5'd0;
+                else
+                    span_field_idx <= span_field_idx + 5'd1;
             end
             else if (cmd_is_draw_triangles) begin
                 // pay_idx 0 = vertex count (ignored; must be 3).
@@ -1654,6 +1940,19 @@ always @(posedge clk) begin
             else if (cmd_is_draw_triangles && pay_idx == 5'd18) begin
                 state <= S_EXECUTE;
             end
+            // Multi-span batch: each span is 15 words (span_field_idx
+            // 0..14).  When span_field_idx hits 14 mid-batch, the
+            // current span's sp_* regs are fully loaded; kick it
+            // through S_EXECUTE → S_FRAG_PIPE.  The post-flush exit
+            // routes back to S_PAY_DATA (see S_FB_FLUSH below) and
+            // advances ring_rdptr there — NOT here.  Mirrors the
+            // triangle batch: advancing rdptr at this dispatch exit
+            // would cause the always-block to settle ring_rd_data at
+            // the next-next word during the long S_FRAG_PIPE window,
+            // skewing the re-entry by one slot.
+            else if (cmd_is_draw_spans_batch && span_field_idx == 5'd14) begin
+                state      <= S_EXECUTE;
+            end
             else begin
                 // Advance rdptr for next word (BRAM read, 1-cycle latency)
                 ring_rdptr <= (ring_rdptr + 16'd4) & ring_mask;
@@ -1683,9 +1982,11 @@ always @(posedge clk) begin
             else if (cmd_is_clear_rect) begin
                 state <= S_CLEAR_RECT;
             end
-            else if (cmd_is_draw_span) begin
-                // sp_flags holds the flag byte written at pay_idx=6; its
-                // SPAN_PERSP bit arms the perspective sub-FSM.
+            else if (cmd_is_draw_span || cmd_is_draw_spans_batch) begin
+                // Either standalone span or one span inside a batch:
+                // the sp_* regs are fully loaded for the current span.
+                // sp_flags holds the flag byte written at field idx 6;
+                // its SPAN_PERSP bit arms the perspective sub-FSM.
                 persp_active      <= sp_flags[SPAN_PERSP];
                 persp_first_done  <= 0;
                 persp_seg_a_ready <= 0;
@@ -2302,7 +2603,21 @@ always @(posedge clk) begin
                 // End-of-primitive flush: return to idle. In FULL, also clear
                 // tri_active so we don't re-enter the triangle path.
                 if (tri_active) tri_active <= 0;
-                state <= S_IDLE;
+                // Mid-batch span dispatch: more spans remain in the
+                // payload, so re-enter S_PAY_DATA to read the next
+                // span's 15 words.  Advance ring_rdptr by 4 here so
+                // that on re-entry's first cycle, the always-block
+                // delivers the next span's word 0 in ring_rd_data
+                // (with the standard 1-cycle lag).  Matches the
+                // triangle re-entry pattern exactly.
+                // span_field_idx already wrapped to 0 in the previous
+                // S_PAY_DATA cycle; cmd_is_draw_spans_batch / sp_*
+                // regs persist across this transition.
+                if (cmd_is_draw_spans_batch && pay_remaining > 24'd0) begin
+                    ring_rdptr <= (ring_rdptr + 16'd4) & ring_mask;
+                    state      <= S_PAY_DATA;
+                end else
+                    state <= S_IDLE;
             end
         end
 
@@ -2354,7 +2669,19 @@ always @(posedge clk) begin
                 end else begin
                     fb_acc_valid <= 0;
                     fb_acc_mask  <= 0;
-                    state <= S_IDLE;
+                    // Mid-batch span dispatch: re-enter S_PAY_DATA
+                    // for the next span (and advance ring_rdptr by 4
+                    // to prime ring_rd_data for the next span's word
+                    // 0 — same trick as the post-S_DECODE prime, so
+                    // re-entry cycle 1 reads the right word).  For
+                    // standalone CMD_DRAW_SPAN we go straight to
+                    // S_IDLE — bit-identical to the pre-batch flow,
+                    // which is what BUILD's per-column path needs.
+                    if (cmd_is_draw_spans_batch && pay_remaining > 24'd0) begin
+                        ring_rdptr <= (ring_rdptr + 16'd4) & ring_mask;
+                        state      <= S_PAY_DATA;
+                    end else
+                        state <= S_IDLE;
                 end
             end
         end
@@ -2597,11 +2924,18 @@ always @(posedge clk) begin
         //   Step 0: edges/diffs + launch C0/C1/C2 first-multiply in parallel
         //   Step 2: capture partials; launch C0/C1/C2 second-multiply in parallel
         //   Step 4: subtract → final C0/C1/C2; launch det parts (dsp + dsp2)
-        //   Step 6: det = dsp_p + dsp2_p
-        //   Step 7: degenerate check + CLZ of |det|
-        //   Step 8: write recip_rd_addr
-        //   Step 9: capture recip → transition to S_TRI_GRAD
-        // 10 cycles end-to-end vs 20 before (2× setup speedup).
+        //   Step 6: det = dsp_p + dsp2_p (just register the sum)
+        //   Step 7: tri_det_is_small_r = small_test(tri_det) (compare on registered sum)
+        //   Step 8: degenerate check + CLZ of |det|
+        //   Step 9: write recip_rd_addr
+        //   Step 10: BRAM read latency wait
+        //   Step 11: capture recip → transition to S_TRI_GRAD
+        // 12 cycles end-to-end (was 11; +1 for the registered small-det
+        // compare).  Previous mp_ram critical path on this design was
+        // step 6's combined "register sum + 3-comparator small-test" =
+        // DSP→ADD→3 compares→FF in one cycle, ~10.5 ns combinational,
+        // -1.21 ns slack at 100 MHz.  Splitting the compare into its
+        // own cycle puts each chunk on its own ≤4 ns path.
         S_TRI_SETUP: begin
             setup_step <= setup_step + 7'd1;
             case (setup_step)
@@ -2638,16 +2972,19 @@ always @(posedge clk) begin
             end
             5: begin end
             6: begin
-                // det = A0*dX20 + B0*dY20  (both multiplies done in parallel)
+                // det = A0*dX20 + B0*dY20  (both multiplies done in parallel).
+                // Register the sum only — the small-det test moves to
+                // step 7 to keep the DSP→ADD→FF path under 5 ns.
                 tri_det <= dsp_p[31:0] + dsp2_p[31:0];
-                // Capture the small-det test on the same combinational
-                // value tri_det is latching, so step 7 sees a single
-                // registered bit instead of a 28-bit compare cone.
-                tri_det_is_small_r <= ($signed(dsp_p[31:0] + dsp2_p[31:0]) == 32'sd0)
-                                       || ($signed(dsp_p[31:0] + dsp2_p[31:0]) > -32'sd16
-                                           && $signed(dsp_p[31:0] + dsp2_p[31:0]) < 32'sd16);
             end
             7: begin
+                // Pure compare-only stage on the registered tri_det:
+                //   FF→3 compares→FF, ~3 ns combinational.  The result
+                //   feeds step 8's branch as a single registered bit.
+                tri_det_is_small_r <= (tri_det == 32'sd0)
+                                       || (tri_det > -32'sd16 && tri_det < 32'sd16);
+            end
+            8: begin
                 // Check determinant: skip degenerate (uses registered compare)
                 if (tri_det_is_small_r) begin
                     setup_step <= 0;
@@ -2716,7 +3053,7 @@ always @(posedge clk) begin
                     end
                 end
             end
-            8: begin
+            9: begin
                 // Set M10K LUT read address (registered, 1-cycle latency).
                 // Phase 4b widened the LUT from 256 → 1024 entries (10-bit
                 // input); index slice grew from [30:23] to [30:21].  This
@@ -2732,9 +3069,9 @@ always @(posedge clk) begin
                     recip_rd_addr <= norm[30:21];
                 end
             end
-            9: begin
+            10: begin
                 // BRAM read latency wait — recip_rd_addr was set at end
-                // of step 8.  recip_rd_data is registered, so the
+                // of step 9.  recip_rd_data is registered, so the
                 // updated lookup result lands at end of this cycle.
                 // Without this wait, tri_recip captured stale data
                 // (always LUT[0] = 0x4000 on the first triangle, since
@@ -2743,7 +3080,7 @@ always @(posedge clk) begin
                 // checked the span's start pixel, where gradients are
                 // multiplied by zero.
             end
-            10: begin
+            11: begin
                 // Capture M10K read result, then enter rolled gradient loop.
                 tri_recip <= recip_rd_data;
                 state <= S_TRI_GRAD;
@@ -3062,6 +3399,11 @@ always @(posedge clk) begin
             tri_active <= 1;
             tri_cur_x <= tri_xmin;
             tri_cur_y <= tri_ymin;
+            // Pre-arm row_done_r for the first S_TRI_PIX cycle.  bbox
+            // check above guarantees tri_xmin <= tri_xmax, so this is
+            // always 0 on entry — set explicitly anyway to be robust
+            // against any future bbox-allows-equal change.
+            row_done_r <= (tri_xmin > tri_xmax);
             // Evaluate edge functions at (xmin*16, ymin*16) in 12.4 space.
             // tri_e_init_Apx/Bpy hold the A*px and B*py products registered
             // during S_TRI_MUL_WAIT, so this is a pure 3-way add — one carry
@@ -3097,7 +3439,7 @@ always @(posedge clk) begin
         // emit a single span into S_FRAG_PIPE via the SRC_SPAN path.
         // ============================================================
         S_TRI_PIX: begin
-            if (tri_cur_x > tri_xmax) begin
+            if (row_done_r) begin
                 // Row scan complete.
                 if (tri_span_count != 16'd0) begin
                     // Emit one span for the inside extent of this row.
@@ -3199,6 +3541,9 @@ always @(posedge clk) begin
                 end
                 tri_span_count <= tri_span_count + 16'd1;
                 tri_cur_x <= tri_cur_x + 16'd1;
+                // Pre-compare with tri_xmax so the next S_TRI_PIX cycle's
+                // branch reads a registered bit, not a 16-bit compare cone.
+                row_done_r <= ((tri_cur_x + 16'd1) > tri_xmax);
                 tri_e[0] <= tri_e[0] + (tri_A[0] <<< 4);
                 tri_e[1] <= tri_e[1] + (tri_A[1] <<< 4);
                 tri_e[2] <= tri_e[2] + (tri_A[2] <<< 4);
@@ -3209,6 +3554,7 @@ always @(posedge clk) begin
             end else begin
                 // Outside — step without recording.
                 tri_cur_x <= tri_cur_x + 16'd1;
+                row_done_r <= ((tri_cur_x + 16'd1) > tri_xmax);
                 tri_e[0] <= tri_e[0] + (tri_A[0] <<< 4);
                 tri_e[1] <= tri_e[1] + (tri_A[1] <<< 4);
                 tri_e[2] <= tri_e[2] + (tri_A[2] <<< 4);
@@ -3245,6 +3591,8 @@ always @(posedge clk) begin
             end else begin
                 tri_cur_y <= tri_cur_y + 16'd1;
                 tri_cur_x <= tri_xmin;
+                // Re-arm row_done_r for the new row's first S_TRI_PIX cycle.
+                row_done_r <= (tri_xmin > tri_xmax);
                 tri_row_e[0] <= tri_row_e[0] + (tri_B[0] <<< 4);
                 tri_row_e[1] <= tri_row_e[1] + (tri_B[1] <<< 4);
                 tri_row_e[2] <= tri_row_e[2] + (tri_B[2] <<< 4);

@@ -191,36 +191,7 @@ void of_video_flush_cache(void) {
     of_cache_clean_range((void *)fb_addr[buf_draw], FB_SIZE);
 }
 
-/* FPS probe: count flips per second and print one UART line per sec.
- * Writes to the raw UART register so it is safe from any context. */
-static uint32_t fps_count;
-static uint64_t fps_last_print;
-
-static void fps_emit(uint32_t fps)
-{
-    const char *hex = "0123456789abcdef";
-    char buf[16];
-    int i = 0;
-    buf[i++] = 'f'; buf[i++] = 'p'; buf[i++] = 's'; buf[i++] = '=';
-    for (int k = 3; k >= 0; k--) buf[i++] = hex[(fps >> (k*4)) & 0xf];
-    buf[i++] = '\n';
-    for (int j = 0; j < i; j++) {
-        for (int w = 0; w < 5000; w++) {
-            if (UART_STATUS & UART_TX_RDY) { UART_TX_DATA = (uint8_t)buf[j]; break; }
-        }
-    }
-}
-
 uint8_t *of_video_flip(void) {
-    /* Count flips; emit fps= over UART every ~1 s (100 M cycles @ 100 MHz). */
-    fps_count++;
-    uint64_t now = read_cycles();
-    if ((uint32_t)(now - fps_last_print) >= 100000000u) {
-        fps_emit(fps_count);
-        fps_count = 0;
-        fps_last_print = now;
-    }
-
     vrr_update();
 
     /* Refresh our view of hardware state */

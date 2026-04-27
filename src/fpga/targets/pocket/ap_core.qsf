@@ -712,6 +712,7 @@ set_global_assignment -name VERILOG_FILE ../../common/jtframe_frac_cen.v
 set_global_assignment -name VERILOG_FILE ../../common/jtframe_resync.v
 set_global_assignment -name VERILOG_FILE ../../common/link_lite.v
 set_global_assignment -name VERILOG_FILE ../../common/cram0_controller.v
+set_global_assignment -name VERILOG_FILE ../../common/cram0_bridge_prefetch.v
 set_global_assignment -name VERILOG_FILE ../../common/cram0_cdc.v
 set_global_assignment -name SYSTEMVERILOG_FILE ../../common/cram0_phy.sv
 set_global_assignment -name VERILOG_FILE ../../common/sram_controller.v
@@ -721,7 +722,7 @@ set_global_assignment -name VERILOG_FILE ../../common/video_CRT_scanout_indexed_
 set_global_assignment -name VERILOG_FILE ../../vendor/vexriscv/VexiiRiscv/VexiiRiscv.v
 set_global_assignment -name VERILOG_FILE mf_pllram_133.v
 set_global_assignment -name SDC_FILE core_constraints.sdc
-set_global_assignment -name SEED 13
+set_global_assignment -name SEED 8
 # Phase 5 fitter-tuning experiments (see session 2026-04-18).  All
 # Quartus knobs we tried — RESOURCE_SHARING, REGISTER_RETIMING,
 # REGISTER_DUPLICATION, ramstyle=MLAB, seed 11 — ended up worse

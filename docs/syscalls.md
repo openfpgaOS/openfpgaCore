@@ -23,11 +23,11 @@ These use standard RISC-V Linux syscall numbers for musl libc compatibility.
 | Number | Name | Signature | Notes |
 |--------|------|-----------|-------|
 | 17 | `getcwd` | -- | Not implemented (returns -ENOSYS) |
-| 56 | `openat` | `(dirfd, pathname, flags, mode)` | Opens files: `"filename"` (registered lookup), `"save_N"` / `"save:N"`, `"slot:N"` |
-| 57 | `close` | `(fd)` | Closes file descriptor. Save files auto-flush actual bytes written. |
+| 56 | `openat` | `(dirfd, pathname, flags, mode)` | Opens read-only data files by filename and read/write save files by filename; `"save_N"` / `"save:N"` aliases remain |
+| 57 | `close` | `(fd)` | Closes file descriptor. Save data is already in CRAM0; size metadata is kept current for APF unload persistence. |
 | 62 | `_llseek` | `(fd, off_hi, off_lo, &result, whence)` | riscv32 uses 5-arg `_llseek`, not 3-arg `lseek`. SEEK_SET=0, SEEK_CUR=1, SEEK_END=2. Returns 0 on success, writes 64-bit result to pointer. |
 | 63 | `read` | `(fd, buf, count)` | Reads from data slot or save file. Uses 64 KB read-ahead buffer. |
-| 64 | `write` | `(fd, buf, count)` | stdout/stderr to terminal, save files to CRAM1 |
+| 64 | `write` | `(fd, buf, count)` | stdout/stderr to terminal, save files to CRAM0 save slots |
 | 65 | `readv` | `(fd, iov, iovcnt)` | Vectored read (required by musl fread) |
 | 66 | `writev` | `(fd, iov, iovcnt)` | Vectored write |
 | 79 | `fstatat` | -- | Not implemented (returns -ENOSYS) |

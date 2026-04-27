@@ -26,7 +26,7 @@ ofOS is a minimal operating system for the Analogue Pocket FPGA handheld. It run
 | `0x10280000 - 0x102FFFFF` | 512 KB | DMA bounce buffer                        |
 | `0x10300000 - 0x103FFFFF` | 1 MB   | OS kernel (code + data + BSS)            |
 | `0x10400000+`             | ~48 MB | Application load area + heap             |
-| `0x39000000 - 0x3927FFFF` | 2.5 MB | Save region (10 × 256 KB slots, CRAM1 uncached) |
+| `0x30100000 - 0x3037FFFF` | 2.5 MB | Save region (10 × 256 KB slots, CRAM0 CPU alias) |
 | `0x13F80000`              |        | Application stack top                    |
 | `0x14000000`              |        | Runtime stack top                        |
 | `0x20000000`              | 1.2 KB | Terminal VRAM (40x30 characters)         |
@@ -151,7 +151,7 @@ The HAL is organized into 11 independent modules:
 | `fb` | `hal/fb.h` | Framebuffer (320x240, 8-bit indexed, triple-buffered) |
 | `audio` | `hal/audio.h` | 48 kHz PCM audio FIFO (48-voice mixer backs it) |
 | `input` | `hal/input.h` | Controller polling with edge detection (2 players) |
-| `save` | `hal/save.h` | Nonvolatile save slots (10 × 256 KB, CRAM1 PSRAM) |
+| `save` | `hal/save.h` | Nonvolatile save slots (10 × 256 KB, CRAM0 save window) |
 | `dataslot` | `hal/dataslot.h` | APF bridge file I/O (DMA read/write) |
 | `analogizer` | `hal/analogizer.h` | Analogizer state query (video mode, SNAC type) |
 | `terminal` | `hal/terminal.h` | Text terminal (40x30, printf support) |

@@ -55,16 +55,31 @@ module audio_mixer (
     // OF_TARGET_SAMPLE_BASE (0x13700000).
     input wire [31:0] sample_pool_base,
 
-    // ------- Voice-table write port (from axi_periph_slave) -------
-    // CPU writes voice state one field at a time: set voice_sel + field,
-    // drive voice_wdata, pulse voice_wr for one cycle.  Lands directly
-    // on vtbl port B; no stall.  voice_sel_rd is the read-side selector
-    // for position readback (independent of voice_wr).
+    // ------- Voice-table write port (flat MMIO from axi_periph_slave) -------
+    // The new flat scheme encodes the voice index in the MMIO address itself.
+    // axi_periph_slave decodes addr[10:6] → voice_sel and addr[5:2] → field
+    // and pulses voice_wr for one cycle.  No SEL latch state means main
+    // thread + ISR can write different voices without race or guard CSRs.
     input wire        voice_wr,
     input wire [3:0]  voice_field,
     input wire [4:0]  voice_sel,
-    input wire [4:0]  voice_sel_rd,
+    input wire [4:0]  voice_sel_rd,    // selects which voice's pos_latch is on the readback bus (combinational)
     input wire [31:0] voice_wdata,
+
+    // ------- Group + master volume composition (HW) ----------------
+    // Voice's per-channel vol_target is composed in S_WR_VOL with the
+    // voice's group volume and the global master volume before the
+    // existing per-channel ramp.  Apps write group_vol/master_vol once
+    // per change instead of walking 32 voices in firmware.
+    //
+    // voice_group_packed: 32 voices × 2-bit group index packed LSB-first.
+    //                     voice i's group = voice_group_packed[i*2 +: 2]
+    input wire  [7:0] master_vol,
+    input wire  [7:0] group_vol_0,
+    input wire  [7:0] group_vol_1,
+    input wire  [7:0] group_vol_2,
+    input wire  [7:0] group_vol_3,
+    input wire [63:0] voice_group_packed,
 
     // ------- AXI4 read master → SDRAM arbiter (M3) --------
     // Read-only, 32-bit data, single-beat bursts (ARLEN=0).
@@ -181,19 +196,31 @@ wire        is_cpu_field =
     (voice_field == VTBL_VOL_RATE);
 wire        vtbl_cpu_b_wr = voice_wr && is_cpu_field;
 
-/* Wait — MIX_VOICE_POS_WR writes VTBL_POS_INT (field 4) via the MMIO
- * path, but POS_INT lives in vtbl_fsm.  Route that one specific CPU
- * write to vtbl_fsm's port A, time-multiplexed with the FSM's own
- * writes.  The CPU's POS_WR happens at most once per note-on (rare
- * vs. the FSM's per-sample S_ADVANCE writes), so the race window is
- * tiny.  CPU write wins when both fire same cycle. */
-wire        cpu_pos_wr = voice_wr && (voice_field == VTBL_POS_INT);
+/* MIX_VOICE_POS_WR (VTBL_POS_INT) and MIX_VOICE_VOL_LR (VTBL_VOL_LR)
+ * both target fields that live in vtbl_fsm, not vtbl_cpu.  Route
+ * those CPU writes to vtbl_fsm's port A, time-multiplexed with the
+ * FSM's own per-sample writes.  Both happen at most once per note-on
+ * (rare vs. the FSM's per-sample S_ADVANCE/S_WR_VOL writes), so the
+ * race window is tiny.  CPU write wins when both fire same cycle.
+ *
+ * VOL_LR was previously NOT routed at all — `is_cpu_field` listed
+ * only the vtbl_cpu fields, and POS_INT was the only vtbl_fsm field
+ * with a bypass.  Result: program_voice_play's `MIX_VOICE_VOL_LR=0`
+ * to start a voice silent was silently dropped, leaving stale vol_lr
+ * from the previous occupant of the slot.  On heavy slot turnover
+ * (high MIDI notes, rapid retriggers) the new voice's first samples
+ * were scaled by the leftover vol_lr — sample-level discontinuity,
+ * audible as random crackle exclusively at high pitch where slot
+ * reuse is frequent. */
+wire        cpu_pos_wr    = voice_wr && (voice_field == VTBL_POS_INT);
+wire        cpu_vol_lr_wr = voice_wr && (voice_field == VTBL_VOL_LR);
+wire        cpu_fsm_wr    = cpu_pos_wr || cpu_vol_lr_wr;
 wire        vtbl_fsm_wren_a;
 wire [8:0]  vtbl_fsm_addr_a;
 wire [31:0] vtbl_fsm_data_a;
-assign vtbl_fsm_wren_a = cpu_pos_wr ? 1'b1 : vtbl_a_wr;
-assign vtbl_fsm_addr_a = cpu_pos_wr ? {voice_sel, voice_field} : vtbl_a_addr;
-assign vtbl_fsm_data_a = cpu_pos_wr ? voice_wdata : vtbl_a_data;
+assign vtbl_fsm_wren_a = cpu_fsm_wr ? 1'b1 : vtbl_a_wr;
+assign vtbl_fsm_addr_a = cpu_fsm_wr ? {voice_sel, voice_field} : vtbl_a_addr;
+assign vtbl_fsm_data_a = cpu_fsm_wr ? voice_wdata : vtbl_a_data;
 
 /* vtbl_cpu — plain reg array with async read + sync write.  Matches
  * the 0-cycle combinational read semantics of altsyncram UNREGISTERED
@@ -201,7 +228,7 @@ assign vtbl_fsm_data_a = cpu_pos_wr ? voice_wdata : vtbl_a_data;
  * capture q in cycle N+1 via NBA).  On Cyclone V, Quartus infers this
  * into MLABs (~26 blocks for 16 Kbits).  Bypasses the altsyncram
  * DUAL_PORT inference that silently dropped port-B writes. */
-reg [31:0] vtbl_cpu_mem [0:511];
+reg [31:0] vtbl_cpu_mem [0:511] /*verilator public_flat_rw*/;
 
 always @(posedge clk) begin
     if (vtbl_cpu_b_wr)
@@ -217,7 +244,7 @@ assign vtbl_cpu_q = vtbl_cpu_mem[vtbl_a_addr];
  * a cycle behind vtbl_cpu reads and break the FSM's pipeline for
  * POS_INT/POS_FRAC/VOL_LR fields.  Reg array → MLAB inference, matches
  * vtbl_cpu's behaviour exactly. */
-reg [31:0] vtbl_fsm_mem [0:511];
+reg [31:0] vtbl_fsm_mem [0:511] /*verilator public_flat_rw*/;
 
 always @(posedge clk) begin
     if (vtbl_fsm_wren_a)
@@ -279,6 +306,53 @@ always @(posedge clk) begin
 end
 
 // ============================================================
+// Group × master pre-composition (PIPELINED)
+// ============================================================
+// gxm_<g>_r = (group_vol[g] * master_vol) >> 8, registered.
+//
+// Why registered, not combinational: master_vol/group_vol drive the
+// per-voice S_WR_VOL composition (raw × gxm), which then feeds the
+// vol-ramp logic and the vtbl write port.  When gxm was a wire, the
+// chain was: master_vol_reg → MULT1 → 4-way MUX → MULT2 → ramp → BRAM
+// write address — 21 ns combinational, blowing the 10 ns budget by
+// 7 ns (Quartus STA mp_ram general[0]: -7.64 ns slack).
+//
+// Registering gxm splits MULT1 into its own cycle.  Adds 1 cycle of
+// latency on master/group volume CHANGES — invisible at 100 MHz vs.
+// the ms-scale rate at which apps actually fade volume.
+//
+// >>8 keeps the result 8-bit; the per-voice multiply against vol_target
+// gives 16 bits, then >>8 again gives 8-bit final.  Total attenuation
+// is (target/255 × group/255 × master/255) ≈ (t × g × m) / 65536, off
+// by ~0.78% from a pure ratio — imperceptible on an 8-bit PCM target.
+reg [7:0] gxm_0_r, gxm_1_r, gxm_2_r, gxm_3_r;
+always @(posedge clk) begin
+    if (!reset_n) begin
+        gxm_0_r <= 8'hFF;
+        gxm_1_r <= 8'hFF;
+        gxm_2_r <= 8'hFF;
+        gxm_3_r <= 8'hFF;
+    end else begin
+        gxm_0_r <= ({8'd0, group_vol_0} * {8'd0, master_vol}) >> 8;
+        gxm_1_r <= ({8'd0, group_vol_1} * {8'd0, master_vol}) >> 8;
+        gxm_2_r <= ({8'd0, group_vol_2} * {8'd0, master_vol}) >> 8;
+        gxm_3_r <= ({8'd0, group_vol_3} * {8'd0, master_vol}) >> 8;
+    end
+end
+
+function [7:0] pick_gxm;
+    input [1:0] g;
+    begin
+        case (g)
+            2'd0: pick_gxm = gxm_0_r;
+            2'd1: pick_gxm = gxm_1_r;
+            2'd2: pick_gxm = gxm_2_r;
+            default: pick_gxm = gxm_3_r;
+        endcase
+    end
+endfunction
+
+// ============================================================
 // Sample extraction / address helpers
 // ============================================================
 function signed [15:0] extract_sample16;
@@ -331,21 +405,21 @@ localparam S_RD_BASE        = 5'd7;
 localparam S_RD_BASE_W      = 5'd8;
 localparam S_RD_RATE        = 5'd9;
 localparam S_RD_RATE_W      = 5'd10;
-localparam S_RD_LEN         = 5'd11;
+localparam S_FETCH_SEAM_R   = 5'd11;  // (was S_RD_LEN, dead) receive tap1 fetched from cur_loop_start
 localparam S_RD_LEN_W       = 5'd12;
 localparam S_RD_VOL         = 5'd13;
 localparam S_RD_VOL_W       = 5'd14;
 localparam S_FETCH_TAP0_CALC = 5'd29;  // register byte addr (adder cycle)
 localparam S_FETCH_TAP0_AR  = 5'd15;    // drive m_araddr from registered addr
 localparam S_FETCH_TAP0_R   = 5'd16;
-localparam S_FETCH_TAP1_NXT  = 5'd31;   // register nxt (pos+1, wrap, clamp)
-localparam S_FETCH_TAP1_CALC = 5'd30;   // register byte addr from nxt
-localparam S_FETCH_TAP1_AR  = 5'd17;
+localparam S_WR_VOL_RAMP     = 5'd31;   // (was S_FETCH_TAP1_NXT, dead) register ramp_step output
+localparam S_FETCH_SEAM_AR  = 5'd30;  // (was S_FETCH_TAP1_CALC, dead) issue tap1 fetch at cur_loop_start
+localparam S_RD_VOL_RATE    = 5'd17;  // (was S_FETCH_TAP1_AR, dead) capture VOL_RATE field
 localparam S_FETCH_TAP1_R   = 5'd18;
 localparam S_LERP_INTERP    = 5'd19;   // stage 1: diff, mult by pos_frac, + tap0
 localparam S_LERP_MIX       = 5'd20;   // stage 2: * vol, accumulate
 localparam S_ADVANCE        = 5'd21;
-localparam S_WR_POS_INT     = 5'd22;
+localparam S_WR_VOL_MULT    = 5'd22;  // (was S_WR_POS_INT, dead code) register raw × cur_gxm output
 localparam S_WR_POS_FRAC    = 5'd23;
 localparam S_NEXT_VOICE     = 5'd24;
 localparam S_OUTPUT         = 5'd25;
@@ -369,6 +443,24 @@ reg [7:0]  cur_vol_l, cur_vol_r;
 reg [21:0] cur_loop_end, cur_loop_start;
 reg [7:0]  cur_vol_tgt_l, cur_vol_tgt_r;
 reg [7:0]  cur_vol_rate;
+/* Per-voice volume-write pipeline (4 stages):
+ *   S_RAMP_STEP    → cur_gxm_r ← pick_gxm(voice→group)         (mux only)
+ *   S_WR_VOL_MULT  → tgt_*_r ← raw × cur_gxm_r                 (DSP only)
+ *   S_WR_VOL_RAMP  → nxt_*_r ← ramp_step(cur_vol, tgt_*_r,...) (compare chain)
+ *   S_WR_VOL       → write VTBL_VOL_LR if nxt != cur           (BRAM write)
+ *
+ * Each cycle isolates one of the long combinational chunks.  The
+ * monolithic version (everything in S_WR_VOL) chained DSP +
+ * 3-comparator ramp + write-mux + BRAM port setup ≈ 7+ ns
+ * combinational — broke 100 MHz once clock skew was added.
+ *
+ * Cost: +2 cycles per voice over the original (now 4 cycles total
+ * across the volume pipeline; was 1).  At 32 voices that's +64
+ * cycles per 48 kHz output sample — the 2083-cycle window has
+ * plenty of slack. */
+reg [7:0]  cur_gxm_r;
+reg [7:0]  tgt_l_r, tgt_r_r;
+reg [7:0]  nxt_l_r, nxt_r_r;
 
 wire cur_active = cur_ctrl[0];
 wire cur_stereo = cur_ctrl[1];
@@ -378,13 +470,38 @@ wire cur_loop   = cur_ctrl[2];
 reg signed [15:0] tap0_l, tap0_r;
 reg signed [15:0] tap1_l, tap1_r;
 reg [31:0] tap_byte_addr;
-reg [31:0] tap_araddr;     // registered m_araddr; pipelined from TAP*_CALC
+reg [31:0] tap_araddr;     // registered m_araddr; pipelined from TAP0_CALC
 reg [21:0] tap_pos;
-reg [21:0] tap_nxt_pos;    // S_FETCH_TAP1_CALC hands this to TAP1_AR
+reg [21:0] tap_nxt_pos;    // post-wrap nxt sample idx (used to update pos_latch)
 reg [21:0] tap_nxt_raw;    // pos+1 pre-wrap-clamp; pipeline register between
-                           //   TAP1_NXT_CALC and TAP1_NXT so the 22-bit
+                           //   TAP0_CALC and BURST_DECIDE so the 22-bit
                            //   adder isn't chained with the 2× compares
                            //   and muxes in the same cycle (was -1.7 ns).
+// Burst-mode flags decided in S_FETCH_TAP1_NXT_CALC (BURST_DECIDE) and
+// consumed in S_FETCH_TAP0_AR / S_FETCH_TAP0_R.  Four mutually-
+// exclusive modes:
+//
+//   2-beat  : pos+1 is contiguous (no wrap, no clamp), and tap1 lives
+//             in a different word than tap0 (stereo, or mono pos_odd).
+//             ARLEN=1 burst, beat 1 holds tap1.
+//   share   : pos+1 contiguous, mono pos_even — tap1 is the other
+//             half of beat 0's word.  ARLEN=0, single beat.
+//   seam    : cur_loop && pos+1 wraps loop_end → tap1 must come from
+//             cur_loop_start.  Issue a SECOND single-beat AR after
+//             beat 0 (state S_FETCH_SEAM_AR / _R).  Preserves
+//             interpolation across the loop seam.  Without this,
+//             every loop wrap dropped a sample of interp → audible
+//             "buzz" at high pitches where wraps are frequent
+//             (loop-cycle freq × pitch ratio).
+//   dup     : pos+1 clamps to length (one-shot voice ending) — tap1
+//             = tap0.  No interp needed; voice will end this sample.
+//
+// Encoded as two flags (mutually disjoint): _2beat covers 2-beat;
+// _seam covers the loop wrap case; _dup covers the clamp case;
+// (_2beat == 0 && _seam == 0 && _dup == 0) is the share case.
+reg burst_mode_2beat;
+reg burst_mode_seam;
+reg burst_mode_dup;
 
 // Linear-interp result (per channel).
 reg signed [15:0] samp_l, samp_r;
@@ -538,6 +655,20 @@ always @(posedge clk) begin
     S_RD_VOL_W: begin
         cur_vol_l <= vtbl_a_q[7:0];
         cur_vol_r <= vtbl_a_q[15:8];
+        // Queue VOL_RATE next so cur_vol_rate is loaded before the
+        // ramp_step() in S_WR_VOL.  Previously cur_vol_rate was never
+        // written anywhere — it sat at 0 forever, which made every
+        // ramp_step() snap to target.  That meant every note-on,
+        // env update, master/group volume change, and voice steal
+        // produced a sample-level discontinuity → audible click.
+        // Even though VTBL_VOL_RATE was being programmed correctly
+        // by the HAL, the FSM never read it back into cur_vol_rate.
+        vtbl_a_addr <= {cur_voice, VTBL_VOL_RATE};
+        state       <= S_RD_VOL_RATE;
+    end
+
+    S_RD_VOL_RATE: begin
+        cur_vol_rate <= vtbl_a_q[7:0];
         // Read more control fields for loop/ramp handling.
         vtbl_a_addr <= {cur_voice, VTBL_LOOP_END};
         state       <= S_RD_VOL;
@@ -549,10 +680,34 @@ always @(posedge clk) begin
         state        <= S_FETCH_TAP0_CALC;  // loop_start captured in CALC
     end
 
-    // ---- Fetch tap 0 (sample at pos_int) ----
-    // CALC cycle: register byte addr so the 32-bit adder sits alone in
-    // its own cycle (cur_pos_int + voice_base + idx_shift).  AR cycle
-    // drives m_araddr from the registered addr and asserts arvalid.
+    // ---- Fetch tap0 + tap1 with one ARLEN=1 burst when safe ----
+    //
+    // The previous FSM issued two single-beat reads per voice per
+    // sample: 64 SDRAM transactions per 48 kHz output sample, each
+    // paying full arbiter + SDRAM round-trip latency.  Under heavy
+    // CPU/GPU contention the resulting tail dominated the per-voice
+    // budget and drained the output dcfifo (framerate-correlated
+    // clicks).
+    //
+    // New flow: one ARLEN=1 burst per voice when consecutive
+    // (tap0=pos, tap1=pos+1, no loop wrap, no length clamp).  Three
+    // sub-modes selected in BURST_DECIDE:
+    //
+    //   2-beat       : stereo OR (mono && pos[0]==1)         — beat 0 = tap0
+    //                                                          beat 1 = tap1
+    //   1-beat-share : mono && pos[0]==0, no wrap            — both taps in
+    //                                                          beat 0 (high+low
+    //                                                          halves of one word)
+    //   1-beat-dup   : pos+1 wraps loop / clamps to length   — tap1 = tap0
+    //                                                          (sample-and-hold
+    //                                                          at boundary; one
+    //                                                          sample of distortion
+    //                                                          at the wrap, fine)
+    //
+    // CALC cycle: latch tap0 byte addr + register pos+1 raw.
+    // BURST_DECIDE cycle: apply wrap/clamp, pick mode, register flags.
+    // TAP0_AR / TAP0_R / TAP1_R: drive AR with chosen ARLEN, receive
+    //                            beat 0, optionally receive beat 1.
     S_FETCH_TAP0_CALC: begin
         cur_loop_start <= vtbl_a_q[21:0];
         if (cur_pos_int >= cur_length) begin
@@ -561,73 +716,110 @@ always @(posedge clk) begin
             tap_pos       <= cur_pos_int;
             tap_byte_addr <= sample_byte_addr(voice_base, cur_pos_int, cur_stereo);
             tap_araddr    <= word_aligned(sample_byte_addr(voice_base, cur_pos_int, cur_stereo));
-            state         <= S_FETCH_TAP0_AR;
+            tap_nxt_raw   <= cur_pos_int + 22'd1;
+            state         <= S_FETCH_TAP1_NXT_CALC;  // repurposed as BURST_DECIDE
         end
+    end
+
+    // BURST_DECIDE — repurposed S_FETCH_TAP1_NXT_CALC slot.  Apply
+    // wrap+clamp to tap_nxt_raw, then pick the burst mode.  Crucially
+    // distinguish loop-wrap (interpolate across the seam by fetching
+    // cur_loop_start as tap1) from end-of-sample clamp (no interp,
+    // voice ends this sample).
+    S_FETCH_TAP1_NXT_CALC: begin : burst_decide_blk
+        reg [21:0] nxt;
+        reg        wrap_only;
+        reg        clamp_after_wrap;
+        // Phase 1: loop wrap if applicable.
+        wrap_only = cur_loop && (tap_nxt_raw >= cur_loop_end);
+        nxt = wrap_only ? cur_loop_start : tap_nxt_raw;
+        // Phase 2: clamp if even the (post-wrap) target sits past length.
+        clamp_after_wrap = (nxt >= cur_length);
+        if (clamp_after_wrap) nxt = cur_pos_int;
+
+        // Mode encoding (mutually exclusive):
+        //   _2beat : contiguous + needs separate words for tap0/tap1
+        //   _seam  : loop wrap with valid (in-range) loop_start
+        //   _dup   : clamp at sample end (one-shot voice ending)
+        //   (none) : contiguous + mono pos_even (share-from-beat-0)
+        burst_mode_2beat <= !wrap_only && !clamp_after_wrap
+                            && (cur_stereo || cur_pos_int[0]);
+        burst_mode_seam  <= wrap_only && !clamp_after_wrap;
+        burst_mode_dup   <= clamp_after_wrap;
+        tap_nxt_pos      <= nxt;
+        state            <= S_FETCH_TAP0_AR;
     end
 
     S_FETCH_TAP0_AR: begin
         m_araddr  <= tap_araddr;
-        m_arlen   <= 8'd0;
+        m_arlen   <= burst_mode_2beat ? 8'd1 : 8'd0;
         m_arvalid <= 1'b1;
         state     <= S_FETCH_TAP0_R;
     end
 
-    S_FETCH_TAP0_R: begin
+    S_FETCH_TAP0_R: begin : fetch_tap0_r_blk
+        reg signed [15:0] beat0_l, beat0_r;
         if (m_arvalid && m_arready) m_arvalid <= 1'b0;
         m_rready <= 1'b1;
         if (m_rvalid) begin
-            // Extract taps.  For mono, the 32-bit word holds 2 samples;
-            // tap_byte_addr[1] picks the high half.  For stereo, same
-            // word holds both L and R — rdata[15:0] = L, rdata[31:16] = R.
+            // Beat 0 always holds tap0.  For mono, low/high half pick by
+            // tap_byte_addr[1].  For stereo, low word is L, high word R.
             if (cur_stereo) begin
-                tap0_l <= $signed(m_rdata[15:0]);
-                tap0_r <= $signed(m_rdata[31:16]);
+                beat0_l = $signed(m_rdata[15:0]);
+                beat0_r = $signed(m_rdata[31:16]);
             end else begin
-                tap0_l <= extract_sample16(m_rdata, tap_byte_addr[1]);
-                tap0_r <= extract_sample16(m_rdata, tap_byte_addr[1]);
+                beat0_l = extract_sample16(m_rdata, tap_byte_addr[1]);
+                beat0_r = beat0_l;
             end
-            m_rready <= 1'b0;
-            state    <= S_FETCH_TAP1_NXT_CALC;
+            tap0_l <= beat0_l;
+            tap0_r <= beat0_r;
+
+            if (burst_mode_2beat) begin
+                // 2-beat burst — wait for beat 1 in S_FETCH_TAP1_R.
+                state <= S_FETCH_TAP1_R;
+            end else if (burst_mode_seam) begin
+                // Loop wrap — issue a second single-beat fetch for
+                // sample[cur_loop_start] so tap1 is the right value
+                // and LERP can interpolate across the seam.
+                m_rready <= 1'b0;
+                state    <= S_FETCH_SEAM_AR;
+            end else if (burst_mode_dup) begin
+                // Clamp at sample end (one-shot voice).  No interp
+                // needed; tap1 = tap0.  Voice ends this sample.
+                tap1_l <= beat0_l;
+                tap1_r <= beat0_r;
+                m_rready <= 1'b0;
+                state    <= S_LERP_INTERP;
+            end else if (cur_stereo) begin
+                // (Stereo with no wrap should always set _2beat.
+                //  Safe fallback in case mode flags ever disagree.)
+                tap1_l <= beat0_l;
+                tap1_r <= beat0_r;
+                m_rready <= 1'b0;
+                state    <= S_LERP_INTERP;
+            end else begin
+                // Mono pos_even — tap1 is the OTHER half of beat 0.
+                tap1_l <= extract_sample16(m_rdata, ~tap_byte_addr[1]);
+                tap1_r <= extract_sample16(m_rdata, ~tap_byte_addr[1]);
+                m_rready <= 1'b0;
+                state    <= S_LERP_INTERP;
+            end
         end
     end
 
-    // ---- Fetch tap 1 (sample at pos_int + 1, or loop_start if wrapping) ----
-    // NXT_CALC cycle: register pos+1 raw (isolates the adder).
-    // NXT      cycle: wrap + clamp on registered raw, register final nxt.
-    // CALC     cycle: register byte addr from nxt + voice_base.
-    // AR       cycle: drive the bus from the registered addr.
-    // Splitting four ways keeps every arithmetic op + each compare/mux
-    // cone on its own cycle — required to close the 100 MHz budget
-    // (pos+1 + 2× compare + 2× mux was -1.7 ns as one cycle).
-    S_FETCH_TAP1_NXT_CALC: begin
-        tap_nxt_raw <= cur_pos_int + 22'd1;
-        state       <= S_FETCH_TAP1_NXT;
+    // S_FETCH_SEAM_AR — issue a second single-beat AR for tap1 at
+    // cur_loop_start (loop wrap case).  byte_addr is recomputed from
+    // cur_loop_start so the SEAM_R extract picks the right mono half.
+    S_FETCH_SEAM_AR: begin
+        tap_byte_addr <= sample_byte_addr(voice_base, cur_loop_start, cur_stereo);
+        m_araddr      <= word_aligned(sample_byte_addr(voice_base, cur_loop_start, cur_stereo));
+        m_arlen       <= 8'd0;
+        m_arvalid     <= 1'b1;
+        state         <= S_FETCH_SEAM_R;
     end
 
-    S_FETCH_TAP1_NXT: begin : tap1_nxt_blk
-        reg [21:0] nxt;
-        nxt = tap_nxt_raw;
-        if (cur_loop && nxt >= cur_loop_end) nxt = cur_loop_start;
-        if (nxt >= cur_length)               nxt = cur_pos_int;   // clamp
-        tap_nxt_pos <= nxt;
-        tap_pos     <= nxt;
-        state       <= S_FETCH_TAP1_CALC;
-    end
-
-    S_FETCH_TAP1_CALC: begin
-        tap_byte_addr <= sample_byte_addr(voice_base, tap_nxt_pos, cur_stereo);
-        tap_araddr    <= word_aligned(sample_byte_addr(voice_base, tap_nxt_pos, cur_stereo));
-        state         <= S_FETCH_TAP1_AR;
-    end
-
-    S_FETCH_TAP1_AR: begin
-        m_araddr  <= tap_araddr;
-        m_arlen   <= 8'd0;
-        m_arvalid <= 1'b1;
-        state     <= S_FETCH_TAP1_R;
-    end
-
-    S_FETCH_TAP1_R: begin
+    // S_FETCH_SEAM_R — receive the loop-start beat as tap1.
+    S_FETCH_SEAM_R: begin
         if (m_arvalid && m_arready) m_arvalid <= 1'b0;
         m_rready <= 1'b1;
         if (m_rvalid) begin
@@ -637,6 +829,27 @@ always @(posedge clk) begin
             end else begin
                 tap1_l <= extract_sample16(m_rdata, tap_byte_addr[1]);
                 tap1_r <= extract_sample16(m_rdata, tap_byte_addr[1]);
+            end
+            m_rready <= 1'b0;
+            state    <= S_LERP_INTERP;
+        end
+    end
+
+    // S_FETCH_TAP1_R — beat 1 of the burst.  Only entered when
+    // burst_mode_2beat (stereo or mono pos_odd, no wrap).
+    S_FETCH_TAP1_R: begin
+        m_rready <= 1'b1;
+        if (m_rvalid) begin
+            if (cur_stereo) begin
+                // Beat 1 = stereo pair at pos+1.
+                tap1_l <= $signed(m_rdata[15:0]);
+                tap1_r <= $signed(m_rdata[31:16]);
+            end else begin
+                // Mono pos_odd — beat 1 is next word; tap1 sits in its
+                // low half (byte addr (pos+1)*2 has bit[1]=0 when
+                // pos[0]==1).
+                tap1_l <= extract_sample16(m_rdata, 1'b0);
+                tap1_r <= extract_sample16(m_rdata, 1'b0);
             end
             m_rready <= 1'b0;
             state    <= S_LERP_INTERP;
@@ -775,34 +988,62 @@ always @(posedge clk) begin
     end
 
     // ---- Volume ramp step (reads target + rate) ----
+    // Three-stage pipeline to keep the per-voice path inside 10 ns:
+    //   S_RAMP_STEP    → pick gxm for cur_voice (cur_voice → voice_group
+    //                    → pick_gxm), queue VTBL_VOL_TARGET read
+    //   S_WR_VOL_MULT  → latch raw × cur_gxm_r into tgt_*_r (DSP cycle)
+    //   S_WR_VOL       → ramp(cur_vol, tgt_*_r) and write VTBL_VOL_LR
+    // Adds 1 cycle per voice over the original (32 cycles/sample,
+    // ~3% of the 2083-cycle window).  The monolithic chain was
+    //   BRAM_q → MULT (3.5 ns) → ramp (2 ns) → write addr (1 ns)
+    // = 6.5 ns combinational, which with ~3 ns clock skew + ~2 ns
+    // setup blew the 10 ns budget — −4.29 ns slack pre-fix.
     S_RAMP_STEP: begin
         vtbl_a_addr <= {cur_voice, VTBL_VOL_TARGET};
-        state       <= S_WR_VOL;
+        cur_gxm_r   <= pick_gxm(voice_group_packed[cur_voice * 2 +: 2]);
+        state       <= S_WR_VOL_MULT;
     end
 
-    S_WR_VOL: begin : ramp_blk
-        reg [7:0] tgt_l, tgt_r;
-        reg [7:0] nxt_l, nxt_r;
+    S_WR_VOL_MULT: begin : compose_blk
+        reg [7:0]  raw_l, raw_r;
+        reg [15:0] tgt_l_x, tgt_r_x;
         begin
-            tgt_l = vtbl_a_q[7:0];
-            tgt_r = vtbl_a_q[15:8];
-            // Second read to grab vol_rate.  Combine with next cycle.
-            vtbl_a_addr <= {cur_voice, VTBL_VOL_RATE};
-            // Use rate = 1 tentatively; real rate read happens in
-            // S_NEXT_VOICE tick below.  Simpler: do the step with
-            // cur_vol_rate (captured previously).  For this phase we
-            // ignore ramping and just snap vol to target every tick
-            // — the SW mixer's ramp was per-sample, here we only
-            // step once per 48 kHz tick.
-            nxt_l = ramp_step(cur_vol_l, tgt_l, cur_vol_rate);
-            nxt_r = ramp_step(cur_vol_r, tgt_r, cur_vol_rate);
-            if (nxt_l != cur_vol_l || nxt_r != cur_vol_r) begin
-                vtbl_a_addr <= {cur_voice, VTBL_VOL_LR};
-                vtbl_a_data <= {16'd0, nxt_r, nxt_l};
-                vtbl_a_wr   <= 1'b1;
-            end
-            state <= S_NEXT_VOICE;
+            // BRAM read (vtbl_a_q) is valid this cycle.  Only thing
+            // we do here is the 8×8 multiply against the registered
+            // cur_gxm_r — DSP block in isolation, no downstream logic
+            // on the same cycle.
+            raw_l   = vtbl_a_q[7:0];
+            raw_r   = vtbl_a_q[15:8];
+            tgt_l_x = raw_l * cur_gxm_r;
+            tgt_r_x = raw_r * cur_gxm_r;
+            tgt_l_r <= tgt_l_x[15:8];
+            tgt_r_r <= tgt_r_x[15:8];
+            state   <= S_WR_VOL_RAMP;
         end
+    end
+
+    S_WR_VOL_RAMP: begin
+        // Run the ramp_step compare chain in its own cycle.  The
+        // function expands into ~3 cascaded compares (cur vs tgt,
+        // +step overflow, -step underflow) plus a 4-way mux — about
+        // 1.5 ns combinational on its own.  Doing this in S_WR_VOL
+        // alongside the BRAM write logic added ~3 ns to the path
+        // (was -2.1 ns slack at 100 MHz).  Registered output here
+        // means S_WR_VOL is just a comparator + BRAM port setup.
+        nxt_l_r <= ramp_step(cur_vol_l, tgt_l_r, cur_vol_rate);
+        nxt_r_r <= ramp_step(cur_vol_r, tgt_r_r, cur_vol_rate);
+        state   <= S_WR_VOL;
+    end
+
+    S_WR_VOL: begin
+        // Pure write-decision + BRAM port setup.  No multiply, no
+        // compare chain — both already registered.
+        if (nxt_l_r != cur_vol_l || nxt_r_r != cur_vol_r) begin
+            vtbl_a_addr <= {cur_voice, VTBL_VOL_LR};
+            vtbl_a_data <= {16'd0, nxt_r_r, nxt_l_r};
+            vtbl_a_wr   <= 1'b1;
+        end
+        state <= S_NEXT_VOICE;
     end
 
     // ---- Voice-end path (one-shot) ----
@@ -830,15 +1071,19 @@ always @(posedge clk) begin
     S_OUTPUT: begin : out_blk
         reg [15:0] out_l, out_r;
         begin
-            /* Mix-down /2 — probe at /8 showed peaks ~8 % FS, /2 gave
-             * ~25 % FS.  Keep /2 and fix the real click cause (CDC
-             * between clk_audio and audgen_sclk) in audio_output.v. */
-            out_l = (accum_l >>> 1 >  32'sd32767)  ? 16'h7FFF :
-                    (accum_l >>> 1 < -32'sd32768)  ? 16'h8000 :
-                                                     accum_l[16:1];
-            out_r = (accum_r >>> 1 >  32'sd32767)  ? 16'h7FFF :
-                    (accum_r >>> 1 < -32'sd32768)  ? 16'h8000 :
-                                                     accum_r[16:1];
+            /* Mix-down /16 — 8× more headroom than the original /2.
+             * audio_output's 1.25× boost + 2:1 soft-knee saturator
+             * has been removed (clean passthrough), so /16 is the
+             * sole attenuation in the chain.  Worst case 16 voices ×
+             * full-scale = 524288 ⇒ /16 = 32768, exactly at the
+             * saturator boundary; realistic busy mixes well under.
+             * Loudness compensation lives in master_vol/group_vol. */
+            out_l = (accum_l >>> 4 >  32'sd32767)  ? 16'h7FFF :
+                    (accum_l >>> 4 < -32'sd32768)  ? 16'h8000 :
+                                                     accum_l[19:4];
+            out_r = (accum_r >>> 4 >  32'sd32767)  ? 16'h7FFF :
+                    (accum_r >>> 4 < -32'sd32768)  ? 16'h8000 :
+                                                     accum_r[19:4];
             sample_data <= {out_l, out_r};
             sample_wr   <= 1'b1;
             /* Diagnostic: latch the outgoing sample + bump counter.

@@ -118,31 +118,18 @@ wire signed [15:0] sfx_l = fifo_empty ? hold_l : $signed(fifo_l);
 wire signed [15:0] sfx_r = fifo_empty ? hold_r : $signed(fifo_r);
 
 // ============================================
-// 1.25× post-mix boost (x + x>>>2) — into 19-bit before soft sat.
+// Pass-through to DAC.  Mixer output is already 16-bit hard-saturated
+// in audio_mixer.v (S_OUTPUT clamp at ±32767), so no further headroom
+// or knee is required.  An earlier 1.25× post-boost + 2:1 soft-knee
+// compressor lived here to compensate for the old /2 mixer mixdown;
+// it caused audible 2:1 compression artifacts on busy/transient mixes
+// ("crackle on busy passages") because the boost pushed in-range
+// mixer samples past the 24576 knee.  Now that the mixer mixes down
+// /8 (sufficient headroom for multi-voice peaks), no post-boost is
+// needed and a clean passthrough is the right answer.
 // ============================================
-wire signed [17:0] mix_l = {{2{sfx_l[15]}}, sfx_l};
-wire signed [17:0] mix_r = {{2{sfx_r[15]}}, sfx_r};
-wire signed [18:0] out_l = {mix_l[17], mix_l} + {{3{mix_l[17]}}, mix_l[17:2]};
-wire signed [18:0] out_r = {mix_r[17], mix_r} + {{3{mix_r[17]}}, mix_r[17:2]};
-// Soft saturation: linear below 75% threshold, 2:1 compression above.
-function [15:0] soft_sat;
-    input signed [18:0] x;
-    reg signed [18:0] y;
-    begin
-        if (x > 19'sd24576)
-            y = 19'sd24576 + ((x - 19'sd24576) >>> 1);
-        else if (x < -19'sd24576)
-            y = -19'sd24576 + ((x + 19'sd24576) >>> 1);
-        else
-            y = x;
-        soft_sat = (y > 19'sd32767)  ? 16'h7FFF :
-                   (y < -19'sd32768) ? 16'h8000 :
-                   y[15:0];
-    end
-endfunction
-
-wire [15:0] mix_clamp_l = soft_sat(out_l);
-wire [15:0] mix_clamp_r = soft_sat(out_r);
+wire [15:0] mix_clamp_l = sfx_l;
+wire [15:0] mix_clamp_r = sfx_r;
 
 // Latch mixer output on audio_pop (48 kHz) for stable I2S serialization.
 reg [15:0] active_l = 16'h0;

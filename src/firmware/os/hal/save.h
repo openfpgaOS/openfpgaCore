@@ -31,6 +31,10 @@ int of_save_flush(int slot);
  * Size must not exceed SAVE_SLOT_SIZE. */
 int of_save_flush_size(int slot, uint32_t size);
 
+/* Update the APF datatable size for a save slot without issuing an
+ * immediate Data Slot Write. */
+int of_save_set_size(int slot, uint32_t size);
+
 /* Compute and store CRC32 for a save slot (in metadata region).
  * Call after writing all data, before or after flush. */
 void of_save_update_crc(int slot);

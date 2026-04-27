@@ -56,22 +56,29 @@ static inline void cram0_mode_settle(void) {
     for (volatile int s = 0; s < 8; s++) {}
 }
 
-void of_save_init(void) {
-    /* v2 arch: nothing to set up on the FPGA side.  CRAM0 is shared
-     * between the bridge and the CPU via the CRAM0_MODE mux, flipped
-     * per-op by the save read/write/flush paths below. */
-}
-
 /* Take CPU ownership of CRAM0 for direct load/store access. */
 static inline void cram0_acquire_cpu(void) {
+    fence();
     CRAM0_MODE = CRAM0_MODE_CPU;
     cram0_mode_settle();
+    fence();
 }
 
 /* Hand CRAM0 back to the bridge so it can DMA save slots to/from SD. */
 static inline void cram0_release_to_bridge(void) {
+    fence();
     CRAM0_MODE = CRAM0_MODE_BRIDGE;
     cram0_mode_settle();
+    fence();
+}
+
+void of_save_init(void) {
+    /* Save slots are ordinary non-deferload APF nonvolatile data slots.
+     * The Pocket bridge loads them into the CRAM0 save window before
+     * dataslot_allcomplete; the BRAM boot stub waits for that before the
+     * OS starts. Keep CRAM0 in bridge mode until a read/write needs CPU
+     * ownership. */
+    cram0_release_to_bridge();
 }
 
 int of_save_read(int slot, void *buf, uint32_t offset, uint32_t len) {
@@ -87,6 +94,7 @@ int of_save_read(int slot, void *buf, uint32_t offset, uint32_t len) {
     for (uint32_t i = 0; i < len; i++)
         dst[i] = src[i];
 
+    cram0_release_to_bridge();
     return (int)len;
 }
 
@@ -103,21 +111,34 @@ int of_save_write(int slot, const void *buf, uint32_t offset, uint32_t len) {
     for (uint32_t i = 0; i < len; i++)
         dst[i] = src[i];
 
+    cram0_release_to_bridge();
     return (int)len;
 }
 
-int of_save_flush_size(int slot, uint32_t size) {
+int of_save_set_size(int slot, uint32_t size) {
     if (slot < 0 || slot >= (int)SAVE_MAX_SLOTS)
         return -1;
     if (size > SAVE_SLOT_SIZE)
         size = SAVE_SLOT_SIZE;
 
-    /* Update datatable so bridge knows the size for shutdown saves */
+    /* Update datatable so the APF bridge knows the logical save size.
+     * Writing SAVE_DT_SIZE commits the slot+size pair. */
     SAVE_DT_SLOT = (uint32_t)slot;
-    SAVE_DT_SIZE = size;           /* writing SIZE triggers the commit */
+    SAVE_DT_SIZE = size;
 
-    /* v2 arch: hand CRAM0 to the bridge for the SD-write DMA.  The
-     * slot base in bridge-space is CRAM0_BRIDGE + save offset + slot*size. */
+    return 0;
+}
+
+int of_save_flush_size(int slot, uint32_t size) {
+    if (size > SAVE_SLOT_SIZE)
+        size = SAVE_SLOT_SIZE;
+
+    int rc = of_save_set_size(slot, size);
+    if (rc < 0)
+        return rc;
+
+    /* v2 arch: hand CRAM0 to the bridge for the SD-write DMA.  The slot
+     * base in bridge-space is CRAM0_BRIDGE + save offset + slot*slot_size. */
     cram0_release_to_bridge();
     uint32_t save_bridge_base = CRAM0_BRIDGE + OF_TARGET_CRAM0_SAVE_OFFSET;
     uint32_t bridge_addr = save_bridge_base + (uint32_t)slot * SAVE_SLOT_SIZE;
@@ -140,6 +161,7 @@ void of_save_update_crc(int slot) {
     volatile save_meta_t *meta = slot_meta(slot);
     meta->crc = crc;
     meta->magic = SAVE_CRC_MAGIC;
+    cram0_release_to_bridge();
 }
 
 int of_save_check(int slot) {
@@ -149,14 +171,19 @@ int of_save_check(int slot) {
     cram0_acquire_cpu();
     volatile save_meta_t *meta = slot_meta(slot);
 
-    if (meta->magic != SAVE_CRC_MAGIC)
+    if (meta->magic != SAVE_CRC_MAGIC) {
+        cram0_release_to_bridge();
         return -2;
+    }
 
     volatile uint8_t *base = slot_base(slot);
     uint32_t computed = save_crc32(base, SAVE_SLOT_SIZE);
-    if (computed != meta->crc)
+    if (computed != meta->crc) {
+        cram0_release_to_bridge();
         return -3;
+    }
 
+    cram0_release_to_bridge();
     return 0;
 }
 
@@ -178,4 +205,5 @@ void of_save_erase(int slot) {
     volatile save_meta_t *meta = slot_meta(slot);
     meta->crc = 0;
     meta->magic = 0;
+    cram0_release_to_bridge();
 }

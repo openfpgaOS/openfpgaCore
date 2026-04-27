@@ -126,7 +126,8 @@ whole flow is visible and debuggable in C.
 | Framebuffers (×3)       | SDRAM 0x10000000..0x10300000 (uncached alias for writes) | CPU writes via 0x50xxxxxx; scanout reads from SDRAM |
 | Audio DMA ring          | SDRAM, in `.osdata` via static array   | 16 KB, cached writes + cbo.clean, DMA reads    |
 | SF2 / sample pool       | SDRAM, loaded once at boot via CRAM0   | ~11 MB; cached reads via L1 D$ burst line fill |
-| Save slots              | CRAM0 (bridge scratch)                 | Written/read only during explicit save/load    |
+| Save slots              | CRAM0 `+0x00100000..+0x0037FFFF`       | 10 × 256 KB; kept separate from scratch        |
+| Bridge scratch          | CRAM0 `+0x00400000`                    | 512 KB file/DMA bounce area                    |
 | Z-buffer, span cache    | GPU SRAM                               | Not CPU-addressable                            |
 
 ## 6. Boot sequence
