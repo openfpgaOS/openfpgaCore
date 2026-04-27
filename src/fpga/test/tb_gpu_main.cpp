@@ -4324,11 +4324,13 @@ static void test_triangle_batch_fan32(void) {
         int32_t s1 = (int32_t)(32 + (cs32[j][0] * 28) / 256) << 16;
         int32_t t1 = (int32_t)(32 + (cs32[j][1] * 28) / 256) << 16;
         // v0 = center, v1 = rim_i, v2 = rim_j  (CCW-ish; det check
-        // tolerates either winding)
+        // tolerates either winding).  r = 0 selects light row 0 of the
+        // colormap (which the test uploads as identity).  Earlier r=16
+        // looked up cmap[16*256 + texel] which is uninitialised → 0.
         ring_write_vertex((int16_t)(cx*16), (int16_t)(cy*16), 0,
-                          (int32_t)32 << 16, (int32_t)32 << 16, 16);
-        ring_write_vertex((int16_t)(x0*16), (int16_t)(y0*16), 0, s0, t0, 16);
-        ring_write_vertex((int16_t)(x1*16), (int16_t)(y1*16), 0, s1, t1, 16);
+                          (int32_t)32 << 16, (int32_t)32 << 16, 0);
+        ring_write_vertex((int16_t)(x0*16), (int16_t)(y0*16), 0, s0, t0, 0);
+        ring_write_vertex((int16_t)(x1*16), (int16_t)(y1*16), 0, s1, t1, 0);
     }
 
     // Generous timeout — 32 triangles, ~300 px each = ~10k pixels.
