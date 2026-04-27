@@ -95,6 +95,12 @@ typedef struct {
     uint16_t pad;
     int32_t  s, t;          /* Texture coordinates, 16.16 fixed-point */
     int32_t  w;             /* 1/W for perspective (0x10000 = affine) */
+    /* r = light index into the active palookup slot.  Only `r` of v0
+     * is sampled (flat shading per triangle).  CMD_DRAW_TRIANGLES
+     * fragments ALWAYS route through palookup[colormap_id][r][texel];
+     * any `r` value used MUST have its row populated, or the fragment
+     * renders 0x00.  Convention: load row 0 with identity (cm[i]=i)
+     * so r=0 means "raw textured / unlit". */
     uint8_t  r, g, b, a;   /* Vertex color / light / alpha */
 } of_gpu_vertex_t;          /* 24 bytes = 6 words */
 

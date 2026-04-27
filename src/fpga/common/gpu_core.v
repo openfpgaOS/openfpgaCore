@@ -845,6 +845,17 @@ reg [15:0] sp_tex_w_mask;
 reg [15:0] sp_tex_h_mask;
 
 // Span flags
+//
+// SPAN_COLORMAP (bit 0) gates the cmap LUT lookup in the p2b → p3 mux:
+//   set:   p3_color = palookup[colormap_id][light][texel]
+//   clear: p3_color = texel  (raw passthrough — UI text, untextured glyphs)
+//
+// IMPORTANT: the triangle path (S_TRI_PIX) sets this bit unconditionally.
+// Every triangle fragment goes through cmap[colormap_id][v_r[0]][texel].
+// The host MUST upload a populated cmap row for every `r` value any
+// vertex carries, or that fragment renders 0x00.  The convention used
+// by tb_gpu and the SDK is "row 0 = identity (cm[i]=i)" so that
+// triangles drawn with v_r=0 render as raw textured (unlit).
 localparam SPAN_COLORMAP    = 0;
 // bit 1 reserved (was SPAN_COLUMN — never wired)
 localparam SPAN_SKIP_ZERO   = 2;
@@ -3502,6 +3513,13 @@ always @(posedge clk) begin
                     // Flat lighting per triangle — light = v_r[0], no walk.
                     sp_light_q    <= tri_span_r_start;
                     sp_light_step <= 32'b0;
+                    // sp_flags bit 0 (SPAN_COLORMAP) is hard-set for every
+                    // triangle: triangle fragments always route through the
+                    // palookup LUT at cmap[colormap_id][v_r[0]][texel].  This
+                    // mirrors BUILD/Duke3D's lit-textured pipeline.  Callers
+                    // that want raw-texel triangles must upload an identity
+                    // row at the cmap[r] they reference (typically r=0); a
+                    // missing row reads 0 and renders the fragment black.
                     // PERSP flag (bit 5) folds in when tri_persp_active.
                     // bits 3/4 (DEPTH_TEST/WRITE) retired with the Z buffer.
                     sp_flags     <= 8'h01

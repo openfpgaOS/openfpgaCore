@@ -143,6 +143,16 @@ static void cmap_upload_bytes(uint32_t start, const uint8_t *bytes, int count) {
     palookup_upload_to_slot(0, start, bytes, count);
 }
 
+// Convenience: load slot-0 row 0 with identity (cm[i]=i) so triangles drawn
+// with vertex r=0 render as raw textured.  See of_gpu_vertex_t.r doc for
+// why this is required: triangle fragments always route through the cmap
+// LUT, so unpopulated rows return 0 and the fragment renders black.
+static void cmap_upload_identity_row0(void) {
+    uint8_t cm[256];
+    for (int i = 0; i < 256; i++) cm[i] = (uint8_t)i;
+    cmap_upload_bytes(0, cm, 256);
+}
+
 // Wait for GPU to reach fence, with timeout
 static bool gpu_wait_fence(uint32_t token, int timeout = 200000) {
     for (int t = 0; t < timeout; t++) {
@@ -359,7 +369,7 @@ static void test_solid_span() {
 
     // Upload identity colormap: output = input for light level 0
     // cmap[0*256 + i] = i  for i in 0..255
-    { uint8_t cm[256]; for (int i = 0; i < 256; i++) cm[i] = (uint8_t)i; cmap_upload_bytes(0, cm, 256); }
+    cmap_upload_identity_row0();
 
     // Set FB
     ring_cmd(0x23, 2);
@@ -413,7 +423,7 @@ static void test_textured_span() {
     gpu_init();
 
     // Upload identity colormap for light=0
-    { uint8_t cm[256]; for (int i = 0; i < 256; i++) cm[i] = (uint8_t)i; cmap_upload_bytes(0, cm, 256); }
+    cmap_upload_identity_row0();
 
     // Set FB
     ring_cmd(0x23, 2);
@@ -581,7 +591,7 @@ static void test_vertical_column() {
     gpu_init();
 
     // Identity colormap
-    { uint8_t cm[256]; for (int i = 0; i < 256; i++) cm[i] = (uint8_t)i; cmap_upload_bytes(0, cm, 256); }
+    cmap_upload_identity_row0();
 
     // Set FB (320 bytes per row)
     ring_cmd(0x23, 2);
@@ -636,7 +646,7 @@ static void test_spans_batch_one() {
 
     gpu_init();
 
-    { uint8_t cm[256]; for (int i = 0; i < 256; i++) cm[i] = (uint8_t)i; cmap_upload_bytes(0, cm, 256); }
+    cmap_upload_identity_row0();
 
     ring_cmd(0x23, 2);
     ring_write(FB_BASE_BYTE);
@@ -683,7 +693,7 @@ static void test_spans_batch_two() {
     gpu_init();
 
     /* Identity colormap so the rendered byte equals the texel byte. */
-    { uint8_t cm[256]; for (int i = 0; i < 256; i++) cm[i] = (uint8_t)i; cmap_upload_bytes(0, cm, 256); }
+    cmap_upload_identity_row0();
 
     /* SET_FB stride=320. */
     ring_cmd(0x23, 2);
@@ -755,7 +765,7 @@ static void test_spans_batch_dma_128() {
 
     gpu_init();
 
-    { uint8_t cm[256]; for (int i = 0; i < 256; i++) cm[i] = (uint8_t)i; cmap_upload_bytes(0, cm, 256); }
+    cmap_upload_identity_row0();
 
     ring_cmd(0x23, 2);
     ring_write(FB_BASE_BYTE);
@@ -849,7 +859,7 @@ static void test_spans_batch_dma_multi() {
 
     gpu_init();
 
-    { uint8_t cm[256]; for (int i = 0; i < 256; i++) cm[i] = (uint8_t)i; cmap_upload_bytes(0, cm, 256); }
+    cmap_upload_identity_row0();
 
     ring_cmd(0x23, 2);
     ring_write(FB_BASE_BYTE);
@@ -975,7 +985,7 @@ static void test_spans_batch_dma_sustained() {
 
     gpu_init();
 
-    { uint8_t cm[256]; for (int i = 0; i < 256; i++) cm[i] = (uint8_t)i; cmap_upload_bytes(0, cm, 256); }
+    cmap_upload_identity_row0();
 
     ring_cmd(0x23, 2);
     ring_write(FB_BASE_BYTE);
@@ -1093,7 +1103,7 @@ static void test_spans_batch_dma() {
 
     gpu_init();
 
-    { uint8_t cm[256]; for (int i = 0; i < 256; i++) cm[i] = (uint8_t)i; cmap_upload_bytes(0, cm, 256); }
+    cmap_upload_identity_row0();
 
     ring_cmd(0x23, 2);
     ring_write(FB_BASE_BYTE);
@@ -1178,7 +1188,7 @@ static void test_skip_zero() {
     gpu_init();
 
     // Identity colormap
-    { uint8_t cm[256]; for (int i = 0; i < 256; i++) cm[i] = (uint8_t)i; cmap_upload_bytes(0, cm, 256); }
+    cmap_upload_identity_row0();
 
     // Set FB
     ring_cmd(0x23, 2);
@@ -1228,7 +1238,7 @@ static void test_multiple_commands() {
     gpu_init();
 
     // Identity colormap
-    { uint8_t cm[256]; for (int i = 0; i < 256; i++) cm[i] = (uint8_t)i; cmap_upload_bytes(0, cm, 256); }
+    cmap_upload_identity_row0();
 
     // Set FB
     ring_cmd(0x23, 2);
@@ -1296,7 +1306,7 @@ static void test_spans_back_to_back_stress() {
     gpu_init();
 
     /* Identity colormap so the rendered byte equals the texel. */
-    { uint8_t cm[256]; for (int i = 0; i < 256; i++) cm[i] = (uint8_t)i; cmap_upload_bytes(0, cm, 256); }
+    cmap_upload_identity_row0();
 
     ring_cmd(0x23, 2);   /* SET_FB */
     ring_write(FB_BASE_BYTE);
@@ -1435,7 +1445,7 @@ static void test_tex_cache_miss() {
     gpu_init();
 
     // Identity colormap
-    { uint8_t cm[256]; for (int i = 0; i < 256; i++) cm[i] = (uint8_t)i; cmap_upload_bytes(0, cm, 256); }
+    cmap_upload_identity_row0();
 
     // Set FB
     ring_cmd(0x23, 2);
@@ -2244,7 +2254,7 @@ static void test_triangle_flat() {
     gpu_init();
 
     // Identity colormap for light=0
-    { uint8_t cm[256]; for (int i = 0; i < 256; i++) cm[i] = (uint8_t)i; cmap_upload_bytes(0, cm, 256); }
+    cmap_upload_identity_row0();
 
     // Set FB
     ring_cmd(0x23, 2);
@@ -2333,7 +2343,7 @@ static void test_triangle_textured() {
     gpu_init();
 
     // Identity colormap
-    { uint8_t cm[256]; for (int i = 0; i < 256; i++) cm[i] = (uint8_t)i; cmap_upload_bytes(0, cm, 256); }
+    cmap_upload_identity_row0();
 
     ring_cmd(0x23, 2);
     ring_write(FB_BASE_BYTE);
@@ -2384,7 +2394,7 @@ static void test_triangle_multi() {
 
     gpu_init();
 
-    { uint8_t cm[256]; for (int i = 0; i < 256; i++) cm[i] = (uint8_t)i; cmap_upload_bytes(0, cm, 256); }
+    cmap_upload_identity_row0();
 
     ring_cmd(0x23, 2);
     ring_write(FB_BASE_BYTE);
@@ -2765,7 +2775,7 @@ static void test_triangle_back_to_back_many() {
 
     gpu_init();
 
-    { uint8_t cm[256]; for (int i = 0; i < 256; i++) cm[i] = (uint8_t)i; cmap_upload_bytes(0, cm, 256); }
+    cmap_upload_identity_row0();
 
     ring_cmd(0x23, 2);
     ring_write(FB_BASE_BYTE);
@@ -2842,7 +2852,7 @@ static void test_triangle_tex_flush_swap() {
 
     gpu_init();
 
-    { uint8_t cm[256]; for (int i = 0; i < 256; i++) cm[i] = (uint8_t)i; cmap_upload_bytes(0, cm, 256); }
+    cmap_upload_identity_row0();
 
     ring_cmd(0x23, 2);
     ring_write(FB_BASE_BYTE);
@@ -2982,7 +2992,7 @@ static void test_triangle_batch_two(void) {
     printf("TEST: Batched DRAW_TRIANGLES — 2 triangles in one command\n");
 
     gpu_init();
-    { uint8_t cm[256]; for (int i = 0; i < 256; i++) cm[i] = (uint8_t)i; cmap_upload_bytes(0, cm, 256); }
+    cmap_upload_identity_row0();
 
     ring_cmd(0x23, 2); ring_write(FB_BASE_BYTE); ring_write(320);
     ring_cmd(0x10, 2); ring_write((1 << 16) | 0x00); ring_write(0);
@@ -3025,7 +3035,7 @@ static void test_triangle_batch_with_degenerate(void) {
     printf("TEST: Batched DRAW_TRIANGLES — 3 tris, middle degenerate\n");
 
     gpu_init();
-    { uint8_t cm[256]; for (int i = 0; i < 256; i++) cm[i] = (uint8_t)i; cmap_upload_bytes(0, cm, 256); }
+    cmap_upload_identity_row0();
 
     ring_cmd(0x23, 2); ring_write(FB_BASE_BYTE); ring_write(320);
     ring_cmd(0x10, 2); ring_write((1 << 16) | 0xEE); ring_write(0);
@@ -3070,7 +3080,7 @@ static void test_triangle_batch_disjoint_fb(void) {
     printf("TEST: Batched DRAW_TRIANGLES — disjoint FB regions, end flush\n");
 
     gpu_init();
-    { uint8_t cm[256]; for (int i = 0; i < 256; i++) cm[i] = (uint8_t)i; cmap_upload_bytes(0, cm, 256); }
+    cmap_upload_identity_row0();
 
     ring_cmd(0x23, 2); ring_write(FB_BASE_BYTE); ring_write(320);
     ring_cmd(0x10, 2); ring_write((1 << 16) | 0x00); ring_write(0);
@@ -3135,7 +3145,7 @@ static void test_span_partial_word_handoff(void) {
     printf("TEST: Span partial-word handoff (Duke3D vline/hline boundary repro)\n");
 
     gpu_init();
-    { uint8_t cm[256]; for (int i = 0; i < 256; i++) cm[i] = (uint8_t)i; cmap_upload_bytes(0, cm, 256); }
+    cmap_upload_identity_row0();
 
     ring_cmd(0x23, 2); ring_write(FB_BASE_BYTE); ring_write(320);
     ring_cmd(0x10, 2); ring_write((1 << 16) | 0xCC); ring_write(0); // sentinel CC
@@ -3220,7 +3230,7 @@ static void test_span_partial_reverse_stride(void) {
     printf("TEST: Span partial-word w/ reverse stride (Duke3D hlineasm4 repro)\n");
 
     gpu_init();
-    { uint8_t cm[256]; for (int i = 0; i < 256; i++) cm[i] = (uint8_t)i; cmap_upload_bytes(0, cm, 256); }
+    cmap_upload_identity_row0();
 
     ring_cmd(0x23, 2); ring_write(FB_BASE_BYTE); ring_write(320);
     ring_cmd(0x10, 2); ring_write((1 << 16) | 0xCC); ring_write(0);
@@ -3263,7 +3273,7 @@ static void test_span_back_to_back_columns(void) {
     printf("TEST: Span back-to-back columns (Duke3D vlineasm1 pattern, 32 cols)\n");
 
     gpu_init();
-    { uint8_t cm[256]; for (int i = 0; i < 256; i++) cm[i] = (uint8_t)i; cmap_upload_bytes(0, cm, 256); }
+    cmap_upload_identity_row0();
 
     ring_cmd(0x23, 2); ring_write(FB_BASE_BYTE); ring_write(320);
     ring_cmd(0x10, 2); ring_write((1 << 16) | 0xCC); ring_write(0);
@@ -4259,7 +4269,7 @@ static void test_triangle_batch_fan32(void) {
     printf("TEST: Batched DRAW_TRIANGLES — 32-tri fan (gpudemo mode 3 shape)\n");
 
     gpu_init();
-    { uint8_t cm[256]; for (int i = 0; i < 256; i++) cm[i] = (uint8_t)i; cmap_upload_bytes(0, cm, 256); }
+    cmap_upload_identity_row0();
 
     ring_cmd(0x23, 2); ring_write(FB_BASE_BYTE); ring_write(320);
     ring_cmd(0x10, 2); ring_write((1 << 16) | 0x00); ring_write(0);
@@ -4533,7 +4543,7 @@ static void test_gpudemo_mode0_replay(void) {
     gpu_init();
 
     /* Identity colormap (light=0 row). */
-    { uint8_t cm[256]; for (int i = 0; i < 256; i++) cm[i] = (uint8_t)i; cmap_upload_bytes(0, cm, 256); }
+    cmap_upload_identity_row0();
 
     /* Small non-trivial textures. */
     const uint32_t WALL_TEX  = TEX_BASE_BYTE;
@@ -4639,7 +4649,7 @@ static void submit_mode0_frame_dropy(uint32_t fb_base, uint32_t wall_tex,
 static void test_gpudemo_mode0_replay_with_drops(void) {
     printf("TEST: gpudemo Mode 0 replay WITH simulated MMIO drops (1 in 500)\n");
     gpu_init();
-    { uint8_t cm[256]; for (int i = 0; i < 256; i++) cm[i] = (uint8_t)i; cmap_upload_bytes(0, cm, 256); }
+    cmap_upload_identity_row0();
     const uint32_t WALL_TEX  = TEX_BASE_BYTE;
     const uint32_t FLOOR_TEX = TEX_BASE_BYTE + 64 * 64;
     for (uint32_t w = 0; w < (64 * 64) / 4; w++) {
