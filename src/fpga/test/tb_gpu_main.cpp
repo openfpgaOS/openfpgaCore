@@ -114,8 +114,10 @@ static void gpu_kick() {
 }
 
 // Palookup layout (must match gpu_core.v's PALOOKUP_BASE / PALOOKUP_STRIDE
-// and the SDK's of_gpu_palookup_upload).  Slot 0 starts at byte 0x100000.
-static const uint32_t PALOOKUP_BASE_BYTE  = 0x00100000;
+// and the SDK's OF_GPU_PALOOKUP_AXI_OFFSET in firmware/api/of_gpu.h).
+// Moved from 0x100000 to 0x3400000 to avoid the FB1 base at 0x10100000 —
+// every GPU FB write was trampling the palookup table at the old offset.
+static const uint32_t PALOOKUP_BASE_BYTE  = 0x03400000;
 static const uint32_t PALOOKUP_SLOT_STRIDE = 0x00004000;  // 16 KB per slot
 
 // Upload `count` bytes into a palookup slot at byte offset `start` within

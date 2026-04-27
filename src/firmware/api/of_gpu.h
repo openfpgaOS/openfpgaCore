@@ -187,7 +187,12 @@ static uint32_t _gpu_base;
  * advertises a `palookup_base` field that maps the same 26-bit
  * GPU AXI offset.
  * ================================================================ */
-#define OF_GPU_PALOOKUP_AXI_OFFSET 0x00100000u  /* GPU AXI M0 byte addr of slot 0 */
+/* GPU AXI M0 byte addr of palookup slot 0.  Was 0x00100000 but that
+ * collided with OF_TARGET_FB1_BASE = 0x10100000, so every FB1 frame
+ * overwrote the palookup table.  Moved to the 3 MB gap between heap
+ * end (0x13400000) and the audio sample pool (0x13700000).  MUST stay
+ * in sync with PALOOKUP_BASE in src/fpga/common/gpu_core.v. */
+#define OF_GPU_PALOOKUP_AXI_OFFSET 0x03400000u
 #define OF_GPU_PALOOKUP_STRIDE     0x00004000u  /* 16 KB per slot */
 #define OF_GPU_PALOOKUP_SLOTS      16
 

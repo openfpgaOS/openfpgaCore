@@ -451,10 +451,42 @@ end
 // the worst critical path on the 100 MHz domain (DSP mult + two long carry
 // chains in one cycle, -1.603 ns at slow 85°C). Computing the two products
 // continuously into registers lets S_TRI_ROW do only a 3-way add — no DSP
-// in the same cycle — shortening the cone to a single carry chain. The
-// update timing matches tri_ymin_x_stride: valid one cycle after tri_xmin/
-// tri_ymin latch in S_TRI_BBOX_CLAMP, i.e. during S_TRI_MUL_WAIT, so
-// triangle start latency is unchanged.
+// in the same cycle — shortening the cone to a single carry chain.
+//
+// Phase 2: dedicated DSP-input shadow regs.  The earlier shape used the
+// 32-bit `tri_A[i]` / `tri_B[i]` register fields directly as multiplier
+// inputs.  Quartus couldn't fit the 32×32 mult into one DSP18 — it
+// cascaded across two DSP blocks and left input/output FFs in fabric,
+// producing the worst path on the system clock (`tri_A[2]` →
+// `tri_e_init_Apx[2]`, slack -0.567 ns).  The narrow shadow regs below
+// shrink the operands to their actual signed ranges:
+//   * tri_A[i] = v_y[a] - v_y[b] with v_y in 12.4 signed, so tri_A
+//     fits in 17-bit signed [-65536, 65535] (truncation matches the
+//     stored value exactly, no precision loss).
+//   * tri_xmin/tri_ymin are clamped to [0, 2047] (12-bit unsigned),
+//     so {tri_xmin[11:0], 4'b0} is 16-bit unsigned ≤ 32752; padding
+//     to 17-bit signed keeps the leading bit zero.
+// Result: 17×17 signed → 34-bit product, fits ONE DSP18 with input
+// + output FFs all packed inside the block.  Adds 1 cycle of latency
+// (matches the existing tri_ymin_x_stride pipeline), absorbed by the
+// already-present S_TRI_MUL_WAIT2 — the consumer (S_TRI_INIT_ATTRIB
+// → S_TRI_ROW) doesn't read tri_e_init_Apx/Bpy until after that wait.
+reg signed [16:0] tri_A_dsp_in        [0:2];
+reg signed [16:0] tri_B_dsp_in        [0:2];
+reg signed [16:0] tri_xmin_sub_dsp_in;
+reg signed [16:0] tri_ymin_sub_dsp_in;
+always @(posedge clk) begin
+    tri_A_dsp_in[0]      <= tri_A[0][16:0];
+    tri_A_dsp_in[1]      <= tri_A[1][16:0];
+    tri_A_dsp_in[2]      <= tri_A[2][16:0];
+    tri_B_dsp_in[0]      <= tri_B[0][16:0];
+    tri_B_dsp_in[1]      <= tri_B[1][16:0];
+    tri_B_dsp_in[2]      <= tri_B[2][16:0];
+    // {sign(0), 12-bit tri_xmin, 4'b0} = 17-bit signed, value tri_xmin<<4.
+    tri_xmin_sub_dsp_in  <= $signed({1'b0, tri_xmin[11:0], 4'b0});
+    tri_ymin_sub_dsp_in  <= $signed({1'b0, tri_ymin[11:0], 4'b0});
+end
+
 (* multstyle = "dsp" *) reg signed [31:0] tri_e_init_Apx [0:2];
 (* multstyle = "dsp" *) reg signed [31:0] tri_e_init_Bpy [0:2];
 always @(posedge clk) begin
@@ -462,16 +494,12 @@ always @(posedge clk) begin
         tri_e_init_Apx[0] <= 0; tri_e_init_Apx[1] <= 0; tri_e_init_Apx[2] <= 0;
         tri_e_init_Bpy[0] <= 0; tri_e_init_Bpy[1] <= 0; tri_e_init_Bpy[2] <= 0;
     end else begin
-        // tri_xmin/tri_ymin are non-negative after clamping (S_TRI_BBOX_CLAMP),
-        // so the {xmin, 4'b0} / {ymin, 4'b0} 20-bit value zero-extends cleanly
-        // to 32-bit signed and the signed×signed DSP product matches the
-        // original px/py expression exactly.
-        tri_e_init_Apx[0] <= tri_A[0] * $signed({12'b0, tri_xmin, 4'b0});
-        tri_e_init_Apx[1] <= tri_A[1] * $signed({12'b0, tri_xmin, 4'b0});
-        tri_e_init_Apx[2] <= tri_A[2] * $signed({12'b0, tri_xmin, 4'b0});
-        tri_e_init_Bpy[0] <= tri_B[0] * $signed({12'b0, tri_ymin, 4'b0});
-        tri_e_init_Bpy[1] <= tri_B[1] * $signed({12'b0, tri_ymin, 4'b0});
-        tri_e_init_Bpy[2] <= tri_B[2] * $signed({12'b0, tri_ymin, 4'b0});
+        tri_e_init_Apx[0] <= tri_A_dsp_in[0] * tri_xmin_sub_dsp_in;
+        tri_e_init_Apx[1] <= tri_A_dsp_in[1] * tri_xmin_sub_dsp_in;
+        tri_e_init_Apx[2] <= tri_A_dsp_in[2] * tri_xmin_sub_dsp_in;
+        tri_e_init_Bpy[0] <= tri_B_dsp_in[0] * tri_ymin_sub_dsp_in;
+        tri_e_init_Bpy[1] <= tri_B_dsp_in[1] * tri_ymin_sub_dsp_in;
+        tri_e_init_Bpy[2] <= tri_B_dsp_in[2] * tri_ymin_sub_dsp_in;
     end
 end
 
@@ -913,7 +941,13 @@ reg [3:0]  st_colormap_id;
 // 8 KB but pads to 16 KB so the slot index multiplier is a clean shift).
 // Both are CPU-known constants so palookup uploads (CPU → SDRAM) and GPU
 // cmap reads agree on layout without any per-slot register state.
-localparam [25:0] PALOOKUP_BASE   = 26'h0100000;  // 1 MB into SDRAM
+// Was 26'h0100000 (1 MB into SDRAM) but that overlapped FB1 at
+// OF_TARGET_FB1_BASE = 0x10100000 — every GPU FB write trampled the
+// palookup table, producing a uniform-colour fixed point on screen
+// regardless of (light, texel).  Moved to the dedicated 3 MB gap
+// between heap end (0x13400000) and sample pool start (0x13700000).
+// Keep in sync with OF_GPU_PALOOKUP_AXI_OFFSET in firmware/api/of_gpu.h.
+localparam [25:0] PALOOKUP_BASE   = 26'h3400000;  // 52 MB into SDRAM
 localparam [25:0] PALOOKUP_STRIDE = 26'h0004000;  // 16 KB per slot
 
 // Payload streaming state — ring_rd_data is routed directly to each
