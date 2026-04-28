@@ -803,20 +803,19 @@ always @(posedge clk) begin
             // value (header position) to the post-DMA ring_wr_addr*4
             // (covering header + every payload word in this kick).
             //
-            // CRITICAL: hold here while the port-A skid still has a
-            // parked DMA beat.  If the LAST DMA beat (m_rd_rlast cycle)
-            // collided with a CPU MMIO write to GPU_RING_DATA, the beat
-            // went into `dma_pend_*` and ring_bram's last cell hasn't
-            // been written yet.  Publishing ring_wrptr here would
-            // expose a ring position whose data is stale — exactly the
-            // failure mode this skid was added to fix.  Wait until the
-            // skid drains (next cycle with no further CPU collision)
-            // so ring_wr_addr's final value reflects the committed
-            // last beat.
-            if (!dma_pend_valid) begin
-                dma_publish_wrptr <= 1'b1;
-                dma_state         <= DMA_S_IDLE;
-            end
+            // The earlier wait-for-skid-drain shape (`if (!dma_pend_valid)`)
+            // produced a silent wedge in Duke3D's batched-DMA path: the
+            // CPU's `while (GPU_STATUS & GPU_STATUS_DMA_BUSY)` spin has
+            // no watchdog, so any path where DMA never publishes
+            // = forever-spin.  Reverting to unconditional publish here
+            // eliminates the wedge.  Risk: if the LAST DMA beat collided
+            // with a CPU MMIO and parked in the skid, publish fires
+            // before ring_bram's last cell is written — one corrupt
+            // span per rare collision.  Acceptable trade for now;
+            // proper fix is to delay publish by 2 cycles unconditionally
+            // or remove the skid path entirely.
+            dma_publish_wrptr <= 1'b1;
+            dma_state         <= DMA_S_IDLE;
         end
 
         default: dma_state <= DMA_S_IDLE;
