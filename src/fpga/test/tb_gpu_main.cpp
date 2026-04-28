@@ -361,6 +361,119 @@ static void test_clear_rect(void) {
     check_byte("rect3_below",     101*320 + 200, 0xAA);
 }
 
+// Test 2c: CMD_CLEAR_RECT with per-command stride.
+// Repro of the BUILD `setviewtotile` bug from
+// openfpgaOS/docs/cr-gpu-clear-rect-stride.md: the global SET_FB stride
+// is one value (320 = screen), but the clear targets a tile buffer
+// whose rows are spaced differently (160).  Without per-command
+// stride, the clear walks 320 bytes/row across 160-byte tile rows,
+// leaving every other tile row with stale pixels.  With the fix,
+// stride==160 in the payload makes the clear walk the right spacing.
+//
+// Layout:
+//   - SET_FB at FB_BASE with stride=320 (screen).
+//   - Pre-fill the 16 KB region with a sentinel (0xAA) via CMD_CLEAR.
+//   - Issue CMD_CLEAR_RECT with start=FB+0x100, w=80, h=8, stride=160,
+//     color=0x55.  This addresses a tile sitting at offset 0x100 with
+//     8 rows of 80 bytes spaced 160 bytes apart.
+//   - Verify each row's first 80 bytes are 0x55 AND the gap between
+//     rows (bytes [80..159] of each tile row) stays at the sentinel
+//     (proving the stride was 160 not 320).
+//   - Verify the SET_FB global stride is unchanged (issue a regular
+//     CMD_CLEAR after; if it walks 320 it's fine, if it walks 160 the
+//     decoder leaked the per-command stride).
+static void test_clear_rect_per_command_stride(void) {
+    printf("TEST: CMD_CLEAR_RECT — per-command stride (BUILD setviewtotile fix)\n");
+    gpu_init();
+    ring_cmd(0x23, 2); ring_write(FB_BASE_BYTE); ring_write(320);
+    ring_cmd(0x10, 2); ring_write((1u << 16) | 0xAAu); ring_write(0);
+
+    const uint32_t TILE_OFFSET = 0x100;       // start of tile-buffer region
+    const uint32_t TILE_BASE   = FB_BASE_BYTE + TILE_OFFSET;
+    const uint32_t TILE_W      = 80;          // tile pixel width
+    const uint32_t TILE_H      = 8;           // tile rows
+    const uint32_t TILE_STRIDE = 160;         // bytes between successive rows
+    const uint8_t  TILE_COLOR  = 0x55;
+
+    // Per-command stride goes in word 2 bits [31:16] alongside color in [7:0].
+    ring_cmd(0x11, 3);
+    ring_write(TILE_BASE);
+    ring_write((TILE_W << 16) | TILE_H);
+    ring_write(((uint32_t)TILE_STRIDE << 16) | (uint32_t)TILE_COLOR);
+
+    bool ok = gpu_finish();
+    check("rect_stride_done", ok ? 1 : 0, 1);
+
+    // Inside-rect bytes at every row must be TILE_COLOR.
+    int inside_fail = 0;
+    for (uint32_t r = 0; r < TILE_H; r++) {
+        for (uint32_t x = 0; x < TILE_W; x++) {
+            uint8_t got = sdram_read_byte(TILE_BASE + r * TILE_STRIDE + x);
+            if (got != TILE_COLOR) {
+                if (inside_fail < 4)
+                    printf("  FAIL inside r=%u x=%u: got 0x%02x exp 0x%02x\n",
+                           r, x, got, TILE_COLOR);
+                inside_fail++;
+            }
+        }
+    }
+    // Gap bytes (between tile rows: [TILE_W..TILE_STRIDE-1]) must remain
+    // sentinel — if they're TILE_COLOR, the clear used stride=320 and
+    // overwrote past the tile width.  Skip the LAST row's gap because
+    // there's no next row to bound it.
+    int gap_fail = 0;
+    for (uint32_t r = 0; r + 1 < TILE_H; r++) {
+        for (uint32_t x = TILE_W; x < TILE_STRIDE; x++) {
+            uint8_t got = sdram_read_byte(TILE_BASE + r * TILE_STRIDE + x);
+            if (got != 0xAA) {
+                if (gap_fail < 4)
+                    printf("  FAIL gap r=%u x=%u: got 0x%02x (stride leaked into next row)\n",
+                           r, x, got);
+                gap_fail++;
+            }
+        }
+    }
+    if (inside_fail == 0 && gap_fail == 0) {
+        pass_count++;
+        printf("  OK  per-command stride=160 walked correctly across %u rows\n",
+               TILE_H);
+    } else {
+        fail_count++;
+        printf("  FAIL clear_rect_stride: %d inside + %d gap mismatches\n",
+               inside_fail, gap_fail);
+    }
+
+    // Now verify the GLOBAL stride wasn't disturbed: issue a second
+    // CLEAR_RECT with stride==0 (legacy mode, falls back to st_fb_stride).
+    // This rect should walk 320 bytes/row.  Place it well clear of the
+    // tile region above so we can spot-check unambiguously.
+    const uint32_t POST_BASE  = FB_BASE_BYTE + 100 * 320;  // row 100
+    const uint8_t  POST_COLOR = 0x66;
+    ring_cmd(0x11, 3);
+    ring_write(POST_BASE);
+    ring_write((40u << 16) | 4u);              // 40-wide × 4-tall
+    ring_write((uint32_t)POST_COLOR);          // stride field=0 → use SET_FB
+    check("rect_stride_post_done", gpu_finish() ? 1 : 0, 1);
+    // Each of the 4 rows should have its 40 bytes set, with rows
+    // spaced 320 apart.
+    int legacy_fail = 0;
+    for (int r = 0; r < 4; r++) {
+        for (int x = 0; x < 40; x++) {
+            uint8_t got = sdram_read_byte(POST_BASE + r * 320 + x);
+            if (got != POST_COLOR) legacy_fail++;
+        }
+        // Just past the rect: should still be sentinel.
+        if (sdram_read_byte(POST_BASE + r * 320 + 40) != 0xAA) legacy_fail++;
+    }
+    if (legacy_fail == 0) {
+        pass_count++;
+        printf("  OK  legacy stride==0 still falls back to SET_FB stride\n");
+    } else {
+        fail_count++;
+        printf("  FAIL legacy fallback broken: %d mismatches\n", legacy_fail);
+    }
+}
+
 // Test 3: Simple untextured span (solid color via identity colormap)
 static void test_solid_span() {
     printf("TEST: Solid-color span (identity colormap)\n");
@@ -1955,6 +2068,305 @@ static void test_persp_negative_zinv() {
                     /*zi_step*/-0x1000);  // zinv = 0.5 → -0.5 across the span
     // Only require the span COMPLETES. Values are undefined-behavior.
     check("persp_negz_done", gpu_finish() ? 1 : 0, 1);
+}
+
+// ============================================================
+// Persp + colormap remap (lit perspective span).
+// All existing persp tests use light=0 with identity cmap row 0 →
+// cmap path is structurally exercised but the *remap* table is a
+// no-op.  Triangle path always sets sp_flags[SPAN_COLORMAP] AND
+// sp_flags[SPAN_PERSP] for perspective triangles, so this combo is
+// what every perspective Duke3D triangle actually hits.  This test
+// exercises a non-identity cmap row through the perspective path
+// to verify the cmap address generator uses the perspective-corrected
+// texel (sp_s[31:16], not the affine sp_t).
+// ============================================================
+static void test_persp_span_cmap_lit() {
+    printf("TEST: Persp span — non-identity cmap row (lit perspective)\n");
+    gpu_init();
+
+    // Cmap: row 0 identity, row 5 = 0xC0 + i (each input maps to a
+    // unique output byte distinct from row 0).
+    {
+        uint8_t cm[6 * 256];
+        for (int i = 0; i < 256; i++) cm[i] = (uint8_t)i;            // row 0 = identity
+        for (int i = 0; i < 256; i++) cm[256 + i] = 0;
+        for (int i = 0; i < 256; i++) cm[2 * 256 + i] = 0;
+        for (int i = 0; i < 256; i++) cm[3 * 256 + i] = 0;
+        for (int i = 0; i < 256; i++) cm[4 * 256 + i] = 0;
+        for (int i = 0; i < 256; i++) cm[5 * 256 + i] = 0xC0 ^ (uint8_t)i;
+        cmap_upload_bytes(0, cm, 6 * 256);
+    }
+
+    ring_cmd(0x23, 2); ring_write(FB_BASE_BYTE); ring_write(320);
+    ring_cmd(0x10, 2); ring_write((1 << 16) | 0x00); ring_write(0);
+
+    // 16-byte texture: byte i = i.
+    for (int w = 0; w < 4; w++) {
+        uint32_t v = (w*4) | ((w*4+1) << 8) | ((w*4+2) << 16) | ((w*4+3) << 24);
+        sdram_write((TEX_BASE_BYTE >> 2) + w, v);
+    }
+
+    // Constant 1/z = 1.0 → affine-equivalent perspective.  sZstep=1.0
+    // per pixel → s_int = pixel index.  Texture[i] = i.  Light=5.
+    // Expected output: cmap[5][i] = 0xC0 ^ i.
+    persp_draw_span(FB_BASE_BYTE, TEX_BASE_BYTE,
+                    /*count*/16, /*light*/5, /*tex_width*/16,
+                    /*sdivz*/0,           /*tdivz*/0,
+                    /*zi_persp*/0x10000,
+                    /*sdivz_step*/0x10000, /*tdivz_step*/0,
+                    /*zi_step*/0);
+
+    bool ok = gpu_finish();
+    check("persp_cmap_lit_done", ok ? 1 : 0, 1);
+
+    // Each pixel must be the cmap-remapped texel, not the raw texel.
+    int mismatch = 0;
+    for (int i = 0; i < 16; i++) {
+        uint8_t got = sdram_read_byte(FB_BASE_BYTE + i);
+        uint8_t exp = (uint8_t)(0xC0 ^ i);
+        if (got != exp) {
+            if (mismatch < 4) {
+                printf("  FAIL persp_cmap_lit_px%d: got 0x%02x exp 0x%02x\n",
+                       i, got, exp);
+            }
+            mismatch++;
+        }
+    }
+    if (mismatch == 0) {
+        pass_count++;
+        printf("  OK  persp + cmap remap correct across 16 pixels\n");
+    } else {
+        fail_count++;
+        printf("  FAIL persp + cmap: %d / 16 pixels wrong\n", mismatch);
+    }
+}
+
+// ============================================================
+// Sub-segment span end + immediate persp follow-up.
+// 9-pixel span ends mid-segment-2 (segment 1 = pixels 0-7, then 1
+// pixel at index 8).  At span end, sp_seg_left ≠ 0 because segment 2
+// only got 1 of its 8 pixels.  The next persp span needs to start
+// clean: PSS in IDLE, sp_seg_left reset to 0 by S_EXECUTE, persp_pass
+// re-armed to PASS_ANCHOR.  If any of those leaks across span
+// boundaries, this test catches it.
+// ============================================================
+static void test_persp_span_subsegment_end(void) {
+    printf("TEST: Persp span — sub-segment end + immediate persp follow-up\n");
+    gpu_init();
+
+    { uint8_t cm[256]; for (int i = 0; i < 256; i++) cm[i] = (uint8_t)i; cmap_upload_bytes(0, cm, 256); }
+
+    ring_cmd(0x23, 2); ring_write(FB_BASE_BYTE); ring_write(320);
+    ring_cmd(0x10, 2); ring_write((1 << 16) | 0x00); ring_write(0);
+
+    // 16-byte texture, byte i = i.
+    for (int w = 0; w < 4; w++) {
+        uint32_t v = (w*4) | ((w*4+1) << 8) | ((w*4+2) << 16) | ((w*4+3) << 24);
+        sdram_write((TEX_BASE_BYTE >> 2) + w, v);
+    }
+
+    // First span: 9 pixels at FB[0..8], constant 1/z, sZstep=1.0.
+    // Ends mid-segment-2 (only 1 pixel into segment 2).
+    persp_draw_span(FB_BASE_BYTE, TEX_BASE_BYTE,
+                    /*count*/9, /*light*/0, /*tex_width*/16,
+                    /*sdivz*/0,           /*tdivz*/0,
+                    /*zi_persp*/0x10000,
+                    /*sdivz_step*/0x10000, /*tdivz_step*/0,
+                    /*zi_step*/0);
+
+    // Second span: 16 pixels at FB[16..31], same params — must produce
+    // the same texel sequence 0..15.  If sp_seg_left or persp_pass
+    // leaked, this span renders wrong values.
+    persp_draw_span(FB_BASE_BYTE + 16, TEX_BASE_BYTE,
+                    /*count*/16, /*light*/0, /*tex_width*/16,
+                    /*sdivz*/0,           /*tdivz*/0,
+                    /*zi_persp*/0x10000,
+                    /*sdivz_step*/0x10000, /*tdivz_step*/0,
+                    /*zi_step*/0);
+
+    bool ok = gpu_finish();
+    check("persp_subseg_done", ok ? 1 : 0, 1);
+
+    // Span 1: pixels 0..8 → texel 0..8.
+    int mm1 = 0;
+    for (int i = 0; i < 9; i++) {
+        uint8_t got = sdram_read_byte(FB_BASE_BYTE + i);
+        if (got != (uint8_t)i) {
+            if (mm1 < 2) printf("  FAIL span1 px%d: got 0x%02x exp 0x%02x\n", i, got, i);
+            mm1++;
+        }
+    }
+    // Span 2: pixels 0..15 → texel 0..15.
+    int mm2 = 0;
+    for (int i = 0; i < 16; i++) {
+        uint8_t got = sdram_read_byte(FB_BASE_BYTE + 16 + i);
+        if (got != (uint8_t)i) {
+            if (mm2 < 2) printf("  FAIL span2 px%d: got 0x%02x exp 0x%02x\n", i, got, i);
+            mm2++;
+        }
+    }
+    if (mm1 == 0 && mm2 == 0) {
+        pass_count++;
+        printf("  OK  9-px + 16-px persp spans both render fresh state\n");
+    } else {
+        fail_count++;
+        printf("  FAIL persp_subseg: span1 %d/9 wrong, span2 %d/16 wrong\n", mm1, mm2);
+    }
+}
+
+// ============================================================
+// Long-corridor monotonicity stress.
+// User symptoms: perspective looks wrong "in specific scenes only —
+// e.g., looking down a long corridor" + "flickering/random texels in
+// specific areas".  That profile = the camera looking far, where 1/w
+// is small and the recip-LUT + Newton-Raphson chain is at its
+// precision limit.  Existing tests verify the math is correct AT
+// specific values; this one verifies texel progression is MONOTONIC
+// as 1/w sweeps across CLZ + LUT-entry boundaries.  A non-monotonic
+// jump in the output sequence is exactly what shows up in-game as
+// flickering or random texels at distance.
+// ============================================================
+static void test_persp_long_corridor_monotonic(void) {
+    printf("TEST: Persp span — long-corridor monotonicity (LUT/NR boundary stress)\n");
+    gpu_init();
+
+    cmap_upload_identity_row0();
+
+    ring_cmd(0x23, 2); ring_write(FB_BASE_BYTE); ring_write(320);
+    ring_cmd(0x10, 2); ring_write((1 << 16) | 0x00); ring_write(0);
+
+    // 256-byte texture, byte i = i.  Plenty of distinct texels so the
+    // monotonicity check picks up off-by-one regressions.
+    for (int w = 0; w < 64; w++) {
+        uint32_t v = (w*4) | ((w*4+1) << 8) | ((w*4+2) << 16) | ((w*4+3) << 24);
+        sdram_write((TEX_BASE_BYTE >> 2) + w, v);
+    }
+
+    // 256-pixel span representing a floor/wall extending into the
+    // distance.  Start near (large 1/w), sweep to far (small 1/w).
+    //   zi_persp at pixel 0  = 0x10000   (1.0)
+    //   zi_persp at pixel 255 ≈ 0x10000 - 255*0xC0 = 0x4040  (~0.25)
+    // sdivz starts at 0 and sweeps so true s = sdivz/zinv covers 0→256
+    // monotonically.  We do NOT expect bit-exact texel match (curvature
+    // + Q-format quantization make some pixels off by 1) — but we DO
+    // expect texels to be NON-DECREASING (camera walking forward into
+    // the distance, every pixel's texel ≥ the previous's).  Any
+    // backward jump in the rendered sequence is a precision bug.
+    persp_draw_span(FB_BASE_BYTE, TEX_BASE_BYTE,
+                    /*count*/256, /*light*/0, /*tex_width*/256,
+                    /*sdivz*/0,           /*tdivz*/0,
+                    /*zi_persp*/0x10000,
+                    /*sdivz_step*/0x100,  /*tdivz_step*/0,    // s/w ramps
+                    /*zi_step*/-0xC0);                        // 1/w shrinks
+
+    bool ok = gpu_finish();
+    check("persp_corridor_done", ok ? 1 : 0, 1);
+    if (!ok) return;
+
+    // Walk the span; track non-monotonic transitions and large jumps.
+    int back_jumps = 0;
+    int large_jumps = 0;
+    int last_rendered = -1;
+    for (int i = 0; i < 256; i++) {
+        uint8_t got = sdram_read_byte(FB_BASE_BYTE + i);
+        if (last_rendered >= 0) {
+            int delta = (int)got - last_rendered;
+            if (delta < 0) {
+                if (back_jumps < 4) {
+                    printf("  WARN px%d: back-jump %d → %d\n",
+                           i, last_rendered, got);
+                }
+                back_jumps++;
+            }
+            // A "large jump" forward is also suspicious — texels
+            // should change smoothly, not by >4 in one pixel given
+            // our parameter ramp.
+            if (delta > 4) {
+                if (large_jumps < 4) {
+                    printf("  WARN px%d: large-fwd-jump %d → %d (Δ=%d)\n",
+                           i, last_rendered, got, delta);
+                }
+                large_jumps++;
+            }
+        }
+        last_rendered = got;
+    }
+    printf("  back_jumps=%d large_fwd_jumps=%d (256 pixels)\n",
+           back_jumps, large_jumps);
+    // Tolerate up to 2 back-jumps (Q-format truncation can cause one
+    // adjacent-pixel inversion at PSS segment boundaries).  Any more
+    // than that = real precision issue, which is what we're hunting.
+    if (back_jumps <= 2 && large_jumps <= 4) {
+        pass_count++;
+        printf("  OK  texel sequence monotonic-within-tolerance\n");
+    } else {
+        fail_count++;
+        printf("  FAIL persp corridor: %d back-jumps + %d large-jumps exceed tolerance\n",
+               back_jumps, large_jumps);
+    }
+}
+
+// ============================================================
+// CLZ boundary cross — tight zi_persp sweep through a power-of-2.
+// At each CLZ boundary (where the leading-zero count changes), the
+// recip computation switches LUT-entry-range: the [13:0] shift
+// constant in PSS_RECIP_SHIFT changes by one.  If shift logic has a
+// rounding hazard at the boundary, texels jump unexpectedly when
+// zi_persp crosses the boundary — visible as a 1-pixel flicker line
+// in-game when the camera moves slowly toward a wall.
+// ============================================================
+static void test_persp_span_clz_boundary(void) {
+    printf("TEST: Persp span — CLZ boundary cross (zi_persp → 0x4000 transition)\n");
+    gpu_init();
+    cmap_upload_identity_row0();
+
+    ring_cmd(0x23, 2); ring_write(FB_BASE_BYTE); ring_write(320);
+    ring_cmd(0x10, 2); ring_write((1 << 16) | 0x00); ring_write(0);
+    for (int w = 0; w < 64; w++) {
+        uint32_t v = (w*4) | ((w*4+1) << 8) | ((w*4+2) << 16) | ((w*4+3) << 24);
+        sdram_write((TEX_BASE_BYTE >> 2) + w, v);
+    }
+
+    // 32-pixel span where zinv crosses a CLZ boundary mid-span.
+    //   zinv at px 0  = 0x4040 (CLZ = 17)
+    //   zinv at px 31 = 0x4040 - 31*8 = 0x3F08 (CLZ = 18)
+    // This straddles the 0x4000 boundary, exercising both shift paths
+    // in PSS_RECIP_SHIFT.
+    persp_draw_span(FB_BASE_BYTE, TEX_BASE_BYTE,
+                    /*count*/32, /*light*/0, /*tex_width*/256,
+                    /*sdivz*/0,           /*tdivz*/0,
+                    /*zi_persp*/0x4040,
+                    /*sdivz_step*/0x10,   /*tdivz_step*/0,
+                    /*zi_step*/-0x8);
+
+    bool ok = gpu_finish();
+    check("persp_clz_done", ok ? 1 : 0, 1);
+    if (!ok) return;
+
+    // Verify texels are monotonically non-decreasing across the
+    // boundary.  Any reversal in this 32-pixel sweep that includes
+    // both CLZ values = the shift-rounding glitch we're hunting.
+    int reversals = 0;
+    int last = -1;
+    for (int i = 0; i < 32; i++) {
+        uint8_t got = sdram_read_byte(FB_BASE_BYTE + i);
+        if (last >= 0 && got < last) {
+            if (reversals < 4) {
+                printf("  WARN px%d: reversal %d → %d (CLZ boundary)\n",
+                       i, last, got);
+            }
+            reversals++;
+        }
+        last = got;
+    }
+    if (reversals == 0) {
+        pass_count++;
+        printf("  OK  CLZ-boundary sweep monotonic across 32 pixels\n");
+    } else {
+        fail_count++;
+        printf("  FAIL persp_clz: %d reversals at CLZ boundary\n", reversals);
+    }
 }
 
 // =====================================================================
@@ -3639,13 +4051,23 @@ static void test_persp_quake_d_scan_repro(void) {
     printf("  total=%d within_1=%d max_diff_s=%d worst@u=%d got=0x%02x exp_s=%d exp_t=%d\n",
            total, within_1, max_diff, worst_u, worst_got, worst_exp_s, worst_exp_t);
 
-    bool pass = (within_1 * 5 >= total * 4) && (max_diff <= 4);
+    // Tightened (Q3): the Newton-Raphson recip refinement (gpu_core.v
+    // commit 2666f2c) brings actual Quake-parameter spans to 0-texel
+    // error in steady state.  The prior `within_1 * 5 >= total * 4 &&
+    // max_diff <= 4` clause permitted a systematic 4-texel bias to
+    // pass, which would exactly match the visual drift symptom on
+    // distant walls.  Lock it down to "every pixel within 1 texel,
+    // worst case ≤ 1" so any future regression in the recip pipeline
+    // surfaces immediately.
+    bool pass = (within_1 == total) && (max_diff <= 1);
     if (pass) {
         pass_count++;
-        printf("  OK  Quake-shape persp span tracks engine reference\n");
+        printf("  OK  Quake-shape persp span tracks engine reference (within_1=%d/%d, max_diff=%d)\n",
+               within_1, total, max_diff);
     } else {
         fail_count++;
-        printf("  FAIL Quake-shape persp span diverges — Bug 2 reproducer\n");
+        printf("  FAIL Quake-shape persp span diverges — Bug 2 reproducer (within_1=%d/%d, max_diff=%d)\n",
+               within_1, total, max_diff);
     }
 
     // Sweep more extreme obliqueness: zi_step = 30, 100, 1000.
@@ -4099,6 +4521,136 @@ static void test_triangle_affine_cw_winding(void) {
 // mistake in the bbox-init Q-format would corrupt every pixel since
 // tri_s starts wrong.  Verifies my fix is correct for the V0-offset
 // case Quake actually hits (alias models rarely have V0 at bbox origin).
+// ============================================================
+// Q4: Gouraud-light interpolation across a triangle.
+//
+// Quake's d_polyse.c::D_DrawNonSubdiv emits per-vertex r values
+// (D_ALIAS_GOURAUD=1), expecting the GPU to interpolate the colormap
+// row index per pixel.  The hardware's gradient loop skips r at
+// grad_idx 5 (gpu_core.v:1578) and S_TRI_PIX sets sp_light_step=0
+// (gpu_core.v:3687), so triangles render with v_r[0]'s row applied
+// flat across the entire triangle — v_r[1] and v_r[2] are ignored.
+//
+// This test makes that observable: emit a triangle with v_r[0]=10,
+// v_r[1]=40, v_r[2]=20 (all distinct, far apart on the cmap).  Set
+// cmap row 10 to all-0x10, row 40 to all-0x40, row 20 to all-0x20.
+// If Gouraud actually works, pixels near v0/v1/v2 sample
+// 0x10/0x40/0x20 respectively, with smooth interpolation between.
+// If the hardware is flat-from-v0, every pixel reads cmap row 10 →
+// all 0x10.
+//
+// Behaviour we VERIFY (matches current hardware): every interior
+// pixel = 0x10 (flat from v_r[0]).  The test failing in the future
+// would mean Gouraud gradient was added to gpu_core (a positive
+// regression), and the test condition should flip to "interpolated".
+// ============================================================
+static void test_triangle_gouraud_light_flat_from_v0(void) {
+    printf("TEST: Triangle Gouraud — verify hardware flat-from-v[0] behavior\n");
+    gpu_init();
+
+    // Cmap rows 0, 10, 20, 40 distinct.  Row 0 = identity (raw texel).
+    // Rows 10/20/40 = uniform 0x10/0x20/0x40 respectively.
+    {
+        uint8_t cm[64 * 256];
+        memset(cm, 0, sizeof(cm));
+        for (int i = 0; i < 256; i++) cm[i] = (uint8_t)i;          // row 0 = identity
+        for (int i = 0; i < 256; i++) cm[10 * 256 + i] = 0x10;     // row 10 → 0x10
+        for (int i = 0; i < 256; i++) cm[20 * 256 + i] = 0x20;     // row 20 → 0x20
+        for (int i = 0; i < 256; i++) cm[40 * 256 + i] = 0x40;     // row 40 → 0x40
+        cmap_upload_bytes(0, cm, sizeof(cm));
+    }
+
+    ring_cmd(0x23, 2); ring_write(FB_BASE_BYTE); ring_write(320);
+    ring_cmd(0x10, 2); ring_write((1u << 16) | 0xCCu); ring_write(0);
+
+    // 8x8 texture, byte i+t*8 — only used to drive the cmap lookup.
+    for (int t = 0; t < 8; t++) {
+        for (int s = 0; s < 8; s += 4) {
+            uint32_t w = ((uint32_t)((s+0) + t*8))       |
+                         ((uint32_t)((s+1) + t*8) <<  8) |
+                         ((uint32_t)((s+2) + t*8) << 16) |
+                         ((uint32_t)((s+3) + t*8) << 24);
+            sdram_write((TEX_BASE_BYTE >> 2) + (t * 8 + s) / 4, w);
+        }
+    }
+    ring_bind_texture(TEX_BASE_BYTE, 8, 8);
+
+    // Triangle: 16x12, with distinct r per vertex.  Affine (w=1.0)
+    // so PSS doesn't enter the picture — pure flat-vs-Gouraud probe.
+    //   v0 at top-left (16,8) with r=10
+    //   v1 at top-right (32,8) with r=40
+    //   v2 at bottom-left (16,20) with r=20
+    int xL = 16, xR = 32, y0 = 8, y1 = 20;
+
+    ring_cmd(0x30, 19);
+    ring_write(3);
+    // v0
+    ring_write(((uint32_t)(uint16_t)(xL*16) << 16) | (uint16_t)(y0*16));
+    ring_write(0);
+    ring_write(0);                   // s
+    ring_write(0);                   // t
+    ring_write(0x00010000u);         // w = 1.0 (affine)
+    ring_write(10);                  // r = 10 → if flat, all pixels read cmap[10]=0x10
+    // v1
+    ring_write(((uint32_t)(uint16_t)(xR*16) << 16) | (uint16_t)(y0*16));
+    ring_write(0);
+    ring_write((uint32_t)(7 << 16)); // s
+    ring_write(0);
+    ring_write(0x00010000u);
+    ring_write(40);                  // r = 40 → if Gouraud, near-v1 pixels read cmap[40]=0x40
+    // v2
+    ring_write(((uint32_t)(uint16_t)(xL*16) << 16) | (uint16_t)(y1*16));
+    ring_write(0);
+    ring_write(0);
+    ring_write((uint32_t)(7 << 16)); // t
+    ring_write(0x00010000u);
+    ring_write(20);                  // r = 20 → if Gouraud, near-v2 pixels read cmap[20]=0x20
+
+    bool ok = gpu_finish();
+    check("gouraud_done", ok ? 1 : 0, 1);
+    if (!ok) return;
+
+    // Walk the bbox; classify each interior pixel.
+    int n_v0_color = 0;   // pixels rendering as 0x10 (cmap row 10)
+    int n_v1_color = 0;   // pixels rendering as 0x40 (cmap row 40)
+    int n_v2_color = 0;   // pixels rendering as 0x20 (cmap row 20)
+    int n_other    = 0;
+    int total_inside = 0;
+    for (int y = y0; y <= y1; y++) {
+        for (int x = xL; x <= xR; x++) {
+            // Right-triangle inside test: (dx/W) + (dy/H) ≤ 1.0
+            int dx = x - xL, dy = y - y0;
+            int W  = xR - xL, H = y1 - y0;
+            if (dx * H + dy * W > W * H) continue;
+            total_inside++;
+            uint8_t got = sdram_read_byte(FB_BASE_BYTE + x + y*320);
+            if      (got == 0x10) n_v0_color++;
+            else if (got == 0x40) n_v1_color++;
+            else if (got == 0x20) n_v2_color++;
+            else                  n_other++;
+        }
+    }
+    printf("  inside=%d  v0_color(0x10)=%d  v1_color(0x40)=%d  v2_color(0x20)=%d  other=%d\n",
+           total_inside, n_v0_color, n_v1_color, n_v2_color, n_other);
+
+    // Post-Gouraud-fix assertion: most interior pixels land at
+    // INTERPOLATED light rows (n_other dominates), not at one of the
+    // three vertex-exact rows.  Flat-from-v0 (the pre-fix bug) would
+    // produce n_v0_color == total_inside.  We require:
+    //   n_other > 0.5 * total_inside  → smooth interpolation present.
+    //   n_v0_color < 0.5 * total_inside → not pinned to v0.
+    bool gouraud_ok = (n_other * 2 > total_inside)
+                   && (n_v0_color * 2 < total_inside);
+    if (gouraud_ok) {
+        pass_count++;
+        printf("  OK  Gouraud interpolation active (%d/%d pixels at intermediate rows)\n",
+               n_other, total_inside);
+    } else {
+        fail_count++;
+        printf("  FAIL  Gouraud regression — pre-fix flat-from-v0 behaviour returned\n");
+    }
+}
+
 static void test_triangle_persp_v0_offset(void) {
     printf("TEST: Perspective triangle, V0 NOT at bbox origin\n");
 
@@ -4814,6 +5366,7 @@ int main(int argc, char **argv) {
     test_set_fb_only();
     test_clear_fb();
     test_clear_rect();
+    test_clear_rect_per_command_stride();
     test_solid_span();
     test_textured_span();
     test_spans_batch_one();
@@ -4846,6 +5399,10 @@ int main(int argc, char **argv) {
     test_persp_small_zinv();
     test_persp_slope_rounding();
     test_persp_negative_zinv();
+    test_persp_span_cmap_lit();
+    test_persp_span_subsegment_end();
+    test_persp_long_corridor_monotonic();
+    test_persp_span_clz_boundary();
     test_transluc_lut_basic();
     test_transluc_overdraw();
     test_transluc_no_blend_interleave();
@@ -4873,6 +5430,7 @@ int main(int argc, char **argv) {
     test_span_back_to_back_columns();
     test_triangle_persp_reference_match();
     test_triangle_persp_v0_offset();
+    test_triangle_gouraud_light_flat_from_v0();
     test_triangle_affine_cw_winding();
     test_triangle_mask_bleed_from_span();
     test_persp_long_oblique_span();

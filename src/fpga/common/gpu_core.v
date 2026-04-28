@@ -109,7 +109,9 @@ assign dbg_frag = {sp_count[7:0],
 // 0x0C  GPU_DMA_SRC       W   SDRAM byte address of command buffer to pull
 // 0x10  GPU_RING_RDPTR    R   GPU read pointer
 // 0x14  GPU_STATUS        R   bit0=busy, bit1=ring_empty, bit2=dma_busy,
-//                              bit3=dma_overflow_sticky, [15:8]=fsm_state
+//                              bit3=dma_overflow_sticky, [5:4]=dma_state,
+//                              bit6=tex_m0_in_flight, bit7=blend_owns_m0,
+//                              [15:8]=fsm_state
 // 0x18  GPU_FENCE         R   Last completed fence token
 // 0x1C  GPU_DMA_LEN       W   Word count to pull (max 4096)
 // 0x20  GPU_TRANSLUC_ADDR W   transluc[] write address (15-bit, auto-inc by 4)
@@ -163,6 +165,18 @@ reg [31:0] dma_burst_addr;        // SDRAM byte addr of next sub-burst
 reg [12:0] dma_words_left;        // Words remaining in the kick (across sub-bursts)
 reg [8:0]  dma_burst_words;       // Words remaining in current sub-burst (1..256)
 wire       dma_busy = (dma_state != DMA_S_IDLE) || dma_kick;
+
+// Anti-starvation counter for DMA_S_AR: count cycles where DMA wants to
+// assert AR but is held off by !dma_bus_idle (sustained tex/blend traffic).
+// At STARVE_THRESHOLD (1024 cycles ≈ 10 µs at 100 MHz), force AR
+// regardless of the idle gate.  The downstream tex/blend AR mux already
+// blocks new tex ARs while dma_owns_ar=1, so any in-flight tex
+// transaction drains naturally and DMA's AR lands on the next free slot
+// at the slave.  Real DMA path is ~25 µs/batch end-to-end; the bound is
+// shorter than that, so it only triggers under genuine starvation —
+// the wedge case observed in Duke3D's heavy textured-rendering frames.
+localparam DMA_STARVE_THRESHOLD = 11'd1024;
+reg [10:0] dma_starve_count;
 
 wire ring_empty = (ring_rdptr == ring_wrptr);
 wire [15:0] ring_mask = (RING_WORDS * 4) - 1;  // 0x3FFF for 16 KB
@@ -333,15 +347,21 @@ always @(*) begin
     case (reg_addr)
         4'd1:    reg_rdata = {16'b0, ring_wrptr};
         4'd4:    reg_rdata = {16'b0, ring_rdptr};
-        // GPU_STATUS now exposes the FSM state in bits[15:8] so a CPU
-        // trap handler can dump where the decoder is stuck without
-        // having to instrument the trap path with a dedicated MMIO
-        // probe.  Bits [7:4] reserved.  Bit 3 = dma_overflow_sticky
-        // (port-A skid full when a second CPU/DMA collision arrived —
-        // sticky so a single freeze repro can be confirmed via a
-        // post-trap GPU_STATUS read).  Bit 2 = dma_busy.  Bit 1 =
-        // ring_empty.  Bit 0 = busy.
-        4'd5:    reg_rdata = {16'b0, 2'b0, state, 4'b0,
+        // GPU_STATUS exposes:
+        //   bit 0     = busy
+        //   bit 1     = ring_empty
+        //   bit 2     = dma_busy
+        //   bit 3     = dma_overflow_sticky (port-A skid back-to-back
+        //               collision — sticky until reset)
+        //   bits[5:4] = dma_state (0=IDLE, 1=AR, 2=R, 3=PUBLISH)
+        //   bit 6     = tex_m0_in_flight (texture-cache fill on the bus)
+        //   bit 7     = blend_owns_m0 (FBSS_BLEND read holding the bus)
+        //   bits[15:8]= main FSM state
+        // The watchdog dump in of_gpu_draw_spans_batch reads this register
+        // when the DMA wedge fires; the dma_state/tex/blend bits tell us
+        // exactly which sub-FSM is stuck without per-bit MMIO probes.
+        4'd5:    reg_rdata = {16'b0, state,
+                              blend_owns_m0, tex_m0_in_flight, dma_state,
                               dma_overflow_sticky,
                               dma_busy, ring_empty, busy};
         4'd6:    reg_rdata = fence_reached;
@@ -734,8 +754,18 @@ always @(posedge clk) begin
         dma_araddr        <= 32'd0;
         dma_arlen         <= 8'd0;
         dma_publish_wrptr <= 1'b0;
+        dma_starve_count  <= 11'd0;
     end else begin
         dma_publish_wrptr <= 1'b0;     // one-cycle pulse default
+
+        // Starvation counter: increments while DMA is in S_AR with
+        // arvalid not yet asserted AND the idle gate is blocking.
+        // Resets the moment we leave S_AR (or assert arvalid).
+        if (dma_state == DMA_S_AR && !dma_arvalid && !dma_bus_idle)
+            dma_starve_count <= dma_starve_count + 11'd1;
+        else
+            dma_starve_count <= 11'd0;
+
         case (dma_state)
         DMA_S_IDLE: begin
             dma_arvalid <= 1'b0;
@@ -754,17 +784,25 @@ always @(posedge clk) begin
                     dma_arvalid <= 1'b0;
                     dma_state   <= DMA_S_R;
                 end
-            end else if (dma_bus_idle) begin
-                // Bus is idle and we haven't asserted yet: latch the burst
-                // size and assert AR next cycle.  Capped at 16 beats per
-                // sub-burst because axi_sdram_slave truncates arlen to 4
-                // bits (sdram_burst_len <= s_axi_arlen[3:0]).  Anything
-                // larger gets silently chopped → master sees rlast on
-                // beat 16 while expecting 256, AXI protocol violation
-                // and the FSM wedges.  16 beats × ~10 cycles each is
-                // fine throughput-wise: 1920 / 16 = 120 sub-bursts ×
-                // ~30 cycles AR-overhead = ~36 µs, still tiny vs
-                // per-MMIO span dispatch.
+            end else if (dma_bus_idle || dma_starve_count >= DMA_STARVE_THRESHOLD) begin
+                // Either the bus is idle (normal path) OR we've been
+                // starved for too long under sustained tex/blend traffic
+                // (forced path).  Without the starvation override, dense
+                // textured rendering in Duke3D could keep tex_m0_in_flight
+                // continuously asserted and DMA would spin in S_AR
+                // forever, manifesting as the silent wedge in the
+                // doorbell-DMA path (no trap, no progress).
+                //
+                // Forcing arvalid is safe: tex_axi_arready is already
+                // gated to 0 by dma_owns_ar (line ~700), so any in-flight
+                // tex transaction completes naturally without a new tex
+                // AR sneaking in.  DMA's AR lands on the next free arb
+                // slot at the slave.
+                //
+                // Capped at 16 beats per sub-burst because axi_sdram_slave
+                // truncates arlen to 4 bits.  16 beats × ~10 cycles each:
+                // 1920 / 16 = 120 sub-bursts × ~30 cycles = ~36 µs
+                // end-to-end DMA fetch.
                 if (dma_words_left >= 13'd16) begin
                     dma_arlen       <= 8'd15;
                     dma_burst_words <= 9'd16;
@@ -775,8 +813,8 @@ always @(posedge clk) begin
                 dma_araddr  <= dma_burst_addr;
                 dma_arvalid <= 1'b1;
             end
-            // else: bus is busy (blend or tex active) — wait without
-            // asserting AR.  No state change.
+            // else: bus is busy and starvation bound not yet hit — wait
+            // without asserting AR.
         end
 
         DMA_S_R: begin
@@ -845,13 +883,17 @@ end
 localparam CMD_NOP            = 8'h01;
 localparam CMD_FENCE          = 8'h02;
 localparam CMD_CLEAR          = 8'h10;
-localparam CMD_CLEAR_RECT     = 8'h11;  // 3-word payload: word0 = start byte
-                                          // addr (CPU pre-computes
-                                          // fb_base + y*stride + x);
+localparam CMD_CLEAR_RECT     = 8'h11;  // 3-word payload:
+                                          // word0 = start byte addr (CPU
+                                          //   pre-computes fb_base + y*stride
+                                          //   + x);
                                           // word1 = {w[31:16], h[15:0]};
-                                          // word2 = {16'b0, color[15:0]}
-                                          // — low 8 bits replicated 4×
-                                          // per word, matching CMD_CLEAR.
+                                          // word2 = {stride[31:16], pad[15:8],
+                                          //   color[7:0]} — stride==0 falls
+                                          //   back to st_fb_stride (legacy);
+                                          //   color's low 8 bits are
+                                          //   replicated 4× per word, matching
+                                          //   CMD_CLEAR.
 localparam CMD_SET_TEXTURE    = 8'h20;
 // 0x21 CMD_SET_DEPTH_FUNC retired with the Z-buffer in lean Phase 2.
 localparam CMD_SET_FB         = 8'h23;
@@ -1454,8 +1496,16 @@ reg [17:0] clear_remaining;   // Words remaining to clear
 // of the next byte to clear in the current row; cr_w_remaining counts
 // down per-word as we walk the row; cr_y_remaining is the row count.
 // cr_row_addr is the byte address of the current row's first byte and
-// is used to derive the next row's base via st_fb_stride.  cr_w_total
-// holds the rect width so each row resets cleanly.  The 8-bit cr_color
+// is used to derive the next row's base via cr_stride.  cr_w_total
+// holds the rect width so each row resets cleanly.  cr_stride is the
+// per-command row advance — decoded from word 2 bits [31:16] of the
+// CLEAR_RECT payload (the slot previously used for `pad`).  When the
+// field is zero, we fall back to st_fb_stride (the SET_FB-resident
+// global) so callers that don't fill the new field stay bit-identical
+// to the prior behaviour.  Per-command stride fixes the BUILD
+// `setviewtotile`/`setviewback` class of bug where the app renders to
+// a buffer whose stride differs from the global FB —
+// see openfpgaOS/docs/cr-gpu-clear-rect-stride.md.  The 8-bit cr_color
 // is just the low byte of CMD_CLEAR_RECT's color word, replicated
 // 4× per AXI write (matching CMD_CLEAR's shape).
 reg [31:0] cr_addr;
@@ -1463,6 +1513,7 @@ reg [31:0] cr_row_addr;
 reg [15:0] cr_w_remaining;
 reg [15:0] cr_w_total;
 reg [15:0] cr_y_remaining;
+reg [15:0] cr_stride;        // per-command row advance; 0 = use st_fb_stride
 reg [7:0]  cr_color;
 
 // (AXI4 write handshakes managed per-state, no global tracking)
@@ -1522,10 +1573,20 @@ reg signed [31:0] grad_z_dx, grad_z_dy;
 // to know which interpretation applies.
 reg signed [31:0] grad_s_dx, grad_s_dy;
 reg signed [31:0] grad_t_dx, grad_t_dy;
-// New pair for the perspective-divide reciprocal gradient.  Only
-// meaningful when tri_persp_active; unused on affine triangles
-// (gradient loop skips computing them by exiting at grad_idx 5).
+// Phase 4c.3 — perspective-divide reciprocal gradient.  Only meaningful
+// when tri_persp_active; unused on affine triangles (gradient loop
+// skips by jumping idx 5 → 8).
 reg signed [31:0] grad_w_dx, grad_w_dy;
+// Phase 4d Gouraud — light-row gradient (the colormap row index that
+// sp_light_q[23:16] feeds the cmap LUT lookup with).  Computed
+// unconditionally for all triangles so flat-shaded triangles emerge
+// from the same path with a zero gradient (when v_r[1] == v_r[2] ==
+// v_r[0]).  Without this the triangle path silently flat-shaded from
+// v_r[0] only — engine D_ALIAS_GOURAUD=1 was a no-op, manifesting in
+// Quake as model-shade flickering as triangle vertex order rotated.
+// See test_triangle_gouraud_light_flat_from_v0 for the empirical
+// pre-fix behaviour.
+reg signed [31:0] grad_r_dx, grad_r_dy;
 // Bounding box (integer pixel coords)
 reg signed [15:0] tri_xmin, tri_xmax, tri_ymin, tri_ymax;
 // Raw (pre-clamp) bbox in 12.4 subpixel space — registered in S_TRI_BBOX,
@@ -1554,7 +1615,14 @@ reg signed [31:0] tri_row_z, tri_row_s, tri_row_t;
 // only).  Initialised in S_TRI_INIT_ATTRIB's round-3 just like the
 // others; advances per row in S_TRI_ROW_NEXT alongside z/s/t.
 reg signed [31:0] tri_row_w;
-// Phase 4d — Gouraud row-anchor and per-pixel walker for `light`.
+// Phase 4d — Gouraud light walker.  Q16.16; bits[23:16] of tri_r are
+// the 8-bit cmap row index the fragment pipe sees.  Initialised at
+// (xmin*16, ymin*16) by S_TRI_INIT_ATTRIB's round-4, advances per row
+// in S_TRI_ROW_NEXT, per pixel in S_TRI_PIX.  Snapshotted into
+// tri_span_r_start at the first inside pixel of each row's span.
+// Replaces the prior flat `{8'b0, v_r[0], 16'b0}` capture.
+reg signed [31:0] tri_r;
+reg signed [31:0] tri_row_r;
 // Bbox-origin attribute init (S_TRI_INIT_ATTRIB).  Pre-registered subpixel
 // deltas from v0 to (xmin, ymin) — fed into the rolled DSP schedule.
 reg signed [20:0] delta_x_subpix;
@@ -1729,7 +1797,7 @@ always @(posedge clk) begin
         cmd_is_clear_rect <= 0;
         cr_addr <= 0; cr_row_addr <= 0;
         cr_w_remaining <= 0; cr_w_total <= 0;
-        cr_y_remaining <= 0; cr_color <= 0;
+        cr_y_remaining <= 0; cr_stride <= 0; cr_color <= 0;
         cmd_is_set_texture <= 0;
         cmd_is_set_fb <= 0;
         cmd_is_draw_span <= 0;
@@ -1813,7 +1881,10 @@ always @(posedge clk) begin
         // reset assertions stay clean.
         tri_w <= 0;
         tri_row_w <= 0;
+        tri_r <= 0;
+        tri_row_r <= 0;
         grad_w_dx <= 0; grad_w_dy <= 0;
+        grad_r_dx <= 0; grad_r_dy <= 0;
         tri_xmin_raw <= 0; tri_xmax_raw <= 0;
         tri_ymin_raw <= 0; tri_ymax_raw <= 0;
         // State registers
@@ -1939,7 +2010,12 @@ always @(posedge clk) begin
                     cr_w_remaining <= ring_rd_data[31:16];
                     cr_y_remaining <= ring_rd_data[15:0];
                 end else if (pay_idx == 5'd2) begin
-                    cr_color <= ring_rd_data[7:0];
+                    // Word 2: {stride[31:16], pad[15:8], color[7:0]}.
+                    // stride==0 ⇒ caller didn't set it; row advance falls
+                    // back to st_fb_stride (the SET_FB global) for backwards
+                    // compatibility with existing callers.
+                    cr_stride <= ring_rd_data[31:16];
+                    cr_color  <= ring_rd_data[7:0];
                 end
             end
             else if (cmd_is_set_texture) begin
@@ -2977,9 +3053,15 @@ always @(posedge clk) begin
                     if (cr_y_remaining == 16'd1) begin
                         // Last row finished — rect done.
                         state <= S_IDLE;
-                    end else begin
-                        cr_row_addr    <= cr_row_addr + {16'b0, st_fb_stride};
-                        cr_addr        <= cr_row_addr + {16'b0, st_fb_stride};
+                    end else begin : cr_row_advance
+                        // Per-command stride if non-zero; otherwise the
+                        // SET_FB global (legacy behaviour for callers
+                        // that don't fill the stride field).
+                        reg [15:0] cr_eff_stride;
+                        cr_eff_stride = (cr_stride != 16'd0) ? cr_stride
+                                                              : st_fb_stride;
+                        cr_row_addr    <= cr_row_addr + {16'b0, cr_eff_stride};
+                        cr_addr        <= cr_row_addr + {16'b0, cr_eff_stride};
                         cr_w_remaining <= cr_w_total;
                         cr_y_remaining <= cr_y_remaining - 16'd1;
                         state          <= S_CLEAR_RECT_WORD;
@@ -3361,18 +3443,28 @@ always @(posedge clk) begin
                         4'd5: grad_t_dy <= tri_persp_active ? (dsp_p_shifted >>> 16) : dsp_p_shifted;
                         4'd6: grad_w_dx <= dsp_p_shifted >>> 16;
                         4'd7: grad_w_dy <= dsp_p_shifted >>> 16;
+                        // Phase 4d Gouraud — light gradient.  Q16.16
+                        // matches sp_light_q's format (bits[23:16] are
+                        // the 8-bit cmap row index).  v_r is 8-bit so
+                        // the dsp product fits comfortably without the
+                        // perspective-Q16.16 right-shift the persp
+                        // attributes need.
+                        4'd8: grad_r_dx <= dsp_p_shifted;
+                        4'd9: grad_r_dy <= dsp_p_shifted;
                         default: ;
                     endcase
                     // grad_sub auto-increments to 3'd7 (settle cycle)
                     // and then wraps to 0 — no explicit reset here.
                     // Loop progression:
-                    //   idx 5 → 6 (persp) or exit (affine, skip w)
-                    //   idx 7 → exit
-                    if (grad_idx == 4'd7) begin
+                    //   idx 5 → 6 (persp continues to w) or 8 (affine
+                    //               jumps over w to r — Gouraud)
+                    //   idx 7 → 8 (persp continues to r — Gouraud)
+                    //   idx 9 → exit
+                    if (grad_idx == 4'd9) begin
                         state <= S_TRI_BBOX;
                     end else if (grad_idx == 4'd5 && !tri_persp_active) begin
-                        // Affine: skip w (idx 6/7), straight to BBOX.
-                        state <= S_TRI_BBOX;
+                        // Affine: skip w (idx 6/7), continue to r (idx 8).
+                        grad_idx <= 4'd8;
                     end else begin
                         grad_idx <= grad_idx + 4'd1;
                     end
@@ -3507,9 +3599,10 @@ always @(posedge clk) begin
                 end
                 4'd5: init_step <= 4'd6;
                 4'd6: begin
-                    // Capture t.  On perspective triangles continue to
-                    // the w round; on affine triangles jump straight to
-                    // the r (Gouraud) round.
+                    // Capture t.  On perspective triangles launch w
+                    // next (round 3 of 5); on affine triangles skip w
+                    // and launch r (round 4) directly.  Either way the
+                    // next step is a wait cycle for the DSP pipeline.
                     tri_row_t <= (tri_persp_active ? v_tw[0]
                                                    : {v_t[0], 16'b0})
                                + $signed(dsp_p[31:0])
@@ -3520,17 +3613,45 @@ always @(posedge clk) begin
                         dsp_b  <= {{11{delta_x_subpix[20]}}, delta_x_subpix};
                         dsp2_a <= grad_w_dy;
                         dsp2_b <= {{11{delta_y_subpix[20]}}, delta_y_subpix};
-                        init_step <= 4'd7;
                     end else begin
-                        // Affine: no w needed.
+                        // Affine path: skip w, launch r (Gouraud)
+                        // directly.
+                        dsp_a  <= grad_r_dx;
+                        dsp_b  <= {{11{delta_x_subpix[20]}}, delta_x_subpix};
+                        dsp2_a <= grad_r_dy;
+                        dsp2_b <= {{11{delta_y_subpix[20]}}, delta_y_subpix};
+                    end
+                    init_step <= 4'd7;
+                end
+                4'd7: init_step <= 4'd8;
+                4'd8: begin
+                    if (tri_persp_active) begin
+                        // Persp: capture w + launch r.
+                        tri_row_w <= v_w[0]
+                                   + $signed(dsp_p[31:0])
+                                   + $signed(dsp2_p[31:0]);
+                        dsp_a  <= grad_r_dx;
+                        dsp_b  <= {{11{delta_x_subpix[20]}}, delta_x_subpix};
+                        dsp2_a <= grad_r_dy;
+                        dsp2_b <= {{11{delta_y_subpix[20]}}, delta_y_subpix};
+                        init_step <= 4'd9;
+                    end else begin
+                        // Affine: this step's DSP product is the r
+                        // round.  Capture and exit init.
+                        // {8'b0, v_r[0], 16'b0} = v_r[0] << 16, the
+                        // anchor in Q16.16 with the 8-bit row at
+                        // bits[23:16] (matches sp_light_q layout).
+                        tri_row_r <= {8'b0, v_r[0], 16'b0}
+                                   + $signed(dsp_p[31:0])
+                                   + $signed(dsp2_p[31:0]);
                         init_step <= 4'd0;
                         state     <= S_TRI_ROW;
                     end
                 end
-                4'd7: init_step <= 4'd8;
-                4'd8: begin
-                    // Capture w (perspective path).
-                    tri_row_w <= v_w[0]
+                4'd9: init_step <= 4'd10;
+                4'd10: begin
+                    // Persp: capture r → S_TRI_ROW.
+                    tri_row_r <= {8'b0, v_r[0], 16'b0}
                                + $signed(dsp_p[31:0])
                                + $signed(dsp2_p[31:0]);
                     init_step <= 4'd0;
@@ -3584,6 +3705,7 @@ always @(posedge clk) begin
             tri_s <= tri_row_s;
             tri_t <= tri_row_t;
             tri_w <= tri_row_w;
+            tri_r <= tri_row_r;
             // tri_ymin_x_stride is the DSP-registered product from
             // S_TRI_MUL_WAIT (tri_ymin × st_fb_stride).
             tri_fb_row_addr <= st_fb_addr + tri_ymin_x_stride;
@@ -3621,9 +3743,15 @@ always @(posedge clk) begin
                     // state across all fragments.  The per-span colormap_id
                     // mechanism is for CMD_DRAW_SPAN(S_BATCH) only.
                     sp_colormap_id <= st_colormap_id;
-                    // Flat lighting per triangle — light = v_r[0], no walk.
+                    // Phase 4d Gouraud: per-pixel light walk along x.
+                    // tri_span_r_start is the interpolated r at this
+                    // span's first inside pixel; sp_light_step is the
+                    // per-pixel x-delta in Q16.16 (matches grad_r_dx
+                    // scaled the same way as the s/t/z attribute steps).
+                    // Replaces the prior flat-from-v0 path which made
+                    // D_ALIAS_GOURAUD a no-op in Quake.
                     sp_light_q    <= tri_span_r_start;
-                    sp_light_step <= 32'b0;
+                    sp_light_step <= grad_r_dx <<< 4;
                     // sp_flags bit 0 (SPAN_COLORMAP) is hard-set for every
                     // triangle: triangle fragments always route through the
                     // palookup LUT at cmap[colormap_id][v_r[0]][texel].  This
@@ -3711,7 +3839,10 @@ always @(posedge clk) begin
                     tri_span_t_start <= tri_t;
                     tri_span_z_start <= tri_z;
                     tri_span_w_start <= tri_w;
-                    tri_span_r_start <= {8'b0, v_r[0], 16'b0};  // flat light from v0
+                    // Phase 4d Gouraud: snapshot the per-pixel-walked
+                    // light value at the first inside pixel.  Replaces
+                    // the prior `{8'b0, v_r[0], 16'b0}` flat anchor.
+                    tri_span_r_start <= tri_r;
                 end
                 tri_span_count <= tri_span_count + 16'd1;
                 tri_cur_x <= tri_cur_x + 16'd1;
@@ -3725,6 +3856,7 @@ always @(posedge clk) begin
                 tri_s <= tri_s + (grad_s_dx <<< 4);
                 tri_t <= tri_t + (grad_t_dx <<< 4);
                 tri_w <= tri_w + (grad_w_dx <<< 4);
+                tri_r <= tri_r + (grad_r_dx <<< 4);
             end else begin
                 // Outside — step without recording.
                 tri_cur_x <= tri_cur_x + 16'd1;
@@ -3736,6 +3868,7 @@ always @(posedge clk) begin
                 tri_s <= tri_s + (grad_s_dx <<< 4);
                 tri_t <= tri_t + (grad_t_dx <<< 4);
                 tri_w <= tri_w + (grad_w_dx <<< 4);
+                tri_r <= tri_r + (grad_r_dx <<< 4);
             end
         end
 
@@ -3778,10 +3911,12 @@ always @(posedge clk) begin
                 tri_row_s <= tri_row_s + (grad_s_dy <<< 4);
                 tri_row_t <= tri_row_t + (grad_t_dy <<< 4);
                 tri_row_w <= tri_row_w + (grad_w_dy <<< 4);
+                tri_row_r <= tri_row_r + (grad_r_dy <<< 4);
                 tri_z <= tri_row_z + (grad_z_dy <<< 4);
                 tri_s <= tri_row_s + (grad_s_dy <<< 4);
                 tri_t <= tri_row_t + (grad_t_dy <<< 4);
                 tri_w <= tri_row_w + (grad_w_dy <<< 4);
+                tri_r <= tri_row_r + (grad_r_dy <<< 4);
                 tri_span_count <= 16'd0;
                 state <= S_TRI_PIX;
             end
