@@ -482,6 +482,20 @@ static inline void of_gpu_clear_rect(uint32_t start_byte_addr,
     _gpu_ring_write((uint32_t)color);
 }
 
+/* Strided clear_rect — word 2 of the payload carries the row stride at
+ * bits [31:16].  When stride==0 the GPU falls back to the SET_FB-
+ * resident global stride (matches plain of_gpu_clear_rect).  See
+ * docs/cr-gpu-clear-rect-stride.md for the rationale. */
+static inline void of_gpu_clear_rect_strided(uint32_t start_byte_addr,
+                                              uint16_t w, uint16_t h,
+                                              uint16_t stride,
+                                              uint8_t color) {
+    _gpu_cmd_header(GPU_CMD_CLEAR_RECT, 3);
+    _gpu_ring_write(start_byte_addr);
+    _gpu_ring_write(((uint32_t)w << 16) | (uint32_t)h);
+    _gpu_ring_write(((uint32_t)stride << 16) | (uint32_t)color);
+}
+
 /*
  * Draw a single span.  15 payload words: 9 core + 6 perspective.
  * GPU ignores the perspective words unless OF_GPU_SPAN_PERSP is set.
