@@ -240,6 +240,54 @@ void of_video_wait_flip(void) {
     sync_swap_state();
 }
 
+uint8_t *of_video_buffer_addr(int idx) {
+    if ((unsigned)idx >= 3) return (uint8_t *)0;
+    return (uint8_t *)fb_addr[idx];
+}
+
+int of_video_acquire_next(int just_flipped_idx) {
+    /* GPU-triggered flip path.  The caller has either:
+     *   (a) just emitted CMD_FLIP for `just_flipped_idx` (the GPU's
+     *       command processor will, after its m_wr_* drain, write the
+     *       slave's fb_swap_pending bit at the next vsync); or
+     *   (b) passed -1 indicating no previous flip — first call.
+     *
+     * In case (a) we promote `just_flipped_idx` to buf_ready, blocking
+     * if a previous buf_ready hasn't yet been retired by sync.  In
+     * case (b) we just return the current draw slot.
+     *
+     * Vs. of_video_flip() this skips the CPU-side cache_clean (the GPU
+     * owns the FB writes — see docs/cr-gpu-triggered-flip.md and the
+     * "GPU owns the framebuffer" architectural rule) and the explicit
+     * FB_SWAP_CTRL kick (the GPU's CMD_FLIP side-port handles that). */
+
+    if (just_flipped_idx < 0) {
+        /* First call: just publish the current draw slot. */
+        sync_swap_state();
+        return buf_draw;
+    }
+
+    /* Wait for the previous queued flip (if any) to retire.  Caps the
+     * CPU at ~1 frame ahead of the display — buf_ready stays held
+     * until vsync clears fb_swap_pending and sync_swap_state catches
+     * the transition. */
+    while (buf_ready >= 0) {
+        sync_swap_state();
+    }
+
+    /* Promote the just-flipped buffer.  The GPU's CMD_FLIP side-port
+     * may already have asserted fb_swap_pending; sync_swap_state's
+     * "buf_ready >= 0 && !pending" check still correctly retires the
+     * slot whenever vsync fires next. */
+    buf_ready = just_flipped_idx;
+
+    /* The new draw slot is the unique one that's neither displayed
+     * nor pending-swap.  With 3 buffers and at most one pending at a
+     * time, this is well-defined. */
+    buf_draw = 3 - buf_display - buf_ready;
+    return buf_draw;
+}
+
 void of_video_flip_wait(void) {
     of_video_flip();
     of_video_wait_flip();

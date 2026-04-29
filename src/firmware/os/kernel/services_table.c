@@ -137,6 +137,8 @@ void services_table_init(void) {
     svc->video_flush_cache      = of_video_flush_cache;
     svc->video_set_display_mode = of_video_set_display_mode;
     svc->video_set_color_mode   = svc_video_set_color_mode;
+    svc->video_acquire_next     = of_video_acquire_next;
+    svc->video_buffer_addr      = of_video_buffer_addr;
 
     /* Input */
     svc->input_poll          = of_input_poll;

@@ -29,6 +29,10 @@ module tb_gpu (
     output wire [31:0] dbg_tri_det,
     output wire [31:0] dbg_frag,
 
+    // CMD_FLIP side-port (observed by C++ harness for the drain test)
+    output wire        gpu_swap_req,
+    output wire [1:0]  gpu_swap_idx,
+
     // SDRAM backdoor write (preload textures, ring buffer, etc.)
     input  wire        bd_we,
     input  wire [23:0] bd_addr,    // word address
@@ -90,6 +94,9 @@ gpu_core gpu (
     .m_wr_wstrb(gpu_wr_wstrb),
     .m_wr_wlast(gpu_wr_wlast),
     .m_wr_bvalid(gpu_wr_bvalid),
+    // CMD_FLIP side-port
+    .gpu_swap_req(gpu_swap_req),
+    .gpu_swap_idx(gpu_swap_idx),
     // MMIO
     .reg_wr(reg_wr),
     .reg_addr(reg_addr),

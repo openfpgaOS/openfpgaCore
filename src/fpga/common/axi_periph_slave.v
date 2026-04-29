@@ -180,7 +180,16 @@ module axi_periph_slave (
     output reg         gpu_reg_wr,
     output reg  [3:0]  gpu_reg_addr,
     output reg  [31:0] gpu_reg_wdata,
-    input  wire [31:0] gpu_reg_rdata
+    input  wire [31:0] gpu_reg_rdata,
+
+    // CMD_FLIP side-port — single-cycle pulse from gpu_core when its
+    // command processor reaches a CMD_FLIP and m_wr_* has drained.
+    // Latched into the same fb_ready_idx / fb_swap_pending state the
+    // kernel writes via sysreg 0x18; GPU has priority on conflicting
+    // same-cycle writes (rare since the kernel only writes during
+    // init / fallback path).  See docs/cr-gpu-triggered-flip.md.
+    input  wire        gpu_swap_req,
+    input  wire [1:0]  gpu_swap_idx
 );
 
 wire reset = ~reset_n;
@@ -695,6 +704,16 @@ always @(posedge clk) begin
 
                 default: ;
             endcase
+        end
+
+        // CMD_FLIP side-port — single-cycle pulse from gpu_core after
+        // its m_wr_* drain completes.  Placed AFTER the sysreg path
+        // so GPU wins on the rare same-cycle conflict (later
+        // non-blocking assignment to fb_ready_idx / fb_swap_pending
+        // overrides the kernel write).
+        if (gpu_swap_req) begin
+            fb_ready_idx    <= gpu_swap_idx;
+            fb_swap_pending <= 1'b1;
         end
 
         // Vsync IRQ — set on every vsync rising edge, cleared by W1C at 0x9C

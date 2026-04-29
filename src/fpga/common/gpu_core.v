@@ -60,6 +60,15 @@ module gpu_core (
     output reg  [31:0] reg_rdata,
 
     // ================================================================
+    // CMD_FLIP side-port — single-cycle pulse into axi_periph_slave's
+    // fb_swap_pending block, signalling "queue swap to gpu_swap_idx".
+    // Routed alongside the existing kernel sysreg path; the slave's
+    // mux gives GPU priority on conflicting same-cycle writes.
+    // ================================================================
+    output reg         gpu_swap_req,
+    output reg  [1:0]  gpu_swap_idx,
+
+    // ================================================================
     // Status outputs
     // ================================================================
     output wire        busy,
@@ -882,6 +891,15 @@ end
 // ================================================================
 localparam CMD_NOP            = 8'h01;
 localparam CMD_FENCE          = 8'h02;
+// CMD_FLIP (0x42) — GPU-triggered display page swap.  2-word payload:
+//   word 0: bits[1:0] = back-buffer index (0/1/2 → FB_ADDR_{0,1,2})
+//   word 1: fence token (published to fence_reached after the swap fires)
+// Semantics: drains all outstanding m_wr_* writes (same primitive as
+// the upgraded CMD_FENCE), then pulses the gpu_swap_req side-port to
+// axi_periph_slave for one cycle with gpu_swap_idx = payload[0][1:0],
+// then publishes the fence token.  Lets apps queue a vsync swap in
+// the GPU command stream — see docs/cr-gpu-triggered-flip.md.
+localparam CMD_FLIP           = 8'h42;
 localparam CMD_CLEAR          = 8'h10;
 localparam CMD_CLEAR_RECT     = 8'h11;  // 3-word payload:
                                           // word0 = start byte addr (CPU
@@ -1073,6 +1091,23 @@ reg [4:0] span_field_idx;
 reg cmd_is_set_skip_zero;
 reg cmd_is_set_colormap_id;
 reg cmd_is_draw_triangles;
+reg cmd_is_flip;
+
+// Outstanding-write tracker for CMD_FENCE / CMD_FLIP drain semantics.
+// Increments on m_wr_* AW handshake (single-beat AWs only — GPU never
+// bursts on this master).  Decrements on m_wr_bvalid (slave pulses it
+// for one cycle since axi_sdram_slave's bready is hardwired to 1
+// upstream).  CMD_FENCE/CMD_FLIP stall in S_EXECUTE while non-zero,
+// so fence_reached / gpu_swap_req only fire after pixel writes
+// commit to SDRAM.  4 bits is plenty (typical inflight is 1-3).
+reg [3:0] m_wr_inflight;
+
+// Latched payload for CMD_FENCE / CMD_FLIP — published only after
+// m_wr_inflight drains in S_EXECUTE.  Pre-CR the fence token was
+// written to fence_reached directly in S_PAY_DATA, which raced with
+// pending pixel writes (see cr-gpu-fence-write-completion.md).
+reg [31:0] pending_fence_token;
+reg [1:0]  pending_swap_idx;
 // Global SKIP_ZERO (color-key at texel 0xFF) state — set via CMD_SET_SKIP_ZERO,
 // ORed into every triangle-emitted span's flags so color-keyed sprites
 // (emitted as 2 triangles) get the transparency treatment.
@@ -1808,6 +1843,12 @@ always @(posedge clk) begin
         st_colormap_id <= 4'b0;
         st_skip_zero <= 0;
         cmd_is_draw_triangles <= 0;
+        cmd_is_flip <= 0;
+        m_wr_inflight       <= 4'b0;
+        pending_fence_token <= 32'b0;
+        pending_swap_idx    <= 2'b0;
+        gpu_swap_req        <= 1'b0;
+        gpu_swap_idx        <= 2'b0;
         pay_idx <= 0;
         pay_remaining <= 0;
         frag_discard <= 0;
@@ -1904,7 +1945,30 @@ always @(posedge clk) begin
             m_wr_wvalid  <= 0;
             fb_acc_valid <= 0;
             fb_acc_mask  <= 0;
-        end else
+            m_wr_inflight <= 4'b0;
+            gpu_swap_req <= 1'b0;
+        end else begin
+            // ------------------------------------------------------------
+            // Always-on housekeeping (runs every non-reset cycle).
+            //
+            // m_wr inflight counter for CMD_FENCE / CMD_FLIP drain.
+            // Increment when an AW handshake fires; decrement when a B
+            // beat lands (slave pulses bvalid for one cycle since
+            // s_axi_bready is hardwired to 1 upstream of the arbiter).
+            // Both events the same cycle ⇒ no change.
+            //
+            // gpu_swap_req default-low: the FLIP drain-done branch in
+            // S_EXECUTE writes <=1 later in code order, which wins
+            // under non-blocking semantics.  Every other cycle this
+            // default keeps the side-port low, so the slave sees a
+            // single-cycle pulse.
+            // ------------------------------------------------------------
+            case ({m_wr_awvalid && m_wr_awready, m_wr_bvalid})
+                2'b10: m_wr_inflight <= m_wr_inflight + 4'd1;
+                2'b01: m_wr_inflight <= m_wr_inflight - 4'd1;
+                default: ;
+            endcase
+            gpu_swap_req <= 1'b0;
         case (state)
 
         // ============================================================
@@ -1950,6 +2014,7 @@ always @(posedge clk) begin
             cmd_is_set_skip_zero  <= (cmd_type == CMD_SET_SKIP_ZERO);
             cmd_is_set_colormap_id <= (cmd_type == CMD_SET_COLORMAP_ID);
             cmd_is_draw_triangles <= (cmd_type == CMD_DRAW_TRIANGLES);
+            cmd_is_flip           <= (cmd_type == CMD_FLIP);
 
             if (cmd_payload_words == 0) begin
                 state <= S_EXECUTE;
@@ -1991,7 +2056,15 @@ always @(posedge clk) begin
             // decoded cmd_is_* one-hot flags set in S_DECODE — keeps the
             // combinational cone to each destination reg short.
             if (cmd_is_fence) begin
-                if (pay_idx == 5'd0) fence_reached <= ring_rd_data;
+                // Publish the token only AFTER outstanding m_wr_* writes
+                // drain in S_EXECUTE — fixes the flashing-pixel race
+                // documented in cr-gpu-fence-write-completion.md.
+                if (pay_idx == 5'd0) pending_fence_token <= ring_rd_data;
+            end
+            else if (cmd_is_flip) begin
+                // CMD_FLIP payload: word 0 = idx, word 1 = fence token.
+                if (pay_idx == 5'd0) pending_swap_idx    <= ring_rd_data[1:0];
+                if (pay_idx == 5'd1) pending_fence_token <= ring_rd_data;
             end
             else if (cmd_is_clear) begin
                 if (pay_idx == 5'd0) begin
@@ -2202,7 +2275,28 @@ always @(posedge clk) begin
         // perspective sub-FSM bring-up from sp_flags[SPAN_PERSP]) runs
         // here, reading the regs S_PAY_DATA just wrote.
         S_EXECUTE: begin
-            if (cmd_is_nop || cmd_is_fence
+            if (cmd_is_fence) begin
+                // Stall until all outstanding m_wr_* writes commit; then
+                // publish the fence token and retire to S_IDLE.
+                if (m_wr_inflight == 4'b0) begin
+                    fence_reached <= pending_fence_token;
+                    state         <= S_IDLE;
+                end
+                // else: stay in S_EXECUTE — m_wr_inflight ticks down via
+                // the global counter update below.
+            end
+            else if (cmd_is_flip) begin
+                // Same drain wait, plus pulse gpu_swap_req for one cycle
+                // and publish the fence token.  gpu_swap_req falls back
+                // to 0 next cycle (S_IDLE has no override).
+                if (m_wr_inflight == 4'b0) begin
+                    gpu_swap_req  <= 1'b1;
+                    gpu_swap_idx  <= pending_swap_idx;
+                    fence_reached <= pending_fence_token;
+                    state         <= S_IDLE;
+                end
+            end
+            else if (cmd_is_nop
                 || cmd_is_set_texture
                 || cmd_is_set_fb
                 || cmd_is_set_skip_zero
@@ -3924,6 +4018,7 @@ always @(posedge clk) begin
 
         default: state <= S_IDLE;
         endcase
+        end  // closes the housekeeping `begin` introduced for m_wr_inflight + gpu_swap_req auto-clear
     end
 end
 

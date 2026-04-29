@@ -2,9 +2,13 @@
 
 ## Status
 
-**Open.** Worked around app-side in PocketDukeNukem-SDK (`d3d_gpu.c::d3d_gpu_flush`
-adds a `while (GPU_STATUS & GPU_STATUS_BUSY)` poll after `of_gpu_finish()`).
-The right place for this is the RTL fence implementation.
+**Fixed.**  Landed jointly with `cr-gpu-triggered-flip.md` since both
+needed the same `m_wr_inflight` drain primitive.  CMD_FENCE now stalls
+in `gpu_core.v`'s S_EXECUTE while `m_wr_inflight != 0` before
+publishing `fence_reached`, so `of_gpu_finish()` is once again
+sufficient pre-flip ordering on its own.  The `STATUS_BUSY` workaround
+spin in `PocketDukeNukem-SDK/src/duke3d/d3d_gpu.c::d3d_gpu_flush` has
+been removed.
 
 ## Problem
 

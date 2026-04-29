@@ -1800,7 +1800,10 @@ assign video_hs = vidout_hs;
         .gpu_reg_wr(gpu_reg_wr),
         .gpu_reg_addr(gpu_reg_addr),
         .gpu_reg_wdata(gpu_reg_wdata),
-        .gpu_reg_rdata(gpu_reg_rdata)
+        .gpu_reg_rdata(gpu_reg_rdata),
+        // CMD_FLIP side-port from gpu_core
+        .gpu_swap_req(gpu_swap_req),
+        .gpu_swap_idx(gpu_swap_idx)
     );
 
     // DMA engine removed — apps use CPU memcpy instead
@@ -2333,6 +2336,8 @@ wire        gpu_wr_bvalid;
 // GPU enable (from MMIO GPU_CTRL bit 0, directly in gpu_core)
 wire        gpu_busy;
 wire [31:0] gpu_fence_reached;
+wire        gpu_swap_req;
+wire [1:0]  gpu_swap_idx;
 
 `ifndef EXCLUDE_GPU
 gpu_core gpu (
@@ -2364,6 +2369,9 @@ gpu_core gpu (
     .reg_addr(gpu_reg_addr),
     .reg_wdata(gpu_reg_wdata),
     .reg_rdata(gpu_reg_rdata),
+    // CMD_FLIP side-port → axi_periph_slave's swap mux
+    .gpu_swap_req(gpu_swap_req),
+    .gpu_swap_idx(gpu_swap_idx),
     // Status
     .busy(gpu_busy),
     .fence_reached(gpu_fence_reached)
@@ -2382,6 +2390,8 @@ assign gpu_wr_wlast   = 1'b0;
 assign gpu_busy       = 1'b0;
 assign gpu_fence_reached = 32'b0;
 assign gpu_reg_rdata   = 32'b0;
+assign gpu_swap_req   = 1'b0;
+assign gpu_swap_idx   = 2'b0;
 `endif
 
 

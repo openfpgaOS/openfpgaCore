@@ -186,7 +186,10 @@ axi_periph_slave dut (
     .gpu_reg_wr   (dbg_gpu_reg_wr),
     .gpu_reg_addr (dbg_gpu_reg_addr),
     .gpu_reg_wdata(dbg_gpu_reg_wdata),
-    .gpu_reg_rdata(gpu_reg_rdata)
+    .gpu_reg_rdata(gpu_reg_rdata),
+    // No gpu_core in this bench — tie the CMD_FLIP side-port low.
+    .gpu_swap_req (1'b0),
+    .gpu_swap_idx (2'b0)
 );
 
 // Hoist FSM internals for debug

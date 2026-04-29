@@ -544,7 +544,10 @@ axi_periph_slave periph (
     .gpu_reg_wr   (),
     .gpu_reg_addr (),
     .gpu_reg_wdata(),
-    .gpu_reg_rdata(gpu_reg_rdata)
+    .gpu_reg_rdata(gpu_reg_rdata),
+    // No gpu_core in this bench — CMD_FLIP side-port tied off.
+    .gpu_swap_req (1'b0),
+    .gpu_swap_idx (2'b0)
 );
 
 // ============================================================

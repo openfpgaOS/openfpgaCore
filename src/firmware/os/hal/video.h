@@ -21,6 +21,25 @@ uint8_t *of_video_flip(void);
 /* Block until pending swap completes */
 void of_video_wait_flip(void);
 
+/* GPU-triggered flip path (see docs/cr-gpu-triggered-flip.md).  The
+ * caller renders to the buffer at `of_video_buffer_addr(idx)`, then
+ * emits CMD_FLIP via `of_gpu_flip_to(idx, fence_token)` (SDK helper),
+ * then calls of_video_acquire_next(idx) to (a) mark that idx as
+ * pending-swap and (b) return the idx of the next free draw slot.
+ * On the very first call, pass `just_flipped_idx = -1` and the kernel
+ * returns the initial draw idx (typically 1) without any handoff.
+ *
+ * Blocks if the previous flip hasn't yet completed (3-buffer ceiling
+ * hit — at most one previous flip can be pending at a time).  Vs.
+ * of_video_flip() this is ~10 µs (just the book-keeping syscall),
+ * not ~79 µs, since the actual swap is queued asynchronously by the
+ * GPU's command processor when CMD_FLIP reaches the head. */
+int of_video_acquire_next(int just_flipped_idx);
+
+/* Address of buffer `idx` (0/1/2).  Companion to of_video_acquire_next
+ * — apps draw via this addr and pass `idx` to of_gpu_flip_to. */
+uint8_t *of_video_buffer_addr(int idx);
+
 /* Swap and wait (convenience: requests swap then blocks) */
 void of_video_flip_wait(void);
 
