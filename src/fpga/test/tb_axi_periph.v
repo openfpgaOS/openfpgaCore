@@ -28,6 +28,7 @@ module tb_axi_periph (
     output wire        s_axi_awready,
     input  wire [31:0] s_axi_awaddr,
     input  wire [7:0]  s_axi_awlen,
+    input  wire [1:0]  s_axi_awburst,
 
     input  wire        s_axi_wvalid,
     output wire        s_axi_wready,
@@ -105,6 +106,7 @@ axi_periph_slave dut (
     .s_axi_rlast  (s_axi_rlast),
     .s_axi_awvalid(s_axi_awvalid), .s_axi_awready(s_axi_awready),
     .s_axi_awaddr (s_axi_awaddr),  .s_axi_awlen  (s_axi_awlen),
+    .s_axi_awburst(s_axi_awburst),
     .s_axi_wvalid (s_axi_wvalid),  .s_axi_wready (s_axi_wready),
     .s_axi_wdata  (s_axi_wdata),   .s_axi_wstrb  (s_axi_wstrb),
     .s_axi_wlast  (s_axi_wlast),

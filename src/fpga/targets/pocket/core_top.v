@@ -922,6 +922,7 @@ wire        cpu_m_local_awvalid;
 wire        cpu_m_local_awready;
 wire [31:0] cpu_m_local_awaddr;
 wire [7:0]  cpu_m_local_awlen;
+wire [1:0]  cpu_m_local_awburst;
 wire        cpu_m_local_wvalid;
 wire        cpu_m_local_wready;
 wire [31:0] cpu_m_local_wdata;
@@ -1663,6 +1664,7 @@ assign video_hs = vidout_hs;
         .m_local_awready(cpu_m_local_awready),
         .m_local_awaddr(cpu_m_local_awaddr),
         .m_local_awlen(cpu_m_local_awlen),
+        .m_local_awburst(cpu_m_local_awburst),
         .m_local_wvalid(cpu_m_local_wvalid),
         .m_local_wready(cpu_m_local_wready),
         .m_local_wdata(cpu_m_local_wdata),
@@ -1692,6 +1694,7 @@ assign video_hs = vidout_hs;
         .s_axi_awready(cpu_m_local_awready),
         .s_axi_awaddr(cpu_m_local_awaddr),
         .s_axi_awlen(cpu_m_local_awlen),
+        .s_axi_awburst(cpu_m_local_awburst),
         .s_axi_wvalid(cpu_m_local_wvalid),
         .s_axi_wready(cpu_m_local_wready),
         .s_axi_wdata(cpu_m_local_wdata),

@@ -36,6 +36,7 @@ static void reset_sequence() {
     tb->s_axi_arvalid = 0;
     tb->s_axi_rready  = 0;
     tb->s_axi_awvalid = 0;
+    tb->s_axi_awburst = 1;  // INCR is the default for everything except FIXED bursts
     tb->s_axi_wvalid  = 0;
     tb->s_axi_bready  = 0;
     for (int i = 0; i < 10; i++) tick();
@@ -329,6 +330,110 @@ static void test_gpu_write_mixed_addr(void) {
 }
 
 // ====================================================================
+// FIXED-burst write — proves req_addr stays pinned across all beats.
+// Used by the LSU shim's M2 coalescer to pack consecutive writes to a
+// single MMIO register (e.g. GPU_RING_DATA) into one AW + N W beats.
+// Without FIXED support, beat 2 would walk to GPU_RING_WRPTR and beat
+// 3 to GPU_FENCE, corrupting state.  Also tests the address-pinned
+// gpu_reg_addr matches the AW address on every pulse.
+// ====================================================================
+static uint32_t g_fixed_addrs[16];
+static uint32_t g_fixed_wdata[16];
+static uint32_t g_fixed_pulse_idx;
+static void count_gpu_pulses_fixed_capture() {
+    if (tb->dbg_gpu_reg_wr && g_fixed_pulse_idx < 16) {
+        g_fixed_addrs[g_fixed_pulse_idx] = tb->dbg_gpu_reg_addr;
+        g_fixed_wdata[g_fixed_pulse_idx] = tb->dbg_gpu_reg_wdata;
+        g_fixed_pulse_idx++;
+    }
+}
+static void tick_and_count_fixed() {
+    tb->clk = 0;
+    tb->eval();
+    sim_time++;
+    tb->clk = 1;
+    tb->eval();
+    count_gpu_pulses_fixed_capture();
+    sim_time++;
+    cycle_count++;
+}
+
+// Issue an AW with awburst=FIXED (00), awlen=N-1; pump N W beats with
+// distinct data; expect bvalid back, gpu_reg_wr to fire N times all at
+// the same gpu_reg_addr (= AW address >> 2 & 0xF), and the captured
+// wdata sequence to match what we sent.
+static bool axi_write_fixed_burst(uint32_t addr, const uint32_t *data, int n) {
+    tb->s_axi_awvalid = 1;
+    tb->s_axi_awaddr  = addr;
+    tb->s_axi_awlen   = (uint8_t)(n - 1);
+    tb->s_axi_awburst = 0;  // FIXED
+    tb->s_axi_wvalid  = 0;
+
+    int cycles = 0;
+    while (cycles++ < 5000 && !(tb->s_axi_awvalid == 0)) {
+        tb->eval();
+        if (tb->s_axi_awvalid && tb->s_axi_awready) tb->s_axi_awvalid = 0;
+        tick_and_count_fixed();
+    }
+    // Pump W beats one at a time so wlast lands on the last beat.
+    int beat = 0;
+    while (beat < n && cycles++ < 5000) {
+        tb->s_axi_wvalid = 1;
+        tb->s_axi_wdata  = data[beat];
+        tb->s_axi_wstrb  = 0xF;
+        tb->s_axi_wlast  = (beat == n - 1) ? 1 : 0;
+        tb->eval();
+        if (tb->s_axi_wready) {
+            beat++;
+        }
+        tick_and_count_fixed();
+    }
+    tb->s_axi_wvalid = 0;
+    tb->s_axi_awburst = 1;  // restore default
+
+    tb->s_axi_bready = 1;
+    cycles = 0;
+    bool b_done = false;
+    while (cycles++ < 1000 && !b_done) {
+        tb->eval();
+        if (tb->s_axi_bvalid && tb->s_axi_bready) b_done = true;
+        tick_and_count_fixed();
+    }
+    tb->s_axi_bready = 0;
+    return b_done && (beat == n);
+}
+
+static void test_gpu_write_fixed_burst(void) {
+    printf("test_gpu_write_fixed_burst (awburst=FIXED, addr stays pinned):\n");
+    const uint32_t GPU_RING_DATA = 0x4A000008u;       // gpu_reg_addr = 2
+    const uint32_t expected_reg  = (GPU_RING_DATA >> 2) & 0xFu;
+    const uint32_t data[4] = {0xCAFEBE00u, 0xCAFEBE01u, 0xCAFEBE02u, 0xCAFEBE03u};
+
+    g_fixed_pulse_idx = 0;
+    bool ok = axi_write_fixed_burst(GPU_RING_DATA, data, 4);
+    for (int i = 0; i < 10; i++) tick_and_count_fixed();
+
+    if (!ok) { printf("  burst transfer failed\n"); fails++; return; }
+
+    check_eq("fixed-burst-pulse-count", g_fixed_pulse_idx, 4u);
+    int addrs_ok = 1, data_ok = 1;
+    for (uint32_t i = 0; i < 4 && i < g_fixed_pulse_idx; i++) {
+        if (g_fixed_addrs[i] != expected_reg) {
+            printf("  beat %u: addr=%u expected=%u (would have walked under INCR)\n",
+                   i, g_fixed_addrs[i], expected_reg);
+            addrs_ok = 0;
+        }
+        if (g_fixed_wdata[i] != data[i]) {
+            printf("  beat %u: wdata=0x%08x expected=0x%08x\n",
+                   i, g_fixed_wdata[i], data[i]);
+            data_ok = 0;
+        }
+    }
+    check_eq("fixed-burst-addr-pinned", addrs_ok, 1);
+    check_eq("fixed-burst-wdata-order", data_ok, 1);
+}
+
+// ====================================================================
 // Tests
 // ====================================================================
 static void test_single_word_bram_read() {
@@ -511,6 +616,7 @@ int main(int argc, char **argv) {
     test_gpu_write_back_to_back();
     test_gpu_write_split_aw_w();
     test_gpu_write_mixed_addr();
+    test_gpu_write_fixed_burst();
 
     // GPU MMIO read addressing — caught the registered-rdata off-by-one.
     test_gpu_read_addressing();

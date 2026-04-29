@@ -125,6 +125,7 @@ SYSTEM_SRCS = \
 	$(COMMON_DIR)/cpu_system.v \
 	$(COMMON_DIR)/cpu_target_port.v \
 	$(COMMON_DIR)/cram0_cdc.v \
+	$(COMMON_DIR)/axi_register_slice.v \
 	$(COMMON_DIR)/axi_sdram_arbiter.v \
 	$(COMMON_DIR)/axi_sdram_slave.v \
 	$(COMMON_DIR)/axi_periph_slave.v \

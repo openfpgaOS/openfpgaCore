@@ -32,6 +32,10 @@ module axi_periph_slave (
     output reg         s_axi_awready,
     input  wire [31:0] s_axi_awaddr,
     input  wire [7:0]  s_axi_awlen,
+    // awburst[1:0]: 00 = FIXED (req_addr stays put for the burst —
+    // used by the LSU shim's M2 coalescer to pack consecutive writes
+    // to GPU_RING_DATA into one AW + N W beats), 01 = INCR (default).
+    input  wire [1:0]  s_axi_awburst,
 
     input  wire        s_axi_wvalid,
     output reg         s_axi_wready,
@@ -929,6 +933,12 @@ reg [3:0]  req_wstrb;
 reg        is_write;
 reg [7:0]  burst_len;
 reg [7:0]  burst_count;
+// awburst latched at AW handshake.  00 = FIXED → req_addr is held for
+// every beat of the burst (target a single MMIO register, e.g.
+// GPU_RING_DATA).  01 = INCR → req_addr += 4 per beat (the existing
+// behavior for I-cache refills, BRAM bursts, etc).
+reg [1:0]  awburst_latched;
+wire       burst_is_fixed = (awburst_latched == 2'b00);
 
 // Region flags (latched on accept)
 reg reg_ram;
@@ -1042,6 +1052,7 @@ always @(posedge clk or posedge reset) begin
         is_write <= 0;
         burst_len <= 0;
         burst_count <= 0;
+        awburst_latched <= 2'b01;  // INCR by default
 
         reg_ram <= 0;
         reg_sysreg <= 0;
@@ -1141,6 +1152,7 @@ always @(posedge clk or posedge reset) begin
                 req_addr <= aw_addr;
                 burst_len <= s_axi_awlen;
                 burst_count <= 0;
+                awburst_latched <= s_axi_awburst;
 
                 reg_ram    <= aw_dec_ram;
                 reg_sysreg <= aw_dec_sysreg;
@@ -1251,7 +1263,7 @@ always @(posedge clk or posedge reset) begin
                 s_axi_bresp <= 2'b00;
                 state <= S_IDLE;
             end else begin
-                req_addr <= req_addr + 32'd4;
+                if (!burst_is_fixed) req_addr <= req_addr + 32'd4;
                 state <= S_WR_NEXT;
             end
         end
@@ -1283,7 +1295,9 @@ always @(posedge clk or posedge reset) begin
                 s_axi_bresp <= 2'b00;
                 state <= S_IDLE;
             end else begin
-                req_addr <= req_addr + 32'd4;
+                // FIXED burst → address pinned (every beat hits the same
+                // register); INCR → walk by 4 per beat.
+                if (!burst_is_fixed) req_addr <= req_addr + 32'd4;
                 state <= S_WR_NEXT;
             end
         end

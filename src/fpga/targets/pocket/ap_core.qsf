@@ -704,6 +704,7 @@ set_global_assignment -name VERILOG_FILE ../../common/axi_periph_slave.v
 set_global_assignment -name VERILOG_FILE ../../common/snac_shifter.v
 # axi_cram0_slave.v retired — cram0_cdc is the CPU-side AXI slave for
 # CRAM0 in v2, owner-muxed against the bridge.  File deleted from tree.
+set_global_assignment -name VERILOG_FILE ../../common/axi_register_slice.v
 set_global_assignment -name VERILOG_FILE ../../common/axi_sdram_arbiter.v
 set_global_assignment -name VERILOG_FILE ../../common/axi_sdram_slave.v
 set_global_assignment -name VERILOG_FILE ../../common/cpu_system.v
@@ -722,7 +723,7 @@ set_global_assignment -name VERILOG_FILE ../../common/video_CRT_scanout_indexed_
 set_global_assignment -name VERILOG_FILE ../../vendor/vexriscv/VexiiRiscv/VexiiRiscv.v
 set_global_assignment -name VERILOG_FILE mf_pllram_133.v
 set_global_assignment -name SDC_FILE core_constraints.sdc
-set_global_assignment -name SEED 39
+set_global_assignment -name SEED 41
 # Phase 5 fitter-tuning experiments (see session 2026-04-18).  All
 # Quartus knobs we tried — RESOURCE_SHARING, REGISTER_RETIMING,
 # REGISTER_DUPLICATION, ramstyle=MLAB, seed 11 — ended up worse

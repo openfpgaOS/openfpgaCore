@@ -88,6 +88,7 @@ module cpu_target_port (
     input  wire [31:0] mem_awaddr,
     input  wire [1:0]  mem_awid,
     input  wire [7:0]  mem_awlen,
+    input  wire [1:0]  mem_awburst,
 
     input  wire        mem_wvalid,
     output wire        mem_wready_contrib,
@@ -118,6 +119,7 @@ module cpu_target_port (
     output wire        per_awready_contrib,
     input  wire [31:0] per_awaddr,
     input  wire [7:0]  per_awlen,
+    input  wire [1:0]  per_awburst,
 
     input  wire        per_wvalid,
     output wire        per_wready_contrib,
@@ -147,6 +149,7 @@ module cpu_target_port (
     input  wire        m_awready,
     output reg  [31:0] m_awaddr,
     output reg  [7:0]  m_awlen,
+    output reg  [1:0]  m_awburst,
 
     output reg         m_wvalid,
     input  wire        m_wready,
@@ -463,6 +466,7 @@ always @(posedge clk or posedge reset) begin
         m_awvalid          <= 1'b0;
         m_awaddr           <= 32'b0;
         m_awlen            <= 8'b0;
+        m_awburst          <= 2'b01;
         m_wvalid           <= 1'b0;
         m_wdata            <= 32'b0;
         m_wstrb            <= 4'b0;
@@ -499,6 +503,7 @@ always @(posedge clk or posedge reset) begin
                 m_awvalid         <= 1'b1;
                 m_awaddr          <= mem_awaddr;
                 m_awlen           <= mem_awlen;
+                m_awburst         <= mem_awburst;
                 last_grant_wr_mem <= 1'b1;
                 wr_state          <= WR_AW;
                 if (mem_wvalid) begin
@@ -516,6 +521,7 @@ always @(posedge clk or posedge reset) begin
                 m_awvalid         <= 1'b1;
                 m_awaddr          <= per_awaddr;
                 m_awlen           <= per_awlen;
+                m_awburst         <= per_awburst;
                 last_grant_wr_mem <= 1'b0;
                 wr_state          <= WR_AW;
                 if (per_wvalid) begin

@@ -114,6 +114,7 @@ wire        cpu_local_rlast;
 wire        cpu_local_awvalid, cpu_local_awready;
 wire [31:0] cpu_local_awaddr;
 wire [7:0]  cpu_local_awlen;
+wire [1:0]  cpu_local_awburst;
 wire        cpu_local_wvalid,  cpu_local_wready;
 wire [31:0] cpu_local_wdata;
 wire [3:0]  cpu_local_wstrb;
@@ -162,6 +163,7 @@ cpu_system cpu_sys (
     .m_local_rlast  (cpu_local_rlast),
     .m_local_awvalid(cpu_local_awvalid), .m_local_awready(cpu_local_awready),
     .m_local_awaddr (cpu_local_awaddr),  .m_local_awlen  (cpu_local_awlen),
+    .m_local_awburst(cpu_local_awburst),
     .m_local_wvalid (cpu_local_wvalid),  .m_local_wready (cpu_local_wready),
     .m_local_wdata  (cpu_local_wdata),   .m_local_wstrb  (cpu_local_wstrb),
     .m_local_wlast  (cpu_local_wlast),
@@ -460,6 +462,7 @@ axi_periph_slave periph (
     .s_axi_rlast  (cpu_local_rlast),
     .s_axi_awvalid(cpu_local_awvalid), .s_axi_awready(cpu_local_awready),
     .s_axi_awaddr (cpu_local_awaddr),  .s_axi_awlen  (cpu_local_awlen),
+    .s_axi_awburst(cpu_local_awburst),
     .s_axi_wvalid (cpu_local_wvalid),  .s_axi_wready (cpu_local_wready),
     .s_axi_wdata  (cpu_local_wdata),   .s_axi_wstrb  (cpu_local_wstrb),
     .s_axi_wlast  (cpu_local_wlast),

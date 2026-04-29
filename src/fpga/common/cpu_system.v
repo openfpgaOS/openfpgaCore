@@ -93,6 +93,7 @@ module cpu_system (
     input  wire        m_local_awready,
     output wire [31:0] m_local_awaddr,
     output wire [7:0]  m_local_awlen,
+    output wire [1:0]  m_local_awburst,
 
     output wire        m_local_wvalid,
     input  wire        m_local_wready,
@@ -119,6 +120,34 @@ wire reset = ~reset_n;
 //             (uncached LSU IO — MMIO, framebuffer writes, etc.)
 // ============================================================
 
+// ============================================================
+// Phase 2 — AXI register slices on each VexiiRiscv master.
+//
+// VexiiRiscv's pins were the dominant placement-pressure source on
+// the 100 MHz CPU domain: each master fans out to all three
+// cpu_target_ports (sdram, cram0, local), so without a slice the
+// fitter has to keep VexiiRiscv physically close to whichever target
+// owns the worst route — stretching VexiiRiscv across a wide region
+// and exposing internal feedback paths (exe3→fetch1, FPU→I-cache RE)
+// to long routing.  See openfpgaOS/docs/cr-* timing analysis.
+//
+// With the slice, VexiiRiscv's pins reach a register inside its own
+// placement region and the long crossings to target ports become
+// register-to-register transfers the placer can route freely.
+// VexiiRiscv contracts; internal cones get short routes.
+//
+// Latency cost: +1 cycle each direction per AXI handshake.
+// Cached inner loops are unaffected (no AXI traffic).  D$ refills
+// pay +2 cycles amortised over an 8-beat burst.  Uncached LSU
+// (per_axi) pays +2 per single-beat MMIO — recovered by the
+// multi-outstanding LSU shim (M1) and burst-mode ring writes (M2).
+//
+// One slice per AXI channel.  The cpu-side wires (`*_cpu`) connect
+// to VexiiRiscv directly; slice outputs drive the existing wire
+// names that the cpu_target_ports already use, so target-port
+// instantiations are unchanged.
+// ============================================================
+
 // i_axi
 wire        i_arvalid;  wire        i_arready;
 wire [31:0] i_araddr;
@@ -130,6 +159,19 @@ wire [31:0] i_rdata;
 wire [0:0]  i_rid;      wire [1:0]  i_rresp;
 wire        i_rlast;
 
+// i_axi cpu-side (between VexiiRiscv and slice)
+wire        i_arvalid_cpu, i_arready_cpu;
+wire [31:0] i_araddr_cpu;
+wire [0:0]  i_arid_cpu;
+wire [7:0]  i_arlen_cpu;
+wire [2:0]  i_arsize_cpu;
+wire [1:0]  i_arburst_cpu;
+wire        i_rvalid_cpu, i_rready_cpu;
+wire [31:0] i_rdata_cpu;
+wire [0:0]  i_rid_cpu;
+wire [1:0]  i_rresp_cpu;
+wire        i_rlast_cpu;
+
 // i_axi has AW/W/B ports on the CPU top but VexiiRiscv ties them off
 // internally (read-only bridge), so the cpu_system side only connects R.
 wire        i_awvalid_tie;
@@ -137,7 +179,7 @@ wire        i_wvalid_tie;
 wire [0:0]  i_bid_tie;
 wire [1:0]  i_bresp_tie;
 
-// mem_axi (D$ cached)
+// mem_axi (D$ cached) — post-slice, drives target ports
 wire        mem_arvalid;  wire        mem_arready;
 wire [31:0] mem_araddr;
 wire [1:0]  mem_arid;
@@ -160,7 +202,42 @@ wire        mem_wlast;
 wire        mem_bvalid;   wire        mem_bready;
 wire [1:0]  mem_bid;      wire [1:0]  mem_bresp;
 
-// p_axi (uncached IO)
+// mem_axi cpu-side (between VexiiRiscv and slice)
+wire        mem_arvalid_cpu, mem_arready_cpu;
+wire [31:0] mem_araddr_cpu;
+wire [1:0]  mem_arid_cpu;
+wire [7:0]  mem_arlen_cpu;
+wire [2:0]  mem_arsize_cpu;
+wire [1:0]  mem_arburst_cpu;
+wire        mem_rvalid_cpu, mem_rready_cpu;
+wire [31:0] mem_rdata_cpu;
+wire [1:0]  mem_rid_cpu;
+wire [1:0]  mem_rresp_cpu;
+wire        mem_rlast_cpu;
+wire        mem_awvalid_cpu, mem_awready_cpu;
+wire [31:0] mem_awaddr_cpu;
+wire [1:0]  mem_awid_cpu;
+wire [7:0]  mem_awlen_cpu;
+wire [2:0]  mem_awsize_cpu;
+wire [1:0]  mem_awburst_cpu;
+// mem_awallStrb is unused by cpu_target_port (no slave reads it) so it
+// doesn't need a slice — declared on the post-slice side only, tied to
+// 0 since VexiiRiscv doesn't expose it.  Same for per_awallStrb below.
+wire        mem_wvalid_cpu, mem_wready_cpu;
+wire [31:0] mem_wdata_cpu;
+wire [3:0]  mem_wstrb_cpu;
+wire        mem_wlast_cpu;
+wire        mem_bvalid_cpu, mem_bready_cpu;
+wire [1:0]  mem_bid_cpu;
+wire [1:0]  mem_bresp_cpu;
+
+// p_axi (uncached IO) — post-slice, drives target ports.
+// NB: per_axi is sourced by the LSU shim further down (it converts
+// VexiiRiscv's native LsuPlugin cmd/rsp bus into single-beat AXI4),
+// not directly by VexiiRiscv.  The slice still sits between the shim
+// output and the target-port fan-out — the LSU shim's output is what
+// fans out to all three target ports, and that fan-out is the
+// placement-pressure source we need to break.
 wire        per_arvalid;  wire        per_arready;
 wire [31:0] per_araddr;
 wire [7:0]  per_arlen;
@@ -180,13 +257,53 @@ wire        per_wlast;
 wire        per_bvalid;   wire        per_bready;
 wire [1:0]  per_bresp;
 
+// per_axi cpu-side (between LSU shim and slice)
+wire        per_arvalid_cpu, per_arready_cpu;
+wire [31:0] per_araddr_cpu;
+wire [7:0]  per_arlen_cpu;
+wire [2:0]  per_arsize_cpu;
+wire [1:0]  per_arburst_cpu;
+wire        per_rvalid_cpu, per_rready_cpu;
+wire [31:0] per_rdata_cpu;
+wire [1:0]  per_rresp_cpu;
+wire        per_rlast_cpu;
+wire        per_awvalid_cpu, per_awready_cpu;
+wire [31:0] per_awaddr_cpu;
+wire [7:0]  per_awlen_cpu;
+wire [2:0]  per_awsize_cpu;
+wire [1:0]  per_awburst_cpu;
+wire        per_wvalid_cpu, per_wready_cpu;
+wire [31:0] per_wdata_cpu;
+wire [3:0]  per_wstrb_cpu;
+wire        per_wlast_cpu;
+wire        per_bvalid_cpu, per_bready_cpu;
+wire [1:0]  per_bresp_cpu;
+
 // ============================================================
-// Native LsuPlugin cmd/rsp bus → per_* AXI4 shim
+// Native LsuPlugin cmd/rsp bus → per_* AXI4 shim (M1: posted writes)
 //
 // VexiiRiscv (stock Generate) exposes the uncached LSU path as a
 // non-AXI cmd/rsp bus.  We convert it to single-beat AXI4 here so
-// downstream cpu_target_ports keep their uniform interface.  The
-// CPU stalls on rsp, so one outstanding transaction max.
+// downstream cpu_target_ports keep their uniform interface.
+//
+// Reads stay 1-deep: VexiiRiscv's commit stage stalls on rsp, so
+// pipelining reads in the shim doesn't help.
+//
+// Writes are posted with a 4-deep FIFO: cmd_ready fires the cycle
+// the write enters the FIFO, and rsp_valid pulses one cycle later
+// — the CPU sees a fast write rsp and pipelines into the next
+// store while the actual AW/W still travels through the slices to
+// the target.  This is the key win after Phase 2 added +2 cycles
+// of round-trip latency on per_axi.
+//
+// Ordering: a read can only be accepted when the write FIFO is
+// empty (drains all pending writes first).  Avoids RAW hazards
+// to MMIO regions where a write must complete before its side
+// effect is observable.
+//
+// Trade-off: bus errors on writes (per_bresp != OK) are dropped.
+// Acceptable for MMIO/UART — none of our targets generate write
+// faults.  Reads still surface rresp via lsu_rsp_error.
 // ============================================================
 wire        lsu_cmd_valid;
 wire        lsu_cmd_ready;
@@ -199,96 +316,213 @@ wire        lsu_rsp_valid;
 wire        lsu_rsp_error;
 wire [31:0] lsu_rsp_data;
 
-// Single-transaction tracker — one native cmd ↔ one AXI transaction.
-reg lsu_inflight_read;    // AR accepted, waiting for R
-reg lsu_inflight_write;   // AW+W accepted, waiting for B
-reg lsu_ar_sent;
-reg lsu_aw_sent, lsu_w_sent;
+// Read tracker — 1-deep.
+reg        lsu_inflight_read;
+reg        lsu_ar_sent;
+reg [31:0] lsu_rd_addr;
+reg [1:0]  lsu_rd_size;
 
-// The native LSU cmd payload is only guaranteed stable until cmd_ready.
-// Hold a private copy while the downstream AXI target accepts AW/W/AR.
-reg        lsu_req_write;
-reg [31:0] lsu_req_addr;
-reg [31:0] lsu_req_data;
-reg [1:0]  lsu_req_size;
-reg [3:0]  lsu_req_mask;
+// Write FIFO — 4-deep posted-write queue.
+localparam WR_FIFO_DEPTH = 4;
+localparam WR_PTR_W      = 2;  // log2(WR_FIFO_DEPTH)
+localparam WR_CNT_W      = 3;  // log2(WR_FIFO_DEPTH+1)
 
-wire lsu_cmd_can_accept = !lsu_inflight_read && !lsu_inflight_write;
+reg [31:0] wr_addr_mem [0:WR_FIFO_DEPTH-1];
+reg [31:0] wr_data_mem [0:WR_FIFO_DEPTH-1];
+reg [3:0]  wr_mask_mem [0:WR_FIFO_DEPTH-1];
+reg [1:0]  wr_size_mem [0:WR_FIFO_DEPTH-1];
+reg [WR_PTR_W-1:0] wr_head, wr_tail;
+reg [WR_CNT_W-1:0] wr_count;
+reg                lsu_aw_sent, lsu_w_sent;  // per-head AW/W issue tracking
+
+wire wr_fifo_full  = (wr_count == WR_FIFO_DEPTH);
+wire wr_fifo_empty = (wr_count == 0);
+
+// M2 coalescer state.  When the FIFO holds N consecutive same-address
+// same-size same-mask entries at the head, fire one AW with awlen=N-1
+// and awburst=FIXED, pump N W-beats from FIFO[head..head+N-1], then
+// pop all N entries on B.  burst_awlen_calc is combinational from the
+// current FIFO contents; burst_awlen is the latched value at AW
+// handshake (used for W-phase wlast detection).  The big win is the
+// GPU ring push pattern (CPU writes a stream of words to a fixed MMIO
+// register at GPU_RING_DATA): without coalescing each word ate one
+// AW + W + B (~6 cycles with slices); coalesced four words share one
+// AW + B (~10 cycles for 4 words = 2.5 cycles/word).
+reg [WR_PTR_W-1:0] burst_awlen;
+reg [WR_PTR_W-1:0] burst_w_idx;
+
+// Accept logic.  A write enters the FIFO whenever it has room AND
+// no read is in flight (read drained first; writes don't pass reads
+// because the CPU's LSU stalls on read rsp anyway).  A read fires
+// when no writes are pending and no other read is outstanding.
+wire lsu_cmd_can_accept_wr = !lsu_inflight_read && !wr_fifo_full;
+wire lsu_cmd_can_accept_rd = !lsu_inflight_read && wr_fifo_empty;
+wire lsu_cmd_can_accept    =  lsu_cmd_write ? lsu_cmd_can_accept_wr
+                                            : lsu_cmd_can_accept_rd;
 wire lsu_cmd_fire = lsu_cmd_valid && lsu_cmd_can_accept;
+wire wr_push     = lsu_cmd_fire & lsu_cmd_write;
+wire wr_pop      = per_bvalid_cpu & per_bready_cpu;
 
+// Posted-write rsp: pulse one cycle after the FIFO push so the CPU
+// retires the store and pipelines the next.  Read rsp is when R-last lands.
+reg wr_rsp_q;
+always @(posedge clk or posedge reset) begin
+    if (reset) wr_rsp_q <= 1'b0;
+    else       wr_rsp_q <= wr_push;
+end
+
+assign lsu_rsp_valid = (per_rvalid_cpu & per_rready_cpu & per_rlast_cpu)
+                     | wr_rsp_q;
+assign lsu_rsp_data  = per_rdata_cpu;
+// Surface read errors only; write errors are dropped (writes posted).
+assign lsu_rsp_error = (per_rvalid_cpu & per_rready_cpu & per_rlast_cpu)
+                       ? (per_rresp_cpu != 2'b00)
+                       : 1'b0;
+assign lsu_cmd_ready = lsu_cmd_can_accept;
+
+// Read FSM — 1-deep, identical behavior to the previous shim.
 always @(posedge clk or posedge reset) begin
     if (reset) begin
-        lsu_inflight_read  <= 1'b0;
-        lsu_inflight_write <= 1'b0;
-        lsu_ar_sent        <= 1'b0;
-        lsu_aw_sent        <= 1'b0;
-        lsu_w_sent         <= 1'b0;
-        lsu_req_write      <= 1'b0;
-        lsu_req_addr       <= 32'b0;
-        lsu_req_data       <= 32'b0;
-        lsu_req_size       <= 2'b0;
-        lsu_req_mask       <= 4'b0;
+        lsu_inflight_read <= 1'b0;
+        lsu_ar_sent       <= 1'b0;
+        lsu_rd_addr       <= 32'b0;
+        lsu_rd_size       <= 2'b0;
     end else begin
-        if (lsu_cmd_fire) begin
-            lsu_req_write <= lsu_cmd_write;
-            lsu_req_addr  <= lsu_cmd_addr;
-            lsu_req_data  <= lsu_cmd_data;
-            lsu_req_size  <= lsu_cmd_size;
-            lsu_req_mask  <= lsu_cmd_mask;
+        if (lsu_cmd_fire && !lsu_cmd_write) begin
+            lsu_rd_addr <= lsu_cmd_addr;
+            lsu_rd_size <= lsu_cmd_size;
         end
-
-        // Read issue
-        if (per_arvalid && per_arready) lsu_ar_sent <= 1'b1;
-        if (per_rvalid  && per_rready && per_rlast) begin
+        if (per_arvalid_cpu && per_arready_cpu) lsu_ar_sent <= 1'b1;
+        if (per_rvalid_cpu  && per_rready_cpu && per_rlast_cpu) begin
             lsu_inflight_read <= 1'b0;
             lsu_ar_sent       <= 1'b0;
         end else if (lsu_cmd_fire && !lsu_cmd_write) begin
             lsu_inflight_read <= 1'b1;
         end
+    end
+end
 
-        // Write issue
-        if (per_awvalid && per_awready) lsu_aw_sent <= 1'b1;
-        if (per_wvalid  && per_wready)  lsu_w_sent  <= 1'b1;
-        if (per_bvalid  && per_bready) begin
-            lsu_inflight_write <= 1'b0;
-            lsu_aw_sent        <= 1'b0;
-            lsu_w_sent         <= 1'b0;
-        end else if (lsu_cmd_fire && lsu_cmd_write) begin
-            lsu_inflight_write <= 1'b1;
+// M2 match scan: how many consecutive head entries share addr+size+mask?
+// burst_awlen_calc is N-1 (0=single beat, 3=4-beat burst).  Combinational
+// — at the AW handshake posedge, both the slice and our burst_awlen
+// register sample the same value, so they stay consistent through the
+// W phase.
+wire [WR_PTR_W-1:0] head1 = wr_head + {{(WR_PTR_W-1){1'b0}}, 1'b1};
+wire [WR_PTR_W-1:0] head2 = wr_head + 2'd2;
+wire [WR_PTR_W-1:0] head3 = wr_head + 2'd3;
+wire match01 = (wr_count >= 3'd2)
+            && (wr_addr_mem[wr_head] == wr_addr_mem[head1])
+            && (wr_size_mem[wr_head] == wr_size_mem[head1])
+            && (wr_mask_mem[wr_head] == wr_mask_mem[head1]);
+wire match02 = match01 && (wr_count >= 3'd3)
+            && (wr_addr_mem[wr_head] == wr_addr_mem[head2])
+            && (wr_size_mem[wr_head] == wr_size_mem[head2])
+            && (wr_mask_mem[wr_head] == wr_mask_mem[head2]);
+wire match03 = match02 && (wr_count >= 3'd4)
+            && (wr_addr_mem[wr_head] == wr_addr_mem[head3])
+            && (wr_size_mem[wr_head] == wr_size_mem[head3])
+            && (wr_mask_mem[wr_head] == wr_mask_mem[head3]);
+
+wire [WR_PTR_W-1:0] burst_awlen_calc = match03 ? 2'd3
+                                     : match02 ? 2'd2
+                                     : match01 ? 2'd1
+                                     : 2'd0;
+
+// W-beat data routing: head + w_idx for both single-beat and burst.
+wire [WR_PTR_W-1:0] w_idx     = wr_head + burst_w_idx;
+wire [31:0]         w_addr    = wr_addr_mem[wr_head];   // FIXED: same every beat
+wire [31:0]         w_data    = wr_data_mem[w_idx];
+wire [3:0]          w_mask    = wr_mask_mem[w_idx];
+wire [1:0]          w_size    = wr_size_mem[wr_head];   // same for whole burst
+wire                w_is_last = (burst_w_idx == burst_awlen);
+
+// Write FIFO push/pop and burst tracking.
+integer wi;
+always @(posedge clk or posedge reset) begin
+    if (reset) begin
+        wr_head     <= {WR_PTR_W{1'b0}};
+        wr_tail     <= {WR_PTR_W{1'b0}};
+        wr_count    <= {WR_CNT_W{1'b0}};
+        lsu_aw_sent <= 1'b0;
+        lsu_w_sent  <= 1'b0;
+        burst_awlen <= {WR_PTR_W{1'b0}};
+        burst_w_idx <= {WR_PTR_W{1'b0}};
+        for (wi = 0; wi < WR_FIFO_DEPTH; wi = wi + 1) begin
+            wr_addr_mem[wi] <= 32'b0;
+            wr_data_mem[wi] <= 32'b0;
+            wr_mask_mem[wi] <= 4'b0;
+            wr_size_mem[wi] <= 2'b0;
         end
+    end else begin
+        if (wr_push) begin
+            wr_addr_mem[wr_tail] <= lsu_cmd_addr;
+            wr_data_mem[wr_tail] <= lsu_cmd_data;
+            wr_mask_mem[wr_tail] <= lsu_cmd_mask;
+            wr_size_mem[wr_tail] <= lsu_cmd_size;
+            wr_tail              <= wr_tail + {{(WR_PTR_W-1){1'b0}}, 1'b1};
+        end
+
+        // B retires the entire burst — pop burst_awlen+1 entries, reset
+        // per-burst state so the next AW handshake re-latches.
+        if (wr_pop) begin
+            wr_head     <= wr_head + (burst_awlen + {{(WR_PTR_W-1){1'b0}}, 1'b1});
+            lsu_aw_sent <= 1'b0;
+            lsu_w_sent  <= 1'b0;
+            burst_w_idx <= {WR_PTR_W{1'b0}};
+        end
+
+        // AW handshake: latch awlen for the W phase + mark sent.
+        if (per_awvalid_cpu && per_awready_cpu) begin
+            lsu_aw_sent <= 1'b1;
+            burst_awlen <= burst_awlen_calc;
+        end
+
+        // W beat: advance w_idx, set w_sent on wlast.
+        if (per_wvalid_cpu && per_wready_cpu) begin
+            if (w_is_last) lsu_w_sent <= 1'b1;
+            else           burst_w_idx <= burst_w_idx + {{(WR_PTR_W-1){1'b0}}, 1'b1};
+        end
+
+        // FIFO count delta accounts for posted push and burst-sized pop.
+        case ({wr_push, wr_pop})
+            2'b10: wr_count <= wr_count + 3'd1;
+            2'b01: wr_count <= wr_count - {1'b0, burst_awlen} - 3'd1;
+            2'b11: wr_count <= wr_count - {1'b0, burst_awlen};
+            default: ;
+        endcase
     end
 end
 
 // AR channel — drive while we have a read in flight but AR not yet accepted.
-assign per_arvalid = lsu_inflight_read & ~lsu_ar_sent;
-assign per_araddr  = lsu_req_addr;
-assign per_arlen   = 8'd0;           // single beat
-assign per_arsize  = {1'b0, lsu_req_size};
-assign per_arburst = 2'b01;          // INCR
-assign per_rready  = 1'b1;           // always accept the single R beat
+assign per_arvalid_cpu = lsu_inflight_read & ~lsu_ar_sent;
+assign per_araddr_cpu  = lsu_rd_addr;
+assign per_arlen_cpu   = 8'd0;
+assign per_arsize_cpu  = {1'b0, lsu_rd_size};
+assign per_arburst_cpu = 2'b01;
+assign per_rready_cpu  = 1'b1;
 
-// AW/W channels — single-beat write.
-assign per_awvalid    = lsu_inflight_write & ~lsu_aw_sent;
-assign per_awaddr     = lsu_req_addr;
-assign per_awlen      = 8'd0;
-assign per_awsize     = {1'b0, lsu_req_size};
-assign per_awburst    = 2'b01;
-assign per_awallStrb  = &lsu_req_mask;
-assign per_wvalid     = lsu_inflight_write & ~lsu_w_sent;
-assign per_wdata      = lsu_req_data;
-assign per_wstrb      = lsu_req_mask;
-assign per_wlast      = 1'b1;
-assign per_bready     = 1'b1;
+// AW channel.  awlen + awburst are combinational from the current
+// match scan — the slice samples them at the handshake posedge and
+// our burst_awlen register latches the same value at the same posedge.
+// awburst=FIXED when coalescing keeps req_addr pinned across beats
+// (e.g. for GPU_RING_DATA pushes); awburst=INCR for single beats so
+// non-burst-aware slaves keep their existing behavior.
+assign per_awvalid_cpu = !wr_fifo_empty & ~lsu_aw_sent;
+assign per_awaddr_cpu  = w_addr;
+assign per_awlen_cpu   = {{(8-WR_PTR_W){1'b0}}, burst_awlen_calc};
+assign per_awsize_cpu  = {1'b0, w_size};
+assign per_awburst_cpu = (burst_awlen_calc != {WR_PTR_W{1'b0}}) ? 2'b00 : 2'b01;
+// awallStrb is a side-band hint not consumed by cpu_target_port —
+// drive the post-slice wire directly; no slice needed.
+assign per_awallStrb   = &w_mask;
+assign mem_awallStrb   = 1'b0;
 
-// Accept exactly one native command, then hold its payload until response.
-assign lsu_cmd_ready = lsu_cmd_can_accept;
-
-// Return the rsp beat when R or B lands.
-assign lsu_rsp_valid = (per_rvalid & per_rready & per_rlast)
-                     | (per_bvalid & per_bready);
-assign lsu_rsp_data  = per_rdata;
-assign lsu_rsp_error = lsu_req_write ? (per_bresp != 2'b00)
-                                     : (per_rresp != 2'b00);
+// W channel — beat data from FIFO[head + w_idx]; wlast on the final beat.
+assign per_wvalid_cpu  = !wr_fifo_empty & ~lsu_w_sent;
+assign per_wdata_cpu   = w_data;
+assign per_wstrb_cpu   = w_mask;
+assign per_wlast_cpu   = w_is_last;
+assign per_bready_cpu  = 1'b1;
 
 // i_axi AW/W/B tie-offs retained for backwards-compatible placeholders.
 assign i_awvalid_tie = 1'b0;
@@ -307,57 +541,59 @@ VexiiRiscv cpu (
     .PrivilegedPlugin_logic_harts_0_int_m_software(1'b0),
     .PrivilegedPlugin_logic_harts_0_int_m_external(int_m_external),
 
-    // FetchL1Axi4 (I-cache refills, read-only)
-    .FetchL1Axi4Plugin_logic_axi_ar_valid        (i_arvalid),
-    .FetchL1Axi4Plugin_logic_axi_ar_ready        (i_arready),
-    .FetchL1Axi4Plugin_logic_axi_ar_payload_addr (i_araddr),
-    .FetchL1Axi4Plugin_logic_axi_ar_payload_id   (i_arid),
-    .FetchL1Axi4Plugin_logic_axi_ar_payload_len  (i_arlen),
-    .FetchL1Axi4Plugin_logic_axi_ar_payload_size (i_arsize),
-    .FetchL1Axi4Plugin_logic_axi_ar_payload_burst(i_arburst),
+    // FetchL1Axi4 (I-cache refills, read-only).  All channels routed
+    // through axi_register_slice instances below — VexiiRiscv connects
+    // to the *_cpu wires; the slice outputs drive i_* (post-slice).
+    .FetchL1Axi4Plugin_logic_axi_ar_valid        (i_arvalid_cpu),
+    .FetchL1Axi4Plugin_logic_axi_ar_ready        (i_arready_cpu),
+    .FetchL1Axi4Plugin_logic_axi_ar_payload_addr (i_araddr_cpu),
+    .FetchL1Axi4Plugin_logic_axi_ar_payload_id   (i_arid_cpu),
+    .FetchL1Axi4Plugin_logic_axi_ar_payload_len  (i_arlen_cpu),
+    .FetchL1Axi4Plugin_logic_axi_ar_payload_size (i_arsize_cpu),
+    .FetchL1Axi4Plugin_logic_axi_ar_payload_burst(i_arburst_cpu),
     .FetchL1Axi4Plugin_logic_axi_ar_payload_cache(),
     .FetchL1Axi4Plugin_logic_axi_ar_payload_prot (),
-    .FetchL1Axi4Plugin_logic_axi_r_valid         (i_rvalid),
-    .FetchL1Axi4Plugin_logic_axi_r_ready         (i_rready),
-    .FetchL1Axi4Plugin_logic_axi_r_payload_data  (i_rdata),
-    .FetchL1Axi4Plugin_logic_axi_r_payload_id    (i_rid),
-    .FetchL1Axi4Plugin_logic_axi_r_payload_resp  (i_rresp),
-    .FetchL1Axi4Plugin_logic_axi_r_payload_last  (i_rlast),
+    .FetchL1Axi4Plugin_logic_axi_r_valid         (i_rvalid_cpu),
+    .FetchL1Axi4Plugin_logic_axi_r_ready         (i_rready_cpu),
+    .FetchL1Axi4Plugin_logic_axi_r_payload_data  (i_rdata_cpu),
+    .FetchL1Axi4Plugin_logic_axi_r_payload_id    (i_rid_cpu),
+    .FetchL1Axi4Plugin_logic_axi_r_payload_resp  (i_rresp_cpu),
+    .FetchL1Axi4Plugin_logic_axi_r_payload_last  (i_rlast_cpu),
 
-    // LsuL1Axi4 (D-cache refills/writebacks + cbo.*)
-    .LsuL1Axi4Plugin_logic_axi_aw_valid        (mem_awvalid),
-    .LsuL1Axi4Plugin_logic_axi_aw_ready        (mem_awready),
-    .LsuL1Axi4Plugin_logic_axi_aw_payload_addr (mem_awaddr),
-    .LsuL1Axi4Plugin_logic_axi_aw_payload_id   (mem_awid),
-    .LsuL1Axi4Plugin_logic_axi_aw_payload_len  (mem_awlen),
-    .LsuL1Axi4Plugin_logic_axi_aw_payload_size (mem_awsize),
-    .LsuL1Axi4Plugin_logic_axi_aw_payload_burst(mem_awburst),
+    // LsuL1Axi4 (D-cache refills/writebacks + cbo.*) — sliced.
+    .LsuL1Axi4Plugin_logic_axi_aw_valid        (mem_awvalid_cpu),
+    .LsuL1Axi4Plugin_logic_axi_aw_ready        (mem_awready_cpu),
+    .LsuL1Axi4Plugin_logic_axi_aw_payload_addr (mem_awaddr_cpu),
+    .LsuL1Axi4Plugin_logic_axi_aw_payload_id   (mem_awid_cpu),
+    .LsuL1Axi4Plugin_logic_axi_aw_payload_len  (mem_awlen_cpu),
+    .LsuL1Axi4Plugin_logic_axi_aw_payload_size (mem_awsize_cpu),
+    .LsuL1Axi4Plugin_logic_axi_aw_payload_burst(mem_awburst_cpu),
     .LsuL1Axi4Plugin_logic_axi_aw_payload_cache(),
     .LsuL1Axi4Plugin_logic_axi_aw_payload_prot (),
-    .LsuL1Axi4Plugin_logic_axi_w_valid         (mem_wvalid),
-    .LsuL1Axi4Plugin_logic_axi_w_ready         (mem_wready),
-    .LsuL1Axi4Plugin_logic_axi_w_payload_data  (mem_wdata),
-    .LsuL1Axi4Plugin_logic_axi_w_payload_strb  (mem_wstrb),
-    .LsuL1Axi4Plugin_logic_axi_w_payload_last  (mem_wlast),
-    .LsuL1Axi4Plugin_logic_axi_b_valid         (mem_bvalid),
-    .LsuL1Axi4Plugin_logic_axi_b_ready         (mem_bready),
-    .LsuL1Axi4Plugin_logic_axi_b_payload_id    (mem_bid),
-    .LsuL1Axi4Plugin_logic_axi_b_payload_resp  (mem_bresp),
-    .LsuL1Axi4Plugin_logic_axi_ar_valid        (mem_arvalid),
-    .LsuL1Axi4Plugin_logic_axi_ar_ready        (mem_arready),
-    .LsuL1Axi4Plugin_logic_axi_ar_payload_addr (mem_araddr),
-    .LsuL1Axi4Plugin_logic_axi_ar_payload_id   (mem_arid),
-    .LsuL1Axi4Plugin_logic_axi_ar_payload_len  (mem_arlen),
-    .LsuL1Axi4Plugin_logic_axi_ar_payload_size (mem_arsize),
-    .LsuL1Axi4Plugin_logic_axi_ar_payload_burst(mem_arburst),
+    .LsuL1Axi4Plugin_logic_axi_w_valid         (mem_wvalid_cpu),
+    .LsuL1Axi4Plugin_logic_axi_w_ready         (mem_wready_cpu),
+    .LsuL1Axi4Plugin_logic_axi_w_payload_data  (mem_wdata_cpu),
+    .LsuL1Axi4Plugin_logic_axi_w_payload_strb  (mem_wstrb_cpu),
+    .LsuL1Axi4Plugin_logic_axi_w_payload_last  (mem_wlast_cpu),
+    .LsuL1Axi4Plugin_logic_axi_b_valid         (mem_bvalid_cpu),
+    .LsuL1Axi4Plugin_logic_axi_b_ready         (mem_bready_cpu),
+    .LsuL1Axi4Plugin_logic_axi_b_payload_id    (mem_bid_cpu),
+    .LsuL1Axi4Plugin_logic_axi_b_payload_resp  (mem_bresp_cpu),
+    .LsuL1Axi4Plugin_logic_axi_ar_valid        (mem_arvalid_cpu),
+    .LsuL1Axi4Plugin_logic_axi_ar_ready        (mem_arready_cpu),
+    .LsuL1Axi4Plugin_logic_axi_ar_payload_addr (mem_araddr_cpu),
+    .LsuL1Axi4Plugin_logic_axi_ar_payload_id   (mem_arid_cpu),
+    .LsuL1Axi4Plugin_logic_axi_ar_payload_len  (mem_arlen_cpu),
+    .LsuL1Axi4Plugin_logic_axi_ar_payload_size (mem_arsize_cpu),
+    .LsuL1Axi4Plugin_logic_axi_ar_payload_burst(mem_arburst_cpu),
     .LsuL1Axi4Plugin_logic_axi_ar_payload_cache(),
     .LsuL1Axi4Plugin_logic_axi_ar_payload_prot (),
-    .LsuL1Axi4Plugin_logic_axi_r_valid         (mem_rvalid),
-    .LsuL1Axi4Plugin_logic_axi_r_ready         (mem_rready),
-    .LsuL1Axi4Plugin_logic_axi_r_payload_data  (mem_rdata),
-    .LsuL1Axi4Plugin_logic_axi_r_payload_id    (mem_rid),
-    .LsuL1Axi4Plugin_logic_axi_r_payload_resp  (mem_rresp),
-    .LsuL1Axi4Plugin_logic_axi_r_payload_last  (mem_rlast),
+    .LsuL1Axi4Plugin_logic_axi_r_valid         (mem_rvalid_cpu),
+    .LsuL1Axi4Plugin_logic_axi_r_ready         (mem_rready_cpu),
+    .LsuL1Axi4Plugin_logic_axi_r_payload_data  (mem_rdata_cpu),
+    .LsuL1Axi4Plugin_logic_axi_r_payload_id    (mem_rid_cpu),
+    .LsuL1Axi4Plugin_logic_axi_r_payload_resp  (mem_rresp_cpu),
+    .LsuL1Axi4Plugin_logic_axi_r_payload_last  (mem_rlast_cpu),
 
     // LsuPlugin native IO bus (goes through the shim above to per_* AXI)
     .LsuPlugin_logic_bus_cmd_valid           (lsu_cmd_valid),
@@ -373,6 +609,117 @@ VexiiRiscv cpu (
     .LsuPlugin_logic_bus_rsp_valid           (lsu_rsp_valid),
     .LsuPlugin_logic_bus_rsp_payload_error   (lsu_rsp_error),
     .LsuPlugin_logic_bus_rsp_payload_data    (lsu_rsp_data)
+);
+
+// ============================================================
+// AXI register slices (Phase 2)
+//
+// One slice per AXI channel.  Each bundles the channel's payload
+// signals into a single packed bus that the slice carries unchanged
+// across a 1-cycle register stage.  Throughput unchanged; latency
+// +1 cycle each direction; placement freedom for VexiiRiscv.
+// ============================================================
+
+// ---- i_axi (read-only) ----
+//   AR payload = {araddr[31:0], arid[0], arlen[7:0], arsize[2:0], arburst[1:0]} = 46 bits
+axi_register_slice #(.W(46)) i_ar_slice (
+    .clk(clk), .reset_n(reset_n),
+    .s_valid (i_arvalid_cpu),  .s_ready (i_arready_cpu),
+    .s_payload({i_araddr_cpu, i_arid_cpu, i_arlen_cpu, i_arsize_cpu, i_arburst_cpu}),
+    .m_valid (i_arvalid),      .m_ready (i_arready),
+    .m_payload({i_araddr,     i_arid,     i_arlen,     i_arsize,     i_arburst})
+);
+//   R payload = {rdata[31:0], rid[0], rresp[1:0], rlast} = 36 bits
+axi_register_slice #(.W(36)) i_r_slice (
+    .clk(clk), .reset_n(reset_n),
+    .s_valid (i_rvalid),       .s_ready (i_rready),
+    .s_payload({i_rdata,     i_rid,     i_rresp,     i_rlast}),
+    .m_valid (i_rvalid_cpu),   .m_ready (i_rready_cpu),
+    .m_payload({i_rdata_cpu, i_rid_cpu, i_rresp_cpu, i_rlast_cpu})
+);
+
+// ---- mem_axi (D$ R/W) ----
+//   AR = {araddr[31:0], arid[1:0], arlen[7:0], arsize[2:0], arburst[1:0]} = 47 bits
+axi_register_slice #(.W(47)) mem_ar_slice (
+    .clk(clk), .reset_n(reset_n),
+    .s_valid (mem_arvalid_cpu),.s_ready (mem_arready_cpu),
+    .s_payload({mem_araddr_cpu, mem_arid_cpu, mem_arlen_cpu, mem_arsize_cpu, mem_arburst_cpu}),
+    .m_valid (mem_arvalid),    .m_ready (mem_arready),
+    .m_payload({mem_araddr,     mem_arid,     mem_arlen,     mem_arsize,     mem_arburst})
+);
+//   R = {rdata[31:0], rid[1:0], rresp[1:0], rlast} = 37 bits
+axi_register_slice #(.W(37)) mem_r_slice (
+    .clk(clk), .reset_n(reset_n),
+    .s_valid (mem_rvalid),     .s_ready (mem_rready),
+    .s_payload({mem_rdata,     mem_rid,     mem_rresp,     mem_rlast}),
+    .m_valid (mem_rvalid_cpu), .m_ready (mem_rready_cpu),
+    .m_payload({mem_rdata_cpu, mem_rid_cpu, mem_rresp_cpu, mem_rlast_cpu})
+);
+//   AW = {awaddr[31:0], awid[1:0], awlen[7:0], awsize[2:0], awburst[1:0]} = 47 bits
+axi_register_slice #(.W(47)) mem_aw_slice (
+    .clk(clk), .reset_n(reset_n),
+    .s_valid (mem_awvalid_cpu),.s_ready (mem_awready_cpu),
+    .s_payload({mem_awaddr_cpu, mem_awid_cpu, mem_awlen_cpu, mem_awsize_cpu, mem_awburst_cpu}),
+    .m_valid (mem_awvalid),    .m_ready (mem_awready),
+    .m_payload({mem_awaddr,     mem_awid,     mem_awlen,     mem_awsize,     mem_awburst})
+);
+//   W = {wdata[31:0], wstrb[3:0], wlast} = 37 bits
+axi_register_slice #(.W(37)) mem_w_slice (
+    .clk(clk), .reset_n(reset_n),
+    .s_valid (mem_wvalid_cpu), .s_ready (mem_wready_cpu),
+    .s_payload({mem_wdata_cpu, mem_wstrb_cpu, mem_wlast_cpu}),
+    .m_valid (mem_wvalid),     .m_ready (mem_wready),
+    .m_payload({mem_wdata,     mem_wstrb,     mem_wlast})
+);
+//   B = {bid[1:0], bresp[1:0]} = 4 bits
+axi_register_slice #(.W(4))  mem_b_slice (
+    .clk(clk), .reset_n(reset_n),
+    .s_valid (mem_bvalid),     .s_ready (mem_bready),
+    .s_payload({mem_bid,     mem_bresp}),
+    .m_valid (mem_bvalid_cpu), .m_ready (mem_bready_cpu),
+    .m_payload({mem_bid_cpu, mem_bresp_cpu})
+);
+
+// ---- per_axi (uncached LSU IO) ----
+//   AR = {araddr[31:0], arlen[7:0], arsize[2:0], arburst[1:0]} = 45 bits
+axi_register_slice #(.W(45)) per_ar_slice (
+    .clk(clk), .reset_n(reset_n),
+    .s_valid (per_arvalid_cpu),.s_ready (per_arready_cpu),
+    .s_payload({per_araddr_cpu, per_arlen_cpu, per_arsize_cpu, per_arburst_cpu}),
+    .m_valid (per_arvalid),    .m_ready (per_arready),
+    .m_payload({per_araddr,     per_arlen,     per_arsize,     per_arburst})
+);
+//   R = {rdata[31:0], rresp[1:0], rlast} = 35 bits
+axi_register_slice #(.W(35)) per_r_slice (
+    .clk(clk), .reset_n(reset_n),
+    .s_valid (per_rvalid),     .s_ready (per_rready),
+    .s_payload({per_rdata,     per_rresp,     per_rlast}),
+    .m_valid (per_rvalid_cpu), .m_ready (per_rready_cpu),
+    .m_payload({per_rdata_cpu, per_rresp_cpu, per_rlast_cpu})
+);
+//   AW = {awaddr[31:0], awlen[7:0], awsize[2:0], awburst[1:0]} = 45 bits
+axi_register_slice #(.W(45)) per_aw_slice (
+    .clk(clk), .reset_n(reset_n),
+    .s_valid (per_awvalid_cpu),.s_ready (per_awready_cpu),
+    .s_payload({per_awaddr_cpu, per_awlen_cpu, per_awsize_cpu, per_awburst_cpu}),
+    .m_valid (per_awvalid),    .m_ready (per_awready),
+    .m_payload({per_awaddr,     per_awlen,     per_awsize,     per_awburst})
+);
+//   W = {wdata[31:0], wstrb[3:0], wlast} = 37 bits
+axi_register_slice #(.W(37)) per_w_slice (
+    .clk(clk), .reset_n(reset_n),
+    .s_valid (per_wvalid_cpu), .s_ready (per_wready_cpu),
+    .s_payload({per_wdata_cpu, per_wstrb_cpu, per_wlast_cpu}),
+    .m_valid (per_wvalid),     .m_ready (per_wready),
+    .m_payload({per_wdata,     per_wstrb,     per_wlast})
+);
+//   B = {bresp[1:0]} = 2 bits
+axi_register_slice #(.W(2))  per_b_slice (
+    .clk(clk), .reset_n(reset_n),
+    .s_valid (per_bvalid),     .s_ready (per_bready),
+    .s_payload(per_bresp),
+    .m_valid (per_bvalid_cpu), .m_ready (per_bready_cpu),
+    .m_payload(per_bresp_cpu)
 );
 
 // ============================================================
@@ -505,6 +852,7 @@ cpu_target_port port_sdram (
     .mem_awaddr          (mem_awaddr),
     .mem_awid            (mem_awid),
     .mem_awlen            (mem_awlen),
+    .mem_awburst         (mem_awburst),
     .mem_wvalid          (mem_wvalid),
     .mem_wready_contrib  (sdram_mem_wready),
     .mem_wdata           (mem_wdata),
@@ -528,6 +876,7 @@ cpu_target_port port_sdram (
     .per_awready_contrib (sdram_per_awready),
     .per_awaddr          (per_awaddr),
     .per_awlen           (per_awlen),
+    .per_awburst         (per_awburst),
     .per_wvalid          (per_wvalid),
     .per_wready_contrib  (sdram_per_wready),
     .per_wdata           (per_wdata),
@@ -550,6 +899,7 @@ cpu_target_port port_sdram (
     .m_awready (m_sdram_awready),
     .m_awaddr  (m_sdram_awaddr),
     .m_awlen   (m_sdram_awlen),
+    .m_awburst (),                  // SDRAM slave doesn't consume awburst (INCR-only)
     .m_wvalid  (m_sdram_wvalid),
     .m_wready  (m_sdram_wready),
     .m_wdata   (m_sdram_wdata),
@@ -606,6 +956,7 @@ cpu_target_port port_cram0 (
     .mem_awaddr          (mem_awaddr),
     .mem_awid            (mem_awid),
     .mem_awlen           (mem_awlen),
+    .mem_awburst         (mem_awburst),
     .mem_wvalid          (mem_wvalid),
     .mem_wready_contrib  (cram0_mem_wready),
     .mem_wdata           (mem_wdata),
@@ -629,6 +980,7 @@ cpu_target_port port_cram0 (
     .per_awready_contrib (cram0_per_awready),
     .per_awaddr          (per_awaddr),
     .per_awlen           (per_awlen),
+    .per_awburst         (per_awburst),
     .per_wvalid          (per_wvalid),
     .per_wready_contrib  (cram0_per_wready),
     .per_wdata           (per_wdata),
@@ -651,6 +1003,7 @@ cpu_target_port port_cram0 (
     .m_awready (m_cram0_awready),
     .m_awaddr  (m_cram0_awaddr),
     .m_awlen   (m_cram0_awlen),
+    .m_awburst (),                  // CRAM0 slave doesn't consume awburst (sync-burst is INCR-only)
     .m_wvalid  (m_cram0_wvalid),
     .m_wready  (m_cram0_wready),
     .m_wdata   (m_cram0_wdata),
@@ -707,6 +1060,7 @@ cpu_target_port port_local (
     .mem_awaddr          (mem_awaddr),
     .mem_awid            (mem_awid),
     .mem_awlen           (mem_awlen),
+    .mem_awburst         (mem_awburst),
     .mem_wvalid          (mem_wvalid),
     .mem_wready_contrib  (local_mem_wready),
     .mem_wdata           (mem_wdata),
@@ -730,6 +1084,7 @@ cpu_target_port port_local (
     .per_awready_contrib (local_per_awready),
     .per_awaddr          (per_awaddr),
     .per_awlen           (per_awlen),
+    .per_awburst         (per_awburst),
     .per_wvalid          (per_wvalid),
     .per_wready_contrib  (local_per_wready),
     .per_wdata           (per_wdata),
@@ -752,6 +1107,7 @@ cpu_target_port port_local (
     .m_awready (m_local_awready),
     .m_awaddr  (m_local_awaddr),
     .m_awlen   (m_local_awlen),
+    .m_awburst (m_local_awburst),    // forwarded to axi_periph_slave at the top level
     .m_wvalid  (m_local_wvalid),
     .m_wready  (m_local_wready),
     .m_wdata   (m_local_wdata),
