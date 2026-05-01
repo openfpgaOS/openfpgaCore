@@ -815,6 +815,7 @@ reg     [3:0]   ram1_word_wstrb;
 reg     [3:0]   ram1_word_burst_len;
 reg     [3:0]   ram1_word_burst_wr_len;
 wire            ram1_word_wr_data_next;
+wire            ram1_word_wr_done;
 wire    [31:0]  ram1_word_q;
 wire            ram1_word_busy;
 wire            ram1_word_q_valid;
@@ -830,6 +831,7 @@ wire    [3:0]   sdram_slave_burst_wr_len;
 // io_sdram word_wr_data_next → axi_sdram_slave sdram_wr_data_next
 // Same clock domain (clk_cpu = clk_ram_controller), direct wire
 wire            sdram_slave_wr_data_next = ram1_word_wr_data_next;
+wire            sdram_slave_wr_done      = ram1_word_wr_done;
 wire    [31:0]  sdram_slave_next_wdata;
 wire    [3:0]   sdram_slave_next_wstrb;
 
@@ -1803,7 +1805,9 @@ assign video_hs = vidout_hs;
         .gpu_reg_rdata(gpu_reg_rdata),
         // CMD_FLIP side-port from gpu_core
         .gpu_swap_req(gpu_swap_req),
-        .gpu_swap_idx(gpu_swap_idx)
+        .gpu_swap_idx(gpu_swap_idx),
+        // CMD_FLIP backpressure → gpu_core stalls until vsync clears
+        .fb_swap_pending_o(slave_swap_pending)
     );
 
     // DMA engine removed — apps use CPU memcpy instead
@@ -1905,7 +1909,10 @@ assign video_hs = vidout_hs;
         .s_wvalid(arb_s_wvalid),   .s_wready(arb_s_wready),
         .s_wdata(arb_s_wdata),     .s_wstrb(arb_s_wstrb),
         .s_wlast(arb_s_wlast),
-        .s_bvalid(arb_s_bvalid),   .s_bresp(arb_s_bresp)
+        .s_bvalid(arb_s_bvalid),   .s_bresp(arb_s_bresp),
+        .dbg_arb_state(sdram_arb_state_dbg),
+        .dbg_cpu_pending(sdram_cpu_pending_dbg),
+        .dbg_grant(sdram_arb_grant_dbg)
     );
 
     // AXI4 SDRAM slave (must stay alive during reset for APF save flush & data load)
@@ -1950,8 +1957,10 @@ assign video_hs = vidout_hs;
         .sdram_accepted(sdram_accepted_r),
         .sdram_rdata_valid(ram1_word_q_valid),
         .sdram_wr_data_next(sdram_slave_wr_data_next),
+        .sdram_wr_done(sdram_slave_wr_done),
         .sdram_next_wdata(sdram_slave_next_wdata),
-        .sdram_next_wstrb(sdram_slave_next_wstrb)
+        .sdram_next_wstrb(sdram_slave_next_wstrb),
+        .dbg_slave(sdram_slave_dbg)
     );
 
     // CRAM0 is now served by the cram0_cdc instance (declared at the
@@ -2338,6 +2347,40 @@ wire        gpu_busy;
 wire [31:0] gpu_fence_reached;
 wire        gpu_swap_req;
 wire [1:0]  gpu_swap_idx;
+wire        slave_swap_pending;  // from axi_periph_slave → stalls gpu_core CMD_FLIP
+wire [1:0]  sdram_arb_state_dbg;     // from arbiter → gpu_core dbg_frag bits 28:27
+wire        sdram_cpu_pending_dbg;   // from arbiter → gpu_core dbg_frag bit 29
+wire [1:0]  sdram_arb_grant_dbg;     // from arbiter → gpu_core dbg_bus bits 20:19
+wire [15:0] sdram_slave_dbg;         // from slave   → gpu_core dbg_bus bits 15:0
+wire [7:0]  io_sdram_dbg_raw;        // from io_sdram on clk_ram_controller — needs re-sync
+reg  [7:0]  io_sdram_dbg_sync_a, io_sdram_dbg_sync_b;
+always @(posedge clk_cpu) begin
+    // 2-FF resync of the io_sdram debug word (state + refresh-pending)
+    // from clk_ram_controller into clk_cpu.  Each bit metastable
+    // independently — debug only, occasional invalid combinations
+    // are acceptable; the wedge state is stable for many ms so the
+    // sync chain converges every snapshot.
+    io_sdram_dbg_sync_a <= io_sdram_dbg_raw;
+    io_sdram_dbg_sync_b <= io_sdram_dbg_sync_a;
+end
+
+// Composed debug word for GPU MMIO 0x38 (GPU_DBG_BUS).  Layout:
+//   bits 15:0   = slave dbg (state/sdram_busy/wready_given/handshake bits)
+//   bits 16     = m1_arvalid               (CPU has read out)
+//   bit  17     = m1_awvalid               (CPU has write out)
+//   bit  18     = mixer_arvalid            (audio mixer M3 has read out)
+//   bits 20:19  = arb_grant[1:0]           (0=GPU,1=CPU,2=DMA,3=Mixer)
+//   bits 22:21  = arb_state[1:0]           (redundant with dbg_frag, kept here for one-read snapshot)
+//   bit  23     = cpu_pending              (m1_arvalid|m1_awvalid)
+//   bits 31:24  = reserved
+wire [31:0] gpu_dbg_bus_w = {io_sdram_dbg_sync_b,    // 31:24 io_sdram state[5:0] + refresh_pending
+                              sdram_cpu_pending_dbg,
+                              sdram_arb_state_dbg,
+                              sdram_arb_grant_dbg,
+                              mixer_arvalid,
+                              cpu_m_sdram_awvalid,
+                              cpu_m_sdram_arvalid,
+                              sdram_slave_dbg};
 
 `ifndef EXCLUDE_GPU
 gpu_core gpu (
@@ -2372,6 +2415,12 @@ gpu_core gpu (
     // CMD_FLIP side-port → axi_periph_slave's swap mux
     .gpu_swap_req(gpu_swap_req),
     .gpu_swap_idx(gpu_swap_idx),
+    .slave_swap_pending(slave_swap_pending),
+    // Arbiter visibility (surfaced via MMIO 0x30)
+    .arb_state_dbg(sdram_arb_state_dbg),
+    .cpu_pending_dbg(sdram_cpu_pending_dbg),
+    // Composed bus debug word (surfaced via MMIO 0x38 GPU_DBG_BUS)
+    .dbg_bus(gpu_dbg_bus_w),
     // Status
     .busy(gpu_busy),
     .fence_reached(gpu_fence_reached)
@@ -2481,6 +2530,7 @@ io_sdram isr0 (
     .burstwr_strobe ( 1'b0 ),
     .burstwr_data   ( 16'b0 ),
     .burstwr_done   ( 1'b0 ),
+    .dbg_io         ( io_sdram_dbg_raw ),
 
     // Word interface - CPU access via AXI
     .word_rd    ( ram1_word_rd ),
@@ -2494,6 +2544,7 @@ io_sdram isr0 (
     .word_busy  ( ram1_word_busy ),
     .word_q_valid ( ram1_word_q_valid ),
     .word_wr_data_next ( ram1_word_wr_data_next ),
+    .word_wr_done ( ram1_word_wr_done ),
     .burst_wr_direct_data ( sdram_slave_wdata ),
     .burst_wr_direct_strb ( sdram_slave_wstrb )
 );

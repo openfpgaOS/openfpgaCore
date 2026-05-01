@@ -47,9 +47,18 @@ output  reg     [31:0]  word_q,
 output  reg             word_busy,
 output  reg             word_q_valid, // Pulses high for one cycle when word_q data is valid
 output  reg             word_wr_data_next, // Pulse: need next word data for burst write
+output  reg             word_wr_done,      // Pulse: slave-issued word write completed (ST_WRITE_4→IDLE)
 
 input   wire    [31:0]  burst_wr_direct_data, // Direct data bus from AXI slave (bypasses pulse adapter)
-input   wire    [3:0]   burst_wr_direct_strb  // Direct byte enables
+input   wire    [3:0]   burst_wr_direct_strb,  // Direct byte enables
+
+// Debug observability — exported on controller_clk; core_top
+// re-syncs into clk_cpu before splicing into GPU_DBG_BUS bits 31:24.
+//   bits 5:0 = state[5:0] (see localparams above; ST_WRITE_0=20,
+//              ST_BURSTWR_0=46, etc.)
+//   bit  6   = issue_autorefresh (refresh queued, awaiting ST_IDLE)
+//   bit  7   = reserved
+output  wire    [7:0]   dbg_io
 );
 
     // tristate for DQ
@@ -139,6 +148,9 @@ assign {phy_ras, phy_cas, phy_we} = cmd;
     wire reset_n_s;
 synch_3 s1(reset_n, reset_n_s, controller_clk);
 
+// Debug tap (combinational; downstream re-syncs to clk_cpu).
+assign dbg_io = {1'b0, issue_autorefresh, state[5:0]};
+
     reg word_rd_queue;
     reg word_wr_queue;
 
@@ -213,6 +225,7 @@ always @(posedge controller_clk) begin
     burstwr_ready <= 0;
     word_q_valid <= 0;  // Clear each cycle, set when read data is captured
     word_wr_data_next <= 0;
+    word_wr_done <= 0;  // 1-cycle pulse, default low
 
     enable_dq_read_5 <= enable_dq_read_4;
     enable_dq_read_4 <= enable_dq_read_3;
@@ -543,6 +556,7 @@ always @(posedge controller_clk) begin
         phy_dqm <= 2'b00;
         if(dc == TIMING_WRITE-1+1) begin
             state <= ST_IDLE;
+            word_wr_done <= 1;  // Slave-issued word write committed: pulse so axi_sdram_slave can release bvalid without polling !word_busy across unrelated io_sdram activity (scanout burst_rd, autorefresh, etc.)
         end
     end
     // Row-crossing for burst writes: finish tWR, precharge, activate new row, resume.
@@ -817,6 +831,7 @@ always @(posedge controller_clk) begin
         word_busy <= 0;
         word_q_valid <= 0;
         word_wr_data_next <= 0;
+        word_wr_done <= 0;
         enable_dq_read_toggle <= 0;
         row_open <= 0;
         prechg_return <= 2'd0;
