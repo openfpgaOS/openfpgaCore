@@ -187,24 +187,28 @@ uint8_t *of_video_buffer_addr(int idx) {
 }
 
 int of_video_acquire_next(int just_flipped_idx, uint32_t fence_token) {
-    /* CMD_FLIP path: gpu_core's S_EXECUTE retires CMD_FLIP in three
-     * phases — m_wr drain → pulse gpu_swap_req → wait for the slave's
-     * fb_swap_pending to *clear* on the vsync edge — and only THEN
-     * publishes fence_reached.  So a single fence wait here covers
-     * both GPU work completion and vsync swap-out: by the time
-     * GPU_FENCE_REACHED catches up to fence_token, scanout has already
-     * committed the new buffer and just_flipped_idx is safe to hand
-     * back.  The bounded spin + FB_SWAP_CTRL write are fallbacks for
-     * the wedge case. */
+    /* CMD_FLIP path: gpu_core pulses gpu_swap_req after its m_wr drain,
+     * then publishes fence_reached.  This function does TWO waits:
+     *
+     *   1. fence_reached >= fence_token — proves the GPU finished
+     *      its m_wr drain and the slave latched fb_swap_pending=1.
+     *      Bounded ~5 ms in case CMD_FLIP wedged.
+     *   2. fb_swap_pending clears on the vsync edge — proves the
+     *      queued buffer has been committed to scanout and
+     *      just_flipped_idx is safe to hand back to the app.
+     *
+     * The second wait is what the cr-acquire-next-vsync-wait CR fixed
+     * — without it, gpudemo modes 1/2/3 freerun at ~340 fps with
+     * tearing.  The CPU spin is preferable to an RTL stall here:
+     * during the wait the GPU command processor is free to chew
+     * through the next frame's queued commands, overlapping vsync
+     * with rendering. */
     vrr_update();
 
     if (just_flipped_idx < 0) {
         return buf_draw;
     }
 
-    /* Fence wait — under healthy CMD_FLIP this is effectively the
-     * vsync wait: the GPU stalls fence publication until scanout has
-     * consumed the swap. */
     {
         uint32_t spins = 500000u;            /* ~5 ms @ 100 MHz */
         while ((int32_t)(GPU_FENCE_REACHED_REG - fence_token) < 0) {
@@ -212,12 +216,20 @@ int of_video_acquire_next(int just_flipped_idx, uint32_t fence_token) {
         }
     }
 
-    /* Idempotent FB_SWAP_CTRL write — for the timeout-fallback case
-     * only.  In the healthy path the slave already cleared
-     * fb_swap_pending before fence_reached published, so this write
-     * either re-arms a fresh swap (timeout path) or is a no-op
-     * (fb_swap_pending already 0). */
     FB_SWAP_CTRL = ((uint32_t)(just_flipped_idx & 0x3) << 1) | 1;
+
+    /* Wait for the queued swap to retire on the vsync edge.  Until
+     * fb_swap_pending clears, scanout is still reading from
+     * just_flipped_idx — handing it back to the app would let pixel
+     * writes race the readout (visible as tearing).  Deadline ~50 ms
+     * covers two frames at the slowest VRR rate (~42 Hz) so a stalled
+     * scanout degrades to ~50 ms/frame instead of freezing. */
+    {
+        uint64_t deadline = read_cycles() + (CPU_FREQ_HZ / 20);
+        while (FB_SWAP_CTRL & 1) {
+            if (read_cycles() > deadline) break;
+        }
+    }
 
     buf_display = just_flipped_idx;
     buf_ready = -1;

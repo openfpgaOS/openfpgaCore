@@ -1140,16 +1140,6 @@ reg [31:0] awvalid_handshake_count;
 // pending pixel writes (see cr-gpu-fence-write-completion.md).
 reg [31:0] pending_fence_token;
 reg [1:0]  pending_swap_idx;
-// Three-phase CMD_FLIP retire (in S_EXECUTE under cmd_is_flip):
-//   2'd0: wait for m_wr drain, then pulse gpu_swap_req → flip_phase=1
-//   2'd1: wait until slave latches fb_swap_pending=1 → flip_phase=2
-//   2'd2: wait until vsync clears fb_swap_pending=0, then publish
-//         fence_reached and retire to S_IDLE.
-// The intermediate "rising" phase eliminates the 1-cycle race where
-// the !slave_swap_pending check could spuriously fire on the OLD
-// (cleared) state of pending before our pulse propagated through the
-// slave.  Lets the kernel's fence wait alone serialize against vsync.
-reg [1:0]  flip_phase;
 // Global SKIP_ZERO (color-key at texel 0xFF) state — set via CMD_SET_SKIP_ZERO,
 // ORed into every triangle-emitted span's flags so color-keyed sprites
 // (emitted as 2 triangles) get the transparency treatment.
@@ -1894,7 +1884,6 @@ always @(posedge clk) begin
         m_wr_inflight       <= 4'b0;
         pending_fence_token <= 32'b0;
         pending_swap_idx    <= 2'b0;
-        flip_phase          <= 2'd0;
         gpu_swap_req        <= 1'b0;
         gpu_swap_idx        <= 2'b0;
         cmd_flip_enter_count       <= 32'b0;
@@ -2348,28 +2337,23 @@ always @(posedge clk) begin
                 // the global counter update below.
             end
             else if (cmd_is_flip) begin
-                // See header comment near flip_phase declaration for
-                // the three-phase retire (drain → pulse → wait-rising
-                // → wait-falling → publish fence).  Holding fence
-                // publication until vsync consumes the swap means the
-                // kernel's fence wait alone serializes against vsync —
-                // apps don't need a separate FB_SWAP_CTRL spin.
-                case (flip_phase)
-                    2'd0: if (m_wr_inflight == 4'b0) begin
-                        gpu_swap_req <= 1'b1;
-                        gpu_swap_idx <= pending_swap_idx;
-                        flip_phase   <= 2'd1;
-                        cmd_flip_drain_done_count <= cmd_flip_drain_done_count + 32'd1;
-                        swap_pulse_count          <= swap_pulse_count          + 32'd1;
-                    end
-                    2'd1: if (slave_swap_pending) flip_phase <= 2'd2;
-                    2'd2: if (!slave_swap_pending) begin
-                        fence_reached <= pending_fence_token;
-                        flip_phase    <= 2'd0;
-                        state         <= S_IDLE;
-                    end
-                    default: flip_phase <= 2'd0;
-                endcase
+                // Same drain wait as CMD_FENCE, plus a one-cycle pulse
+                // on gpu_swap_req that the slave latches into
+                // fb_swap_pending=1 / fb_ready_idx.  The kernel's
+                // of_video_acquire_next does the explicit
+                // FB_SWAP_CTRL & 1 wait (per cr-acquire-next-vsync-wait),
+                // so we publish fence_reached as soon as the m_wr drain
+                // completes — leaves the GPU command processor free to
+                // start the next frame's commands during the CPU's
+                // vsync spin.
+                if (m_wr_inflight == 4'b0) begin
+                    gpu_swap_req  <= 1'b1;
+                    gpu_swap_idx  <= pending_swap_idx;
+                    fence_reached <= pending_fence_token;
+                    state         <= S_IDLE;
+                    cmd_flip_drain_done_count <= cmd_flip_drain_done_count + 32'd1;
+                    swap_pulse_count          <= swap_pulse_count          + 32'd1;
+                end
             end
             else if (cmd_is_nop
                 || cmd_is_set_texture

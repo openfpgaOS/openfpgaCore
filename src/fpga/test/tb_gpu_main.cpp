@@ -40,36 +40,12 @@ static uint32_t ring_mask  = RING_SIZE - 1;
 // Helpers
 // ================================================================
 
-/* Lightweight slave-pending auto-model.  CMD_FLIP retire in gpu_core.v
- * stalls fence_reached until slave_swap_pending falls (= vsync).  Tests
- * that don't explicitly model the slave still need this transition for
- * forward progress, so tick() pulses pending up on each gpu_swap_req
- * and drops it after a fixed delay.  Tests that need to drive timing
- * directly (e.g. fence-held-during-pending) set tb_slave_auto = false
- * and write tb->slave_swap_pending themselves. */
-static bool tb_slave_auto = true;
-static int  tb_slave_hold = 0;
-static const int TB_SLAVE_VSYNC_CYCLES = 8;
-
-static inline void tb_slave_step() {
-    if (!tb_slave_auto) return;
-    if (tb->gpu_swap_req) {
-        tb_slave_hold = TB_SLAVE_VSYNC_CYCLES;
-        tb->slave_swap_pending = 1;
-    } else if (tb_slave_hold > 0) {
-        if (--tb_slave_hold == 0)
-            tb->slave_swap_pending = 0;
-    }
-}
-
 static void tick() {
     tb->clk = 0;
     tb->eval();
     if (trace) trace->dump(sim_time);
     sim_time++;
     tb->clk = 1;
-    tb->eval();
-    tb_slave_step();
     tb->eval();
     if (trace) trace->dump(sim_time);
     sim_time++;
@@ -525,9 +501,8 @@ static void test_clear_rect_per_command_stride(void) {
 // until m_wr_inflight==0.
 // =====================================================================
 static void test_cmd_flip_drain_and_pulse(void) {
-    printf("TEST: CMD_FLIP — drain ordering + pulse + vsync-gated fence\n");
+    printf("TEST: CMD_FLIP — drain ordering + side-port pulse + late fence\n");
 
-    tb_slave_auto = false;   /* harness drives slave_swap_pending below */
     gpu_init();
 
     // Arm FB writes (so CLEAR has somewhere to write)
@@ -548,48 +523,29 @@ static void test_cmd_flip_drain_and_pulse(void) {
     ring_write(FLIP_TOK);
     gpu_kick();
 
-    // Mirror the slave's fb_swap_pending semantics in the harness:
-    // gpu_swap_req → pending=1, then a simulated vsync ~50 cycles later
-    // clears it.  CMD_FLIP's three-phase retire stalls fence_reached
-    // until pending falls, so the harness MUST clock vsync forward or
-    // the test will hang.
     int swap_pulse_count    = 0;
     uint32_t swap_pulse_idx = 0xFF;
     int swap_pulse_cycle    = -1;
-    int pending_clear_cycle = -1;
     int fence_first_cafe    = -1;
-    int sim_pending_cycles  = 0;     // > 0 means slave_swap_pending=1
-    const int VSYNC_DELAY   = 50;    // cycles pending stays high
 
     for (int t = 0; t < 200000; t++) {
         tb->eval();
-
         if (tb->gpu_swap_req) {
             if (swap_pulse_count == 0) {
                 swap_pulse_idx   = tb->gpu_swap_idx;
                 swap_pulse_cycle = t;
             }
             swap_pulse_count++;
-            sim_pending_cycles = VSYNC_DELAY;
-            tb->slave_swap_pending = 1;
-        }
-        if (sim_pending_cycles > 0) {
-            sim_pending_cycles--;
-            if (sim_pending_cycles == 0) {
-                tb->slave_swap_pending = 0;
-                pending_clear_cycle = t;
-            }
         }
         if (fence_first_cafe < 0 && tb->fence_reached == FLIP_TOK) {
             fence_first_cafe = t;
         }
-        if (fence_first_cafe >= 0 && t > fence_first_cafe + 5) break;
+        if (swap_pulse_count > 0 && fence_first_cafe >= 0 && t > swap_pulse_cycle + 20) {
+            break;
+        }
         tick();
     }
-    tb->slave_swap_pending = 0;
-    tb_slave_auto = true;
 
-    // Assertions.
     if (swap_pulse_count == 0) {
         printf("  FAIL gpu_swap_req never pulsed (timeout) fence_reached=0x%08x\n",
                tb->fence_reached);
@@ -600,39 +556,36 @@ static void test_cmd_flip_drain_and_pulse(void) {
     if (fence_first_cafe < 0) {
         printf("  FAIL fence_reached never updated to 0x%X\n", FLIP_TOK);
         fail_count++;
-    } else if (fence_first_cafe < pending_clear_cycle) {
-        printf("  FAIL fence published BEFORE pending cleared: fence@%d clear@%d\n",
-               fence_first_cafe, pending_clear_cycle);
+    } else if (fence_first_cafe < swap_pulse_cycle) {
+        printf("  FAIL fence published BEFORE swap pulse: fence@%d swap@%d\n",
+               fence_first_cafe, swap_pulse_cycle);
         fail_count++;
     } else {
-        // CMD_FLIP retires fence after pending clears (= vsync done).
-        printf("  OK  fence-published-after-vsync (pulse@%d clear@%d fence@%d)\n",
-               swap_pulse_cycle, pending_clear_cycle, fence_first_cafe);
+        printf("  OK  fence-published-with-swap (cycle %d, swap@%d)\n",
+               fence_first_cafe, swap_pulse_cycle);
         pass_count++;
     }
 }
 
 // =====================================================================
-// Test: CMD_FLIP — fence stalls until slave_swap_pending clears.
+// Test: CMD_FLIP — slave_swap_pending does NOT gate the swap pulse.
 //
-// gpu_core's CMD_FLIP retire is three-phase: drain m_wr → pulse
-// gpu_swap_req → wait for slave_swap_pending to *clear* on the vsync
-// edge → publish fence_reached.  This guarantees the kernel's
-// of_video_acquire_next fence wait alone serializes against vsync, so
-// apps don't need a separate FB_SWAP_CTRL spin (see
-// docs/cr-acquire-next-vsync-wait.md).
+// CMD_FLIP gates ONLY on m_wr_inflight==0 (matching CMD_FENCE).  The
+// slave's gpu_swap_req side-port is last-wins on fb_ready_idx, so
+// multiple back-to-back gpu_swap_req pulses just queue the latest
+// frame.  The kernel-side CR (cr-acquire-next-vsync-wait) handles
+// vsync serialization in of_video_acquire_next via FB_SWAP_CTRL & 1.
 //
-// This test verifies:
-//   - the swap pulse still fires regardless of pending state (phase 0
-//     only gates on m_wr_inflight==0)
-//   - fence_reached is HELD as long as slave_swap_pending stays high
-//   - fence_reached publishes on the cycle pending falls
+// Sequence: hold slave_swap_pending=1 throughout the test and assert
+// the pulse fires immediately once m_wr_inflight drains.
 // =====================================================================
-static void test_cmd_flip_fence_held_until_vsync(void) {
-    printf("TEST: CMD_FLIP — fence stalls until slave_swap_pending clears\n");
+static void test_cmd_flip_slave_pending_ignored(void) {
+    printf("TEST: CMD_FLIP — slave_swap_pending does NOT gate pulse\n");
 
-    tb_slave_auto = false;
     gpu_init();
+
+    /* Hold slave_swap_pending=1 throughout. */
+    tb->slave_swap_pending = 1;
 
     ring_cmd(0x23, 2);  // CMD_SET_FB
     ring_write(FB_BASE_BYTE);
@@ -645,51 +598,45 @@ static void test_cmd_flip_fence_held_until_vsync(void) {
     ring_write(FLIP_TOK);
     gpu_kick();
 
-    /* Hold pending high for 100 cycles after the pulse fires, then
-     * drop it to simulate vsync.  Asserts that fence_reached does NOT
-     * advance during the held interval. */
+    int swap_pulse_count = 0;
     int swap_pulse_cycle = -1;
-    int pending_drop_cycle = -1;
-    int fence_advance_cycle = -1;
-    int fence_advanced_during_hold = 0;
-    const int HOLD_CYCLES = 100;
-
-    for (int t = 0; t < 1000; t++) {
+    uint32_t swap_pulse_idx = 0xFF;
+    int fence_first_cycle = -1;
+    const int MAX_CYCLES = 200;
+    for (int t = 0; t < MAX_CYCLES; t++) {
         tb->eval();
-        if (tb->gpu_swap_req && swap_pulse_cycle < 0) {
-            swap_pulse_cycle = t;
-            tb->slave_swap_pending = 1;
+        if (tb->gpu_swap_req) {
+            if (swap_pulse_count == 0) {
+                swap_pulse_idx   = tb->gpu_swap_idx;
+                swap_pulse_cycle = t;
+            }
+            swap_pulse_count++;
         }
-        if (swap_pulse_cycle >= 0 && pending_drop_cycle < 0
-            && t == swap_pulse_cycle + HOLD_CYCLES) {
-            tb->slave_swap_pending = 0;
-            pending_drop_cycle = t;
+        if (fence_first_cycle < 0 && tb->fence_reached == FLIP_TOK) {
+            fence_first_cycle = t;
         }
-        if (fence_advance_cycle < 0 && tb->fence_reached == FLIP_TOK) {
-            fence_advance_cycle = t;
-            if (pending_drop_cycle < 0)
-                fence_advanced_during_hold = 1;
+        if (swap_pulse_count > 0 && fence_first_cycle >= 0 && t > swap_pulse_cycle + 10) {
+            break;
         }
-        if (fence_advance_cycle >= 0 && t > fence_advance_cycle + 5) break;
         tick();
     }
-    tb->slave_swap_pending = 0;
-    tb_slave_auto = true;
 
-    if (swap_pulse_cycle < 0) {
-        printf("  FAIL gpu_swap_req never pulsed\n");
-        fail_count++;
-    } else if (fence_advanced_during_hold) {
-        printf("  FAIL fence advanced while pending held high (cycle %d)\n",
-               fence_advance_cycle);
-        fail_count++;
-    } else if (fence_advance_cycle < 0) {
-        printf("  FAIL fence never advanced after pending dropped\n");
+    tb->slave_swap_pending = 0;
+
+    if (swap_pulse_count == 0) {
+        printf("  FAIL gpu_swap_req never pulsed (gate not removed?)\n");
         fail_count++;
     } else {
-        printf("  OK  pulse@%d pending-drop@%d fence@%d\n",
-               swap_pulse_cycle, pending_drop_cycle, fence_advance_cycle);
-        pass_count++;
+        check("flip-pulse-fires-regardless-of-slave-pending", swap_pulse_count, 1);
+        check("flip-idx-published",                            swap_pulse_idx,   FLIP_IDX);
+        if (fence_first_cycle < 0) {
+            printf("  FAIL fence never advanced\n");
+            fail_count++;
+        } else {
+            printf("  OK  pulse@%d fence@%d (slave_swap_pending=1 throughout)\n",
+                   swap_pulse_cycle, fence_first_cycle);
+            pass_count++;
+        }
     }
 }
 
@@ -719,7 +666,6 @@ static void test_cmd_flip_fence_held_until_vsync(void) {
 static void test_cmd_flip_back_to_back_stress(void) {
     printf("TEST: CMD_FLIP back-to-back stress (Duke3D random-hang repro)\n");
 
-    tb_slave_auto = false;   /* this test models the slave manually */
     gpu_init();
 
     /* Slave model state. */
@@ -862,7 +808,6 @@ static void test_cmd_flip_back_to_back_stress(void) {
         printf("  OK  pending streak bounded (max=%d, < 2 vsyncs)\n", max_pending_streak);
         pass_count++;
     }
-    tb_slave_auto = true;
 }
 
 // =====================================================================
@@ -6042,7 +5987,7 @@ int main(int argc, char **argv) {
     test_clear_rect_per_command_stride();
     test_cmd_fence_drain();
     test_cmd_flip_drain_and_pulse();
-    test_cmd_flip_fence_held_until_vsync();
+    test_cmd_flip_slave_pending_ignored();
     test_cmd_flip_back_to_back_stress();
     test_mwr_inflight_no_wrap();
     test_cmd_flip_rapid_fire();
