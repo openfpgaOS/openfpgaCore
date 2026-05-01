@@ -79,6 +79,7 @@ AXI_PERIPH_SRCS = \
 	tb_axi_periph.v \
 	altsyncram_stub.v \
 	$(COMMON_DIR)/axi_periph_slave.v \
+	$(COMMON_DIR)/vrr_controller.v \
 	$(TARGET_DIR)/apf/common.v
 
 AXI_PERIPH_CPP = tb_axi_periph_main.cpp
@@ -143,6 +144,7 @@ SYSTEM_SRCS = \
 	$(COMMON_DIR)/axi_sdram_arbiter.v \
 	$(COMMON_DIR)/axi_sdram_slave.v \
 	$(COMMON_DIR)/axi_periph_slave.v \
+	$(COMMON_DIR)/vrr_controller.v \
 	$(COMMON_DIR)/snac_shifter.v \
 	$(COMMON_DIR)/gpu_core.v \
 	$(COMMON_DIR)/gpu_tex_cache.v \

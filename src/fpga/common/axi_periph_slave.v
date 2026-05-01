@@ -164,8 +164,13 @@ module axi_periph_slave (
     input  wire [31:0] dt_query_data,
     input  wire        dt_query_valid,
 
-    // VRR (Variable Refresh Rate) — CPU-writable V_TOTAL for video timing
-    output reg  [9:0]  vrr_v_total,
+    // VRR (Variable Refresh Rate) — output drives scaler V_TOTAL.
+    // In normal mode the new vrr_controller below picks the value from
+    // measured render time; when analogizer_enabled is asserted the
+    // CPU's PAL/NTSC value (vrr_v_total_cpu_reg) drives the output
+    // instead, so SD video timing stays standards-compliant.
+    output wire [9:0]  vrr_v_total,
+    input  wire        analogizer_enabled,
 
     // SNAC shifter / GPIO interface to cart pins
     // Pin mapping: [0]=OUT1/bank1[6], [1]=OUT2/bank1[7],
@@ -417,9 +422,21 @@ reg [15:0] dbg_vsync_count;        // vsync_rising count (rolling)
 reg [1:0]  dbg_gpu_idx_last;       // last idx the GPU pulsed for
 reg [7:0]  dbg_kernel_swap_count;  // kernel sysreg FB_SWAP_CTRL writes
 
-// VRR swap hold: skip N vsyncs before presenting a queued frame
-reg [3:0] vrr_swap_hold;     // firmware-written: vsyncs to skip per swap
-reg [3:0] vrr_hold_counter;  // counts down to 0 then swaps
+// VRR swap hold: skip N vsyncs before presenting a queued frame.
+// vrr_swap_hold_cpu_reg is CPU-writable for analogizer override /
+// debug; vrr_swap_hold_rtl comes from the new vrr_controller and is
+// the value actually loaded into the hold counter on every swap event
+// (analogizer mode forces it to 0 inside the controller).
+reg  [3:0] vrr_swap_hold_cpu_reg;
+wire [3:0] vrr_swap_hold_rtl;
+reg  [3:0] vrr_hold_counter;        // counts down to 0 then swaps
+
+// VRR V_TOTAL split: CPU-writable reg for analogizer-mode PAL/NTSC
+// value, RTL-computed value for normal mode.  Mux below picks one.
+reg  [9:0] vrr_v_total_cpu_reg;
+wire [9:0] vrr_v_total_rtl;
+assign vrr_v_total = analogizer_enabled ? vrr_v_total_cpu_reg
+                                        : vrr_v_total_rtl;
 
 wire [24:0] fb_app_addr = (fb_display_idx == 2'd0) ? FB_ADDR_0 :
                            (fb_display_idx == 2'd1) ? FB_ADDR_1 :
@@ -443,6 +460,26 @@ always @(posedge clk) begin
     vsync_sync <= {vsync_sync[1:0], vsync};
 end
 wire vsync_rising = vsync_sync[1] && !vsync_sync[2];
+
+// ============================================
+// VRR controller — RTL implementation of the rate-lock loop that
+// used to live in firmware/os/targets/pocket/video.c.  Measures the
+// time between successive swap kicks (gpu_swap_req or CPU writes to
+// FB_SWAP_CTRL bit 0) and produces (V_TOTAL, swap_hold) so scanout
+// stays in the supported 42-60 Hz band.  Bypassed by the analogizer.
+// ============================================
+wire sysreg_swap_kick =
+    sysreg_wr_fire && (req_addr[8:2] == 7'b0_000110) && req_wdata[0];
+
+vrr_controller u_vrr (
+    .clk(clk),
+    .reset_n(reset_n),
+    .gpu_swap_req(gpu_swap_req),
+    .sysreg_swap_kick(sysreg_swap_kick),
+    .analogizer_enabled(analogizer_enabled),
+    .v_total_o(vrr_v_total_rtl),
+    .swap_hold_o(vrr_swap_hold_rtl)
+);
 
 reg [2:0] target_ack_sync;
 reg [2:0] target_done_sync;
@@ -508,7 +545,6 @@ always @(posedge clk) begin
         fb_ready_idx <= 2'd0;
         fb_swap_pending <= 1'b0;
         term_fb_active <= 1'b1;  // terminal FB visible by default at boot
-        vrr_swap_hold <= 4'd0;
         vrr_hold_counter <= 4'd0;
         dbg_gpu_swap_count <= 16'd0;
         dbg_vsync_count    <= 16'd0;
@@ -549,7 +585,8 @@ always @(posedge clk) begin
         vsync_irq_pending <= 0;
         dt_query_addr <= 0;
         dt_query_toggle <= 0;
-        vrr_v_total <= 10'd262;
+        vrr_v_total_cpu_reg   <= 10'd262;
+        vrr_swap_hold_cpu_reg <= 4'd0;
         snac_en_reg <= 0;
         snac_mode_reg <= 0;
         snac_div_reg <= 16'd499;  // default: 100KHz at 100MHz
@@ -722,8 +759,8 @@ always @(posedge clk) begin
                 7'b0_100111: vsync_irq_pending <= 0;                    // VSYNC_IRQ_CLEAR (0x9C) W1C
                 7'b0_111111: irq_mask <= req_wdata[3:0];             // IRQ_MASK (0xFC)
 
-                7'b0_110111: vrr_v_total <= req_wdata[9:0];          // VRR_V_TOTAL (0xDC)
-                7'b0_111000: vrr_swap_hold <= req_wdata[3:0];        // VRR_SWAP_HOLD (0xE0)
+                7'b0_110111: vrr_v_total_cpu_reg   <= req_wdata[9:0]; // VRR_V_TOTAL (0xDC) — analogizer-mode only
+                7'b0_111000: vrr_swap_hold_cpu_reg <= req_wdata[3:0]; // VRR_SWAP_HOLD (0xE0) — debug only
 
                 default: ;
             endcase
@@ -761,11 +798,14 @@ always @(posedge clk) begin
             dbg_gpu_idx_last   <= gpu_swap_idx;
         end
 
-        // Reload hold counter only for a fresh swap — not when replacing
-        // an already-pending one, otherwise fast-flipping apps starve the
-        // countdown and the display never updates.
-        if (sysreg_wr_fire && req_addr[8:2] == 7'b0_000110 && req_wdata[0] && !fb_swap_pending)
-            vrr_hold_counter <= vrr_swap_hold;
+        // Reload hold counter on EVERY swap event (CMD_FLIP path or
+        // CPU FB_SWAP_CTRL kick).  Value comes from the vrr_controller
+        // — fresh per-frame, computed from measured render time, so
+        // back-to-back kicks naturally land in the "fast" bucket
+        // (hold=0) without a starvation gate.  In analogizer mode the
+        // controller forces the value to 0.
+        if (gpu_swap_req || sysreg_swap_kick)
+            vrr_hold_counter <= vrr_swap_hold_rtl;
     end
 end
 
@@ -811,8 +851,12 @@ always @(*) begin
         7'b0_101110: sysreg_rdata = {30'b0, timer_irq_pending, timer_enable};
         7'b0_101111: sysreg_rdata = timer_counter;
         7'b0_111111: sysreg_rdata = {28'b0, irq_mask};               // IRQ_MASK (0xFC)
+        // VRR_V_TOTAL / VRR_SWAP_HOLD readback returns the LIVE values
+        // driving the scaler (RTL-computed in normal mode, CPU-written
+        // in analogizer mode for V_TOTAL).  Keeps the existing debug
+        // path useful even now that the CPU no longer drives them.
         7'b0_110111: sysreg_rdata = {22'b0, vrr_v_total};             // VRR_V_TOTAL (0xDC)
-        7'b0_111000: sysreg_rdata = {28'b0, vrr_swap_hold};           // VRR_SWAP_HOLD (0xE0)
+        7'b0_111000: sysreg_rdata = {28'b0, vrr_swap_hold_rtl};       // VRR_SWAP_HOLD (0xE0)
         // Debug snapshot of the swap pipeline (SYSREG 0xC0):
         //   bit  0     : fb_swap_pending
         //   bits 2:1   : fb_display_idx

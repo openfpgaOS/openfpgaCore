@@ -384,6 +384,14 @@ always @(*) begin
                               dma_overflow_sticky,
                               dma_busy, ring_empty, busy};
         4'd6:    reg_rdata = fence_reached;
+        // CMD_FLIP debug counters — see reg-decl block above for layout.
+        // Reads at 4'd10 / 4'd11 are non-destructive; the same addresses
+        // accept writes that pulse tex_flush / dma_kick respectively.
+        4'd10:   reg_rdata = cmd_flip_enter_count;
+        4'd11:   reg_rdata = cmd_flip_drain_done_count;
+        4'd12:   reg_rdata = swap_pulse_count;
+        4'd13:   reg_rdata = bvalid_count;
+        4'd14:   reg_rdata = awvalid_handshake_count;
         default: reg_rdata = 32'b0;
     endcase
 end
@@ -1112,12 +1120,36 @@ reg cmd_is_flip;
 // commit to SDRAM.  4 bits is plenty (typical inflight is 1-3).
 reg [3:0] m_wr_inflight;
 
+// CMD_FLIP diagnostic counters — surfaced via MMIO 0x28-0x38.  These
+// are saturation-free 32-bit free-running counters; the CPU reads
+// pre/post-frame deltas to localise where CMD_FLIP stalls.
+//   cmd_flip_enter_count       — S_DECODE saw cmd_type==CMD_FLIP (per command)
+//   cmd_flip_drain_done_count  — S_EXECUTE drain completed for cmd_is_flip
+//   swap_pulse_count           — gpu_swap_req asserted (should equal drain_done)
+//   bvalid_count               — m_wr_bvalid pulses observed
+//   awvalid_handshake_count    — m_wr_awvalid && m_wr_awready handshakes
+reg [31:0] cmd_flip_enter_count;
+reg [31:0] cmd_flip_drain_done_count;
+reg [31:0] swap_pulse_count;
+reg [31:0] bvalid_count;
+reg [31:0] awvalid_handshake_count;
+
 // Latched payload for CMD_FENCE / CMD_FLIP — published only after
 // m_wr_inflight drains in S_EXECUTE.  Pre-CR the fence token was
 // written to fence_reached directly in S_PAY_DATA, which raced with
 // pending pixel writes (see cr-gpu-fence-write-completion.md).
 reg [31:0] pending_fence_token;
 reg [1:0]  pending_swap_idx;
+// Three-phase CMD_FLIP retire (in S_EXECUTE under cmd_is_flip):
+//   2'd0: wait for m_wr drain, then pulse gpu_swap_req → flip_phase=1
+//   2'd1: wait until slave latches fb_swap_pending=1 → flip_phase=2
+//   2'd2: wait until vsync clears fb_swap_pending=0, then publish
+//         fence_reached and retire to S_IDLE.
+// The intermediate "rising" phase eliminates the 1-cycle race where
+// the !slave_swap_pending check could spuriously fire on the OLD
+// (cleared) state of pending before our pulse propagated through the
+// slave.  Lets the kernel's fence wait alone serialize against vsync.
+reg [1:0]  flip_phase;
 // Global SKIP_ZERO (color-key at texel 0xFF) state — set via CMD_SET_SKIP_ZERO,
 // ORed into every triangle-emitted span's flags so color-keyed sprites
 // (emitted as 2 triangles) get the transparency treatment.
@@ -1862,8 +1894,14 @@ always @(posedge clk) begin
         m_wr_inflight       <= 4'b0;
         pending_fence_token <= 32'b0;
         pending_swap_idx    <= 2'b0;
+        flip_phase          <= 2'd0;
         gpu_swap_req        <= 1'b0;
         gpu_swap_idx        <= 2'b0;
+        cmd_flip_enter_count       <= 32'b0;
+        cmd_flip_drain_done_count  <= 32'b0;
+        swap_pulse_count           <= 32'b0;
+        bvalid_count               <= 32'b0;
+        awvalid_handshake_count    <= 32'b0;
         pay_idx <= 0;
         pay_remaining <= 0;
         frag_discard <= 0;
@@ -1983,6 +2021,13 @@ always @(posedge clk) begin
                 2'b01: m_wr_inflight <= m_wr_inflight - 4'd1;
                 default: ;
             endcase
+            // CMD_FLIP debug: count every AW handshake and B beat
+            // independently so we can detect lost B beats (counts
+            // diverge) or lost AW handshakes (drain never reaches 0).
+            if (m_wr_awvalid && m_wr_awready)
+                awvalid_handshake_count <= awvalid_handshake_count + 32'd1;
+            if (m_wr_bvalid)
+                bvalid_count <= bvalid_count + 32'd1;
             gpu_swap_req <= 1'b0;
         case (state)
 
@@ -2030,6 +2075,8 @@ always @(posedge clk) begin
             cmd_is_set_colormap_id <= (cmd_type == CMD_SET_COLORMAP_ID);
             cmd_is_draw_triangles <= (cmd_type == CMD_DRAW_TRIANGLES);
             cmd_is_flip           <= (cmd_type == CMD_FLIP);
+            if (cmd_type == CMD_FLIP)
+                cmd_flip_enter_count <= cmd_flip_enter_count + 32'd1;
 
             if (cmd_payload_words == 0) begin
                 state <= S_EXECUTE;
@@ -2301,15 +2348,28 @@ always @(posedge clk) begin
                 // the global counter update below.
             end
             else if (cmd_is_flip) begin
-                // Same drain wait, plus pulse gpu_swap_req for one cycle
-                // and publish the fence token.  gpu_swap_req falls back
-                // to 0 next cycle (S_IDLE has no override).
-                if (m_wr_inflight == 4'b0) begin
-                    gpu_swap_req  <= 1'b1;
-                    gpu_swap_idx  <= pending_swap_idx;
-                    fence_reached <= pending_fence_token;
-                    state         <= S_IDLE;
-                end
+                // See header comment near flip_phase declaration for
+                // the three-phase retire (drain → pulse → wait-rising
+                // → wait-falling → publish fence).  Holding fence
+                // publication until vsync consumes the swap means the
+                // kernel's fence wait alone serializes against vsync —
+                // apps don't need a separate FB_SWAP_CTRL spin.
+                case (flip_phase)
+                    2'd0: if (m_wr_inflight == 4'b0) begin
+                        gpu_swap_req <= 1'b1;
+                        gpu_swap_idx <= pending_swap_idx;
+                        flip_phase   <= 2'd1;
+                        cmd_flip_drain_done_count <= cmd_flip_drain_done_count + 32'd1;
+                        swap_pulse_count          <= swap_pulse_count          + 32'd1;
+                    end
+                    2'd1: if (slave_swap_pending) flip_phase <= 2'd2;
+                    2'd2: if (!slave_swap_pending) begin
+                        fence_reached <= pending_fence_token;
+                        flip_phase    <= 2'd0;
+                        state         <= S_IDLE;
+                    end
+                    default: flip_phase <= 2'd0;
+                endcase
             end
             else if (cmd_is_nop
                 || cmd_is_set_texture

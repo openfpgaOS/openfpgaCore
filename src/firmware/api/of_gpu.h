@@ -239,82 +239,25 @@ static uint32_t *_gpu_batch_buf;
 /* ---- Internal helpers ---- */
 
 static inline void _gpu_ring_ensure(uint32_t bytes) {
+    /* Wait for any in-flight doorbell-DMA before letting the caller
+     * write into the ring.  CPU MMIO writes and DMA writes share
+     * ring_wr_addr in gpu_core.v — overlapping them shifts DMA's
+     * payload by however many CPU writes interleave.  By gating
+     * here, every command-emitting call site (header + payload + DMA
+     * kick) is implicitly serialized against the previous batch's
+     * DMA fill, while of_gpu_draw_spans_batch can return immediately
+     * after kicking — overlapping the DMA's ~23 µs fill with the
+     * caller's between-batch CPU work. */
+    while (GPU_STATUS & GPU_STATUS_DMA_BUSY)
+        ;
+
     /* Fast path: enough free space already, return immediately. */
     if (((GPU_RING_RDPTR - _gpu_wrptr - 4) & _gpu_ring_mask) >= bytes)
         return;
 
-    /* DIAGNOSTIC: print the FIRST few stall events to capture the
-     * onset of the wedge.  Beyond that, suppress — every stall printf
-     * is ~250 bytes via UART (~125 us blocking) plus 4 cache-line
-     * writebacks to terminal FB, which steals SDRAM bandwidth from
-     * the GPU exactly when it's trying to drain the ring.  After the
-     * wedge stabilizes the kernel's vsync-IRQ snapshot (every ~10 s)
-     * gives us periodic state captures without amplifying the wedge. */
-    static int stall_print_budget = 4;
-    extern int printf(const char *, ...);
-    if (stall_print_budget > 0) {
-        stall_print_budget--;
-    /* Read frag + mwr alongside status — pinpoints WHICH stall source
-     * is sticky.  GPU MMIO reads are direct (caps->gpu_base + offset);
-     * use the same hardcoded 0x4a000000 the kernel uses. */
-    volatile uint32_t *gpu_dbg_frag  = (volatile uint32_t *)0x4a000030u;
-    volatile uint32_t *gpu_dbg_mwr   = (volatile uint32_t *)0x4a000034u;
-    volatile uint32_t *gpu_dbg_bus   = (volatile uint32_t *)0x4a000038u;
-    volatile uint32_t *gpu_dbg_stall = (volatile uint32_t *)0x4a00003Cu;
-    volatile uint32_t *gpu_dbg_treq  = (volatile uint32_t *)0x4a000028u;
-    volatile uint32_t *gpu_dbg_tmiss = (volatile uint32_t *)0x4a00002Cu;
-    uint32_t frag  = *gpu_dbg_frag;
-    uint32_t mwr   = *gpu_dbg_mwr;
-    uint32_t bus   = *gpu_dbg_bus;
-    uint32_t stall = *gpu_dbg_stall;
-    uint32_t treq  = *gpu_dbg_treq;
-    uint32_t tmiss = *gpu_dbg_tmiss;
-    printf("[gpu] ring_ensure stall: need=%u rdptr=0x%04x sdk_wrptr=0x%04x "
-           "ring_wrptr=0x%04x status=0x%08x frag=0x%08x mwr=%u bus=0x%08x "
-           "fbss=%u tex_st=%u stall=%u tex_ar=%u tex_rv=%u cmap_rv=%u "
-           "awv=%u awr=%u bv=%u arb=%u cpu_p=%u "
-           "sl=%u busy=%u wbs=%u grant=%u m1ar=%u m1aw=%u m3ar=%u "
-           "iost=%u rfr=%u "
-           "ssr=%u srdp=%u "
-           "treq=%u tmiss=%u\n",
-           (unsigned)bytes,
-           (unsigned)GPU_RING_RDPTR,
-           (unsigned)_gpu_wrptr,
-           (unsigned)GPU_RING_WRPTR,
-           (unsigned)GPU_STATUS,
-           (unsigned)frag, (unsigned)(mwr & 0xF), (unsigned)bus,
-           (unsigned)((frag >> 8)  & 0xF),
-           (unsigned)((frag >> 16) & 0x7),
-           (unsigned)((frag >> 15) & 0x1),
-           (unsigned)((frag >> 19) & 0x1),
-           (unsigned)((frag >> 20) & 0x1),
-           (unsigned)((frag >> 21) & 0x1),
-           (unsigned)((frag >> 24) & 0x1),  /* m_wr_awvalid */
-           (unsigned)((frag >> 25) & 0x1),  /* m_wr_awready */
-           (unsigned)((frag >> 26) & 0x1),  /* m_wr_bvalid */
-           (unsigned)((frag >> 27) & 0x3),  /* arb_state */
-           (unsigned)((frag >> 29) & 0x1),  /* cpu_pending */
-           (unsigned)(bus & 0xF),           /* slave state */
-           (unsigned)((bus >> 4) & 0x1),    /* sdram_busy */
-           (unsigned)((bus >> 5) & 0x1),    /* wr_busy_seen */
-           (unsigned)((bus >> 19) & 0x3),   /* arb_grant */
-           (unsigned)((bus >> 16) & 0x1),   /* m1_arvalid live */
-           (unsigned)((bus >> 17) & 0x1),   /* m1_awvalid live */
-           (unsigned)((bus >> 18) & 0x1),   /* m3_arvalid live */
-           (unsigned)((bus >> 24) & 0x3F),  /* io_sdram state */
-           (unsigned)((bus >> 30) & 0x1),   /* io_sdram refresh pending */
-           (unsigned)(stall & 0xFFFF),      /* cycles since last gpu_swap_req */
-           (unsigned)((stall >> 16) & 0xFFFF), /* cycles since last rdptr advance */
-           (unsigned)treq,                  /* tex requests (32-bit) */
-           (unsigned)tmiss);                /* tex misses (32-bit) */
-    }
-
-    /* Slow path: ring is full. Publish our current write pointer to
+    /* Slow path: ring is full.  Publish our current write pointer to
      * the GPU first — otherwise the GPU is sitting at its old wrptr
-     * with nothing to drain, and we'd spin forever. (The GPU only
-     * starts consuming commands when wrptr advances; queuing many
-     * spans without an intervening kick deadlocks the producer when
-     * the ring fills.) Then spin until enough space frees up. */
+     * with nothing to drain, and we'd spin forever. */
     GPU_RING_WRPTR = _gpu_wrptr;
     while (((GPU_RING_RDPTR - _gpu_wrptr - 4) & _gpu_ring_mask) < bytes)
         ;
@@ -465,17 +408,15 @@ static inline uint32_t of_gpu_fence(void) {
  * Pair with the kernel's of_video_acquire_next(idx) to get the next
  * free draw buffer.  See docs/cr-gpu-triggered-flip.md for the
  * standard call pattern. */
-/* CMD_FLIP disabled — emit CMD_FENCE only.  The GPU still drains
- * outstanding m_wr writes before publishing fence_reached, but no
- * swap side-port pulse fires.  The kernel side of_video_acquire_next()
- * waits for fence_reached and does the FB_SWAP_CTRL write CPU-side.
- * Avoids the CPU/GPU concurrency hazard the GPU-triggered flip path
- * exposed (CPU runs ahead of GPU drain → m_wr B never returns →
- * CMD_FLIP hangs forever). */
+/* CMD_FLIP re-enabled with diagnostic counters in place (2026-04-30).
+ * The kernel side of_video_acquire_next() retains a bounded fence-wait
+ * + FB_SWAP_CTRL write as a fallback, so if CMD_FLIP wedges, the CPU
+ * still drives the swap after a ~5 ms timeout and the diagnostic
+ * counters at GPU_DBG_FLIP_*_REG localise the failure mode. */
 static inline uint32_t of_gpu_flip_to(int idx) {
-    (void)idx;
     uint32_t token = _gpu_fence_next++;
-    _gpu_cmd_header(GPU_CMD_FENCE, 1);
+    _gpu_cmd_header(GPU_CMD_FLIP, 2);
+    _gpu_ring_write((uint32_t)idx & 0x3u);
     _gpu_ring_write(token);
     return token;
 }
@@ -683,23 +624,6 @@ static inline void of_gpu_draw_spans_batch(const of_gpu_span_t *spans,
                                                   : count;
         uint32_t payload_words = (uint32_t)(15 * n);
 
-        /* TEMP TRACE: log every batch (first 12 only, so we don't
-         * flood UART) — index, ring state before kick, free space.
-         * If the batches show ring overflow or rdptr stalls, the
-         * fence-wait hang's root cause will be obvious. */
-        static int _of_gpu_batch_idx = 0;
-        if (_of_gpu_batch_idx < 30) {
-            extern int printf(const char *, ...);
-            uint32_t rdptr_now = GPU_RING_RDPTR;
-            uint32_t free_bytes = (rdptr_now - _gpu_wrptr - 4) & _gpu_ring_mask;
-            printf("[batch%d] n=%d payload=%u rdptr=0x%04x sdk_wrptr=0x%04x ring_wrptr=0x%04x free=%u dma=%u\n",
-                   _of_gpu_batch_idx, n, (unsigned)payload_words,
-                   (unsigned)rdptr_now, (unsigned)_gpu_wrptr,
-                   (unsigned)GPU_RING_WRPTR, (unsigned)free_bytes,
-                   (unsigned)((GPU_STATUS >> 2) & 1));
-            _of_gpu_batch_idx++;
-        }
-
         /* Build the batch in cached SDRAM at scalar-store speed.  The
          * `wait for DMA at end of helper` policy below guarantees the
          * scratch buffer is free for reuse before we get here. */
@@ -738,41 +662,13 @@ static inline void of_gpu_draw_spans_batch(const of_gpu_span_t *spans,
          * _gpu_ring_ensure calls compute free space correctly. */
         _gpu_wrptr = (_gpu_wrptr + payload_words * 4) & _gpu_ring_mask;
 
-        /* Wait for the DMA pull to complete before returning.  Critical:
-         * the DMA shares ring_wr_addr with CPU MMIO writes (port-A mux
-         * picks DMA when both fire same cycle).  If the caller issues
-         * any ring write — fence in of_gpu_finish, SET_FB / SET_TEXTURE
-         * for the next frame, etc. — while DMA is still streaming, the
-         * CPU's data gets overwritten by DMA payload.  Drain takes
-         * ~23 µs per max-size batch at 100 MHz; minor next to the ~100
-         * µs of CPU compute typically waiting for the next batch.  The
-         * GPU rasteriser already started consuming as DMA published
-         * partial data — this wait is for the DMA fetch path, not for
-         * the render itself, so CPU/GPU parallelism is preserved. */
-        {
-            /* Bounded spin with diagnostic — unbounded loop here was the
-             * likely candidate for Duke3D's random level-load freeze.
-             * If DMA gets stuck (audio M3 contention, FSM wedge, ring
-             * pointer corruption), we want to know about it instead of
-             * hanging silently. */
-            uint32_t dma_spin = 5000000u;  /* ~500 ms at 100 MHz / ~10 cyc body */
-            while (GPU_STATUS & GPU_STATUS_DMA_BUSY) {
-                if (--dma_spin == 0) {
-                    extern int printf(const char *, ...);
-                    printf("[gpu] DMA_BUSY stuck: status=0x%08x rdptr=0x%04x "
-                           "sdk_wrptr=0x%04x ring_wrptr=0x%04x batch_n=%d\n",
-                           (unsigned)GPU_STATUS,
-                           (unsigned)GPU_RING_RDPTR,
-                           (unsigned)_gpu_wrptr,
-                           (unsigned)GPU_RING_WRPTR,
-                           n);
-                    break;  /* try to continue rather than trap */
-                }
-            }
-        }
-
-        /* No after-dma trace; one-shot guard removed (we trace every
-         * batch above instead). */
+        /* DO NOT wait for DMA here — return immediately and let the
+         * caller's between-batch CPU work overlap the ~23 µs DMA fill.
+         * Safety: any subsequent ring writer goes through
+         * _gpu_ring_ensure(), which now spins on GPU_STATUS_DMA_BUSY
+         * before allowing CPU MMIO writes to advance ring_wr_addr —
+         * see the wait at the top of _gpu_ring_ensure for the
+         * ring_wr_addr / DMA-payload interleave hazard. */
 
         spans += n;
         count -= n;

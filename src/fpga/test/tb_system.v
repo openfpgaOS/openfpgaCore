@@ -579,6 +579,7 @@ axi_periph_slave periph (
     .dt_query_valid (dt_query_valid),
 
     .vrr_v_total(),
+    .analogizer_enabled(1'b0),
 
     .snac_pin_out(),
     .snac_pin_dir(),

@@ -131,76 +131,24 @@
  * the SDK; the kernel has no abstraction yet, so hardcode here. */
 #define GPU_FENCE_REACHED_REG  REG32(0x4a000018u)
 
-/* GPU debug regs added for tracing the fragment-pipe wedge.
- *   GPU_DBG_FRAG (0x30): packed pipe diagnostics
- *     bits 4:0    = p0/p1/p2/p2b/p3 valid
- *     bit  5      = src_done
- *     bits 7:6    = tex_req_valid/ready
- *     bits 11:8   = fbss[3:0]      (FB-write subFSM state)
- *     bits 13:12  = dma_state
- *     bit  14     = cmd_is_draw_spans_batch
- *     bit  15     = fp_pipe_stall
- *     bits 18:16  = tex_dbg_state
- *     bit  19     = tex_axi_arvalid
- *     bit  20     = tex_axi_rvalid
- *     bit  21     = cmap_resp_valid_b
- *     bit  22     = persp_active
- *     bit  23     = tri_active
- *     bit  24     = m_wr_awvalid       (GPU's outgoing AW request)
- *     bit  25     = m_wr_awready       (arbiter granting AW)
- *     bit  26     = m_wr_bvalid        (instantaneous B beat)
- *     bits 28:27  = arb_state          (0=IDLE, 1=RD, 2=WR)
- *     bit  29     = cpu_pending        (CPU has AR or AW out)
- *     bits 31:30  = reserved
- *   GPU_DBG_MWR  (0x34): {28'b0, m_wr_inflight[3:0]} */
-/* GPU_DBG_TEX_REQ  (0x28) — total accepted tex requests (port A+B)
- * GPU_DBG_TEX_MISS (0x2C) — total misses
- * Both saturating 32-bit, reset on hard reset.  Hit rate = (req-miss)/req. */
-#define GPU_DBG_TEX_REQ_REG    REG32(0x4a000028u)
-#define GPU_DBG_TEX_MISS_REG   REG32(0x4a00002Cu)
-
-#define GPU_DBG_FRAG_REG       REG32(0x4a000030u)
-#define GPU_DBG_MWR_REG        REG32(0x4a000034u)
-
-/* GPU_DBG_BUS (0x38) — composed arbiter+slave snapshot.  Read this
- * when GPU_DBG_FRAG shows arb=ST_WR/ST_RD with no progress to find
- * out which master owns the wedge and what slave state it's in.
- *   bits 3:0    = slave state (0=IDLE,1=RD_CMD,2=RD_DAT,3=WR_CMD,
- *                              4=WR_DON,5=WR_NEXT,6=WR_BURST)
- *   bit  4      = sdram_busy
- *   bit  5      = wr_busy_seen     (burst path: latched busy edge)
- *   bit  6      = cmd_issued       (sdram_rd/wr asserted)
- *   bit  7      = started          (sdram_accepted observed)
- *   bit  8      = wready_given     (burst W pre-stage holds next beat)
- *   bit  9      = s_axi_awready
- *   bit  10     = s_axi_wready
- *   bit  11     = s_axi_bvalid     (slave's outgoing B beat)
- *   bit  12     = s_axi_arready
- *   bit  13     = s_axi_rvalid
- *   bit  14     = s_axi_rlast
- *   bit  15     = sdram_accepted   (live, before "started" latch)
- *   bit  16     = m1_arvalid       (CPU read still asserting)
- *   bit  17     = m1_awvalid       (CPU write still asserting)
- *   bit  18     = mixer_arvalid    (audio mixer M3 read still asserting)
- *   bits 20:19  = arb_grant        (0=GPU,1=CPU,2=AudioDMA,3=Mixer)
- *   bits 22:21  = arb_state        (0=IDLE,1=RD,2=WR — duplicate of dbg_frag)
- *   bit  23     = cpu_pending      (m1_arvalid|m1_awvalid)
- *   bits 29:24  = io_sdram state   (resynced to clk_cpu; ST_IDLE=7,
- *                                   ST_WRITE_0=20, ST_BURSTWR_0=46,
- *                                   ST_REFRESH_0=60 — see io_sdram.v)
- *   bit  30     = io_sdram issue_autorefresh
- *   bit  31     = reserved */
-#define GPU_DBG_BUS_REG        REG32(0x4a000038u)
-
-/* GPU_DBG_STALL (0x3C) — stall watchdog.  Each field is a saturating
- * 16-bit cycle counter that resets on its progress event.  0xFFFF
- * means "stuck for >655 us at 100 MHz" (longer than any normal stall).
- * Read after a ring-full to triage the wedge:
- *   bits 15:0  = cycles since last gpu_swap_req pulse
- *                (large = CMD_FLIP gate not firing)
- *   bits 31:16 = cycles since last ring_rdptr advance
- *                (large = GPU command processor not consuming) */
-#define GPU_DBG_STALL_REG      REG32(0x4a00003Cu)
+/* CMD_FLIP debug counters — 32-bit free-running, reset on hard reset.
+ * Read pre/post-frame deltas to localise where CMD_FLIP stalls:
+ *   - FLIP_ENTER counts CMD_FLIP commands the GPU dequeued
+ *   - FLIP_DRAIN_DONE counts drain completions inside S_EXECUTE
+ *   - FLIP_SWAP_PULSE counts gpu_swap_req assertions
+ * In a healthy run all three move in lockstep, while BVALID == AWVALID
+ * after each frame's m_wr drain.  Divergence localises the bug:
+ *   ENTER > DRAIN_DONE       → drain never completes (m_wr_inflight stuck)
+ *   DRAIN_DONE > SWAP_PULSE  → impossible (same RTL block); RTL bug
+ *   AWVALID > BVALID         → slave dropped a B beat (the original Stage 1
+ *                              saw-busy starvation class); m_wr_inflight
+ *                              underflows or wedges
+ *   BVALID > AWVALID         → spurious B (would underflow the counter) */
+#define GPU_DBG_FLIP_ENTER_REG       REG32(0x4a000028u)
+#define GPU_DBG_FLIP_DRAIN_DONE_REG  REG32(0x4a00002Cu)
+#define GPU_DBG_FLIP_SWAP_PULSE_REG  REG32(0x4a000030u)
+#define GPU_DBG_BVALID_REG           REG32(0x4a000034u)
+#define GPU_DBG_AWVALID_REG          REG32(0x4a000038u)
 
 /* Swap-pipeline debug snapshot.  Read-only.
  *   FB_SWAP_DBG_LIVE   (0xC0):

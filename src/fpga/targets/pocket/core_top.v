@@ -1793,6 +1793,7 @@ assign video_hs = vidout_hs;
         .dt_query_data(cpu_dt_query_data),
         .dt_query_valid(cpu_dt_query_valid),
         .vrr_v_total(vrr_v_total_cpu),
+        .analogizer_enabled(analogizer_ena),
         // SNAC shifter / GPIO
         .snac_pin_out(snac_pin_out),
         .snac_pin_dir(snac_pin_dir),
