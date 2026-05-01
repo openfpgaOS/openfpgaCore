@@ -69,6 +69,16 @@ module gpu_core (
     output reg  [1:0]  gpu_swap_idx,
 
     // ================================================================
+    // External diagnostic inputs — composed in core_top from arbiter +
+    // io_sdram + slave debug taps.  Currently only surfaced as MMIO
+    // reads for kernel debug; not used for control.
+    // ================================================================
+    input  wire        slave_swap_pending,    // unused (legacy gate retired)
+    input  wire [1:0]  arb_state_dbg,         // SDRAM arb state (0=IDLE,1=RD,2=WR)
+    input  wire        cpu_pending_dbg,       // CPU has AR or AW pending
+    input  wire [31:0] dbg_bus,               // composed bus diag for MMIO 0x38
+
+    // ================================================================
     // Status outputs
     // ================================================================
     output wire        busy,
@@ -1293,9 +1303,14 @@ reg src_done;            // source has issued its last pixel; pipeline draining
 // the same cycle pipe_addr_b matches.  See gpu_tex_cache.v for the held-
 // response semantics this relies on.
 wire cmap_pipe_wait = p2b_valid && p2b_flags[SPAN_COLORMAP] && !cmap_resp_valid_b;
+// Stage 2a: m_wr_inflight is 4 bits (max 15).  FBSS now exits on AW+W
+// handshake without waiting for B (multi-outstanding writes).  Cap at
+// 14 outstanding to prevent counter overflow if SDRAM is slow to drain.
+wire m_wr_inflight_near_full = (m_wr_inflight >= 4'd14);
 wire fp_pipe_stall = (p1_valid && !tex_resp_valid)
                   || cmap_pipe_wait
-                  || (fbss != FBSS_IDLE);
+                  || (fbss != FBSS_IDLE)
+                  || m_wr_inflight_near_full;
 
 // Combinational tex address from p0 + DSP output.  Multiply-mode only
 // (sp_tex_width is always non-zero in every real caller — tested in
@@ -2561,11 +2576,13 @@ always @(posedge clk) begin
                     if (m_wr_awvalid && m_wr_awready) m_wr_awvalid <= 0;
                     if (m_wr_wvalid  && m_wr_wready ) m_wr_wvalid  <= 0;
 
-                    // B response — flush done, apply pending pixel
-                    if (m_wr_bvalid) begin
-                        m_wr_awvalid <= 0;
-                        m_wr_wvalid  <= 0;
-
+                    // Stage 2a: exit on AW+W handshake, NOT on B response.
+                    // The original code waited for m_wr_bvalid here, paying
+                    // the full SDRAM round-trip per pixel-word flush.
+                    // m_wr_inflight tracks outstanding Bs; CMD_FENCE/CMD_FLIP
+                    // drain them at the end of the frame.  Same-master
+                    // single-AWID AXI ordering preserves write semantics.
+                    if (!m_wr_awvalid && !m_wr_wvalid) begin
                         if (fbss_pend_valid) begin : pend_apply
                             reg [31:0] pw_addr;
                             reg [1:0]  pw_lane;
@@ -2959,10 +2976,12 @@ always @(posedge clk) begin
             // W handshake
             if (m_wr_wvalid && m_wr_wready)
                 m_wr_wvalid <= 0;
-            // B response — write complete
-            if (m_wr_bvalid) begin
-                m_wr_awvalid <= 0;
-                m_wr_wvalid  <= 0;
+            // Stage 2a: exit on AW+W handshake (don't wait for B).
+            // m_wr_inflight tracks outstanding Bs; CMD_FENCE/CMD_FLIP
+            // drain.  This unblocks the producer FSM (S_TRI_PIX /
+            // S_SPAN_STEP) to continue emitting fragments while the
+            // previous write's B is round-tripping through SDRAM.
+            if (!m_wr_awvalid && !m_wr_wvalid) begin
                 if (tri_active) begin
                     // Mid-triangle flush: re-accumulate pending pixel
                     begin : reaccum_tri

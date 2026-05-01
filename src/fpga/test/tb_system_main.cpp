@@ -67,8 +67,17 @@ static void tick_half(bool cpu_edge_high) {
     sim_time++;
 }
 
+// Vsync generator — pulses high for 1 clk_cpu cycle every VSYNC_PERIOD
+// cycles to model the display vsync edge that clears
+// axi_periph_slave's fb_swap_pending. On real hardware vsync hits
+// every ~16.67 ms (~1.67M clk_cpu cycles at 100 MHz); a tighter period
+// keeps simulation tests short.
+#define VSYNC_PERIOD 16667
 static void tick_cycle() {
     tick_half(false);
+    /* Pulse vsync high during the second half-tick of the period start so
+     * vsync_rising's edge detector sees a clean 1-cycle-wide pulse. */
+    tb->vsync = (cpu_cycles % VSYNC_PERIOD == 0) ? 1 : 0;
     tick_half(true);
     cpu_cycles++;
 }
@@ -207,6 +216,7 @@ int main(int argc, char **argv) {
     tb->clk_cpu = 0;
     tb->clk_74a = 0;
     tb->reset_n = 0;
+    tb->vsync   = 0;
     tb->bd_cram0_wr = 0;
     tb->bd_cram0_addr = 0;
     tb->bd_cram0_wdata = 0;

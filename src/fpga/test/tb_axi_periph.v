@@ -51,7 +51,15 @@ module tb_axi_periph (
     // periph slave is dropping MMIO writes on the way to the GPU.
     output wire        dbg_gpu_reg_wr,
     output wire [3:0]  dbg_gpu_reg_addr,
-    output wire [31:0] dbg_gpu_reg_wdata
+    output wire [31:0] dbg_gpu_reg_wdata,
+
+    // CMD_FLIP side-port (from gpu_core in production).  Tests can
+    // pulse this and read FB_SWAP_CTRL via the AXI slave to verify
+    // fb_swap_pending toggles.  vsync is also exposed so tests can
+    // synthesize the rising edge that consumes the pending swap.
+    input  wire        gpu_swap_req_in,
+    input  wire [1:0]  gpu_swap_idx_in,
+    input  wire        vsync_in
 );
 
 // Tie-offs for peripheral inputs we don't exercise.
@@ -85,7 +93,7 @@ end
 wire link_irq = 1'b0;
 wire bridge_wr_idle = 1'b1;
 wire dataslot_allcomplete = 1'b1;
-wire vsync = 1'b0;
+wire vsync = vsync_in;
 wire [31:0] cont1_key = 32'b0;
 wire [31:0] cont1_joy = 32'b0;
 wire [15:0] cont1_trig = 16'b0;
@@ -188,8 +196,8 @@ axi_periph_slave dut (
     .gpu_reg_wdata(dbg_gpu_reg_wdata),
     .gpu_reg_rdata(gpu_reg_rdata),
     // No gpu_core in this bench — tie the CMD_FLIP side-port low.
-    .gpu_swap_req (1'b0),
-    .gpu_swap_idx (2'b0)
+    .gpu_swap_req (gpu_swap_req_in),
+    .gpu_swap_idx (gpu_swap_idx_in)
 );
 
 // Hoist FSM internals for debug

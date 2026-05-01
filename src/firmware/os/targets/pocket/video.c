@@ -48,14 +48,25 @@ static const uint32_t overlay_term_pal[16] = {
 #define VRR_VT_MAX          375     /* ~42 Hz — Pocket scaler min */
 #define VRR_VT_DEFAULT      262
 #define VRR_VT_PAL          314     /* 15720/314 ≈ 50.06 Hz — PAL */
-#define VRR_STABLE_FRAMES   4       /* frames before applying a rate change */
+#define VRR_STABLE_FRAMES   4       /* frames to confirm a SMALL rate drift */
 #define VRR_TOLERANCE       3       /* v_total jitter tolerance in lines */
+#define VRR_LARGE_DELTA     30      /* lines: jumps this big lock in one frame
+                                     * (every operating point is ≥ ~50 lines
+                                     * apart at the rates we care about, so
+                                     * ≥30 is unambiguously a new rate, not
+                                     * noise — covers init lockup latency) */
 
 static uint64_t vrr_last_flip;
 static int      vrr_current_vt  = VRR_VT_DEFAULT;
 static int      vrr_pending_vt  = VRR_VT_DEFAULT;
 static int      vrr_stable_count;
-static int      vrr_skip_frames = 8;  /* skip initial frames to stabilize */
+static int      vrr_skip_frames = 2;  /* skip initial frames to stabilize.
+                                       * 2 is enough — by then ensure_video
+                                       * _init's kernel-driven flip cycle has
+                                       * settled and the GPU pipeline is
+                                       * primed.  (Was 8, which delayed VRR
+                                       * settling by ~130 ms at the start of
+                                       * each app launch). */
 static int      vrr_in_gap;           /* 1 = fps 30-40 gap, using swap hold */
 
 static int vrr_abs(int a, int b) { return a > b ? a - b : b - a; }
@@ -125,14 +136,37 @@ static void vrr_update(void) {
     if (new_vt < 0)
         return;
 
-    /* Hysteresis: require consistent target for several frames */
-    if (vrr_abs(new_vt, vrr_pending_vt) <= VRR_TOLERANCE) {
+    /* Asymmetric hysteresis:
+     *   - Large delta (≥ VRR_LARGE_DELTA from current_vt): the rate
+     *     change is unambiguous (we don't operate near each other on
+     *     the rate ladder), so lock immediately.  Cuts initial-lock
+     *     latency from 4 frames to 1 — important for the first VRR
+     *     correction at app start, when we go from 60 Hz default to
+     *     whatever the actual render rate dictates.
+     *   - Small delta (≤ VRR_TOLERANCE from pending): noise floor;
+     *     count stable frames as before so 1-line jitter doesn't
+     *     thrash V_TOTAL.
+     *   - Mid delta (between the two): treat as drift, accumulate
+     *     stable frames before committing.
+     *
+     * gap-mode (swap_hold) follows whatever vt the same logic decides. */
+    int delta_from_current = vrr_abs(new_vt, vrr_current_vt);
+    if (delta_from_current >= VRR_LARGE_DELTA) {
+        /* Big jump — accept immediately. */
+        vrr_current_vt = new_vt;
+        VRR_V_TOTAL = new_vt;
+        vrr_pending_vt = new_vt;
+        vrr_stable_count = VRR_STABLE_FRAMES;  /* primed for next small-delta confirm */
+        if (gap != vrr_in_gap) {
+            vrr_in_gap = gap;
+            VRR_SWAP_HOLD = gap ? 1 : 0;
+        }
+    } else if (vrr_abs(new_vt, vrr_pending_vt) <= VRR_TOLERANCE) {
         if (++vrr_stable_count >= VRR_STABLE_FRAMES) {
-            if (vrr_abs(new_vt, vrr_current_vt) > VRR_TOLERANCE) {
+            if (delta_from_current > VRR_TOLERANCE) {
                 vrr_current_vt = new_vt;
                 VRR_V_TOTAL = new_vt;
             }
-            /* Update swap hold when gap state changes */
             if (gap != vrr_in_gap) {
                 vrr_in_gap = gap;
                 VRR_SWAP_HOLD = gap ? 1 : 0;
@@ -144,17 +178,41 @@ static void vrr_update(void) {
     }
 }
 
+/* swap_kicked: set when we KNOW fb_swap_pending was at 1 at some point
+ * since buf_ready was set.  Without it, sync_swap_state's "buf_ready
+ * set + pending=0" check is ambiguous in the GPU-triggered path —
+ * the kernel sets buf_ready BEFORE the GPU's CMD_FLIP has actually
+ * pulsed gpu_swap_req, so pending=0 might just mean "GPU hasn't fired
+ * yet", not "swap completed".  Forcing sync to first observe pending=1
+ * disambiguates. */
+static int swap_kicked = 0;
+
 /* Check whether a pending swap has completed and update software state. */
 static void sync_swap_state(void) {
-    if (buf_ready >= 0 && !(FB_SWAP_CTRL & 1)) {
+    int hw_pending = FB_SWAP_CTRL & 1;
+    if (hw_pending) swap_kicked = 1;
+    if (buf_ready >= 0 && swap_kicked && !hw_pending) {
         buf_display = buf_ready;
         buf_ready = -1;
+        swap_kicked = 0;
     }
 }
 
 void of_video_init(void) {
     /* Switch scanout to app triple-buffered FB */
     TERM_FB_CTRL = 0;
+
+    /* One-shot diagnostic: confirm the write took effect.  If
+     * scanout is still showing the terminal FB after this, every
+     * frame draw is wasted — apps would see "frozen screen" with
+     * music playing.  Reads back through periph_slave so the value
+     * reflects the registered state after the write. */
+    {
+        extern int printf(const char *, ...);
+        uint32_t term_after = TERM_FB_CTRL & 1;
+        printf("[video_init] TERM_FB_CTRL=%u (0=app FB, 1=terminal FB)\n",
+               (unsigned)term_after);
+    }
 
     buf_display = 0;
     buf_draw    = 1;
@@ -216,6 +274,10 @@ uint8_t *of_video_flip(void) {
     /* Queue draw buffer for display at next vsync.
      * Write format: bits[2:1] = buffer index, bit[0] = trigger */
     FB_SWAP_CTRL = (buf_draw << 1) | 1;
+    /* Kernel-driven kick — fb_swap_pending is high NOW (sysreg write
+     * is committed by the time this returns), so sync_swap_state's
+     * positive-observation requirement is already satisfied. */
+    swap_kicked = 1;
 
     int old_draw = buf_draw;
 
@@ -245,46 +307,110 @@ uint8_t *of_video_buffer_addr(int idx) {
     return (uint8_t *)fb_addr[idx];
 }
 
-int of_video_acquire_next(int just_flipped_idx) {
-    /* GPU-triggered flip path.  The caller has either:
-     *   (a) just emitted CMD_FLIP for `just_flipped_idx` (the GPU's
-     *       command processor will, after its m_wr_* drain, write the
-     *       slave's fb_swap_pending bit at the next vsync); or
-     *   (b) passed -1 indicating no previous flip — first call.
-     *
-     * In case (a) we promote `just_flipped_idx` to buf_ready, blocking
-     * if a previous buf_ready hasn't yet been retired by sync.  In
-     * case (b) we just return the current draw slot.
-     *
-     * Vs. of_video_flip() this skips the CPU-side cache_clean (the GPU
-     * owns the FB writes — see docs/cr-gpu-triggered-flip.md and the
-     * "GPU owns the framebuffer" architectural rule) and the explicit
-     * FB_SWAP_CTRL kick (the GPU's CMD_FLIP side-port handles that). */
+int of_video_acquire_next(int just_flipped_idx, uint32_t fence_token) {
+    /* CPU-driven flip path.  SDK's of_gpu_flip_to() now emits CMD_FENCE
+     * (no CMD_FLIP), so we wait for fence_reached >= fence_token to
+     * confirm the GPU has drained its m_wr writes, then do the
+     * FB_SWAP_CTRL write CPU-side to queue the swap for next vsync.
+     * Avoids the GPU-triggered flip path's CPU/GPU concurrency hazards
+     * (multi-outstanding writes hanging CMD_FLIP drain). */
+    vrr_update();
 
     if (just_flipped_idx < 0) {
-        /* First call: just publish the current draw slot. */
-        sync_swap_state();
         return buf_draw;
     }
 
-    /* Wait for the previous queued flip (if any) to retire.  Caps the
-     * CPU at ~1 frame ahead of the display — buf_ready stays held
-     * until vsync clears fb_swap_pending and sync_swap_state catches
-     * the transition. */
-    while (buf_ready >= 0) {
-        sync_swap_state();
+    /* Bounded fence wait — if GPU hangs we still want diagnostic
+     * output rather than freezing the kernel.  ~5 ms at 100 MHz. */
+    {
+        uint32_t spins = 500000u;
+        while ((int32_t)(GPU_FENCE_REACHED_REG - fence_token) < 0) {
+            if (--spins == 0) break;
+        }
     }
 
-    /* Promote the just-flipped buffer.  The GPU's CMD_FLIP side-port
-     * may already have asserted fb_swap_pending; sync_swap_state's
-     * "buf_ready >= 0 && !pending" check still correctly retires the
-     * slot whenever vsync fires next. */
-    buf_ready = just_flipped_idx;
+    /* CPU-side swap: queue just_flipped_idx for display at next vsync. */
+    FB_SWAP_CTRL = ((uint32_t)(just_flipped_idx & 0x3) << 1) | 1;
 
-    /* The new draw slot is the unique one that's neither displayed
-     * nor pending-swap.  With 3 buffers and at most one pending at a
-     * time, this is well-defined. */
-    buf_draw = 3 - buf_display - buf_ready;
+    /* DEBUG INSTRUMENTATION: log the first N frames so we can see
+     * exactly what the kernel observes when the GPU-triggered flip
+     * path is supposed to be running.  Captures:
+     *   - just_flipped_idx (slot the SDK said it rendered)
+     *   - fence_token (what flip_to returned)
+     *   - GPU_FENCE_REACHED (has the GPU pulsed CMD_FLIP yet?)
+     *   - FB_SWAP_CTRL (bit 0 = fb_swap_pending, bits 2:1 = display_idx)
+     *   - buf_display / buf_draw before update
+     * If display is blank but these tracks look healthy, the bug is
+     * downstream (scanout / FB target).  If they look stuck, the bug
+     * is in the flip pipeline itself. */
+    /* Heavily rate-limited — UART output is the bottleneck.  At 115200
+     * baud the [acq] line (~250 bytes) costs ~17 ms per print, which
+     * was 84% of frame time during the saw-busy investigation.  Now
+     * we print only every 256th frame, enough to spot a regression
+     * but not enough to dominate vid_flip latency. */
+    static int dbg_frame = 0;
+    int dbg_print = ((dbg_frame & 0xFF) == 0);
+    if (dbg_print) {
+        extern int printf(const char *, ...);
+        uint32_t live = FB_SWAP_DBG_LIVE;
+        uint32_t cnts = FB_SWAP_DBG_CNTS;
+
+        /* Sample 3 bytes from each slot via the UNCACHED alias to
+         * see if the slots actually hold non-zero pixel data:
+         *   off1 = 4         — first pixel after the leading bar tag
+         *   off2 = 38400     — middle of the 320x240 frame
+         *   off3 = 76796     — last word of the slot
+         * If all 9 samples are 0 across 16 frames, GPU/CPU writes
+         * are not landing in the FB slots.  If they're non-zero
+         * but display is blank, the scanout side is reading the
+         * wrong place. */
+        const volatile uint8_t *s0 = (const volatile uint8_t *)0x50000000u;
+        const volatile uint8_t *s1 = (const volatile uint8_t *)0x50100000u;
+        const volatile uint8_t *s2 = (const volatile uint8_t *)0x50200000u;
+        uint32_t frag = GPU_DBG_FRAG_REG;
+        uint32_t mwr  = GPU_DBG_MWR_REG;
+        uint32_t bus = GPU_DBG_BUS_REG;
+        printf("[acq f=%d flip=%d reached=0x%x fbctrl=0x%x term=%u draw=%d "
+               "gpu=%u vs=%u "
+               "frag=0x%08x mwr=%u bus=0x%08x "
+               "fbss=%u tex_st=%u stall=%u tex_ar=%u tex_rv=%u cmap_rv=%u "
+               "awv=%u awr=%u bv=%u arb=%u cpu_p=%u "
+               "sl=%u busy=%u wbs=%u grant=%u m1ar=%u m1aw=%u "
+               "iost=%u rfr=%u]\n",
+               dbg_frame, just_flipped_idx,
+               (unsigned)GPU_FENCE_REACHED_REG, (unsigned)FB_SWAP_CTRL,
+               (unsigned)((live >> 19) & 0x1),  /* term_fb_active */
+               buf_draw,
+               (unsigned)(cnts & 0xFFFF),
+               (unsigned)(cnts >> 16),
+               (unsigned)frag, (unsigned)(mwr & 0xF), (unsigned)bus,
+               (unsigned)((frag >> 8)  & 0xF),  /* fbss */
+               (unsigned)((frag >> 16) & 0x7),  /* tex_dbg_state */
+               (unsigned)((frag >> 15) & 0x1),  /* fp_pipe_stall */
+               (unsigned)((frag >> 19) & 0x1),  /* tex_axi_arvalid */
+               (unsigned)((frag >> 20) & 0x1),  /* tex_axi_rvalid */
+               (unsigned)((frag >> 21) & 0x1), /* cmap_resp_valid_b */
+               (unsigned)((frag >> 24) & 0x1), /* m_wr_awvalid */
+               (unsigned)((frag >> 25) & 0x1), /* m_wr_awready */
+               (unsigned)((frag >> 26) & 0x1), /* m_wr_bvalid */
+               (unsigned)((frag >> 27) & 0x3), /* arb_state */
+               (unsigned)((frag >> 29) & 0x1), /* cpu_pending */
+               (unsigned)(bus & 0xF),          /* slave state */
+               (unsigned)((bus >> 4) & 0x1),   /* sdram_busy */
+               (unsigned)((bus >> 5) & 0x1),   /* wr_busy_seen */
+               (unsigned)((bus >> 19) & 0x3),  /* arb_grant */
+               (unsigned)((bus >> 16) & 0x1),  /* m1_arvalid live */
+               (unsigned)((bus >> 17) & 0x1),  /* m1_awvalid live */
+               (unsigned)((bus >> 24) & 0x3F), /* io_sdram state */
+               (unsigned)((bus >> 30) & 0x1)); /* io_sdram refresh pending */
+        (void)live; (void)s0; (void)s1; (void)s2;  /* re-add later if needed */
+    }
+    dbg_frame++;
+
+    buf_display = just_flipped_idx;
+    buf_ready = -1;
+    swap_kicked = 0;
+    buf_draw = (buf_display + 1) % 3;
     return buf_draw;
 }
 

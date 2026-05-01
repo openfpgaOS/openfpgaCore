@@ -36,6 +36,15 @@ module tb_sdram (
     output wire        s_axi_bvalid,
     output wire [1:0]  s_axi_bresp,
 
+    // Optional burst_rd injection — drives io_sdram's burst_rd port
+    // directly so a regression test can keep word_busy high across the
+    // slave's write completion (mirrors scanout's burst_rd contention
+    // on hardware).  Default tie-offs at the C++ side are 0, preserving
+    // pre-existing test behaviour.
+    input  wire        inj_burst_rd,
+    input  wire [24:0] inj_burst_addr,
+    input  wire [10:0] inj_burst_len,
+
     output wire        busy
 );
 
@@ -76,6 +85,7 @@ wire [31:0] word_q;
 wire        word_busy;
 wire        word_q_valid;
 wire        word_wr_data_next;
+wire        word_wr_done;
 
 // Pulse adapter (mirrors core_top.v)
 reg         cmd_forwarded;
@@ -137,6 +147,7 @@ axi_sdram_slave slave (
     .sdram_rdata(word_q), .sdram_busy(word_busy),
     .sdram_accepted(accepted_r), .sdram_rdata_valid(word_q_valid),
     .sdram_wr_data_next(word_wr_data_next),
+    .sdram_wr_done(word_wr_done),
     .sdram_next_wdata(sdram_next_wdata),
     .sdram_next_wstrb(sdram_next_wstrb)
 );
@@ -151,7 +162,7 @@ io_sdram sdram_ctrl (
     .phy_dq_out_port(ctrl_dq_out),
     .phy_dq_oe_port(ctrl_dq_oe),
     .phy_dqm(phy_dqm),
-    .burst_rd(1'b0), .burst_addr(25'b0), .burst_len(11'b0), .burst_32bit(1'b1),
+    .burst_rd(inj_burst_rd), .burst_addr(inj_burst_addr), .burst_len(inj_burst_len), .burst_32bit(1'b1),
     .burst_data(), .burst_data_valid(), .burst_data_done(),
     .burstwr(1'b0), .burstwr_addr(25'b0), .burstwr_ready(),
     .burstwr_strobe(1'b0), .burstwr_data(16'b0), .burstwr_done(1'b0),
@@ -160,6 +171,7 @@ io_sdram sdram_ctrl (
     .word_burst_len(word_burst_len), .word_burst_wr_len(word_burst_wr_len),
     .word_q(word_q), .word_busy(word_busy), .word_q_valid(word_q_valid),
     .word_wr_data_next(word_wr_data_next),
+    .word_wr_done(word_wr_done),
     .burst_wr_direct_data(sdram_wdata),
     .burst_wr_direct_strb(sdram_wstrb)
 );

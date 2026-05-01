@@ -35,6 +35,9 @@ static void reset() {
     tb->s_axi_arvalid = 0;
     tb->s_axi_awvalid = 0;
     tb->s_axi_wvalid = 0;
+    tb->inj_burst_rd = 0;
+    tb->inj_burst_addr = 0;
+    tb->inj_burst_len = 0;
     for (int i = 0; i < 100; i++)
         tick();
     tb->reset_n = 1;
@@ -474,6 +477,93 @@ static void test_burst_write_pipeline() {
     }
 }
 
+// Regression for axi_sdram_slave's word_wr_done-pulse exit (Stage 1 of
+// the saw-busy-gate fix).  io_sdram's word_busy is shared across all
+// of: word writes, scanout burst_rd, autorefresh, burstwr.  The
+// original S_WR_DON exit polled `!sdram_busy`, which stayed high any
+// time io_sdram was processing an unrelated op queued back-to-back —
+// throttling Duke3D FB writes to ~8 fps.  The fix replaces polling
+// with a 1-cycle word_wr_done pulse that fires when io_sdram completes
+// THIS write (ST_WRITE_4→ST_IDLE), independent of subsequent activity.
+//
+// This test reproduces the contention: issue a single-word write,
+// then immediately fire a long burst_rd into io_sdram.  io_sdram sees
+// word_wr_queue + burst_rd_queue both queued, services word_wr first
+// (ST_WRITE_*), then in ST_IDLE picks up burst_rd_queue and returns
+// to ST_BURSTRD — keeping word_busy HIGH the whole time.  The slave's
+// bvalid must still arrive within a tight bound, proving the exit
+// runs off the pulse, not the busy level.
+static void test_wr_done_pulse_under_burst_rd_contention() {
+    printf("TEST: word_wr_done pulse exits S_WR_DON despite concurrent burst_rd\n");
+
+    tb->s_axi_awvalid = 1;
+    tb->s_axi_awaddr  = 0x100C0000;
+    tb->s_axi_awlen   = 0;
+    tb->s_axi_wvalid  = 1;
+    tb->s_axi_wdata   = 0xDEAFCAFE;
+    tb->s_axi_wstrb   = 0xF;
+    tb->s_axi_wlast   = 1;
+
+    int aw_cycle = -1, b_cycle = -1, burst_started = -1;
+
+    for (int t = 0; t < 500; t++) {
+        tick();
+
+        if (tb->s_axi_awready && aw_cycle < 0) {
+            aw_cycle = t;
+            tb->s_axi_awvalid = 0;
+        }
+        if (tb->s_axi_wready) {
+            tb->s_axi_wvalid = 0;
+        }
+
+        // Fire burst_rd one cycle after AW handshake so io_sdram has
+        // already accepted the slave's word_wr.  burst_rd_queue is
+        // latched and processed AFTER the word_wr completes —
+        // extending word_busy=1 across the slave's S_WR_DON wait.
+        if (aw_cycle >= 0 && burst_started < 0 && (t - aw_cycle) >= 1) {
+            tb->inj_burst_rd   = 1;
+            tb->inj_burst_addr = 0x00200000;  // word addr; safe region
+            tb->inj_burst_len  = 80;          // long burst, ~85 cycles
+            burst_started = t;
+        }
+        if (burst_started >= 0 && (t - burst_started) >= 1) {
+            tb->inj_burst_rd = 0;  // 1-cycle pulse
+        }
+
+        if (tb->s_axi_bvalid) {
+            b_cycle = t;
+            break;
+        }
+    }
+
+    tb->s_axi_awvalid = 0;
+    tb->s_axi_wvalid  = 0;
+    tb->inj_burst_rd  = 0;
+
+    if (b_cycle < 0) {
+        printf("  FAIL: B never asserted (slave wedged on !sdram_busy?)\n");
+        fail_count++;
+    } else {
+        int latency = b_cycle - aw_cycle;
+        printf("  AW@%d B@%d latency=%d cycles\n", aw_cycle, b_cycle, latency);
+        // Without Stage 1, the slave waits for the burst_rd to drain
+        // (~85 cycles) before bvalid.  With Stage 1, it should be
+        // under ~25 cycles (io_sdram processes the write in ~10
+        // cycles, slave then asserts bvalid on the pulse).
+        if (latency > 40) {
+            printf("  FAIL: B latency %d > 40 — slave likely polling !sdram_busy "
+                   "across burst_rd\n", latency);
+            fail_count++;
+        } else {
+            pass_count++;
+        }
+    }
+
+    // Drain io_sdram's burst_rd before next test
+    idle(120);
+}
+
 int main(int argc, char **argv) {
     Verilated::commandArgs(argc, argv);
     Verilated::traceEverOn(true);
@@ -499,6 +589,7 @@ int main(int argc, char **argv) {
     test_interleaved_rw();
     test_burst_write_performance();
     test_burst_write_pipeline();
+    test_wr_done_pulse_under_burst_rd_contention();
 
     printf("\n=== Results: %d passed, %d failed ===\n",
            pass_count, fail_count);

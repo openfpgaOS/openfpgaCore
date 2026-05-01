@@ -17,6 +17,7 @@
 #include "Vtb_gpu.h"
 #include "verilated.h"
 #include "verilated_vcd_c.h"
+#include "liveness_watchdog.h"
 
 static Vtb_gpu *tb;
 static VerilatedVcdC *trace;
@@ -54,6 +55,9 @@ static void reset() {
     tb->reset_n  = 0;
     tb->reg_wr   = 0;
     tb->bd_we    = 0;
+    /* No slave in this bench — leave swap-pending tied 0 so CMD_FLIP
+     * never stalls (matches the existing drain-test expectations). */
+    tb->slave_swap_pending = 0;
     for (int i = 0; i < 20; i++) tick();
     tb->reset_n = 1;
     for (int i = 0; i < 5; i++) tick();
@@ -591,6 +595,257 @@ static void test_cmd_flip_drain_and_pulse(void) {
                    fence_first_cafe, swap_pulse_cycle);
             pass_count++;
         }
+    }
+}
+
+// =====================================================================
+// Test: CMD_FLIP — slave_swap_pending NO LONGER gates the swap pulse.
+//
+// Earlier rev added an `&& !slave_swap_pending` term to CMD_FLIP's gate
+// to prevent back-to-back flips from overwriting the slave's
+// fb_ready_idx before vsync.  That gate turned out to deadlock the
+// GPU after N flips — any glitch in the vsync/CDC/vrr_hold path would
+// wedge gpu_core forever, since slave_swap_pending only clears on an
+// external clock-domain edge.
+//
+// Reverted: CMD_FLIP now gates ONLY on m_wr_inflight==0 (matching
+// CMD_FENCE).  The slave's gpu_swap_req side-port is last-wins on
+// fb_ready_idx, so multiple back-to-back gpu_swap_req pulses just
+// queue the latest frame — desired behavior under heavy load.
+//
+// Sequence: same setup, but assert that slave_swap_pending=1 does
+// NOT block the pulse (it should fire immediately once m_wr_inflight
+// drains).
+// =====================================================================
+static void test_cmd_flip_slave_pending_ignored(void) {
+    printf("TEST: CMD_FLIP — slave_swap_pending NO LONGER gates pulse\n");
+
+    gpu_init();
+
+    /* Hold slave_swap_pending=1 throughout.  The gate is gone, so the
+     * pulse must fire regardless. */
+    tb->slave_swap_pending = 1;
+
+    ring_cmd(0x23, 2);  // CMD_SET_FB
+    ring_write(FB_BASE_BYTE);
+    ring_write(320);
+
+    const uint32_t FLIP_IDX = 1;
+    const uint32_t FLIP_TOK = 0xFEED;
+    ring_cmd(0x42, 2);  // CMD_FLIP
+    ring_write(FLIP_IDX);
+    ring_write(FLIP_TOK);
+    gpu_kick();
+
+    int swap_pulse_count = 0;
+    int swap_pulse_cycle = -1;
+    uint32_t swap_pulse_idx = 0xFF;
+    int fence_first_cycle = -1;
+    const int MAX_CYCLES = 200;
+    for (int t = 0; t < MAX_CYCLES; t++) {
+        tb->eval();
+        if (tb->gpu_swap_req) {
+            if (swap_pulse_count == 0) {
+                swap_pulse_idx   = tb->gpu_swap_idx;
+                swap_pulse_cycle = t;
+            }
+            swap_pulse_count++;
+        }
+        if (fence_first_cycle < 0 && tb->fence_reached == FLIP_TOK) {
+            fence_first_cycle = t;
+        }
+        if (swap_pulse_count > 0 && fence_first_cycle >= 0 && t > swap_pulse_cycle + 10) {
+            break;
+        }
+        tick();
+    }
+
+    tb->slave_swap_pending = 0;  /* clean up for subsequent tests */
+
+    if (swap_pulse_count == 0) {
+        printf("  FAIL gpu_swap_req never pulsed (gate not removed?)\n");
+        fail_count++;
+    } else {
+        check("flip-pulse-fires-regardless-of-slave-pending", swap_pulse_count, 1);
+        check("flip-idx-published",                            swap_pulse_idx,   FLIP_IDX);
+        if (fence_first_cycle < 0) {
+            printf("  FAIL fence never advanced\n");
+            fail_count++;
+        } else {
+            printf("  OK  pulse@%d fence@%d (slave_swap_pending=1 throughout)\n",
+                   swap_pulse_cycle, fence_first_cycle);
+            pass_count++;
+        }
+    }
+}
+
+// =====================================================================
+// Test: CMD_FLIP back-to-back stress — repro target for the Duke3D
+// random-hang.  Models the axi_periph_slave's swap-pending state
+// machine accurately and drives many CMD_FLIPs against it with a
+// realistic vsync cadence, watching for any cycle where:
+//   (a) GPU rdptr stops advancing for a long stretch (CPU would
+//       spin in _gpu_ring_ensure here on real HW), or
+//   (b) the slave's swap_pending stays high for too many vsyncs
+//       (means CMD_FLIP gate is wedged).
+//
+// The slave state machine, ~1:1 with axi_periph_slave.v lines 728-744:
+//   if (fb_swap_pending && vsync_rising) {
+//     if (vrr_hold_counter > 0) vrr_hold_counter--;
+//     else { fb_display_idx = fb_ready_idx; fb_swap_pending = 0; }
+//   }
+//   if (gpu_swap_req) {
+//     fb_ready_idx = gpu_swap_idx;
+//     fb_swap_pending = 1;
+//   }
+// Same-cycle (vsync_rising && gpu_swap_req) → gpu_swap_req wins on
+// fb_swap_pending (set to 1).  That's intentional; the vsync block
+// ran first so it captured the OLD ready_idx into display_idx.
+// =====================================================================
+static void test_cmd_flip_back_to_back_stress(void) {
+    printf("TEST: CMD_FLIP back-to-back stress (Duke3D random-hang repro)\n");
+
+    gpu_init();
+
+    /* Slave model state. */
+    int slave_pending  = 0;
+    int slave_ready    = 0;
+    int slave_display  = 0;
+    int slave_hold     = 0;
+    int last_pulse_idx = 0;
+    int swap_completes = 0;
+
+    /* Drive slave_swap_pending into the DUT each tick. */
+    tb->slave_swap_pending = 0;
+
+    /* Vsync pulse timing — every VSYNC_PERIOD cycles, clean 1-cycle
+     * pulse so the DUT sees a rising edge.  Real HW vsync is 16 ms
+     * (~1.67M cyc); we use 200 cyc to keep the test short while
+     * still letting many CMD_FLIPs pile up between vsyncs. */
+    const int VSYNC_PERIOD = 200;
+
+    /* Issue CLEAR_RECT + CMD_FLIP pairs.  CLEAR_RECT generates real
+     * m_wr_* traffic so CMD_FLIP must wait for m_wr_inflight==0 AND
+     * !slave_swap_pending — both gate inputs are exercised.  Closer
+     * to Duke3D's actual pattern where the bars-clear precedes
+     * every flip.  Enable per-frame SET_FB so each flip targets a
+     * fresh slot. */
+    ring_cmd(0x23, 2);                       /* CMD_SET_FB */
+    ring_write(FB_BASE_BYTE);
+    ring_write(320);
+
+    const int N_FLIPS  = 32;
+    uint32_t  base_tok = 0x10000;
+    for (int i = 0; i < N_FLIPS; i++) {
+        uint32_t idx = (uint32_t)(i & 0x3);
+
+        /* Small CMD_CLEAR_RECT — 4 lines × 320 bytes = 1280 bytes
+         * via m_wr master.  Opcode 0x11, 3-word payload:
+         *   word0 = start byte address
+         *   word1 = {w[31:16], h[15:0]}
+         *   word2 = {stride[31:16], pad[15:8], color[7:0]} */
+        ring_cmd(0x11, 3);                   /* CMD_CLEAR_RECT */
+        ring_write(FB_BASE_BYTE);
+        ring_write(((uint32_t)320 << 16) | 4);     /* w=320, h=4 */
+        ring_write(((uint32_t)320 << 16) | (uint32_t)(i & 0xFF));
+
+        ring_cmd(0x42, 2);                   /* CMD_FLIP */
+        ring_write(idx);
+        ring_write(base_tok + (uint32_t)i);
+    }
+    gpu_kick();
+
+    /* Run sim and step the slave model + DUT in lockstep. */
+    int last_rdptr_change = 0;
+    uint32_t prev_rdptr = 0xFFFFFFFFu;
+    int max_rdptr_stall = 0;
+    int max_pending_streak = 0;
+    int pending_streak = 0;
+    int cycles = 0;
+    int swap_pulse_count = 0;
+
+    /* CLEAR_RECT (1280 bytes) + drain + FLIP wait per iteration.
+     * Each iteration takes ~1300 cycles measured.  4× margin. */
+    const int CYCLE_BUDGET = N_FLIPS * 5000;
+    for (int t = 0; t < CYCLE_BUDGET; t++) {
+        tb->eval();
+        cycles++;
+
+        /* Vsync pulse — same edge-detect window as the DUT. */
+        bool vsync_rising = (t > 0) && (t % VSYNC_PERIOD == 0);
+
+        /* Slave state machine — vsync clear FIRST (matches
+         * axi_periph_slave's "later non-blocking wins" structure). */
+        if (slave_pending && vsync_rising) {
+            if (slave_hold > 0) {
+                slave_hold--;
+            } else {
+                slave_display = slave_ready;
+                slave_pending = 0;
+                swap_completes++;
+            }
+        }
+
+        /* Capture GPU's pulse for this cycle (combinational on the
+         * eval'd state), AFTER the vsync update — gpu_swap_req wins
+         * on swap_pending if same-cycle. */
+        if (tb->gpu_swap_req) {
+            slave_ready    = tb->gpu_swap_idx;
+            slave_pending  = 1;
+            last_pulse_idx = slave_ready;
+            swap_pulse_count++;
+        }
+
+        /* Drive the DUT's slave_swap_pending input from the model. */
+        tb->slave_swap_pending = slave_pending ? 1 : 0;
+
+        /* Track GPU rdptr stalls.  rdptr lives in MMIO 0x10. */
+        uint32_t rdptr = (uint32_t)tb->fence_reached;  /* fence == rdptr proxy */
+        (void)rdptr;
+        /* Use the ring rdptr instead — accessible via the same MMIO
+         * read the SDK does, but tb_gpu doesn't expose it; a fence
+         * delta works as a proxy.  Just track fence advances. */
+        uint32_t fence_now = (uint32_t)tb->fence_reached;
+        if (fence_now != prev_rdptr) {
+            int stall = t - last_rdptr_change;
+            if (stall > max_rdptr_stall) max_rdptr_stall = stall;
+            last_rdptr_change = t;
+            prev_rdptr = fence_now;
+        }
+
+        /* Pending-streak tracker — how many cycles in a row pending=1. */
+        if (slave_pending) {
+            pending_streak++;
+            if (pending_streak > max_pending_streak) max_pending_streak = pending_streak;
+        } else {
+            pending_streak = 0;
+        }
+
+        /* Stop early once we've accepted all flips. */
+        if (swap_completes >= N_FLIPS) break;
+
+        tick();
+    }
+
+    printf("  ran %d cycles, completed %d/%d swaps, gpu_pulses=%d, "
+           "max_fence_stall=%d cycles, max_pending_streak=%d cycles\n",
+           cycles, swap_completes, N_FLIPS, swap_pulse_count,
+           max_rdptr_stall, max_pending_streak);
+
+    if (swap_completes < N_FLIPS) {
+        printf("  FAIL only %d/%d swaps completed within %d cycles — gate WEDGED\n",
+               swap_completes, N_FLIPS, CYCLE_BUDGET);
+        fail_count++;
+    } else {
+        check("flip-stress-all-64-flips-completed", swap_completes, N_FLIPS);
+    }
+    if (max_pending_streak > VSYNC_PERIOD * 2) {
+        printf("  FAIL pending stayed high for %d cycles (>2 vsync periods) — vsync clear missed\n",
+               max_pending_streak);
+        fail_count++;
+    } else {
+        printf("  OK  pending streak bounded (max=%d, < 2 vsyncs)\n", max_pending_streak);
+        pass_count++;
     }
 }
 
@@ -5498,8 +5753,255 @@ static void test_gpudemo_mode0_replay_with_drops(void) {
 }
 
 // =====================================================================
-// Main
+// Deadlock hunt — Phase 2A/2B/3 tests.  Each one drives a workload
+// known to stress a specific deadlock path (counter wrap, pulse-loss
+// race, or long-run liveness) and uses the watchdog to fail loudly
+// if any monitored signal goes silent for too long.
 // =====================================================================
+
+// Counts each m_wr_bvalid pulse from the slave (via tb_gpu's debug
+// hook).  Used by deadlock tests to verify that writes are actually
+// completing.
+static uint64_t cum_bvalid_count = 0;
+static uint64_t cum_swap_pulse   = 0;
+
+static void monitor_step() {
+    /* Sample debug signals after each tick to count cumulative
+     * events.  Done before tick so we capture the cycle where the
+     * signal was high. */
+    /* m_wr_bvalid is exposed via dbg_frag bit 26 in newer builds.
+     * For simplicity probe gpu_swap_req and dbg_frag directly. */
+    if (tb->gpu_swap_req) cum_swap_pulse++;
+    /* m_wr_bvalid not exposed at the tb level; use mwr counter
+     * delta as a proxy.  Actually we have dbg_frag bit 26 which
+     * is m_wr_bvalid combinationally — sample it. */
+    uint32_t frag = tb->dbg_frag;
+    if ((frag >> 26) & 0x1) cum_bvalid_count++;
+}
+
+// Helper — pump cycles while waiting for ring space.  Returns true if
+// space freed within timeout, false otherwise.
+static bool wait_ring_space(uint32_t need_bytes, int timeout_cycles) {
+    while (((mmio_read(4) - ring_wrptr - 4) & ring_mask) < need_bytes
+           && timeout_cycles > 0) {
+        tick();
+        monitor_step();
+        timeout_cycles--;
+    }
+    return timeout_cycles > 0;
+}
+
+// =====================================================================
+// Test: m_wr_inflight never wraps under heavy write load.
+//
+// Issues N small CLEAR_RECTs (each generates m_wr traffic), drains
+// via CMD_FENCE.  Streams commands as ring space frees so the 16KB
+// ring doesn't overflow.  Verifies fence_reached advances steadily —
+// if m_wr_inflight wrapped, fence would never see m_wr_inflight==0.
+// =====================================================================
+static void test_mwr_inflight_no_wrap(void) {
+    printf("TEST: m_wr_inflight no-wrap stress (1000 clear+fence cycles)\n");
+
+    gpu_init();
+    cum_bvalid_count = 0;
+
+    LivenessWatchdog wd;
+    wd.add("ring_rdptr",   [&]() { return (uint64_t)mmio_read(4); }, 50000);
+    wd.add("fence_reached",[&]() { return (uint64_t)mmio_read(6); }, 50000);
+    wd.add("bvalid_count", [&]() { return cum_bvalid_count; },        50000);
+
+    ring_cmd(0x23, 2);                       /* CMD_SET_FB */
+    ring_write(FB_BASE_BYTE);
+    ring_write(320);
+    gpu_kick();
+
+    const int N_ITER = 1000;
+    uint32_t base_tok = 0x40000;
+    /* Each iter: CLEAR_RECT (4 words) + FENCE (2 words) = 24 bytes. */
+    const uint32_t NEED_PER_ITER = 24;
+
+    for (int i = 0; i < N_ITER; i++) {
+        if (!wait_ring_space(NEED_PER_ITER, 50000)) {
+            printf("  FAIL ring-space wait timed out at iter %d\n", i);
+            fail_count++;
+            return;
+        }
+        ring_cmd(0x11, 3);                   /* CMD_CLEAR_RECT */
+        ring_write(FB_BASE_BYTE);
+        ring_write(((uint32_t)8 << 16) | 1); /* w=8, h=1 */
+        ring_write(((uint32_t)320 << 16) | (uint32_t)(i & 0xFF));
+
+        ring_cmd(0x02, 1);                   /* CMD_FENCE */
+        ring_write(base_tok + (uint32_t)i);
+        gpu_kick();
+        wd.tick();
+        if (wd.failed()) break;
+    }
+
+    /* Drain — wait for last fence. */
+    uint32_t target_tok = base_tok + N_ITER - 1;
+    const uint64_t DRAIN_BUDGET = 200000;
+    for (uint64_t t = 0; t < DRAIN_BUDGET; t++) {
+        tick();
+        monitor_step();
+        wd.tick();
+        if (wd.failed()) break;
+        if (mmio_read(6) == target_tok) break;
+    }
+
+    wd.report();
+    if (wd.failed()) {
+        fail_count++;
+    } else {
+        check("mwr_no_wrap_final_fence_reached", mmio_read(6), target_tok);
+    }
+}
+
+// =====================================================================
+// Test: CMD_FLIP rapid-fire stress.
+//
+// Issues N CMD_FLIPs back-to-back (mixed with FENCEs) and verifies
+// each retires.  If CMD_FLIP path has a counter overflow or a
+// pulse-loss issue, gpu_swap_req count or fence_reached will lag.
+// =====================================================================
+static void test_cmd_flip_rapid_fire(void) {
+    printf("TEST: CMD_FLIP rapid-fire (1000 flips, deadlock hunt)\n");
+
+    gpu_init();
+    tb->slave_swap_pending = 0;
+    cum_swap_pulse = 0;
+
+    LivenessWatchdog wd;
+    wd.add("ring_rdptr",    [&]() { return (uint64_t)mmio_read(4); }, 50000);
+    wd.add("fence_reached", [&]() { return (uint64_t)mmio_read(6); }, 50000);
+    wd.add("swap_count",    [&]() { return cum_swap_pulse; },         50000);
+
+    ring_cmd(0x23, 2);                       /* CMD_SET_FB */
+    ring_write(FB_BASE_BYTE);
+    ring_write(320);
+    gpu_kick();
+
+    const int N_FLIPS = 1000;
+    uint32_t base_tok = 0x80000;
+    /* Each iter: FLIP (3 words) + FENCE (2 words) = 20 bytes. */
+    const uint32_t NEED_PER_ITER = 20;
+
+    for (int i = 0; i < N_FLIPS; i++) {
+        if (!wait_ring_space(NEED_PER_ITER, 50000)) {
+            printf("  FAIL ring-space wait timed out at flip %d\n", i);
+            fail_count++;
+            return;
+        }
+        ring_cmd(0x42, 2);                   /* CMD_FLIP */
+        ring_write((uint32_t)(i & 0x3));
+        ring_write(base_tok + (uint32_t)(2*i));
+
+        ring_cmd(0x02, 1);                   /* CMD_FENCE */
+        ring_write(base_tok + (uint32_t)(2*i + 1));
+        gpu_kick();
+        wd.tick();
+        if (wd.failed()) break;
+    }
+
+    uint32_t target_tok = base_tok + (uint32_t)(2*N_FLIPS - 1);
+    const uint64_t DRAIN_BUDGET = 2000000;
+    for (uint64_t t = 0; t < DRAIN_BUDGET; t++) {
+        tick();
+        monitor_step();
+        wd.tick();
+        if (wd.failed()) break;
+        if (mmio_read(6) == target_tok) break;
+    }
+
+    wd.report();
+    if (wd.failed()) {
+        fail_count++;
+    } else {
+        /* fence_reached is the source of truth for "all flips
+         * retired".  cum_swap_pulse undercounts because mmio_write
+         * paths advance simulation without calling monitor_step,
+         * so single-cycle pulses are missed. */
+        check("cmd_flip_rapid_fire_final_fence", mmio_read(6), target_tok);
+        printf("  swap pulses observed (lower bound): %lu of %d\n",
+               (unsigned long)cum_swap_pulse, N_FLIPS);
+    }
+}
+
+// =====================================================================
+// Test: spurious bvalid (counter underflow guard).
+//
+// Drives the slave's bvalid path WITHOUT issuing a corresponding AW
+// from the GPU side.  This shouldn't happen in normal operation —
+// the test just verifies that even if it did, the GPU's
+// m_wr_inflight wouldn't underflow to 15 and wedge subsequent CMD_FLIPs.
+//
+// We can't easily inject a phantom bvalid in tb_gpu (the slave is
+// internal), so this test is informational: read m_wr_inflight via
+// dbg_frag bit 24 (m_wr_awvalid) and dbg_mwr at various points,
+// assert it never exceeds a sane bound during normal operation.
+// =====================================================================
+static void test_mwr_inflight_bound(void) {
+    printf("TEST: m_wr_inflight stays in [0,4] under heavy load\n");
+
+    gpu_init();
+
+    /* GPU_DBG_MWR = reg_addr 13 (= MMIO byte offset 0x34). */
+    auto read_mwr = [&]() -> uint32_t {
+        return mmio_read(13) & 0xF;
+    };
+
+    ring_cmd(0x23, 2);                       /* CMD_SET_FB */
+    ring_write(FB_BASE_BYTE);
+    ring_write(320);
+    gpu_kick();
+
+    const int N_CLEARS = 200;
+    uint32_t base_tok = 0xC0000;
+    const uint32_t NEED_PER_ITER = 16;       /* 4 words = 16 bytes */
+    uint32_t max_observed = 0;
+
+    for (int i = 0; i < N_CLEARS; i++) {
+        if (!wait_ring_space(NEED_PER_ITER, 50000)) {
+            printf("  FAIL ring-space wait timed out at iter %d\n", i);
+            fail_count++;
+            return;
+        }
+        ring_cmd(0x11, 3);
+        ring_write(FB_BASE_BYTE);
+        ring_write(((uint32_t)16 << 16) | 1);
+        ring_write(((uint32_t)320 << 16) | (uint32_t)(i & 0xFF));
+        gpu_kick();
+        /* Sample mwr every iter — gives us many sample points */
+        uint32_t m = read_mwr();
+        if (m > max_observed) max_observed = m;
+    }
+    /* Final fence to know when all writes drained. */
+    if (!wait_ring_space(8, 50000)) { fail_count++; return; }
+    ring_cmd(0x02, 1);                       /* CMD_FENCE */
+    ring_write(base_tok);
+    gpu_kick();
+
+    const uint64_t DRAIN_BUDGET = 200000;
+    for (uint64_t t = 0; t < DRAIN_BUDGET; t++) {
+        tick();
+        uint32_t m = read_mwr();
+        if (m > max_observed) max_observed = m;
+        if (mmio_read(6) == base_tok) break;
+    }
+
+    printf("  observed max m_wr_inflight = %u\n", max_observed);
+    /* Slave is single-outstanding, so m_wr_inflight should be 0/1. */
+    if (max_observed > 4) {
+        printf("  FAIL m_wr_inflight reached %u (>4) — likely counter "
+               "imbalance or wrap\n", max_observed);
+        fail_count++;
+    } else {
+        printf("  OK  m_wr_inflight bounded\n");
+        pass_count++;
+    }
+}
+
+
 
 int main(int argc, char **argv) {
     Verilated::commandArgs(argc, argv);
@@ -5523,6 +6025,11 @@ int main(int argc, char **argv) {
     test_clear_rect_per_command_stride();
     test_cmd_fence_drain();
     test_cmd_flip_drain_and_pulse();
+    test_cmd_flip_slave_pending_ignored();
+    test_cmd_flip_back_to_back_stress();
+    test_mwr_inflight_no_wrap();
+    test_cmd_flip_rapid_fire();
+    test_mwr_inflight_bound();
     test_solid_span();
     test_textured_span();
     test_spans_batch_one();

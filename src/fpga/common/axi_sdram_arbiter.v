@@ -11,6 +11,22 @@
 //
 // Fixed priority: GPU > CPU > (M2 unused) > AudioMix.
 //
+// Within GPU (M0), AR and AW alternate via a 1-bit round-robin.
+// M0 merges tex/cmap/blend reads with framebuffer writes onto one
+// master, so any STRICT priority between the channels just trades
+// one starvation for another:
+//   - Strict AR-prefer: under steady tex-miss pressure, M0 AW
+//     could never land — fragment pipe wedged in FBSS_FLUSH_W_RSP.
+//   - Strict AW-prefer: every queued FB write blocked subsequent
+//     tex reads, pipe stalled on every miss, Duke3D ~3 fps.
+//   - Skewed ratios (e.g., 4 AR : 1 AW): same trade in proportion;
+//     load-pattern-sensitive.
+// Fix: pure 1:1 round-robin within M0.  Symmetric, simple, no
+// magic threshold.  Bounded latency = 1 transaction of the other
+// channel.  Within CPU (M1), AR is still checked first since CPU
+// reads are pipeline-blocking and writes are posted through the
+// LSU FIFO.
+//
 // CPU fairness counter (unchanged): any GPU/audio grant while the CPU
 // has a pending request increments a deficit; once it reaches
 // CPU_FAIR_THRESHOLD the CPU is granted unconditionally.  Audio is
@@ -118,7 +134,17 @@ module axi_sdram_arbiter #(
     output wire [3:0]  s_wstrb,
     output wire        s_wlast,
     input  wire        s_bvalid,
-    input  wire [1:0]  s_bresp
+    input  wire [1:0]  s_bresp,
+
+    // Debug observability — surfaced into gpu_core.dbg_frag (MMIO 0x30)
+    // so the kernel can see whether GPU's M0 AW is parked behind a
+    // sticky CPU/audio transaction without rebuilding bit layouts.
+    //   dbg_arb_state: 0=IDLE, 1=RD, 2=WR
+    //   dbg_cpu_pending: m1_arvalid|m1_awvalid (CPU has a request out)
+    //   dbg_grant: 0=GPU(M0), 1=CPU(M1), 2=AudioDMA(M2), 3=AudioMix(M3)
+    output wire [1:0]  dbg_arb_state,
+    output wire        dbg_cpu_pending,
+    output wire [1:0]  dbg_grant
 );
 
 wire reset = ~reset_n;
@@ -151,6 +177,14 @@ wire cpu_pending = m1_arvalid | m1_awvalid;
 reg [3:0] audio_deficit;
 wire audio_pending = m3_arvalid;
 
+// M0 internal AR/AW round-robin.  When BOTH channels are pending,
+// alternate grants 1:1 — symmetric, no AR or AW bias.  When only
+// one is pending, grant immediately and reset the toggle so the
+// other channel gets first dibs next time both are competing.
+// Bounded latency on either channel = 1 transaction of the other.
+// Simpler than a deficit counter and less load-pattern-sensitive.
+reg m0_last_was_ar;
+
 // Grant arbitration — registered for timing
 always @(posedge clk or posedge reset) begin
     if (reset) begin
@@ -158,6 +192,7 @@ always @(posedge clk or posedge reset) begin
         grant         <= 2'd0;
         gpu_deficit   <= 0;
         audio_deficit <= 0;
+        m0_last_was_ar <= 1'b0;
     end else begin
         case (arb_state)
         ST_IDLE: begin
@@ -183,15 +218,31 @@ always @(posedge clk or posedge reset) begin
                 arb_state <= ST_RD;
                 if (cpu_pending) gpu_deficit <= gpu_deficit + 4'd1;
             end
-            // Priority: GPU (M0) > CPU (M1) > Audio (M2)
-            else if (m0_arvalid) begin
+            // Priority: GPU (M0) > CPU (M1) > Audio (M2).  Within M0,
+            // AR/AW round-robin via m0_last_was_ar.  Three branches:
+            // BOTH-pending (alternate), AR-only, AW-only.  BOTH must
+            // come first so its condition wins over the alone fallbacks.
+            else if (m0_arvalid && m0_awvalid) begin
                 grant <= 2'd0;
-                arb_state <= ST_RD;
+                if (cpu_pending) gpu_deficit <= gpu_deficit + 4'd1;
+                if (audio_pending) audio_deficit <= audio_deficit + 4'd1;
+                if (m0_last_was_ar) begin
+                    arb_state      <= ST_WR;
+                    m0_last_was_ar <= 1'b0;
+                end else begin
+                    arb_state      <= ST_RD;
+                    m0_last_was_ar <= 1'b1;
+                end
+            end else if (m0_arvalid) begin
+                grant <= 2'd0;
+                arb_state      <= ST_RD;
+                m0_last_was_ar <= 1'b1;
                 if (cpu_pending) gpu_deficit <= gpu_deficit + 4'd1;
                 if (audio_pending) audio_deficit <= audio_deficit + 4'd1;
             end else if (m0_awvalid) begin
                 grant <= 2'd0;
-                arb_state <= ST_WR;
+                arb_state      <= ST_WR;
+                m0_last_was_ar <= 1'b0;
                 if (cpu_pending) gpu_deficit <= gpu_deficit + 4'd1;
                 if (audio_pending) audio_deficit <= audio_deficit + 4'd1;
             end else if (m1_arvalid) begin
@@ -331,5 +382,10 @@ assign m0_bvalid = (active_wr && grant_m0) ? s_bvalid : 1'b0;
 assign m1_bvalid = (active_wr && grant_m1) ? s_bvalid : 1'b0;
 assign m0_bresp  = s_bresp;
 assign m1_bresp  = s_bresp;
+
+// Debug taps
+assign dbg_arb_state   = arb_state;
+assign dbg_cpu_pending = cpu_pending;
+assign dbg_grant       = grant;
 
 endmodule

@@ -78,7 +78,14 @@ module gpu_tex_cache (
 
     // Debug — exposed in GPU_STATUS for hang diagnosis
     output wire [2:0]  dbg_state,
-    output wire        dbg_pipe_valid
+    output wire        dbg_pipe_valid,
+
+    // Hit/miss counters — used to diagnose Duke3D bandwidth collapse.
+    // Saturating 32-bit (4 billion ops headroom — won't saturate
+    // before the system is restarted).  Reset on reset_n.  Hit rate
+    // = (req_count - miss_count) / req_count.
+    output reg  [31:0] dbg_req_count,    // every accepted req on either port
+    output reg  [31:0] dbg_miss_count    // every miss handled in S_PIPE
 );
 
 assign dbg_state      = state;
@@ -334,11 +341,24 @@ always @(posedge clk) begin
         lat_wide    <= 0;
         lat_port    <= 0;
         flush_pending <= 1'b0;
+        dbg_req_count  <= 32'd0;
+        dbg_miss_count <= 32'd0;
     end else begin
         // Latch any flush pulse regardless of state.  Cleared when we
         // enter S_INIT below.
         if (flush)
             flush_pending <= 1'b1;
+
+        // Hit/miss bandwidth instrumentation.  Increment dbg_req_count
+        // on every accepted req (either port) — gives us total tex
+        // demand.  Increment dbg_miss_count on every miss handled in
+        // S_PIPE (when we transition to S_FILL_AR).  Saturating at
+        // 0xFFFF so the counters don't wrap mid-frame.
+        if ((req_valid && req_ready) || (req_valid_b && req_ready_b)) begin
+            if (dbg_req_count != 32'hFFFFFFFF)
+                dbg_req_count <= dbg_req_count + ((req_valid && req_ready) +
+                                                  (req_valid_b && req_ready_b));
+        end
 
         case (state)
         // ----------------------------------------------------------------
@@ -401,6 +421,8 @@ always @(posedge clk) begin
                 lat_wide    <= pipe_wide_a;
                 lat_port    <= 1'b0;       // serving A
                 pipe_valid_a <= 0;          // explicit clear on miss
+                if (dbg_miss_count != 32'hFFFFFFFF)
+                    dbg_miss_count <= dbg_miss_count + 32'd1;
             end else if (pipe_miss_b) begin
                 axi_arvalid <= 1;
                 axi_araddr  <= {6'b0, pipe_addr_b[25:4], 4'b0};
@@ -411,6 +433,8 @@ always @(posedge clk) begin
                 lat_wide    <= pipe_wide_b;
                 lat_port    <= 1'b1;       // serving B
                 pipe_valid_b <= 0;          // explicit clear on miss
+                if (dbg_miss_count != 32'hFFFFFFFF)
+                    dbg_miss_count <= dbg_miss_count + 32'd1;
             end else if (flush || flush_pending) begin
                 // Safe to flush now: no pending miss on either port
                 // means either pipe_valid_x=0 (no in-flight request)

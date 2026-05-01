@@ -613,6 +613,17 @@ load_from_sd:
     boot_fb_clear_row(0);
 
 start_os:
+    /* Bisect helpers — direct UART writes to track the post-start_os
+     * path step-by-step.  of_term isn't up yet so we can't use
+     * printf.  Marker before each step so a hang reveals where. */
+    #define BOOT_DBG(s) do { \
+        const char *_m = (s); \
+        while (*_m) { \
+            while (!(*(volatile uint32_t *)0x4F000000 & (1u << 1))) ; \
+            *(volatile uint32_t *)0x4F000004 = (uint32_t)(uint8_t)*_m++; \
+        } \
+    } while (0)
+    BOOT_DBG("[boot] start_os\n");
     /* uart_mirror_on is armed by the PHDP path above and by
      * of_term_enable_uart_mirror() in kernel/main.c for SD boot.
      *
@@ -622,13 +633,24 @@ start_os:
      * their SDRAM VMA, so only .bss remains to be zeroed.
      * os_finalize_memory() (located in CRAM0, not BRAM) does that
      * without touching CRAM0 as data. */
+#if OF_TARGET_PLATFORM_ID != OF_PLATFORM_SIM
+    /* flush_dcache_evict reads 64 KB from the top of SDRAM to evict
+     * deferload writes; sim's harness preloads SDRAM via backdoor so
+     * there's nothing to evict, AND sdram_fast_model wedges around
+     * iteration ~800 of the sweep (likely a burst-read state-machine
+     * edge case).  Skip on sim — the kernel will run cbo.flush as
+     * needed once it's up. */
     flush_dcache_evict();
+#endif
+    BOOT_DBG("[boot] flush_icache\n");
     flush_icache();
+    BOOT_DBG("[boot] finalize_memory\n");
     os_finalize_memory((void *)_os_bss_start, (void *)_os_bss_end);
 
     pd_dbg_stage = 5;
 
     /* Jump to OS */
+    BOOT_DBG("[boot] jump_os_main\n");
     switch_to_runtime_stack_and_call(os_main, _runtime_stack_top);
 
     while (1) {}

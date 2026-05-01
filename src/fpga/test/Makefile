@@ -112,6 +112,20 @@ MIXER_DIR = obj_dir_audio_mixer
 MIXER_FLAGS = -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC -Wno-CASEINCOMPLETE -Wno-SYNCASYNCNET -Wno-UNOPTFLAT
 
 # ============================================================
+# AXI SDRAM arbiter — focused 4-master grant FSM probe.
+# Hunts the read-vs-write priority pathology suspected of wedging
+# the GPU's framebuffer-flush during Duke3D hangs.
+# ============================================================
+ARBITER_SRCS = \
+	tb_arbiter.v \
+	$(COMMON_DIR)/axi_sdram_arbiter.v
+
+ARBITER_CPP = tb_arbiter_main.cpp
+ARBITER_TOP = tb_arbiter
+ARBITER_DIR = obj_dir_arbiter
+ARBITER_FLAGS = -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC -Wno-CASEINCOMPLETE -Wno-UNUSEDSIGNAL
+
+# ============================================================
 # Full system bring-up — CPU + SDRAM + CRAM0 CDC + BRAM
 # ============================================================
 # Boots the VexiiRiscv through the v2 fabric, loads os.bin into the
@@ -130,6 +144,8 @@ SYSTEM_SRCS = \
 	$(COMMON_DIR)/axi_sdram_slave.v \
 	$(COMMON_DIR)/axi_periph_slave.v \
 	$(COMMON_DIR)/snac_shifter.v \
+	$(COMMON_DIR)/gpu_core.v \
+	$(COMMON_DIR)/gpu_tex_cache.v \
 	../vendor/vexriscv/VexiiRiscv/VexiiRiscv.v \
 	$(TARGET_DIR)/apf/common.v
 
@@ -146,9 +162,9 @@ SYSTEM_FLAGS = -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC -Wno-CASEINCOMPLETE \
 # Targets
 # ============================================================
 .PHONY: all sdram sram gpu gpu-floor gpu-gpudemo axi-periph \
-        audio audio-mixer system run run-sram build clean
+        audio audio-mixer arbiter system run run-sram build clean
 
-all: sdram sram gpu axi-periph audio audio-mixer
+all: sdram sram gpu axi-periph audio audio-mixer arbiter
 
 # --- SDRAM ---
 sdram: $(SDRAM_DIR)/V$(SDRAM_TOP)
@@ -252,6 +268,17 @@ $(MIXER_DIR)/V$(MIXER_TOP): $(MIXER_SRCS) $(MIXER_CPP)
 		-I$(COMMON_DIR) \
 		$(MIXER_SRCS) $(MIXER_CPP)
 
+# --- AXI SDRAM arbiter ---
+arbiter: $(ARBITER_DIR)/V$(ARBITER_TOP)
+	@printf "\n=== AXI SDRAM arbiter ===\n"
+	./$(ARBITER_DIR)/V$(ARBITER_TOP)
+
+$(ARBITER_DIR)/V$(ARBITER_TOP): $(ARBITER_SRCS) $(ARBITER_CPP)
+	$(VERILATOR) $(VERILATOR_FLAGS) $(ARBITER_FLAGS) \
+		--top-module $(ARBITER_TOP) --Mdir $(ARBITER_DIR) \
+		-I$(COMMON_DIR) \
+		$(ARBITER_SRCS) $(ARBITER_CPP)
+
 # --- System bring-up ---
 system: $(SYSTEM_DIR)/V$(SYSTEM_TOP)
 	@printf "\n=== system bring-up (tb_system) ===\n"
@@ -268,5 +295,6 @@ clean:
 	rm -rf $(SDRAM_DIR) $(SRAM_DIR) $(GPU_DIR) $(GPU_FLOOR_DIR) \
 	       $(GPU_GPUDEMO_DIR) \
 	       $(AXI_PERIPH_DIR) $(AUDIO_DIR) $(MIXER_DIR) $(SYSTEM_DIR) \
+	       $(ARBITER_DIR) \
 	       obj_dir_gpu obj_dir_gpu_floor obj_dir_gpu_gpudemo \
 	       obj_dir_cdc io_sdram_test.v

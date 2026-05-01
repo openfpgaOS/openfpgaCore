@@ -35,6 +35,11 @@ void of_file_set_idle_hook(void (*hook)(void)) {
 void of_file_init(void) {
     idle_hook = (void *)0;
 
+#if OF_TARGET_PLATFORM_ID == OF_PLATFORM_SIM
+    /* Sim has no bridge model — the warmup DMA below would hang
+     * forever waiting for ack/done from a non-existent peer. */
+    return;
+#endif
     /* Bridge warmup: first DMA after boot resets the bridge command
      * state machine. Read 4 bytes from slot 1 into CRAM0 scratch.
      * Skipped when the bridge isn't the active backend, since the

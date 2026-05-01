@@ -29,6 +29,10 @@ module tb_system (
     input  wire        clk_cpu,
     input  wire        clk_74a,
     input  wire        reset_n,
+    // Vsync — driven by C++ harness as a periodic 1-cycle pulse so the
+    // periph slave's fb_swap_pending actually clears the way it does
+    // on real hardware.
+    input  wire        vsync,
 
     // UART TX observation — driven by axi_periph_slave
     output wire        uart_tx_dv,
@@ -194,18 +198,45 @@ wire        arb_wlast;
 wire        arb_bvalid;
 wire [1:0]  arb_bresp;
 
+// ─── GPU bus signals (live: gpu_core instance below) ───
+wire        gpu_rd_arvalid, gpu_rd_arready;
+wire [31:0] gpu_rd_araddr;
+wire [7:0]  gpu_rd_arlen;
+wire        gpu_rd_rvalid;
+wire [31:0] gpu_rd_rdata;
+wire [1:0]  gpu_rd_rresp;
+wire        gpu_rd_rlast;
+wire        gpu_wr_awvalid, gpu_wr_awready;
+wire [31:0] gpu_wr_awaddr;
+wire [7:0]  gpu_wr_awlen;
+wire        gpu_wr_wvalid,  gpu_wr_wready;
+wire [31:0] gpu_wr_wdata;
+wire [3:0]  gpu_wr_wstrb;
+wire        gpu_wr_wlast;
+wire        gpu_wr_bvalid;
+wire [1:0]  gpu_wr_bresp;
+wire        gpu_swap_req;
+wire [1:0]  gpu_swap_idx;
+wire        slave_swap_pending;
+wire [31:0] gpu_reg_rdata;
+wire        gpu_reg_wr;
+wire [3:0]  gpu_reg_addr;
+wire [31:0] gpu_reg_wdata;
+
 axi_sdram_arbiter sdram_arb (
     .clk(clk_cpu), .reset_n(reset_n),
 
-    // M0 — GPU (tied off)
-    .m0_arvalid(1'b0), .m0_arready(),
-    .m0_araddr (32'b0), .m0_arlen(8'b0),
-    .m0_rvalid (), .m0_rdata(), .m0_rresp(), .m0_rlast(),
-    .m0_awvalid(1'b0), .m0_awready(),
-    .m0_awaddr (32'b0), .m0_awlen(8'b0),
-    .m0_wvalid (1'b0), .m0_wready(),
-    .m0_wdata  (32'b0), .m0_wstrb(4'b0), .m0_wlast(1'b0),
-    .m0_bvalid (), .m0_bresp(),
+    // M0 — GPU (live; reads + writes both go here)
+    .m0_arvalid(gpu_rd_arvalid), .m0_arready(gpu_rd_arready),
+    .m0_araddr (gpu_rd_araddr),  .m0_arlen  (gpu_rd_arlen),
+    .m0_rvalid (gpu_rd_rvalid),  .m0_rdata  (gpu_rd_rdata),
+    .m0_rresp  (gpu_rd_rresp),   .m0_rlast  (gpu_rd_rlast),
+    .m0_awvalid(gpu_wr_awvalid), .m0_awready(gpu_wr_awready),
+    .m0_awaddr (gpu_wr_awaddr),  .m0_awlen  (gpu_wr_awlen),
+    .m0_wvalid (gpu_wr_wvalid),  .m0_wready (gpu_wr_wready),
+    .m0_wdata  (gpu_wr_wdata),   .m0_wstrb  (gpu_wr_wstrb),
+    .m0_wlast  (gpu_wr_wlast),
+    .m0_bvalid (gpu_wr_bvalid),  .m0_bresp  (gpu_wr_bresp),
 
     // M1 — CPU (live)
     .m1_arvalid(cpu_sdram_arvalid), .m1_arready(cpu_sdram_arready),
@@ -236,8 +267,18 @@ axi_sdram_arbiter sdram_arb (
     .s_wvalid (arb_wvalid),  .s_wready (arb_wready),
     .s_wdata  (arb_wdata),   .s_wstrb  (arb_wstrb),
     .s_wlast  (arb_wlast),
-    .s_bvalid (arb_bvalid),  .s_bresp  (arb_bresp)
+    .s_bvalid (arb_bvalid),  .s_bresp  (arb_bresp),
+
+    // Debug taps wired to gpu_core dbg_frag (and to the harness via
+    // dbg_arb_state below — same signal as the hierarchical reference).
+    .dbg_arb_state(tb_arb_state_dbg),
+    .dbg_cpu_pending(tb_arb_cpu_pending_dbg),
+    .dbg_grant(tb_arb_grant_dbg)
 );
+
+wire [1:0] tb_arb_state_dbg;
+wire       tb_arb_cpu_pending_dbg;
+wire [1:0] tb_arb_grant_dbg;
 
 // ─── axi_sdram_slave + pulse adapter ───
 wire        sdram_rd, sdram_wr;
@@ -265,6 +306,7 @@ wire [31:0] word_q_sd;
 wire        word_busy_sd;
 wire        word_q_valid_sd;
 wire        word_wr_data_next_sd;
+wire        word_wr_done_sd;
 
 always @(posedge clk_cpu or negedge reset_n) begin
     if (!reset_n) begin
@@ -326,9 +368,12 @@ axi_sdram_slave sdram_axi_slave (
     .sdram_accepted    (accepted_r),
     .sdram_rdata_valid (word_q_valid_sd),
     .sdram_wr_data_next(word_wr_data_next_sd),
+    .sdram_wr_done     (word_wr_done_sd),
     .sdram_next_wdata  (sdram_next_wdata),
-    .sdram_next_wstrb  (sdram_next_wstrb)
+    .sdram_next_wstrb  (sdram_next_wstrb),
+    .dbg_slave         (tb_sdram_slave_dbg)
 );
+wire [15:0] tb_sdram_slave_dbg;
 
 sdram_fast_model sdram_mem (
     .clk (clk_cpu),
@@ -344,6 +389,7 @@ sdram_fast_model sdram_mem (
     .word_busy          (word_busy_sd),
     .word_q_valid       (word_q_valid_sd),
     .word_wr_data_next  (word_wr_data_next_sd),
+    .word_wr_done       (word_wr_done_sd),
     .burst_wr_direct_data(sdram_next_wdata),
     .burst_wr_direct_strb(sdram_next_wstrb)
 );
@@ -438,11 +484,9 @@ wire shutdown_pending = 1'b0;
 wire [31:0] dt_query_data = 32'b0;
 wire dt_query_valid = 1'b0;
 wire [7:0] snac_pin_in = 8'b0;
-wire [31:0] gpu_reg_rdata = 32'b0;
 wire link_irq = 1'b0;
 wire bridge_wr_idle = 1'b1;
 wire dataslot_allcomplete = 1'b1;
-wire vsync = 1'b0;
 wire [31:0] cont1_key = 32'b0;
 wire [31:0] cont1_joy = 32'b0;
 wire [15:0] cont1_trig = 16'b0;
@@ -541,13 +585,59 @@ axi_periph_slave periph (
     .snac_pin_in (snac_pin_in),
     .snac_enable (),
 
-    .gpu_reg_wr   (),
-    .gpu_reg_addr (),
-    .gpu_reg_wdata(),
+    .gpu_reg_wr   (gpu_reg_wr),
+    .gpu_reg_addr (gpu_reg_addr),
+    .gpu_reg_wdata(gpu_reg_wdata),
     .gpu_reg_rdata(gpu_reg_rdata),
-    // No gpu_core in this bench — CMD_FLIP side-port tied off.
-    .gpu_swap_req (1'b0),
-    .gpu_swap_idx (2'b0)
+    // CMD_FLIP side-port from gpu_core
+    .gpu_swap_req (gpu_swap_req),
+    .gpu_swap_idx (gpu_swap_idx),
+    .fb_swap_pending_o (slave_swap_pending)
+);
+
+// ============================================================
+// gpu_core — full GPU instance (matches core_top.v wiring)
+// ============================================================
+gpu_core gpu (
+    .clk        (clk_cpu),
+    .reset_n    (reset_n),
+    .gpu_enable (1'b1),
+    // AXI4 read master (ring fetch + texture)
+    .m_rd_arvalid(gpu_rd_arvalid), .m_rd_arready(gpu_rd_arready),
+    .m_rd_araddr (gpu_rd_araddr),  .m_rd_arlen  (gpu_rd_arlen),
+    .m_rd_rvalid (gpu_rd_rvalid),  .m_rd_rdata  (gpu_rd_rdata),
+    .m_rd_rlast  (gpu_rd_rlast),
+    // AXI4 write master (FB writes + clear)
+    .m_wr_awvalid(gpu_wr_awvalid), .m_wr_awready(gpu_wr_awready),
+    .m_wr_awaddr (gpu_wr_awaddr),  .m_wr_awlen  (gpu_wr_awlen),
+    .m_wr_wvalid (gpu_wr_wvalid),  .m_wr_wready (gpu_wr_wready),
+    .m_wr_wdata  (gpu_wr_wdata),   .m_wr_wstrb  (gpu_wr_wstrb),
+    .m_wr_wlast  (gpu_wr_wlast),
+    .m_wr_bvalid (gpu_wr_bvalid),
+    // MMIO from periph slave
+    .reg_wr      (gpu_reg_wr),
+    .reg_addr    (gpu_reg_addr),
+    .reg_wdata   (gpu_reg_wdata),
+    .reg_rdata   (gpu_reg_rdata),
+    // CMD_FLIP side-port → periph slave
+    .gpu_swap_req(gpu_swap_req),
+    .gpu_swap_idx(gpu_swap_idx),
+    .slave_swap_pending(slave_swap_pending),
+    // Arbiter visibility (surfaced via MMIO 0x30 dbg_frag bits 28:27/29)
+    .arb_state_dbg(tb_arb_state_dbg),
+    .cpu_pending_dbg(tb_arb_cpu_pending_dbg),
+    // Composed bus debug (MMIO 0x38) — see core_top.v for layout.
+    .dbg_bus({8'b0,
+              tb_arb_cpu_pending_dbg,
+              tb_arb_state_dbg,
+              tb_arb_grant_dbg,
+              1'b0,                       // mixer (M3) tied off in tb_system
+              cpu_sdram_awvalid,
+              cpu_sdram_arvalid,
+              tb_sdram_slave_dbg}),
+    // Status
+    .busy        (),
+    .fence_reached()
 );
 
 // ============================================================

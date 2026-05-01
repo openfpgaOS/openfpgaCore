@@ -33,6 +33,9 @@ module tb_gpu (
     output wire        gpu_swap_req,
     output wire [1:0]  gpu_swap_idx,
 
+    // External diag inputs — driven by C++ harness for the drain test
+    input  wire        slave_swap_pending,
+
     // SDRAM backdoor write (preload textures, ring buffer, etc.)
     input  wire        bd_we,
     input  wire [23:0] bd_addr,    // word address
@@ -97,6 +100,13 @@ gpu_core gpu (
     // CMD_FLIP side-port
     .gpu_swap_req(gpu_swap_req),
     .gpu_swap_idx(gpu_swap_idx),
+    // External diagnostic inputs (stubbed in tb_gpu since there's no
+    // arbiter/slave instantiated — only the drain test drives
+    // slave_swap_pending from the C++ harness).
+    .slave_swap_pending(slave_swap_pending),
+    .arb_state_dbg(2'b0),
+    .cpu_pending_dbg(1'b0),
+    .dbg_bus(32'b0),
     // MMIO
     .reg_wr(reg_wr),
     .reg_addr(reg_addr),

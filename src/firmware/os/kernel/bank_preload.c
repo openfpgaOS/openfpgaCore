@@ -195,15 +195,6 @@ int bank_preload(void) {
     g_bank_base = buf;
     g_bank_size = (uint32_t)sz;
     services_table_set_smp_bank(buf, (uint32_t)sz);
-
-    /* Show what we loaded: filename (from APF datatable), zone count,
-     * sample-pool size, and the bank's own INAM/IENG strings so users
-     * can confirm which SF2 they're actually hearing. */
-    of_term_printf(" \033[92mOK\033[0m  %s  [%s by %s, %u zones, %u KB]\n",
-                   name,
-                   hdr->bank_name[0]   ? hdr->bank_name   : "(unnamed)",
-                   hdr->bank_author[0] ? hdr->bank_author : "(unknown)",
-                   (unsigned)hdr->zone_count,
-                   (unsigned)(sz / 1024));
+    of_term_puts(" \033[92mOK\033[0m\n");
     return 0;
 }

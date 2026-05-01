@@ -23,18 +23,26 @@ void of_video_wait_flip(void);
 
 /* GPU-triggered flip path (see docs/cr-gpu-triggered-flip.md).  The
  * caller renders to the buffer at `of_video_buffer_addr(idx)`, then
- * emits CMD_FLIP via `of_gpu_flip_to(idx, fence_token)` (SDK helper),
- * then calls of_video_acquire_next(idx) to (a) mark that idx as
- * pending-swap and (b) return the idx of the next free draw slot.
- * On the very first call, pass `just_flipped_idx = -1` and the kernel
- * returns the initial draw idx (typically 1) without any handoff.
+ * emits CMD_FLIP via `of_gpu_flip_to(idx)` (SDK helper, returns a
+ * fence token), then calls of_video_acquire_next(idx, fence_token)
+ * to (a) wait for CMD_FLIP to retire + the swap to vsync, (b) update
+ * kernel buf_display/buf_ready state, and (c) return the idx of the
+ * next free draw slot.  On the very first call (no previous flip),
+ * pass just_flipped_idx=-1 and fence_token=0; the kernel reads the
+ * initial draw idx out of buf_draw without waiting.
  *
- * Blocks if the previous flip hasn't yet completed (3-buffer ceiling
- * hit — at most one previous flip can be pending at a time).  Vs.
- * of_video_flip() this is ~10 µs (just the book-keeping syscall),
- * not ~79 µs, since the actual swap is queued asynchronously by the
- * GPU's command processor when CMD_FLIP reaches the head. */
-int of_video_acquire_next(int just_flipped_idx);
+ * Why fence_token: the GPU's CMD_FLIP pulse to fb_swap_pending is one
+ * cycle wide; the slave then holds pending=1 until vsync clears it
+ * (~16 ms window).  If the CPU's polling loop runs entirely outside
+ * that window (because vsync fired between the SDK kick and the
+ * kernel call), it'd see pending=0 immediately and can't tell whether
+ * the swap completed or hasn't fired yet.  fence_reached is the
+ * positive signal: CMD_FLIP retires AT THE SAME CYCLE it pulses
+ * gpu_swap_req, so once fence_reached >= token, the slave has
+ * definitely seen the pulse, and any subsequent pending=0 means
+ * vsync completed the swap.  See cr-gpu-triggered-flip.md for the
+ * race analysis. */
+int of_video_acquire_next(int just_flipped_idx, uint32_t fence_token);
 
 /* Address of buffer `idx` (0/1/2).  Companion to of_video_acquire_next
  * — apps draw via this addr and pass `idx` to of_gpu_flip_to. */

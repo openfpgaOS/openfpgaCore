@@ -34,6 +34,7 @@ module sdram_fast_model (
     output reg         word_busy,
     output reg         word_q_valid,
     output reg         word_wr_data_next,
+    output reg         word_wr_done,        // Pulse: write op committed (matches io_sdram ST_WRITE_4→IDLE)
 
     // Pre-staged next word (driven combinatorially by axi_sdram_slave)
     input  wire [31:0] burst_wr_direct_data,
@@ -77,10 +78,12 @@ always @(posedge clk or negedge reset_n) begin
         word_busy         <= 1'b0;
         word_q_valid      <= 1'b0;
         word_wr_data_next <= 1'b0;
+        word_wr_done      <= 1'b0;
     end else begin
         // Default: pulses deassert each cycle
         word_q_valid      <= 1'b0;
         word_wr_data_next <= 1'b0;
+        word_wr_done      <= 1'b0;
 
         case (state)
 
@@ -149,8 +152,9 @@ always @(posedge clk or negedge reset_n) begin
             if (beat_r == burst_r) begin
                 // Last beat — drop busy next cycle to let the slave see
                 // the falling edge and emit the B response.
-                word_busy <= 1'b0;
-                state     <= S_IDLE;
+                word_busy    <= 1'b0;
+                word_wr_done <= 1'b1;  // Pulse: matches io_sdram ST_WRITE_4→IDLE
+                state        <= S_IDLE;
             end else begin
                 // Pull the next beat from the slave's pre-staged word.
                 word_wr_data_next <= 1'b1;

@@ -62,8 +62,29 @@ module axi_sdram_slave (
     input  wire        sdram_accepted,
     input  wire        sdram_rdata_valid,
     input  wire        sdram_wr_data_next, // io_sdram needs next word for burst write
+    input  wire        sdram_wr_done,      // pulse: slave-issued write committed in io_sdram
     output wire [31:0] sdram_next_wdata,   // Pre-staged next word (combinational)
-    output wire [3:0]  sdram_next_wstrb
+    output wire [3:0]  sdram_next_wstrb,
+
+    // Debug observability — surfaced into gpu_core MMIO 0x38.  When
+    // the arbiter is stuck in ST_WR (dbg_frag bits 28:27 == 2) and no
+    // s_bvalid is being produced, this tells us which slave state
+    // owns the wedge and whether sdram_busy / wr_busy_seen are stuck.
+    //   bits 3:0   = state (0=IDLE,1=RD_CMD,2=RD_DAT,3=WR_CMD,
+    //                4=WR_DON,5=WR_NEXT,6=WR_BURST)
+    //   bit  4     = sdram_busy
+    //   bit  5     = wr_busy_seen      (burst path: latched busy edge)
+    //   bit  6     = cmd_issued        (sdram_rd/wr asserted)
+    //   bit  7     = started           (sdram_accepted observed)
+    //   bit  8     = wready_given      (burst pre-stage holds next beat)
+    //   bit  9     = s_axi_awready
+    //   bit  10    = s_axi_wready
+    //   bit  11    = s_axi_bvalid      (slave's outgoing B beat)
+    //   bit  12    = s_axi_arready
+    //   bit  13    = s_axi_rvalid
+    //   bit  14    = s_axi_rlast
+    //   bit  15    = sdram_accepted    (live, before "started" latch)
+    output wire [15:0] dbg_slave
 );
 
 wire reset = ~reset_n;
@@ -88,11 +109,28 @@ reg [31:0] next_wdata;   // Pre-staged next W beat data (burst write)
 reg [3:0]  next_wstrb;
 reg        wready_given; // Next W beat already accepted
 reg        wr_busy_seen; // word_busy seen high during burst (guards early bvalid)
+reg        wr_op_done_seen; // sdram_wr_done pulse latched after our write was accepted; preferred over !sdram_busy because the busy signal stays high across unrelated io_sdram ops (scanout burst_rd, autorefresh) and starves single-word writes
 
 // Combinational export of pre-staged data for burst write forwarding
 assign sdram_next_wdata = next_wdata;
 assign sdram_next_wstrb = next_wstrb;
 reg        started;      // accepted seen, waiting for completion
+
+// Debug tap — see port-list comment for bit layout.  Combinational so
+// the kernel always reads live state; no extra registers added.
+assign dbg_slave = {sdram_accepted,
+                    s_axi_rlast,
+                    s_axi_rvalid,
+                    s_axi_arready,
+                    s_axi_bvalid,
+                    s_axi_wready,
+                    s_axi_awready,
+                    wready_given,
+                    started,
+                    cmd_issued,
+                    wr_busy_seen,
+                    sdram_busy,
+                    state[3:0]};
 
 // 3-entry response pipeline (primary R slot + 2 skid entries) so
 // back-pressure from the master doesn't drop sdram_rdata_valid pulses.
@@ -143,6 +181,7 @@ always @(posedge clk or posedge reset) begin
         next_wstrb <= 0;
         wready_given <= 0;
         wr_busy_seen <= 0;
+        wr_op_done_seen <= 0;
 
         rskid_data   <= 0;
         rskid_last   <= 0;
@@ -189,15 +228,16 @@ always @(posedge clk or posedge reset) begin
             cmd_issued <= 0;
             started <= 0;
             // Reads have priority over writes.  Accept a new AR as soon
-            // as the skid chain is empty — the old last beat may still
-            // be held in s_axi_rvalid/rdata, but upstream m_rready
-            // back-pressure plus the 3-entry pipeline ensure the new
-            // burst's first beats don't clobber it (SDRAM delivers
-            // beat 0 ~5-6 cycles after the command, by which time the
-            // master has almost certainly drained the held beat).
-            // Pairs with cpu_target_port's last-beat pre-grant to
-            // close the inter-burst gap.  The skid-empty check implies
-            // skid2-empty too (contiguous-valid invariant).
+            // as the skid chain is empty.  AR/AW fairness was attempted
+            // (alternation, wire-factored, starvation timer) and each
+            // variant pushed setup TNS from -31 to -130..-300 — the
+            // slave's S_IDLE has a tight combinational path through
+            // the early-issue `!sdram_busy` arms that fitter cannot
+            // close at 100 MHz with extra inputs on the AR predicate.
+            // Stage 2a (FBSS B-wait removal) gave 2x measured fps
+            // without touching this path; if read-vs-write contention
+            // remains the bottleneck, Stage 2b (multi-beat AW bursts)
+            // amortises per-grant cost without modifying the priority.
             if (s_axi_arvalid && !rskid_valid) begin
                 s_axi_arready <= 1;
                 addr_r <= s_axi_araddr;
@@ -340,11 +380,21 @@ always @(posedge clk or posedge reset) begin
                 sdram_burst_wr_len <= burst_len[3:0];
                 if (sdram_accepted) begin
                     started <= 1;
+                    // Reset wr_busy_seen + wr_op_done_seen for BOTH paths.
+                    // The saw-busy gate alone left S_WR_DON polling
+                    // !sdram_busy across unrelated io_sdram activity (scanout
+                    // burst_rd, autorefresh, mixer reads), throttling
+                    // single-word FB writes to ~8 fps.  word_wr_done is a
+                    // 1-cycle pulse from io_sdram tied to ST_WRITE_4→ST_IDLE
+                    // for THIS write — robust against back-to-back ops.
+                    wr_busy_seen <= 0;
+                    wr_op_done_seen <= 0;
                     if (burst_len == 0)
-                        state <= S_WR_DON;   // Single word: wait for !busy
+                        state <= S_WR_DON;   // Single word: wait for done pulse
                     else begin
                         wready_given <= 0;
                         wr_busy_seen <= 0;
+                        wr_op_done_seen <= 0;
                         state <= S_WR_BURST;  // Burst: stream data
                     end
                 end
@@ -369,10 +419,12 @@ always @(posedge clk or posedge reset) begin
              * sdram_wdata on the wr_data_next pulse.  One beat of
              * headroom handles any normal master-side wvalid jitter. */
             if (sdram_busy) wr_busy_seen <= 1;
-            if (wr_busy_seen && !sdram_busy) begin
+            if (sdram_wr_done) wr_op_done_seen <= 1;
+            if (started && (wr_op_done_seen || sdram_wr_done)) begin
                 cmd_issued <= 0;
                 started <= 0;
                 wready_given <= 0;
+                wr_op_done_seen <= 0;
                 s_axi_bvalid <= 1;
                 s_axi_bresp <= 2'b00;
                 state <= S_IDLE;
@@ -405,10 +457,22 @@ always @(posedge clk or posedge reset) begin
         end
 
         S_WR_DON: begin
-            // Wait for single-word write completion (burst_len == 0 only).
-            if (started && !sdram_busy) begin
+            // Wait for single-word write completion (burst_len == 0).
+            // Original saw-busy gate observed busy=HIGH then exited on !busy
+            // to avoid false-complete in the dispatch→busy gap.  But
+            // sdram_busy is shared with scanout burst_rd / autorefresh /
+            // burstwr, so it stays HIGH across unrelated ops and the
+            // slave starves under load (~8 fps in Duke3D, fbss=FLUSH_W_RSP
+            // wedge).  Use sdram_wr_done pulse instead: it fires exactly
+            // when io_sdram's ST_WRITE_4→ST_IDLE for THIS write, immune
+            // to subsequent contention.  wr_busy_seen kept as a sanity
+            // tap for dbg_bus.
+            if (sdram_busy) wr_busy_seen <= 1;
+            if (sdram_wr_done) wr_op_done_seen <= 1;
+            if (started && (wr_op_done_seen || sdram_wr_done)) begin
                 cmd_issued <= 0;
                 started <= 0;
+                wr_op_done_seen <= 0;
                 s_axi_bvalid <= 1;
                 s_axi_bresp <= 2'b00;
                 state <= S_IDLE;

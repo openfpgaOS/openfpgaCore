@@ -39,6 +39,9 @@ static void reset_sequence() {
     tb->s_axi_awburst = 1;  // INCR is the default for everything except FIXED bursts
     tb->s_axi_wvalid  = 0;
     tb->s_axi_bready  = 0;
+    tb->gpu_swap_req_in = 0;  // CMD_FLIP side-port idle
+    tb->gpu_swap_idx_in = 0;
+    tb->vsync_in        = 0;
     for (int i = 0; i < 10; i++) tick();
     tb->reset_n = 1;
     for (int i = 0; i < 10; i++) tick();
@@ -403,6 +406,138 @@ static bool axi_write_fixed_burst(uint32_t addr, const uint32_t *data, int n) {
     return b_done && (beat == n);
 }
 
+// =====================================================================
+// CMD_FLIP side-port — gpu_swap_req → fb_swap_pending latch path.
+// Closes the coverage gap that let a hardware regression slip through:
+// tb_gpu verifies gpu_core's gpu_swap_req pulse, tb_axi_periph (this
+// file) verified the slave's burst behavior, but neither tested the
+// side-port → fb_swap_pending coupling that the production design
+// depends on.  If this test passes but real hardware fails, the
+// failure must be in core_top.v wiring or post-fit optimization.
+// =====================================================================
+static void test_gpu_swap_side_port(void) {
+    printf("test_gpu_swap_side_port (gpu_swap_req → fb_swap_pending):\n");
+
+    /* sysreg 0x18 read returns {fb_display_idx[1:0], fb_swap_pending[0]}. */
+    auto read_swap_ctrl = [&]() -> uint32_t {
+        std::vector<uint32_t> r;
+        if (!axi_read_burst(0x40000018u, 0, r)) return 0xFFFFFFFFu;
+        return r[0];
+    };
+
+    /* Initial state: fb_swap_pending must be 0 (no swap queued). */
+    uint32_t pre = read_swap_ctrl();
+    check_eq("side-port-pre-pending=0", pre & 1, 0u);
+
+    /* Pulse gpu_swap_req for one cycle with idx=2.  Expect fb_swap_pending
+     * to latch high AND fb_ready_idx (bits[2:1] of the readback) to
+     * become 2 on the next clock edge. */
+    tb->gpu_swap_req_in = 1;
+    tb->gpu_swap_idx_in = 2;
+    tick();   /* posedge: slave latches fb_ready_idx<=2, fb_swap_pending<=1 */
+    tb->gpu_swap_req_in = 0;
+    tb->gpu_swap_idx_in = 0;
+    /* Drain a few cycles so the AXI read transaction has time to fire. */
+    for (int i = 0; i < 5; i++) tick();
+
+    uint32_t post = read_swap_ctrl();
+    check_eq("side-port-pending-set",   post & 1,             1u);
+    /* fb_ready_idx isn't directly exposed via sysreg readback (sysreg
+     * 0x18 returns fb_display_idx in bits [2:1]) — we verify it
+     * indirectly below via the post-vsync display_idx check. */
+
+    /* Now pulse vsync_in to clear fb_swap_pending and update display_idx. */
+    tb->vsync_in = 1;
+    tick();   /* slave's vsync_sync shift register sees vsync=1 */
+    tick();   /* shift to vsync_sync[1] — vsync_rising fires this cycle */
+    tb->vsync_in = 0;
+    for (int i = 0; i < 5; i++) tick();
+
+    uint32_t after = read_swap_ctrl();
+    check_eq("side-port-vsync-clear",     after & 1,           0u);
+    check_eq("side-port-display-idx-set", (after >> 1) & 0x3u, 2u);
+}
+
+// =====================================================================
+// Race test: gpu_swap_req fires SAME CYCLE as vsync_rising.
+//
+// Per the slave's reorder: vsync clear path runs BEFORE the GPU
+// side-port path.  Same-cycle expected behavior:
+//   - Vsync clear: fb_display_idx <= old_fb_ready_idx, schedules
+//                  fb_swap_pending <= 0
+//   - GPU pulse:   fb_ready_idx <= new gpu_swap_idx, schedules
+//                  fb_swap_pending <= 1   (LAST WRITE WINS)
+// End state: fb_display_idx = OLD ready (display advances to
+// previous queued frame), fb_ready_idx = NEW (next frame queued),
+// fb_swap_pending = 1 (queued for next vsync).
+//
+// If this test fails, the same-cycle race in the slave is broken
+// and the GPU's swap could be silently dropped — exactly the kind
+// of bug that would manifest as "deterministic deadlock after N
+// frames" because every Nth frame falls on the race cycle.
+// =====================================================================
+static void test_gpu_swap_req_vsync_race(void) {
+    printf("test_gpu_swap_req_vsync_race (gpu_swap_req + vsync_rising same cycle):\n");
+
+    auto read_swap_ctrl = [&]() -> uint32_t {
+        std::vector<uint32_t> r;
+        if (!axi_read_burst(0x40000018u, 0, r)) return 0xFFFFFFFFu;
+        return r[0];
+    };
+
+    /* Phase 1 — set up a previously-queued flip (idx=1) so
+     * fb_swap_pending=1 and fb_ready_idx=1 going into the race. */
+    tb->gpu_swap_req_in = 1;
+    tb->gpu_swap_idx_in = 1;
+    tick();
+    tb->gpu_swap_req_in = 0;
+    tb->gpu_swap_idx_in = 0;
+    for (int i = 0; i < 5; i++) tick();
+
+    uint32_t mid = read_swap_ctrl();
+    check_eq("race-pre-pending=1", mid & 1, 1u);
+
+    /* Phase 2 — drive vsync rising AND gpu_swap_req with idx=2 in
+     * the SAME cycle.  vsync_sync shifts on each posedge so we
+     * arrange vsync_rising to fire on the cycle gpu_swap_req=1.
+     *
+     * vsync_sync = {sync[1:0], vsync_in}.  vsync_rising = sync[1] &&
+     * !sync[2].  We need sync[1]=1 and sync[2]=0 at the cycle gpu
+     * pulse fires.  That means vsync_in went 0→1 two cycles ago. */
+    tb->vsync_in = 1;
+    tick();   /* sync[0] <= 1, sync[1]=0, sync[2]=0 */
+    tick();   /* sync[0]=1, sync[1] <= 1, sync[2]=0 */
+    /* Now on this cycle, vsync_sync = {0, 1, 1}.  vsync_rising =
+     * sync[1] && !sync[2] = 1.  Drive gpu_swap_req simultaneously. */
+    tb->gpu_swap_req_in = 1;
+    tb->gpu_swap_idx_in = 2;
+    tick();   /* THIS is the race cycle */
+    tb->gpu_swap_req_in = 0;
+    tb->gpu_swap_idx_in = 0;
+    tb->vsync_in = 0;
+    for (int i = 0; i < 5; i++) tick();
+
+    /* After race: display_idx should be 1 (the OLD ready, displayed
+     * by the vsync clear), pending should be 1 (GPU's new pulse
+     * overrode the vsync clear).  fb_ready_idx is now 2 (will be
+     * displayed at NEXT vsync). */
+    uint32_t after_race = read_swap_ctrl();
+    check_eq("race-display-idx-advanced",  (after_race >> 1) & 0x3u, 1u);
+    check_eq("race-pending-retained",       after_race & 1,           1u);
+
+    /* Phase 3 — drive a CLEAN vsync (no concurrent GPU pulse) and
+     * verify fb_display_idx advances to 2 (the queued ready). */
+    tb->vsync_in = 1;
+    tick();
+    tick();
+    tb->vsync_in = 0;
+    for (int i = 0; i < 5; i++) tick();
+
+    uint32_t final_state = read_swap_ctrl();
+    check_eq("race-final-display-idx-2", (final_state >> 1) & 0x3u, 2u);
+    check_eq("race-final-pending-clear",  final_state & 1,           0u);
+}
+
 static void test_gpu_write_fixed_burst(void) {
     printf("test_gpu_write_fixed_burst (awburst=FIXED, addr stays pinned):\n");
     const uint32_t GPU_RING_DATA = 0x4A000008u;       // gpu_reg_addr = 2
@@ -617,6 +752,8 @@ int main(int argc, char **argv) {
     test_gpu_write_split_aw_w();
     test_gpu_write_mixed_addr();
     test_gpu_write_fixed_burst();
+    test_gpu_swap_side_port();
+    test_gpu_swap_req_vsync_race();
 
     // GPU MMIO read addressing — caught the registered-rdata off-by-one.
     test_gpu_read_addressing();

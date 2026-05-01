@@ -189,7 +189,15 @@ module axi_periph_slave (
     // same-cycle writes (rare since the kernel only writes during
     // init / fallback path).  See docs/cr-gpu-triggered-flip.md.
     input  wire        gpu_swap_req,
-    input  wire [1:0]  gpu_swap_idx
+    input  wire [1:0]  gpu_swap_idx,
+
+    // CMD_FLIP backpressure — exposes the live fb_swap_pending bit so
+    // gpu_core can stall its CMD_FLIP execution until vsync has
+    // consumed the previous swap.  This moves the swap-serialization
+    // wait out of the CPU (kernel acquire_next) and into the GPU
+    // pipeline, letting old SDK binaries run with a non-blocking
+    // kernel without losing frames to gpu_swap_req-vs-pending races.
+    output wire        fb_swap_pending_o
 );
 
 wire reset = ~reset_n;
@@ -397,7 +405,17 @@ localparam TERM_FB_ADDR = 25'h0180000;  // byte 0x300000 → CPU 0x10300000
 reg [1:0] fb_display_idx;
 reg [1:0] fb_ready_idx;
 reg fb_swap_pending;
+assign fb_swap_pending_o = fb_swap_pending;
 reg term_fb_active;  // 1=scanout reads terminal FB, 0=app triple-buffered FB
+
+// Debug counters for the GPU-triggered flip pipeline.  Exposed via
+// SYSREG 0xC0 (live state snapshot) and 0xC4 (event counters).  Used
+// to root-cause cases where display goes blank under non-blocking
+// kernel acquire_next + RTL stall.
+reg [15:0] dbg_gpu_swap_count;     // gpu_swap_req pulse count (rolling)
+reg [15:0] dbg_vsync_count;        // vsync_rising count (rolling)
+reg [1:0]  dbg_gpu_idx_last;       // last idx the GPU pulsed for
+reg [7:0]  dbg_kernel_swap_count;  // kernel sysreg FB_SWAP_CTRL writes
 
 // VRR swap hold: skip N vsyncs before presenting a queued frame
 reg [3:0] vrr_swap_hold;     // firmware-written: vsyncs to skip per swap
@@ -492,6 +510,10 @@ always @(posedge clk) begin
         term_fb_active <= 1'b1;  // terminal FB visible by default at boot
         vrr_swap_hold <= 4'd0;
         vrr_hold_counter <= 4'd0;
+        dbg_gpu_swap_count <= 16'd0;
+        dbg_vsync_count    <= 16'd0;
+        dbg_gpu_idx_last   <= 2'd0;
+        dbg_kernel_swap_count <= 8'd0;
         pal_wr <= 0;
         pal_addr <= 0;
         pal_data <= 0;
@@ -605,6 +627,7 @@ always @(posedge clk) begin
                 7'b0_000110: if (req_wdata[0]) begin
                     fb_ready_idx <= req_wdata[2:1];
                     fb_swap_pending <= 1'b1;
+                    dbg_kernel_swap_count <= dbg_kernel_swap_count + 8'd1;
                 end
                 7'b0_001000: ds_slot_id_reg <= req_wdata[15:0];
                 7'b0_001001: ds_slot_offset_reg <= req_wdata;
@@ -706,21 +729,18 @@ always @(posedge clk) begin
             endcase
         end
 
-        // CMD_FLIP side-port — single-cycle pulse from gpu_core after
-        // its m_wr_* drain completes.  Placed AFTER the sysreg path
-        // so GPU wins on the rare same-cycle conflict (later
-        // non-blocking assignment to fb_ready_idx / fb_swap_pending
-        // overrides the kernel write).
-        if (gpu_swap_req) begin
-            fb_ready_idx    <= gpu_swap_idx;
-            fb_swap_pending <= 1'b1;
+        // Vsync IRQ — set on every vsync rising edge, cleared by W1C at 0x9C
+        if (vsync_rising) begin
+            vsync_irq_pending <= 1'b1;
+            dbg_vsync_count   <= dbg_vsync_count + 16'd1;
         end
 
-        // Vsync IRQ — set on every vsync rising edge, cleared by W1C at 0x9C
-        if (vsync_rising)
-            vsync_irq_pending <= 1'b1;
-
-        // Triple buffer vsync swap (with VRR hold support)
+        // Triple buffer vsync swap (with VRR hold support).  Placed
+        // BEFORE the GPU side-port so a same-cycle (gpu_swap_req &&
+        // vsync_rising) doesn't lose the GPU's new swap request: the
+        // vsync clear schedules fb_swap_pending<=0 here, then the
+        // GPU pulse below overrides with fb_swap_pending<=1 (non-
+        // blocking, later wins).
         if (fb_swap_pending && vsync_rising) begin
             if (vrr_hold_counter > 0) begin
                 vrr_hold_counter <= vrr_hold_counter - 1;
@@ -728,6 +748,17 @@ always @(posedge clk) begin
                 fb_display_idx <= fb_ready_idx;
                 fb_swap_pending <= 1'b0;
             end
+        end
+
+        // CMD_FLIP side-port — single-cycle pulse from gpu_core after
+        // its m_wr_* drain completes.  Placed LAST so its assignments
+        // override the sysreg-path kernel write AND the vsync-clear
+        // above (later non-blocking wins on same-cycle conflicts).
+        if (gpu_swap_req) begin
+            fb_ready_idx    <= gpu_swap_idx;
+            fb_swap_pending <= 1'b1;
+            dbg_gpu_swap_count <= dbg_gpu_swap_count + 16'd1;
+            dbg_gpu_idx_last   <= gpu_swap_idx;
         end
 
         // Reload hold counter only for a fresh swap — not when replacing
@@ -782,6 +813,26 @@ always @(*) begin
         7'b0_111111: sysreg_rdata = {28'b0, irq_mask};               // IRQ_MASK (0xFC)
         7'b0_110111: sysreg_rdata = {22'b0, vrr_v_total};             // VRR_V_TOTAL (0xDC)
         7'b0_111000: sysreg_rdata = {28'b0, vrr_swap_hold};           // VRR_SWAP_HOLD (0xE0)
+        // Debug snapshot of the swap pipeline (SYSREG 0xC0):
+        //   bit  0     : fb_swap_pending
+        //   bits 2:1   : fb_display_idx
+        //   bits 4:3   : fb_ready_idx
+        //   bits 8:5   : vrr_hold_counter
+        //   bits 16:9  : kernel-side FB_SWAP_CTRL writes (rolling 8-bit)
+        //   bits 18:17 : last gpu_swap_req idx
+        //   bit  19    : term_fb_active (1 = scanout reads TERM_FB instead of app FBs)
+        7'b0_110000: sysreg_rdata = {12'b0,
+                                     term_fb_active,
+                                     dbg_gpu_idx_last,
+                                     dbg_kernel_swap_count,
+                                     vrr_hold_counter,
+                                     fb_ready_idx,
+                                     fb_display_idx,
+                                     fb_swap_pending};
+        // Debug counters (SYSREG 0xC4):
+        //   bits 15:0  : gpu_swap_req pulse count (rolling 16-bit)
+        //   bits 31:16 : vsync_rising count (rolling 16-bit)
+        7'b0_110001: sysreg_rdata = {dbg_vsync_count, dbg_gpu_swap_count};
         // Datatable slot size query (0x90): bit 31 = valid, bits 30:0 = data
         7'b0_100100: sysreg_rdata = {dt_query_valid, dt_query_data[30:0]};
         // Bridge debug (0x94): internal latch state for diagnosing DMA hangs
