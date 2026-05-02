@@ -2944,6 +2944,90 @@ static void test_transluc_overdraw(void) {
     }
 }
 
+// Test TRL_RAW: BLEND read-after-write hazard against in-flight m_wr.
+//
+// Reproduces the bug fixed by gating FBSS_BLEND_REQ on m_wr_inflight==0:
+// when a write to FB[X] is still in transit (AW handshaked, B not yet
+// returned), a back-to-back BLEND of the same address would fire its
+// AR before the slave commits the write — m_rd then returns pre-write
+// data and the blend uses a stale FB byte.
+//
+// Repro sequence:
+//   1. Pre-fill FB with sentinel 0x10 (direct sdram_write — no GPU
+//      activity, no m_wr in flight afterwards).
+//   2. CMD_CLEAR_RECT to overwrite the same 4-byte word with 0x20
+//      (this generates real m_wr_* AW+W beats, m_wr_inflight goes high).
+//   3. IMMEDIATELY (no CMD_FENCE) issue a SPAN_TRANSLUC over the same
+//      word.  src=0x40 (s7=0x20).
+//        - With the fix:  BLEND_REQ waits for m_wr_inflight==0, reads
+//                         0x20 from SDRAM, writes lut[0x20][0x20]=0x40.
+//        - Without fix:   BLEND read may race ahead of the CLEAR's
+//                         m_wr commit, reads stale 0x10, writes
+//                         lut[0x20][0x10]=0x30.
+//   4. gpu_finish + read back the FB.  Expect 0x40 every byte.
+//
+// tb_gpu's simplified SDRAM model has parallel R and W FSMs (unlike
+// real axi_sdram_slave's single-FSM serialisation), so this test
+// faithfully exposes the hazard the arbiter could otherwise allow on
+// hardware after future arbiter changes.
+static void test_transluc_blend_raw_hazard(void) {
+    printf("TEST: transluc[] BLEND — RAW hazard vs in-flight m_wr\n");
+    gpu_init();
+
+    /* Identity colormap so the COLORMAP step is transparent. */
+    { uint8_t cm[256]; for (int i = 0; i < 256; i++) cm[i] = (uint8_t)i;
+      cmap_upload_bytes(0, cm, 256); }
+
+    /* LUT: lut[(s7 << 8) | fb] = (s7 + fb) & 0xFF.  Picked so that
+     * lut[0x20][0x10] = 0x30 (stale-FB result) is distinct from
+     * lut[0x20][0x20] = 0x40 (correct post-CLEAR result). */
+    static uint8_t lut[32768];
+    for (int s7 = 0; s7 < 128; s7++)
+        for (int fb = 0; fb < 256; fb++)
+            lut[(s7 << 8) | fb] = (uint8_t)((s7 + fb) & 0xFF);
+    transluc_upload_full(lut);
+
+    ring_cmd(0x23, 2); ring_write(FB_BASE_BYTE); ring_write(320);
+
+    /* Step 1: pre-fill FB[0..3] with 0x10 via direct SDRAM write —
+     * no m_wr traffic, no inflight to confuse later steps. */
+    sdram_write(FB_BASE_BYTE >> 2,
+        ((uint32_t)0x10) | ((uint32_t)0x10 << 8)
+      | ((uint32_t)0x10 << 16) | ((uint32_t)0x10 << 24));
+
+    /* Step 2: CMD_CLEAR_RECT over those 4 bytes with color 0x20.
+     * Generates real m_wr_* AW+W beats. */
+    ring_cmd(0x11, 3);                       /* CMD_CLEAR_RECT */
+    ring_write(FB_BASE_BYTE);
+    ring_write(((uint32_t)4 << 16) | 1);     /* w=4 h=1 */
+    ring_write(((uint32_t)320 << 16) | 0x20);
+
+    /* Step 3: SPAN_TRANSLUC over the same 4 bytes WITHOUT a fence.
+     * If the BLEND_REQ gate isn't waiting for m_wr_inflight==0, the
+     * BLEND read may beat the CLEAR's m_wr commit. */
+    transluc_emit_span(FB_BASE_BYTE, 0x40, 4);
+
+    check("transluc_raw_done", gpu_finish() ? 1 : 0, 1);
+
+    bool ok = true;
+    for (int i = 0; i < 4; i++) {
+        uint8_t got = sdram_read_byte(FB_BASE_BYTE + i);
+        if (got == 0x30) {
+            printf("  FAIL px%d got 0x30 (stale-FB blend = lut[0x20][0x10])\n", i);
+            ok = false;
+        } else if (got != 0x40) {
+            printf("  FAIL px%d got 0x%02x exp 0x40 (= lut[0x20][0x20])\n", i, got);
+            ok = false;
+        }
+    }
+    if (ok) {
+        pass_count++;
+        printf("  OK  BLEND saw post-CLEAR 0x20 (m_wr_inflight gate honoured)\n");
+    } else {
+        fail_count++;
+    }
+}
+
 // Test TRL3: alternating opaque + translucent spans on overlapping
 // destination words.  Catches the case where the BLEND pipeline's
 // state leaks into the IDLE fast path (e.g., transluc_rd_addr drifts
@@ -6030,6 +6114,7 @@ int main(int argc, char **argv) {
     test_persp_span_clz_boundary();
     test_transluc_lut_basic();
     test_transluc_overdraw();
+    test_transluc_blend_raw_hazard();
     test_transluc_no_blend_interleave();
 
     // Triangle tests

@@ -2666,11 +2666,26 @@ always @(posedge clk) begin
                 // same path as the IDLE fast path.
                 // --------------------------------------------------------
                 FBSS_BLEND_REQ: begin
-                    // Wait for the texture cache to be fully drained from M0
-                    // (no pending AR, no in-flight read) before grabbing the
-                    // bus.  blend_owns_m0 is gated on fbss state, so we
-                    // can't drive m_rd_arvalid until we transition.
-                    if (!tex_axi_arvalid && !tex_m0_in_flight) begin
+                    // Three gates before issuing the BLEND read on M0:
+                    //   1. !tex_axi_arvalid && !tex_m0_in_flight — texture
+                    //      cache must be fully drained from M0 (no pending
+                    //      AR, no in-flight read) so blend_owns_m0 doesn't
+                    //      collide with an in-flight tex fill on the R
+                    //      channel.
+                    //   2. m_wr_inflight == 0 — RAW barrier.  Cross-word
+                    //      fb_acc flushes hand off to m_wr, but the W beats
+                    //      may still be in transit to SDRAM when we'd
+                    //      otherwise issue this BLEND read.  If the
+                    //      arbiter grants m_rd before the slave's pending
+                    //      write commits, the read returns pre-flush data
+                    //      and the blend uses a stale FB byte (visible as
+                    //      a one-frame trail behind translucent surfaces
+                    //      that overdraw their own previous lanes).  The
+                    //      same-word fb_acc bypass below catches writes
+                    //      that haven't yet flushed; the m_wr_inflight gate
+                    //      catches the ones that have.
+                    if (!tex_axi_arvalid && !tex_m0_in_flight
+                        && m_wr_inflight == 4'b0) begin
                         blend_arvalid <= 1;
                         blend_araddr  <= blend_word_addr;
                         fbss          <= FBSS_BLEND_AR_WAIT;
