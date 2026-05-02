@@ -5374,6 +5374,416 @@ static void test_triangle_persp_reference_match(void) {
     }
 }
 
+// =====================================================================
+// Triangle perspective — extended regressions.
+// Each test compares GPU output against a CPU barycentric+perspective
+// reference using the same methodology as
+// test_triangle_persp_reference_match above.
+// =====================================================================
+
+struct PerspVert { int16_t x, y; int32_t s, t, w; };
+
+// CPU reference: for pixel (px, py), compute the perspective-correct
+// texel byte using full double-precision barycentric + perspective
+// division.  Returns 0xCC sentinel for outside-triangle.
+static uint8_t persp_ref_pixel(int px, int py,
+                               const PerspVert v[3],
+                               const uint8_t *tex,
+                               int tex_w, int tex_h)
+{
+    long A0 = v[1].y - v[2].y, B0 = v[2].x - v[1].x;
+    long A1 = v[2].y - v[0].y, B1 = v[0].x - v[2].x;
+    long A2 = v[0].y - v[1].y, B2 = v[1].x - v[0].x;
+    long C0 = (long)v[1].x * v[2].y - (long)v[2].x * v[1].y;
+    long C1 = (long)v[2].x * v[0].y - (long)v[0].x * v[2].y;
+    long C2 = (long)v[0].x * v[1].y - (long)v[1].x * v[0].y;
+
+    long Px = (long)px * 16 + 8;
+    long Py = (long)py * 16 + 8;
+    long e0 = A0*Px + B0*Py + C0;
+    long e1 = A1*Px + B1*Py + C1;
+    long e2 = A2*Px + B2*Py + C2;
+    long det = e0 + e1 + e2;
+    if (det == 0) return 0xCC;
+    if (det < 0) { e0 = -e0; e1 = -e1; e2 = -e2; det = -det; }
+    if (e0 < 0 || e1 < 0 || e2 < 0) return 0xCC;
+
+    double l0 = (double)e0 / det;
+    double l1 = (double)e1 / det;
+    double l2 = (double)e2 / det;
+    double w0 = v[0].w / 65536.0, w1 = v[1].w / 65536.0, w2 = v[2].w / 65536.0;
+    double s0 = v[0].s / 65536.0, s1 = v[1].s / 65536.0, s2 = v[2].s / 65536.0;
+    double t0 = v[0].t / 65536.0, t1 = v[1].t / 65536.0, t2 = v[2].t / 65536.0;
+    double sw = l0*s0*w0 + l1*s1*w1 + l2*s2*w2;
+    double tw = l0*t0*w0 + l1*t1*w1 + l2*t2*w2;
+    double wi = l0*w0    + l1*w1    + l2*w2;
+    if (wi == 0) return 0xCC;
+    int si = (int)(sw / wi);
+    int ti = (int)(tw / wi);
+    if (si < 0) si = 0; if (si > tex_w - 1) si = tex_w - 1;
+    if (ti < 0) ti = 0; if (ti > tex_h - 1) ti = tex_h - 1;
+    return tex[ti * tex_w + si];
+}
+
+static void persp_emit_triangle(const PerspVert v[3]) {
+    ring_cmd(0x30, 19);
+    ring_write(3);
+    for (int i = 0; i < 3; i++) {
+        ring_write(((uint32_t)(uint16_t)v[i].x << 16) | (uint16_t)v[i].y);
+        ring_write(0);
+        ring_write((uint32_t)v[i].s);
+        ring_write((uint32_t)v[i].t);
+        ring_write((uint32_t)v[i].w);
+        ring_write(0);
+    }
+}
+
+// Smooth-gradient texture (s + 2*t) — small derivatives so a 1-texel
+// error stays a 1- or 2-byte error in pixel value.
+static void persp_setup_tex(uint8_t *tex, int w, int h) {
+    for (int t = 0; t < h; t++)
+        for (int s = 0; s < w; s++)
+            tex[t*w + s] = (uint8_t)((s + 2*t) & 0xFF);
+    int total_words = (w * h) / 4;
+    for (int i = 0; i < total_words; i++) {
+        uint32_t word = ((uint32_t)tex[i*4 + 3] << 24)
+                      | ((uint32_t)tex[i*4 + 2] << 16)
+                      | ((uint32_t)tex[i*4 + 1] <<  8)
+                      |  (uint32_t)tex[i*4 + 0];
+        sdram_write((TEX_BASE_BYTE >> 2) + i, word);
+    }
+}
+
+static void persp_setup_cmap_identity(void) {
+    uint8_t cm[256];
+    for (int i = 0; i < 256; i++) cm[i] = (uint8_t)i;
+    cmap_upload_bytes(0, cm, 256);
+}
+
+struct PerspCmpResult {
+    int total_inside;
+    int within_8;
+    int max_diff;
+    int worst_px, worst_py;
+    uint8_t worst_got, worst_exp;
+};
+
+static PerspCmpResult persp_compare_region(
+    const PerspVert v[3], const uint8_t *tex, int tex_w, int tex_h,
+    int x0, int x1, int y0, int y1)
+{
+    PerspCmpResult r = {0, 0, 0, -1, -1, 0, 0};
+    for (int py = y0; py < y1; py++) {
+        for (int px = x0; px < x1; px++) {
+            uint8_t expected = persp_ref_pixel(px, py, v, tex, tex_w, tex_h);
+            if (expected == 0xCC) continue;
+            r.total_inside++;
+            uint8_t got = sdram_read_byte(FB_BASE_BYTE + px + py * 320);
+            int diff = (int)got - (int)expected;
+            if (diff < 0) diff = -diff;
+            if (diff <= 8) r.within_8++;
+            if (diff > r.max_diff) {
+                r.max_diff = diff;
+                r.worst_px = px; r.worst_py = py;
+                r.worst_got = got; r.worst_exp = expected;
+            }
+        }
+    }
+    return r;
+}
+
+// =====================================================================
+// Test BT_PERSP_MULTI: four perspective triangles emitted back-to-back
+// in disjoint screen regions.  Catches state-reset bugs between
+// triangles — sp_*, persp_*, grad_idx, PSS sub-FSM all need to start
+// fresh per triangle.  If any per-triangle state leaks into the next,
+// the latter triangles render with wrong gradients and the
+// per-region compare against the CPU reference fails.
+// =====================================================================
+static void test_triangle_persp_multi(void) {
+    printf("TEST: Persp triangles — 4 back-to-back (per-triangle state reset)\n");
+
+    gpu_init();
+    persp_setup_cmap_identity();
+    ring_cmd(0x23, 2); ring_write(FB_BASE_BYTE); ring_write(320);
+    ring_cmd(0x10, 2); ring_write((1 << 16) | 0xCC); ring_write(0);
+
+    uint8_t tex[64*64];
+    persp_setup_tex(tex, 64, 64);
+    ring_bind_texture(TEX_BASE_BYTE, 64, 64);
+
+    // 4 triangles, each in a 30x30 quadrant, varying W ratios + winding.
+    PerspVert tris[4][3] = {
+        // T0: top-left, mild W variation, near vertex top-left.
+        { {  5*16,  5*16, 0,        0,         0x4000 },
+          { 25*16,  5*16, 60 << 16, 0,         0x4000 },
+          {  5*16, 25*16, 0,        60 << 16,  0x3000 } },
+        // T1: top-right, stronger W variation.
+        { { 35*16,  5*16, 0,        0,         0x4000 },
+          { 55*16,  5*16, 60 << 16, 0,         0x4000 },
+          { 35*16, 25*16, 0,        60 << 16,  0x2000 } },
+        // T2: bottom-left, far vertex bottom.
+        { {  5*16, 35*16, 0,        0,         0x4000 },
+          { 25*16, 35*16, 60 << 16, 0,         0x4000 },
+          {  5*16, 55*16, 0,        60 << 16,  0x1000 } },
+        // T3: bottom-right, near vertex top-right (reversed orientation).
+        { { 35*16, 35*16, 0,        0,         0x2000 },
+          { 55*16, 35*16, 60 << 16, 0,         0x4000 },
+          { 35*16, 55*16, 0,        60 << 16,  0x4000 } },
+    };
+    for (int i = 0; i < 4; i++)
+        persp_emit_triangle(tris[i]);
+    bool ok = gpu_finish();
+    check("persp_multi_done", ok ? 1 : 0, 1);
+    if (!ok) return;
+
+    int rect_x0[4] = {  5, 35,  5, 35 };
+    int rect_x1[4] = { 25, 55, 25, 55 };
+    int rect_y0[4] = {  5,  5, 35, 35 };
+    int rect_y1[4] = { 25, 25, 55, 55 };
+    int total_inside = 0, within_8 = 0, max_diff = 0;
+    for (int i = 0; i < 4; i++) {
+        auto r = persp_compare_region(tris[i], tex, 64, 64,
+                                      rect_x0[i], rect_x1[i],
+                                      rect_y0[i], rect_y1[i]);
+        total_inside += r.total_inside;
+        within_8     += r.within_8;
+        if (r.max_diff > max_diff) max_diff = r.max_diff;
+        if (r.total_inside == 0) {
+            printf("  WARN T%d: 0 pixels inside region (bbox math?)\n", i);
+        }
+    }
+    printf("  total=%d within_8=%d max_diff=%d\n", total_inside, within_8, max_diff);
+    bool pass = total_inside > 200
+             && (within_8 * 10 >= total_inside * 9)   // ≥90% within ±8
+             && (max_diff <= 16);
+    if (pass) { pass_count++; printf("  OK  4 back-to-back persp triangles all match reference\n"); }
+    else      { fail_count++; printf("  FAIL multi-triangle persp diverges (likely state-reset)\n"); }
+}
+
+// =====================================================================
+// Test BT_PERSP_EXTREME_W: 16:1 W ratio (real Quake-wall regime).
+// PSS does piecewise-linear perspective over 8-pixel sub-segments;
+// at this depth ratio the per-segment curvature error grows but
+// must stay bounded.
+// =====================================================================
+static void test_triangle_persp_extreme_w(void) {
+    printf("TEST: Persp triangle — 16:1 W ratio (Quake-wall regime)\n");
+
+    gpu_init();
+    persp_setup_cmap_identity();
+    ring_cmd(0x23, 2); ring_write(FB_BASE_BYTE); ring_write(320);
+    ring_cmd(0x10, 2); ring_write((1 << 16) | 0xCC); ring_write(0);
+
+    uint8_t tex[64*64];
+    persp_setup_tex(tex, 64, 64);
+    ring_bind_texture(TEX_BASE_BYTE, 64, 64);
+
+    // w0 = w1 = 0x8000 (z=2), w2 = 0x0800 (z=32).  16:1.
+    PerspVert v[3] = {
+        { 10*16, 10*16, 0,        0,         0x8000 },
+        { 50*16, 10*16, 60 << 16, 0,         0x8000 },
+        { 10*16, 50*16, 0,        60 << 16,  0x0800 },
+    };
+    persp_emit_triangle(v);
+    bool ok = gpu_finish();
+    check("persp_extreme_w_done", ok ? 1 : 0, 1);
+    if (!ok) return;
+
+    auto r = persp_compare_region(v, tex, 64, 64, 0, 64, 0, 64);
+    printf("  inside=%d within_8=%d max_diff=%d\n", r.total_inside, r.within_8, r.max_diff);
+    // Looser tolerance at extreme W: ≥70% within ±8, max ±32.  These
+    // bounds are derived empirically; tightening them past the PSS
+    // sub-segment approximation accuracy would produce flaky failures.
+    bool pass = r.total_inside > 50
+             && (r.within_8 * 10 >= r.total_inside * 7)
+             && (r.max_diff <= 32);
+    if (pass) { pass_count++; printf("  OK  16:1 W ratio bounded (sub-segment approx holds)\n"); }
+    else      { fail_count++; printf("  FAIL 16:1 W diverges (worst@(%d,%d) got=0x%02x exp=0x%02x diff=%d)\n",
+                                     r.worst_px, r.worst_py, r.worst_got, r.worst_exp, r.max_diff); }
+}
+
+// =====================================================================
+// Test BT_PERSP_SLIVER: 2-pixel-tall × 60-pixel-wide triangle.  Tests
+// edge-walk + per-row anchor selection on near-horizontal edges where
+// most pixels live in a single row.
+// =====================================================================
+static void test_triangle_persp_thin_sliver(void) {
+    printf("TEST: Persp triangle — thin 2-pixel sliver (edge walk stress)\n");
+
+    gpu_init();
+    persp_setup_cmap_identity();
+    ring_cmd(0x23, 2); ring_write(FB_BASE_BYTE); ring_write(320);
+    ring_cmd(0x10, 2); ring_write((1 << 16) | 0xCC); ring_write(0);
+
+    uint8_t tex[64*64];
+    persp_setup_tex(tex, 64, 64);
+    ring_bind_texture(TEX_BASE_BYTE, 64, 64);
+
+    PerspVert v[3] = {
+        {  5*16, 10*16, 0,        0,         0x4000 },
+        { 65*16, 10*16, 60 << 16, 0,         0x3000 },
+        {  5*16, 12*16, 0,        2  << 16,  0x4000 },
+    };
+    persp_emit_triangle(v);
+    bool ok = gpu_finish();
+    check("persp_sliver_done", ok ? 1 : 0, 1);
+    if (!ok) return;
+
+    auto r = persp_compare_region(v, tex, 64, 64, 0, 70, 9, 14);
+    printf("  inside=%d within_8=%d max_diff=%d\n", r.total_inside, r.within_8, r.max_diff);
+    bool pass = r.total_inside > 30
+             && (r.within_8 * 10 >= r.total_inside * 8)
+             && (r.max_diff <= 16);
+    if (pass) { pass_count++; printf("  OK  thin sliver renders without edge-walk wedge\n"); }
+    else      { fail_count++; printf("  FAIL sliver diverges (worst@(%d,%d) got=0x%02x exp=0x%02x diff=%d)\n",
+                                     r.worst_px, r.worst_py, r.worst_got, r.worst_exp, r.max_diff); }
+}
+
+// =====================================================================
+// Test BT_PERSP_WIDE: 200×10 triangle.  Long spans (~200 pixels)
+// stress the gradient accumulators (sZ, tZ, zi running sums) and the
+// long-corridor LUT/NR boundary that 1-D test_persp_long_corridor_
+// monotonic exercises in isolation.  Combined here with triangle
+// edge walks for full-pipeline coverage.
+// =====================================================================
+static void test_triangle_persp_wide_flat(void) {
+    printf("TEST: Persp triangle — 200x10 wide-flat (long-span gradient stress)\n");
+
+    gpu_init();
+    persp_setup_cmap_identity();
+    ring_cmd(0x23, 2); ring_write(FB_BASE_BYTE); ring_write(320);
+    ring_cmd(0x10, 2); ring_write((1 << 16) | 0xCC); ring_write(0);
+
+    uint8_t tex[64*64];
+    persp_setup_tex(tex, 64, 64);
+    ring_bind_texture(TEX_BASE_BYTE, 64, 64);
+
+    PerspVert v[3] = {
+        {  10*16, 10*16, 0,        0,         0x4000 },
+        { 210*16, 10*16, 60 << 16, 0,         0x2000 },
+        {  10*16, 20*16, 0,        10 << 16,  0x4000 },
+    };
+    persp_emit_triangle(v);
+    bool ok = gpu_finish();
+    check("persp_wide_done", ok ? 1 : 0, 1);
+    if (!ok) return;
+
+    auto r = persp_compare_region(v, tex, 64, 64, 0, 220, 9, 22);
+    printf("  inside=%d within_8=%d max_diff=%d\n", r.total_inside, r.within_8, r.max_diff);
+    bool pass = r.total_inside > 200
+             && (r.within_8 * 10 >= r.total_inside * 8)
+             && (r.max_diff <= 32);
+    if (pass) { pass_count++; printf("  OK  wide-flat persp bounded long-span error\n"); }
+    else      { fail_count++; printf("  FAIL wide-flat diverges (worst@(%d,%d) got=0x%02x exp=0x%02x diff=%d)\n",
+                                     r.worst_px, r.worst_py, r.worst_got, r.worst_exp, r.max_diff); }
+}
+
+// =====================================================================
+// Test BT_PERSP_SMALL_W: very small but non-zero W (100:1 ratio).
+// Defensive — output may have large error at the deep vertex but the
+// GPU must not hang in the recip pipeline (Newton-Raphson divergence,
+// CLZ underflow, or PSS sub-FSM stuck).  Verifies graceful completion.
+// =====================================================================
+static void test_triangle_persp_small_w(void) {
+    printf("TEST: Persp triangle — 256:1 W (numerical robustness, no hang)\n");
+
+    gpu_init();
+    persp_setup_cmap_identity();
+    ring_cmd(0x23, 2); ring_write(FB_BASE_BYTE); ring_write(320);
+    ring_cmd(0x10, 2); ring_write((1 << 16) | 0xCC); ring_write(0);
+
+    uint8_t tex[64*64];
+    persp_setup_tex(tex, 64, 64);
+    ring_bind_texture(TEX_BASE_BYTE, 64, 64);
+
+    // w2 = 0x0010 (very small, non-zero).  256:1 ratio vs w0/w1.
+    PerspVert v[3] = {
+        { 10*16, 10*16, 0,        0,         0x1000 },
+        { 50*16, 10*16, 60 << 16, 0,         0x1000 },
+        { 10*16, 50*16, 0,        60 << 16,  0x0010 },
+    };
+    persp_emit_triangle(v);
+
+    // Bounded-time completion is the only correctness criterion here.
+    // Output values may be wildly wrong at the deep vertex (256:1 W
+    // ratio is past the PSS approximation regime).
+    bool ok = gpu_finish(500000);  // 5x normal budget for the deep recip.
+    if (!ok) {
+        printf("  FAIL gpu hung on 256:1 W triangle (recip pipeline stuck?)\n");
+        fail_count++;
+        return;
+    }
+    pass_count++;
+    printf("  OK  GPU completed 256:1 W triangle without hang\n");
+}
+
+// =====================================================================
+// Test BT_PERSP_LIT: persp + non-identity colormap.  Triangles hard-set
+// SPAN_COLORMAP (gpu_core.v:3921), so cmap is always in the chain.
+// Verifies the perspective output passes through cmap correctly —
+// catches cases where SPAN_PERSP path bypasses the cmap stage.
+// =====================================================================
+static void test_triangle_persp_lit_cmap(void) {
+    printf("TEST: Persp triangle — non-identity colormap row (lit perspective)\n");
+
+    gpu_init();
+
+    // Non-identity cmap: cmap[texel] = (texel + 0x10) & 0xFF.  Additive
+    // (NOT xor / bit-permute) so PSS sub-segment texel-error
+    // propagates linearly through the cmap — a ±1-texel error stays a
+    // ±1-byte error after the cmap chain.  XOR-style cmaps would
+    // amplify a 1-texel error to up to ±0xFF after remap, masking the
+    // PSS accuracy this test means to verify.
+    uint8_t cm[256];
+    for (int i = 0; i < 256; i++) cm[i] = (uint8_t)((i + 0x10) & 0xFF);
+    cmap_upload_bytes(0, cm, 256);
+
+    ring_cmd(0x23, 2); ring_write(FB_BASE_BYTE); ring_write(320);
+    ring_cmd(0x10, 2); ring_write((1 << 16) | 0xCC); ring_write(0);
+
+    uint8_t tex[64*64];
+    persp_setup_tex(tex, 64, 64);
+    ring_bind_texture(TEX_BASE_BYTE, 64, 64);
+
+    PerspVert v[3] = {
+        { 10*16, 10*16, 0,        0,         0x4000 },
+        { 50*16, 10*16, 60 << 16, 0,         0x4000 },
+        { 10*16, 50*16, 0,        60 << 16,  0x2000 },
+    };
+    persp_emit_triangle(v);
+    bool ok = gpu_finish();
+    check("persp_lit_done", ok ? 1 : 0, 1);
+    if (!ok) return;
+
+    int total_inside = 0, within_8 = 0, max_diff = 0;
+    int worst_px = -1, worst_py = -1, worst_got = 0, worst_exp = 0;
+    for (int py = 0; py < 64; py++) {
+        for (int px = 0; px < 64; px++) {
+            uint8_t base = persp_ref_pixel(px, py, v, tex, 64, 64);
+            if (base == 0xCC) continue;
+            uint8_t expected = (uint8_t)((base + 0x10) & 0xFF);
+            uint8_t got = sdram_read_byte(FB_BASE_BYTE + px + py * 320);
+            total_inside++;
+            int diff = (int)got - (int)expected;
+            if (diff < 0) diff = -diff;
+            if (diff <= 8) within_8++;
+            if (diff > max_diff) {
+                max_diff = diff;
+                worst_px = px; worst_py = py;
+                worst_got = got; worst_exp = expected;
+            }
+        }
+    }
+    printf("  inside=%d within_8=%d max_diff=%d\n", total_inside, within_8, max_diff);
+    bool pass = total_inside > 50
+             && (within_8 * 10 >= total_inside * 9)
+             && (max_diff <= 16);
+    if (pass) { pass_count++; printf("  OK  persp + cmap chain produces correct output\n"); }
+    else      { fail_count++; printf("  FAIL persp + cmap diverges (worst@(%d,%d) got=0x%02x exp=0x%02x diff=%d)\n",
+                                     worst_px, worst_py, worst_got, worst_exp, max_diff); }
+}
+
 // Test BT4: 32 triangles in one batched command — matches the gpudemo
 // mode-3 fan that hung on hardware ("of_gpu_draw_triangles_batch with
 // FAN_SLICES=32").  Must complete in a sane bound and render every
@@ -6140,6 +6550,12 @@ int main(int argc, char **argv) {
     test_span_back_to_back_columns();
     test_triangle_persp_reference_match();
     test_triangle_persp_v0_offset();
+    test_triangle_persp_multi();
+    test_triangle_persp_extreme_w();
+    test_triangle_persp_thin_sliver();
+    test_triangle_persp_wide_flat();
+    test_triangle_persp_small_w();
+    test_triangle_persp_lit_cmap();
     test_triangle_gouraud_light_flat_from_v0();
     test_triangle_affine_cw_winding();
     test_triangle_mask_bleed_from_span();
