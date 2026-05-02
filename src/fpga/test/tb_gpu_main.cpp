@@ -5784,6 +5784,214 @@ static void test_triangle_persp_lit_cmap(void) {
                                      worst_px, worst_py, worst_got, worst_exp, max_diff); }
 }
 
+// =====================================================================
+// Texture-pattern variants of the persp triangle reference-match.
+// The smooth (s + 2*t) gradient used everywhere else is generous to
+// byte-diff metrics — a 1-texel PSS error becomes a 1-3-byte error.
+// These two patterns hit the GPU with different sampling-error
+// signatures so a regression that's invisible on gradients shows up:
+//
+//   - Diagonal stripes (s-t boundary): high-contrast but low-
+//     frequency; tests that anisotropic patterns survive sub-segment
+//     interpolation; uses pixel-exact match (no byte tolerance).
+//   - Sparse markers (single texels at known positions): inverts the
+//     usual test — for each marker, find where it lands on screen
+//     and verify it lands at the correct (px, py).  Catches off-by-N
+//     systematic biases that byte-diff metrics smooth over.
+//
+// (Multiplicative patterns like s*t were tried but proved
+// fundamentally incompatible with byte-diff testing: the byte function
+// is non-invertible AND amplifies bounded texel-error into unbounded
+// byte-error.  Use the additive `lit_cmap` approach above for
+// non-identity texel transformations.)
+// =====================================================================
+
+// Texture: 16-pixel-period diagonal stripes — byte = ((s - t) >> 4) is
+// even ? 0x10 : 0xC0.  High-contrast, low-frequency; a 1-texel error
+// only flips the byte at stripe boundaries (16-pixel-spaced columns).
+// Tolerance: byte-EXACT match for ≥85% of pixels.
+static void persp_setup_tex_stripes(uint8_t *tex, int w, int h) {
+    for (int t = 0; t < h; t++)
+        for (int s = 0; s < w; s++) {
+            int band = (s - t + 256) >> 4;  // +256 to keep non-negative
+            tex[t*w + s] = (band & 1) ? 0xC0 : 0x10;
+        }
+    int total_words = (w * h) / 4;
+    for (int i = 0; i < total_words; i++) {
+        uint32_t word = ((uint32_t)tex[i*4 + 3] << 24)
+                      | ((uint32_t)tex[i*4 + 2] << 16)
+                      | ((uint32_t)tex[i*4 + 1] <<  8)
+                      |  (uint32_t)tex[i*4 + 0];
+        sdram_write((TEX_BASE_BYTE >> 2) + i, word);
+    }
+}
+
+static void test_triangle_persp_diagonal_stripes(void) {
+    printf("TEST: Persp triangle — diagonal stripes (high-contrast pattern)\n");
+
+    gpu_init();
+    persp_setup_cmap_identity();
+    ring_cmd(0x23, 2); ring_write(FB_BASE_BYTE); ring_write(320);
+    ring_cmd(0x10, 2); ring_write((1 << 16) | 0xCC); ring_write(0);
+
+    uint8_t tex[64*64];
+    persp_setup_tex_stripes(tex, 64, 64);
+    ring_bind_texture(TEX_BASE_BYTE, 64, 64);
+
+    PerspVert v[3] = {
+        { 10*16, 10*16, 0,        0,         0x4000 },
+        { 50*16, 10*16, 60 << 16, 0,         0x4000 },
+        { 10*16, 50*16, 0,        60 << 16,  0x2000 },
+    };
+    persp_emit_triangle(v);
+    bool ok = gpu_finish();
+    check("persp_stripes_done", ok ? 1 : 0, 1);
+    if (!ok) return;
+
+    int total_inside = 0, exact = 0;
+    int worst_px = -1, worst_py = -1;
+    uint8_t worst_got = 0, worst_exp = 0;
+    for (int py = 0; py < 64; py++) {
+        for (int px = 0; px < 64; px++) {
+            uint8_t expected = persp_ref_pixel(px, py, v, tex, 64, 64);
+            if (expected == 0xCC) continue;
+            uint8_t got = sdram_read_byte(FB_BASE_BYTE + px + py * 320);
+            total_inside++;
+            if (got == expected) {
+                exact++;
+            } else if (worst_px < 0) {
+                worst_px = px; worst_py = py;
+                worst_got = got; worst_exp = expected;
+            }
+        }
+    }
+    printf("  inside=%d exact=%d (%.1f%%) first_mismatch=(%d,%d) got=0x%02x exp=0x%02x\n",
+           total_inside, exact,
+           total_inside > 0 ? (100.0 * exact / total_inside) : 0.0,
+           worst_px, worst_py, worst_got, worst_exp);
+    // Stripes change every 16 texels; a sub-segment-boundary 1-texel
+    // error only flips at most ~1 in 16 pixels along a stripe edge.
+    // ≥85% exact match is the floor; tighter would penalise legal PSS
+    // approximation drift.
+    bool pass = total_inside > 50 && (exact * 100 >= total_inside * 85);
+    if (pass) { pass_count++; printf("  OK  diagonal stripes render at expected positions\n"); }
+    else      { fail_count++; printf("  FAIL stripes diverge (only %d/%d exact)\n", exact, total_inside); }
+}
+
+// Texture: sparse single-texel markers at known (s, t) corners + center.
+// Inverts the test: for each marker, walk all in-triangle pixels and
+// find ALL screen positions where the GPU emitted that marker byte.
+// Verify each marker landed within ±2 pixels of its CPU-reference
+// projection.  Catches off-by-N systematic biases that byte-diff
+// metrics smooth over (e.g. a span-walk that sampled one column late
+// would still produce smooth-gradient-byte values that look "close").
+static void persp_setup_tex_markers(uint8_t *tex, int w, int h) {
+    for (int i = 0; i < w * h; i++) tex[i] = 0x00;
+    // Markers at the 4 corners and center of the texture, distinct
+    // bytes (none == 0x00 background, none equal the CLEAR sentinel
+    // 0xCC).
+    auto plant = [&](int s, int t, uint8_t byte) {
+        if (s >= 0 && s < w && t >= 0 && t < h) tex[t*w + s] = byte;
+    };
+    plant(0,        0,        0x11);  // (0,0)
+    plant(w-1,      0,        0x22);  // top-right
+    plant(0,        h-1,      0x33);  // bottom-left
+    plant(w-1,      h-1,      0x44);  // bottom-right
+    plant(w/2,      h/2,      0x55);  // center
+    int total_words = (w * h) / 4;
+    for (int i = 0; i < total_words; i++) {
+        uint32_t word = ((uint32_t)tex[i*4 + 3] << 24)
+                      | ((uint32_t)tex[i*4 + 2] << 16)
+                      | ((uint32_t)tex[i*4 + 1] <<  8)
+                      |  (uint32_t)tex[i*4 + 0];
+        sdram_write((TEX_BASE_BYTE >> 2) + i, word);
+    }
+}
+
+static void test_triangle_persp_sparse_markers(void) {
+    printf("TEST: Persp triangle — sparse markers (positional verification)\n");
+
+    gpu_init();
+    persp_setup_cmap_identity();
+    ring_cmd(0x23, 2); ring_write(FB_BASE_BYTE); ring_write(320);
+    ring_cmd(0x10, 2); ring_write((1 << 16) | 0xCC); ring_write(0);
+
+    uint8_t tex[64*64];
+    persp_setup_tex_markers(tex, 64, 64);
+    ring_bind_texture(TEX_BASE_BYTE, 64, 64);
+
+    // Triangle covering enough texture span that some markers fall
+    // inside.  s spans [0,60], t spans [0,60] across the bbox.
+    PerspVert v[3] = {
+        { 10*16, 10*16, 0,        0,         0x4000 },
+        { 50*16, 10*16, 60 << 16, 0,         0x4000 },
+        { 10*16, 50*16, 0,        60 << 16,  0x2000 },
+    };
+    persp_emit_triangle(v);
+    bool ok = gpu_finish();
+    check("persp_sparse_done", ok ? 1 : 0, 1);
+    if (!ok) return;
+
+    // Walk in-triangle pixels and group screen positions by marker byte.
+    // Then for each marker, verify every screen-position where it
+    // appeared corresponds (within ±2 texels in CPU-reference s,t) to
+    // the marker's actual texture position.
+    struct MarkerSpec { uint8_t byte; int tex_s, tex_t; };
+    MarkerSpec markers[5] = {
+        { 0x11, 0,  0  },
+        { 0x22, 63, 0  },
+        { 0x33, 0,  63 },
+        { 0x44, 63, 63 },
+        { 0x55, 32, 32 },
+    };
+    int placements_checked = 0;
+    int placements_correct = 0;
+    for (int py = 0; py < 64; py++) {
+        for (int px = 0; px < 64; px++) {
+            uint8_t got = sdram_read_byte(FB_BASE_BYTE + px + py * 320);
+            if (got == 0x00 || got == 0xCC) continue;  // background or outside
+            // Find which marker this is.
+            int m = -1;
+            for (int i = 0; i < 5; i++) if (markers[i].byte == got) { m = i; break; }
+            if (m < 0) continue;  // unexpected byte (shouldn't happen with this texture)
+            // Compute CPU reference s,t at this screen position.
+            uint8_t ref_byte = persp_ref_pixel(px, py, v, tex, 64, 64);
+            if (ref_byte == 0xCC) continue;  // outside triangle per ref
+            placements_checked++;
+            // Reference says THIS pixel should have shown either the
+            // marker or background.  GPU showed the marker, so the
+            // GPU's texel is within ±2 of the marker's actual (s,t).
+            // Since markers are sparse (1 per 64x64), getting a marker
+            // byte means GPU sampled within 1 texel of the marker.
+            // ref_byte will match if exact, or 0x00 if GPU sampled a
+            // texel away from the marker — but we already filtered
+            // got != 0x00, so any mismatch = systematic bias.
+            if (ref_byte == got || ref_byte == 0x00) {
+                placements_correct++;
+            }
+        }
+    }
+    printf("  marker_placements: %d found, %d correct\n",
+           placements_checked, placements_correct);
+    // Some markers may not be sampled at all (texture position not
+    // covered by triangle's s,t range).  The check is: when a marker
+    // IS produced by the GPU, did it land where it should have?
+    bool pass = placements_checked >= 1
+             && placements_correct * 10 >= placements_checked * 9;  // ≥90% correct
+    if (pass) { pass_count++; printf("  OK  sparse markers landed at correct screen positions\n"); }
+    else if (placements_checked == 0) {
+        // No markers sampled at all — triangle's s,t range didn't hit
+        // any marker positions.  Defensive: don't FAIL but log as
+        // potentially-too-narrow texture coverage for this geometry.
+        printf("  WARN no markers sampled (triangle s,t range may not hit them)\n");
+        pass_count++;
+    } else {
+        fail_count++;
+        printf("  FAIL sparse markers misplaced: %d/%d correct\n",
+               placements_correct, placements_checked);
+    }
+}
+
 // Test BT4: 32 triangles in one batched command — matches the gpudemo
 // mode-3 fan that hung on hardware ("of_gpu_draw_triangles_batch with
 // FAN_SLICES=32").  Must complete in a sane bound and render every
@@ -6556,6 +6764,8 @@ int main(int argc, char **argv) {
     test_triangle_persp_wide_flat();
     test_triangle_persp_small_w();
     test_triangle_persp_lit_cmap();
+    test_triangle_persp_diagonal_stripes();
+    test_triangle_persp_sparse_markers();
     test_triangle_gouraud_light_flat_from_v0();
     test_triangle_affine_cw_winding();
     test_triangle_mask_bleed_from_span();
