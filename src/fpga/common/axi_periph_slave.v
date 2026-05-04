@@ -826,6 +826,20 @@ always @(posedge clk) begin
         // controller forces the value to 0.
         if (gpu_swap_req || sysreg_swap_kick)
             vrr_hold_counter <= vrr_swap_hold_rtl;
+
+        // Bus-stream diagnostics (saturating).  Sample the AXI
+        // handshakes and S_WR_NEXT stalls so the kernel can read
+        // them via MMIO 0xE4-0xF0 to localize a wedge.  Lives in
+        // this always block (not the main FSM block) so they're
+        // single-driver — Quartus rejects multi-driver regs.
+        if (s_axi_awvalid && s_axi_awready && dbg_awready_count != 32'hFFFFFFFF)
+            dbg_awready_count <= dbg_awready_count + 32'd1;
+        if (s_axi_wvalid  && s_axi_wready  && dbg_wready_count  != 32'hFFFFFFFF)
+            dbg_wready_count  <= dbg_wready_count  + 32'd1;
+        if (s_axi_bvalid  && s_axi_bready  && dbg_bvalid_count  != 32'hFFFFFFFF)
+            dbg_bvalid_count  <= dbg_bvalid_count  + 32'd1;
+        if (state == S_WR_NEXT && !s_axi_wvalid && dbg_wstall_cycles != 32'hFFFFFFFF)
+            dbg_wstall_cycles <= dbg_wstall_cycles + 32'd1;
     end
 end
 
@@ -1251,19 +1265,6 @@ always @(posedge clk or posedge reset) begin
         gpu_reg_wr <= 0;
         mix_voice_wr     <= 1'b0;   // one-cycle pulse
         mix_irq_clear_wr <= 1'b0;   // one-cycle pulse
-
-        // Bus-stream diagnostics (saturating).  Sample the AXI
-        // handshakes from the registered side so they reflect what
-        // the master actually saw last cycle, which is the same view
-        // the wedge symptom presents on hardware.
-        if (s_axi_awvalid && s_axi_awready && dbg_awready_count != 32'hFFFF_FFFF)
-            dbg_awready_count <= dbg_awready_count + 32'd1;
-        if (s_axi_wvalid  && s_axi_wready  && dbg_wready_count  != 32'hFFFF_FFFF)
-            dbg_wready_count  <= dbg_wready_count  + 32'd1;
-        if (s_axi_bvalid  && s_axi_bready  && dbg_bvalid_count  != 32'hFFFF_FFFF)
-            dbg_bvalid_count  <= dbg_bvalid_count  + 32'd1;
-        if (state == S_WR_NEXT && !s_axi_wvalid && dbg_wstall_cycles != 32'hFFFF_FFFF)
-            dbg_wstall_cycles <= dbg_wstall_cycles + 32'd1;
 
         case (state)
 
