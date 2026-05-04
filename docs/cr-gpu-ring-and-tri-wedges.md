@@ -2,29 +2,27 @@
 
 ## Status
 
-**Issues 1 and 3: fixed in commit `f68ba00`** (pending Quartus rebuild
-+ hardware verification).  The actual bug was an AW+W same-cycle
-pipeline race in the cpu_system LSU shim, NOT in
-`gpu_core.v`/`gpu_tex_cache.v` as initially hypothesized.  See
-[Resolution of issues 1 and 3](#resolution-of-issues-1-and-3) below.
+**All three issues resolved.**  Cube hang and the original wedge are
+gone on hardware after the issue-1 bitstream landed.  All gpudemo
+workarounds (kicks after `SET_FB` / `SET_TEXTURE`, 8×8 face textures,
+batch helper) have been removed from
+`~/Repos/openfpgaOS-SDK/src/apps/gpudemo/main.c`.
 
-**Issue 2 (1×1 textures): open, but possibly subsumed by issue 1.**
-Sim repro `test_triangle_1x1_texture` (commit `047973a`) passes —
-the cache's line-fetch and the rasteriser's tex-address path
-handle 1×1 textures correctly in tb_gpu.  Since the CR's
-reported hardware symptom shape (bind + draw wedges, fixed by
-8×8 substitution) is the same shape as issue 1's race, the
-8×8-vs-1×1 workaround likely changed bind+draw timing enough to
-dodge the AW+W race window — not because the cache mis-handles
-1×1.  Verification path: after the issue-1 bitstream lands, revert
-the gpudemo 8×8 workaround back to 1×1 textures and confirm mode
-2 still renders.  If it does, all three CR issues are resolved.
+| Issue | Status | Fix |
+|---|---|---|
+| 1: FIFO/wready stall after idle | **Fixed**     | `f68ba00` — AW+W same-cycle race in LSU shim |
+| 2: 1×1 textures wedge cache     | **Subsumed by 1** | hardware verified post-bitstream — same upstream race |
+| 3: per-tri DRAW_TRIANGLES wedge | **Subsumed by 1** | timing-only divergence the CR itself predicted |
 
-The original gpudemo workarounds (kick after `SET_FB`/`SET_TEXTURE`,
-batch-helper substitution, 8×8 face textures) are documented inline
-in `src/apps/gpudemo/main.c`.  After the bitstream rebuild, the
-issue 1+3 workarounds can be removed; the 1×1-texture workaround
-stays until issue 2 is fixed.
+The original hypothesis (slave wready gated on GPU state, tex cache
+mishandling 1×1) was wrong — all three symptoms came from the same
+shim race, surfaced under different command-pattern timings.
+
+A separate finding from the perspective-triangle fuzz test (b85f498)
+— PSS error envelope on oblique triangles — was also fixed in this
+session: see commit `eb81c6f` for the singularity clamp on
+sp_zinv → 0.
+
 
 ## Issue 1: Posted-write FIFO stalls without periodic kicks
 
