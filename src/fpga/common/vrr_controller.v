@@ -150,7 +150,24 @@ always @(posedge clk) begin
                 swap_hold_o <= 4'd0;
             end else begin
                 v_total_o   <= vt_next;
-                swap_hold_o <= hold_next;
+                // hold>0 creates a positive feedback loop with the
+                // kernel's of_video_acquire_next wait for
+                // fb_swap_pending=0: every extra vsync the slave holds
+                // adds ~16-24 ms to the CPU's perceived frame time,
+                // which vrr_controller then measures as "even slower"
+                // and bumps hold higher.  Once hold>=1 the loop is
+                // self-sustaining; Duke3D got stuck at 12 fps after
+                // 4585ba7 (post-revert of CMD_FLIP 3-phase) because
+                // of this — the GPU was no longer the bottleneck but
+                // hold stayed at 2.
+                //
+                // Force hold=0 always.  V_TOTAL still adapts to render
+                // time (262/285/310/340/375 lines for 60/55/50/45/42 Hz)
+                // so a slow CPU sees a matching scanout rate; the panel
+                // just shows the same buffer for multiple vsyncs at the
+                // slowest rate, which is what the panel does naturally
+                // when fb_swap_pending=0.
+                swap_hold_o <= 4'd0;
             end
         end
     end
