@@ -434,7 +434,16 @@ wire [31:0]         w_addr    = wr_addr_mem[wr_head];   // FIXED: same every bea
 wire [31:0]         w_data    = wr_data_mem[w_idx];
 wire [3:0]          w_mask    = wr_mask_mem[w_idx];
 wire [1:0]          w_size    = wr_size_mem[wr_head];   // same for whole burst
-wire                w_is_last = (burst_w_idx == burst_awlen);
+// Pipeline-race fix (cr-gpu-and-tri-wedges issue 1): burst_awlen
+// updates at the same posedge the AW handshake commits.  Computing
+// w_is_last against the OLD burst_awlen on that cycle marks beat 0
+// of a multi-beat burst as last when the previous burst was a
+// single-beat (the bind_texture-followed-by-draw_triangles wedge
+// shape — see also tb_gpu_chain test_lsu_bind_then_draw).  Use
+// burst_awlen_calc when the AW handshake is firing this cycle.
+wire [WR_PTR_W-1:0] eff_burst_awlen =
+    (per_awvalid_cpu && per_awready_cpu) ? burst_awlen_calc : burst_awlen;
+wire                w_is_last = (burst_w_idx == eff_burst_awlen);
 
 // Write FIFO push/pop and burst tracking.
 integer wi;

@@ -422,6 +422,22 @@ reg [15:0] dbg_vsync_count;        // vsync_rising count (rolling)
 reg [1:0]  dbg_gpu_idx_last;       // last idx the GPU pulsed for
 reg [7:0]  dbg_kernel_swap_count;  // kernel sysreg FB_SWAP_CTRL writes
 
+// Bus-stream diagnostics — added for cr-gpu-and-tri-wedges issue 1
+// to localize the GPU_RING_DATA wedge.  All saturating to avoid
+// wrap-around hiding low-rate symptoms; readable via MMIO 0xE4-0xF0.
+//   awready_count : every AW handshake on this slave.
+//   wready_count  : every W beat handshake on this slave.
+//   bvalid_count  : every B response sent to the master.
+//   wstall_cycles : cycles spent in S_WR_NEXT with no s_axi_wvalid
+//                   (i.e. AW captured, slave waiting for W to land).
+// awready ≈ bvalid + 1 in steady state.  wready / awready / bvalid
+// drifting apart → beats dropped.  wstall_cycles climbing with no
+// throughput → upstream (cpu_target_port / shim) stuck.
+reg [31:0] dbg_awready_count;
+reg [31:0] dbg_wready_count;
+reg [31:0] dbg_bvalid_count;
+reg [31:0] dbg_wstall_cycles;
+
 // VRR swap hold: skip N vsyncs before presenting a queued frame.
 // vrr_swap_hold_cpu_reg is CPU-writable for analogizer override /
 // debug; vrr_swap_hold_rtl comes from the new vrr_controller and is
@@ -550,6 +566,10 @@ always @(posedge clk) begin
         dbg_vsync_count    <= 16'd0;
         dbg_gpu_idx_last   <= 2'd0;
         dbg_kernel_swap_count <= 8'd0;
+        dbg_awready_count <= 32'd0;
+        dbg_wready_count  <= 32'd0;
+        dbg_bvalid_count  <= 32'd0;
+        dbg_wstall_cycles <= 32'd0;
         pal_wr <= 0;
         pal_addr <= 0;
         pal_data <= 0;
@@ -857,6 +877,16 @@ always @(*) begin
         // path useful even now that the CPU no longer drives them.
         7'b0_110111: sysreg_rdata = {22'b0, vrr_v_total};             // VRR_V_TOTAL (0xDC)
         7'b0_111000: sysreg_rdata = {28'b0, vrr_swap_hold_rtl};       // VRR_SWAP_HOLD (0xE0)
+        // Bus-stream counters for cr-gpu-and-tri-wedges issue 1.
+        // Read these in a tight pre-and-post loop around the
+        // suspected wedge sequence; any drift between awready and
+        // bvalid points at the slave dropping a beat, and a high
+        // wstall_cycles with no progress points at upstream stalling
+        // the W channel (cpu_target_port / cpu_system shim).
+        7'b0_111001: sysreg_rdata = dbg_awready_count;                // PERIPH_AWREADY_COUNT (0xE4)
+        7'b0_111010: sysreg_rdata = dbg_wready_count;                 // PERIPH_WREADY_COUNT  (0xE8)
+        7'b0_111011: sysreg_rdata = dbg_bvalid_count;                 // PERIPH_BVALID_COUNT  (0xEC)
+        7'b0_111100: sysreg_rdata = dbg_wstall_cycles;                // PERIPH_WSTALL_CYCLES (0xF0)
         // Debug snapshot of the swap pipeline (SYSREG 0xC0):
         //   bit  0     : fb_swap_pending
         //   bits 2:1   : fb_display_idx
@@ -1221,6 +1251,19 @@ always @(posedge clk or posedge reset) begin
         gpu_reg_wr <= 0;
         mix_voice_wr     <= 1'b0;   // one-cycle pulse
         mix_irq_clear_wr <= 1'b0;   // one-cycle pulse
+
+        // Bus-stream diagnostics (saturating).  Sample the AXI
+        // handshakes from the registered side so they reflect what
+        // the master actually saw last cycle, which is the same view
+        // the wedge symptom presents on hardware.
+        if (s_axi_awvalid && s_axi_awready && dbg_awready_count != 32'hFFFF_FFFF)
+            dbg_awready_count <= dbg_awready_count + 32'd1;
+        if (s_axi_wvalid  && s_axi_wready  && dbg_wready_count  != 32'hFFFF_FFFF)
+            dbg_wready_count  <= dbg_wready_count  + 32'd1;
+        if (s_axi_bvalid  && s_axi_bready  && dbg_bvalid_count  != 32'hFFFF_FFFF)
+            dbg_bvalid_count  <= dbg_bvalid_count  + 32'd1;
+        if (state == S_WR_NEXT && !s_axi_wvalid && dbg_wstall_cycles != 32'hFFFF_FFFF)
+            dbg_wstall_cycles <= dbg_wstall_cycles + 32'd1;
 
         case (state)
 

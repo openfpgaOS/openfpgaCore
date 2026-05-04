@@ -88,6 +88,26 @@ AXI_PERIPH_DIR = obj_dir_axi_periph
 AXI_PERIPH_FLAGS = -Wno-WIDTHEXPAND -Wno-CASEINCOMPLETE -Wno-SYNCASYNCNET
 
 # ============================================================
+# GPU chain — exercises (slices + cpu_target_port + axi_periph_slave)
+# in isolation to repro / disprove cr-gpu-and-tri-wedges issue 1.
+# ============================================================
+GPU_CHAIN_SRCS = \
+	tb_gpu_chain.v \
+	altsyncram_stub.v \
+	$(COMMON_DIR)/axi_register_slice.v \
+	$(COMMON_DIR)/cpu_target_port.v \
+	$(COMMON_DIR)/axi_periph_slave.v \
+	$(COMMON_DIR)/lsu_axi_shim.v \
+	$(COMMON_DIR)/vrr_controller.v \
+	$(TARGET_DIR)/apf/common.v
+GPU_CHAIN_CPP = tb_gpu_chain_main.cpp
+GPU_CHAIN_TOP = tb_gpu_chain
+GPU_CHAIN_DIR = obj_dir_gpu_chain
+GPU_CHAIN_FLAGS = -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC -Wno-CASEINCOMPLETE \
+                  -Wno-SYNCASYNCNET -Wno-PINMISSING -Wno-UNUSEDSIGNAL \
+                  -Wno-UNDRIVEN -Wno-UNUSEDPARAM
+
+# ============================================================
 # Audio pipeline (audio_output.v + dcfifo stub)
 # ============================================================
 AUDIO_SRCS = \
@@ -163,7 +183,7 @@ SYSTEM_FLAGS = -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC -Wno-CASEINCOMPLETE \
 # ============================================================
 # Targets
 # ============================================================
-.PHONY: all sdram sram gpu gpu-floor gpu-gpudemo axi-periph \
+.PHONY: all sdram sram gpu gpu-floor gpu-gpudemo gpu-chain axi-periph \
         audio audio-mixer arbiter system run run-sram build clean
 
 all: sdram sram gpu axi-periph audio audio-mixer arbiter
@@ -247,6 +267,17 @@ $(AXI_PERIPH_DIR)/V$(AXI_PERIPH_TOP): $(AXI_PERIPH_SRCS) $(AXI_PERIPH_CPP)
 		--top-module $(AXI_PERIPH_TOP) --Mdir $(AXI_PERIPH_DIR) \
 		-I$(COMMON_DIR) \
 		$(AXI_PERIPH_SRCS) $(AXI_PERIPH_CPP)
+
+# --- GPU chain (slices + cpu_target_port + axi_periph_slave) ---
+gpu-chain: $(GPU_CHAIN_DIR)/V$(GPU_CHAIN_TOP)
+	@printf "\n=== GPU chain (slice + target_port + slave) ===\n"
+	./$(GPU_CHAIN_DIR)/V$(GPU_CHAIN_TOP)
+
+$(GPU_CHAIN_DIR)/V$(GPU_CHAIN_TOP): $(GPU_CHAIN_SRCS) $(GPU_CHAIN_CPP)
+	$(VERILATOR) $(VERILATOR_FLAGS) $(GPU_CHAIN_FLAGS) \
+		--top-module $(GPU_CHAIN_TOP) --Mdir $(GPU_CHAIN_DIR) \
+		-I$(COMMON_DIR) \
+		$(GPU_CHAIN_SRCS) $(GPU_CHAIN_CPP)
 
 # --- Audio pipeline ---
 audio: $(AUDIO_DIR)/V$(AUDIO_TOP)
