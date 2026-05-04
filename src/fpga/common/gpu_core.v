@@ -1484,40 +1484,44 @@ reg [4:0]  persp_clz;          // CLZ of persp_zinv_abs_r, latched after PSS_CLZ
 // (persp_recip_q16, persp_s_end removed — both sZ and tZ multiplies now
 // run concurrently on dsp/dsp2, so PSS_FINAL reads dsp_p and dsp2_p together.)
 
-// Task #89 — PSS error envelope on oblique triangles.  Investigated
-// in this session; partial fix (zinv-flip flag + anchor reuse) tried
-// but did not address the root cause.  Findings, kept as comments
-// for the next pass:
+// Task #89 — PSS slope clamp on perspective singularity (commit XXXX).
 //
-//   * The fuzz test's worst-case (b85f498's tri[44]) renders pixels
-//     ~89 byte units off the CPU barycentric reference, vs ~5 for
-//     axis-aligned triangles at the same W ratio.
-//   * The bug is geometry-sensitive: aligned triangles whose w-axis
-//     is parallel to a screen axis have d(zinv)/dx = 0 per row, so
-//     each row's sp_zinv is constant and PSS sub-segment endpoints
-//     don't move.  Oblique triangles have non-trivial d(zinv)/dx,
-//     and PSS advances 8 pixels along a row.  When the row's inside
-//     extent is < 8 pixels and the +8 advance lands outside the
-//     triangle on the negative-zinv side, the slope derived from
-//     (s_end - s_anchor) / 8 is contaminated by the recip-from-abs
-//     sign loss.
-//   * A naive clamp (force slope=0 when sp_zinv flips sign in
-//     PSS_ADV) clips PASS_TO_A's slot-A slope correctly but breaks
-//     PASS_TO_B's seed for slot B (anchor-of-sub-segment-1 should
-//     equal the linear-extrap end-of-sub-segment-0, but the clamp
-//     forces it to equal sub-segment 0's anchor).
-//   * Proper fix likely requires either a divide-by-N where N ≤ 8
-//     is the in-row pixels remaining (variable shift in the slope
-//     calc — expensive), OR a different decomposition (compute
-//     anchor + slope per scanline, not per 8-pixel chunk).
+// Root cause: PSS computes s_end = sp_sZ × (1/sp_zinv) at the end of
+// each 8-pixel sub-segment, then derives a per-pixel slope as
+// (s_end - s_anchor) >>> 3.  The 1/sp_zinv operation has a
+// singularity at sp_zinv=0; on oblique triangles where d(zinv)/dx
+// is non-trivial AND the sub-segment END extrapolates close to the
+// triangle's edge, sp_zinv at the END can become very small.
+// s_end = (linearly-interpolated sp_sZ) × (huge recip) blows up,
+// producing a wildly wrong slope that contaminates the *inside*
+// pixels of the sub-segment.
 //
-// Deferred: tb_gpu's existing fuzz test (b85f498) locks down the
-// current behaviour and will catch any regression that makes things
-// worse.  Hardware impact: visible only on triangles where the
-// projection-space gradient runs orthogonal to the scanline AND the
-// triangle is narrow (extent < 8 pixels per row in the worst-case
-// region).  Manifests as a small "fringe" of off-colour pixels at
-// the row's right edge for those triangles.
+// Concrete repro from b85f498 fuzz tri[44]: at row y=40 of tri[44]
+// (sub-pixel-positioned vertices), sub-segment 1's sp_zinv goes
+// 0.164 → 0.00383 across the +8-pixel advance.  Resulting s_end =
+// -1349, slope = -173/pixel — making sp_s at pixel 51 = -138 (real)
+// when CPU barycentric reference says 26.7.  Byte error 89.
+//
+// Fix: clamp the slope to 0 when the sub-segment's sp_zinv ratio
+// is too extreme.  Trigger on either:
+//   (a) sp_zinv_advanced sign-flipped (crossed zero entirely)
+//   (b) |sp_zinv_advanced| < |sp_zinv| / 4 (advance ratio worse
+//       than 4x — past the linear-interpolation comfort zone)
+// When triggered, PSS_FINAL substitutes persp_anchor_s/t for
+// s_end/t_end → slope = 0 → sub-segment uses anchor's s/t for
+// every pixel.  Bounded error (within the sub-segment's natural
+// 1-2 pixels) versus the unbounded extrapolation it replaces.
+//
+// Aligned triangles dodge this naturally: their per-row sp_zinv
+// is constant (d(zinv)/dx = 0 when v0/v1 share y and w), so the
+// advance never shrinks the magnitude.
+//
+// Cost: 1 register (pss_zinv_clamp_r), 1 compare on the abs
+// values.  No timing impact (sp_zinv_abs is already registered).
+reg pss_zinv_clamp_r;
+// Cheap "<<2 magnitude shrink" check: persp_zinv_abs (post-advance)
+// < persp_zinv_abs_na (pre-advance) >> 2.  Combinational.  Both
+// abs values already exist as wires below.
 
 // Stall the issue stage while slot A isn't ready (passes 1+2 still running).
 // Slot B not being ready is handled separately inside the load_p0 gate.
@@ -1969,6 +1973,7 @@ always @(posedge clk) begin
         persp_pss <= PSS_IDLE;
         persp_pass <= PSS_PASS_ANCHOR;
         persp_zinv_abs_r <= 0;
+        pss_zinv_clamp_r <= 0;
         persp_clz <= 0;
         nr_two_minus_xy <= 0;
         dsp_a <= 0; dsp_b <= 0;
@@ -2861,6 +2866,15 @@ always @(posedge clk) begin
                     sp_tZ            <= sp_tZ   + (sp_tZstep   <<< 3);
                     sp_zinv          <= sp_zinv_advanced;
                     persp_zinv_abs_r <= persp_zinv_abs;
+                    // Singularity clamp (task #89).  See comment by
+                    // pss_zinv_clamp_r declaration.  Trigger if the
+                    // 8-pixel advance shrinks |sp_zinv| by 4× or more,
+                    // OR crosses zero entirely.
+                    pss_zinv_clamp_r <=
+                        ((sp_zinv_advanced[31] ^ sp_zinv[31])
+                         && (sp_zinv != 32'sd0)
+                         && (sp_zinv_advanced != 32'sd0))
+                     || (persp_zinv_abs < (persp_zinv_abs_na >> 2));
                     persp_pss        <= PSS_CLZ;
                 end
 
@@ -2869,6 +2883,8 @@ always @(posedge clk) begin
                     // into the same pipeline reg so we can fall through the
                     // shared CLZ / TOP8 stages.
                     persp_zinv_abs_r <= persp_zinv_abs_na;
+                    // Anchor pass — no advance to clamp.
+                    pss_zinv_clamp_r <= 1'b0;
                     persp_pss        <= PSS_CLZ;
                 end
 
@@ -2961,10 +2977,19 @@ always @(posedge clk) begin
                 PSS_FINAL: begin : pss_final_blk
                     // dsp_p  = sZ × recip → s_end
                     // dsp2_p = tZ × recip → t_end
+                    //
+                    // Task #89 clamp: when the 8-pixel sub-segment
+                    // advance brought sp_zinv too close to zero (or
+                    // across it), 1/sp_zinv has blown up and the
+                    // computed s_end / t_end are wildly wrong.
+                    // Substitute persp_anchor_s/t — slope = 0, the
+                    // sub-segment renders with constant s/t.  See
+                    // pss_zinv_clamp_r declaration for the full
+                    // analysis.
                     reg signed [31:0] s_end;
                     reg signed [31:0] t_end;
-                    s_end = dsp_p[47:16];
-                    t_end = dsp2_p[47:16];
+                    s_end = pss_zinv_clamp_r ? persp_anchor_s : dsp_p[47:16];
+                    t_end = pss_zinv_clamp_r ? persp_anchor_t : dsp2_p[47:16];
                     // (debug $display removed)
                     case (persp_pass)
                         PSS_PASS_ANCHOR: begin
