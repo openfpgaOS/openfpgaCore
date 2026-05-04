@@ -6495,6 +6495,94 @@ static void test_triangle_persp_oblique_vs_aligned(void) {
     }
 }
 
+// =====================================================================
+// Test for the "top-of-triangle textures corrupted at sharp angle"
+// hardware symptom — perspective triangle whose APEX vertex is far
+// (very small w → very small zinv).  The narrow rows just below the
+// apex have small inside extents AND small absolute |sp_zinv|, so
+// (1/sp_zinv) is huge and any bit of sp_sZ extrapolation noise
+// amplifies into wildly wrong texel coords.  This is the case the
+// eb81c6f clamp's RATIO test misses: when both anchor and end of a
+// sub-segment have small zinv, the ratio doesn't trigger, but each
+// recip is huge so absolute precision matters.
+// =====================================================================
+static void test_triangle_persp_sharp_apex(void) {
+    printf("TEST: Persp triangle — sharp apex (far vertex at top, small w)\n");
+
+    gpu_init();
+    persp_setup_cmap_identity();
+    ring_cmd(0x23, 2); ring_write(FB_BASE_BYTE); ring_write(320);
+    ring_cmd(0x10, 2); ring_write((1 << 16) | 0xCC); ring_write(0);
+
+    uint8_t tex[64*64];
+    persp_setup_tex(tex, 64, 64);
+    ring_bind_texture(TEX_BASE_BYTE, 64, 64);
+
+    // Apex at top-center (small w → far), base at bottom (large w → near).
+    // 256:1 W ratio between far apex and near base — typical of a Quake
+    // wall slice viewed almost edge-on.  Matches the symptom shape
+    // ("textures at top corrupted at sharp angle").
+    PerspVert v[3] = {
+        { 30 * 16,   3 * 16, 32 << 16, 32 << 16, 0x0040 },  // far apex (top), w ≈ 1/256
+        {  5 * 16,  60 * 16,  0 << 16,  0 << 16, 0x4000 },  // near base-left
+        { 55 * 16,  60 * 16, 60 << 16,  0 << 16, 0x4000 },  // near base-right
+    };
+    persp_emit_triangle(v);
+    bool ok = gpu_finish();
+    check("persp_sharp_apex_done", ok ? 1 : 0, 1);
+    if (!ok) return;
+
+    // Inline diag (separate sentinels from value errors) — same logic
+    // as test_triangle_persp_oblique_vs_aligned's local helper.  We
+    // need this here because the "corrupted texture" symptom is a
+    // value-error class, not a fill-rule sentinel class.
+    auto diag = [&](int x0, int x1, int y0, int y1) {
+        struct R { int total, sentinel, both, within_8, max_value_diff, worst_px, worst_py;
+                   uint8_t worst_got, worst_exp; } r = {0,0,0,0,0,-1,-1,0,0};
+        for (int py = y0; py < y1; py++) {
+            for (int px = x0; px < x1; px++) {
+                uint8_t exp = persp_ref_pixel(px, py, v, tex, 64, 64);
+                if (exp == 0xCC) continue;
+                r.total++;
+                uint8_t got = sdram_read_byte(FB_BASE_BYTE + px + py * 320);
+                if (got == 0xCC) { r.sentinel++; continue; }
+                r.both++;
+                int d = (int)got - (int)exp; if (d < 0) d = -d;
+                if (d <= 8) r.within_8++;
+                if (d > r.max_value_diff) {
+                    r.max_value_diff = d;
+                    r.worst_px = px; r.worst_py = py;
+                    r.worst_got = got; r.worst_exp = exp;
+                }
+            }
+        }
+        return r;
+    };
+
+    auto r     = diag(0, 64, 0, 64);
+    auto r_top = diag(0, 64, 3, 16);
+
+    printf("  whole: inside=%d sentinel=%d both=%d within_8=%d max_value_diff=%d (worst@(%d,%d) got=%02x exp=%02x)\n",
+           r.total, r.sentinel, r.both, r.within_8, r.max_value_diff,
+           r.worst_px, r.worst_py, r.worst_got, r.worst_exp);
+    printf("  TOP12: inside=%d sentinel=%d both=%d within_8=%d max_value_diff=%d (worst@(%d,%d) got=%02x exp=%02x)\n",
+           r_top.total, r_top.sentinel, r_top.both, r_top.within_8, r_top.max_value_diff,
+           r_top.worst_px, r_top.worst_py, r_top.worst_got, r_top.worst_exp);
+
+    // Primary check: TOP rows (the user-reported symptom).  After
+    // the pixel-center offset fix, these should be tight (≤8 byte
+    // diff for ≥95 % of pixels, max ≤ 16).  The wider whole-region
+    // check is a sentinel for the *separate* bottom-rows corruption
+    // (tracked as a follow-up: PSS slope along the row's right edge
+    // accumulates extra rounding when the per-pixel sw stride
+    // forces sp_sZ_advanced negative for the last sub-segment).
+    bool top_pass = r_top.both >= 30
+                 && (r_top.within_8 * 100 >= r_top.both * 95)
+                 && (r_top.max_value_diff <= 16);
+    if (top_pass) { pass_count++; printf("  OK  sharp-apex top rows clean (the user-reported corruption shape)\n"); }
+    else          { fail_count++; printf("  FAIL sharp-apex top rows still corrupted\n"); }
+}
+
 // Test BT4: 32 triangles in one batched command — matches the gpudemo
 // mode-3 fan that hung on hardware ("of_gpu_draw_triangles_batch with
 // FAN_SLICES=32").  Must complete in a sane bound and render every
@@ -7272,6 +7360,7 @@ int main(int argc, char **argv) {
     test_triangle_persp_sparse_markers();
     test_triangle_persp_fuzz();
     test_triangle_persp_oblique_vs_aligned();
+    test_triangle_persp_sharp_apex();
     test_triangle_gouraud_light_flat_from_v0();
     test_triangle_affine_cw_winding();
     test_triangle_mask_bleed_from_span();

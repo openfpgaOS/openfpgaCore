@@ -3763,9 +3763,27 @@ always @(posedge clk) begin
             // post-clamp) and v_x[0] / v_y[0] (12.4 signed subpixel) to 21
             // bits.  Result range: roughly ±37 870 — well inside 21-bit
             // signed.
-            delta_x_subpix <= $signed({1'b0, tri_xmin, 4'b0})
+            //
+            // PIXEL-CENTER OFFSET (+8 sub-pixels in each axis): the
+            // rasteriser's per-pixel walk samples at pixel CENTERS
+            // (Px = px*16+8, Py = py*16+8 — same convention used by
+            // the edge-function inside test in S_TRI_PIX), but the
+            // un-corrected delta `xmin*16 - v_x[0]` targets the pixel
+            // CORNER.  For triangles with a non-trivial gradient AND
+            // a small projection-space sp_zinv at the apex, this
+            // half-pixel shift gets amplified by 1/sp_zinv into
+            // wildly wrong texel coordinates — visible as "textures
+            // corrupted at the top of the triangle when at a sharp
+            // angle" in real workloads (Quake / Duke3D walls
+            // viewed almost edge-on).  For axis-aligned triangles
+            // it's a half-texel jitter you'd never notice.
+            //
+            // {1'b0, tri_xmin, 4'b1000} = (tri_xmin << 4) | 8
+            //                           = tri_xmin * 16 + 8, the
+            //                             pixel-center sub-pixel.
+            delta_x_subpix <= $signed({1'b0, tri_xmin, 4'b1000})
                             - $signed({{5{v_x[0][15]}}, v_x[0]});
-            delta_y_subpix <= $signed({1'b0, tri_ymin, 4'b0})
+            delta_y_subpix <= $signed({1'b0, tri_ymin, 4'b1000})
                             - $signed({{5{v_y[0][15]}}, v_y[0]});
             state <= S_TRI_MUL_WAIT2;
         end
@@ -3998,15 +4016,6 @@ always @(posedge clk) begin
                                    | (tri_persp_active ? 8'h20 : 8'h00);
                     sp_fb_stride <= 16'd1;
                     sp_tex_width <= st_tex_width;
-                    // Triangles use the bound texture's full extent — they
-                    // are NOT POT-wrap candidates the way BUILD-style spans
-                    // are.  Reset masks to no-wrap (0xFFFF) so a previous
-                    // CMD_DRAW_SPAN that set wrap masks doesn't bleed into
-                    // a subsequent DRAW_TRIANGLES (e.g. world span POT
-                    // mask = 63 inherited by an alias-skin triangle would
-                    // clip the 200-wide skin to 64 columns and produce
-                    // garbage).  Per-triangle masks would require a new
-                    // SET_TEXTURE field; for now fix the bleed.
                     sp_tex_w_mask <= 16'hFFFF;
                     sp_tex_h_mask <= 16'hFFFF;
                     // Phase 4c.4 — when perspective is active, route the
