@@ -8,8 +8,17 @@ pipeline race in the cpu_system LSU shim, NOT in
 `gpu_core.v`/`gpu_tex_cache.v` as initially hypothesized.  See
 [Resolution of issues 1 and 3](#resolution-of-issues-1-and-3) below.
 
-**Issue 2 (1×1 textures): open.**  Orthogonal to issues 1/3; lives in
-`gpu_tex_cache.v`.
+**Issue 2 (1×1 textures): open, but possibly subsumed by issue 1.**
+Sim repro `test_triangle_1x1_texture` (commit `047973a`) passes —
+the cache's line-fetch and the rasteriser's tex-address path
+handle 1×1 textures correctly in tb_gpu.  Since the CR's
+reported hardware symptom shape (bind + draw wedges, fixed by
+8×8 substitution) is the same shape as issue 1's race, the
+8×8-vs-1×1 workaround likely changed bind+draw timing enough to
+dodge the AW+W race window — not because the cache mis-handles
+1×1.  Verification path: after the issue-1 bitstream lands, revert
+the gpudemo 8×8 workaround back to 1×1 textures and confirm mode
+2 still renders.  If it does, all three CR issues are resolved.
 
 The original gpudemo workarounds (kick after `SET_FB`/`SET_TEXTURE`,
 batch-helper substitution, 8×8 face textures) are documented inline
@@ -292,7 +301,11 @@ After the RTL/SDK fixes land:
 - `tb_gpu` regression: `test_1x1_texture` that binds a 1×1
   texture and draws a span/triangle using it, asserting the
   fetched texel matches the byte at the texture's base address.
-  Open — issue 2.
+  ✅ covered by `test_triangle_1x1_texture` in commit `047973a`
+  (mid-cache-line offset, axis-aligned triangle, 5 sample
+  points).  Sim passes — the hardware wedge, if it persists
+  after the issue-1 bitstream lands, must come from a path the
+  sim model doesn't cover.
 
 ## Estimated effort
 
