@@ -3361,6 +3361,100 @@ static void test_triangle_textured() {
     }
 }
 
+// =====================================================================
+// CR-cr-gpu-and-tri-wedges issue 2: 1×1 textures wedge texture cache.
+//
+// Symptom on hardware: of_gpu_bind_texture(width=1, height=1) followed
+// by any draw using that texture wedges the GPU's command processor.
+// Substituting an 8×8 texture (same content, repeated) makes the draw
+// complete cleanly.
+//
+// Sim reproducer here: bind a 1×1 texture pointing mid-line (offset 7
+// within a 16-byte cache line — the worst-case overread shape: cache
+// will fetch 9 bytes past the texture's "real" extent), then draw a
+// triangle using it.  Verifies:
+//   (1) gpu_finish() returns within the budget — i.e., the cache's
+//       line fetch and the rasteriser-side address compute don't
+//       wedge for a 1-byte texture pointing mid-line.
+//   (2) every interior pixel of the triangle samples the byte at
+//       texture base — proves the address compute and POT-mask
+//       handling produce s=0/t=0 in the rasteriser regardless of
+//       per-pixel s/t walk magnitudes.
+// =====================================================================
+static void test_triangle_1x1_texture(void) {
+    printf("TEST: Triangle with 1×1 texture (CR issue 2 sim repro)\n");
+
+    gpu_init();
+    cmap_upload_identity_row0();
+
+    ring_cmd(0x23, 2);
+    ring_write(FB_BASE_BYTE);
+    ring_write(320);
+
+    ring_cmd(0x10, 2);
+    ring_write((1 << 16) | 0x00);
+    ring_write(0);
+
+    // Place the 1-byte texture at TEX_BASE_BYTE + 7 — mid 16-byte line.
+    // Cache line fetch will round down to TEX_BASE_BYTE and pull bytes
+    // [0..15], even though only byte[7] is "ours".  Surrounding bytes
+    // are uninitialised SDRAM (read-as-X / 0 in this model).
+    const uint32_t TEX_OFF  = 7;
+    const uint32_t TEX_ADDR = TEX_BASE_BYTE + TEX_OFF;
+    const uint8_t  SRC_BYTE = 0x55;
+    // Word-aligned helper: sdram_write writes a whole 32-bit word.
+    // We want byte[7] = 0x55 in the line at TEX_BASE_BYTE: that's
+    // word-index (TEX_BASE_BYTE>>2) + 1, byte 3 of that word.
+    sdram_write((TEX_BASE_BYTE >> 2) + 1, ((uint32_t)SRC_BYTE) << 24);
+
+    ring_bind_texture(TEX_ADDR, 1, 1);
+
+    // Triangle: (2,2)-(12,2)-(2,10).  v0 at top-left, v1 at top-right,
+    // v2 at bottom-left.  Per-vertex tex coords all zero — the only
+    // valid sample for a 1×1 texture.  ring_write_vertex hardcodes
+    // w = 0x00010000 (affine) — exactly what we want.  r = 0 (default
+    // light).
+    ring_cmd(0x30, 19);
+    ring_write(3);
+    ring_write_vertex(2*16,  2*16, 0, 0, 0, 0);
+    ring_write_vertex(12*16, 2*16, 0, 0, 0, 0);
+    ring_write_vertex(2*16, 10*16, 0, 0, 0, 0);
+
+    bool ok = gpu_finish();
+    check("tri_1x1_done", ok ? 1 : 0, 1);
+    if (!ok) {
+        printf("  FAIL: GPU did not retire — wedge reproduced in sim.\n");
+        return;
+    }
+
+    // Spot-check several inside pixels.  Triangle vertices in pixel
+    // space: (2,2), (12,2), (2,10).  Inside extent at each row:
+    //   y=2: x ∈ [2, 12]
+    //   y=5: x ∈ [2, ~9]
+    //   y=8: x ∈ [2, ~4]
+    int wrong = 0;
+    auto check_px = [&](int x, int y) {
+        uint8_t got = sdram_read_byte(FB_BASE_BYTE + x + y * 320);
+        if (got != SRC_BYTE) {
+            printf("  px(%d,%d): got 0x%02x, expected 0x%02x\n",
+                   x, y, got, SRC_BYTE);
+            wrong++;
+        }
+    };
+    check_px(3, 3);
+    check_px(5, 3);
+    check_px(8, 3);
+    check_px(3, 5);
+    check_px(3, 8);
+    if (wrong == 0) {
+        pass_count++;
+        printf("  OK  1×1 texture sampled correctly across the triangle\n");
+    } else {
+        fail_count++;
+        printf("  FAIL %d/5 sample points wrong (likely tex addr / mask bug)\n", wrong);
+    }
+}
+
 // Test T4: Two triangles in sequence
 static void test_triangle_multi() {
     printf("TEST: Multiple triangles\n");
@@ -6243,6 +6337,164 @@ static void test_triangle_persp_fuzz(void) {
     }
 }
 
+// =====================================================================
+// Diagnostic for fuzz finding b85f498 / task #89.
+//
+// The fuzz test (seed 0xC0FFEE42) hit max_diff=89 on tri[44] at a 3.4:1
+// W ratio.  The existing test_triangle_persp_reference_match runs at a
+// stronger 4:1 W ratio yet reports max_diff=5.  Two hypotheses:
+//
+//   (a) Algorithm-expected: PSS does piecewise-linear perspective over
+//       8-pixel sub-segments along scanlines.  Oblique edges cross
+//       sub-segment boundaries at fractional positions; each crossing
+//       refreshes the linear approximation, but the per-segment slope
+//       is set up at sub-segment start, so off-axis triangles see
+//       larger error simply because the segment endpoints don't align
+//       with the geometry.  The existing reference test uses an
+//       axis-aligned right triangle whose legs DO align with PSS
+//       sub-segments — best case.
+//
+//   (b) Real bug: gradient setup (grad_dV*) has a path that miscomputes
+//       on oblique geometry, producing a systematic per-pixel offset
+//       that the existing axis-aligned tests never trip.
+//
+// Resolution strategy: render tri[44] at its EXACT captured geometry,
+// then render an axis-aligned right triangle with the SAME per-vertex
+// s/t/w values.  Same W ratio, same texture sampling, only the
+// rasterised geometry differs.  Compare both to the CPU barycentric
+// reference.  If oblique max_diff >> aligned max_diff → real bug.
+// If both similar → (a) algorithm-expected; the existing reference
+// test was lucky in its geometry choice.
+//
+// Per-vertex s/t/w from fuzz tri[44]:
+//     v0: s= 54, t= 8, w=0x5d00  (near)
+//     v1: s= 28, t=31, w=0x2803  (far)
+//     v2: s= 20, t= 9, w=0x1b8c  (farthest)
+//   W ratio = 0x5d00 / 0x1b8c ≈ 3.38
+// =====================================================================
+static void test_triangle_persp_oblique_vs_aligned(void) {
+    printf("TEST: Persp triangle — oblique-vs-aligned diagnostic (task #89)\n");
+
+    // Captured tri[44] verbatim.  12.4 fixed-point pixel coords.
+    PerspVert oblique[3] = {
+        { 615, 751, 54 << 16,  8 << 16, 0x5d00 },  // (38.7, 46.15)
+        { 922, 118, 28 << 16, 31 << 16, 0x2803 },  // (57.10, 7.6)
+        { 806, 813, 20 << 16,  9 << 16, 0x1b8c },  // (50.6, 50.13)
+    };
+
+    // Axis-aligned right triangle.  Right angle at v0, horizontal edge
+    // v0→v1, vertical edge v0→v2, hypotenuse v1→v2.  Same width/height
+    // as tri[44]'s bbox (≈19×43) for comparable pixel count.  Same
+    // per-vertex s/t/w as tri[44] (only the screen-space positions
+    // change).
+    PerspVert aligned[3] = {
+        {  5 * 16,  5 * 16, 54 << 16,  8 << 16, 0x5d00 },  // top-left
+        { 24 * 16,  5 * 16, 28 << 16, 31 << 16, 0x2803 },  // top-right
+        {  5 * 16, 48 * 16, 20 << 16,  9 << 16, 0x1b8c },  // bottom-left
+    };
+
+    // Local diag: separate fill-rule disagreements from value errors.
+    // persp_compare_region's max_diff conflates GPU=0xCC vs CPU=byte
+    // (fill-rule edge sliver) with GPU=byte vs CPU=byte (PSS error);
+    // for THIS diagnostic we want to isolate the latter.
+    struct DiagResult {
+        int total_inside;   // CPU reference says inside
+        int sentinel;       // CPU inside, GPU emitted 0xCC sentinel
+        int both_inside;    // CPU inside AND GPU not 0xCC
+        int within_8;       // value diff ≤ 8 among both_inside
+        int max_value_diff; // worst |got - expected| among both_inside
+        int worst_px, worst_py;
+        uint8_t worst_got, worst_exp;
+    };
+    auto diag = [&](const PerspVert v[3], const uint8_t *tex,
+                    int tex_w, int tex_h) -> DiagResult {
+        DiagResult r = {0, 0, 0, 0, 0, -1, -1, 0, 0};
+        for (int py = 0; py < 64; py++) {
+            for (int px = 0; px < 64; px++) {
+                uint8_t expected = persp_ref_pixel(px, py, v, tex, tex_w, tex_h);
+                if (expected == 0xCC) continue;
+                r.total_inside++;
+                uint8_t got = sdram_read_byte(FB_BASE_BYTE + px + py * 320);
+                if (got == 0xCC) { r.sentinel++; continue; }
+                r.both_inside++;
+                int diff = (int)got - (int)expected;
+                if (diff < 0) diff = -diff;
+                if (diff <= 8) r.within_8++;
+                if (diff > r.max_value_diff) {
+                    r.max_value_diff = diff;
+                    r.worst_px = px; r.worst_py = py;
+                    r.worst_got = got; r.worst_exp = expected;
+                }
+            }
+        }
+        return r;
+    };
+
+    uint8_t tex[64*64];
+
+    // ---- Pass 1: oblique geometry ----
+    gpu_init();
+    persp_setup_cmap_identity();
+    ring_cmd(0x23, 2); ring_write(FB_BASE_BYTE); ring_write(320);
+    ring_cmd(0x10, 2); ring_write((1 << 16) | 0xCC); ring_write(0);
+    persp_setup_tex(tex, 64, 64);
+    ring_bind_texture(TEX_BASE_BYTE, 64, 64);
+    persp_emit_triangle(oblique);
+    if (!gpu_finish()) {
+        fail_count++; printf("  FAIL oblique render did not complete\n"); return;
+    }
+    DiagResult ro = diag(oblique, tex, 64, 64);
+    printf("  oblique:  inside=%d sentinel=%d both=%d within_8=%d max_value_diff=%d (worst@(%d,%d) got=%02x exp=%02x)\n",
+           ro.total_inside, ro.sentinel, ro.both_inside, ro.within_8, ro.max_value_diff,
+           ro.worst_px, ro.worst_py, ro.worst_got, ro.worst_exp);
+
+    // ---- Pass 2: axis-aligned geometry, same per-vertex s/t/w ----
+    gpu_init();
+    persp_setup_cmap_identity();
+    ring_cmd(0x23, 2); ring_write(FB_BASE_BYTE); ring_write(320);
+    ring_cmd(0x10, 2); ring_write((1 << 16) | 0xCC); ring_write(0);
+    persp_setup_tex(tex, 64, 64);
+    ring_bind_texture(TEX_BASE_BYTE, 64, 64);
+    persp_emit_triangle(aligned);
+    if (!gpu_finish()) {
+        fail_count++; printf("  FAIL aligned render did not complete\n"); return;
+    }
+    DiagResult ra = diag(aligned, tex, 64, 64);
+    printf("  aligned:  inside=%d sentinel=%d both=%d within_8=%d max_value_diff=%d (worst@(%d,%d) got=%02x exp=%02x)\n",
+           ra.total_inside, ra.sentinel, ra.both_inside, ra.within_8, ra.max_value_diff,
+           ra.worst_px, ra.worst_py, ra.worst_got, ra.worst_exp);
+
+    // ---- Verdict ----
+    // Compare the VALUE error between oblique and axis-aligned at the
+    // SAME 3.4:1 W ratio with the SAME per-vertex s/t/w.  If oblique
+    // value error >> aligned value error, the gradient-setup path is
+    // geometry-sensitive in a way the axis-aligned reference test
+    // doesn't expose.
+    if (ro.both_inside < 50 || ra.both_inside < 50) {
+        fail_count++;
+        printf("  FAIL too few comparable pixels (oblique=%d aligned=%d) — geometry/winding broke\n",
+               ro.both_inside, ra.both_inside);
+        return;
+    }
+
+    bool suspicious = (ra.max_value_diff >= 4)
+                   && (ro.max_value_diff > ra.max_value_diff * 4);
+    if (suspicious) {
+        fail_count++;
+        printf("  SUSPICIOUS  oblique value-error %d >> aligned value-error %d at same W ratio\n",
+               ro.max_value_diff, ra.max_value_diff);
+        printf("              → likely gradient-setup bug on oblique edges\n");
+    } else if (ro.max_value_diff <= 16 && ra.max_value_diff <= 16) {
+        pass_count++;
+        printf("  OK  oblique=%d aligned=%d both within ±16 — fuzz finding was fill-rule, not value bug\n",
+               ro.max_value_diff, ra.max_value_diff);
+    } else {
+        pass_count++;
+        printf("  OK  oblique=%d aligned=%d similar magnitude — algorithm-expected PSS envelope\n",
+               ro.max_value_diff, ra.max_value_diff);
+    }
+}
+
 // Test BT4: 32 triangles in one batched command — matches the gpudemo
 // mode-3 fan that hung on hardware ("of_gpu_draw_triangles_batch with
 // FAN_SLICES=32").  Must complete in a sane bound and render every
@@ -6990,6 +7242,7 @@ int main(int argc, char **argv) {
     test_triangle_flat();
     test_triangle_degenerate();
     test_triangle_textured();
+    test_triangle_1x1_texture();
     test_triangle_multi();
     test_triangle_shared_edge();
     test_triangle_bbox_init();
@@ -7018,6 +7271,7 @@ int main(int argc, char **argv) {
     test_triangle_persp_diagonal_stripes();
     test_triangle_persp_sparse_markers();
     test_triangle_persp_fuzz();
+    test_triangle_persp_oblique_vs_aligned();
     test_triangle_gouraud_light_flat_from_v0();
     test_triangle_affine_cw_winding();
     test_triangle_mask_bleed_from_span();
