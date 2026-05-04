@@ -1484,6 +1484,41 @@ reg [4:0]  persp_clz;          // CLZ of persp_zinv_abs_r, latched after PSS_CLZ
 // (persp_recip_q16, persp_s_end removed — both sZ and tZ multiplies now
 // run concurrently on dsp/dsp2, so PSS_FINAL reads dsp_p and dsp2_p together.)
 
+// Task #89 — PSS error envelope on oblique triangles.  Investigated
+// in this session; partial fix (zinv-flip flag + anchor reuse) tried
+// but did not address the root cause.  Findings, kept as comments
+// for the next pass:
+//
+//   * The fuzz test's worst-case (b85f498's tri[44]) renders pixels
+//     ~89 byte units off the CPU barycentric reference, vs ~5 for
+//     axis-aligned triangles at the same W ratio.
+//   * The bug is geometry-sensitive: aligned triangles whose w-axis
+//     is parallel to a screen axis have d(zinv)/dx = 0 per row, so
+//     each row's sp_zinv is constant and PSS sub-segment endpoints
+//     don't move.  Oblique triangles have non-trivial d(zinv)/dx,
+//     and PSS advances 8 pixels along a row.  When the row's inside
+//     extent is < 8 pixels and the +8 advance lands outside the
+//     triangle on the negative-zinv side, the slope derived from
+//     (s_end - s_anchor) / 8 is contaminated by the recip-from-abs
+//     sign loss.
+//   * A naive clamp (force slope=0 when sp_zinv flips sign in
+//     PSS_ADV) clips PASS_TO_A's slot-A slope correctly but breaks
+//     PASS_TO_B's seed for slot B (anchor-of-sub-segment-1 should
+//     equal the linear-extrap end-of-sub-segment-0, but the clamp
+//     forces it to equal sub-segment 0's anchor).
+//   * Proper fix likely requires either a divide-by-N where N ≤ 8
+//     is the in-row pixels remaining (variable shift in the slope
+//     calc — expensive), OR a different decomposition (compute
+//     anchor + slope per scanline, not per 8-pixel chunk).
+//
+// Deferred: tb_gpu's existing fuzz test (b85f498) locks down the
+// current behaviour and will catch any regression that makes things
+// worse.  Hardware impact: visible only on triangles where the
+// projection-space gradient runs orthogonal to the scanline AND the
+// triangle is narrow (extent < 8 pixels per row in the worst-case
+// region).  Manifests as a small "fringe" of off-colour pixels at
+// the row's right edge for those triangles.
+
 // Stall the issue stage while slot A isn't ready (passes 1+2 still running).
 // Slot B not being ready is handled separately inside the load_p0 gate.
 wire persp_issue_stall = persp_active && !persp_seg_a_ready;
