@@ -238,6 +238,14 @@ static int program_voice_play(int voice, const void *pcm,
 
     uint32_t rate = ((uint64_t)sample_rate << 16) / MIXER_OUTPUT_RATE;
 
+    /* A one-shot voice may have retired in hardware while the app was
+     * busy and before of_mixer_poll_ended() ran. If we reuse that slot
+     * with its old IRQ bit still pending, the next poll would clear
+     * active_shadow/ctrl_shadow for this fresh playback and callers
+     * would treat the live voice as ended. Clear the selected slot's
+     * stale end bit before re-arming it. */
+    MIX_IRQ_CLEAR = 1u << voice;
+
     /* Force the sample data out to SDRAM before the HW mixer reads it.
      * The mixer fetches directly from SDRAM on its own AXI master,
      * bypassing the CPU D-cache; any CPU stores are still dirty in L1
