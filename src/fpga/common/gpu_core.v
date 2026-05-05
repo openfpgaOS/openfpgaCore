@@ -2561,40 +2561,14 @@ always @(posedge clk) begin
                     p0_light     <= sp_light;
                     p0_flags     <= sp_flags;
                     p0_fb_addr   <= sp_fb_addr;
-                    // Clamp negative sp_s / sp_t to 0 before the
-                    // tex-addr cast.  Persp gradients are computed at
-                    // Q16.16-per-sub-pixel and truncated to int by an
-                    // arithmetic-floor `>>> 16` in S_TRI_GRAD; for Y
-                    // gradients with a small negative real value
-                    // (e.g. -2.245) this rounds to -3, accumulating
-                    // ~0.5 % per row.  Over a tall triangle that
-                    // drives sp_t / sp_s slightly negative at the
-                    // bottom rows even when the inside-pixel's
-                    // analytical s/t is positive.  Without clamp,
-                    // sp_t = 0xFFFFFFFF (= -1 in Q16.16) casts to
-                    // unsigned 16-bit = 65535, blowing tx_mul_q to
-                    // 64 × 65535 = ~4 M, addressing texels FAR past
-                    // the texture and hitting uninitialised SDRAM
-                    // (= 0).  Visible as random black pixels at the
-                    // bottom of perspective triangles ("textures at
-                    // top of triangle corrupted at sharp angle" — the
-                    // user's hardware report after the bitstream
-                    // shipped with the previous half-pixel-offset fix).
-                    //
-                    // Clamping to 0 is the standard "clamp to edge"
-                    // texture wrap mode at the lower bound.  Upper
-                    // bound is still handled by sp_tex_*_mask when
-                    // POT (mask = width-1).
-                    p0_s_int     <= sp_s[31] ? 16'd0
-                                  : (sp_s[31:16] & sp_tex_w_mask);
+                    p0_s_int     <= sp_s[31:16] & sp_tex_w_mask;
                     p0_tex_base  <= sp_tex_addr;
 
                     // DSP-pipelined multiply: registered output. The DSP
                     // slice will be inferred via the (* multstyle = "dsp" *)
                     // attribute on tx_mul_q's declaration.
-                    tx_mul_q <= sp_t[31] ? 32'sd0
-                              : ($signed({1'b0, sp_t[31:16] & sp_tex_h_mask})
-                                 * $signed({1'b0, sp_tex_width}));
+                    tx_mul_q <= $signed({1'b0, sp_t[31:16] & sp_tex_h_mask})
+                              * $signed({1'b0, sp_tex_width});
 
                     // Advance span source. For perspective spans, the s/t
                     // path is segmented: within a segment we step by the
