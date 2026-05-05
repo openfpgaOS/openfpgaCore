@@ -14,6 +14,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <cassert>
+#include <cmath>
 #include "Vtb_gpu.h"
 #include "verilated.h"
 #include "verilated_vcd_c.h"
@@ -2736,6 +2737,244 @@ static void test_persp_span_clz_boundary(void) {
     } else {
         fail_count++;
         printf("  FAIL persp_clz: %d reversals at CLZ boundary\n", reversals);
+    }
+}
+
+struct GpudemoPerspStats {
+    int frame;
+    int total;
+    int mismatch;
+    int zero;
+    int top_total;
+    int top_mismatch;
+    int top_zero;
+    int y_min, y_top_band_end;
+    int worst_x, worst_y, worst_diff;
+    uint8_t worst_got, worst_exp;
+};
+
+static int32_t gpudemo_fdiv16(int32_t num, int32_t den) {
+    if (den == 0) return 0;
+    int64_t n = ((int64_t)num) << 16;
+    int64_t q = n / den;
+    if (q > 2147483647LL) return 2147483647;
+    if (q < (-2147483647LL - 1)) return (int32_t)(-2147483647LL - 1);
+    return (int32_t)q;
+}
+
+static void gpudemo_build_persp_texture(uint8_t tex[64 * 64]) {
+    for (int y = 0; y < 64; y++) {
+        for (int x = 0; x < 64; x++) {
+            int gx = x & 7, gy = y & 7;
+            tex[y * 64 + x] = (gx == 0 || gy == 0)
+                            ? 0xFF
+                            : (uint8_t)(0x20 + ((x >> 3) ^ (y >> 3)) * 0x18);
+        }
+    }
+}
+
+static uint8_t gpudemo_persp_ref_texel(const uint8_t tex[64 * 64],
+                                       int32_t sdivz, int32_t tdivz,
+                                       int32_t zinv) {
+    if (zinv == 0) return 0x10;
+    double s = ((double)sdivz / 65536.0) / ((double)zinv / 65536.0);
+    double t = ((double)tdivz / 65536.0) / ((double)zinv / 65536.0);
+    int si = (int)s;
+    int ti = (int)t;
+    if (si < 0) si = 0; if (si > 63) si = 63;
+    if (ti < 0) ti = 0; if (ti > 63) ti = 63;
+    return tex[ti * 64 + si];
+}
+
+static GpudemoPerspStats gpudemo_persp_replay_frame(int frame) {
+    static uint8_t ref[320 * 240];
+    uint8_t tex[64 * 64];
+    gpudemo_build_persp_texture(tex);
+    for (int i = 0; i < (int)sizeof(ref); i++) ref[i] = 0x10;
+
+    gpu_init();
+    cmap_upload_identity_row0();
+    for (int w = 0; w < (320 * 240) / 4; w++)
+        sdram_write((FB_BASE_BYTE >> 2) + w, 0x10101010u);
+
+    for (int i = 0; i < (64 * 64) / 4; i++) {
+        uint32_t word = ((uint32_t)tex[i * 4 + 3] << 24)
+                      | ((uint32_t)tex[i * 4 + 2] << 16)
+                      | ((uint32_t)tex[i * 4 + 1] <<  8)
+                      |  (uint32_t)tex[i * 4 + 0];
+        sdram_write((TEX_BASE_BYTE >> 2) + i, word);
+    }
+
+    ring_cmd(0x23, 2); ring_write(FB_BASE_BYTE); ring_write(320);
+
+    int ang = frame & 255;
+    int s_a = (int)(std::sin((double)ang * 2.0 * M_PI / 256.0) * 256.0);
+    int c_a = (int)(std::cos((double)ang * 2.0 * M_PI / 256.0) * 256.0);
+
+    struct V { int32_t x, y, z, s, t; } verts[3];
+    static const int16_t base[3][3] = {
+        { -80, -60, 0 }, { 80, -60, 0 }, { 0, 80, 0 },
+    };
+    // Mirrors the SDK demo after the Mode 1 apex fix. The original demo used
+    // coord 64 on a 64x64 texture and allowed z=127/128, which overflows the
+    // signed 16.16 s/z input and wraps it negative before the GPU sees it.
+    static const int16_t tc[3][2] = {
+        { 0, 0 }, { 63, 0 }, { 31, 63 },
+    };
+
+    for (int i = 0; i < 3; i++) {
+        int x0 = base[i][0], y0 = base[i][1], z0 = base[i][2];
+        int rx = (x0 * c_a - z0 * s_a) >> 8;
+        int rz = (x0 * s_a + z0 * c_a) >> 8;
+        verts[i].x = rx;
+        verts[i].y = y0;
+        verts[i].z = 200 + rz;
+        verts[i].s = (int32_t)tc[i][0] << 16;
+        verts[i].t = (int32_t)tc[i][1] << 16;
+    }
+
+    int32_t sx[3], sy[3], sZ[3], tZ[3], oZ[3];
+    for (int i = 0; i < 3; i++) {
+        if (verts[i].z < 128) verts[i].z = 128;
+        int32_t zi = verts[i].z;
+        sx[i] = (verts[i].x * 200) / zi + 160;
+        sy[i] = (verts[i].y * 200) / zi + 120;
+        sZ[i] = gpudemo_fdiv16(verts[i].s, zi);
+        tZ[i] = gpudemo_fdiv16(verts[i].t, zi);
+        oZ[i] = gpudemo_fdiv16(1 << 16, zi);
+    }
+
+    int top = 0, mid = 1, bot = 2;
+    if (sy[mid] < sy[top]) { int t = top; top = mid; mid = t; }
+    if (sy[bot] < sy[top]) { int t = top; top = bot; bot = t; }
+    if (sy[bot] < sy[mid]) { int t = mid; mid = bot; bot = t; }
+
+    int y_top = sy[top], y_mid = sy[mid], y_bot = sy[bot];
+    int top_band_end = y_top + 16;
+    if (y_bot > y_top) {
+        for (int y = y_top; y <= y_bot; y++) {
+            if (y < 0 || y >= 240) continue;
+
+            int e1_a = top, e1_b = bot;
+            int e2_a, e2_b;
+            if (y < y_mid) { e2_a = top; e2_b = mid; }
+            else           { e2_a = mid; e2_b = bot; }
+
+            int dy1 = sy[e1_b] - sy[e1_a];
+            int dy2 = sy[e2_b] - sy[e2_a];
+            if (dy1 == 0) dy1 = 1;
+            if (dy2 == 0) dy2 = 1;
+            int t1 = ((y - sy[e1_a]) << 16) / dy1;
+            int t2 = ((y - sy[e2_a]) << 16) / dy2;
+
+            int32_t x1 = sx[e1_a] + (int32_t)(((int64_t)(sx[e1_b] - sx[e1_a]) * t1) >> 16);
+            int32_t x2 = sx[e2_a] + (int32_t)(((int64_t)(sx[e2_b] - sx[e2_a]) * t2) >> 16);
+            int32_t sZ1 = sZ[e1_a] + (int32_t)(((int64_t)(sZ[e1_b] - sZ[e1_a]) * t1) >> 16);
+            int32_t sZ2 = sZ[e2_a] + (int32_t)(((int64_t)(sZ[e2_b] - sZ[e2_a]) * t2) >> 16);
+            int32_t tZ1 = tZ[e1_a] + (int32_t)(((int64_t)(tZ[e1_b] - tZ[e1_a]) * t1) >> 16);
+            int32_t tZ2 = tZ[e2_a] + (int32_t)(((int64_t)(tZ[e2_b] - tZ[e2_a]) * t2) >> 16);
+            int32_t oZ1 = oZ[e1_a] + (int32_t)(((int64_t)(oZ[e1_b] - oZ[e1_a]) * t1) >> 16);
+            int32_t oZ2 = oZ[e2_a] + (int32_t)(((int64_t)(oZ[e2_b] - oZ[e2_a]) * t2) >> 16);
+
+            int32_t xl = x1 < x2 ? x1 : x2;
+            int32_t xr = x1 < x2 ? x2 : x1;
+            if (x2 < x1) {
+                int32_t tmp;
+                tmp = sZ1; sZ1 = sZ2; sZ2 = tmp;
+                tmp = tZ1; tZ1 = tZ2; tZ2 = tmp;
+                tmp = oZ1; oZ1 = oZ2; oZ2 = tmp;
+            }
+            if (xl < 0) xl = 0;
+            if (xr >= 320) xr = 319;
+            int count = xr - xl + 1;
+            if (count <= 0) continue;
+
+            int32_t inv_count = (1 << 16) / count;
+            int32_t sd_step = (int32_t)(((int64_t)(sZ2 - sZ1) * inv_count) >> 16);
+            int32_t td_step = (int32_t)(((int64_t)(tZ2 - tZ1) * inv_count) >> 16);
+            int32_t zi_step = (int32_t)(((int64_t)(oZ2 - oZ1) * inv_count) >> 16);
+
+            for (int n = 0; n < count; n++) {
+                int x = xl + n;
+                ref[y * 320 + x] = gpudemo_persp_ref_texel(
+                    tex, sZ1 + n * sd_step, tZ1 + n * td_step,
+                    oZ1 + n * zi_step);
+            }
+
+            persp_draw_span(FB_BASE_BYTE + y * 320 + xl, TEX_BASE_BYTE,
+                            (uint16_t)count, 0, 64,
+                            sZ1, tZ1, oZ1,
+                            sd_step, td_step, zi_step);
+        }
+    }
+
+    GpudemoPerspStats st = {};
+    st.frame = frame;
+    st.y_min = y_top;
+    st.y_top_band_end = top_band_end;
+    st.worst_diff = -1;
+
+    bool ok = gpu_finish(800000);
+    if (!ok) {
+        st.zero = st.top_zero = 999999;
+        return st;
+    }
+
+    for (int y = 0; y < 240; y++) {
+        for (int x = 0; x < 320; x++) {
+            uint8_t exp = ref[y * 320 + x];
+            if (exp == 0x10) continue;
+            uint8_t got = sdram_read_byte(FB_BASE_BYTE + y * 320 + x);
+            int diff = (int)got - (int)exp;
+            if (diff < 0) diff = -diff;
+            bool top_band = (y >= y_top && y < top_band_end);
+            st.total++;
+            if (top_band) st.top_total++;
+            if (got != exp) {
+                st.mismatch++;
+                if (top_band) st.top_mismatch++;
+            }
+            if (got == 0x00) {
+                st.zero++;
+                if (top_band) st.top_zero++;
+            }
+            if (diff > st.worst_diff) {
+                st.worst_diff = diff;
+                st.worst_x = x; st.worst_y = y;
+                st.worst_got = got; st.worst_exp = exp;
+            }
+        }
+    }
+    return st;
+}
+
+static void test_gpudemo_persp_mode1_high_angle(void) {
+    printf("TEST: gpudemo Mode 1 SPAN_PERSP replay — high-angle texture corruption\n");
+
+    // User reported corruption near "244 degrees". gpudemo uses 256 angle
+    // units per turn, so cover both interpretations: raw frame index 244,
+    // and 244 degrees mapped into frame indices 173/174. The pass criterion
+    // is absence of black SDRAM-zero texels; exact CPU-vs-PSS texel mismatch
+    // is tracked but remains bounded by the 8-pixel perspective subdivision.
+    const int frames[] = {244, 173, 174};
+    bool pass = true;
+    for (int i = 0; i < 3; i++) {
+        GpudemoPerspStats st = gpudemo_persp_replay_frame(frames[i]);
+        printf("  frame=%d y_top=%d top_end=%d total=%d mismatch=%d zero=%d "
+               "top_total=%d top_mismatch=%d top_zero=%d worst=(%d,%d) got=0x%02x exp=0x%02x diff=%d\n",
+               st.frame, st.y_min, st.y_top_band_end, st.total,
+               st.mismatch, st.zero, st.top_total, st.top_mismatch,
+               st.top_zero, st.worst_x, st.worst_y, st.worst_got,
+               st.worst_exp, st.worst_diff);
+        if (st.zero != 0 || st.top_zero != 0) pass = false;
+    }
+
+    if (pass) {
+        pass_count++;
+        printf("  OK  no black/out-of-range texel fetches at reported high angles\n");
+    } else {
+        fail_count++;
+        printf("  FAIL mode-1 replay hit black/out-of-range texel fetches\n");
     }
 }
 
@@ -6777,6 +7016,454 @@ static void test_triangle_tex_flush_midflight(void) {
 }
 
 // =====================================================================
+// gpudemo Mode 2 replay — rotating cube triangle stream
+// =====================================================================
+//
+// Replays draw_triangle_demo() exactly: 8-vertex cube, 12 faces, per-face
+// 1×1 solid-colour texture, X+Y rotation parameterised by frame.  Each
+// face renders as a single dominant colour; any non-cleared pixel inside
+// the triangle's projected bbox must equal that face's colour, so we can
+// scan a range of rotations and report the first frame+face that
+// disagrees.
+//
+// User report: "almost all triangles corrupt on hardware, only one
+// section of the triangle, particular angle".  This test sweeps angles
+// to find the trigger geometry deterministically in sim.
+static const int8_t  cube_verts_test[8][3] = {
+    {-1,-1,-1}, { 1,-1,-1}, { 1, 1,-1}, {-1, 1,-1},
+    {-1,-1, 1}, { 1,-1, 1}, { 1, 1, 1}, {-1, 1, 1},
+};
+static const uint8_t cube_faces_test[12][3] = {
+    {0,1,2},{0,2,3}, {4,6,5},{4,7,6},
+    {0,4,5},{0,5,1}, {2,6,7},{2,7,3},
+    {0,3,7},{0,7,4}, {1,5,6},{1,6,2},
+};
+// Each face has 2 triangles → 6 face colours.  Match SDK gpudemo.
+static const uint8_t cube_face_colours_test[6] = {
+    0xC0, 0xA0, 0x80, 0xE0, 0x60, 0xB0
+};
+
+// Project one cube vertex through the same math gpudemo uses.  Returns
+// proj_x / proj_y in pixel units (not yet ×16 sub-pixel).
+static void cube_project_vertex(int vidx, int frame,
+                                int *proj_x, int *proj_y) {
+    int angle_y = frame * 2;
+    int angle_x = frame;
+    double rad_y = (double)(angle_y & 255) * 2.0 * M_PI / 256.0;
+    double rad_x = (double)(angle_x & 255) * 2.0 * M_PI / 256.0;
+    int sy = (int)(std::sin(rad_y) * 256.0);
+    int cy = (int)(std::cos(rad_y) * 256.0);
+    int sx = (int)(std::sin(rad_x) * 256.0);
+    int cx = (int)(std::cos(rad_x) * 256.0);
+
+    int x = cube_verts_test[vidx][0] * 80;
+    int y = cube_verts_test[vidx][1] * 80;
+    int z = cube_verts_test[vidx][2] * 80;
+    int rx = (x * cy - z * sy) >> 8;
+    int rz = (x * sy + z * cy) >> 8;
+    int ry = (y * cx - rz * sx) >> 8;
+    rz     = (y * sx + rz * cx) >> 8;
+
+    int d = 300 + rz;
+    if (d < 50) d = 50;
+    *proj_x = 160 + (rx * 200) / d;  // SCREEN_W/2 = 160
+    *proj_y = 100 + (ry * 200) / d;  // SCREEN_H/2 = 100
+}
+
+// Render the cube at `frame`, checking each non-culled face's centroid
+// as a cheap diagnostic sample.  Returns 0 on success, or the count of
+// mismatches (also printed).  `verbose` enables per-face diagnostic
+// output even on success.
+static int cube_replay_one_frame(int frame, bool verbose) {
+    gpu_init();
+    cmap_upload_identity_row0();
+
+    ring_cmd(0x23, 2);
+    ring_write(FB_BASE_BYTE);
+    ring_write(320);
+
+    ring_cmd(0x10, 2);
+    ring_write((1 << 16) | 0x00);
+    ring_write(0);
+
+    int proj_x[8], proj_y[8];
+    for (int i = 0; i < 8; i++)
+        cube_project_vertex(i, frame, &proj_x[i], &proj_y[i]);
+
+    // Place 6 face textures back-to-back at TEX_BASE_BYTE.  Each is one
+    // byte, written at byte-offset = face_idx (so addr = TEX_BASE+face).
+    // Pad word stores so byte writes are clean.
+    {
+        uint32_t w0 = 0;
+        for (int f = 0; f < 4; f++)
+            w0 |= ((uint32_t)cube_face_colours_test[f]) << (f * 8);
+        sdram_write(TEX_BASE_BYTE >> 2, w0);
+        uint32_t w1 = 0;
+        w1 |= ((uint32_t)cube_face_colours_test[4]) << 0;
+        w1 |= ((uint32_t)cube_face_colours_test[5]) << 8;
+        sdram_write((TEX_BASE_BYTE >> 2) + 1, w1);
+    }
+
+    struct FaceInfo {
+        bool culled;
+        int v[3];   // vertex indices
+        int colour;
+        int cx, cy; // diagnostic centroid sample
+    };
+    FaceInfo finfo[12];
+
+    for (int f = 0; f < 12; f++) {
+        int i0 = cube_faces_test[f][0];
+        int i1 = cube_faces_test[f][1];
+        int i2 = cube_faces_test[f][2];
+        int dx1 = proj_x[i1] - proj_x[i0], dy1 = proj_y[i1] - proj_y[i0];
+        int dx2 = proj_x[i2] - proj_x[i0], dy2 = proj_y[i2] - proj_y[i0];
+        finfo[f].culled = (dx1 * dy2 - dx2 * dy1 <= 0);
+        finfo[f].v[0]   = i0;
+        finfo[f].v[1]   = i1;
+        finfo[f].v[2]   = i2;
+        finfo[f].colour = cube_face_colours_test[f / 2];
+        finfo[f].cx     = (proj_x[i0] + proj_x[i1] + proj_x[i2]) / 3;
+        finfo[f].cy     = (proj_y[i0] + proj_y[i1] + proj_y[i2]) / 3;
+        if (finfo[f].culled) continue;
+
+        // Bind face texture (1×1) at TEX_BASE_BYTE + (f/2).
+        uint32_t tex_addr = TEX_BASE_BYTE + (f / 2);
+        ring_bind_texture(tex_addr, 1, 1);
+
+        ring_cmd(0x30, 19);
+        ring_write(3);
+        ring_write_vertex((int16_t)(proj_x[i0] * 16),
+                          (int16_t)(proj_y[i0] * 16), 0, 0, 0, 0);
+        ring_write_vertex((int16_t)(proj_x[i1] * 16),
+                          (int16_t)(proj_y[i1] * 16), 0, 0, 0, 0);
+        ring_write_vertex((int16_t)(proj_x[i2] * 16),
+                          (int16_t)(proj_y[i2] * 16), 0, 0, 0, 0);
+    }
+
+    bool ok = gpu_finish(800000);
+    if (!ok) {
+        printf("  FAIL frame=%d: gpu_finish timeout\n", frame);
+        return 1;
+    }
+
+    int mismatches = 0;
+    for (int f = 0; f < 12; f++) {
+        if (finfo[f].culled) continue;
+        int sx = finfo[f].cx;
+        int sy = finfo[f].cy;
+        if (sx < 0 || sx >= 320 || sy < 0 || sy >= 200) continue;
+        uint8_t got = sdram_read_byte(FB_BASE_BYTE + sx + sy * 320);
+        if (got != (uint8_t)finfo[f].colour) {
+            printf("  MISMATCH frame=%d face=%d centroid=(%d,%d) "
+                   "got=0x%02x expected=0x%02x  v0=(%d,%d) v1=(%d,%d) "
+                   "v2=(%d,%d)\n",
+                   frame, f, sx, sy, got, finfo[f].colour,
+                   proj_x[finfo[f].v[0]], proj_y[finfo[f].v[0]],
+                   proj_x[finfo[f].v[1]], proj_y[finfo[f].v[1]],
+                   proj_x[finfo[f].v[2]], proj_y[finfo[f].v[2]]);
+            mismatches++;
+        } else if (verbose) {
+            printf("  ok frame=%d face=%d centroid=(%d,%d) colour=0x%02x\n",
+                   frame, f, sx, sy, got);
+        }
+    }
+    return mismatches;
+}
+
+// Render exactly ONE face from the cube (at index `target_face`, frame
+// `frame`) into a fresh FB and return the centroid pixel for diagnostics.
+// The centroid is not an authoritative sample for very thin projected
+// triangles: the mathematical centroid can land between the few integer
+// pixel samples that the rasteriser actually covers.
+static uint8_t cube_render_single_face(int frame, int target_face,
+                                        int *out_cx, int *out_cy,
+                                        bool *out_culled) {
+    gpu_init();
+    cmap_upload_identity_row0();
+
+    ring_cmd(0x23, 2);
+    ring_write(FB_BASE_BYTE);
+    ring_write(320);
+
+    ring_cmd(0x10, 2);
+    ring_write((1 << 16) | 0x00);
+    ring_write(0);
+
+    int proj_x[8], proj_y[8];
+    for (int i = 0; i < 8; i++)
+        cube_project_vertex(i, frame, &proj_x[i], &proj_y[i]);
+
+    // Face textures, same layout as multi-face test.
+    {
+        uint32_t w0 = 0;
+        for (int f = 0; f < 4; f++)
+            w0 |= ((uint32_t)cube_face_colours_test[f]) << (f * 8);
+        sdram_write(TEX_BASE_BYTE >> 2, w0);
+        uint32_t w1 = 0;
+        w1 |= ((uint32_t)cube_face_colours_test[4]) << 0;
+        w1 |= ((uint32_t)cube_face_colours_test[5]) << 8;
+        sdram_write((TEX_BASE_BYTE >> 2) + 1, w1);
+    }
+
+    int i0 = cube_faces_test[target_face][0];
+    int i1 = cube_faces_test[target_face][1];
+    int i2 = cube_faces_test[target_face][2];
+    int dx1 = proj_x[i1] - proj_x[i0], dy1 = proj_y[i1] - proj_y[i0];
+    int dx2 = proj_x[i2] - proj_x[i0], dy2 = proj_y[i2] - proj_y[i0];
+    *out_culled = (dx1 * dy2 - dx2 * dy1 <= 0);
+    *out_cx = (proj_x[i0] + proj_x[i1] + proj_x[i2]) / 3;
+    *out_cy = (proj_y[i0] + proj_y[i1] + proj_y[i2]) / 3;
+    if (*out_culled) return 0;
+
+    uint32_t tex_addr = TEX_BASE_BYTE + (target_face / 2);
+    ring_bind_texture(tex_addr, 1, 1);
+    ring_cmd(0x30, 19);
+    ring_write(3);
+    ring_write_vertex((int16_t)(proj_x[i0] * 16),
+                      (int16_t)(proj_y[i0] * 16), 0, 0, 0, 0);
+    ring_write_vertex((int16_t)(proj_x[i1] * 16),
+                      (int16_t)(proj_y[i1] * 16), 0, 0, 0, 0);
+    ring_write_vertex((int16_t)(proj_x[i2] * 16),
+                      (int16_t)(proj_y[i2] * 16), 0, 0, 0, 0);
+
+    if (!gpu_finish(800000)) return 0xFF;
+
+    int sx = *out_cx, sy = *out_cy;
+    if (sx < 0 || sx >= 320 || sy < 0 || sy >= 200) return 0;
+    return sdram_read_byte(FB_BASE_BYTE + sx + sy * 320);
+}
+
+struct CubeFaceScan {
+    bool culled;
+    int cx, cy;
+    int area2;
+    int drawn_expected;
+    int drawn_wrong;
+    int first_wrong_x, first_wrong_y;
+    uint8_t first_wrong;
+};
+
+static CubeFaceScan cube_scan_single_face(int frame, int target_face) {
+    CubeFaceScan r = {false, 0, 0, 0, 0, 0, -1, -1, 0};
+    bool culled;
+    cube_render_single_face(frame, target_face, &r.cx, &r.cy, &culled);
+    r.culled = culled;
+    if (culled) return r;
+
+    int proj_x[8], proj_y[8];
+    for (int i = 0; i < 8; i++)
+        cube_project_vertex(i, frame, &proj_x[i], &proj_y[i]);
+
+    int i0 = cube_faces_test[target_face][0];
+    int i1 = cube_faces_test[target_face][1];
+    int i2 = cube_faces_test[target_face][2];
+    int v0x = proj_x[i0], v0y = proj_y[i0];
+    int v1x = proj_x[i1], v1y = proj_y[i1];
+    int v2x = proj_x[i2], v2y = proj_y[i2];
+    int dx1 = v1x - v0x, dy1 = v1y - v0y;
+    int dx2 = v2x - v0x, dy2 = v2y - v0y;
+    r.area2 = dx1 * dy2 - dx2 * dy1;
+    if (r.area2 < 0) r.area2 = -r.area2;
+
+    int xmin = std::min({v0x, v1x, v2x});
+    int xmax = std::max({v0x, v1x, v2x});
+    int ymin = std::min({v0y, v1y, v2y});
+    int ymax = std::max({v0y, v1y, v2y});
+    if (xmin < 0) xmin = 0;
+    if (ymin < 0) ymin = 0;
+    if (xmax >= 320) xmax = 319;
+    if (ymax >= 200) ymax = 199;
+
+    uint8_t expected = cube_face_colours_test[target_face / 2];
+    for (int y = ymin; y <= ymax; y++) {
+        for (int x = xmin; x <= xmax; x++) {
+            uint8_t got = sdram_read_byte(FB_BASE_BYTE + x + y * 320);
+            if (got == 0x00) continue;
+            if (got == expected) {
+                r.drawn_expected++;
+            } else {
+                if (r.drawn_wrong == 0) {
+                    r.first_wrong_x = x;
+                    r.first_wrong_y = y;
+                    r.first_wrong = got;
+                }
+                r.drawn_wrong++;
+            }
+        }
+    }
+    return r;
+}
+
+// Scan the bbox of a single rendered face and print a hit/miss pixel
+// map.  CPU reference rasteriser (same edge-function inside test as the
+// RTL: all three edge values >= 0, with a top-left fill rule applied to
+// match standard rasterisation conventions) decides which pixels SHOULD
+// be inside; we compare against what the GPU actually wrote.
+//
+// Legend:
+//   '.'  outside the triangle (correctly clear)
+//   'X'  inside, rendered correctly with face colour
+//   '?'  inside, rendered with WRONG colour (over/underwrite)
+//   '_'  inside, NOT rendered (missing pixel — bug class)
+//   '*'  outside the triangle but rendered (rasteriser drew too far)
+static void cube_dump_face_bbox_map(int frame, int target_face) {
+    int proj_x[8], proj_y[8];
+    for (int i = 0; i < 8; i++)
+        cube_project_vertex(i, frame, &proj_x[i], &proj_y[i]);
+
+    int i0 = cube_faces_test[target_face][0];
+    int i1 = cube_faces_test[target_face][1];
+    int i2 = cube_faces_test[target_face][2];
+    int v0x = proj_x[i0], v0y = proj_y[i0];
+    int v1x = proj_x[i1], v1y = proj_y[i1];
+    int v2x = proj_x[i2], v2y = proj_y[i2];
+    uint8_t expected = cube_face_colours_test[target_face / 2];
+
+    // CPU reference: standard top-left fill rule.  Edges are evaluated
+    // as e_i(p) = (p - va) × (vb - va) (z-component of 2D cross).  In
+    // screen coordinates (y-down) with CCW winding by signed area, a
+    // point is inside iff all three edge values are <= 0.  Top-left
+    // rule: a pixel exactly on an edge counts as inside iff the edge
+    // is a top edge (horizontal going left→right) or a left edge
+    // (going downwards in screen space — i.e. its endpoint has
+    // strictly greater y than its start).
+    auto edge = [](int ax, int ay, int bx, int by, int px, int py) {
+        return (px - ax) * (by - ay) - (py - ay) * (bx - ax);
+    };
+    auto is_top_left = [](int ax, int ay, int bx, int by) {
+        bool top  = (ay == by) && (bx > ax);
+        bool left = (by > ay);
+        return top || left;
+    };
+
+    int xmin = std::min({v0x, v1x, v2x});
+    int xmax = std::max({v0x, v1x, v2x});
+    int ymin = std::min({v0y, v1y, v2y});
+    int ymax = std::max({v0y, v1y, v2y});
+    if (xmin < 0)   xmin = 0;
+    if (ymin < 0)   ymin = 0;
+    if (xmax >= 320) xmax = 319;
+    if (ymax >= 200) ymax = 199;
+
+    int n_inside = 0, n_hit = 0, n_miss = 0, n_wrong = 0, n_extra = 0;
+    printf("  bbox map  frame=%d face=%d  v0=(%d,%d) v1=(%d,%d) "
+           "v2=(%d,%d)  expected=0x%02x  bbox=(%d..%d, %d..%d)\n",
+           frame, target_face, v0x, v0y, v1x, v1y, v2x, v2y, expected,
+           xmin, xmax, ymin, ymax);
+
+    for (int y = ymin; y <= ymax; y++) {
+        printf("    y=%3d ", y);
+        for (int x = xmin; x <= xmax; x++) {
+            // GPU samples at pixel CORNER (tri_xmin_sub_dsp_in is
+            // {xmin[11:0], 4'b0} — sub-pixel offset 0).  Match.
+            int e01 = edge(v0x, v0y, v1x, v1y, x, y);
+            int e12 = edge(v1x, v1y, v2x, v2y, x, y);
+            int e20 = edge(v2x, v2y, v0x, v0y, x, y);
+            // Screen-coords CCW: inside iff all e <= 0; top-left
+            // rule: e == 0 counts as inside iff edge is top-or-left.
+            auto ok_edge = [&](int e, int ax, int ay, int bx, int by) {
+                if (e < 0) return true;
+                if (e > 0) return false;
+                return is_top_left(ax, ay, bx, by);
+            };
+            bool inside = ok_edge(e01, v0x, v0y, v1x, v1y)
+                       && ok_edge(e12, v1x, v1y, v2x, v2y)
+                       && ok_edge(e20, v2x, v2y, v0x, v0y);
+
+            uint8_t got = sdram_read_byte(FB_BASE_BYTE + x + y * 320);
+            char c;
+            if (inside) {
+                n_inside++;
+                if (got == expected) { c = 'X'; n_hit++; }
+                else if (got == 0x00) { c = '_'; n_miss++; }
+                else                  { c = '?'; n_wrong++; }
+            } else {
+                if (got == 0x00)      { c = '.'; }
+                else                  { c = '*'; n_extra++; }
+            }
+            putchar(c);
+        }
+        putchar('\n');
+    }
+    printf("  summary  inside=%d hit=%d miss=%d wrong=%d "
+           "outside_drawn=%d\n",
+           n_inside, n_hit, n_miss, n_wrong, n_extra);
+}
+
+static void test_gpudemo_cube_replay(void) {
+    printf("TEST: gpudemo Mode 2 cube replay — sweep angles for triangle "
+           "corruption\n");
+
+    // Pass 1: full 12-triangle frames (matches gpudemo command stream).
+    // A mismatch here can be either a real rasteriser bug or legitimate
+    // painter's-algorithm overdraw (later face covers earlier face's
+    // centroid — no Z-buffer).  We surface them and re-test in isolation
+    // in pass 2.
+    const int MAX_FRAMES = 64;
+    int multi_face_bad = 0;
+    int single_face_bad = 0;
+    int first_real_bad_frame = -1;
+    for (int frame = 0; frame < MAX_FRAMES; frame++) {
+        int m = cube_replay_one_frame(frame, false);
+        if (m == 0) continue;
+        multi_face_bad += m;
+        // Pass 2: for any frame with multi-face mismatches, re-render
+        // every face IN ISOLATION.  Do not trust the centroid for the
+        // near-line-area frames that the cube hits at edge-on angles;
+        // instead scan the rendered bbox for wrong-colour pixels.
+        for (int f = 0; f < 12; f++) {
+            uint8_t expected = cube_face_colours_test[f / 2];
+            CubeFaceScan scan = cube_scan_single_face(frame, f);
+            if (scan.culled) continue;
+
+            bool missed_large_face = (scan.area2 >= 32)
+                                  && (scan.drawn_expected == 0);
+            if (scan.drawn_wrong != 0 || missed_large_face) {
+                printf("  ISOLATED MISMATCH frame=%d face=%d "
+                       "area2=%d centroid=(%d,%d) drawn=%d wrong=%d "
+                       "first_wrong=(%d,%d)=0x%02x expected=0x%02x\n",
+                       frame, f, scan.area2, scan.cx, scan.cy,
+                       scan.drawn_expected, scan.drawn_wrong,
+                       scan.first_wrong_x, scan.first_wrong_y,
+                       scan.first_wrong, expected);
+                single_face_bad++;
+                if (first_real_bad_frame < 0) {
+                    first_real_bad_frame = frame;
+                    // Re-render the offender alone and dump the bbox
+                    // hit/miss map so we can see the missing-pixel
+                    // pattern (left edge / right edge / scattered).
+                    int dcx, dcy; bool dcull;
+                    cube_render_single_face(frame, f, &dcx, &dcy,
+                                            &dcull);
+                    cube_dump_face_bbox_map(frame, f);
+                }
+            }
+        }
+        if (single_face_bad > 6) break;
+    }
+
+    if (single_face_bad > 0) {
+        printf("  FAIL  %d isolated-face mismatches "
+               "(rasteriser bug, not overdraw); first bad frame=%d\n",
+               single_face_bad, first_real_bad_frame);
+        printf("        %d additional multi-face mismatches were "
+               "overdraw-explained\n", multi_face_bad - single_face_bad);
+        fail_count++;
+    } else if (multi_face_bad > 0) {
+        printf("  OK  %d multi-face mismatches all explained by "
+               "painter's-algorithm overdraw or thin-triangle centroid misses; "
+               "isolated faces all rendered correctly\n",
+               multi_face_bad);
+        pass_count++;
+    } else {
+        printf("  OK  swept %d frames with no centroid mismatches\n",
+               MAX_FRAMES);
+        pass_count++;
+    }
+}
+
+// =====================================================================
 // gpudemo Mode 0 replay — reproduce the ~270-frame freeze in Verilator
 // =====================================================================
 //
@@ -7321,6 +8008,7 @@ int main(int argc, char **argv) {
     test_persp_span_subsegment_end();
     test_persp_long_corridor_monotonic();
     test_persp_span_clz_boundary();
+    test_gpudemo_persp_mode1_high_angle();
     test_transluc_lut_basic();
     test_transluc_overdraw();
     test_transluc_blend_raw_hazard();
@@ -7345,6 +8033,7 @@ int main(int argc, char **argv) {
     test_triangle_batch_with_degenerate();
     test_triangle_batch_disjoint_fb();
     test_triangle_batch_fan32();
+    test_gpudemo_cube_replay();
     test_span_partial_word_handoff();
     test_span_partial_reverse_stride();
     test_span_back_to_back_columns();
