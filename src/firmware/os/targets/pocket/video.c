@@ -71,15 +71,34 @@ static void vrr_update(void) {
  * disambiguates. */
 static int swap_kicked = 0;
 
-/* Check whether a pending swap has completed and update software state. */
+/* Check whether a pending swap has completed and update software state.
+ * The display index bits are authoritative; using them matters in the
+ * GPU-triggered path where one pending swap can clear and the next
+ * CMD_FLIP can set fb_swap_pending again before the kernel samples the
+ * low interval. */
 static void sync_swap_state(void) {
-    int hw_pending = FB_SWAP_CTRL & 1;
+    uint32_t hw_state = FB_SWAP_CTRL;
+    int hw_pending = hw_state & 1;
+    int hw_display = (int)((hw_state >> 1) & 0x3);
+    if ((unsigned)hw_display < 3)
+        buf_display = hw_display;
     if (hw_pending) swap_kicked = 1;
-    if (buf_ready >= 0 && swap_kicked && !hw_pending) {
+    if (buf_ready == buf_display) {
+        buf_ready = -1;
+        swap_kicked = 0;
+    } else if (buf_ready >= 0 && swap_kicked && !hw_pending) {
         buf_display = buf_ready;
         buf_ready = -1;
         swap_kicked = 0;
     }
+}
+
+static int pick_free_buffer(void) {
+    for (int i = 0; i < 3; i++) {
+        if (i != buf_display && i != buf_ready)
+            return i;
+    }
+    return buf_draw;
 }
 
 void of_video_init(void) {
@@ -188,53 +207,50 @@ uint8_t *of_video_buffer_addr(int idx) {
 
 int of_video_acquire_next(int just_flipped_idx, uint32_t fence_token) {
     /* CMD_FLIP path: gpu_core pulses gpu_swap_req after its m_wr drain,
-     * then publishes fence_reached.  This function does TWO waits:
+     * then publishes fence_reached.  This function does one bounded
+     * wait:
      *
      *   1. fence_reached >= fence_token — proves the GPU finished
      *      its m_wr drain and the slave latched fb_swap_pending=1.
      *      Bounded ~5 ms in case CMD_FLIP wedged.
-     *   2. fb_swap_pending clears on the vsync edge — proves the
-     *      queued buffer has been committed to scanout and
-     *      just_flipped_idx is safe to hand back to the app.
      *
-     * The second wait is what the cr-acquire-next-vsync-wait CR fixed
-     * — without it, gpudemo modes 1/2/3 freerun at ~340 fps with
-     * tearing.  The CPU spin is preferable to an RTL stall here:
-     * during the wait the GPU command processor is free to chew
-     * through the next frame's queued commands, overlapping vsync
-     * with rendering. */
+     * It then returns the third buffer: not the current scanout buffer
+     * and not the buffer queued for the next vsync.  Do not wait for
+     * fb_swap_pending to clear here; that defeats triple buffering by
+     * charging the app for scanout time.  Callers that want to limit
+     * themselves to one outstanding flip should call of_video_wait_flip()
+     * before queuing the next CMD_FLIP. */
     vrr_update();
+    sync_swap_state();
 
     if (just_flipped_idx < 0) {
         return buf_draw;
     }
 
+    int fence_ok = 0;
     {
         uint32_t spins = 500000u;            /* ~5 ms @ 100 MHz */
         while ((int32_t)(GPU_FENCE_REACHED_REG - fence_token) < 0) {
             if (--spins == 0) break;
         }
+        fence_ok = ((int32_t)(GPU_FENCE_REACHED_REG - fence_token) >= 0);
     }
 
-    FB_SWAP_CTRL = ((uint32_t)(just_flipped_idx & 0x3) << 1) | 1;
+    sync_swap_state();
 
-    /* Wait for the queued swap to retire on the vsync edge.  Until
-     * fb_swap_pending clears, scanout is still reading from
-     * just_flipped_idx — handing it back to the app would let pixel
-     * writes race the readout (visible as tearing).  Deadline ~50 ms
-     * covers two frames at the slowest VRR rate (~42 Hz) so a stalled
-     * scanout degrades to ~50 ms/frame instead of freezing. */
-    {
-        uint64_t deadline = read_cycles() + (CPU_FREQ_HZ / 20);
-        while (FB_SWAP_CTRL & 1) {
-            if (read_cycles() > deadline) break;
-        }
+    if (!fence_ok) {
+        /* Fallback for a wedged/missing CMD_FLIP: queue the same buffer
+         * through the CPU path so the app degrades instead of freezing.
+         * Normal successful CMD_FLIP must not write FB_SWAP_CTRL again;
+         * re-kicking the same idx can miss the current vsync and insert
+         * an avoidable extra frame of latency. */
+        FB_SWAP_CTRL = ((uint32_t)(just_flipped_idx & 0x3) << 1) | 1;
     }
 
-    buf_display = just_flipped_idx;
-    buf_ready = -1;
-    swap_kicked = 0;
-    buf_draw = (buf_display + 1) % 3;
+    buf_ready = just_flipped_idx;
+    swap_kicked = 1;
+    sync_swap_state();
+    buf_draw = pick_free_buffer();
     return buf_draw;
 }
 

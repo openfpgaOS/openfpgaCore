@@ -944,6 +944,24 @@ localparam CMD_DRAW_SPAN         = 8'h40;
 // lets the CPU stream commands at cached-store speed instead of one
 // blocking AXI write per word.
 localparam CMD_DRAW_SPANS_BATCH  = 8'h41;
+// Compact four-lane vertical affine span.  Serialises four adjacent
+// columns through the existing fragment pipe, but carries the shared
+// descriptor state once:
+//   word 0  = framebuffer byte address for lane 0
+//   word 1  = {count[15:0], flags[7:0], reserved[3:0], colormap_id[3:0]}
+//   word 2  = {fb_stride[15:0], tex_width[15:0]}
+//   word 3..6   = tex_addr[0..3]
+//   word 7..10  = t[0..3]       (Q16.16)
+//   word 11..14 = tstep[0..3]   (Q16.16)
+//   word 15     = {light3, light2, light1, light0}
+// s/sstep are fixed at 0, so callers use tex_addr[lane] as the
+// column/texel base and tex_width as the row pitch.  colormap_id is
+// explicit (including slot 0), not sticky-state fallback.
+localparam CMD_DRAW_SPAN4        = 8'h43;
+// Batched form of the same compact 4-column payload: header
+// payload_words = 16 * N.  Decoder loops DRAW_SPAN4 front-end state
+// just as CMD_DRAW_SPANS_BATCH loops 15-word scalar spans.
+localparam CMD_DRAW_SPAN4_BATCH  = 8'h44;
 // Removed commands (reserved opcodes, do not reuse):
 //   0x22 CMD_SET_BLEND      — no combine path in the datapath
 //   0x25 CMD_SET_SHADE      — Gouraud gradient dropped in the FMax push
@@ -1009,6 +1027,49 @@ reg [15:0] sp_tex_width;
 // are powers of two (always true for BUILD/Quake/Doom textures).
 reg [15:0] sp_tex_w_mask;
 reg [15:0] sp_tex_h_mask;
+
+// Compact 4-column affine command state.  This is deliberately kept as
+// a thin front-end over the existing span registers so DRAW_SPAN,
+// DRAW_SPANS_BATCH, colormap, skip-zero and translucency all share the
+// same byte-producing datapath.
+reg [31:0] span4_fb_base;
+reg signed [15:0] span4_fb_stride;
+reg [15:0] span4_count;
+reg [7:0]  span4_flags;
+reg [3:0]  span4_colormap_id;
+reg [15:0] span4_tex_width;
+reg [1:0]  span4_lane;
+reg [31:0] span4_tex_addr [0:3];
+reg signed [31:0] span4_t [0:3];
+reg signed [31:0] span4_tstep [0:3];
+reg [7:0]  span4_light [0:3];
+
+task span4_load_lane;
+    input [1:0] lane;
+    begin
+        sp_fb_addr      <= span4_fb_base + {30'b0, lane};
+        sp_tex_addr     <= span4_tex_addr[lane];
+        sp_s            <= 32'sd0;
+        sp_t            <= span4_t[lane];
+        sp_sstep        <= 32'sd0;
+        sp_tstep        <= span4_tstep[lane];
+        sp_count        <= span4_count;
+        sp_colormap_id  <= span4_colormap_id;
+        sp_light_q      <= {8'b0, span4_light[lane], 16'b0};
+        sp_light_step   <= 32'b0;
+        sp_flags        <= span4_flags;
+        sp_fb_stride    <= span4_fb_stride;
+        sp_tex_width    <= (span4_tex_width == 16'd0) ? 16'd1 : span4_tex_width;
+        sp_tex_w_mask   <= 16'hFFFF;
+        sp_tex_h_mask   <= 16'hFFFF;
+        sp_sZ           <= 32'sd0;
+        sp_tZ           <= 32'sd0;
+        sp_zinv         <= 32'sd0;
+        sp_sZstep       <= 32'sd0;
+        sp_tZstep       <= 32'sd0;
+        sp_zinv_step    <= 32'sd0;
+    end
+endtask
 
 // Span flags
 //
@@ -1100,12 +1161,15 @@ reg cmd_is_clear_rect;
 reg cmd_is_set_texture;
 reg cmd_is_set_fb;
 reg cmd_is_draw_span;
+reg cmd_is_draw_span4;
+reg cmd_is_draw_span4_batch;
 // cmd_is_draw_spans_batch: 1 while processing a CMD_DRAW_SPANS_BATCH —
 // drives the per-span re-entry to S_PAY_DATA after each span renders.
 // span_field_idx counts 0..14 inside the current span's 15-word payload
 // (resets each span's start); used as the case index instead of pay_idx.
 reg cmd_is_draw_spans_batch;
 reg [4:0] span_field_idx;
+reg [4:0] span4_field_idx;
 reg cmd_is_set_skip_zero;
 reg cmd_is_set_colormap_id;
 reg cmd_is_draw_triangles;
@@ -1934,8 +1998,11 @@ always @(posedge clk) begin
         cmd_is_set_texture <= 0;
         cmd_is_set_fb <= 0;
         cmd_is_draw_span <= 0;
+        cmd_is_draw_span4 <= 0;
+        cmd_is_draw_span4_batch <= 0;
         cmd_is_draw_spans_batch <= 0;
         span_field_idx <= 0;
+        span4_field_idx <= 0;
         cmd_is_set_skip_zero <= 0;
         cmd_is_set_colormap_id <= 0;
         st_colormap_id <= 4'b0;
@@ -2037,6 +2104,13 @@ always @(posedge clk) begin
         st_tex_addr <= 0; st_tex_width <= 0;
         sp_tex_w_mask <= 16'hFFFF; sp_tex_h_mask <= 16'hFFFF;
         st_fb_addr <= 0; st_fb_stride <= 320;
+        span4_fb_base <= 0;
+        span4_fb_stride <= 0;
+        span4_count <= 0;
+        span4_flags <= 0;
+        span4_colormap_id <= 0;
+        span4_tex_width <= 16'd1;
+        span4_lane <= 0;
     end else begin
         // Ring reset: set rdptr to 0 (from MMIO ring_size write)
         if (ring_reset)
@@ -2121,8 +2195,11 @@ always @(posedge clk) begin
             cmd_is_set_texture    <= (cmd_type == CMD_SET_TEXTURE);
             cmd_is_set_fb         <= (cmd_type == CMD_SET_FB);
             cmd_is_draw_span        <= (cmd_type == CMD_DRAW_SPAN);
+            cmd_is_draw_span4       <= (cmd_type == CMD_DRAW_SPAN4);
+            cmd_is_draw_span4_batch <= (cmd_type == CMD_DRAW_SPAN4_BATCH);
             cmd_is_draw_spans_batch <= (cmd_type == CMD_DRAW_SPANS_BATCH);
             span_field_idx          <= 5'd0;
+            span4_field_idx         <= 5'd0;
             cmd_is_set_skip_zero  <= (cmd_type == CMD_SET_SKIP_ZERO);
             cmd_is_set_colormap_id <= (cmd_type == CMD_SET_COLORMAP_ID);
             cmd_is_draw_triangles <= (cmd_type == CMD_DRAW_TRIANGLES);
@@ -2222,6 +2299,45 @@ always @(posedge clk) begin
             end
             else if (cmd_is_set_colormap_id) begin
                 if (pay_idx == 5'd0) st_colormap_id <= ring_rd_data[3:0];
+            end
+            else if (cmd_is_draw_span4 || cmd_is_draw_span4_batch) begin
+                case (cmd_is_draw_span4_batch ? span4_field_idx : pay_idx)
+                    5'd0: span4_fb_base <= ring_rd_data;
+                    5'd1: begin
+                        span4_count       <= ring_rd_data[31:16];
+                        span4_flags       <= ring_rd_data[15:8];
+                        span4_colormap_id <= ring_rd_data[3:0];
+                    end
+                    5'd2: begin
+                        span4_fb_stride <= ring_rd_data[31:16];
+                        span4_tex_width <= ring_rd_data[15:0];
+                    end
+                    5'd3:  span4_tex_addr[0] <= ring_rd_data;
+                    5'd4:  span4_tex_addr[1] <= ring_rd_data;
+                    5'd5:  span4_tex_addr[2] <= ring_rd_data;
+                    5'd6:  span4_tex_addr[3] <= ring_rd_data;
+                    5'd7:  span4_t[0] <= ring_rd_data;
+                    5'd8:  span4_t[1] <= ring_rd_data;
+                    5'd9:  span4_t[2] <= ring_rd_data;
+                    5'd10: span4_t[3] <= ring_rd_data;
+                    5'd11: span4_tstep[0] <= ring_rd_data;
+                    5'd12: span4_tstep[1] <= ring_rd_data;
+                    5'd13: span4_tstep[2] <= ring_rd_data;
+                    5'd14: span4_tstep[3] <= ring_rd_data;
+                    5'd15: begin
+                        span4_light[0] <= ring_rd_data[7:0];
+                        span4_light[1] <= ring_rd_data[15:8];
+                        span4_light[2] <= ring_rd_data[23:16];
+                        span4_light[3] <= ring_rd_data[31:24];
+                    end
+                    default: ;
+                endcase
+                if (cmd_is_draw_span4_batch) begin
+                    if (span4_field_idx == 5'd15)
+                        span4_field_idx <= 5'd0;
+                    else
+                        span4_field_idx <= span4_field_idx + 5'd1;
+                end
             end
             else if (cmd_is_draw_span) begin
                 case (pay_idx)
@@ -2373,6 +2489,13 @@ always @(posedge clk) begin
             else if (cmd_is_draw_spans_batch && span_field_idx == 5'd14) begin
                 state      <= S_EXECUTE;
             end
+            // Multi-span4 batch: each compact four-lane payload is
+            // 16 words.  Dispatch after field 15 has populated the
+            // span4_* holding regs; post-lane3 flush routes back here
+            // for the next compact payload.
+            else if (cmd_is_draw_span4_batch && span4_field_idx == 5'd15) begin
+                state      <= S_EXECUTE;
+            end
             else begin
                 // Advance rdptr for next word (BRAM read, 1-cycle latency)
                 ring_rdptr <= (ring_rdptr + 16'd4) & ring_mask;
@@ -2431,6 +2554,20 @@ always @(posedge clk) begin
             else if (cmd_is_clear_rect) begin
                 state <= S_CLEAR_RECT;
             end
+            else if (cmd_is_draw_span4 || cmd_is_draw_span4_batch) begin
+                span4_lane <= 2'd0;
+                span4_load_lane(2'd0);
+                persp_active      <= 1'b0;
+                persp_first_done  <= 0;
+                persp_seg_a_ready <= 0;
+                persp_seg_b_ready <= 0;
+                persp_pss         <= PSS_IDLE;
+                persp_pass        <= PSS_PASS_ANCHOR;
+                sp_seg_left       <= 0;
+                src_mode          <= SRC_SPAN;
+                src_done          <= (span4_count == 16'd0);
+                state             <= S_FRAG_PIPE;
+            end
             else if (cmd_is_draw_span || cmd_is_draw_spans_batch) begin
                 // Either standalone span or one span inside a batch:
                 // the sp_* regs are fully loaded for the current span.
@@ -2444,7 +2581,16 @@ always @(posedge clk) begin
                 persp_pass        <= PSS_PASS_ANCHOR;
                 sp_seg_left       <= 0;
                 src_mode     <= SRC_SPAN;
-                src_done     <= 0;
+                // Count=0 spans (legitimate input from BUILD/Quake's
+                // pre-clipped renderers, and from the SDK wire-format
+                // 12-bit count truncation when callers pass count
+                // >=4096) must not deadlock S_FRAG_PIPE.  load_p0 is
+                // gated off when sp_count==0 (line 2494), which would
+                // leave src_done=0 forever and never reach the
+                // pipeline-drain exit at line 3064.  Pre-arm src_done
+                // here so the very first S_FRAG_PIPE cycle sees an
+                // empty pipeline + src_done=1 and exits cleanly.
+                src_done     <= (sp_count == 16'd0);
                 state        <= S_FRAG_PIPE;
             end
             else if (cmd_is_draw_triangles) begin
@@ -3104,7 +3250,24 @@ always @(posedge clk) begin
                 // span_field_idx already wrapped to 0 in the previous
                 // S_PAY_DATA cycle; cmd_is_draw_spans_batch / sp_*
                 // regs persist across this transition.
-                if (cmd_is_draw_spans_batch && pay_remaining > 24'd0) begin
+                if ((cmd_is_draw_span4 || cmd_is_draw_span4_batch)
+                 && span4_lane != 2'd3) begin
+                    span4_lane <= span4_lane + 2'd1;
+                    span4_load_lane(span4_lane + 2'd1);
+                    persp_active      <= 1'b0;
+                    persp_first_done  <= 0;
+                    persp_seg_a_ready <= 0;
+                    persp_seg_b_ready <= 0;
+                    persp_pss         <= PSS_IDLE;
+                    persp_pass        <= PSS_PASS_ANCHOR;
+                    sp_seg_left       <= 0;
+                    src_mode          <= SRC_SPAN;
+                    src_done          <= (span4_count == 16'd0);
+                    state             <= S_FRAG_PIPE;
+                end else if (cmd_is_draw_span4_batch && pay_remaining > 24'd0) begin
+                    ring_rdptr <= (ring_rdptr + 16'd4) & ring_mask;
+                    state      <= S_PAY_DATA;
+                end else if (cmd_is_draw_spans_batch && pay_remaining > 24'd0) begin
                     ring_rdptr <= (ring_rdptr + 16'd4) & ring_mask;
                     state      <= S_PAY_DATA;
                 end else
@@ -3170,7 +3333,24 @@ always @(posedge clk) begin
                     // standalone CMD_DRAW_SPAN we go straight to
                     // S_IDLE — bit-identical to the pre-batch flow,
                     // which is what BUILD's per-column path needs.
-                    if (cmd_is_draw_spans_batch && pay_remaining > 24'd0) begin
+                    if ((cmd_is_draw_span4 || cmd_is_draw_span4_batch)
+                     && span4_lane != 2'd3) begin
+                        span4_lane <= span4_lane + 2'd1;
+                        span4_load_lane(span4_lane + 2'd1);
+                        persp_active      <= 1'b0;
+                        persp_first_done  <= 0;
+                        persp_seg_a_ready <= 0;
+                        persp_seg_b_ready <= 0;
+                        persp_pss         <= PSS_IDLE;
+                        persp_pass        <= PSS_PASS_ANCHOR;
+                        sp_seg_left       <= 0;
+                        src_mode          <= SRC_SPAN;
+                        src_done          <= (span4_count == 16'd0);
+                        state             <= S_FRAG_PIPE;
+                    end else if (cmd_is_draw_span4_batch && pay_remaining > 24'd0) begin
+                        ring_rdptr <= (ring_rdptr + 16'd4) & ring_mask;
+                        state      <= S_PAY_DATA;
+                    end else if (cmd_is_draw_spans_batch && pay_remaining > 24'd0) begin
                         ring_rdptr <= (ring_rdptr + 16'd4) & ring_mask;
                         state      <= S_PAY_DATA;
                     end else

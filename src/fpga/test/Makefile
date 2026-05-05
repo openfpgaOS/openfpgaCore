@@ -183,8 +183,8 @@ SYSTEM_FLAGS = -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC -Wno-CASEINCOMPLETE \
 # ============================================================
 # Targets
 # ============================================================
-.PHONY: all sdram sram gpu gpu-floor gpu-gpudemo gpu-chain axi-periph \
-        audio audio-mixer arbiter system run run-sram build clean
+.PHONY: all sdram sram gpu gpu-floor gpu-gpudemo gpu-acceptance gpu-chain \
+        axi-periph audio audio-mixer arbiter system run run-sram build clean
 
 all: sdram sram gpu axi-periph audio audio-mixer arbiter
 
@@ -257,6 +257,24 @@ $(GPU_GPUDEMO_DIR)/V$(GPU_TOP): $(GPU_SRCS) $(GPU_GPUDEMO_CPP)
 		-I$(COMMON_DIR) \
 		$(GPU_SRCS) $(GPU_GPUDEMO_CPP)
 
+# --- GPU acceptance suite (testgpu.md plan) ---
+# Byte-exact CPU-reference comparison for every command, plus the
+# combination matrices (state-change, paint-order, cmap cache, tex
+# cache, accumulator/blend, ring/DMA).  Hard-fails on any byte
+# mismatch.  Run `make gpu-acceptance` standalone; intentionally not
+# part of `make all` until first green run is captured.
+GPU_ACCEPT_CPP = tb_gpu_acceptance_main.cpp
+GPU_ACCEPT_DIR = obj_dir_gpu_acceptance
+gpu-acceptance: $(GPU_ACCEPT_DIR)/V$(GPU_TOP)
+	@printf "\n=== GPU acceptance suite ===\n"
+	./$(GPU_ACCEPT_DIR)/V$(GPU_TOP)
+
+$(GPU_ACCEPT_DIR)/V$(GPU_TOP): $(GPU_SRCS) $(GPU_ACCEPT_CPP)
+	$(VERILATOR) $(VERILATOR_FLAGS) --top-module $(GPU_TOP) \
+		--Mdir $(GPU_ACCEPT_DIR) \
+		-I$(COMMON_DIR) \
+		$(GPU_SRCS) $(GPU_ACCEPT_CPP)
+
 # --- AXI periph slave ---
 axi-periph: $(AXI_PERIPH_DIR)/V$(AXI_PERIPH_TOP)
 	@printf "\n=== AXI periph slave ===\n"
@@ -326,8 +344,9 @@ $(SYSTEM_DIR)/V$(SYSTEM_TOP): $(SYSTEM_SRCS) $(SYSTEM_CPP)
 # --- Clean ---
 clean:
 	rm -rf $(SDRAM_DIR) $(SRAM_DIR) $(GPU_DIR) $(GPU_FLOOR_DIR) \
-	       $(GPU_GPUDEMO_DIR) \
+	       $(GPU_GPUDEMO_DIR) $(GPU_ACCEPT_DIR) \
 	       $(AXI_PERIPH_DIR) $(AUDIO_DIR) $(MIXER_DIR) $(SYSTEM_DIR) \
 	       $(ARBITER_DIR) \
 	       obj_dir_gpu obj_dir_gpu_floor obj_dir_gpu_gpudemo \
+	       obj_dir_gpu_acceptance \
 	       obj_dir_cdc io_sdram_test.v
