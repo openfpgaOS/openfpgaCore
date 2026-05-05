@@ -285,18 +285,22 @@ void of_file_inval_cram(uint32_t bridge_addr, uint32_t length) {
 
 static int datatable_entry_for_slot(uint32_t slot_id, uint32_t *entry_out) {
     /* APF's datatable is indexed by array position in data.json, while
-     * DS_CMD_READ/GETFILE use the slot `id` field. openfpgaOS reserves
-     * ids 10-19 for the ten nonvolatile save slots, which are appended
-     * after entries 0-7 in data.json; ids 8 and 9 are intentionally
-     * unused in current templates. */
-    if (slot_id < 8) {
+     * DS_CMD_READ/GETFILE use the slot `id` field.  Current layout:
+     *   ids 0-7   -> entries 0-7   (game, os, app, data 1-4, soundbank)
+     *   id  8     -> entry  8      (shared config)
+     *   id  9     -> reserved (gap; not present in data.json)
+     *   ids 10-19 -> entries 9-18  (ten nonvolatile save slots)
+     * If you add or remove a pre-save slot in data.json, this map MUST
+     * be updated in lockstep -- the relationship is contractual and
+     * APF does not expose the id field at runtime to let us derive it. */
+    if (slot_id <= 8) {
         *entry_out = slot_id;
         return 0;
     }
 
     if (slot_id >= 10 &&
         slot_id < 10 + (uint32_t)OF_TARGET_SAVE_MAX_SLOTS) {
-        *entry_out = 8 + (slot_id - 10);
+        *entry_out = 9 + (slot_id - 10);
         return 0;
     }
 
