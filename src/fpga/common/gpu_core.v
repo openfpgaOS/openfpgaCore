@@ -1284,6 +1284,17 @@ reg [7:0]  blend_p3_flags;        // captured for cross-word handling
 reg [31:0] blend_fb_word;         // SDRAM read result (or fb_acc merge)
 reg        blend_arvalid;
 reg [31:0] blend_araddr;
+// Pre-computed in FBSS_BLEND_LUT_WAIT (which otherwise just idles for
+// transluc BRAM read latency), consumed by FBSS_BLEND_APPLY.  Hoists
+// the 32-bit equality compare `fb_acc_addr == blend_word_addr` out of
+// the BLEND_APPLY cycle so the only logic between blend_word_addr (FF)
+// and fb_acc_addr (FF) on the same-word merge path is a 1-bit selector
+// rather than a 32-bit eq + state mux.  Closes the worst GPU-internal
+// path (`blend_word_addr[2] → fb_acc_addr[2]` at -1.031 ns).  Both
+// operands are stable across LUT_WAIT: blend_word_addr is latched on
+// entry to BLEND_REQ; fb_acc_addr is only written by FBSS itself, and
+// BLEND_LUT_WAIT does not write it.
+reg        blend_p3_match_r;
 
 // Tracks whether the texture cache currently has a read in flight on M0.
 // Used by FBSS_BLEND_REQ to wait for M0 to become idle before grabbing it.
@@ -1869,9 +1880,20 @@ wire signed [31:0] grad_axis_b2 = grad_idx[0] ? {{16{dX10[15]}}, dX10}
 // dsp_a/dsp2_a load (one cycle after grad_idx settles, hence the
 // added grad_sub=3'd7 settle cycle in the FSM below).
 reg signed [31:0] grad_dV10_r, grad_dV20_r;
+// Same pattern for the grad_axis backing values feeding dsp_b/dsp2_b.
+// grad_axis_b1/b2 are 2:1 muxes on grad_idx[0] selecting between
+// dX10/dY10 / dX20/dY20.  The path
+// `dX10/Y10/X20/Y20 → grad_idx[0] mux → dsp_b/dsp2_b register input`
+// shows up as the second-tightest GPU family in STA (~-0.72 ns), pulling
+// v_w[1..2] bits through the same wide dsp_b mux Quartus has to build
+// because dsp_b is also written from S_TRI_PERSP_PREMUL et al.  Mirror
+// register makes the S_TRI_GRAD load a clean flop→DSP_in.
+reg signed [31:0] grad_axis_b1_r, grad_axis_b2_r;
 always @(posedge clk) begin
-    grad_dV10_r <= grad_dV10;
-    grad_dV20_r <= grad_dV20;
+    grad_dV10_r    <= grad_dV10;
+    grad_dV20_r    <= grad_dV20;
+    grad_axis_b1_r <= grad_axis_b1;
+    grad_axis_b2_r <= grad_axis_b2;
 end
 
 // ================================================================
@@ -1958,6 +1980,7 @@ always @(posedge clk) begin
         blend_byte_lane  <= 0;
         blend_p3_flags   <= 0;
         blend_fb_word    <= 0;
+        blend_p3_match_r <= 0;
         src_mode <= SRC_SPAN;
         src_done <= 0;
         sp_sZ <= 0; sp_tZ <= 0; sp_zinv <= 0;
@@ -2799,6 +2822,14 @@ always @(posedge clk) begin
                     // BRAM samples it during this cycle, transluc_rd_data is
                     // valid by the start of BLEND_APPLY.
                     fbss <= FBSS_BLEND_APPLY;
+                    // Pre-compute the same-word match for BLEND_APPLY's
+                    // branch.  The 32-bit `fb_acc_addr == blend_word_addr`
+                    // compare lives in a flop-to-flop window here; without
+                    // this hoist it sits in series with BLEND_APPLY's mux
+                    // back into fb_acc_addr (worst-GPU path -1.031 ns).
+                    blend_p3_match_r <=
+                        (fb_acc_valid && fb_acc_addr == blend_word_addr)
+                     || !fb_acc_valid;
                 end
 
                 FBSS_BLEND_APPLY: begin : fbss_blend_apply_blk
@@ -2807,10 +2838,7 @@ always @(posedge clk) begin
                     // including the cross-word flush case.  Cannot just
                     // re-enter IDLE because p3 may already have shifted
                     // out (we cleared p3_valid on entry to BLEND_REQ).
-                    reg p3_word_match_b;
-                    p3_word_match_b = (fb_acc_valid && fb_acc_addr == blend_word_addr)
-                                   || !fb_acc_valid;
-                    if (!p3_word_match_b) begin
+                    if (!blend_p3_match_r) begin
                         // Cross-word: flush old fb_acc, queue blended byte
                         // for re-application (same as FBSS_FLUSH_W_RSP path).
                         m_wr_awvalid <= 1;
@@ -3631,8 +3659,8 @@ always @(posedge clk) begin
                     // (one-cycle-behind copy of the deep mux output).
                     // grad_idx is stable since sub-cycle 7, so the
                     // registered values reflect the current iteration.
-                    dsp_a  <= grad_dV10_r; dsp_b  <= grad_axis_b1;
-                    dsp2_a <= grad_dV20_r; dsp2_b <= grad_axis_b2;
+                    dsp_a  <= grad_dV10_r; dsp_b  <= grad_axis_b1_r;
+                    dsp2_a <= grad_dV20_r; dsp2_b <= grad_axis_b2_r;
                 end
                 3'd1: begin end  // DSP pipeline delay
                 3'd2: begin
