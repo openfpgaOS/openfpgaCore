@@ -13,7 +13,9 @@
 #            of prefetcher logic and reduces placement pressure.)
 #   Branch : BTB 256 sets + GShare 1 KB + RAS, relaxed branch pipeline
 #            (jumpAt=1 — gives the fitter an extra cycle on BTB-hit paths)
-#   FPU    : single-precision (F extension)
+#   FPU    : single-precision (F extension), subnormals flushed/ignored to
+#            remove the unpacker normalizer freeze path from the 100 MHz
+#            execute-control critical path.
 #   Zicbom : cache block management (cbo.clean/flush/inval)
 #   Bypass : --allow-bypass-from=0 (full combinational bypass enabled)
 #            Bypass-from=2 disables the early-ALU bypass entirely and
@@ -67,6 +69,7 @@ sbt "Test/runMain vexiiriscv.Generate \
       --with-btb --btb-sets=256 --relaxed-btb --relaxed-btb-hit \
       --with-gshare --gshare-bytes=1024 --with-ras \
       --allow-bypass-from=0 \
+      --fpu-ignore-subnormal \
       --relaxed-src --relaxed-branch --relaxed-div \
       --reset-vector=0 \
       --region base=0,size=8000,main=0,exe=1 \

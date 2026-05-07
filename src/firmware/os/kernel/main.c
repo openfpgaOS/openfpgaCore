@@ -18,8 +18,9 @@
 
 /* Fallback load address for PIE (ET_DYN) apps that have vaddrs relative to 0.
  * ET_EXEC apps linked at a nonzero base (e.g. 0x10400000 SDRAM) ignore this
- * and use their own absolute vaddrs.  Matches __app_load_base in os.ld. */
-#define APP_LOAD_ADDR   0x30100000
+ * and use their own absolute vaddrs.  Matches __app_load_base in os.ld and
+ * must stay in SDRAM, not the CRAM0 nonvolatile window. */
+#define APP_LOAD_ADDR   0x10400000u
 
 /* Symbols from linker script */
 extern char __os_bss_end[];

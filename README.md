@@ -10,7 +10,7 @@ A game development platform for the [Analogue Pocket](https://www.analogue.co/po
 - **320×240 double-buffered video** — 6 color modes (8/4/2-bit indexed, RGB565, RGB555, RGBA5551), 256-entry palette
 - **32-voice software PCM mixer** — 16/8-bit signed samples, per-voice pitch/pan/volume, linear interpolation, 48 kHz stereo I2S output
 - **Sample-based MIDI** — `of_midi` library renders Standard MIDI Files (Format 0/1) through `of_smp_voice`; ships with a Roland SC-55-derived `.ofsf` General MIDI bank at `assets/banks/sc55.ofsf`
-- **Save system** — 10 × 256 KB APF nonvolatile save slots auto-loaded into the CRAM0 save window and committed on `fclose()`
+- **Save system** — 10 × 256 KB APF nonvolatile save slots auto-loaded into CRAM0, updated on `fclose()`, and persisted on core exit
 - **96 MB+ memory** — 64 MB SDRAM, 16 MB CRAM0, 16 MB CRAM1, 256 KB SRAM
 - **2-player input** — d-pad, ABXY, L/R shoulders, analog sticks, triggers
 - **Analogizer support** — RGBS/YPbPr/composite video, SNAC controllers

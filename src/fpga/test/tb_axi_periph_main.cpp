@@ -42,6 +42,18 @@ static void reset_sequence() {
     tb->gpu_swap_req_in = 0;  // CMD_FLIP side-port idle
     tb->gpu_swap_idx_in = 0;
     tb->vsync_in        = 0;
+    tb->cont1_key_in    = 0;
+    tb->cont1_joy_in    = 0;
+    tb->cont1_trig_in   = 0;
+    tb->cont2_key_in    = 0;
+    tb->cont2_joy_in    = 0;
+    tb->cont2_trig_in   = 0;
+    tb->cont3_key_in    = 0;
+    tb->cont3_joy_in    = 0;
+    tb->cont3_trig_in   = 0;
+    tb->cont4_key_in    = 0;
+    tb->cont4_joy_in    = 0;
+    tb->cont4_trig_in   = 0;
     for (int i = 0; i < 10; i++) tick();
     tb->reset_n = 1;
     for (int i = 0; i < 10; i++) tick();
@@ -665,6 +677,102 @@ static void test_sysreg_polling() {
     check_eq("poll-ds-status-32x", ok, 1);
 }
 
+static void test_save_dt_commit_toggle() {
+    printf("test_save_dt_commit_toggle:\n");
+
+    const uint32_t SAVE_DT_SLOT = 0x40000048u;
+    const uint32_t SAVE_DT_SIZE = 0x4000004Cu;
+
+    uint32_t c0 = tb->dbg_save_dt_commit ? 1u : 0u;
+    axi_write_single(SAVE_DT_SLOT, 3u);
+    axi_write_single(SAVE_DT_SIZE, 0x00012345u);
+    for (int i = 0; i < 4; i++) tick();
+
+    check_eq("save-dt-slot", tb->dbg_save_dt_slot, 3u);
+    check_eq("save-dt-size-1", tb->dbg_save_dt_size, 0x00012345u);
+    check_eq("save-dt-toggle-1", (tb->dbg_save_dt_commit ? 1u : 0u) ^ c0, 1u);
+
+    uint32_t c1 = tb->dbg_save_dt_commit ? 1u : 0u;
+    axi_write_single(SAVE_DT_SIZE, 0x00023456u);
+    for (int i = 0; i < 4; i++) tick();
+
+    check_eq("save-dt-size-2", tb->dbg_save_dt_size, 0x00023456u);
+    check_eq("save-dt-toggle-2", (tb->dbg_save_dt_commit ? 1u : 0u) ^ c1, 1u);
+}
+
+static uint32_t mmio_read32(uint32_t addr) {
+    std::vector<uint32_t> r;
+    if (!axi_read_burst(addr, 0, r)) {
+        fails++;
+        printf("  FAIL mmio_read32 0x%08x did not complete\n", addr);
+        return 0xFFFFFFFFu;
+    }
+    return r[0];
+}
+
+static void test_input_hub(void) {
+    printf("test_input_hub (raw slot regs + FIFO + input IRQ):\n");
+
+    const uint32_t SYS_GAME_ID       = 0x40000068u;
+    const uint32_t SYS_COLOR_MODE    = 0x40000070u;
+    const uint32_t IRQ_MASK          = 0x400000FCu;
+    const uint32_t INPUT_STATUS      = 0x40000100u;
+    const uint32_t INPUT_IRQ_MASK    = 0x40000104u;
+    const uint32_t INPUT_IRQ_CLEAR   = 0x40000108u;
+    const uint32_t INPUT_SLOT2_KEY   = 0x40000134u;
+    const uint32_t INPUT_SLOT2_JOY   = 0x40000138u;
+    const uint32_t INPUT_SLOT2_TRIG  = 0x4000013Cu;
+    const uint32_t INPUT_FIFO_DATA0  = 0x40000150u;
+    const uint32_t INPUT_FIFO_DATA1  = 0x40000154u;
+
+    /* Guard the old register map: the input hub must not occupy the
+     * old proposed 0x68/0x70 range. */
+    check_eq("input-hub-sys-game-id-unchanged", mmio_read32(SYS_GAME_ID), 0u);
+    check_eq("input-hub-color-mode-unchanged",  mmio_read32(SYS_COLOR_MODE), 0u);
+
+    /* Enable all APF slots. The mask write also seeds the change detector
+     * from the current raw state so startup values do not create events. */
+    axi_write_single(INPUT_IRQ_MASK, 0xFu);
+    for (int i = 0; i < 6; i++) tick();
+    check_eq("input-mask-readback", mmio_read32(INPUT_IRQ_MASK) & 0xFu, 0xFu);
+
+    tb->cont3_key_in  = 0x00000030u;
+    tb->cont3_joy_in  = 0x11223344u;
+    tb->cont3_trig_in = 0x55AAu;
+    for (int i = 0; i < 8; i++) tick();
+
+    check_eq("input-slot2-key",  mmio_read32(INPUT_SLOT2_KEY),  0x00000030u);
+    check_eq("input-slot2-joy",  mmio_read32(INPUT_SLOT2_JOY),  0x11223344u);
+    check_eq("input-slot2-trig", mmio_read32(INPUT_SLOT2_TRIG), 0x000055AAu);
+
+    uint32_t status = mmio_read32(INPUT_STATUS);
+    check_eq("input-status-pending", status & 0x1u, 1u);
+    check_eq("input-status-not-empty", (status >> 1) & 0x1u, 0u);
+
+    axi_write_single(IRQ_MASK, 0x10u);
+    for (int i = 0; i < 2; i++) tick();
+    check_eq("input-ext-irq-asserted", tb->ext_irq_out ? 1u : 0u, 1u);
+
+    uint32_t ev_lo = mmio_read32(INPUT_FIFO_DATA0);
+    uint32_t ev_hi = mmio_read32(INPUT_FIFO_DATA1);  /* DATA1 read pops */
+    check_eq("input-event-seq0", ev_lo, 0u);
+    check_eq("input-event-type",   (ev_hi >> 24) & 0xFFu, 0x01u);
+    check_eq("input-event-slot2",  (ev_hi >> 16) & 0xFFu, 0x02u);
+    check_eq("input-event-fields", (ev_hi >> 8)  & 0xFFu, 0x07u);
+
+    for (int i = 0; i < 4; i++) tick();
+    check_eq("input-ext-irq-cleared-after-pop", tb->ext_irq_out ? 1u : 0u, 0u);
+
+    tb->cont3_key_in = 0x00000010u;
+    for (int i = 0; i < 8; i++) tick();
+    check_eq("input-pending-second-change", mmio_read32(INPUT_STATUS) & 0x1u, 1u);
+    axi_write_single(INPUT_IRQ_CLEAR, 0x9u);
+    for (int i = 0; i < 4; i++) tick();
+    check_eq("input-clear-drops-pending", mmio_read32(INPUT_STATUS) & 0x1u, 0u);
+
+    axi_write_single(IRQ_MASK, 0x0u);
+}
+
 // Mixed BRAM + peripheral pattern (like boot stub: fetch instruction,
 // poll MMIO, fetch more, etc.)
 static void test_mixed_bram_periph() {
@@ -732,6 +840,40 @@ static void test_gpu_read_addressing(void) {
     check_eq("gpu-rd-adversarial-pairs", ok, 1);
 }
 
+// ====================================================================
+// Mixer POS read path — core_top registers mix_pos_readback one cycle
+// after mix_voice_sel_rd changes.  axi_periph_slave must wait that
+// cycle before returning 0x48000880+voice*4, otherwise reads return
+// the prior selected voice's position.
+// ====================================================================
+static void test_mixer_pos_read_registered_boundary(void) {
+    printf("test_mixer_pos_read_registered_boundary:\n");
+
+    const uint32_t MIX_POS_BASE = 0x48000880u;
+    int ok = 1;
+    for (uint32_t v = 0; v < 8; v++) {
+        uint32_t addr = MIX_POS_BASE + v * 4u;
+        uint32_t expect = 0x100u + v;
+        uint32_t got = mmio_read32(addr) & 0x3FFFFFu;
+        if (got != expect) {
+            printf("  voice %u: got=0x%05x expected=0x%05x\n",
+                   v, got, expect);
+            ok = 0;
+        }
+    }
+
+    // Adversarial order: voice 7 followed by voice 0 catches stale
+    // previous-selection behaviour directly.
+    uint32_t got7 = mmio_read32(MIX_POS_BASE + 7u * 4u) & 0x3FFFFFu;
+    uint32_t got0 = mmio_read32(MIX_POS_BASE + 0u * 4u) & 0x3FFFFFu;
+    if (got7 != 0x107u || got0 != 0x100u) {
+        printf("  pair 7->0: got7=0x%05x got0=0x%05x\n", got7, got0);
+        ok = 0;
+    }
+
+    check_eq("mixer-pos-registered-readback", ok, 1);
+}
+
 int main(int argc, char **argv) {
     Verilated::commandArgs(argc, argv);
     tb = new Vtb_axi_periph;
@@ -744,6 +886,8 @@ int main(int argc, char **argv) {
     test_back_to_back_cachelines();
     test_burst_with_backpressure();
     test_sysreg_polling();
+    test_save_dt_commit_toggle();
+    test_input_hub();
     test_mixed_bram_periph();
 
     // GPU MMIO hammer — probe the CPU↔GPU write path for dropped
@@ -757,6 +901,7 @@ int main(int argc, char **argv) {
 
     // GPU MMIO read addressing — caught the registered-rdata off-by-one.
     test_gpu_read_addressing();
+    test_mixer_pos_read_registered_boundary();
 
     printf("\n=== Results: %d passed, %d failed ===\n", passes, fails);
     delete tb;

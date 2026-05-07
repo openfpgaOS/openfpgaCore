@@ -276,7 +276,7 @@ always @(posedge clk or posedge reset) begin
 
         ST_RD: begin
             // Release grant when last R beat is transferred
-            if (s_rvalid && s_rlast)
+            if (s_rvalid && s_rready && s_rlast)
                 arb_state <= ST_IDLE;
         end
 

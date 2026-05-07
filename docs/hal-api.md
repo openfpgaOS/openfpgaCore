@@ -179,9 +179,9 @@ Query button state for a player.
 
 ## Save (`hal/save.h`)
 
-Nonvolatile save system staged in the CRAM0 save window. APF auto-loads save slots into CRAM0 before OS boot, and the OS commits dirty save files through the bridge on `fclose()`.
+Nonvolatile save system staged in the CRAM0 save window. APF auto-loads save slots into CRAM0 before OS boot; `fclose()` publishes dirty save data and size metadata in CRAM0, and Pocket persists the nonvolatile slots on core exit.
 
-Apps should prefer standard C `fopen()`/`fwrite`/`fclose` using the save filename from the instance JSON. The OS maps save filenames to writable CRAM0 slots, keeps the APF datatable size current, and commits dirty saves through the bridge on `fclose()`.
+Apps should prefer standard C `fopen()`/`fwrite`/`fclose` using the save filename from the instance JSON. The OS maps save filenames to writable CRAM0 slots and keeps the APF datatable size current.
 
 ```c
 int save_read(int slot, void *buf, uint32_t offset, uint32_t len);

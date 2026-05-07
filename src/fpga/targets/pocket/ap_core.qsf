@@ -691,6 +691,63 @@ set_instance_assignment -name FAST_INPUT_REGISTER ON -to cram0_dq[15]
 set_instance_assignment -name FAST_INPUT_REGISTER ON -to cram0_wait
 # cram1_dq / cram1_wait FAST_INPUT_REGISTER assignments retired with memory-arch v2.
 
+# SDRAM: keep command/address/data mask/data pins in the I/O cells.  These
+# paths are board-facing relative to dram_clk, so fabric-to-pad routing shows
+# up directly as external setup slack.
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to dram_a[0]
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to dram_a[1]
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to dram_a[2]
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to dram_a[3]
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to dram_a[4]
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to dram_a[5]
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to dram_a[6]
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to dram_a[7]
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to dram_a[8]
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to dram_a[9]
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to dram_a[10]
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to dram_a[11]
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to dram_a[12]
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to dram_ba[0]
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to dram_ba[1]
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to dram_dq[0]
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to dram_dq[1]
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to dram_dq[2]
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to dram_dq[3]
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to dram_dq[4]
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to dram_dq[5]
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to dram_dq[6]
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to dram_dq[7]
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to dram_dq[8]
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to dram_dq[9]
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to dram_dq[10]
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to dram_dq[11]
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to dram_dq[12]
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to dram_dq[13]
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to dram_dq[14]
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to dram_dq[15]
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to dram_dqm[0]
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to dram_dqm[1]
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to dram_ras_n
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to dram_cas_n
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to dram_we_n
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to dram_cke
+set_instance_assignment -name FAST_OUTPUT_ENABLE_REGISTER ON -to dram_dq[0]
+set_instance_assignment -name FAST_OUTPUT_ENABLE_REGISTER ON -to dram_dq[1]
+set_instance_assignment -name FAST_OUTPUT_ENABLE_REGISTER ON -to dram_dq[2]
+set_instance_assignment -name FAST_OUTPUT_ENABLE_REGISTER ON -to dram_dq[3]
+set_instance_assignment -name FAST_OUTPUT_ENABLE_REGISTER ON -to dram_dq[4]
+set_instance_assignment -name FAST_OUTPUT_ENABLE_REGISTER ON -to dram_dq[5]
+set_instance_assignment -name FAST_OUTPUT_ENABLE_REGISTER ON -to dram_dq[6]
+set_instance_assignment -name FAST_OUTPUT_ENABLE_REGISTER ON -to dram_dq[7]
+set_instance_assignment -name FAST_OUTPUT_ENABLE_REGISTER ON -to dram_dq[8]
+set_instance_assignment -name FAST_OUTPUT_ENABLE_REGISTER ON -to dram_dq[9]
+set_instance_assignment -name FAST_OUTPUT_ENABLE_REGISTER ON -to dram_dq[10]
+set_instance_assignment -name FAST_OUTPUT_ENABLE_REGISTER ON -to dram_dq[11]
+set_instance_assignment -name FAST_OUTPUT_ENABLE_REGISTER ON -to dram_dq[12]
+set_instance_assignment -name FAST_OUTPUT_ENABLE_REGISTER ON -to dram_dq[13]
+set_instance_assignment -name FAST_OUTPUT_ENABLE_REGISTER ON -to dram_dq[14]
+set_instance_assignment -name FAST_OUTPUT_ENABLE_REGISTER ON -to dram_dq[15]
+
 # Source files added after initial commit
 # audio_mixer.v v2 — hardware voice mixer, SDRAM sample fetch (resurrected post-f11811c).
 # audio_dma.v retired (v1 pre-mixed ring DMA); HW mixer now drives the FIFO directly.
@@ -701,6 +758,7 @@ set_global_assignment -name VERILOG_FILE ../../common/audio_output.v
 set_global_assignment -name VERILOG_FILE ../../common/gpu_core.v
 set_global_assignment -name VERILOG_FILE ../../common/gpu_tex_cache.v
 set_global_assignment -name VERILOG_FILE ../../common/axi_periph_slave.v
+set_global_assignment -name VERILOG_FILE ../../common/sync_fifo.v
 set_global_assignment -name VERILOG_FILE ../../common/vrr_controller.v
 set_global_assignment -name VERILOG_FILE ../../common/snac_shifter.v
 # axi_cram0_slave.v retired — cram0_cdc is the CPU-side AXI slave for
@@ -724,7 +782,7 @@ set_global_assignment -name VERILOG_FILE ../../common/video_CRT_scanout_indexed_
 set_global_assignment -name VERILOG_FILE ../../vendor/vexriscv/VexiiRiscv/VexiiRiscv.v
 set_global_assignment -name VERILOG_FILE mf_pllram_133.v
 set_global_assignment -name SDC_FILE core_constraints.sdc
-set_global_assignment -name SEED 8
+set_global_assignment -name SEED 4
 # Phase 5 fitter-tuning experiments (see session 2026-04-18).  All
 # Quartus knobs we tried — RESOURCE_SHARING, REGISTER_RETIMING,
 # REGISTER_DUPLICATION, ramstyle=MLAB, seed 11 — ended up worse

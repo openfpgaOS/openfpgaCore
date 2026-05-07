@@ -39,7 +39,7 @@ int of_file_read_chunked(uint32_t slot_id, uint32_t slot_offset,
 
 /* Flush a data slot to SD card (Data Slot Write command).
  * Tells the bridge to read from bridge_addr and write to the slot's .sav file.
- * slot_id: APF data slot ID (10-19 for saves)
+ * slot_id: APF nonvolatile data slot ID (config/settings or save)
  * bridge_addr: source address in bridge address space (0x20xxxxxx for CRAM0)
  * length: bytes to write
  * Returns 0 on success, negative on error. */
@@ -49,6 +49,12 @@ int of_file_slot_write(uint32_t slot_id, uint32_t bridge_addr, uint32_t length);
  * Like of_file_slot_write but writes to slot_offset within the .sav file. */
 int of_file_slot_write_at(uint32_t slot_id, uint32_t slot_offset,
                            uint32_t bridge_addr, uint32_t length);
+
+/* Write a larger source range as multiple Data Slot Write commands.
+ * chunk_size == 0 selects one command for the whole range. */
+int of_file_slot_write_chunked(uint32_t slot_id, uint32_t slot_offset,
+                                uint32_t bridge_addr, uint32_t total,
+                                uint32_t chunk_size);
 
 /* Raw bridge DMA: issue a read command and wait for completion.
  * No cache flush — caller is responsible for cache coherency.

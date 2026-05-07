@@ -189,7 +189,6 @@ wire        is_cpu_field =
     (voice_field == VTBL_LEN)        ||
     (voice_field == VTBL_RATE)       ||
     (voice_field == VTBL_CTRL)       ||
-    (voice_field == VTBL_POS_INT)    ||  /* POS_WR writes VTBL_POS_INT directly */
     (voice_field == VTBL_LOOP_END)   ||
     (voice_field == VTBL_LOOP_START) ||
     (voice_field == VTBL_VOL_TARGET) ||
@@ -197,11 +196,10 @@ wire        is_cpu_field =
 wire        vtbl_cpu_b_wr = voice_wr && is_cpu_field;
 
 /* MIX_VOICE_POS_WR (VTBL_POS_INT) and MIX_VOICE_VOL_LR (VTBL_VOL_LR)
- * both target fields that live in vtbl_fsm, not vtbl_cpu.  Route
- * those CPU writes to vtbl_fsm's port A, time-multiplexed with the
- * FSM's own per-sample writes.  Both happen at most once per note-on
- * (rare vs. the FSM's per-sample S_ADVANCE/S_WR_VOL writes), so the
- * race window is tiny.  CPU write wins when both fire same cycle.
+ * both target fields that live in vtbl_fsm, not vtbl_cpu.  Queue those
+ * CPU writes and drain them only from S_IDLE.  That keeps CPU note-on /
+ * retrigger writes from stealing the vtbl_fsm write port from the mixer
+ * FSM's POS_INT/POS_FRAC/VOL_LR commits.
  *
  * VOL_LR was previously NOT routed at all — `is_cpu_field` listed
  * only the vtbl_cpu fields, and POS_INT was the only vtbl_fsm field
@@ -215,12 +213,53 @@ wire        vtbl_cpu_b_wr = voice_wr && is_cpu_field;
 wire        cpu_pos_wr    = voice_wr && (voice_field == VTBL_POS_INT);
 wire        cpu_vol_lr_wr = voice_wr && (voice_field == VTBL_VOL_LR);
 wire        cpu_fsm_wr    = cpu_pos_wr || cpu_vol_lr_wr;
+localparam CPU_FSM_Q_DEPTH  = 64;
+localparam CPU_FSM_Q_ADDR_W = 6;
+localparam [CPU_FSM_Q_ADDR_W:0] CPU_FSM_Q_COUNT_DEPTH = CPU_FSM_Q_DEPTH;
+reg [40:0] cpu_fsm_q_mem [0:CPU_FSM_Q_DEPTH-1];
+reg [CPU_FSM_Q_ADDR_W-1:0] cpu_fsm_q_wr_ptr;
+reg [CPU_FSM_Q_ADDR_W-1:0] cpu_fsm_q_rd_ptr;
+reg [CPU_FSM_Q_ADDR_W:0]   cpu_fsm_q_count;
+reg                        cpu_fsm_q_overflow;
+
+wire cpu_fsm_q_empty = (cpu_fsm_q_count == {CPU_FSM_Q_ADDR_W+1{1'b0}});
+wire cpu_fsm_q_full  = (cpu_fsm_q_count == CPU_FSM_Q_COUNT_DEPTH);
+wire cpu_fsm_q_drain = (state == S_IDLE) && !cpu_fsm_q_empty;
+wire cpu_fsm_q_push  = cpu_fsm_wr && (!cpu_fsm_q_full || cpu_fsm_q_drain);
+wire [40:0] cpu_fsm_q_front = cpu_fsm_q_mem[cpu_fsm_q_rd_ptr];
+wire [8:0]  cpu_fsm_commit_addr = cpu_fsm_q_front[40:32];
+wire [31:0] cpu_fsm_commit_data = cpu_fsm_q_front[31:0];
 wire        vtbl_fsm_wren_a;
 wire [8:0]  vtbl_fsm_addr_a;
 wire [31:0] vtbl_fsm_data_a;
-assign vtbl_fsm_wren_a = cpu_fsm_wr ? 1'b1 : vtbl_a_wr;
-assign vtbl_fsm_addr_a = cpu_fsm_wr ? {voice_sel, voice_field} : vtbl_a_addr;
-assign vtbl_fsm_data_a = cpu_fsm_wr ? voice_wdata : vtbl_a_data;
+assign vtbl_fsm_wren_a = cpu_fsm_q_drain ? 1'b1 : vtbl_a_wr;
+assign vtbl_fsm_addr_a = cpu_fsm_q_drain ? cpu_fsm_commit_addr : vtbl_a_addr;
+assign vtbl_fsm_data_a = cpu_fsm_q_drain ? cpu_fsm_commit_data : vtbl_a_data;
+
+always @(posedge clk) begin
+    if (!reset_n) begin
+        cpu_fsm_q_wr_ptr   <= {CPU_FSM_Q_ADDR_W{1'b0}};
+        cpu_fsm_q_rd_ptr   <= {CPU_FSM_Q_ADDR_W{1'b0}};
+        cpu_fsm_q_count    <= {CPU_FSM_Q_ADDR_W+1{1'b0}};
+        cpu_fsm_q_overflow <= 1'b0;
+    end else begin
+        if (cpu_fsm_q_push) begin
+            cpu_fsm_q_mem[cpu_fsm_q_wr_ptr] <= {{voice_sel, voice_field}, voice_wdata};
+            cpu_fsm_q_wr_ptr <= cpu_fsm_q_wr_ptr + {{CPU_FSM_Q_ADDR_W-1{1'b0}}, 1'b1};
+        end else if (cpu_fsm_wr) begin
+            cpu_fsm_q_overflow <= 1'b1;
+        end
+
+        if (cpu_fsm_q_drain)
+            cpu_fsm_q_rd_ptr <= cpu_fsm_q_rd_ptr + {{CPU_FSM_Q_ADDR_W-1{1'b0}}, 1'b1};
+
+        case ({cpu_fsm_q_push, cpu_fsm_q_drain})
+            2'b10: cpu_fsm_q_count <= cpu_fsm_q_count + {{CPU_FSM_Q_ADDR_W{1'b0}}, 1'b1};
+            2'b01: cpu_fsm_q_count <= cpu_fsm_q_count - {{CPU_FSM_Q_ADDR_W{1'b0}}, 1'b1};
+            default: cpu_fsm_q_count <= cpu_fsm_q_count;
+        endcase
+    end
+end
 
 /* vtbl_cpu — plain reg array with async read + sync write.  Matches
  * the 0-cycle combinational read semantics of altsyncram UNREGISTERED
@@ -255,20 +294,45 @@ assign vtbl_fsm_q = vtbl_fsm_mem[vtbl_a_addr];
 
 // Shadow active bit — updated when CPU writes CTRL (bit 0), or when
 // the FSM retires a one-shot voice (voice_end_clear_mask pulses high
-// for one cycle with bit `cur_voice` set).  CPU write wins if both
-// happen the same cycle.
+// for one cycle with bit `cur_voice` set).  CTRL active writes are
+// deferred until queued POS/VOL writes have drained so note-on starts
+// with a coherent position/current-volume tuple.
 reg [31:0] voice_active;
+reg [31:0] voice_start_pending;
 reg [31:0] voice_end_clear_mask;
 always @(posedge clk) begin
-    if (!reset_n)
+    if (!reset_n) begin
         voice_active <= 32'd0;
-    else begin
+        voice_start_pending <= 32'd0;
+    end else begin
         // Start from "clear any bits the FSM flagged this cycle".
         reg [31:0] next_active;
+        reg [31:0] next_pending;
         next_active = voice_active & ~voice_end_clear_mask;
-        if (voice_wr && voice_field == VTBL_CTRL)
-            next_active[voice_sel] = voice_wdata[0];
+        next_pending = voice_start_pending;
+
+        // A CPU write to FSM-owned start state is part of a re-arm /
+        // retrigger sequence.  Keep the voice silent until the queued
+        // write is applied and the following CTRL active write commits.
+        if (cpu_fsm_wr)
+            next_active[voice_sel] = 1'b0;
+
+        if (voice_wr && voice_field == VTBL_CTRL) begin
+            if (voice_wdata[0])
+                next_pending[voice_sel] = 1'b1;
+            else begin
+                next_active[voice_sel] = 1'b0;
+                next_pending[voice_sel] = 1'b0;
+            end
+        end
+
+        if (cpu_fsm_q_empty && !cpu_fsm_wr) begin
+            next_active = next_active | next_pending;
+            next_pending = 32'd0;
+        end
+
         voice_active <= next_active;
+        voice_start_pending <= next_pending;
     end
 end
 
@@ -426,8 +490,11 @@ localparam S_OUTPUT         = 5'd25;
 localparam S_RAMP_STEP      = 5'd26;
 localparam S_WR_VOL         = 5'd27;
 localparam S_VOICE_END      = 5'd28;
+localparam S_ADV_WRAP       = 6'd32;
+localparam S_ADV_CHECK      = 6'd33;
+localparam S_ADV_COMMIT     = 6'd34;
 
-reg [4:0] state;
+reg [5:0] state;
 reg [4:0] cur_voice;
 reg [4:0] next_voice;
 
@@ -441,6 +508,8 @@ reg [21:0] cur_pos_int;
 reg [15:0] cur_pos_frac;
 reg [7:0]  cur_vol_l, cur_vol_r;
 reg [21:0] cur_loop_end, cur_loop_start;
+reg [21:0] cur_loop_len;
+reg        cur_loop_valid;
 reg [7:0]  cur_vol_tgt_l, cur_vol_tgt_r;
 reg [7:0]  cur_vol_rate;
 /* Per-voice volume-write pipeline (4 stages):
@@ -525,12 +594,22 @@ reg signed [32:0] delta_l_reg, delta_r_reg;
 // 100 MHz cycles — invisible).
 reg lerp_phase;
 
-// Pipeline registers between S_ADV_COMPUTE and S_ADVANCE — the raw
-// pos/frac advance (two chained 22-bit adders) gets its own cycle so
-// the wrap compare + subtract-add + pos_latch M10K write runs alone.
-// Previously the full chain blew the 100 MHz budget by 2 ns.
+// Pipeline registers for the advance path.  Keep each cycle to one
+// simple job:
+//   S_ADV_COMPUTE -> raw pos/frac add
+//   S_ADVANCE     -> first boundary decision / optional one loop subtract
+//   S_ADV_CHECK   -> repeat-wrap or end/commit decision
+//   S_ADV_WRAP    -> one more loop subtract when rate skips many loops
+//   S_ADV_COMMIT  -> VTBL/POS_LATCH write setup
+//
+// The previous S_ADVANCE/S_ADV_WRAP implementation let cur_loop_start /
+// cur_loop_end feed compare + subtract-add + repeat-wrap check + VTBL
+// address muxing in one cycle, which became the 100 MHz critical path.
 reg [17:0] adv_new_frac_full;
 reg [21:0] adv_new_pos_raw;
+reg [21:0] adv_pos_next;
+reg        adv_voice_ended;
+reg        adv_check_wrap;
 
 // Stereo accumulators for the current output sample (s32 to avoid
 // overflow across 32 voices).
@@ -586,7 +665,9 @@ always @(posedge clk) begin
 
     // ---- Idle: wait for FIFO to drop below half, then start new sample ----
     S_IDLE: begin
-        if (mixer_enable && fifo_level[9:8] != 2'b11) begin
+        if (!cpu_fsm_q_empty || cpu_fsm_wr) begin
+            state <= S_IDLE;
+        end else if (mixer_enable && fifo_level[9:8] != 2'b11) begin
             // fifo < 768 entries → room for another ~256 samples.  Begin.
             accum_l    <= 32'sd0;
             accum_r    <= 32'sd0;
@@ -710,6 +791,8 @@ always @(posedge clk) begin
     //                            beat 0, optionally receive beat 1.
     S_FETCH_TAP0_CALC: begin
         cur_loop_start <= vtbl_a_q[21:0];
+        cur_loop_valid <= (cur_loop_end > vtbl_a_q[21:0]);
+        cur_loop_len   <= cur_loop_end - vtbl_a_q[21:0];
         if (cur_pos_int >= cur_length) begin
             state <= S_VOICE_END;
         end else begin
@@ -731,7 +814,7 @@ always @(posedge clk) begin
         reg        wrap_only;
         reg        clamp_after_wrap;
         // Phase 1: loop wrap if applicable.
-        wrap_only = cur_loop && (tap_nxt_raw >= cur_loop_end);
+        wrap_only = cur_loop && cur_loop_valid && (tap_nxt_raw >= cur_loop_end);
         nxt = wrap_only ? cur_loop_start : tap_nxt_raw;
         // Phase 2: clamp if even the (post-wrap) target sits past length.
         clamp_after_wrap = (nxt >= cur_length);
@@ -938,45 +1021,59 @@ always @(posedge clk) begin
         end
     end
 
-    // ---- Advance phase: stage 2 (wrap / clamp / commit) ----
+    // ---- Advance phase: stage 2 (first boundary decision) ----
     S_ADVANCE: begin : adv_a_blk
-        reg [21:0] new_pos;
-        reg        voice_ended;
         begin
-            new_pos     = adv_new_pos_raw;
-            voice_ended = 1'b0;
+            cur_pos_frac    <= adv_new_frac_full[15:0];
+            adv_pos_next    <= adv_new_pos_raw;
+            adv_voice_ended <= 1'b0;
+            adv_check_wrap  <= 1'b0;
 
             if (cur_loop) begin
-                if (new_pos >= cur_loop_end) begin
-                    /* Single-subtraction wrap.  Full `%` of the loop
-                     * length needs 22-bit restoring division, which
-                     * Quartus synthesises as a ~70 ns combinational
-                     * cone and blows the 100 MHz budget.  For every
-                     * realistic playback rate (Q16.16 ≤ ~8×) the
-                     * per-sample excess past loop_end is a handful
-                     * of samples while loop_end-loop_start is
-                     * thousands, so one subtraction always lands
-                     * back inside the loop region. */
-                    new_pos = new_pos - cur_loop_end + cur_loop_start;
+                if (!cur_loop_valid) begin
+                    adv_voice_ended <= 1'b1;
+                end else if (adv_new_pos_raw >= cur_loop_end) begin
+                    adv_pos_next   <= adv_new_pos_raw - cur_loop_len;
+                    adv_check_wrap <= 1'b1;
                 end
             end else begin
-                if (new_pos >= cur_length) begin
-                    voice_ended = 1'b1;
-                end
+                if (adv_new_pos_raw >= cur_length)
+                    adv_voice_ended <= 1'b1;
             end
-
-            cur_pos_int  <= new_pos;
-            cur_pos_frac <= adv_new_frac_full[15:0];
-            if (voice_ended) begin
-                state <= S_VOICE_END;
-            end else begin
-                vtbl_a_addr <= {cur_voice, VTBL_POS_INT};
-                vtbl_a_data <= {10'd0, new_pos};
-                vtbl_a_wr   <= 1'b1;
-                pos_latch[cur_voice] <= new_pos;
-                state       <= S_WR_POS_FRAC;
-            end
+            state <= S_ADV_CHECK;
         end
+    end
+
+    // Stage 3: compare only.  This decides whether a very high rate
+    // skipped more than one loop length.  The VTBL write is deliberately
+    // in S_ADV_COMMIT so cur_loop_end does not feed the RAM address mux.
+    S_ADV_CHECK: begin
+        if (adv_voice_ended) begin
+            cur_pos_int <= adv_pos_next;
+            state       <= S_VOICE_END;
+        end else if (adv_check_wrap && (adv_pos_next >= cur_loop_end)) begin
+            state <= S_ADV_WRAP;
+        end else begin
+            state <= S_ADV_COMMIT;
+        end
+    end
+
+    // Stage 4: one loop-length subtract per pass for extreme rates.
+    S_ADV_WRAP: begin
+        adv_pos_next   <= adv_pos_next - cur_loop_len;
+        adv_check_wrap <= 1'b1;
+        state          <= S_ADV_CHECK;
+    end
+
+    // Stage 5: unconditional commit.  No loop compare or subtract feeds
+    // the VTBL/POS_LATCH setup path in this cycle.
+    S_ADV_COMMIT: begin
+        cur_pos_int           <= adv_pos_next;
+        vtbl_a_addr           <= {cur_voice, VTBL_POS_INT};
+        vtbl_a_data           <= {10'd0, adv_pos_next};
+        vtbl_a_wr             <= 1'b1;
+        pos_latch[cur_voice]  <= adv_pos_next;
+        state                 <= S_WR_POS_FRAC;
     end
 
     S_WR_POS_FRAC: begin

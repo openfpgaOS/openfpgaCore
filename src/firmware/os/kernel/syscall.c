@@ -51,9 +51,12 @@ typedef struct {
     uint32_t offset;        /* Current file offset */
     uint32_t size;          /* File size (0 if unknown) */
     int      flags;         /* O_RDONLY, O_WRONLY, etc. */
-    int      is_save;       /* Is this a save file? */
-    int      save_slot;     /* Save slot index (0-9) */
-    int      dirty;         /* Save data/size needs bridge commit on close */
+    int      is_save;       /* Is this a nonvolatile writable file? */
+    int      save_slot;     /* Save slot index (0-9), or -1 for config/settings */
+    int      nv_cache_idx;  /* Nonvolatile size-cache index */
+    int      dirty;         /* Nonvolatile data/size changed since open */
+    uint32_t nv_write_calls;
+    uint32_t nv_write_bytes;
     int      is_dir;        /* Is this a directory FD? */
     uint32_t dir_pos;       /* Current position in directory listing */
 } fd_entry_t;
@@ -177,6 +180,11 @@ static int io_cache_fill(int entry, uint32_t slot_id,
 #define MAX_FILE_SLOTS      32
 #define FILE_SLOT_NAME_MAX  24
 #define SAVE_SLOT_ID_BASE   10u
+#define DUKE_SETTINGS_SLOT_ID 9u
+#define NV_CONFIG_CACHE_IDX 0
+#define NV_SAVE_CACHE_BASE  1
+#define NV_CACHE_SLOTS      (SAVE_MAX_SLOTS + 1)
+#define NV_TRACE            0
 
 #define O_ACCMODE       03
 #define O_WRONLY        01
@@ -192,10 +200,40 @@ typedef struct {
 
 static file_slot_entry_t file_slots[MAX_FILE_SLOTS];
 static int file_slot_count;
-static uint32_t save_size_cache[SAVE_MAX_SLOTS];
-static uint8_t save_size_known[SAVE_MAX_SLOTS];
+static uint32_t save_size_cache[NV_CACHE_SLOTS];
+static uint8_t save_size_known[NV_CACHE_SLOTS];
 
-static void save_size_cache_store(int save_slot, uint32_t size);
+static void save_size_cache_store(int cache_idx, uint32_t size);
+
+#if NV_TRACE
+static void nv_trace_dump(uint32_t slot_id, uint32_t offset, uint32_t len) {
+    uint8_t buf[32];
+    if (len > sizeof(buf))
+        len = sizeof(buf);
+    if (len == 0)
+        return;
+
+    int rc = of_nvslot_read(slot_id, buf, offset, len);
+    of_term_printf(" data[%x..%x] rc=%d:", offset, offset + len, rc);
+    if (rc > 0) {
+        for (int i = 0; i < rc; i++)
+            of_term_printf(" %02x", (uint32_t)buf[i]);
+    }
+    of_term_putchar('\n');
+}
+
+static void nv_trace_snapshot(const char *tag, uint32_t slot_id,
+                              uint32_t size, uint32_t calls,
+                              uint32_t bytes) {
+    of_term_printf("[nv:%s] slot=%u size=%u calls=%u bytes=%u\n",
+                   tag, slot_id, size, calls, bytes);
+    if (size > 0) {
+        nv_trace_dump(slot_id, 0, size < 32 ? size : 32);
+        if (size > 48)
+            nv_trace_dump(slot_id, size - 16, 16);
+    }
+}
+#endif
 
 void file_slot_register(uint32_t slot_id, const char *filename) {
     if (file_slot_count >= MAX_FILE_SLOTS)
@@ -253,6 +291,17 @@ static int save_slot_from_data_id(uint32_t slot_id) {
     return -1;
 }
 
+static int nv_cache_index_from_data_id(uint32_t slot_id) {
+    if (slot_id == 8 || slot_id == 9)
+        return NV_CONFIG_CACHE_IDX;
+
+    int save_slot = save_slot_from_data_id(slot_id);
+    if (save_slot >= 0)
+        return NV_SAVE_CACHE_BASE + save_slot;
+
+    return -1;
+}
+
 static int open_flags_want_write(long flags) {
     return ((flags & O_ACCMODE) != 0) || ((flags & O_TRUNC) != 0);
 }
@@ -301,6 +350,19 @@ static int save_slot_from_filename(const char *path) {
         slot = slot * 10 + (name[i] - '0');
 
     return (slot < (int)SAVE_MAX_SLOTS) ? slot : -1;
+}
+
+static int nv_settings_slot_from_filename(const char *path) {
+    const char *name = path_basename(path);
+
+    /* Duke's settings slot can be empty on first boot.  Some Pocket
+     * launcher/bridge combinations do not return a useful GETFILE name
+     * for that empty nonvolatile entry, so keep the manifest filename as
+     * a stable fallback. */
+    if (stricmp(name, "duke3d.cfg") == 0)
+        return (int)DUKE_SETTINGS_SLOT_ID;
+
+    return -1;
 }
 
 int file_slot_get_count(void) {
@@ -373,9 +435,9 @@ struct linux_dirent64 {
 #define DT_REG  8
 
 /* Probe data slots: check datatable metadata, then try GETFILE for the
- * real filename. Normal read-only slots need a non-zero size. Save slots
- * are registered when their datatable flags exist, even if the current
- * save file is logically empty. */
+ * real filename. Normal read-only slots need a non-zero size.
+ * Nonvolatile config/save slots are registered when their datatable
+ * flags exist, even if the current file is logically empty. */
 static void dir_probe_slots(void) {
     char name[FILE_SLOT_NAME_MAX];
     /* Slot 0 is reserved by APF (never carries core-visible data).
@@ -385,8 +447,8 @@ static void dir_probe_slots(void) {
         name[0] = '\0';
         long sz = of_file_size(slot);
         long flags = of_file_flags(slot);
-        int save_slot = save_slot_from_data_id(slot);
-        if (sz <= 0 && (save_slot < 0 || flags <= 0))
+        int nv_slot = of_nvslot_is_supported(slot);
+        if (sz <= 0 && (!nv_slot || flags <= 0))
             continue;
 
         /* Retry GETFILE a few times — empirically APF sometimes needs
@@ -514,22 +576,33 @@ static long sys_write(long fd, long buf, long count) {
         if (f->flags & O_APPEND)
             f->offset = f->size;
 
-        if (f->offset >= SAVE_SLOT_SIZE)
+        uint32_t capacity = of_nvslot_capacity(f->slot_id);
+        if (capacity == 0)
+            return -EIO;
+        if (f->offset >= capacity)
             return 0;
-        uint32_t available = SAVE_SLOT_SIZE - f->offset;
+        uint32_t available = capacity - f->offset;
         uint32_t to_write = (uint32_t)count;
         if (to_write > available)
             to_write = available;
 
-        int rc = of_save_write(f->save_slot, (const void *)buf,
-                           f->offset, to_write);
+        int rc = of_nvslot_write(f->slot_id, (const void *)buf,
+                                 f->offset, to_write);
         if (rc > 0) {
             f->offset += rc;
             if (f->offset > f->size)
                 f->size = f->offset;
             f->dirty = 1;
-            save_size_cache_store(f->save_slot, f->size);
-            of_save_set_size(f->save_slot, f->size);
+            f->nv_write_calls++;
+            f->nv_write_bytes += (uint32_t)rc;
+            save_size_cache_store(f->nv_cache_idx, f->size);
+            of_nvslot_set_size(f->slot_id, f->size);
+#if NV_TRACE
+            if (f->nv_write_calls <= 8 || ((f->nv_write_calls & 63u) == 0))
+                of_term_printf("[nv:write] slot=%u off=%u len=%d size=%u call=%u\n",
+                               f->slot_id, f->offset - (uint32_t)rc,
+                               rc, f->size, f->nv_write_calls);
+#endif
         }
         return rc;
     }
@@ -556,8 +629,8 @@ static long sys_read(long fd, long buf, long count) {
         if (to_read > f->size - f->offset)
             to_read = f->size - f->offset;
 
-        int rc = of_save_read(f->save_slot, (void *)buf,
-                          f->offset, to_read);
+        int rc = of_nvslot_read(f->slot_id, (void *)buf,
+                                f->offset, to_read);
         if (rc > 0)
             f->offset += rc;
         return rc;
@@ -667,66 +740,75 @@ static uint32_t save_clamp_size(uint32_t size) {
     return (size > SAVE_SLOT_SIZE) ? SAVE_SLOT_SIZE : size;
 }
 
-static void save_size_cache_store(int save_slot, uint32_t size) {
-    if (save_slot < 0 || save_slot >= (int)SAVE_MAX_SLOTS)
+static void save_size_cache_store(int cache_idx, uint32_t size) {
+    if (cache_idx < 0 || cache_idx >= (int)NV_CACHE_SLOTS)
         return;
-    save_size_cache[save_slot] = save_clamp_size(size);
-    save_size_known[save_slot] = 1;
+    save_size_cache[cache_idx] = save_clamp_size(size);
+    save_size_known[cache_idx] = 1;
 }
 
 /* Force a re-read from the HAL on the next save_current_size() call.
  * Use after a HAL operation fails — the in-memory cache may no longer
- * reflect what the bridge actually has on disk. */
-static void save_size_cache_invalidate(int save_slot) {
-    if (save_slot < 0 || save_slot >= (int)SAVE_MAX_SLOTS)
+ * reflect the APF datatable state. */
+static void save_size_cache_invalidate(int cache_idx) {
+    if (cache_idx < 0 || cache_idx >= (int)NV_CACHE_SLOTS)
         return;
-    save_size_known[save_slot] = 0;
+    save_size_known[cache_idx] = 0;
 }
 
-static uint32_t save_current_size(int save_slot) {
-    if (save_slot < 0 || save_slot >= (int)SAVE_MAX_SLOTS)
+static uint32_t nv_current_size(uint32_t slot_id, int cache_idx) {
+    if (cache_idx < 0 || cache_idx >= (int)NV_CACHE_SLOTS)
         return 0;
 
-    if (save_size_known[save_slot])
-        return save_size_cache[save_slot];
+    if (save_size_known[cache_idx])
+        return save_size_cache[cache_idx];
 
-    long sz = of_file_size(SAVE_SLOT_ID_BASE + (uint32_t)save_slot);
+    long sz = of_file_size(slot_id);
     uint32_t size = 0;
     if (sz > 0)
         size = save_clamp_size((uint32_t)sz);
 
-    save_size_cache_store(save_slot, size);
+    save_size_cache_store(cache_idx, size);
     return size;
 }
 
-static long open_save_fd(int fd, int save_slot, long flags) {
-    if (save_slot < 0 || save_slot >= (int)SAVE_MAX_SLOTS) {
+static long open_nv_fd(int fd, uint32_t slot_id, long flags) {
+    int cache_idx = nv_cache_index_from_data_id(slot_id);
+    if (cache_idx < 0 || !of_nvslot_is_supported(slot_id)) {
         fd_table[fd].in_use = 0;
         return -EINVAL;
     }
 
     fd_entry_t *f = &fd_table[fd];
-    f->slot_id = SAVE_SLOT_ID_BASE + (uint32_t)save_slot;
+    f->slot_id = slot_id;
     f->is_save = 1;
-    f->save_slot = save_slot;
-    f->size = save_current_size(save_slot);
+    f->save_slot = save_slot_from_data_id(slot_id);
+    f->nv_cache_idx = cache_idx;
+    f->size = nv_current_size(slot_id, cache_idx);
 
     if (flags & O_TRUNC) {
         /* Update the HAL first; only commit cached state if the HW
          * accepted the truncation.  Otherwise a later close() would
          * re-flush the bogus zero-size through a known-broken path. */
-        if (of_save_set_size(save_slot, 0) != 0) {
+        if (of_nvslot_set_size(slot_id, 0) != 0) {
             fd_table[fd].in_use = 0;
             return -EIO;
         }
         f->size = 0;
         f->dirty = 1;
-        save_size_cache_store(save_slot, 0);
+        save_size_cache_store(cache_idx, 0);
     }
 
     if (flags & O_APPEND)
         f->offset = f->size;
 
+    of_save_begin_cpu();
+#if NV_TRACE
+    of_term_printf("[nv:open] slot=%u flags=%x size=%u cache=%d\n",
+                   slot_id, (uint32_t)flags, f->size, cache_idx);
+    if (!(flags & O_TRUNC))
+        nv_trace_snapshot("open", slot_id, f->size, 0, 0);
+#endif
     return fd;
 }
 
@@ -738,8 +820,9 @@ static long open_save_fd(int fd, int save_slot, long flags) {
  *   "save:<N>"  Open save slot N (backward-compatible alias).
  *   filename    Open any registered data-slot filename.
  *
- * Read-only slots reject write opens. Save slots are read/write files
- * backed by CRAM0 and committed through the bridge on close.
+ * Read-only slots reject write opens. Nonvolatile config/settings and
+ * save slots are read/write files backed by CRAM0. Dirty closes publish
+ * the logical size; Pocket persists them on core exit.
  */
 static long sys_openat(long dirfd, long pathname, long flags, long mode) {
     (void)dirfd;
@@ -763,9 +846,12 @@ static long sys_openat(long dirfd, long pathname, long flags, long mode) {
     f->flags = (int)flags;
     f->is_save = 0;
     f->save_slot = -1;
+    f->nv_cache_idx = -1;
     f->slot_id = 0;
     f->size = 0;
     f->dirty = 0;
+    f->nv_write_calls = 0;
+    f->nv_write_bytes = 0;
     f->is_dir = 0;
     f->dir_pos = 0;
 
@@ -789,9 +875,8 @@ static long sys_openat(long dirfd, long pathname, long flags, long mode) {
             return -EINVAL;
         }
         int slot = parse_int(&p);
-        int save_slot = save_slot_from_data_id((uint32_t)slot);
-        if (save_slot >= 0)
-            return open_save_fd(fd, save_slot, flags);
+        if (of_nvslot_is_supported((uint32_t)slot))
+            return open_nv_fd(fd, (uint32_t)slot, flags);
         if (open_flags_want_write(flags)) {
             fd_table[fd].in_use = 0;
             return -EACCES;
@@ -809,15 +894,14 @@ static long sys_openat(long dirfd, long pathname, long flags, long mode) {
             return -EINVAL;
         }
         int slot = parse_int(&p);
-        return open_save_fd(fd, slot, flags);
+        return open_nv_fd(fd, SAVE_SLOT_ID_BASE + (uint32_t)slot, flags);
     }
 
     /* Search file slot registry by basename (case-insensitive) */
     int slot = file_slot_lookup(path);
     if (slot >= 0) {
-        int save_slot = save_slot_from_data_id((uint32_t)slot);
-        if (save_slot >= 0)
-            return open_save_fd(fd, save_slot, flags);
+        if (of_nvslot_is_supported((uint32_t)slot))
+            return open_nv_fd(fd, (uint32_t)slot, flags);
 
         if (open_flags_want_write(flags)) {
             fd_table[fd].in_use = 0;
@@ -839,7 +923,11 @@ static long sys_openat(long dirfd, long pathname, long flags, long mode) {
 
     int save_slot = save_slot_from_filename(path);
     if (save_slot >= 0)
-        return open_save_fd(fd, save_slot, flags);
+        return open_nv_fd(fd, SAVE_SLOT_ID_BASE + (uint32_t)save_slot, flags);
+
+    int settings_slot = nv_settings_slot_from_filename(path);
+    if (settings_slot >= 0 && of_nvslot_is_supported((uint32_t)settings_slot))
+        return open_nv_fd(fd, (uint32_t)settings_slot, flags);
 
     /* Unknown path -- no filesystem */
     fd_table[fd].in_use = 0;
@@ -853,21 +941,33 @@ static long sys_close(long fd) {
         return -EBADF;
 
     if (fd_table[fd].is_save) {
-        uint32_t save_size = fd_table[fd].size;
-        if (fd_table[fd].dirty) {
-            int rc = of_save_flush_size(fd_table[fd].save_slot, save_size);
-            /* POSIX: close() always closes the fd, even on flush
-             * failure (the app can't retry the flush via this fd).
-             * But only commit the new size to our cache if the HAL
-             * actually persisted it; otherwise invalidate so a
-             * future open() sees the on-disk size. */
+        fd_entry_t *f = &fd_table[fd];
+        uint32_t save_size = f->size;
+        int rc = 0;
+        if (f->dirty) {
+            rc = of_nvslot_set_size(f->slot_id, save_size);
+            /* POSIX: close() always closes the fd.  Nonvolatile files
+             * all follow the same path: writes update the CRAM0 window,
+             * close() publishes the logical size to the APF datatable,
+             * and the Pocket nonvolatile exit path persists the slot.
+             *
+             * Config/settings used to issue an immediate DS_CMD_WRITE
+             * here, but Duke save slots are stable specifically because
+             * they avoid in-game target-to-host writes and rely on the
+             * automatic writeback path.  Keep settings on that same path. */
             if (rc == 0)
-                save_size_cache_store(fd_table[fd].save_slot, save_size);
+                save_size_cache_store(f->nv_cache_idx, save_size);
             else
-                save_size_cache_invalidate(fd_table[fd].save_slot);
-            fd_table[fd].in_use = 0;
-            return rc;
+                save_size_cache_invalidate(f->nv_cache_idx);
         }
+#if NV_TRACE
+        if (f->dirty || f->nv_write_calls)
+            nv_trace_snapshot("close", f->slot_id, save_size,
+                              f->nv_write_calls, f->nv_write_bytes);
+#endif
+        f->in_use = 0;
+        of_save_end_cpu();
+        return rc;
     }
 
     fd_table[fd].in_use = 0;
@@ -1334,6 +1434,15 @@ static long of_input_dispatch(long fid, long a0, long a1) {
         return 0;
     case OF_INPUT_FID_POLL_P0:
         of_input_poll_p0((of_input_state_t *)a0);
+        return 0;
+    case OF_INPUT_FID_GET_KEYBOARD_STATE: {
+        const of_keyboard_state_t *state = of_input_get_keyboard_state();
+        if (a0)
+            memcpy((void *)a0, state, sizeof(of_keyboard_state_t));
+        return state->present;
+    }
+    case OF_INPUT_FID_READ_MOUSE_STATE:
+        of_input_read_mouse_state((of_mouse_state_t *)a0);
         return 0;
     default:
         return OF_ERR_NOT_SUPPORTED;

@@ -56,6 +56,12 @@ module axi_periph_slave (
     input wire [31:0]  cont2_key,
     input wire [31:0]  cont2_joy,
     input wire [15:0]  cont2_trig,
+    input wire [31:0]  cont3_key,
+    input wire [31:0]  cont3_joy,
+    input wire [15:0]  cont3_trig,
+    input wire [31:0]  cont4_key,
+    input wire [31:0]  cont4_joy,
+    input wire [15:0]  cont4_trig,
     input wire         target_dataslot_ack,
     input wire         target_dataslot_done,
     input wire [2:0]   target_dataslot_err,
@@ -131,10 +137,11 @@ module axi_periph_slave (
     output reg  [31:0] link_reg_wdata,
     input wire  [31:0] link_reg_rdata,
 
-    // Save datatable update interface (CPU → datatable via core_top CDC)
-    output reg  [3:0]  save_dt_slot,    // save slot index (0-9)
+    // Save datatable update interface (CPU -> datatable via core_top CDC)
+    // save_dt_slot: 0-9 = save slots, 0xF = pre-save config/settings slot.
+    output reg  [3:0]  save_dt_slot,
     output reg  [31:0] save_dt_size,    // size to write
-    output reg         save_dt_commit,  // pulse: write save_dt_size to datatable
+    output reg         save_dt_commit,  // toggle: write save_dt_size to datatable
 
     // UART interface
     output reg         uart_tx_dv,      // TX data valid (1 cycle pulse)
@@ -365,14 +372,16 @@ reg        timer_irq_pending;
 assign timer_irq = timer_irq_pending & timer_enable;
 assign uart_rx_irq = !uart_rx_empty;  // IRQ when UART RX FIFO has data
 
-// External IRQ mask — bits[3:0] = {vsync, reserved, link, uart_rx}
+// External IRQ mask — bits[4:0] = {input, vsync, reserved, link, uart_rx}
 // Bit 2 was the hardware-mixer voice-end IRQ; mixer retired, bit kept
 // reserved so firmware IRQ_MASK_* bit positions stay stable.
-reg [3:0] irq_mask;
+reg [4:0] irq_mask;
 reg vsync_irq_pending;
+wire input_irq_pending;
 assign ext_irq = (uart_rx_irq & irq_mask[0]) |
                  (link_irq & irq_mask[1]) |
-                 (vsync_irq_pending & irq_mask[3]);
+                 (vsync_irq_pending & irq_mask[3]) |
+                 (input_irq_pending & irq_mask[4]);
 
 // Triple-buffered framebuffer
 // 25-bit SDRAM half-word addresses (16-bit bus, byte addr = word addr × 2)
@@ -525,12 +534,227 @@ wire [15:0] cont1_trig_s;
 wire [31:0] cont2_key_s;
 wire [31:0] cont2_joy_s;
 wire [15:0] cont2_trig_s;
+wire [31:0] cont3_key_s;
+wire [31:0] cont3_joy_s;
+wire [15:0] cont3_trig_s;
+wire [31:0] cont4_key_s;
+wire [31:0] cont4_joy_s;
+wire [15:0] cont4_trig_s;
 synch_3 #(.WIDTH(32)) s_cont1_key(.i(cont1_key), .o(cont1_key_s), .clk(clk), .rise(), .fall());
 synch_3 #(.WIDTH(32)) s_cont2_key(.i(cont2_key), .o(cont2_key_s), .clk(clk), .rise(), .fall());
 synch_3 #(.WIDTH(32)) s_cont2_joy(.i(cont2_joy), .o(cont2_joy_s), .clk(clk), .rise(), .fall());
 synch_3 #(.WIDTH(16)) s_cont2_trig(.i(cont2_trig), .o(cont2_trig_s), .clk(clk), .rise(), .fall());
 synch_3 #(.WIDTH(32)) s_cont1_joy(.i(cont1_joy), .o(cont1_joy_s), .clk(clk), .rise(), .fall());
 synch_3 #(.WIDTH(16)) s_cont1_trig(.i(cont1_trig), .o(cont1_trig_s), .clk(clk), .rise(), .fall());
+synch_3 #(.WIDTH(32)) s_cont3_key(.i(cont3_key), .o(cont3_key_s), .clk(clk), .rise(), .fall());
+synch_3 #(.WIDTH(32)) s_cont3_joy(.i(cont3_joy), .o(cont3_joy_s), .clk(clk), .rise(), .fall());
+synch_3 #(.WIDTH(16)) s_cont3_trig(.i(cont3_trig), .o(cont3_trig_s), .clk(clk), .rise(), .fall());
+synch_3 #(.WIDTH(32)) s_cont4_key(.i(cont4_key), .o(cont4_key_s), .clk(clk), .rise(), .fall());
+synch_3 #(.WIDTH(32)) s_cont4_joy(.i(cont4_joy), .o(cont4_joy_s), .clk(clk), .rise(), .fall());
+synch_3 #(.WIDTH(16)) s_cont4_trig(.i(cont4_trig), .o(cont4_trig_s), .clk(clk), .rise(), .fall());
+
+// ============================================
+// Input hub: raw APF slots + compact change FIFO
+// ============================================
+localparam [7:0] INPUT_EVENT_SLOT_CHANGE = 8'h01;
+
+reg [3:0] input_irq_mask;
+reg       input_overflow;
+reg [31:0] input_seq;
+
+reg [31:0] input_prev_key0, input_prev_key1, input_prev_key2, input_prev_key3;
+reg [31:0] input_prev_joy0, input_prev_joy1, input_prev_joy2, input_prev_joy3;
+reg [15:0] input_prev_trig0, input_prev_trig1, input_prev_trig2, input_prev_trig3;
+
+wire [2:0] input_chg0 = {cont1_trig_s != input_prev_trig0,
+                         cont1_joy_s  != input_prev_joy0,
+                         cont1_key_s  != input_prev_key0};
+wire [2:0] input_chg1 = {cont2_trig_s != input_prev_trig1,
+                         cont2_joy_s  != input_prev_joy1,
+                         cont2_key_s  != input_prev_key1};
+wire [2:0] input_chg2 = {cont3_trig_s != input_prev_trig2,
+                         cont3_joy_s  != input_prev_joy2,
+                         cont3_key_s  != input_prev_key2};
+wire [2:0] input_chg3 = {cont4_trig_s != input_prev_trig3,
+                         cont4_joy_s  != input_prev_joy3,
+                         cont4_key_s  != input_prev_key3};
+
+wire input_slot0_changed = input_irq_mask[0] && (|input_chg0);
+wire input_slot1_changed = input_irq_mask[1] && (|input_chg1);
+wire input_slot2_changed = input_irq_mask[2] && (|input_chg2);
+wire input_slot3_changed = input_irq_mask[3] && (|input_chg3);
+
+reg       input_event_valid;
+reg [1:0] input_event_slot;
+reg [2:0] input_event_fields;
+
+always @(*) begin
+    input_event_valid  = 1'b0;
+    input_event_slot   = 2'd0;
+    input_event_fields = 3'b000;
+
+    if (input_slot0_changed) begin
+        input_event_valid  = 1'b1;
+        input_event_slot   = 2'd0;
+        input_event_fields = input_chg0;
+    end else if (input_slot1_changed) begin
+        input_event_valid  = 1'b1;
+        input_event_slot   = 2'd1;
+        input_event_fields = input_chg1;
+    end else if (input_slot2_changed) begin
+        input_event_valid  = 1'b1;
+        input_event_slot   = 2'd2;
+        input_event_fields = input_chg2;
+    end else if (input_slot3_changed) begin
+        input_event_valid  = 1'b1;
+        input_event_slot   = 2'd3;
+        input_event_fields = input_chg3;
+    end
+end
+
+wire        input_fifo_empty;
+wire        input_fifo_full;
+wire [5:0]  input_fifo_count;
+wire [63:0] input_fifo_dout;
+wire [63:0] input_fifo_din = {
+    INPUT_EVENT_SLOT_CHANGE,
+    6'b0, input_event_slot,
+    5'b0, input_event_fields,
+    8'h00,
+    input_seq
+};
+wire input_fifo_push = input_event_valid && !input_fifo_full;
+wire input_fifo_pop  = (state == S_PERIPH_RD) && can_push_beat && reg_sysreg &&
+                       (req_addr[8:2] == 7'b1_010101) && !input_fifo_empty; // INPUT_FIFO_DATA1 (0x154)
+reg  input_fifo_clear;
+
+sync_fifo #(
+    .WIDTH(64),
+    .DEPTH(32),
+    .ADDR_WIDTH(5)
+) input_event_fifo (
+    .clk(clk),
+    .reset(reset),
+    .clear(input_fifo_clear),
+    .push(input_fifo_push),
+    .din(input_fifo_din),
+    .pop(input_fifo_pop),
+    .dout(input_fifo_dout),
+    .empty(input_fifo_empty),
+    .full(input_fifo_full),
+    .count(input_fifo_count)
+);
+
+assign input_irq_pending = !input_fifo_empty || input_overflow;
+
+always @(posedge clk) begin
+    if (reset) begin
+        input_irq_mask <= 4'b0;
+        input_overflow <= 1'b0;
+        input_seq <= 32'd0;
+        input_fifo_clear <= 1'b1;
+        input_prev_key0 <= 32'd0;
+        input_prev_key1 <= 32'd0;
+        input_prev_key2 <= 32'd0;
+        input_prev_key3 <= 32'd0;
+        input_prev_joy0 <= 32'd0;
+        input_prev_joy1 <= 32'd0;
+        input_prev_joy2 <= 32'd0;
+        input_prev_joy3 <= 32'd0;
+        input_prev_trig0 <= 16'd0;
+        input_prev_trig1 <= 16'd0;
+        input_prev_trig2 <= 16'd0;
+        input_prev_trig3 <= 16'd0;
+    end else begin
+        input_fifo_clear <= 1'b0;
+
+        if (sysreg_wr_fire && req_addr[8:2] == 7'b1_000001) begin // INPUT_IRQ_MASK (0x104)
+            input_irq_mask <= req_wdata[3:0];
+            input_prev_key0 <= cont1_key_s;
+            input_prev_key1 <= cont2_key_s;
+            input_prev_key2 <= cont3_key_s;
+            input_prev_key3 <= cont4_key_s;
+            input_prev_joy0 <= cont1_joy_s;
+            input_prev_joy1 <= cont2_joy_s;
+            input_prev_joy2 <= cont3_joy_s;
+            input_prev_joy3 <= cont4_joy_s;
+            input_prev_trig0 <= cont1_trig_s;
+            input_prev_trig1 <= cont2_trig_s;
+            input_prev_trig2 <= cont3_trig_s;
+            input_prev_trig3 <= cont4_trig_s;
+        end
+
+        if (sysreg_wr_fire && req_addr[8:2] == 7'b1_000010) begin // INPUT_IRQ_CLEAR (0x108)
+            if (req_wdata[0]) begin
+                input_fifo_clear <= 1'b1;
+                input_prev_key0 <= cont1_key_s;
+                input_prev_key1 <= cont2_key_s;
+                input_prev_key2 <= cont3_key_s;
+                input_prev_key3 <= cont4_key_s;
+                input_prev_joy0 <= cont1_joy_s;
+                input_prev_joy1 <= cont2_joy_s;
+                input_prev_joy2 <= cont3_joy_s;
+                input_prev_joy3 <= cont4_joy_s;
+                input_prev_trig0 <= cont1_trig_s;
+                input_prev_trig1 <= cont2_trig_s;
+                input_prev_trig2 <= cont3_trig_s;
+                input_prev_trig3 <= cont4_trig_s;
+            end
+            if (req_wdata[3])
+                input_overflow <= 1'b0;
+        end else if (input_event_valid) begin
+            if (input_fifo_full) begin
+                input_overflow <= 1'b1;
+            end else begin
+                input_seq <= input_seq + 32'd1;
+            end
+
+            case (input_event_slot)
+                2'd0: begin
+                    input_prev_key0 <= cont1_key_s;
+                    input_prev_joy0 <= cont1_joy_s;
+                    input_prev_trig0 <= cont1_trig_s;
+                end
+                2'd1: begin
+                    input_prev_key1 <= cont2_key_s;
+                    input_prev_joy1 <= cont2_joy_s;
+                    input_prev_trig1 <= cont2_trig_s;
+                end
+                2'd2: begin
+                    input_prev_key2 <= cont3_key_s;
+                    input_prev_joy2 <= cont3_joy_s;
+                    input_prev_trig2 <= cont3_trig_s;
+                end
+                default: begin
+                    input_prev_key3 <= cont4_key_s;
+                    input_prev_joy3 <= cont4_joy_s;
+                    input_prev_trig3 <= cont4_trig_s;
+                end
+            endcase
+        end
+
+        if (!input_irq_mask[0]) begin
+            input_prev_key0 <= cont1_key_s;
+            input_prev_joy0 <= cont1_joy_s;
+            input_prev_trig0 <= cont1_trig_s;
+        end
+        if (!input_irq_mask[1]) begin
+            input_prev_key1 <= cont2_key_s;
+            input_prev_joy1 <= cont2_joy_s;
+            input_prev_trig1 <= cont2_trig_s;
+        end
+        if (!input_irq_mask[2]) begin
+            input_prev_key2 <= cont3_key_s;
+            input_prev_joy2 <= cont3_joy_s;
+            input_prev_trig2 <= cont3_trig_s;
+        end
+        if (!input_irq_mask[3]) begin
+            input_prev_key3 <= cont4_key_s;
+            input_prev_joy3 <= cont4_joy_s;
+            input_prev_trig3 <= cont4_trig_s;
+        end
+    end
+end
 
 // ============================================
 // System register write logic
@@ -601,8 +825,11 @@ always @(posedge clk) begin
         timer_counter <= 0;
         timer_enable <= 0;
         timer_irq_pending <= 0;
-        irq_mask <= 4'b0;
+        irq_mask <= 5'b0;
         vsync_irq_pending <= 0;
+        save_dt_slot <= 0;
+        save_dt_size <= 0;
+        save_dt_commit <= 0;
         dt_query_addr <= 0;
         dt_query_toggle <= 0;
         vrr_v_total_cpu_reg   <= 10'd262;
@@ -623,7 +850,6 @@ always @(posedge clk) begin
     end else begin
         cycle_counter <= cycle_counter + 1;
         pal_wr <= 0;
-        save_dt_commit <= 0;
         snac_start_pulse <= 0;
 
         // Hardware timer countdown
@@ -731,7 +957,7 @@ always @(posedge clk) begin
                 7'b0_010010: save_dt_slot <= req_wdata[3:0];  // SAVE_DT_SLOT (0x48)
                 7'b0_010011: begin                               // SAVE_DT_SIZE (0x4C) — write triggers commit
                     save_dt_size <= req_wdata;
-                    save_dt_commit <= 1;
+                    save_dt_commit <= ~save_dt_commit;
                 end
 
                 // SNAC Shifter + GPIO registers (0xA0-0xAC)
@@ -777,7 +1003,7 @@ always @(posedge clk) begin
                 // 0x48000000 (no back-compat for v3).  Old SYSREG slots
                 // 0x80, 0xC0–0xF8 are free for reuse.
                 7'b0_100111: vsync_irq_pending <= 0;                    // VSYNC_IRQ_CLEAR (0x9C) W1C
-                7'b0_111111: irq_mask <= req_wdata[3:0];             // IRQ_MASK (0xFC)
+                7'b0_111111: irq_mask <= req_wdata[4:0];             // IRQ_MASK (0xFC)
 
                 7'b0_110111: vrr_v_total_cpu_reg   <= req_wdata[9:0]; // VRR_V_TOTAL (0xDC) — analogizer-mode only
                 7'b0_111000: vrr_swap_hold_cpu_reg <= req_wdata[3:0]; // VRR_SWAP_HOLD (0xE0) — debug only
@@ -884,7 +1110,32 @@ always @(*) begin
         7'b0_101101: sysreg_rdata = timer_period;
         7'b0_101110: sysreg_rdata = {30'b0, timer_irq_pending, timer_enable};
         7'b0_101111: sysreg_rdata = timer_counter;
-        7'b0_111111: sysreg_rdata = {28'b0, irq_mask};               // IRQ_MASK (0xFC)
+        7'b0_111111: sysreg_rdata = {27'b0, irq_mask};               // IRQ_MASK (0xFC)
+        // Input hub (0x100-0x158): raw APF slots + compact event FIFO.
+        7'b1_000000: sysreg_rdata = {16'b0, input_fifo_count, 4'b0,
+                                     input_overflow, input_fifo_full,
+                                     input_fifo_empty, input_irq_pending}; // INPUT_STATUS
+        7'b1_000001: sysreg_rdata = {28'b0, input_irq_mask};         // INPUT_IRQ_MASK
+        7'b1_000011: sysreg_rdata = input_seq;                       // INPUT_SEQ
+        7'b1_000100: sysreg_rdata = {23'b0, input_irq_mask[0], 7'b0, 1'b1}; // SLOT0_INFO
+        7'b1_000101: sysreg_rdata = cont1_key_s;                     // SLOT0_KEY
+        7'b1_000110: sysreg_rdata = cont1_joy_s;                     // SLOT0_JOY
+        7'b1_000111: sysreg_rdata = {16'b0, cont1_trig_s};           // SLOT0_TRIG
+        7'b1_001000: sysreg_rdata = {23'b0, input_irq_mask[1], 7'b0, 1'b1}; // SLOT1_INFO
+        7'b1_001001: sysreg_rdata = cont2_key_s;                     // SLOT1_KEY
+        7'b1_001010: sysreg_rdata = cont2_joy_s;                     // SLOT1_JOY
+        7'b1_001011: sysreg_rdata = {16'b0, cont2_trig_s};           // SLOT1_TRIG
+        7'b1_001100: sysreg_rdata = {23'b0, input_irq_mask[2], 7'b0, 1'b1}; // SLOT2_INFO
+        7'b1_001101: sysreg_rdata = cont3_key_s;                     // SLOT2_KEY
+        7'b1_001110: sysreg_rdata = cont3_joy_s;                     // SLOT2_JOY
+        7'b1_001111: sysreg_rdata = {16'b0, cont3_trig_s};           // SLOT2_TRIG
+        7'b1_010000: sysreg_rdata = {23'b0, input_irq_mask[3], 7'b0, 1'b1}; // SLOT3_INFO
+        7'b1_010001: sysreg_rdata = cont4_key_s;                     // SLOT3_KEY
+        7'b1_010010: sysreg_rdata = cont4_joy_s;                     // SLOT3_JOY
+        7'b1_010011: sysreg_rdata = {16'b0, cont4_trig_s};           // SLOT3_TRIG
+        7'b1_010100: sysreg_rdata = input_fifo_dout[31:0];           // INPUT_FIFO_DATA0
+        7'b1_010101: sysreg_rdata = input_fifo_dout[63:32];          // INPUT_FIFO_DATA1 (read pops)
+        7'b1_010110: sysreg_rdata = {26'b0, input_fifo_count};       // INPUT_FIFO_COUNT
         // VRR_V_TOTAL / VRR_SWAP_HOLD readback returns the LIVE values
         // driving the scaler (RTL-computed in normal mode, CPU-written
         // in analogizer mode for V_TOTAL).  Keeps the existing debug
@@ -973,7 +1224,7 @@ always @(posedge clk) begin
             uart_rx_wr_ptr <= uart_rx_wr_ptr + 10'd1;
         end
         // Read: CPU reads the RX register → advance rd_ptr
-        if (state == S_PERIPH_RD && reg_uart && req_addr[3:2] == 2'b10 && !uart_rx_empty)
+        if (state == S_PERIPH_RD && can_push_beat && reg_uart && req_addr[3:2] == 2'b10 && !uart_rx_empty)
             uart_rx_rd_ptr <= uart_rx_rd_ptr + 10'd1;
     end
 end
@@ -1074,13 +1325,14 @@ wire [31:0] periph_rd_mux = reg_sysreg ? sysreg_rdata :
 // ============================================
 // FSM
 // ============================================
-localparam S_IDLE      = 3'd0;
-localparam S_BRAM_RD   = 3'd1;
-localparam S_PERIPH_RD = 3'd2;
-localparam S_PERIPH_WR = 3'd3;
-localparam S_TERM      = 3'd4;
-localparam S_WR_NEXT   = 3'd5;
-localparam S_BRAM_WR   = 3'd6;
+localparam S_IDLE           = 3'd0;
+localparam S_BRAM_RD        = 3'd1;
+localparam S_PERIPH_RD      = 3'd2;
+localparam S_PERIPH_WR      = 3'd3;
+localparam S_TERM           = 3'd4;
+localparam S_WR_NEXT        = 3'd5;
+localparam S_BRAM_WR        = 3'd6;
+localparam S_PERIPH_RD_WAIT = 3'd7;
 
 reg [2:0] state;
 
@@ -1156,10 +1408,9 @@ wire aw_dec_cram0  = (aw_addr[31:24] == 8'h4E);
 
 wire ar_dec_ram    = (ar_addr[31:15] == 17'b0); // 32KB: 0x00000-0x07FFF
 // sysreg covers 0x40000000-0x400001FF (512 bytes / 128 word slots) so the
-// case statement on req_addr[8:2] reaches every defined slot, including
-// the extended mixer regs (0x100-0x108) and the AWE registers (0x110-0x148).
-// Pre-AWE this was 24'h400000 (256 bytes) — silently dropped MIX_VOICE_FILTER*
-// writes at 0x100+; the SW path's filter calls were no-ops.
+// case statement on req_addr[8:2] reaches the extended input-hub page at
+// 0x100+.  Pre-AWE this was 24'h400000 (256 bytes), which would silently
+// drop every extended register access.
 wire ar_dec_sysreg = (ar_addr[31:9]  == 23'h200000);
 wire ar_dec_audio  = (ar_addr[31:24] == 8'h4C);
 wire ar_dec_link   = (ar_addr[31:24] == 8'h4D);
@@ -1294,7 +1545,10 @@ always @(posedge clk or posedge reset) begin
                 if (ar_dec_ram)
                     state <= S_BRAM_RD;
                 else begin
-                    state <= S_PERIPH_RD;
+                    /* core_top registers mixer readback/status one cycle
+                     * after req_addr changes. Wait so POS_RD returns the
+                     * requested voice instead of the previous selection. */
+                    state <= ar_dec_mixer ? S_PERIPH_RD_WAIT : S_PERIPH_RD;
                     if (ar_dec_link) begin
                         link_reg_addr <= ar_addr[6:2];
                         link_reg_rd <= 1;
@@ -1429,6 +1683,10 @@ always @(posedge clk or posedge reset) begin
         // ============================================
         // Peripheral read — same hold-until-drain pattern
         // ============================================
+        S_PERIPH_RD_WAIT: begin
+            state <= S_PERIPH_RD;
+        end
+
         S_PERIPH_RD: begin
             if (can_push_beat) begin
                 s_axi_rvalid <= 1'b1;
@@ -1437,7 +1695,10 @@ always @(posedge clk or posedge reset) begin
                 s_axi_rlast  <= beat_is_last;
                 burst_count  <= burst_count + 1;
                 if (beat_is_last) state <= S_IDLE;
-                else req_addr <= req_addr + 32'd4;
+                else begin
+                    if (!burst_is_fixed) req_addr <= req_addr + 32'd4;
+                    if (reg_mixer) state <= S_PERIPH_RD_WAIT;
+                end
                 /* Pop-pulse side effects on specific read addresses. */
                 // cram0_mode is a simple read-mirror; no pop needed.
             end

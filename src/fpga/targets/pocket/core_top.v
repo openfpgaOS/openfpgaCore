@@ -207,21 +207,35 @@ always @(posedge clk_cpu) begin
     app_id_sync2 <= app_id_sync1;
 end
 
-reg       analogizer_ena;
-reg [3:0] analogizer_video_type;
-reg [4:0] snac_cont_type /* synthesis keep */;
-reg [3:0] snac_cont_assignment /* synthesis keep */;
+reg [31:0] analogizer_settings_cpu_s1, analogizer_settings_cpu;
+reg [31:0] analogizer_settings_core_s1, analogizer_settings_core;
+reg [31:0] analogizer_settings_vid_s1, analogizer_settings_vid;
 
-always @(*) begin
-  snac_cont_type        = analogizer_settings[4:0];
-  snac_cont_assignment  = analogizer_settings[9:6];
-  analogizer_video_type = analogizer_settings[13:10];
-  analogizer_ena        = analogizer_settings[15];
-end 
+always @(posedge clk_cpu) begin
+  analogizer_settings_cpu_s1 <= analogizer_settings;
+  analogizer_settings_cpu    <= analogizer_settings_cpu_s1;
+end
+
+always @(posedge clk_core_49152) begin
+  analogizer_settings_core_s1 <= analogizer_settings;
+  analogizer_settings_core    <= analogizer_settings_core_s1;
+end
+
+always @(posedge clk_vid) begin
+  analogizer_settings_vid_s1 <= analogizer_settings;
+  analogizer_settings_vid    <= analogizer_settings_vid_s1;
+end
+
+wire [4:0] snac_cont_type /* synthesis keep */ = analogizer_settings[4:0];
+wire [3:0] snac_cont_assignment /* synthesis keep */ = analogizer_settings[9:6];
+wire       analogizer_ena_cpu  = analogizer_settings_cpu[15];
+wire       analogizer_ena_core = analogizer_settings_core[15];
+wire       analogizer_ena_vid  = analogizer_settings_vid[15];
+wire [3:0] analogizer_video_type_core = analogizer_settings_core[13:10];
 
 
 
-    wire pocket_blank_screen = analogizer_settings[13] && analogizer_ena;
+    wire pocket_blank_screen = analogizer_settings_vid[13] && analogizer_ena_vid;
 
     wire [23:0] video_rgb_core;
     assign video_rgb_core = (pocket_blank_screen) ? 24'h000000: vidout_rgb;
@@ -239,7 +253,7 @@ end
 
     reg [2:0] fx /* synthesis preserve */;
     always @(posedge clk_core_49152) begin
-        case (analogizer_video_type)
+        case (analogizer_video_type_core)
             4'd5, 4'd13:    begin fx <= 3'd0; end //SC  0%     1 SC 25%
             4'd6, 4'd14:    begin fx <= 3'd2; end //SC  50%    3 SC 75%
             4'd7, 4'd15:    begin fx <= 3'd4; end //hq2x
@@ -268,8 +282,8 @@ parameter CLK_VIDEO_PAL  = 49.152;
 localparam [39:0] NTSC_PHASE_INC = 40'd80073066196;  //print(round(3.579545 * 2**40 / 49.152)) 
 localparam [39:0] PAL_PHASE_INC =  40'd99178372574; //print(round(4.43361875 * 2**40 / 49.152)) 
 
-assign CHROMA_PHASE_INC = ((analogizer_video_type == 4'h4)|| (analogizer_video_type == 4'hC)) ? PAL_PHASE_INC : NTSC_PHASE_INC; 
-assign PALFLAG = (analogizer_video_type == 4'h4) || (analogizer_video_type == 4'hC); 
+assign CHROMA_PHASE_INC = ((analogizer_video_type_core == 4'h4)|| (analogizer_video_type_core == 4'hC)) ? PAL_PHASE_INC : NTSC_PHASE_INC;
+assign PALFLAG = (analogizer_video_type_core == 4'h4) || (analogizer_video_type_core == 4'hC);
 
 
 // H/V offset
@@ -367,10 +381,10 @@ openFPGA_Pocket_Analogizer #(
 ) analogizer (
     .i_clk(clk_core_49152),
     .i_rst(~reset_n),
-    .i_ena(analogizer_ena),
+    .i_ena(analogizer_ena_core),
     // Video interface
     .video_clk(clk_vid),
-    .analog_video_type(analogizer_video_type),
+    .analog_video_type(analogizer_video_type_core),
     .R(vidout_rgb[23:16]),
     .G(vidout_rgb[15:8]),
     .B(vidout_rgb[7:0]),
@@ -451,24 +465,23 @@ localparam [3:0] BCR_ST_IDLE_DIE1   = 4'd6;
 localparam [3:0] BCR_ST_SETTLE      = 4'd7;  // Post-config settle before release
 localparam [3:0] BCR_ST_DONE        = 4'd8;
 
-// Settle counter: hold CPU in reset for a few µs after chip-side BCR
-// write completes — chip internalises sync-burst mode after CE#
-// deasserts.  511 cycles @ 74.25 MHz ≈ 6.9 µs — cheap insurance.
+// Settle counter: hold CPU in reset for a few us after chip-side BCR
+// write completes. 511 cycles @ 74.25 MHz is about 6.9 us.
 localparam [8:0] BCR_SETTLE_CYCLES = 9'd511;
 
-// AS1C8M16PL BCR — sync-burst mode at clk_74a.
+// AS1C8M16PL BCR: async page mode at clk_74a.
 //
-// v2: cram0 runs at clk_74a (74.25 MHz) rather than clk_cpu (100 MHz).
-// At the slower clock, sync-burst latency code 4 (5 cycles) is more
-// than comfortable and async reads still work alongside it — the
-// chip doesn't care whether the adv/oe timing is driven by a 74 MHz
-// or 100 MHz controller.
+// The firmware/bridge CPU alias uses the async single-word path. Hardware
+// testing showed the 0x30000000 CPU alias returning the CRAM fill pattern
+// while the chip was configured for sync-burst mode, even though the BCR
+// write itself completed. Keep the part in async page mode until the sync
+// burst path owns all CRAM0 accesses that happen after BCR init.
 //
-// BCR encoding (unchanged from v1):
-//   bit 15    = 0   sync burst mode
-//   bit 14    = 1   variable initial latency
-//   bits 13-11= 100 latency code 4 (5 clocks)
-//   bit 10    = 0   WAIT active low
+// BCR encoding:
+//   bit 15    = 1   async page mode
+//   bit 14    = 0   fixed initial latency
+//   bits 13-11= 011 latency code
+//   bit 10    = 1   WAIT active high
 //   bit 9     = 0
 //   bit 8     = 1   WAIT asserted one data cycle before delay
 //   bit 7     = 0
@@ -476,7 +489,7 @@ localparam [8:0] BCR_SETTLE_CYCLES = 9'd511;
 //   bits 5-4  = 01  drive strength 1/2
 //   bit 3     = 1   no-wrap burst
 //   bits 2-0  = 111 continuous burst
-localparam [15:0] BCR_VALUE = 16'h641F;  // sync burst mode
+localparam [15:0] BCR_VALUE = 16'h9D1F;  // async page mode
 
 initial begin
     bcr_init_state     = BCR_ST_WAIT_PLL;
@@ -531,10 +544,9 @@ always @(posedge clk_74a) begin
 
         BCR_ST_SETTLE: begin
             // Count down settle cycles before releasing bcr_init_done.
-            // This holds CPU reset for ~5 µs after the chip-side BCR
-            // write completes, giving the chip time to internalise the
-            // sync-burst mode change.  Addresses 1/3 intermittent boot
-            // failures where first I$ line fetch returns 0x0000000f.
+            // This holds CPU reset briefly after the chip-side BCR write
+            // completes, giving the chip time to internalise the mode
+            // change before firmware touches CRAM0.
             if (bcr_settle_cnt == 9'd0) begin
                 bcr_init_done  <= 1'b1;
                 bcr_init_state <= BCR_ST_DONE;
@@ -598,8 +610,55 @@ end
 wire bridge_cram0_rd_pulse = bridge_cram0_range && bridge_rd && !bridge_rd_prev_74a;
 wire bridge_cram0_wr_pulse = bridge_cram0_range && bridge_wr;
 
+// APF bridge writes can arrive while the async PSRAM controller is in
+// the middle of the previous 32-bit word (two 16-bit chip accesses).
+// Queue them in clk_74a and drain at the controller's natural rate;
+// otherwise any write presented outside ST_IDLE is silently dropped and
+// stale CRAM0 scratch data leaks into boot/app file reads.
+localparam [10:0] BRIDGE_CRAM0_WR_FIFO_DEPTH = 11'd1024;
+localparam [3:0]  BRIDGE_CRAM0_WR_FIFO_AW    = 4'd10;
+wire [53:0] bridge_wr_fifo_din = {bridge_addr[23:2], bridge_wr_data};
+wire [53:0] bridge_wr_fifo_dout;
+wire        bridge_wr_fifo_empty;
+wire        bridge_wr_fifo_full;
+wire [10:0] bridge_wr_fifo_count;
+wire        bridge_wr_fifo_push = !cram0_mode_74a && bridge_cram0_wr_pulse &&
+                                  !bridge_wr_fifo_full;
+wire        bridge_wr_fifo_overflow_pulse = !cram0_mode_74a &&
+                                            bridge_cram0_wr_pulse &&
+                                            bridge_wr_fifo_full;
+reg         bridge_wr_fifo_overflow = 1'b0;
+wire        bridge_wr_fifo_pop;
+wire [21:0] bridge_wr_fifo_addr = bridge_wr_fifo_dout[53:32];
+wire [31:0] bridge_wr_fifo_data = bridge_wr_fifo_dout[31:0];
+
+always @(posedge clk_74a or negedge pll_ram_locked_74a) begin
+    if (!pll_ram_locked_74a)
+        bridge_wr_fifo_overflow <= 1'b0;
+    else if (bridge_wr_fifo_overflow_pulse)
+        bridge_wr_fifo_overflow <= 1'b1;
+end
+
+sync_fifo #(
+    .WIDTH(54),
+    .DEPTH(BRIDGE_CRAM0_WR_FIFO_DEPTH),
+    .ADDR_WIDTH(BRIDGE_CRAM0_WR_FIFO_AW)
+) bridge_cram0_write_fifo (
+    .clk   (clk_74a),
+    .reset (!pll_ram_locked_74a),
+    .clear (1'b0),
+    .push  (bridge_wr_fifo_push),
+    .din   (bridge_wr_fifo_din),
+    .pop   (bridge_wr_fifo_pop),
+    .dout  (bridge_wr_fifo_dout),
+    .empty (bridge_wr_fifo_empty),
+    .full  (bridge_wr_fifo_full),
+    .count (bridge_wr_fifo_count)
+);
+
 wire        c0_prefetch_active;
 wire        c0_prefetch_busy;
+wire        c0_prefetch_ready;
 wire        c0_prefetch_bridge_hit;
 wire [31:0] c0_prefetch_rd_data;
 wire        c0_prefetch_burst_rd;
@@ -608,18 +667,26 @@ wire [5:0]  c0_prefetch_burst_len;
 wire        bridge_cram0_direct_rd_pulse = bridge_cram0_rd_pulse && !c0_prefetch_active;
 
 // Mux word-interface inputs to the controller: pick the owning side.
-wire        mux_word_rd    = cram0_mode_74a ? cpu_cram0_word_rd    : bridge_cram0_direct_rd_pulse;
-wire        mux_word_wr    = cram0_mode_74a ? cpu_cram0_word_wr    : bridge_cram0_wr_pulse;
-wire [21:0] mux_word_addr  = cram0_mode_74a       ? cpu_cram0_word_addr
-                            : c0_prefetch_burst_rd ? c0_prefetch_burst_addr
-                                                    : bridge_addr[23:2];
-wire [31:0] mux_word_wdata = cram0_mode_74a ? cpu_cram0_word_wdata : bridge_wr_data;
-wire [3:0]  mux_word_wstrb = cram0_mode_74a ? cpu_cram0_word_wstrb : 4'b1111;
-
-// Controller response fans out to whichever owner asked for it.
 wire [31:0] ctrl_word_rdata;
 wire        ctrl_word_busy;
 wire        ctrl_word_rdata_valid;
+
+assign bridge_wr_fifo_pop = !cram0_mode_74a &&
+                            !bridge_wr_fifo_empty &&
+                            !ctrl_word_busy &&
+                            !c0_prefetch_burst_rd;
+
+// Mux word-interface inputs to the controller: pick the owning side.
+wire        mux_word_rd    = cram0_mode_74a ? cpu_cram0_word_rd    : bridge_cram0_direct_rd_pulse;
+wire        mux_word_wr    = cram0_mode_74a ? cpu_cram0_word_wr    : bridge_wr_fifo_pop;
+wire [21:0] mux_word_addr  = cram0_mode_74a       ? cpu_cram0_word_addr
+                            : c0_prefetch_burst_rd ? c0_prefetch_burst_addr
+                            : bridge_wr_fifo_pop    ? bridge_wr_fifo_addr
+                                                    : bridge_addr[23:2];
+wire [31:0] mux_word_wdata = cram0_mode_74a ? cpu_cram0_word_wdata : bridge_wr_fifo_data;
+wire [3:0]  mux_word_wstrb = cram0_mode_74a ? cpu_cram0_word_wstrb : 4'b1111;
+
+// Controller response fans out to whichever owner asked for it.
 assign cpu_cram0_word_rdata       = ctrl_word_rdata;
 assign cpu_cram0_word_busy        = ctrl_word_busy;
 assign cpu_cram0_word_rdata_valid = ctrl_word_rdata_valid;
@@ -1035,7 +1102,11 @@ end
 
 wire bridge_active_74a = bridge_wr_seen_74a
                        | ctrl_word_busy
+                       | c0_prefetch_active
                        | c0_prefetch_busy
+                       | !bridge_wr_fifo_empty
+                       | bridge_wr_fifo_pop
+                       | bridge_wr_fifo_overflow
                        | bridge_cram0_wr_pulse
                        | bridge_cram0_rd_pulse;
 
@@ -1282,6 +1353,7 @@ assign sram_word_wstrb = 4'b0;
 
         .active             ( c0_prefetch_active ),
         .busy               ( c0_prefetch_busy ),
+        .ready              ( c0_prefetch_ready ),
 
         .burst_rd           ( c0_prefetch_burst_rd ),
         .burst_addr         ( c0_prefetch_burst_addr ),
@@ -1291,20 +1363,32 @@ assign sram_word_wstrb = 4'b0;
         .ctrl_busy          ( ctrl_word_busy )
     );
 
+    wire target_dataslot_write_cram0_prefetch =
+        (target_dataslot_bridgeaddr[31:24] == 8'h20) &&
+        (target_dataslot_length != 32'd0);
+    wire target_dataslot_write_ready =
+        !target_dataslot_write_cram0_prefetch || c0_prefetch_ready;
+
     reg     [9:0]   datatable_addr;
     wire    [31:0]  datatable_q;
     reg             datatable_wren;
     reg     [31:0]  datatable_data;
 
-// Per-slot save sizes: 10-entry array, updated from three sources:
-//   1. APF datatable writes during automatic nonvolatile save-slot load
+// Per-slot nonvolatile sizes, updated from three sources:
+//   1. APF datatable writes during automatic nonvolatile load
 //   2. CPU via SAVE_DT_SLOT/SAVE_DT_SIZE registers (sets individual slots)
 //   3. Legacy Chip32 pmpw writes to 0xF0000000/0xF0000010..0x34
 // The cycling FSM continuously writes these to the datatable so CPU-side
 // save-size commits are visible to later APF writeback.
 reg [31:0] save_sizes [0:9];
+reg [31:0] presave_size = 32'h00000000;
 integer si;
 initial for (si = 0; si < 10; si = si + 1) save_sizes[si] = 32'h00000000;
+
+localparam [9:0] PRESAVE_SIZE_WORD = 10'd17;
+localparam [9:0] SAVE0_SIZE_WORD   = 10'd19;
+localparam [9:0] SAVE9_SIZE_WORD   = 10'd37;
+localparam [3:0] PRESAVE_DT_SLOT   = 4'hF;
 
 wire [31:0] bridge_wr_data_native = bridge_endian_little ? {
     bridge_wr_data[7:0],
@@ -1317,14 +1401,18 @@ wire bridge_datatable_write =
     bridge_wr && (bridge_addr[31:24] == 8'hF8) && (bridge_addr[15:12] == 4'h2);
 wire [9:0] bridge_datatable_word = bridge_addr[11:2];
 
-// Saves are entries 8..17 in data.json. Each entry is two datatable words:
-// flags, size. Save0 size is word 17, save9 size is word 35.
+// Entry 8 is one pre-save nonvolatile slot (SDK Shared Config or Duke
+// Settings). Saves are entries 9..18. Each entry is two datatable words:
+// flags, size. Pre-save size is word 17; save0 is word 19; save9 is word 37.
+wire bridge_presave_size_write =
+    bridge_datatable_write &&
+    (bridge_datatable_word == PRESAVE_SIZE_WORD);
 wire bridge_save_size_write =
     bridge_datatable_write &&
-    (bridge_datatable_word >= 10'd17) &&
-    (bridge_datatable_word <= 10'd35) &&
+    (bridge_datatable_word >= SAVE0_SIZE_WORD) &&
+    (bridge_datatable_word <= SAVE9_SIZE_WORD) &&
     bridge_datatable_word[0];
-wire [9:0] bridge_save_size_delta = bridge_datatable_word - 10'd17;
+wire [9:0] bridge_save_size_delta = bridge_datatable_word - SAVE0_SIZE_WORD;
 wire [3:0] bridge_save_size_slot = bridge_save_size_delta[4:1];
 
 // CPU write: individual slot update via periph slave CDC
@@ -1332,12 +1420,14 @@ wire [3:0]  cpu_save_dt_slot;
 wire [31:0] cpu_save_dt_size;
 wire        cpu_save_dt_commit;
 
-// CDC: synchronize the commit pulse from clk_ram_controller to clk_74a
-reg [2:0] save_dt_commit_sync;
+// CDC: synchronize the commit toggle from clk_ram_controller to clk_74a.
+// A single-cycle pulse can be missed between 100 MHz and 74.25 MHz; the
+// toggle makes each SAVE_DT_SIZE write phase-independent.
+reg [2:0] save_dt_commit_sync = 3'b000;
 always @(posedge clk_74a)
     save_dt_commit_sync <= {save_dt_commit_sync[1:0], cpu_save_dt_commit};
 
-wire save_dt_commit_rise = save_dt_commit_sync[1] & ~save_dt_commit_sync[2];
+wire save_dt_commit_event = save_dt_commit_sync[1] ^ save_dt_commit_sync[2];
 
 // Latch slot/size in clk_ram_controller domain (stable when commit arrives)
 reg [3:0]  save_dt_slot_latch;
@@ -1355,13 +1445,15 @@ always @(posedge clk_74a) begin
     save_dt_size_sync <= save_dt_size_latch;
 end
 
-// Single driver for save_sizes: APF, CPU, or legacy Chip32 updates.
-//   APF datatable writes:     capture auto-loaded save sizes
+// Single driver for nonvolatile sizes: APF, CPU, or legacy Chip32 updates.
+//   APF datatable writes:     capture auto-loaded config/save sizes
 //   Bridge 0xF0000000:        legacy set ALL slots (bulk default)
 //   Bridge 0xF0000010..0x34:  legacy set individual slot
-//   CPU SAVE_DT_SLOT/SIZE:    set individual slot (via CDC)
+//   CPU SAVE_DT_SLOT/SIZE:    set individual slot (via CDC; slot F=pre-save)
 always @(posedge clk_74a) begin
-    if (bridge_save_size_write)
+    if (bridge_presave_size_write)
+        presave_size <= bridge_wr_data_native;
+    else if (bridge_save_size_write)
         save_sizes[bridge_save_size_slot] <= bridge_wr_data_native;
     else if (bridge_wr && bridge_addr == 32'hF0000000)
         for (si = 0; si < 10; si = si + 1)
@@ -1369,7 +1461,9 @@ always @(posedge clk_74a) begin
     else if (bridge_wr && bridge_addr[31:8] == 24'hF00000
              && bridge_addr[7:2] >= 6'd4 && bridge_addr[7:2] < 6'd14)
         save_sizes[bridge_addr[7:2] - 6'd4] <= bridge_wr_data;
-    else if (save_dt_commit_rise && save_dt_slot_sync < 4'd10)
+    else if (save_dt_commit_event && save_dt_slot_sync == PRESAVE_DT_SLOT)
+        presave_size <= save_dt_size_sync;
+    else if (save_dt_commit_event && save_dt_slot_sync < 4'd10)
         save_sizes[save_dt_slot_sync] <= save_dt_size_sync;
 end
 
@@ -1434,12 +1528,18 @@ always @(posedge clk_74a) begin
         // Avoid racing APF's bridge-port datatable writes at startup.
         datatable_wren <= 0;
     end else begin
-        // Normal cycling: write save sizes. Save slots start after data
-        // slots 0..7 in data.json, so save0's size field is word 17.
+        // Normal cycling: write the pre-save config/settings size plus
+        // save sizes. Entry 8 size is word 17; save0's size field is word 19.
         datatable_wren <= 1;
-        datatable_addr <= 10'd17 + {6'd0, save_dt_idx[3:0]} * 10'd2;
-        datatable_data <= save_sizes[save_dt_idx];
-        save_dt_idx <= (save_dt_idx == 4'd9) ? 4'd0 : save_dt_idx + 4'd1;
+        if (save_dt_idx == 4'd0) begin
+            datatable_addr <= PRESAVE_SIZE_WORD;
+            datatable_data <= presave_size;
+        end else begin
+            datatable_addr <= SAVE0_SIZE_WORD +
+                              ({6'd0, save_dt_idx[3:0]} - 10'd1) * 10'd2;
+            datatable_data <= save_sizes[save_dt_idx - 4'd1];
+        end
+        save_dt_idx <= (save_dt_idx == 4'd10) ? 4'd0 : save_dt_idx + 4'd1;
     end
 end
 
@@ -1451,11 +1551,11 @@ wire shutdown_ack_74a;
 
 synch_3 sync_shutdown_pending(shutdown_pending_74a, shutdown_pending_cpu, clk_ram_controller);
 
-// Auto-ack shutdown: OR the CPU's ack with shutdown_pending itself.
-// This gives the bridge immediate acknowledgment so it never times out
-// and hard-resets the core. The CPU can still flush saves via the
-// SYS_SHUTDOWN register, but the bridge won't wait for it.
-wire shutdown_ack_combined = shutdown_ack_cpu | shutdown_pending_cpu;
+// Wait for the CPU to acknowledge shutdown so firmware can hand CRAM0
+// back to the bridge before Pocket nonvolatile save writeback.  The
+// bridge command FSM still has its own timeout fallback if the CPU is
+// wedged and never acknowledges.
+wire shutdown_ack_combined = shutdown_ack_cpu;
 synch_3 sync_shutdown_ack(shutdown_ack_combined, shutdown_ack_74a, clk_74a);
 
 core_bridge_cmd icb (
@@ -1519,6 +1619,7 @@ core_bridge_cmd icb (
 
     .target_dataslot_read       ( target_dataslot_read ),
     .target_dataslot_write      ( target_dataslot_write ),
+    .target_dataslot_write_ready( target_dataslot_write_ready ),
     .target_dataslot_getfile    ( target_dataslot_getfile ),
     .target_dataslot_openfile   ( target_dataslot_openfile ),
 
@@ -1714,6 +1815,12 @@ assign video_hs = vidout_hs;
         .cont2_key(p2_controls),
         .cont2_joy(p2_joypad),
         .cont2_trig(p2_trigger),
+        .cont3_key(cont3_key),
+        .cont3_joy(cont3_joy),
+        .cont3_trig(cont3_trig),
+        .cont4_key(cont4_key),
+        .cont4_joy(cont4_joy),
+        .cont4_trig(cont4_trig),
         .bridge_wr_idle(bridge_wr_idle),
         .target_dataslot_ack(target_dataslot_ack),
         .target_dataslot_done(target_dataslot_done_safe),
@@ -1793,7 +1900,7 @@ assign video_hs = vidout_hs;
         .dt_query_data(cpu_dt_query_data),
         .dt_query_valid(cpu_dt_query_valid),
         .vrr_v_total(vrr_v_total_cpu),
-        .analogizer_enabled(analogizer_ena),
+        .analogizer_enabled(analogizer_ena_cpu),
         // SNAC shifter / GPIO
         .snac_pin_out(snac_pin_out),
         .snac_pin_dir(snac_pin_dir),

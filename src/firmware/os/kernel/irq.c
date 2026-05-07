@@ -6,6 +6,8 @@
 
 #include "irq.h"
 #include "../hal/regs.h"
+#include "../hal/input.h"
+#include "../hal/file.h"
 
 /* Timer ISR callback — lives in syscall.c (handles timer_callback + sigalrm) */
 extern void timer_isr_callback(void);
@@ -70,11 +72,12 @@ void irq_handler(void *frame) {
          * dcfifo, so no audio work happens here. */
         TIMER_CTRL = TIMER_CTRL_ENABLE | TIMER_CTRL_W1C_IRQ;
 
+        of_check_shutdown();
         timer_isr_callback();
     }
 
     if (code == 11) {
-        /* Machine external interrupt — UART RX, link, vsync. */
+        /* Machine external interrupt — UART RX, link, vsync, input. */
         uint32_t source = 0;
 
         if (UART_STATUS & UART_RX_AVAIL)
@@ -88,6 +91,11 @@ void irq_handler(void *frame) {
         if (VSYNC_IRQ_PENDING) {
             VSYNC_IRQ_PENDING = 1;  /* W1C */
             source |= IRQ_SRC_VSYNC;
+        }
+
+        if (INPUT_STATUS & INPUT_STATUS_PENDING) {
+            of_input_irq_service();
+            source |= IRQ_SRC_INPUT;
         }
 
         /* Dispatch: dedicated callbacks */

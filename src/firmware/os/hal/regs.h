@@ -201,6 +201,37 @@
 #define CONT2_JOY           REG32(SYSREG_BASE + 0x60)
 #define CONT2_TRIG          REG32(SYSREG_BASE + 0x64)
 
+/* Input hub (0x100-0x158)
+ * IRQ-on-change raw APF slots plus a compact hardware event FIFO.
+ * FIFO event DATA1 read pops the event; read DATA0 first. */
+#define INPUT_STATUS        REG32(SYSREG_BASE + 0x100)
+#define   INPUT_STATUS_PENDING      (1 << 0)
+#define   INPUT_STATUS_FIFO_EMPTY   (1 << 1)
+#define   INPUT_STATUS_FIFO_FULL    (1 << 2)
+#define   INPUT_STATUS_OVERFLOW     (1 << 3)
+#define   INPUT_STATUS_COUNT_SHIFT  8
+#define   INPUT_STATUS_COUNT_MASK   (0x3F << INPUT_STATUS_COUNT_SHIFT)
+#define INPUT_IRQ_MASK      REG32(SYSREG_BASE + 0x104)  /* bits [3:0] enable APF slot change records */
+#define INPUT_IRQ_CLEAR     REG32(SYSREG_BASE + 0x108)
+#define   INPUT_IRQ_CLEAR_FIFO      (1 << 0)
+#define   INPUT_IRQ_CLEAR_OVERFLOW  (1 << 3)
+#define INPUT_SEQ           REG32(SYSREG_BASE + 0x10C)
+#define INPUT_SLOT_INFO(n)  REG32(SYSREG_BASE + 0x110 + ((n) * 0x10))
+#define INPUT_SLOT_KEY(n)   REG32(SYSREG_BASE + 0x114 + ((n) * 0x10))
+#define INPUT_SLOT_JOY(n)   REG32(SYSREG_BASE + 0x118 + ((n) * 0x10))
+#define INPUT_SLOT_TRIG(n)  REG32(SYSREG_BASE + 0x11C + ((n) * 0x10))
+#define INPUT_FIFO_DATA0    REG32(SYSREG_BASE + 0x150)
+#define INPUT_FIFO_DATA1    REG32(SYSREG_BASE + 0x154)  /* read pops */
+#define INPUT_FIFO_COUNT    REG32(SYSREG_BASE + 0x158)
+
+#define   INPUT_SLOT_INFO_PRESENT   (1 << 0)
+#define   INPUT_SLOT_INFO_IRQ_EN    (1 << 8)
+
+#define   INPUT_HW_EVENT_SLOT_CHANGE 0x01u
+#define   INPUT_HW_EVENT_FIELD_KEY   (1 << 0)
+#define   INPUT_HW_EVENT_FIELD_JOY   (1 << 1)
+#define   INPUT_HW_EVENT_FIELD_TRIG  (1 << 2)
+
 /* Misc */
 #define SYS_GAME_ID         REG32(SYSREG_BASE + 0x68)
 
@@ -279,8 +310,8 @@
  *
  * Layout:
  *   0x000–0x7FF  per-voice fields:  base + voice*64 + field*4
- *   0x800–0x80F  group_vol[0..3]    (low byte used)
- *   0x810        master_vol         (low byte used)
+ *   0x800        master_vol         (low byte used)
+ *   0x804–0x810  group_vol[0..3]    (low byte used)
  *   0x814–0x818  voice_group map    (32 voices × 2 bits packed in 2 words)
  *   0x820        MIX_CTRL           [0]=enable
  *   0x824        MIX_IRQ            R: pending bitmap   W: W1C bits
@@ -307,8 +338,8 @@
 #define MIX_VOICE_LOOP_START(v)  MIX_VOICE_FIELD((v), 8)   /* W: loop_start sample index */
 #define MIX_VOICE_VOL_TARGET(v)  MIX_VOICE_FIELD((v), 9)   /* W: {tgt_r[15:8], tgt_l[7:0]} */
 #define MIX_VOICE_VOL_RATE(v)    MIX_VOICE_FIELD((v), 10)  /* W: ramp step (0=snap) */
-#define MIX_GROUP_VOL(g)     REG32(MIX_BASE + 0x800 + ((g) << 2))
-#define MIX_MASTER_VOL       REG32(MIX_BASE + 0x810)
+#define MIX_MASTER_VOL       REG32(MIX_BASE + 0x800)
+#define MIX_GROUP_VOL(g)     REG32(MIX_BASE + 0x804 + ((g) << 2))
 #define MIX_VOICE_GROUP_LO   REG32(MIX_BASE + 0x814)  /* voices 0..15  packed 2 bits each */
 #define MIX_VOICE_GROUP_HI   REG32(MIX_BASE + 0x818)  /* voices 16..31 packed 2 bits each */
 #define MIX_CTRL             REG32(MIX_BASE + 0x820)  /* [0]=enable */
@@ -337,12 +368,13 @@
 /* Vsync IRQ pending (0x9C) — read: bit 0 = pending, write: W1C clears */
 #define VSYNC_IRQ_PENDING    REG32(SYSREG_BASE + 0x9C)
 
-/* External IRQ mask (0xFC) — bits[3:0] = {vsync, reserved, link, uart_rx}.
+/* External IRQ mask (0xFC) — bits[4:0] = {input, vsync, reserved, link, uart_rx}.
  * Bit 2 was the HW mixer voice-end IRQ; mixer retired, bit reserved. */
 #define IRQ_MASK             REG32(SYSREG_BASE + 0xFC)
 #define   IRQ_MASK_UART_RX   (1 << 0)
 #define   IRQ_MASK_LINK      (1 << 1)
 #define   IRQ_MASK_VSYNC     (1 << 3)
+#define   IRQ_MASK_INPUT     (1 << 4)
 
 /* VRR (Variable Refresh Rate) — dynamic V_TOTAL for video timing (0xDC)
  * Write: bits[9:0] = V_TOTAL line count (262–375, default 262)
@@ -565,6 +597,10 @@ static inline uint32_t cpu_to_bridge(void *addr) {
 #define OF_REG_CONT2_KEY            CONT2_KEY
 #define OF_REG_CONT2_JOY            CONT2_JOY
 #define OF_REG_CONT2_TRIG           CONT2_TRIG
+#define OF_REG_INPUT_STATUS         INPUT_STATUS
+#define OF_REG_INPUT_IRQ_MASK       INPUT_IRQ_MASK
+#define OF_REG_INPUT_IRQ_CLEAR      INPUT_IRQ_CLEAR
+#define OF_REG_INPUT_SEQ            INPUT_SEQ
 #define OF_REG_SYS_GAME_ID          SYS_GAME_ID
 #define OF_REG_HW_FEATURES          HW_FEATURES
 

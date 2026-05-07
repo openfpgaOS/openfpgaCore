@@ -54,7 +54,7 @@ dcfifo dcfifo_audio (
 );
 defparam dcfifo_audio.intended_device_family = "Cyclone V",
     dcfifo_audio.lpm_numwords  = 1024,
-    dcfifo_audio.lpm_showahead = "OFF",
+    dcfifo_audio.lpm_showahead = "ON",
     dcfifo_audio.lpm_type      = "dcfifo",
     dcfifo_audio.lpm_width     = 32,
     dcfifo_audio.lpm_widthu    = 10,
@@ -71,12 +71,17 @@ reg [7:0] mclk_div = 8'hFF;
 reg       audio_pop = 0;
 
 always @(posedge clk_audio) begin
-    audio_pop <= 0;
-    if (mclk_div > 0) begin
-        mclk_div <= mclk_div - 8'd1;
-    end else begin
+    if (!reset_n) begin
         mclk_div  <= 8'hFF;
-        audio_pop <= 1;
+        audio_pop <= 1'b0;
+    end else begin
+        audio_pop <= 1'b0;
+        if (mclk_div > 0) begin
+            mclk_div <= mclk_div - 8'd1;
+        end else begin
+            mclk_div  <= 8'hFF;
+            audio_pop <= 1'b1;
+        end
     end
 end
 
@@ -87,7 +92,10 @@ reg [1:0] sclk_div;
 wire      audgen_sclk = sclk_div[1] /* synthesis keep */;
 
 always @(posedge clk_audio) begin
-    sclk_div <= sclk_div + 2'd1;
+    if (!reset_n)
+        sclk_div <= 2'd0;
+    else
+        sclk_div <= sclk_div + 2'd1;
 end
 
 // ============================================
@@ -103,7 +111,10 @@ reg signed [15:0] hold_l = 16'sh0;
 reg signed [15:0] hold_r = 16'sh0;
 
 always @(posedge clk_audio) begin
-    if (audio_pop) begin
+    if (!reset_n) begin
+        hold_l <= 16'sh0;
+        hold_r <= 16'sh0;
+    end else if (audio_pop) begin
         if (!fifo_empty) begin
             hold_l <= $signed(fifo_l);
             hold_r <= $signed(fifo_r);
@@ -135,7 +146,10 @@ wire [15:0] mix_clamp_r = sfx_r;
 reg [15:0] active_l = 16'h0;
 reg [15:0] active_r = 16'h0;
 always @(posedge clk_audio) begin
-    if (audio_pop) begin
+    if (!reset_n) begin
+        active_l <= 16'h0;
+        active_r <= 16'h0;
+    end else if (audio_pop) begin
         active_l <= mix_clamp_l;
         active_r <= mix_clamp_r;
     end
@@ -145,24 +159,32 @@ reg [31:0] audgen_sampshift;
 reg [4:0]  audgen_lrck_cnt;
 reg        audgen_lrck;
 reg        audgen_dac;
+wire       audgen_sclk_fall = (sclk_div == 2'b11);
 
-always @(negedge audgen_sclk) begin
-    // Output next bit
-    audgen_dac <= audgen_sampshift[31];
+always @(posedge clk_audio) begin
+    if (!reset_n) begin
+        audgen_sampshift <= 32'd0;
+        audgen_lrck_cnt  <= 5'd0;
+        audgen_lrck      <= 1'b0;
+        audgen_dac       <= 1'b0;
+    end else if (audgen_sclk_fall) begin
+        // Output next bit
+        audgen_dac <= audgen_sampshift[31];
 
-    // 48 kHz * 64 bits = 3.072 MHz
-    audgen_lrck_cnt <= audgen_lrck_cnt + 5'd1;
-    if (audgen_lrck_cnt == 5'd31) begin
-        // Switch channels
-        audgen_lrck <= ~audgen_lrck;
+        // 48 kHz * 64 bits = 3.072 MHz
+        audgen_lrck_cnt <= audgen_lrck_cnt + 5'd1;
+        if (audgen_lrck_cnt == 5'd31) begin
+            // Switch channels
+            audgen_lrck <= ~audgen_lrck;
 
-        // Reload sample data at start of left channel
-        if (~audgen_lrck) begin
-            audgen_sampshift <= {active_l, active_r};
+            // Reload sample data at start of left channel
+            if (~audgen_lrck) begin
+                audgen_sampshift <= {active_l, active_r};
+            end
+        end else if (audgen_lrck_cnt < 5'd16) begin
+            // Shift out 16 active bits per channel
+            audgen_sampshift <= {audgen_sampshift[30:0], 1'b0};
         end
-    end else if (audgen_lrck_cnt < 5'd16) begin
-        // Shift out 16 active bits per channel
-        audgen_sampshift <= {audgen_sampshift[30:0], 1'b0};
     end
 end
 

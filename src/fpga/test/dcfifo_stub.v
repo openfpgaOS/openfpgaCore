@@ -50,7 +50,7 @@ module dcfifo #(
     assign wrusedw = diff[9:0];
     assign wrfull  = (diff == 11'd1024);
     assign rdempty = (wr_ptr == rd_ptr);
-    assign q       = q_reg;
+    assign q       = (lpm_showahead == "ON" && !rdempty) ? mem[rd_ptr[9:0]] : q_reg;
 
     always @(posedge wrclk) begin
         if (aclr) begin

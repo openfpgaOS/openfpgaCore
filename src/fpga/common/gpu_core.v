@@ -864,23 +864,14 @@ always @(posedge clk) begin
         end
 
         DMA_S_PUBLISH: begin
-            // 1-cycle pulse to atomically lift ring_wrptr from its old
-            // value (header position) to the post-DMA ring_wr_addr*4
-            // (covering header + every payload word in this kick).
-            //
-            // The earlier wait-for-skid-drain shape (`if (!dma_pend_valid)`)
-            // produced a silent wedge in Duke3D's batched-DMA path: the
-            // CPU's `while (GPU_STATUS & GPU_STATUS_DMA_BUSY)` spin has
-            // no watchdog, so any path where DMA never publishes
-            // = forever-spin.  Reverting to unconditional publish here
-            // eliminates the wedge.  Risk: if the LAST DMA beat collided
-            // with a CPU MMIO and parked in the skid, publish fires
-            // before ring_bram's last cell is written — one corrupt
-            // span per rare collision.  Acceptable trade for now;
-            // proper fix is to delay publish by 2 cycles unconditionally
-            // or remove the skid path entirely.
-            dma_publish_wrptr <= 1'b1;
-            dma_state         <= DMA_S_IDLE;
+            // Publish only after the port-A skid is empty.  If the last
+            // DMA beat collided with a CPU MMIO write, it drains from
+            // dma_pend_* during this state; ring_wr_addr updates on that
+            // drain edge, so ring_wrptr is lifted on the following cycle.
+            if (!dma_pend_valid) begin
+                dma_publish_wrptr <= 1'b1;
+                dma_state         <= DMA_S_IDLE;
+            end
         end
 
         default: dma_state <= DMA_S_IDLE;
@@ -1275,7 +1266,7 @@ reg        frag_discard;      // Alpha test / skip-zero result
 // Source mode: 0 = SPAN (sp_*). Triangle source mode is reserved but the
 // triangle refactor is deferred to a later phase.
 // p0: pre-issue stage. Holds the pixel whose multiply (tx_mul_q) is being
-// computed by the registered DSP this cycle. p0 → p1 transition is the
+// computed by the registered DSP this cycle. p0 -> p1 transition is the
 // "issue commit" event, gated on the cache asserting req_ready in the same
 // cycle the consumer drives req_valid.
 reg        p0_valid;
@@ -1503,29 +1494,31 @@ reg        persp_seg_b_ready;
 
 // PSS — segment-setup sub-FSM. Runs alongside the issue stage (and fbss)
 // inside S_FRAG_PIPE. Drives dsp_a/dsp_b and recip_rd_addr; reads
-// dsp_p / recip_rd_data. ~9 cycles per pass on the regular path (8 on
-// the no-advance first pass).
+// dsp_p / recip_rd_data. ~16 cycles per advanced pass (15 on the
+// no-advance first pass).
 //
-// Setup-side pipeline (PSS_ADV → PSS_CLZ → PSS_TOP8) is split into 3
-// register-bounded stages because the original 1-cycle combinational
+// Setup-side pipeline (PSS_ADV → PSS_ADV_CLAMP → PSS_CLZ → PSS_TOP8)
+// is split into four register-bounded stages because the original
+// 1-cycle combinational
 // chain (sp_zinv → +step<<4 → abs → 32-line CLZ casez → 32-bit barrel
 // shift → top8 → recip_rd_addr) was the worst critical path in the
 // design with -3.451 ns slack at 50 MHz. The split is:
-//   PSS_ADV    : sp_zinv += step<<4; register persp_zinv_abs_r
-//   PSS_CLZ    : compute CLZ from registered abs; register persp_clz
-//   PSS_TOP8   : compute top8 from (abs << clz); write recip_rd_addr
+//   PSS_ADV       : sp_zinv += step<<4; register old/new zinv
+//   PSS_ADV_CLAMP : register |sp_zinv_new| and clamp decision
+//   PSS_CLZ       : compute CLZ from registered abs; register persp_clz
+//   PSS_TOP8      : compute top8 from (abs << clz); write recip_rd_addr
 // PSS_RECIP_NA shares the same PSS_CLZ → PSS_TOP8 tail by registering
 // abs of un-advanced sp_zinv into persp_zinv_abs_r and falling through.
-localparam PSS_IDLE      = 4'd0;
-localparam PSS_ADV       = 4'd1;  // stage 1: advance proj coords; register abs
-localparam PSS_CLZ       = 4'd2;  // stage 2: compute CLZ from registered abs
-localparam PSS_TOP8      = 4'd3;  // stage 3: compute top8; write recip_rd_addr
-localparam PSS_RECIP_W   = 4'd4;  // BRAM read latency
-localparam PSS_MUL       = 4'd5;  // kick BOTH dsp + dsp2 multiplies (operands pre-registered)
-localparam PSS_MUL_W     = 4'd6;  // DSP pipeline delay (shared, both multiplies)
-localparam PSS_FINAL     = 4'd7;  // capture both products; commit per pass
-localparam PSS_RECIP_NA  = 4'd8;  // ANCHOR_ONLY entry — register abs without advance
-localparam PSS_RECIP_SHIFT = 4'd9;  // stage between RECIP_W and MUL: compute recip_q16
+localparam PSS_IDLE      = 5'd0;
+localparam PSS_ADV       = 5'd1;   // stage 1: advance proj coords; register old/new zinv
+localparam PSS_CLZ       = 5'd2;   // stage 3: compute CLZ from registered abs
+localparam PSS_TOP8      = 5'd3;   // stage 4: compute top8; write recip_rd_addr
+localparam PSS_RECIP_W   = 5'd4;   // BRAM read latency
+localparam PSS_MUL       = 5'd5;   // kick BOTH dsp + dsp2 multiplies (operands pre-registered)
+localparam PSS_MUL_W     = 5'd6;   // DSP pipeline delay (shared, both multiplies)
+localparam PSS_FINAL     = 5'd7;   // capture both projected endpoints
+localparam PSS_RECIP_NA  = 5'd8;   // ANCHOR_ONLY entry — register abs without advance
+localparam PSS_RECIP_SHIFT = 5'd9; // stage between RECIP_W and MUL: compute recip_q16
                                     // and register it, so PSS_MUL becomes a simple
                                     // reg-to-reg load into dsp_b/dsp2_b instead of
                                     // synthesizing a 32-bit variable barrel shift
@@ -1537,13 +1530,15 @@ localparam PSS_RECIP_SHIFT = 4'd9;  // stage between RECIP_W and MUL: compute re
 // N-R iteration y1 = y0 * (2 - x*y0) doubles the precision to ~20
 // bits — well past Q16.16 — at the cost of 6 cycles per recip.
 // Reuses the existing dsp slot, no new DSPs.
-localparam PSS_NR_MUL_X    = 4'd10;  // launch x * y0
-localparam PSS_NR_MUL_X_W  = 4'd11;  // DSP pipeline delay
-localparam PSS_NR_SUB      = 4'd12;  // capture xy, register 2 - xy
-localparam PSS_NR_MUL_Y    = 4'd13;  // launch y0 * (2 - xy)
-localparam PSS_NR_MUL_Y_W  = 4'd14;  // DSP pipeline delay
-localparam PSS_NR_CAPTURE  = 4'd15;  // refined recip → recip_q16_r
-reg [3:0] persp_pss;
+localparam PSS_NR_MUL_X    = 5'd10;  // launch x * y0
+localparam PSS_NR_MUL_X_W  = 5'd11;  // DSP pipeline delay
+localparam PSS_NR_SUB      = 5'd12;  // capture xy, register 2 - xy
+localparam PSS_NR_MUL_Y    = 5'd13;  // launch y0 * (2 - xy)
+localparam PSS_NR_MUL_Y_W  = 5'd14;  // DSP pipeline delay
+localparam PSS_NR_CAPTURE  = 5'd15;  // refined recip → recip_q16_r
+localparam PSS_ADV_CLAMP   = 5'd16;  // stage 2: register abs/clamp from old/new zinv
+localparam PSS_SLOPE       = 5'd17;  // commit anchor/slope from registered endpoints
+reg [4:0] persp_pss;
 reg signed [31:0] recip_q16_r;
 reg signed [31:0] nr_two_minus_xy;
 
@@ -1554,10 +1549,10 @@ localparam PSS_PASS_TO_B   = 2'd2;  // pass 3+: derive slope, fill slot B (pendi
 reg [1:0] persp_pass;
 
 // Latched values across PSS pipeline stages.
-reg [31:0] persp_zinv_abs_r;   // |sp_zinv| latched after PSS_ADV / PSS_RECIP_NA
+reg [31:0] persp_zinv_abs_r;   // |sp_zinv| latched after PSS_ADV_CLAMP / PSS_RECIP_NA
 reg [4:0]  persp_clz;          // CLZ of persp_zinv_abs_r, latched after PSS_CLZ
-// (persp_recip_q16, persp_s_end removed — both sZ and tZ multiplies now
-// run concurrently on dsp/dsp2, so PSS_FINAL reads dsp_p and dsp2_p together.)
+reg signed [31:0] pss_s_end_r;
+reg signed [31:0] pss_t_end_r;
 
 // Task #89 — PSS slope clamp on perspective singularity (commit XXXX).
 //
@@ -1591,27 +1586,28 @@ reg [4:0]  persp_clz;          // CLZ of persp_zinv_abs_r, latched after PSS_CLZ
 // is constant (d(zinv)/dx = 0 when v0/v1 share y and w), so the
 // advance never shrinks the magnitude.
 //
-// Cost: 1 register (pss_zinv_clamp_r), 1 compare on the abs
-// values.  No timing impact (sp_zinv_abs is already registered).
+// The clamp uses registered old/new zinv values so the advance adder
+// does not share a cycle with the magnitude compare.
 reg pss_zinv_clamp_r;
-// Cheap "<<2 magnitude shrink" check: persp_zinv_abs (post-advance)
-// < persp_zinv_abs_na (pre-advance) >> 2.  Combinational.  Both
-// abs values already exist as wires below.
+reg signed [31:0] pss_zinv_adv_r;
+reg signed [31:0] pss_zinv_prev_r;
+reg        [31:0] pss_zinv_abs_na_r;
+// Cheap "<<2 magnitude shrink" check:
+// |post-advance zinv| < |pre-advance zinv| >> 2.
 
 // Stall the issue stage while slot A isn't ready (passes 1+2 still running).
 // Slot B not being ready is handled separately inside the load_p0 gate.
 wire persp_issue_stall = persp_active && !persp_seg_a_ready;
 
-// Combinational |sp_zinv| variants. PSS_ADV uses the post-advance value
-// (sp_zinv + 8 pixels of step); PSS_RECIP_NA uses the un-advanced value
-// (first pass only). Both are registered into persp_zinv_abs_r so the
-// downstream CLZ/top8 stages don't include the 32-bit add in their
-// timing path.
+// Combinational zinv helpers. PSS_ADV captures the post-advance value
+// (sp_zinv + 8 pixels of step) and the pre-advance abs; PSS_ADV_CLAMP
+// registers the post-advance abs into persp_zinv_abs_r. PSS_RECIP_NA
+// uses the un-advanced value directly on the first pass.
 wire signed [31:0] sp_zinv_advanced = sp_zinv + (sp_zinv_step <<< 3);  // 8-pixel advance
-wire        [31:0] persp_zinv_abs   = sp_zinv_advanced[31]
-                                    ? -sp_zinv_advanced
-                                    :  sp_zinv_advanced;
 wire        [31:0] persp_zinv_abs_na = sp_zinv[31] ? -sp_zinv : sp_zinv;
+wire        [31:0] pss_zinv_adv_abs_r = pss_zinv_adv_r[31]
+                                      ? -pss_zinv_adv_r
+                                      :  pss_zinv_adv_r;
 
 // CLZ helper — combinational casez. Returns leading-zero count for 32-bit.
 function [4:0] persp_clz_fn;
@@ -1737,11 +1733,16 @@ reg signed [31:0] v_w [0:2];
 reg signed [31:0] v_sw [0:2];
 reg signed [31:0] v_tw [0:2];
 
-// Combinational: any vertex with non-unit w trips perspective.
+// Combinational load-time perspective detect.  S_TRI_LOAD latches
+// stage-local copies so the wide v_w compare is not on every gradient,
+// init, and span-emission mux path.
 // 0x00010000 == 1.0 in Q16.16 == affine.
-wire tri_persp_active = (v_w[0] != 32'h00010000)
-                      || (v_w[1] != 32'h00010000)
-                      || (v_w[2] != 32'h00010000);
+wire tri_persp_active_w = (v_w[0] != 32'h00010000)
+                       || (v_w[1] != 32'h00010000)
+                       || (v_w[2] != 32'h00010000);
+reg tri_persp_active_grad_r;
+reg tri_persp_active_init_r;
+reg tri_persp_active_span_r;
 
 // Pre-multiply round counter for S_TRI_PERSP_PREMUL.  3-bit because
 // each round is launch + wait + capture (matches S_TRI_INIT_ATTRIB).
@@ -1752,15 +1753,15 @@ reg signed [31:0] tri_A [0:2], tri_B [0:2], tri_C [0:2];
 
 // Attribute gradients (per sub-pixel step, fixed-point)
 reg signed [31:0] grad_z_dx, grad_z_dy;
-// Phase 4c.3 — when tri_persp_active, grad_s_dx/dy and grad_t_dx/dy
+// Phase 4c.3 — when perspective is active, grad_s_dx/dy and grad_t_dx/dy
 // hold gradients of (s*w) and (t*w) respectively (the perspective-
 // corrected linearly-interpolatable form).  When affine, they hold
-// gradients of s and t as before.  Span emit checks tri_persp_active
-// to know which interpretation applies.
+// gradients of s and t as before.  Span emit checks the latched
+// perspective flag to know which interpretation applies.
 reg signed [31:0] grad_s_dx, grad_s_dy;
 reg signed [31:0] grad_t_dx, grad_t_dy;
 // Phase 4c.3 — perspective-divide reciprocal gradient.  Only meaningful
-// when tri_persp_active; unused on affine triangles (gradient loop
+// when perspective is active; unused on affine triangles (gradient loop
 // skips by jumping idx 5 → 8).
 reg signed [31:0] grad_w_dx, grad_w_dy;
 // Phase 4d Gouraud — light-row gradient (the colormap row index that
@@ -1908,11 +1909,11 @@ reg signed [15:0] dX10, dY10, dX20, dY20;
 // 1 unit = 0x10000 ≈ a full per-pixel light step).
 wire signed [31:0] grad_dV10 =
     (grad_idx[3:1] == 3'd0) ? ({16'b0, v_z[1]} - {16'b0, v_z[0]}) :
-    (grad_idx[3:1] == 3'd1) ? (tri_persp_active
+    (grad_idx[3:1] == 3'd1) ? (tri_persp_active_grad_r
                                  ? (v_sw[1] - v_sw[0])
                                  : ({{16{v_s[1][15]}}, v_s[1]}
                                   - {{16{v_s[0][15]}}, v_s[0]})) :
-    (grad_idx[3:1] == 3'd2) ? (tri_persp_active
+    (grad_idx[3:1] == 3'd2) ? (tri_persp_active_grad_r
                                  ? (v_tw[1] - v_tw[0])
                                  : ({{16{v_t[1][15]}}, v_t[1]}
                                   - {{16{v_t[0][15]}}, v_t[0]})) :
@@ -1920,11 +1921,11 @@ wire signed [31:0] grad_dV10 =
                               ({24'b0, v_r[1]} - {24'b0, v_r[0]});
 wire signed [31:0] grad_dV20 =
     (grad_idx[3:1] == 3'd0) ? ({16'b0, v_z[2]} - {16'b0, v_z[0]}) :
-    (grad_idx[3:1] == 3'd1) ? (tri_persp_active
+    (grad_idx[3:1] == 3'd1) ? (tri_persp_active_grad_r
                                  ? (v_sw[2] - v_sw[0])
                                  : ({{16{v_s[2][15]}}, v_s[2]}
                                   - {{16{v_s[0][15]}}, v_s[0]})) :
-    (grad_idx[3:1] == 3'd2) ? (tri_persp_active
+    (grad_idx[3:1] == 3'd2) ? (tri_persp_active_grad_r
                                  ? (v_tw[2] - v_tw[0])
                                  : ({{16{v_t[2][15]}}, v_t[2]}
                                   - {{16{v_t[0][15]}}, v_t[0]})) :
@@ -1937,7 +1938,7 @@ wire signed [31:0] grad_axis_b2 = grad_idx[0] ? {{16{dX10[15]}}, dX10}
 
 // Pipeline register on the dV10/dV20 mux outputs.  The combinational
 // chain `v_w[1..2] → 32-bit subtract → 5-way grad_idx mux → 2:1
-// tri_persp_active mux → dsp_a/dsp2_a register input` was 11.2 ns at
+// perspective-active mux → dsp_a/dsp2_a register input` was 11.2 ns at
 // 100 MHz (-1.17 ns slack).  Registering it here breaks the path into
 // flop→mux→flop (free) and flop→DSP_in (clean), closing timing.
 // Updated every cycle; consumed by the S_TRI_GRAD loop at the
@@ -2064,6 +2065,11 @@ always @(posedge clk) begin
         persp_pass <= PSS_PASS_ANCHOR;
         persp_zinv_abs_r <= 0;
         pss_zinv_clamp_r <= 0;
+        pss_zinv_adv_r <= 0;
+        pss_zinv_prev_r <= 0;
+        pss_zinv_abs_na_r <= 0;
+        pss_s_end_r <= 0;
+        pss_t_end_r <= 0;
         persp_clz <= 0;
         nr_two_minus_xy <= 0;
         dsp_a <= 0; dsp_b <= 0;
@@ -2071,6 +2077,9 @@ always @(posedge clk) begin
         recip_rd_addr <= 0;
         dsp3_a <= 0; dsp3_b <= 0;
         tri_active <= 0;
+        tri_persp_active_grad_r <= 0;
+        tri_persp_active_init_r <= 0;
+        tri_persp_active_span_r <= 0;
         setup_step <= 0;
         grad_idx <= 0;
         grad_sub <= 0;
@@ -2630,19 +2639,19 @@ always @(posedge clk) begin
             // Was the (combinational) tex_req accepted by the cache this
             // same cycle? Both signals are visible NOW.
             issue_committed = tex_req_valid && tex_req_ready;
-            // Load p0 with the next pixel when: we just committed (so the
-            // current p0 is shifting out), OR p0 is empty (priming).
+            // Load/refresh p0 only if cache accepted the previous p0 or p0 is
+            // empty (pipe priming).  Otherwise hold p0 stable and do not
+            // advance the source.
             // Persp gating:
             //   * !persp_issue_stall: slot A must be loaded (pass 2 done).
             //   * If sp_seg_left == 0 (last px of segment), slot B must be
             //     ready so the swap can fire in the same cycle.
-            load_p0         = (issue_committed || !p0_valid)
-                           && (sp_count != 16'd0) && !src_done
-                           && !persp_issue_stall
-                           && (!persp_active
-                               || sp_seg_left != 4'd0
-                               || persp_seg_b_ready)
-                           ;
+            load_p0 = (issue_committed || !p0_valid)
+                   && (sp_count != 16'd0) && !src_done
+                   && !persp_issue_stall
+                   && (!persp_active
+                       || sp_seg_left != 4'd0
+                       || persp_seg_b_ready);
             span_last_issue = (sp_count == 16'd1);
 
             // ----------------------------------------------------------
@@ -2700,8 +2709,8 @@ always @(posedge clk) begin
                     p1_valid <= 0;
                 end
 
-                // p0 <- sp_* (pre-issue load + DSP fire). Happens when we
-                // just committed (p0 needs a new pixel) or p0 was empty.
+                // p0 <- sp_* (pre-issue).  The texture row multiply is
+                // captured in tx_mul_q with the same metadata.
                 if (load_p0) begin
                     p0_valid     <= 1;
                     p0_light     <= sp_light;
@@ -3028,23 +3037,34 @@ always @(posedge clk) begin
 
                 PSS_ADV: begin
                     // Stage 1 of pipelined setup: advance projection-space
-                    // accumulators by 8 pixels and register |sp_zinv_new|.
+                    // accumulators by 8 pixels and register old/new zinv.
                     // Splitting the old single-cycle (advance → CLZ → top8 →
-                    // recip_rd_addr) chain into ADV / CLZ / TOP8 closes the
-                    // 50 MHz timing path that was failing by -3.45 ns.
+                    // recip_rd_addr) chain into ADV / ADV_CLAMP / CLZ /
+                    // TOP8 closes the timing path.
                     sp_sZ            <= sp_sZ   + (sp_sZstep   <<< 3);  // 8-pixel advance
                     sp_tZ            <= sp_tZ   + (sp_tZstep   <<< 3);
                     sp_zinv          <= sp_zinv_advanced;
-                    persp_zinv_abs_r <= persp_zinv_abs;
+                    pss_zinv_prev_r  <= sp_zinv;
+                    pss_zinv_adv_r   <= sp_zinv_advanced;
+                    pss_zinv_abs_na_r <= persp_zinv_abs_na;
+                    persp_pss        <= PSS_ADV_CLAMP;
+                end
+
+                PSS_ADV_CLAMP: begin
+                    // Stage 2: register |sp_zinv_new| and the singularity
+                    // clamp decision from the old/new values captured by
+                    // PSS_ADV.  This removes the clamp compare from the
+                    // advance-adder timing cone.
+                    persp_zinv_abs_r <= pss_zinv_adv_abs_r;
                     // Singularity clamp (task #89).  See comment by
                     // pss_zinv_clamp_r declaration.  Trigger if the
                     // 8-pixel advance shrinks |sp_zinv| by 4× or more,
                     // OR crosses zero entirely.
                     pss_zinv_clamp_r <=
-                        ((sp_zinv_advanced[31] ^ sp_zinv[31])
-                         && (sp_zinv != 32'sd0)
-                         && (sp_zinv_advanced != 32'sd0))
-                     || (persp_zinv_abs < (persp_zinv_abs_na >> 2));
+                        ((pss_zinv_adv_r[31] ^ pss_zinv_prev_r[31])
+                         && (pss_zinv_prev_r != 32'sd0)
+                         && (pss_zinv_adv_r != 32'sd0))
+                     || (pss_zinv_adv_abs_r < (pss_zinv_abs_na_r >> 2));
                     persp_pss        <= PSS_CLZ;
                 end
 
@@ -3059,7 +3079,7 @@ always @(posedge clk) begin
                 end
 
                 PSS_CLZ: begin
-                    // Stage 2: compute leading-zero count of the registered
+                    // Stage 3: compute leading-zero count of the registered
                     // abs value and register it. Inputs are FF outputs;
                     // output is a FF input — the casez sits between two
                     // register banks.
@@ -3068,7 +3088,7 @@ always @(posedge clk) begin
                 end
 
                 PSS_TOP8: begin
-                    // Stage 3: compute the top-8 normalized bits (the recip
+                    // Stage 4: compute the top-8 normalized bits (the recip
                     // LUT index) from the registered abs and clz, and write
                     // recip_rd_addr. Variable barrel shift is the only
                     // combinational chain in this stage.
@@ -3144,7 +3164,7 @@ always @(posedge clk) begin
                     persp_pss <= PSS_FINAL;
                 end
 
-                PSS_FINAL: begin : pss_final_blk
+                PSS_FINAL: begin
                     // dsp_p  = sZ × recip → s_end
                     // dsp2_p = tZ × recip → t_end
                     //
@@ -3156,41 +3176,47 @@ always @(posedge clk) begin
                     // sub-segment renders with constant s/t.  See
                     // pss_zinv_clamp_r declaration for the full
                     // analysis.
-                    reg signed [31:0] s_end;
-                    reg signed [31:0] t_end;
-                    s_end = pss_zinv_clamp_r ? persp_anchor_s : dsp_p[47:16];
-                    t_end = pss_zinv_clamp_r ? persp_anchor_t : dsp2_p[47:16];
+                    //
+                    // Register endpoints before deriving slopes.  The previous
+                    // single-cycle path ran DSP output -> 32-bit subtract ->
+                    // sp_sstep/sp_tstep and was the post-fit 100 MHz limiter.
+                    pss_s_end_r <= pss_zinv_clamp_r ? persp_anchor_s : dsp_p[47:16];
+                    pss_t_end_r <= pss_zinv_clamp_r ? persp_anchor_t : dsp2_p[47:16];
+                    persp_pss   <= PSS_SLOPE;
+                end
+
+                PSS_SLOPE: begin
                     // (debug $display removed)
                     case (persp_pass)
                         PSS_PASS_ANCHOR: begin
                             // Pass 1: just store the anchor at pos 0.
-                            persp_anchor_s   <= s_end;
-                            persp_anchor_t   <= t_end;
+                            persp_anchor_s   <= pss_s_end_r;
+                            persp_anchor_t   <= pss_t_end_r;
                             persp_first_done <= 1;
                         end
                         PSS_PASS_TO_A: begin
                             // Pass 2: derive slot A slopes from anchor → pos 8.
                             sp_s              <= persp_anchor_s;
                             sp_t              <= persp_anchor_t;
-                            sp_sstep          <= ($signed(s_end)
+                            sp_sstep          <= ($signed(pss_s_end_r)
                                                 - $signed(persp_anchor_s)) >>> 3;
-                            sp_tstep          <= ($signed(t_end)
+                            sp_tstep          <= ($signed(pss_t_end_r)
                                                 - $signed(persp_anchor_t)) >>> 3;
                             sp_seg_left       <= 4'd7;  // 8-pixel segments
-                            persp_anchor_s    <= s_end;
-                            persp_anchor_t    <= t_end;
+                            persp_anchor_s    <= pss_s_end_r;
+                            persp_anchor_t    <= pss_t_end_r;
                             persp_seg_a_ready <= 1;
                         end
                         PSS_PASS_TO_B: begin
                             // Pass 3+: derive slot B (pending) slopes.
                             persp_pend_s      <= persp_anchor_s;
                             persp_pend_t      <= persp_anchor_t;
-                            persp_pend_sstep  <= ($signed(s_end)
+                            persp_pend_sstep  <= ($signed(pss_s_end_r)
                                                 - $signed(persp_anchor_s)) >>> 3;
-                            persp_pend_tstep  <= ($signed(t_end)
+                            persp_pend_tstep  <= ($signed(pss_t_end_r)
                                                 - $signed(persp_anchor_t)) >>> 3;
-                            persp_anchor_s    <= s_end;
-                            persp_anchor_t    <= t_end;
+                            persp_anchor_s    <= pss_s_end_r;
+                            persp_anchor_t    <= pss_t_end_r;
                             persp_seg_b_ready <= 1;
                         end
                         default: ;
@@ -3520,11 +3546,14 @@ always @(posedge clk) begin
         S_TRI_LOAD: begin
             setup_step <= 0;
             premul_step <= 0;
+            tri_persp_active_grad_r <= tri_persp_active_w;
+            tri_persp_active_init_r <= tri_persp_active_w;
+            tri_persp_active_span_r <= tri_persp_active_w;
             // When any vertex has non-unit w, run the pre-multiply pass
             // first to populate v_sw/v_tw (consumed in 4c.3 by the
             // gradient loop).  Affine triangles skip directly to
             // S_TRI_SETUP — zero overhead on the common path.
-            state <= tri_persp_active ? S_TRI_PERSP_PREMUL : S_TRI_SETUP;
+            state <= tri_persp_active_w ? S_TRI_PERSP_PREMUL : S_TRI_SETUP;
         end
 
         // ============================================================
@@ -3873,10 +3902,10 @@ always @(posedge clk) begin
                     case (grad_idx)
                         4'd0: grad_z_dx <= dsp_p_shifted;
                         4'd1: grad_z_dy <= dsp_p_shifted;
-                        4'd2: grad_s_dx <= tri_persp_active ? (dsp_p_shifted >>> 16) : dsp_p_shifted;
-                        4'd3: grad_s_dy <= tri_persp_active ? (dsp_p_shifted >>> 16) : dsp_p_shifted;
-                        4'd4: grad_t_dx <= tri_persp_active ? (dsp_p_shifted >>> 16) : dsp_p_shifted;
-                        4'd5: grad_t_dy <= tri_persp_active ? (dsp_p_shifted >>> 16) : dsp_p_shifted;
+                        4'd2: grad_s_dx <= tri_persp_active_grad_r ? (dsp_p_shifted >>> 16) : dsp_p_shifted;
+                        4'd3: grad_s_dy <= tri_persp_active_grad_r ? (dsp_p_shifted >>> 16) : dsp_p_shifted;
+                        4'd4: grad_t_dx <= tri_persp_active_grad_r ? (dsp_p_shifted >>> 16) : dsp_p_shifted;
+                        4'd5: grad_t_dy <= tri_persp_active_grad_r ? (dsp_p_shifted >>> 16) : dsp_p_shifted;
                         4'd6: grad_w_dx <= dsp_p_shifted >>> 16;
                         4'd7: grad_w_dy <= dsp_p_shifted >>> 16;
                         // Phase 4d Gouraud — light gradient.  Q16.16
@@ -3898,7 +3927,7 @@ always @(posedge clk) begin
                     //   idx 9 → exit
                     if (grad_idx == 4'd9) begin
                         state <= S_TRI_BBOX;
-                    end else if (grad_idx == 4'd5 && !tri_persp_active) begin
+                    end else if (grad_idx == 4'd5 && !tri_persp_active_grad_r) begin
                         // Affine: skip w (idx 6/7), continue to r (idx 8).
                         grad_idx <= 4'd8;
                     end else begin
@@ -4041,8 +4070,8 @@ always @(posedge clk) begin
                     // Capture s + launch t.  Base value is v_sw[0]
                     // (already Q16.16) when persp_active, else v_s[0]
                     // sign-extended into Q16.16 (integer-only).
-                    tri_row_s <= (tri_persp_active ? v_sw[0]
-                                                   : {v_s[0], 16'b0})
+                    tri_row_s <= (tri_persp_active_init_r ? v_sw[0]
+                                                          : {v_s[0], 16'b0})
                                + $signed(dsp_p[31:0])
                                + $signed(dsp2_p[31:0]);
                     dsp_a  <= grad_t_dx;
@@ -4057,11 +4086,11 @@ always @(posedge clk) begin
                     // next (round 3 of 5); on affine triangles skip w
                     // and launch r (round 4) directly.  Either way the
                     // next step is a wait cycle for the DSP pipeline.
-                    tri_row_t <= (tri_persp_active ? v_tw[0]
-                                                   : {v_t[0], 16'b0})
+                    tri_row_t <= (tri_persp_active_init_r ? v_tw[0]
+                                                          : {v_t[0], 16'b0})
                                + $signed(dsp_p[31:0])
                                + $signed(dsp2_p[31:0]);
-                    if (tri_persp_active) begin
+                    if (tri_persp_active_init_r) begin
                         // Round 3 (w) — perspective only.
                         dsp_a  <= grad_w_dx;
                         dsp_b  <= {{11{delta_x_subpix[20]}}, delta_x_subpix};
@@ -4079,7 +4108,7 @@ always @(posedge clk) begin
                 end
                 4'd7: init_step <= 4'd8;
                 4'd8: begin
-                    if (tri_persp_active) begin
+                    if (tri_persp_active_init_r) begin
                         // Persp: capture w + launch r.
                         tri_row_w <= v_w[0]
                                    + $signed(dsp_p[31:0])
@@ -4213,11 +4242,11 @@ always @(posedge clk) begin
                     // that want raw-texel triangles must upload an identity
                     // row at the cmap[r] they reference (typically r=0); a
                     // missing row reads 0 and renders the fragment black.
-                    // PERSP flag (bit 5) folds in when tri_persp_active.
+                    // PERSP flag (bit 5) folds in when perspective is active.
                     // bits 3/4 (DEPTH_TEST/WRITE) retired with the Z buffer.
                     sp_flags     <= 8'h01
                                    | (st_skip_zero ? 8'h04 : 8'h00)
-                                   | (tri_persp_active ? 8'h20 : 8'h00);
+                                   | (tri_persp_active_span_r ? 8'h20 : 8'h00);
                     sp_fb_stride <= 16'd1;
                     sp_tex_width <= st_tex_width;
                     sp_tex_w_mask <= 16'hFFFF;
@@ -4227,7 +4256,7 @@ always @(posedge clk) begin
                     // SPAN_PERSP path's perspective-source regs and arm
                     // the PSS_* sub-FSM.  When affine, disarm exactly as
                     // before.
-                    if (tri_persp_active) begin
+                    if (tri_persp_active_span_r) begin
                         // sp_sZ / sp_tZ / sp_zinv are linearly-interpolated
                         // (s*w, t*w, w) at the span's first inside pixel,
                         // captured in S_TRI_PIX above.  Their per-pixel

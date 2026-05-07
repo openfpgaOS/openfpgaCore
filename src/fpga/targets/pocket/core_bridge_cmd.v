@@ -80,6 +80,7 @@ input   wire            savestate_load_err,
 
 input   wire            target_dataslot_read,       // rising edge triggered
 input   wire            target_dataslot_write,
+input   wire            target_dataslot_write_ready,
 input   wire            target_dataslot_getfile,
 input   wire            target_dataslot_openfile,
 
@@ -524,15 +525,17 @@ always @(posedge clk) begin
             tstate <= TARG_ST_DATASLOTOP;
             
         end else if(target_dataslot_write_queue) begin
-            target_dataslot_write_queue <= 0;
-            target_0[15:0] <= 16'h0184;
-            
-            target_20 <= target_dataslot_id;
-            target_24 <= target_dataslot_slotoffset;
-            target_28 <= target_dataslot_bridgeaddr;
-            target_2C <= target_dataslot_length;
-            
-            tstate <= TARG_ST_DATASLOTOP;
+            if(target_dataslot_write_ready) begin
+                target_dataslot_write_queue <= 0;
+                target_0[15:0] <= 16'h0184;
+
+                target_20 <= target_dataslot_id;
+                target_24 <= target_dataslot_slotoffset;
+                target_28 <= target_dataslot_bridgeaddr;
+                target_2C <= target_dataslot_length;
+
+                tstate <= TARG_ST_DATASLOTOP;
+            end
             
         end else if(target_dataslot_getfile_queue) begin
             target_dataslot_getfile_queue <= 0;

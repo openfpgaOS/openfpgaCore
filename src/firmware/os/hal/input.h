@@ -6,8 +6,8 @@
  * defined in api/of_input.h -- the SDK header is the canonical source
  * for both. Per-target HAL implementations are responsible for
  * translating native register layouts into this format. On Pocket the
- * native APF format happens to match OF_BTN_* bit-for-bit (no
- * translation), but a future MiSTer port would remap here.
+ * low 16 APF button bits match OF_BTN_* bit-for-bit; APF report type
+ * metadata and dock keyboard/mouse reports are decoded separately.
  */
 
 #ifndef OFOS_INPUT_H
@@ -24,8 +24,19 @@ void of_input_init(void);
 /* Poll all controllers (call once per frame) */
 void of_input_poll(void);
 
+/* Service input-hub IRQs.  Drains raw hardware change records; target
+ * implementations may use this to feed a future event queue. */
+void of_input_irq_service(void);
+
 /* Get current state for a player (0 or 1) */
 const of_input_state_t *of_input_get_state(int player);
+
+/* Get current dock keyboard state.  Keyboard reports use USB HID usage IDs. */
+const of_keyboard_state_t *of_input_get_keyboard_state(void);
+
+/* Read mouse state and consume relative movement accumulated since the
+ * previous read.  Button state remains level-based like controller state. */
+void of_input_read_mouse_state(of_mouse_state_t *out);
 
 /* Single-player fast path: poll hardware + return P0 state in one call */
 void of_input_poll_p0(of_input_state_t *out);

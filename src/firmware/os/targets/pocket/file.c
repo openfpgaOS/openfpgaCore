@@ -53,13 +53,22 @@ void of_file_init(void) {
 }
 
 /* Check for shutdown handshake: if the bridge wants to shut down,
- * flush D-cache (framebuffer/DMA data in SDRAM) and acknowledge
- * so the bridge can proceed with reset. Save data in CRAM0 does
- * not need flushing — CRAM0 is uncached per PMA. */
+ * hand CRAM0 back to the bridge, flush D-cache (framebuffer/DMA data
+ * in SDRAM), and acknowledge so the bridge can proceed with reset.
+ * Save data in CRAM0 does not need cache flushing — CRAM0 is uncached
+ * per PMA — but the bridge must own the CRAM0 mux before the Pocket
+ * nonvolatile exit writeback reads the save window. */
 void of_check_shutdown(void) {
     if (SYS_SHUTDOWN & SHUTDOWN_PENDING) {
+        fence();
+        CRAM0_MODE = CRAM0_MODE_BRIDGE;
+        for (volatile int s = 0; s < 8; s++) {}
+        fence();
         of_cache_flush_dcache();
         SYS_SHUTDOWN = SHUTDOWN_ACK;
+        while (SYS_SHUTDOWN & SHUTDOWN_PENDING) {
+            /* Do not resume app code after handing CRAM0 to the bridge. */
+        }
     }
 }
 
@@ -286,15 +295,20 @@ void of_file_inval_cram(uint32_t bridge_addr, uint32_t length) {
 static int datatable_entry_for_slot(uint32_t slot_id, uint32_t *entry_out) {
     /* APF's datatable is indexed by array position in data.json, while
      * DS_CMD_READ/GETFILE use the slot `id` field.  Current layout:
-     *   ids 0-7   -> entries 0-7   (game, os, app, data 1-4, soundbank)
-     *   id  8     -> entry  8      (shared config)
-     *   id  9     -> reserved (gap; not present in data.json)
-     *   ids 10-19 -> entries 9-18  (ten nonvolatile save slots)
+     *   ids 0-7      -> entries 0-7   (game, os, app, data 1-4, soundbank)
+     *   id 8 or id 9 -> entry  8      (one pre-save nonvolatile slot:
+     *                                    SDK Shared Config or Duke settings)
+     *   ids 10-19    -> entries 9-18  (ten nonvolatile save slots)
      * If you add or remove a pre-save slot in data.json, this map MUST
      * be updated in lockstep -- the relationship is contractual and
      * APF does not expose the id field at runtime to let us derive it. */
-    if (slot_id <= 8) {
+    if (slot_id <= 7) {
         *entry_out = slot_id;
+        return 0;
+    }
+
+    if (slot_id == 8 || slot_id == 9) {
+        *entry_out = 8;
         return 0;
     }
 
@@ -448,7 +462,8 @@ int of_file_slot_write(uint32_t slot_id, uint32_t bridge_addr, uint32_t length) 
     /* Wait for bridge idle before issuing command */
     {
         uint32_t wait = DMA_TIMEOUT;
-        while (!(DS_STATUS & DS_STATUS_READY)) {
+        while ((DS_STATUS & (DS_STATUS_READY | DS_STATUS_WR_IDLE))
+               != (DS_STATUS_READY | DS_STATUS_WR_IDLE)) {
             if (--wait == 0) return OF_ERR_TIMEOUT;
         }
     }
@@ -467,7 +482,8 @@ int of_file_slot_write_at(uint32_t slot_id, uint32_t slot_offset,
     /* Wait for bridge idle before issuing command */
     {
         uint32_t wait = DMA_TIMEOUT;
-        while (!(DS_STATUS & DS_STATUS_READY)) {
+        while ((DS_STATUS & (DS_STATUS_READY | DS_STATUS_WR_IDLE))
+               != (DS_STATUS_READY | DS_STATUS_WR_IDLE)) {
             if (--wait == 0) return OF_ERR_TIMEOUT;
         }
     }
@@ -479,6 +495,32 @@ int of_file_slot_write_at(uint32_t slot_id, uint32_t slot_offset,
     DS_COMMAND     = DS_CMD_WRITE;
 
     return file_wait_complete();
+}
+
+int of_file_slot_write_chunked(uint32_t slot_id, uint32_t slot_offset,
+                                uint32_t bridge_addr, uint32_t total,
+                                uint32_t chunk_size) {
+    if (total == 0)
+        return of_file_slot_write_at(slot_id, slot_offset, bridge_addr, 0);
+
+    if (chunk_size == 0 || chunk_size > total)
+        chunk_size = total;
+
+    uint32_t done = 0;
+    while (done < total) {
+        uint32_t chunk = total - done;
+        if (chunk > chunk_size)
+            chunk = chunk_size;
+
+        int rc = of_file_slot_write_at(slot_id, slot_offset + done,
+                                        bridge_addr + done, chunk);
+        if (rc < 0)
+            return rc;
+
+        done += chunk;
+    }
+
+    return 0;
 }
 
 /* (moved to top of file read section) */

@@ -59,8 +59,9 @@
  * SDRAM before jumping.  Save/load scratch lives at a separate
  * offset so the two don't collide with an in-flight transfer. */
 #define OF_TARGET_CRAM0_OS_OFFSET      0x00000000u
+#define OF_TARGET_CRAM0_PRESAVE_OFFSET 0x000C0000u   /* 768 KB in: shared config / per-game settings */
 #define OF_TARGET_CRAM0_SAVE_OFFSET    0x00100000u   /* 1 MB in */
-#define OF_TARGET_CRAM0_SCRATCH_OFFSET 0x00400000u   /* 4 MB in — above the 2.5 MB save window */
+#define OF_TARGET_CRAM0_SCRATCH_OFFSET 0x00400000u   /* 4 MB in — above config + the 2.5 MB save window */
 
 /* SRAM is GPU-private in v2 — no AXI alias, not CPU-addressable. */
 /* (OF_TARGET_SRAM_BASE / OF_TARGET_SRAM_SIZE removed) */
@@ -93,13 +94,24 @@
 #define OF_TARGET_SAMPLE_BASE_UNCACHED 0x53700000u
 #define OF_TARGET_SAMPLE_SIZE          (8u * 1024u * 1024u)
 
-/* Save region is now the CRAM0 save slot window — the OS copies an
- * SDRAM save buffer into CRAM0 before asking the bridge to DMA it out
- * to the APF data slot.  10 slots × 256 KB = 2.5 MB, starting at the
- * CRAM0 save offset. */
+/* One pre-save nonvolatile slot covers either SDK Shared Config (id 8)
+ * or Duke's per-game settings file (id 9), depending on the active
+ * data.json. Game saves follow immediately after it. */
+#define OF_TARGET_PRESAVE_REGION_ADDR  (OF_TARGET_CRAM0_BASE + OF_TARGET_CRAM0_PRESAVE_OFFSET)
+#define OF_TARGET_PRESAVE_SLOT_SIZE    0x00040000u
+
+/* Save region is the CRAM0 save slot window. 10 slots x 256 KB = 2.5 MB,
+ * starting after the pre-save config/settings slot. */
 #define OF_TARGET_SAVE_REGION_ADDR     (OF_TARGET_CRAM0_BASE + OF_TARGET_CRAM0_SAVE_OFFSET)
 #define OF_TARGET_SAVE_SLOT_SIZE       0x00040000u
 #define OF_TARGET_SAVE_MAX_SLOTS       10u
+/* CRAM0 bridge writeback commands must fit inside the FPGA prefetch
+ * buffer. Larger logical saves are persisted as multiple APF writes. */
+#define OF_TARGET_SAVE_WRITEBACK_CHUNK_SIZE 0x00002000u
+
+#if (OF_TARGET_CRAM0_PRESAVE_OFFSET + OF_TARGET_PRESAVE_SLOT_SIZE) > OF_TARGET_CRAM0_SAVE_OFFSET
+#error "Pre-save nonvolatile slot overlaps the save-slot window"
+#endif
 
 #if OF_TARGET_CRAM0_SCRATCH_OFFSET < (OF_TARGET_CRAM0_SAVE_OFFSET + OF_TARGET_SAVE_SLOT_SIZE * OF_TARGET_SAVE_MAX_SLOTS)
 #error "CRAM0 scratch overlaps the nonvolatile save-slot window"

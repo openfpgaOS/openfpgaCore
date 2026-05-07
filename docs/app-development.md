@@ -279,7 +279,7 @@ void of_set_idle_hook(void (*hook)(void));      // Background work during DMA
 
 ### Save Files
 
-10 slots, 256 KB each, staged in the CRAM0 save window and committed to SD card when a dirty save file is closed.
+10 slots, 256 KB each, staged in the CRAM0 save window. Dirty closes update CRAM0 data and size metadata; Pocket persists nonvolatile slots when the core exits.
 
 ```c
 FILE *f = fopen("MyGame_0.sav", "wb");

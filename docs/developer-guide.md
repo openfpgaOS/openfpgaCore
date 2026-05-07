@@ -44,7 +44,7 @@ A complete reference for building applications on the openfpgaOS platform for An
 | **CRAM1** | 16 MB cellular RAM (cached or uncached) |
 | **SRAM** | 256 KB static RAM (uncached) |
 | **BRAM** | 32 KB on-chip (OS kernel) |
-| **Save** | Nonvolatile, CRAM0 save-window backed, 10 × 256 KB save slots, auto-loaded by APF and committed on close |
+| **Save** | Nonvolatile, CRAM0 save-window backed, 10 × 256 KB save slots, auto-loaded by APF and persisted on core exit |
 | **Link** | Bidirectional 32-bit link cable port |
 | **Dock** | Supported (HDMI output, USB controllers) |
 | **Analogizer** | SNAC controllers + analog video output |
@@ -571,7 +571,7 @@ while (1) {
 
 ### Save Files
 
-Persistent storage is staged in the CRAM0 save window and committed to SD card when a dirty save file is closed. There are 10 save slots of 256 KB each. APF auto-loads existing nonvolatile save files into the CRAM0 save window before the OS boots; missing optional saves appear as empty files to the app.
+Persistent storage is staged in the CRAM0 save window. There are 10 save slots of 256 KB each. APF auto-loads existing nonvolatile save files into the CRAM0 save window before the OS boots; missing optional saves appear as empty files to the app. Dirty `fclose()` calls update CRAM0 data and APF datatable size metadata, and Pocket persists nonvolatile slots when the core exits.
 
 **Preferred: use standard C file I/O.** Save filenames from the instance JSON open as writable files; other APF data files remain read-only:
 

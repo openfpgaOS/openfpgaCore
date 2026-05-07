@@ -298,6 +298,11 @@ reg        b_busy_seen;
 reg [31:0] b_rdata_hold;
 reg        resp_toggle_bridge;
 reg        b_op_is_write;  // latched from b_iswrite_sync2 on dispatch
+reg        b_req_pending;
+reg [31:0] b_pending_addr;
+reg [31:0] b_pending_wdata;
+reg [3:0]  b_pending_wstrb;
+reg        b_pending_iswrite;
 
 always @(posedge clk_bridge or negedge reset_n_bridge) begin
     if (!reset_n_bridge) begin
@@ -312,27 +317,41 @@ always @(posedge clk_bridge or negedge reset_n_bridge) begin
         b_rdata_hold       <= 32'd0;
         resp_toggle_bridge <= 1'b0;
         b_op_is_write      <= 1'b0;
+        b_req_pending      <= 1'b0;
+        b_pending_addr     <= 32'd0;
+        b_pending_wdata    <= 32'd0;
+        b_pending_wstrb    <= 4'd0;
+        b_pending_iswrite  <= 1'b0;
     end else begin
         // Default: deassert single-cycle pulses
         b_word_rd     <= 1'b0;
         b_word_wr     <= 1'b0;
-        b_prev_toggle <= req_toggle_bridge_sync[2];
+
+        if (b_req_edge && !b_req_pending) begin
+            b_prev_toggle     <= req_toggle_bridge_sync[2];
+            b_req_pending     <= 1'b1;
+            b_pending_addr    <= b_addr_sync2;
+            b_pending_wdata   <= b_wdata_sync2;
+            b_pending_wstrb   <= b_wstrb_sync2;
+            b_pending_iswrite <= b_iswrite_sync2;
+        end
 
         case (b_state)
 
         B_IDLE: begin
-            if (b_req_edge && !b_word_busy) begin
+            if (b_req_pending && !b_word_busy) begin
                 // Convert byte address → word address.
                 // 16 MB = 4 M words ⇒ word-addr width = 22 bits.
                 // axi_cram0_slave's convention: word_addr = byte_addr[27:2].
                 // Bits [25:24] are within the 16 MB range; address
                 // decode happens upstream so c_addr is already
                 // guaranteed to live in the CRAM0 range.
-                b_word_addr   <= b_addr_sync2[23:2];
-                b_word_wdata  <= b_wdata_sync2;
-                b_word_wstrb  <= b_wstrb_sync2;
-                b_op_is_write <= b_iswrite_sync2;
-                if (b_iswrite_sync2)
+                b_word_addr   <= b_pending_addr[23:2];
+                b_word_wdata  <= b_pending_wdata;
+                b_word_wstrb  <= b_pending_wstrb;
+                b_op_is_write <= b_pending_iswrite;
+                b_req_pending <= 1'b0;
+                if (b_pending_iswrite)
                     b_word_wr <= 1'b1;
                 else
                     b_word_rd <= 1'b1;

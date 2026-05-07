@@ -52,6 +52,9 @@ module tb_axi_periph (
     output wire        dbg_gpu_reg_wr,
     output wire [3:0]  dbg_gpu_reg_addr,
     output wire [31:0] dbg_gpu_reg_wdata,
+    output wire [3:0]  dbg_save_dt_slot,
+    output wire [31:0] dbg_save_dt_size,
+    output wire        dbg_save_dt_commit,
 
     // CMD_FLIP side-port (from gpu_core in production).  Tests can
     // pulse this and read FB_SWAP_CTRL via the AXI slave to verify
@@ -59,7 +62,21 @@ module tb_axi_periph (
     // synthesize the rising edge that consumes the pending swap.
     input  wire        gpu_swap_req_in,
     input  wire [1:0]  gpu_swap_idx_in,
-    input  wire        vsync_in
+    input  wire        vsync_in,
+
+    input  wire [31:0] cont1_key_in,
+    input  wire [31:0] cont1_joy_in,
+    input  wire [15:0] cont1_trig_in,
+    input  wire [31:0] cont2_key_in,
+    input  wire [31:0] cont2_joy_in,
+    input  wire [15:0] cont2_trig_in,
+    input  wire [31:0] cont3_key_in,
+    input  wire [31:0] cont3_joy_in,
+    input  wire [15:0] cont3_trig_in,
+    input  wire [31:0] cont4_key_in,
+    input  wire [31:0] cont4_joy_in,
+    input  wire [15:0] cont4_trig_in,
+    output wire        ext_irq_out
 );
 
 // Tie-offs for peripheral inputs we don't exercise.
@@ -94,13 +111,30 @@ wire link_irq = 1'b0;
 wire bridge_wr_idle = 1'b1;
 wire dataslot_allcomplete = 1'b1;
 wire vsync = vsync_in;
-wire [31:0] cont1_key = 32'b0;
-wire [31:0] cont1_joy = 32'b0;
-wire [15:0] cont1_trig = 16'b0;
-wire [31:0] cont2_key = 32'b0;
-wire [31:0] cont2_joy = 32'b0;
-wire [15:0] cont2_trig = 16'b0;
+wire [31:0] cont1_key = cont1_key_in;
+wire [31:0] cont1_joy = cont1_joy_in;
+wire [15:0] cont1_trig = cont1_trig_in;
+wire [31:0] cont2_key = cont2_key_in;
+wire [31:0] cont2_joy = cont2_joy_in;
+wire [15:0] cont2_trig = cont2_trig_in;
+wire [31:0] cont3_key = cont3_key_in;
+wire [31:0] cont3_joy = cont3_joy_in;
+wire [15:0] cont3_trig = cont3_trig_in;
+wire [31:0] cont4_key = cont4_key_in;
+wire [31:0] cont4_joy = cont4_joy_in;
+wire [15:0] cont4_trig = cont4_trig_in;
 wire [31:0] app_id = 32'b0;
+
+// Model core_top's one-cycle register boundary between audio_mixer's
+// combinational position mux and axi_periph_slave's read data input.
+wire [4:0]  mix_voice_sel_rd;
+reg  [21:0] mix_pos_readback_r;
+always @(posedge clk or negedge reset_n) begin
+    if (!reset_n)
+        mix_pos_readback_r <= 22'd0;
+    else
+        mix_pos_readback_r <= 22'h100 + {17'd0, mix_voice_sel_rd};
+end
 
 // DUT
 axi_periph_slave dut (
@@ -129,6 +163,12 @@ axi_periph_slave dut (
     .cont2_key           (cont2_key),
     .cont2_joy           (cont2_joy),
     .cont2_trig          (cont2_trig),
+    .cont3_key           (cont3_key),
+    .cont3_joy           (cont3_joy),
+    .cont3_trig          (cont3_trig),
+    .cont4_key           (cont4_key),
+    .cont4_joy           (cont4_joy),
+    .cont4_trig          (cont4_trig),
     .target_dataslot_ack (target_dataslot_ack),
     .target_dataslot_done(target_dataslot_done),
     .target_dataslot_err (target_dataslot_err),
@@ -153,15 +193,36 @@ axi_periph_slave dut (
     .audio_fifo_level (audio_fifo_level),
     .audio_fifo_full  (audio_fifo_full),
 
+    .mix_enable(),
+    .mix_voice_wr(),
+    .mix_voice_sel(),
+    .mix_voice_field(),
+    .mix_voice_wdata(),
+    .mix_irq_clear_wr(),
+    .mix_irq_clear(),
+    .mix_master_vol(),
+    .mix_group_vol_0(),
+    .mix_group_vol_1(),
+    .mix_group_vol_2(),
+    .mix_group_vol_3(),
+    .mix_voice_group_packed(),
+    .mix_voice_sel_rd(mix_voice_sel_rd),
+    .mix_active_count(6'd3),
+    .mix_active_mask(32'hA5A5_1234),
+    .mix_pos_readback(mix_pos_readback_r),
+    .mix_voice_end_pending(32'h0000_00C0),
+    .mix_last_sample(32'h1122_3344),
+    .mix_sample_count(32'h0001_2345),
+
     .link_reg_wr   (),
     .link_reg_rd   (),
     .link_reg_addr (),
     .link_reg_wdata(),
     .link_reg_rdata(link_reg_rdata),
 
-    .save_dt_slot   (),
-    .save_dt_size   (),
-    .save_dt_commit (),
+    .save_dt_slot   (dbg_save_dt_slot),
+    .save_dt_size   (dbg_save_dt_size),
+    .save_dt_commit (dbg_save_dt_commit),
 
     .uart_tx_dv    (),
     .uart_tx_byte  (),
@@ -177,7 +238,7 @@ axi_periph_slave dut (
     .uart_rx_irq(),
 
     .link_irq        (link_irq),
-    .ext_irq         (),
+    .ext_irq         (ext_irq_out),
 
     .dt_query_addr  (),
     .dt_query_toggle(),

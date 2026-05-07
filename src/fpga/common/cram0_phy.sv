@@ -308,8 +308,10 @@ module psram_cram0_drv #(
           // Store data in for future use
           latched_data_in <= data_in;
 
-          // Enable write
-          cram_we_n <= 0;
+          // Keep WE# high while ADV# latches the address.  Driving WE#
+          // through the address phase can make async writes spill the
+          // final data halfword into the following address on hardware.
+          cram_we_n <= 1;
 
           // Enable address latching
           cram_adv_n <= 0;
@@ -372,20 +374,25 @@ module psram_cram0_drv #(
       end
 
       // ============================================
-      // Async writes (unchanged)
+      // Async writes
       // ============================================
       STATE_WRITE_ADV_END: begin
         // Continue holding address after setting adv high
         cram_adv_n <= 1;
       end
       STATE_WRITE_ADDR_LATCH_END: begin
-        // No longer sending address data on cram_dq
-        data_out_en <= 0;
-      end
-      STATE_WRITE_DATA_START: begin
-        // Provide data to write
+        // Switch DQ from address to write data while WE# is still high.
+        // This gives the PSRAM one full clk cycle of data setup before
+        // WE# falls, without reintroducing WE# during the address phase.
         data_out_en <= 1;
         cram_data   <= latched_data_in;
+        cram_we_n   <= 1;
+      end
+      STATE_WRITE_DATA_START: begin
+        // Data is already stable; begin the actual write pulse.
+        data_out_en <= 1;
+        cram_data   <= latched_data_in;
+        cram_we_n   <= 0;
       end
       STATE_WRITE_DATA_END: begin
         state <= STATE_NONE;

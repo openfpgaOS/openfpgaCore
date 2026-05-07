@@ -52,6 +52,16 @@ static void svc_input_get_state(int player, void *out) {
         __builtin_memcpy(out, state, sizeof(of_input_state_t));
 }
 
+static void svc_input_get_keyboard_state(void *out) {
+    const of_keyboard_state_t *state = of_input_get_keyboard_state();
+    if (out)
+        __builtin_memcpy(out, state, sizeof(of_keyboard_state_t));
+}
+
+static void svc_input_read_mouse_state(void *out) {
+    of_input_read_mouse_state((of_mouse_state_t *)out);
+}
+
 /* Timer set_callback: managed in syscall.c, replicate here */
 extern void (*timer_callback_ptr)(void);  /* from syscall.c */
 
@@ -247,6 +257,10 @@ void services_table_init(void) {
      * been unreliable on this VexiiRiscv config (see
      * project_audio_pan_flood / bank_preload comments). */
     svc->cache_flush_range = of_cache_flush_range;
+
+    /* Input HID extensions */
+    svc->input_get_keyboard_state = svc_input_get_keyboard_state;
+    svc->input_read_mouse_state   = svc_input_read_mouse_state;
 }
 
 void services_table_set_smp_bank(const void *base, uint32_t size) {

@@ -122,10 +122,10 @@ static void boot_fb_clear_row(int row) {
 }
 
 
-/* os_finalize_memory() lives in OS .text (CRAM0) so it adds zero BRAM
- * cost. Defined in kernel/main.c. It only zeroes .bss — the .rodata
- * and .data init image has already been streamed to its SDRAM VMA by
- * the load path, so no copy is needed here. */
+/* os_finalize_memory() lives in OS .text, which the v2 boot path copies
+ * into SDRAM before jumping. Defined in kernel/main.c. It only zeroes
+ * .bss — the .rodata and .data init image has already been streamed to
+ * its SDRAM VMA by the load path, so no copy is needed here. */
 extern void os_finalize_memory(void *bss_start, void *bss_end);
 
 __attribute__((section(".text.boot")))
@@ -381,9 +381,12 @@ static int boot_dma_read(uint32_t slot_id, uint32_t slot_offset,
 
     __asm__ volatile("fence" ::: "memory");
 
-    /* Wait for bridge to be idle before issuing a new command. */
+    /* Wait for bridge to be idle before issuing a new command. READY
+     * means the APF command FSM can accept work; WR_IDLE means any
+     * prior bridge writes to CRAM0 have fully drained. */
     timeout = BOOT_DMA_TIMEOUT;
-    while (!(DS_STATUS & DS_STATUS_READY)) {
+    while ((DS_STATUS & (DS_STATUS_READY | DS_STATUS_WR_IDLE)) !=
+           (DS_STATUS_READY | DS_STATUS_WR_IDLE)) {
         if (--timeout == 0) { pd_dbg_info = DS_STATUS; return -3; }
     }
 
@@ -409,11 +412,13 @@ static int boot_dma_read(uint32_t slot_id, uint32_t slot_offset,
     uint32_t err = (DS_STATUS & DS_STATUS_ERR_MASK) >> DS_STATUS_ERR_SHIFT;
     if (err) return -(int)err;
 
-    /* Post-DMA settle: the bridge needs a short delay after DONE before
-     * the next command is accepted.  A fence alone is insufficient because
-     * the bridge status register is on a different clock domain; this
-     * busy-loop gives the bridge logic time to deassert internal busy. */
-    for (volatile int i = 0; i < 32; i++) {}
+    /* DONE reports APF command completion. Do not switch CRAM0 to CPU
+     * ownership until the live drain bit confirms the last bridge write
+     * has landed in memory. */
+    timeout = BOOT_DMA_TIMEOUT;
+    while (!(DS_STATUS & DS_STATUS_WR_IDLE)) {
+        if (--timeout == 0) { pd_dbg_info = DS_STATUS; return -4; }
+    }
 
     return 0;
 }
@@ -613,26 +618,12 @@ load_from_sd:
     boot_fb_clear_row(0);
 
 start_os:
-    /* Bisect helpers — direct UART writes to track the post-start_os
-     * path step-by-step.  of_term isn't up yet so we can't use
-     * printf.  Marker before each step so a hang reveals where. */
-    #define BOOT_DBG(s) do { \
-        const char *_m = (s); \
-        while (*_m) { \
-            while (!(*(volatile uint32_t *)0x4F000000 & (1u << 1))) ; \
-            *(volatile uint32_t *)0x4F000004 = (uint32_t)(uint8_t)*_m++; \
-        } \
-    } while (0)
-    BOOT_DBG("[boot] start_os\n");
     /* uart_mirror_on is armed by the PHDP path above and by
      * of_term_enable_uart_mirror() in kernel/main.c for SD boot.
      *
-     * Split-memory model (os.ld): OS .text is in CRAM0 (single
-     * master, i_axi only); OS .rodata / .data / .bss live in SDRAM.
-     * The load path already streamed .rodata / .data directly to
-     * their SDRAM VMA, so only .bss remains to be zeroed.
-     * os_finalize_memory() (located in CRAM0, not BRAM) does that
-     * without touching CRAM0 as data. */
+     * v2 split-staging model: CRAM0 is only a bridge scratchpad. The
+     * load path has copied os.bin into its SDRAM VMA; only .bss remains
+     * to be zeroed before entering os_main. */
 #if OF_TARGET_PLATFORM_ID != OF_PLATFORM_SIM
     /* flush_dcache_evict reads 64 KB from the top of SDRAM to evict
      * deferload writes; sim's harness preloads SDRAM via backdoor so
@@ -642,15 +633,12 @@ start_os:
      * needed once it's up. */
     flush_dcache_evict();
 #endif
-    BOOT_DBG("[boot] flush_icache\n");
     flush_icache();
-    BOOT_DBG("[boot] finalize_memory\n");
     os_finalize_memory((void *)_os_bss_start, (void *)_os_bss_end);
 
     pd_dbg_stage = 5;
 
     /* Jump to OS */
-    BOOT_DBG("[boot] jump_os_main\n");
     switch_to_runtime_stack_and_call(os_main, _runtime_stack_top);
 
     while (1) {}

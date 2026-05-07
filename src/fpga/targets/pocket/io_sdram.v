@@ -102,6 +102,10 @@ assign {phy_ras, phy_cas, phy_we} = cmd;
     // Open-page row-hit optimization states
     localparam      ST_PRECHG_WAIT      = 'd8;   // Wait tRP after precharge (then refresh or ACT)
     localparam      ST_WRITE_HIT        = 'd9;   // DQ setup for row-hit writes
+    localparam      ST_REQ_READ         = 'd11;  // Registered row-hit decision -> READ path
+    localparam      ST_REQ_WRITE        = 'd12;  // Registered row-hit decision -> WRITE path
+    localparam      ST_REQ_BURST_READ   = 'd13;  // Registered row-hit decision -> burst READ path
+    localparam      ST_REQ_BURST_WRITE  = 'd14;  // Registered open-row decision -> burst WRITE path
 
     localparam      ST_WRITE_0          = 'd20;
     localparam      ST_WRITE_1          = 'd21;
@@ -191,6 +195,10 @@ assign dbg_io = {1'b0, issue_autorefresh, state[5:0]};
     reg             row_open;           // Whether any row is currently open
     reg     [3:0]   open_timer;         // Saturating tRAS counter
     reg     [1:0]   prechg_return;      // After precharge: 0=READ_0, 1=WRITE_0, 2=BURSTWR_0, 3=REFRESH_0
+    reg             req_row_hit;
+    reg             req_need_prechg;
+    reg     [1:0]   req_bank;
+    reg     [1:0]   req_prechg_bank;
 
     // Open-page row-hit detection (combinational)
     wire    [24:0]  pending_addr      = word_addr_captured << 1;
@@ -379,24 +387,11 @@ always @(posedge controller_clk) begin
             word_busy <= 1;
             length <= {7'd0, word_burst_len_captured} + 11'd1;
 
-            if(pending_row_hit) begin
-                // ROW HIT: skip ACT+tRCD, go directly to READ
-                phy_ba <= pending_bank;
-                enable_dq_read_toggle <= 0;
-                state <= ST_READ_2;
-            end else if(pending_need_prechg) begin
-                // ROW MISS or DIFFERENT BANK: precharge, then ACT
-                dc <= 0;
-                cmd <= CMD_PRECHG;
-                phy_ba <= open_bank;
-                phy_a[10] <= 1'b0;
-                row_open <= 0;
-                prechg_return <= 2'd0;
-                state <= ST_PRECHG_WAIT;
-            end else begin
-                // NO ROW OPEN: normal ACT path
-                state <= ST_READ_0;
-            end
+            req_row_hit <= pending_row_hit;
+            req_need_prechg <= pending_need_prechg;
+            req_bank <= pending_bank;
+            req_prechg_bank <= open_bank;
+            state <= ST_REQ_READ;
         end else
         if(word_wr_queue) begin
             word_wr_queue <= 0;
@@ -405,23 +400,11 @@ always @(posedge controller_clk) begin
             word_busy <= 1;
             wr_burst_remaining <= word_burst_wr_len_captured;
 
-            if(pending_row_hit) begin
-                // ROW HIT: 1-cycle DQ setup, then WRITE
-                phy_ba <= pending_bank;
-                state <= ST_WRITE_HIT;
-            end else if(pending_need_prechg) begin
-                // ROW MISS or DIFFERENT BANK: precharge, then ACT
-                dc <= 0;
-                cmd <= CMD_PRECHG;
-                phy_ba <= open_bank;
-                phy_a[10] <= 1'b0;
-                row_open <= 0;
-                prechg_return <= 2'd1;
-                state <= ST_PRECHG_WAIT;
-            end else begin
-                // NO ROW OPEN: normal ACT path
-                state <= ST_WRITE_0;
-            end
+            req_row_hit <= pending_row_hit;
+            req_need_prechg <= pending_need_prechg;
+            req_bank <= pending_bank;
+            req_prechg_bank <= open_bank;
+            state <= ST_REQ_WRITE;
         end else
         if(burst_rd_queue) begin
             burst_rd_queue <= 0;
@@ -429,44 +412,103 @@ always @(posedge controller_clk) begin
             length <= burst_len;
             word_busy <= 1;
             // Row-hit check for burst reads (same logic as word reads)
-            if(row_open && (burst_addr[24:23] == open_bank) &&
-               (burst_addr[22:10] == open_row)) begin
-                // ROW HIT: skip precharge+ACT, go directly to READ
-                phy_ba <= burst_addr[24:23];
-                enable_dq_read_toggle <= 0;
-                state <= ST_READ_2;
-            end else if(row_open) begin
-                // ROW MISS: precharge open bank, then ACT
-                dc <= 0;
-                cmd <= CMD_PRECHG;
-                phy_ba <= open_bank;
-                phy_a[10] <= 1'b0;
-                row_open <= 0;
-                prechg_return <= 2'd0;
-                state <= ST_PRECHG_WAIT;
-            end else begin
-                // NO ROW OPEN: normal ACT path
-                state <= ST_READ_0;
-            end
+            req_row_hit <= row_open && (burst_addr[24:23] == open_bank) &&
+                           (burst_addr[22:10] == open_row);
+            req_need_prechg <= row_open && ((burst_addr[24:23] != open_bank) ||
+                                (burst_addr[22:10] != open_row));
+            req_bank <= burst_addr[24:23];
+            req_prechg_bank <= open_bank;
+            state <= ST_REQ_BURST_READ;
         end else
         if(burstwr_queue) begin
             burstwr_queue <= 0;
             addr <= burstwr_addr;
             word_busy <= 1;
-            if(row_open) begin
-                // Precharge open bank before burst ACT
-                dc <= 0;
-                cmd <= CMD_PRECHG;
-                phy_ba <= open_bank;
-                phy_a[10] <= 1'b0;
-                row_open <= 0;
-                prechg_return <= 2'd2;
-                state <= ST_PRECHG_WAIT;
-            end else begin
-                state <= ST_BURSTWR_0;
-            end
+            req_need_prechg <= row_open;
+            req_prechg_bank <= open_bank;
+            state <= ST_REQ_BURST_WRITE;
         end
 
+    end
+
+    // Registered request dispatch.  This keeps open_row/open_bank out of
+    // the SDRAM command output mux and gives the fitter one cycle between
+    // row-hit comparison and PRECHG/READ/WRITE command issue.
+    ST_REQ_READ: begin
+        if(req_row_hit) begin
+            // ROW HIT: skip ACT+tRCD, go directly to READ
+            phy_ba <= req_bank;
+            enable_dq_read_toggle <= 0;
+            state <= ST_READ_2;
+        end else if(req_need_prechg) begin
+            // ROW MISS or DIFFERENT BANK: precharge, then ACT
+            dc <= 0;
+            cmd <= CMD_PRECHG;
+            phy_ba <= req_prechg_bank;
+            phy_a[10] <= 1'b0;
+            row_open <= 0;
+            prechg_return <= 2'd0;
+            state <= ST_PRECHG_WAIT;
+        end else begin
+            // NO ROW OPEN: normal ACT path
+            state <= ST_READ_0;
+        end
+    end
+
+    ST_REQ_WRITE: begin
+        if(req_row_hit) begin
+            // ROW HIT: 1-cycle DQ setup, then WRITE
+            phy_ba <= req_bank;
+            state <= ST_WRITE_HIT;
+        end else if(req_need_prechg) begin
+            // ROW MISS or DIFFERENT BANK: precharge, then ACT
+            dc <= 0;
+            cmd <= CMD_PRECHG;
+            phy_ba <= req_prechg_bank;
+            phy_a[10] <= 1'b0;
+            row_open <= 0;
+            prechg_return <= 2'd1;
+            state <= ST_PRECHG_WAIT;
+        end else begin
+            // NO ROW OPEN: normal ACT path
+            state <= ST_WRITE_0;
+        end
+    end
+
+    ST_REQ_BURST_READ: begin
+        if(req_row_hit) begin
+            // ROW HIT: skip precharge+ACT, go directly to READ
+            phy_ba <= req_bank;
+            enable_dq_read_toggle <= 0;
+            state <= ST_READ_2;
+        end else if(req_need_prechg) begin
+            // ROW MISS: precharge open bank, then ACT
+            dc <= 0;
+            cmd <= CMD_PRECHG;
+            phy_ba <= req_prechg_bank;
+            phy_a[10] <= 1'b0;
+            row_open <= 0;
+            prechg_return <= 2'd0;
+            state <= ST_PRECHG_WAIT;
+        end else begin
+            // NO ROW OPEN: normal ACT path
+            state <= ST_READ_0;
+        end
+    end
+
+    ST_REQ_BURST_WRITE: begin
+        if(req_need_prechg) begin
+            // Precharge open bank before burst ACT
+            dc <= 0;
+            cmd <= CMD_PRECHG;
+            phy_ba <= req_prechg_bank;
+            phy_a[10] <= 1'b0;
+            row_open <= 0;
+            prechg_return <= 2'd2;
+            state <= ST_PRECHG_WAIT;
+        end else begin
+            state <= ST_BURSTWR_0;
+        end
     end
 
 
@@ -835,6 +877,10 @@ always @(posedge controller_clk) begin
         enable_dq_read_toggle <= 0;
         row_open <= 0;
         prechg_return <= 2'd0;
+        req_row_hit <= 0;
+        req_need_prechg <= 0;
+        req_bank <= 0;
+        req_prechg_bank <= 0;
     end
 end
 

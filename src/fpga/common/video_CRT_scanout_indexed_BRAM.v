@@ -117,6 +117,14 @@ module video_CRT_scanout_indexed_BRAM (
         color_mode_sdram <= color_mode_sdram_s1;
     end
 
+    // Sync color_mode to the pixel pipeline domain; the CPU side shares
+    // clk_sdram, but pixel decode runs on clk_video.
+    reg [2:0] color_mode_video_s1, color_mode_video;
+    always @(posedge clk_video) begin
+        color_mode_video_s1 <= color_mode;
+        color_mode_video <= color_mode_video_s1;
+    end
+
     // =========================================
     // Video clock domain - Line start detection
     // =========================================
@@ -174,7 +182,7 @@ module video_CRT_scanout_indexed_BRAM (
         // STAGE 1: BRAM address + read
         // visible_x counts 0..639 (2x horizontal), so real pixel = visible_x / 2
         // Word index = real_pixel / pixels_per_word
-        case (color_mode)
+        case (color_mode_video)
             MODE_8BIT:    bram_rd_data <= line_buffer[visible_x[9:3]];   // 4 pixels per word, idx = visible_x/8
             MODE_4BIT:    bram_rd_data <= line_buffer[visible_x[9:4]];   // 8 pixels per word, idx = visible_x/16
             MODE_2BIT:    bram_rd_data <= line_buffer[visible_x[9:5]];   // 16 pixels per word, idx = visible_x/32
@@ -188,7 +196,7 @@ module video_CRT_scanout_indexed_BRAM (
 
         // STAGE 2: Pixel decode — feed palette BRAM address or latch direct color
         use_direct <= 0;
-        case (color_mode)
+        case (color_mode_video)
             MODE_8BIT: pal_rd_addr <= shifted_8[7:0];
             MODE_4BIT: pal_rd_addr <= {4'b0, shifted_4[3:0]};
             MODE_2BIT: pal_rd_addr <= {6'b0, shifted_2[1:0]};
