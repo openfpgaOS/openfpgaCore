@@ -176,6 +176,7 @@ enum {
     REG_TRANSLUC_DATA = 9,
     REG_TEX_FLUSH     = 10,
     REG_DMA_KICK      = 11,
+    REG_AW_HANDSHAKE  = 14,
 };
 
 /* Mirror the SDK's _gpu_ring_ensure DMA-busy guard: any subsequent
@@ -446,6 +447,8 @@ struct Span4Wire {
     uint8_t  colormap_id;   // explicit, including slot 0
     int16_t  fb_stride;
     uint16_t tex_width;
+    uint16_t tex_w_mask;
+    uint16_t tex_h_mask;
     uint8_t  light[4];
 };
 
@@ -457,7 +460,7 @@ static Span4Wire make_span4() {
 }
 
 static std::vector<uint32_t> encode_span4_wire(const Span4Wire &s) {
-    std::vector<uint32_t> w(16);
+    std::vector<uint32_t> w(17);
     w[0] = s.fb_addr;
     w[1] = ((uint32_t)s.count << 16)
          | ((uint32_t)s.flags << 8)
@@ -479,17 +482,18 @@ static std::vector<uint32_t> encode_span4_wire(const Span4Wire &s) {
           | ((uint32_t)s.light[2] << 16)
           | ((uint32_t)s.light[1] << 8)
           | (uint32_t)s.light[0];
+    w[16] = ((uint32_t)s.tex_h_mask << 16) | (uint32_t)s.tex_w_mask;
     return w;
 }
 
 static void emit_span4_raw(const Span4Wire &s) {
     auto w = encode_span4_wire(s);
-    ring_cmd(0x43, 16);
+    ring_cmd(0x43, 17);
     for (uint32_t x : w) ring_write(x);
 }
 
 static void emit_span4_batch_raw(const std::vector<Span4Wire> &spans) {
-    uint32_t total_words = (uint32_t)spans.size() * 16;
+    uint32_t total_words = (uint32_t)spans.size() * 17;
     ring_cmd(0x44, total_words);
     for (const auto &s : spans) {
         auto w = encode_span4_wire(s);
@@ -783,8 +787,8 @@ struct FbModel {
             s.flags = q.flags;
             s.fb_stride = q.fb_stride;
             s.tex_width = q.tex_width ? q.tex_width : 1;
-            s.tex_w_mask = 0;
-            s.tex_h_mask = 0;
+            s.tex_w_mask = q.tex_w_mask;
+            s.tex_h_mask = q.tex_h_mask;
             apply_span_affine(s, q.colormap_id & 0xF);
         }
     }
@@ -2336,6 +2340,151 @@ static void test_span4_opaque_equals_four_spans() {
                       FB_BASE_BYTE, 320, 7, 5, 4, q.count);
 }
 
+static void test_span4_texture_height_mask() {
+    printf("TEST span4_texture_height_mask\n");
+    gpu_init();
+    auto m = preload_with_sentinel();
+
+    for (int lane = 0; lane < 4; lane++) {
+        std::vector<uint8_t> tex(8);
+        for (int i = 0; i < 4; i++)
+            tex[i] = (uint8_t)(0x30 + lane * 0x10 + i);
+        for (int i = 4; i < 8; i++)
+            tex[i] = (uint8_t)(0xE0 + lane * 4 + (i - 4));
+        upload_texture(TEX_BASE_BYTE + (uint32_t)lane * 0x100, tex);
+    }
+    m.snapshot_from_sdram();
+
+    Span4Wire q = make_span4();
+    q.fb_addr = FB_BASE_BYTE + 18 * 320 + 16;
+    q.count = 8;
+    q.flags = 0;
+    q.colormap_id = 0;
+    q.tex_h_mask = 3;
+    for (int lane = 0; lane < 4; lane++) {
+        q.tex_addr[lane] = TEX_BASE_BYTE + (uint32_t)lane * 0x100;
+        q.t[lane] = 0;
+        q.tstep[lane] = 0x10000;
+        q.light[lane] = 0;
+    }
+
+    emit_span4_raw(q);
+    m.apply_span4_affine(q);
+    if (!submit_and_wait()) {
+        check_fail("span4_texture_height_mask", "timeout");
+        return;
+    }
+    compare_fb_region("span4_texture_height_mask.fb", m,
+                      FB_BASE_BYTE, 320, 16, 18, 4, q.count);
+}
+
+static void test_span4_aligned_coalesces_row_writes() {
+    printf("TEST span4_aligned_coalesces_row_writes\n");
+    gpu_init();
+    auto m = preload_with_sentinel();
+
+    for (int lane = 0; lane < 4; lane++) {
+        std::vector<uint8_t> tex(8);
+        for (int i = 0; i < 8; i++)
+            tex[i] = (uint8_t)(0x70 + lane * 0x10 + i);
+        upload_texture(TEX_BASE_BYTE + (uint32_t)lane * 0x100, tex);
+        upload_palookup_const_row(5, (uint8_t)lane, (uint8_t)(0x90 + lane));
+    }
+    m.snapshot_from_sdram();
+
+    Span4Wire q = make_span4();
+    q.fb_addr = FB_BASE_BYTE + 40 * 320 + 8;  // 4-byte aligned x
+    q.count = 6;
+    q.flags = 0x1;       // COLORMAP
+    q.colormap_id = 5;
+    for (int lane = 0; lane < 4; lane++) {
+        q.tex_addr[lane] = TEX_BASE_BYTE + (uint32_t)lane * 0x100;
+        q.t[lane] = 0;
+        q.tstep[lane] = 0x10000;
+        q.light[lane] = (uint8_t)lane;
+    }
+
+    uint32_t aw_before = mmio_read(REG_AW_HANDSHAKE);
+    emit_span4_raw(q);
+    m.apply_span4_affine(q);
+    if (!submit_and_wait()) {
+        check_fail("span4_aligned_coalesces_row_writes", "timeout");
+        return;
+    }
+
+    compare_fb_region("span4_aligned_coalesces_row_writes.fb", m,
+                      FB_BASE_BYTE, 320, 8, 40, 4, q.count);
+
+    uint32_t aw_after = mmio_read(REG_AW_HANDSHAKE);
+    uint32_t writes = aw_after - aw_before;
+    if (writes == q.count) {
+        check_pass("span4_aligned_coalesces_row_writes.aw_count");
+    } else {
+        char buf[128];
+        snprintf(buf, sizeof(buf), "AW handshakes=%u expected rows=%u",
+                 writes, (uint32_t)q.count);
+        check_fail("span4_aligned_coalesces_row_writes.aw_count", buf);
+    }
+}
+
+static void test_span4_aligned_texture_cache_thrash() {
+    printf("TEST span4_aligned_texture_cache_thrash\n");
+    gpu_init();
+    auto m = preload_with_sentinel();
+
+    /* Four lane bases separated by 0x4000 share gpu_tex_cache set bits
+     * [13:4] but carry different tags.  Row-major span4 therefore forces
+     * frequent lane-to-lane evictions while still expecting byte-exact
+     * output versus four scalar spans. */
+    for (int row = 0; row < 4; row++) {
+        std::vector<uint8_t> cmap(256);
+        for (int i = 0; i < 256; i++)
+            cmap[i] = (uint8_t)((i + row * 0x31) ^ 0xA5);
+        upload_palookup_slot(6, cmap, (uint32_t)row * 256);
+    }
+
+    for (int lane = 0; lane < 4; lane++) {
+        std::vector<uint8_t> tex(128);
+        for (int i = 0; i < 128; i++)
+            tex[i] = (uint8_t)(0x20 + lane * 0x30 + ((i * 7 + lane) & 0x1F));
+        upload_texture(TEX_BASE_BYTE + (uint32_t)lane * 0x4000, tex);
+    }
+    m.snapshot_from_sdram();
+
+    Span4Wire q = make_span4();
+    q.fb_addr = FB_BASE_BYTE + 64 * 320 + 12;  // aligned x
+    q.count = 24;
+    q.flags = 0x1;       // COLORMAP
+    q.colormap_id = 6;
+    for (int lane = 0; lane < 4; lane++) {
+        q.tex_addr[lane] = TEX_BASE_BYTE + (uint32_t)lane * 0x4000;
+        q.t[lane] = (lane * 3) << 16;
+        q.tstep[lane] = (lane + 1) << 16;
+        q.light[lane] = (uint8_t)lane;
+    }
+
+    uint32_t req_before = mmio_read(REG_TRANSLUC_ADDR);
+    uint32_t miss_before = mmio_read(REG_TRANSLUC_DATA);
+    emit_span4_raw(q);
+    m.apply_span4_affine(q);
+    if (!submit_and_wait()) {
+        check_fail("span4_aligned_texture_cache_thrash", "timeout");
+        return;
+    }
+    compare_fb_region("span4_aligned_texture_cache_thrash.fb", m,
+                      FB_BASE_BYTE, 320, 12, 64, 4, q.count);
+
+    uint32_t reqs = mmio_read(REG_TRANSLUC_ADDR) - req_before;
+    uint32_t misses = mmio_read(REG_TRANSLUC_DATA) - miss_before;
+    if (misses > 8 && reqs >= (uint32_t)q.count * 4u) {
+        check_pass("span4_aligned_texture_cache_thrash.cache_pressure");
+    } else {
+        char buf[128];
+        snprintf(buf, sizeof(buf), "reqs=%u misses=%u", reqs, misses);
+        check_fail("span4_aligned_texture_cache_thrash.cache_pressure", buf);
+    }
+}
+
 static void test_span4_masked_equals_four_spans() {
     printf("TEST span4_masked_equals_four_spans\n");
     gpu_init();
@@ -2551,7 +2700,7 @@ static void test_command_stream_dma_mixed_span_span4() {
     };
     stream.push_back((0x40u << 24) | 15u);
     append(encode_span_wire(s0));
-    stream.push_back((0x43u << 24) | 16u);
+    stream.push_back((0x43u << 24) | 17u);
     append(encode_span4_wire(q));
     stream.push_back((0x40u << 24) | 15u);
     append(encode_span_wire(s1));
@@ -3027,6 +3176,9 @@ int main(int argc, char **argv) {
     test_batch_equals_individual();
     test_batch_mixed_per_span_colormap();
     test_span4_opaque_equals_four_spans();
+    test_span4_texture_height_mask();
+    test_span4_aligned_coalesces_row_writes();
+    test_span4_aligned_texture_cache_thrash();
     test_span4_masked_equals_four_spans();
     test_span4_explicit_colormap_slot();
     test_span4_batch_two_payloads();

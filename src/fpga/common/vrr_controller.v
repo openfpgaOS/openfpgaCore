@@ -35,9 +35,9 @@
 //   > 72       < 13         375      42 Hz      2           floor
 //
 // Bypass: when analogizer_enabled is asserted, the controller leaves
-// v_total_o at its previous value (slave mux picks the CPU-written
-// PAL/NTSC value instead) and forces swap_hold_o = 0 so the
-// analogizer's fixed scanout isn't disrupted by adaptive hold counts.
+// v_total_o at its previous value (slave mux picks a fixed NTSC/PAL value
+// instead) and forces swap_hold_o = 0 so Analogizer/SNAC adapter output is not
+// disrupted by adaptive refresh changes.
 //
 // Domain: clk_cpu — same as the rest of axi_periph_slave's swap
 // logic.  gpu_swap_req is already in clk_cpu out of gpu_core; the
@@ -54,7 +54,7 @@ module vrr_controller (
     input  wire        gpu_swap_req,
     input  wire        sysreg_swap_kick,
 
-    // Bypass for analogizer composite/component output.
+    // Bypass for fixed-rate Analogizer/SNAC adapter output.
     input  wire        analogizer_enabled,
 
     // Computed scanout timing.
@@ -144,9 +144,8 @@ always @(posedge clk) begin
         if (swap_kick) begin
             cycles_since_swap <= 26'd0;
             if (analogizer_enabled) begin
-                // Slave mux picks the CPU-written V_TOTAL when the
-                // analogizer is active; we just freeze our output and
-                // force swap_hold=0 so PAL/NTSC scanout isn't held.
+                // Slave mux picks a fixed V_TOTAL when the adapter is active;
+                // we just freeze our output and force swap_hold=0.
                 swap_hold_o <= 4'd0;
             end else begin
                 v_total_o   <= vt_next;

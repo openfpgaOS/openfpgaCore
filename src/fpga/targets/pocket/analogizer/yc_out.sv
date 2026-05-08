@@ -63,6 +63,7 @@ typedef struct {
 
 localparam MAX_PHASES = 7'd8;
 
+(* altera_attribute = "-name AUTO_SHIFT_REGISTER_RECOGNITION OFF" *)
 phase_t phase[MAX_PHASES];
 reg unsigned [7:0] Y, C, c, U, V;
 

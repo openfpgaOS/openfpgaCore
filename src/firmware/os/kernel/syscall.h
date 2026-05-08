@@ -103,4 +103,8 @@ void file_slot_register(uint32_t slot_id, const char *filename);
 int         file_slot_get_count(void);
 const char *file_slot_get(int idx, uint32_t *slot_id_out);
 
+/* Resolve a registered filename to its APF data slot id. Filename
+ * comparison follows fopen() semantics: basename, case-insensitive. */
+int file_slot_find(const char *filename, uint32_t *slot_id_out);
+
 #endif /* OFOS_SYSCALL_H */

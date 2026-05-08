@@ -27,6 +27,19 @@ static void (*idle_hook)(void);
  * of_file_init's warmup DMA needs to call it directly. */
 static int bridge_read_impl(uint32_t slot_id, uint32_t slot_offset,
                             void *dest, uint32_t length);
+static int bridge_warmed;
+static int bridge_warmup_active;
+
+static void bridge_warmup_once(void) {
+    if (bridge_warmed || bridge_warmup_active)
+        return;
+
+    bridge_warmup_active = 1;
+    (void)bridge_read_impl(1, 0, (void *)CRAM0_SCRATCH, 4);
+    of_cache_flush_dcache();
+    bridge_warmup_active = 0;
+    bridge_warmed = 1;
+}
 
 void of_file_set_idle_hook(void (*hook)(void)) {
     idle_hook = hook;
@@ -34,6 +47,8 @@ void of_file_set_idle_hook(void (*hook)(void)) {
 
 void of_file_init(void) {
     idle_hook = (void *)0;
+    bridge_warmed = 0;
+    bridge_warmup_active = 0;
 
 #if OF_TARGET_PLATFORM_ID == OF_PLATFORM_SIM
     /* Sim has no bridge model — the warmup DMA below would hang
@@ -46,10 +61,8 @@ void of_file_init(void) {
      * boot ROM channel may have been picked because the bridge is
      * wedged. The dispatcher must run before of_file_init — see hal.c.
      * (v2 arch: CRAM1 retired, scratch moved to CRAM0.) */
-    if (of_disk_active() == &of_disk_bridge) {
-        bridge_read_impl(1, 0, (void *)CRAM0_SCRATCH, 4);
-        of_cache_flush_dcache();
-    }
+    if (of_disk_active() == &of_disk_bridge)
+        bridge_warmup_once();
 }
 
 /* Check for shutdown handshake: if the bridge wants to shut down,
@@ -166,48 +179,46 @@ static int file_wait_complete(void) {
  * here when the boot ROM disk channel is unavailable. */
 static int bridge_read_impl(uint32_t slot_id, uint32_t slot_offset,
                              void *dest, uint32_t length) {
+    if (!bridge_warmup_active)
+        bridge_warmup_once();
+
     uint32_t dest_addr = (uintptr_t)dest;
+    uint8_t *dst = (uint8_t *)dest;
+    int direct_cram0 = (dest_addr >= CRAM0_BASE)
+                    && (length <= CRAM_SIZE)
+                    && (dest_addr <= CRAM0_BASE + CRAM_SIZE - length);
 
     /* v2 arch: CRAM1 retired, scratch moved to CRAM0.  CRAM0 is
      * uncached per PMA, so no D-cache invalidation is needed around
      * bridge-written data there. */
 
-    /* CRAM0 destinations: bridge writes directly, no copy needed. */
-    if (dest_addr >= CRAM0_BASE && dest_addr < CRAM0_BASE + CRAM_SIZE) {
-        uint32_t bridge_addr = cpu_to_bridge(dest);
+    uint32_t done = 0;
+    while (done < length) {
+        uint32_t chunk = length - done;
+        if (chunk > DMA_CHUNK_SIZE)
+            chunk = DMA_CHUNK_SIZE;
 
         CRAM0_MODE = CRAM0_MODE_BRIDGE;
         for (volatile int s = 0; s < 8; s++) {}
 
-        DS_SLOT_ID     = slot_id;
-        DS_SLOT_OFFSET = slot_offset;
-        DS_BRIDGE_ADDR = bridge_addr;
-        DS_LENGTH      = length;
-        DS_COMMAND     = DS_CMD_READ;
+        uint32_t bridge_addr = direct_cram0
+            ? cpu_to_bridge(dst + done)
+            : CRAM0_SCRATCH_BRIDGE;
+        int rc = of_file_read_raw(slot_id, slot_offset + done,
+                                  bridge_addr, chunk);
+        if (rc < 0)
+            return rc;
 
-        return file_wait_complete();
+        if (!direct_cram0) {
+            CRAM0_MODE = CRAM0_MODE_CPU;
+            for (volatile int s = 0; s < 8; s++) {}
+            memcpy(dst + done, (const void *)CRAM0_SCRATCH, chunk);
+        }
+
+        done += chunk;
     }
 
-    /* All other destinations: bridge DMAs to CRAM0 scratch, CPU copies
-     * to dest.  This path is for boot, ELF loading, and direct
-     * of_file_read API calls. */
-    CRAM0_MODE = CRAM0_MODE_BRIDGE;
-    for (volatile int s = 0; s < 8; s++) {}
-
-    DS_SLOT_ID     = slot_id;
-    DS_SLOT_OFFSET = slot_offset;
-    DS_BRIDGE_ADDR = CRAM0_SCRATCH_BRIDGE;
-    DS_LENGTH      = length;
-    DS_COMMAND     = DS_CMD_READ;
-
-    int rc = file_wait_complete();
-    if (rc < 0) return rc;
-
-    CRAM0_MODE = CRAM0_MODE_CPU;
-    for (volatile int s = 0; s < 8; s++) {}
-    memcpy(dest, (const void *)CRAM0_SCRATCH, length);
-
-    return rc;
+    return 0;
 }
 
 /* of_disk_bridge probe — the bridge is "available" if the data slot
@@ -249,6 +260,9 @@ int of_file_read(uint32_t slot_id, uint32_t slot_offset,
  * entirely, so cached reads would return stale data. */
 int of_file_read_raw(uint32_t slot_id, uint32_t slot_offset,
                       uint32_t bridge_addr, uint32_t length) {
+    if (length > DMA_CHUNK_SIZE)
+        return OF_ERR_BAD_RANGE;
+
     /* Wait for bridge fully idle — READY (cmd FSM idle) AND WR_IDLE
      * (all write data drained).  Both must be true before issuing a
      * new command, otherwise the dispatch guard may silently drop it
@@ -565,6 +579,8 @@ int of_file_read_async(uint32_t slot_id, uint32_t slot_offset,
                        void (*callback)(int token, int result)) {
     if (async_state.active)
         return OF_ERR_BUSY;
+    if (length > DMA_CHUNK_SIZE)
+        return OF_ERR_BAD_RANGE;
 
     uint32_t bridge_addr = cpu_to_bridge(dest);
 

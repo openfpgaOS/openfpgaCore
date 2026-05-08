@@ -68,6 +68,9 @@ module axi_periph_slave (
 
     // Bridge write drain status (for pacing DMA reads)
     input wire         bridge_wr_idle,
+    input wire [10:0]  bridge_wr_fifo_count_dbg,
+    input wire [10:0]  bridge_wr_fifo_max_dbg,
+    input wire         bridge_wr_fifo_overflow_dbg,
 
     // Display control outputs
     output wire [2:0]  color_mode,      // 0=8bit, 1=4bit, 2=2bit, 3=RGB565, 4=RGB555, 5=RGBA5551
@@ -153,6 +156,17 @@ module axi_periph_slave (
     // App ID from instance JSON memory_writes
     input wire  [31:0] app_id,
 
+    // Analogizer settings mirror. The Pocket bridge writes these through
+    // interact.json, while firmware can override them after loading
+    // analogizer.cfg. Writes cross to clk_74a in core_top.
+    input  wire [31:0] analogizer_settings,
+    input  wire [31:0] analogizer_hoffset,
+    input  wire [31:0] analogizer_voffset,
+    output reg  [2:0]  analogizer_cpu_wr_toggle,
+    output reg  [31:0] analogizer_cpu_wr_settings,
+    output reg  [31:0] analogizer_cpu_wr_hoffset,
+    output reg  [31:0] analogizer_cpu_wr_voffset,
+
     // Shutdown handshake
     input wire         shutdown_pending,
     output reg         shutdown_ack,
@@ -172,10 +186,10 @@ module axi_periph_slave (
     input  wire        dt_query_valid,
 
     // VRR (Variable Refresh Rate) — output drives scaler V_TOTAL.
-    // In normal mode the new vrr_controller below picks the value from
-    // measured render time; when analogizer_enabled is asserted the
-    // CPU's PAL/NTSC value (vrr_v_total_cpu_reg) drives the output
-    // instead, so SD video timing stays standards-compliant.
+    // In normal mode vrr_controller picks the value from measured render
+    // time. When Analogizer video or SNAC owns the adapter path, the output
+    // is locked to a fixed NTSC/PAL V_TOTAL so external hardware does not see
+    // adaptive refresh changes.
     output wire [9:0]  vrr_v_total,
     input  wire        analogizer_enabled,
 
@@ -271,7 +285,8 @@ snac_shifter snac_shift (
 
 // SNAC pin output mux: shifter overrides GPIO when busy
 // Config A: shifter drives [0]=CLK, [1]=LATCH
-// Config B: shifter drives [2]=CLK, [7]=CMD(MOSI)
+// Config B: shifter drives [6]=CLK/pin30, [7]=CMD(MOSI).  Bank0 stays input
+// in PSX mode because the Pocket exposes one direction bit for bank0[7:4].
 reg [7:0] snac_pin_out_mux;
 reg [7:0] snac_pin_dir_mux;
 
@@ -286,10 +301,10 @@ always @(*) begin
             snac_pin_dir_mux[0] = 1'b1;
             snac_pin_dir_mux[1] = 1'b1;
         end else begin
-            // Config B: CLK on [2](IO3/bank0[4]), MOSI on [7](IO6/pin31)
-            snac_pin_out_mux[2] = snac_shift_clk;
+            // Config B: CLK on [6](pin30), MOSI on [7](IO6/pin31)
+            snac_pin_out_mux[6] = snac_shift_clk;
             snac_pin_out_mux[7] = snac_shift_mosi;
-            snac_pin_dir_mux[2] = 1'b1;
+            snac_pin_dir_mux[6] = 1'b1;
             snac_pin_dir_mux[7] = 1'b1;
         end
     end
@@ -448,20 +463,28 @@ reg [31:0] dbg_bvalid_count;
 reg [31:0] dbg_wstall_cycles;
 
 // VRR swap hold: skip N vsyncs before presenting a queued frame.
-// vrr_swap_hold_cpu_reg is CPU-writable for analogizer override /
-// debug; vrr_swap_hold_rtl comes from the new vrr_controller and is
-// the value actually loaded into the hold counter on every swap event
-// (analogizer mode forces it to 0 inside the controller).
-reg  [3:0] vrr_swap_hold_cpu_reg;
+// vrr_swap_hold_rtl comes from vrr_controller and is the value actually
+// loaded into the hold counter on every swap event. Fixed-rate adapter mode
+// forces it to 0.
 wire [3:0] vrr_swap_hold_rtl;
 reg  [3:0] vrr_hold_counter;        // counts down to 0 then swaps
 
-// VRR V_TOTAL split: CPU-writable reg for analogizer-mode PAL/NTSC
-// value, RTL-computed value for normal mode.  Mux below picks one.
-reg  [9:0] vrr_v_total_cpu_reg;
+// VRR V_TOTAL split: fixed NTSC/PAL value for Analogizer/SNAC adapter mode,
+// RTL-computed value for normal Pocket LCD mode.  The fixed adapter value is
+// derived directly from the current Analogizer settings so SNAC-only
+// configurations also lock to a stable rate.
 wire [9:0] vrr_v_total_rtl;
-assign vrr_v_total = analogizer_enabled ? vrr_v_total_cpu_reg
-                                        : vrr_v_total_rtl;
+wire       analogizer_video_enabled = analogizer_settings[15];
+wire [3:0] analogizer_video_mode    = analogizer_settings[13:10];
+wire       analogizer_pal_mode      =
+    (analogizer_video_mode == 4'h4) || (analogizer_video_mode == 4'hC);
+wire       snac_configured          = (analogizer_settings[4:0] != 5'd0);
+wire       vrr_fixed_rate_mode      =
+    analogizer_enabled || analogizer_video_enabled || snac_configured || snac_en_reg;
+wire [9:0] vrr_fixed_v_total        =
+    (analogizer_video_enabled && analogizer_pal_mode) ? 10'd315 : 10'd262;
+assign vrr_v_total = vrr_fixed_rate_mode ? vrr_fixed_v_total
+                                         : vrr_v_total_rtl;
 
 wire [24:0] fb_app_addr = (fb_display_idx == 2'd0) ? FB_ADDR_0 :
                            (fb_display_idx == 2'd1) ? FB_ADDR_1 :
@@ -491,7 +514,7 @@ wire vsync_rising = vsync_sync[1] && !vsync_sync[2];
 // used to live in firmware/os/targets/pocket/video.c.  Measures the
 // time between successive swap kicks (gpu_swap_req or CPU writes to
 // FB_SWAP_CTRL bit 0) and produces (V_TOTAL, swap_hold) so scanout
-// stays in the supported 42-60 Hz band.  Bypassed by the analogizer.
+// stays in the supported 42-60 Hz band.  Bypassed by fixed-rate adapter mode.
 // ============================================
 wire sysreg_swap_kick =
     sysreg_wr_fire && (req_addr[8:2] == 7'b0_000110) && req_wdata[0];
@@ -501,7 +524,7 @@ vrr_controller u_vrr (
     .reset_n(reset_n),
     .gpu_swap_req(gpu_swap_req),
     .sysreg_swap_kick(sysreg_swap_kick),
-    .analogizer_enabled(analogizer_enabled),
+    .analogizer_enabled(vrr_fixed_rate_mode),
     .v_total_o(vrr_v_total_rtl),
     .swap_hold_o(vrr_swap_hold_rtl)
 );
@@ -830,10 +853,12 @@ always @(posedge clk) begin
         save_dt_slot <= 0;
         save_dt_size <= 0;
         save_dt_commit <= 0;
+        analogizer_cpu_wr_toggle <= 0;
+        analogizer_cpu_wr_settings <= 0;
+        analogizer_cpu_wr_hoffset <= 0;
+        analogizer_cpu_wr_voffset <= 0;
         dt_query_addr <= 0;
         dt_query_toggle <= 0;
-        vrr_v_total_cpu_reg   <= 10'd262;
-        vrr_swap_hold_cpu_reg <= 4'd0;
         snac_en_reg <= 0;
         snac_mode_reg <= 0;
         snac_div_reg <= 16'd499;  // default: 100KHz at 100MHz
@@ -960,6 +985,19 @@ always @(posedge clk) begin
                     save_dt_commit <= ~save_dt_commit;
                 end
 
+                7'b0_100000: begin  // ANALOGIZER_SETTINGS (0x80)
+                    analogizer_cpu_wr_settings <= req_wdata;
+                    analogizer_cpu_wr_toggle[0] <= ~analogizer_cpu_wr_toggle[0];
+                end
+                7'b0_100001: begin  // ANALOGIZER_H_OFFSET (0x84)
+                    analogizer_cpu_wr_hoffset <= req_wdata;
+                    analogizer_cpu_wr_toggle[1] <= ~analogizer_cpu_wr_toggle[1];
+                end
+                7'b0_100010: begin  // ANALOGIZER_V_OFFSET (0x88)
+                    analogizer_cpu_wr_voffset <= req_wdata;
+                    analogizer_cpu_wr_toggle[2] <= ~analogizer_cpu_wr_toggle[2];
+                end
+
                 // SNAC Shifter + GPIO registers (0xA0-0xAC)
                 7'b0_101000: begin  // SNAC_CTRL (0xA0)
                     snac_en_reg   <= req_wdata[7];
@@ -999,14 +1037,11 @@ always @(posedge clk) begin
                 end
 
 
-                // Hardware mixer moved to its own peripheral block at
-                // 0x48000000 (no back-compat for v3).  Old SYSREG slots
-                // 0x80, 0xC0–0xF8 are free for reuse.
                 7'b0_100111: vsync_irq_pending <= 0;                    // VSYNC_IRQ_CLEAR (0x9C) W1C
                 7'b0_111111: irq_mask <= req_wdata[4:0];             // IRQ_MASK (0xFC)
 
-                7'b0_110111: vrr_v_total_cpu_reg   <= req_wdata[9:0]; // VRR_V_TOTAL (0xDC) — analogizer-mode only
-                7'b0_111000: vrr_swap_hold_cpu_reg <= req_wdata[3:0]; // VRR_SWAP_HOLD (0xE0) — debug only
+                7'b0_110111: begin end  // VRR_V_TOTAL (0xDC) — read-only live value
+                7'b0_111000: begin end  // VRR_SWAP_HOLD (0xE0) — read-only live value
 
                 default: ;
             endcase
@@ -1099,6 +1134,9 @@ always @(*) begin
         7'b0_011000: sysreg_rdata = cont2_joy_s;
         7'b0_011001: sysreg_rdata = {16'b0, cont2_trig_s};
         7'b0_011010: sysreg_rdata = app_id;
+        7'b0_100000: sysreg_rdata = analogizer_settings;             // ANALOGIZER_SETTINGS (0x80)
+        7'b0_100001: sysreg_rdata = analogizer_hoffset;              // ANALOGIZER_H_OFFSET (0x84)
+        7'b0_100010: sysreg_rdata = analogizer_voffset;              // ANALOGIZER_V_OFFSET (0x88)
         // SNAC Shifter + GPIO registers (0xA0-0xAC)
         7'b0_101000: sysreg_rdata = {22'b0, snac_mode_reg, snac_en_reg, 6'b0, snac_busy};  // SNAC_CTRL
         7'b0_101001: sysreg_rdata = {16'b0, snac_div_reg};                                   // SNAC_DIV
@@ -1172,6 +1210,15 @@ always @(*) begin
         //   bits 15:0  : gpu_swap_req pulse count (rolling 16-bit)
         //   bits 31:16 : vsync_rising count (rolling 16-bit)
         7'b0_110001: sysreg_rdata = {dbg_vsync_count, dbg_gpu_swap_count};
+        // CRAM0 bridge write FIFO occupancy (SYSREG 0xC8):
+        //   bit 31      : sticky overflow
+        //   bits 26:16  : max observed occupancy since reset
+        //   bits 10:0   : current occupancy
+        7'b0_110010: sysreg_rdata = {bridge_wr_fifo_overflow_dbg,
+                                     4'b0,
+                                     bridge_wr_fifo_max_dbg,
+                                     5'b0,
+                                     bridge_wr_fifo_count_dbg};
         // Datatable slot size query (0x90): bit 31 = valid, bits 30:0 = data
         7'b0_100100: sysreg_rdata = {dt_query_valid, dt_query_data[30:0]};
         // Bridge debug (0x94): internal latch state for diagnosing DMA hangs
@@ -1313,14 +1360,7 @@ wire [31:0] mixer_rdata =
     (req_addr[6:2] == 5'h0D) ? {26'b0, mix_active_count}                      :  // 0x834
     32'h0;
 
-wire [31:0] periph_rd_mux = reg_sysreg ? sysreg_rdata :
-                             reg_audio  ? audio_rdata :
-                             reg_cram0  ? cram0_mode_rdata :
-                             reg_link   ? link_reg_rdata :
-                             reg_uart   ? uart_rdata :
-                             reg_gpu    ? gpu_reg_rdata :
-                             reg_mixer  ? mixer_rdata :
-                             32'h0;
+reg [31:0] periph_rd_data_r;
 
 // ============================================
 // FSM
@@ -1329,7 +1369,7 @@ localparam S_IDLE           = 3'd0;
 localparam S_BRAM_RD        = 3'd1;
 localparam S_PERIPH_RD      = 3'd2;
 localparam S_PERIPH_WR      = 3'd3;
-localparam S_TERM           = 3'd4;
+localparam S_PERIPH_RD_LATCH = 3'd4;
 localparam S_WR_NEXT        = 3'd5;
 localparam S_BRAM_WR        = 3'd6;
 localparam S_PERIPH_RD_WAIT = 3'd7;
@@ -1362,8 +1402,9 @@ reg reg_gpu;
 reg reg_mixer;
 
 wire beat_is_last = (burst_count == burst_len);
+wire [31:0] periph_next_addr = burst_is_fixed ? req_addr : (req_addr + 32'd4);
 
-// Terminal moved to software (S_TERM state unused)
+// Terminal moved to software; state 4 is reused as a peripheral read latch.
 
 // BRAM address mux (32KB: 13-bit word address = [14:2])
 wire [12:0] bram_next_word = req_addr[14:2] + 13'd1;
@@ -1450,6 +1491,7 @@ always @(posedge clk or posedge reset) begin
         s_axi_rdata <= 0;
         s_axi_rresp <= 0;
         s_axi_rlast <= 0;
+        periph_rd_data_r <= 32'h0;
         s_axi_awready <= 0;
         s_axi_wready <= 0;
         s_axi_bvalid <= 0;
@@ -1545,10 +1587,13 @@ always @(posedge clk or posedge reset) begin
                 if (ar_dec_ram)
                     state <= S_BRAM_RD;
                 else begin
-                    /* core_top registers mixer readback/status one cycle
-                     * after req_addr changes. Wait so POS_RD returns the
-                     * requested voice instead of the previous selection. */
-                    state <= ar_dec_mixer ? S_PERIPH_RD_WAIT : S_PERIPH_RD;
+                    /* All peripheral reads now stage through a local data
+                     * register before driving AXI RDATA.  That breaks the
+                     * large final periph read mux out of the AXI response
+                     * path.  Mixer position readback still needs one extra
+                     * latch cycle inside S_PERIPH_RD_WAIT because core_top
+                     * registers the selected voice after req_addr changes. */
+                    state <= S_PERIPH_RD_WAIT;
                     if (ar_dec_link) begin
                         link_reg_addr <= ar_addr[6:2];
                         link_reg_rd <= 1;
@@ -1684,20 +1729,51 @@ always @(posedge clk or posedge reset) begin
         // Peripheral read — same hold-until-drain pattern
         // ============================================
         S_PERIPH_RD_WAIT: begin
+            if (reg_mixer) begin
+                state <= S_PERIPH_RD_LATCH;
+            end else begin
+                if (reg_sysreg)
+                    periph_rd_data_r <= sysreg_rdata;
+                else if (reg_audio)
+                    periph_rd_data_r <= audio_rdata;
+                else if (reg_cram0)
+                    periph_rd_data_r <= cram0_mode_rdata;
+                else if (reg_link)
+                    periph_rd_data_r <= link_reg_rdata;
+                else if (reg_uart)
+                    periph_rd_data_r <= uart_rdata;
+                else if (reg_gpu)
+                    periph_rd_data_r <= gpu_reg_rdata;
+                else
+                    periph_rd_data_r <= 32'h0;
+                state <= S_PERIPH_RD;
+            end
+        end
+
+        S_PERIPH_RD_LATCH: begin
+            if (reg_mixer)
+                periph_rd_data_r <= mixer_rdata;
+            else
+                periph_rd_data_r <= 32'h0;
             state <= S_PERIPH_RD;
         end
 
         S_PERIPH_RD: begin
             if (can_push_beat) begin
                 s_axi_rvalid <= 1'b1;
-                s_axi_rdata  <= periph_rd_mux;
+                s_axi_rdata  <= periph_rd_data_r;
                 s_axi_rresp  <= 2'b00;
                 s_axi_rlast  <= beat_is_last;
                 burst_count  <= burst_count + 1;
                 if (beat_is_last) state <= S_IDLE;
                 else begin
-                    if (!burst_is_fixed) req_addr <= req_addr + 32'd4;
-                    if (reg_mixer) state <= S_PERIPH_RD_WAIT;
+                    if (!burst_is_fixed)
+                        req_addr <= periph_next_addr;
+                    if (reg_link)
+                        link_reg_addr <= periph_next_addr[6:2];
+                    if (reg_gpu)
+                        gpu_reg_addr <= periph_next_addr[5:2];
+                    state <= S_PERIPH_RD_WAIT;
                 end
                 /* Pop-pulse side effects on specific read addresses. */
                 // cram0_mode is a simple read-mirror; no pop needed.

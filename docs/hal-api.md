@@ -262,7 +262,11 @@ Open a named file within a data slot. Returns file size on success.
 
 ## Analogizer (`hal/analogizer.h`)
 
-Reads Analogizer adapter configuration from bridge-synced registers. The Analogizer is configured by the user through the Pocket's interact menu; the OS reads the current state.
+Reads Analogizer adapter configuration from bridge-synced registers. The
+OS starts from the Pocket interact menu defaults, then applies
+`analogizer.cfg` when that shared filename is present in the APF
+manifest. The config file is plain `key=value` text and supports `#` or
+`;` comments.
 
 ```c
 int analogizer_is_enabled(void);

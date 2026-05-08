@@ -21,6 +21,7 @@ RELEASE_DIR  = $(BUILD_DIR)/Cores/$(CORE_NAME)
 ASSETS_DIR   = $(BUILD_DIR)/Assets/openfpgaos/common
 TOOLS_DIR    = tools
 DIST_DIR     = dist/core
+ANALOGIZER_CFG = dist/common/analogizer.cfg
 REVERSE_BITS = $(TOOLS_DIR)/reverse_bits
 
 # ── Colors ───────────────────────────────────────────────────────────
@@ -102,14 +103,14 @@ sweep: check-target
 # the same thing (firmware build + MIF patch + bitstream re-install).
 
 # ── Package ──────────────────────────────────────────────────────────
-package: $(REVERSE_BITS) package-dirs package-bitstream package-chip32 package-firmware package-json package-platform package-icon package-install
+package: $(REVERSE_BITS) package-dirs package-bitstream package-chip32 package-firmware package-json package-analogizer-config package-platform package-icon package-install
 	@echo ""
 	@printf "  $(C_OK)Package ready$(C_RESET) → $(BUILD_DIR)/\n"
 	@echo ""
 	@tree -L 4 $(BUILD_DIR) 2>/dev/null || find $(BUILD_DIR) -type f | sort
 
 # Lightweight package (skip checks, for use after flash)
-package-only: $(REVERSE_BITS) package-dirs package-bitstream package-chip32 package-firmware package-json package-platform package-icon package-install
+package-only: $(REVERSE_BITS) package-dirs package-bitstream package-chip32 package-firmware package-json package-analogizer-config package-platform package-icon package-install
 
 package-dirs:
 	@rm -rf $(BUILD_DIR)
@@ -132,6 +133,9 @@ package-json:
 	@for f in core.json video.json audio.json input.json data.json variants.json interact.json; do \
 		cp $(DIST_DIR)/$$f $(RELEASE_DIR)/; \
 	done
+
+package-analogizer-config:
+	@cp $(ANALOGIZER_CFG) $(ASSETS_DIR)/analogizer.cfg
 
 package-platform:
 	@cp dist/platforms/*.json $(BUILD_DIR)/Platforms/
@@ -224,6 +228,18 @@ sdk: check-target
 		cp src/firmware/musl/lib/crtn.o    "$$dir/src/sdk/musl/lib/"; \
 		printf "  $(C_OK)musl$(C_RESET)           → src/sdk/musl/\n"; \
 		\
+		# Shared Analogizer config seed. The SDK demo core maps this file \
+		# through nonvolatile data slot 8; putting it under dist/sdk makes \
+		# `make -C src/apps release/copy` deploy it to Assets/openfpgaos/common. \
+		mkdir -p "$$dir/dist/sdk/Assets/openfpgaos/common"; \
+		cp $(ANALOGIZER_CFG) "$$dir/dist/sdk/Assets/openfpgaos/common/analogizer.cfg"; \
+		mkdir -p "$$dir/runtime"; \
+		cp $(ANALOGIZER_CFG) "$$dir/runtime/analogizer.cfg"; \
+		if [ -d "$$dir/build/sdk/Assets/openfpgaos/common" ]; then \
+			cp $(ANALOGIZER_CFG) "$$dir/build/sdk/Assets/openfpgaos/common/analogizer.cfg"; \
+		fi; \
+		printf "  $(C_OK)analogizer.cfg$(C_RESET) → dist/sdk/Assets/openfpgaos/common/\n"; \
+		\
 		# Legacy directories that used to live under src/sdk/ — the \
 		# rsync above won't touch them because they're outside its \
 		# filter, so nuke them here once. \
@@ -263,5 +279,5 @@ clean:
 .PHONY: all help check-target full cpu bootloader firmware os compile build check test timing program sdk
 .PHONY: sweep
 .PHONY: package package-only package-dirs package-bitstream package-chip32
-.PHONY: package-firmware package-json package-platform package-icon package-install
+.PHONY: package-firmware package-json package-analogizer-config package-platform package-icon package-install
 .PHONY: clean

@@ -104,14 +104,16 @@ localparam LINE_WORDS = 4;
 // TDP altsyncram from the two-always-block pattern below: each port has
 // its own (clk, addr, [we], dout) triplet; the synthesizer recognises
 // the pattern and emits a TDP block with the same M10K count as the
-// prior SDP layout.  data_mem and tag_mem keep their write side on
+// prior SDP layout.  data_mem and tagv_mem keep their write side on
 // port A only (only the fill machine writes; reads via either port).
-(* ramstyle = "M10K" *) reg                 valid_mem [0:SETS-1];
-(* ramstyle = "M10K" *) reg [TAG_BITS-1:0]  tag_mem   [0:SETS-1];
+//
+// Valid is packed into the tag word so the 1024x1 valid array does not
+// consume a whole M10K on its own.  Layout: {valid, tag[TAG_BITS-1:0]}.
+(* ramstyle = "M10K" *) reg [TAG_BITS:0]    tagv_mem  [0:SETS-1];
 (* ramstyle = "M10K" *) reg [31:0]          data_mem  [0:SETS*LINE_WORDS-1];
 
 // ---- FSM ----
-// S_INIT       : walk sets 0..SETS-1 writing valid_mem=0 (entered on reset
+// S_INIT       : walk sets 0..SETS-1 writing tagv_mem.valid=0 (entered on reset
 //                and on flush; M10K can't be bulk-cleared in one cycle)
 // S_PIPE       : normal pipelined operation, 1 req/cycle accepted on hits
 //                (per port, independently)
@@ -231,7 +233,7 @@ wire [1:0]          addr_word_b = req_addr_b[3:2];
 //      (addr_set_x, addr_word_x).
 //
 //   2. S_FILL_OUT no-ack prime: the FSM has just written
-//      tag_mem[lat_set] <= lat_tag, valid_mem[lat_set] <= 1, and
+//      tagv_mem[lat_set] <= {valid=1, lat_tag}, and
 //      the line's words into data_mem[{lat_set, *}] in the prior
 //      cycle (axi_rlast).  Read at (lat_set, lat_word) — the M10K
 //      already holds the correct values, so we don't need a non-RAM
@@ -261,16 +263,14 @@ wire                read_en_b   = (req_valid_b && req_ready_b) || prime_b;
 
 always @(posedge clk) begin
     if (read_en_a) begin
-        rd_tag_a   <= tag_mem[read_set_a];
-        rd_valid_a <= valid_mem[read_set_a];
+        {rd_valid_a, rd_tag_a} <= tagv_mem[read_set_a];
         rd_data_a  <= data_mem[{read_set_a, read_word_a}];
     end
 end
 
 always @(posedge clk) begin
     if (read_en_b) begin
-        rd_tag_b   <= tag_mem[read_set_b];
-        rd_valid_b <= valid_mem[read_set_b];
+        {rd_valid_b, rd_tag_b} <= tagv_mem[read_set_b];
         rd_data_b  <= data_mem[{read_set_b, read_word_b}];
     end
 end
@@ -353,22 +353,30 @@ always @(posedge clk) begin
         // on every accepted req (either port) — gives us total tex
         // demand.  Increment dbg_miss_count on every miss handled in
         // S_PIPE (when we transition to S_FILL_AR).  Saturating at
-        // 0xFFFF so the counters don't wrap mid-frame.
-        if ((req_valid && req_ready) || (req_valid_b && req_ready_b)) begin
+        // 32 bits so the counters don't wrap mid-frame.
+        case ({req_valid && req_ready, req_valid_b && req_ready_b})
+        2'b01, 2'b10: begin
             if (dbg_req_count != 32'hFFFFFFFF)
-                dbg_req_count <= dbg_req_count + ((req_valid && req_ready) +
-                                                  (req_valid_b && req_ready_b));
+                dbg_req_count <= dbg_req_count + 32'd1;
         end
+        2'b11: begin
+            if (dbg_req_count >= 32'hFFFFFFFE)
+                dbg_req_count <= 32'hFFFFFFFF;
+            else
+                dbg_req_count <= dbg_req_count + 32'd2;
+        end
+        default: ;
+        endcase
 
         case (state)
         // ----------------------------------------------------------------
-        // S_INIT: walk through 1024 sets writing valid_mem[i] <= 0.
+        // S_INIT: walk through 1024 sets writing tagv_mem[i].valid <= 0.
         // Entered on reset and on flush.  Both ports' req_ready are 0
         // because they only assert in S_PIPE / S_FILL_OUT.
         // 1024 cycles ≈ 10 µs at 100 MHz — negligible at boot/flush.
         // ----------------------------------------------------------------
         S_INIT: begin
-            valid_mem[init_counter] <= 1'b0;
+            tagv_mem[init_counter] <= {1'b0, {TAG_BITS{1'b0}}};
             if (init_counter == {SET_BITS{1'b1}}) begin
                 state <= S_PIPE;
                 flush_pending <= 1'b0;  // walk-clear done, clear pending
@@ -478,8 +486,7 @@ always @(posedge clk) begin
                 if (fill_beat == lat_word) fill_target_word <= axi_rdata;
                 fill_beat <= fill_beat + 2'd1;
                 if (axi_rlast) begin
-                    tag_mem[lat_set]     <= lat_tag;
-                    valid_mem[lat_set]   <= 1'b1;
+                    tagv_mem[lat_set]    <= {1'b1, lat_tag};
                     if (lat_port == 1'b0) fill_resp_valid_a <= 1;
                     else                  fill_resp_valid_b <= 1;
                     state                <= S_FILL_OUT;

@@ -31,6 +31,39 @@ static inline int16_t apply_deadzone(int16_t val) {
     return (val > -stick_deadzone && val < stick_deadzone) ? 0 : val;
 }
 
+static inline int16_t input_axis_from_u8_centered(uint8_t raw) {
+    return (int16_t)(((int16_t)raw - 128) * 256);
+}
+
+static int input_probe_hub(void) {
+    INPUT_IRQ_MASK = 0x5u;
+
+    uint32_t mask = INPUT_IRQ_MASK & 0xFu;
+    uint32_t info0 = INPUT_SLOT_INFO(0);
+    uint32_t info1 = INPUT_SLOT_INFO(1);
+    uint32_t info2 = INPUT_SLOT_INFO(2);
+    uint32_t info3 = INPUT_SLOT_INFO(3);
+
+    INPUT_IRQ_MASK = 0;
+
+    if (mask != 0x5u)
+        return 0;
+
+    if (!(info0 & INPUT_SLOT_INFO_PRESENT) ||
+        !(info1 & INPUT_SLOT_INFO_PRESENT) ||
+        !(info2 & INPUT_SLOT_INFO_PRESENT) ||
+        !(info3 & INPUT_SLOT_INFO_PRESENT))
+        return 0;
+
+    if (!(info0 & INPUT_SLOT_INFO_IRQ_EN) ||
+         (info1 & INPUT_SLOT_INFO_IRQ_EN) ||
+        !(info2 & INPUT_SLOT_INFO_IRQ_EN) ||
+         (info3 & INPUT_SLOT_INFO_IRQ_EN))
+        return 0;
+
+    return 1;
+}
+
 void of_input_init(void) {
     for (int i = 0; i < INPUT_MAX_PLAYERS; i++) {
         of_input_states[i] = (of_input_state_t){0};
@@ -45,12 +78,13 @@ void of_input_init(void) {
     for (int i = 0; i < (int)OF_KEYBOARD_WORDS; i++)
         prev_keyboard_keys[i] = 0;
 
-    /* Newer bitstreams expose an input hub at 0x40000100.  Probe by
-     * writing the per-slot IRQ mask and reading it back; older bitstreams
-     * return 0 from this extended sysreg page and keep using CONT1/2. */
-    INPUT_IRQ_MASK = 0xFu;
-    input_hub_present = ((INPUT_IRQ_MASK & 0xFu) == 0xFu);
+    /* Newer bitstreams expose an input hub at 0x40000100.  Probe the
+     * coherent register set, not just one writable echo, so an app/runtime
+     * mismatch keeps using the legacy CONT1/2 registers instead of a dead
+     * extended page. */
+    input_hub_present = input_probe_hub();
     if (input_hub_present) {
+        INPUT_IRQ_MASK = 0xFu;
         INPUT_IRQ_CLEAR = INPUT_IRQ_CLEAR_FIFO | INPUT_IRQ_CLEAR_OVERFLOW;
         IRQ_MASK |= IRQ_MASK_INPUT;
     }
@@ -62,6 +96,25 @@ static inline void read_apf(int player, uint32_t *keys, uint32_t *joy, uint32_t 
         *keys = INPUT_SLOT_KEY(player);
         *joy  = INPUT_SLOT_JOY(player);
         *trig = INPUT_SLOT_TRIG(player);
+        if (player == 0 && !(*keys | *joy | *trig)) {
+            uint32_t legacy_keys = CONT1_KEY;
+            uint32_t legacy_joy = CONT1_JOY;
+            uint32_t legacy_trig = CONT1_TRIG;
+            if (legacy_keys | legacy_joy | legacy_trig) {
+                *keys = legacy_keys;
+                *joy = legacy_joy;
+                *trig = legacy_trig;
+            }
+        } else if (player == 1 && !(*keys | *joy | *trig)) {
+            uint32_t legacy_keys = CONT2_KEY;
+            uint32_t legacy_joy = CONT2_JOY;
+            uint32_t legacy_trig = CONT2_TRIG;
+            if (legacy_keys | legacy_joy | legacy_trig) {
+                *keys = legacy_keys;
+                *joy = legacy_joy;
+                *trig = legacy_trig;
+            }
+        }
     } else if (player == 0) {
         *keys = CONT1_KEY;
         *joy  = CONT1_JOY;
@@ -104,8 +157,8 @@ static inline uint8_t apf_input_type(uint32_t key) {
 }
 
 /* Fill input state from raw values */
-static void fill_state(int player, uint32_t keys, int8_t lx, int8_t ly,
-                        int8_t rx, int8_t ry, uint32_t trig) {
+static void fill_state(int player, uint32_t keys, int16_t lx, int16_t ly,
+                       int16_t rx, int16_t ry, uint32_t trig) {
     keys &= 0xFFFFu;
     of_input_states[player].buttons_pressed  = keys & ~prev_buttons[player];
     of_input_states[player].buttons_released = ~keys & prev_buttons[player];
@@ -118,6 +171,37 @@ static void fill_state(int player, uint32_t keys, int8_t lx, int8_t ly,
     of_input_states[player].joy_ry = apply_deadzone(ry);
     of_input_states[player].trigger_l = trig & 0xFFFF;
     of_input_states[player].trigger_r = (trig >> 16) & 0xFFFF;
+}
+
+static void fill_apf_state(int player, uint32_t keys, uint32_t joy,
+                           uint32_t trig) {
+    uint8_t type = apf_input_type(keys);
+    int has_analog = (type == OF_INPUT_TYPE_GAMEPAD_ANALOG) ||
+                     (type == OF_INPUT_TYPE_NONE && joy != 0);
+
+    fill_state(player, keys,
+               has_analog ? input_axis_from_u8_centered(joy & 0xFF) : 0,
+               has_analog ? input_axis_from_u8_centered((joy >> 8) & 0xFF) : 0,
+               has_analog ? input_axis_from_u8_centered((joy >> 16) & 0xFF) : 0,
+               has_analog ? input_axis_from_u8_centered((joy >> 24) & 0xFF) : 0,
+               trig);
+}
+
+static int apf_has_activity(uint32_t keys, uint32_t joy, uint32_t trig) {
+    return (keys & 0xFFFFu) || joy || trig;
+}
+
+static int snac_has_activity(const snac_controller_t *sc) {
+    return sc->buttons || sc->joy_lx || sc->joy_ly ||
+           sc->joy_rx || sc->joy_ry;
+}
+
+static int should_rescue_p1_apf(const snac_controller_t *sc,
+                                uint32_t apf_keys,
+                                uint32_t apf_joy,
+                                uint32_t apf_trig) {
+    return !snac_has_activity(sc) &&
+           apf_has_activity(apf_keys, apf_joy, apf_trig);
 }
 
 static void keyboard_disconnect(void) {
@@ -249,37 +333,36 @@ void of_input_poll(void) {
 
         switch (assignment) {
         case 0: /* SNAC→P1, APF→P2 */
-            fill_state(0, sc->buttons, sc->joy_lx, sc->joy_ly,
-                       sc->joy_rx, sc->joy_ry, 0);
-            fill_state(1, apf2_keys,
-                       (int8_t)(apf2_joy & 0xFF),
-                       (int8_t)((apf2_joy >> 8) & 0xFF),
-                       (int8_t)((apf2_joy >> 16) & 0xFF),
-                       (int8_t)((apf2_joy >> 24) & 0xFF),
-                       apf2_trig);
+            if (should_rescue_p1_apf(sc, apf1_keys, apf1_joy, apf1_trig))
+                fill_apf_state(0, apf1_keys, apf1_joy, apf1_trig);
+            else
+                fill_state(0, sc->buttons, sc->joy_lx, sc->joy_ly,
+                           sc->joy_rx, sc->joy_ry, 0);
+            fill_apf_state(1, apf2_keys, apf2_joy, apf2_trig);
             break;
         case 1: /* APF→P1, SNAC→P2 */
-            fill_state(0, apf1_keys,
-                       (int8_t)(apf1_joy & 0xFF),
-                       (int8_t)((apf1_joy >> 8) & 0xFF),
-                       (int8_t)((apf1_joy >> 16) & 0xFF),
-                       (int8_t)((apf1_joy >> 24) & 0xFF),
-                       apf1_trig);
+            fill_apf_state(0, apf1_keys, apf1_joy, apf1_trig);
             fill_state(1, sc->buttons, sc->joy_lx, sc->joy_ly,
                        sc->joy_rx, sc->joy_ry, 0);
             break;
         case 2: { /* SNAC P1→P1, SNAC P2→P2 */
             const snac_controller_t *sc2 = snac_get_state(1);
-            fill_state(0, sc->buttons, sc->joy_lx, sc->joy_ly,
-                       sc->joy_rx, sc->joy_ry, 0);
+            if (should_rescue_p1_apf(sc, apf1_keys, apf1_joy, apf1_trig))
+                fill_apf_state(0, apf1_keys, apf1_joy, apf1_trig);
+            else
+                fill_state(0, sc->buttons, sc->joy_lx, sc->joy_ly,
+                           sc->joy_rx, sc->joy_ry, 0);
             fill_state(1, sc2->buttons, sc2->joy_lx, sc2->joy_ly,
                        sc2->joy_rx, sc2->joy_ry, 0);
             break;
         }
         case 3: { /* SNAC P1→P2, SNAC P2→P1 */
             const snac_controller_t *sc2 = snac_get_state(1);
-            fill_state(0, sc2->buttons, sc2->joy_lx, sc2->joy_ly,
-                       sc2->joy_rx, sc2->joy_ry, 0);
+            if (should_rescue_p1_apf(sc2, apf1_keys, apf1_joy, apf1_trig))
+                fill_apf_state(0, apf1_keys, apf1_joy, apf1_trig);
+            else
+                fill_state(0, sc2->buttons, sc2->joy_lx, sc2->joy_ly,
+                           sc2->joy_rx, sc2->joy_ry, 0);
             fill_state(1, sc->buttons, sc->joy_lx, sc->joy_ly,
                        sc->joy_rx, sc->joy_ry, 0);
             break;
@@ -289,42 +372,13 @@ void of_input_poll(void) {
         return;
     }
 
-    /* Standard path: read APF Pocket controllers directly */
-    /* Player 1 */
     uint32_t keys1, joy1, trig1;
     read_apf(0, &keys1, &joy1, &trig1);
-    keys1 &= 0xFFFFu;
+    fill_apf_state(0, keys1, joy1, trig1);
 
-    of_input_states[0].buttons_pressed  = keys1 & ~prev_buttons[0];
-    of_input_states[0].buttons_released = ~keys1 & prev_buttons[0];
-    of_input_states[0].buttons = keys1;
-    prev_buttons[0] = keys1;
-
-    of_input_states[0].joy_lx = apply_deadzone((int8_t)(joy1 & 0xFF));
-    of_input_states[0].joy_ly = apply_deadzone((int8_t)((joy1 >> 8) & 0xFF));
-    of_input_states[0].joy_rx = apply_deadzone((int8_t)((joy1 >> 16) & 0xFF));
-    of_input_states[0].joy_ry = apply_deadzone((int8_t)((joy1 >> 24) & 0xFF));
-
-    of_input_states[0].trigger_l = trig1 & 0xFFFF;
-    of_input_states[0].trigger_r = (trig1 >> 16) & 0xFFFF;
-
-    /* Player 2 */
     uint32_t keys2, joy2, trig2;
     read_apf(1, &keys2, &joy2, &trig2);
-    keys2 &= 0xFFFFu;
-
-    of_input_states[1].buttons_pressed  = keys2 & ~prev_buttons[1];
-    of_input_states[1].buttons_released = ~keys2 & prev_buttons[1];
-    of_input_states[1].buttons = keys2;
-    prev_buttons[1] = keys2;
-
-    of_input_states[1].joy_lx = apply_deadzone((int8_t)(joy2 & 0xFF));
-    of_input_states[1].joy_ly = apply_deadzone((int8_t)((joy2 >> 8) & 0xFF));
-    of_input_states[1].joy_rx = apply_deadzone((int8_t)((joy2 >> 16) & 0xFF));
-    of_input_states[1].joy_ry = apply_deadzone((int8_t)((joy2 >> 24) & 0xFF));
-
-    of_input_states[1].trigger_l = trig2 & 0xFFFF;
-    of_input_states[1].trigger_r = (trig2 >> 16) & 0xFFFF;
+    fill_apf_state(1, keys2, joy2, trig2);
 
     poll_hid_slots();
 }
@@ -332,9 +386,25 @@ void of_input_poll(void) {
 void of_input_poll_p0(of_input_state_t *out) {
     if (snac_is_active()) {
         snac_poll();
-        const snac_controller_t *sc = snac_get_state(0);
-        fill_state(0, sc->buttons, sc->joy_lx, sc->joy_ly,
-                   sc->joy_rx, sc->joy_ry, 0);
+        const of_analogizer_state_t *anlg = of_analogizer_get_state();
+        uint8_t assignment = anlg->snac_assignment & 0x3;
+
+        if (assignment == 1) {
+            uint32_t keys, joy, trig;
+            read_apf(0, &keys, &joy, &trig);
+            fill_apf_state(0, keys, joy, trig);
+        } else {
+            const snac_controller_t *sc =
+                snac_get_state((assignment == 3) ? 1 : 0);
+            uint32_t keys, joy, trig;
+            read_apf(0, &keys, &joy, &trig);
+            if (should_rescue_p1_apf(sc, keys, joy, trig))
+                fill_apf_state(0, keys, joy, trig);
+            else
+                fill_state(0, sc->buttons, sc->joy_lx, sc->joy_ly,
+                           sc->joy_rx, sc->joy_ry, 0);
+        }
+
         poll_hid_slots();
         *out = of_input_states[0];
         return;
@@ -342,20 +412,7 @@ void of_input_poll_p0(of_input_state_t *out) {
 
     uint32_t keys, joy, trig;
     read_apf(0, &keys, &joy, &trig);
-    keys &= 0xFFFFu;
-
-    of_input_states[0].buttons_pressed  = keys & ~prev_buttons[0];
-    of_input_states[0].buttons_released = ~keys & prev_buttons[0];
-    of_input_states[0].buttons = keys;
-    prev_buttons[0] = keys;
-
-    of_input_states[0].joy_lx = apply_deadzone((int8_t)(joy & 0xFF));
-    of_input_states[0].joy_ly = apply_deadzone((int8_t)((joy >> 8) & 0xFF));
-    of_input_states[0].joy_rx = apply_deadzone((int8_t)((joy >> 16) & 0xFF));
-    of_input_states[0].joy_ry = apply_deadzone((int8_t)((joy >> 24) & 0xFF));
-
-    of_input_states[0].trigger_l = trig & 0xFFFF;
-    of_input_states[0].trigger_r = (trig >> 16) & 0xFFFF;
+    fill_apf_state(0, keys, joy, trig);
 
     poll_hid_slots();
     *out = of_input_states[0];

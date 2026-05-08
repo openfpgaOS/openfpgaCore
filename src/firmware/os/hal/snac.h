@@ -10,13 +10,13 @@
 #include <stdint.h>
 #include "regs.h"
 
-/* SNAC controller state — parsed button/analog data in Pocket format */
+/* SNAC controller state — parsed buttons plus SDK-scale analog axes */
 typedef struct {
     uint16_t buttons;       /* Pocket BTN_* format */
-    int8_t   joy_lx;        /* Left stick X (-128..127) */
-    int8_t   joy_ly;        /* Left stick Y */
-    int8_t   joy_rx;        /* Right stick X (PSX analog only) */
-    int8_t   joy_ry;        /* Right stick Y */
+    int16_t  joy_lx;        /* Left stick X */
+    int16_t  joy_ly;        /* Left stick Y */
+    int16_t  joy_rx;        /* Right stick X (PSX analog only) */
+    int16_t  joy_ry;        /* Right stick Y */
 } snac_controller_t;
 
 /* Initialize SNAC subsystem for the given controller type.

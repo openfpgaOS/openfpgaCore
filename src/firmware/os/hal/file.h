@@ -21,10 +21,10 @@ void of_file_set_idle_hook(void (*hook)(void));
  * Flushes D-cache and acknowledges if bridge requests shutdown. */
 void of_check_shutdown(void);
 
-/* Read data from a file slot into SDRAM.
+/* Read data from a file slot into memory.
  * slot_id: APF file slot ID
  * slot_offset: byte offset within slot
- * dest: destination address (must be in SDRAM)
+ * dest: destination address
  * length: bytes to read
  * Returns 0 on success, negative on error. */
 int of_file_read(uint32_t slot_id, uint32_t slot_offset,
@@ -59,7 +59,8 @@ int of_file_slot_write_chunked(uint32_t slot_id, uint32_t slot_offset,
 /* Raw bridge DMA: issue a read command and wait for completion.
  * No cache flush — caller is responsible for cache coherency.
  * Used by I/O cache for CRAM0 targets where no SDRAM flush is needed
- * (CRAM0 is uncached per PMA in v2 arch). */
+ * (CRAM0 is uncached per PMA in v2 arch).  Length must not exceed
+ * DMA_CHUNK_SIZE; use of_file_read_chunked/of_file_read for larger reads. */
 int of_file_read_raw(uint32_t slot_id, uint32_t slot_offset,
                       uint32_t bridge_addr, uint32_t length);
 

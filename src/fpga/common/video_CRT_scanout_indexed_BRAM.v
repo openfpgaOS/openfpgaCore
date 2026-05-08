@@ -166,8 +166,11 @@ module video_CRT_scanout_indexed_BRAM (
                               (y_count < (VID_V_SYNC + VID_V_BPORCH + VID_V_ACTIVE));
 
     // Pipeline stage registers
+    (* altera_attribute = "-name AUTO_SHIFT_REGISTER_RECOGNITION OFF" *)
     reg [3:0] sub_pixel_q;  // 4 bits needed for 2-bit mode (16 pixels/word)
+    (* altera_attribute = "-name AUTO_SHIFT_REGISTER_RECOGNITION OFF" *)
     reg hactive_q1, hactive_q2, hactive_q3;
+    (* altera_attribute = "-name AUTO_SHIFT_REGISTER_RECOGNITION OFF" *)
     reg vactive_q1, vactive_q2, vactive_q3;
     reg [23:0] direct_color;
     reg use_direct, use_direct_q;

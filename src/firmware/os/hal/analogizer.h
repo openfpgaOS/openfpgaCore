@@ -10,9 +10,9 @@
 #include "regs.h"
 
 typedef struct {
-    uint8_t  enabled;           /* Analogizer present and enabled */
+    uint8_t  enabled;           /* analog video output enabled */
     uint8_t  video_mode;        /* ANLG_VIDEO_* value */
-    uint8_t  snac_type;         /* SNAC_* controller type */
+    uint8_t  snac_type;         /* SNAC_* controller type; independent of video */
     uint8_t  snac_assignment;   /* Player assignment */
     int8_t   h_offset;          /* Horizontal offset (-32 to +31) */
     int8_t   v_offset;          /* Vertical offset (-16 to +15) */
@@ -21,10 +21,22 @@ typedef struct {
 /* Initialize Analogizer subsystem (reads current bridge state) */
 void of_analogizer_init(void);
 
+/* Load and apply analogizer.cfg after filesystem_init().
+ *
+ * Text configs use key=value lines. Supported keys are enabled, video,
+ * snac, assignment, h_offset, and v_offset. Lines starting with # or ;
+ * are comments, and inline #/; comments are ignored. The legacy binary
+ * ACFG format is still accepted for compatibility.
+ *
+ * Returns 0 when a valid config was applied, negative when the file is
+ * absent or invalid. The boot default from interact.json remains active
+ * on failure. */
+int of_analogizer_load_config(const char *filename);
+
 /* Get current Analogizer state (read from bridge-synced registers) */
 const of_analogizer_state_t *of_analogizer_get_state(void);
 
-/* Check if Analogizer is enabled */
+/* Check if analog video output is enabled */
 int of_analogizer_is_enabled(void);
 
 /* Get the current video output mode */

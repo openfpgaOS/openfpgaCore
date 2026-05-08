@@ -480,6 +480,9 @@ axi_periph_slave dut (
     .target_dataslot_done(1'b0),
     .target_dataslot_err (3'b0),
     .bridge_wr_idle      (1'b1),
+    .bridge_wr_fifo_count_dbg(11'd0),
+    .bridge_wr_fifo_max_dbg  (11'd0),
+    .bridge_wr_fifo_overflow_dbg(1'b0),
 
     .color_mode     (),
     .fb_display_addr(),
@@ -517,6 +520,13 @@ axi_periph_slave dut (
     .uart_rx_byte  (8'b0),
 
     .app_id         (32'b0),
+    .analogizer_settings(32'b0),
+    .analogizer_hoffset (32'b0),
+    .analogizer_voffset (32'b0),
+    .analogizer_cpu_wr_toggle(),
+    .analogizer_cpu_wr_settings(),
+    .analogizer_cpu_wr_hoffset(),
+    .analogizer_cpu_wr_voffset(),
     .shutdown_pending(1'b0),
     .shutdown_ack   (),
 

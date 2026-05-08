@@ -232,6 +232,13 @@
 #define   INPUT_HW_EVENT_FIELD_JOY   (1 << 1)
 #define   INPUT_HW_EVENT_FIELD_TRIG  (1 << 2)
 
+/* Analogizer CPU mirror. Pocket interact.json writes the same settings
+ * through bridge addresses 0xF7000000/04/08; firmware uses these sysregs
+ * to read the bridge defaults and apply analogizer.cfg overrides. */
+#define ANALOGIZER_SETTINGS REG32(SYSREG_BASE + 0x80)
+#define ANALOGIZER_H_OFFSET REG32(SYSREG_BASE + 0x84)
+#define ANALOGIZER_V_OFFSET REG32(SYSREG_BASE + 0x88)
+
 /* Misc */
 #define SYS_GAME_ID         REG32(SYSREG_BASE + 0x68)
 
@@ -265,11 +272,11 @@
  * Pin mapping:
  *   [0] = OUT1  (bank1[6]) — always output
  *   [1] = OUT2  (bank1[7]) — always output
- *   [2] = IO3   (bank0[4]) — CfgA: DATA_IN, CfgB: CLK_OUT
+ *   [2] = IO3   (bank0[4]) — CfgA: DATA_IN, CfgB: unused/input
  *   [3] = IN7   (bank0[5]) — CfgA: DATA4,   CfgB: IRQ10
  *   [4] =        bank0[6]  — CfgB: ACK_IN
  *   [5] = IN4   (bank0[7]) — CfgA: DATA2,   CfgB: DAT_IN
- *   [6] = IO5   (pin30)    — CfgA: CLK2,    CfgB: ACK_IN
+ *   [6] = IO5   (pin30)    — CfgA: CLK2,    CfgB: CLK_OUT
  *   [7] = IO6   (pin31)    — CfgA: DATA3,   CfgB: CMD_OUT
  */
 #define   SNAC_PIN_OUT1     (1 << 0)
@@ -376,15 +383,14 @@
 #define   IRQ_MASK_VSYNC     (1 << 3)
 #define   IRQ_MASK_INPUT     (1 << 4)
 
-/* VRR (Variable Refresh Rate) — dynamic V_TOTAL for video timing (0xDC)
- * Write: bits[9:0] = V_TOTAL line count (262–375, default 262)
+/* VRR (Variable Refresh Rate) — live V_TOTAL readback (0xDC)
  * Read:  bits[9:0] = current V_TOTAL
- * Pocket scaler accepts 42-60 Hz. RTL hard-clamps to [262, 375]. */
+ * Write: ignored; RTL selects adaptive timing for the Pocket LCD and fixed
+ * NTSC/PAL timing when Analogizer/SNAC owns the adapter path. */
 #define VRR_V_TOTAL         REG32(SYSREG_BASE + 0xDC)
 
-/* VRR swap hold — skip N vsyncs before presenting a queued frame (0xE0)
- * Write: bits[3:0] = number of vsyncs to skip (0=immediate, 1=skip one, etc.)
- * Used for even frame pacing in the 30-40 FPS gap. */
+/* VRR swap hold readback (0xE0)
+ * Write: ignored; fixed-rate adapter mode forces hold to 0. */
 #define VRR_SWAP_HOLD       REG32(SYSREG_BASE + 0xE0)
 
 /* Datatable slot size query (0x90) — write slot entry address, read result */
@@ -453,8 +459,8 @@
 
 /* ======================================================================
  * Analogizer (Bridge registers, accessible via interact.json settings)
- * CPU reads current state from bridge-synced registers.
- * Write access requires FPGA register additions.
+ * CPU reads/writes through ANALOGIZER_* sysregs above. The bridge-side
+ * addresses below are used by interact.json and are not CPU MMIO.
  * ====================================================================== */
 
 #define ANALOGIZER_BRIDGE_BASE  0xF7000000

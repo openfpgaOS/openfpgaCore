@@ -5,10 +5,13 @@
 #include "hal.h"
 #include "regs.h"
 
-/* DEBUG instrumentation: write a single character to UART directly
- * (bypassing of_term, which isn't initialized yet during of_init).
- * Used to bisect tb_system boot hangs — UART hardware is set up by
- * the bootloader so direct writes work from of_init onwards. */
+#ifndef OF_BOOT_UART_DEBUG
+#define OF_BOOT_UART_DEBUG 0
+#endif
+
+/* Optional boot instrumentation. Keep it compiled out by default because the
+ * UART shares cart pins with Analogizer/SNAC hardware. */
+#if OF_BOOT_UART_DEBUG
 static void uart_dbg_putc(char c) {
     while (!(UART_STATUS & UART_TX_RDY)) ;
     UART_TX_DATA = (uint32_t)(uint8_t)c;
@@ -16,6 +19,11 @@ static void uart_dbg_putc(char c) {
 static void uart_dbg_puts(const char *s) {
     while (*s) uart_dbg_putc(*s++);
 }
+#else
+static void uart_dbg_puts(const char *s) {
+    (void)s;
+}
+#endif
 
 void of_init(void) {
     uart_dbg_puts("[init] enter\n");

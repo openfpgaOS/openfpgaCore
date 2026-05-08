@@ -197,7 +197,9 @@ assign bridge_endian_little = 1;
 // ============================================================
 
 // Pocket Menu settings
-reg [31:0] analogizer_settings;
+reg [31:0] analogizer_settings = 32'd0;
+reg [31:0] signed_hoff = 32'd0;
+reg [31:0] signed_voff = 32'd0;
 
 // App ID from instance JSON memory_writes (bridge 0xF7000010)
 reg [31:0] app_id_74a;
@@ -208,17 +210,29 @@ always @(posedge clk_cpu) begin
 end
 
 reg [31:0] analogizer_settings_cpu_s1, analogizer_settings_cpu;
+reg [31:0] signed_hoff_cpu_s1, signed_hoff_cpu;
+reg [31:0] signed_voff_cpu_s1, signed_voff_cpu;
 reg [31:0] analogizer_settings_core_s1, analogizer_settings_core;
+reg [31:0] signed_hoff_core_s1, signed_hoff_core;
+reg [31:0] signed_voff_core_s1, signed_voff_core;
 reg [31:0] analogizer_settings_vid_s1, analogizer_settings_vid;
 
 always @(posedge clk_cpu) begin
   analogizer_settings_cpu_s1 <= analogizer_settings;
   analogizer_settings_cpu    <= analogizer_settings_cpu_s1;
+  signed_hoff_cpu_s1         <= signed_hoff;
+  signed_hoff_cpu            <= signed_hoff_cpu_s1;
+  signed_voff_cpu_s1         <= signed_voff;
+  signed_voff_cpu            <= signed_voff_cpu_s1;
 end
 
 always @(posedge clk_core_49152) begin
   analogizer_settings_core_s1 <= analogizer_settings;
   analogizer_settings_core    <= analogizer_settings_core_s1;
+  signed_hoff_core_s1         <= signed_hoff;
+  signed_hoff_core            <= signed_hoff_core_s1;
+  signed_voff_core_s1         <= signed_voff;
+  signed_voff_core            <= signed_voff_core_s1;
 end
 
 always @(posedge clk_vid) begin
@@ -226,8 +240,35 @@ always @(posedge clk_vid) begin
   analogizer_settings_vid    <= analogizer_settings_vid_s1;
 end
 
-wire [4:0] snac_cont_type /* synthesis keep */ = analogizer_settings[4:0];
-wire [3:0] snac_cont_assignment /* synthesis keep */ = analogizer_settings[9:6];
+wire [2:0]  analogizer_cpu_wr_toggle;
+wire [31:0] analogizer_cpu_wr_settings;
+wire [31:0] analogizer_cpu_wr_hoffset;
+wire [31:0] analogizer_cpu_wr_voffset;
+
+reg [2:0]  analogizer_cpu_wr_toggle_s1;
+reg [2:0]  analogizer_cpu_wr_toggle_s2;
+reg [2:0]  analogizer_cpu_wr_toggle_s3;
+reg [31:0] analogizer_cpu_wr_settings_s1, analogizer_cpu_wr_settings_s2;
+reg [31:0] analogizer_cpu_wr_hoffset_s1, analogizer_cpu_wr_hoffset_s2;
+reg [31:0] analogizer_cpu_wr_voffset_s1, analogizer_cpu_wr_voffset_s2;
+
+always @(posedge clk_74a) begin
+  analogizer_cpu_wr_toggle_s1 <= analogizer_cpu_wr_toggle;
+  analogizer_cpu_wr_toggle_s2 <= analogizer_cpu_wr_toggle_s1;
+  analogizer_cpu_wr_toggle_s3 <= analogizer_cpu_wr_toggle_s2;
+  analogizer_cpu_wr_settings_s1 <= analogizer_cpu_wr_settings;
+  analogizer_cpu_wr_settings_s2 <= analogizer_cpu_wr_settings_s1;
+  analogizer_cpu_wr_hoffset_s1 <= analogizer_cpu_wr_hoffset;
+  analogizer_cpu_wr_hoffset_s2 <= analogizer_cpu_wr_hoffset_s1;
+  analogizer_cpu_wr_voffset_s1 <= analogizer_cpu_wr_voffset;
+  analogizer_cpu_wr_voffset_s2 <= analogizer_cpu_wr_voffset_s1;
+end
+
+wire [2:0] analogizer_cpu_wr_event =
+  analogizer_cpu_wr_toggle_s2 ^ analogizer_cpu_wr_toggle_s3;
+
+wire [4:0] snac_cont_type = analogizer_settings[4:0];
+wire [3:0] snac_cont_assignment = analogizer_settings[9:6];
 wire       analogizer_ena_cpu  = analogizer_settings_cpu[15];
 wire       analogizer_ena_core = analogizer_settings_core[15];
 wire       analogizer_ena_vid  = analogizer_settings_vid[15];
@@ -251,7 +292,7 @@ wire [3:0] analogizer_video_type_core = analogizer_settings_core[13:10];
     wire [31:0] p2_joypad   = cont2_joy;
     wire [15:0] p2_trigger  = cont2_trig;
 
-    reg [2:0] fx /* synthesis preserve */;
+    reg [2:0] fx;
     always @(posedge clk_core_49152) begin
         case (analogizer_video_type_core)
             4'd5, 4'd13:    begin fx <= 3'd0; end //SC  0%     1 SC 25%
@@ -276,45 +317,33 @@ parameter NTSC_REF = 3.579545;
 parameter PAL_REF = 4.43361875;
 
 // Parameters to be modifed
-parameter CLK_VIDEO_NTSC = 49.152; 
-parameter CLK_VIDEO_PAL  = 49.152; 
+parameter CLK_VIDEO_NTSC = 49.152;
+parameter CLK_VIDEO_PAL  = 49.152;
 
-localparam [39:0] NTSC_PHASE_INC = 40'd80073066196;  //print(round(3.579545 * 2**40 / 49.152)) 
-localparam [39:0] PAL_PHASE_INC =  40'd99178372574; //print(round(4.43361875 * 2**40 / 49.152)) 
+localparam [39:0] NTSC_PHASE_INC = 40'd80073066196;  // round(3.579545 * 2**40 / 49.152)
+localparam [39:0] PAL_PHASE_INC =  40'd99178372574;  // round(4.43361875 * 2**40 / 49.152)
 
 assign CHROMA_PHASE_INC = ((analogizer_video_type_core == 4'h4)|| (analogizer_video_type_core == 4'hC)) ? PAL_PHASE_INC : NTSC_PHASE_INC;
 assign PALFLAG = (analogizer_video_type_core == 4'h4) || (analogizer_video_type_core == 4'hC);
 
 
-// H/V offset
-reg [31:0] signed_hoff;
-reg [31:0] signed_voff;
-
-wire [5:0]	hoffset = signed_hoff[5:0];
-wire  [4:0]	voffset = signed_voff[4:0];
-wire video_ce_pix, half_ce_pix;
+// Fixed 12.288 MHz pixel enable for the 49.152 MHz Analogizer helper clock.
+// cen[0] is the pixel-rate pulse; cen[1] is half-rate.
+wire analog_ce_pix, analog_ce_half;
 
 jtframe_frac_cen #(.W(2)) pixel_cen
 (
     .clk(clk_core_49152),
     .n(10'd1),
     .m(10'd4),
-    .cen({video_ce_pix,half_ce_pix})
+    .cen({analog_ce_half, analog_ce_pix})
 );
-wire HSync,VSync;
-jtframe_resync jtframe_resync
-(
-    .clk(clk_core_49152),
-    .pxl_cen(video_ce_pix),
-    .hs_in(crt_hs),
-    .vs_in(crt_vs),
-    .LVBL(crt_vblank),
-    .LHBL(crt_hblank),
-    .hoffset(hoffset), //5bits signed
-    .voffset(voffset), //5bits signed
-    .hs_out(HSync),
-    .vs_out(VSync)
-);
+
+// The generated source is progressive. jtframe_resync alternates an internal
+// field slot on vertical blank, which can produce every-other-frame offsets on
+// this non-interlaced timing, so feed the deterministic raw syncs directly.
+wire HSync = crt_hs;
+wire VSync = crt_vs;
 
 wire crt_csync;
 wire crt_blankn;
@@ -332,6 +361,8 @@ wire [7:0] snac_pin_out;
 wire [7:0] snac_pin_dir;
 wire [7:0] snac_pin_in;
 wire       snac_enable;
+wire       snac_configured_cpu = (analogizer_settings_cpu[4:0] != 5'd0);
+wire       adapter_fixed_rate_cpu = analogizer_ena_cpu || snac_configured_cpu;
 
 // Map SNAC GPIO bits to physical cart pin names:
 //   [0]=OUT1/bank1[6], [1]=OUT2/bank1[7],
@@ -351,14 +382,24 @@ assign snac_pin_in = {
     1'b0                    // [0] OUT1 readback (output-only, no read)
 };
 
-// Cart pin assignments: SNAC vs UART mode
-// bank0[7:4]: SNAC GPIO outputs or UART TX (replicated)
+// Cart pin assignments: SNAC / Analogizer GPIO vs UART mode.
+// The adapter pins must leave UART mode as soon as Analogizer video or a
+// SNAC type is configured. Firmware enables SNAC later, after it has written
+// initial GPIO values, so using only snac_enable leaves a boot-time UART
+// window on the physical adapter pins.
+wire analogizer_snac_configured_core = (analogizer_settings_core[4:0] != 5'd0);
+wire analogizer_cart_preclaim = analogizer_ena_core || analogizer_snac_configured_core;
+wire cart_gpio_mode = snac_enable || analogizer_cart_preclaim;
+
+// bank0[7:4]: SNAC GPIO outputs, Analogizer-safe idle, or UART TX replicated.
+wire snac_bank0_drive = snac_enable &&
+    (snac_pin_dir[5] | snac_pin_dir[4] | snac_pin_dir[3] | snac_pin_dir[2]);
 assign cart_tran_bank0     = snac_enable ?
-    {snac_pin_out[5], snac_pin_out[4], snac_pin_out[3], snac_pin_out[2]} :
-    {uart_tx_serial, uart_tx_serial, uart_tx_serial, uart_tx_serial};
-assign cart_tran_bank0_dir = snac_enable ?
-    (snac_pin_dir[5] | snac_pin_dir[4] | snac_pin_dir[3] | snac_pin_dir[2]) :
-    1'b1;  // UART TX is always output
+    (snac_bank0_drive ? {snac_pin_out[5], snac_pin_out[4], snac_pin_out[3], snac_pin_out[2]} : 4'bZ) :
+    (analogizer_cart_preclaim ? 4'hF :
+     {uart_tx_serial, uart_tx_serial, uart_tx_serial, uart_tx_serial});
+assign cart_tran_bank0_dir = snac_enable ? snac_bank0_drive :
+    1'b1;  // UART TX and Analogizer-safe idle are both driven outputs.
 
 // pin31: SNAC GPIO or UART RX (high-Z input)
 assign cart_tran_pin31     = snac_enable ?
@@ -366,13 +407,15 @@ assign cart_tran_pin31     = snac_enable ?
     1'bZ;
 assign cart_tran_pin31_dir = snac_enable ? snac_pin_dir[7] : 1'b0;
 
-// pin30: always SNAC (not shared with UART)
-assign cart_tran_pin30     = snac_pin_dir[6] ? snac_pin_out[6] : 1'bZ;
+// pin30: always SNAC data when active. The pwroff/reset sideband is also
+// asserted for Analogizer video/SNAC preclaim so the cart port is in GPIO use.
+assign cart_tran_pin30     = (snac_enable && snac_pin_dir[6]) ? snac_pin_out[6] : 1'bZ;
 assign cart_tran_pin30_dir = snac_enable ? snac_pin_dir[6] : 1'b0;
-assign cart_pin30_pwroff_reset = snac_enable ? 1'b1 : 1'b0;
+assign cart_pin30_pwroff_reset = cart_gpio_mode ? 1'b1 : 1'b0;
 
-// UART RX gating: when SNAC active, feed idle-high to UART RX to prevent garbage
-wire uart_rx_serial = snac_enable ? 1'b1 : cart_tran_pin31;
+// UART RX gating: when the cart port is owned by Analogizer/SNAC, feed
+// idle-high to UART RX to prevent adapter traffic from becoming console input.
+wire uart_rx_serial = cart_gpio_mode ? 1'b1 : cart_tran_pin31;
 
 // Analogizer: video output only — SNAC pins now driven by CPU through above mux
 openFPGA_Pocket_Analogizer #(
@@ -383,7 +426,7 @@ openFPGA_Pocket_Analogizer #(
     .i_rst(~reset_n),
     .i_ena(analogizer_ena_core),
     // Video interface
-    .video_clk(clk_vid),
+    .video_clk(clk_core_12288),
     .analog_video_type(analogizer_video_type_core),
     .R(vidout_rgb[23:16]),
     .G(vidout_rgb[15:8]),
@@ -396,13 +439,14 @@ openFPGA_Pocket_Analogizer #(
     .Csync(crt_csync),
     .CHROMA_PHASE_INC(CHROMA_PHASE_INC),
     .PALFLAG(PALFLAG),
-    .ce_pix(1'b1),
+    .ce_pix(analog_ce_pix),
     .scandoubler(1'b1),
     .fx(fx),
     // SNAC cart pin pass-through from CPU GPIO
     .snac_bank0_out({snac_pin_out[5], snac_pin_out[4], snac_pin_out[3], snac_pin_out[2]}),
     .snac_bank0_dir(snac_pin_dir[5] | snac_pin_dir[4] | snac_pin_dir[3] | snac_pin_dir[2]),
     .snac_bank1_76_out({snac_pin_out[1], snac_pin_out[0]}),
+    .snac_enable(snac_enable),
     .snac_pin30_out(snac_pin_out[6]),
     .snac_pin30_dir(snac_pin_dir[6]),
     .snac_pin31_out(snac_pin_out[7]),
@@ -628,15 +672,21 @@ wire        bridge_wr_fifo_overflow_pulse = !cram0_mode_74a &&
                                             bridge_cram0_wr_pulse &&
                                             bridge_wr_fifo_full;
 reg         bridge_wr_fifo_overflow = 1'b0;
+reg [10:0] bridge_wr_fifo_max = 11'd0;
 wire        bridge_wr_fifo_pop;
 wire [21:0] bridge_wr_fifo_addr = bridge_wr_fifo_dout[53:32];
 wire [31:0] bridge_wr_fifo_data = bridge_wr_fifo_dout[31:0];
 
 always @(posedge clk_74a or negedge pll_ram_locked_74a) begin
-    if (!pll_ram_locked_74a)
+    if (!pll_ram_locked_74a) begin
         bridge_wr_fifo_overflow <= 1'b0;
-    else if (bridge_wr_fifo_overflow_pulse)
-        bridge_wr_fifo_overflow <= 1'b1;
+        bridge_wr_fifo_max <= 11'd0;
+    end else begin
+        if (bridge_wr_fifo_overflow_pulse)
+            bridge_wr_fifo_overflow <= 1'b1;
+        if (bridge_wr_fifo_count > bridge_wr_fifo_max)
+            bridge_wr_fifo_max <= bridge_wr_fifo_count;
+    end
 end
 
 sync_fifo #(
@@ -1085,6 +1135,13 @@ always @(posedge clk_74a) begin
         bridge_wr_data[31:24]};
         endcase
     end
+
+    if (analogizer_cpu_wr_event[0])
+        analogizer_settings <= analogizer_cpu_wr_settings_s2;
+    if (analogizer_cpu_wr_event[1])
+        signed_hoff <= analogizer_cpu_wr_hoffset_s2;
+    if (analogizer_cpu_wr_event[2])
+        signed_voff <= analogizer_cpu_wr_voffset_s2;
 end
 
 // Bridge SDRAM write path removed — bridge only touches CRAM0 now
@@ -1115,6 +1172,21 @@ reg [2:0] bridge_active_cpu_sync;
 always @(posedge clk_cpu)
     bridge_active_cpu_sync <= {bridge_active_cpu_sync[1:0], bridge_active_74a};
 wire bridge_wr_idle = ~bridge_active_cpu_sync[2];
+
+// Debug-only occupancy mirror for measuring save/writeback FIFO headroom.
+// Values are used after traffic has quiesced, so a simple two-flop bus mirror
+// is sufficient and keeps the datapath free of extra handshakes.
+reg [10:0] bridge_wr_fifo_count_cpu_s1, bridge_wr_fifo_count_cpu_s2;
+reg [10:0] bridge_wr_fifo_max_cpu_s1, bridge_wr_fifo_max_cpu_s2;
+reg        bridge_wr_fifo_overflow_cpu_s1, bridge_wr_fifo_overflow_cpu_s2;
+always @(posedge clk_cpu) begin
+    bridge_wr_fifo_count_cpu_s1 <= bridge_wr_fifo_count;
+    bridge_wr_fifo_count_cpu_s2 <= bridge_wr_fifo_count_cpu_s1;
+    bridge_wr_fifo_max_cpu_s1 <= bridge_wr_fifo_max;
+    bridge_wr_fifo_max_cpu_s2 <= bridge_wr_fifo_max_cpu_s1;
+    bridge_wr_fifo_overflow_cpu_s1 <= bridge_wr_fifo_overflow;
+    bridge_wr_fifo_overflow_cpu_s2 <= bridge_wr_fifo_overflow_cpu_s1;
+end
 
 // Bridge DMA active tracking
 reg bridge_dma_active;
@@ -1374,46 +1446,38 @@ assign sram_word_wstrb = 4'b0;
     reg             datatable_wren;
     reg     [31:0]  datatable_data;
 
-// Per-slot nonvolatile sizes, updated from three sources:
-//   1. APF datatable writes during automatic nonvolatile load
-//   2. CPU via SAVE_DT_SLOT/SAVE_DT_SIZE registers (sets individual slots)
-//   3. Legacy Chip32 pmpw writes to 0xF0000000/0xF0000010..0x34
-// The cycling FSM continuously writes these to the datatable so CPU-side
-// save-size commits are visible to later APF writeback.
-reg [31:0] save_sizes [0:9];
-reg [31:0] presave_size = 32'h00000000;
-integer si;
-initial for (si = 0; si < 10; si = si + 1) save_sizes[si] = 32'h00000000;
+// Nonvolatile size updates share port A of the APF datatable BRAM.
+// APF automatic-load writes already hit the datatable directly through
+// port B, so only CPU-side SAVE_DT_SIZE commits and legacy Chip32 size
+// writes need to be serialized here.  Keep this event-driven; a mirrored
+// save_sizes[0:9] register table costs a large mux/register bank in ALMs.
+reg        dt_update_pending = 1'b0;
+reg [9:0]  dt_update_addr = 10'd0;
+reg [31:0] dt_update_data = 32'd0;
+reg        legacy_save_bulk_active = 1'b0;
+reg [3:0]  legacy_save_bulk_idx = 4'd0;
+reg [31:0] legacy_save_bulk_size = 32'd0;
 
 localparam [9:0] PRESAVE_SIZE_WORD = 10'd17;
 localparam [9:0] SAVE0_SIZE_WORD   = 10'd19;
-localparam [9:0] SAVE9_SIZE_WORD   = 10'd37;
 localparam [3:0] PRESAVE_DT_SLOT   = 4'hF;
-
-wire [31:0] bridge_wr_data_native = bridge_endian_little ? {
-    bridge_wr_data[7:0],
-    bridge_wr_data[15:8],
-    bridge_wr_data[23:16],
-    bridge_wr_data[31:24]
-} : bridge_wr_data;
 
 wire bridge_datatable_write =
     bridge_wr && (bridge_addr[31:24] == 8'hF8) && (bridge_addr[15:12] == 4'h2);
-wire [9:0] bridge_datatable_word = bridge_addr[11:2];
 
 // Entry 8 is one pre-save nonvolatile slot (SDK Shared Config or Duke
 // Settings). Saves are entries 9..18. Each entry is two datatable words:
 // flags, size. Pre-save size is word 17; save0 is word 19; save9 is word 37.
-wire bridge_presave_size_write =
-    bridge_datatable_write &&
-    (bridge_datatable_word == PRESAVE_SIZE_WORD);
-wire bridge_save_size_write =
-    bridge_datatable_write &&
-    (bridge_datatable_word >= SAVE0_SIZE_WORD) &&
-    (bridge_datatable_word <= SAVE9_SIZE_WORD) &&
-    bridge_datatable_word[0];
-wire [9:0] bridge_save_size_delta = bridge_datatable_word - SAVE0_SIZE_WORD;
-wire [3:0] bridge_save_size_slot = bridge_save_size_delta[4:1];
+wire legacy_save_bulk_write =
+    bridge_wr && (bridge_addr == 32'hF0000000);
+wire legacy_save_size_single_write =
+    bridge_wr &&
+    (bridge_addr[31:8] == 24'hF00000) &&
+    (bridge_addr[7:2] >= 6'd4) &&
+    (bridge_addr[7:2] < 6'd14);
+wire [5:0] legacy_save_size_slot = bridge_addr[7:2] - 6'd4;
+wire [9:0] legacy_save_size_addr =
+    SAVE0_SIZE_WORD + {3'd0, legacy_save_size_slot, 1'b0};
 
 // CPU write: individual slot update via periph slave CDC
 wire [3:0]  cpu_save_dt_slot;
@@ -1445,27 +1509,13 @@ always @(posedge clk_74a) begin
     save_dt_size_sync <= save_dt_size_latch;
 end
 
-// Single driver for nonvolatile sizes: APF, CPU, or legacy Chip32 updates.
-//   APF datatable writes:     capture auto-loaded config/save sizes
-//   Bridge 0xF0000000:        legacy set ALL slots (bulk default)
-//   Bridge 0xF0000010..0x34:  legacy set individual slot
-//   CPU SAVE_DT_SLOT/SIZE:    set individual slot (via CDC; slot F=pre-save)
-always @(posedge clk_74a) begin
-    if (bridge_presave_size_write)
-        presave_size <= bridge_wr_data_native;
-    else if (bridge_save_size_write)
-        save_sizes[bridge_save_size_slot] <= bridge_wr_data_native;
-    else if (bridge_wr && bridge_addr == 32'hF0000000)
-        for (si = 0; si < 10; si = si + 1)
-            save_sizes[si] <= bridge_wr_data;
-    else if (bridge_wr && bridge_addr[31:8] == 24'hF00000
-             && bridge_addr[7:2] >= 6'd4 && bridge_addr[7:2] < 6'd14)
-        save_sizes[bridge_addr[7:2] - 6'd4] <= bridge_wr_data;
-    else if (save_dt_commit_event && save_dt_slot_sync == PRESAVE_DT_SLOT)
-        presave_size <= save_dt_size_sync;
-    else if (save_dt_commit_event && save_dt_slot_sync < 4'd10)
-        save_sizes[save_dt_slot_sync] <= save_dt_size_sync;
-end
+wire save_dt_commit_valid =
+    save_dt_commit_event &&
+    ((save_dt_slot_sync == PRESAVE_DT_SLOT) || (save_dt_slot_sync < 4'd10));
+wire [9:0] save_dt_commit_addr =
+    (save_dt_slot_sync == PRESAVE_DT_SLOT)
+        ? PRESAVE_SIZE_WORD
+        : SAVE0_SIZE_WORD + {5'd0, save_dt_slot_sync, 1'b0};
 
 // Datatable slot size query: CDC from CPU (clk_ram_controller) → clk_74a → back
 wire [9:0]  cpu_dt_query_addr;
@@ -1505,18 +1555,17 @@ end
 assign cpu_dt_query_data = dt_result_sync2;
 assign cpu_dt_query_valid = (dt_rtoggle_sync2 == cpu_dt_query_toggle);
 
-// Cycling FSM: continuously write per-slot sizes to datatable,
-// pausing briefly for CPU datatable reads.
-reg [3:0] save_dt_idx;
+// Datatable port-A arbiter: CPU reads have priority, then APF port-B writes
+// hold this side idle, then queued CPU/legacy size updates are written.
 always @(posedge clk_74a) begin
+    datatable_wren <= 0;
+
     if (dt_req_rise) begin
-        // CPU requested a datatable read — pause cycling, set read address
+        // CPU requested a datatable read.
         dt_reading <= 1;
         dt_read_cnt <= 0;
-        datatable_wren <= 0;
         datatable_addr <= dt_addr_sync;
     end else if (dt_reading) begin
-        datatable_wren <= 0;
         dt_read_cnt <= dt_read_cnt + 1;
         if (dt_read_cnt == 2'd1) begin
             // BRAM output valid after 1 cycle — capture result + toggle
@@ -1525,21 +1574,36 @@ always @(posedge clk_74a) begin
             dt_reading <= 0;
         end
     end else if (bridge_datatable_write) begin
-        // Avoid racing APF's bridge-port datatable writes at startup.
-        datatable_wren <= 0;
-    end else begin
-        // Normal cycling: write the pre-save config/settings size plus
-        // save sizes. Entry 8 size is word 17; save0's size field is word 19.
+        // Avoid racing APF's bridge-port datatable writes at startup/load.
+    end else if (dt_update_pending) begin
         datatable_wren <= 1;
-        if (save_dt_idx == 4'd0) begin
-            datatable_addr <= PRESAVE_SIZE_WORD;
-            datatable_data <= presave_size;
+        datatable_addr <= dt_update_addr;
+        datatable_data <= dt_update_data;
+        dt_update_pending <= 0;
+    end else if (legacy_save_bulk_active) begin
+        datatable_wren <= 1;
+        datatable_addr <= SAVE0_SIZE_WORD + {5'd0, legacy_save_bulk_idx, 1'b0};
+        datatable_data <= legacy_save_bulk_size;
+        if (legacy_save_bulk_idx == 4'd9) begin
+            legacy_save_bulk_active <= 0;
+            legacy_save_bulk_idx <= 4'd0;
         end else begin
-            datatable_addr <= SAVE0_SIZE_WORD +
-                              ({6'd0, save_dt_idx[3:0]} - 10'd1) * 10'd2;
-            datatable_data <= save_sizes[save_dt_idx - 4'd1];
+            legacy_save_bulk_idx <= legacy_save_bulk_idx + 4'd1;
         end
-        save_dt_idx <= (save_dt_idx == 4'd10) ? 4'd0 : save_dt_idx + 4'd1;
+    end
+
+    if (save_dt_commit_valid) begin
+        dt_update_pending <= 1;
+        dt_update_addr <= save_dt_commit_addr;
+        dt_update_data <= save_dt_size_sync;
+    end else if (legacy_save_bulk_write) begin
+        legacy_save_bulk_active <= 1;
+        legacy_save_bulk_idx <= 4'd0;
+        legacy_save_bulk_size <= bridge_wr_data;
+    end else if (legacy_save_size_single_write) begin
+        dt_update_pending <= 1;
+        dt_update_addr <= legacy_save_size_addr;
+        dt_update_data <= bridge_wr_data;
     end
 end
 
@@ -1818,11 +1882,14 @@ assign video_hs = vidout_hs;
         .cont3_key(cont3_key),
         .cont3_joy(cont3_joy),
         .cont3_trig(cont3_trig),
-        .cont4_key(cont4_key),
-        .cont4_joy(cont4_joy),
-        .cont4_trig(cont4_trig),
-        .bridge_wr_idle(bridge_wr_idle),
-        .target_dataslot_ack(target_dataslot_ack),
+	    .cont4_key(cont4_key),
+	    .cont4_joy(cont4_joy),
+	    .cont4_trig(cont4_trig),
+	    .bridge_wr_idle(bridge_wr_idle),
+	    .bridge_wr_fifo_count_dbg(bridge_wr_fifo_count_cpu_s2),
+	    .bridge_wr_fifo_max_dbg(bridge_wr_fifo_max_cpu_s2),
+	    .bridge_wr_fifo_overflow_dbg(bridge_wr_fifo_overflow_cpu_s2),
+	    .target_dataslot_ack(target_dataslot_ack),
         .target_dataslot_done(target_dataslot_done_safe),
         .target_dataslot_err(target_dataslot_err),
         // Terminal moved to software — no hardware VRAM
@@ -1887,6 +1954,13 @@ assign video_hs = vidout_hs;
         .save_dt_size(cpu_save_dt_size),
         .save_dt_commit(cpu_save_dt_commit),
         .app_id(app_id_sync2),
+        .analogizer_settings(analogizer_settings_cpu),
+        .analogizer_hoffset(signed_hoff_cpu),
+        .analogizer_voffset(signed_voff_cpu),
+        .analogizer_cpu_wr_toggle(analogizer_cpu_wr_toggle),
+        .analogizer_cpu_wr_settings(analogizer_cpu_wr_settings),
+        .analogizer_cpu_wr_hoffset(analogizer_cpu_wr_hoffset),
+        .analogizer_cpu_wr_voffset(analogizer_cpu_wr_voffset),
         // Shutdown handshake
         .shutdown_pending(shutdown_pending_cpu),
         .shutdown_ack(shutdown_ack_cpu),
@@ -1900,7 +1974,7 @@ assign video_hs = vidout_hs;
         .dt_query_data(cpu_dt_query_data),
         .dt_query_valid(cpu_dt_query_valid),
         .vrr_v_total(vrr_v_total_cpu),
-        .analogizer_enabled(analogizer_ena_cpu),
+        .analogizer_enabled(adapter_fixed_rate_cpu),
         // SNAC shifter / GPIO
         .snac_pin_out(snac_pin_out),
         .snac_pin_dir(snac_pin_dir),
@@ -2141,9 +2215,9 @@ assign video_hs = vidout_hs;
     reg crt_hblank, crt_vblank;
 
     // VRR: dynamic V_TOTAL, latched at frame boundary from CPU register.
-    // Pocket scaler accepts 42-60 Hz → V_TOTAL range [262, 375].
-    // Video clock: 12.5738 MHz / 780 H_TOTAL = 16120 lines/sec.
-    // 16120/262 = 61.5 Hz, 16120/375 = 43.0 Hz.
+    // Pocket scaler accepts roughly 42-60 Hz. With the fixed 12.288 MHz
+    // scanout clock and 780 H_TOTAL, V_TOTAL=262 is the NTSC/SC ~60 Hz
+    // family and Analogizer PAL mode locks to V_TOTAL=315 (~50 Hz).
     reg [9:0] crt_v_total;
     wire [9:0] vrr_vt_safe = (vrr_vt_sync2 < 10'd262) ? 10'd262 :
                               (vrr_vt_sync2 > 10'd375) ? 10'd375 :
@@ -2555,9 +2629,10 @@ assign gpu_swap_idx   = 2'b0;
 ///////////////////////////////////////////////
 
 
-    wire    clk_core_12288;         // 12.288 MHz — audio (48kHz-friendly)
+    wire    clk_core_12288;         // 12.288 MHz — audio + fixed video scanout
+    wire    clk_core_12288_90deg;   // 12.288 MHz 90° — Pocket video DDR
     wire    clk_core_49152;
-    wire    clk_vid;                // 12.5738 MHz — video (~61.5 Hz at V_TOTAL=262)
+    wire    clk_vid;                // 12.288 MHz — ~60 Hz at V_TOTAL=262
     wire    clk_vid_90deg;
     wire    clk_cpu;
     wire    clk_ram_controller;
@@ -2569,16 +2644,19 @@ assign gpu_swap_idx   = 2'b0;
     wire    pll_core_locked_s;
 synch_3 s01(pll_locked_all, pll_core_locked_s, clk_74a);
 
+assign clk_vid = clk_core_12288;
+assign clk_vid_90deg = clk_core_12288_90deg;
+
 mf_pllbase mp1 (
     .refclk         ( clk_74a ),
     .rst            ( 0 ),
 
     .outclk_0       ( clk_core_12288 ),
-    .outclk_1       ( ),  // 12.288 MHz 90° — unused (video moved to clk_vid)
+    .outclk_1       ( clk_core_12288_90deg ),
 
     .outclk_2       ( clk_core_49152),
-    .outclk_3       ( clk_vid ),
-    .outclk_4       ( clk_vid_90deg ),
+    .outclk_3       ( ),
+    .outclk_4       ( ),
 
     .locked         ( pll_core_locked )
 );

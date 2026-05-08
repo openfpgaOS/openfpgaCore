@@ -11,6 +11,10 @@
 #            the `rpt` prefetcher speculated past PMA boundaries and
 #            surfaced bus faults to commit; disabling also frees ~N ALMs
 #            of prefetcher logic and reduces placement pressure.)
+#   FPU    : shared add/FMA pipeline starts pre-shift one stage later so
+#            ctrl5 FMA lane selection is captured before the exponent and
+#            mantissa compare cone. The packer writeback stage is shortened
+#            because subnormal recoding is disabled in this core.
 #   Branch : BTB 256 sets + GShare 1 KB + RAS, relaxed branch pipeline
 #            (jumpAt=1 — gives the fitter an extra cycle on BTB-hit paths)
 #   FPU    : single-precision (F extension), subnormals flushed/ignored to
@@ -70,6 +74,9 @@ sbt "Test/runMain vexiiriscv.Generate \
       --with-gshare --gshare-bytes=1024 --with-ras \
       --allow-bypass-from=0 \
       --fpu-ignore-subnormal \
+      --fpu-wb-at=1 \
+      --fpu-add-preshift-stage=1 --fpu-add-shifter-stage=2 \
+      --fpu-add-math-stage=3 --fpu-add-norm-stage=4 --fpu-add-pack-at=5 \
       --relaxed-src --relaxed-branch --relaxed-div \
       --reset-vector=0 \
       --region base=0,size=8000,main=0,exe=1 \

@@ -762,6 +762,39 @@ typedef struct {
 } of_analogizer_state_t;
 ```
 
+#### Shared `analogizer.cfg`
+
+The OS loads `analogizer.cfg` by filename after the APF filesystem is
+registered and before the selected app starts. The file is plain text:
+
+```ini
+# openfpgaOS Analogizer configuration
+# Lines starting with # or ; are comments. Inline comments are allowed.
+
+# enabled: true/false, on/off, yes/no, or 1/0.
+enabled=true
+
+# video: rgbs, rgsb, ypbpr, yc_ntsc, yc_pal, scart,
+#        sc_0pct, sc_50pct, or sc_hq2x.
+# Add _off to disable the Pocket screen while using Analogizer output,
+# for example yc_ntsc_off or rgbs_off.
+video=yc_ntsc
+
+# snac: none, db15, nes, snes, pce_2btn, pce_6btn,
+#       pce_multitap, psx, psx_fast, psx_analog,
+#       or psx_analog_fast.
+snac=snes
+
+# assignment: snac_p1, snac_p2, dual, or swap.
+assignment=snac_p1
+
+# h_offset range: -32..31.
+h_offset=0
+
+# v_offset range: -16..15.
+v_offset=0
+```
+
 ---
 
 ### System

@@ -96,6 +96,7 @@ module openFPGA_Pocket_Analogizer #(parameter MASTER_CLK_FREQ=50_000_000, parame
 	input wire [7:4] snac_bank0_out,     // CPU-driven output values for bank0[7:4]
 	input wire       snac_bank0_dir,     // 1=output, 0=input (whole nibble)
 	input wire [7:6] snac_bank1_76_out,  // CPU-driven output values for bank1[7:6]
+	input wire       snac_enable,        // keep OUT1/OUT2 alive even when analog video is off
 	input wire       snac_pin30_out,
 	input wire       snac_pin30_dir,
 	input wire       snac_pin31_out,
@@ -124,13 +125,19 @@ module openFPGA_Pocket_Analogizer #(parameter MASTER_CLK_FREQ=50_000_000, parame
 	assign o_stb  = 1'b0;
 
 	//Choose type of analog video type of signal
-	reg [5:0] Rout, Gout, Bout /* synthesis preserve */;
-	reg HsyncOut, VsyncOut, BLANKnOut /* synthesis preserve */;
-	wire [7:0] Yout, PrOut, PbOut /* synthesis keep */;
-	wire [7:0] R_Sd, G_Sd, B_Sd /* synthesis keep */;
-	wire Hsync_Sd, Vsync_Sd /* synthesis keep */;
-	wire Hblank_Sd, Vblank_Sd /* synthesis keep */;
-	wire BLANKn_SD = ~(Hblank_Sd || Vblank_Sd) /* synthesis keep */;
+		reg [5:0] Rout, Gout, Bout;
+		reg HsyncOut, VsyncOut, BLANKnOut;
+		wire [7:0] Yout, PrOut, PbOut;
+		wire [5:0] R_Sd, G_Sd, B_Sd;
+		wire Hsync_Sd, Vsync_Sd;
+		wire Hblank_Sd, Vblank_Sd;
+		wire BLANKn_SD = ~(Hblank_Sd || Vblank_Sd);
+		wire scandoubler_mode = (analog_video_type == 4'h5) ||
+		                         (analog_video_type == 4'h6) ||
+		                         (analog_video_type == 4'h7) ||
+		                         (analog_video_type == 4'hD) ||
+		                         (analog_video_type == 4'hE) ||
+		                         (analog_video_type == 4'hF);
 
 	always @(*) begin
 		case(analog_video_type)
@@ -167,12 +174,12 @@ module openFPGA_Pocket_Analogizer #(parameter MASTER_CLK_FREQ=50_000_000, parame
 				BLANKnOut = 1'b1; //ADV7123 needs this
 			end
 			4'h5, 4'h6, 4'h7, 4'hD, 4'hE, 4'hF: begin //Scandoubler modes
-				Rout = vga_data_sl[23:18]; //R_Sd[7:2];
-				Gout = vga_data_sl[15:10]; //G_Sd[7:2];
-				Bout = vga_data_sl[7:2]; //B_Sd[7:2];
-				HsyncOut = vga_hs_sl; //Hsync_Sd;
-				VsyncOut = vga_vs_sl; //Vsync_Sd;
-				BLANKnOut = 1'b1;
+				Rout = R_Sd;
+				Gout = G_Sd;
+				Bout = B_Sd;
+				HsyncOut = Hsync_Sd;
+				VsyncOut = Vsync_Sd;
+				BLANKnOut = BLANKn_SD;
 			end
 			default: begin
 				Rout = 6'h0;
@@ -226,9 +233,9 @@ module openFPGA_Pocket_Analogizer #(parameter MASTER_CLK_FREQ=50_000_000, parame
 		.de_o(YPbPr_blank)
 	);
 
-	wire [23:0] yc_o /* synthesis keep */;
-	//wire yc_hs, yc_vs, 
-	wire yc_cs /* synthesis keep */;
+		wire [23:0] yc_o;
+		//wire yc_hs, yc_vs,
+		wire yc_cs;
 	yc_out yc_out
 	(
 		.clk(i_clk),
@@ -244,69 +251,34 @@ module openFPGA_Pocket_Analogizer #(parameter MASTER_CLK_FREQ=50_000_000, parame
 		.csync_o(yc_cs)
 	);
 
-	wire ce_pix_Sd /* synthesis keep */;
-	scandoubler_2 #(.LENGTH(LINE_LENGTH), .HALF_DEPTH(0), .ENABLE_HQ2X(0)) sd
-	(
-		.clk_vid(i_clk),
-		.hq2x(fx[2]),
-
-		.ce_pix(ce_pix),
-		.hs_in(Hsync),
-		.vs_in(Vsync),
+	wire sd_pixel_ena;
+	scandoubler #(
+		.HCNT_WIDTH(10),
+		.COLOR_DEPTH(6),
+		.OUT_COLOR_DEPTH(6)
+	) sc_video (
+		.clk_sys(i_clk),
+		.bypass(1'b0),
+		.ce_divider(3'd3),
+		.pixel_ena(sd_pixel_ena),
+		.scanlines(fx[1:0]),
 		.hb_in(Hblank),
 		.vb_in(Vblank),
-		.r_in({R[7:0]&{8{BLANKn}}}),
-		.g_in({G[7:0]&{8{BLANKn}}}),
-		.b_in({B[7:0]&{8{BLANKn}}}),
-
-		.ce_pix_out(ce_pix_Sd),
-		.hs_out(Hsync_Sd),
-		.vs_out(Vsync_Sd),
+		.hs_in(Hsync),
+		.vs_in(Vsync),
+		.r_in(R[7:2] & {6{BLANKn}}),
+		.g_in(G[7:2] & {6{BLANKn}}),
+		.b_in(B[7:2] & {6{BLANKn}}),
 		.hb_out(Hblank_Sd),
 		.vb_out(Vblank_Sd),
+		.hs_out(Hsync_Sd),
+		.vs_out(Vsync_Sd),
 		.r_out(R_Sd),
 		.g_out(G_Sd),
 		.b_out(B_Sd)
 	);
 
-	reg Hsync_SL, Vsync_SL, Hblank_SL, Vblank_SL /* synthesis preserve */;
-	reg [7:0] R_SL, G_SL, B_SL /* synthesis preserve */;
-	reg CE_PIX_SL, DE_SL /* synthesis preserve */;
-
-	always @(posedge video_clk) begin
-		Hsync_SL <= (scandoubler) ? Hsync_Sd : Hsync;
-		Vsync_SL <= (scandoubler) ? Vsync_Sd : Vsync;
-		Hblank_SL <= (scandoubler) ? Hblank_Sd : Hblank;
-		Vblank_SL <= (scandoubler) ? Vblank_Sd : Vblank;
-		R_SL <= (scandoubler) ? R_Sd    : {R[7:0]&{8{BLANKn}}};
-		G_SL <= (scandoubler) ? G_Sd    : {G[7:0]&{8{BLANKn}}};
-		B_SL <= (scandoubler) ? B_Sd    : {B[7:0]&{8{BLANKn}}};
-		CE_PIX_SL <= (scandoubler) ? ce_pix_Sd : ce_pix;
-		DE_SL <= BLANKn;
-	end
-
-
-wire [23:0] vga_data_sl /* synthesis keep */;
-wire        vga_vs_sl, vga_hs_sl /* synthesis keep */;
-scanlines_analogizer #(0) VGA_scanlines
-(
-	.clk(video_clk),
-
-	.scanlines(fx[1:0]),
-	//.din(de_emu ? {R_SL, G_SL,B_SL} : 24'd0),
-	.din({R_SL, G_SL,B_SL}),
-	.hs_in(Hsync_SL),
-	.vs_in(Vsync_SL),
-	.de_in(DE_SL),
-	.ce_in(CE_PIX_SL),
-
-	.dout(vga_data_sl),
-	.hs_out(vga_hs_sl),
-	.vs_out(vga_vs_sl),
-	.de_out(),
-	.ce_out()
-);
-
+	wire cart_video_clk = scandoubler_mode ? sd_pixel_ena : video_clk;
 
 	// Tri-state buffers for video output cart pins (bank1-3)
 	// Bank0, pin30, pin31 now driven by core_top SNAC/UART mux.
@@ -316,7 +288,13 @@ scanlines_analogizer #(0) VGA_scanlines
 	//BK2 — Video: B[0], /BLANK, G[5:0]
 	assign cart_tran_bank2         = i_rst | ~i_ena ? 8'hzz : {Bout[0],BLANKnOut,Gout[5:0]};
 	assign cart_tran_bank2_dir     = i_rst | ~i_ena ? 1'b0  : 1'b1;
-	//BK1 — Video: [5:0]=B[5:1]+clk, [7:6]=SNAC OUT1/OUT2
-	assign cart_tran_bank1         = i_rst | ~i_ena ? 8'hzz : {CART_BK1_OUT_P76,video_clk,Bout[5:1]};
-	assign cart_tran_bank1_dir     = i_rst | ~i_ena ? 1'b0  : 1'b1;
+	//BK1 — Video: [5:0]=B[5:1]+clk, [7:6]=SNAC OUT1/OUT2.
+	// The Pocket exposes one direction control for all of bank1.  SNAC
+	// needs OUT1/OUT2 even when analog video is disabled, so drive safe
+	// zeros on the video bits in SNAC-only mode.
+	wire bank1_drive = i_ena | snac_enable;
+	assign cart_tran_bank1         = i_rst | ~bank1_drive ? 8'hzz :
+	                                 {snac_enable ? CART_BK1_OUT_P76 : 2'b00,
+	                                  i_ena ? {cart_video_clk,Bout[5:1]} : 6'b0};
+	assign cart_tran_bank1_dir     = i_rst | ~bank1_drive ? 1'b0  : 1'b1;
 endmodule

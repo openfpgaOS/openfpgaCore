@@ -130,19 +130,14 @@ static int io_cache_evict(void) {
     return best;
 }
 
-/* Get pointer to entry N's CRAM1 data.
- * Uses the CACHED alias — after io_cache_fill invalidates the D-cache,
- * the first read causes a cache miss and fetches fresh DMA data from CRAM1.
- * Subsequent reads within the same block hit the D-cache (fast).
- * NOTE: the "uncached" 0x39 alias may still be cached if the PMA is not
- * configured to bypass — using the cached alias with explicit invalidation
- * is the only safe approach. */
+/* Get pointer to entry N's SDRAM-backed cached data. */
 static inline const uint8_t *io_cache_data(int entry) {
     return (const uint8_t *)(IO_CACHE_CACHED + entry * IO_CACHE_BLOCK_SIZE);
 }
 
 /* Fill a cache entry via of_file_read, which bounces the bridge DMA
- * through CRAM0 scratch and memcpys into the caller's SDRAM buffer.
+ * through CRAM0 scratch in hardware-sized chunks, then memcpys into the
+ * caller's SDRAM buffer.
  *
  * v2 arch: the direct bridge→SDRAM fabric path was retired with CRAM1,
  * so the bridge can only write to CRAM0.  Using of_file_read lets the
@@ -375,6 +370,16 @@ const char *file_slot_get(int idx, uint32_t *slot_id_out) {
     if (slot_id_out)
         *slot_id_out = file_slots[idx].slot_id;
     return file_slots[idx].filename;
+}
+
+int file_slot_find(const char *filename, uint32_t *slot_id_out) {
+    int slot = file_slot_lookup(filename);
+    if (slot < 0)
+        return -1;
+
+    if (slot_id_out)
+        *slot_id_out = (uint32_t)slot;
+    return 0;
 }
 
 /* ======================================================================
@@ -652,10 +657,10 @@ static long sys_read(long fd, long buf, long count) {
         to_read = f->size - f->offset;
     }
 
-    /* I/O cache: serve reads from CRAM1-backed LRU cache.
+    /* I/O cache: serve reads from an SDRAM-backed LRU cache.
      * Each cache block is 32KB, keyed by (slot_id, aligned_offset).
-     * Bridge DMA goes to CRAM1 (PSRAM bus) — zero SDRAM contention.
-     * CPU reads from CRAM1 cached alias through D-cache. */
+     * The Pocket bridge backend internally chunks APF reads through
+     * CRAM0 scratch before copying into this cache. */
 
     uint8_t *dst = (uint8_t *)buf;
     uint32_t done = 0;
@@ -693,9 +698,8 @@ static long sys_read(long fd, long buf, long count) {
         if (n > avail) n = avail;
         if (n == 0) break;
 
-        /* The bounce buffer is now in SDRAM (bridge_to_sdram fabric
-         * path); reads no longer transit CRAM1 and the mixer doesn't
-         * compete for this bus, so the inhibit bracket is gone. */
+        /* Cache data is already in SDRAM; the bridge backend handled
+         * CRAM0 scratch ownership and chunking when filling the entry. */
         memcpy(dst + done, io_cache_data(entry) + buf_off, n);
         f->offset += n;
         done += n;

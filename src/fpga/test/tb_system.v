@@ -531,6 +531,9 @@ axi_periph_slave periph (
     .target_dataslot_done(target_dataslot_done),
     .target_dataslot_err (target_dataslot_err),
     .bridge_wr_idle      (bridge_wr_idle),
+    .bridge_wr_fifo_count_dbg(11'd0),
+    .bridge_wr_fifo_max_dbg  (11'd0),
+    .bridge_wr_fifo_overflow_dbg(1'b0),
 
     .color_mode     (),
     .fb_display_addr(),
@@ -570,6 +573,13 @@ axi_periph_slave periph (
     .uart_rx_byte  (uart_rx_byte),
 
     .app_id         (app_id),
+    .analogizer_settings(32'b0),
+    .analogizer_hoffset (32'b0),
+    .analogizer_voffset (32'b0),
+    .analogizer_cpu_wr_toggle(),
+    .analogizer_cpu_wr_settings(),
+    .analogizer_cpu_wr_hoffset(),
+    .analogizer_cpu_wr_voffset(),
     .shutdown_pending(shutdown_pending),
     .shutdown_ack   (),
 

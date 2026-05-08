@@ -54,6 +54,7 @@ static void reset_sequence() {
     tb->cont4_key_in    = 0;
     tb->cont4_joy_in    = 0;
     tb->cont4_trig_in   = 0;
+    tb->snac_pin_in_in  = 0;
     for (int i = 0; i < 10; i++) tick();
     tb->reset_n = 1;
     for (int i = 0; i < 10; i++) tick();
@@ -700,6 +701,41 @@ static void test_save_dt_commit_toggle() {
     check_eq("save-dt-toggle-2", (tb->dbg_save_dt_commit ? 1u : 0u) ^ c1, 1u);
 }
 
+static uint32_t mmio_read32(uint32_t addr);
+
+static void test_analogizer_sysregs() {
+    printf("test_analogizer_sysregs:\n");
+
+    const uint32_t ANALOGIZER_SETTINGS = 0x40000080u;
+    const uint32_t ANALOGIZER_H_OFFSET = 0x40000084u;
+    const uint32_t ANALOGIZER_V_OFFSET = 0x40000088u;
+
+    check_eq("analogizer-settings-read", mmio_read32(ANALOGIZER_SETTINGS), 0x00008C43u);
+    check_eq("analogizer-hoffset-read",  mmio_read32(ANALOGIZER_H_OFFSET), 0xFFFFFFF9u);
+    check_eq("analogizer-voffset-read",  mmio_read32(ANALOGIZER_V_OFFSET), 0x00000005u);
+
+    uint32_t t0 = tb->dbg_analogizer_wr_toggle;
+    axi_write_single(ANALOGIZER_SETTINGS, 0x0000B913u);
+    for (int i = 0; i < 4; i++) tick();
+    check_eq("analogizer-settings-wr-toggle",
+             (tb->dbg_analogizer_wr_toggle ^ t0) & 1u, 1u);
+    check_eq("analogizer-settings-wr-data", tb->dbg_analogizer_wr_settings, 0x0000B913u);
+
+    uint32_t t1 = tb->dbg_analogizer_wr_toggle;
+    axi_write_single(ANALOGIZER_H_OFFSET, 0xFFFFFFE0u);
+    for (int i = 0; i < 4; i++) tick();
+    check_eq("analogizer-hoffset-wr-toggle",
+             ((tb->dbg_analogizer_wr_toggle ^ t1) >> 1) & 1u, 1u);
+    check_eq("analogizer-hoffset-wr-data", tb->dbg_analogizer_wr_hoffset, 0xFFFFFFE0u);
+
+    uint32_t t2 = tb->dbg_analogizer_wr_toggle;
+    axi_write_single(ANALOGIZER_V_OFFSET, 0x0000000Fu);
+    for (int i = 0; i < 4; i++) tick();
+    check_eq("analogizer-voffset-wr-toggle",
+             ((tb->dbg_analogizer_wr_toggle ^ t2) >> 2) & 1u, 1u);
+    check_eq("analogizer-voffset-wr-data", tb->dbg_analogizer_wr_voffset, 0x0000000Fu);
+}
+
 static uint32_t mmio_read32(uint32_t addr) {
     std::vector<uint32_t> r;
     if (!axi_read_burst(addr, 0, r)) {
@@ -708,6 +744,47 @@ static uint32_t mmio_read32(uint32_t addr) {
         return 0xFFFFFFFFu;
     }
     return r[0];
+}
+
+static void test_snac_shifter_regs() {
+    printf("test_snac_shifter_regs:\n");
+
+    const uint32_t SNAC_CTRL = 0x400000A0u;
+    const uint32_t SNAC_DIV  = 0x400000A4u;
+    const uint32_t SNAC_DATA = 0x400000A8u;
+    const uint32_t SNAC_GPIO = 0x400000ACu;
+
+    const uint32_t START  = 1u << 0;
+    const uint32_t LATCH  = 1u << 6;
+    const uint32_t ENABLE = 1u << 7;
+    const uint32_t MODE_B = 1u << 8;
+    const uint32_t BITS8  = 7u << 1;
+
+    axi_write_single(SNAC_DIV, 3u);
+
+    // Config A samples bank0[4] / SNAC pin bit2 and returns the received
+    // bits left-aligned, matching the firmware driver's rx >> (32-bits).
+    tb->snac_pin_in_in = 1u << 2;
+    axi_write_single(SNAC_GPIO, 0x0300u);
+    axi_write_single(SNAC_DATA, 0);
+    axi_write_single(SNAC_CTRL, ENABLE | LATCH | BITS8 | START);
+    for (int i = 0; i < 120; i++) tick();
+    check_eq("snac-cfgA-rx-left-aligned", mmio_read32(SNAC_DATA), 0xFF000000u);
+
+    // Config B / PSX must keep bank0 as input and drive CLK on pin30
+    // (bit6) plus CMD on pin31 (bit7).  Driving CLK on bank0[4] would
+    // make DAT on bank0[7] unreadable because bank0 has one direction bit.
+    tb->snac_pin_in_in = 1u << 5;
+    axi_write_single(SNAC_GPIO, 0xC300u | 0xC3u);
+    axi_write_single(SNAC_DATA, 0xA5000000u);
+    axi_write_single(SNAC_CTRL, ENABLE | MODE_B | BITS8 | START);
+    for (int i = 0; i < 4; i++) tick();
+    check_eq("snac-cfgB-enable", tb->dbg_snac_enable, 1u);
+    check_eq("snac-cfgB-bank0-input", tb->dbg_snac_pin_dir & 0x3Cu, 0u);
+    check_eq("snac-cfgB-clk-pin30-dir", (tb->dbg_snac_pin_dir >> 6) & 1u, 1u);
+    check_eq("snac-cfgB-cmd-pin31-dir", (tb->dbg_snac_pin_dir >> 7) & 1u, 1u);
+    for (int i = 0; i < 140; i++) tick();
+    check_eq("snac-cfgB-rx-left-aligned", mmio_read32(SNAC_DATA), 0xFF000000u);
 }
 
 static void test_input_hub(void) {
@@ -887,6 +964,8 @@ int main(int argc, char **argv) {
     test_burst_with_backpressure();
     test_sysreg_polling();
     test_save_dt_commit_toggle();
+    test_analogizer_sysregs();
+    test_snac_shifter_regs();
     test_input_hub();
     test_mixed_bram_periph();
 

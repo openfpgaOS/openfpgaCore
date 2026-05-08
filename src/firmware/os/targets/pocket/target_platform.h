@@ -40,7 +40,11 @@
 #define OF_TARGET_FB_STRIDE            320u
 #define OF_TARGET_TERM_FB_BASE         0x50300000u
 
-#define OF_TARGET_DMA_CHUNK_SIZE       (512u * 1024u)
+/* APF data-slot reads into CRAM0 are absorbed by a 1024-word bridge FIFO
+ * before the async PSRAM controller drains them.  Keep one file operation
+ * within that hardware buffer so a bursty SD/APF transfer cannot overrun it
+ * and leave app/OS loads with missing words. */
+#define OF_TARGET_DMA_CHUNK_SIZE       (4u * 1024u)
 
 #define OF_TARGET_INTERACT_BASE        0x103FE000u
 #define OF_TARGET_INTERACT_UNCACHED    0x503FE000u

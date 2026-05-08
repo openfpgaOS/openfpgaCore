@@ -56,8 +56,8 @@ static void reset() {
     tb->reset_n  = 0;
     tb->reg_wr   = 0;
     tb->bd_we    = 0;
-    /* No slave in this bench — leave swap-pending tied 0 so CMD_FLIP
-     * never stalls (matches the existing drain-test expectations). */
+/* No display slave in this bench by default; individual CMD_FLIP tests
+ * drive swap-pending when they need to exercise backpressure. */
     tb->slave_swap_pending = 0;
     for (int i = 0; i < 20; i++) tick();
     tb->reset_n = 1;
@@ -569,19 +569,14 @@ static void test_cmd_flip_drain_and_pulse(void) {
 }
 
 // =====================================================================
-// Test: CMD_FLIP — slave_swap_pending does NOT gate the swap pulse.
+// Test: CMD_FLIP — slave_swap_pending gates the swap pulse.
 //
-// CMD_FLIP gates ONLY on m_wr_inflight==0 (matching CMD_FENCE).  The
-// slave's gpu_swap_req side-port is last-wins on fb_ready_idx, so
-// multiple back-to-back gpu_swap_req pulses just queue the latest
-// frame.  The kernel-side CR (cr-acquire-next-vsync-wait) handles
-// vsync serialization in of_video_acquire_next via FB_SWAP_CTRL & 1.
-//
-// Sequence: hold slave_swap_pending=1 throughout the test and assert
-// the pulse fires immediately once m_wr_inflight drains.
+// The display slave has one pending swap slot.  Holding
+// slave_swap_pending=1 must stall CMD_FLIP after m_wr drains; clearing it
+// must allow exactly one pulse and publish the fence on that same cycle.
 // =====================================================================
-static void test_cmd_flip_slave_pending_ignored(void) {
-    printf("TEST: CMD_FLIP — slave_swap_pending does NOT gate pulse\n");
+static void test_cmd_flip_slave_pending_gates(void) {
+    printf("TEST: CMD_FLIP — slave_swap_pending gates pulse\n");
 
     gpu_init();
 
@@ -602,8 +597,21 @@ static void test_cmd_flip_slave_pending_ignored(void) {
     int swap_pulse_count = 0;
     int swap_pulse_cycle = -1;
     uint32_t swap_pulse_idx = 0xFF;
+    const int HELD_CYCLES = 80;
+    for (int t = 0; t < HELD_CYCLES; t++) {
+        tb->eval();
+        if (tb->gpu_swap_req) {
+            swap_pulse_count++;
+        }
+        tick();
+    }
+
+    check("flip-pending-holds-pulse", swap_pulse_count, 0);
+    check("flip-pending-holds-fence", tb->fence_reached == FLIP_TOK ? 1 : 0, 0);
+
+    tb->slave_swap_pending = 0;
     int fence_first_cycle = -1;
-    const int MAX_CYCLES = 200;
+    const int MAX_CYCLES = 80;
     for (int t = 0; t < MAX_CYCLES; t++) {
         tb->eval();
         if (tb->gpu_swap_req) {
@@ -613,28 +621,24 @@ static void test_cmd_flip_slave_pending_ignored(void) {
             }
             swap_pulse_count++;
         }
-        if (fence_first_cycle < 0 && tb->fence_reached == FLIP_TOK) {
+        if (fence_first_cycle < 0 && tb->fence_reached == FLIP_TOK)
             fence_first_cycle = t;
-        }
-        if (swap_pulse_count > 0 && fence_first_cycle >= 0 && t > swap_pulse_cycle + 10) {
+        if (swap_pulse_count > 0 && fence_first_cycle >= 0)
             break;
-        }
         tick();
     }
 
-    tb->slave_swap_pending = 0;
-
     if (swap_pulse_count == 0) {
-        printf("  FAIL gpu_swap_req never pulsed (gate not removed?)\n");
+        printf("  FAIL gpu_swap_req never pulsed after pending cleared\n");
         fail_count++;
     } else {
-        check("flip-pulse-fires-regardless-of-slave-pending", swap_pulse_count, 1);
-        check("flip-idx-published",                            swap_pulse_idx,   FLIP_IDX);
+        check("flip-pulse-after-pending-clear", swap_pulse_count, 1);
+        check("flip-idx-published",             swap_pulse_idx,   FLIP_IDX);
         if (fence_first_cycle < 0) {
             printf("  FAIL fence never advanced\n");
             fail_count++;
         } else {
-            printf("  OK  pulse@%d fence@%d (slave_swap_pending=1 throughout)\n",
+            printf("  OK  pulse@%d fence@%d after pending clear\n",
                    swap_pulse_cycle, fence_first_cycle);
             pass_count++;
         }
@@ -1771,6 +1775,36 @@ static void test_spans_batch_dma() {
     }
     /* Row 1 should still be zero — DMA must not have leaked spans. */
     check_byte("dma_row1_clear_px0", 320, 0x00);
+}
+
+static void test_dma_busy_status_includes_global_busy() {
+    printf("TEST: GPU_STATUS busy includes doorbell DMA\n");
+
+    gpu_init();
+
+    const uint32_t DMA_BUF_BYTE = 0x5000;
+    for (int i = 0; i < 16; i++)
+        sdram_write((DMA_BUF_BYTE >> 2) + i, 0xDEAD0000u + (uint32_t)i);
+
+    mmio_write(3,  DMA_BUF_BYTE);
+    mmio_write(7,  16);
+    mmio_write(11, 1);
+
+    uint32_t status = 0;
+    for (int i = 0; i < 8; i++) {
+        status = mmio_read(5);
+        if (status & 0x4u)
+            break;
+        tick();
+    }
+
+    check("dma-status-dma-busy-set", (status & 0x4u) ? 1 : 0, 1);
+    check("dma-status-global-busy-set", (status & 0x1u) ? 1 : 0, 1);
+
+    int timeout = 100000;
+    while ((mmio_read(5) & 0x4u) && timeout-- > 0)
+        tick();
+    check("dma-status-dma-completes", timeout > 0 ? 1 : 0, 1);
 }
 
 static void test_skip_zero() {
@@ -7967,7 +8001,7 @@ int main(int argc, char **argv) {
     test_clear_rect_per_command_stride();
     test_cmd_fence_drain();
     test_cmd_flip_drain_and_pulse();
-    test_cmd_flip_slave_pending_ignored();
+    test_cmd_flip_slave_pending_gates();
     test_cmd_flip_back_to_back_stress();
     test_mwr_inflight_no_wrap();
     test_cmd_flip_rapid_fire();
@@ -7977,6 +8011,7 @@ int main(int argc, char **argv) {
     test_spans_batch_one();
     test_spans_batch_two();
     test_spans_batch_dma();
+    test_dma_busy_status_includes_global_busy();
     test_spans_batch_dma_128();
     test_spans_batch_dma_multi();
     test_spans_batch_dma_sustained();

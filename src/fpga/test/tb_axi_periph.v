@@ -55,6 +55,13 @@ module tb_axi_periph (
     output wire [3:0]  dbg_save_dt_slot,
     output wire [31:0] dbg_save_dt_size,
     output wire        dbg_save_dt_commit,
+    output wire [2:0]  dbg_analogizer_wr_toggle,
+    output wire [31:0] dbg_analogizer_wr_settings,
+    output wire [31:0] dbg_analogizer_wr_hoffset,
+    output wire [31:0] dbg_analogizer_wr_voffset,
+    output wire [7:0]  dbg_snac_pin_out,
+    output wire [7:0]  dbg_snac_pin_dir,
+    output wire        dbg_snac_enable,
 
     // CMD_FLIP side-port (from gpu_core in production).  Tests can
     // pulse this and read FB_SWAP_CTRL via the AXI slave to verify
@@ -76,6 +83,7 @@ module tb_axi_periph (
     input  wire [31:0] cont4_key_in,
     input  wire [31:0] cont4_joy_in,
     input  wire [15:0] cont4_trig_in,
+    input  wire [7:0]  snac_pin_in_in,
     output wire        ext_irq_out
 );
 
@@ -92,7 +100,7 @@ wire [7:0] uart_rx_byte = 8'b0;
 wire shutdown_pending = 1'b0;
 wire [31:0] dt_query_data = 32'b0;
 wire dt_query_valid = 1'b0;
-wire [7:0] snac_pin_in = 8'b0;
+wire [7:0] snac_pin_in = snac_pin_in_in;
 // Mock GPU register-read mux: returns a unique sentinel per address so
 // the harness can verify that each AR returns the data of the requested
 // register (catches the "read returns previous read's value" bug from
@@ -173,6 +181,9 @@ axi_periph_slave dut (
     .target_dataslot_done(target_dataslot_done),
     .target_dataslot_err (target_dataslot_err),
     .bridge_wr_idle      (bridge_wr_idle),
+    .bridge_wr_fifo_count_dbg(11'd0),
+    .bridge_wr_fifo_max_dbg  (11'd0),
+    .bridge_wr_fifo_overflow_dbg(1'b0),
 
     .color_mode     (),
     .fb_display_addr(),
@@ -231,6 +242,13 @@ axi_periph_slave dut (
     .uart_rx_byte  (uart_rx_byte),
 
     .app_id         (app_id),
+    .analogizer_settings(32'h00008C43),
+    .analogizer_hoffset (32'hFFFF_FFF9),
+    .analogizer_voffset (32'h0000_0005),
+    .analogizer_cpu_wr_toggle(dbg_analogizer_wr_toggle),
+    .analogizer_cpu_wr_settings(dbg_analogizer_wr_settings),
+    .analogizer_cpu_wr_hoffset(dbg_analogizer_wr_hoffset),
+    .analogizer_cpu_wr_voffset(dbg_analogizer_wr_voffset),
     .shutdown_pending(shutdown_pending),
     .shutdown_ack   (),
 
@@ -248,10 +266,10 @@ axi_periph_slave dut (
     .vrr_v_total(),
     .analogizer_enabled(1'b0),
 
-    .snac_pin_out(),
-    .snac_pin_dir(),
+    .snac_pin_out(dbg_snac_pin_out),
+    .snac_pin_dir(dbg_snac_pin_dir),
     .snac_pin_in (snac_pin_in),
-    .snac_enable (),
+    .snac_enable (dbg_snac_enable),
 
     .gpu_reg_wr   (dbg_gpu_reg_wr),
     .gpu_reg_addr (dbg_gpu_reg_addr),

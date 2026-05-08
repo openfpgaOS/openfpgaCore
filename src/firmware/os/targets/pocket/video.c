@@ -41,26 +41,10 @@ static const uint32_t overlay_term_pal[16] = {
 };
 
 /* ---- VRR (Variable Refresh Rate) ----
- * The rate-lock loop now lives in RTL (vrr_controller.v): it measures
- * gpu_swap_req cadence and drives V_TOTAL + swap_hold directly.  CPU
- * only writes V_TOTAL in analogizer mode, where the slave's mux
- * forwards the CPU value to the scaler so SD output stays at fixed
- * PAL/NTSC timing. */
-#define VRR_VT_DEFAULT      262     /* 60 Hz NTSC */
-#define VRR_VT_PAL          314     /* 15720/314 ≈ 50.06 Hz */
-
-static int vrr_current_vt = VRR_VT_DEFAULT;
-
-static void vrr_update(void) {
-    if (!of_analogizer_is_enabled()) return;
-    int video_mode = of_analogizer_get_video_mode();
-    int target = (video_mode == ANLG_VIDEO_YC_PAL) ? VRR_VT_PAL : VRR_VT_DEFAULT;
-    if (vrr_current_vt != target) {
-        vrr_current_vt = target;
-        VRR_V_TOTAL = target;
-        VRR_SWAP_HOLD = 0;
-    }
-}
+ * The rate-lock loop lives in RTL (vrr_controller.v). The peripheral slave
+ * also locks V_TOTAL to fixed NTSC/PAL timing when Analogizer video or SNAC is
+ * configured, deriving that directly from the Analogizer settings register.
+ * Firmware no longer needs per-frame VRR writes. */
 
 /* swap_kicked: set when we KNOW fb_swap_pending was at 1 at some point
  * since buf_ready was set.  Without it, sync_swap_state's "buf_ready
@@ -122,11 +106,6 @@ void of_video_init(void) {
     buf_ready   = -1;
     vid_display_mode = DISPLAY_MODE_FRAMEBUFFER;
 
-    /* VRR rate-lock loop is in RTL (vrr_controller.v); CPU-side state
-     * tracks only the analogizer-mode V_TOTAL we've written.  Reset to
-     * the default so the first analogizer toggle reliably writes. */
-    vrr_current_vt = VRR_VT_DEFAULT;
-
     /* FBs live at the CACHED SDRAM alias (FBn_BASE = 0x10xxxxxx) — these
      * memsets populate L1 D$ dirty lines. Clean ranges after each so
      * whichever buffer HW starts scanning sees zeros in SDRAM, not
@@ -148,8 +127,6 @@ void of_video_flush_cache(void) {
 }
 
 uint8_t *of_video_flip(void) {
-    vrr_update();
-
     /* Refresh our view of hardware state */
     sync_swap_state();
 
@@ -220,7 +197,6 @@ int of_video_acquire_next(int just_flipped_idx, uint32_t fence_token) {
      * charging the app for scanout time.  Callers that want to limit
      * themselves to one outstanding flip should call of_video_wait_flip()
      * before queuing the next CMD_FLIP. */
-    vrr_update();
     sync_swap_state();
 
     if (just_flipped_idx < 0) {

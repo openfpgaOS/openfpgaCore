@@ -32,27 +32,6 @@ extern char __os_bss_end[];
  * pointer arguments, so it is safe to invoke before .bss is zeroed. */
 __attribute__((noinline, section(".text.os_finalize_memory")))
 void os_finalize_memory(void *bss_start, void *bss_end) {
-    /* DEBUG: direct UART writes to track BSS-zero progress in
-     * tb_system.  Stack-only, no globals; safe even though .bss
-     * is being zeroed concurrently. */
-    volatile uint32_t * const UART_ST  = (volatile uint32_t *)0x4F000000u;
-    volatile uint32_t * const UART_TX  = (volatile uint32_t *)0x4F000004u;
-    #define DBG_PUTC(ch) do { \
-        while (!(*UART_ST & (1u << 1))) ; \
-        *UART_TX = (uint32_t)(uint8_t)(ch); \
-    } while (0)
-    #define DBG_HEX(v) do { \
-        for (int _s = 28; _s >= 0; _s -= 4) { \
-            uint32_t _n = ((v) >> _s) & 0xF; \
-            DBG_PUTC(_n < 10 ? '0' + _n : 'a' + _n - 10); \
-        } \
-    } while (0)
-    DBG_PUTC('b'); DBG_PUTC('s'); DBG_PUTC('s'); DBG_PUTC(':');
-    DBG_HEX((uint32_t)(uintptr_t)bss_start);
-    DBG_PUTC('-');
-    DBG_HEX((uint32_t)(uintptr_t)bss_end);
-    DBG_PUTC('\n');
-
     /* Bypass cache via uncached SDRAM alias (0x10... → 0x50...).
      * If cache writeback is what's wedging the LSU FIFO, this
      * sidesteps it. */
@@ -60,14 +39,8 @@ void os_finalize_memory(void *bss_start, void *bss_end) {
     uint32_t bss_uc_end   = ((uint32_t)(uintptr_t)bss_end)   - 0x10000000u + 0x50000000u;
     uint32_t *bss = (uint32_t *)(uintptr_t)bss_uc_start;
     uint32_t *bend = (uint32_t *)(uintptr_t)bss_uc_end;
-    uint32_t step = 0;
-    while (bss < bend) {
+    while (bss < bend)
         *bss++ = 0;
-        if ((++step & 0xFFF) == 0) {  /* every 4096 words = 16KB */
-            DBG_PUTC('.');
-        }
-    }
-    DBG_PUTC('!'); DBG_PUTC('\n');
 }
 
 /* Draw boot logo. First call clears screen, subsequent calls just recolor. */
@@ -99,6 +72,31 @@ static void status_ok(void) {
 
 static void status_fail(void) {
     of_term_puts(" \033[91mFAIL\033[0m\n");
+}
+
+static int app_load_transient(int rc) {
+    return rc == -1 ||  /* missing size / first header read failed */
+           rc == -2 ||  /* bad magic: often stale/partial first bytes */
+           rc == -5 ||  /* program header read failed */
+           rc == -6;    /* segment payload read failed */
+}
+
+static int load_app_with_retries(elf_load_result_t *app) {
+    int rc = -1;
+
+    for (int attempt = 0; attempt < 32; attempt++) {
+        rc = elf_load(APP_SLOT_ID, APP_LOAD_ADDR, app);
+        if (rc == 0)
+            return 0;
+        if (!app_load_transient(rc))
+            return rc;
+
+        if ((attempt & 3) == 3)
+            of_term_putchar('.');
+        of_timer_delay_ms(250);
+    }
+
+    return rc;
 }
 
 /* DEBUG ONLY: synthetic Duke3D-shape GPU stress test, sim only.
@@ -295,8 +293,6 @@ void os_main(void) {
     /* Boot stage: red logo = OS initializing */
     boot_logo("\033[91m");  /* red */
 
-    of_term_enable_uart_mirror();
-
     /* Boot stage: green logo = HAL ready */
     boot_logo("\033[92m");  /* green */
 
@@ -335,7 +331,7 @@ void os_main(void) {
     of_term_puts("  Loading app....... ");
 
     elf_load_result_t app;
-    int rc = elf_load(APP_SLOT_ID, APP_LOAD_ADDR, &app);
+    int rc = load_app_with_retries(&app);
 
     if (rc < 0) {
         status_fail();
@@ -348,7 +344,7 @@ void os_main(void) {
             of_input_poll();
             if (of_input_is_pressed(0, OF_BTN_START)) {
                 of_term_puts("\n  Retrying...");
-                rc = elf_load(APP_SLOT_ID, APP_LOAD_ADDR, &app);
+                rc = load_app_with_retries(&app);
                 if (rc == 0)
                     break;
                 of_term_printf(" rc=%d\n", rc);
@@ -386,6 +382,20 @@ void os_main(void) {
     int fs_slots = filesystem_init();
     of_term_printf(" \033[92m%d slot%s\033[0m\n",
                    fs_slots, fs_slots == 1 ? "" : "s");
+
+    /* analogizer.cfg is a shared, filename-addressed config file. It is
+     * loaded after filesystem_init() so the manifest filename mapping is
+     * available, then applied before the app starts. */
+    of_analogizer_load_config("analogizer.cfg");
+
+    /* UART shares cart pins with Analogizer/SNAC. Only mirror the boot console
+     * when neither feature owns the adapter pins after all config is applied. */
+    {
+        const of_analogizer_state_t *analogizer_state = of_analogizer_get_state();
+        if (!analogizer_state->enabled &&
+            analogizer_state->snac_type == SNAC_NONE)
+            of_term_enable_uart_mirror();
+    }
 
     /* Auto-load a .ofsf SoundFont if one is present in a data slot.
      * Silent when no bank is staged; emits its own boot line otherwise. */

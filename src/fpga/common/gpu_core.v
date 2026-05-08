@@ -73,7 +73,7 @@ module gpu_core (
     // io_sdram + slave debug taps.  Currently only surfaced as MMIO
     // reads for kernel debug; not used for control.
     // ================================================================
-    input  wire        slave_swap_pending,    // unused (legacy gate retired)
+    input  wire        slave_swap_pending,    // CMD_FLIP backpressure from display slave
     input  wire [1:0]  arb_state_dbg,         // SDRAM arb state (0=IDLE,1=RD,2=WR)
     input  wire        cpu_pending_dbg,       // CPU has AR or AW pending
     input  wire [31:0] dbg_bus,               // composed bus diag for MMIO 0x38
@@ -133,8 +133,8 @@ assign dbg_frag = {sp_count[7:0],
 //                              [15:8]=fsm_state
 // 0x18  GPU_FENCE         R   Last completed fence token
 // 0x1C  GPU_DMA_LEN       W   Word count to pull (max 4096)
-// 0x20  GPU_TRANSLUC_ADDR W   transluc[] write address (15-bit, auto-inc by 4)
-// 0x24  GPU_TRANSLUC_DATA W   transluc[] write data (32-bit word)
+// 0x20  GPU_TRANSLUC_ADDR W / texture-cache request counter R
+// 0x24  GPU_TRANSLUC_DATA W / texture-cache miss counter R
 // 0x28  GPU_TEX_FLUSH     W   Flush texture cache (write any value)
 // 0x2C  GPU_DMA_KICK      W   Write 1 to fire DMA pull from (SRC, LEN)
 //
@@ -200,7 +200,7 @@ reg [10:0] dma_starve_count;
 wire ring_empty = (ring_rdptr == ring_wrptr);
 wire [15:0] ring_mask = (RING_WORDS * 4) - 1;  // 0x3FFF for 16 KB
 
-assign busy = !ring_empty || (state != S_IDLE);
+assign busy = dma_busy || !ring_empty || (state != S_IDLE);
 
 // Port B: GPU read (synchronous, 1-cycle latency)
 always @(posedge clk)
@@ -384,6 +384,8 @@ always @(*) begin
                               dma_overflow_sticky,
                               dma_busy, ring_empty, busy};
         4'd6:    reg_rdata = fence_reached;
+        4'd8:    reg_rdata = tex_dbg_req_count;
+        4'd9:    reg_rdata = tex_dbg_miss_count;
         // CMD_FLIP debug counters — see reg-decl block above for layout.
         // Reads at 4'd10 / 4'd11 are non-destructive; the same addresses
         // accept writes that pulse tex_flush / dma_kick respectively.
@@ -457,15 +459,26 @@ reg [25:0] cmap_req_addr_reg;
 // off-by-one byte-lane reads (triCK_y1_x2, w300_r1_px6, Duke3D
 // rendering artifacts).
 //
-// Why not gate on full !fp_pipe_stall: that ALSO catches the
-// cmap_pipe_wait + persp_issue_stall stalls, where cmap_req_addr_reg
-// is correctly tracking the pixel in p2 — gating there breaks the
-// segment-boundary handoff in 32-pixel persp spans (persp_2seg_px15).
-// The fbss-only gate is the minimum needed to plug the FB-flush race.
-wire        cmap_req_valid_b = p2_valid && p2_flags[SPAN_COLORMAP]
-                            && (fbss == FBSS_IDLE);
-wire        cmap_req_ready_b;
+// Also gate while p2b is waiting for a prior cmap response, and issue p2's
+// cmap request only when the p2->p2b shift is otherwise allowed.  If port B
+// cannot accept that request in the shift cycle, cmap_issue_wait stalls the
+// pipe instead of letting p2b hold a fragment whose colormap lookup was never
+// queued.  This request/shift handshake is what keeps row-major span4 cache
+// thrash from producing localized wrong pixels.
 wire        cmap_resp_valid_b;
+wire        fp_pipe_shift_blocked;
+wire        cmap_pipe_wait = p2b_valid && p2b_flags[SPAN_COLORMAP]
+                          && !cmap_resp_valid_b;
+wire        cmap_req_ready_b;
+wire        cmap_req_valid_b = p2_valid && p2_flags[SPAN_COLORMAP]
+                            && (fbss == FBSS_IDLE)
+                            && !cmap_pipe_wait
+                            && !fp_pipe_shift_blocked;
+wire        cmap_issue_wait = p2_valid && p2_flags[SPAN_COLORMAP]
+                           && (fbss == FBSS_IDLE)
+                           && !cmap_pipe_wait
+                           && !fp_pipe_shift_blocked
+                           && !cmap_req_ready_b;
 wire [15:0] cmap_resp_data_b;
 wire [7:0]  cmap_rd_data = cmap_resp_data_b[7:0];
 
@@ -669,6 +682,8 @@ wire        tex_axi_rlast;
 
 wire [2:0] tex_dbg_state;
 wire       tex_dbg_pipe_valid;
+wire [31:0] tex_dbg_req_count;
+wire [31:0] tex_dbg_miss_count;
 
 // Port B is wired to the cmap read path: cmap_req_addr_reg holds the
 // per-pixel SDRAM byte address; the request fires whenever p2 has a
@@ -702,7 +717,9 @@ gpu_tex_cache tex_cache (
     .axi_rdata(tex_axi_rdata),
     .axi_rlast(tex_axi_rlast),
     .dbg_state(tex_dbg_state),
-    .dbg_pipe_valid(tex_dbg_pipe_valid)
+    .dbg_pipe_valid(tex_dbg_pipe_valid),
+    .dbg_req_count(tex_dbg_req_count),
+    .dbg_miss_count(tex_dbg_miss_count)
 );
 
 // ================================================================
@@ -935,9 +952,11 @@ localparam CMD_DRAW_SPAN         = 8'h40;
 // lets the CPU stream commands at cached-store speed instead of one
 // blocking AXI write per word.
 localparam CMD_DRAW_SPANS_BATCH  = 8'h41;
-// Compact four-lane vertical affine span.  Serialises four adjacent
-// columns through the existing fragment pipe, but carries the shared
-// descriptor state once:
+// Compact four-lane vertical affine span.  Carries the shared descriptor
+// state once, then issues aligned four-column groups row-major through the
+// existing fragment pipe so the FB accumulator can merge them into one
+// 32-bit word write per row.  Unaligned groups keep the lane-serial fallback
+// because they cross an FB word inside each row.
 //   word 0  = framebuffer byte address for lane 0
 //   word 1  = {count[15:0], flags[7:0], reserved[3:0], colormap_id[3:0]}
 //   word 2  = {fb_stride[15:0], tex_width[15:0]}
@@ -945,12 +964,13 @@ localparam CMD_DRAW_SPANS_BATCH  = 8'h41;
 //   word 7..10  = t[0..3]       (Q16.16)
 //   word 11..14 = tstep[0..3]   (Q16.16)
 //   word 15     = {light3, light2, light1, light0}
+//   word 16     = {tex_h_mask[15:0], tex_w_mask[15:0]}
 // s/sstep are fixed at 0, so callers use tex_addr[lane] as the
 // column/texel base and tex_width as the row pitch.  colormap_id is
 // explicit (including slot 0), not sticky-state fallback.
 localparam CMD_DRAW_SPAN4        = 8'h43;
 // Batched form of the same compact 4-column payload: header
-// payload_words = 16 * N.  Decoder loops DRAW_SPAN4 front-end state
+// payload_words = 17 * N.  Decoder loops DRAW_SPAN4 front-end state
 // just as CMD_DRAW_SPANS_BATCH loops 15-word scalar spans.
 localparam CMD_DRAW_SPAN4_BATCH  = 8'h44;
 // Removed commands (reserved opcodes, do not reuse):
@@ -1020,15 +1040,18 @@ reg [15:0] sp_tex_w_mask;
 reg [15:0] sp_tex_h_mask;
 
 // Compact 4-column affine command state.  This is deliberately kept as
-// a thin front-end over the existing span registers so DRAW_SPAN,
+// a thin front-end over the existing fragment pipe so DRAW_SPAN,
 // DRAW_SPANS_BATCH, colormap, skip-zero and translucency all share the
-// same byte-producing datapath.
+// same byte-producing datapath.  Aligned groups walk row-major
+// (lane 0..3, next row) so adjacent lanes hit the same FB accumulator word.
 reg [31:0] span4_fb_base;
 reg signed [15:0] span4_fb_stride;
 reg [15:0] span4_count;
 reg [7:0]  span4_flags;
 reg [3:0]  span4_colormap_id;
 reg [15:0] span4_tex_width;
+reg [15:0] span4_tex_w_mask;
+reg [15:0] span4_tex_h_mask;
 reg [1:0]  span4_lane;
 reg [31:0] span4_tex_addr [0:3];
 reg signed [31:0] span4_t [0:3];
@@ -1051,8 +1074,8 @@ task span4_load_lane;
         sp_flags        <= span4_flags;
         sp_fb_stride    <= span4_fb_stride;
         sp_tex_width    <= (span4_tex_width == 16'd0) ? 16'd1 : span4_tex_width;
-        sp_tex_w_mask   <= 16'hFFFF;
-        sp_tex_h_mask   <= 16'hFFFF;
+        sp_tex_w_mask   <= span4_tex_w_mask;
+        sp_tex_h_mask   <= span4_tex_h_mask;
         sp_sZ           <= 32'sd0;
         sp_tZ           <= 32'sd0;
         sp_zinv         <= 32'sd0;
@@ -1165,6 +1188,9 @@ reg cmd_is_set_skip_zero;
 reg cmd_is_set_colormap_id;
 reg cmd_is_draw_triangles;
 reg cmd_is_flip;
+
+wire span4_active = cmd_is_draw_span4 || cmd_is_draw_span4_batch;
+wire span4_row_major = span4_active && (span4_fb_base[1:0] == 2'd0);
 
 // Outstanding-write tracker for CMD_FENCE / CMD_FLIP drain semantics.
 // Increments on m_wr_* AW handshake (single-beat AWs only — GPU never
@@ -1384,21 +1410,19 @@ reg src_done;            // source has issued its last pixel; pipeline draining
 // DSP slice and the path from `tx_mul_q` register through the post-multiply
 // adds to the cache RAM port is short.
 
-// cmap_pipe_wait: the p2b→p3 shift consumes cmap_rd_data (= resp_data_b
-// byte) for the fragment in p2b.  If that fragment had SPAN_COLORMAP set
-// and tex_cache port B isn't ready (miss in flight), stall the shift.
-// On hit this is always 0 because resp_valid_b is high combinationally
-// the same cycle pipe_addr_b matches.  See gpu_tex_cache.v for the held-
-// response semantics this relies on.
-wire cmap_pipe_wait = p2b_valid && p2b_flags[SPAN_COLORMAP] && !cmap_resp_valid_b;
+// cmap_pipe_wait is declared with the cmap port-B request wires above because
+// it also gates new cmap accepts while p2b is waiting for an older response.
+// On hit this is always 0 because resp_valid_b is high combinationally the
+// same cycle pipe_addr_b matches.  See gpu_tex_cache.v for the held-response
+// semantics this relies on.
 // Stage 2a: m_wr_inflight is 4 bits (max 15).  FBSS now exits on AW+W
 // handshake without waiting for B (multi-outstanding writes).  Cap at
 // 14 outstanding to prevent counter overflow if SDRAM is slow to drain.
 wire m_wr_inflight_near_full = (m_wr_inflight >= 4'd14);
-wire fp_pipe_stall = (p1_valid && !tex_resp_valid)
-                  || cmap_pipe_wait
-                  || (fbss != FBSS_IDLE)
-                  || m_wr_inflight_near_full;
+assign fp_pipe_shift_blocked = (p1_valid && !tex_resp_valid)
+                            || (fbss != FBSS_IDLE)
+                            || m_wr_inflight_near_full;
+wire fp_pipe_stall = fp_pipe_shift_blocked || cmap_pipe_wait || cmap_issue_wait;
 
 // Combinational tex address from p0 + DSP output.  Multiply-mode only
 // (sp_tex_width is always non-zero in every real caller — tested in
@@ -2119,6 +2143,8 @@ always @(posedge clk) begin
         span4_flags <= 0;
         span4_colormap_id <= 0;
         span4_tex_width <= 16'd1;
+        span4_tex_w_mask <= 16'hFFFF;
+        span4_tex_h_mask <= 16'hFFFF;
         span4_lane <= 0;
     end else begin
         // Ring reset: set rdptr to 0 (from MMIO ring_size write)
@@ -2339,10 +2365,16 @@ always @(posedge clk) begin
                         span4_light[2] <= ring_rd_data[23:16];
                         span4_light[3] <= ring_rd_data[31:24];
                     end
+                    5'd16: begin
+                        span4_tex_w_mask <= (ring_rd_data[15:0]  == 16'd0)
+                                            ? 16'hFFFF : ring_rd_data[15:0];
+                        span4_tex_h_mask <= (ring_rd_data[31:16] == 16'd0)
+                                            ? 16'hFFFF : ring_rd_data[31:16];
+                    end
                     default: ;
                 endcase
                 if (cmd_is_draw_span4_batch) begin
-                    if (span4_field_idx == 5'd15)
+                    if (span4_field_idx == 5'd16)
                         span4_field_idx <= 5'd0;
                     else
                         span4_field_idx <= span4_field_idx + 5'd1;
@@ -2499,10 +2531,10 @@ always @(posedge clk) begin
                 state      <= S_EXECUTE;
             end
             // Multi-span4 batch: each compact four-lane payload is
-            // 16 words.  Dispatch after field 15 has populated the
+            // 17 words.  Dispatch after field 16 has populated the
             // span4_* holding regs; post-lane3 flush routes back here
             // for the next compact payload.
-            else if (cmd_is_draw_span4_batch && span4_field_idx == 5'd15) begin
+            else if (cmd_is_draw_span4_batch && span4_field_idx == 5'd16) begin
                 state      <= S_EXECUTE;
             end
             else begin
@@ -2532,16 +2564,12 @@ always @(posedge clk) begin
                 // the global counter update below.
             end
             else if (cmd_is_flip) begin
-                // Same drain wait as CMD_FENCE, plus a one-cycle pulse
-                // on gpu_swap_req that the slave latches into
-                // fb_swap_pending=1 / fb_ready_idx.  The kernel's
-                // of_video_acquire_next does the explicit
-                // FB_SWAP_CTRL & 1 wait (per cr-acquire-next-vsync-wait),
-                // so we publish fence_reached as soon as the m_wr drain
-                // completes — leaves the GPU command processor free to
-                // start the next frame's commands during the CPU's
-                // vsync spin.
-                if (m_wr_inflight == 4'b0) begin
+                // Same drain wait as CMD_FENCE, plus display-queue
+                // backpressure.  axi_periph_slave has one pending swap slot;
+                // if we pulse while it is already full, the ready index is
+                // overwritten.  Hold the command here until vsync consumes the
+                // previous request, then publish fence with the swap pulse.
+                if (m_wr_inflight == 4'b0 && !slave_swap_pending) begin
                     gpu_swap_req  <= 1'b1;
                     gpu_swap_idx  <= pending_swap_idx;
                     fence_reached <= pending_fence_token;
@@ -2652,7 +2680,9 @@ always @(posedge clk) begin
                    && (!persp_active
                        || sp_seg_left != 4'd0
                        || persp_seg_b_ready);
-            span_last_issue = (sp_count == 16'd1);
+            span_last_issue = span4_row_major
+                            ? (sp_count == 16'd1 && span4_lane == 2'd3)
+                            : (sp_count == 16'd1);
 
             // ----------------------------------------------------------
             // Pipeline shift — only when not stalled
@@ -2725,36 +2755,89 @@ always @(posedge clk) begin
                     tx_mul_q <= $signed({1'b0, sp_t[31:16] & sp_tex_h_mask})
                               * $signed({1'b0, sp_tex_width});
 
-                    // Advance span source. For perspective spans, the s/t
-                    // path is segmented: within a segment we step by the
-                    // affine sub-slope (sp_sstep), and at the segment
-                    // boundary (sp_seg_left == 0) we swap in the pre-
-                    // computed slot B (persp_pend_*).
-                    sp_fb_addr <= sp_fb_addr + {{16{sp_fb_stride[15]}}, sp_fb_stride};
-                    sp_count   <= sp_count - 16'd1;
-                    // Phase 4d — per-pixel light step.  Direct
-                    // CMD_DRAW_SPAN payloads set sp_light_step = 0
-                    // (flat lighting unchanged); triangle Gouraud
-                    // spans walk through the gradient per pixel.
-                    sp_light_q <= sp_light_q + sp_light_step;
-                    if (span_last_issue) src_done <= 1;
-                    if (persp_active) begin
-                        if (sp_seg_left == 4'd0) begin
-                            // Segment boundary — swap pending into current.
-                            sp_s              <= persp_pend_s;
-                            sp_t              <= persp_pend_t;
-                            sp_sstep          <= persp_pend_sstep;
-                            sp_tstep          <= persp_pend_tstep;
-                            sp_seg_left       <= 4'd7;  // 8-pixel segments
-                            persp_seg_b_ready <= 0;  // PSS will refill
+                    if (span4_row_major) begin
+                        // Row-major span4 still feeds the scalar sp_* source
+                        // registers.  This avoids adding a second set of wide
+                        // p0 muxes while letting aligned lanes merge into one
+                        // FB word write per destination row.
+                        case (span4_lane)
+                            2'd0: begin
+                                span4_t[0] <= sp_t + sp_tstep;
+                                span4_lane <= 2'd1;
+                                sp_fb_addr <= sp_fb_addr + 32'd1;
+                                sp_tex_addr <= span4_tex_addr[1];
+                                sp_t <= span4_t[1];
+                                sp_tstep <= span4_tstep[1];
+                                sp_light_q <= {8'b0, span4_light[1], 16'b0};
+                            end
+                            2'd1: begin
+                                span4_t[1] <= sp_t + sp_tstep;
+                                span4_lane <= 2'd2;
+                                sp_fb_addr <= sp_fb_addr + 32'd1;
+                                sp_tex_addr <= span4_tex_addr[2];
+                                sp_t <= span4_t[2];
+                                sp_tstep <= span4_tstep[2];
+                                sp_light_q <= {8'b0, span4_light[2], 16'b0};
+                            end
+                            2'd2: begin
+                                span4_t[2] <= sp_t + sp_tstep;
+                                span4_lane <= 2'd3;
+                                sp_fb_addr <= sp_fb_addr + 32'd1;
+                                sp_tex_addr <= span4_tex_addr[3];
+                                sp_t <= span4_t[3];
+                                sp_tstep <= span4_tstep[3];
+                                sp_light_q <= {8'b0, span4_light[3], 16'b0};
+                            end
+                            default: begin
+                                span4_t[3] <= sp_t + sp_tstep;
+                                span4_lane <= 2'd0;
+                                sp_fb_addr <= sp_fb_addr
+                                            + {{16{sp_fb_stride[15]}}, sp_fb_stride}
+                                            - 32'd3;
+                                sp_count <= sp_count - 16'd1;
+                                sp_tex_addr <= span4_tex_addr[0];
+                                sp_t <= span4_t[0];
+                                sp_tstep <= span4_tstep[0];
+                                sp_light_q <= {8'b0, span4_light[0], 16'b0};
+                            end
+                        endcase
+
+                        if (span_last_issue) src_done <= 1;
+                    end else begin
+                        // Advance span source. For perspective spans, the s/t
+                        // path is segmented: within a segment we step by the
+                        // affine sub-slope (sp_sstep), and at the segment
+                        // boundary (sp_seg_left == 0) we swap in the pre-
+                        // computed slot B (persp_pend_*).
+                        sp_fb_addr <= sp_fb_addr + {{16{sp_fb_stride[15]}}, sp_fb_stride};
+                        sp_count   <= sp_count - 16'd1;
+                        // Phase 4d — per-pixel light step.  Direct
+                        // CMD_DRAW_SPAN payloads set sp_light_step = 0
+                        // (flat lighting unchanged); triangle Gouraud
+                        // spans walk through the gradient per pixel.
+                        sp_light_q <= sp_light_q + sp_light_step;
+                        if (span_last_issue) src_done <= 1;
+                    end
+
+                    if (!span4_row_major) begin
+                        if (persp_active) begin
+                            if (sp_seg_left == 4'd0) begin
+                                // Segment boundary — swap pending into current.
+                                sp_s              <= persp_pend_s;
+                                sp_t              <= persp_pend_t;
+                                sp_sstep          <= persp_pend_sstep;
+                                sp_tstep          <= persp_pend_tstep;
+                                sp_seg_left       <= 4'd7;  // 8-pixel segments
+                                persp_seg_b_ready <= 0;  // PSS will refill
+                            end else begin
+                                sp_s        <= sp_s + sp_sstep;
+                                sp_t        <= sp_t + sp_tstep;
+                                sp_seg_left <= sp_seg_left - 4'd1;
+                            end
                         end else begin
                             sp_s        <= sp_s + sp_sstep;
                             sp_t        <= sp_t + sp_tstep;
-                            sp_seg_left <= sp_seg_left - 4'd1;
                         end
-                    end else begin
-                        sp_s <= sp_s + sp_sstep;
-                        sp_t <= sp_t + sp_tstep;
                     end
                 end else if (issue_committed) begin
                     // Committed but no more pixels to load — drain p0
@@ -3276,8 +3359,7 @@ always @(posedge clk) begin
                 // span_field_idx already wrapped to 0 in the previous
                 // S_PAY_DATA cycle; cmd_is_draw_spans_batch / sp_*
                 // regs persist across this transition.
-                if ((cmd_is_draw_span4 || cmd_is_draw_span4_batch)
-                 && span4_lane != 2'd3) begin
+                if (span4_active && !span4_row_major && span4_lane != 2'd3) begin
                     span4_lane <= span4_lane + 2'd1;
                     span4_load_lane(span4_lane + 2'd1);
                     persp_active      <= 1'b0;
@@ -3359,8 +3441,7 @@ always @(posedge clk) begin
                     // standalone CMD_DRAW_SPAN we go straight to
                     // S_IDLE — bit-identical to the pre-batch flow,
                     // which is what BUILD's per-column path needs.
-                    if ((cmd_is_draw_span4 || cmd_is_draw_span4_batch)
-                     && span4_lane != 2'd3) begin
+                    if (span4_active && !span4_row_major && span4_lane != 2'd3) begin
                         span4_lane <= span4_lane + 2'd1;
                         span4_load_lane(span4_lane + 2'd1);
                         persp_active      <= 1'b0;

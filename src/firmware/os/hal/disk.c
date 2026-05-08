@@ -52,10 +52,14 @@ int of_disk_read(uint32_t slot_id, uint32_t slot_offset,
     int rc = active_disk->read(slot_id, slot_offset, dest, length);
     /* If the boot backend (PHDP) failed, fall back to the bridge (SD).
      * The host may not have every file the app needs — the SD card is
-     * the ground truth and should always work headless. PHDP stays
-     * active for the next read (the host might serve it fine). */
-    if (rc < 0 && active_disk == &of_disk_boot)
+     * the ground truth and should always work headless. Once SD answers,
+     * keep using it; mixing PHDP size queries with SD reads leaves stale
+     * UART packets behind and can make app-load failures look random. */
+    if (rc < 0 && active_disk == &of_disk_boot) {
         rc = of_disk_bridge.read(slot_id, slot_offset, dest, length);
+        if (rc == 0)
+            active_disk = &of_disk_bridge;
+    }
     return rc;
 }
 
@@ -63,8 +67,11 @@ long of_disk_size(uint32_t slot_id) {
     if (!active_disk)
         return -1;
     long sz = active_disk->size(slot_id);
-    if (sz < 0 && active_disk == &of_disk_boot)
+    if (sz < 0 && active_disk == &of_disk_boot) {
         sz = of_disk_bridge.size(slot_id);
+        if (sz >= 0)
+            active_disk = &of_disk_bridge;
+    }
     return sz;
 }
 

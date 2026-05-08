@@ -6,7 +6,7 @@
 // Supports two modes via `mode`:
 //   00 = Config A (NES/SNES/DB15): CLK on pin_out[0], LATCH on pin_out[1],
 //        data sampled from miso_a (bank0[4]/IO3)
-//   01 = Config B (PSX):          CLK on pin_out[2], CMD shifted out on pin_out[7],
+//   01 = Config B (PSX):          CLK on pin_out[6], CMD shifted out on pin_out[7],
 //        data sampled from miso_b (bank0[7]/IN4)
 //
 // Operation: write TX data + config, assert `start`.  Hardware shifts `bit_count`
@@ -55,18 +55,21 @@ localparam S_DONE       = 3'd5;
 reg [2:0]  state;
 reg [15:0] div_cnt;     // clock divider counter
 reg [4:0]  bits_left;   // bits remaining
+reg [4:0]  total_bits;  // original bits-1, used to left-align RX data
 reg [31:0] tx_sr;       // TX shift register
 reg        miso_sel;    // 0=miso_a, 1=miso_b
 
 assign busy = (state != S_IDLE);
 
 wire miso = miso_sel ? miso_b : miso_a;
+wire clk_idle = miso_sel; // Config B / PSX idles clock high.
 
 always @(posedge clk or negedge reset_n) begin
     if (!reset_n) begin
         state       <= S_IDLE;
         div_cnt     <= 0;
         bits_left   <= 0;
+        total_bits   <= 0;
         tx_sr       <= 0;
         rx_data     <= 0;
         shift_clk   <= 0;
@@ -79,12 +82,13 @@ always @(posedge clk or negedge reset_n) begin
 
         case (state)
         S_IDLE: begin
-            shift_clk  <= 0;
+            shift_clk  <= mode[0];
             shift_latch <= 0;
             if (start) begin
                 tx_sr     <= tx_data;
                 rx_data   <= 0;
                 bits_left <= bit_count;
+                total_bits <= bit_count;
                 miso_sel  <= mode[0];
                 // Drive MOSI with MSB immediately (for PSX CMD)
                 shift_mosi <= tx_data[31];
@@ -145,7 +149,8 @@ always @(posedge clk or negedge reset_n) begin
             shift_clk <= 1;
             if (div_cnt == 0) begin
                 if (bits_left == 0) begin
-                    shift_clk <= 0;
+                    shift_clk <= clk_idle;
+                    rx_data   <= rx_data << (5'd31 - total_bits);
                     state     <= S_DONE;
                 end else begin
                     bits_left <= bits_left - 5'd1;
@@ -160,6 +165,7 @@ always @(posedge clk or negedge reset_n) begin
 
         S_DONE: begin
             done  <= 1;
+            shift_clk <= clk_idle;
             state <= S_IDLE;
         end
 
