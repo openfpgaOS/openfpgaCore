@@ -1288,6 +1288,8 @@ reg        frag_discard;      // Alpha test / skip-zero result
 // Stalls:
 //   * (p1_valid && !tex_resp_valid) — cache miss in flight, hold p1
 //   * (fbss != FBSS_IDLE)           — fb sub-FSM busy with a flush
+//   * fb_write_buffer_stall          — p3 crossed words while the one-entry
+//                                      AXI write buffer is still occupied
 //
 // Source mode: 0 = SPAN (sp_*). Triangle source mode is reserved but the
 // triangle refactor is deferred to a later phase.
@@ -1337,7 +1339,7 @@ reg        p3_discard;
 // FB write sub-FSM (lives within S3, pauses pipeline when not IDLE)
 localparam FBSS_IDLE        = 4'd0;
 localparam FBSS_FLUSH_AW    = 4'd1;  // emit AW, then resume into accumulate
-localparam FBSS_FLUSH_W_RSP = 4'd2;  // wait for W handshake + B response
+localparam FBSS_FLUSH_W_RSP = 4'd2;  // wait for write-buffer AW/W acceptance
 // FBSS_ZREAD/ZWAIT/ZWRWAIT (3/4/5) retired with the Z-buffer in lean Phase 2.
 // Translucent-blend sub-flow.  Fragments with SPAN_TRANSLUC pass
 // through a read-modify-write path: read existing FB byte from SDRAM
@@ -1381,11 +1383,6 @@ reg        blend_p3_match_r;
 // Used by FBSS_BLEND_REQ to wait for M0 to become idle before grabbing it.
 reg        tex_m0_in_flight;
 
-// Pending pixel queued during a flush — applied after AXI write completes.
-reg        fbss_pend_valid;
-reg [7:0]  fbss_pend_color;
-reg [31:0] fbss_pend_addr;
-
 // (fbss_z_rdata removed — ZWAIT now launches the SRAM write in the same
 // cycle it sees the read response, so sram_rdata is live when we need it.)
 
@@ -1419,8 +1416,17 @@ reg src_done;            // source has issued its last pixel; pipeline draining
 // handshake without waiting for B (multi-outstanding writes).  Cap at
 // 14 outstanding to prevent counter overflow if SDRAM is slow to drain.
 wire m_wr_inflight_near_full = (m_wr_inflight >= 4'd14);
+wire m_wr_chan_busy = m_wr_awvalid || m_wr_wvalid;
+wire m_wr_aw_done = !m_wr_awvalid || m_wr_awready;
+wire m_wr_w_done  = !m_wr_wvalid  || m_wr_wready;
+wire fb_write_can_issue = !m_wr_chan_busy && !m_wr_inflight_near_full;
+wire p3_needs_fb_flush = p3_valid && !p3_discard && !p3_flags[SPAN_TRANSLUC]
+                       && fb_acc_valid
+                       && (fb_acc_addr[31:2] != p3_fb_addr[31:2]);
+wire fb_write_buffer_stall = p3_needs_fb_flush && !fb_write_can_issue;
 assign fp_pipe_shift_blocked = (p1_valid && !tex_resp_valid)
                             || (fbss != FBSS_IDLE)
+                            || fb_write_buffer_stall
                             || m_wr_inflight_near_full;
 wire fp_pipe_stall = fp_pipe_shift_blocked || cmap_pipe_wait || cmap_issue_wait;
 
@@ -2064,7 +2070,6 @@ always @(posedge clk) begin
         transluc_rd_addr <= 15'b0;
         cmap_req_addr_reg <= 26'b0;
         fbss <= FBSS_IDLE;
-        fbss_pend_valid <= 0; fbss_pend_color <= 0; fbss_pend_addr <= 0;
         blend_arvalid    <= 0;
         blend_araddr     <= 0;
         blend_src_color  <= 0;
@@ -2182,6 +2187,14 @@ always @(posedge clk) begin
                 2'b01: m_wr_inflight <= m_wr_inflight - 4'd1;
                 default: ;
             endcase
+            // The fragment path can now leave the AXI write registers as a
+            // one-entry buffer while it keeps issuing pixels.  Clear accepted
+            // AW/W beats globally so the write channel drains even when FBSS
+            // stays in IDLE instead of parking in a wait state.
+            if (m_wr_awvalid && m_wr_awready)
+                m_wr_awvalid <= 1'b0;
+            if (m_wr_wvalid && m_wr_wready)
+                m_wr_wvalid <= 1'b0;
             // CMD_FLIP debug: count every AW handshake and B beat
             // independently so we can detect lost B beats (counts
             // diverge) or lost AW handshakes (drain never reaches 0).
@@ -2556,7 +2569,7 @@ always @(posedge clk) begin
             if (cmd_is_fence) begin
                 // Stall until all outstanding m_wr_* writes commit; then
                 // publish the fence token and retire to S_IDLE.
-                if (m_wr_inflight == 4'b0) begin
+                if (m_wr_inflight == 4'b0 && !m_wr_chan_busy) begin
                     fence_reached <= pending_fence_token;
                     state         <= S_IDLE;
                 end
@@ -2569,7 +2582,7 @@ always @(posedge clk) begin
                 // if we pulse while it is already full, the ready index is
                 // overwritten.  Hold the command here until vsync consumes the
                 // previous request, then publish fence with the swap pulse.
-                if (m_wr_inflight == 4'b0 && !slave_swap_pending) begin
+                if (m_wr_inflight == 4'b0 && !m_wr_chan_busy && !slave_swap_pending) begin
                     gpu_swap_req  <= 1'b1;
                     gpu_swap_idx  <= pending_swap_idx;
                     fence_reached <= pending_fence_token;
@@ -2663,10 +2676,12 @@ always @(posedge clk) begin
             reg        p3_word_match;
             reg        issue_committed;
             reg        load_p0;
+            reg        p3_consumed;
 
             // Was the (combinational) tex_req accepted by the cache this
             // same cycle? Both signals are visible NOW.
             issue_committed = tex_req_valid && tex_req_ready;
+            p3_consumed = 1'b0;
             // Load/refresh p0 only if cache accepted the previous p0 or p0 is
             // empty (pipe priming).  Otherwise hold p0 stable and do not
             // advance the source.
@@ -2863,7 +2878,7 @@ always @(posedge clk) begin
                         blend_byte_lane <= p3_fb_addr[1:0];
                         blend_p3_flags  <= p3_flags;
                         fbss            <= FBSS_BLEND_REQ;
-                        if (fp_pipe_stall) p3_valid <= 0;
+                        p3_consumed     = 1'b1;
                     end
                     // Process p3 if it has a non-discard pixel (and no pending depth work)
                     else if (p3_valid && !p3_discard) begin : fb_acc_blk
@@ -2873,25 +2888,38 @@ always @(posedge clk) begin
                                      || !fb_acc_valid;
 
                         if (!p3_word_match) begin
-                            // Word boundary cross — flush old word, queue new pixel
-                            m_wr_awvalid <= 1;
-                            m_wr_awaddr  <= fb_acc_addr;
-                            m_wr_awlen   <= 0;
-                            m_wr_wvalid  <= 1;
-                            m_wr_wdata   <= fb_acc_data;
-                            m_wr_wstrb   <= fb_acc_mask;
-                            m_wr_wlast   <= 1;
+                            if (fb_write_can_issue) begin
+                                // Word boundary cross.  Hand the old word to
+                                // the one-entry AXI write buffer and immediately
+                                // re-arm the accumulator with p3's new word so
+                                // the fragment pipe only stalls when that buffer
+                                // is already occupied or the B-response counter
+                                // is near full.
+                                m_wr_awvalid <= 1;
+                                m_wr_awaddr  <= fb_acc_addr;
+                                m_wr_awlen   <= 0;
+                                m_wr_wvalid  <= 1;
+                                m_wr_wdata   <= fb_acc_data;
+                                m_wr_wstrb   <= fb_acc_mask;
+                                m_wr_wlast   <= 1;
 
-                            // Queue p3's pixel for re-application post-flush
-                            fbss_pend_valid <= 1;
-                            fbss_pend_color <= p3_color;
-                            fbss_pend_addr  <= p3_fb_addr;
-
-                            // Reset accumulator (will be re-armed in FLUSH_W_RSP)
-                            fb_acc_valid <= 0;
-                            fb_acc_mask  <= 4'b0;
-
-                            fbss <= FBSS_FLUSH_W_RSP;
+                                fb_acc_valid <= 1;
+                                fb_acc_addr  <= p3_word_addr;
+                                fb_acc_data  <= 32'b0;
+                                fb_acc_mask  <= 4'b0;
+                                case (p3_byte_lane)
+                                    2'd0: begin fb_acc_data[7:0]   <= p3_color; fb_acc_mask[0] <= 1; end
+                                    2'd1: begin fb_acc_data[15:8]  <= p3_color; fb_acc_mask[1] <= 1; end
+                                    2'd2: begin fb_acc_data[23:16] <= p3_color; fb_acc_mask[2] <= 1; end
+                                    2'd3: begin fb_acc_data[31:24] <= p3_color; fb_acc_mask[3] <= 1; end
+                                endcase
+                                p3_consumed = 1'b1;
+                            end else begin
+                                // The write buffer is still draining.  Park FBSS
+                                // for one or more cycles; p3 remains valid
+                                // because fbss != IDLE stalls the pipe.
+                                fbss <= FBSS_FLUSH_W_RSP;
+                            end
                         end else begin
                             // Fast path: accumulate into current word
                             fb_acc_valid <= 1;
@@ -2902,54 +2930,31 @@ always @(posedge clk) begin
                                 2'd2: begin fb_acc_data[23:16] <= p3_color; fb_acc_mask[2] <= 1; end
                                 2'd3: begin fb_acc_data[31:24] <= p3_color; fb_acc_mask[3] <= 1; end
                             endcase
+                            p3_consumed = 1'b1;
                         end
 
-                        // If the pipeline is stalled this cycle (cache miss
-                        // upstream), the shift won't fire to overwrite p3.
-                        // Mark p3 consumed so the next FBSS_IDLE doesn't
-                        // re-process the same pixel.
-                        if (fp_pipe_stall) p3_valid <= 0;
                     end
+                    // If the pipeline is stalled this cycle (cache miss
+                    // upstream, write counter pressure, or a FBSS detour), the
+                    // shift won't fire to overwrite p3.  Clear it only after a
+                    // path above has actually consumed the pixel.
+                    if (p3_consumed && fp_pipe_stall) p3_valid <= 0;
                 end
 
                 FBSS_FLUSH_W_RSP: begin
-                    // Drive AW/W until accepted
-                    if (m_wr_awvalid && m_wr_awready) m_wr_awvalid <= 0;
-                    if (m_wr_wvalid  && m_wr_wready ) m_wr_wvalid  <= 0;
-
                     // Stage 2a: exit on AW+W handshake, NOT on B response.
                     // The original code waited for m_wr_bvalid here, paying
                     // the full SDRAM round-trip per pixel-word flush.
                     // m_wr_inflight tracks outstanding Bs; CMD_FENCE/CMD_FLIP
                     // drain them at the end of the frame.  Same-master
                     // single-AWID AXI ordering preserves write semantics.
-                    if (!m_wr_awvalid && !m_wr_wvalid) begin
-                        if (fbss_pend_valid) begin : pend_apply
-                            reg [31:0] pw_addr;
-                            reg [1:0]  pw_lane;
-                            pw_addr = fbss_pend_addr & 32'hFFFFFFFC;
-                            pw_lane = fbss_pend_addr[1:0];
-
-                            fb_acc_valid <= 1;
-                            fb_acc_addr  <= pw_addr;
-                            fb_acc_data  <= 32'b0;
-                            fb_acc_mask  <= 4'b0;
-                            case (pw_lane)
-                                2'd0: begin fb_acc_data[7:0]   <= fbss_pend_color; fb_acc_mask[0] <= 1; end
-                                2'd1: begin fb_acc_data[15:8]  <= fbss_pend_color; fb_acc_mask[1] <= 1; end
-                                2'd2: begin fb_acc_data[23:16] <= fbss_pend_color; fb_acc_mask[2] <= 1; end
-                                2'd3: begin fb_acc_data[31:24] <= fbss_pend_color; fb_acc_mask[3] <= 1; end
-                            endcase
-
-                            fbss_pend_valid <= 0;
-                        end
-
-                        // Don't touch p3_valid: in the typical case the
-                        // pipeline shifted to a NEW pixel in the same cycle
-                        // we triggered the flush, and that new pixel is now
-                        // sitting in p3 waiting to be processed. The
-                        // FBSS_IDLE branch handles "did we already process
-                        // this p3?" via the conditional clear below.
+                    // m_wr_* valid bits are cleared by the global handshake
+                    // block above; m_wr_*_done lets us resume in the same
+                    // cycle the pending channel accepts its beat.
+                    if (m_wr_aw_done && m_wr_w_done) begin
+                        // Don't touch p3_valid: if FBSS parked because the
+                        // write buffer was busy, p3 is still the unconsumed
+                        // boundary-crossing pixel.  FBSS_IDLE will retry it.
                         fbss <= FBSS_IDLE;
                     end
                 end
@@ -2969,19 +2974,18 @@ always @(posedge clk) begin
                     //      AR, no in-flight read) so blend_owns_m0 doesn't
                     //      collide with an in-flight tex fill on the R
                     //      channel.
-                    //   2. m_wr_inflight == 0 — RAW barrier.  Cross-word
-                    //      fb_acc flushes hand off to m_wr, but the W beats
-                    //      may still be in transit to SDRAM when we'd
-                    //      otherwise issue this BLEND read.  If the
-                    //      arbiter grants m_rd before the slave's pending
-                    //      write commits, the read returns pre-flush data
-                    //      and the blend uses a stale FB byte (visible as
-                    //      a one-frame trail behind translucent surfaces
-                    //      that overdraw their own previous lanes).  The
-                    //      same-word fb_acc bypass below catches writes
-                    //      that haven't yet flushed; the m_wr_inflight gate
-                    //      catches the ones that have.
+                    //   2. m_wr channel idle + m_wr_inflight == 0 — RAW
+                    //      barrier.  Cross-word fb_acc flushes hand off to
+                    //      m_wr, but the W beat may still be waiting in the
+                    //      one-entry write buffer or in transit to SDRAM when
+                    //      we'd otherwise issue this BLEND read.  If the
+                    //      arbiter grants m_rd before the slave's pending write
+                    //      commits, the read returns pre-flush data and the
+                    //      blend uses a stale FB byte.  The same-word fb_acc
+                    //      bypass below catches writes that haven't yet
+                    //      flushed; these gates catch the ones that have.
                     if (!tex_axi_arvalid && !tex_m0_in_flight
+                        && !m_wr_chan_busy
                         && m_wr_inflight == 4'b0) begin
                         blend_arvalid <= 1;
                         blend_araddr  <= blend_word_addr;
@@ -3048,27 +3052,33 @@ always @(posedge clk) begin
                     // transluc_rd_data is now valid.  Apply it to fb_acc
                     // exactly like the IDLE fast path applies p3_color —
                     // including the cross-word flush case.  Cannot just
-                    // re-enter IDLE because p3 may already have shifted
-                    // out (we cleared p3_valid on entry to BLEND_REQ).
+                    // re-enter IDLE because the source p3 may already have
+                    // shifted out on the cycle BLEND_REQ was entered.
                     if (!blend_p3_match_r) begin
-                        // Cross-word: flush old fb_acc, queue blended byte
-                        // for re-application (same as FBSS_FLUSH_W_RSP path).
-                        m_wr_awvalid <= 1;
-                        m_wr_awaddr  <= fb_acc_addr;
-                        m_wr_awlen   <= 0;
-                        m_wr_wvalid  <= 1;
-                        m_wr_wdata   <= fb_acc_data;
-                        m_wr_wstrb   <= fb_acc_mask;
-                        m_wr_wlast   <= 1;
+                        if (fb_write_can_issue) begin
+                            // Cross-word: flush old fb_acc through the same
+                            // one-entry write buffer, then immediately start
+                            // the accumulator at the blended byte's word.
+                            m_wr_awvalid <= 1;
+                            m_wr_awaddr  <= fb_acc_addr;
+                            m_wr_awlen   <= 0;
+                            m_wr_wvalid  <= 1;
+                            m_wr_wdata   <= fb_acc_data;
+                            m_wr_wstrb   <= fb_acc_mask;
+                            m_wr_wlast   <= 1;
 
-                        fbss_pend_valid <= 1;
-                        fbss_pend_color <= transluc_rd_data;
-                        fbss_pend_addr  <= { blend_word_addr[31:2], blend_byte_lane };
-
-                        fb_acc_valid <= 0;
-                        fb_acc_mask  <= 4'b0;
-
-                        fbss <= FBSS_FLUSH_W_RSP;
+                            fb_acc_valid <= 1;
+                            fb_acc_addr  <= blend_word_addr;
+                            fb_acc_data  <= 32'b0;
+                            fb_acc_mask  <= 4'b0;
+                            case (blend_byte_lane)
+                                2'd0: begin fb_acc_data[7:0]   <= transluc_rd_data; fb_acc_mask[0] <= 1; end
+                                2'd1: begin fb_acc_data[15:8]  <= transluc_rd_data; fb_acc_mask[1] <= 1; end
+                                2'd2: begin fb_acc_data[23:16] <= transluc_rd_data; fb_acc_mask[2] <= 1; end
+                                2'd3: begin fb_acc_data[31:24] <= transluc_rd_data; fb_acc_mask[3] <= 1; end
+                            endcase
+                            fbss <= FBSS_IDLE;
+                        end
                     end else begin
                         fb_acc_valid <= 1;
                         fb_acc_addr  <= blend_word_addr;
@@ -3335,14 +3345,16 @@ always @(posedge clk) begin
         // ============================================================
         S_FB_FLUSH: begin
             if (fb_acc_valid && |fb_acc_mask) begin
-                m_wr_awvalid <= 1;
-                m_wr_awaddr  <= fb_acc_addr;
-                m_wr_awlen   <= 0;
-                m_wr_wvalid  <= 1;
-                m_wr_wdata   <= fb_acc_data;
-                m_wr_wstrb   <= fb_acc_mask;
-                m_wr_wlast   <= 1;
-                state        <= S_FB_FLUSH_WAIT;
+                if (fb_write_can_issue) begin
+                    m_wr_awvalid <= 1;
+                    m_wr_awaddr  <= fb_acc_addr;
+                    m_wr_awlen   <= 0;
+                    m_wr_wvalid  <= 1;
+                    m_wr_wdata   <= fb_acc_data;
+                    m_wr_wstrb   <= fb_acc_mask;
+                    m_wr_wlast   <= 1;
+                    state        <= S_FB_FLUSH_WAIT;
+                end
             end else begin
                 fb_acc_valid <= 0;
                 fb_acc_mask  <= 0;
@@ -3384,18 +3396,12 @@ always @(posedge clk) begin
         end
 
         S_FB_FLUSH_WAIT: begin
-            // AW handshake
-            if (m_wr_awvalid && m_wr_awready)
-                m_wr_awvalid <= 0;
-            // W handshake
-            if (m_wr_wvalid && m_wr_wready)
-                m_wr_wvalid <= 0;
             // Stage 2a: exit on AW+W handshake (don't wait for B).
             // m_wr_inflight tracks outstanding Bs; CMD_FENCE/CMD_FLIP
             // drain.  This unblocks the producer FSM (S_TRI_PIX /
             // S_SPAN_STEP) to continue emitting fragments while the
             // previous write's B is round-tripping through SDRAM.
-            if (!m_wr_awvalid && !m_wr_wvalid) begin
+            if (m_wr_aw_done && m_wr_w_done) begin
                 if (tri_active) begin
                     // Mid-triangle flush: re-accumulate pending pixel
                     begin : reaccum_tri
