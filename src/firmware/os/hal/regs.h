@@ -149,6 +149,7 @@
 #define GPU_DBG_FLIP_SWAP_PULSE_REG  REG32(0x4a000030u)
 #define GPU_DBG_BVALID_REG           REG32(0x4a000034u)
 #define GPU_DBG_AWVALID_REG          REG32(0x4a000038u)
+#define GPU_DBG_SELECT_REG           REG32(0x4a00003Cu)
 
 /* Swap-pipeline debug snapshot.  Read-only.
  *   FB_SWAP_DBG_LIVE   (0xC0):

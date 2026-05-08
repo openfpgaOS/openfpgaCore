@@ -137,6 +137,10 @@ assign dbg_frag = {sp_count[7:0],
 // 0x24  GPU_TRANSLUC_DATA W / texture-cache miss counter R
 // 0x28  GPU_TEX_FLUSH     W   Flush texture cache (write any value)
 // 0x2C  GPU_DMA_KICK      W   Write 1 to fire DMA pull from (SRC, LEN)
+// 0x30  GPU_DBG_SWAP_PULSE R   CMD_FLIP swap pulse counter
+// 0x34  GPU_DBG_BVALID     R   FB write response counter
+// 0x38  GPU_DBG_AWVALID    R   FB write address handshake counter
+// 0x3C  GPU_DBG_SELECT     W/R Indexed fragment stall counter selector/data
 //
 // DMA pull semantics: fabric-side AXI INCR-burst read of LEN words from
 // SRC, streamed into the ring BRAM at the auto-incrementing wr_addr,
@@ -166,6 +170,15 @@ reg [14:0] transluc_wr_addr;   // Auto-increment byte address into transluc[]
 reg        tex_flush_req;      // Pulse to flush texture cache
 reg        soft_reset;         // Pulse: resets FSM state + ring pointers
 reg        ring_reset;         // Pulse: reset ring_rdptr (from MMIO, consumed by FSM)
+reg [3:0]  stall_dbg_select;   // MMIO 0x3C selector for fragment stall counters
+
+localparam GPU_STALL_TEX_WAIT    = 4'd0;
+localparam GPU_STALL_CMAP_WAIT   = 4'd1;
+localparam GPU_STALL_CMAP_ISSUE  = 4'd2;
+localparam GPU_STALL_FBSS_BUSY   = 4'd3;
+localparam GPU_STALL_FB_WRITE    = 4'd4;
+localparam GPU_STALL_INFLIGHT    = 4'd5;
+localparam GPU_STALL_PERSP_WAIT  = 4'd6;
 
 // ---- Doorbell-DMA pull from SDRAM into ring BRAM ----
 // Latched on MMIO writes; consumed by the dedicated DMA FSM below.
@@ -296,6 +309,7 @@ always @(posedge clk) begin
         tex_flush_req   <= 0;
         soft_reset      <= 0;
         ring_reset      <= 0;
+        stall_dbg_select <= 4'd0;
         dma_src_latched <= 32'd0;
         dma_len_latched <= 13'd0;
         dma_kick        <= 1'b0;
@@ -355,6 +369,9 @@ always @(posedge clk) begin
                     if (reg_wdata[0] && dma_state == DMA_S_IDLE)
                         dma_kick <= 1'b1;
                 end
+                4'd15: begin // GPU_DBG_SELECT — indexed stall counter
+                    stall_dbg_select <= reg_wdata[3:0];
+                end
                 default: ;
             endcase
         end
@@ -394,6 +411,18 @@ always @(*) begin
         4'd12:   reg_rdata = swap_pulse_count;
         4'd13:   reg_rdata = bvalid_count;
         4'd14:   reg_rdata = awvalid_handshake_count;
+        4'd15: begin
+            case (stall_dbg_select)
+                GPU_STALL_TEX_WAIT:    reg_rdata = stall_tex_wait_count;
+                GPU_STALL_CMAP_WAIT:   reg_rdata = stall_cmap_wait_count;
+                GPU_STALL_CMAP_ISSUE:  reg_rdata = stall_cmap_issue_count;
+                GPU_STALL_FBSS_BUSY:   reg_rdata = stall_fbss_busy_count;
+                GPU_STALL_FB_WRITE:    reg_rdata = stall_fb_write_count;
+                GPU_STALL_INFLIGHT:    reg_rdata = stall_inflight_count;
+                GPU_STALL_PERSP_WAIT:  reg_rdata = stall_persp_wait_count;
+                default:               reg_rdata = 32'b0;
+            endcase
+        end
         default: reg_rdata = 32'b0;
     endcase
 end
@@ -1214,6 +1243,19 @@ reg [31:0] cmd_flip_drain_done_count;
 reg [31:0] swap_pulse_count;
 reg [31:0] bvalid_count;
 reg [31:0] awvalid_handshake_count;
+
+// Fragment-pipe stall counters — surfaced through MMIO 0x3C using
+// stall_dbg_select.  These count cycles while S_FRAG_PIPE cannot issue
+// or advance for each specific reason. Categories may overlap except
+// perspective, which only counts when perspective setup is the issue
+// stage blocker after the rest of the pipe is clear.
+reg [31:0] stall_tex_wait_count;
+reg [31:0] stall_cmap_wait_count;
+reg [31:0] stall_cmap_issue_count;
+reg [31:0] stall_fbss_busy_count;
+reg [31:0] stall_fb_write_count;
+reg [31:0] stall_inflight_count;
+reg [31:0] stall_persp_wait_count;
 
 // Latched payload for CMD_FENCE / CMD_FLIP — published only after
 // m_wr_inflight drains in S_EXECUTE.  Pre-CR the fence token was
@@ -2050,6 +2092,13 @@ always @(posedge clk) begin
         swap_pulse_count           <= 32'b0;
         bvalid_count               <= 32'b0;
         awvalid_handshake_count    <= 32'b0;
+        stall_tex_wait_count       <= 32'b0;
+        stall_cmap_wait_count      <= 32'b0;
+        stall_cmap_issue_count     <= 32'b0;
+        stall_fbss_busy_count      <= 32'b0;
+        stall_fb_write_count       <= 32'b0;
+        stall_inflight_count       <= 32'b0;
+        stall_persp_wait_count     <= 32'b0;
         pay_idx <= 0;
         pay_remaining <= 0;
         frag_discard <= 0;
@@ -2166,6 +2215,13 @@ always @(posedge clk) begin
             fb_acc_mask  <= 0;
             m_wr_inflight <= 4'b0;
             gpu_swap_req <= 1'b0;
+            stall_tex_wait_count   <= 32'b0;
+            stall_cmap_wait_count  <= 32'b0;
+            stall_cmap_issue_count <= 32'b0;
+            stall_fbss_busy_count  <= 32'b0;
+            stall_fb_write_count   <= 32'b0;
+            stall_inflight_count   <= 32'b0;
+            stall_persp_wait_count <= 32'b0;
         end else begin
             // ------------------------------------------------------------
             // Always-on housekeeping (runs every non-reset cycle).
@@ -2202,6 +2258,23 @@ always @(posedge clk) begin
                 awvalid_handshake_count <= awvalid_handshake_count + 32'd1;
             if (m_wr_bvalid)
                 bvalid_count <= bvalid_count + 32'd1;
+            if (state == S_FRAG_PIPE) begin
+                if (p1_valid && !tex_resp_valid)
+                    stall_tex_wait_count <= stall_tex_wait_count + 32'd1;
+                if (cmap_pipe_wait)
+                    stall_cmap_wait_count <= stall_cmap_wait_count + 32'd1;
+                if (cmap_issue_wait)
+                    stall_cmap_issue_count <= stall_cmap_issue_count + 32'd1;
+                if (fbss != FBSS_IDLE)
+                    stall_fbss_busy_count <= stall_fbss_busy_count + 32'd1;
+                if (fb_write_buffer_stall)
+                    stall_fb_write_count <= stall_fb_write_count + 32'd1;
+                if (m_wr_inflight_near_full)
+                    stall_inflight_count <= stall_inflight_count + 32'd1;
+                if (!fp_pipe_stall && persp_issue_stall && !src_done
+                    && (sp_count != 16'd0))
+                    stall_persp_wait_count <= stall_persp_wait_count + 32'd1;
+            end
             gpu_swap_req <= 1'b0;
         case (state)
 
