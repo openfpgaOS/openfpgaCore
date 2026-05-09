@@ -1532,7 +1532,9 @@ static long linux_dispatch(long n, long a0, long a1, long a2,
 
     case SYS_exit:
     case SYS_exit_group:
-        /* Switch scanout back to terminal FB so user sees boot screen */
+        /* Switch scanout back to 8-bit terminal FB so user sees boot screen
+         * even if the app left RGB565/low-bit framebuffer mode selected. */
+        SYS_COLOR_MODE = COLOR_MODE_8BIT;
         TERM_FB_CTRL = 1;
         while (1) {}
         return 0;

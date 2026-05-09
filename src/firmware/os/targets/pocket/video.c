@@ -86,24 +86,19 @@ static int pick_free_buffer(void) {
 }
 
 void of_video_init(void) {
+    /* The scanout color decoder is sticky across apps.  Duke and the
+     * default framebuffer API render 8-bit indexed pixels, so reset the
+     * decoder here before exposing the app FBs.  Apps that want RGB565,
+     * 4-bit, etc. call video_set_color_mode() after init. */
+    SYS_COLOR_MODE = COLOR_MODE_8BIT;
+
     /* Switch scanout to app triple-buffered FB */
     TERM_FB_CTRL = 0;
-
-    /* One-shot diagnostic: confirm the write took effect.  If
-     * scanout is still showing the terminal FB after this, every
-     * frame draw is wasted — apps would see "frozen screen" with
-     * music playing.  Reads back through periph_slave so the value
-     * reflects the registered state after the write. */
-    {
-        extern int printf(const char *, ...);
-        uint32_t term_after = TERM_FB_CTRL & 1;
-        printf("[video_init] TERM_FB_CTRL=%u (0=app FB, 1=terminal FB)\n",
-               (unsigned)term_after);
-    }
 
     buf_display = 0;
     buf_draw    = 1;
     buf_ready   = -1;
+    swap_kicked = 0;
     vid_display_mode = DISPLAY_MODE_FRAMEBUFFER;
 
     /* FBs live at the CACHED SDRAM alias (FBn_BASE = 0x10xxxxxx) — these
@@ -311,6 +306,13 @@ void of_video_set_palette_vga4(const uint8_t *vga_pal, int count) {
 void of_video_set_display_mode(int mode) {
     int prev = vid_display_mode;
     vid_display_mode = mode;
+
+    /* Terminal and overlay rendering are palette-indexed.  If a previous
+     * app left direct/low-bit color mode selected, terminal glyphs and
+     * overlay pixels decode as black or scrambled data. */
+    if (mode == DISPLAY_MODE_TERMINAL || mode == DISPLAY_MODE_OVERLAY)
+        SYS_COLOR_MODE = COLOR_MODE_8BIT;
+
     /* Switch scanout between terminal FB and app triple-buffered FB */
     TERM_FB_CTRL = (mode == DISPLAY_MODE_TERMINAL) ? 1 : 0;
 

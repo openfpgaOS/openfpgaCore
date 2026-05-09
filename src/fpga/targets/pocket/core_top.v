@@ -665,27 +665,22 @@ wire [53:0] bridge_wr_fifo_din = {bridge_addr[23:2], bridge_wr_data};
 wire [53:0] bridge_wr_fifo_dout;
 wire        bridge_wr_fifo_empty;
 wire        bridge_wr_fifo_full;
-wire [10:0] bridge_wr_fifo_count;
 wire        bridge_wr_fifo_push = !cram0_mode_74a && bridge_cram0_wr_pulse &&
                                   !bridge_wr_fifo_full;
 wire        bridge_wr_fifo_overflow_pulse = !cram0_mode_74a &&
                                             bridge_cram0_wr_pulse &&
                                             bridge_wr_fifo_full;
 reg         bridge_wr_fifo_overflow = 1'b0;
-reg [10:0] bridge_wr_fifo_max = 11'd0;
 wire        bridge_wr_fifo_pop;
 wire [21:0] bridge_wr_fifo_addr = bridge_wr_fifo_dout[53:32];
 wire [31:0] bridge_wr_fifo_data = bridge_wr_fifo_dout[31:0];
 
 always @(posedge clk_74a or negedge pll_ram_locked_74a) begin
-    if (!pll_ram_locked_74a) begin
+    if (!pll_ram_locked_74a)
         bridge_wr_fifo_overflow <= 1'b0;
-        bridge_wr_fifo_max <= 11'd0;
-    end else begin
+    else begin
         if (bridge_wr_fifo_overflow_pulse)
             bridge_wr_fifo_overflow <= 1'b1;
-        if (bridge_wr_fifo_count > bridge_wr_fifo_max)
-            bridge_wr_fifo_max <= bridge_wr_fifo_count;
     end
 end
 
@@ -703,7 +698,7 @@ sync_fifo #(
     .dout  (bridge_wr_fifo_dout),
     .empty (bridge_wr_fifo_empty),
     .full  (bridge_wr_fifo_full),
-    .count (bridge_wr_fifo_count)
+    .count ()
 );
 
 wire        c0_prefetch_active;
@@ -1172,21 +1167,6 @@ reg [2:0] bridge_active_cpu_sync;
 always @(posedge clk_cpu)
     bridge_active_cpu_sync <= {bridge_active_cpu_sync[1:0], bridge_active_74a};
 wire bridge_wr_idle = ~bridge_active_cpu_sync[2];
-
-// Debug-only occupancy mirror for measuring save/writeback FIFO headroom.
-// Values are used after traffic has quiesced, so a simple two-flop bus mirror
-// is sufficient and keeps the datapath free of extra handshakes.
-reg [10:0] bridge_wr_fifo_count_cpu_s1, bridge_wr_fifo_count_cpu_s2;
-reg [10:0] bridge_wr_fifo_max_cpu_s1, bridge_wr_fifo_max_cpu_s2;
-reg        bridge_wr_fifo_overflow_cpu_s1, bridge_wr_fifo_overflow_cpu_s2;
-always @(posedge clk_cpu) begin
-    bridge_wr_fifo_count_cpu_s1 <= bridge_wr_fifo_count;
-    bridge_wr_fifo_count_cpu_s2 <= bridge_wr_fifo_count_cpu_s1;
-    bridge_wr_fifo_max_cpu_s1 <= bridge_wr_fifo_max;
-    bridge_wr_fifo_max_cpu_s2 <= bridge_wr_fifo_max_cpu_s1;
-    bridge_wr_fifo_overflow_cpu_s1 <= bridge_wr_fifo_overflow;
-    bridge_wr_fifo_overflow_cpu_s2 <= bridge_wr_fifo_overflow_cpu_s1;
-end
 
 // Bridge DMA active tracking
 reg bridge_dma_active;
@@ -1886,9 +1866,9 @@ assign video_hs = vidout_hs;
 	    .cont4_joy(cont4_joy),
 	    .cont4_trig(cont4_trig),
 	    .bridge_wr_idle(bridge_wr_idle),
-	    .bridge_wr_fifo_count_dbg(bridge_wr_fifo_count_cpu_s2),
-	    .bridge_wr_fifo_max_dbg(bridge_wr_fifo_max_cpu_s2),
-	    .bridge_wr_fifo_overflow_dbg(bridge_wr_fifo_overflow_cpu_s2),
+	    .bridge_wr_fifo_count_dbg(11'd0),
+	    .bridge_wr_fifo_max_dbg(11'd0),
+	    .bridge_wr_fifo_overflow_dbg(1'b0),
 	    .target_dataslot_ack(target_dataslot_ack),
         .target_dataslot_done(target_dataslot_done_safe),
         .target_dataslot_err(target_dataslot_err),
@@ -2092,9 +2072,9 @@ assign video_hs = vidout_hs;
         .s_wdata(arb_s_wdata),     .s_wstrb(arb_s_wstrb),
         .s_wlast(arb_s_wlast),
         .s_bvalid(arb_s_bvalid),   .s_bresp(arb_s_bresp),
-        .dbg_arb_state(sdram_arb_state_dbg),
-        .dbg_cpu_pending(sdram_cpu_pending_dbg),
-        .dbg_grant(sdram_arb_grant_dbg)
+        .dbg_arb_state(),
+        .dbg_cpu_pending(),
+        .dbg_grant()
     );
 
     // AXI4 SDRAM slave (must stay alive during reset for APF save flush & data load)
@@ -2142,7 +2122,7 @@ assign video_hs = vidout_hs;
         .sdram_wr_done(sdram_slave_wr_done),
         .sdram_next_wdata(sdram_slave_next_wdata),
         .sdram_next_wstrb(sdram_slave_next_wstrb),
-        .dbg_slave(sdram_slave_dbg)
+        .dbg_slave()
     );
 
     // CRAM0 is now served by the cram0_cdc instance (declared at the
@@ -2530,39 +2510,6 @@ wire [31:0] gpu_fence_reached;
 wire        gpu_swap_req;
 wire [1:0]  gpu_swap_idx;
 wire        slave_swap_pending;  // from axi_periph_slave → stalls gpu_core CMD_FLIP
-wire [1:0]  sdram_arb_state_dbg;     // from arbiter → gpu_core dbg_frag bits 28:27
-wire        sdram_cpu_pending_dbg;   // from arbiter → gpu_core dbg_frag bit 29
-wire [1:0]  sdram_arb_grant_dbg;     // from arbiter → gpu_core dbg_bus bits 20:19
-wire [15:0] sdram_slave_dbg;         // from slave   → gpu_core dbg_bus bits 15:0
-wire [7:0]  io_sdram_dbg_raw;        // from io_sdram on clk_ram_controller — needs re-sync
-reg  [7:0]  io_sdram_dbg_sync_a, io_sdram_dbg_sync_b;
-always @(posedge clk_cpu) begin
-    // 2-FF resync of the io_sdram debug word (state + refresh-pending)
-    // from clk_ram_controller into clk_cpu.  Each bit metastable
-    // independently — debug only, occasional invalid combinations
-    // are acceptable; the wedge state is stable for many ms so the
-    // sync chain converges every snapshot.
-    io_sdram_dbg_sync_a <= io_sdram_dbg_raw;
-    io_sdram_dbg_sync_b <= io_sdram_dbg_sync_a;
-end
-
-// Composed debug word for GPU MMIO 0x38 (GPU_DBG_BUS).  Layout:
-//   bits 15:0   = slave dbg (state/sdram_busy/wready_given/handshake bits)
-//   bits 16     = m1_arvalid               (CPU has read out)
-//   bit  17     = m1_awvalid               (CPU has write out)
-//   bit  18     = mixer_arvalid            (audio mixer M3 has read out)
-//   bits 20:19  = arb_grant[1:0]           (0=GPU,1=CPU,2=DMA,3=Mixer)
-//   bits 22:21  = arb_state[1:0]           (redundant with dbg_frag, kept here for one-read snapshot)
-//   bit  23     = cpu_pending              (m1_arvalid|m1_awvalid)
-//   bits 31:24  = reserved
-wire [31:0] gpu_dbg_bus_w = {io_sdram_dbg_sync_b,    // 31:24 io_sdram state[5:0] + refresh_pending
-                              sdram_cpu_pending_dbg,
-                              sdram_arb_state_dbg,
-                              sdram_arb_grant_dbg,
-                              mixer_arvalid,
-                              cpu_m_sdram_awvalid,
-                              cpu_m_sdram_arvalid,
-                              sdram_slave_dbg};
 
 `ifndef EXCLUDE_GPU
 gpu_core gpu (
@@ -2598,11 +2545,6 @@ gpu_core gpu (
     .gpu_swap_req(gpu_swap_req),
     .gpu_swap_idx(gpu_swap_idx),
     .slave_swap_pending(slave_swap_pending),
-    // Arbiter visibility (surfaced via MMIO 0x30)
-    .arb_state_dbg(sdram_arb_state_dbg),
-    .cpu_pending_dbg(sdram_cpu_pending_dbg),
-    // Composed bus debug word (surfaced via MMIO 0x38 GPU_DBG_BUS)
-    .dbg_bus(gpu_dbg_bus_w),
     // Status
     .busy(gpu_busy),
     .fence_reached(gpu_fence_reached)
@@ -2716,7 +2658,7 @@ io_sdram isr0 (
     .burstwr_strobe ( 1'b0 ),
     .burstwr_data   ( 16'b0 ),
     .burstwr_done   ( 1'b0 ),
-    .dbg_io         ( io_sdram_dbg_raw ),
+    .dbg_io         ( ),
 
     // Word interface - CPU access via AXI
     .word_rd    ( ram1_word_rd ),

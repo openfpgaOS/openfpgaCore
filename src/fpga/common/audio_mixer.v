@@ -428,8 +428,8 @@ function signed [15:0] extract_sample16;
     end
 endfunction
 
-// Compute the SDRAM byte address for mono sample index `idx` given the
-// voice's precomputed base (sample_pool_base + cur_base_byte) and its
+// Compute the SDRAM byte address for sample index `idx` given the
+// voice's precomputed base (sample_pool_base + voice table address) and its
 // stereo flag.  Stride: 2 bytes mono, 4 bytes stereo (L+R 16-bit
 // interleaved).  The pool-base + voice-base add is hoisted to
 // S_RD_BASE_W (once per voice) so this function is a single 32-bit
@@ -467,7 +467,6 @@ localparam S_FETCH_TAP1_NXT_CALC = 5'd5;  // repurposed from unused S_RD_POS
 localparam S_RD_POS_W       = 5'd6;
 localparam S_RD_BASE        = 5'd7;
 localparam S_RD_BASE_W      = 5'd8;
-localparam S_RD_RATE        = 5'd9;
 localparam S_RD_RATE_W      = 5'd10;
 localparam S_FETCH_SEAM_R   = 5'd11;  // (was S_RD_LEN, dead) receive tap1 fetched from cur_loop_start
 localparam S_RD_LEN_W       = 5'd12;
@@ -496,11 +495,8 @@ localparam S_ADV_COMMIT     = 6'd34;
 
 reg [5:0] state;
 reg [4:0] cur_voice;
-reg [4:0] next_voice;
-
 // Per-voice cached fields for the current pass.
-reg [31:0] cur_base_byte;
-reg [31:0] voice_base;          // sample_pool_base + cur_base_byte, precomputed
+reg [31:0] voice_base;          // sample_pool_base + voice table address, precomputed
 reg [21:0] cur_length;
 reg [31:0] cur_rate;
 reg [2:0]  cur_ctrl;        // {loop, stereo, active}
@@ -510,7 +506,6 @@ reg [7:0]  cur_vol_l, cur_vol_r;
 reg [21:0] cur_loop_end, cur_loop_start;
 reg [21:0] cur_loop_len;
 reg        cur_loop_valid;
-reg [7:0]  cur_vol_tgt_l, cur_vol_tgt_r;
 reg [7:0]  cur_vol_rate;
 /* Per-voice volume-write pipeline (4 stages):
  *   S_RAMP_STEP    → cur_gxm_r ← pick_gxm(voice→group)         (mux only)
@@ -531,7 +526,6 @@ reg [7:0]  cur_gxm_r;
 reg [7:0]  tgt_l_r, tgt_r_r;
 reg [7:0]  nxt_l_r, nxt_r_r;
 
-wire cur_active = cur_ctrl[0];
 wire cur_stereo = cur_ctrl[1];
 wire cur_loop   = cur_ctrl[2];
 
@@ -540,8 +534,6 @@ reg signed [15:0] tap0_l, tap0_r;
 reg signed [15:0] tap1_l, tap1_r;
 reg [31:0] tap_byte_addr;
 reg [31:0] tap_araddr;     // registered m_araddr; pipelined from TAP0_CALC
-reg [21:0] tap_pos;
-reg [21:0] tap_nxt_pos;    // post-wrap nxt sample idx (used to update pos_latch)
 reg [21:0] tap_nxt_raw;    // pos+1 pre-wrap-clamp; pipeline register between
                            //   TAP0_CALC and BURST_DECIDE so the 22-bit
                            //   adder isn't chained with the 2× compares
@@ -615,10 +607,6 @@ reg        adv_check_wrap;
 // overflow across 32 voices).
 reg signed [31:0] accum_l, accum_r;
 
-// Volume-ramped new values (written back to VTBL_VOL_LR).
-reg [7:0] ramp_new_l, ramp_new_r;
-reg       ramp_changed;
-
 function [7:0] ramp_step;
     input [7:0] cur;
     input [7:0] tgt;
@@ -651,7 +639,6 @@ always @(posedge clk) begin
     if (!reset_n) begin
         state            <= S_IDLE;
         cur_voice        <= 5'd0;
-        next_voice       <= 5'd0;
         accum_l          <= 32'sd0;
         accum_r          <= 32'sd0;
         m_arvalid        <= 1'b0;
@@ -672,7 +659,6 @@ always @(posedge clk) begin
             accum_l    <= 32'sd0;
             accum_r    <= 32'sd0;
             cur_voice  <= 5'd0;
-            next_voice <= 5'd0;
             state      <= S_START_SAMPLE;
         end
     end
@@ -715,7 +701,6 @@ always @(posedge clk) begin
     end
 
     S_RD_BASE_W: begin
-        cur_base_byte <= vtbl_a_q;
         voice_base    <= sample_pool_base + vtbl_a_q;   // hoist pool+base add
         vtbl_a_addr   <= {cur_voice, VTBL_RATE};
         state         <= S_RD_RATE_W;
@@ -796,7 +781,6 @@ always @(posedge clk) begin
         if (cur_pos_int >= cur_length) begin
             state <= S_VOICE_END;
         end else begin
-            tap_pos       <= cur_pos_int;
             tap_byte_addr <= sample_byte_addr(voice_base, cur_pos_int, cur_stereo);
             tap_araddr    <= word_aligned(sample_byte_addr(voice_base, cur_pos_int, cur_stereo));
             tap_nxt_raw   <= cur_pos_int + 22'd1;
@@ -829,7 +813,6 @@ always @(posedge clk) begin
                             && (cur_stereo || cur_pos_int[0]);
         burst_mode_seam  <= wrap_only && !clamp_after_wrap;
         burst_mode_dup   <= clamp_after_wrap;
-        tap_nxt_pos      <= nxt;
         state            <= S_FETCH_TAP0_AR;
     end
 

@@ -269,8 +269,7 @@ axi_sdram_arbiter sdram_arb (
     .s_wlast  (arb_wlast),
     .s_bvalid (arb_bvalid),  .s_bresp  (arb_bresp),
 
-    // Debug taps wired to gpu_core dbg_frag (and to the harness via
-    // dbg_arb_state below — same signal as the hierarchical reference).
+    // Debug taps kept for the harness.
     .dbg_arb_state(tb_arb_state_dbg),
     .dbg_cpu_pending(tb_arb_cpu_pending_dbg),
     .dbg_grant(tb_arb_grant_dbg)
@@ -640,18 +639,6 @@ gpu_core gpu (
     .gpu_swap_req(gpu_swap_req),
     .gpu_swap_idx(gpu_swap_idx),
     .slave_swap_pending(slave_swap_pending),
-    // Arbiter visibility (surfaced via MMIO 0x30 dbg_frag bits 28:27/29)
-    .arb_state_dbg(tb_arb_state_dbg),
-    .cpu_pending_dbg(tb_arb_cpu_pending_dbg),
-    // Composed bus debug (MMIO 0x38) — see core_top.v for layout.
-    .dbg_bus({8'b0,
-              tb_arb_cpu_pending_dbg,
-              tb_arb_state_dbg,
-              tb_arb_grant_dbg,
-              1'b0,                       // mixer (M3) tied off in tb_system
-              cpu_sdram_awvalid,
-              cpu_sdram_arvalid,
-              tb_sdram_slave_dbg}),
     // Status
     .busy        (),
     .fence_reached()

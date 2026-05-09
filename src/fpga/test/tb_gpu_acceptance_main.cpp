@@ -176,7 +176,6 @@ enum {
     REG_TRANSLUC_DATA = 9,
     REG_TEX_FLUSH     = 10,
     REG_DMA_KICK      = 11,
-    REG_AW_HANDSHAKE  = 14,
 };
 
 /* Mirror the SDK's _gpu_ring_ensure DMA-busy guard: any subsequent
@@ -1667,6 +1666,37 @@ static void test_clear_color_replication() {
     }
 }
 
+static void test_clear_drains_framebuffer_writes() {
+    printf("TEST clear_drains_framebuffer_writes\n");
+    gpu_init();
+    auto m = preload_with_sentinel();
+    cmd_set_fb(FB_BASE_BYTE, 320);
+    m.st_fb_addr = FB_BASE_BYTE;
+
+    uint32_t aw_before = tb->dbg_aw_count;
+    cmd_clear(0x1, 0x5A);
+    m.apply_clear(0x1, 0x5A);
+    if (!submit_and_wait()) {
+        check_fail("clear_drains_framebuffer_writes", "timeout");
+        return;
+    }
+
+    compare_fb_region("clear_drains_framebuffer_writes.fb", m, FB_BASE_BYTE, 320,
+                      0, 0, 320, 200);
+
+    uint32_t aw_after = tb->dbg_aw_count;
+    uint32_t aw_writes = aw_after - aw_before;
+    const uint32_t clear_words = (320u * 200u) / 4u;
+    if (aw_writes > 0 && aw_writes <= clear_words) {
+        check_pass("clear_drains_framebuffer_writes.aw_count");
+    } else {
+        char buf[128];
+        snprintf(buf, sizeof(buf), "AW handshakes=%u expected 1..%u",
+                 aw_writes, clear_words);
+        check_fail("clear_drains_framebuffer_writes.aw_count", buf);
+    }
+}
+
 static void test_clear_no_op_when_flag_clear() {
     printf("TEST clear_no_op_when_flag_clear\n");
     gpu_init();
@@ -2404,7 +2434,7 @@ static void test_span4_aligned_coalesces_row_writes() {
         q.light[lane] = (uint8_t)lane;
     }
 
-    uint32_t aw_before = mmio_read(REG_AW_HANDSHAKE);
+    uint32_t aw_before = tb->dbg_aw_count;
     emit_span4_raw(q);
     m.apply_span4_affine(q);
     if (!submit_and_wait()) {
@@ -2415,7 +2445,7 @@ static void test_span4_aligned_coalesces_row_writes() {
     compare_fb_region("span4_aligned_coalesces_row_writes.fb", m,
                       FB_BASE_BYTE, 320, 8, 40, 4, q.count);
 
-    uint32_t aw_after = mmio_read(REG_AW_HANDSHAKE);
+    uint32_t aw_after = tb->dbg_aw_count;
     uint32_t writes = aw_after - aw_before;
     if (writes == q.count) {
         check_pass("span4_aligned_coalesces_row_writes.aw_count");
@@ -3158,6 +3188,7 @@ int main(int argc, char **argv) {
     test_set_skip_zero_does_not_affect_direct_spans();
     test_set_skip_zero_affects_triangle_spans();
     test_clear_color_replication();
+    test_clear_drains_framebuffer_writes();
     test_clear_no_op_when_flag_clear();
     test_clear_does_not_touch_rows_200_to_239();
     test_clear_rect_edge_lanes();

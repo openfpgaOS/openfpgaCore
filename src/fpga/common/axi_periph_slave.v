@@ -437,31 +437,6 @@ reg fb_swap_pending;
 assign fb_swap_pending_o = fb_swap_pending;
 reg term_fb_active;  // 1=scanout reads terminal FB, 0=app triple-buffered FB
 
-// Debug counters for the GPU-triggered flip pipeline.  Exposed via
-// SYSREG 0xC0 (live state snapshot) and 0xC4 (event counters).  Used
-// to root-cause cases where display goes blank under non-blocking
-// kernel acquire_next + RTL stall.
-reg [15:0] dbg_gpu_swap_count;     // gpu_swap_req pulse count (rolling)
-reg [15:0] dbg_vsync_count;        // vsync_rising count (rolling)
-reg [1:0]  dbg_gpu_idx_last;       // last idx the GPU pulsed for
-reg [7:0]  dbg_kernel_swap_count;  // kernel sysreg FB_SWAP_CTRL writes
-
-// Bus-stream diagnostics — added for cr-gpu-and-tri-wedges issue 1
-// to localize the GPU_RING_DATA wedge.  All saturating to avoid
-// wrap-around hiding low-rate symptoms; readable via MMIO 0xE4-0xF0.
-//   awready_count : every AW handshake on this slave.
-//   wready_count  : every W beat handshake on this slave.
-//   bvalid_count  : every B response sent to the master.
-//   wstall_cycles : cycles spent in S_WR_NEXT with no s_axi_wvalid
-//                   (i.e. AW captured, slave waiting for W to land).
-// awready ≈ bvalid + 1 in steady state.  wready / awready / bvalid
-// drifting apart → beats dropped.  wstall_cycles climbing with no
-// throughput → upstream (cpu_target_port / shim) stuck.
-reg [31:0] dbg_awready_count;
-reg [31:0] dbg_wready_count;
-reg [31:0] dbg_bvalid_count;
-reg [31:0] dbg_wstall_cycles;
-
 // VRR swap hold: skip N vsyncs before presenting a queued frame.
 // vrr_swap_hold_rtl comes from vrr_controller and is the value actually
 // loaded into the hold counter on every swap event. Fixed-rate adapter mode
@@ -809,14 +784,6 @@ always @(posedge clk) begin
         fb_swap_pending <= 1'b0;
         term_fb_active <= 1'b1;  // terminal FB visible by default at boot
         vrr_hold_counter <= 4'd0;
-        dbg_gpu_swap_count <= 16'd0;
-        dbg_vsync_count    <= 16'd0;
-        dbg_gpu_idx_last   <= 2'd0;
-        dbg_kernel_swap_count <= 8'd0;
-        dbg_awready_count <= 32'd0;
-        dbg_wready_count  <= 32'd0;
-        dbg_bvalid_count  <= 32'd0;
-        dbg_wstall_cycles <= 32'd0;
         pal_wr <= 0;
         pal_addr <= 0;
         pal_data <= 0;
@@ -935,7 +902,6 @@ always @(posedge clk) begin
                 7'b0_000110: if (req_wdata[0]) begin
                     fb_ready_idx <= req_wdata[2:1];
                     fb_swap_pending <= 1'b1;
-                    dbg_kernel_swap_count <= dbg_kernel_swap_count + 8'd1;
                 end
                 7'b0_001000: ds_slot_id_reg <= req_wdata[15:0];
                 7'b0_001001: ds_slot_offset_reg <= req_wdata;
@@ -1048,10 +1014,8 @@ always @(posedge clk) begin
         end
 
         // Vsync IRQ — set on every vsync rising edge, cleared by W1C at 0x9C
-        if (vsync_rising) begin
+        if (vsync_rising)
             vsync_irq_pending <= 1'b1;
-            dbg_vsync_count   <= dbg_vsync_count + 16'd1;
-        end
 
         // Triple buffer vsync swap (with VRR hold support).  Placed
         // BEFORE the GPU side-port so a same-cycle (gpu_swap_req &&
@@ -1075,8 +1039,6 @@ always @(posedge clk) begin
         if (gpu_swap_req) begin
             fb_ready_idx    <= gpu_swap_idx;
             fb_swap_pending <= 1'b1;
-            dbg_gpu_swap_count <= dbg_gpu_swap_count + 16'd1;
-            dbg_gpu_idx_last   <= gpu_swap_idx;
         end
 
         // Reload hold counter on EVERY swap event (CMD_FLIP path or
@@ -1088,19 +1050,6 @@ always @(posedge clk) begin
         if (gpu_swap_req || sysreg_swap_kick)
             vrr_hold_counter <= vrr_swap_hold_rtl;
 
-        // Bus-stream diagnostics (saturating).  Sample the AXI
-        // handshakes and S_WR_NEXT stalls so the kernel can read
-        // them via MMIO 0xE4-0xF0 to localize a wedge.  Lives in
-        // this always block (not the main FSM block) so they're
-        // single-driver — Quartus rejects multi-driver regs.
-        if (s_axi_awvalid && s_axi_awready && dbg_awready_count != 32'hFFFFFFFF)
-            dbg_awready_count <= dbg_awready_count + 32'd1;
-        if (s_axi_wvalid  && s_axi_wready  && dbg_wready_count  != 32'hFFFFFFFF)
-            dbg_wready_count  <= dbg_wready_count  + 32'd1;
-        if (s_axi_bvalid  && s_axi_bready  && dbg_bvalid_count  != 32'hFFFFFFFF)
-            dbg_bvalid_count  <= dbg_bvalid_count  + 32'd1;
-        if (state == S_WR_NEXT && !s_axi_wvalid && dbg_wstall_cycles != 32'hFFFFFFFF)
-            dbg_wstall_cycles <= dbg_wstall_cycles + 32'd1;
     end
 end
 
@@ -1180,45 +1129,22 @@ always @(*) begin
         // path useful even now that the CPU no longer drives them.
         7'b0_110111: sysreg_rdata = {22'b0, vrr_v_total};             // VRR_V_TOTAL (0xDC)
         7'b0_111000: sysreg_rdata = {28'b0, vrr_swap_hold_rtl};       // VRR_SWAP_HOLD (0xE0)
-        // Bus-stream counters for cr-gpu-and-tri-wedges issue 1.
-        // Read these in a tight pre-and-post loop around the
-        // suspected wedge sequence; any drift between awready and
-        // bvalid points at the slave dropping a beat, and a high
-        // wstall_cycles with no progress points at upstream stalling
-        // the W channel (cpu_target_port / cpu_system shim).
-        7'b0_111001: sysreg_rdata = dbg_awready_count;                // PERIPH_AWREADY_COUNT (0xE4)
-        7'b0_111010: sysreg_rdata = dbg_wready_count;                 // PERIPH_WREADY_COUNT  (0xE8)
-        7'b0_111011: sysreg_rdata = dbg_bvalid_count;                 // PERIPH_BVALID_COUNT  (0xEC)
-        7'b0_111100: sysreg_rdata = dbg_wstall_cycles;                // PERIPH_WSTALL_CYCLES (0xF0)
-        // Debug snapshot of the swap pipeline (SYSREG 0xC0):
-        //   bit  0     : fb_swap_pending
-        //   bits 2:1   : fb_display_idx
-        //   bits 4:3   : fb_ready_idx
-        //   bits 8:5   : vrr_hold_counter
-        //   bits 16:9  : kernel-side FB_SWAP_CTRL writes (rolling 8-bit)
-        //   bits 18:17 : last gpu_swap_req idx
-        //   bit  19    : term_fb_active (1 = scanout reads TERM_FB instead of app FBs)
+        7'b0_111001: sysreg_rdata = 32'b0;                            // 0xE4 reserved/read-zero in area mode
+        7'b0_111010: sysreg_rdata = 32'b0;                            // 0xE8 reserved/read-zero in area mode
+        7'b0_111011: sysreg_rdata = 32'b0;                            // 0xEC reserved/read-zero in area mode
+        7'b0_111100: sysreg_rdata = 32'b0;                            // 0xF0 reserved/read-zero in area mode
+        // Live swap state (SYSREG 0xC0). Legacy event counters were
+        // retired in area mode; their bit positions read as zero.
         7'b0_110000: sysreg_rdata = {12'b0,
                                      term_fb_active,
-                                     dbg_gpu_idx_last,
-                                     dbg_kernel_swap_count,
+                                     2'b0,
+                                     8'b0,
                                      vrr_hold_counter,
                                      fb_ready_idx,
                                      fb_display_idx,
                                      fb_swap_pending};
-        // Debug counters (SYSREG 0xC4):
-        //   bits 15:0  : gpu_swap_req pulse count (rolling 16-bit)
-        //   bits 31:16 : vsync_rising count (rolling 16-bit)
-        7'b0_110001: sysreg_rdata = {dbg_vsync_count, dbg_gpu_swap_count};
-        // CRAM0 bridge write FIFO occupancy (SYSREG 0xC8):
-        //   bit 31      : sticky overflow
-        //   bits 26:16  : max observed occupancy since reset
-        //   bits 10:0   : current occupancy
-        7'b0_110010: sysreg_rdata = {bridge_wr_fifo_overflow_dbg,
-                                     4'b0,
-                                     bridge_wr_fifo_max_dbg,
-                                     5'b0,
-                                     bridge_wr_fifo_count_dbg};
+        7'b0_110001: sysreg_rdata = 32'b0;                            // 0xC4 reserved/read-zero in area mode
+        7'b0_110010: sysreg_rdata = 32'b0;                            // 0xC8 reserved/read-zero in area mode
         // Datatable slot size query (0x90): bit 31 = valid, bits 30:0 = data
         7'b0_100100: sysreg_rdata = {dt_query_valid, dt_query_data[30:0]};
         // Bridge debug (0x94): internal latch state for diagnosing DMA hangs
@@ -1380,7 +1306,6 @@ reg [2:0] state;
 reg [31:0] req_addr;
 reg [31:0] req_wdata;
 reg [3:0]  req_wstrb;
-reg        is_write;
 reg [7:0]  burst_len;
 reg [7:0]  burst_count;
 // awburst latched at AW handshake.  00 = FIXED → req_addr is held for
@@ -1500,7 +1425,6 @@ always @(posedge clk or posedge reset) begin
         req_addr <= 0;
         req_wdata <= 0;
         req_wstrb <= 0;
-        is_write <= 0;
         burst_len <= 0;
         burst_count <= 0;
         awburst_latched <= 2'b01;  // INCR by default
@@ -1569,7 +1493,6 @@ always @(posedge clk or posedge reset) begin
             // beat is still draining — would smash held rvalid/rdata.
             if (s_axi_arvalid && !s_axi_rvalid) begin
                 s_axi_arready <= 1;
-                is_write <= 0;
                 req_addr <= ar_addr;
                 burst_len <= s_axi_arlen;
                 burst_count <= 0;
@@ -1605,7 +1528,6 @@ always @(posedge clk or posedge reset) begin
 
             end else if (s_axi_awvalid) begin
                 s_axi_awready <= 1;
-                is_write <= 1;
                 req_addr <= aw_addr;
                 burst_len <= s_axi_awlen;
                 burst_count <= 0;

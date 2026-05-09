@@ -66,10 +66,10 @@ module axi_sdram_slave (
     output wire [31:0] sdram_next_wdata,   // Pre-staged next word (combinational)
     output wire [3:0]  sdram_next_wstrb,
 
-    // Debug observability — surfaced into gpu_core MMIO 0x38.  When
-    // the arbiter is stuck in ST_WR (dbg_frag bits 28:27 == 2) and no
-    // s_bvalid is being produced, this tells us which slave state
-    // owns the wedge and whether sdram_busy / wr_busy_seen are stuck.
+    // Debug observability for simulation/debug harnesses.  When the
+    // arbiter is stuck in ST_WR and no s_bvalid is being produced,
+    // this tells us which slave state owns the wedge and whether
+    // sdram_busy / wr_busy_seen are stuck.
     //   bits 3:0   = state (0=IDLE,1=RD_CMD,2=RD_DAT,3=WR_CMD,
     //                4=WR_DON,5=WR_NEXT,6=WR_BURST)
     //   bit  4     = sdram_busy
@@ -465,8 +465,8 @@ always @(posedge clk or posedge reset) begin
             // slave starves under load (~8 fps in Duke3D, fbss=FLUSH_W_RSP
             // wedge).  Use sdram_wr_done pulse instead: it fires exactly
             // when io_sdram's ST_WRITE_4→ST_IDLE for THIS write, immune
-            // to subsequent contention.  wr_busy_seen kept as a sanity
-            // tap for dbg_bus.
+            // to subsequent contention.  wr_busy_seen remains visible
+            // through the local debug tap.
             if (sdram_busy) wr_busy_seen <= 1;
             if (sdram_wr_done) wr_op_done_seen <= 1;
             if (started && (wr_op_done_seen || sdram_wr_done)) begin

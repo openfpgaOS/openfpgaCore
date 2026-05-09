@@ -7915,15 +7915,10 @@ static void test_mwr_inflight_bound(void) {
 
     gpu_init();
 
-    /* m_wr_inflight = AWVALID handshakes - BVALID beats.
-     *   reg_addr 14 (0x38) = awvalid_handshake_count
-     *   reg_addr 13 (0x34) = bvalid_count
-     * Slave is single-outstanding, so inflight should stay ≤ 1 in
-     * steady state and ≤ 4 even under back-pressure. */
+    /* Hardware area mode retired the 32-bit AW/B counters.  reg_addr 13
+     * now exposes the compact current m_wr_inflight value directly. */
     auto read_mwr = [&]() -> uint32_t {
-        uint32_t awv = mmio_read(14);
-        uint32_t bv  = mmio_read(13);
-        return awv - bv;
+        return mmio_read(13) & 0xFu;
     };
 
     ring_cmd(0x23, 2);                       /* CMD_SET_FB */

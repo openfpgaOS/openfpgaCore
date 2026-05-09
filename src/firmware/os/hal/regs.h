@@ -133,21 +133,13 @@
 
 /* CMD_FLIP debug counters — 32-bit free-running, reset on hard reset.
  * Read pre/post-frame deltas to localise where CMD_FLIP stalls:
- *   - FLIP_ENTER counts CMD_FLIP commands the GPU dequeued
- *   - FLIP_DRAIN_DONE counts drain completions inside S_EXECUTE
- *   - FLIP_SWAP_PULSE counts gpu_swap_req assertions
- * In a healthy run all three move in lockstep, while BVALID == AWVALID
- * after each frame's m_wr drain.  Divergence localises the bug:
- *   ENTER > DRAIN_DONE       → drain never completes (m_wr_inflight stuck)
- *   DRAIN_DONE > SWAP_PULSE  → impossible (same RTL block); RTL bug
- *   AWVALID > BVALID         → slave dropped a B beat (the original Stage 1
- *                              saw-busy starvation class); m_wr_inflight
- *                              underflows or wedges
- *   BVALID > AWVALID         → spurious B (would underflow the counter) */
+ * Area mode retired the old 32-bit FLIP/AW/B counters.  0x34 now exposes
+ * the low 4 bits of the current GPU framebuffer write inflight count; the
+ * other debug counter slots read as zero. */
 #define GPU_DBG_FLIP_ENTER_REG       REG32(0x4a000028u)
 #define GPU_DBG_FLIP_DRAIN_DONE_REG  REG32(0x4a00002Cu)
 #define GPU_DBG_FLIP_SWAP_PULSE_REG  REG32(0x4a000030u)
-#define GPU_DBG_BVALID_REG           REG32(0x4a000034u)
+#define GPU_DBG_BVALID_REG           REG32(0x4a000034u) /* low 4 bits: m_wr_inflight */
 #define GPU_DBG_AWVALID_REG          REG32(0x4a000038u)
 #define GPU_DBG_SELECT_REG           REG32(0x4a00003Cu)
 
@@ -157,12 +149,10 @@
  *     bits 2:1   : fb_display_idx
  *     bits 4:3   : fb_ready_idx
  *     bits 8:5   : vrr_hold_counter
- *     bits 16:9  : kernel FB_SWAP_CTRL writes (rolling 8-bit)
- *     bits 18:17 : last gpu_swap_req idx
+ *     bits 16:9  : zero, retired event counter
+ *     bits 18:17 : zero, retired last gpu_swap_req idx
  *     bit  19    : term_fb_active (1 = scanout reads terminal FB)
- *   FB_SWAP_DBG_CNTS   (0xC4):
- *     bits 15:0  : gpu_swap_req pulse count (rolling 16-bit)
- *     bits 31:16 : vsync_rising count       (rolling 16-bit) */
+ *   FB_SWAP_DBG_CNTS   (0xC4): zero, retired in area mode */
 #define FB_SWAP_DBG_LIVE   REG32(SYSREG_BASE + 0xC0)
 #define FB_SWAP_DBG_CNTS   REG32(SYSREG_BASE + 0xC4)
 

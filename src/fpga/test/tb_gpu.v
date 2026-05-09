@@ -28,6 +28,7 @@ module tb_gpu (
     output wire [5:0]  dbg_setup_step,
     output wire [31:0] dbg_tri_det,
     output wire [31:0] dbg_frag,
+    output reg  [31:0] dbg_aw_count,
 
     // CMD_FLIP side-port (observed by C++ harness for the drain test)
     output wire        gpu_swap_req,
@@ -100,13 +101,9 @@ gpu_core gpu (
     // CMD_FLIP side-port
     .gpu_swap_req(gpu_swap_req),
     .gpu_swap_idx(gpu_swap_idx),
-    // External diagnostic inputs (stubbed in tb_gpu since there's no
-    // arbiter/slave instantiated — only the drain test drives
-    // slave_swap_pending from the C++ harness).
+    // External backpressure input (only the drain test drives it from
+    // the C++ harness).
     .slave_swap_pending(slave_swap_pending),
-    .arb_state_dbg(2'b0),
-    .cpu_pending_dbg(1'b0),
-    .dbg_bus(32'b0),
     // MMIO
     .reg_wr(reg_wr),
     .reg_addr(reg_addr),
@@ -188,11 +185,13 @@ always @(posedge clk) begin
     if (!reset_n) begin
         wr_aw_active <= 0;
         wr_b_pending <= 0;
+        dbg_aw_count <= 0;
     end else begin
         // Accept AW
         if (!wr_aw_active && !wr_b_pending && gpu_wr_awvalid) begin
             wr_aw_active <= 1;
             wr_addr      <= gpu_wr_awaddr[25:2];
+            dbg_aw_count <= dbg_aw_count + 32'd1;
         end
 
         // Accept W beats

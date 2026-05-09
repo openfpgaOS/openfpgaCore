@@ -136,9 +136,7 @@ module axi_sdram_arbiter #(
     input  wire        s_bvalid,
     input  wire [1:0]  s_bresp,
 
-    // Debug observability — surfaced into gpu_core.dbg_frag (MMIO 0x30)
-    // so the kernel can see whether GPU's M0 AW is parked behind a
-    // sticky CPU/audio transaction without rebuilding bit layouts.
+    // Debug observability for simulation/debug harnesses.
     //   dbg_arb_state: 0=IDLE, 1=RD, 2=WR
     //   dbg_cpu_pending: m1_arvalid|m1_awvalid (CPU has a request out)
     //   dbg_grant: 0=GPU(M0), 1=CPU(M1), 2=AudioDMA(M2), 3=AudioMix(M3)

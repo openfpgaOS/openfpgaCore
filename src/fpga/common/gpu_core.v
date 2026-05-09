@@ -68,15 +68,7 @@ module gpu_core (
     output reg         gpu_swap_req,
     output reg  [1:0]  gpu_swap_idx,
 
-    // ================================================================
-    // External diagnostic inputs — composed in core_top from arbiter +
-    // io_sdram + slave debug taps.  Currently only surfaced as MMIO
-    // reads for kernel debug; not used for control.
-    // ================================================================
     input  wire        slave_swap_pending,    // CMD_FLIP backpressure from display slave
-    input  wire [1:0]  arb_state_dbg,         // SDRAM arb state (0=IDLE,1=RD,2=WR)
-    input  wire        cpu_pending_dbg,       // CPU has AR or AW pending
-    input  wire [31:0] dbg_bus,               // composed bus diag for MMIO 0x38
 
     // ================================================================
     // Status outputs
@@ -137,10 +129,10 @@ assign dbg_frag = {sp_count[7:0],
 // 0x24  GPU_TRANSLUC_DATA W / texture-cache miss counter R
 // 0x28  GPU_TEX_FLUSH     W   Flush texture cache (write any value)
 // 0x2C  GPU_DMA_KICK      W   Write 1 to fire DMA pull from (SRC, LEN)
-// 0x30  GPU_DBG_SWAP_PULSE R   CMD_FLIP swap pulse counter
-// 0x34  GPU_DBG_BVALID     R   FB write response counter
-// 0x38  GPU_DBG_AWVALID    R   FB write address handshake counter
-// 0x3C  GPU_DBG_SELECT     W/R Indexed fragment stall counter selector/data
+// 0x30  Reserved/read-zero in area mode
+// 0x34  GPU_DBG_WR_INFLIGHT R Low 4 bits = outstanding FB write responses
+// 0x38  Reserved/read-zero in area mode
+// 0x3C  GPU_DBG_SELECT     Reserved/read-zero in area mode
 //
 // DMA pull semantics: fabric-side AXI INCR-burst read of LEN words from
 // SRC, streamed into the ring BRAM at the auto-incrementing wr_addr,
@@ -170,15 +162,6 @@ reg [14:0] transluc_wr_addr;   // Auto-increment byte address into transluc[]
 reg        tex_flush_req;      // Pulse to flush texture cache
 reg        soft_reset;         // Pulse: resets FSM state + ring pointers
 reg        ring_reset;         // Pulse: reset ring_rdptr (from MMIO, consumed by FSM)
-reg [3:0]  stall_dbg_select;   // MMIO 0x3C selector for fragment stall counters
-
-localparam GPU_STALL_TEX_WAIT    = 4'd0;
-localparam GPU_STALL_CMAP_WAIT   = 4'd1;
-localparam GPU_STALL_CMAP_ISSUE  = 4'd2;
-localparam GPU_STALL_FBSS_BUSY   = 4'd3;
-localparam GPU_STALL_FB_WRITE    = 4'd4;
-localparam GPU_STALL_INFLIGHT    = 4'd5;
-localparam GPU_STALL_PERSP_WAIT  = 4'd6;
 
 // ---- Doorbell-DMA pull from SDRAM into ring BRAM ----
 // Latched on MMIO writes; consumed by the dedicated DMA FSM below.
@@ -309,7 +292,6 @@ always @(posedge clk) begin
         tex_flush_req   <= 0;
         soft_reset      <= 0;
         ring_reset      <= 0;
-        stall_dbg_select <= 4'd0;
         dma_src_latched <= 32'd0;
         dma_len_latched <= 13'd0;
         dma_kick        <= 1'b0;
@@ -369,9 +351,7 @@ always @(posedge clk) begin
                     if (reg_wdata[0] && dma_state == DMA_S_IDLE)
                         dma_kick <= 1'b1;
                 end
-                4'd15: begin // GPU_DBG_SELECT — indexed stall counter
-                    stall_dbg_select <= reg_wdata[3:0];
-                end
+                4'd15: begin end // GPU_DBG_SELECT retired in area mode
                 default: ;
             endcase
         end
@@ -403,26 +383,14 @@ always @(*) begin
         4'd6:    reg_rdata = fence_reached;
         4'd8:    reg_rdata = tex_dbg_req_count;
         4'd9:    reg_rdata = tex_dbg_miss_count;
-        // CMD_FLIP debug counters — see reg-decl block above for layout.
-        // Reads at 4'd10 / 4'd11 are non-destructive; the same addresses
-        // accept writes that pulse tex_flush / dma_kick respectively.
-        4'd10:   reg_rdata = cmd_flip_enter_count;
-        4'd11:   reg_rdata = cmd_flip_drain_done_count;
-        4'd12:   reg_rdata = swap_pulse_count;
-        4'd13:   reg_rdata = bvalid_count;
-        4'd14:   reg_rdata = awvalid_handshake_count;
-        4'd15: begin
-            case (stall_dbg_select)
-                GPU_STALL_TEX_WAIT:    reg_rdata = stall_tex_wait_count;
-                GPU_STALL_CMAP_WAIT:   reg_rdata = stall_cmap_wait_count;
-                GPU_STALL_CMAP_ISSUE:  reg_rdata = stall_cmap_issue_count;
-                GPU_STALL_FBSS_BUSY:   reg_rdata = stall_fbss_busy_count;
-                GPU_STALL_FB_WRITE:    reg_rdata = stall_fb_write_count;
-                GPU_STALL_INFLIGHT:    reg_rdata = stall_inflight_count;
-                GPU_STALL_PERSP_WAIT:  reg_rdata = stall_persp_wait_count;
-                default:               reg_rdata = 32'b0;
-            endcase
-        end
+        // Legacy flip/write counters retired to recover LABs. Keep a
+        // compact current-inflight readback for the write-balance test.
+        4'd10:   reg_rdata = 32'b0;
+        4'd11:   reg_rdata = 32'b0;
+        4'd12:   reg_rdata = 32'b0;
+        4'd13:   reg_rdata = {28'b0, m_wr_inflight};
+        4'd14:   reg_rdata = 32'b0;
+        4'd15:   reg_rdata = 32'b0; // Stall counters retired to recover ALMs.
         default: reg_rdata = 32'b0;
     endcase
 end
@@ -1013,8 +981,7 @@ localparam CMD_SET_SKIP_ZERO  = 8'h27;  // 1-word payload: global SKIP_ZERO enab
 localparam CMD_SET_COLORMAP_ID = 8'h28; // 1-word payload: [3:0] = palookup slot
                                          // (selects which 16-KB palookup
                                          // page in SDRAM the cmap reads
-                                         // index into; see PALOOKUP_BASE
-                                         // / PALOOKUP_STRIDE below)
+                                         // index into; see PALOOKUP_BASE below)
 
 // ================================================================
 // GPU State Registers (sticky, set by SET_* commands)
@@ -1060,7 +1027,8 @@ reg [7:0]  sp_flags;
 reg [3:0]  sp_colormap_id;
 reg signed [15:0] sp_fb_stride;
 reg [15:0] sp_tex_width;
-// POT wrap masks: sp_s_int & sp_tex_w_mask, sp_t_int & sp_tex_h_mask
+// POT wrap masks: (sp_s[31:16] & sp_tex_w_mask) and
+// (sp_t[31:16] & sp_tex_h_mask)
 // before the address math.  Default 16'hFFFF (no-op) so callers that
 // don't set word 8 see the legacy multiply-mode behaviour.  The masks
 // reproduce BUILD's hlineasm4 shift-mode wrap exactly when tex_w/tex_h
@@ -1143,24 +1111,10 @@ localparam S_RING_WAIT      = 6'd2;  // 1-cycle BRAM read latency
 localparam S_DECODE         = 6'd3;
 localparam S_PAY_DATA       = 6'd5;  // 1 word/cycle from BRAM
 localparam S_EXECUTE        = 6'd6;
-localparam S_SPAN_PIXEL     = 6'd7;
-localparam S_SPAN_TEX_REQ   = 6'd8;
-localparam S_SPAN_TEX_WAIT  = 6'd9;
-localparam S_SPAN_CMAP      = 6'd10;
-localparam S_SPAN_CMAP_WAIT = 6'd11;
-localparam S_SPAN_ZREAD     = 6'd12;
-localparam S_SPAN_ZWAIT     = 6'd13;
-localparam S_SPAN_ZCMP      = 6'd14;
-localparam S_SPAN_ZWWAIT    = 6'd15;
-localparam S_SPAN_FB        = 6'd16;
-localparam S_SPAN_STEP      = 6'd17;
 localparam S_FB_FLUSH       = 6'd18;
-localparam S_FB_FLUSH_WAIT  = 6'd19;
 localparam S_CLEAR_INIT     = 6'd20;
 localparam S_CLEAR_FB       = 6'd21;
-localparam S_CLEAR_FB_WAIT  = 6'd22;
 // 6'd23/24 (S_CLEAR_ZB / S_CLEAR_ZB_WAIT) retired with the Z-buffer.
-localparam S_SPAN_TEX_CALC = 6'd25;  // Pipeline stage 2: finish tex addr
 
 // Triangle rasterisation states
 localparam S_TRI_LOAD      = 6'd26;  // Extract vertices from payload
@@ -1184,7 +1138,6 @@ localparam S_TRI_PERSP_PREMUL = 6'd38; // (Phase 4c.2) Pre-multiply v_s × v_w, 
 // payload instead of the hardcoded 320×200 extent.
 localparam S_CLEAR_RECT       = 6'd39;  // entry: per-row setup (no-op if h=0)
 localparam S_CLEAR_RECT_WORD  = 6'd40;  // emit AXI write for current word
-localparam S_CLEAR_RECT_WAIT  = 6'd41;  // wait for AXI bvalid; advance addr/row
 
 reg [5:0] state;
 
@@ -1230,33 +1183,6 @@ wire span4_row_major = span4_active && (span4_fb_base[1:0] == 2'd0);
 // commit to SDRAM.  4 bits is plenty (typical inflight is 1-3).
 reg [3:0] m_wr_inflight;
 
-// CMD_FLIP diagnostic counters — surfaced via MMIO 0x28-0x38.  These
-// are saturation-free 32-bit free-running counters; the CPU reads
-// pre/post-frame deltas to localise where CMD_FLIP stalls.
-//   cmd_flip_enter_count       — S_DECODE saw cmd_type==CMD_FLIP (per command)
-//   cmd_flip_drain_done_count  — S_EXECUTE drain completed for cmd_is_flip
-//   swap_pulse_count           — gpu_swap_req asserted (should equal drain_done)
-//   bvalid_count               — m_wr_bvalid pulses observed
-//   awvalid_handshake_count    — m_wr_awvalid && m_wr_awready handshakes
-reg [31:0] cmd_flip_enter_count;
-reg [31:0] cmd_flip_drain_done_count;
-reg [31:0] swap_pulse_count;
-reg [31:0] bvalid_count;
-reg [31:0] awvalid_handshake_count;
-
-// Fragment-pipe stall counters — surfaced through MMIO 0x3C using
-// stall_dbg_select.  These count cycles while S_FRAG_PIPE cannot issue
-// or advance for each specific reason. Categories may overlap except
-// perspective, which only counts when perspective setup is the issue
-// stage blocker after the rest of the pipe is clear.
-reg [31:0] stall_tex_wait_count;
-reg [31:0] stall_cmap_wait_count;
-reg [31:0] stall_cmap_issue_count;
-reg [31:0] stall_fbss_busy_count;
-reg [31:0] stall_fb_write_count;
-reg [31:0] stall_inflight_count;
-reg [31:0] stall_persp_wait_count;
-
 // Latched payload for CMD_FENCE / CMD_FLIP — published only after
 // m_wr_inflight drains in S_EXECUTE.  Pre-CR the fence token was
 // written to fence_reached directly in S_PAY_DATA, which raced with
@@ -1277,7 +1203,7 @@ reg        st_skip_zero;
 reg [3:0]  st_colormap_id;
 
 // SDRAM address layout for palookups.  PALOOKUP_BASE is the byte offset of
-// slot 0; PALOOKUP_STRIDE is the spacing between slots.  Each slot is the
+// slot 0; slots are spaced 16 KB apart.  Each slot is the
 // same 16 KB shape as the original on-chip cmap_bram (32 shade rows × 256
 // entries × 2 bytes = 16 KB Quake-shape; Duke3D uses 32 × 256 × 1 byte =
 // 8 KB but pads to 16 KB so the slot index multiplier is a clean shift).
@@ -1290,7 +1216,6 @@ reg [3:0]  st_colormap_id;
 // between heap end (0x13400000) and sample pool start (0x13700000).
 // Keep in sync with OF_GPU_PALOOKUP_AXI_OFFSET in firmware/api/of_gpu.h.
 localparam [25:0] PALOOKUP_BASE   = 26'h3400000;  // 52 MB into SDRAM
-localparam [25:0] PALOOKUP_STRIDE = 26'h0004000;  // 16 KB per slot
 
 // Payload streaming state — ring_rd_data is routed directly to each
 // destination reg in S_PAY_DATA; no intermediate pay_buf array.
@@ -1300,11 +1225,6 @@ reg [4:0]  pay_idx;
 reg [23:0] pay_remaining;  // total payload words still to consume from the ring
                            // (matches cmd_payload_words width so multi-triangle
                            //  commands drain completely without desyncing the ring)
-
-// Current pixel state
-reg [7:0]  frag_texel;        // Texel value (I8)
-reg [15:0] frag_color;        // Output color (after colormap / combine)
-reg        frag_discard;      // Alpha test / skip-zero result
 
 // ================================================================
 // Pipelined Fragment Processor — stage registers
@@ -1330,8 +1250,8 @@ reg        frag_discard;      // Alpha test / skip-zero result
 // Stalls:
 //   * (p1_valid && !tex_resp_valid) — cache miss in flight, hold p1
 //   * (fbss != FBSS_IDLE)           — fb sub-FSM busy with a flush
-//   * fb_write_buffer_stall          — p3 crossed words while the one-entry
-//                                      AXI write buffer is still occupied
+//   * fb_write_buffer_stall          — p3 crossed words while the FB write
+//                                      queue has no free entry
 //
 // Source mode: 0 = SPAN (sp_*). Triangle source mode is reserved but the
 // triangle refactor is deferred to a later phase.
@@ -1358,7 +1278,6 @@ reg [31:0] p1_fb_addr;
 
 reg        p2_valid;
 reg [7:0]  p2_color;          // tex result
-reg [7:0]  p2_light;
 reg [7:0]  p2_flags;
 reg [31:0] p2_fb_addr;
 reg        p2_discard;        // skip-zero outcome
@@ -1380,7 +1299,6 @@ reg        p3_discard;
 
 // FB write sub-FSM (lives within S3, pauses pipeline when not IDLE)
 localparam FBSS_IDLE        = 4'd0;
-localparam FBSS_FLUSH_AW    = 4'd1;  // emit AW, then resume into accumulate
 localparam FBSS_FLUSH_W_RSP = 4'd2;  // wait for write-buffer AW/W acceptance
 // FBSS_ZREAD/ZWAIT/ZWRWAIT (3/4/5) retired with the Z-buffer in lean Phase 2.
 // Translucent-blend sub-flow.  Fragments with SPAN_TRANSLUC pass
@@ -1405,8 +1323,6 @@ reg [3:0] fbss;
 reg [7:0]  blend_src_color;       // shaded p3_color captured at entry
 reg [31:0] blend_word_addr;       // p3_word_addr captured at entry
 reg [1:0]  blend_byte_lane;       // p3_byte_lane captured at entry
-reg [7:0]  blend_p3_flags;        // captured for cross-word handling
-reg [31:0] blend_fb_word;         // SDRAM read result (or fb_acc merge)
 reg        blend_arvalid;
 reg [31:0] blend_araddr;
 // Pre-computed in FBSS_BLEND_LUT_WAIT (which otherwise just idles for
@@ -1428,10 +1344,6 @@ reg        tex_m0_in_flight;
 // (fbss_z_rdata removed — ZWAIT now launches the SRAM write in the same
 // cycle it sees the read response, so sram_rdata is live when we need it.)
 
-// Source mode: which input feeds S0 each cycle.
-localparam SRC_SPAN     = 1'b0;
-localparam SRC_TRIANGLE = 1'b1;
-reg src_mode;
 reg src_done;            // source has issued its last pixel; pipeline draining
 
 // ----------------------------------------------------------------
@@ -1454,14 +1366,35 @@ reg src_done;            // source has issued its last pixel; pipeline draining
 // On hit this is always 0 because resp_valid_b is high combinationally the
 // same cycle pipe_addr_b matches.  See gpu_tex_cache.v for the held-response
 // semantics this relies on.
-// Stage 2a: m_wr_inflight is 4 bits (max 15).  FBSS now exits on AW+W
-// handshake without waiting for B (multi-outstanding writes).  Cap at
-// 14 outstanding to prevent counter overflow if SDRAM is slow to drain.
+// Small write FIFO in front of the AXI write master.  Producers enqueue
+// 32-bit word writes; the drain path emits conservative single-beat AXI
+// writes so the framebuffer path does not depend on SDRAM burst-write
+// timing.
+localparam FBWQ_DEPTH = 2;
+reg [31:0] fbwq_addr [0:FBWQ_DEPTH-1];
+reg [31:0] fbwq_data [0:FBWQ_DEPTH-1];
+reg [3:0]  fbwq_strb [0:FBWQ_DEPTH-1];
+reg        fbwq_rd_ptr;
+reg        fbwq_wr_ptr;
+reg [1:0]  fbwq_count;
+wire       fbwq_empty = (fbwq_count == 2'd0);
+wire       fbwq_full  = (fbwq_count == 2'd2);
+
+// Stage 2b: framebuffer/clear writes enqueue into a compact FIFO and the
+// AXI write port drains it independently.  This lets the fragment pipe keep
+// coalescing pixels while the SDRAM slave has a short AW/W hiccup.  Keep the
+// outstanding-B cap at 14 to prevent the 4-bit counter from overflowing if
+// SDRAM is slow to drain.
 wire m_wr_inflight_near_full = (m_wr_inflight >= 4'd14);
 wire m_wr_chan_busy = m_wr_awvalid || m_wr_wvalid;
 wire m_wr_aw_done = !m_wr_awvalid || m_wr_awready;
 wire m_wr_w_done  = !m_wr_wvalid  || m_wr_wready;
-wire fb_write_can_issue = !m_wr_chan_busy && !m_wr_inflight_near_full;
+wire fbwq_drain_can_load = m_wr_aw_done && m_wr_w_done
+                         && !m_wr_inflight_near_full;
+wire fbwq_pop_now = !fbwq_empty && fbwq_drain_can_load;
+wire [1:0] fbwq_pop_count = fbwq_pop_now ? 2'd1 : 2'd0;
+wire fbwq_can_push = !fbwq_full || fbwq_pop_now;
+wire fb_write_can_issue = fbwq_can_push;
 wire p3_needs_fb_flush = p3_valid && !p3_discard && !p3_flags[SPAN_TRANSLUC]
                        && fb_acc_valid
                        && (fb_acc_addr[31:2] != p3_fb_addr[31:2]);
@@ -1739,10 +1672,10 @@ reg [3:0]  fb_acc_mask;       // Byte enables
 reg [31:0] fb_acc_addr;       // Word-aligned SDRAM address
 reg        fb_acc_valid;      // Has pending data
 
-// Clear state
-reg [1:0]  clear_flags;
-reg [15:0] clear_color;
-reg [15:0] clear_depth;
+// Clear state.  Z-clear is retired, so only the FB-enable bit and low byte
+// color are functional.
+reg        clear_fb_enable;
+reg [7:0]  clear_color;
 reg [31:0] clear_addr;
 reg [17:0] clear_remaining;   // Words remaining to clear
 
@@ -1776,9 +1709,8 @@ reg [7:0]  cr_color;
 // Triangle Registers
 // ================================================================
 
-// tri_active: 1 = fragment pipeline returns to triangle path. Read by span
-// states unconditionally; synthesizer folds
-// away `tri_active ? S_TRI_PIX : S_SPAN_STEP` to just `S_SPAN_STEP`.
+// tri_active: 1 = fragment pipeline returns to the triangle row walker.
+// The final primitive flush clears it before dispatching the next command.
 reg        tri_active;
 
 // Vertex data (extracted from pay_buf in S_TRI_LOAD)
@@ -1897,7 +1829,6 @@ reg [15:0]        tri_span_x_start;
 reg [15:0]        tri_span_count;
 reg signed [31:0] tri_span_s_start;
 reg signed [31:0] tri_span_t_start;
-reg signed [31:0] tri_span_z_start;
 // Phase 4c.3 — snapshot of tri_w at first inside pixel.  Used only on
 // perspective triangles (sp_zinv source for the SPAN_PERSP path).
 reg signed [31:0] tri_span_w_start;
@@ -1957,8 +1888,8 @@ reg signed [15:0] dX10, dY10, dX20, dY20;
 // grad_idx[0]:   0=dx (cross with Y axes),
 //                1=dy (cross with X axes, with sign flip)
 // ----------------------------------------------------------------
-// Depth (v_z) is an UNSIGNED 16-bit value — the z-buffer compares
-// (S_SPAN_ZWAIT) treat old_z/new_z as `reg [15:0]` unsigned.  Gradients
+// Depth (v_z) is an UNSIGNED 16-bit value; the retired z-buffer path treated
+// old_z/new_z as `reg [15:0]` unsigned.  Gradients
 // used sign-extend ({{16{v_z[i][15]}}, v_z[i]}), which flipped direction
 // on triangles whose min-z or max-z crossed 0x8000 — the delta came out
 // as a large negative 32-bit number and the interpolator walked away
@@ -2036,28 +1967,68 @@ end
 // ================================================================
 // Texture Address Computation — 2-stage pipeline (DSP-friendly)
 // ================================================================
-// Stage 1 (S_SPAN_PIXEL): register multiply INPUTS for DSP inference
-// Stage 2 (S_SPAN_TEX_CALC): DSP multiply + add, submit to cache
+// Stage 1: register multiply inputs for DSP inference.
+// Stage 2: DSP multiply + add, submit to cache.
 //
 // Multiply mode (tex_width > 0): addr = base + (t>>16)*width + (s>>16)
 // Shift mode (tex_width == 0):   addr = base + ((t>>shift)<<bits) | (s>>(32-bits))
 
-wire [15:0] sp_s_int = sp_s[31:16];
-wire [15:0] sp_t_int = sp_t[31:16];
-// tex_pipe_* / tex_mul_result / tex_addr_final removed along with the
-// sequential S_SPAN_* path they drove.  The pipelined fragment
-// processor uses tx_mul_q (the dedicated DSP-inferred register below)
-// for the per-pixel tex-coord multiply.
+// The pipelined fragment processor uses tx_mul_q (the dedicated
+// DSP-inferred register below) for the per-pixel tex-coord multiply.
+
+task finish_fragment_stream_after_flush;
+    begin
+        fb_acc_valid <= 1'b0;
+        fb_acc_mask  <= 4'b0;
+        if (tri_active)
+            tri_active <= 1'b0;
+
+        if (span4_active && !span4_row_major && span4_lane != 2'd3) begin
+            span4_lane <= span4_lane + 2'd1;
+            span4_load_lane(span4_lane + 2'd1);
+            persp_active      <= 1'b0;
+            persp_first_done  <= 1'b0;
+            persp_seg_a_ready <= 1'b0;
+            persp_seg_b_ready <= 1'b0;
+            persp_pss         <= PSS_IDLE;
+            persp_pass        <= PSS_PASS_ANCHOR;
+            sp_seg_left       <= 4'b0;
+            src_done          <= (span4_count == 16'd0);
+            state             <= S_FRAG_PIPE;
+        end else if (cmd_is_draw_span4_batch && pay_remaining > 24'd0) begin
+            ring_rdptr <= (ring_rdptr + 16'd4) & ring_mask;
+            state      <= S_PAY_DATA;
+        end else if (cmd_is_draw_spans_batch && pay_remaining > 24'd0) begin
+            ring_rdptr <= (ring_rdptr + 16'd4) & ring_mask;
+            state      <= S_PAY_DATA;
+        end else begin
+            state <= S_IDLE;
+        end
+    end
+endtask
 
 // ================================================================
 // Main FSM body
 // ================================================================
-always @(posedge clk) begin
+always @(posedge clk) begin : main_fsm
+    reg        fbwq_push_req;
+    reg [31:0] fbwq_push_addr;
+    reg [31:0] fbwq_push_data;
+    reg [3:0]  fbwq_push_strb;
+
+    fbwq_push_req  = 1'b0;
+    fbwq_push_addr = 32'b0;
+    fbwq_push_data = 32'b0;
+    fbwq_push_strb = 4'b0;
+
     if (!reset_n) begin
         state <= S_IDLE;
         ring_rdptr <= 0;
         m_wr_awvalid <= 0;
         m_wr_wvalid <= 0;
+        fbwq_rd_ptr <= 1'b0;
+        fbwq_wr_ptr <= 1'b0;
+        fbwq_count  <= 2'b0;
         fb_acc_valid <= 0;
         fb_acc_mask <= 0;
         fence_reached <= 0;
@@ -2087,22 +2058,10 @@ always @(posedge clk) begin
         pending_swap_idx    <= 2'b0;
         gpu_swap_req        <= 1'b0;
         gpu_swap_idx        <= 2'b0;
-        cmd_flip_enter_count       <= 32'b0;
-        cmd_flip_drain_done_count  <= 32'b0;
-        swap_pulse_count           <= 32'b0;
-        bvalid_count               <= 32'b0;
-        awvalid_handshake_count    <= 32'b0;
-        stall_tex_wait_count       <= 32'b0;
-        stall_cmap_wait_count      <= 32'b0;
-        stall_cmap_issue_count     <= 32'b0;
-        stall_fbss_busy_count      <= 32'b0;
-        stall_fb_write_count       <= 32'b0;
-        stall_inflight_count       <= 32'b0;
-        stall_persp_wait_count     <= 32'b0;
         pay_idx <= 0;
         pay_remaining <= 0;
-        frag_discard <= 0;
-        clear_flags <= 0;
+        clear_fb_enable <= 1'b0;
+        clear_color <= 8'b0;
         // Pipelined fragment processor reset
         p0_valid <= 0; p0_light <= 0; p0_flags <= 0;
         p0_fb_addr <= 0;
@@ -2110,7 +2069,7 @@ always @(posedge clk) begin
         tx_mul_q <= 0;
         p1_valid <= 0; p1_light <= 0; p1_flags <= 0;
         p1_fb_addr <= 0;
-        p2_valid <= 0; p2_color <= 0; p2_light <= 0; p2_flags <= 0;
+        p2_valid <= 0; p2_color <= 0; p2_flags <= 0;
         p2_fb_addr <= 0; p2_discard <= 0;
         p2b_valid <= 0; p2b_color <= 0; p2b_flags <= 0;
         p2b_fb_addr <= 0; p2b_discard <= 0;
@@ -2124,10 +2083,7 @@ always @(posedge clk) begin
         blend_src_color  <= 0;
         blend_word_addr  <= 0;
         blend_byte_lane  <= 0;
-        blend_p3_flags   <= 0;
-        blend_fb_word    <= 0;
         blend_p3_match_r <= 0;
-        src_mode <= SRC_SPAN;
         src_done <= 0;
         sp_sZ <= 0; sp_tZ <= 0; sp_zinv <= 0;
         sp_sZstep <= 0; sp_tZstep <= 0; sp_zinv_step <= 0;
@@ -2173,7 +2129,6 @@ always @(posedge clk) begin
         tri_span_count <= 0;
         tri_span_s_start <= 0;
         tri_span_t_start <= 0;
-        tri_span_z_start <= 0;
         tri_span_w_start <= 0;
         tri_span_r_start <= 0;
         // Phase 4c.3 — perspective-walk regs.  Don't-care on affine
@@ -2211,17 +2166,13 @@ always @(posedge clk) begin
             ring_rdptr   <= ring_wrptr;
             m_wr_awvalid <= 0;
             m_wr_wvalid  <= 0;
+            fbwq_rd_ptr  <= 1'b0;
+            fbwq_wr_ptr  <= 1'b0;
+            fbwq_count   <= 2'b0;
             fb_acc_valid <= 0;
             fb_acc_mask  <= 0;
             m_wr_inflight <= 4'b0;
             gpu_swap_req <= 1'b0;
-            stall_tex_wait_count   <= 32'b0;
-            stall_cmap_wait_count  <= 32'b0;
-            stall_cmap_issue_count <= 32'b0;
-            stall_fbss_busy_count  <= 32'b0;
-            stall_fb_write_count   <= 32'b0;
-            stall_inflight_count   <= 32'b0;
-            stall_persp_wait_count <= 32'b0;
         end else begin
             // ------------------------------------------------------------
             // Always-on housekeeping (runs every non-reset cycle).
@@ -2243,38 +2194,12 @@ always @(posedge clk) begin
                 2'b01: m_wr_inflight <= m_wr_inflight - 4'd1;
                 default: ;
             endcase
-            // The fragment path can now leave the AXI write registers as a
-            // one-entry buffer while it keeps issuing pixels.  Clear accepted
-            // AW/W beats globally so the write channel drains even when FBSS
-            // stays in IDLE instead of parking in a wait state.
+            // Clear accepted AW/W beats globally so the write channel drains
+            // independently from the producer FSM.
             if (m_wr_awvalid && m_wr_awready)
                 m_wr_awvalid <= 1'b0;
             if (m_wr_wvalid && m_wr_wready)
                 m_wr_wvalid <= 1'b0;
-            // CMD_FLIP debug: count every AW handshake and B beat
-            // independently so we can detect lost B beats (counts
-            // diverge) or lost AW handshakes (drain never reaches 0).
-            if (m_wr_awvalid && m_wr_awready)
-                awvalid_handshake_count <= awvalid_handshake_count + 32'd1;
-            if (m_wr_bvalid)
-                bvalid_count <= bvalid_count + 32'd1;
-            if (state == S_FRAG_PIPE) begin
-                if (p1_valid && !tex_resp_valid)
-                    stall_tex_wait_count <= stall_tex_wait_count + 32'd1;
-                if (cmap_pipe_wait)
-                    stall_cmap_wait_count <= stall_cmap_wait_count + 32'd1;
-                if (cmap_issue_wait)
-                    stall_cmap_issue_count <= stall_cmap_issue_count + 32'd1;
-                if (fbss != FBSS_IDLE)
-                    stall_fbss_busy_count <= stall_fbss_busy_count + 32'd1;
-                if (fb_write_buffer_stall)
-                    stall_fb_write_count <= stall_fb_write_count + 32'd1;
-                if (m_wr_inflight_near_full)
-                    stall_inflight_count <= stall_inflight_count + 32'd1;
-                if (!fp_pipe_stall && persp_issue_stall && !src_done
-                    && (sp_count != 16'd0))
-                    stall_persp_wait_count <= stall_persp_wait_count + 32'd1;
-            end
             gpu_swap_req <= 1'b0;
         case (state)
 
@@ -2325,8 +2250,6 @@ always @(posedge clk) begin
             cmd_is_set_colormap_id <= (cmd_type == CMD_SET_COLORMAP_ID);
             cmd_is_draw_triangles <= (cmd_type == CMD_DRAW_TRIANGLES);
             cmd_is_flip           <= (cmd_type == CMD_FLIP);
-            if (cmd_type == CMD_FLIP)
-                cmd_flip_enter_count <= cmd_flip_enter_count + 32'd1;
 
             if (cmd_payload_words == 0) begin
                 state <= S_EXECUTE;
@@ -2380,10 +2303,8 @@ always @(posedge clk) begin
             end
             else if (cmd_is_clear) begin
                 if (pay_idx == 5'd0) begin
-                    clear_flags <= ring_rd_data[17:16];
-                    clear_color <= ring_rd_data[15:0];
-                end else if (pay_idx == 5'd1) begin
-                    clear_depth <= ring_rd_data[15:0];
+                    clear_fb_enable <= ring_rd_data[16];
+                    clear_color <= ring_rd_data[7:0];
                 end
             end
             else if (cmd_is_clear_rect) begin
@@ -2642,7 +2563,7 @@ always @(posedge clk) begin
             if (cmd_is_fence) begin
                 // Stall until all outstanding m_wr_* writes commit; then
                 // publish the fence token and retire to S_IDLE.
-                if (m_wr_inflight == 4'b0 && !m_wr_chan_busy) begin
+                if (fbwq_empty && m_wr_inflight == 4'b0 && !m_wr_chan_busy) begin
                     fence_reached <= pending_fence_token;
                     state         <= S_IDLE;
                 end
@@ -2655,13 +2576,12 @@ always @(posedge clk) begin
                 // if we pulse while it is already full, the ready index is
                 // overwritten.  Hold the command here until vsync consumes the
                 // previous request, then publish fence with the swap pulse.
-                if (m_wr_inflight == 4'b0 && !m_wr_chan_busy && !slave_swap_pending) begin
+                if (fbwq_empty && m_wr_inflight == 4'b0
+                    && !m_wr_chan_busy && !slave_swap_pending) begin
                     gpu_swap_req  <= 1'b1;
                     gpu_swap_idx  <= pending_swap_idx;
                     fence_reached <= pending_fence_token;
                     state         <= S_IDLE;
-                    cmd_flip_drain_done_count <= cmd_flip_drain_done_count + 32'd1;
-                    swap_pulse_count          <= swap_pulse_count          + 32'd1;
                 end
             end
             else if (cmd_is_nop
@@ -2687,7 +2607,6 @@ always @(posedge clk) begin
                 persp_pss         <= PSS_IDLE;
                 persp_pass        <= PSS_PASS_ANCHOR;
                 sp_seg_left       <= 0;
-                src_mode          <= SRC_SPAN;
                 src_done          <= (span4_count == 16'd0);
                 state             <= S_FRAG_PIPE;
             end
@@ -2703,7 +2622,6 @@ always @(posedge clk) begin
                 persp_pss         <= PSS_IDLE;
                 persp_pass        <= PSS_PASS_ANCHOR;
                 sp_seg_left       <= 0;
-                src_mode     <= SRC_SPAN;
                 // Count=0 spans (legitimate input from BUILD/Quake's
                 // pre-clipped renderers, and from the SDK wire-format
                 // 12-bit count truncation when callers pass count
@@ -2732,7 +2650,7 @@ always @(posedge clk) begin
         // ============================================================
         // Pipelined Fragment Processor
         // ============================================================
-        // Replaces the sequential S_SPAN_PIXEL..S_SPAN_STEP chain with a
+        // Replaces the old sequential span-pixel chain with a
         // 3-stage pipeline + a tail FB write sub-FSM:
         //   S0  combinational issue from sp_* (tex_req_* are wires)
         //   p1  metadata in flight, awaiting tex_resp from cache
@@ -2795,7 +2713,6 @@ always @(posedge clk) begin
                 p2_valid   <= p1_valid;
                 if (p1_valid) begin
                     p2_color   <= tex_resp_data[7:0];
-                    p2_light   <= p1_light;
                     p2_flags   <= p1_flags;
                     p2_fb_addr <= p1_fb_addr;
                     p2_discard <= p1_flags[SPAN_SKIP_ZERO]
@@ -2803,9 +2720,8 @@ always @(posedge clk) begin
                     if (p1_flags[SPAN_COLORMAP]) begin
                         // SDRAM byte address for the cmap lookup.  Slot
                         // base + per-pixel (shade × 256 + texel).  The
-                        // (sp_colormap_id << 14) factor is exactly
-                        // PALOOKUP_STRIDE when STRIDE = 16 KB; expressed
-                        // as a shift here to avoid a multiplier.
+                        // 16 KB per colormap slot, expressed as a shift here
+                        // to avoid a multiplier.
                         // sp_colormap_id is per-span (loaded at span decode,
                         // or copied from st_colormap_id by the triangle path)
                         // so adjacent batched spans with different palookups
@@ -2949,7 +2865,6 @@ always @(posedge clk) begin
                         blend_src_color <= p3_color;
                         blend_word_addr <= p3_fb_addr & 32'hFFFFFFFC;
                         blend_byte_lane <= p3_fb_addr[1:0];
-                        blend_p3_flags  <= p3_flags;
                         fbss            <= FBSS_BLEND_REQ;
                         p3_consumed     = 1'b1;
                     end
@@ -2963,18 +2878,14 @@ always @(posedge clk) begin
                         if (!p3_word_match) begin
                             if (fb_write_can_issue) begin
                                 // Word boundary cross.  Hand the old word to
-                                // the one-entry AXI write buffer and immediately
-                                // re-arm the accumulator with p3's new word so
-                                // the fragment pipe only stalls when that buffer
-                                // is already occupied or the B-response counter
-                                // is near full.
-                                m_wr_awvalid <= 1;
-                                m_wr_awaddr  <= fb_acc_addr;
-                                m_wr_awlen   <= 0;
-                                m_wr_wvalid  <= 1;
-                                m_wr_wdata   <= fb_acc_data;
-                                m_wr_wstrb   <= fb_acc_mask;
-                                m_wr_wlast   <= 1;
+                                // the FB write queue and immediately re-arm the
+                                // accumulator with p3's new word so the fragment
+                                // pipe only stalls when the queue is full or the
+                                // B-response counter is near full.
+                                fbwq_push_req  = 1'b1;
+                                fbwq_push_addr = fb_acc_addr;
+                                fbwq_push_data = fb_acc_data;
+                                fbwq_push_strb = fb_acc_mask;
 
                                 fb_acc_valid <= 1;
                                 fb_acc_addr  <= p3_word_addr;
@@ -2988,7 +2899,7 @@ always @(posedge clk) begin
                                 endcase
                                 p3_consumed = 1'b1;
                             end else begin
-                                // The write buffer is still draining.  Park FBSS
+                                // The write queue is full.  Park FBSS
                                 // for one or more cycles; p3 remains valid
                                 // because fbss != IDLE stalls the pipe.
                                 fbss <= FBSS_FLUSH_W_RSP;
@@ -3015,18 +2926,11 @@ always @(posedge clk) begin
                 end
 
                 FBSS_FLUSH_W_RSP: begin
-                    // Stage 2a: exit on AW+W handshake, NOT on B response.
-                    // The original code waited for m_wr_bvalid here, paying
-                    // the full SDRAM round-trip per pixel-word flush.
-                    // m_wr_inflight tracks outstanding Bs; CMD_FENCE/CMD_FLIP
-                    // drain them at the end of the frame.  Same-master
-                    // single-AWID AXI ordering preserves write semantics.
-                    // m_wr_* valid bits are cleared by the global handshake
-                    // block above; m_wr_*_done lets us resume in the same
-                    // cycle the pending channel accepts its beat.
-                    if (m_wr_aw_done && m_wr_w_done) begin
+                    // Queue-full retry.  The boundary-crossing pixel is
+                    // still in p3; return to IDLE once the queue has a slot.
+                    if (fb_write_can_issue) begin
                         // Don't touch p3_valid: if FBSS parked because the
-                        // write buffer was busy, p3 is still the unconsumed
+                        // write queue was full, p3 is still the unconsumed
                         // boundary-crossing pixel.  FBSS_IDLE will retry it.
                         fbss <= FBSS_IDLE;
                     end
@@ -3047,17 +2951,18 @@ always @(posedge clk) begin
                     //      AR, no in-flight read) so blend_owns_m0 doesn't
                     //      collide with an in-flight tex fill on the R
                     //      channel.
-                    //   2. m_wr channel idle + m_wr_inflight == 0 — RAW
-                    //      barrier.  Cross-word fb_acc flushes hand off to
-                    //      m_wr, but the W beat may still be waiting in the
-                    //      one-entry write buffer or in transit to SDRAM when
-                    //      we'd otherwise issue this BLEND read.  If the
-                    //      arbiter grants m_rd before the slave's pending write
-                    //      commits, the read returns pre-flush data and the
-                    //      blend uses a stale FB byte.  The same-word fb_acc
-                    //      bypass below catches writes that haven't yet
-                    //      flushed; these gates catch the ones that have.
+                    //   2. write FIFO empty + m_wr channel idle +
+                    //      m_wr_inflight == 0 — RAW barrier.  Cross-word
+                    //      fb_acc flushes may be queued or already in
+                    //      transit to SDRAM when we'd otherwise issue this
+                    //      BLEND read.  If the arbiter grants m_rd before
+                    //      the slave's pending write commits, the read
+                    //      returns pre-flush data and the blend uses a stale
+                    //      FB byte.  The same-word fb_acc bypass below
+                    //      catches writes that haven't yet flushed; these
+                    //      gates catch the ones that have.
                     if (!tex_axi_arvalid && !tex_m0_in_flight
+                        && fbwq_empty
                         && !m_wr_chan_busy
                         && m_wr_inflight == 4'b0) begin
                         blend_arvalid <= 1;
@@ -3092,8 +2997,6 @@ always @(posedge clk) begin
                         fb_byte = (fb_acc_valid && fb_acc_addr == blend_word_addr
                                    && fb_acc_mask[blend_byte_lane])
                                 ? acc_lane : rdata_lane;
-                        // Stash for diagnostics (not used downstream).
-                        blend_fb_word <= blend_rdata;
                         // Drive transluc_rd_addr now so the BRAM read
                         // happens during BLEND_LUT_WAIT and the data is
                         // valid by the time BLEND_APPLY runs (one cycle
@@ -3129,16 +3032,12 @@ always @(posedge clk) begin
                     // shifted out on the cycle BLEND_REQ was entered.
                     if (!blend_p3_match_r) begin
                         if (fb_write_can_issue) begin
-                            // Cross-word: flush old fb_acc through the same
-                            // one-entry write buffer, then immediately start
-                            // the accumulator at the blended byte's word.
-                            m_wr_awvalid <= 1;
-                            m_wr_awaddr  <= fb_acc_addr;
-                            m_wr_awlen   <= 0;
-                            m_wr_wvalid  <= 1;
-                            m_wr_wdata   <= fb_acc_data;
-                            m_wr_wstrb   <= fb_acc_mask;
-                            m_wr_wlast   <= 1;
+                            // Cross-word: enqueue old fb_acc, then immediately
+                            // start the accumulator at the blended byte's word.
+                            fbwq_push_req  = 1'b1;
+                            fbwq_push_addr = fb_acc_addr;
+                            fbwq_push_data = fb_acc_data;
+                            fbwq_push_strb = fb_acc_mask;
 
                             fb_acc_valid <= 1;
                             fb_acc_addr  <= blend_word_addr;
@@ -3419,129 +3318,14 @@ always @(posedge clk) begin
         S_FB_FLUSH: begin
             if (fb_acc_valid && |fb_acc_mask) begin
                 if (fb_write_can_issue) begin
-                    m_wr_awvalid <= 1;
-                    m_wr_awaddr  <= fb_acc_addr;
-                    m_wr_awlen   <= 0;
-                    m_wr_wvalid  <= 1;
-                    m_wr_wdata   <= fb_acc_data;
-                    m_wr_wstrb   <= fb_acc_mask;
-                    m_wr_wlast   <= 1;
-                    state        <= S_FB_FLUSH_WAIT;
+                    fbwq_push_req  = 1'b1;
+                    fbwq_push_addr = fb_acc_addr;
+                    fbwq_push_data = fb_acc_data;
+                    fbwq_push_strb = fb_acc_mask;
+                    finish_fragment_stream_after_flush();
                 end
             end else begin
-                fb_acc_valid <= 0;
-                fb_acc_mask  <= 0;
-                // End-of-primitive flush: return to idle. In FULL, also clear
-                // tri_active so we don't re-enter the triangle path.
-                if (tri_active) tri_active <= 0;
-                // Mid-batch span dispatch: more spans remain in the
-                // payload, so re-enter S_PAY_DATA to read the next
-                // span's 15 words.  Advance ring_rdptr by 4 here so
-                // that on re-entry's first cycle, the always-block
-                // delivers the next span's word 0 in ring_rd_data
-                // (with the standard 1-cycle lag).  Matches the
-                // triangle re-entry pattern exactly.
-                // span_field_idx already wrapped to 0 in the previous
-                // S_PAY_DATA cycle; cmd_is_draw_spans_batch / sp_*
-                // regs persist across this transition.
-                if (span4_active && !span4_row_major && span4_lane != 2'd3) begin
-                    span4_lane <= span4_lane + 2'd1;
-                    span4_load_lane(span4_lane + 2'd1);
-                    persp_active      <= 1'b0;
-                    persp_first_done  <= 0;
-                    persp_seg_a_ready <= 0;
-                    persp_seg_b_ready <= 0;
-                    persp_pss         <= PSS_IDLE;
-                    persp_pass        <= PSS_PASS_ANCHOR;
-                    sp_seg_left       <= 0;
-                    src_mode          <= SRC_SPAN;
-                    src_done          <= (span4_count == 16'd0);
-                    state             <= S_FRAG_PIPE;
-                end else if (cmd_is_draw_span4_batch && pay_remaining > 24'd0) begin
-                    ring_rdptr <= (ring_rdptr + 16'd4) & ring_mask;
-                    state      <= S_PAY_DATA;
-                end else if (cmd_is_draw_spans_batch && pay_remaining > 24'd0) begin
-                    ring_rdptr <= (ring_rdptr + 16'd4) & ring_mask;
-                    state      <= S_PAY_DATA;
-                end else
-                    state <= S_IDLE;
-            end
-        end
-
-        S_FB_FLUSH_WAIT: begin
-            // Stage 2a: exit on AW+W handshake (don't wait for B).
-            // m_wr_inflight tracks outstanding Bs; CMD_FENCE/CMD_FLIP
-            // drain.  This unblocks the producer FSM (S_TRI_PIX /
-            // S_SPAN_STEP) to continue emitting fragments while the
-            // previous write's B is round-tripping through SDRAM.
-            if (m_wr_aw_done && m_wr_w_done) begin
-                if (tri_active) begin
-                    // Mid-triangle flush: re-accumulate pending pixel
-                    begin : reaccum_tri
-                        reg [1:0] bl;
-                        bl = sp_fb_addr[1:0];
-                        fb_acc_valid <= 1;
-                        fb_acc_addr  <= sp_fb_addr & 32'hFFFFFFFC;
-                        fb_acc_data  <= 32'b0;
-                        fb_acc_mask  <= 4'b0;
-                        case (bl)
-                            2'd0: begin fb_acc_data[7:0]   <= frag_color[7:0]; fb_acc_mask[0] <= 1; end
-                            2'd1: begin fb_acc_data[15:8]  <= frag_color[7:0]; fb_acc_mask[1] <= 1; end
-                            2'd2: begin fb_acc_data[23:16] <= frag_color[7:0]; fb_acc_mask[2] <= 1; end
-                            2'd3: begin fb_acc_data[31:24] <= frag_color[7:0]; fb_acc_mask[3] <= 1; end
-                        endcase
-                    end
-                    state <= S_TRI_PIX;
-                end else if (sp_count > 0) begin
-                    // Mid-span flush: re-accumulate pending pixel
-                    begin : reaccum_span
-                        reg [1:0] bl;
-                        bl = sp_fb_addr[1:0];
-                        fb_acc_valid <= 1;
-                        fb_acc_addr  <= sp_fb_addr & 32'hFFFFFFFC;
-                        fb_acc_data  <= 32'b0;
-                        fb_acc_mask  <= 4'b0;
-                        case (bl)
-                            2'd0: begin fb_acc_data[7:0]   <= frag_color[7:0]; fb_acc_mask[0] <= 1; end
-                            2'd1: begin fb_acc_data[15:8]  <= frag_color[7:0]; fb_acc_mask[1] <= 1; end
-                            2'd2: begin fb_acc_data[23:16] <= frag_color[7:0]; fb_acc_mask[2] <= 1; end
-                            2'd3: begin fb_acc_data[31:24] <= frag_color[7:0]; fb_acc_mask[3] <= 1; end
-                        endcase
-                    end
-                    state <= S_SPAN_STEP;
-                end else begin
-                    fb_acc_valid <= 0;
-                    fb_acc_mask  <= 0;
-                    // Mid-batch span dispatch: re-enter S_PAY_DATA
-                    // for the next span (and advance ring_rdptr by 4
-                    // to prime ring_rd_data for the next span's word
-                    // 0 — same trick as the post-S_DECODE prime, so
-                    // re-entry cycle 1 reads the right word).  For
-                    // standalone CMD_DRAW_SPAN we go straight to
-                    // S_IDLE — bit-identical to the pre-batch flow,
-                    // which is what BUILD's per-column path needs.
-                    if (span4_active && !span4_row_major && span4_lane != 2'd3) begin
-                        span4_lane <= span4_lane + 2'd1;
-                        span4_load_lane(span4_lane + 2'd1);
-                        persp_active      <= 1'b0;
-                        persp_first_done  <= 0;
-                        persp_seg_a_ready <= 0;
-                        persp_seg_b_ready <= 0;
-                        persp_pss         <= PSS_IDLE;
-                        persp_pass        <= PSS_PASS_ANCHOR;
-                        sp_seg_left       <= 0;
-                        src_mode          <= SRC_SPAN;
-                        src_done          <= (span4_count == 16'd0);
-                        state             <= S_FRAG_PIPE;
-                    end else if (cmd_is_draw_span4_batch && pay_remaining > 24'd0) begin
-                        ring_rdptr <= (ring_rdptr + 16'd4) & ring_mask;
-                        state      <= S_PAY_DATA;
-                    end else if (cmd_is_draw_spans_batch && pay_remaining > 24'd0) begin
-                        ring_rdptr <= (ring_rdptr + 16'd4) & ring_mask;
-                        state      <= S_PAY_DATA;
-                    end else
-                        state <= S_IDLE;
-                end
+                finish_fragment_stream_after_flush();
             end
         end
 
@@ -3557,7 +3341,7 @@ always @(posedge clk) begin
         // width/height payload to CMD_CLEAR and updating the SDK's
         // of_gpu_clear() helper in lock-step.
         S_CLEAR_INIT: begin
-            if (clear_flags[0]) begin
+            if (clear_fb_enable) begin
                 clear_addr      <= st_fb_addr;
                 clear_remaining <= 18'd16000;  // 320*200/4 words (FB)
                 state           <= S_CLEAR_FB;
@@ -3569,31 +3353,13 @@ always @(posedge clk) begin
         S_CLEAR_FB: begin
             if (clear_remaining == 0) begin
                 state <= S_IDLE;
-            end else begin
-                // Single-word AXI4 write
-                m_wr_awvalid <= 1;
-                m_wr_awaddr  <= clear_addr;
-                m_wr_awlen   <= 0;
-                m_wr_wvalid  <= 1;
-                m_wr_wdata   <= {clear_color[7:0], clear_color[7:0],
-                                 clear_color[7:0], clear_color[7:0]};
-                m_wr_wstrb   <= 4'b1111;
-                m_wr_wlast   <= 1;
-                state        <= S_CLEAR_FB_WAIT;
-            end
-        end
-
-        S_CLEAR_FB_WAIT: begin
-            if (m_wr_awvalid && m_wr_awready)
-                m_wr_awvalid <= 0;
-            if (m_wr_wvalid && m_wr_wready)
-                m_wr_wvalid <= 0;
-            if (m_wr_bvalid) begin
-                m_wr_awvalid    <= 0;
-                m_wr_wvalid     <= 0;
+            end else if (fbwq_can_push) begin
+                fbwq_push_req  = 1'b1;
+                fbwq_push_addr = clear_addr;
+                fbwq_push_data = {4{clear_color}};
+                fbwq_push_strb = 4'b1111;
                 clear_remaining <= clear_remaining - 18'd1;
                 clear_addr      <= clear_addr + 32'd4;
-                state           <= S_CLEAR_FB;
             end
         end
 
@@ -3639,43 +3405,18 @@ always @(posedge clk) begin
                                   : cr_w_remaining[2:0]);
             cr_strobe = ((4'b0001 << cr_bytes_this) - 4'b0001) << cr_lane;
 
-            m_wr_awvalid <= 1;
-            m_wr_awaddr  <= cr_addr & 32'hFFFFFFFC;
-            m_wr_awlen   <= 0;
-            m_wr_wvalid  <= 1;
-            m_wr_wdata   <= {cr_color, cr_color, cr_color, cr_color};
-            m_wr_wstrb   <= cr_strobe;
-            m_wr_wlast   <= 1;
-            state        <= S_CLEAR_RECT_WAIT;
-        end
+            if (fbwq_can_push) begin
+                fbwq_push_req  = 1'b1;
+                fbwq_push_addr = cr_addr & 32'hFFFFFFFC;
+                fbwq_push_data = {cr_color, cr_color, cr_color, cr_color};
+                fbwq_push_strb = cr_strobe;
 
-        S_CLEAR_RECT_WAIT: begin : clear_rect_wait_blk
-            // Mirror of S_CLEAR_FB_WAIT: drain AW + W; on B response,
-            // advance addr by the bytes we just wrote (computed the same
-            // way as S_CLEAR_RECT_WORD's cr_bytes_this), wrap to the
-            // next row at end-of-row, and finish the rect when the row
-            // counter expires.
-            reg  [1:0] cr_lane;
-            reg  [2:0] cr_bytes_this;
-            cr_lane = cr_addr[1:0];
-            cr_bytes_this = (cr_w_remaining >= 16'd4
-                             && cr_lane == 2'd0)
-                              ? 3'd4
-                              : ((cr_w_remaining >= {13'b0, 3'd4 - {1'b0, cr_lane}})
-                                  ? (3'd4 - {1'b0, cr_lane})
-                                  : cr_w_remaining[2:0]);
-
-            if (m_wr_awvalid && m_wr_awready) m_wr_awvalid <= 0;
-            if (m_wr_wvalid  && m_wr_wready ) m_wr_wvalid  <= 0;
-            if (m_wr_bvalid) begin
-                m_wr_awvalid <= 0;
-                m_wr_wvalid  <= 0;
                 if (cr_w_remaining <= {13'b0, cr_bytes_this}) begin
                     // Last word in this row.  Advance to next row.
                     if (cr_y_remaining == 16'd1) begin
                         // Last row finished — rect done.
                         state <= S_IDLE;
-                    end else begin : cr_row_advance
+                    end else begin : cr_row_advance_queued
                         // Per-command stride if non-zero; otherwise the
                         // SET_FB global (legacy behaviour for callers
                         // that don't fill the stride field).
@@ -4362,7 +4103,7 @@ always @(posedge clk) begin
         // ------------------------------------------------------------
         // Convex triangles → inside pixels are contiguous per row. Snapshot
         // attribute values at x_start, count inside pixels, and at row end
-        // emit a single span into S_FRAG_PIPE via the SRC_SPAN path.
+        // emit a single span into S_FRAG_PIPE.
         // ============================================================
         S_TRI_PIX: begin
             if (row_done_r) begin
@@ -4457,7 +4198,6 @@ always @(posedge clk) begin
                         persp_pss         <= PSS_IDLE;
                         sp_seg_left       <= 0;
                     end
-                    src_mode <= SRC_SPAN;
                     src_done <= 0;
                     state    <= S_FRAG_PIPE;
                     // tri_active stays 1; drain-detect routes back to S_TRI_ROW_NEXT
@@ -4471,7 +4211,6 @@ always @(posedge clk) begin
                     tri_span_x_start <= tri_cur_x;
                     tri_span_s_start <= tri_s;
                     tri_span_t_start <= tri_t;
-                    tri_span_z_start <= tri_z;
                     tri_span_w_start <= tri_w;
                     // Phase 4d Gouraud: snapshot the per-pixel-walked
                     // light value at the first inside pixel.  Replaces
@@ -4558,6 +4297,36 @@ always @(posedge clk) begin
 
         default: state <= S_IDLE;
         endcase
+
+            // --------------------------------------------------------
+            // Central AXI write drain.  The main FSM only enqueues
+            // writes into fbwq; this block owns m_wr_* and preserves
+            // write order across spans, clears, fences, and translucent
+            // read-modify-write barriers.  Keep writes single-beat here:
+            // it is more robust on the Pocket SDRAM path and costs less
+            // control logic than a partial burst path.
+            // --------------------------------------------------------
+            if (fbwq_pop_now) begin
+                m_wr_awvalid <= 1'b1;
+                m_wr_awaddr  <= fbwq_addr[fbwq_rd_ptr];
+                m_wr_awlen   <= 8'd0;
+                m_wr_wvalid  <= 1'b1;
+                m_wr_wdata   <= fbwq_data[fbwq_rd_ptr];
+                m_wr_wstrb   <= fbwq_strb[fbwq_rd_ptr];
+                m_wr_wlast   <= 1'b1;
+                fbwq_rd_ptr  <= fbwq_rd_ptr + 1'b1;
+            end
+
+            if (fbwq_push_req && fbwq_can_push) begin
+                fbwq_addr[fbwq_wr_ptr] <= fbwq_push_addr;
+                fbwq_data[fbwq_wr_ptr] <= fbwq_push_data;
+                fbwq_strb[fbwq_wr_ptr] <= fbwq_push_strb;
+                fbwq_wr_ptr            <= fbwq_wr_ptr + 1'b1;
+            end
+
+            fbwq_count <= fbwq_count
+                        + (fbwq_push_req && fbwq_can_push ? 2'd1 : 2'd0)
+                        - fbwq_pop_count;
         end  // closes the housekeeping `begin` introduced for m_wr_inflight + gpu_swap_req auto-clear
     end
 end
