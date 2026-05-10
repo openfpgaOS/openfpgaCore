@@ -1,0 +1,11 @@
+This SDRAM work adapts the block-local transaction approach used by
+Obsidian.dev openRTL mem/sdram.
+
+Source reference:
+https://github.com/obsidian-dot-dev/openRTL/tree/main/mem/sdram
+
+License:
+MIT
+
+Copyright:
+Copyright (c) 2026 Obsidian.dev

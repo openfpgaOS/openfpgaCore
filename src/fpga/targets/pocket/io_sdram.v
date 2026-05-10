@@ -41,6 +41,8 @@ input   wire            word_wr,
 input   wire    [23:0]  word_addr,
 input   wire    [31:0]  word_data,
 input   wire    [3:0]   word_wstrb, // byte enables: [0]=byte0, [1]=byte1, [2]=byte2, [3]=byte3
+input   wire    [31:0]  word_data_next, // pre-captured beat 1 for native 2-word block writes
+input   wire    [3:0]   word_wstrb_next,
 input   wire    [3:0]   word_burst_len, // 0=single word, N=N+1 words (for CPU cache line fills)
 input   wire    [3:0]   word_burst_wr_len, // 0=single word, N=N+1 words (for burst writes)
 output  reg     [31:0]  word_q,
@@ -144,7 +146,10 @@ assign {phy_ras, phy_cas, phy_we} = cmd;
 
 
     reg     [23:0]  delay_boot;
-    reg     [15:0]  dc;
+    // SDRAM command timing counter.  The long boot delay has its own counter;
+    // this one only needs to cover tRFC=8 cycles, so keep it narrow to avoid
+    // wide terminal-count compares on the 100MHz SDRAM command path.
+    reg     [3:0]   dc;
     // Refresh every ~5.69us at 90MHz (512 cycles) to satisfy 8K-row SDRAM timing.
     reg     [8:0]   refresh_count;
     reg             issue_autorefresh;
@@ -166,6 +171,8 @@ assign dbg_io = {1'b0, issue_autorefresh, state[5:0]};
     reg [23:0] word_addr_captured;
     reg [31:0] word_data_captured;
     reg [3:0]  word_wstrb_captured;
+    reg [31:0] word_data_next_captured;
+    reg [3:0]  word_wstrb_next_captured;
     reg [3:0]  word_burst_len_captured;
     reg [3:0]  word_burst_wr_len_captured;
     reg [3:0]  wr_burst_remaining;
@@ -384,6 +391,7 @@ always @(posedge controller_clk) begin
             word_rd_queue <= 0;
             word_op <= 1;
             addr <= pending_addr;
+            phy_ba <= pending_bank;
             word_busy <= 1;
             length <= {7'd0, word_burst_len_captured} + 11'd1;
 
@@ -397,6 +405,7 @@ always @(posedge controller_clk) begin
             word_wr_queue <= 0;
             word_op <= 1;
             addr <= pending_addr;
+            phy_ba <= pending_bank;
             word_busy <= 1;
             wr_burst_remaining <= word_burst_wr_len_captured;
 
@@ -409,6 +418,7 @@ always @(posedge controller_clk) begin
         if(burst_rd_queue) begin
             burst_rd_queue <= 0;
             addr <= burst_addr;
+            phy_ba <= burst_addr[24:23];
             length <= burst_len;
             word_busy <= 1;
             // Row-hit check for burst reads (same logic as word reads)
@@ -423,6 +433,7 @@ always @(posedge controller_clk) begin
         if(burstwr_queue) begin
             burstwr_queue <= 0;
             addr <= burstwr_addr;
+            phy_ba <= burstwr_addr[24:23];
             word_busy <= 1;
             req_need_prechg <= row_open;
             req_prechg_bank <= open_bank;
@@ -516,9 +527,18 @@ always @(posedge controller_clk) begin
     ST_PRECHG_WAIT: begin
         if(dc == TIMING_PRECHARGE-1) begin
             case(prechg_return)
-                2'd0: state <= ST_READ_0;
-                2'd1: state <= ST_WRITE_0;
-                2'd2: state <= ST_BURSTWR_0;
+                2'd0: begin
+                    phy_ba <= req_bank;
+                    state <= ST_READ_0;
+                end
+                2'd1: begin
+                    phy_ba <= req_bank;
+                    state <= ST_WRITE_0;
+                end
+                2'd2: begin
+                    phy_ba <= addr[24:23];
+                    state <= ST_BURSTWR_0;
+                end
                 2'd3: state <= ST_REFRESH_0;
             endcase
         end
@@ -535,7 +555,6 @@ always @(posedge controller_clk) begin
     ST_WRITE_0: begin
         dc <= 0;
 
-        phy_ba <= addr[24:23];
         phy_a <= addr[22:10]; // A0-A12 row address
         cmd <= CMD_ACT;
 
@@ -564,10 +583,10 @@ always @(posedge controller_clk) begin
         phy_dq_out <= word_data_captured[15:0];
         phy_dqm <= ~word_wstrb_captured[1:0];
 
-        // Request word N+1 during low-half output.
-        // Slave sees it next cycle, updates sdram_wdata.
-        // Data arrives on direct bus at ST_WRITE_5.
-        if (wr_burst_remaining > 0)
+        // Longer legacy bursts still pull continuation data from the AXI
+        // slave.  Native 2-word blocks already captured beat 1 locally when
+        // the command was accepted, so they avoid this timing-sensitive bus.
+        if (wr_burst_remaining > 0 && word_burst_wr_len_captured != 4'd1)
             word_wr_data_next <= 1;
 
         state <= ST_WRITE_3;
@@ -587,8 +606,15 @@ always @(posedge controller_clk) begin
                 // Must finish current write, precharge, activate
                 // new row, then continue burst.
                 state <= ST_WRITE_4_NEWROW;
+            end else if (word_burst_wr_len_captured == 4'd1) begin
+                // openRTL-style local block continuation: beat 1 is already
+                // in controller registers, so issue the second BL=2 write
+                // without a cross-module pull/capture bubble.
+                word_data_captured <= word_data_next_captured;
+                word_wstrb_captured <= word_wstrb_next_captured;
+                state <= ST_WRITE_2;
             end else begin
-                state <= ST_WRITE_5;  // 1 gap cycle then capture
+                state <= ST_WRITE_5;  // two gap cycles, then capture
             end
         end else begin
             state <= ST_WRITE_4;
@@ -608,6 +634,7 @@ always @(posedge controller_clk) begin
             // Precharge current bank
             cmd <= CMD_PRECHG;
             phy_a[10] <= 0;
+            phy_ba <= addr[24:23];
             row_open <= 0;
             dc <= 0;
             state <= ST_WRITE_4_NR_PRECHG;
@@ -616,7 +643,6 @@ always @(posedge controller_clk) begin
     ST_WRITE_4_NR_PRECHG: begin
         if(dc == TIMING_PRECHARGE-1) begin
             // Activate new row
-            phy_ba <= addr[24:23];
             phy_a <= addr[22:10];
             cmd <= CMD_ACT;
             row_open <= 1;
@@ -631,22 +657,34 @@ always @(posedge controller_clk) begin
         phy_a[10] <= 1'b0;
         if(dc == TIMING_ACT_RW-1) begin
             dc <= 0;
-            // Capture next word data then resume writing
-            word_data_captured <= burst_wr_direct_data;
-            word_wstrb_captured <= burst_wr_direct_strb;
+            // Capture next word data then resume writing.  Native 2-word
+            // blocks use the command-time local preload; longer legacy
+            // bursts use the pull-driven continuation bus.
+            if (word_burst_wr_len_captured == 4'd1) begin
+                word_data_captured <= word_data_next_captured;
+                word_wstrb_captured <= word_wstrb_next_captured;
+            end else begin
+                word_data_captured <= burst_wr_direct_data;
+                word_wstrb_captured <= burst_wr_direct_strb;
+            end
             phy_dq_oe <= 1;
             state <= ST_WRITE_2;
         end
     end
-    // 3 cycles/word burst write: request in WRITE_2, gap in WRITE_5, capture+loop.
+    // Burst write continuation: request in WRITE_2, then wait two cycles
+    // before capturing the next beat.  The extra bubble costs one controller
+    // cycle per additional word, but it gives the AXI-slave→io_sdram data
+    // handoff enough slack on hardware.
     ST_WRITE_5: begin
+        phy_dq_oe <= 1;
+        phy_dqm <= 2'b00;
+        state <= ST_WRITE_6;
+    end
+    ST_WRITE_6: begin
         phy_dq_oe <= 1;
         phy_dqm <= 2'b00;
         word_data_captured <= burst_wr_direct_data;
         word_wstrb_captured <= burst_wr_direct_strb;
-        state <= ST_WRITE_2;
-    end
-    ST_WRITE_6: begin
         state <= ST_WRITE_2;
     end
     ST_WRITE_7: begin
@@ -657,7 +695,6 @@ always @(posedge controller_clk) begin
     ST_READ_0: begin
         dc <= 0;
 
-        phy_ba <= addr[24:23];
         phy_a <= addr[22:10]; // A0-A12 row address
         cmd <= CMD_ACT;
 
@@ -741,7 +778,6 @@ always @(posedge controller_clk) begin
     end
 
     ST_BURSTWR_0: begin
-        phy_ba <= addr[24:23];
         phy_a <= addr[22:10]; // A0-A12 column address
         cmd <= CMD_ACT;
         state <= ST_BURSTWR_1;
@@ -832,6 +868,8 @@ always @(posedge controller_clk) begin
         word_addr_captured <= word_addr;
         word_data_captured <= word_data;
         word_wstrb_captured <= word_wstrb;
+        word_data_next_captured <= word_data_next;
+        word_wstrb_next_captured <= word_wstrb_next;
         word_burst_wr_len_captured <= word_burst_wr_len;
     end else if(word_rd) begin
         word_rd_queue <= 1;
@@ -866,6 +904,8 @@ always @(posedge controller_clk) begin
         word_addr_captured <= 0;
         word_data_captured <= 0;
         word_wstrb_captured <= 0;
+        word_data_next_captured <= 0;
+        word_wstrb_next_captured <= 0;
         word_burst_len_captured <= 0;
         word_burst_wr_len_captured <= 0;
         wr_burst_remaining <= 0;

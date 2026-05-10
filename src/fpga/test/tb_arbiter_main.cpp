@@ -269,20 +269,155 @@ static void test_aw_alone() {
 }
 
 // ====================================================================
-// Test 5: M0 AR/AW round-robin under continuous mixed pressure.
+// Test 5: M0 posted write accepts before SDRAM grant.
+//
+// Holds a continuous GPU read stream while issuing one GPU write.  The new
+// queue should accept AW/W quickly, let several reads complete, then commit
+// the write and return B.  This is the state Duke needs: posted writes do not
+// occupy the shared SDRAM grant while texture reads are waiting.
+// ====================================================================
+static void test_posted_write_allows_reads_before_commit() {
+    printf("\n=== Test 5: Posted M0 write lets reads run before commit ===\n");
+    reset_sequence();
+
+    tb->m0_arvalid = 1;
+    tb->m0_araddr  = 0x10000000;
+    tb->m0_arlen   = 0;
+
+    tb->m0_awvalid = 1;
+    tb->m0_awaddr  = 0x20000000;
+    tb->m0_awlen   = 0;
+    tb->m0_wvalid  = 1;
+    tb->m0_wdata   = 0x11112222;
+    tb->m0_wstrb   = 0xF;
+    tb->m0_wlast   = 1;
+
+    int aw_hs_cycle = -1;
+    int w_hs_cycle = -1;
+    int slave_aw_cycle = -1;
+    int b_cycle = -1;
+    int reads_before_slave_aw = 0;
+
+    for (int t = 0; t < 300; t++) {
+        tb->eval();
+        bool ar_hs = handshake(tb->m0_arvalid, tb->m0_arready);
+        bool aw_hs = handshake(tb->m0_awvalid, tb->m0_awready);
+        bool w_hs  = handshake(tb->m0_wvalid,  tb->m0_wready);
+        bool slave_aw_hs = handshake(tb->dbg_s_awvalid, tb->dbg_s_awready);
+
+        if (tb->dbg_s_rvalid && tb->dbg_s_rlast && slave_aw_cycle < 0)
+            reads_before_slave_aw++;
+        if (aw_hs && aw_hs_cycle < 0) aw_hs_cycle = t;
+        if (w_hs && w_hs_cycle < 0) w_hs_cycle = t;
+        if (slave_aw_hs && slave_aw_cycle < 0) slave_aw_cycle = t;
+        if (tb->m0_bvalid && b_cycle < 0) b_cycle = t;
+
+        tick();
+
+        tb->m0_arvalid = 1;  // continuous read pressure
+        if (aw_hs) tb->m0_awvalid = 0;
+        if (w_hs)  tb->m0_wvalid  = 0;
+    }
+
+    char msg[160];
+    snprintf(msg, sizeof(msg),
+             "aw=%d w=%d slave_aw=%d b=%d reads_before_slave_aw=%d q=%u",
+             aw_hs_cycle, w_hs_cycle, slave_aw_cycle, b_cycle,
+             reads_before_slave_aw, (unsigned)tb->dbg_gpu_wq_count);
+    check("AW accepted into posted queue", aw_hs_cycle >= 0 && aw_hs_cycle < 20, msg);
+    check("W accepted into posted queue", w_hs_cycle >= 0 && w_hs_cycle < 30, msg);
+    check("SDRAM write grant happens after queue accept",
+          slave_aw_cycle > w_hs_cycle, msg);
+    check("At least one read completed before queued write grant",
+          reads_before_slave_aw > 0, msg);
+    check("B returned after queued write commit", b_cycle > slave_aw_cycle, msg);
+}
+
+// ====================================================================
+// Test 6: Posted AWLEN=1 is split into two ordered SDRAM writes.
+//
+// The GPU can still emit compact two-beat transactions.  The arbiter stores
+// each beat as one queued word and only returns one B after the WLAST beat
+// commits.
+// ====================================================================
+static void test_posted_burst2_splits_and_b_after_last() {
+    printf("\n=== Test 6: Posted M0 AWLEN=1 splits, one B after last ===\n");
+    reset_sequence();
+
+    tb->m0_awvalid = 1;
+    tb->m0_awaddr  = 0x20000100;
+    tb->m0_awlen   = 1;
+    tb->m0_wvalid  = 1;
+    tb->m0_wdata   = 0xAAAA0001;
+    tb->m0_wstrb   = 0xF;
+    tb->m0_wlast   = 0;
+
+    int w_beats = 0;
+    int slave_aw_count = 0;
+    int second_slave_aw_cycle = -1;
+    int b_count = 0;
+    int b_cycle = -1;
+
+    for (int t = 0; t < 300; t++) {
+        tb->eval();
+        bool aw_hs = handshake(tb->m0_awvalid, tb->m0_awready);
+        bool w_hs  = handshake(tb->m0_wvalid,  tb->m0_wready);
+        bool slave_aw_hs = handshake(tb->dbg_s_awvalid, tb->dbg_s_awready);
+
+        if (slave_aw_hs) {
+            slave_aw_count++;
+            if (slave_aw_count == 2)
+                second_slave_aw_cycle = t;
+        }
+        if (tb->m0_bvalid) {
+            b_count++;
+            b_cycle = t;
+        }
+
+        tick();
+
+        if (aw_hs) tb->m0_awvalid = 0;
+        if (w_hs) {
+            w_beats++;
+            if (w_beats == 1) {
+                tb->m0_wdata = 0xBBBB0002;
+                tb->m0_wlast = 1;
+                tb->m0_wvalid = 1;
+            } else {
+                tb->m0_wvalid = 0;
+            }
+        }
+    }
+
+    char msg[160];
+    snprintf(msg, sizeof(msg),
+             "w_beats=%d slave_aw=%d second_aw=%d b_count=%d b_cycle=%d q=%u",
+             w_beats, slave_aw_count, second_slave_aw_cycle, b_count, b_cycle,
+             (unsigned)tb->dbg_gpu_wq_count);
+    check("Two W beats accepted", w_beats == 2, msg);
+    check("Two single-word SDRAM writes issued", slave_aw_count == 2, msg);
+    check("Exactly one M0 B response returned", b_count == 1, msg);
+    check("B follows second committed word", b_cycle > second_slave_aw_cycle, msg);
+    check("Posted queue drains", tb->dbg_gpu_wq_count == 0, msg);
+}
+
+// ====================================================================
+// Test 7: M0 read/write service under continuous mixed pressure.
 //
 // Drive BOTH AR and AW continuously, re-arming each handshake.  The
-// arbiter's M0 round-robin should produce ~1:1 ratio — symmetric,
-// no AR or AW bias.
+// posted-write scheduler should keep both directions live.  With a full
+// queue it intentionally trends toward ~1:1 service; with a low queue it
+// allows several reads between writes.
 //
 // Verifies the design hits the right point on the priority spectrum:
 //   - Strict AR-prefer would give AW=0 (starves writes)
 //   - Strict AW-prefer would give AR=0 (starves reads, the bug that
 //     collapsed Duke3D to ~3 fps)
-//   - 1:1 round-robin gives AR ≈ AW with both > 0
+//   - Posted queue gives AR > 0 and AW > 0 without requiring AW to hold
+//     the shared grant while it is only waiting to be accepted.
 // ====================================================================
 static void test_m0_fairness_ratio() {
-    printf("\n=== Test 5: M0 AR/AW round-robin (continuous mixed) ===\n");
+    printf("\n=== Test 7: M0 posted read/write continuous mixed ===\n");
     reset_sequence();
 
     tb->m0_arvalid = 1;
@@ -332,15 +467,14 @@ static void test_m0_fairness_ratio() {
 
     int total = ar_grants + aw_grants;
     double ratio = (aw_grants > 0) ? (double)ar_grants / (double)aw_grants : 0.0;
-    printf("  cycles=%d  AR=%d  AW=%d  ratio=%.2f (target ~1.0, pure round-robin)\n",
+    printf("  cycles=%d  AR=%d  AW=%d  ratio=%.2f (posted queue service)\n",
            CYCLES, ar_grants, aw_grants, ratio);
 
     check("AR grants > 0 (reads not starved)",  ar_grants > 0);
     check("AW grants > 0 (writes not starved)", aw_grants > 0);
-    // Round-robin → ratio ≈ 1.  Allow 0.7–1.5 for startup transient.
     char msg[128];
-    snprintf(msg, sizeof(msg), "ratio=%.2f outside 0.7..1.5 window (RR drift?)", ratio);
-    check("AR:AW ratio in round-robin window", ratio >= 0.7 && ratio <= 1.5, msg);
+    snprintf(msg, sizeof(msg), "ratio=%.2f outside 0.2..5.0 service window", ratio);
+    check("AR:AW ratio remains bounded", ratio >= 0.2 && ratio <= 5.0, msg);
     (void)total;
 }
 
@@ -489,6 +623,8 @@ int main(int argc, char **argv) {
     test_priority_chain();
     test_read_starves_write();
     test_continuous_ar_starves_aw();
+    test_posted_write_allows_reads_before_commit();
+    test_posted_burst2_splits_and_b_after_last();
     test_m0_fairness_ratio();
     test_multi_master_stress();
 

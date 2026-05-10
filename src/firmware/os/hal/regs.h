@@ -179,6 +179,8 @@
 /* Palette (256-color indexed) */
 #define PAL_INDEX           REG32(SYSREG_BASE + 0x40)
 #define PAL_WRITE           REG32(SYSREG_BASE + 0x44)
+#define PAL_INDEX_COMMIT    (1u << 31)  /* write to PAL_INDEX: swap staged palette at frame start */
+#define PAL_INDEX_BUSY      (1u << 31)  /* read from PAL_INDEX: staged swap not visible yet */
 
 /* Save datatable control (per-slot size for bridge shutdown saves) */
 #define SAVE_DT_SLOT        REG32(SYSREG_BASE + 0x48)

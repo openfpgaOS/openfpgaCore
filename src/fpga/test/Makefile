@@ -37,6 +37,8 @@ SDRAM_SYNCH = $(TARGET_DIR)/apf/common.v
 SDRAM_CPP = tb_sdram_main.cpp
 SDRAM_TOP = tb_sdram
 SDRAM_DIR = obj_dir
+SDRAM_SERIAL_DIR = obj_dir_sdram_serial
+SDRAM_NATIVE2_DIR = obj_dir_sdram_native2
 
 # Generate test variant of io_sdram with split DQ (no inout for Verilator)
 io_sdram_test.v: $(TARGET_DIR)/io_sdram.v
@@ -201,10 +203,10 @@ SYSTEM_FLAGS = -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC -Wno-CASEINCOMPLETE \
 # ============================================================
 # Targets
 # ============================================================
-.PHONY: all sdram sram gpu gpu-floor gpu-gpudemo gpu-acceptance gpu-chain \
+.PHONY: all sdram sdram-serialize sdram-native2 sdram-all sram gpu gpu-floor gpu-gpudemo gpu-acceptance gpu-acceptance-single gpu-acceptance-burst2 gpu-acceptance-all gpu-chain \
         axi-periph cram0-prefetch audio audio-mixer arbiter system run run-sram build clean
 
-all: sdram sram gpu axi-periph cram0-prefetch audio audio-mixer arbiter
+all: sdram-all sram gpu axi-periph cram0-prefetch audio audio-mixer arbiter
 
 # --- SDRAM ---
 sdram: $(SDRAM_DIR)/V$(SDRAM_TOP)
@@ -213,6 +215,24 @@ sdram: $(SDRAM_DIR)/V$(SDRAM_TOP)
 $(SDRAM_DIR)/V$(SDRAM_TOP): $(SDRAM_SRCS) $(SDRAM_SYNCH) $(SDRAM_CPP)
 	$(VERILATOR) $(VERILATOR_FLAGS) --top-module $(SDRAM_TOP) --Mdir $(SDRAM_DIR) \
 		$(SDRAM_SRCS) $(SDRAM_SYNCH) $(SDRAM_CPP)
+
+sdram-serialize: $(SDRAM_SERIAL_DIR)/V$(SDRAM_TOP)
+	./$(SDRAM_SERIAL_DIR)/V$(SDRAM_TOP)
+
+$(SDRAM_SERIAL_DIR)/V$(SDRAM_TOP): $(SDRAM_SRCS) $(SDRAM_SYNCH) $(SDRAM_CPP)
+	$(VERILATOR) $(VERILATOR_FLAGS) -GSERIALIZE_WRITE_BURSTS=1 \
+		--top-module $(SDRAM_TOP) --Mdir $(SDRAM_SERIAL_DIR) \
+		$(SDRAM_SRCS) $(SDRAM_SYNCH) $(SDRAM_CPP)
+
+sdram-native2: $(SDRAM_NATIVE2_DIR)/V$(SDRAM_TOP)
+	./$(SDRAM_NATIVE2_DIR)/V$(SDRAM_TOP)
+
+$(SDRAM_NATIVE2_DIR)/V$(SDRAM_TOP): $(SDRAM_SRCS) $(SDRAM_SYNCH) $(SDRAM_CPP)
+	$(VERILATOR) $(VERILATOR_FLAGS) -GMAX_NATIVE_WRITE_BURST_LEN=1 \
+		--top-module $(SDRAM_TOP) --Mdir $(SDRAM_NATIVE2_DIR) \
+		$(SDRAM_SRCS) $(SDRAM_SYNCH) $(SDRAM_CPP)
+
+sdram-all: sdram sdram-serialize sdram-native2
 
 # Backward compat aliases
 build: $(SDRAM_DIR)/V$(SDRAM_TOP)
@@ -283,6 +303,7 @@ $(GPU_GPUDEMO_DIR)/V$(GPU_TOP): $(GPU_SRCS) $(GPU_GPUDEMO_CPP)
 # part of `make all` until first green run is captured.
 GPU_ACCEPT_CPP = tb_gpu_acceptance_main.cpp
 GPU_ACCEPT_DIR = obj_dir_gpu_acceptance
+GPU_ACCEPT_SINGLE_DIR = obj_dir_gpu_acceptance_single
 gpu-acceptance: $(GPU_ACCEPT_DIR)/V$(GPU_TOP)
 	@printf "\n=== GPU acceptance suite ===\n"
 	./$(GPU_ACCEPT_DIR)/V$(GPU_TOP)
@@ -292,6 +313,21 @@ $(GPU_ACCEPT_DIR)/V$(GPU_TOP): $(GPU_SRCS) $(GPU_ACCEPT_CPP)
 		--Mdir $(GPU_ACCEPT_DIR) \
 		-I$(COMMON_DIR) \
 		$(GPU_SRCS) $(GPU_ACCEPT_CPP)
+
+gpu-acceptance-single: $(GPU_ACCEPT_SINGLE_DIR)/V$(GPU_TOP)
+	@printf "\n=== GPU acceptance suite (single-beat FB writes) ===\n"
+	./$(GPU_ACCEPT_SINGLE_DIR)/V$(GPU_TOP)
+
+$(GPU_ACCEPT_SINGLE_DIR)/V$(GPU_TOP): $(GPU_SRCS) $(GPU_ACCEPT_CPP)
+	$(VERILATOR) $(VERILATOR_FLAGS) -GFBWQ_BURST2_ENABLE=0 \
+		--top-module $(GPU_TOP) \
+		--Mdir $(GPU_ACCEPT_SINGLE_DIR) \
+		-I$(COMMON_DIR) \
+		$(GPU_SRCS) $(GPU_ACCEPT_CPP)
+
+gpu-acceptance-burst2: gpu-acceptance
+
+gpu-acceptance-all: gpu-acceptance gpu-acceptance-single
 
 # --- AXI periph slave ---
 axi-periph: $(AXI_PERIPH_DIR)/V$(AXI_PERIPH_TOP)
@@ -372,8 +408,8 @@ $(SYSTEM_DIR)/V$(SYSTEM_TOP): $(SYSTEM_SRCS) $(SYSTEM_CPP)
 
 # --- Clean ---
 clean:
-	rm -rf $(SDRAM_DIR) $(SRAM_DIR) $(GPU_DIR) $(GPU_FLOOR_DIR) \
-	       $(GPU_GPUDEMO_DIR) $(GPU_ACCEPT_DIR) \
+	rm -rf $(SDRAM_DIR) $(SDRAM_SERIAL_DIR) $(SDRAM_NATIVE2_DIR) $(SRAM_DIR) $(GPU_DIR) $(GPU_FLOOR_DIR) \
+	       $(GPU_GPUDEMO_DIR) $(GPU_ACCEPT_DIR) $(GPU_ACCEPT_SINGLE_DIR) \
 	       $(AXI_PERIPH_DIR) $(CRAM0_PREFETCH_DIR) \
 	       $(AUDIO_DIR) $(MIXER_DIR) $(SYSTEM_DIR) \
 	       $(ARBITER_DIR) \

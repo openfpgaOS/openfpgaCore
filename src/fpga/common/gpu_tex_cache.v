@@ -81,15 +81,19 @@ module gpu_tex_cache (
     output wire        dbg_pipe_valid,
 
     // Hit/miss counters — used to diagnose Duke3D bandwidth collapse.
-    // Saturating 32-bit (4 billion ops headroom — won't saturate
-    // before the system is restarted).  Reset on reset_n.  Hit rate
-    // = (req_count - miss_count) / req_count.
-    output reg  [31:0] dbg_req_count,    // every accepted req on either port
-    output reg  [31:0] dbg_miss_count    // every miss handled in S_PIPE
+    // Kept compact for the Pocket fit; zero-extended to 32 bits at MMIO.
+    output wire [31:0] dbg_req_count,    // every accepted req on either port
+    output wire [31:0] dbg_miss_count    // every miss handled in S_PIPE
 );
 
 assign dbg_state      = state;
 assign dbg_pipe_valid = pipe_valid_a;
+
+localparam DBG_COUNT_BITS = 20;
+reg [DBG_COUNT_BITS-1:0] dbg_req_count_r;
+reg [DBG_COUNT_BITS-1:0] dbg_miss_count_r;
+assign dbg_req_count = {{(32-DBG_COUNT_BITS){1'b0}}, dbg_req_count_r};
+assign dbg_miss_count = {{(32-DBG_COUNT_BITS){1'b0}}, dbg_miss_count_r};
 
 //   addr[3:0]   = byte offset within 16-byte line
 //   addr[13:4]  = set index (10 bits, 1024 sets)
@@ -341,30 +345,20 @@ always @(posedge clk) begin
         lat_wide    <= 0;
         lat_port    <= 0;
         flush_pending <= 1'b0;
-        dbg_req_count  <= 32'd0;
-        dbg_miss_count <= 32'd0;
+        dbg_req_count_r  <= {DBG_COUNT_BITS{1'b0}};
+        dbg_miss_count_r <= {DBG_COUNT_BITS{1'b0}};
     end else begin
         // Latch any flush pulse regardless of state.  Cleared when we
         // enter S_INIT below.
         if (flush)
             flush_pending <= 1'b1;
 
-        // Hit/miss bandwidth instrumentation.  Increment dbg_req_count
-        // on every accepted req (either port) — gives us total tex
-        // demand.  Increment dbg_miss_count on every miss handled in
-        // S_PIPE (when we transition to S_FILL_AR).  Saturating at
-        // 32 bits so the counters don't wrap mid-frame.
+        // Hit/miss bandwidth instrumentation.  The compact counters have
+        // enough headroom for the short Duke perf windows and avoid the
+        // wide saturating add/compare logic in the tight Pocket fit.
         case ({req_valid && req_ready, req_valid_b && req_ready_b})
-        2'b01, 2'b10: begin
-            if (dbg_req_count != 32'hFFFFFFFF)
-                dbg_req_count <= dbg_req_count + 32'd1;
-        end
-        2'b11: begin
-            if (dbg_req_count >= 32'hFFFFFFFE)
-                dbg_req_count <= 32'hFFFFFFFF;
-            else
-                dbg_req_count <= dbg_req_count + 32'd2;
-        end
+        2'b01, 2'b10: dbg_req_count_r <= dbg_req_count_r + {{(DBG_COUNT_BITS-1){1'b0}}, 1'b1};
+        2'b11:        dbg_req_count_r <= dbg_req_count_r + {{(DBG_COUNT_BITS-2){1'b0}}, 2'd2};
         default: ;
         endcase
 
@@ -429,8 +423,7 @@ always @(posedge clk) begin
                 lat_wide    <= pipe_wide_a;
                 lat_port    <= 1'b0;       // serving A
                 pipe_valid_a <= 0;          // explicit clear on miss
-                if (dbg_miss_count != 32'hFFFFFFFF)
-                    dbg_miss_count <= dbg_miss_count + 32'd1;
+                dbg_miss_count_r <= dbg_miss_count_r + {{(DBG_COUNT_BITS-1){1'b0}}, 1'b1};
             end else if (pipe_miss_b) begin
                 axi_arvalid <= 1;
                 axi_araddr  <= {6'b0, pipe_addr_b[25:4], 4'b0};
@@ -441,8 +434,7 @@ always @(posedge clk) begin
                 lat_wide    <= pipe_wide_b;
                 lat_port    <= 1'b1;       // serving B
                 pipe_valid_b <= 0;          // explicit clear on miss
-                if (dbg_miss_count != 32'hFFFFFFFF)
-                    dbg_miss_count <= dbg_miss_count + 32'd1;
+                dbg_miss_count_r <= dbg_miss_count_r + {{(DBG_COUNT_BITS-1){1'b0}}, 1'b1};
             end else if (flush || flush_pending) begin
                 // Safe to flush now: no pending miss on either port
                 // means either pipe_valid_x=0 (no in-flight request)

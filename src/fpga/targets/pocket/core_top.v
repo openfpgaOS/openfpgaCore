@@ -924,6 +924,8 @@ reg             ram1_word_wr;
 reg     [23:0]  ram1_word_addr;
 reg     [31:0]  ram1_word_data;
 reg     [3:0]   ram1_word_wstrb;
+reg     [31:0]  ram1_word_data_next;
+reg     [3:0]   ram1_word_wstrb_next;
 reg     [3:0]   ram1_word_burst_len;
 reg     [3:0]   ram1_word_burst_wr_len;
 wire            ram1_word_wr_data_next;
@@ -946,6 +948,8 @@ wire            sdram_slave_wr_data_next = ram1_word_wr_data_next;
 wire            sdram_slave_wr_done      = ram1_word_wr_done;
 wire    [31:0]  sdram_slave_next_wdata;
 wire    [3:0]   sdram_slave_next_wstrb;
+wire    [31:0]  sdram_slave_preload_wdata;
+wire    [3:0]   sdram_slave_preload_wstrb;
 
 // ============================================================
 // CPU AXI4 master buses
@@ -1881,6 +1885,8 @@ assign video_hs = vidout_hs;
         .pal_wr(cpu_pal_wr),
         .pal_addr(cpu_pal_addr),
         .pal_data(cpu_pal_data),
+        .pal_commit(cpu_pal_commit),
+        .pal_busy(cpu_pal_busy),
         // Target dataslot interface
         .target_dataslot_read(cpu_target_dataslot_read),
         .target_dataslot_write(cpu_target_dataslot_write),
@@ -1977,7 +1983,6 @@ assign video_hs = vidout_hs;
     // Slave → io_sdram pulse adapter
     reg sdram_accepted_r;
     reg sdram_cmd_forwarded;
-    reg wr_data_fwd_d1;
     always @(posedge clk_ram_controller) begin
         ram1_word_rd <= 0;
         ram1_word_wr <= 0;
@@ -1995,17 +2000,12 @@ assign video_hs = vidout_hs;
             ram1_word_addr <= sdram_slave_addr;
             ram1_word_data <= sdram_slave_wdata;
             ram1_word_wstrb <= sdram_slave_wstrb;
+            ram1_word_data_next <= sdram_slave_preload_wdata;
+            ram1_word_wstrb_next <= sdram_slave_preload_wstrb;
             ram1_word_burst_len <= sdram_slave_burst_len;
             ram1_word_burst_wr_len <= sdram_slave_burst_wr_len;
             sdram_accepted_r <= 1;
             sdram_cmd_forwarded <= 1;
-        end
-
-        // Burst write data forwarding: delay by 1 cycle after slave updates
-        wr_data_fwd_d1 <= ram1_word_wr_data_next;
-        if (wr_data_fwd_d1) begin
-            ram1_word_data <= sdram_slave_wdata;
-            ram1_word_wstrb <= sdram_slave_wstrb;
         end
     end
 
@@ -2083,7 +2083,14 @@ assign video_hs = vidout_hs;
     // the arbiter-local signal, not cpu_m_sdram_rready directly. The
     // arbiter itself already provides back-pressure to each master; for
     // now leave this tied to 1'b1 (matches pre-burst behaviour).
-    axi_sdram_slave sdram_axi_slave (
+    axi_sdram_slave #(
+        // GPU framebuffer writes are posted and split to single-word SDRAM
+        // writes inside the arbiter.  CPU/cache-line writes can still use the
+        // native io_sdram burst path to keep command submit/memcpy traffic
+        // from degenerating into one SDRAM command per word.
+        .SERIALIZE_WRITE_BURSTS(1'b0),
+        .MAX_NATIVE_WRITE_BURST_LEN(8'd15)
+    ) sdram_axi_slave (
         .clk(clk_cpu),
         .reset_n(1'b1),
         .s_axi_arvalid(arb_s_arvalid),
@@ -2122,6 +2129,8 @@ assign video_hs = vidout_hs;
         .sdram_wr_done(sdram_slave_wr_done),
         .sdram_next_wdata(sdram_slave_next_wdata),
         .sdram_next_wstrb(sdram_slave_next_wstrb),
+        .sdram_preload_wdata(sdram_slave_preload_wdata),
+        .sdram_preload_wstrb(sdram_slave_preload_wstrb),
         .dbg_slave()
     );
 
@@ -2147,6 +2156,8 @@ assign video_hs = vidout_hs;
     wire        cpu_pal_wr;
     wire [7:0]  cpu_pal_addr;
     wire [23:0] cpu_pal_data;
+    wire        cpu_pal_commit;
+    wire        cpu_pal_busy;
 
     // SDRAM burst interface signals for video scanout
     wire        video_burst_rd;
@@ -2176,7 +2187,9 @@ assign video_hs = vidout_hs;
         .burst_data_done(video_burst_data_done),
         .pal_wr(cpu_pal_wr),
         .pal_addr(cpu_pal_addr),
-        .pal_data(cpu_pal_data)
+        .pal_data(cpu_pal_data),
+        .pal_commit(cpu_pal_commit),
+        .pal_busy(cpu_pal_busy)
     );
 
 
@@ -2512,7 +2525,12 @@ wire [1:0]  gpu_swap_idx;
 wire        slave_swap_pending;  // from axi_periph_slave → stalls gpu_core CMD_FLIP
 
 `ifndef EXCLUDE_GPU
-gpu_core gpu (
+gpu_core #(
+    // Writes now post into the SDRAM arbiter queue, so the compact GPU
+    // two-word issue path no longer blocks texture reads for the whole
+    // write response.
+    .FBWQ_BURST2_ENABLE(1'b1)
+) gpu (
     .clk(clk_cpu),
     .reset_n(reset_n),
     .gpu_enable(1'b1),
@@ -2666,6 +2684,8 @@ io_sdram isr0 (
     .word_addr  ( ram1_word_addr ),
     .word_data  ( ram1_word_data ),
     .word_wstrb ( ram1_word_wstrb ),
+    .word_data_next ( ram1_word_data_next ),
+    .word_wstrb_next ( ram1_word_wstrb_next ),
     .word_burst_len ( ram1_word_burst_len ),
     .word_burst_wr_len ( ram1_word_burst_wr_len ),
     .word_q     ( ram1_word_q ),
@@ -2673,8 +2693,8 @@ io_sdram isr0 (
     .word_q_valid ( ram1_word_q_valid ),
     .word_wr_data_next ( ram1_word_wr_data_next ),
     .word_wr_done ( ram1_word_wr_done ),
-    .burst_wr_direct_data ( sdram_slave_wdata ),
-    .burst_wr_direct_strb ( sdram_slave_wstrb )
+    .burst_wr_direct_data ( sdram_slave_next_wdata ),
+    .burst_wr_direct_strb ( sdram_slave_next_wstrb )
 );
 
 

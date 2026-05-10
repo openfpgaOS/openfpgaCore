@@ -11,21 +11,12 @@
 //
 // Fixed priority: GPU > CPU > (M2 unused) > AudioMix.
 //
-// Within GPU (M0), AR and AW alternate via a 1-bit round-robin.
-// M0 merges tex/cmap/blend reads with framebuffer writes onto one
-// master, so any STRICT priority between the channels just trades
-// one starvation for another:
-//   - Strict AR-prefer: under steady tex-miss pressure, M0 AW
-//     could never land — fragment pipe wedged in FBSS_FLUSH_W_RSP.
-//   - Strict AW-prefer: every queued FB write blocked subsequent
-//     tex reads, pipe stalled on every miss, Duke3D ~3 fps.
-//   - Skewed ratios (e.g., 4 AR : 1 AW): same trade in proportion;
-//     load-pattern-sensitive.
-// Fix: pure 1:1 round-robin within M0.  Symmetric, simple, no
-// magic threshold.  Bounded latency = 1 transaction of the other
-// channel.  Within CPU (M1), AR is still checked first since CPU
-// reads are pipeline-blocking and writes are posted through the
-// LSU FIFO.
+// M0 writes are posted into an ordered local queue before they reach the
+// shared SDRAM slave.  B responses still wait for the corresponding queued
+// write to commit, so GPU fences/flips keep their "pixels are in SDRAM"
+// meaning.  The queue lets texture reads continue while framebuffer writes
+// are pending; a bounded read budget and high-water mark keep writes from
+// starving.
 //
 // CPU fairness counter (unchanged): any GPU/audio grant while the CPU
 // has a pending request increments a deficit; once it reaches
@@ -33,8 +24,9 @@
 // BELOW CPU in priority, so it never contributes to the deficit —
 // matching the old 5-master layout where audio also sat below CPU.
 //
-// Single outstanding transaction — grants one master at a time, holds
-// until read completes (R.rlast) or write completes (B.bvalid).
+// Single outstanding transaction at the SDRAM slave -- grants one master at a
+// time, holds until read completes (R.rlast) or write completes (B.bvalid).
+// M0 AW/W handshakes are decoupled from that grant by the posted queue.
 //
 // v2 changes vs the 5-master arbiter:
 //   - Dropped M0/M1/M3 (legacy GPU-read + GPU-write + bridge) — GPU now
@@ -46,7 +38,8 @@
 
 module axi_sdram_arbiter #(
     parameter [3:0] CPU_FAIR_THRESHOLD   = 4'd8, // Force CPU grant after this many non-CPU grants
-    parameter [3:0] AUDIO_FAIR_THRESHOLD = 4'd4  // Force AudioMix grant after this many non-audio grants
+    parameter [3:0] AUDIO_FAIR_THRESHOLD = 4'd4, // Force AudioMix grant after this many non-audio grants
+    parameter [3:0] GPU_WRITE_READ_BUDGET = 4'd4 // Max GPU reads while posted writes wait
 ) (
     input wire clk,
     input wire reset_n,
@@ -154,6 +147,7 @@ localparam ST_WR   = 2'd2;  // Write transaction active (AW→W→B)
 
 reg [1:0] arb_state;
 reg [1:0] grant;  // 0=GPU, 1=CPU, 2=AudioDMA, 3=AudioMix
+reg       active_wr_gpuq;
 
 // Fairness: deficit counter prevents GPU (and technically Audio, but
 // it's below CPU anyway) from starving the CPU.  Increments each time
@@ -167,131 +161,35 @@ wire cpu_pending = m1_arvalid | m1_awvalid;
 // experience.  Without this, GPU + CPU traffic can starve the audio
 // FSM during heavy frame rendering, draining the output dcfifo (1024
 // entries / ~21 ms) and producing framerate-correlated clicks.
-// Increments on every grant given to anyone-but-AudioMix while M3 has
-// a pending read.  Resets when AudioMix is granted or has no pending
-// request.  Threshold is 4 — at ARLEN=1 burst latency (~20 cycles)
-// that's ~80 cycles of worst-case wait, well under one 48 kHz sample
-// period (2083 cycles).
 reg [3:0] audio_deficit;
 wire audio_pending = m3_arvalid;
 
-// M0 internal AR/AW round-robin.  When BOTH channels are pending,
-// alternate grants 1:1 — symmetric, no AR or AW bias.  When only
-// one is pending, grant immediately and reset the toggle so the
-// other channel gets first dibs next time both are competing.
-// Bounded latency on either channel = 1 transaction of the other.
-// Simpler than a deficit counter and less load-pattern-sensitive.
-reg m0_last_was_ar;
+// Posted M0 write queue.  Entries are single 32-bit word writes; AWLEN>0
+// GPU bursts are split into consecutive queue entries and one B is returned
+// when the entry carrying WLAST commits.
+//
+// Keep this deliberately compact.  Duke's GPU write coalescer emits 1- or
+// 2-beat writes, so an 8-entry queue gives useful read/write decoupling
+// without spending the routing/ALM budget of a larger register FIFO in the
+// already dense 100 MHz SDRAM domain.
+localparam GPU_WQ_DEPTH = 8;
+localparam GPU_WQ_HIGH_WATERMARK = 6;
+localparam GPU_WQ_PTR_W = 3;
 
-// Grant arbitration — registered for timing
-always @(posedge clk or posedge reset) begin
-    if (reset) begin
-        arb_state     <= ST_IDLE;
-        grant         <= 2'd0;
-        gpu_deficit   <= 0;
-        audio_deficit <= 0;
-        m0_last_was_ar <= 1'b0;
-    end else begin
-        case (arb_state)
-        ST_IDLE: begin
-            // Fairness override #1: force a CPU grant after too many
-            // non-CPU grants while CPU was waiting.
-            if (cpu_pending && gpu_deficit >= CPU_FAIR_THRESHOLD) begin
-                grant <= 2'd1;
-                gpu_deficit <= 0;
-                if (audio_pending) audio_deficit <= audio_deficit + 4'd1;
-                if (m1_arvalid)
-                    arb_state <= ST_RD;
-                else
-                    arb_state <= ST_WR;
-            end
-            // Fairness override #2: force an AudioMix grant after too
-            // many non-audio grants while M3 has a pending read.
-            // Sits BELOW the CPU override so a critical CPU stall still
-            // wins; in practice both deficits hit roughly the same time
-            // under heavy CPU+GPU load and tradeoff is harmless.
-            else if (audio_pending && audio_deficit >= AUDIO_FAIR_THRESHOLD) begin
-                grant <= 2'd3;
-                audio_deficit <= 0;
-                arb_state <= ST_RD;
-                if (cpu_pending) gpu_deficit <= gpu_deficit + 4'd1;
-            end
-            // Priority: GPU (M0) > CPU (M1) > Audio (M2).  Within M0,
-            // AR/AW round-robin via m0_last_was_ar.  Three branches:
-            // BOTH-pending (alternate), AR-only, AW-only.  BOTH must
-            // come first so its condition wins over the alone fallbacks.
-            else if (m0_arvalid && m0_awvalid) begin
-                grant <= 2'd0;
-                if (cpu_pending) gpu_deficit <= gpu_deficit + 4'd1;
-                if (audio_pending) audio_deficit <= audio_deficit + 4'd1;
-                if (m0_last_was_ar) begin
-                    arb_state      <= ST_WR;
-                    m0_last_was_ar <= 1'b0;
-                end else begin
-                    arb_state      <= ST_RD;
-                    m0_last_was_ar <= 1'b1;
-                end
-            end else if (m0_arvalid) begin
-                grant <= 2'd0;
-                arb_state      <= ST_RD;
-                m0_last_was_ar <= 1'b1;
-                if (cpu_pending) gpu_deficit <= gpu_deficit + 4'd1;
-                if (audio_pending) audio_deficit <= audio_deficit + 4'd1;
-            end else if (m0_awvalid) begin
-                grant <= 2'd0;
-                arb_state      <= ST_WR;
-                m0_last_was_ar <= 1'b0;
-                if (cpu_pending) gpu_deficit <= gpu_deficit + 4'd1;
-                if (audio_pending) audio_deficit <= audio_deficit + 4'd1;
-            end else if (m1_arvalid) begin
-                grant <= 2'd1;
-                arb_state <= ST_RD;
-                gpu_deficit <= 0;
-                if (audio_pending) audio_deficit <= audio_deficit + 4'd1;
-            end else if (m1_awvalid) begin
-                grant <= 2'd1;
-                arb_state <= ST_WR;
-                gpu_deficit <= 0;
-                if (audio_pending) audio_deficit <= audio_deficit + 4'd1;
-            end else if (m2_arvalid) begin
-                /* Audio DMA gets whatever's left after everyone else has
-                 * had their turn.  Never touches gpu_deficit — this
-                 * master is below CPU so it cannot starve the CPU. */
-                grant <= 2'd2;
-                arb_state <= ST_RD;
-                if (audio_pending) audio_deficit <= audio_deficit + 4'd1;
-            end else if (m3_arvalid) begin
-                /* Audio Mixer — same rationale as M2, still below CPU. */
-                grant <= 2'd3;
-                arb_state <= ST_RD;
-                audio_deficit <= 0;
-            end else begin
-                // No requests pending — reset both deficits
-                gpu_deficit   <= 0;
-                audio_deficit <= 0;
-            end
-        end
+reg [31:0] gpu_wq_addr [0:GPU_WQ_DEPTH-1];
+reg [31:0] gpu_wq_data [0:GPU_WQ_DEPTH-1];
+reg [3:0]  gpu_wq_strb [0:GPU_WQ_DEPTH-1];
+reg        gpu_wq_last [0:GPU_WQ_DEPTH-1];
+reg [GPU_WQ_PTR_W-1:0] gpu_wq_rd_ptr;
+reg [GPU_WQ_PTR_W-1:0] gpu_wq_wr_ptr;
+reg [3:0]  gpu_wq_count;
 
-        ST_RD: begin
-            // Release grant when last R beat is transferred
-            if (s_rvalid && s_rready && s_rlast)
-                arb_state <= ST_IDLE;
-        end
+reg        m0w_active;
+reg [31:0] m0w_addr;
+reg [7:0]  m0w_beats_left;
+reg        m0_bvalid_q;
+reg [3:0]  gpu_reads_since_write;
 
-        ST_WR: begin
-            // Release grant when B response is transferred
-            if (s_bvalid)
-                arb_state <= ST_IDLE;
-        end
-
-        default: arb_state <= ST_IDLE;
-        endcase
-    end
-end
-
-// ============================================
-// Master → Slave channel mux (combinational)
-// ============================================
 wire grant_m0 = (grant == 2'd0);
 wire grant_m1 = (grant == 2'd1);
 wire grant_m2 = (grant == 2'd2);
@@ -299,16 +197,172 @@ wire grant_m3 = (grant == 2'd3);
 wire active_rd = (arb_state == ST_RD);
 wire active_wr = (arb_state == ST_WR);
 
-// Completion guards: on the cycle bvalid/rlast fires, the slave
-// returns to S_IDLE while the arbiter is still in ST_WR/ST_RD
-// (registered transition).  Without masking, the slave would see
-// the next master request through the mux and accept it before the
-// arbiter returns to ST_IDLE — causing a duplicate transaction.
+wire gpu_wq_empty = (gpu_wq_count == 5'd0);
+wire gpu_wq_full  = (gpu_wq_count == 4'd8);
+wire [4:0] gpu_wq_free = 5'd8 - {1'b0, gpu_wq_count};
+wire [4:0] m0_aw_beats = {1'b0, m0_awlen[3:0]} + 5'd1;
+wire       m0_aw_supported = (m0_awlen[7:3] == 5'd0);
+wire       m0_aw_has_space = m0_aw_supported && (gpu_wq_free >= m0_aw_beats);
+wire       m0_aw_post_fire = m0_awvalid && m0_awready;
+wire       m0_w_post_fire  = m0_wvalid && m0_wready;
+wire       m0_w_post_last  = (m0w_beats_left == 8'd0) || m0_wlast;
+wire       gpu_wq_pop      = active_wr && active_wr_gpuq && s_bvalid;
+wire       gpu_wq_high     = (gpu_wq_count >= GPU_WQ_HIGH_WATERMARK[3:0]);
+wire [3:0] gpu_wq_read_budget_limit = gpu_wq_high ? 4'd1 : GPU_WRITE_READ_BUDGET;
+wire       gpu_wq_read_budget_spent = (gpu_reads_since_write >= gpu_wq_read_budget_limit);
+wire       gpu_wq_should_drain = !gpu_wq_empty &&
+                                 (!m0_arvalid || gpu_wq_read_budget_spent);
+
+// Completion guards: on the cycle bvalid/rlast fires, the slave returns to
+// S_IDLE while the arbiter is still registered in ST_WR/ST_RD.
 wire rd_completing = active_rd && s_rvalid && s_rlast;
 wire wr_completing = active_wr && s_bvalid;
 
-// AR channel — masked on rlast.  M2 (audio DMA) and M3 (audio mixer)
-// are read-only; routed here.
+// Grant arbitration, M0 posted-write receiver, and M0 B response generation.
+always @(posedge clk or posedge reset) begin
+    if (reset) begin
+        arb_state <= ST_IDLE;
+        grant <= 2'd0;
+        active_wr_gpuq <= 1'b0;
+        gpu_deficit <= 4'd0;
+        audio_deficit <= 4'd0;
+        gpu_wq_rd_ptr <= {GPU_WQ_PTR_W{1'b0}};
+        gpu_wq_wr_ptr <= {GPU_WQ_PTR_W{1'b0}};
+        gpu_wq_count <= 4'd0;
+        m0w_active <= 1'b0;
+        m0w_addr <= 32'd0;
+        m0w_beats_left <= 8'd0;
+        m0_bvalid_q <= 1'b0;
+        gpu_reads_since_write <= 4'd0;
+    end else begin
+        m0_bvalid_q <= 1'b0;
+
+        if (m0_aw_post_fire) begin
+            m0w_active <= 1'b1;
+            m0w_addr <= m0_awaddr;
+            m0w_beats_left <= m0_awlen;
+        end
+
+        if (m0_w_post_fire) begin
+            gpu_wq_addr[gpu_wq_wr_ptr] <= m0w_addr;
+            gpu_wq_data[gpu_wq_wr_ptr] <= m0_wdata;
+            gpu_wq_strb[gpu_wq_wr_ptr] <= m0_wstrb;
+            gpu_wq_last[gpu_wq_wr_ptr] <= m0_w_post_last;
+            gpu_wq_wr_ptr <= gpu_wq_wr_ptr + 1'b1;
+            if (m0_w_post_last) begin
+                m0w_active <= 1'b0;
+            end else begin
+                m0w_addr <= m0w_addr + 32'd4;
+                m0w_beats_left <= m0w_beats_left - 8'd1;
+            end
+        end
+
+        if (gpu_wq_pop) begin
+            if (gpu_wq_last[gpu_wq_rd_ptr])
+                m0_bvalid_q <= 1'b1;
+            gpu_wq_rd_ptr <= gpu_wq_rd_ptr + 1'b1;
+        end
+
+        case ({m0_w_post_fire, gpu_wq_pop})
+        2'b10: gpu_wq_count <= gpu_wq_count + 4'd1;
+        2'b01: gpu_wq_count <= gpu_wq_count - 4'd1;
+        default: ;
+        endcase
+
+        if (gpu_wq_empty)
+            gpu_reads_since_write <= 4'd0;
+
+        case (arb_state)
+        ST_IDLE: begin
+            if (cpu_pending && gpu_deficit >= CPU_FAIR_THRESHOLD) begin
+                grant <= 2'd1;
+                active_wr_gpuq <= 1'b0;
+                gpu_deficit <= 4'd0;
+                if (audio_pending) audio_deficit <= audio_deficit + 4'd1;
+                arb_state <= m1_arvalid ? ST_RD : ST_WR;
+            end else if (audio_pending && audio_deficit >= AUDIO_FAIR_THRESHOLD) begin
+                grant <= 2'd3;
+                active_wr_gpuq <= 1'b0;
+                audio_deficit <= 4'd0;
+                arb_state <= ST_RD;
+                if (cpu_pending) gpu_deficit <= gpu_deficit + 4'd1;
+            end else if (m0_arvalid && !gpu_wq_should_drain) begin
+                grant <= 2'd0;
+                active_wr_gpuq <= 1'b0;
+                arb_state <= ST_RD;
+                if (!gpu_wq_empty)
+                    gpu_reads_since_write <= gpu_reads_since_write + 4'd1;
+                else
+                    gpu_reads_since_write <= 4'd0;
+                if (cpu_pending) gpu_deficit <= gpu_deficit + 4'd1;
+                if (audio_pending) audio_deficit <= audio_deficit + 4'd1;
+            end else if (!gpu_wq_empty) begin
+                grant <= 2'd0;
+                active_wr_gpuq <= 1'b1;
+                arb_state <= ST_WR;
+                gpu_reads_since_write <= 4'd0;
+                if (cpu_pending) gpu_deficit <= gpu_deficit + 4'd1;
+                if (audio_pending) audio_deficit <= audio_deficit + 4'd1;
+            end else if (m0_arvalid) begin
+                grant <= 2'd0;
+                active_wr_gpuq <= 1'b0;
+                arb_state <= ST_RD;
+                gpu_reads_since_write <= 4'd0;
+                if (cpu_pending) gpu_deficit <= gpu_deficit + 4'd1;
+                if (audio_pending) audio_deficit <= audio_deficit + 4'd1;
+            end else if (m1_arvalid) begin
+                grant <= 2'd1;
+                active_wr_gpuq <= 1'b0;
+                arb_state <= ST_RD;
+                gpu_deficit <= 4'd0;
+                if (audio_pending) audio_deficit <= audio_deficit + 4'd1;
+            end else if (m1_awvalid) begin
+                grant <= 2'd1;
+                active_wr_gpuq <= 1'b0;
+                arb_state <= ST_WR;
+                gpu_deficit <= 4'd0;
+                if (audio_pending) audio_deficit <= audio_deficit + 4'd1;
+            end else if (m2_arvalid) begin
+                grant <= 2'd2;
+                active_wr_gpuq <= 1'b0;
+                arb_state <= ST_RD;
+                if (audio_pending) audio_deficit <= audio_deficit + 4'd1;
+            end else if (m3_arvalid) begin
+                grant <= 2'd3;
+                active_wr_gpuq <= 1'b0;
+                arb_state <= ST_RD;
+                audio_deficit <= 4'd0;
+            end else begin
+                gpu_deficit <= 4'd0;
+                audio_deficit <= 4'd0;
+            end
+        end
+
+        ST_RD: begin
+            if (s_rvalid && s_rready && s_rlast)
+                arb_state <= ST_IDLE;
+        end
+
+        ST_WR: begin
+            if (s_bvalid) begin
+                arb_state <= ST_IDLE;
+                active_wr_gpuq <= 1'b0;
+            end
+        end
+
+        default: begin
+            arb_state <= ST_IDLE;
+            active_wr_gpuq <= 1'b0;
+        end
+        endcase
+    end
+end
+
+// ============================================
+// Master -> Slave channel mux (combinational)
+// ============================================
+
+// AR channel -- M2 and M3 are read-only; routed here.
 assign s_arvalid = (active_rd && !rd_completing) ? (grant_m0 ? m0_arvalid :
                                                      grant_m1 ? m1_arvalid :
                                                      grant_m2 ? m2_arvalid :
@@ -320,41 +374,35 @@ assign s_arlen   = grant_m0 ? m0_arlen   :
                    grant_m1 ? m1_arlen   :
                    grant_m2 ? m2_arlen   : m3_arlen;
 
-// AW channel — masked on bvalid.  M2 never writes.
-assign s_awvalid = (active_wr && !wr_completing) ? (grant_m0 ? m0_awvalid :
+// AW/W channel.  Posted M0 writes drain as single-word slave writes.
+assign s_awvalid = (active_wr && !wr_completing) ? (active_wr_gpuq ? 1'b1 :
                                                                 m1_awvalid) : 1'b0;
-assign s_awaddr  = grant_m0 ? m0_awaddr  : m1_awaddr;
-assign s_awlen   = grant_m0 ? m0_awlen   : m1_awlen;
+assign s_awaddr  = active_wr_gpuq ? gpu_wq_addr[gpu_wq_rd_ptr] : m1_awaddr;
+assign s_awlen   = active_wr_gpuq ? 8'd0 : m1_awlen;
 
-// W channel — masked on bvalid
-assign s_wvalid  = (active_wr && !wr_completing) ? (grant_m0 ? m0_wvalid :
+assign s_wvalid  = (active_wr && !wr_completing) ? (active_wr_gpuq ? 1'b1 :
                                                                 m1_wvalid) : 1'b0;
-assign s_wdata   = grant_m0 ? m0_wdata  : m1_wdata;
-assign s_wstrb   = grant_m0 ? m0_wstrb  : m1_wstrb;
-assign s_wlast   = grant_m0 ? m0_wlast  : m1_wlast;
+assign s_wdata   = active_wr_gpuq ? gpu_wq_data[gpu_wq_rd_ptr] : m1_wdata;
+assign s_wstrb   = active_wr_gpuq ? gpu_wq_strb[gpu_wq_rd_ptr] : m1_wstrb;
+assign s_wlast   = active_wr_gpuq ? 1'b1 : m1_wlast;
 
 // ============================================
-// Slave → Master channel demux (combinational)
+// Slave -> Master channel demux (combinational)
 // ============================================
 
-// AR ready — only to granted master during read
 assign m0_arready = (active_rd && grant_m0) ? s_arready : 1'b0;
 assign m1_arready = (active_rd && grant_m1) ? s_arready : 1'b0;
 assign m2_arready = (active_rd && grant_m2) ? s_arready : 1'b0;
 assign m3_arready = (active_rd && grant_m3) ? s_arready : 1'b0;
 
-// R channel — only to granted master during read
 assign m0_rvalid = (active_rd && grant_m0) ? s_rvalid : 1'b0;
 assign m1_rvalid = (active_rd && grant_m1) ? s_rvalid : 1'b0;
 assign m2_rvalid = (active_rd && grant_m2) ? s_rvalid : 1'b0;
 assign m3_rvalid = (active_rd && grant_m3) ? s_rvalid : 1'b0;
 
-// Upstream rready — mux from granted master.  GPU (m0), audio DMA (m2),
-// and audio mixer (m3) don't back-pressure so they default to 1; CPU
-// (m1) drives m1_rready via cpu_target_port's registered response slot.
 assign s_rready = active_rd ? (grant_m1 ? m1_rready : 1'b1) : 1'b1;
 
-assign m0_rdata  = s_rdata;  // Broadcast data (only valid matters)
+assign m0_rdata  = s_rdata;
 assign m1_rdata  = s_rdata;
 assign m2_rdata  = s_rdata;
 assign m3_rdata  = s_rdata;
@@ -367,18 +415,15 @@ assign m1_rlast  = s_rlast;
 assign m2_rlast  = s_rlast;
 assign m3_rlast  = s_rlast;
 
-// AW ready — only to granted master during write (M2 never writes)
-assign m0_awready = (active_wr && grant_m0) ? s_awready : 1'b0;
-assign m1_awready = (active_wr && grant_m1) ? s_awready : 1'b0;
+assign m0_awready = !m0w_active && m0_aw_has_space;
+assign m1_awready = (active_wr && grant_m1 && !active_wr_gpuq) ? s_awready : 1'b0;
 
-// W ready — only to granted master during write
-assign m0_wready = (active_wr && grant_m0) ? s_wready : 1'b0;
-assign m1_wready = (active_wr && grant_m1) ? s_wready : 1'b0;
+assign m0_wready = m0w_active && !gpu_wq_full;
+assign m1_wready = (active_wr && grant_m1 && !active_wr_gpuq) ? s_wready : 1'b0;
 
-// B channel — only to granted master during write
-assign m0_bvalid = (active_wr && grant_m0) ? s_bvalid : 1'b0;
-assign m1_bvalid = (active_wr && grant_m1) ? s_bvalid : 1'b0;
-assign m0_bresp  = s_bresp;
+assign m0_bvalid = m0_bvalid_q;
+assign m1_bvalid = (active_wr && grant_m1 && !active_wr_gpuq) ? s_bvalid : 1'b0;
+assign m0_bresp  = 2'b00;
 assign m1_bresp  = s_bresp;
 
 // Debug taps

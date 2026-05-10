@@ -11,7 +11,9 @@
 
 `default_nettype none
 
-module tb_gpu (
+module tb_gpu #(
+    parameter FBWQ_BURST2_ENABLE = 1'b1
+) (
     input  wire        clk,
     input  wire        reset_n,
 
@@ -28,6 +30,7 @@ module tb_gpu (
     output wire [5:0]  dbg_setup_step,
     output wire [31:0] dbg_tri_det,
     output wire [31:0] dbg_frag,
+    output wire        dbg_fbwq_burst2_enable,
     output reg  [31:0] dbg_aw_count,
 
     // CMD_FLIP side-port (observed by C++ harness for the drain test)
@@ -75,7 +78,9 @@ wire        gpu_wr_bvalid;
 // ============================================================
 // GPU Core
 // ============================================================
-gpu_core gpu (
+gpu_core #(
+    .FBWQ_BURST2_ENABLE(FBWQ_BURST2_ENABLE)
+) gpu (
     .clk(clk),
     .reset_n(reset_n),
     .gpu_enable(1'b1),
@@ -117,6 +122,8 @@ gpu_core gpu (
     .dbg_tri_det(dbg_tri_det),
     .dbg_frag(dbg_frag)
 );
+
+assign dbg_fbwq_burst2_enable = FBWQ_BURST2_ENABLE;
 
 // ============================================================
 // Simplified SDRAM Model (flat 1M word = 4MB, fast)

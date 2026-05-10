@@ -7,7 +7,10 @@
 
 `default_nettype none
 
-module tb_sdram (
+module tb_sdram #(
+    parameter SERIALIZE_WRITE_BURSTS = 1'b0,
+    parameter [7:0] MAX_NATIVE_WRITE_BURST_LEN = 8'd15
+) (
     input  wire        clk,
     input  wire        reset_n,
 
@@ -45,6 +48,9 @@ module tb_sdram (
     input  wire [24:0] inj_burst_addr,
     input  wire [10:0] inj_burst_len,
 
+    output wire        dbg_word_wr_data_next,
+    output wire        dbg_serialize_write_bursts,
+
     output wire        busy
 );
 
@@ -58,6 +64,8 @@ wire [3:0]  sdram_burst_wr_len;
 wire        sdram_wr_data_next;
 wire [31:0] sdram_next_wdata;
 wire [3:0]  sdram_next_wstrb;
+wire [31:0] sdram_preload_wdata;
+wire [3:0]  sdram_preload_wstrb;
 
 // io_sdram physical interface
 wire        phy_cke, phy_clk, phy_cas, phy_ras, phy_we;
@@ -79,6 +87,8 @@ reg         word_rd, word_wr;
 reg  [23:0] word_addr;
 reg  [31:0] word_data;
 reg  [3:0]  word_wstrb;
+reg  [31:0] word_data_next;
+reg  [3:0]  word_wstrb_next;
 reg  [3:0]  word_burst_len;
 reg  [3:0]  word_burst_wr_len;
 wire [31:0] word_q;
@@ -90,14 +100,14 @@ wire        word_wr_done;
 // Pulse adapter (mirrors core_top.v)
 reg         cmd_forwarded;
 reg         accepted_r;
-reg         wr_data_fwd_d1;
 
 always @(posedge clk or negedge reset_n) begin
     if (!reset_n) begin
         word_rd <= 0; word_wr <= 0;
         word_addr <= 0; word_data <= 0; word_wstrb <= 0;
+        word_data_next <= 0; word_wstrb_next <= 0;
         word_burst_len <= 0; word_burst_wr_len <= 0;
-        cmd_forwarded <= 0; accepted_r <= 0; wr_data_fwd_d1 <= 0;
+        cmd_forwarded <= 0; accepted_r <= 0;
     end else begin
         word_rd <= 0; word_wr <= 0;
         word_burst_len <= 0; word_burst_wr_len <= 0;
@@ -112,25 +122,25 @@ always @(posedge clk or negedge reset_n) begin
             word_addr <= sdram_addr;
             word_data <= sdram_wdata;
             word_wstrb <= sdram_wstrb;
+            word_data_next <= sdram_preload_wdata;
+            word_wstrb_next <= sdram_preload_wstrb;
             word_burst_len <= sdram_burst_len;
             word_burst_wr_len <= sdram_burst_wr_len;
             accepted_r <= 1;
             cmd_forwarded <= 1;
         end
-
-        // Burst write data forwarding: delay by 1 cycle after slave updates
-        wr_data_fwd_d1 <= word_wr_data_next;
-        if (wr_data_fwd_d1) begin
-            word_data <= sdram_wdata;
-            word_wstrb <= sdram_wstrb;
-        end
     end
 end
 
 assign busy = word_busy;
+assign dbg_word_wr_data_next = word_wr_data_next;
+assign dbg_serialize_write_bursts = SERIALIZE_WRITE_BURSTS;
 
 // AXI SDRAM Slave
-axi_sdram_slave slave (
+axi_sdram_slave #(
+    .SERIALIZE_WRITE_BURSTS(SERIALIZE_WRITE_BURSTS),
+    .MAX_NATIVE_WRITE_BURST_LEN(MAX_NATIVE_WRITE_BURST_LEN)
+) slave (
     .clk(clk), .reset_n(reset_n),
     .s_axi_arvalid(s_axi_arvalid), .s_axi_arready(s_axi_arready),
     .s_axi_araddr(s_axi_araddr), .s_axi_arlen(s_axi_arlen),
@@ -149,7 +159,9 @@ axi_sdram_slave slave (
     .sdram_wr_data_next(word_wr_data_next),
     .sdram_wr_done(word_wr_done),
     .sdram_next_wdata(sdram_next_wdata),
-    .sdram_next_wstrb(sdram_next_wstrb)
+    .sdram_next_wstrb(sdram_next_wstrb),
+    .sdram_preload_wdata(sdram_preload_wdata),
+    .sdram_preload_wstrb(sdram_preload_wstrb)
 );
 
 // io_sdram (test variant with split DQ)
@@ -168,12 +180,13 @@ io_sdram sdram_ctrl (
     .burstwr_strobe(1'b0), .burstwr_data(16'b0), .burstwr_done(1'b0),
     .word_rd(word_rd), .word_wr(word_wr),
     .word_addr(word_addr), .word_data(word_data), .word_wstrb(word_wstrb),
+    .word_data_next(word_data_next), .word_wstrb_next(word_wstrb_next),
     .word_burst_len(word_burst_len), .word_burst_wr_len(word_burst_wr_len),
     .word_q(word_q), .word_busy(word_busy), .word_q_valid(word_q_valid),
     .word_wr_data_next(word_wr_data_next),
     .word_wr_done(word_wr_done),
-    .burst_wr_direct_data(sdram_wdata),
-    .burst_wr_direct_strb(sdram_wstrb)
+    .burst_wr_direct_data(sdram_next_wdata),
+    .burst_wr_direct_strb(sdram_next_wstrb)
 );
 
 // Behavioral SDRAM model

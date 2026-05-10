@@ -1687,12 +1687,19 @@ static void test_clear_drains_framebuffer_writes() {
     uint32_t aw_after = tb->dbg_aw_count;
     uint32_t aw_writes = aw_after - aw_before;
     const uint32_t clear_words = (320u * 200u) / 4u;
-    if (aw_writes > 0 && aw_writes <= clear_words) {
+    bool burst2_enabled = tb->dbg_fbwq_burst2_enable;
+    bool aw_count_ok = burst2_enabled
+        ? (aw_writes > 0 && aw_writes < clear_words)
+        : (aw_writes == clear_words);
+    if (aw_count_ok) {
         check_pass("clear_drains_framebuffer_writes.aw_count");
     } else {
         char buf[128];
-        snprintf(buf, sizeof(buf), "AW handshakes=%u expected 1..%u",
-                 aw_writes, clear_words);
+        snprintf(buf, sizeof(buf), "AW handshakes=%u expected %s%u%s",
+                 aw_writes,
+                 burst2_enabled ? "1.." : "",
+                 burst2_enabled ? (clear_words - 1u) : clear_words,
+                 burst2_enabled ? " with burst coalescing" : " without burst coalescing");
         check_fail("clear_drains_framebuffer_writes.aw_count", buf);
     }
 }

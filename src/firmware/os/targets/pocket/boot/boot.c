@@ -85,6 +85,7 @@ __attribute__((section(".text.boot")))
 static void boot_palette_init(void) {
     PAL_INDEX = 15;
     PAL_WRITE = 0xFFFFFF;
+    PAL_INDEX = PAL_INDEX_COMMIT;
 }
 
 __attribute__((section(".text.boot")))

@@ -75,16 +75,18 @@ static bool axi_write(uint32_t byte_addr, const uint32_t *data, int len, int tim
     bool w_done = false;
 
     for (int t = 0; t < timeout; t++) {
+        bool aw_fire = tb->s_axi_awvalid && tb->s_axi_awready;
+        bool w_fire = tb->s_axi_wvalid && tb->s_axi_wready;
         tick();
 
         // AW handshake
-        if (!aw_done && tb->s_axi_awready) {
+        if (!aw_done && aw_fire) {
             aw_done = true;
             tb->s_axi_awvalid = 0;
         }
 
         // W handshake
-        if (!w_done && tb->s_axi_wready) {
+        if (!w_done && w_fire) {
             beat++;
             if (beat >= beats) {
                 w_done = true;
@@ -224,6 +226,240 @@ static void test_burst_write() {
         snprintf(name, sizeof(name), "burst_wr_verify[%d]", i);
         check(name, val, 0xB0000000 | i);
     }
+}
+
+static bool axi_write_2beat_wvalid_on_pull(uint32_t byte_addr,
+                                           uint32_t first,
+                                           uint32_t second,
+                                           int timeout = 4000) {
+    tb->s_axi_awvalid = 1;
+    tb->s_axi_awaddr = byte_addr;
+    tb->s_axi_awlen = 1;  // 2 beats
+    tb->s_axi_wvalid = 1;
+    tb->s_axi_wdata = first;
+    tb->s_axi_wstrb = 0xF;
+    tb->s_axi_wlast = 0;
+
+    bool aw_done = false;
+    int w_beats = 0;
+    int first_w_cycle = -1;
+    bool second_presented = false;
+
+    for (int t = 0; t < timeout; t++) {
+        bool aw_fire = tb->s_axi_awvalid && tb->s_axi_awready;
+        bool w_fire = tb->s_axi_wvalid && tb->s_axi_wready;
+        tick();
+
+        if (!aw_done && aw_fire) {
+            aw_done = true;
+            tb->s_axi_awvalid = 0;
+        }
+
+        if (w_fire) {
+            w_beats++;
+            if (first_w_cycle < 0) first_w_cycle = t;
+            tb->s_axi_wvalid = 0;
+        }
+
+        // Native 2-beat writes now preload beat 1 before starting io_sdram;
+        // older streaming and serialized modes may request it later.  In all
+        // cases, present the delayed beat only after the first handshake and
+        // when the slave gives an explicit readiness signal.
+        bool wants_second = (first_w_cycle >= 0 && t > first_w_cycle) &&
+            (tb->s_axi_wready || tb->dbg_word_wr_data_next);
+        if (w_beats == 1 && !second_presented && !tb->s_axi_wvalid
+            && wants_second) {
+            tb->s_axi_wdata = second;
+            tb->s_axi_wstrb = 0xF;
+            tb->s_axi_wlast = 1;
+            tb->s_axi_wvalid = 1;
+            second_presented = true;
+        }
+
+        if (tb->s_axi_bvalid) {
+            tb->s_axi_awvalid = 0;
+            tb->s_axi_wvalid = 0;
+            idle(2);
+            return aw_done && (w_beats == 2);
+        }
+    }
+
+    printf("  TIMEOUT: wvalid-on-pull 2-beat write addr=0x%08x ser=%d aw=%d beats=%d second=%d\n",
+           byte_addr, tb->dbg_serialize_write_bursts, aw_done, w_beats, second_presented);
+    tb->s_axi_awvalid = 0;
+    tb->s_axi_wvalid = 0;
+    return false;
+}
+
+struct Write2Stats {
+    bool ok;
+    bool aw_done;
+    bool second_presented;
+    int w_beats;
+    int pull_count;
+    int b_latency;
+};
+
+static Write2Stats axi_write_2beat_observed(uint32_t byte_addr,
+                                            uint32_t first,
+                                            uint32_t second,
+                                            uint8_t strb0 = 0xF,
+                                            uint8_t strb1 = 0xF,
+                                            bool delay_second = false,
+                                            bool inject_burst_rd = false,
+                                            int timeout = 5000) {
+    Write2Stats st = {};
+    st.b_latency = -1;
+
+    tb->s_axi_awvalid = 1;
+    tb->s_axi_awaddr = byte_addr;
+    tb->s_axi_awlen = 1;
+    tb->s_axi_wvalid = 1;
+    tb->s_axi_wdata = first;
+    tb->s_axi_wstrb = strb0;
+    tb->s_axi_wlast = 0;
+
+    int aw_cycle = -1;
+    int first_w_cycle = -1;
+    int burst_started = -1;
+
+    for (int t = 0; t < timeout; t++) {
+        bool aw_fire = tb->s_axi_awvalid && tb->s_axi_awready;
+        bool w_fire = tb->s_axi_wvalid && tb->s_axi_wready;
+        tick();
+
+        if (tb->dbg_word_wr_data_next)
+            st.pull_count++;
+
+        if (!st.aw_done && aw_fire) {
+            st.aw_done = true;
+            aw_cycle = t;
+            tb->s_axi_awvalid = 0;
+        }
+
+        if (w_fire) {
+            st.w_beats++;
+            if (first_w_cycle < 0)
+                first_w_cycle = t;
+            tb->s_axi_wvalid = 0;
+        }
+
+        bool present_second = false;
+        if (st.w_beats == 1 && !st.second_presented && !tb->s_axi_wvalid) {
+            if (delay_second) {
+                present_second = (first_w_cycle >= 0 && t > first_w_cycle) &&
+                    (tb->s_axi_wready || tb->dbg_word_wr_data_next);
+            } else {
+                present_second = true;
+            }
+        }
+        if (present_second) {
+            tb->s_axi_wdata = second;
+            tb->s_axi_wstrb = strb1;
+            tb->s_axi_wlast = 1;
+            tb->s_axi_wvalid = 1;
+            st.second_presented = true;
+        }
+
+        if (inject_burst_rd && st.w_beats == 2 && tb->busy && burst_started < 0) {
+            tb->inj_burst_rd   = 1;
+            tb->inj_burst_addr = 0x00204000;
+            tb->inj_burst_len  = 160;
+            burst_started = t;
+        }
+        if (burst_started >= 0 && (t - burst_started) >= 1)
+            tb->inj_burst_rd = 0;
+
+        if (tb->s_axi_bvalid) {
+            tb->s_axi_awvalid = 0;
+            tb->s_axi_wvalid = 0;
+            tb->inj_burst_rd = 0;
+            st.b_latency = (aw_cycle >= 0) ? (t - aw_cycle) : -1;
+            st.ok = st.aw_done && st.second_presented && (st.w_beats == 2);
+            idle(inject_burst_rd ? 180 : 2);
+            return st;
+        }
+    }
+
+    tb->s_axi_awvalid = 0;
+    tb->s_axi_wvalid = 0;
+    tb->inj_burst_rd = 0;
+    idle(5);
+    return st;
+}
+
+static void test_native_2word_local_preload() {
+    printf("TEST: Native 2-word write uses local preload, not pull bus\n");
+
+    Write2Stats st = axi_write_2beat_observed(0x10002100,
+                                              0x01234567,
+                                              0x89ABCDEF);
+    check("native2_preload_ok", st.ok, 1);
+    check("native2_preload_no_pull", st.pull_count, 0);
+    check("native2_preload[0]", axi_read_word(0x10002100), 0x01234567);
+    check("native2_preload[1]", axi_read_word(0x10002104), 0x89ABCDEF);
+}
+
+static void test_burst_write_wvalid_on_pull() {
+    printf("TEST: Burst write accepts WVALID on data pull\n");
+
+    bool ok = axi_write_2beat_wvalid_on_pull(0x10002200,
+                                             0x13572468,
+                                             0x24681357);
+    check("burst_wr_wvalid_on_pull_ok", ok, 1);
+    check("burst_wr_wvalid_on_pull[0]", axi_read_word(0x10002200), 0x13572468);
+    check("burst_wr_wvalid_on_pull[1]", axi_read_word(0x10002204), 0x24681357);
+}
+
+static void test_native_2word_row_crossing() {
+    printf("TEST: Native 2-word write crosses SDRAM row boundary\n");
+
+    Write2Stats st = axi_write_2beat_observed(0x100007FC,
+                                              0x11223344,
+                                              0x55667788);
+    check("native2_row_cross_ok", st.ok, 1);
+    check("native2_row_cross_no_pull", st.pull_count, 0);
+    check("native2_row_cross[0]", axi_read_word(0x100007FC), 0x11223344);
+    check("native2_row_cross[1]", axi_read_word(0x10000800), 0x55667788);
+}
+
+static void test_native_2word_byte_strobes() {
+    printf("TEST: Native 2-word write preserves per-beat byte strobes\n");
+
+    axi_write_word(0x10002400, 0x11223344);
+    axi_write_word(0x10002404, 0x55667788);
+
+    Write2Stats st = axi_write_2beat_observed(0x10002400,
+                                              0x0000AA00,
+                                              0xBB000000,
+                                              0x2,
+                                              0x8);
+    check("native2_strobe_ok", st.ok, 1);
+    check("native2_strobe_no_pull", st.pull_count, 0);
+    check("native2_strobe[0]", axi_read_word(0x10002400), 0x1122AA44);
+    check("native2_strobe[1]", axi_read_word(0x10002404), 0xBB667788);
+}
+
+static void test_native_2word_under_burst_rd_contention() {
+    printf("TEST: Native 2-word write completes while scanout burst_rd is queued\n");
+
+    Write2Stats st = axi_write_2beat_observed(0x10002600,
+                                              0xFACE0001,
+                                              0xFACE0002,
+                                              0xF,
+                                              0xF,
+                                              false,
+                                              true);
+    check("native2_contention_ok", st.ok, 1);
+    check("native2_contention_no_pull", st.pull_count, 0);
+    if (!tb->dbg_serialize_write_bursts && (st.b_latency < 0 || st.b_latency > 70)) {
+        printf("  FAIL native2_contention_latency: got %d, expected <= 70\n", st.b_latency);
+        fail_count++;
+    } else {
+        pass_count++;
+    }
+    check("native2_contention[0]", axi_read_word(0x10002600), 0xFACE0001);
+    check("native2_contention[1]", axi_read_word(0x10002604), 0xFACE0002);
 }
 
 static void test_burst_write_16() {
@@ -581,6 +817,11 @@ int main(int argc, char **argv) {
     test_burst_read();
     if (trace) { trace->close(); delete trace; trace = nullptr; }  // Stop tracing to keep VCD small
     test_burst_write();
+    test_native_2word_local_preload();
+    test_burst_write_wvalid_on_pull();
+    test_native_2word_row_crossing();
+    test_native_2word_byte_strobes();
+    test_native_2word_under_burst_rd_contention();
     test_burst_write_16();
     test_row_hit_writes();
     test_different_rows();

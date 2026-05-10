@@ -19,7 +19,11 @@
 
 `default_nettype none
 
-module gpu_core (
+module gpu_core #(
+    // Experimental framebuffer write coalescer.  Set to 0 to force the
+    // conservative single-beat path without changing producer logic.
+    parameter FBWQ_BURST2_ENABLE = 1'b0
+) (
     input wire clk,
     input wire reset_n,
 
@@ -1175,12 +1179,12 @@ wire span4_active = cmd_is_draw_span4 || cmd_is_draw_span4_batch;
 wire span4_row_major = span4_active && (span4_fb_base[1:0] == 2'd0);
 
 // Outstanding-write tracker for CMD_FENCE / CMD_FLIP drain semantics.
-// Increments on m_wr_* AW handshake (single-beat AWs only — GPU never
-// bursts on this master).  Decrements on m_wr_bvalid (slave pulses it
-// for one cycle since axi_sdram_slave's bready is hardwired to 1
-// upstream).  CMD_FENCE/CMD_FLIP stall in S_EXECUTE while non-zero,
-// so fence_reached / gpu_swap_req only fire after pixel writes
-// commit to SDRAM.  4 bits is plenty (typical inflight is 1-3).
+// Increments on m_wr_* AW handshake (one AXI write transaction, single
+// beat or burst).  Decrements on m_wr_bvalid (slave pulses it for one
+// cycle since axi_sdram_slave's bready is hardwired to 1 upstream).
+// CMD_FENCE/CMD_FLIP stall in S_EXECUTE while non-zero, so fence_reached
+// / gpu_swap_req only fire after pixel writes commit to SDRAM.  4 bits is
+// plenty (typical inflight is 1-3).
 reg [3:0] m_wr_inflight;
 
 // Latched payload for CMD_FENCE / CMD_FLIP — published only after
@@ -1367,9 +1371,11 @@ reg src_done;            // source has issued its last pixel; pipeline draining
 // same cycle pipe_addr_b matches.  See gpu_tex_cache.v for the held-response
 // semantics this relies on.
 // Small write FIFO in front of the AXI write master.  Producers enqueue
-// 32-bit word writes; the drain path emits conservative single-beat AXI
-// writes so the framebuffer path does not depend on SDRAM burst-write
-// timing.
+// 32-bit word writes.  The drain path can optionally combine two adjacent
+// full-word writes into one AWLEN=1 transaction; partial/unaligned writes
+// and non-adjacent words always fall back to single-beat AXI writes.  Burst
+// writes are emitted by a tiny transaction FSM so both beats are captured
+// before AW/W launch and the second W beat is not dependent on FIFO state.
 localparam FBWQ_DEPTH = 2;
 reg [31:0] fbwq_addr [0:FBWQ_DEPTH-1];
 reg [31:0] fbwq_data [0:FBWQ_DEPTH-1];
@@ -1380,19 +1386,37 @@ reg [1:0]  fbwq_count;
 wire       fbwq_empty = (fbwq_count == 2'd0);
 wire       fbwq_full  = (fbwq_count == 2'd2);
 
+localparam FBWQ_TX_IDLE     = 2'd0;
+localparam FBWQ_TX_BURST_W0 = 2'd1;
+localparam FBWQ_TX_BURST_W1 = 2'd2;
+reg [1:0]  fbwq_tx_state;
+reg [31:0] fbwq_tx_data1;
+reg [3:0]  fbwq_tx_strb1;
+
 // Stage 2b: framebuffer/clear writes enqueue into a compact FIFO and the
 // AXI write port drains it independently.  This lets the fragment pipe keep
 // coalescing pixels while the SDRAM slave has a short AW/W hiccup.  Keep the
 // outstanding-B cap at 14 to prevent the 4-bit counter from overflowing if
 // SDRAM is slow to drain.
 wire m_wr_inflight_near_full = (m_wr_inflight >= 4'd14);
-wire m_wr_chan_busy = m_wr_awvalid || m_wr_wvalid;
-wire m_wr_aw_done = !m_wr_awvalid || m_wr_awready;
-wire m_wr_w_done  = !m_wr_wvalid  || m_wr_wready;
-wire fbwq_drain_can_load = m_wr_aw_done && m_wr_w_done
-                         && !m_wr_inflight_near_full;
+wire fbwq_tx_idle = (fbwq_tx_state == FBWQ_TX_IDLE);
+wire m_wr_chan_busy = m_wr_awvalid || m_wr_wvalid || !fbwq_tx_idle;
+wire fbwq_output_idle = fbwq_tx_idle && !m_wr_awvalid && !m_wr_wvalid;
+wire fbwq_drain_can_load = !m_wr_inflight_near_full
+                         && fbwq_output_idle;
 wire fbwq_pop_now = !fbwq_empty && fbwq_drain_can_load;
-wire [1:0] fbwq_pop_count = fbwq_pop_now ? 2'd1 : 2'd0;
+wire [31:0] fbwq_addr0 = fbwq_addr[fbwq_rd_ptr];
+wire [31:0] fbwq_addr1 = fbwq_addr[fbwq_rd_ptr ^ 1'b1];
+wire [3:0]  fbwq_strb0 = fbwq_strb[fbwq_rd_ptr];
+wire [3:0]  fbwq_strb1 = fbwq_strb[fbwq_rd_ptr ^ 1'b1];
+wire        fbwq_can_burst2 = FBWQ_BURST2_ENABLE
+                            && (fbwq_count == 2'd2)
+                            && (fbwq_strb0 == 4'hF)
+                            && (fbwq_strb1 == 4'hF)
+                            && (fbwq_addr0[1:0] == 2'b00)
+                            && (fbwq_addr1[1:0] == 2'b00)
+                            && (fbwq_addr1[31:2] == (fbwq_addr0[31:2] + 30'd1));
+wire [1:0] fbwq_pop_count = fbwq_pop_now ? (fbwq_can_burst2 ? 2'd2 : 2'd1) : 2'd0;
 wire fbwq_can_push = !fbwq_full || fbwq_pop_now;
 wire fb_write_can_issue = fbwq_can_push;
 wire p3_needs_fb_flush = p3_valid && !p3_discard && !p3_flags[SPAN_TRANSLUC]
@@ -2029,6 +2053,9 @@ always @(posedge clk) begin : main_fsm
         fbwq_rd_ptr <= 1'b0;
         fbwq_wr_ptr <= 1'b0;
         fbwq_count  <= 2'b0;
+        fbwq_tx_state <= FBWQ_TX_IDLE;
+        fbwq_tx_data1 <= 32'b0;
+        fbwq_tx_strb1 <= 4'b0;
         fb_acc_valid <= 0;
         fb_acc_mask <= 0;
         fence_reached <= 0;
@@ -2169,6 +2196,9 @@ always @(posedge clk) begin : main_fsm
             fbwq_rd_ptr  <= 1'b0;
             fbwq_wr_ptr  <= 1'b0;
             fbwq_count   <= 2'b0;
+            fbwq_tx_state <= FBWQ_TX_IDLE;
+            fbwq_tx_data1 <= 32'b0;
+            fbwq_tx_strb1 <= 4'b0;
             fb_acc_valid <= 0;
             fb_acc_mask  <= 0;
             m_wr_inflight <= 4'b0;
@@ -4302,19 +4332,36 @@ always @(posedge clk) begin : main_fsm
             // Central AXI write drain.  The main FSM only enqueues
             // writes into fbwq; this block owns m_wr_* and preserves
             // write order across spans, clears, fences, and translucent
-            // read-modify-write barriers.  Keep writes single-beat here:
-            // it is more robust on the Pocket SDRAM path and costs less
-            // control logic than a partial burst path.
+            // read-modify-write barriers.
             // --------------------------------------------------------
+            if (FBWQ_BURST2_ENABLE
+                && (fbwq_tx_state == FBWQ_TX_BURST_W0)
+                && m_wr_wvalid && m_wr_wready) begin
+                m_wr_wvalid  <= 1'b1;
+                m_wr_wdata   <= fbwq_tx_data1;
+                m_wr_wstrb   <= fbwq_tx_strb1;
+                m_wr_wlast   <= 1'b1;
+                fbwq_tx_state <= FBWQ_TX_BURST_W1;
+            end else if (FBWQ_BURST2_ENABLE
+                && (fbwq_tx_state == FBWQ_TX_BURST_W1)
+                && m_wr_wvalid && m_wr_wready) begin
+                fbwq_tx_state <= FBWQ_TX_IDLE;
+            end
+
             if (fbwq_pop_now) begin
                 m_wr_awvalid <= 1'b1;
                 m_wr_awaddr  <= fbwq_addr[fbwq_rd_ptr];
-                m_wr_awlen   <= 8'd0;
+                m_wr_awlen   <= fbwq_can_burst2 ? 8'd1 : 8'd0;
                 m_wr_wvalid  <= 1'b1;
                 m_wr_wdata   <= fbwq_data[fbwq_rd_ptr];
                 m_wr_wstrb   <= fbwq_strb[fbwq_rd_ptr];
-                m_wr_wlast   <= 1'b1;
-                fbwq_rd_ptr  <= fbwq_rd_ptr + 1'b1;
+                m_wr_wlast   <= !fbwq_can_burst2;
+                if (fbwq_can_burst2) begin
+                    fbwq_tx_state <= FBWQ_TX_BURST_W0;
+                    fbwq_tx_data1 <= fbwq_data[fbwq_rd_ptr ^ 1'b1];
+                    fbwq_tx_strb1 <= fbwq_strb[fbwq_rd_ptr ^ 1'b1];
+                end
+                fbwq_rd_ptr  <= fbwq_rd_ptr + (fbwq_pop_count == 2'd1);
             end
 
             if (fbwq_push_req && fbwq_can_push) begin

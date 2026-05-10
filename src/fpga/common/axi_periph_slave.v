@@ -80,6 +80,8 @@ module axi_periph_slave (
     output reg         pal_wr,
     output reg  [7:0]  pal_addr,
     output reg  [23:0] pal_data,
+    output reg         pal_commit,
+    input  wire        pal_busy,
 
     // Target dataslot interface
     output reg         target_dataslot_read,
@@ -787,6 +789,7 @@ always @(posedge clk) begin
         pal_wr <= 0;
         pal_addr <= 0;
         pal_data <= 0;
+        pal_commit <= 0;
         pal_index_reg <= 0;
         ds_slot_id_reg <= 0;
         ds_slot_offset_reg <= 0;
@@ -842,6 +845,7 @@ always @(posedge clk) begin
     end else begin
         cycle_counter <= cycle_counter + 1;
         pal_wr <= 0;
+        pal_commit <= 0;
         snac_start_pulse <= 0;
 
         // Hardware timer countdown
@@ -937,7 +941,10 @@ always @(posedge clk) begin
                         ds_err_latched <= 0;
                     end
                 end
-                7'b0_010000: pal_index_reg <= req_wdata[7:0];
+                7'b0_010000: begin
+                    pal_index_reg <= req_wdata[7:0];
+                    pal_commit <= req_wdata[31];
+                end
                 7'b0_010001: begin
                     pal_wr <= 1;
                     pal_addr <= pal_index_reg;
@@ -1072,7 +1079,7 @@ always @(*) begin
         7'b0_001101: sysreg_rdata = ds_resp_addr_reg;
         7'b0_001110: sysreg_rdata = 32'h0;
         7'b0_001111: sysreg_rdata = {25'b0, bridge_wr_idle, ~target_ack_s, ds_err_latched, ds_done_latched, ds_ack_latched};
-        7'b0_010000: sysreg_rdata = {24'b0, pal_index_reg};
+        7'b0_010000: sysreg_rdata = {pal_busy, 23'b0, pal_index_reg};
         // 0x44 (PAL_DATA write) doesn't have a meaningful read-back —
         // case row dropped to save the comparator LUT.  Reads return 0
         // via the default branch.

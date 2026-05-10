@@ -62,6 +62,9 @@ module tb_axi_periph (
     output wire [7:0]  dbg_snac_pin_out,
     output wire [7:0]  dbg_snac_pin_dir,
     output wire        dbg_snac_enable,
+    output wire        dbg_pal_commit,
+    output reg  [7:0]  dbg_pal_commit_count,
+    input  wire        pal_busy_in,
 
     // CMD_FLIP side-port (from gpu_core in production).  Tests can
     // pulse this and read FB_SWAP_CTRL via the AXI slave to verify
@@ -132,6 +135,16 @@ wire [31:0] cont4_key = cont4_key_in;
 wire [31:0] cont4_joy = cont4_joy_in;
 wire [15:0] cont4_trig = cont4_trig_in;
 wire [31:0] app_id = 32'b0;
+wire pal_commit_w;
+
+assign dbg_pal_commit = pal_commit_w;
+
+always @(posedge clk or negedge reset_n) begin
+    if (!reset_n)
+        dbg_pal_commit_count <= 8'd0;
+    else if (pal_commit_w)
+        dbg_pal_commit_count <= dbg_pal_commit_count + 8'd1;
+end
 
 // Model core_top's one-cycle register boundary between audio_mixer's
 // combinational position mux and axi_periph_slave's read data input.
@@ -188,7 +201,8 @@ axi_periph_slave dut (
     .color_mode     (),
     .fb_display_addr(),
 
-    .pal_wr  (), .pal_addr(), .pal_data(),
+    .pal_wr  (), .pal_addr(), .pal_data(), .pal_commit(pal_commit_w),
+    .pal_busy(pal_busy_in),
 
     .target_dataslot_read      (),
     .target_dataslot_write     (),

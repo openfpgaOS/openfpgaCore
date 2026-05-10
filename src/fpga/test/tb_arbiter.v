@@ -91,7 +91,8 @@ module tb_arbiter (
     output wire        dbg_s_awready,
     output wire        dbg_s_bvalid,
     output wire        dbg_s_rvalid,
-    output wire        dbg_s_rlast
+    output wire        dbg_s_rlast,
+    output wire [4:0]  dbg_gpu_wq_count
 );
 
 // ============================================================
@@ -117,6 +118,7 @@ wire [3:0]  s_wstrb;
 wire        s_wlast;
 wire        s_bvalid;
 wire [1:0]  s_bresp;
+wire        dut_dbg_cpu_pending;
 
 axi_sdram_arbiter dut (
     .clk        (clk),
@@ -200,7 +202,11 @@ axi_sdram_arbiter dut (
     .s_wstrb    (s_wstrb),
     .s_wlast    (s_wlast),
     .s_bvalid   (s_bvalid),
-    .s_bresp    (s_bresp)
+    .s_bresp    (s_bresp),
+
+    .dbg_arb_state(dbg_arb_state),
+    .dbg_cpu_pending(dut_dbg_cpu_pending),
+    .dbg_grant(dbg_grant)
 );
 
 // ============================================================
@@ -294,8 +300,6 @@ end
 // ============================================================
 // Observability
 // ============================================================
-assign dbg_grant     = dut.grant;
-assign dbg_arb_state = dut.arb_state;
 assign dbg_s_arvalid = s_arvalid;
 assign dbg_s_arready = s_arready;
 assign dbg_s_awvalid = s_awvalid;
@@ -303,6 +307,7 @@ assign dbg_s_awready = s_awready;
 assign dbg_s_bvalid  = s_bvalid;
 assign dbg_s_rvalid  = s_rvalid;
 assign dbg_s_rlast   = s_rlast;
+assign dbg_gpu_wq_count = dut.gpu_wq_count;
 
 endmodule
 

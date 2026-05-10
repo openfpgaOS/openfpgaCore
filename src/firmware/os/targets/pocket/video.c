@@ -40,6 +40,26 @@ static const uint32_t overlay_term_pal[16] = {
     0xFF5555, 0xFF55FF, 0xFFFF55, 0xFFFFFF,  /* 12-15: red, magenta, yellow, white */
 };
 
+static void palette_commit_staged(void) {
+    PAL_INDEX = PAL_INDEX_COMMIT;
+}
+
+static void palette_wait_ready(void) {
+    uint64_t deadline = read_cycles() + (CPU_FREQ_HZ / 30);
+    while (PAL_INDEX & PAL_INDEX_BUSY) {
+        if (read_cycles() > deadline)
+            break;
+    }
+}
+
+static void palette_upload_shadow(void) {
+    palette_wait_ready();
+    PAL_INDEX = 0;
+    for (int i = 0; i < 256; i++)
+        PAL_WRITE = pal_shadow[i];
+    palette_commit_staged();
+}
+
 /* ---- VRR (Variable Refresh Rate) ----
  * The rate-lock loop lives in RTL (vrr_controller.v). The peripheral slave
  * also locks V_TOTAL to fixed NTSC/PAL timing when Analogizer video or SNAC is
@@ -244,6 +264,7 @@ void of_video_vsync(void) {
 
 /* Install overlay palette: dim app colors by 50%, bright terminal at 240-255 */
 static void overlay_install_palette(void) {
+    palette_wait_ready();
     PAL_INDEX = 0;
     for (int i = 0; i < 240; i++) {
         uint32_t c = pal_shadow[i];
@@ -254,13 +275,12 @@ static void overlay_install_palette(void) {
     }
     for (int i = 0; i < 16; i++)
         PAL_WRITE = overlay_term_pal[i];
+    palette_commit_staged();
 }
 
 /* Restore original app palette from shadow */
 static void overlay_restore_palette(void) {
-    PAL_INDEX = 0;
-    for (int i = 0; i < 256; i++)
-        PAL_WRITE = pal_shadow[i];
+    palette_upload_shadow();
 }
 
 void of_video_set_palette(uint8_t index, uint8_t r, uint8_t g, uint8_t b) {
@@ -269,8 +289,7 @@ void of_video_set_palette(uint8_t index, uint8_t r, uint8_t g, uint8_t b) {
     if (vid_display_mode == DISPLAY_MODE_OVERLAY) {
         overlay_install_palette();
     } else {
-        PAL_INDEX = index;
-        PAL_WRITE = rgb;
+        palette_upload_shadow();
     }
 }
 
@@ -280,9 +299,7 @@ void of_video_set_palette_bulk(const uint32_t *palette, int count) {
     if (vid_display_mode == DISPLAY_MODE_OVERLAY) {
         overlay_install_palette();
     } else {
-        PAL_INDEX = 0;
-        for (int i = 0; i < count && i < 256; i++)
-            PAL_WRITE = palette[i];
+        palette_upload_shadow();
     }
 }
 
@@ -297,9 +314,7 @@ void of_video_set_palette_vga4(const uint8_t *vga_pal, int count) {
     if (vid_display_mode == DISPLAY_MODE_OVERLAY) {
         overlay_install_palette();
     } else {
-        PAL_INDEX = 0;
-        for (int i = 0; i < count; i++)
-            PAL_WRITE = pal_shadow[i];
+        palette_upload_shadow();
     }
 }
 

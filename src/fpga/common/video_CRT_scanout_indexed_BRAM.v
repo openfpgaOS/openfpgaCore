@@ -37,10 +37,12 @@ module video_CRT_scanout_indexed_BRAM (
     input wire         burst_data_valid,
     input wire         burst_data_done,
 
-    // Palette write interface (directly from CPU, active on any clock edge)
+    // Palette write interface (clk_sdram domain)
     input wire        pal_wr,
     input wire [7:0]  pal_addr,
-    input wire [23:0] pal_data      // RGB888 palette data
+    input wire [23:0] pal_data,     // RGB888 palette data
+    input wire        pal_commit,   // request visible-bank swap at frame start
+    output wire       pal_busy      // commit queued until visible at frame start
 );
 
     // Color mode constants (match OF_VIDEO_MODE_* in SDK)
@@ -68,20 +70,61 @@ module video_CRT_scanout_indexed_BRAM (
     reg [31:0] bram_rd_data;
     reg [7:0] write_ptr;
 
-    // Palette RAM: 256 entries x 24-bit RGB (BRAM, dual-port)
-    // Port A: write from CPU (pal_wr)
-    // Port B: read for pixel lookup (palette_index)
+    // Palette RAM: two 256-entry banks x 24-bit RGB.
+    // Port A writes the staging bank.  Port B reads the active bank for
+    // scanout.  PAL_COMMIT swaps the active/staging banks only at frame start
+    // so a 256-entry fade upload cannot tear through an active scanline.
     reg [7:0] pal_rd_addr;
     wire [23:0] pal_rd_data;
+    reg pal_active_bank;
+
+    reg pal_commit_req_toggle;
+    reg pal_commit_ack_toggle;
+    reg [1:0] pal_commit_ack_sdram_sync;
+    reg [1:0] pal_commit_req_video_sync;
+    wire pal_write_bank = ~pal_commit_ack_sdram_sync[1];
+    wire pal_commit_pending_sdram =
+        (pal_commit_req_toggle != pal_commit_ack_sdram_sync[1]);
+    wire pal_commit_pending_video =
+        (pal_commit_req_video_sync[1] != pal_commit_ack_toggle);
+    wire frame_start = line_start && (y_count == 10'd0);
+    assign pal_busy = pal_commit_pending_sdram;
+
+    always @(posedge clk_sdram or negedge reset_n) begin
+        if (!reset_n) begin
+            pal_commit_req_toggle <= 1'b0;
+            pal_commit_ack_sdram_sync <= 2'b00;
+        end else begin
+            pal_commit_ack_sdram_sync <= {pal_commit_ack_sdram_sync[0],
+                                          pal_commit_ack_toggle};
+            if (pal_commit && !pal_commit_pending_sdram)
+                pal_commit_req_toggle <= ~pal_commit_req_toggle;
+        end
+    end
+
+    always @(posedge clk_video or negedge reset_n) begin
+        if (!reset_n) begin
+            pal_active_bank <= 1'b0;
+            pal_commit_ack_toggle <= 1'b0;
+            pal_commit_req_video_sync <= 2'b00;
+        end else begin
+            pal_commit_req_video_sync <= {pal_commit_req_video_sync[0],
+                                          pal_commit_req_toggle};
+            if (frame_start && pal_commit_pending_video) begin
+                pal_active_bank <= ~pal_active_bank;
+                pal_commit_ack_toggle <= pal_commit_req_video_sync[1];
+            end
+        end
+    end
 
     altsyncram #(
         .operation_mode("DUAL_PORT"),
         .width_a(24),
-        .widthad_a(8),
+        .widthad_a(9),
         .width_b(24),
-        .widthad_b(8),
-        .numwords_a(256),
-        .numwords_b(256),
+        .widthad_b(9),
+        .numwords_a(512),
+        .numwords_b(512),
         .clock_enable_input_a("BYPASS"),
         .clock_enable_input_b("BYPASS"),
         .clock_enable_output_b("BYPASS"),
@@ -91,11 +134,11 @@ module video_CRT_scanout_indexed_BRAM (
         .power_up_uninitialized("FALSE")
     ) palette_ram (
         .clock0(clk_sdram),
-        .address_a(pal_addr),
+        .address_a({pal_write_bank, pal_addr}),
         .data_a(pal_data),
         .wren_a(pal_wr),
         .clock1(clk_video),
-        .address_b(pal_rd_addr),
+        .address_b({pal_active_bank, pal_rd_addr}),
         .q_b(pal_rd_data),
         .wren_b(1'b0),
         .aclr0(1'b0), .aclr1(1'b0),
@@ -110,12 +153,8 @@ module video_CRT_scanout_indexed_BRAM (
     // Use 32-bit burst mode
     assign burst_32bit = 1'b1;
 
-    // Sync color_mode to SDRAM domain
-    reg [2:0] color_mode_sdram_s1, color_mode_sdram;
-    always @(posedge clk_sdram) begin
-        color_mode_sdram_s1 <= color_mode;
-        color_mode_sdram <= color_mode_sdram_s1;
-    end
+    // color_mode is driven by axi_periph_slave in the clk_sdram domain.
+    wire [2:0] color_mode_sdram = color_mode;
 
     // Sync color_mode to the pixel pipeline domain; the CPU side shares
     // clk_sdram, but pixel decode runs on clk_video.

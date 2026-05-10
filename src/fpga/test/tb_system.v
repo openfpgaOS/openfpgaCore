@@ -289,6 +289,8 @@ wire [3:0]  sdram_burst_wr_len;
 wire        sdram_wr_data_next;
 wire [31:0] sdram_next_wdata;
 wire [3:0]  sdram_next_wstrb;
+wire [31:0] sdram_preload_wdata;
+wire [3:0]  sdram_preload_wstrb;
 
 // Pulse adapter (mirror of core_top.v lines 1713–1746)
 reg         cmd_forwarded;
@@ -335,8 +337,8 @@ always @(posedge clk_cpu or negedge reset_n) begin
 
         wr_data_fwd_d1 <= word_wr_data_next_sd;
         if (wr_data_fwd_d1) begin
-            word_data_sd <= sdram_next_wdata;
-            word_wstrb_sd <= sdram_next_wstrb;
+            word_data_sd <= sdram_wdata;
+            word_wstrb_sd <= sdram_wstrb;
         end
     end
 end
@@ -370,6 +372,8 @@ axi_sdram_slave sdram_axi_slave (
     .sdram_wr_done     (word_wr_done_sd),
     .sdram_next_wdata  (sdram_next_wdata),
     .sdram_next_wstrb  (sdram_next_wstrb),
+    .sdram_preload_wdata(sdram_preload_wdata),
+    .sdram_preload_wstrb(sdram_preload_wstrb),
     .dbg_slave         (tb_sdram_slave_dbg)
 );
 wire [15:0] tb_sdram_slave_dbg;
@@ -389,8 +393,8 @@ sdram_fast_model sdram_mem (
     .word_q_valid       (word_q_valid_sd),
     .word_wr_data_next  (word_wr_data_next_sd),
     .word_wr_done       (word_wr_done_sd),
-    .burst_wr_direct_data(sdram_next_wdata),
-    .burst_wr_direct_strb(sdram_next_wstrb)
+    .burst_wr_direct_data(word_data_sd),
+    .burst_wr_direct_strb(word_wstrb_sd)
 );
 
 // ============================================================
@@ -537,7 +541,7 @@ axi_periph_slave periph (
     .color_mode     (),
     .fb_display_addr(),
 
-    .pal_wr  (), .pal_addr(), .pal_data(),
+    .pal_wr  (), .pal_addr(), .pal_data(), .pal_commit(), .pal_busy(1'b0),
 
     .target_dataslot_read      (),
     .target_dataslot_write     (),
@@ -614,7 +618,9 @@ axi_periph_slave periph (
 // ============================================================
 // gpu_core — full GPU instance (matches core_top.v wiring)
 // ============================================================
-gpu_core gpu (
+gpu_core #(
+    .FBWQ_BURST2_ENABLE(1'b1)
+) gpu (
     .clk        (clk_cpu),
     .reset_n    (reset_n),
     .gpu_enable (1'b1),

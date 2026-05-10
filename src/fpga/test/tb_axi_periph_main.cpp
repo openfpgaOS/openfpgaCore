@@ -55,6 +55,7 @@ static void reset_sequence() {
     tb->cont4_joy_in    = 0;
     tb->cont4_trig_in   = 0;
     tb->snac_pin_in_in  = 0;
+    tb->pal_busy_in     = 0;
     for (int i = 0; i < 10; i++) tick();
     tb->reset_n = 1;
     for (int i = 0; i < 10; i++) tick();
@@ -703,6 +704,34 @@ static void test_save_dt_commit_toggle() {
 
 static uint32_t mmio_read32(uint32_t addr);
 
+static void test_palette_commit_sysreg() {
+    printf("test_palette_commit_sysreg:\n");
+
+    const uint32_t PAL_INDEX = 0x40000040u;
+
+    check_eq("pal-commit-idle", tb->dbg_pal_commit ? 1u : 0u, 0u);
+
+    uint32_t c0 = tb->dbg_pal_commit_count;
+    axi_write_single(PAL_INDEX, 0x80000000u);
+    for (int i = 0; i < 4; i++) tick();
+    check_eq("pal-commit-pulse-count",
+             (tb->dbg_pal_commit_count - c0) & 0xFFu, 1u);
+
+    c0 = tb->dbg_pal_commit_count;
+    axi_write_single(PAL_INDEX, 0u);
+    for (int i = 0; i < 4; i++) tick();
+    check_eq("pal-commit-zero-no-pulse",
+             (tb->dbg_pal_commit_count - c0) & 0xFFu, 0u);
+
+    tb->pal_busy_in = 1;
+    check_eq("pal-index-busy-readback", mmio_read32(PAL_INDEX), 0x80000000u);
+    tb->pal_busy_in = 0;
+    axi_write_single(PAL_INDEX, 0x2au);
+    check_eq("pal-index-idle-readback", mmio_read32(PAL_INDEX), 0x0000002au);
+}
+
+static uint32_t mmio_read32(uint32_t addr);
+
 static void test_analogizer_sysregs() {
     printf("test_analogizer_sysregs:\n");
 
@@ -964,6 +993,7 @@ int main(int argc, char **argv) {
     test_burst_with_backpressure();
     test_sysreg_polling();
     test_save_dt_commit_toggle();
+    test_palette_commit_sysreg();
     test_analogizer_sysregs();
     test_snac_shifter_regs();
     test_input_hub();
