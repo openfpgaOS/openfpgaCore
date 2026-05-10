@@ -6,6 +6,7 @@
  *
  * Usage:
  *   sf2_to_ofsf input.sf2 output.ofsf [--max-size=NM] [--sample-rate=RATE]
+ *               [--usage=FILE]
  *
  * Reads an SF2 (SoundFont 2.04) RIFF file and writes a flat .ofsf binary
  * matching the layout in of_smp_bank.h:
@@ -20,6 +21,7 @@
 #include <stdarg.h>
 #include <math.h>
 #include <errno.h>
+#include <ctype.h>
 
 #ifdef _WIN32
   /* No mmap on Windows -- use malloc+fread fallback */
@@ -220,9 +222,24 @@ static int g_sample_cap;
 static uint32_t g_max_size  = 0;        /* 0 = no limit */
 static uint32_t g_sample_rate = 0;      /* 0 = auto-detect from first sample */
 
+/* Optional usage mask.  Slot 0..127 = melodic bank 0, slot 128..255 =
+ * percussion bank 128.  A kept slot with note_filter=0 keeps every zone;
+ * a kept slot with note_filter=1 keeps only zones intersecting used notes. */
+static uint8_t g_usage_enabled;
+static uint8_t g_slot_keep[OFSF_PRESET_COUNT];
+static uint8_t g_slot_note_filter[OFSF_PRESET_COUNT];
+static uint8_t g_slot_note_keep[OFSF_PRESET_COUNT][128];
+static uint32_t g_usage_slots;
+static uint32_t g_usage_note_slots;
+static uint32_t g_usage_notes;
+static uint32_t g_filtered_presets;
+static uint32_t g_filtered_zones;
+
 /* Metadata pulled from SF2 INFO LIST (INAM/IENG), null-terminated. */
 static char g_bank_name[OFSF_NAME_MAX];
 static char g_bank_author[OFSF_AUTHOR_MAX];
+
+static int usage_slot_intersects_notes(int slot, int16_t key_range);
 
 /* ------------------------------------------------------------------ */
 /* Helpers                                                            */
@@ -718,6 +735,11 @@ static void resolve_instrument_zone(int preset_slot,
     if (final_key == -1 || final_vel == -1)
         return;
 
+    if (!usage_slot_intersects_notes(preset_slot, final_key)) {
+        g_filtered_zones++;
+        return;
+    }
+
     merged.val[GEN_keyRange] = final_key;
     merged.val[GEN_velRange] = final_vel;
 
@@ -814,6 +836,11 @@ static void resolve_preset(int phdr_index)
         slot = ph->preset & 127;
     } else {
         /* Variation bank — not reachable by runtime, skip. */
+        return;
+    }
+
+    if (g_usage_enabled && !g_slot_keep[slot]) {
+        g_filtered_presets++;
         return;
     }
 
@@ -1393,6 +1420,202 @@ static uint32_t parse_size(const char *s)
     return (uint32_t)val;
 }
 
+static char *trim_ws(char *s)
+{
+    while (*s && isspace((unsigned char)*s))
+        s++;
+
+    char *end = s + strlen(s);
+    while (end > s && isspace((unsigned char)end[-1]))
+        *--end = '\0';
+
+    return s;
+}
+
+static int parse_number_token(const char *s, const char *what)
+{
+    char *end = NULL;
+    long v = strtol(s, &end, 0);
+    if (end == s || *end != '\0')
+        die("invalid %s: '%s'", what, s);
+    if (v < 0 || v > 255)
+        die("%s out of range 0..255: '%s'", what, s);
+    return (int)v;
+}
+
+static void usage_keep_slot(int slot)
+{
+    if (slot < 0 || slot >= OFSF_PRESET_COUNT)
+        die("usage slot out of range 0..255: %d", slot);
+
+    if (!g_slot_keep[slot])
+        g_usage_slots++;
+    g_slot_keep[slot] = 1;
+}
+
+static void usage_keep_note(int slot, int note)
+{
+    if (note < 0 || note > 127)
+        die("usage note out of range 0..127: %d", note);
+
+    usage_keep_slot(slot);
+    if (!g_slot_note_filter[slot]) {
+        g_slot_note_filter[slot] = 1;
+        g_usage_note_slots++;
+    }
+    if (!g_slot_note_keep[slot][note]) {
+        g_slot_note_keep[slot][note] = 1;
+        g_usage_notes++;
+    }
+}
+
+static void usage_parse_notes(int slot, char *notes)
+{
+    char *tok = strtok(notes, ", \t\r\n");
+    if (!tok)
+        die("usage slot %d has 'notes' without a note list", slot);
+
+    while (tok) {
+        char *dash = strchr(tok, '-');
+        if (dash) {
+            *dash = '\0';
+            int lo = parse_number_token(tok, "note");
+            int hi = parse_number_token(dash + 1, "note");
+            if (hi < lo)
+                die("invalid note range %d-%d", lo, hi);
+            for (int n = lo; n <= hi; n++)
+                usage_keep_note(slot, n);
+        } else {
+            usage_keep_note(slot, parse_number_token(tok, "note"));
+        }
+        tok = strtok(NULL, ", \t\r\n");
+    }
+}
+
+static void usage_recount(void)
+{
+    g_usage_slots = 0;
+    g_usage_note_slots = 0;
+    g_usage_notes = 0;
+
+    for (int slot = 0; slot < OFSF_PRESET_COUNT; slot++) {
+        if (!g_slot_keep[slot])
+            continue;
+        g_usage_slots++;
+
+        if (!g_slot_note_filter[slot])
+            continue;
+        g_usage_note_slots++;
+        for (int note = 0; note < 128; note++) {
+            if (g_slot_note_keep[slot][note])
+                g_usage_notes++;
+        }
+    }
+}
+
+static void parse_usage_file(const char *path)
+{
+    FILE *f = fopen(path, "r");
+    if (!f)
+        die("cannot open usage file '%s': %s", path, strerror(errno));
+
+    char *line = NULL;
+    size_t cap = 0;
+    int lineno = 0;
+
+    while (getline(&line, &cap, f) != -1) {
+        lineno++;
+
+        char *comment = strchr(line, '#');
+        if (comment)
+            *comment = '\0';
+
+        char *p = trim_ws(line);
+        if (*p == '\0')
+            continue;
+
+        char *kind = strtok(p, " \t\r\n");
+        char *id_s = strtok(NULL, " \t\r\n");
+        char *mode = strtok(NULL, " \t\r\n");
+        if (!kind || !id_s) {
+            fclose(f);
+            die("%s:%d: expected 'slot N all' or 'slot N notes LIST'", path, lineno);
+        }
+
+        int id = parse_number_token(id_s, "usage id");
+        int slot;
+        if (strcmp(kind, "slot") == 0) {
+            slot = id;
+        } else if (strcmp(kind, "program") == 0 || strcmp(kind, "melodic") == 0) {
+            if (id > 127)
+                die("%s:%d: melodic program out of range 0..127", path, lineno);
+            slot = id;
+        } else if (strcmp(kind, "drum") == 0) {
+            if (id > 127)
+                die("%s:%d: drum program out of range 0..127", path, lineno);
+            slot = 128 + id;
+        } else {
+            fclose(f);
+            die("%s:%d: unknown usage kind '%s'", path, lineno, kind);
+        }
+
+        if (!mode || strcmp(mode, "all") == 0) {
+            usage_keep_slot(slot);
+            g_slot_note_filter[slot] = 0;
+            memset(g_slot_note_keep[slot], 0, sizeof(g_slot_note_keep[slot]));
+            continue;
+        }
+
+        char *rest;
+        if (strcmp(mode, "notes") == 0) {
+            rest = strtok(NULL, "\r\n");
+            if (rest)
+                rest = trim_ws(rest);
+        } else {
+            rest = mode;
+        }
+        if (!rest) {
+            fclose(f);
+            die("%s:%d: expected note list", path, lineno);
+        }
+        usage_parse_notes(slot, rest);
+    }
+
+    free(line);
+    fclose(f);
+
+    usage_recount();
+    if (g_usage_slots == 0)
+        die("usage file '%s' did not keep any slots", path);
+
+    g_usage_enabled = 1;
+    fprintf(stderr, "Usage filter: %u slots, %u note-filtered slots, %u notes\n",
+            g_usage_slots, g_usage_note_slots, g_usage_notes);
+}
+
+static int usage_slot_intersects_notes(int slot, int16_t key_range)
+{
+    if (!g_usage_enabled)
+        return 1;
+    if (slot < 0 || slot >= OFSF_PRESET_COUNT || !g_slot_keep[slot])
+        return 0;
+    if (!g_slot_note_filter[slot])
+        return 1;
+
+    int lo = (uint8_t)((uint16_t)key_range & 0xFF);
+    int hi = (uint8_t)(((uint16_t)key_range >> 8) & 0xFF);
+    if (hi < lo)
+        return 0;
+    if (lo < 0) lo = 0;
+    if (hi > 127) hi = 127;
+
+    for (int n = lo; n <= hi; n++) {
+        if (g_slot_note_keep[slot][n])
+            return 1;
+    }
+    return 0;
+}
+
 static void usage(void)
 {
     fprintf(stderr,
@@ -1401,7 +1624,15 @@ static void usage(void)
         "Options:\n"
         "  --max-size=SIZE    Maximum output file size (e.g. 8M, 512K)\n"
         "  --sample-rate=RATE Override sample rate (default: from SF2)\n"
+        "  --usage=FILE       Keep only slots/notes listed in usage file\n"
         "  -h, --help         Show this help\n"
+        "\n"
+        "Usage file lines:\n"
+        "  program P all              Keep melodic program P\n"
+        "  program P notes LIST       Keep zones touching listed MIDI notes\n"
+        "  drum P notes LIST          Keep drum-kit program P notes\n"
+        "  slot S notes LIST          Keep raw OFSF slot S notes\n"
+        "LIST accepts comma/space-separated notes and ranges, e.g. 36,38,42-46.\n"
         "\n"
         "Converts an SF2 soundfont to the openfpgaOS .ofsf runtime format.\n"
     );
@@ -1420,6 +1651,8 @@ int main(int argc, char **argv)
             g_sample_rate = (uint32_t)atoi(argv[i] + 14);
             if (g_sample_rate == 0)
                 die("invalid sample rate: '%s'", argv[i] + 14);
+        } else if (strncmp(argv[i], "--usage=", 8) == 0) {
+            parse_usage_file(argv[i] + 8);
         } else if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
             usage();
         } else if (argv[i][0] == '-') {
@@ -1447,6 +1680,10 @@ int main(int argc, char **argv)
 
     fprintf(stderr, "Resolved %d zones from %d presets\n",
             g_zone_count, g_sf2.phdr_count - 1);
+    if (g_usage_enabled) {
+        fprintf(stderr, "Usage filter removed %u presets and %u zones\n",
+                g_filtered_presets, g_filtered_zones);
+    }
 
     /* Write output */
     write_output(output_path);
