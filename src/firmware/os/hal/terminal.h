@@ -69,11 +69,11 @@ void of_term_reset(void);
 /* Set terminal display mode: 0=terminal, 1=framebuffer, 2=overlay */
 void of_term_set_display_mode(int mode);
 
-/* Enable UART console mirror (call after the debug-host handshake completes) */
+/* Enable UART console mirror after boot has confirmed the cart pins are free. */
 void of_term_enable_uart_mirror(void);
 
-/* Drain the UART TX ring buffer into the UART FIFO.  Called from the
- * machine-timer ISR — bounded work per call (32 bytes max). */
+/* Service target-specific terminal UART output.  Pocket output is
+ * synchronous, so this is a compatibility no-op there. */
 void of_term_uart_drain(void);
 
 #endif /* OFOS_TERMINAL_H */

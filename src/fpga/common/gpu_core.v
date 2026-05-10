@@ -135,7 +135,7 @@ assign dbg_frag = {sp_count[7:0],
 // 0x2C  GPU_DMA_KICK      W   Write 1 to fire DMA pull from (SRC, LEN)
 // 0x30  Reserved
 // 0x34  GPU_DBG_WR_INFLIGHT R Low 4 bits = outstanding FB write responses
-// 0x38  GPU_DMA_DBG       R   Compact DMA/debug status
+// 0x38  GPU_DMA_DBG       R   Compact DMA diagnostic status
 // 0x3C  GPU_DBG_SELECT     Reserved/read-zero in area mode
 //
 // Upload semantics:
@@ -361,7 +361,7 @@ always @(posedge clk) begin
                         dma_kick <= 1'b1;
                 end
                 4'd12: begin end // Reserved
-                4'd14: begin end // DMA debug register is read-only
+                4'd14: begin end // DMA diagnostic register is read-only
                 4'd15: begin end // GPU_DBG_SELECT retired in area mode
                 default: ;
             endcase
@@ -1590,9 +1590,9 @@ reg [4:0]  persp_clz;          // CLZ of persp_zinv_abs_r, latched after PSS_CLZ
 reg signed [31:0] pss_s_end_r;
 reg signed [31:0] pss_t_end_r;
 
-// Task #89 — PSS slope clamp on perspective singularity (commit XXXX).
+// PSS slope clamp on perspective singularity.
 //
-// Root cause: PSS computes s_end = sp_sZ × (1/sp_zinv) at the end of
+// Root cause: PSS computes s_end = sp_sZ * (1/sp_zinv) at the end of
 // each 8-pixel sub-segment, then derives a per-pixel slope as
 // (s_end - s_anchor) >>> 3.  The 1/sp_zinv operation has a
 // singularity at sp_zinv=0; on oblique triangles where d(zinv)/dx
@@ -3288,7 +3288,6 @@ always @(posedge clk) begin : main_fsm
                 end
 
                 PSS_SLOPE: begin
-                    // (debug $display removed)
                     case (persp_pass)
                         PSS_PASS_ANCHOR: begin
                             // Pass 1: just store the anchor at pos 0.

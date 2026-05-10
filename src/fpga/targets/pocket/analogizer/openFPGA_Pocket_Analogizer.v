@@ -101,18 +101,15 @@ module openFPGA_Pocket_Analogizer #(parameter MASTER_CLK_FREQ=50_000_000, parame
 	input wire       snac_pin30_dir,
 	input wire       snac_pin31_out,
 	input wire       snac_pin31_dir,
-	//Pocket Analogizer IO interface — video output on bank1-3
+	// Pocket Analogizer IO interface: video output on bank1-3.
 	inout   wire    [7:0]   cart_tran_bank2,
 	output  wire            cart_tran_bank2_dir,
 	inout   wire    [7:0]   cart_tran_bank3,
 	output  wire            cart_tran_bank3_dir,
 	inout   wire    [7:0]   cart_tran_bank1,
-	output  wire            cart_tran_bank1_dir,
-    //debug
-	output wire [3:0] DBG_TX,
-    output wire o_stb
+	output  wire            cart_tran_bank1_dir
 );
-	// SNAC hardware FSMs removed — pins now driven by CPU SNAC shifter/GPIO
+	// SNAC pins are driven by the CPU SNAC shifter/GPIO.
 	wire [7:4] CART_BK0_OUT    = snac_bank0_out;
 	wire       CART_BK0_DIR    = snac_bank0_dir;
 	wire [7:6] CART_BK1_OUT_P76 = snac_bank1_76_out;
@@ -120,9 +117,6 @@ module openFPGA_Pocket_Analogizer #(parameter MASTER_CLK_FREQ=50_000_000, parame
 	wire       CART_PIN30_DIR  = snac_pin30_dir;
 	wire       CART_PIN31_OUT  = snac_pin31_out;
 	wire       CART_PIN31_DIR  = snac_pin31_dir;
-
-	assign DBG_TX = 4'b0;
-	assign o_stb  = 1'b0;
 
 	//Choose type of analog video type of signal
 		reg [5:0] Rout, Gout, Bout;

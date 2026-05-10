@@ -5,7 +5,7 @@
 
 #include "../hal/terminal.h"
 #include "../hal/regs.h"
-/* Debug variables (defined in main.c) */
+/* Trap context breadcrumbs (defined in main.c) */
 extern volatile unsigned int pd_dbg_stage;
 extern volatile unsigned int pd_dbg_info;
 
@@ -137,9 +137,6 @@ static void emulate_store(unsigned int addr, unsigned int val, int funct3) {
     }
 }
 
-/* Debug counter for misaligned traps */
-static unsigned int misaligned_count = 0;
-
 /* Read instruction at PC using byte reads (mepc may not be 4-byte aligned) */
 __attribute__((section(".text.boot")))
 static unsigned int read_instr(unsigned int pc) {
@@ -163,13 +160,6 @@ int handle_misaligned(trap_frame_t *frame) {
 
     unsigned int instr = read_instr(frame->mepc);
     int is_compressed = ((instr & 3) != 3);
-
-    /* Debug: print first few traps */
-    misaligned_count++;
-    if (misaligned_count <= 5) {
-        of_term_printf("T#%d mc=%x pc=%x i=%x\n",
-                    misaligned_count, mcause, frame->mepc, instr);
-    }
 
     /* ---- Compressed (RVC) instructions ---- */
     if (is_compressed) {
@@ -337,73 +327,14 @@ int handle_misaligned(trap_frame_t *frame) {
     return 0;
 }
 
-/* ======================================================================
- * Fatal trap output — writes directly to VRAM + color RAM.
- * Bypasses of_term_putchar/ANSI parser entirely so trap output
- * is always readable regardless of terminal state.
- * All functions are in .text.boot (BRAM) for reliability.
- * ====================================================================== */
-
-#define TRAP_VRAM  0x20000000
-#define TRAP_COLOR 0x20000800
-#define TRAP_COLS  40
-#define TRAP_ROWS  30
-#define TRAP_ATTR  0x0F  /* white on black */
-
-static int trap_col, trap_row;
-
-__attribute__((section(".text.boot")))
-static void trap_putchar(char c) {
-    if (c == '\n') {
-        trap_col = 0;
-        trap_row++;
-    } else {
-        if (trap_col < TRAP_COLS && trap_row < TRAP_ROWS) {
-            int off = trap_row * TRAP_COLS + trap_col;
-            (*(volatile unsigned char *)(TRAP_VRAM + off)) = (unsigned char)c;
-            (*(volatile unsigned char *)(TRAP_COLOR + off)) = TRAP_ATTR;
-        }
-        trap_col++;
-    }
-}
-
-__attribute__((section(".text.boot")))
-static void trap_puts(const char *s) {
-    while (*s) trap_putchar(*s++);
-}
-
-__attribute__((section(".text.boot")))
-static void trap_hex(unsigned int val) {
-    const char *hex = "0123456789ABCDEF";
-    trap_puts("0x");
-    for (int i = 28; i >= 0; i -= 4)
-        trap_putchar(hex[(val >> i) & 0xF]);
-}
-
-__attribute__((section(".text.boot")))
-static void trap_uint(unsigned int val) {
-    char buf[12];
-    int n = 0;
-    if (val == 0) { trap_putchar('0'); return; }
-    while (val > 0) { buf[n++] = '0' + (val % 10); val /= 10; }
-    while (n > 0) trap_putchar(buf[--n]);
-}
-
-__attribute__((section(".text.boot")))
-static void trap_line(const char *label, unsigned int val) {
-    trap_puts(label);
-    trap_hex(val);
-    trap_putchar('\n');
-}
-
-/* Fatal trap handler — called when we can't handle the exception.
+/* Fatal trap handler: called when we cannot handle the exception.
  *
  * Writes to UART MMIO (0x4F000004) *must* poll UART_STATUS.TX_RDY
  * (bit 1) at 0x4F000000 before each byte.  The fabric UART is a
  * single-byte passthrough (TX FIFO was removed for ALM budget); writing
- * while TX is still shifting simply drops the byte — which is why
+ * while TX is still shifting simply drops the byte, which is why
  * earlier trap dumps lost characters and appeared "buffered" on the
- * host side.  Bounded poll (~8000 cycles ≈ 16× byte-time at 2 Mbaud)
+ * host side.  Bounded poll (~8000 cycles, about 16 byte-times at 2 Mbaud)
  * so a wedged UART still lets the infinite loop engage instead of
  * hanging the dump forever. */
 __attribute__((section(".text.boot")))

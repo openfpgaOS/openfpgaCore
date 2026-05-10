@@ -457,10 +457,7 @@ openFPGA_Pocket_Analogizer #(
     .cart_tran_bank3(cart_tran_bank3),
     .cart_tran_bank3_dir(cart_tran_bank3_dir),
     .cart_tran_bank1(cart_tran_bank1),
-    .cart_tran_bank1_dir(cart_tran_bank1_dir),
-    // Debug
-    .DBG_TX(),
-    .o_stb()
+    .cart_tran_bank1_dir(cart_tran_bank1_dir)
 );
 
 // Link port directions
@@ -877,13 +874,13 @@ sram_controller #(
 );
 
 // ============================================================
-// UART (2 Mbaud, 8N1) — DevKey/Cartridge debug interface
+// UART (2 Mbaud, 8N1): DevKey/Cartridge service interface.
 // CLKS_PER_BIT = clk_cpu / 2_000_000.  clk_cpu is set in
 // mf_pllram_133.v output_clock_frequency0; any change there MUST
 // update this divisor, or the host will see a baud-rate mismatch
 // and silently drop every byte.
-//   100 MHz → 50  ← current
-//    90 MHz → 45
+//   100 MHz -> 50  (current)
+//    90 MHz -> 45
 // ============================================================
 wire        uart_tx_serial;
 wire        uart_tx_active;
@@ -909,7 +906,7 @@ uart_rx #(.CLKS_PER_BIT(50)) uart_rx_inst (
     .o_Rx_Byte(uart_rx_byte)
 );
 
-// UART TX also on dbg_tx (direct 1.8V debug pin)
+// UART TX also appears on dbg_tx (direct 1.8V service pin).
 assign dbg_tx = uart_tx_serial;
 
 assign user1 = 1'bZ;
@@ -1079,7 +1076,7 @@ always @(posedge clk_74a) begin
             // APF samples read data before bridge_rd can complete a
             // single-word PSRAM access. Dataslot writes therefore serve
             // 0x20xxxxxx from the prefetch buffer; the direct readback
-            // path remains only for non-prefetched debug accesses.
+            // path remains only for non-prefetched diagnostic accesses.
             if (c0_prefetch_bridge_hit)
                 bridge_rd_data <= c0_prefetch_rd_data;
             else if (bridge_cram0_rdata_valid)

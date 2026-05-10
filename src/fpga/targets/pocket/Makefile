@@ -180,7 +180,7 @@ test:
 
 # ── RTL check ────────────────────────────────────────────────────────
 # Quick map-only sanity check (no fit / asm / sta).  Pairs with
-# VARIANT_DEFS for debug-flag builds.
+# VARIANT_DEFS for optional build-flag checks.
 check:
 	@printf "$(C_HEAD)[check]$(C_RESET) Analysis & Synthesis...\n"
 	@quartus_map $(PROJECT) $(VERILOG_MACROS)

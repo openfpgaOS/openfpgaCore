@@ -1,0 +1,3 @@
+[submodule "src/fpga/vendor/vexriscv/VexiiRiscv"]
+	path = src/fpga/vendor/vexriscv/VexiiRiscv
+	url = https://github.com/SpinalHDL/VexiiRiscv.git

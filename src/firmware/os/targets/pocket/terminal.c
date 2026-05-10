@@ -376,26 +376,28 @@ static void esc_dispatch(char cmd) {
     }
 }
 
-/* UART console mirror -- enabled after the boot-time debug-host handshake */
+/* UART console mirror -- enabled only when the cart pins are not claimed by
+ * Analogizer/SNAC. */
 volatile int uart_mirror_on __attribute__((section(".bss.boot")));
 
 void of_term_enable_uart_mirror(void) { uart_mirror_on = 1; }
 
-/* ── UART TX — synchronous, unbuffered ────────────────────────────────
+/* UART TX -- synchronous, unbuffered.
  * Direct poll-and-write: each char waits for the FPGA UART to accept
  * the byte, then writes UART_TX_DATA.  No ring buffer, no ISR drain,
- * no batching — every printf char shows up on the wire before
+ * no batching -- every printf char shows up on the wire before
  * term_emit_char returns.  Use this when you need real-time visibility
  * (audio glitch debugging, crash diagnostics).
  *
- * Cost: at 2 Mbaud each byte takes ~5 µs to shift out, so a 100-byte
- * printf blocks the caller for ~500 µs.  Acceptable for diagnostics;
+ * Cost: at 2 Mbaud each byte takes about 5 us to shift out, so a
+ * 100-byte printf blocks the caller for about 500 us. Acceptable for
+ * diagnostics;
  * the ring path can be reinstated if printf-heavy hot paths get too
  * slow.  The poll has a bounded retry (~64 cycles) so a stuck UART
- * never hangs the kernel — if the byte can't be accepted it's
+ * never hangs the kernel -- if the byte can't be accepted it's
  * dropped, matching the prior fire-and-forget overflow semantics. */
 void of_term_uart_drain(void) {
-    /* No-op kept for ABI compatibility — the timer ISR still calls
+    /* No-op kept for ABI compatibility -- the timer ISR still calls
      * this; with no ring there is nothing to drain. */
 }
 
@@ -403,11 +405,11 @@ void of_term_uart_drain(void) {
 void term_emit_char(char c) {
     uint8_t color = term_color_byte(term_fg, term_bg);
 
-    /* UART console mirror — synchronous: poll TX_RDY then write.
-     * No buffering, immediate output.  Each byte takes ~500 cycles
-     * to shift out at 2 Mbaud (100 MHz / 50 CLKS_PER_BIT × 10 bits).
-     * Loop bound = 2000 cycles ≈ 4× byte time — generous enough to
-     * cover a back-to-back byte plus jitter, but never hangs. */
+    /* UART console mirror: poll TX_RDY then write.
+     * No buffering, immediate output. Each byte takes about 500 cycles
+     * to shift out at 2 Mbaud (100 MHz / 50 CLKS_PER_BIT x 10 bits).
+     * Loop bound = 2000 cycles, enough to cover a back-to-back byte
+     * plus jitter, but never hangs. */
     if (uart_mirror_on && c != 0x02) {
         for (int i = 0; i < 2000; i++) {
             if (UART_STATUS & UART_TX_RDY) {

@@ -112,7 +112,7 @@ module axi_periph_slave (
     // Hardware audio mixer control (see audio_mixer.v v3, MMIO at 0x48000000).
     // Flat addressing — MMIO address encodes voice and field directly:
     //   addr[10:6] = voice index, addr[5:2] = vtbl field for per-voice writes
-    //   addr[11]=1, [7]=0      = control region (group/master/ctrl/irq/debug)
+    //   addr[11]=1, [7]=0      = control region (group/master/ctrl/irq/diagnostics)
     //   addr[11]=1, [7]=1      = per-voice POS_INT readback
     output reg         mix_enable,
     output reg         mix_voice_wr,
@@ -129,7 +129,7 @@ module axi_periph_slave (
     output reg [63:0]  mix_voice_group_packed,  // 32 voices × 2 bits LSB-first
     output wire [4:0]  mix_voice_sel_rd,        // combinational from read addr (POS readback)
     input  wire [5:0]  mix_active_count,
-    input  wire [31:0] mix_active_mask,     // 32-bit active voice bitmap (debug)
+    input  wire [31:0] mix_active_mask,     // 32-bit active voice bitmap
     input  wire [21:0] mix_pos_readback,
     input  wire [31:0] mix_voice_end_pending,
     input  wire [31:0] mix_last_sample,
@@ -1132,8 +1132,8 @@ always @(*) begin
         7'b1_010110: sysreg_rdata = {26'b0, input_fifo_count};       // INPUT_FIFO_COUNT
         // VRR_V_TOTAL / VRR_SWAP_HOLD readback returns the LIVE values
         // driving the scaler (RTL-computed in normal mode, CPU-written
-        // in analogizer mode for V_TOTAL).  Keeps the existing debug
-        // path useful even now that the CPU no longer drives them.
+        // in analogizer mode for V_TOTAL). Keeps the diagnostic readback
+        // useful even now that the CPU no longer drives them.
         7'b0_110111: sysreg_rdata = {22'b0, vrr_v_total};             // VRR_V_TOTAL (0xDC)
         7'b0_111000: sysreg_rdata = {28'b0, vrr_swap_hold_rtl};       // VRR_SWAP_HOLD (0xE0)
         7'b0_111001: sysreg_rdata = 32'b0;                            // 0xE4 reserved/read-zero in area mode
@@ -1154,7 +1154,7 @@ always @(*) begin
         7'b0_110010: sysreg_rdata = 32'b0;                            // 0xC8 reserved/read-zero in area mode
         // Datatable slot size query (0x90): bit 31 = valid, bits 30:0 = data
         7'b0_100100: sysreg_rdata = {dt_query_valid, dt_query_data[30:0]};
-        // Bridge debug (0x94): internal latch state for diagnosing DMA hangs
+        // Bridge diagnostics (0x94): internal latch state for DMA hangs
         7'b0_100101: sysreg_rdata = {24'b0,
             target_dataslot_read,   // bit 7: command signal (CPU domain)
             target_done_s,          // bit 6: done CDC output
@@ -1265,7 +1265,7 @@ wire [31:0] cram0_mode_rdata = (req_addr[3:2] == 2'd0) ? {31'b0, cram0_mode} :
                                32'h0;
 
 /* Mixer (0x4B) read decode.  The read mux fans in
- *   - control regs (group/master/voice_group/ctrl/irq + read-only debug)
+ *   - control regs (group/master/voice_group/ctrl/irq + read-only diagnostics)
  *   - per-voice POS readback
  * The per-voice POS path needs voice_sel_rd driven combinationally to
  * audio_mixer.v before this read mux fires, so the pos_latch[voice_sel_rd]

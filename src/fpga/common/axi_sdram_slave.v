@@ -79,7 +79,7 @@ module axi_sdram_slave #(
     output wire [31:0] sdram_preload_wdata, // Beat 1 already captured before native 2-word issue
     output wire [3:0]  sdram_preload_wstrb,
 
-    // Debug observability for simulation/debug harnesses.  When the
+    // Diagnostic observability for simulation harnesses.  When the
     // arbiter is stuck in ST_WR and no s_bvalid is being produced,
     // this tells us which slave state owns the wedge and whether
     // sdram_busy / wr_busy_seen are stuck.
@@ -139,7 +139,7 @@ assign sdram_preload_wdata = next_wdata;
 assign sdram_preload_wstrb = next_wstrb;
 reg        started;      // accepted seen, waiting for completion
 
-// Debug tap — see port-list comment for bit layout.  Combinational so
+// Diagnostic tap: see port-list comment for bit layout.  Combinational so
 // the kernel always reads live state; no extra registers added.
 assign dbg_slave = {sdram_accepted,
                     s_axi_rlast,
@@ -518,7 +518,7 @@ always @(posedge clk or posedge reset) begin
             // wedge).  Use sdram_wr_done pulse instead: it fires exactly
             // when io_sdram's ST_WRITE_4→ST_IDLE for THIS write, immune
             // to subsequent contention.  wr_busy_seen remains visible
-            // through the local debug tap.
+            // through the local diagnostic tap.
             if (sdram_busy) wr_busy_seen <= 1;
             if (sdram_wr_done) wr_op_done_seen <= 1;
             if (started && (wr_op_done_seen || sdram_wr_done)) begin

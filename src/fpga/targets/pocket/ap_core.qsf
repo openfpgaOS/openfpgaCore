@@ -293,11 +293,6 @@ set_global_assignment -name ENABLE_OCT_DONE OFF
 set_global_assignment -name USE_CONFIGURATION_DEVICE ON
 set_global_assignment -name GENERATE_RBF_FILE ON
 
-# Signal Tap Assignments
-# ======================
-set_global_assignment -name ENABLE_SIGNALTAP OFF
-set_global_assignment -name USE_SIGNALTAP_FILE core/stp1.stp
-
 # Power Estimation Assignments
 # ============================
 set_global_assignment -name POWER_PRESET_COOLING_SOLUTION "23 MM HEAT SINK WITH 200 LFPM AIRFLOW"
@@ -666,11 +661,7 @@ set_global_assignment -name QIP_FILE apf/mf_ddio_bidir_12.qip
 set_global_assignment -name VERILOG_FILE core_top.v
 set_global_assignment -name VERILOG_FILE core_bridge_cmd.v
 set_global_assignment -name MIF_FILE firmware.mif
-# cents_to_mult.mif retired with the old audio filter bank.
-# text_terminal.v, tile_engine.v, sprite_engine.v removed — rendering in software.
-# mf_linebuf.v retired (Pocket template leftover, never instantiated).
 set_global_assignment -name VERILOG_FILE io_sdram.v
-set_global_assignment -name SIGNALTAP_FILE core/stp1.stp
 set_global_assignment -name QIP_FILE mf_pllbase.qip
 set_global_assignment -name SIP_FILE mf_pllbase.sip
 

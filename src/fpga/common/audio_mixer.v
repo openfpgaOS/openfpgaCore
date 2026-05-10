@@ -106,7 +106,7 @@ module audio_mixer (
     output reg  [31:0] voice_end_pending,
     output wire        voice_end_irq,
 
-    // ------- Debug / diagnostic outputs ---------------------------
+    // ------- Diagnostic outputs -----------------------------------
     // last_sample_data  : 32-bit value last pushed into the audio_out
     //                     dcfifo ({left[15:0], right[15:0]}).  Firmware
     //                     reads this to verify non-zero samples are

@@ -38,7 +38,7 @@ static uint8_t phdp_seq                __attribute__((section(".bss.boot")));
 #undef PHDP_BUF
 #undef SHARED_ATTR
 
-/* Debug variables (read by misaligned trap handler) — must be in BRAM */
+/* Trap context breadcrumbs (read by misaligned handler), kept in BRAM. */
 volatile unsigned int __attribute__((section(".bss.boot"))) pd_dbg_stage;
 volatile unsigned int __attribute__((section(".bss.boot"))) pd_dbg_info;
 
@@ -136,7 +136,7 @@ static void flush_icache(void) {
 }
 
 /* uart_putc/uart_getc, phdp_crc16/phdp_send/phdp_recv, and
- * flush_dcache_evict are pulled in from shared/*.inc.c at the top of
+ * flush_dcache_evict are pulled in from shared include-C files at the top of
  * this file. The boot-only state they need (sequence counter, packet
  * buffer, UART probe latch) lives here so it can be tagged .bss.boot
  * and end up in BRAM. */
@@ -152,11 +152,11 @@ static int uart_probe(void) {
 }
 
 /* phdp_buf / phdp_seq live at the top of this file (above the
- * shared/*.inc.c includes) so the codec sees them via PHDP_BUF /
+ * shared include-C files) so the codec sees them via PHDP_BUF /
  * PHDP_SEQ. */
 
 /* ======================================================================
- * PHDP discovery — Phase I
+ * PHDP discovery - Phase I
  * Returns 1 if host connected, 0 if timeout (boot from SD).
  * ====================================================================== */
 
@@ -530,7 +530,7 @@ int main(void) {
 
     if (debug_mode) {
         boot_fb_clear_row(0);
-        boot_fb_puts(0, 0, "Debug host connected");
+        boot_fb_puts(0, 0, "Service host connected");
 
         uint32_t total_size = 0;
         uint16_t chunk_size = 0;

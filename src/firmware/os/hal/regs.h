@@ -131,11 +131,10 @@
  * the SDK; the kernel has no abstraction yet, so hardcode here. */
 #define GPU_FENCE_REACHED_REG  REG32(0x4a000018u)
 
-/* CMD_FLIP debug counters — 32-bit free-running, reset on hard reset.
- * Read pre/post-frame deltas to localise where CMD_FLIP stalls:
- * Area mode retired the old 32-bit FLIP/AW/B counters.  0x34 now exposes
- * the low 4 bits of the current GPU framebuffer write inflight count; the
- * other debug counter slots read as zero. */
+/* CMD_FLIP diagnostic counters. Area mode retired the old 32-bit
+ * FLIP/AW/B counters. 0x34 now exposes the low 4 bits of the current
+ * GPU framebuffer write inflight count; the other legacy slots read as
+ * zero. */
 #define GPU_DBG_FLIP_ENTER_REG       REG32(0x4a000028u)
 #define GPU_DBG_FLIP_DRAIN_DONE_REG  REG32(0x4a00002Cu)
 #define GPU_DBG_FLIP_SWAP_PULSE_REG  REG32(0x4a000030u)
@@ -143,7 +142,7 @@
 #define GPU_DBG_AWVALID_REG          REG32(0x4a000038u)
 #define GPU_DBG_SELECT_REG           REG32(0x4a00003Cu)
 
-/* Swap-pipeline debug snapshot.  Read-only.
+/* Swap-pipeline diagnostic snapshot. Read-only.
  *   FB_SWAP_DBG_LIVE   (0xC0):
  *     bit  0     : fb_swap_pending
  *     bits 2:1   : fb_display_idx
@@ -389,7 +388,7 @@
 /* Datatable slot size query (0x90) — write slot entry address, read result */
 #define DT_QUERY            REG32(SYSREG_BASE + 0x90)
 
-/* Bridge debug (0x94) — internal latch state for DMA diagnostics */
+/* Bridge diagnostics (0x94): internal latch state for DMA failures */
 #define DS_DEBUG            REG32(SYSREG_BASE + 0x94)
 
 /* Hardware features (0x98) — read-only, set at synthesis time in RTL */
@@ -438,7 +437,7 @@
 #define LINK_BASE           0x4D000000
 #define LINK_REG(n)         REG32(LINK_BASE + ((n) << 2))
 
-/* UART (0x4F000000) — DevKey debug serial, 2 Mbaud 8N1 */
+/* UART (0x4F000000): DevKey service serial, 2 Mbaud 8N1 */
 #define UART_BASE           0x4F000000
 #define UART_STATUS         REG32(UART_BASE + 0x00)     /* Read status bits */
 #define UART_TX_DATA        REG32(UART_BASE + 0x04)     /* Write: push byte to TX FIFO */

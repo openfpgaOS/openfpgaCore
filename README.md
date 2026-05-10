@@ -1,133 +1,173 @@
 # openfpgaOS
 
-A game development platform for the [Analogue Pocket](https://www.analogue.co/pocket). Write C, compile, copy to SD, run — no 45-minute FPGA synthesis. A RISC-V soft CPU on the Cyclone V FPGA runs your code at 100 MHz with hardware-accelerated video, sample-based audio, and controller input.
+openfpgaOS is a bare-metal game runtime and FPGA core for the Analogue Pocket.
+It runs a 32-bit RISC-V CPU in the Cyclone V fabric and exposes hardware
+services for video, audio, input, storage, and app loading.
 
-## Features
+For game development, use the SDK repository. This repository is for changing
+the OS, firmware, FPGA RTL, Pocket packaging, and shared SDK headers/runtime.
 
-- **One-header API** — `#include "of.h"` and start writing a game
-- **Sub-second iteration** — compile C, copy ELF to SD, run. No FPGA synthesis required
-- **VexRiscv RISC-V CPU** — rv32imafc at 100 MHz, AXI4 bus, 32 KB D-cache + 8 KB I-cache, hardware FPU
-- **320×240 double-buffered video** — 6 color modes (8/4/2-bit indexed, RGB565, RGB555, RGBA5551), 256-entry palette
-- **32-voice software PCM mixer** — 16/8-bit signed samples, per-voice pitch/pan/volume, linear interpolation, 48 kHz stereo I2S output
-- **Sample-based MIDI** — `of_midi` library renders Standard MIDI Files (Format 0/1) through `of_smp_voice`; ships with a Roland SC-55-derived `.ofsf` General MIDI bank at `assets/banks/sc55.ofsf`
-- **Save system** — 10 × 256 KB APF nonvolatile save slots auto-loaded into CRAM0, updated on `fclose()`, and persisted on core exit
-- **96 MB+ memory** — 64 MB SDRAM, 16 MB CRAM0, 16 MB CRAM1, 256 KB SRAM
-- **2-player input** — d-pad, ABXY, L/R shoulders, analog sticks, triggers
-- **Analogizer support** — RGBS/YPbPr/composite video, SNAC controllers
-- **musl libc** — standard C library via jump table (printf, malloc, fopen, math, etc.)
-- **POSIX file I/O** — `fopen("game.dat")` for read-only data files, `fopen("MyGame_0.sav")` for read/write saves
-- **Chip32 VM loader** — APF bitstream load and core handoff
+## Current Target
 
-## Quick Start
+The production target is `pocket`.
 
-For **game development**, use the [openfpgaOS SDK](https://github.com/ThinkElastic/openfpgaOS-SDK). You don't need this repo unless you're modifying the OS, FPGA design, or adding a new target.
+Core pieces:
 
-### Building
+- `src/fpga/common/`: reusable RTL for CPU integration, AXI, GPU, video,
+  audio, SDRAM, CRAM0, input, and shared peripherals.
+- `src/fpga/targets/pocket/`: Analogue Pocket top level, APF bridge, PLLs,
+  constraints, Analogizer output, and target build flow.
+- `src/firmware/os/`: bootloader, OS kernel, HAL, syscall layer, file/save
+  services, input, terminal, and Pocket runtime.
+- `src/firmware/api/`: SDK-facing headers, linker script, and shared runtime
+  sources.
+- `dist/`: Pocket core JSON, platform metadata, and default Analogizer config.
+- `assets/`: runtime assets such as the sample bank.
+
+Generated Quartus, Verilator, seed sweep, SignalTap, and simulation outputs are
+not source artifacts and should not be committed.
+
+## Requirements
+
+- RISC-V embedded toolchain providing `riscv64-elf-*`
+- Intel Quartus Prime Lite, currently expected at
+  `/home/alberto/altera_lite/25.1std/quartus`
+- Java plus sbt for VexiiRiscv generation
+- Verilator for RTL tests
+- Standard Unix tools: `make`, `gcc`, `rsync`, `find`, `grep`
+
+Initialize submodules after a fresh checkout:
 
 ```bash
-# Prerequisites: RISC-V toolchain (riscv64-elf-*), Intel Quartus Prime, Java + sbt
-cd src/fpga/targets/pocket
-
-make              # full clean build: cpu → firmware → compile → test → deploy
-make flash        # quick: rebuild firmware, patch into bitstream, deploy
-make build        # incremental Quartus compile only
-make cpu          # regenerate VexiiRiscv from SpinalHDL
-make firmware     # rebuild bootloader + os.bin
-make test         # run Verilator test suite (836 tests)
-make check        # fast RTL syntax check
-make program      # JTAG flash via USB Blaster (dev)
-make clean        # wipe Quartus build artifacts
+git submodule update --init --recursive
 ```
 
-### Deploying
+## Build
 
-Copy `build/Cores/ThinkElastic.openfpgaOS/` to SD card, or:
+From the repository root:
+
 ```bash
-./deploy.sh                    # auto-detect SD card
-./deploy.sh ../openfpgaOS-SDK  # push to SDK repo instead
+make                 # show help
+make full            # target full build: CPU, bootloader, OS, FPGA, summary
+make build           # clean Quartus compile for the Pocket bitstream
+make firmware        # rebuild bootloader + OS and patch an existing bitstream
+make os              # rebuild os.bin and install it into build/
+make check           # Quartus analysis/synthesis only
+make test            # Verilator RTL test suite
+make timing          # timing summary from the last full compile
+make package         # create build/ SD-card package
+make clean           # remove generated build artifacts
 ```
 
-## Project Structure
+The target Makefile can also be used directly:
 
-```
-openfpgaOS/
-├── src/
-│   ├── fpga/
-│   │   ├── common/              ← portable RTL (CPU, bus, video, audio engines)
-│   │   ├── vendor/              ← third-party IP (VexRiscv)
-│   │   └── targets/pocket/     ← Analogue Pocket (APF, core_top, PLLs)
-│   ├── firmware/
-│   │   └── os/
-│   │       ├── hal/             ← portable HAL + headers
-│   │       ├── targets/pocket/  ← Pocket HAL implementations
-│   │       └── kernel/          ← portable kernel (syscalls, ELF loader)
-│   └── chip32/pocket/           ← Chip32 VM loader (APF-specific)
-├── dist/
-│   ├── core/                    ← JSON configs (audio, video, input, etc.)
-│   └── platforms/               ← platform definition
-├── tools/                       ← reverse_bits, capture_ocr
-├── docs/                        ← developer documentation
-├── deploy.sh                    ← deploy to SD card or SDK
-└── Makefile                     ← build system (TARGET=pocket)
+```bash
+make -C src/fpga/targets/pocket check
+make -C src/fpga/targets/pocket build
+make -C src/fpga/targets/pocket firmware
 ```
 
-### Multi-target support
+## Verification
 
-The codebase is split between portable code (`common/`, `hal/`, `kernel/`) and target-specific code (`targets/pocket/`). Adding a new FPGA target:
+Useful narrow checks before committing core changes:
 
-1. `src/fpga/targets/<name>/` — core_top.v, PLLs, pin assignments
-2. `src/firmware/os/targets/<name>/` — regs.h, HAL implementations
-3. `src/chip32/<name>/` — target-specific loader
-4. `make TARGET=<name>`
+```bash
+make -C src/firmware/os
+make -C src/fpga/test gpu-acceptance gpu-acceptance-single
+make -C src/fpga/targets/pocket bootloader os
+make -C src/fpga/targets/pocket check
+git diff --check
+```
 
-## Design Approach
+For a release candidate, run a full Quartus build and a seed sweep when timing
+margin matters:
 
-openfpgaOS is a single-process bare-metal runtime with a Linux-compatible syscall ABI. There's no MMU, no scheduler, no kernel modules. The FPGA fabric acts as the driver layer — video scanout, audio mixing, and memory control are hardware state machines, not software.
+```bash
+make -C src/fpga/targets/pocket build
+make sweep SEEDS=1-30
+```
 
-Apps are ELF binaries that call standard C functions (`fopen`, `malloc`, `printf`) through a jump table backed by musl libc. OS services (video, audio, input) use Linux syscall numbers handled by a minimal dispatcher. This means existing C codebases port with few changes — they don't know they're not on Linux.
+## Deploy
 
-| | openfpgaOS | Linux | Zephyr/FreeRTOS | Newlib bare-metal | CP/M |
-|---|---|---|---|---|---|
-| Processes | 1 | Many | Threads | 1 | 1 |
-| MMU | No | Yes | Optional | No | No |
-| Syscall ABI | Linux subset | Linux | Custom | Custom stubs | BDOS |
-| Drivers | FPGA fabric | Kernel modules | HAL | BSP | BIOS |
-| libc | musl (jump table) | musl/glibc | Newlib (partial) | Newlib | None |
-| Kernel size | ~120 KB | Megabytes | 10-100 KB | N/A | ~8 KB |
+`make package` writes the SD-card layout under `build/`.
 
-The closest historical analog is CP/M or MS-DOS: single-process, hardware-specific BIOS, apps call the OS through a fixed interface. The Linux syscall ABI is what makes porting practical.
+The expected core directory is:
 
-Trade-offs: no memory protection (apps are trusted), no concurrency (event callbacks instead of threads), no dynamic linking (jump table serves the same purpose with less overhead). These are deliberate choices for a platform where the CPU shares an FPGA with custom hardware and every ALM counts.
+```text
+build/Cores/ThinkElastic.openfpgaOS/
+```
 
-See [architecture.md](architecture.md) for the roadmap (multi-target support, capability descriptors, async I/O).
+To deploy to an SDK checkout:
 
-## Documentation
+```bash
+make sdk DEST=/path/to/openfpgaOS-SDK
+```
 
-| Document | Description |
-|----------|-------------|
-| [Developer Guide](docs/developer-guide.md) | Tutorial + API reference |
-| [Architecture](docs/architecture.md) | System architecture, memory map, boot flow |
-| [HAL API](docs/hal-api.md) | Hardware abstraction layer reference |
-| [Syscalls](docs/syscalls.md) | Syscall number table |
-| [FPGA Design](docs/fpga-design.md) | Verilog module hierarchy, register map |
-| [Building](docs/building.md) | Build instructions |
+This syncs SDK headers/sources, musl files, runtime binaries, the default
+Analogizer config, and the sample bank when present.
 
-## License
+## Runtime Model
 
-| Component | License | Author |
-|-----------|---------|--------|
-| openfpgaOS (FPGA, firmware, OS) | MIT | ThinkElastic |
-| VexiiRiscv CPU | MIT | SpinalHDL / Charles Papon |
-| Analogizer adapter | — | RndMnkIII |
-| openFPGA framework | — | Analogue |
-| musl libc | MIT | Rich Felker |
-| jtframe utilities | GPL-3.0 | Jose Tejada |
+The OS is single-process and bare-metal. Apps are ELF binaries loaded by the
+boot/runtime path and call services through a stable SDK ABI backed by musl.
+There is no MMU, scheduler, or dynamic linking; apps are trusted and run close
+to the hardware.
+
+The FPGA fabric provides the driver layer:
+
+- indexed/RGB framebuffer scanout
+- GPU span, span4, batch, clear, flip, translucency, and triangle commands
+- 48 kHz hardware PCM mixer
+- APF data-slot read/write and nonvolatile save handling
+- Pocket controls, dock input, keyboard/mouse/controller events, Analogizer,
+  and SNAC GPIO/shifter paths
+- SDRAM, CRAM0, SRAM, and bridge arbitration
+
+Diagnostic UART/trap output exists for fatal failures and service-host booting,
+but normal production paths should not emit continuous UART traffic.
+
+## Hardware Comparison
+
+The audio path is a hardware sample mixer, not an FM chip. It is closest in
+spirit to the Gravis Ultrasound or the wavetable side of an AWE32/AWE64: many
+independent PCM voices are mixed in hardware from sample memory, with per-voice
+rate, volume, pan, loop, and group/master control. Compared with common PC
+sound cards:
+
+| Device class | Relationship to openfpgaOS |
+|--------------|----------------------------|
+| AdLib / OPL2 / OPL3 | Different model. Those are FM synthesizers; openfpgaOS uses PCM samples and a sample-bank MIDI path. |
+| Sound Blaster PCM DMA | More capable for game music/effects. Classic SB playback is mostly one streamed PCM channel; openfpgaOS mixes many hardware voices. |
+| Gravis Ultrasound | Similar conceptually: hardware-mixed sample voices from memory. openfpgaOS is smaller and game-runtime focused, with 32 voices at 48 kHz stereo. |
+| AWE32 / AWE64 wavetable | Similar high-level role for MIDI playback, but openfpgaOS exposes a simpler fixed runtime mixer instead of emulating EMU8000 behavior. |
+
+The GPU is also a purpose-built raster accelerator, not a VGA clone and not a
+general OpenGL-style 3D core. It keeps the simple framebuffer/palette model
+that old PC games expect, then adds commands for the expensive draw paths:
+spans, four-column vertical spans, batch submission, clears, flips,
+translucency, texture lookup, colormap lookup, and triangle rasterization.
+
+| Device class | Relationship to openfpgaOS |
+|--------------|----------------------------|
+| VGA / Mode 13h | Same broad framebuffer/palette heritage, but drawing is accelerated by FPGA commands instead of being entirely CPU-written. |
+| SVGA linear framebuffer | Similar app-visible idea for pixels, with a custom low-resolution game focus rather than a PC display adapter feature set. |
+| 2D blitter | Overlaps on clears, copies-by-command, and write coalescing, but the hot path is span/raster work rather than GUI rectangles. |
+| Early 3D cards | Shares textured triangle and translucency ideas, but it is not a full fixed-function PC 3D pipeline: no driver stack, no OpenGL, no programmable shaders, and no general Z-buffer path. |
+| BUILD/Doom-era software renderer | The closest workload match. The GPU accelerates the span and palette/colormap-heavy raster work those engines spend time on. |
+
+## Maintenance Rules
+
+- Keep source, core metadata, and required runtime assets tracked.
+- Keep generated Quartus/Verilator/seed/simulation artifacts ignored.
+- Keep target-specific behavior under `targets/pocket/`; keep reusable RTL and
+  firmware interfaces in `common/`, `hal/`, `kernel/`, and `api/`.
+- Validate firmware and RTL after changing shared interfaces.
+- Update this README when build, deploy, or production workflow changes.
 
 ## Acknowledgments
 
-- [SpinalHDL/VexiiRiscv](https://github.com/SpinalHDL/VexiiRiscv) — RISC-V CPU core (Charles Papon)
-- [RndMnkIII](https://github.com/RndMnkIII) — Analogizer adapter
-- [Analogue](https://www.analogue.co/developer) — Pocket openFPGA framework
-- [musl libc](https://musl.libc.org/) — C library (Rich Felker)
-- [jtframe](https://github.com/jotego/jtframe) — Clock and resync modules (Jose Tejada)
-- dyreschlock — Platform image
+- VexiiRiscv CPU: SpinalHDL / Charles Papon
+- Analogizer adapter: RndMnkIII
+- openFPGA framework: Analogue
+- musl libc: Rich Felker
+- jtframe utilities: Jose Tejada

@@ -81,7 +81,7 @@ module psram_cram0_drv #(
 
     output reg busy,
 
-    // Debug outputs (sticky counters, cleared on sync_burst_en)
+    // Diagnostic outputs (sticky counters, cleared on sync_burst_en)
     output reg        dbg_wait_seen,     // Sticky: WAIT was HIGH during STATE_SYNC_DATA
     output reg [15:0] dbg_wait_cycles,   // Total cycles WAIT HIGH during STATE_SYNC_DATA
     output reg [15:0] dbg_burst_count,   // Completed sync bursts since last clear
@@ -208,7 +208,7 @@ module psram_cram0_drv #(
   reg [5:0] latency_counter;
   reg [5:0] burst_counter;
 
-  // Debug counters (no reset — accumulate until power cycle)
+  // Diagnostic counters (no reset; accumulate until power cycle)
   initial begin
     dbg_wait_seen = 0;
     dbg_wait_cycles = 0;

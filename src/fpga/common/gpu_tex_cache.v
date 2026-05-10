@@ -76,11 +76,11 @@ module gpu_tex_cache (
     input wire  [31:0]  axi_rdata,
     input wire          axi_rlast,
 
-    // Debug — exposed in GPU_STATUS for hang diagnosis
+    // Diagnostic state exposed through GPU_STATUS for hang diagnosis.
     output wire [2:0]  dbg_state,
     output wire        dbg_pipe_valid,
 
-    // Hit/miss counters — used to diagnose Duke3D bandwidth collapse.
+    // Hit/miss counters used to diagnose bandwidth collapse.
     // Kept compact for the Pocket fit; zero-extended to 32 bits at MMIO.
     output wire [31:0] dbg_req_count,    // every accepted req on either port
     output wire [31:0] dbg_miss_count    // every miss handled in S_PIPE

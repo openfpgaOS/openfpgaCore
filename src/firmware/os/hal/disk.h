@@ -10,7 +10,7 @@
  *
  * The kernel auto-probes both at boot and selects the first that
  * responds (disk_boot first, so the kernel can use the boot ROM's
- * transport when a debug host is attached and bypass the bridge
+ * transport when a service host is attached and bypass the bridge
  * entirely). The selection is read-only — file WRITES (saves)
  * always go through the bridge directly via the existing
  * of_file_slot_write API. See file.h.

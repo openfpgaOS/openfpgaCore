@@ -173,35 +173,52 @@ static void fill_state(int player, uint32_t keys, int16_t lx, int16_t ly,
     of_input_states[player].trigger_r = (trig >> 16) & 0xFFFF;
 }
 
-static void fill_apf_state(int player, uint32_t keys, uint32_t joy,
-                           uint32_t trig) {
+typedef struct {
+    int16_t lx, ly;
+    int16_t rx, ry;
+} input_axes_t;
+
+static input_axes_t apf_axes_from_raw(uint32_t keys, uint32_t joy) {
     uint8_t type = apf_input_type(keys);
     int has_analog = (type == OF_INPUT_TYPE_GAMEPAD_ANALOG) ||
                      (type == OF_INPUT_TYPE_NONE && joy != 0);
 
-    fill_state(player, keys,
-               has_analog ? input_axis_from_u8_centered(joy & 0xFF) : 0,
-               has_analog ? input_axis_from_u8_centered((joy >> 8) & 0xFF) : 0,
-               has_analog ? input_axis_from_u8_centered((joy >> 16) & 0xFF) : 0,
-               has_analog ? input_axis_from_u8_centered((joy >> 24) & 0xFF) : 0,
-               trig);
+    if (!has_analog)
+        return (input_axes_t){0};
+
+    return (input_axes_t){
+        .lx = input_axis_from_u8_centered(joy & 0xFF),
+        .ly = input_axis_from_u8_centered((joy >> 8) & 0xFF),
+        .rx = input_axis_from_u8_centered((joy >> 16) & 0xFF),
+        .ry = input_axis_from_u8_centered((joy >> 24) & 0xFF),
+    };
 }
 
-static int apf_has_activity(uint32_t keys, uint32_t joy, uint32_t trig) {
-    return (keys & 0xFFFFu) || joy || trig;
+static void fill_apf_state(int player, uint32_t keys, uint32_t joy,
+                           uint32_t trig) {
+    input_axes_t axes = apf_axes_from_raw(keys, joy);
+    fill_state(player, keys, axes.lx, axes.ly, axes.rx, axes.ry, trig);
 }
 
-static int snac_has_activity(const snac_controller_t *sc) {
-    return sc->buttons || sc->joy_lx || sc->joy_ly ||
-           sc->joy_rx || sc->joy_ry;
+static inline int axis_active(int16_t axis) {
+    return apply_deadzone(axis) != 0;
 }
 
-static int should_rescue_p1_apf(const snac_controller_t *sc,
-                                uint32_t apf_keys,
-                                uint32_t apf_joy,
-                                uint32_t apf_trig) {
-    return !snac_has_activity(sc) &&
-           apf_has_activity(apf_keys, apf_joy, apf_trig);
+static void fill_apf_snac_state(int player, uint32_t keys, uint32_t joy,
+                                uint32_t trig,
+                                const snac_controller_t *sc) {
+    input_axes_t axes = apf_axes_from_raw(keys, joy);
+    uint32_t buttons = keys & 0xFFFFu;
+
+    if (sc) {
+        buttons |= sc->buttons;
+        if (axis_active(sc->joy_lx)) axes.lx = sc->joy_lx;
+        if (axis_active(sc->joy_ly)) axes.ly = sc->joy_ly;
+        if (axis_active(sc->joy_rx)) axes.rx = sc->joy_rx;
+        if (axis_active(sc->joy_ry)) axes.ry = sc->joy_ry;
+    }
+
+    fill_state(player, buttons, axes.lx, axes.ly, axes.rx, axes.ry, trig);
 }
 
 static void keyboard_disconnect(void) {
@@ -319,7 +336,9 @@ static void poll_hid_slots(void) {
 
 void of_input_poll(void) {
     if (snac_is_active()) {
-        /* Poll SNAC hardware shift register */
+        /* Keep Pocket/Dock APF input live, then overlay SNAC on the
+         * configured player slot.  This allows built-in controls and
+         * dock controllers to remain usable while Analogizer/SNAC is on. */
         snac_poll();
         const snac_controller_t *sc = snac_get_state(0);
 
@@ -332,39 +351,25 @@ void of_input_poll(void) {
         read_apf(1, &apf2_keys, &apf2_joy, &apf2_trig);
 
         switch (assignment) {
-        case 0: /* SNAC→P1, APF→P2 */
-            if (should_rescue_p1_apf(sc, apf1_keys, apf1_joy, apf1_trig))
-                fill_apf_state(0, apf1_keys, apf1_joy, apf1_trig);
-            else
-                fill_state(0, sc->buttons, sc->joy_lx, sc->joy_ly,
-                           sc->joy_rx, sc->joy_ry, 0);
+        default:
+        case 0: /* SNAC->P1, APF P1/P2 remain active */
+            fill_apf_snac_state(0, apf1_keys, apf1_joy, apf1_trig, sc);
             fill_apf_state(1, apf2_keys, apf2_joy, apf2_trig);
             break;
-        case 1: /* APF→P1, SNAC→P2 */
+        case 1: /* SNAC->P2, APF P1/P2 remain active */
             fill_apf_state(0, apf1_keys, apf1_joy, apf1_trig);
-            fill_state(1, sc->buttons, sc->joy_lx, sc->joy_ly,
-                       sc->joy_rx, sc->joy_ry, 0);
+            fill_apf_snac_state(1, apf2_keys, apf2_joy, apf2_trig, sc);
             break;
-        case 2: { /* SNAC P1→P1, SNAC P2→P2 */
+        case 2: { /* SNAC P1->P1, SNAC P2->P2; APF remains active */
             const snac_controller_t *sc2 = snac_get_state(1);
-            if (should_rescue_p1_apf(sc, apf1_keys, apf1_joy, apf1_trig))
-                fill_apf_state(0, apf1_keys, apf1_joy, apf1_trig);
-            else
-                fill_state(0, sc->buttons, sc->joy_lx, sc->joy_ly,
-                           sc->joy_rx, sc->joy_ry, 0);
-            fill_state(1, sc2->buttons, sc2->joy_lx, sc2->joy_ly,
-                       sc2->joy_rx, sc2->joy_ry, 0);
+            fill_apf_snac_state(0, apf1_keys, apf1_joy, apf1_trig, sc);
+            fill_apf_snac_state(1, apf2_keys, apf2_joy, apf2_trig, sc2);
             break;
         }
-        case 3: { /* SNAC P1→P2, SNAC P2→P1 */
+        case 3: { /* SNAC P1->P2, SNAC P2->P1; APF remains active */
             const snac_controller_t *sc2 = snac_get_state(1);
-            if (should_rescue_p1_apf(sc2, apf1_keys, apf1_joy, apf1_trig))
-                fill_apf_state(0, apf1_keys, apf1_joy, apf1_trig);
-            else
-                fill_state(0, sc2->buttons, sc2->joy_lx, sc2->joy_ly,
-                           sc2->joy_rx, sc2->joy_ry, 0);
-            fill_state(1, sc->buttons, sc->joy_lx, sc->joy_ly,
-                       sc->joy_rx, sc->joy_ry, 0);
+            fill_apf_snac_state(0, apf1_keys, apf1_joy, apf1_trig, sc2);
+            fill_apf_snac_state(1, apf2_keys, apf2_joy, apf2_trig, sc);
             break;
         }
         }
@@ -388,21 +393,15 @@ void of_input_poll_p0(of_input_state_t *out) {
         snac_poll();
         const of_analogizer_state_t *anlg = of_analogizer_get_state();
         uint8_t assignment = anlg->snac_assignment & 0x3;
+        uint32_t keys, joy, trig;
+        read_apf(0, &keys, &joy, &trig);
 
         if (assignment == 1) {
-            uint32_t keys, joy, trig;
-            read_apf(0, &keys, &joy, &trig);
             fill_apf_state(0, keys, joy, trig);
         } else {
             const snac_controller_t *sc =
                 snac_get_state((assignment == 3) ? 1 : 0);
-            uint32_t keys, joy, trig;
-            read_apf(0, &keys, &joy, &trig);
-            if (should_rescue_p1_apf(sc, keys, joy, trig))
-                fill_apf_state(0, keys, joy, trig);
-            else
-                fill_state(0, sc->buttons, sc->joy_lx, sc->joy_ly,
-                           sc->joy_rx, sc->joy_ry, 0);
+            fill_apf_snac_state(0, keys, joy, trig, sc);
         }
 
         poll_hid_slots();

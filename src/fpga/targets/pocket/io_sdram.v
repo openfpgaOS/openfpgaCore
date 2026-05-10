@@ -54,7 +54,7 @@ output  reg             word_wr_done,      // Pulse: slave-issued word write com
 input   wire    [31:0]  burst_wr_direct_data, // Direct data bus from AXI slave (bypasses pulse adapter)
 input   wire    [3:0]   burst_wr_direct_strb,  // Direct byte enables
 
-// Debug observability — exported on controller_clk; core_top
+// Diagnostic observability exported on controller_clk; core_top
 // re-syncs into clk_cpu before splicing into GPU_DBG_BUS bits 31:24.
 //   bits 5:0 = state[5:0] (see localparams above; ST_WRITE_0=20,
 //              ST_BURSTWR_0=46, etc.)
@@ -157,7 +157,7 @@ assign {phy_ras, phy_cas, phy_we} = cmd;
     wire reset_n_s;
 synch_3 s1(reset_n, reset_n_s, controller_clk);
 
-// Debug tap (combinational; downstream re-syncs to clk_cpu).
+// Diagnostic tap (combinational; downstream re-syncs to clk_cpu).
 assign dbg_io = {1'b0, issue_autorefresh, state[5:0]};
 
     reg word_rd_queue;

@@ -129,7 +129,7 @@ module axi_sdram_arbiter #(
     input  wire        s_bvalid,
     input  wire [1:0]  s_bresp,
 
-    // Debug observability for simulation/debug harnesses.
+    // Diagnostic observability for simulation harnesses.
     //   dbg_arb_state: 0=IDLE, 1=RD, 2=WR
     //   dbg_cpu_pending: m1_arvalid|m1_awvalid (CPU has a request out)
     //   dbg_grant: 0=GPU(M0), 1=CPU(M1), 2=AudioDMA(M2), 3=AudioMix(M3)
@@ -426,7 +426,7 @@ assign m1_bvalid = (active_wr && grant_m1 && !active_wr_gpuq) ? s_bvalid : 1'b0;
 assign m0_bresp  = 2'b00;
 assign m1_bresp  = s_bresp;
 
-// Debug taps
+// Diagnostic taps
 assign dbg_arb_state   = arb_state;
 assign dbg_cpu_pending = cpu_pending;
 assign dbg_grant       = grant;

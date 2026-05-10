@@ -94,23 +94,6 @@ static int ends_with_ofsf(const char *name) {
     return c1 == 'o' && c2 == 'f' && c3 == 's' && c4 == 'f';
 }
 
-/* Read the first 16 bytes of a slot and check for the OFSF magic. Used
- * as a fallback when the APF filename lookup in dir_probe_slots() fell
- * back to "slot:N" (so the .ofsf extension isn't visible by name). */
-static int slot_has_ofsf_magic(uint32_t slot_id, uint32_t file_size) {
-    if (file_size < sizeof(ofsf_header_t))
-        return 0;
-    /* Read into a 16-byte aligned CRAM1 scratch — of_mixer_alloc_samples
-     * gives us a CRAM1 buffer that the bridge DMA can target, and a
-     * successful later full-file read will overwrite whatever we sampled
-     * here. The buffer stays leased from the pool either way. */
-    uint8_t probe[16] __attribute__((aligned(4)));
-    if (of_file_read_chunked(slot_id, 0, probe, sizeof(probe)) < 0)
-        return 0;
-    const uint32_t *p = (const uint32_t *)probe;
-    return p[0] == OFSF_MAGIC;
-}
-
 int bank_preload(void) {
     if (g_bank_base)
         return 0;

@@ -26,8 +26,9 @@ void (*timer_callback_ptr)(void) = NULL;  /* non-static: accessed by services_ta
 
 /* Called from irq_handler() on machine timer interrupt */
 void timer_isr_callback(void) {
-    /* Drain the UART TX ring first — keeps the debug console mirror
-     * flowing regardless of what the app thread is doing. */
+    /* Service the terminal UART hook before app callbacks.  The Pocket
+     * implementation is currently synchronous/no-op here, but keeping the
+     * call preserves the HAL contract for targets with buffered output. */
     of_term_uart_drain();
     if (timer_callback_ptr)
         timer_callback_ptr();
@@ -55,8 +56,6 @@ typedef struct {
     int      save_slot;     /* Save slot index (0-9), or -1 for config/settings */
     int      nv_cache_idx;  /* Nonvolatile size-cache index */
     int      dirty;         /* Nonvolatile data/size changed since open */
-    uint32_t nv_write_calls;
-    uint32_t nv_write_bytes;
     int      is_dir;        /* Is this a directory FD? */
     uint32_t dir_pos;       /* Current position in directory listing */
 } fd_entry_t;
@@ -179,7 +178,6 @@ static int io_cache_fill(int entry, uint32_t slot_id,
 #define NV_CONFIG_CACHE_IDX 0
 #define NV_SAVE_CACHE_BASE  1
 #define NV_CACHE_SLOTS      (SAVE_MAX_SLOTS + 1)
-#define NV_TRACE            0
 
 #define O_ACCMODE       03
 #define O_WRONLY        01
@@ -199,36 +197,6 @@ static uint32_t save_size_cache[NV_CACHE_SLOTS];
 static uint8_t save_size_known[NV_CACHE_SLOTS];
 
 static void save_size_cache_store(int cache_idx, uint32_t size);
-
-#if NV_TRACE
-static void nv_trace_dump(uint32_t slot_id, uint32_t offset, uint32_t len) {
-    uint8_t buf[32];
-    if (len > sizeof(buf))
-        len = sizeof(buf);
-    if (len == 0)
-        return;
-
-    int rc = of_nvslot_read(slot_id, buf, offset, len);
-    of_term_printf(" data[%x..%x] rc=%d:", offset, offset + len, rc);
-    if (rc > 0) {
-        for (int i = 0; i < rc; i++)
-            of_term_printf(" %02x", (uint32_t)buf[i]);
-    }
-    of_term_putchar('\n');
-}
-
-static void nv_trace_snapshot(const char *tag, uint32_t slot_id,
-                              uint32_t size, uint32_t calls,
-                              uint32_t bytes) {
-    of_term_printf("[nv:%s] slot=%u size=%u calls=%u bytes=%u\n",
-                   tag, slot_id, size, calls, bytes);
-    if (size > 0) {
-        nv_trace_dump(slot_id, 0, size < 32 ? size : 32);
-        if (size > 48)
-            nv_trace_dump(slot_id, size - 16, 16);
-    }
-}
-#endif
 
 void file_slot_register(uint32_t slot_id, const char *filename) {
     if (file_slot_count >= MAX_FILE_SLOTS)
@@ -598,16 +566,8 @@ static long sys_write(long fd, long buf, long count) {
             if (f->offset > f->size)
                 f->size = f->offset;
             f->dirty = 1;
-            f->nv_write_calls++;
-            f->nv_write_bytes += (uint32_t)rc;
             save_size_cache_store(f->nv_cache_idx, f->size);
             of_nvslot_set_size(f->slot_id, f->size);
-#if NV_TRACE
-            if (f->nv_write_calls <= 8 || ((f->nv_write_calls & 63u) == 0))
-                of_term_printf("[nv:write] slot=%u off=%u len=%d size=%u call=%u\n",
-                               f->slot_id, f->offset - (uint32_t)rc,
-                               rc, f->size, f->nv_write_calls);
-#endif
         }
         return rc;
     }
@@ -807,12 +767,6 @@ static long open_nv_fd(int fd, uint32_t slot_id, long flags) {
         f->offset = f->size;
 
     of_save_begin_cpu();
-#if NV_TRACE
-    of_term_printf("[nv:open] slot=%u flags=%x size=%u cache=%d\n",
-                   slot_id, (uint32_t)flags, f->size, cache_idx);
-    if (!(flags & O_TRUNC))
-        nv_trace_snapshot("open", slot_id, f->size, 0, 0);
-#endif
     return fd;
 }
 
@@ -854,8 +808,6 @@ static long sys_openat(long dirfd, long pathname, long flags, long mode) {
     f->slot_id = 0;
     f->size = 0;
     f->dirty = 0;
-    f->nv_write_calls = 0;
-    f->nv_write_bytes = 0;
     f->is_dir = 0;
     f->dir_pos = 0;
 
@@ -964,11 +916,6 @@ static long sys_close(long fd) {
             else
                 save_size_cache_invalidate(f->nv_cache_idx);
         }
-#if NV_TRACE
-        if (f->dirty || f->nv_write_calls)
-            nv_trace_snapshot("close", f->slot_id, save_size,
-                              f->nv_write_calls, f->nv_write_bytes);
-#endif
         f->in_use = 0;
         of_save_end_cpu();
         return rc;

@@ -30,6 +30,7 @@ src/fpga/greybox_tmp/
 src/fpga/*.qws
 src/fpga/*.bak
 src/fpga/targets/*/firmware.mif
+!src/fpga/targets/pocket/firmware.mif
 
 # Verilator build artifacts
 src/fpga/test/obj_dir*/
@@ -46,7 +47,11 @@ src/fpga/test/psram_cram0_test.v
 
 # Quartus per-seed logs (kept as loose files outside db/)
 src/fpga/targets/*/output_files/seed_*_compile.log
+src/fpga/targets/*/output_files/seed_*_fit.log
 src/fpga/targets/*/output_files/seed_*_sta.log
+src/fpga/targets/*/output_files/seed_map.log
+src/fpga/targets/*/output_files/*.jdi
+src/fpga/targets/*/simulation/
 
 # SignalTap captures
 *.stp
@@ -70,6 +75,7 @@ __pycache__/
 # VexRiscv source trees (only generated .v needed)
 src/fpga/vendor/vexriscv/VexRiscv/
 src/fpga/vendor/vexriscv/VexiiRiscv/
+!src/fpga/vendor/vexriscv/VexiiRiscv
 
 # macOS
 .DS_Store
