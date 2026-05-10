@@ -500,11 +500,13 @@ static void emit_span4_batch_raw(const std::vector<Span4Wire> &spans) {
     }
 }
 
-/* Doorbell-DMA a raw ring command stream.  The stream already includes
- * command headers; DMA writes it into ring BRAM and publishes wrptr at
- * the end, with no enclosing batch command. */
+/* Submit a raw mixed command stream through the doorbell-DMA path.  The
+ * stream already includes command headers; hardware pulls the words into
+ * ring BRAM and publishes wrptr only after the final word lands, with no
+ * enclosing batch command. */
 static void emit_command_stream_dma(const std::vector<uint32_t> &stream) {
     wait_for_dma_idle();
+
     uint32_t addr_word = BATCH_BUF_BYTE >> 2;
     for (uint32_t w : stream)
         sdram_write(addr_word++, w);
@@ -2678,7 +2680,7 @@ static void test_batch_dma_equals_inline() {
 }
 
 static void test_command_stream_dma_mixed_span_span4() {
-    /* Raw DMA command streams let software batch mixed DRAW_SPAN and
+    /* DMA command streams let software batch mixed DRAW_SPAN and
      * DRAW_SPAN4 commands without changing draw order. */
     printf("TEST command_stream_dma_mixed_span_span4\n");
     gpu_init();

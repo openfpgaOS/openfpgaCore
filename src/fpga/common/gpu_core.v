@@ -123,7 +123,7 @@ assign dbg_frag = {sp_count[7:0],
 // 0x08  GPU_RING_DATA     W   Write next word to ring BRAM (auto-increment)
 // 0x0C  GPU_DMA_SRC       W   SDRAM byte address of command buffer to pull
 // 0x10  GPU_RING_RDPTR    R   GPU read pointer
-// 0x14  GPU_STATUS        R   bit0=busy, bit1=ring_empty, bit2=dma_busy,
+// 0x14  GPU_STATUS        R   bit0=busy, bit1=ring_empty, bit2=upload_busy,
 //                              bit3=dma_overflow_sticky, [5:4]=dma_state,
 //                              bit6=tex_m0_in_flight, bit7=blend_owns_m0,
 //                              [15:8]=fsm_state
@@ -133,17 +133,18 @@ assign dbg_frag = {sp_count[7:0],
 // 0x24  GPU_TRANSLUC_DATA W / texture-cache miss counter R
 // 0x28  GPU_TEX_FLUSH     W   Flush texture cache (write any value)
 // 0x2C  GPU_DMA_KICK      W   Write 1 to fire DMA pull from (SRC, LEN)
-// 0x30  Reserved/read-zero in area mode
+// 0x30  Reserved
 // 0x34  GPU_DBG_WR_INFLIGHT R Low 4 bits = outstanding FB write responses
-// 0x38  Reserved/read-zero in area mode
+// 0x38  GPU_DMA_DBG       R   Compact DMA/debug status
 // 0x3C  GPU_DBG_SELECT     Reserved/read-zero in area mode
 //
-// DMA pull semantics: fabric-side AXI INCR-burst read of LEN words from
-// SRC, streamed into the ring BRAM at the auto-incrementing wr_addr,
-// with ring_wrptr auto-advanced per word so the decoder picks them up
-// in parallel.  CPU is free as soon as KICK is written.  Bursts split
-// at the 256-beat AXI4 boundary internally.  Polls GPU_STATUS:dma_busy
-// to know when the SDRAM source buffer is safe to overwrite.
+// Upload semantics:
+//   * GPU_DMA_* pulls either homogeneous payloads or already-encoded mixed
+//     command streams from SDRAM into the ordered ring BRAM with fabric-side
+//     AXI INCR bursts.
+//   * The DMA publishes ring_wrptr only after the final word lands, so the
+//     decoder never observes a partial command.
+// Poll GPU_STATUS:upload_busy before reusing the SDRAM batch/stream buffer.
 
 // Ring BRAM: 16 KB = 4096 words, dual-port M10K
 // Port A: CPU writes via MMIO (GPU_RING_DATA)
@@ -155,7 +156,7 @@ reg [31:0] ring_bram [0:RING_WORDS-1];
 reg [RING_ADDR_BITS-1:0] ring_wr_addr;  // CPU write pointer (word index)
 reg [15:0] ring_wrptr;                    // CPU write pointer (byte offset, for GPU comparison)
 reg [15:0] ring_rdptr;                    // GPU read pointer (byte offset)
-reg [31:0] ring_rd_data;                  // Port B read output (registered)
+reg [31:0] ring_rd_data;                  // Ring BRAM port B read output (registered)
 
 // CPU upload address for the transluc[] LUT (32 KB).  Colormap storage
 // retired — palookups now live in SDRAM and the GPU reads them through
@@ -183,7 +184,9 @@ reg        dma_publish_wrptr;     // 1-cycle pulse, latched by ring_wrptr
 reg [31:0] dma_burst_addr;        // SDRAM byte addr of next sub-burst
 reg [12:0] dma_words_left;        // Words remaining in the kick (across sub-bursts)
 reg [8:0]  dma_burst_words;       // Words remaining in current sub-burst (1..256)
-wire       dma_busy = (dma_state != DMA_S_IDLE) || dma_kick;
+
+wire       dma_pull_busy = (dma_state != DMA_S_IDLE) || dma_kick;
+wire       dma_busy = dma_pull_busy;
 
 // Anti-starvation counter for DMA_S_AR: count cycles where DMA wants to
 // assert AR but is held off by !dma_bus_idle (sustained tex/blend traffic).
@@ -279,7 +282,8 @@ wire [31:0] dma_ring_wdata = dma_pend_valid ? dma_pend_data : dma_ring_wdata_raw
 // registers and synthesis blows up by ~128 K FFs.  CPU MMIO wins the
 // mux now (changed from the prior DMA-priority shape — see skid above).
 wire        ring_a_we    = cpu_ring_write || dma_ring_wr;
-wire [31:0] ring_a_wdata = cpu_ring_write ? reg_wdata : dma_ring_wdata;
+wire [31:0] ring_a_wdata = cpu_ring_write ? reg_wdata :
+                                            dma_ring_wdata;
 always @(posedge clk) begin
     if (ring_a_we)
         ring_bram[ring_wr_addr] <= ring_a_wdata;
@@ -311,9 +315,10 @@ always @(posedge clk) begin
         if (ring_a_we)
             ring_wr_addr <= ring_wr_addr + 1'b1;
 
-        // DMA end-of-kick publishes ring_wrptr atomically (covering
-        // header + every payload word).  Otherwise the decoder doesn't
-        // see in-flight DMA words (it gates only S_IDLE on ring_empty).
+        // Upload end publishes ring_wrptr atomically (covering every
+        // payload word copied into ring BRAM).  Otherwise the decoder
+        // doesn't see in-flight upload words (it gates only S_IDLE on
+        // ring_empty).
         if (dma_publish_wrptr)
             ring_wrptr <= {2'b0, ring_wr_addr, 2'b0};
             // ring_wr_addr (12 bits) << 2 → byte offset (14 bits),
@@ -355,6 +360,8 @@ always @(posedge clk) begin
                     if (reg_wdata[0] && dma_state == DMA_S_IDLE)
                         dma_kick <= 1'b1;
                 end
+                4'd12: begin end // Reserved
+                4'd14: begin end // DMA debug register is read-only
                 4'd15: begin end // GPU_DBG_SELECT retired in area mode
                 default: ;
             endcase
@@ -370,17 +377,17 @@ always @(*) begin
         // GPU_STATUS exposes:
         //   bit 0     = busy
         //   bit 1     = ring_empty
-        //   bit 2     = dma_busy
+        //   bit 2     = upload_busy (SDRAM DMA pull)
         //   bit 3     = dma_overflow_sticky (port-A skid back-to-back
         //               collision — sticky until reset)
         //   bits[5:4] = dma_state (0=IDLE, 1=AR, 2=R, 3=PUBLISH)
         //   bit 6     = tex_m0_in_flight (texture-cache fill on the bus)
         //   bit 7     = blend_owns_m0 (FBSS_BLEND read holding the bus)
-        //   bits[15:8]= main FSM state
+        //   bits[15:8]= main FSM state, zero-extended
         // The watchdog dump in of_gpu_draw_spans_batch reads this register
         // when the DMA wedge fires; the dma_state/tex/blend bits tell us
         // exactly which sub-FSM is stuck without per-bit MMIO probes.
-        4'd5:    reg_rdata = {16'b0, state,
+        4'd5:    reg_rdata = {16'b0, 2'b0, state,
                               blend_owns_m0, tex_m0_in_flight, dma_state,
                               dma_overflow_sticky,
                               dma_busy, ring_empty, busy};
@@ -393,7 +400,7 @@ always @(*) begin
         4'd11:   reg_rdata = 32'b0;
         4'd12:   reg_rdata = 32'b0;
         4'd13:   reg_rdata = {28'b0, m_wr_inflight};
-        4'd14:   reg_rdata = 32'b0;
+        4'd14:   reg_rdata = {29'b0, dma_state, dma_pull_busy};
         4'd15:   reg_rdata = 32'b0; // Stall counters retired to recover ALMs.
         default: reg_rdata = 32'b0;
     endcase
