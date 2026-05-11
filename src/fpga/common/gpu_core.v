@@ -1,20 +1,18 @@
 //
 // GPU Core — span + triangle rasterizer
 //
-// Asynchronous 2D/3D GPU for openfpgaOS.  Reads commands from a ring
-// buffer in SDRAM, rasterises spans (textured, colormapped, depth-tested),
-// and writes pixels to the framebuffer via AXI4.
+// Asynchronous 2D/3D GPU for openfpgaOS.  The CPU builds command streams in
+// SDRAM; a doorbell DMA copies them into an internal BRAM ring, then the GPU
+// rasterises textured/colormapped spans and writes pixels to the framebuffer
+// via AXI4.
 //
 // Two AXI4 master ports:
-//   M_RD  — ring buffer fetch + texture cache fills (read only)
+//   M_RD  — command-stream DMA + texture/cache fills (read only)
 //   M_WR  — framebuffer writes + clear DMA (write only)
 //
-// One SRAM word port:
-//   Z-buffer read / compare / write (shared with CPU via external mux)
-//
-// Colormap BRAM (16 KB): CPU uploads via MMIO, GPU reads during fragment.
-//
-// MMIO registers exposed to CPU for control, status, and fence sync.
+// MMIO registers expose control, status, fence sync, texture flush and the
+// remaining translucency LUT upload path.  Command data is not accepted over
+// MMIO.
 //
 
 `default_nettype none
@@ -79,9 +77,8 @@ module gpu_core #(
     // ================================================================
     output wire        busy,
     output reg  [31:0] fence_reached,
-    // Verilator-only diagnostic outputs.  Quartus prunes unused module
-    // ports, so these cost zero ALMs in the bitstream; they exist only so
-    // tb_gpu can print state during trace.
+    // Legacy Verilator diagnostic outputs.  Production builds keep them
+    // tied off so debug cones do not survive into timing/resource closure.
     output wire [5:0]  dbg_state,
     output wire [5:0]  dbg_setup_step,
     output wire [31:0] dbg_tri_det,
@@ -90,43 +87,21 @@ module gpu_core #(
 
 wire active = reset_n & gpu_enable;
 
-assign dbg_state = state;
-assign dbg_setup_step = setup_step;
-assign dbg_tri_det = tri_det;
-// Packed fragment-pipe diagnostic.  bit0=p0_v, 1=p1_v, 2=p2_v, 3=p2b_v,
-// 4=p3_v, 5=src_done, 6=tex_req_valid, 7=tex_req_ready,
-// [11:8]=fbss[3:0], [13:12]=dma_state, [14]=cmd_is_draw_spans_batch,
-// [15]=fp_pipe_stall, [18:16]=tex_dbg_state, [19]=tex_axi_arvalid,
-// [20]=tex_axi_rvalid, [21]=cmap_resp_valid_b, [22]=persp_active,
-// [23]=tri_active, [31:24]=sp_count[7:0].
-assign dbg_frag = {sp_count[7:0],
-                   tri_active,
-                   persp_active,
-                   cmap_resp_valid_b,
-                   m_rd_rvalid,
-                   m_rd_arvalid,
-                   tex_dbg_state,
-                   fp_pipe_stall,
-                   cmd_is_draw_spans_batch,
-                   dma_state,
-                   fbss[3:0],
-                   tex_req_ready,
-                   tex_req_valid,
-                   src_done,
-                   p3_valid, p2b_valid, p2_valid, p1_valid, p0_valid};
+assign dbg_state = 6'd0;
+assign dbg_setup_step = 6'd0;
+assign dbg_tri_det = 32'd0;
+assign dbg_frag = 32'd0;
 
 // ================================================================
 // MMIO Register Map
 // ================================================================
 // 0x00  GPU_CTRL          W   bit0=enable, bit1=soft_reset, bit2=ring_reset
-// 0x04  GPU_RING_WRPTR    W   CPU write pointer (byte offset into ring BRAM)
-// 0x08  GPU_RING_DATA     W   Write next word to ring BRAM (auto-increment)
+// 0x04  GPU_RING_WRPTR    R   Published ring write pointer
+// 0x08  Reserved              Legacy GPU_RING_DATA command MMIO removed
 // 0x0C  GPU_DMA_SRC       W   SDRAM byte address of command buffer to pull
 // 0x10  GPU_RING_RDPTR    R   GPU read pointer
 // 0x14  GPU_STATUS        R   bit0=busy, bit1=ring_empty, bit2=upload_busy,
-//                              bit3=dma_overflow_sticky, [5:4]=dma_state,
-//                              bit6=tex_m0_in_flight, bit7=blend_owns_m0,
-//                              [15:8]=fsm_state
+//                              [5:4]=dma_state
 // 0x18  GPU_FENCE         R   Last completed fence token
 // 0x1C  GPU_DMA_LEN       W   Word count to pull (max 4096)
 // 0x20  GPU_TRANSLUC_ADDR W / texture-cache request counter R
@@ -135,7 +110,7 @@ assign dbg_frag = {sp_count[7:0],
 // 0x2C  GPU_DMA_KICK      W   Write 1 to fire DMA pull from (SRC, LEN)
 // 0x30  Reserved
 // 0x34  GPU_DBG_WR_INFLIGHT R Low 4 bits = outstanding FB write responses
-// 0x38  GPU_DMA_DBG       R   Compact DMA diagnostic status
+// 0x38  Reserved/read-zero
 // 0x3C  GPU_DBG_SELECT     Reserved/read-zero in area mode
 //
 // Upload semantics:
@@ -147,14 +122,14 @@ assign dbg_frag = {sp_count[7:0],
 // Poll GPU_STATUS:upload_busy before reusing the SDRAM batch/stream buffer.
 
 // Ring BRAM: 16 KB = 4096 words, dual-port M10K
-// Port A: CPU writes via MMIO (GPU_RING_DATA)
+// Port A: doorbell-DMA writes command streams from SDRAM
 // Port B: GPU reads during command fetch (1-cycle latency)
 localparam RING_WORDS = 4096;  // 16 KB
 localparam RING_ADDR_BITS = 12;
 
 reg [31:0] ring_bram [0:RING_WORDS-1];
-reg [RING_ADDR_BITS-1:0] ring_wr_addr;  // CPU write pointer (word index)
-reg [15:0] ring_wrptr;                    // CPU write pointer (byte offset, for GPU comparison)
+reg [RING_ADDR_BITS-1:0] ring_wr_addr;  // DMA write pointer (word index)
+reg [15:0] ring_wrptr;                  // Published write pointer (byte offset)
 reg [15:0] ring_rdptr;                    // GPU read pointer (byte offset)
 reg [31:0] ring_rd_data;                  // Ring BRAM port B read output (registered)
 
@@ -215,75 +190,12 @@ always @(posedge clk)
 wire        dma_ring_wr_raw;
 wire [31:0] dma_ring_wdata_raw;
 
-// ============================================================
-// Port-A collision skid (doorbell-DMA freeze fix)
-// ------------------------------------------------------------
-// gpu_core's m_rd_* AXI master has no `rready` — the slave
-// (sdram_arb) drives R-beats unconditionally and we MUST swallow
-// them on the cycle they arrive.  That collides with CPU MMIO
-// writes to GPU_RING_DATA: the previous mux gave DMA priority and
-// silently dropped the CPU's word while still advancing
-// ring_wr_addr by 1.  The dropped CPU word produced a stale
-// ring_bram cell that the decoder later interpreted as a span's
-// sp_fb_addr — and the GPU's m_wr_* wrote pixels into CPU code /
-// stack regions, manifesting as an mcause=2 trap several frames
-// later (PocketDukeNukem-SDK / Duke3D batched-spans freeze).
-//
-// Fix: 1-deep skid for DMA beats.  CPU MMIO always wins port-A in
-// the cycle it fires; the DMA beat parks in `dma_pend_*` and
-// commits on the next cycle (assuming no further collision).
-// `dma_overflow_sticky` latches if a second collision arrives
-// while the skid is still occupied — exposed via GPU_STATUS bit
-// 3 so the SDK can detect the (rare) double-collision case.
-// ============================================================
-wire cpu_ring_write = reg_wr && (reg_addr == 4'd2);
-
-reg        dma_pend_valid;
-reg [31:0] dma_pend_data;
-reg        dma_overflow_sticky;
-
-// Drain the skid whenever no CPU MMIO is colliding this cycle.
-wire dma_pend_drain = dma_pend_valid && !cpu_ring_write;
-// Park a fresh DMA beat only when CPU MMIO collides AND skid is empty.
-wire dma_pend_load  = dma_ring_wr_raw && cpu_ring_write && !dma_pend_valid;
-// Overflow: DMA beat arrives, CPU collides, skid already full.
-wire dma_pend_overflow = dma_ring_wr_raw && cpu_ring_write && dma_pend_valid;
-
-always @(posedge clk) begin
-    if (!reset_n) begin
-        dma_pend_valid      <= 1'b0;
-        dma_pend_data       <= 32'b0;
-        dma_overflow_sticky <= 1'b0;
-    end else begin
-        if (dma_pend_load) begin
-            dma_pend_valid <= 1'b1;
-            dma_pend_data  <= dma_ring_wdata_raw;
-        end else if (dma_pend_drain) begin
-            dma_pend_valid <= 1'b0;
-        end
-        if (dma_pend_overflow)
-            dma_overflow_sticky <= 1'b1;
-    end
-end
-
-// Effective DMA→ring write that drives port A.  Either the live
-// beat (no CPU collision, skid empty) or the parked beat (no CPU
-// collision, skid loaded).  If CPU collides AND beat fires, the
-// live beat goes to the skid and DMA does NOT commit this cycle —
-// CPU wins port-A, ring_wr_addr advances by 1 for the CPU write.
-wire        dma_ring_wr    = (dma_ring_wr_raw && !cpu_ring_write && !dma_pend_valid)
-                          || dma_pend_drain;
-wire [31:0] dma_ring_wdata = dma_pend_valid ? dma_pend_data : dma_ring_wdata_raw;
-
 // Canonical altsyncram-inferable single-port write to ring_bram.  The
-// always block has EXACTLY ONE `ring_bram[X] <= D` statement under a
-// single conditional — Quartus's M10K pattern matcher requires this
-// shape, otherwise the 4096×32 array gets thrown into LUT-based
-// registers and synthesis blows up by ~128 K FFs.  CPU MMIO wins the
-// mux now (changed from the prior DMA-priority shape — see skid above).
-wire        ring_a_we    = cpu_ring_write || dma_ring_wr;
-wire [31:0] ring_a_wdata = cpu_ring_write ? reg_wdata :
-                                            dma_ring_wdata;
+// legacy CPU MMIO command path is gone; commands are staged in SDRAM and
+// copied here by the doorbell DMA only.  That leaves one writer for port A,
+// avoiding the former CPU/DMA collision mux and skid registers.
+wire        ring_a_we    = dma_ring_wr_raw;
+wire [31:0] ring_a_wdata = dma_ring_wdata_raw;
 always @(posedge clk) begin
     if (ring_a_we)
         ring_bram[ring_wr_addr] <= ring_a_wdata;
@@ -309,9 +221,8 @@ always @(posedge clk) begin
         ring_reset    <= 0;
         dma_kick      <= 1'b0;
 
-        // ring_wr_addr advances once per port-A write (CPU MMIO or DMA
-        // beat).  Keeping it here (not in the BRAM-write block) means
-        // the BRAM block stays canonical.
+        // ring_wr_addr advances once per DMA beat.  Keeping it here
+        // (not in the BRAM-write block) means the BRAM block stays canonical.
         if (ring_a_we)
             ring_wr_addr <= ring_wr_addr + 1'b1;
 
@@ -335,12 +246,8 @@ always @(posedge clk) begin
                         ring_wrptr   <= 0;
                     end
                 end
-                4'd1: begin  // GPU_RING_WRPTR — explicit kick
-                    if (!dma_ring_wr) ring_wrptr <= reg_wdata[15:0];
-                end
-                // 4'd2 GPU_RING_DATA: ring_bram write happens in the
-                // dedicated BRAM-write always block above; ring_wr_addr
-                // increment is handled by the `ring_a_we` branch above.
+                4'd1: begin end // GPU_RING_WRPTR is read-only now
+                4'd2: begin end // Legacy GPU_RING_DATA retired
                 4'd3: begin  // GPU_DMA_SRC
                     dma_src_latched <= reg_wdata;
                 end
@@ -361,7 +268,7 @@ always @(posedge clk) begin
                         dma_kick <= 1'b1;
                 end
                 4'd12: begin end // Reserved
-                4'd14: begin end // DMA diagnostic register is read-only
+                4'd14: begin end // Reserved/read-only
                 4'd15: begin end // GPU_DBG_SELECT retired in area mode
                 default: ;
             endcase
@@ -374,33 +281,24 @@ always @(*) begin
     case (reg_addr)
         4'd1:    reg_rdata = {16'b0, ring_wrptr};
         4'd4:    reg_rdata = {16'b0, ring_rdptr};
-        // GPU_STATUS exposes:
+        // Compact production status:
         //   bit 0     = busy
         //   bit 1     = ring_empty
         //   bit 2     = upload_busy (SDRAM DMA pull)
-        //   bit 3     = dma_overflow_sticky (port-A skid back-to-back
-        //               collision — sticky until reset)
+        //   bit 3     = reserved
         //   bits[5:4] = dma_state (0=IDLE, 1=AR, 2=R, 3=PUBLISH)
-        //   bit 6     = tex_m0_in_flight (texture-cache fill on the bus)
-        //   bit 7     = blend_owns_m0 (FBSS_BLEND read holding the bus)
-        //   bits[15:8]= main FSM state, zero-extended
-        // The watchdog dump in of_gpu_draw_spans_batch reads this register
-        // when the DMA wedge fires; the dma_state/tex/blend bits tell us
-        // exactly which sub-FSM is stuck without per-bit MMIO probes.
-        4'd5:    reg_rdata = {16'b0, 2'b0, state,
-                              blend_owns_m0, tex_m0_in_flight, dma_state,
-                              dma_overflow_sticky,
+        4'd5:    reg_rdata = {26'b0, dma_state, 1'b0,
                               dma_busy, ring_empty, busy};
         4'd6:    reg_rdata = fence_reached;
-        4'd8:    reg_rdata = tex_dbg_req_count;
-        4'd9:    reg_rdata = tex_dbg_miss_count;
+        4'd8:    reg_rdata = 32'b0;
+        4'd9:    reg_rdata = 32'b0;
         // Legacy flip/write counters retired to recover LABs. Keep a
         // compact current-inflight readback for the write-balance test.
         4'd10:   reg_rdata = 32'b0;
         4'd11:   reg_rdata = 32'b0;
         4'd12:   reg_rdata = 32'b0;
         4'd13:   reg_rdata = {28'b0, m_wr_inflight};
-        4'd14:   reg_rdata = {29'b0, dma_state, dma_pull_busy};
+        4'd14:   reg_rdata = 32'b0;
         4'd15:   reg_rdata = 32'b0; // Stall counters retired to recover ALMs.
         default: reg_rdata = 32'b0;
     endcase
@@ -688,11 +586,6 @@ wire        tex_axi_rvalid;
 wire [31:0] tex_axi_rdata;
 wire        tex_axi_rlast;
 
-wire [2:0] tex_dbg_state;
-wire       tex_dbg_pipe_valid;
-wire [31:0] tex_dbg_req_count;
-wire [31:0] tex_dbg_miss_count;
-
 // Port B is wired to the cmap read path: cmap_req_addr_reg holds the
 // per-pixel SDRAM byte address; the request fires whenever p2 has a
 // SPAN_COLORMAP fragment.  Tex_cache returns the byte combinationally
@@ -723,11 +616,7 @@ gpu_tex_cache tex_cache (
     .axi_arlen(tex_axi_arlen),
     .axi_rvalid(tex_axi_rvalid),
     .axi_rdata(tex_axi_rdata),
-    .axi_rlast(tex_axi_rlast),
-    .dbg_state(tex_dbg_state),
-    .dbg_pipe_valid(tex_dbg_pipe_valid),
-    .dbg_req_count(tex_dbg_req_count),
-    .dbg_miss_count(tex_dbg_miss_count)
+    .axi_rlast(tex_axi_rlast)
 );
 
 // ================================================================
@@ -751,10 +640,6 @@ wire blend_owns_m0  = (fbss == FBSS_BLEND_AR_WAIT)
 wire dma_owns_ar    = (dma_state == DMA_S_AR)
                    || (dma_state == DMA_S_R);
 wire dma_owns_r     = (dma_state == DMA_S_R);
-// Legacy alias retained for places that conservatively want "DMA is
-// somehow active" (e.g. dma_busy in MMIO status).  Same coverage as
-// the old `dma_owns_m0`.
-wire dma_owns_m0    = (dma_state != DMA_S_IDLE);
 
 reg         dma_arvalid;
 reg  [31:0] dma_araddr;
@@ -787,12 +672,9 @@ wire [31:0] blend_rdata = m_rd_rdata;
 // port A, splitting at 256-beat AXI4 burst boundaries.  Enters DMA_S_AR
 // only when the M0 bus is idle (no blend in flight, no texture-cache
 // AR/R outstanding) so no fight for the bus mid-burst.  Per accepted
-// R-beat, drives dma_ring_wr/dma_ring_wdata which the always-block
-// above splices into ring BRAM port A and auto-advances ring_wrptr.
+// R-beat, drives dma_ring_wr_raw/dma_ring_wdata_raw into ring BRAM
+// port A and auto-advances the unpublished write address.
 wire dma_bus_idle = !blend_owns_m0 && !tex_m0_in_flight;
-// _raw drivers from the DMA FSM — these feed the port-A skid above
-// (see "Port-A collision skid" comment block) which mediates between
-// live DMA beats, the parked beat, and CPU MMIO writes.
 assign dma_ring_wr_raw    = (dma_state == DMA_S_R) && m_rd_rvalid;
 assign dma_ring_wdata_raw = m_rd_rdata;
 
@@ -889,14 +771,10 @@ always @(posedge clk) begin
         end
 
         DMA_S_PUBLISH: begin
-            // Publish only after the port-A skid is empty.  If the last
-            // DMA beat collided with a CPU MMIO write, it drains from
-            // dma_pend_* during this state; ring_wr_addr updates on that
-            // drain edge, so ring_wrptr is lifted on the following cycle.
-            if (!dma_pend_valid) begin
-                dma_publish_wrptr <= 1'b1;
-                dma_state         <= DMA_S_IDLE;
-            end
+            // Every DMA beat has landed in ring_bram and ring_wr_addr has
+            // advanced, so publish the new write pointer atomically.
+            dma_publish_wrptr <= 1'b1;
+            dma_state         <= DMA_S_IDLE;
         end
 
         default: dma_state <= DMA_S_IDLE;
@@ -1236,6 +1114,8 @@ reg [4:0]  pay_idx;
 reg [23:0] pay_remaining;  // total payload words still to consume from the ring
                            // (matches cmd_payload_words width so multi-triangle
                            //  commands drain completely without desyncing the ring)
+wire span_active = cmd_is_draw_span || cmd_is_draw_spans_batch;
+wire [4:0] span_load_idx = cmd_is_draw_spans_batch ? span_field_idx : pay_idx;
 
 // ================================================================
 // Pipelined Fragment Processor — stage registers
@@ -2424,8 +2304,11 @@ always @(posedge clk) begin : main_fsm
                         span4_field_idx <= span4_field_idx + 5'd1;
                 end
             end
-            else if (cmd_is_draw_span) begin
-                case (pay_idx)
+            else if (span_active) begin
+                // Shared scalar-span loader.  Standalone DRAW_SPAN uses
+                // pay_idx; DRAW_SPANS_BATCH wraps span_field_idx 0..14 for
+                // each packed span in the payload.
+                case (span_load_idx)
                     5'd0: sp_fb_addr   <= ring_rd_data;
                     5'd1: sp_tex_addr  <= ring_rd_data;
                     5'd2: sp_s         <= ring_rd_data;
@@ -2433,52 +2316,9 @@ always @(posedge clk) begin : main_fsm
                     5'd4: sp_sstep     <= ring_rd_data;
                     5'd5: sp_tstep     <= ring_rd_data;
                     5'd6: begin
-                        // Word 6 packing: [31:28]=colormap_id, [27:16]=count
-                        // (12 bits, was 16), [15:8]=light, [7:0]=flags.
-                        // colormap_id == 0 falls back to the sticky default
-                        // (st_colormap_id) so existing single-colormap callers
-                        // that never set the field stay bit-identical.
-                        sp_count       <= {4'b0, ring_rd_data[27:16]};
-                        sp_colormap_id <= (ring_rd_data[31:28] != 4'b0)
-                                            ? ring_rd_data[31:28]
-                                            : st_colormap_id;
-                        sp_light_q     <= {8'b0, ring_rd_data[15:8], 16'b0};
-                        sp_light_step  <= 32'b0;
-                        sp_flags       <= ring_rd_data[7:0];
-                    end
-                    5'd7: begin
-                        sp_fb_stride <= ring_rd_data[31:16];
-                        sp_tex_width <= ring_rd_data[15:0];
-                    end
-                    5'd8: begin
-                        sp_tex_w_mask <= (ring_rd_data[15:0]  == 16'd0)
-                                         ? 16'hFFFF : ring_rd_data[15:0];
-                        sp_tex_h_mask <= (ring_rd_data[31:16] == 16'd0)
-                                         ? 16'hFFFF : ring_rd_data[31:16];
-                    end
-                    5'd9:  sp_sZ         <= ring_rd_data;
-                    5'd10: sp_tZ         <= ring_rd_data;
-                    5'd11: sp_zinv       <= ring_rd_data;
-                    5'd12: sp_sZstep     <= ring_rd_data;
-                    5'd13: sp_tZstep     <= ring_rd_data;
-                    5'd14: sp_zinv_step  <= ring_rd_data;
-                    default: ;
-                endcase
-            end
-            else if (cmd_is_draw_spans_batch) begin
-                // Separate routing block keyed on span_field_idx (0..14
-                // wrapping per-span) so back-to-back spans inside a
-                // batch payload land their words in the correct sp_* slots.
-                case (span_field_idx)
-                    5'd0: sp_fb_addr   <= ring_rd_data;
-                    5'd1: sp_tex_addr  <= ring_rd_data;
-                    5'd2: sp_s         <= ring_rd_data;
-                    5'd3: sp_t         <= ring_rd_data;
-                    5'd4: sp_sstep     <= ring_rd_data;
-                    5'd5: sp_tstep     <= ring_rd_data;
-                    5'd6: begin
-                        // Word 6 packing matches the single-span path; see
-                        // the cmd_is_draw_span branch for the full comment.
+                        // Word 6 packing: [31:28]=colormap_id,
+                        // [27:16]=count, [15:8]=light, [7:0]=flags.
+                        // colormap_id==0 keeps the sticky default.
                         sp_count       <= {4'b0, ring_rd_data[27:16]};
                         sp_colormap_id <= (ring_rd_data[31:28] != 4'b0)
                                             ? ring_rd_data[31:28]
@@ -2506,12 +2346,14 @@ always @(posedge clk) begin : main_fsm
                     default: ;
                 endcase
 
-                // Advance the per-span sub-counter, wrapping at 14 → 0
-                // so the next span's words land in the right slots.
-                if (span_field_idx == 5'd14)
-                    span_field_idx <= 5'd0;
-                else
-                    span_field_idx <= span_field_idx + 5'd1;
+                if (cmd_is_draw_spans_batch) begin
+                    // Advance the per-span sub-counter, wrapping at 14 → 0
+                    // so the next span's words land in the right slots.
+                    if (span_field_idx == 5'd14)
+                        span_field_idx <= 5'd0;
+                    else
+                        span_field_idx <= span_field_idx + 5'd1;
+                end
             end
             else if (cmd_is_draw_triangles) begin
                 // pay_idx 0 = vertex count (ignored; must be 3).
@@ -2647,7 +2489,7 @@ always @(posedge clk) begin : main_fsm
                 src_done          <= (span4_count == 16'd0);
                 state             <= S_FRAG_PIPE;
             end
-            else if (cmd_is_draw_span || cmd_is_draw_spans_batch) begin
+            else if (span_active) begin
                 // Either standalone span or one span inside a batch:
                 // the sp_* regs are fully loaded for the current span.
                 // sp_flags holds the flag byte written at field idx 6;

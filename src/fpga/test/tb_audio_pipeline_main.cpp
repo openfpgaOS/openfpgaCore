@@ -1,6 +1,7 @@
 // Verilator driver for tb_audio_pipeline.v — audio_output.v integration test.
 
 #include "Vtb_audio_pipeline.h"
+#include "Vtb_audio_pipeline___024root.h"
 #include <verilated.h>
 #include <verilated_vcd_c.h>
 
@@ -47,6 +48,23 @@ static void push_sample(DUT* dut, int16_t l, int16_t r) {
     tick_sys(dut);
 }
 
+static uint16_t active_l(DUT* dut) {
+    return (uint16_t)dut->rootp->tb_audio_pipeline__DOT__dut__DOT__active_l;
+}
+
+static uint16_t active_r(DUT* dut) {
+    return (uint16_t)dut->rootp->tb_audio_pipeline__DOT__dut__DOT__active_r;
+}
+
+static bool wait_for_active(DUT* dut, uint16_t l, uint16_t r) {
+    for (int i = 0; i < 100000; i++) {
+        tick_sys(dut);
+        if (active_l(dut) == l && active_r(dut) == r)
+            return true;
+    }
+    return false;
+}
+
 int main(int argc, char** argv) {
     Verilated::commandArgs(argc, argv);
     auto* dut = new DUT;
@@ -66,6 +84,18 @@ int main(int argc, char** argv) {
     // Initial state: FIFO empty, not full
     check(dut->fifo_level == 0, "fifo empty at reset");
     check(dut->fifo_full  == 0, "not full at reset");
+
+    push_sample(dut, 0x1111, 0x2222);
+    check(wait_for_active(dut, 0x1111, 0x2222),
+          "stereo center sample reaches output staging");
+
+    push_sample(dut, 0x4000, 0x0000);
+    check(wait_for_active(dut, 0x4000, 0x0000),
+          "hard-left sample reaches output staging");
+
+    push_sample(dut, 0x0000, 0x4000);
+    check(wait_for_active(dut, 0x0000, 0x4000),
+          "hard-right sample reaches output staging");
 
     // Push 100 samples, check level rises
     for (int i = 0; i < 100; i++) {

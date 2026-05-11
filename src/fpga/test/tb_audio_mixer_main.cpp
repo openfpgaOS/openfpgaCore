@@ -87,6 +87,10 @@ static void check_in_range(const char *name, int got, int lo, int hi) {
     }
 }
 
+static int abs_i16(int v) {
+    return (v < 0) ? -v : v;
+}
+
 // One-cycle pulse on voice_wr with the given field/voice/data.
 static void mmio_voice_write(int voice, int field, uint32_t data) {
     dut->voice_sel   = voice;
@@ -110,6 +114,58 @@ static uint32_t vtbl_read(int voice, int field) {
     return is_fsm
         ? dut->rootp->tb_audio_mixer->dut__DOT__vtbl_fsm_mem[addr]
         : dut->rootp->tb_audio_mixer->dut__DOT__vtbl_cpu_mem[addr];
+}
+
+static void sdram_fill_constant(uint32_t word) {
+    for (int i = 0; i < 1024; i++)
+        dut->rootp->tb_audio_mixer->sdram_mem[i] = word;
+}
+
+static uint32_t wait_for_sample(int sample_index, const char *name) {
+    int seen = 0;
+    uint32_t last = 0;
+
+    for (int i = 0; i < 200000 && seen < sample_index; i++) {
+        tick(1);
+        if (dut->sample_wr) {
+            last = dut->sample_data;
+            seen++;
+        }
+    }
+
+    check(seen >= sample_index, name);
+    return last;
+}
+
+static void program_constant_looped_voice(int voice, uint32_t target_lr) {
+    reset_dut();
+    sdram_fill_constant(0x40004000);       // two mono s16 samples: +16384, +16384
+
+    mmio_voice_write(voice, VTBL_ADDR,        0);
+    mmio_voice_write(voice, VTBL_LEN,         32);
+    mmio_voice_write(voice, VTBL_RATE,        0x10000);
+    mmio_voice_write(voice, VTBL_LOOP_START,  0);
+    mmio_voice_write(voice, VTBL_LOOP_END,    32);
+    mmio_voice_write(voice, VTBL_VOL_TARGET,  target_lr);
+    mmio_voice_write(voice, VTBL_VOL_RATE,    0);       // snap after first pass
+    mmio_voice_write(voice, VTBL_VOL_LR,      0);
+    mmio_voice_write(voice, VTBL_CTRL,        1 | 4);   // active | loop, mono
+}
+
+static void program_zero_then_post_target_voice(int voice, uint32_t target_lr) {
+    reset_dut();
+    sdram_fill_constant(0x40004000);       // two mono s16 samples: +16384, +16384
+
+    mmio_voice_write(voice, VTBL_ADDR,        0);
+    mmio_voice_write(voice, VTBL_LEN,         32);
+    mmio_voice_write(voice, VTBL_RATE,        0x10000);
+    mmio_voice_write(voice, VTBL_LOOP_START,  0);
+    mmio_voice_write(voice, VTBL_LOOP_END,    32);
+    mmio_voice_write(voice, VTBL_VOL_TARGET,  0);       // alloc/play volume 0
+    mmio_voice_write(voice, VTBL_VOL_RATE,    8);       // firmware note-on ramp
+    mmio_voice_write(voice, VTBL_VOL_LR,      0);
+    mmio_voice_write(voice, VTBL_CTRL,        1 | 4);   // active | loop, mono
+    mmio_voice_write(voice, VTBL_VOL_TARGET,  target_lr);
 }
 
 // ---------------------------------------------------------------------
@@ -160,13 +216,13 @@ static void test_group_composition(void) {
     // voice 5 is in group 2 (low 2 bits of nibble 5 in voice_group_packed)
     dut->voice_group_packed = ((uint64_t)2) << (5 * 2);
 
-    // Configure voice 5: small length, snap volume, full target, active.
+    // Configure voice 5: small length, snap volume, full stereo target, active.
     mmio_voice_write(5, VTBL_ADDR,        0);
     mmio_voice_write(5, VTBL_LEN,         32);
     mmio_voice_write(5, VTBL_RATE,        0x10000);   // 1.0
     mmio_voice_write(5, VTBL_LOOP_START,  0);
     mmio_voice_write(5, VTBL_LOOP_END,    32);
-    mmio_voice_write(5, VTBL_VOL_TARGET,  0x00FF);     // L=0xFF, R=0x00
+    mmio_voice_write(5, VTBL_VOL_TARGET,  0xFFFF);     // L=0xFF, R=0xFF
     mmio_voice_write(5, VTBL_VOL_RATE,    0);          // snap to target
     mmio_voice_write(5, VTBL_VOL_LR,      0);          // start at 0
     mmio_voice_write(5, VTBL_CTRL,        1 | 4);      // active | loop
@@ -179,12 +235,15 @@ static void test_group_composition(void) {
 
     uint32_t vol_lr = vtbl_read(5, VTBL_VOL_LR) & 0xFFFF;
     int vol_l = vol_lr & 0xFF;
+    int vol_r = (vol_lr >> 8) & 0xFF;
 
     // Expected: 0xFF * 0xC0 * 0x80 >> 16  (HW does two >>8 stages)
     //   gxm_2  = (0xC0 * 0x80) >> 8 = 0x60
     //   tgt_l  = (0xFF * 0x60) >> 8 = 0x5F
     int expected = (0xFF * ((0xC0 * 0x80) >> 8)) >> 8;
     check_in_range("voice 5 vol_l after compose", vol_l,
+                   expected - 2, expected + 2);
+    check_in_range("voice 5 vol_r after compose", vol_r,
                    expected - 2, expected + 2);
 }
 
@@ -255,6 +314,48 @@ static void test_voice_end_irq(void) {
     check(cleared, "voice 3 voice_end_pending cleared by W1C");
 }
 
+// ---------------------------------------------------------------------
+// Test 5: explicit_lr_targets
+//
+// Program a mono constant sample and assert that explicit VOL_TARGET L/R
+// bytes survive the full mixer path into sample_data.  This directly
+// covers the Duke MultiVoc-style call pattern:
+//   alloc/play at volume 0 -> immediately set_vol_lr(voice, L, R).
+// The first emitted sample can be silent because VOL_LR starts at 0; with
+// VOL_RATE=0 the second and later samples must snap to the requested target.
+// ---------------------------------------------------------------------
+static void test_explicit_lr_targets(void) {
+    printf("test_explicit_lr_targets:\n");
+
+    program_constant_looped_voice(2, 0xFFFF);    // L=255, R=255
+    uint32_t center = wait_for_sample(3, "center sample emitted");
+    int center_l = (int16_t)(center >> 16);
+    int center_r = (int16_t)(center & 0xFFFF);
+    check_in_range("center L", center_l, 900, 1100);
+    check_in_range("center R", center_r, 900, 1100);
+
+    program_constant_looped_voice(2, 0x00FF);    // L=255, R=0
+    uint32_t left = wait_for_sample(3, "hard-left sample emitted");
+    int left_l = (int16_t)(left >> 16);
+    int left_r = (int16_t)(left & 0xFFFF);
+    check_in_range("hard-left L", left_l, 900, 1100);
+    check(abs_i16(left_r) <= 2, "hard-left R muted");
+
+    program_constant_looped_voice(2, 0xFF00);    // L=0, R=255
+    uint32_t right = wait_for_sample(3, "hard-right sample emitted");
+    int right_l = (int16_t)(right >> 16);
+    int right_r = (int16_t)(right & 0xFFFF);
+    check(abs_i16(right_l) <= 2, "hard-right L muted");
+    check_in_range("hard-right R", right_r, 900, 1100);
+
+    program_zero_then_post_target_voice(2, 0x00FF);     // Duke 3D sequence
+    uint32_t post = wait_for_sample(40, "post-start set_vol_lr sample emitted");
+    int post_l = (int16_t)(post >> 16);
+    int post_r = (int16_t)(post & 0xFFFF);
+    check_in_range("post-start hard-left L", post_l, 900, 1100);
+    check(abs_i16(post_r) <= 2, "post-start hard-left R muted");
+}
+
 int main(int argc, char **argv) {
     Verilated::commandArgs(argc, argv);
     dut = new Vtb_audio_mixer;
@@ -272,6 +373,9 @@ int main(int argc, char **argv) {
 
     reset_dut();
     test_voice_end_irq();
+
+    reset_dut();
+    test_explicit_lr_targets();
 
     printf("\n=== Results: %d passed, %d failed ===\n", passes, fails);
 

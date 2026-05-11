@@ -106,20 +106,15 @@ module audio_mixer (
     output reg  [31:0] voice_end_pending,
     output wire        voice_end_irq,
 
-    // ------- Diagnostic outputs -----------------------------------
-    // last_sample_data  : 32-bit value last pushed into the audio_out
-    //                     dcfifo ({left[15:0], right[15:0]}).  Firmware
-    //                     reads this to verify non-zero samples are
-    //                     actually being produced by the mixer.
-    // sample_count      : monotonic counter, increments on every
-    //                     sample_wr pulse.  Firmware diffs across a
-    //                     window to confirm the mixer is producing at
-    //                     ~48 kHz and not stalled.
-    output reg  [31:0] last_sample_data,
-    output reg  [31:0] sample_count,
-    // voice_active_mask : 32-bit bitmap of the shadow `voice_active`
-    // register — firmware diagnostic to see WHICH voices the HW thinks
-    // are playing (active_count only gives the popcount).
+    // ------- Status/debug outputs ---------------------------------
+    // active_count, last_sample_data, and sample_count used to be
+    // production diagnostic counters.  They are now tied to zero in
+    // the mixer so the MMIO ABI remains stable without spending ALMs
+    // on counters/popcount trees that shipping firmware does not need.
+    output wire [31:0] last_sample_data,
+    output wire [31:0] sample_count,
+    // voice_active_mask remains functional and is used by firmware to
+    // see which voices the HW mixer still considers active.
     output wire [31:0] voice_active_mask
 );
 
@@ -338,20 +333,9 @@ end
 
 assign voice_end_irq = |voice_end_pending;
 
-// Popcount for active_count MMIO readback.  Blocking accumulator inside
-// an always_comb-style combinational always block, then registered so
-// the MMIO read sees a stable value.  (The previous NBA-in-for-loop form
-// only retained the LAST set bit's +1, not a real popcount.)
-reg [5:0] active_cnt;
-integer i;
-reg [5:0] active_cnt_comb;
-always @* begin
-    active_cnt_comb = 6'd0;
-    for (i = 0; i < 32; i = i + 1)
-        if (voice_active[i]) active_cnt_comb = active_cnt_comb + 6'd1;
-end
-always @(posedge clk) active_cnt <= active_cnt_comb;
-assign active_count = active_cnt;
+assign active_count = 6'd0;
+assign last_sample_data = 32'd0;
+assign sample_count = 32'd0;
 assign voice_active_mask = voice_active;
 
 // Position readback — latched per-voice for instantaneous CPU reads.
@@ -492,6 +476,7 @@ localparam S_VOICE_END      = 5'd28;
 localparam S_ADV_WRAP       = 6'd32;
 localparam S_ADV_CHECK      = 6'd33;
 localparam S_ADV_COMMIT     = 6'd34;
+localparam S_FETCH_TAP1_MODE = 6'd35;  // second half of burst-mode decision
 
 reg [5:0] state;
 reg [4:0] cur_voice;
@@ -534,11 +519,10 @@ reg signed [15:0] tap0_l, tap0_r;
 reg signed [15:0] tap1_l, tap1_r;
 reg [31:0] tap_byte_addr;
 reg [31:0] tap_araddr;     // registered m_araddr; pipelined from TAP0_CALC
-reg [21:0] tap_nxt_raw;    // pos+1 pre-wrap-clamp; pipeline register between
-                           //   TAP0_CALC and BURST_DECIDE so the 22-bit
-                           //   adder isn't chained with the 2× compares
-                           //   and muxes in the same cycle (was -1.7 ns).
-// Burst-mode flags decided in S_FETCH_TAP1_NXT_CALC (BURST_DECIDE) and
+reg [21:0] tap_nxt_raw;    // pos+1 before wrap/clamp.
+reg [21:0] tap_nxt_wrapped;// pos+1 after optional loop wrap, before length clamp.
+reg        tap_wrap_only;  // registered loop-wrap decision.
+// Burst-mode flags decided across S_FETCH_TAP1_NXT_CALC / S_FETCH_TAP1_MODE and
 // consumed in S_FETCH_TAP0_AR / S_FETCH_TAP0_R.  Four mutually-
 // exclusive modes:
 //
@@ -645,9 +629,13 @@ always @(posedge clk) begin
         m_rready         <= 1'b0;
         m_araddr         <= 32'd0;
         m_arlen          <= 8'd0;
-        last_sample_data <= 32'd0;
-        sample_count     <= 32'd0;
         lerp_phase       <= 1'b0;
+        tap_nxt_raw      <= 22'd0;
+        tap_nxt_wrapped  <= 22'd0;
+        tap_wrap_only    <= 1'b0;
+        burst_mode_2beat <= 1'b0;
+        burst_mode_seam  <= 1'b0;
+        burst_mode_dup   <= 1'b0;
     end else case (state)
 
     // ---- Idle: wait for FIFO to drop below half, then start new sample ----
@@ -756,8 +744,8 @@ always @(posedge clk) begin
     // clicks).
     //
     // New flow: one ARLEN=1 burst per voice when consecutive
-    // (tap0=pos, tap1=pos+1, no loop wrap, no length clamp).  Three
-    // sub-modes selected in BURST_DECIDE:
+    // (tap0=pos, tap1=pos+1, no loop wrap, no length clamp).  The
+    // sub-modes are selected by a two-cycle decision pipeline:
     //
     //   2-beat       : stereo OR (mono && pos[0]==1)         — beat 0 = tap0
     //                                                          beat 1 = tap1
@@ -771,7 +759,8 @@ always @(posedge clk) begin
     //                                                          at the wrap, fine)
     //
     // CALC cycle: latch tap0 byte addr + register pos+1 raw.
-    // BURST_DECIDE cycle: apply wrap/clamp, pick mode, register flags.
+    // WRAP cycle: apply loop wrap and register the wrap decision.
+    // MODE cycle: apply length clamp, pick mode, register flags.
     // TAP0_AR / TAP0_R / TAP1_R: drive AR with chosen ARLEN, receive
     //                            beat 0, optionally receive beat 1.
     S_FETCH_TAP0_CALC: begin
@@ -784,34 +773,38 @@ always @(posedge clk) begin
             tap_byte_addr <= sample_byte_addr(voice_base, cur_pos_int, cur_stereo);
             tap_araddr    <= word_aligned(sample_byte_addr(voice_base, cur_pos_int, cur_stereo));
             tap_nxt_raw   <= cur_pos_int + 22'd1;
-            state         <= S_FETCH_TAP1_NXT_CALC;  // repurposed as BURST_DECIDE
+            state         <= S_FETCH_TAP1_NXT_CALC;  // first half of burst decision
         end
     end
 
-    // BURST_DECIDE — repurposed S_FETCH_TAP1_NXT_CALC slot.  Apply
-    // wrap+clamp to tap_nxt_raw, then pick the burst mode.  Crucially
-    // distinguish loop-wrap (interpolate across the seam by fetching
-    // cur_loop_start as tap1) from end-of-sample clamp (no interp,
-    // voice ends this sample).
-    S_FETCH_TAP1_NXT_CALC: begin : burst_decide_blk
-        reg [21:0] nxt;
+    // WRAP — repurposed S_FETCH_TAP1_NXT_CALC slot.  Keep the loop wrap
+    // compare/mux in its own cycle; the following MODE state handles
+    // length clamp and mode flags.  This removes the 22-bit wrap compare
+    // -> mux -> 22-bit clamp compare -> mode flag chain from the critical
+    // path and gives the fitter much more freedom around this FSM.
+    S_FETCH_TAP1_NXT_CALC: begin : burst_wrap_blk
         reg        wrap_only;
-        reg        clamp_after_wrap;
-        // Phase 1: loop wrap if applicable.
         wrap_only = cur_loop && cur_loop_valid && (tap_nxt_raw >= cur_loop_end);
-        nxt = wrap_only ? cur_loop_start : tap_nxt_raw;
-        // Phase 2: clamp if even the (post-wrap) target sits past length.
-        clamp_after_wrap = (nxt >= cur_length);
-        if (clamp_after_wrap) nxt = cur_pos_int;
+        tap_wrap_only   <= wrap_only;
+        tap_nxt_wrapped <= wrap_only ? cur_loop_start : tap_nxt_raw;
+        state           <= S_FETCH_TAP1_MODE;
+    end
 
+    // MODE — apply the post-wrap length clamp, then register the mutually
+    // exclusive burst-mode flags.  A loop-wrap fetches cur_loop_start as
+    // tap1; a clamp at the real sample end duplicates tap0 and lets the
+    // advance path end the voice.
+    S_FETCH_TAP1_MODE: begin : burst_mode_blk
+        reg clamp_after_wrap;
+        clamp_after_wrap = (tap_nxt_wrapped >= cur_length);
         // Mode encoding (mutually exclusive):
         //   _2beat : contiguous + needs separate words for tap0/tap1
         //   _seam  : loop wrap with valid (in-range) loop_start
         //   _dup   : clamp at sample end (one-shot voice ending)
         //   (none) : contiguous + mono pos_even (share-from-beat-0)
-        burst_mode_2beat <= !wrap_only && !clamp_after_wrap
+        burst_mode_2beat <= !tap_wrap_only && !clamp_after_wrap
                             && (cur_stereo || cur_pos_int[0]);
-        burst_mode_seam  <= wrap_only && !clamp_after_wrap;
+        burst_mode_seam  <= tap_wrap_only && !clamp_after_wrap;
         burst_mode_dup   <= clamp_after_wrap;
         state            <= S_FETCH_TAP0_AR;
     end
@@ -1166,12 +1159,6 @@ always @(posedge clk) begin
                                                      accum_r[19:4];
             sample_data <= {out_l, out_r};
             sample_wr   <= 1'b1;
-            /* Diagnostic: latch the outgoing sample + bump counter.
-             * Firmware reads these via MIX_LAST_SAMPLE/MIX_SAMPLE_COUNT
-             * to verify the HW mixer is actually producing non-zero
-             * values at 48 kHz before they hit the dcfifo / I2S. */
-            last_sample_data <= {out_l, out_r};
-            sample_count     <= sample_count + 32'd1;
             state       <= S_IDLE;
         end
     end

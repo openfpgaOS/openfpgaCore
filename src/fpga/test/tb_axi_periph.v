@@ -73,6 +73,10 @@ module tb_axi_periph (
     input  wire        gpu_swap_req_in,
     input  wire [1:0]  gpu_swap_idx_in,
     input  wire        vsync_in,
+    input  wire        target_dataslot_ack_in,
+    input  wire        target_dataslot_done_in,
+    input  wire [2:0]  target_dataslot_err_in,
+    input  wire        bridge_wr_idle_in,
 
     input  wire [31:0] cont1_key_in,
     input  wire [31:0] cont1_joy_in,
@@ -90,10 +94,10 @@ module tb_axi_periph (
     output wire        ext_irq_out
 );
 
-// Tie-offs for peripheral inputs we don't exercise.
-wire target_dataslot_ack   = 1'b0;
-wire target_dataslot_done  = 1'b0;
-wire [2:0] target_dataslot_err = 3'b0;
+// Tie-offs / harness-driven peripheral inputs.
+wire target_dataslot_ack   = target_dataslot_ack_in;
+wire target_dataslot_done  = target_dataslot_done_in;
+wire [2:0] target_dataslot_err = target_dataslot_err_in;
 wire [31:0] link_reg_rdata = 32'b0;
 wire [8:0] audio_fifo_level = 9'b0;
 wire audio_fifo_full = 1'b0;
@@ -119,7 +123,7 @@ always @(*) begin
     endcase
 end
 wire link_irq = 1'b0;
-wire bridge_wr_idle = 1'b1;
+wire bridge_wr_idle = bridge_wr_idle_in;
 wire dataslot_allcomplete = 1'b1;
 wire vsync = vsync_in;
 wire [31:0] cont1_key = cont1_key_in;
@@ -232,12 +236,9 @@ axi_periph_slave dut (
     .mix_group_vol_3(),
     .mix_voice_group_packed(),
     .mix_voice_sel_rd(mix_voice_sel_rd),
-    .mix_active_count(6'd3),
     .mix_active_mask(32'hA5A5_1234),
     .mix_pos_readback(mix_pos_readback_r),
     .mix_voice_end_pending(32'h0000_00C0),
-    .mix_last_sample(32'h1122_3344),
-    .mix_sample_count(32'h0001_2345),
 
     .link_reg_wr   (),
     .link_reg_rd   (),

@@ -62,16 +62,6 @@ module tb_arbiter (
     output wire        m1_bvalid,
     output wire [1:0]  m1_bresp,
 
-    // Master 2: Audio DMA (read-only)
-    input  wire        m2_arvalid,
-    output wire        m2_arready,
-    input  wire [31:0] m2_araddr,
-    input  wire [7:0]  m2_arlen,
-    output wire        m2_rvalid,
-    output wire [31:0] m2_rdata,
-    output wire [1:0]  m2_rresp,
-    output wire        m2_rlast,
-
     // Master 3: Audio Mixer (read-only, lowest priority)
     input  wire        m3_arvalid,
     output wire        m3_arready,
@@ -164,15 +154,6 @@ axi_sdram_arbiter dut (
     .m1_wlast   (m1_wlast),
     .m1_bvalid  (m1_bvalid),
     .m1_bresp   (m1_bresp),
-
-    .m2_arvalid (m2_arvalid),
-    .m2_arready (m2_arready),
-    .m2_araddr  (m2_araddr),
-    .m2_arlen   (m2_arlen),
-    .m2_rvalid  (m2_rvalid),
-    .m2_rdata   (m2_rdata),
-    .m2_rresp   (m2_rresp),
-    .m2_rlast   (m2_rlast),
 
     .m3_arvalid (m3_arvalid),
     .m3_arready (m3_arready),

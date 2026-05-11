@@ -85,19 +85,25 @@ long of_file_size(uint32_t slot_id);
 
 /* Start a non-blocking file read. Returns a token (>= 0) on success,
  * or negative error if a read is already in flight.
- * The callback is called with (token, bytes_read) when the DMA completes.
+ * The callback is called from the data-slot completion IRQ with
+ * (token, result), where result is 0 on success or <0 on bridge error.
+ * of_file_async_poll() is only a compatibility/fallback drain.
  * Only one async read can be in flight at a time (bridge limitation).
  * dest must be in CRAM0 (direct DMA target). */
 int of_file_read_async(uint32_t slot_id, uint32_t slot_offset,
                        void *dest, uint32_t length,
                        void (*callback)(int token, int result));
 
-/* Poll async read progress. Call from your main loop or idle hook.
- * Returns 1 if a read completed (callback was invoked), 0 if still
- * pending or no async read in flight. */
+/* Poll async read progress. Optional: completion is IRQ-driven on Pocket.
+ * Returns 1 once per completed read, 0 otherwise. */
 int of_file_async_poll(void);
 
 /* Check if an async read is currently in flight. */
 int of_file_async_busy(void);
+
+/* Service a data-slot completion IRQ. Called by the central IRQ dispatcher;
+ * exported so the async path can share the same completion logic with the
+ * polling fallback. */
+void of_file_async_irq_service(void);
 
 #endif /* OFOS_FILE_H */

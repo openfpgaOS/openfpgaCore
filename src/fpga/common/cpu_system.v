@@ -343,11 +343,8 @@ wire wr_fifo_empty = (wr_count == 0);
 // and awburst=FIXED, pump N W-beats from FIFO[head..head+N-1], then
 // pop all N entries on B.  burst_awlen_calc is combinational from the
 // current FIFO contents; burst_awlen is the latched value at AW
-// handshake (used for W-phase wlast detection).  The big win is the
-// GPU ring push pattern (CPU writes a stream of words to a fixed MMIO
-// register at GPU_RING_DATA): without coalescing each word ate one
-// AW + W + B (~6 cycles with slices); coalesced four words share one
-// AW + B (~10 cycles for 4 words = 2.5 cycles/word).
+// handshake (used for W-phase wlast detection).  This still helps
+// repeated writes to one MMIO register, such as LUT uploads.
 reg [WR_PTR_W-1:0] burst_awlen;
 reg [WR_PTR_W-1:0] burst_w_idx;
 
@@ -513,8 +510,8 @@ assign per_rready_cpu  = 1'b1;
 // AW channel.  awlen + awburst are combinational from the current
 // match scan — the slice samples them at the handshake posedge and
 // our burst_awlen register latches the same value at the same posedge.
-// awburst=FIXED when coalescing keeps req_addr pinned across beats
-// (e.g. for GPU_RING_DATA pushes); awburst=INCR for single beats so
+// awburst=FIXED when coalescing keeps req_addr pinned across beats;
+// awburst=INCR for single beats so
 // non-burst-aware slaves keep their existing behavior.
 assign per_awvalid_cpu = !wr_fifo_empty & ~lsu_aw_sent;
 assign per_awaddr_cpu  = w_addr;

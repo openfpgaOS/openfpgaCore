@@ -77,7 +77,8 @@ void irq_handler(void *frame) {
     }
 
     if (code == 11) {
-        /* Machine external interrupt — UART RX, link, vsync, input. */
+        /* Machine external interrupt — UART RX, link, vsync, input,
+         * data-slot completion. */
         uint32_t source = 0;
 
         if (UART_STATUS & UART_RX_AVAIL)
@@ -96,6 +97,11 @@ void irq_handler(void *frame) {
         if (INPUT_STATUS & INPUT_STATUS_PENDING) {
             of_input_irq_service();
             source |= IRQ_SRC_INPUT;
+        }
+
+        if (DS_STATUS & DS_STATUS_IRQ_PENDING) {
+            of_file_async_irq_service();
+            source |= IRQ_SRC_DATASLOT;
         }
 
         /* Dispatch: dedicated callbacks */

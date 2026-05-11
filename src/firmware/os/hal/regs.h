@@ -174,6 +174,7 @@
 #define   DS_STATUS_ERR_SHIFT 2
 #define   DS_STATUS_READY   (1 << 5)  /* live: bridge idle, ready for new command */
 #define   DS_STATUS_WR_IDLE (1 << 6)  /* live: all bridge writes drained to memory */
+#define   DS_STATUS_IRQ_PENDING (1 << 7)  /* read: data-slot done IRQ, write 1 to clear */
 
 /* Palette (256-color indexed) */
 #define PAL_INDEX           REG32(SYSREG_BASE + 0x40)
@@ -314,10 +315,10 @@
  *   0x814–0x818  voice_group map    (32 voices × 2 bits packed in 2 words)
  *   0x820        MIX_CTRL           [0]=enable
  *   0x824        MIX_IRQ            R: pending bitmap   W: W1C bits
- *   0x828        MIX_LAST_SAMPLE    R: last pushed {L,R}
- *   0x82C        MIX_SAMPLE_COUNT   R: monotonic counter
+ *   0x828        MIX_LAST_SAMPLE    R: retired diagnostic, reads 0
+ *   0x82C        MIX_SAMPLE_COUNT   R: retired diagnostic, reads 0
  *   0x830        MIX_ACTIVE_MASK    R: 32-bit voice bitmap
- *   0x834        MIX_STATUS         R: [5:0] active count
+ *   0x834        MIX_STATUS         R: retired diagnostic, reads 0
  *   0x880–0x8FF  per-voice POS_RD:  base + 0x880 + voice*4 (read-only)
  *
  * Address decode (axi_periph_slave):
@@ -344,10 +345,10 @@
 #define MIX_CTRL             REG32(MIX_BASE + 0x820)  /* [0]=enable */
 #define MIX_IRQ_PENDING      REG32(MIX_BASE + 0x824)  /* R: voice-end bitmap */
 #define MIX_IRQ_CLEAR        REG32(MIX_BASE + 0x824)  /* W: W1C bits */
-#define MIX_LAST_SAMPLE      REG32(MIX_BASE + 0x828)  /* R: last pushed {L[15:0],R[15:0]} */
-#define MIX_SAMPLE_COUNT     REG32(MIX_BASE + 0x82C)  /* R: monotonic sample-push counter */
+#define MIX_LAST_SAMPLE      REG32(MIX_BASE + 0x828)  /* R: retired diagnostic, reads 0 */
+#define MIX_SAMPLE_COUNT     REG32(MIX_BASE + 0x82C)  /* R: retired diagnostic, reads 0 */
 #define MIX_ACTIVE_MASK      REG32(MIX_BASE + 0x830)  /* R: 32-bit active-voice bitmap */
-#define MIX_STATUS           REG32(MIX_BASE + 0x834)  /* R: [5:0] active voice count */
+#define MIX_STATUS           REG32(MIX_BASE + 0x834)  /* R: retired diagnostic, reads 0 */
 #define MIX_VOICE_POS(v)     REG32(MIX_BASE + 0x880 + ((v) << 2))  /* R: pos_int per voice */
 #define   MIX_CTRL_ENABLE       (1 << 0)
 #define   MIX_CTRL_BIT_ACTIVE   (1 << 0)
@@ -367,13 +368,15 @@
 /* Vsync IRQ pending (0x9C) — read: bit 0 = pending, write: W1C clears */
 #define VSYNC_IRQ_PENDING    REG32(SYSREG_BASE + 0x9C)
 
-/* External IRQ mask (0xFC) — bits[4:0] = {input, vsync, reserved, link, uart_rx}.
+/* External IRQ mask (0xFC) — bit 5=data-slot completion, bit 4=input,
+ * bit 3=vsync, bit 2=reserved, bit 1=link, bit 0=uart_rx.
  * Bit 2 was the HW mixer voice-end IRQ; mixer retired, bit reserved. */
 #define IRQ_MASK             REG32(SYSREG_BASE + 0xFC)
 #define   IRQ_MASK_UART_RX   (1 << 0)
 #define   IRQ_MASK_LINK      (1 << 1)
 #define   IRQ_MASK_VSYNC     (1 << 3)
 #define   IRQ_MASK_INPUT     (1 << 4)
+#define   IRQ_MASK_DATASLOT  (1 << 5)
 
 /* VRR (Variable Refresh Rate) — live V_TOTAL readback (0xDC)
  * Read:  bits[9:0] = current V_TOTAL

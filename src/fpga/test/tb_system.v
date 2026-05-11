@@ -251,11 +251,6 @@ axi_sdram_arbiter sdram_arb (
     .m1_wlast  (cpu_sdram_wlast),
     .m1_bvalid (cpu_sdram_bvalid),  .m1_bresp  (cpu_sdram_bresp),
 
-    // M2 — Audio (tied off)
-    .m2_arvalid(1'b0), .m2_arready(),
-    .m2_araddr (32'b0), .m2_arlen(8'b0),
-    .m2_rvalid (), .m2_rdata(), .m2_rresp(), .m2_rlast(),
-
     // Slave side
     .s_arvalid(arb_arvalid), .s_arready(arb_arready),
     .s_araddr (arb_araddr),  .s_arlen  (arb_arlen),

@@ -30,6 +30,19 @@ static int bridge_read_impl(uint32_t slot_id, uint32_t slot_offset,
 static int bridge_warmed;
 static int bridge_warmup_active;
 
+/* Async data-slot read state. Completion is IRQ-driven on Pocket hardware;
+ * of_file_async_poll() remains as a compatibility/fallback drain. */
+static struct {
+    volatile int      active;
+    volatile uint32_t completed_count;
+    int               token;
+    uint32_t          length;
+    void             *dest;
+    void            (*callback)(int token, int result);
+} async_state;
+
+static int async_token_counter;
+
 static void bridge_warmup_once(void) {
     if (bridge_warmed || bridge_warmup_active)
         return;
@@ -49,12 +62,22 @@ void of_file_init(void) {
     idle_hook = (void *)0;
     bridge_warmed = 0;
     bridge_warmup_active = 0;
+    async_state.active = 0;
+    async_state.completed_count = 0;
+    async_state.token = 0;
+    async_state.length = 0;
+    async_state.dest = (void *)0;
+    async_state.callback = (void *)0;
+    async_token_counter = 0;
 
 #if OF_TARGET_PLATFORM_ID == OF_PLATFORM_SIM
     /* Sim has no bridge model — the warmup DMA below would hang
      * forever waiting for ack/done from a non-existent peer. */
     return;
 #endif
+    IRQ_MASK &= ~IRQ_MASK_DATASLOT;
+    DS_STATUS = DS_STATUS_IRQ_PENDING;
+
     /* Bridge warmup: first DMA after boot resets the bridge command
      * state machine. Read 4 bytes from slot 1 into CRAM0 scratch.
      * Skipped when the bridge isn't the active backend, since the
@@ -139,8 +162,10 @@ static int file_wait_complete(void) {
 
     /* Check error bits */
     uint32_t err = (DS_STATUS & DS_STATUS_ERR_MASK) >> DS_STATUS_ERR_SHIFT;
-    if (err)
+    if (err) {
+        DS_STATUS = DS_STATUS_IRQ_PENDING;
         return -((int)err);
+    }
 
     /* Wait for bridge to return to idle (ACK cleared via CDC).
      * Without this, the next command can be silently dropped because
@@ -167,6 +192,7 @@ static int file_wait_complete(void) {
         }
     }
 
+    DS_STATUS = DS_STATUS_IRQ_PENDING;
     return 0;
 }
 
@@ -260,6 +286,8 @@ int of_file_read_raw(uint32_t slot_id, uint32_t slot_offset,
                       uint32_t bridge_addr, uint32_t length) {
     if (length > DMA_CHUNK_SIZE)
         return OF_ERR_BAD_RANGE;
+    if (async_state.active)
+        return OF_ERR_BUSY;
 
     /* Wait for bridge fully idle — READY (cmd FSM idle) AND WR_IDLE
      * (all write data drained).  Both must be true before issuing a
@@ -375,6 +403,9 @@ long of_file_size(uint32_t slot_id) {
  * Filename is written to `name_out` (max `name_max` chars).
  */
 int of_file_get_name(uint32_t slot_id, char *name_out, uint32_t name_max) {
+    if (async_state.active)
+        return OF_ERR_BUSY;
+
     /* v2 arch: response buffer lands in CRAM0 scratch (uncached per
      * PMA, so no D-cache dance is needed).  Use a dedicated GETFILE
      * offset so it can't collide with an in-flight bridge DMA that
@@ -446,6 +477,7 @@ int of_file_get_name(uint32_t slot_id, char *name_out, uint32_t name_max) {
         }
     }
 
+    DS_STATUS = DS_STATUS_IRQ_PENDING;
     uint32_t err = (DS_STATUS & DS_STATUS_ERR_MASK) >> DS_STATUS_ERR_SHIFT;
     if (err)
         return -((int)err);
@@ -471,6 +503,9 @@ int of_file_get_name(uint32_t slot_id, char *name_out, uint32_t name_max) {
 }
 
 int of_file_slot_write(uint32_t slot_id, uint32_t bridge_addr, uint32_t length) {
+    if (async_state.active)
+        return OF_ERR_BUSY;
+
     /* Wait for bridge idle before issuing command */
     {
         uint32_t wait = DMA_TIMEOUT;
@@ -491,6 +526,9 @@ int of_file_slot_write(uint32_t slot_id, uint32_t bridge_addr, uint32_t length) 
 
 int of_file_slot_write_at(uint32_t slot_id, uint32_t slot_offset,
                            uint32_t bridge_addr, uint32_t length) {
+    if (async_state.active)
+        return OF_ERR_BUSY;
+
     /* Wait for bridge idle before issuing command */
     {
         uint32_t wait = DMA_TIMEOUT;
@@ -562,15 +600,37 @@ int of_file_read_chunked(uint32_t slot_id, uint32_t slot_offset,
  * Async file read — non-blocking DMA with callback
  * ====================================================================== */
 
-static struct {
-    int      active;
-    int      token;
-    uint32_t length;
-    void    *dest;
-    void   (*callback)(int token, int result);
-} async_state;
+static int async_dest_in_cram0(void *dest, uint32_t length) {
+    uint32_t addr = (uintptr_t)dest;
+    return addr >= CRAM0_BASE &&
+           length <= CRAM_SIZE &&
+           addr <= (CRAM0_BASE + CRAM_SIZE - length);
+}
 
-static int async_token_counter;
+static void async_complete(uint32_t status) {
+    uint32_t err = (status & DS_STATUS_ERR_MASK) >> DS_STATUS_ERR_SHIFT;
+    int result = err ? -((int)err) : 0;
+
+    void *dest = async_state.dest;
+    uint32_t length = async_state.length;
+    int token = async_state.token;
+    void (*cb)(int, int) = async_state.callback;
+
+    CRAM0_MODE = CRAM0_MODE_CPU;
+    for (volatile int s = 0; s < 8; s++) {}
+
+    of_cache_inval_range(dest, length);
+
+    async_state.active = 0;
+    async_state.dest = (void *)0;
+    async_state.length = 0;
+    async_state.callback = (void *)0;
+    async_state.completed_count++;
+    IRQ_MASK &= ~IRQ_MASK_DATASLOT;
+
+    if (cb)
+        cb(token, result);
+}
 
 int of_file_read_async(uint32_t slot_id, uint32_t slot_offset,
                        void *dest, uint32_t length,
@@ -579,20 +639,26 @@ int of_file_read_async(uint32_t slot_id, uint32_t slot_offset,
         return OF_ERR_BUSY;
     if (length > DMA_CHUNK_SIZE)
         return OF_ERR_BAD_RANGE;
+    if (!async_dest_in_cram0(dest, length))
+        return OF_ERR_BAD_RANGE;
+    if (!bridge_warmup_active)
+        bridge_warmup_once();
+
+    uint32_t st = DS_STATUS;
+    if ((st & (DS_STATUS_READY | DS_STATUS_WR_IDLE))
+        != (DS_STATUS_READY | DS_STATUS_WR_IDLE))
+        return OF_ERR_BUSY;
 
     uint32_t bridge_addr = cpu_to_bridge(dest);
 
-    /* Pre-invalidate cache for the DMA target */
+    /* Pre-invalidate cache for the DMA target, then hand CRAM0 to the bridge. */
     of_cache_inval_range(dest, length);
+    CRAM0_MODE = CRAM0_MODE_BRIDGE;
+    for (volatile int s = 0; s < 8; s++) {}
 
-    /* Fire the DMA */
-    DS_SLOT_ID     = slot_id;
-    DS_SLOT_OFFSET = slot_offset;
-    DS_BRIDGE_ADDR = bridge_addr;
-    DS_LENGTH      = length;
-    DS_COMMAND     = DS_CMD_READ;
-
-    /* Record pending state */
+    /* Record pending state before firing the command.  IRQ delivery is masked
+     * while the syscall is in progress, but the bridge can still complete very
+     * quickly once the command reaches the APF host. */
     int token = async_token_counter++;
     async_state.active   = 1;
     async_state.token    = token;
@@ -600,39 +666,80 @@ int of_file_read_async(uint32_t slot_id, uint32_t slot_offset,
     async_state.dest     = dest;
     async_state.callback = callback;
 
+    DS_STATUS = DS_STATUS_IRQ_PENDING;
+    IRQ_MASK |= IRQ_MASK_DATASLOT;
+
+    /* Fire the DMA */
+    DS_SLOT_ID     = slot_id;
+    DS_SLOT_OFFSET = slot_offset;
+    DS_BRIDGE_ADDR = bridge_addr;
+    DS_LENGTH      = length;
+    fence();
+    DS_COMMAND     = DS_CMD_READ;
+
+    fence();
+    for (int i = 0; i < 100; i++) {
+        st = DS_STATUS;
+        if (st & DS_STATUS_ACK) goto accepted;
+        if (!(st & DS_STATUS_READY)) goto accepted;
+    }
+
+    DS_COMMAND = DS_CMD_READ;
+    fence();
+    for (int i = 0; i < 100; i++) {
+        st = DS_STATUS;
+        if (st & DS_STATUS_ACK) goto accepted;
+        if (!(st & DS_STATUS_READY)) goto accepted;
+    }
+
+    async_state.active = 0;
+    async_state.callback = (void *)0;
+    IRQ_MASK &= ~IRQ_MASK_DATASLOT;
+    return OF_ERR_TIMEOUT;
+
+accepted:
     return token;
 }
 
-int of_file_async_poll(void) {
-    if (!async_state.active)
-        return 0;
-
+void of_file_async_irq_service(void) {
     uint32_t st = DS_STATUS;
+    if (!(st & DS_STATUS_IRQ_PENDING))
+        return;
 
-    /* Still waiting for ACK or DONE */
-    if (!(st & DS_STATUS_DONE))
-        return 0;
+    DS_STATUS = DS_STATUS_IRQ_PENDING;
 
-    /* Check error */
-    uint32_t err = (st & DS_STATUS_ERR_MASK) >> DS_STATUS_ERR_SHIFT;
-    int result = err ? -((int)err) : 0;
+    if (!async_state.active) {
+        IRQ_MASK &= ~IRQ_MASK_DATASLOT;
+        return;
+    }
 
-    /* Wait for bridge idle + writes drained (fast, non-blocking spin) */
-    while (!(DS_STATUS & DS_STATUS_READY)) {}
-    while (!(DS_STATUS & DS_STATUS_WR_IDLE)) {}
+    async_complete(st);
+}
 
-    /* Post-invalidate cache */
-    of_cache_inval_range(async_state.dest, async_state.length);
+int of_file_async_poll(void) {
+    if (async_state.completed_count) {
+        async_state.completed_count--;
+        return 1;
+    }
 
-    /* Clear state before callback (callback may start another read) */
-    int token = async_state.token;
-    void (*cb)(int, int) = async_state.callback;
-    async_state.active = 0;
+    if (async_state.active) {
+        uint32_t st = DS_STATUS;
+        if (st & DS_STATUS_IRQ_PENDING) {
+            of_file_async_irq_service();
+        } else if ((st & DS_STATUS_DONE) &&
+                   ((st & (DS_STATUS_READY | DS_STATUS_WR_IDLE))
+                    == (DS_STATUS_READY | DS_STATUS_WR_IDLE))) {
+            DS_STATUS = DS_STATUS_IRQ_PENDING;
+            async_complete(st);
+        }
 
-    if (cb)
-        cb(token, result);
+        if (async_state.completed_count) {
+            async_state.completed_count--;
+            return 1;
+        }
+    }
 
-    return 1;
+    return 0;
 }
 
 int of_file_async_busy(void) {

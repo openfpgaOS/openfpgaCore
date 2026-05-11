@@ -1,15 +1,12 @@
 //
-// AXI4 SDRAM Arbiter — 4 Masters, Fixed Priority (v2).
+// AXI4 SDRAM Arbiter — 3 Masters, Fixed Priority.
 //
-// Routes 4 AXI4 masters to 1 AXI4 slave (axi_sdram_slave):
+// Routes 3 AXI4 masters to 1 AXI4 slave (axi_sdram_slave):
 //   M0 = GPU      (span reads + framebuffer writes, merged upstream)
 //   M1 = CPU      (i + d + p merged through cpu_target_port)
-//   M2 = retired  (was AudioDMA; tied off at core_top — HW mixer now
-//                  drives audio directly).  Slot kept for arbiter ABI
-//                  stability; a future pass can drop it to 3 masters.
 //   M3 = AudioMix (audio_mixer per-voice sample fetch, read-only)
 //
-// Fixed priority: GPU > CPU > (M2 unused) > AudioMix.
+// Fixed priority: GPU > CPU > AudioMix.
 //
 // M0 writes are posted into an ordered local queue before they reach the
 // shared SDRAM slave.  B responses still wait for the corresponding queued
@@ -28,12 +25,6 @@
 // time, holds until read completes (R.rlast) or write completes (B.bvalid).
 // M0 AW/W handshakes are decoupled from that grant by the posted queue.
 //
-// v2 changes vs the 5-master arbiter:
-//   - Dropped M0/M1/M3 (legacy GPU-read + GPU-write + bridge) — GPU now
-//     exposes a single merged AXI master, bridge no longer touches SDRAM.
-//   - Renumbered: old M2 (CPU) → M1, old M4 (audio) → M2.
-//
-
 `default_nettype none
 
 module axi_sdram_arbiter #(
@@ -87,16 +78,6 @@ module axi_sdram_arbiter #(
     output wire        m1_bvalid,
     output wire [1:0]  m1_bresp,
 
-    // Master 2: Audio DMA (read-only, third priority)
-    input  wire        m2_arvalid,
-    output wire        m2_arready,
-    input  wire [31:0] m2_araddr,
-    input  wire [7:0]  m2_arlen,
-    output wire        m2_rvalid,
-    output wire [31:0] m2_rdata,
-    output wire [1:0]  m2_rresp,
-    output wire        m2_rlast,
-
     // Master 3: Audio Mixer (read-only, lowest priority)
     input  wire        m3_arvalid,
     output wire        m3_arready,
@@ -132,7 +113,7 @@ module axi_sdram_arbiter #(
     // Diagnostic observability for simulation harnesses.
     //   dbg_arb_state: 0=IDLE, 1=RD, 2=WR
     //   dbg_cpu_pending: m1_arvalid|m1_awvalid (CPU has a request out)
-    //   dbg_grant: 0=GPU(M0), 1=CPU(M1), 2=AudioDMA(M2), 3=AudioMix(M3)
+    //   dbg_grant: 0=GPU(M0), 1=CPU(M1), 3=AudioMix(M3)
     output wire [1:0]  dbg_arb_state,
     output wire        dbg_cpu_pending,
     output wire [1:0]  dbg_grant
@@ -146,7 +127,7 @@ localparam ST_RD   = 2'd1;  // Read transaction active (AR→R)
 localparam ST_WR   = 2'd2;  // Write transaction active (AW→W→B)
 
 reg [1:0] arb_state;
-reg [1:0] grant;  // 0=GPU, 1=CPU, 2=AudioDMA, 3=AudioMix
+reg [1:0] grant;  // 0=GPU, 1=CPU, 3=AudioMix
 reg       active_wr_gpuq;
 
 // Fairness: deficit counter prevents GPU (and technically Audio, but
@@ -192,7 +173,6 @@ reg [3:0]  gpu_reads_since_write;
 
 wire grant_m0 = (grant == 2'd0);
 wire grant_m1 = (grant == 2'd1);
-wire grant_m2 = (grant == 2'd2);
 wire grant_m3 = (grant == 2'd3);
 wire active_rd = (arb_state == ST_RD);
 wire active_wr = (arb_state == ST_WR);
@@ -322,11 +302,6 @@ always @(posedge clk or posedge reset) begin
                 arb_state <= ST_WR;
                 gpu_deficit <= 4'd0;
                 if (audio_pending) audio_deficit <= audio_deficit + 4'd1;
-            end else if (m2_arvalid) begin
-                grant <= 2'd2;
-                active_wr_gpuq <= 1'b0;
-                arb_state <= ST_RD;
-                if (audio_pending) audio_deficit <= audio_deficit + 4'd1;
             end else if (m3_arvalid) begin
                 grant <= 2'd3;
                 active_wr_gpuq <= 1'b0;
@@ -362,17 +337,14 @@ end
 // Master -> Slave channel mux (combinational)
 // ============================================
 
-// AR channel -- M2 and M3 are read-only; routed here.
+// AR channel.
 assign s_arvalid = (active_rd && !rd_completing) ? (grant_m0 ? m0_arvalid :
                                                      grant_m1 ? m1_arvalid :
-                                                     grant_m2 ? m2_arvalid :
                                                                 m3_arvalid) : 1'b0;
 assign s_araddr  = grant_m0 ? m0_araddr  :
-                   grant_m1 ? m1_araddr  :
-                   grant_m2 ? m2_araddr  : m3_araddr;
+                   grant_m1 ? m1_araddr  : m3_araddr;
 assign s_arlen   = grant_m0 ? m0_arlen   :
-                   grant_m1 ? m1_arlen   :
-                   grant_m2 ? m2_arlen   : m3_arlen;
+                   grant_m1 ? m1_arlen   : m3_arlen;
 
 // AW/W channel.  Posted M0 writes drain as single-word slave writes.
 assign s_awvalid = (active_wr && !wr_completing) ? (active_wr_gpuq ? 1'b1 :
@@ -392,27 +364,22 @@ assign s_wlast   = active_wr_gpuq ? 1'b1 : m1_wlast;
 
 assign m0_arready = (active_rd && grant_m0) ? s_arready : 1'b0;
 assign m1_arready = (active_rd && grant_m1) ? s_arready : 1'b0;
-assign m2_arready = (active_rd && grant_m2) ? s_arready : 1'b0;
 assign m3_arready = (active_rd && grant_m3) ? s_arready : 1'b0;
 
 assign m0_rvalid = (active_rd && grant_m0) ? s_rvalid : 1'b0;
 assign m1_rvalid = (active_rd && grant_m1) ? s_rvalid : 1'b0;
-assign m2_rvalid = (active_rd && grant_m2) ? s_rvalid : 1'b0;
 assign m3_rvalid = (active_rd && grant_m3) ? s_rvalid : 1'b0;
 
 assign s_rready = active_rd ? (grant_m1 ? m1_rready : 1'b1) : 1'b1;
 
 assign m0_rdata  = s_rdata;
 assign m1_rdata  = s_rdata;
-assign m2_rdata  = s_rdata;
 assign m3_rdata  = s_rdata;
 assign m0_rresp  = s_rresp;
 assign m1_rresp  = s_rresp;
-assign m2_rresp  = s_rresp;
 assign m3_rresp  = s_rresp;
 assign m0_rlast  = s_rlast;
 assign m1_rlast  = s_rlast;
-assign m2_rlast  = s_rlast;
 assign m3_rlast  = s_rlast;
 
 assign m0_awready = !m0w_active && m0_aw_has_space;

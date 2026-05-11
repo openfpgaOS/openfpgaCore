@@ -12,7 +12,7 @@
 //   - 1-deep read tracker.
 //   - 4-deep posted-write FIFO with M2 same-address coalescer that
 //     fires AW with awburst=FIXED, awlen=N-1 for runs of identical
-//     destinations (the GPU_RING_DATA push pattern).
+//     MMIO destinations.
 //   - Writes posted: lsu_cmd_ready falls only when the FIFO is full
 //     OR a read is in flight; rsp_valid pulses one cycle after each
 //     write enters the FIFO.

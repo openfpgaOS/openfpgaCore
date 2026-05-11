@@ -7,6 +7,7 @@
  *
  *   - fifo_level rises as samples are pushed
  *   - fifo_full asserts when the FIFO is full
+ *   - stereo sample packing reaches the I2S staging registers unchanged
  *   - audio_mclk passthrough
  *   - audio_lrck toggles at half the SCLK rate, 48 kHz
  *   - audio_dac serialises 16-bit MSB-first stereo words

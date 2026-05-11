@@ -47,7 +47,6 @@ static void clear_all() {
     tb->m1_awaddr = 0;  tb->m1_awlen = 0;
     tb->m1_wdata = 0;   tb->m1_wstrb = 0xF; tb->m1_wlast = 0;
 
-    tb->m2_arvalid = 0; tb->m2_araddr = 0; tb->m2_arlen = 0;
     tb->m3_arvalid = 0; tb->m3_araddr = 0; tb->m3_arlen = 0;
 }
 

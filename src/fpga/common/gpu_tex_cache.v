@@ -74,26 +74,8 @@ module gpu_tex_cache (
     output reg  [7:0]   axi_arlen,
     input wire          axi_rvalid,
     input wire  [31:0]  axi_rdata,
-    input wire          axi_rlast,
-
-    // Diagnostic state exposed through GPU_STATUS for hang diagnosis.
-    output wire [2:0]  dbg_state,
-    output wire        dbg_pipe_valid,
-
-    // Hit/miss counters used to diagnose bandwidth collapse.
-    // Kept compact for the Pocket fit; zero-extended to 32 bits at MMIO.
-    output wire [31:0] dbg_req_count,    // every accepted req on either port
-    output wire [31:0] dbg_miss_count    // every miss handled in S_PIPE
+    input wire          axi_rlast
 );
-
-assign dbg_state      = state;
-assign dbg_pipe_valid = pipe_valid_a;
-
-localparam DBG_COUNT_BITS = 20;
-reg [DBG_COUNT_BITS-1:0] dbg_req_count_r;
-reg [DBG_COUNT_BITS-1:0] dbg_miss_count_r;
-assign dbg_req_count = {{(32-DBG_COUNT_BITS){1'b0}}, dbg_req_count_r};
-assign dbg_miss_count = {{(32-DBG_COUNT_BITS){1'b0}}, dbg_miss_count_r};
 
 //   addr[3:0]   = byte offset within 16-byte line
 //   addr[13:4]  = set index (10 bits, 1024 sets)
@@ -149,6 +131,7 @@ reg [SET_BITS-1:0] init_counter;
 // flush is a 1-cycle pulse that can arrive any cycle; we latch and apply
 // it at the next safe transition.
 reg flush_pending;
+wire flush_block = flush || flush_pending;
 
 // ---- Stage 2 registers — one set per port ----
 reg         pipe_valid_a;
@@ -199,16 +182,16 @@ wire pipe_miss_b = pipe_valid_b && !(rd_valid_b && (rd_tag_b == pipe_tag_b));
 reg lat_port;
 
 // ---- Backpressure ----
-// Per-port req_ready: ready in S_PIPE when no miss and no flush;
+// Per-port req_ready: ready in S_PIPE when no miss and no flush is pending;
 // ALSO ready in S_FILL_OUT when serving this port — that lets the
 // consumer's first post-fill request roll into S_PIPE without an
 // extra latch cycle (the M10K read fires on accept and rd_*_x
 // updates correctly even though the FSM transitions S_FILL_OUT →
 // S_PIPE simultaneously).
-assign req_ready   = ((state == S_PIPE) && !pipe_miss_a && !flush)
-                  || ((state == S_FILL_OUT) && (lat_port == 1'b0) && !flush);
-assign req_ready_b = ((state == S_PIPE) && !pipe_miss_b && !flush)
-                  || ((state == S_FILL_OUT) && (lat_port == 1'b1) && !flush);
+assign req_ready   = ((state == S_PIPE) && !pipe_miss_a && !flush_block)
+                  || ((state == S_FILL_OUT) && (lat_port == 1'b0) && !flush_block);
+assign req_ready_b = ((state == S_PIPE) && !pipe_miss_b && !flush_block)
+                  || ((state == S_FILL_OUT) && (lat_port == 1'b1) && !flush_block);
 
 // ---- Combinational responses (hot path) ----
 // Pipe-hit OR S_FILL_OUT held response.  fill_resp_valid_x is set at
@@ -251,10 +234,10 @@ wire [1:0]          addr_word_b = req_addr_b[3:2];
 // RAM megafunctions").  This version reads from M10K in both cases;
 // the address mux is fine in M10K's SDP interface.
 wire prime_a = (state == S_FILL_OUT) && (lat_port == 1'b0)
-            && !flush && !flush_pending
+            && !flush_block
             && !(req_valid && req_ready);
 wire prime_b = (state == S_FILL_OUT) && (lat_port == 1'b1)
-            && !flush && !flush_pending
+            && !flush_block
             && !(req_valid_b && req_ready_b);
 
 wire [SET_BITS-1:0] read_set_a  = prime_a ? lat_set  : addr_set_a;
@@ -345,22 +328,11 @@ always @(posedge clk) begin
         lat_wide    <= 0;
         lat_port    <= 0;
         flush_pending <= 1'b0;
-        dbg_req_count_r  <= {DBG_COUNT_BITS{1'b0}};
-        dbg_miss_count_r <= {DBG_COUNT_BITS{1'b0}};
     end else begin
         // Latch any flush pulse regardless of state.  Cleared when we
         // enter S_INIT below.
         if (flush)
             flush_pending <= 1'b1;
-
-        // Hit/miss bandwidth instrumentation.  The compact counters have
-        // enough headroom for the short Duke perf windows and avoid the
-        // wide saturating add/compare logic in the tight Pocket fit.
-        case ({req_valid && req_ready, req_valid_b && req_ready_b})
-        2'b01, 2'b10: dbg_req_count_r <= dbg_req_count_r + {{(DBG_COUNT_BITS-1){1'b0}}, 1'b1};
-        2'b11:        dbg_req_count_r <= dbg_req_count_r + {{(DBG_COUNT_BITS-2){1'b0}}, 2'd2};
-        default: ;
-        endcase
 
         case (state)
         // ----------------------------------------------------------------
@@ -406,8 +378,8 @@ always @(posedge clk) begin
             // updates fine — the bug only manifests in synthesis
             // against real DRAM latency.
             //
-            // Splitting accepts out is safe: req_ready_x already
-            // gates on (state==S_PIPE && !pipe_miss_x && !flush), so
+            // Splitting accepts out is safe: req_ready_x already gates
+            // on (state==S_PIPE && !pipe_miss_x && !flush_block), so
             // the accepts fire only when this port is genuinely
             // hitting and the FSM isn't transitioning to S_INIT for
             // flush.  The miss branch's pipe_valid_x<=0 cannot race
@@ -423,7 +395,6 @@ always @(posedge clk) begin
                 lat_wide    <= pipe_wide_a;
                 lat_port    <= 1'b0;       // serving A
                 pipe_valid_a <= 0;          // explicit clear on miss
-                dbg_miss_count_r <= dbg_miss_count_r + {{(DBG_COUNT_BITS-1){1'b0}}, 1'b1};
             end else if (pipe_miss_b) begin
                 axi_arvalid <= 1;
                 axi_araddr  <= {6'b0, pipe_addr_b[25:4], 4'b0};
@@ -434,8 +405,7 @@ always @(posedge clk) begin
                 lat_wide    <= pipe_wide_b;
                 lat_port    <= 1'b1;       // serving B
                 pipe_valid_b <= 0;          // explicit clear on miss
-                dbg_miss_count_r <= dbg_miss_count_r + {{(DBG_COUNT_BITS-1){1'b0}}, 1'b1};
-            end else if (flush || flush_pending) begin
+            end else if (flush_block) begin
                 // Safe to flush now: no pending miss on either port
                 // means either pipe_valid_x=0 (no in-flight request)
                 // or pipe_hit_x=1 (response is being served
@@ -451,7 +421,7 @@ always @(posedge clk) begin
             // Per-port new-request accepts — independent of the
             // miss/flush priority block above.  req_ready_x already
             // self-gates on the right combination of state /
-            // pipe_miss_x / flush, so this cannot accept while the
+            // pipe_miss_x / flush_block, so this cannot accept while the
             // FSM is mid-fill or about to flush.
             if (req_valid && req_ready) begin
                 pipe_valid_a <= 1;
@@ -496,9 +466,10 @@ always @(posedge clk) begin
             //
             // If the consumer DID issue a new req this cycle (the
             // common case during steady-state pipelined operation):
-            // req_ready_x is high (S_FILL_OUT && lat_port == X), so the
-            // M10K-read latch fires and updates rd_*_x to the new
-            // addr's data.  pipe_*_x captures the new req's address.
+            // req_ready_x is high when flush_block is clear
+            // (S_FILL_OUT && lat_port == X && !flush_block), so the
+            // M10K-read latch fires and updates rd_*_x to the new addr's
+            // data.  pipe_*_x captures the new req's address.
             // The held fill_resp_valid_x for the prior addr was already
             // observed at PRE-edge of this cycle, so the consumer's
             // shift captured it; the latch's new rd_*_x then becomes
@@ -508,7 +479,7 @@ always @(posedge clk) begin
             // rd_*_x to the just-filled line's word containing the
             // requested byte.  Next cycle's pipe_hit_x carries the
             // response forward in S_PIPE.
-            if (flush || flush_pending) begin
+            if (flush_block) begin
                 state <= S_INIT;
                 init_counter <= 0;
                 fill_resp_valid_a <= 0;

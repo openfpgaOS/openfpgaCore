@@ -14,6 +14,7 @@
 #define IRQ_SRC_LINK_RX     (1 << 1)
 #define IRQ_SRC_VSYNC       (1 << 3)
 #define IRQ_SRC_INPUT       (1 << 4)
+#define IRQ_SRC_DATASLOT    (1 << 5)
 
 void of_irq_init(void);
 void of_irq_register_external(void (*cb)(uint32_t source));

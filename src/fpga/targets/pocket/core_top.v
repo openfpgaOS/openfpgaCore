@@ -1913,12 +1913,9 @@ assign video_hs = vidout_hs;
         .mix_group_vol_3        (mixer_group_vol_3_mmio),
         .mix_voice_group_packed (mixer_voice_group_packed_mmio),
         .mix_voice_sel_rd       (mixer_voice_sel_rd_mmio),
-        .mix_active_count       (mixer_active_count_r),
         .mix_active_mask        (mixer_active_mask_r),
         .mix_pos_readback       (mixer_pos_readback_r),
         .mix_voice_end_pending  (mixer_voice_end_pending_r),
-        .mix_last_sample        (mixer_last_sample_r),
-        .mix_sample_count       (mixer_sample_count_r),
         // CRAM0 ownership mode (0 = bridge, 1 = CPU)
         .cram0_mode            (cram0_mode_cpu),
         // Link MMIO interface
@@ -2043,14 +2040,6 @@ assign video_hs = vidout_hs;
         .m1_wdata(cpu_m_sdram_wdata),     .m1_wstrb(cpu_m_sdram_wstrb),
         .m1_wlast(cpu_m_sdram_wlast),
         .m1_bvalid(cpu_m_sdram_bvalid),   .m1_bresp(cpu_m_sdram_bresp),
-        // M2: Retired — was the audio_dma ring read port in v1.  In v2
-        // the HW mixer (M3 below) is the sole audio producer; M2 tied
-        // off so the arbiter sees no requests on this slot.  A future
-        // pass can reduce the arbiter to 3 read masters.
-        .m2_arvalid(1'b0),            .m2_arready(),
-        .m2_araddr(32'd0),            .m2_arlen(8'd0),
-        .m2_rvalid(),                 .m2_rdata(),
-        .m2_rresp(),                  .m2_rlast(),
         // M3: Audio Mixer (read-only, lowest priority) — per-voice
         // sample fetches from the SDRAM sample pool.
         .m3_arvalid(mixer_arvalid),   .m3_arready(mixer_arready),
@@ -2367,13 +2356,10 @@ wire        mixer_rlast;
 wire        mixer_rready;
 wire        mixer_sample_wr;
 wire [31:0] mixer_sample_data;
-wire [5:0]  mixer_active_count;
 wire [31:0] mixer_active_mask;
 wire [21:0] mixer_pos_readback;
 wire [31:0] mixer_voice_end_pending;
 wire        mixer_voice_end_irq;
-wire [31:0] mixer_last_sample;
-wire [31:0] mixer_sample_count;
 
 /* 1-cycle register stage between audio_mixer status outputs and
  * axi_periph_slave read mux.  The sysreg read mux in the periph slave
@@ -2383,19 +2369,13 @@ wire [31:0] mixer_sample_count;
  * which made the FPU critical path in VexiiRiscv worse because the
  * CPU had to be squeezed in too.  Firmware MMIO reads already incur
  * multi-cycle AXI handshake latency, so +1 cycle here is invisible. */
-reg [5:0]  mixer_active_count_r;
 reg [31:0] mixer_active_mask_r;
 reg [21:0] mixer_pos_readback_r;
 reg [31:0] mixer_voice_end_pending_r;
-reg [31:0] mixer_last_sample_r;
-reg [31:0] mixer_sample_count_r;
 always @(posedge clk_cpu) begin
-    mixer_active_count_r      <= mixer_active_count;
     mixer_active_mask_r       <= mixer_active_mask;
     mixer_pos_readback_r      <= mixer_pos_readback;
     mixer_voice_end_pending_r <= mixer_voice_end_pending;
-    mixer_last_sample_r       <= mixer_last_sample;
-    mixer_sample_count_r      <= mixer_sample_count;
 end
 
 // MMIO-driven voice programming signals (from axi_periph_slave).
@@ -2442,14 +2422,14 @@ audio_mixer audio_mixer_inst (
     .sample_wr        (mixer_sample_wr),
     .sample_data      (mixer_sample_data),
     .fifo_level       (audio_fifo_level),
-    .active_count     (mixer_active_count),
+    .active_count     (),
     .pos_readback     (mixer_pos_readback),
     .irq_clear_wr     (mixer_irq_clear_wr_mmio),
     .irq_clear        (mixer_irq_clear_mmio),
     .voice_end_pending(mixer_voice_end_pending),
     .voice_end_irq    (mixer_voice_end_irq),
-    .last_sample_data (mixer_last_sample),
-    .sample_count     (mixer_sample_count),
+    .last_sample_data (),
+    .sample_count     (),
     .voice_active_mask(mixer_active_mask)
 );
 

@@ -32,9 +32,8 @@ module axi_periph_slave (
     output reg         s_axi_awready,
     input  wire [31:0] s_axi_awaddr,
     input  wire [7:0]  s_axi_awlen,
-    // awburst[1:0]: 00 = FIXED (req_addr stays put for the burst —
-    // used by the LSU shim's M2 coalescer to pack consecutive writes
-    // to GPU_RING_DATA into one AW + N W beats), 01 = INCR (default).
+    // awburst[1:0]: 00 = FIXED (req_addr stays put for repeated writes
+    // to one MMIO register, such as LUT uploads), 01 = INCR (default).
     input  wire [1:0]  s_axi_awburst,
 
     input  wire        s_axi_wvalid,
@@ -112,7 +111,7 @@ module axi_periph_slave (
     // Hardware audio mixer control (see audio_mixer.v v3, MMIO at 0x48000000).
     // Flat addressing — MMIO address encodes voice and field directly:
     //   addr[10:6] = voice index, addr[5:2] = vtbl field for per-voice writes
-    //   addr[11]=1, [7]=0      = control region (group/master/ctrl/irq/diagnostics)
+    //   addr[11]=1, [7]=0      = control region (group/master/ctrl/irq)
     //   addr[11]=1, [7]=1      = per-voice POS_INT readback
     output reg         mix_enable,
     output reg         mix_voice_wr,
@@ -128,12 +127,9 @@ module axi_periph_slave (
     output reg  [7:0]  mix_group_vol_3,
     output reg [63:0]  mix_voice_group_packed,  // 32 voices × 2 bits LSB-first
     output wire [4:0]  mix_voice_sel_rd,        // combinational from read addr (POS readback)
-    input  wire [5:0]  mix_active_count,
     input  wire [31:0] mix_active_mask,     // 32-bit active voice bitmap
     input  wire [21:0] mix_pos_readback,
     input  wire [31:0] mix_voice_end_pending,
-    input  wire [31:0] mix_last_sample,
-    input  wire [31:0] mix_sample_count,
 
     // Link MMIO interface
     output reg         link_reg_wr,
@@ -389,16 +385,19 @@ reg        timer_irq_pending;
 assign timer_irq = timer_irq_pending & timer_enable;
 assign uart_rx_irq = !uart_rx_empty;  // IRQ when UART RX FIFO has data
 
-// External IRQ mask — bits[4:0] = {input, vsync, reserved, link, uart_rx}
+// External IRQ mask — bit 5=data-slot completion, bit 4=input,
+// bit 3=vsync, bit 2=reserved, bit 1=link, bit 0=uart_rx.
 // Bit 2 was the hardware-mixer voice-end IRQ; mixer retired, bit kept
 // reserved so firmware IRQ_MASK_* bit positions stay stable.
-reg [4:0] irq_mask;
+reg [5:0] irq_mask;
 reg vsync_irq_pending;
+reg dataslot_irq_pending;
 wire input_irq_pending;
 assign ext_irq = (uart_rx_irq & irq_mask[0]) |
                  (link_irq & irq_mask[1]) |
                  (vsync_irq_pending & irq_mask[3]) |
-                 (input_irq_pending & irq_mask[4]);
+                 (input_irq_pending & irq_mask[4]) |
+                 (dataslot_irq_pending & irq_mask[5]);
 
 // Triple-buffered framebuffer
 // 25-bit SDRAM half-word addresses (16-bit bus, byte addr = word addr × 2)
@@ -623,9 +622,9 @@ wire [63:0] input_fifo_din = {
     8'h00,
     input_seq
 };
-wire input_fifo_push = input_event_valid && !input_fifo_full;
 wire input_fifo_pop  = (state == S_PERIPH_RD) && can_push_beat && reg_sysreg &&
                        (req_addr[8:2] == 7'b1_010101) && !input_fifo_empty; // INPUT_FIFO_DATA1 (0x154)
+wire input_fifo_push = input_event_valid && !input_fifo_full;
 reg  input_fifo_clear;
 
 sync_fifo #(
@@ -707,30 +706,29 @@ always @(posedge clk) begin
                 input_overflow <= 1'b1;
             end else begin
                 input_seq <= input_seq + 32'd1;
+                case (input_event_slot)
+                    2'd0: begin
+                        input_prev_key0 <= cont1_key_s;
+                        input_prev_joy0 <= cont1_joy_s;
+                        input_prev_trig0 <= cont1_trig_s;
+                    end
+                    2'd1: begin
+                        input_prev_key1 <= cont2_key_s;
+                        input_prev_joy1 <= cont2_joy_s;
+                        input_prev_trig1 <= cont2_trig_s;
+                    end
+                    2'd2: begin
+                        input_prev_key2 <= cont3_key_s;
+                        input_prev_joy2 <= cont3_joy_s;
+                        input_prev_trig2 <= cont3_trig_s;
+                    end
+                    default: begin
+                        input_prev_key3 <= cont4_key_s;
+                        input_prev_joy3 <= cont4_joy_s;
+                        input_prev_trig3 <= cont4_trig_s;
+                    end
+                endcase
             end
-
-            case (input_event_slot)
-                2'd0: begin
-                    input_prev_key0 <= cont1_key_s;
-                    input_prev_joy0 <= cont1_joy_s;
-                    input_prev_trig0 <= cont1_trig_s;
-                end
-                2'd1: begin
-                    input_prev_key1 <= cont2_key_s;
-                    input_prev_joy1 <= cont2_joy_s;
-                    input_prev_trig1 <= cont2_trig_s;
-                end
-                2'd2: begin
-                    input_prev_key2 <= cont3_key_s;
-                    input_prev_joy2 <= cont3_joy_s;
-                    input_prev_trig2 <= cont3_trig_s;
-                end
-                default: begin
-                    input_prev_key3 <= cont4_key_s;
-                    input_prev_joy3 <= cont4_joy_s;
-                    input_prev_trig3 <= cont4_trig_s;
-                end
-            endcase
         end
 
         if (!input_irq_mask[0]) begin
@@ -818,8 +816,9 @@ always @(posedge clk) begin
         timer_counter <= 0;
         timer_enable <= 0;
         timer_irq_pending <= 0;
-        irq_mask <= 5'b0;
+        irq_mask <= 6'b0;
         vsync_irq_pending <= 0;
+        dataslot_irq_pending <= 0;
         save_dt_slot <= 0;
         save_dt_size <= 0;
         save_dt_commit <= 0;
@@ -886,6 +885,7 @@ always @(posedge clk) begin
                 ds_done_latched <= 1;
                 ds_err_latched <= target_err_s;
                 ds_cmd_active <= 0;
+                dataslot_irq_pending <= 1'b1;
                 /* Deassert the command-type trigger once the bridge
                  * says DONE, so the next DS_COMMAND write generates a
                  * fresh 0→1 edge for core_bridge_cmd.v's edge detector.
@@ -939,7 +939,12 @@ always @(posedge clk) begin
                         ds_ack_seen_low <= 0;
                         ds_done_seen_low <= 0;
                         ds_err_latched <= 0;
+                        dataslot_irq_pending <= 1'b0;
                     end
+                end
+                7'b0_001111: begin  // DS_STATUS (0x3C) bit 7 W1C clears data-slot IRQ pending
+                    if (req_wdata[7])
+                        dataslot_irq_pending <= 1'b0;
                 end
                 7'b0_010000: begin
                     pal_index_reg <= req_wdata[7:0];
@@ -1011,7 +1016,7 @@ always @(posedge clk) begin
 
 
                 7'b0_100111: vsync_irq_pending <= 0;                    // VSYNC_IRQ_CLEAR (0x9C) W1C
-                7'b0_111111: irq_mask <= req_wdata[4:0];             // IRQ_MASK (0xFC)
+                7'b0_111111: irq_mask <= req_wdata[5:0];             // IRQ_MASK (0xFC)
 
                 7'b0_110111: begin end  // VRR_V_TOTAL (0xDC) — read-only live value
                 7'b0_111000: begin end  // VRR_SWAP_HOLD (0xE0) — read-only live value
@@ -1078,7 +1083,7 @@ always @(*) begin
         7'b0_001100: sysreg_rdata = ds_param_addr_reg;
         7'b0_001101: sysreg_rdata = ds_resp_addr_reg;
         7'b0_001110: sysreg_rdata = 32'h0;
-        7'b0_001111: sysreg_rdata = {25'b0, bridge_wr_idle, ~target_ack_s, ds_err_latched, ds_done_latched, ds_ack_latched};
+        7'b0_001111: sysreg_rdata = {24'b0, dataslot_irq_pending, bridge_wr_idle, ~target_ack_s, ds_err_latched, ds_done_latched, ds_ack_latched};
         7'b0_010000: sysreg_rdata = {pal_busy, 23'b0, pal_index_reg};
         // 0x44 (PAL_DATA write) doesn't have a meaningful read-back —
         // case row dropped to save the comparator LUT.  Reads return 0
@@ -1104,7 +1109,7 @@ always @(*) begin
         7'b0_101101: sysreg_rdata = timer_period;
         7'b0_101110: sysreg_rdata = {30'b0, timer_irq_pending, timer_enable};
         7'b0_101111: sysreg_rdata = timer_counter;
-        7'b0_111111: sysreg_rdata = {27'b0, irq_mask};               // IRQ_MASK (0xFC)
+        7'b0_111111: sysreg_rdata = {26'b0, irq_mask};               // IRQ_MASK (0xFC)
         // Input hub (0x100-0x158): raw APF slots + compact event FIFO.
         7'b1_000000: sysreg_rdata = {16'b0, input_fifo_count, 4'b0,
                                      input_overflow, input_fifo_full,
@@ -1265,7 +1270,7 @@ wire [31:0] cram0_mode_rdata = (req_addr[3:2] == 2'd0) ? {31'b0, cram0_mode} :
                                32'h0;
 
 /* Mixer (0x4B) read decode.  The read mux fans in
- *   - control regs (group/master/voice_group/ctrl/irq + read-only diagnostics)
+ *   - control regs (group/master/voice_group/ctrl/irq)
  *   - per-voice POS readback
  * The per-voice POS path needs voice_sel_rd driven combinationally to
  * audio_mixer.v before this read mux fires, so the pos_latch[voice_sel_rd]
@@ -1287,10 +1292,7 @@ wire [31:0] mixer_rdata =
     (req_addr[6:2] == 5'h06) ? mix_voice_group_packed[63:32]                 :  // 0x818
     (req_addr[6:2] == 5'h08) ? {31'b0, mix_enable}                            :  // 0x820
     (req_addr[6:2] == 5'h09) ? mix_voice_end_pending                          :  // 0x824
-    (req_addr[6:2] == 5'h0A) ? mix_last_sample                                :  // 0x828
-    (req_addr[6:2] == 5'h0B) ? mix_sample_count                               :  // 0x82C
     (req_addr[6:2] == 5'h0C) ? mix_active_mask                                :  // 0x830
-    (req_addr[6:2] == 5'h0D) ? {26'b0, mix_active_count}                      :  // 0x834
     32'h0;
 
 reg [31:0] periph_rd_data_r;
@@ -1316,9 +1318,8 @@ reg [3:0]  req_wstrb;
 reg [7:0]  burst_len;
 reg [7:0]  burst_count;
 // awburst latched at AW handshake.  00 = FIXED → req_addr is held for
-// every beat of the burst (target a single MMIO register, e.g.
-// GPU_RING_DATA).  01 = INCR → req_addr += 4 per beat (the existing
-// behavior for I-cache refills, BRAM bursts, etc).
+// every beat of the burst (target one MMIO register repeatedly).
+// 01 = INCR → req_addr += 4 per beat.
 reg [1:0]  awburst_latched;
 wire       burst_is_fixed = (awburst_latched == 2'b00);
 

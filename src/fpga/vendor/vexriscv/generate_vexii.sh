@@ -90,6 +90,18 @@ if [ ! -f "$OUTPUT" ]; then
     echo "ERROR: VexiiRiscv.v not found after generation"
     exit 1
 fi
+
+# The generated execute_freeze_valid cone fans into the whole CPU
+# ready/valid network.  Quartus otherwise tends to keep it as one huge
+# high-fanout control net, which leaves the worst path from execute/FPU
+# control back to the I-cache read enable route-limited.  Add a local
+# synthesis hint after generation so the fitter can insert replicas.
+perl -0pi -e 's/  wire                execute_freeze_valid;/  (* maxfan = 256 *) wire                execute_freeze_valid;/' "$OUTPUT"
+if ! grep -q "maxfan = 256.*execute_freeze_valid" "$OUTPUT"; then
+    echo "ERROR: failed to annotate execute_freeze_valid maxfan hint"
+    exit 1
+fi
+
 echo ""
 echo "Done! Generated $OUTPUT"
 echo "Top module: VexiiRiscv"

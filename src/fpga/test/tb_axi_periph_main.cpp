@@ -42,6 +42,10 @@ static void reset_sequence() {
     tb->gpu_swap_req_in = 0;  // CMD_FLIP side-port idle
     tb->gpu_swap_idx_in = 0;
     tb->vsync_in        = 0;
+    tb->target_dataslot_ack_in  = 0;
+    tb->target_dataslot_done_in = 0;
+    tb->target_dataslot_err_in  = 0;
+    tb->bridge_wr_idle_in       = 1;
     tb->cont1_key_in    = 0;
     tb->cont1_joy_in    = 0;
     tb->cont1_trig_in   = 0;
@@ -679,6 +683,59 @@ static void test_sysreg_polling() {
     check_eq("poll-ds-status-32x", ok, 1);
 }
 
+static uint32_t mmio_read32(uint32_t addr);
+
+static void test_dataslot_completion_irq() {
+    printf("test_dataslot_completion_irq:\n");
+
+    const uint32_t DS_SLOT_ID     = 0x40000020u;
+    const uint32_t DS_SLOT_OFFSET = 0x40000024u;
+    const uint32_t DS_BRIDGE_ADDR = 0x40000028u;
+    const uint32_t DS_LENGTH      = 0x4000002Cu;
+    const uint32_t DS_COMMAND     = 0x40000038u;
+    const uint32_t DS_STATUS      = 0x4000003Cu;
+    const uint32_t IRQ_MASK       = 0x400000FCu;
+    const uint32_t DS_CMD_READ    = 1u;
+    const uint32_t DS_STATUS_ACK  = 1u << 0;
+    const uint32_t DS_STATUS_DONE = 1u << 1;
+    const uint32_t DS_STATUS_IRQ  = 1u << 7;
+    const uint32_t IRQ_MASK_DS    = 1u << 5;
+
+    axi_write_single(IRQ_MASK, IRQ_MASK_DS);
+    axi_write_single(DS_SLOT_ID, 3u);
+    axi_write_single(DS_SLOT_OFFSET, 0x1234u);
+    axi_write_single(DS_BRIDGE_ADDR, 0x20001000u);
+    axi_write_single(DS_LENGTH, 128u);
+    axi_write_single(DS_COMMAND, DS_CMD_READ);
+
+    for (int i = 0; i < 6; i++) tick();
+    tb->target_dataslot_ack_in = 1;
+    for (int i = 0; i < 6; i++) tick();
+    uint32_t st_ack = mmio_read32(DS_STATUS);
+    check_eq("dataslot-ack-latched", st_ack & DS_STATUS_ACK, DS_STATUS_ACK);
+    check_eq("dataslot-no-irq-before-done", tb->ext_irq_out ? 1u : 0u, 0u);
+
+    tb->target_dataslot_err_in = 5;
+    tb->target_dataslot_done_in = 1;
+    for (int i = 0; i < 8; i++) tick();
+    uint32_t st_done = mmio_read32(DS_STATUS);
+    check_eq("dataslot-done-latched", st_done & DS_STATUS_DONE, DS_STATUS_DONE);
+    check_eq("dataslot-err-latched", (st_done >> 2) & 0x7u, 5u);
+    check_eq("dataslot-irq-pending", st_done & DS_STATUS_IRQ, DS_STATUS_IRQ);
+    check_eq("dataslot-ext-irq-asserted", tb->ext_irq_out ? 1u : 0u, 1u);
+
+    axi_write_single(DS_STATUS, DS_STATUS_IRQ);
+    for (int i = 0; i < 4; i++) tick();
+    uint32_t st_clear = mmio_read32(DS_STATUS);
+    check_eq("dataslot-irq-cleared", st_clear & DS_STATUS_IRQ, 0u);
+    check_eq("dataslot-ext-irq-cleared", tb->ext_irq_out ? 1u : 0u, 0u);
+
+    tb->target_dataslot_ack_in = 0;
+    tb->target_dataslot_done_in = 0;
+    tb->target_dataslot_err_in = 0;
+    axi_write_single(IRQ_MASK, 0u);
+}
+
 static void test_save_dt_commit_toggle() {
     printf("test_save_dt_commit_toggle:\n");
 
@@ -992,6 +1049,7 @@ int main(int argc, char **argv) {
     test_back_to_back_cachelines();
     test_burst_with_backpressure();
     test_sysreg_polling();
+    test_dataslot_completion_irq();
     test_save_dt_commit_toggle();
     test_palette_commit_sysreg();
     test_analogizer_sysregs();

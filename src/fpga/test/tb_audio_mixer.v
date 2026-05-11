@@ -13,6 +13,7 @@
  *   2. group_composition         — vol_target × group_vol × master_vol math
  *   3. master_mute               — master=0 silences the output stream
  *   4. voice_end_irq             — one-shot voices raise voice_end_pending
+ *   5. explicit_lr_targets       — hard-left/hard-right targets reach output
  */
 
 `timescale 1ns/1ps
@@ -60,22 +61,21 @@ module tb_audio_mixer (
     wire        m_rlast;
     wire        m_rready;
 
-    /* Tiny SDRAM stub: returns zeros for every address.  That is enough
-     * for the volume-composition + IRQ tests; samples land at silence
-     * so the only active contribution to the output is the per-voice
-     * vol_lr ramp toward the (composed) target.  Tests that need real
-     * sample data could backdoor-write into this array via Verilator's
-     * public_flat scope. */
+    /* Tiny SDRAM stub.  It supports the audio mixer's single-beat reads
+     * and ARLEN=1 two-beat bursts so interpolation tests can run through
+     * both mono even/odd sample positions. */
     /* verilator public_module */
-    reg [31:0] sdram_mem [0:1023];
+    reg [31:0] sdram_mem [0:1023] /*verilator public_flat_rw*/;
 
     reg        rd_pending;
     reg [31:0] rd_data;
+    reg [9:0]  rd_addr;
+    reg [7:0]  rd_remaining;
     assign m_arready = !rd_pending;
     assign m_rvalid  = rd_pending;
     assign m_rdata   = rd_data;
     assign m_rresp   = 2'b00;
-    assign m_rlast   = 1'b1;
+    assign m_rlast   = (rd_remaining == 8'd0);
 
     integer si;
     initial begin
@@ -89,10 +89,18 @@ module tb_audio_mixer (
         end else begin
             if (m_arvalid && m_arready) begin
                 /* Word-aligned address; treat lower bits as a 1 KB ring */
-                rd_data    <= sdram_mem[m_araddr[11:2]];
-                rd_pending <= 1'b1;
+                rd_addr      <= m_araddr[11:2];
+                rd_data      <= sdram_mem[m_araddr[11:2]];
+                rd_remaining <= m_arlen;
+                rd_pending   <= 1'b1;
             end else if (m_rvalid && m_rready) begin
-                rd_pending <= 1'b0;
+                if (rd_remaining != 8'd0) begin
+                    rd_addr      <= rd_addr + 10'd1;
+                    rd_data      <= sdram_mem[rd_addr + 10'd1];
+                    rd_remaining <= rd_remaining - 8'd1;
+                end else begin
+                    rd_pending <= 1'b0;
+                end
             end
         end
     end
