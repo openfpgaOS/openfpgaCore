@@ -215,7 +215,6 @@ reg [40:0] cpu_fsm_q_mem [0:CPU_FSM_Q_DEPTH-1];
 reg [CPU_FSM_Q_ADDR_W-1:0] cpu_fsm_q_wr_ptr;
 reg [CPU_FSM_Q_ADDR_W-1:0] cpu_fsm_q_rd_ptr;
 reg [CPU_FSM_Q_ADDR_W:0]   cpu_fsm_q_count;
-reg                        cpu_fsm_q_overflow;
 
 wire cpu_fsm_q_empty = (cpu_fsm_q_count == {CPU_FSM_Q_ADDR_W+1{1'b0}});
 wire cpu_fsm_q_full  = (cpu_fsm_q_count == CPU_FSM_Q_COUNT_DEPTH);
@@ -236,13 +235,10 @@ always @(posedge clk) begin
         cpu_fsm_q_wr_ptr   <= {CPU_FSM_Q_ADDR_W{1'b0}};
         cpu_fsm_q_rd_ptr   <= {CPU_FSM_Q_ADDR_W{1'b0}};
         cpu_fsm_q_count    <= {CPU_FSM_Q_ADDR_W+1{1'b0}};
-        cpu_fsm_q_overflow <= 1'b0;
     end else begin
         if (cpu_fsm_q_push) begin
             cpu_fsm_q_mem[cpu_fsm_q_wr_ptr] <= {{voice_sel, voice_field}, voice_wdata};
             cpu_fsm_q_wr_ptr <= cpu_fsm_q_wr_ptr + {{CPU_FSM_Q_ADDR_W-1{1'b0}}, 1'b1};
-        end else if (cpu_fsm_wr) begin
-            cpu_fsm_q_overflow <= 1'b1;
         end
 
         if (cpu_fsm_q_drain)

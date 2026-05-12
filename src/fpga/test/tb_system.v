@@ -368,10 +368,8 @@ axi_sdram_slave sdram_axi_slave (
     .sdram_next_wdata  (sdram_next_wdata),
     .sdram_next_wstrb  (sdram_next_wstrb),
     .sdram_preload_wdata(sdram_preload_wdata),
-    .sdram_preload_wstrb(sdram_preload_wstrb),
-    .dbg_slave         (tb_sdram_slave_dbg)
+    .sdram_preload_wstrb(sdram_preload_wstrb)
 );
-wire [15:0] tb_sdram_slave_dbg;
 
 sdram_fast_model sdram_mem (
     .clk (clk_cpu),
@@ -529,9 +527,6 @@ axi_periph_slave periph (
     .target_dataslot_done(target_dataslot_done),
     .target_dataslot_err (target_dataslot_err),
     .bridge_wr_idle      (bridge_wr_idle),
-    .bridge_wr_fifo_count_dbg(11'd0),
-    .bridge_wr_fifo_max_dbg  (11'd0),
-    .bridge_wr_fifo_overflow_dbg(1'b0),
 
     .color_mode     (),
     .fb_display_addr(),
@@ -613,9 +608,7 @@ axi_periph_slave periph (
 // ============================================================
 // gpu_core — full GPU instance (matches core_top.v wiring)
 // ============================================================
-gpu_core #(
-    .FBWQ_BURST2_ENABLE(1'b1)
-) gpu (
+gpu_core gpu (
     .clk        (clk_cpu),
     .reset_n    (reset_n),
     .gpu_enable (1'b1),

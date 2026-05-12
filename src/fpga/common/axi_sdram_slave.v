@@ -77,28 +77,7 @@ module axi_sdram_slave #(
     output wire [31:0] sdram_next_wdata,   // Active continuation word for io_sdram burst writes
     output wire [3:0]  sdram_next_wstrb,
     output wire [31:0] sdram_preload_wdata, // Beat 1 already captured before native 2-word issue
-    output wire [3:0]  sdram_preload_wstrb,
-
-    // Diagnostic observability for simulation harnesses.  When the
-    // arbiter is stuck in ST_WR and no s_bvalid is being produced,
-    // this tells us which slave state owns the wedge and whether
-    // sdram_busy / wr_busy_seen are stuck.
-    //   bits 3:0   = state (0=IDLE,1=RD_CMD,2=RD_DAT,3=WR_CMD,
-    //                4=WR_DON,5=WR_NEXT,6=WR_BURST,7=WR_NATIVE_W0,
-    //                8=WR_NATIVE_W1)
-    //   bit  4     = sdram_busy
-    //   bit  5     = wr_busy_seen      (burst path: latched busy edge)
-    //   bit  6     = cmd_issued        (sdram_rd/wr asserted)
-    //   bit  7     = started           (sdram_accepted observed)
-    //   bit  8     = wready_given      (burst pre-stage holds next beat)
-    //   bit  9     = s_axi_awready
-    //   bit  10    = s_axi_wready
-    //   bit  11    = s_axi_bvalid      (slave's outgoing B beat)
-    //   bit  12    = s_axi_arready
-    //   bit  13    = s_axi_rvalid
-    //   bit  14    = s_axi_rlast
-    //   bit  15    = sdram_accepted    (live, before "started" latch)
-    output wire [15:0] dbg_slave
+    output wire [3:0]  sdram_preload_wstrb
 );
 
 wire reset = ~reset_n;
@@ -127,7 +106,6 @@ reg [31:0] active_next_wdata; // Beat selected by the last sdram_wr_data_next pu
 reg [3:0]  active_next_wstrb;
 reg        wready_given; // Next W beat already accepted
 reg        burst_preloaded; // 2-beat write has next_wdata before command issue
-reg        wr_busy_seen; // word_busy seen high during burst (guards early bvalid)
 reg        wr_op_done_seen; // sdram_wr_done pulse latched after our write was accepted; preferred over !sdram_busy because the busy signal stays high across unrelated io_sdram ops (scanout burst_rd, autorefresh) and starves single-word writes
 
 // Stable continuation export for io_sdram burst write forwarding.  This is
@@ -138,22 +116,6 @@ assign sdram_next_wstrb = active_next_wstrb;
 assign sdram_preload_wdata = next_wdata;
 assign sdram_preload_wstrb = next_wstrb;
 reg        started;      // accepted seen, waiting for completion
-
-// Diagnostic tap: see port-list comment for bit layout.  Combinational so
-// the kernel always reads live state; no extra registers added.
-assign dbg_slave = {sdram_accepted,
-                    s_axi_rlast,
-                    s_axi_rvalid,
-                    s_axi_arready,
-                    s_axi_bvalid,
-                    s_axi_wready,
-                    s_axi_awready,
-                    wready_given,
-                    started,
-                    cmd_issued,
-                    wr_busy_seen,
-                    sdram_busy,
-                    state[3:0]};
 
 // 3-entry response pipeline (primary R slot + 2 skid entries) so
 // back-pressure from the master doesn't drop sdram_rdata_valid pulses.
@@ -211,7 +173,6 @@ always @(posedge clk or posedge reset) begin
         active_next_wstrb <= 0;
         wready_given <= 0;
         burst_preloaded <= 0;
-        wr_busy_seen <= 0;
         wr_op_done_seen <= 0;
 
         rskid_data   <= 0;
@@ -426,20 +387,18 @@ always @(posedge clk or posedge reset) begin
                                     ? 4'd0 : burst_len[3:0];
                 if (sdram_accepted) begin
                     started <= 1;
-                    // Reset wr_busy_seen + wr_op_done_seen for BOTH paths.
+                    // Reset wr_op_done_seen for BOTH paths.
                     // The saw-busy gate alone left S_WR_DON polling
                     // !sdram_busy across unrelated io_sdram activity (scanout
                     // burst_rd, autorefresh, mixer reads), throttling
                     // single-word FB writes to ~8 fps.  word_wr_done is a
                     // 1-cycle pulse from io_sdram tied to ST_WRITE_4→ST_IDLE
                     // for THIS write — robust against back-to-back ops.
-                    wr_busy_seen <= 0;
                     wr_op_done_seen <= 0;
                     if (burst_len == 0 || write_burst_serialized)
                         state <= S_WR_DON;   // Single/serialized word: wait for done pulse
                     else begin
                         wready_given <= burst_preloaded;
-                        wr_busy_seen <= 0;
                         wr_op_done_seen <= 0;
                         state <= S_WR_BURST;  // Burst: stream data
                     end
@@ -454,7 +413,6 @@ always @(posedge clk or posedge reset) begin
              * stable register for the controller to capture later.  The
              * pre-stage slot lets AXI W handshakes happen before or on
              * the pull without changing the active continuation word. */
-            if (sdram_busy) wr_busy_seen <= 1;
             if (sdram_wr_done) wr_op_done_seen <= 1;
             if (started && (wr_op_done_seen || sdram_wr_done)) begin
                 cmd_issued <= 0;
@@ -517,9 +475,7 @@ always @(posedge clk or posedge reset) begin
             // slave starves under load (~8 fps in Duke3D, fbss=FLUSH_W_RSP
             // wedge).  Use sdram_wr_done pulse instead: it fires exactly
             // when io_sdram's ST_WRITE_4→ST_IDLE for THIS write, immune
-            // to subsequent contention.  wr_busy_seen remains visible
-            // through the local diagnostic tap.
-            if (sdram_busy) wr_busy_seen <= 1;
+            // to subsequent contention.
             if (sdram_wr_done) wr_op_done_seen <= 1;
             if (started && (wr_op_done_seen || sdram_wr_done)) begin
                 cmd_issued <= 0;

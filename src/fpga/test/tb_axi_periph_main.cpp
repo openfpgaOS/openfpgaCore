@@ -333,7 +333,7 @@ static void test_gpu_write_mixed_addr(void) {
     const uint32_t GPU_RING_WRPTR = 0x4A000004u;
 
     g_gpu_wr_pulses = 0;
-    const int CHUNK = 19;   // one CMD_DRAW_SPAN worth
+    const int CHUNK = 19;   // one medium GPU command worth
     const int N_CMDS = 50;
 
     for (int c = 0; c < N_CMDS; c++) {

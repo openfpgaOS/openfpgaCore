@@ -35,6 +35,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <cstdint>
+#include <vector>
 #include "Vtb_gpu.h"
 #include "verilated.h"
 #include "verilated_vcd_c.h"
@@ -51,9 +52,11 @@ static const uint32_t CEIL_TEX_OFF   = 0x00002000;  // 64x64
 static const uint32_t SPRITE_OFF     = 0x00003000;  // 64x64 (cube face)
 static const uint32_t FB_BASE        = 0x00080000;
 static const uint32_t ZB_BASE        = 0x000C0000;
+static const uint32_t CMD_UPLOAD_BYTE = 0x00380000;
 static const uint32_t RING_SIZE      = 0x00004000;
 static uint32_t ring_wrptr = 0;
 static const uint32_t ring_mask = RING_SIZE - 1;
+static std::vector<uint32_t> pending_ring_words;
 
 // Reduced screen so one frame's command stream fits in the 16 KB ring.
 // gpudemo on hardware uses 320x240; this test scales the geometry by
@@ -86,11 +89,18 @@ static void mmio_write(uint32_t reg, uint32_t val) {
     tb->reg_wr = 1; tb->reg_addr = reg; tb->reg_wdata = val;
     tick(); tb->reg_wr = 0;
 }
+static uint32_t mmio_read(uint32_t reg) {
+    tb->reg_addr = reg;
+    tb->eval();
+    return tb->reg_rdata;
+}
 static uint32_t read_rdptr() {
     tb->reg_addr = 4;  // GPU_RING_RDPTR
     tb->eval();
     return tb->reg_rdata & 0xFFFF;
 }
+static void gpu_kick();
+
 // Match SDK's _gpu_ring_ensure: wait until at least `bytes` of ring
 // space is free.  Without this the CPU outruns the GPU and overwrites
 // in-flight commands.  Kicks the GPU to make sure it's draining.
@@ -99,21 +109,40 @@ static void ring_ensure(uint32_t bytes) {
         uint32_t rdptr = read_rdptr();
         uint32_t free = (rdptr - ring_wrptr - 4) & ring_mask;
         if (free >= bytes) return;
-        // Make sure the GPU sees the latest wrptr so it can drain.
-        mmio_write(1, ring_wrptr);
         tick();
     }
     printf("ring_ensure: TIMED OUT waiting for %u bytes free\n", bytes);
 }
 static void ring_write(uint32_t w) {
-    mmio_write(2, w);  // GPU_RING_DATA
+    pending_ring_words.push_back(w);
     ring_wrptr = (ring_wrptr + 4) & ring_mask;
 }
 static void ring_cmd(uint8_t cmd, uint32_t payload_words) {
-    ring_ensure((1 + payload_words) * 4);
+    uint32_t words = 1u + payload_words;
+    if (pending_ring_words.size() + words > (RING_SIZE / 4u - 1u))
+        gpu_kick();
+    ring_ensure(words * 4u);
     ring_write(((uint32_t)cmd << 24) | payload_words);
 }
-static void gpu_kick() { mmio_write(1, ring_wrptr); }
+static bool wait_dma_idle(int timeout_cycles = 1000000) {
+    while ((mmio_read(5) & 0x4u) && timeout_cycles > 0) {
+        tick();
+        timeout_cycles--;
+    }
+    return timeout_cycles > 0;
+}
+static void gpu_kick() {
+    if (pending_ring_words.empty())
+        return;
+    if (!wait_dma_idle())
+        return;
+    for (size_t i = 0; i < pending_ring_words.size(); i++)
+        sdram_write((CMD_UPLOAD_BYTE >> 2) + (uint32_t)i, pending_ring_words[i]);
+    mmio_write(3, CMD_UPLOAD_BYTE);
+    mmio_write(7, (uint32_t)pending_ring_words.size());
+    mmio_write(11, 1);
+    pending_ring_words.clear();
+}
 static bool gpu_wait_fence(uint32_t token, int timeout) {
     for (int t = 0; t < timeout; t++) {
         tick();
@@ -167,7 +196,7 @@ static void clear_fb() {
 // Identity cmap preloaded into SDRAM at the slot-0 palookup base —
 // matches gpu_core.v's PALOOKUP_BASE = 0x100000.  cmap_bram retired in
 // favour of tex_cache port B reads from SDRAM.
-static const uint32_t PALOOKUP_BASE_BYTE = 0x00100000;
+static const uint32_t PALOOKUP_BASE_BYTE = 0x03400000;
 static void upload_identity_cmap_row0() {
     for (int i = 0; i < 256; i += 4) {
         uint32_t w = (uint32_t)(uint8_t)(i + 0)
@@ -179,7 +208,7 @@ static void upload_identity_cmap_row0() {
 }
 
 // =====================================================================
-// CMD_DRAW_SPAN payload — 18 words.
+// Scalar span payload — 15 words.
 // Modelled after of_gpu_draw_span() in src/firmware/api/of_gpu.h.
 // =====================================================================
 static void emit_span(uint32_t fb_addr, uint32_t tex_addr,
@@ -189,7 +218,7 @@ static void emit_span(uint32_t fb_addr, uint32_t tex_addr,
                       int16_t fb_stride, uint16_t tex_width,
                       uint16_t tex_w_mask, uint16_t tex_h_mask)
 {
-    ring_cmd(0x40, 18);
+    ring_cmd(0x43, 15);
     ring_write(fb_addr);
     ring_write(tex_addr);
     ring_write((uint32_t)s);
@@ -202,7 +231,7 @@ static void emit_span(uint32_t fb_addr, uint32_t tex_addr,
     ring_write(0);  // z_addr (unused for non-depth spans)
     ring_write(0);  // zi
     ring_write(0);  // zistep
-    for (int i = 12; i < 18; i++) ring_write(0);
+    for (int i = 12; i < 15; i++) ring_write(0);
 }
 
 // CMD_DRAW_TRIANGLES payload — 19 words: count + 6 words per vertex × 3.
@@ -214,8 +243,7 @@ static void emit_triangle(int16_t x0, int16_t y0, uint16_t z0,
                           int32_t s2, int32_t t2,
                           uint8_t light)
 {
-    ring_cmd(0x30, 19);  // CMD_DRAW_TRIANGLES (was 0x41 — now repurposed as
-                          // CMD_DRAW_SPANS_BATCH; triangle opcode moved to 0x30)
+    ring_cmd(0x30, 19);  // CMD_DRAW_TRIANGLES
     ring_write(1);  // vertex count
     auto v = [light](int16_t x, int16_t y, uint16_t z, int32_t s, int32_t t) {
         ring_write(((uint32_t)(uint16_t)x << 16) | (uint16_t)y);  // word 0: x|y
@@ -350,6 +378,7 @@ int main(int argc, char **argv)
 
     // Boot.
     ring_wrptr = 0;
+    pending_ring_words.clear();
     reset();
     mmio_write(0, 4);   // GPU_CTRL: ring_reset
     mmio_write(1, 0);   // RING_WRPTR = 0

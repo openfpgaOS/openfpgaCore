@@ -1,14 +1,14 @@
 /*
  * Verilator harness — focused floor-span path coverage.
  *
- * Drives the GPU's CMD_DRAW_SPAN against a CPU reference that
+ * Drives the GPU's scalar span payload against a CPU reference that
  * literally executes BUILD's hlineasm4 in C.  The reference uses
  * shift-mode addressing (i4/i5/bits/shifter); the GPU uses multiply-
  * mode (sp_s/sp_t/tex_width).  We translate the BUILD-style inputs
  * into the closest multiply-mode equivalent and compare bytewise.
  *
  * The GPU has POT wrap masks (sp_tex_w_mask / sp_tex_h_mask, set via
- * word 8 of CMD_DRAW_SPAN) that reproduce shift-mode wrap inside the
+ * word 8 of the scalar span payload) that reproduce shift-mode wrap inside the
  * multiply-mode addressing path.  All eight cases now pass — they
  * exercise the full BUILD/Duke3D hlineasm4 envelope (axis-aligned,
  * sloped, large-negative i4/i5, mid-span tex-boundary cross,
@@ -26,6 +26,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <cstdint>
+#include <vector>
 #include "Vtb_gpu.h"
 #include "verilated.h"
 #include "verilated_vcd_c.h"
@@ -38,9 +39,11 @@ static int fail_count = 0;
 // Memory layout in the testbench's SDRAM model
 static const uint32_t TEX_BASE_BYTE = 0x00040000;  // texture root
 static const uint32_t FB_BASE_BYTE  = 0x00080000;  // framebuffer root
+static const uint32_t CMD_UPLOAD_BYTE = 0x00380000;
 static const uint32_t RING_SIZE     = 0x00004000;
 static uint32_t ring_wrptr = 0;
 static const uint32_t ring_mask = RING_SIZE - 1;
+static std::vector<uint32_t> pending_ring_words;
 
 // =====================================================================
 // Tick / reset / MMIO / SDRAM helpers (lifted from tb_gpu_main.cpp)
@@ -78,14 +81,37 @@ static void mmio_write(uint32_t reg, uint32_t val) {
     tb->reg_wr = 1; tb->reg_addr = reg; tb->reg_wdata = val;
     tick(); tb->reg_wr = 0;
 }
+static uint32_t mmio_read(uint32_t reg) {
+    tb->reg_addr = reg;
+    tb->eval();
+    return tb->reg_rdata;
+}
 static void ring_write(uint32_t w) {
-    mmio_write(2, w);
+    pending_ring_words.push_back(w);
     ring_wrptr = (ring_wrptr + 4) & ring_mask;
 }
 static void ring_cmd(uint8_t cmd, uint32_t payload_words) {
     ring_write(((uint32_t)cmd << 24) | payload_words);
 }
-static void gpu_kick() { mmio_write(1, ring_wrptr); }
+static bool wait_dma_idle(int timeout_cycles = 1000000) {
+    while ((mmio_read(5) & 0x4u) && timeout_cycles > 0) {
+        tick();
+        timeout_cycles--;
+    }
+    return timeout_cycles > 0;
+}
+static void gpu_kick() {
+    if (pending_ring_words.empty())
+        return;
+    if (!wait_dma_idle())
+        return;
+    for (size_t i = 0; i < pending_ring_words.size(); i++)
+        sdram_write((CMD_UPLOAD_BYTE >> 2) + (uint32_t)i, pending_ring_words[i]);
+    mmio_write(3, CMD_UPLOAD_BYTE);
+    mmio_write(7, (uint32_t)pending_ring_words.size());
+    mmio_write(11, 1);
+    pending_ring_words.clear();
+}
 static bool gpu_wait_fence(uint32_t token, int timeout = 200000) {
     for (int t = 0; t < timeout; t++) {
         tick();
@@ -107,6 +133,7 @@ static bool gpu_finish(int timeout = 200000) {
 }
 static void gpu_init() {
     ring_wrptr = 0;
+    pending_ring_words.clear();
     reset();
     mmio_write(0, 4);   // GPU_CTRL: ring_reset
     mmio_write(1, 0);   // RING_WRPTR = 0
@@ -139,8 +166,8 @@ static void hlineasm4_ref(int numPixels, int /*shade*/,
 // palookup base.  The on-chip cmap_bram was retired; the GPU now reads
 // palookup bytes through gpu_tex_cache port B, so tests preload the
 // table directly via the SDRAM backdoor.  PALOOKUP_BASE_BYTE matches
-// gpu_core.v's PALOOKUP_BASE localparam (= 0x100000).
-static const uint32_t PALOOKUP_BASE_BYTE = 0x00100000;
+// gpu_core.v's PALOOKUP_BASE localparam.
+static const uint32_t PALOOKUP_BASE_BYTE = 0x03400000;
 static void upload_identity_cmap_row0() {
     for (int i = 0; i < 256; i += 4) {
         uint32_t w = (uint32_t)(uint8_t)(i + 0)
@@ -193,8 +220,8 @@ static void preset_fb_sentinel(uint32_t fb_byte_base, int count_bytes) {
 }
 
 // =====================================================================
-// Submit one CMD_DRAW_SPAN.  Translates BUILD-style hlineasm4 inputs
-// into the GPU's multiply-mode CMD_DRAW_SPAN payload.
+// Submit one scalar span.  Translates BUILD-style hlineasm4 inputs
+// into the GPU's multiply-mode scalar payload.
 //
 // The GPU's tex_addr math is `tex_base + t_int*tex_width + s_int`,
 // where t_int = sp_t[31:16] and s_int = sp_s[31:16].  hlineasm4's
@@ -251,8 +278,8 @@ static int run_case(const floor_case &c)
     uint32_t sp_sstep = (uint32_t)-(int32_t)to_q16(c.asm2, s_rshift);
     uint32_t sp_tstep = (uint32_t)-(int32_t)to_q16(c.asm1, t_rshift);
 
-    // CMD_DRAW_SPAN payload (18 words; perspective fields zero).
-    ring_cmd(0x40, 18);                                      // CMD_DRAW_SPAN
+    // Scalar span payload (15 words; perspective fields zero).
+    ring_cmd(0x43, 15);                                      // CMD_DRAW_SPAN_GROUP scalar
     ring_write(fb_row_base + (c.count - 1));                 // 0: fb_addr (rightmost px)
     ring_write(TEX_BASE_BYTE);                               // 1: tex_addr
     ring_write(sp_s);                                        // 2: sp_s
@@ -276,7 +303,7 @@ static int run_case(const floor_case &c)
     ring_write(0);                                           // 9: z_addr
     ring_write(0);                                           // 10: zi
     ring_write(0);                                           // 11: zistep
-    for (int i = 12; i < 18; i++) ring_write(0);             // 12..17: persp (unused)
+    for (int i = 12; i < 15; i++) ring_write(0);             // 12..14: persp (unused)
 
     bool ok = gpu_finish(500000);
     if (!ok) {

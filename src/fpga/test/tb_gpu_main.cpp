@@ -15,6 +15,7 @@
 #include <cstring>
 #include <cassert>
 #include <cmath>
+#include <vector>
 #include "Vtb_gpu.h"
 #include "verilated.h"
 #include "verilated_vcd_c.h"
@@ -31,11 +32,13 @@ static int fail_count = 0;
 // Framebuffer: 0x020000..0x02FFFF (320*200 = 64000 bytes = 16000 words)
 static const uint32_t TEX_BASE_BYTE  = 0x00040000;   // word 0x10000
 static const uint32_t FB_BASE_BYTE   = 0x00080000;   // word 0x20000
+static const uint32_t CMD_UPLOAD_BYTE = 0x00380000;  // 16KB scratch, clear of FB/textures
 
 // Ring state (mirrors GPU ring BRAM, 16 KB)
 static const uint32_t RING_SIZE      = 0x00004000;   // 16KB
 static uint32_t ring_wrptr = 0;
 static uint32_t ring_mask  = RING_SIZE - 1;
+static std::vector<uint32_t> pending_ring_words;
 
 // ================================================================
 // Helpers
@@ -102,9 +105,11 @@ static uint32_t mmio_read(uint32_t reg) {
     return tb->reg_rdata;
 }
 
-// Write a word to the ring BRAM (via GPU_RING_DATA MMIO, auto-increment)
+// Write a word to the software command stream.  Production hardware no
+// longer accepts per-word GPU_RING_DATA writes; commands are uploaded to
+// the GPU ring by doorbell DMA from SDRAM.
 static void ring_write(uint32_t w) {
-    mmio_write(2, w);           // reg_addr 2 = GPU_RING_DATA
+    pending_ring_words.push_back(w);
     ring_wrptr = (ring_wrptr + 4) & ring_mask;
 }
 
@@ -113,9 +118,50 @@ static void ring_cmd(uint8_t cmd, uint32_t payload_words) {
     ring_write(((uint32_t)cmd << 24) | payload_words);
 }
 
-// Kick GPU (update WRPTR MMIO)
+static void ring_clear_fb(uint8_t color) {
+    ring_cmd(0x11, 3);
+    ring_write(FB_BASE_BYTE);
+    ring_write((320u << 16) | 200u);
+    ring_write((320u << 16) | (uint32_t)color);
+}
+
+static bool wait_dma_idle(int timeout_cycles = 1000000) {
+    while ((mmio_read(5) & 0x4u) && timeout_cycles > 0) {
+        tick();
+        timeout_cycles--;
+    }
+    if (timeout_cycles <= 0) {
+        printf("  FAIL DMA upload did not go idle before command upload\n");
+        fail_count++;
+        return false;
+    }
+    return true;
+}
+
+// Kick GPU by copying the pending command stream into SDRAM and asking
+// gpu_core's doorbell DMA to append it to the internal ring BRAM.
 static void gpu_kick() {
-    mmio_write(1, ring_wrptr);  // reg_addr 1 = GPU_RING_WRPTR
+    if (pending_ring_words.empty())
+        return;
+
+    if (pending_ring_words.size() > (RING_SIZE / 4)) {
+        printf("  FAIL command upload too large: %zu words (ring holds %u)\n",
+               pending_ring_words.size(), RING_SIZE / 4);
+        fail_count++;
+        pending_ring_words.clear();
+        return;
+    }
+
+    if (!wait_dma_idle())
+        return;
+
+    for (size_t i = 0; i < pending_ring_words.size(); i++)
+        sdram_write((CMD_UPLOAD_BYTE >> 2) + (uint32_t)i, pending_ring_words[i]);
+
+    mmio_write(3, CMD_UPLOAD_BYTE);                       // GPU_DMA_SRC
+    mmio_write(7, (uint32_t)pending_ring_words.size());   // GPU_DMA_LEN
+    mmio_write(11, 1);                                    // GPU_DMA_KICK
+    pending_ring_words.clear();
 }
 
 // Palookup layout (must match gpu_core.v's PALOOKUP_BASE / PALOOKUP_STRIDE
@@ -194,6 +240,7 @@ static bool gpu_finish(int timeout = 200000) {
 // Initialise GPU: toggle hardware reset, then configure MMIO
 static void gpu_init() {
     ring_wrptr = 0;
+    pending_ring_words.clear();
     // Hard reset to clear all internal state
     tb->reset_n = 0;
     for (int i = 0; i < 10; i++) tick();
@@ -201,7 +248,6 @@ static void gpu_init() {
     for (int i = 0; i < 5; i++) tick();
     // Reset ring pointers (CTRL bit2 = ring_reset)
     mmio_write(0, 4);              // GPU_CTRL: ring_reset
-    mmio_write(1, 0);              // GPU_RING_WRPTR = 0
 }
 
 // ---- Test Helpers ----
@@ -283,10 +329,8 @@ static void test_clear_fb() {
     ring_write(FB_BASE_BYTE);
     ring_write(320);     // stride
 
-    // Clear with color 0x42
-    ring_cmd(0x10, 2);  // CMD_CLEAR
-    ring_write((1 << 16) | 0x42);  // flags=CLEAR_COLOR, color=0x42
-    ring_write(0);  // depth (unused)
+    // Clear with color 0x42.
+    ring_clear_fb(0x42);
 
     bool ok = gpu_finish();
     check("clear_done", ok ? 1 : 0, 1);
@@ -314,7 +358,7 @@ static void test_clear_rect(void) {
     ring_cmd(0x23, 2); ring_write(FB_BASE_BYTE); ring_write(320);
 
     // Pre-fill FB with a sentinel.
-    ring_cmd(0x10, 2); ring_write((1 << 16) | 0xAA); ring_write(0);
+    ring_clear_fb((uint8_t)(0xAA));
 
     // (1) Letterbox strip: rows 5..14 (10 rows × 320 = 3200 bytes), x=0,
     //     w=320, color=0x42.  Word-aligned start, word-multiple width.
@@ -377,7 +421,7 @@ static void test_clear_rect(void) {
 //
 // Layout:
 //   - SET_FB at FB_BASE with stride=320 (screen).
-//   - Pre-fill the 16 KB region with a sentinel (0xAA) via CMD_CLEAR.
+//   - Pre-fill the 16 KB region with a sentinel (0xAA) via whole-FB clear.
 //   - Issue CMD_CLEAR_RECT with start=FB+0x100, w=80, h=8, stride=160,
 //     color=0x55.  This addresses a tile sitting at offset 0x100 with
 //     8 rows of 80 bytes spaced 160 bytes apart.
@@ -385,13 +429,13 @@ static void test_clear_rect(void) {
 //     rows (bytes [80..159] of each tile row) stays at the sentinel
 //     (proving the stride was 160 not 320).
 //   - Verify the SET_FB global stride is unchanged (issue a regular
-//     CMD_CLEAR after; if it walks 320 it's fine, if it walks 160 the
+//     whole-FB clear after; if it walks 320 it's fine, if it walks 160 the
 //     decoder leaked the per-command stride).
 static void test_clear_rect_per_command_stride(void) {
     printf("TEST: CMD_CLEAR_RECT — per-command stride (BUILD setviewtotile fix)\n");
     gpu_init();
     ring_cmd(0x23, 2); ring_write(FB_BASE_BYTE); ring_write(320);
-    ring_cmd(0x10, 2); ring_write((1u << 16) | 0xAAu); ring_write(0);
+    ring_clear_fb((uint8_t)(0xAAu));
 
     const uint32_t TILE_OFFSET = 0x100;       // start of tile-buffer region
     const uint32_t TILE_BASE   = FB_BASE_BYTE + TILE_OFFSET;
@@ -490,9 +534,9 @@ static void test_clear_rect_per_command_stride(void) {
 //   4. fence_reached only reaches the payload's fence_token at or after
 //      the swap pulse cycle (never before).
 //
-// Sequence we drive at the GPU MMIO ring:
+// Sequence we drive through the SDRAM command upload path:
 //   CMD_SET_FB   → arm the FB write target
-//   CMD_CLEAR    → push 320*200 bytes via m_wr_* (lots of inflight Bs)
+//   full clear   → push 320*200 bytes via m_wr_* (lots of inflight Bs)
 //   CMD_FLIP idx=2 token=0xCAFE  → the unit under test
 //
 // The CLEAR's tail-end m_wr_* writes are still draining when the GPU's
@@ -512,9 +556,7 @@ static void test_cmd_flip_drain_and_pulse(void) {
     ring_write(320);
 
     // Spray FB writes — produces m_wr_* traffic the FLIP must drain past.
-    ring_cmd(0x10, 2);  // CMD_CLEAR
-    ring_write((1u << 16) | 0x42u);
-    ring_write(0);
+    ring_clear_fb(0x42);
 
     // The unit under test: CMD_FLIP with idx=2, fence_token=0xCAFE.
     const uint32_t FLIP_IDX = 2;
@@ -829,7 +871,7 @@ static void test_cmd_fence_drain(void) {
 
     gpu_init();
     ring_cmd(0x23, 2); ring_write(FB_BASE_BYTE); ring_write(320);
-    ring_cmd(0x10, 2); ring_write((1u << 16) | 0x33u); ring_write(0);
+    ring_clear_fb((uint8_t)(0x33u));
 
     const uint32_t TOK = 0xBEEF;
     ring_cmd(0x02, 1);  // CMD_FENCE
@@ -865,15 +907,13 @@ static void test_solid_span() {
     ring_write(320);
 
     // Clear FB to 0x00 first
-    ring_cmd(0x10, 2);
-    ring_write((1 << 16) | 0x00);
-    ring_write(0);
+    ring_clear_fb((uint8_t)(0x00));
 
     // Create a 1-byte "texture" in SDRAM: texel value = 0xAB
     sdram_write(TEX_BASE_BYTE >> 2, 0xABABABAB);
 
     // Draw a horizontal span of 8 pixels at FB row 0
-    ring_cmd(0x40, 15);  // CMD_DRAW_SPAN, 18 payload words
+    ring_cmd(0x43, 15);  // scalar span payload
     ring_write(FB_BASE_BYTE);       // fb_addr
     ring_write(TEX_BASE_BYTE);      // tex_addr
     ring_write(0);                  // s = 0
@@ -919,15 +959,13 @@ static void test_textured_span() {
     ring_write(320);
 
     // Clear FB
-    ring_cmd(0x10, 2);
-    ring_write((1 << 16) | 0x00);
-    ring_write(0);
+    ring_clear_fb((uint8_t)(0x00));
 
     // Create a 4-byte texture: [0x10, 0x20, 0x30, 0x40]
     sdram_write(TEX_BASE_BYTE >> 2, 0x40302010);
 
     // Draw 4 pixels, stepping through texture (s=0, sstep=1.0 = 0x10000)
-    ring_cmd(0x40, 15);
+    ring_cmd(0x43, 15);
     ring_write(FB_BASE_BYTE);       // fb_addr
     ring_write(TEX_BASE_BYTE);      // tex_addr
     ring_write(0);                  // s = 0
@@ -969,15 +1007,13 @@ static void test_colormap_lighting() {
     ring_write(320);
 
     // Clear FB
-    ring_cmd(0x10, 2);
-    ring_write((1 << 16) | 0x00);
-    ring_write(0);
+    ring_clear_fb((uint8_t)(0x00));
 
     // Texture: [0xAA]
     sdram_write(TEX_BASE_BYTE >> 2, 0xAAAAAAAA);
 
     // Draw 4 pixels with light=1 (should all be 0x77)
-    ring_cmd(0x40, 15);
+    ring_cmd(0x43, 15);
     ring_write(FB_BASE_BYTE);
     ring_write(TEX_BASE_BYTE);
     ring_write(0); ring_write(0);    // s, t
@@ -1026,13 +1062,11 @@ static void test_colormap_stuck_address_repro() {
     ring_cmd(0x23, 2);
     ring_write(FB_BASE_BYTE);
     ring_write(320);
-    ring_cmd(0x10, 2);
-    ring_write((1 << 16) | 0x00);
-    ring_write(0);
+    ring_clear_fb((uint8_t)(0x00));
 
     /* Single span, 64 pixels, light=0, SPAN_COLORMAP, sstep=1 (Q16.16).
      * Result expected: FB[i] = 0xFF - i. */
-    ring_cmd(0x40, 15);
+    ring_cmd(0x43, 15);
     ring_write(FB_BASE_BYTE);
     ring_write(TEX_BASE_BYTE);
     ring_write(0);              /* s = 0 */
@@ -1072,11 +1106,11 @@ static void test_colormap_stuck_address_repro() {
     }
 }
 
-// Per-span colormap_id: three spans submitted in one CMD_DRAW_SPANS_BATCH
+// Per-span colormap_id: three spans submitted in one command stream
 // with colormap_id = 0, 1, 2 must each render through the matching palookup
 // slot.  Pre-fix this required three separate batches with intervening
 // CMD_SET_COLORMAP_ID flushes; the wire-format change packs colormap_id
-// into word 6 bits [31:28] so adjacent batched spans coexist with
+// into word 6 bits [31:28] so adjacent streamed spans coexist with
 // different palookups.
 static void test_span_per_colormap() {
     printf("TEST: Per-span colormap_id (3 spans, 3 slots, 1 batch)\n");
@@ -1095,14 +1129,14 @@ static void test_span_per_colormap() {
     }
 
     ring_cmd(0x23, 2); ring_write(FB_BASE_BYTE); ring_write(320);
-    ring_cmd(0x10, 2); ring_write((1 << 16) | 0x00); ring_write(0);
+    ring_clear_fb((uint8_t)(0x00));
 
     // Texture: byte[0] = 0xAB so identity slot 0 yields 0xAB.
     sdram_write(TEX_BASE_BYTE >> 2, 0xABABABAB);
 
-    // CMD_DRAW_SPANS_BATCH: 3 spans × 15 words = 45 payload words.
-    ring_cmd(0x41, 45);
+    // Three DRAW_SPAN commands in one command stream.
     for (int slot = 0; slot < 3; slot++) {
+        ring_cmd(0x43, 15);
         // Each span writes 4 pixels at FB[slot*4 .. slot*4+3].
         ring_write(FB_BASE_BYTE + slot * 4);
         ring_write(TEX_BASE_BYTE);
@@ -1125,34 +1159,37 @@ static void test_span_per_colormap() {
     for (int i = 0; i < 4; i++) check_byte("per_cmap_slot2", 8 + i, 0x22);
 }
 
-// Per-span colormap_id default fallback: when the wire-format field is 0
-// the span must use st_colormap_id (the sticky CMD_SET_COLORMAP_ID
-// default).  Preserves bit-identical behaviour for callers that never
-// set the new field — i.e. every existing single-colormap caller.
+// Per-span colormap_id is explicit, including slot 0.  Sticky
+// CMD_SET_COLORMAP_ID is still used by triangles, but scalar spans do not
+// fall back to it.
 static void test_span_default_colormap() {
-    printf("TEST: Per-span colormap_id default fallback (field==0 → sticky)\n");
+    printf("TEST: Per-span colormap_id explicit slot 0\n");
     gpu_init();
 
-    // Slot 5: row 0 maps everything to 0x55.  Slot 2: maps to 0x22.
+    // Slot 0: row 0 maps everything to 0x55.  Sticky slot 5 maps to 0xEE
+    // so any accidental fallback is obvious.  Slot 2 maps to 0x22.
     {
         uint8_t cm[256];
         for (int i = 0; i < 256; i++) cm[i] = 0x55;
+        palookup_upload_to_slot(0, 0, cm, 256);
+        for (int i = 0; i < 256; i++) cm[i] = 0xEE;
         palookup_upload_to_slot(5, 0, cm, 256);
         for (int i = 0; i < 256; i++) cm[i] = 0x22;
         palookup_upload_to_slot(2, 0, cm, 256);
     }
 
     ring_cmd(0x23, 2); ring_write(FB_BASE_BYTE); ring_write(320);
-    ring_cmd(0x10, 2); ring_write((1 << 16) | 0x00); ring_write(0);
+    ring_clear_fb((uint8_t)(0x00));
 
-    // Sticky default: slot 5.
+    // Sticky default: slot 5.  Scalar span A explicitly selects slot 0 and
+    // must not pick up the sticky state.
     ring_cmd(0x28, 1); ring_write(5);
 
     // Texture: any non-zero byte (cmap row 0 maps it).
     sdram_write(TEX_BASE_BYTE >> 2, 0x55555555);
 
-    // Span A: colormap_id field = 0 → falls back to st_colormap_id (5) → 0x55.
-    ring_cmd(0x40, 15);
+    // Span A: colormap_id field = 0 → explicit slot 0.
+    ring_cmd(0x43, 15);
     ring_write(FB_BASE_BYTE);
     ring_write(TEX_BASE_BYTE);
     ring_write(0); ring_write(0); ring_write(0); ring_write(0);
@@ -1163,7 +1200,7 @@ static void test_span_default_colormap() {
     ring_write(0); ring_write(0); ring_write(0);
 
     // Span B: colormap_id field = 2 → overrides default → 0x22.
-    ring_cmd(0x40, 15);
+    ring_cmd(0x43, 15);
     ring_write(FB_BASE_BYTE + 4);
     ring_write(TEX_BASE_BYTE);
     ring_write(0); ring_write(0); ring_write(0); ring_write(0);
@@ -1175,8 +1212,8 @@ static void test_span_default_colormap() {
 
     bool ok = gpu_finish();
     check("def_cmap_done", ok ? 1 : 0, 1);
-    for (int i = 0; i < 4; i++) check_byte("def_cmap_sticky",   i, 0x55);
-    for (int i = 0; i < 4; i++) check_byte("def_cmap_override", 4 + i, 0x22);
+    for (int i = 0; i < 4; i++) check_byte("def_cmap_explicit0", i, 0x55);
+    for (int i = 0; i < 4; i++) check_byte("def_cmap_override",  4 + i, 0x22);
 }
 
 // Test 6: Vertical column (fb_stride = 320)
@@ -1194,16 +1231,14 @@ static void test_vertical_column() {
     ring_write(320);
 
     // Clear
-    ring_cmd(0x10, 2);
-    ring_write((1 << 16) | 0x00);
-    ring_write(0);
+    ring_clear_fb((uint8_t)(0x00));
 
     // Texture: [0xCC]
     sdram_write(TEX_BASE_BYTE >> 2, 0xCCCCCCCC);
 
     // Draw column of 4 pixels starting at column 5, row 0
     uint32_t col_fb_addr = FB_BASE_BYTE + 5;
-    ring_cmd(0x40, 15);
+    ring_cmd(0x43, 15);
     ring_write(col_fb_addr);
     ring_write(TEX_BASE_BYTE);
     ring_write(0); ring_write(0);
@@ -1232,12 +1267,9 @@ static void test_vertical_column() {
 }
 
 // Test 7: Skip-zero transparency
-/* CMD_DRAW_SPANS_BATCH with N=1 — exercises the basic batch dispatch
- * without the inter-span re-entry path.  If this fails, the span_field_idx
- * routing or the dispatch trigger is wrong; if it passes, only the
- * S_FB_FLUSH → S_PAY_DATA re-entry is broken. */
+/* Single span through the same command-stream path used by batched callers. */
 static void test_spans_batch_one() {
-    printf("TEST: CMD_DRAW_SPANS_BATCH — single span (N=1)\n");
+    printf("TEST: Batched DRAW_SPAN stream — single span (N=1)\n");
 
     gpu_init();
 
@@ -1247,14 +1279,11 @@ static void test_spans_batch_one() {
     ring_write(FB_BASE_BYTE);
     ring_write(320);
 
-    ring_cmd(0x10, 2);
-    ring_write((1 << 16) | 0x00);
-    ring_write(0);
+    ring_clear_fb((uint8_t)(0x00));
 
     sdram_write(TEX_BASE_BYTE >> 2, 0xCDCDCDCD);
 
-    /* Header: opcode 0x41, payload = 1 × 15 = 15 words. */
-    ring_cmd(0x41, 15);
+    ring_cmd(0x43, 15);
 
     /* Single span: 4 pixels at FB row 0, texel 0xCD. */
     ring_write(FB_BASE_BYTE);
@@ -1278,12 +1307,9 @@ static void test_spans_batch_one() {
     check_byte("batch1_clear", 4, 0x00);
 }
 
-/* CMD_DRAW_SPANS_BATCH (opcode 0x41) — exercise the per-span re-entry
- * path in the decoder.  Two spans rendered on consecutive rows; both
- * should appear in the FB exactly as if they had been submitted via
- * back-to-back CMD_DRAW_SPAN commands. */
+/* Two spans rendered on consecutive rows in one command stream. */
 static void test_spans_batch_two() {
-    printf("TEST: CMD_DRAW_SPANS_BATCH — two spans, MMIO ring writes\n");
+    printf("TEST: Batched DRAW_SPAN stream — two spans, command upload\n");
 
     gpu_init();
 
@@ -1296,18 +1322,14 @@ static void test_spans_batch_two() {
     ring_write(320);
 
     /* Clear FB to 0x00 first. */
-    ring_cmd(0x10, 2);
-    ring_write((1 << 16) | 0x00);
-    ring_write(0);
+    ring_clear_fb((uint8_t)(0x00));
 
     /* Two single-byte textures: row 0 = 0xCD, row 1 = 0x77. */
     sdram_write(TEX_BASE_BYTE >> 2, 0xCDCDCDCD);
     sdram_write((TEX_BASE_BYTE + 4) >> 2, 0x77777777);
 
-    /* Header: opcode 0x41, payload = 2 × 15 = 30 words. */
-    ring_cmd(0x41, 30);
-
     /* Span 0 — 4 pixels at FB row 0, texel 0xCD. */
+    ring_cmd(0x43, 15);
     ring_write(FB_BASE_BYTE);                      /* 0  fb_addr */
     ring_write(TEX_BASE_BYTE);                     /* 1  tex_addr */
     ring_write(0); ring_write(0);                   /* 2,3 s, t */
@@ -1319,6 +1341,7 @@ static void test_spans_batch_two() {
     ring_write(0); ring_write(0); ring_write(0);    /* 12,13,14 persp steps */
 
     /* Span 1 — 4 pixels at FB row 1, texel 0x77. */
+    ring_cmd(0x43, 15);
     ring_write(FB_BASE_BYTE + 320);                 /* 0  fb_addr (next row) */
     ring_write(TEX_BASE_BYTE + 4);                  /* 1  tex_addr */
     ring_write(0); ring_write(0);
@@ -1350,13 +1373,10 @@ static void test_spans_batch_two() {
 
 }
 
-/* DMA-pull batch of 128 spans — mirrors the Duke3D failure mode where
- * 128-span batches hang the GPU on hardware.  Reproduces in Verilator
- * if the bug is N-dependent (state machine, ring wraparound at large
- * beat counts).  Each span renders 1 pixel into a unique FB slot so
- * we can verify all 128 reached the FB. */
+/* DMA-pull stream of 128 spans.  Each span renders 1 pixel into a unique
+ * FB slot so we can verify all 128 reached the FB. */
 static void test_spans_batch_dma_128() {
-    printf("TEST: CMD_DRAW_SPANS_BATCH — DMA pull 128 spans (Duke3D shape)\n");
+    printf("TEST: Batched DRAW_SPAN stream — DMA pull 128 spans\n");
 
     gpu_init();
 
@@ -1366,9 +1386,7 @@ static void test_spans_batch_dma_128() {
     ring_write(FB_BASE_BYTE);
     ring_write(320);
 
-    ring_cmd(0x10, 2);
-    ring_write((1 << 16) | 0x00);
-    ring_write(0);
+    ring_clear_fb((uint8_t)(0x00));
 
     /* Texture: byte i = i+1 (avoid 0xFF / 0x00 SKIP_ZERO confusion).
      * 256 distinct values so each span samples a unique texel. */
@@ -1380,8 +1398,7 @@ static void test_spans_batch_dma_128() {
                     ((uint32_t)b <<  8) |  (uint32_t)a);
     }
 
-    /* Stage 128 × 15 = 1920 payload words in SDRAM. */
-    const uint32_t DMA_BUF_BYTE = 0x4000;
+    /* Stage 128 × 15 payload words behind one batch header. */
     const int N = 128;
     uint32_t batch[15 * N];
     for (int i = 0; i < N; i++) {
@@ -1398,26 +1415,11 @@ static void test_spans_batch_dma_128() {
         p[9]  = 0; p[10] = 0; p[11] = 0;  /* persp */
         p[12] = 0; p[13] = 0; p[14] = 0;  /* persp steps */
     }
-    for (int w = 0; w < 15 * N; w++)
-        sdram_write((DMA_BUF_BYTE >> 2) + w, batch[w]);
-
-    /* Header via MMIO — DMA publishes ring_wrptr at end of pull. */
-    ring_cmd(0x41, 15 * N);
-
-    mmio_write(3,  DMA_BUF_BYTE);
-    mmio_write(7,  15 * N);
-    mmio_write(11, 1);
-
-    /* Wait for DMA to drain before publishing fence kick (otherwise
-     * fence MMIO writes race with DMA's port-A writes). */
-    int dma_timeout = 100000;
-    while ((mmio_read(5) & 0x4) && dma_timeout > 0) {
-        tick();
-        dma_timeout--;
+    for (int i = 0; i < N; i++) {
+        ring_cmd(0x43, 15);
+        for (int w = 0; w < 15; w++)
+            ring_write(batch[i * 15 + w]);
     }
-    check("dma128_busy_clears", dma_timeout > 0 ? 1 : 0, 1);
-
-    ring_wrptr = (ring_wrptr + 15u * N * 4u) & ring_mask;
 
     bool ok = gpu_finish(5000000);   /* 5M cycles for 128 spans */
     check("dma128_done", ok ? 1 : 0, 1);
@@ -1460,9 +1462,7 @@ static void test_spans_batch_dma_multi() {
     ring_write(FB_BASE_BYTE);
     ring_write(320);
 
-    ring_cmd(0x10, 2);
-    ring_write((1 << 16) | 0x00);
-    ring_write(0);
+    ring_clear_fb((uint8_t)(0x00));
 
     /* Texture: 1024 distinct bytes (4×256). */
     for (int i = 0; i < 1024; i += 4) {
@@ -1473,11 +1473,8 @@ static void test_spans_batch_dma_multi() {
                     ((uint32_t)b <<  8) |  (uint32_t)a);
     }
 
-    /* Build 3 batches in 3 separate SDRAM regions (matches what the
-     * SDK's _gpu_batch_buf does when reused: same SDRAM offset, but
-     * we need to wait for DMA between kicks).  Different regions
-     * lets us submit all 3 without waits. */
-    const uint32_t DMA_BUF_BYTE_BASE = 0x4000;
+    /* Build 3 batches and submit each through the production command-stream
+     * DMA path.  The ring-space wait mirrors the SDK helper. */
     const int N = 128;
     uint32_t batch[15 * N];
 
@@ -1495,15 +1492,11 @@ static void test_spans_batch_dma_multi() {
             p[9]  = 0; p[10] = 0; p[11] = 0;
             p[12] = 0; p[13] = 0; p[14] = 0;
         }
-        uint32_t buf_byte = DMA_BUF_BYTE_BASE + (uint32_t)k * 15 * N * 4;
-        for (int w = 0; w < 15 * N; w++)
-            sdram_write((buf_byte >> 2) + w, batch[w]);
-
-        /* Backpressure: ring is 16 KB.  Each batch needs (1+15*N)*4 =
-         * 7684 bytes.  3 batches = 23052 bytes — won't fit without
+        /* Backpressure: ring is 16 KB. Each streamed span needs
+         * (1 header + 15 payload) * 4 bytes. 3 batches won't fit without
          * waiting for the decoder to consume.  Mirrors the SDK
          * helper's _gpu_ring_ensure spin. */
-        uint32_t need = (1u + 15u * N) * 4u;
+        uint32_t need = (16u * N) * 4u;
         int rt = 5000000;
         while (((mmio_read(4) - ring_wrptr - 4) & ring_mask) < need && rt > 0) {
             tick();
@@ -1511,16 +1504,12 @@ static void test_spans_batch_dma_multi() {
         }
         if (rt == 0) { printf("  FAIL batch %d ring_ensure timeout\n", k); fail_count++; return; }
 
-        ring_cmd(0x41, 15 * N);
-        mmio_write(3,  buf_byte);
-        mmio_write(7,  15 * N);
-        mmio_write(11, 1);
-
-        /* Wait for DMA before the next kick (mirrors SDK helper). */
-        int t = 5000000;
-        while ((mmio_read(5) & 0x4) && t > 0) { tick(); t--; }
-        if (t == 0) { printf("  FAIL batch %d DMA timeout\n", k); fail_count++; return; }
-        ring_wrptr = (ring_wrptr + 15u * N * 4u) & ring_mask;
+        for (int i = 0; i < N; i++) {
+            ring_cmd(0x43, 15);
+            for (int w = 0; w < 15; w++)
+                ring_write(batch[i * 15 + w]);
+        }
+        gpu_kick();
     }
 
     /* Submit fence + kick, then poll repeatedly so we can tell if the
@@ -1585,9 +1574,7 @@ static void test_spans_batch_dma_sustained() {
     ring_cmd(0x23, 2);
     ring_write(FB_BASE_BYTE);
     ring_write(320);
-    ring_cmd(0x10, 2);
-    ring_write((1 << 16) | 0x00);
-    ring_write(0);
+    ring_clear_fb((uint8_t)(0x00));
 
     /* 1 KB of distinct texel bytes so each span samples a different
      * byte and the cache exercises real misses. */
@@ -1599,7 +1586,6 @@ static void test_spans_batch_dma_sustained() {
                     ((uint32_t)((uint8_t)(i + 4)) << 24));
     }
 
-    const uint32_t DMA_BUF_BYTE = 0x4000;
     const int N = 128;
     const int LAST_N = 64;            /* 128 + 128 + 64 = 320 */
     const int PIX_PER_SPAN = 8;       /* small but >1 for fb_acc exercise */
@@ -1623,11 +1609,8 @@ static void test_spans_batch_dma_sustained() {
                 p[9]  = 0; p[10] = 0; p[11] = 0;
                 p[12] = 0; p[13] = 0; p[14] = 0;
             }
-            for (int w = 0; w < 15 * n; w++)
-                sdram_write((DMA_BUF_BYTE >> 2) + w, batch[w]);
-
             /* Backpressure spin */
-            uint32_t need = (1u + 15u * n) * 4u;
+            uint32_t need = (16u * n) * 4u;
             int rt = 5000000;
             while (((mmio_read(4) - ring_wrptr - 4) & ring_mask) < need && rt > 0) {
                 tick();
@@ -1642,19 +1625,12 @@ static void test_spans_batch_dma_sustained() {
                 goto done;
             }
 
-            ring_cmd(0x41, 15 * n);
-            mmio_write(3,  DMA_BUF_BYTE);
-            mmio_write(7,  15 * n);
-            mmio_write(11, 1);
-
-            int t = 5000000;
-            while ((mmio_read(5) & 0x4) && t > 0) { tick(); t--; }
-            if (t == 0) {
-                printf("  HANG at frame %d batch %d: DMA timeout\n", frame, k);
-                hangs_at_frame = frame;
-                goto done;
+            for (int i = 0; i < n; i++) {
+                ring_cmd(0x43, 15);
+                for (int w = 0; w < 15; w++)
+                    ring_write(batch[i * 15 + w]);
             }
-            ring_wrptr = (ring_wrptr + 15u * n * 4u) & ring_mask;
+            gpu_kick();
             total_batches++;
         }
         /* Per-frame fence/kick like d3d_gpu_flush does. */
@@ -1688,13 +1664,10 @@ done:
     }
 }
 
-/* GPU_DMA_KICK doorbell — same two-span batch as test_spans_batch_two,
- * but instead of writing the 30 payload words via MMIO, we backdoor the
- * batch into "SDRAM" and let the GPU pull it via its own m_rd_* AXI
- * master.  Validates: header MMIO write + DMA payload pull → atomic
- * publish via DMA_S_PUBLISH state → existing decoder fragment-pipe path. */
+/* Doorbell command upload — same two-span stream as test_spans_batch_two,
+ * but routed through the production SDRAM command-stream DMA path. */
 static void test_spans_batch_dma() {
-    printf("TEST: CMD_DRAW_SPANS_BATCH — DMA pull from SDRAM\n");
+    printf("TEST: Batched DRAW_SPAN stream — DMA pull from SDRAM\n");
 
     gpu_init();
 
@@ -1704,16 +1677,12 @@ static void test_spans_batch_dma() {
     ring_write(FB_BASE_BYTE);
     ring_write(320);
 
-    ring_cmd(0x10, 2);
-    ring_write((1 << 16) | 0x00);
-    ring_write(0);
+    ring_clear_fb((uint8_t)(0x00));
 
     sdram_write(TEX_BASE_BYTE >> 2, 0xEFEFEFEF);
     sdram_write((TEX_BASE_BYTE + 4) >> 2, 0x42424242);
 
-    /* Stage the 30 payload words in SDRAM at DMA_BUF byte offset.
-     * The DMA puller will INCR-burst from this region. */
-    const uint32_t DMA_BUF_BYTE = 0x4000;  /* well clear of FB & textures */
+    /* Stage the 30 payload words behind one batch header. */
     uint32_t batch[30];
     /* Span 0 (row 0, texel 0xEF). */
     batch[0]  = FB_BASE_BYTE;
@@ -1735,29 +1704,12 @@ static void test_spans_batch_dma() {
     batch[23] = 0;
     batch[24] = 0; batch[25] = 0; batch[26] = 0;
     batch[27] = 0; batch[28] = 0; batch[29] = 0;
-    for (int i = 0; i < 30; i++)
-        sdram_write((DMA_BUF_BYTE >> 2) + i, batch[i]);
-
-    /* Header via MMIO — lands in ring BRAM but does NOT publish wrptr. */
-    ring_cmd(0x41, 30);
-
-    /* Arm the doorbell: SRC, LEN, KICK.  The DMA pull writes 30 words
-     * into the ring BRAM and atomically publishes ring_wrptr at the end. */
-    mmio_write(3,  DMA_BUF_BYTE);   /* GPU_DMA_SRC */
-    mmio_write(7,  30);             /* GPU_DMA_LEN */
-    mmio_write(11, 1);              /* GPU_DMA_KICK */
-
-    /* Wait for DMA to complete (dma_busy bit clears in GPU_STATUS).
-     * Then sync the test's ring_wrptr shadow to account for the 30
-     * payload words the DMA published, so the subsequent gpu_finish's
-     * ring_wrptr MMIO write doesn't roll the GPU's wrptr back. */
-    int dma_timeout = 100000;
-    while ((mmio_read(5) & 0x4) && dma_timeout > 0) {  /* GPU_STATUS bit2 */
-        tick();
-        dma_timeout--;
-    }
-    check("dma_busy_clears", dma_timeout > 0 ? 1 : 0, 1);
-    ring_wrptr = (ring_wrptr + 30u * 4u) & ring_mask;
+    ring_cmd(0x43, 15);
+    for (int i = 0; i < 15; i++)
+        ring_write(batch[i]);
+    ring_cmd(0x43, 15);
+    for (int i = 15; i < 30; i++)
+        ring_write(batch[i]);
 
     bool ok = gpu_finish();
     check("dma_batch_done", ok ? 1 : 0, 1);
@@ -1782,9 +1734,9 @@ static void test_dma_busy_status_includes_global_busy() {
 
     gpu_init();
 
-    const uint32_t DMA_BUF_BYTE = 0x5000;
+    const uint32_t DMA_BUF_BYTE = CMD_UPLOAD_BYTE;
     for (int i = 0; i < 16; i++)
-        sdram_write((DMA_BUF_BYTE >> 2) + i, 0xDEAD0000u + (uint32_t)i);
+        sdram_write((DMA_BUF_BYTE >> 2) + i, 0x01000000u);  // CMD_NOP headers
 
     mmio_write(3,  DMA_BUF_BYTE);
     mmio_write(7,  16);
@@ -1821,16 +1773,14 @@ static void test_skip_zero() {
     ring_write(320);
 
     // Clear to 0xEE (background)
-    ring_cmd(0x10, 2);
-    ring_write((1 << 16) | 0xEE);
-    ring_write(0);
+    ring_clear_fb((uint8_t)(0xEE));
 
     // Texture: [0x11, 0xFF, 0x22, 0xFF]
     // 0xFF should be skipped (transparent), 0x11 and 0x22 drawn
     sdram_write(TEX_BASE_BYTE >> 2, 0xFF22FF11);
 
     // Draw 4 pixels with SKIP_ZERO flag
-    ring_cmd(0x40, 15);
+    ring_cmd(0x43, 15);
     ring_write(FB_BASE_BYTE);
     ring_write(TEX_BASE_BYTE);
     ring_write(0); ring_write(0);
@@ -1871,9 +1821,7 @@ static void test_multiple_commands() {
     ring_write(320);
 
     // Clear to 0
-    ring_cmd(0x10, 2);
-    ring_write((1 << 16) | 0x00);
-    ring_write(0);
+    ring_clear_fb((uint8_t)(0x00));
 
     // Texture A: [0xAA]
     sdram_write(TEX_BASE_BYTE >> 2, 0xAAAAAAAA);
@@ -1881,7 +1829,7 @@ static void test_multiple_commands() {
     sdram_write((TEX_BASE_BYTE >> 2) + 4, 0xBBBBBBBB);
 
     // Span 1: 4 pixels at offset 0, texture A
-    ring_cmd(0x40, 15);
+    ring_cmd(0x43, 15);
     ring_write(FB_BASE_BYTE + 0);
     ring_write(TEX_BASE_BYTE);
     ring_write(0); ring_write(0);
@@ -1894,7 +1842,7 @@ static void test_multiple_commands() {
     ring_write(0); ring_write(0); ring_write(0);
 
     // Span 2: 4 pixels at offset 10, texture B
-    ring_cmd(0x40, 15);
+    ring_cmd(0x43, 15);
     ring_write(FB_BASE_BYTE + 10);
     ring_write(TEX_BASE_BYTE + 16);
     ring_write(0); ring_write(0);
@@ -1916,7 +1864,7 @@ static void test_multiple_commands() {
     check_byte("multi_spanB_3", 13, 0xBB);
 }
 
-/* Stress: many back-to-back CMD_DRAW_SPAN commands in one ring fill,
+/* Stress: many back-to-back scalar span payloads in one ring fill,
  * mirroring BUILD's per-column dispatch in Duke3D.  Validates the
  * standalone span path holds up across hundreds of spans in a row,
  * including the ring-wrap path (each span is 16 words; 100 spans =
@@ -1926,7 +1874,7 @@ static void test_multiple_commands() {
  * (the kind of bug that the 2-span test_multiple_commands misses but
  * that BUILD's hundreds-per-frame dispatch will hit immediately). */
 static void test_spans_back_to_back_stress() {
-    printf("TEST: Back-to-back CMD_DRAW_SPAN stress (100 spans)\n");
+    printf("TEST: Back-to-back scalar span stress (100 spans)\n");
 
     gpu_init();
 
@@ -1937,9 +1885,7 @@ static void test_spans_back_to_back_stress() {
     ring_write(FB_BASE_BYTE);
     ring_write(320);
 
-    ring_cmd(0x10, 2);   /* CLEAR */
-    ring_write((1 << 16) | 0x00);
-    ring_write(0);
+    ring_clear_fb(0x00);
 
     /* Texture: 256 distinct bytes (texel[i] = i+1 to avoid SKIP_ZERO confusion). */
     for (int i = 0; i < 256; i += 4) {
@@ -1955,7 +1901,7 @@ static void test_spans_back_to_back_stress() {
      * unique texel so we can detect mis-routing per span. */
     const int N_SPANS = 100;
     for (int i = 0; i < N_SPANS; i++) {
-        ring_cmd(0x40, 15);
+        ring_cmd(0x43, 15);
         ring_write(FB_BASE_BYTE + i);                 /* fb_addr — 1 byte per span */
         ring_write(TEX_BASE_BYTE + i);                /* tex_addr — texel i */
         ring_write(0); ring_write(0);                  /* s,t */
@@ -2015,9 +1961,7 @@ static void test_spans_with_cmap_changes() {
     ring_write(FB_BASE_BYTE);
     ring_write(320);
 
-    ring_cmd(0x10, 2);
-    ring_write((1 << 16) | 0x00);
-    ring_write(0);
+    ring_clear_fb((uint8_t)(0x00));
 
     sdram_write(TEX_BASE_BYTE >> 2, 0xAAAAAAAA);
 
@@ -2029,12 +1973,12 @@ static void test_spans_with_cmap_changes() {
         ring_cmd(0x28, 1);                /* CMD_SET_COLORMAP_ID */
         ring_write((uint32_t)(i & 1));    /* slot 0 or 1 */
 
-        ring_cmd(0x40, 15);               /* CMD_DRAW_SPAN, 1 pixel */
+        ring_cmd(0x43, 15);               /* scalar span, 1 pixel */
         ring_write(FB_BASE_BYTE + i);
         ring_write(TEX_BASE_BYTE);
         ring_write(0); ring_write(0);
         ring_write(0); ring_write(0);
-        ring_write((1 << 16) | (0 << 8) | 0x01);
+        ring_write(((uint32_t)(i & 1) << 28) | (1 << 16) | (0 << 8) | 0x01);
         ring_write((1 << 16) | 1);
         ring_write(0);
         ring_write(0); ring_write(0); ring_write(0);
@@ -2078,9 +2022,7 @@ static void test_tex_cache_miss() {
     ring_write(320);
 
     // Clear
-    ring_cmd(0x10, 2);
-    ring_write((1 << 16) | 0x00);
-    ring_write(0);
+    ring_clear_fb((uint8_t)(0x00));
 
     // Create a 64-byte texture (4 cache lines of 16 bytes)
     // Line 0: bytes 0x01..0x10
@@ -2094,7 +2036,7 @@ static void test_tex_cache_miss() {
     }
 
     // Draw 32 pixels stepping through texture
-    ring_cmd(0x40, 15);
+    ring_cmd(0x43, 15);
     ring_write(FB_BASE_BYTE);
     ring_write(TEX_BASE_BYTE);
     ring_write(0); ring_write(0);
@@ -2143,7 +2085,7 @@ static void persp_draw_span(uint32_t fb_addr,
                              int32_t  zi_persp,
                              int32_t  sdivz_step, int32_t tdivz_step,
                              int32_t  zi_step) {
-    ring_cmd(0x40, 15);
+    ring_cmd(0x43, 15);
     ring_write(fb_addr);
     ring_write(tex_addr);
     ring_write(0);                 // s (unused in persp)
@@ -2175,7 +2117,7 @@ static void test_persp_constant_z() {
     { uint8_t _cm[256]; for (int i = 0; i < 256; i++) _cm[i] = (uint8_t)i; cmap_upload_bytes(0, _cm, 256); }
 
     ring_cmd(0x23, 2); ring_write(FB_BASE_BYTE); ring_write(320);
-    ring_cmd(0x10, 2); ring_write((1 << 16) | 0x00); ring_write(0);
+    ring_clear_fb((uint8_t)(0x00));
 
     // 16-byte texture: [0,1,2,3, 4,5,6,7, ...]
     for (int w = 0; w < 4; w++) {
@@ -2212,7 +2154,7 @@ static void test_persp_two_segments() {
     { uint8_t _cm[256]; for (int i = 0; i < 256; i++) _cm[i] = (uint8_t)i; cmap_upload_bytes(0, _cm, 256); }
 
     ring_cmd(0x23, 2); ring_write(FB_BASE_BYTE); ring_write(320);
-    ring_cmd(0x10, 2); ring_write((1 << 16) | 0x00); ring_write(0);
+    ring_clear_fb((uint8_t)(0x00));
 
     // 32-byte texture
     for (int w = 0; w < 8; w++) {
@@ -2257,7 +2199,7 @@ static void test_persp_varying_z() {
     { uint8_t _cm[256]; for (int i = 0; i < 256; i++) _cm[i] = (uint8_t)i; cmap_upload_bytes(0, _cm, 256); }
 
     ring_cmd(0x23, 2); ring_write(FB_BASE_BYTE); ring_write(320);
-    ring_cmd(0x10, 2); ring_write((1 << 16) | 0x00); ring_write(0);
+    ring_clear_fb((uint8_t)(0x00));
 
     // Texture: each byte = its own index. 16 bytes is enough.
     for (int w = 0; w < 4; w++) {
@@ -2309,7 +2251,7 @@ static void test_persp_curvature_accuracy() {
     { uint8_t _cm[256]; for (int i = 0; i < 256; i++) _cm[i] = (uint8_t)i; cmap_upload_bytes(0, _cm, 256); }
 
     ring_cmd(0x23, 2); ring_write(FB_BASE_BYTE); ring_write(320);
-    ring_cmd(0x10, 2); ring_write((1 << 16) | 0x00); ring_write(0);
+    ring_clear_fb((uint8_t)(0x00));
 
     // Texture: 16 bytes, texel[i] = i. Identity colormap gives FB[x] = s_int(x).
     for (int w = 0; w < 4; w++) {
@@ -2362,7 +2304,7 @@ static void test_persp_small_zinv() {
     { uint8_t _cm[256]; for (int i = 0; i < 256; i++) _cm[i] = (uint8_t)i; cmap_upload_bytes(0, _cm, 256); }
 
     ring_cmd(0x23, 2); ring_write(FB_BASE_BYTE); ring_write(320);
-    ring_cmd(0x10, 2); ring_write((1 << 16) | 0x00); ring_write(0);
+    ring_clear_fb((uint8_t)(0x00));
 
     // 64-byte texture, identity
     for (int w = 0; w < 16; w++) {
@@ -2412,7 +2354,7 @@ static void test_persp_slope_rounding() {
     { uint8_t _cm[256]; for (int i = 0; i < 256; i++) _cm[i] = (uint8_t)i; cmap_upload_bytes(0, _cm, 256); }
 
     ring_cmd(0x23, 2); ring_write(FB_BASE_BYTE); ring_write(320);
-    ring_cmd(0x10, 2); ring_write((1 << 16) | 0x00); ring_write(0);
+    ring_clear_fb((uint8_t)(0x00));
 
     for (int w = 0; w < 16; w++) {
         uint32_t v = (w*4) | ((w*4+1) << 8) | ((w*4+2) << 16) | ((w*4+3) << 24);
@@ -2457,7 +2399,7 @@ static void test_persp_negative_zinv() {
     { uint8_t _cm[256]; for (int i = 0; i < 256; i++) _cm[i] = (uint8_t)i; cmap_upload_bytes(0, _cm, 256); }
 
     ring_cmd(0x23, 2); ring_write(FB_BASE_BYTE); ring_write(320);
-    ring_cmd(0x10, 2); ring_write((1 << 16) | 0x00); ring_write(0);
+    ring_clear_fb((uint8_t)(0x00));
 
     for (int w = 0; w < 4; w++) {
         uint32_t v = (w*4) | ((w*4+1) << 8) | ((w*4+2) << 16) | ((w*4+3) << 24);
@@ -2504,7 +2446,7 @@ static void test_persp_span_cmap_lit() {
     }
 
     ring_cmd(0x23, 2); ring_write(FB_BASE_BYTE); ring_write(320);
-    ring_cmd(0x10, 2); ring_write((1 << 16) | 0x00); ring_write(0);
+    ring_clear_fb((uint8_t)(0x00));
 
     // 16-byte texture: byte i = i.
     for (int w = 0; w < 4; w++) {
@@ -2563,7 +2505,7 @@ static void test_persp_span_subsegment_end(void) {
     { uint8_t cm[256]; for (int i = 0; i < 256; i++) cm[i] = (uint8_t)i; cmap_upload_bytes(0, cm, 256); }
 
     ring_cmd(0x23, 2); ring_write(FB_BASE_BYTE); ring_write(320);
-    ring_cmd(0x10, 2); ring_write((1 << 16) | 0x00); ring_write(0);
+    ring_clear_fb((uint8_t)(0x00));
 
     // 16-byte texture, byte i = i.
     for (int w = 0; w < 4; w++) {
@@ -2639,7 +2581,7 @@ static void test_persp_long_corridor_monotonic(void) {
     cmap_upload_identity_row0();
 
     ring_cmd(0x23, 2); ring_write(FB_BASE_BYTE); ring_write(320);
-    ring_cmd(0x10, 2); ring_write((1 << 16) | 0x00); ring_write(0);
+    ring_clear_fb((uint8_t)(0x00));
 
     // 256-byte texture, byte i = i.  Plenty of distinct texels so the
     // monotonicity check picks up off-by-one regressions.
@@ -2727,7 +2669,7 @@ static void test_persp_span_clz_boundary(void) {
     cmap_upload_identity_row0();
 
     ring_cmd(0x23, 2); ring_write(FB_BASE_BYTE); ring_write(320);
-    ring_cmd(0x10, 2); ring_write((1 << 16) | 0x00); ring_write(0);
+    ring_clear_fb((uint8_t)(0x00));
     for (int w = 0; w < 64; w++) {
         uint32_t v = (w*4) | ((w*4+1) << 8) | ((w*4+2) << 16) | ((w*4+3) << 24);
         sdram_write((TEX_BASE_BYTE >> 2) + w, v);
@@ -3104,7 +3046,7 @@ static void test_transluc_lut_basic(void) {
 
     // Submit a span: 8 pixels, fb_addr=0, flags = COLORMAP|TRANSLUC.
     // SPAN_COLORMAP=bit0=0x01, SPAN_TRANSLUC=bit6=0x40 → flags = 0x41.
-    ring_cmd(0x40, 15);
+    ring_cmd(0x43, 15);
     ring_write(FB_BASE_BYTE);       // fb_addr
     ring_write(TEX_BASE_BYTE);      // tex_addr
     ring_write(0); ring_write(0);   // s, t
@@ -3149,7 +3091,7 @@ static void transluc_emit_span(uint32_t fb_addr, uint8_t src_byte,
     ring_write(((uint32_t)1 << 16) | 1);
     ring_write(0);
     ring_write(0);
-    ring_cmd(0x40, 15);
+    ring_cmd(0x43, 15);
     ring_write(fb_addr);
     ring_write(TEX_BASE_BYTE);
     ring_write(0); ring_write(0);
@@ -3337,7 +3279,7 @@ static void test_transluc_no_blend_interleave(void) {
         sdram_write(tex_addr >> 2, v);
         ring_cmd(0x20, 4); ring_write(tex_addr);
         ring_write(((uint32_t)1 << 16) | 1); ring_write(0); ring_write(0);
-        ring_cmd(0x40, 15);
+        ring_cmd(0x43, 15);
         ring_write(FB_BASE_BYTE + fb_off);
         ring_write(tex_addr);
         ring_write(0); ring_write(0); ring_write(0); ring_write(0);
@@ -3352,7 +3294,7 @@ static void test_transluc_no_blend_interleave(void) {
         sdram_write(tex_addr >> 2, v);
         ring_cmd(0x20, 4); ring_write(tex_addr);
         ring_write(((uint32_t)1 << 16) | 1); ring_write(0); ring_write(0);
-        ring_cmd(0x40, 15);
+        ring_cmd(0x43, 15);
         ring_write(FB_BASE_BYTE + fb_off);
         ring_write(tex_addr);
         ring_write(0); ring_write(0); ring_write(0); ring_write(0);
@@ -3422,10 +3364,10 @@ static void test_span_tex_width_nonpow2(void) {
     }
 
     ring_cmd(0x23, 2); ring_write(FB_BASE_BYTE); ring_write(320);
-    ring_cmd(0x10, 2); ring_write((1 << 16) | 0x00); ring_write(0);  // clear FB
+    ring_clear_fb((uint8_t)(0x00));  // clear FB
 
     // Row 0 span: s=0, t=0, sstep=1.0 → pixels should read tex[0..7] = 0..7.
-    ring_cmd(0x40, 15);
+    ring_cmd(0x43, 15);
     ring_write(FB_BASE_BYTE);
     ring_write(tex_base);
     ring_write(0); ring_write(0);                          // s=0, t=0
@@ -3438,7 +3380,7 @@ static void test_span_tex_width_nonpow2(void) {
 
     // Row 1 span: s=100, t=1, sstep=1.0 → pixels should read tex[(100+128..107+128) & 0xFF].
     // addr = tex_base + 1 * 300 + (100..107), values = (100..107 + 128) & 0xFF = 228..235 (0xE4..0xEB).
-    ring_cmd(0x40, 15);
+    ring_cmd(0x43, 15);
     ring_write(FB_BASE_BYTE + 8);
     ring_write(tex_base);
     ring_write(100 << 16); ring_write(1 << 16);            // s=100.0, t=1.0
@@ -3508,9 +3450,7 @@ static void test_triangle_flat() {
     ring_write(320);
 
     // Clear to 0
-    ring_cmd(0x10, 2);
-    ring_write((1 << 16) | 0x00);
-    ring_write(0);
+    ring_clear_fb((uint8_t)(0x00));
 
     // Texture: single byte 0xAA
     sdram_write(TEX_BASE_BYTE >> 2, 0xAAAAAAAA);
@@ -3561,9 +3501,7 @@ static void test_triangle_degenerate() {
     ring_write(320);
 
     // Clear to 0xEE
-    ring_cmd(0x10, 2);
-    ring_write((1 << 16) | 0xEE);
-    ring_write(0);
+    ring_clear_fb((uint8_t)(0xEE));
 
     sdram_write(TEX_BASE_BYTE >> 2, 0xAAAAAAAA);
     ring_bind_texture(TEX_BASE_BYTE, 1, 1);
@@ -3595,9 +3533,7 @@ static void test_triangle_textured() {
     ring_write(FB_BASE_BYTE);
     ring_write(320);
 
-    ring_cmd(0x10, 2);
-    ring_write((1 << 16) | 0x00);
-    ring_write(0);
+    ring_clear_fb((uint8_t)(0x00));
 
     // 4x4 texture with distinct values
     // Row 0: 0x10 0x20 0x30 0x40
@@ -3664,9 +3600,7 @@ static void test_triangle_1x1_texture(void) {
     ring_write(FB_BASE_BYTE);
     ring_write(320);
 
-    ring_cmd(0x10, 2);
-    ring_write((1 << 16) | 0x00);
-    ring_write(0);
+    ring_clear_fb((uint8_t)(0x00));
 
     // Place the 1-byte texture at TEX_BASE_BYTE + 7 — mid 16-byte line.
     // Cache line fetch will round down to TEX_BASE_BYTE and pull bytes
@@ -3740,9 +3674,7 @@ static void test_triangle_multi() {
     ring_write(FB_BASE_BYTE);
     ring_write(320);
 
-    ring_cmd(0x10, 2);
-    ring_write((1 << 16) | 0x00);
-    ring_write(0);
+    ring_clear_fb((uint8_t)(0x00));
 
     // Texture A: 0xAA
     sdram_write(TEX_BASE_BYTE >> 2, 0xAAAAAAAA);
@@ -3783,9 +3715,7 @@ static void test_triangle_shared_edge() {
     ring_write(FB_BASE_BYTE);
     ring_write(320);
 
-    ring_cmd(0x10, 2);
-    ring_write((1 << 16) | 0x00);
-    ring_write(0);
+    ring_clear_fb((uint8_t)(0x00));
 
     sdram_write(TEX_BASE_BYTE >> 2, 0xAAAAAAAA);
     ring_bind_texture(TEX_BASE_BYTE, 1, 1);
@@ -3840,9 +3770,7 @@ static void test_triangle_persp_premul_dormant(void) {
     ring_cmd(0x23, 2);
     ring_write(FB_BASE_BYTE);
     ring_write(320);
-    ring_cmd(0x10, 2);
-    ring_write((1 << 16) | 0x00);
-    ring_write(0);
+    ring_clear_fb((uint8_t)(0x00));
     sdram_write(TEX_BASE_BYTE >> 2, 0xDDCCBBAA);
     ring_bind_texture(TEX_BASE_BYTE, 1, 1);
 
@@ -3893,9 +3821,7 @@ static void test_triangle_persp_vs_affine(void) {
         ring_cmd(0x23, 2);
         ring_write(FB_BASE_BYTE);
         ring_write(320);
-        ring_cmd(0x10, 2);
-        ring_write((1 << 16) | 0x00);
-        ring_write(0);
+        ring_clear_fb((uint8_t)(0x00));
         // 16x16 distinctive texture: byte = (t<<4) | s.
         for (int t = 0; t < 16; t++) {
             for (int s = 0; s < 16; s += 4) {
@@ -3992,9 +3918,7 @@ static void test_triangle_bbox_init(void) {
     ring_write(FB_BASE_BYTE);
     ring_write(320);
 
-    ring_cmd(0x10, 2);
-    ring_write((1 << 16) | 0x00);
-    ring_write(0);
+    ring_clear_fb((uint8_t)(0x00));
 
     // 16x16 texture: byte at (s, t) = (t << 4) | s.
     for (int t = 0; t < 16; t++) {
@@ -4060,7 +3984,7 @@ static void test_triangle_skip_zero(void) {
     { uint8_t _cm[256]; for (int i = 0; i < 256; i++) _cm[i] = (uint8_t)i; cmap_upload_bytes(0, _cm, 256); }
 
     ring_cmd(0x23, 2); ring_write(FB_BASE_BYTE); ring_write(320);
-    ring_cmd(0x10, 2); ring_write((1 << 16) | 0x22); ring_write(0);  // clear to 0x22
+    ring_clear_fb((uint8_t)(0x22));  // clear to 0x22
 
     // Enable color-key. 1 word payload, low bit = enable.
     ring_cmd(0x27, 1); ring_write(1);
@@ -4121,9 +4045,7 @@ static void test_triangle_back_to_back_many() {
     ring_write(FB_BASE_BYTE);
     ring_write(320);
 
-    ring_cmd(0x10, 2);
-    ring_write((1 << 16) | 0x00);
-    ring_write(0);
+    ring_clear_fb((uint8_t)(0x00));
 
     // 8×8 texture: each row is its row index × 0x10, so sampling at t=r
     // produces 0x10..0x80 and lets the gradient test land predictable
@@ -4198,9 +4120,7 @@ static void test_triangle_tex_flush_swap() {
     ring_write(FB_BASE_BYTE);
     ring_write(320);
 
-    ring_cmd(0x10, 2);
-    ring_write((1 << 16) | 0x00);
-    ring_write(0);
+    ring_clear_fb((uint8_t)(0x00));
 
     // Texture A at TEX_BASE_BYTE: all 0x55
     for (int i = 0; i < 16; i++) sdram_write((TEX_BASE_BYTE >> 2) + i, 0x55555555);
@@ -4262,9 +4182,7 @@ static void test_triangle_light_zero_identity_cmap(void) {
     ring_write(FB_BASE_BYTE);
     ring_write(320);
 
-    ring_cmd(0x10, 2);
-    ring_write((1 << 16) | 0x00);
-    ring_write(0);
+    ring_clear_fb((uint8_t)(0x00));
 
     // 16x16 texture: byte = (t<<4)|s — every texel is distinct.
     for (int t = 0; t < 16; t++) {
@@ -4335,7 +4253,7 @@ static void test_triangle_batch_two(void) {
     cmap_upload_identity_row0();
 
     ring_cmd(0x23, 2); ring_write(FB_BASE_BYTE); ring_write(320);
-    ring_cmd(0x10, 2); ring_write((1 << 16) | 0x00); ring_write(0);
+    ring_clear_fb((uint8_t)(0x00));
 
     sdram_write(TEX_BASE_BYTE >> 2, 0xAAAAAAAA);
     ring_bind_texture(TEX_BASE_BYTE, 1, 1);
@@ -4378,7 +4296,7 @@ static void test_triangle_batch_with_degenerate(void) {
     cmap_upload_identity_row0();
 
     ring_cmd(0x23, 2); ring_write(FB_BASE_BYTE); ring_write(320);
-    ring_cmd(0x10, 2); ring_write((1 << 16) | 0xEE); ring_write(0);
+    ring_clear_fb((uint8_t)(0xEE));
 
     sdram_write(TEX_BASE_BYTE >> 2, 0xAAAAAAAA);
     ring_bind_texture(TEX_BASE_BYTE, 1, 1);
@@ -4423,7 +4341,7 @@ static void test_triangle_batch_disjoint_fb(void) {
     cmap_upload_identity_row0();
 
     ring_cmd(0x23, 2); ring_write(FB_BASE_BYTE); ring_write(320);
-    ring_cmd(0x10, 2); ring_write((1 << 16) | 0x00); ring_write(0);
+    ring_clear_fb((uint8_t)(0x00));
 
     sdram_write(TEX_BASE_BYTE >> 2, 0xAAAAAAAA);
     ring_bind_texture(TEX_BASE_BYTE, 1, 1);
@@ -4466,7 +4384,7 @@ static void test_triangle_batch_disjoint_fb(void) {
 // over-write of adjacent pixels).
 static void emit_solid_span(uint32_t fb_addr, uint32_t tex_addr,
                             uint16_t count) {
-    ring_cmd(0x40, 15);
+    ring_cmd(0x43, 15);
     ring_write(fb_addr);
     ring_write(tex_addr);
     ring_write(0);                 // s
@@ -4488,7 +4406,7 @@ static void test_span_partial_word_handoff(void) {
     cmap_upload_identity_row0();
 
     ring_cmd(0x23, 2); ring_write(FB_BASE_BYTE); ring_write(320);
-    ring_cmd(0x10, 2); ring_write((1 << 16) | 0xCC); ring_write(0); // sentinel CC
+    ring_clear_fb((uint8_t)(0xCC)); // sentinel CC
 
     // Four 1-byte solid textures at distinct words.
     sdram_write((TEX_BASE_BYTE >> 2) + 0, 0x11111111);
@@ -4553,7 +4471,7 @@ static void test_span_partial_word_handoff(void) {
 // backward as well as forward.
 static void emit_solid_span_stride(uint32_t fb_addr, uint32_t tex_addr,
                                     uint16_t count, int16_t stride) {
-    ring_cmd(0x40, 15);
+    ring_cmd(0x43, 15);
     ring_write(fb_addr);
     ring_write(tex_addr);
     ring_write(0); ring_write(0);
@@ -4573,7 +4491,7 @@ static void test_span_partial_reverse_stride(void) {
     cmap_upload_identity_row0();
 
     ring_cmd(0x23, 2); ring_write(FB_BASE_BYTE); ring_write(320);
-    ring_cmd(0x10, 2); ring_write((1 << 16) | 0xCC); ring_write(0);
+    ring_clear_fb((uint8_t)(0xCC));
 
     sdram_write((TEX_BASE_BYTE >> 2) + 0, 0x55555555);
     sdram_write((TEX_BASE_BYTE >> 2) + 1, 0x66666666);
@@ -4616,7 +4534,7 @@ static void test_span_back_to_back_columns(void) {
     cmap_upload_identity_row0();
 
     ring_cmd(0x23, 2); ring_write(FB_BASE_BYTE); ring_write(320);
-    ring_cmd(0x10, 2); ring_write((1 << 16) | 0xCC); ring_write(0);
+    ring_clear_fb((uint8_t)(0xCC));
 
     // Per-column texel = (column_index | 0x80) so 0xCC sentinel can never
     // match, and we can identify which column wrote each pixel.
@@ -4633,7 +4551,7 @@ static void test_span_back_to_back_columns(void) {
         ring_bind_texture(TEX_BASE_BYTE + col*4, 1, 1);
         // Column at fb_addr = base_byte + col, fb_stride=320 (next row),
         // count=H pixels going down screen.
-        ring_cmd(0x40, 15);
+        ring_cmd(0x43, 15);
         ring_write(FB_BASE_BYTE + col);
         ring_write(TEX_BASE_BYTE + col*4);
         ring_write(0); ring_write(0); ring_write(0); ring_write(0);
@@ -4699,7 +4617,7 @@ static void test_persp_long_oblique_span(void) {
     { uint8_t cm[256]; for (int i = 0; i < 256; i++) cm[i] = (uint8_t)i;
       cmap_upload_bytes(0, cm, 256); }
     ring_cmd(0x23, 2); ring_write(FB_BASE_BYTE); ring_write(320);
-    ring_cmd(0x10, 2); ring_write((1 << 16) | 0xCC); ring_write(0);
+    ring_clear_fb((uint8_t)(0xCC));
 
     // 256-byte texture, identity (texel(s) = s & 0xFF).
     for (int s = 0; s < 256; s += 4)
@@ -4789,7 +4707,7 @@ static void test_persp_quake_d_scan_repro(void) {
     { uint8_t cm[256]; for (int i = 0; i < 256; i++) cm[i] = (uint8_t)i;
       cmap_upload_bytes(0, cm, 256); }
     ring_cmd(0x23, 2); ring_write(FB_BASE_BYTE); ring_write(320);
-    ring_cmd(0x10, 2); ring_write((1 << 16) | 0xCC); ring_write(0);
+    ring_clear_fb((uint8_t)(0xCC));
 
     // 64×128 texture: byte = ((t & 0x3) << 6) | (s & 0x3F).  Bottom 6
     // bits decode to s mod 64; top 2 bits decode to t mod 4.  Stored
@@ -4898,7 +4816,7 @@ static void test_persp_quake_d_scan_repro(void) {
         { uint8_t cm2[256]; for (int i = 0; i < 256; i++) cm2[i] = (uint8_t)i;
           cmap_upload_bytes(0, cm2, 256); }
         ring_cmd(0x23, 2); ring_write(FB_BASE_BYTE); ring_write(320);
-        ring_cmd(0x10, 2); ring_write((1 << 16) | 0xCC); ring_write(0);
+        ring_clear_fb((uint8_t)(0xCC));
         ring_bind_texture(TEX_BASE_BYTE, 64, 128);
 
         persp_draw_span(FB_BASE_BYTE, TEX_BASE_BYTE,
@@ -4966,7 +4884,7 @@ static void test_persp_high_magnitude_overflow(void) {
     { uint8_t cm[256]; for (int i = 0; i < 256; i++) cm[i] = (uint8_t)i;
       cmap_upload_bytes(0, cm, 256); }
     ring_cmd(0x23, 2); ring_write(FB_BASE_BYTE); ring_write(320);
-    ring_cmd(0x10, 2); ring_write((1 << 16) | 0xCC); ring_write(0);
+    ring_clear_fb((uint8_t)(0xCC));
 
     for (int s = 0; s < 256; s += 4)
         sdram_write((TEX_BASE_BYTE >> 2) + s/4,
@@ -5058,7 +4976,7 @@ static void test_persp_sadjust_offset(void) {
     { uint8_t cm[256]; for (int i = 0; i < 256; i++) cm[i] = (uint8_t)i;
       cmap_upload_bytes(0, cm, 256); }
     ring_cmd(0x23, 2); ring_write(FB_BASE_BYTE); ring_write(320);
-    ring_cmd(0x10, 2); ring_write((1 << 16) | 0xCC); ring_write(0);
+    ring_clear_fb((uint8_t)(0xCC));
 
     for (int s = 0; s < 256; s += 4)
         sdram_write((TEX_BASE_BYTE >> 2) + s/4,
@@ -5133,7 +5051,7 @@ static void test_persp_tiny_zinv_precision(void) {
     { uint8_t cm[256]; for (int i = 0; i < 256; i++) cm[i] = (uint8_t)i;
       cmap_upload_bytes(0, cm, 256); }
     ring_cmd(0x23, 2); ring_write(FB_BASE_BYTE); ring_write(320);
-    ring_cmd(0x10, 2); ring_write((1 << 16) | 0xCC); ring_write(0);
+    ring_clear_fb((uint8_t)(0xCC));
 
     for (int s = 0; s < 256; s += 4)
         sdram_write((TEX_BASE_BYTE >> 2) + s/4,
@@ -5192,7 +5110,7 @@ static void test_persp_tiny_zinv_precision(void) {
 }
 
 // Regression: sp_tex_w_mask / sp_tex_h_mask must not bleed from a
-// preceding CMD_DRAW_SPAN into a subsequent DRAW_TRIANGLES.  Pre-fix
+// preceding scalar span into a subsequent DRAW_TRIANGLES.  Pre-fix
 // the triangle inherited the span's POT wrap mask and clipped a
 // non-POT alias skin's columns.  Post-fix, triangle span emit resets
 // both masks to 0xFFFF (no wrap).
@@ -5210,7 +5128,7 @@ static void test_triangle_mask_bleed_from_span(void) {
     { uint8_t cm[256]; for (int i = 0; i < 256; i++) cm[i] = (uint8_t)i;
       cmap_upload_bytes(0, cm, 256); }
     ring_cmd(0x23, 2); ring_write(FB_BASE_BYTE); ring_write(320);
-    ring_cmd(0x10, 2); ring_write((1 << 16) | 0xCC); ring_write(0);
+    ring_clear_fb((uint8_t)(0xCC));
 
     // 100x1 non-POT texture: byte = (s & 0xFF) so each column is
     // identifiable.  Triangle samples s in 64..99 — those columns
@@ -5228,7 +5146,7 @@ static void test_triangle_mask_bleed_from_span(void) {
 
     // First: a benign DRAW_SPAN that sets sp_tex_w_mask = 63.
     ring_bind_texture(TEX_BASE_BYTE, 64, 1);
-    ring_cmd(0x40, 15);
+    ring_cmd(0x43, 15);
     ring_write(FB_BASE_BYTE + 200*320);  // far row, won't overlap triangle
     ring_write(TEX_BASE_BYTE);
     ring_write(0); ring_write(0);
@@ -5294,7 +5212,7 @@ static void test_triangle_affine_cw_winding(void) {
     { uint8_t cm[256]; for (int i = 0; i < 256; i++) cm[i] = (uint8_t)i;
       cmap_upload_bytes(0, cm, 256); }
     ring_cmd(0x23, 2); ring_write(FB_BASE_BYTE); ring_write(320);
-    ring_cmd(0x10, 2); ring_write((1 << 16) | 0xCC); ring_write(0);
+    ring_clear_fb((uint8_t)(0xCC));
 
     // 16x16 texture: byte = (t<<4)|s.
     for (int t = 0; t < 16; t++)
@@ -5382,7 +5300,7 @@ static void test_triangle_gouraud_light_flat_from_v0(void) {
     }
 
     ring_cmd(0x23, 2); ring_write(FB_BASE_BYTE); ring_write(320);
-    ring_cmd(0x10, 2); ring_write((1u << 16) | 0xCCu); ring_write(0);
+    ring_clear_fb((uint8_t)(0xCCu));
 
     // 8x8 texture, byte i+t*8 — only used to drive the cmap lookup.
     for (int t = 0; t < 8; t++) {
@@ -5479,7 +5397,7 @@ static void test_triangle_persp_v0_offset(void) {
     { uint8_t cm[256]; for (int i = 0; i < 256; i++) cm[i] = (uint8_t)i;
       cmap_upload_bytes(0, cm, 256); }
     ring_cmd(0x23, 2); ring_write(FB_BASE_BYTE); ring_write(320);
-    ring_cmd(0x10, 2); ring_write((1 << 16) | 0xCC); ring_write(0);
+    ring_clear_fb((uint8_t)(0xCC));
 
     // Smooth-gradient texture: byte = (s + 2*t) & 0xFF.
     uint8_t tex[64*64];
@@ -5608,7 +5526,7 @@ static void test_triangle_persp_reference_match(void) {
     { uint8_t cm[256]; for (int i = 0; i < 256; i++) cm[i] = (uint8_t)i;
       cmap_upload_bytes(0, cm, 256); }
     ring_cmd(0x23, 2); ring_write(FB_BASE_BYTE); ring_write(320);
-    ring_cmd(0x10, 2); ring_write((1 << 16) | 0xCC); ring_write(0);  // sentinel CC
+    ring_clear_fb((uint8_t)(0xCC));  // sentinel CC
 
     // 64x64 smooth-gradient texture: byte = (s + 2*t) & 0xFF.
     // |Δbyte/Δs| = 1, |Δbyte/Δt| = 2 — small s/t error stays small.
@@ -5873,7 +5791,7 @@ static void test_triangle_persp_multi(void) {
     gpu_init();
     persp_setup_cmap_identity();
     ring_cmd(0x23, 2); ring_write(FB_BASE_BYTE); ring_write(320);
-    ring_cmd(0x10, 2); ring_write((1 << 16) | 0xCC); ring_write(0);
+    ring_clear_fb((uint8_t)(0xCC));
 
     uint8_t tex[64*64];
     persp_setup_tex(tex, 64, 64);
@@ -5940,7 +5858,7 @@ static void test_triangle_persp_extreme_w(void) {
     gpu_init();
     persp_setup_cmap_identity();
     ring_cmd(0x23, 2); ring_write(FB_BASE_BYTE); ring_write(320);
-    ring_cmd(0x10, 2); ring_write((1 << 16) | 0xCC); ring_write(0);
+    ring_clear_fb((uint8_t)(0xCC));
 
     uint8_t tex[64*64];
     persp_setup_tex(tex, 64, 64);
@@ -5981,7 +5899,7 @@ static void test_triangle_persp_thin_sliver(void) {
     gpu_init();
     persp_setup_cmap_identity();
     ring_cmd(0x23, 2); ring_write(FB_BASE_BYTE); ring_write(320);
-    ring_cmd(0x10, 2); ring_write((1 << 16) | 0xCC); ring_write(0);
+    ring_clear_fb((uint8_t)(0xCC));
 
     uint8_t tex[64*64];
     persp_setup_tex(tex, 64, 64);
@@ -6020,7 +5938,7 @@ static void test_triangle_persp_wide_flat(void) {
     gpu_init();
     persp_setup_cmap_identity();
     ring_cmd(0x23, 2); ring_write(FB_BASE_BYTE); ring_write(320);
-    ring_cmd(0x10, 2); ring_write((1 << 16) | 0xCC); ring_write(0);
+    ring_clear_fb((uint8_t)(0xCC));
 
     uint8_t tex[64*64];
     persp_setup_tex(tex, 64, 64);
@@ -6058,7 +5976,7 @@ static void test_triangle_persp_small_w(void) {
     gpu_init();
     persp_setup_cmap_identity();
     ring_cmd(0x23, 2); ring_write(FB_BASE_BYTE); ring_write(320);
-    ring_cmd(0x10, 2); ring_write((1 << 16) | 0xCC); ring_write(0);
+    ring_clear_fb((uint8_t)(0xCC));
 
     uint8_t tex[64*64];
     persp_setup_tex(tex, 64, 64);
@@ -6107,7 +6025,7 @@ static void test_triangle_persp_lit_cmap(void) {
     cmap_upload_bytes(0, cm, 256);
 
     ring_cmd(0x23, 2); ring_write(FB_BASE_BYTE); ring_write(320);
-    ring_cmd(0x10, 2); ring_write((1 << 16) | 0xCC); ring_write(0);
+    ring_clear_fb((uint8_t)(0xCC));
 
     uint8_t tex[64*64];
     persp_setup_tex(tex, 64, 64);
@@ -6199,7 +6117,7 @@ static void test_triangle_persp_diagonal_stripes(void) {
     gpu_init();
     persp_setup_cmap_identity();
     ring_cmd(0x23, 2); ring_write(FB_BASE_BYTE); ring_write(320);
-    ring_cmd(0x10, 2); ring_write((1 << 16) | 0xCC); ring_write(0);
+    ring_clear_fb((uint8_t)(0xCC));
 
     uint8_t tex[64*64];
     persp_setup_tex_stripes(tex, 64, 64);
@@ -6281,7 +6199,7 @@ static void test_triangle_persp_sparse_markers(void) {
     gpu_init();
     persp_setup_cmap_identity();
     ring_cmd(0x23, 2); ring_write(FB_BASE_BYTE); ring_write(320);
-    ring_cmd(0x10, 2); ring_write((1 << 16) | 0xCC); ring_write(0);
+    ring_clear_fb((uint8_t)(0xCC));
 
     uint8_t tex[64*64];
     persp_setup_tex_markers(tex, 64, 64);
@@ -6444,7 +6362,7 @@ static void test_triangle_persp_fuzz(void) {
         gpu_init();
         persp_setup_cmap_identity();
         ring_cmd(0x23, 2); ring_write(FB_BASE_BYTE); ring_write(320);
-        ring_cmd(0x10, 2); ring_write((1 << 16) | 0xCC); ring_write(0);
+        ring_clear_fb((uint8_t)(0xCC));
         // Re-upload texture on each iter (gpu_init resets the cache).
         for (int i = 0; i < (64*64)/4; i++) {
             uint32_t word = ((uint32_t)tex[i*4 + 3] << 24)
@@ -6709,7 +6627,7 @@ static void test_triangle_persp_oblique_vs_aligned(void) {
     gpu_init();
     persp_setup_cmap_identity();
     ring_cmd(0x23, 2); ring_write(FB_BASE_BYTE); ring_write(320);
-    ring_cmd(0x10, 2); ring_write((1 << 16) | 0xCC); ring_write(0);
+    ring_clear_fb((uint8_t)(0xCC));
     persp_setup_tex(tex, 64, 64);
     ring_bind_texture(TEX_BASE_BYTE, 64, 64);
     persp_emit_triangle(oblique);
@@ -6725,7 +6643,7 @@ static void test_triangle_persp_oblique_vs_aligned(void) {
     gpu_init();
     persp_setup_cmap_identity();
     ring_cmd(0x23, 2); ring_write(FB_BASE_BYTE); ring_write(320);
-    ring_cmd(0x10, 2); ring_write((1 << 16) | 0xCC); ring_write(0);
+    ring_clear_fb((uint8_t)(0xCC));
     persp_setup_tex(tex, 64, 64);
     ring_bind_texture(TEX_BASE_BYTE, 64, 64);
     persp_emit_triangle(aligned);
@@ -6785,7 +6703,7 @@ static void test_triangle_persp_sharp_apex(void) {
     gpu_init();
     persp_setup_cmap_identity();
     ring_cmd(0x23, 2); ring_write(FB_BASE_BYTE); ring_write(320);
-    ring_cmd(0x10, 2); ring_write((1 << 16) | 0xCC); ring_write(0);
+    ring_clear_fb((uint8_t)(0xCC));
 
     uint8_t tex[64*64];
     persp_setup_tex(tex, 64, 64);
@@ -6867,7 +6785,7 @@ static void test_triangle_batch_fan32(void) {
     cmap_upload_identity_row0();
 
     ring_cmd(0x23, 2); ring_write(FB_BASE_BYTE); ring_write(320);
-    ring_cmd(0x10, 2); ring_write((1 << 16) | 0x00); ring_write(0);
+    ring_clear_fb((uint8_t)(0x00));
 
     // 64x64 texture: byte = (t<<2)|(s>>4) — non-zero everywhere so
     // any rendered pixel reads as != 0x00 (matches mode 3 wall_tex).
@@ -6986,9 +6904,7 @@ static void test_triangle_tex_flush_midflight(void) {
     ring_write(FB_BASE_BYTE);
     ring_write(320);
 
-    ring_cmd(0x10, 2);
-    ring_write((1 << 16) | 0x00);
-    ring_write(0);
+    ring_clear_fb((uint8_t)(0x00));
 
     // Use a 64x64 texture so different pixels hit different cache
     // lines and misses fire frequently — the bug requires the flush
@@ -7116,9 +7032,7 @@ static int cube_replay_one_frame(int frame, bool verbose) {
     ring_write(FB_BASE_BYTE);
     ring_write(320);
 
-    ring_cmd(0x10, 2);
-    ring_write((1 << 16) | 0x00);
-    ring_write(0);
+    ring_clear_fb((uint8_t)(0x00));
 
     int proj_x[8], proj_y[8];
     for (int i = 0; i < 8; i++)
@@ -7220,9 +7134,7 @@ static uint8_t cube_render_single_face(int frame, int target_face,
     ring_write(FB_BASE_BYTE);
     ring_write(320);
 
-    ring_cmd(0x10, 2);
-    ring_write((1 << 16) | 0x00);
-    ring_write(0);
+    ring_clear_fb((uint8_t)(0x00));
 
     int proj_x[8], proj_y[8];
     for (int i = 0; i < 8; i++)
@@ -7522,7 +7434,7 @@ static void test_gpudemo_cube_replay(void) {
 // reproduce, the bug is at the CPU↔GPU boundary (axi_periph_slave
 // or MMIO write race) which this harness doesn't exercise.
 
-/* Ring is 16 KB = 4096 words = 215 CMD_DRAW_SPAN commands max in flight.
+/* Ring is 16 KB = 4096 words = 215 scalar span commands max in flight.
  * gpudemo's real Mode 0 submits ~440 spans per frame; it only works because
  * the SDK's `_gpu_ring_ensure()` blocks until the GPU has drained enough.
  * This simplified harness submits-then-waits, so we keep each frame below
@@ -7545,7 +7457,7 @@ static void submit_mode0_frame(uint32_t fb_base, uint32_t wall_tex, uint32_t flo
     ring_write(320);
     /* 10 horizontal floor spans. */
     for (int y = 120; y < 130; y++) {
-        ring_cmd(0x40, 15);         // CMD_DRAW_SPAN
+        ring_cmd(0x43, 15);         // scalar span payload
         ring_write(fb_base + y * 320);          // fb_addr
         ring_write(floor_tex);                  // tex_addr
         ring_write((uint32_t)(y * 0x1234));     // s (arbitrary walk)
@@ -7564,7 +7476,7 @@ static void submit_mode0_frame(uint32_t fb_base, uint32_t wall_tex, uint32_t flo
         int draw_start = 100;
         int span_count = 16;
         uint32_t col_fb = fb_base + draw_start * 320 + x;
-        ring_cmd(0x40, 15);
+        ring_cmd(0x43, 15);
         ring_write(col_fb);
         ring_write(wall_tex);
         ring_write((uint32_t)((x & 63) << 16));   // s = x mod tex width
@@ -7615,116 +7527,6 @@ static void test_gpudemo_mode0_replay(void) {
     }
     printf("  gpudemo replay: %d/%d frames completed\n", last_fence_ok + 1, N_FRAMES);
     check("gpudemo_mode0_replay", last_fence_ok == N_FRAMES - 1 ? 1 : 0, 1);
-}
-
-// =====================================================================
-// Simulated-MMIO-drop variant of the gpudemo replay
-// =====================================================================
-// Hypothesis: on hardware, GPU_RING_DATA MMIO writes are occasionally
-// lost — some fence commands never reach the ring, so fence_reached
-// lags the app's target token.  Reproduce that symptom here by
-// deliberately skipping 1-in-N ring writes and confirm the GPU ends
-// up in the "drained to idle with fence short" state.
-//
-// If this test trips gpu_wait_fence timeout, it validates the
-// lost-MMIO theory — the real-hardware freeze matches what we see
-// when ring words are dropped.
-static int  drop_every_n = 0;  /* 0 = no drops; N = drop 1 in N writes */
-static int  drop_counter = 0;
-static void ring_write_maybe_drop(uint32_t w) {
-    drop_counter++;
-    if (drop_every_n > 0 && (drop_counter % drop_every_n) == 0) {
-        /* Simulate a lost MMIO write: still bump the app-side wrptr
-         * (so the KICK covers the "logical" range), but don't actually
-         * post the word to GPU_RING_DATA.  The ring_bram slot keeps
-         * whatever garbage / previous value was there. */
-        ring_wrptr = (ring_wrptr + 4) & ring_mask;
-        return;
-    }
-    ring_write(w);
-}
-
-static void submit_mode0_frame_dropy(uint32_t fb_base, uint32_t wall_tex,
-                                      uint32_t floor_tex, int fb_cycle) {
-    const uint32_t SPAN_COLORMAP = 0x01;
-    const uint32_t SPAN_COLUMN   = 0x02;
-    ring_cmd(0x20, 4);
-    ring_write_maybe_drop(wall_tex);
-    ring_write_maybe_drop((64u << 16) | 64u);
-    ring_write_maybe_drop(0);
-    ring_write_maybe_drop(0);
-    ring_cmd(0x23, 2);
-    ring_write_maybe_drop(fb_base);
-    ring_write_maybe_drop(320);
-    for (int y = 120; y < 130; y++) {
-        ring_cmd(0x40, 15);
-        ring_write_maybe_drop(fb_base + y * 320);
-        ring_write_maybe_drop(floor_tex);
-        ring_write_maybe_drop((uint32_t)(y * 0x1234));
-        ring_write_maybe_drop((uint32_t)(fb_cycle * 0x55));
-        ring_write_maybe_drop(0x00010000);
-        ring_write_maybe_drop(0);
-        ring_write_maybe_drop((320u << 16) | SPAN_COLORMAP);
-        ring_write_maybe_drop((1u << 16) | 64u);
-        ring_write_maybe_drop(0);
-        ring_write_maybe_drop(0); ring_write_maybe_drop(0); ring_write_maybe_drop(0);
-        ring_write_maybe_drop(0); ring_write_maybe_drop(0); ring_write_maybe_drop(0);
-        ring_write_maybe_drop(0); ring_write_maybe_drop(0); ring_write_maybe_drop(0);
-    }
-    for (int x = 0; x < 50; x++) {
-        uint32_t col_fb = fb_base + 100 * 320 + x;
-        ring_cmd(0x40, 15);
-        ring_write_maybe_drop(col_fb);
-        ring_write_maybe_drop(wall_tex);
-        ring_write_maybe_drop((uint32_t)((x & 63) << 16));
-        ring_write_maybe_drop(0);
-        ring_write_maybe_drop(0);
-        ring_write_maybe_drop(0x00010000);
-        ring_write_maybe_drop((16u << 16) | SPAN_COLORMAP | SPAN_COLUMN);
-        ring_write_maybe_drop((320u << 16) | 64u);
-        ring_write_maybe_drop(0);
-        ring_write_maybe_drop(0); ring_write_maybe_drop(0); ring_write_maybe_drop(0);
-        ring_write_maybe_drop(0); ring_write_maybe_drop(0); ring_write_maybe_drop(0);
-        ring_write_maybe_drop(0); ring_write_maybe_drop(0); ring_write_maybe_drop(0);
-    }
-}
-
-static void test_gpudemo_mode0_replay_with_drops(void) {
-    printf("TEST: gpudemo Mode 0 replay WITH simulated MMIO drops (1 in 500)\n");
-    gpu_init();
-    cmap_upload_identity_row0();
-    const uint32_t WALL_TEX  = TEX_BASE_BYTE;
-    const uint32_t FLOOR_TEX = TEX_BASE_BYTE + 64 * 64;
-    for (uint32_t w = 0; w < (64 * 64) / 4; w++) {
-        sdram_write((WALL_TEX  >> 2) + w, 0x80808080u + w);
-        sdram_write((FLOOR_TEX >> 2) + w, 0x40404040u + w);
-    }
-    const uint32_t FBS[3] = { FB_BASE_BYTE, FB_BASE_BYTE + 0x14000, FB_BASE_BYTE + 0x28000 };
-
-    drop_every_n = 500;   /* drop 1 in 500 ring-BRAM writes */
-    drop_counter = 0;
-
-    const int N_FRAMES = 100;
-    int last_ok = -1;
-    for (int f = 0; f < N_FRAMES; f++) {
-        submit_mode0_frame_dropy(FBS[f % 3], WALL_TEX, FLOOR_TEX, f);
-        bool ok = gpu_finish(500000);
-        if (!ok) {
-            printf("  FAIL @ frame %d: drops=%d (1 in %d), fence timeout\n",
-                   f, drop_counter / drop_every_n, drop_every_n);
-            printf("  state=%u\n", tb->dbg_state);
-            break;
-        }
-        last_ok = f;
-    }
-    drop_every_n = 0;  /* disable drops for subsequent tests */
-    printf("  drop-sim: %d/%d frames completed (%d MMIO writes dropped)\n",
-           last_ok + 1, N_FRAMES, drop_counter / (drop_every_n ? drop_every_n : 500));
-
-    /* Expected: if drops cause the hang, this test hits timeout early.
-     * If the GPU recovers (e.g. because garbage decodes as NOP and
-     * real fences still land), this passes and we learn the theory
-     * needs a different mechanism. */
 }
 
 // =====================================================================
@@ -8024,7 +7826,6 @@ int main(int argc, char **argv) {
     /* gpudemo Mode 0 replay — tries to reproduce the hardware freeze
      * after ~300 frames in a deterministic Verilator environment. */
     test_gpudemo_mode0_replay();
-    test_gpudemo_mode0_replay_with_drops();
 
     // Perspective spans
     test_persp_constant_z();

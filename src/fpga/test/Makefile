@@ -261,7 +261,7 @@ $(GPU_DIR)/V$(GPU_TOP): $(GPU_SRCS) $(GPU_CPP)
 		$(GPU_SRCS) $(GPU_CPP)
 
 # --- GPU floor-span coverage (BUILD/Duke3D hlineasm4 vs GPU multiply) ---
-# Focused regression suite that drives CMD_DRAW_SPAN with BUILD-style
+# Focused regression suite that drives scalar span payloads with BUILD-style
 # inputs and compares against a CPU-side hlineasm4 reference.  Some
 # cases (F2/F3/F6/F8) require shift-mode tex addressing that the RTL
 # retired — those XFAIL with a documented gap message instead of
@@ -319,7 +319,7 @@ gpu-acceptance-single: $(GPU_ACCEPT_SINGLE_DIR)/V$(GPU_TOP)
 	./$(GPU_ACCEPT_SINGLE_DIR)/V$(GPU_TOP)
 
 $(GPU_ACCEPT_SINGLE_DIR)/V$(GPU_TOP): $(GPU_SRCS) $(GPU_ACCEPT_CPP)
-	$(VERILATOR) $(VERILATOR_FLAGS) -GFBWQ_BURST2_ENABLE=0 \
+	$(VERILATOR) $(VERILATOR_FLAGS) \
 		--top-module $(GPU_TOP) \
 		--Mdir $(GPU_ACCEPT_SINGLE_DIR) \
 		-I$(COMMON_DIR) \

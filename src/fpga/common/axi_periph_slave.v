@@ -67,9 +67,6 @@ module axi_periph_slave (
 
     // Bridge write drain status (for pacing DMA reads)
     input wire         bridge_wr_idle,
-    input wire [10:0]  bridge_wr_fifo_count_dbg,
-    input wire [10:0]  bridge_wr_fifo_max_dbg,
-    input wire         bridge_wr_fifo_overflow_dbg,
 
     // Display control outputs
     output wire [2:0]  color_mode,      // 0=8bit, 1=4bit, 2=2bit, 3=RGB565, 4=RGB555, 5=RGBA5551
@@ -493,7 +490,7 @@ wire vsync_rising = vsync_sync[1] && !vsync_sync[2];
 // stays in the supported 42-60 Hz band.  Bypassed by fixed-rate adapter mode.
 // ============================================
 wire sysreg_swap_kick =
-    sysreg_wr_fire && (req_addr[8:2] == 7'b0_000110) && req_wdata[0];
+    sysreg_wr_fire && !req_addr[8] && (req_addr[7:2] == 6'd6) && req_wdata[0];
 
 vrr_controller u_vrr (
     .clk(clk),
@@ -527,30 +524,51 @@ wire target_ack_s = target_ack_sync[2];
 wire target_done_s = target_done_sync[2];
 wire [2:0] target_err_s = {target_err_sync[2][2], target_err_sync[1][2], target_err_sync[0][2]};
 
-wire [31:0] cont1_key_s;
-wire [31:0] cont1_joy_s;
-wire [15:0] cont1_trig_s;
-wire [31:0] cont2_key_s;
-wire [31:0] cont2_joy_s;
-wire [15:0] cont2_trig_s;
-wire [31:0] cont3_key_s;
-wire [31:0] cont3_joy_s;
-wire [15:0] cont3_trig_s;
-wire [31:0] cont4_key_s;
-wire [31:0] cont4_joy_s;
-wire [15:0] cont4_trig_s;
-synch_3 #(.WIDTH(32)) s_cont1_key(.i(cont1_key), .o(cont1_key_s), .clk(clk), .rise(), .fall());
-synch_3 #(.WIDTH(32)) s_cont2_key(.i(cont2_key), .o(cont2_key_s), .clk(clk), .rise(), .fall());
-synch_3 #(.WIDTH(32)) s_cont2_joy(.i(cont2_joy), .o(cont2_joy_s), .clk(clk), .rise(), .fall());
-synch_3 #(.WIDTH(16)) s_cont2_trig(.i(cont2_trig), .o(cont2_trig_s), .clk(clk), .rise(), .fall());
-synch_3 #(.WIDTH(32)) s_cont1_joy(.i(cont1_joy), .o(cont1_joy_s), .clk(clk), .rise(), .fall());
-synch_3 #(.WIDTH(16)) s_cont1_trig(.i(cont1_trig), .o(cont1_trig_s), .clk(clk), .rise(), .fall());
-synch_3 #(.WIDTH(32)) s_cont3_key(.i(cont3_key), .o(cont3_key_s), .clk(clk), .rise(), .fall());
-synch_3 #(.WIDTH(32)) s_cont3_joy(.i(cont3_joy), .o(cont3_joy_s), .clk(clk), .rise(), .fall());
-synch_3 #(.WIDTH(16)) s_cont3_trig(.i(cont3_trig), .o(cont3_trig_s), .clk(clk), .rise(), .fall());
-synch_3 #(.WIDTH(32)) s_cont4_key(.i(cont4_key), .o(cont4_key_s), .clk(clk), .rise(), .fall());
-synch_3 #(.WIDTH(32)) s_cont4_joy(.i(cont4_joy), .o(cont4_joy_s), .clk(clk), .rise(), .fall());
-synch_3 #(.WIDTH(16)) s_cont4_trig(.i(cont4_trig), .o(cont4_trig_s), .clk(clk), .rise(), .fall());
+reg [31:0] cont1_key_meta, cont1_key_s;
+reg [31:0] cont1_joy_meta, cont1_joy_s;
+reg [15:0] cont1_trig_meta, cont1_trig_s;
+reg [31:0] cont2_key_meta, cont2_key_s;
+reg [31:0] cont2_joy_meta, cont2_joy_s;
+reg [15:0] cont2_trig_meta, cont2_trig_s;
+reg [31:0] cont3_key_meta, cont3_key_s;
+reg [31:0] cont3_joy_meta, cont3_joy_s;
+reg [15:0] cont3_trig_meta, cont3_trig_s;
+reg [31:0] cont4_key_meta, cont4_key_s;
+reg [31:0] cont4_joy_meta, cont4_joy_s;
+reg [15:0] cont4_trig_meta, cont4_trig_s;
+
+// Controller buses are sampled state, not edge pulses.  Keep only the two
+// synchronizer flops needed by this clock domain; the APF synch_2 helper also
+// carries edge-detect history that these vector buses never use.
+always @(posedge clk) begin
+    cont1_key_meta  <= cont1_key;
+    cont1_key_s     <= cont1_key_meta;
+    cont1_joy_meta  <= cont1_joy;
+    cont1_joy_s     <= cont1_joy_meta;
+    cont1_trig_meta <= cont1_trig;
+    cont1_trig_s    <= cont1_trig_meta;
+
+    cont2_key_meta  <= cont2_key;
+    cont2_key_s     <= cont2_key_meta;
+    cont2_joy_meta  <= cont2_joy;
+    cont2_joy_s     <= cont2_joy_meta;
+    cont2_trig_meta <= cont2_trig;
+    cont2_trig_s    <= cont2_trig_meta;
+
+    cont3_key_meta  <= cont3_key;
+    cont3_key_s     <= cont3_key_meta;
+    cont3_joy_meta  <= cont3_joy;
+    cont3_joy_s     <= cont3_joy_meta;
+    cont3_trig_meta <= cont3_trig;
+    cont3_trig_s    <= cont3_trig_meta;
+
+    cont4_key_meta  <= cont4_key;
+    cont4_key_s     <= cont4_key_meta;
+    cont4_joy_meta  <= cont4_joy;
+    cont4_joy_s     <= cont4_joy_meta;
+    cont4_trig_meta <= cont4_trig;
+    cont4_trig_s    <= cont4_trig_meta;
+end
 
 // ============================================
 // Input hub: raw APF slots + compact change FIFO
@@ -559,7 +577,7 @@ localparam [7:0] INPUT_EVENT_SLOT_CHANGE = 8'h01;
 
 reg [3:0] input_irq_mask;
 reg       input_overflow;
-reg [31:0] input_seq;
+reg [15:0] input_seq;
 
 reg [31:0] input_prev_key0, input_prev_key1, input_prev_key2, input_prev_key3;
 reg [31:0] input_prev_joy0, input_prev_joy1, input_prev_joy2, input_prev_joy3;
@@ -613,24 +631,24 @@ end
 
 wire        input_fifo_empty;
 wire        input_fifo_full;
-wire [5:0]  input_fifo_count;
+wire [4:0]  input_fifo_count;
 wire [63:0] input_fifo_dout;
 wire [63:0] input_fifo_din = {
     INPUT_EVENT_SLOT_CHANGE,
     6'b0, input_event_slot,
     5'b0, input_event_fields,
     8'h00,
-    input_seq
+    16'b0, input_seq
 };
 wire input_fifo_pop  = (state == S_PERIPH_RD) && can_push_beat && reg_sysreg &&
-                       (req_addr[8:2] == 7'b1_010101) && !input_fifo_empty; // INPUT_FIFO_DATA1 (0x154)
+                       req_addr[8] && (req_addr[7:2] == 6'd21) && !input_fifo_empty; // INPUT_FIFO_DATA1 (0x154)
 wire input_fifo_push = input_event_valid && !input_fifo_full;
 reg  input_fifo_clear;
 
 sync_fifo #(
     .WIDTH(64),
-    .DEPTH(32),
-    .ADDR_WIDTH(5)
+    .DEPTH(16),
+    .ADDR_WIDTH(4)
 ) input_event_fifo (
     .clk(clk),
     .reset(reset),
@@ -650,7 +668,7 @@ always @(posedge clk) begin
     if (reset) begin
         input_irq_mask <= 4'b0;
         input_overflow <= 1'b0;
-        input_seq <= 32'd0;
+        input_seq <= 16'd0;
         input_fifo_clear <= 1'b1;
         input_prev_key0 <= 32'd0;
         input_prev_key1 <= 32'd0;
@@ -667,7 +685,7 @@ always @(posedge clk) begin
     end else begin
         input_fifo_clear <= 1'b0;
 
-        if (sysreg_wr_fire && req_addr[8:2] == 7'b1_000001) begin // INPUT_IRQ_MASK (0x104)
+        if (sysreg_wr_fire && req_addr[8] && req_addr[7:2] == 6'd1) begin // INPUT_IRQ_MASK (0x104)
             input_irq_mask <= req_wdata[3:0];
             input_prev_key0 <= cont1_key_s;
             input_prev_key1 <= cont2_key_s;
@@ -683,7 +701,7 @@ always @(posedge clk) begin
             input_prev_trig3 <= cont4_trig_s;
         end
 
-        if (sysreg_wr_fire && req_addr[8:2] == 7'b1_000010) begin // INPUT_IRQ_CLEAR (0x108)
+        if (sysreg_wr_fire && req_addr[8] && req_addr[7:2] == 6'd2) begin // INPUT_IRQ_CLEAR (0x108)
             if (req_wdata[0]) begin
                 input_fifo_clear <= 1'b1;
                 input_prev_key0 <= cont1_key_s;
@@ -705,7 +723,7 @@ always @(posedge clk) begin
             if (input_fifo_full) begin
                 input_overflow <= 1'b1;
             end else begin
-                input_seq <= input_seq + 32'd1;
+                input_seq <= input_seq + 16'd1;
                 case (input_event_slot)
                     2'd0: begin
                         input_prev_key0 <= cont1_key_s;
@@ -899,21 +917,21 @@ always @(posedge clk) begin
             end
         end
 
-        if (sysreg_wr_fire) begin
-            case (req_addr[8:2])
-                7'b0_000011: term_fb_active <= req_wdata[0];  // TERM_FB_CTRL
-                7'b0_011100: color_mode_reg <= req_wdata[2:0];  // offset 0x70
-                7'b0_000110: if (req_wdata[0]) begin
+        if (sysreg_wr_fire && !req_addr[8]) begin
+            case (req_addr[7:2])
+                6'd3: term_fb_active <= req_wdata[0];  // TERM_FB_CTRL
+                6'd28: color_mode_reg <= req_wdata[2:0];  // offset 0x70
+                6'd6: if (req_wdata[0]) begin
                     fb_ready_idx <= req_wdata[2:1];
                     fb_swap_pending <= 1'b1;
                 end
-                7'b0_001000: ds_slot_id_reg <= req_wdata[15:0];
-                7'b0_001001: ds_slot_offset_reg <= req_wdata;
-                7'b0_001010: ds_bridge_addr_reg <= req_wdata;
-                7'b0_001011: ds_length_reg <= req_wdata;
-                7'b0_001100: ds_param_addr_reg <= req_wdata;
-                7'b0_001101: ds_resp_addr_reg <= req_wdata;
-                7'b0_001110: begin
+                6'd8: ds_slot_id_reg <= req_wdata[15:0];
+                6'd9: ds_slot_offset_reg <= req_wdata;
+                6'd10: ds_bridge_addr_reg <= req_wdata;
+                6'd11: ds_length_reg <= req_wdata;
+                6'd12: ds_param_addr_reg <= req_wdata;
+                6'd13: ds_resp_addr_reg <= req_wdata;
+                6'd14: begin
                     if (!(target_dataslot_read || target_dataslot_write || target_dataslot_openfile || target_ack_s)) begin
                         target_dataslot_id <= ds_slot_id_reg;
                         target_dataslot_slotoffset <= ds_slot_offset_reg;
@@ -942,42 +960,42 @@ always @(posedge clk) begin
                         dataslot_irq_pending <= 1'b0;
                     end
                 end
-                7'b0_001111: begin  // DS_STATUS (0x3C) bit 7 W1C clears data-slot IRQ pending
+                6'd15: begin  // DS_STATUS (0x3C) bit 7 W1C clears data-slot IRQ pending
                     if (req_wdata[7])
                         dataslot_irq_pending <= 1'b0;
                 end
-                7'b0_010000: begin
+                6'd16: begin
                     pal_index_reg <= req_wdata[7:0];
                     pal_commit <= req_wdata[31];
                 end
-                7'b0_010001: begin
+                6'd17: begin
                     pal_wr <= 1;
                     pal_addr <= pal_index_reg;
                     pal_data <= req_wdata[23:0];
                     pal_index_reg <= pal_index_reg + 1;
                 end
 
-                7'b0_010010: save_dt_slot <= req_wdata[3:0];  // SAVE_DT_SLOT (0x48)
-                7'b0_010011: begin                               // SAVE_DT_SIZE (0x4C) — write triggers commit
+                6'd18: save_dt_slot <= req_wdata[3:0];  // SAVE_DT_SLOT (0x48)
+                6'd19: begin                               // SAVE_DT_SIZE (0x4C) — write triggers commit
                     save_dt_size <= req_wdata;
                     save_dt_commit <= ~save_dt_commit;
                 end
 
-                7'b0_100000: begin  // ANALOGIZER_SETTINGS (0x80)
+                6'd32: begin  // ANALOGIZER_SETTINGS (0x80)
                     analogizer_cpu_wr_settings <= req_wdata;
                     analogizer_cpu_wr_toggle[0] <= ~analogizer_cpu_wr_toggle[0];
                 end
-                7'b0_100001: begin  // ANALOGIZER_H_OFFSET (0x84)
+                6'd33: begin  // ANALOGIZER_H_OFFSET (0x84)
                     analogizer_cpu_wr_hoffset <= req_wdata;
                     analogizer_cpu_wr_toggle[1] <= ~analogizer_cpu_wr_toggle[1];
                 end
-                7'b0_100010: begin  // ANALOGIZER_V_OFFSET (0x88)
+                6'd34: begin  // ANALOGIZER_V_OFFSET (0x88)
                     analogizer_cpu_wr_voffset <= req_wdata;
                     analogizer_cpu_wr_toggle[2] <= ~analogizer_cpu_wr_toggle[2];
                 end
 
                 // SNAC Shifter + GPIO registers (0xA0-0xAC)
-                7'b0_101000: begin  // SNAC_CTRL (0xA0)
+                6'd40: begin  // SNAC_CTRL (0xA0)
                     snac_en_reg   <= req_wdata[7];
                     snac_mode_reg <= req_wdata[9:8];
                     // Start a shift if bit[0] set and shifter not busy
@@ -987,39 +1005,36 @@ always @(posedge clk) begin
                         snac_latch_en_reg  <= req_wdata[6];
                     end
                 end
-                7'b0_101001: snac_div_reg <= req_wdata[15:0];   // SNAC_DIV (0xA4)
-                7'b0_101010: snac_tx_reg  <= req_wdata;          // SNAC_DATA (0xA8)
-                7'b0_101011: begin                                // SNAC_GPIO (0xAC)
+                6'd41: snac_div_reg <= req_wdata[15:0];   // SNAC_DIV (0xA4)
+                6'd42: snac_tx_reg  <= req_wdata;          // SNAC_DATA (0xA8)
+                6'd43: begin                                // SNAC_GPIO (0xAC)
                     snac_gpio_out_reg <= req_wdata[7:0];
                     snac_gpio_dir_reg <= req_wdata[15:8];
                 end
 
-                7'b0_101100: begin  // SYS_SHUTDOWN (0xB0)
+                6'd44: begin  // SYS_SHUTDOWN (0xB0)
                     shutdown_ack <= req_wdata[0];
                 end
 
                 // Hardware timer (0xB4-0xB8)
-                7'b0_101101: begin  // TIMER_PERIOD (0xB4)
+                6'd45: begin  // TIMER_PERIOD (0xB4)
                     timer_period <= req_wdata;
                     timer_counter <= req_wdata - 1;
                 end
-                7'b0_101110: begin  // TIMER_CTRL (0xB8)
+                6'd46: begin  // TIMER_CTRL (0xB8)
                     timer_enable <= req_wdata[0];
                     if (req_wdata[1]) timer_irq_pending <= 0;
                 end
 
                 // Datatable slot size query (0x90)
-                7'b0_100100: begin
+                6'd36: begin
                     dt_query_addr <= req_wdata[9:0];
                     dt_query_toggle <= ~dt_query_toggle;
                 end
 
 
-                7'b0_100111: vsync_irq_pending <= 0;                    // VSYNC_IRQ_CLEAR (0x9C) W1C
-                7'b0_111111: irq_mask <= req_wdata[5:0];             // IRQ_MASK (0xFC)
-
-                7'b0_110111: begin end  // VRR_V_TOTAL (0xDC) — read-only live value
-                7'b0_111000: begin end  // VRR_SWAP_HOLD (0xE0) — read-only live value
+                6'd39: vsync_irq_pending <= 0;                    // VSYNC_IRQ_CLEAR (0x9C) W1C
+                6'd63: irq_mask <= req_wdata[5:0];             // IRQ_MASK (0xFC)
 
                 default: ;
             endcase
@@ -1065,116 +1080,134 @@ always @(posedge clk) begin
     end
 end
 
+wire        sysreg_input_page  = req_addr[8];
+wire [5:0]  sysreg_word        = req_addr[7:2];
+wire        input_slot_read    = sysreg_input_page
+                               && (req_addr[7:4] >= 4'h1)
+                               && (req_addr[7:4] <= 4'h4);
+reg [31:0] input_slot_key_rdata;
+reg [31:0] input_slot_joy_rdata;
+reg [15:0] input_slot_trig_rdata;
+reg        input_slot_irq_en_rdata;
+reg [31:0] input_slot_rdata;
+
+always @(*) begin
+    case (req_addr[7:4])
+        4'h1: begin
+            input_slot_key_rdata    = cont1_key_s;
+            input_slot_joy_rdata    = cont1_joy_s;
+            input_slot_trig_rdata   = cont1_trig_s;
+            input_slot_irq_en_rdata = input_irq_mask[0];
+        end
+        4'h2: begin
+            input_slot_key_rdata    = cont2_key_s;
+            input_slot_joy_rdata    = cont2_joy_s;
+            input_slot_trig_rdata   = cont2_trig_s;
+            input_slot_irq_en_rdata = input_irq_mask[1];
+        end
+        4'h3: begin
+            input_slot_key_rdata    = cont3_key_s;
+            input_slot_joy_rdata    = cont3_joy_s;
+            input_slot_trig_rdata   = cont3_trig_s;
+            input_slot_irq_en_rdata = input_irq_mask[2];
+        end
+        default: begin
+            input_slot_key_rdata    = cont4_key_s;
+            input_slot_joy_rdata    = cont4_joy_s;
+            input_slot_trig_rdata   = cont4_trig_s;
+            input_slot_irq_en_rdata = input_irq_mask[3];
+        end
+    endcase
+
+    case (req_addr[3:2])
+        2'd0: input_slot_rdata = {23'b0, input_slot_irq_en_rdata, 7'b0, 1'b1};
+        2'd1: input_slot_rdata = input_slot_key_rdata;
+        2'd2: input_slot_rdata = input_slot_joy_rdata;
+        default: input_slot_rdata = {16'b0, input_slot_trig_rdata};
+    endcase
+end
+
 // System register read mux
 always @(*) begin
-    case (req_addr[8:2])
-        7'b0_000000: sysreg_rdata = {30'b0, dataslot_allcomplete_s, 1'b1};
-        7'b0_000001: sysreg_rdata = cycle_counter[31:0];
-        7'b0_000010: sysreg_rdata = cycle_counter[63:32];
-        7'b0_000011: sysreg_rdata = {31'b0, term_fb_active};  // TERM_FB_CTRL
-        7'b0_011100: sysreg_rdata = {29'b0, color_mode_reg};
-        7'b0_000100: sysreg_rdata = {7'b0, fb_display_addr_reg};
-        7'b0_000101: sysreg_rdata = {30'b0, fb_display_idx};
-        7'b0_000110: sysreg_rdata = {29'b0, fb_display_idx, fb_swap_pending};
-        7'b0_001000: sysreg_rdata = {16'b0, ds_slot_id_reg};
-        7'b0_001001: sysreg_rdata = ds_slot_offset_reg;
-        7'b0_001010: sysreg_rdata = ds_bridge_addr_reg;
-        7'b0_001011: sysreg_rdata = ds_length_reg;
-        7'b0_001100: sysreg_rdata = ds_param_addr_reg;
-        7'b0_001101: sysreg_rdata = ds_resp_addr_reg;
-        7'b0_001110: sysreg_rdata = 32'h0;
-        7'b0_001111: sysreg_rdata = {24'b0, dataslot_irq_pending, bridge_wr_idle, ~target_ack_s, ds_err_latched, ds_done_latched, ds_ack_latched};
-        7'b0_010000: sysreg_rdata = {pal_busy, 23'b0, pal_index_reg};
-        // 0x44 (PAL_DATA write) doesn't have a meaningful read-back —
-        // case row dropped to save the comparator LUT.  Reads return 0
-        // via the default branch.
-        7'b0_010100: sysreg_rdata = cont1_key_s;
-        7'b0_010101: sysreg_rdata = cont1_joy_s;
-        7'b0_010110: sysreg_rdata = {16'b0, cont1_trig_s};
-        7'b0_010111: sysreg_rdata = cont2_key_s;
-        7'b0_011000: sysreg_rdata = cont2_joy_s;
-        7'b0_011001: sysreg_rdata = {16'b0, cont2_trig_s};
-        7'b0_011010: sysreg_rdata = app_id;
-        7'b0_100000: sysreg_rdata = analogizer_settings;             // ANALOGIZER_SETTINGS (0x80)
-        7'b0_100001: sysreg_rdata = analogizer_hoffset;              // ANALOGIZER_H_OFFSET (0x84)
-        7'b0_100010: sysreg_rdata = analogizer_voffset;              // ANALOGIZER_V_OFFSET (0x88)
-        // SNAC Shifter + GPIO registers (0xA0-0xAC)
-        7'b0_101000: sysreg_rdata = {22'b0, snac_mode_reg, snac_en_reg, 6'b0, snac_busy};  // SNAC_CTRL
-        7'b0_101001: sysreg_rdata = {16'b0, snac_div_reg};                                   // SNAC_DIV
-        7'b0_101010: sysreg_rdata = snac_rx_data;                                             // SNAC_DATA (RX)
-        7'b0_101011: sysreg_rdata = {16'b0, snac_pin_dir, snac_pin_in};                      // SNAC_GPIO (read: input + dir)
-        // Shutdown handshake
-        7'b0_101100: sysreg_rdata = {31'b0, shutdown_pending};  // SYS_SHUTDOWN (0xB0)
-        // Hardware timer (0xB4-0xBC)
-        7'b0_101101: sysreg_rdata = timer_period;
-        7'b0_101110: sysreg_rdata = {30'b0, timer_irq_pending, timer_enable};
-        7'b0_101111: sysreg_rdata = timer_counter;
-        7'b0_111111: sysreg_rdata = {26'b0, irq_mask};               // IRQ_MASK (0xFC)
+    sysreg_rdata = 32'h0;
+    if (sysreg_input_page) begin
         // Input hub (0x100-0x158): raw APF slots + compact event FIFO.
-        7'b1_000000: sysreg_rdata = {16'b0, input_fifo_count, 4'b0,
-                                     input_overflow, input_fifo_full,
-                                     input_fifo_empty, input_irq_pending}; // INPUT_STATUS
-        7'b1_000001: sysreg_rdata = {28'b0, input_irq_mask};         // INPUT_IRQ_MASK
-        7'b1_000011: sysreg_rdata = input_seq;                       // INPUT_SEQ
-        7'b1_000100: sysreg_rdata = {23'b0, input_irq_mask[0], 7'b0, 1'b1}; // SLOT0_INFO
-        7'b1_000101: sysreg_rdata = cont1_key_s;                     // SLOT0_KEY
-        7'b1_000110: sysreg_rdata = cont1_joy_s;                     // SLOT0_JOY
-        7'b1_000111: sysreg_rdata = {16'b0, cont1_trig_s};           // SLOT0_TRIG
-        7'b1_001000: sysreg_rdata = {23'b0, input_irq_mask[1], 7'b0, 1'b1}; // SLOT1_INFO
-        7'b1_001001: sysreg_rdata = cont2_key_s;                     // SLOT1_KEY
-        7'b1_001010: sysreg_rdata = cont2_joy_s;                     // SLOT1_JOY
-        7'b1_001011: sysreg_rdata = {16'b0, cont2_trig_s};           // SLOT1_TRIG
-        7'b1_001100: sysreg_rdata = {23'b0, input_irq_mask[2], 7'b0, 1'b1}; // SLOT2_INFO
-        7'b1_001101: sysreg_rdata = cont3_key_s;                     // SLOT2_KEY
-        7'b1_001110: sysreg_rdata = cont3_joy_s;                     // SLOT2_JOY
-        7'b1_001111: sysreg_rdata = {16'b0, cont3_trig_s};           // SLOT2_TRIG
-        7'b1_010000: sysreg_rdata = {23'b0, input_irq_mask[3], 7'b0, 1'b1}; // SLOT3_INFO
-        7'b1_010001: sysreg_rdata = cont4_key_s;                     // SLOT3_KEY
-        7'b1_010010: sysreg_rdata = cont4_joy_s;                     // SLOT3_JOY
-        7'b1_010011: sysreg_rdata = {16'b0, cont4_trig_s};           // SLOT3_TRIG
-        7'b1_010100: sysreg_rdata = input_fifo_dout[31:0];           // INPUT_FIFO_DATA0
-        7'b1_010101: sysreg_rdata = input_fifo_dout[63:32];          // INPUT_FIFO_DATA1 (read pops)
-        7'b1_010110: sysreg_rdata = {26'b0, input_fifo_count};       // INPUT_FIFO_COUNT
-        // VRR_V_TOTAL / VRR_SWAP_HOLD readback returns the LIVE values
-        // driving the scaler (RTL-computed in normal mode, CPU-written
-        // in analogizer mode for V_TOTAL). Keeps the diagnostic readback
-        // useful even now that the CPU no longer drives them.
-        7'b0_110111: sysreg_rdata = {22'b0, vrr_v_total};             // VRR_V_TOTAL (0xDC)
-        7'b0_111000: sysreg_rdata = {28'b0, vrr_swap_hold_rtl};       // VRR_SWAP_HOLD (0xE0)
-        7'b0_111001: sysreg_rdata = 32'b0;                            // 0xE4 reserved/read-zero in area mode
-        7'b0_111010: sysreg_rdata = 32'b0;                            // 0xE8 reserved/read-zero in area mode
-        7'b0_111011: sysreg_rdata = 32'b0;                            // 0xEC reserved/read-zero in area mode
-        7'b0_111100: sysreg_rdata = 32'b0;                            // 0xF0 reserved/read-zero in area mode
-        // Live swap state (SYSREG 0xC0). Legacy event counters were
-        // retired in area mode; their bit positions read as zero.
-        7'b0_110000: sysreg_rdata = {12'b0,
-                                     term_fb_active,
-                                     2'b0,
-                                     8'b0,
-                                     vrr_hold_counter,
-                                     fb_ready_idx,
-                                     fb_display_idx,
-                                     fb_swap_pending};
-        7'b0_110001: sysreg_rdata = 32'b0;                            // 0xC4 reserved/read-zero in area mode
-        7'b0_110010: sysreg_rdata = 32'b0;                            // 0xC8 reserved/read-zero in area mode
-        // Datatable slot size query (0x90): bit 31 = valid, bits 30:0 = data
-        7'b0_100100: sysreg_rdata = {dt_query_valid, dt_query_data[30:0]};
-        // Bridge diagnostics (0x94): internal latch state for DMA hangs
-        7'b0_100101: sysreg_rdata = {24'b0,
-            target_dataslot_read,   // bit 7: command signal (CPU domain)
-            target_done_s,          // bit 6: done CDC output
-            target_ack_s,           // bit 5: ack CDC output
-            ds_done_latched,        // bit 4
-            ds_done_seen_low,       // bit 3
-            ds_ack_latched,         // bit 2
-            ds_ack_seen_low,        // bit 1
-            ds_cmd_active           // bit 0
-        };
-        7'b0_100110: sysreg_rdata = HW_FEATURES;                    // HW_FEATURES (0x98)
-        7'b0_100111: sysreg_rdata = {31'b0, vsync_irq_pending};   // VSYNC_IRQ_PENDING (0x9C)
-        // Mixer readbacks moved to 0x48000000 (see mixer_rdata mux).
-        default: sysreg_rdata = 32'h0;
-    endcase
+        if (input_slot_read) begin
+            sysreg_rdata = input_slot_rdata;
+        end else begin
+            case (sysreg_word)
+                6'd0:  sysreg_rdata = {19'b0, input_fifo_count, 4'b0,
+                                        input_overflow, input_fifo_full,
+                                        input_fifo_empty, input_irq_pending}; // INPUT_STATUS
+                6'd1:  sysreg_rdata = {28'b0, input_irq_mask};         // INPUT_IRQ_MASK
+                6'd3:  sysreg_rdata = {16'b0, input_seq};              // INPUT_SEQ
+                6'd20: sysreg_rdata = input_fifo_dout[31:0];           // INPUT_FIFO_DATA0
+                6'd21: sysreg_rdata = input_fifo_dout[63:32];          // INPUT_FIFO_DATA1
+                6'd22: sysreg_rdata = {27'b0, input_fifo_count};       // INPUT_FIFO_COUNT
+                default: ;
+            endcase
+        end
+    end else begin
+        case (sysreg_word)
+            6'd0:  sysreg_rdata = {30'b0, dataslot_allcomplete_s, 1'b1};
+            6'd1:  sysreg_rdata = cycle_counter[31:0];
+            6'd2:  sysreg_rdata = cycle_counter[63:32];
+            6'd3:  sysreg_rdata = {31'b0, term_fb_active};  // TERM_FB_CTRL
+            6'd28: sysreg_rdata = {29'b0, color_mode_reg};
+            6'd4:  sysreg_rdata = {7'b0, fb_display_addr_reg};
+            6'd5:  sysreg_rdata = {30'b0, fb_display_idx};
+            6'd6:  sysreg_rdata = {29'b0, fb_display_idx, fb_swap_pending};
+            6'd8:  sysreg_rdata = {16'b0, ds_slot_id_reg};
+            6'd9:  sysreg_rdata = ds_slot_offset_reg;
+            6'd10: sysreg_rdata = ds_bridge_addr_reg;
+            6'd11: sysreg_rdata = ds_length_reg;
+            6'd12: sysreg_rdata = ds_param_addr_reg;
+            6'd13: sysreg_rdata = ds_resp_addr_reg;
+            6'd15: sysreg_rdata = {24'b0, dataslot_irq_pending, bridge_wr_idle,
+                                    ~target_ack_s, ds_err_latched,
+                                    ds_done_latched, ds_ack_latched};
+            6'd16: sysreg_rdata = {pal_busy, 23'b0, pal_index_reg};
+            // 0x44 (PAL_DATA write) has no meaningful read-back.
+            6'd20: sysreg_rdata = cont1_key_s;
+            6'd21: sysreg_rdata = cont1_joy_s;
+            6'd22: sysreg_rdata = {16'b0, cont1_trig_s};
+            6'd23: sysreg_rdata = cont2_key_s;
+            6'd24: sysreg_rdata = cont2_joy_s;
+            6'd25: sysreg_rdata = {16'b0, cont2_trig_s};
+            6'd26: sysreg_rdata = app_id;
+            6'd32: sysreg_rdata = analogizer_settings;             // ANALOGIZER_SETTINGS
+            6'd33: sysreg_rdata = analogizer_hoffset;              // ANALOGIZER_H_OFFSET
+            6'd34: sysreg_rdata = analogizer_voffset;              // ANALOGIZER_V_OFFSET
+            6'd36: sysreg_rdata = {dt_query_valid, dt_query_data[30:0]};
+            6'd38: sysreg_rdata = HW_FEATURES;                     // HW_FEATURES
+            6'd39: sysreg_rdata = {31'b0, vsync_irq_pending};      // VSYNC_IRQ_PENDING
+            // SNAC Shifter + GPIO registers (0xA0-0xAC)
+            6'd40: sysreg_rdata = {22'b0, snac_mode_reg, snac_en_reg, 6'b0, snac_busy};
+            6'd41: sysreg_rdata = {16'b0, snac_div_reg};
+            6'd42: sysreg_rdata = snac_rx_data;
+            6'd43: sysreg_rdata = {16'b0, snac_pin_dir, snac_pin_in};
+            // Shutdown handshake
+            6'd44: sysreg_rdata = {31'b0, shutdown_pending};
+            // Hardware timer
+            6'd45: sysreg_rdata = timer_period;
+            6'd46: sysreg_rdata = {30'b0, timer_irq_pending, timer_enable};
+            6'd47: sysreg_rdata = timer_counter;
+            // Live swap state. Legacy event counters read as zero.
+            6'd48: sysreg_rdata = {12'b0,
+                                    term_fb_active,
+                                    2'b0,
+                                    8'b0,
+                                    vrr_hold_counter,
+                                    fb_ready_idx,
+                                    fb_display_idx,
+                                    fb_swap_pending};
+            // VRR live readback.
+            6'd55: sysreg_rdata = {22'b0, vrr_v_total};
+            6'd56: sysreg_rdata = {28'b0, vrr_swap_hold_rtl};
+            6'd63: sysreg_rdata = {26'b0, irq_mask};
+            default: ;
+        endcase
+    end
 end
 
 // ============================================
@@ -1280,20 +1313,25 @@ assign mix_voice_sel_rd = req_addr[6:2];
 
 wire mixer_per_voice_rd = (req_addr[11] == 1'b1) && (req_addr[7] == 1'b1);
 
-wire [31:0] mixer_rdata =
-    mixer_per_voice_rd ? {10'b0, mix_pos_readback} :
-    // Control region: addr[11]=1, [7]=0
-    (req_addr[6:2] == 5'h00) ? {24'b0, mix_master_vol}                       :  // 0x800
-    (req_addr[6:2] == 5'h01) ? {24'b0, mix_group_vol_0}                      :  // 0x804
-    (req_addr[6:2] == 5'h02) ? {24'b0, mix_group_vol_1}                      :  // 0x808
-    (req_addr[6:2] == 5'h03) ? {24'b0, mix_group_vol_2}                      :  // 0x80C
-    (req_addr[6:2] == 5'h04) ? {24'b0, mix_group_vol_3}                      :  // 0x810
-    (req_addr[6:2] == 5'h05) ? mix_voice_group_packed[31:0]                  :  // 0x814
-    (req_addr[6:2] == 5'h06) ? mix_voice_group_packed[63:32]                 :  // 0x818
-    (req_addr[6:2] == 5'h08) ? {31'b0, mix_enable}                            :  // 0x820
-    (req_addr[6:2] == 5'h09) ? mix_voice_end_pending                          :  // 0x824
-    (req_addr[6:2] == 5'h0C) ? mix_active_mask                                :  // 0x830
-    32'h0;
+reg [31:0] mixer_ctrl_rdata;
+always @(*) begin
+    case (req_addr[6:2])
+        5'h00: mixer_ctrl_rdata = {24'b0, mix_master_vol};        // 0x800
+        5'h01: mixer_ctrl_rdata = {24'b0, mix_group_vol_0};       // 0x804
+        5'h02: mixer_ctrl_rdata = {24'b0, mix_group_vol_1};       // 0x808
+        5'h03: mixer_ctrl_rdata = {24'b0, mix_group_vol_2};       // 0x80C
+        5'h04: mixer_ctrl_rdata = {24'b0, mix_group_vol_3};       // 0x810
+        5'h05: mixer_ctrl_rdata = mix_voice_group_packed[31:0];   // 0x814
+        5'h06: mixer_ctrl_rdata = mix_voice_group_packed[63:32];  // 0x818
+        5'h08: mixer_ctrl_rdata = {31'b0, mix_enable};            // 0x820
+        5'h09: mixer_ctrl_rdata = mix_voice_end_pending;          // 0x824
+        5'h0C: mixer_ctrl_rdata = mix_active_mask;                // 0x830
+        default: mixer_ctrl_rdata = 32'h0;
+    endcase
+end
+
+wire [31:0] mixer_rdata = mixer_per_voice_rd ? {10'b0, mix_pos_readback}
+                                             : mixer_ctrl_rdata;
 
 reg [31:0] periph_rd_data_r;
 
@@ -1381,10 +1419,10 @@ wire ar_dec_cram0  = (ar_addr[31:24] == 8'h4E);
 wire aw_dec_cram0  = (aw_addr[31:24] == 8'h4E);
 
 wire ar_dec_ram    = (ar_addr[31:15] == 17'b0); // 32KB: 0x00000-0x07FFF
-// sysreg covers 0x40000000-0x400001FF (512 bytes / 128 word slots) so the
-// case statement on req_addr[8:2] reaches the extended input-hub page at
-// 0x100+.  Pre-AWE this was 24'h400000 (256 bytes), which would silently
-// drop every extended register access.
+// sysreg covers 0x40000000-0x400001FF (512 bytes / 128 word slots).  The
+// low page is the legacy control block; bit 8 selects the input-hub page.
+// Pre-AWE this was 24'h400000 (256 bytes), which would silently drop every
+// extended register access.
 wire ar_dec_sysreg = (ar_addr[31:9]  == 23'h200000);
 wire ar_dec_audio  = (ar_addr[31:24] == 8'h4C);
 wire ar_dec_link   = (ar_addr[31:24] == 8'h4D);
@@ -1560,61 +1598,10 @@ always @(posedge clk or posedge reset) begin
                         state <= S_BRAM_WR;
                     else begin
                         state <= S_PERIPH_WR;
-                        if (aw_dec_sysreg && |s_axi_wstrb)
-                            sysreg_wr_fire <= 1;
-                        /* AUDIO_BASE writes retired in v2.  The HW mixer
-                         * drives audio_output directly via MIX_* registers.
-                         * aw_dec_audio address range left in place so that
-                         * legacy app writes to 0x4C000000 simply no-op
-                         * rather than raising a bus fault. */
-                        if (aw_dec_cram0 && |s_axi_wstrb && aw_addr[3:2] == 2'd0) begin
-                            /* CRAM0_MODE + 0x00: update owner bit. */
-                            cram0_mode <= s_axi_wdata[0];
-                        end
-                        if (aw_dec_link && |s_axi_wstrb) begin
-                            link_reg_wr <= 1;
-                            link_reg_addr <= aw_addr[6:2];
-                            link_reg_wdata <= s_axi_wdata;
-                        end
-                        if (aw_dec_gpu && |s_axi_wstrb) begin
-                            gpu_reg_wr <= 1;
-                            gpu_reg_addr <= aw_addr[5:2];
-                            gpu_reg_wdata <= s_axi_wdata;
-                        end
-                        if (aw_dec_mixer && |s_axi_wstrb) begin
-                            if (aw_addr[11] == 1'b0) begin
-                                /* Per-voice field write: addr[10:6]=voice, addr[5:2]=field */
-                                mix_voice_wr    <= 1'b1;
-                                mix_voice_sel   <= aw_addr[10:6];
-                                mix_voice_field <= aw_addr[5:2];
-                                mix_voice_wdata <= s_axi_wdata;
-                            end else begin
-                                /* Control region (addr[11]=1, [7]=0).  POS read region
-                                 * (addr[11]=1, [7]=1) is read-only — writes drop. */
-                                if (aw_addr[7] == 1'b0) case (aw_addr[6:2])
-                                    5'h00: mix_master_vol         <= s_axi_wdata[7:0];          // 0x800
-                                    5'h01: mix_group_vol_0        <= s_axi_wdata[7:0];          // 0x804
-                                    5'h02: mix_group_vol_1        <= s_axi_wdata[7:0];          // 0x808
-                                    5'h03: mix_group_vol_2        <= s_axi_wdata[7:0];          // 0x80C
-                                    5'h04: mix_group_vol_3        <= s_axi_wdata[7:0];          // 0x810
-                                    5'h05: mix_voice_group_packed[31:0]  <= s_axi_wdata;        // 0x814
-                                    5'h06: mix_voice_group_packed[63:32] <= s_axi_wdata;        // 0x818
-                                    5'h08: mix_enable             <= s_axi_wdata[0];            // 0x820
-                                    5'h09: begin                                                  // 0x824 W1C
-                                        mix_irq_clear    <= s_axi_wdata;
-                                        mix_irq_clear_wr <= 1'b1;
-                                    end
-                                    default: ;
-                                endcase
-                            end
-                        end
-                        if (aw_dec_uart && |s_axi_wstrb && aw_addr[3:2] == 2'b01) begin
-                            // UART_TX_DATA (offset 0x04): push into TX FIFO.
-                            // Mirrors the S_WR_NEXT path so bundled AW+W
-                            // writes don't drop the byte.
-                            uart_tx_fifo_din <= s_axi_wdata[7:0];
-                            uart_tx_fifo_we  <= 1;
-                        end
+                        /* Peripheral side effects are applied centrally in
+                         * S_PERIPH_WR.  This keeps the bundled AW+W path and
+                         * later W-beat path from synthesizing duplicate
+                         * decode/control cones. */
                     end
                 end else begin
                     state <= S_WR_NEXT;
@@ -1659,12 +1646,10 @@ always @(posedge clk or posedge reset) begin
         // Peripheral read — same hold-until-drain pattern
         // ============================================
         S_PERIPH_RD_WAIT: begin
-            if (reg_mixer) begin
+            if (reg_mixer || reg_sysreg) begin
                 state <= S_PERIPH_RD_LATCH;
             end else begin
-                if (reg_sysreg)
-                    periph_rd_data_r <= sysreg_rdata;
-                else if (reg_audio)
+                if (reg_audio)
                     periph_rd_data_r <= audio_rdata;
                 else if (reg_cram0)
                     periph_rd_data_r <= cram0_mode_rdata;
@@ -1683,6 +1668,8 @@ always @(posedge clk or posedge reset) begin
         S_PERIPH_RD_LATCH: begin
             if (reg_mixer)
                 periph_rd_data_r <= mixer_rdata;
+            else if (reg_sysreg)
+                periph_rd_data_r <= sysreg_rdata;
             else
                 periph_rd_data_r <= 32'h0;
             state <= S_PERIPH_RD;
@@ -1714,15 +1701,65 @@ always @(posedge clk or posedge reset) begin
         // Peripheral write
         // ============================================
         S_PERIPH_WR: begin
+            if (|req_wstrb) begin
+                if (reg_sysreg)
+                    sysreg_wr_fire <= 1'b1;
+                /* AUDIO_BASE writes retired in v2.  The HW mixer drives
+                 * audio_output directly via MIX_* registers.  The address
+                 * range is still accepted so legacy probes no-op rather than
+                 * raising a bus fault. */
+                if (reg_cram0 && req_addr[3:2] == 2'd0)
+                    cram0_mode <= req_wdata[0];
+                if (reg_link) begin
+                    link_reg_wr    <= 1'b1;
+                    link_reg_addr  <= req_addr[6:2];
+                    link_reg_wdata <= req_wdata;
+                end
+                if (reg_uart && req_addr[3:2] == 2'b01) begin
+                    uart_tx_fifo_din <= req_wdata[7:0];
+                    uart_tx_fifo_we  <= 1'b1;
+                end
+                if (reg_gpu) begin
+                    gpu_reg_wr    <= 1'b1;
+                    gpu_reg_addr  <= req_addr[5:2];
+                    gpu_reg_wdata <= req_wdata;
+                end
+                if (reg_mixer) begin
+                    if (req_addr[11] == 1'b0) begin
+                        mix_voice_wr    <= 1'b1;
+                        mix_voice_sel   <= req_addr[10:6];
+                        mix_voice_field <= req_addr[5:2];
+                        mix_voice_wdata <= req_wdata;
+                    end else if (req_addr[7] == 1'b0) begin
+                        case (req_addr[6:2])
+                            5'h00: mix_master_vol         <= req_wdata[7:0];
+                            5'h01: mix_group_vol_0        <= req_wdata[7:0];
+                            5'h02: mix_group_vol_1        <= req_wdata[7:0];
+                            5'h03: mix_group_vol_2        <= req_wdata[7:0];
+                            5'h04: mix_group_vol_3        <= req_wdata[7:0];
+                            5'h05: mix_voice_group_packed[31:0]  <= req_wdata;
+                            5'h06: mix_voice_group_packed[63:32] <= req_wdata;
+                            5'h08: mix_enable             <= req_wdata[0];
+                            5'h09: begin
+                                mix_irq_clear    <= req_wdata;
+                                mix_irq_clear_wr <= 1'b1;
+                            end
+                            default: ;
+                        endcase
+                    end
+                end
+            end
+
             burst_count <= burst_count + 1;
             if (beat_is_last) begin
                 s_axi_bvalid <= 1;
                 s_axi_bresp <= 2'b00;
                 state <= S_IDLE;
             end else begin
-                // FIXED burst → address pinned (every beat hits the same
-                // register); INCR → walk by 4 per beat.
-                if (!burst_is_fixed) req_addr <= req_addr + 32'd4;
+                // Keep req_addr stable through the next cycle so the delayed
+                // sysreg_wr_fire pulse is observed with the address/data for
+                // this beat.  S_WR_NEXT advances req_addr when it accepts the
+                // following W beat.
                 state <= S_WR_NEXT;
             end
         end
@@ -1742,56 +1779,8 @@ always @(posedge clk or posedge reset) begin
                     state <= S_BRAM_WR;
                 end else begin
                     state <= S_PERIPH_WR;
-                    if (reg_sysreg && |s_axi_wstrb)
-                        sysreg_wr_fire <= 1;
-                    /* AUDIO_BASE writes retired in v2 — see the earlier
-                     * branch above.  No-op to stay compatible with any
-                     * legacy app probing 0x4C0000xx. */
-                    if (reg_cram0 && |s_axi_wstrb && req_addr[3:2] == 2'd0) begin
-                        cram0_mode <= s_axi_wdata[0];
-                    end
-                    if (reg_link && |s_axi_wstrb) begin
-                        link_reg_wr <= 1;
-                        link_reg_addr <= req_addr[6:2];
-                        link_reg_wdata <= s_axi_wdata;
-                    end
-                    if (reg_uart && |s_axi_wstrb && req_addr[3:2] == 2'b01) begin
-                        // Push into the TX FIFO; the FIFO drain block
-                        // hands bytes to uart_tx asynchronously. Drops
-                        // silently if FIFO is full -- matches the prior
-                        // fire-and-forget software contract.
-                        uart_tx_fifo_din <= s_axi_wdata[7:0];
-                        uart_tx_fifo_we  <= 1;
-                    end
-                    if (reg_gpu && |s_axi_wstrb) begin
-                        gpu_reg_wr <= 1;
-                        gpu_reg_addr <= req_addr[5:2];
-                        gpu_reg_wdata <= s_axi_wdata;
-                    end
-                    if (reg_mixer && |s_axi_wstrb) begin
-                        if (req_addr[11] == 1'b0) begin
-                            mix_voice_wr    <= 1'b1;
-                            mix_voice_sel   <= req_addr[10:6];
-                            mix_voice_field <= req_addr[5:2];
-                            mix_voice_wdata <= s_axi_wdata;
-                        end else if (req_addr[7] == 1'b0) begin
-                            case (req_addr[6:2])
-                                5'h00: mix_master_vol         <= s_axi_wdata[7:0];
-                                5'h01: mix_group_vol_0        <= s_axi_wdata[7:0];
-                                5'h02: mix_group_vol_1        <= s_axi_wdata[7:0];
-                                5'h03: mix_group_vol_2        <= s_axi_wdata[7:0];
-                                5'h04: mix_group_vol_3        <= s_axi_wdata[7:0];
-                                5'h05: mix_voice_group_packed[31:0]  <= s_axi_wdata;
-                                5'h06: mix_voice_group_packed[63:32] <= s_axi_wdata;
-                                5'h08: mix_enable             <= s_axi_wdata[0];
-                                5'h09: begin
-                                    mix_irq_clear    <= s_axi_wdata;
-                                    mix_irq_clear_wr <= 1'b1;
-                                end
-                                default: ;
-                            endcase
-                        end
-                    end
+                    if (!burst_is_fixed)
+                        req_addr <= req_addr + 32'd4;
                 end
             end
         end

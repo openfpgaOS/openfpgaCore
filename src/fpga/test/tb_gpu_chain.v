@@ -19,11 +19,10 @@
 // gpu_reg_wr pulses against writes submitted.  Any drop or stall
 // surfaces as a failed test.
 //
-// What this bench DOES NOT model: the cpu_system shim's posted-write
-// FIFO + M2 coalescer.  C++ drives per_*_cpu directly so we control
-// the AW/W timing exactly.  If a wedge reproduces here, the bug is
-// somewhere in slices / cpu_target_port / axi_periph_slave.  If it
-// doesn't, the bug is upstream of per_axi (shim / VexiiRiscv issue).
+// The harness can either drive the slices directly (legacy per_axi
+// mode) or drive the upstream LSU shim, which covers the posted-write
+// FIFO + M2 coalescer path without dragging VexiiRiscv into this
+// focused bench.
 //
 
 `default_nettype none
@@ -119,7 +118,6 @@ module tb_gpu_chain (
 // ----------------------------------------------------------------
 wire        per_arvalid; wire        per_arready;
 wire [31:0] per_araddr;  wire [7:0]  per_arlen;
-wire [2:0]  per_arsize;  wire [1:0]  per_arburst;
 
 wire        per_rvalid;  wire        per_rready;
 wire [31:0] per_rdata;   wire [1:0]  per_rresp;
@@ -127,7 +125,7 @@ wire        per_rlast;
 
 wire        per_awvalid; wire        per_awready;
 wire [31:0] per_awaddr;  wire [7:0]  per_awlen;
-wire [2:0]  per_awsize;  wire [1:0]  per_awburst;
+wire [1:0]  per_awburst;
 
 wire        per_wvalid;  wire        per_wready;
 wire [31:0] per_wdata;   wire [3:0]  per_wstrb;
@@ -147,8 +145,6 @@ wire [1:0]  per_bresp;
 wire        shim_arvalid;
 wire [31:0] shim_araddr;
 wire [7:0]  shim_arlen;
-wire [2:0]  shim_arsize;
-wire [1:0]  shim_arburst;
 wire        shim_arready;
 
 wire        shim_rready;
@@ -160,7 +156,6 @@ wire        shim_rlast;
 wire        shim_awvalid;
 wire [31:0] shim_awaddr;
 wire [7:0]  shim_awlen;
-wire [2:0]  shim_awsize;
 wire [1:0]  shim_awburst;
 wire        shim_awready;
 wire        shim_awallStrb;
@@ -183,7 +178,6 @@ lsu_axi_shim u_shim (
     .lsu_cmd_write(lsu_cmd_write),
     .lsu_cmd_addr (lsu_cmd_addr),
     .lsu_cmd_data (lsu_cmd_data),
-    .lsu_cmd_size (lsu_cmd_size),
     .lsu_cmd_mask (lsu_cmd_mask),
     .lsu_rsp_valid(lsu_rsp_valid),
     .lsu_rsp_error(lsu_rsp_error),
@@ -191,14 +185,13 @@ lsu_axi_shim u_shim (
 
     .per_arvalid_cpu(shim_arvalid), .per_arready_cpu(shim_arready),
     .per_araddr_cpu (shim_araddr),  .per_arlen_cpu  (shim_arlen),
-    .per_arsize_cpu (shim_arsize),  .per_arburst_cpu(shim_arburst),
     .per_rvalid_cpu (shim_rvalid),  .per_rready_cpu (shim_rready),
     .per_rdata_cpu  (shim_rdata),   .per_rresp_cpu  (shim_rresp),
     .per_rlast_cpu  (shim_rlast),
 
     .per_awvalid_cpu(shim_awvalid), .per_awready_cpu(shim_awready),
     .per_awaddr_cpu (shim_awaddr),  .per_awlen_cpu  (shim_awlen),
-    .per_awsize_cpu (shim_awsize),  .per_awburst_cpu(shim_awburst),
+    .per_awburst_cpu(shim_awburst),
     .per_awallStrb  (shim_awallStrb),
     .per_wvalid_cpu (shim_wvalid),  .per_wready_cpu (shim_wready),
     .per_wdata_cpu  (shim_wdata),   .per_wstrb_cpu  (shim_wstrb),
@@ -212,13 +205,10 @@ lsu_axi_shim u_shim (
 wire        slice_arvalid_in = lsu_path_en ? shim_arvalid : s_per_arvalid;
 wire [31:0] slice_araddr_in  = lsu_path_en ? shim_araddr  : s_per_araddr;
 wire [7:0]  slice_arlen_in   = lsu_path_en ? shim_arlen   : s_per_arlen;
-wire [2:0]  slice_arsize_in  = lsu_path_en ? shim_arsize  : s_per_arsize;
-wire [1:0]  slice_arburst_in = lsu_path_en ? shim_arburst : s_per_arburst;
 
 wire        slice_awvalid_in = lsu_path_en ? shim_awvalid : s_per_awvalid;
 wire [31:0] slice_awaddr_in  = lsu_path_en ? shim_awaddr  : s_per_awaddr;
 wire [7:0]  slice_awlen_in   = lsu_path_en ? shim_awlen   : s_per_awlen;
-wire [2:0]  slice_awsize_in  = lsu_path_en ? shim_awsize  : s_per_awsize;
 wire [1:0]  slice_awburst_in = lsu_path_en ? shim_awburst : s_per_awburst;
 
 wire        slice_wvalid_in  = lsu_path_en ? shim_wvalid  : s_per_wvalid;
@@ -241,12 +231,12 @@ assign s_per_awready = !lsu_path_en ? slice_awready_out : 1'b0;
 assign s_per_wready  = !lsu_path_en ? slice_wready_out  : 1'b0;
 
 // AR slice
-axi_register_slice #(.W(45)) per_ar_slice (
+axi_register_slice #(.W(40)) per_ar_slice (
     .clk(clk), .reset_n(reset_n),
     .s_valid (slice_arvalid_in), .s_ready (slice_arready_out),
-    .s_payload({slice_araddr_in, slice_arlen_in, slice_arsize_in, slice_arburst_in}),
+    .s_payload({slice_araddr_in, slice_arlen_in}),
     .m_valid (per_arvalid),      .m_ready (per_arready),
-    .m_payload({per_araddr,      per_arlen,       per_arsize,       per_arburst})
+    .m_payload({per_araddr,      per_arlen})
 );
 
 // R / B slices: m_* is the master-side (downstream of slice).  Both
@@ -275,12 +265,12 @@ assign shim_rdata   =  r_master_data;
 assign shim_rresp   =  r_master_resp;
 assign shim_rlast   =  r_master_last;
 
-axi_register_slice #(.W(45)) per_aw_slice (
+axi_register_slice #(.W(42)) per_aw_slice (
     .clk(clk), .reset_n(reset_n),
     .s_valid (slice_awvalid_in), .s_ready (slice_awready_out),
-    .s_payload({slice_awaddr_in, slice_awlen_in, slice_awsize_in, slice_awburst_in}),
+    .s_payload({slice_awaddr_in, slice_awlen_in, slice_awburst_in}),
     .m_valid (per_awvalid),      .m_ready (per_awready),
-    .m_payload({per_awaddr,      per_awlen,      per_awsize,      per_awburst})
+    .m_payload({per_awaddr,      per_awlen,      per_awburst})
 );
 
 axi_register_slice #(.W(37)) per_w_slice (
@@ -480,9 +470,6 @@ axi_periph_slave dut (
     .target_dataslot_done(1'b0),
     .target_dataslot_err (3'b0),
     .bridge_wr_idle      (1'b1),
-    .bridge_wr_fifo_count_dbg(11'd0),
-    .bridge_wr_fifo_max_dbg  (11'd0),
-    .bridge_wr_fifo_overflow_dbg(1'b0),
 
     .color_mode     (),
     .fb_display_addr(),

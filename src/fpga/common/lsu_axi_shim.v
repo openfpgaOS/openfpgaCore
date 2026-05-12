@@ -38,7 +38,6 @@ module lsu_axi_shim (
     input  wire        lsu_cmd_write,
     input  wire [31:0] lsu_cmd_addr,
     input  wire [31:0] lsu_cmd_data,
-    input  wire [1:0]  lsu_cmd_size,   // AXI size: 0=1B, 1=2B, 2=4B
     input  wire [3:0]  lsu_cmd_mask,
     output wire        lsu_rsp_valid,
     output wire        lsu_rsp_error,
@@ -51,8 +50,6 @@ module lsu_axi_shim (
     input  wire        per_arready_cpu,
     output wire [31:0] per_araddr_cpu,
     output wire [7:0]  per_arlen_cpu,
-    output wire [2:0]  per_arsize_cpu,
-    output wire [1:0]  per_arburst_cpu,
 
     input  wire        per_rvalid_cpu,
     output wire        per_rready_cpu,
@@ -64,7 +61,6 @@ module lsu_axi_shim (
     input  wire        per_awready_cpu,
     output wire [31:0] per_awaddr_cpu,
     output wire [7:0]  per_awlen_cpu,
-    output wire [2:0]  per_awsize_cpu,
     output wire [1:0]  per_awburst_cpu,
     output wire        per_awallStrb,
 
@@ -83,7 +79,6 @@ module lsu_axi_shim (
 reg        lsu_inflight_read;
 reg        lsu_ar_sent;
 reg [31:0] lsu_rd_addr;
-reg [1:0]  lsu_rd_size;
 
 // Write FIFO — 4-deep posted-write queue.
 localparam WR_FIFO_DEPTH = 4;
@@ -93,7 +88,6 @@ localparam WR_CNT_W      = 3;
 reg [31:0] wr_addr_mem [0:WR_FIFO_DEPTH-1];
 reg [31:0] wr_data_mem [0:WR_FIFO_DEPTH-1];
 reg [3:0]  wr_mask_mem [0:WR_FIFO_DEPTH-1];
-reg [1:0]  wr_size_mem [0:WR_FIFO_DEPTH-1];
 reg [WR_PTR_W-1:0] wr_head, wr_tail;
 reg [WR_CNT_W-1:0] wr_count;
 reg                lsu_aw_sent, lsu_w_sent;
@@ -132,12 +126,9 @@ always @(posedge clk or posedge reset) begin
         lsu_inflight_read <= 1'b0;
         lsu_ar_sent       <= 1'b0;
         lsu_rd_addr       <= 32'b0;
-        lsu_rd_size       <= 2'b0;
     end else begin
-        if (lsu_cmd_fire && !lsu_cmd_write) begin
+        if (lsu_cmd_fire && !lsu_cmd_write)
             lsu_rd_addr <= lsu_cmd_addr;
-            lsu_rd_size <= lsu_cmd_size;
-        end
         if (per_arvalid_cpu && per_arready_cpu) lsu_ar_sent <= 1'b1;
         if (per_rvalid_cpu  && per_rready_cpu && per_rlast_cpu) begin
             lsu_inflight_read <= 1'b0;
@@ -154,15 +145,12 @@ wire [WR_PTR_W-1:0] head2 = wr_head + 2'd2;
 wire [WR_PTR_W-1:0] head3 = wr_head + 2'd3;
 wire match01 = (wr_count >= 3'd2)
             && (wr_addr_mem[wr_head] == wr_addr_mem[head1])
-            && (wr_size_mem[wr_head] == wr_size_mem[head1])
             && (wr_mask_mem[wr_head] == wr_mask_mem[head1]);
 wire match02 = match01 && (wr_count >= 3'd3)
             && (wr_addr_mem[wr_head] == wr_addr_mem[head2])
-            && (wr_size_mem[wr_head] == wr_size_mem[head2])
             && (wr_mask_mem[wr_head] == wr_mask_mem[head2]);
 wire match03 = match02 && (wr_count >= 3'd4)
             && (wr_addr_mem[wr_head] == wr_addr_mem[head3])
-            && (wr_size_mem[wr_head] == wr_size_mem[head3])
             && (wr_mask_mem[wr_head] == wr_mask_mem[head3]);
 
 wire [WR_PTR_W-1:0] burst_awlen_calc = match03 ? 2'd3
@@ -174,7 +162,6 @@ wire [WR_PTR_W-1:0] w_idx     = wr_head + burst_w_idx;
 wire [31:0]         w_addr    = wr_addr_mem[wr_head];
 wire [31:0]         w_data    = wr_data_mem[w_idx];
 wire [3:0]          w_mask    = wr_mask_mem[w_idx];
-wire [1:0]          w_size    = wr_size_mem[wr_head];
 // Pipeline-race fix: when AW and W handshakes fire on the same
 // posedge (first beat of a multi-beat burst), burst_awlen is still
 // the OLD value during the cycle — it'll update to burst_awlen_calc
@@ -202,14 +189,12 @@ always @(posedge clk or posedge reset) begin
             wr_addr_mem[wi] <= 32'b0;
             wr_data_mem[wi] <= 32'b0;
             wr_mask_mem[wi] <= 4'b0;
-            wr_size_mem[wi] <= 2'b0;
         end
     end else begin
         if (wr_push) begin
             wr_addr_mem[wr_tail] <= lsu_cmd_addr;
             wr_data_mem[wr_tail] <= lsu_cmd_data;
             wr_mask_mem[wr_tail] <= lsu_cmd_mask;
-            wr_size_mem[wr_tail] <= lsu_cmd_size;
             wr_tail              <= wr_tail + {{(WR_PTR_W-1){1'b0}}, 1'b1};
         end
 
@@ -243,15 +228,12 @@ end
 assign per_arvalid_cpu = lsu_inflight_read & ~lsu_ar_sent;
 assign per_araddr_cpu  = lsu_rd_addr;
 assign per_arlen_cpu   = 8'd0;
-assign per_arsize_cpu  = {1'b0, lsu_rd_size};
-assign per_arburst_cpu = 2'b01;
 assign per_rready_cpu  = 1'b1;
 
 // AW channel
 assign per_awvalid_cpu = !wr_fifo_empty & ~lsu_aw_sent;
 assign per_awaddr_cpu  = w_addr;
 assign per_awlen_cpu   = {{(8-WR_PTR_W){1'b0}}, burst_awlen_calc};
-assign per_awsize_cpu  = {1'b0, w_size};
 assign per_awburst_cpu = (burst_awlen_calc != {WR_PTR_W{1'b0}}) ? 2'b00 : 2'b01;
 assign per_awallStrb   = &w_mask;
 

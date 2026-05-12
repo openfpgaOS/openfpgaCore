@@ -141,12 +141,10 @@ end
     reg     [31:0]  host_20; // parameter data
     reg     [31:0]  host_24;
     reg     [31:0]  host_28;
-    reg     [31:0]  host_2C;
-    
+
     reg     [31:0]  host_40; // response data
     reg     [31:0]  host_44;
     reg     [31:0]  host_48;
-    reg     [31:0]  host_4C;    
     
     reg             host_cmd_start;
     reg     [15:0]  host_cmd_startval;
@@ -171,11 +169,6 @@ localparam  [3:0]   ST_DONE_ERR     = 'd15;
     reg     [31:0]  target_24;
     reg     [31:0]  target_28;
     reg     [31:0]  target_2C;
-    
-    reg     [31:0]  target_40; // response data
-    reg     [31:0]  target_44;
-    reg     [31:0]  target_48;
-    reg     [31:0]  target_4C;  
     
 localparam  [3:0]   TARG_ST_IDLE        = 'd0;
 localparam  [3:0]   TARG_ST_READYTORUN  = 'd1;
@@ -263,7 +256,6 @@ always @(posedge clk) begin
             8'h20: host_20 <= bridge_wr_data_in; // parameter data regs
             8'h24: host_24 <= bridge_wr_data_in;
             8'h28: host_28 <= bridge_wr_data_in;
-            8'h2C: host_2C <= bridge_wr_data_in;
             endcase
         end
         32'hF8xx10xx: begin
@@ -271,10 +263,6 @@ always @(posedge clk) begin
             8'h0: target_0 <= bridge_wr_data_in; // command/status
             8'h4: target_4 <= bridge_wr_data_in; // parameter data pointer
             8'h8: target_8 <= bridge_wr_data_in; // response data pointer
-            8'h40: target_40 <= bridge_wr_data_in; // response data regs
-            8'h44: target_44 <= bridge_wr_data_in;
-            8'h48: target_48 <= bridge_wr_data_in;
-            8'h4C: target_4C <= bridge_wr_data_in;
             endcase
         end
         32'hF8xx2xxx: begin
@@ -292,7 +280,7 @@ always @(posedge clk) begin
             8'h40: bridge_rd_data_out <= host_40; // response data regs
             8'h44: bridge_rd_data_out <= host_44;
             8'h48: bridge_rd_data_out <= host_48;
-            8'h4C: bridge_rd_data_out <= host_4C;
+            8'h4C: bridge_rd_data_out <= 32'h0;
             endcase
         end
         32'hF8xx10xx: begin

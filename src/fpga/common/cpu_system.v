@@ -153,7 +153,6 @@ wire        i_arvalid;  wire        i_arready;
 wire [31:0] i_araddr;
 wire [0:0]  i_arid;
 wire [7:0]  i_arlen;
-wire [2:0]  i_arsize;   wire [1:0]  i_arburst;
 wire        i_rvalid;   wire        i_rready;
 wire [31:0] i_rdata;
 wire [0:0]  i_rid;      wire [1:0]  i_rresp;
@@ -164,8 +163,6 @@ wire        i_arvalid_cpu, i_arready_cpu;
 wire [31:0] i_araddr_cpu;
 wire [0:0]  i_arid_cpu;
 wire [7:0]  i_arlen_cpu;
-wire [2:0]  i_arsize_cpu;
-wire [1:0]  i_arburst_cpu;
 wire        i_rvalid_cpu, i_rready_cpu;
 wire [31:0] i_rdata_cpu;
 wire [0:0]  i_rid_cpu;
@@ -184,7 +181,6 @@ wire        mem_arvalid;  wire        mem_arready;
 wire [31:0] mem_araddr;
 wire [1:0]  mem_arid;
 wire [7:0]  mem_arlen;
-wire [2:0]  mem_arsize;   wire [1:0]  mem_arburst;
 wire        mem_rvalid;   wire        mem_rready;
 wire [31:0] mem_rdata;
 wire [1:0]  mem_rid;      wire [1:0]  mem_rresp;
@@ -194,7 +190,7 @@ wire        mem_awvalid;  wire        mem_awready;
 wire [31:0] mem_awaddr;
 wire [1:0]  mem_awid;
 wire [7:0]  mem_awlen;
-wire [2:0]  mem_awsize;   wire [1:0]  mem_awburst;
+wire [1:0]  mem_awburst;
 wire        mem_awallStrb;
 wire        mem_wvalid;   wire        mem_wready;
 wire [31:0] mem_wdata;    wire [3:0]  mem_wstrb;
@@ -207,8 +203,6 @@ wire        mem_arvalid_cpu, mem_arready_cpu;
 wire [31:0] mem_araddr_cpu;
 wire [1:0]  mem_arid_cpu;
 wire [7:0]  mem_arlen_cpu;
-wire [2:0]  mem_arsize_cpu;
-wire [1:0]  mem_arburst_cpu;
 wire        mem_rvalid_cpu, mem_rready_cpu;
 wire [31:0] mem_rdata_cpu;
 wire [1:0]  mem_rid_cpu;
@@ -218,7 +212,6 @@ wire        mem_awvalid_cpu, mem_awready_cpu;
 wire [31:0] mem_awaddr_cpu;
 wire [1:0]  mem_awid_cpu;
 wire [7:0]  mem_awlen_cpu;
-wire [2:0]  mem_awsize_cpu;
 wire [1:0]  mem_awburst_cpu;
 // mem_awallStrb is unused by cpu_target_port (no slave reads it) so it
 // doesn't need a slice — declared on the post-slice side only, tied to
@@ -241,7 +234,6 @@ wire [1:0]  mem_bresp_cpu;
 wire        per_arvalid;  wire        per_arready;
 wire [31:0] per_araddr;
 wire [7:0]  per_arlen;
-wire [2:0]  per_arsize;   wire [1:0]  per_arburst;
 wire        per_rvalid;   wire        per_rready;
 wire [31:0] per_rdata;    wire [1:0]  per_rresp;
 wire        per_rlast;
@@ -249,7 +241,7 @@ wire        per_rlast;
 wire        per_awvalid;  wire        per_awready;
 wire [31:0] per_awaddr;
 wire [7:0]  per_awlen;
-wire [2:0]  per_awsize;   wire [1:0]  per_awburst;
+wire [1:0]  per_awburst;
 wire        per_awallStrb;
 wire        per_wvalid;   wire        per_wready;
 wire [31:0] per_wdata;    wire [3:0]  per_wstrb;
@@ -261,8 +253,6 @@ wire [1:0]  per_bresp;
 wire        per_arvalid_cpu, per_arready_cpu;
 wire [31:0] per_araddr_cpu;
 wire [7:0]  per_arlen_cpu;
-wire [2:0]  per_arsize_cpu;
-wire [1:0]  per_arburst_cpu;
 wire        per_rvalid_cpu, per_rready_cpu;
 wire [31:0] per_rdata_cpu;
 wire [1:0]  per_rresp_cpu;
@@ -270,7 +260,6 @@ wire        per_rlast_cpu;
 wire        per_awvalid_cpu, per_awready_cpu;
 wire [31:0] per_awaddr_cpu;
 wire [7:0]  per_awlen_cpu;
-wire [2:0]  per_awsize_cpu;
 wire [1:0]  per_awburst_cpu;
 wire        per_wvalid_cpu, per_wready_cpu;
 wire [31:0] per_wdata_cpu;
@@ -310,7 +299,6 @@ wire        lsu_cmd_ready;
 wire        lsu_cmd_write;
 wire [31:0] lsu_cmd_addr;
 wire [31:0] lsu_cmd_data;
-wire [1:0]  lsu_cmd_size;   // AXI size: 0=1B, 1=2B, 2=4B
 wire [3:0]  lsu_cmd_mask;
 wire        lsu_rsp_valid;
 wire        lsu_rsp_error;
@@ -320,7 +308,6 @@ wire [31:0] lsu_rsp_data;
 reg        lsu_inflight_read;
 reg        lsu_ar_sent;
 reg [31:0] lsu_rd_addr;
-reg [1:0]  lsu_rd_size;
 
 // Write FIFO — 4-deep posted-write queue.
 localparam WR_FIFO_DEPTH = 4;
@@ -330,7 +317,6 @@ localparam WR_CNT_W      = 3;  // log2(WR_FIFO_DEPTH+1)
 reg [31:0] wr_addr_mem [0:WR_FIFO_DEPTH-1];
 reg [31:0] wr_data_mem [0:WR_FIFO_DEPTH-1];
 reg [3:0]  wr_mask_mem [0:WR_FIFO_DEPTH-1];
-reg [1:0]  wr_size_mem [0:WR_FIFO_DEPTH-1];
 reg [WR_PTR_W-1:0] wr_head, wr_tail;
 reg [WR_CNT_W-1:0] wr_count;
 reg                lsu_aw_sent, lsu_w_sent;  // per-head AW/W issue tracking
@@ -339,7 +325,7 @@ wire wr_fifo_full  = (wr_count == WR_FIFO_DEPTH);
 wire wr_fifo_empty = (wr_count == 0);
 
 // M2 coalescer state.  When the FIFO holds N consecutive same-address
-// same-size same-mask entries at the head, fire one AW with awlen=N-1
+// same-mask entries at the head, fire one AW with awlen=N-1
 // and awburst=FIXED, pump N W-beats from FIFO[head..head+N-1], then
 // pop all N entries on B.  burst_awlen_calc is combinational from the
 // current FIFO contents; burst_awlen is the latched value at AW
@@ -383,11 +369,9 @@ always @(posedge clk or posedge reset) begin
         lsu_inflight_read <= 1'b0;
         lsu_ar_sent       <= 1'b0;
         lsu_rd_addr       <= 32'b0;
-        lsu_rd_size       <= 2'b0;
     end else begin
         if (lsu_cmd_fire && !lsu_cmd_write) begin
             lsu_rd_addr <= lsu_cmd_addr;
-            lsu_rd_size <= lsu_cmd_size;
         end
         if (per_arvalid_cpu && per_arready_cpu) lsu_ar_sent <= 1'b1;
         if (per_rvalid_cpu  && per_rready_cpu && per_rlast_cpu) begin
@@ -399,7 +383,7 @@ always @(posedge clk or posedge reset) begin
     end
 end
 
-// M2 match scan: how many consecutive head entries share addr+size+mask?
+// M2 match scan: how many consecutive head entries share addr+mask?
 // burst_awlen_calc is N-1 (0=single beat, 3=4-beat burst).  Combinational
 // — at the AW handshake posedge, both the slice and our burst_awlen
 // register sample the same value, so they stay consistent through the
@@ -409,15 +393,12 @@ wire [WR_PTR_W-1:0] head2 = wr_head + 2'd2;
 wire [WR_PTR_W-1:0] head3 = wr_head + 2'd3;
 wire match01 = (wr_count >= 3'd2)
             && (wr_addr_mem[wr_head] == wr_addr_mem[head1])
-            && (wr_size_mem[wr_head] == wr_size_mem[head1])
             && (wr_mask_mem[wr_head] == wr_mask_mem[head1]);
 wire match02 = match01 && (wr_count >= 3'd3)
             && (wr_addr_mem[wr_head] == wr_addr_mem[head2])
-            && (wr_size_mem[wr_head] == wr_size_mem[head2])
             && (wr_mask_mem[wr_head] == wr_mask_mem[head2]);
 wire match03 = match02 && (wr_count >= 3'd4)
             && (wr_addr_mem[wr_head] == wr_addr_mem[head3])
-            && (wr_size_mem[wr_head] == wr_size_mem[head3])
             && (wr_mask_mem[wr_head] == wr_mask_mem[head3]);
 
 wire [WR_PTR_W-1:0] burst_awlen_calc = match03 ? 2'd3
@@ -430,7 +411,6 @@ wire [WR_PTR_W-1:0] w_idx     = wr_head + burst_w_idx;
 wire [31:0]         w_addr    = wr_addr_mem[wr_head];   // FIXED: same every beat
 wire [31:0]         w_data    = wr_data_mem[w_idx];
 wire [3:0]          w_mask    = wr_mask_mem[w_idx];
-wire [1:0]          w_size    = wr_size_mem[wr_head];   // same for whole burst
 // Pipeline-race fix (cr-gpu-and-tri-wedges issue 1): burst_awlen
 // updates at the same posedge the AW handshake commits.  Computing
 // w_is_last against the OLD burst_awlen on that cycle marks beat 0
@@ -457,14 +437,12 @@ always @(posedge clk or posedge reset) begin
             wr_addr_mem[wi] <= 32'b0;
             wr_data_mem[wi] <= 32'b0;
             wr_mask_mem[wi] <= 4'b0;
-            wr_size_mem[wi] <= 2'b0;
         end
     end else begin
         if (wr_push) begin
             wr_addr_mem[wr_tail] <= lsu_cmd_addr;
             wr_data_mem[wr_tail] <= lsu_cmd_data;
             wr_mask_mem[wr_tail] <= lsu_cmd_mask;
-            wr_size_mem[wr_tail] <= lsu_cmd_size;
             wr_tail              <= wr_tail + {{(WR_PTR_W-1){1'b0}}, 1'b1};
         end
 
@@ -503,8 +481,6 @@ end
 assign per_arvalid_cpu = lsu_inflight_read & ~lsu_ar_sent;
 assign per_araddr_cpu  = lsu_rd_addr;
 assign per_arlen_cpu   = 8'd0;
-assign per_arsize_cpu  = {1'b0, lsu_rd_size};
-assign per_arburst_cpu = 2'b01;
 assign per_rready_cpu  = 1'b1;
 
 // AW channel.  awlen + awburst are combinational from the current
@@ -516,7 +492,6 @@ assign per_rready_cpu  = 1'b1;
 assign per_awvalid_cpu = !wr_fifo_empty & ~lsu_aw_sent;
 assign per_awaddr_cpu  = w_addr;
 assign per_awlen_cpu   = {{(8-WR_PTR_W){1'b0}}, burst_awlen_calc};
-assign per_awsize_cpu  = {1'b0, w_size};
 assign per_awburst_cpu = (burst_awlen_calc != {WR_PTR_W{1'b0}}) ? 2'b00 : 2'b01;
 // awallStrb is a side-band hint not consumed by cpu_target_port —
 // drive the post-slice wire directly; no slice needed.
@@ -555,8 +530,8 @@ VexiiRiscv cpu (
     .FetchL1Axi4Plugin_logic_axi_ar_payload_addr (i_araddr_cpu),
     .FetchL1Axi4Plugin_logic_axi_ar_payload_id   (i_arid_cpu),
     .FetchL1Axi4Plugin_logic_axi_ar_payload_len  (i_arlen_cpu),
-    .FetchL1Axi4Plugin_logic_axi_ar_payload_size (i_arsize_cpu),
-    .FetchL1Axi4Plugin_logic_axi_ar_payload_burst(i_arburst_cpu),
+    .FetchL1Axi4Plugin_logic_axi_ar_payload_size (),
+    .FetchL1Axi4Plugin_logic_axi_ar_payload_burst(),
     .FetchL1Axi4Plugin_logic_axi_ar_payload_cache(),
     .FetchL1Axi4Plugin_logic_axi_ar_payload_prot (),
     .FetchL1Axi4Plugin_logic_axi_r_valid         (i_rvalid_cpu),
@@ -572,7 +547,7 @@ VexiiRiscv cpu (
     .LsuL1Axi4Plugin_logic_axi_aw_payload_addr (mem_awaddr_cpu),
     .LsuL1Axi4Plugin_logic_axi_aw_payload_id   (mem_awid_cpu),
     .LsuL1Axi4Plugin_logic_axi_aw_payload_len  (mem_awlen_cpu),
-    .LsuL1Axi4Plugin_logic_axi_aw_payload_size (mem_awsize_cpu),
+    .LsuL1Axi4Plugin_logic_axi_aw_payload_size (),
     .LsuL1Axi4Plugin_logic_axi_aw_payload_burst(mem_awburst_cpu),
     .LsuL1Axi4Plugin_logic_axi_aw_payload_cache(),
     .LsuL1Axi4Plugin_logic_axi_aw_payload_prot (),
@@ -590,8 +565,8 @@ VexiiRiscv cpu (
     .LsuL1Axi4Plugin_logic_axi_ar_payload_addr (mem_araddr_cpu),
     .LsuL1Axi4Plugin_logic_axi_ar_payload_id   (mem_arid_cpu),
     .LsuL1Axi4Plugin_logic_axi_ar_payload_len  (mem_arlen_cpu),
-    .LsuL1Axi4Plugin_logic_axi_ar_payload_size (mem_arsize_cpu),
-    .LsuL1Axi4Plugin_logic_axi_ar_payload_burst(mem_arburst_cpu),
+    .LsuL1Axi4Plugin_logic_axi_ar_payload_size (),
+    .LsuL1Axi4Plugin_logic_axi_ar_payload_burst(),
     .LsuL1Axi4Plugin_logic_axi_ar_payload_cache(),
     .LsuL1Axi4Plugin_logic_axi_ar_payload_prot (),
     .LsuL1Axi4Plugin_logic_axi_r_valid         (mem_rvalid_cpu),
@@ -607,7 +582,7 @@ VexiiRiscv cpu (
     .LsuPlugin_logic_bus_cmd_payload_write   (lsu_cmd_write),
     .LsuPlugin_logic_bus_cmd_payload_address (lsu_cmd_addr),
     .LsuPlugin_logic_bus_cmd_payload_data    (lsu_cmd_data),
-    .LsuPlugin_logic_bus_cmd_payload_size    (lsu_cmd_size),
+    .LsuPlugin_logic_bus_cmd_payload_size    (),
     .LsuPlugin_logic_bus_cmd_payload_mask    (lsu_cmd_mask),
     .LsuPlugin_logic_bus_cmd_payload_io      (),
     .LsuPlugin_logic_bus_cmd_payload_fromHart(),
@@ -627,13 +602,13 @@ VexiiRiscv cpu (
 // ============================================================
 
 // ---- i_axi (read-only) ----
-//   AR payload = {araddr[31:0], arid[0], arlen[7:0], arsize[2:0], arburst[1:0]} = 46 bits
-axi_register_slice #(.W(46)) i_ar_slice (
+//   AR payload = {araddr[31:0], arid[0], arlen[7:0]} = 41 bits
+axi_register_slice #(.W(41)) i_ar_slice (
     .clk(clk), .reset_n(reset_n),
     .s_valid (i_arvalid_cpu),  .s_ready (i_arready_cpu),
-    .s_payload({i_araddr_cpu, i_arid_cpu, i_arlen_cpu, i_arsize_cpu, i_arburst_cpu}),
+    .s_payload({i_araddr_cpu, i_arid_cpu, i_arlen_cpu}),
     .m_valid (i_arvalid),      .m_ready (i_arready),
-    .m_payload({i_araddr,     i_arid,     i_arlen,     i_arsize,     i_arburst})
+    .m_payload({i_araddr,     i_arid,     i_arlen})
 );
 //   R payload = {rdata[31:0], rid[0], rresp[1:0], rlast} = 36 bits
 axi_register_slice #(.W(36)) i_r_slice (
@@ -645,13 +620,13 @@ axi_register_slice #(.W(36)) i_r_slice (
 );
 
 // ---- mem_axi (D$ R/W) ----
-//   AR = {araddr[31:0], arid[1:0], arlen[7:0], arsize[2:0], arburst[1:0]} = 47 bits
-axi_register_slice #(.W(47)) mem_ar_slice (
+//   AR = {araddr[31:0], arid[1:0], arlen[7:0]} = 42 bits
+axi_register_slice #(.W(42)) mem_ar_slice (
     .clk(clk), .reset_n(reset_n),
     .s_valid (mem_arvalid_cpu),.s_ready (mem_arready_cpu),
-    .s_payload({mem_araddr_cpu, mem_arid_cpu, mem_arlen_cpu, mem_arsize_cpu, mem_arburst_cpu}),
+    .s_payload({mem_araddr_cpu, mem_arid_cpu, mem_arlen_cpu}),
     .m_valid (mem_arvalid),    .m_ready (mem_arready),
-    .m_payload({mem_araddr,     mem_arid,     mem_arlen,     mem_arsize,     mem_arburst})
+    .m_payload({mem_araddr,     mem_arid,     mem_arlen})
 );
 //   R = {rdata[31:0], rid[1:0], rresp[1:0], rlast} = 37 bits
 axi_register_slice #(.W(37)) mem_r_slice (
@@ -661,13 +636,13 @@ axi_register_slice #(.W(37)) mem_r_slice (
     .m_valid (mem_rvalid_cpu), .m_ready (mem_rready_cpu),
     .m_payload({mem_rdata_cpu, mem_rid_cpu, mem_rresp_cpu, mem_rlast_cpu})
 );
-//   AW = {awaddr[31:0], awid[1:0], awlen[7:0], awsize[2:0], awburst[1:0]} = 47 bits
-axi_register_slice #(.W(47)) mem_aw_slice (
+//   AW = {awaddr[31:0], awid[1:0], awlen[7:0], awburst[1:0]} = 44 bits
+axi_register_slice #(.W(44)) mem_aw_slice (
     .clk(clk), .reset_n(reset_n),
     .s_valid (mem_awvalid_cpu),.s_ready (mem_awready_cpu),
-    .s_payload({mem_awaddr_cpu, mem_awid_cpu, mem_awlen_cpu, mem_awsize_cpu, mem_awburst_cpu}),
+    .s_payload({mem_awaddr_cpu, mem_awid_cpu, mem_awlen_cpu, mem_awburst_cpu}),
     .m_valid (mem_awvalid),    .m_ready (mem_awready),
-    .m_payload({mem_awaddr,     mem_awid,     mem_awlen,     mem_awsize,     mem_awburst})
+    .m_payload({mem_awaddr,     mem_awid,     mem_awlen,     mem_awburst})
 );
 //   W = {wdata[31:0], wstrb[3:0], wlast} = 37 bits
 axi_register_slice #(.W(37)) mem_w_slice (
@@ -687,13 +662,13 @@ axi_register_slice #(.W(4))  mem_b_slice (
 );
 
 // ---- per_axi (uncached LSU IO) ----
-//   AR = {araddr[31:0], arlen[7:0], arsize[2:0], arburst[1:0]} = 45 bits
-axi_register_slice #(.W(45)) per_ar_slice (
+//   AR = {araddr[31:0], arlen[7:0]} = 40 bits
+axi_register_slice #(.W(40)) per_ar_slice (
     .clk(clk), .reset_n(reset_n),
     .s_valid (per_arvalid_cpu),.s_ready (per_arready_cpu),
-    .s_payload({per_araddr_cpu, per_arlen_cpu, per_arsize_cpu, per_arburst_cpu}),
+    .s_payload({per_araddr_cpu, per_arlen_cpu}),
     .m_valid (per_arvalid),    .m_ready (per_arready),
-    .m_payload({per_araddr,     per_arlen,     per_arsize,     per_arburst})
+    .m_payload({per_araddr,     per_arlen})
 );
 //   R = {rdata[31:0], rresp[1:0], rlast} = 35 bits
 axi_register_slice #(.W(35)) per_r_slice (
@@ -703,13 +678,13 @@ axi_register_slice #(.W(35)) per_r_slice (
     .m_valid (per_rvalid_cpu), .m_ready (per_rready_cpu),
     .m_payload({per_rdata_cpu, per_rresp_cpu, per_rlast_cpu})
 );
-//   AW = {awaddr[31:0], awlen[7:0], awsize[2:0], awburst[1:0]} = 45 bits
-axi_register_slice #(.W(45)) per_aw_slice (
+//   AW = {awaddr[31:0], awlen[7:0], awburst[1:0]} = 42 bits
+axi_register_slice #(.W(42)) per_aw_slice (
     .clk(clk), .reset_n(reset_n),
     .s_valid (per_awvalid_cpu),.s_ready (per_awready_cpu),
-    .s_payload({per_awaddr_cpu, per_awlen_cpu, per_awsize_cpu, per_awburst_cpu}),
+    .s_payload({per_awaddr_cpu, per_awlen_cpu, per_awburst_cpu}),
     .m_valid (per_awvalid),    .m_ready (per_awready),
-    .m_payload({per_awaddr,     per_awlen,     per_awsize,     per_awburst})
+    .m_payload({per_awaddr,     per_awlen,     per_awburst})
 );
 //   W = {wdata[31:0], wstrb[3:0], wlast} = 37 bits
 axi_register_slice #(.W(37)) per_w_slice (

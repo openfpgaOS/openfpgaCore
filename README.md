@@ -116,7 +116,9 @@ to the hardware.
 The FPGA fabric provides the driver layer:
 
 - indexed/RGB framebuffer scanout
-- GPU span, span4, batch, clear, flip, translucency, and triangle commands
+- GPU scalar span, native 1/2/4-lane span-group with SDK-level 8-lane
+  splitting, batch, clear, flip,
+  translucency, and triangle commands
 - 48 kHz hardware PCM mixer
 - APF data-slot read/write and nonvolatile save handling
 - Pocket controls, dock input, keyboard/mouse/controller events, Analogizer,

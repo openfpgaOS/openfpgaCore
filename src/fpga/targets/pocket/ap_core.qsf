@@ -259,7 +259,7 @@ set_global_assignment -name TIMING_ANALYZER_MULTICORNER_ANALYSIS ON
 
 # Compiler Assignments
 # ====================
-set_global_assignment -name OPTIMIZATION_MODE "AGGRESSIVE PERFORMANCE"
+set_global_assignment -name OPTIMIZATION_MODE BALANCED
 
 # Analysis & Synthesis Assignments
 # ================================
@@ -275,7 +275,7 @@ set_global_assignment -name SAFE_STATE_MACHINE OFF
 set_global_assignment -name ADV_NETLIST_OPT_SYNTH_WYSIWYG_REMAP ON
 set_global_assignment -name SYNTH_PROTECT_SDC_CONSTRAINT ON
 set_global_assignment -name PRE_MAPPING_RESYNTHESIS ON
-set_global_assignment -name OPTIMIZATION_TECHNIQUE SPEED
+set_global_assignment -name OPTIMIZATION_TECHNIQUE BALANCED
 set_global_assignment -name MUX_RESTRUCTURE OFF
 
 # Fitter Assignments
@@ -779,7 +779,7 @@ set_global_assignment -name VERILOG_FILE ../../common/video_CRT_scanout_indexed_
 set_global_assignment -name VERILOG_FILE ../../vendor/vexriscv/VexiiRiscv/VexiiRiscv.v
 set_global_assignment -name VERILOG_FILE mf_pllram_133.v
 set_global_assignment -name SDC_FILE core_constraints.sdc
-set_global_assignment -name SEED 25
+set_global_assignment -name SEED 44
 # Phase 5 fitter-tuning experiments (see session 2026-04-18).  All
 # Quartus knobs we tried — RESOURCE_SHARING, REGISTER_RETIMING,
 # REGISTER_DUPLICATION, ramstyle=MLAB, seed 11 — ended up worse

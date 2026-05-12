@@ -198,9 +198,6 @@ axi_periph_slave dut (
     .target_dataslot_done(target_dataslot_done),
     .target_dataslot_err (target_dataslot_err),
     .bridge_wr_idle      (bridge_wr_idle),
-    .bridge_wr_fifo_count_dbg(11'd0),
-    .bridge_wr_fifo_max_dbg  (11'd0),
-    .bridge_wr_fifo_overflow_dbg(1'b0),
 
     .color_mode     (),
     .fb_display_addr(),

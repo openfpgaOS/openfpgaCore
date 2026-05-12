@@ -203,7 +203,7 @@
 #define   INPUT_STATUS_FIFO_FULL    (1 << 2)
 #define   INPUT_STATUS_OVERFLOW     (1 << 3)
 #define   INPUT_STATUS_COUNT_SHIFT  8
-#define   INPUT_STATUS_COUNT_MASK   (0x3F << INPUT_STATUS_COUNT_SHIFT)
+#define   INPUT_STATUS_COUNT_MASK   (0x1F << INPUT_STATUS_COUNT_SHIFT)
 #define INPUT_IRQ_MASK      REG32(SYSREG_BASE + 0x104)  /* bits [3:0] enable APF slot change records */
 #define INPUT_IRQ_CLEAR     REG32(SYSREG_BASE + 0x108)
 #define   INPUT_IRQ_CLEAR_FIFO      (1 << 0)
@@ -391,7 +391,7 @@
 /* Datatable slot size query (0x90) — write slot entry address, read result */
 #define DT_QUERY            REG32(SYSREG_BASE + 0x90)
 
-/* Bridge diagnostics (0x94): internal latch state for DMA failures */
+/* Bridge diagnostics (0x94): retired in production RTL, reads zero. */
 #define DS_DEBUG            REG32(SYSREG_BASE + 0x94)
 
 /* Hardware features (0x98) — read-only, set at synthesis time in RTL */

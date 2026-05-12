@@ -1429,15 +1429,12 @@ assign sram_word_wstrb = 4'b0;
 
 // Nonvolatile size updates share port A of the APF datatable BRAM.
 // APF automatic-load writes already hit the datatable directly through
-// port B, so only CPU-side SAVE_DT_SIZE commits and legacy Chip32 size
-// writes need to be serialized here.  Keep this event-driven; a mirrored
-// save_sizes[0:9] register table costs a large mux/register bank in ALMs.
+// port B, so only CPU-side SAVE_DT_SIZE commits need to be serialized here.
+// Keep this event-driven; a mirrored save_sizes[0:9] register table costs a
+// large mux/register bank in ALMs.
 reg        dt_update_pending = 1'b0;
 reg [9:0]  dt_update_addr = 10'd0;
 reg [31:0] dt_update_data = 32'd0;
-reg        legacy_save_bulk_active = 1'b0;
-reg [3:0]  legacy_save_bulk_idx = 4'd0;
-reg [31:0] legacy_save_bulk_size = 32'd0;
 
 localparam [9:0] PRESAVE_SIZE_WORD = 10'd17;
 localparam [9:0] SAVE0_SIZE_WORD   = 10'd19;
@@ -1449,16 +1446,6 @@ wire bridge_datatable_write =
 // Entry 8 is one pre-save nonvolatile slot (SDK Shared Config or Duke
 // Settings). Saves are entries 9..18. Each entry is two datatable words:
 // flags, size. Pre-save size is word 17; save0 is word 19; save9 is word 37.
-wire legacy_save_bulk_write =
-    bridge_wr && (bridge_addr == 32'hF0000000);
-wire legacy_save_size_single_write =
-    bridge_wr &&
-    (bridge_addr[31:8] == 24'hF00000) &&
-    (bridge_addr[7:2] >= 6'd4) &&
-    (bridge_addr[7:2] < 6'd14);
-wire [5:0] legacy_save_size_slot = bridge_addr[7:2] - 6'd4;
-wire [9:0] legacy_save_size_addr =
-    SAVE0_SIZE_WORD + {3'd0, legacy_save_size_slot, 1'b0};
 
 // CPU write: individual slot update via periph slave CDC
 wire [3:0]  cpu_save_dt_slot;
@@ -1537,7 +1524,7 @@ assign cpu_dt_query_data = dt_result_sync2;
 assign cpu_dt_query_valid = (dt_rtoggle_sync2 == cpu_dt_query_toggle);
 
 // Datatable port-A arbiter: CPU reads have priority, then APF port-B writes
-// hold this side idle, then queued CPU/legacy size updates are written.
+// hold this side idle, then queued CPU size updates are written.
 always @(posedge clk_74a) begin
     datatable_wren <= 0;
 
@@ -1561,30 +1548,12 @@ always @(posedge clk_74a) begin
         datatable_addr <= dt_update_addr;
         datatable_data <= dt_update_data;
         dt_update_pending <= 0;
-    end else if (legacy_save_bulk_active) begin
-        datatable_wren <= 1;
-        datatable_addr <= SAVE0_SIZE_WORD + {5'd0, legacy_save_bulk_idx, 1'b0};
-        datatable_data <= legacy_save_bulk_size;
-        if (legacy_save_bulk_idx == 4'd9) begin
-            legacy_save_bulk_active <= 0;
-            legacy_save_bulk_idx <= 4'd0;
-        end else begin
-            legacy_save_bulk_idx <= legacy_save_bulk_idx + 4'd1;
-        end
     end
 
     if (save_dt_commit_valid) begin
         dt_update_pending <= 1;
         dt_update_addr <= save_dt_commit_addr;
         dt_update_data <= save_dt_size_sync;
-    end else if (legacy_save_bulk_write) begin
-        legacy_save_bulk_active <= 1;
-        legacy_save_bulk_idx <= 4'd0;
-        legacy_save_bulk_size <= bridge_wr_data;
-    end else if (legacy_save_size_single_write) begin
-        dt_update_pending <= 1;
-        dt_update_addr <= legacy_save_size_addr;
-        dt_update_data <= bridge_wr_data;
     end
 end
 
@@ -1866,10 +1835,7 @@ assign video_hs = vidout_hs;
 	    .cont4_key(cont4_key),
 	    .cont4_joy(cont4_joy),
 	    .cont4_trig(cont4_trig),
-	    .bridge_wr_idle(bridge_wr_idle),
-	    .bridge_wr_fifo_count_dbg(11'd0),
-	    .bridge_wr_fifo_max_dbg(11'd0),
-	    .bridge_wr_fifo_overflow_dbg(1'b0),
+        .bridge_wr_idle(bridge_wr_idle),
 	    .target_dataslot_ack(target_dataslot_ack),
         .target_dataslot_done(target_dataslot_done_safe),
         .target_dataslot_err(target_dataslot_err),
@@ -2116,8 +2082,7 @@ assign video_hs = vidout_hs;
         .sdram_next_wdata(sdram_slave_next_wdata),
         .sdram_next_wstrb(sdram_slave_next_wstrb),
         .sdram_preload_wdata(sdram_slave_preload_wdata),
-        .sdram_preload_wstrb(sdram_slave_preload_wstrb),
-        .dbg_slave()
+        .sdram_preload_wstrb(sdram_slave_preload_wstrb)
     );
 
     // CRAM0 is now served by the cram0_cdc instance (declared at the
@@ -2502,12 +2467,7 @@ wire [1:0]  gpu_swap_idx;
 wire        slave_swap_pending;  // from axi_periph_slave → stalls gpu_core CMD_FLIP
 
 `ifndef EXCLUDE_GPU
-gpu_core #(
-    // Writes now post into the SDRAM arbiter queue, so the compact GPU
-    // two-word issue path no longer blocks texture reads for the whole
-    // write response.
-    .FBWQ_BURST2_ENABLE(1'b1)
-) gpu (
+gpu_core gpu (
     .clk(clk_cpu),
     .reset_n(reset_n),
     .gpu_enable(1'b1),
