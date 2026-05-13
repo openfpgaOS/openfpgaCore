@@ -129,6 +129,8 @@ localparam ST_WR   = 2'd2;  // Write transaction active (AW→W→B)
 reg [1:0] arb_state;
 reg [1:0] grant;  // 0=GPU, 1=CPU, 3=AudioMix
 reg       active_wr_gpuq;
+reg       active_gpuq_awlen;
+reg       gpuq_w_idx;
 
 // Fairness: deficit counter prevents GPU (and technically Audio, but
 // it's below CPU anyway) from starving the CPU.  Increments each time
@@ -149,8 +151,8 @@ wire audio_pending = m3_arvalid;
 // GPU bursts are split into consecutive queue entries and one B is returned
 // when the entry carrying WLAST commits.
 //
-// Keep this deliberately compact.  Duke's GPU write coalescer emits 1- or
-// 2-beat writes, so an 8-entry queue gives useful read/write decoupling
+// Keep this deliberately compact.  The GPU emits 1- or 2-beat writes today,
+// so an 8-entry queue gives useful read/write decoupling
 // without spending the routing/ALM budget of a larger register FIFO in the
 // already dense 100 MHz SDRAM domain.
 localparam GPU_WQ_DEPTH = 8;
@@ -187,10 +189,29 @@ wire       m0_aw_post_fire = m0_awvalid && m0_awready;
 wire       m0_w_post_fire  = m0_wvalid && m0_wready;
 wire       m0_w_post_last  = (m0w_beats_left == 8'd0) || m0_wlast;
 wire       gpu_wq_pop      = active_wr && active_wr_gpuq && s_bvalid;
+wire [GPU_WQ_PTR_W-1:0] gpu_wq_rd_next = gpu_wq_rd_ptr + 1'b1;
+wire       gpu_wq_can_burst2 = (gpu_wq_count >= 4'd2)
+                            && !gpu_wq_last[gpu_wq_rd_ptr]
+                            && (gpu_wq_strb[gpu_wq_rd_ptr] == 4'hF)
+                            && (gpu_wq_strb[gpu_wq_rd_next] == 4'hF)
+                            && (gpu_wq_addr[gpu_wq_rd_next] ==
+                                (gpu_wq_addr[gpu_wq_rd_ptr] + 32'd4));
+wire       gpu_wq_head_ready = !gpu_wq_empty
+                            && (gpu_wq_last[gpu_wq_rd_ptr] ||
+                                (gpu_wq_count >= 4'd2));
+wire       gpu_wq_drain_awlen = gpu_wq_can_burst2;
+wire [GPU_WQ_PTR_W-1:0] active_gpuq_w_ptr =
+    gpu_wq_rd_ptr + {{(GPU_WQ_PTR_W-1){1'b0}}, gpuq_w_idx};
+wire [GPU_WQ_PTR_W-1:0] active_gpuq_last_ptr =
+    gpu_wq_rd_ptr + {{(GPU_WQ_PTR_W-1){1'b0}}, active_gpuq_awlen};
+wire       active_gpuq_wlast = (gpuq_w_idx == active_gpuq_awlen);
+wire [3:0] gpu_wq_pop_count = gpu_wq_pop
+                             ? (active_gpuq_awlen ? 4'd2 : 4'd1)
+                             : 4'd0;
 wire       gpu_wq_high     = (gpu_wq_count >= GPU_WQ_HIGH_WATERMARK[3:0]);
 wire [3:0] gpu_wq_read_budget_limit = gpu_wq_high ? 4'd1 : GPU_WRITE_READ_BUDGET;
 wire       gpu_wq_read_budget_spent = (gpu_reads_since_write >= gpu_wq_read_budget_limit);
-wire       gpu_wq_should_drain = !gpu_wq_empty &&
+wire       gpu_wq_should_drain = gpu_wq_head_ready &&
                                  (!m0_arvalid || gpu_wq_read_budget_spent);
 
 // Completion guards: on the cycle bvalid/rlast fires, the slave returns to
@@ -204,6 +225,8 @@ always @(posedge clk or posedge reset) begin
         arb_state <= ST_IDLE;
         grant <= 2'd0;
         active_wr_gpuq <= 1'b0;
+        active_gpuq_awlen <= 1'b0;
+        gpuq_w_idx <= 1'b0;
         gpu_deficit <= 4'd0;
         audio_deficit <= 4'd0;
         gpu_wq_rd_ptr <= {GPU_WQ_PTR_W{1'b0}};
@@ -238,16 +261,19 @@ always @(posedge clk or posedge reset) begin
         end
 
         if (gpu_wq_pop) begin
-            if (gpu_wq_last[gpu_wq_rd_ptr])
+            if (gpu_wq_last[active_gpuq_last_ptr])
                 m0_bvalid_q <= 1'b1;
-            gpu_wq_rd_ptr <= gpu_wq_rd_ptr + 1'b1;
+            gpu_wq_rd_ptr <= gpu_wq_rd_ptr
+                           + {{(GPU_WQ_PTR_W-1){1'b0}}, active_gpuq_awlen}
+                           + {{(GPU_WQ_PTR_W-1){1'b0}}, 1'b1};
         end
 
-        case ({m0_w_post_fire, gpu_wq_pop})
-        2'b10: gpu_wq_count <= gpu_wq_count + 4'd1;
-        2'b01: gpu_wq_count <= gpu_wq_count - 4'd1;
-        default: ;
-        endcase
+        gpu_wq_count <= gpu_wq_count
+                      + (m0_w_post_fire ? 4'd1 : 4'd0)
+                      - gpu_wq_pop_count;
+
+        if (active_wr && active_wr_gpuq && s_wvalid && s_wready && !active_gpuq_wlast)
+            gpuq_w_idx <= gpuq_w_idx + 1'b1;
 
         if (gpu_wq_empty)
             gpu_reads_since_write <= 4'd0;
@@ -276,9 +302,11 @@ always @(posedge clk or posedge reset) begin
                     gpu_reads_since_write <= 4'd0;
                 if (cpu_pending) gpu_deficit <= gpu_deficit + 4'd1;
                 if (audio_pending) audio_deficit <= audio_deficit + 4'd1;
-            end else if (!gpu_wq_empty) begin
+            end else if (gpu_wq_head_ready) begin
                 grant <= 2'd0;
                 active_wr_gpuq <= 1'b1;
+                active_gpuq_awlen <= gpu_wq_drain_awlen;
+                gpuq_w_idx <= 1'b0;
                 arb_state <= ST_WR;
                 gpu_reads_since_write <= 4'd0;
                 if (cpu_pending) gpu_deficit <= gpu_deficit + 4'd1;
@@ -346,17 +374,19 @@ assign s_araddr  = grant_m0 ? m0_araddr  :
 assign s_arlen   = grant_m0 ? m0_arlen   :
                    grant_m1 ? m1_arlen   : m3_arlen;
 
-// AW/W channel.  Posted M0 writes drain as single-word slave writes.
+// AW/W channel.  Posted M0 writes normally drain as single-word slave writes.
+// When the GPU queued a short contiguous full-strobe write, preserve it as a
+// 2-beat slave burst so triangle rows can reach the SDRAM burst path.
 assign s_awvalid = (active_wr && !wr_completing) ? (active_wr_gpuq ? 1'b1 :
                                                                 m1_awvalid) : 1'b0;
 assign s_awaddr  = active_wr_gpuq ? gpu_wq_addr[gpu_wq_rd_ptr] : m1_awaddr;
-assign s_awlen   = active_wr_gpuq ? 8'd0 : m1_awlen;
+assign s_awlen   = active_wr_gpuq ? {7'b0, active_gpuq_awlen} : m1_awlen;
 
 assign s_wvalid  = (active_wr && !wr_completing) ? (active_wr_gpuq ? 1'b1 :
                                                                 m1_wvalid) : 1'b0;
-assign s_wdata   = active_wr_gpuq ? gpu_wq_data[gpu_wq_rd_ptr] : m1_wdata;
-assign s_wstrb   = active_wr_gpuq ? gpu_wq_strb[gpu_wq_rd_ptr] : m1_wstrb;
-assign s_wlast   = active_wr_gpuq ? 1'b1 : m1_wlast;
+assign s_wdata   = active_wr_gpuq ? gpu_wq_data[active_gpuq_w_ptr] : m1_wdata;
+assign s_wstrb   = active_wr_gpuq ? gpu_wq_strb[active_gpuq_w_ptr] : m1_wstrb;
+assign s_wlast   = active_wr_gpuq ? active_gpuq_wlast : m1_wlast;
 
 // ============================================
 // Slave -> Master channel demux (combinational)

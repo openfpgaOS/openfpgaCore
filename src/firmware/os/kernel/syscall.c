@@ -901,16 +901,13 @@ static long sys_close(long fd) {
         uint32_t save_size = f->size;
         int rc = 0;
         if (f->dirty) {
-            rc = of_nvslot_set_size(f->slot_id, save_size);
             /* POSIX: close() always closes the fd.  Nonvolatile files
-             * all follow the same path: writes update the CRAM0 window,
-             * close() publishes the logical size to the APF datatable,
-             * and the Pocket nonvolatile exit path persists the slot.
-             *
-             * Config/settings used to issue an immediate DS_CMD_WRITE
-             * here, but Duke save slots are stable specifically because
-             * they avoid in-game target-to-host writes and rely on the
-             * automatic writeback path.  Keep settings on that same path. */
+             * must be durable at fclose() because an app or developer
+             * workflow can reset/reload the core without taking the normal
+             * Pocket exit path.  Writes already updated the CRAM0 window;
+             * this publishes the logical size and asks the bridge to write
+             * that range back to SD immediately. */
+            rc = of_nvslot_flush_size(f->slot_id, save_size);
             if (rc == 0)
                 save_size_cache_store(f->nv_cache_idx, save_size);
             else

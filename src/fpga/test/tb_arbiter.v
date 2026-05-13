@@ -79,6 +79,10 @@ module tb_arbiter (
     output wire        dbg_s_arready,
     output wire        dbg_s_awvalid,
     output wire        dbg_s_awready,
+    output wire [7:0]  dbg_s_awlen,
+    output wire        dbg_s_wvalid,
+    output wire        dbg_s_wready,
+    output wire        dbg_s_wlast,
     output wire        dbg_s_bvalid,
     output wire        dbg_s_rvalid,
     output wire        dbg_s_rlast,
@@ -285,6 +289,10 @@ assign dbg_s_arvalid = s_arvalid;
 assign dbg_s_arready = s_arready;
 assign dbg_s_awvalid = s_awvalid;
 assign dbg_s_awready = s_awready;
+assign dbg_s_awlen   = s_awlen;
+assign dbg_s_wvalid  = s_wvalid;
+assign dbg_s_wready  = s_wready;
+assign dbg_s_wlast   = s_wlast;
 assign dbg_s_bvalid  = s_bvalid;
 assign dbg_s_rvalid  = s_rvalid;
 assign dbg_s_rlast   = s_rlast;

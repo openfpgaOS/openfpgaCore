@@ -29,6 +29,8 @@ module tb_gpu (
     output wire [31:0] dbg_tri_det,
     output wire [31:0] dbg_frag,
     output reg  [31:0] dbg_aw_count,
+    output reg  [31:0] dbg_aw_burst_count,
+    output reg  [7:0]  dbg_aw_max_len,
 
     // CMD_FLIP side-port (observed by C++ harness for the drain test)
     output wire        gpu_swap_req,
@@ -186,12 +188,18 @@ always @(posedge clk) begin
         wr_aw_active <= 0;
         wr_b_pending <= 0;
         dbg_aw_count <= 0;
+        dbg_aw_burst_count <= 0;
+        dbg_aw_max_len <= 0;
     end else begin
         // Accept AW
         if (!wr_aw_active && !wr_b_pending && gpu_wr_awvalid) begin
             wr_aw_active <= 1;
             wr_addr      <= gpu_wr_awaddr[25:2];
             dbg_aw_count <= dbg_aw_count + 32'd1;
+            if (gpu_wr_awlen != 8'd0)
+                dbg_aw_burst_count <= dbg_aw_burst_count + 32'd1;
+            if (gpu_wr_awlen > dbg_aw_max_len)
+                dbg_aw_max_len <= gpu_wr_awlen;
         end
 
         // Accept W beats

@@ -2938,6 +2938,76 @@ static void test_triangle_cmap_slot_change_between_draws() {
     }
 }
 
+static void test_triangle_full_words_emit_bursts_only_for_triangles() {
+    printf("TEST triangle_full_words_emit_bursts_only_for_triangles\n");
+    gpu_init();
+    preload_with_sentinel();
+    upload_palookup_identity_row(0, 0);
+
+    std::vector<uint8_t> tex(64, 0x42);
+    upload_texture(TEX_BASE_BYTE, tex);
+
+    cmd_set_fb(FB_BASE_BYTE, 320);
+    cmd_set_texture(TEX_BASE_BYTE, 8, 8);
+    cmd_set_colormap_id(0);
+
+    uint32_t burst_before = tb->dbg_aw_burst_count;
+
+    SpanWire s = make_span();
+    s.fb_addr = FB_BASE_BYTE + 0x100;
+    s.tex_addr = TEX_BASE_BYTE;
+    s.tex_width = 8;
+    s.count = 16;
+    s.flags = 0;
+    emit_span_raw(s);
+
+    if (!submit_and_wait()) {
+        check_fail("triangle_full_words_emit_bursts_only_for_triangles.scalar", "timeout");
+        return;
+    }
+
+    uint32_t burst_after_scalar = tb->dbg_aw_burst_count;
+
+    ring_cmd(0x30, 19);
+    ring_write(3);
+    auto vert = [](int16_t x, int16_t y, int32_t s, int32_t t) {
+        ring_write(((uint32_t)(uint16_t)(x * 16) << 16) | (uint16_t)(y * 16));
+        ring_write(0);
+        ring_write((uint32_t)s);
+        ring_write((uint32_t)t);
+        ring_write(0x00010000);
+        ring_write(0x00000000);
+    };
+    vert(8,  8, 0,       0);
+    vert(72, 8, 7 << 16, 0);
+    vert(8, 40, 0,       7 << 16);
+
+    if (!submit_and_wait()) {
+        check_fail("triangle_full_words_emit_bursts_only_for_triangles.triangle", "timeout");
+        return;
+    }
+
+    uint32_t burst_after_tri = tb->dbg_aw_burst_count;
+    if (burst_after_scalar == burst_before)
+        check_pass("triangle_full_words_emit_bursts_only_for_triangles.scalar_no_burst");
+    else {
+        char buf[128];
+        snprintf(buf, sizeof(buf), "burst count changed on scalar span: %u -> %u",
+                 burst_before, burst_after_scalar);
+        check_fail("triangle_full_words_emit_bursts_only_for_triangles.scalar_no_burst", buf);
+    }
+
+    if (burst_after_tri > burst_after_scalar && tb->dbg_aw_max_len >= 1)
+        check_pass("triangle_full_words_emit_bursts_only_for_triangles.triangle_burst");
+    else {
+        char buf[128];
+        snprintf(buf, sizeof(buf),
+                 "expected triangle burst count to rise and max AWLEN>=1: %u -> %u, max=%u",
+                 burst_after_scalar, burst_after_tri, (unsigned)tb->dbg_aw_max_len);
+        check_fail("triangle_full_words_emit_bursts_only_for_triangles.triangle_burst", buf);
+    }
+}
+
 // ---- Section 16: FLIP ------------------------------------------------------
 static void test_flip_no_writes_pulses_immediately() {
     printf("TEST flip_no_writes_pulses_immediately\n");
@@ -3336,6 +3406,7 @@ int main(int argc, char **argv) {
     test_batch_dma_equals_inline();
     test_command_stream_dma_mixed_span_span_group();
     test_triangle_cmap_slot_change_between_draws();
+    test_triangle_full_words_emit_bursts_only_for_triangles();
     test_flip_no_writes_pulses_immediately();
 
     // ---- Combination tests ----

@@ -1285,18 +1285,21 @@ reg src_done;            // source has issued its last pixel; pipeline draining
 // same cycle pipe_addr_b matches.  See gpu_tex_cache.v for the held-response
 // semantics this relies on.
 // Small write FIFO in front of the AXI write master.  Producers enqueue
-// 32-bit word writes and the drain path emits one AXI beat per queued word.
-// The earlier optional burst-2 coalescer was removed after hardware testing
-// showed no win and occasional display bring-up failures.
+// 32-bit word writes.  The drain path normally emits single-beat writes, but
+// it may preserve a triangle-generated pair of adjacent full words as one
+// short AXI burst. Scope this to triangles only: vertical spans, clears, and
+// RMW translucency stay on the single-write path that has proven stable.
 localparam FBWQ_DEPTH = 2;
 reg [31:0] fbwq_addr [0:FBWQ_DEPTH-1];
 reg [31:0] fbwq_data [0:FBWQ_DEPTH-1];
 reg [3:0]  fbwq_strb [0:FBWQ_DEPTH-1];
+reg        fbwq_tri  [0:FBWQ_DEPTH-1];
 reg        fbwq_rd_ptr;
 reg        fbwq_wr_ptr;
 reg [1:0]  fbwq_count;
 wire       fbwq_empty = (fbwq_count == 2'd0);
 wire       fbwq_full  = (fbwq_count == 2'd2);
+wire       fbwq_rd_next = fbwq_rd_ptr + 1'b1;
 
 // Stage 2b: framebuffer/clear writes enqueue into a compact FIFO and the
 // AXI write port drains it independently.  This lets the fragment pipe keep
@@ -1304,12 +1307,29 @@ wire       fbwq_full  = (fbwq_count == 2'd2);
 // outstanding-B cap at 14 to prevent the 4-bit counter from overflowing if
 // SDRAM is slow to drain.
 wire m_wr_inflight_near_full = (m_wr_inflight >= 4'd14);
-wire m_wr_chan_busy = m_wr_awvalid || m_wr_wvalid;
-wire fbwq_output_idle = !m_wr_awvalid && !m_wr_wvalid;
+reg        m_wr_w2_valid;
+reg [31:0] m_wr_w2_data;
+reg [3:0]  m_wr_w2_strb;
+reg        sp_from_tri;
+wire m_wr_chan_busy = m_wr_awvalid || m_wr_wvalid || m_wr_w2_valid;
+wire fbwq_output_idle = !m_wr_awvalid && !m_wr_wvalid && !m_wr_w2_valid;
+wire fbwq_wait_for_tri_pair = (fbwq_count == 2'd1)
+                           && fbwq_tri[fbwq_rd_ptr]
+                           && (fbwq_strb[fbwq_rd_ptr] == 4'hF)
+                           && sp_from_tri;
 wire fbwq_drain_can_load = !m_wr_inflight_near_full
-                         && fbwq_output_idle;
+                         && fbwq_output_idle
+                         && !fbwq_wait_for_tri_pair;
+wire fbwq_pop_burst2 = (fbwq_count == 2'd2)
+                     && fbwq_drain_can_load
+                     && fbwq_tri[fbwq_rd_ptr]
+                     && fbwq_tri[fbwq_rd_next]
+                     && (fbwq_strb[fbwq_rd_ptr] == 4'hF)
+                     && (fbwq_strb[fbwq_rd_next] == 4'hF)
+                     && (fbwq_addr[fbwq_rd_next] == (fbwq_addr[fbwq_rd_ptr] + 32'd4));
 wire fbwq_pop_now = !fbwq_empty && fbwq_drain_can_load;
-wire [1:0] fbwq_pop_count = fbwq_pop_now ? 2'd1 : 2'd0;
+wire [1:0] fbwq_pop_count = fbwq_pop_now ? (fbwq_pop_burst2 ? 2'd2 : 2'd1)
+                                          : 2'd0;
 wire fbwq_can_push = !fbwq_full || fbwq_pop_now;
 wire fb_write_can_issue = fbwq_can_push;
 wire p3_needs_fb_flush = p3_valid && !p3_discard && !p3_flags[SPAN_TRANSLUC]
@@ -1867,6 +1887,7 @@ task finish_fragment_stream_after_flush;
     begin
         fb_acc_valid <= 1'b0;
         fb_acc_mask  <= 4'b0;
+        sp_from_tri  <= 1'b0;
         if (tri_active)
             tri_active <= 1'b0;
 
@@ -1882,17 +1903,20 @@ always @(posedge clk) begin : main_fsm
     reg [31:0] fbwq_push_addr;
     reg [31:0] fbwq_push_data;
     reg [3:0]  fbwq_push_strb;
+    reg        fbwq_push_tri;
 
     fbwq_push_req  = 1'b0;
     fbwq_push_addr = 32'b0;
     fbwq_push_data = 32'b0;
     fbwq_push_strb = 4'b0;
+    fbwq_push_tri  = 1'b0;
 
     if (!reset_n) begin
         state <= S_IDLE;
         ring_rdptr <= 0;
         m_wr_awvalid <= 0;
         m_wr_wvalid <= 0;
+        m_wr_w2_valid <= 0;
         fbwq_rd_ptr <= 1'b0;
         fbwq_wr_ptr <= 1'b0;
         fbwq_count  <= 2'b0;
@@ -1946,6 +1970,7 @@ always @(posedge clk) begin : main_fsm
         blend_byte_lane  <= 0;
         blend_p3_match_r <= 0;
         src_done <= 0;
+        sp_from_tri <= 0;
         sp_sZ <= 0; sp_tZ <= 0; sp_zinv <= 0;
         sp_sZstep <= 0; sp_tZstep <= 0; sp_zinv_step <= 0;
         persp_active <= 0;
@@ -2031,11 +2056,13 @@ always @(posedge clk) begin : main_fsm
             ring_rdptr   <= ring_wrptr;
             m_wr_awvalid <= 0;
             m_wr_wvalid  <= 0;
+            m_wr_w2_valid <= 0;
             fbwq_rd_ptr  <= 1'b0;
             fbwq_wr_ptr  <= 1'b0;
             fbwq_count   <= 2'b0;
             fb_acc_valid <= 0;
             fb_acc_mask  <= 0;
+            sp_from_tri  <= 0;
             m_wr_inflight <= 4'b0;
             gpu_swap_req <= 1'b0;
         end else begin
@@ -2387,6 +2414,7 @@ always @(posedge clk) begin : main_fsm
             else if (span_group_active) begin
                 spg_lane <= 2'd0;
                 spg_load_lane;
+                sp_from_tri       <= 1'b0;
                 persp_active      <= 1'b0;
                 persp_first_done  <= 0;
                 persp_seg_a_ready <= 0;
@@ -2402,6 +2430,7 @@ always @(posedge clk) begin : main_fsm
                 // the sp_* regs are fully loaded for the current span.
                 // sp_flags holds the packed live flags from field idx 6;
                 // its SPAN_PERSP bit arms the perspective sub-FSM.
+                sp_from_tri       <= 1'b0;
                 persp_active      <= sp_flags[SPAN_PERSP];
                 persp_first_done  <= 0;
                 persp_seg_a_ready <= 0;
@@ -2652,6 +2681,7 @@ always @(posedge clk) begin : main_fsm
                                 fbwq_push_addr = fb_acc_addr;
                                 fbwq_push_data = fb_acc_data;
                                 fbwq_push_strb = fb_acc_mask;
+                                fbwq_push_tri  = sp_from_tri && (fb_acc_mask == 4'hF);
 
                                 fb_acc_valid <= 1;
                                 fb_acc_addr  <= p3_word_addr;
@@ -2804,6 +2834,7 @@ always @(posedge clk) begin : main_fsm
                             fbwq_push_addr = fb_acc_addr;
                             fbwq_push_data = fb_acc_data;
                             fbwq_push_strb = fb_acc_mask;
+                            fbwq_push_tri  = 1'b0;
 
                             fb_acc_valid <= 1;
                             fb_acc_addr  <= blend_word_addr;
@@ -3090,6 +3121,7 @@ always @(posedge clk) begin : main_fsm
                     fbwq_push_addr = fb_acc_addr;
                     fbwq_push_data = fb_acc_data;
                     fbwq_push_strb = fb_acc_mask;
+                    fbwq_push_tri  = sp_from_tri && (fb_acc_mask == 4'hF);
                     finish_fragment_stream_after_flush();
                 end
             end else begin
@@ -3843,6 +3875,7 @@ always @(posedge clk) begin : main_fsm
                     sp_tex_width <= st_tex_width;
                     sp_tex_w_mask <= 16'hFFFF;
                     sp_tex_h_mask <= 16'hFFFF;
+                    sp_from_tri <= 1'b1;
                     // Phase 4c.4 — when perspective is active, route the
                     // triangle's row-walked attributes into the
                     // SPAN_PERSP path's perspective-source regs and arm
@@ -3991,21 +4024,35 @@ always @(posedge clk) begin : main_fsm
             // write order across spans, clears, fences, and translucent
             // read-modify-write barriers.
             // --------------------------------------------------------
-            if (fbwq_pop_now) begin
+            if (!m_wr_wvalid && m_wr_w2_valid) begin
+                m_wr_wvalid  <= 1'b1;
+                m_wr_wdata   <= m_wr_w2_data;
+                m_wr_wstrb   <= m_wr_w2_strb;
+                m_wr_wlast   <= 1'b1;
+                m_wr_w2_valid <= 1'b0;
+            end else if (fbwq_pop_now) begin
                 m_wr_awvalid <= 1'b1;
                 m_wr_awaddr  <= fbwq_addr[fbwq_rd_ptr];
-                m_wr_awlen   <= 8'd0;
+                m_wr_awlen   <= fbwq_pop_burst2 ? 8'd1 : 8'd0;
                 m_wr_wvalid  <= 1'b1;
                 m_wr_wdata   <= fbwq_data[fbwq_rd_ptr];
                 m_wr_wstrb   <= fbwq_strb[fbwq_rd_ptr];
-                m_wr_wlast   <= 1'b1;
-                fbwq_rd_ptr  <= fbwq_rd_ptr + 1'b1;
+                m_wr_wlast   <= !fbwq_pop_burst2;
+                if (fbwq_pop_burst2) begin
+                    m_wr_w2_valid <= 1'b1;
+                    m_wr_w2_data  <= fbwq_data[fbwq_rd_next];
+                    m_wr_w2_strb  <= fbwq_strb[fbwq_rd_next];
+                    fbwq_rd_ptr   <= fbwq_rd_ptr;
+                end else begin
+                    fbwq_rd_ptr   <= fbwq_rd_ptr + 1'b1;
+                end
             end
 
             if (fbwq_push_req && fbwq_can_push) begin
                 fbwq_addr[fbwq_wr_ptr] <= fbwq_push_addr;
                 fbwq_data[fbwq_wr_ptr] <= fbwq_push_data;
                 fbwq_strb[fbwq_wr_ptr] <= fbwq_push_strb;
+                fbwq_tri[fbwq_wr_ptr]  <= fbwq_push_tri;
                 fbwq_wr_ptr            <= fbwq_wr_ptr + 1'b1;
             end
 

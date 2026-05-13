@@ -333,14 +333,14 @@ static void test_posted_write_allows_reads_before_commit() {
 }
 
 // ====================================================================
-// Test 6: Posted AWLEN=1 is split into two ordered SDRAM writes.
+// Test 6: Posted AWLEN=1 is preserved as one ordered SDRAM burst.
 //
-// The GPU can still emit compact two-beat transactions.  The arbiter stores
-// each beat as one queued word and only returns one B after the WLAST beat
-// commits.
+// The GPU can emit compact two-beat transactions.  The arbiter stores
+// each beat as one queued word, drains the adjacent full-strobe pair as one
+// 2-beat slave burst, and only returns one B after the WLAST beat commits.
 // ====================================================================
-static void test_posted_burst2_splits_and_b_after_last() {
-    printf("\n=== Test 6: Posted M0 AWLEN=1 splits, one B after last ===\n");
+static void test_posted_burst2_preserved_and_b_after_last() {
+    printf("\n=== Test 6: Posted M0 AWLEN=1 preserved, one B after last ===\n");
     reset_sequence();
 
     tb->m0_awvalid = 1;
@@ -353,7 +353,10 @@ static void test_posted_burst2_splits_and_b_after_last() {
 
     int w_beats = 0;
     int slave_aw_count = 0;
-    int second_slave_aw_cycle = -1;
+    int slave_awlen = -1;
+    int slave_w_beats = 0;
+    int slave_wlast_count = 0;
+    int slave_wlast_cycle = -1;
     int b_count = 0;
     int b_cycle = -1;
 
@@ -362,11 +365,18 @@ static void test_posted_burst2_splits_and_b_after_last() {
         bool aw_hs = handshake(tb->m0_awvalid, tb->m0_awready);
         bool w_hs  = handshake(tb->m0_wvalid,  tb->m0_wready);
         bool slave_aw_hs = handshake(tb->dbg_s_awvalid, tb->dbg_s_awready);
+        bool slave_w_hs  = handshake(tb->dbg_s_wvalid,  tb->dbg_s_wready);
 
         if (slave_aw_hs) {
             slave_aw_count++;
-            if (slave_aw_count == 2)
-                second_slave_aw_cycle = t;
+            slave_awlen = tb->dbg_s_awlen;
+        }
+        if (slave_w_hs) {
+            slave_w_beats++;
+            if (tb->dbg_s_wlast) {
+                slave_wlast_count++;
+                slave_wlast_cycle = t;
+            }
         }
         if (tb->m0_bvalid) {
             b_count++;
@@ -390,13 +400,18 @@ static void test_posted_burst2_splits_and_b_after_last() {
 
     char msg[160];
     snprintf(msg, sizeof(msg),
-             "w_beats=%d slave_aw=%d second_aw=%d b_count=%d b_cycle=%d q=%u",
-             w_beats, slave_aw_count, second_slave_aw_cycle, b_count, b_cycle,
+             "w=%d slave_aw=%d awlen=%d slave_w=%d wlast=%d/%d b=%d/%d q=%u",
+             w_beats, slave_aw_count, slave_awlen, slave_w_beats,
+             slave_wlast_count, slave_wlast_cycle, b_count, b_cycle,
              (unsigned)tb->dbg_gpu_wq_count);
     check("Two W beats accepted", w_beats == 2, msg);
-    check("Two single-word SDRAM writes issued", slave_aw_count == 2, msg);
+    check("One SDRAM burst issued", slave_aw_count == 1, msg);
+    check("SDRAM burst length is two beats", slave_awlen == 1, msg);
+    check("Two SDRAM W beats issued", slave_w_beats == 2, msg);
+    check("WLAST asserted only on second SDRAM beat",
+          slave_wlast_count == 1 && slave_wlast_cycle >= 0, msg);
     check("Exactly one M0 B response returned", b_count == 1, msg);
-    check("B follows second committed word", b_cycle > second_slave_aw_cycle, msg);
+    check("B follows second committed word", b_cycle > slave_wlast_cycle, msg);
     check("Posted queue drains", tb->dbg_gpu_wq_count == 0, msg);
 }
 
@@ -623,7 +638,7 @@ int main(int argc, char **argv) {
     test_read_starves_write();
     test_continuous_ar_starves_aw();
     test_posted_write_allows_reads_before_commit();
-    test_posted_burst2_splits_and_b_after_last();
+    test_posted_burst2_preserved_and_b_after_last();
     test_m0_fairness_ratio();
     test_multi_master_stress();
 
