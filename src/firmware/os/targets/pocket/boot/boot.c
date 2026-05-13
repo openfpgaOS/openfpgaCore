@@ -44,6 +44,7 @@ volatile unsigned int __attribute__((section(".bss.boot"))) pd_dbg_info;
 
 /* Data slot IDs */
 #define OS_SLOT_ID      1       /* OS binary */
+#define OS_DT_SIZE_WORD 3       /* entry 1 size word: id word 2, size word 3 */
 
 /* DMA timeout (~2 seconds at 100MHz) */
 #define BOOT_DMA_TIMEOUT 200000000
@@ -425,6 +426,27 @@ static int boot_dma_read(uint32_t slot_id, uint32_t slot_offset,
 }
 
 __attribute__((section(".text.boot")))
+static uint32_t boot_dt_read_word(uint32_t word) {
+    DT_QUERY = word;
+    for (int i = 0; i < 100000; i++) {
+        uint32_t v = DT_QUERY;
+        if (v & 0x80000000u)
+            return v & 0x7FFFFFFFu;
+    }
+    return 0;
+}
+
+__attribute__((section(".text.boot")))
+static uint32_t boot_os_slot_size(void) {
+    uint32_t linked_size = (uint32_t)(uintptr_t)_os_copy_size;
+    uint32_t dt_size = boot_dt_read_word(OS_DT_SIZE_WORD);
+
+    if (dt_size >= 4096u && dt_size <= 768u * 1024u)
+        return dt_size;
+    return linked_size;
+}
+
+__attribute__((section(".text.boot")))
 static int boot_load_os_sd(uint32_t total) {
     /* v2 arch: CRAM1 retired, OS .text in SDRAM (CRAM0 is non-exec).
      * Single-destination layout: bridge DMAs os.bin into CRAM0
@@ -595,7 +617,7 @@ load_from_sd:
 
     pd_dbg_stage = 3;
 
-    uint32_t os_size = (uint32_t)(uintptr_t)_os_copy_size;
+    uint32_t os_size = boot_os_slot_size();
 
     int rc = boot_load_os_sd(os_size);
 

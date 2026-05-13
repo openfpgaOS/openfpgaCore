@@ -193,7 +193,8 @@ int of_nvslot_is_supported(uint32_t data_slot_id) {
 
 uint32_t of_nvslot_capacity(uint32_t data_slot_id) {
     nvslot_map_t map;
-    if (nvslot_map(data_slot_id, &map) < 0)
+    if (!of_nvslot_is_supported(data_slot_id) ||
+        nvslot_map(data_slot_id, &map) < 0)
         return 0;
     return map.capacity;
 }
@@ -201,7 +202,8 @@ uint32_t of_nvslot_capacity(uint32_t data_slot_id) {
 int of_nvslot_read(uint32_t data_slot_id, void *buf,
                    uint32_t offset, uint32_t len) {
     nvslot_map_t map;
-    if (nvslot_map(data_slot_id, &map) < 0)
+    if (!of_nvslot_is_supported(data_slot_id) ||
+        nvslot_map(data_slot_id, &map) < 0)
         return -1;
     if (offset > map.capacity || len > map.capacity - offset)
         return -1;
@@ -218,7 +220,8 @@ int of_nvslot_read(uint32_t data_slot_id, void *buf,
 int of_nvslot_write(uint32_t data_slot_id, const void *buf,
                     uint32_t offset, uint32_t len) {
     nvslot_map_t map;
-    if (nvslot_map(data_slot_id, &map) < 0)
+    if (!of_nvslot_is_supported(data_slot_id) ||
+        nvslot_map(data_slot_id, &map) < 0)
         return -1;
     if (offset > map.capacity || len > map.capacity - offset)
         return -1;
@@ -233,7 +236,8 @@ int of_nvslot_write(uint32_t data_slot_id, const void *buf,
 
 int of_nvslot_set_size(uint32_t data_slot_id, uint32_t size) {
     nvslot_map_t map;
-    if (nvslot_map(data_slot_id, &map) < 0)
+    if (!of_nvslot_is_supported(data_slot_id) ||
+        nvslot_map(data_slot_id, &map) < 0)
         return -1;
     if (size > map.capacity)
         size = map.capacity;
@@ -250,7 +254,8 @@ int of_nvslot_set_size(uint32_t data_slot_id, uint32_t size) {
 
 int of_nvslot_flush_size(uint32_t data_slot_id, uint32_t size) {
     nvslot_map_t map;
-    if (nvslot_map(data_slot_id, &map) < 0)
+    if (!of_nvslot_is_supported(data_slot_id) ||
+        nvslot_map(data_slot_id, &map) < 0)
         return -1;
     if (size > map.capacity)
         size = map.capacity;

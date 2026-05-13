@@ -332,16 +332,17 @@ void of_file_inval_cram(uint32_t bridge_addr, uint32_t length) {
     (void)length;
 }
 
-static int datatable_entry_for_slot(uint32_t slot_id, uint32_t *entry_out) {
+static int datatable_entry_candidate_for_slot(uint32_t slot_id,
+                                              uint32_t *entry_out) {
     /* APF's datatable is indexed by array position in data.json, while
-     * DS_CMD_READ/GETFILE use the slot `id` field.  Current layout:
+     * DS_CMD_READ/GETFILE use the slot `id` field. Current layout:
      *   ids 0-7      -> entries 0-7   (game, os, app, data 1-4, soundbank)
      *   id 8 or id 9 -> entry  8      (one pre-save nonvolatile slot:
      *                                    SDK Shared Config or Duke settings)
      *   ids 10-19    -> entries 9-18  (ten nonvolatile save slots)
      * If you add or remove a pre-save slot in data.json, this map MUST
      * be updated in lockstep -- the relationship is contractual and
-     * APF does not expose the id field at runtime to let us derive it. */
+     * APF does not expose a dependable runtime layout query. */
     if (slot_id <= 7) {
         *entry_out = slot_id;
         return 0;
@@ -377,6 +378,10 @@ static long datatable_read_word(uint32_t word) {
     }
 
     return -1;
+}
+
+static int datatable_entry_for_slot(uint32_t slot_id, uint32_t *entry_out) {
+    return datatable_entry_candidate_for_slot(slot_id, entry_out);
 }
 
 long of_file_flags(uint32_t slot_id) {

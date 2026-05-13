@@ -1445,7 +1445,7 @@ wire bridge_datatable_write =
 
 // Entry 8 is one pre-save nonvolatile slot (SDK Shared Config or Duke
 // Settings). Saves are entries 9..18. Each entry is two datatable words:
-// flags, size. Pre-save size is word 17; save0 is word 19; save9 is word 37.
+// file id, size. Pre-save size is word 17; save0 is word 19; save9 is word 37.
 
 // CPU write: individual slot update via periph slave CDC
 wire [3:0]  cpu_save_dt_slot;

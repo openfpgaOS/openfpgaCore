@@ -25,6 +25,8 @@ KERNEL_DIR = kernel
 BOOT_DIR = targets/$(TARGET)/boot
 API_DIR = ../api
 SHARED_DIR = shared
+LIB_DIR = ../lib
+ISO9660_DIR = $(LIB_DIR)/iso9660
 
 # Compiler flags
 ARCH = rv32imafc
@@ -38,7 +40,7 @@ CFLAGS += -fsingle-precision-constant
 CFLAGS += -falign-functions=64 -falign-loops=64
 # Don't auto-rewrite plain loops as memset/memcpy calls.
 CFLAGS += -fno-tree-loop-distribute-patterns
-CFLAGS += -I. -I$(HAL_DIR) -I$(TARGET_DIR) -I$(KERNEL_DIR) -I$(BOOT_DIR) -I$(API_DIR) -I$(SHARED_DIR)
+CFLAGS += -I. -I$(HAL_DIR) -I$(TARGET_DIR) -I$(KERNEL_DIR) -I$(BOOT_DIR) -I$(API_DIR) -I$(SHARED_DIR) -I$(ISO9660_DIR)
 CFLAGS += -MMD -MP
 
 # OS kernel flags (optimized for speed)
@@ -106,7 +108,9 @@ KERNEL_SRCS = $(KERNEL_DIR)/main.c \
               $(KERNEL_DIR)/services_table.c \
               $(KERNEL_DIR)/of_malloc.c \
               $(KERNEL_DIR)/irq.c \
-              $(KERNEL_DIR)/bank_preload.c
+              $(KERNEL_DIR)/bank_preload.c \
+              $(ISO9660_DIR)/lib9660.c \
+              $(ISO9660_DIR)/iso9660_vfs.c
 
 # All sources
 ALL_C_SRCS = $(BOOT_SRCS_C) $(HAL_SRCS) $(TARGET_SRCS) $(KERNEL_SRCS)
@@ -203,6 +207,9 @@ $(KERNEL_DIR)/irq.o: $(KERNEL_DIR)/irq.c
 	$(CC) $(filter-out -flto,$(OS_CFLAGS)) -c -o $@ $<
 
 $(KERNEL_DIR)/%.o: $(KERNEL_DIR)/%.c
+	$(CC) $(OS_CFLAGS) -c -o $@ $<
+
+$(ISO9660_DIR)/%.o: $(ISO9660_DIR)/%.c
 	$(CC) $(OS_CFLAGS) -c -o $@ $<
 
 # Auto-dependency files (header tracking)

@@ -36,6 +36,7 @@
 #define SYS_renameat2       276
 #define SYS_ftruncate       46
 #define SYS_faccessat       48
+#define SYS_chdir           49
 #define SYS_openat          56
 #define SYS_close           57
 #define SYS_lseek           62

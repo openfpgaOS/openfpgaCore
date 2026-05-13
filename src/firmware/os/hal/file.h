@@ -74,8 +74,9 @@ void of_file_inval_cram(uint32_t bridge_addr, uint32_t length);
 int of_file_get_name(uint32_t slot_id, char *name_out, uint32_t name_max);
 
 /* Query APF datatable metadata for a data slot ID.
- * APF exposes two words per datatable entry: flags, then current size.
- * Returns the value on success, or <0 if the slot has no datatable entry. */
+ * APF exposes two words per datatable entry: concrete file id, then
+ * current size. Returns the value on success, or <0 if the slot has no
+ * datatable entry matching that id. */
 long of_file_flags(uint32_t slot_id);
 long of_file_size(uint32_t slot_id);
 
