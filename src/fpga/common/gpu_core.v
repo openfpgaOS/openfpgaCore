@@ -1687,6 +1687,8 @@ reg               row_done_r;
 reg signed [31:0] tri_e [0:2];                  // edge function at current pixel
 reg signed [31:0] tri_row_e [0:2];              // edge function at row start
 reg signed [31:0] tri_s, tri_t;                 // interpolated texture attribs
+wire              tri_pix_inside = !tri_e[0][31] && !tri_e[1][31] && !tri_e[2][31];
+wire signed [15:0] tri_cur_x_next = tri_cur_x + 16'sd1;
 // Phase 4c.3 — per-pixel walker for w (1/W).  Walked alongside s/t in
 // S_TRI_PIX, snapshot at first inside pixel, fed into the span's sp_zinv
 // when perspective is active.
@@ -3867,34 +3869,27 @@ always @(posedge clk) begin : main_fsm
                     // No inside pixels this row — skip the FRAG_PIPE round-trip.
                     state <= S_TRI_ROW_NEXT;
                 end
-            end else if (!tri_e[0][31] && !tri_e[1][31] && !tri_e[2][31]) begin
-                // Inside triangle — extend the span.
-                if (tri_span_count == 16'd0) begin
-                    tri_span_x_start <= tri_cur_x;
-                    tri_span_s_start <= tri_s;
-                    tri_span_t_start <= tri_t;
-                    tri_span_w_start <= tri_w;
-                    // Phase 4d Gouraud: snapshot the per-pixel-walked
-                    // light value at the first inside pixel.  Replaces
-                    // the prior `{2'b0, v_r[0], 16'b0}` flat anchor.
-                    tri_span_r_start <= tri_r;
-                end
-                tri_span_count <= tri_span_count + 16'd1;
-                tri_cur_x <= tri_cur_x + 16'd1;
-                // Pre-compare with tri_xmax so the next S_TRI_PIX cycle's
-                // branch reads a registered bit, not a 16-bit compare cone.
-                row_done_r <= ((tri_cur_x + 16'd1) > tri_xmax);
-                tri_e[0] <= tri_e[0] + (tri_A[0] <<< 4);
-                tri_e[1] <= tri_e[1] + (tri_A[1] <<< 4);
-                tri_e[2] <= tri_e[2] + (tri_A[2] <<< 4);
-                tri_s <= tri_s + (grad_s_dx <<< 4);
-                tri_t <= tri_t + (grad_t_dx <<< 4);
-                tri_w <= tri_w + (grad_w_dx <<< 4);
-                tri_r <= tri_r + (grad_r_dx <<< 4);
             end else begin
-                // Outside — step without recording.
-                tri_cur_x <= tri_cur_x + 16'd1;
-                row_done_r <= ((tri_cur_x + 16'd1) > tri_xmax);
+                if (tri_pix_inside) begin
+                    // Inside triangle — extend the span.
+                    if (tri_span_count == 16'd0) begin
+                        tri_span_x_start <= tri_cur_x;
+                        tri_span_s_start <= tri_s;
+                        tri_span_t_start <= tri_t;
+                        tri_span_w_start <= tri_w;
+                        // Phase 4d Gouraud: snapshot the per-pixel-walked
+                        // light value at the first inside pixel.  Replaces
+                        // the prior `{2'b0, v_r[0], 16'b0}` flat anchor.
+                        tri_span_r_start <= tri_r;
+                    end
+                    tri_span_count <= tri_span_count + 16'd1;
+                end
+
+                // Advance one pixel whether inside or outside.  Row end is
+                // pre-compared so the next S_TRI_PIX cycle branches on the
+                // registered row_done_r bit instead of a wide compare cone.
+                tri_cur_x <= tri_cur_x_next;
+                row_done_r <= (tri_cur_x_next > tri_xmax);
                 tri_e[0] <= tri_e[0] + (tri_A[0] <<< 4);
                 tri_e[1] <= tri_e[1] + (tri_A[1] <<< 4);
                 tri_e[2] <= tri_e[2] + (tri_A[2] <<< 4);
