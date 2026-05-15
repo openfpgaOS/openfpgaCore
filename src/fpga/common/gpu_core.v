@@ -1686,6 +1686,12 @@ reg signed [15:0] tri_cur_x, tri_cur_y;
 reg               row_done_r;
 reg signed [31:0] tri_e [0:2];                  // edge function at current pixel
 reg signed [31:0] tri_row_e [0:2];              // edge function at row start
+wire signed [31:0] tri_init_e0 = tri_e_init_Apx[0] + tri_e_init_Bpy[0] + tri_C[0];
+wire signed [31:0] tri_init_e1 = tri_e_init_Apx[1] + tri_e_init_Bpy[1] + tri_C[1];
+wire signed [31:0] tri_init_e2 = tri_e_init_Apx[2] + tri_e_init_Bpy[2] + tri_C[2];
+wire signed [31:0] tri_next_row_e0 = tri_row_e[0] + (tri_B[0] <<< 4);
+wire signed [31:0] tri_next_row_e1 = tri_row_e[1] + (tri_B[1] <<< 4);
+wire signed [31:0] tri_next_row_e2 = tri_row_e[2] + (tri_B[2] <<< 4);
 reg signed [31:0] tri_s, tri_t;                 // interpolated texture attribs
 wire              tri_pix_inside = !tri_e[0][31] && !tri_e[1][31] && !tri_e[2][31];
 wire signed [15:0] tri_cur_x_next = tri_cur_x + 16'sd1;
@@ -3741,12 +3747,12 @@ always @(posedge clk) begin : main_fsm
             // tri_e_init_Apx/Bpy hold the A*px and B*py products registered
             // during S_TRI_MUL_WAIT, so this is a pure 3-way add — one carry
             // chain, no DSP — keeping the cone well inside the 10 ns budget.
-            tri_e[0]     <= tri_e_init_Apx[0] + tri_e_init_Bpy[0] + tri_C[0];
-            tri_e[1]     <= tri_e_init_Apx[1] + tri_e_init_Bpy[1] + tri_C[1];
-            tri_e[2]     <= tri_e_init_Apx[2] + tri_e_init_Bpy[2] + tri_C[2];
-            tri_row_e[0] <= tri_e_init_Apx[0] + tri_e_init_Bpy[0] + tri_C[0];
-            tri_row_e[1] <= tri_e_init_Apx[1] + tri_e_init_Bpy[1] + tri_C[1];
-            tri_row_e[2] <= tri_e_init_Apx[2] + tri_e_init_Bpy[2] + tri_C[2];
+            tri_e[0]     <= tri_init_e0;
+            tri_e[1]     <= tri_init_e1;
+            tri_e[2]     <= tri_init_e2;
+            tri_row_e[0] <= tri_init_e0;
+            tri_row_e[1] <= tri_init_e1;
+            tri_row_e[2] <= tri_init_e2;
             // tri_row_{s,t,w,r} were evaluated at the bbox origin
             // (xmin*16, ymin*16) by S_TRI_INIT_ATTRIB.  Copy into the
             // current-pixel walk regs; the row regs are preserved so
@@ -3928,12 +3934,12 @@ always @(posedge clk) begin : main_fsm
                 tri_cur_x <= tri_xmin;
                 // Re-arm row_done_r for the new row's first S_TRI_PIX cycle.
                 row_done_r <= (tri_xmin > tri_xmax);
-                tri_row_e[0] <= tri_row_e[0] + (tri_B[0] <<< 4);
-                tri_row_e[1] <= tri_row_e[1] + (tri_B[1] <<< 4);
-                tri_row_e[2] <= tri_row_e[2] + (tri_B[2] <<< 4);
-                tri_e[0] <= tri_row_e[0] + (tri_B[0] <<< 4);
-                tri_e[1] <= tri_row_e[1] + (tri_B[1] <<< 4);
-                tri_e[2] <= tri_row_e[2] + (tri_B[2] <<< 4);
+                tri_row_e[0] <= tri_next_row_e0;
+                tri_row_e[1] <= tri_next_row_e1;
+                tri_row_e[2] <= tri_next_row_e2;
+                tri_e[0] <= tri_next_row_e0;
+                tri_e[1] <= tri_next_row_e1;
+                tri_e[2] <= tri_next_row_e2;
                 tri_fb_row_addr <= tri_fb_row_addr + {{16{st_fb_stride[15]}}, st_fb_stride};
                 tri_row_s <= tri_row_s + (grad_s_dy <<< 4);
                 tri_row_t <= tri_row_t + (grad_t_dy <<< 4);
