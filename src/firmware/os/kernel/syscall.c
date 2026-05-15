@@ -72,8 +72,8 @@ typedef struct {
     int      in_use;
     int      kind;
     uint32_t slot_id;       /* APF data slot ID */
-    uint32_t offset;        /* Current file offset */
-    uint32_t size;          /* File size (0 if unknown) */
+    uint64_t offset;        /* Current file offset */
+    uint64_t size;          /* File size (0 if unknown) */
     int      flags;         /* O_RDONLY, O_WRONLY, etc. */
     int      is_save;       /* Is this a nonvolatile writable file? */
     int      save_slot;     /* Save slot index (0-9), or -1 for config/settings */
@@ -200,7 +200,7 @@ static int slot_read_cached(uint32_t slot_id, uint32_t off,
                             void *dst, uint32_t len) {
     uint8_t *out = (uint8_t *)dst;
     uint32_t done = 0;
-    long file_size = -2;
+    int64_t file_size = -2;
 
     while (done < len) {
         uint32_t cur = off + done;
@@ -213,12 +213,12 @@ static int slot_read_cached(uint32_t slot_id, uint32_t off,
             uint32_t fill = IO_CACHE_BLOCK_SIZE;
 
             if (file_size == -2)
-                file_size = of_file_size(slot_id);
+                file_size = of_file_size64(slot_id);
             if (file_size > 0) {
-                if (aligned_off >= (uint32_t)file_size)
+                if ((uint64_t)aligned_off >= (uint64_t)file_size)
                     return -EIO;
-                if (aligned_off + fill > (uint32_t)file_size)
-                    fill = (uint32_t)file_size - aligned_off;
+                if ((uint64_t)aligned_off + fill > (uint64_t)file_size)
+                    fill = (uint32_t)((uint64_t)file_size - aligned_off);
             }
 
             int rc = io_cache_fill(entry, slot_id, aligned_off, fill);
@@ -794,7 +794,7 @@ static void dir_probe_slots(void) {
      * mapping or payload. */
     for (uint32_t slot = 1; slot < MAX_DATA_SLOTS; slot++) {
         name[0] = '\0';
-        long sz = of_file_size(slot);
+        int64_t sz = of_file_size64(slot);
         long flags = of_file_flags(slot);
         int nv_slot = of_nvslot_is_supported(slot);
         if (sz <= 0 && (!nv_slot || flags <= 0))
@@ -998,19 +998,19 @@ static long sys_write(long fd, long buf, long count) {
             return -EIO;
         if (f->offset >= capacity)
             return 0;
-        uint32_t available = capacity - f->offset;
+        uint32_t available = capacity - (uint32_t)f->offset;
         uint32_t to_write = (uint32_t)count;
         if (to_write > available)
             to_write = available;
 
         int rc = of_nvslot_write(f->slot_id, (const void *)buf,
-                                 f->offset, to_write);
+                                 (uint32_t)f->offset, to_write);
         if (rc > 0) {
             f->offset += rc;
             if (f->offset > f->size)
                 f->size = f->offset;
             f->dirty = 1;
-            save_size_cache_store(f->nv_cache_idx, f->size);
+            save_size_cache_store(f->nv_cache_idx, (uint32_t)f->size);
         }
         return rc;
     }
@@ -1046,10 +1046,10 @@ static long sys_read(long fd, long buf, long count) {
 
         uint32_t to_read = (uint32_t)count;
         if (to_read > f->size - f->offset)
-            to_read = f->size - f->offset;
+            to_read = (uint32_t)(f->size - f->offset);
 
         int rc = of_nvslot_read(f->slot_id, (void *)buf,
-                                f->offset, to_read);
+                                (uint32_t)f->offset, to_read);
         if (rc > 0)
             f->offset += rc;
         return rc;
@@ -1057,18 +1057,18 @@ static long sys_read(long fd, long buf, long count) {
 
     /* Lazy file size resolution — only probe on first read, not at fopen */
     if (f->size == 0 && f->slot_id > 0 && f->offset == 0) {
-        long sz = of_file_size(f->slot_id);
+        int64_t sz = of_file_size64(f->slot_id);
         if (sz > 0)
-            f->size = (uint32_t)sz;
+            f->size = (uint64_t)sz;
         /* If size unknown (-1), leave f->size as 0 and read without
          * bounds checking — the bridge returns short/zero when EOF. */
     }
 
     uint32_t to_read = (uint32_t)count;
-    if (f->size > 0 && f->offset + to_read > f->size) {
+    if (f->size > 0 && f->offset + (uint64_t)to_read > f->size) {
         if (f->offset >= f->size)
             return 0;
-        to_read = f->size - f->offset;
+        to_read = (uint32_t)(f->size - f->offset);
     }
 
     /* I/O cache: serve reads from an SDRAM-backed LRU cache.
@@ -1080,8 +1080,12 @@ static long sys_read(long fd, long buf, long count) {
     uint32_t done = 0;
 
     while (done < to_read) {
-        uint32_t aligned_off = f->offset & ~(IO_CACHE_BLOCK_SIZE - 1);
-        uint32_t buf_off = f->offset - aligned_off;
+        if (f->offset > 0xFFFFFFFFull)
+            return done ? (long)done : -EINVAL;
+
+        uint32_t cur_off = (uint32_t)f->offset;
+        uint32_t aligned_off = cur_off & ~(IO_CACHE_BLOCK_SIZE - 1);
+        uint32_t buf_off = cur_off - aligned_off;
 
         /* Look up in I/O cache */
         int entry = io_cache_lookup(f->slot_id, aligned_off);
@@ -1091,8 +1095,9 @@ static long sys_read(long fd, long buf, long count) {
             entry = io_cache_evict();
 
             uint32_t fill = IO_CACHE_BLOCK_SIZE;
-            if (f->size > 0 && aligned_off + fill > f->size)
-                fill = f->size - aligned_off;
+            if (f->size > 0 &&
+                (uint64_t)aligned_off + fill > f->size)
+                fill = (uint32_t)(f->size - aligned_off);
             if (fill == 0) break;
 
             int rc = io_cache_fill(entry, f->slot_id, aligned_off, fill);
@@ -1384,14 +1389,14 @@ static long sys_openat(long dirfd, long pathname, long flags, long mode) {
         /* Reject registered names whose slot is unbacked (size == 0).
          * Without this, fopen returns a valid FD and subsequent reads
          * serve stale bytes from the I/O cache's bounce buffer. */
-        long sz = of_file_size(slot);
+        int64_t sz = of_file_size64((uint32_t)slot);
         if (sz <= 0) {
             fd_table[fd].in_use = 0;
             return -ENOENT;
         }
         f->slot_id = (uint32_t)slot;
         f->kind = FD_KIND_SLOT_FILE;
-        f->size = (uint32_t)sz;
+        f->size = (uint64_t)sz;
         return fd;
     }
 
@@ -1416,7 +1421,7 @@ static long sys_close(long fd) {
 
     if (fd_table[fd].is_save) {
         fd_entry_t *f = &fd_table[fd];
-        uint32_t save_size = f->size;
+        uint32_t save_size = (uint32_t)f->size;
         int rc = 0;
         if (f->dirty) {
             /* Nonvolatile APF slots are already backed by fixed CRAM0
@@ -1454,43 +1459,43 @@ long sys_file_size_fd(int fd) {
         return -1;
     fd_entry_t *f = &fd_table[fd];
     if (f->kind == FD_KIND_ISO_FILE || f->kind == FD_KIND_ISO_DIR)
-        return (long)f->size;
+        return (f->size > 0x7FFFFFFFull) ? 0x7FFFFFFFl : (long)f->size;
     if (f->is_save)
-        return (long)f->size;
+        return (f->size > 0x7FFFFFFFull) ? 0x7FFFFFFFl : (long)f->size;
     if (f->size == 0 && f->slot_id > 0) {
-        long sz = of_file_size(f->slot_id);
-        if (sz > 0) f->size = (uint32_t)sz;
+        int64_t sz = of_file_size64(f->slot_id);
+        if (sz > 0) f->size = (uint64_t)sz;
     }
-    return (long)f->size;
+    return (f->size > 0x7FFFFFFFull) ? 0x7FFFFFFFl : (long)f->size;
 }
 
 /* _llseek: (fd, offset_hi, offset_lo, &result, whence) — riscv32 uses this */
 static long sys_llseek(long fd, long off_hi, long off_lo,
                        long result_ptr, long whence) {
-    (void)off_hi; /* 32-bit offsets only */
     if (fd < 0 || fd >= MAX_FDS || !fd_table[fd].in_use)
         return -EBADF;
 
     fd_entry_t *f = &fd_table[fd];
-    long offset = off_lo;
-    long new_offset;
+    int64_t offset = (int64_t)(((uint64_t)(uint32_t)off_hi << 32) |
+                               (uint32_t)off_lo);
+    int64_t new_offset;
 
     if (f->kind == FD_KIND_ISO_FILE) {
         switch (whence) {
         case 0: new_offset = offset; break;
-        case 1: new_offset = (long)iso9660_tell_file(&f->u.iso_file) + offset; break;
-        case 2: new_offset = (long)f->size + offset; break;
+        case 1: new_offset = (int64_t)iso9660_tell_file(&f->u.iso_file) + offset; break;
+        case 2: new_offset = (int64_t)f->size + offset; break;
         default: return -EINVAL;
         }
-        if (new_offset < 0)
+        if (new_offset < 0 || new_offset > 0xFFFFFFFFll)
             return -EINVAL;
         int rc = iso9660_seek_file(&f->u.iso_file, new_offset, 0);
         if (rc < 0)
             return rc;
-        f->offset = (uint32_t)new_offset;
+        f->offset = (uint64_t)new_offset;
         if (result_ptr) {
             int64_t *res = (int64_t *)result_ptr;
-            *res = (int64_t)new_offset;
+            *res = new_offset;
         }
         return 0;
     }
@@ -1500,21 +1505,21 @@ static long sys_llseek(long fd, long off_hi, long off_lo,
 
     /* Resolve file size for SEEK_END */
     if (whence == 2 && !f->is_save && f->size == 0 && f->slot_id > 0) {
-        long sz = of_file_size(f->slot_id);
-        if (sz > 0) f->size = (uint32_t)sz;
+        int64_t sz = of_file_size64(f->slot_id);
+        if (sz > 0) f->size = (uint64_t)sz;
     }
 
     switch (whence) {
     case 0: new_offset = offset; break;
-    case 1: new_offset = (long)f->offset + offset; break;
-    case 2: new_offset = (long)f->size + offset; break;
+    case 1: new_offset = (int64_t)f->offset + offset; break;
+    case 2: new_offset = (int64_t)f->size + offset; break;
     default: return -EINVAL;
     }
 
-    if (new_offset < 0)
+    if (new_offset < 0 || new_offset > 0xFFFFFFFFll)
         return -EINVAL;
 
-    f->offset = (uint32_t)new_offset;
+    f->offset = (uint64_t)new_offset;
 
     /* I/O cache is keyed by (slot_id, aligned_offset) — seeks just
      * change f->offset and the cache naturally serves the right block. */
@@ -1522,7 +1527,7 @@ static long sys_llseek(long fd, long off_hi, long off_lo,
     /* _llseek writes result to user pointer as 64-bit */
     if (result_ptr) {
         int64_t *res = (int64_t *)result_ptr;
-        *res = (int64_t)new_offset;
+        *res = new_offset;
     }
     return 0;  /* _llseek returns 0 on success, -1 on error */
 }
@@ -1951,7 +1956,7 @@ static long of_vendor_dispatch(long eid, long fid,
                                long a3, long a4, long a5);
 
 static long stat_path_info(long dirfd, const char *path,
-                           uint32_t *size_out, int *is_dir_out) {
+                           uint64_t *size_out, int *is_dir_out) {
     char full_path[VFS_PATH_MAX];
 
     if (!path)
@@ -1960,8 +1965,8 @@ static long stat_path_info(long dirfd, const char *path,
         fd_table[dirfd].in_use) {
         fd_entry_t *f = &fd_table[dirfd];
         if (f->size == 0 && f->slot_id > 0) {
-            long sz = of_file_size(f->slot_id);
-            if (sz > 0) f->size = (uint32_t)sz;
+            int64_t sz = of_file_size64(f->slot_id);
+            if (sz > 0) f->size = (uint64_t)sz;
         }
         if (size_out) *size_out = f->size;
         if (is_dir_out) *is_dir_out = f->is_dir;
@@ -1981,8 +1986,11 @@ static long stat_path_info(long dirfd, const char *path,
     const char *rel = NULL;
     int mount_idx = vfs_find_mount(full_path, &rel);
     if (mount_idx >= 0) {
+        uint32_t iso_size = 0;
         rc = iso9660_stat(&vfs_mounts[mount_idx].iso, rel,
-                          size_out, is_dir_out);
+                          &iso_size, is_dir_out);
+        if (rc == 0 && size_out)
+            *size_out = iso_size;
         return rc;
     }
 
@@ -1991,8 +1999,8 @@ static long stat_path_info(long dirfd, const char *path,
         return fd;
     fd_entry_t *f = &fd_table[fd];
     if (f->size == 0 && f->slot_id > 0) {
-        long sz = of_file_size(f->slot_id);
-        if (sz > 0) f->size = (uint32_t)sz;
+        int64_t sz = of_file_size64(f->slot_id);
+        if (sz > 0) f->size = (uint64_t)sz;
     }
     if (size_out) *size_out = f->size;
     if (is_dir_out) *is_dir_out = f->is_dir;
@@ -2014,7 +2022,7 @@ static long sys_getcwd(char *buf, uint32_t size) {
 
 static long sys_chdir(const char *path) {
     char full_path[VFS_PATH_MAX];
-    uint32_t size = 0;
+    uint64_t size = 0;
     int is_dir = 0;
 
     int rc = normalize_abs_path(path, full_path, sizeof(full_path));
@@ -2179,14 +2187,14 @@ static long linux_dispatch(long n, long a0, long a1, long a2,
          *   fstat: dirfd=fd, path="", flags=AT_EMPTY_PATH
          *   stat:  dirfd=AT_FDCWD, path="filename", flags=0 */
         long statx_fd = a0;
-        uint32_t file_size = 0;
+        uint64_t file_size = 0;
 
         if (statx_fd >= 0 && statx_fd < MAX_FDS && fd_table[statx_fd].in_use) {
             /* fstat mode: use existing fd */
             fd_entry_t *f = &fd_table[statx_fd];
             if (f->size == 0 && f->slot_id > 0) {
-                long sz = of_file_size(f->slot_id);
-                if (sz > 0) f->size = (uint32_t)sz;
+                int64_t sz = of_file_size64(f->slot_id);
+                if (sz > 0) f->size = (uint64_t)sz;
             }
             file_size = f->size;
         } else if (a1 && vfs_mount_count > 0) {
@@ -2202,8 +2210,8 @@ static long linux_dispatch(long n, long a0, long a1, long a2,
             if (fd >= 0) {
                 fd_entry_t *f = &fd_table[fd];
                 if (f->size == 0 && f->slot_id > 0) {
-                    long sz = of_file_size(f->slot_id);
-                    if (sz > 0) f->size = (uint32_t)sz;
+                    int64_t sz = of_file_size64(f->slot_id);
+                    if (sz > 0) f->size = (uint64_t)sz;
                 }
                 file_size = f->size;
                 fd_table[fd].in_use = 0;
@@ -2217,8 +2225,8 @@ static long linux_dispatch(long n, long a0, long a1, long a2,
         uint32_t *sx = (uint32_t *)a4;
         memset(sx, 0, 256);
         sx[0] = 0x7FF;         /* stx_mask (offset 0) */
-        sx[10] = file_size;    /* stx_size low 32 (offset 40) */
-        sx[11] = 0;            /* stx_size high 32 */
+        sx[10] = (uint32_t)file_size;         /* stx_size low 32 (offset 40) */
+        sx[11] = (uint32_t)(file_size >> 32); /* stx_size high 32 */
         return 0;
     }
 
@@ -2226,10 +2234,10 @@ static long linux_dispatch(long n, long a0, long a1, long a2,
         if (a0 >= 0 && a0 < MAX_FDS && fd_table[a0].in_use) {
             fd_entry_t *f = &fd_table[a0];
             if (f->size == 0 && f->slot_id > 0) {
-                long sz = of_file_size(f->slot_id);
-                if (sz > 0) f->size = (uint32_t)sz;
+                int64_t sz = of_file_size64(f->slot_id);
+                if (sz > 0) f->size = (uint64_t)sz;
             }
-            struct { uint64_t __pad[6]; uint32_t st_size; } *st = (void *)a1;
+            struct { uint64_t __pad[6]; uint64_t st_size; } *st = (void *)a1;
             memset(st, 0, 128);
             st->st_size = f->size;
             return 0;
@@ -2239,12 +2247,12 @@ static long linux_dispatch(long n, long a0, long a1, long a2,
     case SYS_fstatat: {
         /* a0=dirfd, a1=path, a2=statbuf, a3=flags */
         if (vfs_mount_count > 0) {
-            uint32_t file_size = 0;
+            uint64_t file_size = 0;
             int is_dir = 0;
             long rc = stat_path_info(a0, (const char *)a1,
                                      &file_size, &is_dir);
             if (rc < 0) return rc;
-            struct { uint64_t __pad[6]; uint32_t st_size; } *st = (void *)a2;
+            struct { uint64_t __pad[6]; uint64_t st_size; } *st = (void *)a2;
             memset(st, 0, 128);
             st->st_size = file_size;
             (void)is_dir;
@@ -2255,10 +2263,10 @@ static long linux_dispatch(long n, long a0, long a1, long a2,
         if (fd < 0) return fd;
         fd_entry_t *f = &fd_table[fd];
         if (f->size == 0 && f->slot_id > 0) {
-            long sz = of_file_size(f->slot_id);
-            if (sz > 0) f->size = (uint32_t)sz;
+            int64_t sz = of_file_size64(f->slot_id);
+            if (sz > 0) f->size = (uint64_t)sz;
         }
-        struct { uint64_t __pad[6]; uint32_t st_size; } *st = (void *)a2;
+        struct { uint64_t __pad[6]; uint64_t st_size; } *st = (void *)a2;
         memset(st, 0, 128);
         st->st_size = f->size;
         fd_table[fd].in_use = 0;
@@ -2269,7 +2277,7 @@ static long linux_dispatch(long n, long a0, long a1, long a2,
     case SYS_faccessat: {
         if (vfs_mount_count == 0)
             return -ENOSYS;
-        uint32_t size = 0;
+        uint64_t size = 0;
         int is_dir = 0;
         (void)a2; (void)a3;
         return stat_path_info(a0, (const char *)a1, &size, &is_dir);

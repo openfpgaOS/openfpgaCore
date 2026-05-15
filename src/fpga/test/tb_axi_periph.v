@@ -90,6 +90,8 @@ module tb_axi_periph (
     input  wire [31:0] cont4_key_in,
     input  wire [31:0] cont4_joy_in,
     input  wire [15:0] cont4_trig_in,
+    input  wire [31:0] dt_query_data_in,
+    input  wire        dt_query_valid_in,
     input  wire [7:0]  snac_pin_in_in,
     output wire        ext_irq_out
 );
@@ -105,8 +107,8 @@ wire uart_tx_active = 1'b0;
 wire uart_rx_dv = 1'b0;
 wire [7:0] uart_rx_byte = 8'b0;
 wire shutdown_pending = 1'b0;
-wire [31:0] dt_query_data = 32'b0;
-wire dt_query_valid = 1'b0;
+wire [31:0] dt_query_data = dt_query_data_in;
+wire dt_query_valid = dt_query_valid_in;
 wire [7:0] snac_pin_in = snac_pin_in_in;
 // Mock GPU register-read mux: returns a unique sentinel per address so
 // the harness can verify that each AR returns the data of the requested

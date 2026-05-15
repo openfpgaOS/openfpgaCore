@@ -1179,6 +1179,7 @@ always @(*) begin
             6'd33: sysreg_rdata = analogizer_hoffset;              // ANALOGIZER_H_OFFSET
             6'd34: sysreg_rdata = analogizer_voffset;              // ANALOGIZER_V_OFFSET
             6'd36: sysreg_rdata = {dt_query_valid, dt_query_data[30:0]};
+            6'd37: sysreg_rdata = dt_query_data;                    // DT_QUERY_DATA full 32-bit result
             6'd38: sysreg_rdata = HW_FEATURES;                     // HW_FEATURES
             6'd39: sysreg_rdata = {31'b0, vsync_irq_pending};      // VSYNC_IRQ_PENDING
             // SNAC Shifter + GPIO registers (0xA0-0xAC)

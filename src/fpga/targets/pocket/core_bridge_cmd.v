@@ -503,9 +503,13 @@ always @(posedge clk) begin
             
         end else if(target_dataslot_read_queue) begin
             target_dataslot_read_queue <= 0;
-            target_0[15:0] <= 16'h0180;
-            
-            target_20 <= target_dataslot_id;
+            // Keep the boot/small-file path on the proven 32-bit APF
+            // command.  Switch to the 48-bit form only for offsets with
+            // bit31 set, where some host paths appear to mishandle the
+            // legacy command as signed.
+            target_0[15:0] <= target_dataslot_slotoffset[31] ? 16'h0181 : 16'h0180;
+
+            target_20 <= {16'd0, target_dataslot_id};
             target_24 <= target_dataslot_slotoffset;
             target_28 <= target_dataslot_bridgeaddr;
             target_2C <= target_dataslot_length;
@@ -515,9 +519,9 @@ always @(posedge clk) begin
         end else if(target_dataslot_write_queue) begin
             if(target_dataslot_write_ready) begin
                 target_dataslot_write_queue <= 0;
-                target_0[15:0] <= 16'h0184;
+                target_0[15:0] <= target_dataslot_slotoffset[31] ? 16'h0185 : 16'h0184;
 
-                target_20 <= target_dataslot_id;
+                target_20 <= {16'd0, target_dataslot_id};
                 target_24 <= target_dataslot_slotoffset;
                 target_28 <= target_dataslot_bridgeaddr;
                 target_2C <= target_dataslot_length;

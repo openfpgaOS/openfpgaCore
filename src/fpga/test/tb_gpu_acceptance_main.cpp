@@ -637,16 +637,6 @@ static void cmd_set_texture(uint32_t addr, uint16_t width, uint16_t height) {
     ring_write(((uint32_t)width << 16) | (uint32_t)height);
 }
 
-static void cmd_set_colormap_id(uint8_t slot) {
-    ring_cmd(0x28, 1);
-    ring_write((uint32_t)(slot & 0xF));
-}
-
-static void cmd_set_skip_zero(bool on) {
-    ring_cmd(0x27, 1);
-    ring_write(on ? 1u : 0u);
-}
-
 static void cmd_clear(uint16_t flags, uint16_t color) {
     if ((flags & 0x1u) == 0)
         return;
@@ -662,10 +652,6 @@ static void cmd_clear_rect(uint32_t addr, uint16_t w, uint16_t h,
     ring_write(addr);
     ring_write(((uint32_t)w << 16) | (uint32_t)h);
     ring_write(((uint32_t)stride << 16) | (uint32_t)color);
-}
-
-static void cmd_nop() {
-    ring_cmd(0x01, 0);
 }
 
 static void cmd_flip(uint8_t idx, uint32_t token) {
@@ -699,8 +685,6 @@ struct FbModel {
     uint16_t st_fb_stride = 320;
     uint32_t st_tex_addr  = 0;
     uint16_t st_tex_width = 0;
-    uint8_t  st_colormap  = 0;
-    uint8_t  st_skip_zero = 0;
     /* transluc[(src>>1)*256 + dst] */
     std::vector<uint8_t> transluc;
 
@@ -755,9 +739,7 @@ struct FbModel {
 
     /* Pure span fragment apply — no flag-routing logic, just the inner
      * loop. flags bit 0 = COLORMAP, bit 2 = SKIP_ZERO, bit 6 = TRANSLUC.
-     * cmap_id is the explicit scalar/span-group slot. Triangle model code
-     * passes st_colormap separately because triangles still use sticky slot
-     * state in RTL. */
+     * cmap_id is the explicit scalar/span-group slot. */
     void apply_span_affine(const SpanWire &s, uint8_t cmap_id_resolved) {
         const uint8_t SPAN_COLORMAP  = 1 << 0;
         const uint8_t SPAN_SKIP_ZERO = 1 << 2;
@@ -849,8 +831,8 @@ struct FbModel {
     }
 
     /* DRAW_TRIANGLES — affine, top-left rule. Vertex.r is the palookup
-     * shade row (gpu_core.v line 2330: v_r[0] flat-shaded). Always
-     * routes through palookup[st_colormap][r[0]][texel]. */
+     * shade row (gpu_core.v line 2330: v_r[0] flat-shaded). Triangles
+     * always route through palookup slot 0. */
     struct Vertex {
         int16_t  x16, y16;   /* 12.4 sub-pixel input units */
         uint16_t z;
@@ -911,10 +893,8 @@ struct FbModel {
                                   + s_u;
                 uint8_t texel = read(tex_addr);
 
-                if (st_skip_zero && texel == 0xFF) continue;
-
-                /* Triangles always route through palookup, row = vt[0].r. */
-                uint8_t color = palookup(st_colormap, vt[0].r, texel);
+                /* Triangles always route through palookup slot 0, row = vt[0].r. */
+                uint8_t color = palookup(0, vt[0].r, texel);
 
                 uint32_t fb = st_fb_addr + (uint32_t)y * st_fb_stride + (uint32_t)x;
                 write(fb, color);
@@ -1067,37 +1047,7 @@ static FbModel preload_with_sentinel() {
 // 6. Standalone command tests
 // ============================================================================
 
-// ---- Section 1: NOP --------------------------------------------------------
-static void test_nop_basic() {
-    printf("TEST nop_basic\n");
-    gpu_init();
-    auto m = preload_with_sentinel();
-    cmd_set_fb(FB_BASE_BYTE, 320);
-    cmd_nop();
-    if (!submit_and_wait()) {
-        check_fail("nop_basic.fence", "timeout");
-        return;
-    }
-    /* Whole 320x200 must still be sentinel. */
-    compare_fb_region("nop_basic.fb_unchanged", m, FB_BASE_BYTE, 320,
-                      0, 0, 320, 200);
-}
-
-static void test_nop_burst() {
-    printf("TEST nop_burst\n");
-    gpu_init();
-    auto m = preload_with_sentinel();
-    cmd_set_fb(FB_BASE_BYTE, 320);
-    for (int i = 0; i < 100; i++) cmd_nop();
-    if (!submit_and_wait()) {
-        check_fail("nop_burst.fence", "timeout");
-        return;
-    }
-    compare_fb_region("nop_burst.fb_unchanged", m, FB_BASE_BYTE, 320,
-                      0, 0, 320, 200);
-}
-
-// ---- Section 2: FENCE ------------------------------------------------------
+// ---- Section 1: FENCE ------------------------------------------------------
 static void test_fence_no_writes() {
     printf("TEST fence_no_writes\n");
     gpu_init();
@@ -1318,7 +1268,6 @@ static void test_set_texture_via_triangle() {
     upload_texture(TEX_BASE_BYTE + 0x1000, texB);
 
     cmd_set_fb(FB_BASE_BYTE, 320);
-    cmd_set_colormap_id(0);
 
     auto draw_tri = [&](int x_off) {
         /* v0 (10,10), v1 (40,10), v2 (10,40) — r=0 → palookup row 0. */
@@ -1415,7 +1364,6 @@ static void test_set_texture_width_via_triangle() {
     upload_texture(TEX_BASE_BYTE, tex);
 
     cmd_set_fb(FB_BASE_BYTE, 320);
-    cmd_set_colormap_id(0);
 
     auto draw_tri = [&](int x_off) {
         ring_cmd(0x30, 19);
@@ -1515,18 +1463,16 @@ static void test_scalar_span_explicit_colormap_slots() {
                              FB_BASE_BYTE, 320, 0, 0, 16, 3, 4);
 }
 
-static void test_per_span_colormap_overrides_sticky() {
-    /* SET_COLORMAP_ID 2 (constant 0xC0) becomes the sticky default.
-     * Draw two spans inside the SAME batch: one with explicit per-span
-     * id=1 (inverted), one with explicit per-span id=0 (identity).
-     * Verify both override the sticky. */
-    printf("TEST per_span_colormap_overrides_sticky\n");
+static void test_per_span_colormap_explicit_slots() {
+    /* Draw three spans inside the SAME batch: one with explicit per-span
+     * id=1 (inverted), one with explicit per-span id=0 (identity), and
+     * one more id=1 span. */
+    printf("TEST per_span_colormap_explicit_slots\n");
     gpu_init();
     auto m = preload_with_sentinel();
 
     upload_palookup_identity_row(0, 0);
     upload_palookup_inverted_row(1, 0);
-    upload_palookup_const_row   (2, 0, 0xC0);
 
     std::vector<uint8_t> tex(16);
     for (int i = 0; i < 16; i++) tex[i] = (uint8_t)i;
@@ -1535,7 +1481,6 @@ static void test_per_span_colormap_overrides_sticky() {
 
     cmd_set_fb(FB_BASE_BYTE, 320);
     m.st_fb_addr = FB_BASE_BYTE;
-    cmd_set_colormap_id(2); m.st_colormap = 2;
 
     SpanWire base = make_span();
     base.tex_addr = TEX_BASE_BYTE;
@@ -1552,140 +1497,65 @@ static void test_per_span_colormap_overrides_sticky() {
     m.apply_batch({s_inv, s_id, s_ex0});
 
     if (!submit_and_wait()) {
-        check_fail("per_span_colormap_overrides_sticky", "timeout");
+        check_fail("per_span_colormap_explicit_slots", "timeout");
         return;
     }
-    compare_fb_region("per_span_colormap_overrides_sticky.inv", m,
+    compare_fb_region("per_span_colormap_explicit_slots.inv", m,
                       FB_BASE_BYTE, 320, 0, 0, 16, 1);
-    compare_fb_region("per_span_colormap_overrides_sticky.id_explicit0", m,
+    compare_fb_region("per_span_colormap_explicit_slots.id_explicit0", m,
                       FB_BASE_BYTE, 320, 0, 1, 16, 1);
-    compare_fb_region("per_span_colormap_overrides_sticky.ex_inv", m,
+    compare_fb_region("per_span_colormap_explicit_slots.ex_inv", m,
                       FB_BASE_BYTE, 320, 0, 2, 16, 1);
 }
 
-// ---- Section 6: SET_SKIP_ZERO ----------------------------------------------
-// SET_SKIP_ZERO affects only triangle-generated spans (sticky). Direct
-// spans honor their per-span SPAN_SKIP_ZERO flag. We test BOTH:
-//   - Negative: direct spans ignore sticky skip-zero (below).
-//   - Positive: triangles with sticky skip-zero=1 over a 0xFF texel
-//     leave the FB unchanged; with skip-zero=0 they overwrite (further
-//     below).
-static void test_set_skip_zero_does_not_affect_direct_spans() {
-    printf("TEST set_skip_zero_does_not_affect_direct_spans\n");
-    gpu_init();
-    auto m = preload_with_sentinel();
-    /* Texture has 0xFF at index 0, 0x10 at index 1. */
-    std::vector<uint8_t> tex(2);
-    tex[0] = 0xFF; tex[1] = 0x10;
-    upload_texture(TEX_BASE_BYTE, tex);
-    m.snapshot_from_sdram();
-
-    cmd_set_fb(FB_BASE_BYTE, 320);
-    m.st_fb_addr = FB_BASE_BYTE;
-
-    /* Pre-fill FB row with 0x77 so a "no-write" pixel is visibly
-     * different from a "write 0xFF" pixel. */
-    cmd_clear_rect(FB_BASE_BYTE, 320, 1, 0, 0x77);
-    m.apply_clear_rect(FB_BASE_BYTE, 320, 1, 0, 0x77);
-
-    /* Set st_skip_zero = 1 (would only affect triangles). */
-    cmd_set_skip_zero(true); m.st_skip_zero = 1;
-
-    /* Direct span without SPAN_SKIP_ZERO: writes 0xFF then 0x10. */
-    SpanWire s = make_span();
-    s.fb_addr   = FB_BASE_BYTE;
-    s.tex_addr  = TEX_BASE_BYTE;
-    s.s = 0; s.t = 0; s.sstep = 0x10000; s.tstep = 0;
-    s.count     = 2;
-    s.tex_width = 2;
-    s.flags     = 0;                       // no SPAN_SKIP_ZERO
-    emit_span_raw(s);
-    m.apply_draw_span(s);                  // model also runs without skip-zero
-
-    if (!submit_and_wait()) {
-        check_fail("set_skip_zero_does_not_affect_direct_spans", "timeout");
-        return;
-    }
-    /* FB[0] must be 0xFF, FB[1] must be 0x10 — st_skip_zero ignored. */
-    compare_fb_region("set_skip_zero_does_not_affect_direct_spans.bytes", m,
-                      FB_BASE_BYTE, 320, 0, 0, 2, 1);
-}
-
-// Positive: SET_SKIP_ZERO affects triangles.  Triangle textures all
-// 0xFF; pre-fill FB with sentinel; render under skip-zero=0 (overwrite
-// expected), then under skip-zero=1 (no FB writes), then back to 0
-// (overwrite again).  Each triangle goes to a distinct FB region.
-static void test_set_skip_zero_affects_triangle_spans() {
-    printf("TEST set_skip_zero_affects_triangle_spans\n");
+// ---- Section 6: triangle skip-zero retirement -------------------------------
+// Triangle commands no longer consume global skip-zero state. A 0xFF texel
+// should render normally through palookup slot 0.
+static void test_triangle_no_global_skip_zero() {
+    printf("TEST triangle_no_global_skip_zero\n");
     gpu_init();
     preload_with_sentinel();
     upload_palookup_identity_row(0, 0);
-    /* Texture: every byte is 0xFF (all-transparent under skip-zero). */
+    /* Texture: every byte is 0xFF. */
     std::vector<uint8_t> tex(64, 0xFF);
     upload_texture(TEX_BASE_BYTE, tex);
 
     cmd_set_fb(FB_BASE_BYTE, 320);
-    cmd_set_colormap_id(0);
     cmd_set_texture(TEX_BASE_BYTE, 8, 8);
 
-    auto draw_tri = [&](int x_off) {
-        ring_cmd(0x30, 19);
-        ring_write(3);
-        auto vert = [](int16_t x, int16_t y, int32_t s, int32_t t) {
-            ring_write(((uint32_t)(uint16_t)(x*16) << 16) | (uint16_t)(y*16));
-            ring_write(0);
-            ring_write((uint32_t)s);
-            ring_write((uint32_t)t);
-            ring_write(0x00010000);
-            ring_write(0x00000000);
-        };
-        vert(10 + x_off, 10, 0,           0);
-        vert(40 + x_off, 10, 7 << 16,     0);
-        vert(10 + x_off, 40, 0,           7 << 16);
+    ring_cmd(0x30, 19);
+    ring_write(3);
+    auto vert = [](int16_t x, int16_t y, int32_t s, int32_t t) {
+        ring_write(((uint32_t)(uint16_t)(x*16) << 16) | (uint16_t)(y*16));
+        ring_write(0);
+        ring_write((uint32_t)s);
+        ring_write((uint32_t)t);
+        ring_write(0x00010000);
+        ring_write(0x00000000);
     };
-
-    /* Triangle 1: skip_zero OFF → texel 0xFF passes through palookup
-     *   (identity) and writes 0xFF to FB.
-     * Triangle 2: skip_zero ON → texel 0xFF discarded → FB unchanged.
-     * Triangle 3: skip_zero OFF again → FB writes 0xFF (proves toggle
-     *   off works after a previous on).
-     */
-    cmd_set_skip_zero(false); draw_tri(0);     // tri1 at x=10..40
-    cmd_set_skip_zero(true);  draw_tri(50);    // tri2 at x=60..90
-    cmd_set_skip_zero(false); draw_tri(100);   // tri3 at x=110..140
+    vert(10, 10, 0,           0);
+    vert(40, 10, 7 << 16,     0);
+    vert(10, 40, 0,           7 << 16);
 
     if (!submit_and_wait()) {
-        check_fail("set_skip_zero_affects_triangle_spans", "timeout");
+        check_fail("triangle_no_global_skip_zero", "timeout");
         return;
     }
-    /* Sample inside each triangle's covered region. */
-    int n_ff_t1 = 0, n_sentinel_t1 = 0;
-    int n_ff_t2 = 0, n_sentinel_t2 = 0;
-    int n_ff_t3 = 0, n_sentinel_t3 = 0;
+    int n_ff = 0;
+    int n_other = 0;
     for (int y = 15; y < 35; y++) {
         for (int x = 15; x < 35; x++) {
             uint8_t a = sdram_read_byte(FB_BASE_BYTE + y*320 + x);
-            uint8_t b = sdram_read_byte(FB_BASE_BYTE + y*320 + x + 50);
-            uint8_t c = sdram_read_byte(FB_BASE_BYTE + y*320 + x + 100);
-            if (a == 0xFF) n_ff_t1++;        else if (a == SENTINEL_BYTE) n_sentinel_t1++;
-            if (b == 0xFF) n_ff_t2++;        else if (b == SENTINEL_BYTE) n_sentinel_t2++;
-            if (c == 0xFF) n_ff_t3++;        else if (c == SENTINEL_BYTE) n_sentinel_t3++;
+            if (a == 0xFF) n_ff++;
+            else if (a != SENTINEL_BYTE) n_other++;
         }
     }
-    /* Triangles 1 and 3: at least 100 0xFF pixels (~half of 20x20).
-     * Triangle 2: ZERO 0xFF pixels and the sample area still entirely
-     * sentinel (skip-zero discarded everything). */
-    bool ok_t1 = (n_ff_t1 > 100);
-    bool ok_t2 = (n_ff_t2 == 0 && n_sentinel_t2 == 400);
-    bool ok_t3 = (n_ff_t3 > 100);
-    if (ok_t1 && ok_t2 && ok_t3) {
-        check_pass("set_skip_zero_affects_triangle_spans.toggle_off_on_off");
+    if (n_ff > 100 && n_other == 0) {
+        check_pass("triangle_no_global_skip_zero.writes_0xff");
     } else {
-        char buf[200];
-        snprintf(buf, sizeof(buf),
-                 "tri1 ff=%d (need>100); tri2 ff=%d sent=%d (need 0/400); tri3 ff=%d (need>100)",
-                 n_ff_t1, n_ff_t2, n_sentinel_t2, n_ff_t3);
-        check_fail("set_skip_zero_affects_triangle_spans.toggle_off_on_off", buf);
+        char buf[128];
+        snprintf(buf, sizeof(buf), "ff=%d other_nonsentinel=%d", n_ff, n_other);
+        check_fail("triangle_no_global_skip_zero.writes_0xff", buf);
     }
 }
 
@@ -2346,10 +2216,6 @@ static void test_batch_mixed_per_span_colormap() {
     m.snapshot_from_sdram();
     cmd_set_fb(FB_BASE_BYTE, 320);
     m.st_fb_addr = FB_BASE_BYTE;
-    /* Sticky default 7 — should NEVER be used because each span has
-     * an explicit non-zero colormap_id. */
-    upload_palookup_const_row(7, 0, 0xEE);
-    cmd_set_colormap_id(7); m.st_colormap = 7;
 
     std::vector<SpanWire> spans;
     SpanWire base = make_span();
@@ -2605,9 +2471,6 @@ static void test_span_group_explicit_colormap_slot() {
 
     for (int row = 0; row < 4; row++)
         upload_palookup_const_row(5, (uint8_t)row, (uint8_t)(0x60 + row));
-    for (int row = 0; row < 4; row++)
-        upload_palookup_const_row(7, (uint8_t)row, 0xEE);
-
     for (int lane = 0; lane < 4; lane++) {
         std::vector<uint8_t> tex(4);
         for (int i = 0; i < 4; i++)
@@ -2615,14 +2478,12 @@ static void test_span_group_explicit_colormap_slot() {
         upload_texture(TEX_BASE_BYTE + (uint32_t)lane * 0x100, tex);
     }
     m.snapshot_from_sdram();
-    cmd_set_colormap_id(7);
-    m.st_colormap = 7;
 
     SpanGroupWire q = make_span_group();
     q.fb_addr = FB_BASE_BYTE + 20 * 320 + 11;
     q.count = 4;
     q.flags = 0x1;        // COLORMAP
-    q.colormap_id = 5;    // explicit; sticky slot 7 must not leak in
+    q.colormap_id = 5;    // explicit slot
     for (int lane = 0; lane < 4; lane++) {
         q.tex_addr[lane] = TEX_BASE_BYTE + (uint32_t)lane * 0x100;
         q.t[lane] = 0;
@@ -2871,18 +2732,14 @@ static void test_command_stream_dma_mixed_span_span_group() {
 // Triangles use a CPU model approximation; tests compare bbox stats
 // rather than per-byte (the rasterization rules are too tight for a
 // double-precision reference to match the integer 12.4 / 16.16 mix).
-// The standalone triangle suite already lives in tb_gpu_main.cpp; we
-// add ONE narrowed test here that verifies state-coupling: a triangle
-// drawn with SET_COLORMAP_ID 1 must produce different output than the
-// same triangle with SET_COLORMAP_ID 2, even back-to-back without flush.
-static void test_triangle_cmap_slot_change_between_draws() {
-    printf("TEST triangle_cmap_slot_change_between_draws\n");
+// The standalone triangle suite already lives in tb_gpu_main.cpp; we add
+// one narrowed test here that verifies triangles use palookup slot 0.
+static void test_triangle_uses_colormap_slot_zero() {
+    printf("TEST triangle_uses_colormap_slot_zero\n");
     gpu_init();
     preload_with_sentinel();
 
-    /* Slot 1: identity — so triangle output reflects the texture bytes
-     * directly.  Slot 2: constant 0x88. */
-    upload_palookup_identity_row(1, 0);
+    upload_palookup_identity_row(0, 0);
     upload_palookup_const_row   (2, 0, 0x88);
 
     /* 8x8 texture of value 0x42. */
@@ -2910,31 +2767,33 @@ static void test_triangle_cmap_slot_change_between_draws() {
         vert(10 + x_off, 40, 0,             7 << 16);
     };
 
-    cmd_set_colormap_id(1); write_tri(0);
-    cmd_set_colormap_id(2); write_tri(50);
+    write_tri(0);
+    write_tri(50);
 
     if (!submit_and_wait()) {
-        check_fail("triangle_cmap_slot_change_between_draws", "timeout");
+        check_fail("triangle_uses_colormap_slot_zero", "timeout");
         return;
     }
-    /* Sample inside each triangle. The first triangle's interior should
-     * contain bytes ≈ 0x42 (identity through palookup); the second must
-     * contain 0x88 (constant). */
-    int n_42_in_first = 0, n_88_in_second = 0;
+    /* Both triangles should resolve through slot 0 identity. Slot 2 is
+     * deliberately different to catch accidental nonzero slot selection. */
+    int n_42_in_first = 0, n_42_in_second = 0, n_88_any = 0;
     for (int y = 15; y < 35; y++) {
         for (int x = 15; x < 35; x++) {
-            if (sdram_read_byte(FB_BASE_BYTE + y*320 + x)      == 0x42) n_42_in_first++;
-            if (sdram_read_byte(FB_BASE_BYTE + y*320 + x + 50) == 0x88) n_88_in_second++;
+            uint8_t a = sdram_read_byte(FB_BASE_BYTE + y*320 + x);
+            uint8_t b = sdram_read_byte(FB_BASE_BYTE + y*320 + x + 50);
+            if (a == 0x42) n_42_in_first++;
+            if (b == 0x42) n_42_in_second++;
+            if (a == 0x88 || b == 0x88) n_88_any++;
         }
     }
-    if (n_42_in_first > 50 && n_88_in_second > 50)
-        check_pass("triangle_cmap_slot_change_between_draws.distinct");
+    if (n_42_in_first > 50 && n_42_in_second > 50 && n_88_any == 0)
+        check_pass("triangle_uses_colormap_slot_zero.identity");
     else {
         char buf[128];
         snprintf(buf, sizeof(buf),
-                 "expected ~hundreds of 0x42 in tri1 + 0x88 in tri2; got %d / %d",
-                 n_42_in_first, n_88_in_second);
-        check_fail("triangle_cmap_slot_change_between_draws.distinct", buf);
+                 "expected slot0 identity in both triangles; got 0x42 counts %d/%d, 0x88 count %d",
+                 n_42_in_first, n_42_in_second, n_88_any);
+        check_fail("triangle_uses_colormap_slot_zero.identity", buf);
     }
 }
 
@@ -2949,7 +2808,6 @@ static void test_triangle_full_words_emit_bursts_only_for_triangles() {
 
     cmd_set_fb(FB_BASE_BYTE, 320);
     cmd_set_texture(TEX_BASE_BYTE, 8, 8);
-    cmd_set_colormap_id(0);
 
     uint32_t burst_before = tb->dbg_aw_burst_count;
 
@@ -3044,8 +2902,8 @@ static void test_flip_no_writes_pulses_immediately() {
 // ============================================================================
 
 // ---- A: state-change matrix (subset) ---------------------------------------
-static void test_combo_a_setfb_then_setcmap_then_span() {
-    printf("TEST combo_A_setfb_then_setcmap_then_span\n");
+static void test_combo_a_setfb_then_colormapped_span() {
+    printf("TEST combo_A_setfb_then_colormapped_span\n");
     gpu_init();
     auto m = preload_with_sentinel();
     upload_palookup_const_row(3, 0, 0xCC);
@@ -3053,10 +2911,9 @@ static void test_combo_a_setfb_then_setcmap_then_span() {
     upload_texture(TEX_BASE_BYTE, tex);
     m.snapshot_from_sdram();
 
-    /* SET_FB A, SET_CMAP 3, draw colormapped span with explicit slot 3 —
-     * should write 0xCC everywhere in FB-A. */
+    /* SET_FB A, draw colormapped span with explicit slot 3 — should write
+     * 0xCC everywhere in FB-A. */
     cmd_set_fb(FB_BASE_BYTE, 320); m.st_fb_addr = FB_BASE_BYTE;
-    cmd_set_colormap_id(3);        m.st_colormap = 3;
     SpanWire s = make_span();
     s.fb_addr = FB_BASE_BYTE; s.tex_addr = TEX_BASE_BYTE;
     s.tex_width = 16; s.tex_w_mask = 0xF;
@@ -3070,7 +2927,7 @@ static void test_combo_a_setfb_then_setcmap_then_span() {
     emit_span_raw(sB); m.apply_draw_span(sB);
 
     if (!submit_and_wait()) {
-        check_fail("combo_A_setfb_then_setcmap_then_span", "timeout");
+        check_fail("combo_A_setfb_then_colormapped_span", "timeout");
         return;
     }
     compare_fb_region("combo_A.A_row0", m, FB_BASE_BYTE,    320, 0, 0, 16, 1);
@@ -3360,8 +3217,6 @@ int main(int argc, char **argv) {
            (unsigned long)(sim_time / 2));
 
     // ---- Standalone tests ----
-    test_nop_basic();
-    test_nop_burst();
     test_fence_no_writes();
     test_multi_fence_in_order();
     test_fence_after_clear_drains();
@@ -3372,9 +3227,8 @@ int main(int argc, char **argv) {
     test_set_texture_via_triangle();
     test_set_texture_width_via_triangle();
     test_scalar_span_explicit_colormap_slots();
-    test_per_span_colormap_overrides_sticky();
-    test_set_skip_zero_does_not_affect_direct_spans();
-    test_set_skip_zero_affects_triangle_spans();
+    test_per_span_colormap_explicit_slots();
+    test_triangle_no_global_skip_zero();
     test_clear_color_replication();
     test_clear_drains_framebuffer_writes();
     test_clear_no_op_when_flag_clear();
@@ -3405,12 +3259,12 @@ int main(int argc, char **argv) {
     test_span_group_eight_lane_colormap();
     test_batch_dma_equals_inline();
     test_command_stream_dma_mixed_span_span_group();
-    test_triangle_cmap_slot_change_between_draws();
+    test_triangle_uses_colormap_slot_zero();
     test_triangle_full_words_emit_bursts_only_for_triangles();
     test_flip_no_writes_pulses_immediately();
 
     // ---- Combination tests ----
-    test_combo_a_setfb_then_setcmap_then_span();
+    test_combo_a_setfb_then_colormapped_span();
     test_combo_b_clear_then_span_paints_span();
     test_combo_c_three_slots_in_one_batch();
     test_combo_d_tex_mutate_with_flush();

@@ -140,7 +140,6 @@
 #define GPU_DBG_FLIP_SWAP_PULSE_REG  REG32(0x4a000030u)
 #define GPU_DBG_BVALID_REG           REG32(0x4a000034u) /* low 4 bits: m_wr_inflight */
 #define GPU_DBG_AWVALID_REG          REG32(0x4a000038u)
-#define GPU_DBG_SELECT_REG           REG32(0x4a00003Cu)
 
 /* Swap-pipeline diagnostic snapshot. Read-only.
  *   FB_SWAP_DBG_LIVE   (0xC0):
@@ -388,11 +387,12 @@
  * Write: ignored; fixed-rate adapter mode forces hold to 0. */
 #define VRR_SWAP_HOLD       REG32(SYSREG_BASE + 0xE0)
 
-/* Datatable slot size query (0x90) — write slot entry address, read result */
+/* Datatable slot size query:
+ *   0x90 write: datatable word address
+ *   0x90 read : bit31=result valid for this query, bits30:0=legacy data
+ *   0x94 read : full 32-bit result, including size bit31 */
 #define DT_QUERY            REG32(SYSREG_BASE + 0x90)
-
-/* Bridge diagnostics (0x94): retired in production RTL, reads zero. */
-#define DS_DEBUG            REG32(SYSREG_BASE + 0x94)
+#define DT_QUERY_DATA       REG32(SYSREG_BASE + 0x94)
 
 /* Hardware features (0x98) — read-only, set at synthesis time in RTL */
 #define HW_FEATURES         REG32(SYSREG_BASE + 0x98)

@@ -11,6 +11,10 @@
 
 #include <stdint.h>
 
+typedef uint64_t of_mixer_handle_t;
+
+#define OF_MIXER_HANDLE_INVALID ((of_mixer_handle_t)0)
+
 void of_mixer_init(int max_voices, int output_rate);
 
 /* Play 16-bit signed mono PCM from the SDRAM sample pool.
@@ -101,6 +105,58 @@ int of_mixer_alloc_for_group(int group, const uint8_t *pcm_s16,
 /* Read the group tag for a voice (-1 if voice index is out of range).
  * Cheap shadow read; safe from ISR context. */
 int of_mixer_voice_group(int voice);
+
+/* Stable logical voice handles.  These APIs reject stale handles after
+ * a physical slot naturally ends, is stopped, stolen, or reused. */
+of_mixer_handle_t of_mixer_play_h(const uint8_t *pcm_s16,
+                                  uint32_t sample_count,
+                                  uint32_t sample_rate,
+                                  int priority,
+                                  int volume);
+of_mixer_handle_t of_mixer_play_8bit_h(const uint8_t *pcm_s8,
+                                       uint32_t sample_count,
+                                       uint32_t sample_rate,
+                                       int priority,
+                                       int volume);
+of_mixer_handle_t of_mixer_alloc_for_group_h(int group,
+                                             const uint8_t *pcm_s16,
+                                             uint32_t sample_count,
+                                             uint32_t sample_rate,
+                                             int priority,
+                                             int volume);
+of_mixer_handle_t of_mixer_retrigger_h(of_mixer_handle_t handle,
+                                       const uint8_t *pcm_s16,
+                                       uint32_t sample_count,
+                                       uint32_t sample_rate,
+                                       int volume);
+void of_mixer_stop_h(of_mixer_handle_t handle);
+int of_mixer_handle_active(of_mixer_handle_t handle);
+int of_mixer_handle_group(of_mixer_handle_t handle);
+int of_mixer_handle_voice(of_mixer_handle_t handle);
+void of_mixer_set_volume_h(of_mixer_handle_t handle, int volume);
+void of_mixer_set_pan_h(of_mixer_handle_t handle, int pan);
+void of_mixer_set_loop_h(of_mixer_handle_t handle, int loop_start, int loop_end);
+void of_mixer_set_rate_h(of_mixer_handle_t handle, int sample_rate_hz);
+void of_mixer_set_rate_raw_h(of_mixer_handle_t handle, uint32_t rate_fp16);
+void of_mixer_set_vol_lr_h(of_mixer_handle_t handle, int vol_l, int vol_r);
+void of_mixer_set_bidi_h(of_mixer_handle_t handle, int enable);
+int of_mixer_get_position_h(of_mixer_handle_t handle);
+void of_mixer_set_position_h(of_mixer_handle_t handle, int sample_offset);
+void of_mixer_set_voice_h(of_mixer_handle_t handle,
+                          int sample_rate_hz,
+                          int vol_l,
+                          int vol_r);
+void of_mixer_set_voice_raw_h(of_mixer_handle_t handle,
+                              uint32_t rate_fp16,
+                              int vol_l,
+                              int vol_r);
+void of_mixer_set_volume_ramp_h(of_mixer_handle_t handle, int rate);
+void of_mixer_set_filter_h(of_mixer_handle_t handle,
+                           int cutoff_q016,
+                           int q,
+                           int enable);
+uint32_t of_mixer_poll_ended_h(of_mixer_handle_t *out_handles,
+                               uint32_t max_handles);
 
 /* Per-voice SVF low-pass filter.
  *   cutoff_q016 : Q0.16 SVF cutoff coefficient (raw register value).

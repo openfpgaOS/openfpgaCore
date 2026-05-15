@@ -78,7 +78,8 @@ int of_file_get_name(uint32_t slot_id, char *name_out, uint32_t name_max);
  * current size. Returns the value on success, or <0 if the slot has no
  * datatable entry matching that id. */
 long of_file_flags(uint32_t slot_id);
-long of_file_size(uint32_t slot_id);
+long of_file_size(uint32_t slot_id);      /* legacy/saturating on rv32 */
+int64_t of_file_size64(uint32_t slot_id);
 
 /* ======================================================================
  * Async file read — non-blocking DMA with callback on completion

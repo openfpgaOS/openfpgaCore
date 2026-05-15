@@ -50,10 +50,122 @@ static int8_t   priority_shadow[MIXER_MAX_VOICES];
 static uint8_t  vol_shadow[MIXER_MAX_VOICES];     /* per-voice 0..255 (pre-pan) */
 static uint8_t  pan_shadow[MIXER_MAX_VOICES];     /* 0=L, 128=C, 255=R */
 static uint8_t  group_shadow[MIXER_MAX_VOICES];   /* mirror of HW packed reg */
+static uint64_t generation_shadow[MIXER_MAX_VOICES];
 
 #define MIXER_NUM_GROUPS 4
+#define MIXER_ENDED_QUEUE_SIZE 64
 
 static int mixer_initialized;
+static uint64_t ended_queue[MIXER_ENDED_QUEUE_SIZE];
+static uint8_t  ended_head;
+static uint8_t  ended_tail;
+static uint8_t  ended_count;
+static uint32_t ended_legacy_latch;
+static uint32_t ended_queue_overflows;
+
+static inline int voice_in_range(int voice);
+static void write_voice_group_packed(void);
+
+static inline uint32_t mixer_irq_save_local(void)
+{
+    uint32_t prev;
+    __asm__ volatile("csrrci %0, mstatus, 0x8"
+                     : "=r"(prev) :: "memory");
+    return prev & 0x8u;
+}
+
+static inline void mixer_irq_restore_local(uint32_t prev)
+{
+    if (prev)
+        __asm__ volatile("csrrsi zero, mstatus, 0x8" ::: "memory");
+}
+
+static inline uint64_t mixer_generation_next(uint64_t generation)
+{
+    const uint64_t mask = (UINT64_C(1) << 56) - 1;
+    generation = (generation + 1) & mask;
+    return generation ? generation : 1;
+}
+
+static inline of_mixer_handle_t mixer_make_handle_locked(int voice)
+{
+    uint64_t generation = mixer_generation_next(generation_shadow[voice]);
+    generation_shadow[voice] = generation;
+    return (generation << 8) | (uint8_t)voice;
+}
+
+static inline of_mixer_handle_t mixer_current_handle_locked(int voice)
+{
+    uint64_t generation = generation_shadow[voice];
+    if (!generation)
+        return OF_MIXER_HANDLE_INVALID;
+    return (generation << 8) | (uint8_t)voice;
+}
+
+static inline int mixer_handle_voice_index(of_mixer_handle_t handle)
+{
+    int voice = (int)(handle & 0xFFu);
+    uint64_t generation = handle >> 8;
+    if (handle == OF_MIXER_HANDLE_INVALID || generation == 0)
+        return -1;
+    if (!voice_in_range(voice))
+        return -1;
+    return voice;
+}
+
+static inline int mixer_validate_handle_locked(of_mixer_handle_t handle)
+{
+    int voice = mixer_handle_voice_index(handle);
+    if (voice < 0)
+        return -1;
+    if (!(active_shadow & (1u << voice)))
+        return -1;
+    if (generation_shadow[voice] != (handle >> 8))
+        return -1;
+    return voice;
+}
+
+static void mixer_ended_push_locked(of_mixer_handle_t handle)
+{
+    if (handle == OF_MIXER_HANDLE_INVALID)
+        return;
+
+    if (ended_count == MIXER_ENDED_QUEUE_SIZE) {
+        ended_tail = (uint8_t)((ended_tail + 1u) & (MIXER_ENDED_QUEUE_SIZE - 1u));
+        ended_count--;
+        ended_queue_overflows++;
+    }
+
+    ended_queue[ended_head] = handle;
+    ended_head = (uint8_t)((ended_head + 1u) & (MIXER_ENDED_QUEUE_SIZE - 1u));
+    ended_count++;
+}
+
+static uint32_t mixer_reap_ended_pending(void)
+{
+    uint32_t ended = MIX_IRQ_PENDING;
+    if (!ended)
+        return 0;
+
+    uint32_t irq = mixer_irq_save_local();
+    ended = MIX_IRQ_PENDING;
+    if (ended) {
+        uint32_t active_ended = ended & active_shadow;
+
+        for (int i = 0; i < MIXER_MAX_VOICES; i++) {
+            if (!(active_ended & (1u << i)))
+                continue;
+            mixer_ended_push_locked(mixer_current_handle_locked(i));
+            ctrl_shadow[i] = 0;
+        }
+
+        active_shadow &= ~ended;
+        ended_legacy_latch |= active_ended;
+        MIX_IRQ_CLEAR = ended;
+    }
+    mixer_irq_restore_local(irq);
+    return ended;
+}
 
 /* Equal-power pan: quarter-cosine/sine, 256 entries.
  * pan_cos[i] ~= cos(i*pi/510)*255, pan_sin[i] ~= sin(i*pi/510)*255. */
@@ -138,6 +250,7 @@ void of_mixer_init(int max_voices, int output_rate)
         priority_shadow[i] = 0;
         group_shadow[i]    = 0;
         ctrl_shadow[i]     = 0;
+        generation_shadow[i] = mixer_generation_next(generation_shadow[i]);
         MIX_VOICE_CTRL(i)        = 0;
         MIX_VOICE_VOL_LR(i)      = 0;
         MIX_VOICE_VOL_TARGET(i)  = 0;
@@ -153,6 +266,11 @@ void of_mixer_init(int max_voices, int output_rate)
     MIX_VOICE_GROUP_LO   = 0;
     MIX_VOICE_GROUP_HI   = 0;
     active_shadow  = 0;
+    ended_head = 0;
+    ended_tail = 0;
+    ended_count = 0;
+    ended_legacy_latch = 0;
+    ended_queue_overflows = 0;
     MIX_IRQ_CLEAR  = 0xFFFFFFFFu;
     MIX_CTRL       = MIX_CTRL_ENABLE;
     mixer_initialized = 1;
@@ -229,14 +347,21 @@ static int alloc_voice_grouped(int priority, int group)
  * path; the caller has chosen `voice` and (for the grouped path) tagged
  * group_shadow before this runs so apply_vol_pan composes against the
  * correct group_vol[]. */
-static int program_voice_play(int voice, const void *pcm,
-                              uint32_t sample_count, uint32_t sample_rate,
-                              int priority, int volume)
+static of_mixer_handle_t program_voice_play(int voice, const void *pcm,
+                                            uint32_t sample_count,
+                                            uint32_t sample_rate,
+                                            int priority, int volume)
 {
     extern volatile uint32_t play_counter_diag;
     play_counter_diag++;
 
     uint32_t rate = ((uint64_t)sample_rate << 16) / MIXER_OUTPUT_RATE;
+    uint32_t irq = mixer_irq_save_local();
+    of_mixer_handle_t handle = mixer_make_handle_locked(voice);
+
+    active_shadow &= ~(1u << voice);
+    ctrl_shadow[voice] = 0;
+    mixer_irq_restore_local(irq);
 
     /* A one-shot voice may have retired in hardware while the app was
      * busy and before of_mixer_poll_ended() ran. If we reuse that slot
@@ -269,18 +394,24 @@ static int program_voice_play(int voice, const void *pcm,
     priority_shadow[voice] = (int8_t)priority;
     apply_vol_pan(voice);
 
+    irq = mixer_irq_save_local();
     write_ctrl(voice, 1u);   /* active | mono | no-loop */
-    return voice;
+    mixer_irq_restore_local(irq);
+    return handle;
 }
 
-static int play_internal(const void *pcm, uint32_t sample_count,
-                         uint32_t sample_rate, int priority, int volume,
-                         int fmt16)
+static of_mixer_handle_t play_internal_h(const void *pcm, uint32_t sample_count,
+                                         uint32_t sample_rate, int priority,
+                                         int volume, int fmt16)
 {
-    if (!mixer_initialized || !pcm || sample_count == 0) return -1;
-    if (!fmt16) return -1;   /* HW v2 is 16-bit only */
+    if (!mixer_initialized || !pcm || sample_count == 0)
+        return OF_MIXER_HANDLE_INVALID;
+    if (!fmt16)
+        return OF_MIXER_HANDLE_INVALID;   /* HW v2 is 16-bit only */
+    mixer_reap_ended_pending();
     int voice = alloc_voice(priority);
-    if (voice < 0) return -1;
+    if (voice < 0)
+        return OF_MIXER_HANDLE_INVALID;
     return program_voice_play(voice, pcm, sample_count, sample_rate,
                               priority, volume);
 }
@@ -288,7 +419,20 @@ static int play_internal(const void *pcm, uint32_t sample_count,
 int of_mixer_play(const uint8_t *pcm_s16, uint32_t sample_count,
                   uint32_t sample_rate, int priority, int volume)
 {
-    return play_internal(pcm_s16, sample_count, sample_rate, priority, volume, 1);
+    of_mixer_handle_t handle = play_internal_h(pcm_s16, sample_count,
+                                               sample_rate, priority,
+                                               volume, 1);
+    return handle == OF_MIXER_HANDLE_INVALID ? -1 : (int)(handle & 0xFFu);
+}
+
+of_mixer_handle_t of_mixer_play_h(const uint8_t *pcm_s16,
+                                  uint32_t sample_count,
+                                  uint32_t sample_rate,
+                                  int priority,
+                                  int volume)
+{
+    return play_internal_h(pcm_s16, sample_count, sample_rate,
+                           priority, volume, 1);
 }
 
 /* Atomic alloc-and-tag for callers that know which group the voice
@@ -300,11 +444,30 @@ int of_mixer_alloc_for_group(int group, const uint8_t *pcm_s16,
                              uint32_t sample_count, uint32_t sample_rate,
                              int priority, int volume)
 {
-    if (!mixer_initialized || !pcm_s16 || sample_count == 0) return -1;
+    of_mixer_handle_t handle = of_mixer_alloc_for_group_h(group, pcm_s16,
+                                                          sample_count,
+                                                          sample_rate,
+                                                          priority,
+                                                          volume);
+    return handle == OF_MIXER_HANDLE_INVALID ? -1 : (int)(handle & 0xFFu);
+}
+
+of_mixer_handle_t of_mixer_alloc_for_group_h(int group,
+                                             const uint8_t *pcm_s16,
+                                             uint32_t sample_count,
+                                             uint32_t sample_rate,
+                                             int priority,
+                                             int volume)
+{
+    if (!mixer_initialized || !pcm_s16 || sample_count == 0)
+        return OF_MIXER_HANDLE_INVALID;
     if (group < 0 || group >= MIXER_NUM_GROUPS) group = OF_MIXER_GROUP_SFX;
+    mixer_reap_ended_pending();
     int voice = alloc_voice_grouped(priority, group);
-    if (voice < 0) return -1;
+    if (voice < 0)
+        return OF_MIXER_HANDLE_INVALID;
     group_shadow[voice] = (uint8_t)group;
+    write_voice_group_packed();
     return program_voice_play(voice, pcm_s16, sample_count, sample_rate,
                               priority, volume);
 }
@@ -328,25 +491,48 @@ int of_mixer_voice_group(int voice)
 int of_mixer_play_8bit(const uint8_t *pcm_s8, uint32_t sample_count,
                        uint32_t sample_rate, int priority, int volume)
 {
-    if (!pcm_s8 || sample_count == 0) return -1;
+    of_mixer_handle_t handle = of_mixer_play_8bit_h(pcm_s8, sample_count,
+                                                    sample_rate, priority,
+                                                    volume);
+    return handle == OF_MIXER_HANDLE_INVALID ? -1 : (int)(handle & 0xFFu);
+}
+
+of_mixer_handle_t of_mixer_play_8bit_h(const uint8_t *pcm_s8,
+                                       uint32_t sample_count,
+                                       uint32_t sample_rate,
+                                       int priority,
+                                       int volume)
+{
+    if (!pcm_s8 || sample_count == 0) return OF_MIXER_HANDLE_INVALID;
 
     int16_t *s16 = (int16_t *)of_mixer_alloc_samples(sample_count * sizeof(int16_t));
-    if (!s16) return -1;
+    if (!s16) return OF_MIXER_HANDLE_INVALID;
 
     const int8_t *src = (const int8_t *)pcm_s8;
     for (uint32_t i = 0; i < sample_count; i++)
         s16[i] = (int16_t)((int16_t)src[i] << 8);
 
-    return play_internal(s16, sample_count, sample_rate, priority, volume, 1);
+    return play_internal_h(s16, sample_count, sample_rate, priority, volume, 1);
 }
 
-void of_mixer_retrigger(int voice, const uint8_t *pcm_s16,
-                        uint32_t sample_count, uint32_t sample_rate,
-                        int volume)
+static of_mixer_handle_t retrigger_voice_h(int voice, const uint8_t *pcm_s16,
+                                           uint32_t sample_count,
+                                           uint32_t sample_rate,
+                                           int volume,
+                                           of_mixer_handle_t handle)
 {
-    if (!voice_in_range(voice) || !pcm_s16 || sample_count == 0) return;
+    if (!voice_in_range(voice) || !pcm_s16 || sample_count == 0)
+        return OF_MIXER_HANDLE_INVALID;
     uint32_t rate = ((uint64_t)sample_rate << 16) / MIXER_OUTPUT_RATE;
     int v = volume & 0xFF;
+
+    if (handle == OF_MIXER_HANDLE_INVALID) {
+        uint32_t irq = mixer_irq_save_local();
+        handle = mixer_make_handle_locked(voice);
+        active_shadow &= ~(1u << voice);
+        ctrl_shadow[voice] = 0;
+        mixer_irq_restore_local(irq);
+    }
 
     /* Same SDRAM flush as play_internal — see comment there. */
     of_cache_flush_range((void *)pcm_s16, sample_count * sizeof(int16_t));
@@ -364,7 +550,39 @@ void of_mixer_retrigger(int voice, const uint8_t *pcm_s16,
     pan_shadow[voice] = 128;
     apply_vol_pan(voice);
 
+    uint32_t irq = mixer_irq_save_local();
     write_ctrl(voice, 1u);   /* active | mono | no-loop */
+    mixer_irq_restore_local(irq);
+    return handle;
+}
+
+void of_mixer_retrigger(int voice, const uint8_t *pcm_s16,
+                        uint32_t sample_count, uint32_t sample_rate,
+                        int volume)
+{
+    (void)retrigger_voice_h(voice, pcm_s16, sample_count, sample_rate, volume,
+                            OF_MIXER_HANDLE_INVALID);
+}
+
+of_mixer_handle_t of_mixer_retrigger_h(of_mixer_handle_t handle,
+                                       const uint8_t *pcm_s16,
+                                       uint32_t sample_count,
+                                       uint32_t sample_rate,
+                                       int volume)
+{
+    uint32_t irq = mixer_irq_save_local();
+    int voice = mixer_validate_handle_locked(handle);
+    of_mixer_handle_t new_handle = OF_MIXER_HANDLE_INVALID;
+    if (voice >= 0) {
+        new_handle = mixer_make_handle_locked(voice);
+        active_shadow &= ~(1u << voice);
+        ctrl_shadow[voice] = 0;
+    }
+    mixer_irq_restore_local(irq);
+    if (voice < 0)
+        return OF_MIXER_HANDLE_INVALID;
+    return retrigger_voice_h(voice, pcm_s16, sample_count, sample_rate, volume,
+                             new_handle);
 }
 
 /* Stopping a voice was previously a 2-MMIO sequence: snap VOL_LR=0,
@@ -391,13 +609,26 @@ void of_mixer_stop(int voice)
     write_ctrl(voice, 0);
 }
 
+void of_mixer_stop_h(of_mixer_handle_t handle)
+{
+    uint32_t irq = mixer_irq_save_local();
+    int voice = mixer_validate_handle_locked(handle);
+    if (voice >= 0)
+        write_ctrl(voice, 0);
+    mixer_irq_restore_local(irq);
+}
+
 void of_mixer_stop_all(void)
 {
+    uint32_t irq = mixer_irq_save_local();
     for (int i = 0; i < MIXER_MAX_VOICES; i++) {
         MIX_VOICE_CTRL(i) = 0;
         ctrl_shadow[i]    = 0;
+        if (active_shadow & (1u << i))
+            generation_shadow[i] = mixer_generation_next(generation_shadow[i]);
     }
     active_shadow = 0;
+    mixer_irq_restore_local(irq);
 }
 
 void of_mixer_set_volume(int voice, int volume)
@@ -407,6 +638,17 @@ void of_mixer_set_volume(int voice, int volume)
     apply_vol_pan(voice);
 }
 
+void of_mixer_set_volume_h(of_mixer_handle_t handle, int volume)
+{
+    uint32_t irq = mixer_irq_save_local();
+    int voice = mixer_validate_handle_locked(handle);
+    if (voice >= 0) {
+        vol_shadow[voice] = volume & 0xFF;
+        apply_vol_pan(voice);
+    }
+    mixer_irq_restore_local(irq);
+}
+
 void of_mixer_set_pan(int voice, int pan)
 {
     if (!voice_in_range(voice)) return;
@@ -414,10 +656,49 @@ void of_mixer_set_pan(int voice, int pan)
     apply_vol_pan(voice);
 }
 
+void of_mixer_set_pan_h(of_mixer_handle_t handle, int pan)
+{
+    uint32_t irq = mixer_irq_save_local();
+    int voice = mixer_validate_handle_locked(handle);
+    if (voice >= 0) {
+        pan_shadow[voice] = pan & 0xFF;
+        apply_vol_pan(voice);
+    }
+    mixer_irq_restore_local(irq);
+}
+
 int of_mixer_voice_active(int voice)
 {
     if (!voice_in_range(voice)) return 0;
     return (active_shadow >> voice) & 1u;
+}
+
+int of_mixer_handle_active(of_mixer_handle_t handle)
+{
+    mixer_reap_ended_pending();
+    uint32_t irq = mixer_irq_save_local();
+    int voice = mixer_validate_handle_locked(handle);
+    mixer_irq_restore_local(irq);
+    return voice >= 0;
+}
+
+int of_mixer_handle_group(of_mixer_handle_t handle)
+{
+    uint32_t irq = mixer_irq_save_local();
+    int voice = mixer_validate_handle_locked(handle);
+    int group = voice >= 0 ? (int)group_shadow[voice] : -1;
+    mixer_irq_restore_local(irq);
+    return group;
+}
+
+int of_mixer_handle_voice(of_mixer_handle_t handle)
+{
+    uint32_t irq = mixer_irq_save_local();
+    int voice = mixer_handle_voice_index(handle);
+    if (voice >= 0 && generation_shadow[voice] != (handle >> 8))
+        voice = -1;
+    mixer_irq_restore_local(irq);
+    return voice;
 }
 
 /* Hardware mixer runs autonomously — no CPU pump needed.  The ABI
@@ -439,11 +720,40 @@ void of_mixer_set_loop(int voice, int loop_start, int loop_end)
     }
 }
 
+void of_mixer_set_loop_h(of_mixer_handle_t handle, int loop_start, int loop_end)
+{
+    mixer_reap_ended_pending();
+    uint32_t irq = mixer_irq_save_local();
+    int voice = mixer_validate_handle_locked(handle);
+    if (voice >= 0) {
+        uint8_t cur = ctrl_shadow[voice];
+        if (loop_start < 0) {
+            write_ctrl(voice, cur & ~4u);
+        } else {
+            MIX_VOICE_LOOP_START(voice) = (uint32_t)loop_start;
+            if (loop_end > 0) MIX_VOICE_LOOP_END(voice) = (uint32_t)loop_end;
+            write_ctrl(voice, cur | 4u);
+        }
+    }
+    mixer_irq_restore_local(irq);
+}
+
 void of_mixer_set_rate(int voice, int sample_rate_hz)
 {
     if (!voice_in_range(voice)) return;
     uint32_t rate = ((uint64_t)sample_rate_hz << 16) / MIXER_OUTPUT_RATE;
     MIX_VOICE_RATE(voice) = rate;
+}
+
+void of_mixer_set_rate_h(of_mixer_handle_t handle, int sample_rate_hz)
+{
+    uint32_t irq = mixer_irq_save_local();
+    int voice = mixer_validate_handle_locked(handle);
+    if (voice >= 0) {
+        uint32_t rate = ((uint64_t)sample_rate_hz << 16) / MIXER_OUTPUT_RATE;
+        MIX_VOICE_RATE(voice) = rate;
+    }
+    mixer_irq_restore_local(irq);
 }
 
 void of_mixer_set_rate_raw(int voice, uint32_t rate_fp16)
@@ -452,10 +762,28 @@ void of_mixer_set_rate_raw(int voice, uint32_t rate_fp16)
     MIX_VOICE_RATE(voice) = rate_fp16;
 }
 
+void of_mixer_set_rate_raw_h(of_mixer_handle_t handle, uint32_t rate_fp16)
+{
+    uint32_t irq = mixer_irq_save_local();
+    int voice = mixer_validate_handle_locked(handle);
+    if (voice >= 0)
+        MIX_VOICE_RATE(voice) = rate_fp16;
+    mixer_irq_restore_local(irq);
+}
+
 void of_mixer_set_vol_lr(int voice, int vol_l, int vol_r)
 {
     if (!voice_in_range(voice)) return;
     MIX_VOICE_VOL_TARGET(voice) = ((vol_r & 0xFF) << 8) | (vol_l & 0xFF);
+}
+
+void of_mixer_set_vol_lr_h(of_mixer_handle_t handle, int vol_l, int vol_r)
+{
+    uint32_t irq = mixer_irq_save_local();
+    int voice = mixer_validate_handle_locked(handle);
+    if (voice >= 0)
+        MIX_VOICE_VOL_TARGET(voice) = ((vol_r & 0xFF) << 8) | (vol_l & 0xFF);
+    mixer_irq_restore_local(irq);
 }
 
 /* Bidi loop deferred in HW v2 — log via no-op, forward-loop still works. */
@@ -464,16 +792,39 @@ void of_mixer_set_bidi(int voice, int enable)
     (void)voice; (void)enable;
 }
 
+void of_mixer_set_bidi_h(of_mixer_handle_t handle, int enable)
+{
+    (void)handle; (void)enable;
+}
+
 int of_mixer_get_position(int voice)
 {
     if (!voice_in_range(voice)) return 0;
     return (int)(MIX_VOICE_POS(voice) & 0x3FFFFFu);
 }
 
+int of_mixer_get_position_h(of_mixer_handle_t handle)
+{
+    uint32_t irq = mixer_irq_save_local();
+    int voice = mixer_validate_handle_locked(handle);
+    int pos = voice >= 0 ? (int)(MIX_VOICE_POS(voice) & 0x3FFFFFu) : -1;
+    mixer_irq_restore_local(irq);
+    return pos;
+}
+
 void of_mixer_set_position(int voice, int sample_offset_idx)
 {
     if (!voice_in_range(voice)) return;
     MIX_VOICE_POS_WR(voice) = (uint32_t)sample_offset_idx;
+}
+
+void of_mixer_set_position_h(of_mixer_handle_t handle, int sample_offset_idx)
+{
+    uint32_t irq = mixer_irq_save_local();
+    int voice = mixer_validate_handle_locked(handle);
+    if (voice >= 0)
+        MIX_VOICE_POS_WR(voice) = (uint32_t)sample_offset_idx;
+    mixer_irq_restore_local(irq);
 }
 
 void of_mixer_set_voice(int voice, int sample_rate_hz, int vol_l, int vol_r)
@@ -484,11 +835,40 @@ void of_mixer_set_voice(int voice, int sample_rate_hz, int vol_l, int vol_r)
     MIX_VOICE_VOL_TARGET(voice) = ((vol_r & 0xFF) << 8) | (vol_l & 0xFF);
 }
 
+void of_mixer_set_voice_h(of_mixer_handle_t handle,
+                          int sample_rate_hz,
+                          int vol_l,
+                          int vol_r)
+{
+    uint32_t irq = mixer_irq_save_local();
+    int voice = mixer_validate_handle_locked(handle);
+    if (voice >= 0) {
+        uint32_t rate = ((uint64_t)sample_rate_hz << 16) / MIXER_OUTPUT_RATE;
+        MIX_VOICE_RATE(voice)       = rate;
+        MIX_VOICE_VOL_TARGET(voice) = ((vol_r & 0xFF) << 8) | (vol_l & 0xFF);
+    }
+    mixer_irq_restore_local(irq);
+}
+
 void of_mixer_set_voice_raw(int voice, uint32_t rate_fp16, int vol_l, int vol_r)
 {
     if (!voice_in_range(voice)) return;
     MIX_VOICE_RATE(voice)       = rate_fp16;
     MIX_VOICE_VOL_TARGET(voice) = ((vol_r & 0xFF) << 8) | (vol_l & 0xFF);
+}
+
+void of_mixer_set_voice_raw_h(of_mixer_handle_t handle,
+                              uint32_t rate_fp16,
+                              int vol_l,
+                              int vol_r)
+{
+    uint32_t irq = mixer_irq_save_local();
+    int voice = mixer_validate_handle_locked(handle);
+    if (voice >= 0) {
+        MIX_VOICE_RATE(voice)       = rate_fp16;
+        MIX_VOICE_VOL_TARGET(voice) = ((vol_r & 0xFF) << 8) | (vol_l & 0xFF);
+    }
+    mixer_irq_restore_local(irq);
 }
 
 void of_mixer_set_volume_ramp(int voice, int rate)
@@ -497,16 +877,45 @@ void of_mixer_set_volume_ramp(int voice, int rate)
     MIX_VOICE_VOL_RATE(voice) = (uint32_t)(rate & 0xFF);
 }
 
+void of_mixer_set_volume_ramp_h(of_mixer_handle_t handle, int rate)
+{
+    uint32_t irq = mixer_irq_save_local();
+    int voice = mixer_validate_handle_locked(handle);
+    if (voice >= 0)
+        MIX_VOICE_VOL_RATE(voice) = (uint32_t)(rate & 0xFF);
+    mixer_irq_restore_local(irq);
+}
+
 uint32_t of_mixer_poll_ended(void)
 {
-    uint32_t ended = MIX_IRQ_PENDING;
-    if (ended) {
-        MIX_IRQ_CLEAR  = ended;
-        active_shadow &= ~ended;
-        for (int i = 0; i < MIXER_MAX_VOICES; i++)
-            if (ended & (1u << i)) ctrl_shadow[i] = 0;
-    }
+    mixer_reap_ended_pending();
+    uint32_t irq = mixer_irq_save_local();
+    uint32_t ended = ended_legacy_latch;
+    ended_legacy_latch = 0;
+    mixer_irq_restore_local(irq);
     return ended;
+}
+
+uint32_t of_mixer_poll_ended_h(of_mixer_handle_t *out_handles,
+                               uint32_t max_handles)
+{
+    mixer_reap_ended_pending();
+
+    uint32_t irq = mixer_irq_save_local();
+    if (!out_handles || max_handles == 0) {
+        uint32_t pending = ended_count;
+        mixer_irq_restore_local(irq);
+        return pending;
+    }
+
+    uint32_t copied = 0;
+    while (copied < max_handles && ended_count > 0) {
+        out_handles[copied++] = ended_queue[ended_tail];
+        ended_tail = (uint8_t)((ended_tail + 1u) & (MIXER_ENDED_QUEUE_SIZE - 1u));
+        ended_count--;
+    }
+    mixer_irq_restore_local(irq);
+    return copied;
 }
 
 /* Update the packed voice→group mapping in HW.  32 voices × 2 bits split
@@ -551,6 +960,14 @@ void of_mixer_set_master_volume(int volume)
 void of_mixer_set_filter(int voice, int cutoff_q016, int q, int enable)
 {
     (void)voice; (void)cutoff_q016; (void)q; (void)enable;
+}
+
+void of_mixer_set_filter_h(of_mixer_handle_t handle,
+                           int cutoff_q016,
+                           int q,
+                           int enable)
+{
+    (void)handle; (void)cutoff_q016; (void)q; (void)enable;
 }
 
 /* Sample memory bump allocator — backed by the SDRAM sample pool at

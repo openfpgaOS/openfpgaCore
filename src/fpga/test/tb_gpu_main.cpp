@@ -282,8 +282,7 @@ static void test_fence_sync() {
 
     gpu_init();
 
-    // Submit a NOP + fence
-    ring_cmd(0x01, 0);  // CMD_NOP
+    // Submit a fence-only stream.
     uint32_t t = gpu_submit();
     bool ok = gpu_wait_fence(t);
     check("fence_reached", ok ? 1 : 0, 1);
@@ -292,7 +291,6 @@ static void test_fence_sync() {
     // Verify GPU works after a second gpu_init() reset
     printf("  (re-init and re-test)\n");
     gpu_init();
-    ring_cmd(0x01, 0);
     t = gpu_submit();
     ok = gpu_wait_fence(t);
     check("fence_after_reinit", ok ? 1 : 0, 1);
@@ -1109,7 +1107,7 @@ static void test_colormap_stuck_address_repro() {
 // Per-span colormap_id: three spans submitted in one command stream
 // with colormap_id = 0, 1, 2 must each render through the matching palookup
 // slot.  Pre-fix this required three separate batches with intervening
-// CMD_SET_COLORMAP_ID flushes; the wire-format change packs colormap_id
+// colormap state changes; the wire-format change packs colormap_id
 // into word 6 bits [31:28] so adjacent streamed spans coexist with
 // different palookups.
 static void test_span_per_colormap() {
@@ -1159,31 +1157,22 @@ static void test_span_per_colormap() {
     for (int i = 0; i < 4; i++) check_byte("per_cmap_slot2", 8 + i, 0x22);
 }
 
-// Per-span colormap_id is explicit, including slot 0.  Sticky
-// CMD_SET_COLORMAP_ID is still used by triangles, but scalar spans do not
-// fall back to it.
+// Per-span colormap_id is explicit, including slot 0.
 static void test_span_default_colormap() {
     printf("TEST: Per-span colormap_id explicit slot 0\n");
     gpu_init();
 
-    // Slot 0: row 0 maps everything to 0x55.  Sticky slot 5 maps to 0xEE
-    // so any accidental fallback is obvious.  Slot 2 maps to 0x22.
+    // Slot 0: row 0 maps everything to 0x55. Slot 2 maps to 0x22.
     {
         uint8_t cm[256];
         for (int i = 0; i < 256; i++) cm[i] = 0x55;
         palookup_upload_to_slot(0, 0, cm, 256);
-        for (int i = 0; i < 256; i++) cm[i] = 0xEE;
-        palookup_upload_to_slot(5, 0, cm, 256);
         for (int i = 0; i < 256; i++) cm[i] = 0x22;
         palookup_upload_to_slot(2, 0, cm, 256);
     }
 
     ring_cmd(0x23, 2); ring_write(FB_BASE_BYTE); ring_write(320);
     ring_clear_fb((uint8_t)(0x00));
-
-    // Sticky default: slot 5.  Scalar span A explicitly selects slot 0 and
-    // must not pick up the sticky state.
-    ring_cmd(0x28, 1); ring_write(5);
 
     // Texture: any non-zero byte (cmap row 0 maps it).
     sdram_write(TEX_BASE_BYTE >> 2, 0x55555555);
@@ -1735,8 +1724,10 @@ static void test_dma_busy_status_includes_global_busy() {
     gpu_init();
 
     const uint32_t DMA_BUF_BYTE = CMD_UPLOAD_BYTE;
-    for (int i = 0; i < 16; i++)
-        sdram_write((DMA_BUF_BYTE >> 2) + i, 0x01000000u);  // CMD_NOP headers
+    for (int i = 0; i < 8; i++) {
+        sdram_write((DMA_BUF_BYTE >> 2) + i * 2 + 0, 0x02000001u);  // CMD_FENCE
+        sdram_write((DMA_BUF_BYTE >> 2) + i * 2 + 1, 0x1000u + (uint32_t)i);
+    }
 
     mmio_write(3,  DMA_BUF_BYTE);
     mmio_write(7,  16);
@@ -1936,13 +1927,11 @@ static void test_spans_back_to_back_stress() {
         printf("  OK  all %d sampled spans rendered correctly\n", pass);
 }
 
-/* Stress: spans interleaved with CMD_SET_COLORMAP_ID changes — Duke3D
- * pattern (each unique palookup forces a cmap-id flip).  Validates that
- * back-to-back state-change + span doesn't regress, and that
- * cmd_is_set_colormap_id does not leave stale flags affecting the
- * subsequent span's cmd_is_draw_span dispatch. */
+/* Stress: many adjacent spans with alternating explicit colormap_id values.
+ * Validates that scalar span dispatch keeps each command's colormap slot
+ * independent without any global colormap state. */
 static void test_spans_with_cmap_changes() {
-    printf("TEST: Spans interleaved with CMAP_ID changes (50 cycles)\n");
+    printf("TEST: Spans with alternating explicit CMAP_ID (50 cycles)\n");
 
     gpu_init();
 
@@ -1965,14 +1954,10 @@ static void test_spans_with_cmap_changes() {
 
     sdram_write(TEX_BASE_BYTE >> 2, 0xAAAAAAAA);
 
-    /* 50 (set_cmap, draw_span) pairs.  Spans alternate between cmap 0
-     * and cmap 1 — each span's pixel reads the same texel (0xAA) but
-     * resolves to either 0xAA (cmap 0 identity) or 0x55 (cmap 1 ~).
-     * If state survives correctly, FB[i] == (i & 1) ? 0x55 : 0xAA. */
+    /* 50 spans alternate between cmap 0 and cmap 1. Each span's pixel
+     * reads the same texel (0xAA) but resolves to either 0xAA
+     * (cmap 0 identity) or 0x55 (cmap 1 ~). */
     for (int i = 0; i < 50; i++) {
-        ring_cmd(0x28, 1);                /* CMD_SET_COLORMAP_ID */
-        ring_write((uint32_t)(i & 1));    /* slot 0 or 1 */
-
         ring_cmd(0x43, 15);               /* scalar span, 1 pixel */
         ring_write(FB_BASE_BYTE + i);
         ring_write(TEX_BASE_BYTE);
@@ -3971,23 +3956,19 @@ static void test_triangle_bbox_init(void) {
 }
 
 // =====================================================================
-// CMD_SET_SKIP_ZERO — color-key transparency for triangle span-emit
+// Triangle span-emit has no global skip-zero state
 // ---------------------------------------------------------------------
 // Sprites used to have their own primitive (CMD_DRAW_SPRITE, now removed).
-// Apps emit 2 textured triangles instead; for color-key transparency
-// (e.g. Duke3D's 0xFF sentinel) they set this global state bit first and
-// the triangle rasterizer passes SKIP_ZERO through to the fragment pipe.
+// Apps that need color-key transparency should emit masked spans/groups or
+// use a triangle path that explicitly carries such a flag in its command.
 // =====================================================================
-static void test_triangle_skip_zero(void) {
-    printf("TEST: Triangle with SKIP_ZERO (color-key via triangles)\n");
+static void test_triangle_no_global_skip_zero(void) {
+    printf("TEST: Triangle has no global SKIP_ZERO state\n");
     gpu_init();
     { uint8_t _cm[256]; for (int i = 0; i < 256; i++) _cm[i] = (uint8_t)i; cmap_upload_bytes(0, _cm, 256); }
 
     ring_cmd(0x23, 2); ring_write(FB_BASE_BYTE); ring_write(320);
     ring_clear_fb((uint8_t)(0x22));  // clear to 0x22
-
-    // Enable color-key. 1 word payload, low bit = enable.
-    ring_cmd(0x27, 1); ring_write(1);
 
     // Texture: 8×8, every row is {0x10, 0xFF, 0x20, 0xFF, 0x30, 0xFF, 0x40, 0xFF}.
     // Making it 8 tall ensures the triangle's t interpolation (t=1 at y=1,
@@ -4017,15 +3998,11 @@ static void test_triangle_skip_zero(void) {
     // Only check pixels we know are covered — y=1..6 is the safe interior.
     // For this test we check y=1 (well inside the triangle).
     check_byte("triCK_y1_x0", 0 + 1*320, 0x10);
-    check_byte("triCK_y1_x1", 1 + 1*320, 0x22);  // transparent
+    check_byte("triCK_y1_x1", 1 + 1*320, 0xFF);
     check_byte("triCK_y1_x2", 2 + 1*320, 0x20);
-    check_byte("triCK_y1_x3", 3 + 1*320, 0x22);
+    check_byte("triCK_y1_x3", 3 + 1*320, 0xFF);
     check_byte("triCK_y1_x4", 4 + 1*320, 0x30);
-    check_byte("triCK_y1_x5", 5 + 1*320, 0x22);
-
-    // Disable color-key for subsequent tests.
-    ring_cmd(0x27, 1); ring_write(0);
-    gpu_finish();
+    check_byte("triCK_y1_x5", 5 + 1*320, 0xFF);
 }
 
 // Test T9: Back-to-back triangle stress — 8 textured triangles with
@@ -7855,7 +7832,7 @@ int main(int argc, char **argv) {
     test_triangle_bbox_init();
     test_triangle_persp_premul_dormant();
     test_triangle_persp_vs_affine();
-    test_triangle_skip_zero();
+    test_triangle_no_global_skip_zero();
     test_triangle_back_to_back_many();
     test_triangle_tex_flush_swap();
     test_triangle_tex_flush_midflight();

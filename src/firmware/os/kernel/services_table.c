@@ -261,6 +261,30 @@ void services_table_init(void) {
     /* Input HID extensions */
     svc->input_get_keyboard_state = svc_input_get_keyboard_state;
     svc->input_read_mouse_state   = svc_input_read_mouse_state;
+
+    /* Mixer stable handles */
+    svc->mixer_play_h            = of_mixer_play_h;
+    svc->mixer_play_8bit_h       = of_mixer_play_8bit_h;
+    svc->mixer_alloc_for_group_h = of_mixer_alloc_for_group_h;
+    svc->mixer_retrigger_h       = of_mixer_retrigger_h;
+    svc->mixer_stop_h            = of_mixer_stop_h;
+    svc->mixer_handle_active     = of_mixer_handle_active;
+    svc->mixer_handle_group      = of_mixer_handle_group;
+    svc->mixer_handle_voice      = of_mixer_handle_voice;
+    svc->mixer_set_volume_h      = of_mixer_set_volume_h;
+    svc->mixer_set_pan_h         = of_mixer_set_pan_h;
+    svc->mixer_set_loop_h        = of_mixer_set_loop_h;
+    svc->mixer_set_rate_h        = of_mixer_set_rate_h;
+    svc->mixer_set_rate_raw_h    = of_mixer_set_rate_raw_h;
+    svc->mixer_set_vol_lr_h      = of_mixer_set_vol_lr_h;
+    svc->mixer_set_bidi_h        = of_mixer_set_bidi_h;
+    svc->mixer_get_position_h    = of_mixer_get_position_h;
+    svc->mixer_set_position_h    = of_mixer_set_position_h;
+    svc->mixer_set_voice_h       = of_mixer_set_voice_h;
+    svc->mixer_set_voice_raw_h   = of_mixer_set_voice_raw_h;
+    svc->mixer_set_vol_rate_h    = of_mixer_set_volume_ramp_h;
+    svc->mixer_set_filter_h      = of_mixer_set_filter_h;
+    svc->mixer_poll_ended_h      = of_mixer_poll_ended_h;
 }
 
 void services_table_set_smp_bank(const void *base, uint32_t size) {

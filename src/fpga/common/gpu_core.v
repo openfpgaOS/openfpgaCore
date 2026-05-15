@@ -100,14 +100,14 @@ assign dbg_frag = 32'd0;
 //                              [5:4]=dma_state
 // 0x18  GPU_FENCE         R   Last completed fence token
 // 0x1C  GPU_DMA_LEN       W   Word count to pull (max 4096)
-// 0x20  GPU_TRANSLUC_ADDR W / texture-cache request counter R
-// 0x24  GPU_TRANSLUC_DATA W / texture-cache miss counter R
+// 0x20  GPU_TRANSLUC_ADDR W   byte address into transluc[] upload window
+// 0x24  GPU_TRANSLUC_DATA W   word data into transluc[] upload window
 // 0x28  GPU_TEX_FLUSH     W   Flush texture cache (write any value)
 // 0x2C  GPU_DMA_KICK      W   Write 1 to fire DMA pull from (SRC, LEN)
 // 0x30  Reserved
 // 0x34  GPU_DBG_WR_INFLIGHT R Low 4 bits = outstanding FB write responses
-// 0x38  Reserved/read-zero
-// 0x3C  GPU_DBG_SELECT     Reserved/read-zero in area mode
+// 0x38  Reserved
+// 0x3C  Reserved
 //
 // Upload semantics:
 //   * GPU_DMA_* pulls either homogeneous payloads or already-encoded mixed
@@ -327,9 +327,10 @@ end
 // the pipeline via fp_pipe_stall's cmap_pipe_wait term until the fill
 // completes — see fp_pipe_stall below.
 //
-// PALOOKUP_BASE + (st_colormap_id << 14) anchors the slot; the per-pixel
-// term (light << 8 | texel) indexes within the slot.  Slot encoding
-// matches the SDK's of_gpu_palookup_upload() on the host side.
+// PALOOKUP_BASE + (sp_colormap_id << 14) anchors the slot for span/group
+// fragments; triangle-emitted spans force slot 0.  The per-pixel term
+// (light << 8 | texel) indexes within the slot.  Slot encoding matches
+// the SDK's of_gpu_palookup_upload() on the host side.
 reg [25:0] cmap_req_addr_reg;
 
 // resp_data_b is wired from gpu_tex_cache port B below; the byte falls out
@@ -444,7 +445,7 @@ always @(posedge clk) dsp2_p <= dsp2_a * dsp2_b;
 //
 // DSP input registers: tri_ymin / st_fb_stride are buffered through a
 // stand-alone always-clocked register near the DSP so Quartus can pack
-// those FFs into the Cyclone 10 DSP's built-in input flip-flops. Source
+// those FFs into the Cyclone V DSP's built-in input flip-flops. Source
 // registers have state-gated writes (different clock-enables from the
 // unconditional tri_ymin_x_stride output), which prevented input-FF
 // packing and left -0.858 ns routing slack on the path from the source
@@ -781,7 +782,6 @@ end
 // ================================================================
 // Command Types
 // ================================================================
-localparam CMD_NOP            = 8'h01;
 localparam CMD_FENCE          = 8'h02;
 // CMD_FLIP (0x42) — GPU-triggered display page swap.  2-word payload:
 //   word 0: bits[1:0] = back-buffer index (0/1/2 → FB_ADDR_{0,1,2})
@@ -839,11 +839,11 @@ localparam CMD_DRAW_SPAN_GROUP        = 8'h43;
 //   0x41 CMD_DRAW_SPANS_BATCH — duplicate scalar-span decoder; software
 //                               batches normal span commands instead
 //   0x42 CMD_DRAW_SPRITE    — 2-triangle sprite is cheaper and rotates
-localparam CMD_SET_SKIP_ZERO  = 8'h27;  // 1-word payload: global SKIP_ZERO enable
-localparam CMD_SET_COLORMAP_ID = 8'h28; // 1-word payload: [3:0] = palookup slot
-                                         // (selects which 16-KB palookup
-                                         // page in SDRAM the cmap reads
-                                         // index into; see PALOOKUP_BASE below)
+//   0x01 CMD_NOP             — retired; use FENCE when a synchronising
+//                              no-op is needed
+//   0x27 CMD_SET_SKIP_ZERO   — retired; skip-zero is carried by span flags
+//   0x28 CMD_SET_COLORMAP_ID — retired; scalar/group spans carry explicit
+//                              colormap_id, triangles use slot 0
 
 // ================================================================
 // GPU State Registers (sticky, set by SET_* commands)
@@ -878,8 +878,8 @@ reg signed [23:0] sp_light_step;
 wire [5:0]        sp_light = sp_light_q[21:16];
 reg [3:0]  sp_flags;
 // Per-span colormap_id.  Decoded explicitly from word 6 bits [31:28] at
-// scalar-span dispatch.  Triangle span emit still copies st_colormap_id at
-// S_TRI_PIX because the triangle command format does not yet carry a slot.
+// scalar/group span dispatch.  Triangle span emit writes slot 0 because the
+// triangle command format does not carry a palookup slot.
 reg [3:0]  sp_colormap_id;
 reg signed [15:0] sp_fb_stride;
 reg [15:0] sp_tex_width;
@@ -1078,15 +1078,12 @@ reg [12:0] cmd_payload_words;
 // the combinational path from cmd_type to the per-command state regs
 // (notably sp_tstep, which had a -0.6 ns critical path through the
 // 8-bit case decoder before this change).
-reg cmd_is_nop;
 reg cmd_is_fence;
 reg cmd_is_clear_rect;
 reg cmd_is_set_texture;
 reg cmd_is_set_fb;
 reg cmd_is_draw_span_group;
 reg cmd_span_scalar;
-reg cmd_is_set_skip_zero;
-reg cmd_is_set_colormap_id;
 reg cmd_is_draw_triangles;
 reg cmd_is_flip;
 
@@ -1108,18 +1105,6 @@ reg [3:0] m_wr_inflight;
 // pending pixel writes (see cr-gpu-fence-write-completion.md).
 reg [31:0] pending_fence_token;
 reg [1:0]  pending_swap_idx;
-// Global SKIP_ZERO (color-key at texel 0xFF) state — set via CMD_SET_SKIP_ZERO,
-// ORed into every triangle-emitted span's flags so color-keyed sprites
-// (emitted as 2 triangles) get the transparency treatment.
-reg        st_skip_zero;
-
-// Active palookup slot for colormap reads.  Updated by CMD_SET_COLORMAP_ID;
-// fed into the cmap address compute as the high bits of the SDRAM address
-// (PALOOKUP_BASE + (st_colormap_id << 14) + per-pixel offset).  4-bit means
-// 16 simultaneous palookup pages addressable, which is well above any real
-// Duke3D scene.  Default 0 keeps single-palookup callers working without
-// any new commands.
-reg [3:0]  st_colormap_id;
 
 // SDRAM address layout for palookups.  PALOOKUP_BASE is the byte offset of
 // slot 0; slots are spaced 16 KB apart.  Each slot is the
@@ -1925,7 +1910,7 @@ always @(posedge clk) begin : main_fsm
         fence_reached <= 0;
         cmd_type <= 0;
         cmd_payload_words <= 0;
-        cmd_is_nop <= 0; cmd_is_fence <= 0;
+        cmd_is_fence <= 0;
         cmd_is_clear_rect <= 0;
         cr_addr <= 0; cr_row_addr <= 0;
         cr_w_remaining <= 0; cr_w_total <= 0;
@@ -1934,10 +1919,6 @@ always @(posedge clk) begin : main_fsm
         cmd_is_set_fb <= 0;
         cmd_is_draw_span_group <= 0;
         cmd_span_scalar <= 0;
-        cmd_is_set_skip_zero <= 0;
-        cmd_is_set_colormap_id <= 0;
-        st_colormap_id <= 4'b0;
-        st_skip_zero <= 0;
         cmd_is_draw_triangles <= 0;
         cmd_is_flip <= 0;
         m_wr_inflight       <= 4'b0;
@@ -2128,7 +2109,6 @@ always @(posedge clk) begin : main_fsm
             // which built a long combinational chain into the per-command
             // state-reg writes (notably sp_tstep). Doing the decode here
             // shortens the S_EXECUTE path to a 1-bit flag check.
-            cmd_is_nop            <= (cmd_type == CMD_NOP);
             cmd_is_fence          <= (cmd_type == CMD_FENCE);
             cmd_is_clear_rect     <= (cmd_type == CMD_CLEAR_RECT);
             cmd_is_set_texture    <= (cmd_type == CMD_SET_TEXTURE);
@@ -2136,8 +2116,6 @@ always @(posedge clk) begin : main_fsm
             cmd_is_draw_span_group       <= (cmd_type == CMD_DRAW_SPAN_GROUP);
             cmd_span_scalar       <= (cmd_type == CMD_DRAW_SPAN_GROUP &&
                                       cmd_payload_words == 13'd15);
-            cmd_is_set_skip_zero  <= (cmd_type == CMD_SET_SKIP_ZERO);
-            cmd_is_set_colormap_id <= (cmd_type == CMD_SET_COLORMAP_ID);
             cmd_is_draw_triangles <= (cmd_type == CMD_DRAW_TRIANGLES);
             cmd_is_flip           <= (cmd_type == CMD_FLIP);
 
@@ -2219,12 +2197,6 @@ always @(posedge clk) begin : main_fsm
             else if (cmd_is_set_fb) begin
                 if (pay_idx == 5'd0) st_fb_addr   <= ring_rd_data;
                 else if (pay_idx == 5'd1) st_fb_stride <= ring_rd_data[15:0];
-            end
-            else if (cmd_is_set_skip_zero) begin
-                if (pay_idx == 5'd0) st_skip_zero <= ring_rd_data[0];
-            end
-            else if (cmd_is_set_colormap_id) begin
-                if (pay_idx == 5'd0) st_colormap_id <= ring_rd_data[3:0];
             end
             else if (span_group_active) begin
                 case (pay_idx)
@@ -2401,11 +2373,9 @@ always @(posedge clk) begin : main_fsm
                     state         <= S_IDLE;
                 end
             end
-            else if (cmd_is_nop
-                || cmd_is_set_texture
+            else if (cmd_is_set_texture
                 || cmd_is_set_fb
-                || cmd_is_set_skip_zero
-                || cmd_is_set_colormap_id) begin
+            ) begin
                 state <= S_IDLE;
             end
             else if (cmd_is_clear_rect) begin
@@ -2538,10 +2508,10 @@ always @(posedge clk) begin : main_fsm
                         // base + per-pixel (shade × 256 + texel).  The
                         // 16 KB per colormap slot, expressed as a shift here
                         // to avoid a multiplier.
-                        // sp_colormap_id is per-span (loaded at span decode,
-                        // or copied from st_colormap_id by the triangle path)
-                        // so adjacent batched spans with different palookups
-                        // coexist without a CMD_SET_COLORMAP_ID flush.
+                        // sp_colormap_id is per-span for scalar/group spans;
+                        // triangle-emitted spans use slot 0. Adjacent batched
+                        // spans with different palookups coexist without
+                        // global colormap state.
                         cmap_req_addr_reg <= PALOOKUP_BASE
                                            + {8'b0, sp_colormap_id, 14'b0}
                                            + {12'b0, p1_light, tex_resp_data[7:0]};
@@ -3846,10 +3816,10 @@ always @(posedge clk) begin : main_fsm
                     sp_sstep     <= grad_s_dx <<< 4;
                     sp_tstep     <= grad_t_dx <<< 4;
                     sp_count     <= tri_span_count;
-                    // Triangle path keeps using the sticky CMD_SET_COLORMAP_ID
-                    // default because the triangle command has no explicit
-                    // colormap field yet.
-                    sp_colormap_id <= st_colormap_id;
+                    // Triangle commands have no explicit colormap field.
+                    // They always use slot 0; scalar/group spans carry
+                    // explicit per-command colormap_id.
+                    sp_colormap_id <= 4'd0;
                     // Phase 4d Gouraud: per-pixel light walk along x.
                     // tri_span_r_start is the interpolated r at this
                     // span's first inside pixel; sp_light_step is the
@@ -3869,7 +3839,6 @@ always @(posedge clk) begin : main_fsm
                     // PERSP folds in when perspective is active. Depth flags
                     // were retired with the Z buffer.
                     sp_flags     <= 4'b0001
-                                   | (st_skip_zero ? 4'b0010 : 4'b0000)
                                    | (tri_persp_active_span_r ? 4'b0100 : 4'b0000);
                     sp_fb_stride <= 16'd1;
                     sp_tex_width <= st_tex_width;

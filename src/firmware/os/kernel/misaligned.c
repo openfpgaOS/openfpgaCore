@@ -361,6 +361,173 @@ static void trap_uart_puts(const char *s) {
 }
 
 __attribute__((section(".text.boot")))
+static void trap_uart_hex8(uint32_t v) {
+    uint32_t n = (v >> 4) & 0xF;
+    trap_uart_putb((n < 10) ? ('0' + n) : ('a' + n - 10));
+    n = v & 0xF;
+    trap_uart_putb((n < 10) ? ('0' + n) : ('a' + n - 10));
+}
+
+__attribute__((section(".text.boot")))
+static int trap_addr_range_valid(uintptr_t addr, uintptr_t len) {
+    uintptr_t end = addr + len - 1;
+    if (len == 0 || end < addr) return 0;
+    if (end < BRAM_END_ADDR) return 1;
+    if (addr >= SDRAM_BASE && end < SDRAM_END_ADDR) return 1;
+    if (addr >= SDRAM_UNCACHED_BASE && end < SDRAM_UC_END_ADDR) return 1;
+    if (addr >= CRAM0_START_ADDR && end < CRAM0_END_ADDR) return 1;
+    return 0;
+}
+
+__attribute__((section(".text.boot")))
+static int trap_sdram_alias(uintptr_t addr, uintptr_t *cached, uintptr_t *uncached) {
+    if (addr >= SDRAM_BASE && addr < SDRAM_END_ADDR) {
+        uintptr_t off = addr - SDRAM_BASE;
+        *cached = SDRAM_BASE + off;
+        *uncached = SDRAM_UNCACHED_BASE + off;
+        return 1;
+    }
+    if (addr >= SDRAM_UNCACHED_BASE && addr < SDRAM_UC_END_ADDR) {
+        uintptr_t off = addr - SDRAM_UNCACHED_BASE;
+        *cached = SDRAM_BASE + off;
+        *uncached = SDRAM_UNCACHED_BASE + off;
+        return 1;
+    }
+    return 0;
+}
+
+__attribute__((section(".text.boot")))
+static void trap_uart_region(uintptr_t addr) {
+    if (addr < BRAM_END_ADDR) {
+        trap_uart_puts("bram");
+    } else if (addr >= SDRAM_BASE && addr < SDRAM_END_ADDR) {
+        trap_uart_puts("sdram");
+    } else if (addr >= SDRAM_UNCACHED_BASE && addr < SDRAM_UC_END_ADDR) {
+        trap_uart_puts("sdram_uc");
+    } else if (addr >= CRAM0_START_ADDR && addr < CRAM0_END_ADDR) {
+        trap_uart_puts("cram0");
+    } else if (addr >= 0x40000000u && addr < 0x50000000u) {
+        trap_uart_puts("mmio");
+    } else {
+        trap_uart_puts("unknown");
+    }
+}
+
+__attribute__((section(".text.boot")))
+static uint32_t trap_read_u16_le(uintptr_t addr) {
+    return ((uint32_t)*(volatile uint8_t *)addr) |
+           ((uint32_t)*(volatile uint8_t *)(addr + 1) << 8);
+}
+
+__attribute__((section(".text.boot")))
+static uint32_t trap_read_u32_le(uintptr_t addr) {
+    return ((uint32_t)*(volatile uint8_t *)addr) |
+           ((uint32_t)*(volatile uint8_t *)(addr + 1) << 8) |
+           ((uint32_t)*(volatile uint8_t *)(addr + 2) << 16) |
+           ((uint32_t)*(volatile uint8_t *)(addr + 3) << 24);
+}
+
+__attribute__((section(".text.boot")))
+static void trap_dump_bytes(const char *label, uintptr_t addr) {
+    trap_uart_puts(label);
+    trap_uart_puts("=");
+    trap_uart_hex((uint32_t)addr);
+    trap_uart_puts(" ");
+    trap_uart_region(addr);
+
+    if (trap_addr_range_valid(addr, 4)) {
+        trap_uart_puts(" b=");
+        for (int i = 0; i < 4; i++) {
+            if (i) trap_uart_putb(' ');
+            trap_uart_hex8(*(volatile uint8_t *)(addr + i));
+        }
+        trap_uart_puts(" h=");
+        trap_uart_hex(trap_read_u16_le(addr));
+        trap_uart_puts(" w=");
+        trap_uart_hex(trap_read_u32_le(addr));
+    } else {
+        trap_uart_puts(" unreadable");
+    }
+
+    uintptr_t ca, ua;
+    if (trap_sdram_alias(addr, &ca, &ua) && trap_addr_range_valid(ua, 4)) {
+        trap_uart_puts(" uc_b=");
+        for (int i = 0; i < 4; i++) {
+            if (i) trap_uart_putb(' ');
+            trap_uart_hex8(*(volatile uint8_t *)(ua + i));
+        }
+        trap_uart_puts(" uc_w=");
+        trap_uart_hex(trap_read_u32_le(ua));
+        if (ca != addr && trap_addr_range_valid(ca, 4)) {
+            trap_uart_puts(" c_w=");
+            trap_uart_hex(trap_read_u32_le(ca));
+        }
+    }
+    trap_uart_puts("\n");
+}
+
+__attribute__((section(".text.boot")))
+static void trap_dump_words(const char *label, uintptr_t addr) {
+    uintptr_t ca, ua;
+    uintptr_t base = addr & ~3u;
+
+    trap_uart_puts(label);
+    trap_uart_puts(" cached:");
+    for (int i = -2; i < 4; i++) {
+        uintptr_t a = base + (uintptr_t)(i * 4);
+        if (trap_addr_range_valid(a, 4)) {
+            trap_uart_puts(" ");
+            trap_uart_hex(*(volatile uint32_t *)a);
+        }
+    }
+    trap_uart_puts("\n");
+
+    if (!trap_sdram_alias(addr, &ca, &ua))
+        return;
+
+    base = ua & ~3u;
+    trap_uart_puts(label);
+    trap_uart_puts(" uncached:");
+    for (int i = -2; i < 4; i++) {
+        uintptr_t a = base + (uintptr_t)(i * 4);
+        if (trap_addr_range_valid(a, 4)) {
+            trap_uart_puts(" ");
+            trap_uart_hex(*(volatile uint32_t *)a);
+        }
+    }
+    trap_uart_puts("\n");
+}
+
+__attribute__((section(".text.boot")))
+static void trap_decode_word(const char *label, uint32_t instr) {
+    uint32_t opcode = instr & 0x7Fu;
+    uint32_t rd     = (instr >> 7) & 0x1Fu;
+    uint32_t funct3 = (instr >> 12) & 0x7u;
+    uint32_t rs1    = (instr >> 15) & 0x1Fu;
+    uint32_t rs2    = (instr >> 20) & 0x1Fu;
+    int32_t imm_i   = ((int32_t)instr) >> 20;
+    int32_t imm_s   = (int32_t)(((instr >> 7) & 0x1Fu) |
+                      ((((int32_t)instr) >> 20) & ~0x1Fu));
+
+    trap_uart_puts(label);
+    trap_uart_puts(" op=");
+    trap_uart_hex(opcode);
+    trap_uart_puts(" f3=");
+    trap_uart_hex(funct3);
+    trap_uart_puts(" rd=");
+    trap_uart_hex(rd);
+    trap_uart_puts(" rs1=");
+    trap_uart_hex(rs1);
+    trap_uart_puts(" rs2=");
+    trap_uart_hex(rs2);
+    trap_uart_puts(" immI=");
+    trap_uart_hex((uint32_t)imm_i);
+    trap_uart_puts(" immS=");
+    trap_uart_hex((uint32_t)imm_s);
+    trap_uart_puts("\n");
+}
+
+__attribute__((section(".text.boot")))
 void fatal_trap(trap_frame_t *frame) {
     /* Shout cause/mepc/mtval to UART first so the host sees it even
      * if the terminal / screen has been torn down.  Format:
@@ -373,6 +540,7 @@ void fatal_trap(trap_frame_t *frame) {
      * pinpoints traps taken with IRQs masked / from nested context. */
     uint32_t mstatus_v;
     __asm__ volatile ("csrr %0, mstatus" : "=r"(mstatus_v));
+    uint32_t fs = (mstatus_v >> 13) & 0x3u;
 
     trap_uart_puts("\n==TRAP==\nmcause=");
     trap_uart_hex(frame->mcause);
@@ -382,46 +550,36 @@ void fatal_trap(trap_frame_t *frame) {
     trap_uart_hex(frame->mtval);
     trap_uart_puts(" mstatus=");
     trap_uart_hex(mstatus_v);
+    trap_uart_puts(" FS=");
+    trap_uart_putb('0' + fs);
     trap_uart_puts("\nsp=");
     trap_uart_hex(frame->regs[2]);
     trap_uart_puts(" ra=");
     trap_uart_hex(frame->regs[1]);
     trap_uart_puts("\n");
 
-    /* Diagnostic: re-read memory at mepc DIRECTLY from SDRAM to tell us
-     * whether the corruption is in SDRAM (a DMA master — the GPU in LITE —
-     * wrote junk there) or in the I-cache path (cache returned bad bits).
-     *
-     *   cbo.inval the D-cache line → guarantees the subsequent volatile
-     *     load goes to DRAM, not cache.
-     *   Use the SDRAM uncached alias at 0x38000000-0x3FFFFFFF (if mepc
-     *     is in the cached 0x10000000 SDRAM window) so the load BYPASSES
-     *     both D-cache and I-cache and reads the real storage.
-     *
-     * If sdram_mem == mtval → SDRAM is physically corrupted.
-     * If sdram_mem != mtval && sdram_mem == expected → I-cache path bug.
-     */
     uintptr_t mepc = frame->mepc;
     uintptr_t ra   = frame->regs[1];
-    if (mepc >= 0x10000000u && mepc < 0x14000000u) {
-        /* Round down to word boundary — RVC instructions can be at
-         * 2-byte alignment, but reads must be 4-byte.  Print 4 words
-         * spanning mepc so the actual fault and its neighbours are
-         * visible from the physical memory side. */
-        uintptr_t word0 = mepc & ~3u;
-        __asm__ volatile(".insn i 0x0F, 2, x0, %0, 0" :: "r"(word0)       : "memory");
-        __asm__ volatile(".insn i 0x0F, 2, x0, %0, 0" :: "r"(word0 + 64)  : "memory");
-        __asm__ volatile("fence" ::: "memory");
-        trap_uart_puts("sdram@mepc:");
-        for (int i = -2; i < 4; i++) {
-            uintptr_t a = word0 + i * 4;
-            if (a >= 0x10000000u && a < 0x14000000u) {
-                trap_uart_puts(" ");
-                trap_uart_hex(*(volatile uint32_t *)a);
-            }
-        }
-        trap_uart_puts("\n");
+
+    trap_dump_bytes("insn@mepc", mepc);
+    if (trap_addr_range_valid(mepc, 4))
+        trap_decode_word("dec@mepc", trap_read_u32_le(mepc));
+    if (mepc >= 2)
+        trap_dump_bytes("insn@mepc-2", mepc - 2);
+    if (mepc >= 4)
+        trap_dump_bytes("insn@mepc-4", mepc - 4);
+    trap_dump_words("words@mepc", mepc);
+
+    if (ra >= 4) {
+        trap_dump_bytes("insn@ra-4", ra - 4);
+        if (trap_addr_range_valid(ra - 4, 4))
+            trap_decode_word("dec@ra-4", trap_read_u32_le(ra - 4));
     }
+    if (ra >= 2)
+        trap_dump_bytes("insn@ra-2", ra - 2);
+    trap_dump_bytes("insn@ra", ra);
+    trap_dump_words("words@ra", ra);
+
     uint32_t gpu_status = *(volatile uint32_t *)0x4A000014u;
     uint32_t gpu_rdptr  = *(volatile uint32_t *)0x4A000010u;
     uint32_t gpu_wrptr  = *(volatile uint32_t *)0x4A000004u;
@@ -437,23 +595,6 @@ void fatal_trap(trap_frame_t *frame) {
     trap_uart_puts(" fence=");
     trap_uart_hex(gpu_fence);
     trap_uart_puts("\n");
-
-    /* Also dump 4 words at ra (the caller). If the app's text got
-     * overwritten by a stray DMA, the jal at ra-4 will show garbage. */
-    if (ra >= 0x10000000u && ra < 0x14000000u) {
-        uintptr_t word0 = ra & ~3u;
-        __asm__ volatile(".insn i 0x0F, 2, x0, %0, 0" :: "r"(word0) : "memory");
-        __asm__ volatile("fence" ::: "memory");
-        trap_uart_puts("sdram@ra:");
-        for (int i = -2; i < 4; i++) {
-            uintptr_t a = word0 + i * 4;
-            if (a >= 0x10000000u && a < 0x14000000u) {
-                trap_uart_puts(" ");
-                trap_uart_hex(*(volatile uint32_t *)a);
-            }
-        }
-        trap_uart_puts("\n");
-    }
 
     /* Dump 64 words of app stack around sp — lets us find where the
      * corrupted return address came from.  Safe because we're on the

@@ -258,8 +258,8 @@ static int bridge_probe(void) {
     return (DS_STATUS & DS_STATUS_READY) ? 1 : 0;
 }
 
-/* Bridge backend size: delegates to of_file_size, which queries
- * the APF datatable through the bridge. Returns -1 on empty slot. */
+/* Bridge backend size: delegates to the legacy/saturating size wrapper.
+ * Loader inputs are small; POSIX slot FDs use of_file_size64 below. */
 long of_file_size(uint32_t slot_id);
 static long bridge_size_impl(uint32_t slot_id) {
     return of_file_size(slot_id);
@@ -362,22 +362,68 @@ static int datatable_entry_candidate_for_slot(uint32_t slot_id,
     return -1;
 }
 
-static long datatable_read_word(uint32_t word) {
+static int datatable_read_word32(uint32_t word, uint32_t *value_out,
+                                 int *full_reg_out) {
     /* Toggle-based CDC: writing DT_QUERY flips a toggle bit. The
      * clk_74a domain detects the change, reads the datatable BRAM,
-     * and tags the result with the captured toggle. The result
-     * register reads {toggle_match[31], data[30:0]} — bit 31 is high
-     * only when the result corresponds to THIS query. */
+     * and tags the result with the captured toggle. DT_QUERY keeps the
+     * legacy {valid, data[30:0]} readback, while DT_QUERY_DATA exposes
+     * the full 32-bit payload so file sizes >= 2GB retain bit 31. */
     DT_QUERY = word;
 
     uint32_t val = 0;
     for (int i = 0; i < 1000; i++) {
         val = DT_QUERY;
-        if (val & 0x80000000)
-            return (long)(val & 0x7FFFFFFF);
+        if (val & 0x80000000) {
+            if (value_out) {
+                uint32_t legacy = val & 0x7FFFFFFFu;
+                uint32_t full = DT_QUERY_DATA;
+                int has_full = (full != 0 || legacy == 0);
+
+                /* Older bitstreams leave 0x94 as a retired zero register.
+                 * Keep normal app/core loading working there, while newer
+                 * bitstreams use DT_QUERY_DATA to preserve size bit 31. */
+                *value_out = has_full ? full : legacy;
+                if (full_reg_out)
+                    *full_reg_out = has_full;
+            }
+            return 0;
+        }
     }
 
     return -1;
+}
+
+static int datatable_probe_size_bit31(uint32_t slot_id, uint32_t low_size) {
+    enum { PROBE_LEN = 32 };
+
+    if (low_size == 0 || async_state.active)
+        return 0;
+
+    volatile uint8_t *probe = (volatile uint8_t *)CRAM0_SCRATCH;
+
+    CRAM0_MODE = CRAM0_MODE_CPU;
+    for (volatile int s = 0; s < 8; s++) {}
+    for (uint32_t i = 0; i < PROBE_LEN; i++)
+        probe[i] = (uint8_t)(0x5Au + i * 37u);
+    __asm__ volatile("fence" ::: "memory");
+
+    CRAM0_MODE = CRAM0_MODE_BRIDGE;
+    for (volatile int s = 0; s < 8; s++) {}
+
+    int rc = of_file_read_raw(slot_id, low_size, CRAM0_SCRATCH_BRIDGE,
+                              PROBE_LEN);
+    if (rc < 0)
+        return 0;
+
+    CRAM0_MODE = CRAM0_MODE_CPU;
+    for (volatile int s = 0; s < 8; s++) {}
+    for (uint32_t i = 0; i < PROBE_LEN; i++) {
+        if (probe[i] != (uint8_t)(0x5Au + i * 37u))
+            return 1;
+    }
+
+    return 0;
 }
 
 static int datatable_entry_for_slot(uint32_t slot_id, uint32_t *entry_out) {
@@ -389,16 +435,48 @@ long of_file_flags(uint32_t slot_id) {
     if (datatable_entry_for_slot(slot_id, &entry) < 0)
         return -1;
 
-    return datatable_read_word(entry * 2);
+    uint32_t word = 0;
+    if (datatable_read_word32(entry * 2, &word, NULL) < 0)
+        return -1;
+
+    /* Word 0 is [31:16]=size high bits for >4GB files and [15:0]=id. */
+    return (long)(word & 0xFFFFu);
 }
 
-long of_file_size(uint32_t slot_id) {
+static int64_t of_file_size64_common(uint32_t slot_id, int allow_probe) {
     uint32_t entry;
     if (datatable_entry_for_slot(slot_id, &entry) < 0)
         return -1;
 
-    long size = datatable_read_word(entry * 2 + 1);
-    return (size > 0) ? size : -1;
+    uint32_t id_word = 0;
+    uint32_t size_low = 0;
+    int size_has_full_reg = 0;
+    if (datatable_read_word32(entry * 2, &id_word, NULL) < 0)
+        return -1;
+    if (datatable_read_word32(entry * 2 + 1, &size_low,
+                              &size_has_full_reg) < 0)
+        return -1;
+
+    uint64_t size = ((uint64_t)(id_word >> 16) << 32) | size_low;
+    if (allow_probe && !size_has_full_reg &&
+        datatable_probe_size_bit31(slot_id, size_low)) {
+        size += 0x80000000ull;
+    }
+
+    return size ? (int64_t)size : -1;
+}
+
+int64_t of_file_size64(uint32_t slot_id) {
+    return of_file_size64_common(slot_id, 1);
+}
+
+long of_file_size(uint32_t slot_id) {
+    int64_t size = of_file_size64_common(slot_id, 0);
+    if (size <= 0)
+        return -1;
+    if (size > 0x7FFFFFFFll)
+        return 0x7FFFFFFFl;
+    return (long)size;
 }
 
 /*

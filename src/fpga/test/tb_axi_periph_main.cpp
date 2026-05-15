@@ -58,6 +58,8 @@ static void reset_sequence() {
     tb->cont4_key_in    = 0;
     tb->cont4_joy_in    = 0;
     tb->cont4_trig_in   = 0;
+    tb->dt_query_data_in = 0;
+    tb->dt_query_valid_in = 0;
     tb->snac_pin_in_in  = 0;
     tb->pal_busy_in     = 0;
     for (int i = 0; i < 10; i++) tick();
@@ -685,6 +687,24 @@ static void test_sysreg_polling() {
 
 static uint32_t mmio_read32(uint32_t addr);
 
+static void test_dt_query_full_data_reg() {
+    printf("test_dt_query_full_data_reg:\n");
+
+    tb->dt_query_data_in = 0x12345678u;
+    tb->dt_query_valid_in = 1;
+    for (int i = 0; i < 2; i++) tick();
+
+    uint32_t legacy = mmio_read32(0x40000090u);
+    uint32_t full   = mmio_read32(0x40000094u);
+    check_eq("dt-query-legacy-valid", legacy, 0x92345678u);
+    check_eq("dt-query-full-data", full, 0x12345678u);
+
+    tb->dt_query_data_in = 0x92345678u;
+    for (int i = 0; i < 2; i++) tick();
+    full = mmio_read32(0x40000094u);
+    check_eq("dt-query-full-bit31", full, 0x92345678u);
+}
+
 static void test_dataslot_completion_irq() {
     printf("test_dataslot_completion_irq:\n");
 
@@ -1049,6 +1069,7 @@ int main(int argc, char **argv) {
     test_back_to_back_cachelines();
     test_burst_with_backpressure();
     test_sysreg_polling();
+    test_dt_query_full_data_reg();
     test_dataslot_completion_irq();
     test_save_dt_commit_toggle();
     test_palette_commit_sysreg();
