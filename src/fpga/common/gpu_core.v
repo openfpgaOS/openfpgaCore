@@ -191,11 +191,9 @@ wire [31:0] dma_ring_wdata_raw;
 // legacy CPU MMIO command path is gone; commands are staged in SDRAM and
 // copied here by the doorbell DMA only.  That leaves one writer for port A,
 // avoiding the former CPU/DMA collision mux and skid registers.
-wire        ring_a_we    = dma_ring_wr_raw;
-wire [31:0] ring_a_wdata = dma_ring_wdata_raw;
 always @(posedge clk) begin
-    if (ring_a_we)
-        ring_bram[ring_wr_addr] <= ring_a_wdata;
+    if (dma_ring_wr_raw)
+        ring_bram[ring_wr_addr] <= dma_ring_wdata_raw;
 end
 
 // MMIO write handling + ring_wr_addr management (BRAM index pointer).
@@ -220,7 +218,7 @@ always @(posedge clk) begin
 
         // ring_wr_addr advances once per DMA beat.  Keeping it here
         // (not in the BRAM-write block) means the BRAM block stays canonical.
-        if (ring_a_we)
+        if (dma_ring_wr_raw)
             ring_wr_addr <= ring_wr_addr + 1'b1;
 
         // Upload end publishes ring_wrptr atomically (covering every
@@ -361,15 +359,12 @@ wire        fp_pipe_shift_blocked;
 wire        cmap_pipe_wait = p2b_valid && p2b_flags[SPAN_COLORMAP]
                           && !cmap_resp_valid_b;
 wire        cmap_req_ready_b;
-wire        cmap_req_valid_b = p2_valid && p2_flags[SPAN_COLORMAP]
-                            && (fbss == FBSS_IDLE)
-                            && !cmap_pipe_wait
-                            && !fp_pipe_shift_blocked;
-wire        cmap_issue_wait = p2_valid && p2_flags[SPAN_COLORMAP]
+wire        cmap_issue_base = p2_valid && p2_flags[SPAN_COLORMAP]
                            && (fbss == FBSS_IDLE)
                            && !cmap_pipe_wait
-                           && !fp_pipe_shift_blocked
-                           && !cmap_req_ready_b;
+                           && !fp_pipe_shift_blocked;
+wire        cmap_req_valid_b = cmap_issue_base;
+wire        cmap_issue_wait = cmap_issue_base && !cmap_req_ready_b;
 wire [15:0] cmap_resp_data_b;
 wire [7:0]  cmap_rd_data = cmap_resp_data_b[7:0];
 
@@ -976,32 +971,10 @@ endtask
 task spg_load_source_only;
     input [1:0] lane;
     begin
-        case (lane)
-            2'd0: begin
-                sp_tex_addr <= spg_tex_addr[0];
-                sp_t        <= spg_t[0];
-                sp_tstep    <= spg_tstep[0];
-                sp_light_q  <= {2'b0, spg_light[0], 16'b0};
-            end
-            2'd1: begin
-                sp_tex_addr <= spg_tex_addr[1];
-                sp_t        <= spg_t[1];
-                sp_tstep    <= spg_tstep[1];
-                sp_light_q  <= {2'b0, spg_light[1], 16'b0};
-            end
-            2'd2: begin
-                sp_tex_addr <= spg_tex_addr[2];
-                sp_t        <= spg_t[2];
-                sp_tstep    <= spg_tstep[2];
-                sp_light_q  <= {2'b0, spg_light[2], 16'b0};
-            end
-            default: begin
-                sp_tex_addr <= spg_tex_addr[3];
-                sp_t        <= spg_t[3];
-                sp_tstep    <= spg_tstep[3];
-                sp_light_q  <= {2'b0, spg_light[3], 16'b0};
-            end
-        endcase
+        sp_tex_addr <= spg_tex_addr[lane];
+        sp_t        <= spg_t[lane];
+        sp_tstep    <= spg_tstep[lane];
+        sp_light_q  <= {2'b0, spg_light[lane], 16'b0};
     end
 endtask
 
@@ -1297,6 +1270,7 @@ reg [31:0] m_wr_w2_data;
 reg [3:0]  m_wr_w2_strb;
 reg        sp_from_tri;
 wire m_wr_chan_busy = m_wr_awvalid || m_wr_wvalid || m_wr_w2_valid;
+wire fb_write_drain_complete = fbwq_empty && (m_wr_inflight == 4'b0) && !m_wr_chan_busy;
 wire fbwq_output_idle = !m_wr_awvalid && !m_wr_wvalid && !m_wr_w2_valid;
 wire fbwq_wait_for_tri_pair = (fbwq_count == 2'd1)
                            && fbwq_tri[fbwq_rd_ptr]
@@ -1922,8 +1896,6 @@ always @(posedge clk) begin : main_fsm
         cmd_is_draw_triangles <= 0;
         cmd_is_flip <= 0;
         m_wr_inflight       <= 4'b0;
-        pending_fence_token <= 32'b0;
-        pending_swap_idx    <= 2'b0;
         gpu_swap_req        <= 1'b0;
         gpu_swap_idx        <= 2'b0;
         pay_idx <= 0;
@@ -2352,7 +2324,7 @@ always @(posedge clk) begin : main_fsm
             if (cmd_is_fence) begin
                 // Stall until all outstanding m_wr_* writes commit; then
                 // publish the fence token and retire to S_IDLE.
-                if (fbwq_empty && m_wr_inflight == 4'b0 && !m_wr_chan_busy) begin
+                if (fb_write_drain_complete) begin
                     fence_reached <= pending_fence_token;
                     state         <= S_IDLE;
                 end
@@ -2365,8 +2337,7 @@ always @(posedge clk) begin : main_fsm
                 // if we pulse while it is already full, the ready index is
                 // overwritten.  Hold the command here until vsync consumes the
                 // previous request, then publish fence with the swap pulse.
-                if (fbwq_empty && m_wr_inflight == 4'b0
-                    && !m_wr_chan_busy && !slave_swap_pending) begin
+                if (fb_write_drain_complete && !slave_swap_pending) begin
                     gpu_swap_req  <= 1'b1;
                     gpu_swap_idx  <= pending_swap_idx;
                     fence_reached <= pending_fence_token;
@@ -2513,8 +2484,8 @@ always @(posedge clk) begin : main_fsm
                         // spans with different palookups coexist without
                         // global colormap state.
                         cmap_req_addr_reg <= PALOOKUP_BASE
-                                           + {8'b0, sp_colormap_id, 14'b0}
-                                           + {12'b0, p1_light, tex_resp_data[7:0]};
+                                           | {8'b0, sp_colormap_id, 14'b0}
+                                           | {12'b0, p1_light, tex_resp_data[7:0]};
                     end
                 end
 
@@ -2728,9 +2699,7 @@ always @(posedge clk) begin : main_fsm
                     //      catches writes that haven't yet flushed; these
                     //      gates catch the ones that have.
                     if (!tex_axi_arvalid && !tex_m0_in_flight
-                        && fbwq_empty
-                        && !m_wr_chan_busy
-                        && m_wr_inflight == 4'b0) begin
+                        && fb_write_drain_complete) begin
                         blend_arvalid <= 1;
                         blend_araddr  <= blend_word_addr;
                         fbss          <= FBSS_BLEND_AR_WAIT;
