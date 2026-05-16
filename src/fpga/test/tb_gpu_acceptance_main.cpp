@@ -2093,6 +2093,48 @@ static void test_transluc_overdraw_same_word() {
                       320, 0, 0, 4, 1);
 }
 
+static void test_transluc_duplicate_lane_order() {
+    /* Degenerate but important for the grouped BLEND path: two translucent
+     * fragments hit the same byte lane in one span.  The second fragment must
+     * blend over the first fragment's result, so the hardware has to flush the
+     * current lane group before accepting the duplicate lane. */
+    printf("TEST transluc_duplicate_lane_order\n");
+    gpu_init();
+    auto m = preload_with_sentinel();
+    auto table = make_transluc_table_avg();
+    upload_transluc_table(table);
+    m.transluc = table;
+
+    cmd_set_fb(FB_BASE_BYTE, 320);
+    m.st_fb_addr = FB_BASE_BYTE;
+    cmd_clear_rect(FB_BASE_BYTE, 4, 1, 0, 0x10);
+    m.apply_clear_rect(FB_BASE_BYTE, 4, 1, 0, 0x10);
+
+    std::vector<uint8_t> tex { 0x40, 0x20 };
+    upload_texture(TEX_BASE_BYTE, tex);
+    m.snapshot_from_sdram();
+    m.apply_clear_rect(FB_BASE_BYTE, 4, 1, 0, 0x10);
+
+    SpanWire s = make_span();
+    s.fb_addr = FB_BASE_BYTE;
+    s.tex_addr = TEX_BASE_BYTE;
+    s.tex_width = 2; s.tex_w_mask = 0x1;
+    s.s = 0; s.t = 0; s.sstep = 0x10000; s.tstep = 0;
+    s.count = 2;
+    s.fb_stride = 0;
+    s.flags = (1 << 6);
+
+    emit_span_raw(s);
+    m.apply_draw_span(s);
+
+    if (!submit_and_wait()) {
+        check_fail("transluc_duplicate_lane_order", "timeout");
+        return;
+    }
+    compare_fb_region("transluc_duplicate_lane_order.fb", m, FB_BASE_BYTE,
+                      320, 0, 0, 4, 1);
+}
+
 // ---- Section 13: PERSP spans (constant-Z exact) ----------------------------
 static void test_persp_constant_z_matches_affine() {
     /* Constant-Z perspective: zinv constant, sZstep/tZstep matching
@@ -3245,6 +3287,7 @@ int main(int argc, char **argv) {
     test_skip_zero_with_colormap();
     test_transluc_basic_blend();
     test_transluc_overdraw_same_word();
+    test_transluc_duplicate_lane_order();
     test_persp_constant_z_matches_affine();
     test_batch_equals_individual();
     test_batch_mixed_per_span_colormap();

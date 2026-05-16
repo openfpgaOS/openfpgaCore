@@ -9,6 +9,18 @@
 #include <stdint.h>
 #include "regs.h"
 
+#ifndef OF_VIDEO_TIMING_T_DEFINED
+#define OF_VIDEO_TIMING_T_DEFINED
+typedef struct of_video_timing {
+    uint32_t vblank_count;
+    uint32_t present_count;
+    uint32_t last_presented_idx;
+    uint32_t reserved;
+    uint64_t last_vblank_us;
+    uint64_t last_flip_presented_us;
+} of_video_timing_t;
+#endif
+
 /* Initialize framebuffer subsystem (sets display mode, initial palette) */
 void of_video_init(void);
 
@@ -54,6 +66,12 @@ void of_video_flip_wait(void);
 /* Wait for next vertical blank without flipping buffers.
  * Use for palette animations or effects at 60Hz. */
 void of_video_vsync(void);
+
+/* Copy a coherent snapshot of vblank/present timing. */
+void of_video_get_timing(of_video_timing_t *out);
+
+/* Internal IRQ hook called by the kernel vsync dispatcher. */
+void of_video_vsync_irq_service(void);
 
 /* Set a single palette entry (index 0-255, RGB888) */
 void of_video_set_palette(uint8_t index, uint8_t r, uint8_t g, uint8_t b);

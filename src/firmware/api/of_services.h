@@ -28,6 +28,21 @@ extern "C" {
 /* Forward declare input state struct */
 struct of_input_state;
 
+/* Display timing snapshot shared by the SDK API and OS services table.
+ * Times are sampled from the CPU cycle counter and converted to
+ * microseconds by the OS when the snapshot is copied. */
+#ifndef OF_VIDEO_TIMING_T_DEFINED
+#define OF_VIDEO_TIMING_T_DEFINED
+typedef struct of_video_timing {
+    uint32_t vblank_count;
+    uint32_t present_count;
+    uint32_t last_presented_idx;
+    uint32_t reserved;
+    uint64_t last_vblank_us;
+    uint64_t last_flip_presented_us;
+} of_video_timing_t;
+#endif
+
 /* Forward declare AWE per-voice config -- full definition in of_awe.h.
  * Kept opaque here so this header doesn't pull the AWE-specific types
  * into every TU that just wants the services table. */
@@ -280,6 +295,13 @@ struct of_services_table {
                                     int enable);
     uint32_t  (*mixer_poll_ended_h)(uint64_t *out_handles,
                                     uint32_t max_handles);
+
+    /* -- Video timing (append-only) --
+     * Snapshot of the most recent vblank and presented flip.  This is
+     * intentionally additive so existing flip APIs keep their behavior
+     * while apps that need smooth interpolation can pace against the
+     * actual scanout clock. */
+    void      (*video_get_timing)(of_video_timing_t *out);
 };
 
 #ifndef OF_PC

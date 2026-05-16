@@ -11,6 +11,7 @@
 
 /* Timer ISR callback — lives in syscall.c (handles timer_callback + sigalrm) */
 extern void timer_isr_callback(void);
+extern void of_video_vsync_irq_service(void);
 
 /* Terminal printf — declared here to avoid dragging all of terminal.h. */
 extern void of_term_printf(const char *fmt, ...);
@@ -36,10 +37,7 @@ void of_irq_register_external(void (*cb)(uint32_t source)) {
 
 void of_irq_register_vsync(void (*cb)(void)) {
     vsync_cb = cb;
-    if (cb)
-        IRQ_MASK |= IRQ_MASK_VSYNC;
-    else
-        IRQ_MASK &= ~IRQ_MASK_VSYNC;
+    IRQ_MASK |= IRQ_MASK_VSYNC;
 }
 
 /* Voice-end IRQ retired with the hardware mixer.  Ended voices are now
@@ -110,10 +108,16 @@ void irq_handler(void *frame) {
             link_rx_cb(word);
         }
 
-        if ((source & IRQ_SRC_VSYNC) && vsync_cb)
-            vsync_cb();
+        uint32_t dispatch_source = source;
+        if (source & IRQ_SRC_VSYNC) {
+            of_video_vsync_irq_service();
+            if (vsync_cb)
+                vsync_cb();
+            else
+                dispatch_source &= ~IRQ_SRC_VSYNC;
+        }
 
-        if (external_cb)
-            external_cb(source);
+        if (external_cb && dispatch_source)
+            external_cb(dispatch_source);
     }
 }

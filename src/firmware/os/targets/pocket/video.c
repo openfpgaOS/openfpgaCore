@@ -75,6 +75,54 @@ static void palette_upload_shadow(void) {
  * disambiguates. */
 static int swap_kicked = 0;
 
+static uint32_t buf_ready_serial;
+static uint32_t counted_ready_serial;
+static volatile uint32_t timing_vblank_count;
+static volatile uint32_t timing_present_count;
+static volatile uint32_t timing_last_presented_idx;
+static volatile uint64_t timing_last_vblank_cycles;
+static volatile uint64_t timing_last_present_cycles;
+
+static inline uint32_t video_irq_save_local(void) {
+    uint32_t prev;
+    __asm__ volatile("csrrci %0, mstatus, 0x8"
+                     : "=r"(prev) :: "memory");
+    return prev & 0x8u;
+}
+
+static inline void video_irq_restore_local(uint32_t prev) {
+    if (prev)
+        __asm__ volatile("csrrsi zero, mstatus, 0x8" ::: "memory");
+}
+
+static inline uint64_t cycles_to_us(uint64_t cycles) {
+    return cycles / (CPU_FREQ_HZ / 1000000u);
+}
+
+static void mark_buffer_ready(int idx) {
+    buf_ready = idx;
+    buf_ready_serial++;
+    if (buf_ready_serial == counted_ready_serial)
+        buf_ready_serial++;
+}
+
+static uint64_t present_timestamp_cycles(void) {
+    if (VSYNC_IRQ_PENDING)
+        return read_cycles();
+    return timing_last_vblank_cycles ? timing_last_vblank_cycles : read_cycles();
+}
+
+static void timing_record_present_if_needed(int idx) {
+    uint32_t irq = video_irq_save_local();
+    if (buf_ready_serial != counted_ready_serial) {
+        timing_present_count++;
+        timing_last_presented_idx = (uint32_t)idx;
+        timing_last_present_cycles = present_timestamp_cycles();
+        counted_ready_serial = buf_ready_serial;
+    }
+    video_irq_restore_local(irq);
+}
+
 /* Check whether a pending swap has completed and update software state.
  * The display index bits are authoritative; using them matters in the
  * GPU-triggered path where one pending swap can clear and the next
@@ -87,6 +135,10 @@ static void sync_swap_state(void) {
     if ((unsigned)hw_display < 3)
         buf_display = hw_display;
     if (hw_pending) swap_kicked = 1;
+    if (buf_ready >= 0 && !hw_pending &&
+        (buf_ready == buf_display || swap_kicked)) {
+        timing_record_present_if_needed(buf_ready);
+    }
     if (buf_ready == buf_display) {
         buf_ready = -1;
         swap_kicked = 0;
@@ -119,7 +171,15 @@ void of_video_init(void) {
     buf_draw    = 1;
     buf_ready   = -1;
     swap_kicked = 0;
+    buf_ready_serial = 0;
+    counted_ready_serial = 0;
+    timing_vblank_count = 0;
+    timing_present_count = 0;
+    timing_last_presented_idx = 0;
+    timing_last_vblank_cycles = 0;
+    timing_last_present_cycles = 0;
     vid_display_mode = DISPLAY_MODE_FRAMEBUFFER;
+    IRQ_MASK |= IRQ_MASK_VSYNC;
 
     /* FBs live at the CACHED SDRAM alias (FBn_BASE = 0x10xxxxxx) — these
      * memsets populate L1 D$ dirty lines. Clean ranges after each so
@@ -179,7 +239,7 @@ uint8_t *of_video_flip(void) {
         buf_draw = 3 - buf_display - old_draw;
     }
 
-    buf_ready = old_draw;
+    mark_buffer_ready(old_draw);
     return (uint8_t *)fb_addr[buf_draw];
 }
 
@@ -238,7 +298,7 @@ int of_video_acquire_next(int just_flipped_idx, uint32_t fence_token) {
         FB_SWAP_CTRL = ((uint32_t)(just_flipped_idx & 0x3) << 1) | 1;
     }
 
-    buf_ready = just_flipped_idx;
+    mark_buffer_ready(just_flipped_idx);
     swap_kicked = 1;
     sync_swap_state();
     buf_draw = pick_free_buffer();
@@ -260,6 +320,32 @@ void of_video_vsync(void) {
     while (FB_SWAP_CTRL & 1) {
         if (read_cycles() > deadline) break;
     }
+}
+
+void of_video_vsync_irq_service(void) {
+    timing_vblank_count++;
+    timing_last_vblank_cycles = read_cycles();
+    sync_swap_state();
+}
+
+void of_video_get_timing(of_video_timing_t *out) {
+    if (!out)
+        return;
+
+    uint32_t irq = video_irq_save_local();
+    uint32_t vblank_count = timing_vblank_count;
+    uint32_t present_count = timing_present_count;
+    uint32_t last_presented_idx = timing_last_presented_idx;
+    uint64_t last_vblank_cycles = timing_last_vblank_cycles;
+    uint64_t last_present_cycles = timing_last_present_cycles;
+    video_irq_restore_local(irq);
+
+    out->vblank_count = vblank_count;
+    out->present_count = present_count;
+    out->last_presented_idx = last_presented_idx;
+    out->reserved = 0;
+    out->last_vblank_us = cycles_to_us(last_vblank_cycles);
+    out->last_flip_presented_us = cycles_to_us(last_present_cycles);
 }
 
 /* Install overlay palette: dim app colors by 50%, bright terminal at 240-255 */

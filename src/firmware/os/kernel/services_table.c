@@ -285,6 +285,9 @@ void services_table_init(void) {
     svc->mixer_set_vol_rate_h    = of_mixer_set_volume_ramp_h;
     svc->mixer_set_filter_h      = of_mixer_set_filter_h;
     svc->mixer_poll_ended_h      = of_mixer_poll_ended_h;
+
+    /* Video timing snapshot */
+    svc->video_get_timing = of_video_get_timing;
 }
 
 void services_table_set_smp_bank(const void *base, uint32_t size) {

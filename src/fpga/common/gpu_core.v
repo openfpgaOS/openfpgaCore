@@ -1007,6 +1007,44 @@ function [3:0] span_flags_from_wire;
     end
 endfunction
 
+function [3:0] fb_lane_mask;
+    input [1:0] lane;
+    begin
+        case (lane)
+            2'd0: fb_lane_mask = 4'b0001;
+            2'd1: fb_lane_mask = 4'b0010;
+            2'd2: fb_lane_mask = 4'b0100;
+            default: fb_lane_mask = 4'b1000;
+        endcase
+    end
+endfunction
+
+function [31:0] fb_lane_data;
+    input [1:0] lane;
+    input [7:0] byte_value;
+    begin
+        case (lane)
+            2'd0: fb_lane_data = {24'b0, byte_value};
+            2'd1: fb_lane_data = {16'b0, byte_value, 8'b0};
+            2'd2: fb_lane_data = {8'b0, byte_value, 16'b0};
+            default: fb_lane_data = {byte_value, 24'b0};
+        endcase
+    end
+endfunction
+
+function [7:0] fb_lane_read;
+    input [31:0] word_value;
+    input [1:0] lane;
+    begin
+        case (lane)
+            2'd0: fb_lane_read = word_value[7:0];
+            2'd1: fb_lane_read = word_value[15:8];
+            2'd2: fb_lane_read = word_value[23:16];
+            default: fb_lane_read = word_value[31:24];
+        endcase
+    end
+endfunction
+
 // ================================================================
 // Main FSM
 // ================================================================
@@ -1177,40 +1215,49 @@ reg        p3_discard;
 localparam FBSS_IDLE        = 4'd0;
 localparam FBSS_FLUSH_W_RSP = 4'd2;  // wait for write-buffer AW/W acceptance
 // FBSS_ZREAD/ZWAIT/ZWRWAIT (3/4/5) retired with the Z-buffer in lean Phase 2.
-// Translucent-blend sub-flow.  Fragments with SPAN_TRANSLUC pass
-// through a read-modify-write path: read existing FB byte from SDRAM
-// (or bypass from fb_acc if same-word), compose a 15-bit key from the
-// shaded source and the FB byte, look up the blended byte in
-// transluc[], then accumulate that into fb_acc as usual.
-//   BLEND_REQ      — wait for M0 to be free of texture-cache traffic
-//   BLEND_AR_WAIT  — issue AR; m_rd_* muxed to BLEND while in this/R_WAIT
-//   BLEND_R_WAIT   — wait for R, capture rdata
-//   BLEND_LUT_WAIT — BRAM 1-cycle read latency for transluc_rd_data
-//   BLEND_APPLY    — write transluc_rd_data into fb_acc (cross-word
-//                    flush handled identically to the IDLE fast path)
+// Translucent-blend sub-flow.  SPAN_TRANSLUC fragments are first collected
+// into a same-word lane group while the fragment pipe keeps running.  The
+// blend unit then reads the destination FB word once, serialises the
+// transluc[] lookups for the active lanes, and commits the modified word
+// back into fb_acc.  One active lane is the old single-pixel path; adjacent
+// horizontal / span-group lanes can amortise the expensive FB read.
+//   BLEND_REQ       — wait for M0 to be free of texture-cache traffic
+//   BLEND_AR_WAIT   — issue AR; m_rd_* muxed to BLEND while in this/R_WAIT
+//   BLEND_R_WAIT    — wait for R, capture rdata + fb_acc same-word bypass
+//   BLEND_SELECT    — find next active lane and issue transluc[] addr
+//   BLEND_LUT_WAIT  — BRAM 1-cycle read latency for transluc_rd_data
+//   BLEND_LUT_APPLY — merge one blended byte, loop or finish
+//   BLEND_APPLY     — write the grouped word-fragment into fb_acc
 localparam FBSS_BLEND_REQ      = 4'd6;
 localparam FBSS_BLEND_AR_WAIT  = 4'd7;
 localparam FBSS_BLEND_R_WAIT   = 4'd8;
 localparam FBSS_BLEND_LUT_WAIT = 4'd9;
 localparam FBSS_BLEND_APPLY    = 4'd10;
+localparam FBSS_BLEND_SELECT   = 4'd11;
+localparam FBSS_BLEND_LUT_APPLY = 4'd12;
 reg [3:0] fbss;
 
-// BLEND scratch state (latched at FBSS_IDLE → FBSS_BLEND_REQ).
-reg [7:0]  blend_src_color;       // shaded p3_color captured at entry
-reg [31:0] blend_word_addr;       // p3_word_addr captured at entry
-reg [1:0]  blend_byte_lane;       // p3_byte_lane captured at entry
+// BLEND same-word group state.  Source bytes are stored per framebuffer byte
+// lane; duplicate lanes flush the current group first so overdraw order is
+// preserved exactly.
+reg        blend_group_active;
+reg [31:0] blend_group_word_addr;
+reg [3:0]  blend_group_mask;
+reg [31:0] blend_group_src_data;
+reg [31:0] blend_result_word;
+reg [1:0]  blend_lane_iter;
+reg [1:0]  blend_lut_lane;
 reg        blend_arvalid;
 reg [31:0] blend_araddr;
-// Pre-computed in FBSS_BLEND_LUT_WAIT (which otherwise just idles for
-// transluc BRAM read latency), consumed by FBSS_BLEND_APPLY.  Hoists
-// the 32-bit equality compare `fb_acc_addr == blend_word_addr` out of
-// the BLEND_APPLY cycle so the only logic between blend_word_addr (FF)
+// Pre-computed after the grouped FB read, consumed by FBSS_BLEND_APPLY.  Hoists
+// the 32-bit equality compare `fb_acc_addr == blend_group_word_addr` out of
+// the BLEND_APPLY cycle so the only logic between blend_group_word_addr (FF)
 // and fb_acc_addr (FF) on the same-word merge path is a 1-bit selector
 // rather than a 32-bit eq + state mux.  Closes the worst GPU-internal
-// path (`blend_word_addr[2] → fb_acc_addr[2]` at -1.031 ns).  Both
-// operands are stable across LUT_WAIT: blend_word_addr is latched on
-// entry to BLEND_REQ; fb_acc_addr is only written by FBSS itself, and
-// BLEND_LUT_WAIT does not write it.
+// path (`blend_group_word_addr[2] → fb_acc_addr[2]` at -1.031 ns).  Both
+// operands are stable across the grouped lookup loop: blend_group_word_addr is
+// latched before entry to BLEND_REQ; fb_acc_addr is only written by FBSS, and
+// the SELECT/LUT states do not write it.
 reg        blend_p3_match_r;
 
 // Tracks whether the texture cache currently has a read in flight on M0.
@@ -1295,8 +1342,18 @@ wire p3_needs_fb_flush = p3_valid && !p3_discard && !p3_flags[SPAN_TRANSLUC]
                        && fb_acc_valid
                        && (fb_acc_addr[31:2] != p3_fb_addr[31:2]);
 wire fb_write_buffer_stall = p3_needs_fb_flush && !fb_write_can_issue;
+wire [31:0] p3_fb_word_addr_w = p3_fb_addr & 32'hFFFFFFFC;
+wire [3:0]  p3_fb_lane_mask_w = fb_lane_mask(p3_fb_addr[1:0]);
+wire blend_group_pipe_block = (fbss == FBSS_IDLE)
+                           && blend_group_active
+                           && p3_valid
+                           && !p3_discard
+                           && (!p3_flags[SPAN_TRANSLUC]
+                               || (blend_group_word_addr != p3_fb_word_addr_w)
+                               || (|(blend_group_mask & p3_fb_lane_mask_w)));
 assign fp_pipe_shift_blocked = (p1_valid && !tex_resp_valid)
                             || (fbss != FBSS_IDLE)
+                            || blend_group_pipe_block
                             || fb_write_buffer_stall
                             || m_wr_inflight_near_full;
 wire fp_pipe_stall = fp_pipe_shift_blocked || cmap_pipe_wait || cmap_issue_wait;
@@ -1926,9 +1983,13 @@ always @(posedge clk) begin : main_fsm
         fbss <= FBSS_IDLE;
         blend_arvalid    <= 0;
         blend_araddr     <= 0;
-        blend_src_color  <= 0;
-        blend_word_addr  <= 0;
-        blend_byte_lane  <= 0;
+        blend_group_active <= 0;
+        blend_group_word_addr <= 0;
+        blend_group_mask <= 0;
+        blend_group_src_data <= 0;
+        blend_result_word <= 0;
+        blend_lane_iter <= 0;
+        blend_lut_lane <= 0;
         blend_p3_match_r <= 0;
         src_done <= 0;
         sp_from_tri <= 0;
@@ -2024,6 +2085,10 @@ always @(posedge clk) begin : main_fsm
             fb_acc_valid <= 0;
             fb_acc_mask  <= 0;
             sp_from_tri  <= 0;
+            fbss         <= FBSS_IDLE;
+            blend_arvalid <= 1'b0;
+            blend_group_active <= 1'b0;
+            blend_group_mask <= 4'b0;
             m_wr_inflight <= 4'b0;
             gpu_swap_req <= 1'b0;
         end else begin
@@ -2598,19 +2663,40 @@ always @(posedge clk) begin : main_fsm
             // ----------------------------------------------------------
             case (fbss)
                 FBSS_IDLE: begin
-                    // Translucent detour: if SPAN_TRANSLUC is set, capture p3
-                    // state and run the read-modify-write blend flow.  The
-                    // blend result is written to fb_acc by FBSS_BLEND_APPLY,
-                    // so we deliberately do NOT touch fb_acc here.  fb_acc
-                    // state is frozen for the duration of the blend (fbss !=
-                    // IDLE keeps fp_pipe_stall asserted, so no new fragment
-                    // can advance to p3 and clobber it).
+                    // Translucent fragments are grouped by destination word.
+                    // As long as consecutive fragments hit different byte
+                    // lanes in the same word, keep collecting and let the
+                    // pipe advance.  A word change, duplicate lane, or
+                    // following opaque pixel flushes the group first so draw
+                    // order stays byte-exact.
                     if (p3_valid && !p3_discard && p3_flags[SPAN_TRANSLUC]) begin
-                        blend_src_color <= p3_color;
-                        blend_word_addr <= p3_fb_addr & 32'hFFFFFFFC;
-                        blend_byte_lane <= p3_fb_addr[1:0];
-                        fbss            <= FBSS_BLEND_REQ;
-                        p3_consumed     = 1'b1;
+                        p3_word_addr = p3_fb_addr & 32'hFFFFFFFC;
+                        p3_byte_lane = p3_fb_addr[1:0];
+                        if (!blend_group_active) begin
+                            blend_group_active    <= 1'b1;
+                            blend_group_word_addr <= p3_word_addr;
+                            blend_group_mask      <= fb_lane_mask(p3_byte_lane);
+                            blend_group_src_data  <= fb_lane_data(p3_byte_lane, p3_color);
+                            p3_consumed = 1'b1;
+                        end else if (blend_group_word_addr == p3_word_addr
+                                  && !(|(blend_group_mask & fb_lane_mask(p3_byte_lane)))) begin
+                            blend_group_mask <= blend_group_mask | fb_lane_mask(p3_byte_lane);
+                            case (p3_byte_lane)
+                                2'd0: blend_group_src_data[7:0]   <= p3_color;
+                                2'd1: blend_group_src_data[15:8]  <= p3_color;
+                                2'd2: blend_group_src_data[23:16] <= p3_color;
+                                default: blend_group_src_data[31:24] <= p3_color;
+                            endcase
+                            p3_consumed = 1'b1;
+                        end else begin
+                            fbss <= FBSS_BLEND_REQ;
+                        end
+                    end
+                    else if (blend_group_active && p3_valid && !p3_discard) begin
+                        // A following opaque pixel cannot pass the older
+                        // translucent word group, even if it targets the same
+                        // word.  Flush first, then retry p3 from IDLE.
+                        fbss <= FBSS_BLEND_REQ;
                     end
                     // Process p3 if it has a non-discard pixel (and no pending depth work)
                     else if (p3_valid && !p3_discard) begin : fb_acc_blk
@@ -2621,47 +2707,49 @@ always @(posedge clk) begin : main_fsm
 
                         if (!p3_word_match) begin
                             if (fb_write_can_issue) begin
-                                // Word boundary cross.  Hand the old word to
-                                // the FB write queue and immediately re-arm the
-                                // accumulator with p3's new word so the fragment
-                                // pipe only stalls when the queue is full or the
-                                // B-response counter is near full.
                                 fbwq_push_req  = 1'b1;
                                 fbwq_push_addr = fb_acc_addr;
                                 fbwq_push_data = fb_acc_data;
                                 fbwq_push_strb = fb_acc_mask;
                                 fbwq_push_tri  = sp_from_tri && (fb_acc_mask == 4'hF);
 
-                                fb_acc_valid <= 1;
+                                fb_acc_valid <= 1'b1;
                                 fb_acc_addr  <= p3_word_addr;
                                 fb_acc_data  <= 32'b0;
                                 fb_acc_mask  <= 4'b0;
                                 case (p3_byte_lane)
-                                    2'd0: begin fb_acc_data[7:0]   <= p3_color; fb_acc_mask[0] <= 1; end
-                                    2'd1: begin fb_acc_data[15:8]  <= p3_color; fb_acc_mask[1] <= 1; end
-                                    2'd2: begin fb_acc_data[23:16] <= p3_color; fb_acc_mask[2] <= 1; end
-                                    2'd3: begin fb_acc_data[31:24] <= p3_color; fb_acc_mask[3] <= 1; end
+                                    2'd0: begin fb_acc_data[7:0]   <= p3_color; fb_acc_mask[0] <= 1'b1; end
+                                    2'd1: begin fb_acc_data[15:8]  <= p3_color; fb_acc_mask[1] <= 1'b1; end
+                                    2'd2: begin fb_acc_data[23:16] <= p3_color; fb_acc_mask[2] <= 1'b1; end
+                                    default: begin fb_acc_data[31:24] <= p3_color; fb_acc_mask[3] <= 1'b1; end
                                 endcase
                                 p3_consumed = 1'b1;
                             end else begin
-                                // The write queue is full.  Park FBSS
-                                // for one or more cycles; p3 remains valid
-                                // because fbss != IDLE stalls the pipe.
+                                // The write queue is full.  Park FBSS for one
+                                // or more cycles; p3 remains valid because
+                                // fbss != IDLE stalls the pipe.
                                 fbss <= FBSS_FLUSH_W_RSP;
                             end
                         end else begin
-                            // Fast path: accumulate into current word
-                            fb_acc_valid <= 1;
+                            fb_acc_valid <= 1'b1;
                             fb_acc_addr  <= p3_word_addr;
                             case (p3_byte_lane)
-                                2'd0: begin fb_acc_data[7:0]   <= p3_color; fb_acc_mask[0] <= 1; end
-                                2'd1: begin fb_acc_data[15:8]  <= p3_color; fb_acc_mask[1] <= 1; end
-                                2'd2: begin fb_acc_data[23:16] <= p3_color; fb_acc_mask[2] <= 1; end
-                                2'd3: begin fb_acc_data[31:24] <= p3_color; fb_acc_mask[3] <= 1; end
+                                2'd0: begin fb_acc_data[7:0]   <= p3_color; fb_acc_mask[0] <= 1'b1; end
+                                2'd1: begin fb_acc_data[15:8]  <= p3_color; fb_acc_mask[1] <= 1'b1; end
+                                2'd2: begin fb_acc_data[23:16] <= p3_color; fb_acc_mask[2] <= 1'b1; end
+                                default: begin fb_acc_data[31:24] <= p3_color; fb_acc_mask[3] <= 1'b1; end
                             endcase
                             p3_consumed = 1'b1;
                         end
 
+                    end
+                    else if (blend_group_active
+                          && src_done && !p0_valid && !p1_valid && !p2_valid
+                          && !p2b_valid && !p3_valid) begin
+                        // End of stream with a partially collected translucent
+                        // word.  Drain it before the normal fragment-pipe
+                        // exit path can hand control back to the command FSM.
+                        fbss <= FBSS_BLEND_REQ;
                     end
                     // If the pipeline is stalled this cycle (cache miss
                     // upstream, write counter pressure, or a FBSS detour), the
@@ -2682,12 +2770,12 @@ always @(posedge clk) begin : main_fsm
                 end
 
                 // --------------------------------------------------------
-                // Translucent-blend sub-flow (5 states).  Entry from
-                // FBSS_IDLE captured the pixel into blend_*; we now read
-                // the existing FB byte (from SDRAM, with fb_acc bypass for
-                // the same-word case), look up the blended byte in
-                // transluc[], then accumulate it into fb_acc using the
-                // same path as the IDLE fast path.
+                // Translucent-blend sub-flow.  Entry from FBSS_IDLE has
+                // collected one or more active lanes into blend_group_*.
+                // Read the existing FB word once, apply fb_acc same-word
+                // bypass, serialise active-lane LUT reads, then commit the
+                // modified word into fb_acc using the same cross-word logic
+                // as the opaque fast path.
                 // --------------------------------------------------------
                 FBSS_BLEND_REQ: begin
                     // Three gates before issuing the BLEND read on M0:
@@ -2706,10 +2794,12 @@ always @(posedge clk) begin : main_fsm
                     //      FB byte.  The same-word fb_acc bypass below
                     //      catches writes that haven't yet flushed; these
                     //      gates catch the ones that have.
-                    if (!tex_axi_arvalid && !tex_m0_in_flight
-                        && fb_write_drain_complete) begin
+                    if (!blend_group_active) begin
+                        fbss <= FBSS_IDLE;
+                    end else if (!tex_axi_arvalid && !tex_m0_in_flight
+                              && fb_write_drain_complete) begin
                         blend_arvalid <= 1;
-                        blend_araddr  <= blend_word_addr;
+                        blend_araddr  <= blend_group_word_addr;
                         fbss          <= FBSS_BLEND_AR_WAIT;
                     end
                 end
@@ -2723,87 +2813,90 @@ always @(posedge clk) begin : main_fsm
 
                 FBSS_BLEND_R_WAIT: begin
                     if (blend_rvalid) begin : blend_r_capture
-                        // Compose the FB byte for the blend: prefer fb_acc's
-                        // pending lane data over the SDRAM read when fb_acc
-                        // has dirty data for our word + lane (same-word
-                        // bypass, handles back-to-back GPU translucent
-                        // overdraw correctly).
-                        reg [7:0] rdata_lane;
-                        reg [7:0] acc_lane;
-                        reg [7:0] fb_byte;
-                        case (blend_byte_lane)
-                            2'd0: begin rdata_lane = blend_rdata[7:0];   acc_lane = fb_acc_data[7:0];   end
-                            2'd1: begin rdata_lane = blend_rdata[15:8];  acc_lane = fb_acc_data[15:8];  end
-                            2'd2: begin rdata_lane = blend_rdata[23:16]; acc_lane = fb_acc_data[23:16]; end
-                            2'd3: begin rdata_lane = blend_rdata[31:24]; acc_lane = fb_acc_data[31:24]; end
-                        endcase
-                        fb_byte = (fb_acc_valid && fb_acc_addr == blend_word_addr
-                                   && fb_acc_mask[blend_byte_lane])
-                                ? acc_lane : rdata_lane;
-                        // Drive transluc_rd_addr now so the BRAM read
-                        // happens during BLEND_LUT_WAIT and the data is
-                        // valid by the time BLEND_APPLY runs (one cycle
-                        // address-set + one cycle BRAM-read = two cycles).
-                        // Key layout (15 bits): { src[7:1], fb_byte }.
-                        // Source LSB drop is the 128×256 quantisation
-                        // chosen in transluc.md.
-                        transluc_rd_addr <= { blend_src_color[7:1], fb_byte };
-                        fbss <= FBSS_BLEND_LUT_WAIT;
+                        reg [31:0] read_word;
+                        read_word = blend_rdata;
+                        if (fb_acc_valid && fb_acc_addr == blend_group_word_addr) begin
+                            if (fb_acc_mask[0]) read_word[7:0]   = fb_acc_data[7:0];
+                            if (fb_acc_mask[1]) read_word[15:8]  = fb_acc_data[15:8];
+                            if (fb_acc_mask[2]) read_word[23:16] = fb_acc_data[23:16];
+                            if (fb_acc_mask[3]) read_word[31:24] = fb_acc_data[31:24];
+                        end
+                        blend_result_word <= read_word;
+                        blend_p3_match_r <=
+                            (fb_acc_valid && fb_acc_addr == blend_group_word_addr)
+                         || !fb_acc_valid;
+                        blend_lane_iter <= 2'd0;
+                        fbss <= FBSS_BLEND_SELECT;
+                    end
+                end
+
+                FBSS_BLEND_SELECT: begin : fbss_blend_select_blk
+                    reg [7:0] src_byte;
+                    reg [7:0] fb_byte;
+                    if (blend_group_mask[blend_lane_iter]) begin
+                        src_byte = fb_lane_read(blend_group_src_data, blend_lane_iter);
+                        fb_byte  = fb_lane_read(blend_result_word, blend_lane_iter);
+                        transluc_rd_addr <= {src_byte[7:1], fb_byte};
+                        blend_lut_lane   <= blend_lane_iter;
+                        fbss             <= FBSS_BLEND_LUT_WAIT;
+                    end else if (blend_lane_iter == 2'd3) begin
+                        fbss <= FBSS_BLEND_APPLY;
+                    end else begin
+                        blend_lane_iter <= blend_lane_iter + 2'd1;
                     end
                 end
 
                 FBSS_BLEND_LUT_WAIT: begin
-                    // BRAM read latency: addr was set at end of BLEND_R_WAIT,
-                    // BRAM samples it during this cycle, transluc_rd_data is
-                    // valid by the start of BLEND_APPLY.
-                    fbss <= FBSS_BLEND_APPLY;
-                    // Pre-compute the same-word match for BLEND_APPLY's
-                    // branch.  The 32-bit `fb_acc_addr == blend_word_addr`
-                    // compare lives in a flop-to-flop window here; without
-                    // this hoist it sits in series with BLEND_APPLY's mux
-                    // back into fb_acc_addr (worst-GPU path -1.031 ns).
-                    blend_p3_match_r <=
-                        (fb_acc_valid && fb_acc_addr == blend_word_addr)
-                     || !fb_acc_valid;
+                    // BRAM read latency: addr was set by BLEND_SELECT; data
+                    // is valid by the start of BLEND_LUT_APPLY.
+                    fbss <= FBSS_BLEND_LUT_APPLY;
+                end
+
+                FBSS_BLEND_LUT_APPLY: begin
+                    case (blend_lut_lane)
+                        2'd0: blend_result_word[7:0]   <= transluc_rd_data;
+                        2'd1: blend_result_word[15:8]  <= transluc_rd_data;
+                        2'd2: blend_result_word[23:16] <= transluc_rd_data;
+                        default: blend_result_word[31:24] <= transluc_rd_data;
+                    endcase
+                    if (blend_lut_lane == 2'd3) begin
+                        fbss <= FBSS_BLEND_APPLY;
+                    end else begin
+                        blend_lane_iter <= blend_lut_lane + 2'd1;
+                        fbss <= FBSS_BLEND_SELECT;
+                    end
                 end
 
                 FBSS_BLEND_APPLY: begin : fbss_blend_apply_blk
-                    // transluc_rd_data is now valid.  Apply it to fb_acc
-                    // exactly like the IDLE fast path applies p3_color —
-                    // including the cross-word flush case.  Cannot just
-                    // re-enter IDLE because the source p3 may already have
-                    // shifted out on the cycle BLEND_REQ was entered.
+                    // All active lanes have been blended into
+                    // blend_result_word.  Apply the grouped word fragment to
+                    // fb_acc, preserving same-word dirty lanes that were not
+                    // part of this translucent group.
                     if (!blend_p3_match_r) begin
                         if (fb_write_can_issue) begin
-                            // Cross-word: enqueue old fb_acc, then immediately
-                            // start the accumulator at the blended byte's word.
                             fbwq_push_req  = 1'b1;
                             fbwq_push_addr = fb_acc_addr;
                             fbwq_push_data = fb_acc_data;
                             fbwq_push_strb = fb_acc_mask;
                             fbwq_push_tri  = 1'b0;
 
-                            fb_acc_valid <= 1;
-                            fb_acc_addr  <= blend_word_addr;
-                            fb_acc_data  <= 32'b0;
-                            fb_acc_mask  <= 4'b0;
-                            case (blend_byte_lane)
-                                2'd0: begin fb_acc_data[7:0]   <= transluc_rd_data; fb_acc_mask[0] <= 1; end
-                                2'd1: begin fb_acc_data[15:8]  <= transluc_rd_data; fb_acc_mask[1] <= 1; end
-                                2'd2: begin fb_acc_data[23:16] <= transluc_rd_data; fb_acc_mask[2] <= 1; end
-                                2'd3: begin fb_acc_data[31:24] <= transluc_rd_data; fb_acc_mask[3] <= 1; end
-                            endcase
+                            fb_acc_valid <= 1'b1;
+                            fb_acc_addr  <= blend_group_word_addr;
+                            fb_acc_data  <= blend_result_word;
+                            fb_acc_mask  <= blend_group_mask;
+                            blend_group_active <= 1'b0;
+                            blend_group_mask   <= 4'b0;
                             fbss <= FBSS_IDLE;
                         end
                     end else begin
-                        fb_acc_valid <= 1;
-                        fb_acc_addr  <= blend_word_addr;
-                        case (blend_byte_lane)
-                            2'd0: begin fb_acc_data[7:0]   <= transluc_rd_data; fb_acc_mask[0] <= 1; end
-                            2'd1: begin fb_acc_data[15:8]  <= transluc_rd_data; fb_acc_mask[1] <= 1; end
-                            2'd2: begin fb_acc_data[23:16] <= transluc_rd_data; fb_acc_mask[2] <= 1; end
-                            2'd3: begin fb_acc_data[31:24] <= transluc_rd_data; fb_acc_mask[3] <= 1; end
-                        endcase
+                        fb_acc_valid <= 1'b1;
+                        fb_acc_addr  <= blend_group_word_addr;
+                        fb_acc_data  <= blend_result_word;
+                        fb_acc_mask  <= (fb_acc_valid && fb_acc_addr == blend_group_word_addr)
+                                      ? (fb_acc_mask | blend_group_mask)
+                                      : blend_group_mask;
+                        blend_group_active <= 1'b0;
+                        blend_group_mask   <= 4'b0;
                         fbss <= FBSS_IDLE;
                     end
                 end
@@ -3045,7 +3138,8 @@ always @(posedge clk) begin : main_fsm
             // and fb_acc will keep coalescing writes).
             // ----------------------------------------------------------
             if (src_done && !p0_valid && !p1_valid && !p2_valid && !p2b_valid
-                         && !p3_valid && fbss == FBSS_IDLE) begin
+                         && !p3_valid && fbss == FBSS_IDLE
+                         && !blend_group_active) begin
                 src_done <= 0;
                 persp_active      <= 0;  // disarm so PSS doesn't keep running
                 persp_seg_a_ready <= 0;

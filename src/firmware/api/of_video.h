@@ -13,6 +13,21 @@ extern "C" {
 
 #include <stdint.h>
 
+/* Snapshot returned by of_video_get_timing().  The OS samples these
+ * from the vblank IRQ and presented-swap state so apps can pace
+ * interpolation against scanout instead of render-loop timing. */
+#ifndef OF_VIDEO_TIMING_T_DEFINED
+#define OF_VIDEO_TIMING_T_DEFINED
+typedef struct of_video_timing {
+    uint32_t vblank_count;
+    uint32_t present_count;
+    uint32_t last_presented_idx;
+    uint32_t reserved;
+    uint64_t last_vblank_us;
+    uint64_t last_flip_presented_us;
+} of_video_timing_t;
+#endif
+
 /* Screen constants */
 #define OF_SCREEN_W     320
 #define OF_SCREEN_H     240
@@ -25,6 +40,10 @@ extern "C" {
 #ifndef OF_PC
 
 #include "of_services.h"
+
+#define OF_VIDEO_SVC_INDEX(field) \
+    ((uint32_t)((offsetof(struct of_services_table, field) - \
+                 offsetof(struct of_services_table, video_init)) / sizeof(void *)))
 
 static inline void of_video_init(void) {
     OF_SVC->video_init();
@@ -152,6 +171,40 @@ static inline void of_video_set_vsync_callback(void (*cb)(void)) {
     OF_SVC->video_set_vsync_callback(cb);
 }
 
+static inline void of_video_get_timing(of_video_timing_t *out) {
+    if (!out)
+        return;
+    if (OF_SVC->count > OF_VIDEO_SVC_INDEX(video_get_timing) &&
+        OF_SVC->video_get_timing) {
+        OF_SVC->video_get_timing(out);
+    } else {
+        out->vblank_count = 0;
+        out->present_count = 0;
+        out->last_presented_idx = 0;
+        out->reserved = 0;
+        out->last_vblank_us = 0;
+        out->last_flip_presented_us = 0;
+    }
+}
+
+static inline uint64_t of_video_last_vblank_us(void) {
+    of_video_timing_t timing;
+    of_video_get_timing(&timing);
+    return timing.last_vblank_us;
+}
+
+static inline uint64_t of_video_last_flip_presented_us(void) {
+    of_video_timing_t timing;
+    of_video_get_timing(&timing);
+    return timing.last_flip_presented_us;
+}
+
+static inline uint32_t of_video_vblank_count(void) {
+    of_video_timing_t timing;
+    of_video_get_timing(&timing);
+    return timing.vblank_count;
+}
+
 /* Get surface as 16-bit for direct color modes */
 static inline uint16_t *of_video_surface16(void) {
     return (uint16_t *)of_video_surface();
@@ -168,6 +221,10 @@ void     of_video_palette(uint8_t index, uint32_t rgb);
 void     of_video_palette_bulk(const uint32_t *pal, int count);
 void     of_video_flush(void);
 void     of_video_set_display_mode(int mode);
+void     of_video_get_timing(of_video_timing_t *out);
+uint64_t of_video_last_vblank_us(void);
+uint64_t of_video_last_flip_presented_us(void);
+uint32_t of_video_vblank_count(void);
 
 /* Convert and set a VGA 6-bit palette (768 bytes: R,G,B triplets, 0-63 range).
  * Converts to 8-bit 0x00RRGGBB and sets all 256 entries at once. */
