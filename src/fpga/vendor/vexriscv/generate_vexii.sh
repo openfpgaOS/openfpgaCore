@@ -6,15 +6,19 @@
 # pre-FMax openfpgaOS config.
 #
 # Config highlights:
-#   I-cache: 32 KB (256 sets × 2 ways × 64 B line, NL prefetch)
+#   Issue  : single-issue front end.  Dual issue proved too route-heavy on
+#            Cyclone V at 100 MHz (front-end/decode/I-cache enable cone).
+#   I-cache: 32 KB (256 sets × 2 ways × 64 B line, NL prefetch,
+#            64-bit refill/fetch fabric)
 #            readAt=1 / ctrlAt=3 gives the fitter one extra fetch stage
 #            between execute-side backpressure and the M10K read-enable
 #            cone. This recovers much of the old high-Fmax pipeline win
 #            without disabling the proven-safe bypass network.
-#   D-cache: 128 KB (1024 sets × 2 ways × 64 B line, NO HW prefetch —
+#   D-cache: 128 KB (1024 sets × 2 ways × 64 B line, 64-bit refill/
+#            writeback fabric, next-line HW prefetch —
 #            the `rpt` prefetcher speculated past PMA boundaries and
-#            surfaced bus faults to commit; disabling also frees ~N ALMs
-#            of prefetcher logic and reduces placement pressure.)
+#            surfaced bus faults to commit, so use the simpler `nl`
+#            prefetcher.)
 #   FPU    : shared add/FMA pipeline starts pre-shift one stage later so
 #            ctrl5 FMA lane selection is captured before the exponent and
 #            mantissa compare cone. The packer writeback stage is shortened
@@ -68,10 +72,12 @@ sbt -Dsbt.server.forcestart=true --batch "Test/runMain vexiiriscv.Generate \
       --with-rvm --with-rva --with-rvf --with-rvc \
       --with-rvZcbm \
       --with-fetch-l1 --fetch-l1-sets=256 --fetch-l1-ways=2 --fetch-l1-refill-count=2 \
+      --fetch-l1-mem-data-width-min=64 \
       --fetch-l1-read-at=1 --fetch-l1-hits-at=2 --fetch-l1-hit-at=2 \
       --fetch-l1-bank-muxes-at=2 --fetch-l1-bank-mux-at=3 --fetch-l1-ctrl-at=3 \
       --fetch-l1-hardware-prefetch=nl --fetch-axi4 \
       --with-lsu-l1 --lsu-l1-sets=1024 --lsu-l1-ways=2 \
+      --lsu-l1-mem-data-width-min=64 \
       --lsu-l1-refill-count=2 --lsu-l1-writeback-count=2 \
       --lsu-l1-store-buffer-slots=2 --lsu-l1-store-buffer-ops=16 \
       --lsu-l1-axi4 \
@@ -105,6 +111,17 @@ fi
 perl -0pi -e 's/  wire                execute_freeze_valid;/  (* maxfan = 256 *) wire                execute_freeze_valid;/' "$OUTPUT"
 if ! grep -q "maxfan = 256.*execute_freeze_valid" "$OUTPUT"; then
     echo "ERROR: failed to annotate execute_freeze_valid maxfan hint"
+    exit 1
+fi
+
+# Some generated helpers emit simulation randomisation inside `ifndef
+# SYNTHESIS` blocks, but Quartus does not define SYNTHESIS for this flow and
+# rejects $urandom during Analysis & Synthesis.  The values are not
+# architecturally observable, so scrub them to deterministic zero
+# initialisation in the generated Verilog.
+perl -pi -e 's/= \{\$urandom\};/= 0;/' "$OUTPUT"
+if grep -q '\$urandom' "$OUTPUT"; then
+    echo "ERROR: unsupported \$urandom remains in generated Verilog"
     exit 1
 fi
 
