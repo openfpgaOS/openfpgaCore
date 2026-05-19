@@ -70,6 +70,9 @@ void of_video_vsync(void);
 /* Copy a coherent snapshot of vblank/present timing. */
 void of_video_get_timing(of_video_timing_t *out);
 
+/* Force a scanout V_TOTAL, or pass 0 to restore automatic policy. */
+void of_video_set_refresh_vtotal(uint32_t v_total);
+
 /* Internal IRQ hook called by the kernel vsync dispatcher. */
 void of_video_vsync_irq_service(void);
 

@@ -9,6 +9,9 @@
 // Two AXI4 master ports:
 //   M_RD  — command-stream DMA + texture/cache fills (read only)
 //   M_WR  — framebuffer writes + clear DMA (write only)
+// SRAM:
+//   GPU-private scratch storage for low-locality tables that are too large
+//   for BRAM.  The current user is the translucency blend LUT.
 //
 // MMIO registers expose control, status, fence sync, texture flush and the
 // remaining translucency LUT upload path.  Command data is not accepted over
@@ -50,6 +53,18 @@ module gpu_core (
     input  wire        m_wr_bvalid,
 
     // ================================================================
+    // SRAM word port — private GPU scratch
+    // ================================================================
+    output reg         sram_rd,
+    output reg         sram_wr,
+    output reg  [21:0] sram_addr,
+    output reg  [31:0] sram_wdata,
+    output reg  [3:0]  sram_wstrb,
+    input  wire [31:0] sram_rdata,
+    input  wire        sram_busy,
+    input  wire        sram_rdata_valid,
+
+    // ================================================================
     // MMIO Register Interface (from axi_periph_slave)
     // ================================================================
     input  wire        reg_wr,
@@ -81,6 +96,12 @@ module gpu_core (
     output wire [31:0] dbg_frag
 );
 
+// Production span-only GPU profile used while the core is LAB-bound.  Quake
+// can fall back to CPU perspective setup plus GPU affine spans; Duke and Doom
+// do not use the removed triangle/perspective paths.
+localparam GPU_ENABLE_TRIANGLES = 1'b0;
+localparam GPU_ENABLE_PERSP     = 1'b0;
+
 wire active = reset_n & gpu_enable;
 
 assign dbg_state = 6'd0;
@@ -97,7 +118,7 @@ assign dbg_frag = 32'd0;
 // 0x0C  GPU_DMA_SRC       W   SDRAM byte address of command buffer to pull
 // 0x10  GPU_RING_RDPTR    R   GPU read pointer
 // 0x14  GPU_STATUS        R   bit0=busy, bit1=ring_empty, bit2=upload_busy,
-//                              [5:4]=dma_state
+//                              bit3=transluc_busy, [5:4]=dma_state
 // 0x18  GPU_FENCE         R   Last completed fence token
 // 0x1C  GPU_DMA_LEN       W   Word count to pull (max 4096)
 // 0x20  GPU_TRANSLUC_ADDR W   byte address into transluc[] upload window
@@ -131,9 +152,8 @@ reg [31:0] ring_rd_data;                  // Ring BRAM port B read output (regis
 
 // CPU upload address for the transluc[] LUT (32 KB).  Colormap storage
 // retired — palookups now live in SDRAM and the GPU reads them through
-// gpu_tex_cache port B; only transluc[] still lives in on-chip BRAM
-// because its random-access blend lookup pattern doesn't fit a single-
-// line cache.
+// gpu_tex_cache port B; transluc[] is GPU-private SRAM because its
+// random-access blend lookup pattern doesn't fit a single-line cache.
 reg [14:0] transluc_wr_addr;   // Auto-increment byte address into transluc[]
 reg        tex_flush_req;      // Pulse to flush texture cache
 reg        soft_reset;         // Pulse: resets FSM state + ring pointers
@@ -174,8 +194,9 @@ reg [10:0] dma_starve_count;
 wire ring_empty = (ring_rdptr == ring_wrptr);
 wire [15:0] ring_wrptr_bytes = {2'b0, ring_wrptr, 2'b0};
 wire [15:0] ring_rdptr_bytes = {2'b0, ring_rdptr, 2'b0};
+wire transluc_upload_busy;
 
-assign busy = dma_busy || !ring_empty || (state != S_IDLE);
+assign busy = dma_busy || transluc_upload_busy || !ring_empty || (state != S_IDLE);
 
 // Port B: GPU read (synchronous, 1-cycle latency)
 always @(posedge clk)
@@ -203,7 +224,6 @@ always @(posedge clk) begin
     if (!reset_n) begin
         ring_wrptr      <= 0;
         ring_wr_addr    <= 0;
-        transluc_wr_addr <= 0;
         tex_flush_req   <= 0;
         soft_reset      <= 0;
         ring_reset      <= 0;
@@ -246,12 +266,8 @@ always @(posedge clk) begin
                 4'd7: begin  // GPU_DMA_LEN — clamp to ring depth
                     dma_len_latched <= reg_wdata[12:0];
                 end
-                4'd8: begin  // GPU_TRANSLUC_ADDR
-                    transluc_wr_addr <= reg_wdata[14:0];
-                end
-                4'd9: begin  // GPU_TRANSLUC_DATA
-                    transluc_wr_addr <= transluc_wr_addr + 15'd4;
-                end
+                4'd8: begin end // GPU_TRANSLUC_ADDR handled by SRAM LUT upload FSM
+                4'd9: begin end // GPU_TRANSLUC_DATA handled by SRAM LUT upload FSM
                 4'd10: begin // GPU_TEX_FLUSH
                     tex_flush_req <= 1;
                 end
@@ -274,9 +290,9 @@ always @(*) begin
         //   bit 0     = busy
         //   bit 1     = ring_empty
         //   bit 2     = upload_busy (SDRAM DMA pull)
-        //   bit 3     = reserved
+        //   bit 3     = translucency SRAM upload/lookup busy
         //   bits[5:4] = dma_state (0=IDLE, 1=AR, 2=R, 3=PUBLISH)
-        4'd5:    reg_rdata = {26'b0, dma_state, 1'b0,
+        4'd5:    reg_rdata = {26'b0, dma_state, transluc_upload_busy,
                               dma_busy, ring_empty, busy};
         4'd6:    reg_rdata = fence_reached;
         // Legacy flip/write counters retired to recover LABs. Keep a
@@ -289,11 +305,14 @@ end
 // ================================================================
 // transluc[] LUT — 32 KB BUILD-style indexed-color blend table
 // ================================================================
-// Stored as 8192 × 32-bit words (32 M10K under Quartus inference).
-// Keep the access pattern word-aligned with no byte-enables, or BRAM
-// inference collapses to FFs (the 16 KB colormap that used to live
-// here had this exact failure mode at 145k registers).  CPU loads via
-// GPU_TRANSLUC_ADDR / GPU_TRANSLUC_DATA on the MMIO.
+// The table lives in external SRAM, not FPGA BRAM.  That recovers the
+// 32 M10K blocks previously inferred for transluc_bram while keeping the
+// random-access blend table private to the GPU.
+//
+// SRAM upload is handshaked.  The CPU writes GPU_TRANSLUC_ADDR once and
+// then writes GPU_TRANSLUC_DATA words, polling GPU_STATUS bit3 before each
+// word.  The old BRAM path accepted one word/cycle; SRAM cannot, so writes
+// are only accepted while the LUT SRAM state is idle.
 //
 // Layout: 128-source × 256-destination quantised approximation of
 // BUILD's transluc[256][256].  Source axis is dropped to 7 bits (low
@@ -306,12 +325,74 @@ end
 //   key[7:0]  = fb_byte           (8 bits)
 //   word_addr = key[14:2]         (13 bits → 8192 words)
 //   byte_lane = key[1:0]
-reg [31:0] transluc_bram [0:8191];
+localparam LUTSRAM_IDLE       = 2'd0;
+localparam LUTSRAM_WRITE_WAIT = 2'd1;
+localparam LUTSRAM_READ_WAIT  = 2'd2;
 
-wire transluc_cpu_wr = reg_wr && (reg_addr == 4'd9);
+reg [1:0]  lutsram_state;
+reg        lutsram_seen_busy;
+
+reg [14:0] transluc_rd_addr;
+reg        transluc_lookup_fire;
+
+wire transluc_lookup_ready =
+    (lutsram_state == LUTSRAM_IDLE) && !sram_busy;
+
+assign transluc_upload_busy = (lutsram_state != LUTSRAM_IDLE);
+
 always @(posedge clk) begin
-    if (transluc_cpu_wr)
-        transluc_bram[transluc_wr_addr[14:2]] <= reg_wdata;
+    if (!reset_n) begin
+        sram_rd                 <= 1'b0;
+        sram_wr                 <= 1'b0;
+        sram_addr               <= 22'd0;
+        sram_wdata              <= 32'd0;
+        sram_wstrb              <= 4'd0;
+        transluc_wr_addr        <= 15'd0;
+        lutsram_state           <= LUTSRAM_IDLE;
+        lutsram_seen_busy       <= 1'b0;
+    end else begin
+        sram_rd    <= 1'b0;
+        sram_wr    <= 1'b0;
+        sram_wstrb <= 4'd0;
+
+        if (reg_wr && reg_addr == 4'd8)
+            transluc_wr_addr <= reg_wdata[14:0];
+
+        case (lutsram_state)
+            LUTSRAM_IDLE: begin
+                lutsram_seen_busy <= 1'b0;
+                if (transluc_lookup_fire && !sram_busy) begin
+                    sram_rd               <= 1'b1;
+                    sram_addr             <= {9'd0, transluc_rd_addr[14:2]};
+                    lutsram_state         <= LUTSRAM_READ_WAIT;
+                end else if (reg_wr && reg_addr == 4'd9 && !sram_busy) begin
+                    sram_wr          <= 1'b1;
+                    sram_addr        <= {9'd0, transluc_wr_addr[14:2]};
+                    sram_wdata       <= reg_wdata;
+                    sram_wstrb       <= 4'hF;
+                    transluc_wr_addr <= transluc_wr_addr + 15'd4;
+                    lutsram_state    <= LUTSRAM_WRITE_WAIT;
+                end
+            end
+
+            LUTSRAM_WRITE_WAIT: begin
+                if (sram_busy)
+                    lutsram_seen_busy <= 1'b1;
+                if (lutsram_seen_busy && !sram_busy)
+                    lutsram_state <= LUTSRAM_IDLE;
+            end
+
+            LUTSRAM_READ_WAIT: begin
+                if (sram_rdata_valid) begin
+                    lutsram_state         <= LUTSRAM_IDLE;
+                end
+            end
+
+            default: begin
+                lutsram_state <= LUTSRAM_IDLE;
+            end
+        endcase
+    end
 end
 
 // Cmap read path — formerly cmap_bram, now routed through gpu_tex_cache
@@ -372,46 +453,6 @@ wire [7:0]  cmap_rd_data = cmap_resp_data_b[7:0];
 // needed.  The byte mux that previously selected a lane out of the 32-bit
 // cmap_bram word is now subsumed into tex_cache port B's resp_data_b,
 // which already returns the byte at req_addr_b[1:0] when req_wide_b == 0.)
-
-// ================================================================
-// transluc[] LUT — Port B: GPU read
-// ================================================================
-// Same registered-read pattern as the colormap BRAM: a 13-bit word
-// address selects an 8K-word entry, a 2-bit lane selects the byte.
-// Held across fp_pipe_stall for the same reason cmap_rd_word is —
-// otherwise a stall mid-pipeline would let the LUT read drift to a
-// later pixel's index before the stalled stage captured this one.
-//
-// Address composition (computed by the BLEND stage when SPAN_TRANSLUC
-// is set on a fragment):
-//   transluc_rd_addr = { shaded_src[7:1], fb_byte[7:0] }   // 15 bits
-// (= 128 × 256 quantised LUT, dropping low bit of the source axis;
-// see transluc.md for the table-format rationale.)
-reg [14:0] transluc_rd_addr;
-reg [7:0]  transluc_rd_data;
-reg [31:0] transluc_rd_word;
-reg [1:0]  transluc_rd_lane;
-// Unlike cmap_rd_word, this BRAM read is NOT gated on fp_pipe_stall.
-// fbss != FBSS_IDLE asserts fp_pipe_stall during the entire BLEND
-// sub-flow (REQ → AR_WAIT → R_WAIT → LUT_WAIT → APPLY), but the BLEND
-// flow specifically REQUIRES the BRAM read to fire during LUT_WAIT —
-// transluc_rd_addr is set in BLEND_R_WAIT and the data must be
-// available by BLEND_APPLY two cycles later.  The cmap stall gate is
-// to prevent the cmap address from drifting to the next pipeline
-// pixel mid-stall; here transluc_rd_addr is only ever written by
-// BLEND_R_WAIT and the reset block, so there's no drift to gate.
-always @(posedge clk) begin
-    transluc_rd_word <= transluc_bram[transluc_rd_addr[14:2]];
-    transluc_rd_lane <= transluc_rd_addr[1:0];
-end
-always @(*) begin
-    case (transluc_rd_lane)
-        2'd0: transluc_rd_data = transluc_rd_word[7:0];
-        2'd1: transluc_rd_data = transluc_rd_word[15:8];
-        2'd2: transluc_rd_data = transluc_rd_word[23:16];
-        2'd3: transluc_rd_data = transluc_rd_word[31:24];
-    endcase
-end
 
 // ================================================================
 // Shared DSP multiply + reciprocal LUT
@@ -805,11 +846,14 @@ localparam CMD_DRAW_TRIANGLES    = 8'h30;
 // Compact adjacent affine span group.  The native group size is capped
 // at four lanes because the framebuffer bus writes one 32-bit word at a
 // time.  Wider callers split into multiple 4-lane groups in the SDK.
-// The same opcode also carries the generic scalar/perspective span format:
-// a 15-word payload uses the old scalar-span field layout; an 18-word
-// payload uses the compact adjacent-lane layout below.  This keeps one
-// public span command ID while preserving the generic span path needed by
-// floor, wall, Doom/Quake-style and perspective renderers.
+// The same opcode also carries the generic scalar/perspective span format.
+// A 9-word payload uses the scalar affine layout (words 0..8 only), a
+// 15-word payload appends the perspective fields, an 18-word payload uses
+// the fixed-count adjacent-lane layout below, and a 22-word payload inserts
+// per-lane y_start/count words so clipped columns can share one command while
+// still walking overlapping rows lane-adjacent.  This keeps one public span
+// command ID while preserving the generic span path needed by floor, wall,
+// Doom/Quake-style and perspective renderers.
 //   word 0  = framebuffer byte address for lane 0
 //   word 1  = {count[15:0], flags[7:0], lane_count[3:0], colormap_id[3:0]}
 //   word 2  = {fb_stride[15:0], lane_delta[15:0]}
@@ -819,7 +863,22 @@ localparam CMD_DRAW_TRIANGLES    = 8'h30;
 //   word 9..12  = t[0..3]       (Q16.16)
 //   word 13..16 = tstep[0..3]   (Q16.16)
 //   word 17     = {light3, light2, light1, light0}
-// Native callers should use lane_count 1/2/4.  A raw 8-lane header clamps
+// 22-word varcount group layout reuses words 0..4, where word 1's high half
+// is row_count, then inserts:
+//   word 5  = {y_start1[15:0], y_start0[15:0]}
+//   word 6  = {y_start3[15:0], y_start2[15:0]}
+//   word 7  = {count1[15:0], count0[15:0]}
+//   word 8  = {count3[15:0], count2[15:0]}
+//   word 9..12   = tex_addr[0..3]
+//   word 13..16  = t[0..3]      (at each lane's first active pixel)
+//   word 17..20  = tstep[0..3]
+//   word 21      = {light3, light2, light1, light0}
+// Scalar payload words 0..8 match the original scalar format:
+//   fb_addr, tex_addr, s, t, sstep, tstep,
+//   {colormap_id,count,light,flags}, {fb_stride,tex_width}, {tmask,smask}
+// Scalar payload words 9..14 are present only when SPAN_PERSP is set:
+//   sZ, tZ, zinv, sZstep, tZstep, zinv_step
+// Native group callers should use lane_count 1/2/4.  A raw 8-lane header clamps
 // to four lanes so older test streams do not overrun the compact payload;
 // other values normalize to one lane.  The path is affine only; perspective
 // remains on scalar spans / triangle-emitted spans.
@@ -839,6 +898,8 @@ localparam CMD_DRAW_SPAN_GROUP        = 8'h43;
 //   0x27 CMD_SET_SKIP_ZERO   — retired; skip-zero is carried by span flags
 //   0x28 CMD_SET_COLORMAP_ID — retired; scalar/group spans carry explicit
 //                              colormap_id, triangles use slot 0
+//   0x44 CMD_COPY_BRAM_FB_TO_SDRAM — BRAM framebuffer experiment retired;
+//                                    recovered M10K is used by CPU D-cache.
 
 // ================================================================
 // GPU State Registers (sticky, set by SET_* commands)
@@ -895,6 +956,8 @@ reg [15:0] sp_tex_h_mask;
 reg [31:0] spg_fb_base;
 reg signed [15:0] spg_fb_stride;
 reg [15:0] spg_count;
+reg        spg_varcount;
+reg [15:0] spg_row;
 reg [3:0]  spg_flags;
 reg [3:0]  spg_colormap_id;
 reg [15:0] spg_tex_width;
@@ -908,9 +971,15 @@ reg [31:0] spg_tex_addr [0:3];
 reg signed [31:0] spg_t [0:3];
 reg signed [31:0] spg_tstep [0:3];
 reg [5:0]  spg_light [0:3];
+reg [15:0] spg_lane_start [0:3];
+reg [15:0] spg_lane_count [0:3];
+reg        spg_var_lane_active_q;
 
 wire [31:0] spg_lane_delta_addr = {{16{spg_lane_delta[15]}}, spg_lane_delta};
 wire [31:0] spg_row_advance_addr = {{14{spg_row_advance[17]}}, spg_row_advance};
+wire        spg_var_lane_active = !spg_varcount || spg_var_lane_active_q;
+wire        spg_var_last_slot = (spg_lane == spg_last_lane);
+wire        spg_var_last_row  = ((spg_row + 16'd1) >= spg_count);
 
 function [1:0] spg_last_lane_from_count;
     input [3:0] lane_count;
@@ -921,6 +990,36 @@ function [1:0] spg_last_lane_from_count;
             4'd8: spg_last_lane_from_count = 2'd3;
             default: spg_last_lane_from_count = 2'd0;
         endcase
+    end
+endfunction
+
+function spg_lane_active_from;
+    input [15:0] row;
+    input [1:0] lane;
+    reg [16:0] row_ext;
+    reg [16:0] start_ext;
+    reg [16:0] end_ext;
+    begin
+        row_ext = {1'b0, row};
+        case (lane)
+            2'd0: begin
+                start_ext = {1'b0, spg_lane_start[0]};
+                end_ext   = {1'b0, spg_lane_start[0]} + {1'b0, spg_lane_count[0]};
+            end
+            2'd1: begin
+                start_ext = {1'b0, spg_lane_start[1]};
+                end_ext   = {1'b0, spg_lane_start[1]} + {1'b0, spg_lane_count[1]};
+            end
+            2'd2: begin
+                start_ext = {1'b0, spg_lane_start[2]};
+                end_ext   = {1'b0, spg_lane_start[2]} + {1'b0, spg_lane_count[2]};
+            end
+            default: begin
+                start_ext = {1'b0, spg_lane_start[3]};
+                end_ext   = {1'b0, spg_lane_start[3]} + {1'b0, spg_lane_count[3]};
+            end
+        endcase
+        spg_lane_active_from = (row_ext >= start_ext) && (row_ext < end_ext);
     end
 endfunction
 
@@ -1002,7 +1101,7 @@ function [3:0] span_flags_from_wire;
         span_flags_from_wire = 4'b0;
         span_flags_from_wire[SPAN_COLORMAP] = flags[0];
         span_flags_from_wire[SPAN_SKIP_ZERO] = flags[2];
-        span_flags_from_wire[SPAN_PERSP] = flags[5];
+        span_flags_from_wire[SPAN_PERSP] = GPU_ENABLE_PERSP && flags[5];
         span_flags_from_wire[SPAN_TRANSLUC] = flags[6];
     end
 endfunction
@@ -1028,6 +1127,18 @@ function [31:0] fb_lane_data;
             2'd1: fb_lane_data = {16'b0, byte_value, 8'b0};
             2'd2: fb_lane_data = {8'b0, byte_value, 16'b0};
             default: fb_lane_data = {byte_value, 24'b0};
+        endcase
+    end
+endfunction
+
+function [31:0] fb_lane_data_mask;
+    input [1:0] lane;
+    begin
+        case (lane)
+            2'd0: fb_lane_data_mask = 32'h000000FF;
+            2'd1: fb_lane_data_mask = 32'h0000FF00;
+            2'd2: fb_lane_data_mask = 32'h00FF0000;
+            default: fb_lane_data_mask = 32'hFF000000;
         endcase
     end
 endfunction
@@ -1095,6 +1206,7 @@ reg cmd_is_set_texture;
 reg cmd_is_set_fb;
 reg cmd_is_draw_span_group;
 reg cmd_span_scalar;
+reg cmd_span_group_varcount;
 reg cmd_is_draw_triangles;
 reg cmd_is_flip;
 
@@ -1102,9 +1214,9 @@ wire span_active = cmd_span_scalar;
 wire span_group_active = cmd_is_draw_span_group && !cmd_span_scalar;
 
 // Outstanding-write tracker for CMD_FENCE / CMD_FLIP drain semantics.
-// Increments on m_wr_* AW handshake (one AXI write transaction, single
-// beat or burst).  Decrements on m_wr_bvalid (slave pulses it for one
-// cycle since axi_sdram_slave's bready is hardwired to 1 upstream).
+// Increments on m_wr_* AW handshake.  Decrements on m_wr_bvalid (slave
+// pulses it for one cycle since axi_sdram_slave's bready is hardwired to 1
+// upstream).
 // CMD_FENCE/CMD_FLIP stall in S_EXECUTE while non-zero, so fence_reached
 // / gpu_swap_req only fire after pixel writes commit to SDRAM.  4 bits is
 // plenty (typical inflight is 1-3).
@@ -1134,8 +1246,9 @@ localparam [25:0] PALOOKUP_BASE   = 26'h3400000;  // 52 MB into SDRAM
 
 // Payload streaming state — ring_rd_data is routed directly to each
 // destination reg in S_PAY_DATA; no intermediate pay_buf array.
-// pay_idx saturates at 19 (any payload word past that still drains the
-// ring via pay_remaining but has nowhere to go).
+// pay_idx saturates at 31 (any payload word past that still drains the
+// ring via pay_remaining but has nowhere to go).  The largest native
+// payload decoded here is the 22-word variable-count span group.
 reg [4:0]  pay_idx;
 reg [12:0] pay_remaining;  // total payload words still to consume from the ring
                            // (ring BRAM is 4096 words, so 13 bits covers the
@@ -1224,9 +1337,8 @@ localparam FBSS_FLUSH_W_RSP = 4'd2;  // wait for write-buffer AW/W acceptance
 //   BLEND_REQ       — wait for M0 to be free of texture-cache traffic
 //   BLEND_AR_WAIT   — issue AR; m_rd_* muxed to BLEND while in this/R_WAIT
 //   BLEND_R_WAIT    — wait for R, capture rdata + fb_acc same-word bypass
-//   BLEND_SELECT    — find next active lane and issue transluc[] addr
-//   BLEND_LUT_WAIT  — BRAM 1-cycle read latency for transluc_rd_data
-//   BLEND_LUT_APPLY — merge one blended byte, loop or finish
+//   BLEND_SELECT    — find next active lane and issue transluc[] SRAM read
+//   BLEND_LUT_WAIT  — wait for SRAM read response, merge byte, loop/finish
 //   BLEND_APPLY     — write the grouped word-fragment into fb_acc
 localparam FBSS_BLEND_REQ      = 4'd6;
 localparam FBSS_BLEND_AR_WAIT  = 4'd7;
@@ -1234,7 +1346,6 @@ localparam FBSS_BLEND_R_WAIT   = 4'd8;
 localparam FBSS_BLEND_LUT_WAIT = 4'd9;
 localparam FBSS_BLEND_APPLY    = 4'd10;
 localparam FBSS_BLEND_SELECT   = 4'd11;
-localparam FBSS_BLEND_LUT_APPLY = 4'd12;
 reg [3:0] fbss;
 
 // BLEND same-word group state.  Source bytes are stored per framebuffer byte
@@ -1290,21 +1401,18 @@ reg src_done;            // source has issued its last pixel; pipeline draining
 // same cycle pipe_addr_b matches.  See gpu_tex_cache.v for the held-response
 // semantics this relies on.
 // Small write FIFO in front of the AXI write master.  Producers enqueue
-// 32-bit word writes.  The drain path normally emits single-beat writes, but
-// it may preserve a triangle-generated pair of adjacent full words as one
-// short AXI burst. Scope this to triangles only: vertical spans, clears, and
-// RMW translucency stay on the single-write path that has proven stable.
+// 32-bit word writes and the drain path emits one AXI beat per entry.  Keeping
+// this path single-beat avoids extra pairing state and leaves more placement
+// freedom for the fitter.
 localparam FBWQ_DEPTH = 2;
 reg [31:0] fbwq_addr [0:FBWQ_DEPTH-1];
 reg [31:0] fbwq_data [0:FBWQ_DEPTH-1];
 reg [3:0]  fbwq_strb [0:FBWQ_DEPTH-1];
-reg        fbwq_tri  [0:FBWQ_DEPTH-1];
 reg        fbwq_rd_ptr;
 reg        fbwq_wr_ptr;
 reg [1:0]  fbwq_count;
 wire       fbwq_empty = (fbwq_count == 2'd0);
 wire       fbwq_full  = (fbwq_count == 2'd2);
-wire       fbwq_rd_next = fbwq_rd_ptr + 1'b1;
 
 // Stage 2b: framebuffer/clear writes enqueue into a compact FIFO and the
 // AXI write port drains it independently.  This lets the fragment pipe keep
@@ -1312,30 +1420,13 @@ wire       fbwq_rd_next = fbwq_rd_ptr + 1'b1;
 // outstanding-B cap at 14 to prevent the 4-bit counter from overflowing if
 // SDRAM is slow to drain.
 wire m_wr_inflight_near_full = (m_wr_inflight >= 4'd14);
-reg        m_wr_w2_valid;
-reg [31:0] m_wr_w2_data;
-reg [3:0]  m_wr_w2_strb;
-reg        sp_from_tri;
-wire m_wr_chan_busy = m_wr_awvalid || m_wr_wvalid || m_wr_w2_valid;
+
+wire m_wr_chan_busy = m_wr_awvalid || m_wr_wvalid;
 wire fb_write_drain_complete = fbwq_empty && (m_wr_inflight == 4'b0) && !m_wr_chan_busy;
-wire fbwq_output_idle = !m_wr_awvalid && !m_wr_wvalid && !m_wr_w2_valid;
-wire fbwq_wait_for_tri_pair = (fbwq_count == 2'd1)
-                           && fbwq_tri[fbwq_rd_ptr]
-                           && (fbwq_strb[fbwq_rd_ptr] == 4'hF)
-                           && sp_from_tri;
-wire fbwq_drain_can_load = !m_wr_inflight_near_full
-                         && fbwq_output_idle
-                         && !fbwq_wait_for_tri_pair;
-wire fbwq_pop_burst2 = (fbwq_count == 2'd2)
-                     && fbwq_drain_can_load
-                     && fbwq_tri[fbwq_rd_ptr]
-                     && fbwq_tri[fbwq_rd_next]
-                     && (fbwq_strb[fbwq_rd_ptr] == 4'hF)
-                     && (fbwq_strb[fbwq_rd_next] == 4'hF)
-                     && (fbwq_addr[fbwq_rd_next] == (fbwq_addr[fbwq_rd_ptr] + 32'd4));
+wire fbwq_output_idle = !m_wr_awvalid && !m_wr_wvalid;
+wire fbwq_drain_can_load = !m_wr_inflight_near_full && fbwq_output_idle;
 wire fbwq_pop_now = !fbwq_empty && fbwq_drain_can_load;
-wire [1:0] fbwq_pop_count = fbwq_pop_now ? (fbwq_pop_burst2 ? 2'd2 : 2'd1)
-                                          : 2'd0;
+wire [1:0] fbwq_pop_count = fbwq_pop_now ? 2'd1 : 2'd0;
 wire fbwq_can_push = !fbwq_full || fbwq_pop_now;
 wire fb_write_can_issue = fbwq_can_push;
 wire p3_needs_fb_flush = p3_valid && !p3_discard && !p3_flags[SPAN_TRANSLUC]
@@ -1911,7 +2002,6 @@ task finish_fragment_stream_after_flush;
     begin
         fb_acc_valid <= 1'b0;
         fb_acc_mask  <= 4'b0;
-        sp_from_tri  <= 1'b0;
         if (tri_active)
             tri_active <= 1'b0;
 
@@ -1927,20 +2017,17 @@ always @(posedge clk) begin : main_fsm
     reg [31:0] fbwq_push_addr;
     reg [31:0] fbwq_push_data;
     reg [3:0]  fbwq_push_strb;
-    reg        fbwq_push_tri;
 
     fbwq_push_req  = 1'b0;
     fbwq_push_addr = 32'b0;
     fbwq_push_data = 32'b0;
     fbwq_push_strb = 4'b0;
-    fbwq_push_tri  = 1'b0;
 
     if (!reset_n) begin
         state <= S_IDLE;
         ring_rdptr <= 0;
         m_wr_awvalid <= 0;
         m_wr_wvalid <= 0;
-        m_wr_w2_valid <= 0;
         fbwq_rd_ptr <= 1'b0;
         fbwq_wr_ptr <= 1'b0;
         fbwq_count  <= 2'b0;
@@ -1958,6 +2045,7 @@ always @(posedge clk) begin : main_fsm
         cmd_is_set_fb <= 0;
         cmd_is_draw_span_group <= 0;
         cmd_span_scalar <= 0;
+        cmd_span_group_varcount <= 0;
         cmd_is_draw_triangles <= 0;
         cmd_is_flip <= 0;
         m_wr_inflight       <= 4'b0;
@@ -1979,6 +2067,7 @@ always @(posedge clk) begin : main_fsm
         p3_valid <= 0; p3_color <= 0; p3_flags <= 0;
         p3_fb_addr <= 0; p3_discard <= 0;
         transluc_rd_addr <= 15'b0;
+        transluc_lookup_fire <= 1'b0;
         cmap_req_addr_reg <= 26'b0;
         fbss <= FBSS_IDLE;
         blend_arvalid    <= 0;
@@ -1992,7 +2081,6 @@ always @(posedge clk) begin : main_fsm
         blend_lut_lane <= 0;
         blend_p3_match_r <= 0;
         src_done <= 0;
-        sp_from_tri <= 0;
         sp_sZ <= 0; sp_tZ <= 0; sp_zinv <= 0;
         sp_sZstep <= 0; sp_tZstep <= 0; sp_zinv_step <= 0;
         persp_active <= 0;
@@ -2058,6 +2146,8 @@ always @(posedge clk) begin : main_fsm
         spg_fb_base <= 0;
         spg_fb_stride <= 0;
         spg_count <= 0;
+        spg_varcount <= 1'b0;
+        spg_row <= 16'd0;
         spg_flags <= 0;
         spg_colormap_id <= 0;
         spg_tex_width <= 16'd1;
@@ -2067,6 +2157,11 @@ always @(posedge clk) begin : main_fsm
         spg_last_lane <= 0;
         spg_lane_delta <= 16'sd1;
         spg_row_advance <= 18'sd0;
+        spg_var_lane_active_q <= 1'b1;
+        spg_lane_start[0] <= 16'd0; spg_lane_start[1] <= 16'd0;
+        spg_lane_start[2] <= 16'd0; spg_lane_start[3] <= 16'd0;
+        spg_lane_count[0] <= 16'd0; spg_lane_count[1] <= 16'd0;
+        spg_lane_count[2] <= 16'd0; spg_lane_count[3] <= 16'd0;
     end else begin
         // Ring reset: set the read pointer to the start of ring BRAM.
         if (ring_reset)
@@ -2078,19 +2173,18 @@ always @(posedge clk) begin : main_fsm
             ring_rdptr   <= ring_wrptr;
             m_wr_awvalid <= 0;
             m_wr_wvalid  <= 0;
-            m_wr_w2_valid <= 0;
             fbwq_rd_ptr  <= 1'b0;
             fbwq_wr_ptr  <= 1'b0;
             fbwq_count   <= 2'b0;
             fb_acc_valid <= 0;
             fb_acc_mask  <= 0;
-            sp_from_tri  <= 0;
             fbss         <= FBSS_IDLE;
             blend_arvalid <= 1'b0;
             blend_group_active <= 1'b0;
             blend_group_mask <= 4'b0;
             m_wr_inflight <= 4'b0;
             gpu_swap_req <= 1'b0;
+            transluc_lookup_fire <= 1'b0;
         end else begin
             // ------------------------------------------------------------
             // Always-on housekeeping (runs every non-reset cycle).
@@ -2119,6 +2213,7 @@ always @(posedge clk) begin : main_fsm
             if (m_wr_wvalid && m_wr_wready)
                 m_wr_wvalid <= 1'b0;
             gpu_swap_req <= 1'b0;
+            transluc_lookup_fire <= 1'b0;
         case (state)
 
         // ============================================================
@@ -2160,8 +2255,12 @@ always @(posedge clk) begin : main_fsm
             cmd_is_set_fb         <= (cmd_type == CMD_SET_FB);
             cmd_is_draw_span_group       <= (cmd_type == CMD_DRAW_SPAN_GROUP);
             cmd_span_scalar       <= (cmd_type == CMD_DRAW_SPAN_GROUP &&
-                                      cmd_payload_words == 13'd15);
-            cmd_is_draw_triangles <= (cmd_type == CMD_DRAW_TRIANGLES);
+                                      (cmd_payload_words == 13'd9 ||
+                                       cmd_payload_words == 13'd15));
+            cmd_span_group_varcount <= (cmd_type == CMD_DRAW_SPAN_GROUP &&
+                                         cmd_payload_words == 13'd22);
+            cmd_is_draw_triangles <= GPU_ENABLE_TRIANGLES &&
+                                     (cmd_type == CMD_DRAW_TRIANGLES);
             cmd_is_flip           <= (cmd_type == CMD_FLIP);
 
             if (cmd_payload_words == 0) begin
@@ -2170,7 +2269,7 @@ always @(posedge clk) begin : main_fsm
                 pay_idx <= 0;
                 // Track the FULL payload count so we drain every word out
                 // of the ring — stores into pay_buf are separately capped
-                // at index 19 in S_PAY_DATA.  This keeps ring_rdptr aligned
+                // at index 31 in S_PAY_DATA.  This keeps ring_rdptr aligned
                 // even when a command (e.g. a multi-triangle draw) exceeds
                 // the 19-entry pay_buf capacity.
                 pay_remaining <= cmd_payload_words;
@@ -2191,12 +2290,12 @@ always @(posedge clk) begin : main_fsm
         // v_*, etc.), so the only storage cost is the 5-bit pay_idx
         // counter and pay_remaining — we save the 19×32 pay_buf array.
         //
-        // pay_idx saturates at 19: any payload word past index 19
+        // pay_idx saturates at 31: any payload word past index 31
         // (e.g. padding at the end of an oversized DRAW_TRIANGLES batch)
         // is still drained from the ring so ring_rdptr ends up at the
         // next command header, but has no destination reg to write.
         S_PAY_DATA: begin
-            if (pay_idx != 5'd19)
+            if (pay_idx != 5'd31)
                 pay_idx <= pay_idx + 5'd1;
             pay_remaining <= pay_remaining - 13'd1;
 
@@ -2244,48 +2343,109 @@ always @(posedge clk) begin : main_fsm
                 else if (pay_idx == 5'd1) st_fb_stride <= ring_rd_data[15:0];
             end
             else if (span_group_active) begin
-                case (pay_idx)
-                    5'd0: spg_fb_base <= ring_rd_data;
-                    5'd1: begin
-                        spg_count       <= ring_rd_data[31:16];
-                        spg_flags       <= span_flags_from_wire(ring_rd_data[15:8]);
-                        spg_last_lane   <= spg_last_lane_from_count(ring_rd_data[7:4]);
-                        spg_colormap_id <= ring_rd_data[3:0];
-                    end
-                    5'd2: begin
-                        spg_fb_stride       <= ring_rd_data[31:16];
-                        spg_lane_delta      <= ring_rd_data[15:0];
-                        spg_row_advance     <= spg_row_advance_from(spg_last_lane,
-                                                                    ring_rd_data[31:16],
-                                                                    ring_rd_data[15:0]);
-                    end
-                    5'd3: spg_tex_width <= ring_rd_data[15:0];
-                    5'd4: begin
-                        spg_tex_w_mask <= (ring_rd_data[15:0]  == 16'd0)
-                                          ? 16'hFFFF : ring_rd_data[15:0];
-                        spg_tex_h_mask <= (ring_rd_data[31:16] == 16'd0)
-                                          ? 16'hFFFF : ring_rd_data[31:16];
-                    end
-                    5'd5:  spg_tex_addr[0] <= ring_rd_data;
-                    5'd6:  spg_tex_addr[1] <= ring_rd_data;
-                    5'd7:  spg_tex_addr[2] <= ring_rd_data;
-                    5'd8:  spg_tex_addr[3] <= ring_rd_data;
-                    5'd9:  spg_t[0] <= ring_rd_data;
-                    5'd10: spg_t[1] <= ring_rd_data;
-                    5'd11: spg_t[2] <= ring_rd_data;
-                    5'd12: spg_t[3] <= ring_rd_data;
-                    5'd13: spg_tstep[0] <= ring_rd_data;
-                    5'd14: spg_tstep[1] <= ring_rd_data;
-                    5'd15: spg_tstep[2] <= ring_rd_data;
-                    5'd16: spg_tstep[3] <= ring_rd_data;
-                    5'd17: begin
-                        spg_light[0] <= ring_rd_data[5:0];
-                        spg_light[1] <= ring_rd_data[13:8];
-                        spg_light[2] <= ring_rd_data[21:16];
-                        spg_light[3] <= ring_rd_data[29:24];
-                    end
-                    default: ;
-                endcase
+                if (cmd_span_group_varcount) begin
+                    case (pay_idx)
+                        5'd0: spg_fb_base <= ring_rd_data;
+                        5'd1: begin
+                            spg_count       <= ring_rd_data[31:16];
+                            spg_flags       <= span_flags_from_wire(ring_rd_data[15:8]);
+                            spg_last_lane   <= spg_last_lane_from_count(ring_rd_data[7:4]);
+                            spg_colormap_id <= ring_rd_data[3:0];
+                        end
+                        5'd2: begin
+                            spg_fb_stride       <= ring_rd_data[31:16];
+                            spg_lane_delta      <= ring_rd_data[15:0];
+                            spg_row_advance     <= spg_row_advance_from(spg_last_lane,
+                                                                        ring_rd_data[31:16],
+                                                                        ring_rd_data[15:0]);
+                        end
+                        5'd3: spg_tex_width <= ring_rd_data[15:0];
+                        5'd4: begin
+                            spg_tex_w_mask <= (ring_rd_data[15:0]  == 16'd0)
+                                              ? 16'hFFFF : ring_rd_data[15:0];
+                            spg_tex_h_mask <= (ring_rd_data[31:16] == 16'd0)
+                                              ? 16'hFFFF : ring_rd_data[31:16];
+                        end
+                        5'd5: begin
+                            spg_lane_start[0] <= ring_rd_data[15:0];
+                            spg_lane_start[1] <= ring_rd_data[31:16];
+                        end
+                        5'd6: begin
+                            spg_lane_start[2] <= ring_rd_data[15:0];
+                            spg_lane_start[3] <= ring_rd_data[31:16];
+                        end
+                        5'd7: begin
+                            spg_lane_count[0] <= ring_rd_data[15:0];
+                            spg_lane_count[1] <= ring_rd_data[31:16];
+                        end
+                        5'd8: begin
+                            spg_lane_count[2] <= ring_rd_data[15:0];
+                            spg_lane_count[3] <= ring_rd_data[31:16];
+                        end
+                        5'd9:  spg_tex_addr[0] <= ring_rd_data;
+                        5'd10: spg_tex_addr[1] <= ring_rd_data;
+                        5'd11: spg_tex_addr[2] <= ring_rd_data;
+                        5'd12: spg_tex_addr[3] <= ring_rd_data;
+                        5'd13: spg_t[0] <= ring_rd_data;
+                        5'd14: spg_t[1] <= ring_rd_data;
+                        5'd15: spg_t[2] <= ring_rd_data;
+                        5'd16: spg_t[3] <= ring_rd_data;
+                        5'd17: spg_tstep[0] <= ring_rd_data;
+                        5'd18: spg_tstep[1] <= ring_rd_data;
+                        5'd19: spg_tstep[2] <= ring_rd_data;
+                        5'd20: spg_tstep[3] <= ring_rd_data;
+                        5'd21: begin
+                            spg_light[0] <= ring_rd_data[5:0];
+                            spg_light[1] <= ring_rd_data[13:8];
+                            spg_light[2] <= ring_rd_data[21:16];
+                            spg_light[3] <= ring_rd_data[29:24];
+                        end
+                        default: ;
+                    endcase
+                end else begin
+                    case (pay_idx)
+                        5'd0: spg_fb_base <= ring_rd_data;
+                        5'd1: begin
+                            spg_count       <= ring_rd_data[31:16];
+                            spg_flags       <= span_flags_from_wire(ring_rd_data[15:8]);
+                            spg_last_lane   <= spg_last_lane_from_count(ring_rd_data[7:4]);
+                            spg_colormap_id <= ring_rd_data[3:0];
+                        end
+                        5'd2: begin
+                            spg_fb_stride       <= ring_rd_data[31:16];
+                            spg_lane_delta      <= ring_rd_data[15:0];
+                            spg_row_advance     <= spg_row_advance_from(spg_last_lane,
+                                                                        ring_rd_data[31:16],
+                                                                        ring_rd_data[15:0]);
+                        end
+                        5'd3: spg_tex_width <= ring_rd_data[15:0];
+                        5'd4: begin
+                            spg_tex_w_mask <= (ring_rd_data[15:0]  == 16'd0)
+                                              ? 16'hFFFF : ring_rd_data[15:0];
+                            spg_tex_h_mask <= (ring_rd_data[31:16] == 16'd0)
+                                              ? 16'hFFFF : ring_rd_data[31:16];
+                        end
+                        5'd5:  spg_tex_addr[0] <= ring_rd_data;
+                        5'd6:  spg_tex_addr[1] <= ring_rd_data;
+                        5'd7:  spg_tex_addr[2] <= ring_rd_data;
+                        5'd8:  spg_tex_addr[3] <= ring_rd_data;
+                        5'd9:  spg_t[0] <= ring_rd_data;
+                        5'd10: spg_t[1] <= ring_rd_data;
+                        5'd11: spg_t[2] <= ring_rd_data;
+                        5'd12: spg_t[3] <= ring_rd_data;
+                        5'd13: spg_tstep[0] <= ring_rd_data;
+                        5'd14: spg_tstep[1] <= ring_rd_data;
+                        5'd15: spg_tstep[2] <= ring_rd_data;
+                        5'd16: spg_tstep[3] <= ring_rd_data;
+                        5'd17: begin
+                            spg_light[0] <= ring_rd_data[5:0];
+                            spg_light[1] <= ring_rd_data[13:8];
+                            spg_light[2] <= ring_rd_data[21:16];
+                            spg_light[3] <= ring_rd_data[29:24];
+                        end
+                        default: ;
+                    endcase
+                end
             end
             else if (span_active) begin
                 // Scalar-span loader.  Software batches multiple spans as
@@ -2373,9 +2533,12 @@ always @(posedge clk) begin : main_fsm
             else if (cmd_is_draw_triangles && pay_idx == 5'd18) begin
                 state <= S_EXECUTE;
             end
-            // Span-group payloads are 18 words.  Dispatch after pay_idx 17
-            // has populated the spg_* holding regs.
-            else if (span_group_active && pay_idx == 5'd17) begin
+            // Span-group payloads are 18 words for fixed-count groups and
+            // 22 words for variable-count groups. Dispatch once the spg_*
+            // holding regs are fully populated.
+            else if (span_group_active
+                  && ((!cmd_span_group_varcount && pay_idx == 5'd17)
+                   || ( cmd_span_group_varcount && pay_idx == 5'd21))) begin
                 state      <= S_EXECUTE;
             end
             else begin
@@ -2427,8 +2590,11 @@ always @(posedge clk) begin : main_fsm
             end
             else if (span_group_active) begin
                 spg_lane <= 2'd0;
+                spg_varcount <= cmd_span_group_varcount;
+                spg_row <= 16'd0;
+                spg_var_lane_active_q <= !cmd_span_group_varcount
+                                      || spg_lane_active_from(16'd0, 2'd0);
                 spg_load_lane;
-                sp_from_tri       <= 1'b0;
                 persp_active      <= 1'b0;
                 persp_first_done  <= 0;
                 persp_seg_a_ready <= 0;
@@ -2444,7 +2610,6 @@ always @(posedge clk) begin : main_fsm
                 // the sp_* regs are fully loaded for the current span.
                 // sp_flags holds the packed live flags from field idx 6;
                 // its SPAN_PERSP bit arms the perspective sub-FSM.
-                sp_from_tri       <= 1'b0;
                 persp_active      <= sp_flags[SPAN_PERSP];
                 persp_first_done  <= 0;
                 persp_seg_a_ready <= 0;
@@ -2511,13 +2676,20 @@ always @(posedge clk) begin : main_fsm
             //   * If sp_seg_left == 0 (last px of segment), slot B must be
             //     ready so the swap can fire in the same cycle.
             load_p0 = (issue_committed || !p0_valid)
-                   && (sp_count != 16'd0) && !src_done
+                   && (span_group_active
+                       ? (spg_varcount
+                          ? ((spg_count != 16'd0) && spg_var_lane_active)
+                          : (sp_count != 16'd0))
+                       : (sp_count != 16'd0))
+                   && !src_done
                    && !persp_issue_stall
                    && (!persp_active
                        || sp_seg_left != 4'd0
                        || persp_seg_b_ready);
             span_last_issue = span_group_active
-                            ? (sp_count == 16'd1 && spg_lane == spg_last_lane)
+                            ? (spg_varcount
+                               ? (spg_var_last_row && spg_var_last_slot)
+                               : (sp_count == 16'd1 && spg_lane == spg_last_lane))
                             : (sp_count == 16'd1);
 
             // ----------------------------------------------------------
@@ -2597,22 +2769,44 @@ always @(posedge clk) begin : main_fsm
                             default: spg_t[3] <= sp_t + sp_tstep;
                         endcase
 
-                        if (spg_lane == spg_last_lane) begin
-                            spg_lane <= 2'd0;
-                            sp_fb_addr <= sp_fb_addr + spg_row_advance_addr;
-                            sp_count <= sp_count - 16'd1;
-                            if (spg_last_lane == 2'd0) begin
-                                sp_tex_addr <= spg_tex_addr[0];
-                                sp_t        <= sp_t + sp_tstep;
-                                sp_tstep    <= spg_tstep[0];
-                sp_light_q  <= {2'b0, spg_light[0], 16'b0};
+                        if (spg_varcount) begin
+                            if (spg_var_last_slot) begin
+                                spg_lane  <= 2'd0;
+                                spg_row   <= spg_row + 16'd1;
+                                sp_fb_addr <= sp_fb_addr + spg_row_advance_addr;
+                                spg_var_lane_active_q <= spg_lane_active_from(spg_row + 16'd1, 2'd0);
+                                if (spg_last_lane == 2'd0) begin
+                                    sp_tex_addr <= spg_tex_addr[0];
+                                    sp_t        <= sp_t + sp_tstep;
+                                    sp_tstep    <= spg_tstep[0];
+                                    sp_light_q  <= {2'b0, spg_light[0], 16'b0};
+                                end else begin
+                                    spg_load_source_only(2'd0);
+                                end
                             end else begin
-                                spg_load_source_only(2'd0);
+                                spg_lane <= spg_lane + 2'd1;
+                                sp_fb_addr <= sp_fb_addr + spg_lane_delta_addr;
+                                spg_var_lane_active_q <= spg_lane_active_from(spg_row, spg_lane + 2'd1);
+                                spg_load_source_only(spg_lane + 2'd1);
                             end
                         end else begin
-                            spg_lane <= spg_lane + 2'd1;
-                            sp_fb_addr <= sp_fb_addr + spg_lane_delta_addr;
-                            spg_load_source_only(spg_lane + 2'd1);
+                            if (spg_lane == spg_last_lane) begin
+                                spg_lane <= 2'd0;
+                                sp_fb_addr <= sp_fb_addr + spg_row_advance_addr;
+                                sp_count <= sp_count - 16'd1;
+                                if (spg_last_lane == 2'd0) begin
+                                    sp_tex_addr <= spg_tex_addr[0];
+                                    sp_t        <= sp_t + sp_tstep;
+                                    sp_tstep    <= spg_tstep[0];
+                                    sp_light_q  <= {2'b0, spg_light[0], 16'b0};
+                                end else begin
+                                    spg_load_source_only(2'd0);
+                                end
+                            end else begin
+                                spg_lane <= spg_lane + 2'd1;
+                                sp_fb_addr <= sp_fb_addr + spg_lane_delta_addr;
+                                spg_load_source_only(spg_lane + 2'd1);
+                            end
                         end
 
                         if (span_last_issue) src_done <= 1'b1;
@@ -2652,6 +2846,28 @@ always @(posedge clk) begin : main_fsm
                             sp_t        <= sp_t + sp_tstep;
                         end
                     end
+                end else if (span_group_active && spg_varcount
+                          && !src_done && !spg_var_lane_active
+                          && (issue_committed || !p0_valid)) begin
+                    // Variable-count groups keep the row-major address walk
+                    // even when a lane is inactive for the current row.  That
+                    // preserves adjacent-byte coalescing for overlapping rows
+                    // without issuing a tex/cmap/fb fragment for skipped rows.
+                    p0_valid <= 0;
+                    if (spg_var_last_slot) begin
+                        spg_lane  <= 2'd0;
+                        spg_row   <= spg_row + 16'd1;
+                        sp_fb_addr <= sp_fb_addr + spg_row_advance_addr;
+                        spg_var_lane_active_q <= spg_lane_active_from(spg_row + 16'd1, 2'd0);
+                        spg_load_source_only(2'd0);
+                        if (spg_var_last_row)
+                            src_done <= 1'b1;
+                    end else begin
+                        spg_lane <= spg_lane + 2'd1;
+                        sp_fb_addr <= sp_fb_addr + spg_lane_delta_addr;
+                        spg_var_lane_active_q <= spg_lane_active_from(spg_row, spg_lane + 2'd1);
+                        spg_load_source_only(spg_lane + 2'd1);
+                    end
                 end else if (issue_committed) begin
                     // Committed but no more pixels to load — drain p0
                     p0_valid <= 0;
@@ -2681,12 +2897,8 @@ always @(posedge clk) begin : main_fsm
                         end else if (blend_group_word_addr == p3_word_addr
                                   && !(|(blend_group_mask & fb_lane_mask(p3_byte_lane)))) begin
                             blend_group_mask <= blend_group_mask | fb_lane_mask(p3_byte_lane);
-                            case (p3_byte_lane)
-                                2'd0: blend_group_src_data[7:0]   <= p3_color;
-                                2'd1: blend_group_src_data[15:8]  <= p3_color;
-                                2'd2: blend_group_src_data[23:16] <= p3_color;
-                                default: blend_group_src_data[31:24] <= p3_color;
-                            endcase
+                            blend_group_src_data <= blend_group_src_data
+                                                  | fb_lane_data(p3_byte_lane, p3_color);
                             p3_consumed = 1'b1;
                         end else begin
                             fbss <= FBSS_BLEND_REQ;
@@ -2711,18 +2923,11 @@ always @(posedge clk) begin : main_fsm
                                 fbwq_push_addr = fb_acc_addr;
                                 fbwq_push_data = fb_acc_data;
                                 fbwq_push_strb = fb_acc_mask;
-                                fbwq_push_tri  = sp_from_tri && (fb_acc_mask == 4'hF);
 
                                 fb_acc_valid <= 1'b1;
                                 fb_acc_addr  <= p3_word_addr;
-                                fb_acc_data  <= 32'b0;
-                                fb_acc_mask  <= 4'b0;
-                                case (p3_byte_lane)
-                                    2'd0: begin fb_acc_data[7:0]   <= p3_color; fb_acc_mask[0] <= 1'b1; end
-                                    2'd1: begin fb_acc_data[15:8]  <= p3_color; fb_acc_mask[1] <= 1'b1; end
-                                    2'd2: begin fb_acc_data[23:16] <= p3_color; fb_acc_mask[2] <= 1'b1; end
-                                    default: begin fb_acc_data[31:24] <= p3_color; fb_acc_mask[3] <= 1'b1; end
-                                endcase
+                                fb_acc_data  <= fb_lane_data(p3_byte_lane, p3_color);
+                                fb_acc_mask  <= fb_lane_mask(p3_byte_lane);
                                 p3_consumed = 1'b1;
                             end else begin
                                 // The write queue is full.  Park FBSS for one
@@ -2733,12 +2938,9 @@ always @(posedge clk) begin : main_fsm
                         end else begin
                             fb_acc_valid <= 1'b1;
                             fb_acc_addr  <= p3_word_addr;
-                            case (p3_byte_lane)
-                                2'd0: begin fb_acc_data[7:0]   <= p3_color; fb_acc_mask[0] <= 1'b1; end
-                                2'd1: begin fb_acc_data[15:8]  <= p3_color; fb_acc_mask[1] <= 1'b1; end
-                                2'd2: begin fb_acc_data[23:16] <= p3_color; fb_acc_mask[2] <= 1'b1; end
-                                default: begin fb_acc_data[31:24] <= p3_color; fb_acc_mask[3] <= 1'b1; end
-                            endcase
+                            fb_acc_data  <= (fb_acc_data & ~fb_lane_data_mask(p3_byte_lane))
+                                          | fb_lane_data(p3_byte_lane, p3_color);
+                            fb_acc_mask  <= fb_acc_mask | fb_lane_mask(p3_byte_lane);
                             p3_consumed = 1'b1;
                         end
 
@@ -2834,11 +3036,14 @@ always @(posedge clk) begin : main_fsm
                     reg [7:0] src_byte;
                     reg [7:0] fb_byte;
                     if (blend_group_mask[blend_lane_iter]) begin
-                        src_byte = fb_lane_read(blend_group_src_data, blend_lane_iter);
-                        fb_byte  = fb_lane_read(blend_result_word, blend_lane_iter);
-                        transluc_rd_addr <= {src_byte[7:1], fb_byte};
-                        blend_lut_lane   <= blend_lane_iter;
-                        fbss             <= FBSS_BLEND_LUT_WAIT;
+                        if (transluc_lookup_ready) begin
+                            src_byte = fb_lane_read(blend_group_src_data, blend_lane_iter);
+                            fb_byte  = fb_lane_read(blend_result_word, blend_lane_iter);
+                            transluc_rd_addr      <= {src_byte[7:1], fb_byte};
+                            transluc_lookup_fire  <= 1'b1;
+                            blend_lut_lane        <= blend_lane_iter;
+                            fbss                  <= FBSS_BLEND_LUT_WAIT;
+                        end
                     end else if (blend_lane_iter == 2'd3) begin
                         fbss <= FBSS_BLEND_APPLY;
                     end else begin
@@ -2847,23 +3052,22 @@ always @(posedge clk) begin : main_fsm
                 end
 
                 FBSS_BLEND_LUT_WAIT: begin
-                    // BRAM read latency: addr was set by BLEND_SELECT; data
-                    // is valid by the start of BLEND_LUT_APPLY.
-                    fbss <= FBSS_BLEND_LUT_APPLY;
-                end
-
-                FBSS_BLEND_LUT_APPLY: begin
-                    case (blend_lut_lane)
-                        2'd0: blend_result_word[7:0]   <= transluc_rd_data;
-                        2'd1: blend_result_word[15:8]  <= transluc_rd_data;
-                        2'd2: blend_result_word[23:16] <= transluc_rd_data;
-                        default: blend_result_word[31:24] <= transluc_rd_data;
-                    endcase
-                    if (blend_lut_lane == 2'd3) begin
-                        fbss <= FBSS_BLEND_APPLY;
-                    end else begin
-                        blend_lane_iter <= blend_lut_lane + 2'd1;
-                        fbss <= FBSS_BLEND_SELECT;
+                    if (sram_rdata_valid) begin : fbss_blend_lut_capture
+                        reg [7:0] lut_byte;
+                        case (transluc_rd_addr[1:0])
+                            2'd0: lut_byte = sram_rdata[7:0];
+                            2'd1: lut_byte = sram_rdata[15:8];
+                            2'd2: lut_byte = sram_rdata[23:16];
+                            default: lut_byte = sram_rdata[31:24];
+                        endcase
+                        blend_result_word <= (blend_result_word & ~fb_lane_data_mask(blend_lut_lane))
+                                           | fb_lane_data(blend_lut_lane, lut_byte);
+                        if (blend_lut_lane == 2'd3) begin
+                            fbss <= FBSS_BLEND_APPLY;
+                        end else begin
+                            blend_lane_iter <= blend_lut_lane + 2'd1;
+                            fbss <= FBSS_BLEND_SELECT;
+                        end
                     end
                 end
 
@@ -2878,7 +3082,6 @@ always @(posedge clk) begin : main_fsm
                             fbwq_push_addr = fb_acc_addr;
                             fbwq_push_data = fb_acc_data;
                             fbwq_push_strb = fb_acc_mask;
-                            fbwq_push_tri  = 1'b0;
 
                             fb_acc_valid <= 1'b1;
                             fb_acc_addr  <= blend_group_word_addr;
@@ -3162,7 +3365,6 @@ always @(posedge clk) begin : main_fsm
                     fbwq_push_addr = fb_acc_addr;
                     fbwq_push_data = fb_acc_data;
                     fbwq_push_strb = fb_acc_mask;
-                    fbwq_push_tri  = sp_from_tri && (fb_acc_mask == 4'hF);
                     finish_fragment_stream_after_flush();
                 end
             end else begin
@@ -3176,7 +3378,7 @@ always @(posedge clk) begin : main_fsm
         // Walks h rows × w bytes through M_WR with byte-strobed
         // partial-word edges.  Word-aligned full-width row strips hit
         // the 4-byte fast path (cr_strobe = 4'b1111, 4 bytes per AXI
-        // burst); arbitrary x/w paths use the general byte-strobe.
+        // beat); arbitrary x/w paths use the general byte-strobe.
         //
         // Stride is the active st_fb_stride.  CPU pre-computes the
         // start byte address (fb_base + y*stride + x) so the GPU
@@ -3244,6 +3446,7 @@ always @(posedge clk) begin : main_fsm
             end
         end
 
+`ifdef GPU_INCLUDE_TRIANGLES
         // ============================================================
         // Triangle: Load vertices — now a pass-through
         // ============================================================
@@ -3915,7 +4118,6 @@ always @(posedge clk) begin : main_fsm
                     sp_tex_width <= st_tex_width;
                     sp_tex_w_mask <= 16'hFFFF;
                     sp_tex_h_mask <= 16'hFFFF;
-                    sp_from_tri <= 1'b1;
                     // Phase 4c.4 — when perspective is active, route the
                     // triangle's row-walked attributes into the
                     // SPAN_PERSP path's perspective-source regs and arm
@@ -4048,6 +4250,30 @@ always @(posedge clk) begin : main_fsm
             end
         end
 
+`else
+        // Triangle hardware is compiled out for the span-only profile.
+        // The public capability bit is also clear, but keeping these state
+        // encodings as explicit traps makes any stale command stream retire
+        // instead of wandering through unreachable datapath logic.  More
+        // importantly, this prevents Quartus from preserving the large
+        // triangle rasterizer cones as "possible" state-machine logic.
+        S_TRI_LOAD,
+        S_TRI_PERSP_PREMUL,
+        S_TRI_SETUP,
+        S_TRI_GRAD,
+        S_TRI_BBOX,
+        S_TRI_BBOX_CLAMP,
+        S_TRI_MUL_WAIT,
+        S_TRI_MUL_WAIT2,
+        S_TRI_INIT_ATTRIB,
+        S_TRI_ROW,
+        S_TRI_PIX,
+        S_TRI_ROW_NEXT: begin
+            tri_active <= 1'b0;
+            state      <= S_IDLE;
+        end
+`endif
+
         default: state <= S_IDLE;
         endcase
 
@@ -4057,35 +4283,21 @@ always @(posedge clk) begin : main_fsm
             // write order across spans, clears, fences, and translucent
             // read-modify-write barriers.
             // --------------------------------------------------------
-            if (!m_wr_wvalid && m_wr_w2_valid) begin
-                m_wr_wvalid  <= 1'b1;
-                m_wr_wdata   <= m_wr_w2_data;
-                m_wr_wstrb   <= m_wr_w2_strb;
-                m_wr_wlast   <= 1'b1;
-                m_wr_w2_valid <= 1'b0;
-            end else if (fbwq_pop_now) begin
+            if (fbwq_pop_now) begin
                 m_wr_awvalid <= 1'b1;
                 m_wr_awaddr  <= fbwq_addr[fbwq_rd_ptr];
-                m_wr_awlen   <= fbwq_pop_burst2 ? 8'd1 : 8'd0;
+                m_wr_awlen   <= 8'd0;
                 m_wr_wvalid  <= 1'b1;
                 m_wr_wdata   <= fbwq_data[fbwq_rd_ptr];
                 m_wr_wstrb   <= fbwq_strb[fbwq_rd_ptr];
-                m_wr_wlast   <= !fbwq_pop_burst2;
-                if (fbwq_pop_burst2) begin
-                    m_wr_w2_valid <= 1'b1;
-                    m_wr_w2_data  <= fbwq_data[fbwq_rd_next];
-                    m_wr_w2_strb  <= fbwq_strb[fbwq_rd_next];
-                    fbwq_rd_ptr   <= fbwq_rd_ptr;
-                end else begin
-                    fbwq_rd_ptr   <= fbwq_rd_ptr + 1'b1;
-                end
+                m_wr_wlast   <= 1'b1;
+                fbwq_rd_ptr  <= fbwq_rd_ptr + 1'b1;
             end
 
             if (fbwq_push_req && fbwq_can_push) begin
                 fbwq_addr[fbwq_wr_ptr] <= fbwq_push_addr;
                 fbwq_data[fbwq_wr_ptr] <= fbwq_push_data;
                 fbwq_strb[fbwq_wr_ptr] <= fbwq_push_strb;
-                fbwq_tri[fbwq_wr_ptr]  <= fbwq_push_tri;
                 fbwq_wr_ptr            <= fbwq_wr_ptr + 1'b1;
             end
 

@@ -60,11 +60,73 @@ static void palette_upload_shadow(void) {
     palette_commit_staged();
 }
 
-/* ---- VRR (Variable Refresh Rate) ----
- * The rate-lock loop lives in RTL (vrr_controller.v). The peripheral slave
- * also locks V_TOTAL to fixed NTSC/PAL timing when Analogizer video or SNAC is
- * configured, deriving that directly from the Analogizer settings register.
- * Firmware no longer needs per-frame VRR writes. */
+/* ---- Display refresh policy ----
+ * Firmware owns the adaptive refresh policy and writes VIDEO_VTOTAL. The
+ * FPGA still clamps the value and latches it only at frame boundary. When
+ * Analogizer video or SNAC is active, RTL overrides this register with fixed
+ * NTSC/PAL timing so external hardware does not see adaptive changes. */
+static uint64_t vrr_last_swap_cycles;
+static uint32_t vrr_current_v_total = VIDEO_VTOTAL_60HZ;
+static uint32_t vrr_manual_v_total;  /* 0 = automatic render-period policy */
+
+static uint32_t vrr_clamp_v_total(uint32_t v_total) {
+    if (v_total < VIDEO_VTOTAL_MIN)
+        return VIDEO_VTOTAL_MIN;
+    if (v_total > VIDEO_VTOTAL_MAX)
+        return VIDEO_VTOTAL_MAX;
+    return v_total;
+}
+
+static uint32_t vrr_v_total_from_period(uint32_t cycles) {
+    if      (cycles < 1666666u) return VIDEO_VTOTAL_60HZ;
+    else if (cycles < 1833333u) return VIDEO_VTOTAL_55HZ;
+    else if (cycles < 2022222u) return VIDEO_VTOTAL_50HZ;
+    else if (cycles < 2222222u) return VIDEO_VTOTAL_45HZ;
+    else if (cycles < 2400000u) return VIDEO_VTOTAL_42HZ;
+    else if (cycles < 3333333u) return VIDEO_VTOTAL_60HZ;
+    else if (cycles < 3666666u) return VIDEO_VTOTAL_55HZ;
+    else if (cycles < 4044444u) return VIDEO_VTOTAL_50HZ;
+    else if (cycles < 4444444u) return VIDEO_VTOTAL_45HZ;
+    else if (cycles < 4800000u) return VIDEO_VTOTAL_42HZ;
+    else if (cycles < 5500000u) return VIDEO_VTOTAL_55HZ;
+    else if (cycles < 6066666u) return VIDEO_VTOTAL_50HZ;
+    else if (cycles < 6666666u) return VIDEO_VTOTAL_45HZ;
+    else                        return VIDEO_VTOTAL_42HZ;
+}
+
+static void vrr_apply_v_total(uint32_t v_total) {
+    v_total = vrr_clamp_v_total(v_total);
+    if (vrr_current_v_total == v_total)
+        return;
+    VIDEO_VTOTAL = v_total;
+    vrr_current_v_total = v_total;
+}
+
+static void vrr_update_on_swap(void) {
+    uint64_t now = read_cycles();
+    uint32_t v_total = vrr_manual_v_total;
+
+    if (v_total == 0) {
+        if (vrr_last_swap_cycles == 0) {
+            v_total = VIDEO_VTOTAL_60HZ;
+        } else {
+            uint64_t elapsed = now - vrr_last_swap_cycles;
+            v_total = vrr_v_total_from_period(elapsed > 0xFFFFFFFFu
+                                              ? 0xFFFFFFFFu
+                                              : (uint32_t)elapsed);
+        }
+    }
+
+    vrr_last_swap_cycles = now;
+    vrr_apply_v_total(v_total);
+}
+
+void of_video_set_refresh_vtotal(uint32_t v_total) {
+    vrr_manual_v_total = v_total ? vrr_clamp_v_total(v_total) : 0;
+    vrr_last_swap_cycles = read_cycles();
+    vrr_apply_v_total(vrr_manual_v_total ? vrr_manual_v_total
+                                         : VIDEO_VTOTAL_60HZ);
+}
 
 /* swap_kicked: set when we KNOW fb_swap_pending was at 1 at some point
  * since buf_ready was set.  Without it, sync_swap_state's "buf_ready
@@ -178,6 +240,10 @@ void of_video_init(void) {
     timing_last_presented_idx = 0;
     timing_last_vblank_cycles = 0;
     timing_last_present_cycles = 0;
+    vrr_last_swap_cycles = read_cycles();
+    vrr_current_v_total = VIDEO_VTOTAL_60HZ;
+    vrr_manual_v_total = 0;
+    VIDEO_VTOTAL = VIDEO_VTOTAL_60HZ;
     vid_display_mode = DISPLAY_MODE_FRAMEBUFFER;
     IRQ_MASK |= IRQ_MASK_VSYNC;
 
@@ -211,7 +277,7 @@ uint8_t *of_video_flip(void) {
     if (vid_display_mode == DISPLAY_MODE_OVERLAY) {
         const uint8_t *term = (const uint8_t *)TERM_FB_BASE;
         uint8_t *app = (uint8_t *)fb_addr[buf_draw];
-        for (int i = 0; i < FB_WIDTH * FB_HEIGHT; i++) {
+        for (uint32_t i = 0; i < FB_WIDTH * FB_HEIGHT; i++) {
             if (term[i])
                 app[i] = 240 + (term[i] & 0x0F);
         }
@@ -223,6 +289,7 @@ uint8_t *of_video_flip(void) {
 
     /* Queue draw buffer for display at next vsync.
      * Write format: bits[2:1] = buffer index, bit[0] = trigger */
+    vrr_update_on_swap();
     FB_SWAP_CTRL = (buf_draw << 1) | 1;
     /* Kernel-driven kick — fb_swap_pending is high NOW (sysreg write
      * is committed by the time this returns), so sync_swap_state's
@@ -289,6 +356,7 @@ int of_video_acquire_next(int just_flipped_idx, uint32_t fence_token) {
 
     sync_swap_state();
 
+    vrr_update_on_swap();
     if (!fence_ok) {
         /* Fallback for a wedged/missing CMD_FLIP: queue the same buffer
          * through the CPU path so the app degrades instead of freezing.

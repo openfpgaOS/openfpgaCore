@@ -66,6 +66,9 @@
 #define OF_TARGET_CRAM0_PRESAVE_OFFSET 0x000C0000u   /* 768 KB in: shared config / per-game settings */
 #define OF_TARGET_CRAM0_SAVE_OFFSET    0x00100000u   /* 1 MB in */
 #define OF_TARGET_CRAM0_SCRATCH_OFFSET 0x00400000u   /* 4 MB in — above config + the 2.5 MB save window */
+#define OF_TARGET_CRAM0_ASYNC_BOUNCE_OFFSET (OF_TARGET_CRAM0_SCRATCH_OFFSET + OF_TARGET_DMA_CHUNK_SIZE)
+#define OF_TARGET_CRAM0_APP_DMA_OFFSET 0x00500000u   /* App-visible async file staging pool */
+#define OF_TARGET_CRAM0_APP_DMA_SIZE   0x00100000u   /* 1 MB */
 
 /* SRAM is GPU-private in v2 — no AXI alias, not CPU-addressable. */
 /* (OF_TARGET_SRAM_BASE / OF_TARGET_SRAM_SIZE removed) */
@@ -119,6 +122,14 @@
 
 #if OF_TARGET_CRAM0_SCRATCH_OFFSET < (OF_TARGET_CRAM0_SAVE_OFFSET + OF_TARGET_SAVE_SLOT_SIZE * OF_TARGET_SAVE_MAX_SLOTS)
 #error "CRAM0 scratch overlaps the nonvolatile save-slot window"
+#endif
+
+#if (OF_TARGET_CRAM0_ASYNC_BOUNCE_OFFSET + OF_TARGET_DMA_CHUNK_SIZE) > OF_TARGET_CRAM0_APP_DMA_OFFSET
+#error "CRAM0 app DMA pool overlaps the async bounce DMA window"
+#endif
+
+#if (OF_TARGET_CRAM0_APP_DMA_OFFSET + OF_TARGET_CRAM0_APP_DMA_SIZE) > OF_TARGET_CRAM_SIZE
+#error "CRAM0 app DMA pool exceeds CRAM0"
 #endif
 
 #define OF_TARGET_GPU_BASE             0x4A000000u

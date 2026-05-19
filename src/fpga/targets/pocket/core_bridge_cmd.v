@@ -359,7 +359,12 @@ always @(posedge clk) begin
                 target_dataslot_ack <= 0;
                 target_dataslot_done <= 0;
                 target_dataslot_err <= 0;
-                status_setup_done_queue <= 0;
+                // A menu "Load Game" / instance switch can reset and reload
+                // slots without reconfiguring the FPGA.  In that warm path
+                // status_setup_done is already high, so its edge detector will
+                // not fire again.  Queue a fresh Ready-To-Run while the core is
+                // held in reset; the Pocket host expects that before Reset Exit.
+                status_setup_done_queue <= reset_n && status_setup_done;
                 target_dataslot_read_queue <= 0;
                 target_dataslot_write_queue <= 0;
                 target_dataslot_getfile_queue <= 0;

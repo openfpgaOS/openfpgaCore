@@ -9,6 +9,7 @@
 #include "caps_table.h"
 #include "services_table.h"
 #include "bank_preload.h"
+#include "irq.h"
 #include <stddef.h>
 #include <string.h>
 
@@ -63,7 +64,7 @@ static void boot_logo(const char *color) {
     of_term_puts("    /_/_/_/___\\___/_/ |_|\n");
     of_term_puts("   / __ \\/ __/\n");
     of_term_puts("  / /_/ /\\ \\\n");
-    of_term_puts("  \\____/___/  \033[93mv0.3\033[0m\n\n");
+    of_term_puts("  \\____/___/  \033[93mv0.4\033[0m\n\n");
 }
 
 static void status_ok(void) {
@@ -100,8 +101,14 @@ static int load_app_with_retries(elf_load_result_t *app) {
 }
 
 void os_main(void) {
+    /* Clear IRQ callback state and hardware source masks before enabling
+     * machine interrupts.  The bootloader deliberately keeps MIE disabled
+     * while SDRAM .bss is being zeroed. */
+    of_irq_init();
+
     /* Initialize all hardware */
     of_init();
+    of_irq_enable_cpu();
 
     /* Boot stage: red logo = OS initializing */
     boot_logo("\033[91m");  /* red */
@@ -201,18 +208,19 @@ void os_main(void) {
      * available, then applied before the app starts. */
     of_analogizer_load_config("analogizer.cfg");
 
+    /* Auto-load a .ofsf SoundFont if one is present in a data slot.
+     * Silent when no bank is staged; emits its own boot line otherwise. */
+    bank_preload();
+
     /* UART shares cart pins with Analogizer/SNAC. Only mirror the boot console
-     * when neither feature owns the adapter pins after all config is applied. */
+     * when neither feature owns the adapter pins, and only after the SoundFont
+     * preload has finished probing/loading staged files. */
     {
         const of_analogizer_state_t *analogizer_state = of_analogizer_get_state();
         if (!analogizer_state->enabled &&
             analogizer_state->snac_type == SNAC_NONE)
             of_term_enable_uart_mirror();
     }
-
-    /* Auto-load a .ofsf SoundFont if one is present in a data slot.
-     * Silent when no bank is staged; emits its own boot line otherwise. */
-    bank_preload();
 
     of_timer_delay_ms(300);
 

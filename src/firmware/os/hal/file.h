@@ -91,7 +91,8 @@ int64_t of_file_size64(uint32_t slot_id);
  * (token, result), where result is 0 on success or <0 on bridge error.
  * of_file_async_poll() is only a compatibility/fallback drain.
  * Only one async read can be in flight at a time (bridge limitation).
- * dest must be in CRAM0 (direct DMA target). */
+ * CRAM0 destinations use direct DMA; other destinations are filled through
+ * an internal CRAM0 bounce buffer before callback dispatch. */
 int of_file_read_async(uint32_t slot_id, uint32_t slot_offset,
                        void *dest, uint32_t length,
                        void (*callback)(int token, int result));
@@ -102,6 +103,14 @@ int of_file_async_poll(void);
 
 /* Check if an async read is currently in flight. */
 int of_file_async_busy(void);
+
+/* App-visible CRAM0 staging memory for async file reads.  This prevents apps
+ * from hardcoding CRAM0 addresses while keeping the bridge DMA target in the
+ * region the hardware supports. */
+void *of_file_dma_stage_alloc(uint32_t size, uint32_t align);
+int of_file_dma_stage_reset(void);
+uint32_t of_file_async_max_read(void);
+uint32_t of_file_dma_stage_size(void);
 
 /* Service a data-slot completion IRQ. Called by the central IRQ dispatcher;
  * exported so the async path can share the same completion logic with the

@@ -180,11 +180,11 @@ module axi_periph_slave (
     input  wire [31:0] dt_query_data,
     input  wire        dt_query_valid,
 
-    // VRR (Variable Refresh Rate) — output drives scaler V_TOTAL.
-    // In normal mode vrr_controller picks the value from measured render
-    // time. When Analogizer video or SNAC owns the adapter path, the output
-    // is locked to a fixed NTSC/PAL V_TOTAL so external hardware does not see
-    // adaptive refresh changes.
+    // Display V_TOTAL — output drives scaler timing.
+    // Firmware owns the adaptive refresh policy and writes the desired
+    // line count through SYSREG word 55. When Analogizer video or SNAC owns
+    // the adapter path, the output is locked to fixed NTSC/PAL timing so
+    // external hardware does not see adaptive refresh changes.
     output wire [9:0]  vrr_v_total,
     input  wire        analogizer_enabled,
 
@@ -418,10 +418,6 @@ localparam [31:0] HW_FEATURES =
     |
     32'h0000_0010      // GPU span renderer
     |
-    32'h0000_0020      // GPU triangle rasterizer (bit 5)
-    |
-    32'h0000_2000      // GPU perspective spans (bit 13)
-    |
     32'h0000_4000      // GPU pipelined fragment processor (bit 14)
     | 32'h0000_0348;  // Analogizer(3) + MIDI(6) + FPU(8) + Save slots(9) — always present
 
@@ -435,18 +431,11 @@ reg fb_swap_pending;
 assign fb_swap_pending_o = fb_swap_pending;
 reg term_fb_active;  // 1=scanout reads terminal FB, 0=app triple-buffered FB
 
-// VRR swap hold: skip N vsyncs before presenting a queued frame.
-// vrr_swap_hold_rtl comes from vrr_controller and is the value actually
-// loaded into the hold counter on every swap event. Fixed-rate adapter mode
-// forces it to 0.
-wire [3:0] vrr_swap_hold_rtl;
-reg  [3:0] vrr_hold_counter;        // counts down to 0 then swaps
-
-// VRR V_TOTAL split: fixed NTSC/PAL value for Analogizer/SNAC adapter mode,
-// RTL-computed value for normal Pocket LCD mode.  The fixed adapter value is
-// derived directly from the current Analogizer settings so SNAC-only
-// configurations also lock to a stable rate.
-wire [9:0] vrr_v_total_rtl;
+// V_TOTAL split: fixed NTSC/PAL value for Analogizer/SNAC adapter mode,
+// firmware-computed value for normal Pocket LCD mode.  The fixed adapter
+// value is derived directly from the current Analogizer settings so
+// SNAC-only configurations also lock to a stable rate.
+reg  [9:0] vrr_v_total_reg;
 wire       analogizer_video_enabled = analogizer_settings[15];
 wire [3:0] analogizer_video_mode    = analogizer_settings[13:10];
 wire       analogizer_pal_mode      =
@@ -457,7 +446,7 @@ wire       vrr_fixed_rate_mode      =
 wire [9:0] vrr_fixed_v_total        =
     (analogizer_video_enabled && analogizer_pal_mode) ? 10'd315 : 10'd262;
 assign vrr_v_total = vrr_fixed_rate_mode ? vrr_fixed_v_total
-                                         : vrr_v_total_rtl;
+                                         : vrr_v_total_reg;
 
 wire [24:0] fb_app_addr = (fb_display_idx == 2'd0) ? FB_ADDR_0 :
                            (fb_display_idx == 2'd1) ? FB_ADDR_1 :
@@ -482,25 +471,17 @@ always @(posedge clk) begin
 end
 wire vsync_rising = vsync_sync[1] && !vsync_sync[2];
 
-// ============================================
-// VRR controller — RTL implementation of the rate-lock loop that
-// used to live in firmware/os/targets/pocket/video.c.  Measures the
-// time between successive swap kicks (gpu_swap_req or CPU writes to
-// FB_SWAP_CTRL bit 0) and produces (V_TOTAL, swap_hold) so scanout
-// stays in the supported 42-60 Hz band.  Bypassed by fixed-rate adapter mode.
-// ============================================
-wire sysreg_swap_kick =
-    sysreg_wr_fire && !req_addr[8] && (req_addr[7:2] == 6'd6) && req_wdata[0];
-
-vrr_controller u_vrr (
-    .clk(clk),
-    .reset_n(reset_n),
-    .gpu_swap_req(gpu_swap_req),
-    .sysreg_swap_kick(sysreg_swap_kick),
-    .analogizer_enabled(vrr_fixed_rate_mode),
-    .v_total_o(vrr_v_total_rtl),
-    .swap_hold_o(vrr_swap_hold_rtl)
-);
+function [9:0] clamp_v_total;
+    input [9:0] vt;
+    begin
+        if (vt < 10'd262)
+            clamp_v_total = 10'd262;
+        else if (vt > 10'd375)
+            clamp_v_total = 10'd375;
+        else
+            clamp_v_total = vt;
+    end
+endfunction
 
 reg [2:0] target_ack_sync;
 reg [2:0] target_done_sync;
@@ -648,7 +629,8 @@ reg  input_fifo_clear;
 sync_fifo #(
     .WIDTH(64),
     .DEPTH(16),
-    .ADDR_WIDTH(4)
+    .ADDR_WIDTH(4),
+    .RAMSTYLE("MLAB, no_rw_check")
 ) input_event_fifo (
     .clk(clk),
     .reset(reset),
@@ -801,7 +783,7 @@ always @(posedge clk) begin
         fb_ready_idx <= 2'd0;
         fb_swap_pending <= 1'b0;
         term_fb_active <= 1'b1;  // terminal FB visible by default at boot
-        vrr_hold_counter <= 4'd0;
+        vrr_v_total_reg <= 10'd262;
         pal_wr <= 0;
         pal_addr <= 0;
         pal_data <= 0;
@@ -1034,6 +1016,7 @@ always @(posedge clk) begin
 
 
                 6'd39: vsync_irq_pending <= 0;                    // VSYNC_IRQ_CLEAR (0x9C) W1C
+                6'd55: vrr_v_total_reg <= clamp_v_total(req_wdata[9:0]); // VIDEO_VTOTAL (0xDC)
                 6'd63: irq_mask <= req_wdata[5:0];             // IRQ_MASK (0xFC)
 
                 default: ;
@@ -1044,19 +1027,15 @@ always @(posedge clk) begin
         if (vsync_rising)
             vsync_irq_pending <= 1'b1;
 
-        // Triple buffer vsync swap (with VRR hold support).  Placed
+        // Triple buffer vsync swap.  Placed
         // BEFORE the GPU side-port so a same-cycle (gpu_swap_req &&
         // vsync_rising) doesn't lose the GPU's new swap request: the
         // vsync clear schedules fb_swap_pending<=0 here, then the
         // GPU pulse below overrides with fb_swap_pending<=1 (non-
         // blocking, later wins).
         if (fb_swap_pending && vsync_rising) begin
-            if (vrr_hold_counter > 0) begin
-                vrr_hold_counter <= vrr_hold_counter - 1;
-            end else begin
-                fb_display_idx <= fb_ready_idx;
-                fb_swap_pending <= 1'b0;
-            end
+            fb_display_idx <= fb_ready_idx;
+            fb_swap_pending <= 1'b0;
         end
 
         // CMD_FLIP side-port — single-cycle pulse from gpu_core after
@@ -1067,15 +1046,6 @@ always @(posedge clk) begin
             fb_ready_idx    <= gpu_swap_idx;
             fb_swap_pending <= 1'b1;
         end
-
-        // Reload hold counter on EVERY swap event (CMD_FLIP path or
-        // CPU FB_SWAP_CTRL kick).  Value comes from the vrr_controller
-        // — fresh per-frame, computed from measured render time, so
-        // back-to-back kicks naturally land in the "fast" bucket
-        // (hold=0) without a starvation gate.  In analogizer mode the
-        // controller forces the value to 0.
-        if (gpu_swap_req || sysreg_swap_kick)
-            vrr_hold_counter <= vrr_swap_hold_rtl;
 
     end
 end
@@ -1198,13 +1168,13 @@ always @(*) begin
                                     term_fb_active,
                                     2'b0,
                                     8'b0,
-                                    vrr_hold_counter,
+                                    4'b0,
                                     fb_ready_idx,
                                     fb_display_idx,
                                     fb_swap_pending};
-            // VRR live readback.
+            // Display timing live readback.
             6'd55: sysreg_rdata = {22'b0, vrr_v_total};
-            6'd56: sysreg_rdata = {28'b0, vrr_swap_hold_rtl};
+            6'd56: sysreg_rdata = 32'b0;  // swap hold retired
             6'd63: sysreg_rdata = {26'b0, irq_mask};
             default: ;
         endcase

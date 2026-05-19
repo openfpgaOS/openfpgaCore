@@ -302,6 +302,12 @@ struct of_services_table {
      * while apps that need smooth interpolation can pace against the
      * actual scanout clock. */
     void      (*video_get_timing)(of_video_timing_t *out);
+
+    /* -- Video refresh policy (append-only) --
+     * v_total=0 restores the OS automatic render-period policy.
+     * Nonzero values request a fixed scanout line count; hardware clamps
+     * again and fixed Analogizer/SNAC modes override this request. */
+    void      (*video_set_refresh_vtotal)(uint32_t v_total);
 };
 
 #ifndef OF_PC

@@ -146,13 +146,26 @@
  *     bit  0     : fb_swap_pending
  *     bits 2:1   : fb_display_idx
  *     bits 4:3   : fb_ready_idx
- *     bits 8:5   : vrr_hold_counter
+ *     bits 8:5   : zero, retired swap-hold counter
  *     bits 16:9  : zero, retired event counter
  *     bits 18:17 : zero, retired last gpu_swap_req idx
  *     bit  19    : term_fb_active (1 = scanout reads terminal FB)
  *   FB_SWAP_DBG_CNTS   (0xC4): zero, retired in area mode */
 #define FB_SWAP_DBG_LIVE   REG32(SYSREG_BASE + 0xC0)
 #define FB_SWAP_DBG_CNTS   REG32(SYSREG_BASE + 0xC4)
+
+/* Display timing control.
+ * VIDEO_VTOTAL is the firmware-owned scanout V_TOTAL request. Hardware
+ * clamps again in the video clock domain and latches changes only at frame
+ * boundary; Analogizer/SNAC fixed-rate mode overrides this register. */
+#define VIDEO_VTOTAL       REG32(SYSREG_BASE + 0xDC)
+#define VIDEO_VTOTAL_MIN   262u
+#define VIDEO_VTOTAL_MAX   375u
+#define VIDEO_VTOTAL_60HZ  262u
+#define VIDEO_VTOTAL_55HZ  285u
+#define VIDEO_VTOTAL_50HZ  310u
+#define VIDEO_VTOTAL_45HZ  340u
+#define VIDEO_VTOTAL_42HZ  375u
 
 /* Data slot / DMA interface */
 #define DS_SLOT_ID          REG32(SYSREG_BASE + 0x20)
@@ -377,14 +390,10 @@
 #define   IRQ_MASK_INPUT     (1 << 4)
 #define   IRQ_MASK_DATASLOT  (1 << 5)
 
-/* VRR (Variable Refresh Rate) — live V_TOTAL readback (0xDC)
- * Read:  bits[9:0] = current V_TOTAL
- * Write: ignored; RTL selects adaptive timing for the Pocket LCD and fixed
- * NTSC/PAL timing when Analogizer/SNAC owns the adapter path. */
-#define VRR_V_TOTAL         REG32(SYSREG_BASE + 0xDC)
+/* Legacy aliases. */
+#define VRR_V_TOTAL         VIDEO_VTOTAL
 
-/* VRR swap hold readback (0xE0)
- * Write: ignored; fixed-rate adapter mode forces hold to 0. */
+/* Retired swap-hold readback (0xE0): reads zero, writes ignored. */
 #define VRR_SWAP_HOLD       REG32(SYSREG_BASE + 0xE0)
 
 /* Datatable slot size query:

@@ -29,6 +29,15 @@ void of_irq_init(void) {
     external_cb = 0;
     vsync_cb = 0;
     link_rx_cb = 0;
+    IRQ_MASK = 0;
+    INPUT_IRQ_MASK = 0;
+    TIMER_CTRL = 0;
+}
+
+void of_irq_enable_cpu(void) {
+    uint32_t mie = (1u << 7) | (1u << 11);  /* MTIE | MEIE */
+    __asm__ volatile("csrw mie, %0" :: "r"(mie) : "memory");
+    __asm__ volatile("csrsi mstatus, 0x8" ::: "memory");
 }
 
 void of_irq_register_external(void (*cb)(uint32_t source)) {

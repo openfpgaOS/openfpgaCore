@@ -3,9 +3,10 @@
 ## Goal
 
 Move the GPU `transluc[]` lookup table out of on-chip BRAM/M10K and into the
-Pocket external SRAM. The purpose is to free the current 32 KB M10K allocation
-for future GPU scratch experiments, especially BRAM framebuffer or stripe
-buffering, while preserving byte-identical translucent rendering.
+Pocket external SRAM while preserving byte-identical translucent rendering.
+The later BRAM framebuffer experiment was implemented and measured, but did
+not improve rendering performance; that 64 KB M10K budget is now reassigned
+to the CPU D-cache instead.
 
 ## Current State
 
@@ -26,6 +27,12 @@ Properties:
 
 The external SRAM controller already exists in `src/fpga/targets/pocket/core_top.v`,
 but SRAM is currently tied off because the old Z-buffer path was removed.
+
+## Target End State
+
+The active architecture keeps the translucency LUT in external SRAM and renders
+directly to SDRAM.  The intermediate framebuffer section below is retained only
+as historical design context for the measured experiment.
 
 ## SRAM Layout
 
@@ -146,6 +153,169 @@ endcase
 - Keep existing generic span and triangle behavior unchanged except for
   transluc lookup latency.
 
+## Retired Intermediate BRAM Framebuffer State
+
+After the translucency table was moved to SRAM, the freed M10Ks were tested as
+a GPU-local render target. Hardware validation showed no useful performance
+gain, so this mode has been retired and the recovered 64 KB M10K budget is now
+reserved for the CPU D-cache.
+
+### Motivation
+
+Duke-style vertical spans create scattered SDRAM writes. A BRAM framebuffer
+turns those writes into local memory updates, then performs one sequential
+copy-back to SDRAM at frame end. The copy-back can use the existing SDRAM burst
+write path, making the expensive part predictable and linear.
+
+The experiment implemented the feature as a generic GPU capability:
+
+- Span renderers can target BRAM instead of SDRAM.
+- Triangle renderers can target BRAM instead of SDRAM.
+- Final presentation still uses the normal SDRAM framebuffer and scanout path.
+
+### Memory Sizing
+
+8-bit indexed framebuffer sizes:
+
+```text
+320x200 = 64,000 bytes = 16,000 32-bit words
+320x240 = 76,800 bytes = 19,200 32-bit words
+```
+
+The current translucency BRAM is 32 KB. Moving it to SRAM frees enough M10K for
+roughly 102 full-width 320-pixel lines, but not a complete 320x200 or 320x240
+framebuffer by itself.
+
+Measured implementation shape:
+
+```text
+BRAM FB width:      320 pixels
+BRAM FB height:     configurable, start with 100 or 128 lines
+BRAM FB format:     8-bit indexed
+BRAM FB stride:     320 bytes
+Copy-back target:   SDRAM framebuffer base + y_offset * 320
+```
+
+The useful target was a full 320x200 Duke-sized framebuffer, but even with the
+larger 64 KB buffer the measured result did not improve Duke or gpudemo enough
+to justify the extra GPU control logic.
+
+### Rendering Model
+
+The retired design added a GPU render-target mode:
+
+```text
+TARGET_SDRAM_FB   existing behavior
+TARGET_BRAM_FB    write GPU fragments into intermediate BRAM
+```
+
+The SDK exposed this as a policy instead of forcing apps to manually sequence
+the copy-back every frame:
+
+```c
+of_gpu_set_framebuffer_policy(OF_GPU_FB_POLICY_DIRECT);     // default
+of_gpu_set_framebuffer_policy(OF_GPU_FB_POLICY_BRAM_AUTO);  // transparent BRAM when the window fits
+of_gpu_configure_bram_framebuffer(width, height, src_off, src_stride, dst_stride);
+```
+
+In the current code, these APIs are compatibility shims only:
+`OF_GPU_FB_POLICY_BRAM_AUTO` is accepted as direct SDRAM rendering, and
+`OF_GPU_BRAM_FB_BYTES` reports zero.
+
+When `TARGET_BRAM_FB` was enabled in the experiment:
+
+- Opaque writes update BRAM.
+- Masked writes skip transparent pixels and update BRAM.
+- Translucent writes read destination from BRAM, use the SRAM transluc table,
+  then write the blended byte back to BRAM.
+- GPU commands that address rows outside the configured BRAM window either:
+  - fall back to SDRAM writes, or
+  - are clipped/rejected by command setup.
+
+The production path keeps direct SDRAM targeting for all spans and triangles.
+
+### Copy-Back Command
+
+The retired design used a GPU command to copy the BRAM framebuffer window to
+SDRAM:
+
+```text
+CMD_COPY_BRAM_FB_TO_SDRAM
+  word 0: opcode / flags
+  word 1: SDRAM framebuffer byte base
+  word 2: source BRAM byte offset
+  word 3: byte count, rounded down to 32-bit words
+```
+
+The command and its decoder state have been removed from the active RTL.
+
+Copy ordering:
+
+1. GPU renders into BRAM.
+2. GPU copies BRAM window to SDRAM.
+3. GPU fence/flip only retires after the copy-back writes have committed.
+4. CPU HUD/menu overlays may then draw directly to SDRAM, or the app may
+   include them in the BRAM window if they fit.
+
+The active SDK does not queue copy-back work because the BRAM target is retired.
+
+For CPU framebuffer access, transparency still requires an app/engine hook.
+An engine that reads the framebuffer or draws CPU overlays after GPU work must
+call:
+
+```c
+of_gpu_prepare_framebuffer_for_cpu();
+```
+
+In the active direct-SDRAM path this is equivalent to `of_gpu_finish()`.
+
+### Clear/Load Policy
+
+The BRAM target needs explicit contents.
+
+Supported policies:
+
+- `CLEAR_BRAM_FB`: clear the BRAM window to a color before rendering.
+- `LOAD_SDRAM_TO_BRAM`: optional future command for effects that need the
+  previous SDRAM framebuffer contents.
+- `UNDEFINED`: fastest path, only valid when every destination pixel in the
+  BRAM window is overwritten before copy-back.
+
+This state machine is not present in the active RTL.
+
+### Hazards And Constraints
+
+- Do not let scanout read BRAM directly; scanout remains SDRAM-only.
+- Do not add CPU access to BRAM FB.
+- Do not route BRAM FB through the existing command ring BRAM.
+- Do not require a full-screen BRAM framebuffer for correctness.
+- Preserve direct SDRAM target behavior as the production default; the active
+  SDK accepts `OF_GPU_FB_POLICY_BRAM_AUTO` as a no-op compatibility value.
+- Fence and flip semantics must still mean all pixels are visible in SDRAM.
+- If translucent rendering targets BRAM, destination readback must come from
+  BRAM, not SDRAM.
+
+### Expected Performance
+
+Best case:
+
+- Large reduction in scattered SDRAM writes for vertical-span-heavy scenes.
+- More predictable frame-end SDRAM traffic.
+- Potential to use SDRAM bursts during copy-back in a later optimized copy
+  engine.
+
+Costs:
+
+- Fixed copy-back bandwidth every frame.
+- Extra BRAM write/read muxing in GPU.
+- Extra copy FSM pressure.
+- If the BRAM window is small, scenes with many pixels outside the window still
+  use SDRAM writes and gain less.
+
+Measured result: the extra muxing and copy-back machinery were not a win.  The
+current design favors a simpler direct-SDRAM GPU and spends the recovered M10K
+on CPU cache capacity.
+
 ## Expected Tradeoffs
 
 Benefits:
@@ -189,8 +359,12 @@ Hardware validation:
 - Confirm M10K count drops by the expected amount.
 - Confirm LAB increase remains acceptable.
 - Test Duke normal gameplay and translucent effects.
+- Keep BRAM framebuffer compatibility shims no-op unless the experiment is
+  deliberately revived.
 
 ## Implementation Order
+
+Stage 1, SRAM translucency:
 
 1. Add SRAM ports to `gpu_core`.
 2. Wire GPU SRAM ports to `sram_controller` in `core_top.v`.
@@ -199,3 +373,15 @@ Hardware validation:
 5. Delete `transluc_bram`.
 6. Update acceptance tests.
 7. Build and compare resource usage.
+
+Historical stage 2, intermediate BRAM framebuffer:
+
+1. Implemented a parameterized BRAM framebuffer block.
+2. Added GPU render-target mode selection.
+3. Routed opaque/masked/translucent FB writes to BRAM in BRAM mode.
+4. Added `CMD_COPY_BRAM_FB_TO_SDRAM`.
+5. Preserved fence/flip ordering through copy-back completion.
+6. Added byte-exact tests comparing SDRAM direct render vs BRAM render plus
+   copy-back.
+7. Measured Duke and gpudemo.
+8. Retired the path after it failed to improve performance.

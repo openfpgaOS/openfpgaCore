@@ -32,6 +32,10 @@
 #include "verilated.h"
 #include "verilated_vcd_c.h"
 
+#ifndef GPU_TEST_ENABLE_TRIANGLES
+#define GPU_TEST_ENABLE_TRIANGLES 0
+#endif
+
 // ============================================================================
 // 0. Globals
 // ============================================================================
@@ -191,6 +195,15 @@ static void wait_for_dma_idle(int timeout = 200000) {
             mmio_read(REG_STATUS));
 }
 
+static void wait_for_transluc_idle(int timeout = 200000) {
+    for (int t = 0; t < timeout; t++) {
+        if ((mmio_read(REG_STATUS) & (1 << 3)) == 0) return;
+        tick();
+    }
+    fprintf(stderr, "wait_for_transluc_idle: timeout (status=0x%08x)\n",
+            mmio_read(REG_STATUS));
+}
+
 static void ring_write(uint32_t w) {
     pending_stream.push_back(w);
 }
@@ -312,8 +325,10 @@ static void upload_transluc_table(const std::vector<uint8_t> &table32k) {
                    | ((uint32_t)table32k[i + 1] << 8)
                    | ((uint32_t)table32k[i + 2] << 16)
                    | ((uint32_t)table32k[i + 3] << 24);
+        wait_for_transluc_idle();
         mmio_write(REG_TRANSLUC_DATA, w);
     }
+    wait_for_transluc_idle();
 }
 
 /* A simple deterministic transluc table: blend[src][dst] = (src+dst)/2.
@@ -349,7 +364,10 @@ static void emit_raw_command(uint8_t cmd,
     for (uint32_t w : payload) ring_write(w);
 }
 
-/* Span-as-15-words representation (RTL wire format, no SDK packing). */
+static const uint8_t SPAN_PERSP = 1 << 5;
+
+/* Span representation used by the scalar wire formats.  Affine spans encode
+ * words 0..8; perspective spans append words 9..14. */
 struct SpanWire {
     uint32_t fb_addr;
     uint32_t tex_addr;
@@ -381,8 +399,15 @@ static SpanWire make_span() {
     return s;
 }
 
-static std::vector<uint32_t> encode_span_wire(const SpanWire &s) {
-    std::vector<uint32_t> w(15);
+static uint32_t span_payload_words(const SpanWire &s) {
+    return (s.flags & SPAN_PERSP) ? 15u : 9u;
+}
+
+static std::vector<uint32_t> encode_span_wire(const SpanWire &s,
+                                              uint32_t payload_words = 0) {
+    if (payload_words == 0)
+        payload_words = span_payload_words(s);
+    std::vector<uint32_t> w(payload_words);
     w[0]  = s.fb_addr;
     w[1]  = s.tex_addr;
     w[2]  = (uint32_t)s.s;
@@ -395,18 +420,28 @@ static std::vector<uint32_t> encode_span_wire(const SpanWire &s) {
           | (uint32_t)s.flags;
     w[7]  = ((uint32_t)(uint16_t)s.fb_stride << 16) | (uint32_t)s.tex_width;
     w[8]  = ((uint32_t)s.tex_h_mask << 16) | (uint32_t)s.tex_w_mask;
-    w[9]  = (uint32_t)s.sZ;
-    w[10] = (uint32_t)s.tZ;
-    w[11] = (uint32_t)s.zinv;
-    w[12] = (uint32_t)s.sZstep;
-    w[13] = (uint32_t)s.tZstep;
-    w[14] = (uint32_t)s.zinv_step;
+    if (payload_words >= 15u) {
+        w[9]  = (uint32_t)s.sZ;
+        w[10] = (uint32_t)s.tZ;
+        w[11] = (uint32_t)s.zinv;
+        w[12] = (uint32_t)s.sZstep;
+        w[13] = (uint32_t)s.tZstep;
+        w[14] = (uint32_t)s.zinv_step;
+    }
     return w;
 }
 
 /* Emit one span as a scalar CMD_DRAW_SPAN_GROUP payload. */
 static void emit_span_raw(const SpanWire &s) {
     auto w = encode_span_wire(s);
+    ring_cmd(0x43, (uint32_t)w.size());
+    for (uint32_t x : w) ring_write(x);
+}
+
+/* Explicit legacy 15-word affine form, kept as a fallback/compatibility
+ * acceptance test while the SDK emits compact 9-word affine spans. */
+static void emit_span_raw_legacy15(const SpanWire &s) {
+    auto w = encode_span_wire(s, 15u);
     ring_cmd(0x43, 15);
     for (uint32_t x : w) ring_write(x);
 }
@@ -426,7 +461,7 @@ static void emit_batch_dma(const std::vector<SpanWire> &spans) {
     stream.reserve(spans.size() * 16u);
     for (const auto &s : spans) {
         auto w = encode_span_wire(s);
-        stream.push_back((0x43u << 24) | 15u);
+        stream.push_back((0x43u << 24) | (uint32_t)w.size());
         stream.insert(stream.end(), w.begin(), w.end());
     }
 
@@ -540,6 +575,100 @@ static void emit_span_group_stream_raw(const std::vector<SpanGroupWire> &spans) 
         emit_span_group_raw(s);
 }
 
+struct SpanGroupVarWire {
+    uint32_t fb_addr;
+    uint32_t tex_addr[8];
+    int32_t  t[8];
+    int32_t  tstep[8];
+    uint16_t y_start[8];
+    uint16_t count[8];
+    uint8_t  flags;
+    uint8_t  colormap_id;
+    uint8_t  lane_count;
+    int16_t  fb_stride;
+    int16_t  lane_delta;
+    uint16_t tex_width;
+    uint16_t tex_w_mask;
+    uint16_t tex_h_mask;
+    uint8_t  light[8];
+};
+
+static SpanGroupVarWire make_span_group_var() {
+    SpanGroupVarWire s {};
+    s.lane_count = 4;
+    s.lane_delta = 1;
+    s.fb_stride = 320;
+    s.tex_width = 1;
+    return s;
+}
+
+static const uint32_t SPAN_GROUP_VARCOUNT_PAYLOAD_WORDS = 22;
+
+static uint16_t span_group_var_row_count(const SpanGroupVarWire &s,
+                                         int first_lane,
+                                         int lane_count) {
+    uint32_t rows = 0;
+    for (int lane = 0; lane < lane_count && lane < 4; lane++) {
+        int src = first_lane + lane;
+        if (s.count[src] != 0) {
+            uint32_t end = (uint32_t)s.y_start[src] + (uint32_t)s.count[src];
+            if (end > rows)
+                rows = end;
+        }
+    }
+    return (rows > 0xFFFFu) ? 0xFFFFu : (uint16_t)rows;
+}
+
+static std::vector<uint32_t>
+encode_span_group_var_wire_chunk(const SpanGroupVarWire &s,
+                                 int first_lane,
+                                 int lane_count) {
+    std::vector<uint32_t> w(SPAN_GROUP_VARCOUNT_PAYLOAD_WORDS);
+    uint16_t y_start[4] = {};
+    uint16_t count[4] = {};
+    uint32_t lights = 0;
+
+    w[0] = s.fb_addr + (uint32_t)((int32_t)s.lane_delta * first_lane);
+    w[1] = ((uint32_t)span_group_var_row_count(s, first_lane, lane_count) << 16)
+         | ((uint32_t)s.flags << 8)
+         | (((uint32_t)lane_count & 0xF) << 4)
+         | (uint32_t)(s.colormap_id & 0xF);
+    w[2] = ((uint32_t)(uint16_t)s.fb_stride << 16)
+         | (uint32_t)(uint16_t)s.lane_delta;
+    w[3] = (uint32_t)s.tex_width;
+    w[4] = ((uint32_t)s.tex_h_mask << 16) | (uint32_t)s.tex_w_mask;
+    for (int lane = 0; lane < lane_count && lane < 4; lane++) {
+        int src = first_lane + lane;
+        y_start[lane] = s.y_start[src];
+        count[lane] = s.count[src];
+        w[9 + lane] = s.tex_addr[src];
+        w[13 + lane] = (uint32_t)s.t[src];
+        w[17 + lane] = (uint32_t)s.tstep[src];
+        lights |= ((uint32_t)s.light[src] & 0x3Fu) << (lane * 8);
+    }
+    w[5] = ((uint32_t)y_start[1] << 16) | (uint32_t)y_start[0];
+    w[6] = ((uint32_t)y_start[3] << 16) | (uint32_t)y_start[2];
+    w[7] = ((uint32_t)count[1] << 16) | (uint32_t)count[0];
+    w[8] = ((uint32_t)count[3] << 16) | (uint32_t)count[2];
+    w[21] = lights;
+    return w;
+}
+
+static void emit_span_group_var_raw(const SpanGroupVarWire &s) {
+    int first_lane = 0;
+    int lanes_left = span_group_effective_lanes(s.lane_count);
+    while (lanes_left > 0) {
+        int chunk_lanes = span_group_next_chunk_lanes(lanes_left);
+        auto w = encode_span_group_var_wire_chunk(s, first_lane, chunk_lanes);
+        if (span_group_var_row_count(s, first_lane, chunk_lanes) != 0) {
+            ring_cmd(0x43, SPAN_GROUP_VARCOUNT_PAYLOAD_WORDS);
+            for (uint32_t x : w) ring_write(x);
+        }
+        first_lane += chunk_lanes;
+        lanes_left -= chunk_lanes;
+    }
+}
+
 /* Submit a raw mixed command stream through the doorbell-DMA path.  The
  * stream already includes command headers; hardware pulls the words into
  * ring BRAM and publishes wrptr only after the final word lands, with no
@@ -591,7 +720,8 @@ static SpanSdk make_sdk_span() {
 }
 
 static std::vector<uint32_t> encode_span_sdk(const SpanSdk &s) {
-    std::vector<uint32_t> w(15);
+    uint32_t payload_words = (s.flags & SPAN_PERSP) ? 15u : 9u;
+    std::vector<uint32_t> w(payload_words);
     w[0]  = s.fb_addr;
     w[1]  = s.tex_addr;
     w[2]  = (uint32_t)s.s;
@@ -605,18 +735,20 @@ static std::vector<uint32_t> encode_span_sdk(const SpanSdk &s) {
             (uint32_t)s.flags;
     w[7]  = ((uint32_t)(uint16_t)s.fb_stride << 16) | (uint32_t)s.tex_width;
     w[8]  = ((uint32_t)s.tex_h_mask << 16) | (uint32_t)s.tex_w_mask;
-    w[9]  = (uint32_t)s.sdivz;
-    w[10] = (uint32_t)s.tdivz;
-    w[11] = (uint32_t)s.zi_persp;
-    w[12] = (uint32_t)s.sdivz_step;
-    w[13] = (uint32_t)s.tdivz_step;
-    w[14] = (uint32_t)s.zi_step;
+    if (payload_words >= 15u) {
+        w[9]  = (uint32_t)s.sdivz;
+        w[10] = (uint32_t)s.tdivz;
+        w[11] = (uint32_t)s.zi_persp;
+        w[12] = (uint32_t)s.sdivz_step;
+        w[13] = (uint32_t)s.tdivz_step;
+        w[14] = (uint32_t)s.zi_step;
+    }
     return w;
 }
 
 static void emit_span_sdk_encoded(const SpanSdk &s) {
     auto w = encode_span_sdk(s);
-    ring_cmd(0x43, 15);
+    ring_cmd(0x43, (uint32_t)w.size());
     for (uint32_t x : w) ring_write(x);
 }
 
@@ -815,6 +947,32 @@ struct FbModel {
             s.tstep = q.tstep[lane];
             s.colormap_id = q.colormap_id;
             s.count = q.count;
+            s.light = q.light[lane];
+            s.flags = q.flags;
+            s.fb_stride = q.fb_stride;
+            s.tex_width = q.tex_width ? q.tex_width : 1;
+            s.tex_w_mask = q.tex_w_mask;
+            s.tex_h_mask = q.tex_h_mask;
+            apply_span_affine(s, q.colormap_id & 0xF);
+        }
+    }
+
+    void apply_span_group_var_affine(const SpanGroupVarWire &q) {
+        int lane_count = (q.lane_count == 2 || q.lane_count == 4 ||
+                          q.lane_count == 8) ? q.lane_count : 1;
+        for (int lane = 0; lane < lane_count; lane++) {
+            SpanWire s = make_span();
+            s.fb_addr  = q.fb_addr
+                       + (uint32_t)((int32_t)q.lane_delta * lane)
+                       + (uint32_t)((int32_t)q.fb_stride *
+                                    (int32_t)q.y_start[lane]);
+            s.tex_addr = q.tex_addr[lane];
+            s.s = 0;
+            s.t = q.t[lane];
+            s.sstep = 0;
+            s.tstep = q.tstep[lane];
+            s.colormap_id = q.colormap_id;
+            s.count = q.count[lane];
             s.light = q.light[lane];
             s.flags = q.flags;
             s.fb_stride = q.fb_stride;
@@ -1863,6 +2021,64 @@ static void test_span_raw_mask_zero_means_identity() {
                              FB_BASE_BYTE, 320, 0, 0, 64, 1, 4);
 }
 
+static void test_span_compact_affine_matches_legacy15() {
+    printf("TEST span_compact_affine_matches_legacy15\n");
+    gpu_init();
+    auto m = preload_with_sentinel();
+
+    std::vector<uint8_t> tex(64);
+    for (int i = 0; i < 64; i++)
+        tex[i] = (uint8_t)(0x30 + i);
+    upload_texture(TEX_BASE_BYTE, tex);
+    m.snapshot_from_sdram();
+
+    cmd_set_fb(FB_BASE_BYTE, 320);
+    m.st_fb_addr = FB_BASE_BYTE;
+
+    SpanWire compact = make_span();
+    compact.fb_addr = FB_BASE_BYTE + 4u * 320u + 8u;
+    compact.tex_addr = TEX_BASE_BYTE;
+    compact.s = 0;
+    compact.t = 0;
+    compact.sstep = 0x10000;
+    compact.tstep = 0;
+    compact.count = 16;
+    compact.tex_width = 64;
+    compact.tex_w_mask = 0x3F;
+    compact.flags = 0;
+
+    SpanWire legacy = compact;
+    legacy.fb_addr = FB_BASE_BYTE + 5u * 320u + 8u;
+
+    emit_span_raw(compact);
+    emit_span_raw_legacy15(legacy);
+    m.apply_draw_span(compact);
+    m.apply_draw_span(legacy);
+
+    if (!submit_and_wait()) {
+        check_fail("span_compact_affine_matches_legacy15", "timeout");
+        return;
+    }
+
+    compare_fb_region("span_compact_affine_matches_legacy15.fb",
+                      m, FB_BASE_BYTE, 320, 8, 4, 16, 2);
+
+    int mismatches = 0;
+    for (int x = 0; x < 16; x++) {
+        uint8_t a = sdram_read_byte(FB_BASE_BYTE + 4u * 320u + 8u + x);
+        uint8_t b = sdram_read_byte(FB_BASE_BYTE + 5u * 320u + 8u + x);
+        if (a != b)
+            mismatches++;
+    }
+    if (mismatches == 0) {
+        check_pass("span_compact_affine_matches_legacy15.rows_equal");
+    } else {
+        char buf[96];
+        snprintf(buf, sizeof(buf), "%d row byte mismatches", mismatches);
+        check_fail("span_compact_affine_matches_legacy15.rows_equal", buf);
+    }
+}
+
 // ---- Section 10: DRAW_SPAN with COLORMAP -----------------------------------
 static void test_span_colormap_explicit_per_span_id() {
     printf("TEST span_colormap_explicit_per_span_id\n");
@@ -2543,6 +2759,127 @@ static void test_span_group_explicit_colormap_slot() {
                       FB_BASE_BYTE, 320, 11, 20, 4, q.count);
 }
 
+static void test_span_group_varcount_opaque_equals_spans() {
+    printf("TEST span_group_varcount_opaque_equals_spans\n");
+    gpu_init();
+    auto m = preload_with_sentinel();
+
+    for (int lane = 0; lane < 4; lane++) {
+        std::vector<uint8_t> tex(16);
+        for (int i = 0; i < 16; i++)
+            tex[i] = (uint8_t)(0x20 + lane * 0x20 + i);
+        upload_texture(TEX_BASE_BYTE + (uint32_t)lane * 0x100, tex);
+    }
+    m.snapshot_from_sdram();
+
+    SpanGroupVarWire q = make_span_group_var();
+    q.fb_addr = FB_BASE_BYTE + 28 * 320 + 20;
+    q.flags = 0;
+    q.colormap_id = 0;
+    const uint16_t starts[4] = {0, 1, 0, 3};
+    const uint16_t counts[4] = {7, 4, 5, 2};
+    for (int lane = 0; lane < 4; lane++) {
+        q.tex_addr[lane] = TEX_BASE_BYTE + (uint32_t)lane * 0x100;
+        q.t[lane] = lane << 16;
+        q.tstep[lane] = 0x10000;
+        q.y_start[lane] = starts[lane];
+        q.count[lane] = counts[lane];
+        q.light[lane] = 0;
+    }
+
+    emit_span_group_var_raw(q);
+    m.apply_span_group_var_affine(q);
+    if (!submit_and_wait()) {
+        check_fail("span_group_varcount_opaque_equals_spans", "timeout");
+        return;
+    }
+    compare_fb_region("span_group_varcount_opaque_equals_spans.fb", m,
+                      FB_BASE_BYTE, 320, 20, 28, 4,
+                      span_group_var_row_count(q, 0, 4));
+}
+
+static void test_span_group_varcount_masked_equals_spans() {
+    printf("TEST span_group_varcount_masked_equals_spans\n");
+    gpu_init();
+    auto m = preload_with_sentinel();
+
+    for (int lane = 0; lane < 4; lane++) {
+        std::vector<uint8_t> tex = {
+            (uint8_t)(0x30 + lane), 0xFF,
+            (uint8_t)(0x40 + lane), (uint8_t)(0x50 + lane),
+            0xFF, (uint8_t)(0x60 + lane), (uint8_t)(0x70 + lane)
+        };
+        upload_texture(TEX_BASE_BYTE + (uint32_t)lane * 0x100, tex);
+    }
+    m.snapshot_from_sdram();
+
+    SpanGroupVarWire q = make_span_group_var();
+    q.fb_addr = FB_BASE_BYTE + 52 * 320 + 6;
+    q.flags = 0x4;  // SKIP_ZERO
+    q.colormap_id = 0;
+    const uint16_t starts[4] = {2, 0, 1, 4};
+    const uint16_t counts[4] = {5, 7, 3, 2};
+    for (int lane = 0; lane < 4; lane++) {
+        q.tex_addr[lane] = TEX_BASE_BYTE + (uint32_t)lane * 0x100;
+        q.t[lane] = 0;
+        q.tstep[lane] = 0x10000;
+        q.y_start[lane] = starts[lane];
+        q.count[lane] = counts[lane];
+        q.light[lane] = 0;
+    }
+
+    emit_span_group_var_raw(q);
+    m.apply_span_group_var_affine(q);
+    if (!submit_and_wait()) {
+        check_fail("span_group_varcount_masked_equals_spans", "timeout");
+        return;
+    }
+    compare_fb_region("span_group_varcount_masked_equals_spans.fb", m,
+                      FB_BASE_BYTE, 320, 6, 52, 4,
+                      span_group_var_row_count(q, 0, 4));
+}
+
+static void test_span_group_varcount_explicit_colormap_slot() {
+    printf("TEST span_group_varcount_explicit_colormap_slot\n");
+    gpu_init();
+    auto m = preload_with_sentinel();
+
+    for (int row = 0; row < 4; row++)
+        upload_palookup_const_row(7, (uint8_t)row, (uint8_t)(0xA0 + row));
+    for (int lane = 0; lane < 4; lane++) {
+        std::vector<uint8_t> tex(8);
+        for (int i = 0; i < 8; i++)
+            tex[i] = (uint8_t)(0x08 + lane * 8 + i);
+        upload_texture(TEX_BASE_BYTE + (uint32_t)lane * 0x100, tex);
+    }
+    m.snapshot_from_sdram();
+
+    SpanGroupVarWire q = make_span_group_var();
+    q.fb_addr = FB_BASE_BYTE + 78 * 320 + 12;
+    q.flags = 0x1;      // COLORMAP
+    q.colormap_id = 7;  // explicit slot
+    const uint16_t starts[4] = {0, 3, 1, 2};
+    const uint16_t counts[4] = {4, 3, 5, 1};
+    for (int lane = 0; lane < 4; lane++) {
+        q.tex_addr[lane] = TEX_BASE_BYTE + (uint32_t)lane * 0x100;
+        q.t[lane] = 0;
+        q.tstep[lane] = 0x10000;
+        q.y_start[lane] = starts[lane];
+        q.count[lane] = counts[lane];
+        q.light[lane] = (uint8_t)lane;
+    }
+
+    emit_span_group_var_raw(q);
+    m.apply_span_group_var_affine(q);
+    if (!submit_and_wait()) {
+        check_fail("span_group_varcount_explicit_colormap_slot", "timeout");
+        return;
+    }
+    compare_fb_region("span_group_varcount_explicit_colormap_slot.fb", m,
+                      FB_BASE_BYTE, 320, 12, 78, 4,
+                      span_group_var_row_count(q, 0, 4));
+}
+
 static void test_span_group_stream_two_payloads() {
     printf("TEST span_group_stream_two_payloads\n");
     gpu_init();
@@ -2750,11 +3087,17 @@ static void test_command_stream_dma_mixed_span_span_group() {
     auto append = [&stream](const std::vector<uint32_t> &words) {
         stream.insert(stream.end(), words.begin(), words.end());
     };
-    stream.push_back((0x43u << 24) | 15u);
-    append(encode_span_wire(s0));
+    {
+        auto w = encode_span_wire(s0);
+        stream.push_back((0x43u << 24) | (uint32_t)w.size());
+        append(w);
+    }
     append_span_group_stream_raw(stream, q);
-    stream.push_back((0x43u << 24) | 15u);
-    append(encode_span_wire(s1));
+    {
+        auto w = encode_span_wire(s1);
+        stream.push_back((0x43u << 24) | (uint32_t)w.size());
+        append(w);
+    }
 
     emit_command_stream_dma(stream);
     m.apply_draw_span(s0);
@@ -2839,8 +3182,8 @@ static void test_triangle_uses_colormap_slot_zero() {
     }
 }
 
-static void test_triangle_full_words_emit_bursts_only_for_triangles() {
-    printf("TEST triangle_full_words_emit_bursts_only_for_triangles\n");
+static void test_framebuffer_writes_remain_single_beat() {
+    printf("TEST framebuffer_writes_remain_single_beat\n");
     gpu_init();
     preload_with_sentinel();
     upload_palookup_identity_row(0, 0);
@@ -2862,12 +3205,22 @@ static void test_triangle_full_words_emit_bursts_only_for_triangles() {
     emit_span_raw(s);
 
     if (!submit_and_wait()) {
-        check_fail("triangle_full_words_emit_bursts_only_for_triangles.scalar", "timeout");
+        check_fail("framebuffer_writes_remain_single_beat.scalar", "timeout");
         return;
     }
 
     uint32_t burst_after_scalar = tb->dbg_aw_burst_count;
 
+    if (burst_after_scalar == burst_before)
+        check_pass("framebuffer_writes_remain_single_beat.scalar_no_burst");
+    else {
+        char buf[128];
+        snprintf(buf, sizeof(buf), "burst count changed on scalar span: %u -> %u",
+                 burst_before, burst_after_scalar);
+        check_fail("framebuffer_writes_remain_single_beat.scalar_no_burst", buf);
+    }
+
+#if GPU_TEST_ENABLE_TRIANGLES
     ring_cmd(0x30, 19);
     ring_write(3);
     auto vert = [](int16_t x, int16_t y, int32_t s, int32_t t) {
@@ -2883,29 +3236,21 @@ static void test_triangle_full_words_emit_bursts_only_for_triangles() {
     vert(8, 40, 0,       7 << 16);
 
     if (!submit_and_wait()) {
-        check_fail("triangle_full_words_emit_bursts_only_for_triangles.triangle", "timeout");
+        check_fail("framebuffer_writes_remain_single_beat.triangle", "timeout");
         return;
     }
 
     uint32_t burst_after_tri = tb->dbg_aw_burst_count;
-    if (burst_after_scalar == burst_before)
-        check_pass("triangle_full_words_emit_bursts_only_for_triangles.scalar_no_burst");
-    else {
-        char buf[128];
-        snprintf(buf, sizeof(buf), "burst count changed on scalar span: %u -> %u",
-                 burst_before, burst_after_scalar);
-        check_fail("triangle_full_words_emit_bursts_only_for_triangles.scalar_no_burst", buf);
-    }
-
-    if (burst_after_tri > burst_after_scalar && tb->dbg_aw_max_len >= 1)
-        check_pass("triangle_full_words_emit_bursts_only_for_triangles.triangle_burst");
+    if (burst_after_tri == burst_after_scalar)
+        check_pass("framebuffer_writes_remain_single_beat.triangle_no_burst");
     else {
         char buf[128];
         snprintf(buf, sizeof(buf),
-                 "expected triangle burst count to rise and max AWLEN>=1: %u -> %u, max=%u",
+                 "burst count changed on triangle: %u -> %u, max=%u",
                  burst_after_scalar, burst_after_tri, (unsigned)tb->dbg_aw_max_len);
-        check_fail("triangle_full_words_emit_bursts_only_for_triangles.triangle_burst", buf);
+        check_fail("framebuffer_writes_remain_single_beat.triangle_no_burst", buf);
     }
+#endif
 }
 
 // ---- Section 16: FLIP ------------------------------------------------------
@@ -3266,11 +3611,15 @@ int main(int argc, char **argv) {
     test_set_fb_two_bases();
     test_set_fb_unusual_stride();
     test_set_texture_does_not_affect_direct_span();
+#if GPU_TEST_ENABLE_TRIANGLES
     test_set_texture_via_triangle();
     test_set_texture_width_via_triangle();
+#endif
     test_scalar_span_explicit_colormap_slots();
     test_per_span_colormap_explicit_slots();
+#if GPU_TEST_ENABLE_TRIANGLES
     test_triangle_no_global_skip_zero();
+#endif
     test_clear_color_replication();
     test_clear_drains_framebuffer_writes();
     test_clear_no_op_when_flag_clear();
@@ -3281,6 +3630,7 @@ int main(int argc, char **argv) {
     test_span_raw_count_4096_truncation();
     test_span_raw_negative_stride();
     test_span_raw_mask_zero_means_identity();
+    test_span_compact_affine_matches_legacy15();
     test_span_colormap_explicit_per_span_id();
     test_span_colormap_light_wraps_mod_64();
     test_skip_zero_only_discards_0xff();
@@ -3297,13 +3647,18 @@ int main(int argc, char **argv) {
     test_span_group_aligned_texture_cache_thrash();
     test_span_group_masked_equals_four_spans();
     test_span_group_explicit_colormap_slot();
+    test_span_group_varcount_opaque_equals_spans();
+    test_span_group_varcount_masked_equals_spans();
+    test_span_group_varcount_explicit_colormap_slot();
     test_span_group_stream_two_payloads();
     test_span_group_two_lane_masked();
     test_span_group_eight_lane_colormap();
     test_batch_dma_equals_inline();
     test_command_stream_dma_mixed_span_span_group();
+#if GPU_TEST_ENABLE_TRIANGLES
     test_triangle_uses_colormap_slot_zero();
-    test_triangle_full_words_emit_bursts_only_for_triangles();
+#endif
+    test_framebuffer_writes_remain_single_beat();
     test_flip_no_writes_pulses_immediately();
 
     // ---- Combination tests ----

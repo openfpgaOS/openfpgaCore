@@ -21,6 +21,14 @@
 #include "verilated_vcd_c.h"
 #include "liveness_watchdog.h"
 
+#ifndef GPU_TEST_ENABLE_TRIANGLES
+#define GPU_TEST_ENABLE_TRIANGLES 0
+#endif
+
+#ifndef GPU_TEST_ENABLE_PERSP
+#define GPU_TEST_ENABLE_PERSP 0
+#endif
+
 static Vtb_gpu *tb;
 static VerilatedVcdC *trace;
 static uint64_t sim_time = 0;
@@ -132,6 +140,19 @@ static bool wait_dma_idle(int timeout_cycles = 1000000) {
     }
     if (timeout_cycles <= 0) {
         printf("  FAIL DMA upload did not go idle before command upload\n");
+        fail_count++;
+        return false;
+    }
+    return true;
+}
+
+static bool wait_transluc_idle(int timeout_cycles = 1000000) {
+    while ((mmio_read(5) & 0x8u) && timeout_cycles > 0) {
+        tick();
+        timeout_cycles--;
+    }
+    if (timeout_cycles <= 0) {
+        printf("  FAIL translucency SRAM upload did not go idle\n");
         fail_count++;
         return false;
     }
@@ -695,10 +716,10 @@ static void test_cmd_flip_slave_pending_gates(void) {
 //   (b) the slave's swap_pending stays high for too many vsyncs
 //       (means CMD_FLIP gate is wedged).
 //
-// The slave state machine, ~1:1 with axi_periph_slave.v lines 728-744:
+// The slave state machine, ~1:1 with axi_periph_slave.v:
 //   if (fb_swap_pending && vsync_rising) {
-//     if (vrr_hold_counter > 0) vrr_hold_counter--;
-//     else { fb_display_idx = fb_ready_idx; fb_swap_pending = 0; }
+//     fb_display_idx = fb_ready_idx;
+//     fb_swap_pending = 0;
 //   }
 //   if (gpu_swap_req) {
 //     fb_ready_idx = gpu_swap_idx;
@@ -2958,7 +2979,9 @@ static void test_gpudemo_persp_mode1_high_angle(void) {
 static void transluc_upload_word(uint32_t byte_addr, uint32_t word) {
     // byte_addr must be word-aligned.
     mmio_write(8, byte_addr & 0x7FFC);
+    wait_transluc_idle();
     mmio_write(9, word);
+    wait_transluc_idle();
 }
 
 // Upload all 32 KB of transluc[] from a CPU-side byte array.  The CPU
@@ -2970,8 +2993,10 @@ static void transluc_upload_full(const uint8_t *table32kb) {
                    | ((uint32_t)table32kb[byte_addr + 1] <<  8)
                    | ((uint32_t)table32kb[byte_addr + 2] << 16)
                    | ((uint32_t)table32kb[byte_addr + 3] << 24);
+        wait_transluc_idle();
         mmio_write(9, w);
     }
+    wait_transluc_idle();
 }
 
 // Test TRL1: deterministic LUT, single span, no fb_acc bypass case
@@ -7804,7 +7829,10 @@ int main(int argc, char **argv) {
      * after ~300 frames in a deterministic Verilator environment. */
     test_gpudemo_mode0_replay();
 
-    // Perspective spans
+    // Perspective spans.  The production span-only profile currently
+    // compiles perspective correction out of gpu_core.v; enable these
+    // explicitly for full-GPU experiments.
+#if GPU_TEST_ENABLE_PERSP
     test_persp_constant_z();
     test_persp_two_segments();
     test_persp_varying_z();
@@ -7817,12 +7845,16 @@ int main(int argc, char **argv) {
     test_persp_long_corridor_monotonic();
     test_persp_span_clz_boundary();
     test_gpudemo_persp_mode1_high_angle();
+#endif
     test_transluc_lut_basic();
     test_transluc_overdraw();
     test_transluc_blend_raw_hazard();
     test_transluc_no_blend_interleave();
 
-    // Triangle tests
+    // Triangle tests.  The production span-only profile compiles the
+    // triangle rasterizer out of gpu_core.v, so keep these behind an
+    // explicit test macro for full-GPU experiments.
+#if GPU_TEST_ENABLE_TRIANGLES
     test_triangle_flat();
     test_triangle_degenerate();
     test_triangle_textured();
@@ -7842,9 +7874,11 @@ int main(int argc, char **argv) {
     test_triangle_batch_disjoint_fb();
     test_triangle_batch_fan32();
     test_gpudemo_cube_replay();
+#endif
     test_span_partial_word_handoff();
     test_span_partial_reverse_stride();
     test_span_back_to_back_columns();
+#if GPU_TEST_ENABLE_TRIANGLES
     test_triangle_persp_reference_match();
     test_triangle_persp_v0_offset();
     test_triangle_persp_multi();
@@ -7861,11 +7895,14 @@ int main(int argc, char **argv) {
     test_triangle_gouraud_light_flat_from_v0();
     test_triangle_affine_cw_winding();
     test_triangle_mask_bleed_from_span();
+#endif
+#if GPU_TEST_ENABLE_PERSP
     test_persp_long_oblique_span();
     test_persp_high_magnitude_overflow();
     test_persp_quake_d_scan_repro();
     test_persp_tiny_zinv_precision();
     test_persp_sadjust_offset();
+#endif
 
     printf("\n=== Results: %d passed, %d failed ===\n",
            pass_count, fail_count);

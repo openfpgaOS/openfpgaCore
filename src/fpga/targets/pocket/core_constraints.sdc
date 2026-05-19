@@ -15,16 +15,14 @@
 #   mp_ram general[1] -> clk_ram_chip       (100 MHz 243°)
 #   mp_ram general[2] -> clk_cram           (unconnected since v2 memory arch)
 #
-# Unused PLL counters are omitted from this group list — referencing them
-# triggered Critical Warning (332012) "unmatched clock" from Quartus.
+# Unused PLL counters are omitted from this group list.  Referencing unused
+# counters produces unmatched-clock warnings and can hide real timing issues.
 set_clock_groups -asynchronous \
  -group { bridge_spiclk } \
  -group { clk_74a } \
  -group { clk_74b } \
  -group { ic|mp1|mf_pllbase_inst|altera_pll_i|general[0].gpll~PLL_OUTPUT_COUNTER|divclk } \
  -group { ic|mp1|mf_pllbase_inst|altera_pll_i|general[2].gpll~PLL_OUTPUT_COUNTER|divclk } \
- -group { ic|mp1|mf_pllbase_inst|altera_pll_i|general[3].gpll~PLL_OUTPUT_COUNTER|divclk \
-          ic|mp1|mf_pllbase_inst|altera_pll_i|general[4].gpll~PLL_OUTPUT_COUNTER|divclk } \
  -group { ic|mp_ram|altera_pll_i|general[0].gpll~PLL_OUTPUT_COUNTER|divclk \
           ic|mp_ram|altera_pll_i|general[1].gpll~PLL_OUTPUT_COUNTER|divclk }
 
@@ -76,3 +74,8 @@ set_multicycle_path -from [get_registers {*VexiiRiscv*|execute_ctrl2_up_COMPLETI
 set_multicycle_path -from [get_registers {*VexiiRiscv*|execute_ctrl2_up_COMPLETION_AT_*}] \
                     -to   [get_registers {*FpuAddSharedPlugin_logic_pip_node_1*}] \
                     -hold 1
+
+# The GPU triangle rasterizer is currently disabled in the production
+# span-only profile, so its DSP input-shadow constraints are intentionally
+# absent.  If the triangle path is restored, also restore the narrow hold-only
+# exceptions for tri_A/tri_B -> tri_A_dsp_in/tri_B_dsp_in.

@@ -56,7 +56,7 @@ help:
 	@echo "      /_/_/_/___\\___/_/ |_|"
 	@echo "     / __ \\/ __/"
 	@echo "    / /_/ /\\ \\"
-	@echo "    \\____/___/  \033[93mv0.3\033[0m OS"
+	@echo "    \\____/___/  \033[93mv0.4\033[0m OS"
 	@printf "$(C_RESET)\n"
 	@printf "  $(C_HEAD)Target: $(TARGET)$(C_RESET)\n\n"
 	@printf "  $(C_HEAD)Build:$(C_RESET)\n"

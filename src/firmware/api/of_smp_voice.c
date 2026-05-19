@@ -181,6 +181,32 @@ static int clamp_midi7(int v)
     return v;
 }
 
+static int midi_velocity_to_gain(int velocity)
+{
+    int v = clamp_midi7(velocity);
+    if (v <= 0) return 0;
+
+    int linear = (v << 1) + 1;
+    if (linear > 255) linear = 255;
+
+    /* Gentle perceptual lift for low/mid MIDI velocities.  A pure sqrt-like
+     * curve makes soft notes too loud; this keeps 75% of the old linear
+     * response and blends in 25% of a quadratic ease-out curve.
+     *
+     * Examples:
+     *   v=32:  65 ->  77
+     *   v=64: 129 -> 145
+     *   v=96: 193 -> 205
+     *   v=127:       255
+     */
+    int inv = 127 - v;
+    int ease = 255 - ((inv * inv * 255 + (127 * 127 / 2)) / (127 * 127));
+    int gain = ((linear * 3) + ease + 2) >> 2;
+    if (gain > 255) gain = 255;
+    if (gain < 0) gain = 0;
+    return gain;
+}
+
 /* ------------------------------------------------------------------ */
 /* Envelope helpers                                                   */
 /* ------------------------------------------------------------------ */
@@ -657,18 +683,17 @@ int smp_voice_note_on(const ofsf_zone_t *zone, int midi_ch, int note,
     v->zone = zone;
     v->midi_ch = (uint8_t)midi_ch;
     v->note = (uint8_t)note;
-    v->velocity = (uint8_t)velocity;
+    v->velocity = (uint8_t)clamp_midi7(velocity);
     v->sustain_held = 0;
     v->mixer_voice = OF_MIXER_HANDLE_INVALID;
     v->age = tick_counter;
 
-    /* Pre-bake voice_base_vol = (vel_scale × initial_attn_scale) >> 8.
+    /* Pre-bake voice_base_vol = (velocity_gain × initial_attn_scale) >> 8.
      * One u8 field now replaces the two multiplies the old compute_vol_lr
      * did per tick, and matches the awe_voice_t.voice_base_vol the AWE
      * fabric reads from voice-state RAM (Phase 3 onward). */
     {
-        int vel_scale = (velocity * 2) + 1;
-        if (vel_scale > 255) vel_scale = 255;
+        int vel_scale = midi_velocity_to_gain(velocity);
         int attn_scale = zone ? zone->initial_attn_scale : 255;
         int bv = (vel_scale * attn_scale) >> 8;
         if (bv > 255) bv = 255;

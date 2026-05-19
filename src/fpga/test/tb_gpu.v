@@ -75,6 +75,18 @@ wire        gpu_wr_wlast;
 wire        gpu_wr_bvalid;
 
 // ============================================================
+// GPU SRAM scratch signals
+// ============================================================
+wire        gpu_sram_rd;
+wire        gpu_sram_wr;
+wire [21:0] gpu_sram_addr;
+wire [31:0] gpu_sram_wdata;
+wire [3:0]  gpu_sram_wstrb;
+wire [31:0] gpu_sram_rdata;
+wire        gpu_sram_busy;
+wire        gpu_sram_rdata_valid;
+
+// ============================================================
 // GPU Core
 // ============================================================
 gpu_core gpu (
@@ -100,6 +112,15 @@ gpu_core gpu (
     .m_wr_wstrb(gpu_wr_wstrb),
     .m_wr_wlast(gpu_wr_wlast),
     .m_wr_bvalid(gpu_wr_bvalid),
+    // SRAM scratch
+    .sram_rd(gpu_sram_rd),
+    .sram_wr(gpu_sram_wr),
+    .sram_addr(gpu_sram_addr),
+    .sram_wdata(gpu_sram_wdata),
+    .sram_wstrb(gpu_sram_wstrb),
+    .sram_rdata(gpu_sram_rdata),
+    .sram_busy(gpu_sram_busy),
+    .sram_rdata_valid(gpu_sram_rdata_valid),
     // CMD_FLIP side-port
     .gpu_swap_req(gpu_swap_req),
     .gpu_swap_idx(gpu_swap_idx),
@@ -119,6 +140,58 @@ gpu_core gpu (
     .dbg_tri_det(dbg_tri_det),
     .dbg_frag(dbg_frag)
 );
+
+// ============================================================
+// SRAM Model (word-level, GPU private scratch)
+// ============================================================
+reg [31:0] sram_mem [0:65535];
+reg        sram_busy_r;
+reg        sram_rvalid_r;
+reg [1:0]  sram_delay;
+reg        sram_op_read;
+reg [15:0] sram_addr_r;
+reg [31:0] sram_wdata_r;
+reg [3:0]  sram_wstrb_r;
+
+assign gpu_sram_busy = sram_busy_r;
+assign gpu_sram_rdata_valid = sram_rvalid_r;
+assign gpu_sram_rdata = sram_mem[sram_addr_r];
+
+always @(posedge clk) begin
+    if (!reset_n) begin
+        sram_busy_r   <= 1'b0;
+        sram_rvalid_r <= 1'b0;
+        sram_delay    <= 2'd0;
+        sram_op_read  <= 1'b0;
+        sram_addr_r   <= 16'd0;
+        sram_wdata_r  <= 32'd0;
+        sram_wstrb_r  <= 4'd0;
+    end else begin
+        sram_rvalid_r <= 1'b0;
+        if (!sram_busy_r && (gpu_sram_rd || gpu_sram_wr)) begin
+            sram_busy_r  <= 1'b1;
+            sram_delay   <= 2'd2;
+            sram_op_read <= gpu_sram_rd;
+            sram_addr_r  <= gpu_sram_addr[15:0];
+            sram_wdata_r <= gpu_sram_wdata;
+            sram_wstrb_r <= gpu_sram_wstrb;
+        end else if (sram_busy_r) begin
+            if (sram_delay != 2'd0) begin
+                sram_delay <= sram_delay - 2'd1;
+            end else begin
+                if (sram_op_read) begin
+                    sram_rvalid_r <= 1'b1;
+                end else begin
+                    if (sram_wstrb_r[0]) sram_mem[sram_addr_r][7:0]   <= sram_wdata_r[7:0];
+                    if (sram_wstrb_r[1]) sram_mem[sram_addr_r][15:8]  <= sram_wdata_r[15:8];
+                    if (sram_wstrb_r[2]) sram_mem[sram_addr_r][23:16] <= sram_wdata_r[23:16];
+                    if (sram_wstrb_r[3]) sram_mem[sram_addr_r][31:24] <= sram_wdata_r[31:24];
+                end
+                sram_busy_r <= 1'b0;
+            end
+        end
+    end
+end
 
 // ============================================================
 // Simplified SDRAM Model (flat 1M word = 4MB, fast)

@@ -37,6 +37,13 @@ typedef struct of_video_timing {
 #define OF_DISPLAY_FRAMEBUFFER 1  /* Framebuffer only */
 #define OF_DISPLAY_OVERLAY     2  /* White terminal text over framebuffer */
 
+#define OF_VIDEO_VTOTAL_AUTO 0u
+#define OF_VIDEO_VTOTAL_60HZ 262u
+#define OF_VIDEO_VTOTAL_55HZ 285u
+#define OF_VIDEO_VTOTAL_50HZ 310u
+#define OF_VIDEO_VTOTAL_45HZ 340u
+#define OF_VIDEO_VTOTAL_42HZ 375u
+
 #ifndef OF_PC
 
 #include "of_services.h"
@@ -205,6 +212,17 @@ static inline uint32_t of_video_vblank_count(void) {
     return timing.vblank_count;
 }
 
+/* Request a fixed scanout V_TOTAL, or pass OF_VIDEO_VTOTAL_AUTO to restore
+ * the OS automatic render-period policy. Hardware clamps again at the
+ * frame-boundary latch, and Analogizer/SNAC fixed-rate output overrides this
+ * request. */
+static inline void of_video_set_refresh_vtotal(uint32_t v_total) {
+    if (OF_SVC->count > OF_VIDEO_SVC_INDEX(video_set_refresh_vtotal) &&
+        OF_SVC->video_set_refresh_vtotal) {
+        OF_SVC->video_set_refresh_vtotal(v_total);
+    }
+}
+
 /* Get surface as 16-bit for direct color modes */
 static inline uint16_t *of_video_surface16(void) {
     return (uint16_t *)of_video_surface();
@@ -225,6 +243,9 @@ void     of_video_get_timing(of_video_timing_t *out);
 uint64_t of_video_last_vblank_us(void);
 uint64_t of_video_last_flip_presented_us(void);
 uint32_t of_video_vblank_count(void);
+static inline void of_video_set_refresh_vtotal(uint32_t v_total) {
+    (void)v_total;
+}
 
 /* Convert and set a VGA 6-bit palette (768 bytes: R,G,B triplets, 0-63 range).
  * Converts to 8-bit 0x00RRGGBB and sets all 256 entries at once. */

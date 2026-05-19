@@ -215,6 +215,14 @@ wire [3:0]  gpu_wr_wstrb;
 wire        gpu_wr_wlast;
 wire        gpu_wr_bvalid;
 wire [1:0]  gpu_wr_bresp;
+wire        gpu_sram_rd;
+wire        gpu_sram_wr;
+wire [21:0] gpu_sram_addr;
+wire [31:0] gpu_sram_wdata;
+wire [3:0]  gpu_sram_wstrb;
+wire [31:0] gpu_sram_rdata;
+wire        gpu_sram_busy;
+wire        gpu_sram_rdata_valid;
 wire        gpu_swap_req;
 wire [1:0]  gpu_swap_idx;
 wire        slave_swap_pending;
@@ -624,6 +632,15 @@ gpu_core gpu (
     .m_wr_wdata  (gpu_wr_wdata),   .m_wr_wstrb  (gpu_wr_wstrb),
     .m_wr_wlast  (gpu_wr_wlast),
     .m_wr_bvalid (gpu_wr_bvalid),
+    // SRAM scratch
+    .sram_rd     (gpu_sram_rd),
+    .sram_wr     (gpu_sram_wr),
+    .sram_addr   (gpu_sram_addr),
+    .sram_wdata  (gpu_sram_wdata),
+    .sram_wstrb  (gpu_sram_wstrb),
+    .sram_rdata  (gpu_sram_rdata),
+    .sram_busy   (gpu_sram_busy),
+    .sram_rdata_valid(gpu_sram_rdata_valid),
     // MMIO from periph slave
     .reg_wr      (gpu_reg_wr),
     .reg_addr    (gpu_reg_addr),
@@ -637,6 +654,58 @@ gpu_core gpu (
     .busy        (),
     .fence_reached()
 );
+
+// ============================================================
+// SRAM Model (word-level GPU scratch)
+// ============================================================
+reg [31:0] gpu_sram_mem [0:65535];
+reg        gpu_sram_busy_r;
+reg        gpu_sram_rvalid_r;
+reg [1:0]  gpu_sram_delay;
+reg        gpu_sram_op_read;
+reg [15:0] gpu_sram_addr_r;
+reg [31:0] gpu_sram_wdata_r;
+reg [3:0]  gpu_sram_wstrb_r;
+
+assign gpu_sram_busy = gpu_sram_busy_r;
+assign gpu_sram_rdata_valid = gpu_sram_rvalid_r;
+assign gpu_sram_rdata = gpu_sram_mem[gpu_sram_addr_r];
+
+always @(posedge clk_cpu) begin
+    if (!reset_n) begin
+        gpu_sram_busy_r   <= 1'b0;
+        gpu_sram_rvalid_r <= 1'b0;
+        gpu_sram_delay    <= 2'd0;
+        gpu_sram_op_read  <= 1'b0;
+        gpu_sram_addr_r   <= 16'd0;
+        gpu_sram_wdata_r  <= 32'd0;
+        gpu_sram_wstrb_r  <= 4'd0;
+    end else begin
+        gpu_sram_rvalid_r <= 1'b0;
+        if (!gpu_sram_busy_r && (gpu_sram_rd || gpu_sram_wr)) begin
+            gpu_sram_busy_r  <= 1'b1;
+            gpu_sram_delay   <= 2'd2;
+            gpu_sram_op_read <= gpu_sram_rd;
+            gpu_sram_addr_r  <= gpu_sram_addr[15:0];
+            gpu_sram_wdata_r <= gpu_sram_wdata;
+            gpu_sram_wstrb_r <= gpu_sram_wstrb;
+        end else if (gpu_sram_busy_r) begin
+            if (gpu_sram_delay != 2'd0) begin
+                gpu_sram_delay <= gpu_sram_delay - 2'd1;
+            end else begin
+                if (gpu_sram_op_read) begin
+                    gpu_sram_rvalid_r <= 1'b1;
+                end else begin
+                    if (gpu_sram_wstrb_r[0]) gpu_sram_mem[gpu_sram_addr_r][7:0]   <= gpu_sram_wdata_r[7:0];
+                    if (gpu_sram_wstrb_r[1]) gpu_sram_mem[gpu_sram_addr_r][15:8]  <= gpu_sram_wdata_r[15:8];
+                    if (gpu_sram_wstrb_r[2]) gpu_sram_mem[gpu_sram_addr_r][23:16] <= gpu_sram_wdata_r[23:16];
+                    if (gpu_sram_wstrb_r[3]) gpu_sram_mem[gpu_sram_addr_r][31:24] <= gpu_sram_wdata_r[31:24];
+                end
+                gpu_sram_busy_r <= 1'b0;
+            end
+        end
+    end
+end
 
 // ============================================================
 // Debug hoists for the C++ harness

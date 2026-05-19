@@ -65,6 +65,7 @@ module tb_axi_periph (
     output wire        dbg_pal_commit,
     output reg  [7:0]  dbg_pal_commit_count,
     input  wire        pal_busy_in,
+    input  wire [31:0] analogizer_settings_in,
 
     // CMD_FLIP side-port (from gpu_core in production).  Tests can
     // pulse this and read FB_SWAP_CTRL via the AXI slave to verify
@@ -221,6 +222,8 @@ axi_periph_slave dut (
     .audio_fifo_level (audio_fifo_level),
     .audio_fifo_full  (audio_fifo_full),
 
+    .cram0_mode(),
+
     .mix_enable(),
     .mix_voice_wr(),
     .mix_voice_sel(),
@@ -256,7 +259,7 @@ axi_periph_slave dut (
     .uart_rx_byte  (uart_rx_byte),
 
     .app_id         (app_id),
-    .analogizer_settings(32'h00008C43),
+    .analogizer_settings(analogizer_settings_in),
     .analogizer_hoffset (32'hFFFF_FFF9),
     .analogizer_voffset (32'h0000_0005),
     .analogizer_cpu_wr_toggle(dbg_analogizer_wr_toggle),
@@ -291,7 +294,8 @@ axi_periph_slave dut (
     .gpu_reg_rdata(gpu_reg_rdata),
     // No gpu_core in this bench — tie the CMD_FLIP side-port low.
     .gpu_swap_req (gpu_swap_req_in),
-    .gpu_swap_idx (gpu_swap_idx_in)
+    .gpu_swap_idx (gpu_swap_idx_in),
+    .fb_swap_pending_o()
 );
 
 // Hoist FSM internals for debug

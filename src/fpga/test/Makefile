@@ -65,6 +65,7 @@ SRAM_DIR = obj_dir_sram
 # ============================================================
 GPU_SRCS = \
 	tb_gpu.v \
+	altsyncram_stub.v \
 	$(COMMON_DIR)/gpu_core.v \
 	$(COMMON_DIR)/gpu_tex_cache.v
 
@@ -83,7 +84,6 @@ AXI_PERIPH_SRCS = \
 	$(COMMON_DIR)/axi_periph_slave.v \
 	$(COMMON_DIR)/snac_shifter.v \
 	$(COMMON_DIR)/sync_fifo.v \
-	$(COMMON_DIR)/vrr_controller.v \
 	$(TARGET_DIR)/apf/common.v
 
 AXI_PERIPH_CPP = tb_axi_periph_main.cpp
@@ -106,6 +106,24 @@ CRAM0_PREFETCH_DIR = obj_dir_cram0_prefetch
 CRAM0_PREFETCH_FLAGS = -Wno-WIDTHEXPAND -Wno-CASEINCOMPLETE
 
 # ============================================================
+# Pocket bridge command FSM — warm Reset Enter must re-issue the
+# Ready-To-Run target command while reset is held, even when setup_done
+# never drops across an instance switch.
+# ============================================================
+BRIDGE_CMD_SRCS = \
+	tb_core_bridge_cmd.v \
+	altsyncram_stub.v \
+	$(TARGET_DIR)/core_bridge_cmd.v \
+	$(TARGET_DIR)/apf/mf_datatable.v \
+	$(TARGET_DIR)/apf/common.v
+
+BRIDGE_CMD_CPP = tb_core_bridge_cmd_main.cpp
+BRIDGE_CMD_TOP = tb_core_bridge_cmd
+BRIDGE_CMD_DIR = obj_dir_bridge_cmd
+BRIDGE_CMD_FLAGS = -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC -Wno-CASEINCOMPLETE \
+                   -Wno-SYNCASYNCNET -Wno-UNUSEDSIGNAL
+
+# ============================================================
 # GPU chain — exercises (slices + cpu_target_port + axi_periph_slave)
 # in isolation to repro / disprove cr-gpu-and-tri-wedges issue 1.
 # ============================================================
@@ -117,7 +135,6 @@ GPU_CHAIN_SRCS = \
 	$(COMMON_DIR)/axi_periph_slave.v \
 	$(COMMON_DIR)/sync_fifo.v \
 	$(COMMON_DIR)/lsu_axi_shim.v \
-	$(COMMON_DIR)/vrr_controller.v \
 	$(TARGET_DIR)/apf/common.v
 GPU_CHAIN_CPP = tb_gpu_chain_main.cpp
 GPU_CHAIN_TOP = tb_gpu_chain
@@ -184,7 +201,6 @@ SYSTEM_SRCS = \
 	$(COMMON_DIR)/axi_sdram_slave.v \
 	$(COMMON_DIR)/axi_periph_slave.v \
 	$(COMMON_DIR)/sync_fifo.v \
-	$(COMMON_DIR)/vrr_controller.v \
 	$(COMMON_DIR)/snac_shifter.v \
 	$(COMMON_DIR)/gpu_core.v \
 	$(COMMON_DIR)/gpu_tex_cache.v \
@@ -204,9 +220,9 @@ SYSTEM_FLAGS = -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC -Wno-CASEINCOMPLETE \
 # Targets
 # ============================================================
 .PHONY: all sdram sdram-serialize sdram-native2 sdram-all sram gpu gpu-floor gpu-gpudemo gpu-acceptance gpu-acceptance-single gpu-acceptance-burst2 gpu-acceptance-all gpu-chain \
-        axi-periph cram0-prefetch audio audio-mixer arbiter system run run-sram build clean
+        axi-periph cram0-prefetch bridge-cmd audio audio-mixer arbiter system run run-sram build clean
 
-all: sdram-all sram gpu axi-periph cram0-prefetch audio audio-mixer arbiter
+all: sdram-all sram gpu axi-periph cram0-prefetch bridge-cmd audio audio-mixer arbiter
 
 # --- SDRAM ---
 sdram: $(SDRAM_DIR)/V$(SDRAM_TOP)
@@ -350,6 +366,17 @@ $(CRAM0_PREFETCH_DIR)/V$(CRAM0_PREFETCH_TOP): $(CRAM0_PREFETCH_SRCS) $(CRAM0_PRE
 		--top-module $(CRAM0_PREFETCH_TOP) --Mdir $(CRAM0_PREFETCH_DIR) \
 		-I$(COMMON_DIR) \
 		$(CRAM0_PREFETCH_SRCS) $(CRAM0_PREFETCH_CPP)
+
+# --- Pocket bridge command FSM ---
+bridge-cmd: $(BRIDGE_CMD_DIR)/V$(BRIDGE_CMD_TOP)
+	@printf "\n=== Pocket bridge command FSM ===\n"
+	./$(BRIDGE_CMD_DIR)/V$(BRIDGE_CMD_TOP)
+
+$(BRIDGE_CMD_DIR)/V$(BRIDGE_CMD_TOP): $(BRIDGE_CMD_SRCS) $(BRIDGE_CMD_CPP)
+	$(VERILATOR) $(VERILATOR_FLAGS) $(BRIDGE_CMD_FLAGS) \
+		--top-module $(BRIDGE_CMD_TOP) --Mdir $(BRIDGE_CMD_DIR) \
+		-I$(COMMON_DIR) \
+		$(BRIDGE_CMD_SRCS) $(BRIDGE_CMD_CPP)
 
 # --- GPU chain (slices + cpu_target_port + axi_periph_slave) ---
 gpu-chain: $(GPU_CHAIN_DIR)/V$(GPU_CHAIN_TOP)

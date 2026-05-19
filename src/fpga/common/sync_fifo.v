@@ -11,7 +11,8 @@
 module sync_fifo #(
     parameter WIDTH = 32,
     parameter DEPTH = 16,
-    parameter ADDR_WIDTH = 4
+    parameter ADDR_WIDTH = 4,
+    parameter RAMSTYLE = ""
 ) (
     input  wire                  clk,
     input  wire                  reset,
@@ -27,7 +28,7 @@ module sync_fifo #(
     output reg  [ADDR_WIDTH:0]   count
 );
 
-reg [WIDTH-1:0] mem [0:DEPTH-1];
+(* ramstyle = RAMSTYLE *) reg [WIDTH-1:0] mem [0:DEPTH-1];
 reg [ADDR_WIDTH-1:0] wr_ptr;
 reg [ADDR_WIDTH-1:0] rd_ptr;
 

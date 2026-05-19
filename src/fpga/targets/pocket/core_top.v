@@ -684,7 +684,8 @@ end
 sync_fifo #(
     .WIDTH(54),
     .DEPTH(BRIDGE_CRAM0_WR_FIFO_DEPTH),
-    .ADDR_WIDTH(BRIDGE_CRAM0_WR_FIFO_AW)
+    .ADDR_WIDTH(BRIDGE_CRAM0_WR_FIFO_AW),
+    .RAMSTYLE("M10K")
 ) bridge_cram0_write_fifo (
     .clk   (clk_74a),
     .reset (!pll_ram_locked_74a),
@@ -1235,15 +1236,6 @@ end
 
 // Bridge SDRAM read path fully removed — bridge never reads SDRAM in v2.
 // Bridge CRAM0 access lives in the ownership-mux block above.
-
-// SRAM unused by the lean GPU (Z buffer dropped in Phase 2.3).  Tie off.
-assign sram_word_rd    = 1'b0;
-assign sram_word_wr    = 1'b0;
-assign sram_word_addr  = 22'b0;
-assign sram_word_wdata = 32'b0;
-assign sram_word_wstrb = 4'b0;
-
-
 
 //
 // host/target command handler
@@ -2456,8 +2448,7 @@ wire        gpu_wr_bvalid;
 // Bridge → SDRAM write path retired in v2 (bridge no longer touches
 // SDRAM; loads/saves bounce through CRAM0 and CPU memcpys the bytes).
 
-// GPU SRAM interface (Z-buffer)
-// gpu_sram_* removed in Phase 2.3 — Z-buffer dropped.
+// GPU SRAM interface: private scratch tables (currently translucency LUT).
 
 // GPU enable (from MMIO GPU_CTRL bit 0, directly in gpu_core)
 wire        gpu_busy;
@@ -2490,7 +2481,15 @@ gpu_core gpu (
     .m_wr_wstrb(gpu_wr_wstrb),
     .m_wr_wlast(gpu_wr_wlast),
     .m_wr_bvalid(gpu_wr_bvalid),
-    // SRAM interface (Z-buffer)
+    // SRAM scratch
+    .sram_rd(sram_word_rd),
+    .sram_wr(sram_word_wr),
+    .sram_addr(sram_word_addr),
+    .sram_wdata(sram_word_wdata),
+    .sram_wstrb(sram_word_wstrb),
+    .sram_rdata(sram_word_rdata),
+    .sram_busy(sram_word_busy),
+    .sram_rdata_valid(sram_word_rdata_valid),
     // MMIO registers
     .reg_wr(gpu_reg_wr),
     .reg_addr(gpu_reg_addr),
@@ -2520,6 +2519,11 @@ assign gpu_fence_reached = 32'b0;
 assign gpu_reg_rdata   = 32'b0;
 assign gpu_swap_req   = 1'b0;
 assign gpu_swap_idx   = 2'b0;
+assign sram_word_rd    = 1'b0;
+assign sram_word_wr    = 1'b0;
+assign sram_word_addr  = 22'b0;
+assign sram_word_wdata = 32'b0;
+assign sram_word_wstrb = 4'b0;
 `endif
 
 

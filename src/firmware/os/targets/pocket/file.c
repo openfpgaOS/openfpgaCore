@@ -38,10 +38,13 @@ static struct {
     int               token;
     uint32_t          length;
     void             *dest;
+    void             *dma_dest;
+    int               bounce_to_dest;
     void            (*callback)(int token, int result);
 } async_state;
 
 static int async_token_counter;
+static uint32_t dma_stage_next;
 
 static void bridge_warmup_once(void) {
     if (bridge_warmed || bridge_warmup_active)
@@ -67,8 +70,11 @@ void of_file_init(void) {
     async_state.token = 0;
     async_state.length = 0;
     async_state.dest = (void *)0;
+    async_state.dma_dest = (void *)0;
+    async_state.bounce_to_dest = 0;
     async_state.callback = (void *)0;
     async_token_counter = 0;
+    dma_stage_next = 0;
 
 #if OF_TARGET_PLATFORM_ID == OF_PLATFORM_SIM
     /* Sim has no bridge model — the warmup DMA below would hang
@@ -683,6 +689,43 @@ int of_file_read_chunked(uint32_t slot_id, uint32_t slot_offset,
  * Async file read — non-blocking DMA with callback
  * ====================================================================== */
 
+static uint32_t align_up_u32(uint32_t value, uint32_t align) {
+    return (value + align - 1u) & ~(align - 1u);
+}
+
+void *of_file_dma_stage_alloc(uint32_t size, uint32_t align) {
+    if (size == 0)
+        return (void *)0;
+
+    if (align < 4u)
+        align = 4u;
+    if ((align & (align - 1u)) != 0)
+        return (void *)0;
+
+    uint32_t off = align_up_u32(dma_stage_next, align);
+    if (off > OF_TARGET_CRAM0_APP_DMA_SIZE ||
+        size > OF_TARGET_CRAM0_APP_DMA_SIZE - off)
+        return (void *)0;
+
+    dma_stage_next = off + size;
+    return (void *)(uintptr_t)(CRAM0_BASE + OF_TARGET_CRAM0_APP_DMA_OFFSET + off);
+}
+
+int of_file_dma_stage_reset(void) {
+    if (async_state.active)
+        return OF_ERR_BUSY;
+    dma_stage_next = 0;
+    return 0;
+}
+
+uint32_t of_file_async_max_read(void) {
+    return DMA_CHUNK_SIZE;
+}
+
+uint32_t of_file_dma_stage_size(void) {
+    return OF_TARGET_CRAM0_APP_DMA_SIZE;
+}
+
 static int async_dest_in_cram0(void *dest, uint32_t length) {
     uint32_t addr = (uintptr_t)dest;
     return addr >= CRAM0_BASE &&
@@ -695,6 +738,8 @@ static void async_complete(uint32_t status) {
     int result = err ? -((int)err) : 0;
 
     void *dest = async_state.dest;
+    void *dma_dest = async_state.dma_dest;
+    int bounce_to_dest = async_state.bounce_to_dest;
     uint32_t length = async_state.length;
     int token = async_state.token;
     void (*cb)(int, int) = async_state.callback;
@@ -702,10 +747,17 @@ static void async_complete(uint32_t status) {
     CRAM0_MODE = CRAM0_MODE_CPU;
     for (volatile int s = 0; s < 8; s++) {}
 
-    of_cache_inval_range(dest, length);
+    /* The bridge DMA target is always CRAM0: either the app-provided staging
+     * buffer or the OS bounce window.  CRAM0 is uncached in the CPU PMA, so
+     * cache maintenance here is both unnecessary and unsafe while the CRAM0
+     * mux is being handed back from the bridge. */
+    if (result == 0 && bounce_to_dest)
+        memcpy(dest, dma_dest, length);
 
     async_state.active = 0;
     async_state.dest = (void *)0;
+    async_state.dma_dest = (void *)0;
+    async_state.bounce_to_dest = 0;
     async_state.length = 0;
     async_state.callback = (void *)0;
     async_state.completed_count++;
@@ -722,8 +774,10 @@ int of_file_read_async(uint32_t slot_id, uint32_t slot_offset,
         return OF_ERR_BUSY;
     if (length > DMA_CHUNK_SIZE)
         return OF_ERR_BAD_RANGE;
-    if (!async_dest_in_cram0(dest, length))
-        return OF_ERR_BAD_RANGE;
+    int direct_cram0 = async_dest_in_cram0(dest, length);
+    void *dma_dest = direct_cram0
+        ? dest
+        : (void *)(uintptr_t)(CRAM0_BASE + OF_TARGET_CRAM0_ASYNC_BOUNCE_OFFSET);
     if (!bridge_warmup_active)
         bridge_warmup_once();
 
@@ -732,10 +786,11 @@ int of_file_read_async(uint32_t slot_id, uint32_t slot_offset,
         != (DS_STATUS_READY | DS_STATUS_WR_IDLE))
         return OF_ERR_BUSY;
 
-    uint32_t bridge_addr = cpu_to_bridge(dest);
+    uint32_t bridge_addr = cpu_to_bridge(dma_dest);
 
-    /* Pre-invalidate cache for the DMA target, then hand CRAM0 to the bridge. */
-    of_cache_inval_range(dest, length);
+    /* The async hardware path only writes CRAM0.  Do not issue CBO operations
+     * for the DMA target: CRAM0 is uncached, and SDRAM destinations are filled
+     * later by CPU memcpy from the internal CRAM0 bounce buffer. */
     CRAM0_MODE = CRAM0_MODE_BRIDGE;
     for (volatile int s = 0; s < 8; s++) {}
 
@@ -744,9 +799,12 @@ int of_file_read_async(uint32_t slot_id, uint32_t slot_offset,
      * quickly once the command reaches the APF host. */
     int token = async_token_counter++;
     async_state.active   = 1;
+    async_state.completed_count = 0;
     async_state.token    = token;
     async_state.length   = length;
     async_state.dest     = dest;
+    async_state.dma_dest = dma_dest;
+    async_state.bounce_to_dest = !direct_cram0;
     async_state.callback = callback;
 
     DS_STATUS = DS_STATUS_IRQ_PENDING;
@@ -759,28 +817,12 @@ int of_file_read_async(uint32_t slot_id, uint32_t slot_offset,
     DS_LENGTH      = length;
     fence();
     DS_COMMAND     = DS_CMD_READ;
-
     fence();
-    for (int i = 0; i < 100; i++) {
-        st = DS_STATUS;
-        if (st & DS_STATUS_ACK) goto accepted;
-        if (!(st & DS_STATUS_READY)) goto accepted;
-    }
 
-    DS_COMMAND = DS_CMD_READ;
-    fence();
-    for (int i = 0; i < 100; i++) {
-        st = DS_STATUS;
-        if (st & DS_STATUS_ACK) goto accepted;
-        if (!(st & DS_STATUS_READY)) goto accepted;
-    }
-
-    async_state.active = 0;
-    async_state.callback = (void *)0;
-    IRQ_MASK &= ~IRQ_MASK_DATASLOT;
-    return OF_ERR_TIMEOUT;
-
-accepted:
+    /* This is intentionally fire-and-return.  ACK is the APF host accepting
+     * the command, not a cheap local "doorbell latched" bit, and it can take
+     * far longer than a few CPU cycles on slow SD cards.  Completion is
+     * reported by the data-slot IRQ or by of_file_async_poll() observing DONE. */
     return token;
 }
 

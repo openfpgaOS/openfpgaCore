@@ -2436,6 +2436,27 @@ static long of_vendor_dispatch(long eid, long fid,
             return sys_mount_iso((const char *)a0, (const char *)a1);
         case OF_FILE_FID_UMOUNT:
             return sys_unmount_path((const char *)a0);
+        case OF_FILE_FID_SLOT_FIND: {
+            if (!a0)
+                return OF_ERR_INVALID_PARAM;
+            if (file_slot_count == 0)
+                dir_probe_slots();
+            uint32_t slot_id = 0;
+            int rc = file_slot_find((const char *)a0, &slot_id);
+            if (rc < 0)
+                return rc;
+            return (long)slot_id;
+        }
+        case OF_FILE_FID_DMA_STAGE_ALLOC: {
+            void *ptr = of_file_dma_stage_alloc((uint32_t)a0, (uint32_t)a1);
+            return ptr ? (long)ptr : OF_ERR_NO_SHMEM;
+        }
+        case OF_FILE_FID_DMA_STAGE_RESET:
+            return of_file_dma_stage_reset();
+        case OF_FILE_FID_ASYNC_MAX_READ:
+            return (long)of_file_async_max_read();
+        case OF_FILE_FID_DMA_STAGE_SIZE:
+            return (long)of_file_dma_stage_size();
         }
         break;
     }

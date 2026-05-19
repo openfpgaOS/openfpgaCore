@@ -62,6 +62,7 @@ static void reset_sequence() {
     tb->dt_query_valid_in = 0;
     tb->snac_pin_in_in  = 0;
     tb->pal_busy_in     = 0;
+    tb->analogizer_settings_in = 0x00008C43u;
     for (int i = 0; i < 10; i++) tick();
     tb->reset_n = 1;
     for (int i = 0; i < 10; i++) tick();
@@ -842,6 +843,32 @@ static void test_analogizer_sysregs() {
     check_eq("analogizer-voffset-wr-data", tb->dbg_analogizer_wr_voffset, 0x0000000Fu);
 }
 
+static void test_video_vtotal_sysreg() {
+    printf("test_video_vtotal_sysreg:\n");
+
+    const uint32_t VIDEO_VTOTAL = 0x400000DCu;
+
+    tb->analogizer_settings_in = 0;
+    for (int i = 0; i < 4; i++) tick();
+
+    check_eq("vtotal-reset-60hz", mmio_read32(VIDEO_VTOTAL), 262u);
+
+    axi_write_single(VIDEO_VTOTAL, 310u);
+    check_eq("vtotal-write-50hz", mmio_read32(VIDEO_VTOTAL), 310u);
+
+    axi_write_single(VIDEO_VTOTAL, 1u);
+    check_eq("vtotal-clamp-low", mmio_read32(VIDEO_VTOTAL), 262u);
+
+    axi_write_single(VIDEO_VTOTAL, 4095u);
+    check_eq("vtotal-clamp-high", mmio_read32(VIDEO_VTOTAL), 375u);
+
+    tb->analogizer_settings_in = 0x00008000u;
+    for (int i = 0; i < 4; i++) tick();
+    check_eq("vtotal-fixed-output-override", mmio_read32(VIDEO_VTOTAL), 262u);
+
+    tb->analogizer_settings_in = 0x00008C43u;
+}
+
 static uint32_t mmio_read32(uint32_t addr) {
     std::vector<uint32_t> r;
     if (!axi_read_burst(addr, 0, r)) {
@@ -1074,6 +1101,7 @@ int main(int argc, char **argv) {
     test_save_dt_commit_toggle();
     test_palette_commit_sysreg();
     test_analogizer_sysregs();
+    test_video_vtotal_sysreg();
     test_snac_shifter_regs();
     test_input_hub();
     test_mixed_bram_periph();

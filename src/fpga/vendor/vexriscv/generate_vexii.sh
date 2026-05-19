@@ -7,7 +7,11 @@
 #
 # Config highlights:
 #   I-cache: 32 KB (256 sets × 2 ways × 64 B line, NL prefetch)
-#   D-cache: 32 KB (256 sets × 2 ways × 64 B line, NO HW prefetch —
+#            readAt=1 / ctrlAt=3 gives the fitter one extra fetch stage
+#            between execute-side backpressure and the M10K read-enable
+#            cone. This recovers much of the old high-Fmax pipeline win
+#            without disabling the proven-safe bypass network.
+#   D-cache: 128 KB (1024 sets × 2 ways × 64 B line, NO HW prefetch —
 #            the `rpt` prefetcher speculated past PMA boundaries and
 #            surfaced bus faults to commit; disabling also frees ~N ALMs
 #            of prefetcher logic and reduces placement pressure.)
@@ -59,15 +63,17 @@ fi
 echo "Generating VexiiRiscv (stock vexiiriscv.Generate, openfpgaOS cache sizing)..."
 cd "$VEXII_DIR"
 
-sbt "Test/runMain vexiiriscv.Generate \
+sbt -Dsbt.server.forcestart=true --batch "Test/runMain vexiiriscv.Generate \
       --xlen=32 \
       --with-rvm --with-rva --with-rvf --with-rvc \
       --with-rvZcbm \
       --with-fetch-l1 --fetch-l1-sets=256 --fetch-l1-ways=2 --fetch-l1-refill-count=2 \
+      --fetch-l1-read-at=1 --fetch-l1-hits-at=2 --fetch-l1-hit-at=2 \
+      --fetch-l1-bank-muxes-at=2 --fetch-l1-bank-mux-at=3 --fetch-l1-ctrl-at=3 \
       --fetch-l1-hardware-prefetch=nl --fetch-axi4 \
-      --with-lsu-l1 --lsu-l1-sets=512 --lsu-l1-ways=2 \
+      --with-lsu-l1 --lsu-l1-sets=1024 --lsu-l1-ways=2 \
       --lsu-l1-refill-count=2 --lsu-l1-writeback-count=2 \
-      --lsu-l1-store-buffer-slots=2 --lsu-l1-store-buffer-ops=32 \
+      --lsu-l1-store-buffer-slots=2 --lsu-l1-store-buffer-ops=16 \
       --lsu-l1-axi4 \
       --lsu-software-prefetch --lsu-hardware-prefetch=nl \
       --with-btb --btb-sets=256 --relaxed-btb --relaxed-btb-hit \

@@ -288,6 +288,7 @@ void services_table_init(void) {
 
     /* Video timing snapshot */
     svc->video_get_timing = of_video_get_timing;
+    svc->video_set_refresh_vtotal = of_video_set_refresh_vtotal;
 }
 
 void services_table_set_smp_bank(const void *base, uint32_t size) {

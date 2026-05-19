@@ -31,12 +31,13 @@ _start:
     la t0, _trap_entry
     csrw mtvec, t0
 
-    /* Enable machine interrupts: MTIE (bit 7) + MEIE (bit 11) in mie,
-     * then set mstatus.MIE (bit 3) to enable global interrupt delivery */
-    li t0, (1 << 7) | (1 << 11)
-    csrw mie, t0
-    li t0, (1 << 3)
-    csrs mstatus, t0
+    /* Keep interrupts globally disabled until the kernel has zeroed BSS,
+     * cleared callback pointers, and initialized the HAL.  Enabling MEIE
+     * here lets a stale pending external interrupt run through irq_handler
+     * while .sbss still contains previous SDRAM contents, which can turn a
+     * stale callback word into a wild jump. */
+    csrw mie, zero
+    csrci mstatus, 0x8
 
     /* Initialize thread pointer (tp) for musl TLS.
      * musl's __pthread_self() returns (tp - sizeof(struct __pthread)).

@@ -78,7 +78,7 @@ module altsyncram #(
     input  wire                     clocken1,
     input  wire                     clocken2,
     input  wire                     clocken3,
-    output wire                     eccstatus,
+    output wire [2:0]               eccstatus,
     output wire [width_b-1:0]       q_b,
     input  wire                     rden_a,
     input  wire                     rden_b
@@ -153,6 +153,6 @@ end
 assign q_a = (outdata_reg_a == "UNREGISTERED") ? q_a_reg : q_a_reg2;
 assign q_b = (outdata_reg_b == "UNREGISTERED") ? q_b_reg : q_b_reg2;
 
-assign eccstatus = 1'b0;
+assign eccstatus = 3'b000;
 
 endmodule

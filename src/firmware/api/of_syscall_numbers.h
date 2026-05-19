@@ -233,6 +233,11 @@ enum of_file_fid {
     OF_FILE_FID_ASYNC_BUSY = 2,
     OF_FILE_FID_MOUNT = 3,
     OF_FILE_FID_UMOUNT = 4,
+    OF_FILE_FID_SLOT_FIND = 5,
+    OF_FILE_FID_DMA_STAGE_ALLOC = 6,
+    OF_FILE_FID_DMA_STAGE_RESET = 7,
+    OF_FILE_FID_ASYNC_MAX_READ = 8,
+    OF_FILE_FID_DMA_STAGE_SIZE = 9,
 };
 
 #ifdef __cplusplus
