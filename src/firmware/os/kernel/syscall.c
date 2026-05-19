@@ -2330,7 +2330,7 @@ static long of_vendor_dispatch(long eid, long fid,
             if (a0)
                 memcpy((void *)a0, of_analogizer_get_state(),
                        sizeof(of_analogizer_state_t));
-            return of_analogizer_is_enabled();
+            return 0;
         }
         break;
 

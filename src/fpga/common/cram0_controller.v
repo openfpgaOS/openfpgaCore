@@ -1,4 +1,4 @@
-// CRAM0 Controller wrapper for VexRiscv CPU
+// CRAM0 Controller wrapper for VexiiRiscv CPU
 // Provides 32-bit word interface using two 16-bit PSRAM accesses
 // Uses the cram1_phy module (CRAM0/CRAM1 share the AS1C8M16PL phy).
 

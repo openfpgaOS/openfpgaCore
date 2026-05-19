@@ -30,6 +30,12 @@ extern "C" {
 #include "of_cache.h"
 #endif
 
+#if defined(__GNUC__) || defined(__clang__)
+#define OF_GPU_DEPRECATED(msg) __attribute__((deprecated(msg)))
+#else
+#define OF_GPU_DEPRECATED(msg)
+#endif
+
 /* ================================================================
  * Constants
  * ================================================================ */
@@ -212,10 +218,10 @@ static uint32_t _gpu_base;
  * is now assigned to the CPU D-cache. */
 
 #define OF_GPU_FB_TARGET_SDRAM 0u
-#define OF_GPU_FB_TARGET_BRAM  1u  /* accepted by the SDK, forced to SDRAM */
+#define OF_GPU_FB_TARGET_BRAM  1u  /* retired compatibility value */
 
 #define OF_GPU_FB_POLICY_DIRECT    0u  /* of_gpu_set_framebuffer() targets SDRAM */
-#define OF_GPU_FB_POLICY_BRAM_AUTO 1u  /* retired; accepted as DIRECT */
+#define OF_GPU_FB_POLICY_BRAM_AUTO 1u  /* retired compatibility value */
 
 #define OF_GPU_BRAM_FB_BYTES       0u
 
@@ -463,8 +469,8 @@ static inline void of_gpu_init(void) {
     /* Resolve the GPU MMIO base from the runtime caps descriptor.
      * Must be called after main() (or after the SDK constructors run)
      * so _of_caps_ptr is populated. Apps that try to drive the GPU
-     * before of_gpu_init() will dereference a NULL _gpu_base and
-     * fault clearly. */
+     * before of_gpu_init() may write address 0, which is valid BRAM on
+     * Pocket, so always initialize before touching GPU helpers or MMIO. */
     _gpu_base = of_get_caps()->gpu_base;
 
     _gpu_wrptr = 0;
@@ -705,7 +711,8 @@ static inline void of_gpu_debug_snapshot(of_gpu_debug_snapshot_t *snap,
 
 /* ---- State commands ---- */
 
-static inline void of_gpu_set_framebuffer_policy(uint32_t policy) {
+static inline void OF_GPU_DEPRECATED("BRAM framebuffer policy is retired; render to SDRAM")
+of_gpu_set_framebuffer_policy(uint32_t policy) {
     (void)policy;
     if (_gpu_fb_policy == OF_GPU_FB_POLICY_DIRECT)
         return;
@@ -713,16 +720,20 @@ static inline void of_gpu_set_framebuffer_policy(uint32_t policy) {
     _gpu_state_valid &= ~OF_GPU_STATE_FB;
 }
 
-static inline uint32_t of_gpu_get_framebuffer_policy(void) {
+static inline uint32_t OF_GPU_DEPRECATED("BRAM framebuffer policy is retired; render to SDRAM")
+of_gpu_get_framebuffer_policy(void) {
     return OF_GPU_FB_POLICY_DIRECT;
 }
 
-/* Compatibility shim: the BRAM framebuffer target is retired. */
-static inline void of_gpu_configure_bram_framebuffer(uint16_t width_bytes,
-                                                     uint16_t height_rows,
-                                                     uint16_t src_byte_offset,
-                                                     uint16_t src_stride,
-                                                     uint16_t dst_stride) {
+/* Compatibility shim: the BRAM framebuffer target is retired.  These helpers
+ * deliberately do not allocate or route through BRAM; new code should target
+ * SDRAM directly with of_gpu_set_framebuffer(). */
+static inline void OF_GPU_DEPRECATED("BRAM framebuffer path is retired; use of_gpu_set_framebuffer")
+of_gpu_configure_bram_framebuffer(uint16_t width_bytes,
+                                  uint16_t height_rows,
+                                  uint16_t src_byte_offset,
+                                  uint16_t src_stride,
+                                  uint16_t dst_stride) {
     (void)width_bytes;
     (void)height_rows;
     (void)src_byte_offset;
@@ -732,6 +743,8 @@ static inline void of_gpu_configure_bram_framebuffer(uint16_t width_bytes,
 
 static inline void of_gpu_set_framebuffer_target(uint32_t addr, uint16_t stride,
                                                  uint32_t target) {
+    /* The BRAM target was measured and removed; keep this argument only so
+     * older source still compiles while always emitting an SDRAM SET_FB. */
     (void)target;
     if ((_gpu_state_valid & OF_GPU_STATE_FB) &&
         _gpu_state_fb_addr == addr &&
@@ -750,8 +763,8 @@ static inline void of_gpu_set_framebuffer(uint32_t addr, uint16_t stride) {
     of_gpu_set_framebuffer_target(addr, stride, OF_GPU_FB_TARGET_SDRAM);
 }
 
-static inline void of_gpu_set_framebuffer_bram(uint32_t sdram_addr,
-                                               uint16_t stride) {
+static inline void OF_GPU_DEPRECATED("BRAM framebuffer path is retired; use of_gpu_set_framebuffer")
+of_gpu_set_framebuffer_bram(uint32_t sdram_addr, uint16_t stride) {
     of_gpu_set_framebuffer_target(sdram_addr, stride, OF_GPU_FB_TARGET_SDRAM);
 }
 
@@ -823,12 +836,13 @@ static inline void of_gpu_clear_rect_strided(uint32_t start_byte_addr,
     _gpu_ring_write(((uint32_t)stride << 16) | (uint32_t)color);
 }
 
-static inline void of_gpu_copy_bram_fb_to_sdram(uint32_t dst_byte_addr,
-                                                uint16_t src_byte_offset,
-                                                uint16_t width_bytes,
-                                                uint16_t height_rows,
-                                                uint16_t src_stride,
-                                                uint16_t dst_stride) {
+static inline void OF_GPU_DEPRECATED("BRAM framebuffer path is retired; render to SDRAM directly")
+of_gpu_copy_bram_fb_to_sdram(uint32_t dst_byte_addr,
+                             uint16_t src_byte_offset,
+                             uint16_t width_bytes,
+                             uint16_t height_rows,
+                             uint16_t src_stride,
+                             uint16_t dst_stride) {
     (void)dst_byte_addr;
     (void)src_byte_offset;
     (void)width_bytes;

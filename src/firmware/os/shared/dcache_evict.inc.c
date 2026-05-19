@@ -2,15 +2,15 @@
  * shared/dcache_evict.inc.c — D-cache flush by conflict eviction
  *
  * Pure-software flush of the L1 D-cache by reading 64 KB of SDRAM
- * (one byte per cache line). The VexiiRiscv L1 is 4-way associative,
- * 256 sets × 4 ways × 64-byte lines = 64 KB total, so streaming
+ * (one byte per cache line). The VexiiRiscv L1 is 2-way associative,
+ * 512 sets × 2 ways × 64-byte lines = 64 KB total, so streaming
  * 64 KB through any contiguous SDRAM region forces every line out.
  *
  * Used by:
  *   - boot ROM: flushes deferload writes before jumping to os_main
  *
- * Why no `cbo.flush`: the VexiiRiscv core in this target doesn't
- * implement Zicbom, so we have to evict the hard way.
+ * Why no `cbo.flush`: the boot ROM shares this file with builds that
+ * cannot rely on Zicbom being available before the OS cache HAL starts.
  *
  * Provided by the includer:
  *   SHARED_ATTR — section attribute (or empty)

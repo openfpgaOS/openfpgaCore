@@ -1,7 +1,7 @@
 /*
  * openfpgaOS Hardware Mixer HAL
  *
- * 48-voice hardware PCM mixer with stereo 8-bit volume,
+ * 32-voice hardware PCM mixer with stereo 8-bit volume,
  * 16.16 fixed-point resampling, forward/bidi looping,
  * 16-bit and 8-bit signed sample support.
  */
@@ -158,11 +158,7 @@ void of_mixer_set_filter_h(of_mixer_handle_t handle,
 uint32_t of_mixer_poll_ended_h(of_mixer_handle_t *out_handles,
                                uint32_t max_handles);
 
-/* Per-voice SVF low-pass filter.
- *   cutoff_q016 : Q0.16 SVF cutoff coefficient (raw register value).
- *                 65535 ≈ wide-open, lower values close it down.
- *   q           : 0..255 resonance (lower = more damping in HW).
- *   enable      : 0 = bypass, 1 = filter active. */
+/* Retired per-voice SVF filter surface.  Kept as a compatibility no-op. */
 void of_mixer_set_filter(int voice, int cutoff_q016, int q, int enable);
 
 /* Sample memory bump allocator */

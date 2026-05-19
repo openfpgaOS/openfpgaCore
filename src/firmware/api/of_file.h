@@ -93,20 +93,20 @@ static inline uint32_t of_file_dma_stage_size(void) {
 static inline int of_file_read_async(int slot_id, uint32_t offset,
                                      void *dest, uint32_t length,
                                      void (*callback)(int token, int result)) {
-    return (int)of_ecall5(OF_EID_FILE, OF_FILE_FID_READ_ASYNC,
-                          slot_id, (long)offset, (long)dest,
-                          (long)length, (long)callback).value;
+    return of_sbi_ret_int(of_ecall5(OF_EID_FILE, OF_FILE_FID_READ_ASYNC,
+                                    slot_id, (long)offset, (long)dest,
+                                    (long)length, (long)callback));
 }
 
 /* Poll async read progress. Optional on Pocket: completion is IRQ-driven.
  * Returns 1 once per completed read, 0 otherwise. */
 static inline int of_file_async_poll(void) {
-    return (int)of_ecall0(OF_EID_FILE, OF_FILE_FID_ASYNC_POLL).value;
+    return of_sbi_ret_int(of_ecall0(OF_EID_FILE, OF_FILE_FID_ASYNC_POLL));
 }
 
 /* Check if an async read is in flight. */
 static inline int of_file_async_busy(void) {
-    return (int)of_ecall0(OF_EID_FILE, OF_FILE_FID_ASYNC_BUSY).value;
+    return of_sbi_ret_int(of_ecall0(OF_EID_FILE, OF_FILE_FID_ASYNC_BUSY));
 }
 
 #endif /* OF_PC */

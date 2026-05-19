@@ -1,7 +1,7 @@
 //
 // User core top-level (openfpgaOS)
 //
-// VexiiRiscv CPU with AXI4 bus architecture, 48-voice PCM mixer.
+// VexiiRiscv CPU with AXI4 bus architecture, 32-voice PCM mixer.
 // Instantiated by the real top-level: apf_top
 //
 

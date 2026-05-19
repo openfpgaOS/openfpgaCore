@@ -33,7 +33,7 @@ static OF_FASTDATA uint32_t    tick_counter;
 /* ------------------------------------------------------------------ */
 /* Tick-cost probe (Task #10)                                         */
 /* ------------------------------------------------------------------ */
-/* NOTE: VexRiscv here does not expose rdcycle to user mode, so we use
+/* NOTE: VexiiRiscv here does not expose rdcycle to user mode, so we use
  * OF_SVC->timer_get_us() (direct service-table call — NOT the ecall
  * of_time_us(), which would nest-trap when smp_voice_tick runs from
  * the MIDI timer ISR). Stats are in microseconds. */
@@ -55,7 +55,6 @@ static OF_FASTDATA uint8_t  tick_ch_active[16];
  * Incremented at actual HW-write sites (post-cache) and from
  * smp_voice_tick_record_pump(), then snapshotted by get_stats and zeroed
  * by reset_stats.  All in BRAM: the writes happen in the ISR. */
-static OF_FASTDATA uint32_t stat_filter_writes;
 static OF_FASTDATA uint32_t stat_rate_writes;
 static OF_FASTDATA uint32_t stat_vol_writes;
 static OF_FASTDATA uint32_t stat_pump_count;
@@ -63,7 +62,6 @@ static OF_FASTDATA uint32_t stat_pump_interval_max_us;
 static OF_FASTDATA uint32_t stat_pump_interval_min_us = 0xFFFFFFFFu;
 static OF_FASTDATA uint32_t stat_pump_burst_count;
 static OF_FASTDATA uint32_t stat_pump_budget_exceeded;
-static OF_FASTDATA uint16_t stat_cutoff_delta_max;
 
 /* A single 1 kHz voice tick should stay comfortably below the pump cap. */
 #define SMP_TICK_SPIKE_US  2000u
@@ -84,7 +82,7 @@ void smp_voice_tick_get_stats(smp_tick_stats_t *out)
     for (int i = 0; i < 16; i++)
         out->ch_active[i] = tick_ch_active[i];
 
-    out->filter_writes         = stat_filter_writes;
+    out->filter_writes         = 0;
     out->rate_writes           = stat_rate_writes;
     out->vol_writes            = stat_vol_writes;
     out->pump_count            = stat_pump_count;
@@ -92,7 +90,7 @@ void smp_voice_tick_get_stats(smp_tick_stats_t *out)
     out->pump_interval_min_us  = stat_pump_interval_min_us;
     out->pump_burst_count      = stat_pump_burst_count;
     out->pump_budget_exceeded  = stat_pump_budget_exceeded;
-    out->cutoff_delta_max      = stat_cutoff_delta_max;
+    out->cutoff_delta_max      = 0;
 }
 
 void smp_voice_tick_reset_stats(void)
@@ -102,7 +100,6 @@ void smp_voice_tick_reset_stats(void)
     tick_stat_count  = 0;
     tick_active_peak = 0;
 
-    stat_filter_writes        = 0;
     stat_rate_writes          = 0;
     stat_vol_writes           = 0;
     stat_pump_count           = 0;
@@ -110,7 +107,6 @@ void smp_voice_tick_reset_stats(void)
     stat_pump_interval_min_us = 0xFFFFFFFFu;
     stat_pump_burst_count     = 0;
     stat_pump_budget_exceeded = 0;
-    stat_cutoff_delta_max     = 0;
 }
 
 void smp_voice_tick_record_pump(uint32_t elapsed_us, int ticks_fired,

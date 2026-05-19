@@ -155,7 +155,7 @@ struct of_services_table {
      *    The openFPGA manifest identifies data slots by numeric id;
      *    this service lets apps tell the kernel which id holds which
      *    filename so fopen() by name resolves correctly. Overwrites
-     *    any prior mapping for the same filename. Max 16 entries. */
+     *    any prior mapping for the same filename. Max 32 entries. */
     void      (*file_slot_register)(uint32_t slot_id, const char *filename);
 
     /* -- SoundFont preload (append-only, ABI-stable) --

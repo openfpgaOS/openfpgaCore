@@ -119,7 +119,7 @@ The FPGA fabric provides the driver layer:
 - GPU scalar span, native 1/2/4-lane span-group with SDK-level 8-lane
   splitting, batch, clear, flip,
   translucency, and triangle commands
-- 48 kHz hardware PCM mixer
+- 48 kHz, 32-voice hardware PCM mixer
 - APF data-slot read/write and nonvolatile save handling
 - Pocket controls, dock input, keyboard/mouse/controller events, Analogizer,
   and SNAC GPIO/shifter paths
@@ -127,6 +127,24 @@ The FPGA fabric provides the driver layer:
 
 Diagnostic UART/trap output exists for fatal failures and service-host booting,
 but normal production paths should not emit continuous UART traffic.
+
+## GPU Notes
+
+The GPU is optimized for indexed-color software-renderer workloads: BUILD/Doom
+style spans, colormap lookup, masked pixels, translucent spans, clears, flips,
+and textured triangles. Command data is built by the CPU in a cached SDRAM
+scratch buffer, flushed, then pulled into the GPU's 16 KB internal command ring
+by doorbell DMA. The old CPU MMIO command-data path is retired.
+
+The active framebuffer target is SDRAM. The tested intermediate BRAM
+framebuffer path did not improve measured rendering performance, so it has been
+removed from the active RTL. The remaining SDK symbols for BRAM framebuffer
+policy are compatibility shims only; new code should render directly to SDRAM.
+
+The BUILD-style translucency table is GPU-private SRAM, not M10K BRAM. The SDK
+still uploads it through `GPU_TRANSLUC_ADDR` / `GPU_TRANSLUC_DATA`, and the GPU
+uses SRAM lookups during translucent read-modify-write spans. Opaque and masked
+spans do not pay this lookup cost.
 
 ## Hardware Comparison
 

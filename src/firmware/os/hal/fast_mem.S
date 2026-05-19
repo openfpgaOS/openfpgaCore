@@ -3,7 +3,7 @@
  * Pinned in BRAM (.fasttext) for 0-wait-state access.
  *
  * VexiiRiscv pipeline notes:
- *   - D-cache: 64KB, 4-way, 64B lines, write-back
+ *   - D-cache: 64KB, 2-way, 64B lines, write-back
  *   - Store buffer: 4 slots — LLSS interleaving prevents stalls
  *   - Zicbom: cbo.clean/flush/inval
  *
@@ -17,10 +17,9 @@
  *   memmove bwd:     word-aligned backward copy
  */
 
-/* cbo.inval macro — no-op on this build (Zicbom not enabled in the
- * VexiiRiscv config, since Zcbm is incompatible with the coherency hub
- * we rely on). The 64B memcpy path still works; it just pays for the
- * write-allocate miss instead of dropping the dirty line up front. */
+/* cbo.inval macro placeholder.  The current assembly path keeps this as a
+ * no-op because the generic copy still performs well and stays portable
+ * across CPU cache configurations. */
 .macro CBO_INVAL reg
 .endm
 
