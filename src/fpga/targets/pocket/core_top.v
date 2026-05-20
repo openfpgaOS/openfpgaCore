@@ -493,7 +493,7 @@ wire        cpu_psram_raw_busy;
 reg [3:0]   bcr_init_state;
 reg         bcr_init_config_en;
 reg         bcr_init_bank_sel;
-reg         bcr_init_done;
+(* keep, syn_keep, maxfan = 160 *) reg bcr_init_done;
 reg [8:0]   bcr_settle_cnt;
 
 localparam [3:0] BCR_ST_WAIT_PLL    = 4'd0;
@@ -791,7 +791,7 @@ cram0_controller #(
 // ============================================================
 cram0_cdc cpu_cram0_axi (
     .clk_cpu        (clk_cpu),
-    .reset_n_cpu    (reset_n),
+    .reset_n_cpu    (reset_n_cpu_cram),
 
     .s_axi_arvalid  (cpu_m_cram0_arvalid),
     .s_axi_arready  (cpu_m_cram0_arready),
@@ -1245,6 +1245,28 @@ end
 
     wire reset_n = reset_n_apf & bcr_init_done;
 
+    // clk_cpu-domain reset replicas.  reset_n asserts asynchronously
+    // from the bridge/BCR gate, but deasserts synchronously and on
+    // separate local branches so fitter placement is not constrained by
+    // one monolithic reset tree feeding CPU, GPU, audio, link and CRAM.
+    reg [1:0] reset_cpu_core_sync;
+    reg [1:0] reset_cpu_media_sync;
+    reg [1:0] reset_cpu_cram_sync;
+    always @(posedge clk_cpu or negedge reset_n) begin
+        if (~reset_n) begin
+            reset_cpu_core_sync  <= 2'b00;
+            reset_cpu_media_sync <= 2'b00;
+            reset_cpu_cram_sync  <= 2'b00;
+        end else begin
+            reset_cpu_core_sync  <= {reset_cpu_core_sync[0],  1'b1};
+            reset_cpu_media_sync <= {reset_cpu_media_sync[0], 1'b1};
+            reset_cpu_cram_sync  <= {reset_cpu_cram_sync[0],  1'b1};
+        end
+    end
+    wire reset_n_cpu_core  = reset_cpu_core_sync[1];
+    wire reset_n_cpu_media = reset_cpu_media_sync[1];
+    wire reset_n_cpu_cram  = reset_cpu_cram_sync[1];
+
     // Synchronize reset deassertion to clk_vid domain
     reg [1:0] reset_vid_sync;
     wire reset_n_vid = reset_vid_sync[1];
@@ -1690,8 +1712,8 @@ assign video_hs = vidout_hs;
     reg [2:0]  vrr_toggle_sync;     // 3-stage synchronizer in clk_vid
     reg [9:0]  vrr_vt_sync2;        // output in clk_vid domain
 
-    always @(posedge clk_cpu or negedge reset_n) begin
-        if (~reset_n) begin
+    always @(posedge clk_cpu or negedge reset_n_cpu_core) begin
+        if (~reset_n_cpu_core) begin
             vrr_toggle_cpu <= 1'b0;
             vrr_vt_hold <= CRT_V_TOTAL_DEFAULT;
         end else if (vrr_vt_hold != vrr_v_total_cpu) begin
@@ -1714,7 +1736,7 @@ assign video_hs = vidout_hs;
     // VexiiRiscv CPU system — AXI4 bus routing
     cpu_system cpu (
         .clk(clk_cpu),
-        .reset_n(reset_n),
+        .reset_n(reset_n_cpu_core),
         // SDRAM AXI4 master interface
         .m_sdram_arvalid(cpu_m_sdram_arvalid),
         .m_sdram_arready(cpu_m_sdram_arready),
@@ -1788,7 +1810,7 @@ assign video_hs = vidout_hs;
     // AXI4 peripheral slave
     axi_periph_slave periph (
         .clk(clk_cpu),
-        .reset_n(reset_n),
+        .reset_n(reset_n_cpu_core),
         // AXI4 slave interface
         .s_axi_arvalid(cpu_m_local_arvalid),
         .s_axi_arready(cpu_m_local_arready),
@@ -2242,7 +2264,7 @@ link_lite #(
     .SCK_HZ(256000)
 ) link0 (
     .clk(clk_cpu),
-    .reset_n(reset_n),
+    .reset_n(reset_n_cpu_media),
     .reg_wr(link_reg_wr),
     .reg_rd(link_reg_rd),
     .reg_addr(link_reg_addr),
@@ -2353,7 +2375,7 @@ wire [4:0]  mixer_voice_sel_rd_mmio;
 
 audio_mixer audio_mixer_inst (
     .clk              (clk_cpu),
-    .reset_n          (reset_n),
+    .reset_n          (reset_n_cpu_media),
     .mixer_enable     (mixer_enable_mmio),
     .sample_pool_base (32'h13700000),         // OF_TARGET_SAMPLE_BASE
     .voice_wr         (mixer_voice_wr_mmio),
@@ -2403,7 +2425,7 @@ audio_mixer audio_mixer_inst (
 audio_output audio_out (
     .clk_sys      (clk_cpu),
     .clk_audio    (clk_core_12288),
-    .reset_n      (reset_n),
+    .reset_n      (reset_n_cpu_media),
 
     .sample_wr    (mixer_sample_wr),
     .sample_data  (mixer_sample_data),
@@ -2460,7 +2482,7 @@ wire        slave_swap_pending;  // from axi_periph_slave → stalls gpu_core CM
 `ifndef EXCLUDE_GPU
 gpu_core gpu (
     .clk(clk_cpu),
-    .reset_n(reset_n),
+    .reset_n(reset_n_cpu_media),
     .gpu_enable(1'b1),
     // AXI4 read master (ring fetch + texture)
     .m_rd_arvalid(gpu_rd_arvalid),

@@ -30,12 +30,6 @@ extern "C" {
 #include "of_cache.h"
 #endif
 
-#if defined(__GNUC__) || defined(__clang__)
-#define OF_GPU_DEPRECATED(msg) __attribute__((deprecated(msg)))
-#else
-#define OF_GPU_DEPRECATED(msg)
-#endif
-
 /* ================================================================
  * Constants
  * ================================================================ */
@@ -217,14 +211,6 @@ static uint32_t _gpu_base;
  * framebuffer experiment did not improve measured rendering and its M10K
  * is now assigned to the CPU D-cache. */
 
-#define OF_GPU_FB_TARGET_SDRAM 0u
-#define OF_GPU_FB_TARGET_BRAM  1u  /* retired compatibility value */
-
-#define OF_GPU_FB_POLICY_DIRECT    0u  /* of_gpu_set_framebuffer() targets SDRAM */
-#define OF_GPU_FB_POLICY_BRAM_AUTO 1u  /* retired compatibility value */
-
-#define OF_GPU_BRAM_FB_BYTES       0u
-
 /* Maximum spans per scalar-span stream chunk.  Affine spans emit 9 payload
  * words and perspective spans emit 15; the batch limit is sized to the
  * perspective worst case so mixed streams still split only at command
@@ -304,7 +290,6 @@ static uint32_t _gpu_state_fb_addr;
 static uint32_t _gpu_state_fb_stride;
 static uint32_t _gpu_state_tex_addr;
 static uint32_t _gpu_state_tex_dims;
-static uint32_t _gpu_fb_policy;
 
 #define OF_GPU_STATE_FB       (1u << 0)
 #define OF_GPU_STATE_TEXTURE  (1u << 1)
@@ -399,12 +384,13 @@ static inline void _gpu_flush_cmd_stream(void) {
     _gpu_flush_cmd_cache_range(_gpu_batch_buf, _gpu_cmd_words * 4u);
     _gpu_drain_cmd_writeback(_gpu_cmd_words * 4u);
 
-    __asm__ volatile("fence" ::: "memory");
+    /* The writeback drain above is the data-visibility barrier.  The GPU MMIO
+     * doorbell registers sit on a single in-order peripheral path, so extra
+     * CPU fences between these volatile writes only add submit latency. */
     GPU_DMA_SRC  = _gpu_batch_dma_addr;
     GPU_DMA_LEN  = _gpu_cmd_words;
-    __asm__ volatile("fence" ::: "memory");
     GPU_DMA_KICK = 1;
-    __asm__ volatile("fence" ::: "memory");
+    __asm__ volatile("" ::: "memory");
     _gpu_cmd_words = 0;
 }
 
@@ -484,7 +470,6 @@ static inline void of_gpu_init(void) {
     _gpu_dbg_ring_spin_iters = 0;
     _gpu_dbg_min_ring_free = OF_GPU_RING_SIZE;
     _gpu_state_valid = 0;
-    _gpu_fb_policy = OF_GPU_FB_POLICY_DIRECT;
     GPU_CTRL = 4;               /* ring_reset: clear wr_addr + wrptr + rdptr */
     GPU_CTRL = 1;               /* enable */
 
@@ -665,7 +650,6 @@ static inline void of_gpu_shutdown(void) {
     of_gpu_finish();
     GPU_CTRL = 0;
     _gpu_state_valid = 0;
-    _gpu_fb_policy = OF_GPU_FB_POLICY_DIRECT;
 }
 
 typedef struct {
@@ -711,41 +695,7 @@ static inline void of_gpu_debug_snapshot(of_gpu_debug_snapshot_t *snap,
 
 /* ---- State commands ---- */
 
-static inline void OF_GPU_DEPRECATED("BRAM framebuffer policy is retired; render to SDRAM")
-of_gpu_set_framebuffer_policy(uint32_t policy) {
-    (void)policy;
-    if (_gpu_fb_policy == OF_GPU_FB_POLICY_DIRECT)
-        return;
-    _gpu_fb_policy = OF_GPU_FB_POLICY_DIRECT;
-    _gpu_state_valid &= ~OF_GPU_STATE_FB;
-}
-
-static inline uint32_t OF_GPU_DEPRECATED("BRAM framebuffer policy is retired; render to SDRAM")
-of_gpu_get_framebuffer_policy(void) {
-    return OF_GPU_FB_POLICY_DIRECT;
-}
-
-/* Compatibility shim: the BRAM framebuffer target is retired.  These helpers
- * deliberately do not allocate or route through BRAM; new code should target
- * SDRAM directly with of_gpu_set_framebuffer(). */
-static inline void OF_GPU_DEPRECATED("BRAM framebuffer path is retired; use of_gpu_set_framebuffer")
-of_gpu_configure_bram_framebuffer(uint16_t width_bytes,
-                                  uint16_t height_rows,
-                                  uint16_t src_byte_offset,
-                                  uint16_t src_stride,
-                                  uint16_t dst_stride) {
-    (void)width_bytes;
-    (void)height_rows;
-    (void)src_byte_offset;
-    (void)src_stride;
-    (void)dst_stride;
-}
-
-static inline void of_gpu_set_framebuffer_target(uint32_t addr, uint16_t stride,
-                                                 uint32_t target) {
-    /* The BRAM target was measured and removed; keep this argument only so
-     * older source still compiles while always emitting an SDRAM SET_FB. */
-    (void)target;
+static inline void of_gpu_set_framebuffer(uint32_t addr, uint16_t stride) {
     if ((_gpu_state_valid & OF_GPU_STATE_FB) &&
         _gpu_state_fb_addr == addr &&
         _gpu_state_fb_stride == (uint32_t)stride)
@@ -757,15 +707,6 @@ static inline void of_gpu_set_framebuffer_target(uint32_t addr, uint16_t stride,
     _gpu_state_fb_addr = addr;
     _gpu_state_fb_stride = (uint32_t)stride;
     _gpu_state_valid |= OF_GPU_STATE_FB;
-}
-
-static inline void of_gpu_set_framebuffer(uint32_t addr, uint16_t stride) {
-    of_gpu_set_framebuffer_target(addr, stride, OF_GPU_FB_TARGET_SDRAM);
-}
-
-static inline void OF_GPU_DEPRECATED("BRAM framebuffer path is retired; use of_gpu_set_framebuffer")
-of_gpu_set_framebuffer_bram(uint32_t sdram_addr, uint16_t stride) {
-    of_gpu_set_framebuffer_target(sdram_addr, stride, OF_GPU_FB_TARGET_SDRAM);
 }
 
 /* Z-buffer / depth-test API retired with the lean Z-removal in Phase 2.3.
@@ -834,21 +775,6 @@ static inline void of_gpu_clear_rect_strided(uint32_t start_byte_addr,
     _gpu_ring_write(start_byte_addr);
     _gpu_ring_write(((uint32_t)w << 16) | (uint32_t)h);
     _gpu_ring_write(((uint32_t)stride << 16) | (uint32_t)color);
-}
-
-static inline void OF_GPU_DEPRECATED("BRAM framebuffer path is retired; render to SDRAM directly")
-of_gpu_copy_bram_fb_to_sdram(uint32_t dst_byte_addr,
-                             uint16_t src_byte_offset,
-                             uint16_t width_bytes,
-                             uint16_t height_rows,
-                             uint16_t src_stride,
-                             uint16_t dst_stride) {
-    (void)dst_byte_addr;
-    (void)src_byte_offset;
-    (void)width_bytes;
-    (void)height_rows;
-    (void)src_stride;
-    (void)dst_stride;
 }
 
 /*

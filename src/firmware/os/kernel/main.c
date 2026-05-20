@@ -42,6 +42,7 @@ void os_finalize_memory(void *bss_start, void *bss_end) {
     uint32_t *bend = (uint32_t *)(uintptr_t)bss_uc_end;
     while (bss < bend)
         *bss++ = 0;
+    __asm__ volatile("fence" ::: "memory");
 }
 
 /* Draw boot logo. First call clears screen, subsequent calls just recolor. */

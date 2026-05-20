@@ -44,6 +44,21 @@ typedef struct of_video_timing {
 #define OF_VIDEO_VTOTAL_45HZ 340u
 #define OF_VIDEO_VTOTAL_42HZ 375u
 
+/* Color mode + framebuffer-size constants — referenced by both branches
+ * (the PC SDL2 stub uses them too), so define here above the OF_PC fence. */
+#define OF_VIDEO_MODE_8BIT     0  /* 8-bit indexed: 256 colors, 1 byte/pixel */
+#define OF_VIDEO_MODE_4BIT     1  /* 4-bit indexed: 16 colors, 0.5 byte/pixel */
+#define OF_VIDEO_MODE_2BIT     2  /* 2-bit indexed: 4 colors, 0.25 byte/pixel */
+#define OF_VIDEO_MODE_RGB565   3  /* 16-bit direct: R5G6B5, 2 bytes/pixel */
+#define OF_VIDEO_MODE_RGB555   4  /* 15-bit direct: X1R5G5B5, 2 bytes/pixel */
+#define OF_VIDEO_MODE_RGBA5551 5  /* 15+1 bit: R5G5B5A1, 2 bytes/pixel */
+
+/* Framebuffer size per mode (320x240) */
+#define OF_FB_SIZE_8BIT     (320 * 240)         /* 76,800 bytes */
+#define OF_FB_SIZE_4BIT     (320 * 240 / 2)     /* 38,400 bytes */
+#define OF_FB_SIZE_2BIT     (320 * 240 / 4)     /* 19,200 bytes */
+#define OF_FB_SIZE_16BPP    (320 * 240 * 2)     /* 153,600 bytes */
+
 #ifndef OF_PC
 
 #include "of_services.h"
@@ -154,19 +169,7 @@ static inline void of_video_set_display_mode(int mode) {
     OF_SVC->video_set_display_mode(mode);
 }
 
-/* Color mode constants */
-#define OF_VIDEO_MODE_8BIT     0  /* 8-bit indexed: 256 colors, 1 byte/pixel */
-#define OF_VIDEO_MODE_4BIT     1  /* 4-bit indexed: 16 colors, 0.5 byte/pixel */
-#define OF_VIDEO_MODE_2BIT     2  /* 2-bit indexed: 4 colors, 0.25 byte/pixel */
-#define OF_VIDEO_MODE_RGB565   3  /* 16-bit direct: R5G6B5, 2 bytes/pixel */
-#define OF_VIDEO_MODE_RGB555   4  /* 15-bit direct: X1R5G5B5, 2 bytes/pixel */
-#define OF_VIDEO_MODE_RGBA5551 5  /* 15+1 bit: R5G5B5A1, 2 bytes/pixel */
-
-/* Framebuffer size per mode (320x240) */
-#define OF_FB_SIZE_8BIT     (320 * 240)         /* 76,800 bytes */
-#define OF_FB_SIZE_4BIT     (320 * 240 / 2)     /* 38,400 bytes */
-#define OF_FB_SIZE_2BIT     (320 * 240 / 4)     /* 19,200 bytes */
-#define OF_FB_SIZE_16BPP    (320 * 240 * 2)     /* 153,600 bytes */
+/* Color mode + FB size constants are defined above the OF_PC fence. */
 
 static inline void of_video_set_color_mode(int mode) {
     OF_SVC->video_set_color_mode(mode);

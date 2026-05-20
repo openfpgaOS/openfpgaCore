@@ -259,7 +259,7 @@ set_global_assignment -name TIMING_ANALYZER_MULTICORNER_ANALYSIS ON
 
 # Compiler Assignments
 # ====================
-set_global_assignment -name OPTIMIZATION_MODE BALANCED
+set_global_assignment -name OPTIMIZATION_MODE "HIGH PERFORMANCE EFFORT"
 
 # Analysis & Synthesis Assignments
 # ================================
@@ -275,8 +275,15 @@ set_global_assignment -name SAFE_STATE_MACHINE OFF
 set_global_assignment -name ADV_NETLIST_OPT_SYNTH_WYSIWYG_REMAP ON
 set_global_assignment -name SYNTH_PROTECT_SDC_CONSTRAINT ON
 set_global_assignment -name PRE_MAPPING_RESYNTHESIS ON
-set_global_assignment -name OPTIMIZATION_TECHNIQUE BALANCED
-set_global_assignment -name MUX_RESTRUCTURE OFF
+set_global_assignment -name OPTIMIZATION_TECHNIQUE SPEED
+set_global_assignment -name MUX_RESTRUCTURE ON
+set_global_assignment -name PHYSICAL_SYNTHESIS_COMBO_LOGIC ON
+set_global_assignment -name PHYSICAL_SYNTHESIS_REGISTER_DUPLICATION ON
+set_global_assignment -name PHYSICAL_SYNTHESIS_REGISTER_RETIMING ON
+set_global_assignment -name PHYSICAL_SYNTHESIS_ASYNCHRONOUS_SIGNAL_PIPELINING ON
+set_global_assignment -name ROUTER_LCELL_INSERTION_AND_LOGIC_DUPLICATION ON
+set_global_assignment -name ROUTER_TIMING_OPTIMIZATION_LEVEL MAXIMUM
+set_global_assignment -name PHYSICAL_SYNTHESIS_EFFORT EXTRA
 
 # Fitter Assignments
 # ==================
@@ -778,7 +785,7 @@ set_global_assignment -name VERILOG_FILE ../../common/video_CRT_scanout_indexed_
 set_global_assignment -name VERILOG_FILE ../../vendor/vexriscv/VexiiRiscv/VexiiRiscv.v
 set_global_assignment -name VERILOG_FILE mf_pllram_133.v
 set_global_assignment -name SDC_FILE core_constraints.sdc
-set_global_assignment -name SEED 8
+set_global_assignment -name SEED 2
 # Phase 5 fitter-tuning experiments were done while the design was above
 # 94% ALMs.  They are no longer representative after the span-only GPU
 # profile reduced the design to roughly 76% ALMs.

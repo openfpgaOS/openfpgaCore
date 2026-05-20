@@ -1,8 +1,8 @@
 /*
  * openfpgaOS Cache Management HAL
  *
- * VexiiRiscv D-cache: 64KB, 2-way set-associative, write-back, 64B lines
- * (512 sets × 2 ways × 64B).
+ * VexiiRiscv D-cache: 128KB, 2-way set-associative, write-back, 64B lines
+ * (1024 sets × 2 ways × 64B).
  *
  * Zicbom (cbo.clean/inval/flush) is enabled: lsuL1Coherency is off and
  * the HubFiber is removed so the LsuL1Plugin CBM area is active. Range
@@ -18,9 +18,9 @@
 #include "regs.h"
 
 #define DCACHE_LINE_SIZE  64
-#define DCACHE_SETS       512
+#define DCACHE_SETS       1024
 #define DCACHE_WAYS       2
-#define DCACHE_TOTAL      (DCACHE_SETS * DCACHE_WAYS * DCACHE_LINE_SIZE)  /* 64KB */
+#define DCACHE_TOTAL      (DCACHE_SETS * DCACHE_WAYS * DCACHE_LINE_SIZE)  /* 128KB */
 
 /* Eviction region: top of SDRAM, above all active data */
 #define EVICT_BASE  (SDRAM_BASE + SDRAM_SIZE - DCACHE_TOTAL)

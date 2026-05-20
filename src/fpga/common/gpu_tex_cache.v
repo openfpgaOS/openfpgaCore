@@ -127,6 +127,14 @@ localparam S_INIT      = 3'd4;
 reg [2:0] state;
 reg [SET_BITS-1:0] init_counter;
 
+// Keep separate state-decode copies for the hot ready/prime paths.  The
+// fitter report shows the synthesized state-derived cache enable as a
+// very high-fanout route-heavy net; splitting the decode users gives
+// Quartus legal duplication points without changing cache timing.
+(* keep, syn_keep, maxfan = 64 *) wire state_pipe_ready     = (state == S_PIPE);
+(* keep, syn_keep, maxfan = 64 *) wire state_fillout_ready  = (state == S_FILL_OUT);
+(* keep, syn_keep, maxfan = 64 *) wire state_fillout_prime  = (state == S_FILL_OUT);
+
 // Pending flush: see prior (SDP) version for the full rationale.  TL;DR:
 // flush is a 1-cycle pulse that can arrive any cycle; we latch and apply
 // it at the next safe transition.
@@ -188,10 +196,10 @@ reg lat_port;
 // extra latch cycle (the M10K read fires on accept and rd_*_x
 // updates correctly even though the FSM transitions S_FILL_OUT →
 // S_PIPE simultaneously).
-assign req_ready   = ((state == S_PIPE) && !pipe_miss_a && !flush_block)
-                  || ((state == S_FILL_OUT) && (lat_port == 1'b0) && !flush_block);
-assign req_ready_b = ((state == S_PIPE) && !pipe_miss_b && !flush_block)
-                  || ((state == S_FILL_OUT) && (lat_port == 1'b1) && !flush_block);
+assign req_ready   = (state_pipe_ready && !pipe_miss_a && !flush_block)
+                  || (state_fillout_ready && (lat_port == 1'b0) && !flush_block);
+assign req_ready_b = (state_pipe_ready && !pipe_miss_b && !flush_block)
+                  || (state_fillout_ready && (lat_port == 1'b1) && !flush_block);
 
 // ---- Combinational responses (hot path) ----
 // Pipe-hit OR S_FILL_OUT held response.  fill_resp_valid_x is set at
@@ -233,10 +241,10 @@ wire [1:0]          addr_word_b = req_addr_b[3:2];
 // to FFs (Error 276003: "Cannot convert all sets of registers into
 // RAM megafunctions").  This version reads from M10K in both cases;
 // the address mux is fine in M10K's SDP interface.
-wire prime_a = (state == S_FILL_OUT) && (lat_port == 1'b0)
+wire prime_a = state_fillout_prime && (lat_port == 1'b0)
             && !flush_block
             && !(req_valid && req_ready);
-wire prime_b = (state == S_FILL_OUT) && (lat_port == 1'b1)
+wire prime_b = state_fillout_prime && (lat_port == 1'b1)
             && !flush_block
             && !(req_valid_b && req_ready_b);
 

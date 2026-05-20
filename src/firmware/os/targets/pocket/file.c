@@ -18,9 +18,10 @@
  * Apps register this via OF_SYS_SET_IDLE_HOOK to do background
  * work (audio pump, input polling) during file I/O.
  *
- * The hook can safely use ecall (syscalls) because the trap handler
- * supports nested traps — it detects when sp is already on the trap
- * stack and continues from there instead of resetting to _stack_top. */
+ * The hook may use syscalls only when file I/O is running from normal
+ * app/OS context. When a blocking file syscall is already executing inside
+ * the trap handler, call_idle_hook() suppresses the hook to avoid nested
+ * ecall clobbering the outer trap frame. */
 static void (*idle_hook)(void);
 
 /* Forward decl: bridge backend implementation lives below, but
@@ -114,12 +115,18 @@ void of_check_shutdown(void) {
     }
 }
 
-/* Call the idle hook safely — save/restore trap CSRs so the
- * hook can use ecall without corrupting the outer syscall's
- * return path. Note: the hook must NOT use syscalls that
- * trigger file I/O (would recurse into file_wait_complete). */
+/* Call the idle hook safely. Hooks may issue syscalls only when this wait is
+ * running from normal context; while already inside a file syscall trap, MIE is
+ * clear and we skip the hook to avoid overwriting the outer BRAM trap frame.
+ * Note: the hook must NOT use syscalls that trigger file I/O, since that would
+ * recurse into file_wait_complete(). */
 static inline void call_idle_hook(void) {
     if (!idle_hook) return;
+
+    uint32_t mstatus;
+    __asm__ volatile("csrr %0, mstatus" : "=r"(mstatus));
+    if ((mstatus & 0x8u) == 0)
+        return;
 
     /* Save trap CSRs that ecall would clobber */
     uint32_t saved_mepc, saved_mcause, saved_mtval;

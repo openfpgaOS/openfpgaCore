@@ -648,7 +648,7 @@ start_os:
      * load path has copied os.bin into its SDRAM VMA; only .bss remains
      * to be zeroed before entering os_main. */
 #if OF_TARGET_PLATFORM_ID != OF_PLATFORM_SIM
-    /* flush_dcache_evict reads 64 KB from the top of SDRAM to evict
+    /* flush_dcache_evict reads one full D-cache worth of SDRAM to evict
      * deferload writes; sim's harness preloads SDRAM via backdoor so
      * there's nothing to evict, AND sdram_fast_model wedges around
      * iteration ~800 of the sweep (likely a burst-read state-machine

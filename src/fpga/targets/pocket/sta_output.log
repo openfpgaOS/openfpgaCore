@@ -1,0 +1,125 @@
+Info: *******************************************************************
+Info: Running Quartus Prime Timing Analyzer
+    Info: Version 25.1std.0 Build 1129 10/21/2025 SC Lite Edition
+    Info: Copyright (C) 2025  Altera Corporation. All rights reserved.
+    Info: Your use of Altera Corporation's design tools, logic functions 
+    Info: and other software and tools, and any partner logic 
+    Info: functions, and any output files from any of the foregoing 
+    Info: (including device programming or simulation files), and any 
+    Info: associated documentation or information are expressly subject 
+    Info: to the terms and conditions of the Altera Program License 
+    Info: Subscription Agreement, the Altera Quartus Prime License Agreement,
+    Info: the Altera IP License Agreement, or other applicable license
+    Info: agreement, including, without limitation, that your use is for
+    Info: the sole purpose of programming logic devices manufactured by
+    Info: Altera and sold by Altera or its authorized distributors.  Please
+    Info: refer to the Altera Software License Subscription Agreements 
+    Info: on the Quartus Prime software download page.
+    Info: Processing started: Tue May 19 15:49:40 2026
+Info: Command: quartus_sta -t report_critical3.tcl
+Info (20030): Parallel compilation is enabled and will use 16 of the 16 processors detected
+Info (21077): Low junction temperature is 0 degrees C
+Info (21077): High junction temperature is 85 degrees C
+Info (332164): Evaluating HDL-embedded SDC commands
+    Info (332165): Entity dcfifo_1tm1
+        Info (332166): set_false_path -from *rdptr_g* -to *ws_dgrp|dffpipe_re9:dffpipe16|dffe17a* 
+        Info (332166): set_false_path -from *delayed_wrptr_g* -to *rs_dgwp|dffpipe_qe9:dffpipe12|dffe13a* 
+Info (332104): Reading SDC File: 'apf/apf_constraints.sdc'
+Info (332110): Deriving PLL clocks
+    Info (332110): create_generated_clock -source {ic|mp1|mf_pllbase_inst|altera_pll_i|general[0].gpll~FRACTIONAL_PLL|refclkin} -divide_by 256 -multiply_by 2203 -duty_cycle 50.00 -name {ic|mp1|mf_pllbase_inst|altera_pll_i|general[0].gpll~FRACTIONAL_PLL|vcoph[0]} {ic|mp1|mf_pllbase_inst|altera_pll_i|general[0].gpll~FRACTIONAL_PLL|vcoph[0]}
+    Info (332110): create_generated_clock -source {ic|mp1|mf_pllbase_inst|altera_pll_i|general[0].gpll~PLL_OUTPUT_COUNTER|vco0ph[0]} -divide_by 52 -duty_cycle 50.00 -name {ic|mp1|mf_pllbase_inst|altera_pll_i|general[0].gpll~PLL_OUTPUT_COUNTER|divclk} {ic|mp1|mf_pllbase_inst|altera_pll_i|general[0].gpll~PLL_OUTPUT_COUNTER|divclk}
+    Info (332110): create_generated_clock -source {ic|mp1|mf_pllbase_inst|altera_pll_i|general[2].gpll~PLL_OUTPUT_COUNTER|vco0ph[0]} -divide_by 13 -duty_cycle 50.00 -name {ic|mp1|mf_pllbase_inst|altera_pll_i|general[2].gpll~PLL_OUTPUT_COUNTER|divclk} {ic|mp1|mf_pllbase_inst|altera_pll_i|general[2].gpll~PLL_OUTPUT_COUNTER|divclk}
+    Info (332110): create_generated_clock -source {ic|mp1|mf_pllbase_inst|altera_pll_i|general[1].gpll~PLL_OUTPUT_COUNTER|vco0ph[0]} -divide_by 52 -phase 90.00 -duty_cycle 50.00 -name {ic|mp1|mf_pllbase_inst|altera_pll_i|general[1].gpll~PLL_OUTPUT_COUNTER|divclk} {ic|mp1|mf_pllbase_inst|altera_pll_i|general[1].gpll~PLL_OUTPUT_COUNTER|divclk}
+    Info (332110): create_generated_clock -source {ic|mp_ram|altera_pll_i|general[0].gpll~FRACTIONAL_PLL|refclkin} -divide_by 512 -multiply_by 6895 -duty_cycle 50.00 -name {ic|mp_ram|altera_pll_i|general[0].gpll~FRACTIONAL_PLL|vcoph[0]} {ic|mp_ram|altera_pll_i|general[0].gpll~FRACTIONAL_PLL|vcoph[0]}
+    Info (332110): create_generated_clock -source {ic|mp_ram|altera_pll_i|general[0].gpll~PLL_OUTPUT_COUNTER|vco0ph[0]} -divide_by 10 -duty_cycle 50.00 -name {ic|mp_ram|altera_pll_i|general[0].gpll~PLL_OUTPUT_COUNTER|divclk} {ic|mp_ram|altera_pll_i|general[0].gpll~PLL_OUTPUT_COUNTER|divclk}
+    Info (332110): create_generated_clock -source {ic|mp_ram|altera_pll_i|general[1].gpll~PLL_OUTPUT_COUNTER|vco0ph[0]} -divide_by 10 -phase 243.00 -duty_cycle 50.00 -name {ic|mp_ram|altera_pll_i|general[1].gpll~PLL_OUTPUT_COUNTER|divclk} {ic|mp_ram|altera_pll_i|general[1].gpll~PLL_OUTPUT_COUNTER|divclk}
+Info (332104): Reading SDC File: 'core_constraints.sdc'
+Info (332097): The following timing edges are non-unate.  The Timing Analyzer will assume pos-unate behavior for these edges in the clock network.
+    Info (332098): From: core_top:ic|axi_periph_slave:periph|sync_fifo:input_event_fifo|altdpram:mem_rtl_0|dpram_7no1:auto_generated|lutrama0~CLKMUX_0  to: core_top:ic|axi_periph_slave:periph|sync_fifo:input_event_fifo|altdpram:mem_rtl_0|dpram_7no1:auto_generated|lutrama0~MEMORYREGOUT
+    Info (332098): From: core_top:ic|axi_periph_slave:periph|sync_fifo:input_event_fifo|altdpram:mem_rtl_0|dpram_7no1:auto_generated|lutrama10~CLKMUX_0  to: core_top:ic|axi_periph_slave:periph|sync_fifo:input_event_fifo|altdpram:mem_rtl_0|dpram_7no1:auto_generated|lutrama10~MEMORYREGOUT
+    Info (332098): From: core_top:ic|axi_periph_slave:periph|sync_fifo:input_event_fifo|altdpram:mem_rtl_0|dpram_7no1:auto_generated|lutrama11~CLKMUX_0  to: core_top:ic|axi_periph_slave:periph|sync_fifo:input_event_fifo|altdpram:mem_rtl_0|dpram_7no1:auto_generated|lutrama11~MEMORYREGOUT
+    Info (332098): From: core_top:ic|axi_periph_slave:periph|sync_fifo:input_event_fifo|altdpram:mem_rtl_0|dpram_7no1:auto_generated|lutrama12~CLKMUX_0  to: core_top:ic|axi_periph_slave:periph|sync_fifo:input_event_fifo|altdpram:mem_rtl_0|dpram_7no1:auto_generated|lutrama12~MEMORYREGOUT
+    Info (332098): From: core_top:ic|axi_periph_slave:periph|sync_fifo:input_event_fifo|altdpram:mem_rtl_0|dpram_7no1:auto_generated|lutrama13~CLKMUX_0  to: core_top:ic|axi_periph_slave:periph|sync_fifo:input_event_fifo|altdpram:mem_rtl_0|dpram_7no1:auto_generated|lutrama13~MEMORYREGOUT
+    Info (332098): From: core_top:ic|axi_periph_slave:periph|sync_fifo:input_event_fifo|altdpram:mem_rtl_0|dpram_7no1:auto_generated|lutrama14~CLKMUX_0  to: core_top:ic|axi_periph_slave:periph|sync_fifo:input_event_fifo|altdpram:mem_rtl_0|dpram_7no1:auto_generated|lutrama14~MEMORYREGOUT
+    Info (332098): From: core_top:ic|axi_periph_slave:periph|sync_fifo:input_event_fifo|altdpram:mem_rtl_0|dpram_7no1:auto_generated|lutrama15~CLKMUX_0  to: core_top:ic|axi_periph_slave:periph|sync_fifo:input_event_fifo|altdpram:mem_rtl_0|dpram_7no1:auto_generated|lutrama15~MEMORYREGOUT
+    Info (332098): From: core_top:ic|axi_periph_slave:periph|sync_fifo:input_event_fifo|altdpram:mem_rtl_0|dpram_7no1:auto_generated|lutrama16~CLKMUX_0  to: core_top:ic|axi_periph_slave:periph|sync_fifo:input_event_fifo|altdpram:mem_rtl_0|dpram_7no1:auto_generated|lutrama16~MEMORYREGOUT
+    Info (332098): From: core_top:ic|axi_periph_slave:periph|sync_fifo:input_event_fifo|altdpram:mem_rtl_0|dpram_7no1:auto_generated|lutrama17~CLKMUX_0  to: core_top:ic|axi_periph_slave:periph|sync_fifo:input_event_fifo|altdpram:mem_rtl_0|dpram_7no1:auto_generated|lutrama17~MEMORYREGOUT
+    Info (332098): From: core_top:ic|axi_periph_slave:periph|sync_fifo:input_event_fifo|altdpram:mem_rtl_0|dpram_7no1:auto_generated|lutrama18~CLKMUX_0  to: core_top:ic|axi_periph_slave:periph|sync_fifo:input_event_fifo|altdpram:mem_rtl_0|dpram_7no1:auto_generated|lutrama18~MEMORYREGOUT
+    Info (332098): From: core_top:ic|axi_periph_slave:periph|sync_fifo:input_event_fifo|altdpram:mem_rtl_0|dpram_7no1:auto_generated|lutrama19~CLKMUX_0  to: core_top:ic|axi_periph_slave:periph|sync_fifo:input_event_fifo|altdpram:mem_rtl_0|dpram_7no1:auto_generated|lutrama19~MEMORYREGOUT
+    Info (332098): From: core_top:ic|axi_periph_slave:periph|sync_fifo:input_event_fifo|altdpram:mem_rtl_0|dpram_7no1:auto_generated|lutrama1~CLKMUX_0  to: core_top:ic|axi_periph_slave:periph|sync_fifo:input_event_fifo|altdpram:mem_rtl_0|dpram_7no1:auto_generated|lutrama1~MEMORYREGOUT
+    Info (332098): From: core_top:ic|axi_periph_slave:periph|sync_fifo:input_event_fifo|altdpram:mem_rtl_0|dpram_7no1:auto_generated|lutrama20~CLKMUX_0  to: core_top:ic|axi_periph_slave:periph|sync_fifo:input_event_fifo|altdpram:mem_rtl_0|dpram_7no1:auto_generated|lutrama20~MEMORYREGOUT
+    Info (332098): From: core_top:ic|axi_periph_slave:periph|sync_fifo:input_event_fifo|altdpram:mem_rtl_0|dpram_7no1:auto_generated|lutrama21~CLKMUX_0  to: core_top:ic|axi_periph_slave:periph|sync_fifo:input_event_fifo|altdpram:mem_rtl_0|dpram_7no1:auto_generated|lutrama21~MEMORYREGOUT
+    Info (332098): From: core_top:ic|axi_periph_slave:periph|sync_fifo:input_event_fifo|altdpram:mem_rtl_0|dpram_7no1:auto_generated|lutrama2~CLKMUX_0  to: core_top:ic|axi_periph_slave:periph|sync_fifo:input_event_fifo|altdpram:mem_rtl_0|dpram_7no1:auto_generated|lutrama2~MEMORYREGOUT
+    Info (332098): From: core_top:ic|axi_periph_slave:periph|sync_fifo:input_event_fifo|altdpram:mem_rtl_0|dpram_7no1:auto_generated|lutrama3~CLKMUX_0  to: core_top:ic|axi_periph_slave:periph|sync_fifo:input_event_fifo|altdpram:mem_rtl_0|dpram_7no1:auto_generated|lutrama3~MEMORYREGOUT
+    Info (332098): From: core_top:ic|axi_periph_slave:periph|sync_fifo:input_event_fifo|altdpram:mem_rtl_0|dpram_7no1:auto_generated|lutrama4~CLKMUX_0  to: core_top:ic|axi_periph_slave:periph|sync_fifo:input_event_fifo|altdpram:mem_rtl_0|dpram_7no1:auto_generated|lutrama4~MEMORYREGOUT
+    Info (332098): From: core_top:ic|axi_periph_slave:periph|sync_fifo:input_event_fifo|altdpram:mem_rtl_0|dpram_7no1:auto_generated|lutrama5~CLKMUX_0  to: core_top:ic|axi_periph_slave:periph|sync_fifo:input_event_fifo|altdpram:mem_rtl_0|dpram_7no1:auto_generated|lutrama5~MEMORYREGOUT
+    Info (332098): From: core_top:ic|axi_periph_slave:periph|sync_fifo:input_event_fifo|altdpram:mem_rtl_0|dpram_7no1:auto_generated|lutrama6~CLKMUX_0  to: core_top:ic|axi_periph_slave:periph|sync_fifo:input_event_fifo|altdpram:mem_rtl_0|dpram_7no1:auto_generated|lutrama6~MEMORYREGOUT
+    Info (332098): From: core_top:ic|axi_periph_slave:periph|sync_fifo:input_event_fifo|altdpram:mem_rtl_0|dpram_7no1:auto_generated|lutrama7~CLKMUX_0  to: core_top:ic|axi_periph_slave:periph|sync_fifo:input_event_fifo|altdpram:mem_rtl_0|dpram_7no1:auto_generated|lutrama7~MEMORYREGOUT
+    Info (332098): From: core_top:ic|axi_periph_slave:periph|sync_fifo:input_event_fifo|altdpram:mem_rtl_0|dpram_7no1:auto_generated|lutrama8~CLKMUX_0  to: core_top:ic|axi_periph_slave:periph|sync_fifo:input_event_fifo|altdpram:mem_rtl_0|dpram_7no1:auto_generated|lutrama8~MEMORYREGOUT
+    Info (332098): From: core_top:ic|axi_periph_slave:periph|sync_fifo:input_event_fifo|altdpram:mem_rtl_0|dpram_7no1:auto_generated|lutrama9~CLKMUX_0  to: core_top:ic|axi_periph_slave:periph|sync_fifo:input_event_fifo|altdpram:mem_rtl_0|dpram_7no1:auto_generated|lutrama9~MEMORYREGOUT
+    Info (332098): Cell: ic|mp1|mf_pllbase_inst|altera_pll_i|general[0].gpll~FRACTIONAL_PLL  from: refclkin  to: fbclk
+    Info (332098): Cell: ic|mp1|mf_pllbase_inst|altera_pll_i|general[0].gpll~PLL_OUTPUT_COUNTER  from: vco0ph[0]  to: divclk
+    Info (332098): Cell: ic|mp1|mf_pllbase_inst|altera_pll_i|general[0].gpll~PLL_REFCLK_SELECT  from: clkin[2]  to: clkout
+    Info (332098): Cell: ic|mp1|mf_pllbase_inst|altera_pll_i|general[1].gpll~PLL_OUTPUT_COUNTER  from: vco0ph[0]  to: divclk
+    Info (332098): Cell: ic|mp1|mf_pllbase_inst|altera_pll_i|general[2].gpll~PLL_OUTPUT_COUNTER  from: vco0ph[0]  to: divclk
+    Info (332098): Cell: ic|mp_ram|altera_pll_i|general[0].gpll~FRACTIONAL_PLL  from: refclkin  to: fbclk
+    Info (332098): Cell: ic|mp_ram|altera_pll_i|general[0].gpll~PLL_OUTPUT_COUNTER  from: vco0ph[0]  to: divclk
+    Info (332098): Cell: ic|mp_ram|altera_pll_i|general[0].gpll~PLL_REFCLK_SELECT  from: clkin[0]  to: clkout
+    Info (332098): Cell: ic|mp_ram|altera_pll_i|general[1].gpll~PLL_OUTPUT_COUNTER  from: vco0ph[0]  to: divclk
+Info (332143): No user constrained clock uncertainty found in the design. Calling "derive_clock_uncertainty"
+Info (332123): Deriving Clock Uncertainty. Please refer to report_sdc in the Timing Analyzer to see clock uncertainties.
+=== WORST clk_74a PATH - FULL DETAIL ===
+Info (332115): Report Timing: Found 1 setup paths (0 violated).  Worst case slack is 0.906
+    Info (332115): -to_clock [get_clocks {clk_74a}]
+    Info (332115): -setup
+    Info (332115): -npaths 1
+    Info (332115): -detail full_path
+    Info (332115): -panel_name {Critical 74a}
+
+=== WORST CPU PATH - FULL DETAIL ===
+Info (332115): Report Timing: Found 1 setup paths (1 violated).  Worst case slack is -1.115
+    Info (332115): -to_clock [get_clocks {ic|mp_ram|altera_pll_i|general[0].gpll~PLL_OUTPUT_COUNTER|divclk}]
+    Info (332115): -setup
+    Info (332115): -npaths 1
+    Info (332115): -detail full_path
+    Info (332115): -panel_name {Critical CPU}
+
+=== WORST clk_74a - FROM/TO NAMES ===
+Slack:    0.906  From: cram0_dq[15]
+               To:   core_top:ic|cram0_controller:psram0|psram_cram0_drv:psram_inst|cram_dq_r[15]
+
+Slack:    0.998  From: cram0_dq[4]
+               To:   core_top:ic|cram0_controller:psram0|psram_cram0_drv:psram_inst|cram_dq_r[4]
+
+Slack:    1.013  From: cram0_dq[7]
+               To:   core_top:ic|cram0_controller:psram0|psram_cram0_drv:psram_inst|cram_dq_r[7]
+
+Slack:    1.031  From: cram0_dq[0]
+               To:   core_top:ic|cram0_controller:psram0|psram_cram0_drv:psram_inst|cram_dq_r[0]
+
+Slack:    1.035  From: cram0_dq[11]
+               To:   core_top:ic|cram0_controller:psram0|psram_cram0_drv:psram_inst|cram_dq_r[11]
+
+
+=== WORST CPU - FROM/TO NAMES ===
+Slack:   -1.115  From: core_top:ic|cpu_system:cpu|VexiiRiscv:cpu|execute_ctrl2_up_float_RS1_lane0[28]~DUPLICATE
+               To:   core_top:ic|cpu_system:cpu|VexiiRiscv:cpu|altsyncram:FetchL1Plugin_logic_banks_0_mem_rtl_0|altsyncram_g9q1:auto_generated|ram_block1a11~portb_re_reg
+
+Slack:   -1.083  From: core_top:ic|cpu_system:cpu|VexiiRiscv:cpu|execute_ctrl2_up_float_RS1_lane0[28]~DUPLICATE
+               To:   core_top:ic|cpu_system:cpu|VexiiRiscv:cpu|fetch_logic_ctrls_3_up_FetchL1Plugin_logic_BANKS_MUXES_1[22]
+
+Slack:   -1.083  From: core_top:ic|cpu_system:cpu|VexiiRiscv:cpu|execute_ctrl2_up_float_RS1_lane0[28]~DUPLICATE
+               To:   core_top:ic|cpu_system:cpu|VexiiRiscv:cpu|fetch_logic_ctrls_2_up_FetchL1Plugin_logic_MIXED_PC[10]
+
+Slack:   -1.082  From: core_top:ic|cpu_system:cpu|VexiiRiscv:cpu|execute_ctrl2_up_float_RS1_lane0[28]~DUPLICATE
+               To:   core_top:ic|cpu_system:cpu|VexiiRiscv:cpu|fetch_logic_ctrls_3_up_FetchL1Plugin_logic_BANKS_MUXES_1[6]
+
+Slack:   -1.082  From: core_top:ic|cpu_system:cpu|VexiiRiscv:cpu|execute_ctrl2_up_float_RS1_lane0[28]~DUPLICATE
+               To:   core_top:ic|cpu_system:cpu|VexiiRiscv:cpu|fetch_logic_ctrls_2_up_FetchL1Plugin_logic_cmd_TAGS_UPDATE_ADDRESS[1]
+
+Info (23030): Evaluation of Tcl script report_critical3.tcl was successful
+Info: Quartus Prime Timing Analyzer was successful. 0 errors, 0 warnings
+    Info: Peak virtual memory: 1011 megabytes
+    Info: Processing ended: Tue May 19 15:49:42 2026
+    Info: Elapsed time: 00:00:02
+    Info: Total CPU time (on all processors): 00:00:03

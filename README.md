@@ -134,46 +134,16 @@ The GPU is optimized for indexed-color software-renderer workloads: BUILD/Doom
 style spans, colormap lookup, masked pixels, translucent spans, clears, flips,
 and textured triangles. Command data is built by the CPU in a cached SDRAM
 scratch buffer, flushed, then pulled into the GPU's 16 KB internal command ring
-by doorbell DMA. The old CPU MMIO command-data path is retired.
+by doorbell DMA.
 
-The active framebuffer target is SDRAM. The tested intermediate BRAM
-framebuffer path did not improve measured rendering performance, so it has been
-removed from the active RTL. The remaining SDK symbols for BRAM framebuffer
-policy are compatibility shims only; new code should render directly to SDRAM.
+The framebuffer target is SDRAM. Apps set the render target with
+`of_gpu_set_framebuffer()` and synchronize CPU framebuffer access with
+`of_gpu_prepare_framebuffer_for_cpu()` when mixing GPU and direct CPU writes.
 
-The BUILD-style translucency table is GPU-private SRAM, not M10K BRAM. The SDK
-still uploads it through `GPU_TRANSLUC_ADDR` / `GPU_TRANSLUC_DATA`, and the GPU
-uses SRAM lookups during translucent read-modify-write spans. Opaque and masked
-spans do not pay this lookup cost.
-
-## Hardware Comparison
-
-The audio path is a hardware sample mixer, not an FM chip. It is closest in
-spirit to the Gravis Ultrasound or the wavetable side of an AWE32/AWE64: many
-independent PCM voices are mixed in hardware from sample memory, with per-voice
-rate, volume, pan, loop, and group/master control. Compared with common PC
-sound cards:
-
-| Device class | Relationship to openfpgaOS |
-|--------------|----------------------------|
-| AdLib / OPL2 / OPL3 | Different model. Those are FM synthesizers; openfpgaOS uses PCM samples and a sample-bank MIDI path. |
-| Sound Blaster PCM DMA | More capable for game music/effects. Classic SB playback is mostly one streamed PCM channel; openfpgaOS mixes many hardware voices. |
-| Gravis Ultrasound | Similar conceptually: hardware-mixed sample voices from memory. openfpgaOS is smaller and game-runtime focused, with 32 voices at 48 kHz stereo. |
-| AWE32 / AWE64 wavetable | Similar high-level role for MIDI playback, but openfpgaOS exposes a simpler fixed runtime mixer instead of emulating EMU8000 behavior. |
-
-The GPU is also a purpose-built raster accelerator, not a VGA clone and not a
-general OpenGL-style 3D core. It keeps the simple framebuffer/palette model
-that old PC games expect, then adds commands for the expensive draw paths:
-spans, four-column vertical spans, batch submission, clears, flips,
-translucency, texture lookup, colormap lookup, and triangle rasterization.
-
-| Device class | Relationship to openfpgaOS |
-|--------------|----------------------------|
-| VGA / Mode 13h | Same broad framebuffer/palette heritage, but drawing is accelerated by FPGA commands instead of being entirely CPU-written. |
-| SVGA linear framebuffer | Similar app-visible idea for pixels, with a custom low-resolution game focus rather than a PC display adapter feature set. |
-| 2D blitter | Overlaps on clears, copies-by-command, and write coalescing, but the hot path is span/raster work rather than GUI rectangles. |
-| Early 3D cards | Shares textured triangle and translucency ideas, but it is not a full fixed-function PC 3D pipeline: no driver stack, no OpenGL, no programmable shaders, and no general Z-buffer path. |
-| BUILD/Doom-era software renderer | The closest workload match. The GPU accelerates the span and palette/colormap-heavy raster work those engines spend time on. |
+The translucency table is GPU-private SRAM. The SDK uploads it through
+`GPU_TRANSLUC_ADDR` / `GPU_TRANSLUC_DATA`, and the GPU uses SRAM lookups during
+translucent read-modify-write spans. Opaque and masked spans do not pay this
+lookup cost.
 
 ## Maintenance Rules
 

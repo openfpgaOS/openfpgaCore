@@ -154,7 +154,7 @@ SECTIONS {
      * traffic (see start.S::_trap_entry comment).  Pinning in BRAM
      * breaks the race. */
     __app_bram_start = 0x00004000;
-    __app_bram_end   = 0x00007800;  /* caps at 0x7800, libc at 0x7C00, trap stack at 0x7E00 */
+    __app_bram_end   = 0x00007800;  /* caps at 0x7800; top BRAM holds trap/boot state */
 
     /* Provide symbols for C code */
     PROVIDE(_start_addr = ORIGIN(BRAM));

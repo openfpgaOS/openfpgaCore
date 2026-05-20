@@ -1,10 +1,10 @@
 /*
  * shared/dcache_evict.inc.c — D-cache flush by conflict eviction
  *
- * Pure-software flush of the L1 D-cache by reading 64 KB of SDRAM
+ * Pure-software flush of the L1 D-cache by reading 128 KB of SDRAM
  * (one byte per cache line). The VexiiRiscv L1 is 2-way associative,
- * 512 sets × 2 ways × 64-byte lines = 64 KB total, so streaming
- * 64 KB through any contiguous SDRAM region forces every line out.
+ * 1024 sets × 2 ways × 64-byte lines = 128 KB total, so streaming
+ * 128 KB through any contiguous SDRAM region forces every line out.
  *
  * Used by:
  *   - boot ROM: flushes deferload writes before jumping to os_main
@@ -24,8 +24,8 @@
 SHARED_ATTR
 static void flush_dcache_evict(void) {
     __asm__ volatile("fence" ::: "memory");
-    volatile char *p = (volatile char *)(SDRAM_BASE + SDRAM_SIZE - 65536);
-    for (uint32_t i = 0; i < 65536; i += 64)
+    volatile char *p = (volatile char *)(SDRAM_BASE + SDRAM_SIZE - 131072);
+    for (uint32_t i = 0; i < 131072; i += 64)
         (void)p[i];
     __asm__ volatile("fence" ::: "memory");
 }

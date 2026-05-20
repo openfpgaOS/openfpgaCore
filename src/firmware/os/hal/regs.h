@@ -25,9 +25,9 @@
 #define BRAM_SIZE           OF_TARGET_BRAM_SIZE
 
 /* App BRAM region — available for app hot code after OS sections.
- * Top 512 bytes reserved for trap handler stack frame. */
+ * Top BRAM remains reserved for the trap handler register frame. */
 #define APP_BRAM_BASE       OF_TARGET_APP_BRAM_BASE
-#define APP_BRAM_END        OF_TARGET_APP_BRAM_END  /* Caps at 0x7800, libc at 0x7C00, trap stack at 0x7E00 */
+#define APP_BRAM_END        OF_TARGET_APP_BRAM_END  /* Caps at 0x7800; top BRAM holds trap/boot state */
 #define APP_BRAM_SIZE       (APP_BRAM_END - APP_BRAM_BASE)
 
 #define SDRAM_BASE          OF_TARGET_SDRAM_BASE

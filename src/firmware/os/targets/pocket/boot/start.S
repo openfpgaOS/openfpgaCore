@@ -80,6 +80,10 @@ halt:
  *   mcause  (1 word)   at sp+132
  *   mtval   (1 word)   at sp+136
  *   f0-f31  (32 words) at sp+140 .. sp+264
+ *
+ * The register frame stays in BRAM so restore remains deterministic.
+ * C handlers that can recurse deeply switch to the OS runtime stack
+ * while keeping the BRAM frame pointer in s2.
  * ======================================== */
 _trap_entry:
     /* Drain the CPU store buffer before any ISR-side work.  Prevents
@@ -192,10 +196,16 @@ _trap_entry:
     li t1, 11           /* Environment call from M-mode */
     beq t0, t1, _ecall_handler
 
-    /* Not an ecall - try misaligned access emulation */
-    mv a0, sp
+    /* Not an ecall - try misaligned access emulation.
+     * Use the large OS runtime stack for the C helper; the trap frame
+     * itself remains in BRAM. */
+    mv s2, sp
+    lui sp, %hi(_runtime_stack_top)
+    addi sp, sp, %lo(_runtime_stack_top)
+    mv a0, s2
     la t0, handle_misaligned
     jalr ra, t0
+    mv sp, s2
 
     beqz a0, _fatal_trap
 
@@ -258,8 +268,14 @@ _ecall_handler:
     mv s0, a1           /* preserve user a1 */
     mv s1, a7           /* preserve EID for the post-call branch */
 
+    /* Run syscall bodies on the OS runtime stack. File/path syscalls can
+     * exceed the small BRAM trap-frame reserve. */
+    mv s2, sp
+    lui sp, %hi(_runtime_stack_top)
+    addi sp, sp, %lo(_runtime_stack_top)
     la t0, syscall_dispatch
     jalr ra, t0
+    mv sp, s2
     /* sbiret returned in a0/a1: a0 = error/value, a1 = SBI value */
 
     /* Always write the primary return value to user a0. */

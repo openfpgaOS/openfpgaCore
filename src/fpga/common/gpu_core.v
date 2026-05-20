@@ -152,8 +152,8 @@ reg [31:0] ring_rd_data;                  // Ring BRAM port B read output (regis
 
 // CPU upload address for the transluc[] LUT (32 KB).  Colormap storage
 // retired — palookups now live in SDRAM and the GPU reads them through
-// gpu_tex_cache port B; transluc[] is GPU-private SRAM because its
-// random-access blend lookup pattern doesn't fit a single-line cache.
+// gpu_tex_cache port B; transluc[] is GPU-private SRAM with a tiny
+// last-word cache for repeated blend lookups.
 reg [14:0] transluc_wr_addr;   // Auto-increment byte address into transluc[]
 reg        tex_flush_req;      // Pulse to flush texture cache
 reg        soft_reset;         // Pulse: resets FSM state + ring pointers
@@ -334,8 +334,11 @@ reg        lutsram_seen_busy;
 
 reg [14:0] transluc_rd_addr;
 reg        transluc_lookup_fire;
+reg        transluc_cache_valid;
+reg [12:0] transluc_cache_addr;
+reg [31:0] transluc_cache_data;
 
-wire transluc_lookup_ready =
+wire transluc_sram_lookup_ready =
     (lutsram_state == LUTSRAM_IDLE) && !sram_busy;
 
 assign transluc_upload_busy = (lutsram_state != LUTSRAM_IDLE);
@@ -350,13 +353,18 @@ always @(posedge clk) begin
         transluc_wr_addr        <= 15'd0;
         lutsram_state           <= LUTSRAM_IDLE;
         lutsram_seen_busy       <= 1'b0;
+        transluc_cache_valid    <= 1'b0;
+        transluc_cache_addr     <= 13'd0;
+        transluc_cache_data     <= 32'd0;
     end else begin
         sram_rd    <= 1'b0;
         sram_wr    <= 1'b0;
         sram_wstrb <= 4'd0;
 
-        if (reg_wr && reg_addr == 4'd8)
+        if (reg_wr && reg_addr == 4'd8) begin
             transluc_wr_addr <= reg_wdata[14:0];
+            transluc_cache_valid <= 1'b0;
+        end
 
         case (lutsram_state)
             LUTSRAM_IDLE: begin
@@ -371,6 +379,7 @@ always @(posedge clk) begin
                     sram_wdata       <= reg_wdata;
                     sram_wstrb       <= 4'hF;
                     transluc_wr_addr <= transluc_wr_addr + 15'd4;
+                    transluc_cache_valid <= 1'b0;
                     lutsram_state    <= LUTSRAM_WRITE_WAIT;
                 end
             end
@@ -384,6 +393,9 @@ always @(posedge clk) begin
 
             LUTSRAM_READ_WAIT: begin
                 if (sram_rdata_valid) begin
+                    transluc_cache_valid <= 1'b1;
+                    transluc_cache_addr  <= transluc_rd_addr[14:2];
+                    transluc_cache_data  <= sram_rdata;
                     lutsram_state         <= LUTSRAM_IDLE;
                 end
             end
@@ -1360,6 +1372,16 @@ reg [1:0]  blend_lane_iter;
 reg [1:0]  blend_lut_lane;
 reg        blend_arvalid;
 reg [31:0] blend_araddr;
+wire [7:0]  blend_lut_src_byte = fb_lane_read(blend_group_src_data, blend_lane_iter);
+wire [7:0]  blend_lut_fb_byte  = fb_lane_read(blend_result_word, blend_lane_iter);
+wire [14:0] blend_lut_addr_w   = {blend_lut_src_byte[7:1], blend_lut_fb_byte};
+wire        transluc_cache_hit = transluc_cache_valid
+                               && (transluc_cache_addr == blend_lut_addr_w[14:2]);
+wire [7:0]  transluc_cache_byte =
+    (blend_lut_addr_w[1:0] == 2'd0) ? transluc_cache_data[7:0]   :
+    (blend_lut_addr_w[1:0] == 2'd1) ? transluc_cache_data[15:8]  :
+    (blend_lut_addr_w[1:0] == 2'd2) ? transluc_cache_data[23:16] :
+                                      transluc_cache_data[31:24];
 // Pre-computed after the grouped FB read, consumed by FBSS_BLEND_APPLY.  Hoists
 // the 32-bit equality compare `fb_acc_addr == blend_group_word_addr` out of
 // the BLEND_APPLY cycle so the only logic between blend_group_word_addr (FF)
@@ -1404,15 +1426,15 @@ reg src_done;            // source has issued its last pixel; pipeline draining
 // 32-bit word writes and the drain path emits one AXI beat per entry.  Keeping
 // this path single-beat avoids extra pairing state and leaves more placement
 // freedom for the fitter.
-localparam FBWQ_DEPTH = 2;
+localparam FBWQ_DEPTH = 16;
 reg [31:0] fbwq_addr [0:FBWQ_DEPTH-1];
 reg [31:0] fbwq_data [0:FBWQ_DEPTH-1];
 reg [3:0]  fbwq_strb [0:FBWQ_DEPTH-1];
-reg        fbwq_rd_ptr;
-reg        fbwq_wr_ptr;
-reg [1:0]  fbwq_count;
-wire       fbwq_empty = (fbwq_count == 2'd0);
-wire       fbwq_full  = (fbwq_count == 2'd2);
+reg [3:0]  fbwq_rd_ptr;
+reg [3:0]  fbwq_wr_ptr;
+reg [4:0]  fbwq_count;
+wire       fbwq_empty = (fbwq_count == 5'd0);
+wire       fbwq_full  = (fbwq_count == 5'd16);
 
 // Stage 2b: framebuffer/clear writes enqueue into a compact FIFO and the
 // AXI write port drains it independently.  This lets the fragment pipe keep
@@ -1426,7 +1448,7 @@ wire fb_write_drain_complete = fbwq_empty && (m_wr_inflight == 4'b0) && !m_wr_ch
 wire fbwq_output_idle = !m_wr_awvalid && !m_wr_wvalid;
 wire fbwq_drain_can_load = !m_wr_inflight_near_full && fbwq_output_idle;
 wire fbwq_pop_now = !fbwq_empty && fbwq_drain_can_load;
-wire [1:0] fbwq_pop_count = fbwq_pop_now ? 2'd1 : 2'd0;
+wire [4:0] fbwq_pop_count = fbwq_pop_now ? 5'd1 : 5'd0;
 wire fbwq_can_push = !fbwq_full || fbwq_pop_now;
 wire fb_write_can_issue = fbwq_can_push;
 wire p3_needs_fb_flush = p3_valid && !p3_discard && !p3_flags[SPAN_TRANSLUC]
@@ -1466,11 +1488,11 @@ assign tex_req_wide  = 1'b0;
 // ----------------------------------------------------------------
 // Perspective span — projection-space state + segment setup
 // ----------------------------------------------------------------
-// 8-pixel affine subdivision (perspective-correct at segment ends,
+// 16-pixel affine subdivision (perspective-correct at segment ends,
 // linear interpolation within each segment). The span command supplies
 // (s/z)_start, (t/z)_start, (1/z)_start and their per-pixel deltas in
-// projection space (sdivz, tdivz, zi_persp + their *_step). Per 8-pixel
-// segment, the GPU computes:
+// projection space (sdivz, tdivz, zi_persp + their *_step). For each
+// PERSPECTIVE_SEG_LEN-pixel segment, the GPU computes:
 //
 //   z       = 1 / (1/z)               -- via M10K reciprocal LUT
 //   s_anchor = (s/z) * z              -- via shared DSP
@@ -1495,9 +1517,8 @@ assign tex_req_wide  = 1'b0;
 //
 // Passes 1+2 stall the issue stage (`persp_issue_stall = persp_active &&
 // !persp_seg_a_ready`). Pass 3 runs in parallel with the issue stage rendering
-// segment 0 — its 7-cycle latency is well inside the 16-pixel segment, so
-// slot B is ready by the time the issue stage finishes segment 0 and needs
-// to swap.
+// segment 0, so slot B is ready by the time the issue stage finishes segment 0
+// and needs to swap.
 //
 // On segment boundary: when load_p0 fires for the last pixel of segment N
 // (sp_seg_left == 0), the issue stage swaps slot B into slot A (sp_s,
@@ -1512,11 +1533,18 @@ reg signed [31:0] sp_sZstep;    // d(s/z)/dx, per-pixel
 reg signed [31:0] sp_tZstep;    // d(t/z)/dx, per-pixel
 reg signed [31:0] sp_zinv_step; // d(1/z)/dx, per-pixel
 
+// Perspective correction runs as affine sub-segments.  The PSS setup path
+// takes about one segment's worth of cycles, so 16 pixels keeps slot B ready
+// without creating the structural 8-on/8-off issue-stage bubble.
+localparam integer PERSPECTIVE_SEG_SHIFT = 4;
+localparam [15:0]  PERSPECTIVE_SEG_LEN   = 16'd16;
+localparam [3:0]   PERSPECTIVE_SEG_LAST  = 4'd15;
+
 // Active when the current span has SPAN_PERSP set.
 reg        persp_active;
 
-// Pixels remaining in the current 8-pixel affine sub-segment, AFTER the
-// pixel currently being issued. Counts 7 → 0 within a segment. When
+// Pixels remaining in the current affine sub-segment, AFTER the
+// pixel currently being issued. Counts 15 → 0 within a segment. When
 // load_p0 fires with sp_seg_left == 0, slot B is swapped into slot A.
 reg [3:0]  sp_seg_left;
 
@@ -1608,8 +1636,8 @@ reg signed [31:0] pss_t_end_r;
 // PSS slope clamp on perspective singularity.
 //
 // Root cause: PSS computes s_end = sp_sZ * (1/sp_zinv) at the end of
-// each 8-pixel sub-segment, then derives a per-pixel slope as
-// (s_end - s_anchor) >>> 3.  The 1/sp_zinv operation has a
+// each affine sub-segment, then derives a per-pixel slope as
+// (s_end - s_anchor) >> PERSPECTIVE_SEG_SHIFT.  The 1/sp_zinv operation has a
 // singularity at sp_zinv=0; on oblique triangles where d(zinv)/dx
 // is non-trivial AND the sub-segment END extrapolates close to the
 // triangle's edge, sp_zinv at the END can become very small.
@@ -1617,9 +1645,8 @@ reg signed [31:0] pss_t_end_r;
 // producing a wildly wrong slope that contaminates the *inside*
 // pixels of the sub-segment.
 //
-// Concrete repro from b85f498 fuzz tri[44]: at row y=40 of tri[44]
-// (sub-pixel-positioned vertices), sub-segment 1's sp_zinv goes
-// 0.164 → 0.00383 across the +8-pixel advance.  Resulting s_end =
+// A known repro from b85f498 fuzz tri[44] had sub-segment 1's sp_zinv go
+// 0.164 → 0.00383 across the advance.  Resulting s_end =
 // -1349, slope = -173/pixel — making sp_s at pixel 51 = -138 (real)
 // when CPU barycentric reference says 26.7.  Byte error 89.
 //
@@ -1651,10 +1678,11 @@ reg        [31:0] pss_zinv_abs_na_r;
 wire persp_issue_stall = persp_active && !persp_seg_a_ready;
 
 // Combinational zinv helpers. PSS_ADV captures the post-advance value
-// (sp_zinv + 8 pixels of step) and the pre-advance abs; PSS_ADV_CLAMP
+// (sp_zinv + one segment of step) and the pre-advance abs; PSS_ADV_CLAMP
 // registers the post-advance abs into persp_zinv_abs_r. PSS_RECIP_NA
 // uses the un-advanced value directly on the first pass.
-wire signed [31:0] sp_zinv_advanced = sp_zinv + (sp_zinv_step <<< 3);  // 8-pixel advance
+wire signed [31:0] sp_zinv_advanced =
+    sp_zinv + (sp_zinv_step <<< PERSPECTIVE_SEG_SHIFT);
 wire        [31:0] persp_zinv_abs_na = sp_zinv[31] ? -sp_zinv : sp_zinv;
 wire        [31:0] pss_zinv_adv_abs_r = pss_zinv_adv_r[31]
                                       ? -pss_zinv_adv_r
@@ -2028,9 +2056,9 @@ always @(posedge clk) begin : main_fsm
         ring_rdptr <= 0;
         m_wr_awvalid <= 0;
         m_wr_wvalid <= 0;
-        fbwq_rd_ptr <= 1'b0;
-        fbwq_wr_ptr <= 1'b0;
-        fbwq_count  <= 2'b0;
+        fbwq_rd_ptr <= 4'b0;
+        fbwq_wr_ptr <= 4'b0;
+        fbwq_count  <= 5'b0;
         fb_acc_valid <= 0;
         fb_acc_mask <= 0;
         fence_reached <= 0;
@@ -2173,9 +2201,9 @@ always @(posedge clk) begin : main_fsm
             ring_rdptr   <= ring_wrptr;
             m_wr_awvalid <= 0;
             m_wr_wvalid  <= 0;
-            fbwq_rd_ptr  <= 1'b0;
-            fbwq_wr_ptr  <= 1'b0;
-            fbwq_count   <= 2'b0;
+            fbwq_rd_ptr  <= 4'b0;
+            fbwq_wr_ptr  <= 4'b0;
+            fbwq_count   <= 5'b0;
             fb_acc_valid <= 0;
             fb_acc_mask  <= 0;
             fbss         <= FBSS_IDLE;
@@ -2834,7 +2862,7 @@ always @(posedge clk) begin : main_fsm
                                 sp_t              <= persp_pend_t;
                                 sp_sstep          <= persp_pend_sstep;
                                 sp_tstep          <= persp_pend_tstep;
-                                sp_seg_left       <= 4'd7;  // 8-pixel segments
+                                sp_seg_left       <= PERSPECTIVE_SEG_LAST;
                                 persp_seg_b_ready <= 0;  // PSS will refill
                             end else begin
                                 sp_s        <= sp_s + sp_sstep;
@@ -3033,13 +3061,17 @@ always @(posedge clk) begin : main_fsm
                 end
 
                 FBSS_BLEND_SELECT: begin : fbss_blend_select_blk
-                    reg [7:0] src_byte;
-                    reg [7:0] fb_byte;
                     if (blend_group_mask[blend_lane_iter]) begin
-                        if (transluc_lookup_ready) begin
-                            src_byte = fb_lane_read(blend_group_src_data, blend_lane_iter);
-                            fb_byte  = fb_lane_read(blend_result_word, blend_lane_iter);
-                            transluc_rd_addr      <= {src_byte[7:1], fb_byte};
+                        if (transluc_cache_hit) begin
+                            blend_result_word <= (blend_result_word & ~fb_lane_data_mask(blend_lane_iter))
+                                               | fb_lane_data(blend_lane_iter, transluc_cache_byte);
+                            if (blend_lane_iter == 2'd3) begin
+                                fbss <= FBSS_BLEND_APPLY;
+                            end else begin
+                                blend_lane_iter <= blend_lane_iter + 2'd1;
+                            end
+                        end else if (transluc_sram_lookup_ready) begin
+                            transluc_rd_addr      <= blend_lut_addr_w;
                             transluc_lookup_fire  <= 1'b1;
                             blend_lut_lane        <= blend_lane_iter;
                             fbss                  <= FBSS_BLEND_LUT_WAIT;
@@ -3130,8 +3162,9 @@ always @(posedge clk) begin : main_fsm
                             persp_pass <= PSS_PASS_TO_A;
                             persp_pss  <= PSS_ADV;
                         end else if (!persp_seg_b_ready
-                                  && (sp_count > 16'd8 || sp_seg_left != 4'd0)) begin
-                            // Only fill slot B if there's a future 8-px segment
+                                  && (sp_count > PERSPECTIVE_SEG_LEN
+                                      || sp_seg_left != 4'd0)) begin
+                            // Only fill slot B if there's a future segment
                             // that will swap it in. (sp_count includes the
                             // current segment's remaining pixels.)
                             persp_pass <= PSS_PASS_TO_B;
@@ -3142,12 +3175,12 @@ always @(posedge clk) begin : main_fsm
 
                 PSS_ADV: begin
                     // Stage 1 of pipelined setup: advance projection-space
-                    // accumulators by 8 pixels and register old/new zinv.
+                    // accumulators by one segment and register old/new zinv.
                     // Splitting the old single-cycle (advance → CLZ → top8 →
                     // recip_rd_addr) chain into ADV / ADV_CLAMP / CLZ /
                     // TOP8 closes the timing path.
-                    sp_sZ            <= sp_sZ   + (sp_sZstep   <<< 3);  // 8-pixel advance
-                    sp_tZ            <= sp_tZ   + (sp_tZstep   <<< 3);
+                    sp_sZ            <= sp_sZ   + (sp_sZstep   <<< PERSPECTIVE_SEG_SHIFT);
+                    sp_tZ            <= sp_tZ   + (sp_tZstep   <<< PERSPECTIVE_SEG_SHIFT);
                     sp_zinv          <= sp_zinv_advanced;
                     pss_zinv_prev_r  <= sp_zinv;
                     pss_zinv_adv_r   <= sp_zinv_advanced;
@@ -3164,7 +3197,7 @@ always @(posedge clk) begin : main_fsm
                     recip_norm_abs_r <= pss_zinv_adv_abs_r;
                     // Singularity clamp (task #89).  See comment by
                     // pss_zinv_clamp_r declaration.  Trigger if the
-                    // 8-pixel advance shrinks |sp_zinv| by 4× or more,
+                    // segment advance shrinks |sp_zinv| by 4× or more,
                     // OR crosses zero entirely.
                     pss_zinv_clamp_r <=
                         ((pss_zinv_adv_r[31] ^ pss_zinv_prev_r[31])
@@ -3276,8 +3309,8 @@ always @(posedge clk) begin : main_fsm
                     // dsp_p  = sZ × recip → s_end
                     // dsp2_p = tZ × recip → t_end
                     //
-                    // Task #89 clamp: when the 8-pixel sub-segment
-                    // advance brought sp_zinv too close to zero (or
+                    // Task #89 clamp: when the sub-segment advance
+                    // brought sp_zinv too close to zero (or
                     // across it), 1/sp_zinv has blown up and the
                     // computed s_end / t_end are wildly wrong.
                     // Substitute persp_anchor_s/t — slope = 0, the
@@ -3302,14 +3335,17 @@ always @(posedge clk) begin : main_fsm
                             persp_first_done <= 1;
                         end
                         PSS_PASS_TO_A: begin
-                            // Pass 2: derive slot A slopes from anchor → pos 8.
+                            // Pass 2: derive slot A slopes from anchor to the
+                            // end of the first affine sub-segment.
                             sp_s              <= persp_anchor_s;
                             sp_t              <= persp_anchor_t;
                             sp_sstep          <= ($signed(pss_s_end_r)
-                                                - $signed(persp_anchor_s)) >>> 3;
+                                                - $signed(persp_anchor_s))
+                                                >>> PERSPECTIVE_SEG_SHIFT;
                             sp_tstep          <= ($signed(pss_t_end_r)
-                                                - $signed(persp_anchor_t)) >>> 3;
-                            sp_seg_left       <= 4'd7;  // 8-pixel segments
+                                                - $signed(persp_anchor_t))
+                                                >>> PERSPECTIVE_SEG_SHIFT;
+                            sp_seg_left       <= PERSPECTIVE_SEG_LAST;
                             persp_anchor_s    <= pss_s_end_r;
                             persp_anchor_t    <= pss_t_end_r;
                             persp_seg_a_ready <= 1;
@@ -3319,9 +3355,11 @@ always @(posedge clk) begin : main_fsm
                             persp_pend_s      <= persp_anchor_s;
                             persp_pend_t      <= persp_anchor_t;
                             persp_pend_sstep  <= ($signed(pss_s_end_r)
-                                                - $signed(persp_anchor_s)) >>> 3;
+                                                - $signed(persp_anchor_s))
+                                                >>> PERSPECTIVE_SEG_SHIFT;
                             persp_pend_tstep  <= ($signed(pss_t_end_r)
-                                                - $signed(persp_anchor_t)) >>> 3;
+                                                - $signed(persp_anchor_t))
+                                                >>> PERSPECTIVE_SEG_SHIFT;
                             persp_anchor_s    <= pss_s_end_r;
                             persp_anchor_t    <= pss_t_end_r;
                             persp_seg_b_ready <= 1;
@@ -3782,7 +3820,7 @@ always @(posedge clk) begin : main_fsm
                     // affine v_s / v_t are Q16.0 sign-extended.  The
                     // same shift constant therefore lands the perspective
                     // gradient 2^16 too big — sp_sZ then overflows the
-                    // 32-bit register on the 8-pixel PSS_ADV and inverts
+                    // 32-bit register on PSS_ADV and inverts
                     // sign.  Shift perspective gradients down 16 bits.
                     // w gradients are perspective-only by design.
                     case (grad_idx)
@@ -4139,7 +4177,7 @@ always @(posedge clk) begin : main_fsm
                         // Arm PSS in its initial state — pass 1 (anchor)
                         // will fire on first fragment-issue, fill the slot
                         // A slope, then the issue stage runs at full
-                        // throughput within each 8-pixel segment.
+                        // throughput within each segment.
                         persp_seg_a_ready <= 0;
                         persp_seg_b_ready <= 0;
                         persp_first_done  <= 0;
@@ -4152,7 +4190,7 @@ always @(posedge clk) begin : main_fsm
                         // persp_pend_s (= the prior row's anchor).  Segment 2
                         // of every row after the first then swapped that stale
                         // value into sp_s — visible as a 50%+ pixel mismatch
-                        // jump at the second 8-pixel boundary.
+                        // jump at the second segment boundary.
                         persp_pss         <= PSS_RECIP_NA;
                         persp_pass        <= PSS_PASS_ANCHOR;
                         sp_seg_left       <= 0;
@@ -4302,7 +4340,7 @@ always @(posedge clk) begin : main_fsm
             end
 
             fbwq_count <= fbwq_count
-                        + (fbwq_push_req && fbwq_can_push ? 2'd1 : 2'd0)
+                        + (fbwq_push_req && fbwq_can_push ? 5'd1 : 5'd0)
                         - fbwq_pop_count;
         end  // closes the housekeeping `begin` introduced for m_wr_inflight + gpu_swap_req auto-clear
     end

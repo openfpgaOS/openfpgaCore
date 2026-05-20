@@ -108,8 +108,8 @@ fi
 # high-fanout control net, which leaves the worst path from execute/FPU
 # control back to the I-cache read enable route-limited.  Add a local
 # synthesis hint after generation so the fitter can insert replicas.
-perl -0pi -e 's/  wire                execute_freeze_valid;/  (* maxfan = 256 *) wire                execute_freeze_valid;/' "$OUTPUT"
-if ! grep -q "maxfan = 256.*execute_freeze_valid" "$OUTPUT"; then
+perl -0pi -e 's/  wire                execute_freeze_valid;/  (* maxfan = 16 *) wire                execute_freeze_valid;/' "$OUTPUT"
+if ! grep -q "maxfan = 16.*execute_freeze_valid" "$OUTPUT"; then
     echo "ERROR: failed to annotate execute_freeze_valid maxfan hint"
     exit 1
 fi

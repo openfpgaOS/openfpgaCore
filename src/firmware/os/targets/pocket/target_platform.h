@@ -20,7 +20,7 @@
 /* App framebuffers live at the uncached SDRAM alias (0x50xxxxxx) so CPU
  * pixel writes go straight through p_axi to SDRAM, bypassing the L1 D$.
  * This avoids cache pollution: without the alias, a 76 KB triple buffer
- * thrashes the 64 KB L1 and evicts real app working-set data.  The
+ * thrashes the L1 D-cache and evicts real app working-set data.  The
  * scanout engine and GPU access the same physical SDRAM via their own
  * paths (scanout has hardcoded FB_ADDR_0/1/2 constants in
  * axi_periph_slave.v; GPU writes pass through axi_sdram_slave's [25:2]

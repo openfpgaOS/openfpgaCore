@@ -69,8 +69,8 @@ static int addr_valid(unsigned int addr, unsigned int len) {
     /* Check for overflow */
     if (end < addr) return 0;
     /* BRAM — only the app's window is emulatable. OS BRAM
-     * (< APP_BRAM_BASE, and > APP_BRAM_END which is the kernel
-     * trap stack) is off-limits. */
+     * (< APP_BRAM_BASE, and > APP_BRAM_END which holds kernel
+     * trap/boot state) is off-limits. */
     if (addr >= APP_BRAM_BASE && end < APP_BRAM_END) return 1;
     /* SDRAM (cached) */
     if (addr >= SDRAM_BASE && end < SDRAM_END_ADDR) return 1;
@@ -597,8 +597,7 @@ void fatal_trap(trap_frame_t *frame) {
     trap_uart_puts("\n");
 
     /* Dump 64 words of app stack around sp — lets us find where the
-     * corrupted return address came from.  Safe because we're on the
-     * trap stack in BRAM and the app's sp is in SDRAM.  Stop before
+     * corrupted return address came from.  Stop before
      * reading past the SDRAM PMA end (0x14000000) so the dump itself
      * can't trigger a recursive load access fault — that used to
      * double-print the trap when sp was deep and 64 words crossed the
