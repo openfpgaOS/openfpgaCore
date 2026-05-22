@@ -65,6 +65,20 @@ static void svc_input_read_mouse_state(void *out) {
 /* Timer set_callback: managed in syscall.c, replicate here */
 extern void (*timer_callback_ptr)(void);  /* from syscall.c */
 
+static inline uint32_t svc_irq_save_local(void)
+{
+    uint32_t prev;
+    __asm__ volatile("csrrci %0, mstatus, 0x8"
+                     : "=r"(prev) :: "memory");
+    return prev & 0x8u;
+}
+
+static inline void svc_irq_restore_local(uint32_t prev)
+{
+    if (prev)
+        __asm__ volatile("csrrsi zero, mstatus, 0x8" ::: "memory");
+}
+
 static void svc_timer_set_callback(void (*cb)(void), uint32_t hz) {
     /* Pin the hardware timer at 1 kHz regardless of the app's requested
      * rate.  The HW audio mixer runs autonomously so it no longer drives
@@ -73,18 +87,23 @@ static void svc_timer_set_callback(void (*cb)(void), uint32_t hz) {
      * appropriate number of times per wake, so 50 Hz MIDI callbacks
      * still resolve correctly on a 1 kHz hardware tick. */
     (void)hz;
-    timer_callback_ptr = cb;
+    uint32_t irq = svc_irq_save_local();
     if (cb) {
         TIMER_PERIOD = CPU_FREQ_HZ / 1000u;
+        timer_callback_ptr = cb;
         TIMER_CTRL = TIMER_CTRL_ENABLE;
     } else {
+        timer_callback_ptr = NULL;
         TIMER_CTRL = 0;
     }
+    svc_irq_restore_local(irq);
 }
 
 static void svc_timer_stop(void) {
-    TIMER_CTRL = 0;
+    uint32_t irq = svc_irq_save_local();
     timer_callback_ptr = NULL;
+    TIMER_CTRL = 0;
+    svc_irq_restore_local(irq);
 }
 
 /* Mixer end callback: wraps irq registration */

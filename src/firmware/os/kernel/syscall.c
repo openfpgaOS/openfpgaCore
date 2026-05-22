@@ -46,6 +46,20 @@ extern void *dlcalloc(size_t, size_t);
 static void (*sigalrm_handler)(int) = NULL;
 void (*timer_callback_ptr)(void) = NULL;  /* non-static: accessed by services_table.c */
 
+static inline uint32_t sys_irq_save_local(void)
+{
+    uint32_t prev;
+    __asm__ volatile("csrrci %0, mstatus, 0x8"
+                     : "=r"(prev) :: "memory");
+    return prev & 0x8u;
+}
+
+static inline void sys_irq_restore_local(uint32_t prev)
+{
+    if (prev)
+        __asm__ volatile("csrrsi zero, mstatus, 0x8" ::: "memory");
+}
+
 /* Called from irq_handler() on machine timer interrupt */
 void timer_isr_callback(void) {
     /* Service the terminal UART hook before app callbacks.  The Pocket
@@ -2340,18 +2354,27 @@ static long of_vendor_dispatch(long eid, long fid,
     case OF_EID_TIMER:
         switch (fid) {
         case OF_TIMER_FID_SET_CALLBACK:
-            timer_callback_ptr = (void (*)(void))a0;
+        {
+            uint32_t irq = sys_irq_save_local();
             if (a0 && a1 > 0) {
                 TIMER_PERIOD = CPU_FREQ_HZ / (uint32_t)a1;
+                timer_callback_ptr = (void (*)(void))a0;
                 TIMER_CTRL = TIMER_CTRL_ENABLE;
             } else {
+                timer_callback_ptr = NULL;
                 TIMER_CTRL = 0;
             }
+            sys_irq_restore_local(irq);
             return 0;
+        }
         case OF_TIMER_FID_STOP:
-            TIMER_CTRL = 0;
+        {
+            uint32_t irq = sys_irq_save_local();
             timer_callback_ptr = NULL;
+            TIMER_CTRL = 0;
+            sys_irq_restore_local(irq);
             return 0;
+        }
         case OF_TIMER_FID_GET_US:
             return of_timer_get_us();
         case OF_TIMER_FID_GET_MS:

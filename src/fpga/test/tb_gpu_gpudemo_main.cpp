@@ -194,8 +194,7 @@ static void clear_fb() {
         sdram_write((FB_BASE >> 2) + i, 0xCCCCCCCCu);
 }
 // Identity cmap preloaded into SDRAM at the slot-0 palookup base —
-// matches gpu_core.v's PALOOKUP_BASE = 0x100000.  cmap_bram retired in
-// favour of tex_cache port B reads from SDRAM.
+// matches gpu_core.v's PALOOKUP_BASE and is read through tex_cache port B.
 static const uint32_t PALOOKUP_BASE_BYTE = 0x03400000;
 static void upload_identity_cmap_row0() {
     for (int i = 0; i < 256; i += 4) {
@@ -208,8 +207,7 @@ static void upload_identity_cmap_row0() {
 }
 
 // =====================================================================
-// Scalar span payload — 15 words.
-// Modelled after of_gpu_draw_span() in src/firmware/api/of_gpu.h.
+// One-lane native affine span group, matching the SDK command encoding.
 // =====================================================================
 static void emit_span(uint32_t fb_addr, uint32_t tex_addr,
                       int32_t s, int32_t t,
@@ -218,20 +216,18 @@ static void emit_span(uint32_t fb_addr, uint32_t tex_addr,
                       int16_t fb_stride, uint16_t tex_width,
                       uint16_t tex_w_mask, uint16_t tex_h_mask)
 {
-    ring_cmd(0x43, 15);
+    ring_cmd(0x47, 11);
+    ring_write((1u << 28) | (((uint32_t)flags & 0xFFu) << 20));
+    ring_write(tex_width);
+    ring_write(((uint32_t)tex_h_mask << 16) | tex_w_mask);
+    ring_write((uint32_t)(int32_t)fb_stride);
     ring_write(fb_addr);
     ring_write(tex_addr);
+    ring_write((((uint32_t)light & 0x3Fu) << 16) | (uint32_t)count);
     ring_write((uint32_t)s);
     ring_write((uint32_t)t);
     ring_write((uint32_t)sstep);
     ring_write((uint32_t)tstep);
-    ring_write(((uint32_t)count << 16) | ((uint32_t)light << 8) | flags);
-    ring_write(((uint32_t)(uint16_t)fb_stride << 16) | tex_width);
-    ring_write(((uint32_t)tex_h_mask << 16) | tex_w_mask);  // word 8
-    ring_write(0);  // z_addr (unused for non-depth spans)
-    ring_write(0);  // zi
-    ring_write(0);  // zistep
-    for (int i = 12; i < 15; i++) ring_write(0);
 }
 
 // CMD_DRAW_TRIANGLES payload — 19 words: count + 6 words per vertex × 3.
@@ -280,8 +276,8 @@ static bool one_frame(int frame_no)
                   /*flags*/ 0x01,           // SPAN_COLORMAP
                   /*fb_stride*/ 1,
                   /*tex_width*/ 64,
-                  /*tex_w_mask*/ 0,    // gpudemo doesn't set masks → word 8 = 0
-                  /*tex_h_mask*/ 0);   // RTL decodes 0 → no wrap (legacy default)
+                  /*tex_w_mask*/ 0,
+                  /*tex_h_mask*/ 0);
         // Mirror as ceiling.
         int cy = (SCREEN_H - 1) - y;
         emit_span(FB_BASE + cy * SCREEN_W, TEX_BASE + CEIL_TEX_OFF,
@@ -290,8 +286,8 @@ static bool one_frame(int frame_no)
                   /*flags*/ 0x01,
                   /*fb_stride*/ 1,
                   /*tex_width*/ 64,
-                  /*tex_w_mask*/ 0,    // gpudemo doesn't set masks → word 8 = 0
-                  /*tex_h_mask*/ 0);   // RTL decodes 0 → no wrap (legacy default)
+                  /*tex_w_mask*/ 0,
+                  /*tex_h_mask*/ 0);
     }
 
     // ---- Wall column spans (vertical, COLUMN flag) ----
@@ -307,11 +303,11 @@ static bool one_frame(int frame_no)
                   /*sstep*/ 0, /*tstep*/ tstep,
                   /*count*/ height,
                   /*light*/ 8,
-                  /*flags*/ 0x01 | 0x02,    // SPAN_COLORMAP | SPAN_COLUMN
+                  /*flags*/ 0x01,           // SPAN_COLORMAP
                   /*fb_stride*/ SCREEN_W,
                   /*tex_width*/ 64,
-                  /*tex_w_mask*/ 0,    // gpudemo doesn't set masks → word 8 = 0
-                  /*tex_h_mask*/ 0);   // RTL decodes 0 → no wrap (legacy default)
+                  /*tex_w_mask*/ 0,
+                  /*tex_h_mask*/ 0);
     }
 
     // ---- One textured triangle (cube facet) with depth ----

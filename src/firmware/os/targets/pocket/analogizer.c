@@ -247,6 +247,17 @@ static uint32_t analogizer_pack_settings(const of_analogizer_state_t *s) {
            (s->enabled ? (1u << 15) : 0u);
 }
 
+static void analogizer_wait_for_registers(const of_analogizer_state_t *s) {
+    uint32_t settings = analogizer_pack_settings(s);
+
+    for (volatile int i = 0; i < 1024; i++) {
+        if (ANALOGIZER_SETTINGS == settings &&
+            (int8_t)ANALOGIZER_H_OFFSET == s->h_offset &&
+            (int8_t)ANALOGIZER_V_OFFSET == s->v_offset)
+            break;
+    }
+}
+
 static void analogizer_init_snac(void) {
     if (anlg_state.snac_type != SNAC_NONE)
         snac_init(anlg_state.snac_type);
@@ -262,6 +273,7 @@ static void analogizer_apply_state(const of_analogizer_state_t *state) {
     ANALOGIZER_V_OFFSET = (uint32_t)(int32_t)anlg_state.v_offset;
     ANALOGIZER_SETTINGS = analogizer_pack_settings(&anlg_state);
 
+    analogizer_wait_for_registers(&anlg_state);
     analogizer_init_snac();
 }
 
@@ -275,6 +287,28 @@ static void analogizer_read_hardware_defaults(void) {
     anlg_state.h_offset = (int8_t)ANALOGIZER_H_OFFSET;
     anlg_state.v_offset = (int8_t)ANALOGIZER_V_OFFSET;
     analogizer_clamp_state(&anlg_state);
+}
+
+static void analogizer_decode_hardware_state(of_analogizer_state_t *out) {
+    uint32_t settings = ANALOGIZER_SETTINGS;
+
+    out->snac_type = settings & 0x1Fu;
+    out->snac_assignment = (settings >> 6) & 0x0Fu;
+    out->video_mode = (settings >> 10) & 0x0Fu;
+    out->enabled = (settings >> 15) & 1u;
+    out->h_offset = (int8_t)ANALOGIZER_H_OFFSET;
+    out->v_offset = (int8_t)ANALOGIZER_V_OFFSET;
+    analogizer_clamp_state(out);
+}
+
+static int analogizer_state_changed(const of_analogizer_state_t *a,
+                                    const of_analogizer_state_t *b) {
+    return a->enabled != b->enabled ||
+           a->video_mode != b->video_mode ||
+           a->snac_type != b->snac_type ||
+           a->snac_assignment != b->snac_assignment ||
+           a->h_offset != b->h_offset ||
+           a->v_offset != b->v_offset;
 }
 
 static int parse_binary_config(const uint8_t *buf, uint32_t len,
@@ -510,6 +544,19 @@ void of_analogizer_init(void) {
     analogizer_init_snac();
 }
 
+void of_analogizer_refresh(void) {
+    of_analogizer_state_t hw;
+    analogizer_decode_hardware_state(&hw);
+    if (!analogizer_state_changed(&hw, &anlg_state))
+        return;
+
+    uint8_t old_snac_type = anlg_state.snac_type;
+    anlg_state = hw;
+
+    if (anlg_state.snac_type != old_snac_type)
+        analogizer_init_snac();
+}
+
 int of_analogizer_load_config(const char *filename) {
     uint8_t buf[ANALOGCFG_MAX_READ];
     uint32_t len;
@@ -534,13 +581,16 @@ int of_analogizer_load_config(const char *filename) {
 }
 
 const of_analogizer_state_t *of_analogizer_get_state(void) {
+    of_analogizer_refresh();
     return &anlg_state;
 }
 
 int of_analogizer_is_enabled(void) {
+    of_analogizer_refresh();
     return anlg_state.enabled;
 }
 
 int of_analogizer_get_video_mode(void) {
+    of_analogizer_refresh();
     return anlg_state.video_mode;
 }

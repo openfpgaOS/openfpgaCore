@@ -62,13 +62,29 @@ module video_CRT_scanout_indexed_BRAM (
     localparam VID_H_BPORCH = 62;
     localparam VID_H_FPORCH = 20;
     localparam VID_H_ACTIVE = 640;
+    localparam [9:0] VID_H_ACTIVE_START = 10'd120;
+    localparam [9:0] VID_H_ACTIVE_END   = 10'd760;
+    localparam [9:0] VID_V_FETCH_START  = 10'd17;
+    localparam [9:0] VID_V_FETCH_END    = 10'd257;
+    localparam [9:0] VID_V_ACTIVE_START = 10'd18;
+    localparam [9:0] VID_V_ACTIVE_END   = 10'd258;
 
-    // Line buffer: stores one line of pixel data
-    // Max size: RGB565 mode = 320 x 16-bit = 160 x 32-bit words
-    // 8-bit mode = 320 x 8-bit = 80 x 32-bit words
-    reg [31:0] line_buffer [0:159];
+    // Scanout line cache.  The video side reads the bank selected by the
+    // visible line number while the SDRAM side prefetches a few future lines
+    // into different banks.  This avoids read/write contention on a single
+    // dual-clock RAM and gives SDRAM arbitration jitter room to breathe.
+    //
+    // Max line size: RGB565 mode = 320 x 16-bit = 160 x 32-bit words.
+    localparam [8:0] LAST_ACTIVE_LINE = 9'd239;
+    localparam [8:0] PREFETCH_LOOKAHEAD = 9'd2;
+
+    // Four 256-word banks are used even though only 160 words are needed per
+    // line.  The power-of-two bank stride keeps the RAM address simple enough
+    // for Quartus to infer block RAM reliably.
+    reg [31:0] line_buffer [0:1023];
     reg [31:0] bram_rd_data;
     reg [7:0] write_ptr;
+    reg [1:0] write_bank;
 
     // Palette RAM: two 256-entry banks x 24-bit RGB.
     // Port A writes the staging bank.  Port B reads the active bank for
@@ -167,9 +183,9 @@ module video_CRT_scanout_indexed_BRAM (
     // =========================================
     // Video clock domain - Line start detection
     // =========================================
-    wire [9:0] fetch_line = y_count - VID_V_SYNC - VID_V_BPORCH + 1;
-    wire in_vactive = (y_count >= (VID_V_SYNC + VID_V_BPORCH - 1)) &&
-                      (y_count < (VID_V_SYNC + VID_V_BPORCH + VID_V_ACTIVE - 1));
+    wire [9:0] fetch_line = y_count - VID_V_FETCH_START;
+    wire in_vactive = (y_count >= VID_V_FETCH_START) &&
+                      (y_count < VID_V_FETCH_END);
 
     reg fetch_request;
     reg fetch_request_ack_sync1, fetch_request_ack_sync2;
@@ -190,7 +206,7 @@ module video_CRT_scanout_indexed_BRAM (
 
             if (line_start && in_vactive && !fetch_request) begin
                 fetch_request <= 1;
-                fetch_line_latched <= fetch_line[9:0];
+                fetch_line_latched <= fetch_line[8:0];
             end
         end
     end
@@ -198,11 +214,21 @@ module video_CRT_scanout_indexed_BRAM (
     // =========================================
     // Video clock domain - Pixel output (multi-mode)
     // =========================================
-    wire [9:0] visible_x = x_count - VID_H_SYNC - VID_H_BPORCH;
-    wire in_hactive = (x_count >= (VID_H_SYNC + VID_H_BPORCH)) &&
-                      (x_count < (VID_H_SYNC + VID_H_BPORCH + VID_H_ACTIVE));
-    wire in_vactive_display = (y_count >= (VID_V_SYNC + VID_V_BPORCH)) &&
-                              (y_count < (VID_V_SYNC + VID_V_BPORCH + VID_V_ACTIVE));
+    wire [9:0] visible_x = x_count - VID_H_ACTIVE_START;
+    wire [9:0] visible_y = y_count - VID_V_ACTIVE_START;
+    wire [1:0] visible_line_bank = visible_y[1:0];
+    wire [7:0] line_rd_index =
+        (color_mode_video == MODE_8BIT) ? {1'b0, visible_x[9:3]} :
+        (color_mode_video == MODE_4BIT) ? {2'b00, visible_x[9:4]} :
+        (color_mode_video == MODE_2BIT) ? {3'b000, visible_x[9:5]} :
+                                           visible_x[9:2];
+    wire in_hactive = (x_count >= VID_H_ACTIVE_START) &&
+                      (x_count < VID_H_ACTIVE_END);
+    wire in_vactive_display = (y_count >= VID_V_ACTIVE_START) &&
+                              (y_count < VID_V_ACTIVE_END);
+    wire [7:0] line_rd_index_safe = in_hactive ? line_rd_index : 8'd0;
+    wire [9:0] line_rd_addr = {visible_line_bank, line_rd_index_safe};
+    wire [9:0] line_wr_addr = {write_bank, write_ptr};
 
     // Pipeline stage registers
     (* altera_attribute = "-name AUTO_SHIFT_REGISTER_RECOGNITION OFF" *)
@@ -224,12 +250,7 @@ module video_CRT_scanout_indexed_BRAM (
         // STAGE 1: BRAM address + read
         // visible_x counts 0..639 (2x horizontal), so real pixel = visible_x / 2
         // Word index = real_pixel / pixels_per_word
-        case (color_mode_video)
-            MODE_8BIT:    bram_rd_data <= line_buffer[visible_x[9:3]];   // 4 pixels per word, idx = visible_x/8
-            MODE_4BIT:    bram_rd_data <= line_buffer[visible_x[9:4]];   // 8 pixels per word, idx = visible_x/16
-            MODE_2BIT:    bram_rd_data <= line_buffer[visible_x[9:5]];   // 16 pixels per word, idx = visible_x/32
-            default:      bram_rd_data <= line_buffer[visible_x[9:2]];   // 2 pixels per word, idx = visible_x/4
-        endcase
+        bram_rd_data <= line_buffer[line_rd_addr];
 
         // Latch sub-pixel position (used by STAGE 2 on next clock)
         sub_pixel_q <= visible_x[4:1];
@@ -289,6 +310,11 @@ module video_CRT_scanout_indexed_BRAM (
     reg fetch_request_sync1, fetch_request_sync2;
     reg fetch_request_ack;
     reg [8:0] fetch_line_sdram;
+    reg [8:0] last_request_line;
+    reg [8:0] next_fetch_line;
+    reg [8:0] prefetch_limit_line;
+    reg       prefetch_enabled;
+    reg       fetch_line_sdram_valid;
 
     localparam ST_IDLE = 2'd0;
     localparam ST_BURST = 2'd1;
@@ -296,25 +322,43 @@ module video_CRT_scanout_indexed_BRAM (
 
     reg [1:0] state;
 
-    // Burst length depends on color mode:
-    //   8-bit:  80 words (320 bytes / 4)
-    //   4-bit:  40 words (160 bytes / 4)
-    //   2-bit:  20 words (80 bytes / 4)
-    //   16bpp: 160 words (640 bytes / 4)
-    reg [10:0] mode_burst_len;
-    reg [24:0] mode_line_offset;
+    function [10:0] burst_len_for_mode;
+        input [2:0] mode;
+        begin
+            case (mode)
+                MODE_8BIT: burst_len_for_mode = 11'd80;
+                MODE_4BIT: burst_len_for_mode = 11'd40;
+                MODE_2BIT: burst_len_for_mode = 11'd20;
+                default:   burst_len_for_mode = 11'd160;
+            endcase
+        end
+    endfunction
 
-    // Line offset: registered to break combinational path in SDRAM domain.
-    // Computed when fetch_request arrives (ST_IDLE → ST_BURST transition).
-    // Uses shift+add for multiply: line*160, line*80, line*40, line*320.
-    always @(posedge clk_sdram) begin
-        case (color_mode_sdram)
-            MODE_8BIT: begin mode_burst_len <= 11'd80;  mode_line_offset <= {fetch_line_latched, 7'b0} + {fetch_line_latched, 5'b0}; end
-            MODE_4BIT: begin mode_burst_len <= 11'd40;  mode_line_offset <= {fetch_line_latched, 6'b0} + {fetch_line_latched, 4'b0}; end
-            MODE_2BIT: begin mode_burst_len <= 11'd20;  mode_line_offset <= {fetch_line_latched, 5'b0} + {fetch_line_latched, 3'b0}; end
-            default:   begin mode_burst_len <= 11'd160; mode_line_offset <= {fetch_line_latched, 8'b0} + {fetch_line_latched, 6'b0}; end
-        endcase
-    end
+    // Address offsets match the original scanout addressing convention.
+    function [24:0] line_offset_for_mode;
+        input [8:0] line;
+        input [2:0] mode;
+        begin
+            case (mode)
+                MODE_8BIT: line_offset_for_mode = {line, 7'b0} + {line, 5'b0};
+                MODE_4BIT: line_offset_for_mode = {line, 6'b0} + {line, 4'b0};
+                MODE_2BIT: line_offset_for_mode = {line, 5'b0} + {line, 3'b0};
+                default:   line_offset_for_mode = {line, 8'b0} + {line, 6'b0};
+            endcase
+        end
+    endfunction
+
+    function [8:0] prefetch_limit_for_line;
+        input [8:0] line;
+        reg [10:0] limit;
+        begin
+            limit = {2'b00, line} + {2'b00, PREFETCH_LOOKAHEAD};
+            if (limit > {2'b00, LAST_ACTIVE_LINE})
+                prefetch_limit_for_line = LAST_ACTIVE_LINE;
+            else
+                prefetch_limit_for_line = limit[8:0];
+        end
+    endfunction
 
     always @(posedge clk_sdram or negedge reset_n) begin
         if (!reset_n) begin
@@ -323,44 +367,67 @@ module video_CRT_scanout_indexed_BRAM (
             burst_addr <= 0;
             burst_len <= 0;
             write_ptr <= 0;
+            write_bank <= 0;
             fetch_request_sync1 <= 0;
             fetch_request_sync2 <= 0;
             fetch_request_ack <= 0;
             fetch_line_sdram <= 0;
+            fetch_line_sdram_valid <= 0;
+            last_request_line <= 0;
+            next_fetch_line <= 0;
+            prefetch_limit_line <= 0;
+            prefetch_enabled <= 0;
         end else begin
             fetch_request_sync1 <= fetch_request;
             fetch_request_sync2 <= fetch_request_sync1;
             burst_rd <= 0;
 
+            if (fetch_line_sdram_valid) begin
+                if (!prefetch_enabled || (fetch_line_sdram < last_request_line)) begin
+                    next_fetch_line <= fetch_line_sdram;
+                    prefetch_limit_line <= prefetch_limit_for_line(fetch_line_sdram);
+                    prefetch_enabled <= 1;
+                end else if (prefetch_limit_for_line(fetch_line_sdram) > prefetch_limit_line) begin
+                    prefetch_limit_line <= prefetch_limit_for_line(fetch_line_sdram);
+                end
+
+                last_request_line <= fetch_line_sdram;
+                fetch_line_sdram_valid <= 0;
+            end
+
+            if (fetch_request_sync2 && !fetch_request_ack) begin
+                fetch_line_sdram <= fetch_line_latched;
+                fetch_line_sdram_valid <= 1;
+                fetch_request_ack <= 1;
+            end else if (!fetch_request_sync2) begin
+                fetch_request_ack <= 0;
+            end
+
             case (state)
                 ST_IDLE: begin
-                    fetch_request_ack <= 0;
-                    if (fetch_request_sync2 && !fetch_request_ack) begin
-                        fetch_line_sdram <= fetch_line_latched;
-                        burst_addr <= fb_base_addr + mode_line_offset;
-                        burst_len <= mode_burst_len;
+                    if (prefetch_enabled && (next_fetch_line <= prefetch_limit_line)) begin
+                        burst_addr <= fb_base_addr + line_offset_for_mode(next_fetch_line, color_mode_sdram);
+                        burst_len <= burst_len_for_mode(color_mode_sdram);
                         burst_rd <= 1;
                         write_ptr <= 0;
+                        write_bank <= next_fetch_line[1:0];
                         state <= ST_BURST;
                     end
                 end
 
                 ST_BURST: begin
                     if (burst_data_valid) begin
-                        line_buffer[write_ptr] <= burst_data;
-                        write_ptr <= write_ptr + 1;
+                        line_buffer[line_wr_addr] <= burst_data;
+                        write_ptr <= write_ptr + 8'd1;
                     end
                     if (burst_data_done) begin
-                        fetch_request_ack <= 1;
-                        state <= ST_WAIT;
+                        next_fetch_line <= next_fetch_line + 9'd1;
+                        state <= ST_IDLE;
                     end
                 end
 
                 ST_WAIT: begin
-                    if (!fetch_request_sync2) begin
-                        fetch_request_ack <= 0;
-                        state <= ST_IDLE;
-                    end
+                    state <= ST_IDLE;
                 end
             endcase
         end

@@ -15,11 +15,23 @@
 static snac_controller_t snac_state[2];
 static uint8_t active_type;
 static int     snac_active_flag;
+static int     snac_poll_busy;
 static uint8_t snac_gpio_out_shadow;
+static uint8_t psx_att_pin;
+
+#define PSX_ATT_SETUP_DELAY      1000
+#define PSX_INTERBYTE_DELAY       256
+#define PSX_ACK_TIMEOUT           128
+#define PSX_ACK_RELEASE_TIMEOUT   256
 
 static void snac_gpio_set(uint8_t out, uint8_t dir) {
     snac_gpio_out_shadow = out;
     snac_gpio_write(out, dir);
+}
+
+static void snac_delay(volatile int cycles) {
+    while (cycles-- > 0)
+        ;
 }
 
 static int16_t psx_axis_to_input(uint8_t value) {
@@ -119,38 +131,83 @@ static uint8_t psx_xfer_byte(uint8_t cmd) {
     return rx_rev;
 }
 
-static void poll_psx(int analog) {
-    /* Assert ATT (active low) */
-    uint8_t gpio_out = snac_gpio_out_shadow;
-    snac_gpio_set(gpio_out & ~SNAC_PIN_OUT1,
-                  (SNAC_DIR_IO5 >> 8) | (SNAC_DIR_IO6 >> 8) | 0x03);
+static void psx_wait_ack_or_gap(void) {
+    int saw_ack = 0;
 
-    /* Small delay for ATT setup */
-    for (volatile int i = 0; i < 10; i++) ;
+    /* ACK is optional for our poll path: some adapters do not expose it on
+     * the expected pin. Keep this as a short probe, then use a fixed gap so
+     * SNAC polling cannot become a frame-time sink. */
+    for (volatile int i = 0; i < PSX_ACK_TIMEOUT; i++) {
+        if ((snac_gpio_read() & SNAC_PIN_BK06) == 0) {
+            saw_ack = 1;
+            break;
+        }
+    }
+
+    if (saw_ack) {
+        for (volatile int i = 0; i < PSX_ACK_RELEASE_TIMEOUT; i++) {
+            if (snac_gpio_read() & SNAC_PIN_BK06)
+                break;
+        }
+    } else {
+        snac_delay(PSX_INTERBYTE_DELAY);
+    }
+}
+
+static uint8_t psx_xfer_byte_gap(uint8_t cmd) {
+    uint8_t rx = psx_xfer_byte(cmd);
+    psx_wait_ack_or_gap();
+    return rx;
+}
+
+static int psx_response_valid(uint8_t id, uint8_t status) {
+    return status == 0x5A &&
+           id != 0x00 &&
+           id != 0xFF;
+}
+
+static int poll_psx_att(int analog, uint8_t att_pin, int commit) {
+    uint8_t dir = ((SNAC_DIR_IO5 | SNAC_DIR_IO6) >> 8) | 0x03;
+    uint8_t idle_out = snac_gpio_out_shadow |
+                       SNAC_PIN_OUT1 |
+                       SNAC_PIN_OUT2 |
+                       SNAC_PIN_IO5 |
+                       SNAC_PIN_IO6;
+
+    /* Assert ATT/select (active low).  Analogizer Config B adapters may
+     * route the active select to OUT1 or OUT2, so the caller probes both. */
+    snac_gpio_set(idle_out & (uint8_t)~att_pin, dir);
+
+    /* Give the controller time to see ATT before the first clock edge. */
+    snac_delay(PSX_ATT_SETUP_DELAY);
 
     /* Address: 0x01 */
-    psx_xfer_byte(0x01);
+    psx_xfer_byte_gap(0x01);
     /* Command: 0x42 (Read Data), get device ID */
-    uint8_t id = psx_xfer_byte(0x42);
+    uint8_t id = psx_xfer_byte_gap(0x42);
     /* Get status byte (usually 0x5A = ready) */
-    psx_xfer_byte(0x00);
+    uint8_t status = psx_xfer_byte_gap(0x00);
     /* Button bytes (active low) */
-    uint8_t btn_lo = psx_xfer_byte(0x00);
-    uint8_t btn_hi = psx_xfer_byte(0x00);
+    uint8_t btn_lo = psx_xfer_byte_gap(0x00);
 
     int16_t joy_rx = 0, joy_ry = 0, joy_lx = 0, joy_ly = 0;
+    int analog_reply = analog && (id == 0x73 || id == 0x53);
+    uint8_t btn_hi = analog_reply ? psx_xfer_byte_gap(0x00)
+                                  : psx_xfer_byte(0x00);
 
     /* Analog mode (id = 0x73 for DualShock, 0x53 for analog joystick) */
-    if (analog && (id == 0x73 || id == 0x53)) {
-        joy_rx = psx_axis_to_input(psx_xfer_byte(0x00));
-        joy_ry = psx_axis_to_input(psx_xfer_byte(0x00));
-        joy_lx = psx_axis_to_input(psx_xfer_byte(0x00));
+    if (analog_reply) {
+        joy_rx = psx_axis_to_input(psx_xfer_byte_gap(0x00));
+        joy_ry = psx_axis_to_input(psx_xfer_byte_gap(0x00));
+        joy_lx = psx_axis_to_input(psx_xfer_byte_gap(0x00));
         joy_ly = psx_axis_to_input(psx_xfer_byte(0x00));
     }
 
     /* Deassert ATT */
-    snac_gpio_set(gpio_out | SNAC_PIN_OUT1,
-                  (SNAC_DIR_IO5 >> 8) | (SNAC_DIR_IO6 >> 8) | 0x03);
+    snac_gpio_set(idle_out, dir);
+
+    if (!psx_response_valid(id, status))
+        return 0;
 
     /* Map PSX buttons to Pocket format.
      * PSX byte layout (active low):
@@ -176,11 +233,34 @@ static void poll_psx(int analog) {
     if (raw & 0x4000) buttons |= OF_BTN_A;       /* Cross */
     if (raw & 0x8000) buttons |= OF_BTN_X;       /* Square */
 
-    snac_state[0].buttons = buttons;
-    snac_state[0].joy_lx = joy_lx;
-    snac_state[0].joy_ly = joy_ly;
-    snac_state[0].joy_rx = joy_rx;
-    snac_state[0].joy_ry = joy_ry;
+    if (commit) {
+        snac_state[0].buttons = buttons;
+        snac_state[0].joy_lx = joy_lx;
+        snac_state[0].joy_ly = joy_ly;
+        snac_state[0].joy_rx = joy_rx;
+        snac_state[0].joy_ry = joy_ry;
+    }
+
+    return 1;
+}
+
+static void poll_psx(int analog) {
+    if (poll_psx_att(analog, psx_att_pin, 1))
+        return;
+
+    uint8_t alt_att = (psx_att_pin == SNAC_PIN_OUT1)
+                    ? SNAC_PIN_OUT2
+                    : SNAC_PIN_OUT1;
+    if (poll_psx_att(analog, alt_att, 1)) {
+        psx_att_pin = alt_att;
+        return;
+    }
+
+    snac_state[0].buttons = 0;
+    snac_state[0].joy_lx = 0;
+    snac_state[0].joy_ly = 0;
+    snac_state[0].joy_rx = 0;
+    snac_state[0].joy_ry = 0;
 }
 
 /* ============================================================
@@ -265,19 +345,19 @@ static void poll_pce(int sixbtn) {
  * ============================================================ */
 
 void snac_init(uint8_t snac_type) {
+    snac_active_flag = 0;
+    snac_poll_busy = 0;
     active_type = snac_type;
+    psx_att_pin = SNAC_PIN_OUT1;
     snac_state[0] = (snac_controller_t){0};
     snac_state[1] = (snac_controller_t){0};
 
     if (snac_type == SNAC_NONE) {
-        snac_active_flag = 0;
         /* Disable SNAC mode → UART active */
         snac_gpio_out_shadow = 0;
         SNAC_CTRL = 0;
         return;
     }
-
-    snac_active_flag = 1;
 
     /* Enable SNAC mode (disables UART on shared pins) */
     uint32_t ctrl = SNAC_CTRL_ENABLE;
@@ -285,13 +365,13 @@ void snac_init(uint8_t snac_type) {
     if (snac_type >= SNAC_PSX) {
         /* Config B (PSX): CLK on pin30, CMD on IO6, DAT on IN4 */
         ctrl |= SNAC_CTRL_MODE_B;
-        /* PSX standard: 125 KHz clock → div = CPU_FREQ/(2*125000) - 1 = 399 */
-        SNAC_DIV = 399;
+        /* PSX standard: conservative 100 KHz for adapter/controller margin. */
+        SNAC_DIV = 499;
         /* GPIO: OUT1=ATT high (deassert), pin30=CLK high idle, IO6=CMD high idle */
         snac_gpio_set(SNAC_PIN_OUT1 | SNAC_PIN_OUT2 | SNAC_PIN_IO5 | SNAC_PIN_IO6,
                       ((SNAC_DIR_IO5 | SNAC_DIR_IO6) >> 8) | 0x03);
         if (snac_type == SNAC_PSX_FAST || snac_type == SNAC_PSX_ANALOG_FAST)
-            SNAC_DIV = 199;  /* 250 KHz */
+            SNAC_DIV = 249;  /* 200 KHz */
     } else if (snac_type >= SNAC_PCE_2BTN && snac_type <= SNAC_PCE_MULTITAP) {
         /* PC Engine: pure GPIO, no shifter.  Use Config A mode but
          * we won't actually use the shifter. */
@@ -310,10 +390,15 @@ void snac_init(uint8_t snac_type) {
     }
 
     SNAC_CTRL = ctrl;
+    snac_active_flag = 1;
+    snac_poll();
 }
 
 void snac_poll(void) {
     if (!snac_active_flag) return;
+    if (snac_poll_busy) return;
+
+    snac_poll_busy = 1;
 
     switch (active_type) {
     case SNAC_NES:
@@ -347,6 +432,8 @@ void snac_poll(void) {
     default:
         break;
     }
+
+    snac_poll_busy = 0;
 }
 
 const snac_controller_t *snac_get_state(int player) {

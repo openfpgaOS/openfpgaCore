@@ -250,10 +250,22 @@ wire [31:0] snac_rx_data;
 wire        snac_shift_clk;
 wire        snac_shift_mosi;
 wire        snac_shift_latch;
+reg  [7:0]  snac_pin_in_meta;
+reg  [7:0]  snac_pin_in_sync;
 
-// Shifter MISO inputs — directly from synced pin inputs
-wire snac_miso_a = snac_pin_in[2];  // IO3/bank0[4] (Config A: DATA)
-wire snac_miso_b = snac_pin_in[5];  // IN4/bank0[7] (Config B: DAT)
+always @(posedge clk) begin
+    if (reset) begin
+        snac_pin_in_meta <= 8'h00;
+        snac_pin_in_sync <= 8'h00;
+    end else begin
+        snac_pin_in_meta <= snac_pin_in;
+        snac_pin_in_sync <= snac_pin_in_meta;
+    end
+end
+
+// Shifter MISO inputs — synchronized from cart pins
+wire snac_miso_a = snac_pin_in_sync[2];  // IO3/bank0[4] (Config A: DATA)
+wire snac_miso_b = snac_pin_in_sync[5];  // IN4/bank0[7] (Config B: DAT)
 
 // Shift parameters latched from SNAC_CTRL write
 reg [4:0] snac_bit_count_reg;
@@ -1156,7 +1168,7 @@ always @(*) begin
             6'd40: sysreg_rdata = {22'b0, snac_mode_reg, snac_en_reg, 6'b0, snac_busy};
             6'd41: sysreg_rdata = {16'b0, snac_div_reg};
             6'd42: sysreg_rdata = snac_rx_data;
-            6'd43: sysreg_rdata = {16'b0, snac_pin_dir, snac_pin_in};
+            6'd43: sysreg_rdata = {16'b0, snac_pin_dir, snac_pin_in_sync};
             // Shutdown handshake
             6'd44: sysreg_rdata = {31'b0, shutdown_pending};
             // Hardware timer

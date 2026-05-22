@@ -88,7 +88,7 @@ module gpu_core (
     // ================================================================
     output wire        busy,
     output reg  [31:0] fence_reached,
-    // Legacy Verilator diagnostic outputs.  Production builds keep them
+    // Verilator diagnostic outputs.  Production builds keep them
     // tied off so debug cones do not survive into timing/resource closure.
     output wire [5:0]  dbg_state,
     output wire [5:0]  dbg_setup_step,
@@ -96,11 +96,10 @@ module gpu_core (
     output wire [31:0] dbg_frag
 );
 
-// Production span-only GPU profile used while the core is LAB-bound.  Quake
-// can fall back to CPU perspective setup plus GPU affine spans; Duke and Doom
-// do not use the removed triangle/perspective paths.
-localparam GPU_ENABLE_TRIANGLES = 1'b0;
-localparam GPU_ENABLE_PERSP     = 1'b0;
+// Production span-group GPU profile used while the core is LAB-bound.
+// Triangle drawing is a real compile-time feature boundary: the default
+// build does not even elaborate the triangle setup/rasterizer cones.
+localparam GPU_ENABLE_PERSP     = 1'b1;
 
 wire active = reset_n & gpu_enable;
 
@@ -114,11 +113,12 @@ assign dbg_frag = 32'd0;
 // ================================================================
 // 0x00  GPU_CTRL          W   bit0=enable, bit1=soft_reset, bit2=ring_reset
 // 0x04  GPU_RING_WRPTR    R   Published ring write pointer
-// 0x08  Reserved              Legacy GPU_RING_DATA command MMIO removed
+// 0x08  Reserved
 // 0x0C  GPU_DMA_SRC       W   SDRAM byte address of command buffer to pull
 // 0x10  GPU_RING_RDPTR    R   GPU read pointer
-// 0x14  GPU_STATUS        R   bit0=busy, bit1=ring_empty, bit2=upload_busy,
-//                              bit3=transluc_busy, [5:4]=dma_state
+// 0x14  GPU_STATUS        R   bit0=busy, bit1=ring_empty, bit2=dma_busy,
+//                              bit3=transluc_busy, [5:4]=dma_state,
+//                              bit6=dma_desc_full
 // 0x18  GPU_FENCE         R   Last completed fence token
 // 0x1C  GPU_DMA_LEN       W   Word count to pull (max 4096)
 // 0x20  GPU_TRANSLUC_ADDR W   byte address into transluc[] upload window
@@ -136,7 +136,7 @@ assign dbg_frag = 32'd0;
 //     AXI INCR bursts.
 //   * The DMA publishes ring_wrptr only after the final word lands, so the
 //     decoder never observes a partial command.
-// Poll GPU_STATUS:upload_busy before reusing the SDRAM batch/stream buffer.
+// Poll GPU_STATUS:dma_busy before reusing an SDRAM batch/stream buffer.
 
 // Ring BRAM: 16 KB = 4096 words, dual-port M10K
 // Port A: doorbell-DMA writes command streams from SDRAM
@@ -148,12 +148,12 @@ reg [31:0] ring_bram [0:RING_WORDS-1];
 reg [RING_ADDR_BITS-1:0] ring_wr_addr;  // DMA write pointer (word index)
 reg [RING_ADDR_BITS-1:0] ring_wrptr;     // Published write pointer (word index)
 reg [RING_ADDR_BITS-1:0] ring_rdptr;     // GPU read pointer (word index)
+reg [RING_ADDR_BITS-1:0] ring_rd_addr;   // Port-B read address
 reg [31:0] ring_rd_data;                  // Ring BRAM port B read output (registered)
 
-// CPU upload address for the transluc[] LUT (32 KB).  Colormap storage
-// retired — palookups now live in SDRAM and the GPU reads them through
-// gpu_tex_cache port B; transluc[] is GPU-private SRAM with a tiny
-// last-word cache for repeated blend lookups.
+// CPU upload address for the transluc[] LUT (32 KB).  Palookups live in SDRAM
+// and the GPU reads them through gpu_tex_cache port B; transluc[] is GPU-private
+// SRAM with a tiny last-word cache for repeated blend lookups.
 reg [14:0] transluc_wr_addr;   // Auto-increment byte address into transluc[]
 reg        tex_flush_req;      // Pulse to flush texture cache
 reg        soft_reset;         // Pulse: resets FSM state + ring pointers
@@ -165,7 +165,6 @@ reg        ring_reset;         // Pulse: reset ring_rdptr (from MMIO, consumed b
 // re-issues an AR for each 256-beat sub-burst until the count drains.
 reg [31:0] dma_src_latched;       // SDRAM byte addr (from GPU_DMA_SRC)
 reg [12:0] dma_len_latched;       // Total words to pull (max 4096; 13-bit fits)
-reg        dma_kick;              // Pulse: latch SRC/LEN snapshot into burst regs
 localparam DMA_S_IDLE    = 2'd0;
 localparam DMA_S_AR      = 2'd1;
 localparam DMA_S_R       = 2'd2;
@@ -176,20 +175,30 @@ reg [31:0] dma_burst_addr;        // SDRAM byte addr of next sub-burst
 reg [12:0] dma_words_left;        // Words remaining in the kick (across sub-bursts)
 reg [8:0]  dma_burst_words;       // Words remaining in current sub-burst (1..256)
 
-wire       dma_pull_busy = (dma_state != DMA_S_IDLE) || dma_kick;
+reg [31:0] dma_desc_src [0:1];
+reg [12:0] dma_desc_len [0:1];
+reg        dma_desc_rd;
+reg        dma_desc_wr;
+reg [1:0]  dma_desc_count;
+wire       dma_desc_empty = (dma_desc_count == 2'd0);
+wire       dma_desc_full  = (dma_desc_count == 2'd2);
+wire       dma_desc_push_req = reg_wr && (reg_addr == 4'd11) && reg_wdata[0]
+                            && (dma_len_latched != 13'd0) && !dma_desc_full;
+wire       dma_desc_pop_now = (dma_state == DMA_S_IDLE) && !dma_desc_empty;
+wire       dma_pull_busy = (dma_state != DMA_S_IDLE) || !dma_desc_empty;
 wire       dma_busy = dma_pull_busy;
 
 // Anti-starvation counter for DMA_S_AR: count cycles where DMA wants to
 // assert AR but is held off by !dma_bus_idle (sustained tex/blend traffic).
-// At STARVE_THRESHOLD (1024 cycles ≈ 10 µs at 100 MHz), force AR
+// At STARVE_THRESHOLD (512 cycles ≈ 5 µs at 100 MHz), force AR
 // regardless of the idle gate.  The downstream tex/blend AR mux already
 // blocks new tex ARs while dma_owns_ar=1, so any in-flight tex
 // transaction drains naturally and DMA's AR lands on the next free slot
 // at the slave.  Real DMA path is ~25 µs/batch end-to-end; the bound is
 // shorter than that, so it only triggers under genuine starvation —
 // the wedge case observed in Duke3D's heavy textured-rendering frames.
-localparam DMA_STARVE_THRESHOLD = 11'd1024;
-reg [10:0] dma_starve_count;
+localparam DMA_STARVE_THRESHOLD = 10'd512;
+reg [9:0] dma_starve_count;
 
 wire ring_empty = (ring_rdptr == ring_wrptr);
 wire [15:0] ring_wrptr_bytes = {2'b0, ring_wrptr, 2'b0};
@@ -200,7 +209,7 @@ assign busy = dma_busy || transluc_upload_busy || !ring_empty || (state != S_IDL
 
 // Port B: GPU read (synchronous, 1-cycle latency)
 always @(posedge clk)
-    ring_rd_data <= ring_bram[ring_rdptr];
+    ring_rd_data <= ring_bram[ring_rd_addr];
 
 // DMA word-write into ring BRAM port A: asserted by the DMA FSM
 // when an R-beat lands (dma_state==DMA_S_R && m_rd_rvalid).  These
@@ -208,10 +217,9 @@ always @(posedge clk)
 wire        dma_ring_wr_raw;
 wire [31:0] dma_ring_wdata_raw;
 
-// Canonical altsyncram-inferable single-port write to ring_bram.  The
-// legacy CPU MMIO command path is gone; commands are staged in SDRAM and
-// copied here by the doorbell DMA only.  That leaves one writer for port A,
-// avoiding the former CPU/DMA collision mux and skid registers.
+// Canonical altsyncram-inferable single-port write to ring_bram.  Commands are
+// staged in SDRAM and copied here by the doorbell DMA only.  That leaves one
+// writer for port A, avoiding a CPU/DMA collision mux and skid registers.
 always @(posedge clk) begin
     if (dma_ring_wr_raw)
         ring_bram[ring_wr_addr] <= dma_ring_wdata_raw;
@@ -229,12 +237,10 @@ always @(posedge clk) begin
         ring_reset      <= 0;
         dma_src_latched <= 32'd0;
         dma_len_latched <= 13'd0;
-        dma_kick        <= 1'b0;
     end else begin
         tex_flush_req <= 0;
         soft_reset    <= 0;
         ring_reset    <= 0;
-        dma_kick      <= 1'b0;
 
         // ring_wr_addr advances once per DMA beat.  Keeping it here
         // (not in the BRAM-write block) means the BRAM block stays canonical.
@@ -259,7 +265,7 @@ always @(posedge clk) begin
                     end
                 end
                 4'd1: begin end // GPU_RING_WRPTR is read-only now
-                4'd2: begin end // Legacy GPU_RING_DATA retired
+                4'd2: begin end
                 4'd3: begin  // GPU_DMA_SRC
                     dma_src_latched <= reg_wdata;
                 end
@@ -272,8 +278,7 @@ always @(posedge clk) begin
                     tex_flush_req <= 1;
                 end
                 4'd11: begin // GPU_DMA_KICK — fire pull
-                    if (reg_wdata[0] && dma_state == DMA_S_IDLE)
-                        dma_kick <= 1'b1;
+                    // Handled by the DMA descriptor queue FSM below.
                 end
                 default: ;
             endcase
@@ -289,14 +294,14 @@ always @(*) begin
         // Compact production status:
         //   bit 0     = busy
         //   bit 1     = ring_empty
-        //   bit 2     = upload_busy (SDRAM DMA pull)
+        //   bit 2     = dma_busy (active or queued SDRAM DMA pull)
         //   bit 3     = translucency SRAM upload/lookup busy
         //   bits[5:4] = dma_state (0=IDLE, 1=AR, 2=R, 3=PUBLISH)
-        4'd5:    reg_rdata = {26'b0, dma_state, transluc_upload_busy,
+        //   bit 6     = DMA descriptor FIFO full
+        4'd5:    reg_rdata = {25'b0, dma_desc_full, dma_state, transluc_upload_busy,
                               dma_busy, ring_empty, busy};
         4'd6:    reg_rdata = fence_reached;
-        // Legacy flip/write counters retired to recover LABs. Keep a
-        // compact current-inflight readback for the write-balance test.
+        // Compact current-inflight readback for the write-balance test.
         4'd13:   reg_rdata = {28'b0, m_wr_inflight};
         default: reg_rdata = 32'b0;
     endcase
@@ -407,21 +412,18 @@ always @(posedge clk) begin
     end
 end
 
-// Cmap read path — formerly cmap_bram, now routed through gpu_tex_cache
-// port B (added by the TDP conversion in commit 1 of the cmap-via-cache
-// plan).  The address pipeline is unchanged in spirit: at p1→p2 shift,
-// latch the SDRAM byte address for the upcoming p2 fragment's cmap
-// lookup; tex_cache port B accepts the request combinationally on cycle
-// p2; the byte response is available combinationally one cycle later
-// (resp_data_b[7:0] at p2b's cycle), exactly mirroring the prior
-// cmap_bram timing.  Misses (which the dedicated BRAM never had) stall
-// the pipeline via fp_pipe_stall's cmap_pipe_wait term until the fill
-// completes — see fp_pipe_stall below.
+// Cmap read path through gpu_tex_cache port B.  At p1→p2 shift, latch
+// the SDRAM byte address for the upcoming p2 fragment's cmap lookup;
+// tex_cache port B accepts the request combinationally on p2's cycle,
+// and the byte response is available one cycle later on p2b's cycle.
+// Cache misses stall the pipeline via fp_pipe_stall's cmap_pipe_wait
+// term until the fill completes.
 //
-// PALOOKUP_BASE + (sp_colormap_id << 14) anchors the slot for span/group
-// fragments; triangle-emitted spans force slot 0.  The per-pixel term
-// (light << 8 | texel) indexes within the slot.  Slot encoding matches
-// the SDK's of_gpu_palookup_upload() on the host side.
+// PALOOKUP_BASE + (colormap_id << 14) anchors the slot for fragments.
+// Affine span groups carry a per-lane slot; scalar/perspective paths carry
+// a per-command slot; triangle-emitted spans force slot 0.  The per-pixel
+// term (light << 8 | texel) indexes within the slot.  Slot encoding
+// matches the SDK's of_gpu_palookup_upload() on the host side.
 reg [25:0] cmap_req_addr_reg;
 
 // resp_data_b is wired from gpu_tex_cache port B below; the byte falls out
@@ -461,10 +463,8 @@ wire        cmap_issue_wait = cmap_issue_base && !cmap_req_ready_b;
 wire [15:0] cmap_resp_data_b;
 wire [7:0]  cmap_rd_data = cmap_resp_data_b[7:0];
 
-// (cmap_rd_data is now a continuous-assign wire above — no always block
-// needed.  The byte mux that previously selected a lane out of the 32-bit
-// cmap_bram word is now subsumed into tex_cache port B's resp_data_b,
-// which already returns the byte at req_addr_b[1:0] when req_wide_b == 0.)
+// cmap_rd_data is a continuous-assign wire.  tex_cache port B returns
+// the selected byte at req_addr_b[1:0] when req_wide_b == 0.
 
 // ================================================================
 // Shared DSP multiply + reciprocal LUT
@@ -486,32 +486,21 @@ reg signed [31:0] dsp2_b;
 (* multstyle = "dsp" *) reg signed [63:0] dsp2_p;
 always @(posedge clk) dsp2_p <= dsp2_a * dsp2_b;
 
+function signed [31:0] q16_round_product;
+    input signed [63:0] product;
+    begin
+        q16_round_product = (product + 64'sd32768) >>> 16;
+    end
+endfunction
+
+`ifdef GPU_INCLUDE_TRIANGLES
 // Dedicated registered DSP multiply for the triangle row-base address.
-// `tri_ymin * st_fb_stride` was the worst critical path in fabric adders
-// (16.8 ns, -2.8 ns slack). A DSP costs one of the 37 free slots and
-// delivers the product.
-//
-// DSP input registers: tri_ymin / st_fb_stride are buffered through a
-// stand-alone always-clocked register near the DSP so Quartus can pack
-// those FFs into the Cyclone V DSP's built-in input flip-flops. Source
-// registers have state-gated writes (different clock-enables from the
-// unconditional tri_ymin_x_stride output), which prevented input-FF
-// packing and left -0.858 ns routing slack on the path from the source
-// FFs to the DSP input pins.  Adds 1 cycle of latency (tri_ymin update
-// → tri_ymin_x_stride valid), absorbed by an extra S_TRI_MUL_WAIT2 step.
-//
+// This block is omitted from production span-group builds.
 reg signed [15:0] tri_ymin_dsp_in, st_fb_stride_dsp_in;
 always @(posedge clk) begin
     tri_ymin_dsp_in     <= tri_ymin;
     st_fb_stride_dsp_in <= st_fb_stride;
 end
-// Drop the sign-extension: st_fb_stride is unsigned [15:0]; the
-// `{{16{st_fb_stride[15]}}, st_fb_stride}` made the operand 32 bits wide,
-// forcing Quartus to cascade two DSP18 blocks with a fabric hlmac
-// combine + fabric output reg.  Casting to 17-bit signed keeps the
-// multiply at 16×17 — fits in ONE DSP18 with all three FFs (two inputs
-// and output) packed inside the block.  Matches the unreset input-buffer
-// FFs so Quartus has a consistent control set.
 (* multstyle = "dsp" *) reg signed [31:0] tri_ymin_x_stride;
 always @(posedge clk) begin
     tri_ymin_x_stride <= tri_ymin_dsp_in * $signed({1'b0, st_fb_stride_dsp_in});
@@ -520,28 +509,8 @@ end
 // Pre-registered A*px and B*py products for the S_TRI_ROW edge-init. The
 // original S_TRI_ROW expression `tri_A[i]*px + tri_B[i]*py + tri_C[i]` was
 // the worst critical path on the 100 MHz domain (DSP mult + two long carry
-// chains in one cycle, -1.603 ns at slow 85°C). Computing the two products
-// continuously into registers lets S_TRI_ROW do only a 3-way add — no DSP
-// in the same cycle — shortening the cone to a single carry chain.
-//
-// Phase 2: dedicated DSP-input shadow regs.  The earlier shape used the
-// 32-bit `tri_A[i]` / `tri_B[i]` register fields directly as multiplier
-// inputs.  Quartus couldn't fit the 32×32 mult into one DSP18 — it
-// cascaded across two DSP blocks and left input/output FFs in fabric,
-// producing the worst path on the system clock (`tri_A[2]` →
-// `tri_e_init_Apx[2]`, slack -0.567 ns).  The narrow shadow regs below
-// shrink the operands to their actual signed ranges:
-//   * tri_A[i] = v_y[a] - v_y[b] with v_y in 12.4 signed, so tri_A
-//     fits in 17-bit signed [-65536, 65535] (truncation matches the
-//     stored value exactly, no precision loss).
-//   * tri_xmin/tri_ymin are clamped to [0, 2047] (12-bit unsigned),
-//     so {tri_xmin[11:0], 4'b0} is 16-bit unsigned ≤ 32752; padding
-//     to 17-bit signed keeps the leading bit zero.
-// Result: 17×17 signed → 34-bit product, fits ONE DSP18 with input
-// + output FFs all packed inside the block.  Adds 1 cycle of latency
-// (matches the existing tri_ymin_x_stride pipeline), absorbed by the
-// already-present S_TRI_MUL_WAIT2 — the consumer (S_TRI_INIT_ATTRIB
-// → S_TRI_ROW) doesn't read tri_e_init_Apx/Bpy until after that wait.
+// chains in one cycle, -1.603 ns at slow 85 C). Computing the two products
+// continuously into registers lets S_TRI_ROW do only a 3-way add.
 reg signed [16:0] tri_A_dsp_in        [0:2];
 reg signed [16:0] tri_B_dsp_in        [0:2];
 reg signed [16:0] tri_xmin_sub_dsp_in;
@@ -573,6 +542,7 @@ always @(posedge clk) begin
         tri_e_init_Bpy[2] <= tri_B_dsp_in[2] * tri_ymin_sub_dsp_in;
     end
 end
+`endif
 
 // Reciprocal LUT: 1024 × 16-bit in M10K (Phase 4b — widened from 256 to
 // 1024 to give 10-bit input precision instead of 8-bit, the simpler of
@@ -697,8 +667,8 @@ wire blend_rvalid  = (blend_owns_m0 && !dma_owns_r ) ? m_rd_rvalid  : 1'b0;
 wire [31:0] blend_rdata = m_rd_rdata;
 
 // ---- Doorbell-DMA FSM ----
-// Streams dma_len_latched words from dma_src_latched into ring BRAM
-// port A, splitting at 256-beat AXI4 burst boundaries.  Enters DMA_S_AR
+// Streams queued DMA descriptors into ring BRAM port A, splitting each
+// descriptor at 16-beat AXI4 burst boundaries.  Enters DMA_S_AR
 // only when the M0 bus is idle (no blend in flight, no texture-cache
 // AR/R outstanding) so no fight for the bus mid-burst.  Per accepted
 // R-beat, drives dma_ring_wr_raw/dma_ring_wdata_raw into ring BRAM
@@ -717,24 +687,46 @@ always @(posedge clk) begin
         dma_araddr        <= 32'd0;
         dma_arlen         <= 8'd0;
         dma_publish_wrptr <= 1'b0;
-        dma_starve_count  <= 11'd0;
+        dma_starve_count  <= 10'd0;
+        dma_desc_src[0]   <= 32'd0;
+        dma_desc_src[1]   <= 32'd0;
+        dma_desc_len[0]   <= 13'd0;
+        dma_desc_len[1]   <= 13'd0;
+        dma_desc_rd       <= 1'b0;
+        dma_desc_wr       <= 1'b0;
+        dma_desc_count    <= 2'd0;
     end else begin
         dma_publish_wrptr <= 1'b0;     // one-cycle pulse default
+
+        if (dma_desc_push_req) begin
+            dma_desc_src[dma_desc_wr] <= dma_src_latched;
+            dma_desc_len[dma_desc_wr] <= dma_len_latched;
+            dma_desc_wr <= ~dma_desc_wr;
+        end
+
+        if (dma_desc_pop_now)
+            dma_desc_rd <= ~dma_desc_rd;
+
+        case ({dma_desc_push_req, dma_desc_pop_now})
+            2'b10: dma_desc_count <= dma_desc_count + 2'd1;
+            2'b01: dma_desc_count <= dma_desc_count - 2'd1;
+            default: ;
+        endcase
 
         // Starvation counter: increments while DMA is in S_AR with
         // arvalid not yet asserted AND the idle gate is blocking.
         // Resets the moment we leave S_AR (or assert arvalid).
         if (dma_state == DMA_S_AR && !dma_arvalid && !dma_bus_idle)
-            dma_starve_count <= dma_starve_count + 11'd1;
+            dma_starve_count <= dma_starve_count + 10'd1;
         else
-            dma_starve_count <= 11'd0;
+            dma_starve_count <= 10'd0;
 
         case (dma_state)
         DMA_S_IDLE: begin
             dma_arvalid <= 1'b0;
-            if (dma_kick && dma_len_latched != 13'd0) begin
-                dma_burst_addr <= dma_src_latched;
-                dma_words_left <= dma_len_latched;
+            if (!dma_desc_empty) begin
+                dma_burst_addr <= dma_desc_src[dma_desc_rd];
+                dma_words_left <= dma_desc_len[dma_desc_rd];
                 dma_state      <= DMA_S_AR;
             end
         end
@@ -851,77 +843,50 @@ localparam CMD_CLEAR_RECT     = 8'h11;  // 3-word payload:
                                           //   low 8 bits are replicated 4×
                                           //   per word.
 localparam CMD_SET_TEXTURE    = 8'h20;
-// 0x21 CMD_SET_DEPTH_FUNC retired with the Z-buffer in lean Phase 2.
 localparam CMD_SET_FB         = 8'h23;
-// 0x24 CMD_SET_ZB           retired with the Z-buffer in lean Phase 2.
+`ifdef GPU_INCLUDE_TRIANGLES
 localparam CMD_DRAW_TRIANGLES    = 8'h30;
-// Compact adjacent affine span group.  The native group size is capped
-// at four lanes because the framebuffer bus writes one 32-bit word at a
-// time.  Wider callers split into multiple 4-lane groups in the SDK.
-// The same opcode also carries the generic scalar/perspective span format.
-// A 9-word payload uses the scalar affine layout (words 0..8 only), a
-// 15-word payload appends the perspective fields, an 18-word payload uses
-// the fixed-count adjacent-lane layout below, and a 22-word payload inserts
-// per-lane y_start/count words so clipped columns can share one command while
-// still walking overlapping rows lane-adjacent.  This keeps one public span
-// command ID while preserving the generic span path needed by floor, wall,
-// Doom/Quake-style and perspective renderers.
-//   word 0  = framebuffer byte address for lane 0
-//   word 1  = {count[15:0], flags[7:0], lane_count[3:0], colormap_id[3:0]}
-//   word 2  = {fb_stride[15:0], lane_delta[15:0]}
-//   word 3  = {reserved[15:0], tex_width[15:0]}
-//   word 4  = {tex_h_mask[15:0], tex_w_mask[15:0]}
-//   word 5..8   = tex_addr[0..3]
-//   word 9..12  = t[0..3]       (Q16.16)
-//   word 13..16 = tstep[0..3]   (Q16.16)
-//   word 17     = {light3, light2, light1, light0}
-// 22-word varcount group layout reuses words 0..4, where word 1's high half
-// is row_count, then inserts:
-//   word 5  = {y_start1[15:0], y_start0[15:0]}
-//   word 6  = {y_start3[15:0], y_start2[15:0]}
-//   word 7  = {count1[15:0], count0[15:0]}
-//   word 8  = {count3[15:0], count2[15:0]}
-//   word 9..12   = tex_addr[0..3]
-//   word 13..16  = t[0..3]      (at each lane's first active pixel)
-//   word 17..20  = tstep[0..3]
-//   word 21      = {light3, light2, light1, light0}
-// Scalar payload words 0..8 match the original scalar format:
-//   fb_addr, tex_addr, s, t, sstep, tstep,
-//   {colormap_id,count,light,flags}, {fb_stride,tex_width}, {tmask,smask}
-// Scalar payload words 9..14 are present only when SPAN_PERSP is set:
-//   sZ, tZ, zinv, sZstep, tZstep, zinv_step
-// Native group callers should use lane_count 1/2/4.  A raw 8-lane header clamps
-// to four lanes so older test streams do not overrun the compact payload;
-// other values normalize to one lane.  The path is affine only; perspective
-// remains on scalar spans / triangle-emitted spans.
-localparam CMD_DRAW_SPAN_GROUP        = 8'h43;
-// Removed commands (reserved opcodes, do not reuse):
-//   0x22 CMD_SET_BLEND      — no combine path in the datapath
-//   0x25 CMD_SET_SHADE      — Gouraud gradient dropped in the FMax push
-//   0x26 CMD_SET_ALPHA_REF  — no alpha test in the datapath
-//   0x31 CMD_DRAW_INDEXED   — ~400 ALMs of dynamic pay_buf mux fabric;
-//                             expand indices CPU-side and emit per-tri
-//   0x40 CMD_DRAW_SPAN       — merged into CMD_DRAW_SPAN_GROUP scalar format
-//   0x41 CMD_DRAW_SPANS_BATCH — duplicate scalar-span decoder; software
-//                               batches normal span commands instead
-//   0x42 CMD_DRAW_SPRITE    — 2-triangle sprite is cheaper and rotates
-//   0x01 CMD_NOP             — retired; use FENCE when a synchronising
-//                              no-op is needed
-//   0x27 CMD_SET_SKIP_ZERO   — retired; skip-zero is carried by span flags
-//   0x28 CMD_SET_COLORMAP_ID — retired; scalar/group spans carry explicit
-//                              colormap_id, triangles use slot 0
-//   0x44 CMD_COPY_BRAM_FB_TO_SDRAM — BRAM framebuffer experiment retired;
-//                                    recovered M10K is used by CPU D-cache.
+`endif
+// Generic clipped perspective span group: shared projection and
+// texture state are carried once, and up to four clipped lanes carry only
+// start/count.  The front-end expands each lane into the scalar perspective
+// span pipe, so all texture/cache/colormap/translucency semantics stay
+// single-sourced.
+//   word 0  = framebuffer byte address for lane 0 at minor=0
+//   word 1  = texture base address
+//   word 2  = {lane_count[31:28], flags[27:20], mode[19:16],
+//              reserved[15:4], colormap_id[3:0]}
+//   word 3  = major_fb_step signed byte step between adjacent lanes
+//   word 4  = minor_fb_step signed byte step inside each span
+//   word 5  = {reserved[15:0], tex_width[15:0]}
+//   word 6  = {tex_h_mask[15:0], tex_w_mask[15:0]}
+//   word 7  = {start1[15:0], start0[15:0]} signed minor starts
+//   word 8  = {start3[15:0], start2[15:0]}
+//   word 9  = {count1[15:0], count0[15:0]}
+//   word 10 = {count3[15:0], count2[15:0]}
+//   word 11..19 = s/z, t/z, 1/z plus major/minor steps (Q16.16)
+//   word 20..22 = light, light_major_step, light_minor_step (Q6.16)
+// SDK callers may submit up to 8 lanes; the public helper splits to native
+// 4-lane chunks.
+localparam CMD_DRAW_PERSP_SPAN_GROUP  = 8'h46;
+// Generic affine span group.  Up to four independent affine spans share
+// flags, texture dimensions, and framebuffer pixel step.  Each lane carries
+// its own framebuffer/texture address, count, texture steps, light, and
+// colormap slot.
+//   word 0  = {lane_count[31:28], flags[27:20], reserved[19:0]}
+//   word 1  = {reserved[15:0], tex_width[15:0]}
+//   word 2  = {tex_h_mask[15:0], tex_w_mask[15:0]}
+//   word 3  = signed framebuffer byte step per pixel
+//   per-lane = {fb_addr, tex_addr, colormap_id[31:28] | light[21:16] |
+//               count[15:0], s, t, sstep, tstep}
+// Count is low 16 bits; light is low 6 bits.  Lanes with count=0 are skipped.
+localparam CMD_DRAW_AFFINE_SPAN_GROUP = 8'h47;
 
 // ================================================================
 // GPU State Registers (sticky, set by SET_* commands)
 // ================================================================
-// Removed: st_tex_height / st_tex_format / st_tex_wrap_s / st_tex_wrap_t
-//          were parsed from CMD_SET_TEXTURE but never read by the
-//          datapath (format is I8-only, no wrap/clamp logic).
-//          st_blend_mode / st_alpha_ref / st_gouraud dropped with their
-//          respective SET commands; the blend/alpha/Gouraud paths never
-//          existed as functioning code.  Triangle light uses flat v0.r.
+// Only datapath-visible texture state is stored here.  The texture pipe is
+// I8-only and does not implement wrap/clamp mode registers.
 reg [31:0] st_tex_addr;
 reg [15:0] st_tex_width;
 reg [31:0] st_fb_addr;
@@ -945,147 +910,253 @@ reg signed [23:0] sp_light_q;
 reg signed [23:0] sp_light_step;
 wire [5:0]        sp_light = sp_light_q[21:16];
 reg [3:0]  sp_flags;
-// Per-span colormap_id.  Decoded explicitly from word 6 bits [31:28] at
-// scalar/group span dispatch.  Triangle span emit writes slot 0 because the
-// triangle command format does not carry a palookup slot.
+// Per-span colormap_id for scalar/perspective dispatch.  Affine groups carry
+// per-lane slots in affg_colormap_id[] and forward them through the fragment
+// pipe; triangle span emit writes slot 0 because the triangle command format
+// does not carry a palookup slot.
 reg [3:0]  sp_colormap_id;
-reg signed [15:0] sp_fb_stride;
+reg signed [31:0] sp_fb_stride;
 reg [15:0] sp_tex_width;
 // POT wrap masks: (sp_s[31:16] & sp_tex_w_mask) and
 // (sp_t[31:16] & sp_tex_h_mask)
 // before the address math.  Default 16'hFFFF (no-op) so callers that
-// don't set word 8 see the legacy multiply-mode behaviour.  The masks
+// don't set word 8 see the multiply-mode behaviour.  The masks
 // reproduce BUILD's hlineasm4 shift-mode wrap exactly when tex_w/tex_h
 // are powers of two (always true for BUILD/Quake/Doom textures).
 reg [15:0] sp_tex_w_mask;
 reg [15:0] sp_tex_h_mask;
 
-// Generic adjacent affine span-group command state.  The group front-end
-// feeds the same scalar fragment pipe as DRAW_SPAN but walks lanes row-first:
-// lane 0..N-1 for the current output row, then the next row.  That keeps the
-// fragment/shading/blend logic single-sourced and lets the FB accumulator merge
-// adjacent byte writes naturally for 2/4-lane callers.
-reg [31:0] spg_fb_base;
-reg signed [15:0] spg_fb_stride;
-reg [15:0] spg_count;
-reg        spg_varcount;
-reg [15:0] spg_row;
-reg [3:0]  spg_flags;
-reg [3:0]  spg_colormap_id;
-reg [15:0] spg_tex_width;
-reg [15:0] spg_tex_w_mask;
-reg [15:0] spg_tex_h_mask;
-reg [1:0]  spg_lane;
-reg [1:0]  spg_last_lane;
-reg signed [15:0] spg_lane_delta;
-reg signed [17:0] spg_row_advance;
-reg [31:0] spg_tex_addr [0:3];
-reg signed [31:0] spg_t [0:3];
-reg signed [31:0] spg_tstep [0:3];
-reg [5:0]  spg_light [0:3];
-reg [15:0] spg_lane_start [0:3];
-reg [15:0] spg_lane_count [0:3];
-reg        spg_var_lane_active_q;
+// Generic affine span-group command state.  The group front-end feeds the same
+// scalar fragment pipe but walks lanes row-first: lane 0..N-1 for the current
+// output row, then the next row.  That keeps shading/blend logic single-sourced
+// and lets the FB accumulator merge adjacent byte writes naturally.
+reg        affg_active;
+reg [1:0]  affg_lane;
+reg [1:0]  affg_last_lane;
+reg [3:0]  affg_flags;
+reg [3:0]  affg_colormap_id [0:3];
+reg [15:0] affg_tex_width;
+reg [15:0] affg_tex_w_mask;
+reg [15:0] affg_tex_h_mask;
+reg signed [31:0] affg_fb_step;
+reg [31:0] affg_fb_addr [0:3];
+reg [31:0] affg_tex_addr [0:3];
+reg [15:0] affg_count [0:3];
+reg signed [31:0] affg_s [0:3];
+reg signed [31:0] affg_t [0:3];
+reg signed [31:0] affg_sstep [0:3];
+reg signed [31:0] affg_tstep [0:3];
+reg [5:0] affg_light [0:3];
 
-wire [31:0] spg_lane_delta_addr = {{16{spg_lane_delta[15]}}, spg_lane_delta};
-wire [31:0] spg_row_advance_addr = {{14{spg_row_advance[17]}}, spg_row_advance};
-wire        spg_var_lane_active = !spg_varcount || spg_var_lane_active_q;
-wire        spg_var_last_slot = (spg_lane == spg_last_lane);
-wire        spg_var_last_row  = ((spg_row + 16'd1) >= spg_count);
+// Generic clipped perspective span-group front-end.  It shares the
+// perspective span pipe with normal spans, but uses full 32-bit
+// signed framebuffer steps so row/column orientation and non-320 strides are
+// not encoded into the opcode.
+reg        psg_active;
+reg [1:0]  psg_lane;
+reg [1:0]  psg_last_lane;
+reg [31:0] psg_fb_base;
+reg [31:0] psg_tex_addr;
+reg [3:0]  psg_flags;
+reg [3:0]  psg_colormap_id;
+reg signed [31:0] psg_major_fb_step;
+reg signed [31:0] psg_minor_fb_step;
+reg [15:0] psg_tex_width;
+reg [15:0] psg_tex_w_mask;
+reg [15:0] psg_tex_h_mask;
+reg signed [15:0] psg_start [0:3];
+reg [15:0] psg_count [0:3];
+reg signed [31:0] psg_sZ;
+reg signed [31:0] psg_tZ;
+reg signed [31:0] psg_zinv;
+reg signed [31:0] psg_sZ_major_step;
+reg signed [31:0] psg_tZ_major_step;
+reg signed [31:0] psg_zinv_major_step;
+reg signed [31:0] psg_sZ_minor_step;
+reg signed [31:0] psg_tZ_minor_step;
+reg signed [31:0] psg_zinv_minor_step;
+reg signed [23:0] psg_light;
+reg signed [23:0] psg_light_major_step;
+reg signed [23:0] psg_light_minor_step;
+reg signed [31:0] psg_cur_fb_major;
+reg signed [31:0] psg_cur_sZ_major;
+reg signed [31:0] psg_cur_tZ_major;
+reg signed [31:0] psg_cur_zinv_major;
+reg signed [23:0] psg_cur_light_major;
+reg signed [31:0] psg_cur_start_ext;
+reg [15:0] psg_cur_count;
+reg signed [31:0] psg_fb_off_r;
+reg signed [31:0] psg_sZ_off_r;
+reg signed [31:0] psg_tZ_off_r;
+reg signed [31:0] psg_zinv_off_r;
 
-function [1:0] spg_last_lane_from_count;
+function affg_lane_has_after_issue;
+    input [1:0] lane;
+    input [1:0] cur_lane;
+    begin
+        if (lane > affg_last_lane)
+            affg_lane_has_after_issue = 1'b0;
+        else if (lane == cur_lane)
+            affg_lane_has_after_issue = (affg_count[lane] > 16'd1);
+        else
+            affg_lane_has_after_issue = (affg_count[lane] != 16'd0);
+    end
+endfunction
+
+function affg_any_lane_active;
+    input dummy;
+    begin
+        affg_any_lane_active =
+            (affg_count[0] != 16'd0) ||
+            ((affg_last_lane >= 2'd1) && (affg_count[1] != 16'd0)) ||
+            ((affg_last_lane >= 2'd2) && (affg_count[2] != 16'd0)) ||
+            ((affg_last_lane >= 2'd3) && (affg_count[3] != 16'd0));
+    end
+endfunction
+
+function [1:0] affg_first_active_lane;
+    input dummy;
+    begin
+        if (affg_count[0] != 16'd0)
+            affg_first_active_lane = 2'd0;
+        else if (affg_last_lane >= 2'd1 && affg_count[1] != 16'd0)
+            affg_first_active_lane = 2'd1;
+        else if (affg_last_lane >= 2'd2 && affg_count[2] != 16'd0)
+            affg_first_active_lane = 2'd2;
+        else
+            affg_first_active_lane = 2'd3;
+    end
+endfunction
+
+function [1:0] affg_next_lane_after_issue;
+    input [1:0] cur_lane;
+    begin
+        case (cur_lane)
+            2'd0: begin
+                if (affg_lane_has_after_issue(2'd1, cur_lane))
+                    affg_next_lane_after_issue = 2'd1;
+                else if (affg_lane_has_after_issue(2'd2, cur_lane))
+                    affg_next_lane_after_issue = 2'd2;
+                else if (affg_lane_has_after_issue(2'd3, cur_lane))
+                    affg_next_lane_after_issue = 2'd3;
+                else
+                    affg_next_lane_after_issue = 2'd0;
+            end
+            2'd1: begin
+                if (affg_lane_has_after_issue(2'd2, cur_lane))
+                    affg_next_lane_after_issue = 2'd2;
+                else if (affg_lane_has_after_issue(2'd3, cur_lane))
+                    affg_next_lane_after_issue = 2'd3;
+                else if (affg_lane_has_after_issue(2'd0, cur_lane))
+                    affg_next_lane_after_issue = 2'd0;
+                else
+                    affg_next_lane_after_issue = 2'd1;
+            end
+            2'd2: begin
+                if (affg_lane_has_after_issue(2'd3, cur_lane))
+                    affg_next_lane_after_issue = 2'd3;
+                else if (affg_lane_has_after_issue(2'd0, cur_lane))
+                    affg_next_lane_after_issue = 2'd0;
+                else if (affg_lane_has_after_issue(2'd1, cur_lane))
+                    affg_next_lane_after_issue = 2'd1;
+                else
+                    affg_next_lane_after_issue = 2'd2;
+            end
+            default: begin
+                if (affg_lane_has_after_issue(2'd0, cur_lane))
+                    affg_next_lane_after_issue = 2'd0;
+                else if (affg_lane_has_after_issue(2'd1, cur_lane))
+                    affg_next_lane_after_issue = 2'd1;
+                else if (affg_lane_has_after_issue(2'd2, cur_lane))
+                    affg_next_lane_after_issue = 2'd2;
+                else
+                    affg_next_lane_after_issue = 2'd3;
+            end
+        endcase
+    end
+endfunction
+
+function affg_last_issue_from;
+    input [1:0] cur_lane;
+    begin
+        affg_last_issue_from = (affg_count[cur_lane] == 16'd1)
+                            && !affg_lane_has_after_issue(2'd0, cur_lane)
+                            && !affg_lane_has_after_issue(2'd1, cur_lane)
+                            && !affg_lane_has_after_issue(2'd2, cur_lane)
+                            && !affg_lane_has_after_issue(2'd3, cur_lane);
+    end
+endfunction
+
+function [1:0] psg_last_lane_from_count;
     input [3:0] lane_count;
     begin
         case (lane_count)
-            4'd2: spg_last_lane_from_count = 2'd1;
-            4'd4: spg_last_lane_from_count = 2'd3;
-            4'd8: spg_last_lane_from_count = 2'd3;
-            default: spg_last_lane_from_count = 2'd0;
+            4'd2: psg_last_lane_from_count = 2'd1;
+            4'd3: psg_last_lane_from_count = 2'd2;
+            4'd4, 4'd5, 4'd6, 4'd7, 4'd8:
+                psg_last_lane_from_count = 2'd3;
+            default: psg_last_lane_from_count = 2'd0;
         endcase
     end
 endfunction
 
-function spg_lane_active_from;
-    input [15:0] row;
-    input [1:0] lane;
-    reg [16:0] row_ext;
-    reg [16:0] start_ext;
-    reg [16:0] end_ext;
+task psg_advance_lane;
     begin
-        row_ext = {1'b0, row};
-        case (lane)
+        case (psg_lane)
             2'd0: begin
-                start_ext = {1'b0, spg_lane_start[0]};
-                end_ext   = {1'b0, spg_lane_start[0]} + {1'b0, spg_lane_count[0]};
+                psg_cur_start_ext <= {{16{psg_start[1][15]}}, psg_start[1]};
+                psg_cur_count     <= psg_count[1];
             end
             2'd1: begin
-                start_ext = {1'b0, spg_lane_start[1]};
-                end_ext   = {1'b0, spg_lane_start[1]} + {1'b0, spg_lane_count[1]};
-            end
-            2'd2: begin
-                start_ext = {1'b0, spg_lane_start[2]};
-                end_ext   = {1'b0, spg_lane_start[2]} + {1'b0, spg_lane_count[2]};
+                psg_cur_start_ext <= {{16{psg_start[2][15]}}, psg_start[2]};
+                psg_cur_count     <= psg_count[2];
             end
             default: begin
-                start_ext = {1'b0, spg_lane_start[3]};
-                end_ext   = {1'b0, spg_lane_start[3]} + {1'b0, spg_lane_count[3]};
+                psg_cur_start_ext <= {{16{psg_start[3][15]}}, psg_start[3]};
+                psg_cur_count     <= psg_count[3];
             end
         endcase
-        spg_lane_active_from = (row_ext >= start_ext) && (row_ext < end_ext);
-    end
-endfunction
-
-function signed [17:0] spg_row_advance_from;
-    input [1:0] last_lane;
-    input signed [15:0] stride;
-    input signed [15:0] delta;
-    reg signed [17:0] s;
-    reg signed [17:0] d;
-    begin
-        s = {{2{stride[15]}}, stride};
-        d = {{2{delta[15]}}, delta};
-        case (last_lane)
-            2'd0: spg_row_advance_from = s;
-            2'd1: spg_row_advance_from = s - d;
-            2'd3: spg_row_advance_from = s - ((d <<< 1) + d);
-            default: spg_row_advance_from = s;
-        endcase
-    end
-endfunction
-
-task spg_load_lane;
-    begin
-        sp_fb_addr      <= spg_fb_base;
-        sp_tex_addr     <= spg_tex_addr[0];
-        sp_s            <= 32'sd0;
-        sp_t            <= spg_t[0];
-        sp_sstep        <= 32'sd0;
-        sp_tstep        <= spg_tstep[0];
-        sp_count        <= spg_count;
-        sp_colormap_id  <= spg_colormap_id;
-        sp_light_q      <= {2'b0, spg_light[0], 16'b0};
-        sp_light_step   <= 24'b0;
-        sp_flags        <= spg_flags;
-        sp_fb_stride    <= spg_fb_stride;
-        sp_tex_width    <= (spg_tex_width == 16'd0) ? 16'd1 : spg_tex_width;
-        sp_tex_w_mask   <= spg_tex_w_mask;
-        sp_tex_h_mask   <= spg_tex_h_mask;
-        sp_sZ           <= 32'sd0;
-        sp_tZ           <= 32'sd0;
-        sp_zinv         <= 32'sd0;
-        sp_sZstep       <= 32'sd0;
-        sp_tZstep       <= 32'sd0;
-        sp_zinv_step    <= 32'sd0;
+        psg_lane <= psg_lane + 2'd1;
+        psg_cur_fb_major    <= psg_cur_fb_major + psg_major_fb_step;
+        psg_cur_sZ_major    <= psg_cur_sZ_major + psg_sZ_major_step;
+        psg_cur_tZ_major    <= psg_cur_tZ_major + psg_tZ_major_step;
+        psg_cur_zinv_major  <= psg_cur_zinv_major + psg_zinv_major_step;
+        psg_cur_light_major <= psg_cur_light_major + psg_light_major_step;
     end
 endtask
 
-task spg_load_source_only;
-    input [1:0] lane;
+task psg_load_generated_span;
     begin
-        sp_tex_addr <= spg_tex_addr[lane];
-        sp_t        <= spg_t[lane];
-        sp_tstep    <= spg_tstep[lane];
-        sp_light_q  <= {2'b0, spg_light[lane], 16'b0};
+        sp_fb_addr     <= psg_fb_base + psg_cur_fb_major + psg_fb_off_r;
+        sp_tex_addr    <= psg_tex_addr;
+        sp_s           <= 32'sd0;
+        sp_t           <= 32'sd0;
+        sp_sstep       <= 32'sd0;
+        sp_tstep       <= 32'sd0;
+        sp_count       <= psg_cur_count;
+        sp_colormap_id <= psg_colormap_id;
+        sp_light_q     <= psg_light + psg_cur_light_major + $signed(dsp_p[23:0]);
+        sp_light_step  <= psg_light_minor_step;
+        sp_flags       <= psg_flags | (4'b0001 << SPAN_PERSP);
+        sp_fb_stride   <= psg_minor_fb_step;
+        sp_tex_width   <= (psg_tex_width == 16'd0) ? 16'd1 : psg_tex_width;
+        sp_tex_w_mask  <= psg_tex_w_mask;
+        sp_tex_h_mask  <= psg_tex_h_mask;
+        sp_sZ          <= psg_sZ + psg_cur_sZ_major + psg_sZ_off_r;
+        sp_tZ          <= psg_tZ + psg_cur_tZ_major + psg_tZ_off_r;
+        sp_zinv        <= psg_zinv + psg_cur_zinv_major + psg_zinv_off_r;
+        sp_sZstep      <= psg_sZ_minor_step;
+        sp_tZstep      <= psg_tZ_minor_step;
+        sp_zinv_step   <= psg_zinv_minor_step;
+        persp_active      <= 1'b1;
+        persp_first_done  <= 1'b0;
+        persp_seg_a_ready <= 1'b0;
+        persp_seg_b_ready <= 1'b0;
+        persp_swap_pending <= 1'b0;
+        persp_pss         <= PSS_IDLE;
+        persp_pass        <= PSS_PASS_ANCHOR;
+        sp_seg_left       <= 4'd0;
+        src_done          <= 1'b0;
     end
 endtask
 
@@ -1117,6 +1188,117 @@ function [3:0] span_flags_from_wire;
         span_flags_from_wire[SPAN_TRANSLUC] = flags[6];
     end
 endfunction
+
+task load_affine_span_group_payload_word;
+    input [4:0]  idx;
+    input [31:0] data;
+    begin
+        case (idx)
+            5'd0: begin
+                affg_last_lane   <= psg_last_lane_from_count(data[31:28]);
+                affg_flags       <= span_flags_from_wire(data[27:20]);
+                affg_count[0]    <= 16'd0;
+                affg_count[1]    <= 16'd0;
+                affg_count[2]    <= 16'd0;
+                affg_count[3]    <= 16'd0;
+                affg_colormap_id[0] <= 4'd0;
+                affg_colormap_id[1] <= 4'd0;
+                affg_colormap_id[2] <= 4'd0;
+                affg_colormap_id[3] <= 4'd0;
+            end
+            5'd1: affg_tex_width <= data[15:0];
+            5'd2: begin
+                affg_tex_w_mask <= (data[15:0]  == 16'd0) ? 16'hFFFF : data[15:0];
+                affg_tex_h_mask <= (data[31:16] == 16'd0) ? 16'hFFFF : data[31:16];
+            end
+            5'd3: affg_fb_step <= data;
+            5'd4: affg_fb_addr[0] <= data;
+            5'd5: affg_tex_addr[0] <= data;
+            5'd6: begin affg_count[0] <= data[15:0]; affg_light[0] <= data[21:16]; affg_colormap_id[0] <= data[31:28]; end
+            5'd7: affg_s[0] <= data;
+            5'd8: affg_t[0] <= data;
+            5'd9: affg_sstep[0] <= data;
+            5'd10: affg_tstep[0] <= data;
+            5'd11: affg_fb_addr[1] <= data;
+            5'd12: affg_tex_addr[1] <= data;
+            5'd13: begin affg_count[1] <= data[15:0]; affg_light[1] <= data[21:16]; affg_colormap_id[1] <= data[31:28]; end
+            5'd14: affg_s[1] <= data;
+            5'd15: affg_t[1] <= data;
+            5'd16: affg_sstep[1] <= data;
+            5'd17: affg_tstep[1] <= data;
+            5'd18: affg_fb_addr[2] <= data;
+            5'd19: affg_tex_addr[2] <= data;
+            5'd20: begin affg_count[2] <= data[15:0]; affg_light[2] <= data[21:16]; affg_colormap_id[2] <= data[31:28]; end
+            5'd21: affg_s[2] <= data;
+            5'd22: affg_t[2] <= data;
+            5'd23: affg_sstep[2] <= data;
+            5'd24: affg_tstep[2] <= data;
+            5'd25: affg_fb_addr[3] <= data;
+            5'd26: affg_tex_addr[3] <= data;
+            5'd27: begin affg_count[3] <= data[15:0]; affg_light[3] <= data[21:16]; affg_colormap_id[3] <= data[31:28]; end
+            5'd28: affg_s[3] <= data;
+            5'd29: affg_t[3] <= data;
+            5'd30: affg_sstep[3] <= data;
+            5'd31: affg_tstep[3] <= data;
+            default: ;
+        endcase
+    end
+endtask
+
+task load_persp_span_group_payload_word;
+    input [4:0]  idx;
+    input [31:0] data;
+    begin
+        case (idx)
+            5'd0: psg_fb_base <= data;
+            5'd1: psg_tex_addr <= data;
+            5'd2: begin
+                psg_last_lane   <= psg_last_lane_from_count(data[31:28]);
+                psg_flags       <= span_flags_from_wire(data[27:20])
+                                 | (GPU_ENABLE_PERSP
+                                    ? (4'b0001 << SPAN_PERSP)
+                                    : 4'b0);
+                psg_colormap_id <= data[3:0];
+            end
+            5'd3: psg_major_fb_step <= data;
+            5'd4: psg_minor_fb_step <= data;
+            5'd5: psg_tex_width <= data[15:0];
+            5'd6: begin
+                psg_tex_w_mask <= (data[15:0]  == 16'd0) ? 16'hFFFF : data[15:0];
+                psg_tex_h_mask <= (data[31:16] == 16'd0) ? 16'hFFFF : data[31:16];
+            end
+            5'd7: begin
+                psg_start[0] <= data[15:0];
+                psg_start[1] <= data[31:16];
+            end
+            5'd8: begin
+                psg_start[2] <= data[15:0];
+                psg_start[3] <= data[31:16];
+            end
+            5'd9: begin
+                psg_count[0] <= data[15:0];
+                psg_count[1] <= data[31:16];
+            end
+            5'd10: begin
+                psg_count[2] <= data[15:0];
+                psg_count[3] <= data[31:16];
+            end
+            5'd11: psg_sZ <= data;
+            5'd12: psg_tZ <= data;
+            5'd13: psg_zinv <= data;
+            5'd14: psg_sZ_major_step <= data;
+            5'd15: psg_tZ_major_step <= data;
+            5'd16: psg_zinv_major_step <= data;
+            5'd17: psg_sZ_minor_step <= data;
+            5'd18: psg_tZ_minor_step <= data;
+            5'd19: psg_zinv_minor_step <= data;
+            5'd20: psg_light <= data[23:0];
+            5'd21: psg_light_major_step <= data[23:0];
+            5'd22: psg_light_minor_step <= data[23:0];
+            default: ;
+        endcase
+    end
+endtask
 
 function [3:0] fb_lane_mask;
     input [1:0] lane;
@@ -1177,8 +1359,9 @@ localparam S_DECODE         = 6'd3;
 localparam S_PAY_DATA       = 6'd5;  // 1 word/cycle from BRAM
 localparam S_EXECUTE        = 6'd6;
 localparam S_FB_FLUSH       = 6'd18;
-// 6'd20/21 (fixed-extent CLEAR) and 6'd23/24 (CLEAR_ZB) are retired.
+// 6'd20/21 and 6'd23/24 are unused state IDs.
 
+`ifdef GPU_INCLUDE_TRIANGLES
 // Triangle rasterisation states
 localparam S_TRI_LOAD      = 6'd26;  // Extract vertices from payload
 localparam S_TRI_SETUP     = 6'd27;  // Sequential edge/gradient computation
@@ -1187,12 +1370,15 @@ localparam S_TRI_ROW       = 6'd29;  // Initialise scanline row
 localparam S_TRI_PIX       = 6'd30;  // Scan row for inside-extent → emit span
 localparam S_TRI_ROW_NEXT  = 6'd31;  // Advance to next Y (after span drains)
 localparam S_TRI_GRAD      = 6'd32;  // Rolled gradient computation loop
+`endif
 localparam S_FRAG_PIPE     = 6'd33;  // Unified pipelined fragment processor
+`ifdef GPU_INCLUDE_TRIANGLES
 localparam S_TRI_MUL_WAIT  = 6'd34;  // wait for DSP input-register stage (+1 cycle from BBOX_CLAMP)
 localparam S_TRI_BBOX_CLAMP = 6'd35; // Clamp raw min/max to screen bounds
 localparam S_TRI_MUL_WAIT2 = 6'd36;  // wait for DSP output register (tri_ymin_x_stride valid)
 localparam S_TRI_INIT_ATTRIB = 6'd37; // Bbox-origin attribute init (s/t/w/r at xmin,ymin)
 localparam S_TRI_PERSP_PREMUL = 6'd38; // (Phase 4c.2) Pre-multiply v_s × v_w, v_t × v_w
+`endif
 
 // Rect-clear states — for partial-rect FB clears (letterbox bars,
 // status-bar wipes, menu pane backgrounds).  Issues word-by-word AXI
@@ -1200,6 +1386,13 @@ localparam S_TRI_PERSP_PREMUL = 6'd38; // (Phase 4c.2) Pre-multiply v_s × v_w, 
 // the full-frame clear primitive.
 localparam S_CLEAR_RECT       = 6'd39;  // entry: per-row setup (no-op if h=0)
 localparam S_CLEAR_RECT_WORD  = 6'd40;  // emit AXI write for current word
+localparam S_PSG_SETUP0       = 6'd51;  // launch start*fb/sZ products
+localparam S_PSG_SETUP1       = 6'd52;  // wait for fb/sZ DSP products
+localparam S_PSG_SETUP2       = 6'd53;  // capture fb/sZ; launch tZ/zinv
+localparam S_PSG_SETUP3       = 6'd54;  // wait for tZ/zinv DSP products
+localparam S_PSG_SETUP4       = 6'd55;  // capture tZ/zinv; launch light
+localparam S_PSG_SETUP5       = 6'd56;  // wait for light DSP product
+localparam S_PSG_SETUP6       = 6'd57;  // commit generated single-lane span
 
 reg [5:0] state;
 
@@ -1216,14 +1409,12 @@ reg cmd_is_fence;
 reg cmd_is_clear_rect;
 reg cmd_is_set_texture;
 reg cmd_is_set_fb;
-reg cmd_is_draw_span_group;
-reg cmd_span_scalar;
-reg cmd_span_group_varcount;
+reg cmd_is_draw_affine_span_group;
+reg cmd_is_draw_persp_span_group;
+`ifdef GPU_INCLUDE_TRIANGLES
 reg cmd_is_draw_triangles;
+`endif
 reg cmd_is_flip;
-
-wire span_active = cmd_span_scalar;
-wire span_group_active = cmd_is_draw_span_group && !cmd_span_scalar;
 
 // Outstanding-write tracker for CMD_FENCE / CMD_FLIP drain semantics.
 // Increments on m_wr_* AW handshake.  Decrements on m_wr_bvalid (slave
@@ -1241,26 +1432,18 @@ reg [3:0] m_wr_inflight;
 reg [31:0] pending_fence_token;
 reg [1:0]  pending_swap_idx;
 
-// SDRAM address layout for palookups.  PALOOKUP_BASE is the byte offset of
-// slot 0; slots are spaced 16 KB apart.  Each slot is the
-// same 16 KB shape as the original on-chip cmap_bram (32 shade rows × 256
-// entries × 2 bytes = 16 KB Quake-shape; Duke3D uses 32 × 256 × 1 byte =
-// 8 KB but pads to 16 KB so the slot index multiplier is a clean shift).
-// Both are CPU-known constants so palookup uploads (CPU → SDRAM) and GPU
-// cmap reads agree on layout without any per-slot register state.
-// Was 26'h0100000 (1 MB into SDRAM) but that overlapped FB1 at
-// OF_TARGET_FB1_BASE = 0x10100000 — every GPU FB write trampled the
-// palookup table, producing a uniform-colour fixed point on screen
-// regardless of (light, texel).  Moved to the dedicated 3 MB gap
-// between heap end (0x13400000) and sample pool start (0x13700000).
-// Keep in sync with OF_GPU_PALOOKUP_AXI_OFFSET in firmware/api/of_gpu.h.
+// SDRAM address layout for palookups.  PALOOKUP_BASE is the byte offset
+// of slot 0; slots are spaced 16 KB apart.  Each slot has 32 shade rows
+// and 256 entries per row, padded to 16 KB so the slot index multiplier
+// is a clean shift.  CPU uploads and GPU cmap reads share these constants
+// without any per-slot register state.  Keep in sync with
+// OF_GPU_PALOOKUP_AXI_OFFSET in firmware/api/of_gpu.h.
 localparam [25:0] PALOOKUP_BASE   = 26'h3400000;  // 52 MB into SDRAM
 
 // Payload streaming state — ring_rd_data is routed directly to each
-// destination reg in S_PAY_DATA; no intermediate pay_buf array.
+// destination reg in S_PAY_DATA; no intermediate payload array.
 // pay_idx saturates at 31 (any payload word past that still drains the
-// ring via pay_remaining but has nowhere to go).  The largest native
-// payload decoded here is the 22-word variable-count span group.
+// ring via pay_remaining but has nowhere to go).
 reg [4:0]  pay_idx;
 reg [12:0] pay_remaining;  // total payload words still to consume from the ring
                            // (ring BRAM is 4096 words, so 13 bits covers the
@@ -1270,14 +1453,17 @@ reg [12:0] pay_remaining;  // total payload words still to consume from the ring
 // ================================================================
 // Single fragment processor for spans and triangle-emitted spans.
 // Triangles are rasterised into per-row spans in S_TRI_PIX that feed
-// the same S_FRAG_PIPE path used by scalar spans.
+// the same S_FRAG_PIPE path used by single-lane spans.
 //
-// 4 logical stages, with combinational tex_req drive (1-cycle cache latency):
-//   S0 (Issue, comb):    drive tex_req_valid/addr from current sp_*. The
+// 5 logical stages, with combinational tex_req drive (1-cycle cache latency):
+//   S0a (Source snap):   capture current sp_* into a small pre-issue register
+//                        and advance the source state. This isolates the
+//                        source muxes from the texture-row DSP.
+//   S0b (Issue, comb):   drive tex_req_valid/addr from p0 + tx_mul_q. The
 //                        cache sees the request the same cycle and accepts
 //                        if req_ready=1 (combinational). On commitment
 //                        (`tex_req_valid && tex_req_ready` in same cycle),
-//                        latch p1 with sp_*'s metadata and advance source.
+//                        latch p1 with p0's metadata.
 //   S1 (TexResp, p1):    1 cycle later, cache returns tex_resp_data
 //                        (combinational hit response). Capture into p2 and
 //                        issue cmap_rd_addr.
@@ -1294,24 +1480,40 @@ reg [12:0] pay_remaining;  // total payload words still to consume from the ring
 //
 // Source mode: 0 = SPAN (sp_*). Triangle source mode is reserved but the
 // triangle refactor is deferred to a later phase.
-// p0: pre-issue stage. Holds the pixel whose multiply (tx_mul_q) is being
-// computed by the registered DSP this cycle. p0 -> p1 transition is the
-// "issue commit" event, gated on the cache asserting req_ready in the same
-// cycle the consumer drives req_valid.
+// p0a: source snapshot / DSP-input stage.  This stage is intentionally small
+// and local: it breaks the timing path from the wide sp_* source muxes into
+// the texture-row multiply.
+reg        p0a_valid;
+reg [5:0]  p0a_light;
+reg [3:0]  p0a_colormap_id;
+reg [3:0]  p0a_flags;
+reg [31:0] p0a_fb_addr;
+reg signed [15:0] p0a_s_int;
+reg [31:0] p0a_tex_base;
+reg [15:0] p0a_t_y;
+reg [15:0] p0a_tex_width;
+
+// p0: cache-issue stage. Holds the pixel whose texture-row multiply output is
+// already available in tx_mul_q. p0 -> p1 transition is the "issue commit"
+// event, gated on the cache asserting req_ready in the same cycle p0 drives
+// req_valid.
 reg        p0_valid;
 reg [5:0]  p0_light;
+reg [3:0]  p0_colormap_id;
 reg [3:0]  p0_flags;
 reg [31:0] p0_fb_addr;
 reg signed [15:0] p0_s_int;     // for the post-mul add
 reg [31:0] p0_tex_base;         // sp_tex_addr at issue time
 
-// DSP-pipelined texture multiply. Registered output gives the path a clean
-// register-to-register boundary that the fitter can pack into a DSP slice.
-// Loaded conditionally (only on issue commit OR when p0 is being primed).
+// DSP-pipelined texture multiply.  The p0a source snapshot gives this DSP a
+// narrow, local input boundary; tx_mul_q is updated only when that snapshot
+// promotes into p0, so the following cycle's cache request sees the matching
+// product.
 (* multstyle = "dsp" *) reg signed [31:0] tx_mul_q;
 
 reg        p1_valid;
 reg [5:0]  p1_light;
+reg [3:0]  p1_colormap_id;
 reg [3:0]  p1_flags;
 reg [31:0] p1_fb_addr;
 
@@ -1339,7 +1541,7 @@ reg        p3_discard;
 // FB write sub-FSM (lives within S3, pauses pipeline when not IDLE)
 localparam FBSS_IDLE        = 4'd0;
 localparam FBSS_FLUSH_W_RSP = 4'd2;  // wait for write-buffer AW/W acceptance
-// FBSS_ZREAD/ZWAIT/ZWRWAIT (3/4/5) retired with the Z-buffer in lean Phase 2.
+// FBSS_ZREAD/ZWAIT/ZWRWAIT (3/4/5) are unused.
 // Translucent-blend sub-flow.  SPAN_TRANSLUC fragments are first collected
 // into a same-word lane group while the fragment pipe keeps running.  The
 // blend unit then reads the destination FB word once, serialises the
@@ -1377,11 +1579,9 @@ wire [7:0]  blend_lut_fb_byte  = fb_lane_read(blend_result_word, blend_lane_iter
 wire [14:0] blend_lut_addr_w   = {blend_lut_src_byte[7:1], blend_lut_fb_byte};
 wire        transluc_cache_hit = transluc_cache_valid
                                && (transluc_cache_addr == blend_lut_addr_w[14:2]);
-wire [7:0]  transluc_cache_byte =
-    (blend_lut_addr_w[1:0] == 2'd0) ? transluc_cache_data[7:0]   :
-    (blend_lut_addr_w[1:0] == 2'd1) ? transluc_cache_data[15:8]  :
-    (blend_lut_addr_w[1:0] == 2'd2) ? transluc_cache_data[23:16] :
-                                      transluc_cache_data[31:24];
+wire [31:0] transluc_cache_shift = transluc_cache_data
+                                 >> {blend_lut_addr_w[1:0], 3'b0};
+wire [7:0]  transluc_cache_byte  = transluc_cache_shift[7:0];
 // Pre-computed after the grouped FB read, consumed by FBSS_BLEND_APPLY.  Hoists
 // the 32-bit equality compare `fb_acc_addr == blend_group_word_addr` out of
 // the BLEND_APPLY cycle so the only logic between blend_group_word_addr (FF)
@@ -1405,12 +1605,10 @@ reg src_done;            // source has issued its last pixel; pipeline draining
 // ----------------------------------------------------------------
 // Combinational tex_req drive
 // ----------------------------------------------------------------
-// Drives tex_req from p0 (registered pre-issue metadata) and tx_mul_q
-// (registered DSP multiply output for that p0). The p0 stage exists so
-// that the multiply can be DSP-pipelined: while p0 holds the pixel about
-// to issue, the DSP is producing tx_mul_q for it. When the cache accepts
-// (combinational `tex_req_valid && tex_req_ready`), p0 → p1 commits and
-// the next sp_* pixel is loaded into p0 (with its DSP mul kicked off).
+// Drives tex_req from p0 (registered issue metadata) and tx_mul_q
+// (registered DSP multiply output for that p0). p0 is loaded from p0a one
+// cycle after p0a snapshots the source pixel.  That extra boundary lets the
+// fitter place the source muxes and the texture-row DSP independently.
 //
 // Critical-path benefit: the long combinational `sp_t * sp_tex_width` path
 // is broken at the DSP output register, so the fitter can pack it into a
@@ -1457,6 +1655,11 @@ wire p3_needs_fb_flush = p3_valid && !p3_discard && !p3_flags[SPAN_TRANSLUC]
 wire fb_write_buffer_stall = p3_needs_fb_flush && !fb_write_can_issue;
 wire [31:0] p3_fb_word_addr_w = p3_fb_addr & 32'hFFFFFFFC;
 wire [3:0]  p3_fb_lane_mask_w = fb_lane_mask(p3_fb_addr[1:0]);
+wire [31:0] fb_acc_match_addr = (fbss == FBSS_BLEND_R_WAIT)
+                              ? blend_group_word_addr
+                              : p3_fb_word_addr_w;
+wire        fb_acc_word_match = !fb_acc_valid
+                              || (fb_acc_addr == fb_acc_match_addr);
 wire blend_group_pipe_block = (fbss == FBSS_IDLE)
                            && blend_group_active
                            && p3_valid
@@ -1481,7 +1684,7 @@ wire [31:0] fp_tex_addr_full = p0_tex_base + tx_mul_q
                              + {{16{p0_s_int[15]}}, p0_s_int};
 
 assign tex_req_valid = (state == S_FRAG_PIPE) && p0_valid
-                    && !fp_pipe_stall && !persp_issue_stall;
+                    && !fp_pipe_stall;
 assign tex_req_addr  = fp_tex_addr_full[25:0];
 assign tex_req_wide  = 1'b0;
 
@@ -1520,12 +1723,12 @@ assign tex_req_wide  = 1'b0;
 // segment 0, so slot B is ready by the time the issue stage finishes segment 0
 // and needs to swap.
 //
-// On segment boundary: when load_p0 fires for the last pixel of segment N
+// On segment boundary: when the source snapshot captures the last pixel of segment N
 // (sp_seg_left == 0), the issue stage swaps slot B into slot A (sp_s,
 // sp_sstep, etc), clears persp_seg_b_ready, and the PSS scheduler picks up
 // segment N+2 in slot B.
-// Projection-space accumulators (advance by 16 each PSS run).
-// Loaded from scalar-span payload words 12..14.
+// Projection-space accumulators (advance by 16 each PSS run).  Loaded by
+// perspective span-group setup before entering S_FRAG_PIPE.
 reg signed [31:0] sp_sZ;        // s/z, 16.16 signed
 reg signed [31:0] sp_tZ;        // t/z, 16.16 signed
 reg signed [31:0] sp_zinv;      // 1/z, 16.16 (always positive)
@@ -1545,7 +1748,7 @@ reg        persp_active;
 
 // Pixels remaining in the current affine sub-segment, AFTER the
 // pixel currently being issued. Counts 15 → 0 within a segment. When
-// load_p0 fires with sp_seg_left == 0, slot B is swapped into slot A.
+// the source snapshot captures with sp_seg_left == 0, slot B is swapped into slot A.
 reg [3:0]  sp_seg_left;
 
 // Slot A readiness: sp_s/sp_t/sp_sstep/sp_tstep are valid (PSS pass 2 done).
@@ -1568,6 +1771,7 @@ reg signed [31:0] persp_pend_t;
 reg signed [31:0] persp_pend_sstep;
 reg signed [31:0] persp_pend_tstep;
 reg        persp_seg_b_ready;
+reg        persp_swap_pending;
 
 // PSS — segment-setup sub-FSM. Runs alongside the issue stage (and fbss)
 // inside S_FRAG_PIPE. Drives dsp_a/dsp_b and recip_rd_addr; reads
@@ -1615,6 +1819,8 @@ localparam PSS_NR_MUL_Y_W  = 5'd14;  // DSP pipeline delay
 localparam PSS_NR_CAPTURE  = 5'd15;  // refined recip → recip_q16_r
 localparam PSS_ADV_CLAMP   = 5'd16;  // stage 2: register abs/clamp from old/new zinv
 localparam PSS_SLOPE       = 5'd17;  // commit anchor/slope from registered endpoints
+localparam PSS_CONSTZ_STEP_W = 5'd18; // wait for constant-Z step multiplies
+localparam PSS_CONSTZ_STEP_CAPTURE = 5'd19; // commit constant-Z affine step
 reg [4:0] persp_pss;
 reg signed [31:0] recip_q16_r;
 reg signed [31:0] nr_two_minus_xy;
@@ -1674,7 +1880,7 @@ reg        [31:0] pss_zinv_abs_na_r;
 // |post-advance zinv| < |pre-advance zinv| >> 2.
 
 // Stall the issue stage while slot A isn't ready (passes 1+2 still running).
-// Slot B not being ready is handled separately inside the load_p0 gate.
+// Slot B not being ready is handled separately inside the source-snapshot gate.
 wire persp_issue_stall = persp_active && !persp_seg_a_ready;
 
 // Combinational zinv helpers. PSS_ADV captures the post-advance value
@@ -1775,8 +1981,13 @@ reg [7:0]  cr_color;
 
 // tri_active: 1 = fragment pipeline returns to the triangle row walker.
 // The final primitive flush clears it before dispatching the next command.
+`ifdef GPU_INCLUDE_TRIANGLES
 reg        tri_active;
+`else
+wire       tri_active = 1'b0;
+`endif
 
+`ifdef GPU_INCLUDE_TRIANGLES
 // Vertex data (extracted from the triangle payload)
 reg signed [15:0] v_x [0:2], v_y [0:2];       // 12.4 screen coords
 reg signed [15:0] v_s [0:2], v_t [0:2];        // tex coord integer part
@@ -1818,9 +2029,8 @@ reg [2:0] premul_step;
 // Edge equation coefficients: E_i(x,y) = A_i*x + B_i*y + C_i
 reg signed [31:0] tri_A [0:2], tri_B [0:2], tri_C [0:2];
 
-// Attribute gradients (per sub-pixel step, fixed-point).  The Z-buffer path
-// is retired; triangle payload Z fields are ignored and no depth gradient is
-// computed.
+// Attribute gradients (per sub-pixel step, fixed-point).  Triangle payload Z
+// fields are ignored and no depth gradient is computed.
 // Phase 4c.3 — when perspective is active, grad_s_dx/dy and grad_t_dx/dy
 // hold gradients of (s*w) and (t*w) respectively (the perspective-
 // corrected linearly-interpolatable form).  When affine, they hold
@@ -1896,7 +2106,7 @@ reg signed [20:0] delta_y_subpix;
 reg [3:0]         init_step;
 
 // Span-emit scan state: captures the inside-triangle extent for the current
-// scanline, then builds one scalar-span-equivalent sp_* setup and hands it
+// scanline, then builds one single-lane sp_* setup and hands it
 // to S_FRAG_PIPE. Convex triangles ⇒ the inside pixels are contiguous per row.
 reg [15:0]        tri_span_x_start;
 reg [15:0]        tri_span_count;
@@ -2013,6 +2223,7 @@ always @(posedge clk) begin
     grad_axis_b1_r <= grad_axis_b1;
     grad_axis_b2_r <= grad_axis_b2;
 end
+`endif
 
 // ================================================================
 // Texture Address Computation — 2-stage pipeline (DSP-friendly)
@@ -2030,9 +2241,14 @@ task finish_fragment_stream_after_flush;
     begin
         fb_acc_valid <= 1'b0;
         fb_acc_mask  <= 4'b0;
+`ifdef GPU_INCLUDE_TRIANGLES
         if (tri_active)
             tri_active <= 1'b0;
-
+`endif
+        if (psg_active)
+            psg_active <= 1'b0;
+        if (affg_active)
+            affg_active <= 1'b0;
         state <= S_IDLE;
     end
 endtask
@@ -2054,6 +2270,7 @@ always @(posedge clk) begin : main_fsm
     if (!reset_n) begin
         state <= S_IDLE;
         ring_rdptr <= 0;
+        ring_rd_addr <= 0;
         m_wr_awvalid <= 0;
         m_wr_wvalid <= 0;
         fbwq_rd_ptr <= 4'b0;
@@ -2071,10 +2288,11 @@ always @(posedge clk) begin : main_fsm
         cr_y_remaining <= 0; cr_stride <= 0; cr_color <= 0;
         cmd_is_set_texture <= 0;
         cmd_is_set_fb <= 0;
-        cmd_is_draw_span_group <= 0;
-        cmd_span_scalar <= 0;
-        cmd_span_group_varcount <= 0;
+        cmd_is_draw_affine_span_group <= 0;
+        cmd_is_draw_persp_span_group <= 0;
+`ifdef GPU_INCLUDE_TRIANGLES
         cmd_is_draw_triangles <= 0;
+`endif
         cmd_is_flip <= 0;
         m_wr_inflight       <= 4'b0;
         gpu_swap_req        <= 1'b0;
@@ -2082,11 +2300,15 @@ always @(posedge clk) begin : main_fsm
         pay_idx <= 0;
         pay_remaining <= 0;
         // Pipelined fragment processor reset
-        p0_valid <= 0; p0_light <= 0; p0_flags <= 0;
+        p0a_valid <= 0; p0a_light <= 0; p0a_colormap_id <= 0; p0a_flags <= 0;
+        p0a_fb_addr <= 0;
+        p0a_s_int <= 0; p0a_tex_base <= 0;
+        p0a_t_y <= 0; p0a_tex_width <= 0;
+        p0_valid <= 0; p0_light <= 0; p0_colormap_id <= 0; p0_flags <= 0;
         p0_fb_addr <= 0;
         p0_s_int <= 0; p0_tex_base <= 0;
         tx_mul_q <= 0;
-        p1_valid <= 0; p1_light <= 0; p1_flags <= 0;
+        p1_valid <= 0; p1_light <= 0; p1_colormap_id <= 0; p1_flags <= 0;
         p1_fb_addr <= 0;
         p2_valid <= 0; p2_color <= 0; p2_flags <= 0;
         p2_fb_addr <= 0; p2_discard <= 0;
@@ -2119,6 +2341,7 @@ always @(posedge clk) begin : main_fsm
         persp_pend_s <= 0; persp_pend_t <= 0;
         persp_pend_sstep <= 0; persp_pend_tstep <= 0;
         persp_seg_b_ready <= 0;
+        persp_swap_pending <= 1'b0;
         persp_pss <= PSS_IDLE;
         persp_pass <= PSS_PASS_ANCHOR;
         persp_zinv_abs_r <= 0;
@@ -2135,6 +2358,7 @@ always @(posedge clk) begin : main_fsm
         dsp_a <= 0; dsp_b <= 0;
         dsp2_a <= 0; dsp2_b <= 0;
         recip_rd_addr <= 0;
+`ifdef GPU_INCLUDE_TRIANGLES
         tri_active <= 0;
         tri_persp_active_grad_r <= 0;
         tri_persp_active_init_r <= 0;
@@ -2167,38 +2391,88 @@ always @(posedge clk) begin : main_fsm
         grad_r_dx <= 0; grad_r_dy <= 0;
         tri_xmin_raw <= 0; tri_xmax_raw <= 0;
         tri_ymin_raw <= 0; tri_ymax_raw <= 0;
+`endif
         // State registers
         st_tex_addr <= 0; st_tex_width <= 0;
         sp_tex_w_mask <= 16'hFFFF; sp_tex_h_mask <= 16'hFFFF;
         st_fb_addr <= 0; st_fb_stride <= 320;
-        spg_fb_base <= 0;
-        spg_fb_stride <= 0;
-        spg_count <= 0;
-        spg_varcount <= 1'b0;
-        spg_row <= 16'd0;
-        spg_flags <= 0;
-        spg_colormap_id <= 0;
-        spg_tex_width <= 16'd1;
-        spg_tex_w_mask <= 16'hFFFF;
-        spg_tex_h_mask <= 16'hFFFF;
-        spg_lane <= 0;
-        spg_last_lane <= 0;
-        spg_lane_delta <= 16'sd1;
-        spg_row_advance <= 18'sd0;
-        spg_var_lane_active_q <= 1'b1;
-        spg_lane_start[0] <= 16'd0; spg_lane_start[1] <= 16'd0;
-        spg_lane_start[2] <= 16'd0; spg_lane_start[3] <= 16'd0;
-        spg_lane_count[0] <= 16'd0; spg_lane_count[1] <= 16'd0;
-        spg_lane_count[2] <= 16'd0; spg_lane_count[3] <= 16'd0;
+        affg_active <= 1'b0;
+        affg_lane <= 2'd0;
+        affg_last_lane <= 2'd0;
+        affg_flags <= 4'd0;
+        affg_colormap_id[0] <= 4'd0; affg_colormap_id[1] <= 4'd0;
+        affg_colormap_id[2] <= 4'd0; affg_colormap_id[3] <= 4'd0;
+        affg_tex_width <= 16'd1;
+        affg_tex_w_mask <= 16'hFFFF;
+        affg_tex_h_mask <= 16'hFFFF;
+        affg_fb_step <= 32'sd1;
+        affg_fb_addr[0] <= 32'd0; affg_fb_addr[1] <= 32'd0;
+        affg_fb_addr[2] <= 32'd0; affg_fb_addr[3] <= 32'd0;
+        affg_tex_addr[0] <= 32'd0; affg_tex_addr[1] <= 32'd0;
+        affg_tex_addr[2] <= 32'd0; affg_tex_addr[3] <= 32'd0;
+        affg_count[0] <= 16'd0; affg_count[1] <= 16'd0;
+        affg_count[2] <= 16'd0; affg_count[3] <= 16'd0;
+        affg_s[0] <= 32'sd0; affg_s[1] <= 32'sd0;
+        affg_s[2] <= 32'sd0; affg_s[3] <= 32'sd0;
+        affg_t[0] <= 32'sd0; affg_t[1] <= 32'sd0;
+        affg_t[2] <= 32'sd0; affg_t[3] <= 32'sd0;
+        affg_sstep[0] <= 32'sd0; affg_sstep[1] <= 32'sd0;
+        affg_sstep[2] <= 32'sd0; affg_sstep[3] <= 32'sd0;
+        affg_tstep[0] <= 32'sd0; affg_tstep[1] <= 32'sd0;
+        affg_tstep[2] <= 32'sd0; affg_tstep[3] <= 32'sd0;
+        affg_light[0] <= 6'd0; affg_light[1] <= 6'd0;
+        affg_light[2] <= 6'd0; affg_light[3] <= 6'd0;
+        psg_active <= 1'b0;
+        psg_lane <= 2'd0;
+        psg_last_lane <= 2'd0;
+        psg_fb_base <= 32'd0;
+        psg_tex_addr <= 32'd0;
+        psg_flags <= 4'd0;
+        psg_colormap_id <= 4'd0;
+        psg_major_fb_step <= 32'sd0;
+        psg_minor_fb_step <= 32'sd1;
+        psg_tex_width <= 16'd1;
+        psg_tex_w_mask <= 16'hFFFF;
+        psg_tex_h_mask <= 16'hFFFF;
+        psg_start[0] <= 16'sd0; psg_start[1] <= 16'sd0;
+        psg_start[2] <= 16'sd0; psg_start[3] <= 16'sd0;
+        psg_count[0] <= 16'd0; psg_count[1] <= 16'd0;
+        psg_count[2] <= 16'd0; psg_count[3] <= 16'd0;
+        psg_sZ <= 32'sd0;
+        psg_tZ <= 32'sd0;
+        psg_zinv <= 32'sd0;
+        psg_sZ_major_step <= 32'sd0;
+        psg_tZ_major_step <= 32'sd0;
+        psg_zinv_major_step <= 32'sd0;
+        psg_sZ_minor_step <= 32'sd0;
+        psg_tZ_minor_step <= 32'sd0;
+        psg_zinv_minor_step <= 32'sd0;
+        psg_light <= 24'sd0;
+        psg_light_major_step <= 24'sd0;
+        psg_light_minor_step <= 24'sd0;
+        psg_cur_fb_major <= 32'sd0;
+        psg_cur_sZ_major <= 32'sd0;
+        psg_cur_tZ_major <= 32'sd0;
+        psg_cur_zinv_major <= 32'sd0;
+        psg_cur_light_major <= 24'sd0;
+        psg_cur_start_ext <= 32'sd0;
+        psg_cur_count <= 16'd0;
+        psg_fb_off_r <= 32'sd0;
+        psg_sZ_off_r <= 32'sd0;
+        psg_tZ_off_r <= 32'sd0;
+        psg_zinv_off_r <= 32'sd0;
     end else begin
         // Ring reset: set the read pointer to the start of ring BRAM.
-        if (ring_reset)
+        if (ring_reset) begin
             ring_rdptr <= 0;
+            ring_rd_addr <= 0;
+        end
 
         // Soft reset: return FSM to idle, deassert all bus signals
         if (soft_reset) begin
             state        <= S_IDLE;
             ring_rdptr   <= ring_wrptr;
+            ring_rd_addr <= ring_wrptr;
             m_wr_awvalid <= 0;
             m_wr_wvalid  <= 0;
             fbwq_rd_ptr  <= 4'b0;
@@ -2210,6 +2484,10 @@ always @(posedge clk) begin : main_fsm
             blend_arvalid <= 1'b0;
             blend_group_active <= 1'b0;
             blend_group_mask <= 4'b0;
+            psg_active <= 1'b0;
+            affg_active <= 1'b0;
+            cmd_is_draw_affine_span_group <= 1'b0;
+            cmd_is_draw_persp_span_group <= 1'b0;
             m_wr_inflight <= 4'b0;
             gpu_swap_req <= 1'b0;
             transluc_lookup_fire <= 1'b0;
@@ -2242,6 +2520,7 @@ always @(posedge clk) begin : main_fsm
                 m_wr_wvalid <= 1'b0;
             gpu_swap_req <= 1'b0;
             transluc_lookup_fire <= 1'b0;
+
         case (state)
 
         // ============================================================
@@ -2252,6 +2531,7 @@ always @(posedge clk) begin : main_fsm
                 // BRAM read initiated by ring_rdptr (port B, 1-cycle latency)
                 // Advance rdptr; data available next cycle in ring_rd_data
                 ring_rdptr <= ring_rdptr + 1'b1;
+                ring_rd_addr <= ring_rdptr + 1'b1;
                 state      <= S_RING_WAIT;
             end
         end
@@ -2281,28 +2561,28 @@ always @(posedge clk) begin : main_fsm
             cmd_is_clear_rect     <= (cmd_type == CMD_CLEAR_RECT);
             cmd_is_set_texture    <= (cmd_type == CMD_SET_TEXTURE);
             cmd_is_set_fb         <= (cmd_type == CMD_SET_FB);
-            cmd_is_draw_span_group       <= (cmd_type == CMD_DRAW_SPAN_GROUP);
-            cmd_span_scalar       <= (cmd_type == CMD_DRAW_SPAN_GROUP &&
-                                      (cmd_payload_words == 13'd9 ||
-                                       cmd_payload_words == 13'd15));
-            cmd_span_group_varcount <= (cmd_type == CMD_DRAW_SPAN_GROUP &&
-                                         cmd_payload_words == 13'd22);
-            cmd_is_draw_triangles <= GPU_ENABLE_TRIANGLES &&
-                                     (cmd_type == CMD_DRAW_TRIANGLES);
+            cmd_is_draw_affine_span_group <= (cmd_type == CMD_DRAW_AFFINE_SPAN_GROUP &&
+                                              cmd_payload_words >= 13'd11 &&
+                                              cmd_payload_words <= 13'd32);
+            cmd_is_draw_persp_span_group <= (cmd_type == CMD_DRAW_PERSP_SPAN_GROUP &&
+                                             cmd_payload_words == 13'd23);
+`ifdef GPU_INCLUDE_TRIANGLES
+            cmd_is_draw_triangles <= (cmd_type == CMD_DRAW_TRIANGLES);
+`endif
             cmd_is_flip           <= (cmd_type == CMD_FLIP);
 
             if (cmd_payload_words == 0) begin
                 state <= S_EXECUTE;
             end else begin
                 pay_idx <= 0;
-                // Track the FULL payload count so we drain every word out
-                // of the ring — stores into pay_buf are separately capped
-                // at index 31 in S_PAY_DATA.  This keeps ring_rdptr aligned
-                // even when a command (e.g. a multi-triangle draw) exceeds
-                // the 19-entry pay_buf capacity.
+                // Track the full payload count so every word drains out of
+                // the ring.  This keeps ring_rdptr aligned even when a
+                // command has more words than the direct destination decode
+                // accepts.
                 pay_remaining <= cmd_payload_words;
                 // Start first BRAM read (data arrives next cycle)
                 ring_rdptr <= ring_rdptr + 1'b1;
+                ring_rd_addr <= ring_rdptr + 1'b1;
                 state <= S_PAY_DATA;
             end
         end
@@ -2310,13 +2590,13 @@ always @(posedge clk) begin : main_fsm
         // ============================================================
         // Payload — stream words directly to destination regs
         // ============================================================
-        // No intermediate pay_buf.  Each cycle, ring_rd_data holds the
+        // No intermediate payload array.  Each cycle, ring_rd_data holds the
         // current payload word (advanced by the 1-cycle BRAM read); we
         // route it straight to the right state reg based on the
         // registered command type and the payload-word index pay_idx.
         // Destinations live in regs that already exist (sp_*, st_*,
         // v_*, etc.), so the only storage cost is the 5-bit pay_idx
-        // counter and pay_remaining — we save the 19×32 pay_buf array.
+        // counter and pay_remaining.
         //
         // pay_idx saturates at 31: any payload word past index 31
         // (e.g. padding at the end of an oversized DRAW_TRIANGLES batch)
@@ -2351,9 +2631,7 @@ always @(posedge clk) begin : main_fsm
                     cr_y_remaining <= ring_rd_data[15:0];
                 end else if (pay_idx == 5'd2) begin
                     // Word 2: {stride[31:16], pad[15:8], color[7:0]}.
-                    // stride==0 ⇒ caller didn't set it; row advance falls
-                    // back to st_fb_stride (the SET_FB global) for backwards
-                    // compatibility with existing callers.
+                    // stride==0 uses st_fb_stride from SET_FB.
                     cr_stride <= ring_rd_data[31:16];
                     cr_color  <= ring_rd_data[7:0];
                 end
@@ -2370,154 +2648,18 @@ always @(posedge clk) begin : main_fsm
                 if (pay_idx == 5'd0) st_fb_addr   <= ring_rd_data;
                 else if (pay_idx == 5'd1) st_fb_stride <= ring_rd_data[15:0];
             end
-            else if (span_group_active) begin
-                if (cmd_span_group_varcount) begin
-                    case (pay_idx)
-                        5'd0: spg_fb_base <= ring_rd_data;
-                        5'd1: begin
-                            spg_count       <= ring_rd_data[31:16];
-                            spg_flags       <= span_flags_from_wire(ring_rd_data[15:8]);
-                            spg_last_lane   <= spg_last_lane_from_count(ring_rd_data[7:4]);
-                            spg_colormap_id <= ring_rd_data[3:0];
-                        end
-                        5'd2: begin
-                            spg_fb_stride       <= ring_rd_data[31:16];
-                            spg_lane_delta      <= ring_rd_data[15:0];
-                            spg_row_advance     <= spg_row_advance_from(spg_last_lane,
-                                                                        ring_rd_data[31:16],
-                                                                        ring_rd_data[15:0]);
-                        end
-                        5'd3: spg_tex_width <= ring_rd_data[15:0];
-                        5'd4: begin
-                            spg_tex_w_mask <= (ring_rd_data[15:0]  == 16'd0)
-                                              ? 16'hFFFF : ring_rd_data[15:0];
-                            spg_tex_h_mask <= (ring_rd_data[31:16] == 16'd0)
-                                              ? 16'hFFFF : ring_rd_data[31:16];
-                        end
-                        5'd5: begin
-                            spg_lane_start[0] <= ring_rd_data[15:0];
-                            spg_lane_start[1] <= ring_rd_data[31:16];
-                        end
-                        5'd6: begin
-                            spg_lane_start[2] <= ring_rd_data[15:0];
-                            spg_lane_start[3] <= ring_rd_data[31:16];
-                        end
-                        5'd7: begin
-                            spg_lane_count[0] <= ring_rd_data[15:0];
-                            spg_lane_count[1] <= ring_rd_data[31:16];
-                        end
-                        5'd8: begin
-                            spg_lane_count[2] <= ring_rd_data[15:0];
-                            spg_lane_count[3] <= ring_rd_data[31:16];
-                        end
-                        5'd9:  spg_tex_addr[0] <= ring_rd_data;
-                        5'd10: spg_tex_addr[1] <= ring_rd_data;
-                        5'd11: spg_tex_addr[2] <= ring_rd_data;
-                        5'd12: spg_tex_addr[3] <= ring_rd_data;
-                        5'd13: spg_t[0] <= ring_rd_data;
-                        5'd14: spg_t[1] <= ring_rd_data;
-                        5'd15: spg_t[2] <= ring_rd_data;
-                        5'd16: spg_t[3] <= ring_rd_data;
-                        5'd17: spg_tstep[0] <= ring_rd_data;
-                        5'd18: spg_tstep[1] <= ring_rd_data;
-                        5'd19: spg_tstep[2] <= ring_rd_data;
-                        5'd20: spg_tstep[3] <= ring_rd_data;
-                        5'd21: begin
-                            spg_light[0] <= ring_rd_data[5:0];
-                            spg_light[1] <= ring_rd_data[13:8];
-                            spg_light[2] <= ring_rd_data[21:16];
-                            spg_light[3] <= ring_rd_data[29:24];
-                        end
-                        default: ;
-                    endcase
-                end else begin
-                    case (pay_idx)
-                        5'd0: spg_fb_base <= ring_rd_data;
-                        5'd1: begin
-                            spg_count       <= ring_rd_data[31:16];
-                            spg_flags       <= span_flags_from_wire(ring_rd_data[15:8]);
-                            spg_last_lane   <= spg_last_lane_from_count(ring_rd_data[7:4]);
-                            spg_colormap_id <= ring_rd_data[3:0];
-                        end
-                        5'd2: begin
-                            spg_fb_stride       <= ring_rd_data[31:16];
-                            spg_lane_delta      <= ring_rd_data[15:0];
-                            spg_row_advance     <= spg_row_advance_from(spg_last_lane,
-                                                                        ring_rd_data[31:16],
-                                                                        ring_rd_data[15:0]);
-                        end
-                        5'd3: spg_tex_width <= ring_rd_data[15:0];
-                        5'd4: begin
-                            spg_tex_w_mask <= (ring_rd_data[15:0]  == 16'd0)
-                                              ? 16'hFFFF : ring_rd_data[15:0];
-                            spg_tex_h_mask <= (ring_rd_data[31:16] == 16'd0)
-                                              ? 16'hFFFF : ring_rd_data[31:16];
-                        end
-                        5'd5:  spg_tex_addr[0] <= ring_rd_data;
-                        5'd6:  spg_tex_addr[1] <= ring_rd_data;
-                        5'd7:  spg_tex_addr[2] <= ring_rd_data;
-                        5'd8:  spg_tex_addr[3] <= ring_rd_data;
-                        5'd9:  spg_t[0] <= ring_rd_data;
-                        5'd10: spg_t[1] <= ring_rd_data;
-                        5'd11: spg_t[2] <= ring_rd_data;
-                        5'd12: spg_t[3] <= ring_rd_data;
-                        5'd13: spg_tstep[0] <= ring_rd_data;
-                        5'd14: spg_tstep[1] <= ring_rd_data;
-                        5'd15: spg_tstep[2] <= ring_rd_data;
-                        5'd16: spg_tstep[3] <= ring_rd_data;
-                        5'd17: begin
-                            spg_light[0] <= ring_rd_data[5:0];
-                            spg_light[1] <= ring_rd_data[13:8];
-                            spg_light[2] <= ring_rd_data[21:16];
-                            spg_light[3] <= ring_rd_data[29:24];
-                        end
-                        default: ;
-                    endcase
-                end
+            else if (cmd_is_draw_persp_span_group) begin
+                load_persp_span_group_payload_word(pay_idx, ring_rd_data);
             end
-            else if (span_active) begin
-                // Scalar-span loader.  Software batches multiple spans as
-                // multiple DRAW_SPAN commands in one command-stream submit.
-                case (pay_idx)
-                    5'd0: sp_fb_addr   <= ring_rd_data;
-                    5'd1: sp_tex_addr  <= ring_rd_data;
-                    5'd2: sp_s         <= ring_rd_data;
-                    5'd3: sp_t         <= ring_rd_data;
-                    5'd4: sp_sstep     <= ring_rd_data;
-                    5'd5: sp_tstep     <= ring_rd_data;
-                    5'd6: begin
-                        // Word 6 packing: [31:28]=explicit colormap_id,
-                        // [27:16]=count, [15:8]=light, [7:0]=flags.
-                        sp_count       <= {4'b0, ring_rd_data[27:16]};
-                        sp_colormap_id <= ring_rd_data[31:28];
-                        sp_light_q     <= {2'b0, ring_rd_data[13:8], 16'b0};
-                        sp_light_step  <= 24'b0;
-                        sp_flags       <= span_flags_from_wire(ring_rd_data[7:0]);
-                    end
-                    5'd7: begin
-                        sp_fb_stride <= ring_rd_data[31:16];
-                        sp_tex_width <= ring_rd_data[15:0];
-                    end
-                    5'd8: begin
-                        sp_tex_w_mask <= (ring_rd_data[15:0]  == 16'd0)
-                                         ? 16'hFFFF : ring_rd_data[15:0];
-                        sp_tex_h_mask <= (ring_rd_data[31:16] == 16'd0)
-                                         ? 16'hFFFF : ring_rd_data[31:16];
-                    end
-                    5'd9:  sp_sZ         <= ring_rd_data;
-                    5'd10: sp_tZ         <= ring_rd_data;
-                    5'd11: sp_zinv       <= ring_rd_data;
-                    5'd12: sp_sZstep     <= ring_rd_data;
-                    5'd13: sp_tZstep     <= ring_rd_data;
-                    5'd14: sp_zinv_step  <= ring_rd_data;
-                    default: ;
-                endcase
+            else if (cmd_is_draw_affine_span_group) begin
+                load_affine_span_group_payload_word(pay_idx, ring_rd_data);
             end
+`ifdef GPU_INCLUDE_TRIANGLES
             else if (cmd_is_draw_triangles) begin
                 // pay_idx 0 = vertex count (ignored; must be 3).
                 // Vertex layout: 6 words each, packed as
                 //   word 0: {x, y} (12.4 subpixel each)
-                //   word 1: {z,  --}  (depth is ignored; Z-buffer retired)
+                //   word 1: {z,  --}  (depth is ignored)
                 //   word 2: {s,  --}  (sign-extended tex s)
                 //   word 3: {t,  --}  (sign-extended tex t)
                 //   word 4: w (1/W in Q16.16, 0x00010000 == affine)
@@ -2544,6 +2686,7 @@ always @(posedge clk) begin : main_fsm
                     default: ;
                 endcase
             end
+`endif
 
             if (pay_remaining <= 13'd1) begin
                 state <= S_EXECUTE;
@@ -2558,20 +2701,18 @@ always @(posedge clk) begin : main_fsm
             // latency: each "triangle-done mid-batch" exit advances
             // ring_rdptr by one word to consume v0_word_0 on the same posedge
             // as the state transition back to S_PAY_DATA).
+`ifdef GPU_INCLUDE_TRIANGLES
             else if (cmd_is_draw_triangles && pay_idx == 5'd18) begin
                 state <= S_EXECUTE;
             end
-            // Span-group payloads are 18 words for fixed-count groups and
-            // 22 words for variable-count groups. Dispatch once the spg_*
-            // holding regs are fully populated.
-            else if (span_group_active
-                  && ((!cmd_span_group_varcount && pay_idx == 5'd17)
-                   || ( cmd_span_group_varcount && pay_idx == 5'd21))) begin
-                state      <= S_EXECUTE;
+`endif
+            else if (cmd_is_draw_persp_span_group && pay_idx == 5'd22) begin
+                state <= S_EXECUTE;
             end
             else begin
                 // Advance rdptr for next word (BRAM read, 1-cycle latency)
                 ring_rdptr <= ring_rdptr + 1'b1;
+                ring_rd_addr <= ring_rdptr + 1'b1;
             end
         end
 
@@ -2616,55 +2757,123 @@ always @(posedge clk) begin : main_fsm
             else if (cmd_is_clear_rect) begin
                 state <= S_CLEAR_RECT;
             end
-            else if (span_group_active) begin
-                spg_lane <= 2'd0;
-                spg_varcount <= cmd_span_group_varcount;
-                spg_row <= 16'd0;
-                spg_var_lane_active_q <= !cmd_span_group_varcount
-                                      || spg_lane_active_from(16'd0, 2'd0);
-                spg_load_lane;
+            else if (cmd_is_draw_affine_span_group) begin
+                affg_active <= 1'b1;
+                affg_lane <= affg_first_active_lane(1'b0);
+                sp_colormap_id  <= affg_colormap_id[affg_first_active_lane(1'b0)];
+                sp_light_step   <= 24'sd0;
+                sp_flags        <= affg_flags & ~(4'b0001 << SPAN_PERSP);
+                sp_fb_stride    <= affg_fb_step;
+                sp_tex_width    <= (affg_tex_width == 16'd0) ? 16'd1 : affg_tex_width;
+                sp_tex_w_mask   <= affg_tex_w_mask;
+                sp_tex_h_mask   <= affg_tex_h_mask;
+                sp_sZ           <= 32'sd0;
+                sp_tZ           <= 32'sd0;
+                sp_zinv         <= 32'sd0;
+                sp_sZstep       <= 32'sd0;
+                sp_tZstep       <= 32'sd0;
+                sp_zinv_step    <= 32'sd0;
                 persp_active      <= 1'b0;
-                persp_first_done  <= 0;
-                persp_seg_a_ready <= 0;
-                persp_seg_b_ready <= 0;
+                persp_first_done  <= 1'b0;
+                persp_seg_a_ready <= 1'b0;
+                persp_seg_b_ready <= 1'b0;
+                persp_swap_pending <= 1'b0;
                 persp_pss         <= PSS_IDLE;
                 persp_pass        <= PSS_PASS_ANCHOR;
-                sp_seg_left       <= 0;
-                src_done          <= (spg_count == 16'd0);
-                state             <= S_FRAG_PIPE;
+                sp_seg_left       <= 4'd0;
+                src_done          <= !affg_any_lane_active(1'b0);
+                state <= S_FRAG_PIPE;
             end
-            else if (span_active) begin
-                // Either standalone span or one span inside a batch:
-                // the sp_* regs are fully loaded for the current span.
-                // sp_flags holds the packed live flags from field idx 6;
-                // its SPAN_PERSP bit arms the perspective sub-FSM.
-                persp_active      <= sp_flags[SPAN_PERSP];
-                persp_first_done  <= 0;
-                persp_seg_a_ready <= 0;
-                persp_seg_b_ready <= 0;
+            else if (cmd_is_draw_persp_span_group) begin
+                psg_active <= 1'b1;
+                psg_lane <= 2'd0;
+                psg_cur_fb_major <= 32'sd0;
+                psg_cur_sZ_major <= 32'sd0;
+                psg_cur_tZ_major <= 32'sd0;
+                psg_cur_zinv_major <= 32'sd0;
+                psg_cur_light_major <= 24'sd0;
+                psg_cur_start_ext <= {{16{psg_start[0][15]}}, psg_start[0]};
+                psg_cur_count <= psg_count[0];
+                src_done <= 1'b0;
+                persp_active      <= 1'b0;
+                persp_first_done  <= 1'b0;
+                persp_seg_a_ready <= 1'b0;
+                persp_seg_b_ready <= 1'b0;
+                persp_swap_pending <= 1'b0;
                 persp_pss         <= PSS_IDLE;
                 persp_pass        <= PSS_PASS_ANCHOR;
-                sp_seg_left       <= 0;
-                // Count=0 spans (legitimate input from BUILD/Quake's
-                // pre-clipped renderers, and from the SDK wire-format
-                // 12-bit count truncation when callers pass count
-                // >=4096) must not deadlock S_FRAG_PIPE.  load_p0 is
-                // gated off when sp_count==0 (line 2494), which would
-                // leave src_done=0 forever and never reach the
-                // pipeline-drain exit at line 3064.  Pre-arm src_done
-                // here so the very first S_FRAG_PIPE cycle sees an
-                // empty pipeline + src_done=1 and exits cleanly.
-                src_done     <= (sp_count == 16'd0);
-                state        <= S_FRAG_PIPE;
+                sp_seg_left       <= 4'd0;
+                state <= S_PSG_SETUP0;
             end
+`ifdef GPU_INCLUDE_TRIANGLES
             else if (cmd_is_draw_triangles) begin
-                // Vertices already loaded into v_*[] in S_PAY_DATA;
-                // S_TRI_LOAD used to do the load in a separate cycle
-                // but is now a pass-through state kept only for
-                // schedule compatibility (setup_step reset).
+                // Vertices already loaded into v_*[] in S_PAY_DATA.
+                // S_TRI_LOAD resets setup_step before triangle setup.
                 state <= S_TRI_LOAD;
             end
+`endif
             else state <= S_IDLE;
+        end
+
+        // ============================================================
+        // CMD_DRAW_PERSP_SPAN_GROUP — expand clipped adjacent lanes into
+        // scalar perspective spans.  Each lane shares projection gradients
+        // but carries its own minor start/count, so irregular two-sided wall
+        // tiers can batch without the CPU deriving per-column affine state.
+        // ============================================================
+        S_PSG_SETUP0: begin
+            if (!psg_active) begin
+                state <= S_FB_FLUSH;
+            end else if (psg_cur_count == 16'd0) begin
+                if (psg_lane == psg_last_lane) begin
+                    psg_active <= 1'b0;
+                    state <= S_FB_FLUSH;
+                end else begin
+                    psg_advance_lane;
+                    state <= S_PSG_SETUP0;
+                end
+            end else begin
+                dsp_a  <= psg_cur_start_ext;
+                dsp_b  <= psg_minor_fb_step;
+                dsp2_a <= psg_cur_start_ext;
+                dsp2_b <= psg_sZ_minor_step;
+                state  <= S_PSG_SETUP1;
+            end
+        end
+
+        S_PSG_SETUP1: begin
+            state <= S_PSG_SETUP2;
+        end
+
+        S_PSG_SETUP2: begin
+            psg_fb_off_r <= dsp_p[31:0];
+            psg_sZ_off_r <= dsp2_p[31:0];
+            dsp_a  <= psg_cur_start_ext;
+            dsp_b  <= psg_tZ_minor_step;
+            dsp2_a <= psg_cur_start_ext;
+            dsp2_b <= psg_zinv_minor_step;
+            state  <= S_PSG_SETUP3;
+        end
+
+        S_PSG_SETUP3: begin
+            state <= S_PSG_SETUP4;
+        end
+
+        S_PSG_SETUP4: begin
+            psg_tZ_off_r   <= dsp_p[31:0];
+            psg_zinv_off_r <= dsp2_p[31:0];
+            dsp_a <= psg_cur_start_ext;
+            dsp_b <= {{8{psg_light_minor_step[23]}}, psg_light_minor_step};
+            state <= S_PSG_SETUP5;
+        end
+
+        S_PSG_SETUP5: begin
+            state <= S_PSG_SETUP6;
+        end
+
+        S_PSG_SETUP6: begin
+            psg_load_generated_span;
+            state <= S_FRAG_PIPE;
         end
 
         // ============================================================
@@ -2673,52 +2882,76 @@ always @(posedge clk) begin : main_fsm
         // ============================================================
         // Pipelined Fragment Processor
         // ============================================================
-        // Replaces the old sequential span-pixel chain with a
-        // 3-stage pipeline + a tail FB write sub-FSM:
-        //   S0  combinational issue from sp_* (tex_req_* are wires)
+        // Replaces the old sequential span-pixel chain with a source snapshot,
+        // a cache-issue stage, and the texture/cmap/fb tail:
+        //   p0a source snapshot and DSP inputs
+        //   p0  cache issue using registered tx_mul_q
         //   p1  metadata in flight, awaiting tex_resp from cache
         //   p2  tex color captured, cmap_rd_addr issued (if cmap)
         //   p3  cmap result merged, ready for fb_acc write
         //
-        // S0 issue commits when the cache accepts the request this cycle
-        // (combinational `tex_req_valid && tex_req_ready`). On commitment
-        // we latch p1 with sp_*'s metadata and advance the source state.
+        // p0 issue commits when the cache accepts the request this cycle
+        // (combinational `tex_req_valid && tex_req_ready`). Source state
+        // advances when p0a snapshots a source pixel.
         S_FRAG_PIPE: begin : frag_pipe_blk
             reg span_last_issue;
             reg [31:0] p3_word_addr;
             reg [1:0]  p3_byte_lane;
             reg        p3_word_match;
             reg        issue_committed;
-            reg        load_p0;
+            reg        p0a_to_p0;
+            reg        p0a_free_after;
+            reg        source_pixel_available;
+            reg        load_p0a;
             reg        p3_consumed;
+            reg [31:0] source_fb_addr;
+            reg [31:0] source_tex_base;
+            reg signed [31:0] source_s;
+            reg signed [31:0] source_t;
+            reg [5:0] source_light;
+            reg [3:0] source_colormap_id;
 
             // Was the (combinational) tex_req accepted by the cache this
             // same cycle? Both signals are visible NOW.
             issue_committed = tex_req_valid && tex_req_ready;
             p3_consumed = 1'b0;
-            // Load/refresh p0 only if cache accepted the previous p0 or p0 is
-            // empty (pipe priming).  Otherwise hold p0 stable and do not
-            // advance the source.
+            span_last_issue = affg_active
+                            ? affg_last_issue_from(affg_lane)
+                            : (sp_count == 16'd1);
+
+            // Load/refresh p0a only if the one-entry source snapshot will be
+            // free after this cycle.  p0 itself remains the cache-issue stage;
+            // if it is busy, p0a can still prefetch one source pixel.
             // Persp gating:
             //   * !persp_issue_stall: slot A must be loaded (pass 2 done).
             //   * If sp_seg_left == 0 (last px of segment), slot B must be
-            //     ready so the swap can fire in the same cycle.
-            load_p0 = (issue_committed || !p0_valid)
-                   && (span_group_active
-                       ? (spg_varcount
-                          ? ((spg_count != 16'd0) && spg_var_lane_active)
-                          : (sp_count != 16'd0))
-                       : (sp_count != 16'd0))
-                   && !src_done
-                   && !persp_issue_stall
-                   && (!persp_active
-                       || sp_seg_left != 4'd0
-                       || persp_seg_b_ready);
-            span_last_issue = span_group_active
-                            ? (spg_varcount
-                               ? (spg_var_last_row && spg_var_last_slot)
-                               : (sp_count == 16'd1 && spg_lane == spg_last_lane))
-                            : (sp_count == 16'd1);
+            //     ready so the swap can fire in the same cycle, unless this
+            //     pixel is also the last pixel of the whole span.
+            p0a_to_p0 = p0a_valid && (issue_committed || !p0_valid);
+            p0a_free_after = !p0a_valid || p0a_to_p0;
+	            source_pixel_available =
+	                   (affg_active
+	                    ? (affg_count[affg_lane] != 16'd0)
+	                    : (sp_count != 16'd0))
+                && !src_done
+                && !persp_swap_pending
+                && !persp_issue_stall
+                && (!persp_active
+                    || sp_seg_left != 4'd0
+                    || persp_seg_b_ready
+                    || span_last_issue);
+            load_p0a = p0a_free_after && source_pixel_available;
+            source_fb_addr = affg_active ? affg_fb_addr[affg_lane]
+                             : sp_fb_addr;
+            source_tex_base = affg_active ? affg_tex_addr[affg_lane]
+                              : sp_tex_addr;
+            source_s = affg_active ? affg_s[affg_lane] : sp_s;
+            source_t = affg_active ? affg_t[affg_lane]
+                       : sp_t;
+            source_light = affg_active ? affg_light[affg_lane]
+                           : sp_light;
+            source_colormap_id = affg_active ? affg_colormap_id[affg_lane]
+                                  : sp_colormap_id;
 
             // ----------------------------------------------------------
             // Pipeline shift — only when not stalled
@@ -2732,7 +2965,7 @@ always @(posedge clk) begin : main_fsm
                 p3_fb_addr   <= p2b_fb_addr;
                 p3_discard   <= p2b_discard;
 
-                // p2b <- p2  (no-op shift, gives cmap BRAM time to read)
+	                // p2b <- p2  (no-op shift, gives cmap port B time to respond)
                 p2b_valid   <= p2_valid;
                 p2b_color   <= p2_color;
                 p2b_flags   <= p2_flags;
@@ -2752,12 +2985,10 @@ always @(posedge clk) begin : main_fsm
                         // base + per-pixel (shade × 256 + texel).  The
                         // 16 KB per colormap slot, expressed as a shift here
                         // to avoid a multiplier.
-                        // sp_colormap_id is per-span for scalar/group spans;
-                        // triangle-emitted spans use slot 0. Adjacent batched
-                        // spans with different palookups coexist without
-                        // global colormap state.
+                        // Colormap id is captured per fragment so affine
+                        // groups can interleave lanes with different slots.
                         cmap_req_addr_reg <= PALOOKUP_BASE
-                                           | {8'b0, sp_colormap_id, 14'b0}
+                                           | {8'b0, p1_colormap_id, 14'b0}
                                            | {12'b0, p1_light, tex_resp_data[7:0]};
                     end
                 end
@@ -2767,139 +2998,112 @@ always @(posedge clk) begin : main_fsm
                 if (issue_committed) begin
                     p1_valid   <= 1;
                     p1_light   <= p0_light;
+                    p1_colormap_id <= p0_colormap_id;
                     p1_flags   <= p0_flags;
                     p1_fb_addr <= p0_fb_addr;
                 end else begin
                     p1_valid <= 0;
                 end
 
-                // p0 <- sp_* (pre-issue).  The texture row multiply is
-                // captured in tx_mul_q with the same metadata.
-                if (load_p0) begin
+                // p0 <- p0a.  The texture row multiply consumes the registered
+                // p0a inputs, not the wide sp_* mux, which is the timing win.
+                if (p0a_to_p0) begin
                     p0_valid     <= 1;
-                    p0_light     <= sp_light;
-                    p0_flags     <= sp_flags;
-                    p0_fb_addr   <= sp_fb_addr;
-                    p0_s_int     <= sp_s[31:16] & sp_tex_w_mask;
-                    p0_tex_base  <= sp_tex_addr;
+                    p0_light     <= p0a_light;
+                    p0_colormap_id <= p0a_colormap_id;
+                    p0_flags     <= p0a_flags;
+                    p0_fb_addr   <= p0a_fb_addr;
+                    p0_s_int     <= p0a_s_int;
+                    p0_tex_base  <= p0a_tex_base;
+                    tx_mul_q     <= $signed({1'b0, p0a_t_y})
+                                  * $signed({1'b0, p0a_tex_width});
+                end else if (issue_committed) begin
+                    p0_valid <= 0;
+                end
+                if (p0a_to_p0 && !load_p0a)
+                    p0a_valid <= 0;
+            end
 
-                    // DSP-pipelined multiply: registered output. The DSP
-                    // slice will be inferred via the (* multstyle = "dsp" *)
-                    // attribute on tx_mul_q's declaration.
-                    tx_mul_q <= $signed({1'b0, sp_t[31:16] & sp_tex_h_mask})
-                              * $signed({1'b0, sp_tex_width});
+            // Source snapshot and source-state advance are intentionally outside
+            // the tail-pipe shift gate.  When p0a is empty, it can prefetch one
+            // source fragment while p1/p2/p3 are stalled on a cache or FB event.
+            // This removes a hot `p1_valid -> sp_t/sp_s enable` timing cone and
+            // gives the fragment pipe one extra cycle of elasticity.
+            if (load_p0a) begin
+                p0a_valid     <= 1;
+                p0a_light     <= source_light;
+                p0a_colormap_id <= source_colormap_id;
+                p0a_flags     <= sp_flags;
+                p0a_fb_addr   <= source_fb_addr;
+                p0a_s_int     <= source_s[31:16] & sp_tex_w_mask;
+                p0a_tex_base  <= source_tex_base;
+                p0a_t_y       <= source_t[31:16] & sp_tex_h_mask;
+                p0a_tex_width <= sp_tex_width;
 
-                    if (span_group_active) begin
-                        case (spg_lane)
-                            2'd0: spg_t[0] <= sp_t + sp_tstep;
-                            2'd1: spg_t[1] <= sp_t + sp_tstep;
-                            2'd2: spg_t[2] <= sp_t + sp_tstep;
-                            default: spg_t[3] <= sp_t + sp_tstep;
-                        endcase
-
-                        if (spg_varcount) begin
-                            if (spg_var_last_slot) begin
-                                spg_lane  <= 2'd0;
-                                spg_row   <= spg_row + 16'd1;
-                                sp_fb_addr <= sp_fb_addr + spg_row_advance_addr;
-                                spg_var_lane_active_q <= spg_lane_active_from(spg_row + 16'd1, 2'd0);
-                                if (spg_last_lane == 2'd0) begin
-                                    sp_tex_addr <= spg_tex_addr[0];
-                                    sp_t        <= sp_t + sp_tstep;
-                                    sp_tstep    <= spg_tstep[0];
-                                    sp_light_q  <= {2'b0, spg_light[0], 16'b0};
-                                end else begin
-                                    spg_load_source_only(2'd0);
-                                end
-                            end else begin
-                                spg_lane <= spg_lane + 2'd1;
-                                sp_fb_addr <= sp_fb_addr + spg_lane_delta_addr;
-                                spg_var_lane_active_q <= spg_lane_active_from(spg_row, spg_lane + 2'd1);
-                                spg_load_source_only(spg_lane + 2'd1);
-                            end
-                        end else begin
-                            if (spg_lane == spg_last_lane) begin
-                                spg_lane <= 2'd0;
-                                sp_fb_addr <= sp_fb_addr + spg_row_advance_addr;
-                                sp_count <= sp_count - 16'd1;
-                                if (spg_last_lane == 2'd0) begin
-                                    sp_tex_addr <= spg_tex_addr[0];
-                                    sp_t        <= sp_t + sp_tstep;
-                                    sp_tstep    <= spg_tstep[0];
-                                    sp_light_q  <= {2'b0, spg_light[0], 16'b0};
-                                end else begin
-                                    spg_load_source_only(2'd0);
-                                end
-                            end else begin
-                                spg_lane <= spg_lane + 2'd1;
-                                sp_fb_addr <= sp_fb_addr + spg_lane_delta_addr;
-                                spg_load_source_only(spg_lane + 2'd1);
-                            end
+                if (affg_active) begin
+                    case (affg_lane)
+                        2'd0: begin
+                            affg_fb_addr[0] <= affg_fb_addr[0] + affg_fb_step;
+                            affg_count[0]   <= affg_count[0] - 16'd1;
+                            affg_s[0]       <= affg_s[0] + affg_sstep[0];
+                            affg_t[0]       <= affg_t[0] + affg_tstep[0];
                         end
+                        2'd1: begin
+                            affg_fb_addr[1] <= affg_fb_addr[1] + affg_fb_step;
+                            affg_count[1]   <= affg_count[1] - 16'd1;
+                            affg_s[1]       <= affg_s[1] + affg_sstep[1];
+                            affg_t[1]       <= affg_t[1] + affg_tstep[1];
+                        end
+                        2'd2: begin
+                            affg_fb_addr[2] <= affg_fb_addr[2] + affg_fb_step;
+                            affg_count[2]   <= affg_count[2] - 16'd1;
+                            affg_s[2]       <= affg_s[2] + affg_sstep[2];
+                            affg_t[2]       <= affg_t[2] + affg_tstep[2];
+                        end
+                        default: begin
+                            affg_fb_addr[3] <= affg_fb_addr[3] + affg_fb_step;
+                            affg_count[3]   <= affg_count[3] - 16'd1;
+                            affg_s[3]       <= affg_s[3] + affg_sstep[3];
+                            affg_t[3]       <= affg_t[3] + affg_tstep[3];
+                        end
+                    endcase
+                    affg_lane <= affg_next_lane_after_issue(affg_lane);
+                    if (span_last_issue) src_done <= 1'b1;
+                end else begin
+                    sp_fb_addr <= sp_fb_addr + sp_fb_stride;
+                    sp_count   <= sp_count - 16'd1;
+                    sp_light_q <= sp_light_q + sp_light_step;
+                    if (span_last_issue) src_done <= 1;
 
-                        if (span_last_issue) src_done <= 1'b1;
-                    end else begin
-                        // Advance span source. For perspective spans, the s/t
-                        // path is segmented: within a segment we step by the
-                        // affine sub-slope (sp_sstep), and at the segment
-                        // boundary (sp_seg_left == 0) we swap in the pre-
-                        // computed slot B (persp_pend_*).
-                        sp_fb_addr <= sp_fb_addr + {{16{sp_fb_stride[15]}}, sp_fb_stride};
-                        sp_count   <= sp_count - 16'd1;
-                        // Phase 4d — per-pixel light step.  Direct
-                        // Scalar span payloads set sp_light_step = 0
-                        // (flat lighting unchanged); triangle Gouraud
-                        // spans walk through the gradient per pixel.
-                        sp_light_q <= sp_light_q + sp_light_step;
-                        if (span_last_issue) src_done <= 1;
-                    end
-
-                    if (!span_group_active) begin
-                        if (persp_active) begin
-                            if (sp_seg_left == 4'd0) begin
-                                // Segment boundary — swap pending into current.
-                                sp_s              <= persp_pend_s;
-                                sp_t              <= persp_pend_t;
-                                sp_sstep          <= persp_pend_sstep;
-                                sp_tstep          <= persp_pend_tstep;
-                                sp_seg_left       <= PERSPECTIVE_SEG_LAST;
-                                persp_seg_b_ready <= 0;  // PSS will refill
-                            end else begin
-                                sp_s        <= sp_s + sp_sstep;
-                                sp_t        <= sp_t + sp_tstep;
-                                sp_seg_left <= sp_seg_left - 4'd1;
+                    if (persp_active) begin
+                        if (sp_seg_left == 4'd0) begin
+                            if (!span_last_issue) begin
+                                persp_swap_pending <= 1'b1;
+                                persp_seg_b_ready <= 0;
                             end
                         end else begin
                             sp_s        <= sp_s + sp_sstep;
                             sp_t        <= sp_t + sp_tstep;
+                            sp_seg_left <= sp_seg_left - 4'd1;
                         end
-                    end
-                end else if (span_group_active && spg_varcount
-                          && !src_done && !spg_var_lane_active
-                          && (issue_committed || !p0_valid)) begin
-                    // Variable-count groups keep the row-major address walk
-                    // even when a lane is inactive for the current row.  That
-                    // preserves adjacent-byte coalescing for overlapping rows
-                    // without issuing a tex/cmap/fb fragment for skipped rows.
-                    p0_valid <= 0;
-                    if (spg_var_last_slot) begin
-                        spg_lane  <= 2'd0;
-                        spg_row   <= spg_row + 16'd1;
-                        sp_fb_addr <= sp_fb_addr + spg_row_advance_addr;
-                        spg_var_lane_active_q <= spg_lane_active_from(spg_row + 16'd1, 2'd0);
-                        spg_load_source_only(2'd0);
-                        if (spg_var_last_row)
-                            src_done <= 1'b1;
                     end else begin
-                        spg_lane <= spg_lane + 2'd1;
-                        sp_fb_addr <= sp_fb_addr + spg_lane_delta_addr;
-                        spg_var_lane_active_q <= spg_lane_active_from(spg_row, spg_lane + 2'd1);
-                        spg_load_source_only(spg_lane + 2'd1);
+                        sp_s <= sp_s + sp_sstep;
+                        sp_t <= sp_t + sp_tstep;
                     end
-                end else if (issue_committed) begin
-                    // Committed but no more pixels to load — drain p0
-                    p0_valid <= 0;
                 end
+            end
+
+            // Apply a perspective segment swap one cycle after the boundary
+            // pixel is accepted.  This keeps cache req_ready out of the
+            // sp_sstep/sp_tstep update cone while only adding a bubble at the
+            // 16-pixel perspective sub-segment boundary.
+            if (persp_swap_pending) begin
+                sp_s                 <= persp_pend_s;
+                sp_t                 <= persp_pend_t;
+                sp_sstep             <= persp_pend_sstep;
+                sp_tstep             <= persp_pend_tstep;
+                sp_seg_left          <= PERSPECTIVE_SEG_LAST;
+                persp_swap_pending   <= 1'b0;
             end
 
             // ----------------------------------------------------------
@@ -2942,8 +3146,7 @@ always @(posedge clk) begin : main_fsm
                     else if (p3_valid && !p3_discard) begin : fb_acc_blk
                         p3_word_addr  = p3_fb_addr & 32'hFFFFFFFC;
                         p3_byte_lane  = p3_fb_addr[1:0];
-                        p3_word_match = (fb_acc_valid && fb_acc_addr == p3_word_addr)
-                                     || !fb_acc_valid;
+                        p3_word_match = fb_acc_word_match;
 
                         if (!p3_word_match) begin
                             if (fb_write_can_issue) begin
@@ -2974,7 +3177,7 @@ always @(posedge clk) begin : main_fsm
 
                     end
                     else if (blend_group_active
-                          && src_done && !p0_valid && !p1_valid && !p2_valid
+                          && src_done && !p0a_valid && !p0_valid && !p1_valid && !p2_valid
                           && !p2b_valid && !p3_valid) begin
                         // End of stream with a partially collected translucent
                         // word.  Drain it before the normal fragment-pipe
@@ -3052,9 +3255,7 @@ always @(posedge clk) begin : main_fsm
                             if (fb_acc_mask[3]) read_word[31:24] = fb_acc_data[31:24];
                         end
                         blend_result_word <= read_word;
-                        blend_p3_match_r <=
-                            (fb_acc_valid && fb_acc_addr == blend_group_word_addr)
-                         || !fb_acc_valid;
+                        blend_p3_match_r <= fb_acc_word_match;
                         blend_lane_iter <= 2'd0;
                         fbss <= FBSS_BLEND_SELECT;
                     end
@@ -3086,12 +3287,9 @@ always @(posedge clk) begin : main_fsm
                 FBSS_BLEND_LUT_WAIT: begin
                     if (sram_rdata_valid) begin : fbss_blend_lut_capture
                         reg [7:0] lut_byte;
-                        case (transluc_rd_addr[1:0])
-                            2'd0: lut_byte = sram_rdata[7:0];
-                            2'd1: lut_byte = sram_rdata[15:8];
-                            2'd2: lut_byte = sram_rdata[23:16];
-                            default: lut_byte = sram_rdata[31:24];
-                        endcase
+                        reg [31:0] lut_shifted;
+                        lut_shifted = sram_rdata >> {transluc_rd_addr[1:0], 3'b0};
+                        lut_byte = lut_shifted[7:0];
                         blend_result_word <= (blend_result_word & ~fb_lane_data_mask(blend_lut_lane))
                                            | fb_lane_data(blend_lut_lane, lut_byte);
                         if (blend_lut_lane == 2'd3) begin
@@ -3284,8 +3482,18 @@ always @(posedge clk) begin : main_fsm
                 end
                 PSS_NR_MUL_Y_W: persp_pss <= PSS_NR_CAPTURE;
                 PSS_NR_CAPTURE: begin
-                    // Refined Q16.16 reciprocal.
-                    recip_q16_r <= dsp_p[47:16];
+                    // Refined Q16.16 reciprocal.  Constant-Z spans convert
+                    // projected endpoints into affine spans once, and Doom's
+                    // wall projection often lands exactly on an integer
+                    // texture column.  A floor reciprocal can under-project
+                    // those values by a few Q16 LSBs and sample the previous
+                    // column.  Bias constant-Z by one reciprocal LSB so exact
+                    // boundaries land on/above the intended texel while full
+                    // perspective spans keep the unbiased reciprocal.
+                    recip_q16_r <= dsp_p[47:16]
+                                 + ((sp_zinv_step == 32'sd0
+                                  && sp_zinv != 32'sh00010000) ? 32'sd1
+                                                               : 32'sd0);
                     persp_pss <= PSS_MUL;
                 end
 
@@ -3321,18 +3529,40 @@ always @(posedge clk) begin : main_fsm
                     // Register endpoints before deriving slopes.  The previous
                     // single-cycle path ran DSP output -> 32-bit subtract ->
                     // sp_sstep/sp_tstep and was the post-fit 100 MHz limiter.
-                    pss_s_end_r <= pss_zinv_clamp_r ? persp_anchor_s : dsp_p[47:16];
-                    pss_t_end_r <= pss_zinv_clamp_r ? persp_anchor_t : dsp2_p[47:16];
+                    pss_s_end_r <= pss_zinv_clamp_r ? persp_anchor_s
+                                                     : q16_round_product(dsp_p);
+                    pss_t_end_r <= pss_zinv_clamp_r ? persp_anchor_t
+                                                     : q16_round_product(dsp2_p);
                     persp_pss   <= PSS_SLOPE;
                 end
 
                 PSS_SLOPE: begin
+                    persp_pss <= PSS_IDLE;
                     case (persp_pass)
                         PSS_PASS_ANCHOR: begin
-                            // Pass 1: just store the anchor at pos 0.
-                            persp_anchor_s   <= pss_s_end_r;
-                            persp_anchor_t   <= pss_t_end_r;
-                            persp_first_done <= 1;
+                            if (sp_zinv_step == 32'sd0) begin
+                                // Constant-Z perspective spans (Doom walls):
+                                // one reciprocal is enough for the whole
+                                // generated span.  Convert to affine by
+                                // projecting the start point and multiplying
+                                // the projection-space minor steps by the same
+                                // reciprocal.  This avoids the 16-pixel PSS
+                                // segment loop entirely while preserving the
+                                // perspective-correct result for constant 1/Z.
+                                sp_s <= pss_s_end_r;
+                                sp_t <= pss_t_end_r;
+                                dsp_a  <= sp_sZstep;
+                                dsp_b  <= recip_q16_r;
+                                dsp2_a <= sp_tZstep;
+                                dsp2_b <= recip_q16_r;
+                                persp_first_done <= 1'b1;
+                                persp_pss <= PSS_CONSTZ_STEP_W;
+                            end else begin
+                                // Pass 1: just store the anchor at pos 0.
+                                persp_anchor_s   <= pss_s_end_r;
+                                persp_anchor_t   <= pss_t_end_r;
+                                persp_first_done <= 1;
+                            end
                         end
                         PSS_PASS_TO_A: begin
                             // Pass 2: derive slot A slopes from anchor to the
@@ -3366,7 +3596,22 @@ always @(posedge clk) begin : main_fsm
                         end
                         default: ;
                     endcase
-                    persp_pss <= PSS_IDLE;
+                end
+
+                PSS_CONSTZ_STEP_W: begin
+                    persp_pss <= PSS_CONSTZ_STEP_CAPTURE;
+                end
+
+                PSS_CONSTZ_STEP_CAPTURE: begin
+                    sp_sstep          <= q16_round_product(dsp_p);
+                    sp_tstep          <= q16_round_product(dsp2_p);
+                    sp_flags          <= sp_flags & ~(4'b0001 << SPAN_PERSP);
+                    sp_seg_left       <= 4'd0;
+                    persp_active      <= 1'b0;
+                    persp_seg_a_ready <= 1'b1;
+                    persp_seg_b_ready <= 1'b0;
+                    persp_swap_pending <= 1'b0;
+                    persp_pss         <= PSS_IDLE;
                 end
 
                 default: persp_pss <= PSS_IDLE;
@@ -3378,17 +3623,33 @@ always @(posedge clk) begin : main_fsm
             // row walker instead of flushing fb_acc (more rows may follow
             // and fb_acc will keep coalescing writes).
             // ----------------------------------------------------------
-            if (src_done && !p0_valid && !p1_valid && !p2_valid && !p2b_valid
-                         && !p3_valid && fbss == FBSS_IDLE
-                         && !blend_group_active) begin
+	            if (src_done && !p0a_valid && !p0_valid && !p1_valid && !p2_valid && !p2b_valid
+	                         && !p3_valid && fbss == FBSS_IDLE
+	                         && !blend_group_active
+	                         && !persp_active) begin
                 src_done <= 0;
                 persp_active      <= 0;  // disarm so PSS doesn't keep running
                 persp_seg_a_ready <= 0;
                 persp_seg_b_ready <= 0;
+                persp_swap_pending <= 1'b0;
                 persp_first_done  <= 0;
+`ifdef GPU_INCLUDE_TRIANGLES
                 if (tri_active)
                     state <= S_TRI_ROW_NEXT;
                 else
+`endif
+                if (affg_active) begin
+                    affg_active <= 1'b0;
+                    state <= S_FB_FLUSH;
+                end else if (psg_active) begin
+                    if (psg_lane == psg_last_lane) begin
+                        psg_active <= 1'b0;
+                        state <= S_FB_FLUSH;
+                    end else begin
+                        psg_advance_lane;
+                        state <= S_PSG_SETUP0;
+                    end
+                end else
                     state    <= S_FB_FLUSH;
             end
         end
@@ -3465,8 +3726,7 @@ always @(posedge clk) begin : main_fsm
                         state <= S_IDLE;
                     end else begin : cr_row_advance_queued
                         // Per-command stride if non-zero; otherwise the
-                        // SET_FB global (legacy behaviour for callers
-                        // that don't fill the stride field).
+                        // SET_FB global for callers that don't fill the stride field.
                         reg [15:0] cr_eff_stride;
                         cr_eff_stride = (cr_stride != 16'd0) ? cr_stride
                                                               : st_fb_stride;
@@ -3659,6 +3919,7 @@ always @(posedge clk) begin : main_fsm
                         // primes ring_rd_data for pay_idx=1) and jump
                         // back to vertex-load.
                         ring_rdptr <= ring_rdptr + 1'b1;
+                        ring_rd_addr <= ring_rdptr + 1'b1;
                         pay_idx    <= 5'd1;
                         state      <= S_PAY_DATA;
                     end else begin
@@ -4063,6 +4324,7 @@ always @(posedge clk) begin : main_fsm
                     // Mid-batch: advance ring_rdptr (primes v0_word_0
                     // for pay_idx=1) and jump back to vertex-load.
                     ring_rdptr <= ring_rdptr + 1'b1;
+                    ring_rd_addr <= ring_rdptr + 1'b1;
                     pay_idx    <= 5'd1;
                     state      <= S_PAY_DATA;
                 end else begin
@@ -4148,11 +4410,10 @@ always @(posedge clk) begin : main_fsm
                     // that want raw-texel triangles must upload an identity
                     // row at the cmap[r] they reference (typically r=0); a
                     // missing row reads 0 and renders the fragment black.
-                    // PERSP folds in when perspective is active. Depth flags
-                    // were retired with the Z buffer.
+                    // PERSP folds in when perspective is active.
                     sp_flags     <= 4'b0001
                                    | (tri_persp_active_span_r ? 4'b0100 : 4'b0000);
-                    sp_fb_stride <= 16'd1;
+                    sp_fb_stride <= 32'sd1;
                     sp_tex_width <= st_tex_width;
                     sp_tex_w_mask <= 16'hFFFF;
                     sp_tex_h_mask <= 16'hFFFF;
@@ -4180,6 +4441,7 @@ always @(posedge clk) begin : main_fsm
                         // throughput within each segment.
                         persp_seg_a_ready <= 0;
                         persp_seg_b_ready <= 0;
+                        persp_swap_pending <= 1'b0;
                         persp_first_done  <= 0;
                         // ANCHOR_ONLY entry: kick PSS_RECIP_NA pipeline.
                         // Must also reset persp_pass to PASS_ANCHOR — left
@@ -4198,6 +4460,7 @@ always @(posedge clk) begin : main_fsm
                         persp_active      <= 0;
                         persp_seg_a_ready <= 0;
                         persp_seg_b_ready <= 0;
+                        persp_swap_pending <= 1'b0;
                         persp_first_done  <= 0;
                         persp_pss         <= PSS_IDLE;
                         sp_seg_left       <= 0;
@@ -4258,6 +4521,7 @@ always @(posedge clk) begin : main_fsm
                     // touch the same FB word; word-change writes flush
                     // mid-stream as before.
                     ring_rdptr <= ring_rdptr + 1'b1;
+                    ring_rd_addr <= ring_rdptr + 1'b1;
                     pay_idx    <= 5'd1;
                     state      <= S_PAY_DATA;
                 end else begin
@@ -4286,29 +4550,6 @@ always @(posedge clk) begin : main_fsm
                 tri_span_count <= 16'd0;
                 state <= S_TRI_PIX;
             end
-        end
-
-`else
-        // Triangle hardware is compiled out for the span-only profile.
-        // The public capability bit is also clear, but keeping these state
-        // encodings as explicit traps makes any stale command stream retire
-        // instead of wandering through unreachable datapath logic.  More
-        // importantly, this prevents Quartus from preserving the large
-        // triangle rasterizer cones as "possible" state-machine logic.
-        S_TRI_LOAD,
-        S_TRI_PERSP_PREMUL,
-        S_TRI_SETUP,
-        S_TRI_GRAD,
-        S_TRI_BBOX,
-        S_TRI_BBOX_CLAMP,
-        S_TRI_MUL_WAIT,
-        S_TRI_MUL_WAIT2,
-        S_TRI_INIT_ATTRIB,
-        S_TRI_ROW,
-        S_TRI_PIX,
-        S_TRI_ROW_NEXT: begin
-            tri_active <= 1'b0;
-            state      <= S_IDLE;
         end
 `endif
 

@@ -21,6 +21,10 @@ typedef struct {
 /* Initialize Analogizer subsystem (reads current bridge state) */
 void of_analogizer_init(void);
 
+/* Refresh from bridge/interact registers.  This picks up Pocket menu
+ * changes made after boot, including SNAC enable/type/assignment changes. */
+void of_analogizer_refresh(void);
+
 /* Load and apply analogizer.cfg after filesystem_init().
  *
  * Text configs use key=value lines. Supported keys are enabled, video,

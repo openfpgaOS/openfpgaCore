@@ -24,9 +24,9 @@ typedef struct {
  * Call after reading analogizer settings from bridge. */
 void snac_init(uint8_t snac_type);
 
-/* Poll the SNAC controller(s). Call once per frame.
- * Reads the hardware shift register and parses protocol data
- * into p1/p2 controller states. */
+/* Poll the SNAC controller(s). The Pocket input HAL calls this from its
+ * vblank service and caches the parsed state, so apps should use
+ * of_input_poll()/of_input_state() instead of calling this directly. */
 void snac_poll(void);
 
 /* Get parsed controller state for player 0 or 1 */
@@ -42,14 +42,29 @@ int snac_is_active(void);
 /* Start a shift transfer and wait for completion.
  * Returns the RX data (shifted-in bits). */
 static inline uint32_t snac_xfer(uint32_t tx, int bits, int latch) {
+    uint32_t mode = SNAC_CTRL & 0x300;
+
+    for (volatile int i = 0; i < 200000; i++) {
+        if ((SNAC_CTRL & SNAC_CTRL_BUSY) == 0)
+            break;
+    }
+
     SNAC_DATA = tx;
     SNAC_CTRL = SNAC_CTRL_START
               | (((bits - 1) & 0x1F) << SNAC_CTRL_BITCNT_SHIFT)
               | (latch ? SNAC_CTRL_LATCH : 0)
               | SNAC_CTRL_ENABLE
-              | (SNAC_CTRL & 0x300);  /* preserve mode bits */
-    while (SNAC_CTRL & SNAC_CTRL_BUSY)
-        ;
+              | mode;
+
+    for (volatile int i = 0; i < 4096; i++) {
+        if (SNAC_CTRL & SNAC_CTRL_BUSY)
+            break;
+    }
+    for (volatile int i = 0; i < 200000; i++) {
+        if ((SNAC_CTRL & SNAC_CTRL_BUSY) == 0)
+            break;
+    }
+
     return SNAC_DATA;
 }
 

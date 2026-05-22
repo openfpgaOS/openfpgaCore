@@ -120,6 +120,7 @@ void irq_handler(void *frame) {
         uint32_t dispatch_source = source;
         if (source & IRQ_SRC_VSYNC) {
             of_video_vsync_irq_service();
+            of_input_vblank_service();
             if (vsync_cb)
                 vsync_cb();
             else

@@ -785,7 +785,7 @@ set_global_assignment -name VERILOG_FILE ../../common/video_CRT_scanout_indexed_
 set_global_assignment -name VERILOG_FILE ../../vendor/vexriscv/VexiiRiscv/VexiiRiscv.v
 set_global_assignment -name VERILOG_FILE mf_pllram_133.v
 set_global_assignment -name SDC_FILE core_constraints.sdc
-set_global_assignment -name SEED 2
+set_global_assignment -name SEED 1
 # Phase 5 fitter-tuning experiments were done while the design was above
 # 94% ALMs.  They are no longer representative after the span-only GPU
 # profile reduced the design to roughly 76% ALMs.

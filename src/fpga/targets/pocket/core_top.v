@@ -391,15 +391,16 @@ wire analogizer_snac_configured_core = (analogizer_settings_core[4:0] != 5'd0);
 wire analogizer_cart_preclaim = analogizer_ena_core || analogizer_snac_configured_core;
 wire cart_gpio_mode = snac_enable || analogizer_cart_preclaim;
 
-// bank0[7:4]: SNAC GPIO outputs, Analogizer-safe idle, or UART TX replicated.
+// bank0[7:4]: SNAC GPIO outputs, high-Z while the adapter is preclaimed, or
+// UART TX replicated when the cart port is in console mode.
 wire snac_bank0_drive = snac_enable &&
     (snac_pin_dir[5] | snac_pin_dir[4] | snac_pin_dir[3] | snac_pin_dir[2]);
 assign cart_tran_bank0     = snac_enable ?
     (snac_bank0_drive ? {snac_pin_out[5], snac_pin_out[4], snac_pin_out[3], snac_pin_out[2]} : 4'bZ) :
-    (analogizer_cart_preclaim ? 4'hF :
+    (analogizer_cart_preclaim ? 4'bZ :
      {uart_tx_serial, uart_tx_serial, uart_tx_serial, uart_tx_serial});
 assign cart_tran_bank0_dir = snac_enable ? snac_bank0_drive :
-    1'b1;  // UART TX and Analogizer-safe idle are both driven outputs.
+    (analogizer_cart_preclaim ? 1'b0 : 1'b1);
 
 // pin31: SNAC GPIO or UART RX (high-Z input)
 assign cart_tran_pin31     = snac_enable ?

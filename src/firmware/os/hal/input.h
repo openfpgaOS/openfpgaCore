@@ -28,6 +28,11 @@ void of_input_poll(void);
  * implementations may use this to feed a future event queue. */
 void of_input_irq_service(void);
 
+/* Service input sources that are intentionally sampled from display IRQ
+ * context.  On Pocket this polls SNAC into a cached state so app-side
+ * of_input_poll() does not synchronously clock controller adapters. */
+void of_input_vblank_service(void);
+
 /* Get current state for a player (0 or 1) */
 const of_input_state_t *of_input_get_state(int player);
 

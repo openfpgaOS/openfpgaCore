@@ -37,7 +37,7 @@ module snac_shifter (
 
     // Pin interface — directly drives/samples SNAC GPIO pins
     // Active only when busy; otherwise GPIO register drives pins.
-    output reg         shift_clk,   // goes to pin_out[0] (CfgA) or pin_out[2] (CfgB)
+    output reg         shift_clk,   // goes to pin_out[0] (CfgA) or pin_out[6] (CfgB)
     output reg         shift_mosi,  // goes to pin_out[7] (CfgB CMD); unused in CfgA
     output reg         shift_latch, // goes to pin_out[1] (CfgA LATCH)
     input  wire        miso_a,      // from pin_in[2]  (CfgA: IO3/bank0[4])
@@ -51,6 +51,7 @@ localparam S_LATCH_LOW  = 3'd2;
 localparam S_CLK_LOW    = 3'd3;
 localparam S_CLK_HIGH   = 3'd4;
 localparam S_DONE       = 3'd5;
+localparam S_SETUP      = 3'd6;
 
 reg [2:0]  state;
 reg [15:0] div_cnt;     // clock divider counter
@@ -98,10 +99,12 @@ always @(posedge clk or negedge reset_n) begin
                     div_cnt     <= clk_div;
                     state       <= S_LATCH_HIGH;
                 end else begin
-                    // Go straight to shifting
-                    shift_clk <= 0;
+                    // Config B / PSX idles CLK high.  Hold CMD stable for a
+                    // half-period before the first falling edge so the first
+                    // command bit has real setup time.
+                    shift_clk <= mode[0];
                     div_cnt   <= clk_div;
-                    state     <= S_CLK_LOW;
+                    state     <= mode[0] ? S_SETUP : S_CLK_LOW;
                 end
             end
         end
@@ -119,6 +122,18 @@ always @(posedge clk or negedge reset_n) begin
 
         S_LATCH_LOW: begin
             // Wait for half-period with latch low, then start clocking
+            if (div_cnt == 0) begin
+                div_cnt <= clk_div;
+                state   <= clk_idle ? S_SETUP : S_CLK_LOW;
+            end else begin
+                div_cnt <= div_cnt - 16'd1;
+            end
+        end
+
+        S_SETUP: begin
+            // PSX mode: CLK is idle high, CMD is already driven.  Wait one
+            // half-period before the first falling edge.
+            shift_clk <= 1;
             if (div_cnt == 0) begin
                 div_cnt <= clk_div;
                 state   <= S_CLK_LOW;

@@ -47,6 +47,10 @@ static const uint32_t RING_SIZE      = 0x00004000;   // 16KB
 static uint32_t ring_wrptr = 0;
 static uint32_t ring_mask  = RING_SIZE - 1;
 static std::vector<uint32_t> pending_ring_words;
+static bool     span_payload_active = false;
+static uint32_t span_payload_words_left = 0;
+static uint32_t span_payload_words_total = 0;
+static uint32_t span_payload[15];
 
 // ================================================================
 // Helpers
@@ -113,17 +117,97 @@ static uint32_t mmio_read(uint32_t reg) {
     return tb->reg_rdata;
 }
 
-// Write a word to the software command stream.  Production hardware no
-// longer accepts per-word GPU_RING_DATA writes; commands are uploaded to
-// the GPU ring by doorbell DMA from SDRAM.
-static void ring_write(uint32_t w) {
+static void ring_write_raw(uint32_t w) {
     pending_ring_words.push_back(w);
     ring_wrptr = (ring_wrptr + 4) & ring_mask;
 }
 
+static void emit_test_span_payload(void) {
+    uint32_t *p = span_payload;
+    uint32_t meta = p[6];
+    uint32_t flags = meta & 0xFFu;
+    uint32_t cmap = (meta >> 28) & 0x0Fu;
+    uint32_t count = (meta >> 16) & 0x0FFFu;
+    uint32_t light = (meta >> 8) & 0x3Fu;
+    int16_t fb_stride = (int16_t)(p[7] >> 16);
+    uint32_t tex_width = p[7] & 0xFFFFu;
+    uint32_t masks = p[8];
+
+    if (flags & (1u << 5)) {
+        ring_write_raw((0x46u << 24) | 23u);
+        ring_write_raw(p[0]);                         // fb_addr
+        ring_write_raw(p[1]);                         // tex_addr
+        ring_write_raw((1u << 28) | ((flags & 0xFFu) << 20) | cmap);
+        ring_write_raw(0);                            // major_fb_step
+        ring_write_raw((uint32_t)(int32_t)fb_stride); // minor_fb_step
+        ring_write_raw(tex_width);
+        ring_write_raw(masks);
+        ring_write_raw(0);                            // start[0..1]
+        ring_write_raw(0);                            // start[2..3]
+        ring_write_raw(count);                        // count[0], count[1]=0
+        ring_write_raw(0);                            // count[2..3]
+        ring_write_raw(p[9]);
+        ring_write_raw(p[10]);
+        ring_write_raw(p[11]);
+        ring_write_raw(0);
+        ring_write_raw(0);
+        ring_write_raw(0);
+        ring_write_raw(p[12]);
+        ring_write_raw(p[13]);
+        ring_write_raw(p[14]);
+        ring_write_raw(light << 16);
+        ring_write_raw(0);
+        ring_write_raw(0);
+    } else {
+        ring_write_raw((0x47u << 24) | 11u);
+        ring_write_raw((1u << 28) | (((flags & ~(1u << 5)) & 0xFFu) << 20) | cmap);
+        ring_write_raw(tex_width);
+        ring_write_raw(masks);
+        ring_write_raw((uint32_t)(int32_t)fb_stride);
+        ring_write_raw(p[0]);                         // lane 0 fb_addr
+        ring_write_raw(p[1]);                         // lane 0 tex_addr
+        ring_write_raw((light << 16) | count);        // lane 0 light/count
+        ring_write_raw(p[2]);                         // lane 0 s
+        ring_write_raw(p[3]);                         // lane 0 t
+        ring_write_raw(p[4]);                         // lane 0 sstep
+        ring_write_raw(p[5]);                         // lane 0 tstep
+    }
+}
+
+static void begin_test_span_payload(uint32_t payload_words) {
+    if (payload_words != 15u) {
+        printf("  FAIL unsupported test span payload size %u\n", payload_words);
+        fail_count++;
+        return;
+    }
+    span_payload_active = true;
+    span_payload_words_left = payload_words;
+    span_payload_words_total = payload_words;
+}
+
+// Write a word to the software command stream.  Production hardware no
+// longer accepts per-word GPU_RING_DATA writes; commands are uploaded to
+// the GPU ring by doorbell DMA from SDRAM.
+static void ring_write(uint32_t w) {
+    if (span_payload_active) {
+        uint32_t idx = span_payload_words_total - span_payload_words_left;
+        if (idx < 15)
+            span_payload[idx] = w;
+        span_payload_words_left--;
+        if (span_payload_words_left == 0) {
+            for (uint32_t i = span_payload_words_total; i < 15; i++)
+                span_payload[i] = 0;
+            span_payload_active = false;
+            emit_test_span_payload();
+        }
+        return;
+    }
+    ring_write_raw(w);
+}
+
 // Write command header
 static void ring_cmd(uint8_t cmd, uint32_t payload_words) {
-    ring_write(((uint32_t)cmd << 24) | payload_words);
+    ring_write_raw(((uint32_t)cmd << 24) | payload_words);
 }
 
 static void ring_clear_fb(uint8_t color) {
@@ -193,10 +277,8 @@ static const uint32_t PALOOKUP_BASE_BYTE  = 0x03400000;
 static const uint32_t PALOOKUP_SLOT_STRIDE = 0x00004000;  // 16 KB per slot
 
 // Upload `count` bytes into a palookup slot at byte offset `start` within
-// the slot.  Replaces the prior MMIO-upload path that wrote the on-chip
-// cmap_bram; the GPU now reads palookups from SDRAM via tex_cache port B,
-// so tests preload directly through the SDRAM backdoor.  Default slot 0
-// preserves the old test API for callers that didn't care about slots.
+// the slot.  The GPU reads palookups from SDRAM via tex_cache port B, so
+// tests preload directly through the SDRAM backdoor.
 static void palookup_upload_to_slot(uint8_t slot, uint32_t start,
                                     const uint8_t *bytes, int count) {
     uint32_t base_byte = PALOOKUP_BASE_BYTE
@@ -262,6 +344,9 @@ static bool gpu_finish(int timeout = 200000) {
 static void gpu_init() {
     ring_wrptr = 0;
     pending_ring_words.clear();
+    span_payload_active = false;
+    span_payload_words_left = 0;
+    span_payload_words_total = 0;
     // Hard reset to clear all internal state
     tb->reset_n = 0;
     for (int i = 0; i < 10; i++) tick();
@@ -512,7 +597,7 @@ static void test_clear_rect_per_command_stride(void) {
     }
 
     // Now verify the GLOBAL stride wasn't disturbed: issue a second
-    // CLEAR_RECT with stride==0 (legacy mode, falls back to st_fb_stride).
+    // CLEAR_RECT with stride==0 (fallback mode, resolves to st_fb_stride).
     // This rect should walk 320 bytes/row.  Place it well clear of the
     // tile region above so we can spot-check unambiguously.
     const uint32_t POST_BASE  = FB_BASE_BYTE + 100 * 320;  // row 100
@@ -524,21 +609,21 @@ static void test_clear_rect_per_command_stride(void) {
     check("rect_stride_post_done", gpu_finish() ? 1 : 0, 1);
     // Each of the 4 rows should have its 40 bytes set, with rows
     // spaced 320 apart.
-    int legacy_fail = 0;
+    int fallback_fail = 0;
     for (int r = 0; r < 4; r++) {
         for (int x = 0; x < 40; x++) {
             uint8_t got = sdram_read_byte(POST_BASE + r * 320 + x);
-            if (got != POST_COLOR) legacy_fail++;
+            if (got != POST_COLOR) fallback_fail++;
         }
         // Just past the rect: should still be sentinel.
-        if (sdram_read_byte(POST_BASE + r * 320 + 40) != 0xAA) legacy_fail++;
+        if (sdram_read_byte(POST_BASE + r * 320 + 40) != 0xAA) fallback_fail++;
     }
-    if (legacy_fail == 0) {
+    if (fallback_fail == 0) {
         pass_count++;
-        printf("  OK  legacy stride==0 still falls back to SET_FB stride\n");
+        printf("  OK  stride==0 still falls back to SET_FB stride\n");
     } else {
         fail_count++;
-        printf("  FAIL legacy fallback broken: %d mismatches\n", legacy_fail);
+        printf("  FAIL stride fallback broken: %d mismatches\n", fallback_fail);
     }
 }
 
@@ -880,7 +965,7 @@ static void test_cmd_flip_back_to_back_stress(void) {
 // Test: CMD_FENCE drain — no swap pulse, fence published only after drain.
 // Verifies cr-gpu-fence-write-completion.md is honored: a CMD_FENCE
 // emitted after a CLEAR doesn't update fence_reached until the CLEAR's
-// m_wr_* writes have all retired.  We can't directly observe
+// m_wr_* writes have all drained.  We can't directly observe
 // m_wr_inflight, but we can assert (a) gpu_swap_req never pulses
 // (CMD_FENCE doesn't trigger the swap path), and (b) fence_reached
 // reaches the token within a sensible drain window.
@@ -932,7 +1017,7 @@ static void test_solid_span() {
     sdram_write(TEX_BASE_BYTE >> 2, 0xABABABAB);
 
     // Draw a horizontal span of 8 pixels at FB row 0
-    ring_cmd(0x43, 15);  // scalar span payload
+    begin_test_span_payload(15);  // single-lane span payload
     ring_write(FB_BASE_BYTE);       // fb_addr
     ring_write(TEX_BASE_BYTE);      // tex_addr
     ring_write(0);                  // s = 0
@@ -984,7 +1069,7 @@ static void test_textured_span() {
     sdram_write(TEX_BASE_BYTE >> 2, 0x40302010);
 
     // Draw 4 pixels, stepping through texture (s=0, sstep=1.0 = 0x10000)
-    ring_cmd(0x43, 15);
+    begin_test_span_payload(15);
     ring_write(FB_BASE_BYTE);       // fb_addr
     ring_write(TEX_BASE_BYTE);      // tex_addr
     ring_write(0);                  // s = 0
@@ -1032,7 +1117,7 @@ static void test_colormap_lighting() {
     sdram_write(TEX_BASE_BYTE >> 2, 0xAAAAAAAA);
 
     // Draw 4 pixels with light=1 (should all be 0x77)
-    ring_cmd(0x43, 15);
+    begin_test_span_payload(15);
     ring_write(FB_BASE_BYTE);
     ring_write(TEX_BASE_BYTE);
     ring_write(0); ring_write(0);    // s, t
@@ -1085,7 +1170,7 @@ static void test_colormap_stuck_address_repro() {
 
     /* Single span, 64 pixels, light=0, SPAN_COLORMAP, sstep=1 (Q16.16).
      * Result expected: FB[i] = 0xFF - i. */
-    ring_cmd(0x43, 15);
+    begin_test_span_payload(15);
     ring_write(FB_BASE_BYTE);
     ring_write(TEX_BASE_BYTE);
     ring_write(0);              /* s = 0 */
@@ -1153,9 +1238,9 @@ static void test_span_per_colormap() {
     // Texture: byte[0] = 0xAB so identity slot 0 yields 0xAB.
     sdram_write(TEX_BASE_BYTE >> 2, 0xABABABAB);
 
-    // Three DRAW_SPAN commands in one command stream.
+    // Three native span commands in one command stream.
     for (int slot = 0; slot < 3; slot++) {
-        ring_cmd(0x43, 15);
+        begin_test_span_payload(15);
         // Each span writes 4 pixels at FB[slot*4 .. slot*4+3].
         ring_write(FB_BASE_BYTE + slot * 4);
         ring_write(TEX_BASE_BYTE);
@@ -1199,7 +1284,7 @@ static void test_span_default_colormap() {
     sdram_write(TEX_BASE_BYTE >> 2, 0x55555555);
 
     // Span A: colormap_id field = 0 → explicit slot 0.
-    ring_cmd(0x43, 15);
+    begin_test_span_payload(15);
     ring_write(FB_BASE_BYTE);
     ring_write(TEX_BASE_BYTE);
     ring_write(0); ring_write(0); ring_write(0); ring_write(0);
@@ -1210,7 +1295,7 @@ static void test_span_default_colormap() {
     ring_write(0); ring_write(0); ring_write(0);
 
     // Span B: colormap_id field = 2 → overrides default → 0x22.
-    ring_cmd(0x43, 15);
+    begin_test_span_payload(15);
     ring_write(FB_BASE_BYTE + 4);
     ring_write(TEX_BASE_BYTE);
     ring_write(0); ring_write(0); ring_write(0); ring_write(0);
@@ -1248,7 +1333,7 @@ static void test_vertical_column() {
 
     // Draw column of 4 pixels starting at column 5, row 0
     uint32_t col_fb_addr = FB_BASE_BYTE + 5;
-    ring_cmd(0x43, 15);
+    begin_test_span_payload(15);
     ring_write(col_fb_addr);
     ring_write(TEX_BASE_BYTE);
     ring_write(0); ring_write(0);
@@ -1279,7 +1364,7 @@ static void test_vertical_column() {
 // Test 7: Skip-zero transparency
 /* Single span through the same command-stream path used by batched callers. */
 static void test_spans_batch_one() {
-    printf("TEST: Batched DRAW_SPAN stream — single span (N=1)\n");
+    printf("TEST: Batched native span stream — single span (N=1)\n");
 
     gpu_init();
 
@@ -1293,7 +1378,7 @@ static void test_spans_batch_one() {
 
     sdram_write(TEX_BASE_BYTE >> 2, 0xCDCDCDCD);
 
-    ring_cmd(0x43, 15);
+    begin_test_span_payload(15);
 
     /* Single span: 4 pixels at FB row 0, texel 0xCD. */
     ring_write(FB_BASE_BYTE);
@@ -1319,7 +1404,7 @@ static void test_spans_batch_one() {
 
 /* Two spans rendered on consecutive rows in one command stream. */
 static void test_spans_batch_two() {
-    printf("TEST: Batched DRAW_SPAN stream — two spans, command upload\n");
+    printf("TEST: Batched native span stream — two spans, command upload\n");
 
     gpu_init();
 
@@ -1339,7 +1424,7 @@ static void test_spans_batch_two() {
     sdram_write((TEX_BASE_BYTE + 4) >> 2, 0x77777777);
 
     /* Span 0 — 4 pixels at FB row 0, texel 0xCD. */
-    ring_cmd(0x43, 15);
+    begin_test_span_payload(15);
     ring_write(FB_BASE_BYTE);                      /* 0  fb_addr */
     ring_write(TEX_BASE_BYTE);                     /* 1  tex_addr */
     ring_write(0); ring_write(0);                   /* 2,3 s, t */
@@ -1351,7 +1436,7 @@ static void test_spans_batch_two() {
     ring_write(0); ring_write(0); ring_write(0);    /* 12,13,14 persp steps */
 
     /* Span 1 — 4 pixels at FB row 1, texel 0x77. */
-    ring_cmd(0x43, 15);
+    begin_test_span_payload(15);
     ring_write(FB_BASE_BYTE + 320);                 /* 0  fb_addr (next row) */
     ring_write(TEX_BASE_BYTE + 4);                  /* 1  tex_addr */
     ring_write(0); ring_write(0);
@@ -1386,7 +1471,7 @@ static void test_spans_batch_two() {
 /* DMA-pull stream of 128 spans.  Each span renders 1 pixel into a unique
  * FB slot so we can verify all 128 reached the FB. */
 static void test_spans_batch_dma_128() {
-    printf("TEST: Batched DRAW_SPAN stream — DMA pull 128 spans\n");
+    printf("TEST: Batched native span stream — DMA pull 128 spans\n");
 
     gpu_init();
 
@@ -1426,7 +1511,7 @@ static void test_spans_batch_dma_128() {
         p[12] = 0; p[13] = 0; p[14] = 0;  /* persp steps */
     }
     for (int i = 0; i < N; i++) {
-        ring_cmd(0x43, 15);
+        begin_test_span_payload(15);
         for (int w = 0; w < 15; w++)
             ring_write(batch[i * 15 + w]);
     }
@@ -1515,7 +1600,7 @@ static void test_spans_batch_dma_multi() {
         if (rt == 0) { printf("  FAIL batch %d ring_ensure timeout\n", k); fail_count++; return; }
 
         for (int i = 0; i < N; i++) {
-            ring_cmd(0x43, 15);
+            begin_test_span_payload(15);
             for (int w = 0; w < 15; w++)
                 ring_write(batch[i * 15 + w]);
         }
@@ -1636,7 +1721,7 @@ static void test_spans_batch_dma_sustained() {
             }
 
             for (int i = 0; i < n; i++) {
-                ring_cmd(0x43, 15);
+                begin_test_span_payload(15);
                 for (int w = 0; w < 15; w++)
                     ring_write(batch[i * 15 + w]);
             }
@@ -1677,7 +1762,7 @@ done:
 /* Doorbell command upload — same two-span stream as test_spans_batch_two,
  * but routed through the production SDRAM command-stream DMA path. */
 static void test_spans_batch_dma() {
-    printf("TEST: Batched DRAW_SPAN stream — DMA pull from SDRAM\n");
+    printf("TEST: Batched native span stream — DMA pull from SDRAM\n");
 
     gpu_init();
 
@@ -1714,10 +1799,10 @@ static void test_spans_batch_dma() {
     batch[23] = 0;
     batch[24] = 0; batch[25] = 0; batch[26] = 0;
     batch[27] = 0; batch[28] = 0; batch[29] = 0;
-    ring_cmd(0x43, 15);
+    begin_test_span_payload(15);
     for (int i = 0; i < 15; i++)
         ring_write(batch[i]);
-    ring_cmd(0x43, 15);
+    begin_test_span_payload(15);
     for (int i = 15; i < 30; i++)
         ring_write(batch[i]);
 
@@ -1792,7 +1877,7 @@ static void test_skip_zero() {
     sdram_write(TEX_BASE_BYTE >> 2, 0xFF22FF11);
 
     // Draw 4 pixels with SKIP_ZERO flag
-    ring_cmd(0x43, 15);
+    begin_test_span_payload(15);
     ring_write(FB_BASE_BYTE);
     ring_write(TEX_BASE_BYTE);
     ring_write(0); ring_write(0);
@@ -1841,7 +1926,7 @@ static void test_multiple_commands() {
     sdram_write((TEX_BASE_BYTE >> 2) + 4, 0xBBBBBBBB);
 
     // Span 1: 4 pixels at offset 0, texture A
-    ring_cmd(0x43, 15);
+    begin_test_span_payload(15);
     ring_write(FB_BASE_BYTE + 0);
     ring_write(TEX_BASE_BYTE);
     ring_write(0); ring_write(0);
@@ -1854,7 +1939,7 @@ static void test_multiple_commands() {
     ring_write(0); ring_write(0); ring_write(0);
 
     // Span 2: 4 pixels at offset 10, texture B
-    ring_cmd(0x43, 15);
+    begin_test_span_payload(15);
     ring_write(FB_BASE_BYTE + 10);
     ring_write(TEX_BASE_BYTE + 16);
     ring_write(0); ring_write(0);
@@ -1876,7 +1961,7 @@ static void test_multiple_commands() {
     check_byte("multi_spanB_3", 13, 0xBB);
 }
 
-/* Stress: many back-to-back scalar span payloads in one ring fill,
+/* Stress: many back-to-back single-lane span payloads in one ring fill,
  * mirroring BUILD's per-column dispatch in Duke3D.  Validates the
  * standalone span path holds up across hundreds of spans in a row,
  * including the ring-wrap path (each span is 16 words; 100 spans =
@@ -1886,7 +1971,7 @@ static void test_multiple_commands() {
  * (the kind of bug that the 2-span test_multiple_commands misses but
  * that BUILD's hundreds-per-frame dispatch will hit immediately). */
 static void test_spans_back_to_back_stress() {
-    printf("TEST: Back-to-back scalar span stress (100 spans)\n");
+    printf("TEST: Back-to-back single-lane span stress (100 spans)\n");
 
     gpu_init();
 
@@ -1913,7 +1998,7 @@ static void test_spans_back_to_back_stress() {
      * unique texel so we can detect mis-routing per span. */
     const int N_SPANS = 100;
     for (int i = 0; i < N_SPANS; i++) {
-        ring_cmd(0x43, 15);
+        begin_test_span_payload(15);
         ring_write(FB_BASE_BYTE + i);                 /* fb_addr — 1 byte per span */
         ring_write(TEX_BASE_BYTE + i);                /* tex_addr — texel i */
         ring_write(0); ring_write(0);                  /* s,t */
@@ -1949,7 +2034,7 @@ static void test_spans_back_to_back_stress() {
 }
 
 /* Stress: many adjacent spans with alternating explicit colormap_id values.
- * Validates that scalar span dispatch keeps each command's colormap slot
+ * Validates that single-lane span dispatch keeps each command's colormap slot
  * independent without any global colormap state. */
 static void test_spans_with_cmap_changes() {
     printf("TEST: Spans with alternating explicit CMAP_ID (50 cycles)\n");
@@ -1979,7 +2064,7 @@ static void test_spans_with_cmap_changes() {
      * reads the same texel (0xAA) but resolves to either 0xAA
      * (cmap 0 identity) or 0x55 (cmap 1 ~). */
     for (int i = 0; i < 50; i++) {
-        ring_cmd(0x43, 15);               /* scalar span, 1 pixel */
+        begin_test_span_payload(15);               /* single-lane span, 1 pixel */
         ring_write(FB_BASE_BYTE + i);
         ring_write(TEX_BASE_BYTE);
         ring_write(0); ring_write(0);
@@ -2042,7 +2127,7 @@ static void test_tex_cache_miss() {
     }
 
     // Draw 32 pixels stepping through texture
-    ring_cmd(0x43, 15);
+    begin_test_span_payload(15);
     ring_write(FB_BASE_BYTE);
     ring_write(TEX_BASE_BYTE);
     ring_write(0); ring_write(0);
@@ -2068,9 +2153,9 @@ static void test_tex_cache_miss() {
 // Perspective Span Tests
 // =====================================================================
 //
-// Perspective spans use the same DRAW_SPAN command, with the SPAN_PERSP
-// flag bit set and pay_buf[12..17] populated with projection-space
-// (s/z, t/z, 1/z) initial values + per-pixel deltas.
+// Perspective spans use the native perspective group command, with the
+// SPAN_PERSP flag bit set and projection-space (s/z, t/z, 1/z) initial
+// values plus per-pixel deltas in the payload.
 //
 // The GPU computes:
 //     z          = 1 / (1/z)
@@ -2081,8 +2166,8 @@ static void test_tex_cache_miss() {
 //
 // SPAN_PERSP = bit 5 → flag value 0x20.
 
-// Helper to submit one persp span (writes 18-word DRAW_SPAN payload).
-static void persp_draw_span(uint32_t fb_addr,
+// Helper to submit one native perspective span-group payload.
+static void persp_span_ref(uint32_t fb_addr,
                              uint32_t tex_addr,
                              uint16_t count,
                              uint8_t  light,
@@ -2091,7 +2176,7 @@ static void persp_draw_span(uint32_t fb_addr,
                              int32_t  zi_persp,
                              int32_t  sdivz_step, int32_t tdivz_step,
                              int32_t  zi_step) {
-    ring_cmd(0x43, 15);
+    begin_test_span_payload(15);
     ring_write(fb_addr);
     ring_write(tex_addr);
     ring_write(0);                 // s (unused in persp)
@@ -2133,7 +2218,7 @@ static void test_persp_constant_z() {
 
     // 16 pixels, persp constant z=1 (zinv=1.0=0x10000, zi_step=0)
     // sdivz starts at 0, sdivz_step = 1.0 → s_anchor at pos N = N*1.0
-    persp_draw_span(FB_BASE_BYTE, TEX_BASE_BYTE,
+    persp_span_ref(FB_BASE_BYTE, TEX_BASE_BYTE,
                     /*count*/16, /*light*/0, /*tex_width*/16,
                     /*sdivz*/0,         /*tdivz*/0,
                     /*zi_persp*/0x10000,
@@ -2168,7 +2253,7 @@ static void test_persp_two_segments() {
         sdram_write((TEX_BASE_BYTE >> 2) + w, v);
     }
 
-    persp_draw_span(FB_BASE_BYTE, TEX_BASE_BYTE,
+    persp_span_ref(FB_BASE_BYTE, TEX_BASE_BYTE,
                     /*count*/32, /*light*/0, /*tex_width*/32,
                     /*sdivz*/0,         /*tdivz*/0,
                     /*zi_persp*/0x10000,
@@ -2214,7 +2299,7 @@ static void test_persp_varying_z() {
     }
 
     // Persp params: 16 pixels, zinv from 1.0 → 2.0, sdivz from 0 → 1.0
-    persp_draw_span(FB_BASE_BYTE, TEX_BASE_BYTE,
+    persp_span_ref(FB_BASE_BYTE, TEX_BASE_BYTE,
                     /*count*/16, /*light*/0, /*tex_width*/16,
                     /*sdivz*/0,           /*tdivz*/0,
                     /*zi_persp*/0x10000,
@@ -2267,7 +2352,7 @@ static void test_persp_curvature_accuracy() {
 
     // zinv: 1.0 → 0.5 over 16 pixels. zinv_step = -0.5/16 = -0x800 in 16.16.
     // sZ:   0   → 1.0. sZstep = 1.0/16 = 0x1000 in 16.16.
-    persp_draw_span(FB_BASE_BYTE, TEX_BASE_BYTE,
+    persp_span_ref(FB_BASE_BYTE, TEX_BASE_BYTE,
                     /*count*/16, /*light*/0, /*tex_width*/16,
                     /*sdivz*/0,         /*tdivz*/0,
                     /*zi_persp*/0x10000,
@@ -2322,7 +2407,7 @@ static void test_persp_small_zinv() {
     // sZ = 0, sZ_step: pick so s_16 = small value. s = sZ × z = sZstep × 16 × 16384.
     // For s_16 = 16: sZstep × 16 × 16384 = 16 → sZstep = 1/16384 = 0x4 in 16.16.
     // Linear slope per pixel = 16/16 = 1.0 → texel(x) = x.
-    persp_draw_span(FB_BASE_BYTE, TEX_BASE_BYTE,
+    persp_span_ref(FB_BASE_BYTE, TEX_BASE_BYTE,
                     /*count*/16, /*light*/0, /*tex_width*/64,
                     /*sdivz*/0,         /*tdivz*/0,
                     /*zi_persp*/4,
@@ -2372,7 +2457,7 @@ static void test_persp_slope_rounding() {
     // so the >>> 4 floor discards 15/65536 per segment.
     //   s_16 = 16 × 0x000F / 0x10000 = 0x00F0/65536 ≈ 0.00366
     //   texel at pixel 16 should be 0 (s < 1) after both anchor and linear math.
-    persp_draw_span(FB_BASE_BYTE, TEX_BASE_BYTE,
+    persp_span_ref(FB_BASE_BYTE, TEX_BASE_BYTE,
                     /*count*/32, /*light*/0, /*tex_width*/32,
                     /*sdivz*/0,         /*tdivz*/0,
                     /*zi_persp*/0x10000,
@@ -2413,7 +2498,7 @@ static void test_persp_negative_zinv() {
     }
 
     // Start zinv = 0.5 (z=2), step very negative so zinv crosses zero by pixel 8.
-    persp_draw_span(FB_BASE_BYTE, TEX_BASE_BYTE,
+    persp_span_ref(FB_BASE_BYTE, TEX_BASE_BYTE,
                     /*count*/16, /*light*/0, /*tex_width*/16,
                     /*sdivz*/0,         /*tdivz*/0,
                     /*zi_persp*/0x08000,
@@ -2463,7 +2548,7 @@ static void test_persp_span_cmap_lit() {
     // Constant 1/z = 1.0 → affine-equivalent perspective.  sZstep=1.0
     // per pixel → s_int = pixel index.  Texture[i] = i.  Light=5.
     // Expected output: cmap[5][i] = 0xC0 ^ i.
-    persp_draw_span(FB_BASE_BYTE, TEX_BASE_BYTE,
+    persp_span_ref(FB_BASE_BYTE, TEX_BASE_BYTE,
                     /*count*/16, /*light*/5, /*tex_width*/16,
                     /*sdivz*/0,           /*tdivz*/0,
                     /*zi_persp*/0x10000,
@@ -2521,7 +2606,7 @@ static void test_persp_span_subsegment_end(void) {
 
     // First span: 9 pixels at FB[0..8], constant 1/z, sZstep=1.0.
     // Ends mid-segment-2 (only 1 pixel into segment 2).
-    persp_draw_span(FB_BASE_BYTE, TEX_BASE_BYTE,
+    persp_span_ref(FB_BASE_BYTE, TEX_BASE_BYTE,
                     /*count*/9, /*light*/0, /*tex_width*/16,
                     /*sdivz*/0,           /*tdivz*/0,
                     /*zi_persp*/0x10000,
@@ -2531,7 +2616,7 @@ static void test_persp_span_subsegment_end(void) {
     // Second span: 16 pixels at FB[16..31], same params — must produce
     // the same texel sequence 0..15.  If sp_seg_left or persp_pass
     // leaked, this span renders wrong values.
-    persp_draw_span(FB_BASE_BYTE + 16, TEX_BASE_BYTE,
+    persp_span_ref(FB_BASE_BYTE + 16, TEX_BASE_BYTE,
                     /*count*/16, /*light*/0, /*tex_width*/16,
                     /*sdivz*/0,           /*tdivz*/0,
                     /*zi_persp*/0x10000,
@@ -2606,7 +2691,7 @@ static void test_persp_long_corridor_monotonic(void) {
     // expect texels to be NON-DECREASING (camera walking forward into
     // the distance, every pixel's texel ≥ the previous's).  Any
     // backward jump in the rendered sequence is a precision bug.
-    persp_draw_span(FB_BASE_BYTE, TEX_BASE_BYTE,
+    persp_span_ref(FB_BASE_BYTE, TEX_BASE_BYTE,
                     /*count*/256, /*light*/0, /*tex_width*/256,
                     /*sdivz*/0,           /*tdivz*/0,
                     /*zi_persp*/0x10000,
@@ -2686,7 +2771,7 @@ static void test_persp_span_clz_boundary(void) {
     //   zinv at px 31 = 0x4040 - 31*8 = 0x3F08 (CLZ = 18)
     // This straddles the 0x4000 boundary, exercising both shift paths
     // in PSS_RECIP_SHIFT.
-    persp_draw_span(FB_BASE_BYTE, TEX_BASE_BYTE,
+    persp_span_ref(FB_BASE_BYTE, TEX_BASE_BYTE,
                     /*count*/32, /*light*/0, /*tex_width*/256,
                     /*sdivz*/0,           /*tdivz*/0,
                     /*zi_persp*/0x4040,
@@ -2883,7 +2968,7 @@ static GpudemoPerspStats gpudemo_persp_replay_frame(int frame) {
                     oZ1 + n * zi_step);
             }
 
-            persp_draw_span(FB_BASE_BYTE + y * 320 + xl, TEX_BASE_BYTE,
+            persp_span_ref(FB_BASE_BYTE + y * 320 + xl, TEX_BASE_BYTE,
                             (uint16_t)count, 0, 64,
                             sZ1, tZ1, oZ1,
                             sd_step, td_step, zi_step);
@@ -3056,7 +3141,7 @@ static void test_transluc_lut_basic(void) {
 
     // Submit a span: 8 pixels, fb_addr=0, flags = COLORMAP|TRANSLUC.
     // SPAN_COLORMAP=bit0=0x01, SPAN_TRANSLUC=bit6=0x40 → flags = 0x41.
-    ring_cmd(0x43, 15);
+    begin_test_span_payload(15);
     ring_write(FB_BASE_BYTE);       // fb_addr
     ring_write(TEX_BASE_BYTE);      // tex_addr
     ring_write(0); ring_write(0);   // s, t
@@ -3101,7 +3186,7 @@ static void transluc_emit_span(uint32_t fb_addr, uint8_t src_byte,
     ring_write(((uint32_t)1 << 16) | 1);
     ring_write(0);
     ring_write(0);
-    ring_cmd(0x43, 15);
+    begin_test_span_payload(15);
     ring_write(fb_addr);
     ring_write(TEX_BASE_BYTE);
     ring_write(0); ring_write(0);
@@ -3289,7 +3374,7 @@ static void test_transluc_no_blend_interleave(void) {
         sdram_write(tex_addr >> 2, v);
         ring_cmd(0x20, 4); ring_write(tex_addr);
         ring_write(((uint32_t)1 << 16) | 1); ring_write(0); ring_write(0);
-        ring_cmd(0x43, 15);
+        begin_test_span_payload(15);
         ring_write(FB_BASE_BYTE + fb_off);
         ring_write(tex_addr);
         ring_write(0); ring_write(0); ring_write(0); ring_write(0);
@@ -3304,7 +3389,7 @@ static void test_transluc_no_blend_interleave(void) {
         sdram_write(tex_addr >> 2, v);
         ring_cmd(0x20, 4); ring_write(tex_addr);
         ring_write(((uint32_t)1 << 16) | 1); ring_write(0); ring_write(0);
-        ring_cmd(0x43, 15);
+        begin_test_span_payload(15);
         ring_write(FB_BASE_BYTE + fb_off);
         ring_write(tex_addr);
         ring_write(0); ring_write(0); ring_write(0); ring_write(0);
@@ -3377,7 +3462,7 @@ static void test_span_tex_width_nonpow2(void) {
     ring_clear_fb((uint8_t)(0x00));  // clear FB
 
     // Row 0 span: s=0, t=0, sstep=1.0 → pixels should read tex[0..7] = 0..7.
-    ring_cmd(0x43, 15);
+    begin_test_span_payload(15);
     ring_write(FB_BASE_BYTE);
     ring_write(tex_base);
     ring_write(0); ring_write(0);                          // s=0, t=0
@@ -3390,7 +3475,7 @@ static void test_span_tex_width_nonpow2(void) {
 
     // Row 1 span: s=100, t=1, sstep=1.0 → pixels should read tex[(100+128..107+128) & 0xFF].
     // addr = tex_base + 1 * 300 + (100..107), values = (100..107 + 128) & 0xFF = 228..235 (0xE4..0xEB).
-    ring_cmd(0x43, 15);
+    begin_test_span_payload(15);
     ring_write(FB_BASE_BYTE + 8);
     ring_write(tex_base);
     ring_write(100 << 16); ring_write(1 << 16);            // s=100.0, t=1.0
@@ -4371,7 +4456,7 @@ static void test_triangle_batch_disjoint_fb(void) {
 
 // Test SPAN-PARTIAL: directly probe the FB-write accumulator at span
 // boundaries.  Models the Duke3D scenario where consecutive short
-// DRAW_SPANs land on non-aligned addresses and the leftover 1-3 bytes
+// native spans land on non-aligned addresses and the leftover 1-3 bytes
 // in fb_acc must flush before the next span starts (or get committed
 // at end-of-span).
 //
@@ -4386,7 +4471,7 @@ static void test_triangle_batch_disjoint_fb(void) {
 // over-write of adjacent pixels).
 static void emit_solid_span(uint32_t fb_addr, uint32_t tex_addr,
                             uint16_t count) {
-    ring_cmd(0x43, 15);
+    begin_test_span_payload(15);
     ring_write(fb_addr);
     ring_write(tex_addr);
     ring_write(0);                 // s
@@ -4473,7 +4558,7 @@ static void test_span_partial_word_handoff(void) {
 // backward as well as forward.
 static void emit_solid_span_stride(uint32_t fb_addr, uint32_t tex_addr,
                                     uint16_t count, int16_t stride) {
-    ring_cmd(0x43, 15);
+    begin_test_span_payload(15);
     ring_write(fb_addr);
     ring_write(tex_addr);
     ring_write(0); ring_write(0);
@@ -4553,7 +4638,7 @@ static void test_span_back_to_back_columns(void) {
         ring_bind_texture(TEX_BASE_BYTE + col*4, 1, 1);
         // Column at fb_addr = base_byte + col, fb_stride=320 (next row),
         // count=H pixels going down screen.
-        ring_cmd(0x43, 15);
+        begin_test_span_payload(15);
         ring_write(FB_BASE_BYTE + col);
         ring_write(TEX_BASE_BYTE + col*4);
         ring_write(0); ring_write(0); ring_write(0); ring_write(0);
@@ -4646,7 +4731,7 @@ static void test_persp_long_oblique_span(void) {
     const int32_t sd_step  = 0x100;  // sdivz walks 0 .. 0x100*256 = 0x10000
     const int     count    = 256;
 
-    persp_draw_span(FB_BASE_BYTE, TEX_BASE_BYTE,
+    persp_span_ref(FB_BASE_BYTE, TEX_BASE_BYTE,
                     count, 0, 256,
                     sd_init, 0,
                     zi_init,
@@ -4734,7 +4819,7 @@ static void test_persp_quake_d_scan_repro(void) {
     const int32_t zi_step     = 3;
     const uint16_t count      = 80;
 
-    persp_draw_span(FB_BASE_BYTE, TEX_BASE_BYTE,
+    persp_span_ref(FB_BASE_BYTE, TEX_BASE_BYTE,
                     count, 0, /*tex_width*/64,
                     sdivz, tdivz,
                     zi_persp,
@@ -4821,7 +4906,7 @@ static void test_persp_quake_d_scan_repro(void) {
         ring_clear_fb((uint8_t)(0xCC));
         ring_bind_texture(TEX_BASE_BYTE, 64, 128);
 
-        persp_draw_span(FB_BASE_BYTE, TEX_BASE_BYTE,
+        persp_span_ref(FB_BASE_BYTE, TEX_BASE_BYTE,
                         count, 0, /*tex_width*/64,
                         sdivz, tdivz,
                         zi_persp,
@@ -4915,7 +5000,7 @@ static void test_persp_high_magnitude_overflow(void) {
     const int32_t sd_step  = 0x40 << 16;
     const int     count    = 16;
 
-    persp_draw_span(FB_BASE_BYTE, TEX_BASE_BYTE,
+    persp_span_ref(FB_BASE_BYTE, TEX_BASE_BYTE,
                     count, 0, 256,
                     sd_init, 0,
                     zi_init,
@@ -4996,7 +5081,7 @@ static void test_persp_sadjust_offset(void) {
     const int32_t sd_step  = 0x10000;     // +1 per pixel
     const int     count    = 128;
 
-    persp_draw_span(FB_BASE_BYTE, TEX_BASE_BYTE,
+    persp_span_ref(FB_BASE_BYTE, TEX_BASE_BYTE,
                     count, 0, 256,
                     sd_init, 0,
                     zi_init,
@@ -5069,7 +5154,7 @@ static void test_persp_tiny_zinv_precision(void) {
     const int32_t sd_step  = 0x40;
     const int     count    = 64;
 
-    persp_draw_span(FB_BASE_BYTE, TEX_BASE_BYTE,
+    persp_span_ref(FB_BASE_BYTE, TEX_BASE_BYTE,
                     count, 0, 256,
                     sd_init, 0,
                     zi_init,
@@ -5112,7 +5197,7 @@ static void test_persp_tiny_zinv_precision(void) {
 }
 
 // Regression: sp_tex_w_mask / sp_tex_h_mask must not bleed from a
-// preceding scalar span into a subsequent DRAW_TRIANGLES.  Pre-fix
+// preceding single-lane span into a subsequent DRAW_TRIANGLES.  Pre-fix
 // the triangle inherited the span's POT wrap mask and clipped a
 // non-POT alias skin's columns.  Post-fix, triangle span emit resets
 // both masks to 0xFFFF (no wrap).
@@ -5124,7 +5209,7 @@ static void test_persp_tiny_zinv_precision(void) {
 //     in 64..99.  Pre-fix: GPU clips s to 0..63 and reads garbage; post-
 //     fix: GPU samples the correct s region of the 100-wide texture.
 static void test_triangle_mask_bleed_from_span(void) {
-    printf("TEST: sp_tex_w_mask bleed from DRAW_SPAN into DRAW_TRIANGLES\n");
+    printf("TEST: sp_tex_w_mask bleed from native span into DRAW_TRIANGLES\n");
 
     gpu_init();
     { uint8_t cm[256]; for (int i = 0; i < 256; i++) cm[i] = (uint8_t)i;
@@ -5146,9 +5231,9 @@ static void test_triangle_mask_bleed_from_span(void) {
         sdram_write((TEX_BASE_BYTE >> 2) + s/4, w);
     }
 
-    // First: a benign DRAW_SPAN that sets sp_tex_w_mask = 63.
+    // First: a benign native span that sets sp_tex_w_mask = 63.
     ring_bind_texture(TEX_BASE_BYTE, 64, 1);
-    ring_cmd(0x43, 15);
+    begin_test_span_payload(15);
     ring_write(FB_BASE_BYTE + 200*320);  // far row, won't overlap triangle
     ring_write(TEX_BASE_BYTE);
     ring_write(0); ring_write(0);
@@ -7418,7 +7503,7 @@ static void test_gpudemo_cube_replay(void) {
 // gpudemo's Mode 0 renders a Wolfenstein-style raycaster.  Per frame:
 //   - ~60 horizontal floor spans   (SPAN_COLORMAP)
 //   - ~60 horizontal ceiling spans (SPAN_COLORMAP)
-//   - ~320 vertical wall spans     (SPAN_COLORMAP | SPAN_COLUMN)
+//   - ~320 vertical wall spans     (SPAN_COLORMAP, fb_step=320)
 //   - 1 CMD_FENCE at the end
 //
 // On hardware the app freezes after ~108-300 frames with the GPU
@@ -7436,7 +7521,7 @@ static void test_gpudemo_cube_replay(void) {
 // reproduce, the bug is at the CPU↔GPU boundary (axi_periph_slave
 // or MMIO write race) which this harness doesn't exercise.
 
-/* Ring is 16 KB = 4096 words = 215 scalar span commands max in flight.
+/* Ring is 16 KB = 4096 words = 215 single-lane span commands max in flight.
  * gpudemo's real Mode 0 submits ~440 spans per frame; it only works because
  * the SDK's `_gpu_ring_ensure()` blocks until the GPU has drained enough.
  * This simplified harness submits-then-waits, so we keep each frame below
@@ -7446,7 +7531,6 @@ static void test_gpudemo_cube_replay(void) {
 static void submit_mode0_frame(uint32_t fb_base, uint32_t wall_tex, uint32_t floor_tex,
                                 int fb_cycle) {
     const uint32_t SPAN_COLORMAP = 0x01;
-    const uint32_t SPAN_COLUMN   = 0x02;
     /* Bind wall tex for the column pass. */
     ring_cmd(0x20, 4);              // CMD_SET_TEXTURE
     ring_write(wall_tex);
@@ -7459,7 +7543,7 @@ static void submit_mode0_frame(uint32_t fb_base, uint32_t wall_tex, uint32_t flo
     ring_write(320);
     /* 10 horizontal floor spans. */
     for (int y = 120; y < 130; y++) {
-        ring_cmd(0x43, 15);         // scalar span payload
+        begin_test_span_payload(15);         // single-lane span payload
         ring_write(fb_base + y * 320);          // fb_addr
         ring_write(floor_tex);                  // tex_addr
         ring_write((uint32_t)(y * 0x1234));     // s (arbitrary walk)
@@ -7478,7 +7562,7 @@ static void submit_mode0_frame(uint32_t fb_base, uint32_t wall_tex, uint32_t flo
         int draw_start = 100;
         int span_count = 16;
         uint32_t col_fb = fb_base + draw_start * 320 + x;
-        ring_cmd(0x43, 15);
+        begin_test_span_payload(15);
         ring_write(col_fb);
         ring_write(wall_tex);
         ring_write((uint32_t)((x & 63) << 16));   // s = x mod tex width
@@ -7486,7 +7570,7 @@ static void submit_mode0_frame(uint32_t fb_base, uint32_t wall_tex, uint32_t flo
         ring_write(0);                            // sstep = 0 (column mode)
         ring_write(0x00010000);                   // tstep = 1.0
         ring_write(((uint32_t)span_count << 16) | (0 << 8)
-                   | SPAN_COLORMAP | SPAN_COLUMN);
+                   | SPAN_COLORMAP);
         ring_write((320u << 16) | 64u);           // fb_stride=320, tex_width=64
         ring_write(0);
         ring_write(0); ring_write(0); ring_write(0);
@@ -7692,7 +7776,7 @@ static void test_cmd_flip_rapid_fire(void) {
         fail_count++;
     } else {
         /* fence_reached is the source of truth for "all flips
-         * retired".  cum_swap_pulse undercounts because mmio_write
+         * complete".  cum_swap_pulse undercounts because mmio_write
          * paths advance simulation without calling monitor_step,
          * so single-cycle pulses are missed. */
         check("cmd_flip_rapid_fire_final_fence", mmio_read(6), target_tok);
@@ -7719,7 +7803,7 @@ static void test_mwr_inflight_bound(void) {
 
     gpu_init();
 
-    /* Hardware area mode retired the 32-bit AW/B counters.  reg_addr 13
+    /* Hardware area mode removed the 32-bit AW/B counters.  reg_addr 13
      * now exposes the compact current m_wr_inflight value directly. */
     auto read_mwr = [&]() -> uint32_t {
         return mmio_read(13) & 0xFu;

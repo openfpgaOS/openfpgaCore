@@ -1,14 +1,14 @@
 /*
  * Verilator harness — focused floor-span path coverage.
  *
- * Drives the GPU's scalar span payload against a CPU reference that
+ * Drives the GPU's one-lane native span command against a CPU reference that
  * literally executes BUILD's hlineasm4 in C.  The reference uses
  * shift-mode addressing (i4/i5/bits/shifter); the GPU uses multiply-
  * mode (sp_s/sp_t/tex_width).  We translate the BUILD-style inputs
  * into the closest multiply-mode equivalent and compare bytewise.
  *
  * The GPU has POT wrap masks (sp_tex_w_mask / sp_tex_h_mask, set via
- * word 8 of the scalar span payload) that reproduce shift-mode wrap inside the
+ * word 8 of the one-lane native span command) that reproduce shift-mode wrap inside the
  * multiply-mode addressing path.  All eight cases now pass — they
  * exercise the full BUILD/Duke3D hlineasm4 envelope (axis-aligned,
  * sloped, large-negative i4/i5, mid-span tex-boundary cross,
@@ -163,10 +163,9 @@ static void hlineasm4_ref(int numPixels, int /*shade*/,
 // Setup helpers
 // =====================================================================
 // Identity colormap — 256 bytes preloaded into SDRAM at the slot-0
-// palookup base.  The on-chip cmap_bram was retired; the GPU now reads
-// palookup bytes through gpu_tex_cache port B, so tests preload the
-// table directly via the SDRAM backdoor.  PALOOKUP_BASE_BYTE matches
-// gpu_core.v's PALOOKUP_BASE localparam.
+// palookup base.  The GPU reads palookup bytes through gpu_tex_cache
+// port B, so tests preload the table directly via the SDRAM backdoor.
+// PALOOKUP_BASE_BYTE matches gpu_core.v's PALOOKUP_BASE localparam.
 static const uint32_t PALOOKUP_BASE_BYTE = 0x03400000;
 static void upload_identity_cmap_row0() {
     for (int i = 0; i < 256; i += 4) {
@@ -220,7 +219,7 @@ static void preset_fb_sentinel(uint32_t fb_byte_base, int count_bytes) {
 }
 
 // =====================================================================
-// Submit one scalar span.  Translates BUILD-style hlineasm4 inputs
+// Submit one native one-lane span group.  Translates BUILD-style hlineasm4 inputs
 // into the GPU's multiply-mode scalar payload.
 //
 // The GPU's tex_addr math is `tex_base + t_int*tex_width + s_int`,
@@ -278,20 +277,11 @@ static int run_case(const floor_case &c)
     uint32_t sp_sstep = (uint32_t)-(int32_t)to_q16(c.asm2, s_rshift);
     uint32_t sp_tstep = (uint32_t)-(int32_t)to_q16(c.asm1, t_rshift);
 
-    // Scalar span payload (15 words; perspective fields zero).
-    ring_cmd(0x43, 15);                                      // CMD_DRAW_SPAN_GROUP scalar
-    ring_write(fb_row_base + (c.count - 1));                 // 0: fb_addr (rightmost px)
-    ring_write(TEX_BASE_BYTE);                               // 1: tex_addr
-    ring_write(sp_s);                                        // 2: sp_s
-    ring_write(sp_t);                                        // 3: sp_t
-    ring_write(sp_sstep);                                    // 4: sp_sstep
-    ring_write(sp_tstep);                                    // 5: sp_tstep
-    ring_write(((uint32_t)c.count << 16)
-             | (0u << 8)                                      // light = 0
-             | 0x01u);                                        // SPAN_COLORMAP only
-    ring_write(((uint32_t)(uint16_t)c.fb_stride << 16)
-             | (uint32_t)(uint16_t)(1u << c.bits));           // 7: fb_stride | tex_width
-    // Word 8 — POT wrap masks: {tex_h_mask, tex_w_mask} =
+    // One-lane affine span-group encoding of the hlineasm4 span.
+    ring_cmd(0x47, 11);
+    ring_write((1u << 28) | (0x01u << 20));                  // lane_count, flags, colormap
+    ring_write((uint32_t)(uint16_t)(1u << c.bits));          // tex_width
+    // POT wrap masks: {tex_h_mask, tex_w_mask} =
     //   {tex_h - 1, tex_w - 1}.  Both required POT (BUILD/Quake
     //   guarantee this).  Wrap masks reproduce hlineasm4's natural
     //   shift-mode wrap inside multiply-mode addressing.
@@ -299,11 +289,15 @@ static int run_case(const floor_case &c)
         uint16_t w_mask = (uint16_t)(c.tex_w - 1);
         uint16_t h_mask = (uint16_t)(c.tex_h - 1);
         ring_write(((uint32_t)h_mask << 16) | (uint32_t)w_mask);
-    }                                                        // 8: wrap masks
-    ring_write(0);                                           // 9: z_addr
-    ring_write(0);                                           // 10: zi
-    ring_write(0);                                           // 11: zistep
-    for (int i = 12; i < 15; i++) ring_write(0);             // 12..14: persp (unused)
+    }
+    ring_write((uint32_t)(int32_t)c.fb_stride);              // fb_step
+    ring_write(fb_row_base + (c.count - 1));                 // lane 0 fb_addr
+    ring_write(TEX_BASE_BYTE);                               // lane 0 tex_addr
+    ring_write((uint32_t)c.count);                           // lane 0 count/light
+    ring_write(sp_s);
+    ring_write(sp_t);
+    ring_write(sp_sstep);
+    ring_write(sp_tstep);
 
     bool ok = gpu_finish(500000);
     if (!ok) {
@@ -454,14 +448,13 @@ int main(int argc, char **argv)
             .fb_stride = -1,
             .known_diverge = false,
         },
-        // F6 — tex_width=0 was the old shift-mode selector; with the
-        // POT wrap masks engaged, tex_width=0 still works because the
-        // mask drives sp_t_int to 0, the multiplier-of-zero result is
-        // 0, and the byte read is just sdram[base + masked_s].  The
-        // BUILD oracle's source = (t<<6)|s and pattern_full lookup
-        // collapses to the same 1-D walk for tex_h=64 / shifter=26.
+        // F6 — tex_width=0 with POT wrap masks still works because the
+        // mask drives sp_t_int to 0, the multiplier-of-zero result is 0,
+        // and the byte read is just sdram[base + masked_s].  The BUILD
+        // oracle's source = (t<<6)|s and pattern_full lookup collapses to
+        // the same 1-D walk for tex_h=64 / shifter=26.
         {
-            .name = "F6: tex_width=0 (shift-mode selector — retired)",
+            .name = "F6: tex_width=0 with POT masks",
             .count = 64, .tex_w = 64, .tex_h = 64,
             .bits = 6, .shifter = 26,
             .i4 = 0, .i5 = 0,
