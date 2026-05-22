@@ -57,6 +57,8 @@ module gpu_core (
     // ================================================================
     output reg         sram_rd,
     output reg         sram_wr,
+    output reg         sram_rd_half,
+    output reg         sram_rd_hi,
     output reg  [21:0] sram_addr,
     output reg  [31:0] sram_wdata,
     output reg  [3:0]  sram_wstrb,
@@ -339,9 +341,10 @@ reg        lutsram_seen_busy;
 
 reg [14:0] transluc_rd_addr;
 reg        transluc_lookup_fire;
-reg        transluc_cache_valid;
-reg [12:0] transluc_cache_addr;
-reg [31:0] transluc_cache_data;
+reg [3:0]  transluc_cache_valid;
+reg [13:0] transluc_cache_addr [0:3];
+reg [15:0] transluc_cache_data [0:3];
+reg [1:0]  transluc_cache_replace;
 
 wire transluc_sram_lookup_ready =
     (lutsram_state == LUTSRAM_IDLE) && !sram_busy;
@@ -352,23 +355,34 @@ always @(posedge clk) begin
     if (!reset_n) begin
         sram_rd                 <= 1'b0;
         sram_wr                 <= 1'b0;
+        sram_rd_half            <= 1'b0;
+        sram_rd_hi              <= 1'b0;
         sram_addr               <= 22'd0;
         sram_wdata              <= 32'd0;
         sram_wstrb              <= 4'd0;
         transluc_wr_addr        <= 15'd0;
         lutsram_state           <= LUTSRAM_IDLE;
         lutsram_seen_busy       <= 1'b0;
-        transluc_cache_valid    <= 1'b0;
-        transluc_cache_addr     <= 13'd0;
-        transluc_cache_data     <= 32'd0;
+        transluc_cache_valid    <= 4'b0;
+        transluc_cache_addr[0]  <= 14'd0;
+        transluc_cache_addr[1]  <= 14'd0;
+        transluc_cache_addr[2]  <= 14'd0;
+        transluc_cache_addr[3]  <= 14'd0;
+        transluc_cache_data[0]  <= 16'd0;
+        transluc_cache_data[1]  <= 16'd0;
+        transluc_cache_data[2]  <= 16'd0;
+        transluc_cache_data[3]  <= 16'd0;
+        transluc_cache_replace  <= 2'd0;
     end else begin
         sram_rd    <= 1'b0;
         sram_wr    <= 1'b0;
+        sram_rd_half <= 1'b0;
+        sram_rd_hi   <= 1'b0;
         sram_wstrb <= 4'd0;
 
         if (reg_wr && reg_addr == 4'd8) begin
             transluc_wr_addr <= reg_wdata[14:0];
-            transluc_cache_valid <= 1'b0;
+            transluc_cache_valid <= 4'b0;
         end
 
         case (lutsram_state)
@@ -376,6 +390,8 @@ always @(posedge clk) begin
                 lutsram_seen_busy <= 1'b0;
                 if (transluc_lookup_fire && !sram_busy) begin
                     sram_rd               <= 1'b1;
+                    sram_rd_half          <= 1'b1;
+                    sram_rd_hi            <= transluc_rd_addr[1];
                     sram_addr             <= {9'd0, transluc_rd_addr[14:2]};
                     lutsram_state         <= LUTSRAM_READ_WAIT;
                 end else if (reg_wr && reg_addr == 4'd9 && !sram_busy) begin
@@ -384,7 +400,7 @@ always @(posedge clk) begin
                     sram_wdata       <= reg_wdata;
                     sram_wstrb       <= 4'hF;
                     transluc_wr_addr <= transluc_wr_addr + 15'd4;
-                    transluc_cache_valid <= 1'b0;
+                    transluc_cache_valid <= 4'b0;
                     lutsram_state    <= LUTSRAM_WRITE_WAIT;
                 end
             end
@@ -398,9 +414,12 @@ always @(posedge clk) begin
 
             LUTSRAM_READ_WAIT: begin
                 if (sram_rdata_valid) begin
-                    transluc_cache_valid <= 1'b1;
-                    transluc_cache_addr  <= transluc_rd_addr[14:2];
-                    transluc_cache_data  <= sram_rdata;
+                    transluc_cache_valid[transluc_cache_replace] <= 1'b1;
+                    transluc_cache_addr[transluc_cache_replace]  <= transluc_rd_addr[14:1];
+                    transluc_cache_data[transluc_cache_replace]  <= transluc_rd_addr[1]
+                                                                  ? sram_rdata[31:16]
+                                                                  : sram_rdata[15:0];
+                    transluc_cache_replace <= transluc_cache_replace + 2'd1;
                     lutsram_state         <= LUTSRAM_IDLE;
                 end
             end
@@ -1577,11 +1596,26 @@ reg [31:0] blend_araddr;
 wire [7:0]  blend_lut_src_byte = fb_lane_read(blend_group_src_data, blend_lane_iter);
 wire [7:0]  blend_lut_fb_byte  = fb_lane_read(blend_result_word, blend_lane_iter);
 wire [14:0] blend_lut_addr_w   = {blend_lut_src_byte[7:1], blend_lut_fb_byte};
-wire        transluc_cache_hit = transluc_cache_valid
-                               && (transluc_cache_addr == blend_lut_addr_w[14:2]);
-wire [31:0] transluc_cache_shift = transluc_cache_data
-                                 >> {blend_lut_addr_w[1:0], 3'b0};
-wire [7:0]  transluc_cache_byte  = transluc_cache_shift[7:0];
+wire [13:0] transluc_cache_lookup_addr = blend_lut_addr_w[14:1];
+wire        transluc_cache_hit0 = transluc_cache_valid[0]
+                               && (transluc_cache_addr[0] == transluc_cache_lookup_addr);
+wire        transluc_cache_hit1 = transluc_cache_valid[1]
+                               && (transluc_cache_addr[1] == transluc_cache_lookup_addr);
+wire        transluc_cache_hit2 = transluc_cache_valid[2]
+                               && (transluc_cache_addr[2] == transluc_cache_lookup_addr);
+wire        transluc_cache_hit3 = transluc_cache_valid[3]
+                               && (transluc_cache_addr[3] == transluc_cache_lookup_addr);
+wire        transluc_cache_hit = transluc_cache_hit0
+                              || transluc_cache_hit1
+                              || transluc_cache_hit2
+                              || transluc_cache_hit3;
+wire [15:0] transluc_cache_half = transluc_cache_hit0 ? transluc_cache_data[0] :
+                                  transluc_cache_hit1 ? transluc_cache_data[1] :
+                                  transluc_cache_hit2 ? transluc_cache_data[2] :
+                                  transluc_cache_data[3];
+wire [7:0]  transluc_cache_byte = blend_lut_addr_w[0]
+                                ? transluc_cache_half[15:8]
+                                : transluc_cache_half[7:0];
 // Pre-computed after the grouped FB read, consumed by FBSS_BLEND_APPLY.  Hoists
 // the 32-bit equality compare `fb_acc_addr == blend_group_word_addr` out of
 // the BLEND_APPLY cycle so the only logic between blend_group_word_addr (FF)

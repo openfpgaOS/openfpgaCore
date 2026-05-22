@@ -217,6 +217,8 @@ wire        gpu_wr_bvalid;
 wire [1:0]  gpu_wr_bresp;
 wire        gpu_sram_rd;
 wire        gpu_sram_wr;
+wire        gpu_sram_rd_half;
+wire        gpu_sram_rd_hi;
 wire [21:0] gpu_sram_addr;
 wire [31:0] gpu_sram_wdata;
 wire [3:0]  gpu_sram_wstrb;
@@ -519,6 +521,7 @@ axi_periph_slave periph (
 
     .dataslot_allcomplete(dataslot_allcomplete),
     .vsync               (vsync),
+    .early_vblank        (1'b0),
     .cont1_key           (cont1_key),
     .cont1_joy           (cont1_joy),
     .cont1_trig          (cont1_trig),
@@ -635,6 +638,8 @@ gpu_core gpu (
     // SRAM scratch
     .sram_rd     (gpu_sram_rd),
     .sram_wr     (gpu_sram_wr),
+    .sram_rd_half(gpu_sram_rd_half),
+    .sram_rd_hi  (gpu_sram_rd_hi),
     .sram_addr   (gpu_sram_addr),
     .sram_wdata  (gpu_sram_wdata),
     .sram_wstrb  (gpu_sram_wstrb),
@@ -663,13 +668,19 @@ reg        gpu_sram_busy_r;
 reg        gpu_sram_rvalid_r;
 reg [1:0]  gpu_sram_delay;
 reg        gpu_sram_op_read;
+reg        gpu_sram_half_r;
+reg        gpu_sram_hi_r;
 reg [15:0] gpu_sram_addr_r;
 reg [31:0] gpu_sram_wdata_r;
 reg [3:0]  gpu_sram_wstrb_r;
 
 assign gpu_sram_busy = gpu_sram_busy_r;
 assign gpu_sram_rdata_valid = gpu_sram_rvalid_r;
-assign gpu_sram_rdata = gpu_sram_mem[gpu_sram_addr_r];
+assign gpu_sram_rdata = gpu_sram_half_r
+                      ? (gpu_sram_hi_r
+                         ? {gpu_sram_mem[gpu_sram_addr_r][31:16], 16'd0}
+                         : {16'd0, gpu_sram_mem[gpu_sram_addr_r][15:0]})
+                      : gpu_sram_mem[gpu_sram_addr_r];
 
 always @(posedge clk_cpu) begin
     if (!reset_n) begin
@@ -677,6 +688,8 @@ always @(posedge clk_cpu) begin
         gpu_sram_rvalid_r <= 1'b0;
         gpu_sram_delay    <= 2'd0;
         gpu_sram_op_read  <= 1'b0;
+        gpu_sram_half_r   <= 1'b0;
+        gpu_sram_hi_r     <= 1'b0;
         gpu_sram_addr_r   <= 16'd0;
         gpu_sram_wdata_r  <= 32'd0;
         gpu_sram_wstrb_r  <= 4'd0;
@@ -686,6 +699,8 @@ always @(posedge clk_cpu) begin
             gpu_sram_busy_r  <= 1'b1;
             gpu_sram_delay   <= 2'd2;
             gpu_sram_op_read <= gpu_sram_rd;
+            gpu_sram_half_r  <= gpu_sram_rd && gpu_sram_rd_half;
+            gpu_sram_hi_r    <= gpu_sram_rd_hi;
             gpu_sram_addr_r  <= gpu_sram_addr[15:0];
             gpu_sram_wdata_r <= gpu_sram_wdata;
             gpu_sram_wstrb_r <= gpu_sram_wstrb;

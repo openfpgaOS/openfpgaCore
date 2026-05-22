@@ -49,6 +49,7 @@ module axi_periph_slave (
     // CDC inputs
     input wire         dataslot_allcomplete,
     input wire         vsync,
+    input wire         early_vblank,
     input wire [31:0]  cont1_key,
     input wire [31:0]  cont1_joy,
     input wire [15:0]  cont1_trig,
@@ -440,6 +441,7 @@ localparam TERM_FB_ADDR = 25'h0180000;  // byte 0x300000 → CPU 0x10300000
 reg [1:0] fb_display_idx;
 reg [1:0] fb_ready_idx;
 reg fb_swap_pending;
+reg fb_swap_consumed_this_frame;
 assign fb_swap_pending_o = fb_swap_pending;
 reg term_fb_active;  // 1=scanout reads terminal FB, 0=app triple-buffered FB
 
@@ -483,11 +485,17 @@ always @(posedge clk) begin
 end
 wire vsync_rising = vsync_sync[1] && !vsync_sync[2];
 
+reg [2:0] early_vblank_sync;
+always @(posedge clk) begin
+    early_vblank_sync <= {early_vblank_sync[1:0], early_vblank};
+end
+wire early_vblank_s = early_vblank_sync[2];
+
 function [9:0] clamp_v_total;
     input [9:0] vt;
     begin
-        if (vt < 10'd262)
-            clamp_v_total = 10'd262;
+        if (vt < 10'd258)
+            clamp_v_total = 10'd258;
         else if (vt > 10'd375)
             clamp_v_total = 10'd375;
         else
@@ -794,6 +802,7 @@ always @(posedge clk) begin
         fb_display_idx <= 2'd0;
         fb_ready_idx <= 2'd0;
         fb_swap_pending <= 1'b0;
+        fb_swap_consumed_this_frame <= 1'b0;
         term_fb_active <= 1'b1;  // terminal FB visible by default at boot
         vrr_v_total_reg <= 10'd262;
         pal_wr <= 0;
@@ -1039,21 +1048,29 @@ always @(posedge clk) begin
         if (vsync_rising)
             vsync_irq_pending <= 1'b1;
 
-        // Triple buffer vsync swap.  Placed
-        // BEFORE the GPU side-port so a same-cycle (gpu_swap_req &&
-        // vsync_rising) doesn't lose the GPU's new swap request: the
-        // vsync clear schedules fb_swap_pending<=0 here, then the
-        // GPU pulse below overrides with fb_swap_pending<=1 (non-
-        // blocking, later wins).
+        // Triple buffer swap. Vsync is the normal consume point; the early
+        // vblank level lets a just-late frame catch the same refresh before
+        // visible scanout starts.  Only one pending swap may be consumed per
+        // display frame, so a new GPU CMD_FLIP arriving after a real vsync
+        // consume waits for the next frame instead of skipping a frame that
+        // was already presented.
+        if (vsync_rising)
+            fb_swap_consumed_this_frame <= 1'b0;
         if (fb_swap_pending && vsync_rising) begin
             fb_display_idx <= fb_ready_idx;
             fb_swap_pending <= 1'b0;
+            fb_swap_consumed_this_frame <= 1'b1;
+        end else if (fb_swap_pending && early_vblank_s &&
+                     !fb_swap_consumed_this_frame) begin
+            fb_display_idx <= fb_ready_idx;
+            fb_swap_pending <= 1'b0;
+            fb_swap_consumed_this_frame <= 1'b1;
         end
 
         // CMD_FLIP side-port — single-cycle pulse from gpu_core after
-        // its m_wr_* drain completes.  Placed LAST so its assignments
-        // override the sysreg-path kernel write AND the vsync-clear
-        // above (later non-blocking wins on same-cycle conflicts).
+        // its m_wr_* drain completes. Placed LAST so its assignments
+        // override the sysreg-path kernel write and consume path above
+        // (later non-blocking wins on same-cycle conflicts).
         if (gpu_swap_req) begin
             fb_ready_idx    <= gpu_swap_idx;
             fb_swap_pending <= 1'b1;

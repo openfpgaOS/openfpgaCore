@@ -16,6 +16,8 @@ module sram_controller #(
     // 32-bit word interface
     input  wire        word_rd,
     input  wire        word_wr,
+    input  wire        word_rd_half,
+    input  wire        word_rd_hi,
     input  wire [21:0] word_addr,
     input  wire [31:0] word_data,
     input  wire [3:0]  word_wstrb,
@@ -47,9 +49,11 @@ module sram_controller #(
     localparam [3:0] ST_RD_HI_WAIT    = 4'd10;
     localparam [3:0] ST_RD_HI_SAMPLE  = 4'd11;
     localparam [3:0] ST_DONE          = 4'd12;
+    localparam [3:0] ST_RD_HI_SETUP   = 4'd13;
 
     reg [3:0] state;
     reg       is_write;
+    reg       latched_rd_half;
     reg [31:0] latched_data;
     reg [3:0]  latched_wstrb;
     reg [15:0] latched_addr;
@@ -65,6 +69,7 @@ module sram_controller #(
             word_q <= 32'b0;
             word_q_valid <= 1'b0;
             is_write <= 1'b0;
+            latched_rd_half <= 1'b0;
             latched_data <= 32'b0;
             latched_wstrb <= 4'b0;
             latched_addr <= 16'b0;
@@ -91,10 +96,18 @@ module sram_controller #(
                     if (word_wr || word_rd) begin
                         word_busy <= 1'b1;
                         is_write <= word_wr;
+                        latched_rd_half <= word_rd & word_rd_half;
                         latched_data <= word_data;
                         latched_wstrb <= word_wstrb;
                         latched_addr <= word_addr[15:0];
-                        state <= word_wr ? ST_WR_LO_SETUP : ST_RD_LO_SETUP;
+                        if (word_wr) begin
+                            state <= ST_WR_LO_SETUP;
+                        end else begin
+                            word_q <= 32'b0;
+                            state <= (word_rd_half && word_rd_hi)
+                                   ? ST_RD_HI_SETUP
+                                   : ST_RD_LO_SETUP;
+                        end
                     end
                 end
 
@@ -184,14 +197,32 @@ module sram_controller #(
 
                 ST_RD_LO_SAMPLE: begin
                     word_q[15:0] <= sram_dq_in;
-                    // Page mode: keep OE# low, just change address.
-                    // LO and HI addresses differ only in bit 0 (same page).
-                    sram_a <= latched_addr_hi;
-                    wait_cnt <= PAGE_CYCLES[3:0];
-                    state <= ST_RD_HI_WAIT;
+                    if (latched_rd_half) begin
+                        sram_oe_n <= 1'b1;
+                        sram_ub_n <= 1'b1;
+                        sram_lb_n <= 1'b1;
+                        state <= ST_DONE;
+                    end else begin
+                        // Page mode: keep OE# low, just change address.
+                        // LO and HI addresses differ only in bit 0 (same page).
+                        sram_a <= latched_addr_hi;
+                        wait_cnt <= PAGE_CYCLES[3:0];
+                        state <= ST_RD_HI_WAIT;
+                    end
                 end
 
                 // ---- Read High Half (page mode — fast) ----
+                ST_RD_HI_SETUP: begin
+                    sram_a <= latched_addr_hi;
+                    sram_dq_oe <= 1'b0;
+                    sram_we_n <= 1'b1;
+                    sram_oe_n <= 1'b0;
+                    sram_ub_n <= 1'b0;
+                    sram_lb_n <= 1'b0;
+                    wait_cnt <= WAIT_CYCLES[3:0];
+                    state <= ST_RD_HI_WAIT;
+                end
+
                 ST_RD_HI_WAIT: begin
                     if (wait_cnt == 0) begin
                         state <= ST_RD_HI_SAMPLE;

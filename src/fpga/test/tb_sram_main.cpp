@@ -34,6 +34,8 @@ static void reset() {
     tb->reset_n = 0;
     tb->word_rd = 0;
     tb->word_wr = 0;
+    tb->word_rd_half = 0;
+    tb->word_rd_hi = 0;
     tb->word_addr = 0;
     tb->word_data = 0;
     tb->word_wstrb = 0;
@@ -47,6 +49,8 @@ static void reset() {
 // ---- Word-level Write ----
 static bool word_write(uint32_t addr, uint32_t data, uint8_t wstrb = 0xF, int timeout = 500) {
     tb->word_wr = 1;
+    tb->word_rd_half = 0;
+    tb->word_rd_hi = 0;
     tb->word_addr = addr;
     tb->word_data = data;
     tb->word_wstrb = wstrb;
@@ -65,6 +69,8 @@ static bool word_write(uint32_t addr, uint32_t data, uint8_t wstrb = 0xF, int ti
 // ---- Word-level Read ----
 static bool word_read(uint32_t addr, uint32_t *data, int timeout = 500) {
     tb->word_rd = 1;
+    tb->word_rd_half = 0;
+    tb->word_rd_hi = 0;
     tb->word_addr = addr;
     tick();  // Controller latches on this posedge
     tb->word_rd = 0;
@@ -77,6 +83,27 @@ static bool word_read(uint32_t addr, uint32_t *data, int timeout = 500) {
         }
     }
     printf("  TIMEOUT: word_read addr=0x%05x\n", addr);
+    return false;
+}
+
+static bool half_read(uint32_t addr, bool high, uint32_t *data, int timeout = 500) {
+    tb->word_rd = 1;
+    tb->word_rd_half = 1;
+    tb->word_rd_hi = high ? 1 : 0;
+    tb->word_addr = addr;
+    tick();
+    tb->word_rd = 0;
+    tb->word_rd_half = 0;
+    tb->word_rd_hi = 0;
+
+    for (int t = 0; t < timeout; t++) {
+        tick();
+        if (tb->word_q_valid) {
+            *data = tb->word_q;
+            return true;
+        }
+    }
+    printf("  TIMEOUT: half_read addr=0x%05x high=%d\n", addr, high ? 1 : 0);
     return false;
 }
 
@@ -150,6 +177,22 @@ static void test_byte_strobe_upper_halfword() {
     word_write(0x0103, 0xCCDD0000, 0xC);
     uint32_t val = word_read_val(0x0103);
     check("strobe_hi_half", val, 0xCCDD7788);
+}
+
+static void test_halfword_reads() {
+    printf("TEST: Halfword reads - selected low/high half only\n");
+
+    word_write(0x0104, 0x89ABCDEF);
+    uint32_t val = 0;
+
+    half_read(0x0104, false, &val);
+    check("half_read_lo", val, 0x0000CDEF);
+
+    half_read(0x0104, true, &val);
+    check("half_read_hi", val, 0x89AB0000);
+
+    val = word_read_val(0x0104);
+    check("half_read_preserves_full", val, 0x89ABCDEF);
 }
 
 static void test_sequential_writes() {
@@ -238,6 +281,7 @@ int main(int argc, char **argv) {
     test_byte_strobe_byte3();
     test_byte_strobe_halfword();
     test_byte_strobe_upper_halfword();
+    test_halfword_reads();
     test_sequential_writes();
     test_interleaved_rw();
     test_different_addresses();

@@ -42,6 +42,7 @@ static void reset_sequence() {
     tb->gpu_swap_req_in = 0;  // CMD_FLIP side-port idle
     tb->gpu_swap_idx_in = 0;
     tb->vsync_in        = 0;
+    tb->early_vblank_in = 0;
     tb->target_dataslot_ack_in  = 0;
     tb->target_dataslot_done_in = 0;
     tb->target_dataslot_err_in  = 0;
@@ -559,6 +560,111 @@ static void test_gpu_swap_req_vsync_race(void) {
     check_eq("race-final-pending-clear",  final_state & 1,           0u);
 }
 
+static void test_gpu_swap_early_vblank(void) {
+    printf("test_gpu_swap_early_vblank (late-safe swap before active scanout):\n");
+
+    auto read_swap_ctrl = [&]() -> uint32_t {
+        std::vector<uint32_t> r;
+        if (!axi_read_burst(0x40000018u, 0, r)) return 0xFFFFFFFFu;
+        return r[0];
+    };
+
+    uint32_t pre = read_swap_ctrl();
+    uint32_t display = (pre >> 1) & 0x3u;
+    uint32_t target = (display + 1u) % 3u;
+
+    /* Start a fresh display frame with no pending swap.  The early-vblank
+     * path is only allowed after the frame's real vsync has reset the
+     * one-consume latch. */
+    tb->vsync_in = 1;
+    tick();
+    tick();
+    tb->vsync_in = 0;
+    for (int i = 0; i < 3; i++) tick();
+
+    /* Assert early-vblank long enough to cross the CDC, then queue a GPU
+     * swap.  Since no swap was consumed at this frame's vsync, the slave
+     * may consume it immediately while visible scanout has not started. */
+    tb->early_vblank_in = 1;
+    for (int i = 0; i < 4; i++) tick();
+
+    tb->gpu_swap_req_in = 1;
+    tb->gpu_swap_idx_in = target;
+    tick();
+    tb->gpu_swap_req_in = 0;
+    tb->gpu_swap_idx_in = 0;
+    for (int i = 0; i < 6; i++) tick();
+
+    uint32_t after = read_swap_ctrl();
+    check_eq("early-vblank-display-idx", (after >> 1) & 0x3u, target);
+    check_eq("early-vblank-pending-clear", after & 1u, 0u);
+
+    tb->early_vblank_in = 0;
+    for (int i = 0; i < 4; i++) tick();
+}
+
+static void test_gpu_swap_early_vblank_one_consume_per_frame(void) {
+    printf("test_gpu_swap_early_vblank_one_consume_per_frame:\n");
+
+    auto read_swap_ctrl = [&]() -> uint32_t {
+        std::vector<uint32_t> r;
+        if (!axi_read_burst(0x40000018u, 0, r)) return 0xFFFFFFFFu;
+        return r[0];
+    };
+
+    uint32_t pre = read_swap_ctrl();
+    uint32_t display = (pre >> 1) & 0x3u;
+    uint32_t first = (display + 1u) % 3u;
+    uint32_t second = (first + 1u) % 3u;
+
+    /* Queue one frame before vsync. */
+    tb->gpu_swap_req_in = 1;
+    tb->gpu_swap_idx_in = first;
+    tick();
+    tb->gpu_swap_req_in = 0;
+    tb->gpu_swap_idx_in = 0;
+    for (int i = 0; i < 5; i++) tick();
+
+    /* Consume it at real vsync while entering early blank. */
+    tb->early_vblank_in = 1;
+    tb->vsync_in = 1;
+    tick();
+    tick();
+    tb->vsync_in = 0;
+    for (int i = 0; i < 4; i++) tick();
+
+    uint32_t after_vsync = read_swap_ctrl();
+    check_eq("early-one-display-first", (after_vsync >> 1) & 0x3u, first);
+    check_eq("early-one-first-clear", after_vsync & 1u, 0u);
+
+    /* Queue another frame while still in early blank.  The one-consume latch
+     * must keep it pending until the next real frame, avoiding a visible
+     * frame skip inside the same blanking interval. */
+    tb->gpu_swap_req_in = 1;
+    tb->gpu_swap_idx_in = second;
+    tick();
+    tb->gpu_swap_req_in = 0;
+    tb->gpu_swap_idx_in = 0;
+    for (int i = 0; i < 6; i++) tick();
+
+    uint32_t held = read_swap_ctrl();
+    check_eq("early-one-held-display", (held >> 1) & 0x3u, first);
+    check_eq("early-one-held-pending", held & 1u, 1u);
+
+    tb->early_vblank_in = 0;
+    for (int i = 0; i < 4; i++) tick();
+
+    tb->vsync_in = 1;
+    tick();
+    tick();
+    tb->vsync_in = 0;
+    for (int i = 0; i < 5; i++) tick();
+
+    uint32_t final_state = read_swap_ctrl();
+    check_eq("early-one-final-display", (final_state >> 1) & 0x3u, second);
+    check_eq("early-one-final-clear", final_state & 1u, 0u);
+}
+
 static void test_gpu_write_fixed_burst(void) {
     printf("test_gpu_write_fixed_burst (awburst=FIXED, addr stays pinned):\n");
     const uint32_t GPU_RING_DATA = 0x4A000008u;       // gpu_reg_addr = 2
@@ -851,13 +957,13 @@ static void test_video_vtotal_sysreg() {
     tb->analogizer_settings_in = 0;
     for (int i = 0; i < 4; i++) tick();
 
-    check_eq("vtotal-reset-60hz", mmio_read32(VIDEO_VTOTAL), 262u);
+    check_eq("vtotal-reset-conservative", mmio_read32(VIDEO_VTOTAL), 262u);
 
     axi_write_single(VIDEO_VTOTAL, 310u);
     check_eq("vtotal-write-50hz", mmio_read32(VIDEO_VTOTAL), 310u);
 
     axi_write_single(VIDEO_VTOTAL, 1u);
-    check_eq("vtotal-clamp-low", mmio_read32(VIDEO_VTOTAL), 262u);
+    check_eq("vtotal-clamp-low", mmio_read32(VIDEO_VTOTAL), 258u);
 
     axi_write_single(VIDEO_VTOTAL, 4095u);
     check_eq("vtotal-clamp-high", mmio_read32(VIDEO_VTOTAL), 375u);
@@ -1114,6 +1220,8 @@ int main(int argc, char **argv) {
     test_gpu_write_fixed_burst();
     test_gpu_swap_side_port();
     test_gpu_swap_req_vsync_race();
+    test_gpu_swap_early_vblank();
+    test_gpu_swap_early_vblank_one_consume_per_frame();
 
     // GPU MMIO read addressing — caught the registered-rdata off-by-one.
     test_gpu_read_addressing();

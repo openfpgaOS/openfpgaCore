@@ -60,14 +60,52 @@ static void palette_upload_shadow(void) {
     palette_commit_staged();
 }
 
+static volatile uint32_t timing_vblank_count;
+static volatile uint32_t timing_present_count;
+static volatile uint32_t timing_last_presented_idx;
+static volatile uint64_t timing_last_vblank_cycles;
+static volatile uint64_t timing_last_present_cycles;
+
 /* ---- Display refresh policy ----
  * Firmware owns the adaptive refresh policy and writes VIDEO_VTOTAL. The
- * FPGA still clamps the value and latches it only at frame boundary. When
- * Analogizer video or SNAC is active, RTL overrides this register with fixed
- * NTSC/PAL timing so external hardware does not see adaptive changes. */
+ * normal LCD policy measures the last frame-ready period, derives a direct
+ * integer repeat cadence inside the legal LCD Hz window, and only nudges the
+ * final planned repeat by a few scanlines if the last two frame times show a
+ * rising or falling trend. The awkward 30-42 fps band cannot map to one legal
+ * refresh interval or two legal intervals, so it is presented as a stable
+ * 30 fps cadence until the frame time fits one period. Planned repeats run at
+ * the computed cadence. If the next frame is still missing after those
+ * repeats, extra repeats switch to the fastest safe LCD timing until a new
+ * frame arrives, creating quick recovery opportunities without disturbing the
+ * normal repeat cadence. If the late window is missed too, the next repeat
+ * also uses that fastest timing.
+ * The FPGA clamps again and can consume shorter requests in the current frame
+ * after active video has completed. V_TOTAL=262 measured about 59.225 Hz; the
+ * experimental fast LCD mode lowers normal-LCD timing to V_TOTAL=258,
+ * estimated at about 60.14 Hz with the same line period. When Analogizer
+ * video or SNAC is active, RTL overrides this register with fixed NTSC/PAL
+ * timing so external hardware does not see adaptive changes. */
+#define VRR_FASTEST_HZ_MILLI         60143u
+#define VRR_CYCLES_PER_LINE_X1024    \
+    (((uint64_t)CPU_FREQ_HZ * 1000u * 1024u) / \
+     ((uint64_t)VRR_FASTEST_HZ_MILLI * VIDEO_VTOTAL_MIN))
+#define VRR_READY_GUARD_LINES        3u
+#define VRR_LATE_STRETCH_LINES       32u
+#define VRR_TREND_NUDGE_MAX_LINES    8u
+#define VRR_MAX_REPEAT_CANDIDATES    8u
+
 static uint64_t vrr_last_swap_cycles;
+static uint64_t vrr_ready_period_cycles;
 static uint32_t vrr_current_v_total = VIDEO_VTOTAL_60HZ;
-static uint32_t vrr_manual_v_total;  /* 0 = automatic render-period policy */
+static uint32_t vrr_steady_v_total = VIDEO_VTOTAL_60HZ;
+static uint32_t vrr_expected_v_total = VIDEO_VTOTAL_60HZ;
+static uint32_t vrr_late_v_total = VIDEO_VTOTAL_60HZ + VRR_LATE_STRETCH_LINES;
+static uint32_t vrr_repeats_per_frame = 1;
+static uint32_t vrr_repeat_phase;
+static int32_t vrr_trend_nudge_lines;
+static int vrr_recovery_fast;
+static int vrr_trend_nudge_allowed;
+static uint32_t vrr_manual_v_total;  /* 0 = automatic cadence/recovery policy */
 
 static uint32_t vrr_clamp_v_total(uint32_t v_total) {
     if (v_total < VIDEO_VTOTAL_MIN)
@@ -75,23 +113,6 @@ static uint32_t vrr_clamp_v_total(uint32_t v_total) {
     if (v_total > VIDEO_VTOTAL_MAX)
         return VIDEO_VTOTAL_MAX;
     return v_total;
-}
-
-static uint32_t vrr_v_total_from_period(uint32_t cycles) {
-    if      (cycles < 1666666u) return VIDEO_VTOTAL_60HZ;
-    else if (cycles < 1833333u) return VIDEO_VTOTAL_55HZ;
-    else if (cycles < 2022222u) return VIDEO_VTOTAL_50HZ;
-    else if (cycles < 2222222u) return VIDEO_VTOTAL_45HZ;
-    else if (cycles < 2400000u) return VIDEO_VTOTAL_42HZ;
-    else if (cycles < 3333333u) return VIDEO_VTOTAL_60HZ;
-    else if (cycles < 3666666u) return VIDEO_VTOTAL_55HZ;
-    else if (cycles < 4044444u) return VIDEO_VTOTAL_50HZ;
-    else if (cycles < 4444444u) return VIDEO_VTOTAL_45HZ;
-    else if (cycles < 4800000u) return VIDEO_VTOTAL_42HZ;
-    else if (cycles < 5500000u) return VIDEO_VTOTAL_55HZ;
-    else if (cycles < 6066666u) return VIDEO_VTOTAL_50HZ;
-    else if (cycles < 6666666u) return VIDEO_VTOTAL_45HZ;
-    else                        return VIDEO_VTOTAL_42HZ;
 }
 
 static void vrr_apply_v_total(uint32_t v_total) {
@@ -102,30 +123,182 @@ static void vrr_apply_v_total(uint32_t v_total) {
     vrr_current_v_total = v_total;
 }
 
+static uint32_t vrr_cycles_to_lines_ceil(uint64_t cycles) {
+    uint64_t lines = (cycles * 1024u + VRR_CYCLES_PER_LINE_X1024 - 1)
+                   / VRR_CYCLES_PER_LINE_X1024;
+    if (lines > 0xFFFFFFFFu)
+        return 0xFFFFFFFFu;
+    return (uint32_t)lines;
+}
+
+static uint32_t vrr_cycles_to_lines_nearest(uint64_t cycles) {
+    uint64_t lines = (cycles * 1024u + (VRR_CYCLES_PER_LINE_X1024 / 2u))
+                   / VRR_CYCLES_PER_LINE_X1024;
+    if (lines > 0xFFFFFFFFu)
+        return 0xFFFFFFFFu;
+    return (uint32_t)lines;
+}
+
+static uint32_t vrr_elapsed_lines_since_vblank(uint64_t now) {
+    uint64_t frame_start = timing_last_vblank_cycles;
+    if (frame_start == 0 || now < frame_start)
+        return 0;
+    return vrr_cycles_to_lines_ceil(now - frame_start);
+}
+
+static void vrr_update_cadence_from_period(void) {
+    if (vrr_ready_period_cycles == 0) {
+        vrr_repeats_per_frame = 1;
+        vrr_steady_v_total = VIDEO_VTOTAL_60HZ;
+        vrr_trend_nudge_allowed = 0;
+    } else {
+        uint32_t period_lines = vrr_cycles_to_lines_nearest(vrr_ready_period_cycles);
+
+        vrr_repeats_per_frame = 1;
+        vrr_steady_v_total = VIDEO_VTOTAL_60HZ;
+        vrr_trend_nudge_allowed = 0;
+
+        for (uint32_t repeats = 1; repeats <= VRR_MAX_REPEAT_CANDIDATES; repeats++) {
+            uint32_t v_total = (period_lines + (repeats / 2u)) / repeats;
+            if (v_total >= VIDEO_VTOTAL_MIN && v_total <= VIDEO_VTOTAL_MAX) {
+                vrr_repeats_per_frame = repeats;
+                vrr_steady_v_total = v_total;
+                vrr_trend_nudge_allowed = 1;
+                break;
+            }
+        }
+
+        if (period_lines < VIDEO_VTOTAL_MIN) {
+            vrr_repeats_per_frame = 1;
+            vrr_steady_v_total = VIDEO_VTOTAL_MIN;
+            vrr_trend_nudge_allowed = 0;
+        } else if (period_lines > (VIDEO_VTOTAL_MAX * VRR_MAX_REPEAT_CANDIDATES)) {
+            vrr_repeats_per_frame = VRR_MAX_REPEAT_CANDIDATES;
+            vrr_steady_v_total = VIDEO_VTOTAL_MAX;
+            vrr_trend_nudge_allowed = 0;
+        } else if (period_lines > VIDEO_VTOTAL_MAX &&
+                   period_lines < (VIDEO_VTOTAL_MIN * 2u)) {
+            vrr_repeats_per_frame = 2;
+            vrr_steady_v_total = VIDEO_VTOTAL_MIN;
+            vrr_trend_nudge_allowed = 0;
+        }
+    }
+
+    int32_t expected = (int32_t)vrr_steady_v_total;
+    if (vrr_trend_nudge_allowed)
+        expected += vrr_trend_nudge_lines;
+    if (expected < (int32_t)VIDEO_VTOTAL_MIN)
+        expected = VIDEO_VTOTAL_MIN;
+    if (expected > (int32_t)VIDEO_VTOTAL_MAX)
+        expected = VIDEO_VTOTAL_MAX;
+
+    vrr_expected_v_total = (uint32_t)expected;
+    vrr_late_v_total = vrr_clamp_v_total(vrr_expected_v_total +
+                                         VRR_LATE_STRETCH_LINES);
+}
+
+static int vrr_next_interval_expects_frame(void) {
+    return (vrr_repeats_per_frame <= 1u) ||
+           ((vrr_repeat_phase + 1u) >= vrr_repeats_per_frame);
+}
+
+static uint32_t vrr_interval_v_total(void) {
+    if (vrr_recovery_fast)
+        return VIDEO_VTOTAL_60HZ;
+    return vrr_next_interval_expects_frame() ? vrr_late_v_total
+                                             : vrr_steady_v_total;
+}
+
+static void vrr_note_presented(void) {
+    if (vrr_manual_v_total)
+        return;
+    vrr_repeat_phase = 0;
+    vrr_recovery_fast = 0;
+    vrr_apply_v_total(vrr_interval_v_total());
+}
+
+static uint32_t vrr_v_total_for_ready_time(uint64_t now) {
+    uint64_t frame_start = timing_last_vblank_cycles;
+    if (frame_start == 0 || now < frame_start)
+        frame_start = vrr_last_swap_cycles;
+    if (frame_start == 0 || now < frame_start)
+        return VIDEO_VTOTAL_60HZ;
+
+    uint64_t elapsed = now - frame_start;
+    uint64_t lines = (elapsed * 1024u + VRR_CYCLES_PER_LINE_X1024 - 1)
+                   / VRR_CYCLES_PER_LINE_X1024;
+    uint32_t target = (uint32_t)lines + VRR_READY_GUARD_LINES;
+    return vrr_clamp_v_total(target);
+}
+
+static void vrr_note_frame_ready(uint64_t now) {
+    if (vrr_last_swap_cycles != 0 && now > vrr_last_swap_cycles) {
+        uint64_t delta = now - vrr_last_swap_cycles;
+        if (delta > (CPU_FREQ_HZ / 120u) && delta < (CPU_FREQ_HZ / 5u)) {
+            if (vrr_ready_period_cycles != 0) {
+                uint64_t diff = (delta > vrr_ready_period_cycles)
+                              ? (delta - vrr_ready_period_cycles)
+                              : (vrr_ready_period_cycles - delta);
+                uint32_t nudge = (vrr_cycles_to_lines_nearest(diff) + 1u) / 2u;
+                if (nudge > VRR_TREND_NUDGE_MAX_LINES)
+                    nudge = VRR_TREND_NUDGE_MAX_LINES;
+                vrr_trend_nudge_lines = (delta > vrr_ready_period_cycles)
+                                      ? (int32_t)nudge : -(int32_t)nudge;
+            } else {
+                vrr_trend_nudge_lines = 0;
+            }
+            vrr_ready_period_cycles = delta;
+            vrr_update_cadence_from_period();
+        }
+    }
+    vrr_last_swap_cycles = now;
+}
+
 static void vrr_update_on_swap(void) {
     uint64_t now = read_cycles();
     uint32_t v_total = vrr_manual_v_total;
 
+    vrr_note_frame_ready(now);
+
     if (v_total == 0) {
-        if (vrr_last_swap_cycles == 0) {
-            v_total = VIDEO_VTOTAL_60HZ;
+        uint32_t elapsed_lines = vrr_elapsed_lines_since_vblank(now);
+
+        if (vrr_recovery_fast) {
+            v_total = vrr_v_total_for_ready_time(now);
+        } else if (elapsed_lines + VRR_READY_GUARD_LINES <= vrr_expected_v_total) {
+            v_total = vrr_expected_v_total;
         } else {
-            uint64_t elapsed = now - vrr_last_swap_cycles;
-            v_total = vrr_v_total_from_period(elapsed > 0xFFFFFFFFu
-                                              ? 0xFFFFFFFFu
-                                              : (uint32_t)elapsed);
+            v_total = vrr_v_total_for_ready_time(now);
         }
     }
 
-    vrr_last_swap_cycles = now;
     vrr_apply_v_total(v_total);
+}
+
+static void vrr_update_on_vblank(int presented) {
+    if (vrr_manual_v_total) {
+        vrr_apply_v_total(vrr_manual_v_total);
+        return;
+    }
+
+    if (presented) {
+        vrr_note_presented();
+    } else if (vrr_repeat_phase < 0xFFFFFFFFu) {
+        vrr_repeat_phase++;
+        if (vrr_repeat_phase >= vrr_repeats_per_frame)
+            vrr_recovery_fast = 1;
+    }
+
+    vrr_apply_v_total(vrr_interval_v_total());
 }
 
 void of_video_set_refresh_vtotal(uint32_t v_total) {
     vrr_manual_v_total = v_total ? vrr_clamp_v_total(v_total) : 0;
     vrr_last_swap_cycles = read_cycles();
+    vrr_repeat_phase = 0;
+    vrr_recovery_fast = 0;
     vrr_apply_v_total(vrr_manual_v_total ? vrr_manual_v_total
-                                         : VIDEO_VTOTAL_60HZ);
+                                         : vrr_interval_v_total());
 }
 
 /* swap_kicked: set when we KNOW fb_swap_pending was at 1 at some point
@@ -139,11 +312,6 @@ static int swap_kicked = 0;
 
 static uint32_t buf_ready_serial;
 static uint32_t counted_ready_serial;
-static volatile uint32_t timing_vblank_count;
-static volatile uint32_t timing_present_count;
-static volatile uint32_t timing_last_presented_idx;
-static volatile uint64_t timing_last_vblank_cycles;
-static volatile uint64_t timing_last_present_cycles;
 
 static inline uint32_t video_irq_save_local(void) {
     uint32_t prev;
@@ -181,6 +349,7 @@ static void timing_record_present_if_needed(int idx) {
         timing_last_presented_idx = (uint32_t)idx;
         timing_last_present_cycles = present_timestamp_cycles();
         counted_ready_serial = buf_ready_serial;
+        vrr_note_presented();
     }
     video_irq_restore_local(irq);
 }
@@ -241,7 +410,17 @@ void of_video_init(void) {
     timing_last_vblank_cycles = 0;
     timing_last_present_cycles = 0;
     vrr_last_swap_cycles = read_cycles();
+    vrr_ready_period_cycles = 0;
     vrr_current_v_total = VIDEO_VTOTAL_60HZ;
+    vrr_steady_v_total = VIDEO_VTOTAL_60HZ;
+    vrr_expected_v_total = VIDEO_VTOTAL_60HZ;
+    vrr_late_v_total = vrr_clamp_v_total(VIDEO_VTOTAL_60HZ +
+                                         VRR_LATE_STRETCH_LINES);
+    vrr_repeats_per_frame = 1;
+    vrr_repeat_phase = 0;
+    vrr_trend_nudge_lines = 0;
+    vrr_recovery_fast = 0;
+    vrr_trend_nudge_allowed = 0;
     vrr_manual_v_total = 0;
     VIDEO_VTOTAL = VIDEO_VTOTAL_60HZ;
     vid_display_mode = DISPLAY_MODE_FRAMEBUFFER;
@@ -391,9 +570,11 @@ void of_video_vsync(void) {
 }
 
 void of_video_vsync_irq_service(void) {
+    uint32_t present_count_before = timing_present_count;
     timing_vblank_count++;
     timing_last_vblank_cycles = read_cycles();
     sync_swap_state();
+    vrr_update_on_vblank(timing_present_count != present_count_before);
 }
 
 void of_video_get_timing(of_video_timing_t *out) {

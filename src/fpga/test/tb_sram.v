@@ -16,6 +16,8 @@ module tb_sram (
     // Word interface (driven from C++)
     input  wire        word_rd,
     input  wire        word_wr,
+    input  wire        word_rd_half,
+    input  wire        word_rd_hi,
     input  wire [21:0] word_addr,
     input  wire [31:0] word_data,
     input  wire [3:0]  word_wstrb,
@@ -40,6 +42,7 @@ sram_controller #(
 ) ctrl (
     .clk(clk), .reset_n(reset_n),
     .word_rd(word_rd), .word_wr(word_wr),
+    .word_rd_half(word_rd_half), .word_rd_hi(word_rd_hi),
     .word_addr(word_addr), .word_data(word_data), .word_wstrb(word_wstrb),
     .word_q(word_q), .word_busy(word_busy), .word_q_valid(word_q_valid),
     .sram_a(sram_a),

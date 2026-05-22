@@ -79,6 +79,8 @@ wire        gpu_wr_bvalid;
 // ============================================================
 wire        gpu_sram_rd;
 wire        gpu_sram_wr;
+wire        gpu_sram_rd_half;
+wire        gpu_sram_rd_hi;
 wire [21:0] gpu_sram_addr;
 wire [31:0] gpu_sram_wdata;
 wire [3:0]  gpu_sram_wstrb;
@@ -115,6 +117,8 @@ gpu_core gpu (
     // SRAM scratch
     .sram_rd(gpu_sram_rd),
     .sram_wr(gpu_sram_wr),
+    .sram_rd_half(gpu_sram_rd_half),
+    .sram_rd_hi(gpu_sram_rd_hi),
     .sram_addr(gpu_sram_addr),
     .sram_wdata(gpu_sram_wdata),
     .sram_wstrb(gpu_sram_wstrb),
@@ -149,13 +153,19 @@ reg        sram_busy_r;
 reg        sram_rvalid_r;
 reg [1:0]  sram_delay;
 reg        sram_op_read;
+reg        sram_half_r;
+reg        sram_hi_r;
 reg [15:0] sram_addr_r;
 reg [31:0] sram_wdata_r;
 reg [3:0]  sram_wstrb_r;
 
 assign gpu_sram_busy = sram_busy_r;
 assign gpu_sram_rdata_valid = sram_rvalid_r;
-assign gpu_sram_rdata = sram_mem[sram_addr_r];
+assign gpu_sram_rdata = sram_half_r
+                       ? (sram_hi_r
+                          ? {sram_mem[sram_addr_r][31:16], 16'd0}
+                          : {16'd0, sram_mem[sram_addr_r][15:0]})
+                       : sram_mem[sram_addr_r];
 
 always @(posedge clk) begin
     if (!reset_n) begin
@@ -163,6 +173,8 @@ always @(posedge clk) begin
         sram_rvalid_r <= 1'b0;
         sram_delay    <= 2'd0;
         sram_op_read  <= 1'b0;
+        sram_half_r    <= 1'b0;
+        sram_hi_r      <= 1'b0;
         sram_addr_r   <= 16'd0;
         sram_wdata_r  <= 32'd0;
         sram_wstrb_r  <= 4'd0;
@@ -172,6 +184,8 @@ always @(posedge clk) begin
             sram_busy_r  <= 1'b1;
             sram_delay   <= 2'd2;
             sram_op_read <= gpu_sram_rd;
+            sram_half_r   <= gpu_sram_rd && gpu_sram_rd_half;
+            sram_hi_r     <= gpu_sram_rd_hi;
             sram_addr_r  <= gpu_sram_addr[15:0];
             sram_wdata_r <= gpu_sram_wdata;
             sram_wstrb_r <= gpu_sram_wstrb;

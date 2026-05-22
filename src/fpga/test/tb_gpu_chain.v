@@ -454,6 +454,7 @@ axi_periph_slave dut (
 
     .dataslot_allcomplete(1'b1),
     .vsync               (1'b0),
+    .early_vblank        (1'b0),
     .cont1_key           (32'b0),
     .cont1_joy           (32'b0),
     .cont1_trig          (16'b0),

@@ -166,7 +166,7 @@ static void emit_test_span_payload(void) {
         ring_write_raw((uint32_t)(int32_t)fb_stride);
         ring_write_raw(p[0]);                         // lane 0 fb_addr
         ring_write_raw(p[1]);                         // lane 0 tex_addr
-        ring_write_raw((light << 16) | count);        // lane 0 light/count
+        ring_write_raw((cmap << 28) | (light << 16) | count); // lane 0 cmap/light/count
         ring_write_raw(p[2]);                         // lane 0 s
         ring_write_raw(p[3]);                         // lane 0 t
         ring_write_raw(p[4]);                         // lane 0 sstep

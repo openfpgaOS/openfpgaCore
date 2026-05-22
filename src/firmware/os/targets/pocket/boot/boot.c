@@ -396,7 +396,27 @@ static int boot_dma_read(uint32_t slot_id, uint32_t slot_offset,
     DS_SLOT_OFFSET = slot_offset;
     DS_BRIDGE_ADDR = bridge_addr;
     DS_LENGTH      = length;
-    DS_COMMAND     = DS_CMD_READ;
+
+    /* Warm instance switches can leave the peripheral-side dispatch
+     * guard briefly unable to consume DS_COMMAND even though the live
+     * bridge status already reads READY|WR_IDLE.  If the write is
+     * dropped, status remains idle forever (the on-screen E1 60 case).
+     * Probe for either ACK or READY deassertion and retry the command
+     * before entering the long ACK wait. */
+    for (int attempt = 0; attempt < 4; attempt++) {
+        DS_COMMAND = DS_CMD_READ;
+        __asm__ volatile("fence" ::: "memory");
+
+        for (int i = 0; i < 256; i++) {
+            uint32_t st = DS_STATUS;
+            if (st & DS_STATUS_ACK)
+                goto accepted;
+            if (!(st & DS_STATUS_READY))
+                goto accepted;
+        }
+    }
+
+accepted:
 
     /* Wait for ACK */
     timeout = BOOT_DMA_TIMEOUT;

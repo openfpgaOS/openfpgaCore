@@ -156,12 +156,13 @@
 
 /* Display timing control.
  * VIDEO_VTOTAL is the firmware-owned scanout V_TOTAL request. Hardware
- * clamps again in the video clock domain and latches changes only at frame
- * boundary; Analogizer/SNAC fixed-rate mode overrides this register. */
+ * clamps again in the video clock domain. In normal LCD mode, shorter
+ * requests may be consumed during the current blanking interval; Analogizer
+ * and SNAC fixed-rate modes override this register. */
 #define VIDEO_VTOTAL       REG32(SYSREG_BASE + 0xDC)
-#define VIDEO_VTOTAL_MIN   262u
+#define VIDEO_VTOTAL_MIN   258u
 #define VIDEO_VTOTAL_MAX   375u
-#define VIDEO_VTOTAL_60HZ  262u
+#define VIDEO_VTOTAL_60HZ  258u  /* experimental fast LCD mode, estimated ~60.14 Hz */
 #define VIDEO_VTOTAL_55HZ  285u
 #define VIDEO_VTOTAL_50HZ  310u
 #define VIDEO_VTOTAL_45HZ  340u

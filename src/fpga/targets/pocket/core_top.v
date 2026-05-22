@@ -837,6 +837,8 @@ wire        sram_oe_n_w, sram_we_n_w, sram_ub_n_w, sram_lb_n_w;
 
 wire        sram_word_rd;
 wire        sram_word_wr;
+wire        sram_word_rd_half;
+wire        sram_word_rd_hi;
 wire [21:0] sram_word_addr;
 wire [31:0] sram_word_wdata;
 wire [3:0]  sram_word_wstrb;
@@ -859,6 +861,8 @@ sram_controller #(
     .reset_n(1'b1),
     .word_rd(sram_word_rd),
     .word_wr(sram_word_wr),
+    .word_rd_half(sram_word_rd_half),
+    .word_rd_hi(sram_word_rd_hi),
     .word_addr(sram_word_addr),
     .word_data(sram_word_wdata),
     .word_wstrb(sram_word_wstrb),
@@ -1696,6 +1700,7 @@ assign video_hs = vidout_hs;
     reg         vidout_skip;
     reg         vidout_vs;
     reg         vidout_hs, vidout_hs_1;
+    wire        early_vblank_safe_vid;
 
     // Terminal moved to software — no hardware VRAM interface
 
@@ -1838,6 +1843,7 @@ assign video_hs = vidout_hs;
         // CDC inputs
         .dataslot_allcomplete(dataslot_allcomplete && bridge_wr_idle),
         .vsync(vidout_vs),
+        .early_vblank(early_vblank_safe_vid),
         .cont1_key(p1_controls),
         .cont1_joy(p1_joypad),
         .cont1_trig(p1_trigger),
@@ -2173,17 +2179,19 @@ assign video_hs = vidout_hs;
     reg crt_hs, crt_vs, crt_de;
     reg crt_hblank, crt_vblank;
 
-    // VRR: dynamic V_TOTAL, latched at frame boundary from CPU register.
-    // Pocket scaler accepts roughly 42-60 Hz. With the fixed 12.288 MHz
-    // scanout clock and 780 H_TOTAL, V_TOTAL=262 is the NTSC/SC ~60 Hz
-    // family and Analogizer PAL mode locks to V_TOTAL=315 (~50 Hz).
+    // VRR: dynamic V_TOTAL from CPU register. V_TOTAL=262 measured about
+    // 59.225 Hz; normal LCD mode may request an experimental V_TOTAL=258
+    // fast mode (~60.14 Hz). Analogizer PAL mode locks to V_TOTAL=315
+    // (~50 Hz). The active image ends after line 257, so V_TOTAL=258 keeps
+    // all 240 active lines but leaves no trailing blanking line.
     reg [9:0] crt_v_total;
-    wire [9:0] vrr_vt_safe = (vrr_vt_sync2 < 10'd262) ? 10'd262 :
+    wire [9:0] vrr_vt_safe = (vrr_vt_sync2 < 10'd258) ? 10'd258 :
                               (vrr_vt_sync2 > 10'd375) ? 10'd375 :
-                              (vrr_vt_sync2 == 10'd0)  ? 10'd262 : vrr_vt_sync2;
+                              (vrr_vt_sync2 == 10'd0)  ? 10'd258 : vrr_vt_sync2;
 
     wire [9:0]  visible_x = x_count - CRT_H_SYNC - CRT_H_BPORCH;
     wire [9:0]  visible_y = y_count - CRT_V_SYNC - CRT_V_BPORCH;
+    assign early_vblank_safe_vid = (y_count < (CRT_V_SYNC + CRT_V_BPORCH));
 
 always @(posedge clk_vid or negedge reset_n_vid) begin
 
@@ -2203,14 +2211,19 @@ always @(posedge clk_vid or negedge reset_n_vid) begin
         vidout_de_1 <= vidout_de;
 
         // x and y counters
+        // Refresh the target at line boundaries so a frame that becomes ready
+        // during blanking can end in the current frame instead of waiting one
+        // more full refresh.  The >= compare handles late shorter requests.
+        if(x_count == 0)
+            crt_v_total <= vrr_vt_safe;
         x_count <= x_count + 1'b1;
         if(x_count == CRT_H_TOTAL-1) begin
             x_count <= 0;
 
             y_count <= y_count + 1'b1;
-            if(y_count == crt_v_total - 1) begin
+            if(y_count >= crt_v_total - 1) begin
                 y_count <= 0;
-                crt_v_total <= vrr_vt_safe; // latch new V_TOTAL at frame boundary
+                crt_v_total <= vrr_vt_safe;
             end
         end
 
@@ -2507,6 +2520,8 @@ gpu_core gpu (
     // SRAM scratch
     .sram_rd(sram_word_rd),
     .sram_wr(sram_word_wr),
+    .sram_rd_half(sram_word_rd_half),
+    .sram_rd_hi(sram_word_rd_hi),
     .sram_addr(sram_word_addr),
     .sram_wdata(sram_word_wdata),
     .sram_wstrb(sram_word_wstrb),
@@ -2544,6 +2559,8 @@ assign gpu_swap_req   = 1'b0;
 assign gpu_swap_idx   = 2'b0;
 assign sram_word_rd    = 1'b0;
 assign sram_word_wr    = 1'b0;
+assign sram_word_rd_half = 1'b0;
+assign sram_word_rd_hi = 1'b0;
 assign sram_word_addr  = 22'b0;
 assign sram_word_wdata = 32'b0;
 assign sram_word_wstrb = 4'b0;
@@ -2556,7 +2573,7 @@ assign sram_word_wstrb = 4'b0;
     wire    clk_core_12288;         // 12.288 MHz — audio + fixed video scanout
     wire    clk_core_12288_90deg;   // 12.288 MHz 90° — Pocket video DDR
     wire    clk_core_49152;
-    wire    clk_vid;                // 12.288 MHz — ~60 Hz at V_TOTAL=262
+    wire    clk_vid;                // 12.288 MHz — ~59.225 Hz at V_TOTAL=262
     wire    clk_vid_90deg;
     wire    clk_cpu;
     wire    clk_ram_controller;
