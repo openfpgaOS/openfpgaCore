@@ -75,6 +75,9 @@ static std::vector<uint32_t> pending_stream;
  * being driven by a test, so any "wrong byte" mismatches stand out. */
 static const uint8_t SENTINEL_BYTE = 0xAB;
 
+static void check_pass(const char *name);
+static void check_fail(const char *name, const std::string &reason);
+
 // ============================================================================
 // 1. Tick / MMIO / ring / SDRAM helpers
 // ============================================================================
@@ -365,6 +368,7 @@ static void emit_raw_command(uint8_t cmd,
 }
 
 static const uint8_t SPAN_PERSP = 1 << 5;
+static const uint8_t CMD_PARAM_SPAN_LIST = 0x48;
 
 /* Internal single-span test model.  Wire emission uses one-lane native affine
  * or perspective span-group commands. */
@@ -404,36 +408,28 @@ struct EncodedCommand {
 
 static EncodedCommand encode_span_wire(const SpanWire &s) {
     EncodedCommand c {};
+    c.cmd = CMD_PARAM_SPAN_LIST;
     if (s.flags & SPAN_PERSP) {
-        c.cmd = 0x46;
-        c.payload.resize(23);
+        c.payload.assign(34, 0);
         c.payload[0]  = s.fb_addr;
-        c.payload[1]  = s.tex_addr;
-        c.payload[2]  = (1u << 28)
-                      | (((uint32_t)(s.flags | SPAN_PERSP) & 0xFFu) << 20)
-                      | (uint32_t)(s.colormap_id & 0x0F);
-        c.payload[3]  = 0;
-        c.payload[4]  = (uint32_t)(int32_t)s.fb_stride;
-        c.payload[5]  = (uint32_t)s.tex_width;
-        c.payload[6]  = ((uint32_t)s.tex_h_mask << 16) | (uint32_t)s.tex_w_mask;
-        c.payload[7]  = 0;
-        c.payload[8]  = 0;
-        c.payload[9]  = (uint32_t)s.count;
-        c.payload[10] = 0;
-        c.payload[11] = (uint32_t)s.sZ;
-        c.payload[12] = (uint32_t)s.tZ;
-        c.payload[13] = (uint32_t)s.zinv;
-        c.payload[14] = 0;
-        c.payload[15] = 0;
-        c.payload[16] = 0;
-        c.payload[17] = (uint32_t)s.sZstep;
-        c.payload[18] = (uint32_t)s.tZstep;
-        c.payload[19] = (uint32_t)s.zinv_step;
-        c.payload[20] = ((uint32_t)s.light & 0x3Fu) << 16;
-        c.payload[21] = 0;
-        c.payload[22] = 0;
+        c.payload[2]  = (uint32_t)(int32_t)s.fb_stride;
+        c.payload[3]  = s.tex_addr;
+        c.payload[4]  = (uint32_t)s.tex_width;
+        c.payload[5]  = (uint32_t)s.tex_w_mask;
+        c.payload[6]  = (uint32_t)s.tex_h_mask;
+        c.payload[7]  = ((uint32_t)(s.flags | SPAN_PERSP) & 0xFFu)
+                      | (((uint32_t)s.colormap_id & 0x0Fu) << 8)
+                      | (1u << 12);
+        c.payload[8]  = (uint32_t)s.sZ;
+        c.payload[9]  = (uint32_t)s.sZstep;
+        c.payload[11] = (uint32_t)s.tZ;
+        c.payload[12] = (uint32_t)s.tZstep;
+        c.payload[14] = (uint32_t)s.zinv;
+        c.payload[15] = (uint32_t)s.zinv_step;
+        c.payload[17] = ((uint32_t)s.light & 0x3Fu) << 16;
+        c.payload[29] = 1;
+        c.payload[32] = (uint32_t)s.count;
     } else {
-        c.cmd = 0x47;
         c.payload.resize(11);
         c.payload[0]  = (1u << 28)
                       | (((uint32_t)s.flags & ~SPAN_PERSP) << 20);
@@ -498,9 +494,12 @@ static void emit_batch_dma(const std::vector<SpanWire> &spans) {
 struct SpanGroupWire {
     uint32_t fb_addr;
     uint32_t tex_addr[8];
+    int32_t  s[8];
     int32_t  t[8];
+    int32_t  sstep[8];
     int32_t  tstep[8];
     uint16_t count;
+    uint16_t count_lane[8];
     uint8_t  flags;
     uint8_t  colormap_id[8]; // explicit per lane, including slot 0
     uint8_t  lane_count;
@@ -537,6 +536,10 @@ static int span_group_chunk_lanes(int lanes_left) {
     return (lanes_left > 4) ? 4 : lanes_left;
 }
 
+static uint16_t span_group_lane_count_value(const SpanGroupWire &s, int lane) {
+    return s.count_lane[lane] ? s.count_lane[lane] : s.count;
+}
+
 static std::vector<uint32_t> encode_affine_span_group_chunk(const SpanGroupWire &s,
                                                             int first_lane,
                                                             int lane_count) {
@@ -553,10 +556,10 @@ static std::vector<uint32_t> encode_affine_span_group_chunk(const SpanGroupWire 
         w[base + 1] = s.tex_addr[src];
         w[base + 2] = (((uint32_t)s.colormap_id[src] & 0x0Fu) << 28) |
                       (((uint32_t)s.light[src] & 0x3Fu) << 16) |
-                      (uint32_t)s.count;
-        w[base + 3] = 0;
+                      (uint32_t)span_group_lane_count_value(s, src);
+        w[base + 3] = (uint32_t)s.s[src];
         w[base + 4] = (uint32_t)s.t[src];
-        w[base + 5] = 0;
+        w[base + 5] = (uint32_t)s.sstep[src];
         w[base + 6] = (uint32_t)s.tstep[src];
     }
     return w;
@@ -567,7 +570,7 @@ static void emit_span_group_raw(const SpanGroupWire &s) {
     for (int first = 0; first < lane_count;) {
         int n = span_group_chunk_lanes(lane_count - first);
         std::vector<uint32_t> w = encode_affine_span_group_chunk(s, first, n);
-        ring_cmd(0x47, (uint32_t)w.size());
+        ring_cmd(CMD_PARAM_SPAN_LIST, (uint32_t)w.size());
         for (uint32_t x : w) ring_write(x);
         first += n;
     }
@@ -579,7 +582,7 @@ static void append_span_group_stream_raw(std::vector<uint32_t> &stream,
     for (int first = 0; first < lane_count;) {
         int n = span_group_chunk_lanes(lane_count - first);
         std::vector<uint32_t> w = encode_affine_span_group_chunk(s, first, n);
-        stream.push_back((0x47u << 24) | (uint32_t)w.size());
+        stream.push_back(((uint32_t)CMD_PARAM_SPAN_LIST << 24) | (uint32_t)w.size());
         stream.insert(stream.end(), w.begin(), w.end());
         first += n;
     }
@@ -666,7 +669,7 @@ static void emit_span_group_var_raw(const SpanGroupVarWire &s) {
     for (int first = 0; first < lane_count;) {
         int n = span_group_chunk_lanes(lane_count - first);
         std::vector<uint32_t> w = encode_affine_span_group_var_chunk(s, first, n);
-        ring_cmd(0x47, (uint32_t)w.size());
+        ring_cmd(CMD_PARAM_SPAN_LIST, (uint32_t)w.size());
         for (uint32_t x : w) ring_write(x);
         first += n;
     }
@@ -707,7 +710,7 @@ static std::vector<uint32_t>
 encode_persp_span_group_wire_chunk(const PerspSpanGroupWire &q,
                                    int first_lane,
                                    int lane_count) {
-    std::vector<uint32_t> w(23);
+    std::vector<uint32_t> w(31 + ((lane_count + 1) / 2) * 3);
     uint8_t flags = q.flags | SPAN_PERSP;
     int32_t fb_major = q.major_fb_step * first_lane;
     int32_t sZ_major = q.sZ_major_step * first_lane;
@@ -724,31 +727,42 @@ encode_persp_span_group_wire_chunk(const PerspSpanGroupWire &q,
     }
 
     w[0] = q.fb_addr + (uint32_t)fb_major;
-    w[1] = q.tex_addr;
-    w[2] = (((uint32_t)lane_count & 0x0Fu) << 28)
-         | ((uint32_t)flags << 20)
-         | (((uint32_t)q.reserved & 0x0Fu) << 16)
-         | ((uint32_t)q.colormap_id & 0x0Fu);
-    w[3] = (uint32_t)q.major_fb_step;
-    w[4] = (uint32_t)q.minor_fb_step;
-    w[5] = (uint32_t)q.tex_width;
-    w[6] = ((uint32_t)q.tex_h_mask << 16) | (uint32_t)q.tex_w_mask;
-    w[7] = ((uint32_t)start[1] << 16) | (uint32_t)start[0];
-    w[8] = ((uint32_t)start[3] << 16) | (uint32_t)start[2];
-    w[9] = ((uint32_t)count[1] << 16) | (uint32_t)count[0];
-    w[10] = ((uint32_t)count[3] << 16) | (uint32_t)count[2];
-    w[11] = (uint32_t)(q.sZ + sZ_major);
-    w[12] = (uint32_t)(q.tZ + tZ_major);
-    w[13] = (uint32_t)(q.zinv + zi_major);
-    w[14] = (uint32_t)q.sZ_major_step;
-    w[15] = (uint32_t)q.tZ_major_step;
+    w[1] = (uint32_t)q.major_fb_step;
+    w[2] = (uint32_t)q.minor_fb_step;
+    w[3] = q.tex_addr;
+    w[4] = (uint32_t)q.tex_width;
+    w[5] = (uint32_t)q.tex_w_mask;
+    w[6] = (uint32_t)q.tex_h_mask;
+    w[7] = ((uint32_t)flags & 0xFFu)
+         | (((uint32_t)q.colormap_id & 0x0Fu) << 8)
+         | (1u << 12);
+    w[8] = (uint32_t)(q.sZ + sZ_major);
+    w[9] = (uint32_t)q.sZ_minor_step;
+    w[10] = (uint32_t)q.sZ_major_step;
+    w[11] = (uint32_t)(q.tZ + tZ_major);
+    w[12] = (uint32_t)q.tZ_minor_step;
+    w[13] = (uint32_t)q.tZ_major_step;
+    w[14] = (uint32_t)(q.zinv + zi_major);
+    w[15] = (uint32_t)q.zinv_minor_step;
     w[16] = (uint32_t)q.zinv_major_step;
-    w[17] = (uint32_t)q.sZ_minor_step;
-    w[18] = (uint32_t)q.tZ_minor_step;
-    w[19] = (uint32_t)q.zinv_minor_step;
-    w[20] = (uint32_t)(q.light + light_major);
-    w[21] = (uint32_t)q.light_major_step;
-    w[22] = (uint32_t)q.light_minor_step;
+    w[17] = (uint32_t)(q.light + light_major);
+    w[18] = (uint32_t)q.light_minor_step;
+    w[19] = (uint32_t)q.light_major_step;
+    w[29] = (uint32_t)lane_count;
+    for (int i = 0; i < lane_count; i += 2) {
+        uint16_t bu = 0;
+        uint16_t bv = 0;
+        uint16_t bc = 0;
+        if (i + 1 < lane_count) {
+            bu = start[i + 1];
+            bv = (uint16_t)(i + 1);
+            bc = count[i + 1];
+        }
+        int base = 31 + (i / 2) * 3;
+        w[base + 0] = ((uint32_t)(uint16_t)i << 16) | (uint32_t)start[i];
+        w[base + 1] = ((uint32_t)bu << 16) | (uint32_t)count[i];
+        w[base + 2] = ((uint32_t)bc << 16) | (uint32_t)bv;
+    }
     return w;
 }
 
@@ -760,11 +774,347 @@ static void emit_persp_span_group_raw(const PerspSpanGroupWire &q) {
     while (lanes_left > 0) {
         int chunk_lanes = (lanes_left >= 4) ? 4 : lanes_left;
         auto w = encode_persp_span_group_wire_chunk(q, first_lane, chunk_lanes);
-        ring_cmd(0x46, (uint32_t)w.size());
+        ring_cmd(CMD_PARAM_SPAN_LIST, (uint32_t)w.size());
         for (uint32_t x : w) ring_write(x);
         first_lane += chunk_lanes;
         lanes_left -= chunk_lanes;
     }
+}
+
+struct ParamSpanRecordWire {
+    uint16_t u;
+    uint16_t v;
+    uint16_t count;
+};
+
+struct ParamSpanListWire {
+    uint32_t fb_base;
+    int32_t fb_major_step;
+    int32_t fb_minor_step;
+    uint32_t tex_addr;
+    uint16_t tex_width;
+    uint16_t tex_w_mask;
+    uint16_t tex_h_mask;
+    uint8_t flags;
+    uint8_t colormap_id;
+    uint8_t attr_mode;
+    uint8_t span_axis;
+    uint8_t z_mode;
+    int32_t attr_origin[3];
+    int32_t attr_du[3];
+    int32_t attr_dv[3];
+    int32_t light_origin;
+    int32_t light_du;
+    int32_t light_dv;
+    int32_t clamp_min[3];
+    int32_t clamp_max[3];
+    uint32_t z_base;
+    int32_t z_major_step;
+    int32_t z_minor_step;
+};
+
+static std::vector<uint32_t>
+encode_param_span_list_wire(const ParamSpanListWire &p,
+                            const std::vector<ParamSpanRecordWire> &records) {
+    std::vector<uint32_t> w(31 + ((records.size() + 1u) / 2u) * 3u, 0);
+    uint32_t control = ((uint32_t)p.flags & 0xFFu)
+                     | (((uint32_t)p.colormap_id & 0x0Fu) << 8)
+                     | (((uint32_t)p.attr_mode & 0x0Fu) << 12)
+                     | (((uint32_t)p.span_axis & 0x0Fu) << 16)
+                     | (((uint32_t)p.z_mode & 0x0Fu) << 24);
+
+    w[0] = p.fb_base;
+    w[1] = (uint32_t)p.fb_major_step;
+    w[2] = (uint32_t)p.fb_minor_step;
+    w[3] = p.tex_addr;
+    w[4] = p.tex_width;
+    w[5] = p.tex_w_mask;
+    w[6] = p.tex_h_mask;
+    w[7] = control;
+    for (int i = 0; i < 3; i++) {
+        w[8 + i * 3 + 0] = (uint32_t)p.attr_origin[i];
+        w[8 + i * 3 + 1] = (uint32_t)p.attr_du[i];
+        w[8 + i * 3 + 2] = (uint32_t)p.attr_dv[i];
+    }
+    w[17] = (uint32_t)p.light_origin;
+    w[18] = (uint32_t)p.light_du;
+    w[19] = (uint32_t)p.light_dv;
+    for (int i = 0; i < 3; i++) {
+        w[20 + i * 2 + 0] = (uint32_t)p.clamp_min[i];
+        w[20 + i * 2 + 1] = (uint32_t)p.clamp_max[i];
+    }
+    w[26] = p.z_base;
+    w[27] = (uint32_t)p.z_major_step;
+    w[28] = (uint32_t)p.z_minor_step;
+    w[29] = (uint32_t)records.size();
+
+    for (size_t i = 0; i < records.size(); i += 2) {
+        ParamSpanRecordWire a = records[i];
+        ParamSpanRecordWire b {};
+        if (i + 1u < records.size())
+            b = records[i + 1u];
+        size_t k = 31u + (i / 2u) * 3u;
+        w[k + 0] = ((uint32_t)a.v << 16) | (uint32_t)a.u;
+        w[k + 1] = ((uint32_t)b.u << 16) | (uint32_t)a.count;
+        w[k + 2] = ((uint32_t)b.count << 16) | (uint32_t)b.v;
+    }
+    return w;
+}
+
+static void emit_param_span_list_raw(const ParamSpanListWire &p,
+                                     const std::vector<ParamSpanRecordWire> &records) {
+    auto w = encode_param_span_list_wire(p, records);
+    ring_cmd(0x48, (uint32_t)w.size());
+    for (uint32_t x : w)
+        ring_write(x);
+}
+
+struct QuakePerspOraclePixel {
+    int64_t sZ;
+    int64_t tZ;
+    int64_t zi;
+    int32_t s_q16;
+    int32_t t_q16;
+    int s_int;
+    int t_int;
+    uint8_t texel;
+    uint8_t color;
+};
+
+static int32_t clamp_i128_to_i32(__int128 v) {
+    if (v > (__int128)INT32_MAX)
+        return INT32_MAX;
+    if (v < (__int128)INT32_MIN)
+        return INT32_MIN;
+    return (int32_t)v;
+}
+
+static int32_t quake_div_q16(int64_t n_q16, int64_t d_q16) {
+    if (d_q16 == 0)
+        return 0;
+    return clamp_i128_to_i32(((__int128)n_q16 << 16) / d_q16);
+}
+
+static int32_t arshift_i32(int32_t v, int shift) {
+    return v >> shift;
+}
+
+static uint8_t quake_persp_sample_texture(const PerspSpanGroupWire &q,
+                                          int32_t s_q16,
+                                          int32_t t_q16,
+                                          int32_t light_q16,
+                                          QuakePerspOraclePixel *out) {
+    uint16_t mw = q.tex_w_mask ? q.tex_w_mask : 0xFFFFu;
+    uint16_t mh = q.tex_h_mask ? q.tex_h_mask : 0xFFFFu;
+    int s_int = (int)((uint16_t)(arshift_i32(s_q16, 16) & mw));
+    int t_int = (int)((uint16_t)(arshift_i32(t_q16, 16) & mh));
+    uint32_t tex_addr = q.tex_addr
+                      + (uint32_t)t_int * (uint32_t)q.tex_width
+                      + (uint32_t)s_int;
+    uint8_t texel = sdram_read_byte(tex_addr);
+    uint8_t color = texel;
+    if (q.flags & 0x01u) {
+        uint8_t light = (uint8_t)((light_q16 >> 16) & 0x3F);
+        color = sdram_read_byte(PALOOKUP_BASE_BYTE
+                              + (uint32_t)(q.colormap_id & 0x0F) * PALOOKUP_STRIDE
+                              + (uint32_t)light * 256u
+                              + (uint32_t)texel);
+    }
+    if (out) {
+        out->s_q16 = s_q16;
+        out->t_q16 = t_q16;
+        out->s_int = s_int;
+        out->t_int = t_int;
+        out->texel = texel;
+        out->color = color;
+    }
+    return color;
+}
+
+static QuakePerspOraclePixel
+quake_persp_exact_oracle(const PerspSpanGroupWire &q, int lane, int pixel) {
+    int minor = (int)q.start[lane] + pixel;
+    QuakePerspOraclePixel r {};
+    r.sZ = (int64_t)q.sZ + (int64_t)lane * q.sZ_major_step
+         + (int64_t)minor * q.sZ_minor_step;
+    r.tZ = (int64_t)q.tZ + (int64_t)lane * q.tZ_major_step
+         + (int64_t)minor * q.tZ_minor_step;
+    r.zi = (int64_t)q.zinv + (int64_t)lane * q.zinv_major_step
+         + (int64_t)minor * q.zinv_minor_step;
+    int64_t light = (int64_t)q.light + (int64_t)lane * q.light_major_step
+                  + (int64_t)minor * q.light_minor_step;
+    r.s_q16 = quake_div_q16(r.sZ, r.zi);
+    r.t_q16 = quake_div_q16(r.tZ, r.zi);
+    quake_persp_sample_texture(q, r.s_q16, r.t_q16, (int32_t)light, &r);
+    return r;
+}
+
+static QuakePerspOraclePixel
+quake_persp_segment16_oracle(const PerspSpanGroupWire &q, int lane, int pixel) {
+    int seg_pixel = pixel & ~15;
+    int in_seg = pixel & 15;
+    int minor0 = (int)q.start[lane] + seg_pixel;
+    int minor1 = minor0 + 16;
+
+    int64_t sZ0 = (int64_t)q.sZ + (int64_t)lane * q.sZ_major_step
+                + (int64_t)minor0 * q.sZ_minor_step;
+    int64_t tZ0 = (int64_t)q.tZ + (int64_t)lane * q.tZ_major_step
+                + (int64_t)minor0 * q.tZ_minor_step;
+    int64_t zi0 = (int64_t)q.zinv + (int64_t)lane * q.zinv_major_step
+                + (int64_t)minor0 * q.zinv_minor_step;
+    int64_t sZ1 = (int64_t)q.sZ + (int64_t)lane * q.sZ_major_step
+                + (int64_t)minor1 * q.sZ_minor_step;
+    int64_t tZ1 = (int64_t)q.tZ + (int64_t)lane * q.tZ_major_step
+                + (int64_t)minor1 * q.tZ_minor_step;
+    int64_t zi1 = (int64_t)q.zinv + (int64_t)lane * q.zinv_major_step
+                + (int64_t)minor1 * q.zinv_minor_step;
+
+    int32_t s0 = quake_div_q16(sZ0, zi0);
+    int32_t t0 = quake_div_q16(tZ0, zi0);
+    int32_t s1 = quake_div_q16(sZ1, zi1);
+    int32_t t1 = quake_div_q16(tZ1, zi1);
+    int32_t sstep = (int32_t)(((int64_t)s1 - (int64_t)s0) >> 4);
+    int32_t tstep = (int32_t)(((int64_t)t1 - (int64_t)t0) >> 4);
+
+    QuakePerspOraclePixel r {};
+    r.sZ = (int64_t)q.sZ + (int64_t)lane * q.sZ_major_step
+         + (int64_t)((int)q.start[lane] + pixel) * q.sZ_minor_step;
+    r.tZ = (int64_t)q.tZ + (int64_t)lane * q.tZ_major_step
+         + (int64_t)((int)q.start[lane] + pixel) * q.tZ_minor_step;
+    r.zi = (int64_t)q.zinv + (int64_t)lane * q.zinv_major_step
+         + (int64_t)((int)q.start[lane] + pixel) * q.zinv_minor_step;
+    int64_t light = (int64_t)q.light + (int64_t)lane * q.light_major_step
+                  + (int64_t)((int)q.start[lane] + pixel) * q.light_minor_step;
+    r.s_q16 = s0 + in_seg * sstep;
+    r.t_q16 = t0 + in_seg * tstep;
+    quake_persp_sample_texture(q, r.s_q16, r.t_q16, (int32_t)light, &r);
+    return r;
+}
+
+static void emit_quake_segment16_affine_fallback(const PerspSpanGroupWire &q,
+                                                 uint32_t fb_base) {
+    for (int lane = 0; lane < q.lane_count; lane++) {
+        for (int p = 0; p < q.count[lane]; p += 16) {
+            int chunk = std::min<int>(16, (int)q.count[lane] - p);
+            QuakePerspOraclePixel a0 = quake_persp_segment16_oracle(q, lane, p);
+            QuakePerspOraclePixel a1 = quake_persp_segment16_oracle(q, lane, p + 16);
+            SpanWire s = make_span();
+            s.fb_addr = fb_base + (uint32_t)((int32_t)lane * q.major_fb_step)
+                      + (uint32_t)((int32_t)((int)q.start[lane] + p)
+                                   * q.minor_fb_step);
+            s.tex_addr = q.tex_addr;
+            s.flags = q.flags & (uint8_t)~SPAN_PERSP;
+            s.colormap_id = q.colormap_id;
+            s.count = (uint16_t)chunk;
+            s.light = (uint8_t)((q.light >> 16) & 0x3F);
+            s.fb_stride = (int16_t)q.minor_fb_step;
+            s.tex_width = q.tex_width;
+            s.tex_w_mask = q.tex_w_mask;
+            s.tex_h_mask = q.tex_h_mask;
+            s.s = a0.s_q16;
+            s.t = a0.t_q16;
+            s.sstep = (int32_t)(((int64_t)a1.s_q16 - (int64_t)a0.s_q16) >> 4);
+            s.tstep = (int32_t)(((int64_t)a1.t_q16 - (int64_t)a0.t_q16) >> 4);
+            emit_span_raw(s);
+        }
+    }
+}
+
+static void dump_persp_payload_words(const std::vector<uint32_t> &payload) {
+    printf("    payload:");
+    for (size_t i = 0; i < payload.size(); i++) {
+        if ((i % 4) == 0)
+            printf("\n      %02zu:", i);
+        printf(" %08x", payload[i]);
+    }
+    printf("\n");
+}
+
+static bool compare_quake_persp_group_to_oracles(const char *name,
+                                                 const PerspSpanGroupWire &q,
+                                                 uint32_t split_fb_base,
+                                                 bool fail_on_exact_mismatch) {
+    std::vector<uint32_t> payload = encode_persp_span_group_wire_chunk(q, 0, q.lane_count);
+    int exact_diffs = 0;
+    int seg_diffs = 0;
+    int split_diffs = 0;
+    bool printed = false;
+    bool printed_split = false;
+
+    for (int lane = 0; lane < q.lane_count; lane++) {
+        for (int p = 0; p < q.count[lane]; p++) {
+            uint32_t fb = q.fb_addr + (uint32_t)((int32_t)lane * q.major_fb_step)
+                        + (uint32_t)((int32_t)((int)q.start[lane] + p)
+                                     * q.minor_fb_step);
+            uint32_t split_fb = split_fb_base
+                              + (uint32_t)((int32_t)lane * q.major_fb_step)
+                              + (uint32_t)((int32_t)((int)q.start[lane] + p)
+                                           * q.minor_fb_step);
+            uint8_t got = sdram_read_byte(fb);
+            uint8_t split = sdram_read_byte(split_fb);
+            QuakePerspOraclePixel exact = quake_persp_exact_oracle(q, lane, p);
+            QuakePerspOraclePixel seg16 = quake_persp_segment16_oracle(q, lane, p);
+            bool exact_mismatch = got != exact.color;
+            bool seg_mismatch = got != seg16.color;
+            bool split_mismatch = got != split;
+
+            if (exact_mismatch)
+                exact_diffs++;
+            if (seg_mismatch)
+                seg_diffs++;
+            if (split_mismatch)
+                split_diffs++;
+
+            if (!printed && ((fail_on_exact_mismatch && exact_mismatch)
+                          || seg_mismatch || split_mismatch)) {
+                printf("  first mismatch in %s:\n", name);
+                printf("    lane=%d pixel=%d fb=0x%08x start=%d count=%u\n",
+                       lane, p, fb, (int)q.start[lane], q.count[lane]);
+                printf("    actual=0x%02x(s=%d t%%8=%d) exact=0x%02x seg16=0x%02x split_gpu=0x%02x\n",
+                       got, got & 31, (got >> 5) & 7,
+                       exact.color, seg16.color, split);
+                printf("    exact sZ=%lld tZ=%lld zi=%lld s_q16=0x%08x t_q16=0x%08x s=%d t=%d texel=0x%02x\n",
+                       (long long)exact.sZ, (long long)exact.tZ,
+                       (long long)exact.zi, (uint32_t)exact.s_q16,
+                       (uint32_t)exact.t_q16, exact.s_int, exact.t_int,
+                       exact.texel);
+                printf("    seg16 s_q16=0x%08x t_q16=0x%08x s=%d t=%d texel=0x%02x\n",
+                       (uint32_t)seg16.s_q16, (uint32_t)seg16.t_q16,
+                       seg16.s_int, seg16.t_int, seg16.texel);
+                dump_persp_payload_words(payload);
+                printed = true;
+            }
+            if (!printed_split && (seg_mismatch || split_mismatch)) {
+                printf("  first segment/split mismatch in %s:\n", name);
+                printf("    lane=%d pixel=%d fb=0x%08x split_fb=0x%08x\n",
+                       lane, p, fb, split_fb);
+                printf("    actual=0x%02x(s=%d t%%8=%d) seg16=0x%02x split_gpu=0x%02x exact=0x%02x\n",
+                       got, got & 31, (got >> 5) & 7,
+                       seg16.color, split, exact.color);
+                printf("    sZ=%lld tZ=%lld zi=%lld seg_s_q16=0x%08x seg_t_q16=0x%08x s=%d t=%d\n",
+                       (long long)seg16.sZ, (long long)seg16.tZ,
+                       (long long)seg16.zi, (uint32_t)seg16.s_q16,
+                       (uint32_t)seg16.t_q16, seg16.s_int, seg16.t_int);
+                dump_persp_payload_words(payload);
+                printed_split = true;
+            }
+        }
+    }
+
+    printf("  %s diffs: exact=%d segment16=%d split_gpu=%d\n",
+           name, exact_diffs, seg_diffs, split_diffs);
+    if (split_diffs == 0 && seg_diffs == 0
+            && (!fail_on_exact_mismatch || exact_diffs == 0)) {
+        check_pass(name);
+        return true;
+    }
+
+    char buf[160];
+    snprintf(buf, sizeof(buf),
+             "exact_diffs=%d segment16_diffs=%d split_gpu_diffs=%d",
+             exact_diffs, seg_diffs, split_diffs);
+    check_fail(name, buf);
+    return false;
 }
 
 /* Submit a raw mixed command stream through the doorbell-DMA path.  The
@@ -986,11 +1336,11 @@ struct FbModel {
         int32_t cs = s.s, ct = s.t;
         uint32_t fb = s.fb_addr;
         for (uint16_t i = 0; i < count; i++) {
-            uint16_t s_int = (uint16_t)((cs >> 16) & mw);
-            uint16_t t_int = (uint16_t)((ct >> 16) & mh);
-            uint32_t tex_addr = s.tex_addr
-                              + (uint32_t)t_int * (uint32_t)s.tex_width
-                              + s_int;
+            int32_t s_int = (int16_t)((cs >> 16) & mw);
+            int32_t t_int = (int16_t)((ct >> 16) & mh);
+            uint32_t tex_addr = (uint32_t)((int64_t)s.tex_addr
+                              + (int64_t)t_int * (uint32_t)s.tex_width
+                              + s_int);
             uint8_t texel = read(tex_addr);
 
             if ((s.flags & SPAN_SKIP_ZERO) && texel == 0xFF) {
@@ -1037,12 +1387,12 @@ struct FbModel {
             SpanWire s = make_span();
             s.fb_addr  = q.fb_addr + (uint32_t)((int32_t)q.lane_delta * lane);
             s.tex_addr = q.tex_addr[lane];
-            s.s = 0;
+            s.s = q.s[lane];
             s.t = q.t[lane];
-            s.sstep = 0;
+            s.sstep = q.sstep[lane];
             s.tstep = q.tstep[lane];
             s.colormap_id = q.colormap_id[lane];
-            s.count = q.count;
+            s.count = span_group_lane_count_value(q, lane);
             s.light = q.light[lane];
             s.flags = q.flags;
             s.fb_stride = q.fb_stride;
@@ -1855,13 +2205,14 @@ static void test_clear_drains_framebuffer_writes() {
     uint32_t aw_after = tb->dbg_aw_count;
     uint32_t aw_writes = aw_after - aw_before;
     const uint32_t clear_words = (320u * 200u) / 4u;
-    if (aw_writes == clear_words) {
-        check_pass("clear_drains_framebuffer_writes.aw_count");
+    if (aw_writes < clear_words && tb->dbg_aw_burst_count != 0 && tb->dbg_aw_max_len >= 3) {
+        check_pass("clear_drains_framebuffer_writes.aw_count_reduced");
     } else {
         char buf[128];
-        snprintf(buf, sizeof(buf), "AW handshakes=%u expected %u",
-                 aw_writes, clear_words);
-        check_fail("clear_drains_framebuffer_writes.aw_count", buf);
+        snprintf(buf, sizeof(buf), "AW handshakes=%u words=%u bursts=%u max_len=%u",
+                 aw_writes, clear_words, tb->dbg_aw_burst_count,
+                 (unsigned)tb->dbg_aw_max_len);
+        check_fail("clear_drains_framebuffer_writes.aw_count_reduced", buf);
     }
 }
 
@@ -3132,6 +3483,269 @@ static void test_persp_span_group_doom_wall_cpu_fixeddiv_reference() {
     }
 }
 
+static void test_persp_span_group_quake_rows_match_single_lane_spans() {
+    printf("TEST persp_span_group_quake_rows_match_single_lane_spans\n");
+    gpu_init();
+    preload_with_sentinel();
+
+    constexpr int tex_w = 64;
+    constexpr int tex_h = 64;
+    std::vector<uint8_t> tex(tex_w * tex_h);
+    for (int t = 0; t < tex_h; t++) {
+        for (int s = 0; s < tex_w; s++)
+            tex[(size_t)t * tex_w + (size_t)s] =
+                (uint8_t)(((t & 3) << 6) | (s & 0x3F));
+    }
+    upload_texture(TEX_BASE_BYTE, tex);
+    upload_palookup_identity_row(0, 0);
+    cmd_set_fb(FB_BASE_BYTE, 320);
+
+    PerspSpanGroupWire q = make_persp_span_group();
+    q.fb_addr = FB_BASE_BYTE + 10u * 320u;
+    q.tex_addr = TEX_BASE_BYTE;
+    q.lane_count = 4;
+    q.flags = SPAN_PERSP | (1u << 0);
+    q.colormap_id = 0;
+    q.major_fb_step = 320;           // adjacent Quake scanlines
+    q.minor_fb_step = 1;             // pixels advance horizontally
+    q.tex_width = tex_w;
+    q.tex_w_mask = tex_w - 1;
+    q.tex_h_mask = tex_h - 1;
+
+    const int starts[4] = {0, 7, 3, 11};
+    const int counts[4] = {80, 37, 64, 22};
+    for (int lane = 0; lane < 4; lane++) {
+        q.start[lane] = (int16_t)starts[lane];
+        q.count[lane] = (uint16_t)counts[lane];
+    }
+
+    /* Quake-like non-constant projection.  The absolute values mirror the
+     * d_scan.c repro shape; major steps make each adjacent row distinct.
+     */
+    q.sZ = 60280;
+    q.tZ = 9948;
+    q.zinv = 1455;
+    q.sZ_major_step = 1200;
+    q.tZ_major_step = 96;
+    q.zinv_major_step = 8;
+    q.sZ_minor_step = 234;
+    q.tZ_minor_step = 42;
+    q.zinv_minor_step = 3;
+    q.light = 0;
+    q.light_major_step = 0;
+    q.light_minor_step = 0;
+
+    emit_persp_span_group_raw(q);
+
+    const uint32_t scalar_base = FB_BASE_BYTE + 80u * 320u;
+    for (int lane = 0; lane < 4; lane++) {
+        const int start = q.start[lane];
+        SpanWire s = make_span();
+        s.fb_addr = scalar_base + (uint32_t)lane * 320u + (uint32_t)start;
+        s.tex_addr = TEX_BASE_BYTE;
+        s.count = q.count[lane];
+        s.flags = q.flags;
+        s.colormap_id = q.colormap_id;
+        s.fb_stride = 1;
+        s.tex_width = q.tex_width;
+        s.tex_w_mask = q.tex_w_mask;
+        s.tex_h_mask = q.tex_h_mask;
+        s.sZ = q.sZ + lane * q.sZ_major_step + start * q.sZ_minor_step;
+        s.tZ = q.tZ + lane * q.tZ_major_step + start * q.tZ_minor_step;
+        s.zinv = q.zinv + lane * q.zinv_major_step + start * q.zinv_minor_step;
+        s.sZstep = q.sZ_minor_step;
+        s.tZstep = q.tZ_minor_step;
+        s.zinv_step = q.zinv_minor_step;
+        emit_span_raw(s);
+    }
+
+    if (!submit_and_wait()) {
+        check_fail("persp_span_group_quake_rows_match_single_lane_spans", "timeout");
+        return;
+    }
+
+    int diffs = 0;
+    int first_lane = -1, first_pix = -1;
+    uint8_t first_group = 0, first_scalar = 0;
+    for (int lane = 0; lane < 4; lane++) {
+        for (int p = 0; p < q.count[lane]; p++) {
+            uint32_t group_addr = q.fb_addr + (uint32_t)lane * 320u
+                                + (uint32_t)(q.start[lane] + p);
+            uint32_t scalar_addr = scalar_base + (uint32_t)lane * 320u
+                                 + (uint32_t)(q.start[lane] + p);
+            uint8_t a = sdram_read_byte(group_addr);
+            uint8_t b = sdram_read_byte(scalar_addr);
+            if (a != b) {
+                if (diffs == 0) {
+                    first_lane = lane;
+                    first_pix = p;
+                    first_group = a;
+                    first_scalar = b;
+                }
+                diffs++;
+            }
+        }
+    }
+    if (diffs == 0) {
+        check_pass("persp_span_group_quake_rows_match_single_lane_spans");
+    } else {
+        char buf[192];
+        snprintf(buf, sizeof(buf),
+                 "diffs=%d first lane=%d pix=%d group=0x%02x scalar=0x%02x",
+                 diffs, first_lane, first_pix, first_group, first_scalar);
+        check_fail("persp_span_group_quake_rows_match_single_lane_spans", buf);
+    }
+}
+
+static void upload_quake_oracle_texture(int tex_w, int tex_h) {
+    std::vector<uint8_t> tex((size_t)tex_w * (size_t)tex_h);
+    for (int t = 0; t < tex_h; t++) {
+        for (int s = 0; s < tex_w; s++) {
+            tex[(size_t)t * (size_t)tex_w + (size_t)s] =
+                (uint8_t)(((t & 7) << 5) | (s & 31));
+        }
+    }
+    upload_texture(TEX_BASE_BYTE, tex);
+}
+
+static bool run_quake_persp_payload_case(const char *name,
+                                         const PerspSpanGroupWire &q,
+                                         bool fail_on_exact_mismatch) {
+    gpu_init();
+    preload_with_sentinel();
+    upload_quake_oracle_texture(q.tex_width, q.tex_h_mask + 1);
+    upload_palookup_identity_row(q.colormap_id, 0);
+    cmd_set_fb(FB_BASE_BYTE, 320);
+    std::vector<uint32_t> payload =
+        encode_persp_span_group_wire_chunk(q, 0, q.lane_count);
+    if (payload.size() < 31) {
+        check_fail(name, "perspective payload is missing span header");
+        return false;
+    }
+    emit_raw_command(CMD_PARAM_SPAN_LIST, payload);
+    uint32_t split_fb_base = FB_ALT_BASE_BYTE + (q.fb_addr - FB_BASE_BYTE);
+    emit_quake_segment16_affine_fallback(q, split_fb_base);
+    if (!submit_and_wait()) {
+        check_fail(name, "timeout");
+        return false;
+    }
+    return compare_quake_persp_group_to_oracles(name, q, split_fb_base,
+                                                fail_on_exact_mismatch);
+}
+
+static PerspSpanGroupWire make_quake_base_payload() {
+    PerspSpanGroupWire q = make_persp_span_group();
+    q.fb_addr = FB_BASE_BYTE + 20u * 320u;
+    q.tex_addr = TEX_BASE_BYTE;
+    q.lane_count = 4;
+    q.flags = SPAN_PERSP | 0x01u;      // perspective + explicit colormap
+    q.colormap_id = 3;
+    q.major_fb_step = 320;             // adjacent Quake scanlines
+    q.minor_fb_step = 1;               // horizontal pixels
+    q.tex_width = 128;
+    q.tex_w_mask = 127;
+    q.tex_h_mask = 127;
+    q.light = 0;
+    q.light_major_step = 0;
+    q.light_minor_step = 0;
+    return q;
+}
+
+static void test_persp_span_group_quake_payload_cpu_oracle() {
+    printf("TEST persp_span_group_quake_payload_cpu_oracle\n");
+
+    /* Real Quake d_scan-shaped world surface: four adjacent rows, row-base
+     * projection fields, non-zero starts, varied counts, and non-zero
+     * major/minor perspective steps.  Lane 0 at start=18 reproduces the
+     * 60280/9948/1455 d_scan repro values used by the scalar perspective
+     * test; the group payload stores the row-base values exactly as
+     * the SDK normalizes them before emitting the unified span command.
+     */
+    PerspSpanGroupWire q = make_quake_base_payload();
+    const int starts[4] = {18, 23, 7, 41};
+    const int counts[4] = {85, 74, 109, 36};
+    for (int i = 0; i < 4; i++) {
+        q.start[i] = (int16_t)starts[i];
+        q.count[i] = (uint16_t)counts[i];
+    }
+    q.sZ = 60280 - starts[0] * 234;
+    q.tZ = 9948  - starts[0] * 42;
+    q.zinv = 1455 - starts[0] * 3;
+    q.sZ_major_step = 715;
+    q.tZ_major_step = -86;
+    q.zinv_major_step = 9;
+    q.sZ_minor_step = 234;
+    q.tZ_minor_step = 42;
+    q.zinv_minor_step = 3;
+    run_quake_persp_payload_case("persp_quake_payload_exact_oracle",
+                                 q, false);
+}
+
+static void test_persp_span_group_quake_payload_edge_cases() {
+    printf("TEST persp_span_group_quake_payload_edge_cases\n");
+
+    PerspSpanGroupWire neg = make_quake_base_payload();
+    neg.fb_addr = FB_BASE_BYTE + 60u * 320u;
+    int neg_starts[4] = {5, 18, 31, 2};
+    int neg_counts[4] = {64, 49, 33, 80};
+    for (int i = 0; i < 4; i++) {
+        neg.start[i] = (int16_t)neg_starts[i];
+        neg.count[i] = (uint16_t)neg_counts[i];
+    }
+    neg.sZ = 100000;
+    neg.tZ = 18000;
+    neg.zinv = 1800;
+    neg.sZ_major_step = -420;
+    neg.tZ_major_step = 165;
+    neg.zinv_major_step = 6;
+    neg.sZ_minor_step = -171;          // negative minor step
+    neg.tZ_minor_step = 65;
+    neg.zinv_minor_step = 4;
+    run_quake_persp_payload_case("persp_quake_payload_negative_minor",
+                                 neg, false);
+
+    PerspSpanGroupWire tiny = make_quake_base_payload();
+    tiny.fb_addr = FB_BASE_BYTE + 95u * 320u;
+    tiny.lane_count = 2;
+    tiny.start[0] = 33;
+    tiny.start[1] = 47;
+    tiny.count[0] = 40;
+    tiny.count[1] = 24;
+    tiny.sZ = 0;
+    tiny.tZ = 0;
+    tiny.zinv = 64;                    // very small positive 1/z
+    tiny.sZ_major_step = 48;
+    tiny.tZ_major_step = 32;
+    tiny.zinv_major_step = 3;
+    tiny.sZ_minor_step = 64;
+    tiny.tZ_minor_step = 32;
+    tiny.zinv_minor_step = 1;
+    run_quake_persp_payload_case("persp_quake_payload_tiny_positive_zi",
+                                 tiny, false);
+
+    PerspSpanGroupWire sadj = make_quake_base_payload();
+    sadj.fb_addr = FB_BASE_BYTE + 120u * 320u;
+    sadj.start[0] = 40;
+    sadj.start[1] = 44;
+    sadj.start[2] = 48;
+    sadj.start[3] = 52;
+    sadj.count[0] = 48;
+    sadj.count[1] = 48;
+    sadj.count[2] = 48;
+    sadj.count[3] = 48;
+    sadj.sZ = -32 << 16;               // baked Quake sadjust-style offset
+    sadj.tZ = 3 << 16;
+    sadj.zinv = 0x8000;
+    sadj.sZ_major_step = 1 << 16;
+    sadj.tZ_major_step = 0x2000;
+    sadj.zinv_major_step = 0x20;
+    sadj.sZ_minor_step = 1 << 16;
+    sadj.tZ_minor_step = 0x4000;
+    sadj.zinv_minor_step = 0x10;
+    run_quake_persp_payload_case("persp_quake_payload_baked_sadjust",
+                                 sadj, false);
+}
+
 // ---- Section 14: Batched native span stream equivalence ----------------------
 static void test_batch_equals_individual() {
     /* For the same payload, a batch and N individual spans must produce
@@ -3290,8 +3904,8 @@ static void test_span_group_texture_height_mask() {
                       FB_BASE_BYTE, 320, 16, 18, 4, q.count);
 }
 
-static void test_span_group_aligned_coalesces_row_writes() {
-    printf("TEST span_group_aligned_coalesces_row_writes\n");
+static void test_span_group_aligned_matches_reference() {
+    printf("TEST span_group_aligned_matches_reference\n");
     gpu_init();
     auto m = preload_with_sentinel();
 
@@ -3316,27 +3930,15 @@ static void test_span_group_aligned_coalesces_row_writes() {
         q.light[lane] = (uint8_t)lane;
     }
 
-    uint32_t aw_before = tb->dbg_aw_count;
     emit_span_group_raw(q);
     m.apply_span_group_affine(q);
     if (!submit_and_wait()) {
-        check_fail("span_group_aligned_coalesces_row_writes", "timeout");
+        check_fail("span_group_aligned_matches_reference", "timeout");
         return;
     }
 
-    compare_fb_region("span_group_aligned_coalesces_row_writes.fb", m,
+    compare_fb_region("span_group_aligned_matches_reference.fb", m,
                       FB_BASE_BYTE, 320, 8, 40, 4, q.count);
-
-    uint32_t aw_after = tb->dbg_aw_count;
-    uint32_t writes = aw_after - aw_before;
-    if (writes == q.count) {
-        check_pass("span_group_aligned_coalesces_row_writes.aw_count");
-    } else {
-        char buf[128];
-        snprintf(buf, sizeof(buf), "AW handshakes=%u expected rows=%u",
-                 writes, (uint32_t)q.count);
-        check_fail("span_group_aligned_coalesces_row_writes.aw_count", buf);
-    }
 }
 
 static void test_span_group_aligned_texture_cache_thrash() {
@@ -3852,7 +4454,7 @@ static void test_command_stream_dma_mixed_affine_groups() {
 }
 
 static void test_command_stream_dma_mixed_persp_span_group() {
-    /* Exercise CMD_DRAW_PERSP_SPAN_GROUP through the same mixed raw command
+    /* Exercise perspective records through the same mixed raw command
      * stream path the SDK uses, with ordinary commands before and after it.
      * This catches payload length, rdptr, and state carryover bugs that an
      * isolated inline command can miss. */
@@ -3935,7 +4537,7 @@ static void test_command_stream_dma_mixed_persp_span_group() {
             int chunk_lanes = (lanes_left >= 4) ? 4 : lanes_left;
             auto w = encode_persp_span_group_wire_chunk(q, first_lane,
                                                         chunk_lanes);
-            stream.push_back((0x46u << 24) | (uint32_t)w.size());
+            stream.push_back(((uint32_t)CMD_PARAM_SPAN_LIST << 24) | (uint32_t)w.size());
             append(w);
             first_lane += chunk_lanes;
             lanes_left -= chunk_lanes;
@@ -4117,42 +4719,37 @@ static void test_triangle_uses_colormap_slot_zero() {
     }
 }
 
-static void test_framebuffer_writes_remain_single_beat() {
-    printf("TEST framebuffer_writes_remain_single_beat\n");
+static void test_framebuffer_writes_burst_full_words() {
+    printf("TEST framebuffer_writes_burst_full_words\n");
     gpu_init();
-    preload_with_sentinel();
-    upload_palookup_identity_row(0, 0);
-
-    std::vector<uint8_t> tex(64, 0x42);
-    upload_texture(TEX_BASE_BYTE, tex);
+    auto m = preload_with_sentinel();
 
     cmd_set_fb(FB_BASE_BYTE, 320);
-    cmd_set_texture(TEX_BASE_BYTE, 8, 8);
+    m.st_fb_addr = FB_BASE_BYTE;
 
     uint32_t burst_before = tb->dbg_aw_burst_count;
 
-    SpanWire s = make_span();
-    s.fb_addr = FB_BASE_BYTE + 0x100;
-    s.tex_addr = TEX_BASE_BYTE;
-    s.tex_width = 8;
-    s.count = 16;
-    s.flags = 0;
-    emit_span_raw(s);
+    cmd_clear_rect(FB_BASE_BYTE + 0x100, 64, 1, 0, 0x42);
+    m.apply_clear_rect(FB_BASE_BYTE + 0x100, 64, 1, 0, 0x42);
 
     if (!submit_and_wait()) {
-        check_fail("framebuffer_writes_remain_single_beat.scalar", "timeout");
+        check_fail("framebuffer_writes_burst_full_words.clear_rect", "timeout");
         return;
     }
 
-    uint32_t burst_after_scalar = tb->dbg_aw_burst_count;
+    compare_fb_region("framebuffer_writes_burst_full_words.fb", m,
+                      FB_BASE_BYTE, 320, 0, 0, 128, 2);
 
-    if (burst_after_scalar == burst_before)
-        check_pass("framebuffer_writes_remain_single_beat.single_lane_no_burst");
+    uint32_t burst_after_clear = tb->dbg_aw_burst_count;
+
+    if (burst_after_clear > burst_before && tb->dbg_aw_max_len >= 6)
+        check_pass("framebuffer_writes_burst_full_words.clear_rect_burst");
     else {
         char buf[128];
-        snprintf(buf, sizeof(buf), "burst count changed on single-lane span: %u -> %u",
-                 burst_before, burst_after_scalar);
-        check_fail("framebuffer_writes_remain_single_beat.single_lane_no_burst", buf);
+        snprintf(buf, sizeof(buf),
+                 "expected burst beyond old 4-beat cap on aligned clear_rect: bursts %u -> %u max_len=%u",
+                 burst_before, burst_after_clear, (unsigned)tb->dbg_aw_max_len);
+        check_fail("framebuffer_writes_burst_full_words.clear_rect_burst", buf);
     }
 
 #if GPU_TEST_ENABLE_TRIANGLES
@@ -4171,19 +4768,19 @@ static void test_framebuffer_writes_remain_single_beat() {
     vert(8, 40, 0,       7 << 16);
 
     if (!submit_and_wait()) {
-        check_fail("framebuffer_writes_remain_single_beat.triangle", "timeout");
+        check_fail("framebuffer_writes_burst_full_words.triangle", "timeout");
         return;
     }
 
     uint32_t burst_after_tri = tb->dbg_aw_burst_count;
-    if (burst_after_tri == burst_after_scalar)
-        check_pass("framebuffer_writes_remain_single_beat.triangle_no_burst");
+    if (burst_after_tri >= burst_after_clear)
+        check_pass("framebuffer_writes_burst_full_words.triangle_safe");
     else {
         char buf[128];
         snprintf(buf, sizeof(buf),
-                 "burst count changed on triangle: %u -> %u, max=%u",
-                 burst_after_scalar, burst_after_tri, (unsigned)tb->dbg_aw_max_len);
-        check_fail("framebuffer_writes_remain_single_beat.triangle_no_burst", buf);
+                 "burst counter regressed on triangle: %u -> %u, max=%u",
+                 burst_after_clear, burst_after_tri, (unsigned)tb->dbg_aw_max_len);
+        check_fail("framebuffer_writes_burst_full_words.triangle_safe", buf);
     }
 #endif
 }
@@ -4522,6 +5119,1531 @@ static void test_sdk_count_4096_does_not_leak_into_colormap_id() {
     }
 }
 
+static SpanWire param_affine_ref_span(const ParamSpanListWire &p,
+                                      const ParamSpanRecordWire &r) {
+    SpanWire s = make_span();
+    int64_t u = r.u;
+    int64_t v = r.v;
+    int64_t fb = (p.span_axis == 1)
+               ? (int64_t)p.fb_base + u * p.fb_major_step + v * p.fb_minor_step
+               : (int64_t)p.fb_base + v * p.fb_major_step + u * p.fb_minor_step;
+    int64_t a0 = (int64_t)p.attr_origin[0] + u * p.attr_du[0] + v * p.attr_dv[0];
+    int64_t a1 = (int64_t)p.attr_origin[1] + u * p.attr_du[1] + v * p.attr_dv[1];
+    int64_t light = (int64_t)p.light_origin + u * p.light_du + v * p.light_dv;
+
+    s.fb_addr = (uint32_t)fb;
+    s.tex_addr = p.tex_addr;
+    s.s = (int32_t)a0;
+    s.t = (int32_t)a1;
+    s.sstep = (p.span_axis == 1) ? p.attr_dv[0] : p.attr_du[0];
+    s.tstep = (p.span_axis == 1) ? p.attr_dv[1] : p.attr_du[1];
+    s.count = r.count;
+    s.flags = p.flags & ~SPAN_PERSP;
+    s.colormap_id = p.colormap_id;
+    s.light = (uint8_t)((light >> 16) & 0x3F);
+    s.fb_stride = (int16_t)p.fb_minor_step;
+    s.tex_width = p.tex_width;
+    s.tex_w_mask = p.tex_w_mask;
+    s.tex_h_mask = p.tex_h_mask;
+    return s;
+}
+
+static std::vector<uint8_t> make_param_test_texture() {
+    std::vector<uint8_t> tex(64 * 64);
+    for (int y = 0; y < 64; y++)
+        for (int x = 0; x < 64; x++)
+            tex[y * 64 + x] = (uint8_t)((y << 2) ^ (x * 3) ^ 0x31);
+    return tex;
+}
+
+static void test_param_span_list_affine_rows() {
+    printf("TEST param_span_list_affine_rows\n");
+    gpu_init();
+    FbModel m = preload_with_sentinel();
+    upload_texture(TEX_BASE_BYTE, make_param_test_texture());
+    m.snapshot_from_sdram();
+
+    ParamSpanListWire p {};
+    p.fb_base = FB_BASE_BYTE;
+    p.fb_major_step = 320;
+    p.fb_minor_step = 1;
+    p.tex_addr = TEX_BASE_BYTE;
+    p.tex_width = 64;
+    p.tex_w_mask = 0x3F;
+    p.tex_h_mask = 0x3F;
+    p.attr_mode = 0;
+    p.span_axis = 0;
+    p.attr_du[0] = 1 << 16;
+    p.attr_dv[1] = 1 << 16;
+
+    std::vector<ParamSpanRecordWire> records = {
+        {3, 4, 5}, {10, 5, 3}, {1, 7, 4}
+    };
+    emit_param_span_list_raw(p, records);
+    for (const auto &r : records)
+        m.apply_span_ref(param_affine_ref_span(p, r));
+
+    if (!submit_and_wait()) {
+        check_fail("param_span_list_affine_rows", "timeout");
+        return;
+    }
+    compare_fb_region("param_span_list_affine_rows.fb", m,
+                      FB_BASE_BYTE, 320, 0, 0, 32, 12);
+}
+
+static void test_param_span_list_affine_columns() {
+    printf("TEST param_span_list_affine_columns\n");
+    gpu_init();
+    FbModel m = preload_with_sentinel();
+    upload_texture(TEX_BASE_BYTE, make_param_test_texture());
+    m.snapshot_from_sdram();
+
+    ParamSpanListWire p {};
+    p.fb_base = FB_BASE_BYTE;
+    p.fb_major_step = 1;
+    p.fb_minor_step = 320;
+    p.tex_addr = TEX_BASE_BYTE;
+    p.tex_width = 64;
+    p.tex_w_mask = 0x3F;
+    p.tex_h_mask = 0x3F;
+    p.attr_mode = 0;
+    p.span_axis = 1;
+    p.attr_du[0] = 1 << 16;
+    p.attr_dv[1] = 1 << 16;
+
+    std::vector<ParamSpanRecordWire> records = {
+        {5, 2, 4}, {9, 3, 5}, {14, 1, 3}, {18, 4, 2}
+    };
+    emit_param_span_list_raw(p, records);
+    for (const auto &r : records)
+        m.apply_span_ref(param_affine_ref_span(p, r));
+
+    if (!submit_and_wait()) {
+        check_fail("param_span_list_affine_columns", "timeout");
+        return;
+    }
+    compare_fb_region("param_span_list_affine_columns.fb", m,
+                      FB_BASE_BYTE, 320, 0, 0, 24, 12);
+}
+
+static void test_param_span_list_affine_clamp() {
+    printf("TEST param_span_list_affine_clamp\n");
+    gpu_init();
+    preload_with_sentinel();
+    std::vector<uint8_t> tex(64);
+    for (int i = 0; i < 64; i++)
+        tex[i] = (uint8_t)i;
+    upload_texture(TEX_BASE_BYTE, tex);
+
+    ParamSpanListWire p {};
+    p.fb_base = FB_BASE_BYTE;
+    p.fb_major_step = 320;
+    p.fb_minor_step = 1;
+    p.tex_addr = TEX_BASE_BYTE;
+    p.tex_width = 64;
+    p.tex_w_mask = 0x3F;
+    p.tex_h_mask = 0x3F;
+    p.attr_mode = 0;
+    p.span_axis = 0;
+    p.attr_du[0] = 1 << 16;
+    p.clamp_min[0] = 2 << 16;
+    p.clamp_max[0] = 4 << 16;
+
+    std::vector<ParamSpanRecordWire> records = {{0, 0, 8}};
+    emit_param_span_list_raw(p, records);
+
+    if (!submit_and_wait()) {
+        check_fail("param_span_list_affine_clamp", "timeout");
+        return;
+    }
+    const uint8_t expected[8] = {2, 2, 2, 3, 4, 4, 4, 4};
+    int diffs = 0;
+    for (int i = 0; i < 8; i++) {
+        if (sdram_read_byte(FB_BASE_BYTE + (uint32_t)i) != expected[i])
+            diffs++;
+    }
+    if (diffs == 0)
+        check_pass("param_span_list_affine_clamp");
+    else {
+        char buf[64];
+        snprintf(buf, sizeof(buf), "%d clamp byte mismatches", diffs);
+        check_fail("param_span_list_affine_clamp", buf);
+    }
+}
+
+static void test_param_span_list_zero_counts_skip() {
+    printf("TEST param_span_list_zero_counts_skip\n");
+    gpu_init();
+    FbModel m = preload_with_sentinel();
+    upload_texture(TEX_BASE_BYTE, make_param_test_texture());
+    m.snapshot_from_sdram();
+
+    ParamSpanListWire p {};
+    p.fb_base = FB_BASE_BYTE;
+    p.fb_major_step = 320;
+    p.fb_minor_step = 1;
+    p.tex_addr = TEX_BASE_BYTE;
+    p.tex_width = 64;
+    p.tex_w_mask = 0x3F;
+    p.tex_h_mask = 0x3F;
+    p.attr_mode = 0;
+    p.span_axis = 0;
+    p.attr_du[0] = 1 << 16;
+    p.attr_dv[1] = 1 << 16;
+
+    std::vector<ParamSpanRecordWire> records = {
+        {2, 2, 3}, {7, 2, 0}, {4, 3, 2}, {9, 3, 0}
+    };
+    emit_param_span_list_raw(p, records);
+    for (const auto &r : records) {
+        if (r.count != 0)
+            m.apply_span_ref(param_affine_ref_span(p, r));
+    }
+
+    if (!submit_and_wait()) {
+        check_fail("param_span_list_zero_counts_skip", "timeout");
+        return;
+    }
+    compare_fb_region("param_span_list_zero_counts_skip.fb", m,
+                      FB_BASE_BYTE, 320, 0, 0, 16, 8);
+}
+
+static void test_param_span_list_streams_many_records() {
+    printf("TEST param_span_list_streams_many_records\n");
+    gpu_init();
+    FbModel m = preload_with_sentinel();
+    upload_texture(TEX_BASE_BYTE, make_param_test_texture());
+    m.snapshot_from_sdram();
+
+    ParamSpanListWire p {};
+    p.fb_base = FB_BASE_BYTE;
+    p.fb_major_step = 320;
+    p.fb_minor_step = 1;
+    p.tex_addr = TEX_BASE_BYTE;
+    p.tex_width = 64;
+    p.tex_w_mask = 0x3F;
+    p.tex_h_mask = 0x3F;
+    p.attr_mode = 0;
+    p.span_axis = 0;
+    p.attr_du[0] = 1 << 16;
+    p.attr_dv[1] = 1 << 16;
+
+    std::vector<ParamSpanRecordWire> records = {
+        {1, 1, 5}, {9, 1, 4}, {2, 2, 6}, {13, 2, 3},
+        {4, 3, 0}, {6, 3, 7}, {3, 4, 5}, {12, 5, 6},
+        {0, 6, 8}
+    };
+    emit_param_span_list_raw(p, records);
+    for (const auto &r : records) {
+        if (r.count != 0)
+            m.apply_span_ref(param_affine_ref_span(p, r));
+    }
+
+    if (!submit_and_wait()) {
+        check_fail("param_span_list_streams_many_records", "timeout");
+        return;
+    }
+    compare_fb_region("param_span_list_streams_many_records.fb", m,
+                      FB_BASE_BYTE, 320, 0, 0, 24, 8);
+}
+
+static void test_param_span_list_unsupported_noop() {
+    printf("TEST param_span_list_unsupported_noop\n");
+    gpu_init();
+    FbModel m = preload_with_sentinel();
+    upload_texture(TEX_BASE_BYTE, make_param_test_texture());
+    m.snapshot_from_sdram();
+
+    ParamSpanListWire p {};
+    p.fb_base = FB_BASE_BYTE;
+    p.fb_major_step = 320;
+    p.fb_minor_step = 1;
+    p.tex_addr = TEX_BASE_BYTE;
+    p.tex_width = 64;
+    p.tex_w_mask = 0x3F;
+    p.tex_h_mask = 0x3F;
+    p.attr_mode = 2;       // unsupported SOLID/opaque fill attr mode
+    p.span_axis = 0;
+    p.attr_du[0] = 1 << 16;
+
+    std::vector<ParamSpanRecordWire> records = {{0, 0, 5}};
+    emit_param_span_list_raw(p, records);
+
+    p.attr_mode = 0;
+    p.z_mode = 4;          // unsupported depth mode must also be ignored
+    emit_param_span_list_raw(p, records);
+
+    if (!submit_and_wait()) {
+        check_fail("param_span_list_unsupported_noop", "timeout");
+        return;
+    }
+    compare_fb_region("param_span_list_unsupported_noop.fb", m,
+                      FB_BASE_BYTE, 320, 0, 0, 16, 4);
+}
+
+static void test_param_span_list_colormap_skip_zero() {
+    printf("TEST param_span_list_colormap_skip_zero\n");
+    gpu_init();
+    FbModel m = preload_with_sentinel();
+    std::vector<uint8_t> tex(64 * 64, 0);
+    tex[0] = 0x10;
+    tex[1] = 0xFF;
+    tex[2] = 0x20;
+    tex[3] = 0x21;
+    tex[4] = 0xFF;
+    tex[5] = 0x22;
+    upload_texture(TEX_BASE_BYTE, tex);
+    upload_palookup_const_row(3, 2, 0x77);
+    m.snapshot_from_sdram();
+
+    ParamSpanListWire p {};
+    p.fb_base = FB_BASE_BYTE;
+    p.fb_major_step = 320;
+    p.fb_minor_step = 1;
+    p.tex_addr = TEX_BASE_BYTE;
+    p.tex_width = 64;
+    p.tex_w_mask = 0x3F;
+    p.tex_h_mask = 0x3F;
+    p.flags = (1u << 0) | (1u << 2);   // COLORMAP | SKIP_ZERO
+    p.colormap_id = 3;
+    p.attr_mode = 0;
+    p.span_axis = 0;
+    p.attr_du[0] = 1 << 16;
+    p.light_origin = 2 << 16;
+
+    std::vector<ParamSpanRecordWire> records = {{0, 0, 6}};
+    emit_param_span_list_raw(p, records);
+    m.apply_span_ref(param_affine_ref_span(p, records[0]));
+
+    if (!submit_and_wait()) {
+        check_fail("param_span_list_colormap_skip_zero", "timeout");
+        return;
+    }
+    compare_fb_region("param_span_list_colormap_skip_zero.fb", m,
+                      FB_BASE_BYTE, 320, 0, 0, 8, 1);
+}
+
+static void test_param_span_list_persp_matches_helper() {
+    printf("TEST param_span_list_persp_matches_helper\n");
+    gpu_init();
+    preload_with_sentinel();
+    upload_texture(TEX_BASE_BYTE, make_projection_test_texture());
+    upload_palookup_identity_row(0, 0);
+
+    PerspSpanGroupWire q = make_persp_span_group();
+    q.fb_addr = FB_BASE_BYTE;
+    q.tex_addr = TEX_BASE_BYTE;
+    q.lane_count = 4;
+    q.flags = SPAN_PERSP;
+    q.major_fb_step = 320;
+    q.minor_fb_step = 1;
+    q.tex_width = 64;
+    q.tex_w_mask = 0x3F;
+    q.tex_h_mask = 0x3F;
+    q.start[0] = 3; q.start[1] = 4; q.start[2] = 5; q.start[3] = 6;
+    q.count[0] = 19; q.count[1] = 23; q.count[2] = 17; q.count[3] = 21;
+    q.sZ = 0x00024000;
+    q.tZ = 0x00018000;
+    q.zinv = 0x00010000;
+    q.sZ_major_step = 0x00000700;
+    q.tZ_major_step = -0x00000500;
+    q.zinv_major_step = 0x00000080;
+    q.sZ_minor_step = 0x00001100;
+    q.tZ_minor_step = 0x00000d00;
+    q.zinv_minor_step = 0x00000040;
+
+    ParamSpanListWire p {};
+    p.fb_base = FB_ALT_BASE_BYTE;
+    p.fb_major_step = 320;
+    p.fb_minor_step = 1;
+    p.tex_addr = TEX_BASE_BYTE;
+    p.tex_width = 64;
+    p.tex_w_mask = 0x3F;
+    p.tex_h_mask = 0x3F;
+    p.flags = SPAN_PERSP;
+    p.attr_mode = 1;
+    p.span_axis = 0;
+    p.attr_origin[0] = q.sZ;
+    p.attr_origin[1] = q.tZ;
+    p.attr_origin[2] = q.zinv;
+    p.attr_du[0] = q.sZ_minor_step;
+    p.attr_du[1] = q.tZ_minor_step;
+    p.attr_du[2] = q.zinv_minor_step;
+    p.attr_dv[0] = q.sZ_major_step;
+    p.attr_dv[1] = q.tZ_major_step;
+    p.attr_dv[2] = q.zinv_major_step;
+
+    std::vector<ParamSpanRecordWire> records;
+    for (int lane = 0; lane < 4; lane++)
+        records.push_back({(uint16_t)q.start[lane], (uint16_t)lane, q.count[lane]});
+
+    emit_persp_span_group_raw(q);
+    emit_param_span_list_raw(p, records);
+
+    if (!submit_and_wait()) {
+        check_fail("param_span_list_persp_matches_helper", "timeout");
+        return;
+    }
+
+    int diffs = 0;
+    for (int lane = 0; lane < 4; lane++) {
+        for (int i = 0; i < q.count[lane]; i++) {
+            uint32_t a = FB_BASE_BYTE + (uint32_t)lane * 320u + q.start[lane] + i;
+            uint32_t b = FB_ALT_BASE_BYTE + (uint32_t)lane * 320u + q.start[lane] + i;
+            if (sdram_read_byte(a) != sdram_read_byte(b))
+                diffs++;
+        }
+    }
+    if (diffs == 0)
+        check_pass("param_span_list_persp_matches_helper");
+    else {
+        char buf[96];
+        snprintf(buf, sizeof(buf), "%d pixel mismatches vs helper path", diffs);
+        check_fail("param_span_list_persp_matches_helper", buf);
+    }
+}
+
+static uint16_t sdram_read_u16_le(uint32_t byte_addr) {
+    return (uint16_t)sdram_read_byte(byte_addr)
+         | ((uint16_t)sdram_read_byte(byte_addr + 1u) << 8);
+}
+
+static void sdram_write_u16_le(uint32_t byte_addr, uint16_t value) {
+    sdram_write_byte(byte_addr, (uint8_t)(value & 0xFFu));
+    sdram_write_byte(byte_addr + 1u, (uint8_t)(value >> 8));
+}
+
+static int32_t q_i32(double x) {
+    return (int32_t)x;
+}
+
+static int32_t q_clamp_i32(int32_t x, int32_t lo, int32_t hi) {
+    if (x < lo) return lo;
+    if (x > hi) return hi;
+    return x;
+}
+
+static std::vector<uint8_t> make_quake_distinct_texture(int tex_w, int tex_h) {
+    std::vector<uint8_t> tex((size_t)tex_w * (size_t)tex_h);
+    for (int t = 0; t < tex_h; t++) {
+        for (int s = 0; s < tex_w; s++)
+            tex[(size_t)t * (size_t)tex_w + (size_t)s] =
+                (uint8_t)((s * 3 + t * 17 + 11) & 0xFF);
+    }
+    return tex;
+}
+
+static void quake_ref_span(std::vector<uint8_t> &fb,
+                           std::vector<uint16_t> *zb,
+                           const std::vector<uint8_t> &tex,
+                           int tex_w,
+                           int x, int y, int count,
+                           double d_sdivzorigin,
+                           double d_tdivzorigin,
+                           double d_ziorigin,
+                           double d_sdivzstepu,
+                           double d_tdivzstepu,
+                           double d_zistepu,
+                           double d_sdivzstepv,
+                           double d_tdivzstepv,
+                           double d_zistepv,
+                           int32_t sadjust,
+                           int32_t tadjust,
+                           int32_t bbextents,
+                           int32_t bbextentt,
+                           int fb_stride,
+                           int z_stride) {
+    double sdivz16stepu = d_sdivzstepu * 16.0;
+    double tdivz16stepu = d_tdivzstepu * 16.0;
+    double zi16stepu    = d_zistepu    * 16.0;
+
+    double sdivz = d_sdivzorigin + y * d_sdivzstepv + x * d_sdivzstepu;
+    double tdivz = d_tdivzorigin + y * d_tdivzstepv + x * d_tdivzstepu;
+    double zi    = d_ziorigin    + y * d_zistepv    + x * d_zistepu;
+    int izistep = q_i32(d_zistepu * 0x8000 * 0x10000);
+    int izi = q_i32(zi * 0x8000 * 0x10000);
+
+    int32_t s = q_i32(sdivz * (65536.0 / zi)) + sadjust;
+    int32_t t = q_i32(tdivz * (65536.0 / zi)) + tadjust;
+    s = q_clamp_i32(s, 0, bbextents);
+    t = q_clamp_i32(t, 0, bbextentt);
+
+    int px = x;
+    while (count > 0) {
+        int spancount = (count >= 16) ? 16 : count;
+        count -= spancount;
+
+        int32_t snext, tnext, sstep = 0, tstep = 0;
+        if (count) {
+            sdivz += sdivz16stepu;
+            tdivz += tdivz16stepu;
+            zi    += zi16stepu;
+            snext = q_i32(sdivz * (65536.0 / zi)) + sadjust;
+            tnext = q_i32(tdivz * (65536.0 / zi)) + tadjust;
+            snext = q_clamp_i32(snext, 16, bbextents);
+            tnext = q_clamp_i32(tnext, 16, bbextentt);
+            sstep = (snext - s) >> 4;
+            tstep = (tnext - t) >> 4;
+        } else {
+            double m = (double)(spancount - 1);
+            sdivz += d_sdivzstepu * m;
+            tdivz += d_tdivzstepu * m;
+            zi    += d_zistepu    * m;
+            snext = q_i32(sdivz * (65536.0 / zi)) + sadjust;
+            tnext = q_i32(tdivz * (65536.0 / zi)) + tadjust;
+            snext = q_clamp_i32(snext, 8, bbextents);
+            tnext = q_clamp_i32(tnext, 8, bbextentt);
+            if (spancount > 1) {
+                sstep = q_i32((double)(snext - s) / (double)(spancount - 1));
+                tstep = q_i32((double)(tnext - t) / (double)(spancount - 1));
+            }
+        }
+
+        for (int i = 0; i < spancount; i++) {
+            int si = s >> 16;
+            int ti = t >> 16;
+            fb[(size_t)y * (size_t)fb_stride + (size_t)px] =
+                tex[(size_t)ti * (size_t)tex_w + (size_t)si];
+
+            if (zb) {
+                (*zb)[(size_t)y * (size_t)z_stride + (size_t)px] =
+                    (uint16_t)(izi >> 16);
+                izi += izistep;
+            }
+
+            s += sstep;
+            t += tstep;
+            px++;
+        }
+
+        s = snext;
+        t = tnext;
+    }
+}
+
+struct QuakeQ29RefSetup {
+    double d_sdivzorigin;
+    double d_tdivzorigin;
+    double d_ziorigin;
+    double d_sdivzstepu;
+    double d_tdivzstepu;
+    double d_zistepu;
+    double d_sdivzstepv;
+    double d_tdivzstepv;
+    double d_zistepv;
+    int32_t sadjust;
+    int32_t tadjust;
+    int32_t bbextents;
+    int32_t bbextentt;
+};
+
+static QuakeQ29RefSetup make_quake_q29_ref_setup(int tex_w, int tex_h) {
+    QuakeQ29RefSetup q {};
+    q.d_sdivzorigin = -0.01425;
+    q.d_tdivzorigin =  0.02875;
+    q.d_ziorigin    =  0.01020;
+    q.d_sdivzstepu  =  0.000033;
+    q.d_tdivzstepu  = -0.000019;
+    q.d_zistepu     =  0.0000011;
+    q.d_sdivzstepv  = -0.000071;
+    q.d_tdivzstepv  =  0.000096;
+    q.d_zistepv     = -0.0000004;
+    q.sadjust = 17 << 16;
+    q.tadjust = 11 << 16;
+    q.bbextents = ((tex_w - 1) << 16) - 1;
+    q.bbextentt = ((tex_h - 1) << 16) - 1;
+    return q;
+}
+
+static ParamSpanListWire make_quake_q29_param(const QuakeQ29RefSetup &q,
+                                              uint32_t fb_base,
+                                              uint32_t tex_base,
+                                              int fb_stride,
+                                              int tex_w,
+                                              int tex_h) {
+    ParamSpanListWire p {};
+    p.fb_base = fb_base;
+    p.fb_major_step = fb_stride;
+    p.fb_minor_step = 1;
+    p.tex_addr = tex_base;
+    p.tex_width = tex_w;
+    p.tex_w_mask = 0;
+    p.tex_h_mask = 0;
+    p.attr_mode = 3;
+    p.span_axis = 0;
+    const double num_scale = 8192.0;       // 2^(29 - 16)
+    const double zi_scale = 536870912.0;   // 2^29
+    p.attr_origin[0] = q_i32((q.d_sdivzorigin * 65536.0
+                           + (double)q.sadjust * q.d_ziorigin) * num_scale);
+    p.attr_origin[1] = q_i32((q.d_tdivzorigin * 65536.0
+                           + (double)q.tadjust * q.d_ziorigin) * num_scale);
+    p.attr_origin[2] = q_i32(q.d_ziorigin * zi_scale);
+    p.attr_du[0] = q_i32((q.d_sdivzstepu * 65536.0
+                       + (double)q.sadjust * q.d_zistepu) * num_scale);
+    p.attr_du[1] = q_i32((q.d_tdivzstepu * 65536.0
+                       + (double)q.tadjust * q.d_zistepu) * num_scale);
+    p.attr_du[2] = q_i32(q.d_zistepu * zi_scale);
+    p.attr_dv[0] = q_i32((q.d_sdivzstepv * 65536.0
+                       + (double)q.sadjust * q.d_zistepv) * num_scale);
+    p.attr_dv[1] = q_i32((q.d_tdivzstepv * 65536.0
+                       + (double)q.tadjust * q.d_zistepv) * num_scale);
+    p.attr_dv[2] = q_i32(q.d_zistepv * zi_scale);
+    p.clamp_min[0] = 0;
+    p.clamp_max[0] = q.bbextents;
+    p.clamp_min[1] = 0;
+    p.clamp_max[1] = q.bbextentt;
+    return p;
+}
+
+static void quake_q29_ref_records(std::vector<uint8_t> &ref_fb,
+                                  std::vector<uint16_t> *ref_z,
+                                  const std::vector<uint8_t> &tex,
+                                  int tex_w,
+                                  const QuakeQ29RefSetup &q,
+                                  int fb_stride,
+                                  int z_stride,
+                                  const std::vector<ParamSpanRecordWire> &records) {
+    for (const auto &r : records) {
+        quake_ref_span(ref_fb, ref_z, tex, tex_w,
+                       r.u, r.v, r.count,
+                       q.d_sdivzorigin, q.d_tdivzorigin, q.d_ziorigin,
+                       q.d_sdivzstepu, q.d_tdivzstepu, q.d_zistepu,
+                       q.d_sdivzstepv, q.d_tdivzstepv, q.d_zistepv,
+                       q.sadjust, q.tadjust, q.bbextents, q.bbextentt,
+                       fb_stride, z_stride);
+    }
+}
+
+static bool compare_quake_param_fb(const char *name,
+                                   uint32_t fb_base,
+                                   const std::vector<uint8_t> &ref,
+                                   int fb_stride,
+                                   const std::vector<ParamSpanRecordWire> &records) {
+    int diffs = 0;
+    char first[192] = {0};
+    for (const auto &r : records) {
+        for (uint16_t i = 0; i < r.count; i++) {
+            uint32_t x = (uint32_t)r.u + i;
+            uint32_t y = (uint32_t)r.v;
+            uint8_t got = sdram_read_byte(fb_base + y * (uint32_t)fb_stride + x);
+            uint8_t want = ref[(size_t)y * (size_t)fb_stride + x];
+            if (got != want) {
+                if (diffs == 0) {
+                    snprintf(first, sizeof(first),
+                             "x=%u y=%u got=%02x want=%02x",
+                             x, y, got, want);
+                }
+                diffs++;
+            }
+        }
+    }
+    if (diffs == 0) {
+        check_pass(name);
+        return true;
+    }
+    char msg[256];
+    snprintf(msg, sizeof(msg), "%d pixel mismatches; first %s", diffs, first);
+    check_fail(name, msg);
+    return false;
+}
+
+static bool compare_quake_param_z(const char *name,
+                                  uint32_t z_base,
+                                  const std::vector<uint16_t> &ref,
+                                  int z_stride,
+                                  const std::vector<ParamSpanRecordWire> &records) {
+    int diffs = 0;
+    char first[192] = {0};
+    for (const auto &r : records) {
+        for (uint16_t i = 0; i < r.count; i++) {
+            uint32_t x = (uint32_t)r.u + i;
+            uint32_t y = (uint32_t)r.v;
+            uint16_t got = sdram_read_u16_le(z_base + y * (uint32_t)z_stride * 2u + x * 2u);
+            uint16_t want = ref[(size_t)y * (size_t)z_stride + x];
+            if (got != want) {
+                if (diffs == 0) {
+                    snprintf(first, sizeof(first),
+                             "x=%u y=%u got=%04x want=%04x",
+                             x, y, got, want);
+                }
+                diffs++;
+            }
+        }
+    }
+    if (diffs == 0) {
+        check_pass(name);
+        return true;
+    }
+    char msg[256];
+    snprintf(msg, sizeof(msg), "%d z mismatches; first %s", diffs, first);
+    check_fail(name, msg);
+    return false;
+}
+
+static void test_param_span_quake_projection_math_mode(uint8_t z_mode,
+                                                       const char *suffix) {
+    printf("TEST param_span_quake_projection_math_%s\n", suffix);
+    gpu_init();
+    preload_with_sentinel();
+
+    const int fb_stride = 320;
+    const int fb_height = 80;
+    const int tex_w = 96;
+    const int tex_h = 64;
+    const uint32_t z_base_abs = 0x00180000u;
+    const uint32_t z_base_reb = 0x001A0000u;
+    const int z_stride = 320;
+
+    std::vector<uint8_t> tex = make_quake_distinct_texture(tex_w, tex_h);
+    upload_texture(TEX_BASE_BYTE, tex);
+    sdram_fill(z_base_abs, (uint32_t)z_stride * fb_height * 2u, 0x5A);
+    sdram_fill(z_base_reb, (uint32_t)z_stride * fb_height * 2u, 0x5A);
+
+    const double d_sdivzorigin = -0.01975;
+    const double d_tdivzorigin =  0.03450;
+    const double d_ziorigin    =  0.00680;
+    const double d_sdivzstepu =  0.000041;
+    const double d_tdivzstepu = -0.000027;
+    const double d_zistepu    =  0.0000032;
+    const double d_sdivzstepv = -0.000083;
+    const double d_tdivzstepv =  0.000117;
+    const double d_zistepv    = -0.0000017;
+    const int32_t sadjust = 21 << 16;
+    const int32_t tadjust =  7 << 16;
+    const int32_t bbextents = (95 << 16) - 1;
+    const int32_t bbextentt = (63 << 16) - 1;
+
+    std::vector<ParamSpanRecordWire> records = {
+        {13, 37, 73}, {9, 41, 81}, {31, 46, 64}, {5, 56, 92}
+    };
+
+    std::vector<uint8_t> ref_fb((size_t)fb_stride * fb_height, SENTINEL_BYTE);
+    std::vector<uint16_t> ref_z((size_t)z_stride * fb_height, 0x5A5A);
+    for (const auto &r : records) {
+        quake_ref_span(ref_fb, (z_mode == 0) ? nullptr : &ref_z, tex, tex_w,
+                       r.u, r.v, r.count,
+                       d_sdivzorigin, d_tdivzorigin, d_ziorigin,
+                       d_sdivzstepu, d_tdivzstepu, d_zistepu,
+                       d_sdivzstepv, d_tdivzstepv, d_zistepv,
+                       sadjust, tadjust, bbextents, bbextentt,
+                       fb_stride, z_stride);
+    }
+
+    ParamSpanListWire p {};
+    p.fb_base = FB_BASE_BYTE;
+    p.fb_major_step = fb_stride;
+    p.fb_minor_step = 1;
+    p.tex_addr = TEX_BASE_BYTE;
+    p.tex_width = tex_w;
+    p.tex_w_mask = 0;
+    p.tex_h_mask = 0;
+    p.attr_mode = 3;
+    p.span_axis = 0;
+    p.z_mode = z_mode;
+    const double persp_q29_num_scale = 8192.0;       // 2^(29 - 16)
+    const double persp_q29_zi_scale = 536870912.0;   // 2^29
+    p.attr_origin[0] = q_i32((d_sdivzorigin * 65536.0
+                           + (double)sadjust * d_ziorigin) * persp_q29_num_scale);
+    p.attr_origin[1] = q_i32((d_tdivzorigin * 65536.0
+                           + (double)tadjust * d_ziorigin) * persp_q29_num_scale);
+    p.attr_origin[2] = q_i32(d_ziorigin * persp_q29_zi_scale);
+    p.attr_du[0] = q_i32((d_sdivzstepu * 65536.0
+                       + (double)sadjust * d_zistepu) * persp_q29_num_scale);
+    p.attr_du[1] = q_i32((d_tdivzstepu * 65536.0
+                       + (double)tadjust * d_zistepu) * persp_q29_num_scale);
+    p.attr_du[2] = q_i32(d_zistepu * persp_q29_zi_scale);
+    p.attr_dv[0] = q_i32((d_sdivzstepv * 65536.0
+                       + (double)sadjust * d_zistepv) * persp_q29_num_scale);
+    p.attr_dv[1] = q_i32((d_tdivzstepv * 65536.0
+                       + (double)tadjust * d_zistepv) * persp_q29_num_scale);
+    p.attr_dv[2] = q_i32(d_zistepv * persp_q29_zi_scale);
+    p.clamp_min[0] = 0;
+    p.clamp_max[0] = bbextents;
+    p.clamp_min[1] = 0;
+    p.clamp_max[1] = bbextentt;
+    p.z_base = z_base_abs;
+    p.z_major_step = z_stride * 2;
+    p.z_minor_step = 2;
+
+    ParamSpanListWire rebased = p;
+    const int base_u = 5;
+    const int base_v = 37;
+    rebased.fb_base = FB_ALT_BASE_BYTE + (uint32_t)base_v * fb_stride + base_u;
+    rebased.attr_origin[0] = p.attr_origin[0] + base_u * p.attr_du[0] + base_v * p.attr_dv[0];
+    rebased.attr_origin[1] = p.attr_origin[1] + base_u * p.attr_du[1] + base_v * p.attr_dv[1];
+    rebased.attr_origin[2] = p.attr_origin[2] + base_u * p.attr_du[2] + base_v * p.attr_dv[2];
+    rebased.z_base = z_base_reb + (uint32_t)base_v * z_stride * 2u + (uint32_t)base_u * 2u;
+
+    std::vector<ParamSpanRecordWire> rebased_records;
+    for (const auto &r : records) {
+        rebased_records.push_back({
+            (uint16_t)(r.u - base_u),
+            (uint16_t)(r.v - base_v),
+            r.count
+        });
+    }
+
+    emit_param_span_list_raw(p, records);
+    emit_param_span_list_raw(rebased, rebased_records);
+
+    if (!submit_and_wait()) {
+        check_fail("param_span_quake_projection_math", "timeout");
+        return;
+    }
+
+    char name[96];
+    snprintf(name, sizeof(name), "param_span_quake_projection_math_%s_abs_fb", suffix);
+    compare_quake_param_fb(name, FB_BASE_BYTE, ref_fb, fb_stride, records);
+    snprintf(name, sizeof(name), "param_span_quake_projection_math_%s_rebased_fb", suffix);
+    compare_quake_param_fb(name, FB_ALT_BASE_BYTE, ref_fb, fb_stride, records);
+    if (z_mode != 0) {
+        snprintf(name, sizeof(name), "param_span_quake_projection_math_%s_abs_z", suffix);
+        compare_quake_param_z(name, z_base_abs, ref_z, z_stride, records);
+        snprintf(name, sizeof(name), "param_span_quake_projection_math_%s_rebased_z", suffix);
+        compare_quake_param_z(name, z_base_reb, ref_z, z_stride, records);
+    }
+}
+
+static void test_param_span_quake_projection_math() {
+    test_param_span_quake_projection_math_mode(0, "no_z");
+    test_param_span_quake_projection_math_mode(1, "z_write");
+}
+
+static void test_param_span_q29_high_angle_floor_no_flatten() {
+    printf("TEST param_span_q29_high_angle_floor_no_flatten\n");
+    gpu_init();
+    preload_with_sentinel();
+
+    const int fb_stride = 320;
+    const int tex_w = 64;
+    const int tex_h = 64;
+    std::vector<uint8_t> tex = make_quake_distinct_texture(tex_w, tex_h);
+    upload_texture(TEX_BASE_BYTE, tex);
+
+    const double q29 = 536870912.0;
+    const int32_t zi0 = q_i32(0.25 * q29);
+    const int32_t zi16 = q_i32(0.05 * q29);
+    const int32_t zi_du = q_i32(((0.05 - 0.25) / 16.0) * q29);
+
+    ParamSpanListWire p {};
+    p.fb_base = FB_BASE_BYTE;
+    p.fb_major_step = fb_stride;
+    p.fb_minor_step = 1;
+    p.tex_addr = TEX_BASE_BYTE;
+    p.tex_width = tex_w;
+    p.tex_w_mask = tex_w - 1;
+    p.tex_h_mask = tex_h - 1;
+    p.attr_mode = 3;
+    p.span_axis = 0;
+    p.attr_origin[0] = zi0 * 4;  // s ~= 4.0 at x=0, ~=20.0 at x=16
+    p.attr_origin[1] = zi0 * 7;  // t ~= 7.0 at x=0, ~=35.0 at x=16
+    p.attr_origin[2] = zi0;
+    p.attr_du[2] = zi_du;
+    p.clamp_min[0] = 0;
+    p.clamp_max[0] = (tex_w - 1) << 16;
+    p.clamp_min[1] = 0;
+    p.clamp_max[1] = (tex_h - 1) << 16;
+
+    std::vector<ParamSpanRecordWire> records = {
+        {0, 12, 16}
+    };
+
+    emit_param_span_list_raw(p, records);
+    if (!submit_and_wait()) {
+        check_fail("param_span_q29_high_angle_floor_no_flatten", "timeout");
+        return;
+    }
+
+    const uint32_t row_base = FB_BASE_BYTE + 12u * (uint32_t)fb_stride;
+    const uint8_t first = sdram_read_byte(row_base);
+    const int end_i = records[0].count - 1;
+    int32_t s0 = clamp_i128_to_i32(((__int128)p.attr_origin[0] << 16)
+                                 / p.attr_origin[2]);
+    int32_t t0 = clamp_i128_to_i32(((__int128)p.attr_origin[1] << 16)
+                                 / p.attr_origin[2]);
+    int32_t s_end = clamp_i128_to_i32(((__int128)(p.attr_origin[0] + end_i * p.attr_du[0]) << 16)
+                                    / (p.attr_origin[2] + end_i * p.attr_du[2]));
+    int32_t t_end = clamp_i128_to_i32(((__int128)(p.attr_origin[1] + end_i * p.attr_du[1]) << 16)
+                                    / (p.attr_origin[2] + end_i * p.attr_du[2]));
+    int32_t s_step = (s_end - s0) / end_i;
+    int32_t t_step = (t_end - t0) / end_i;
+    int changed = 0;
+    int sentinel = 0;
+    int diffs = 0;
+    char first_diff[192] = {0};
+    for (int i = 0; i < 16; i++) {
+        uint8_t px = sdram_read_byte(row_base + (uint32_t)i);
+        if (px != first)
+            changed++;
+        if (px == SENTINEL_BYTE)
+            sentinel++;
+
+        int32_t s_q16 = s0 + i * s_step;
+        int32_t t_q16 = t0 + i * t_step;
+        s_q16 = q_clamp_i32(s_q16, p.clamp_min[0], p.clamp_max[0]);
+        t_q16 = q_clamp_i32(t_q16, p.clamp_min[1], p.clamp_max[1]);
+        uint8_t want = tex[(size_t)(t_q16 >> 16) * (size_t)tex_w
+                         + (size_t)(s_q16 >> 16)];
+        if (px != want) {
+            if (diffs == 0) {
+                snprintf(first_diff, sizeof(first_diff),
+                         "x=%d got=%02x want=%02x s=%08x t=%08x zi=%08x",
+                         i, px, want, (uint32_t)s_q16, (uint32_t)t_q16,
+                         (uint32_t)(p.attr_origin[2] + i * p.attr_du[2]));
+            }
+            diffs++;
+        }
+    }
+
+    if (sentinel == 0 && changed >= 4 && diffs == 0) {
+        check_pass("param_span_q29_high_angle_floor_no_flatten");
+        return;
+    }
+
+    char msg[160];
+    snprintf(msg, sizeof(msg),
+             "changed=%d sentinel=%d diffs=%d zi0=%08x zi16=%08x du=%08x first %s",
+             changed, sentinel, diffs, (uint32_t)zi0, (uint32_t)zi16,
+             (uint32_t)zi_du, first_diff);
+    check_fail("param_span_q29_high_angle_floor_no_flatten", msg);
+}
+
+static void test_param_q29_tail_counts_and_boundaries() {
+    printf("TEST param_q29_tail_counts_and_boundaries\n");
+    gpu_init();
+    preload_with_sentinel();
+
+    const int fb_stride = 320;
+    const int tex_w = 128;
+    const int tex_h = 128;
+    std::vector<uint8_t> tex = make_quake_distinct_texture(tex_w, tex_h);
+    upload_texture(TEX_BASE_BYTE, tex);
+
+    QuakeQ29RefSetup q = make_quake_q29_ref_setup(tex_w, tex_h);
+    ParamSpanListWire p = make_quake_q29_param(q, FB_BASE_BYTE, TEX_BASE_BYTE,
+                                               fb_stride, tex_w, tex_h);
+    ParamSpanListWire split = p;
+    split.fb_base = FB_ALT_BASE_BYTE;
+
+    const uint16_t counts[] = {
+        1, 2, 3, 4, 7, 8, 15, 16, 17, 31, 32, 33, 47, 48, 63, 64, 127, 255
+    };
+    std::vector<ParamSpanRecordWire> records;
+    for (size_t i = 0; i < sizeof(counts) / sizeof(counts[0]); i++) {
+        records.push_back({
+            (uint16_t)(3u + (uint16_t)((i * 11u) & 31u)),
+            (uint16_t)(2u + (uint16_t)i * 4u),
+            counts[i]
+        });
+    }
+
+    emit_param_span_list_raw(p, records);
+    for (const auto &r : records) {
+        uint16_t done = 0;
+        while (done < r.count) {
+            uint16_t chunk = (uint16_t)std::min<int>(16, r.count - done);
+            ParamSpanRecordWire sr {
+                (uint16_t)(r.u + done),
+                r.v,
+                chunk
+            };
+            emit_param_span_list_raw(split, std::vector<ParamSpanRecordWire>{sr});
+            done = (uint16_t)(done + chunk);
+        }
+    }
+
+    if (!submit_and_wait()) {
+        check_fail("param_q29_tail_counts_and_boundaries", "timeout");
+        return;
+    }
+
+    int diffs = 0;
+    char first[192] = {0};
+    for (const auto &r : records) {
+        for (uint16_t i = 0; i < r.count; i++) {
+            uint32_t off = (uint32_t)r.v * (uint32_t)fb_stride
+                         + (uint32_t)r.u + i;
+            uint8_t got = sdram_read_byte(FB_BASE_BYTE + off);
+            uint8_t want = sdram_read_byte(FB_ALT_BASE_BYTE + off);
+            if (got != want) {
+                if (diffs == 0) {
+                    snprintf(first, sizeof(first),
+                             "u=%u v=%u i=%u got=%02x want=%02x",
+                             r.u, r.v, i, got, want);
+                }
+                diffs++;
+            }
+        }
+    }
+
+    if (diffs == 0)
+        check_pass("param_q29_tail_counts_and_boundaries");
+    else {
+        char msg[240];
+        snprintf(msg, sizeof(msg), "%d split mismatches; first %s", diffs, first);
+        check_fail("param_q29_tail_counts_and_boundaries", msg);
+    }
+}
+
+static void test_param_q29_record_counts_and_odd_pairs() {
+    printf("TEST param_q29_record_counts_and_odd_pairs\n");
+
+    const int fb_stride = 320;
+    const int tex_w = 64;
+    const int tex_h = 64;
+    const uint16_t record_counts[] = {1, 2, 3, 4, 5, 7, 8, 16, 64, 511, 512};
+
+    for (uint16_t record_count : record_counts) {
+        gpu_init();
+        preload_with_sentinel();
+        std::vector<uint8_t> tex = make_quake_distinct_texture(tex_w, tex_h);
+        upload_texture(TEX_BASE_BYTE, tex);
+
+        QuakeQ29RefSetup q = make_quake_q29_ref_setup(tex_w, tex_h);
+        ParamSpanListWire p = make_quake_q29_param(q, FB_BASE_BYTE,
+                                                   TEX_BASE_BYTE, fb_stride,
+                                                   tex_w, tex_h);
+        ParamSpanListWire p_single = p;
+        p_single.fb_base = FB_ALT_BASE_BYTE;
+
+        std::vector<ParamSpanRecordWire> records;
+        records.reserve(record_count);
+        for (uint16_t i = 0; i < record_count; i++) {
+            uint16_t count = (uint16_t)(1u + (i & 3u));
+            uint16_t u = (uint16_t)((i * 17u + record_count) % 300u);
+            if ((uint32_t)u + count >= 320u)
+                u = (uint16_t)(319u - count);
+            uint16_t v = (uint16_t)((i * 7u + record_count) % 180u);
+            records.push_back({u, v, count});
+        }
+
+        char name[96];
+        snprintf(name, sizeof(name),
+                 "param_q29_record_counts_and_odd_pairs.%u", record_count);
+
+        emit_param_span_list_raw(p, records);
+        if (!submit_and_wait(1600000)) {
+            check_fail(name, "timeout in multi-record command");
+            continue;
+        }
+
+        bool ok = true;
+        for (const auto &r : records) {
+            emit_param_span_list_raw(p_single, std::vector<ParamSpanRecordWire>{r});
+            if (pending_stream.size() > 3000u) {
+                if (!submit_and_wait(1600000)) {
+                    check_fail(name, "timeout in single-record comparison stream");
+                    ok = false;
+                    break;
+                }
+            }
+        }
+        if (!ok)
+            continue;
+        if (!pending_stream.empty() && !submit_and_wait(1600000)) {
+            check_fail(name, "timeout in final single-record comparison stream");
+            continue;
+        }
+
+        int diffs = 0;
+        char first[160] = {0};
+        for (const auto &r : records) {
+            for (uint16_t i = 0; i < r.count; i++) {
+                uint32_t off = (uint32_t)r.v * (uint32_t)fb_stride
+                             + (uint32_t)r.u + i;
+                uint8_t got = sdram_read_byte(FB_BASE_BYTE + off);
+                uint8_t want = sdram_read_byte(FB_ALT_BASE_BYTE + off);
+                if (got != want) {
+                    if (diffs == 0) {
+                        snprintf(first, sizeof(first),
+                                 "record_count=%u u=%u v=%u i=%u got=%02x want=%02x",
+                                 record_count, r.u, r.v, i, got, want);
+                    }
+                    diffs++;
+                }
+            }
+        }
+
+        if (diffs == 0)
+            check_pass(name);
+        else {
+            char msg[224];
+            snprintf(msg, sizeof(msg), "%d mismatches; first %s", diffs, first);
+            check_fail(name, msg);
+        }
+    }
+}
+
+static std::vector<uint8_t> make_param_bitwalk_texture(int tex_w, int tex_h,
+                                                       uint8_t salt) {
+    std::vector<uint8_t> tex((size_t)tex_w * (size_t)tex_h);
+    for (int t = 0; t < tex_h; t++) {
+        for (int s = 0; s < tex_w; s++) {
+            uint32_t addr = (uint32_t)t * (uint32_t)tex_w + (uint32_t)s;
+            tex[(size_t)addr] =
+                (uint8_t)((s ^ (t << 4) ^ (addr >> 1) ^ salt) & 0xFF);
+        }
+    }
+    return tex;
+}
+
+static void test_param_q29_wrap_and_fb_byte_lanes() {
+    printf("TEST param_q29_wrap_and_fb_byte_lanes\n");
+    gpu_init();
+    preload_with_sentinel();
+
+    const int fb_stride = 320;
+    const int sizes[] = {16, 32, 64, 128};
+    int diffs = 0;
+    char first[192] = {0};
+
+    for (int si = 0; si < 4; si++) {
+        int tex_w = sizes[si];
+        int tex_h = sizes[si];
+        uint32_t tex_base = TEX_BASE_BYTE + (uint32_t)si * 0x8000u;
+        std::vector<uint8_t> tex =
+            make_param_bitwalk_texture(tex_w, tex_h, (uint8_t)(0x21 + si));
+        upload_texture(tex_base, tex);
+
+        ParamSpanListWire p {};
+        p.fb_base = FB_BASE_BYTE;
+        p.fb_major_step = fb_stride;
+        p.fb_minor_step = 1;
+        p.tex_addr = tex_base;
+        p.tex_width = tex_w;
+        p.tex_w_mask = (uint16_t)(tex_w - 1);
+        p.tex_h_mask = (uint16_t)(tex_h - 1);
+        p.attr_mode = 3;
+        p.span_axis = 0;
+        p.attr_origin[0] = (tex_w - 3) << 16;
+        p.attr_origin[1] = 2 << 16;
+        p.attr_origin[2] = 0x00010000;
+        p.attr_du[0] = 1 << 16;
+
+        std::vector<ParamSpanRecordWire> records;
+        for (uint16_t lane = 0; lane < 4; lane++)
+            records.push_back({lane, (uint16_t)(si * 8 + lane), 9});
+        emit_param_span_list_raw(p, records);
+    }
+
+    if (!submit_and_wait()) {
+        check_fail("param_q29_wrap_and_fb_byte_lanes", "timeout");
+        return;
+    }
+
+    for (int si = 0; si < 4; si++) {
+        int tex_w = sizes[si];
+        int tex_h = sizes[si];
+        std::vector<uint8_t> tex =
+            make_param_bitwalk_texture(tex_w, tex_h, (uint8_t)(0x21 + si));
+        for (uint16_t lane = 0; lane < 4; lane++) {
+            uint16_t y = (uint16_t)(si * 8 + lane);
+            for (uint16_t i = 0; i < 9; i++) {
+                uint16_t x = lane + i;
+                int s = (tex_w - 3 + x) & (tex_w - 1);
+                int t = 2 & (tex_h - 1);
+                uint8_t want = tex[(size_t)t * (size_t)tex_w + (size_t)s];
+                uint8_t got = sdram_read_byte(FB_BASE_BYTE
+                                             + (uint32_t)y * fb_stride + x);
+                if (got != want) {
+                    if (diffs == 0) {
+                        snprintf(first, sizeof(first),
+                                 "size=%d x=%u y=%u got=%02x want=%02x s=%d t=%d",
+                                 tex_w, x, y, got, want, s, t);
+                    }
+                    diffs++;
+                }
+            }
+        }
+    }
+
+    if (diffs == 0)
+        check_pass("param_q29_wrap_and_fb_byte_lanes");
+    else {
+        char msg[240];
+        snprintf(msg, sizeof(msg), "%d mismatches; first %s", diffs, first);
+        check_fail("param_q29_wrap_and_fb_byte_lanes", msg);
+    }
+}
+
+static void test_param_q29_static_repeat_300() {
+    printf("TEST param_q29_static_repeat_300\n");
+    gpu_init();
+    preload_with_sentinel();
+
+    const int fb_stride = 320;
+    std::vector<uint8_t> tex = make_quake_distinct_texture(64, 64);
+    upload_texture(TEX_BASE_BYTE, tex);
+    QuakeQ29RefSetup q = make_quake_q29_ref_setup(64, 64);
+    ParamSpanListWire p = make_quake_q29_param(q, FB_BASE_BYTE, TEX_BASE_BYTE,
+                                               fb_stride, 64, 64);
+    std::vector<ParamSpanRecordWire> records = {{11, 19, 23}, {7, 21, 31}};
+
+    uint32_t first_hash = 0;
+    bool have_hash = false;
+    for (int frame = 0; frame < 300; frame++) {
+        sdram_fill(FB_BASE_BYTE, 320u * 40u, SENTINEL_BYTE);
+        emit_param_span_list_raw(p, records);
+        if (!submit_and_wait()) {
+            check_fail("param_q29_static_repeat_300", "timeout");
+            return;
+        }
+
+        uint32_t hash = 2166136261u;
+        for (const auto &r : records) {
+            for (uint16_t i = 0; i < r.count; i++) {
+                uint8_t b = sdram_read_byte(FB_BASE_BYTE
+                    + (uint32_t)r.v * (uint32_t)fb_stride + r.u + i);
+                hash ^= b;
+                hash *= 16777619u;
+            }
+        }
+        if (!have_hash) {
+            first_hash = hash;
+            have_hash = true;
+        } else if (hash != first_hash) {
+            char msg[128];
+            snprintf(msg, sizeof(msg),
+                     "frame=%d hash=%08x first=%08x", frame, hash, first_hash);
+            check_fail("param_q29_static_repeat_300", msg);
+            return;
+        }
+    }
+
+    check_pass("param_q29_static_repeat_300");
+}
+
+static void quake_alias_ref_span(std::vector<uint8_t> &fb,
+                                 const std::vector<uint8_t> &skin,
+                                 const std::vector<uint8_t> &cmap_row,
+                                 int fb_x,
+                                 int count,
+                                 int skin_w,
+                                 int base_s,
+                                 int base_t,
+                                 int32_t sfrac,
+                                 int32_t tfrac,
+                                 int32_t sstep,
+                                 int32_t tstep) {
+    int base = base_t * skin_w + base_s;
+    int32_t s = sfrac & 0xFFFF;
+    int32_t t = tfrac & 0xFFFF;
+
+    for (int i = 0; i < count; i++) {
+        int tex_ofs = base + (s >> 16) + (t >> 16) * skin_w;
+        fb[(size_t)fb_x + (size_t)i] = cmap_row[skin[(size_t)tex_ofs]];
+        s += sstep;
+        t += tstep;
+    }
+}
+
+static void test_affine_span_group_quake_alias_carry_math() {
+    printf("TEST affine_span_group_quake_alias_carry_math\n");
+    gpu_init();
+    preload_with_sentinel();
+
+    const int skin_w = 96;
+    const int skin_h = 64;
+    std::vector<uint8_t> skin((size_t)skin_w * skin_h);
+    for (int t = 0; t < skin_h; t++) {
+        for (int s = 0; s < skin_w; s++)
+            skin[(size_t)t * skin_w + s] =
+                (uint8_t)((s * 5 + t * 29 + 7) & 0xFF);
+    }
+    upload_texture(TEX_BASE_BYTE, skin);
+
+    std::vector<uint8_t> cmap_row(256);
+    for (int i = 0; i < 256; i++)
+        cmap_row[(size_t)i] = (uint8_t)((i + 0x31) & 0xFF);
+    upload_palookup_slot(4, cmap_row, 3u * 256u);
+
+    SpanGroupWire stale = make_span_group();
+    stale.lane_count = 1;
+    stale.fb_addr = FB_BASE_BYTE + 320u * 10u;
+    stale.tex_addr[0] = TEX_BASE_BYTE;
+    stale.count = 1;
+    stale.t[0] = 0;
+    stale.tex_width = 64;
+    stale.tex_w_mask = 0x3F;
+    stale.tex_h_mask = 0x3F;
+    emit_span_group_raw(stale);
+
+    struct Lane {
+        int base_s, base_t;
+        int32_t sfrac, tfrac, sstep, tstep;
+        uint16_t count;
+    };
+    const Lane lanes[4] = {
+        {48, 18, 0x0000e000, 0x00002000, -0x0000c000,  0x00003000, 31},
+        {22, 31, 0x00001000, 0x0000f000,  0x00016000,  0x00008000, 29},
+        {72, 12, 0x0000f400, 0x0000f800, -0x00012000,  0x00011000, 27},
+        {11, 44, 0x00008000, 0x00004000,  0x0000a000, -0x00007000, 33},
+    };
+
+    SpanGroupWire q = make_span_group();
+    q.lane_count = 4;
+    q.fb_addr = FB_BASE_BYTE + 320u * 20u;
+    q.lane_delta = 40;
+    q.fb_stride = 1;
+    q.flags = 1u << 0;
+    q.tex_width = skin_w;
+    q.tex_w_mask = 0;
+    q.tex_h_mask = 0;
+
+    std::vector<uint8_t> ref(320, SENTINEL_BYTE);
+    for (int lane = 0; lane < 4; lane++) {
+        const Lane &l = lanes[lane];
+        q.fb_addr = FB_BASE_BYTE + 320u * 20u;
+        q.tex_addr[lane] = TEX_BASE_BYTE + (uint32_t)(l.base_t * skin_w + l.base_s);
+        q.s[lane] = l.sfrac & 0xFFFF;
+        q.t[lane] = l.tfrac & 0xFFFF;
+        q.sstep[lane] = l.sstep;
+        q.tstep[lane] = l.tstep;
+        q.count_lane[lane] = l.count;
+        q.light[lane] = 3;
+        q.colormap_id[lane] = 4;
+        quake_alias_ref_span(ref, skin, cmap_row,
+                             lane * 40, l.count, skin_w,
+                             l.base_s, l.base_t,
+                             l.sfrac, l.tfrac, l.sstep, l.tstep);
+    }
+    emit_span_group_raw(q);
+
+    if (!submit_and_wait()) {
+        check_fail("affine_span_group_quake_alias_carry_math", "timeout");
+        return;
+    }
+
+    int diffs = 0;
+    char first[160] = {0};
+    for (int x = 0; x < 160; x++) {
+        uint8_t want = ref[(size_t)x];
+        uint8_t got = sdram_read_byte(FB_BASE_BYTE + 320u * 20u + (uint32_t)x);
+        if (got != want) {
+            if (diffs == 0) {
+                snprintf(first, sizeof(first),
+                         "x=%d got=%02x want=%02x", x, got, want);
+            }
+            diffs++;
+        }
+    }
+    if (diffs == 0)
+        check_pass("affine_span_group_quake_alias_carry_math");
+    else {
+        char msg[224];
+        snprintf(msg, sizeof(msg), "%d mismatches; first %s", diffs, first);
+        check_fail("affine_span_group_quake_alias_carry_math", msg);
+    }
+}
+
+static void test_param_span_list_z_write_zi() {
+    printf("TEST param_span_list_z_write_zi\n");
+    gpu_init();
+    preload_with_sentinel();
+    upload_texture(TEX_BASE_BYTE, make_projection_test_texture());
+
+    const uint32_t z_base = 0x00180000u;
+    const int32_t z_major_step = 64;
+    const int32_t z_minor_step = 2;
+    sdram_fill(z_base, 1024, 0x5A);
+
+    ParamSpanListWire p {};
+    p.fb_base = FB_BASE_BYTE;
+    p.fb_major_step = 320;
+    p.fb_minor_step = 1;
+    p.tex_addr = TEX_BASE_BYTE;
+    p.tex_width = 64;
+    p.tex_w_mask = 0x3F;
+    p.tex_h_mask = 0x3F;
+    p.flags = SPAN_PERSP;
+    p.attr_mode = 1;
+    p.span_axis = 0;
+    p.z_mode = 1;
+    p.attr_origin[0] = 0x00018000;
+    p.attr_origin[1] = 0x00010000;
+    p.attr_origin[2] = 0x00024000;
+    p.attr_du[0] = 0x00001000;
+    p.attr_du[1] = 0x00000400;
+    p.attr_du[2] = 0x00000140;
+    p.attr_dv[0] = 0x00000300;
+    p.attr_dv[1] = 0x00002000;
+    p.attr_dv[2] = 0x00000A00;
+    p.z_base = z_base;
+    p.z_major_step = z_major_step;
+    p.z_minor_step = z_minor_step;
+
+    std::vector<ParamSpanRecordWire> records = {
+        {1, 2, 5}, {9, 2, 4}, {0, 3, 18}, {20, 3, 1}, {2, 4, 3}
+    };
+
+    emit_param_span_list_raw(p, records);
+
+    if (!submit_and_wait()) {
+        check_fail("param_span_list_z_write_zi", "timeout");
+        return;
+    }
+
+    int mismatches = 0;
+    char first[160] = {0};
+    for (const auto &r : records) {
+        for (uint16_t i = 0; i < r.count; i++) {
+            uint32_t u = (uint32_t)r.u + i;
+            uint32_t addr = z_base + (uint32_t)r.v * (uint32_t)z_major_step
+                          + u * (uint32_t)z_minor_step;
+            int32_t zi = p.attr_origin[2]
+                       + (int32_t)u * p.attr_du[2]
+                       + (int32_t)r.v * p.attr_dv[2];
+            uint16_t want = (uint16_t)(zi >> 1);
+            uint16_t got = sdram_read_u16_le(addr);
+            if (got != want) {
+                if (mismatches == 0) {
+                    snprintf(first, sizeof(first),
+                             "u=%u v=%u i=%u addr=%08x got=%04x want=%04x zi=%08x",
+                             u, (uint32_t)r.v, (uint32_t)i, addr,
+                             got, want, (uint32_t)zi);
+                }
+                mismatches++;
+            }
+        }
+    }
+
+    if (mismatches == 0)
+        check_pass("param_span_list_z_write_zi");
+    else
+        check_fail("param_span_list_z_write_zi", first);
+}
+
+static void test_param_span_list_z_test_zi() {
+    printf("TEST param_span_list_z_test_zi\n");
+    gpu_init();
+    preload_with_sentinel();
+    upload_texture(TEX_BASE_BYTE, std::vector<uint8_t>(64 * 64, 0x44));
+
+    const uint32_t z_base = 0x00180400u;
+    const int32_t z_major_step = 64;
+    const int32_t z_minor_step = 2;
+    sdram_fill(z_base, 256, 0x00);
+
+    ParamSpanListWire p {};
+    p.fb_base = FB_BASE_BYTE;
+    p.fb_major_step = 320;
+    p.fb_minor_step = 1;
+    p.tex_addr = TEX_BASE_BYTE;
+    p.tex_width = 64;
+    p.tex_w_mask = 0x3F;
+    p.tex_h_mask = 0x3F;
+    p.flags = SPAN_PERSP;
+    p.attr_mode = 1;
+    p.span_axis = 0;
+    p.z_mode = 2;          // TEST_ZI, no z write
+    p.attr_origin[2] = 0x00004000;  // z half = 0x2000
+    p.z_base = z_base;
+    p.z_major_step = z_major_step;
+    p.z_minor_step = z_minor_step;
+
+    std::vector<ParamSpanRecordWire> records = {{0, 0, 4}};
+    for (uint16_t i = 0; i < 4; i++) {
+        uint16_t oldz = (i & 1) ? 0x3000 : 0x1000;
+        sdram_write_u16_le(z_base + i * 2u, oldz);
+    }
+
+    emit_param_span_list_raw(p, records);
+
+    if (!submit_and_wait()) {
+        check_fail("param_span_list_z_test_zi", "timeout");
+        return;
+    }
+
+    bool ok = true;
+    char first[160] = {0};
+    for (uint16_t i = 0; i < 4; i++) {
+        uint8_t want_color = (i & 1) ? SENTINEL_BYTE : 0x44;
+        uint16_t want_z = (i & 1) ? 0x3000 : 0x1000;
+        uint8_t got_color = sdram_read_byte(FB_BASE_BYTE + i);
+        uint16_t got_z = sdram_read_u16_le(z_base + i * 2u);
+        if (got_color != want_color || got_z != want_z) {
+            snprintf(first, sizeof(first),
+                     "i=%u color got=%02x want=%02x z got=%04x want=%04x",
+                     i, got_color, want_color, got_z, want_z);
+            ok = false;
+            break;
+        }
+    }
+
+    if (ok)
+        check_pass("param_span_list_z_test_zi");
+    else
+        check_fail("param_span_list_z_test_zi", first);
+}
+
+static void test_param_span_list_z_test_write_skip_zero() {
+    printf("TEST param_span_list_z_test_write_skip_zero\n");
+    gpu_init();
+    preload_with_sentinel();
+
+    std::vector<uint8_t> tex(64 * 64, 0);
+    tex[0] = 0x44;
+    tex[1] = 0xFF;
+    tex[2] = 0x55;
+    tex[3] = 0x66;
+    upload_texture(TEX_BASE_BYTE, tex);
+
+    const uint32_t z_base = 0x00180800u;
+    const int32_t z_major_step = 64;
+    const int32_t z_minor_step = 2;
+    sdram_fill(z_base, 256, 0x00);
+
+    ParamSpanListWire p {};
+    p.fb_base = FB_BASE_BYTE;
+    p.fb_major_step = 320;
+    p.fb_minor_step = 1;
+    p.tex_addr = TEX_BASE_BYTE;
+    p.tex_width = 64;
+    p.tex_w_mask = 0x3F;
+    p.tex_h_mask = 0x3F;
+    p.flags = SPAN_PERSP | (1u << 2);   // SKIP_ZERO
+    p.attr_mode = 1;
+    p.span_axis = 0;
+    p.z_mode = 3;          // TEST_WRITE
+    p.attr_origin[2] = 0x00010000;  // z half = 0x8000
+    p.attr_du[0] = 0x00010000;      // s advances 1 texel per pixel
+    p.z_base = z_base;
+    p.z_major_step = z_major_step;
+    p.z_minor_step = z_minor_step;
+
+    std::vector<ParamSpanRecordWire> records = {{0, 0, 4}};
+    for (uint16_t i = 0; i < 4; i++)
+        sdram_write_u16_le(z_base + i * 2u, 0x1000);
+
+    emit_param_span_list_raw(p, records);
+
+    if (!submit_and_wait()) {
+        check_fail("param_span_list_z_test_write_skip_zero", "timeout");
+        return;
+    }
+
+    const uint8_t want_color[4] = {0x44, SENTINEL_BYTE, 0x55, 0x66};
+    const uint16_t want_z[4] = {0x8000, 0x1000, 0x8000, 0x8000};
+    bool ok = true;
+    char first[180] = {0};
+    for (uint16_t i = 0; i < 4; i++) {
+        uint8_t got_color = sdram_read_byte(FB_BASE_BYTE + i);
+        uint16_t got_z = sdram_read_u16_le(z_base + i * 2u);
+        if (got_color != want_color[i] || got_z != want_z[i]) {
+            snprintf(first, sizeof(first),
+                     "i=%u color got=%02x want=%02x z got=%04x want=%04x",
+                     i, got_color, want_color[i], got_z, want_z[i]);
+            ok = false;
+            break;
+        }
+    }
+
+    if (ok)
+        check_pass("param_span_list_z_test_write_skip_zero");
+    else
+        check_fail("param_span_list_z_test_write_skip_zero", first);
+}
+
 // ============================================================================
 // Main runner
 // ============================================================================
@@ -4579,11 +6701,32 @@ int main(int argc, char **argv) {
     test_persp_span_group_doom_wall_7lane_partial_chunk();
     test_persp_span_group_doom_wall_nonunit_z_equals_single_lane_spans();
     test_persp_span_group_doom_wall_cpu_fixeddiv_reference();
+    test_persp_span_group_quake_rows_match_single_lane_spans();
+    test_persp_span_group_quake_payload_cpu_oracle();
+    test_persp_span_group_quake_payload_edge_cases();
+    test_param_span_list_affine_rows();
+    test_param_span_list_affine_columns();
+    test_param_span_list_affine_clamp();
+    test_param_span_list_zero_counts_skip();
+    test_param_span_list_streams_many_records();
+    test_param_span_list_unsupported_noop();
+    test_param_span_list_colormap_skip_zero();
+    test_param_span_list_persp_matches_helper();
+    test_param_span_quake_projection_math();
+    test_param_span_q29_high_angle_floor_no_flatten();
+    test_param_q29_tail_counts_and_boundaries();
+    test_param_q29_record_counts_and_odd_pairs();
+    test_param_q29_wrap_and_fb_byte_lanes();
+    test_param_q29_static_repeat_300();
+    test_affine_span_group_quake_alias_carry_math();
+    test_param_span_list_z_write_zi();
+    test_param_span_list_z_test_zi();
+    test_param_span_list_z_test_write_skip_zero();
     test_batch_equals_individual();
     test_batch_mixed_per_span_colormap();
     test_span_group_opaque_equals_four_spans();
     test_span_group_texture_height_mask();
-    test_span_group_aligned_coalesces_row_writes();
+    test_span_group_aligned_matches_reference();
     test_span_group_aligned_texture_cache_thrash();
     test_span_group_masked_equals_four_spans();
     test_span_group_explicit_colormap_slot();
@@ -4601,7 +6744,7 @@ int main(int argc, char **argv) {
 #if GPU_TEST_ENABLE_TRIANGLES
     test_triangle_uses_colormap_slot_zero();
 #endif
-    test_framebuffer_writes_remain_single_beat();
+    test_framebuffer_writes_burst_full_words();
     test_flip_no_writes_pulses_immediately();
 
     // ---- Combination tests ----

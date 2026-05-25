@@ -72,6 +72,7 @@ GPU_SRCS = \
 GPU_CPP = tb_gpu_main.cpp
 GPU_TOP = tb_gpu
 GPU_DIR = obj_dir_gpu
+GPU_PERSP_DIR = obj_dir_gpu_persp
 
 # ============================================================
 # AXI periph slave — BRAM read bursts, peripheral reads/writes, GPU MMIO
@@ -83,6 +84,7 @@ AXI_PERIPH_SRCS = \
 	altsyncram_stub.v \
 	$(COMMON_DIR)/axi_periph_slave.v \
 	$(COMMON_DIR)/snac_shifter.v \
+	$(COMMON_DIR)/snac_psx_poller.v \
 	$(COMMON_DIR)/sync_fifo.v \
 	$(TARGET_DIR)/apf/common.v
 
@@ -202,6 +204,7 @@ SYSTEM_SRCS = \
 	$(COMMON_DIR)/axi_periph_slave.v \
 	$(COMMON_DIR)/sync_fifo.v \
 	$(COMMON_DIR)/snac_shifter.v \
+	$(COMMON_DIR)/snac_psx_poller.v \
 	$(COMMON_DIR)/gpu_core.v \
 	$(COMMON_DIR)/gpu_tex_cache.v \
 	../vendor/vexriscv/VexiiRiscv/VexiiRiscv.v \
@@ -219,10 +222,10 @@ SYSTEM_FLAGS = -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC -Wno-CASEINCOMPLETE \
 # ============================================================
 # Targets
 # ============================================================
-.PHONY: all sdram sdram-serialize sdram-native2 sdram-all sram gpu gpu-floor gpu-gpudemo gpu-acceptance gpu-acceptance-single gpu-acceptance-burst2 gpu-acceptance-all gpu-chain \
+.PHONY: all sdram sdram-serialize sdram-native2 sdram-all sram gpu gpu-persp gpu-floor gpu-gpudemo gpu-acceptance gpu-acceptance-single gpu-acceptance-burst2 gpu-acceptance-all gpu-chain \
         axi-periph cram0-prefetch bridge-cmd audio audio-mixer arbiter system run run-sram build clean
 
-all: sdram-all sram gpu axi-periph cram0-prefetch bridge-cmd audio audio-mixer arbiter
+all: sdram-all sram gpu gpu-persp axi-periph cram0-prefetch bridge-cmd audio audio-mixer arbiter
 
 # --- SDRAM ---
 sdram: $(SDRAM_DIR)/V$(SDRAM_TOP)
@@ -276,6 +279,17 @@ $(GPU_DIR)/V$(GPU_TOP): $(GPU_SRCS) $(GPU_CPP)
 		-I$(COMMON_DIR) \
 		$(GPU_SRCS) $(GPU_CPP)
 
+gpu-persp: $(GPU_PERSP_DIR)/V$(GPU_TOP)
+	@printf "\n=== GPU perspective-span tests ===\n"
+	./$(GPU_PERSP_DIR)/V$(GPU_TOP)
+
+$(GPU_PERSP_DIR)/V$(GPU_TOP): $(GPU_SRCS) $(GPU_CPP)
+	$(VERILATOR) $(VERILATOR_FLAGS) \
+		-CFLAGS "-std=c++17 -O2 -DGPU_TEST_ENABLE_PERSP=1" \
+		--top-module $(GPU_TOP) --Mdir $(GPU_PERSP_DIR) \
+		-I$(COMMON_DIR) \
+		$(GPU_SRCS) $(GPU_CPP)
+
 # --- GPU floor-span coverage (BUILD/Duke3D hlineasm4 vs GPU multiply) ---
 # Focused regression suite that drives scalar span payloads with BUILD-style
 # inputs and compares against a CPU-side hlineasm4 reference.  Some
@@ -295,7 +309,7 @@ $(GPU_FLOOR_DIR)/V$(GPU_TOP): $(GPU_SRCS) $(GPU_FLOOR_CPP)
 		-I$(COMMON_DIR) \
 		$(GPU_SRCS) $(GPU_FLOOR_CPP)
 
-# --- gpudemo reproducer (long-running multi-span + textured triangle) ---
+# --- gpudemo reproducer (long-running span-heavy stream) ---
 # Mirrors openfpgaOS-SDK/src/apps/gpudemo's per-frame submission so we
 # can chase on-hardware hangs (commit 8ae32d6's "fps=0001" trap) in the
 # Verilator harness.  Run `make gpu-gpudemo` standalone.

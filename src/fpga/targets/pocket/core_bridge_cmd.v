@@ -154,6 +154,7 @@ end
 localparam  [3:0]   ST_IDLE         = 'd0;
 localparam  [3:0]   ST_PARSE        = 'd1;
 localparam  [3:0]   ST_WORK         = 'd2;
+localparam  [3:0]   ST_CLEAR_DATATABLE = 'd3;
 localparam  [3:0]   ST_DONE_OK      = 'd13;
 localparam  [3:0]   ST_DONE_CODE    = 'd14;
 localparam  [3:0]   ST_DONE_ERR     = 'd15;
@@ -182,6 +183,7 @@ localparam  [3:0]   TARG_ST_WAITRESULT_DSO  = 'd15;
     wire            shutdown_timeout_reached = shutdown_timeout[22];  // ~56ms conservative
 
     reg             status_setup_done_1, status_setup_done_queue;
+    reg             warm_reset_ready_pending;
     reg             target_dataslot_read_1, target_dataslot_read_queue;
     reg             target_dataslot_write_1, target_dataslot_write_queue;
     reg             target_dataslot_getfile_1, target_dataslot_getfile_queue;
@@ -201,6 +203,7 @@ initial begin
     shutdown_pending <= 0;
 
     status_setup_done_queue <= 0;
+    warm_reset_ready_pending <= 0;
     target_dataslot_read_queue <= 0;
     target_dataslot_write_queue <= 0;
     target_dataslot_getfile_queue <= 0;
@@ -208,6 +211,8 @@ initial begin
     target_dataslot_ack <= 0;
     target_dataslot_done <= 0;
     target_dataslot_err <= 0;
+    b_datatable_clear_active <= 0;
+    b_datatable_clear_addr <= 0;
 end
     
 always @(posedge clk) begin
@@ -269,7 +274,16 @@ always @(posedge clk) begin
             b_datatable_wren <= 1;
         end
         endcase
-    end 
+    end
+    if(b_datatable_clear_active) begin
+        if(b_datatable_clear_addr < 5'd16) begin
+            b_datatable_wren <= 1;
+            b_datatable_addr <= {5'd0, b_datatable_clear_addr};
+            b_datatable_clear_addr <= b_datatable_clear_addr + 5'd1;
+        end else begin
+            b_datatable_clear_active <= 0;
+        end
+    end
     if(bridge_rd) begin
         casex(bridge_addr)
         32'hF8xx00xx: begin
@@ -362,14 +376,22 @@ always @(posedge clk) begin
                 // A menu "Load Game" / instance switch can reset and reload
                 // slots without reconfiguring the FPGA.  In that warm path
                 // status_setup_done is already high, so its edge detector will
-                // not fire again.  Queue a fresh Ready-To-Run while the core is
-                // held in reset; the Pocket host expects that before Reset Exit.
-                status_setup_done_queue <= reset_n && status_setup_done;
+                // not fire again.  Delay the fresh Ready-To-Run until after
+                // stale read-only datatable entries have been cleared.
+                status_setup_done_queue <= 0;
+                warm_reset_ready_pending <= reset_n && status_setup_done;
                 target_dataslot_read_queue <= 0;
                 target_dataslot_write_queue <= 0;
                 target_dataslot_getfile_queue <= 0;
                 target_dataslot_openfile_queue <= 0;
-                hstate <= ST_DONE_OK;
+                // A warm instance switch can leave datatable entries for
+                // undeclared read-only slots from the previous instance.
+                // Clear entries 0..7 while preserving pre-save config and
+                // save slots at entries 8..18; APF reload writes will
+                // repopulate only the current instance's read-only slots.
+                b_datatable_clear_active <= 1;
+                b_datatable_clear_addr <= 0;
+                hstate <= ST_CLEAR_DATATABLE;
             end else begin
                 shutdown_timeout <= shutdown_timeout + 1;
             end
@@ -480,6 +502,13 @@ always @(posedge clk) begin
     end
     ST_WORK: begin
         hstate <= ST_IDLE;
+    end
+    ST_CLEAR_DATATABLE: begin
+        if(!b_datatable_clear_active) begin
+            status_setup_done_queue <= warm_reset_ready_pending;
+            warm_reset_ready_pending <= 0;
+            hstate <= ST_DONE_OK;
+        end
     end
     ST_DONE_OK: begin
         host_0 <= 32'h4F4B0000; // result code 0
@@ -592,6 +621,10 @@ end
     wire    [31:0]  b_datatable_q;
     reg     [9:0]   b_datatable_addr;
     reg             b_datatable_wren;
+    reg             b_datatable_clear_active;
+    reg     [4:0]   b_datatable_clear_addr;
+    wire    [31:0]  b_datatable_data =
+        b_datatable_clear_active ? 32'd0 : bridge_wr_data_in;
 
 mf_datatable idt (
     .address_a      ( datatable_addr ),
@@ -599,7 +632,7 @@ mf_datatable idt (
     .clock_a        ( clk ),
     .clock_b        ( clk ),
     .data_a         ( datatable_data ),
-    .data_b         ( bridge_wr_data_in ),
+    .data_b         ( b_datatable_data ),
     .wren_a         ( datatable_wren ),
     .wren_b         ( b_datatable_wren ),
     .q_a            ( datatable_q ),

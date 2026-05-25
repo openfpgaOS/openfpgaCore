@@ -975,6 +975,29 @@ static void test_video_vtotal_sysreg() {
     tb->analogizer_settings_in = 0x00008C43u;
 }
 
+static void test_hw_features_readback() {
+    printf("test_hw_features_readback:\n");
+
+    const uint32_t HW_FEATURES = 0x40000098u;
+    const uint32_t REQUIRED =
+        (1u << 0) |   // audio
+        (1u << 2) |   // link
+        (1u << 3) |   // analogizer
+        (1u << 4) |   // GPU spans
+        (1u << 6) |   // MIDI
+        (1u << 8) |   // FPU
+        (1u << 9) |   // save slots
+        (1u << 13) |  // GPU perspective spans
+        (1u << 14) |  // GPU fragment pipeline
+        (1u << 15) |  // GPU param span-list
+        (1u << 16) |  // GPU param span z-write
+        (1u << 17);   // GPU param span z-test/write
+
+    uint32_t features = mmio_read32(HW_FEATURES);
+    check_eq("hw-features-required", features & REQUIRED, REQUIRED);
+    check_eq("hw-features-no-triangle", features & (1u << 5), 0u);
+}
+
 static uint32_t mmio_read32(uint32_t addr) {
     std::vector<uint32_t> r;
     if (!axi_read_burst(addr, 0, r)) {
@@ -1024,6 +1047,36 @@ static void test_snac_shifter_regs() {
     check_eq("snac-cfgB-cmd-pin31-dir", (tb->dbg_snac_pin_dir >> 7) & 1u, 1u);
     for (int i = 0; i < 140; i++) tick();
     check_eq("snac-cfgB-rx-left-aligned", mmio_read32(SNAC_DATA), 0xFF000000u);
+}
+
+static void test_snac_hw_poller_regs() {
+    printf("test_snac_hw_poller_regs:\n");
+
+    const uint32_t SNAC_CTRL     = 0x400000A0u;
+    const uint32_t SNAC_HW_CTRL  = 0x40000160u;
+    const uint32_t SNAC_HW_CLEAR = 0x4000017Cu;
+    const uint32_t SNAC_HW_RAW_BUTTONS = 0x40000180u;
+
+    const uint32_t ENABLE = 1u << 7;
+    const uint32_t MODE_B = 1u << 8;
+
+    axi_write_single(SNAC_HW_CLEAR, 0x3u);
+    axi_write_single(SNAC_HW_CTRL, 0x7u);  // enable, analog, fast
+    for (int i = 0; i < 8; i++) tick();
+
+    check_eq("snac-hw-ctrl-readback", mmio_read32(SNAC_HW_CTRL) & 0x7u, 0x7u);
+    check_eq("snac-hw-enable", tb->dbg_snac_enable, 1u);
+    check_eq("snac-hw-pin-dir", tb->dbg_snac_pin_dir, 0xC3u);
+    check_eq("snac-hw-att-active-out", tb->dbg_snac_pin_out & 0xC3u, 0xC2u);
+    check_eq("snac-hw-raw-buttons-reset", mmio_read32(SNAC_HW_RAW_BUTTONS), 0u);
+
+    axi_write_single(SNAC_CTRL, ENABLE | MODE_B);
+    for (int i = 0; i < 8; i++) tick();
+
+    check_eq("snac-legacy-disables-hw", mmio_read32(SNAC_HW_CTRL) & 0x1u, 0u);
+    check_eq("snac-legacy-enable", tb->dbg_snac_enable, 1u);
+
+    axi_write_single(SNAC_CTRL, 0u);
 }
 
 static void test_input_hub(void) {
@@ -1208,7 +1261,9 @@ int main(int argc, char **argv) {
     test_palette_commit_sysreg();
     test_analogizer_sysregs();
     test_video_vtotal_sysreg();
+    test_hw_features_readback();
     test_snac_shifter_regs();
+    test_snac_hw_poller_regs();
     test_input_hub();
     test_mixed_bram_periph();
 

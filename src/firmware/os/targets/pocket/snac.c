@@ -15,14 +15,19 @@
 static snac_controller_t snac_state[2];
 static uint8_t active_type;
 static int     snac_active_flag;
+static int     snac_hw_active_flag;
 static int     snac_poll_busy;
 static uint8_t snac_gpio_out_shadow;
 static uint8_t psx_att_pin;
+static uint8_t psx_att_locked;
+static uint8_t psx_invalid_poll_count;
+static uint64_t snac_last_poll_cycles;
 
 #define PSX_ATT_SETUP_DELAY      1000
 #define PSX_INTERBYTE_DELAY       256
 #define PSX_ACK_TIMEOUT           128
 #define PSX_ACK_RELEASE_TIMEOUT   256
+#define PSX_CLEAR_AFTER_INVALID_POLLS     8
 
 static void snac_gpio_set(uint8_t out, uint8_t dir) {
     snac_gpio_out_shadow = out;
@@ -32,6 +37,33 @@ static void snac_gpio_set(uint8_t out, uint8_t dir) {
 static void snac_delay(volatile int cycles) {
     while (cycles-- > 0)
         ;
+}
+
+static int snac_type_is_psx(uint8_t snac_type) {
+    return snac_type == SNAC_PSX ||
+           snac_type == SNAC_PSX_FAST ||
+           snac_type == SNAC_PSX_ANALOG ||
+           snac_type == SNAC_PSX_ANALOG_FAST;
+}
+
+static void snac_commit_state(int player, const snac_controller_t *next) {
+    if (player < 0 || player > 1)
+        return;
+
+    uint16_t old_buttons = snac_state[player].buttons;
+    uint16_t new_buttons = next->buttons;
+
+    snac_controller_t filtered = *next;
+    filtered.buttons_pressed = snac_state[player].buttons_pressed |
+                               (uint16_t)(new_buttons & (uint16_t)~old_buttons);
+    filtered.buttons_released = snac_state[player].buttons_released |
+                                (uint16_t)((uint16_t)~new_buttons & old_buttons);
+    snac_state[player] = filtered;
+}
+
+static void snac_commit_empty(int player) {
+    snac_controller_t next = {0};
+    snac_commit_state(player, &next);
 }
 
 static int16_t psx_axis_to_input(uint8_t value) {
@@ -99,11 +131,14 @@ static void poll_serlatch(int bits) {
         buttons = raw;
     }
 
-    snac_state[0].buttons = buttons;
-    snac_state[0].joy_lx = 0;
-    snac_state[0].joy_ly = 0;
-    snac_state[0].joy_rx = 0;
-    snac_state[0].joy_ry = 0;
+    snac_controller_t next = {
+        .buttons = buttons,
+        .joy_lx = 0,
+        .joy_ly = 0,
+        .joy_rx = 0,
+        .joy_ry = 0,
+    };
+    snac_commit_state(0, &next);
 }
 
 /* ============================================================
@@ -160,10 +195,19 @@ static uint8_t psx_xfer_byte_gap(uint8_t cmd) {
     return rx;
 }
 
+static int psx_id_valid(uint8_t id) {
+    return id == 0x41 ||   /* digital */
+           id == 0x53 ||   /* analog green */
+           id == 0x73;     /* analog red / DualShock */
+}
+
 static int psx_response_valid(uint8_t id, uint8_t status) {
-    return status == 0x5A &&
-           id != 0x00 &&
-           id != 0xFF;
+    /* Some Analogizer/SNAC PSX adapters do not report the 0x5A status byte
+     * perfectly every poll, but the device ID remains stable.  Treat a known
+     * ID as a synchronized frame so releases do not wait behind transient
+     * status-byte misses. */
+    (void)status;
+    return psx_id_valid(id);
 }
 
 static int poll_psx_att(int analog, uint8_t att_pin, int commit) {
@@ -228,39 +272,65 @@ static int poll_psx_att(int analog, uint8_t att_pin, int commit) {
     if (raw & 0x0200) buttons |= OF_BTN_R2;
     if (raw & 0x0400) buttons |= OF_BTN_L1;
     if (raw & 0x0800) buttons |= OF_BTN_R1;
-    if (raw & 0x1000) buttons |= OF_BTN_Y;       /* Triangle */
-    if (raw & 0x2000) buttons |= OF_BTN_B;       /* Circle */
-    if (raw & 0x4000) buttons |= OF_BTN_A;       /* Cross */
-    if (raw & 0x8000) buttons |= OF_BTN_X;       /* Square */
+    if (raw & 0x1000) buttons |= OF_BTN_X;       /* Triangle/top */
+    if (raw & 0x2000) buttons |= OF_BTN_A;       /* Circle/right */
+    if (raw & 0x4000) buttons |= OF_BTN_B;       /* Cross/bottom */
+    if (raw & 0x8000) buttons |= OF_BTN_Y;       /* Square/left */
 
     if (commit) {
-        snac_state[0].buttons = buttons;
-        snac_state[0].joy_lx = joy_lx;
-        snac_state[0].joy_ly = joy_ly;
-        snac_state[0].joy_rx = joy_rx;
-        snac_state[0].joy_ry = joy_ry;
+        snac_controller_t next = {
+            .buttons = buttons,
+            .joy_lx = joy_lx,
+            .joy_ly = joy_ly,
+            .joy_rx = joy_rx,
+            .joy_ry = joy_ry,
+        };
+        snac_commit_state(0, &next);
     }
 
     return 1;
 }
 
 static void poll_psx(int analog) {
-    if (poll_psx_att(analog, psx_att_pin, 1))
+    if (poll_psx_att(analog, psx_att_pin, 1)) {
+        psx_att_locked = 1;
+        psx_invalid_poll_count = 0;
         return;
+    }
+
+    if (psx_att_locked) {
+        /* Once a working ATT/select pin is known, do not probe the
+         * alternate pin on every transient bad frame.  That extra failed
+         * transaction can disturb some adapters and adds input latency. */
+        if (psx_invalid_poll_count < PSX_CLEAR_AFTER_INVALID_POLLS) {
+            psx_invalid_poll_count++;
+            return;
+        }
+
+        psx_att_locked = 0;
+    }
 
     uint8_t alt_att = (psx_att_pin == SNAC_PIN_OUT1)
                     ? SNAC_PIN_OUT2
                     : SNAC_PIN_OUT1;
     if (poll_psx_att(analog, alt_att, 1)) {
         psx_att_pin = alt_att;
+        psx_att_locked = 1;
+        psx_invalid_poll_count = 0;
         return;
     }
 
-    snac_state[0].buttons = 0;
-    snac_state[0].joy_lx = 0;
-    snac_state[0].joy_ly = 0;
-    snac_state[0].joy_rx = 0;
-    snac_state[0].joy_ry = 0;
+    /* Treat invalid PSX frames as transient transport failures, not as
+     * releases.  Some adapters/controllers occasionally miss a reply while
+     * a button is held; committing an empty state here creates visible
+     * held-button flicker.  A real disconnect still clears after a short
+     * invalid streak, so releases do not feel sticky. */
+    if (psx_invalid_poll_count < PSX_CLEAR_AFTER_INVALID_POLLS) {
+        psx_invalid_poll_count++;
+        return;
+    }
+
+    snac_commit_empty(0);
 }
 
 /* ============================================================
@@ -333,11 +403,14 @@ static void poll_pce(int sixbtn) {
         if (nib2 & 0x08) buttons |= OF_BTN_R1;
     }
 
-    snac_state[0].buttons = buttons;
-    snac_state[0].joy_lx = 0;
-    snac_state[0].joy_ly = 0;
-    snac_state[0].joy_rx = 0;
-    snac_state[0].joy_ry = 0;
+    snac_controller_t next = {
+        .buttons = buttons,
+        .joy_lx = 0,
+        .joy_ly = 0,
+        .joy_rx = 0,
+        .joy_ry = 0,
+    };
+    snac_commit_state(0, &next);
 }
 
 /* ============================================================
@@ -346,11 +419,17 @@ static void poll_pce(int sixbtn) {
 
 void snac_init(uint8_t snac_type) {
     snac_active_flag = 0;
+    snac_hw_active_flag = 0;
     snac_poll_busy = 0;
     active_type = snac_type;
     psx_att_pin = SNAC_PIN_OUT1;
+    psx_att_locked = 0;
+    psx_invalid_poll_count = 0;
+    snac_last_poll_cycles = 0;
     snac_state[0] = (snac_controller_t){0};
     snac_state[1] = (snac_controller_t){0};
+    SNAC_HW_CTRL = 0;
+    SNAC_HW_CLEAR = SNAC_HW_CLEAR_IRQ | SNAC_HW_CLEAR_EDGES;
 
     if (snac_type == SNAC_NONE) {
         /* Disable SNAC mode → UART active */
@@ -359,20 +438,26 @@ void snac_init(uint8_t snac_type) {
         return;
     }
 
+    if (snac_type_is_psx(snac_type)) {
+        uint32_t hw_ctrl = SNAC_HW_CTRL_ENABLE;
+        if (snac_type == SNAC_PSX_ANALOG ||
+            snac_type == SNAC_PSX_ANALOG_FAST)
+            hw_ctrl |= SNAC_HW_CTRL_ANALOG;
+        if (snac_type == SNAC_PSX_FAST ||
+            snac_type == SNAC_PSX_ANALOG_FAST)
+            hw_ctrl |= SNAC_HW_CTRL_FAST;
+
+        snac_hw_active_flag = 1;
+        snac_active_flag = 1;
+        SNAC_CTRL = 0;
+        SNAC_HW_CTRL = hw_ctrl;
+        return;
+    }
+
     /* Enable SNAC mode (disables UART on shared pins) */
     uint32_t ctrl = SNAC_CTRL_ENABLE;
 
-    if (snac_type >= SNAC_PSX) {
-        /* Config B (PSX): CLK on pin30, CMD on IO6, DAT on IN4 */
-        ctrl |= SNAC_CTRL_MODE_B;
-        /* PSX standard: conservative 100 KHz for adapter/controller margin. */
-        SNAC_DIV = 499;
-        /* GPIO: OUT1=ATT high (deassert), pin30=CLK high idle, IO6=CMD high idle */
-        snac_gpio_set(SNAC_PIN_OUT1 | SNAC_PIN_OUT2 | SNAC_PIN_IO5 | SNAC_PIN_IO6,
-                      ((SNAC_DIR_IO5 | SNAC_DIR_IO6) >> 8) | 0x03);
-        if (snac_type == SNAC_PSX_FAST || snac_type == SNAC_PSX_ANALOG_FAST)
-            SNAC_DIV = 249;  /* 200 KHz */
-    } else if (snac_type >= SNAC_PCE_2BTN && snac_type <= SNAC_PCE_MULTITAP) {
+    if (snac_type >= SNAC_PCE_2BTN && snac_type <= SNAC_PCE_MULTITAP) {
         /* PC Engine: pure GPIO, no shifter.  Use Config A mode but
          * we won't actually use the shifter. */
         ctrl |= SNAC_CTRL_MODE_A;
@@ -381,7 +466,7 @@ void snac_init(uint8_t snac_type) {
     } else {
         /* Config A (NES/SNES/DB15): CLK on OUT1, LATCH on OUT2, DATA on IO3 */
         ctrl |= SNAC_CTRL_MODE_A;
-        /* NES/SNES: 200 KHz clock → div = CPU_FREQ/(2*200000) - 1 = 249 */
+        /* NES/SNES: 200 KHz clock -> div = CPU_FREQ/(2*200000) - 1 = 249 */
         SNAC_DIV = 249;
         /* GPIO: OUT1=CLK, OUT2=LATCH — both idle low */
         snac_gpio_set(0, 0x03);
@@ -396,6 +481,7 @@ void snac_init(uint8_t snac_type) {
 
 void snac_poll(void) {
     if (!snac_active_flag) return;
+    if (snac_hw_active_flag) return;
     if (snac_poll_busy) return;
 
     snac_poll_busy = 1;
@@ -433,12 +519,62 @@ void snac_poll(void) {
         break;
     }
 
+    snac_last_poll_cycles = read_cycles();
     snac_poll_busy = 0;
+}
+
+void snac_poll_if_due(uint32_t min_interval_us) {
+    if (!snac_active_flag) return;
+    if (snac_hw_active_flag) return;
+
+    uint64_t now = read_cycles();
+    uint64_t min_cycles =
+        (uint64_t)min_interval_us * (CPU_FREQ_HZ / 1000000u);
+
+    if (snac_last_poll_cycles &&
+        (now - snac_last_poll_cycles) < min_cycles)
+        return;
+
+    snac_poll();
 }
 
 const snac_controller_t *snac_get_state(int player) {
     if (player < 0 || player > 1) return &snac_state[0];
     return &snac_state[player];
+}
+
+snac_controller_t snac_read_state(int player) {
+    snac_controller_t out;
+
+    if (player < 0 || player > 1)
+        player = 0;
+
+    if (snac_hw_active_flag) {
+        uint32_t joy_l = SNAC_HW_JOY_L;
+        uint32_t joy_r = SNAC_HW_JOY_R;
+        out = (snac_controller_t){
+            .buttons = (uint16_t)SNAC_HW_BUTTONS,
+            .buttons_pressed = (uint16_t)SNAC_HW_PRESSED,
+            .buttons_released = (uint16_t)SNAC_HW_RELEASED,
+            .joy_lx = (int16_t)(joy_l & 0xFFFFu),
+            .joy_ly = (int16_t)(joy_l >> 16),
+            .joy_rx = (int16_t)(joy_r & 0xFFFFu),
+            .joy_ry = (int16_t)(joy_r >> 16),
+        };
+        snac_state[0] = out;
+        SNAC_HW_CLEAR = SNAC_HW_CLEAR_EDGES;
+        return out;
+    }
+
+    out = snac_state[player];
+    snac_state[player].buttons_pressed = 0;
+    snac_state[player].buttons_released = 0;
+    return out;
+}
+
+void snac_irq_ack(void) {
+    if (snac_hw_active_flag)
+        SNAC_HW_CLEAR = SNAC_HW_CLEAR_IRQ;
 }
 
 int snac_is_active(void) {

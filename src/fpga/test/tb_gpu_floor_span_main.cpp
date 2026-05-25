@@ -277,8 +277,8 @@ static int run_case(const floor_case &c)
     uint32_t sp_sstep = (uint32_t)-(int32_t)to_q16(c.asm2, s_rshift);
     uint32_t sp_tstep = (uint32_t)-(int32_t)to_q16(c.asm1, t_rshift);
 
-    // One-lane affine span-group encoding of the hlineasm4 span.
-    ring_cmd(0x47, 11);
+    // One-lane direct-affine record inside the unified span command.
+    ring_cmd(0x48, 11);
     ring_write((1u << 28) | (0x01u << 20));                  // lane_count, flags, colormap
     ring_write((uint32_t)(uint16_t)(1u << c.bits));          // tex_width
     // POT wrap masks: {tex_h_mask, tex_w_mask} =

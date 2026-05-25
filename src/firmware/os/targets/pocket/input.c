@@ -1,10 +1,10 @@
 /*
  * openfpgaOS Input HAL Implementation
  * Reads from Pocket APF controllers and Analogizer SNAC.
- * SNAC polling is serviced from vblank IRQ context and cached by the
- * SNAC driver. App-side polling merges that cached state with APF input
- * so games do not synchronously clock controller adapters in their frame
- * loop.
+ * Hardware-polled SNAC protocols latch decoded state/edges in RTL.  Older
+ * software-polled SNAC protocols are refreshed opportunistically and cached
+ * by the SNAC driver so games do not synchronously clock adapters in their
+ * frame loop.
  */
 
 #include "input.h"
@@ -29,6 +29,8 @@ static volatile uint32_t input_hw_last_event_lo;
 static volatile uint32_t input_hw_last_event_hi;
 static volatile uint32_t input_hw_dropped_events;
 
+#define SNAC_INPUT_POLL_INTERVAL_US 2000u
+
 static inline uint32_t input_irq_save_local(void)
 {
     uint32_t prev;
@@ -47,7 +49,7 @@ static snac_controller_t read_snac_cached(int player)
 {
     snac_controller_t out;
     uint32_t irq = input_irq_save_local();
-    out = *snac_get_state(player);
+    out = snac_read_state(player);
     input_irq_restore_local(irq);
     return out;
 }
@@ -152,8 +154,12 @@ static inline void read_apf(int player, uint32_t *keys, uint32_t *joy, uint32_t 
 }
 
 void of_input_irq_service(void) {
-    if (!input_hub_present)
+    if (!input_hub_present) {
+        snac_irq_ack();
         return;
+    }
+
+    snac_irq_ack();
 
     /* Drain bounded hardware records.  DATA0 is the low word; DATA1 is
      * the high word and pops the FIFO in RTL.  The current v1 pipeline
@@ -179,7 +185,7 @@ void of_input_irq_service(void) {
 
 void of_input_vblank_service(void) {
     if (snac_is_active())
-        snac_poll();
+        snac_poll_if_due(SNAC_INPUT_POLL_INTERVAL_US);
 }
 
 static inline uint8_t apf_input_type(uint32_t key) {
@@ -187,11 +193,15 @@ static inline uint8_t apf_input_type(uint32_t key) {
 }
 
 /* Fill input state from raw values */
-static void fill_state(int player, uint32_t keys, int16_t lx, int16_t ly,
-                       int16_t rx, int16_t ry, uint32_t trig) {
+static void fill_state_edges(int player, uint32_t keys, int16_t lx, int16_t ly,
+                             int16_t rx, int16_t ry, uint32_t trig,
+                             uint32_t extra_pressed,
+                             uint32_t extra_released) {
     keys &= 0xFFFFu;
-    of_input_states[player].buttons_pressed  = keys & ~prev_buttons[player];
-    of_input_states[player].buttons_released = ~keys & prev_buttons[player];
+    of_input_states[player].buttons_pressed  =
+        (keys & ~prev_buttons[player]) | (extra_pressed & 0xFFFFu);
+    of_input_states[player].buttons_released =
+        (~keys & prev_buttons[player]) | (extra_released & 0xFFFFu);
     of_input_states[player].buttons = keys;
     prev_buttons[player] = keys;
 
@@ -201,6 +211,11 @@ static void fill_state(int player, uint32_t keys, int16_t lx, int16_t ly,
     of_input_states[player].joy_ry = apply_deadzone(ry);
     of_input_states[player].trigger_l = trig & 0xFFFF;
     of_input_states[player].trigger_r = (trig >> 16) & 0xFFFF;
+}
+
+static void fill_state(int player, uint32_t keys, int16_t lx, int16_t ly,
+                       int16_t rx, int16_t ry, uint32_t trig) {
+    fill_state_edges(player, keys, lx, ly, rx, ry, trig, 0, 0);
 }
 
 typedef struct {
@@ -248,7 +263,9 @@ static void fill_apf_snac_state(int player, uint32_t keys, uint32_t joy,
         if (axis_active(sc->joy_ry)) axes.ry = sc->joy_ry;
     }
 
-    fill_state(player, buttons, axes.lx, axes.ly, axes.rx, axes.ry, trig);
+    fill_state_edges(player, buttons, axes.lx, axes.ly, axes.rx, axes.ry, trig,
+                     sc ? sc->buttons_pressed : 0,
+                     sc ? sc->buttons_released : 0);
 }
 
 static void keyboard_disconnect(void) {
@@ -371,6 +388,7 @@ void of_input_poll(void) {
         /* Keep Pocket/Dock APF input live, then overlay SNAC on the
          * configured player slot.  This allows built-in controls and
          * dock controllers to remain usable while Analogizer/SNAC is on. */
+        snac_poll_if_due(SNAC_INPUT_POLL_INTERVAL_US);
         snac_controller_t sc0 = read_snac_cached(0);
 
         const of_analogizer_state_t *anlg = of_analogizer_get_state();
@@ -423,6 +441,7 @@ void of_input_poll_p0(of_input_state_t *out) {
     of_analogizer_refresh();
 
     if (snac_is_active()) {
+        snac_poll_if_due(SNAC_INPUT_POLL_INTERVAL_US);
         const of_analogizer_state_t *anlg = of_analogizer_get_state();
         uint8_t assignment = anlg->snac_assignment & 0x3;
         uint32_t keys, joy, trig;

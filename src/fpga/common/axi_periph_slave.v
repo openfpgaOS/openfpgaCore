@@ -231,7 +231,10 @@ wire [31:0] ar_addr = s_axi_araddr;
 wire [31:0] aw_addr = s_axi_awaddr;
 
 // ============================================
-// SNAC Shifter + GPIO (registers 0xA0-0xAC)
+// SNAC raw shifter/GPIO plus optional PSX poller.
+// The RndMnkIII Analogizer/SNAC pinout stays as the physical layer; firmware
+// can either drive the raw pins through SNAC_CTRL/SNAC_GPIO or let the PSX
+// poller own the same pins and expose decoded state/edges.
 // ============================================
 // SNAC_CTRL (0xA0): [0]=start, [5:1]=bit_count-1, [6]=latch_en, [7]=snac_en, [9:8]=mode
 // SNAC_DIV  (0xA4): [15:0]=clock divider half-period
@@ -244,6 +247,11 @@ reg [31:0] snac_tx_reg;
 reg [7:0]  snac_gpio_out_reg;
 reg [7:0]  snac_gpio_dir_reg;   // 0=input, 1=output; bits [1:0] always output
 reg        snac_start_pulse;
+reg        snac_hw_enable_reg;
+reg        snac_hw_analog_reg;
+reg        snac_hw_fast_reg;
+reg        snac_hw_clear_irq_pulse;
+reg        snac_hw_clear_edges_pulse;
 
 wire        snac_busy;
 wire        snac_done;
@@ -251,6 +259,19 @@ wire [31:0] snac_rx_data;
 wire        snac_shift_clk;
 wire        snac_shift_mosi;
 wire        snac_shift_latch;
+wire [7:0]  snac_hw_pin_out;
+wire [7:0]  snac_hw_pin_dir;
+wire        snac_hw_valid;
+wire        snac_hw_irq_pending;
+wire [15:0] snac_hw_buttons;
+wire [15:0] snac_hw_pressed;
+wire [15:0] snac_hw_released;
+wire [15:0] snac_hw_raw_buttons;
+wire [15:0] snac_hw_lx;
+wire [15:0] snac_hw_ly;
+wire [15:0] snac_hw_rx;
+wire [15:0] snac_hw_ry;
+wire [7:0]  snac_hw_debug_status;
 reg  [7:0]  snac_pin_in_meta;
 reg  [7:0]  snac_pin_in_sync;
 
@@ -291,6 +312,30 @@ snac_shifter snac_shift (
     .miso_b(snac_miso_b)
 );
 
+snac_psx_poller snac_hw_psx (
+    .clk(clk),
+    .reset_n(reset_n),
+    .enable(snac_hw_enable_reg),
+    .analog_en(snac_hw_analog_reg),
+    .fast_en(snac_hw_fast_reg),
+    .clear_irq(snac_hw_clear_irq_pulse),
+    .clear_edges(snac_hw_clear_edges_pulse),
+    .pin_in(snac_pin_in_sync),
+    .pin_out(snac_hw_pin_out),
+    .pin_dir(snac_hw_pin_dir),
+    .valid(snac_hw_valid),
+    .irq_pending(snac_hw_irq_pending),
+    .buttons(snac_hw_buttons),
+    .buttons_pressed(snac_hw_pressed),
+    .buttons_released(snac_hw_released),
+    .raw_buttons_debug(snac_hw_raw_buttons),
+    .joy_lx(snac_hw_lx),
+    .joy_ly(snac_hw_ly),
+    .joy_rx(snac_hw_rx),
+    .joy_ry(snac_hw_ry),
+    .debug_status(snac_hw_debug_status)
+);
+
 // SNAC pin output mux: shifter overrides GPIO when busy
 // Config A: shifter drives [0]=CLK, [1]=LATCH
 // Config B: shifter drives [6]=CLK/pin30, [7]=CMD(MOSI).  Bank0 stays input
@@ -318,9 +363,9 @@ always @(*) begin
     end
 end
 
-assign snac_pin_out = snac_pin_out_mux;
-assign snac_pin_dir = snac_pin_dir_mux;
-assign snac_enable  = snac_en_reg;
+assign snac_pin_out = snac_hw_enable_reg ? snac_hw_pin_out : snac_pin_out_mux;
+assign snac_pin_dir = snac_hw_enable_reg ? snac_hw_pin_dir : snac_pin_dir_mux;
+assign snac_enable  = snac_en_reg | snac_hw_enable_reg;
 
 // ============================================
 // BRAM (32KB = 8192 x 32-bit words)
@@ -419,7 +464,13 @@ assign ext_irq = (uart_rx_irq & irq_mask[0]) |
 // Bit  4: GPU span renderer (always)       Bit 12: GPU alpha blending
 // Bit  5: GPU triangle rasterizer          Bit 13: GPU perspective spans
 // Bit  6: MIDI (sample-based synth)        Bit 14: GPU pipelined fragments
-// Bit  7: WiFi (reserved)                  Bit 15: (reserved)
+// Bit  7: WiFi (reserved)                  Bit 15: GPU param span-list
+//                                          Bit 16: GPU param span z-write
+//                                          Bit 17: GPU param span z-test/write
+//
+// Perspective and parametric span commands are implemented and covered by
+// the GPU acceptance tests. Keep the caps exposed so renderers can select
+// these paths without local force-enable hacks.
 localparam [31:0] HW_FEATURES =
     32'h0000_0001                           // Audio stereo FIFO present
     |
@@ -431,7 +482,7 @@ localparam [31:0] HW_FEATURES =
     |
     32'h0000_0010      // GPU span renderer
     |
-    32'h0000_4000      // GPU pipelined fragment processor (bit 14)
+    32'h0003_E000      // GPU persp + fragpipe + param span/list/z caps (bits 13..17)
     | 32'h0000_0348;  // Analogizer(3) + MIDI(6) + FPU(8) + Save slots(9) — always present
 
 localparam FB_ADDR_0 = 25'h0000000;     // byte 0x000000 → CPU 0x10000000
@@ -583,52 +634,57 @@ reg [15:0] input_seq;
 reg [31:0] input_prev_key0, input_prev_key1, input_prev_key2, input_prev_key3;
 reg [31:0] input_prev_joy0, input_prev_joy1, input_prev_joy2, input_prev_joy3;
 reg [15:0] input_prev_trig0, input_prev_trig1, input_prev_trig2, input_prev_trig3;
+reg [1:0]  input_scan_slot;
 
-wire [2:0] input_chg0 = {cont1_trig_s != input_prev_trig0,
-                         cont1_joy_s  != input_prev_joy0,
-                         cont1_key_s  != input_prev_key0};
-wire [2:0] input_chg1 = {cont2_trig_s != input_prev_trig1,
-                         cont2_joy_s  != input_prev_joy1,
-                         cont2_key_s  != input_prev_key1};
-wire [2:0] input_chg2 = {cont3_trig_s != input_prev_trig2,
-                         cont3_joy_s  != input_prev_joy2,
-                         cont3_key_s  != input_prev_key2};
-wire [2:0] input_chg3 = {cont4_trig_s != input_prev_trig3,
-                         cont4_joy_s  != input_prev_joy3,
-                         cont4_key_s  != input_prev_key3};
-
-wire input_slot0_changed = input_irq_mask[0] && (|input_chg0);
-wire input_slot1_changed = input_irq_mask[1] && (|input_chg1);
-wire input_slot2_changed = input_irq_mask[2] && (|input_chg2);
-wire input_slot3_changed = input_irq_mask[3] && (|input_chg3);
-
-reg       input_event_valid;
-reg [1:0] input_event_slot;
-reg [2:0] input_event_fields;
+reg [31:0] input_cur_key_sel;
+reg [31:0] input_cur_joy_sel;
+reg [15:0] input_cur_trig_sel;
+reg [31:0] input_prev_key_sel;
+reg [31:0] input_prev_joy_sel;
+reg [15:0] input_prev_trig_sel;
 
 always @(*) begin
-    input_event_valid  = 1'b0;
-    input_event_slot   = 2'd0;
-    input_event_fields = 3'b000;
-
-    if (input_slot0_changed) begin
-        input_event_valid  = 1'b1;
-        input_event_slot   = 2'd0;
-        input_event_fields = input_chg0;
-    end else if (input_slot1_changed) begin
-        input_event_valid  = 1'b1;
-        input_event_slot   = 2'd1;
-        input_event_fields = input_chg1;
-    end else if (input_slot2_changed) begin
-        input_event_valid  = 1'b1;
-        input_event_slot   = 2'd2;
-        input_event_fields = input_chg2;
-    end else if (input_slot3_changed) begin
-        input_event_valid  = 1'b1;
-        input_event_slot   = 2'd3;
-        input_event_fields = input_chg3;
-    end
+    case (input_scan_slot)
+        2'd0: begin
+            input_cur_key_sel   = cont1_key_s;
+            input_cur_joy_sel   = cont1_joy_s;
+            input_cur_trig_sel  = cont1_trig_s;
+            input_prev_key_sel  = input_prev_key0;
+            input_prev_joy_sel  = input_prev_joy0;
+            input_prev_trig_sel = input_prev_trig0;
+        end
+        2'd1: begin
+            input_cur_key_sel   = cont2_key_s;
+            input_cur_joy_sel   = cont2_joy_s;
+            input_cur_trig_sel  = cont2_trig_s;
+            input_prev_key_sel  = input_prev_key1;
+            input_prev_joy_sel  = input_prev_joy1;
+            input_prev_trig_sel = input_prev_trig1;
+        end
+        2'd2: begin
+            input_cur_key_sel   = cont3_key_s;
+            input_cur_joy_sel   = cont3_joy_s;
+            input_cur_trig_sel  = cont3_trig_s;
+            input_prev_key_sel  = input_prev_key2;
+            input_prev_joy_sel  = input_prev_joy2;
+            input_prev_trig_sel = input_prev_trig2;
+        end
+        default: begin
+            input_cur_key_sel   = cont4_key_s;
+            input_cur_joy_sel   = cont4_joy_s;
+            input_cur_trig_sel  = cont4_trig_s;
+            input_prev_key_sel  = input_prev_key3;
+            input_prev_joy_sel  = input_prev_joy3;
+            input_prev_trig_sel = input_prev_trig3;
+        end
+    endcase
 end
+
+wire [2:0] input_event_fields = {input_cur_trig_sel != input_prev_trig_sel,
+                                 input_cur_joy_sel  != input_prev_joy_sel,
+                                 input_cur_key_sel  != input_prev_key_sel};
+wire [1:0] input_event_slot = input_scan_slot;
+wire       input_event_valid = input_irq_mask[input_scan_slot] && (|input_event_fields);
 
 wire        input_fifo_empty;
 wire        input_fifo_full;
@@ -641,7 +697,7 @@ wire [63:0] input_fifo_din = {
     8'h00,
     16'b0, input_seq
 };
-wire input_fifo_pop  = (state == S_PERIPH_RD) && can_push_beat && reg_sysreg &&
+wire input_fifo_pop  = (state == S_PERIPH_RD) && can_push_beat && req_is_sysreg &&
                        req_addr[8] && (req_addr[7:2] == 6'd21) && !input_fifo_empty; // INPUT_FIFO_DATA1 (0x154)
 wire input_fifo_push = input_event_valid && !input_fifo_full;
 reg  input_fifo_clear;
@@ -664,28 +720,18 @@ sync_fifo #(
     .count(input_fifo_count)
 );
 
-assign input_irq_pending = !input_fifo_empty || input_overflow;
+assign input_irq_pending = !input_fifo_empty || input_overflow || snac_hw_irq_pending;
 
 always @(posedge clk) begin
     if (reset) begin
         input_irq_mask <= 4'b0;
         input_overflow <= 1'b0;
         input_seq <= 16'd0;
+        input_scan_slot <= 2'd0;
         input_fifo_clear <= 1'b1;
-        input_prev_key0 <= 32'd0;
-        input_prev_key1 <= 32'd0;
-        input_prev_key2 <= 32'd0;
-        input_prev_key3 <= 32'd0;
-        input_prev_joy0 <= 32'd0;
-        input_prev_joy1 <= 32'd0;
-        input_prev_joy2 <= 32'd0;
-        input_prev_joy3 <= 32'd0;
-        input_prev_trig0 <= 16'd0;
-        input_prev_trig1 <= 16'd0;
-        input_prev_trig2 <= 16'd0;
-        input_prev_trig3 <= 16'd0;
     end else begin
         input_fifo_clear <= 1'b0;
+        input_scan_slot <= input_scan_slot + 2'd1;
 
         if (sysreg_wr_fire && req_addr[8] && req_addr[7:2] == 6'd1) begin // INPUT_IRQ_MASK (0x104)
             input_irq_mask <= req_wdata[3:0];
@@ -779,10 +825,6 @@ end
 // ============================================
 reg sysreg_wr_fire;
 
-// Loop variable for the save_slot_base reset sweep below.  Declared
-// at module scope (Verilog-2001) so the always block can reference it.
-integer rsi;
-
 // Command state tracking: latch ACK/DONE per-command so firmware
 // never sees stale status from a previous command.
 // ds_cmd_active: set when DS_COMMAND fires, cleared when DONE is captured.
@@ -858,7 +900,12 @@ always @(posedge clk) begin
         snac_start_pulse <= 0;
         snac_bit_count_reg <= 0;
         snac_latch_en_reg <= 0;
-        /* mix_*, reg_mixer reset live in the main FSM always block
+        snac_hw_enable_reg <= 1'b0;
+        snac_hw_analog_reg <= 1'b0;
+        snac_hw_fast_reg <= 1'b0;
+        snac_hw_clear_irq_pulse <= 1'b0;
+        snac_hw_clear_edges_pulse <= 1'b0;
+        /* mix_* reset lives in the main FSM always block
          * to avoid Quartus multi-driver errors (10028).  Verilator
          * tolerates split drivers if the conflict is provably
          * non-overlapping; Quartus does not. */
@@ -867,6 +914,8 @@ always @(posedge clk) begin
         pal_wr <= 0;
         pal_commit <= 0;
         snac_start_pulse <= 0;
+        snac_hw_clear_irq_pulse <= 1'b0;
+        snac_hw_clear_edges_pulse <= 1'b0;
 
         // Hardware timer countdown
         if (timer_enable && timer_period != 0) begin
@@ -1001,6 +1050,8 @@ always @(posedge clk) begin
                 6'd40: begin  // SNAC_CTRL (0xA0)
                     snac_en_reg   <= req_wdata[7];
                     snac_mode_reg <= req_wdata[9:8];
+                    if (req_wdata[7])
+                        snac_hw_enable_reg <= 1'b0;
                     // Start a shift if bit[0] set and shifter not busy
                     if (req_wdata[0] && !snac_busy) begin
                         snac_start_pulse  <= 1;
@@ -1040,6 +1091,23 @@ always @(posedge clk) begin
                 6'd55: vrr_v_total_reg <= clamp_v_total(req_wdata[9:0]); // VIDEO_VTOTAL (0xDC)
                 6'd63: irq_mask <= req_wdata[5:0];             // IRQ_MASK (0xFC)
 
+                default: ;
+            endcase
+        end
+
+        if (sysreg_wr_fire && req_addr[8]) begin
+            case (req_addr[7:2])
+                6'd24: begin  // SNAC_HW_CTRL (0x160)
+                    snac_hw_enable_reg <= req_wdata[0];
+                    snac_hw_analog_reg <= req_wdata[1];
+                    snac_hw_fast_reg   <= req_wdata[2];
+                    if (req_wdata[0])
+                        snac_en_reg <= 1'b0;
+                end
+                6'd31: begin  // SNAC_HW_CLEAR (0x17C)
+                    snac_hw_clear_irq_pulse   <= req_wdata[0];
+                    snac_hw_clear_edges_pulse <= req_wdata[1];
+                end
                 default: ;
             endcase
         end
@@ -1143,6 +1211,23 @@ always @(*) begin
                 6'd20: sysreg_rdata = input_fifo_dout[31:0];           // INPUT_FIFO_DATA0
                 6'd21: sysreg_rdata = input_fifo_dout[63:32];          // INPUT_FIFO_DATA1
                 6'd22: sysreg_rdata = {27'b0, input_fifo_count};       // INPUT_FIFO_COUNT
+                6'd24: sysreg_rdata = {snac_hw_debug_status, 14'b0,
+                                        snac_hw_irq_pending,
+                                        snac_hw_valid,
+                                        5'b0,
+                                        snac_hw_fast_reg,
+                                        snac_hw_analog_reg,
+                                        snac_hw_enable_reg};             // SNAC_HW_CTRL
+                6'd25: sysreg_rdata = {16'b0, snac_hw_buttons};         // SNAC_HW_BUTTONS
+                6'd26: sysreg_rdata = {16'b0, snac_hw_pressed};         // SNAC_HW_PRESSED
+                6'd27: sysreg_rdata = {16'b0, snac_hw_released};        // SNAC_HW_RELEASED
+                6'd28: sysreg_rdata = {snac_hw_ly, snac_hw_lx};         // SNAC_HW_JOY_L
+                6'd29: sysreg_rdata = {snac_hw_ry, snac_hw_rx};         // SNAC_HW_JOY_R
+                6'd30: sysreg_rdata = {snac_hw_debug_status, 8'b0,
+                                        snac_hw_released[3:0],
+                                        snac_hw_pressed[3:0],
+                                        snac_hw_buttons[7:0]};           // SNAC_HW_DEBUG
+                6'd32: sysreg_rdata = {16'b0, snac_hw_raw_buttons};     // SNAC_HW_RAW_BUTTONS
                 default: ;
             endcase
         end
@@ -1242,7 +1327,7 @@ always @(posedge clk) begin
             uart_rx_wr_ptr <= uart_rx_wr_ptr + 10'd1;
         end
         // Read: CPU reads the RX register → advance rd_ptr
-        if (state == S_PERIPH_RD && can_push_beat && reg_uart && req_addr[3:2] == 2'b10 && !uart_rx_empty)
+        if (state == S_PERIPH_RD && can_push_beat && req_is_uart && req_addr[3:2] == 2'b10 && !uart_rx_empty)
             uart_rx_rd_ptr <= uart_rx_rd_ptr + 10'd1;
     end
 end
@@ -1361,16 +1446,29 @@ reg [7:0]  burst_count;
 reg [1:0]  awburst_latched;
 wire       burst_is_fixed = (awburst_latched == 2'b00);
 
-// Region flags (latched on accept)
-reg reg_ram;
-// reg_term removed — terminal in software
-reg reg_sysreg;
-reg reg_audio;
-reg reg_cram0;
-reg reg_link;
-reg reg_uart;
-reg reg_gpu;
-reg reg_mixer;
+// Region ID latched on accept.  A single decoded field keeps the read/write
+// FSM from carrying a bank of parallel one-hot region registers through every
+// MMIO path.
+localparam [3:0] REGION_NONE   = 4'd0;
+localparam [3:0] REGION_RAM    = 4'd1;
+localparam [3:0] REGION_SYSREG = 4'd2;
+localparam [3:0] REGION_AUDIO  = 4'd3;
+localparam [3:0] REGION_CRAM0  = 4'd4;
+localparam [3:0] REGION_LINK   = 4'd5;
+localparam [3:0] REGION_UART   = 4'd6;
+localparam [3:0] REGION_GPU    = 4'd7;
+localparam [3:0] REGION_MIXER  = 4'd8;
+
+reg [3:0] req_region;
+
+wire req_is_ram    = (req_region == REGION_RAM);
+wire req_is_sysreg = (req_region == REGION_SYSREG);
+wire req_is_audio  = (req_region == REGION_AUDIO);
+wire req_is_cram0  = (req_region == REGION_CRAM0);
+wire req_is_link   = (req_region == REGION_LINK);
+wire req_is_uart   = (req_region == REGION_UART);
+wire req_is_gpu    = (req_region == REGION_GPU);
+wire req_is_mixer  = (req_region == REGION_MIXER);
 
 wire beat_is_last = (burst_count == burst_len);
 wire [31:0] periph_next_addr = burst_is_fixed ? req_addr : (req_addr + 32'd4);
@@ -1414,29 +1512,32 @@ assign ram_wren = (state == S_BRAM_WR) && (|req_wstrb);
 // ============================================
 // Region decode helpers
 // ============================================
-// 0x4E000000 region: CRAM0 ownership mode register (bit 0).
-wire ar_dec_cram0  = (ar_addr[31:24] == 8'h4E);
-wire aw_dec_cram0  = (aw_addr[31:24] == 8'h4E);
+function [3:0] decode_region;
+    input [31:0] addr;
+    begin
+        // BRAM: 32KB, 0x00000-0x07FFF.
+        if (addr[31:15] == 17'b0) begin
+            decode_region = REGION_RAM;
+        // SYSREG: 0x40000000-0x400001FF.  The low page is the legacy
+        // control block; bit 8 selects the input-hub page.
+        end else if (addr[31:9] == 23'h200000) begin
+            decode_region = REGION_SYSREG;
+        end else begin
+            case (addr[31:24])
+                8'h48: decode_region = REGION_MIXER;
+                8'h4A: decode_region = REGION_GPU;
+                8'h4C: decode_region = REGION_AUDIO;
+                8'h4D: decode_region = REGION_LINK;
+                8'h4E: decode_region = REGION_CRAM0;
+                8'h4F: decode_region = REGION_UART;
+                default: decode_region = REGION_NONE;
+            endcase
+        end
+    end
+endfunction
 
-wire ar_dec_ram    = (ar_addr[31:15] == 17'b0); // 32KB: 0x00000-0x07FFF
-// sysreg covers 0x40000000-0x400001FF (512 bytes / 128 word slots).  The
-// low page is the legacy control block; bit 8 selects the input-hub page.
-// Pre-AWE this was 24'h400000 (256 bytes), which would silently drop every
-// extended register access.
-wire ar_dec_sysreg = (ar_addr[31:9]  == 23'h200000);
-wire ar_dec_audio  = (ar_addr[31:24] == 8'h4C);
-wire ar_dec_link   = (ar_addr[31:24] == 8'h4D);
-wire ar_dec_uart   = (ar_addr[31:24] == 8'h4F);
-wire ar_dec_gpu    = (ar_addr[31:24] == 8'h4A);
-wire ar_dec_mixer  = (ar_addr[31:24] == 8'h48);
-
-wire aw_dec_ram    = (aw_addr[31:15] == 17'b0); // 32KB: 0x00000-0x07FFF
-wire aw_dec_sysreg = (aw_addr[31:9]  == 23'h200000);
-wire aw_dec_audio  = (aw_addr[31:24] == 8'h4C);
-wire aw_dec_link   = (aw_addr[31:24] == 8'h4D);
-wire aw_dec_uart   = (aw_addr[31:24] == 8'h4F);
-wire aw_dec_gpu    = (aw_addr[31:24] == 8'h4A);
-wire aw_dec_mixer  = (aw_addr[31:24] == 8'h48);
+wire [3:0] ar_region = decode_region(ar_addr);
+wire [3:0] aw_region = decode_region(aw_addr);
 
 // ============================================
 // R channel hold-until-rready (proper AXI)
@@ -1475,15 +1576,8 @@ always @(posedge clk or posedge reset) begin
         burst_count <= 0;
         awburst_latched <= 2'b01;  // INCR by default
 
-        reg_ram <= 0;
-        reg_sysreg <= 0;
-        reg_audio <= 0;
-        reg_cram0 <= 0;
-        reg_link <= 0;
-        reg_gpu <= 0;
+        req_region <= REGION_NONE;
         gpu_reg_wr <= 0;
-        reg_uart <= 0;
-        reg_mixer  <= 1'b0;
 
         sysreg_wr_fire <= 0;
         cram0_mode <= 1'b0;     // bridge owns CRAM0 at reset
@@ -1543,17 +1637,9 @@ always @(posedge clk or posedge reset) begin
                 burst_len <= s_axi_arlen;
                 burst_count <= 0;
 
-                reg_ram    <= ar_dec_ram;
-                reg_sysreg <= ar_dec_sysreg;
-                reg_audio  <= ar_dec_audio;
-                reg_cram0  <= ar_dec_cram0;
-                reg_link   <= ar_dec_link;
+                req_region <= ar_region;
 
-                reg_uart   <= ar_dec_uart;
-                reg_gpu    <= ar_dec_gpu;
-                reg_mixer  <= ar_dec_mixer;
-
-                if (ar_dec_ram)
+                if (ar_region == REGION_RAM)
                     state <= S_BRAM_RD;
                 else begin
                     /* All peripheral reads now stage through a local data
@@ -1563,11 +1649,11 @@ always @(posedge clk or posedge reset) begin
                      * latch cycle inside S_PERIPH_RD_WAIT because core_top
                      * registers the selected voice after req_addr changes. */
                     state <= S_PERIPH_RD_WAIT;
-                    if (ar_dec_link) begin
+                    if (ar_region == REGION_LINK) begin
                         link_reg_addr <= ar_addr[6:2];
                         link_reg_rd <= 1;
                     end
-                    if (ar_dec_gpu) begin
+                    if (ar_region == REGION_GPU) begin
                         gpu_reg_addr <= ar_addr[5:2];
                     end
                 end
@@ -1579,22 +1665,14 @@ always @(posedge clk or posedge reset) begin
                 burst_count <= 0;
                 awburst_latched <= s_axi_awburst;
 
-                reg_ram    <= aw_dec_ram;
-                reg_sysreg <= aw_dec_sysreg;
-                reg_audio  <= aw_dec_audio;
-                reg_cram0  <= aw_dec_cram0;
-                reg_link   <= aw_dec_link;
-
-                reg_uart   <= aw_dec_uart;
-                reg_gpu    <= aw_dec_gpu;
-                reg_mixer  <= aw_dec_mixer;
+                req_region <= aw_region;
 
                 if (s_axi_wvalid) begin
                     s_axi_wready <= 1;
                     req_wdata <= s_axi_wdata;
                     req_wstrb <= s_axi_wstrb;
 
-                    if (aw_dec_ram)
+                    if (aw_region == REGION_RAM)
                         state <= S_BRAM_WR;
                     else begin
                         state <= S_PERIPH_WR;
@@ -1646,18 +1724,18 @@ always @(posedge clk or posedge reset) begin
         // Peripheral read — same hold-until-drain pattern
         // ============================================
         S_PERIPH_RD_WAIT: begin
-            if (reg_mixer || reg_sysreg) begin
+            if (req_is_mixer || req_is_sysreg) begin
                 state <= S_PERIPH_RD_LATCH;
             end else begin
-                if (reg_audio)
+                if (req_is_audio)
                     periph_rd_data_r <= audio_rdata;
-                else if (reg_cram0)
+                else if (req_is_cram0)
                     periph_rd_data_r <= cram0_mode_rdata;
-                else if (reg_link)
+                else if (req_is_link)
                     periph_rd_data_r <= link_reg_rdata;
-                else if (reg_uart)
+                else if (req_is_uart)
                     periph_rd_data_r <= uart_rdata;
-                else if (reg_gpu)
+                else if (req_is_gpu)
                     periph_rd_data_r <= gpu_reg_rdata;
                 else
                     periph_rd_data_r <= 32'h0;
@@ -1666,9 +1744,9 @@ always @(posedge clk or posedge reset) begin
         end
 
         S_PERIPH_RD_LATCH: begin
-            if (reg_mixer)
+            if (req_is_mixer)
                 periph_rd_data_r <= mixer_rdata;
-            else if (reg_sysreg)
+            else if (req_is_sysreg)
                 periph_rd_data_r <= sysreg_rdata;
             else
                 periph_rd_data_r <= 32'h0;
@@ -1686,9 +1764,9 @@ always @(posedge clk or posedge reset) begin
                 else begin
                     if (!burst_is_fixed)
                         req_addr <= periph_next_addr;
-                    if (reg_link)
+                    if (req_is_link)
                         link_reg_addr <= periph_next_addr[6:2];
-                    if (reg_gpu)
+                    if (req_is_gpu)
                         gpu_reg_addr <= periph_next_addr[5:2];
                     state <= S_PERIPH_RD_WAIT;
                 end
@@ -1702,29 +1780,29 @@ always @(posedge clk or posedge reset) begin
         // ============================================
         S_PERIPH_WR: begin
             if (|req_wstrb) begin
-                if (reg_sysreg)
+                if (req_is_sysreg)
                     sysreg_wr_fire <= 1'b1;
                 /* AUDIO_BASE writes retired in v2.  The HW mixer drives
                  * audio_output directly via MIX_* registers.  The address
                  * range is still accepted so legacy probes no-op rather than
                  * raising a bus fault. */
-                if (reg_cram0 && req_addr[3:2] == 2'd0)
+                if (req_is_cram0 && req_addr[3:2] == 2'd0)
                     cram0_mode <= req_wdata[0];
-                if (reg_link) begin
+                if (req_is_link) begin
                     link_reg_wr    <= 1'b1;
                     link_reg_addr  <= req_addr[6:2];
                     link_reg_wdata <= req_wdata;
                 end
-                if (reg_uart && req_addr[3:2] == 2'b01) begin
+                if (req_is_uart && req_addr[3:2] == 2'b01) begin
                     uart_tx_fifo_din <= req_wdata[7:0];
                     uart_tx_fifo_we  <= 1'b1;
                 end
-                if (reg_gpu) begin
+                if (req_is_gpu) begin
                     gpu_reg_wr    <= 1'b1;
                     gpu_reg_addr  <= req_addr[5:2];
                     gpu_reg_wdata <= req_wdata;
                 end
-                if (reg_mixer) begin
+                if (req_is_mixer) begin
                     if (req_addr[11] == 1'b0) begin
                         mix_voice_wr    <= 1'b1;
                         mix_voice_sel   <= req_addr[10:6];
@@ -1775,7 +1853,7 @@ always @(posedge clk or posedge reset) begin
                 req_wdata <= s_axi_wdata;
                 req_wstrb <= s_axi_wstrb;
 
-                if (reg_ram) begin
+                if (req_is_ram) begin
                     state <= S_BRAM_WR;
                 end else begin
                     state <= S_PERIPH_WR;

@@ -42,9 +42,10 @@ CFLAGS += -falign-functions=64 -falign-loops=64
 CFLAGS += -fno-tree-loop-distribute-patterns
 CFLAGS += -I. -I$(HAL_DIR) -I$(TARGET_DIR) -I$(KERNEL_DIR) -I$(BOOT_DIR) -I$(API_DIR) -I$(SHARED_DIR) -I$(ISO9660_DIR)
 CFLAGS += -MMD -MP
+LTO_FLAGS = -flto=2
 
 # OS kernel flags (optimized for speed)
-OS_CFLAGS = $(filter-out -Os,$(CFLAGS)) -O2 -flto -std=gnu11
+OS_CFLAGS = $(filter-out -Os,$(CFLAGS)) -O2 $(LTO_FLAGS) -std=gnu11
 
 # Assembler flags
 ASFLAGS = -march=$(ARCH)_zicsr -mabi=$(ABI)
@@ -54,7 +55,7 @@ LDFLAGS = -march=$(ARCH) -mabi=$(ABI)
 LDFLAGS += -T os.ld -nostdlib -nostartfiles
 LDFLAGS += -Wl,--gc-sections -Wl,--no-warn-rwx-segments
 LDFLAGS += -Wl,-Map=$(FW_TARGET).map
-LDFLAGS += -flto
+LDFLAGS += $(LTO_FLAGS)
 
 # Libraries
 LIBGCC = $(shell $(CC) -march=$(ARCH) -mabi=$(ABI) -print-libgcc-file-name)
@@ -200,11 +201,11 @@ $(TARGET_DIR)/%.o: $(TARGET_DIR)/%.c
 # syscall.c without LTO — LTO strips functions called only via
 # runtime-determined if-chains from the assembly trap handler.
 $(KERNEL_DIR)/syscall.o: $(KERNEL_DIR)/syscall.c
-	$(CC) $(filter-out -flto,$(OS_CFLAGS)) -c -o $@ $<
+	$(CC) $(filter-out -flto -flto=%,$(OS_CFLAGS)) -c -o $@ $<
 
 # irq.c without LTO — called from assembly trap handler via function pointer.
 $(KERNEL_DIR)/irq.o: $(KERNEL_DIR)/irq.c
-	$(CC) $(filter-out -flto,$(OS_CFLAGS)) -c -o $@ $<
+	$(CC) $(filter-out -flto -flto=%,$(OS_CFLAGS)) -c -o $@ $<
 
 $(KERNEL_DIR)/%.o: $(KERNEL_DIR)/%.c
 	$(CC) $(OS_CFLAGS) -c -o $@ $<

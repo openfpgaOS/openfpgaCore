@@ -122,7 +122,7 @@ The FPGA fabric provides the driver layer:
 - 48 kHz, 32-voice hardware PCM mixer
 - APF data-slot read/write and nonvolatile save handling
 - Pocket controls, dock input, keyboard/mouse/controller events, Analogizer,
-  and SNAC GPIO/shifter paths
+  SNAC physical pin pass-through/raw shifter paths, and a PSX decoded poller
 - SDRAM, CRAM0, SRAM, and bridge arbitration
 
 Diagnostic UART/trap output exists for fatal failures and service-host booting,
@@ -157,7 +157,7 @@ lookup cost.
 ## Acknowledgments
 
 - VexiiRiscv CPU: SpinalHDL / Charles Papon
-- Analogizer adapter: RndMnkIII
+- Analogizer adapter and SNAC pinout reference: RndMnkIII
 - openFPGA framework: Analogue
 - musl libc: Rich Felker
 - jtframe utilities: Jose Tejada

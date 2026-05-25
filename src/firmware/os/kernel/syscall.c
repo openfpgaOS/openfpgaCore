@@ -1362,19 +1362,26 @@ static long sys_openat(long dirfd, long pathname, long flags, long mode) {
             return -EINVAL;
         }
         int slot = parse_int(&p);
-        if (of_file_flags((uint32_t)slot) < 0) {
+        if (of_nvslot_is_supported((uint32_t)slot))
+            return open_nv_fd(fd, (uint32_t)slot, flags);
+
+        long slot_id = of_file_flags((uint32_t)slot);
+        if (slot_id != slot) {
             fd_table[fd].in_use = 0;
             return -ENOENT;
         }
-        if (of_nvslot_is_supported((uint32_t)slot))
-            return open_nv_fd(fd, (uint32_t)slot, flags);
         if (open_flags_want_write(flags)) {
             fd_table[fd].in_use = 0;
             return -EACCES;
         }
+        int64_t sz = of_file_size64((uint32_t)slot);
+        if (sz <= 0) {
+            fd_table[fd].in_use = 0;
+            return -ENOENT;
+        }
         f->slot_id = (uint32_t)slot;
         f->kind = FD_KIND_SLOT_FILE;
-        f->size = 0;  /* Resolved lazily on first read */
+        f->size = (uint64_t)sz;
         return fd;
     }
 

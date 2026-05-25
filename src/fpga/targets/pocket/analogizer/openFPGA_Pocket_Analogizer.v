@@ -109,7 +109,8 @@ module openFPGA_Pocket_Analogizer #(parameter MASTER_CLK_FREQ=50_000_000, parame
 	inout   wire    [7:0]   cart_tran_bank1,
 	output  wire            cart_tran_bank1_dir
 );
-	// SNAC pins are driven by the CPU SNAC shifter/GPIO.
+	// RndMnkIII Analogizer/SNAC physical pinout.  The OS-side raw shifter
+	// or optional PSX poller drives these pass-through pins.
 	wire [7:4] CART_BK0_OUT    = snac_bank0_out;
 	wire       CART_BK0_DIR    = snac_bank0_dir;
 	wire [7:6] CART_BK1_OUT_P76 = snac_bank1_76_out;

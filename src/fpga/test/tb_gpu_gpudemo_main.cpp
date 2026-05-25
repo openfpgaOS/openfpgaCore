@@ -11,12 +11,12 @@
  * has p1 + p3 valid but isn't draining.  No depth detour pending
  * (fbss_depth_entry=0 — flags are COLORMAP-only on these spans).
  *
- * The frame layout copied here mirrors gpudemo's main mode:
+ * The frame layout copied here mirrors gpudemo's span-heavy mode:
  *   - ~120 horizontal floor spans (320 px wide, fb_stride=1, COLORMAP)
  *   - ~120 horizontal ceiling spans (mirror of the floor)
  *   - 320 vertical wall column spans (variable count, fb_stride=320,
  *     COLORMAP|COLUMN)
- *   - One textured triangle (cube facet, depth-test + write enabled)
+ *   - One sprite-like block emitted as horizontal masked spans
  *   - Fence + drain via gpu_finish.
  *
  * The whole batch is submitted in ONE ring burst (no per-span reset)
@@ -49,9 +49,8 @@ static const uint32_t TEX_BASE       = 0x00040000;
 static const uint32_t FLOOR_TEX_OFF  = 0x00000000;  // 64x64 = 4096 bytes
 static const uint32_t WALL_TEX_OFF   = 0x00001000;  // 64x64 = 4096 bytes
 static const uint32_t CEIL_TEX_OFF   = 0x00002000;  // 64x64
-static const uint32_t SPRITE_OFF     = 0x00003000;  // 64x64 (cube face)
+static const uint32_t SPRITE_OFF     = 0x00003000;  // 64x64
 static const uint32_t FB_BASE        = 0x00080000;
-static const uint32_t ZB_BASE        = 0x000C0000;
 static const uint32_t CMD_UPLOAD_BYTE = 0x00380000;
 static const uint32_t RING_SIZE      = 0x00004000;
 static uint32_t ring_wrptr = 0;
@@ -62,7 +61,6 @@ static std::vector<uint32_t> pending_ring_words;
 // gpudemo on hardware uses 320x240; this test scales the geometry by
 // ~5x while preserving the same submission order + cache pressure
 // pattern.  At 64x32, one frame = 16 floors + 16 ceilings + 64 walls
-// + 1 triangle ≈ 7.4 KB, comfortably under the ring.
 static const int SCREEN_W = 320;
 static const int SCREEN_H = 240;
 
@@ -183,12 +181,6 @@ static void upload_texture_64x64(uint32_t off_byte, uint8_t seed) {
         }
     }
 }
-static void clear_zb(uint16_t depth) {
-    // Initialize Z-buffer to "far" so depth tests pass.
-    uint32_t pair = ((uint32_t)depth << 16) | depth;
-    for (int i = 0; i < SCREEN_W * SCREEN_H / 2; i++)
-        sdram_write((ZB_BASE >> 2) + i, pair);
-}
 static void clear_fb() {
     for (int i = 0; i < SCREEN_W * SCREEN_H / 4; i++)
         sdram_write((FB_BASE >> 2) + i, 0xCCCCCCCCu);
@@ -207,7 +199,7 @@ static void upload_identity_cmap_row0() {
 }
 
 // =====================================================================
-// One-lane native affine span group, matching the SDK command encoding.
+// One-lane direct-affine record inside the unified span command.
 // =====================================================================
 static void emit_span(uint32_t fb_addr, uint32_t tex_addr,
                       int32_t s, int32_t t,
@@ -216,7 +208,7 @@ static void emit_span(uint32_t fb_addr, uint32_t tex_addr,
                       int16_t fb_stride, uint16_t tex_width,
                       uint16_t tex_w_mask, uint16_t tex_h_mask)
 {
-    ring_cmd(0x47, 11);
+    ring_cmd(0x48, 11);
     ring_write((1u << 28) | (((uint32_t)flags & 0xFFu) << 20));
     ring_write(tex_width);
     ring_write(((uint32_t)tex_h_mask << 16) | tex_w_mask);
@@ -230,32 +222,8 @@ static void emit_span(uint32_t fb_addr, uint32_t tex_addr,
     ring_write((uint32_t)tstep);
 }
 
-// CMD_DRAW_TRIANGLES payload — 19 words: count + 6 words per vertex × 3.
-static void emit_triangle(int16_t x0, int16_t y0, uint16_t z0,
-                          int32_t s0, int32_t t0,
-                          int16_t x1, int16_t y1, uint16_t z1,
-                          int32_t s1, int32_t t1,
-                          int16_t x2, int16_t y2, uint16_t z2,
-                          int32_t s2, int32_t t2,
-                          uint8_t light)
-{
-    ring_cmd(0x30, 19);  // CMD_DRAW_TRIANGLES
-    ring_write(1);  // vertex count
-    auto v = [light](int16_t x, int16_t y, uint16_t z, int32_t s, int32_t t) {
-        ring_write(((uint32_t)(uint16_t)x << 16) | (uint16_t)y);  // word 0: x|y
-        ring_write(((uint32_t)z) << 16);                          // word 1: z
-        ring_write((uint32_t)s);                                  // word 2: s
-        ring_write((uint32_t)t);                                  // word 3: t
-        ring_write(0x00010000);                                   // word 4: w (affine)
-        ring_write((uint32_t)light);                              // word 5: r in low byte
-    };
-    v(x0, y0, z0, s0, t0);
-    v(x1, y1, z1, s1, t1);
-    v(x2, y2, z2, s2, t2);
-}
-
 // =====================================================================
-// One gpudemo-style frame: floors, ceilings, walls, one cube triangle.
+// One gpudemo-style frame: floors, ceilings, walls, one sprite block.
 // Returns true if the frame's fence advanced within the timeout.
 // =====================================================================
 static bool one_frame(int frame_no)
@@ -290,7 +258,7 @@ static bool one_frame(int frame_no)
                   /*tex_h_mask*/ 0);
     }
 
-    // ---- Wall column spans (vertical, COLUMN flag) ----
+    // ---- Wall column spans (vertical framebuffer step) ----
     for (int x = 0; x < SCREEN_W; x++) {
         int height = 64 + ((x + frame_no) & 31);    // varying wall height
         int top = (SCREEN_H - height) / 2;
@@ -310,33 +278,22 @@ static bool one_frame(int frame_no)
                   /*tex_h_mask*/ 0);
     }
 
-    // ---- One textured triangle (cube facet) with depth ----
-    // Set depth state first.
-    ring_cmd(0x21, 1);              // CMD_SET_DEPTH_FUNC
-    ring_write(2);                  // LESS
-    // Set Z-buffer.
-    ring_cmd(0x24, 2);              // CMD_SET_ZB
-    ring_write(ZB_BASE);
-    ring_write(SCREEN_W * 2);       // stride in bytes
-    // Set tex state for the triangle (uses st_tex_addr / st_tex_width).
-    // CMD_SET_TEXTURE: 4 payload words (addr, {h, w}, format, {wrap_t, wrap_s}).
-    ring_cmd(0x20, 4);              // CMD_SET_TEXTURE
-    ring_write(TEX_BASE + SPRITE_OFF);
-    ring_write(((uint32_t)64 << 16) | 64);  // height | width
-    ring_write(0);                          // format (I8)
-    ring_write(0);                          // wraps
-    // Triangle covering ~half the screen.
-    int16_t cx = (SCREEN_W / 2) << 4;   // 12.4 subpixel
-    int16_t cy = (SCREEN_H / 2) << 4;
-    int16_t r  = 60 << 4;
-    emit_triangle(cx,       cy - r, 0x4000, 0,           0,
-                  cx + r,   cy + r, 0x4000, 64 << 16,    64 << 16,
-                  cx - r,   cy + r, 0x4000, 0,           64 << 16,
-                  /*light*/ 32);
-
-    // Restore depth=NONE so subsequent draws don't pay the depth detour.
-    ring_cmd(0x21, 1);
-    ring_write(0);
+    // ---- Sprite-like masked block ----
+    int sx = SCREEN_W / 2 - 32;
+    int sy = SCREEN_H / 2 - 32;
+    for (int row = 0; row < 64; row++) {
+        emit_span(FB_BASE + (sy + row) * SCREEN_W + sx,
+                  TEX_BASE + SPRITE_OFF,
+                  /*s*/ 0, /*t*/ row << 16,
+                  /*sstep*/ 0x10000, /*tstep*/ 0,
+                  /*count*/ 64,
+                  /*light*/ 32,
+                  /*flags*/ 0x05,           // SPAN_COLORMAP | SPAN_SKIP_ZERO
+                  /*fb_stride*/ 1,
+                  /*tex_width*/ 64,
+                  /*tex_w_mask*/ 0,
+                  /*tex_h_mask*/ 0);
+    }
 
     // ---- Fence + drain ----
     uint32_t token = gpu_submit_fence();
@@ -385,7 +342,6 @@ int main(int argc, char **argv)
     upload_texture_64x64(WALL_TEX_OFF,   0x20);
     upload_texture_64x64(CEIL_TEX_OFF,   0x30);
     upload_texture_64x64(SPRITE_OFF,     0x40);
-    clear_zb(0xFFFF);
     clear_fb();
 
     // Set framebuffer.

@@ -229,6 +229,25 @@
 #define INPUT_FIFO_DATA0    REG32(SYSREG_BASE + 0x150)
 #define INPUT_FIFO_DATA1    REG32(SYSREG_BASE + 0x154)  /* read pops */
 #define INPUT_FIFO_COUNT    REG32(SYSREG_BASE + 0x158)
+/* Optional decoded PSX SNAC poller. This is layered above the same physical
+ * pinout as SNAC_GPIO; enabling it takes ownership of the SNAC pins until
+ * disabled or until the raw SNAC_CTRL path is enabled again. */
+#define SNAC_HW_CTRL        REG32(SYSREG_BASE + 0x160)
+#define   SNAC_HW_CTRL_ENABLE      (1 << 0)
+#define   SNAC_HW_CTRL_ANALOG      (1 << 1)
+#define   SNAC_HW_CTRL_FAST        (1 << 2)
+#define   SNAC_HW_STATUS_VALID     (1 << 8)
+#define   SNAC_HW_STATUS_IRQ       (1 << 9)
+#define SNAC_HW_BUTTONS     REG32(SYSREG_BASE + 0x164)
+#define SNAC_HW_PRESSED     REG32(SYSREG_BASE + 0x168)
+#define SNAC_HW_RELEASED    REG32(SYSREG_BASE + 0x16C)
+#define SNAC_HW_JOY_L       REG32(SYSREG_BASE + 0x170)  /* [15:0]=LX, [31:16]=LY */
+#define SNAC_HW_JOY_R       REG32(SYSREG_BASE + 0x174)  /* [15:0]=RX, [31:16]=RY */
+#define SNAC_HW_DEBUG       REG32(SYSREG_BASE + 0x178)
+#define SNAC_HW_CLEAR       REG32(SYSREG_BASE + 0x17C)
+#define SNAC_HW_RAW_BUTTONS REG32(SYSREG_BASE + 0x180)
+#define   SNAC_HW_CLEAR_IRQ        (1 << 0)
+#define   SNAC_HW_CLEAR_EDGES      (1 << 1)
 
 #define   INPUT_SLOT_INFO_PRESENT   (1 << 0)
 #define   INPUT_SLOT_INFO_IRQ_EN    (1 << 8)
@@ -248,9 +267,9 @@
 /* Misc */
 #define SYS_GAME_ID         REG32(SYSREG_BASE + 0x68)
 
-/* SNAC Shifter + GPIO (0xA0-0xAC) — software-driven SNAC controller interface
- * Replaces hardware protocol FSMs with a generic SPI/shift register master.
- * CPU bit-bangs controller protocols (NES/SNES/PSX/PCE) via this interface. */
+/* SNAC Shifter + GPIO (0xA0-0xAC) — raw access to the RndMnkIII
+ * Analogizer/SNAC physical pinout. Firmware uses this for non-PSX protocols,
+ * diagnostics, and manual transfers. */
 #define SNAC_CTRL           REG32(SYSREG_BASE + 0xA0)
 #define SNAC_DIV            REG32(SYSREG_BASE + 0xA4)
 #define SNAC_DATA           REG32(SYSREG_BASE + 0xA8)
@@ -410,7 +429,6 @@
 #define   HW_FEAT_LINK          (1 << 2)
 #define   HW_FEAT_ANALOGIZER    (1 << 3)
 #define   HW_FEAT_GPU_SPAN      (1 << 4)   /* GPU span renderer (always set) */
-#define   HW_FEAT_GPU_TRIANGLE  (1 << 5)   /* GPU triangle rasterizer (Full) */
 #define   HW_FEAT_MIDI          (1 << 6)   /* MIDI playback (any backend) */
 #define   HW_FEAT_WIFI          (1 << 7)
 #define   HW_FEAT_FPU           (1 << 8)
@@ -420,7 +438,9 @@
 #define   HW_FEAT_GPU_ALPHA     (1 << 12)  /* GPU alpha blending (Full) */
 #define   HW_FEAT_GPU_PERSP     (1 << 13)  /* GPU perspective spans (Lite/Full) */
 #define   HW_FEAT_GPU_FRAGPIPE  (1 << 14)  /* GPU 1-px/cycle frag pipeline (Lite/Full) */
-#define   HW_FEAT_MIDI_SMP      (1 << 15)  /* Sample-based MIDI synthesis */
+#define   HW_FEAT_GPU_PARAM_SPAN_LIST (1 << 15) /* GPU parametric span-list command */
+#define   HW_FEAT_GPU_PARAM_SPAN_Z    (1 << 16) /* Param-span Quake-compatible z writes */
+#define   HW_FEAT_GPU_PARAM_SPAN_ZTEST (1 << 17) /* Param-span Quake-compatible z test/write */
 
 
 /* ======================================================================

@@ -26,7 +26,7 @@ module tb_gpu (
     output wire [31:0] fence_reached,
     output wire [5:0]  dbg_state,
     output wire [5:0]  dbg_setup_step,
-    output wire [31:0] dbg_tri_det,
+    output wire [31:0] dbg_aux,
     output wire [31:0] dbg_frag,
     output reg  [31:0] dbg_aw_count,
     output reg  [31:0] dbg_aw_burst_count,
@@ -141,7 +141,7 @@ gpu_core gpu (
     .fence_reached(fence_reached),
     .dbg_state(dbg_state),
     .dbg_setup_step(dbg_setup_step),
-    .dbg_tri_det(dbg_tri_det),
+    .dbg_aux(dbg_aux),
     .dbg_frag(dbg_frag)
 );
 

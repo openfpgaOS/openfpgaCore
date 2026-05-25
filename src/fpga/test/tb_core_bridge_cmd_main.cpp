@@ -10,6 +10,7 @@ static int fails = 0;
 
 static constexpr uint32_t HOST_CMD = 0xF8000000u;
 static constexpr uint32_t TARGET_CMD = 0xF8001000u;
+static constexpr uint32_t DATATABLE = 0xF8002000u;
 
 static void tick() {
     tb->clk = 0;
@@ -46,6 +47,22 @@ static uint32_t read32(uint32_t addr) {
     tb->bridge_rd = 0;
     tick();
     return tb->bridge_rd_data;
+}
+
+static void write_dt_word(uint32_t word, uint32_t data) {
+    uint32_t addr = DATATABLE + word * 4u;
+    tb->bridge_addr = addr;
+    tb->bridge_wr_data = data;
+    tick();
+    write32(addr, data);
+}
+
+static uint32_t read_dt_word(uint32_t word) {
+    uint32_t addr = DATATABLE + word * 4u;
+    tb->bridge_addr = addr;
+    tick();
+    tick();
+    return read32(addr);
 }
 
 static bool wait_target_cmd(uint32_t expect, int max_cycles = 64) {
@@ -115,12 +132,46 @@ static void test_ready_reissued_after_warm_reset() {
     check_eq("reset-exit-no-extra-ready", saw_target_cmd(0x636D0140u) ? 1u : 0u, 0u);
 }
 
+static void test_reset_enter_clears_readonly_datatable_only() {
+    std::printf("test_reset_enter_clears_readonly_datatable_only:\n");
+    init_inputs();
+
+    for (uint32_t word = 0; word < 20; word++)
+        write_dt_word(word, 0xA5000000u | word);
+
+    tb->status_setup_done = 1;
+    check_eq("initial-ready-before-dt-clear",
+             wait_target_cmd(0x636D0140u) ? 1u : 0u, 1u);
+    ack_target_cmd();
+
+    host_cmd(0x0011);
+    check_eq("dt-clear-reset-high-before-enter", tb->reset_n, 1u);
+
+    host_cmd(0x0010);
+    check_eq("dt-clear-reset-low", tb->reset_n, 0u);
+
+    for (int i = 0; i < 64; i++)
+        tick();
+
+    for (uint32_t word = 0; word < 16; word++) {
+        char tag[48];
+        std::snprintf(tag, sizeof(tag), "readonly-dt-word-%u-cleared", word);
+        check_eq(tag, read_dt_word(word), 0u);
+    }
+
+    check_eq("presave-id-word-preserved", read_dt_word(16), 0xA5000010u);
+    check_eq("presave-size-word-preserved", read_dt_word(17), 0xA5000011u);
+    check_eq("save0-id-word-preserved", read_dt_word(18), 0xA5000012u);
+    check_eq("save0-size-word-preserved", read_dt_word(19), 0xA5000013u);
+}
+
 int main(int argc, char **argv) {
     Verilated::commandArgs(argc, argv);
     tb = new Vtb_core_bridge_cmd;
 
     std::printf("=== core_bridge_cmd warm-reset test ===\n");
     test_ready_reissued_after_warm_reset();
+    test_reset_enter_clears_readonly_datatable_only();
 
     std::printf("\n=== Results: %d passed, %d failed ===\n", passes, fails);
     delete tb;
