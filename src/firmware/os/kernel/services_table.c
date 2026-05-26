@@ -40,9 +40,8 @@ static void svc_video_set_palette(uint8_t index, uint32_t rgb) {
                          (uint8_t)(rgb >> 8), (uint8_t)rgb);
 }
 
-/* SDK: writes SYS_COLOR_MODE directly (syscall.c pattern) */
 static void svc_video_set_color_mode(int mode) {
-    SYS_COLOR_MODE = (uint32_t)mode;
+    of_video_set_color_mode(mode);
 }
 
 /* SDK: (player, out_ptr) copies state  →  HAL: returns pointer */
@@ -308,6 +307,10 @@ void services_table_init(void) {
     /* Video timing snapshot */
     svc->video_get_timing = of_video_get_timing;
     svc->video_set_refresh_vtotal = of_video_set_refresh_vtotal;
+    svc->video_set_mode = of_video_set_mode;
+    svc->video_get_mode = of_video_get_mode;
+    svc->video_get_mode_count = of_video_get_mode_count;
+    svc->video_get_mode_info = of_video_get_mode_info;
 }
 
 void services_table_set_smp_bank(const void *base, uint32_t size) {

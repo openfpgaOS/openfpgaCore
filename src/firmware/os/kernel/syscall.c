@@ -1905,7 +1905,7 @@ static long of_video_dispatch(long fid, long a0, long a1) {
         of_video_flush_cache();
         return 0;
     case OF_VIDEO_FID_SET_COLOR_MODE:
-        SYS_COLOR_MODE = (uint32_t)a0;
+        of_video_set_color_mode((int)a0);
         return 0;
     case OF_VIDEO_FID_SET_PALETTE_VGA4:
         of_video_set_palette_vga4((const uint8_t *)a0, (int)a1);
@@ -1916,6 +1916,15 @@ static long of_video_dispatch(long fid, long a0, long a1) {
     case OF_VIDEO_FID_SET_VSYNC_CALLBACK:
         of_irq_register_vsync((void (*)(void))a0);
         return 0;
+    case OF_VIDEO_FID_SET_MODE:
+        return of_video_set_mode((const of_video_mode_t *)a0);
+    case OF_VIDEO_FID_GET_MODE:
+        of_video_get_mode((of_video_mode_t *)a0);
+        return 0;
+    case OF_VIDEO_FID_GET_MODE_COUNT:
+        return of_video_get_mode_count();
+    case OF_VIDEO_FID_GET_MODE_INFO:
+        return of_video_get_mode_info((int)a0, (of_video_mode_t *)a1);
     default:
         return OF_ERR_NOT_SUPPORTED;
     }
@@ -2134,6 +2143,8 @@ static long linux_dispatch(long n, long a0, long a1, long a2,
         /* Switch scanout back to 8-bit terminal FB so user sees boot screen
          * even if the app left RGB565/low-bit framebuffer mode selected. */
         SYS_COLOR_MODE = COLOR_MODE_8BIT;
+        FB_MODE_SIZE = ((uint32_t)FB_HEIGHT << 16) | FB_WIDTH;
+        FB_MODE_STRIDE = FB_STRIDE;
         TERM_FB_CTRL = 1;
         while (1) {}
         return 0;

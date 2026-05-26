@@ -975,6 +975,32 @@ static void test_video_vtotal_sysreg() {
     tb->analogizer_settings_in = 0x00008C43u;
 }
 
+static void test_fb_mode_sysregs() {
+    printf("test_fb_mode_sysregs:\n");
+
+    const uint32_t FB_MODE_SIZE   = 0x400000E4u;
+    const uint32_t FB_MODE_STRIDE = 0x400000E8u;
+
+    check_eq("fb-mode-size-reset", mmio_read32(FB_MODE_SIZE),
+             (240u << 16) | 320u);
+    check_eq("fb-mode-stride-reset", mmio_read32(FB_MODE_STRIDE), 320u);
+
+    axi_write_single(FB_MODE_SIZE, (480u << 16) | 640u);
+    axi_write_single(FB_MODE_STRIDE, 640u);
+    check_eq("fb-mode-size-640x480", mmio_read32(FB_MODE_SIZE),
+             (480u << 16) | 640u);
+    check_eq("fb-mode-stride-640", mmio_read32(FB_MODE_STRIDE), 640u);
+
+    axi_write_single(FB_MODE_SIZE, (700u << 16) | 900u);
+    axi_write_single(FB_MODE_STRIDE, 4095u);
+    check_eq("fb-mode-size-clamp", mmio_read32(FB_MODE_SIZE),
+             (600u << 16) | 800u);
+    check_eq("fb-mode-stride-clamp-high", mmio_read32(FB_MODE_STRIDE), 2048u);
+
+    axi_write_single(FB_MODE_STRIDE, 1u);
+    check_eq("fb-mode-stride-clamp-low-even", mmio_read32(FB_MODE_STRIDE), 2u);
+}
+
 static void test_hw_features_readback() {
     printf("test_hw_features_readback:\n");
 
@@ -1262,6 +1288,7 @@ int main(int argc, char **argv) {
     test_palette_commit_sysreg();
     test_analogizer_sysregs();
     test_video_vtotal_sysreg();
+    test_fb_mode_sysregs();
     test_hw_features_readback();
     test_snac_shifter_regs();
     test_snac_hw_poller_regs();

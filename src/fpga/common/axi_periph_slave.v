@@ -72,6 +72,9 @@ module axi_periph_slave (
     // Display control outputs
     output wire [2:0]  color_mode,      // 0=8bit, 1=4bit, 2=2bit, 3=RGB565, 4=RGB555, 5=RGBA5551
     output wire [24:0] fb_display_addr,
+    output wire [9:0]  fb_width,
+    output wire [9:0]  fb_height,
+    output wire [15:0] fb_stride,
 
     // Palette write interface
     output reg         pal_wr,
@@ -422,6 +425,9 @@ altsyncram #(
 reg [31:0] sysreg_rdata;
 reg [63:0] cycle_counter;
 reg [2:0] color_mode_reg;
+reg [9:0] fb_width_reg;
+reg [9:0] fb_height_reg;
+reg [15:0] fb_stride_reg;
 
 reg [15:0] ds_slot_id_reg;
 reg [31:0] ds_slot_offset_reg;
@@ -520,6 +526,9 @@ wire [24:0] fb_display_addr_reg = term_fb_active ? TERM_FB_ADDR : fb_app_addr;
 
 assign color_mode = color_mode_reg;
 assign fb_display_addr = fb_display_addr_reg;
+assign fb_width = fb_width_reg;
+assign fb_height = fb_height_reg;
+assign fb_stride = fb_stride_reg;
 
 // ============================================
 // CDC synchronizers
@@ -551,6 +560,44 @@ function [9:0] clamp_v_total;
             clamp_v_total = 10'd375;
         else
             clamp_v_total = vt;
+    end
+endfunction
+
+function [9:0] clamp_fb_width;
+    input [15:0] w;
+    begin
+        if (w < 16'd1)
+            clamp_fb_width = 10'd1;
+        else if (w > 16'd800)
+            clamp_fb_width = 10'd800;
+        else
+            clamp_fb_width = w[9:0];
+    end
+endfunction
+
+function [9:0] clamp_fb_height;
+    input [15:0] h;
+    begin
+        if (h < 16'd1)
+            clamp_fb_height = 10'd1;
+        else if (h > 16'd600)
+            clamp_fb_height = 10'd600;
+        else
+            clamp_fb_height = h[9:0];
+    end
+endfunction
+
+function [15:0] clamp_fb_stride;
+    input [15:0] stride;
+    reg [15:0] even_stride;
+    begin
+        even_stride = {stride[15:1], 1'b0};
+        if (even_stride < 16'd2)
+            clamp_fb_stride = 16'd2;
+        else if (even_stride > 16'd2048)
+            clamp_fb_stride = 16'd2048;
+        else
+            clamp_fb_stride = even_stride;
     end
 endfunction
 
@@ -841,6 +888,9 @@ always @(posedge clk) begin
     if (reset) begin
         cycle_counter <= 0;
         color_mode_reg <= 0;
+        fb_width_reg <= 10'd320;
+        fb_height_reg <= 10'd240;
+        fb_stride_reg <= 16'd320;
         fb_display_idx <= 2'd0;
         fb_ready_idx <= 2'd0;
         fb_swap_pending <= 1'b0;
@@ -1089,6 +1139,11 @@ always @(posedge clk) begin
 
                 6'd39: vsync_irq_pending <= 0;                    // VSYNC_IRQ_CLEAR (0x9C) W1C
                 6'd55: vrr_v_total_reg <= clamp_v_total(req_wdata[9:0]); // VIDEO_VTOTAL (0xDC)
+                6'd57: begin                                      // FB_MODE_SIZE (0xE4)
+                    fb_width_reg <= clamp_fb_width(req_wdata[15:0]);
+                    fb_height_reg <= clamp_fb_height(req_wdata[31:16]);
+                end
+                6'd58: fb_stride_reg <= clamp_fb_stride(req_wdata[15:0]); // FB_MODE_STRIDE (0xE8)
                 6'd63: irq_mask <= req_wdata[5:0];             // IRQ_MASK (0xFC)
 
                 default: ;
@@ -1289,6 +1344,8 @@ always @(*) begin
             // Display timing live readback.
             6'd55: sysreg_rdata = {22'b0, vrr_v_total};
             6'd56: sysreg_rdata = 32'b0;  // swap hold retired
+            6'd57: sysreg_rdata = {6'b0, fb_height_reg, 6'b0, fb_width_reg};
+            6'd58: sysreg_rdata = {16'b0, fb_stride_reg};
             6'd63: sysreg_rdata = {26'b0, irq_mask};
             default: ;
         endcase

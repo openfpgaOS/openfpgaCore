@@ -1646,6 +1646,9 @@ assign video_hs = vidout_hs;
     // display_mode removed — terminal rendering in software
     wire [2:0] color_mode;
     wire [24:0] fb_display_addr;
+    wire [9:0] fb_width;
+    wire [9:0] fb_height;
+    wire [15:0] fb_stride;
 
     // VRR: firmware-written V_TOTAL
     wire [9:0] vrr_v_total_cpu;
@@ -1803,6 +1806,9 @@ assign video_hs = vidout_hs;
         // display_mode removed — terminal rendering in software
         .color_mode(color_mode),
         .fb_display_addr(fb_display_addr),
+        .fb_width(fb_width),
+        .fb_height(fb_height),
+        .fb_stride(fb_stride),
         // Palette write interface
         .pal_wr(cpu_pal_wr),
         .pal_addr(cpu_pal_addr),
@@ -2087,6 +2093,9 @@ assign video_hs = vidout_hs;
         .pixel_color(framebuffer_pixel_color),
         .fb_base_addr(fb_display_addr),
         .color_mode(color_mode),
+        .fb_width(fb_width),
+        .fb_height(fb_height),
+        .fb_stride(fb_stride),
         .clk_sdram(clk_ram_controller),
         .burst_rd(video_burst_rd),
         .burst_addr(video_burst_addr),

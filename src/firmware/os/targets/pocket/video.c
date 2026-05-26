@@ -27,6 +27,101 @@ static int buf_ready   = -1;  /* buffer queued for next vsync (-1 = none)   */
 
 /* Display mode (tracked here for overlay compositing in of_video_flip) */
 static int vid_display_mode = DISPLAY_MODE_FRAMEBUFFER;
+static of_video_mode_t vid_mode = {
+    FB_WIDTH, FB_HEIGHT, FB_STRIDE, COLOR_MODE_8BIT, 0
+};
+static uint32_t vid_frame_bytes = FB_SIZE;
+
+static const of_video_mode_t video_modes[] = {
+    {256, 224, 0, COLOR_MODE_8BIT, 0},
+    {256, 240, 0, COLOR_MODE_8BIT, 0},
+    {320, 200, 0, COLOR_MODE_8BIT, 0},
+    {320, 224, 0, COLOR_MODE_8BIT, 0},
+    {320, 240, 0, COLOR_MODE_8BIT, 0},
+    {320, 256, 0, COLOR_MODE_8BIT, 0},
+    {320, 288, 0, COLOR_MODE_8BIT, 0},
+    {400, 300, 0, COLOR_MODE_8BIT, 0},
+    {512, 384, 0, COLOR_MODE_8BIT, 0},
+    {640, 360, 0, COLOR_MODE_8BIT, 0},
+    {640, 400, 0, COLOR_MODE_8BIT, 0},
+    {640, 480, 0, COLOR_MODE_8BIT, 0},
+    {800, 600, 0, COLOR_MODE_8BIT, 0},
+};
+
+static uint32_t video_line_bytes(uint16_t width, uint8_t color_mode) {
+    switch (color_mode) {
+    case COLOR_MODE_4BIT:
+        return ((uint32_t)width + 1u) >> 1;
+    case COLOR_MODE_2BIT:
+        return ((uint32_t)width + 3u) >> 2;
+    case COLOR_MODE_RGB565:
+    case COLOR_MODE_RGB555:
+    case COLOR_MODE_RGBA5551:
+        return (uint32_t)width * 2u;
+    default:
+        return width;
+    }
+}
+
+static uint32_t video_align_stride(uint32_t bytes) {
+    return (bytes + 1u) & ~1u;
+}
+
+static int video_normalize_mode(const of_video_mode_t *in,
+                                of_video_mode_t *out,
+                                uint32_t *frame_bytes_out) {
+    if (!in || !out || in->width == 0 || in->height == 0)
+        return -1;
+    if (in->width > FB_MODE_MAX_WIDTH || in->height > FB_MODE_MAX_HEIGHT)
+        return -1;
+    if (in->color_mode > COLOR_MODE_RGBA5551)
+        return -1;
+
+    uint32_t line = video_align_stride(video_line_bytes(in->width,
+                                                        in->color_mode));
+    uint32_t stride = in->stride ? video_align_stride(in->stride) : line;
+    if (stride < line || stride > FB_MODE_MAX_STRIDE)
+        return -1;
+
+    uint32_t frame_bytes = stride * (uint32_t)in->height;
+    if (frame_bytes == 0 || frame_bytes > (FB1_BASE - FB0_BASE))
+        return -1;
+
+    *out = *in;
+    out->stride = (uint16_t)stride;
+    out->reserved = 0;
+    if (frame_bytes_out)
+        *frame_bytes_out = frame_bytes;
+    return 0;
+}
+
+static void video_program_app_mode(void) {
+    SYS_COLOR_MODE = vid_mode.color_mode;
+    FB_MODE_SIZE = ((uint32_t)vid_mode.height << 16) | vid_mode.width;
+    FB_MODE_STRIDE = vid_mode.stride;
+}
+
+static void video_program_terminal_mode(void) {
+    SYS_COLOR_MODE = COLOR_MODE_8BIT;
+    FB_MODE_SIZE = ((uint32_t)FB_HEIGHT << 16) | FB_WIDTH;
+    FB_MODE_STRIDE = FB_STRIDE;
+}
+
+static void video_program_visible_mode(void) {
+    if (vid_display_mode == DISPLAY_MODE_TERMINAL)
+        video_program_terminal_mode();
+    else
+        video_program_app_mode();
+}
+
+static void video_clear_all_buffers(void) {
+    memset((void *)FB0_BASE, 0, vid_frame_bytes);
+    memset((void *)FB1_BASE, 0, vid_frame_bytes);
+    memset((void *)FB2_BASE, 0, vid_frame_bytes);
+    of_cache_clean_range((void *)FB0_BASE, vid_frame_bytes);
+    of_cache_clean_range((void *)FB1_BASE, vid_frame_bytes);
+    of_cache_clean_range((void *)FB2_BASE, vid_frame_bytes);
+}
 
 /* Palette shadow — needed to dim the app palette in overlay mode.
  * Hardware palette is write-only so we track it here. */
@@ -354,6 +449,85 @@ static void timing_record_present_if_needed(int idx) {
     video_irq_restore_local(irq);
 }
 
+static void video_wait_pending_swap_for_mode_change(void) {
+    uint64_t deadline = read_cycles() + (CPU_FREQ_HZ / 30);
+    while (FB_SWAP_CTRL & 1) {
+        if (read_cycles() > deadline)
+            break;
+    }
+}
+
+static void video_reset_buffer_roles(void) {
+    buf_display = 0;
+    buf_draw = 1;
+    buf_ready = -1;
+    swap_kicked = 0;
+    buf_ready_serial = 0;
+    counted_ready_serial = 0;
+}
+
+int of_video_set_mode(const of_video_mode_t *mode) {
+    of_video_mode_t normalized;
+    uint32_t frame_bytes;
+    if (video_normalize_mode(mode, &normalized, &frame_bytes) < 0)
+        return -1;
+
+    video_wait_pending_swap_for_mode_change();
+
+    uint32_t irq = video_irq_save_local();
+    vid_mode = normalized;
+    vid_frame_bytes = frame_bytes;
+    vid_display_mode = DISPLAY_MODE_FRAMEBUFFER;
+    video_reset_buffer_roles();
+    video_program_app_mode();
+    TERM_FB_CTRL = 0;
+    video_irq_restore_local(irq);
+
+    video_clear_all_buffers();
+    of_term_set_display_mode(DISPLAY_MODE_FRAMEBUFFER);
+    return 0;
+}
+
+void of_video_get_mode(of_video_mode_t *out) {
+    if (!out)
+        return;
+    *out = vid_mode;
+}
+
+int of_video_get_mode_count(void) {
+    return (int)(sizeof(video_modes) / sizeof(video_modes[0]));
+}
+
+int of_video_get_mode_info(int index, of_video_mode_t *out) {
+    if (!out || index < 0 || index >= of_video_get_mode_count())
+        return -1;
+
+    uint32_t frame_bytes;
+    return video_normalize_mode(&video_modes[index], out, &frame_bytes);
+}
+
+void of_video_set_color_mode(int mode) {
+    of_video_mode_t next = vid_mode;
+    next.color_mode = (uint8_t)mode;
+    next.stride = 0;
+
+    of_video_mode_t normalized;
+    uint32_t frame_bytes;
+    if (video_normalize_mode(&next, &normalized, &frame_bytes) < 0)
+        return;
+
+    video_wait_pending_swap_for_mode_change();
+
+    uint32_t irq = video_irq_save_local();
+    vid_mode = normalized;
+    vid_frame_bytes = frame_bytes;
+    video_reset_buffer_roles();
+    video_program_visible_mode();
+    video_irq_restore_local(irq);
+
+    video_clear_all_buffers();
+}
+
 /* Check whether a pending swap has completed and update software state.
  * The display index bits are authoritative; using them matters in the
  * GPU-triggered path where one pending swap can clear and the next
@@ -389,21 +563,18 @@ static int pick_free_buffer(void) {
 }
 
 void of_video_init(void) {
-    /* The scanout color decoder is sticky across apps.  Duke and the
-     * default framebuffer API render 8-bit indexed pixels, so reset the
-     * decoder here before exposing the app FBs.  Apps that want RGB565,
-     * 4-bit, etc. call video_set_color_mode() after init. */
-    SYS_COLOR_MODE = COLOR_MODE_8BIT;
+    of_video_mode_t default_mode = {
+        FB_WIDTH, FB_HEIGHT, FB_STRIDE, COLOR_MODE_8BIT, 0
+    };
+    uint32_t frame_bytes;
+    (void)video_normalize_mode(&default_mode, &vid_mode, &frame_bytes);
+    vid_frame_bytes = frame_bytes;
+    video_program_app_mode();
 
     /* Switch scanout to app triple-buffered FB */
     TERM_FB_CTRL = 0;
 
-    buf_display = 0;
-    buf_draw    = 1;
-    buf_ready   = -1;
-    swap_kicked = 0;
-    buf_ready_serial = 0;
-    counted_ready_serial = 0;
+    video_reset_buffer_roles();
     timing_vblank_count = 0;
     timing_present_count = 0;
     timing_last_presented_idx = 0;
@@ -430,12 +601,7 @@ void of_video_init(void) {
      * memsets populate L1 D$ dirty lines. Clean ranges after each so
      * whichever buffer HW starts scanning sees zeros in SDRAM, not
      * whatever stale data happens to still be in SDRAM at boot. */
-    memset((void *)FB0_BASE, 0, FB_SIZE);
-    memset((void *)FB1_BASE, 0, FB_SIZE);
-    memset((void *)FB2_BASE, 0, FB_SIZE);
-    of_cache_clean_range((void *)FB0_BASE, FB_SIZE);
-    of_cache_clean_range((void *)FB1_BASE, FB_SIZE);
-    of_cache_clean_range((void *)FB2_BASE, FB_SIZE);
+    video_clear_all_buffers();
 }
 
 uint8_t *of_video_get_surface(void) {
@@ -443,7 +609,7 @@ uint8_t *of_video_get_surface(void) {
 }
 
 void of_video_flush_cache(void) {
-    of_cache_clean_range((void *)fb_addr[buf_draw], FB_SIZE);
+    of_cache_clean_range((void *)fb_addr[buf_draw], vid_frame_bytes);
 }
 
 uint8_t *of_video_flip(void) {
@@ -456,15 +622,20 @@ uint8_t *of_video_flip(void) {
     if (vid_display_mode == DISPLAY_MODE_OVERLAY) {
         const uint8_t *term = (const uint8_t *)TERM_FB_BASE;
         uint8_t *app = (uint8_t *)fb_addr[buf_draw];
-        for (uint32_t i = 0; i < FB_WIDTH * FB_HEIGHT; i++) {
-            if (term[i])
-                app[i] = 240 + (term[i] & 0x0F);
+        uint32_t w = vid_mode.width < FB_WIDTH ? vid_mode.width : FB_WIDTH;
+        uint32_t h = vid_mode.height < FB_HEIGHT ? vid_mode.height : FB_HEIGHT;
+        for (uint32_t y = 0; y < h; y++) {
+            const uint8_t *term_row = term + y * FB_STRIDE;
+            uint8_t *app_row = app + y * vid_mode.stride;
+            for (uint32_t x = 0; x < w; x++) {
+                if (term_row[x])
+                    app_row[x] = 240 + (term_row[x] & 0x0F);
+            }
         }
     }
 
-    /* Flush dirty FB lines to SDRAM so the scanout DMA sees them.
-     * 1,200 cache lines × ~7 cycles per cbo.clean ≈ 84 µs. */
-    of_cache_clean_range((void *)fb_addr[buf_draw], FB_SIZE);
+    /* Flush dirty FB lines to SDRAM so the scanout DMA sees them. */
+    of_cache_clean_range((void *)fb_addr[buf_draw], vid_frame_bytes);
 
     /* Queue draw buffer for display at next vsync.
      * Write format: bits[2:1] = buffer index, bit[0] = trigger */
@@ -657,11 +828,12 @@ void of_video_set_display_mode(int mode) {
     int prev = vid_display_mode;
     vid_display_mode = mode;
 
-    /* Terminal and overlay rendering are palette-indexed.  If a previous
-     * app left direct/low-bit color mode selected, terminal glyphs and
-     * overlay pixels decode as black or scrambled data. */
-    if (mode == DISPLAY_MODE_TERMINAL || mode == DISPLAY_MODE_OVERLAY)
-        SYS_COLOR_MODE = COLOR_MODE_8BIT;
+    /* Terminal rendering is always the fixed 320x240 8-bit surface.
+     * Framebuffer and overlay modes scan out the active app mode. */
+    if (mode == DISPLAY_MODE_TERMINAL)
+        video_program_terminal_mode();
+    else
+        video_program_app_mode();
 
     /* Switch scanout between terminal FB and app triple-buffered FB */
     TERM_FB_CTRL = (mode == DISPLAY_MODE_TERMINAL) ? 1 : 0;
@@ -676,5 +848,5 @@ void of_video_set_display_mode(int mode) {
 }
 
 void of_video_clear(uint8_t color) {
-    memset(of_video_get_surface(), color, FB_SIZE);
+    memset(of_video_get_surface(), color, vid_frame_bytes);
 }

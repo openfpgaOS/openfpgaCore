@@ -123,6 +123,16 @@
 #define FB_DISPLAY_IDX      REG32(SYSREG_BASE + 0x14)
 #define FB_SWAP_CTRL        REG32(SYSREG_BASE + 0x18)
 
+/* Runtime framebuffer geometry.  Size packs width in bits [15:0] and
+ * height in bits [31:16].  Stride is bytes per source framebuffer row.
+ * Hardware currently clamps to 800x600 and a 2048-byte stride so every
+ * supported mode fits the scanout line cache and 1 MB FB slot spacing. */
+#define FB_MODE_SIZE        REG32(SYSREG_BASE + 0xE4)
+#define FB_MODE_STRIDE      REG32(SYSREG_BASE + 0xE8)
+#define FB_MODE_MAX_WIDTH   800u
+#define FB_MODE_MAX_HEIGHT  600u
+#define FB_MODE_MAX_STRIDE  2048u
+
 /* GPU fence-reached register, used by of_video_acquire_next() to
  * confirm a CMD_FLIP retired before waiting on fb_swap_pending.  GPU
  * MMIO base is target-specific; on Pocket it sits at 0x4a000000 with

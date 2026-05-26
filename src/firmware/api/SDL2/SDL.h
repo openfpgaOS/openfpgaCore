@@ -4,9 +4,9 @@
  * Minimal SDL2 implementation using of_* syscalls.
  * On PC builds, this header is never used — the real SDL2 is linked.
  *
- * Video model: the SDL screen surface points DIRECTLY at the 320x240
- * hardware framebuffer. No intermediate buffer, no copy, no cache issues.
- * SDL_Flip = of_video_flip (buffer swap).
+ * Video model: requested SDL window sizes are first offered to the OS as
+ * native framebuffer modes. If unsupported, the shim keeps a logical
+ * software surface and scales it to the active framebuffer on present.
  *
  * Covers: video (8-bit indexed surface), input, audio, timer.
  */
@@ -172,6 +172,13 @@ typedef struct {
 typedef struct { int w, h; uint32_t flags; } SDL_Window;
 typedef struct { int unused; } SDL_Renderer;
 typedef struct { int w, h, pitch; void *pixels; } SDL_Texture;
+typedef struct {
+    uint32_t format;
+    int w;
+    int h;
+    int refresh_rate;
+    void *driverdata;
+} SDL_DisplayMode;
 
 typedef enum {
     SDL_SCANCODE_UNKNOWN = 0,
@@ -429,19 +436,44 @@ static inline void __sdl_setup_surface(void) {
 }
 
 static inline void __sdl_fb_dims(int *w, int *h, int *stride) {
-    const struct of_capabilities *caps = of_get_caps();
-    int fw = (caps && caps->fb_width) ? (int)caps->fb_width : OF_SCREEN_W;
-    int fh = (caps && caps->fb_height) ? (int)caps->fb_height : OF_SCREEN_H;
-    int fs = (caps && caps->fb_stride) ? (int)caps->fb_stride : fw;
+    of_video_mode_t mode;
+    of_video_get_mode(&mode);
+    int fw = mode.width ? (int)mode.width : OF_SCREEN_W;
+    int fh = mode.height ? (int)mode.height : OF_SCREEN_H;
+    int fs = mode.stride ? (int)mode.stride : fw;
     if (w) *w = fw;
     if (h) *h = fh;
     if (stride) *stride = fs;
+}
+
+static inline int __sdl_try_hw_fb_mode(int w, int h) {
+    if (w <= 0 || h <= 0)
+        return 0;
+    if (w > OF_VIDEO_MAX_WIDTH || h > OF_VIDEO_MAX_HEIGHT)
+        return 0;
+
+    of_video_mode_t mode;
+    of_video_get_mode(&mode);
+    if (mode.width == (uint16_t)w &&
+        mode.height == (uint16_t)h &&
+        mode.color_mode == OF_VIDEO_MODE_8BIT) {
+        return 1;
+    }
+
+    mode.width = (uint16_t)w;
+    mode.height = (uint16_t)h;
+    mode.stride = 0;
+    mode.color_mode = OF_VIDEO_MODE_8BIT;
+    mode.reserved = 0;
+    return of_video_set_mode(&mode) == 0;
 }
 
 static inline int __sdl_configure_window_surface(int w, int h) {
     __sdl_setup_surface();
     if (w <= 0) w = OF_SCREEN_W;
     if (h <= 0) h = OF_SCREEN_H;
+
+    (void)__sdl_try_hw_fb_mode(w, h);
 
     int fw, fh, fs;
     __sdl_fb_dims(&fw, &fh, &fs);
@@ -534,6 +566,54 @@ static inline void SDL_DestroyWindow(SDL_Window *w) {
 }
 static inline uint32_t SDL_GetWindowFlags(SDL_Window *w) {
     return w ? w->flags : SDL_WINDOW_SHOWN;
+}
+static inline int SDL_GetNumVideoDisplays(void) {
+    return 1;
+}
+static inline int SDL_GetNumDisplayModes(int displayIndex) {
+    if (displayIndex != 0) return -1;
+    return of_video_get_mode_count();
+}
+static inline int SDL_GetDisplayMode(int displayIndex, int modeIndex,
+                                      SDL_DisplayMode *mode) {
+    if (displayIndex != 0 || !mode) return -1;
+    of_video_mode_t of_mode;
+    if (of_video_get_mode_info(modeIndex, &of_mode) < 0)
+        return -1;
+    mode->format = SDL_PIXELFORMAT_INDEX8;
+    mode->w = of_mode.width;
+    mode->h = of_mode.height;
+    mode->refresh_rate = 60;
+    mode->driverdata = NULL;
+    return 0;
+}
+static inline int SDL_GetCurrentDisplayMode(int displayIndex,
+                                             SDL_DisplayMode *mode) {
+    if (displayIndex != 0 || !mode) return -1;
+    of_video_mode_t of_mode;
+    of_video_get_mode(&of_mode);
+    mode->format = SDL_PIXELFORMAT_INDEX8;
+    mode->w = of_mode.width;
+    mode->h = of_mode.height;
+    mode->refresh_rate = 60;
+    mode->driverdata = NULL;
+    return 0;
+}
+static inline int SDL_GetDesktopDisplayMode(int displayIndex,
+                                             SDL_DisplayMode *mode) {
+    return SDL_GetCurrentDisplayMode(displayIndex, mode);
+}
+static inline int SDL_SetWindowDisplayMode(SDL_Window *w,
+                                            const SDL_DisplayMode *mode) {
+    if (!w || !mode) return -1;
+    w->w = mode->w > 0 ? mode->w : OF_SCREEN_W;
+    w->h = mode->h > 0 ? mode->h : OF_SCREEN_H;
+    return __sdl_configure_window_surface(w->w, w->h);
+}
+static inline int SDL_GetWindowDisplayMode(SDL_Window *w,
+                                            SDL_DisplayMode *mode) {
+    (void)w;
+    return SDL_GetCurrentDisplayMode(0, mode);
 }
 static inline void SDL_GetWindowSize(SDL_Window *w, int *ow, int *oh) {
     if (ow) *ow = (w && w->w > 0) ? w->w : OF_SCREEN_W;

@@ -1,6 +1,6 @@
 /*
  * openfpgaOS Video HAL
- * 320x240 8-bit indexed color, triple-buffered, hardware palette
+ * Dynamic framebuffer geometry, triple-buffered, hardware palette
  */
 
 #ifndef OFOS_VIDEO_H
@@ -21,8 +21,25 @@ typedef struct of_video_timing {
 } of_video_timing_t;
 #endif
 
+#ifndef OF_VIDEO_MODE_T_DEFINED
+#define OF_VIDEO_MODE_T_DEFINED
+typedef struct of_video_mode {
+    uint16_t width;
+    uint16_t height;
+    uint16_t stride;
+    uint8_t color_mode;
+    uint8_t reserved;
+} of_video_mode_t;
+#endif
+
 /* Initialize framebuffer subsystem (sets display mode, initial palette) */
 void of_video_init(void);
+
+/* Set/query the active app framebuffer geometry. */
+int of_video_set_mode(const of_video_mode_t *mode);
+void of_video_get_mode(of_video_mode_t *out);
+int of_video_get_mode_count(void);
+int of_video_get_mode_info(int index, of_video_mode_t *out);
 
 /* Get pointer to current draw buffer (write pixels here) */
 uint8_t *of_video_get_surface(void);
@@ -89,6 +106,9 @@ void of_video_set_palette_vga4(const uint8_t *vga_pal, int count);
 
 /* Switch between terminal overlay and framebuffer mode */
 void of_video_set_display_mode(int mode);
+
+/* Switch color decoder and update active stride/frame size. */
+void of_video_set_color_mode(int mode);
 
 /* Flush D-cache to ensure draw buffer is visible to video scanout */
 void of_video_flush_cache(void);

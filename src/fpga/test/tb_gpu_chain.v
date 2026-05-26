@@ -474,6 +474,9 @@ axi_periph_slave dut (
 
     .color_mode     (),
     .fb_display_addr(),
+    .fb_width       (),
+    .fb_height      (),
+    .fb_stride      (),
 
     .pal_wr  (), .pal_addr(), .pal_data(), .pal_commit(), .pal_busy(1'b0),
 
