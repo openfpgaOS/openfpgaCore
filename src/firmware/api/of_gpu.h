@@ -155,7 +155,8 @@ typedef struct {
     uint8_t  attr_mode;
     uint8_t  span_axis;
     uint8_t  z_mode;
-    uint8_t  reserved[3];
+    uint8_t  q29_attr_shift;
+    uint8_t  reserved[2];
 
     int32_t  attr_origin[3];
     int32_t  attr_du[3];
@@ -285,13 +286,14 @@ static uint32_t _gpu_base;
 /* Doorbell-DMA scratch region — must live in SDRAM because gpu_core's
  * m_rd_* AXI master only reaches the SDRAM arbiter (see core_top.v's
  * sdram_arb instantiation: GPU is m0, no other targets are wired).
- * CPU writes this window through the cached alias for speed.  The RTL DMA
- * puller has a two-entry descriptor FIFO, so the SDK alternates between
- * two scratch buffers and can build one command stream while the prior
- * stream is still being copied into ring BRAM.  Before each GPU DMA kick,
- * of_gpu drains the flushed cache lines with same-master readbacks so the
- * GPU cannot read stale command words. */
-#define OF_GPU_BATCH_BUF_AXI_OFFSET  0x00140000u
+ * The buffer is real app-owned storage, so the linker accounts for it
+ * instead of relying on a hidden fixed SDRAM reservation.  CPU writes it
+ * through the cached alias for speed.  The RTL DMA puller has a two-entry
+ * descriptor FIFO, so the SDK alternates between two scratch buffers and
+ * can build one command stream while the prior stream is still being copied
+ * into ring BRAM.  Before each GPU DMA kick, of_gpu drains the flushed cache
+ * lines with same-master readbacks so the GPU cannot read stale command
+ * words. */
 #define OF_GPU_BATCH_BUFFER_COUNT    2u
 #define OF_GPU_BATCH_BUFFER_BYTES    0x00004000u  /* 16 KB per buffer */
 #define OF_GPU_BATCH_BUF_BYTES       (OF_GPU_BATCH_BUFFER_COUNT * OF_GPU_BATCH_BUFFER_BYTES)
@@ -314,10 +316,12 @@ static uint32_t _gpu_batch_inflight_mask;
 
 static const uint32_t _gpu_ring_mask = OF_GPU_RING_SIZE - 1;
 
-/* Doorbell-DMA scratch buffer.  Pinned to a fixed SDRAM offset by
- * of_gpu_init and kept cached so command construction does not stall on
- * every store.  NULL on targets that don't expose SDRAM; command
- * submission traps on those targets. */
+/* Doorbell-DMA scratch buffer.  Kept cached so command construction does
+ * not stall on every store.  NULL on targets that don't expose SDRAM;
+ * command submission traps on those targets. */
+static uint32_t _gpu_batch_storage[OF_GPU_BATCH_BUFFER_COUNT]
+    [OF_GPU_BATCH_BUFFER_BYTES / sizeof(uint32_t)]
+    __attribute__((aligned(OF_GPU_CACHE_LINE_BYTES)));
 static uint32_t *_gpu_batch_buf_base;
 static uint32_t *_gpu_batch_buf;
 static uint32_t  _gpu_dbg_dma_waits;
@@ -544,17 +548,24 @@ static inline void of_gpu_init(void) {
     GPU_CTRL = 4;               /* ring_reset: clear wr_addr + wrptr + rdptr */
     GPU_CTRL = 1;               /* enable */
 
-    /* Pin the doorbell-DMA scratch buffer at a known SDRAM offset.
-     * Command words are written through the cached alias for normal CPU
-     * store speed.  _gpu_flush_cmd_stream() handles the external-master
-     * handoff by flushing and then reading back the invalidated lines on
-     * the same d_axi path before GPU_DMA_KICK. */
+    /* Command words are written through cached SDRAM for normal CPU store
+     * speed.  _gpu_flush_cmd_stream() handles the external-master handoff
+     * by flushing and then reading back the invalidated lines on the same
+     * d_axi path before GPU_DMA_KICK. */
     {
         const struct of_capabilities *caps = of_get_caps();
         if (caps && caps->sdram_base != 0) {
-            _gpu_batch_dma_base = caps->sdram_base + OF_GPU_BATCH_BUF_AXI_OFFSET;
-            _gpu_batch_buf_base = (uint32_t *)(uintptr_t)
-                (caps->sdram_base + OF_GPU_BATCH_BUF_AXI_OFFSET);
+            uint32_t base = (uint32_t)(uintptr_t)&_gpu_batch_storage[0][0];
+            uint64_t lo = base;
+            uint64_t hi = lo + OF_GPU_BATCH_BUF_BYTES;
+            uint64_t sdram_lo = caps->sdram_base;
+            uint64_t sdram_hi = sdram_lo + caps->sdram_size;
+
+            if (lo < sdram_lo || hi > sdram_hi)
+                __builtin_trap();
+
+            _gpu_batch_dma_base = base;
+            _gpu_batch_buf_base = &_gpu_batch_storage[0][0];
             _gpu_select_batch_buffer(0);
         }
     }
@@ -983,6 +994,7 @@ _gpu_emit_param_span_list(const of_gpu_param_span_list_t *p,
                           const of_gpu_param_span_record_t *records,
                           uint32_t record_count) {
     uint32_t control;
+    uint32_t q29_attr_shift = 0;
 
     if (record_count == 0)
         return;
@@ -993,6 +1005,14 @@ _gpu_emit_param_span_list(const of_gpu_param_span_list_t *p,
         && p->z_mode != OF_GPU_PARAM_Z_TEST_ZI
         && p->z_mode != OF_GPU_PARAM_Z_TEST_WRITE)
         return;
+    if (p->attr_mode == OF_GPU_PARAM_ATTR_PERSP_Q29) {
+        q29_attr_shift = (uint32_t)p->q29_attr_shift & 31u;
+#ifndef OF_PC
+        if (q29_attr_shift != 0u
+            && !of_has_feature(OF_HW_GPU_PARAM_SPAN_Q29_SCALE))
+            return;
+#endif
+    }
 
     control = ((uint32_t)p->flags & 0xFFu)
             | (((uint32_t)p->colormap_id & 0x0Fu) << 8)
@@ -1031,7 +1051,7 @@ _gpu_emit_param_span_list(const of_gpu_param_span_list_t *p,
     _gpu_ring_write((uint32_t)p->z_major_step);
     _gpu_ring_write((uint32_t)p->z_minor_step);
     _gpu_ring_write(record_count);
-    _gpu_ring_write(0);
+    _gpu_ring_write(q29_attr_shift);
 
     for (uint32_t i = 0; i < record_count; i += 2) {
         const of_gpu_param_span_record_t *a = &records[i];

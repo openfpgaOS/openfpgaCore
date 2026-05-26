@@ -100,7 +100,6 @@ core_bridge_cmd dut (
 
     .target_dataslot_read       (1'b0),
     .target_dataslot_write      (1'b0),
-    .target_dataslot_write_ready(1'b1),
     .target_dataslot_getfile    (1'b0),
     .target_dataslot_openfile   (1'b0),
 

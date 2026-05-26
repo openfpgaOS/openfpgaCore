@@ -148,13 +148,15 @@ reg         pipe_wide_a;
 
 reg         pipe_valid_b;
 reg  [25:0] pipe_addr_b;
+reg  [TAG_BITS-1:0] pipe_tag_b_r;
+reg  [1:0]          pipe_byte_b_r;
 reg         pipe_wide_b;
 
 wire [TAG_BITS-1:0] pipe_tag_a  = pipe_addr_a[25:14];
 wire [1:0]          pipe_byte_a = pipe_addr_a[1:0];
 
-wire [TAG_BITS-1:0] pipe_tag_b  = pipe_addr_b[25:14];
-wire [1:0]          pipe_byte_b = pipe_addr_b[1:0];
+wire [TAG_BITS-1:0] pipe_tag_b  = pipe_tag_b_r;
+wire [1:0]          pipe_byte_b = pipe_byte_b_r;
 
 // ---- RAM read result registers — one set per port ----
 reg [TAG_BITS-1:0] rd_tag_a;
@@ -190,16 +192,23 @@ wire pipe_miss_b = pipe_valid_b && !(rd_valid_b && (rd_tag_b == pipe_tag_b));
 reg lat_port;
 
 // ---- Backpressure ----
-// Per-port req_ready: ready in S_PIPE when no miss and no flush is pending;
-// ALSO ready in S_FILL_OUT when serving this port — that lets the
-// consumer's first post-fill request roll into S_PIPE without an
-// extra latch cycle (the M10K read fires on accept and rd_*_x
-// updates correctly even though the FSM transitions S_FILL_OUT →
-// S_PIPE simultaneously).
 assign req_ready   = (state_pipe_ready && !pipe_miss_a && !flush_block)
                   || (state_fillout_ready && (lat_port == 1'b0) && !flush_block);
-assign req_ready_b = (state_pipe_ready && !pipe_miss_b && !flush_block)
-                  || (state_fillout_ready && (lat_port == 1'b1) && !flush_block);
+
+// Port B is used for colormap lookups from the fragment pipe.  Keeping its
+// ready signal fully combinational creates a long feedback cone:
+// pipe_addr_b -> pipe_hit_b -> req_ready_b -> GPU cmap issue -> RAM read
+// address.  Register the external ready decision and force one evaluate
+// cycle after each accepted request; a miss is then known before ready can
+// reassert, while the held response path still lets the consumer stall until
+// resp_valid_b.
+reg req_ready_b_r;
+wire req_ready_b_state = req_ready_b_r
+                      && !flush_block
+                      && (state_pipe_ready
+                       || (state_fillout_ready && (lat_port == 1'b1)));
+assign req_ready_b = req_ready_b_state;
+wire accept_b = req_valid_b && req_ready_b;
 
 // ---- Combinational responses (hot path) ----
 // Pipe-hit OR S_FILL_OUT held response.  fill_resp_valid_x is set at
@@ -246,7 +255,7 @@ wire prime_a = state_fillout_prime && (lat_port == 1'b0)
             && !(req_valid && req_ready);
 wire prime_b = state_fillout_prime && (lat_port == 1'b1)
             && !flush_block
-            && !(req_valid_b && req_ready_b);
+            && !accept_b;
 
 wire [SET_BITS-1:0] read_set_a  = prime_a ? lat_set  : addr_set_a;
 wire [1:0]          read_word_a = prime_a ? lat_word : addr_word_a;
@@ -254,7 +263,7 @@ wire                read_en_a   = (req_valid && req_ready) || prime_a;
 
 wire [SET_BITS-1:0] read_set_b  = prime_b ? lat_set  : addr_set_b;
 wire [1:0]          read_word_b = prime_b ? lat_word : addr_word_b;
-wire                read_en_b   = (req_valid_b && req_ready_b) || prime_b;
+wire                read_en_b   = accept_b || prime_b;
 
 always @(posedge clk) begin
     if (read_en_a) begin
@@ -324,7 +333,10 @@ always @(posedge clk) begin
         pipe_wide_a  <= 0;
         pipe_valid_b <= 0;
         pipe_addr_b  <= 0;
+        pipe_tag_b_r <= 0;
+        pipe_byte_b_r <= 0;
         pipe_wide_b  <= 0;
+        req_ready_b_r <= 1'b0;
         fill_resp_valid_a <= 0;
         fill_resp_valid_b <= 0;
         axi_arvalid <= 0;
@@ -354,6 +366,9 @@ always @(posedge clk) begin
             if (init_counter == {SET_BITS{1'b1}}) begin
                 state <= S_PIPE;
                 flush_pending <= 1'b0;  // walk-clear done, clear pending
+                req_ready_b_r <= 1'b1;
+            end else begin
+                req_ready_b_r <= 1'b0;
             end
             init_counter <= init_counter + 1'b1;
         end
@@ -386,13 +401,11 @@ always @(posedge clk) begin
             // updates fine — the bug only manifests in synthesis
             // against real DRAM latency.
             //
-            // Splitting accepts out is safe: req_ready_x already gates
-            // on (state==S_PIPE && !pipe_miss_x && !flush_block), so
-            // the accepts fire only when this port is genuinely
-            // hitting and the FSM isn't transitioning to S_INIT for
-            // flush.  The miss branch's pipe_valid_x<=0 cannot race
-            // with an accept on the same port because req_ready_x is
-            // 0 whenever pipe_miss_x is 1.
+            // Splitting accepts out is safe: port A's req_ready gates on
+            // pipe_miss_a directly, and port B's registered ready is dropped
+            // for one cycle after each accept so a miss is resolved before
+            // the next B accept can occur.  The miss branch's pipe_valid_x<=0
+            // cannot race with an accept on the same port.
             if (pipe_miss_a) begin
                 axi_arvalid <= 1;
                 axi_araddr  <= {6'b0, pipe_addr_a[25:4], 4'b0};
@@ -403,6 +416,7 @@ always @(posedge clk) begin
                 lat_wide    <= pipe_wide_a;
                 lat_port    <= 1'b0;       // serving A
                 pipe_valid_a <= 0;          // explicit clear on miss
+                req_ready_b_r <= 1'b0;
             end else if (pipe_miss_b) begin
                 axi_arvalid <= 1;
                 axi_araddr  <= {6'b0, pipe_addr_b[25:4], 4'b0};
@@ -413,6 +427,7 @@ always @(posedge clk) begin
                 lat_wide    <= pipe_wide_b;
                 lat_port    <= 1'b1;       // serving B
                 pipe_valid_b <= 0;          // explicit clear on miss
+                req_ready_b_r <= 1'b0;
             end else if (flush_block) begin
                 // Safe to flush now: no pending miss on either port
                 // means either pipe_valid_x=0 (no in-flight request)
@@ -424,26 +439,33 @@ always @(posedge clk) begin
                 init_counter <= 0;
                 pipe_valid_a <= 0;
                 pipe_valid_b <= 0;
+                req_ready_b_r <= 1'b0;
+            end else if (accept_b) begin
+                req_ready_b_r <= 1'b0;
+            end else begin
+                req_ready_b_r <= 1'b1;
             end
 
-            // Per-port new-request accepts — independent of the
-            // miss/flush priority block above.  req_ready_x already
-            // self-gates on the right combination of state /
-            // pipe_miss_x / flush_block, so this cannot accept while the
-            // FSM is mid-fill or about to flush.
+            // Per-port new-request accepts — independent of the miss/flush
+            // priority block above.  req_ready_x already self-gates on the
+            // right combination of state / readiness / flush_block, so this
+            // cannot accept while the FSM is mid-fill or about to flush.
             if (req_valid && req_ready) begin
                 pipe_valid_a <= 1;
                 pipe_addr_a  <= req_addr;
                 pipe_wide_a  <= req_wide;
             end
-            if (req_valid_b && req_ready_b) begin
+            if (accept_b) begin
                 pipe_valid_b <= 1;
                 pipe_addr_b  <= req_addr_b;
+                pipe_tag_b_r <= req_addr_b[25:14];
+                pipe_byte_b_r <= req_addr_b[1:0];
                 pipe_wide_b  <= req_wide_b;
             end
         end
 
         S_FILL_AR: begin
+            req_ready_b_r <= 1'b0;
             if (axi_arready) begin
                 axi_arvalid <= 0;
                 state       <= S_FILL_DATA;
@@ -451,6 +473,7 @@ always @(posedge clk) begin
         end
 
         S_FILL_DATA: begin
+            req_ready_b_r <= 1'b0;
             if (axi_rvalid) begin
                 data_mem[{lat_set, fill_beat}] <= axi_rdata;
                 if (fill_beat == lat_word) fill_target_word <= axi_rdata;
@@ -458,7 +481,10 @@ always @(posedge clk) begin
                 if (axi_rlast) begin
                     tagv_mem[lat_set]    <= {1'b1, lat_tag};
                     if (lat_port == 1'b0) fill_resp_valid_a <= 1;
-                    else                  fill_resp_valid_b <= 1;
+                    else begin
+                        fill_resp_valid_b <= 1;
+                        req_ready_b_r <= 1'b1;
+                    end
                     state                <= S_FILL_OUT;
                 end
             end
@@ -494,6 +520,7 @@ always @(posedge clk) begin
                 fill_resp_valid_b <= 0;
                 pipe_valid_a <= 0;
                 pipe_valid_b <= 0;
+                req_ready_b_r <= 1'b0;
             end else begin
                 // Whether the consumer issued a new req this cycle or
                 // not, drive pipe_*_x for the requesting port.  In the
@@ -511,6 +538,7 @@ always @(posedge clk) begin
                 // both pipe_*_x and rd_*_x land at their correct
                 // POST-edge values.
                 if (lat_port == 1'b0) begin
+                    req_ready_b_r <= 1'b0;
                     fill_resp_valid_a <= 0;
                     if (req_valid && req_ready) begin
                         pipe_valid_a <= 1;
@@ -523,14 +551,20 @@ always @(posedge clk) begin
                     end
                 end else begin
                     fill_resp_valid_b <= 0;
-                    if (req_valid_b && req_ready_b) begin
+                    if (accept_b) begin
                         pipe_valid_b <= 1;
                         pipe_addr_b  <= req_addr_b;
+                        pipe_tag_b_r <= req_addr_b[25:14];
+                        pipe_byte_b_r <= req_addr_b[1:0];
                         pipe_wide_b  <= req_wide_b;
+                        req_ready_b_r <= 1'b0;
                     end else begin
                         pipe_valid_b <= 1;
                         pipe_addr_b  <= lat_addr;
+                        pipe_tag_b_r <= lat_addr[25:14];
+                        pipe_byte_b_r <= lat_addr[1:0];
                         pipe_wide_b  <= lat_wide;
+                        req_ready_b_r <= 1'b1;
                     end
                 end
                 state <= S_PIPE;

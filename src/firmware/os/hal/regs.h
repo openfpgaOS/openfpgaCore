@@ -441,6 +441,7 @@
 #define   HW_FEAT_GPU_PARAM_SPAN_LIST (1 << 15) /* GPU parametric span-list command */
 #define   HW_FEAT_GPU_PARAM_SPAN_Z    (1 << 16) /* Param-span Quake-compatible z writes */
 #define   HW_FEAT_GPU_PARAM_SPAN_ZTEST (1 << 17) /* Param-span Quake-compatible z test/write */
+#define   HW_FEAT_GPU_PARAM_SPAN_Q29_SCALE (1 << 18) /* Param-span Q29 dynamic scale */
 
 
 /* ======================================================================

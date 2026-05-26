@@ -800,6 +800,7 @@ struct ParamSpanListWire {
     uint8_t attr_mode;
     uint8_t span_axis;
     uint8_t z_mode;
+    uint8_t q29_attr_shift;
     int32_t attr_origin[3];
     int32_t attr_du[3];
     int32_t attr_dv[3];
@@ -847,6 +848,7 @@ encode_param_span_list_wire(const ParamSpanListWire &p,
     w[27] = (uint32_t)p.z_major_step;
     w[28] = (uint32_t)p.z_minor_step;
     w[29] = (uint32_t)records.size();
+    w[30] = (p.attr_mode == 3) ? ((uint32_t)p.q29_attr_shift & 31u) : 0u;
 
     for (size_t i = 0; i < records.size(); i += 2) {
         ParamSpanRecordWire a = records[i];
@@ -6313,6 +6315,221 @@ static void test_param_q29_static_repeat_300() {
     check_pass("param_q29_static_repeat_300");
 }
 
+static ParamSpanListWire make_q29_dynamic_scale_param(uint32_t fb_base,
+                                                      uint32_t tex_base,
+                                                      uint32_t z_base,
+                                                      int fb_stride,
+                                                      int z_stride,
+                                                      int tex_w,
+                                                      int tex_h,
+                                                      uint8_t z_mode) {
+    const int32_t zi = 0x08000000;
+    ParamSpanListWire p {};
+    p.fb_base = fb_base;
+    p.fb_major_step = fb_stride;
+    p.fb_minor_step = 1;
+    p.tex_addr = tex_base;
+    p.tex_width = tex_w;
+    p.tex_w_mask = (uint16_t)(tex_w - 1);
+    p.tex_h_mask = (uint16_t)(tex_h - 1);
+    p.attr_mode = 3;
+    p.q29_attr_shift = 4;
+    p.z_mode = z_mode;
+    p.attr_origin[0] = zi * 4;
+    p.attr_origin[1] = zi * 7;
+    p.attr_origin[2] = zi;
+    p.attr_du[0] = zi / 8;
+    p.attr_du[1] = zi / 16;
+    p.attr_du[2] = 0;
+    p.clamp_min[0] = 0;
+    p.clamp_max[0] = (tex_w - 1) << 16;
+    p.clamp_min[1] = 0;
+    p.clamp_max[1] = (tex_h - 1) << 16;
+    p.z_base = z_base;
+    p.z_major_step = z_stride * 2;
+    p.z_minor_step = 2;
+    return p;
+}
+
+static uint8_t q29_dynamic_scale_texel(const ParamSpanListWire &p,
+                                       const std::vector<uint8_t> &tex,
+                                       int tex_w,
+                                       uint16_t x,
+                                       uint16_t y) {
+    __int128 s_num = (__int128)p.attr_origin[0]
+                   + (__int128)x * p.attr_du[0]
+                   + (__int128)y * p.attr_dv[0];
+    __int128 t_num = (__int128)p.attr_origin[1]
+                   + (__int128)x * p.attr_du[1]
+                   + (__int128)y * p.attr_dv[1];
+    __int128 zi = (__int128)p.attr_origin[2]
+                + (__int128)x * p.attr_du[2]
+                + (__int128)y * p.attr_dv[2];
+    int32_t s_q16 = clamp_i128_to_i32((s_num << 16) / zi);
+    int32_t t_q16 = clamp_i128_to_i32((t_num << 16) / zi);
+    s_q16 = q_clamp_i32(s_q16, p.clamp_min[0], p.clamp_max[0]);
+    t_q16 = q_clamp_i32(t_q16, p.clamp_min[1], p.clamp_max[1]);
+    uint32_t s = ((uint32_t)(s_q16 >> 16)) & p.tex_w_mask;
+    uint32_t t = ((uint32_t)(t_q16 >> 16)) & p.tex_h_mask;
+    return tex[(size_t)t * (size_t)tex_w + (size_t)s];
+}
+
+static void test_param_q29_dynamic_scale_projection() {
+    printf("TEST param_q29_dynamic_scale_projection\n");
+    gpu_init();
+    preload_with_sentinel();
+
+    const int fb_stride = 320;
+    const int z_stride = 320;
+    const int tex_w = 64;
+    const int tex_h = 64;
+    std::vector<uint8_t> tex = make_param_bitwalk_texture(tex_w, tex_h, 0x53);
+    upload_texture(TEX_BASE_BYTE, tex);
+
+    ParamSpanListWire p = make_q29_dynamic_scale_param(
+        FB_BASE_BYTE, TEX_BASE_BYTE, 0x001C0000u, fb_stride, z_stride,
+        tex_w, tex_h, 0);
+    std::vector<ParamSpanRecordWire> records = {
+        {3, 12, 29}, {37, 17, 31}
+    };
+
+    emit_param_span_list_raw(p, records);
+    if (!submit_and_wait()) {
+        check_fail("param_q29_dynamic_scale_projection", "timeout");
+        return;
+    }
+
+    int diffs = 0;
+    char first[192] = {0};
+    for (const auto &r : records) {
+        for (uint16_t i = 0; i < r.count; i++) {
+            uint16_t x = (uint16_t)(r.u + i);
+            uint8_t got = sdram_read_byte(FB_BASE_BYTE
+                                        + (uint32_t)r.v * fb_stride + x);
+            uint8_t want = q29_dynamic_scale_texel(p, tex, tex_w, x, r.v);
+            if (got != want) {
+                if (diffs == 0) {
+                    snprintf(first, sizeof(first),
+                             "x=%u y=%u got=%02x want=%02x",
+                             x, r.v, got, want);
+                }
+                diffs++;
+            }
+        }
+    }
+
+    if (diffs == 0)
+        check_pass("param_q29_dynamic_scale_projection");
+    else {
+        char msg[224];
+        snprintf(msg, sizeof(msg), "%d pixel mismatches; first %s", diffs, first);
+        check_fail("param_q29_dynamic_scale_projection", msg);
+    }
+}
+
+static void test_param_q29_dynamic_scale_z_restore_saturates() {
+    printf("TEST param_q29_dynamic_scale_z_restore_saturates\n");
+    gpu_init();
+    preload_with_sentinel();
+
+    const int fb_stride = 320;
+    const int z_stride = 320;
+    const int tex_w = 64;
+    const int tex_h = 64;
+    const uint32_t z_base = 0x001C0000u;
+    std::vector<uint8_t> tex = make_param_bitwalk_texture(tex_w, tex_h, 0x71);
+    upload_texture(TEX_BASE_BYTE, tex);
+    sdram_fill(z_base, (uint32_t)z_stride * 64u * 2u, 0x5A);
+
+    ParamSpanListWire p = make_q29_dynamic_scale_param(
+        FB_BASE_BYTE, TEX_BASE_BYTE, z_base, fb_stride, z_stride,
+        tex_w, tex_h, 1);
+    std::vector<ParamSpanRecordWire> records = {
+        {5, 19, 11}, {21, 20, 13}
+    };
+
+    emit_param_span_list_raw(p, records);
+    if (!submit_and_wait()) {
+        check_fail("param_q29_dynamic_scale_z_restore_saturates", "timeout");
+        return;
+    }
+
+    int diffs = 0;
+    char first[192] = {0};
+    for (const auto &r : records) {
+        for (uint16_t i = 0; i < r.count; i++) {
+            uint16_t x = (uint16_t)(r.u + i);
+            uint16_t got = sdram_read_u16_le(z_base
+                + (uint32_t)r.v * (uint32_t)z_stride * 2u
+                + (uint32_t)x * 2u);
+            if (got != 0xFFFFu) {
+                if (diffs == 0) {
+                    snprintf(first, sizeof(first),
+                             "x=%u y=%u got=%04x want=ffff",
+                             x, r.v, got);
+                }
+                diffs++;
+            }
+        }
+    }
+
+    if (diffs == 0)
+        check_pass("param_q29_dynamic_scale_z_restore_saturates");
+    else {
+        char msg[224];
+        snprintf(msg, sizeof(msg), "%d z mismatches; first %s", diffs, first);
+        check_fail("param_q29_dynamic_scale_z_restore_saturates", msg);
+    }
+}
+
+static void test_param_q29_dynamic_scale_reserved_bits_noop() {
+    printf("TEST param_q29_dynamic_scale_reserved_bits_noop\n");
+    gpu_init();
+    preload_with_sentinel();
+
+    const int fb_stride = 320;
+    const int z_stride = 320;
+    const int tex_w = 64;
+    const int tex_h = 64;
+    std::vector<uint8_t> tex = make_param_bitwalk_texture(tex_w, tex_h, 0x29);
+    upload_texture(TEX_BASE_BYTE, tex);
+
+    ParamSpanListWire p = make_q29_dynamic_scale_param(
+        FB_BASE_BYTE, TEX_BASE_BYTE, 0x001C0000u, fb_stride, z_stride,
+        tex_w, tex_h, 0);
+    std::vector<ParamSpanRecordWire> records = {{5, 22, 12}};
+
+    auto words = encode_param_span_list_wire(p, records);
+    words[30] |= (1u << 5);
+    ring_cmd(0x48, (uint32_t)words.size());
+    for (uint32_t word : words)
+        ring_write(word);
+
+    if (!submit_and_wait()) {
+        check_fail("param_q29_dynamic_scale_reserved_bits_noop", "timeout");
+        return;
+    }
+
+    int touched = 0;
+    for (const auto &r : records) {
+        for (uint16_t i = 0; i < r.count; i++) {
+            uint16_t x = (uint16_t)(r.u + i);
+            uint8_t got = sdram_read_byte(FB_BASE_BYTE
+                                        + (uint32_t)r.v * fb_stride + x);
+            if (got != SENTINEL_BYTE)
+                touched++;
+        }
+    }
+
+    if (touched == 0)
+        check_pass("param_q29_dynamic_scale_reserved_bits_noop");
+    else {
+        char msg[96];
+        snprintf(msg, sizeof(msg), "touched=%d", touched);
+        check_fail("param_q29_dynamic_scale_reserved_bits_noop", msg);
+    }
+}
+
 static void quake_alias_ref_span(std::vector<uint8_t> &fb,
                                  const std::vector<uint8_t> &skin,
                                  const std::vector<uint8_t> &cmap_row,
@@ -6718,6 +6935,9 @@ int main(int argc, char **argv) {
     test_param_q29_record_counts_and_odd_pairs();
     test_param_q29_wrap_and_fb_byte_lanes();
     test_param_q29_static_repeat_300();
+    test_param_q29_dynamic_scale_projection();
+    test_param_q29_dynamic_scale_z_restore_saturates();
+    test_param_q29_dynamic_scale_reserved_bits_noop();
     test_affine_span_group_quake_alias_carry_math();
     test_param_span_list_z_write_zi();
     test_param_span_list_z_test_zi();

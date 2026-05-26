@@ -652,82 +652,75 @@ end
 wire bridge_cram0_rd_pulse = bridge_cram0_range && bridge_rd && !bridge_rd_prev_74a;
 wire bridge_cram0_wr_pulse = bridge_cram0_range && bridge_wr;
 
-// APF bridge writes can arrive while the async PSRAM controller is in
-// the middle of the previous 32-bit word (two 16-bit chip accesses).
-// Queue them in clk_74a and drain at the controller's natural rate;
-// otherwise any write presented outside ST_IDLE is silently dropped and
-// stale CRAM0 scratch data leaks into boot/app file reads.
-localparam [10:0] BRIDGE_CRAM0_WR_FIFO_DEPTH = 11'd1024;
-localparam [3:0]  BRIDGE_CRAM0_WR_FIFO_AW    = 4'd10;
-wire [53:0] bridge_wr_fifo_din = {bridge_addr[23:2], bridge_wr_data};
-wire [53:0] bridge_wr_fifo_dout;
-wire        bridge_wr_fifo_empty;
-wire        bridge_wr_fifo_full;
-wire        bridge_wr_fifo_push = !cram0_mode_74a && bridge_cram0_wr_pulse &&
-                                  !bridge_wr_fifo_full;
-wire        bridge_wr_fifo_overflow_pulse = !cram0_mode_74a &&
-                                            bridge_cram0_wr_pulse &&
-                                            bridge_wr_fifo_full;
-reg         bridge_wr_fifo_overflow = 1'b0;
-wire        bridge_wr_fifo_pop;
-wire [21:0] bridge_wr_fifo_addr = bridge_wr_fifo_dout[53:32];
-wire [31:0] bridge_wr_fifo_data = bridge_wr_fifo_dout[31:0];
+// APF bridge writes land in clk_74a already.  Keep the bridge-owned
+// path simple: one outstanding write is latched and issued directly to
+// the CRAM0 controller when it reaches idle.  There is intentionally no
+// RAM-backed bridge write FIFO in this path.
+reg         bridge_wr_pending = 1'b0;
+reg         bridge_wr_inflight = 1'b0;
+reg         bridge_wr_seen_busy = 1'b0;
+reg [21:0]  bridge_wr_pending_addr = 22'd0;
+reg [31:0]  bridge_wr_pending_data = 32'd0;
+reg         bridge_wr_overrun = 1'b0;
+
+wire        bridge_wr_busy = bridge_wr_pending | bridge_wr_inflight;
+wire        bridge_wr_accept = !cram0_mode_74a &&
+                               bridge_cram0_wr_pulse &&
+                               !bridge_wr_busy;
+wire        bridge_wr_overrun_pulse = !cram0_mode_74a &&
+                                      bridge_cram0_wr_pulse &&
+                                      bridge_wr_busy;
+wire        bridge_wr_issue = !cram0_mode_74a &&
+                              bridge_wr_pending &&
+                              !ctrl_word_busy;
 
 always @(posedge clk_74a or negedge pll_ram_locked_74a) begin
-    if (!pll_ram_locked_74a)
-        bridge_wr_fifo_overflow <= 1'b0;
+    if (!pll_ram_locked_74a) begin
+        bridge_wr_pending <= 1'b0;
+        bridge_wr_inflight <= 1'b0;
+        bridge_wr_seen_busy <= 1'b0;
+        bridge_wr_pending_addr <= 22'd0;
+        bridge_wr_pending_data <= 32'd0;
+        bridge_wr_overrun <= 1'b0;
+    end
     else begin
-        if (bridge_wr_fifo_overflow_pulse)
-            bridge_wr_fifo_overflow <= 1'b1;
+        if (bridge_wr_accept) begin
+            bridge_wr_pending <= 1'b1;
+            bridge_wr_pending_addr <= bridge_addr[23:2];
+            bridge_wr_pending_data <= bridge_wr_data;
+        end
+
+        if (bridge_wr_overrun_pulse)
+            bridge_wr_overrun <= 1'b1;
+
+        if (bridge_wr_issue) begin
+            bridge_wr_pending <= 1'b0;
+            bridge_wr_inflight <= 1'b1;
+            bridge_wr_seen_busy <= 1'b0;
+        end else if (bridge_wr_inflight) begin
+            if (ctrl_word_busy)
+                bridge_wr_seen_busy <= 1'b1;
+            else if (bridge_wr_seen_busy)
+                bridge_wr_inflight <= 1'b0;
+        end
     end
 end
 
-sync_fifo #(
-    .WIDTH(54),
-    .DEPTH(BRIDGE_CRAM0_WR_FIFO_DEPTH),
-    .ADDR_WIDTH(BRIDGE_CRAM0_WR_FIFO_AW),
-    .RAMSTYLE("M10K")
-) bridge_cram0_write_fifo (
-    .clk   (clk_74a),
-    .reset (!pll_ram_locked_74a),
-    .clear (1'b0),
-    .push  (bridge_wr_fifo_push),
-    .din   (bridge_wr_fifo_din),
-    .pop   (bridge_wr_fifo_pop),
-    .dout  (bridge_wr_fifo_dout),
-    .empty (bridge_wr_fifo_empty),
-    .full  (bridge_wr_fifo_full),
-    .count ()
-);
-
-wire        c0_prefetch_active;
-wire        c0_prefetch_busy;
-wire        c0_prefetch_ready;
-wire        c0_prefetch_bridge_hit;
-wire [31:0] c0_prefetch_rd_data;
-wire        c0_prefetch_burst_rd;
-wire [21:0] c0_prefetch_burst_addr;
-wire [5:0]  c0_prefetch_burst_len;
-wire        bridge_cram0_direct_rd_pulse = bridge_cram0_rd_pulse && !c0_prefetch_active;
+wire        bridge_cram0_direct_rd_pulse = bridge_cram0_rd_pulse &&
+                                           !bridge_wr_busy;
 
 // Mux word-interface inputs to the controller: pick the owning side.
 wire [31:0] ctrl_word_rdata;
 wire        ctrl_word_busy;
 wire        ctrl_word_rdata_valid;
 
-assign bridge_wr_fifo_pop = !cram0_mode_74a &&
-                            !bridge_wr_fifo_empty &&
-                            !ctrl_word_busy &&
-                            !c0_prefetch_burst_rd;
-
 // Mux word-interface inputs to the controller: pick the owning side.
 wire        mux_word_rd    = cram0_mode_74a ? cpu_cram0_word_rd    : bridge_cram0_direct_rd_pulse;
-wire        mux_word_wr    = cram0_mode_74a ? cpu_cram0_word_wr    : bridge_wr_fifo_pop;
+wire        mux_word_wr    = cram0_mode_74a ? cpu_cram0_word_wr    : bridge_wr_issue;
 wire [21:0] mux_word_addr  = cram0_mode_74a       ? cpu_cram0_word_addr
-                            : c0_prefetch_burst_rd ? c0_prefetch_burst_addr
-                            : bridge_wr_fifo_pop    ? bridge_wr_fifo_addr
+                            : bridge_wr_issue       ? bridge_wr_pending_addr
                                                     : bridge_addr[23:2];
-wire [31:0] mux_word_wdata = cram0_mode_74a ? cpu_cram0_word_wdata : bridge_wr_fifo_data;
+wire [31:0] mux_word_wdata = cram0_mode_74a ? cpu_cram0_word_wdata : bridge_wr_pending_data;
 wire [3:0]  mux_word_wstrb = cram0_mode_74a ? cpu_cram0_word_wstrb : 4'b1111;
 
 // Controller response fans out to whichever owner asked for it.
@@ -739,15 +732,6 @@ assign cpu_cram0_word_rdata_valid = ctrl_word_rdata_valid;
 // (used for bridge 0x20xxxxxx read-backs below).
 wire [31:0] bridge_cram0_rdata      = ctrl_word_rdata;
 wire        bridge_cram0_rdata_valid= ctrl_word_rdata_valid;
-
-// Sync-burst read path used by the CRAM0 bridge prefetcher. APF bridge
-// reads have only a few cycles of data-capture slack, so target writes
-// must stream from this prefilled buffer instead of issuing direct
-// single-word PSRAM reads on bridge_rd.
-wire        c0_burst_rd    = !cram0_mode_74a && c0_prefetch_burst_rd;
-wire [5:0]  c0_burst_len   = c0_prefetch_burst_len;
-wire [31:0] c0_burst_rdata;
-wire        c0_burst_rdata_valid;
 
 // ============================================================
 // PSRAM Controller for CRAM0 (16 MB, bridge scratch — clk_74a)
@@ -777,10 +761,10 @@ cram0_controller #(
     .cram_we_n(cram0_we_n),
     .cram_ub_n(cram0_ub_n),
     .cram_lb_n(cram0_lb_n),
-    .burst_rd(c0_burst_rd),
-    .burst_len(c0_burst_len),
-    .burst_rdata_valid(c0_burst_rdata_valid),
-    .burst_rdata(c0_burst_rdata),
+    .burst_rd(1'b0),
+    .burst_len(6'd0),
+    .burst_rdata_valid(),
+    .burst_rdata(),
     .config_en(bcr_init_config_en),
     .config_data(BCR_VALUE),
     .config_bank_sel(bcr_init_bank_sel),
@@ -1079,13 +1063,10 @@ always @(posedge clk_74a) begin
             bridge_rd_data <= 0;
         end
         32'h20xxxxxx: begin
-            // APF samples read data before bridge_rd can complete a
-            // single-word PSRAM access. Dataslot writes therefore serve
-            // 0x20xxxxxx from the prefetch buffer; the direct readback
-            // path remains only for non-prefetched diagnostic accesses.
-            if (c0_prefetch_bridge_hit)
-                bridge_rd_data <= c0_prefetch_rd_data;
-            else if (bridge_cram0_rdata_valid)
+            // CRAM0 bridge window. Automatic nonvolatile save-on-exit
+            // reads this address range after firmware hands ownership
+            // back to the bridge.
+            if (bridge_cram0_rdata_valid)
                 bridge_rd_data <= bridge_cram0_rdata;
         end
 
@@ -1161,11 +1142,9 @@ end
 
 wire bridge_active_74a = bridge_wr_seen_74a
                        | ctrl_word_busy
-                       | c0_prefetch_active
-                       | c0_prefetch_busy
-                       | !bridge_wr_fifo_empty
-                       | bridge_wr_fifo_pop
-                       | bridge_wr_fifo_overflow
+                       | bridge_wr_busy
+                       | bridge_wr_issue
+                       | bridge_wr_overrun
                        | bridge_cram0_wr_pulse
                        | bridge_cram0_rd_pulse;
 
@@ -1401,46 +1380,6 @@ end
         end
     end
 
-    wire target_dataslot_write_start_74a =
-        target_dataslot_write && !target_dataslot_write_1;
-    reg target_dataslot_write_start_d = 1'b0;
-    always @(posedge clk_74a)
-        target_dataslot_write_start_d <= target_dataslot_write_start_74a;
-
-    cram0_bridge_prefetch c0_bridge_prefetch (
-        .clk                ( clk_74a ),
-        .reset_n            ( pll_ram_locked_74a ),
-
-        // Delay the start by one clk_74a so the captured dataslot
-        // parameters above are visible to the prefetcher.
-        .start              ( target_dataslot_write_start_d ),
-        .start_bridge_addr  ( target_dataslot_bridgeaddr ),
-        .start_length       ( target_dataslot_length ),
-        .bridge_owner       ( !cram0_mode_74a ),
-
-        .bridge_rd_pulse    ( bridge_cram0_rd_pulse ),
-        .bridge_addr        ( bridge_addr ),
-        .bridge_hit         ( c0_prefetch_bridge_hit ),
-        .bridge_rd_data     ( c0_prefetch_rd_data ),
-
-        .active             ( c0_prefetch_active ),
-        .busy               ( c0_prefetch_busy ),
-        .ready              ( c0_prefetch_ready ),
-
-        .burst_rd           ( c0_prefetch_burst_rd ),
-        .burst_addr         ( c0_prefetch_burst_addr ),
-        .burst_len          ( c0_prefetch_burst_len ),
-        .burst_rdata        ( c0_burst_rdata ),
-        .burst_rdata_valid  ( c0_burst_rdata_valid ),
-        .ctrl_busy          ( ctrl_word_busy )
-    );
-
-    wire target_dataslot_write_cram0_prefetch =
-        (target_dataslot_bridgeaddr[31:24] == 8'h20) &&
-        (target_dataslot_length != 32'd0);
-    wire target_dataslot_write_ready =
-        !target_dataslot_write_cram0_prefetch || c0_prefetch_ready;
-
     reg     [9:0]   datatable_addr;
     wire    [31:0]  datatable_q;
     reg             datatable_wren;
@@ -1652,7 +1591,6 @@ core_bridge_cmd icb (
 
     .target_dataslot_read       ( target_dataslot_read ),
     .target_dataslot_write      ( target_dataslot_write ),
-    .target_dataslot_write_ready( target_dataslot_write_ready ),
     .target_dataslot_getfile    ( target_dataslot_getfile ),
     .target_dataslot_openfile   ( target_dataslot_openfile ),
 

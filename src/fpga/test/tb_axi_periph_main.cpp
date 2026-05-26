@@ -991,7 +991,8 @@ static void test_hw_features_readback() {
         (1u << 14) |  // GPU fragment pipeline
         (1u << 15) |  // GPU param span-list
         (1u << 16) |  // GPU param span z-write
-        (1u << 17);   // GPU param span z-test/write
+        (1u << 17) |  // GPU param span z-test/write
+        (1u << 18);   // GPU param span Q29 dynamic scale
 
     uint32_t features = mmio_read32(HW_FEATURES);
     check_eq("hw-features-required", features & REQUIRED, REQUIRED);

@@ -441,6 +441,8 @@ end
 // within the slot.  Slot encoding matches the SDK's
 // of_gpu_palookup_upload() on the host side.
 reg [25:0] cmap_req_addr_reg;
+reg        cmap_pending_valid;
+reg [25:0] cmap_pending_addr;
 
 // resp_data_b is wired from gpu_tex_cache port B below; the byte falls out
 // of resp_data_b[7:0] (req_wide_b is tied to 0 so port B always returns
@@ -459,23 +461,19 @@ reg [25:0] cmap_req_addr_reg;
 // off-by-one byte-lane reads (triCK_y1_x2, w300_r1_px6, Duke3D
 // rendering artifacts).
 //
-// Also gate while p2b is waiting for a prior cmap response, and issue p2's
-// cmap request only when the p2->p2b shift is otherwise allowed.  If port B
-// cannot accept that request in the shift cycle, cmap_issue_wait stalls the
-// pipe instead of letting p2b hold a fragment whose colormap lookup was never
-// queued.  This request/shift handshake is what keeps row-major span-group
-// cache thrash from producing localized wrong pixels.
+// Stage cmap requests on the p2->p2b shift, then issue the registered request
+// to tex_cache port B.  This deliberately keeps both tex_cache response state
+// and framebuffer/write-back stall state out of the cache request-valid/address
+// cone.  p2b waits while a staged request is pending or while the cache is
+// resolving the response.
 wire        cmap_resp_valid_b;
 wire        fp_pipe_shift_blocked;
-wire        cmap_pipe_wait = p2b_valid && p2b_flags[SPAN_COLORMAP]
-                          && !cmap_resp_valid_b;
+wire        cmap_pipe_wait = cmap_pending_valid
+                          || (p2b_valid && p2b_flags[SPAN_COLORMAP]
+                              && !cmap_resp_valid_b);
 wire        cmap_req_ready_b;
-wire        cmap_issue_base = p2_valid && p2_flags[SPAN_COLORMAP]
-                           && (fbss == FBSS_IDLE)
-                           && !cmap_pipe_wait
-                           && !fp_pipe_shift_blocked;
-wire        cmap_req_valid_b = cmap_issue_base;
-wire        cmap_issue_wait = cmap_issue_base && !cmap_req_ready_b;
+wire        cmap_req_valid_b = cmap_pending_valid;
+wire [25:0] cmap_req_addr_b = cmap_pending_addr;
 wire [15:0] cmap_resp_data_b;
 wire [7:0]  cmap_rd_data = cmap_resp_data_b[7:0];
 
@@ -569,7 +567,7 @@ gpu_tex_cache tex_cache (
     // Port B — cmap reads (one byte per fragment, SDRAM-backed palookup)
     .req_valid_b(cmap_req_valid_b),
     .req_ready_b(cmap_req_ready_b),
-    .req_addr_b(cmap_req_addr_reg),
+    .req_addr_b(cmap_req_addr_b),
     .req_wide_b(1'b0),
     .resp_valid_b(cmap_resp_valid_b),
     .resp_data_b(cmap_resp_data_b),
@@ -864,6 +862,9 @@ reg [31:0] sp_z_addr;
 reg signed [31:0] sp_z_step;
 reg signed [31:0] sp_z_value;
 reg signed [31:0] sp_z_value_step;
+reg        sp_q29_z_enable;
+reg signed [31:0] sp_q29_z_value;
+reg signed [31:0] sp_q29_z_value_step;
 
 // Unified span front-end.  Parametric records derive scalar spans from
 // compact screen-space planes.  Direct-affine records carry already-computed
@@ -886,6 +887,7 @@ reg [3:0]  spanprod_flags;
 reg [3:0]  spanprod_colormap_id;
 reg        spanprod_attr_persp;
 reg        spanprod_attr_q29;
+reg [4:0]  spanprod_q29_attr_shift;
 reg        spanprod_span_axis;
 reg        spanprod_header_supported;
 reg        spanprod_z_write;
@@ -926,6 +928,18 @@ reg signed [31:0] spanprod_direct_sstep [0:3];
 reg signed [31:0] spanprod_direct_tstep [0:3];
 reg [3:0]  spanprod_direct_colormap_id [0:3];
 reg [5:0]  spanprod_direct_light [0:3];
+reg signed [15:0] spanprod_cur_u;
+reg signed [15:0] spanprod_cur_v;
+reg [15:0] spanprod_cur_count;
+reg        spanprod_cur_nonzero;
+reg [31:0] spanprod_cur_direct_fb_addr;
+reg [31:0] spanprod_cur_direct_tex_addr;
+reg signed [31:0] spanprod_cur_direct_s;
+reg signed [31:0] spanprod_cur_direct_t;
+reg signed [31:0] spanprod_cur_direct_sstep;
+reg signed [31:0] spanprod_cur_direct_tstep;
+reg [3:0]  spanprod_cur_direct_colormap_id;
+reg [5:0]  spanprod_cur_direct_light;
 
 // Internal span flags.  The command wire format is still the public 8-bit
 // layout; span_flags_from_wire packs only the live bits into these four bits.
@@ -975,6 +989,7 @@ task load_param_span_list_payload_word;
                     spanprod_flags        <= span_flags_from_wire(data[27:20]);
                     spanprod_attr_persp   <= 1'b0;
                     spanprod_attr_q29     <= 1'b0;
+                    spanprod_q29_attr_shift <= 5'd0;
                     spanprod_span_axis    <= 1'b0;
                     spanprod_header_supported <= 1'b1;
                     spanprod_z_write      <= 1'b0;
@@ -1043,6 +1058,7 @@ task load_param_span_list_payload_word;
                     spanprod_colormap_id   <= data[11:8];
                     spanprod_attr_persp    <= data[12] && (data[23:20] == PARAM_RECORD_U16V16_COUNT16);
                     spanprod_attr_q29      <= data[13] && data[12] && (data[23:20] == PARAM_RECORD_U16V16_COUNT16);
+                    spanprod_q29_attr_shift <= 5'd0;
                     spanprod_span_axis     <= data[16];
                     spanprod_z_write       <= data[24] && (data[23:20] == PARAM_RECORD_U16V16_COUNT16);
                     spanprod_z_test        <= data[25] && (data[23:20] == PARAM_RECORD_U16V16_COUNT16);
@@ -1098,6 +1114,12 @@ task load_param_span_list_payload_word;
                     spanprod_direct_colormap_id[2] <= 4'd0;
                     spanprod_direct_colormap_id[3] <= 4'd0;
                 end
+                6'd30: begin
+                    spanprod_q29_attr_shift <= spanprod_attr_q29 ? data[4:0] : 5'd0;
+                    if ((data[31:5] != 27'd0)
+                        || (!spanprod_attr_q29 && (data[4:0] != 5'd0)))
+                        spanprod_header_supported <= 1'b0;
+                end
                 6'd31: begin
                     spanprod_u[0] <= data[15:0];
                     spanprod_v[0] <= data[31:16];
@@ -1128,17 +1150,34 @@ task load_param_span_list_payload_word;
     end
 endtask
 
+task spanprod_select_current_record;
+    begin
+        spanprod_cur_u <= spanprod_u[spanprod_idx];
+        spanprod_cur_v <= spanprod_v[spanprod_idx];
+        spanprod_cur_count <= spanprod_count[spanprod_idx];
+        spanprod_cur_nonzero <= (spanprod_count[spanprod_idx] != 16'd0);
+        spanprod_cur_direct_fb_addr <= spanprod_direct_fb_addr[spanprod_idx];
+        spanprod_cur_direct_tex_addr <= spanprod_direct_tex_addr[spanprod_idx];
+        spanprod_cur_direct_s <= spanprod_direct_s[spanprod_idx];
+        spanprod_cur_direct_t <= spanprod_direct_t[spanprod_idx];
+        spanprod_cur_direct_sstep <= spanprod_direct_sstep[spanprod_idx];
+        spanprod_cur_direct_tstep <= spanprod_direct_tstep[spanprod_idx];
+        spanprod_cur_direct_colormap_id <= spanprod_direct_colormap_id[spanprod_idx];
+        spanprod_cur_direct_light <= spanprod_direct_light[spanprod_idx];
+    end
+endtask
+
 task spanprod_launch_fb_mul;
     begin
         if (spanprod_span_axis) begin
-            dsp_a  <= $signed({{16{spanprod_u[spanprod_idx][15]}}, spanprod_u[spanprod_idx]});
+            dsp_a  <= $signed({{16{spanprod_cur_u[15]}}, spanprod_cur_u});
             dsp_b  <= spanprod_fb_major_step;
-            dsp2_a <= $signed({{16{spanprod_v[spanprod_idx][15]}}, spanprod_v[spanprod_idx]});
+            dsp2_a <= $signed({{16{spanprod_cur_v[15]}}, spanprod_cur_v});
             dsp2_b <= spanprod_fb_minor_step;
         end else begin
-            dsp_a  <= $signed({{16{spanprod_v[spanprod_idx][15]}}, spanprod_v[spanprod_idx]});
+            dsp_a  <= $signed({{16{spanprod_cur_v[15]}}, spanprod_cur_v});
             dsp_b  <= spanprod_fb_major_step;
-            dsp2_a <= $signed({{16{spanprod_u[spanprod_idx][15]}}, spanprod_u[spanprod_idx]});
+            dsp2_a <= $signed({{16{spanprod_cur_u[15]}}, spanprod_cur_u});
             dsp2_b <= spanprod_fb_minor_step;
         end
     end
@@ -1147,14 +1186,14 @@ endtask
 task spanprod_launch_z_mul;
     begin
         if (spanprod_span_axis) begin
-            dsp_a  <= $signed({{16{spanprod_u[spanprod_idx][15]}}, spanprod_u[spanprod_idx]});
+            dsp_a  <= $signed({{16{spanprod_cur_u[15]}}, spanprod_cur_u});
             dsp_b  <= spanprod_z_major_step;
-            dsp2_a <= $signed({{16{spanprod_v[spanprod_idx][15]}}, spanprod_v[spanprod_idx]});
+            dsp2_a <= $signed({{16{spanprod_cur_v[15]}}, spanprod_cur_v});
             dsp2_b <= spanprod_z_minor_step;
         end else begin
-            dsp_a  <= $signed({{16{spanprod_v[spanprod_idx][15]}}, spanprod_v[spanprod_idx]});
+            dsp_a  <= $signed({{16{spanprod_cur_v[15]}}, spanprod_cur_v});
             dsp_b  <= spanprod_z_major_step;
-            dsp2_a <= $signed({{16{spanprod_u[spanprod_idx][15]}}, spanprod_u[spanprod_idx]});
+            dsp2_a <= $signed({{16{spanprod_cur_u[15]}}, spanprod_cur_u});
             dsp2_b <= spanprod_z_minor_step;
         end
     end
@@ -1164,26 +1203,26 @@ task spanprod_launch_attr_mul;
     input signed [31:0] du;
     input signed [31:0] dv;
     begin
-        dsp_a  <= $signed({{16{spanprod_u[spanprod_idx][15]}}, spanprod_u[spanprod_idx]});
+        dsp_a  <= $signed({{16{spanprod_cur_u[15]}}, spanprod_cur_u});
         dsp_b  <= du;
-        dsp2_a <= $signed({{16{spanprod_v[spanprod_idx][15]}}, spanprod_v[spanprod_idx]});
+        dsp2_a <= $signed({{16{spanprod_cur_v[15]}}, spanprod_cur_v});
         dsp2_b <= dv;
     end
 endtask
 
 task spanprod_load_generated_span;
     begin
-        sp_count       <= spanprod_count[spanprod_idx];
+        sp_count       <= spanprod_cur_count;
         sp_fb_stride   <= spanprod_fb_minor_step;
         sp_tex_width   <= (spanprod_tex_width == 16'd0) ? 16'd1 : spanprod_tex_width;
         sp_tex_w_mask  <= spanprod_tex_w_mask;
         sp_tex_h_mask  <= spanprod_tex_h_mask;
 
         if (spanprod_direct_affine) begin
-            sp_fb_addr     <= spanprod_direct_fb_addr[spanprod_idx];
-            sp_tex_addr    <= spanprod_direct_tex_addr[spanprod_idx];
-            sp_colormap_id <= spanprod_direct_colormap_id[spanprod_idx];
-            sp_light_q     <= {2'b00, spanprod_direct_light[spanprod_idx], 16'b0};
+            sp_fb_addr     <= spanprod_cur_direct_fb_addr;
+            sp_tex_addr    <= spanprod_cur_direct_tex_addr;
+            sp_colormap_id <= spanprod_cur_direct_colormap_id;
+            sp_light_q     <= {2'b00, spanprod_cur_direct_light, 16'b0};
             sp_light_step  <= 24'sd0;
             sp_flags       <= spanprod_flags & ~(4'b0001 << SPAN_PERSP);
             sp_clamp_enable <= 2'b00;
@@ -1193,16 +1232,20 @@ task spanprod_load_generated_span;
             sp_z_step       <= 32'sd0;
             sp_z_value      <= 32'sd0;
             sp_z_value_step <= 32'sd0;
-            sp_s           <= spanprod_direct_s[spanprod_idx];
-            sp_t           <= spanprod_direct_t[spanprod_idx];
-            sp_sstep       <= spanprod_direct_sstep[spanprod_idx];
-            sp_tstep       <= spanprod_direct_tstep[spanprod_idx];
+            sp_q29_z_enable     <= 1'b0;
+            sp_q29_z_value      <= 32'sd0;
+            sp_q29_z_value_step <= 32'sd0;
+            sp_s           <= spanprod_cur_direct_s;
+            sp_t           <= spanprod_cur_direct_t;
+            sp_sstep       <= spanprod_cur_direct_sstep;
+            sp_tstep       <= spanprod_cur_direct_tstep;
             sp_sZ          <= 32'sd0;
             sp_tZ          <= 32'sd0;
             sp_zinv        <= 32'sd0;
             sp_sZstep      <= 32'sd0;
             sp_tZstep      <= 32'sd0;
             sp_zinv_step   <= 32'sd0;
+            sp_zinv_step_zero <= 1'b1;
             sp_persp_q29_mode <= 1'b0;
             persp_active      <= 1'b0;
             persp_first_done  <= 1'b0;
@@ -1235,12 +1278,28 @@ task spanprod_load_generated_span;
             sp_z_value      <= spanprod_attr2_start_r;
             sp_z_value_step <= spanprod_span_axis
                              ? spanprod_attr2_dv : spanprod_attr2_du;
+            sp_q29_z_enable <= spanprod_attr_q29
+                             && (spanprod_z_write || spanprod_z_test);
+            sp_q29_z_value <= (spanprod_attr_q29
+                              && (spanprod_z_write || spanprod_z_test))
+                             ? q29_restore_z_saturating(spanprod_attr2_start_r,
+                                                        spanprod_q29_attr_shift)
+                             : 32'sd0;
+            sp_q29_z_value_step <= (spanprod_attr_q29
+                                   && (spanprod_z_write || spanprod_z_test))
+                                  ? q29_restore_z_saturating(
+                                      spanprod_span_axis
+                                      ? spanprod_attr2_dv : spanprod_attr2_du,
+                                      spanprod_q29_attr_shift)
+                                  : 32'sd0;
             sp_sZstep      <= spanprod_span_axis
                             ? spanprod_attr0_dv : spanprod_attr0_du;
             sp_tZstep      <= spanprod_span_axis
                             ? spanprod_attr1_dv : spanprod_attr1_du;
             sp_zinv_step   <= spanprod_span_axis
                             ? spanprod_attr2_dv : spanprod_attr2_du;
+            sp_zinv_step_zero <= ((spanprod_span_axis
+                                  ? spanprod_attr2_dv : spanprod_attr2_du) == 32'sd0);
             sp_light_step  <= spanprod_span_axis
                             ? spanprod_light_dv : spanprod_light_du;
             sp_persp_q29_mode <= spanprod_attr_q29;
@@ -1327,6 +1386,32 @@ function [15:0] fb_halfword_read;
     end
 endfunction
 
+function signed [31:0] q29_restore_z_saturating;
+    input signed [31:0] value;
+    input [4:0] shift;
+    reg signed [63:0] wide;
+    begin
+        wide = $signed({{32{value[31]}}, value}) <<< shift;
+        if (wide[63:31] != {33{wide[31]}})
+            q29_restore_z_saturating = wide[63] ? 32'sh80000000 : 32'sh7fffffff;
+        else
+            q29_restore_z_saturating = wide[31:0];
+    end
+endfunction
+
+function signed [31:0] sat_add32;
+    input signed [31:0] a;
+    input signed [31:0] b;
+    reg signed [32:0] sum;
+    begin
+        sum = {a[31], a} + {b[31], b};
+        if (sum[32] != sum[31])
+            sat_add32 = sum[32] ? 32'sh80000000 : 32'sh7fffffff;
+        else
+            sat_add32 = sum[31:0];
+    end
+endfunction
+
 function [7:0] fb_lane_read;
     input [31:0] word_value;
     input [1:0] lane;
@@ -1361,6 +1446,7 @@ localparam S_SPANPROD_SETUP   = 6'd9;  // launch fb products for current record
 localparam S_SPANPROD_MUL_WAIT = 6'd10; // DSP latency wait
 localparam S_SPANPROD_CAPTURE = 6'd11; // capture product pair / launch next
 localparam S_SPANPROD_EMIT    = 6'd12; // emit generated span into fragment pipe
+localparam S_SPANPROD_SELECT  = 6'd13; // register current record before setup
 
 reg [5:0] state;
 
@@ -1477,8 +1563,8 @@ reg [3:0]  p0a_flags;
 reg [31:0] p0a_fb_addr;
 reg signed [15:0] p0a_s_int;
 reg [31:0] p0a_tex_base;
-reg signed [15:0] p0a_t_y;
-reg [15:0] p0a_tex_width;
+(* preserve *) reg signed [15:0] p0a_t_y;
+(* preserve *) reg [15:0] p0a_tex_width;
 reg        p0a_z_test;
 reg        p0a_z_write;
 reg [31:0] p0a_z_addr;
@@ -1515,6 +1601,8 @@ reg        p1_z_test;
 reg        p1_z_write;
 reg [31:0] p1_z_addr;
 reg [15:0] p1_z_value;
+reg        p1_tex_ready;
+reg [7:0]  p1_tex_color;
 
 reg        p2_valid;
 reg [7:0]  p2_color;          // tex result
@@ -1554,6 +1642,7 @@ localparam FBSS_IDLE        = 4'd0;
 localparam FBSS_FLUSH_W_RSP = 4'd2;  // wait for write-buffer AW/W acceptance
 localparam FBSS_ZTEST_AR_WAIT = 4'd4;
 localparam FBSS_ZTEST_R_WAIT  = 4'd5;
+localparam FBSS_ZTEST_ACC_EVAL = 4'd12;
 // Translucent-blend sub-flow.  SPAN_TRANSLUC fragments are first collected
 // into a same-word lane group while the fragment pipe keeps running.  The
 // blend unit then reads the destination FB word once, serialises the
@@ -1573,6 +1662,18 @@ localparam FBSS_BLEND_LUT_WAIT = 4'd9;
 localparam FBSS_BLEND_APPLY    = 4'd10;
 localparam FBSS_BLEND_SELECT   = 4'd11;
 reg [3:0] fbss;
+
+// Registered accumulator-hit depth test.  The hot z path was previously:
+// p3_z_addr -> z_acc_addr compare -> halfword select -> depth compare ->
+// z_acc_hi/lo update, all in one 100 MHz cycle.  On a z_acc hit, capture the
+// selected old halfword and apply the test in the following FBSS cycle.
+reg [15:0] ztest_acc_old_half;
+reg [15:0] ztest_acc_value;
+reg        ztest_acc_hi;
+reg        ztest_acc_write;
+reg        ztest_acc_from_read;
+reg [31:0] ztest_acc_addr;
+reg [31:0] ztest_acc_word;
 
 // BLEND same-word group state.  Source bytes are stored per framebuffer byte
 // lane; duplicate lanes flush the current group first so overdraw order is
@@ -1613,7 +1714,7 @@ wire [7:0]  transluc_cache_byte = blend_lut_addr_w[0]
 // the 32-bit equality compare `fb_acc_addr == blend_group_word_addr` out of
 // the BLEND_APPLY cycle so the only logic between blend_group_word_addr (FF)
 // and fb_acc_addr (FF) on the same-word merge path is a 1-bit selector
-// rather than a 32-bit eq + state mux.  Closes the worst GPU-internal
+// rather than a 32-bit equality test.  Closes the worst GPU-internal
 // path (`blend_group_word_addr[2] → fb_acc_addr[2]` at -1.031 ns).  Both
 // operands are stable across the grouped lookup loop: blend_group_word_addr is
 // latched before entry to BLEND_REQ; fb_acc_addr is only written by FBSS, and
@@ -1659,6 +1760,10 @@ reg [3:0]  fbwq_rd_ptr;
 reg [3:0]  fbwq_wr_ptr;
 reg [4:0]  fbwq_count;
 reg [3:0]  fbwq_burst_remaining;
+reg        fbwq_req_valid;
+reg [31:0] fbwq_req_addr;
+reg [31:0] fbwq_req_data;
+reg [3:0]  fbwq_req_strb;
 reg        fbwq_stage_valid;
 reg [31:0] fbwq_stage_addr;
 reg [31:0] fbwq_stage_data;
@@ -1675,7 +1780,9 @@ wire       fbwq_full  = (fbwq_count == 5'd16);
 wire m_wr_inflight_near_full = (m_wr_inflight >= 4'd14);
 
 wire m_wr_chan_busy = m_wr_awvalid || m_wr_wvalid;
-wire fb_write_drain_complete = !fbwq_stage_valid && fbwq_empty
+wire fb_write_drain_complete = !z_flush_valid
+                             && !z_src_pending_valid
+                             && !fbwq_req_valid && !fbwq_stage_valid && fbwq_empty
                              && (m_wr_inflight == 4'b0) && !m_wr_chan_busy;
 wire fbwq_output_idle = !m_wr_awvalid && !m_wr_wvalid;
 wire fbwq_drain_can_load = !m_wr_inflight_near_full && fbwq_output_idle;
@@ -1720,7 +1827,9 @@ wire fbwq_pop_now = fbwq_start_now || fbwq_continue_now;
 wire [4:0] fbwq_pop_count = fbwq_pop_now ? 5'd1 : 5'd0;
 wire fbwq_can_enqueue = !fbwq_full || fbwq_pop_now;
 wire fbwq_stage_drain_now = fbwq_stage_valid && fbwq_can_enqueue;
-wire fbwq_can_push = !fbwq_stage_valid || fbwq_stage_drain_now;
+wire fbwq_stage_can_load = !fbwq_stage_valid || fbwq_stage_drain_now;
+wire fbwq_req_to_stage_now = fbwq_req_valid && fbwq_stage_can_load;
+wire fbwq_can_push = !fbwq_req_valid || fbwq_req_to_stage_now;
 wire fb_write_can_issue = fbwq_can_push;
 wire [3:0] fbwq_prev_wr_ptr = fbwq_wr_ptr - 4'd1;
 wire fbwq_has_tail_after_pop = (fbwq_count > fbwq_pop_count);
@@ -1730,11 +1839,10 @@ wire p3_needs_fb_flush = p3_valid && !p3_discard && !p3_flags[SPAN_TRANSLUC]
 wire fb_write_buffer_stall = p3_needs_fb_flush && !fb_write_can_issue;
 wire [31:0] p3_fb_word_addr_w = p3_fb_addr & 32'hFFFFFFFC;
 wire [3:0]  p3_fb_lane_mask_w = fb_lane_mask(p3_fb_addr[1:0]);
-wire [31:0] fb_acc_match_addr = (fbss == FBSS_BLEND_R_WAIT)
-                              ? blend_group_word_addr
-                              : p3_fb_word_addr_w;
-wire        fb_acc_word_match = !fb_acc_valid
-                              || (fb_acc_addr == fb_acc_match_addr);
+wire        fb_acc_p3_word_match = !fb_acc_valid
+                                  || (fb_acc_addr == p3_fb_word_addr_w);
+wire        fb_acc_blend_word_match = !fb_acc_valid
+                                     || (fb_acc_addr == blend_group_word_addr);
 wire blend_group_pipe_block = (fbss == FBSS_IDLE)
                            && blend_group_active
                            && p3_valid
@@ -1742,13 +1850,13 @@ wire blend_group_pipe_block = (fbss == FBSS_IDLE)
                            && (!p3_flags[SPAN_TRANSLUC]
                                || (blend_group_word_addr != p3_fb_word_addr_w)
                                || (|(blend_group_mask & p3_fb_lane_mask_w)));
-assign fp_pipe_shift_blocked = (p1_valid && !tex_resp_valid)
+assign fp_pipe_shift_blocked = (p1_valid && !p1_tex_ready)
                             || (fbss != FBSS_IDLE)
                             || (p3_valid && !p3_discard && p3_z_test)
                             || blend_group_pipe_block
                             || fb_write_buffer_stall
                             || m_wr_inflight_near_full;
-wire fp_pipe_stall = fp_pipe_shift_blocked || cmap_pipe_wait || cmap_issue_wait;
+wire fp_pipe_stall = fp_pipe_shift_blocked || cmap_pipe_wait;
 
 // Combinational tex address from p0 + DSP output.  Multiply-mode only
 // (sp_tex_width is always non-zero in every real caller — tested in
@@ -1760,7 +1868,7 @@ wire [31:0] fp_tex_addr_full = p0_tex_base + tx_mul_q
                              + {{16{p0_s_int[15]}}, p0_s_int};
 
 assign tex_req_valid = (state == S_FRAG_PIPE) && p0_valid
-                    && !fp_pipe_stall;
+                    && !p1_valid;
 assign tex_req_addr  = fp_tex_addr_full[25:0];
 assign tex_req_wide  = 1'b0;
 
@@ -1811,6 +1919,7 @@ reg signed [31:0] sp_zinv;      // 1/z, 16.16 or high-precision param q28
 reg signed [31:0] sp_sZstep;    // d(s/z)/dx, per-pixel
 reg signed [31:0] sp_tZstep;    // d(t/z)/dx, per-pixel
 reg signed [31:0] sp_zinv_step; // d(1/z)/dx, per-pixel
+reg               sp_zinv_step_zero;
 // Perspective correction runs as affine sub-segments.  The PSS setup path
 // takes about one segment's worth of cycles, so 16 pixels keeps slot B ready
 // without creating the structural 8-on/8-off issue-stage bubble.
@@ -1853,20 +1962,22 @@ reg        persp_swap_pending;
 // dsp_p / recip_rd_data. ~16 cycles per advanced pass (15 on the
 // no-advance first pass).
 //
-// Setup-side pipeline (PSS_ADV → PSS_ADV_CLAMP → PSS_CLZ → PSS_TOP8)
-// is split into four register-bounded stages because the original
+// Setup-side pipeline (PSS_ADV → PSS_ADV_ISSUE → PSS_ADV_CLAMP →
+// PSS_CLZ → PSS_TOP8)
+// is split into register-bounded stages because the original
 // 1-cycle combinational
 // chain (sp_zinv → +step<<4 → abs → 32-line CLZ casez → 32-bit barrel
 // shift → top8 → recip_rd_addr) was the worst critical path in the
 // design with -3.451 ns slack at 50 MHz. The split is:
-//   PSS_ADV       : sp_zinv += step<<4; register old/new zinv
+//   PSS_ADV       : plan advance/tail amount from span counters
+//   PSS_ADV_ISSUE : sp_zinv += step<<4 or launch variable-tail DSP advance
 //   PSS_ADV_CLAMP : register |sp_zinv_new| and clamp decision
 //   PSS_CLZ       : compute CLZ from registered abs; register persp_clz
 //   PSS_TOP8      : compute top8 from (abs << clz); write recip_rd_addr
 // PSS_RECIP_NA shares the same PSS_CLZ → PSS_TOP8 tail by registering
 // abs of un-advanced sp_zinv into persp_zinv_abs_r and falling through.
 localparam PSS_IDLE      = 5'd0;
-localparam PSS_ADV       = 5'd1;   // stage 1: advance proj coords; register old/new zinv
+localparam PSS_ADV       = 5'd1;   // stage 1: plan projection advance
 localparam PSS_CLZ       = 5'd2;   // stage 3: compute CLZ from registered abs
 localparam PSS_TOP8      = 5'd3;   // stage 4: compute top8; write recip_rd_addr
 localparam PSS_RECIP_W   = 5'd4;   // BRAM read latency
@@ -1907,6 +2018,7 @@ localparam PSS_ADV_TAIL_ST_WAIT = 5'd27; // wait for Q29 tail sZ/tZ advance prod
 localparam PSS_ADV_TAIL_ST_CAPTURE = 5'd28; // capture sZ/tZ products, launch zinv product
 localparam PSS_ADV_TAIL_Z_WAIT = 5'd29; // wait for Q29 tail zinv advance product
 localparam PSS_ADV_TAIL_COMMIT = 5'd30; // commit Q29 tail advance
+localparam PSS_ADV_ISSUE = 5'd31; // registered tail/normal advance issue
 localparam [5:0] PSS_Q29_RECIP_EXTRA = 6'd4;
 localparam integer PSS_Q29_RECIP_EXTRA_INT = 4;
 reg [4:0] persp_pss;
@@ -1985,6 +2097,7 @@ reg        pss_slope_t_corr;
 reg signed [31:0] pss_tail_s_delta;
 reg signed [31:0] pss_tail_t_delta;
 reg [4:0] pss_tail_advance;
+reg       pss_adv_tail_dynamic;
 // Cheap "<<2 magnitude shrink" check:
 // |post-advance zinv| < |pre-advance zinv| >> 2.
 
@@ -2105,6 +2218,14 @@ reg [3:0]  z_acc_mask;
 reg [31:0] z_acc_addr;
 reg        z_acc_valid;
 wire [31:0] z_acc_data = {z_acc_hi, z_acc_lo};
+reg        z_flush_valid;
+reg [31:0] z_flush_addr;
+reg [31:0] z_flush_data;
+reg [3:0]  z_flush_strb;
+reg        z_src_pending_valid;
+reg [31:0] z_src_pending_addr;
+reg        z_src_pending_hi;
+reg [15:0] z_src_pending_half;
 
 // Rect-clear state — for CMD_CLEAR_RECT.  cr_addr is the byte address
 // of the next byte to clear in the current row; cr_w_remaining counts
@@ -2150,6 +2271,8 @@ task finish_fragment_stream_after_flush;
         fb_acc_mask  <= 4'b0;
         z_acc_valid  <= 1'b0;
         z_acc_mask   <= 4'b0;
+        z_flush_valid <= 1'b0;
+        z_src_pending_valid <= 1'b0;
         if (spanprod_active)
             spanprod_active <= 1'b0;
         state <= S_IDLE;
@@ -2164,17 +2287,31 @@ always @(posedge clk) begin : main_fsm
     reg [31:0] fbwq_push_addr;
     reg [31:0] fbwq_push_data;
     reg [3:0]  fbwq_push_strb;
-    reg        fbwq_push_links_fifo_tail;
-    reg        fbwq_push_links_stage_tail;
-    reg        fbwq_push_link_tail;
+    reg        fbwq_req_links_fifo_tail;
+    reg        fbwq_req_links_stage_tail;
+    reg        fbwq_req_link_tail;
+    reg        z_flush_set;
+    reg        z_src_push;
+    reg [31:0] z_src_push_addr;
+    reg        z_src_push_hi;
+    reg [15:0] z_src_push_half;
+    reg        z_src_pending_consume;
+    reg        z_src_pending_applied;
 
     fbwq_push_req  = 1'b0;
     fbwq_push_addr = 32'b0;
     fbwq_push_data = 32'b0;
     fbwq_push_strb = 4'b0;
-    fbwq_push_links_fifo_tail = 1'b0;
-    fbwq_push_links_stage_tail = 1'b0;
-    fbwq_push_link_tail = 1'b0;
+    fbwq_req_links_fifo_tail = 1'b0;
+    fbwq_req_links_stage_tail = 1'b0;
+    fbwq_req_link_tail = 1'b0;
+    z_flush_set = 1'b0;
+    z_src_push = 1'b0;
+    z_src_push_addr = 32'd0;
+    z_src_push_hi = 1'b0;
+    z_src_push_half = 16'd0;
+    z_src_pending_consume = z_src_pending_valid && !z_flush_valid;
+    z_src_pending_applied = 1'b0;
 
     if (!reset_n) begin
         state <= S_IDLE;
@@ -2187,6 +2324,10 @@ always @(posedge clk) begin : main_fsm
         fbwq_count  <= 5'b0;
         fbwq_link_next <= 16'b0;
         fbwq_burst_remaining <= 4'b0;
+        fbwq_req_valid <= 1'b0;
+        fbwq_req_addr <= 32'd0;
+        fbwq_req_data <= 32'd0;
+        fbwq_req_strb <= 4'd0;
         fbwq_stage_valid <= 1'b0;
         fbwq_stage_addr <= 32'd0;
         fbwq_stage_data <= 32'd0;
@@ -2199,6 +2340,14 @@ always @(posedge clk) begin : main_fsm
         z_acc_addr <= 0;
         z_acc_lo <= 16'd0;
         z_acc_hi <= 16'd0;
+        z_flush_valid <= 1'b0;
+        z_flush_addr <= 32'd0;
+        z_flush_data <= 32'd0;
+        z_flush_strb <= 4'd0;
+        z_src_pending_valid <= 1'b0;
+        z_src_pending_addr <= 32'd0;
+        z_src_pending_hi <= 1'b0;
+        z_src_pending_half <= 16'd0;
         fence_reached <= 0;
         cmd_type <= 0;
         cmd_payload_words <= 0;
@@ -2230,6 +2379,8 @@ always @(posedge clk) begin : main_fsm
         p1_valid <= 0; p1_light <= 0; p1_colormap_id <= 0; p1_flags <= 0;
         p1_fb_addr <= 0;
         p1_z_test <= 0; p1_z_write <= 0; p1_z_addr <= 0; p1_z_value <= 0;
+        p1_tex_ready <= 1'b0;
+        p1_tex_color <= 8'd0;
         p2_valid <= 0; p2_color <= 0; p2_flags <= 0;
         p2_fb_addr <= 0; p2_discard <= 0;
         p2_z_test <= 0; p2_z_write <= 0; p2_z_addr <= 0; p2_z_value <= 0;
@@ -2242,7 +2393,16 @@ always @(posedge clk) begin : main_fsm
         transluc_rd_addr <= 15'b0;
         transluc_lookup_fire <= 1'b0;
         cmap_req_addr_reg <= 26'b0;
+        cmap_pending_valid <= 1'b0;
+        cmap_pending_addr <= 26'b0;
         fbss <= FBSS_IDLE;
+        ztest_acc_old_half <= 16'd0;
+        ztest_acc_value <= 16'd0;
+        ztest_acc_hi <= 1'b0;
+        ztest_acc_write <= 1'b0;
+        ztest_acc_from_read <= 1'b0;
+        ztest_acc_addr <= 32'd0;
+        ztest_acc_word <= 32'd0;
         blend_arvalid    <= 0;
         blend_araddr     <= 0;
         blend_group_active <= 0;
@@ -2258,6 +2418,9 @@ always @(posedge clk) begin : main_fsm
         sp_z_write_enable <= 1'b0;
         sp_z_test_enable <= 1'b0;
         sp_persp_q29_mode <= 1'b0;
+        sp_q29_z_enable <= 1'b0;
+        sp_q29_z_value <= 32'sd0;
+        sp_q29_z_value_step <= 32'sd0;
         spanprod_active <= 0;
         spanprod_compact_direct <= 1'b0;
         spanprod_direct_affine <= 1'b0;
@@ -2265,9 +2428,22 @@ always @(posedge clk) begin : main_fsm
         spanprod_record_count <= 0;
         spanprod_records_left <= 0;
         spanprod_calc_step <= 0;
+        spanprod_q29_attr_shift <= 5'd0;
         spanprod_header_supported <= 1'b0;
+        spanprod_cur_u <= 16'sd0;
+        spanprod_cur_v <= 16'sd0;
+        spanprod_cur_count <= 16'd0;
+        spanprod_cur_nonzero <= 1'b0;
+        spanprod_cur_direct_fb_addr <= 32'd0;
+        spanprod_cur_direct_tex_addr <= 32'd0;
+        spanprod_cur_direct_s <= 32'sd0;
+        spanprod_cur_direct_t <= 32'sd0;
+        spanprod_cur_direct_sstep <= 32'sd0;
+        spanprod_cur_direct_tstep <= 32'sd0;
+        spanprod_cur_direct_colormap_id <= 4'd0;
+        spanprod_cur_direct_light <= 6'd0;
         sp_sZ <= 0; sp_tZ <= 0; sp_zinv <= 0;
-        sp_sZstep <= 0; sp_tZstep <= 0; sp_zinv_step <= 0;
+        sp_sZstep <= 0; sp_tZstep <= 0; sp_zinv_step <= 0; sp_zinv_step_zero <= 1'b1;
         persp_active <= 0;
         sp_seg_left <= 0;
         persp_seg_a_ready <= 0;
@@ -2298,6 +2474,7 @@ always @(posedge clk) begin : main_fsm
         pss_tail_s_delta <= 32'sd0;
         pss_tail_t_delta <= 32'sd0;
         pss_tail_advance <= 5'd0;
+        pss_adv_tail_dynamic <= 1'b0;
         pss_s_end_r <= 0;
         pss_t_end_r <= 0;
         persp_clz <= 0;
@@ -2329,15 +2506,29 @@ always @(posedge clk) begin : main_fsm
             fbwq_count   <= 5'b0;
             fbwq_link_next <= 16'b0;
             fbwq_burst_remaining <= 4'b0;
+            fbwq_req_valid <= 1'b0;
+            fbwq_req_addr <= 32'd0;
+            fbwq_req_data <= 32'd0;
+            fbwq_req_strb <= 4'd0;
             fbwq_stage_valid <= 1'b0;
             fbwq_stage_link_tail <= 1'b0;
             fb_acc_valid <= 0;
             fb_acc_mask  <= 0;
             z_acc_valid <= 1'b0;
             z_acc_mask  <= 4'b0;
+            z_flush_valid <= 1'b0;
+            z_flush_addr <= 32'd0;
+            z_flush_data <= 32'd0;
+            z_flush_strb <= 4'b0;
+            z_src_pending_valid <= 1'b0;
+            z_src_pending_addr <= 32'd0;
+            z_src_pending_hi <= 1'b0;
+            z_src_pending_half <= 16'd0;
             p0a_valid <= 1'b0;
             p0_valid <= 1'b0;
             p1_valid <= 1'b0;
+            p1_tex_ready <= 1'b0;
+            p1_tex_color <= 8'd0;
             p2_valid <= 1'b0;
             p2b_valid <= 1'b0;
             p3_valid <= 1'b0;
@@ -2345,19 +2536,49 @@ always @(posedge clk) begin : main_fsm
             p3_z_write <= 1'b0;
             sp_z_write_enable <= 1'b0;
             sp_z_test_enable <= 1'b0;
+            sp_zinv_step_zero <= 1'b1;
+            sp_persp_q29_mode <= 1'b0;
+            sp_q29_z_enable <= 1'b0;
+            sp_q29_z_value <= 32'sd0;
+            sp_q29_z_value_step <= 32'sd0;
             fbss         <= FBSS_IDLE;
+            ztest_acc_old_half <= 16'd0;
+            ztest_acc_value <= 16'd0;
+            ztest_acc_hi <= 1'b0;
+            ztest_acc_write <= 1'b0;
+            ztest_acc_from_read <= 1'b0;
+            ztest_acc_addr <= 32'd0;
+            ztest_acc_word <= 32'd0;
             blend_arvalid <= 1'b0;
             blend_group_active <= 1'b0;
             blend_group_mask <= 4'b0;
             spanprod_active <= 1'b0;
             spanprod_compact_direct <= 1'b0;
             spanprod_direct_affine <= 1'b0;
+            spanprod_q29_attr_shift <= 5'd0;
+            spanprod_cur_u <= 16'sd0;
+            spanprod_cur_v <= 16'sd0;
+            spanprod_cur_count <= 16'd0;
+            spanprod_cur_nonzero <= 1'b0;
+            pss_adv_tail_dynamic <= 1'b0;
             m_wr_inflight <= 4'b0;
             gpu_swap_req <= 1'b0;
             transluc_lookup_fire <= 1'b0;
+            cmap_pending_valid <= 1'b0;
+            cmap_pending_addr <= 26'b0;
         end else begin
             // ------------------------------------------------------------
             // Always-on housekeeping (runs every non-reset cycle).
+            //
+            // Keep the shared DSP operand registers driven every cycle.
+            // Otherwise Quartus maps the sparse state-machine assignments
+            // into a wide DSP input clock-enable cone that reaches through
+            // the texture-cache stall path.
+            dsp_a <= 32'sd0;
+            dsp_b <= 32'sd0;
+            dsp2_a <= 32'sd0;
+            dsp2_b <= 32'sd0;
+            //
             //
             // m_wr inflight counter for CMD_FENCE / CMD_FLIP drain.
             // Increment when an AW handshake fires; decrement when a B
@@ -2573,21 +2794,34 @@ always @(posedge clk) begin : main_fsm
                 sp_seg_left       <= 4'd0;
                 spanprod_active <= spanprod_header_supported
                              && (spanprod_record_count != 3'd0);
-                state <= (spanprod_header_supported && (spanprod_record_count != 3'd0))
-                       ? S_SPANPROD_SETUP : S_IDLE;
-            end
-            else state <= S_IDLE;
-        end
+	                state <= (spanprod_header_supported && (spanprod_record_count != 3'd0))
+	                       ? S_SPANPROD_SELECT : S_IDLE;
+	            end
+	            else state <= S_IDLE;
+	        end
 
         // ============================================================
         // Unified span producer — expand compact param records or direct
         // affine lane records into scalar spans for the fragment pipe.
         // ============================================================
-        S_SPANPROD_SETUP: begin
-            if (!spanprod_active) begin
-                state <= S_IDLE;
-            end else if (spanprod_count[spanprod_idx] == 16'd0) begin
-                if (z_acc_valid && |z_acc_mask) begin
+	        S_SPANPROD_SELECT: begin
+	            spanprod_select_current_record;
+	            state <= S_SPANPROD_SETUP;
+	        end
+
+	        S_SPANPROD_SETUP: begin
+	            if (!spanprod_active) begin
+	                state <= S_IDLE;
+            end else if (!spanprod_cur_nonzero) begin
+                if (z_flush_valid) begin
+                    if (fb_write_can_issue) begin
+                        fbwq_push_req  = 1'b1;
+                        fbwq_push_addr = z_flush_addr;
+                        fbwq_push_data = z_flush_data;
+                        fbwq_push_strb = z_flush_strb;
+                        z_flush_valid  <= 1'b0;
+                    end
+                end else if (z_acc_valid && |z_acc_mask) begin
                     if (fb_write_can_issue) begin
                         fbwq_push_req  = 1'b1;
                         fbwq_push_addr = z_acc_addr;
@@ -2614,7 +2848,7 @@ always @(posedge clk) begin : main_fsm
 	                            end
 	                        end else begin
 	                            spanprod_idx <= spanprod_idx + 2'd1;
-	                            state <= S_SPANPROD_SETUP;
+		                            state <= S_SPANPROD_SELECT;
 	                        end
 	                    end
 	                end else if (spanprod_idx == spanprod_last_idx) begin
@@ -2627,7 +2861,7 @@ always @(posedge clk) begin : main_fsm
 	                    end
 	                end else begin
                     spanprod_idx <= spanprod_idx + 2'd1;
-                    state <= S_SPANPROD_SETUP;
+	                    state <= S_SPANPROD_SELECT;
                 end
             end else begin
                 spanprod_calc_step <= 3'd0;
@@ -2742,6 +2976,7 @@ always @(posedge clk) begin : main_fsm
             reg [1:0]  p3_byte_lane;
             reg        p3_word_match;
             reg        issue_committed;
+            reg        p1_to_p2;
             reg        p0a_to_p0;
             reg        p0a_free_after;
             reg        source_pixel_available;
@@ -2760,31 +2995,37 @@ always @(posedge clk) begin : main_fsm
             reg [31:0] source_z_word_addr;
             reg        source_z_hi;
             reg [15:0] source_z_half;
-            reg        source_z_can_flush;
+            reg        source_z_stage_ready;
             reg        source_z_ready;
             reg        source_z_write_only_active;
             reg        source_z_advance_active;
             reg [31:0] p3_z_word_addr;
             reg        p3_z_hi;
-            reg [15:0] p3_z_old_half;
-            reg [31:0] p3_z_word;
-            reg        p3_z_pass;
 
             // Was the (combinational) tex_req accepted by the cache this
-            // same cycle? Both signals are visible NOW.
+            // same cycle? Both signals are visible NOW.  p1 is the decoupling
+            // slot between cache issue and the tail pipe; using p1 availability
+            // instead of fp_pipe_stall keeps p2/p3 feedback out of the cache
+            // RAM read-enable/address cone.
             issue_committed = tex_req_valid && tex_req_ready;
+            p1_to_p2 = !fp_pipe_stall && p1_valid;
             p3_consumed = 1'b0;
             scalar_span_last_issue = 1'b0;
 
             // Load/refresh p0a only if the one-entry source snapshot will be
             // free after this cycle.  p0 itself remains the cache-issue stage;
             // if it is busy, p0a can still prefetch one source pixel.
+            //
+            // Promote p0a only when p0 is already empty.  Refilling p0 in the
+            // same cycle that tex_req is accepted ties tex_cache hit/ready
+            // feedback directly to the texture-row DSP enable.  Taking the
+            // one-cycle handoff bubble keeps that ready path out of the DSP.
             // Persp gating:
             //   * !persp_issue_stall: slot A must be loaded (pass 2 done).
             //   * If sp_seg_left == 0 (last px of segment), slot B must be
             //     ready so the swap can fire in the same cycle, unless this
             //     pixel is also the last pixel of the whole span.
-            p0a_to_p0 = p0a_valid && (issue_committed || !p0_valid);
+            p0a_to_p0 = p0a_valid && !p0_valid;
             p0a_free_after = !p0a_valid || p0a_to_p0;
             scalar_source_pixel_available = 1'b0;
             source_pixel_available = 1'b0;
@@ -2805,15 +3046,14 @@ always @(posedge clk) begin : main_fsm
                 sp_z_write_enable || sp_z_test_enable;
             source_z_word_addr = sp_z_addr & 32'hFFFFFFFC;
             source_z_hi = sp_z_addr[1];
-            source_z_half = sp_persp_q29_mode
-                          ? sp_z_value[29:14]
+            source_z_half = sp_q29_z_enable
+                          ? sp_q29_z_value[29:14]
                           : sp_z_value[16:1];
-            source_z_can_flush = fb_write_can_issue && (fbss == FBSS_IDLE)
-                               && !p3_needs_fb_flush;
+            source_z_stage_ready = !z_flush_valid
+                                 && (!z_src_pending_valid
+                                     || z_src_pending_consume);
             source_z_ready = !source_z_write_only_active
-                           || !z_acc_valid
-                           || (z_acc_addr == source_z_word_addr)
-                           || source_z_can_flush;
+                           || source_z_stage_ready;
             load_p0a = p0a_free_after && source_pixel_available && source_z_ready;
             load_p0a_z = p0a_free_after && scalar_source_pixel_available
                        && source_z_ready && source_z_write_only_active;
@@ -2839,15 +3079,28 @@ always @(posedge clk) begin : main_fsm
             source_colormap_id = sp_colormap_id;
             p3_z_word_addr = p3_z_addr & 32'hFFFFFFFC;
             p3_z_hi = p3_z_addr[1];
-            p3_z_word = (z_acc_valid && z_acc_addr == p3_z_word_addr)
-                      ? z_acc_data : blend_rdata;
-            p3_z_old_half = fb_halfword_read(p3_z_word, p3_z_hi);
-            p3_z_pass = (p3_z_value >= p3_z_old_half);
+            // External z reads only reach FBSS_ZTEST_R_WAIT after any dirty
+            // z_acc word has either matched the p3 word or been flushed.  The
+            // accumulator-hit case is handled by FBSS_ZTEST_ACC_EVAL below, so
+            // keep this compare path free of the z_acc_addr equality cone.
 
             // ----------------------------------------------------------
             // Pipeline shift — only when not stalled
             // ----------------------------------------------------------
+            if (cmap_pending_valid && cmap_req_ready_b)
+                cmap_pending_valid <= 1'b0;
+
+            if (p1_valid && !p1_tex_ready && tex_resp_valid) begin
+                p1_tex_ready <= 1'b1;
+                p1_tex_color <= tex_resp_data[7:0];
+            end
+
             if (!fp_pipe_stall) begin
+                if (p2_valid && p2_flags[SPAN_COLORMAP]) begin
+                    cmap_pending_valid <= 1'b1;
+                    cmap_pending_addr  <= cmap_req_addr_reg;
+                end
+
                 // p3 <- p2b  (merges cmap result if cmap was used; cmap_rd_data
                 // is now valid because p2b gave us 1 extra cycle of latency)
                 p3_valid     <= p2b_valid;
@@ -2874,11 +3127,11 @@ always @(posedge clk) begin : main_fsm
                 // p2 <- p1  (captures tex_resp; issues cmap_rd_addr if needed)
                 p2_valid   <= p1_valid;
                 if (p1_valid) begin
-                    p2_color   <= tex_resp_data[7:0];
+                    p2_color   <= p1_tex_color;
                     p2_flags   <= p1_flags;
                     p2_fb_addr <= p1_fb_addr;
                     p2_discard <= p1_flags[SPAN_SKIP_ZERO]
-                               && (tex_resp_data[7:0] == 8'hFF);
+                               && (p1_tex_color == 8'hFF);
                     p2_z_test  <= p1_z_test;
                     p2_z_write <= p1_z_write;
                     p2_z_addr  <= p1_z_addr;
@@ -2892,48 +3145,57 @@ always @(posedge clk) begin : main_fsm
                         // groups can interleave lanes with different slots.
                         cmap_req_addr_reg <= PALOOKUP_BASE
                                            | {8'b0, p1_colormap_id, 14'b0}
-                                           | {12'b0, p1_light, tex_resp_data[7:0]};
+                                           | {12'b0, p1_light, p1_tex_color};
                     end
                 end
 
-                // p1 <- p0 (issue commit). Cache accepted our request this
-                // cycle. The OLD p0 metadata becomes p1 (the in-cache pixel).
-                if (issue_committed) begin
-                    p1_valid   <= 1;
-                    p1_light   <= p0_light;
-                    p1_colormap_id <= p0_colormap_id;
-                    p1_flags   <= p0_flags;
-                    p1_fb_addr <= p0_fb_addr;
-                    p1_z_test  <= p0_z_test;
-                    p1_z_write <= p0_z_write;
-                    p1_z_addr  <= p0_z_addr;
-                    p1_z_value <= p0_z_value;
-                end else begin
-                    p1_valid <= 0;
-                end
-
-                // p0 <- p0a.  The texture row multiply consumes the registered
-                // p0a inputs, not the wide sp_* mux, which is the timing win.
-                if (p0a_to_p0) begin
-                    p0_valid     <= 1;
-                    p0_light     <= p0a_light;
-                    p0_colormap_id <= p0a_colormap_id;
-                    p0_flags     <= p0a_flags;
-                    p0_fb_addr   <= p0a_fb_addr;
-                    p0_s_int     <= p0a_s_int;
-                    p0_tex_base  <= p0a_tex_base;
-                    p0_z_test    <= p0a_z_test;
-                    p0_z_write   <= p0a_z_write;
-                    p0_z_addr    <= p0a_z_addr;
-                    p0_z_value   <= p0a_z_value;
-                    tx_mul_q     <= $signed(p0a_t_y)
-                                  * $signed({1'b0, p0a_tex_width});
-                end else if (issue_committed) begin
-                    p0_valid <= 0;
-                end
-                if (p0a_to_p0 && !load_p0a)
-                    p0a_valid <= 0;
             end
+
+            if (p1_to_p2) begin
+                p1_valid <= 1'b0;
+                p1_tex_ready <= 1'b0;
+            end
+
+            // p1 <- p0 (issue commit).  Cache accepted our request this
+            // cycle.  The OLD p0 metadata becomes p1 even if p2/p3 are stalled;
+            // p1 holds the texture response until the tail pipe can shift.
+            if (issue_committed) begin
+                p1_valid   <= 1'b1;
+                p1_light   <= p0_light;
+                p1_colormap_id <= p0_colormap_id;
+                p1_flags   <= p0_flags;
+                p1_fb_addr <= p0_fb_addr;
+                p1_z_test  <= p0_z_test;
+                p1_z_write <= p0_z_write;
+                p1_z_addr  <= p0_z_addr;
+                p1_z_value <= p0_z_value;
+                p1_tex_ready <= 1'b0;
+                p1_tex_color <= 8'd0;
+                p0_valid <= 1'b0;
+            end
+
+            // p0 <- p0a.  This promotion is independent of the tail-pipe
+            // shift, so an empty p0 can be preloaded even while p1/p2/p3 are
+            // stalled.  tex_req_valid remains blocked by p1_valid, so the
+            // cache still sees one in-order request at a time.
+            if (p0a_to_p0) begin
+                p0_valid     <= 1;
+                p0_light     <= p0a_light;
+                p0_colormap_id <= p0a_colormap_id;
+                p0_flags     <= p0a_flags;
+                p0_fb_addr   <= p0a_fb_addr;
+                p0_s_int     <= p0a_s_int;
+                p0_tex_base  <= p0a_tex_base;
+                p0_z_test    <= p0a_z_test;
+                p0_z_write   <= p0a_z_write;
+                p0_z_addr    <= p0a_z_addr;
+                p0_z_value   <= p0a_z_value;
+                tx_mul_q     <= $signed(p0a_t_y)
+                              * $signed({1'b0, p0a_tex_width});
+            end
+
+            if (p0a_to_p0 && !load_p0a)
+                p0a_valid <= 0;
 
             // Source snapshot and source-state advance are intentionally outside
             // the tail-pipe shift gate.  When p0a is empty, it can prefetch one
@@ -2956,47 +3218,22 @@ always @(posedge clk) begin : main_fsm
                 p0a_t_y   <= source_t_clamped[31:16] & sp_tex_h_mask;
 
                 if (load_p0a_z) begin
-	                    if (z_acc_valid && z_acc_addr != source_z_word_addr) begin
-	                        fbwq_push_req  = 1'b1;
-	                        fbwq_push_addr = z_acc_addr;
-	                        fbwq_push_data = z_acc_data;
-	                        fbwq_push_strb = z_acc_mask;
-	                        z_acc_addr     <= source_z_word_addr;
-	                        z_acc_valid    <= 1'b1;
-	                        if (source_z_hi) begin
-                            z_acc_hi <= source_z_half;
-                            z_acc_lo <= 16'b0;
-	                            z_acc_mask <= 4'b1100;
-	                        end else begin
-                            z_acc_hi <= 16'b0;
-                            z_acc_lo <= source_z_half;
-	                            z_acc_mask <= 4'b0011;
-	                        end
-	                    end else begin
-	                        z_acc_valid <= 1'b1;
-	                        z_acc_addr  <= source_z_word_addr;
-	                        if (source_z_hi) begin
-		                            z_acc_hi <= source_z_half;
-	                            z_acc_mask[3:2]   <= 2'b11;
-	                            if (!z_acc_valid) begin
-		                                z_acc_lo <= 16'b0;
-	                                z_acc_mask[1:0]  <= 2'b00;
-	                            end
-	                        end else begin
-		                            z_acc_lo <= source_z_half;
-	                            z_acc_mask[1:0]  <= 2'b11;
-	                            if (!z_acc_valid) begin
-		                                z_acc_hi <= 16'b0;
-	                                z_acc_mask[3:2]   <= 2'b00;
-	                            end
-	                        end
-	                    end
+                    z_src_push      = 1'b1;
+                    z_src_push_addr = source_z_word_addr;
+                    z_src_push_hi   = source_z_hi;
+                    z_src_push_half = source_z_half;
                     sp_z_addr  <= sp_z_addr + sp_z_step;
                     sp_z_value <= sp_z_value + sp_z_value_step;
+                    if (sp_q29_z_enable)
+                        sp_q29_z_value <= sat_add32(sp_q29_z_value,
+                                                    sp_q29_z_value_step);
                 end
                 else if (source_z_advance_active) begin
                     sp_z_addr  <= sp_z_addr + sp_z_step;
                     sp_z_value <= sp_z_value + sp_z_value_step;
+                    if (sp_q29_z_enable)
+                        sp_q29_z_value <= sat_add32(sp_q29_z_value,
+                                                    sp_q29_z_value_step);
                 end
 
                 sp_fb_addr <= sp_fb_addr + sp_fb_stride;
@@ -3096,21 +3333,12 @@ always @(posedge clk) begin : main_fsm
                                 fbss <= FBSS_FLUSH_W_RSP;
                             end
                         end else if (z_acc_valid && z_acc_addr == p3_z_word_addr) begin
-	                            if (p3_z_pass) begin
-	                                if (p3_z_write) begin
-	                                    if (p3_z_hi) begin
-		                                        z_acc_hi <= p3_z_value;
-	                                        z_acc_mask[3:2]   <= 2'b11;
-	                                    end else begin
-		                                        z_acc_lo <= p3_z_value;
-	                                        z_acc_mask[1:0]  <= 2'b11;
-	                                    end
-	                                end
-	                                p3_z_test <= 1'b0;
-	                            end else begin
-                                p3_valid <= 1'b0;
-                                p3_consumed = 1'b1;
-                            end
+                            ztest_acc_old_half <= p3_z_hi ? z_acc_hi : z_acc_lo;
+                            ztest_acc_value    <= p3_z_value;
+                            ztest_acc_hi       <= p3_z_hi;
+                            ztest_acc_write    <= p3_z_write;
+                            ztest_acc_from_read <= 1'b0;
+                            fbss               <= FBSS_ZTEST_ACC_EVAL;
                         end else if (!tex_axi_arvalid && !tex_m0_in_flight
                                   && fb_write_drain_complete) begin
                             blend_arvalid <= 1'b1;
@@ -3122,7 +3350,7 @@ always @(posedge clk) begin : main_fsm
                     else if (p3_valid && !p3_discard) begin : fb_acc_blk
                         p3_word_addr  = p3_fb_addr & 32'hFFFFFFFC;
                         p3_byte_lane  = p3_fb_addr[1:0];
-                        p3_word_match = fb_acc_word_match;
+                        p3_word_match = fb_acc_p3_word_match;
 
                         if (!p3_word_match) begin
                             if (fb_write_can_issue) begin
@@ -3185,30 +3413,50 @@ always @(posedge clk) begin : main_fsm
                     end
                 end
 
-                FBSS_ZTEST_R_WAIT: begin
-	                    if (blend_rvalid) begin
-	                        if (p3_z_pass) begin
-	                            if (p3_z_write) begin
-	                                z_acc_valid <= 1'b1;
-	                                z_acc_addr  <= p3_z_word_addr;
-	                                if (p3_z_hi) begin
-	                                    z_acc_hi <= p3_z_value;
-	                                    z_acc_lo <= blend_rdata[15:0];
-	                                end else begin
-	                                    z_acc_hi <= blend_rdata[31:16];
-	                                    z_acc_lo <= p3_z_value;
-	                                end
-	                                z_acc_mask  <= p3_z_hi ? 4'b1100 : 4'b0011;
-	                            end
-                            p3_z_test <= 1'b0;
-                        end else begin
-                            p3_valid <= 1'b0;
-                        end
-                        fbss <= FBSS_IDLE;
-                    end
-                end
+	                FBSS_ZTEST_R_WAIT: begin
+			                    if (blend_rvalid) begin
+		                        ztest_acc_old_half <= fb_halfword_read(blend_rdata, p3_z_hi);
+		                        ztest_acc_value    <= p3_z_value;
+		                        ztest_acc_hi       <= p3_z_hi;
+		                        ztest_acc_write    <= p3_z_write;
+		                        ztest_acc_from_read <= 1'b1;
+		                        ztest_acc_addr     <= p3_z_word_addr;
+		                        ztest_acc_word     <= blend_rdata;
+		                        fbss               <= FBSS_ZTEST_ACC_EVAL;
+		                    end
+		                end
 
-                // --------------------------------------------------------
+		                FBSS_ZTEST_ACC_EVAL: begin
+		                    if (ztest_acc_value >= ztest_acc_old_half) begin
+		                        if (ztest_acc_write) begin
+		                            if (ztest_acc_from_read) begin
+		                                z_acc_valid <= 1'b1;
+		                                z_acc_addr  <= ztest_acc_addr;
+		                                if (ztest_acc_hi) begin
+		                                    z_acc_hi   <= ztest_acc_value;
+		                                    z_acc_lo   <= ztest_acc_word[15:0];
+		                                    z_acc_mask <= 4'b1100;
+		                                end else begin
+		                                    z_acc_hi   <= ztest_acc_word[31:16];
+		                                    z_acc_lo   <= ztest_acc_value;
+		                                    z_acc_mask <= 4'b0011;
+		                                end
+		                            end else if (ztest_acc_hi) begin
+		                                z_acc_hi <= ztest_acc_value;
+		                                z_acc_mask[3:2] <= 2'b11;
+		                            end else begin
+		                                z_acc_lo <= ztest_acc_value;
+		                                z_acc_mask[1:0] <= 2'b11;
+		                            end
+		                        end
+		                        p3_z_test <= 1'b0;
+	                    end else begin
+	                        p3_valid <= 1'b0;
+	                    end
+	                    fbss <= FBSS_IDLE;
+	                end
+
+	                // --------------------------------------------------------
                 // Translucent-blend sub-flow.  Entry from FBSS_IDLE has
                 // collected one or more active lanes into blend_group_*.
                 // Read the existing FB word once, apply fb_acc same-word
@@ -3261,7 +3509,7 @@ always @(posedge clk) begin : main_fsm
                             if (fb_acc_mask[3]) read_word[31:24] = fb_acc_data[31:24];
                         end
                         blend_result_word <= read_word;
-                        blend_p3_match_r <= fb_acc_word_match;
+                        blend_p3_match_r <= fb_acc_blend_word_match;
                         blend_lane_iter <= 2'd0;
                         fbss <= FBSS_BLEND_SELECT;
                     end
@@ -3384,10 +3632,12 @@ always @(posedge clk) begin : main_fsm
 	                    reg [4:0]  slope_divisor;
 	                    reg        tail_dynamic;
                     // Stage 1 of pipelined setup: advance projection-space
-                    // accumulators by one segment and register old/new zinv.
-                    // Splitting the old single-cycle (advance → CLZ → top8 →
-                    // recip_rd_addr) chain into ADV / ADV_CLAMP / CLZ /
-                    // TOP8 closes the timing path.
+                    // counters and register whether this pass needs a
+                    // variable-length tail advance.  The following
+                    // PSS_ADV_ISSUE stage uses only this registered decision
+                    // to load the shared DSP operands; keeping the
+                    // future_count compare out of the DSP enable cone fixes
+                    // the post-fit sp_seg_left/sp_count → Mult*_ENA path.
                     //
                     // Quake's software rasterizer uses 16-pixel affine
                     // subspans for non-final chunks, but the final chunk uses
@@ -3426,12 +3676,17 @@ always @(posedge clk) begin : main_fsm
 	                    pss_slope_divisor <= slope_divisor;
 	                    pss_zinv_prev_r  <= sp_zinv;
 	                    pss_zinv_abs_na_r <= persp_zinv_abs_na;
-	                    if (tail_dynamic) begin
-	                        pss_tail_advance <= end_advance;
+	                    pss_tail_advance <= end_advance;
+	                    pss_adv_tail_dynamic <= tail_dynamic;
+	                    persp_pss <= PSS_ADV_ISSUE;
+	                end
+
+	                PSS_ADV_ISSUE: begin
+	                    if (pss_adv_tail_dynamic) begin
 	                        dsp_a  <= sp_sZstep;
-	                        dsp_b  <= $signed({27'd0, end_advance});
+	                        dsp_b  <= $signed({27'd0, pss_tail_advance});
 	                        dsp2_a <= sp_tZstep;
-	                        dsp2_b <= $signed({27'd0, end_advance});
+	                        dsp2_b <= $signed({27'd0, pss_tail_advance});
 	                        persp_pss <= PSS_ADV_TAIL_ST_WAIT;
 	                    end else begin
 	                        sp_sZ          <= sp_sZ   + (sp_sZstep   <<< PERSPECTIVE_SEG_SHIFT);
@@ -3600,7 +3855,7 @@ always @(posedge clk) begin : main_fsm
                         recip_q16_r <= recip_shifted[31:0];
                     end else begin
                         recip_q16_r <= dsp_p[47:16]
-                                     + ((sp_zinv_step == 32'sd0
+                                     + ((sp_zinv_step_zero
                                       && sp_zinv != 32'sh00010000) ? 32'sd1
                                                                    : 32'sd0);
                     end
@@ -3665,7 +3920,7 @@ always @(posedge clk) begin : main_fsm
                     persp_pss <= PSS_IDLE;
                     case (persp_pass)
                         PSS_PASS_ANCHOR: begin
-                            if (sp_zinv_step == 32'sd0) begin
+                            if (sp_zinv_step_zero) begin
                                 // Constant-Z perspective spans (Doom walls):
                                 // one reciprocal is enough for the whole
                                 // generated span.  Convert to affine by
@@ -3888,7 +4143,7 @@ always @(posedge clk) begin : main_fsm
 	                        end
 	                    end else begin
 	                        spanprod_idx <= spanprod_idx + 2'd1;
-	                        state <= S_SPANPROD_SETUP;
+	                        state <= S_SPANPROD_SELECT;
                     end
                 end else
                     state    <= S_FB_FLUSH;
@@ -3899,7 +4154,15 @@ always @(posedge clk) begin : main_fsm
         // FB flush — end-of-span or mid-span word boundary
         // ============================================================
         S_FB_FLUSH: begin
-            if (z_acc_valid && |z_acc_mask) begin
+            if (z_flush_valid) begin
+                if (fb_write_can_issue) begin
+                    fbwq_push_req  = 1'b1;
+                    fbwq_push_addr = z_flush_addr;
+                    fbwq_push_data = z_flush_data;
+                    fbwq_push_strb = z_flush_strb;
+                    z_flush_valid  <= 1'b0;
+                end
+            end else if (z_acc_valid && |z_acc_mask) begin
                 if (fb_write_can_issue) begin
                     fbwq_push_req  = 1'b1;
                     fbwq_push_addr = z_acc_addr;
@@ -3998,19 +4261,77 @@ always @(posedge clk) begin : main_fsm
         default: state <= S_IDLE;
         endcase
 
-            fbwq_push_links_fifo_tail =
+            if (z_src_pending_consume && !z_flush_set) begin
+                z_src_pending_applied = 1'b1;
+                if (z_acc_valid && z_acc_addr != z_src_pending_addr) begin
+                    z_flush_valid <= 1'b1;
+                    z_flush_addr  <= z_acc_addr;
+                    z_flush_data  <= z_acc_data;
+                    z_flush_strb  <= z_acc_mask;
+                    z_flush_set   = 1'b1;
+                    z_acc_addr    <= z_src_pending_addr;
+                    z_acc_valid   <= 1'b1;
+                    if (z_src_pending_hi) begin
+                        z_acc_hi   <= z_src_pending_half;
+                        z_acc_lo   <= 16'b0;
+                        z_acc_mask <= 4'b1100;
+                    end else begin
+                        z_acc_hi   <= 16'b0;
+                        z_acc_lo   <= z_src_pending_half;
+                        z_acc_mask <= 4'b0011;
+                    end
+                end else begin
+                    z_acc_valid <= 1'b1;
+                    z_acc_addr  <= z_src_pending_addr;
+                    if (z_src_pending_hi) begin
+                        z_acc_hi <= z_src_pending_half;
+                        z_acc_mask[3:2] <= 2'b11;
+                        if (!z_acc_valid) begin
+                            z_acc_lo <= 16'b0;
+                            z_acc_mask[1:0] <= 2'b00;
+                        end
+                    end else begin
+                        z_acc_lo <= z_src_pending_half;
+                        z_acc_mask[1:0] <= 2'b11;
+                        if (!z_acc_valid) begin
+                            z_acc_hi <= 16'b0;
+                            z_acc_mask[3:2] <= 2'b00;
+                        end
+                    end
+                end
+            end
+
+            if (z_src_push) begin
+                z_src_pending_valid <= 1'b1;
+                z_src_pending_addr  <= z_src_push_addr;
+                z_src_pending_hi    <= z_src_push_hi;
+                z_src_pending_half  <= z_src_push_half;
+            end else if (z_src_pending_applied) begin
+                z_src_pending_valid <= 1'b0;
+            end
+
+            if (!fbwq_push_req && z_flush_valid && fb_write_can_issue) begin
+                fbwq_push_req  = 1'b1;
+                fbwq_push_addr = z_flush_addr;
+                fbwq_push_data = z_flush_data;
+                fbwq_push_strb = z_flush_strb;
+                if (!z_flush_set)
+                    z_flush_valid <= 1'b0;
+            end
+
+            fbwq_req_links_fifo_tail =
                    (fbwq_strb[fbwq_prev_wr_ptr] == 4'hF)
-                && (fbwq_push_strb == 4'hF)
+                && (fbwq_req_strb == 4'hF)
                 && (fbwq_addr[fbwq_prev_wr_ptr][11:0] <= 12'hFF8)
-                && (fbwq_push_addr == fbwq_addr[fbwq_prev_wr_ptr] + 32'd4);
-            fbwq_push_links_stage_tail =
+                && (fbwq_req_addr == fbwq_addr[fbwq_prev_wr_ptr] + 32'd4);
+            fbwq_req_links_stage_tail =
                    (fbwq_stage_strb == 4'hF)
-                && (fbwq_push_strb == 4'hF)
+                && (fbwq_req_strb == 4'hF)
                 && (fbwq_stage_addr[11:0] <= 12'hFF8)
-                && (fbwq_push_addr == fbwq_stage_addr + 32'd4);
-            fbwq_push_link_tail = fbwq_stage_drain_now
-                                 ? fbwq_push_links_stage_tail
-                                 : fbwq_push_links_fifo_tail;
+                && (fbwq_req_addr == fbwq_stage_addr + 32'd4);
+            fbwq_req_link_tail = fbwq_stage_drain_now
+                               ? fbwq_req_links_stage_tail
+                               : fbwq_req_links_fifo_tail;
 
             // --------------------------------------------------------
             // Central AXI write drain.  The main FSM only enqueues
@@ -4047,15 +4368,24 @@ always @(posedge clk) begin : main_fsm
                 fbwq_wr_ptr            <= fbwq_wr_ptr + 1'b1;
             end
 
-            if (fbwq_push_req && fbwq_can_push) begin
+            if (fbwq_req_to_stage_now) begin
                 fbwq_stage_valid <= 1'b1;
-                fbwq_stage_addr  <= fbwq_push_addr;
-                fbwq_stage_data  <= fbwq_push_data;
-                fbwq_stage_strb  <= fbwq_push_strb;
-                fbwq_stage_link_tail <= fbwq_push_link_tail;
+                fbwq_stage_addr  <= fbwq_req_addr;
+                fbwq_stage_data  <= fbwq_req_data;
+                fbwq_stage_strb  <= fbwq_req_strb;
+                fbwq_stage_link_tail <= fbwq_req_link_tail;
             end else if (fbwq_stage_drain_now) begin
                 fbwq_stage_valid <= 1'b0;
                 fbwq_stage_link_tail <= 1'b0;
+            end
+
+            if (fbwq_push_req && fbwq_can_push) begin
+                fbwq_req_valid <= 1'b1;
+                fbwq_req_addr  <= fbwq_push_addr;
+                fbwq_req_data  <= fbwq_push_data;
+                fbwq_req_strb  <= fbwq_push_strb;
+            end else if (fbwq_req_to_stage_now) begin
+                fbwq_req_valid <= 1'b0;
             end
 
             fbwq_count <= fbwq_count

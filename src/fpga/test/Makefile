@@ -2,7 +2,7 @@
 #
 # `make all` (the default `make test` entry point) runs every test that
 # currently passes:
-#   sdram, sram, gpu, axi-periph, cram0-prefetch, audio
+#   sdram, sram, gpu, axi-periph, bridge-cmd, audio
 #
 # v2 memory-arch: cram1 and cram1-burst-mmio tests retired with the
 # chip; cram1_controller.v / cram1_phy.sv / axi_cram1_slave.v /
@@ -92,20 +92,6 @@ AXI_PERIPH_CPP = tb_axi_periph_main.cpp
 AXI_PERIPH_TOP = tb_axi_periph
 AXI_PERIPH_DIR = obj_dir_axi_periph
 AXI_PERIPH_FLAGS = -Wno-WIDTHEXPAND -Wno-CASEINCOMPLETE -Wno-SYNCASYNCNET
-
-# ============================================================
-# CRAM0 bridge prefetcher — verifies the APF writeback gate waits for
-# a full 8 KB chunk, or the complete short transfer, before asserting
-# ready to core_bridge_cmd.
-# ============================================================
-CRAM0_PREFETCH_SRCS = \
-	tb_cram0_prefetch.v \
-	$(COMMON_DIR)/cram0_bridge_prefetch.v
-
-CRAM0_PREFETCH_CPP = tb_cram0_prefetch_main.cpp
-CRAM0_PREFETCH_TOP = tb_cram0_prefetch
-CRAM0_PREFETCH_DIR = obj_dir_cram0_prefetch
-CRAM0_PREFETCH_FLAGS = -Wno-WIDTHEXPAND -Wno-CASEINCOMPLETE
 
 # ============================================================
 # Pocket bridge command FSM — warm Reset Enter must re-issue the
@@ -223,9 +209,9 @@ SYSTEM_FLAGS = -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC -Wno-CASEINCOMPLETE \
 # Targets
 # ============================================================
 .PHONY: all sdram sdram-serialize sdram-native2 sdram-all sram gpu gpu-persp gpu-floor gpu-gpudemo gpu-acceptance gpu-acceptance-single gpu-acceptance-burst2 gpu-acceptance-all gpu-chain \
-        axi-periph cram0-prefetch bridge-cmd audio audio-mixer arbiter system run run-sram build clean
+        axi-periph bridge-cmd audio audio-mixer arbiter system run run-sram build clean
 
-all: sdram-all sram gpu gpu-persp axi-periph cram0-prefetch bridge-cmd audio audio-mixer arbiter
+all: sdram-all sram gpu gpu-persp axi-periph bridge-cmd audio audio-mixer arbiter
 
 # --- SDRAM ---
 sdram: $(SDRAM_DIR)/V$(SDRAM_TOP)
@@ -370,17 +356,6 @@ $(AXI_PERIPH_DIR)/V$(AXI_PERIPH_TOP): $(AXI_PERIPH_SRCS) $(AXI_PERIPH_CPP)
 		-I$(COMMON_DIR) \
 		$(AXI_PERIPH_SRCS) $(AXI_PERIPH_CPP)
 
-# --- CRAM0 bridge prefetcher ---
-cram0-prefetch: $(CRAM0_PREFETCH_DIR)/V$(CRAM0_PREFETCH_TOP)
-	@printf "\n=== CRAM0 bridge prefetcher ===\n"
-	./$(CRAM0_PREFETCH_DIR)/V$(CRAM0_PREFETCH_TOP)
-
-$(CRAM0_PREFETCH_DIR)/V$(CRAM0_PREFETCH_TOP): $(CRAM0_PREFETCH_SRCS) $(CRAM0_PREFETCH_CPP)
-	$(VERILATOR) $(VERILATOR_FLAGS) $(CRAM0_PREFETCH_FLAGS) \
-		--top-module $(CRAM0_PREFETCH_TOP) --Mdir $(CRAM0_PREFETCH_DIR) \
-		-I$(COMMON_DIR) \
-		$(CRAM0_PREFETCH_SRCS) $(CRAM0_PREFETCH_CPP)
-
 # --- Pocket bridge command FSM ---
 bridge-cmd: $(BRIDGE_CMD_DIR)/V$(BRIDGE_CMD_TOP)
 	@printf "\n=== Pocket bridge command FSM ===\n"
@@ -451,7 +426,7 @@ $(SYSTEM_DIR)/V$(SYSTEM_TOP): $(SYSTEM_SRCS) $(SYSTEM_CPP)
 clean:
 	rm -rf $(SDRAM_DIR) $(SDRAM_SERIAL_DIR) $(SDRAM_NATIVE2_DIR) $(SRAM_DIR) $(GPU_DIR) $(GPU_FLOOR_DIR) \
 	       $(GPU_GPUDEMO_DIR) $(GPU_ACCEPT_DIR) $(GPU_ACCEPT_SINGLE_DIR) \
-	       $(AXI_PERIPH_DIR) $(CRAM0_PREFETCH_DIR) \
+	       $(AXI_PERIPH_DIR) \
 	       $(AUDIO_DIR) $(MIXER_DIR) $(SYSTEM_DIR) \
 	       $(ARBITER_DIR) \
 	       obj_dir_gpu obj_dir_gpu_floor obj_dir_gpu_gpudemo \

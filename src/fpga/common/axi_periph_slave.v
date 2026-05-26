@@ -482,7 +482,7 @@ localparam [31:0] HW_FEATURES =
     |
     32'h0000_0010      // GPU span renderer
     |
-    32'h0003_E000      // GPU persp + fragpipe + param span/list/z caps (bits 13..17)
+    32'h0007_E000      // GPU persp + fragpipe + param span/list/z/scale caps (bits 13..18)
     | 32'h0000_0348;  // Analogizer(3) + MIDI(6) + FPU(8) + Save slots(9) — always present
 
 localparam FB_ADDR_0 = 25'h0000000;     // byte 0x000000 → CPU 0x10000000
