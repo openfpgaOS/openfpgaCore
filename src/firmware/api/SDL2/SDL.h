@@ -465,6 +465,8 @@ static inline int __sdl_try_hw_fb_mode(int w, int h) {
     mode.stride = 0;
     mode.color_mode = OF_VIDEO_MODE_8BIT;
     mode.reserved = 0;
+    if (of_video_check_mode(&mode, NULL) < 0)
+        return 0;
     return of_video_set_mode(&mode) == 0;
 }
 
@@ -530,14 +532,20 @@ static inline void __sdl_present_window_surface(void) {
             memcpy(fb + (size_t)y * (size_t)fs,
                    src + (size_t)y * (size_t)sp, (size_t)fw);
     } else {
+        uint32_t xstep = ((uint32_t)sw << 16) / (uint32_t)fw;
+        uint32_t ystep = ((uint32_t)sh << 16) / (uint32_t)fh;
+        uint32_t yacc = 0;
         for (int y = 0; y < fh; y++) {
-            int sy = (int)(((int64_t)y * sh) / fh);
+            int sy = (int)(yacc >> 16);
             const uint8_t *srow = src + (size_t)sy * (size_t)sp;
             uint8_t *drow = fb + (size_t)y * (size_t)fs;
+            uint32_t xacc = 0;
             for (int x = 0; x < fw; x++) {
-                int sx = (int)(((int64_t)x * sw) / fw);
+                int sx = (int)(xacc >> 16);
                 drow[x] = srow[sx];
+                xacc += xstep;
             }
+            yacc += ystep;
         }
     }
 
@@ -602,6 +610,28 @@ static inline int SDL_GetCurrentDisplayMode(int displayIndex,
 static inline int SDL_GetDesktopDisplayMode(int displayIndex,
                                              SDL_DisplayMode *mode) {
     return SDL_GetCurrentDisplayMode(displayIndex, mode);
+}
+static inline int SDL_VideoModeOK(int width, int height, int bpp,
+                                   uint32_t flags) {
+    (void)flags;
+    if (width <= 0) width = OF_SCREEN_W;
+    if (height <= 0) height = OF_SCREEN_H;
+    if (bpp != 0 && bpp != 8)
+        return 0;
+    if (width > OF_VIDEO_MAX_WIDTH || height > OF_VIDEO_MAX_HEIGHT)
+        return 0;
+
+    of_video_mode_t mode = {
+        (uint16_t)width, (uint16_t)height, 0, OF_VIDEO_MODE_8BIT, 0
+    };
+    return of_video_check_mode(&mode, NULL) == 0 ? 8 : 0;
+}
+static inline SDL_Rect **SDL_ListModes(SDL_PixelFormat *format,
+                                        uint32_t flags) {
+    (void)flags;
+    if (format && format->BitsPerPixel != 0 && format->BitsPerPixel != 8)
+        return NULL;
+    return (SDL_Rect **)-1;
 }
 static inline int SDL_SetWindowDisplayMode(SDL_Window *w,
                                             const SDL_DisplayMode *mode) {
@@ -687,9 +717,26 @@ static inline int SDL_SetPaletteColors(SDL_Palette *palette,
     for (int i = 0; i < ncolors && (first + i) < 256; i++) {
         int idx = first + i;
         palette->colors[idx] = colors[i];
-        uint32_t rgb = ((uint32_t)colors[i].r << 16) |
-                       ((uint32_t)colors[i].g << 8) |
-                       (uint32_t)colors[i].b;
+    }
+
+    if (first == 0 && ncolors >= 256) {
+        uint32_t pal32[256];
+        for (int i = 0; i < 256; i++) {
+            SDL_Color c = palette->colors[i];
+            pal32[i] = ((uint32_t)c.r << 16) |
+                       ((uint32_t)c.g << 8) |
+                       (uint32_t)c.b;
+        }
+        of_video_palette_bulk(pal32, 256);
+        return 0;
+    }
+
+    for (int i = 0; i < ncolors && (first + i) < 256; i++) {
+        int idx = first + i;
+        SDL_Color c = palette->colors[idx];
+        uint32_t rgb = ((uint32_t)c.r << 16) |
+                       ((uint32_t)c.g << 8) |
+                       (uint32_t)c.b;
         of_video_palette((uint8_t)idx, rgb);
     }
     return 0;

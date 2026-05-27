@@ -311,6 +311,8 @@ void services_table_init(void) {
     svc->video_get_mode = of_video_get_mode;
     svc->video_get_mode_count = of_video_get_mode_count;
     svc->video_get_mode_info = of_video_get_mode_info;
+    svc->video_get_caps = of_video_get_caps;
+    svc->video_check_mode = of_video_check_mode;
 }
 
 void services_table_set_smp_bank(const void *base, uint32_t size) {

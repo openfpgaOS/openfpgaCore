@@ -69,29 +69,33 @@
 `default_nettype none
 `timescale 1ns / 1ps
 
-module openFPGA_Pocket_Analogizer #(parameter MASTER_CLK_FREQ=50_000_000, parameter LINE_LENGTH) (
+module openFPGA_Pocket_Analogizer #(parameter MASTER_CLK_FREQ=50_000_000) (
 	input wire i_clk,
     input wire i_rst,
 	input wire i_ena,
 	//Video interface
 	input wire video_clk,
+	input wire sd_video_clk,
 	input wire [3:0] analog_video_type,
 	input wire [7:0] R,
 	input wire [7:0] G,
 	input wire [7:0] B,
+	input wire [7:0] R_Sd,
+	input wire [7:0] G_Sd,
+	input wire [7:0] B_Sd,
 	input wire Hblank,
 	input wire Vblank,
+	input wire Hblank_Sd,
+	input wire Vblank_Sd,
 	input wire BLANKn,
 	input wire Hsync,
 	input wire Vsync,
+	input wire Hsync_Sd,
+	input wire Vsync_Sd,
 	input wire Csync,
 	//Video Y/C Encoder interface
 	input wire [39:0] CHROMA_PHASE_INC,
 	input wire PALFLAG,
-	//Video SVGA Scandoubler interface
-	input wire ce_pix,
-	input wire scandoubler, //logic for disable/enable the scandoubler
-	input wire [2:0] fx, //0 disable, 1 scanlines 25%, 2 scanlines 50%, 3 scanlines 75%, 4 hq2x
 	// SNAC cart pin pass-through (driven by CPU SNAC shifter/GPIO)
 	input wire [7:4] snac_bank0_out,     // CPU-driven output values for bank0[7:4]
 	input wire       snac_bank0_dir,     // 1=output, 0=input (whole nibble)
@@ -123,9 +127,6 @@ module openFPGA_Pocket_Analogizer #(parameter MASTER_CLK_FREQ=50_000_000, parame
 		reg [5:0] Rout, Gout, Bout;
 		reg HsyncOut, VsyncOut, BLANKnOut;
 		wire [7:0] Yout, PrOut, PbOut;
-		wire [5:0] R_Sd, G_Sd, B_Sd;
-		wire Hsync_Sd, Vsync_Sd;
-		wire Hblank_Sd, Vblank_Sd;
 		wire BLANKn_SD = ~(Hblank_Sd || Vblank_Sd);
 		wire scandoubler_mode = (analog_video_type == 4'h5) ||
 		                         (analog_video_type == 4'h6) ||
@@ -169,9 +170,9 @@ module openFPGA_Pocket_Analogizer #(parameter MASTER_CLK_FREQ=50_000_000, parame
 				BLANKnOut = 1'b1; //ADV7123 needs this
 			end
 			4'h5, 4'h6, 4'h7, 4'hD, 4'hE, 4'hF: begin //Scandoubler modes
-				Rout = R_Sd;
-				Gout = G_Sd;
-				Bout = B_Sd;
+				Rout = R_Sd[7:2];
+				Gout = G_Sd[7:2];
+				Bout = B_Sd[7:2];
 				HsyncOut = Hsync_Sd;
 				VsyncOut = Vsync_Sd;
 				BLANKnOut = BLANKn_SD;
@@ -246,34 +247,7 @@ module openFPGA_Pocket_Analogizer #(parameter MASTER_CLK_FREQ=50_000_000, parame
 		.csync_o(yc_cs)
 	);
 
-	wire sd_pixel_ena;
-	scandoubler #(
-		.HCNT_WIDTH(10),
-		.COLOR_DEPTH(6),
-		.OUT_COLOR_DEPTH(6)
-	) sc_video (
-		.clk_sys(i_clk),
-		.bypass(1'b0),
-		.ce_divider(3'd3),
-		.pixel_ena(sd_pixel_ena),
-		.scanlines(fx[1:0]),
-		.hb_in(Hblank),
-		.vb_in(Vblank),
-		.hs_in(Hsync),
-		.vs_in(Vsync),
-		.r_in(R[7:2] & {6{BLANKn}}),
-		.g_in(G[7:2] & {6{BLANKn}}),
-		.b_in(B[7:2] & {6{BLANKn}}),
-		.hb_out(Hblank_Sd),
-		.vb_out(Vblank_Sd),
-		.hs_out(Hsync_Sd),
-		.vs_out(Vsync_Sd),
-		.r_out(R_Sd),
-		.g_out(G_Sd),
-		.b_out(B_Sd)
-	);
-
-	wire cart_video_clk = scandoubler_mode ? sd_pixel_ena : video_clk;
+		wire cart_video_clk = scandoubler_mode ? sd_video_clk : video_clk;
 
 	// Tri-state buffers for video output cart pins (bank1-3)
 	// Bank0, pin30, pin31 now driven by core_top SNAC/UART mux.

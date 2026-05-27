@@ -1925,6 +1925,12 @@ static long of_video_dispatch(long fid, long a0, long a1) {
         return of_video_get_mode_count();
     case OF_VIDEO_FID_GET_MODE_INFO:
         return of_video_get_mode_info((int)a0, (of_video_mode_t *)a1);
+    case OF_VIDEO_FID_GET_CAPS:
+        of_video_get_caps((of_video_caps_t *)a0);
+        return 0;
+    case OF_VIDEO_FID_CHECK_MODE:
+        return of_video_check_mode((const of_video_mode_t *)a0,
+                                   (of_video_mode_t *)a1);
     default:
         return OF_ERR_NOT_SUPPORTED;
     }

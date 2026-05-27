@@ -166,6 +166,7 @@ package-install:
 #   src/sdk/sdk.mk             <- src/firmware/api/sdk.mk
 #   src/sdk/app.ld             <- src/firmware/api/app.ld
 #   src/sdk/of_midi.c          <- src/firmware/api/of_midi.c
+#   src/sdk/pc/of_sdl2.c       <- src/firmware/api/pc/of_sdl2.c
 #   src/sdk/musl/include/      <- src/firmware/musl/include/
 #   src/sdk/musl/lib/          <- src/firmware/musl/lib/
 #                                  (libc.a, libm.a, crt1.o, crti.o, crtn.o)
@@ -208,15 +209,18 @@ sdk: check-target
 		# OS-owned files at src/sdk/ top level: opt-in SDK sources \
 		# (of_*.c, of_*.cpp), build rules (sdk.mk), and linker script \
 		# (app.ld).  --delete + --include/--exclude filters make this a \
-		# one-way mirror of exactly these patterns — pc/ and platforms/ \
-		# subdirs live alongside and are SDK-owned, so they're left \
-		# alone because they don't match any --include. \
+		# one-way mirror of exactly these patterns. \
 		rsync -a --delete \
 			--include='of_*.c' --include='of_*.cpp' \
 			--include='sdk.mk' --include='app.ld' \
 			--exclude='*' \
 			src/firmware/api/ "$$dir/src/sdk/"; \
 		printf "  $(C_OK)sources + sdk.mk + app.ld$(C_RESET) → src/sdk/\n"; \
+		\
+		# PC SDL backend used by sdk.mk's app_pc target. \
+		mkdir -p "$$dir/src/sdk/pc"; \
+		rsync -a --delete src/firmware/api/pc/ "$$dir/src/sdk/pc/"; \
+		printf "  $(C_OK)pc SDL backend$(C_RESET) → src/sdk/pc/\n"; \
 		\
 		# musl headers + static library + crt objects \
 		mkdir -p "$$dir/src/sdk/musl/include" "$$dir/src/sdk/musl/lib"; \

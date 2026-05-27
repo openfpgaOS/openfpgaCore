@@ -129,9 +129,16 @@
  * supported mode fits the scanout line cache and 1 MB FB slot spacing. */
 #define FB_MODE_SIZE        REG32(SYSREG_BASE + 0xE4)
 #define FB_MODE_STRIDE      REG32(SYSREG_BASE + 0xE8)
+#define VIDEO_SCALER_MODE   REG32(SYSREG_BASE + 0xEC)
 #define FB_MODE_MAX_WIDTH   800u
 #define FB_MODE_MAX_HEIGHT  600u
 #define FB_MODE_MAX_STRIDE  2048u
+
+/* Current physical output timing advertised by dist/core/video.json.
+ * Dynamic app framebuffers are scaled into this output unless a later
+ * physical-output mode switch changes the RTL timing. */
+#define VIDEO_PHYSICAL_WIDTH   640u
+#define VIDEO_PHYSICAL_HEIGHT  240u
 
 /* GPU fence-reached register, used by of_video_acquire_next() to
  * confirm a CMD_FLIP retired before waiting on fb_swap_pending.  GPU

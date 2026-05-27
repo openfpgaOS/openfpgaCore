@@ -1661,6 +1661,7 @@ localparam FBSS_BLEND_R_WAIT   = 4'd8;
 localparam FBSS_BLEND_LUT_WAIT = 4'd9;
 localparam FBSS_BLEND_APPLY    = 4'd10;
 localparam FBSS_BLEND_SELECT   = 4'd11;
+localparam FBSS_BLEND_LOOKUP   = 4'd13;
 reg [3:0] fbss;
 
 // Registered accumulator-hit depth test.  The hot z path was previously:
@@ -1690,7 +1691,7 @@ reg [31:0] blend_araddr;
 wire [7:0]  blend_lut_src_byte = fb_lane_read(blend_group_src_data, blend_lane_iter);
 wire [7:0]  blend_lut_fb_byte  = fb_lane_read(blend_result_word, blend_lane_iter);
 wire [14:0] blend_lut_addr_w   = {blend_lut_src_byte[7:1], blend_lut_fb_byte};
-wire [13:0] transluc_cache_lookup_addr = blend_lut_addr_w[14:1];
+wire [13:0] transluc_cache_lookup_addr = transluc_rd_addr[14:1];
 wire        transluc_cache_hit0 = transluc_cache_valid[0]
                                && (transluc_cache_addr[0] == transluc_cache_lookup_addr);
 wire        transluc_cache_hit1 = transluc_cache_valid[1]
@@ -1707,7 +1708,7 @@ wire [15:0] transluc_cache_half = transluc_cache_hit0 ? transluc_cache_data[0] :
                                   transluc_cache_hit1 ? transluc_cache_data[1] :
                                   transluc_cache_hit2 ? transluc_cache_data[2] :
                                   transluc_cache_data[3];
-wire [7:0]  transluc_cache_byte = blend_lut_addr_w[0]
+wire [7:0]  transluc_cache_byte = transluc_rd_addr[0]
                                 ? transluc_cache_half[15:8]
                                 : transluc_cache_half[7:0];
 // Pre-computed after the grouped FB read, consumed by FBSS_BLEND_APPLY.  Hoists
@@ -3517,24 +3518,29 @@ always @(posedge clk) begin : main_fsm
 
                 FBSS_BLEND_SELECT: begin : fbss_blend_select_blk
                     if (blend_group_mask[blend_lane_iter]) begin
-                        if (transluc_cache_hit) begin
-                            blend_result_word <= (blend_result_word & ~fb_lane_data_mask(blend_lane_iter))
-                                               | fb_lane_data(blend_lane_iter, transluc_cache_byte);
-                            if (blend_lane_iter == 2'd3) begin
-                                fbss <= FBSS_BLEND_APPLY;
-                            end else begin
-                                blend_lane_iter <= blend_lane_iter + 2'd1;
-                            end
-                        end else if (transluc_sram_lookup_ready) begin
-                            transluc_rd_addr      <= blend_lut_addr_w;
-                            transluc_lookup_fire  <= 1'b1;
-                            blend_lut_lane        <= blend_lane_iter;
-                            fbss                  <= FBSS_BLEND_LUT_WAIT;
-                        end
+                        transluc_rd_addr <= blend_lut_addr_w;
+                        blend_lut_lane   <= blend_lane_iter;
+                        fbss             <= FBSS_BLEND_LOOKUP;
                     end else if (blend_lane_iter == 2'd3) begin
                         fbss <= FBSS_BLEND_APPLY;
                     end else begin
                         blend_lane_iter <= blend_lane_iter + 2'd1;
+                    end
+                end
+
+                FBSS_BLEND_LOOKUP: begin
+                    if (transluc_cache_hit) begin
+                        blend_result_word <= (blend_result_word & ~fb_lane_data_mask(blend_lut_lane))
+                                           | fb_lane_data(blend_lut_lane, transluc_cache_byte);
+                        if (blend_lut_lane == 2'd3) begin
+                            fbss <= FBSS_BLEND_APPLY;
+                        end else begin
+                            blend_lane_iter <= blend_lut_lane + 2'd1;
+                            fbss <= FBSS_BLEND_SELECT;
+                        end
+                    end else if (transluc_sram_lookup_ready) begin
+                        transluc_lookup_fire <= 1'b1;
+                        fbss                 <= FBSS_BLEND_LUT_WAIT;
                     end
                 end
 

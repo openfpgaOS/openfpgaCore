@@ -54,6 +54,22 @@ typedef struct of_video_mode {
 } of_video_mode_t;
 #endif
 
+#ifndef OF_VIDEO_CAPS_T_DEFINED
+#define OF_VIDEO_CAPS_T_DEFINED
+typedef struct of_video_caps {
+    uint16_t max_width;
+    uint16_t max_height;
+    uint16_t max_stride;
+    uint16_t physical_width;
+    uint16_t physical_height;
+    uint16_t default_width;
+    uint16_t default_height;
+    uint16_t default_stride;
+    uint32_t max_frame_bytes;
+    uint32_t color_mode_mask;
+} of_video_caps_t;
+#endif
+
 /* Forward declare AWE per-voice config -- full definition in of_awe.h.
  * Kept opaque here so this header doesn't pull the AWE-specific types
  * into every TU that just wants the services table. */
@@ -327,6 +343,9 @@ struct of_services_table {
     void      (*video_get_mode)(of_video_mode_t *out);
     int       (*video_get_mode_count)(void);
     int       (*video_get_mode_info)(int index, of_video_mode_t *out);
+    void      (*video_get_caps)(of_video_caps_t *out);
+    int       (*video_check_mode)(const of_video_mode_t *mode,
+                                  of_video_mode_t *normalized);
 };
 
 #ifndef OF_PC

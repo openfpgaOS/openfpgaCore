@@ -75,6 +75,7 @@ module axi_periph_slave (
     output wire [9:0]  fb_width,
     output wire [9:0]  fb_height,
     output wire [15:0] fb_stride,
+    output wire [2:0]  video_scaler_slot,
 
     // Palette write interface
     output reg         pal_wr,
@@ -428,6 +429,7 @@ reg [2:0] color_mode_reg;
 reg [9:0] fb_width_reg;
 reg [9:0] fb_height_reg;
 reg [15:0] fb_stride_reg;
+reg [2:0] video_scaler_slot_reg;
 
 reg [15:0] ds_slot_id_reg;
 reg [31:0] ds_slot_offset_reg;
@@ -529,6 +531,7 @@ assign fb_display_addr = fb_display_addr_reg;
 assign fb_width = fb_width_reg;
 assign fb_height = fb_height_reg;
 assign fb_stride = fb_stride_reg;
+assign video_scaler_slot = video_scaler_slot_reg;
 
 // ============================================
 // CDC synchronizers
@@ -891,6 +894,7 @@ always @(posedge clk) begin
         fb_width_reg <= 10'd320;
         fb_height_reg <= 10'd240;
         fb_stride_reg <= 16'd320;
+        video_scaler_slot_reg <= 3'd0;
         fb_display_idx <= 2'd0;
         fb_ready_idx <= 2'd0;
         fb_swap_pending <= 1'b0;
@@ -1144,6 +1148,7 @@ always @(posedge clk) begin
                     fb_height_reg <= clamp_fb_height(req_wdata[31:16]);
                 end
                 6'd58: fb_stride_reg <= clamp_fb_stride(req_wdata[15:0]); // FB_MODE_STRIDE (0xE8)
+                6'd59: video_scaler_slot_reg <= req_wdata[2:0];   // VIDEO_SCALER_MODE (0xEC)
                 6'd63: irq_mask <= req_wdata[5:0];             // IRQ_MASK (0xFC)
 
                 default: ;
@@ -1346,6 +1351,7 @@ always @(*) begin
             6'd56: sysreg_rdata = 32'b0;  // swap hold retired
             6'd57: sysreg_rdata = {6'b0, fb_height_reg, 6'b0, fb_width_reg};
             6'd58: sysreg_rdata = {16'b0, fb_stride_reg};
+            6'd59: sysreg_rdata = {29'b0, video_scaler_slot_reg};
             6'd63: sysreg_rdata = {26'b0, irq_mask};
             default: ;
         endcase

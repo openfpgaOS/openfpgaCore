@@ -32,6 +32,22 @@ typedef struct of_video_mode {
 } of_video_mode_t;
 #endif
 
+#ifndef OF_VIDEO_CAPS_T_DEFINED
+#define OF_VIDEO_CAPS_T_DEFINED
+typedef struct of_video_caps {
+    uint16_t max_width;
+    uint16_t max_height;
+    uint16_t max_stride;
+    uint16_t physical_width;
+    uint16_t physical_height;
+    uint16_t default_width;
+    uint16_t default_height;
+    uint16_t default_stride;
+    uint32_t max_frame_bytes;
+    uint32_t color_mode_mask;
+} of_video_caps_t;
+#endif
+
 /* Initialize framebuffer subsystem (sets display mode, initial palette) */
 void of_video_init(void);
 
@@ -40,6 +56,8 @@ int of_video_set_mode(const of_video_mode_t *mode);
 void of_video_get_mode(of_video_mode_t *out);
 int of_video_get_mode_count(void);
 int of_video_get_mode_info(int index, of_video_mode_t *out);
+void of_video_get_caps(of_video_caps_t *out);
+int of_video_check_mode(const of_video_mode_t *mode, of_video_mode_t *normalized);
 
 /* Get pointer to current draw buffer (write pixels here) */
 uint8_t *of_video_get_surface(void);

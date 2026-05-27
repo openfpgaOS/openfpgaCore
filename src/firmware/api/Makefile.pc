@@ -1,7 +1,7 @@
 # openfpgaOS PC Build (SDL2)
 #
-# Apps use standard SDL2 directly. On PC, the real SDL2 library is linked.
-# The of.h header is still included for of_file_slot_register (no-op on PC).
+# Apps use standard SDL2 directly, and openfpgaOS of_* calls are backed by
+# the SDL2 simulator in pc/of_sdl2.c.
 #
 # Usage from an app directory:
 #   make -f ../../api/Makefile.pc APP=myapp SRCS="main.c util.c"
@@ -18,6 +18,7 @@ SDL_LIBS   := $(shell sdl2-config --libs 2>/dev/null || pkg-config --libs sdl2 2
 
 APP ?= app
 SRCS ?= main.c
+PC_BACKEND := $(API_DIR)/pc/of_sdl2.c
 
 CFLAGS += -DOF_PC -I$(API_DIR) -O2 -g -Wall -Wextra $(SDL_CFLAGS)
 CFLAGS += -falign-functions=64 -falign-loops=64
@@ -26,8 +27,8 @@ LDFLAGS += $(SDL_LIBS) -lm
 
 all: $(APP)
 
-$(APP): $(SRCS) $(API_DIR)/of.h
-	$(CC) $(CFLAGS) -o $@ $(SRCS) $(LDFLAGS)
+$(APP): $(SRCS) $(API_DIR)/of.h $(PC_BACKEND)
+	$(CC) $(CFLAGS) -o $@ $(SRCS) $(PC_BACKEND) $(LDFLAGS)
 
 clean:
 	rm -f $(APP)

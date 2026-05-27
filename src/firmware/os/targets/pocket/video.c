@@ -32,6 +32,8 @@ static of_video_mode_t vid_mode = {
 };
 static uint32_t vid_frame_bytes = FB_SIZE;
 
+/* Common presets for app menus/enumeration. of_video_set_mode() accepts any
+ * geometry that passes video_normalize_mode(); this table is not exhaustive. */
 static const of_video_mode_t video_modes[] = {
     {256, 224, 0, COLOR_MODE_8BIT, 0},
     {256, 240, 0, COLOR_MODE_8BIT, 0},
@@ -47,6 +49,32 @@ static const of_video_mode_t video_modes[] = {
     {640, 480, 0, COLOR_MODE_8BIT, 0},
     {800, 600, 0, COLOR_MODE_8BIT, 0},
 };
+
+typedef struct {
+    uint16_t width;
+    uint16_t height;
+    uint8_t slot;
+} video_scaler_mode_t;
+
+static const video_scaler_mode_t scaler_modes[] = {
+    {640, 240, 0},
+    {320, 200, 1},
+    {320, 224, 2},
+    {320, 240, 3},
+    {320, 256, 4},
+    {320, 288, 5},
+    {400, 300, 6},
+    {256, 240, 7},
+};
+
+static const video_scaler_mode_t *video_scaler_mode_for_size(uint16_t width,
+                                                             uint16_t height) {
+    for (unsigned i = 0; i < sizeof(scaler_modes) / sizeof(scaler_modes[0]); i++) {
+        if (scaler_modes[i].width == width && scaler_modes[i].height == height)
+            return &scaler_modes[i];
+    }
+    return &scaler_modes[0];
+}
 
 static uint32_t video_line_bytes(uint16_t width, uint8_t color_mode) {
     switch (color_mode) {
@@ -70,7 +98,7 @@ static uint32_t video_align_stride(uint32_t bytes) {
 static int video_normalize_mode(const of_video_mode_t *in,
                                 of_video_mode_t *out,
                                 uint32_t *frame_bytes_out) {
-    if (!in || !out || in->width == 0 || in->height == 0)
+    if (!in || in->width == 0 || in->height == 0)
         return -1;
     if (in->width > FB_MODE_MAX_WIDTH || in->height > FB_MODE_MAX_HEIGHT)
         return -1;
@@ -87,9 +115,11 @@ static int video_normalize_mode(const of_video_mode_t *in,
     if (frame_bytes == 0 || frame_bytes > (FB1_BASE - FB0_BASE))
         return -1;
 
-    *out = *in;
-    out->stride = (uint16_t)stride;
-    out->reserved = 0;
+    if (out) {
+        *out = *in;
+        out->stride = (uint16_t)stride;
+        out->reserved = 0;
+    }
     if (frame_bytes_out)
         *frame_bytes_out = frame_bytes;
     return 0;
@@ -99,12 +129,16 @@ static void video_program_app_mode(void) {
     SYS_COLOR_MODE = vid_mode.color_mode;
     FB_MODE_SIZE = ((uint32_t)vid_mode.height << 16) | vid_mode.width;
     FB_MODE_STRIDE = vid_mode.stride;
+    VIDEO_SCALER_MODE =
+        video_scaler_mode_for_size(vid_mode.width, vid_mode.height)->slot;
 }
 
 static void video_program_terminal_mode(void) {
     SYS_COLOR_MODE = COLOR_MODE_8BIT;
     FB_MODE_SIZE = ((uint32_t)FB_HEIGHT << 16) | FB_WIDTH;
     FB_MODE_STRIDE = FB_STRIDE;
+    VIDEO_SCALER_MODE =
+        video_scaler_mode_for_size(FB_WIDTH, FB_HEIGHT)->slot;
 }
 
 static void video_program_visible_mode(void) {
@@ -504,6 +538,35 @@ int of_video_get_mode_info(int index, of_video_mode_t *out) {
 
     uint32_t frame_bytes;
     return video_normalize_mode(&video_modes[index], out, &frame_bytes);
+}
+
+void of_video_get_caps(of_video_caps_t *out) {
+    if (!out)
+        return;
+
+    out->max_width = FB_MODE_MAX_WIDTH;
+    out->max_height = FB_MODE_MAX_HEIGHT;
+    out->max_stride = FB_MODE_MAX_STRIDE;
+    const video_scaler_mode_t *scaler =
+        video_scaler_mode_for_size(vid_mode.width, vid_mode.height);
+    out->physical_width = scaler->width;
+    out->physical_height = scaler->height;
+    out->default_width = FB_WIDTH;
+    out->default_height = FB_HEIGHT;
+    out->default_stride = FB_STRIDE;
+    out->max_frame_bytes = FB1_BASE - FB0_BASE;
+    out->color_mode_mask = (1u << COLOR_MODE_8BIT) |
+                           (1u << COLOR_MODE_4BIT) |
+                           (1u << COLOR_MODE_2BIT) |
+                           (1u << COLOR_MODE_RGB565) |
+                           (1u << COLOR_MODE_RGB555) |
+                           (1u << COLOR_MODE_RGBA5551);
+}
+
+int of_video_check_mode(const of_video_mode_t *mode,
+                        of_video_mode_t *normalized) {
+    uint32_t frame_bytes;
+    return video_normalize_mode(mode, normalized, &frame_bytes);
 }
 
 void of_video_set_color_mode(int mode) {

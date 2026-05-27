@@ -418,31 +418,42 @@ assign cart_pin30_pwroff_reset = cart_gpio_mode ? 1'b1 : 1'b0;
 // idle-high to UART RX to prevent adapter traffic from becoming console input.
 wire uart_rx_serial = cart_gpio_mode ? 1'b1 : cart_tran_pin31;
 
+wire        analogizer_sd_clk;
+wire [23:0] analogizer_sd_rgb;
+wire        analogizer_sd_hblank;
+wire        analogizer_sd_vblank;
+wire        analogizer_sd_hsync;
+wire        analogizer_sd_vsync;
+
 // Analogizer: video output only — SNAC pins now driven by CPU through above mux
 openFPGA_Pocket_Analogizer #(
-    .MASTER_CLK_FREQ(49_152_000),
-    .LINE_LENGTH(640)
+    .MASTER_CLK_FREQ(49_152_000)
 ) analogizer (
     .i_clk(clk_core_49152),
-    .i_rst(~reset_n),
+    .i_rst(~reset_n_analog),
     .i_ena(analogizer_ena_core),
     // Video interface
     .video_clk(clk_core_12288),
+    .sd_video_clk(analogizer_sd_clk),
     .analog_video_type(analogizer_video_type_core),
     .R(vidout_rgb[23:16]),
     .G(vidout_rgb[15:8]),
     .B(vidout_rgb[7:0]),
+    .R_Sd(analogizer_sd_rgb[23:16]),
+    .G_Sd(analogizer_sd_rgb[15:8]),
+    .B_Sd(analogizer_sd_rgb[7:0]),
     .Hblank(crt_hblank),
     .Vblank(crt_vblank),
+    .Hblank_Sd(analogizer_sd_hblank),
+    .Vblank_Sd(analogizer_sd_vblank),
     .BLANKn(crt_blankn),
     .Hsync(HSync),
     .Vsync(VSync),
+    .Hsync_Sd(analogizer_sd_hsync),
+    .Vsync_Sd(analogizer_sd_vsync),
     .Csync(crt_csync),
     .CHROMA_PHASE_INC(CHROMA_PHASE_INC),
     .PALFLAG(PALFLAG),
-    .ce_pix(analog_ce_pix),
-    .scandoubler(1'b1),
-    .fx(fx),
     // SNAC cart pin pass-through from CPU GPIO
     .snac_bank0_out({snac_pin_out[5], snac_pin_out[4], snac_pin_out[3], snac_pin_out[2]}),
     .snac_bank0_dir(snac_pin_dir[5] | snac_pin_dir[4] | snac_pin_dir[3] | snac_pin_dir[2]),
@@ -1261,6 +1272,17 @@ end
             reset_vid_sync <= {reset_vid_sync[0], 1'b1};
     end
 
+    // Synchronize reset deassertion to the 49.152 MHz Analogizer helper
+    // domain used by the shared scanout/line-doubler timing.
+    reg [1:0] reset_analog_sync;
+    wire reset_n_analog = reset_analog_sync[1];
+    always @(posedge clk_core_49152 or negedge reset_n) begin
+        if (~reset_n)
+            reset_analog_sync <= 2'b0;
+        else
+            reset_analog_sync <= {reset_analog_sync[0], 1'b1};
+    end
+
     wire            bcr_init_done_s;
     synch_3 sync_bcr(bcr_init_done, bcr_init_done_s, clk_74a);
     wire            status_boot_done  = bcr_init_done_s;
@@ -1649,6 +1671,7 @@ assign video_hs = vidout_hs;
     wire [9:0] fb_width;
     wire [9:0] fb_height;
     wire [15:0] fb_stride;
+    wire [2:0] video_scaler_slot_cpu;
 
     // VRR: firmware-written V_TOTAL
     wire [9:0] vrr_v_total_cpu;
@@ -1658,6 +1681,8 @@ assign video_hs = vidout_hs;
     reg [9:0]  vrr_vt_hold;         // stable copy latched in clk_cpu
     reg [2:0]  vrr_toggle_sync;     // 3-stage synchronizer in clk_vid
     reg [9:0]  vrr_vt_sync2;        // output in clk_vid domain
+    reg [2:0]  video_scaler_slot_s1;
+    reg [2:0]  video_scaler_slot_vid;
 
     always @(posedge clk_cpu or negedge reset_n_cpu_core) begin
         if (~reset_n_cpu_core) begin
@@ -1673,12 +1698,83 @@ assign video_hs = vidout_hs;
         if (~reset_n_vid) begin
             vrr_toggle_sync <= 3'b0;
             vrr_vt_sync2 <= CRT_V_TOTAL_DEFAULT;
+            video_scaler_slot_s1 <= 3'd0;
+            video_scaler_slot_vid <= 3'd0;
         end else begin
             vrr_toggle_sync <= {vrr_toggle_sync[1:0], vrr_toggle_cpu};
             if (vrr_toggle_sync[2] != vrr_toggle_sync[1])
                 vrr_vt_sync2 <= vrr_vt_hold;  // stable — toggle edge means new value ready
+            video_scaler_slot_s1 <= video_scaler_slot_cpu;
+            video_scaler_slot_vid <= video_scaler_slot_s1;
         end
     end
+
+    // Pocket scaler slots advertised in dist/core/video.json.  Slot 0 is
+    // the historical 640x240 output used as the fallback for arbitrary app
+    // framebuffer sizes that do not have a physical scaler mode.
+    localparam CRT_V_SYNC   = 3;
+    localparam CRT_V_BPORCH = 15;
+    localparam CRT_V_FPORCH = 4;
+    localparam CRT_H_SYNC   = 58;
+    localparam CRT_H_BPORCH = 62;
+    localparam CRT_H_FPORCH = 20;
+    localparam CRT_H_TOTAL  = CRT_H_SYNC + CRT_H_BPORCH + 640 + CRT_H_FPORCH;
+    localparam CRT_V_TOTAL_DEFAULT = CRT_V_SYNC + CRT_V_BPORCH + 240 + CRT_V_FPORCH; // 262
+
+    function [9:0] scaler_slot_width;
+        input [2:0] slot;
+        begin
+            case (slot)
+                3'd1: scaler_slot_width = 10'd320;
+                3'd2: scaler_slot_width = 10'd320;
+                3'd3: scaler_slot_width = 10'd320;
+                3'd4: scaler_slot_width = 10'd320;
+                3'd5: scaler_slot_width = 10'd320;
+                3'd6: scaler_slot_width = 10'd400;
+                3'd7: scaler_slot_width = 10'd256;
+                default: scaler_slot_width = 10'd640;
+            endcase
+        end
+    endfunction
+
+    function [9:0] scaler_slot_height;
+        input [2:0] slot;
+        begin
+            case (slot)
+                3'd1: scaler_slot_height = 10'd200;
+                3'd2: scaler_slot_height = 10'd224;
+                3'd3: scaler_slot_height = 10'd240;
+                3'd4: scaler_slot_height = 10'd256;
+                3'd5: scaler_slot_height = 10'd288;
+                3'd6: scaler_slot_height = 10'd300;
+                3'd7: scaler_slot_height = 10'd240;
+                default: scaler_slot_height = 10'd240;
+            endcase
+        end
+    endfunction
+
+    wire [9:0] crt_h_active = scaler_slot_width(video_scaler_slot_vid);
+    wire [9:0] crt_v_active = scaler_slot_height(video_scaler_slot_vid);
+    wire [9:0] crt_h_active_end =
+        CRT_H_SYNC + CRT_H_BPORCH + crt_h_active;
+    wire [9:0] crt_v_active_end =
+        CRT_V_SYNC + CRT_V_BPORCH + crt_v_active;
+    wire [9:0] crt_v_total_min =
+        CRT_V_SYNC + CRT_V_BPORCH + crt_v_active;
+    reg [9:0] crt_v_total;
+    reg crt_hs, crt_vs, crt_de;
+    reg crt_hblank, crt_vblank;
+
+    // VRR: dynamic V_TOTAL from CPU register. V_TOTAL=262 measured about
+    // 59.225 Hz; normal LCD mode may request an experimental V_TOTAL=258
+    // fast mode (~60.14 Hz). Physical scaler modes with taller active
+    // regions clamp the request up so active video is never truncated.
+    wire [9:0] vrr_vt_clamped = (vrr_vt_sync2 < 10'd258) ? 10'd258 :
+                                (vrr_vt_sync2 > 10'd375) ? 10'd375 :
+                                (vrr_vt_sync2 == 10'd0)  ? 10'd258 :
+                                                           vrr_vt_sync2;
+    wire [9:0] vrr_vt_safe =
+        (vrr_vt_clamped < crt_v_total_min) ? crt_v_total_min : vrr_vt_clamped;
 
     // VexiiRiscv CPU system — AXI4 bus routing
     cpu_system cpu (
@@ -1809,6 +1905,7 @@ assign video_hs = vidout_hs;
         .fb_width(fb_width),
         .fb_height(fb_height),
         .fb_stride(fb_stride),
+        .video_scaler_slot(video_scaler_slot_cpu),
         // Palette write interface
         .pal_wr(cpu_pal_wr),
         .pal_addr(cpu_pal_addr),
@@ -2091,11 +2188,23 @@ assign video_hs = vidout_hs;
         .y_count(y_count),
         .line_start(line_start),
         .pixel_color(framebuffer_pixel_color),
+        .clk_analog(clk_core_49152),
+        .reset_analog_n(reset_n_analog),
+        .analog_ce_pix(analog_ce_pix),
+        .analog_scanlines(fx[1:0]),
+        .analog_pixel_clk(analogizer_sd_clk),
+        .analog_pixel_color(analogizer_sd_rgb),
+        .analog_hblank(analogizer_sd_hblank),
+        .analog_vblank(analogizer_sd_vblank),
+        .analog_hsync(analogizer_sd_hsync),
+        .analog_vsync(analogizer_sd_vsync),
         .fb_base_addr(fb_display_addr),
         .color_mode(color_mode),
         .fb_width(fb_width),
         .fb_height(fb_height),
         .fb_stride(fb_stride),
+        .out_width(crt_h_active),
+        .out_height(crt_v_active),
         .clk_sdram(clk_ram_controller),
         .burst_rd(video_burst_rd),
         .burst_addr(video_burst_addr),
@@ -2111,33 +2220,6 @@ assign video_hs = vidout_hs;
         .pal_busy(cpu_pal_busy)
     );
 
-
-        // ---  CRT 15.7kHz / VRR Parameters ---
-    localparam CRT_V_SYNC   = 3;
-    localparam CRT_V_BPORCH = 15;
-    localparam CRT_V_FPORCH = 4;
-    localparam CRT_V_ACTIVE = 240;
-    localparam CRT_V_TOTAL_DEFAULT = CRT_V_SYNC + CRT_V_BPORCH + CRT_V_ACTIVE + CRT_V_FPORCH; // 262
-    localparam CRT_H_TOTAL  = CRT_H_SYNC + CRT_H_BPORCH + CRT_H_ACTIVE + CRT_H_FPORCH;
-    localparam CRT_H_SYNC   = 58;
-    localparam CRT_H_BPORCH = 62;
-    localparam CRT_H_FPORCH = 20;
-    localparam CRT_H_ACTIVE = 640;
-    reg crt_hs, crt_vs, crt_de;
-    reg crt_hblank, crt_vblank;
-
-    // VRR: dynamic V_TOTAL from CPU register. V_TOTAL=262 measured about
-    // 59.225 Hz; normal LCD mode may request an experimental V_TOTAL=258
-    // fast mode (~60.14 Hz). Analogizer PAL mode locks to V_TOTAL=315
-    // (~50 Hz). The active image ends after line 257, so V_TOTAL=258 keeps
-    // all 240 active lines but leaves no trailing blanking line.
-    reg [9:0] crt_v_total;
-    wire [9:0] vrr_vt_safe = (vrr_vt_sync2 < 10'd258) ? 10'd258 :
-                              (vrr_vt_sync2 > 10'd375) ? 10'd375 :
-                              (vrr_vt_sync2 == 10'd0)  ? 10'd258 : vrr_vt_sync2;
-
-    wire [9:0]  visible_x = x_count - CRT_H_SYNC - CRT_H_BPORCH;
-    wire [9:0]  visible_y = y_count - CRT_V_SYNC - CRT_V_BPORCH;
     assign early_vblank_safe_vid = (y_count < (CRT_V_SYNC + CRT_V_BPORCH));
 
 always @(posedge clk_vid or negedge reset_n_vid) begin
@@ -2175,8 +2257,10 @@ always @(posedge clk_vid or negedge reset_n_vid) begin
         end
 
         // CRT Blank
-        crt_hblank <= x_count < (CRT_H_SYNC + CRT_H_BPORCH) || (x_count >= CRT_H_SYNC + CRT_H_BPORCH + CRT_H_ACTIVE);
-        crt_vblank <= y_count < (CRT_V_SYNC + CRT_V_BPORCH) || (y_count >= CRT_V_SYNC + CRT_V_BPORCH + CRT_V_ACTIVE);
+        crt_hblank <= x_count < (CRT_H_SYNC + CRT_H_BPORCH) ||
+                      (x_count >= crt_h_active_end);
+        crt_vblank <= y_count < (CRT_V_SYNC + CRT_V_BPORCH) ||
+                      (y_count >= crt_v_active_end);
 
         // Generate CRT sync
         // --- Generación de Syncs (Lógica Negativa) ---
@@ -2201,11 +2285,15 @@ always @(posedge clk_vid or negedge reset_n_vid) begin
 
         // inactive screen areas are black
         vidout_rgb <= 24'h0;
+        if(x_count == crt_h_active_end) begin
+            // APF scaler-slot command: RGB[23:13]=slot, RGB[2:0]=0 after DE falls.
+            vidout_rgb <= {8'b0, video_scaler_slot_vid, 13'b0};
+        end
 
         // generate active video, now accounts for CRT specific timings but making compatible with Analogue Pocket video also
-        if(x_count >= CRT_H_SYNC + CRT_H_BPORCH  && x_count < CRT_H_SYNC + CRT_H_BPORCH + CRT_H_ACTIVE) begin
+        if(x_count >= CRT_H_SYNC + CRT_H_BPORCH  && x_count < crt_h_active_end) begin
 
-            if(y_count >= CRT_V_SYNC + CRT_V_BPORCH && y_count < CRT_V_SYNC + CRT_V_BPORCH + CRT_V_ACTIVE) begin
+            if(y_count >= CRT_V_SYNC + CRT_V_BPORCH && y_count < crt_v_active_end) begin
                 // data enable. this is the active region of the line
                 vidout_de <= 1;
 
