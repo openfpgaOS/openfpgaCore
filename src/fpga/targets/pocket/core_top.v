@@ -84,8 +84,18 @@ output  wire            cram0_we_n,
 output  wire            cram0_ub_n,
 output  wire            cram0_lb_n,
 
-// cram1 chip retired in memory-arch v2 — pins are unassigned in the
-// qsf so this block is gone from the module port list.
+output  wire    [21:16] cram1_a,
+inout   wire    [15:0]  cram1_dq,
+input   wire            cram1_wait,
+output  wire            cram1_clk,
+output  wire            cram1_adv_n,
+output  wire            cram1_cre,
+output  wire            cram1_ce0_n,
+output  wire            cram1_ce1_n,
+output  wire            cram1_oe_n,
+output  wire            cram1_we_n,
+output  wire            cram1_ub_n,
+output  wire            cram1_lb_n,
 
 ///////////////////////////////////////////////////
 // sdram, 512mbit 16bit
@@ -773,6 +783,7 @@ cram0_controller #(
     .cram_ub_n(cram0_ub_n),
     .cram_lb_n(cram0_lb_n),
     .burst_rd(1'b0),
+    .burst_addr(22'd0),
     .burst_len(6'd0),
     .burst_rdata_valid(),
     .burst_rdata(),
@@ -783,33 +794,97 @@ cram0_controller #(
 );
 
 // ============================================================
+// Shared PSRAM target demux.
+//
+// cpu_system emits one AXI target for all PSRAM addresses.  Keeping the
+// CRAM0/CRAM1 split here costs a few muxes instead of a full extra
+// cpu_target_port in the CPU fabric.
+// ============================================================
+wire psram_ar_to_cram1 = (cpu_m_cram0_araddr[31:24] == 8'h31);
+wire psram_aw_to_cram1 = (cpu_m_cram0_awaddr[31:24] == 8'h31);
+reg  psram_wr_active;
+reg  psram_wr_to_cram1;
+wire psram_w_to_cram1 = psram_wr_active ? psram_wr_to_cram1 : psram_aw_to_cram1;
+
+always @(posedge clk_cpu or negedge reset_n_cpu_core) begin
+    if (!reset_n_cpu_core) begin
+        psram_wr_active  <= 1'b0;
+        psram_wr_to_cram1 <= 1'b0;
+    end else begin
+        if (cpu_m_cram0_bvalid)
+            psram_wr_active <= 1'b0;
+
+        if (cpu_m_cram0_awvalid && cpu_m_cram0_awready) begin
+            psram_wr_active  <= 1'b1;
+            psram_wr_to_cram1 <= psram_aw_to_cram1;
+        end
+    end
+end
+
+assign cram0_axi_arvalid = cpu_m_cram0_arvalid && !psram_ar_to_cram1;
+assign cpu_m_cram1_arvalid = cpu_m_cram0_arvalid && psram_ar_to_cram1;
+assign cram0_axi_araddr = cpu_m_cram0_araddr;
+assign cpu_m_cram1_araddr = cpu_m_cram0_araddr;
+assign cram0_axi_arlen = cpu_m_cram0_arlen;
+assign cpu_m_cram1_arlen = cpu_m_cram0_arlen;
+assign cpu_m_cram0_arready = psram_ar_to_cram1 ? cpu_m_cram1_arready : cram0_axi_arready;
+
+assign cpu_m_cram0_rvalid = cram0_axi_rvalid | cpu_m_cram1_rvalid;
+assign cpu_m_cram0_rdata  = cpu_m_cram1_rvalid ? cpu_m_cram1_rdata  : cram0_axi_rdata;
+assign cpu_m_cram0_rresp  = cpu_m_cram1_rvalid ? cpu_m_cram1_rresp  : cram0_axi_rresp;
+assign cpu_m_cram0_rlast  = cpu_m_cram1_rvalid ? cpu_m_cram1_rlast  : cram0_axi_rlast;
+assign cram0_axi_rready   = cpu_m_cram0_rready && cram0_axi_rvalid;
+assign cpu_m_cram1_rready = cpu_m_cram0_rready && cpu_m_cram1_rvalid;
+
+assign cram0_axi_awvalid = cpu_m_cram0_awvalid && !psram_aw_to_cram1;
+assign cpu_m_cram1_awvalid = cpu_m_cram0_awvalid && psram_aw_to_cram1;
+assign cram0_axi_awaddr = cpu_m_cram0_awaddr;
+assign cpu_m_cram1_awaddr = cpu_m_cram0_awaddr;
+assign cram0_axi_awlen = cpu_m_cram0_awlen;
+assign cpu_m_cram1_awlen = cpu_m_cram0_awlen;
+assign cpu_m_cram0_awready = psram_aw_to_cram1 ? cpu_m_cram1_awready : cram0_axi_awready;
+
+assign cram0_axi_wvalid = cpu_m_cram0_wvalid && !psram_w_to_cram1;
+assign cpu_m_cram1_wvalid = cpu_m_cram0_wvalid && psram_w_to_cram1;
+assign cram0_axi_wdata = cpu_m_cram0_wdata;
+assign cpu_m_cram1_wdata = cpu_m_cram0_wdata;
+assign cram0_axi_wstrb = cpu_m_cram0_wstrb;
+assign cpu_m_cram1_wstrb = cpu_m_cram0_wstrb;
+assign cram0_axi_wlast = cpu_m_cram0_wlast;
+assign cpu_m_cram1_wlast = cpu_m_cram0_wlast;
+assign cpu_m_cram0_wready = psram_w_to_cram1 ? cpu_m_cram1_wready : cram0_axi_wready;
+
+assign cpu_m_cram0_bvalid = cram0_axi_bvalid | cpu_m_cram1_bvalid;
+assign cpu_m_cram0_bresp  = cpu_m_cram1_bvalid ? cpu_m_cram1_bresp : cram0_axi_bresp;
+
+// ============================================================
 // CRAM0 CDC — CPU-side AXI slave (clk_cpu) → word-iface (clk_74a)
 // ============================================================
 cram0_cdc cpu_cram0_axi (
     .clk_cpu        (clk_cpu),
     .reset_n_cpu    (reset_n_cpu_cram),
 
-    .s_axi_arvalid  (cpu_m_cram0_arvalid),
-    .s_axi_arready  (cpu_m_cram0_arready),
-    .s_axi_araddr   (cpu_m_cram0_araddr),
-    .s_axi_arlen    (cpu_m_cram0_arlen),
-    .s_axi_rvalid   (cpu_m_cram0_rvalid),
-    .s_axi_rready   (cpu_m_cram0_rready),
-    .s_axi_rdata    (cpu_m_cram0_rdata),
-    .s_axi_rresp    (cpu_m_cram0_rresp),
-    .s_axi_rlast    (cpu_m_cram0_rlast),
-    .s_axi_awvalid  (cpu_m_cram0_awvalid),
-    .s_axi_awready  (cpu_m_cram0_awready),
-    .s_axi_awaddr   (cpu_m_cram0_awaddr),
-    .s_axi_awlen    (cpu_m_cram0_awlen),
-    .s_axi_wvalid   (cpu_m_cram0_wvalid),
-    .s_axi_wready   (cpu_m_cram0_wready),
-    .s_axi_wdata    (cpu_m_cram0_wdata),
-    .s_axi_wstrb    (cpu_m_cram0_wstrb),
-    .s_axi_wlast    (cpu_m_cram0_wlast),
-    .s_axi_bvalid   (cpu_m_cram0_bvalid),
+    .s_axi_arvalid  (cram0_axi_arvalid),
+    .s_axi_arready  (cram0_axi_arready),
+    .s_axi_araddr   (cram0_axi_araddr),
+    .s_axi_arlen    (cram0_axi_arlen),
+    .s_axi_rvalid   (cram0_axi_rvalid),
+    .s_axi_rready   (cram0_axi_rready),
+    .s_axi_rdata    (cram0_axi_rdata),
+    .s_axi_rresp    (cram0_axi_rresp),
+    .s_axi_rlast    (cram0_axi_rlast),
+    .s_axi_awvalid  (cram0_axi_awvalid),
+    .s_axi_awready  (cram0_axi_awready),
+    .s_axi_awaddr   (cram0_axi_awaddr),
+    .s_axi_awlen    (cram0_axi_awlen),
+    .s_axi_wvalid   (cram0_axi_wvalid),
+    .s_axi_wready   (cram0_axi_wready),
+    .s_axi_wdata    (cram0_axi_wdata),
+    .s_axi_wstrb    (cram0_axi_wstrb),
+    .s_axi_wlast    (cram0_axi_wlast),
+    .s_axi_bvalid   (cram0_axi_bvalid),
     .s_axi_bready   (1'b1),
-    .s_axi_bresp    (cpu_m_cram0_bresp),
+    .s_axi_bresp    (cram0_axi_bresp),
 
     .clk_bridge     (clk_74a),
     .reset_n_bridge (pll_ram_locked_74a),
@@ -821,6 +896,193 @@ cram0_cdc cpu_cram0_axi (
     .b_word_rdata   (cpu_cram0_word_rdata),
     .b_word_busy    (cpu_cram0_word_busy),
     .b_word_rdata_valid (cpu_cram0_word_rdata_valid)
+);
+
+// ============================================================
+// CRAM1 executable PSRAM (clk_cpu domain)
+// ============================================================
+// CRAM1 is owned by the CPU fabric.  Firmware writes OS/app executable
+// images into this chip and then executes them directly through the
+// I$/D$ cached AXI path.  Configure both dies for sync-burst reads before
+// releasing the CPU so instruction and cache-line refills are valid.
+reg [2:0] pll_ram_locked_cpu_sync;
+initial pll_ram_locked_cpu_sync = 3'b000;
+always @(posedge clk_cpu)
+    pll_ram_locked_cpu_sync <= {pll_ram_locked_cpu_sync[1:0], pll_ram_locked};
+wire pll_ram_locked_cpu = pll_ram_locked_cpu_sync[2];
+
+wire        cram1_raw_busy;
+reg [3:0]   cram1_bcr_state;
+reg         cram1_bcr_config_en;
+reg         cram1_bcr_bank_sel;
+(* keep, syn_keep, maxfan = 160 *) reg cram1_bcr_init_done;
+reg [9:0]   cram1_bcr_settle_cnt;
+
+localparam [3:0] CRAM1_BCR_ST_WAIT_PLL   = 4'd0;
+localparam [3:0] CRAM1_BCR_ST_PULSE_DIE0 = 4'd1;
+localparam [3:0] CRAM1_BCR_ST_BUSY_DIE0  = 4'd2;
+localparam [3:0] CRAM1_BCR_ST_IDLE_DIE0  = 4'd3;
+localparam [3:0] CRAM1_BCR_ST_PULSE_DIE1 = 4'd4;
+localparam [3:0] CRAM1_BCR_ST_BUSY_DIE1  = 4'd5;
+localparam [3:0] CRAM1_BCR_ST_IDLE_DIE1  = 4'd6;
+localparam [3:0] CRAM1_BCR_ST_SETTLE     = 4'd7;
+localparam [3:0] CRAM1_BCR_ST_DONE       = 4'd8;
+
+localparam [9:0]  CRAM1_BCR_SETTLE_CYCLES = 10'd511;
+localparam [15:0] CRAM1_BCR_VALUE = 16'h641F;  // sync burst, fixed latency
+
+initial begin
+    cram1_bcr_state     = CRAM1_BCR_ST_WAIT_PLL;
+    cram1_bcr_config_en = 1'b0;
+    cram1_bcr_bank_sel  = 1'b0;
+    cram1_bcr_init_done = 1'b0;
+    cram1_bcr_settle_cnt = 10'd0;
+end
+
+always @(posedge clk_cpu) begin
+    cram1_bcr_config_en <= 1'b0;
+
+    if (!pll_ram_locked_cpu) begin
+        cram1_bcr_state <= CRAM1_BCR_ST_WAIT_PLL;
+        cram1_bcr_bank_sel <= 1'b0;
+        cram1_bcr_init_done <= 1'b0;
+        cram1_bcr_settle_cnt <= 10'd0;
+    end else begin
+        case (cram1_bcr_state)
+        CRAM1_BCR_ST_WAIT_PLL:
+            cram1_bcr_state <= CRAM1_BCR_ST_PULSE_DIE0;
+
+        CRAM1_BCR_ST_PULSE_DIE0: begin
+            cram1_bcr_bank_sel <= 1'b0;
+            cram1_bcr_config_en <= 1'b1;
+            cram1_bcr_state <= CRAM1_BCR_ST_BUSY_DIE0;
+        end
+        CRAM1_BCR_ST_BUSY_DIE0:
+            if (cram1_raw_busy)
+                cram1_bcr_state <= CRAM1_BCR_ST_IDLE_DIE0;
+        CRAM1_BCR_ST_IDLE_DIE0:
+            if (!cram1_raw_busy)
+                cram1_bcr_state <= CRAM1_BCR_ST_PULSE_DIE1;
+
+        CRAM1_BCR_ST_PULSE_DIE1: begin
+            cram1_bcr_bank_sel <= 1'b1;
+            cram1_bcr_config_en <= 1'b1;
+            cram1_bcr_state <= CRAM1_BCR_ST_BUSY_DIE1;
+        end
+        CRAM1_BCR_ST_BUSY_DIE1:
+            if (cram1_raw_busy)
+                cram1_bcr_state <= CRAM1_BCR_ST_IDLE_DIE1;
+        CRAM1_BCR_ST_IDLE_DIE1:
+            if (!cram1_raw_busy) begin
+                cram1_bcr_settle_cnt <= CRAM1_BCR_SETTLE_CYCLES;
+                cram1_bcr_state <= CRAM1_BCR_ST_SETTLE;
+            end
+
+        CRAM1_BCR_ST_SETTLE: begin
+            if (cram1_bcr_settle_cnt == 10'd0) begin
+                cram1_bcr_init_done <= 1'b1;
+                cram1_bcr_state <= CRAM1_BCR_ST_DONE;
+            end else begin
+                cram1_bcr_settle_cnt <= cram1_bcr_settle_cnt - 10'd1;
+            end
+        end
+
+        CRAM1_BCR_ST_DONE:
+            ;
+        default:
+            cram1_bcr_state <= CRAM1_BCR_ST_WAIT_PLL;
+        endcase
+    end
+end
+
+wire        cram1_word_rd;
+wire        cram1_word_wr;
+wire [21:0] cram1_word_addr;
+wire [31:0] cram1_word_wdata;
+wire [3:0]  cram1_word_wstrb;
+wire [31:0] cram1_word_rdata;
+wire        cram1_word_busy;
+wire        cram1_word_rdata_valid;
+wire        cram1_burst_rd;
+wire [21:0] cram1_burst_addr;
+wire [5:0]  cram1_burst_len;
+wire [31:0] cram1_burst_rdata;
+wire        cram1_burst_rdata_valid;
+
+axi_cram1_slave cpu_cram1_axi (
+    .clk            (clk_cpu),
+    .reset_n        (reset_n_cpu_core),
+    .s_axi_arvalid  (cpu_m_cram1_arvalid),
+    .s_axi_arready  (cpu_m_cram1_arready),
+    .s_axi_araddr   (cpu_m_cram1_araddr),
+    .s_axi_arlen    (cpu_m_cram1_arlen),
+    .s_axi_rvalid   (cpu_m_cram1_rvalid),
+    .s_axi_rready   (cpu_m_cram1_rready),
+    .s_axi_rdata    (cpu_m_cram1_rdata),
+    .s_axi_rresp    (cpu_m_cram1_rresp),
+    .s_axi_rlast    (cpu_m_cram1_rlast),
+    .s_axi_awvalid  (cpu_m_cram1_awvalid),
+    .s_axi_awready  (cpu_m_cram1_awready),
+    .s_axi_awaddr   (cpu_m_cram1_awaddr),
+    .s_axi_awlen    (cpu_m_cram1_awlen),
+    .s_axi_wvalid   (cpu_m_cram1_wvalid),
+    .s_axi_wready   (cpu_m_cram1_wready),
+    .s_axi_wdata    (cpu_m_cram1_wdata),
+    .s_axi_wstrb    (cpu_m_cram1_wstrb),
+    .s_axi_wlast    (cpu_m_cram1_wlast),
+    .s_axi_bvalid   (cpu_m_cram1_bvalid),
+    .s_axi_bready   (1'b1),
+    .s_axi_bresp    (cpu_m_cram1_bresp),
+    .psram_rd       (cram1_word_rd),
+    .psram_wr       (cram1_word_wr),
+    .psram_addr     (cram1_word_addr),
+    .psram_wdata    (cram1_word_wdata),
+    .psram_wstrb    (cram1_word_wstrb),
+    .psram_rdata    (cram1_word_rdata),
+    .psram_busy     (cram1_word_busy),
+    .psram_rdata_valid (cram1_word_rdata_valid),
+    .psram_burst_rd (cram1_burst_rd),
+    .psram_burst_addr (cram1_burst_addr),
+    .psram_burst_len  (cram1_burst_len),
+    .psram_burst_rdata (cram1_burst_rdata),
+    .psram_burst_rdata_valid (cram1_burst_rdata_valid)
+);
+
+cram0_controller #(
+    .CLOCK_SPEED(100.0),
+    .WORD_READS_USE_SYNC_BURST(1'b1)
+) psram1 (
+    .clk(clk_cpu),
+    .reset_n(pll_ram_locked_cpu),
+    .word_rd(cram1_word_rd),
+    .word_wr(cram1_word_wr),
+    .word_addr(cram1_word_addr),
+    .word_data(cram1_word_wdata),
+    .word_wstrb(cram1_word_wstrb),
+    .word_q(cram1_word_rdata),
+    .word_busy(cram1_word_busy),
+    .word_q_valid(cram1_word_rdata_valid),
+    .cram_a(cram1_a),
+    .cram_dq(cram1_dq),
+    .cram_wait(cram1_wait),
+    .cram_clk(),
+    .cram_adv_n(cram1_adv_n),
+    .cram_cre(cram1_cre),
+    .cram_ce0_n(cram1_ce0_n),
+    .cram_ce1_n(cram1_ce1_n),
+    .cram_oe_n(cram1_oe_n),
+    .cram_we_n(cram1_we_n),
+    .cram_ub_n(cram1_ub_n),
+    .cram_lb_n(cram1_lb_n),
+    .burst_rd(cram1_burst_rd),
+    .burst_addr(cram1_burst_addr),
+    .burst_len(cram1_burst_len),
+    .burst_rdata_valid(cram1_burst_rdata_valid),
+    .burst_rdata(cram1_burst_rdata),
+    .config_en(cram1_bcr_config_en),
+    .config_data(CRAM1_BCR_VALUE),
+    .config_bank_sel(cram1_bcr_bank_sel),
+    .raw_busy(cram1_raw_busy)
 );
 
 // SRAM controller (256 KB) - tristate handled at top level
@@ -975,9 +1237,9 @@ wire        cpu_m_sdram_wlast;
 wire        cpu_m_sdram_bvalid;
 wire [1:0]  cpu_m_sdram_bresp;
 
-// CPU AXI4 master → cram0_cdc (clk_cpu slave side of the CDC).
-// Crosses into clk_74a inside cram0_cdc and drives the controller
-// via the mux block above when cram0_mode_74a=1.
+// CPU AXI4 master -> shared PSRAM target.  cpu_system routes CRAM0
+// staging and CRAM1 executable traffic through this one target port to
+// avoid a second heavyweight cpu_target_port in the CPU fabric.
 wire        cpu_m_cram0_arvalid;
 wire        cpu_m_cram0_arready;
 wire [31:0] cpu_m_cram0_araddr;
@@ -999,8 +1261,53 @@ wire        cpu_m_cram0_wlast;
 wire        cpu_m_cram0_bvalid;
 wire [1:0]  cpu_m_cram0_bresp;
 
+// Physical CRAM0 AXI side after the shared PSRAM demux.  Crosses into
+// clk_74a inside cram0_cdc and drives the controller via the mux block
+// above when cram0_mode_74a=1.
+wire        cram0_axi_arvalid;
+wire        cram0_axi_arready;
+wire [31:0] cram0_axi_araddr;
+wire [7:0]  cram0_axi_arlen;
+wire        cram0_axi_rvalid;
+wire        cram0_axi_rready;
+wire [31:0] cram0_axi_rdata;
+wire [1:0]  cram0_axi_rresp;
+wire        cram0_axi_rlast;
+wire        cram0_axi_awvalid;
+wire        cram0_axi_awready;
+wire [31:0] cram0_axi_awaddr;
+wire [7:0]  cram0_axi_awlen;
+wire        cram0_axi_wvalid;
+wire        cram0_axi_wready;
+wire [31:0] cram0_axi_wdata;
+wire [3:0]  cram0_axi_wstrb;
+wire        cram0_axi_wlast;
+wire        cram0_axi_bvalid;
+wire [1:0]  cram0_axi_bresp;
+
+// Physical CRAM1 AXI side after the shared PSRAM demux.
+wire        cpu_m_cram1_arvalid;
+wire        cpu_m_cram1_arready;
+wire [31:0] cpu_m_cram1_araddr;
+wire [7:0]  cpu_m_cram1_arlen;
+wire        cpu_m_cram1_rvalid;
+wire        cpu_m_cram1_rready;
+wire [31:0] cpu_m_cram1_rdata;
+wire [1:0]  cpu_m_cram1_rresp;
+wire        cpu_m_cram1_rlast;
+wire        cpu_m_cram1_awvalid;
+wire        cpu_m_cram1_awready;
+wire [31:0] cpu_m_cram1_awaddr;
+wire [7:0]  cpu_m_cram1_awlen;
+wire        cpu_m_cram1_wvalid;
+wire        cpu_m_cram1_wready;
+wire [31:0] cpu_m_cram1_wdata;
+wire [3:0]  cpu_m_cram1_wstrb;
+wire        cpu_m_cram1_wlast;
+wire        cpu_m_cram1_bvalid;
+wire [1:0]  cpu_m_cram1_bresp;
+
 // SRAM CPU path removed — GPU has exclusive direct access (Z-buffer).
-// CRAM1 removed — memory arch v2 retires the chip.
 
 // Audio FIFO status — HW mixer drives the FIFO directly (v2).
 wire [9:0]  audio_fifo_level;
@@ -1063,7 +1370,7 @@ wire [3:0]  arb_s_wstrb;
 wire        arb_s_bvalid;
 wire [1:0]  arb_s_bresp;
 
-// Bridge SDRAM path fully removed — all bridge DMA goes through CRAM1.
+// Bridge SDRAM path fully removed — bridge DMA stages through CRAM0.
 
 // ============================================================
 // Bridge read data mux (registered — one cycle after bridge_rd)
@@ -1238,7 +1545,7 @@ end
     wire            reset_n_apf;
     wire    [31:0]  cmd_bridge_rd_data;
 
-    wire reset_n = reset_n_apf & bcr_init_done;
+    wire reset_n = reset_n_apf & bcr_init_done & cram1_bcr_init_done;
 
     // clk_cpu-domain reset replicas.  reset_n asserts asynchronously
     // from the bridge/BCR gate, but deasserts synchronously and on
@@ -1285,8 +1592,11 @@ end
 
     wire            bcr_init_done_s;
     synch_3 sync_bcr(bcr_init_done, bcr_init_done_s, clk_74a);
-    wire            status_boot_done  = bcr_init_done_s;
-    wire            status_setup_done = bcr_init_done_s;
+    wire            cram1_bcr_init_done_s;
+    synch_3 sync_cram1_bcr(cram1_bcr_init_done, cram1_bcr_init_done_s, clk_74a);
+    wire            psram_init_done_s = bcr_init_done_s & cram1_bcr_init_done_s;
+    wire            status_boot_done  = psram_init_done_s;
+    wire            status_setup_done = psram_init_done_s;
     wire            status_running    = reset_n;
 
     wire            dataslot_requestread;
@@ -1822,8 +2132,7 @@ assign video_hs = vidout_hs;
         .m_cram0_wlast  (cpu_m_cram0_wlast),
         .m_cram0_bvalid (cpu_m_cram0_bvalid),
         .m_cram0_bresp  (cpu_m_cram0_bresp),
-        // CRAM1 + SRAM target ports retired in v2 (chip gone, SRAM is
-        // GPU-private).  cpu_system.v no longer exposes those ports.
+        // SRAM remains GPU-private.
         // Local peripheral AXI4 master interface
         .m_local_arvalid(cpu_m_local_arvalid),
         .m_local_arready(cpu_m_local_arready),
@@ -2147,12 +2456,9 @@ assign video_hs = vidout_hs;
         .sdram_preload_wstrb(sdram_slave_preload_wstrb)
     );
 
-    // CRAM0 is now served by the cram0_cdc instance (declared at the
-    // top of the file with the CRAM0 controller block).  No per-chip
-    // AXI sub-slave is needed — the CDC *is* the CPU-side AXI slave.
-    //
-    // CRAM1 axi slave and pin fan-out retired with the chip.  SRAM is
-    // GPU-exclusive (Z-buffer) and has no CPU AXI surface.
+    // CRAM0 is served by the cram0_cdc instance above.  CRAM1 is the
+    // executable PSRAM target, also declared above so its BCR init can
+    // gate CPU reset.  SRAM is GPU-exclusive and has no CPU AXI surface.
 
     // Terminal rendering moved to software (firmware renders to framebuffer)
 
@@ -2461,8 +2767,8 @@ audio_mixer audio_mixer_inst (
     .voice_active_mask(mixer_active_mask)
 );
 
-// cram1_burst_mmio retired with CRAM1 chip; 0x4E000000 MMIO slot is
-// repurposed in v2 as the CRAM0 ownership mode bit (see axi_periph_slave).
+// cram1_burst_mmio retired; CRAM1 is exposed only through the CPU AXI
+// path.  0x4E000000 is the CRAM0 ownership mode bit (see axi_periph_slave).
 
 // v2 audio path: HW mixer is the sole producer into audio_output.
 // audio_dma retired (v1 pre-mixed-ring DMA) and the AUDIO_SAMPLE
@@ -2656,8 +2962,8 @@ assign clk_cpu = clk_ram_controller;
 // cross-domain skew.  The CRAM chip is rated well above 74 MHz; the
 // shared-tree arrangement has been validated across many FMax runs.
 //
-// CRAM1 retired in v2 — pin unassigned in the qsf.
 assign cram0_clk = clk_74a;
+assign cram1_clk = clk_cpu;
 
 // SDRAM controller
 io_sdram isr0 (

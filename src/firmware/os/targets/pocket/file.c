@@ -89,8 +89,7 @@ void of_file_init(void) {
      * state machine. Read 4 bytes from slot 1 into CRAM0 scratch.
      * Skipped when the bridge isn't the active backend, since the
      * boot ROM channel may have been picked because the bridge is
-     * wedged. The dispatcher must run before of_file_init — see hal.c.
-     * (v2 arch: CRAM1 retired, scratch moved to CRAM0.) */
+     * wedged. The dispatcher must run before of_file_init — see hal.c. */
     if (of_disk_active() == &of_disk_bridge)
         bridge_warmup_once();
 }
@@ -225,9 +224,8 @@ static int bridge_read_impl(uint32_t slot_id, uint32_t slot_offset,
                     && (length <= CRAM_SIZE)
                     && (dest_addr <= CRAM0_BASE + CRAM_SIZE - length);
 
-    /* v2 arch: CRAM1 retired, scratch moved to CRAM0.  CRAM0 is
-     * uncached per PMA, so no D-cache invalidation is needed around
-     * bridge-written data there. */
+    /* CRAM0 is uncached per PMA, so no D-cache invalidation is needed
+     * around bridge-written data there. */
 
     uint32_t done = 0;
     while (done < length) {
@@ -338,8 +336,8 @@ accepted:
 }
 
 void of_file_inval_cram(uint32_t bridge_addr, uint32_t length) {
-    /* v2 arch: CRAM0 is uncached per PMA (and CRAM1 is gone), so no
-     * D-cache invalidation is needed for bridge-written CRAM data.
+    /* CRAM0 is uncached per PMA, so no D-cache invalidation is needed
+     * for bridge-written CRAM data.
      * Kept as a no-op so callers don't need to know the PMA policy. */
     (void)bridge_addr;
     (void)length;

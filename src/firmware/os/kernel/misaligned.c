@@ -38,13 +38,13 @@ typedef struct {
 #define CAUSE_LOAD_MISALIGNED   4
 #define CAUSE_STORE_MISALIGNED  6
 
-/* Valid memory regions for emulation (derived from hal/regs.h).
- * v2 arch: CRAM1 + the 0x38 cached alias are gone — only CRAM0 at
- * its base (uncached per PMA) remains. */
+/* Valid memory regions for emulation (derived from hal/regs.h). */
 #define BRAM_END_ADDR       (BRAM_BASE + BRAM_SIZE)
 #define SDRAM_END_ADDR      (SDRAM_BASE + SDRAM_SIZE)
 #define CRAM0_START_ADDR    CRAM0_BASE
 #define CRAM0_END_ADDR      (CRAM0_BASE + CRAM_SIZE)
+#define CRAM1_START_ADDR    CRAM1_BASE
+#define CRAM1_END_ADDR      (CRAM1_BASE + CRAM_SIZE)
 #define SDRAM_UC_END_ADDR   (SDRAM_UNCACHED_BASE + SDRAM_SIZE)
 
 /* Check if address range is in valid memory that the APP is allowed
@@ -74,8 +74,9 @@ static int addr_valid(unsigned int addr, unsigned int len) {
     if (addr >= APP_BRAM_BASE && end < APP_BRAM_END) return 1;
     /* SDRAM (cached) */
     if (addr >= SDRAM_BASE && end < SDRAM_END_ADDR) return 1;
-    /* CRAM0 (uncached per PMA; CRAM1 retired in v2 arch) */
+    /* CRAM0 bridge staging and CRAM1 executable app/OS image. */
     if (addr >= CRAM0_START_ADDR && end < CRAM0_END_ADDR) return 1;
+    if (addr >= CRAM1_START_ADDR && end < CRAM1_END_ADDR) return 1;
     /* SDRAM (uncached alias — used for PAK data) */
     if (addr >= SDRAM_UNCACHED_BASE && end < SDRAM_UC_END_ADDR) return 1;
     return 0;

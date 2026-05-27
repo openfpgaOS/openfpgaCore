@@ -1,8 +1,8 @@
 /*
  * openfpgaOS Application Linker Script
  *
- * Places SDK apps at the address the kernel ELF loader expects, with
- * an optional BRAM hot-path section for performance-critical code.
+ * Places executable app sections in CRAM1 and writable state in SDRAM,
+ * with an optional BRAM hot-path section for performance-critical code.
  *
  * Apps statically link upstream musl, so the entry point is musl's
  * own _start (from crt1.o), which calls __libc_start_main, which calls
@@ -21,11 +21,12 @@ ENTRY(_start)
 
 MEMORY {
     APP_BRAM (rwx) : ORIGIN = 0x00004000, LENGTH = 0x3800
+    CRAM1_RX (rx)  : ORIGIN = 0x31100000, LENGTH = 15M
     SDRAM    (rwx) : ORIGIN = 0x10400000, LENGTH = 48M
 }
 
 SECTIONS {
-    . = 0x10400000;
+    . = 0x31100000;
 
     .text : {
         *(.text.start)
@@ -33,7 +34,7 @@ SECTIONS {
         *(.rodata*)
         *(.srodata*)
         . = ALIGN(4);
-    } > SDRAM
+    } > CRAM1_RX
 
     /* C++ static constructors / destructors -- musl's __libc_start_main
      * walks these arrays. Keep them even if --gc-sections fires. */
@@ -42,19 +43,21 @@ SECTIONS {
         KEEP(*(SORT_BY_INIT_PRIORITY(.init_array.*) SORT_BY_INIT_PRIORITY(.ctors.*)))
         KEEP(*(.init_array .ctors))
         PROVIDE_HIDDEN(__init_array_end = .);
-    } > SDRAM
+    } > CRAM1_RX
 
     .fini_array : {
         PROVIDE_HIDDEN(__fini_array_start = .);
         KEEP(*(SORT_BY_INIT_PRIORITY(.fini_array.*) SORT_BY_INIT_PRIORITY(.dtors.*)))
         KEEP(*(.fini_array .dtors))
         PROVIDE_HIDDEN(__fini_array_end = .);
-    } > SDRAM
+    } > CRAM1_RX
 
     /* musl _init / _fini: crti.o opens the function frames, the libc
      * payload contributes its bits, crtn.o emits the closing rets. */
-    .init : { KEEP(*(.init)) } > SDRAM
-    .fini : { KEEP(*(.fini)) } > SDRAM
+    .init : { KEEP(*(.init)) } > CRAM1_RX
+    .fini : { KEEP(*(.fini)) } > CRAM1_RX
+
+    . = 0x10400000;
 
     .data : {
         *(.data*)

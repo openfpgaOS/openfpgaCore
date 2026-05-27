@@ -189,7 +189,7 @@ struct of_services_table {
      *    The kernel auto-loads the first .ofsf file it finds in a data
      *    slot during boot. Apps should check smp_bank_preload_base and,
      *    when non-NULL, skip of_smp_bank_load() / of_mixer_alloc_samples
-     *    and reuse the preloaded CRAM1 buffer directly. Older firmware
+     *    and reuse the preloaded sample-pool buffer directly. Older firmware
      *    leaves these as NULL/0. */
     const void *smp_bank_preload_base;
     uint32_t    smp_bank_preload_size;

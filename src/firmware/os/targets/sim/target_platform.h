@@ -59,8 +59,9 @@
 #define OF_TARGET_INTERACT_UNCACHED    0x503FE000u
 #define OF_TARGET_INTERACT_MAX_VARS    64u
 
-/* v2 memory arch: CRAM1 retired, CRAM0 on bridge clock. */
+/* Match Pocket's app-visible executable CRAM1 map for build sanity. */
 #define OF_TARGET_CRAM0_BASE           0x30000000u
+#define OF_TARGET_CRAM1_BASE           0x31000000u
 #define OF_TARGET_CRAM_SIZE            (16u * 1024u * 1024u)
 #define OF_TARGET_CRAM0_BRIDGE         0x20000000u
 #define OF_TARGET_CRAM0_OS_OFFSET      0x00000000u

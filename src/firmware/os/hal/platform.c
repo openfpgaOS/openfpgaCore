@@ -34,8 +34,9 @@ static const of_target_platform_t g_target_platform = {
     .interact_uncached = OF_TARGET_INTERACT_UNCACHED,
     .interact_max_vars = OF_TARGET_INTERACT_MAX_VARS,
 
-    /* v2 memory arch: CRAM1 + SRAM retired. */
+    /* CRAM0 is bridge staging; CRAM1 is executable CPU PSRAM. */
     .cram0_base           = OF_TARGET_CRAM0_BASE,
+    .cram1_base           = OF_TARGET_CRAM1_BASE,
     .cram_size            = OF_TARGET_CRAM_SIZE,
     .cram0_bridge         = OF_TARGET_CRAM0_BRIDGE,
     .cram0_os_offset      = OF_TARGET_CRAM0_OS_OFFSET,

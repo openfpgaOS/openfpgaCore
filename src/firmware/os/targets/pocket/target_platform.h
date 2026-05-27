@@ -49,17 +49,18 @@
 #define OF_TARGET_INTERACT_UNCACHED    0x503FE000u
 #define OF_TARGET_INTERACT_MAX_VARS    64u
 
-/* CRAM0 — bridge staging only (v2 memory arch).  Runs on the APF
+/* CRAM0 — bridge staging only.  Runs on the APF
  * bridge clock (clk_74a); CPU accesses go through a CDC in the FPGA
  * fabric.  CPU-side alias is uncached (PMA main=0) at 0x30000000.
- * CRAM1 was retired along with its two aliases and the CRAM0 uncached
- * alias — there is now only one CRAM0 address. */
+ *
+ * CRAM1 is CPU-owned executable/cacheable PSRAM for OS and app code. */
 #define OF_TARGET_CRAM0_BASE           0x30000000u
+#define OF_TARGET_CRAM1_BASE           0x31000000u
 #define OF_TARGET_CRAM_SIZE            (16u * 1024u * 1024u)
 #define OF_TARGET_CRAM0_BRIDGE         0x20000000u
 /* APF data slot offset inside CRAM0 for OS boot payload (slot 1).
  * The bootloader in BRAM reads from CRAM0_BASE + this and copies to
- * SDRAM before jumping.  Save/load scratch lives at a separate
+ * CRAM1 before jumping.  Save/load scratch lives at a separate
  * offset so the two don't collide with an in-flight transfer. */
 #define OF_TARGET_CRAM0_OS_OFFSET      0x00000000u
 #define OF_TARGET_CRAM0_PRESAVE_OFFSET 0x000C0000u   /* 768 KB in: shared config / per-game settings */

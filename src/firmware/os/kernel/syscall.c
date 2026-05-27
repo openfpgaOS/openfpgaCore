@@ -114,30 +114,17 @@ enum {
 };
 
 /* ======================================================================
- * I/O cache — LRU read cache in CRAM1 (PSRAM, bridge-speed)
- *
- * Bridge DMA writes to CRAM1 at 74.25 MHz (bridge clock) with zero
- * SDRAM contention. The CPU reads cached data from the CRAM1 cached
- * alias (0x31xxxxxx) through D-cache for fast sequential access.
+ * I/O cache — LRU read cache in SDRAM.
  *
  * Each entry holds one 32KB block, keyed by (slot_id, aligned_offset).
- * On hit, data is served directly from CRAM1 — no bridge DMA needed.
- * On miss, the LRU entry is evicted and refilled via bridge DMA.
- *
- * Bridge DMA writes to CRAM1 (PSRAM bus, zero SDRAM contention).
- * CPU reads via the 0x31 cached alias — D-cache fills on first
- * access (one CDC read per 64B line), then all hits are single-cycle.
- * Lines are read-only (CPU never writes to 0x31), so eviction just
- * drops clean lines — no CDC writeback, no bridge contention.
+ * On hit, data is served directly from SDRAM. On miss, the LRU entry
+ * is evicted and refilled through the normal CRAM0 bridge bounce path.
  * ====================================================================== */
 
 #define IO_CACHE_ENTRIES    8
 #define IO_CACHE_BLOCK_SIZE (32 * 1024)
-/* The bounce buffer now lives in SDRAM at 0x10380000 (256 KB,
- * sandwiched between the unused tail of TERM_FB and INTERACT_BASE).
- * The bridge_to_sdram fabric module sniffs writes whose address starts
- * with 0x10 and replays them on the SDRAM arbiter's M3 port — fully
- * bypassing the CRAM1 controller that races with the audio mixer. */
+/* The cache buffer lives in SDRAM at 0x10380000 (256 KB), sandwiched
+ * between the unused tail of TERM_FB and INTERACT_BASE. */
 #define IO_CACHE_BASE       0x10380000u
 #define IO_CACHE_CACHED     (IO_CACHE_BASE)                /* CPU cached reads */
 #define IO_CACHE_UNCACHED   (IO_CACHE_BASE)                /* SDRAM has no uncached alias */
@@ -189,8 +176,7 @@ static inline const uint8_t *io_cache_data(int entry) {
  * through CRAM0 scratch in hardware-sized chunks, then memcpys into the
  * caller's SDRAM buffer.
  *
- * v2 arch: the direct bridge→SDRAM fabric path was retired with CRAM1,
- * so the bridge can only write to CRAM0.  Using of_file_read lets the
+ * The bridge can only write to CRAM0 directly.  Using of_file_read lets the
  * of_disk_bridge backend handle the mode flip + bounce once, instead of
  * duplicating that sequence here.  The memcpy lands in SDRAM via the
  * L1 D$, so subsequent reads from cached_ptr hit the cache coherently
@@ -260,7 +246,7 @@ static int slot_read_cached(uint32_t slot_id, uint32_t off,
 /* ======================================================================
  * File slot registry -- maps filenames to APF data slot IDs
  *
- * Chip32 writes a file table ("FTAB") to CRAM1 at 0x39280000 (uncached)
+ * Chip32 writes a file table ("FTAB") to CRAM0 scratch
  * during boot. The table has: magic(4) + count(4) + entries[count],
  * where each entry is: slot_id(4) + name_len(4) + name(24).
  *

@@ -54,11 +54,11 @@
 #define TERM_COLS           40
 #define TERM_ROWS           30
 
-/* v2 memory arch: CRAM1 retired.  CRAM0 is the only PSRAM kept, running
- * on the APF bridge clock (clk_74a); CPU access is through a fabric-side
- * CDC.  PMA marks 0x30000000 as uncached so there's no cache-coherency
- * concern around the bridge writing behind the CPU. */
+/* CRAM0 is bridge staging on the APF bridge clock (clk_74a); CPU access
+ * is through a fabric-side CDC and PMA marks it uncached.  CRAM1 is
+ * CPU-owned executable/cacheable PSRAM for OS and app code. */
 #define CRAM0_BASE          OF_TARGET_CRAM0_BASE      /* CRAM0 (uncached) */
+#define CRAM1_BASE          OF_TARGET_CRAM1_BASE      /* CRAM1 (cached executable) */
 #define CRAM_SIZE           OF_TARGET_CRAM_SIZE
 
 #define CRAM0_BRIDGE        OF_TARGET_CRAM0_BRIDGE    /* CRAM0 in bridge address space */
@@ -590,11 +590,11 @@ static inline volatile void *sdram_uncached(void *addr) {
 /* Convert CPU address to bridge address (for DMA).
  * Bridge address space (v2 memory arch):
  *   0x00000000  SDRAM   (CPU 0x10000000, cached)
- *   0x20000000  CRAM0   (CPU 0x30000000, uncached) — the only PSRAM left
+ *   0x20000000  CRAM0   (CPU 0x30000000, uncached)
  *
- * CRAM1 and SRAM are no longer CPU-addressable.  Bridge only touches
- * CRAM0 directly; anything in SDRAM needs an explicit OS-side memcpy
- * into CRAM0 first (see the CRAM0_MODE protocol in memory-arch-v2.md). */
+ * CRAM1 is CPU-only executable PSRAM and has no bridge address.
+ * Bridge only touches CRAM0 directly; anything in SDRAM/CRAM1 needs
+ * an explicit OS-side copy into CRAM0 first. */
 static inline uint32_t sdram_to_bridge(void *addr) {
     return (uint32_t)addr - SDRAM_BASE;
 }

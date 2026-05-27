@@ -2,11 +2,11 @@
  * bank_preload.c -- Auto-detect and preload an .ofsf SoundFont at boot.
  *
  * After filesystem_init() has populated the file slot registry, scan for
- * the first *.ofsf file. If found, allocate CRAM1 through the mixer's
+ * the first *.ofsf file. If found, allocate from the mixer's SDRAM
  * sample pool, DMA the file in, and validate the header. The loaded base
  * + size are exposed through the services table so apps' of_smp_bank_load
  * can reuse the preload instead of re-reading the file (and re-allocating
- * from the same small CRAM1 pool).
+ * from the same sample pool).
  */
 
 #include <stdint.h>

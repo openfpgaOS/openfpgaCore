@@ -17,31 +17,33 @@
 #define OS_SLOT_ID      1       /* OS binary (loaded by bootloader) */
 #define APP_SLOT_ID     2       /* Application ELF binary */
 
-/* Fallback load address for PIE (ET_DYN) apps that have vaddrs relative to 0.
- * ET_EXEC apps linked at a nonzero base (e.g. 0x10400000 SDRAM) ignore this
- * and use their own absolute vaddrs.  Matches __app_load_base in os.ld and
- * must stay in SDRAM, not the CRAM0 nonvolatile window. */
+/* Fallback load address for older PIE (ET_DYN) apps that have vaddrs
+ * relative to 0.  New ET_EXEC apps linked with app.ld use absolute
+ * CRAM1 text and SDRAM data VMAs and ignore this base. */
 #define APP_LOAD_ADDR   0x10400000u
 
 /* Symbols from linker script */
 extern char __os_bss_end[];
 
-/* Zero OS .bss in SDRAM. Lives in OS .text (CRAM0) so it adds zero
- * BRAM cost. Called by the BRAM bootloader AFTER .rodata/.data have
- * been streamed directly to their SDRAM VMA by the load path, so
- * only .bss remains to be cleared. Uses only stack locals and the
- * pointer arguments, so it is safe to invoke before .bss is zeroed. */
+/* Zero OS .bss after the BRAM bootloader has copied the OS image.  Uses
+ * only stack locals and pointer arguments, so it is safe to invoke before
+ * .bss is zeroed. */
 __attribute__((noinline, section(".text.os_finalize_memory")))
 void os_finalize_memory(void *bss_start, void *bss_end) {
-    /* Bypass cache via uncached SDRAM alias (0x10... → 0x50...).
-     * If cache writeback is what's wedging the LSU FIFO, this
-     * sidesteps it. */
-    uint32_t bss_uc_start = ((uint32_t)(uintptr_t)bss_start) - 0x10000000u + 0x50000000u;
-    uint32_t bss_uc_end   = ((uint32_t)(uintptr_t)bss_end)   - 0x10000000u + 0x50000000u;
-    uint32_t *bss = (uint32_t *)(uintptr_t)bss_uc_start;
-    uint32_t *bend = (uint32_t *)(uintptr_t)bss_uc_end;
-    while (bss < bend)
-        *bss++ = 0;
+    uintptr_t p = (uintptr_t)bss_start;
+    uintptr_t end = (uintptr_t)bss_end;
+    if (p >= SDRAM_BASE && end <= (SDRAM_BASE + SDRAM_SIZE)) {
+        p = p - SDRAM_BASE + SDRAM_UNCACHED_BASE;
+        end = end - SDRAM_BASE + SDRAM_UNCACHED_BASE;
+    }
+    while ((p + sizeof(uint32_t)) <= end) {
+        *(volatile uint32_t *)p = 0;
+        p += sizeof(uint32_t);
+    }
+    while (p < end) {
+        *(volatile uint8_t *)p = 0;
+        p++;
+    }
     __asm__ volatile("fence" ::: "memory");
 }
 

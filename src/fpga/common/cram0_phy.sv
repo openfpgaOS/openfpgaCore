@@ -22,12 +22,9 @@
 //
 ////////////////////////////////////////////////////////////////////////////////
 //
-// CRAM0-only fork of psram.sv. Created so the CRAM0 path can be
-// iterated on without affecting CRAM1 (save data). The original
-// `psram` module in `psram.sv` is now exclusively used by
-// `psram_cram1.v` and should not be edited. All file-scope symbols
-// are uniquely suffixed (`_c0`) so both files can compile together
-// without redefinition.
+// AS1C8M16PL-compatible PSRAM PHY used by the CRAM0 and CRAM1 controller
+// instances.  File-scope helper symbols are uniquely suffixed (`_c0`) so
+// this module can coexist with older PSRAM PHY variants in experiments.
 
 function integer rtoi_c0(input integer x);
   return x;
@@ -51,7 +48,7 @@ module psram_cram0_drv #(
     parameter MIN_WRITE_PULSE = 45, // Minimum time (ns) for we_n to be held low to latch data (t_wp)
     parameter MIN_WRITE_TIME_FROM_ADV = 70, // Minimum time (ns) for write to complete after adv_n goes low (after setup) (t_aw)
 
-    // -- Async reads (for non-sync-burst instances like CRAM1) --
+    // -- Async reads (for async-page CRAM0 mode) --
     parameter MIN_OE_AFTER_ADDR_UNLATCHED = 3, // Minimum time (ns) until oe_n goes low after addr unlatch
     parameter MAX_ACCESS_TIME_FROM_ADV = 70, // Maximum time (ns) for valid data to appear after adv_n goes low
 

@@ -47,6 +47,7 @@ CFLAGS += $(ARCH_FLAGS) \
 
 LDFLAGS += $(ARCH_FLAGS) \
            -nostdlib -static \
+           -T$(API_DIR)/app.ld \
            -Wl,--gc-sections \
            -Wl,-Map=$(APP).map \
            -L$(MUSL_DIR)/lib

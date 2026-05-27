@@ -18,7 +18,7 @@ typedef uint64_t of_mixer_handle_t;
 void of_mixer_init(int max_voices, int output_rate);
 
 /* Play 16-bit signed mono PCM from the SDRAM sample pool.
- * Returns voice index or -1.  (v2 arch: samples moved from CRAM1 to SDRAM.) */
+ * Returns voice index or -1. */
 int of_mixer_play(const uint8_t *pcm_s16, uint32_t sample_count,
                   uint32_t sample_rate, int priority, int volume);
 

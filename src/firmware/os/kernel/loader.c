@@ -101,17 +101,30 @@ typedef struct {
  * by seg_in_app_vmap() with error -7. */
 #define APP_VMAP_V1_BRAM_BASE   0x00004000u
 #define APP_VMAP_V1_BRAM_END    0x00007800u
+#define APP_VMAP_V1_CRAM1_BASE  0x31100000u
+#define APP_VMAP_V1_CRAM1_END   0x32000000u
 #define APP_VMAP_V1_SDRAM_BASE  0x10400000u
 #define APP_VMAP_V1_SDRAM_END   0x13400000u  /* 48 MB window */
+
+static int seg_in_range(uint32_t vaddr, uint32_t memsz,
+                        uint32_t base, uint32_t end) {
+    if (memsz == 0)
+        return 1;
+    uint32_t seg_end = vaddr + memsz;
+    if (seg_end < vaddr)
+        return 0;
+    return vaddr >= base && seg_end <= end;
+}
 
 static int seg_in_app_vmap(uint32_t vaddr, uint32_t memsz) {
     /* Empty segments (memsz == 0) are vacuously in-range. */
     if (memsz == 0)
         return 1;
-    uint32_t end = vaddr + memsz;
-    if (vaddr >= APP_VMAP_V1_BRAM_BASE && end <= APP_VMAP_V1_BRAM_END)
+    if (seg_in_range(vaddr, memsz, APP_VMAP_V1_BRAM_BASE, APP_VMAP_V1_BRAM_END))
         return 1;
-    if (vaddr >= APP_VMAP_V1_SDRAM_BASE && end <= APP_VMAP_V1_SDRAM_END)
+    if (seg_in_range(vaddr, memsz, APP_VMAP_V1_CRAM1_BASE, APP_VMAP_V1_CRAM1_END))
+        return 1;
+    if (seg_in_range(vaddr, memsz, APP_VMAP_V1_SDRAM_BASE, APP_VMAP_V1_SDRAM_END))
         return 1;
     return 0;
 }
@@ -278,6 +291,23 @@ int elf_load(uint32_t slot_id, uintptr_t load_addr,
                            phdr.p_memsz - phdr.p_filesz);
                 }
                 /* BRAM segments don't contribute to SDRAM bss_end */
+            } else if (seg_in_range(phdr.p_vaddr, phdr.p_memsz,
+                                    APP_VMAP_V1_CRAM1_BASE,
+                                    APP_VMAP_V1_CRAM1_END)) {
+                uintptr_t seg_addr = load_base + phdr.p_vaddr;
+
+                if (phdr.p_filesz > 0) {
+                    rc = of_file_read_chunked(slot_id, phdr.p_offset,
+                                               (void *)seg_addr, phdr.p_filesz);
+                    if (rc < 0)
+                        return -6;
+                }
+
+                if (phdr.p_memsz > phdr.p_filesz) {
+                    memset((void *)(seg_addr + phdr.p_filesz), 0,
+                           phdr.p_memsz - phdr.p_filesz);
+                }
+                /* CRAM1 executable segments don't contribute to SDRAM heap base. */
             } else {
                 uintptr_t seg_addr = load_base + phdr.p_vaddr;
 
