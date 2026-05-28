@@ -16,10 +16,12 @@
 
 #include "caps_table.h"
 #include "services_table.h"
+#include "syscall.h"
 #include "of_caps.h"
 #include "of_services.h"
 #include "of_version.h"
 #include "../hal/regs.h"
+#include "../hal/mixer.h"
 
 /* Single source of truth for the app-visible cap struct. Lives in BSS
  * (zero-initialized at boot), populated by caps_table_init(). */
@@ -35,15 +37,17 @@ void caps_table_init(uintptr_t heap_base) {
 
     /* Memory regions */
     caps->heap_base   = (uint32_t)heap_base;
-    caps->heap_size   = (platform->sdram_base + platform->sdram_size)
-                      - (uint32_t)heap_base - platform->runtime_stack_size;
+    uintptr_t heap_limit = of_brk_limit();
+    caps->heap_size   = heap_limit > heap_base
+                      ? (uint32_t)(heap_limit - heap_base)
+                      : 0;
     caps->fb_base     = platform->fb_bases[0];
     caps->fb_size     = FB_SIZE;
     caps->fb_width    = platform->fb_width;
     caps->fb_height   = platform->fb_height;
     caps->fb_stride   = platform->fb_stride;
-    caps->sample_base = platform->sample_base;
-    caps->sample_size = platform->sample_size;
+    caps->sample_base = of_mixer_reserved_base();
+    caps->sample_size = of_mixer_reserved_size();
 
     /* Hardware features — read from RTL register (single source of truth) */
     caps->hw_features   = features;

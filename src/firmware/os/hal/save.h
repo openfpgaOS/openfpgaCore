@@ -1,8 +1,7 @@
 /*
  * openfpgaOS Save File HAL
  * Nonvolatile CRAM0-window save system (persisted to SD card by bridge).
- * Save slots live in CRAM0 via the CRAM0_MODE mux; CRAM1 is executable
- * CPU-only image storage and is not part of the bridge save path.
+ * v2 arch: CRAM1 retired, save slots moved into CRAM0 via CRAM0_MODE mux.
  */
 
 #ifndef OFOS_SAVE_H

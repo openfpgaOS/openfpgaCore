@@ -1,8 +1,8 @@
 /*
  * openfpgaOS Application Linker Script
  *
- * Places executable app sections in CRAM1 and writable state in SDRAM,
- * with an optional BRAM hot-path section for performance-critical code.
+ * Places SDK apps at the address the kernel ELF loader expects, with
+ * an optional BRAM hot-path section for performance-critical code.
  *
  * Apps statically link upstream musl, so the entry point is musl's
  * own _start (from crt1.o), which calls __libc_start_main, which calls
@@ -21,12 +21,13 @@ ENTRY(_start)
 
 MEMORY {
     APP_BRAM (rwx) : ORIGIN = 0x00004000, LENGTH = 0x3800
-    CRAM1_RX (rx)  : ORIGIN = 0x31100000, LENGTH = 15M
-    SDRAM    (rwx) : ORIGIN = 0x10400000, LENGTH = 48M
+    /* Ends at 0x13E7C000: below the dynamic audio reservation and
+     * 512 KB app stack in the no-SoundFont case. */
+    SDRAM    (rwx) : ORIGIN = 0x10400000, LENGTH = 0x03A7C000
 }
 
 SECTIONS {
-    . = 0x31100000;
+    . = 0x10400000;
 
     .text : {
         *(.text.start)
@@ -34,7 +35,17 @@ SECTIONS {
         *(.rodata*)
         *(.srodata*)
         . = ALIGN(4);
-    } > CRAM1_RX
+    } > SDRAM
+
+    .eh_frame : {
+        . = ALIGN(4);
+        PROVIDE(__EH_FRAME_BEGIN__ = .);
+        KEEP(*(.eh_frame))
+        KEEP(*(.eh_frame.*))
+        LONG(0);
+        PROVIDE(__FRAME_END__ = .);
+        . = ALIGN(4);
+    } > SDRAM
 
     /* C++ static constructors / destructors -- musl's __libc_start_main
      * walks these arrays. Keep them even if --gc-sections fires. */
@@ -43,21 +54,19 @@ SECTIONS {
         KEEP(*(SORT_BY_INIT_PRIORITY(.init_array.*) SORT_BY_INIT_PRIORITY(.ctors.*)))
         KEEP(*(.init_array .ctors))
         PROVIDE_HIDDEN(__init_array_end = .);
-    } > CRAM1_RX
+    } > SDRAM
 
     .fini_array : {
         PROVIDE_HIDDEN(__fini_array_start = .);
         KEEP(*(SORT_BY_INIT_PRIORITY(.fini_array.*) SORT_BY_INIT_PRIORITY(.dtors.*)))
         KEEP(*(.fini_array .dtors))
         PROVIDE_HIDDEN(__fini_array_end = .);
-    } > CRAM1_RX
+    } > SDRAM
 
     /* musl _init / _fini: crti.o opens the function frames, the libc
      * payload contributes its bits, crtn.o emits the closing rets. */
-    .init : { KEEP(*(.init)) } > CRAM1_RX
-    .fini : { KEEP(*(.fini)) } > CRAM1_RX
-
-    . = 0x10400000;
+    .init : { KEEP(*(.init)) } > SDRAM
+    .fini : { KEEP(*(.fini)) } > SDRAM
 
     .data : {
         *(.data*)
@@ -109,7 +118,6 @@ SECTIONS {
     /DISCARD/ : {
         *(.note.*)
         *(.comment)
-        *(.eh_frame*)
         *(.riscv.attributes)
     }
 }

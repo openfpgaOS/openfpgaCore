@@ -102,18 +102,27 @@ static void mmio_voice_write(int voice, int field, uint32_t data) {
     tick(1);
 }
 
-// Backdoor read.  audio_mixer.v splits the voice table into two memories
-// (see is_fsm_field): POS_INT (4), POS_FRAC (5), VOL_LR (6) live in
-// vtbl_fsm; everything else lives in vtbl_cpu.  Pick the right backing
-// store for the requested field.
+// Backdoor read. audio_mixer.v keeps the MMIO-visible 16-field voice
+// layout in two packed tables: CPU-owned fields and FSM-owned fields.
 static uint32_t vtbl_read(int voice, int field) {
-    uint32_t addr = (voice << 4) | (field & 0xF);
-    int is_fsm = (field == VTBL_POS_INT) ||
-                 (field == VTBL_POS_FRAC) ||
-                 (field == VTBL_VOL_LR);
-    return is_fsm
-        ? dut->rootp->tb_audio_mixer->dut__DOT__vtbl_fsm_mem[addr]
-        : dut->rootp->tb_audio_mixer->dut__DOT__vtbl_cpu_mem[addr];
+    int addr = (voice << 4) | field;
+    switch (field) {
+    case VTBL_POS_INT:
+    case VTBL_POS_FRAC:
+    case VTBL_VOL_LR:
+        return dut->rootp->tb_audio_mixer->dut__DOT__vtbl_fsm_mem[addr];
+    case VTBL_ADDR:
+    case VTBL_LEN:
+    case VTBL_RATE:
+    case VTBL_CTRL:
+    case VTBL_LOOP_END:
+    case VTBL_LOOP_START:
+    case VTBL_VOL_TARGET:
+    case VTBL_VOL_RATE:
+        return dut->rootp->tb_audio_mixer->dut__DOT__vtbl_cpu_mem[addr];
+    default:
+        return 0;
+    }
 }
 
 static void sdram_fill_constant(uint32_t word) {

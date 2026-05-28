@@ -1,31 +1,33 @@
 /*
- * openfpgaOS Linker Script
+ * openfpgaOS Linker Script — v2 memory arch
  *
  * Memory layout:
  * - BRAM:     0x00000000 (32KB)   - Bootloader + trap handler + hot code
- * - OSIMAGE:  0x31000000 (1MB)    - OS code + data + rodata in CRAM1
- * - OSDATA:   0x10320000 (768KB)  - OS BSS and initial kernel heap in SDRAM
- * - Apps:     0x31100000+         - App executable segments in CRAM1
- *             0x10400000+         - App writable state in SDRAM
+ * - OSDATA:   0x10320000 (768KB)  - OS code + data + rodata + BSS (ALL in SDRAM)
+ * - Apps:     0x10400000+         - Dynamically loaded application (SDRAM)
+ *
+ * v2 rationale: CRAM1 retired entirely.  CRAM0 is bridge staging only
+ * (uncached + non-exec per PMA), so the OS kernel can no longer run
+ * from CRAM0.  Everything that used to live in CRAM0 (just OS .text)
+ * moves into the OSDATA region alongside .rodata/.data/.bss.
  *
  * Boot flow: bridge DMAs os.bin into CRAM0 slot 1 scratch, then the
  * BRAM bootloader flips CRAM0_MODE to CPU and memcpy's the whole blob
- * into CRAM1 at __osdata_vma start (== __os_entry).  Single
- * contiguous copy; CRAM0 remains bridge staging only.
+ * into SDRAM at __osdata_vma start (== __os_entry).  Single
+ * contiguous copy — no CRAM0 destination anymore.
  */
 
 ENTRY(_start)
 
 MEMORY {
     BRAM      (rwx) : ORIGIN = 0x00000000, LENGTH = 32K
-    OSIMAGE   (rwx) : ORIGIN = 0x31000000, LENGTH = 1M
-    OSDATA    (rw)  : ORIGIN = 0x10320000, LENGTH = 768K
+    OSDATA    (rwx) : ORIGIN = 0x10320000, LENGTH = 768K
 }
 
 /* Layout symbols */
 __sdram_base = 0x10000000;
 __sdram_size = 64M;
-__os_entry = 0x31000000;
+__os_entry = 0x10320000;
 __app_load_base = 0x10400000;
 
 SECTIONS {
@@ -79,10 +81,11 @@ SECTIONS {
         __fastdata_end = .;
     } > BRAM
 
-    /* === CRAM1: OS code + read-only + initialised data ===
-     * The whole OS image is packed into one contiguous section so
-     * boot.c can do a single memcpy from the CRAM0 scratch blob into
-     * executable CRAM1. */
+    /* === SDRAM: OS code + read-only + initialised data ===
+     * v2 arch: .text moves here from CRAM0 since CRAM0 is now
+     * non-executable (PMA exe=0).  The whole OS image (text + rodata
+     * + data) is packed into one contiguous section so boot.c can
+     * do a single memcpy from the CRAM0 scratch blob into SDRAM. */
     .osdata __os_entry : {
         . = ALIGN(16);
         __osdata_lma        = LOADADDR(.osdata);
@@ -104,21 +107,18 @@ SECTIONS {
         . = ALIGN(4);
         __osdata_data_vma_end = .;
         __osdata_vma_end      = .;
-    } > OSIMAGE
+    } > OSDATA
 
     /* os.bin = .osdata (which includes .text, .rodata, .data).
      * Bootloader reads the whole blob from CRAM0 slot 1 scratch and
-     * memcpy's it to CRAM1 at __osdata_vma == __os_entry.  No split. */
+     * memcpy's it to SDRAM at __osdata_vma == __os_entry.  No split. */
     __os_load_addr          = __os_entry;
     __os_text_size          = __text_end - __text_start;
     __os_copy_size          = __osdata_vma_end - __osdata_vma;
     __osdata_init_vma_start = __osdata_vma;
     __osdata_init_size      = __osdata_vma_end - __osdata_vma;
 
-    /* === SDRAM: OS BSS (zeroed at boot) ===
-     * Keep BSS in SDRAM so the initial kernel/app brk base remains in
-     * the SDRAM heap window; CRAM1 is executable image storage, not
-     * general heap. */
+    /* === SDRAM: OS BSS (zeroed at boot) === */
     .os_bss : {
         . = ALIGN(4);
         __os_bss_start = .;
@@ -131,16 +131,12 @@ SECTIONS {
 
     /* Memory regions.
      *
-     * __runtime_stack_top is 16 MB below the SDRAM PMA end (0x14000000) —
-     * a conservative known-good SDRAM region.  With the stack top at the
-     * PMA edge, speculative loads past the top (branch prediction paths,
-     * cache line ahead-fill) cross into unmapped memory and surface as
-     * architectural load
-     * access faults.  16 MB of headroom is more than any speculation
-     * window reaches. */
+     * The OS runtime stack lives high in SDRAM but below the top guard
+     * and fixed GPU palookup tables.  Audio/SoundFont reservations are
+     * carved below this stack so the app heap/mmap remains contiguous. */
     __os_heap_start = __os_bss_end;
     __save_region = 0x13C00000;
-    __runtime_stack_top = 0x13000000;
+    __runtime_stack_top = 0x13F80000;
     __runtime_stack_size = 512K;
     __runtime_stack_bottom = __runtime_stack_top - __runtime_stack_size;
 
@@ -175,8 +171,6 @@ SECTIONS {
 
     ASSERT(__fastdata_end <= __app_bram_start, "OS BRAM overflow: OS sections exceed 8KB reserved region")
     ASSERT(__fastdata_end <= (__stack_top - 8192), "BRAM overflow: insufficient stack headroom")
-    ASSERT(__osdata_vma_end <= (ORIGIN(OSIMAGE) + LENGTH(OSIMAGE)),
-           "OS text+rodata+data too large: exceeds reserved OS CRAM1 region")
     ASSERT(__os_bss_end <= (ORIGIN(OSDATA) + LENGTH(OSDATA)),
-           "OS bss too large: exceeds OSDATA region in SDRAM")
+           "OS text+rodata+data+bss too large: exceeds OSDATA region in SDRAM")
 }

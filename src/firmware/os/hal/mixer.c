@@ -1,10 +1,10 @@
 /*
  * openfpgaOS mixer HAL — thin facade over the HW audio_mixer (v2).
  *
- * Hardware fetches samples from the SDRAM sample pool (base 0x13700000),
- * does 2-tap linear interp + per-channel volume ramp, mixes 32 voices,
- * and drives audio_output's dcfifo at 48 kHz.  The public of_mixer_* API
- * is unchanged from the old swmixer-backed HAL so existing apps link.
+ * Hardware fetches samples from absolute SDRAM byte addresses, does
+ * 2-tap linear interp + per-channel volume ramp, mixes 32 voices, and
+ * drives audio_output's dcfifo at 48 kHz.  The public of_mixer_* API is
+ * unchanged from the old swmixer-backed HAL so existing apps link.
  *
  * Programming model (see audio_mixer.v + axi_periph_slave.v):
  *   MIX_VOICE_SEL      = <voice>        // latches target voice index
@@ -23,6 +23,7 @@
 #include "cache.h"
 #include "of_error.h"
 #include "of_syscall_numbers.h"
+#include "../kernel/syscall.h"
 
 extern void of_irq_register_mixer_end(void (*cb)(uint32_t ended_mask));
 
@@ -211,10 +212,153 @@ static inline int voice_in_range(int voice)
     return voice >= 0 && voice < MIXER_MAX_VOICES;
 }
 
-/* Sample pool pointer -> byte offset the HW expects in MIX_VOICE_ADDR. */
-static inline uint32_t sample_offset(const void *p)
+static inline uint32_t align_down_u32(uint32_t v, uint32_t align)
 {
-    return (uint32_t)p - SAMPLE_POOL_BASE;
+    return v & ~(align - 1u);
+}
+
+static inline uint32_t align_up_u32(uint32_t v, uint32_t align)
+{
+    return (v + align - 1u) & ~(align - 1u);
+}
+
+static inline int is_power_of_two_u32(uint32_t v)
+{
+    return v && ((v & (v - 1u)) == 0);
+}
+
+static int sample_byte_count(uint32_t sample_count, uint32_t bytes_per_sample,
+                             uint32_t *bytes_out)
+{
+    if (!bytes_out || bytes_per_sample == 0)
+        return 0;
+    if (sample_count > (UINT32_MAX / bytes_per_sample))
+        return 0;
+    *bytes_out = sample_count * bytes_per_sample;
+    return 1;
+}
+
+static int mixer_sdram_addr(const void *ptr, uint32_t bytes,
+                            uint32_t *addr_out, int *needs_flush_out)
+{
+    uintptr_t p = (uintptr_t)ptr;
+    uintptr_t end = p + (uintptr_t)bytes;
+    uintptr_t sdram_lo = (uintptr_t)OF_TARGET_SDRAM_BASE;
+    uintptr_t sdram_hi = sdram_lo + (uintptr_t)OF_TARGET_SDRAM_SIZE;
+    uintptr_t uncached_lo = (uintptr_t)OF_TARGET_SDRAM_UNCACHED_BASE;
+    uintptr_t uncached_hi = uncached_lo + (uintptr_t)OF_TARGET_SDRAM_SIZE;
+
+    if (!ptr || !addr_out || !needs_flush_out || end < p)
+        return 0;
+
+    if (p >= sdram_lo && end <= sdram_hi) {
+        *addr_out = (uint32_t)p;
+        *needs_flush_out = 1;
+        return 1;
+    }
+
+    if (p >= uncached_lo && end <= uncached_hi) {
+        uintptr_t offset = p - uncached_lo;
+        *addr_out = (uint32_t)(sdram_lo + offset);
+        *needs_flush_out = 0;
+        return 1;
+    }
+
+    return 0;
+}
+
+/* Persistent audio reservations, carved top-down before the app starts.
+ * The stream ring is always reserved; a boot-time .ofsf bank reserves
+ * exactly its file size below that. */
+static uint32_t audio_reserve_top;
+static uint32_t audio_reserve_cursor;
+static uint32_t audio_reserved_base;
+static uint32_t audio_reserve_floor = OF_TARGET_SDRAM_BASE;
+static uint32_t audio_stream_base;
+static int audio_memory_initialized;
+
+void of_mixer_memory_init(void)
+{
+    if (audio_memory_initialized)
+        return;
+
+    audio_memory_initialized = 1;
+    audio_reserve_top = align_down_u32(OF_TARGET_AUDIO_RESERVE_TOP,
+                                       OF_TARGET_AUDIO_RESERVE_ALIGN);
+    audio_reserve_cursor = audio_reserve_top;
+    audio_reserved_base = audio_reserve_top;
+
+    audio_stream_base =
+        (uint32_t)(uintptr_t)of_mixer_reserve_persistent(OF_TARGET_AUDIO_STREAM_SIZE,
+                                                         OF_TARGET_AUDIO_RESERVE_ALIGN);
+}
+
+int of_mixer_memory_set_floor(uint32_t floor)
+{
+    of_mixer_memory_init();
+    floor = align_up_u32(floor, OF_TARGET_AUDIO_RESERVE_ALIGN);
+    if (floor > audio_reserved_base)
+        return -1;
+    audio_reserve_floor = floor;
+    return 0;
+}
+
+void *of_mixer_reserve_persistent(uint32_t size, uint32_t align)
+{
+    if (!audio_memory_initialized)
+        of_mixer_memory_init();
+
+    if (!is_power_of_two_u32(align))
+        return (void *)0;
+    if (align < 4u)
+        align = 4u;
+
+    if (size > UINT32_MAX - 3u)
+        return (void *)0;
+    size = (size + 3u) & ~3u;
+    if (size == 0)
+        return (void *)(uintptr_t)audio_reserve_cursor;
+    if (audio_reserve_cursor < size)
+        return (void *)0;
+
+    uint32_t base = align_down_u32(audio_reserve_cursor - size, align);
+    if (base < audio_reserve_floor || base < OF_TARGET_SDRAM_BASE)
+        return (void *)0;
+
+    audio_reserve_cursor = base;
+    if (base < audio_reserved_base)
+        audio_reserved_base = base;
+    return (void *)(uintptr_t)base;
+}
+
+uint32_t of_mixer_reserved_base(void)
+{
+    of_mixer_memory_init();
+    return audio_reserved_base;
+}
+
+uint32_t of_mixer_reserved_size(void)
+{
+    of_mixer_memory_init();
+    return audio_reserve_top - audio_reserved_base;
+}
+
+uint32_t of_mixer_app_memory_top(void)
+{
+    of_mixer_memory_init();
+    return audio_reserved_base;
+}
+
+uint32_t of_mixer_stream_base(void)
+{
+    of_mixer_memory_init();
+    return audio_stream_base;
+}
+
+uint32_t of_mixer_stream_uncached_base(void)
+{
+    of_mixer_memory_init();
+    return audio_stream_base - OF_TARGET_SDRAM_BASE + OF_TARGET_SDRAM_UNCACHED_BASE;
 }
 
 /* Compose pan-weighted L/R from vol_shadow + pan_shadow and write the
@@ -242,6 +386,7 @@ void of_mixer_init(int max_voices, int output_rate)
 {
     (void)max_voices;
     (void)output_rate;
+    of_mixer_memory_init();
 
     /* Deactivate every voice and clear pending IRQ bits. */
     for (int i = 0; i < MIXER_MAX_VOICES; i++) {
@@ -355,6 +500,13 @@ static of_mixer_handle_t program_voice_play(int voice, const void *pcm,
     extern volatile uint32_t play_counter_diag;
     play_counter_diag++;
 
+    uint32_t sample_bytes;
+    uint32_t sdram_addr;
+    int needs_flush;
+    if (!sample_byte_count(sample_count, sizeof(int16_t), &sample_bytes) ||
+        !mixer_sdram_addr(pcm, sample_bytes, &sdram_addr, &needs_flush))
+        return OF_MIXER_HANDLE_INVALID;
+
     uint32_t rate = ((uint64_t)sample_rate << 16) / MIXER_OUTPUT_RATE;
     uint32_t irq = mixer_irq_save_local();
     of_mixer_handle_t handle = mixer_make_handle_locked(voice);
@@ -378,9 +530,10 @@ static of_mixer_handle_t program_voice_play(int voice, const void *pcm,
      * rather than cbo.clean — the bank_preload path showed that on this
      * VexiiRiscv config, only flush reliably moves data to SDRAM for
      * the mixer's AXI read path to see. */
-    of_cache_flush_range((void *)pcm, sample_count * sizeof(int16_t));
+    if (needs_flush)
+        of_cache_flush_range((void *)pcm, sample_bytes);
 
-    MIX_VOICE_ADDR(voice)       = sample_offset(pcm);
+    MIX_VOICE_ADDR(voice)       = sdram_addr;
     MIX_VOICE_LEN(voice)        = sample_count;
     MIX_VOICE_RATE(voice)       = rate;
     MIX_VOICE_POS_WR(voice)     = 0;
@@ -485,9 +638,9 @@ int of_mixer_voice_group(int voice)
 }
 
 /* HW v2 mixer is 16-bit-only (see audio_mixer.v).  We implement 8-bit
- * playback by expanding s8 → s16 into a fresh sample-pool buffer and
- * handing that to play_internal.  Costs one O(N) copy + 2× pool bytes
- * per 8-bit sample; steady-state playback is identical to 16-bit. */
+ * playback by expanding s8 -> s16 into a persistent SDRAM buffer and
+ * handing that to play_internal.  Steady-state playback is identical
+ * to 16-bit. */
 int of_mixer_play_8bit(const uint8_t *pcm_s8, uint32_t sample_count,
                        uint32_t sample_rate, int priority, int volume)
 {
@@ -523,6 +676,13 @@ static of_mixer_handle_t retrigger_voice_h(int voice, const uint8_t *pcm_s16,
 {
     if (!voice_in_range(voice) || !pcm_s16 || sample_count == 0)
         return OF_MIXER_HANDLE_INVALID;
+    uint32_t sample_bytes;
+    uint32_t sdram_addr;
+    int needs_flush;
+    if (!sample_byte_count(sample_count, sizeof(int16_t), &sample_bytes) ||
+        !mixer_sdram_addr(pcm_s16, sample_bytes, &sdram_addr, &needs_flush))
+        return OF_MIXER_HANDLE_INVALID;
+
     uint32_t rate = ((uint64_t)sample_rate << 16) / MIXER_OUTPUT_RATE;
     int v = volume & 0xFF;
 
@@ -535,9 +695,10 @@ static of_mixer_handle_t retrigger_voice_h(int voice, const uint8_t *pcm_s16,
     }
 
     /* Same SDRAM flush as play_internal — see comment there. */
-    of_cache_flush_range((void *)pcm_s16, sample_count * sizeof(int16_t));
+    if (needs_flush)
+        of_cache_flush_range((void *)pcm_s16, sample_bytes);
 
-    MIX_VOICE_ADDR(voice)       = sample_offset(pcm_s16);
+    MIX_VOICE_ADDR(voice)       = sdram_addr;
     MIX_VOICE_LEN(voice)        = sample_count;
     MIX_VOICE_RATE(voice)       = rate;
     MIX_VOICE_POS_WR(voice)     = 0;
@@ -970,27 +1131,51 @@ void of_mixer_set_filter_h(of_mixer_handle_t handle,
     (void)handle; (void)cutoff_q016; (void)q; (void)enable;
 }
 
-/* Sample memory bump allocator — backed by the SDRAM sample pool at
- * OF_TARGET_SAMPLE_BASE.  Apps pass the returned pointer back into
- * of_mixer_play*; sample_offset() converts to the byte offset the HW
- * expects in MIX_VOICE_ADDR.  The first AUDIO_STREAM_RESERVED_BYTES of
- * the pool are reserved for the of_audio stereo stream ring (owned by
- * targets/pocket/audio.c), so the head starts past that window. */
-#define AUDIO_STREAM_RESERVED_BYTES  0x4000u   /* 16 KB: 2048 stereo pairs */
-static uint32_t sample_pool_head = SAMPLE_POOL_BASE + AUDIO_STREAM_RESERVED_BYTES;
+#define MIXER_LEGACY_ALLOC_SLOTS 64
+typedef struct {
+    void *ptr;
+    uint32_t size;
+} mixer_legacy_alloc_t;
+static mixer_legacy_alloc_t legacy_allocs[MIXER_LEGACY_ALLOC_SLOTS];
 
+/* Legacy allocator service.  The mixer can read any SDRAM buffer now,
+ * so this ABI is backed by app mmap memory instead of a hidden fixed
+ * pool. */
 void *of_mixer_alloc_samples(uint32_t size)
 {
-    size = (size + 3) & ~3u;
-    if (sample_pool_head + size > SAMPLE_POOL_END) return (void *)0;
-    void *ptr = (void *)sample_pool_head;
-    sample_pool_head += size;
+    if (size > UINT32_MAX - 4095u)
+        return (void *)0;
+    size = (size + 4095u) & ~4095u;
+    if (!size)
+        return (void *)0;
+
+    int slot = -1;
+    for (int i = 0; i < MIXER_LEGACY_ALLOC_SLOTS; i++) {
+        if (!legacy_allocs[i].ptr) {
+            slot = i;
+            break;
+        }
+    }
+    if (slot < 0)
+        return (void *)0;
+
+    void *ptr = syscall_alloc_app_mmap(size);
+    if (!ptr)
+        return (void *)0;
+    legacy_allocs[slot].ptr = ptr;
+    legacy_allocs[slot].size = size;
     return ptr;
 }
 
 void of_mixer_free_samples(void)
 {
-    sample_pool_head = SAMPLE_POOL_BASE + AUDIO_STREAM_RESERVED_BYTES;
+    for (int i = 0; i < MIXER_LEGACY_ALLOC_SLOTS; i++) {
+        if (!legacy_allocs[i].ptr)
+            continue;
+        syscall_free_app_mmap(legacy_allocs[i].ptr, legacy_allocs[i].size);
+        legacy_allocs[i].ptr = (void *)0;
+        legacy_allocs[i].size = 0;
+    }
 }
 
 long of_mixer_dispatch(long fid, long a0, long a1,

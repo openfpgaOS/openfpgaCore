@@ -1,12 +1,11 @@
-// Cellular PSRAM controller wrapper for VexiiRiscv CPU
+// CRAM0 Controller wrapper for VexiiRiscv CPU
 // Provides 32-bit word interface using two 16-bit PSRAM accesses
-// CRAM0 and CRAM1 share the AS1C8M16PL-compatible PHY.
+// Uses the cram1_phy module (CRAM0/CRAM1 share the AS1C8M16PL phy).
 
 `default_nettype none
 
 module cram0_controller #(
-    parameter CLOCK_SPEED = 100.0,  // MHz - matches CPU / SDRAM / mp_ram PLL
-    parameter WORD_READS_USE_SYNC_BURST = 1'b0
+    parameter CLOCK_SPEED = 100.0  // MHz - matches CPU / SDRAM / mp_ram PLL
 ) (
     input wire clk,
     input wire reset_n,
@@ -51,7 +50,6 @@ module cram0_controller #(
 
     // Sync burst read interface (active only with PSRAM_BURST_ENABLE)
     input  wire         burst_rd,       // single-cycle pulse
-    input  wire  [21:0] burst_addr,     // 32-bit word address
     input  wire  [5:0]  burst_len,      // 32-bit words minus 1
     output reg          burst_rdata_valid,
     output reg   [31:0] burst_rdata,
@@ -87,7 +85,6 @@ reg [3:0] latched_wstrb;
 // Burst read tracking
 reg [5:0]  burst_words_rem;    // 32-bit words remaining (including current)
 reg [15:0] burst_lo_half;      // latched low halfword during burst
-reg        burst_to_word;      // sync-burst command services word_rd
 
 // Signals to psram module
 reg psram_write_en;
@@ -223,7 +220,6 @@ always @(posedge clk or negedge reset_n) begin
         sync_burst_len_r <= 6'd0;
         burst_words_rem <= 6'd0;
         burst_lo_half <= 16'd0;
-        burst_to_word <= 1'b0;
         burst_rdata_valid <= 1'b0;
         burst_rdata <= 32'b0;
     end else begin
@@ -241,26 +237,13 @@ always @(posedge clk or negedge reset_n) begin
                 if (burst_rd) begin
                     // Sync burst read: each 32-bit word = 2 halfwords
                     word_busy <= 1'b1;
-                    burst_to_word <= 1'b0;
-                    latched_addr <= burst_addr;
-                    latched_chip_sel <= burst_addr[21];
-                    burst_words_rem <= burst_len + 6'd1;
-                    state <= ST_BURST_START;
-                end else if (word_rd && WORD_READS_USE_SYNC_BURST) begin
-                    // CRAM1 runs in sync-burst BCR mode so async reads
-                    // are not safe.  A single word read becomes a
-                    // one-word sync burst and returns on word_q_valid.
-                    word_busy <= 1'b1;
-                    is_write <= 1'b0;
-                    burst_to_word <= 1'b1;
                     latched_addr <= word_addr;
                     latched_chip_sel <= word_addr[21];
-                    burst_words_rem <= 6'd1;
+                    burst_words_rem <= burst_len + 6'd1;
                     state <= ST_BURST_START;
                 end else if (word_wr || word_rd) begin
                     word_busy <= 1'b1;
                     is_write <= word_wr;
-                    burst_to_word <= 1'b0;
                     latched_data <= word_data;
                     latched_addr <= word_addr;
                     latched_chip_sel <= word_addr[21];
@@ -345,7 +328,7 @@ always @(posedge clk or negedge reset_n) begin
 
             ST_DONE: begin
                 word_busy <= 1'b0;
-                if (!is_write && !burst_to_word) begin
+                if (!is_write) begin
                     word_q_valid <= 1'b1;  // Pulse valid on read completion
                 end
                 state <= ST_IDLE;
@@ -382,13 +365,8 @@ always @(posedge clk or negedge reset_n) begin
             ST_BURST_HI: begin
                 // Wait for high halfword, assemble 32-bit word
                 if (psram_read_avail) begin
-                    if (burst_to_word) begin
-                        word_q <= {psram_data_out, burst_lo_half};
-                        word_q_valid <= 1'b1;
-                    end else begin
-                        burst_rdata <= {psram_data_out, burst_lo_half};
-                        burst_rdata_valid <= 1'b1;
-                    end
+                    burst_rdata <= {psram_data_out, burst_lo_half};
+                    burst_rdata_valid <= 1'b1;
                     burst_words_rem <= burst_words_rem - 6'd1;
                     if (burst_words_rem == 6'd1) begin
                         // Last word delivered — wait for PHY to

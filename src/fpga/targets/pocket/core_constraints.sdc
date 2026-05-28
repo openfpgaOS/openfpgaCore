@@ -55,15 +55,10 @@ set_output_delay -clock cram0_clk_pin -min -1.0 [get_ports {cram0_a[*] cram0_dq[
 set_input_delay -clock cram0_clk_pin -max 6.5 [get_ports {cram0_dq[*] cram0_wait}]
 set_input_delay -clock cram0_clk_pin -min 1.0 [get_ports {cram0_dq[*] cram0_wait}]
 
-# CRAM1 executable PSRAM.  The controller and chip clock share clk_cpu.
-create_generated_clock -name cram1_clk_pin \
-  -source [get_pins {ic|mp_ram|altera_pll_i|general[0].gpll~PLL_OUTPUT_COUNTER|divclk}] \
-  [get_ports cram1_clk]
-
-set_output_delay -clock cram1_clk_pin -max 3.0 [get_ports {cram1_a[*] cram1_dq[*] cram1_adv_n cram1_cre cram1_ce0_n cram1_ce1_n cram1_oe_n cram1_we_n cram1_ub_n cram1_lb_n}]
-set_output_delay -clock cram1_clk_pin -min -1.0 [get_ports {cram1_a[*] cram1_dq[*] cram1_adv_n cram1_cre cram1_ce0_n cram1_ce1_n cram1_oe_n cram1_we_n cram1_ub_n cram1_lb_n}]
-set_input_delay -clock cram1_clk_pin -max 6.5 [get_ports {cram1_dq[*] cram1_wait}]
-set_input_delay -clock cram1_clk_pin -min 1.0 [get_ports {cram1_dq[*] cram1_wait}]
+# CRAM1 retired in memory-arch v2 — chip is not pin-assigned in ap_core.qsf
+# and the top-level ports have been removed. Old cram1_* IO/clock constraints
+# deleted here; referencing the retired ports produced "unresolved port"
+# warnings from Quartus.
 
 # ============================================================================
 # VexiiRiscv FPU multicycle — the FpuAddSharedPlugin's pre-shift exp-diff

@@ -38,12 +38,15 @@ typedef struct of_video_timing {
 #define OF_DISPLAY_FRAMEBUFFER 1  /* Framebuffer only */
 #define OF_DISPLAY_OVERLAY     2  /* White terminal text over framebuffer */
 
-#define OF_VIDEO_VTOTAL_AUTO 0u
-#define OF_VIDEO_VTOTAL_60HZ 258u  /* experimental fast LCD mode, estimated ~60.14 Hz */
-#define OF_VIDEO_VTOTAL_55HZ 285u
-#define OF_VIDEO_VTOTAL_50HZ 310u
-#define OF_VIDEO_VTOTAL_45HZ 340u
-#define OF_VIDEO_VTOTAL_42HZ 375u
+#define OF_VIDEO_VTOTAL_AUTO     0u
+#define OF_VIDEO_VTOTAL_MIN      257u
+#define OF_VIDEO_VTOTAL_MAX      375u
+#define OF_VIDEO_VTOTAL_61_25HZ  257u  /* experimental; current clock measures ~61.30 Hz */
+#define OF_VIDEO_VTOTAL_60HZ     262u  /* conservative normal LCD timing, measured ~60.13 Hz */
+#define OF_VIDEO_VTOTAL_55HZ     285u
+#define OF_VIDEO_VTOTAL_50HZ     310u
+#define OF_VIDEO_VTOTAL_45HZ     340u
+#define OF_VIDEO_VTOTAL_42HZ     375u
 
 /* Color mode + framebuffer-size constants — referenced by both branches
  * (the PC SDL2 stub uses them too), so define here above the OF_PC fence. */

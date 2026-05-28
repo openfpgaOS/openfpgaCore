@@ -166,7 +166,7 @@ static void hlineasm4_ref(int numPixels, int /*shade*/,
 // palookup base.  The GPU reads palookup bytes through gpu_tex_cache
 // port B, so tests preload the table directly via the SDRAM backdoor.
 // PALOOKUP_BASE_BYTE matches gpu_core.v's PALOOKUP_BASE localparam.
-static const uint32_t PALOOKUP_BASE_BYTE = 0x03400000;
+static const uint32_t PALOOKUP_BASE_BYTE = 0x03FC0000;
 static void upload_identity_cmap_row0() {
     for (int i = 0; i < 256; i += 4) {
         uint32_t w = (uint32_t)(uint8_t)(i + 0)

@@ -48,7 +48,7 @@ set_global_assignment -name PROJECT_OUTPUT_DIRECTORY output_files
 # deterministic. The Altera reference build_id_gen.tcl below
 # regenerated it on every Quartus invocation with the current
 # timestamp + MAC + hostname, which folded into BRAM init data and
-# produced non-deterministic bitstreams from the same RTL — some
+# produced non-deterministic bitstreams from the same RTL - some
 # functional, some wedging the CPU on first instruction fetch with
 # `0 errors, 0 warnings`. Re-enable only if you actually need a
 # unique build ID per compile.
@@ -129,38 +129,7 @@ set_location_assignment PIN_D6 -to cram0_oe_n
 set_location_assignment PIN_A7 -to cram0_ub_n
 set_location_assignment PIN_K7 -to cram0_wait
 set_location_assignment PIN_G8 -to cram0_we_n
-set_location_assignment PIN_Y3 -to cram1_a[21]
-set_location_assignment PIN_AA2 -to cram1_a[20]
-set_location_assignment PIN_L2 -to cram1_a[19]
-set_location_assignment PIN_N1 -to cram1_a[18]
-set_location_assignment PIN_U1 -to cram1_a[17]
-set_location_assignment PIN_U2 -to cram1_a[16]
-set_location_assignment PIN_U8 -to cram1_adv_n
-set_location_assignment PIN_N2 -to cram1_ce0_n
-set_location_assignment PIN_T8 -to cram1_ce1_n
-set_location_assignment PIN_W2 -to cram1_clk
-set_location_assignment PIN_T7 -to cram1_cre
-set_location_assignment PIN_W8 -to cram1_dq[15]
-set_location_assignment PIN_U6 -to cram1_dq[14]
-set_location_assignment PIN_R7 -to cram1_dq[13]
-set_location_assignment PIN_R6 -to cram1_dq[12]
-set_location_assignment PIN_P7 -to cram1_dq[11]
-set_location_assignment PIN_N6 -to cram1_dq[10]
-set_location_assignment PIN_C2 -to cram1_dq[9]
-set_location_assignment PIN_D3 -to cram1_dq[8]
-set_location_assignment PIN_V6 -to cram1_dq[7]
-set_location_assignment PIN_U7 -to cram1_dq[6]
-set_location_assignment PIN_M6 -to cram1_dq[5]
-set_location_assignment PIN_R5 -to cram1_dq[4]
-set_location_assignment PIN_P6 -to cram1_dq[3]
-set_location_assignment PIN_E2 -to cram1_dq[2]
-set_location_assignment PIN_G2 -to cram1_dq[1]
-set_location_assignment PIN_C1 -to cram1_dq[0]
-set_location_assignment PIN_L1 -to cram1_lb_n
-set_location_assignment PIN_M7 -to cram1_oe_n
-set_location_assignment PIN_G1 -to cram1_ub_n
-set_location_assignment PIN_W9 -to cram1_wait
-set_location_assignment PIN_AA1 -to cram1_we_n
+# cram1_* pin assignments retired with memory-arch v2.
 set_location_assignment PIN_J17 -to dram_a[12]
 set_location_assignment PIN_F15 -to dram_a[11]
 set_location_assignment PIN_C13 -to dram_a[10]
@@ -515,18 +484,7 @@ set_instance_assignment -name IO_STANDARD "1.8 V" -to cram0_a[18]
 set_instance_assignment -name IO_STANDARD "1.8 V" -to cram0_a[19]
 set_instance_assignment -name IO_STANDARD "1.8 V" -to cram0_a[20]
 set_instance_assignment -name IO_STANDARD "1.8 V" -to cram0_a[21]
-set_instance_assignment -name IO_STANDARD "1.8 V" -to cram1_a[*]
-set_instance_assignment -name IO_STANDARD "1.8 V" -to cram1_dq[*]
-set_instance_assignment -name IO_STANDARD "1.8 V" -to cram1_wait
-set_instance_assignment -name IO_STANDARD "1.8 V" -to cram1_clk
-set_instance_assignment -name IO_STANDARD "1.8 V" -to cram1_adv_n
-set_instance_assignment -name IO_STANDARD "1.8 V" -to cram1_cre
-set_instance_assignment -name IO_STANDARD "1.8 V" -to cram1_ce0_n
-set_instance_assignment -name IO_STANDARD "1.8 V" -to cram1_ce1_n
-set_instance_assignment -name IO_STANDARD "1.8 V" -to cram1_oe_n
-set_instance_assignment -name IO_STANDARD "1.8 V" -to cram1_we_n
-set_instance_assignment -name IO_STANDARD "1.8 V" -to cram1_ub_n
-set_instance_assignment -name IO_STANDARD "1.8 V" -to cram1_lb_n
+# cram1_* IO_STANDARD assignments retired with memory-arch v2.
 set_instance_assignment -name IO_STANDARD "1.8 V" -to user1
 set_instance_assignment -name IO_STANDARD "1.8 V" -to user2
 set_instance_assignment -name IO_STANDARD "1.8 V" -to dbg_rx
@@ -558,7 +516,7 @@ set_instance_assignment -name OUTPUT_TERMINATION "SERIES 50 OHM WITHOUT CALIBRAT
 set_instance_assignment -name OUTPUT_TERMINATION "SERIES 50 OHM WITHOUT CALIBRATION" -to scal_auddac
 set_instance_assignment -name OUTPUT_TERMINATION "SERIES 50 OHM WITHOUT CALIBRATION" -to scal_audlrck
 set_instance_assignment -name OUTPUT_TERMINATION "SERIES 50 OHM WITHOUT CALIBRATION" -to vpll_feed
-set_instance_assignment -name OUTPUT_TERMINATION "SERIES 50 OHM WITHOUT CALIBRATION" -to cram1_clk
+# cram1_clk OUTPUT_TERMINATION retired with memory-arch v2.
 set_instance_assignment -name OUTPUT_TERMINATION "SERIES 50 OHM WITHOUT CALIBRATION" -to scal_clk
 set_instance_assignment -name CURRENT_STRENGTH_NEW 4MA -to dram_dqm[1]
 set_instance_assignment -name CURRENT_STRENGTH_NEW 4MA -to dram_dqm[0]
@@ -598,17 +556,7 @@ set_instance_assignment -name CURRENT_STRENGTH_NEW 4MA -to dram_a[9]
 set_instance_assignment -name CURRENT_STRENGTH_NEW 4MA -to dram_a[10]
 set_instance_assignment -name CURRENT_STRENGTH_NEW 4MA -to dram_a[11]
 set_instance_assignment -name CURRENT_STRENGTH_NEW 8MA -to dbg_tx
-set_instance_assignment -name CURRENT_STRENGTH_NEW 4MA -to cram1_a[*]
-set_instance_assignment -name CURRENT_STRENGTH_NEW 4MA -to cram1_dq[*]
-set_instance_assignment -name CURRENT_STRENGTH_NEW 4MA -to cram1_adv_n
-set_instance_assignment -name CURRENT_STRENGTH_NEW 4MA -to cram1_cre
-set_instance_assignment -name CURRENT_STRENGTH_NEW 4MA -to cram1_ce0_n
-set_instance_assignment -name CURRENT_STRENGTH_NEW 4MA -to cram1_ce1_n
-set_instance_assignment -name CURRENT_STRENGTH_NEW 4MA -to cram1_oe_n
-set_instance_assignment -name CURRENT_STRENGTH_NEW 4MA -to cram1_we_n
-set_instance_assignment -name CURRENT_STRENGTH_NEW 4MA -to cram1_ub_n
-set_instance_assignment -name CURRENT_STRENGTH_NEW 4MA -to cram1_lb_n
-set_instance_assignment -name CURRENT_STRENGTH_NEW 4MA -to cram1_wait
+# cram1_* CURRENT_STRENGTH assignments retired with memory-arch v2.
 set_instance_assignment -name CURRENT_STRENGTH_NEW 4MA -to cram0_we_n
 set_instance_assignment -name CURRENT_STRENGTH_NEW 4MA -to cram0_wait
 set_instance_assignment -name CURRENT_STRENGTH_NEW 4MA -to cram0_ub_n
@@ -725,7 +673,7 @@ set_global_assignment -name QIP_FILE mf_pllbase.qip
 set_global_assignment -name SIP_FILE mf_pllbase.sip
 
 # Audio filter modules
-# audio_filters removed — never instantiated (OpenGateware template leftover)
+# audio_filters removed - never instantiated (OpenGateware template leftover)
 
 # PSRAM sync burst: IOB input registers for fast data capture
 set_instance_assignment -name FAST_INPUT_REGISTER ON -to cram0_dq[0]
@@ -745,8 +693,7 @@ set_instance_assignment -name FAST_INPUT_REGISTER ON -to cram0_dq[13]
 set_instance_assignment -name FAST_INPUT_REGISTER ON -to cram0_dq[14]
 set_instance_assignment -name FAST_INPUT_REGISTER ON -to cram0_dq[15]
 set_instance_assignment -name FAST_INPUT_REGISTER ON -to cram0_wait
-set_instance_assignment -name FAST_INPUT_REGISTER ON -to cram1_dq[*]
-set_instance_assignment -name FAST_INPUT_REGISTER ON -to cram1_wait
+# cram1_dq / cram1_wait FAST_INPUT_REGISTER assignments retired with memory-arch v2.
 
 # SDRAM: keep command/address/data mask/data pins in the I/O cells.  These
 # paths are board-facing relative to dram_clk, so fabric-to-pad routing shows
@@ -806,11 +753,11 @@ set_instance_assignment -name FAST_OUTPUT_ENABLE_REGISTER ON -to dram_dq[14]
 set_instance_assignment -name FAST_OUTPUT_ENABLE_REGISTER ON -to dram_dq[15]
 
 # Source files added after initial commit
-# audio_mixer.v v2 — hardware voice mixer, SDRAM sample fetch (resurrected post-f11811c).
+# audio_mixer.v v2 - hardware voice mixer, SDRAM sample fetch (resurrected post-f11811c).
 # audio_dma.v retired (v1 pre-mixed ring DMA); HW mixer now drives the FIFO directly.
 set_global_assignment -name VERILOG_FILE ../../common/audio_mixer.v
-set_global_assignment -name VERILOG_FILE ../../common/axi_cram1_slave.v
-# bridge_to_cram1.v / cram1_burst_mmio.v / bridge_to_sdram.v retired in memory-arch v2.
+# cram1_controller.v / cram1_phy.sv / axi_cram1_slave.v / bridge_to_cram1.v /
+# cram1_burst_mmio.v / bridge_to_sdram.v retired in memory-arch v2.
 set_global_assignment -name VERILOG_FILE ../../common/audio_output.v
 set_global_assignment -name VERILOG_FILE ../../common/gpu_core.v
 set_global_assignment -name VERILOG_FILE ../../common/gpu_tex_cache.v
@@ -818,7 +765,7 @@ set_global_assignment -name VERILOG_FILE ../../common/axi_periph_slave.v
 set_global_assignment -name VERILOG_FILE ../../common/sync_fifo.v
 set_global_assignment -name VERILOG_FILE ../../common/snac_shifter.v
 set_global_assignment -name VERILOG_FILE ../../common/snac_psx_poller.v
-# axi_cram0_slave.v retired — cram0_cdc is the CPU-side AXI slave for
+# axi_cram0_slave.v retired - cram0_cdc is the CPU-side AXI slave for
 # CRAM0 in v2, owner-muxed against the bridge.  File deleted from tree.
 set_global_assignment -name VERILOG_FILE ../../common/axi_register_slice.v
 set_global_assignment -name VERILOG_FILE ../../common/axi_sdram_arbiter.v
@@ -838,7 +785,7 @@ set_global_assignment -name VERILOG_FILE ../../common/video_CRT_scanout_indexed_
 set_global_assignment -name VERILOG_FILE ../../vendor/vexriscv/VexiiRiscv/VexiiRiscv.v
 set_global_assignment -name VERILOG_FILE mf_pllram_133.v
 set_global_assignment -name SDC_FILE core_constraints.sdc
-set_global_assignment -name SEED 10
+set_global_assignment -name SEED 46
 # Phase 5 fitter-tuning experiments were done while the design was above
 # 94% ALMs.  They are no longer representative after the span-only GPU
 # profile reduced the design to roughly 76% ALMs.

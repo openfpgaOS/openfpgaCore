@@ -137,8 +137,7 @@ static void video_program_terminal_mode(void) {
     SYS_COLOR_MODE = COLOR_MODE_8BIT;
     FB_MODE_SIZE = ((uint32_t)FB_HEIGHT << 16) | FB_WIDTH;
     FB_MODE_STRIDE = FB_STRIDE;
-    VIDEO_SCALER_MODE =
-        video_scaler_mode_for_size(FB_WIDTH, FB_HEIGHT)->slot;
+    VIDEO_SCALER_MODE = VIDEO_SCALER_SLOT_640X240;
 }
 
 static void video_program_visible_mode(void) {
@@ -148,13 +147,15 @@ static void video_program_visible_mode(void) {
         video_program_app_mode();
 }
 
+static void video_fill_all_buffers(uint8_t color) {
+    for (int i = 0; i < 3; i++)
+        memset((void *)fb_addr[i], color, vid_frame_bytes);
+    for (int i = 0; i < 3; i++)
+        of_cache_clean_range((void *)fb_addr[i], vid_frame_bytes);
+}
+
 static void video_clear_all_buffers(void) {
-    memset((void *)FB0_BASE, 0, vid_frame_bytes);
-    memset((void *)FB1_BASE, 0, vid_frame_bytes);
-    memset((void *)FB2_BASE, 0, vid_frame_bytes);
-    of_cache_clean_range((void *)FB0_BASE, vid_frame_bytes);
-    of_cache_clean_range((void *)FB1_BASE, vid_frame_bytes);
-    of_cache_clean_range((void *)FB2_BASE, vid_frame_bytes);
+    video_fill_all_buffers(0);
 }
 
 /* Palette shadow — needed to dim the app palette in overlay mode.
@@ -209,12 +210,13 @@ static volatile uint64_t timing_last_present_cycles;
  * normal repeat cadence. If the late window is missed too, the next repeat
  * also uses that fastest timing.
  * The FPGA clamps again and can consume shorter requests in the current frame
- * after active video has completed. V_TOTAL=262 measured about 59.225 Hz; the
- * experimental fast LCD mode lowers normal-LCD timing to V_TOTAL=258,
- * estimated at about 60.14 Hz with the same line period. When Analogizer
- * video or SNAC is active, RTL overrides this register with fixed NTSC/PAL
- * timing so external hardware does not see adaptive changes. */
-#define VRR_FASTEST_HZ_MILLI         60143u
+ * after active video has completed. The fastest experimental normal-LCD
+ * timing is V_TOTAL=257, which measures about 61.30 Hz with the current
+ * 12.288 MHz video clock and 780-line horizontal total; exact 61.25 Hz would
+ * need a small clock retune. When Analogizer video or SNAC is active, RTL
+ * overrides this register with fixed NTSC/PAL timing so external hardware
+ * does not see adaptive changes. */
+#define VRR_FASTEST_HZ_MILLI         61299u
 #define VRR_CYCLES_PER_LINE_X1024    \
     (((uint64_t)CPU_FREQ_HZ * 1000u * 1024u) / \
      ((uint64_t)VRR_FASTEST_HZ_MILLI * VIDEO_VTOTAL_MIN))
@@ -911,5 +913,5 @@ void of_video_set_display_mode(int mode) {
 }
 
 void of_video_clear(uint8_t color) {
-    memset(of_video_get_surface(), color, vid_frame_bytes);
+    video_fill_all_buffers(color);
 }

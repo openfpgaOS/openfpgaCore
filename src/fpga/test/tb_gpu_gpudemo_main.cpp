@@ -187,7 +187,7 @@ static void clear_fb() {
 }
 // Identity cmap preloaded into SDRAM at the slot-0 palookup base —
 // matches gpu_core.v's PALOOKUP_BASE and is read through tex_cache port B.
-static const uint32_t PALOOKUP_BASE_BYTE = 0x03400000;
+static const uint32_t PALOOKUP_BASE_BYTE = 0x03FC0000;
 static void upload_identity_cmap_row0() {
     for (int i = 0; i < 256; i += 4) {
         uint32_t w = (uint32_t)(uint8_t)(i + 0)
@@ -334,6 +334,7 @@ int main(int argc, char **argv)
     pending_ring_words.clear();
     reset();
     mmio_write(0, 4);   // GPU_CTRL: ring_reset
+    mmio_write(12, PALOOKUP_BASE_BYTE);
     mmio_write(1, 0);   // RING_WRPTR = 0
 
     // Static setup (matches gpudemo's startup ordering).

@@ -17,33 +17,30 @@
 #define OS_SLOT_ID      1       /* OS binary (loaded by bootloader) */
 #define APP_SLOT_ID     2       /* Application ELF binary */
 
-/* Fallback load address for older PIE (ET_DYN) apps that have vaddrs
- * relative to 0.  New ET_EXEC apps linked with app.ld use absolute
- * CRAM1 text and SDRAM data VMAs and ignore this base. */
+/* Fallback load address for PIE (ET_DYN) apps that have vaddrs relative to 0.
+ * ET_EXEC apps linked at a nonzero base (e.g. 0x10400000 SDRAM) ignore this
+ * and use their own absolute vaddrs.  Matches __app_load_base in os.ld and
+ * must stay in SDRAM, not the CRAM0 nonvolatile window. */
 #define APP_LOAD_ADDR   0x10400000u
 
 /* Symbols from linker script */
 extern char __os_bss_end[];
 
-/* Zero OS .bss after the BRAM bootloader has copied the OS image.  Uses
- * only stack locals and pointer arguments, so it is safe to invoke before
- * .bss is zeroed. */
-__attribute__((noinline, section(".text.os_finalize_memory")))
+/* Zero OS .bss in SDRAM from BRAM.  This runs before os_main(), while
+ * SDRAM has just been populated by the bootloader and before the OS
+ * can rely on its own .bss state.  Keep it in .fasttext so the first
+ * uncached SDRAM cleanup does not execute from SDRAM at the same time. */
+__attribute__((noinline, section(".fasttext.os_finalize_memory"), aligned(4)))
 void os_finalize_memory(void *bss_start, void *bss_end) {
-    uintptr_t p = (uintptr_t)bss_start;
-    uintptr_t end = (uintptr_t)bss_end;
-    if (p >= SDRAM_BASE && end <= (SDRAM_BASE + SDRAM_SIZE)) {
-        p = p - SDRAM_BASE + SDRAM_UNCACHED_BASE;
-        end = end - SDRAM_BASE + SDRAM_UNCACHED_BASE;
-    }
-    while ((p + sizeof(uint32_t)) <= end) {
-        *(volatile uint32_t *)p = 0;
-        p += sizeof(uint32_t);
-    }
-    while (p < end) {
-        *(volatile uint8_t *)p = 0;
-        p++;
-    }
+    /* Bypass cache via uncached SDRAM alias (0x10... → 0x50...).
+     * If cache writeback is what's wedging the LSU FIFO, this
+     * sidesteps it. */
+    uint32_t bss_uc_start = ((uint32_t)(uintptr_t)bss_start) - 0x10000000u + 0x50000000u;
+    uint32_t bss_uc_end   = ((uint32_t)(uintptr_t)bss_end)   - 0x10000000u + 0x50000000u;
+    uint32_t *bss = (uint32_t *)(uintptr_t)bss_uc_start;
+    uint32_t *bend = (uint32_t *)(uintptr_t)bss_uc_end;
+    while (bss < bend)
+        *bss++ = 0;
     __asm__ volatile("fence" ::: "memory");
 }
 
@@ -192,11 +189,15 @@ void os_main(void) {
     of_term_puts("  Services init..... ");
     status_ok();
 
-    /* Populate capability descriptor for the app */
-    caps_table_init(app.bss_end);
-
-    of_term_puts("  Caps init......... ");
-    status_ok();
+    uintptr_t audio_floor = (app.bss_end + APP_STACK_SIZE
+                           + OF_TARGET_AUDIO_RESERVE_ALIGN - 1u)
+                          & ~(uintptr_t)(OF_TARGET_AUDIO_RESERVE_ALIGN - 1u);
+    if (of_mixer_memory_set_floor((uint32_t)audio_floor) < 0) {
+        of_term_puts("  App memory........ ");
+        status_fail();
+        of_term_puts("  Application is too large for the audio reserve layout.\n");
+        while (1) of_timer_delay_ms(1000);
+    }
 
     /* Filesystem init — last step before handing control to the app.
      * Opens every data slot (required for deferload:true) and populates
@@ -214,6 +215,21 @@ void os_main(void) {
     /* Auto-load a .ofsf SoundFont if one is present in a data slot.
      * Silent when no bank is staged; emits its own boot line otherwise. */
     bank_preload();
+
+    app.stack_top = of_mixer_app_memory_top();
+    if (syscall_set_app_stack_top(app.stack_top) < 0) {
+        of_term_puts("  App memory........ ");
+        status_fail();
+        of_term_puts("  Not enough SDRAM for app stack after audio reservations.\n");
+        while (1) of_timer_delay_ms(1000);
+    }
+
+    /* Populate capability descriptor after audio/SoundFont reservations
+     * so heap_size and sample_base/sample_size describe the real layout. */
+    caps_table_init(app.bss_end);
+
+    of_term_puts("  Caps init......... ");
+    status_ok();
 
     /* UART shares cart pins with Analogizer/SNAC. Only mirror the boot console
      * when neither feature owns the adapter pins, and only after the SoundFont

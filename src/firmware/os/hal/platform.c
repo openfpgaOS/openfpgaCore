@@ -34,9 +34,8 @@ static const of_target_platform_t g_target_platform = {
     .interact_uncached = OF_TARGET_INTERACT_UNCACHED,
     .interact_max_vars = OF_TARGET_INTERACT_MAX_VARS,
 
-    /* CRAM0 is bridge staging; CRAM1 is executable CPU PSRAM. */
+    /* v2 memory arch: CRAM1 + SRAM retired. */
     .cram0_base           = OF_TARGET_CRAM0_BASE,
-    .cram1_base           = OF_TARGET_CRAM1_BASE,
     .cram_size            = OF_TARGET_CRAM_SIZE,
     .cram0_bridge         = OF_TARGET_CRAM0_BRIDGE,
     .cram0_os_offset      = OF_TARGET_CRAM0_OS_OFFSET,
@@ -45,8 +44,8 @@ static const of_target_platform_t g_target_platform = {
     .runtime_stack_top = OF_TARGET_RUNTIME_STACK_TOP,
     .runtime_stack_size = OF_TARGET_RUNTIME_STACK_SIZE,
 
-    .sample_base = OF_TARGET_SAMPLE_BASE,
-    .sample_size = OF_TARGET_SAMPLE_SIZE,
+    .sample_base = 0,
+    .sample_size = 0,
 
     .save_region_addr = OF_TARGET_SAVE_REGION_ADDR,
     .save_slot_size = OF_TARGET_SAVE_SLOT_SIZE,

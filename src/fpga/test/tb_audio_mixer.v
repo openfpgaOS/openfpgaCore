@@ -110,7 +110,6 @@ module tb_audio_mixer (
         .clk                (clk),
         .reset_n            (reset_n),
         .mixer_enable       (1'b1),
-        .sample_pool_base   (32'h00000000),
         .voice_wr           (voice_wr),
         .voice_field        (voice_field),
         .voice_sel          (voice_sel),

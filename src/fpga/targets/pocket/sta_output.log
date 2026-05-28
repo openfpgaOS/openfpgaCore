@@ -15,7 +15,7 @@ Info: Running Quartus Prime Timing Analyzer
     Info: Altera and sold by Altera or its authorized distributors.  Please
     Info: refer to the Altera Software License Subscription Agreements 
     Info: on the Quartus Prime software download page.
-    Info: Processing started: Tue May 19 15:49:40 2026
+    Info: Processing started: Wed May 27 09:15:48 2026
 Info: Command: quartus_sta -t report_critical3.tcl
 Info (20030): Parallel compilation is enabled and will use 16 of the 16 processors detected
 Info (21077): Low junction temperature is 0 degrees C
@@ -69,7 +69,7 @@ Info (332097): The following timing edges are non-unate.  The Timing Analyzer wi
 Info (332143): No user constrained clock uncertainty found in the design. Calling "derive_clock_uncertainty"
 Info (332123): Deriving Clock Uncertainty. Please refer to report_sdc in the Timing Analyzer to see clock uncertainties.
 === WORST clk_74a PATH - FULL DETAIL ===
-Info (332115): Report Timing: Found 1 setup paths (0 violated).  Worst case slack is 0.906
+Info (332115): Report Timing: Found 1 setup paths (0 violated).  Worst case slack is 0.900
     Info (332115): -to_clock [get_clocks {clk_74a}]
     Info (332115): -setup
     Info (332115): -npaths 1
@@ -77,7 +77,7 @@ Info (332115): Report Timing: Found 1 setup paths (0 violated).  Worst case slac
     Info (332115): -panel_name {Critical 74a}
 
 === WORST CPU PATH - FULL DETAIL ===
-Info (332115): Report Timing: Found 1 setup paths (1 violated).  Worst case slack is -1.115
+Info (332115): Report Timing: Found 1 setup paths (1 violated).  Worst case slack is -0.978
     Info (332115): -to_clock [get_clocks {ic|mp_ram|altera_pll_i|general[0].gpll~PLL_OUTPUT_COUNTER|divclk}]
     Info (332115): -setup
     Info (332115): -npaths 1
@@ -85,41 +85,41 @@ Info (332115): Report Timing: Found 1 setup paths (1 violated).  Worst case slac
     Info (332115): -panel_name {Critical CPU}
 
 === WORST clk_74a - FROM/TO NAMES ===
-Slack:    0.906  From: cram0_dq[15]
+Slack:    0.900  From: cram0_dq[15]
                To:   core_top:ic|cram0_controller:psram0|psram_cram0_drv:psram_inst|cram_dq_r[15]
 
-Slack:    0.998  From: cram0_dq[4]
+Slack:    0.992  From: cram0_dq[4]
                To:   core_top:ic|cram0_controller:psram0|psram_cram0_drv:psram_inst|cram_dq_r[4]
 
-Slack:    1.013  From: cram0_dq[7]
+Slack:    1.007  From: cram0_dq[7]
                To:   core_top:ic|cram0_controller:psram0|psram_cram0_drv:psram_inst|cram_dq_r[7]
 
-Slack:    1.031  From: cram0_dq[0]
+Slack:    1.024  From: cram0_dq[0]
                To:   core_top:ic|cram0_controller:psram0|psram_cram0_drv:psram_inst|cram_dq_r[0]
 
-Slack:    1.035  From: cram0_dq[11]
+Slack:    1.029  From: cram0_dq[11]
                To:   core_top:ic|cram0_controller:psram0|psram_cram0_drv:psram_inst|cram_dq_r[11]
 
 
 === WORST CPU - FROM/TO NAMES ===
-Slack:   -1.115  From: core_top:ic|cpu_system:cpu|VexiiRiscv:cpu|execute_ctrl2_up_float_RS1_lane0[28]~DUPLICATE
-               To:   core_top:ic|cpu_system:cpu|VexiiRiscv:cpu|altsyncram:FetchL1Plugin_logic_banks_0_mem_rtl_0|altsyncram_g9q1:auto_generated|ram_block1a11~portb_re_reg
+Slack:   -0.978  From: core_top:ic|cpu_system:cpu|VexiiRiscv:cpu|execute_ctrl2_up_float_RS1_lane0[17]~DUPLICATE
+               To:   core_top:ic|cpu_system:cpu|VexiiRiscv:cpu|altsyncram:LsuL1Plugin_logic_banks_1_mem_symbol4_rtl_0|altsyncram_s6q1:auto_generated|ram_block1a3~porta_we_reg
 
-Slack:   -1.083  From: core_top:ic|cpu_system:cpu|VexiiRiscv:cpu|execute_ctrl2_up_float_RS1_lane0[28]~DUPLICATE
-               To:   core_top:ic|cpu_system:cpu|VexiiRiscv:cpu|fetch_logic_ctrls_3_up_FetchL1Plugin_logic_BANKS_MUXES_1[22]
+Slack:   -0.965  From: core_top:ic|cpu_system:cpu|VexiiRiscv:cpu|execute_ctrl2_up_float_RS1_lane0[1]
+               To:   core_top:ic|cpu_system:cpu|VexiiRiscv:cpu|altsyncram:LsuL1Plugin_logic_banks_1_mem_symbol4_rtl_0|altsyncram_s6q1:auto_generated|ram_block1a3~porta_we_reg
 
-Slack:   -1.083  From: core_top:ic|cpu_system:cpu|VexiiRiscv:cpu|execute_ctrl2_up_float_RS1_lane0[28]~DUPLICATE
-               To:   core_top:ic|cpu_system:cpu|VexiiRiscv:cpu|fetch_logic_ctrls_2_up_FetchL1Plugin_logic_MIXED_PC[10]
+Slack:   -0.941  From: core_top:ic|cpu_system:cpu|VexiiRiscv:cpu|execute_ctrl2_up_float_RS1_lane0[7]
+               To:   core_top:ic|cpu_system:cpu|VexiiRiscv:cpu|altsyncram:LsuL1Plugin_logic_banks_1_mem_symbol5_rtl_0|altsyncram_s6q1:auto_generated|ram_block1a4~porta_we_reg
 
-Slack:   -1.082  From: core_top:ic|cpu_system:cpu|VexiiRiscv:cpu|execute_ctrl2_up_float_RS1_lane0[28]~DUPLICATE
-               To:   core_top:ic|cpu_system:cpu|VexiiRiscv:cpu|fetch_logic_ctrls_3_up_FetchL1Plugin_logic_BANKS_MUXES_1[6]
+Slack:   -0.937  From: core_top:ic|cpu_system:cpu|VexiiRiscv:cpu|execute_ctrl2_up_float_RS1_lane0[7]
+               To:   core_top:ic|cpu_system:cpu|VexiiRiscv:cpu|altsyncram:LsuL1Plugin_logic_banks_1_mem_symbol4_rtl_0|altsyncram_s6q1:auto_generated|ram_block1a3~porta_we_reg
 
-Slack:   -1.082  From: core_top:ic|cpu_system:cpu|VexiiRiscv:cpu|execute_ctrl2_up_float_RS1_lane0[28]~DUPLICATE
-               To:   core_top:ic|cpu_system:cpu|VexiiRiscv:cpu|fetch_logic_ctrls_2_up_FetchL1Plugin_logic_cmd_TAGS_UPDATE_ADDRESS[1]
+Slack:   -0.925  From: core_top:ic|cpu_system:cpu|VexiiRiscv:cpu|execute_ctrl2_up_float_RS1_lane0[7]
+               To:   core_top:ic|cpu_system:cpu|VexiiRiscv:cpu|altsyncram:LsuL1Plugin_logic_banks_1_mem_symbol5_rtl_0|altsyncram_s6q1:auto_generated|ram_block1a1~porta_we_reg
 
 Info (23030): Evaluation of Tcl script report_critical3.tcl was successful
 Info: Quartus Prime Timing Analyzer was successful. 0 errors, 0 warnings
-    Info: Peak virtual memory: 1011 megabytes
-    Info: Processing ended: Tue May 19 15:49:42 2026
-    Info: Elapsed time: 00:00:02
-    Info: Total CPU time (on all processors): 00:00:03
+    Info: Peak virtual memory: 1095 megabytes
+    Info: Processing ended: Wed May 27 09:15:51 2026
+    Info: Elapsed time: 00:00:03
+    Info: Total CPU time (on all processors): 00:00:04

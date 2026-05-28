@@ -1,5 +1,5 @@
 # openfpgaOS Kernel Makefile
-# Builds bootloader (BRAM) + OS kernel image (CRAM1)
+# Builds bootloader (BRAM) + OS kernel (SDRAM)
 
 # Toolchain
 CROSS ?= $(shell which riscv64-unknown-elf-gcc >/dev/null 2>&1 && echo riscv64-unknown-elf- || echo riscv64-elf-)
@@ -159,9 +159,11 @@ $(FW_TARGET).mif: $(FW_TARGET).elf
 	@echo "END;" >> $@
 	@echo "Generated $@ with $$(hexdump -v -e '1/4 "%08X\n"' boot.bin | wc -l) words of BRAM image"
 
-# OS binary loaded by the BRAM bootloader.  .osdata is one contiguous
-# CRAM1 image containing OS text/rodata/data; .os_bss is not present and
-# is zeroed by os_finalize_memory before os_main.
+# OS binary (loaded by bootloader via deferload).  Includes the
+# split-memory sections: .text stays in CRAM0, .osdata_rodata and
+# .osdata_data have their LMA packed into CRAM0 right after .text
+# (AT> CRAM0 in os.ld).  The bootloader splits the blob at runtime
+# and streams the .rodata / .data portion directly to its SDRAM VMA.
 os.bin: $(FW_TARGET).elf
 	$(OBJCOPY) -O binary \
 		--only-section=.text \

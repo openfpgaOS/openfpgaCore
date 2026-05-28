@@ -42,6 +42,10 @@ module video_CRT_scanout_indexed_BRAM (
     input wire [9:0] out_width,
     input wire [9:0] out_height,
 
+    // Palette/sysreg clock domain (CPU clock)
+    input wire clk_palette,
+    input wire reset_palette_n,
+
     // SDRAM clock domain (66 MHz)
     input wire clk_sdram,
 
@@ -54,7 +58,7 @@ module video_CRT_scanout_indexed_BRAM (
     input wire         burst_data_valid,
     input wire         burst_data_done,
 
-    // Palette write interface (clk_sdram domain)
+    // Palette write interface (clk_palette domain)
     input wire        pal_wr,
     input wire [7:0]  pal_addr,
     input wire [23:0] pal_data,     // RGB888 palette data
@@ -118,26 +122,26 @@ module video_CRT_scanout_indexed_BRAM (
 
     reg pal_commit_req_toggle;
     reg pal_commit_ack_toggle;
-    reg [1:0] pal_commit_ack_sdram_sync;
+    reg [1:0] pal_commit_ack_palette_sync;
     reg [1:0] pal_commit_req_video_sync;
     reg pal_active_bank_analog_s1;
     reg pal_active_bank_analog;
-    wire pal_write_bank = ~pal_commit_ack_sdram_sync[1];
-    wire pal_commit_pending_sdram =
-        (pal_commit_req_toggle != pal_commit_ack_sdram_sync[1]);
+    wire pal_write_bank = ~pal_commit_ack_palette_sync[1];
+    wire pal_commit_pending_palette =
+        (pal_commit_req_toggle != pal_commit_ack_palette_sync[1]);
     wire pal_commit_pending_video =
         (pal_commit_req_video_sync[1] != pal_commit_ack_toggle);
     wire frame_start = line_start && (y_count == 10'd0);
-    assign pal_busy = pal_commit_pending_sdram;
+    assign pal_busy = pal_commit_pending_palette;
 
-    always @(posedge clk_sdram or negedge reset_n) begin
-        if (!reset_n) begin
+    always @(posedge clk_palette or negedge reset_palette_n) begin
+        if (!reset_palette_n) begin
             pal_commit_req_toggle <= 1'b0;
-            pal_commit_ack_sdram_sync <= 2'b00;
+            pal_commit_ack_palette_sync <= 2'b00;
         end else begin
-            pal_commit_ack_sdram_sync <= {pal_commit_ack_sdram_sync[0],
-                                          pal_commit_ack_toggle};
-            if (pal_commit && !pal_commit_pending_sdram)
+            pal_commit_ack_palette_sync <= {pal_commit_ack_palette_sync[0],
+                                            pal_commit_ack_toggle};
+            if (pal_commit && !pal_commit_pending_palette)
                 pal_commit_req_toggle <= ~pal_commit_req_toggle;
         end
     end
@@ -183,7 +187,7 @@ module video_CRT_scanout_indexed_BRAM (
         .lpm_type("altsyncram"),
         .power_up_uninitialized("FALSE")
     ) palette_ram (
-        .clock0(clk_sdram),
+        .clock0(clk_palette),
         .address_a({pal_write_bank, pal_addr}),
         .data_a(pal_data),
         .wren_a(pal_wr),

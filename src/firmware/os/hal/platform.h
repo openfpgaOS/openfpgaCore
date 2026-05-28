@@ -39,9 +39,8 @@ typedef struct {
     uint32_t interact_uncached;
     uint32_t interact_max_vars;
 
-    /* CRAM0 is bridge staging; CRAM1 is executable CPU PSRAM. */
+    /* v2 memory arch: CRAM1 + SRAM retired, CRAM0 uncached at its base. */
     uint32_t cram0_base;
-    uint32_t cram1_base;
     uint32_t cram_size;
     uint32_t cram0_bridge;
     uint32_t cram0_os_offset;
@@ -50,7 +49,7 @@ typedef struct {
     uint32_t runtime_stack_top;
     uint32_t runtime_stack_size;
 
-    uint32_t sample_base;
+    uint32_t sample_base;       /* legacy: dynamic audio reserve is in caps */
     uint32_t sample_size;
 
     uint32_t save_region_addr;

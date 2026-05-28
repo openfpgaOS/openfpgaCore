@@ -4,7 +4,8 @@
  * The kernel auto-loads the first .ofsf it finds in a data slot at boot
  * and hands the buffer to apps via OF_SVC->smp_bank_preload_base. This
  * file copies the metadata (header + presets + zones) into SDRAM so the
- * CPU does not repeatedly walk the sample-bank blob during playback.
+ * app can keep compact, writable metadata while sample data remains in
+ * the preloaded SDRAM bank read by the mixer.
  */
 
 #include "include/of_smp_bank.h"

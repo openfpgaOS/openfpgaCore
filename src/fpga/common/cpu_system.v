@@ -1,5 +1,5 @@
 //
-// VexiiRiscv CPU System — 3-master × 3-target AXI4 router.
+// VexiiRiscv CPU System — 3-master × 3-target AXI4 router (v2).
 //
 // Three CPU AXI4 master inputs fan out to three downstream slaves.
 // Each target is handled by an independent `cpu_target_port` with its
@@ -8,16 +8,19 @@
 //
 //   i_axi   (L1 I$ refills, read-only)    ───┐
 //   mem_axi (L1 D$ + cbo.*)                  │
-//   p_axi   (uncached LSU IO)                ├──→  4 target ports
-//                                            │     (SDRAM / PSRAM /
+//   p_axi   (uncached LSU IO)                ├──→  3 target ports
+//                                            │     (SDRAM / CRAM0 /
 //                                            │      LOCAL)
 //                                            │
 //
 // Address decode → target:
 //    0x10000000–0x13FFFFFF, 0x50000000–0x53FFFFFF → SDRAM
-//    0x30000000 / 0x38000000 / 0x31000000         → PSRAM
+//    0x30000000 / 0x38000000                      → CRAM0
 //    everything else                              → LOCAL
-// SRAM target port removed: SRAM is GPU-private and off the fabric.
+//
+// v2 changes vs the previous iteration:
+//   - CRAM1 target port removed: the CRAM1 chip is retired.
+//   - SRAM target port removed: SRAM is GPU-private and off the fabric.
 //
 
 `default_nettype none
@@ -52,7 +55,7 @@ module cpu_system (
     input  wire        m_sdram_bvalid,
     input  wire [1:0]  m_sdram_bresp,
 
-    // ---- PSRAM AXI4 master (CRAM0 + CRAM1) -----------------------
+    // ---- CRAM0 AXI4 master ---------------------------------------
     output wire        m_cram0_arvalid,
     input  wire        m_cram0_arready,
     output wire [31:0] m_cram0_araddr,
@@ -121,7 +124,7 @@ wire reset = ~reset_n;
 // Phase 2 — AXI register slices on each VexiiRiscv master.
 //
 // VexiiRiscv's pins were the dominant placement-pressure source on
-// the 100 MHz CPU domain: each master fans out to all target
+// the 100 MHz CPU domain: each master fans out to all three
 // cpu_target_ports (sdram, cram0, local), so without a slice the
 // fitter has to keep VexiiRiscv physically close to whichever target
 // owns the worst route — stretching VexiiRiscv across a wide region
@@ -226,7 +229,7 @@ wire [1:0]  mem_bresp_cpu;
 // VexiiRiscv's native LsuPlugin cmd/rsp bus into single-beat AXI4),
 // not directly by VexiiRiscv.  The slice still sits between the shim
 // output and the target-port fan-out — the LSU shim's output is what
-// fans out to all target ports, and that fan-out is the
+// fans out to all three target ports, and that fan-out is the
 // placement-pressure source we need to break.
 wire        per_arvalid;  wire        per_arready;
 wire [31:0] per_araddr;
@@ -703,17 +706,17 @@ axi_register_slice #(.W(2))  per_b_slice (
 // ============================================================
 // Address decode → target select
 // ============================================================
-// Target IDs.
+// Target IDs (3 total).
 //   0 — SDRAM   (0x10xxxxxx cached, 0x50xxxxxx uncached alias)
-//   1 — PSRAM   (0x30/0x38 CRAM0 staging, 0x31 CRAM1 executable)
+//   1 — CRAM0   (0x30xxxxxx, 0x38xxxxxx alias)
 //   2 — LOCAL   (BRAM, peripherals, term FB, etc.)
 function [2:0] decode_target;
     input [31:0] addr;
     begin
         if (addr[31:26] == 6'b000100 || addr[31:26] == 6'b010100)
             decode_target = 3'd0;   // SDRAM
-        else if (addr[31:24] == 8'h30 || addr[31:24] == 8'h31 || addr[31:24] == 8'h38)
-            decode_target = 3'd1;   // PSRAM
+        else if (addr[31:24] == 8'h30 || addr[31:24] == 8'h38)
+            decode_target = 3'd1;   // CRAM0
         else
             decode_target = 3'd2;   // LOCAL
     end
@@ -769,7 +772,7 @@ wire        sdram_mem_wready,  sdram_per_wready;
 wire        sdram_mem_bvalid;  wire [1:0]  sdram_mem_bid;   wire [1:0] sdram_mem_bresp;
 wire        sdram_per_bvalid;  wire [1:0]  sdram_per_bresp;
 
-// PSRAM target port.  core_top demuxes 0x30/0x38 to CRAM0 and 0x31 to CRAM1.
+// CRAM0
 wire        cram0_i_arready,   cram0_mem_arready,   cram0_per_arready;
 wire        cram0_i_rvalid;    wire [31:0] cram0_i_rdata;   wire [0:0] cram0_i_rid;   wire [1:0] cram0_i_rresp;   wire cram0_i_rlast;
 wire        cram0_mem_rvalid;  wire [31:0] cram0_mem_rdata; wire [1:0] cram0_mem_rid; wire [1:0] cram0_mem_rresp; wire cram0_mem_rlast;
@@ -894,7 +897,7 @@ cpu_target_port port_sdram (
 );
 
 // ============================================================
-// PSRAM target port (CRAM0 + CRAM1)
+// CRAM0 target port
 // ============================================================
 cpu_target_port port_cram0 (
     .clk    (clk),
@@ -981,7 +984,7 @@ cpu_target_port port_cram0 (
     .m_awready (m_cram0_awready),
     .m_awaddr  (m_cram0_awaddr),
     .m_awlen   (m_cram0_awlen),
-    .m_awburst (),                  // PSRAM slaves consume INCR order only
+    .m_awburst (),                  // CRAM0 slave doesn't consume awburst (sync-burst is INCR-only)
     .m_wvalid  (m_cram0_wvalid),
     .m_wready  (m_cram0_wready),
     .m_wdata   (m_cram0_wdata),

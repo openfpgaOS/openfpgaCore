@@ -48,6 +48,7 @@ volatile unsigned int __attribute__((section(".bss.boot"))) pd_dbg_info;
 
 /* DMA timeout (~2 seconds at 100MHz) */
 #define BOOT_DMA_TIMEOUT 200000000
+#define BOOT_DMA_CHUNK_SIZE 4096u
 
 /* External symbols from linker */
 extern char _os_bss_start[], _os_bss_end[];
@@ -124,10 +125,8 @@ static void boot_fb_clear_row(int row) {
 }
 
 
-/* os_finalize_memory() lives in OS .text, which the v2 boot path copies
- * into SDRAM before jumping. Defined in kernel/main.c. It only zeroes
- * .bss — the .rodata and .data init image has already been streamed to
- * its SDRAM VMA by the load path, so no copy is needed here. */
+/* os_finalize_memory() lives in BRAM .fasttext.  It only zeroes .bss;
+ * the .rodata and .data init image has already been copied to SDRAM. */
 extern void os_finalize_memory(void *bss_start, void *bss_end);
 
 __attribute__((section(".text.boot")))
@@ -229,7 +228,7 @@ static int phdp_request_override(uint8_t slot_id,
             *chunk_size = (uint16_t)p[4]
                         | ((uint16_t)p[5] << 8);
 
-            if (*total_size > 1 * 1024 * 1024) return 0;
+            if (*total_size > 16 * 1024 * 1024) return 0;
             if (*chunk_size > PHDP_MAX_CHUNK) *chunk_size = PHDP_MAX_CHUNK;
             return 1;
         }
@@ -430,9 +429,14 @@ accepted:
         if (--timeout == 0) { pd_dbg_info = DS_STATUS; return -2; }
     }
 
-    /* Check error */
-    uint32_t err = (DS_STATUS & DS_STATUS_ERR_MASK) >> DS_STATUS_ERR_SHIFT;
-    if (err) return -(int)err;
+    /* Check bridge/APF error and capture the same status byte that the
+     * failure screen prints. */
+    uint32_t st = DS_STATUS;
+    uint32_t err = (st & DS_STATUS_ERR_MASK) >> DS_STATUS_ERR_SHIFT;
+    if (err) {
+        pd_dbg_info = st;
+        return -(int)err;
+    }
 
     /* DONE reports APF command completion. Do not switch CRAM0 to CPU
      * ownership until the live drain bit confirms the last bridge write
@@ -461,26 +465,29 @@ static uint32_t boot_os_slot_size(void) {
     uint32_t linked_size = (uint32_t)(uintptr_t)_os_copy_size;
     uint32_t dt_size = boot_dt_read_word(OS_DT_SIZE_WORD);
 
-    if (dt_size >= 4096u && dt_size <= 1u * 1024u * 1024u)
+    if (dt_size >= 4096u && dt_size <= 768u * 1024u)
         return dt_size;
     return linked_size;
 }
 
 __attribute__((section(".text.boot")))
 static int boot_load_os_sd(uint32_t total) {
-    /* Single-destination layout: bridge DMAs os.bin into CRAM0 scratch,
-     * then the CPU copies the whole blob contiguously into executable
-     * CRAM1 starting at __osdata_vma (== __os_entry). */
+    /* v2 arch: CRAM1 retired, OS .text in SDRAM (CRAM0 is non-exec).
+     * Single-destination layout: bridge DMAs os.bin into CRAM0
+     * scratch, then the CPU copies the whole blob contiguously into
+     * SDRAM starting at __osdata_vma (== __os_entry).  No
+     * text-vs-data split needed since the linker put everything in
+     * one .osdata section. */
     uint32_t bounce_bridge = CRAM0_SCRATCH_BRIDGE;
     volatile uint8_t *bounce_src = (volatile uint8_t *)CRAM0_SCRATCH;
-    volatile uint8_t *os_dst =
+    volatile uint8_t *sdram_dst =
         (volatile uint8_t *)(uintptr_t)_osdata_init_vma_start;
     uint32_t done = 0;
 
     while (done < total) {
         uint32_t chunk = total - done;
-        if (chunk > DMA_CHUNK_SIZE)
-            chunk = DMA_CHUNK_SIZE;
+        if (chunk > BOOT_DMA_CHUNK_SIZE)
+            chunk = BOOT_DMA_CHUNK_SIZE;
 
         /* Bridge DMA: SD card → CRAM0 scratch */
         CRAM0_MODE = CRAM0_MODE_BRIDGE;
@@ -489,11 +496,11 @@ static int boot_load_os_sd(uint32_t total) {
         if (rc < 0)
             return rc;
 
-        /* CPU reads CRAM0 scratch, writes to CRAM1. */
+        /* CPU reads CRAM0 scratch, writes to SDRAM. */
         CRAM0_MODE = CRAM0_MODE_CPU;
         for (volatile int s = 0; s < 8; s++) {}  /* settle ~4 clk_74a */
         volatile uint32_t *src32 = (volatile uint32_t *)bounce_src;
-        volatile uint32_t *dst32 = (volatile uint32_t *)(os_dst + done);
+        volatile uint32_t *dst32 = (volatile uint32_t *)(sdram_dst + done);
         for (uint32_t i = 0; i < chunk / 4; i++)
             dst32[i] = src32[i];
 
@@ -579,12 +586,12 @@ int main(void) {
             boot_fb_clear_row(0);
             boot_fb_puts(0, 0, "Loading via UART...");
 
-            /* OS is one contiguous image in executable CRAM1
+            /* v2 arch: OS is ONE contiguous section in SDRAM
              * (__os_load_addr == __osdata_init_vma_start, same
              * address).  No text/data split — stream the whole blob
-             * directly into CRAM1 with a single phdp_chunk_loop call.
-             * PHDP writes through the CPU, so the CRAM0 mux is
-             * irrelevant here. */
+             * directly into SDRAM with a single phdp_chunk_loop call.
+             * PHDP writes the CPU directly to SDRAM; the CRAM0 mux
+             * is irrelevant here. */
             (void)chunk_size;
             uint8_t *os_dst = (uint8_t *)(uintptr_t)_os_load_addr;
             int rc = phdp_chunk_loop(0, total_size, total_size, os_dst);
@@ -661,9 +668,9 @@ start_os:
     /* uart_mirror_on is armed by the PHDP path above and by
      * of_term_enable_uart_mirror() in kernel/main.c for SD boot.
      *
-     * CRAM0 is only a bridge scratchpad. The load path has copied os.bin
-     * into its CRAM1 VMA; only .bss remains to be zeroed before entering
-     * os_main. */
+     * v2 split-staging model: CRAM0 is only a bridge scratchpad. The
+     * load path has copied os.bin into its SDRAM VMA; only .bss remains
+     * to be zeroed before entering os_main. */
 #if OF_TARGET_PLATFORM_ID != OF_PLATFORM_SIM
     /* flush_dcache_evict reads one full D-cache worth of SDRAM to evict
      * deferload writes; sim's harness preloads SDRAM via backdoor so

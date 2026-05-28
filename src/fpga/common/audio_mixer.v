@@ -1,5 +1,5 @@
 //
-// Hardware PCM Mixer (v2) — 32 voices from SDRAM sample pool
+// Hardware PCM Mixer (v2) — 32 voices from SDRAM
 //
 // Derived from the original CRAM1-era audio_mixer.v (retired in
 // f11811c).  This is a simplified v2 port that fetches from SDRAM
@@ -14,7 +14,7 @@
 // for worst-case SDRAM arbitration.
 //
 // What's in this version (phase 1):
-//   - 32 voices, mono/stereo 16-bit PCM in the SDRAM sample pool
+//   - 32 voices, mono/stereo 16-bit PCM in SDRAM
 //   - Forward loop / one-shot (no bidi — deferred)
 //   - 2-tap linear interpolation (Q16.16 position)
 //   - Per-channel HW volume ramp (target/rate pair)
@@ -27,7 +27,7 @@
 //   - Per-voice sample burst cache
 //
 // Voice table layout (16-word stride × 32 voices = 512 words = 1 M10K):
-//   Word 0:  base_byte[31:0]   — byte offset of sample 0 into SDRAM pool
+//   Word 0:  base_byte[31:0]   — absolute SDRAM byte address of sample 0
 //   Word 1:  length[21:0]      — total sample count
 //   Word 2:  rate_fp16[31:0]   — Q16.16 playback rate (0x10000 = 1.0)
 //   Word 3:  ctrl              — {loop[2], stereo[1], active[0]} (fmt=16 always)
@@ -49,11 +49,6 @@ module audio_mixer (
 
     // Global enable (from MIXER_CTRL MMIO).
     input wire mixer_enable,
-
-    // Sample pool base address in SDRAM (byte address).  Each voice's
-    // base_byte is added to this.  Programmed once at reset to
-    // OF_TARGET_SAMPLE_BASE (0x13700000).
-    input wire [31:0] sample_pool_base,
 
     // ------- Voice-table write port (flat MMIO from axi_periph_slave) -------
     // The new flat scheme encodes the voice index in the MMIO address itself.
@@ -119,7 +114,7 @@ module audio_mixer (
 );
 
 // ============================================================
-// Voice table (BIDIR_DUAL_PORT altsyncram, 1 M10K)
+// Packed MMIO voice-field indices
 // ============================================================
 localparam VTBL_ADDR       = 4'd0;
 localparam VTBL_LEN        = 4'd1;
@@ -134,39 +129,25 @@ localparam VTBL_VOL_TARGET = 4'd9;
 localparam VTBL_VOL_RATE   = 4'd10;
 
 /* =================================================================
- * Voice table — SPLIT INTO TWO MEMORIES (Option A).
+ * Voice table backing store.
  *
- * Attempted BIDIR_DUAL_PORT with one altsyncram repeatedly produced
- * silent port-B write failures on Cyclone V silicon despite multiple
- * parameter tweaks (width_byteena, byte_size, rden_b, q_b handling).
- * The shadow `voice_active` (plain always block) would update but
- * the corresponding CTRL write into the RAM would not — voice stayed
- * permanently skipped at S_CHECK_ACTIVE.  Split by ownership:
+ * Keep the hardware in two packed 512x32 memories instead of many
+ * tiny 32xN field memories.  The field-split version reduced logical
+ * bits but forced Quartus to spend one RAM block per tiny field on
+ * Cyclone V, which made both M10K and LAB packing pressure worse.
  *
- *   vtbl_cpu (DUAL_PORT):  port B = CPU write, port A = FSM read.
- *       Holds ADDR, LEN, RATE, CTRL, LOOP_END, LOOP_START,
- *       VOL_TARGET, VOL_RATE — everything CPU configures at note-on.
- *   vtbl_fsm (SINGLE_PORT): port A = FSM R/W.
- *       Holds POS_INT, POS_FRAC, VOL_LR — the per-sample mutable
- *       state only the FSM touches.
- *
- * Simple-dual-port and single-port are the well-trodden altsyncram
- * configurations on Altera — no inference edge cases.  Both memories
- * are 512 words × 32 bits (addresses = {voice[4:0], field[3:0]} so the
- * existing field indices stay valid across either memory), total cost
- * 2 M10Ks (was 1 previously — acceptable overhead).
+ *   vtbl_cpu: CPU-written fields, FSM read-only.
+ *   vtbl_fsm: per-sample mutable fields, FSM read/write plus queued
+ *             CPU writes for retrigger/start state.
  * ================================================================= */
 reg  [8:0]  vtbl_a_addr;
 reg  [31:0] vtbl_a_data;
 reg         vtbl_a_wr;
-wire [31:0] vtbl_a_q;     // muxed FSM read output (cpu or fsm memory)
+wire [31:0] vtbl_a_q;
 
 wire [31:0] vtbl_cpu_q;
 wire [31:0] vtbl_fsm_q;
 
-/* is_fsm_field = the currently-addressed field belongs to vtbl_fsm.
- * Computed combinationally from the read address; matches the 1-cycle
- * altsyncram latency because the address is stable for that cycle. */
 wire is_fsm_field =
     (vtbl_a_addr[3:0] == VTBL_POS_INT)  ||
     (vtbl_a_addr[3:0] == VTBL_POS_FRAC) ||
@@ -174,9 +155,6 @@ wire is_fsm_field =
 
 assign vtbl_a_q = is_fsm_field ? vtbl_fsm_q : vtbl_cpu_q;
 
-/* CPU → vtbl_cpu port B write.  Gate out FSM-owned fields so a stray
- * CPU write to POS_INT/POS_FRAC/VOL_LR doesn't corrupt the FSM memory
- * (firmware doesn't write those today, but cheap insurance). */
 wire [8:0]  vtbl_b_addr = {voice_sel, voice_field};
 wire [31:0] vtbl_b_data = voice_wdata;
 wire        is_cpu_field =
@@ -191,14 +169,13 @@ wire        is_cpu_field =
 wire        vtbl_cpu_b_wr = voice_wr && is_cpu_field;
 
 /* MIX_VOICE_POS_WR (VTBL_POS_INT) and MIX_VOICE_VOL_LR (VTBL_VOL_LR)
- * both target fields that live in vtbl_fsm, not vtbl_cpu.  Queue those
- * CPU writes and drain them only from S_IDLE.  That keeps CPU note-on /
- * retrigger writes from stealing the vtbl_fsm write port from the mixer
- * FSM's POS_INT/POS_FRAC/VOL_LR commits.
+ * both target FSM-owned state.  Queue those CPU writes and drain them
+ * only from S_IDLE.  That keeps CPU note-on/retrigger writes from
+ * racing the mixer FSM's POS_INT/POS_FRAC/VOL_LR commits.
  *
  * VOL_LR was previously NOT routed at all — `is_cpu_field` listed
- * only the vtbl_cpu fields, and POS_INT was the only vtbl_fsm field
- * with a bypass.  Result: program_voice_play's `MIX_VOICE_VOL_LR=0`
+ * only CPU fields, and POS_INT was the only FSM-owned field with a
+ * bypass.  Result: program_voice_play's `MIX_VOICE_VOL_LR=0`
  * to start a voice silent was silently dropped, leaving stale vol_lr
  * from the previous occupant of the slot.  On heavy slot turnover
  * (high MIDI notes, rapid retriggers) the new voice's first samples
@@ -210,8 +187,9 @@ wire        cpu_vol_lr_wr = voice_wr && (voice_field == VTBL_VOL_LR);
 wire        cpu_fsm_wr    = cpu_pos_wr || cpu_vol_lr_wr;
 localparam CPU_FSM_Q_DEPTH  = 64;
 localparam CPU_FSM_Q_ADDR_W = 6;
+localparam CPU_FSM_Q_DATA_W = 28;
 localparam [CPU_FSM_Q_ADDR_W:0] CPU_FSM_Q_COUNT_DEPTH = CPU_FSM_Q_DEPTH;
-reg [40:0] cpu_fsm_q_mem [0:CPU_FSM_Q_DEPTH-1];
+reg [CPU_FSM_Q_DATA_W-1:0] cpu_fsm_q_mem [0:CPU_FSM_Q_DEPTH-1];
 reg [CPU_FSM_Q_ADDR_W-1:0] cpu_fsm_q_wr_ptr;
 reg [CPU_FSM_Q_ADDR_W-1:0] cpu_fsm_q_rd_ptr;
 reg [CPU_FSM_Q_ADDR_W:0]   cpu_fsm_q_count;
@@ -220,15 +198,18 @@ wire cpu_fsm_q_empty = (cpu_fsm_q_count == {CPU_FSM_Q_ADDR_W+1{1'b0}});
 wire cpu_fsm_q_full  = (cpu_fsm_q_count == CPU_FSM_Q_COUNT_DEPTH);
 wire cpu_fsm_q_drain = (state == S_IDLE) && !cpu_fsm_q_empty;
 wire cpu_fsm_q_push  = cpu_fsm_wr && (!cpu_fsm_q_full || cpu_fsm_q_drain);
-wire [40:0] cpu_fsm_q_front = cpu_fsm_q_mem[cpu_fsm_q_rd_ptr];
-wire [8:0]  cpu_fsm_commit_addr = cpu_fsm_q_front[40:32];
-wire [31:0] cpu_fsm_commit_data = cpu_fsm_q_front[31:0];
-wire        vtbl_fsm_wren_a;
-wire [8:0]  vtbl_fsm_addr_a;
-wire [31:0] vtbl_fsm_data_a;
-assign vtbl_fsm_wren_a = cpu_fsm_q_drain ? 1'b1 : vtbl_a_wr;
-assign vtbl_fsm_addr_a = cpu_fsm_q_drain ? cpu_fsm_commit_addr : vtbl_a_addr;
-assign vtbl_fsm_data_a = cpu_fsm_q_drain ? cpu_fsm_commit_data : vtbl_a_data;
+wire [CPU_FSM_Q_DATA_W-1:0] cpu_fsm_q_front = cpu_fsm_q_mem[cpu_fsm_q_rd_ptr];
+wire [4:0]  cpu_fsm_commit_voice   = cpu_fsm_q_front[27:23];
+wire        cpu_fsm_commit_is_vol  = cpu_fsm_q_front[22];
+wire [21:0] cpu_fsm_commit_payload = cpu_fsm_q_front[21:0];
+wire [3:0]  cpu_fsm_commit_field   = cpu_fsm_commit_is_vol ? VTBL_VOL_LR : VTBL_POS_INT;
+wire [8:0]  cpu_fsm_commit_addr    = {cpu_fsm_commit_voice, cpu_fsm_commit_field};
+wire [31:0] cpu_fsm_commit_data    =
+    cpu_fsm_commit_is_vol ? {16'd0, cpu_fsm_commit_payload[15:0]}
+                          : {10'd0, cpu_fsm_commit_payload};
+wire        vtbl_fsm_wren_a = cpu_fsm_q_drain ? 1'b1 : vtbl_a_wr;
+wire [8:0]  vtbl_fsm_addr_a = cpu_fsm_q_drain ? cpu_fsm_commit_addr : vtbl_a_addr;
+wire [31:0] vtbl_fsm_data_a = cpu_fsm_q_drain ? cpu_fsm_commit_data : vtbl_a_data;
 
 always @(posedge clk) begin
     if (!reset_n) begin
@@ -237,7 +218,11 @@ always @(posedge clk) begin
         cpu_fsm_q_count    <= {CPU_FSM_Q_ADDR_W+1{1'b0}};
     end else begin
         if (cpu_fsm_q_push) begin
-            cpu_fsm_q_mem[cpu_fsm_q_wr_ptr] <= {{voice_sel, voice_field}, voice_wdata};
+            cpu_fsm_q_mem[cpu_fsm_q_wr_ptr] <= {
+                voice_sel,
+                cpu_vol_lr_wr,
+                cpu_vol_lr_wr ? {6'd0, voice_wdata[15:0]} : voice_wdata[21:0]
+            };
             cpu_fsm_q_wr_ptr <= cpu_fsm_q_wr_ptr + {{CPU_FSM_Q_ADDR_W-1{1'b0}}, 1'b1};
         end
 
@@ -252,35 +237,18 @@ always @(posedge clk) begin
     end
 end
 
-/* vtbl_cpu — plain reg array with async read + sync write.  Matches
- * the 0-cycle combinational read semantics of altsyncram UNREGISTERED
- * that the FSM's read pipeline was built around (set addr cycle N,
- * capture q in cycle N+1 via NBA).  On Cyclone V, Quartus infers this
- * into MLABs (~26 blocks for 16 Kbits).  Bypasses the altsyncram
- * DUAL_PORT inference that silently dropped port-B writes. */
 reg [31:0] vtbl_cpu_mem [0:511] /*verilator public_flat_rw*/;
-
 always @(posedge clk) begin
     if (vtbl_cpu_b_wr)
         vtbl_cpu_mem[vtbl_b_addr] <= vtbl_b_data;
 end
-
 assign vtbl_cpu_q = vtbl_cpu_mem[vtbl_a_addr];
 
-/* vtbl_fsm — same plain reg-array pattern as vtbl_cpu so both memories
- * share 0-cycle async-read semantics.  The previous altsyncram SINGLE_PORT
- * UNREGISTERED variant may have added a 1-cycle input-register latency
- * (Quartus' M10K inference forces one), which would put vtbl_fsm reads
- * a cycle behind vtbl_cpu reads and break the FSM's pipeline for
- * POS_INT/POS_FRAC/VOL_LR fields.  Reg array → MLAB inference, matches
- * vtbl_cpu's behaviour exactly. */
 reg [31:0] vtbl_fsm_mem [0:511] /*verilator public_flat_rw*/;
-
 always @(posedge clk) begin
     if (vtbl_fsm_wren_a)
         vtbl_fsm_mem[vtbl_fsm_addr_a] <= vtbl_fsm_data_a;
 end
-
 assign vtbl_fsm_q = vtbl_fsm_mem[vtbl_a_addr];
 
 // Shadow active bit — updated when CPU writes CTRL (bit 0), or when
@@ -356,9 +324,9 @@ end
 //
 // Why registered, not combinational: master_vol/group_vol drive the
 // per-voice S_WR_VOL composition (raw × gxm), which then feeds the
-// vol-ramp logic and the vtbl write port.  When gxm was a wire, the
-// chain was: master_vol_reg → MULT1 → 4-way MUX → MULT2 → ramp → BRAM
-// write address — 21 ns combinational, blowing the 10 ns budget by
+// vol-ramp logic and the current-volume write.  When gxm was a wire,
+// the chain was: master_vol_reg → MULT1 → 4-way MUX → MULT2 → ramp →
+// storage write control — 21 ns combinational, blowing the 10 ns budget by
 // 7 ns (Quartus STA mp_ram general[0]: -7.64 ns slack).
 //
 // Registering gxm splits MULT1 into its own cycle.  Adds 1 cycle of
@@ -409,11 +377,8 @@ function signed [15:0] extract_sample16;
 endfunction
 
 // Compute the SDRAM byte address for sample index `idx` given the
-// voice's precomputed base (sample_pool_base + voice table address) and its
-// stereo flag.  Stride: 2 bytes mono, 4 bytes stereo (L+R 16-bit
-// interleaved).  The pool-base + voice-base add is hoisted to
-// S_RD_BASE_W (once per voice) so this function is a single 32-bit
-// adder, keeping cur_pos_int → m_araddr inside the 10 ns budget.
+// voice's absolute SDRAM byte address and its stereo flag.  Stride:
+// 2 bytes mono, 4 bytes stereo (L+R 16-bit interleaved).
 function [31:0] sample_byte_addr;
     input [31:0] vbase;
     input [21:0] idx;
@@ -473,11 +438,12 @@ localparam S_ADV_WRAP       = 6'd32;
 localparam S_ADV_CHECK      = 6'd33;
 localparam S_ADV_COMMIT     = 6'd34;
 localparam S_FETCH_TAP1_MODE = 6'd35;  // second half of burst-mode decision
+localparam S_WR_VOL_RAMP_R = 6'd36;
 
 reg [5:0] state;
 reg [4:0] cur_voice;
 // Per-voice cached fields for the current pass.
-reg [31:0] voice_base;          // sample_pool_base + voice table address, precomputed
+reg [31:0] voice_base;          // absolute SDRAM byte address from voice state
 reg [21:0] cur_length;
 reg [31:0] cur_rate;
 reg [2:0]  cur_ctrl;        // {loop, stereo, active}
@@ -491,12 +457,13 @@ reg [7:0]  cur_vol_rate;
 /* Per-voice volume-write pipeline (4 stages):
  *   S_RAMP_STEP    → cur_gxm_r ← pick_gxm(voice→group)         (mux only)
  *   S_WR_VOL_MULT  → tgt_*_r ← raw × cur_gxm_r                 (DSP only)
- *   S_WR_VOL_RAMP  → nxt_*_r ← ramp_step(cur_vol, tgt_*_r,...) (compare chain)
- *   S_WR_VOL       → write VTBL_VOL_LR if nxt != cur           (BRAM write)
+ *   S_WR_VOL_RAMP  → nxt_l_r ← ramp_step(cur_vol_l, tgt_l_r,...) (compare chain)
+ *   S_WR_VOL_RAMP_R→ nxt_r_r ← ramp_step(cur_vol_r, tgt_r_r,...) (same chain)
+ *   S_WR_VOL       → write VTBL_VOL_LR if nxt != cur           (storage write)
  *
  * Each cycle isolates one of the long combinational chunks.  The
  * monolithic version (everything in S_WR_VOL) chained DSP +
- * 3-comparator ramp + write-mux + BRAM port setup ≈ 7+ ns
+ * 3-comparator ramp + write-mux + storage setup ≈ 7+ ns
  * combinational — broke 100 MHz once clock skew was added.
  *
  * Cost: +2 cycles per voice over the original (now 4 cycles total
@@ -544,9 +511,6 @@ reg burst_mode_2beat;
 reg burst_mode_seam;
 reg burst_mode_dup;
 
-// Linear-interp result (per channel).
-reg signed [15:0] samp_l, samp_r;
-
 // Pipeline register between S_LERP_INTERP and S_LERP_MIX — holds the
 // post-interp, pre-volume sample so the multiplier chain is split
 // across two cycles.  Without this the tap1→accum combinational path
@@ -572,10 +536,10 @@ reg lerp_phase;
 //   S_ADVANCE     -> first boundary decision / optional one loop subtract
 //   S_ADV_CHECK   -> repeat-wrap or end/commit decision
 //   S_ADV_WRAP    -> one more loop subtract when rate skips many loops
-//   S_ADV_COMMIT  -> VTBL/POS_LATCH write setup
+//   S_ADV_COMMIT  -> position/POS_LATCH write setup
 //
 // The previous S_ADVANCE/S_ADV_WRAP implementation let cur_loop_start /
-// cur_loop_end feed compare + subtract-add + repeat-wrap check + VTBL
+// cur_loop_end feed compare + subtract-add + repeat-wrap check + write
 // address muxing in one cycle, which became the 100 MHz critical path.
 reg [17:0] adv_new_frac_full;
 reg [21:0] adv_new_pos_raw;
@@ -583,9 +547,13 @@ reg [21:0] adv_pos_next;
 reg        adv_voice_ended;
 reg        adv_check_wrap;
 
-// Stereo accumulators for the current output sample (s32 to avoid
-// overflow across 32 voices).
-reg signed [31:0] accum_l, accum_r;
+// Stereo accumulators for the current output sample.  32 saturated s16
+// voices need 21 signed bits exactly:
+//   +32767 * 32 = +1048544, -32768 * 32 = -1048576.
+localparam ACCUM_W = 21;
+localparam signed [ACCUM_W-1:0] ACCUM_OUT_MAX = 32767;
+localparam signed [ACCUM_W-1:0] ACCUM_OUT_MIN = -32768;
+reg signed [ACCUM_W-1:0] accum_l, accum_r;
 
 function [7:0] ramp_step;
     input [7:0] cur;
@@ -619,8 +587,8 @@ always @(posedge clk) begin
     if (!reset_n) begin
         state            <= S_IDLE;
         cur_voice        <= 5'd0;
-        accum_l          <= 32'sd0;
-        accum_r          <= 32'sd0;
+        accum_l          <= {ACCUM_W{1'b0}};
+        accum_r          <= {ACCUM_W{1'b0}};
         m_arvalid        <= 1'b0;
         m_rready         <= 1'b0;
         m_araddr         <= 32'd0;
@@ -640,8 +608,8 @@ always @(posedge clk) begin
             state <= S_IDLE;
         end else if (mixer_enable && fifo_level[9:8] != 2'b11) begin
             // fifo < 768 entries → room for another ~256 samples.  Begin.
-            accum_l    <= 32'sd0;
-            accum_r    <= 32'sd0;
+            accum_l    <= {ACCUM_W{1'b0}};
+            accum_r    <= {ACCUM_W{1'b0}};
             cur_voice  <= 5'd0;
             state      <= S_START_SAMPLE;
         end
@@ -652,18 +620,16 @@ always @(posedge clk) begin
         state       <= S_RD_CTRL_W;
     end
 
-    // Voice-field read pipeline — each field is {S_RD_*, S_RD_*_W}.
-    // _W captures vtbl_a_q with one cycle of BRAM latency.
+    // Voice-field read pipeline. The packed table keeps the public
+    // 16-word-per-voice ABI while avoiding one physical RAM per field.
     S_RD_CTRL_W: begin
         cur_ctrl <= vtbl_a_q[2:0];
         state    <= S_CHECK_ACTIVE;
     end
 
     S_CHECK_ACTIVE: begin
-        /* Check the shadow ONLY — in the split-memory v2 the FSM no
-         * longer writes VTBL_CTRL (the shadow `voice_active` is the
-         * source of truth).  Previously we also AND'd `cur_ctrl[0]`;
-         * keeping that would race the RAM read pipeline unnecessarily. */
+        /* Check the shadow ONLY — the FSM does not write CTRL storage.
+         * The shadow `voice_active` is the source of truth. */
         if (!voice_active[cur_voice]) begin
             state <= S_NEXT_VOICE;
         end else begin
@@ -685,9 +651,9 @@ always @(posedge clk) begin
     end
 
     S_RD_BASE_W: begin
-        voice_base    <= sample_pool_base + vtbl_a_q;   // hoist pool+base add
-        vtbl_a_addr   <= {cur_voice, VTBL_RATE};
-        state         <= S_RD_RATE_W;
+        voice_base  <= vtbl_a_q;
+        vtbl_a_addr <= {cur_voice, VTBL_RATE};
+        state       <= S_RD_RATE_W;
     end
 
     S_RD_RATE_W: begin
@@ -719,15 +685,14 @@ always @(posedge clk) begin
 
     S_RD_VOL_RATE: begin
         cur_vol_rate <= vtbl_a_q[7:0];
-        // Read more control fields for loop/ramp handling.
-        vtbl_a_addr <= {cur_voice, VTBL_LOOP_END};
-        state       <= S_RD_VOL;
+        vtbl_a_addr  <= {cur_voice, VTBL_LOOP_END};
+        state        <= S_RD_VOL;
     end
 
     S_RD_VOL: begin
         cur_loop_end <= vtbl_a_q[21:0];
         vtbl_a_addr  <= {cur_voice, VTBL_LOOP_START};
-        state        <= S_FETCH_TAP0_CALC;  // loop_start captured in CALC
+        state        <= S_FETCH_TAP0_CALC;
     end
 
     // ---- Fetch tap0 + tap1 with one ARLEN=1 burst when safe ----
@@ -759,15 +724,17 @@ always @(posedge clk) begin
     // MODE cycle: apply length clamp, pick mode, register flags.
     // TAP0_AR / TAP0_R / TAP1_R: drive AR with chosen ARLEN, receive
     //                            beat 0, optionally receive beat 1.
-    S_FETCH_TAP0_CALC: begin
+    S_FETCH_TAP0_CALC: begin : fetch_tap0_calc_blk
+        reg [31:0] sample_addr;
         cur_loop_start <= vtbl_a_q[21:0];
         cur_loop_valid <= (cur_loop_end > vtbl_a_q[21:0]);
         cur_loop_len   <= cur_loop_end - vtbl_a_q[21:0];
         if (cur_pos_int >= cur_length) begin
             state <= S_VOICE_END;
         end else begin
-            tap_byte_addr <= sample_byte_addr(voice_base, cur_pos_int, cur_stereo);
-            tap_araddr    <= word_aligned(sample_byte_addr(voice_base, cur_pos_int, cur_stereo));
+            sample_addr   = sample_byte_addr(voice_base, cur_pos_int, cur_stereo);
+            tap_byte_addr <= sample_addr;
+            tap_araddr    <= word_aligned(sample_addr);
             tap_nxt_raw   <= cur_pos_int + 22'd1;
             state         <= S_FETCH_TAP1_NXT_CALC;  // first half of burst decision
         end
@@ -846,8 +813,8 @@ always @(posedge clk) begin
                 m_rready <= 1'b0;
                 state    <= S_LERP_INTERP;
             end else if (cur_stereo) begin
-                // (Stereo with no wrap should always set _2beat.
-                //  Safe fallback in case mode flags ever disagree.)
+                // Stereo with no wrap should already set _2beat.
+                // Keep this fallback for defensive mode handling.
                 tap1_l <= beat0_l;
                 tap1_r <= beat0_r;
                 m_rready <= 1'b0;
@@ -865,9 +832,11 @@ always @(posedge clk) begin
     // S_FETCH_SEAM_AR — issue a second single-beat AR for tap1 at
     // cur_loop_start (loop wrap case).  byte_addr is recomputed from
     // cur_loop_start so the SEAM_R extract picks the right mono half.
-    S_FETCH_SEAM_AR: begin
-        tap_byte_addr <= sample_byte_addr(voice_base, cur_loop_start, cur_stereo);
-        m_araddr      <= word_aligned(sample_byte_addr(voice_base, cur_loop_start, cur_stereo));
+    S_FETCH_SEAM_AR: begin : fetch_seam_ar_blk
+        reg [31:0] sample_addr;
+        sample_addr   = sample_byte_addr(voice_base, cur_loop_start, cur_stereo);
+        tap_byte_addr <= sample_addr;
+        m_araddr      <= word_aligned(sample_addr);
         m_arlen       <= 8'd0;
         m_arvalid     <= 1'b1;
         state         <= S_FETCH_SEAM_R;
@@ -950,6 +919,7 @@ always @(posedge clk) begin
     S_LERP_MIX: begin : lerp_mix_blk
         reg signed [24:0] scaled_l, scaled_r;
         reg signed [16:0] post_l, post_r;
+        reg signed [15:0] samp_l_tmp, samp_r_tmp;
         begin
             // Apply per-channel volume (8-bit unsigned), shift right 8.
             scaled_l = lerp_l_reg * $signed({1'b0, cur_vol_l});
@@ -963,15 +933,15 @@ always @(posedge clk) begin
              * shift preserves sign; saturation clips to s16. */
             post_l = scaled_l >>> 8;
             post_r = scaled_r >>> 8;
-            samp_l = (post_l >  17'sd32767)  ? 16'sh7FFF :
-                     (post_l < -17'sd32768)  ? 16'sh8000 :
-                                               post_l[15:0];
-            samp_r = (post_r >  17'sd32767)  ? 16'sh7FFF :
-                     (post_r < -17'sd32768)  ? 16'sh8000 :
-                                               post_r[15:0];
+            samp_l_tmp = (post_l >  17'sd32767) ? 16'sh7FFF :
+                         (post_l < -17'sd32768) ? 16'sh8000 :
+                                                   post_l[15:0];
+            samp_r_tmp = (post_r >  17'sd32767) ? 16'sh7FFF :
+                         (post_r < -17'sd32768) ? 16'sh8000 :
+                                                   post_r[15:0];
 
-            accum_l <= accum_l + $signed({{16{samp_l[15]}}, samp_l});
-            accum_r <= accum_r + $signed({{16{samp_r[15]}}, samp_r});
+            accum_l <= accum_l + $signed({{(ACCUM_W-16){samp_l_tmp[15]}}, samp_l_tmp});
+            accum_r <= accum_r + $signed({{(ACCUM_W-16){samp_r_tmp[15]}}, samp_r_tmp});
             state   <= S_ADV_COMPUTE;
         end
     end
@@ -1017,8 +987,8 @@ always @(posedge clk) begin
     end
 
     // Stage 3: compare only.  This decides whether a very high rate
-    // skipped more than one loop length.  The VTBL write is deliberately
-    // in S_ADV_COMMIT so cur_loop_end does not feed the RAM address mux.
+    // skipped more than one loop length.  The position write is deliberately
+    // in S_ADV_COMMIT so cur_loop_end does not feed the write-address mux.
     S_ADV_CHECK: begin
         if (adv_voice_ended) begin
             cur_pos_int <= adv_pos_next;
@@ -1038,7 +1008,7 @@ always @(posedge clk) begin
     end
 
     // Stage 5: unconditional commit.  No loop compare or subtract feeds
-    // the VTBL/POS_LATCH setup path in this cycle.
+    // the position storage setup path in this cycle.
     S_ADV_COMMIT: begin
         cur_pos_int           <= adv_pos_next;
         vtbl_a_addr           <= {cur_voice, VTBL_POS_INT};
@@ -1056,15 +1026,16 @@ always @(posedge clk) begin
         state       <= S_RAMP_STEP;
     end
 
-    // ---- Volume ramp step (reads target + rate) ----
-    // Three-stage pipeline to keep the per-voice path inside 10 ns:
+    // ---- Volume ramp step ----
+    // Four-stage pipeline to keep the per-voice path inside 10 ns:
     //   S_RAMP_STEP    → pick gxm for cur_voice (cur_voice → voice_group
     //                    → pick_gxm), queue VTBL_VOL_TARGET read
     //   S_WR_VOL_MULT  → latch raw × cur_gxm_r into tgt_*_r (DSP cycle)
-    //   S_WR_VOL       → ramp(cur_vol, tgt_*_r) and write VTBL_VOL_LR
-    // Adds 1 cycle per voice over the original (32 cycles/sample,
-    // ~3% of the 2083-cycle window).  The monolithic chain was
-    //   BRAM_q → MULT (3.5 ns) → ramp (2 ns) → write addr (1 ns)
+    //   S_WR_VOL_RAMP  → ramp left channel
+    //   S_WR_VOL_RAMP_R→ ramp right channel
+    //   S_WR_VOL       → write VTBL_VOL_LR if needed
+    // Adds a few cycles per voice over the original.  The monolithic chain was
+    //   target → MULT (3.5 ns) → ramp (2 ns) → write control (1 ns)
     // = 6.5 ns combinational, which with ~3 ns clock skew + ~2 ns
     // setup blew the 10 ns budget — −4.29 ns slack pre-fix.
     S_RAMP_STEP: begin
@@ -1077,8 +1048,7 @@ always @(posedge clk) begin
         reg [7:0]  raw_l, raw_r;
         reg [15:0] tgt_l_x, tgt_r_x;
         begin
-            // BRAM read (vtbl_a_q) is valid this cycle.  Only thing
-            // we do here is the 8×8 multiply against the registered
+            // Only thing we do here is the 8x8 multiply against the registered
             // cur_gxm_r — DSP block in isolation, no downstream logic
             // on the same cycle.
             raw_l   = vtbl_a_q[7:0];
@@ -1092,20 +1062,20 @@ always @(posedge clk) begin
     end
 
     S_WR_VOL_RAMP: begin
-        // Run the ramp_step compare chain in its own cycle.  The
-        // function expands into ~3 cascaded compares (cur vs tgt,
-        // +step overflow, -step underflow) plus a 4-way mux — about
-        // 1.5 ns combinational on its own.  Doing this in S_WR_VOL
-        // alongside the BRAM write logic added ~3 ns to the path
-        // (was -2.1 ns slack at 100 MHz).  Registered output here
-        // means S_WR_VOL is just a comparator + BRAM port setup.
+        // Run one ramp_step compare chain per cycle.  Sharing the left
+        // and right ramp hardware costs one extra active-voice cycle
+        // but avoids duplicating the add/compare/mux chain in ALMs.
         nxt_l_r <= ramp_step(cur_vol_l, tgt_l_r, cur_vol_rate);
+        state   <= S_WR_VOL_RAMP_R;
+    end
+
+    S_WR_VOL_RAMP_R: begin
         nxt_r_r <= ramp_step(cur_vol_r, tgt_r_r, cur_vol_rate);
         state   <= S_WR_VOL;
     end
 
     S_WR_VOL: begin
-        // Pure write-decision + BRAM port setup.  No multiply, no
+        // Pure write-decision + storage setup.  No multiply, no
         // compare chain — both already registered.
         if (nxt_l_r != cur_vol_l || nxt_r_r != cur_vol_r) begin
             vtbl_a_addr <= {cur_voice, VTBL_VOL_LR};
@@ -1118,8 +1088,7 @@ always @(posedge clk) begin
     // ---- Voice-end path (one-shot) ----
     S_VOICE_END: begin
         /* Signal active-bit clear (in the shadow) and set the IRQ bit.
-         * No VTBL_CTRL write here: in the split-memory v2, CTRL lives
-         * in vtbl_cpu which FSM cannot write.  The shadow clear makes
+         * No VTBL_CTRL write here: CTRL is CPU-owned storage.  The shadow clear makes
          * S_CHECK_ACTIVE skip this voice on every subsequent pass until
          * CPU re-arms it with a fresh CTRL write. */
         voice_end_clear_mask[cur_voice] <= 1'b1;
@@ -1139,20 +1108,23 @@ always @(posedge clk) begin
     // ---- Saturate + push stereo pair to FIFO ----
     S_OUTPUT: begin : out_blk
         reg [15:0] out_l, out_r;
+        reg signed [ACCUM_W-1:0] mix_l, mix_r;
         begin
             /* Mix-down /16 — 8× more headroom than the original /2.
              * audio_output's 1.25× boost + 2:1 soft-knee saturator
              * has been removed (clean passthrough), so /16 is the
-             * sole attenuation in the chain.  Worst case 16 voices ×
-             * full-scale = 524288 ⇒ /16 = 32768, exactly at the
+             * sole attenuation in the chain.  Worst case 32 voices x
+             * full-scale exceeds s16 after /16 and clamps cleanly at the
              * saturator boundary; realistic busy mixes well under.
              * Loudness compensation lives in master_vol/group_vol. */
-            out_l = (accum_l >>> 4 >  32'sd32767)  ? 16'h7FFF :
-                    (accum_l >>> 4 < -32'sd32768)  ? 16'h8000 :
-                                                     accum_l[19:4];
-            out_r = (accum_r >>> 4 >  32'sd32767)  ? 16'h7FFF :
-                    (accum_r >>> 4 < -32'sd32768)  ? 16'h8000 :
-                                                     accum_r[19:4];
+            mix_l = accum_l >>> 4;
+            mix_r = accum_r >>> 4;
+            out_l = (mix_l > ACCUM_OUT_MAX) ? 16'h7FFF :
+                    (mix_l < ACCUM_OUT_MIN) ? 16'h8000 :
+                                             mix_l[15:0];
+            out_r = (mix_r > ACCUM_OUT_MAX) ? 16'h7FFF :
+                    (mix_r < ACCUM_OUT_MIN) ? 16'h8000 :
+                                             mix_r[15:0];
             sample_data <= {out_l, out_r};
             sample_wr   <= 1'b1;
             state       <= S_IDLE;

@@ -289,7 +289,7 @@ SWEEP_MIN ?= 1
 SWEEP_MAX ?= 30
 
 sweep: firmware
-	@bash $(ROOT_DIR)/tools/sweep.sh $(SWEEP_MIN) $(SWEEP_MAX)
+	@VARIANT_DEFS="$(VARIANT_DEFS)" bash $(ROOT_DIR)/tools/sweep.sh $(SWEEP_MIN) $(SWEEP_MAX)
 
 # ── Tools ────────────────────────────────────────────────────────────
 $(REVERSE_BITS): $(TOOLS_DIR)/reverse_bits.c

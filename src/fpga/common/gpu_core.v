@@ -124,7 +124,7 @@ assign dbg_frag = 32'd0;
 // 0x24  GPU_TRANSLUC_DATA W   word data into transluc[] upload window
 // 0x28  GPU_TEX_FLUSH     W   Flush texture cache (write any value)
 // 0x2C  GPU_DMA_KICK      W   Write 1 to fire DMA pull from (SRC, LEN)
-// 0x30  Reserved
+// 0x30  GPU_PALOOKUP_BASE W/R SDRAM byte base for 16x16KB colormap slots
 // 0x34  GPU_DBG_WR_INFLIGHT R Low 4 bits = outstanding FB write responses
 // 0x38  Reserved
 // 0x3C  Reserved
@@ -157,6 +157,11 @@ reg [14:0] transluc_wr_addr;   // Auto-increment byte address into transluc[]
 reg        tex_flush_req;      // Pulse to flush texture cache
 reg        soft_reset;         // Pulse: resets FSM state + ring pointers
 reg        ring_reset;         // Pulse: reset ring_rdptr (from MMIO, consumed by FSM)
+
+// Default matches the fixed address used by recent SDKs.  New SDKs program
+// this register to app-owned, linker-accounted storage during of_gpu_init().
+localparam [25:0] PALOOKUP_BASE_DEFAULT = 26'h3fc0000;  // byte offset 0x03FC0000
+reg [25:0] palookup_base;
 
 // ---- Doorbell-DMA pull from SDRAM into ring BRAM ----
 // Latched on MMIO writes; consumed by the dedicated DMA FSM below.
@@ -236,6 +241,7 @@ always @(posedge clk) begin
         ring_reset      <= 0;
         dma_src_latched <= 32'd0;
         dma_len_latched <= 13'd0;
+        palookup_base   <= PALOOKUP_BASE_DEFAULT;
     end else begin
         tex_flush_req <= 0;
         soft_reset    <= 0;
@@ -279,6 +285,9 @@ always @(posedge clk) begin
                 4'd11: begin // GPU_DMA_KICK — fire pull
                     // Handled by the DMA descriptor queue FSM below.
                 end
+                4'd12: begin // GPU_PALOOKUP_BASE
+                    palookup_base <= reg_wdata[25:0];
+                end
                 default: ;
             endcase
         end
@@ -300,6 +309,7 @@ always @(*) begin
         4'd5:    reg_rdata = {25'b0, dma_desc_full, dma_state, transluc_upload_busy,
                               dma_busy, ring_empty, busy};
         4'd6:    reg_rdata = fence_reached;
+        4'd12:   reg_rdata = {6'b0, palookup_base};
         // Compact current-inflight readback for the write-balance test.
         4'd13:   reg_rdata = {28'b0, m_wr_inflight};
         default: reg_rdata = 32'b0;
@@ -435,7 +445,7 @@ end
 // Cache misses stall the pipeline via fp_pipe_stall's cmap_pipe_wait
 // term until the fill completes.
 //
-// PALOOKUP_BASE + (colormap_id << 14) anchors the slot for fragments.
+// palookup_base + (colormap_id << 14) anchors the slot for fragments.
 // Direct-affine records carry a per-lane slot; parametric spans carry a
 // per-command slot.  The per-pixel term (light << 8 | texel) indexes
 // within the slot.  Slot encoding matches the SDK's
@@ -443,6 +453,8 @@ end
 reg [25:0] cmap_req_addr_reg;
 reg        cmap_pending_valid;
 reg [25:0] cmap_pending_addr;
+wire [11:0] cmap_slot_page = palookup_base[25:14] + {8'b0, p1_colormap_id};
+wire [25:0] cmap_slot_addr = {cmap_slot_page, 14'b0};
 
 // resp_data_b is wired from gpu_tex_cache port B below; the byte falls out
 // of resp_data_b[7:0] (req_wide_b is tied to 0 so port B always returns
@@ -813,6 +825,9 @@ localparam CMD_SET_FB         = 8'h23;
 // direct-affine commands use the same opcode with the shorter 4+7N payload
 // for already-prepared independent lanes.
 localparam CMD_DRAW_PARAM_SPAN_LIST   = 8'h48;
+// 8'h49 is reserved.  The experimental staged-lightmap span command is no
+// longer part of the advertised GPU surface; unsupported commands drain their
+// payload and retire as no-ops.
 
 localparam PARAM_RECORD_U16V16_COUNT16 = 4'd0;
 
@@ -1481,19 +1496,16 @@ reg [3:0] m_wr_inflight;
 reg [31:0] pending_fence_token;
 reg [1:0]  pending_swap_idx;
 
-// SDRAM address layout for palookups.  PALOOKUP_BASE is the byte offset
-// of slot 0; slots are spaced 16 KB apart.  Each slot has 32 shade rows
-// and 256 entries per row, padded to 16 KB so the slot index multiplier
-// is a clean shift.  CPU uploads and GPU cmap reads share these constants
-// without any per-slot register state.  Keep in sync with
-// OF_GPU_PALOOKUP_AXI_OFFSET in firmware/api/of_gpu.h.
-localparam [25:0] PALOOKUP_BASE   = 26'h3400000;  // 52 MB into SDRAM
+// SDRAM address layout for palookups.  palookup_base is the byte offset
+// of slot 0; slots are spaced 16 KB apart.  Each slot has 64 shade rows
+// and 256 entries per row, padded to 16 KB so the slot index is a 14-bit
+// shift.  SDKs program app-owned storage through GPU_PALOOKUP_BASE.
 
 // Payload streaming state — ring_rd_data is routed directly to each
 // destination reg in S_PAY_DATA; no intermediate payload array.
 // pay_idx saturates at 63 (any payload word past that still drains the
 // ring via pay_remaining but has nowhere to go).
-reg [5:0]  pay_idx;
+reg [12:0] pay_idx;
 reg [12:0] pay_remaining;  // total payload words still to consume from the ring
                            // (ring BRAM is 4096 words, so 13 bits covers the
                            // largest valid command payload)
@@ -1516,10 +1528,10 @@ task spanprod_prepare_next_record_chunk;
         spanprod_calc_step <= 3'd0;
 
         // Consume the first word of the next packed-record chunk and prime
-        // ring_rd_data so S_PAY_DATA sees it with pay_idx=31.
+        // ring_rd_data so S_PAY_DATA sees the first record word index.
         ring_rdptr   <= ring_rdptr + 1'b1;
         ring_rd_addr <= ring_rdptr + 1'b1;
-        pay_idx      <= 6'd31;
+        pay_idx      <= 13'd31;
         state        <= S_PAY_DATA;
     end
 endtask
@@ -2646,8 +2658,8 @@ always @(posedge clk) begin : main_fsm
             cmd_is_fence          <= (cmd_type == CMD_FENCE);
             cmd_is_clear_rect     <= (cmd_type == CMD_CLEAR_RECT);
             cmd_is_set_fb         <= (cmd_type == CMD_SET_FB);
-            cmd_is_draw_param_span_list <= (cmd_type == CMD_DRAW_PARAM_SPAN_LIST &&
-                                             cmd_payload_words >= 13'd11);
+            cmd_is_draw_param_span_list <=
+                (cmd_type == CMD_DRAW_PARAM_SPAN_LIST && cmd_payload_words >= 13'd11);
             spanprod_compact_direct <= (cmd_type == CMD_DRAW_PARAM_SPAN_LIST &&
                                         cmd_payload_words <= 13'd32);
             cmd_is_flip           <= (cmd_type == CMD_FLIP);
@@ -2655,7 +2667,7 @@ always @(posedge clk) begin : main_fsm
             if (cmd_payload_words == 0) begin
                 state <= S_EXECUTE;
             end else begin
-                pay_idx <= 0;
+                pay_idx <= 13'd0;
                 // Track the full payload count so every word drains out of
                 // the ring.  This keeps ring_rdptr aligned even when a
                 // command has more words than the direct destination decode
@@ -2676,14 +2688,11 @@ always @(posedge clk) begin : main_fsm
         // route it straight to the right state reg based on the
         // registered command type and the payload-word index pay_idx.
         // Destinations live in regs that already exist, so the only storage
-        // cost is the 6-bit pay_idx counter and pay_remaining.
+        // cost is the payload index counter and pay_remaining.
         //
-        // pay_idx saturates at 63: any payload word past index 63 is still
-        // drained from the ring so ring_rdptr ends up at the next command
-        // header, but has no destination reg to write.
         S_PAY_DATA: begin
-            if (pay_idx != 6'd63)
-                pay_idx <= pay_idx + 6'd1;
+            if (pay_idx != 13'd4095)
+                pay_idx <= pay_idx + 13'd1;
             pay_remaining <= pay_remaining - 13'd1;
 
             // Per-command dispatch.  The if-else chain mirrors the pre-
@@ -2693,22 +2702,22 @@ always @(posedge clk) begin : main_fsm
                 // Publish the token only AFTER outstanding m_wr_* writes
                 // drain in S_EXECUTE — fixes the flashing-pixel race
                 // documented in cr-gpu-fence-write-completion.md.
-                if (pay_idx == 6'd0) pending_fence_token <= ring_rd_data;
+                if (pay_idx == 13'd0) pending_fence_token <= ring_rd_data;
             end
             else if (cmd_is_flip) begin
                 // CMD_FLIP payload: word 0 = idx, word 1 = fence token.
-                if (pay_idx == 6'd0) pending_swap_idx    <= ring_rd_data[1:0];
-                if (pay_idx == 6'd1) pending_fence_token <= ring_rd_data;
+                if (pay_idx == 13'd0) pending_swap_idx    <= ring_rd_data[1:0];
+                if (pay_idx == 13'd1) pending_fence_token <= ring_rd_data;
             end
             else if (cmd_is_clear_rect) begin
-                if (pay_idx == 6'd0) begin
+                if (pay_idx == 13'd0) begin
                     cr_addr     <= ring_rd_data;
                     cr_row_addr <= ring_rd_data;
-                end else if (pay_idx == 6'd1) begin
+                end else if (pay_idx == 13'd1) begin
                     cr_w_total     <= ring_rd_data[31:16];
                     cr_w_remaining <= ring_rd_data[31:16];
                     cr_y_remaining <= ring_rd_data[15:0];
-                end else if (pay_idx == 6'd2) begin
+                end else if (pay_idx == 13'd2) begin
                     // Word 2: {stride[31:16], pad[15:8], color[7:0]}.
                     // stride==0 uses st_fb_stride from SET_FB.
                     cr_stride <= ring_rd_data[31:16];
@@ -2716,10 +2725,10 @@ always @(posedge clk) begin : main_fsm
                 end
             end
             else if (cmd_is_set_fb) begin
-                if (pay_idx == 6'd1) st_fb_stride <= ring_rd_data[15:0];
+                if (pay_idx == 13'd1) st_fb_stride <= ring_rd_data[15:0];
             end
             else if (cmd_is_draw_param_span_list) begin
-                load_param_span_list_payload_word(pay_idx, ring_rd_data);
+                load_param_span_list_payload_word(pay_idx[5:0], ring_rd_data);
             end
 
             if (pay_remaining <= 13'd1) begin
@@ -2732,7 +2741,7 @@ always @(posedge clk) begin : main_fsm
                   && !spanprod_direct_affine
                   && spanprod_header_supported
                   && (spanprod_records_left > {13'd0, spanprod_record_count})
-                  && pay_idx == 6'd36) begin
+                  && (pay_idx == 13'd36)) begin
                 state <= S_EXECUTE;
             end
             else begin
@@ -3144,8 +3153,7 @@ always @(posedge clk) begin : main_fsm
                         // to avoid a multiplier.
                         // Colormap id is captured per fragment so affine
                         // groups can interleave lanes with different slots.
-                        cmap_req_addr_reg <= PALOOKUP_BASE
-                                           | {8'b0, p1_colormap_id, 14'b0}
+                        cmap_req_addr_reg <= cmap_slot_addr
                                            | {12'b0, p1_light, p1_tex_color};
                     end
                 end

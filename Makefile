@@ -244,6 +244,20 @@ sdk: check-target
 		fi; \
 		printf "  $(C_OK)analogizer.cfg$(C_RESET) → dist/sdk/Assets/openfpgaos/common/\n"; \
 		\
+		# Core metadata JSON. Keep the SDK-deployed core description in \
+		# step with this repo so apps can request the current video modes. \
+		mkdir -p "$$dir/dist/sdk/Cores/$(CORE_NAME)"; \
+		for f in core.json video.json audio.json input.json data.json variants.json interact.json; do \
+			cp "$(DIST_DIR)/$$f" "$$dir/dist/sdk/Cores/$(CORE_NAME)/"; \
+			if [ -d "$$dir/build/sdk/Cores/$(CORE_NAME)" ]; then \
+				cp "$(DIST_DIR)/$$f" "$$dir/build/sdk/Cores/$(CORE_NAME)/"; \
+			fi; \
+		done; \
+		if [ -d "$$dir/src/sdk/platforms/pocket/templates" ]; then \
+			cp "$(DIST_DIR)/video.json" "$$dir/src/sdk/platforms/pocket/templates/video.json"; \
+		fi; \
+		printf "  $(C_OK)core json$(C_RESET)      → dist/sdk/Cores/$(CORE_NAME)/\n"; \
+		\
 		# Legacy directories that used to live under src/sdk/ — the \
 		# rsync above won't touch them because they're outside its \
 		# filter, so nuke them here once. \

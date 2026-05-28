@@ -86,6 +86,10 @@ struct of_sbiret syscall_dispatch(long a0, long a1, long a2, long a3,
                                   long a4, long a5, long fid, long eid);
 
 void syscall_init(uintptr_t heap_start);
+int syscall_set_app_stack_top(uintptr_t stack_top);
+void *syscall_alloc_app_mmap(uint32_t size);
+int syscall_free_app_mmap(void *ptr, uint32_t size);
+uintptr_t of_brk_limit(void);
 
 /* Filesystem init — issues DS_CMD_OPENFILE on every data slot (0-6)
  * so APF opens backing files (required for "deferload":true slots),

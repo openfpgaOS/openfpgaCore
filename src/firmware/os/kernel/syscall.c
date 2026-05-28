@@ -114,17 +114,17 @@ enum {
 };
 
 /* ======================================================================
- * I/O cache — LRU read cache in SDRAM.
+ * I/O cache — LRU read cache in SDRAM
  *
  * Each entry holds one 32KB block, keyed by (slot_id, aligned_offset).
- * On hit, data is served directly from SDRAM. On miss, the LRU entry
- * is evicted and refilled through the normal CRAM0 bridge bounce path.
+ * On hit, data is served directly from SDRAM — no bridge DMA needed.
+ * On miss, the LRU entry is evicted and refilled via bridge DMA.
  * ====================================================================== */
 
 #define IO_CACHE_ENTRIES    8
 #define IO_CACHE_BLOCK_SIZE (32 * 1024)
-/* The cache buffer lives in SDRAM at 0x10380000 (256 KB), sandwiched
- * between the unused tail of TERM_FB and INTERACT_BASE. */
+/* The cache lives in SDRAM at 0x10380000 (256 KB), between the unused
+ * tail of TERM_FB and INTERACT_BASE. */
 #define IO_CACHE_BASE       0x10380000u
 #define IO_CACHE_CACHED     (IO_CACHE_BASE)                /* CPU cached reads */
 #define IO_CACHE_UNCACHED   (IO_CACHE_BASE)                /* SDRAM has no uncached alias */
@@ -176,7 +176,8 @@ static inline const uint8_t *io_cache_data(int entry) {
  * through CRAM0 scratch in hardware-sized chunks, then memcpys into the
  * caller's SDRAM buffer.
  *
- * The bridge can only write to CRAM0 directly.  Using of_file_read lets the
+ * v2 arch: the direct bridge→SDRAM fabric path was retired with CRAM1,
+ * so the bridge can only write to CRAM0.  Using of_file_read lets the
  * of_disk_bridge backend handle the mode flip + bounce once, instead of
  * duplicating that sequence here.  The memcpy lands in SDRAM via the
  * L1 D$, so subsequent reads from cached_ptr hit the cache coherently
@@ -246,7 +247,7 @@ static int slot_read_cached(uint32_t slot_id, uint32_t off,
 /* ======================================================================
  * File slot registry -- maps filenames to APF data slot IDs
  *
- * Chip32 writes a file table ("FTAB") to CRAM0 scratch
+ * Chip32 writes a file table ("FTAB") to CRAM0 at the OS slot offset
  * during boot. The table has: magic(4) + count(4) + entries[count],
  * where each entry is: slot_id(4) + name_len(4) + name(24).
  *
@@ -1632,9 +1633,11 @@ static long sys_clock_nanosleep_time64(long clk_id, long flags,
 /* Sized for mallocng's slab-per-size-class arenas: musl's allocator
  * mmaps a fresh slab the first time any size class is touched, so an
  * app pulling in many small allocations of diverse sizes can easily
- * hold ~70+ concurrent slabs.  256 keeps headroom for a heavy workload
- * without costing much BSS (12 B per slot). */
-#define MMAP_SLOTS 256
+ * hold hundreds of concurrent slabs once a larger C++ game/runtime has
+ * menus, resource tables, file readers, and texture state alive at the
+ * same time.  1024 costs 12 KB of OS BSS and avoids false ENOMEM when
+ * SDRAM is still available. */
+#define MMAP_SLOTS 1024
 
 typedef struct {
     uintptr_t base;     /* 0 = slot unused */
@@ -1649,7 +1652,7 @@ static void mmap_coalesce_bottom(void) {
     /* Walk free slots; any free slot whose BASE equals mmap_bottom
      * sits exactly at the bottom of the carved arena and can be
      * reclaimed by raising mmap_bottom up by its length.  Carved
-     * slots grow downward from the initial 0x13400000, so mmap_bottom
+     * slots grow downward from the current app stack reserve, so mmap_bottom
      * always equals the lowest currently-allocated (or just-freed)
      * address; a free slot starting at mmap_bottom is therefore the
      * region we can reabsorb into the bulk free arena.
@@ -1785,6 +1788,12 @@ static long sys_mmap2(long addr, long length, long prot,
     return (long)base;
 }
 
+void *syscall_alloc_app_mmap(uint32_t size)
+{
+    long ret = sys_mmap2(0, (long)size, 0, 0, -1, 0);
+    return ret < 0 ? (void *)0 : (void *)(uintptr_t)ret;
+}
+
 static long sys_munmap(long addr, long length) {
     if (!addr || length <= 0)
         return 0;    /* Linux tolerates 0-length unmap as a no-op. */
@@ -1823,6 +1832,11 @@ static long sys_munmap(long addr, long length) {
      * munmap that musl never issues, or a double-free on the app
      * side; neither warrants a failure return. */
     return 0;
+}
+
+int syscall_free_app_mmap(void *ptr, uint32_t size)
+{
+    return (int)sys_munmap((long)(uintptr_t)ptr, (long)size);
 }
 
 static long sys_writev(long fd, long iov_ptr, long iovcnt) {
@@ -2132,11 +2146,12 @@ static long linux_dispatch(long n, long a0, long a1, long a2,
 
     case SYS_exit:
     case SYS_exit_group:
-        /* Switch scanout back to 8-bit terminal FB so user sees boot screen
-         * even if the app left RGB565/low-bit framebuffer mode selected. */
+        /* Switch scanout back to the legacy 8-bit terminal path so user sees
+         * boot screen even if the app left RGB565/low-bit/dynamic mode set. */
         SYS_COLOR_MODE = COLOR_MODE_8BIT;
         FB_MODE_SIZE = ((uint32_t)FB_HEIGHT << 16) | FB_WIDTH;
         FB_MODE_STRIDE = FB_STRIDE;
+        VIDEO_SCALER_MODE = VIDEO_SCALER_SLOT_640X240;
         TERM_FB_CTRL = 1;
         while (1) {}
         return 0;
@@ -2508,19 +2523,11 @@ void syscall_init(uintptr_t heap_start) {
     fd_table[FD_STDERR].in_use = 1;
     brk_base    = heap_start;
     current_brk = heap_start;
-    /* mmap grows down from APP_STACK_TOP - APP_STACK_SIZE.  The window
-     * nominally ends at APP_VMAP_V1_SDRAM_END (0x13400000) for
-     * portability, but on-target SDRAM extends further, and we let
-     * mmap reclaim that tail so memory-hungry workloads don't run
-     * out in the 48 MB portable window.  APP_VMAP_V1_SDRAM_END still
-     * bounds PT_LOAD segments — just not mmap.
-     *
-     * Strict inequality vs APP_STACK_TOP is critical: sys_mmap2
-     * zero-fills every carved region, and if mmap_bottom == stack
-     * top the first mmap wipes whatever stack frames the app
-     * already pushed.  Reserve the same 512 KB stack span used
-     * above 0x13F80000 for the OS runtime stack. */
-    mmap_bottom = 0x12F00000u;   /* APP_STACK_TOP (0x12F80000) - 512 KB */
+    /* Initial app mmap ceiling.  main.c tightens this after filesystem
+     * scan and SoundFont preload, when dynamic audio reservations are
+     * known.  Strict inequality vs the stack top is critical because
+     * sys_mmap2 zero-fills every carved region. */
+    mmap_bottom = APP_STACK_TOP - APP_STACK_SIZE;
 
     /* Reset mmap region tracker — the previous app's allocations
      * are no longer reachable once current_brk/mmap_bottom are
@@ -2540,4 +2547,20 @@ void syscall_init(uintptr_t heap_start) {
     memset(vfs_mounts, 0, sizeof(vfs_mounts));
     vfs_mount_count = 0;
     path_copy(vfs_cwd, sizeof(vfs_cwd), "/");
+}
+
+int syscall_set_app_stack_top(uintptr_t stack_top)
+{
+    stack_top &= ~(uintptr_t)15u;
+    if (stack_top < APP_STACK_SIZE)
+        return -1;
+
+    uintptr_t bottom = stack_top - APP_STACK_SIZE;
+    if (bottom < current_brk)
+        return -1;
+
+    mmap_bottom = bottom;
+    memset(mmap_slots, 0, sizeof(mmap_slots));
+    mmap_slots_used = 0;
+    return 0;
 }

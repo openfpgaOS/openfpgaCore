@@ -458,7 +458,8 @@ int of_video_check_mode(const of_video_mode_t *mode,
 }
 
 void of_video_clear(uint8_t color) {
-    memset(g_fb[g_draw_buf], color, g_frame_bytes);
+    memset(g_fb[0], color, g_frame_bytes);
+    memset(g_fb[1], color, g_frame_bytes);
 }
 
 void of_video_palette(uint8_t index, uint32_t rgb) {

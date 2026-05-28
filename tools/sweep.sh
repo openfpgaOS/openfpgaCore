@@ -21,6 +21,12 @@ PROJECT=ap_core
 MIN=${1:-1}
 MAX=${2:-30}
 RESULTS=output_files/seed_map.log
+VERILOG_MACROS=()
+if [ -n "${VARIANT_DEFS:-}" ]; then
+    for def in ${VARIANT_DEFS}; do
+        VERILOG_MACROS+=(--verilog_macro="${def}")
+    done
+fi
 
 # Colors
 C_HEAD='\033[1m'
@@ -32,6 +38,9 @@ C_RESET='\033[0m'
 
 TOTAL=$(( MAX - MIN + 1 ))
 printf "${C_HEAD}[sweep]${C_RESET} Seeds ${MIN}-${MAX} (${TOTAL} builds)\n\n"
+if [ -n "${VARIANT_DEFS:-}" ]; then
+    printf "${C_HEAD}[sweep]${C_RESET} Variant defs: ${VARIANT_DEFS}\n\n"
+fi
 
 mkdir -p output_files
 echo "seed,fmax_mhz" > "${RESULTS}"
@@ -51,7 +60,16 @@ for seed in $(seq ${MIN} ${MAX}); do
     # met; we don't care -- as long as the STA report exists with an
     # Fmax line, we'll consider this seed for the "best" ranking.
     rm -rf db incremental_db
-    quartus_sh --flow compile ${PROJECT} > "output_files/seed_${seed}_compile.log" 2>&1 || true
+    if [ ${#VERILOG_MACROS[@]} -gt 0 ]; then
+        {
+            quartus_map ${PROJECT} "${VERILOG_MACROS[@]}" &&
+            quartus_fit ${PROJECT} &&
+            quartus_asm ${PROJECT} &&
+            quartus_sta ${PROJECT}
+        } > "output_files/seed_${seed}_compile.log" 2>&1 || true
+    else
+        quartus_sh --flow compile ${PROJECT} > "output_files/seed_${seed}_compile.log" 2>&1 || true
+    fi
 
     # Extract restricted Fmax for the SDRAM clock domain (mp_ram general[0]).
     # The STA report exists whether or not timing was met, so we read it
@@ -115,7 +133,14 @@ echo ""
 printf "${C_HEAD}[rebuild]${C_RESET} Final compile with seed ${BEST_SEED}...\n"
 sed -i "s/^set_global_assignment -name SEED .*/set_global_assignment -name SEED ${BEST_SEED}/" ${PROJECT}.qsf
 rm -rf db incremental_db
-quartus_sh --flow compile ${PROJECT} || true
+if [ ${#VERILOG_MACROS[@]} -gt 0 ]; then
+    quartus_map ${PROJECT} "${VERILOG_MACROS[@]}" &&
+    quartus_fit ${PROJECT} &&
+    quartus_asm ${PROJECT} &&
+    quartus_sta ${PROJECT} || true
+else
+    quartus_sh --flow compile ${PROJECT} || true
+fi
 
 # Verify the bitstream actually came out -- this is the real success
 # criterion, not Quartus's exit code.

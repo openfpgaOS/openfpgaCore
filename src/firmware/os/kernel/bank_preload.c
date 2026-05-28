@@ -2,11 +2,10 @@
  * bank_preload.c -- Auto-detect and preload an .ofsf SoundFont at boot.
  *
  * After filesystem_init() has populated the file slot registry, scan for
- * the first *.ofsf file. If found, allocate from the mixer's SDRAM
- * sample pool, DMA the file in, and validate the header. The loaded base
- * + size are exposed through the services table so apps' of_smp_bank_load
- * can reuse the preload instead of re-reading the file (and re-allocating
- * from the same sample pool).
+ * the first *.ofsf file. If found, reserve exactly that file size in the
+ * persistent audio area, DMA the file in, and validate the header. The
+ * loaded base + size are exposed through the services table so apps'
+ * of_smp_bank_load can reuse the preload instead of re-reading the file.
  */
 
 #include <stdint.h>
@@ -20,6 +19,7 @@
 #include "../hal/mixer.h"
 #include "../hal/cache.h"
 #include "../hal/file.h"
+#include "../hal/regs.h"
 #include "../hal/terminal.h"
 
 /* Declared in targets/<target>/file.c; not in hal/file.h because size
@@ -128,7 +128,8 @@ int bank_preload(void) {
         return -2;
     }
 
-    void *buf = of_mixer_alloc_samples((uint32_t)sz);
+    void *buf = of_mixer_reserve_persistent((uint32_t)sz,
+                                            OF_TARGET_AUDIO_RESERVE_ALIGN);
     if (!buf) {
         of_term_puts(" \033[93mNONE\033[0m\n");
         return -3;

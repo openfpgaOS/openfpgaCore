@@ -51,15 +51,15 @@ static int fail_count = 0;
 static const uint32_t TEX_BASE_BYTE      = 0x00040000;  // textures (256 KB)
 static const uint32_t FB_BASE_BYTE       = 0x00080000;  // primary FB
 static const uint32_t FB_ALT_BASE_BYTE   = 0x00100000;  // alternate FB
-static const uint32_t PALOOKUP_BASE_BYTE = 0x03400000;  // matches gpu_core PALOOKUP_BASE
+static const uint32_t PALOOKUP_BASE_BYTE = 0x03FC0000;  // matches gpu_core PALOOKUP_BASE
 static const uint32_t PALOOKUP_STRIDE    = 0x00004000;  // 16 KB per slot
 static const uint32_t BATCH_BUF_BYTE     = 0x00140000;  // doorbell-DMA scratch
 static const uint32_t SDRAM_BYTES        = 4 * 1024 * 1024;
 
 /* tb_gpu.v's SDRAM model uses `bd_addr[19:0]` (1M words = 4 MB) so any
  * byte address whose top bits exceed this range aliases back into the
- * 4 MB window.  PALOOKUP_BASE (0x03400000) wraps to byte 0; tex bases
- * inside 0x00400000 are unaffected.  The CPU model mirrors this so its
+ * 4 MB window.  PALOOKUP_BASE (0x03FC0000) wraps to byte 0x003C0000;
+ * tex bases inside 0x00400000 are unaffected.  The CPU model mirrors this so its
  * indexing matches what the RTL actually sees in SDRAM. */
 static inline uint32_t sdram_alias(uint32_t byte_addr) {
     return byte_addr & 0x003FFFFFu;   /* (1<<22)-1 — same as bd_addr[19:0]<<2 */
@@ -184,6 +184,7 @@ enum {
     REG_TRANSLUC_DATA = 9,
     REG_TEX_FLUSH     = 10,
     REG_DMA_KICK      = 11,
+    REG_PALOOKUP_BASE = 12,
 };
 
 /* Mirror the SDK's doorbell-DMA guard.  The production GPU no longer has
@@ -241,6 +242,7 @@ static void gpu_init() {
     ring_wrptr = 0;
     pending_stream.clear();
     mmio_write(REG_CTRL, 4);              // ring_reset
+    mmio_write(REG_PALOOKUP_BASE, PALOOKUP_BASE_BYTE);
     mmio_write(REG_RING_WRPTR, 0);
 }
 
@@ -2558,6 +2560,50 @@ static void test_span_colormap_explicit_per_span_id() {
                       0, 0, 16, 1);
     compare_fb_region("span_colormap.slot15_const", m, FB_BASE_BYTE, 320,
                       0, 1, 16, 1);
+}
+
+static void test_palookup_base_register() {
+    printf("TEST palookup_base_register\n");
+    gpu_init();
+    preload_with_sentinel();
+
+    static const uint32_t ALT_PALOOKUP_BASE = 0x00200000u;
+    mmio_write(REG_PALOOKUP_BASE, ALT_PALOOKUP_BASE);
+
+    std::vector<uint8_t> tex(1, 0x44);
+    upload_texture(TEX_BASE_BYTE, tex);
+    sdram_write_byte(ALT_PALOOKUP_BASE + 2u * PALOOKUP_STRIDE + 0x44u, 0x5A);
+    mmio_write(REG_TEX_FLUSH, 1);
+
+    cmd_set_fb(FB_BASE_BYTE, 320);
+    SpanWire s = make_span();
+    s.fb_addr = FB_BASE_BYTE;
+    s.tex_addr = TEX_BASE_BYTE;
+    s.s = 0;
+    s.t = 0;
+    s.sstep = 0;
+    s.tstep = 0;
+    s.count = 1;
+    s.tex_width = 1;
+    s.tex_w_mask = 0;
+    s.tex_h_mask = 0;
+    s.flags = 0x1;
+    s.colormap_id = 2;
+    emit_span_raw(s);
+
+    if (!submit_and_wait()) {
+        check_fail("palookup_base_register", "timeout");
+        return;
+    }
+
+    uint8_t got = sdram_read_byte(FB_BASE_BYTE);
+    if (got == 0x5A) {
+        check_pass("palookup_base_register");
+    } else {
+        char msg[80];
+        snprintf(msg, sizeof(msg), "got=%02x want=5a", got);
+        check_fail("palookup_base_register", msg);
+    }
 }
 
 static void test_span_colormap_light_wraps_mod_64() {
@@ -5425,6 +5471,28 @@ static void test_param_span_list_colormap_skip_zero() {
                       FB_BASE_BYTE, 320, 0, 0, 8, 1);
 }
 
+static void test_reserved_49_command_noop_drains() {
+    printf("TEST reserved_49_command_noop_drains\n");
+    gpu_init();
+    FbModel m = preload_with_sentinel();
+    m.snapshot_from_sdram();
+
+    std::vector<uint32_t> payload(53);
+    for (size_t i = 0; i < payload.size(); i++)
+        payload[i] = 0x49000000u ^ (uint32_t)(i * 0x10203u);
+    emit_raw_command(0x49, payload);
+
+    cmd_clear_rect(FB_BASE_BYTE + 7u * 320u + 5u, 9, 2, 0, 0x42);
+    m.apply_clear_rect(FB_BASE_BYTE + 7u * 320u + 5u, 9, 2, 0, 0x42);
+
+    if (!submit_and_wait()) {
+        check_fail("reserved_49_command_noop_drains", "timeout");
+        return;
+    }
+    compare_fb_region("reserved_49_command_noop_drains.fb",
+                      m, FB_BASE_BYTE, 320, 0, 0, 32, 12);
+}
+
 static void test_param_span_list_persp_matches_helper() {
     printf("TEST param_span_list_persp_matches_helper\n");
     gpu_init();
@@ -6427,6 +6495,89 @@ static void test_param_q29_dynamic_scale_projection() {
     }
 }
 
+static void test_param_q29_dynamic_scale_all_records_touch() {
+    printf("TEST param_q29_dynamic_scale_all_records_touch\n");
+    gpu_init();
+    preload_with_sentinel();
+
+    const int fb_stride = 320;
+    const int z_stride = 320;
+    const int tex_w = 64;
+    const int tex_h = 64;
+    std::vector<uint8_t> tex = make_param_bitwalk_texture(tex_w, tex_h, 0x5D);
+    for (uint8_t &px : tex) {
+        if (px == SENTINEL_BYTE)
+            px ^= 0x3C;
+    }
+    upload_texture(TEX_BASE_BYTE, tex);
+
+    ParamSpanListWire p = make_q29_dynamic_scale_param(
+        FB_BASE_BYTE, TEX_BASE_BYTE, 0x001C0000u, fb_stride, z_stride,
+        tex_w, tex_h, 0);
+    std::vector<ParamSpanRecordWire> records = {
+        {0,   5,  1}, {4,   6,  2}, {9,   7,  3}, {15,  8,  4},
+        {22,  9,  5}, {31, 10,  7}, {45, 11,  8}, {58, 12,  9},
+        {72, 13, 15}, {8,  14, 16}, {30, 15, 17}, {55, 16, 31},
+        {0,  17, 32}, {40, 18, 33}
+    };
+
+    emit_param_span_list_raw(p, records);
+    if (!submit_and_wait()) {
+        check_fail("param_q29_dynamic_scale_all_records_touch", "timeout");
+        return;
+    }
+
+    int diffs = 0;
+    int untouched = 0;
+    int guard_touched = 0;
+    char first[224] = {0};
+    for (const auto &r : records) {
+        for (uint16_t i = 0; i < r.count; i++) {
+            uint16_t x = (uint16_t)(r.u + i);
+            uint8_t got = sdram_read_byte(FB_BASE_BYTE
+                                        + (uint32_t)r.v * fb_stride + x);
+            uint8_t want = q29_dynamic_scale_texel(p, tex, tex_w, x, r.v);
+            if (got == SENTINEL_BYTE)
+                untouched++;
+            if (got != want) {
+                if (diffs == 0) {
+                    snprintf(first, sizeof(first),
+                             "x=%u y=%u got=%02x want=%02x count=%u",
+                             x, r.v, got, want, r.count);
+                }
+                diffs++;
+            }
+        }
+
+        if (r.u > 0) {
+            uint8_t left = sdram_read_byte(FB_BASE_BYTE
+                + (uint32_t)r.v * fb_stride + (uint32_t)r.u - 1u);
+            if (left != SENTINEL_BYTE)
+                guard_touched++;
+        }
+        if ((uint32_t)r.u + r.count < 320u) {
+            uint8_t right = sdram_read_byte(FB_BASE_BYTE
+                + (uint32_t)r.v * fb_stride + (uint32_t)r.u + r.count);
+            if (right != SENTINEL_BYTE)
+                guard_touched++;
+        }
+    }
+
+    uint8_t quiet_row = sdram_read_byte(FB_BASE_BYTE + 4u * fb_stride + 37u);
+    if (quiet_row != SENTINEL_BYTE)
+        guard_touched++;
+
+    if (diffs == 0 && untouched == 0 && guard_touched == 0)
+        check_pass("param_q29_dynamic_scale_all_records_touch");
+    else {
+        char msg[288];
+        snprintf(msg, sizeof(msg),
+                 "diffs=%d untouched=%d guard_touched=%d first %s",
+                 diffs, untouched, guard_touched, first);
+        check_fail("param_q29_dynamic_scale_all_records_touch", msg);
+    }
+}
+
 static void test_param_q29_dynamic_scale_z_restore_saturates() {
     printf("TEST param_q29_dynamic_scale_z_restore_saturates\n");
     gpu_init();
@@ -6904,6 +7055,7 @@ int main(int argc, char **argv) {
     test_span_raw_mask_zero_means_identity();
     test_span_affine_group_repeatable();
     test_span_colormap_explicit_per_span_id();
+    test_palookup_base_register();
     test_span_colormap_light_wraps_mod_64();
     test_skip_zero_only_discards_0xff();
     test_skip_zero_with_colormap();
@@ -6928,6 +7080,7 @@ int main(int argc, char **argv) {
     test_param_span_list_streams_many_records();
     test_param_span_list_unsupported_noop();
     test_param_span_list_colormap_skip_zero();
+    test_reserved_49_command_noop_drains();
     test_param_span_list_persp_matches_helper();
     test_param_span_quake_projection_math();
     test_param_span_q29_high_angle_floor_no_flatten();
@@ -6936,6 +7089,7 @@ int main(int argc, char **argv) {
     test_param_q29_wrap_and_fb_byte_lanes();
     test_param_q29_static_repeat_300();
     test_param_q29_dynamic_scale_projection();
+    test_param_q29_dynamic_scale_all_records_touch();
     test_param_q29_dynamic_scale_z_restore_saturates();
     test_param_q29_dynamic_scale_reserved_bits_noop();
     test_affine_span_group_quake_alias_carry_math();

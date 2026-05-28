@@ -47,8 +47,7 @@ memcpy:
     li      t1, 64
     bltu    a2, t1, .Lcpy_32_enter
 
-    /* Fast full-line path for cached SDRAM and PSRAM windows.  CBO is
-     * currently a no-op macro, but keep the region gate conservative. */
+    /* cbo.inval only safe on cached regions (SDRAM 0x10-0x13, PSRAM 0x30-0x37) */
     srli    t1, a0, 26
     li      t2, 4
     beq     t1, t2, .Lcpy_align

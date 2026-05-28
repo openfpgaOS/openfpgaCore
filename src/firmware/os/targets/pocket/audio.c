@@ -3,10 +3,8 @@
  *
  * of_audio_write() pushes interleaved stereo s16 into an SDRAM ring buffer
  * that the hardware mixer plays back on voice 31 (stereo, forward-loop).
- * The ring lives in the reserved 16 KB window at the base of the sample
- * pool (see AUDIO_STREAM_RESERVED_BYTES in hal/mixer.c), which
- * of_mixer_alloc_samples skips past so app sample allocations don't
- * collide with it.
+ * The ring lives in a 16 KB persistent audio reservation carved by
+ * mixer.c before the app starts.
  *
  * Cache discipline: audio_ring uses the UNCACHED SDRAM alias.  Each
  * CPU store goes straight through p_axi to SDRAM and stalls on its AXI
@@ -26,23 +24,24 @@
 #include "regs.h"
 #include "mixer.h"   /* of_mixer_irq_save / restore — SEL race guard */
 
-/* Ring: 2048 stereo pairs = 16 KB = ~42 ms of slack at 48 kHz.  Must
- * match AUDIO_STREAM_RESERVED_BYTES in hal/mixer.c. */
+/* Ring: 2048 stereo pairs = 16 KB = ~42 ms of slack at 48 kHz. */
 #define AUDIO_RING_PAIRS  2048
 
-/* Interleaved L,R,L,R...  Anchored at the base of the SDRAM sample pool
- * via the uncached alias (see file header for why).  The first
- * AUDIO_STREAM_RESERVED_BYTES of the pool are carved off by the mixer
- * HAL's allocator so we own this region exclusively.  HW mixer's AXI
- * master sees the same physical SDRAM regardless of which CPU alias we
- * write through. */
-static volatile int16_t * const audio_ring =
-    (volatile int16_t *)SAMPLE_POOL_UNCACHED_BASE;
+/* Interleaved L,R,L,R... via the uncached SDRAM alias (see file header
+ * for why).  HW mixer's AXI master sees the same physical SDRAM
+ * regardless of which CPU alias we write through. */
+static volatile int16_t *audio_ring;
 static uint32_t audio_write_idx;        /* next stereo pair to fill (mod AUDIO_RING_PAIRS) */
 static int      audio_voice_active;
 static uint32_t audio_voice_rate = 0x10000u;  /* Q16.16: 1.0 = 48 kHz */
 
 #define AUDIO_VOICE  31
+
+static inline void ensure_audio_ring(void)
+{
+    if (!audio_ring)
+        audio_ring = (volatile int16_t *)(uintptr_t)of_mixer_stream_uncached_base();
+}
 
 static inline uint32_t ring_read_pos(void)
 {
@@ -54,11 +53,8 @@ static inline uint32_t ring_read_pos(void)
 
 static void configure_stream_voice(uint32_t rate_fp16)
 {
-    /* MIX_VOICE_ADDR is a byte offset into the sample pool — the HW
-     * mixer adds its own SDRAM base.  audio_ring is at the start of
-     * the pool via the uncached alias, so subtract the uncached base
-     * to get offset 0. */
-    MIX_VOICE_ADDR(AUDIO_VOICE)       = (uint32_t)audio_ring - SAMPLE_POOL_UNCACHED_BASE;
+    ensure_audio_ring();
+    MIX_VOICE_ADDR(AUDIO_VOICE)       = of_mixer_stream_base();
     MIX_VOICE_LEN(AUDIO_VOICE)        = AUDIO_RING_PAIRS;
     MIX_VOICE_RATE(AUDIO_VOICE)       = rate_fp16;
     MIX_VOICE_POS_WR(AUDIO_VOICE)     = 0;
@@ -74,6 +70,7 @@ static void configure_stream_voice(uint32_t rate_fp16)
 
 void of_audio_init(void)
 {
+    ensure_audio_ring();
     /* Uncached writes — each store stalls on its B-response, so by
      * the loop's end the ring is fully zeroed in SDRAM.  No flush. */
     for (int i = 0; i < AUDIO_RING_PAIRS * 2; i++) audio_ring[i] = 0;
@@ -101,6 +98,7 @@ static inline uint32_t ring_room_pairs(void)
 int of_audio_write(const int16_t *samples, int count)
 {
     if (!samples || count <= 0) return 0;
+    ensure_audio_ring();
 
     if (!audio_voice_active) configure_stream_voice(0x10000u);
 
@@ -130,6 +128,7 @@ int of_audio_get_free(void)
 int of_audio_stream_open(int sample_rate)
 {
     if (sample_rate <= 0) return -1;
+    ensure_audio_ring();
     uint32_t rate = ((uint64_t)sample_rate << 16) / 48000;
     /* Uncached zeroing — same rationale as of_audio_init. */
     for (int i = 0; i < AUDIO_RING_PAIRS * 2; i++) audio_ring[i] = 0;

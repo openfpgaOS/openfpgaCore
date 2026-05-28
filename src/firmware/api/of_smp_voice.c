@@ -710,7 +710,7 @@ int smp_voice_note_on(const ofsf_zone_t *zone, int midi_ch, int note,
     v->base_rate_fp16 = (uint32_t)(((uint64_t)base_fp16 * pitch_mult) >> 16);
 
     /* Compute sample address. sample_base points to the start of the
-     * preloaded sample blob; sample_offset is bytes from blob start. */
+     * SDRAM sample blob and sample_offset is in bytes from that base. */
     const uint8_t *sample_ptr = (const uint8_t *)sample_base
                               + zone->sample_offset;
 

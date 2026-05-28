@@ -54,11 +54,11 @@
 #define TERM_COLS           40
 #define TERM_ROWS           30
 
-/* CRAM0 is bridge staging on the APF bridge clock (clk_74a); CPU access
- * is through a fabric-side CDC and PMA marks it uncached.  CRAM1 is
- * CPU-owned executable/cacheable PSRAM for OS and app code. */
+/* v2 memory arch: CRAM1 retired.  CRAM0 is the only PSRAM kept, running
+ * on the APF bridge clock (clk_74a); CPU access is through a fabric-side
+ * CDC.  PMA marks 0x30000000 as uncached so there's no cache-coherency
+ * concern around the bridge writing behind the CPU. */
 #define CRAM0_BASE          OF_TARGET_CRAM0_BASE      /* CRAM0 (uncached) */
-#define CRAM1_BASE          OF_TARGET_CRAM1_BASE      /* CRAM1 (cached executable) */
 #define CRAM_SIZE           OF_TARGET_CRAM_SIZE
 
 #define CRAM0_BRIDGE        OF_TARGET_CRAM0_BRIDGE    /* CRAM0 in bridge address space */
@@ -76,18 +76,8 @@
 /* Runtime stack layout (must match os.ld) */
 #define RUNTIME_STACK_TOP   OF_TARGET_RUNTIME_STACK_TOP
 #define RUNTIME_STACK_SIZE  OF_TARGET_RUNTIME_STACK_SIZE
-#define APP_STACK_TOP       (RUNTIME_STACK_TOP - RUNTIME_STACK_SIZE)  /* 0x13F80000 */
-
-/* Sample memory pool for the shared mixer allocator.  SAMPLE_POOL_BASE
- * is the cached alias used by SFX uploads (paired with cbo.flush).
- * SAMPLE_POOL_UNCACHED_BASE is the same physical region via the
- * uncached SDRAM alias — used by the audio streaming ring (voice 31)
- * to bypass the L1 D$ entirely so each store stalls on its AXI
- * B-response and the HW mixer's sub-ms reads always see fresh data. */
-#define SAMPLE_POOL_BASE             OF_TARGET_SAMPLE_BASE
-#define SAMPLE_POOL_UNCACHED_BASE    OF_TARGET_SAMPLE_BASE_UNCACHED
-#define SAMPLE_POOL_SIZE             OF_TARGET_SAMPLE_SIZE
-#define SAMPLE_POOL_END              (SAMPLE_POOL_BASE + SAMPLE_POOL_SIZE)
+#define APP_STACK_SIZE     RUNTIME_STACK_SIZE
+#define APP_STACK_TOP      (RUNTIME_STACK_TOP - RUNTIME_STACK_SIZE)
 
 
 /* ======================================================================
@@ -130,6 +120,7 @@
 #define FB_MODE_SIZE        REG32(SYSREG_BASE + 0xE4)
 #define FB_MODE_STRIDE      REG32(SYSREG_BASE + 0xE8)
 #define VIDEO_SCALER_MODE   REG32(SYSREG_BASE + 0xEC)
+#define VIDEO_SCALER_SLOT_640X240 0u
 #define FB_MODE_MAX_WIDTH   800u
 #define FB_MODE_MAX_HEIGHT  600u
 #define FB_MODE_MAX_STRIDE  2048u
@@ -177,9 +168,10 @@
  * requests may be consumed during the current blanking interval; Analogizer
  * and SNAC fixed-rate modes override this register. */
 #define VIDEO_VTOTAL       REG32(SYSREG_BASE + 0xDC)
-#define VIDEO_VTOTAL_MIN   258u
+#define VIDEO_VTOTAL_MIN   257u
 #define VIDEO_VTOTAL_MAX   375u
-#define VIDEO_VTOTAL_60HZ  258u  /* experimental fast LCD mode, estimated ~60.14 Hz */
+#define VIDEO_VTOTAL_61_25HZ 257u  /* experimental; current clock measures ~61.30 Hz */
+#define VIDEO_VTOTAL_60HZ  262u  /* conservative normal LCD timing, measured ~60.13 Hz */
 #define VIDEO_VTOTAL_55HZ  285u
 #define VIDEO_VTOTAL_50HZ  310u
 #define VIDEO_VTOTAL_45HZ  340u
@@ -349,7 +341,7 @@
 #define   TIMER_CTRL_ENABLE   (1 << 0)
 #define   TIMER_CTRL_W1C_IRQ  (1 << 1)
 
-/* Hardware PCM mixer (0x48000000) — 32 voices, SDRAM sample pool,
+/* Hardware PCM mixer (0x48000000) — 32 voices, SDRAM sample fetch,
  * linear interp, HW volume ramp, voice-end IRQ, group/master volume
  * composition.  See audio_mixer.v v3.
  *
@@ -377,7 +369,7 @@
  */
 #define MIX_BASE             0x48000000u   /* 0x4A=GPU(pocket), 0x4B=GPU(sim) — mixer lives below */
 #define MIX_VOICE_FIELD(v, f)  REG32(MIX_BASE + ((v) << 6) + ((f) << 2))
-#define MIX_VOICE_ADDR(v)        MIX_VOICE_FIELD((v), 0)   /* W: sample-pool byte offset */
+#define MIX_VOICE_ADDR(v)        MIX_VOICE_FIELD((v), 0)   /* W: absolute SDRAM byte address */
 #define MIX_VOICE_LEN(v)         MIX_VOICE_FIELD((v), 1)   /* W: sample count */
 #define MIX_VOICE_RATE(v)        MIX_VOICE_FIELD((v), 2)   /* W: Q16.16 playback rate */
 #define MIX_VOICE_CTRL(v)        MIX_VOICE_FIELD((v), 3)   /* W: [0]=active [1]=stereo [2]=loop */
@@ -590,11 +582,11 @@ static inline volatile void *sdram_uncached(void *addr) {
 /* Convert CPU address to bridge address (for DMA).
  * Bridge address space (v2 memory arch):
  *   0x00000000  SDRAM   (CPU 0x10000000, cached)
- *   0x20000000  CRAM0   (CPU 0x30000000, uncached)
+ *   0x20000000  CRAM0   (CPU 0x30000000, uncached) — the only PSRAM left
  *
- * CRAM1 is CPU-only executable PSRAM and has no bridge address.
- * Bridge only touches CRAM0 directly; anything in SDRAM/CRAM1 needs
- * an explicit OS-side copy into CRAM0 first. */
+ * CRAM1 and SRAM are no longer CPU-addressable.  Bridge only touches
+ * CRAM0 directly; anything in SDRAM needs an explicit OS-side memcpy
+ * into CRAM0 first (see the CRAM0_MODE protocol in memory-arch-v2.md). */
 static inline uint32_t sdram_to_bridge(void *addr) {
     return (uint32_t)addr - SDRAM_BASE;
 }

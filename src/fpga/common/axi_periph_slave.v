@@ -475,6 +475,8 @@ assign ext_irq = (uart_rx_irq & irq_mask[0]) |
 // Bit  7: WiFi (reserved)                  Bit 15: GPU param span-list
 //                                          Bit 16: GPU param span z-write
 //                                          Bit 17: GPU param span z-test/write
+//                                          Bit 18: GPU param span Q29 scale
+//                                          Bit 19: reserved
 //
 // Perspective and parametric span commands are implemented and covered by
 // the GPU acceptance tests. Keep the caps exposed so renderers can select
@@ -557,8 +559,8 @@ wire early_vblank_s = early_vblank_sync[2];
 function [9:0] clamp_v_total;
     input [9:0] vt;
     begin
-        if (vt < 10'd258)
-            clamp_v_total = 10'd258;
+        if (vt < 10'd257)
+            clamp_v_total = 10'd257;
         else if (vt > 10'd375)
             clamp_v_total = 10'd375;
         else

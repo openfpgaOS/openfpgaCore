@@ -17,12 +17,11 @@ typedef uint64_t of_mixer_handle_t;
 
 void of_mixer_init(int max_voices, int output_rate);
 
-/* Play 16-bit signed mono PCM from the SDRAM sample pool.
- * Returns voice index or -1. */
+/* Play 16-bit signed mono PCM from SDRAM. Returns voice index or -1. */
 int of_mixer_play(const uint8_t *pcm_s16, uint32_t sample_count,
                   uint32_t sample_rate, int priority, int volume);
 
-/* Play 8-bit signed mono PCM from the SDRAM sample pool. Returns voice index or -1. */
+/* Play 8-bit signed mono PCM from SDRAM. Returns voice index or -1. */
 int of_mixer_play_8bit(const uint8_t *pcm_s8, uint32_t sample_count,
                        uint32_t sample_rate, int priority, int volume);
 
@@ -161,7 +160,15 @@ uint32_t of_mixer_poll_ended_h(of_mixer_handle_t *out_handles,
 /* Retired per-voice SVF filter surface.  Kept as a compatibility no-op. */
 void of_mixer_set_filter(int voice, int cutoff_q016, int q, int enable);
 
-/* Sample memory bump allocator */
+/* Boot-time persistent audio reservations and legacy sample allocation. */
+void of_mixer_memory_init(void);
+int of_mixer_memory_set_floor(uint32_t floor);
+void *of_mixer_reserve_persistent(uint32_t size, uint32_t align);
+uint32_t of_mixer_reserved_base(void);
+uint32_t of_mixer_reserved_size(void);
+uint32_t of_mixer_app_memory_top(void);
+uint32_t of_mixer_stream_base(void);
+uint32_t of_mixer_stream_uncached_base(void);
 void *of_mixer_alloc_samples(uint32_t size);
 void of_mixer_free_samples(void);
 
