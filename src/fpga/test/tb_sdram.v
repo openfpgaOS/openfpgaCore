@@ -151,6 +151,7 @@ axi_sdram_slave #(
     .s_axi_wvalid(s_axi_wvalid), .s_axi_wready(s_axi_wready),
     .s_axi_wdata(s_axi_wdata), .s_axi_wstrb(s_axi_wstrb), .s_axi_wlast(s_axi_wlast),
     .s_axi_bvalid(s_axi_bvalid), .s_axi_bready(1'b1), .s_axi_bresp(s_axi_bresp),
+    .s_axi_wcont(1'b1),  // tb holds WVALID continuously → exercise the native burst path
     .sdram_rd(sdram_rd), .sdram_wr(sdram_wr),
     .sdram_addr(sdram_addr), .sdram_wdata(sdram_wdata), .sdram_wstrb(sdram_wstrb),
     .sdram_burst_len(sdram_burst_len), .sdram_burst_wr_len(sdram_burst_wr_len),

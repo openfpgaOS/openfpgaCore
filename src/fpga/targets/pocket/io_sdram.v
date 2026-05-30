@@ -58,7 +58,7 @@ input   wire    [3:0]   burst_wr_direct_strb,  // Direct byte enables
 // re-syncs into clk_cpu before splicing into GPU_DBG_BUS bits 31:24.
 //   bits 5:0 = state[5:0] (see localparams above; ST_WRITE_0=20,
 //              ST_BURSTWR_0=46, etc.)
-//   bit  6   = issue_autorefresh (refresh queued, awaiting ST_IDLE)
+//   bit  6   = refresh pending (one or more refreshes queued, awaiting ST_IDLE)
 //   bit  7   = reserved
 output  wire    [7:0]   dbg_io
 );
@@ -85,7 +85,8 @@ assign {phy_ras, phy_cas, phy_we} = cmd;
     localparam      TIMING_LMR          =   4'd2;   // tLMR = 2ck
     localparam      TIMING_AUTOREFRESH  =   4'd8;   // tRFC = 80ns @ 100MHz = 8 cycles (80ns)
     localparam      TIMING_PRECHARGE    =   4'd2;   // tRP = 15ns @ 100MHz = 2 cycles (20ns)
-    localparam      TIMING_ACT_ACT      =   4'd6;   // tRC = 60ns @ 100MHz = 6 cycles (60ns)
+    // (tRC / ACT-to-ACT is satisfied implicitly by the FSM's per-row command
+    // latency; no explicit ACT-ACT timer is needed.)
     localparam      TIMING_ACT_RW       =   4'd2;   // tRCD = 15ns @ 100MHz = 2 cycles (20ns)
     localparam      TIMING_ACT_PRECHG   =   4'd5;   // tRAS = 42ns @ 100MHz = 5 cycles (50ns)
     localparam      TIMING_WRITE        =   4'd2;   // tWR = 2ck
@@ -150,15 +151,19 @@ assign {phy_ras, phy_cas, phy_we} = cmd;
     // this one only needs to cover tRFC=8 cycles, so keep it narrow to avoid
     // wide terminal-count compares on the 100MHz SDRAM command path.
     reg     [3:0]   dc;
-    // Refresh every ~5.69us at 90MHz (512 cycles) to satisfy 8K-row SDRAM timing.
+    // Refresh every ~5.12us at 100MHz (512 cycles) to satisfy 8K-row SDRAM timing.
     reg     [8:0]   refresh_count;
-    reg             issue_autorefresh;
+    // Pending-refresh counter (was a single flag).  A counter cannot drop a
+    // refresh tick if a previous refresh is still being serviced when the next
+    // tick arrives, so it stays correct even if a future longer op or clock
+    // change pushes a single operation past the 5.12us interval.
+    reg     [1:0]   refresh_pending;
 
     wire reset_n_s;
 synch_3 s1(reset_n, reset_n_s, controller_clk);
 
 // Diagnostic tap (combinational; downstream re-syncs to clk_cpu).
-assign dbg_io = {1'b0, issue_autorefresh, state[5:0]};
+assign dbg_io = {1'b0, (refresh_pending != 2'd0), state[5:0]};
 
     reg word_rd_queue;
     reg word_wr_queue;
@@ -200,7 +205,8 @@ assign dbg_io = {1'b0, issue_autorefresh, state[5:0]};
     reg     [1:0]   open_bank;          // Which bank is currently open
     reg     [12:0]  open_row;           // Which row is open in that bank
     reg             row_open;           // Whether any row is currently open
-    reg     [3:0]   open_timer;         // Saturating tRAS counter
+    // (No tRAS counter: the dead open_timer reg was removed — tRAS is met
+    //  implicitly by the FSM's ACT->...->PRECHARGE command latency.)
     reg     [1:0]   prechg_return;      // After precharge: 0=READ_0, 1=WRITE_0, 2=BURSTWR_0, 3=REFRESH_0
     reg             req_row_hit;
     reg             req_need_prechg;
@@ -255,9 +261,6 @@ always @(posedge controller_clk) begin
     enable_data_done_1 <= enable_data_done;
     enable_data_done <= 0;
 
-    // Open-page tRAS timer: saturating increment each cycle
-    if (row_open && open_timer < TIMING_ACT_PRECHG)
-        open_timer <= open_timer + 4'd1;
 
     // delayed by CAS latency for reads
     // CAS=3 means data appears 3 cycles after READ command
@@ -300,7 +303,7 @@ always @(posedge controller_clk) begin
         phy_cke <= 0;
         cmd <= CMD_NOP;
         delay_boot <= 0;
-        issue_autorefresh <= 0;
+        refresh_pending <= 2'd0;
         phy_dqm <= 2'b00;
         read_cmd_issued <= 0;
 
@@ -372,7 +375,7 @@ always @(posedge controller_clk) begin
         word_busy <= 0;
         word_op <= 0;
 
-        if(issue_autorefresh) begin
+        if(refresh_pending != 2'd0) begin
             word_busy <= 1;
             if(row_open) begin
                 // Precharge open bank before refresh
@@ -386,6 +389,28 @@ always @(posedge controller_clk) begin
             end else begin
                 state <= ST_REFRESH_0;
             end
+        end else
+        // Video scanout fetch is hard-real-time: it must deliver one line of
+        // pixels per scanline or the display shows a blank/stale line, and
+        // under sustained GPU framebuffer writes a starved fetch corrupts the
+        // whole frame (observed as Doom's blank / half-stale screen).  Serve it
+        // right after refresh — ABOVE the CPU/GPU word read/write queues — so a
+        // heavy GPU writer cannot starve it.  The fetch is a single bounded
+        // line-burst per scanline, so CPU/GPU traffic only sees a small, bounded
+        // added latency (their posted queues / cache absorb it).
+        if(burst_rd_queue) begin
+            burst_rd_queue <= 0;
+            addr <= burst_addr;
+            phy_ba <= burst_addr[24:23];
+            length <= burst_len;
+            word_busy <= 1;
+            req_row_hit <= row_open && (burst_addr[24:23] == open_bank) &&
+                           (burst_addr[22:10] == open_row);
+            req_need_prechg <= row_open && ((burst_addr[24:23] != open_bank) ||
+                                (burst_addr[22:10] != open_row));
+            req_bank <= burst_addr[24:23];
+            req_prechg_bank <= open_bank;
+            state <= ST_REQ_BURST_READ;
         end else
         if(word_rd_queue) begin
             word_rd_queue <= 0;
@@ -414,21 +439,6 @@ always @(posedge controller_clk) begin
             req_bank <= pending_bank;
             req_prechg_bank <= open_bank;
             state <= ST_REQ_WRITE;
-        end else
-        if(burst_rd_queue) begin
-            burst_rd_queue <= 0;
-            addr <= burst_addr;
-            phy_ba <= burst_addr[24:23];
-            length <= burst_len;
-            word_busy <= 1;
-            // Row-hit check for burst reads (same logic as word reads)
-            req_row_hit <= row_open && (burst_addr[24:23] == open_bank) &&
-                           (burst_addr[22:10] == open_row);
-            req_need_prechg <= row_open && ((burst_addr[24:23] != open_bank) ||
-                                (burst_addr[22:10] != open_row));
-            req_bank <= burst_addr[24:23];
-            req_prechg_bank <= open_bank;
-            state <= ST_REQ_BURST_READ;
         end else
         if(burstwr_queue) begin
             burstwr_queue <= 0;
@@ -562,7 +572,6 @@ always @(posedge controller_clk) begin
         row_open <= 1;
         open_bank <= addr[24:23];
         open_row <= addr[22:10];
-        open_timer <= 4'd0;
 
         state <= ST_WRITE_1;
     end
@@ -648,7 +657,6 @@ always @(posedge controller_clk) begin
             row_open <= 1;
             open_bank <= addr[24:23];
             open_row <= addr[22:10];
-            open_timer <= 4'd0;
             dc <= 0;
             state <= ST_WRITE_4_NR_ACT;
         end
@@ -702,7 +710,6 @@ always @(posedge controller_clk) begin
         row_open <= 1;
         open_bank <= addr[24:23];
         open_row <= addr[22:10];
-        open_timer <= 4'd0;
 
         state <= ST_READ_1;
     end
@@ -834,7 +841,7 @@ always @(posedge controller_clk) begin
         state <= ST_IDLE;
         if(burstwr_newrow) begin
             state <= ST_BURSTWR_0;
-            if(issue_autorefresh) begin
+            if(refresh_pending != 2'd0) begin
                 state <= ST_REFRESH_0;
             end
         end
@@ -842,9 +849,8 @@ always @(posedge controller_clk) begin
 
 
     ST_REFRESH_0: begin
-        // autorefresh
-        issue_autorefresh <= 0;
-
+        // autorefresh — refresh_pending is decremented by the generator below
+        // (state==ST_REFRESH_0 this cycle).
         cmd <= CMD_AUTOREF;
         dc <= 0;
         state <= ST_REFRESH_1;
@@ -884,19 +890,24 @@ always @(posedge controller_clk) begin
     end
 
     // autorefresh generator
+    // every 5.12us @100MHz (512 cycles); 8192 refreshes / 64ms requires a
+    // <=7.8125us average interval, so 5.12us has comfortable margin.
     refresh_count <= refresh_count + 1'b1;
-    if(&refresh_count) begin
-        // every 5.689us @90MHz (512 cycles)
-        // 8192 refreshes / 64ms requires <=7.8125us average interval
+    if(&refresh_count)
         refresh_count <= 0;
-        issue_autorefresh <= 1;
-
-    end
+    // A refresh tick (counter wrap) increments the pending count; issuing one
+    // in ST_REFRESH_0 decrements it.  Combined into a single assignment so a
+    // simultaneous tick+issue nets correctly — the old single flag dropped the
+    // second tick in that case.
+    refresh_pending <= refresh_pending
+                     + (&refresh_count ? 2'd1 : 2'd0)
+                     - ((state == ST_REFRESH_0) ? 2'd1 : 2'd0);
 
     if(~reset_n_s) begin
         // reset
         state <= ST_RESET;
         refresh_count <= 0;
+        refresh_pending <= 2'd0;
         word_rd_queue <= 0;
         word_wr_queue <= 0;
         burst_rd_queue <= 0;

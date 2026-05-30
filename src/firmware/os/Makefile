@@ -104,6 +104,7 @@ TARGET_SRCS = $(TARGET_DIR)/video.c \
 KERNEL_SRCS = $(KERNEL_DIR)/main.c \
               $(KERNEL_DIR)/syscall.c \
               $(KERNEL_DIR)/loader.c \
+              $(KERNEL_DIR)/config.c \
               $(KERNEL_DIR)/misaligned.c \
               $(KERNEL_DIR)/caps_table.c \
               $(KERNEL_DIR)/services_table.c \

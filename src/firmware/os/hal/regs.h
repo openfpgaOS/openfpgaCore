@@ -45,6 +45,9 @@
 #define FB_SIZE             (FB_WIDTH * FB_HEIGHT)
 
 #define DMA_CHUNK_SIZE      OF_TARGET_DMA_CHUNK_SIZE    /* Max transfer per target file op */
+#define FILE_CACHE_BASE     OF_TARGET_FILE_CACHE_BASE
+#define FILE_CACHE_SIZE     OF_TARGET_FILE_CACHE_SIZE
+#define FILE_CACHE_BLOCK_SIZE OF_TARGET_FILE_CACHE_BLOCK_SIZE
 
 #define INTERACT_BASE       OF_TARGET_INTERACT_BASE
 #define INTERACT_UNCACHED   OF_TARGET_INTERACT_UNCACHED
@@ -77,7 +80,7 @@
 #define RUNTIME_STACK_TOP   OF_TARGET_RUNTIME_STACK_TOP
 #define RUNTIME_STACK_SIZE  OF_TARGET_RUNTIME_STACK_SIZE
 #define APP_STACK_SIZE     RUNTIME_STACK_SIZE
-#define APP_STACK_TOP      (RUNTIME_STACK_TOP - RUNTIME_STACK_SIZE)
+#define APP_STACK_TOP      OF_TARGET_APP_STACK_TOP
 
 
 /* ======================================================================
@@ -120,7 +123,7 @@
 #define FB_MODE_SIZE        REG32(SYSREG_BASE + 0xE4)
 #define FB_MODE_STRIDE      REG32(SYSREG_BASE + 0xE8)
 #define VIDEO_SCALER_MODE   REG32(SYSREG_BASE + 0xEC)
-#define VIDEO_SCALER_SLOT_640X240 0u
+#define VIDEO_SCALER_SLOT_DEFAULT_320X240 0u
 #define FB_MODE_MAX_WIDTH   800u
 #define FB_MODE_MAX_HEIGHT  600u
 #define FB_MODE_MAX_STRIDE  2048u
@@ -128,7 +131,7 @@
 /* Current physical output timing advertised by dist/core/video.json.
  * Dynamic app framebuffers are scaled into this output unless a later
  * physical-output mode switch changes the RTL timing. */
-#define VIDEO_PHYSICAL_WIDTH   640u
+#define VIDEO_PHYSICAL_WIDTH   320u
 #define VIDEO_PHYSICAL_HEIGHT  240u
 
 /* GPU fence-reached register, used by of_video_acquire_next() to
@@ -584,17 +587,18 @@ static inline volatile void *sdram_uncached(void *addr) {
  *   0x00000000  SDRAM   (CPU 0x10000000, cached)
  *   0x20000000  CRAM0   (CPU 0x30000000, uncached) — the only PSRAM left
  *
- * CRAM1 and SRAM are no longer CPU-addressable.  Bridge only touches
- * CRAM0 directly; anything in SDRAM needs an explicit OS-side memcpy
- * into CRAM0 first (see the CRAM0_MODE protocol in memory-arch-v2.md). */
+ * CRAM1 and SRAM are no longer CPU-addressable. */
 static inline uint32_t sdram_to_bridge(void *addr) {
-    return (uint32_t)addr - SDRAM_BASE;
+    uint32_t a = (uint32_t)addr;
+    if (a >= SDRAM_UNCACHED_BASE && a < SDRAM_UNCACHED_BASE + SDRAM_SIZE)
+        return a - SDRAM_UNCACHED_BASE;
+    return a - SDRAM_BASE;
 }
 
 static inline uint32_t cpu_to_bridge(void *addr) {
     uint32_t a = (uint32_t)addr;
     if (a >= CRAM0_BASE && a < CRAM0_BASE + CRAM_SIZE) return (a - CRAM0_BASE) + CRAM0_BRIDGE;
-    return a - SDRAM_BASE;
+    return sdram_to_bridge(addr);
 }
 
 /* ======================================================================

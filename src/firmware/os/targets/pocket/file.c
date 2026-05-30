@@ -13,6 +13,11 @@
 #include <string.h>
 
 #define DMA_TIMEOUT         200000000   /* ~2 seconds at 100MHz */
+#define DMA_CACHE_LINE_SIZE 64u
+
+#ifndef OF_TARGET_CRAM0_DMA_CHUNK_SIZE
+#define OF_TARGET_CRAM0_DMA_CHUNK_SIZE DMA_CHUNK_SIZE
+#endif
 
 /* Idle hook — called during any blocking wait (DMA, bridge, etc.)
  * Apps register this via OF_SYS_SET_IDLE_HOOK to do background
@@ -28,6 +33,7 @@ static void (*idle_hook)(void);
  * of_file_init's warmup DMA needs to call it directly. */
 static int bridge_read_impl(uint32_t slot_id, uint32_t slot_offset,
                             void *dest, uint32_t length);
+long of_file_size(uint32_t slot_id);
 static int bridge_warmed;
 static int bridge_warmup_active;
 
@@ -46,6 +52,31 @@ static struct {
 
 static int async_token_counter;
 static uint32_t dma_stage_next;
+
+static int addr_in_range(uint32_t addr, uint32_t length,
+                         uint32_t base, uint32_t size) {
+    return addr >= base && length <= size && addr <= base + size - length;
+}
+
+static int addr_in_sdram(uint32_t addr, uint32_t length) {
+    return addr_in_range(addr, length, SDRAM_BASE, SDRAM_SIZE) ||
+           addr_in_range(addr, length, SDRAM_UNCACHED_BASE, SDRAM_SIZE);
+}
+
+static int addr_in_cached_sdram(uint32_t addr, uint32_t length) {
+    return addr_in_range(addr, length, SDRAM_BASE, SDRAM_SIZE);
+}
+
+static uint32_t sdram_alias_to_bridge(void *addr) {
+    uint32_t a = (uintptr_t)addr;
+    if (a >= SDRAM_UNCACHED_BASE && a < SDRAM_UNCACHED_BASE + SDRAM_SIZE)
+        return a - SDRAM_UNCACHED_BASE;
+    return a - SDRAM_BASE;
+}
+
+static int bridge_addr_targets_cram0(uint32_t bridge_addr, uint32_t length) {
+    return addr_in_range(bridge_addr, length, CRAM0_BRIDGE, CRAM_SIZE);
+}
 
 static void bridge_warmup_once(void) {
     if (bridge_warmed || bridge_warmup_active)
@@ -209,8 +240,6 @@ static int file_wait_complete(void) {
     return 0;
 }
 
-/* Check if address is in SDRAM (DMA-capable) range */
-
 /* Bridge backend implementation for the disk HAL. Exported through
  * of_disk_bridge so the dispatcher in hal/disk.c can route reads
  * here when the boot ROM disk channel is unavailable. */
@@ -224,6 +253,8 @@ static int bridge_read_impl(uint32_t slot_id, uint32_t slot_offset,
     int direct_cram0 = (dest_addr >= CRAM0_BASE)
                     && (length <= CRAM_SIZE)
                     && (dest_addr <= CRAM0_BASE + CRAM_SIZE - length);
+    int direct_sdram = addr_in_sdram(dest_addr, length);
+    int cached_sdram = addr_in_cached_sdram(dest_addr, length);
 
     /* v2 arch: CRAM1 retired, scratch moved to CRAM0.  CRAM0 is
      * uncached per PMA, so no D-cache invalidation is needed around
@@ -232,8 +263,49 @@ static int bridge_read_impl(uint32_t slot_id, uint32_t slot_offset,
     uint32_t done = 0;
     while (done < length) {
         uint32_t chunk = length - done;
-        if (chunk > DMA_CHUNK_SIZE)
-            chunk = DMA_CHUNK_SIZE;
+        int rc;
+
+        if (direct_sdram && !direct_cram0) {
+            uint32_t cur = dest_addr + done;
+
+            if (cached_sdram && (cur & (DMA_CACHE_LINE_SIZE - 1u))) {
+                chunk = DMA_CACHE_LINE_SIZE -
+                        (cur & (DMA_CACHE_LINE_SIZE - 1u));
+                if (chunk > length - done)
+                    chunk = length - done;
+                if (chunk > OF_TARGET_CRAM0_DMA_CHUNK_SIZE)
+                    chunk = OF_TARGET_CRAM0_DMA_CHUNK_SIZE;
+                goto bounce_via_cram0;
+            }
+
+            if (cached_sdram) {
+                chunk &= ~(DMA_CACHE_LINE_SIZE - 1u);
+                if (chunk == 0) {
+                    chunk = length - done;
+                    if (chunk > OF_TARGET_CRAM0_DMA_CHUNK_SIZE)
+                        chunk = OF_TARGET_CRAM0_DMA_CHUNK_SIZE;
+                    goto bounce_via_cram0;
+                }
+            }
+
+            if (chunk > DMA_CHUNK_SIZE)
+                chunk = DMA_CHUNK_SIZE;
+            if (cached_sdram)
+                of_cache_inval_range(dst + done, chunk);
+
+            rc = of_file_read_raw(slot_id, slot_offset + done,
+                                  sdram_alias_to_bridge(dst + done), chunk);
+            if (rc < 0)
+                return rc;
+
+            if (cached_sdram)
+                of_cache_inval_range(dst + done, chunk);
+            done += chunk;
+            continue;
+        }
+
+        if (chunk > OF_TARGET_CRAM0_DMA_CHUNK_SIZE)
+            chunk = OF_TARGET_CRAM0_DMA_CHUNK_SIZE;
 
         CRAM0_MODE = CRAM0_MODE_BRIDGE;
         for (volatile int s = 0; s < 8; s++) {}
@@ -241,8 +313,7 @@ static int bridge_read_impl(uint32_t slot_id, uint32_t slot_offset,
         uint32_t bridge_addr = direct_cram0
             ? cpu_to_bridge(dst + done)
             : CRAM0_SCRATCH_BRIDGE;
-        int rc = of_file_read_raw(slot_id, slot_offset + done,
-                                  bridge_addr, chunk);
+        rc = of_file_read_raw(slot_id, slot_offset + done, bridge_addr, chunk);
         if (rc < 0)
             return rc;
 
@@ -252,6 +323,21 @@ static int bridge_read_impl(uint32_t slot_id, uint32_t slot_offset,
             memcpy(dst + done, (const void *)CRAM0_SCRATCH, chunk);
         }
 
+        done += chunk;
+        continue;
+
+bounce_via_cram0:
+        CRAM0_MODE = CRAM0_MODE_BRIDGE;
+        for (volatile int s = 0; s < 8; s++) {}
+
+        rc = of_file_read_raw(slot_id, slot_offset + done,
+                              CRAM0_SCRATCH_BRIDGE, chunk);
+        if (rc < 0)
+            return rc;
+
+        CRAM0_MODE = CRAM0_MODE_CPU;
+        for (volatile int s = 0; s < 8; s++) {}
+        memcpy(dst + done, (const void *)CRAM0_SCRATCH, chunk);
         done += chunk;
     }
 
@@ -273,7 +359,6 @@ static int bridge_probe(void) {
 
 /* Bridge backend size: delegates to the legacy/saturating size wrapper.
  * Loader inputs are small; POSIX slot FDs use of_file_size64 below. */
-long of_file_size(uint32_t slot_id);
 static long bridge_size_impl(uint32_t slot_id) {
     return of_file_size(slot_id);
 }
@@ -292,12 +377,16 @@ int of_file_read(uint32_t slot_id, uint32_t slot_offset,
     return of_disk_read(slot_id, slot_offset, dest, length);
 }
 
-/* Invalidate D-cache for CRAM cached aliases after any bridge
- * operation that writes to CRAM. The bridge bypasses the CPU
- * entirely, so cached reads would return stale data. */
+/* Raw bridge DMA: caller owns cache coherency and destination ownership.
+ * Higher-level reads prefer direct SDRAM DMA for aligned cache-line ranges
+ * and use the CRAM0 scratch bounce only where required. */
 int of_file_read_raw(uint32_t slot_id, uint32_t slot_offset,
                       uint32_t bridge_addr, uint32_t length) {
-    if (length > DMA_CHUNK_SIZE)
+    uint32_t max_len = bridge_addr_targets_cram0(bridge_addr, length)
+        ? OF_TARGET_CRAM0_DMA_CHUNK_SIZE
+        : DMA_CHUNK_SIZE;
+
+    if (length > max_len)
         return OF_ERR_BAD_RANGE;
     if (async_state.active)
         return OF_ERR_BUSY;
@@ -349,7 +438,8 @@ static int datatable_entry_candidate_for_slot(uint32_t slot_id,
                                               uint32_t *entry_out) {
     /* APF's datatable is indexed by array position in data.json, while
      * DS_CMD_READ/GETFILE use the slot `id` field. Current layout:
-     *   ids 0-7      -> entries 0-7   (game, os, app, data 1-4, soundbank)
+     *   ids 0-7      -> entries 0-7   (game, os, os.ini, app,
+     *                                    data 1-3, soundbank)
      *   id 8 or id 9 -> entry  8      (one pre-save nonvolatile slot:
      *                                    SDK Shared Config or Duke settings)
      *   ids 10-19    -> entries 9-18  (ten nonvolatile save slots)
@@ -439,8 +529,33 @@ static int datatable_probe_size_bit31(uint32_t slot_id, uint32_t low_size) {
     return 0;
 }
 
+/* Fallback for slot ids the fixed map rejects (e.g. >= 20).  The APF datatable
+ * is positional and target_dataslot_getfile can't return data to the CPU (see
+ * Chip32.md), so we scan the table directly: each entry's word0[15:0] holds
+ * that entry's slot id, so a linear scan recovers an arbitrary id's array
+ * position.  Additive -- existing <=19 layouts still take the hardcoded fast
+ * path above, so this cannot change their behaviour.  Bounded by
+ * DATATABLE_MAX_ENTRIES; the datatable BRAM (mf_datatable.v) holds 512 entries,
+ * but 64 keeps each miss cheap.  A queried id is always one we declared, so its
+ * real (lower) entry is found before any stale post-declaration position. */
+#define DATATABLE_MAX_ENTRIES 64u
+static int datatable_entry_scan_for_slot(uint32_t slot_id, uint32_t *entry_out) {
+    for (uint32_t e = 0; e < DATATABLE_MAX_ENTRIES; e++) {
+        uint32_t w0 = 0;
+        if (datatable_read_word32(e * 2u, &w0, NULL) < 0)
+            return -1;
+        if ((w0 & 0xFFFFu) == slot_id) {
+            *entry_out = e;
+            return 0;
+        }
+    }
+    return -1;
+}
+
 static int datatable_entry_for_slot(uint32_t slot_id, uint32_t *entry_out) {
-    return datatable_entry_candidate_for_slot(slot_id, entry_out);
+    if (datatable_entry_candidate_for_slot(slot_id, entry_out) == 0)
+        return 0;
+    return datatable_entry_scan_for_slot(slot_id, entry_out);
 }
 
 long of_file_flags(uint32_t slot_id) {
@@ -680,7 +795,7 @@ int of_file_read_chunked(uint32_t slot_id, uint32_t slot_offset,
         if (chunk > DMA_CHUNK_SIZE)
             chunk = DMA_CHUNK_SIZE;
 
-        /* of_file_read handles CRAM bounce automatically for SDRAM dests */
+        /* of_file_read handles SDRAM direct DMA and CRAM0 bounce fallback. */
         int rc = of_file_read(slot_id, slot_offset + done,
                                (void *)((uintptr_t)dest + done), chunk);
         if (rc < 0)
@@ -726,7 +841,7 @@ int of_file_dma_stage_reset(void) {
 }
 
 uint32_t of_file_async_max_read(void) {
-    return DMA_CHUNK_SIZE;
+    return OF_TARGET_CRAM0_DMA_CHUNK_SIZE;
 }
 
 uint32_t of_file_dma_stage_size(void) {
@@ -779,7 +894,7 @@ int of_file_read_async(uint32_t slot_id, uint32_t slot_offset,
                        void (*callback)(int token, int result)) {
     if (async_state.active)
         return OF_ERR_BUSY;
-    if (length > DMA_CHUNK_SIZE)
+    if (length > OF_TARGET_CRAM0_DMA_CHUNK_SIZE)
         return OF_ERR_BAD_RANGE;
     int direct_cram0 = async_dest_in_cram0(dest, length);
     void *dma_dest = direct_cram0

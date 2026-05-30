@@ -4,9 +4,10 @@
 // Routes 3 AXI4 masters to 1 AXI4 slave (axi_sdram_slave):
 //   M0 = GPU      (span reads + framebuffer writes, merged upstream)
 //   M1 = CPU      (i + d + p merged through cpu_target_port)
+//   M2 = APF bridge file DMA (write-only)
 //   M3 = AudioMix (audio_mixer per-voice sample fetch, read-only)
 //
-// Fixed priority: GPU > CPU > AudioMix.
+// Fixed priority: GPU > CPU > Bridge > AudioMix.
 //
 // M0 writes are posted into an ordered local queue before they reach the
 // shared SDRAM slave.  B responses still wait for the corresponding queued
@@ -78,6 +79,19 @@ module axi_sdram_arbiter #(
     output wire        m1_bvalid,
     output wire [1:0]  m1_bresp,
 
+    // Master 2: APF bridge file DMA (write-only)
+    input  wire        m2_awvalid,
+    output wire        m2_awready,
+    input  wire [31:0] m2_awaddr,
+    input  wire [7:0]  m2_awlen,
+    input  wire        m2_wvalid,
+    output wire        m2_wready,
+    input  wire [31:0] m2_wdata,
+    input  wire [3:0]  m2_wstrb,
+    input  wire        m2_wlast,
+    output wire        m2_bvalid,
+    output wire [1:0]  m2_bresp,
+
     // Master 3: Audio Mixer (read-only, lowest priority)
     input  wire        m3_arvalid,
     output wire        m3_arready,
@@ -87,6 +101,7 @@ module axi_sdram_arbiter #(
     output wire [31:0] m3_rdata,
     output wire [1:0]  m3_rresp,
     output wire        m3_rlast,
+    input  wire        m3_rready,
 
     // Slave port (to axi_sdram_slave)
     output wire        s_arvalid,
@@ -109,11 +124,16 @@ module axi_sdram_arbiter #(
     output wire        s_wlast,
     input  wire        s_bvalid,
     input  wire [1:0]  s_bresp,
+    // Asserted while the active write's W data is supplied continuously by the
+    // arbiter (the GPU posted-write queue) and so cannot underrun.  The slave
+    // uses this to allow native streaming bursts only for the GPU; CPU/bridge
+    // writes (which can stall WVALID) are kept on the serialized path.
+    output wire        s_wcont,
 
     // Diagnostic observability for simulation harnesses.
     //   dbg_arb_state: 0=IDLE, 1=RD, 2=WR
     //   dbg_cpu_pending: m1_arvalid|m1_awvalid (CPU has a request out)
-    //   dbg_grant: 0=GPU(M0), 1=CPU(M1), 3=AudioMix(M3)
+    //   dbg_grant: 0=GPU(M0), 1=CPU(M1), 2=Bridge(M2), 3=AudioMix(M3)
     output wire [1:0]  dbg_arb_state,
     output wire        dbg_cpu_pending,
     output wire [1:0]  dbg_grant
@@ -129,8 +149,8 @@ localparam ST_WR   = 2'd2;  // Write transaction active (AW→W→B)
 reg [1:0] arb_state;
 reg [1:0] grant;  // 0=GPU, 1=CPU, 3=AudioMix
 reg       active_wr_gpuq;
-reg       active_gpuq_awlen;
-reg       gpuq_w_idx;
+reg [2:0] active_gpuq_awlen;   // beats-1 of the GPU write burst currently draining (0..7)
+reg [2:0] gpuq_w_idx;          // beat index within that burst
 
 // Fairness: deficit counter prevents GPU (and technically Audio, but
 // it's below CPU anyway) from starving the CPU.  Increments each time
@@ -151,10 +171,10 @@ wire audio_pending = m3_arvalid;
 // GPU bursts are split into consecutive queue entries and one B is returned
 // when the entry carrying WLAST commits.
 //
-// Keep this deliberately compact.  The GPU emits 1- or 2-beat writes today,
-// so an 8-entry queue gives useful read/write decoupling
-// without spending the routing/ALM budget of a larger register FIFO in the
-// already dense 100 MHz SDRAM domain.
+// Keep this deliberately compact.  The GPU emits up to 8-beat contiguous
+// framebuffer write bursts; an 8-entry queue holds one full burst and gives
+// useful read/write decoupling without spending the routing/ALM budget of a
+// larger register FIFO in the already dense 100 MHz SDRAM domain.
 localparam GPU_WQ_DEPTH = 8;
 localparam GPU_WQ_HIGH_WATERMARK = 6;
 localparam GPU_WQ_PTR_W = 3;
@@ -175,6 +195,7 @@ reg [3:0]  gpu_reads_since_write;
 
 wire grant_m0 = (grant == 2'd0);
 wire grant_m1 = (grant == 2'd1);
+wire grant_m2 = (grant == 2'd2);
 wire grant_m3 = (grant == 2'd3);
 wire active_rd = (arb_state == ST_RD);
 wire active_wr = (arb_state == ST_WR);
@@ -189,25 +210,63 @@ wire       m0_aw_post_fire = m0_awvalid && m0_awready;
 wire       m0_w_post_fire  = m0_wvalid && m0_wready;
 wire       m0_w_post_last  = (m0w_beats_left == 8'd0) || m0_wlast;
 wire       gpu_wq_pop      = active_wr && active_wr_gpuq && s_bvalid;
-wire [GPU_WQ_PTR_W-1:0] gpu_wq_rd_next = gpu_wq_rd_ptr + 1'b1;
-wire       gpu_wq_can_burst2 = (gpu_wq_count >= 4'd2)
-                            && !gpu_wq_last[gpu_wq_rd_ptr]
-                            && (gpu_wq_strb[gpu_wq_rd_ptr] == 4'hF)
-                            && (gpu_wq_strb[gpu_wq_rd_next] == 4'hF)
-                            && (gpu_wq_addr[gpu_wq_rd_next] ==
-                                (gpu_wq_addr[gpu_wq_rd_ptr] + 32'd4));
+// GPU write-burst run-length coalescing.
+// A GPU AW burst is split into consecutive queue entries whose addresses are
+// base, base+4, ... BY CONSTRUCTION (m0w_addr increments +4 per posted beat),
+// and the final beat carries WLAST.  So one full AW = the run of entries from
+// rd_ptr up to and INCLUDING the first WLAST entry.  We coalesce that whole run
+// into a single native SDRAM burst (one AW + one B), instead of the previous
+// fixed 2-beat merge.  No inter-entry address compare is needed (contiguity is
+// guaranteed by construction); we only require each entry be full-strobe so the
+// native burst path stays on its tested full-word path, and stop at the first
+// WLAST so exactly one B is returned per GPU AW.
+wire [GPU_WQ_PTR_W-1:0] gwq_p0 = gpu_wq_rd_ptr;
+wire [GPU_WQ_PTR_W-1:0] gwq_p1 = gpu_wq_rd_ptr + 3'd1;
+wire [GPU_WQ_PTR_W-1:0] gwq_p2 = gpu_wq_rd_ptr + 3'd2;
+wire [GPU_WQ_PTR_W-1:0] gwq_p3 = gpu_wq_rd_ptr + 3'd3;
+wire [GPU_WQ_PTR_W-1:0] gwq_p4 = gpu_wq_rd_ptr + 3'd4;
+wire [GPU_WQ_PTR_W-1:0] gwq_p5 = gpu_wq_rd_ptr + 3'd5;
+wire [GPU_WQ_PTR_W-1:0] gwq_p6 = gpu_wq_rd_ptr + 3'd6;
+wire [GPU_WQ_PTR_W-1:0] gwq_p7 = gpu_wq_rd_ptr + 3'd7;
+// chainK: entries 0..K are all present and full-strobe, with no WLAST strictly
+// before K — i.e. entries 0..K-1 are non-last (so the run never crosses an AW
+// boundary; it stops AT the first WLAST entry, including it).
+wire gwq_fs0 = (gpu_wq_strb[gwq_p0] == 4'hF);
+wire gwq_c1 = gwq_fs0 && (gpu_wq_count >= 4'd2) && !gpu_wq_last[gwq_p0] && (gpu_wq_strb[gwq_p1] == 4'hF);
+wire gwq_c2 = gwq_c1  && (gpu_wq_count >= 4'd3) && !gpu_wq_last[gwq_p1] && (gpu_wq_strb[gwq_p2] == 4'hF);
+wire gwq_c3 = gwq_c2  && (gpu_wq_count >= 4'd4) && !gpu_wq_last[gwq_p2] && (gpu_wq_strb[gwq_p3] == 4'hF);
+wire gwq_c4 = gwq_c3  && (gpu_wq_count >= 4'd5) && !gpu_wq_last[gwq_p3] && (gpu_wq_strb[gwq_p4] == 4'hF);
+wire gwq_c5 = gwq_c4  && (gpu_wq_count >= 4'd6) && !gpu_wq_last[gwq_p4] && (gpu_wq_strb[gwq_p5] == 4'hF);
+wire gwq_c6 = gwq_c5  && (gpu_wq_count >= 4'd7) && !gpu_wq_last[gwq_p5] && (gpu_wq_strb[gwq_p6] == 4'hF);
+wire gwq_c7 = gwq_c6  && (gpu_wq_count >= 4'd8) && !gpu_wq_last[gwq_p6] && (gpu_wq_strb[gwq_p7] == 4'hF);
+// awlen = length-1 of the contiguous full-strobe run currently present from
+// rd_ptr (capped at the first WLAST entry).  This coalesces opportunistically
+// like the old 2-beat path — it does NOT wait for the AW's WLAST to be queued,
+// so a partially-streamed AW still drains efficiently rather than as singles.
+// B is gated separately on the drained group containing the WLAST entry, so a
+// burst that stops mid-AW correctly returns no B until the final beat commits.
+wire [2:0] gpu_wq_run =
+      gwq_c7 ? 3'd7 :
+      gwq_c6 ? 3'd6 :
+      gwq_c5 ? 3'd5 :
+      gwq_c4 ? 3'd4 :
+      gwq_c3 ? 3'd3 :
+      gwq_c2 ? 3'd2 :
+      gwq_c1 ? 3'd1 : 3'd0;
 wire       gpu_wq_head_ready = !gpu_wq_empty
                             && (gpu_wq_last[gpu_wq_rd_ptr] ||
                                 (gpu_wq_count >= 4'd2));
-wire       gpu_wq_drain_awlen = gpu_wq_can_burst2;
-wire [GPU_WQ_PTR_W-1:0] active_gpuq_w_ptr =
-    gpu_wq_rd_ptr + {{(GPU_WQ_PTR_W-1){1'b0}}, gpuq_w_idx};
-wire [GPU_WQ_PTR_W-1:0] active_gpuq_last_ptr =
-    gpu_wq_rd_ptr + {{(GPU_WQ_PTR_W-1){1'b0}}, active_gpuq_awlen};
+// Combinational (not registered) so the burst length reflects the queue at the
+// exact grant cycle — a registered value lags the count by one cycle and would
+// drain singles on the cycle count first reaches 2.  The scan is only
+// strb/last/count comparisons (no 32-bit address compare — contiguity is
+// guaranteed by construction), and it feeds the active_gpuq_awlen flop, not the
+// grant-priority mux, so it does not lengthen the AR-priority decision.
+wire [2:0] gpu_wq_drain_awlen = gpu_wq_run;
+wire [GPU_WQ_PTR_W-1:0] active_gpuq_w_ptr    = gpu_wq_rd_ptr + gpuq_w_idx;
+wire [GPU_WQ_PTR_W-1:0] active_gpuq_last_ptr = gpu_wq_rd_ptr + active_gpuq_awlen;
 wire       active_gpuq_wlast = (gpuq_w_idx == active_gpuq_awlen);
-wire [3:0] gpu_wq_pop_count = gpu_wq_pop
-                             ? (active_gpuq_awlen ? 4'd2 : 4'd1)
-                             : 4'd0;
+wire [3:0] gpu_wq_pop_count = gpu_wq_pop ? ({1'b0, active_gpuq_awlen} + 4'd1) : 4'd0;
 wire       gpu_wq_high     = (gpu_wq_count >= GPU_WQ_HIGH_WATERMARK[3:0]);
 wire [3:0] gpu_wq_read_budget_limit = gpu_wq_high ? 4'd1 : GPU_WRITE_READ_BUDGET;
 wire       gpu_wq_read_budget_spent = (gpu_reads_since_write >= gpu_wq_read_budget_limit);
@@ -225,8 +284,8 @@ always @(posedge clk or posedge reset) begin
         arb_state <= ST_IDLE;
         grant <= 2'd0;
         active_wr_gpuq <= 1'b0;
-        active_gpuq_awlen <= 1'b0;
-        gpuq_w_idx <= 1'b0;
+        active_gpuq_awlen <= 3'd0;
+        gpuq_w_idx <= 3'd0;
         gpu_deficit <= 4'd0;
         audio_deficit <= 4'd0;
         gpu_wq_rd_ptr <= {GPU_WQ_PTR_W{1'b0}};
@@ -263,9 +322,7 @@ always @(posedge clk or posedge reset) begin
         if (gpu_wq_pop) begin
             if (gpu_wq_last[active_gpuq_last_ptr])
                 m0_bvalid_q <= 1'b1;
-            gpu_wq_rd_ptr <= gpu_wq_rd_ptr
-                           + {{(GPU_WQ_PTR_W-1){1'b0}}, active_gpuq_awlen}
-                           + {{(GPU_WQ_PTR_W-1){1'b0}}, 1'b1};
+            gpu_wq_rd_ptr <= gpu_wq_rd_ptr + active_gpuq_awlen + 3'd1;
         end
 
         gpu_wq_count <= gpu_wq_count
@@ -273,7 +330,7 @@ always @(posedge clk or posedge reset) begin
                       - gpu_wq_pop_count;
 
         if (active_wr && active_wr_gpuq && s_wvalid && s_wready && !active_gpuq_wlast)
-            gpuq_w_idx <= gpuq_w_idx + 1'b1;
+            gpuq_w_idx <= gpuq_w_idx + 3'd1;
 
         if (gpu_wq_empty)
             gpu_reads_since_write <= 4'd0;
@@ -306,7 +363,7 @@ always @(posedge clk or posedge reset) begin
                 grant <= 2'd0;
                 active_wr_gpuq <= 1'b1;
                 active_gpuq_awlen <= gpu_wq_drain_awlen;
-                gpuq_w_idx <= 1'b0;
+                gpuq_w_idx <= 3'd0;
                 arb_state <= ST_WR;
                 gpu_reads_since_write <= 4'd0;
                 if (cpu_pending) gpu_deficit <= gpu_deficit + 4'd1;
@@ -329,6 +386,12 @@ always @(posedge clk or posedge reset) begin
                 active_wr_gpuq <= 1'b0;
                 arb_state <= ST_WR;
                 gpu_deficit <= 4'd0;
+                if (audio_pending) audio_deficit <= audio_deficit + 4'd1;
+            end else if (m2_awvalid) begin
+                grant <= 2'd2;
+                active_wr_gpuq <= 1'b0;
+                arb_state <= ST_WR;
+                if (cpu_pending) gpu_deficit <= gpu_deficit + 4'd1;
                 if (audio_pending) audio_deficit <= audio_deficit + 4'd1;
             end else if (m3_arvalid) begin
                 grant <= 2'd3;
@@ -374,19 +437,31 @@ assign s_araddr  = grant_m0 ? m0_araddr  :
 assign s_arlen   = grant_m0 ? m0_arlen   :
                    grant_m1 ? m1_arlen   : m3_arlen;
 
-// AW/W channel.  Posted M0 writes normally drain as single-word slave writes.
-// When the GPU queued a short contiguous full-strobe write, preserve it as a
-// 2-beat slave burst so triangle rows can reach the SDRAM burst path.
-assign s_awvalid = (active_wr && !wr_completing) ? (active_wr_gpuq ? 1'b1 :
-                                                                m1_awvalid) : 1'b0;
-assign s_awaddr  = active_wr_gpuq ? gpu_wq_addr[gpu_wq_rd_ptr] : m1_awaddr;
-assign s_awlen   = active_wr_gpuq ? {7'b0, active_gpuq_awlen} : m1_awlen;
+// AW/W channel.  Posted M0 writes drain as native SDRAM bursts: the GPU's
+// contiguous full-strobe framebuffer AW (up to 8 beats) is coalesced into a
+// single slave burst (s_awlen = run length), amortizing the per-grant AW /
+// arbitration / SDRAM command overhead over the whole span.
+assign s_awvalid = (active_wr && !wr_completing)
+                 ? (active_wr_gpuq ? 1'b1 :
+                    grant_m1       ? m1_awvalid :
+                    grant_m2       ? m2_awvalid : 1'b0)
+                 : 1'b0;
+assign s_awaddr  = active_wr_gpuq ? gpu_wq_addr[gpu_wq_rd_ptr] :
+                   grant_m1       ? m1_awaddr : m2_awaddr;
+assign s_awlen   = active_wr_gpuq ? {5'b0, active_gpuq_awlen} :
+                   grant_m1       ? m1_awlen : m2_awlen;
 
-assign s_wvalid  = (active_wr && !wr_completing) ? (active_wr_gpuq ? 1'b1 :
-                                                                m1_wvalid) : 1'b0;
-assign s_wdata   = active_wr_gpuq ? gpu_wq_data[active_gpuq_w_ptr] : m1_wdata;
-assign s_wstrb   = active_wr_gpuq ? gpu_wq_strb[active_gpuq_w_ptr] : m1_wstrb;
-assign s_wlast   = active_wr_gpuq ? active_gpuq_wlast : m1_wlast;
+assign s_wvalid  = (active_wr && !wr_completing)
+                 ? (active_wr_gpuq ? 1'b1 :
+                    grant_m1       ? m1_wvalid :
+                    grant_m2       ? m2_wvalid : 1'b0)
+                 : 1'b0;
+assign s_wdata   = active_wr_gpuq ? gpu_wq_data[active_gpuq_w_ptr] :
+                   grant_m1       ? m1_wdata : m2_wdata;
+assign s_wstrb   = active_wr_gpuq ? gpu_wq_strb[active_gpuq_w_ptr] :
+                   grant_m1       ? m1_wstrb : m2_wstrb;
+assign s_wlast   = active_wr_gpuq ? active_gpuq_wlast :
+                   grant_m1       ? m1_wlast : m2_wlast;
 
 // ============================================
 // Slave -> Master channel demux (combinational)
@@ -400,7 +475,12 @@ assign m0_rvalid = (active_rd && grant_m0) ? s_rvalid : 1'b0;
 assign m1_rvalid = (active_rd && grant_m1) ? s_rvalid : 1'b0;
 assign m3_rvalid = (active_rd && grant_m3) ? s_rvalid : 1'b0;
 
-assign s_rready = active_rd ? (grant_m1 ? m1_rready : 1'b1) : 1'b1;
+// Honor each read master's RREADY.  M1 (CPU) and M3 (AudioMix) can back-
+// pressure; M0 (GPU) has no RREADY because its read consumer (tex cache / DMA)
+// captures every beat the cycle m_rvalid lands, so it is contractually always
+// ready and tied to 1'b1.
+assign s_rready = active_rd ? (grant_m1 ? m1_rready :
+                               grant_m3 ? m3_rready : 1'b1) : 1'b1;
 
 assign m0_rdata  = s_rdata;
 assign m1_rdata  = s_rdata;
@@ -414,14 +494,24 @@ assign m3_rlast  = s_rlast;
 
 assign m0_awready = !m0w_active && m0_aw_has_space;
 assign m1_awready = (active_wr && grant_m1 && !active_wr_gpuq) ? s_awready : 1'b0;
+assign m2_awready = (active_wr && grant_m2 && !active_wr_gpuq) ? s_awready : 1'b0;
 
 assign m0_wready = m0w_active && !gpu_wq_full;
 assign m1_wready = (active_wr && grant_m1 && !active_wr_gpuq) ? s_wready : 1'b0;
+assign m2_wready = (active_wr && grant_m2 && !active_wr_gpuq) ? s_wready : 1'b0;
 
 assign m0_bvalid = m0_bvalid_q;
 assign m1_bvalid = (active_wr && grant_m1 && !active_wr_gpuq) ? s_bvalid : 1'b0;
+assign m2_bvalid = (active_wr && grant_m2 && !active_wr_gpuq) ? s_bvalid : 1'b0;
 assign m0_bresp  = 2'b00;
 assign m1_bresp  = s_bresp;
+assign m2_bresp  = s_bresp;
+
+// The GPU posted-write queue supplies W beats continuously (s_wvalid held high
+// from the queue), so its bursts can never underrun → safe for native slave
+// streaming.  CPU/bridge writes pass through and may stall, so wcont=0 keeps
+// them on the serialized path.
+assign s_wcont = active_wr_gpuq;
 
 // Diagnostic taps
 assign dbg_arb_state   = arb_state;

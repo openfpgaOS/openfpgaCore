@@ -663,49 +663,60 @@ end
 wire bridge_cram0_rd_pulse = bridge_cram0_range && bridge_rd && !bridge_rd_prev_74a;
 wire bridge_cram0_wr_pulse = bridge_cram0_range && bridge_wr;
 
-// APF bridge writes land in clk_74a already.  Keep the bridge-owned
-// path simple: one outstanding write is latched and issued directly to
-// the CRAM0 controller when it reaches idle.  There is intentionally no
-// RAM-backed bridge write FIFO in this path.
-reg         bridge_wr_pending = 1'b0;
+// APF bridge writes land in clk_74a already, but the bridge side has no
+// ready/backpressure signal and CRAM0 has turnaround latency.  Queue one
+// safe 4 KB data-slot burst while firmware waits for WR_IDLE before flipping
+// CRAM0 to CPU ownership.
+wire        bridge_wr_fifo_empty;
+wire        bridge_wr_fifo_full;
+wire [10:0] bridge_wr_fifo_count;
+wire [53:0] bridge_wr_fifo_dout;
 reg         bridge_wr_inflight = 1'b0;
 reg         bridge_wr_seen_busy = 1'b0;
-reg [21:0]  bridge_wr_pending_addr = 22'd0;
-reg [31:0]  bridge_wr_pending_data = 32'd0;
 reg         bridge_wr_overrun = 1'b0;
 
-wire        bridge_wr_busy = bridge_wr_pending | bridge_wr_inflight;
+wire        bridge_wr_busy = (bridge_wr_fifo_count != 11'd0) | bridge_wr_inflight;
+wire        bridge_wr_issue = !cram0_mode_74a &&
+                              !bridge_wr_fifo_empty &&
+                              !bridge_wr_inflight &&
+                              !ctrl_word_busy;
 wire        bridge_wr_accept = !cram0_mode_74a &&
                                bridge_cram0_wr_pulse &&
-                               !bridge_wr_busy;
+                               (!bridge_wr_fifo_full || bridge_wr_issue);
 wire        bridge_wr_overrun_pulse = !cram0_mode_74a &&
                                       bridge_cram0_wr_pulse &&
-                                      bridge_wr_busy;
-wire        bridge_wr_issue = !cram0_mode_74a &&
-                              bridge_wr_pending &&
-                              !ctrl_word_busy;
+                                      bridge_wr_fifo_full &&
+                                      !bridge_wr_issue;
+wire [21:0] bridge_wr_fifo_addr = bridge_wr_fifo_dout[53:32];
+wire [31:0] bridge_wr_fifo_data = bridge_wr_fifo_dout[31:0];
+
+bridge_cram0_write_fifo #(
+    .WIDTH(54),
+    .DEPTH(1024),
+    .ADDR_WIDTH(10)
+) bridge_cram0_write_fifo_inst (
+    .clk(clk_74a),
+    .reset(!pll_ram_locked_74a),
+    .push(bridge_wr_accept),
+    .din({bridge_addr[23:2], bridge_wr_data}),
+    .pop(bridge_wr_issue),
+    .dout(bridge_wr_fifo_dout),
+    .empty(bridge_wr_fifo_empty),
+    .full(bridge_wr_fifo_full),
+    .count(bridge_wr_fifo_count)
+);
 
 always @(posedge clk_74a or negedge pll_ram_locked_74a) begin
     if (!pll_ram_locked_74a) begin
-        bridge_wr_pending <= 1'b0;
         bridge_wr_inflight <= 1'b0;
         bridge_wr_seen_busy <= 1'b0;
-        bridge_wr_pending_addr <= 22'd0;
-        bridge_wr_pending_data <= 32'd0;
         bridge_wr_overrun <= 1'b0;
     end
     else begin
-        if (bridge_wr_accept) begin
-            bridge_wr_pending <= 1'b1;
-            bridge_wr_pending_addr <= bridge_addr[23:2];
-            bridge_wr_pending_data <= bridge_wr_data;
-        end
-
         if (bridge_wr_overrun_pulse)
             bridge_wr_overrun <= 1'b1;
 
         if (bridge_wr_issue) begin
-            bridge_wr_pending <= 1'b0;
             bridge_wr_inflight <= 1'b1;
             bridge_wr_seen_busy <= 1'b0;
         end else if (bridge_wr_inflight) begin
@@ -729,9 +740,9 @@ wire        ctrl_word_rdata_valid;
 wire        mux_word_rd    = cram0_mode_74a ? cpu_cram0_word_rd    : bridge_cram0_direct_rd_pulse;
 wire        mux_word_wr    = cram0_mode_74a ? cpu_cram0_word_wr    : bridge_wr_issue;
 wire [21:0] mux_word_addr  = cram0_mode_74a       ? cpu_cram0_word_addr
-                            : bridge_wr_issue       ? bridge_wr_pending_addr
+                            : bridge_wr_issue       ? bridge_wr_fifo_addr
                                                     : bridge_addr[23:2];
-wire [31:0] mux_word_wdata = cram0_mode_74a ? cpu_cram0_word_wdata : bridge_wr_pending_data;
+wire [31:0] mux_word_wdata = cram0_mode_74a ? cpu_cram0_word_wdata : bridge_wr_fifo_data;
 wire [3:0]  mux_word_wstrb = cram0_mode_74a ? cpu_cram0_word_wstrb : 4'b1111;
 
 // Controller response fans out to whichever owner asked for it.
@@ -1304,8 +1315,28 @@ wire [31:0] arb_s_wdata;
 wire [3:0]  arb_s_wstrb;
 wire        arb_s_bvalid;
 wire [1:0]  arb_s_bresp;
+wire        arb_s_wcont;   // arbiter → slave: GPU write bursts are continuous (native-streaming OK)
 
-// Bridge SDRAM path fully removed; bridge DMA stages through CRAM0.
+// Bridge -> SDRAM AXI4 write master.  Normal APF file reads now target
+// SDRAM directly; CRAM0 remains for boot/save windows and small bounce ops.
+wire        brg_sdram_awvalid;
+wire        brg_sdram_awready;
+wire [31:0] brg_sdram_awaddr;
+wire [7:0]  brg_sdram_awlen;
+wire        brg_sdram_wvalid;
+wire        brg_sdram_wready;
+wire [31:0] brg_sdram_wdata;
+wire [3:0]  brg_sdram_wstrb;
+wire        brg_sdram_wlast;
+wire        brg_sdram_bvalid;
+wire        brg_sdram_idle;
+wire        brg_sdram_fifo_full;
+wire        brg_sdram_overrun;
+// Combined bridge write-overrun diagnostic.  Both overrun flags are sticky
+// error indicators that are NO LONGER allowed to gate idle/busy (that caused a
+// permanent data-slot wedge); they are observable here for SignalTap and can
+// be surfaced to firmware via a status bit as a follow-up.
+wire        bridge_any_overrun = bridge_wr_overrun | brg_sdram_overrun;
 
 // ============================================================
 // Bridge read data mux (registered — one cycle after bridge_rd)
@@ -1380,11 +1411,10 @@ always @(posedge clk_74a) begin
         signed_voff <= analogizer_cpu_wr_voffset_s2;
 end
 
-// Bridge SDRAM write path removed — bridge only touches CRAM0 now
-// and firmware synchronises mode flips explicitly.
-// bridge_wr_idle: true when no bridge-to-cram0 operation is in flight.
-// Conservative: reports busy whenever the controller is busy or a
-// bridge request is mid-handshake.
+// bridge_wr_idle: true when both bridge write targets have drained.
+// The CRAM0 side must be idle before firmware flips CRAM0 ownership; the
+// SDRAM side must be idle before the data-slot command is acknowledged.
+// Conservative: reports busy whenever either path has work in flight.
 reg  bridge_wr_seen_74a;
 always @(posedge clk_74a) begin
     if (bridge_cram0_wr_pulse || bridge_cram0_rd_pulse)
@@ -1393,11 +1423,15 @@ always @(posedge clk_74a) begin
         bridge_wr_seen_74a <= 1'b0;
 end
 
+// NOTE: bridge_wr_overrun is intentionally NOT part of this busy term.  It is
+// a sticky error latch (cleared only by reset); ORing it here turned a
+// transient CRAM0 write-FIFO overflow into a permanent wedge of the data-slot
+// completion handshake (bridge_active_74a stuck high -> bridge_wr_idle never
+// asserts).  Overrun is surfaced as an observable diagnostic instead.
 wire bridge_active_74a = bridge_wr_seen_74a
                        | ctrl_word_busy
                        | bridge_wr_busy
                        | bridge_wr_issue
-                       | bridge_wr_overrun
                        | bridge_cram0_wr_pulse
                        | bridge_cram0_rd_pulse;
 
@@ -1405,7 +1439,8 @@ wire bridge_active_74a = bridge_wr_seen_74a
 reg [2:0] bridge_active_cpu_sync;
 always @(posedge clk_cpu)
     bridge_active_cpu_sync <= {bridge_active_cpu_sync[1:0], bridge_active_74a};
-wire bridge_wr_idle = ~bridge_active_cpu_sync[2];
+wire bridge_cram0_idle_cpu = ~bridge_active_cpu_sync[2];
+wire bridge_wr_idle = bridge_cram0_idle_cpu && brg_sdram_idle;
 
 // Bridge DMA active tracking
 reg bridge_dma_active;
@@ -1471,8 +1506,8 @@ always @(posedge clk_ram_controller) begin
     end
 end
 
-// Bridge SDRAM read path fully removed — bridge never reads SDRAM in v2.
-// Bridge CRAM0 access lives in the ownership-mux block above.
+// Bridge SDRAM reads are not used.  Bridge writes target either SDRAM
+// through bridge_to_sdram or CRAM0 through the ownership-mux block above.
 
 //
 // host/target command handler
@@ -1951,9 +1986,8 @@ assign video_hs = vidout_hs;
         end
     end
 
-    // Pocket scaler slots advertised in dist/core/video.json.  Slot 0 is
-    // the historical 640x240 output used as the fallback for arbitrary app
-    // framebuffer sizes that do not have a physical scaler mode.
+    // Pocket scaler slots advertised in dist/core/video.json. Slot 0 is the
+    // standard 320x240 output used for boot/terminal/fallback.
     localparam CRT_V_SYNC   = 3;
     localparam CRT_V_BPORCH = 15;
     localparam CRT_V_FPORCH = 4;
@@ -1961,20 +1995,23 @@ assign video_hs = vidout_hs;
     localparam CRT_H_BPORCH = 62;
     localparam CRT_H_FPORCH = 20;
     localparam CRT_H_TOTAL  = CRT_H_SYNC + CRT_H_BPORCH + 640 + CRT_H_FPORCH;
-    localparam CRT_V_TOTAL_DEFAULT = CRT_V_SYNC + CRT_V_BPORCH + 240 + CRT_V_FPORCH; // 262
+    localparam [9:0] CRT_V_ACTIVE_BASE = CRT_V_SYNC + CRT_V_BPORCH;
+    localparam [9:0] CRT_V_CENTER_HEIGHT = 10'd240;
+    localparam CRT_V_TOTAL_DEFAULT = CRT_V_ACTIVE_BASE + 240 + CRT_V_FPORCH; // 262
 
     function [9:0] scaler_slot_width;
         input [2:0] slot;
         begin
             case (slot)
+                3'd0: scaler_slot_width = 10'd320;
                 3'd1: scaler_slot_width = 10'd320;
                 3'd2: scaler_slot_width = 10'd320;
                 3'd3: scaler_slot_width = 10'd320;
                 3'd4: scaler_slot_width = 10'd320;
-                3'd5: scaler_slot_width = 10'd320;
-                3'd6: scaler_slot_width = 10'd400;
-                3'd7: scaler_slot_width = 10'd256;
-                default: scaler_slot_width = 10'd640;
+                3'd5: scaler_slot_width = 10'd400;
+                3'd6: scaler_slot_width = 10'd256;
+                3'd7: scaler_slot_width = 10'd320;
+                default: scaler_slot_width = 10'd320;
             endcase
         end
     endfunction
@@ -1983,12 +2020,13 @@ assign video_hs = vidout_hs;
         input [2:0] slot;
         begin
             case (slot)
+                3'd0: scaler_slot_height = 10'd240;
                 3'd1: scaler_slot_height = 10'd200;
                 3'd2: scaler_slot_height = 10'd224;
-                3'd3: scaler_slot_height = 10'd240;
-                3'd4: scaler_slot_height = 10'd256;
-                3'd5: scaler_slot_height = 10'd288;
-                3'd6: scaler_slot_height = 10'd300;
+                3'd3: scaler_slot_height = 10'd256;
+                3'd4: scaler_slot_height = 10'd288;
+                3'd5: scaler_slot_height = 10'd300;
+                3'd6: scaler_slot_height = 10'd240;
                 3'd7: scaler_slot_height = 10'd240;
                 default: scaler_slot_height = 10'd240;
             endcase
@@ -1997,12 +2035,17 @@ assign video_hs = vidout_hs;
 
     wire [9:0] crt_h_active = scaler_slot_width(video_scaler_slot_vid);
     wire [9:0] crt_v_active = scaler_slot_height(video_scaler_slot_vid);
+    wire [9:0] crt_v_center_offset =
+        (crt_v_active < CRT_V_CENTER_HEIGHT) ?
+        ((CRT_V_CENTER_HEIGHT - crt_v_active) >> 1) : 10'd0;
     wire [9:0] crt_h_active_end =
         CRT_H_SYNC + CRT_H_BPORCH + crt_h_active;
+    wire [9:0] crt_v_active_start =
+        CRT_V_ACTIVE_BASE + crt_v_center_offset;
     wire [9:0] crt_v_active_end =
-        CRT_V_SYNC + CRT_V_BPORCH + crt_v_active;
+        crt_v_active_start + crt_v_active;
     wire [9:0] crt_v_total_min =
-        CRT_V_SYNC + CRT_V_BPORCH + crt_v_active;
+        crt_v_active_end;
     reg [9:0] crt_v_total;
     reg crt_hs, crt_vs, crt_de;
     reg crt_hblank, crt_vblank;
@@ -2123,6 +2166,7 @@ assign video_hs = vidout_hs;
         .dataslot_allcomplete(dataslot_allcomplete && bridge_wr_idle),
         .vsync(vidout_vs),
         .early_vblank(early_vblank_safe_vid),
+        .os_inmenu(osnotify_inmenu),
         .cont1_key(p1_controls),
         .cont1_joy(p1_joypad),
         .cont1_trig(p1_trigger),
@@ -2273,12 +2317,33 @@ assign video_hs = vidout_hs;
         end
     end
 
-    // axi_bridge_master removed — bridge writes no longer touch SDRAM.
-    // Bridge SDRAM path retired with v2: saves/loads bounce through
-    // CRAM0 (bridge-native clock), CPU then memcpys into SDRAM.
+    bridge_to_sdram brg_sdram (
+        .clk_bridge     (clk_74a),
+        .reset_n        (reset_n),
+        .bridge_addr    (bridge_addr),
+        .bridge_wr      (bridge_wr),
+        .bridge_wr_data (bridge_wr_data),
+        .idle           (brg_sdram_idle),
+        .fifo_full      (brg_sdram_fifo_full),
+        .overrun        (brg_sdram_overrun),
+        .clk_axi        (clk_cpu),
+        // Never-reset (config-init only), symmetric with the arbiter/slave it
+        // drives, so it cannot async-drop AW/W mid-handshake on a warm reset.
+        .reset_n_axi    (1'b1),
+        .m_awvalid      (brg_sdram_awvalid),
+        .m_awready      (brg_sdram_awready),
+        .m_awaddr       (brg_sdram_awaddr),
+        .m_awlen        (brg_sdram_awlen),
+        .m_wvalid       (brg_sdram_wvalid),
+        .m_wready       (brg_sdram_wready),
+        .m_wdata        (brg_sdram_wdata),
+        .m_wstrb        (brg_sdram_wstrb),
+        .m_wlast        (brg_sdram_wlast),
+        .m_bvalid       (brg_sdram_bvalid)
+    );
 
     // ============================================================
-    // AXI4 SDRAM arbiter (3 masters in v2: GPU, CPU, Audio)
+    // AXI4 SDRAM arbiter (GPU, CPU, APF bridge, Audio)
     // ============================================================
     // GPU exposes separate AR (gpu_rd_*) and AW/W (gpu_wr_*) channels
     // but they are never active simultaneously — the GPU FSM serialises
@@ -2310,12 +2375,20 @@ assign video_hs = vidout_hs;
         .m1_wdata(cpu_sdram_bus_wdata),     .m1_wstrb(cpu_sdram_bus_wstrb),
         .m1_wlast(cpu_sdram_bus_wlast),
         .m1_bvalid(cpu_sdram_bus_bvalid),   .m1_bresp(cpu_sdram_bus_bresp),
+        // M2: APF bridge data-slot writes into SDRAM
+        .m2_awvalid(brg_sdram_awvalid), .m2_awready(brg_sdram_awready),
+        .m2_awaddr(brg_sdram_awaddr),   .m2_awlen(brg_sdram_awlen),
+        .m2_wvalid(brg_sdram_wvalid),   .m2_wready(brg_sdram_wready),
+        .m2_wdata(brg_sdram_wdata),     .m2_wstrb(brg_sdram_wstrb),
+        .m2_wlast(brg_sdram_wlast),
+        .m2_bvalid(brg_sdram_bvalid),   .m2_bresp(),
         // M3: Audio Mixer (read-only, lowest priority) — per-voice
         // sample fetches from SDRAM.
         .m3_arvalid(mixer_arvalid),   .m3_arready(mixer_arready),
         .m3_araddr(mixer_araddr),     .m3_arlen(mixer_arlen),
         .m3_rvalid(mixer_rvalid),     .m3_rdata(mixer_rdata),
         .m3_rresp(mixer_rresp),       .m3_rlast(mixer_rlast),
+        .m3_rready(mixer_rready),
         // Slave output (to axi_sdram_slave)
         .s_arvalid(arb_s_arvalid), .s_arready(arb_s_arready),
         .s_araddr(arb_s_araddr),   .s_arlen(arb_s_arlen),
@@ -2328,6 +2401,7 @@ assign video_hs = vidout_hs;
         .s_wdata(arb_s_wdata),     .s_wstrb(arb_s_wstrb),
         .s_wlast(arb_s_wlast),
         .s_bvalid(arb_s_bvalid),   .s_bresp(arb_s_bresp),
+        .s_wcont(arb_s_wcont),
         .dbg_arb_state(),
         .dbg_cpu_pending(),
         .dbg_grant()
@@ -2340,10 +2414,13 @@ assign video_hs = vidout_hs;
     // arbiter itself already provides back-pressure to each master; for
     // now leave this tied to 1'b1 (matches pre-burst behaviour).
     axi_sdram_slave #(
-        // GPU framebuffer writes are posted and split to single-word SDRAM
-        // writes inside the arbiter.  CPU/cache-line writes can still use the
-        // native io_sdram burst path to keep command submit/memcpy traffic
-        // from degenerating into one SDRAM command per word.
+        // Native streaming write bursts are gated per-master by s_axi_wcont
+        // (driven from the arbiter's s_wcont): the GPU's queue-fed framebuffer
+        // bursts (continuous WVALID, underrun-immune) stream natively up to 8
+        // beats, while CPU cache-line writebacks (which can stall WVALID mid-
+        // burst, risking a stale/duplicated word in the pre-staged streaming
+        // path) are forced onto the serialized per-beat path.  MAX cap stays at
+        // 15 (the io_sdram/AXI 4-bit ARLEN/AWLEN limit).
         .SERIALIZE_WRITE_BURSTS(1'b0),
         .MAX_NATIVE_WRITE_BURST_LEN(8'd15)
     ) sdram_axi_slave (
@@ -2370,6 +2447,7 @@ assign video_hs = vidout_hs;
         .s_axi_bvalid(arb_s_bvalid),
         .s_axi_bready(1'b1),
         .s_axi_bresp(arb_s_bresp),
+        .s_axi_wcont(arb_s_wcont),
         .sdram_rd(sdram_slave_rd),
         .sdram_wr(sdram_slave_wr),
         .sdram_addr(sdram_slave_addr),
@@ -2464,7 +2542,7 @@ assign video_hs = vidout_hs;
         .pal_busy(cpu_pal_busy)
     );
 
-    assign early_vblank_safe_vid = (y_count < (CRT_V_SYNC + CRT_V_BPORCH));
+    assign early_vblank_safe_vid = (y_count < crt_v_active_start);
 
 always @(posedge clk_vid or negedge reset_n_vid) begin
 
@@ -2503,7 +2581,7 @@ always @(posedge clk_vid or negedge reset_n_vid) begin
         // CRT Blank
         crt_hblank <= x_count < (CRT_H_SYNC + CRT_H_BPORCH) ||
                       (x_count >= crt_h_active_end);
-        crt_vblank <= y_count < (CRT_V_SYNC + CRT_V_BPORCH) ||
+        crt_vblank <= y_count < crt_v_active_start ||
                       (y_count >= crt_v_active_end);
 
         // Generate CRT sync
@@ -2527,17 +2605,15 @@ always @(posedge clk_vid or negedge reset_n_vid) begin
             vidout_hs <= 1;
         end
 
-        // inactive screen areas are black
-        vidout_rgb <= 24'h0;
-        if(x_count == crt_h_active_end) begin
-            // APF scaler-slot command: RGB[23:13]=slot, RGB[2:0]=0 after DE falls.
-            vidout_rgb <= {8'b0, video_scaler_slot_vid, 13'b0};
-        end
+        // APF scaler-slot command while DE is low.  The Pocket can sample
+        // this during menu/screenshot transitions, so keep it stable across
+        // the whole blanking interval instead of emitting a one-cycle marker.
+        vidout_rgb <= {8'b0, video_scaler_slot_vid, 13'b0};
 
         // generate active video, now accounts for CRT specific timings but making compatible with Analogue Pocket video also
         if(x_count >= CRT_H_SYNC + CRT_H_BPORCH  && x_count < crt_h_active_end) begin
 
-            if(y_count >= CRT_V_SYNC + CRT_V_BPORCH && y_count < crt_v_active_end) begin
+            if(y_count >= crt_v_active_start && y_count < crt_v_active_end) begin
                 // data enable. this is the active region of the line
                 vidout_de <= 1;
 
@@ -2747,7 +2823,7 @@ wire        gpu_rd_rvalid;
 wire [31:0] gpu_rd_rdata;
 wire        gpu_rd_rlast;
 
-// GPU AXI4 write master (M1 on SDRAM arbiter)
+// GPU AXI4 write channel (GPU M0 on SDRAM arbiter)
 wire        gpu_wr_awvalid;
 wire        gpu_wr_awready;
 wire [31:0] gpu_wr_awaddr;
@@ -2758,9 +2834,6 @@ wire [31:0] gpu_wr_wdata;
 wire [3:0]  gpu_wr_wstrb;
 wire        gpu_wr_wlast;
 wire        gpu_wr_bvalid;
-
-// Bridge → SDRAM write path retired in v2 (bridge no longer touches
-// SDRAM; loads/saves bounce through CRAM0 and CPU memcpys the bytes).
 
 // GPU SRAM interface: private scratch tables (currently translucency LUT).
 
@@ -2958,4 +3031,55 @@ io_sdram isr0 (
 
 
 
+endmodule
+
+module bridge_cram0_write_fifo #(
+    parameter WIDTH = 54,
+    parameter DEPTH = 1024,
+    parameter ADDR_WIDTH = 10
+) (
+    input  wire                   clk,
+    input  wire                   reset,
+    input  wire                   push,
+    input  wire [WIDTH-1:0]       din,
+    input  wire                   pop,
+    output wire [WIDTH-1:0]       dout,
+    output wire                   empty,
+    output wire                   full,
+    output wire [ADDR_WIDTH:0]    count
+);
+    reg [WIDTH-1:0] mem [0:DEPTH-1];
+    reg [ADDR_WIDTH-1:0] rd_ptr = {ADDR_WIDTH{1'b0}};
+    reg [ADDR_WIDTH-1:0] wr_ptr = {ADDR_WIDTH{1'b0}};
+    reg [ADDR_WIDTH:0] used = {(ADDR_WIDTH+1){1'b0}};
+    localparam [ADDR_WIDTH:0] DEPTH_COUNT = DEPTH;
+
+    assign empty = (used == {(ADDR_WIDTH+1){1'b0}});
+    assign full = (used == DEPTH_COUNT);
+    assign count = used;
+    assign dout = mem[rd_ptr];
+
+    wire pop_ok = pop && !empty;
+    wire push_ok = push && (!full || pop_ok);
+
+    always @(posedge clk) begin
+        if (reset) begin
+            rd_ptr <= {ADDR_WIDTH{1'b0}};
+            wr_ptr <= {ADDR_WIDTH{1'b0}};
+            used <= {(ADDR_WIDTH+1){1'b0}};
+        end else begin
+            if (push_ok) begin
+                mem[wr_ptr] <= din;
+                wr_ptr <= wr_ptr + {{(ADDR_WIDTH-1){1'b0}}, 1'b1};
+            end
+            if (pop_ok)
+                rd_ptr <= rd_ptr + {{(ADDR_WIDTH-1){1'b0}}, 1'b1};
+
+            case ({push_ok, pop_ok})
+            2'b10: used <= used + {{ADDR_WIDTH{1'b0}}, 1'b1};
+            2'b01: used <= used - {{ADDR_WIDTH{1'b0}}, 1'b1};
+            default: used <= used;
+            endcase
+        end
+    end
 endmodule

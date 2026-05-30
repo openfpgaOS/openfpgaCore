@@ -391,7 +391,22 @@ end
 wire [WR_PTR_W-1:0] head1 = wr_head + {{(WR_PTR_W-1){1'b0}}, 1'b1};
 wire [WR_PTR_W-1:0] head2 = wr_head + 2'd2;
 wire [WR_PTR_W-1:0] head3 = wr_head + 2'd3;
-wire match01 = (wr_count >= 3'd2)
+// Same-address FIXED-burst coalescing is only legal for the LOCAL (periph)
+// target, which honors awburst==FIXED (req_addr held across beats).  The
+// SDRAM and CRAM0 target ports leave m_awburst unconnected and treat any
+// multi-beat write as INCR, so a coalesced FIXED burst routed there would
+// scatter the 2nd..Nth beats to addr+4, addr+8, ... and corrupt memory.
+// Gate coalescing on the head address decoding to LOCAL; otherwise force
+// burst_awlen_calc=0 (single INCR beat).  (Decoded inline here because
+// decode_target is defined later in the file.)
+wire [31:0] coalesce_addr = wr_addr_mem[wr_head];
+wire coalesce_is_sdram = (coalesce_addr[31:26] == 6'b000100)
+                      || (coalesce_addr[31:26] == 6'b010100);
+wire coalesce_is_cram0 = (coalesce_addr[31:24] == 8'h30)
+                      || (coalesce_addr[31:24] == 8'h38);
+wire coalesce_ok = !coalesce_is_sdram && !coalesce_is_cram0; // LOCAL only
+wire match01 = coalesce_ok
+            && (wr_count >= 3'd2)
             && (wr_addr_mem[wr_head] == wr_addr_mem[head1])
             && (wr_mask_mem[wr_head] == wr_mask_mem[head1]);
 wire match02 = match01 && (wr_count >= 3'd3)

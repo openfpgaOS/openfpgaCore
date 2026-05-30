@@ -43,6 +43,7 @@ static void reset_sequence() {
     tb->gpu_swap_idx_in = 0;
     tb->vsync_in        = 0;
     tb->early_vblank_in = 0;
+    tb->os_inmenu_in    = 0;
     tb->target_dataslot_ack_in  = 0;
     tb->target_dataslot_done_in = 0;
     tb->target_dataslot_err_in  = 0;
@@ -478,6 +479,57 @@ static void test_gpu_swap_side_port(void) {
     uint32_t after = read_swap_ctrl();
     check_eq("side-port-vsync-clear",     after & 1,           0u);
     check_eq("side-port-display-idx-set", (after >> 1) & 0x3u, 2u);
+}
+
+static void test_gpu_swap_hold_during_os_menu(void) {
+    printf("test_gpu_swap_hold_during_os_menu (Pocket menu/screenshot freezes presentation):\n");
+
+    auto read_swap_ctrl = [&]() -> uint32_t {
+        std::vector<uint32_t> r;
+        if (!axi_read_burst(0x40000018u, 0, r)) return 0xFFFFFFFFu;
+        return r[0];
+    };
+
+    uint32_t pre = read_swap_ctrl();
+    uint32_t display = (pre >> 1) & 0x3u;
+    uint32_t target = (display + 1u) % 3u;
+    check_eq("menu-hold-pre-pending=0", pre & 1u, 0u);
+
+    tb->os_inmenu_in = 1;
+    for (int i = 0; i < 4; i++) tick();
+
+    tb->gpu_swap_req_in = 1;
+    tb->gpu_swap_idx_in = target;
+    tick();
+    tb->gpu_swap_req_in = 0;
+    tb->gpu_swap_idx_in = 0;
+    for (int i = 0; i < 4; i++) tick();
+
+    uint32_t queued = read_swap_ctrl();
+    check_eq("menu-hold-pending-set", queued & 1u, 1u);
+
+    tb->vsync_in = 1;
+    tick();
+    tick();
+    tb->vsync_in = 0;
+    for (int i = 0; i < 5; i++) tick();
+
+    uint32_t held = read_swap_ctrl();
+    check_eq("menu-hold-display-stable", (held >> 1) & 0x3u, display);
+    check_eq("menu-hold-pending-retained", held & 1u, 1u);
+
+    tb->os_inmenu_in = 0;
+    for (int i = 0; i < 4; i++) tick();
+
+    tb->vsync_in = 1;
+    tick();
+    tick();
+    tb->vsync_in = 0;
+    for (int i = 0; i < 5; i++) tick();
+
+    uint32_t released = read_swap_ctrl();
+    check_eq("menu-hold-release-display", (released >> 1) & 0x3u, target);
+    check_eq("menu-hold-release-clear", released & 1u, 0u);
 }
 
 // =====================================================================
@@ -1308,6 +1360,7 @@ int main(int argc, char **argv) {
     test_gpu_write_mixed_addr();
     test_gpu_write_fixed_burst();
     test_gpu_swap_side_port();
+    test_gpu_swap_hold_during_os_menu();
     test_gpu_swap_req_vsync_race();
     test_gpu_swap_early_vblank();
     test_gpu_swap_early_vblank_one_consume_per_frame();

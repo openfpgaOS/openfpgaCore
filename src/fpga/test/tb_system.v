@@ -197,6 +197,7 @@ wire [3:0]  arb_wstrb;
 wire        arb_wlast;
 wire        arb_bvalid;
 wire [1:0]  arb_bresp;
+wire        arb_wcont;
 
 // ─── GPU bus signals (live: gpu_core instance below) ───
 wire        gpu_rd_arvalid, gpu_rd_arready;
@@ -232,6 +233,10 @@ wire [31:0] gpu_reg_rdata;
 wire        gpu_reg_wr;
 wire [3:0]  gpu_reg_addr;
 wire [31:0] gpu_reg_wdata;
+wire        bridge_awready_unused;
+wire        bridge_wready_unused;
+wire        bridge_bvalid_unused;
+wire [1:0]  bridge_bresp_unused;
 
 axi_sdram_arbiter sdram_arb (
     .clk(clk_cpu), .reset_n(reset_n),
@@ -261,6 +266,14 @@ axi_sdram_arbiter sdram_arb (
     .m1_wlast  (cpu_sdram_wlast),
     .m1_bvalid (cpu_sdram_bvalid),  .m1_bresp  (cpu_sdram_bresp),
 
+    // M2 — APF bridge DMA unused in this system test
+    .m2_awvalid(1'b0), .m2_awready(bridge_awready_unused),
+    .m2_awaddr (32'd0), .m2_awlen(8'd0),
+    .m2_wvalid (1'b0), .m2_wready(bridge_wready_unused),
+    .m2_wdata  (32'd0), .m2_wstrb(4'd0),
+    .m2_wlast  (1'b0),
+    .m2_bvalid (bridge_bvalid_unused), .m2_bresp(bridge_bresp_unused),
+
     // Slave side
     .s_arvalid(arb_arvalid), .s_arready(arb_arready),
     .s_araddr (arb_araddr),  .s_arlen  (arb_arlen),
@@ -273,6 +286,7 @@ axi_sdram_arbiter sdram_arb (
     .s_wdata  (arb_wdata),   .s_wstrb  (arb_wstrb),
     .s_wlast  (arb_wlast),
     .s_bvalid (arb_bvalid),  .s_bresp  (arb_bresp),
+    .s_wcont  (arb_wcont),
 
     // Debug taps kept for the harness.
     .dbg_arb_state(tb_arb_state_dbg),
@@ -362,6 +376,7 @@ axi_sdram_slave sdram_axi_slave (
     .s_axi_wlast  (arb_wlast),
     .s_axi_bvalid (arb_bvalid),  .s_axi_bready (1'b1),
     .s_axi_bresp  (arb_bresp),
+    .s_axi_wcont  (arb_wcont),
     .sdram_rd          (sdram_rd),
     .sdram_wr          (sdram_wr),
     .sdram_addr        (sdram_addr),
@@ -522,6 +537,7 @@ axi_periph_slave periph (
     .dataslot_allcomplete(dataslot_allcomplete),
     .vsync               (vsync),
     .early_vblank        (1'b0),
+    .os_inmenu           (1'b0),
     .cont1_key           (cont1_key),
     .cont1_joy           (cont1_joy),
     .cont1_trig          (cont1_trig),

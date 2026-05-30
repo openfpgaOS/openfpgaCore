@@ -350,6 +350,16 @@ always @(posedge clk or negedge reset_n) begin
                 // which corrupts CE# timing for the next transaction and
                 // shows up as a failure on test_cram0_256k's single-word
                 // uncached read path.
+                //
+                // NOTE: {burst_words_rem[4:0], 1'b0} is NOT a truncation bug —
+                // it is exactly (2*N)[5:0] (shifting left maps bit k->k+1, so
+                // dropping N's bit 5 drops the product's bit 6, leaving bits
+                // [5:0] of 2N).  sync_burst_len is a 6-bit field (max 63
+                // halfwords = 32 words), and 2N-1 <= 63 for all valid N<=32, so
+                // the 6-bit result is exact.  CRAM0 read bursts are cache-line
+                // fills (N<=16) — well inside that bound.  Do NOT widen this to
+                // {burst_words_rem, 1'b0}: that would overflow the 6-bit field
+                // identically for N>32 while changing nothing for valid N.
                 sync_burst_len_r <= {burst_words_rem[4:0], 1'b0} - 6'd1;
                 state <= ST_BURST_LO;
             end

@@ -418,7 +418,7 @@ always @(posedge clk or negedge reset_n) begin
                 psx_clk <= 1'b1;
                 psx_cmd <= 1'b1;
                 poll_timer <= POLL_INTERVAL_CYCLES;
-                debug_status <= {att_sel, valid, frame_id[1:0],
+                debug_status <= {att_sel, psx_id_valid(frame_id), frame_id[1:0],
                                  invalid_count[3:0]};
 
                 if (psx_id_valid(frame_id)) begin

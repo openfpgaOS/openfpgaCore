@@ -154,12 +154,18 @@ module sram_controller #(
 
                 ST_WR_HI_PULSE: begin
                     sram_we_n <= 1'b0;
-                    // Page-mode HI write: same page as the LO write that
-                    // just completed, so use the shorter PAGE_CYCLES hold
-                    // time instead of a full WAIT_CYCLES (mirrors the
-                    // page-mode optimization the read path already uses).
-                    // Saves 3 cycles per 32-bit write at 100 MHz.
-                    wait_cnt <= PAGE_CYCLES[3:0] - 1'b1;
+                    // Async SRAM has NO page-WRITE mode: page/static-column
+                    // mode shortens only reads (OE# held, address changes
+                    // within a page).  Every write must independently meet
+                    // full tPWE (write-pulse width) and tWC regardless of
+                    // address locality, so the HI half-word needs the same
+                    // WAIT_CYCLES pulse as the LO half.  Using the shorter
+                    // PAGE_CYCLES here gave a ~30 ns WE# pulse, below tPWE for
+                    // a 55 ns-class part, so the upper 16 bits of every 32-bit
+                    // write could fail to commit on real hardware (the
+                    // Verilator chip model captures on any posedge and cannot
+                    // expose this).
+                    wait_cnt <= WAIT_CYCLES[3:0] - 1'b1;
                     state <= ST_WR_HI_HOLD;
                 end
 

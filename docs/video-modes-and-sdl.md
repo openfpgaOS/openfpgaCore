@@ -9,11 +9,11 @@ The Pocket target boots in the legacy app framebuffer mode:
 - one framebuffer is `76,800` bytes
 - `of_get_caps()->fb_width`, `fb_height`, and `fb_stride` report this boot mode
 
-The scanout timing is 640 pixels wide but only 240 active lines. The scanout
+The default scanout timing is 320 pixels wide by 240 active lines. The scanout
 module now reads the active framebuffer width, height, stride, and color mode
-from sysregs and scales that source framebuffer into the existing 640x240
-output. This supports dynamic source framebuffers such as 320x288, 640x480,
-and 800x600 without changing the physical LCD timing.
+from sysregs and scales that source framebuffer into the selected Pocket scaler
+slot. This supports dynamic source framebuffers such as 320x288, 640x480, and
+800x600 by switching to the matching physical scaler slot when one exists.
 
 ## What SDL does
 

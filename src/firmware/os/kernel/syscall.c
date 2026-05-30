@@ -114,34 +114,48 @@ enum {
 };
 
 /* ======================================================================
- * I/O cache — LRU read cache in SDRAM
+ * Always-on file read cache
  *
- * Each entry holds one 32KB block, keyed by (slot_id, aligned_offset).
- * On hit, data is served directly from SDRAM — no bridge DMA needed.
- * On miss, the LRU entry is evicted and refilled via bridge DMA.
+ * The cache storage is a target-owned SDRAM reservation, not kernel BSS:
+ * the Pocket OSDATA linker region is intentionally small, while the cache
+ * defaults to 4 MB.  The target memory map lowers the app's SDRAM limit so
+ * apps cannot legally overlap this region.
  * ====================================================================== */
 
-#define IO_CACHE_ENTRIES    8
-#define IO_CACHE_BLOCK_SIZE (32 * 1024)
-/* The cache lives in SDRAM at 0x10380000 (256 KB), between the unused
- * tail of TERM_FB and INTERACT_BASE. */
-#define IO_CACHE_BASE       0x10380000u
-#define IO_CACHE_CACHED     (IO_CACHE_BASE)                /* CPU cached reads */
-#define IO_CACHE_UNCACHED   (IO_CACHE_BASE)                /* SDRAM has no uncached alias */
-#define IO_CACHE_BRIDGE     (IO_CACHE_BASE)                /* Bridge writes here too */
+#define IO_CACHE_TOTAL_SIZE FILE_CACHE_SIZE
+#define IO_CACHE_BLOCK_SIZE FILE_CACHE_BLOCK_SIZE
+#define IO_CACHE_ENTRIES    ((int)(IO_CACHE_TOTAL_SIZE / IO_CACHE_BLOCK_SIZE))
+
+#if IO_CACHE_TOTAL_SIZE == 0
+#error "The file read cache is always on; OF_TARGET_FILE_CACHE_SIZE must be nonzero"
+#endif
+
+#if (IO_CACHE_TOTAL_SIZE % IO_CACHE_BLOCK_SIZE) != 0
+#error "OF_TARGET_FILE_CACHE_SIZE must be a multiple of OF_TARGET_FILE_CACHE_BLOCK_SIZE"
+#endif
+
+#if (IO_CACHE_BLOCK_SIZE & (IO_CACHE_BLOCK_SIZE - 1u)) != 0
+#error "OF_TARGET_FILE_CACHE_BLOCK_SIZE must be a power of two"
+#endif
 
 typedef struct {
-    uint32_t slot_id;       /* data slot this block belongs to */
-    uint32_t file_off;      /* file offset (aligned to IO_CACHE_BLOCK_SIZE) */
-    uint32_t valid;         /* bytes of valid data in this block */
-    uint32_t lru;           /* access counter — higher = more recent */
+    uint32_t slot_id;
+    uint32_t file_off;
+    uint32_t valid;
+    uint32_t lru;
 } io_cache_entry_t;
 
 static io_cache_entry_t io_cache[IO_CACHE_ENTRIES];
 static uint32_t io_lru_counter;
 
-/* Find a cache entry matching (slot, aligned_off), or return -1 */
-static int io_cache_lookup(uint32_t slot_id, uint32_t aligned_off) {
+static inline const uint8_t *io_cache_data(int entry)
+{
+    return (const uint8_t *)(uintptr_t)
+        (FILE_CACHE_BASE + (uint32_t)entry * IO_CACHE_BLOCK_SIZE);
+}
+
+static int io_cache_lookup(uint32_t slot_id, uint32_t aligned_off)
+{
     for (int i = 0; i < IO_CACHE_ENTRIES; i++) {
         if (io_cache[i].valid > 0 &&
             io_cache[i].slot_id == slot_id &&
@@ -153,12 +167,14 @@ static int io_cache_lookup(uint32_t slot_id, uint32_t aligned_off) {
     return -1;
 }
 
-/* Find the LRU entry to evict */
-static int io_cache_evict(void) {
+static int io_cache_evict(void)
+{
     int best = 0;
     uint32_t oldest = io_cache[0].lru;
+
     for (int i = 1; i < IO_CACHE_ENTRIES; i++) {
-        if (io_cache[i].valid == 0) return i;  /* prefer empty slot */
+        if (io_cache[i].valid == 0)
+            return i;
         if (io_cache[i].lru < oldest) {
             oldest = io_cache[i].lru;
             best = i;
@@ -167,45 +183,39 @@ static int io_cache_evict(void) {
     return best;
 }
 
-/* Get pointer to entry N's SDRAM-backed cached data. */
-static inline const uint8_t *io_cache_data(int entry) {
-    return (const uint8_t *)(IO_CACHE_CACHED + entry * IO_CACHE_BLOCK_SIZE);
-}
-
-/* Fill a cache entry via of_file_read, which bounces the bridge DMA
- * through CRAM0 scratch in hardware-sized chunks, then memcpys into the
- * caller's SDRAM buffer.
- *
- * v2 arch: the direct bridge→SDRAM fabric path was retired with CRAM1,
- * so the bridge can only write to CRAM0.  Using of_file_read lets the
- * of_disk_bridge backend handle the mode flip + bounce once, instead of
- * duplicating that sequence here.  The memcpy lands in SDRAM via the
- * L1 D$, so subsequent reads from cached_ptr hit the cache coherently
- * — no explicit invalidation needed. */
 static int io_cache_fill(int entry, uint32_t slot_id,
-                          uint32_t aligned_off, uint32_t fill) {
-    void *cached_ptr = (void *)(IO_CACHE_CACHED + entry * IO_CACHE_BLOCK_SIZE);
+                         uint32_t aligned_off, uint32_t fill)
+{
+    if (fill == 0)
+        return -EIO;
 
-    int rc = of_file_read(slot_id, aligned_off, cached_ptr, fill);
-    if (rc < 0) return rc;
+    void *cache_ptr = (void *)(uintptr_t)
+        (FILE_CACHE_BASE + (uint32_t)entry * IO_CACHE_BLOCK_SIZE);
+
+    int rc = of_file_read(slot_id, aligned_off, cache_ptr, fill);
+    if (rc < 0)
+        return rc;
 
     io_cache[entry].slot_id = slot_id;
     io_cache[entry].file_off = aligned_off;
     io_cache[entry].valid = fill;
     io_cache[entry].lru = ++io_lru_counter;
-
     return 0;
 }
 
 static int slot_read_cached(uint32_t slot_id, uint32_t off,
-                            void *dst, uint32_t len) {
+                            void *dst, uint32_t len)
+{
     uint8_t *out = (uint8_t *)dst;
     uint32_t done = 0;
     int64_t file_size = -2;
 
     while (done < len) {
+        if (done > 0xFFFFFFFFu - off)
+            return -EINVAL;
+
         uint32_t cur = off + done;
-        uint32_t aligned_off = cur & ~(IO_CACHE_BLOCK_SIZE - 1);
+        uint32_t aligned_off = cur & ~(IO_CACHE_BLOCK_SIZE - 1u);
         uint32_t buf_off = cur - aligned_off;
         int entry = io_cache_lookup(slot_id, aligned_off);
 
@@ -483,9 +493,6 @@ typedef struct {
 static vfs_mount_t vfs_mounts[VFS_MAX_MOUNTS];
 static int vfs_mount_count;
 static char vfs_cwd[VFS_PATH_MAX] = "/";
-
-static int slot_read_cached(uint32_t slot_id, uint32_t off,
-                            void *dst, uint32_t len);
 
 static int path_len(const char *s) {
     int n = 0;
@@ -767,7 +774,7 @@ static long vfs_open_if_mounted(int fd, const char *path,
 /* ======================================================================
  * Directory listing — enumerate data slots via DS_CMD_GETFILE
  *
- * opendir("/") probes slots 0-6 for loaded files and auto-registers
+ * opendir("/") probes available APF data slots and auto-registers
  * them in the file slot table.  getdents64 returns the entries.
  * ====================================================================== */
 
@@ -1072,60 +1079,25 @@ static long sys_read(long fd, long buf, long count) {
         to_read = (uint32_t)(f->size - f->offset);
     }
 
-    /* I/O cache: serve reads from an SDRAM-backed LRU cache.
-     * Each cache block is 32KB, keyed by (slot_id, aligned_offset).
-     * The Pocket bridge backend internally chunks APF reads through
-     * CRAM0 scratch before copying into this cache. */
+    if (to_read == 0)
+        return 0;
+    if (f->offset > 0xFFFFFFFFull)
+        return -EINVAL;
+    if ((uint64_t)to_read > 0x100000000ull - f->offset)
+        to_read = (uint32_t)(0x100000000ull - f->offset);
 
-    uint8_t *dst = (uint8_t *)buf;
-    uint32_t done = 0;
-
-    while (done < to_read) {
-        if (f->offset > 0xFFFFFFFFull)
-            return done ? (long)done : -EINVAL;
-
-        uint32_t cur_off = (uint32_t)f->offset;
-        uint32_t aligned_off = cur_off & ~(IO_CACHE_BLOCK_SIZE - 1);
-        uint32_t buf_off = cur_off - aligned_off;
-
-        /* Look up in I/O cache */
-        int entry = io_cache_lookup(f->slot_id, aligned_off);
-
-        if (entry < 0) {
-            /* Cache miss — evict LRU and fill from bridge DMA */
-            entry = io_cache_evict();
-
-            uint32_t fill = IO_CACHE_BLOCK_SIZE;
-            if (f->size > 0 &&
-                (uint64_t)aligned_off + fill > f->size)
-                fill = (uint32_t)(f->size - aligned_off);
-            if (fill == 0) break;
-
-            int rc = io_cache_fill(entry, f->slot_id, aligned_off, fill);
-            if (rc < 0) {
-                if (f->size == 0) {
-                    f->size = f->offset;
-                    break;
-                }
-                if (done > 0) break;
-                return (long)rc;
-            }
+    int rc = slot_read_cached(f->slot_id, (uint32_t)f->offset,
+                              (void *)buf, to_read);
+    if (rc < 0) {
+        if (f->size == 0) {
+            f->size = f->offset;
+            return 0;
         }
-
-        /* Serve from cache entry */
-        uint32_t avail = io_cache[entry].valid - buf_off;
-        uint32_t n = to_read - done;
-        if (n > avail) n = avail;
-        if (n == 0) break;
-
-        /* Cache data is already in SDRAM; the bridge backend handled
-         * CRAM0 scratch ownership and chunking when filling the entry. */
-        memcpy(dst + done, io_cache_data(entry) + buf_off, n);
-        f->offset += n;
-        done += n;
+        return (long)rc;
     }
 
-    return (long)done;
+    f->offset += to_read;
+    return (long)to_read;
 }
 
 static int alloc_fd(void) {
@@ -1394,9 +1366,7 @@ static long sys_openat(long dirfd, long pathname, long flags, long mode) {
             return -EACCES;
         }
 
-        /* Reject registered names whose slot is unbacked (size == 0).
-         * Without this, fopen returns a valid FD and subsequent reads
-         * serve stale bytes from the I/O cache's bounce buffer. */
+        /* Reject registered names whose slot is unbacked (size == 0). */
         int64_t sz = of_file_size64((uint32_t)slot);
         if (sz <= 0) {
             fd_table[fd].in_use = 0;
@@ -1528,9 +1498,6 @@ static long sys_llseek(long fd, long off_hi, long off_lo,
         return -EINVAL;
 
     f->offset = (uint64_t)new_offset;
-
-    /* I/O cache is keyed by (slot_id, aligned_offset) — seeks just
-     * change f->offset and the cache naturally serves the right block. */
 
     /* _llseek writes result to user pointer as 64-bit */
     if (result_ptr) {
@@ -2151,7 +2118,7 @@ static long linux_dispatch(long n, long a0, long a1, long a2,
         SYS_COLOR_MODE = COLOR_MODE_8BIT;
         FB_MODE_SIZE = ((uint32_t)FB_HEIGHT << 16) | FB_WIDTH;
         FB_MODE_STRIDE = FB_STRIDE;
-        VIDEO_SCALER_MODE = VIDEO_SCALER_SLOT_640X240;
+        VIDEO_SCALER_MODE = VIDEO_SCALER_SLOT_DEFAULT_320X240;
         TERM_FB_CTRL = 1;
         while (1) {}
         return 0;
@@ -2539,7 +2506,6 @@ void syscall_init(uintptr_t heap_start) {
     file_slot_count = 0;
     memset(file_slots, 0, sizeof(file_slots));
 
-    /* Reset I/O cache */
     memset(io_cache, 0, sizeof(io_cache));
     io_lru_counter = 0;
 

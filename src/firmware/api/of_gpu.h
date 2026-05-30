@@ -545,6 +545,8 @@ static inline void of_gpu_init(void) {
     _gpu_dbg_ring_spin_iters = 0;
     _gpu_dbg_min_ring_free = OF_GPU_RING_SIZE;
     _gpu_state_valid = 0;
+    GPU_CTRL = 6;               /* soft_reset | ring_reset */
+    for (volatile int i = 0; i < 100; i++) {}
     GPU_CTRL = 4;               /* ring_reset: clear wr_addr + wrptr + rdptr */
     GPU_CTRL = 1;               /* enable */
 

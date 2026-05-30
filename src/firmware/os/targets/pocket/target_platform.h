@@ -40,10 +40,11 @@
 #define OF_TARGET_FB_STRIDE            320u
 #define OF_TARGET_TERM_FB_BASE         0x50300000u
 
-/* APF data-slot reads stage through CRAM0.  The FPGA bridge path now
- * issues CRAM0 writes directly, without the previous 1024-word write FIFO;
- * try larger bridge-managed file chunks so fewer host commands are needed. */
+/* Normal APF data-slot reads target SDRAM directly.  CRAM0 transfers still
+ * use the smaller safe raw size because the bridge-side CRAM0 ingress FIFO
+ * is intentionally shallow. */
 #define OF_TARGET_DMA_CHUNK_SIZE       (32u * 1024u)
+#define OF_TARGET_CRAM0_DMA_CHUNK_SIZE (4u * 1024u)
 
 #define OF_TARGET_INTERACT_BASE        0x103FE000u
 #define OF_TARGET_INTERACT_UNCACHED    0x503FE000u
@@ -65,7 +66,7 @@
 #define OF_TARGET_CRAM0_PRESAVE_OFFSET 0x000C0000u   /* 768 KB in: shared config / per-game settings */
 #define OF_TARGET_CRAM0_SAVE_OFFSET    0x00100000u   /* 1 MB in */
 #define OF_TARGET_CRAM0_SCRATCH_OFFSET 0x00400000u   /* 4 MB in — above config + the 2.5 MB save window */
-#define OF_TARGET_CRAM0_ASYNC_BOUNCE_OFFSET (OF_TARGET_CRAM0_SCRATCH_OFFSET + OF_TARGET_DMA_CHUNK_SIZE)
+#define OF_TARGET_CRAM0_ASYNC_BOUNCE_OFFSET (OF_TARGET_CRAM0_SCRATCH_OFFSET + OF_TARGET_CRAM0_DMA_CHUNK_SIZE)
 #define OF_TARGET_CRAM0_APP_DMA_OFFSET 0x00500000u   /* App-visible async file staging pool */
 #define OF_TARGET_CRAM0_APP_DMA_SIZE   0x00100000u   /* 1 MB */
 
@@ -76,23 +77,29 @@
  *   0x13FC0000-0x14000000  GPU palookup tables (fixed RTL address)
  *   0x13F80000-0x13FC0000  speculation headroom / guard
  *   0x13F00000-0x13F80000  OS runtime stack for syscall/trap C code
- *   below 0x13F00000       dynamic audio/SoundFont reservations
+ *   0x13B00000-0x13F00000  OS file read cache (4 MB by default)
+ *   below file cache       dynamic audio/SoundFont reservations
  *
  * The app heap/mmap/stack top is set at boot to the lowest audio
- * reservation, so apps get the unused SDRAM tail without a hidden
- * sample-pool hole. */
+ * reservation, so apps get the unused SDRAM tail without hidden holes. */
 #define OF_TARGET_GPU_PALOOKUP_BASE    0x13FC0000u
 #define OF_TARGET_GPU_PALOOKUP_SIZE    0x00040000u
 
 #define OF_TARGET_RUNTIME_STACK_TOP    0x13F80000u
 #define OF_TARGET_RUNTIME_STACK_SIZE   (512u * 1024u)
 
+#define OF_TARGET_FILE_CACHE_SIZE       (4u * 1024u * 1024u)
+#define OF_TARGET_FILE_CACHE_BLOCK_SIZE OF_TARGET_DMA_CHUNK_SIZE
+#define OF_TARGET_FILE_CACHE_TOP        (OF_TARGET_RUNTIME_STACK_TOP - OF_TARGET_RUNTIME_STACK_SIZE)
+#define OF_TARGET_FILE_CACHE_BASE       (OF_TARGET_FILE_CACHE_TOP - OF_TARGET_FILE_CACHE_SIZE)
+
 /* Dynamic audio memory.  The 16 KB stream ring and any boot-time .ofsf
- * bank are reserved top-down from below the OS runtime stack. */
-#define OF_TARGET_AUDIO_RESERVE_TOP    (OF_TARGET_RUNTIME_STACK_TOP - OF_TARGET_RUNTIME_STACK_SIZE)
+ * bank are reserved top-down from below the OS file cache. */
+#define OF_TARGET_AUDIO_RESERVE_TOP    OF_TARGET_FILE_CACHE_BASE
 #define OF_TARGET_AUDIO_STREAM_SIZE    0x00004000u
 #define OF_TARGET_AUDIO_RESERVE_ALIGN  0x00001000u
-#define OF_TARGET_APP_STATIC_END       (OF_TARGET_AUDIO_RESERVE_TOP - OF_TARGET_AUDIO_STREAM_SIZE - OF_TARGET_RUNTIME_STACK_SIZE)
+#define OF_TARGET_APP_STACK_TOP        OF_TARGET_AUDIO_RESERVE_TOP
+#define OF_TARGET_APP_STATIC_END       (OF_TARGET_APP_STACK_TOP - OF_TARGET_AUDIO_STREAM_SIZE - OF_TARGET_RUNTIME_STACK_SIZE)
 
 /* One pre-save nonvolatile slot covers either SDK Shared Config (id 8)
  * or Duke's per-game settings file (id 9), depending on the active
@@ -117,12 +124,28 @@
 #error "CRAM0 scratch overlaps the nonvolatile save-slot window"
 #endif
 
-#if (OF_TARGET_CRAM0_ASYNC_BOUNCE_OFFSET + OF_TARGET_DMA_CHUNK_SIZE) > OF_TARGET_CRAM0_APP_DMA_OFFSET
+#if (OF_TARGET_CRAM0_ASYNC_BOUNCE_OFFSET + OF_TARGET_CRAM0_DMA_CHUNK_SIZE) > OF_TARGET_CRAM0_APP_DMA_OFFSET
 #error "CRAM0 app DMA pool overlaps the async bounce DMA window"
 #endif
 
 #if (OF_TARGET_CRAM0_APP_DMA_OFFSET + OF_TARGET_CRAM0_APP_DMA_SIZE) > OF_TARGET_CRAM_SIZE
 #error "CRAM0 app DMA pool exceeds CRAM0"
+#endif
+
+#if OF_TARGET_FILE_CACHE_SIZE == 0
+#error "The file read cache is always on; OF_TARGET_FILE_CACHE_SIZE must be nonzero"
+#endif
+
+#if (OF_TARGET_FILE_CACHE_SIZE % OF_TARGET_FILE_CACHE_BLOCK_SIZE) != 0
+#error "File cache size must be a multiple of the file cache block size"
+#endif
+
+#if OF_TARGET_FILE_CACHE_TOP > (OF_TARGET_RUNTIME_STACK_TOP - OF_TARGET_RUNTIME_STACK_SIZE)
+#error "File cache overlaps the OS runtime stack"
+#endif
+
+#if OF_TARGET_APP_STATIC_END <= 0x10400000u
+#error "File cache/audio/app-stack reservations leave no app SDRAM"
 #endif
 
 #define OF_TARGET_GPU_BASE             0x4A000000u

@@ -60,6 +60,13 @@ module axi_sdram_slave #(
     input  wire        s_axi_bready,
     output reg  [1:0]  s_axi_bresp,
 
+    // Asserted when this write's W data is supplied continuously (cannot
+    // underrun) — e.g. the GPU posted-write queue.  Only such writes may take
+    // the native streaming-burst path; writes that can stall WVALID mid-burst
+    // (CPU cache-line writebacks) are forced to the serialized path, where each
+    // beat waits for its own WVALID and so cannot latch a stale/duplicated word.
+    input  wire        s_axi_wcont,
+
     // SDRAM word interface (directly to arbiter in core_top.v)
     output reg         sdram_rd,
     output reg         sdram_wr,
@@ -106,6 +113,7 @@ reg [31:0] active_next_wdata; // Beat selected by the last sdram_wr_data_next pu
 reg [3:0]  active_next_wstrb;
 reg        wready_given; // Next W beat already accepted
 reg        burst_preloaded; // 2-beat write has next_wdata before command issue
+reg        wcont_r;      // latched s_axi_wcont for the in-flight write
 reg        wr_op_done_seen; // sdram_wr_done pulse latched after our write was accepted; preferred over !sdram_busy because the busy signal stays high across unrelated io_sdram ops (scanout burst_rd, autorefresh) and starves single-word writes
 
 // Stable continuation export for io_sdram burst write forwarding.  This is
@@ -135,10 +143,15 @@ reg        rskid_last,  rskid2_last;
 reg        rskid_valid, rskid2_valid;
 
 wire beat_is_last = (beat_count == burst_len);
+// Serialize a multi-beat write unless its W stream is continuously available
+// (s_axi_wcont).  This keeps native streaming bursts for the GPU (queue-fed,
+// underrun-immune) while forcing CPU writebacks onto the safe per-beat path.
 wire write_burst_serialized = SERIALIZE_WRITE_BURSTS ||
-                              (burst_len > MAX_NATIVE_WRITE_BURST_LEN);
+                              (burst_len > MAX_NATIVE_WRITE_BURST_LEN) ||
+                              (!wcont_r && (burst_len != 8'd0));
 wire idle_aw_serialized = SERIALIZE_WRITE_BURSTS ||
-                          (s_axi_awlen > MAX_NATIVE_WRITE_BURST_LEN);
+                          (s_axi_awlen > MAX_NATIVE_WRITE_BURST_LEN) ||
+                          (!s_axi_wcont && (s_axi_awlen != 8'd0));
 wire idle_aw_native_burst2 = !idle_aw_serialized && (s_axi_awlen == 8'd1);
 
 always @(posedge clk or posedge reset) begin
@@ -173,6 +186,7 @@ always @(posedge clk or posedge reset) begin
         active_next_wstrb <= 0;
         wready_given <= 0;
         burst_preloaded <= 0;
+        wcont_r <= 0;
         wr_op_done_seen <= 0;
 
         rskid_data   <= 0;
@@ -249,6 +263,7 @@ always @(posedge clk or posedge reset) begin
                 burst_len <= s_axi_awlen;
                 beat_count <= 0;
                 burst_preloaded <= 1'b0;
+                wcont_r <= s_axi_wcont;
                 if (idle_aw_native_burst2) begin
                     // Native 2-beat writes need a stricter W handshake than
                     // the legacy early-capture path below.  WREADY is a

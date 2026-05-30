@@ -91,7 +91,7 @@ void *syscall_alloc_app_mmap(uint32_t size);
 int syscall_free_app_mmap(void *ptr, uint32_t size);
 uintptr_t of_brk_limit(void);
 
-/* Filesystem init — issues DS_CMD_OPENFILE on every data slot (0-6)
+/* Filesystem init — issues DS_CMD_OPENFILE on every data slot (0-7)
  * so APF opens backing files (required for "deferload":true slots),
  * queries size + filename, and populates the file_slot registry so
  * fopen("name.wad") resolves and opendir("/") lists every slot.

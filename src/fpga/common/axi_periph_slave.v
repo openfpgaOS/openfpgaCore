@@ -50,6 +50,7 @@ module axi_periph_slave (
     input wire         dataslot_allcomplete,
     input wire         vsync,
     input wire         early_vblank,
+    input wire         os_inmenu,
     input wire [31:0]  cont1_key,
     input wire [31:0]  cont1_joy,
     input wire [15:0]  cont1_trig,
@@ -555,6 +556,12 @@ always @(posedge clk) begin
     early_vblank_sync <= {early_vblank_sync[1:0], early_vblank};
 end
 wire early_vblank_s = early_vblank_sync[2];
+
+reg [2:0] os_inmenu_sync;
+always @(posedge clk) begin
+    os_inmenu_sync <= {os_inmenu_sync[1:0], os_inmenu};
+end
+wire os_inmenu_s = os_inmenu_sync[2];
 
 function [9:0] clamp_v_total;
     input [9:0] vt;
@@ -1175,7 +1182,7 @@ always @(posedge clk) begin
         end
 
         // Vsync IRQ — set on every vsync rising edge, cleared by W1C at 0x9C
-        if (vsync_rising)
+        if (vsync_rising && !os_inmenu_s)
             vsync_irq_pending <= 1'b1;
 
         // Triple buffer swap. Vsync is the normal consume point; the early
@@ -1184,13 +1191,13 @@ always @(posedge clk) begin
         // display frame, so a new GPU CMD_FLIP arriving after a real vsync
         // consume waits for the next frame instead of skipping a frame that
         // was already presented.
-        if (vsync_rising)
+        if (vsync_rising && !os_inmenu_s)
             fb_swap_consumed_this_frame <= 1'b0;
-        if (fb_swap_pending && vsync_rising) begin
+        if (!os_inmenu_s && fb_swap_pending && vsync_rising) begin
             fb_display_idx <= fb_ready_idx;
             fb_swap_pending <= 1'b0;
             fb_swap_consumed_this_frame <= 1'b1;
-        end else if (fb_swap_pending && early_vblank_s &&
+        end else if (!os_inmenu_s && fb_swap_pending && early_vblank_s &&
                      !fb_swap_consumed_this_frame) begin
             fb_display_idx <= fb_ready_idx;
             fb_swap_pending <= 1'b0;

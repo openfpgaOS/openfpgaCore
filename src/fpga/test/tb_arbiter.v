@@ -83,6 +83,7 @@ module tb_arbiter (
     output wire        dbg_s_wvalid,
     output wire        dbg_s_wready,
     output wire        dbg_s_wlast,
+    output wire [31:0] dbg_s_wdata,
     output wire        dbg_s_bvalid,
     output wire        dbg_s_rvalid,
     output wire        dbg_s_rlast,
@@ -113,6 +114,10 @@ wire        s_wlast;
 wire        s_bvalid;
 wire [1:0]  s_bresp;
 wire        dut_dbg_cpu_pending;
+wire        m2_awready_unused;
+wire        m2_wready_unused;
+wire        m2_bvalid_unused;
+wire [1:0]  m2_bresp_unused;
 
 axi_sdram_arbiter dut (
     .clk        (clk),
@@ -159,6 +164,18 @@ axi_sdram_arbiter dut (
     .m1_bvalid  (m1_bvalid),
     .m1_bresp   (m1_bresp),
 
+    .m2_awvalid (1'b0),
+    .m2_awready (m2_awready_unused),
+    .m2_awaddr  (32'd0),
+    .m2_awlen   (8'd0),
+    .m2_wvalid  (1'b0),
+    .m2_wready  (m2_wready_unused),
+    .m2_wdata   (32'd0),
+    .m2_wstrb   (4'd0),
+    .m2_wlast   (1'b0),
+    .m2_bvalid  (m2_bvalid_unused),
+    .m2_bresp   (m2_bresp_unused),
+
     .m3_arvalid (m3_arvalid),
     .m3_arready (m3_arready),
     .m3_araddr  (m3_araddr),
@@ -167,6 +184,7 @@ axi_sdram_arbiter dut (
     .m3_rdata   (m3_rdata),
     .m3_rresp   (m3_rresp),
     .m3_rlast   (m3_rlast),
+    .m3_rready  (1'b1),
 
     .s_arvalid  (s_arvalid),
     .s_arready  (s_arready),
@@ -188,6 +206,7 @@ axi_sdram_arbiter dut (
     .s_wlast    (s_wlast),
     .s_bvalid   (s_bvalid),
     .s_bresp    (s_bresp),
+    .s_wcont    (),
 
     .dbg_arb_state(dbg_arb_state),
     .dbg_cpu_pending(dut_dbg_cpu_pending),
@@ -293,6 +312,7 @@ assign dbg_s_awlen   = s_awlen;
 assign dbg_s_wvalid  = s_wvalid;
 assign dbg_s_wready  = s_wready;
 assign dbg_s_wlast   = s_wlast;
+assign dbg_s_wdata   = s_wdata;
 assign dbg_s_bvalid  = s_bvalid;
 assign dbg_s_rvalid  = s_rvalid;
 assign dbg_s_rlast   = s_rlast;

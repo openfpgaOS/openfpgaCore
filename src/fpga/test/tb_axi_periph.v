@@ -75,6 +75,7 @@ module tb_axi_periph (
     input  wire [1:0]  gpu_swap_idx_in,
     input  wire        vsync_in,
     input  wire        early_vblank_in,
+    input  wire        os_inmenu_in,
     input  wire        target_dataslot_ack_in,
     input  wire        target_dataslot_done_in,
     input  wire [2:0]  target_dataslot_err_in,
@@ -131,6 +132,7 @@ wire bridge_wr_idle = bridge_wr_idle_in;
 wire dataslot_allcomplete = 1'b1;
 wire vsync = vsync_in;
 wire early_vblank = early_vblank_in;
+wire os_inmenu = os_inmenu_in;
 wire [31:0] cont1_key = cont1_key_in;
 wire [31:0] cont1_joy = cont1_joy_in;
 wire [15:0] cont1_trig = cont1_trig_in;
@@ -188,6 +190,7 @@ axi_periph_slave dut (
     .dataslot_allcomplete(dataslot_allcomplete),
     .vsync               (vsync),
     .early_vblank        (early_vblank),
+    .os_inmenu           (os_inmenu),
     .cont1_key           (cont1_key),
     .cont1_joy           (cont1_joy),
     .cont1_trig          (cont1_trig),

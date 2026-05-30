@@ -10,12 +10,17 @@
 #include "services_table.h"
 #include "bank_preload.h"
 #include "irq.h"
+#include "config.h"
 #include <stddef.h>
 #include <string.h>
 
 /* Data slot IDs (match data.json) */
 #define OS_SLOT_ID      1       /* OS binary (loaded by bootloader) */
-#define APP_SLOT_ID     2       /* Application ELF binary */
+#define APP_SLOT_ID     3       /* Default application ELF binary */
+#define APP_DEFAULT_ELF "app.elf"
+#define APP_ELF_NAME_MAX 64
+#define APP_ARGS_MAX     512
+#define APP_ARGC_MAX     32
 
 /* Fallback load address for PIE (ET_DYN) apps that have vaddrs relative to 0.
  * ET_EXEC apps linked at a nonzero base (e.g. 0x10400000 SDRAM) ignore this
@@ -82,11 +87,11 @@ static int app_load_transient(int rc) {
            rc == -6;    /* segment payload read failed */
 }
 
-static int load_app_with_retries(elf_load_result_t *app) {
+static int load_app_with_retries(uint32_t slot_id, elf_load_result_t *app) {
     int rc = -1;
 
     for (int attempt = 0; attempt < 32; attempt++) {
-        rc = elf_load(APP_SLOT_ID, APP_LOAD_ADDR, app);
+        rc = elf_load(slot_id, APP_LOAD_ADDR, app);
         if (rc == 0)
             return 0;
         if (!app_load_transient(rc))
@@ -98,6 +103,156 @@ static int load_app_with_retries(elf_load_result_t *app) {
     }
 
     return rc;
+}
+
+static char app_elf_name[APP_ELF_NAME_MAX];
+static char app_args_buf[APP_ARGS_MAX];
+static char *app_argv[APP_ARGC_MAX + 1];
+
+static int os_cfg_isspace(char c) {
+    return c == ' ' || c == '\t' || c == '\r' || c == '\n';
+}
+
+static char os_cfg_tolower(char c) {
+    if (c >= 'A' && c <= 'Z')
+        return (char)(c + ('a' - 'A'));
+    return c;
+}
+
+static int os_cfg_stricmp(const char *a, const char *b) {
+    while (*a && *b) {
+        char ca = os_cfg_tolower(*a++);
+        char cb = os_cfg_tolower(*b++);
+        if (ca != cb)
+            return (int)(unsigned char)ca - (int)(unsigned char)cb;
+    }
+    return (int)(unsigned char)os_cfg_tolower(*a) -
+           (int)(unsigned char)os_cfg_tolower(*b);
+}
+
+static int os_cfg_parse_slot_ref(const char *s, uint32_t *slot_out) {
+    if (!s || !(s[0] == 's' || s[0] == 'S') ||
+        !(s[1] == 'l' || s[1] == 'L') ||
+        !(s[2] == 'o' || s[2] == 'O') ||
+        !(s[3] == 't' || s[3] == 'T') ||
+        s[4] != ':')
+        return -1;
+
+    const char *p = s + 5;
+    uint32_t slot = 0;
+    int digits = 0;
+    while (*p >= '0' && *p <= '9') {
+        slot = slot * 10u + (uint32_t)(*p - '0');
+        digits++;
+        p++;
+    }
+
+    if (!digits || *p)
+        return -1;
+
+    *slot_out = slot;
+    return 0;
+}
+
+static int resolve_app_slot(const char *elf_name, uint32_t *slot_out) {
+    if (os_cfg_parse_slot_ref(elf_name, slot_out) == 0)
+        return 0;
+
+    if (file_slot_find(elf_name, slot_out) == 0)
+        return 0;
+
+    if (os_cfg_stricmp(elf_name, APP_DEFAULT_ELF) == 0) {
+        *slot_out = APP_SLOT_ID;
+        return 0;
+    }
+
+    return -1;
+}
+
+static int build_app_argv(int *argc_out) {
+    int argc = 1;
+    char *read = app_args_buf;
+    char *write = app_args_buf;
+
+    app_argv[0] = app_elf_name;
+
+    while (*read) {
+        while (os_cfg_isspace(*read))
+            read++;
+        if (!*read)
+            break;
+
+        if (argc >= APP_ARGC_MAX)
+            return OF_CONFIG_ERR_E2BIG;
+
+        app_argv[argc++] = write;
+        char quote = 0;
+
+        while (*read) {
+            char c = *read++;
+
+            if (quote) {
+                if (c == quote) {
+                    quote = 0;
+                    continue;
+                }
+                if (c == '\\' && *read) {
+                    *write++ = *read++;
+                    continue;
+                }
+                *write++ = c;
+                continue;
+            }
+
+            if (c == '\'' || c == '"') {
+                quote = c;
+                continue;
+            }
+            if (c == '\\' && *read) {
+                *write++ = *read++;
+                continue;
+            }
+            if (os_cfg_isspace(c))
+                break;
+
+            *write++ = c;
+        }
+
+        if (quote)
+            return OF_CONFIG_ERR_INVAL;
+
+        *write++ = '\0';
+    }
+
+    app_argv[argc] = NULL;
+    *argc_out = argc;
+    return 0;
+}
+
+static int prepare_app_launch(uint32_t *slot_out, int *argc_out) {
+    strncpy(app_elf_name, APP_DEFAULT_ELF, sizeof(app_elf_name));
+    app_elf_name[sizeof(app_elf_name) - 1] = '\0';
+    app_args_buf[0] = '\0';
+
+    int rc = of_config_get("os", "ELF", app_elf_name, sizeof(app_elf_name));
+    if (rc == OF_CONFIG_ERR_NOENT)
+        rc = 0;
+    if (rc < 0)
+        return rc;
+
+    rc = of_config_get("os", "ARGS", app_args_buf, sizeof(app_args_buf));
+    if (rc == OF_CONFIG_ERR_NOENT)
+        rc = 0;
+    if (rc < 0)
+        return rc;
+
+    filesystem_init();
+
+    rc = resolve_app_slot(app_elf_name, slot_out);
+    if (rc < 0)
+        return OF_CONFIG_ERR_NOENT;
+
+    return build_app_argv(argc_out);
 }
 
 void os_main(void) {
@@ -144,6 +299,18 @@ void os_main(void) {
     of_term_puts("  Syscall init...... ");
     status_ok();
 
+    of_term_puts("  Config init....... ");
+    int config_rc = of_config_load(OS_CONFIG_SLOT_ID);
+    if (config_rc < 0) {
+        status_fail();
+        of_term_printf("  os.ini rc=%d", config_rc);
+        if (of_config_error_line() > 0)
+            of_term_printf(" line=%d", of_config_error_line());
+        of_term_putchar('\n');
+        while (1) of_timer_delay_ms(1000);
+    }
+    status_ok();
+
     /* Brief pause to show banner */
     of_timer_delay_ms(800);
 
@@ -151,20 +318,28 @@ void os_main(void) {
     of_term_puts("  Loading app....... ");
 
     elf_load_result_t app;
-    int rc = load_app_with_retries(&app);
+    uint32_t app_slot = APP_SLOT_ID;
+    int app_argc = 1;
+    int rc = prepare_app_launch(&app_slot, &app_argc);
+    if (rc == 0)
+        rc = load_app_with_retries(app_slot, &app);
 
     if (rc < 0) {
         status_fail();
         of_term_printf("  rc=%d\n", rc);
-        of_term_puts("  \033[93mNo application found.\033[0m\n\n");
-        of_term_puts("  Place .elf in data slot 2\n");
+        of_term_printf("  \033[93mNo application found: %s\033[0m\n\n",
+                       app_elf_name);
+        of_term_puts("  Place .elf in data slot 3\n");
+        of_term_puts("  or set [os] ELF in os.ini\n");
         of_term_puts("  and press START to retry.\n");
 
         while (1) {
             of_input_poll();
             if (of_input_is_pressed(0, OF_BTN_START)) {
                 of_term_puts("\n  Retrying...");
-                rc = load_app_with_retries(&app);
+                rc = prepare_app_launch(&app_slot, &app_argc);
+                if (rc == 0)
+                    rc = load_app_with_retries(app_slot, &app);
                 if (rc == 0)
                     break;
                 of_term_printf(" rc=%d\n", rc);
@@ -256,8 +431,7 @@ void os_main(void) {
     of_timer_delay_ms(200);
 
     /* Execute the app */
-    char *argv[] = {"app", NULL};
-    elf_exec(&app, 1, argv);
+    elf_exec(&app, app_argc, app_argv);
 
     /* Should never reach here */
     while (1) {}

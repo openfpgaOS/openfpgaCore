@@ -6161,7 +6161,9 @@ static void test_param_q29_record_counts_and_odd_pairs() {
     const int fb_stride = 320;
     const int tex_w = 64;
     const int tex_h = 64;
-    const uint16_t record_counts[] = {1, 2, 3, 4, 5, 7, 8, 16, 64, 511, 512};
+    const uint16_t record_counts[] = {
+        1, 2, 3, 4, 5, 7, 8, 9, 16, 63, 64, 65, 511, 512
+    };
 
     for (uint16_t record_count : record_counts) {
         gpu_init();
@@ -6241,6 +6243,71 @@ static void test_param_q29_record_counts_and_odd_pairs() {
             snprintf(msg, sizeof(msg), "%d mismatches; first %s", diffs, first);
             check_fail(name, msg);
         }
+    }
+}
+
+static void test_param_q29_zero_counts_mixed_no_drop() {
+    printf("TEST param_q29_zero_counts_mixed_no_drop\n");
+    gpu_init();
+    preload_with_sentinel();
+
+    const int fb_stride = 320;
+    const int tex_w = 64;
+    const int tex_h = 64;
+    std::vector<uint8_t> tex = make_quake_distinct_texture(tex_w, tex_h);
+    for (uint8_t &px : tex) {
+        if (px == SENTINEL_BYTE)
+            px ^= 0x55;
+    }
+    upload_texture(TEX_BASE_BYTE, tex);
+
+    QuakeQ29RefSetup q = make_quake_q29_ref_setup(tex_w, tex_h);
+    ParamSpanListWire p = make_quake_q29_param(q, FB_BASE_BYTE,
+                                               TEX_BASE_BYTE, fb_stride,
+                                               tex_w, tex_h);
+
+    std::vector<ParamSpanRecordWire> records = {
+        {5,  11,  7}, {37, 12, 0}, {9,  13, 15}, {48, 14, 0},
+        {13, 15, 16}, {29, 16, 1}, {61, 17, 0}, {7,  18, 33},
+        {3,  19,  2}
+    };
+
+    std::vector<uint8_t> ref_fb((size_t)fb_stride * 32u, SENTINEL_BYTE);
+    quake_q29_ref_records(ref_fb, nullptr, tex, tex_w, q, fb_stride,
+                          fb_stride, records);
+
+    emit_param_span_list_raw(p, records);
+    if (!submit_and_wait()) {
+        check_fail("param_q29_zero_counts_mixed_no_drop", "timeout");
+        return;
+    }
+
+    bool ok = compare_quake_param_fb("param_q29_zero_counts_mixed_no_drop.fb",
+                                     FB_BASE_BYTE, ref_fb, fb_stride, records);
+
+    int zero_touched = 0;
+    char first[160] = {0};
+    for (const auto &r : records) {
+        if (r.count != 0)
+            continue;
+        uint8_t got = sdram_read_byte(FB_BASE_BYTE
+                                    + (uint32_t)r.v * fb_stride + r.u);
+        if (got != SENTINEL_BYTE) {
+            if (zero_touched == 0) {
+                snprintf(first, sizeof(first),
+                         "u=%u v=%u got=%02x", r.u, r.v, got);
+            }
+            zero_touched++;
+        }
+    }
+
+    if (ok && zero_touched == 0)
+        check_pass("param_q29_zero_counts_mixed_no_drop.zero_guards");
+    else if (zero_touched != 0) {
+        char msg[224];
+        snprintf(msg, sizeof(msg), "zero_touched=%d first %s",
+                 zero_touched, first);
+        check_fail("param_q29_zero_counts_mixed_no_drop.zero_guards", msg);
     }
 }
 
@@ -7086,6 +7153,7 @@ int main(int argc, char **argv) {
     test_param_span_q29_high_angle_floor_no_flatten();
     test_param_q29_tail_counts_and_boundaries();
     test_param_q29_record_counts_and_odd_pairs();
+    test_param_q29_zero_counts_mixed_no_drop();
     test_param_q29_wrap_and_fb_byte_lanes();
     test_param_q29_static_repeat_300();
     test_param_q29_dynamic_scale_projection();

@@ -416,6 +416,112 @@ static void test_posted_burst2_preserved_and_b_after_last() {
 }
 
 // ====================================================================
+// Test 6b: a 4-beat contiguous full-strobe GPU framebuffer write (AWLEN=3)
+// is coalesced into ONE native 4-beat slave burst, with the four W beats
+// forwarded IN ORDER and exactly one B after WLAST.  This exercises the
+// run-length coalescer's N>2 path (the prior arbiter capped GPU drains at 2
+// beats, so this would have been split into two 2-beat bursts).
+//
+// Continuous read pressure is applied so the arbiter defers the write drain
+// (read budget) until all four W beats have been posted into the queue — i.e.
+// the realistic "queue fills under read contention" scenario the widening
+// targets.  Without contention the same write would drain opportunistically in
+// 2-beat chunks as beats stream in (still correct, just less coalesced).
+// ====================================================================
+static void test_posted_burst4_coalesced_in_order() {
+    printf("\n=== Test 6b: Posted 4-beat GPU write coalesced to one burst ===\n");
+    reset_sequence();
+
+    const uint32_t wseq[4] = {0xC0DE0000u, 0xC0DE0001u, 0xC0DE0002u, 0xC0DE0003u};
+
+    tb->m0_arvalid = 1;            // continuous read pressure → defer write drain
+    tb->m0_araddr  = 0x10000000;
+    tb->m0_arlen   = 0;
+
+    tb->m0_awvalid = 1;
+    tb->m0_awaddr  = 0x20000200;
+    tb->m0_awlen   = 3;
+    tb->m0_wvalid  = 1;
+    tb->m0_wdata   = wseq[0];
+    tb->m0_wstrb   = 0xF;
+    tb->m0_wlast   = 0;
+
+    int w_beats = 0;
+    int slave_aw_count = 0;
+    int slave_awlen = -1;
+    int slave_w_beats = 0;
+    int slave_wlast_count = 0;
+    int slave_wlast_cycle = -1;
+    uint32_t slave_wdata_cap[4] = {0, 0, 0, 0};
+    int b_count = 0;
+    int b_cycle = -1;
+
+    for (int t = 0; t < 500; t++) {
+        tb->eval();
+        bool aw_hs = handshake(tb->m0_awvalid, tb->m0_awready);
+        bool w_hs  = handshake(tb->m0_wvalid,  tb->m0_wready);
+        bool slave_aw_hs = handshake(tb->dbg_s_awvalid, tb->dbg_s_awready);
+        bool slave_w_hs  = handshake(tb->dbg_s_wvalid,  tb->dbg_s_wready);
+
+        if (slave_aw_hs) {
+            slave_aw_count++;
+            if (slave_awlen < 0) slave_awlen = tb->dbg_s_awlen;  // first write burst
+        }
+        if (slave_w_hs) {
+            if (slave_w_beats < 4) slave_wdata_cap[slave_w_beats] = tb->dbg_s_wdata;
+            slave_w_beats++;
+            if (tb->dbg_s_wlast) {
+                slave_wlast_count++;
+                slave_wlast_cycle = t;
+            }
+        }
+        if (tb->m0_bvalid) {
+            b_count++;
+            b_cycle = t;
+        }
+
+        tick();
+
+        tb->m0_arvalid = 1;  // keep read pressure up
+        if (aw_hs) tb->m0_awvalid = 0;
+        if (w_hs) {
+            w_beats++;
+            if (w_beats < 4) {
+                tb->m0_wdata  = wseq[w_beats];
+                tb->m0_wlast  = (w_beats == 3) ? 1 : 0;
+                tb->m0_wvalid = 1;
+            } else {
+                tb->m0_wvalid = 0;
+            }
+        }
+    }
+
+    bool data_in_order = (slave_wdata_cap[0] == wseq[0]) &&
+                         (slave_wdata_cap[1] == wseq[1]) &&
+                         (slave_wdata_cap[2] == wseq[2]) &&
+                         (slave_wdata_cap[3] == wseq[3]);
+
+    char msg[200];
+    snprintf(msg, sizeof(msg),
+             "w=%d slave_aw=%d awlen0=%d slave_w=%d wlast=%d/%d b=%d/%d "
+             "data=%08x,%08x,%08x,%08x q=%u",
+             w_beats, slave_aw_count, slave_awlen, slave_w_beats,
+             slave_wlast_count, slave_wlast_cycle, b_count, b_cycle,
+             slave_wdata_cap[0], slave_wdata_cap[1], slave_wdata_cap[2],
+             slave_wdata_cap[3], (unsigned)tb->dbg_gpu_wq_count);
+    check("Four W beats accepted", w_beats == 4, msg);
+    check("One SDRAM write burst issued (coalesced, not split)", slave_aw_count == 1, msg);
+    check("SDRAM write burst length is four beats", slave_awlen == 3, msg);
+    check("Four SDRAM W beats issued", slave_w_beats == 4, msg);
+    check("WLAST asserted only on the fourth SDRAM beat",
+          slave_wlast_count == 1 && slave_wlast_cycle >= 0, msg);
+    check("Four W beats forwarded in order", data_in_order, msg);
+    check("Exactly one M0 B response returned", b_count == 1, msg);
+    check("B follows last committed word", b_cycle > slave_wlast_cycle, msg);
+    check("Posted queue drains", tb->dbg_gpu_wq_count == 0, msg);
+}
+
+// ====================================================================
 // Test 7: M0 read/write service under continuous mixed pressure.
 //
 // Drive BOTH AR and AW continuously, re-arming each handshake.  The
@@ -639,6 +745,7 @@ int main(int argc, char **argv) {
     test_continuous_ar_starves_aw();
     test_posted_write_allows_reads_before_commit();
     test_posted_burst2_preserved_and_b_after_last();
+    test_posted_burst4_coalesced_in_order();
     test_m0_fairness_ratio();
     test_multi_master_stress();
 

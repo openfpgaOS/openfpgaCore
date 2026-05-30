@@ -31,43 +31,44 @@ module dcfifo #(
 ) (
     input  wire        wrclk,
     input  wire        rdclk,
-    input  wire [31:0] data,
+    input  wire [lpm_width-1:0] data,
     input  wire        wrreq,
-    output wire [31:0] q,
+    output wire [lpm_width-1:0] q,
     input  wire        rdreq,
     output wire        rdempty,
-    output wire  [9:0] wrusedw,
+    output wire [lpm_widthu-1:0] wrusedw,
     output wire        wrfull,
     input  wire        aclr
 );
-    reg [31:0] mem [0:1023];
-    reg [10:0] wr_ptr = 11'd0;  /* MSB = wrap bit */
-    reg [10:0] rd_ptr = 11'd0;
-    reg [31:0] q_reg  = 32'd0;
+    reg [lpm_width-1:0] mem [0:lpm_numwords-1];
+    reg [lpm_widthu:0] wr_ptr = {(lpm_widthu+1){1'b0}};  /* MSB = wrap bit */
+    reg [lpm_widthu:0] rd_ptr = {(lpm_widthu+1){1'b0}};
+    reg [lpm_width-1:0] q_reg  = {lpm_width{1'b0}};
 
-    wire [10:0] diff = wr_ptr - rd_ptr;
+    localparam [lpm_widthu:0] DEPTH_COUNT = lpm_numwords;
+    wire [lpm_widthu:0] diff = wr_ptr - rd_ptr;
 
-    assign wrusedw = diff[9:0];
-    assign wrfull  = (diff == 11'd1024);
+    assign wrusedw = diff[lpm_widthu-1:0];
+    assign wrfull  = (diff == DEPTH_COUNT);
     assign rdempty = (wr_ptr == rd_ptr);
-    assign q       = (lpm_showahead == "ON" && !rdempty) ? mem[rd_ptr[9:0]] : q_reg;
+    assign q       = (lpm_showahead == "ON" && !rdempty) ? mem[rd_ptr[lpm_widthu-1:0]] : q_reg;
 
     always @(posedge wrclk) begin
         if (aclr) begin
-            wr_ptr <= 11'd0;
+            wr_ptr <= {(lpm_widthu+1){1'b0}};
         end else if (wrreq && !wrfull) begin
-            mem[wr_ptr[9:0]] <= data;
-            wr_ptr <= wr_ptr + 11'd1;
+            mem[wr_ptr[lpm_widthu-1:0]] <= data;
+            wr_ptr <= wr_ptr + {{lpm_widthu{1'b0}}, 1'b1};
         end
     end
 
     always @(posedge rdclk) begin
         if (aclr) begin
-            rd_ptr <= 11'd0;
-            q_reg  <= 32'd0;
+            rd_ptr <= {(lpm_widthu+1){1'b0}};
+            q_reg  <= {lpm_width{1'b0}};
         end else if (rdreq && !rdempty) begin
-            q_reg  <= mem[rd_ptr[9:0]];
-            rd_ptr <= rd_ptr + 11'd1;
+            q_reg  <= mem[rd_ptr[lpm_widthu-1:0]];
+            rd_ptr <= rd_ptr + {{lpm_widthu{1'b0}}, 1'b1};
         end
     end
 endmodule

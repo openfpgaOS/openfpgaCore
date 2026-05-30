@@ -31,9 +31,8 @@ int of_file_read(uint32_t slot_id, uint32_t slot_offset,
                   void *dest, uint32_t length);
 
 /* Read data from a slot in chunks.
- * dest can be in SDRAM (direct DMA) or CRAM/SRAM (bounced through SDRAM).
- * For non-SDRAM destinations, data is DMA'd to a bounce buffer first,
- * then copied to the target address. */
+ * SDRAM destinations use direct bridge DMA for aligned cache-line ranges.
+ * Unaligned edges and non-SDRAM destinations bounce through CRAM0. */
 int of_file_read_chunked(uint32_t slot_id, uint32_t slot_offset,
                           void *dest, uint32_t total);
 
@@ -58,9 +57,8 @@ int of_file_slot_write_chunked(uint32_t slot_id, uint32_t slot_offset,
 
 /* Raw bridge DMA: issue a read command and wait for completion.
  * No cache flush — caller is responsible for cache coherency.
- * Used by I/O cache for CRAM0 targets where no SDRAM flush is needed
- * (CRAM0 is uncached per PMA in v2 arch).  Length must not exceed
- * DMA_CHUNK_SIZE; use of_file_read_chunked/of_file_read for larger reads. */
+ * CRAM0 targets are limited by OF_TARGET_CRAM0_DMA_CHUNK_SIZE; SDRAM
+ * targets are limited by DMA_CHUNK_SIZE. */
 int of_file_read_raw(uint32_t slot_id, uint32_t slot_offset,
                       uint32_t bridge_addr, uint32_t length);
 

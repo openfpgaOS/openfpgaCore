@@ -15,6 +15,7 @@
 #include "services_table.h"
 #include "irq.h"
 #include "bank_preload.h"
+#include "config.h"
 #include "of_services.h"
 #include "../hal/hal.h"
 #include "../hal/regs.h"
@@ -313,6 +314,12 @@ void services_table_init(void) {
     svc->video_get_mode_info = of_video_get_mode_info;
     svc->video_get_caps = of_video_get_caps;
     svc->video_check_mode = of_video_check_mode;
+
+    /* OS/app configuration */
+    svc->config_get = of_config_get;
+    svc->config_get_int = of_config_get_int;
+    svc->config_get_bool = of_config_get_bool;
+    svc->config_next = of_config_next;
 }
 
 void services_table_set_smp_bank(const void *base, uint32_t size) {

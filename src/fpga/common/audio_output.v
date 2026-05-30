@@ -15,7 +15,11 @@ module audio_output (
     // CPU write interface (PCM samples from hardware mixer)
     input  wire        sample_wr,     // Write strobe (one clk_sys cycle)
     input  wire [31:0] sample_data,   // {left[15:0], right[15:0]}
-    output wire [9:0]  fifo_level,    // Write-side fill level (0..1024)
+    output wire [9:0]  fifo_level,    // Write-side fill level (0..1023); a
+                                      // completely full 1024-deep FIFO reads
+                                      // back as 0 here (dcfifo wrusedw is only
+                                      // lpm_widthu=10 bits wide), so use
+                                      // fifo_full for the true "full" condition.
     output wire        fifo_full,
 
     // I2S output

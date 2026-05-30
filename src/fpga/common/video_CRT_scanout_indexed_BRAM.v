@@ -82,21 +82,39 @@ module video_CRT_scanout_indexed_BRAM (
     localparam VID_H_BPORCH = 62;
     localparam VID_H_FPORCH = 20;
     localparam [9:0] VID_H_ACTIVE_START = 10'd120;
-    localparam [9:0] VID_V_FETCH_START  = 10'd17;
-    localparam [9:0] VID_V_ACTIVE_START = 10'd18;
+    localparam [9:0] VID_V_FETCH_BASE   = 10'd17;
+    localparam [9:0] VID_V_ACTIVE_BASE  = 10'd18;
+    localparam [9:0] VID_V_CENTER_HEIGHT = 10'd240;
     localparam [9:0] ANALOG_H_ACTIVE_END = 10'd760;
-    localparam [9:0] ANALOG_V_ACTIVE_END = 10'd258;
+
+    // Frame-boundary latch for the output geometry.  out_width/out_height are
+    // driven from the CPU sysreg domain and may update at any point; if every
+    // consumer (fetch addressing, LCD scanout, analog replay) read them
+    // combinationally they could disagree within a single frame, causing tear
+    // or mis-banking.  Capture them once per frame at frame_start (clk_video)
+    // into out_width_locked/out_height_locked so all three views share one
+    // stable geometry for the whole frame.  A mid-frame mode change is held off
+    // until the next frame_start.  See latch block below near frame_start.
+    reg [9:0] out_width_locked;
+    reg [9:0] out_height_locked;
 
     wire [9:0] out_width_safe =
-        (out_width == 10'd0) ? 10'd640 : out_width;
+        (out_width_locked == 10'd0) ? 10'd320 : out_width_locked;
     wire [9:0] out_height_safe =
-        (out_height == 10'd0) ? 10'd240 : out_height;
+        (out_height_locked == 10'd0) ? 10'd240 : out_height_locked;
+    wire [9:0] vid_v_center_offset =
+        (out_height_safe < VID_V_CENTER_HEIGHT) ?
+        ((VID_V_CENTER_HEIGHT - out_height_safe) >> 1) : 10'd0;
+    wire [10:0] vid_v_fetch_start =
+        {1'b0, VID_V_FETCH_BASE} + {1'b0, vid_v_center_offset};
+    wire [10:0] vid_v_active_start =
+        {1'b0, VID_V_ACTIVE_BASE} + {1'b0, vid_v_center_offset};
     wire [10:0] vid_h_active_end =
         {1'b0, VID_H_ACTIVE_START} + {1'b0, out_width_safe};
     wire [10:0] vid_v_fetch_end =
-        {1'b0, VID_V_FETCH_START} + {1'b0, out_height_safe};
+        vid_v_fetch_start + {1'b0, out_height_safe};
     wire [10:0] vid_v_active_end =
-        {1'b0, VID_V_ACTIVE_START} + {1'b0, out_height_safe};
+        vid_v_active_start + {1'b0, out_height_safe};
 
     // Scanout line cache.  The video side reads the bank selected by the
     // visible output line while the SDRAM side fills that bank from the
@@ -133,6 +151,21 @@ module video_CRT_scanout_indexed_BRAM (
         (pal_commit_req_video_sync[1] != pal_commit_ack_toggle);
     wire frame_start = line_start && (y_count == 10'd0);
     assign pal_busy = pal_commit_pending_palette;
+
+    // Single frame-boundary latch (clk_video).  All output-geometry consumers
+    // derive from out_width_locked/out_height_locked, so a mid-frame change to
+    // out_width/out_height only takes effect at the next frame_start.  Reset to
+    // the same defaults the safe-wires fall back to (320x240) so the very first
+    // frame behaves identically to the previous combinational version.
+    always @(posedge clk_video or negedge reset_n) begin
+        if (!reset_n) begin
+            out_width_locked  <= 10'd320;
+            out_height_locked <= 10'd240;
+        end else if (frame_start) begin
+            out_width_locked  <= out_width;
+            out_height_locked <= out_height;
+        end
+    end
 
     always @(posedge clk_palette or negedge reset_palette_n) begin
         if (!reset_palette_n) begin
@@ -232,8 +265,8 @@ module video_CRT_scanout_indexed_BRAM (
     // =========================================
     // Video clock domain - Line start detection
     // =========================================
-    wire [9:0] fetch_output_line = y_count - VID_V_FETCH_START;
-    wire in_vactive = (y_count >= VID_V_FETCH_START) &&
+    wire [9:0] fetch_output_line = y_count - vid_v_fetch_start[9:0];
+    wire in_vactive = ({1'b0, y_count} >= vid_v_fetch_start) &&
                       ({1'b0, y_count} < vid_v_fetch_end);
 
     reg fetch_request;
@@ -326,33 +359,49 @@ module video_CRT_scanout_indexed_BRAM (
     reg [2:0] color_mode_analog_s1, color_mode_analog;
     reg [9:0] fb_width_analog_s1, fb_width_analog;
     reg [9:0] out_width_analog_s1, out_width_analog;
+    reg [9:0] out_height_analog_s1, out_height_analog;
     always @(posedge clk_analog or negedge reset_analog_n) begin
         if (!reset_analog_n) begin
             color_mode_analog_s1 <= MODE_8BIT;
             color_mode_analog <= MODE_8BIT;
             fb_width_analog_s1 <= 10'd320;
             fb_width_analog <= 10'd320;
-            out_width_analog_s1 <= 10'd640;
-            out_width_analog <= 10'd640;
+            out_width_analog_s1 <= 10'd320;
+            out_width_analog <= 10'd320;
+            out_height_analog_s1 <= 10'd240;
+            out_height_analog <= 10'd240;
         end else begin
             color_mode_analog_s1 <= color_mode;
             color_mode_analog <= color_mode_analog_s1;
             fb_width_analog_s1 <= fb_width;
             fb_width_analog <= fb_width_analog_s1;
+            // out_width_safe/out_height_safe are now the frame-locked geometry
+            // (latched at frame_start in clk_video), so this 2FF CDC carries
+            // the SAME per-frame value the fetch and LCD paths use.  A mode
+            // change only propagates here after the next frame boundary.
             out_width_analog_s1 <= out_width_safe;
             out_width_analog <= out_width_analog_s1;
+            out_height_analog_s1 <= out_height_safe;
+            out_height_analog <= out_height_analog_s1;
         end
     end
     wire [9:0] fb_width_analog_safe =
         (fb_width_analog == 10'd0) ? 10'd1 : fb_width_analog;
     wire [9:0] out_width_analog_safe =
-        (out_width_analog == 10'd0) ? 10'd640 : out_width_analog;
+        (out_width_analog == 10'd0) ? 10'd320 : out_width_analog;
+    wire [9:0] out_height_analog_safe =
+        (out_height_analog == 10'd0) ? 10'd240 : out_height_analog;
+    wire [9:0] analog_v_center_offset =
+        (out_height_analog_safe < VID_V_CENTER_HEIGHT) ?
+        ((VID_V_CENTER_HEIGHT - out_height_analog_safe) >> 1) : 10'd0;
+    wire [10:0] analog_v_active_start =
+        {1'b0, VID_V_ACTIVE_BASE} + {1'b0, analog_v_center_offset};
 
-    wire [9:0] lcd_visible_y = y_count - VID_V_ACTIVE_START;
+    wire [9:0] lcd_visible_y = y_count - vid_v_active_start[9:0];
     wire [1:0] lcd_line_bank = lcd_visible_y[1:0];
     wire lcd_in_hactive = (x_count >= VID_H_ACTIVE_START) &&
                           ({1'b0, x_count} < vid_h_active_end);
-    wire lcd_in_vactive = (y_count >= VID_V_ACTIVE_START) &&
+    wire lcd_in_vactive = ({1'b0, y_count} >= vid_v_active_start) &&
                           ({1'b0, y_count} < vid_v_active_end);
 
     reg [9:0] lcd_src_x_scan;
@@ -402,11 +451,13 @@ module video_CRT_scanout_indexed_BRAM (
     wire analog_hblank_now = (analog_out_x < VID_H_ACTIVE_START) ||
                              (analog_out_x >= ANALOG_H_ACTIVE_END);
     wire analog_hsync_now = (analog_out_x < VID_H_SYNC);
-    wire analog_vblank_now = (analog_line_y < VID_V_ACTIVE_START) ||
-                             (analog_line_y >= ANALOG_V_ACTIVE_END);
+    wire [10:0] analog_v_active_end =
+        analog_v_active_start + {1'b0, out_height_analog_safe};
+    wire analog_vblank_now = ({1'b0, analog_line_y} < analog_v_active_start) ||
+                             ({1'b0, analog_line_y} >= analog_v_active_end);
     wire analog_vsync_now = (analog_line_y < VID_V_SYNC);
     wire analog_active_now = !analog_hblank_now && !analog_vblank_now;
-    wire [9:0] analog_visible_y = analog_line_y - VID_V_ACTIVE_START;
+    wire [9:0] analog_visible_y = analog_line_y - analog_v_active_start[9:0];
     wire [1:0] analog_line_bank = analog_visible_y[1:0];
     wire [10:0] analog_x_sum =
         analog_x_acc + {1'b0, fb_width_analog_safe};

@@ -49,6 +49,24 @@ volatile unsigned int __attribute__((section(".bss.boot"))) pd_dbg_info;
 /* DMA timeout (~2 seconds at 100MHz) */
 #define BOOT_DMA_TIMEOUT 200000000
 #define BOOT_DMA_CHUNK_SIZE 4096u
+#define BOOT_CACHE_LINE_SIZE 64u
+#define BOOT_HW_IDLE_TIMEOUT 1000000u
+
+#define BOOT_GPU_REG(offset)     REG32(OF_TARGET_GPU_BASE + (offset))
+#define BOOT_GPU_CTRL            BOOT_GPU_REG(0x00u)
+#define BOOT_GPU_STATUS          BOOT_GPU_REG(0x14u)
+#define BOOT_GPU_DMA_SRC         BOOT_GPU_REG(0x0Cu)
+#define BOOT_GPU_DMA_LEN         BOOT_GPU_REG(0x1Cu)
+#define BOOT_GPU_TEX_FLUSH       BOOT_GPU_REG(0x28u)
+#define BOOT_GPU_CTRL_SOFT_RESET (1u << 1)
+#define BOOT_GPU_CTRL_RING_RESET (1u << 2)
+#define BOOT_GPU_STATUS_DMA_BUSY (1u << 2)
+
+#define BOOT_LINK_CTRL_RESET     (1u << 1)
+#define BOOT_SNAC_DIV_DEFAULT    499u
+#define BOOT_SNAC_GPIO_IDLE      (0xFFu | (0x03u << 8))
+#define BOOT_ANALOGIZER_VIDEO_SHIFT      10u
+#define BOOT_ANALOGIZER_POCKET_OFF_MASK  (ANLG_VIDEO_POCKET_OFF << BOOT_ANALOGIZER_VIDEO_SHIFT)
 
 /* External symbols from linker */
 extern char _os_bss_start[], _os_bss_end[];
@@ -62,6 +80,41 @@ extern char _osdata_init_size[];
 /* OS entry point */
 extern void os_main(void);
 extern void switch_to_runtime_stack_and_call(void (*entry)(void), void *stack_top);
+
+__attribute__((section(".text.boot")))
+static uintptr_t boot_sdram_uncached_addr(const void *addr) {
+    uint32_t a = (uint32_t)(uintptr_t)addr;
+    if (a >= SDRAM_BASE && a < SDRAM_BASE + SDRAM_SIZE)
+        return (uintptr_t)(a - SDRAM_BASE + SDRAM_UNCACHED_BASE);
+    return (uintptr_t)a;
+}
+
+__attribute__((section(".text.boot")))
+static void boot_dcache_inval_range(void *addr, uint32_t size) {
+    if (size == 0)
+        return;
+
+    uintptr_t a = (uintptr_t)addr & ~(uintptr_t)(BOOT_CACHE_LINE_SIZE - 1u);
+    uintptr_t end = (uintptr_t)addr + size;
+    __asm__ volatile("fence" ::: "memory");
+    for (; a < end; a += BOOT_CACHE_LINE_SIZE)
+        __asm__ volatile(".insn i 0x0F, 2, x0, %0, 0" :: "r"(a) : "memory");
+    __asm__ volatile("fence" ::: "memory");
+}
+
+__attribute__((section(".text.boot")))
+static void boot_zero_uncached_sdram(uint32_t start, uint32_t end) {
+    if (end <= start)
+        return;
+
+    volatile uint32_t *p =
+        (volatile uint32_t *)boot_sdram_uncached_addr((void *)(uintptr_t)start);
+    volatile uint32_t *e =
+        (volatile uint32_t *)boot_sdram_uncached_addr((void *)(uintptr_t)end);
+    while (p < e)
+        *p++ = 0;
+    __asm__ volatile("fence" ::: "memory");
+}
 
 /* PHDP wire constants come from shared/phdp_proto.h. Boot-specific
  * timing constants stay here so the host has nothing to coordinate. */
@@ -133,6 +186,94 @@ __attribute__((section(".text.boot")))
 static void flush_icache(void) {
     __asm__ volatile("fence");
     __asm__ volatile(".word 0x0000100f");  /* fence.i */
+}
+
+__attribute__((section(".text.boot")))
+static void boot_hw_stabilize(void) {
+    __asm__ volatile("fence" ::: "memory");
+
+    /* Stale interrupt enables/pending bits are the most dangerous warm-boot
+     * leftovers.  Machine interrupts are still globally disabled by start.S;
+     * this resets the peripheral side before the OS installs callbacks. */
+    IRQ_MASK = 0;
+    TIMER_CTRL = TIMER_CTRL_W1C_IRQ;
+    VSYNC_IRQ_PENDING = 1;
+    DS_STATUS = DS_STATUS_IRQ_PENDING;
+    INPUT_IRQ_MASK = 0;
+    INPUT_IRQ_CLEAR = INPUT_IRQ_CLEAR_FIFO | INPUT_IRQ_CLEAR_OVERFLOW;
+
+    /* Return display scanout to the boot console's conservative mode.  Clear
+     * only the persistent Analogizer "Pocket OFF" latch so a bad interact
+     * state cannot make the LCD unrecoverable; keep video type, enable, SNAC,
+     * and offsets intact for normal runtime/config handling. */
+    TERM_FB_CTRL = 1u;
+    SYS_COLOR_MODE = COLOR_MODE_8BIT;
+    FB_MODE_SIZE = (FB_HEIGHT << 16) | FB_WIDTH;
+    FB_MODE_STRIDE = FB_STRIDE;
+    VIDEO_SCALER_MODE = VIDEO_SCALER_SLOT_DEFAULT_320X240;
+    VIDEO_VTOTAL = VIDEO_VTOTAL_60HZ;
+    uint32_t analogizer_boot_settings = ANALOGIZER_SETTINGS;
+    if (analogizer_boot_settings & BOOT_ANALOGIZER_POCKET_OFF_MASK) {
+        ANALOGIZER_SETTINGS =
+            analogizer_boot_settings & ~BOOT_ANALOGIZER_POCKET_OFF_MASK;
+        for (volatile int i = 0; i < 16; i++) {}
+    }
+
+    /* CRAM0 is bridge-owned by default.  The loader only flips to CPU mode
+     * for the short scratch-copy window inside boot_load_os_sd(). */
+    CRAM0_MODE = CRAM0_MODE_BRIDGE;
+    for (volatile int i = 0; i < 8; i++) {}
+    uint32_t bridge_wait = BOOT_HW_IDLE_TIMEOUT;
+    while ((DS_STATUS & (DS_STATUS_READY | DS_STATUS_WR_IDLE)) !=
+           (DS_STATUS_READY | DS_STATUS_WR_IDLE)) {
+        if (--bridge_wait == 0)
+            break;
+    }
+
+    DS_SLOT_ID = 0;
+    DS_SLOT_OFFSET = 0;
+    DS_BRIDGE_ADDR = 0;
+    DS_LENGTH = 0;
+    DS_PARAM_ADDR = 0;
+    DS_RESP_ADDR = 0;
+
+    /* Stop subsystems that can continue producing bus traffic or IRQs after
+     * an app/OS warm restart.  Apps and the OS reprogram these explicitly. */
+    MIX_CTRL = 0;
+    for (uint32_t v = 0; v < 32u; v++)
+        MIX_VOICE_CTRL(v) = 0;
+    MIX_MASTER_VOL = 0xFFu;
+    MIX_GROUP_VOL(0) = 0xFFu;
+    MIX_GROUP_VOL(1) = 0xFFu;
+    MIX_GROUP_VOL(2) = 0xFFu;
+    MIX_GROUP_VOL(3) = 0xFFu;
+    MIX_VOICE_GROUP_LO = 0;
+    MIX_VOICE_GROUP_HI = 0;
+    MIX_IRQ_CLEAR = 0xFFFFFFFFu;
+
+    SNAC_HW_CTRL = 0;
+    SNAC_HW_CLEAR = SNAC_HW_CLEAR_IRQ | SNAC_HW_CLEAR_EDGES;
+    SNAC_CTRL = 0;
+    SNAC_DIV = BOOT_SNAC_DIV_DEFAULT;
+    SNAC_DATA = 0;
+    SNAC_GPIO = BOOT_SNAC_GPIO_IDLE;
+
+    LINK_CTRL = BOOT_LINK_CTRL_RESET;
+
+    BOOT_GPU_CTRL = BOOT_GPU_CTRL_SOFT_RESET;
+    for (volatile int i = 0; i < 8; i++) {}
+    uint32_t gpu_wait = BOOT_HW_IDLE_TIMEOUT;
+    while (BOOT_GPU_STATUS & BOOT_GPU_STATUS_DMA_BUSY) {
+        if (--gpu_wait == 0)
+            break;
+    }
+    BOOT_GPU_DMA_SRC = 0;
+    BOOT_GPU_DMA_LEN = 0;
+    BOOT_GPU_TEX_FLUSH = 1;
+    BOOT_GPU_CTRL = BOOT_GPU_CTRL_RING_RESET;
+    for (volatile int i = 0; i < 8; i++) {}
+
+    __asm__ volatile("fence" ::: "memory");
 }
 
 /* uart_putc/uart_getc, phdp_crc16/phdp_send/phdp_recv, and
@@ -481,8 +622,10 @@ static int boot_load_os_sd(uint32_t total) {
     uint32_t bounce_bridge = CRAM0_SCRATCH_BRIDGE;
     volatile uint8_t *bounce_src = (volatile uint8_t *)CRAM0_SCRATCH;
     volatile uint8_t *sdram_dst =
-        (volatile uint8_t *)(uintptr_t)_osdata_init_vma_start;
+        (volatile uint8_t *)boot_sdram_uncached_addr(_osdata_init_vma_start);
     uint32_t done = 0;
+
+    boot_dcache_inval_range(_osdata_init_vma_start, total);
 
     while (done < total) {
         uint32_t chunk = total - done;
@@ -496,16 +639,22 @@ static int boot_load_os_sd(uint32_t total) {
         if (rc < 0)
             return rc;
 
-        /* CPU reads CRAM0 scratch, writes to SDRAM. */
+        /* CPU reads CRAM0 scratch, writes uncached SDRAM.  The OS executes
+         * from SDRAM immediately after this loader, so avoid depending on a
+         * best-effort D-cache eviction sweep to publish instruction bytes. */
         CRAM0_MODE = CRAM0_MODE_CPU;
         for (volatile int s = 0; s < 8; s++) {}  /* settle ~4 clk_74a */
         volatile uint32_t *src32 = (volatile uint32_t *)bounce_src;
         volatile uint32_t *dst32 = (volatile uint32_t *)(sdram_dst + done);
         for (uint32_t i = 0; i < chunk / 4; i++)
             dst32[i] = src32[i];
+        for (uint32_t i = chunk & ~3u; i < chunk; i++)
+            sdram_dst[done + i] = bounce_src[i];
 
         done += chunk;
     }
+
+    __asm__ volatile("fence" ::: "memory");
 
     /* Leave the mux in bridge mode — later code issuing bridge DMAs
      * is the common case; one-off CPU reads flip it as needed. */
@@ -551,6 +700,13 @@ int main(void) {
 
     pd_dbg_stage = 2;
 
+    boot_hw_stabilize();
+
+    /* A soft reset can leave dirty D-cache lines from the previous run.
+     * Drain them before any boot-critical SDRAM writes; later targeted
+     * invalidates drop stale lines for the exact OS/BSS/stack ranges. */
+    flush_dcache_evict();
+
     /* Brief delay for deferload to settle */
     for (volatile int i = 0; i < 100; i++) {}  // Shortened for fast sim
 
@@ -590,10 +746,11 @@ int main(void) {
              * (__os_load_addr == __osdata_init_vma_start, same
              * address).  No text/data split — stream the whole blob
              * directly into SDRAM with a single phdp_chunk_loop call.
-             * PHDP writes the CPU directly to SDRAM; the CRAM0 mux
-             * is irrelevant here. */
+             * Use the uncached alias for the same reason as the SD path:
+             * the next instruction fetch must see the bytes immediately. */
             (void)chunk_size;
-            uint8_t *os_dst = (uint8_t *)(uintptr_t)_os_load_addr;
+            uint8_t *os_dst = (uint8_t *)boot_sdram_uncached_addr(_os_load_addr);
+            boot_dcache_inval_range(_os_load_addr, total_size);
             int rc = phdp_chunk_loop(0, total_size, total_size, os_dst);
 
             if (rc < 0) {
@@ -671,17 +828,14 @@ start_os:
      * v2 split-staging model: CRAM0 is only a bridge scratchpad. The
      * load path has copied os.bin into its SDRAM VMA; only .bss remains
      * to be zeroed before entering os_main. */
-#if OF_TARGET_PLATFORM_ID != OF_PLATFORM_SIM
-    /* flush_dcache_evict reads one full D-cache worth of SDRAM to evict
-     * deferload writes; sim's harness preloads SDRAM via backdoor so
-     * there's nothing to evict, AND sdram_fast_model wedges around
-     * iteration ~800 of the sweep (likely a burst-read state-machine
-     * edge case).  Skip on sim — the kernel will run cbo.flush as
-     * needed once it's up. */
-    flush_dcache_evict();
-#endif
+    boot_dcache_inval_range(_os_bss_start,
+                            (uint32_t)(_os_bss_end - _os_bss_start));
+    boot_dcache_inval_range((void *)(uintptr_t)(RUNTIME_STACK_TOP - RUNTIME_STACK_SIZE),
+                            RUNTIME_STACK_SIZE);
     flush_icache();
     os_finalize_memory((void *)_os_bss_start, (void *)_os_bss_end);
+    boot_zero_uncached_sdram(RUNTIME_STACK_TOP - RUNTIME_STACK_SIZE,
+                             RUNTIME_STACK_TOP);
 
     pd_dbg_stage = 5;
 

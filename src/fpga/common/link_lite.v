@@ -75,6 +75,14 @@ reg [2:0] sck_sync;
 wire sck_rise = (sck_sync[2:1] == 2'b01);
 wire sck_fall = (sck_sync[2:1] == 2'b10);
 
+// SI synchroniser: link_si_i is an asynchronous external pin (driven from
+// port_tran_si in core_top). Sample it through a 2-flop synchroniser before
+// any logic consumes it; link_si_sync is the de-metastabilised value. The
+// SI bit is sampled relative to the SCK edge, so the matched ~2-cycle delay
+// through this chain mirrors the SCK synchroniser and preserves bit timing.
+reg [1:0] si_sync;
+wire link_si_sync = si_sync[1];
+
 // Outputs
 assign link_so_oe  = ctrl_enable;
 assign link_sck_oe = ctrl_enable & ctrl_master;
@@ -83,12 +91,17 @@ assign link_sd_oe  = 1'b0;
 assign irq         = ctrl_enable & rx_ready;
 
 // Register read
+//
+// reg_addr is the full 5-bit word offset (byte addr[6:2], 32 words). Decode
+// against all 5 bits so only the four mapped word offsets (0..3) respond;
+// using a truncated field (e.g. reg_addr[1:0]) would alias word offsets
+// 4,8,12,... onto the real registers.
 always @(*) begin
-    case (reg_addr[1:0])
-        2'd0: reg_rdata = {26'b0, rx_ready, ~tx_pending, ctrl_master, 1'b0, ctrl_enable};
-        2'd1: reg_rdata = 32'd0;
-        2'd2: reg_rdata = rx_data;
-        2'd3: reg_rdata = {16'b0, half_div};
+    case (reg_addr)
+        5'd0: reg_rdata = {26'b0, rx_ready, ~tx_pending, ctrl_master, 1'b0, ctrl_enable};
+        5'd1: reg_rdata = 32'd0;
+        5'd2: reg_rdata = rx_data;
+        5'd3: reg_rdata = {16'b0, half_div};
         default: reg_rdata = 32'd0;
     endcase
 end
@@ -114,14 +127,16 @@ always @(posedge clk or negedge reset_n) begin
         slot_bit_idx <= 0;
         tx_shift <= 0; rx_shift <= 0;
         sck_sync <= 0;
+        si_sync <= 0;
         link_so_o <= 0; link_sck_o <= 0;
     end else begin
         sck_sync <= {sck_sync[1:0], link_sck_i};
+        si_sync  <= {si_sync[0], link_si_i};
 
         // ---- CPU writes ----
         if (reg_wr) begin
-            case (reg_addr[1:0])
-                2'd0: begin  // CTRL
+            case (reg_addr)
+                5'd0: begin  // CTRL
                     if (reg_wdata[1]) begin  // reset
                         ctrl_enable <= 0; ctrl_master <= 0;
                         tx_pending <= 0; rx_ready <= 0;
@@ -132,18 +147,18 @@ always @(posedge clk or negedge reset_n) begin
                         ctrl_master <= reg_wdata[2];
                     end
                 end
-                2'd1: begin  // TX_DATA
+                5'd1: begin  // TX_DATA
                     tx_data <= reg_wdata;
                     tx_pending <= 1'b1;
                 end
-                2'd3: begin  // DIVISOR
+                5'd3: begin  // DIVISOR
                     half_div <= reg_wdata[DIV_W-1:0];
                 end
             endcase
         end
 
         // ---- CPU reads (side effect: clear rx_ready) ----
-        if (reg_rd && reg_addr[1:0] == 2'd2)
+        if (reg_rd && reg_addr == 5'd2)
             rx_ready <= 1'b0;
 
         // ---- Master mode ----
@@ -171,7 +186,7 @@ always @(posedge clk or negedge reset_n) begin
                         // Rising: sample SI
                         slot_phase_high <= 1'b1;
                         link_sck_o <= 1'b1;
-                        rx_shift[slot_bit_idx] <= link_si_i;
+                        rx_shift[slot_bit_idx] <= link_si_sync;
                     end else begin
                         // Falling: advance
                         slot_phase_high <= 1'b0;
@@ -209,10 +224,10 @@ always @(posedge clk or negedge reset_n) begin
                     slot_active <= 1'b1;
                     slot_bit_idx <= 6'd32;
                     rx_shift <= 33'd0;
-                    rx_shift[32] <= link_si_i;
+                    rx_shift[32] <= link_si_sync;
                     if (tx_pending) tx_pending <= 1'b0;
                 end else begin
-                    rx_shift[slot_bit_idx] <= link_si_i;
+                    rx_shift[slot_bit_idx] <= link_si_sync;
                 end
             end
 

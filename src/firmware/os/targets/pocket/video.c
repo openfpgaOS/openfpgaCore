@@ -57,14 +57,13 @@ typedef struct {
 } video_scaler_mode_t;
 
 static const video_scaler_mode_t scaler_modes[] = {
-    {640, 240, 0},
+    {320, 240, 0},
     {320, 200, 1},
     {320, 224, 2},
-    {320, 240, 3},
-    {320, 256, 4},
-    {320, 288, 5},
-    {400, 300, 6},
-    {256, 240, 7},
+    {320, 256, 3},
+    {320, 288, 4},
+    {400, 300, 5},
+    {256, 240, 6},
 };
 
 static const video_scaler_mode_t *video_scaler_mode_for_size(uint16_t width,
@@ -137,7 +136,7 @@ static void video_program_terminal_mode(void) {
     SYS_COLOR_MODE = COLOR_MODE_8BIT;
     FB_MODE_SIZE = ((uint32_t)FB_HEIGHT << 16) | FB_WIDTH;
     FB_MODE_STRIDE = FB_STRIDE;
-    VIDEO_SCALER_MODE = VIDEO_SCALER_SLOT_640X240;
+    VIDEO_SCALER_MODE = VIDEO_SCALER_SLOT_DEFAULT_320X240;
 }
 
 static void video_program_visible_mode(void) {
@@ -147,15 +146,36 @@ static void video_program_visible_mode(void) {
         video_program_app_mode();
 }
 
+static uint32_t video_clamp_frame_bytes(uint32_t bytes) {
+    uint32_t slot_bytes = FB1_BASE - FB0_BASE;
+    if (bytes == 0 || bytes > slot_bytes)
+        return slot_bytes;
+    return bytes;
+}
+
+static void video_fill_all_buffers_bytes(uint8_t color, uint32_t bytes) {
+    bytes = video_clamp_frame_bytes(bytes);
+    for (int i = 0; i < 3; i++)
+        memset((void *)fb_addr[i], color, bytes);
+    for (int i = 0; i < 3; i++)
+        of_cache_clean_range((void *)fb_addr[i], bytes);
+}
+
 static void video_fill_all_buffers(uint8_t color) {
-    for (int i = 0; i < 3; i++)
-        memset((void *)fb_addr[i], color, vid_frame_bytes);
-    for (int i = 0; i < 3; i++)
-        of_cache_clean_range((void *)fb_addr[i], vid_frame_bytes);
+    video_fill_all_buffers_bytes(color, vid_frame_bytes);
 }
 
 static void video_clear_all_buffers(void) {
     video_fill_all_buffers(0);
+}
+
+static void video_clear_mode_change_buffers(uint32_t old_frame_bytes) {
+    uint32_t bytes = vid_frame_bytes;
+    if (old_frame_bytes > bytes)
+        bytes = old_frame_bytes;
+    if (bytes < FB_SIZE)
+        bytes = FB_SIZE;
+    video_fill_all_buffers_bytes(0, bytes);
 }
 
 /* Palette shadow — needed to dim the app palette in overlay mode.
@@ -493,18 +513,42 @@ static void video_wait_pending_swap_for_mode_change(void) {
     }
 }
 
+static int video_first_draw_buffer(int display) {
+    return display == 0 ? 1 : 0;
+}
+
 static void video_reset_buffer_roles(void) {
-    buf_display = 0;
-    buf_draw = 1;
+    uint32_t hw_state = FB_SWAP_CTRL;
+    int hw_display = (int)((hw_state >> 1) & 0x3);
+
+    buf_display = ((unsigned)hw_display < 3) ? hw_display : 0;
+    buf_draw = video_first_draw_buffer(buf_display);
     buf_ready = -1;
     swap_kicked = 0;
     buf_ready_serial = 0;
     counted_ready_serial = 0;
 }
 
+static void sync_swap_state(void);
+static int pick_free_buffer(void);
+
+static void video_force_present_clean_buffer(void) {
+    sync_swap_state();
+
+    int idx = pick_free_buffer();
+    of_cache_clean_range((void *)fb_addr[idx], vid_frame_bytes);
+    vrr_update_on_swap();
+    FB_SWAP_CTRL = ((uint32_t)idx << 1) | 1u;
+    swap_kicked = 1;
+    mark_buffer_ready(idx);
+    of_video_wait_flip();
+    video_reset_buffer_roles();
+}
+
 int of_video_set_mode(const of_video_mode_t *mode) {
     of_video_mode_t normalized;
     uint32_t frame_bytes;
+    uint32_t old_frame_bytes = vid_frame_bytes;
     if (video_normalize_mode(mode, &normalized, &frame_bytes) < 0)
         return -1;
 
@@ -519,7 +563,8 @@ int of_video_set_mode(const of_video_mode_t *mode) {
     TERM_FB_CTRL = 0;
     video_irq_restore_local(irq);
 
-    video_clear_all_buffers();
+    video_clear_mode_change_buffers(old_frame_bytes);
+    video_force_present_clean_buffer();
     of_term_set_display_mode(DISPLAY_MODE_FRAMEBUFFER);
     return 0;
 }
@@ -573,6 +618,7 @@ int of_video_check_mode(const of_video_mode_t *mode,
 
 void of_video_set_color_mode(int mode) {
     of_video_mode_t next = vid_mode;
+    uint32_t old_frame_bytes = vid_frame_bytes;
     next.color_mode = (uint8_t)mode;
     next.stride = 0;
 
@@ -590,7 +636,8 @@ void of_video_set_color_mode(int mode) {
     video_program_visible_mode();
     video_irq_restore_local(irq);
 
-    video_clear_all_buffers();
+    video_clear_mode_change_buffers(old_frame_bytes);
+    video_force_present_clean_buffer();
 }
 
 /* Check whether a pending swap has completed and update software state.
@@ -632,6 +679,9 @@ void of_video_init(void) {
         FB_WIDTH, FB_HEIGHT, FB_STRIDE, COLOR_MODE_8BIT, 0
     };
     uint32_t frame_bytes;
+
+    video_wait_pending_swap_for_mode_change();
+
     (void)video_normalize_mode(&default_mode, &vid_mode, &frame_bytes);
     vid_frame_bytes = frame_bytes;
     video_program_app_mode();
@@ -681,6 +731,12 @@ uint8_t *of_video_flip(void) {
     /* Refresh our view of hardware state */
     sync_swap_state();
 
+    if ((unsigned)buf_draw >= 3 ||
+        buf_draw == buf_display ||
+        buf_draw == buf_ready) {
+        buf_draw = pick_free_buffer();
+    }
+
     /* Overlay mode: composite terminal text over app draw buffer.
      * App pixels use the dimmed palette (set in overlay_install_palette).
      * Terminal text pixels are remapped to 240-255 (bright VGA colors). */
@@ -712,16 +768,8 @@ uint8_t *of_video_flip(void) {
     swap_kicked = 1;
 
     int old_draw = buf_draw;
-
-    if (buf_ready >= 0) {
-        /* A previously queued buffer was replaced — recycle it */
-        buf_draw = buf_ready;
-    } else {
-        /* Pick the free buffer: the one not displaying and not just queued */
-        buf_draw = 3 - buf_display - old_draw;
-    }
-
     mark_buffer_ready(old_draw);
+    buf_draw = pick_free_buffer();
     return (uint8_t *)fb_addr[buf_draw];
 }
 
