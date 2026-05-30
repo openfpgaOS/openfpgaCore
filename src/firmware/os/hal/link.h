@@ -9,7 +9,6 @@
 #include <stdint.h>
 
 #define LINK_MODE_SLAVE   0
-#define LINK_MODE_MASTER  1
 
 /* Initialise link cable. mode: LINK_MODE_MASTER drives SCK, SLAVE listens. */
 void of_link_init(int mode);

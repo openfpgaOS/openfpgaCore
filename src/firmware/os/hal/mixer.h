@@ -43,9 +43,8 @@ void of_mixer_set_pan(int voice, int pan);
 /* Per-voice active check (software-tracked) */
 int of_mixer_voice_active(int voice);
 
-/* No-op: hardware mixer runs autonomously */
+/* No-op: hardware mixer runs autonomously (retained for svc->mixer_pump) */
 void of_mixer_pump(void);
-void of_mixer_pump_auto(void);
 
 /* Loop control. loop_start=-1 disables. loop_end sets LOOP_END register. */
 void of_mixer_set_loop(int voice, int loop_start, int loop_end);
@@ -178,12 +177,5 @@ void of_mixer_free_samples(void);
  * the enum without showing up in the dispatcher diff. */
 long of_mixer_dispatch(long fid, long a0, long a1,
                        long a2, long a3, long a4);
-
-/* IRQ save/restore wrappers retired in v3 — flat MMIO writes are
- * race-free on their own (each per-voice register has its own address
- * so main thread + ISR never share a SEL latch).  Kept as no-ops so
- * existing call sites compile unchanged. */
-static inline uint32_t of_mixer_irq_save(void)    { return 0; }
-static inline void     of_mixer_irq_restore(uint32_t prev) { (void)prev; }
 
 #endif /* OFOS_MIXER_H */

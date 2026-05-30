@@ -862,10 +862,9 @@ int of_mixer_handle_voice(of_mixer_handle_t handle)
     return voice;
 }
 
-/* Hardware mixer runs autonomously — no CPU pump needed.  The ABI
- * entries stay so older app binaries continue to link. */
+/* Hardware mixer runs autonomously — no CPU pump needed.  of_mixer_pump
+ * is a no-op retained only for the services table (svc->mixer_pump). */
 void of_mixer_pump(void)      {}
-void of_mixer_pump_auto(void) {}
 
 void of_mixer_set_loop(int voice, int loop_start, int loop_end)
 {

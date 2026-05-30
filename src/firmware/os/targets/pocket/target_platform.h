@@ -71,7 +71,6 @@
 #define OF_TARGET_CRAM0_APP_DMA_SIZE   0x00100000u   /* 1 MB */
 
 /* SRAM is GPU-private in v2 — no AXI alias, not CPU-addressable. */
-/* (OF_TARGET_SRAM_BASE / OF_TARGET_SRAM_SIZE removed) */
 
 /* High SDRAM reservations, from top down:
  *   0x13FC0000-0x14000000  GPU palookup tables (fixed RTL address)
@@ -82,9 +81,6 @@
  *
  * The app heap/mmap/stack top is set at boot to the lowest audio
  * reservation, so apps get the unused SDRAM tail without hidden holes. */
-#define OF_TARGET_GPU_PALOOKUP_BASE    0x13FC0000u
-#define OF_TARGET_GPU_PALOOKUP_SIZE    0x00040000u
-
 #define OF_TARGET_RUNTIME_STACK_TOP    0x13F80000u
 #define OF_TARGET_RUNTIME_STACK_SIZE   (512u * 1024u)
 

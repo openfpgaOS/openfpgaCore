@@ -22,7 +22,7 @@
 
 #include "audio.h"
 #include "regs.h"
-#include "mixer.h"   /* of_mixer_irq_save / restore — SEL race guard */
+#include "mixer.h"
 
 /* Ring: 2048 stereo pairs = 16 KB = ~42 ms of slack at 48 kHz. */
 #define AUDIO_RING_PAIRS  2048

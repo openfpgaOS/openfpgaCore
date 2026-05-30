@@ -4,8 +4,8 @@
  * Called by kernel main() after filesystem_init(). Scans the file slot
  * registry for a *.ofsf file, loads it into the persistent audio SDRAM
  * reservation, validates the header, and prints a boot status line. The
- * loaded buffer is exposed via bank_preload_base/size so apps can skip
- * re-loading.
+ * preloaded bank is exposed to apps via the services table
+ * (OF_SVC->smp_bank_preload_base / smp_bank_preload_size).
  */
 
 #ifndef OFOS_BANK_PRELOAD_H
@@ -17,11 +17,5 @@
  * Returns 0 on success, negative if no bank was found or load failed.
  * Safe to call multiple times; subsequent calls are no-ops. */
 int bank_preload(void);
-
-/* Pointer to the preloaded bank in SDRAM, or NULL if none. */
-const void *bank_preload_base(void);
-
-/* Byte size of the preloaded bank, or 0. */
-uint32_t bank_preload_size(void);
 
 #endif /* OFOS_BANK_PRELOAD_H */

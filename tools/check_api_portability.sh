@@ -30,8 +30,7 @@
 #      Pocket one. This proves that per-target addresses flow through
 #      caps_table.c at runtime, not through compile-time bake-in.
 #
-# See docs/app-virtual-map.md and the portability_baseline.txt for the
-# full contract.
+# See tools/portability_baseline.txt for the full contract.
 
 set -u
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -161,6 +160,5 @@ if [ "$fail" -eq 0 ]; then
 else
     printf '\n\033[31mPortability checks FAILED.\033[0m See above. Baseline:\n'
     printf '  tools/portability_baseline.txt\n'
-    printf '  docs/app-virtual-map.md\n'
     exit 1
 fi

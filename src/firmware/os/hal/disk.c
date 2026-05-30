@@ -74,7 +74,3 @@ long of_disk_size(uint32_t slot_id) {
     }
     return sz;
 }
-
-const char *of_disk_active_name(void) {
-    return active_disk ? active_disk->name : "none";
-}

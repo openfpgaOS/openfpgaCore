@@ -14,8 +14,6 @@
  * ====================================================================== */
 
 #define REG32(addr)     (*(volatile uint32_t *)(addr))
-#define REG16(addr)     (*(volatile uint16_t *)(addr))
-#define REG8(addr)      (*(volatile uint8_t *)(addr))
 
 /* ======================================================================
  * Memory Map
@@ -28,7 +26,6 @@
  * Top BRAM remains reserved for the trap handler register frame. */
 #define APP_BRAM_BASE       OF_TARGET_APP_BRAM_BASE
 #define APP_BRAM_END        OF_TARGET_APP_BRAM_END  /* Caps at 0x7800; top BRAM holds trap/boot state */
-#define APP_BRAM_SIZE       (APP_BRAM_END - APP_BRAM_BASE)
 
 #define SDRAM_BASE          OF_TARGET_SDRAM_BASE
 #define SDRAM_SIZE          OF_TARGET_SDRAM_SIZE
@@ -38,7 +35,6 @@
 #define FB1_BASE            OF_TARGET_FB1_BASE      /* Framebuffer 1 */
 #define FB2_BASE            OF_TARGET_FB2_BASE      /* Framebuffer 2 */
 #define TERM_FB_BASE        OF_TARGET_TERM_FB_BASE  /* Dedicated terminal framebuffer */
-#define FB_COUNT            OF_TARGET_FB_COUNT
 #define FB_WIDTH            OF_TARGET_FB_WIDTH
 #define FB_HEIGHT           OF_TARGET_FB_HEIGHT
 #define FB_STRIDE           OF_TARGET_FB_STRIDE
@@ -49,9 +45,7 @@
 #define FILE_CACHE_SIZE     OF_TARGET_FILE_CACHE_SIZE
 #define FILE_CACHE_BLOCK_SIZE OF_TARGET_FILE_CACHE_BLOCK_SIZE
 
-#define INTERACT_BASE       OF_TARGET_INTERACT_BASE
 #define INTERACT_UNCACHED   OF_TARGET_INTERACT_UNCACHED
-#define INTERACT_MAX_VARS   OF_TARGET_INTERACT_MAX_VARS
 
 /* Terminal VRAM removed — terminal renders to TERM_FB_BASE in SDRAM */
 #define TERM_COLS           40
@@ -67,8 +61,6 @@
 #define CRAM0_BRIDGE        OF_TARGET_CRAM0_BRIDGE    /* CRAM0 in bridge address space */
 
 /* FTAB (file table) — written by Chip32 loader at boot into CRAM0 (not CRAM1). */
-#define CRAM0_FTAB            (CRAM0_BASE + OF_TARGET_CRAM0_OS_OFFSET)
-#define CRAM0_FTAB_BRIDGE     (CRAM0_BRIDGE + OF_TARGET_CRAM0_OS_OFFSET)
 
 /* DMA scratch area in CRAM0 (shared with bridge, managed via CRAM0_MODE). */
 #define CRAM0_SCRATCH         (CRAM0_BASE + OF_TARGET_CRAM0_SCRATCH_OFFSET)
@@ -91,7 +83,6 @@
 
 /* Core status & control */
 #define SYS_STATUS          REG32(SYSREG_BASE + 0x00)
-#define   SYS_STATUS_SDRAM_READY    (1 << 0)
 #define   SYS_STATUS_ALLCOMPLETE    (1 << 1)
 #define SYS_CYCLE_LO        REG32(SYSREG_BASE + 0x04)
 #define SYS_CYCLE_HI        REG32(SYSREG_BASE + 0x08)
@@ -112,8 +103,6 @@
 /* Framebuffer control (triple-buffered)
  * FB_SWAP_CTRL write: bit[0]=trigger, bits[2:1]=buffer index to display at next vsync
  * FB_SWAP_CTRL read:  bit[0]=pending, bits[2:1]=current display buffer index */
-#define FB_DISPLAY_ADDR     REG32(SYSREG_BASE + 0x10)
-#define FB_DISPLAY_IDX      REG32(SYSREG_BASE + 0x14)
 #define FB_SWAP_CTRL        REG32(SYSREG_BASE + 0x18)
 
 /* Runtime framebuffer geometry.  Size packs width in bits [15:0] and
@@ -131,8 +120,6 @@
 /* Current physical output timing advertised by dist/core/video.json.
  * Dynamic app framebuffers are scaled into this output unless a later
  * physical-output mode switch changes the RTL timing. */
-#define VIDEO_PHYSICAL_WIDTH   320u
-#define VIDEO_PHYSICAL_HEIGHT  240u
 
 /* GPU fence-reached register, used by of_video_acquire_next() to
  * confirm a CMD_FLIP retired before waiting on fb_swap_pending.  GPU
@@ -142,28 +129,8 @@
  * the SDK; the kernel has no abstraction yet, so hardcode here. */
 #define GPU_FENCE_REACHED_REG  REG32(0x4a000018u)
 
-/* CMD_FLIP diagnostic counters. Area mode retired the old 32-bit
- * FLIP/AW/B counters. 0x34 now exposes the low 4 bits of the current
- * GPU framebuffer write inflight count; the other legacy slots read as
- * zero. */
-#define GPU_DBG_FLIP_ENTER_REG       REG32(0x4a000028u)
-#define GPU_DBG_FLIP_DRAIN_DONE_REG  REG32(0x4a00002Cu)
-#define GPU_DBG_FLIP_SWAP_PULSE_REG  REG32(0x4a000030u)
-#define GPU_DBG_BVALID_REG           REG32(0x4a000034u) /* low 4 bits: m_wr_inflight */
-#define GPU_DBG_AWVALID_REG          REG32(0x4a000038u)
-
-/* Swap-pipeline diagnostic snapshot. Read-only.
- *   FB_SWAP_DBG_LIVE   (0xC0):
- *     bit  0     : fb_swap_pending
- *     bits 2:1   : fb_display_idx
- *     bits 4:3   : fb_ready_idx
- *     bits 8:5   : zero, retired swap-hold counter
- *     bits 16:9  : zero, retired event counter
- *     bits 18:17 : zero, retired last gpu_swap_req idx
- *     bit  19    : term_fb_active (1 = scanout reads terminal FB)
- *   FB_SWAP_DBG_CNTS   (0xC4): zero, retired in area mode */
-#define FB_SWAP_DBG_LIVE   REG32(SYSREG_BASE + 0xC0)
-#define FB_SWAP_DBG_CNTS   REG32(SYSREG_BASE + 0xC4)
+/* CMD_FLIP diagnostic: 0x34 exposes the low 4 bits of the current GPU
+ * framebuffer write inflight count (m_wr_inflight). */
 
 /* Display timing control.
  * VIDEO_VTOTAL is the firmware-owned scanout V_TOTAL request. Hardware
@@ -173,12 +140,7 @@
 #define VIDEO_VTOTAL       REG32(SYSREG_BASE + 0xDC)
 #define VIDEO_VTOTAL_MIN   257u
 #define VIDEO_VTOTAL_MAX   375u
-#define VIDEO_VTOTAL_61_25HZ 257u  /* experimental; current clock measures ~61.30 Hz */
 #define VIDEO_VTOTAL_60HZ  262u  /* conservative normal LCD timing, measured ~60.13 Hz */
-#define VIDEO_VTOTAL_55HZ  285u
-#define VIDEO_VTOTAL_50HZ  310u
-#define VIDEO_VTOTAL_45HZ  340u
-#define VIDEO_VTOTAL_42HZ  375u
 
 /* Data slot / DMA interface */
 #define DS_SLOT_ID          REG32(SYSREG_BASE + 0x20)
@@ -225,10 +187,7 @@
 #define INPUT_STATUS        REG32(SYSREG_BASE + 0x100)
 #define   INPUT_STATUS_PENDING      (1 << 0)
 #define   INPUT_STATUS_FIFO_EMPTY   (1 << 1)
-#define   INPUT_STATUS_FIFO_FULL    (1 << 2)
 #define   INPUT_STATUS_OVERFLOW     (1 << 3)
-#define   INPUT_STATUS_COUNT_SHIFT  8
-#define   INPUT_STATUS_COUNT_MASK   (0x1F << INPUT_STATUS_COUNT_SHIFT)
 #define INPUT_IRQ_MASK      REG32(SYSREG_BASE + 0x104)  /* bits [3:0] enable APF slot change records */
 #define INPUT_IRQ_CLEAR     REG32(SYSREG_BASE + 0x108)
 #define   INPUT_IRQ_CLEAR_FIFO      (1 << 0)
@@ -264,10 +223,6 @@
 #define   INPUT_SLOT_INFO_PRESENT   (1 << 0)
 #define   INPUT_SLOT_INFO_IRQ_EN    (1 << 8)
 
-#define   INPUT_HW_EVENT_SLOT_CHANGE 0x01u
-#define   INPUT_HW_EVENT_FIELD_KEY   (1 << 0)
-#define   INPUT_HW_EVENT_FIELD_JOY   (1 << 1)
-#define   INPUT_HW_EVENT_FIELD_TRIG  (1 << 2)
 
 /* Analogizer CPU mirror. Pocket interact.json writes the same settings
  * through bridge addresses 0xF7000000/04/08; firmware uses these sysregs
@@ -292,9 +247,7 @@
 #define   SNAC_CTRL_BITCNT_SHIFT 1          /* bits [5:1] = bit_count - 1 */
 #define   SNAC_CTRL_LATCH       (1 << 6)    /* Pulse LATCH before shifting */
 #define   SNAC_CTRL_ENABLE      (1 << 7)    /* 1=SNAC mode, 0=UART mode */
-#define   SNAC_CTRL_MODE_SHIFT  8           /* bits [9:8]: 00=CfgA, 01=CfgB */
 #define   SNAC_CTRL_MODE_A      (0 << 8)    /* Config A: NES/SNES/DB15 */
-#define   SNAC_CTRL_MODE_B      (1 << 8)    /* Config B: PSX */
 /* SNAC_CTRL read bits */
 #define   SNAC_CTRL_BUSY        (1 << 0)    /* Shift in progress */
 
@@ -318,17 +271,10 @@
  */
 #define   SNAC_PIN_OUT1     (1 << 0)
 #define   SNAC_PIN_OUT2     (1 << 1)
-#define   SNAC_PIN_IO3      (1 << 2)
-#define   SNAC_PIN_IN7      (1 << 3)
 #define   SNAC_PIN_BK06     (1 << 4)
-#define   SNAC_PIN_IN4      (1 << 5)
 #define   SNAC_PIN_IO5      (1 << 6)
 #define   SNAC_PIN_IO6      (1 << 7)
 /* Direction bits in [15:8] — same mapping, shifted left 8 */
-#define   SNAC_DIR_IO3      (1 << 10)
-#define   SNAC_DIR_IN7      (1 << 11)
-#define   SNAC_DIR_BK06     (1 << 12)
-#define   SNAC_DIR_IN4      (1 << 13)
 #define   SNAC_DIR_IO5      (1 << 14)
 #define   SNAC_DIR_IO6      (1 << 15)
 
@@ -340,7 +286,6 @@
 /* Hardware timer (0xB4-0xBC) — countdown with auto-reload, drives int_m_timer */
 #define TIMER_PERIOD        REG32(SYSREG_BASE + 0xB4)  /* Reload value (CPU cycles) */
 #define TIMER_CTRL          REG32(SYSREG_BASE + 0xB8)  /* [0]=enable, [1]=irq_pending (W1C) */
-#define TIMER_COUNTER       REG32(SYSREG_BASE + 0xBC)  /* Current countdown (read-only) */
 #define   TIMER_CTRL_ENABLE   (1 << 0)
 #define   TIMER_CTRL_W1C_IRQ  (1 << 1)
 
@@ -389,15 +334,9 @@
 #define MIX_CTRL             REG32(MIX_BASE + 0x820)  /* [0]=enable */
 #define MIX_IRQ_PENDING      REG32(MIX_BASE + 0x824)  /* R: voice-end bitmap */
 #define MIX_IRQ_CLEAR        REG32(MIX_BASE + 0x824)  /* W: W1C bits */
-#define MIX_LAST_SAMPLE      REG32(MIX_BASE + 0x828)  /* R: retired diagnostic, reads 0 */
-#define MIX_SAMPLE_COUNT     REG32(MIX_BASE + 0x82C)  /* R: retired diagnostic, reads 0 */
 #define MIX_ACTIVE_MASK      REG32(MIX_BASE + 0x830)  /* R: 32-bit active-voice bitmap */
-#define MIX_STATUS           REG32(MIX_BASE + 0x834)  /* R: retired diagnostic, reads 0 */
 #define MIX_VOICE_POS(v)     REG32(MIX_BASE + 0x880 + ((v) << 2))  /* R: pos_int per voice */
 #define   MIX_CTRL_ENABLE       (1 << 0)
-#define   MIX_CTRL_BIT_ACTIVE   (1 << 0)
-#define   MIX_CTRL_BIT_STEREO   (1 << 1)
-#define   MIX_CTRL_BIT_LOOP     (1 << 2)
 
 /* Link-lite peripheral (0x4D000000) — IRQ-driven, 1-word TX/RX */
 #define LINK_BASE            0x4D000000
@@ -405,8 +344,6 @@
 #define LINK_STATUS          REG32(LINK_BASE + 0x00)  /* R: [0]=enable [2]=master [4]=tx_empty [5]=rx_ready */
 #define LINK_TX_DATA         REG32(LINK_BASE + 0x04)  /* W: word to transmit */
 #define LINK_RX_DATA         REG32(LINK_BASE + 0x08)  /* R: received word (clears rx_ready) */
-#define LINK_DIVISOR         REG32(LINK_BASE + 0x0C)  /* W: half-period clock divider */
-#define   LINK_STATUS_TX_EMPTY  (1 << 4)
 #define   LINK_STATUS_RX_READY  (1 << 5)
 
 /* Vsync IRQ pending (0x9C) — read: bit 0 = pending, write: W1C clears */
@@ -416,17 +353,10 @@
  * bit 3=vsync, bit 2=reserved, bit 1=link, bit 0=uart_rx.
  * Bit 2 was the HW mixer voice-end IRQ; mixer retired, bit reserved. */
 #define IRQ_MASK             REG32(SYSREG_BASE + 0xFC)
-#define   IRQ_MASK_UART_RX   (1 << 0)
 #define   IRQ_MASK_LINK      (1 << 1)
 #define   IRQ_MASK_VSYNC     (1 << 3)
 #define   IRQ_MASK_INPUT     (1 << 4)
 #define   IRQ_MASK_DATASLOT  (1 << 5)
-
-/* Legacy aliases. */
-#define VRR_V_TOTAL         VIDEO_VTOTAL
-
-/* Retired swap-hold readback (0xE0): reads zero, writes ignored. */
-#define VRR_SWAP_HOLD       REG32(SYSREG_BASE + 0xE0)
 
 /* Datatable slot size query:
  *   0x90 write: datatable word address
@@ -441,19 +371,7 @@
 #define   HW_FEAT_LINK          (1 << 2)
 #define   HW_FEAT_ANALOGIZER    (1 << 3)
 #define   HW_FEAT_GPU_SPAN      (1 << 4)   /* GPU span renderer (always set) */
-#define   HW_FEAT_MIDI          (1 << 6)   /* MIDI playback (any backend) */
-#define   HW_FEAT_WIFI          (1 << 7)
-#define   HW_FEAT_FPU           (1 << 8)
 #define   HW_FEAT_SAVE_SLOTS    (1 << 9)
-#define   HW_FEAT_GPU_VCOLOR    (1 << 10)  /* GPU vertex color (Full) */
-#define   HW_FEAT_GPU_BILINEAR  (1 << 11)  /* GPU bilinear filtering (Full) */
-#define   HW_FEAT_GPU_ALPHA     (1 << 12)  /* GPU alpha blending (Full) */
-#define   HW_FEAT_GPU_PERSP     (1 << 13)  /* GPU perspective spans (Lite/Full) */
-#define   HW_FEAT_GPU_FRAGPIPE  (1 << 14)  /* GPU 1-px/cycle frag pipeline (Lite/Full) */
-#define   HW_FEAT_GPU_PARAM_SPAN_LIST (1 << 15) /* GPU parametric span-list command */
-#define   HW_FEAT_GPU_PARAM_SPAN_Z    (1 << 16) /* Param-span Quake-compatible z writes */
-#define   HW_FEAT_GPU_PARAM_SPAN_ZTEST (1 << 17) /* Param-span Quake-compatible z test/write */
-#define   HW_FEAT_GPU_PARAM_SPAN_Q29_SCALE (1 << 18) /* Param-span Q29 dynamic scale */
 
 
 /* ======================================================================
@@ -464,9 +382,6 @@
 
 #define AUDIO_BASE          0x4C000000
 #define AUDIO_STATUS        REG32(AUDIO_BASE + 0x00)    /* Read: FIFO status */
-#define   AUDIO_FIFO_LEVEL_MASK  0x3FF                  /* bits [9:0] */
-#define   AUDIO_FIFO_FULL        (1 << 10)
-#define AUDIO_FIFO_DEPTH    1024
 
 /* CRAM0 ownership mux (v2 memory arch).  CRAM0 runs on the bridge
  * clock (clk_74a) and is time-sliced between the APF bridge and the
@@ -481,7 +396,6 @@
  * ====================================================================== */
 
 #define LINK_BASE           0x4D000000
-#define LINK_REG(n)         REG32(LINK_BASE + ((n) << 2))
 
 /* UART (0x4F000000): DevKey service serial, 2 Mbaud 8N1 */
 #define UART_BASE           0x4F000000
@@ -501,7 +415,6 @@
  * addresses below are used by interact.json and are not CPU MMIO.
  * ====================================================================== */
 
-#define ANALOGIZER_BRIDGE_BASE  0xF7000000
 /* Bits [4:0]: SNAC controller type, [9:6]: assignment, [13:10]: video type, [15]: enable */
 
 /* SNAC controller type IDs */
@@ -600,58 +513,5 @@ static inline uint32_t cpu_to_bridge(void *addr) {
     if (a >= CRAM0_BASE && a < CRAM0_BASE + CRAM_SIZE) return (a - CRAM0_BASE) + CRAM0_BRIDGE;
     return sdram_to_bridge(addr);
 }
-
-/* ======================================================================
- * Standardized aliases (OF_* prefix)
- * ====================================================================== */
-
-/* Memory map */
-#define OF_MEM_BRAM_BASE            BRAM_BASE
-#define OF_MEM_BRAM_SIZE            BRAM_SIZE
-#define OF_MEM_SDRAM_BASE           SDRAM_BASE
-#define OF_MEM_SDRAM_SIZE           SDRAM_SIZE
-#define OF_MEM_SDRAM_UNCACHED_BASE  SDRAM_UNCACHED_BASE
-#define OF_MEM_FB0_BASE             FB0_BASE
-#define OF_MEM_FB1_BASE             FB1_BASE
-#define OF_MEM_FB2_BASE             FB2_BASE
-#define OF_MEM_DMA_CHUNK_SIZE       DMA_CHUNK_SIZE
-#define OF_MEM_CRAM0_BASE           CRAM0_BASE
-#define OF_MEM_CRAM_SIZE            CRAM_SIZE
-#define OF_MEM_TERM_FB_BASE         TERM_FB_BASE
-
-/* System registers */
-#define OF_REG_SYSREG_BASE          SYSREG_BASE
-#define OF_REG_SYS_STATUS           SYS_STATUS
-#define OF_REG_SYS_CYCLE_LO         SYS_CYCLE_LO
-#define OF_REG_SYS_CYCLE_HI         SYS_CYCLE_HI
-#define OF_REG_TERM_FB_CTRL         TERM_FB_CTRL
-#define OF_REG_FB_DISPLAY_ADDR      FB_DISPLAY_ADDR
-#define OF_REG_FB_DISPLAY_IDX       FB_DISPLAY_IDX
-#define OF_REG_FB_SWAP_CTRL         FB_SWAP_CTRL
-#define OF_REG_DS_SLOT_ID           DS_SLOT_ID
-#define OF_REG_DS_SLOT_OFFSET       DS_SLOT_OFFSET
-#define OF_REG_DS_BRIDGE_ADDR       DS_BRIDGE_ADDR
-#define OF_REG_DS_LENGTH            DS_LENGTH
-#define OF_REG_DS_COMMAND           DS_COMMAND
-#define OF_REG_DS_STATUS            DS_STATUS
-#define OF_REG_PAL_INDEX            PAL_INDEX
-#define OF_REG_PAL_WRITE            PAL_WRITE
-#define OF_REG_CONT1_KEY            CONT1_KEY
-#define OF_REG_CONT1_JOY            CONT1_JOY
-#define OF_REG_CONT1_TRIG           CONT1_TRIG
-#define OF_REG_CONT2_KEY            CONT2_KEY
-#define OF_REG_CONT2_JOY            CONT2_JOY
-#define OF_REG_CONT2_TRIG           CONT2_TRIG
-#define OF_REG_INPUT_STATUS         INPUT_STATUS
-#define OF_REG_INPUT_IRQ_MASK       INPUT_IRQ_MASK
-#define OF_REG_INPUT_IRQ_CLEAR      INPUT_IRQ_CLEAR
-#define OF_REG_INPUT_SEQ            INPUT_SEQ
-#define OF_REG_SYS_GAME_ID          SYS_GAME_ID
-#define OF_REG_HW_FEATURES          HW_FEATURES
-
-/* Audio registers (v2: HW mixer drives FIFO; only STATUS remains) */
-#define OF_REG_AUDIO_STATUS         AUDIO_STATUS
-/* Link registers */
-#define OF_REG_LINK_BASE            LINK_BASE
 
 #endif /* OFOS_REGS_H */

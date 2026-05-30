@@ -17,8 +17,6 @@
 #include "../os_string.h"
 
 static const uint32_t fb_addr[3] = { FB0_BASE, FB1_BASE, FB2_BASE };
-/* Uncached FB aliases — available for future GPU/DMA use:
- * (FB0_BASE - SDRAM_BASE + SDRAM_UNCACHED_BASE), etc. */
 
 /* Software-tracked buffer roles */
 static int buf_display = 0;   /* buffer the hardware is scanning out        */

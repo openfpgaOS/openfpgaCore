@@ -84,7 +84,3 @@ int of_link_recv(uint32_t *word) {
 int of_link_rx_available(void) {
     return (rx_head - rx_tail) & LINK_RX_BUF_MASK;
 }
-
-int of_link_tx_ready(void) {
-    return !tx_busy;
-}

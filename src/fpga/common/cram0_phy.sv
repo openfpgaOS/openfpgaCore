@@ -22,12 +22,8 @@
 //
 ////////////////////////////////////////////////////////////////////////////////
 //
-// CRAM0-only fork of psram.sv. Created so the CRAM0 path can be
-// iterated on without affecting CRAM1 (save data). The original
-// `psram` module in `psram.sv` is now exclusively used by
-// `psram_cram1.v` and should not be edited. All file-scope symbols
-// are uniquely suffixed (`_c0`) so both files can compile together
-// without redefinition.
+// CRAM0 PSRAM PHY.  All file-scope symbols are uniquely suffixed
+// (`_c0`) to avoid redefinition collisions with other PHY variants.
 
 function integer rtoi_c0(input integer x);
   return x;

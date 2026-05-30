@@ -21,19 +21,11 @@
 #define EM_RISCV    243
 #define PT_LOAD     1
 #define PT_DYNAMIC  2
-#define PF_X        1
-#define PF_W        2
-#define PF_R        4
 
 #define DT_NULL     0
 #define DT_RELA     7
 #define DT_RELASZ   8
 #define DT_RELAENT  9
-#define DT_REL      17
-#define DT_RELSZ    18
-#define DT_RELENT   19
-#define DT_JMPREL   23
-#define DT_PLTRELSZ 2
 
 #define R_RISCV_RELATIVE    3
 

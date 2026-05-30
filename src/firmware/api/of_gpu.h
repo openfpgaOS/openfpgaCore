@@ -42,8 +42,6 @@ extern "C" {
 /* Fixed-point helpers */
 #define OF_GPU_FIXED_16_16(x)   ((int32_t)((x) * 65536))   /* float → 16.16 */
 #define OF_GPU_SUBPIXEL(x)      ((int16_t)((x) * 16))       /* pixel → 12.4  */
-#define OF_GPU_FP16(x)          OF_GPU_FIXED_16_16(x)
-#define OF_GPU_SC(x)            OF_GPU_SUBPIXEL(x)
 
 /* ================================================================
  * Span Flags

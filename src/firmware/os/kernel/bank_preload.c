@@ -80,8 +80,6 @@ static void bank_lpf_biquad(int16_t *samples, uint32_t count)
     }
 }
 
-const void *bank_preload_base(void) { return g_bank_base; }
-uint32_t    bank_preload_size(void) { return g_bank_size; }
 
 static int ends_with_ofsf(const char *name) {
     int n = 0;

@@ -50,22 +50,10 @@ void of_input_poll_p0(of_input_state_t *out);
  * Stick values with absolute value below this threshold are zeroed. */
 void of_input_set_deadzone(int16_t deadzone);
 
-/* Check if a button is currently held */
-static inline int of_input_is_held(int player, uint32_t mask) {
-    extern of_input_state_t of_input_states[INPUT_MAX_PLAYERS];
-    return (of_input_states[player].buttons & mask) != 0;
-}
-
 /* Check if a button was just pressed this frame */
 static inline int of_input_is_pressed(int player, uint32_t mask) {
     extern of_input_state_t of_input_states[INPUT_MAX_PLAYERS];
     return (of_input_states[player].buttons_pressed & mask) != 0;
-}
-
-/* Check if a button was just released this frame */
-static inline int of_input_is_released(int player, uint32_t mask) {
-    extern of_input_state_t of_input_states[INPUT_MAX_PLAYERS];
-    return (of_input_states[player].buttons_released & mask) != 0;
 }
 
 #endif /* OFOS_INPUT_H */

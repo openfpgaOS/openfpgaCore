@@ -5,9 +5,6 @@
 
 #include "../hal/terminal.h"
 #include "../hal/regs.h"
-/* Trap context breadcrumbs (defined in main.c) */
-extern volatile unsigned int pd_dbg_stage;
-extern volatile unsigned int pd_dbg_info;
 
 /* Trap frame layout (matches start.S) */
 typedef struct {

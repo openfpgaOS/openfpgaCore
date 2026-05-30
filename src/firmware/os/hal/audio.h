@@ -1,6 +1,6 @@
 /*
  * openfpgaOS Audio HAL
- * 48 kHz stereo I2S output via hardware FIFO.
+ * 48 kHz stereo I2S output; the hardware mixer drives the FIFO directly.
  */
 
 #ifndef OFOS_AUDIO_H

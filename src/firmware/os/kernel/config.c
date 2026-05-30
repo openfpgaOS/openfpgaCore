@@ -25,7 +25,6 @@ typedef struct {
 static char config_buf[CONFIG_MAX_FILE + 1u];
 static config_entry_t config_entries[CONFIG_MAX_ENTRIES];
 static uint32_t config_entry_count;
-static int config_is_loaded;
 static int config_parse_error_line;
 
 static int cfg_isspace(char c) {
@@ -206,13 +205,11 @@ static int cfg_parse_buffer(uint32_t size) {
 
 int of_config_load(uint32_t slot_id) {
     config_entry_count = 0;
-    config_is_loaded = 0;
     config_parse_error_line = 0;
     config_buf[0] = '\0';
 
     int64_t size = of_file_size64(slot_id);
     if (size <= 0) {
-        config_is_loaded = 1;
         return 0;
     }
 
@@ -228,7 +225,6 @@ int of_config_load(uint32_t slot_id) {
     if (rc < 0)
         return rc;
 
-    config_is_loaded = 1;
     return 0;
 }
 
@@ -294,10 +290,6 @@ int of_config_next(const char *section, uint32_t *cursor,
     }
 
     return OF_CONFIG_ERR_NOENT;
-}
-
-int of_config_loaded(void) {
-    return config_is_loaded;
 }
 
 int of_config_error_line(void) {

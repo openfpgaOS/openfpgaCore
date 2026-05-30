@@ -99,18 +99,12 @@ cpu bootloader firmware os compile build check test timing program: check-target
 sweep: check-target
 	@$(MAKE) -C $(TARGET_DIR) sweep SWEEP_MIN=$(SWEEP_MIN) SWEEP_MAX=$(SWEEP_MAX)
 
-# `flash` removed — use `make firmware` instead. The two targets did
-# the same thing (firmware build + MIF patch + bitstream re-install).
-
 # ── Package ──────────────────────────────────────────────────────────
 package: $(REVERSE_BITS) package-dirs package-bitstream package-chip32 package-firmware package-json package-analogizer-config package-platform package-icon package-install
 	@echo ""
 	@printf "  $(C_OK)Package ready$(C_RESET) → $(BUILD_DIR)/\n"
 	@echo ""
 	@tree -L 4 $(BUILD_DIR) 2>/dev/null || find $(BUILD_DIR) -type f | sort
-
-# Lightweight package (skip checks, for use after flash)
-package-only: $(REVERSE_BITS) package-dirs package-bitstream package-chip32 package-firmware package-json package-analogizer-config package-platform package-icon package-install
 
 package-dirs:
 	@rm -rf $(BUILD_DIR)

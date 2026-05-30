@@ -27,14 +27,8 @@
  * ====================================================================== */
 
 #define SYS_getcwd          17
-#define SYS_dup             23
-#define SYS_dup3            24
 #define SYS_fcntl           25
 #define SYS_ioctl           29
-#define SYS_mkdirat         34
-#define SYS_unlinkat        35
-#define SYS_renameat2       276
-#define SYS_ftruncate       46
 #define SYS_faccessat       48
 #define SYS_chdir           49
 #define SYS_openat          56
@@ -44,8 +38,6 @@
 #define SYS_write           64
 #define SYS_writev          66
 #define SYS_readv           65
-#define SYS_pread64         67
-#define SYS_pwrite64        68
 #define SYS_fstatat         79      /* legacy — riscv32 musl uses SYS_statx instead */
 #define SYS_fstat           80      /* legacy — riscv32 musl uses SYS_statx instead */
 #define SYS_exit            93

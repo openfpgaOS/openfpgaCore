@@ -134,10 +134,4 @@ void of_video_flush_cache(void);
 /* Clear the draw buffer to a palette index */
 void of_video_clear(uint8_t color);
 
-/* Draw a single pixel */
-static inline void of_video_pixel(uint8_t *buf, int x, int y, uint8_t color) {
-    if ((unsigned)x < FB_WIDTH && (unsigned)y < FB_HEIGHT)
-        buf[y * FB_STRIDE + x] = color;
-}
-
 #endif /* OFOS_VIDEO_H */

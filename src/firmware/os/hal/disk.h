@@ -65,10 +65,6 @@ int of_disk_read(uint32_t slot_id, uint32_t slot_offset,
  * on missing app slots without triggering a backend-specific hang. */
 long of_disk_size(uint32_t slot_id);
 
-/* Returns the name of the active backend ("boot", "bridge", or
- * "none") for status display. Never NULL. */
-const char *of_disk_active_name(void);
-
 /* Returns a pointer to the active driver descriptor, or NULL if
  * no backend is installed. Lets callers compare against a known
  * backend by pointer (e.g. file.c's bridge-only warmup DMA) without

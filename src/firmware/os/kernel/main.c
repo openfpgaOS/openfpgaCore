@@ -15,7 +15,6 @@
 #include <string.h>
 
 /* Data slot IDs (match data.json) */
-#define OS_SLOT_ID      1       /* OS binary (loaded by bootloader) */
 #define APP_SLOT_ID     3       /* Default application ELF binary */
 #define APP_DEFAULT_ELF "app.elf"
 #define APP_ELF_NAME_MAX 64
