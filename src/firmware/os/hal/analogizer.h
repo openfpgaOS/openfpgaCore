@@ -43,7 +43,4 @@ const of_analogizer_state_t *of_analogizer_get_state(void);
 /* Check if analog video output is enabled */
 int of_analogizer_is_enabled(void);
 
-/* Get the current video output mode */
-int of_analogizer_get_video_mode(void);
-
 #endif /* OFOS_ANALOGIZER_H */

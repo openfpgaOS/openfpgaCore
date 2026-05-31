@@ -78,8 +78,6 @@ assign {phy_ras, phy_cas, phy_we} = cmd;
     localparam      CMD_PRECHG          = 3'b010;
     localparam      CMD_AUTOREF         = 3'b001;
     localparam      CMD_LMR             = 3'b000;
-    localparam      CMD_SELFENTER       = 3'b001;
-    localparam      CMD_SELFEXIT        = 3'b111;
 
     localparam      CAS                 =   4'd3;   // timings are for 100MHz (10ns)
     localparam      TIMING_LMR          =   4'd2;   // tLMR = 2ck
@@ -88,7 +86,6 @@ assign {phy_ras, phy_cas, phy_we} = cmd;
     // (tRC / ACT-to-ACT is satisfied implicitly by the FSM's per-row command
     // latency; no explicit ACT-ACT timer is needed.)
     localparam      TIMING_ACT_RW       =   4'd2;   // tRCD = 15ns @ 100MHz = 2 cycles (20ns)
-    localparam      TIMING_ACT_PRECHG   =   4'd5;   // tRAS = 42ns @ 100MHz = 5 cycles (50ns)
     localparam      TIMING_WRITE        =   4'd2;   // tWR = 2ck
 
     reg     [5:0]   state;
@@ -126,7 +123,6 @@ assign {phy_ras, phy_cas, phy_we} = cmd;
     localparam      ST_READ_1           = 'd31;
     localparam      ST_READ_2           = 'd32;
     localparam      ST_READ_3           = 'd33;
-    localparam      ST_READ_4           = 'd34;
     localparam      ST_READ_5           = 'd35;
     localparam      ST_READ_6           = 'd36;
     localparam      ST_READ_7           = 'd37;
@@ -186,7 +182,6 @@ assign dbg_io = {1'b0, (refresh_pending != 2'd0), state[5:0]};
     reg burstwr_queue;
 
     reg             word_op;
-    reg             bram_op;
     reg     [24:0]  addr;
     wire    [9:0]   addr_col9_next_1 = addr[9:0] + 'h1;
 

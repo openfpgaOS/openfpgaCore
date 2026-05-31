@@ -6,7 +6,6 @@
  * picks its own draw target from whichever buffer is free.
  *
  * of_video_flip()      — non-blocking: queues draw buffer, picks new draw target
- * of_video_flip_wait() — blocking: flip then wait for vsync (frame-locked)
  */
 
 #include "video.h"
@@ -832,11 +831,6 @@ int of_video_acquire_next(int just_flipped_idx, uint32_t fence_token) {
     sync_swap_state();
     buf_draw = pick_free_buffer();
     return buf_draw;
-}
-
-void of_video_flip_wait(void) {
-    of_video_flip();
-    of_video_wait_flip();
 }
 
 void of_video_vsync(void) {

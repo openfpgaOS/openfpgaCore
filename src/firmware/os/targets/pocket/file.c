@@ -426,14 +426,6 @@ accepted:
     return file_wait_complete();
 }
 
-void of_file_inval_cram(uint32_t bridge_addr, uint32_t length) {
-    /* v2 arch: CRAM0 is uncached per PMA (and CRAM1 is gone), so no
-     * D-cache invalidation is needed for bridge-written CRAM data.
-     * Kept as a no-op so callers don't need to know the PMA policy. */
-    (void)bridge_addr;
-    (void)length;
-}
-
 static int datatable_entry_candidate_for_slot(uint32_t slot_id,
                                               uint32_t *entry_out) {
     /* APF's datatable is indexed by array position in data.json, while

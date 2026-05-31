@@ -497,9 +497,6 @@ static of_mixer_handle_t program_voice_play(int voice, const void *pcm,
                                             uint32_t sample_rate,
                                             int priority, int volume)
 {
-    extern volatile uint32_t play_counter_diag;
-    play_counter_diag++;
-
     uint32_t sample_bytes;
     uint32_t sdram_addr;
     int needs_flush;

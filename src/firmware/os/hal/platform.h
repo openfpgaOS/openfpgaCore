@@ -49,9 +49,6 @@ typedef struct {
     uint32_t runtime_stack_top;
     uint32_t runtime_stack_size;
 
-    uint32_t sample_base;       /* legacy: dynamic audio reserve is in caps */
-    uint32_t sample_size;
-
     uint32_t save_region_addr;
     uint32_t save_slot_size;
     uint32_t save_max_slots;

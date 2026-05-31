@@ -55,18 +55,6 @@ void of_link_init(int master) {
     of_irq_register_link_rx(link_rx_isr);
 }
 
-/* Register a callback for received words.
- * Called from ISR context — keep it short (set a flag, push to a queue).
- * Pass NULL to disable. Data is still buffered regardless. */
-void of_link_set_recv_callback(void (*cb)(uint32_t word)) {
-    app_rx_cb = cb;
-}
-
-void of_link_stop(void) {
-    of_irq_register_link_rx(0);
-    LINK_CTRL = 0;
-}
-
 int of_link_send(uint32_t word) {
     if (tx_busy) return -1;
     tx_busy = 1;

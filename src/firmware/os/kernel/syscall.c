@@ -2377,12 +2377,6 @@ static long of_vendor_dispatch(long eid, long fid,
         }
         break;
 
-    case OF_EID_TILE:
-    case OF_EID_SPRITE:
-        /* Tile/sprite engine retired -- still occupies an EID for ABI
-         * stability but every FID returns NOT_SUPPORTED. */
-        return OF_ERR_NOT_SUPPORTED;
-
     case OF_EID_MEMORY:
         switch (fid) {
         case OF_MEMORY_FID_MALLOC:

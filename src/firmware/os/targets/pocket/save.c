@@ -54,24 +54,9 @@ typedef struct {
 } nvslot_map_t;
 
 /* CRC32 (no table, small code) */
-static uint32_t save_crc32(const volatile uint8_t *data, uint32_t len) {
-    uint32_t crc = 0xFFFFFFFF;
-    for (uint32_t i = 0; i < len; i++) {
-        crc ^= data[i];
-        for (int j = 0; j < 8; j++)
-            crc = (crc >> 1) ^ (0xEDB88320 & -(crc & 1));
-    }
-    return ~crc;
-}
-
 static volatile uint8_t *slot_base(int slot) {
     return (volatile uint8_t *)(SAVE_REGION_ADDR +
                                  (uint32_t)slot * SAVE_SLOT_SIZE);
-}
-
-static volatile save_meta_t *slot_meta(int slot) {
-    return (volatile save_meta_t *)(SAVE_META_ADDR +
-                                     (uint32_t)slot * sizeof(save_meta_t));
 }
 
 static uint32_t cram0_cpu_hold_count;
@@ -273,93 +258,4 @@ int of_nvslot_flush_size(uint32_t data_slot_id, uint32_t size) {
 
     return of_file_slot_write_chunked(data_slot_id, 0,
                                       map.bridge_addr, size, chunk);
-}
-
-int of_save_read(int slot, void *buf, uint32_t offset, uint32_t len) {
-    if (slot < 0 || slot >= (int)SAVE_MAX_SLOTS)
-        return -1;
-    return of_nvslot_read(NV_SLOT_ID_SAVE_BASE + (uint32_t)slot,
-                          buf, offset, len);
-}
-
-int of_save_write(int slot, const void *buf, uint32_t offset, uint32_t len) {
-    if (slot < 0 || slot >= (int)SAVE_MAX_SLOTS)
-        return -1;
-    return of_nvslot_write(NV_SLOT_ID_SAVE_BASE + (uint32_t)slot,
-                           buf, offset, len);
-}
-
-int of_save_set_size(int slot, uint32_t size) {
-    if (slot < 0 || slot >= (int)SAVE_MAX_SLOTS)
-        return -1;
-    return of_nvslot_set_size(NV_SLOT_ID_SAVE_BASE + (uint32_t)slot, size);
-}
-
-int of_save_flush_size(int slot, uint32_t size) {
-    if (slot < 0 || slot >= (int)SAVE_MAX_SLOTS)
-        return -1;
-    return of_nvslot_flush_size(NV_SLOT_ID_SAVE_BASE + (uint32_t)slot, size);
-}
-
-int of_save_flush(int slot) {
-    return of_save_flush_size(slot, SAVE_SLOT_SIZE);
-}
-
-void of_save_update_crc(int slot) {
-    if (slot < 0 || slot >= (int)SAVE_MAX_SLOTS)
-        return;
-
-    /* v2 arch: CPU needs CRAM0 for the CRC sweep + metadata store. */
-    of_save_begin_cpu();
-    volatile uint8_t *base = slot_base(slot);
-    uint32_t crc = save_crc32(base, SAVE_SLOT_SIZE);
-
-    volatile save_meta_t *meta = slot_meta(slot);
-    meta->crc = crc;
-    meta->magic = SAVE_CRC_MAGIC;
-    of_save_end_cpu();
-}
-
-int of_save_check(int slot) {
-    if (slot < 0 || slot >= (int)SAVE_MAX_SLOTS)
-        return -1;
-
-    of_save_begin_cpu();
-    volatile save_meta_t *meta = slot_meta(slot);
-
-    if (meta->magic != SAVE_CRC_MAGIC) {
-        of_save_end_cpu();
-        return -2;
-    }
-
-    volatile uint8_t *base = slot_base(slot);
-    uint32_t computed = save_crc32(base, SAVE_SLOT_SIZE);
-    if (computed != meta->crc) {
-        of_save_end_cpu();
-        return -3;
-    }
-
-    of_save_end_cpu();
-    return 0;
-}
-
-uint32_t of_save_get_size(int slot) {
-    (void)slot;
-    return SAVE_SLOT_SIZE;
-}
-
-void of_save_erase(int slot) {
-    if (slot < 0 || slot >= (int)SAVE_MAX_SLOTS)
-        return;
-
-    of_save_begin_cpu();
-    volatile uint32_t *dst = (volatile uint32_t *)slot_base(slot);
-    for (uint32_t i = 0; i < SAVE_SLOT_SIZE / 4; i++)
-        dst[i] = 0xFFFFFFFF;
-
-    /* Clear metadata */
-    volatile save_meta_t *meta = slot_meta(slot);
-    meta->crc = 0;
-    meta->magic = 0;
-    of_save_end_cpu();
 }

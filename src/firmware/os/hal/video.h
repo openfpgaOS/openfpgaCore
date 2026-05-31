@@ -95,9 +95,6 @@ int of_video_acquire_next(int just_flipped_idx, uint32_t fence_token);
  * — apps draw via this addr and pass `idx` to of_gpu_flip_to. */
 uint8_t *of_video_buffer_addr(int idx);
 
-/* Swap and wait (convenience: requests swap then blocks) */
-void of_video_flip_wait(void);
-
 /* Wait for next vertical blank without flipping buffers.
  * Use for palette animations or effects at 60Hz. */
 void of_video_vsync(void);

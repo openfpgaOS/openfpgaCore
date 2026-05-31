@@ -589,8 +589,3 @@ int of_analogizer_is_enabled(void) {
     of_analogizer_refresh();
     return anlg_state.enabled;
 }
-
-int of_analogizer_get_video_mode(void) {
-    of_analogizer_refresh();
-    return anlg_state.video_mode;
-}

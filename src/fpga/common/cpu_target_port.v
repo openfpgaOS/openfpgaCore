@@ -487,7 +487,7 @@ always @(posedge clk or posedge reset) begin
         case (wr_state)
         // WR_IDLE bundles W into the same cycle as AW when the master
         // already has wvalid up — for single-beat MMIO writes (the
-        // common case for AWE voice loads, ~36 writes per note_on)
+        // common case for the mixer's per-note register writes)
         // this skips the WR_AW intermediate state, saving 1 cycle per
         // write at the master-side handshake.  WR_AW handles the
         // unbundled case (W arrives later) by dropping awready and

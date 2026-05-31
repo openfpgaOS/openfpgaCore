@@ -98,7 +98,6 @@ defparam bridge_sdram_fifo.intended_device_family = "Cyclone V",
 
 localparam ST_IDLE = 2'd0;
 localparam ST_AW   = 2'd1;
-localparam ST_W    = 2'd2;
 localparam ST_B    = 2'd3;
 
 reg [1:0] state;

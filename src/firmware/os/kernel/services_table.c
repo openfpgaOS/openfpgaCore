@@ -20,17 +20,6 @@
 #include "../hal/hal.h"
 #include "../hal/regs.h"
 
-/* AWE fabric retired.  Service slots wired to no-op stubs so SDK apps
- * built against the old ABI still link; they'll just silently do nothing. */
-struct awe_voice_t;
-static void     svc_awe_noop_i(int v)                          { (void)v; }
-static void     svc_awe_voice_load(int v, const struct awe_voice_t *p) { (void)v; (void)p; }
-static void     svc_awe_ch_int(int c, int x)                   { (void)c; (void)x; }
-static void     svc_awe_set_int(int v)                         { (void)v; }
-static uint64_t svc_awe_active_mask(void)                      { return 0; }
-static uint32_t svc_awe_tick_count(void)                       { return 0; }
-static void     svc_awe_ramp1_trigger(int v, int s, uint32_t r){ (void)v; (void)s; (void)r; }
-
 /* ======================================================================
  * Wrappers for SDK/HAL signature mismatches
  * ====================================================================== */
@@ -241,33 +230,6 @@ void services_table_init(void) {
     /* SoundFont preload -- filled in by bank_preload() post-init */
     svc->smp_bank_preload_base = NULL;
     svc->smp_bank_preload_size = 0;
-
-    /* AWE coprocessor (retired — slots kept for ABI stability) */
-    svc->awe_voice_load              = svc_awe_voice_load;
-    svc->awe_voice_trigger           = svc_awe_noop_i;
-    svc->awe_voice_release           = svc_awe_noop_i;
-    svc->awe_voice_stop              = svc_awe_noop_i;
-    svc->awe_channel_set_volume      = svc_awe_ch_int;
-    svc->awe_channel_set_expression  = svc_awe_ch_int;
-    svc->awe_channel_set_pan         = svc_awe_ch_int;
-    svc->awe_channel_set_bend        = svc_awe_ch_int;
-    svc->awe_channel_set_mod         = svc_awe_ch_int;
-    svc->awe_channel_set_sustain     = svc_awe_ch_int;
-    svc->awe_channel_set_brightness  = svc_awe_ch_int;
-    svc->awe_channel_set_resonance   = svc_awe_ch_int;
-    svc->awe_channel_set_reverb_send = svc_awe_ch_int;
-    svc->awe_channel_set_chorus_send = svc_awe_ch_int;
-    svc->awe_set_master_volume       = svc_awe_set_int;
-    svc->awe_set_bend_range          = svc_awe_set_int;
-    svc->awe_active_mask             = svc_awe_active_mask;
-    svc->awe_tick_count              = svc_awe_tick_count;
-    svc->awe_set_hw_envelope         = svc_awe_set_int;
-    svc->awe_set_reverb_level        = svc_awe_set_int;
-    svc->awe_set_reverb_feedback     = svc_awe_set_int;
-    svc->awe_set_chorus_level        = svc_awe_set_int;
-    svc->awe_set_chorus_rate         = svc_awe_set_int;
-    svc->awe_set_chorus_depth        = svc_awe_set_int;
-    svc->awe_ramp1_trigger           = svc_awe_ramp1_trigger;
 
     /* Cache (append-only).  cbo.flush per line — writes back AND
      * invalidates dirty lines in the affected range so external AXI

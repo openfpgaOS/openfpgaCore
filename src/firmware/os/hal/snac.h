@@ -35,9 +35,6 @@ void snac_poll(void);
 /* Poll only when the cached state is older than min_interval_us. */
 void snac_poll_if_due(uint32_t min_interval_us);
 
-/* Get parsed controller state for player 0 or 1 */
-const snac_controller_t *snac_get_state(int player);
-
 /* Copy parsed controller state and clear latched press/release edges.
  * Apps read through the input HAL, which calls this once per app poll so
  * short SNAC taps survive until the app consumes them. */

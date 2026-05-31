@@ -339,9 +339,9 @@ jtframe_frac_cen #(.W(2)) pixel_cen
     .cen({analog_ce_half, analog_ce_pix})
 );
 
-// The generated source is progressive. jtframe_resync alternates an internal
-// field slot on vertical blank, which can produce every-other-frame offsets on
-// this non-interlaced timing, so feed the deterministic raw syncs directly.
+// The generated source is progressive on this non-interlaced timing.  A
+// field-alternating resync would inject every-other-frame offsets, so feed
+// the deterministic raw syncs directly.
 wire HSync = crt_hs;
 wire VSync = crt_vs;
 

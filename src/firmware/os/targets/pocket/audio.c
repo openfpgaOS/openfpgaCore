@@ -24,8 +24,14 @@
 #include "regs.h"
 #include "mixer.h"
 
-/* Ring: 2048 stereo pairs = 16 KB = ~42 ms of slack at 48 kHz. */
-#define AUDIO_RING_PAIRS  2048
+/* Ring: 16384 stereo pairs = 64 KB = ~341 ms of slack at 48 kHz.
+ * Sized to outlast the worst single-thread stall (heavy render frames,
+ * MPQ/bzip2 asset loads) on apps that software-mix music into this ring
+ * from the main loop, so the autonomous HW mixer never underruns and
+ * replays its tail. Must stay a power of two; reservation is
+ * OF_TARGET_AUDIO_STREAM_SIZE (= AUDIO_RING_PAIRS * 4 bytes). Music
+ * latency through the ring is irrelevant and SFX bypass it entirely. */
+#define AUDIO_RING_PAIRS  16384
 
 /* Interleaved L,R,L,R... via the uncached SDRAM alias (see file header
  * for why).  HW mixer's AXI master sees the same physical SDRAM

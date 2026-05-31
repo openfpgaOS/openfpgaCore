@@ -538,11 +538,6 @@ void snac_poll_if_due(uint32_t min_interval_us) {
     snac_poll();
 }
 
-const snac_controller_t *snac_get_state(int player) {
-    if (player < 0 || player > 1) return &snac_state[0];
-    return &snac_state[player];
-}
-
 snac_controller_t snac_read_state(int player) {
     snac_controller_t out;
 

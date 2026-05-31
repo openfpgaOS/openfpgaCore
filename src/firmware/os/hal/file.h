@@ -62,11 +62,6 @@ int of_file_slot_write_chunked(uint32_t slot_id, uint32_t slot_offset,
 int of_file_read_raw(uint32_t slot_id, uint32_t slot_offset,
                       uint32_t bridge_addr, uint32_t length);
 
-/* Invalidate D-cache for CRAM cached aliases after bridge writes.
- * Call after any bridge operation that writes to CRAM (dataslot load,
- * save restore) so CPU reads via 0x30/0x31 see fresh data. */
-void of_file_inval_cram(uint32_t bridge_addr, uint32_t length);
-
 /* Get the filename for a data slot from the bridge.
  * Returns 0 on success, <0 on error or empty slot. */
 int of_file_get_name(uint32_t slot_id, char *name_out, uint32_t name_max);

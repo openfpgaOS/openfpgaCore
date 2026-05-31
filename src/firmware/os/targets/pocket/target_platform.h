@@ -89,10 +89,13 @@
 #define OF_TARGET_FILE_CACHE_TOP        (OF_TARGET_RUNTIME_STACK_TOP - OF_TARGET_RUNTIME_STACK_SIZE)
 #define OF_TARGET_FILE_CACHE_BASE       (OF_TARGET_FILE_CACHE_TOP - OF_TARGET_FILE_CACHE_SIZE)
 
-/* Dynamic audio memory.  The 16 KB stream ring and any boot-time .ofsf
- * bank are reserved top-down from below the OS file cache. */
+/* Dynamic audio memory.  The stream ring and any boot-time .ofsf
+ * bank are reserved top-down from below the OS file cache.
+ * Stream ring is 64 KB = 16384 stereo pairs = ~341 ms (audio.c
+ * AUDIO_RING_PAIRS * 4 bytes); deep enough that main-thread-fed music
+ * survives heavy frames / asset loads without underrunning. */
 #define OF_TARGET_AUDIO_RESERVE_TOP    OF_TARGET_FILE_CACHE_BASE
-#define OF_TARGET_AUDIO_STREAM_SIZE    0x00004000u
+#define OF_TARGET_AUDIO_STREAM_SIZE    0x00010000u
 #define OF_TARGET_AUDIO_RESERVE_ALIGN  0x00001000u
 #define OF_TARGET_APP_STACK_TOP        OF_TARGET_AUDIO_RESERVE_TOP
 #define OF_TARGET_APP_STATIC_END       (OF_TARGET_APP_STACK_TOP - OF_TARGET_AUDIO_STREAM_SIZE - OF_TARGET_RUNTIME_STACK_SIZE)

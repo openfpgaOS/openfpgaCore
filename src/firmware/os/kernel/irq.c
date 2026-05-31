@@ -16,10 +16,6 @@ extern void of_video_vsync_irq_service(void);
 /* Terminal printf — declared here to avoid dragging all of terminal.h. */
 extern void of_term_printf(const char *fmt, ...);
 
-/* play_counter_diag kept as a no-op counter so mixer.c's bump site
- * compiles cleanly — we may re-enable the probe later. */
-volatile uint32_t play_counter_diag;
-
 /* IRQ callbacks */
 static void (*external_cb)(uint32_t source);
 static void (*vsync_cb)(void);

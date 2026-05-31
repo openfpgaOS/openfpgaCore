@@ -44,9 +44,6 @@ static const of_target_platform_t g_target_platform = {
     .runtime_stack_top = OF_TARGET_RUNTIME_STACK_TOP,
     .runtime_stack_size = OF_TARGET_RUNTIME_STACK_SIZE,
 
-    .sample_base = 0,
-    .sample_size = 0,
-
     .save_region_addr = OF_TARGET_SAVE_REGION_ADDR,
     .save_slot_size = OF_TARGET_SAVE_SLOT_SIZE,
     .save_max_slots = OF_TARGET_SAVE_MAX_SLOTS,

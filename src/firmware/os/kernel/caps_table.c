@@ -63,10 +63,6 @@ void caps_table_init(uintptr_t heap_base) {
     /* OS info */
     caps->os_version      = OF_API_VERSION;
     caps->cpu_freq_hz     = platform->cpu_freq_hz;
-    /* Legacy field: still pointed at the services table for any old app
-     * that reads it. New apps get the same pointer via AT_OF_SVC. */
-    caps->services_table  = (uint32_t)(uintptr_t)services_table_get();
-
     /* v2 fields: memory bases for inline accessors that previously
      * baked the addresses into every app .elf. */
     caps->sdram_base          = platform->sdram_base;
