@@ -113,6 +113,32 @@ boot/runtime path and call services through a stable SDK ABI backed by musl.
 There is no MMU, scheduler, or dynamic linking; apps are trusted and run close
 to the hardware.
 
+The current data-slot contract is:
+
+```text
+slot 1   os.bin
+slot 2   os.ini
+slot 3   default app ELF
+slot 4-6 app data files
+slot 7   optional .ofsf sound bank
+slot 8   shared nonvolatile config
+slot 10-19 nonvolatile save slots
+```
+
+`os.ini` is optional. When present, the OS parses it before launching the app:
+
+```ini
+[os]
+ELF=app.elf
+ARGS=--help -a -p path
+```
+
+`ELF` names the app ELF to launch, resolved by APF filename. `slot:N` is also
+accepted for explicit numeric slot launches. `ARGS` is tokenized and passed as
+`argv[1...]`; `argv[0]` is the selected ELF name. Apps can read configuration
+sections through `of_config_get()`, `of_config_get_int()`,
+`of_config_get_bool()`, and `of_config_next()`.
+
 The FPGA fabric provides the driver layer:
 
 - indexed/RGB framebuffer scanout
@@ -127,6 +153,28 @@ The FPGA fabric provides the driver layer:
 
 Diagnostic UART/trap output exists for fatal failures and service-host booting,
 but normal production paths should not emit continuous UART traffic.
+
+## Video Modes
+
+The Pocket target boots in 320x240, 8-bit indexed framebuffer mode with three
+SDRAM framebuffers. Apps can change the logical framebuffer through
+`of_video_set_mode()` and query the active mode with `of_video_get_mode()`.
+
+The packaged `video.json` scaler slots are:
+
+```text
+slot 0  320x240
+slot 1  320x200
+slot 2  320x224
+slot 3  320x256
+slot 4  320x288
+slot 5  400x300
+slot 6  256x240
+```
+
+The SDK accepts larger source framebuffers up to the current hardware limits
+of 800x600 and 2048 bytes per row. The scanout path scales/crops the source
+into the selected Pocket scaler slot where a matching physical mode exists.
 
 ## GPU Notes
 
