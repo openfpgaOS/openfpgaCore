@@ -6,11 +6,11 @@
 
 #
 # PLL output usage (must match core_top.v mp1/mp_ram instantiations):
-#   mp1 general[0] -> clk_core_12288   (audio 12.288 MHz)
-#   mp1 general[1] -> unconnected      (outclk_1 tied to no net)
+#   mp1 general[0] -> clk_core_12288       (audio 12.288 MHz)
+#   mp1 general[1] -> unused (outclk_1 disconnected; freed a global clock net)
 #   mp1 general[2] -> clk_core_49152
-#   mp1 general[3] -> clk_vid
-#   mp1 general[4] -> clk_vid_90deg
+#   mp1 general[3] -> clk_vid              (video 24.576 MHz)
+#   mp1 general[4] -> clk_vid_90deg        (video DDR 24.576 MHz @90)
 #   mp_ram general[0] -> clk_ram_controller (100 MHz CPU/RAM)
 #   mp_ram general[1] -> clk_ram_chip       (100 MHz 243°)
 #   mp_ram general[2] -> clk_cram           (unconnected since v2 memory arch)
@@ -23,6 +23,8 @@ set_clock_groups -asynchronous \
  -group { clk_74b } \
  -group { ic|mp1|mf_pllbase_inst|altera_pll_i|general[0].gpll~PLL_OUTPUT_COUNTER|divclk } \
  -group { ic|mp1|mf_pllbase_inst|altera_pll_i|general[2].gpll~PLL_OUTPUT_COUNTER|divclk } \
+ -group { ic|mp1|mf_pllbase_inst|altera_pll_i|general[3].gpll~PLL_OUTPUT_COUNTER|divclk \
+          ic|mp1|mf_pllbase_inst|altera_pll_i|general[4].gpll~PLL_OUTPUT_COUNTER|divclk } \
  -group { ic|mp_ram|altera_pll_i|general[0].gpll~PLL_OUTPUT_COUNTER|divclk \
           ic|mp_ram|altera_pll_i|general[1].gpll~PLL_OUTPUT_COUNTER|divclk }
 

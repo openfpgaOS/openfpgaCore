@@ -402,6 +402,12 @@ module video_CRT_scanout_indexed_BRAM (
 
     reg [9:0] lcd_src_x_scan;
     reg [10:0] lcd_x_acc;
+    // Previous-cycle x_count (clk_analog domain) so the LCD line-buffer read is
+    // issued once per clk_vid pixel (now 24.576 MHz) instead of per analog_ce_pix
+    // (12.288 MHz). clk_vid:clk_analog is mesochronous 1:2 from one PLL VCO, so
+    // x_count is stable for 2 clk_analog cycles and this edge-detect yields a
+    // clean 24.576 MHz LCD pixel strobe aligned to x_count.
+    reg [9:0] lcd_x_count_prev;
     wire [10:0] lcd_x_sum = lcd_x_acc + {1'b0, fb_width_analog_safe};
     wire [11:0] lcd_x_sum_ext = {1'b0, lcd_x_sum};
     wire [11:0] out_width_1x = {2'b0, out_width_analog_safe};
@@ -477,7 +483,10 @@ module video_CRT_scanout_indexed_BRAM (
     wire [10:0] analog_line_rd_addr =
         {analog_line_bank, analog_line_rd_index};
 
-    wire issue_lcd_read = analog_ce_pix;
+    // One LCD line-buffer read per new x_count value = one per clk_vid pixel
+    // (24.576 MHz). Was analog_ce_pix (12.288 MHz), which matched clk_vid only
+    // when clk_vid was 12.288; at 24.576 that produced half the pixels.
+    wire issue_lcd_read = (x_count != lcd_x_count_prev);
     wire issue_analog_read =
         !issue_lcd_read &&
         ((analog_mux_phase == 2'd1) || (analog_mux_phase == 2'd3));
@@ -553,6 +562,7 @@ module video_CRT_scanout_indexed_BRAM (
             analog_x_acc <= 11'd0;
             lcd_src_x_scan <= 10'd0;
             lcd_x_acc <= 11'd0;
+            lcd_x_count_prev <= 10'd0;
             read_tag_q1 <= READ_NONE;
             read_sub_pixel_q1 <= 4'd0;
             read_active_q1 <= 1'b0;
@@ -583,6 +593,7 @@ module video_CRT_scanout_indexed_BRAM (
         end else begin
             analog_pixel_clk <= ~analog_pixel_clk;
             analog_line_start_ce_d <= analog_line_start_ce;
+            lcd_x_count_prev <= x_count;
             if (analog_ce_pix)
                 analog_mux_phase <= 2'd1;
             else

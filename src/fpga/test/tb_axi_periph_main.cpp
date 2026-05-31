@@ -1009,26 +1009,28 @@ static void test_video_vtotal_sysreg() {
     tb->analogizer_settings_in = 0;
     for (int i = 0; i < 4; i++) tick();
 
-    check_eq("vtotal-reset-conservative", mmio_read32(VIDEO_VTOTAL), 262u);
+    // 24.576 MHz video clock, H_TOTAL=780: clamp band [514,750] = [61.30,42.01] Hz,
+    // 60Hz default=525, 50Hz=630. (Was [257,375] / 262 / 310 at the old 12.288 MHz clock.)
+    check_eq("vtotal-reset-conservative", mmio_read32(VIDEO_VTOTAL), 525u);
 
-    axi_write_single(VIDEO_VTOTAL, 310u);
-    check_eq("vtotal-write-50hz", mmio_read32(VIDEO_VTOTAL), 310u);
+    axi_write_single(VIDEO_VTOTAL, 630u);
+    check_eq("vtotal-write-50hz", mmio_read32(VIDEO_VTOTAL), 630u);
 
     axi_write_single(VIDEO_VTOTAL, 1u);
-    check_eq("vtotal-clamp-low", mmio_read32(VIDEO_VTOTAL), 257u);
+    check_eq("vtotal-clamp-low", mmio_read32(VIDEO_VTOTAL), 514u);
 
-    axi_write_single(VIDEO_VTOTAL, 257u);
-    check_eq("vtotal-write-experimental-fast", mmio_read32(VIDEO_VTOTAL), 257u);
+    axi_write_single(VIDEO_VTOTAL, 514u);
+    check_eq("vtotal-write-experimental-fast", mmio_read32(VIDEO_VTOTAL), 514u);
 
-    axi_write_single(VIDEO_VTOTAL, 262u);
-    check_eq("vtotal-write-conservative", mmio_read32(VIDEO_VTOTAL), 262u);
+    axi_write_single(VIDEO_VTOTAL, 525u);
+    check_eq("vtotal-write-conservative", mmio_read32(VIDEO_VTOTAL), 525u);
 
     axi_write_single(VIDEO_VTOTAL, 4095u);
-    check_eq("vtotal-clamp-high", mmio_read32(VIDEO_VTOTAL), 375u);
+    check_eq("vtotal-clamp-high", mmio_read32(VIDEO_VTOTAL), 750u);
 
     tb->analogizer_settings_in = 0x00008000u;
     for (int i = 0; i < 4; i++) tick();
-    check_eq("vtotal-fixed-output-override", mmio_read32(VIDEO_VTOTAL), 262u);
+    check_eq("vtotal-fixed-output-override", mmio_read32(VIDEO_VTOTAL), 525u);
 
     tb->analogizer_settings_in = 0x00008C43u;
 }

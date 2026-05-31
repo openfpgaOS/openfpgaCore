@@ -19,6 +19,7 @@
 #include "of_services.h"
 #include "../hal/hal.h"
 #include "../hal/regs.h"
+#include "../hal/file.h"
 
 /* ======================================================================
  * Wrappers for SDK/HAL signature mismatches
@@ -282,6 +283,9 @@ void services_table_init(void) {
     svc->config_get_int = of_config_get_int;
     svc->config_get_bool = of_config_get_bool;
     svc->config_next = of_config_next;
+
+    /* File I/O idle hook: lets the app feed audio during blocking SD reads. */
+    svc->file_set_idle_hook = of_file_set_idle_hook;
 }
 
 void services_table_set_smp_bank(const void *base, uint32_t size) {

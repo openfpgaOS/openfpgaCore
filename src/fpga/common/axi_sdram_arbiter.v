@@ -7,7 +7,9 @@
 //   M2 = APF bridge file DMA (write-only)
 //   M3 = AudioMix (audio_mixer per-voice sample fetch, read-only)
 //
-// Fixed priority: GPU > CPU > Bridge > AudioMix.
+// Priority: CPU-starvation guard, then AudioMix, then GPU > CPU > Bridge.
+// (AudioMix was historically lowest; it is now promoted to just under the CPU
+//  guard because it is latency-critical and tiny — see the ST_IDLE comment.)
 //
 // M0 writes are posted into an ordered local queue before they reach the
 // shared SDRAM slave.  B responses still wait for the corresponding queued
@@ -16,11 +18,11 @@
 // are pending; a bounded read budget and high-water mark keep writes from
 // starving.
 //
-// CPU fairness counter (unchanged): any GPU/audio grant while the CPU
-// has a pending request increments a deficit; once it reaches
-// CPU_FAIR_THRESHOLD the CPU is granted unconditionally.  Audio is
-// BELOW CPU in priority, so it never contributes to the deficit —
-// matching the old 5-master layout where audio also sat below CPU.
+// CPU fairness counter: any GPU/audio grant while the CPU has a pending
+// request increments a deficit; once it reaches CPU_FAIR_THRESHOLD the CPU
+// is granted unconditionally.  Audio now sits ABOVE GPU/CPU but still under
+// this guard, and an audio grant while the CPU is pending DOES bump the
+// deficit, so the guard can preempt a sustained audio burst (no starvation).
 //
 // Single outstanding transaction at the SDRAM slave -- grants one master at a
 // time, holds until read completes (R.rlast) or write completes (B.bvalid).
@@ -343,7 +345,18 @@ always @(posedge clk or posedge reset) begin
                 gpu_deficit <= 4'd0;
                 if (audio_pending) audio_deficit <= audio_deficit + 4'd1;
                 arb_state <= m1_arvalid ? ST_RD : ST_WR;
-            end else if (audio_pending && audio_deficit >= AUDIO_FAIR_THRESHOLD) begin
+            end else if (audio_pending) begin
+                // AudioMix promoted to 2nd-highest (just under the CPU-starvation
+                // guard, ABOVE GPU/CPU-normal/Bridge). It is a tiny (~192 KB/s) but
+                // hard-real-time per-output-sample voice fetch; with the native
+                // 640x480 scanout reading the framebuffer at ~4x the old rate,
+                // leaving audio at the bottom let its fetches stall behind GPU/CPU
+                // long enough to stretch the output FIFO (audible pitch flutter).
+                // Granting it whenever pending bounds its latency to one in-flight
+                // transaction plus the bounded video line-burst above it in
+                // io_sdram. Audio demand is sparse/short, so GPU/CPU barely notice;
+                // the cpu_pending->gpu_deficit bump keeps the CPU guard able to
+                // preempt a pathological audio burst, so no master starves.
                 grant <= 2'd3;
                 active_wr_gpuq <= 1'b0;
                 audio_deficit <= 4'd0;

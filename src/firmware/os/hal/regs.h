@@ -138,9 +138,9 @@
  * requests may be consumed during the current blanking interval; Analogizer
  * and SNAC fixed-rate modes override this register. */
 #define VIDEO_VTOTAL       REG32(SYSREG_BASE + 0xDC)
-#define VIDEO_VTOTAL_MIN   257u
-#define VIDEO_VTOTAL_MAX   375u
-#define VIDEO_VTOTAL_60HZ  262u  /* conservative normal LCD timing, measured ~60.13 Hz */
+#define VIDEO_VTOTAL_MIN   514u  /* 24.576 MHz / (780 * 514) = 61.30 Hz */
+#define VIDEO_VTOTAL_MAX   750u  /* 24.576 MHz / (780 * 750) = 42.01 Hz */
+#define VIDEO_VTOTAL_60HZ  525u  /* 24.576 MHz / (780 * 525) = 60.02 Hz; conservative normal LCD timing */
 
 /* Data slot / DMA interface */
 #define DS_SLOT_ID          REG32(SYSREG_BASE + 0x20)

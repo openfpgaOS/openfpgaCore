@@ -520,7 +520,7 @@ wire       snac_configured          = (analogizer_settings[4:0] != 5'd0);
 wire       vrr_fixed_rate_mode      =
     analogizer_enabled || analogizer_video_enabled || snac_configured || snac_en_reg;
 wire [9:0] vrr_fixed_v_total        =
-    (analogizer_video_enabled && analogizer_pal_mode) ? 10'd315 : 10'd262;
+    (analogizer_video_enabled && analogizer_pal_mode) ? 10'd630 : 10'd525;
 assign vrr_v_total = vrr_fixed_rate_mode ? vrr_fixed_v_total
                                          : vrr_v_total_reg;
 
@@ -566,10 +566,10 @@ wire os_inmenu_s = os_inmenu_sync[2];
 function [9:0] clamp_v_total;
     input [9:0] vt;
     begin
-        if (vt < 10'd257)
-            clamp_v_total = 10'd257;
-        else if (vt > 10'd375)
-            clamp_v_total = 10'd375;
+        if (vt < 10'd514)
+            clamp_v_total = 10'd514;
+        else if (vt > 10'd750)
+            clamp_v_total = 10'd750;
         else
             clamp_v_total = vt;
     end
@@ -909,7 +909,7 @@ always @(posedge clk) begin
         fb_swap_pending <= 1'b0;
         fb_swap_consumed_this_frame <= 1'b0;
         term_fb_active <= 1'b1;  // terminal FB visible by default at boot
-        vrr_v_total_reg <= 10'd262;
+        vrr_v_total_reg <= 10'd525;
         pal_wr <= 0;
         pal_addr <= 0;
         pal_data <= 0;

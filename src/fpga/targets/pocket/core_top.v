@@ -1997,7 +1997,7 @@ assign video_hs = vidout_hs;
     localparam CRT_H_TOTAL  = CRT_H_SYNC + CRT_H_BPORCH + 640 + CRT_H_FPORCH;
     localparam [9:0] CRT_V_ACTIVE_BASE = CRT_V_SYNC + CRT_V_BPORCH;
     localparam [9:0] CRT_V_CENTER_HEIGHT = 10'd240;
-    localparam CRT_V_TOTAL_DEFAULT = CRT_V_ACTIVE_BASE + 240 + CRT_V_FPORCH; // 262
+    localparam CRT_V_TOTAL_DEFAULT = 10'd525; // ~60.0 Hz at 24.576 MHz (old CRT_V_ACTIVE_BASE+240+CRT_V_FPORCH=262 was ~60 Hz at 12.288, = ~120 Hz at 24.576). Default sets frame LENGTH only; active region is crt_v_active_start/end.
 
     function [9:0] scaler_slot_width;
         input [2:0] slot;
@@ -2010,7 +2010,7 @@ assign video_hs = vidout_hs;
                 3'd4: scaler_slot_width = 10'd320;
                 3'd5: scaler_slot_width = 10'd400;
                 3'd6: scaler_slot_width = 10'd256;
-                3'd7: scaler_slot_width = 10'd320;
+                3'd7: scaler_slot_width = 10'd640;   /* 640x480 (full-res) */
                 default: scaler_slot_width = 10'd320;
             endcase
         end
@@ -2027,7 +2027,7 @@ assign video_hs = vidout_hs;
                 3'd4: scaler_slot_height = 10'd288;
                 3'd5: scaler_slot_height = 10'd300;
                 3'd6: scaler_slot_height = 10'd240;
-                3'd7: scaler_slot_height = 10'd240;
+                3'd7: scaler_slot_height = 10'd480;   /* 640x480 (full-res); V_TOTAL floors to 18+480=498 -> ~31.6 Hz at the 12.288 MHz video clock */
                 default: scaler_slot_height = 10'd240;
             endcase
         end
@@ -2055,8 +2055,8 @@ assign video_hs = vidout_hs;
     // clock. Physical scaler modes with taller active regions clamp the
     // request up so active video is never truncated.
     wire [9:0] vrr_vt_clamped = (vrr_vt_sync2 == 10'd0)  ? CRT_V_TOTAL_DEFAULT :
-                                (vrr_vt_sync2 < 10'd257) ? 10'd257 :
-                                (vrr_vt_sync2 > 10'd375) ? 10'd375 :
+                                (vrr_vt_sync2 < 10'd514) ? 10'd514 :
+                                (vrr_vt_sync2 > 10'd750) ? 10'd750 :
                                                            vrr_vt_sync2;
     wire [9:0] vrr_vt_safe =
         (vrr_vt_clamped < crt_v_total_min) ? crt_v_total_min : vrr_vt_clamped;
@@ -2921,10 +2921,11 @@ assign sram_word_wstrb = 4'b0;
 ///////////////////////////////////////////////
 
 
-    wire    clk_core_12288;         // 12.288 MHz — audio + fixed video scanout
-    wire    clk_core_12288_90deg;   // 12.288 MHz 90° — Pocket video DDR
+    wire    clk_core_12288;         // 12.288 MHz — audio (256*48kHz) ONLY
     wire    clk_core_49152;
-    wire    clk_vid;                // 12.288 MHz — ~60.13 Hz at V_TOTAL=262
+    wire    clk_core_24576;         // 24.576 MHz — Pocket video pixel clock
+    wire    clk_core_24576_90deg;   // 24.576 MHz 90° — Pocket video DDR
+    wire    clk_vid;                // 24.576 MHz — ~60.0 Hz at V_TOTAL=525
     wire    clk_vid_90deg;
     wire    clk_cpu;
     wire    clk_ram_controller;
@@ -2936,19 +2937,19 @@ assign sram_word_wstrb = 4'b0;
     wire    pll_core_locked_s;
 synch_3 s01(pll_locked_all, pll_core_locked_s, clk_74a);
 
-assign clk_vid = clk_core_12288;
-assign clk_vid_90deg = clk_core_12288_90deg;
+assign clk_vid = clk_core_24576;
+assign clk_vid_90deg = clk_core_24576_90deg;
 
 mf_pllbase mp1 (
     .refclk         ( clk_74a ),
     .rst            ( 0 ),
 
     .outclk_0       ( clk_core_12288 ),
-    .outclk_1       ( clk_core_12288_90deg ),
+    .outclk_1       ( ),
 
     .outclk_2       ( clk_core_49152),
-    .outclk_3       ( ),
-    .outclk_4       ( ),
+    .outclk_3       ( clk_core_24576 ),
+    .outclk_4       ( clk_core_24576_90deg ),
 
     .locked         ( pll_core_locked )
 );

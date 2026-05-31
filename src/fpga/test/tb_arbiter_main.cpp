@@ -209,13 +209,15 @@ static void test_continuous_ar_starves_aw() {
 }
 
 // ====================================================================
-// Test 3: Sanity — fixed priority M0>M1>M3 when no M0 pressure.
+// Test 3: Sanity — AudioMix (M3) is now promoted ABOVE CPU (M1) and GPU (M0),
+// sitting just under the CPU-starvation guard.  With no CPU deficit built up,
+// M3 wins when it competes with M1.
 // ====================================================================
 static void test_priority_chain() {
-    printf("\n=== Test 3: Priority chain M0 > M1 > M3 ===\n");
+    printf("\n=== Test 3: Priority chain M3(audio) > M0 > M1 ===\n");
     reset_sequence();
 
-    // M0 idle; M1 + M3 both want a read.  M1 should win first.
+    // M0 idle; M1 + M3 both want a read.  M3 (audio) should win first now.
     tb->m1_arvalid = 1; tb->m1_araddr = 0x30000000; tb->m1_arlen = 0;
     tb->m3_arvalid = 1; tb->m3_araddr = 0x40000000; tb->m3_arlen = 0;
 
@@ -233,8 +235,8 @@ static void test_priority_chain() {
     }
 
     char msg[128];
-    snprintf(msg, sizeof(msg), "first granted master = %d (expected 1)", first_grant);
-    check("M1 wins over M3 when both request", first_grant == 1, msg);
+    snprintf(msg, sizeof(msg), "first granted master = %d (expected 3 = audio)", first_grant);
+    check("M3 (audio) wins over M1 when both request", first_grant == 3, msg);
 }
 
 // ====================================================================

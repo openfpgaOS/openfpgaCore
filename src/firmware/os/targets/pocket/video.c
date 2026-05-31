@@ -61,6 +61,7 @@ static const video_scaler_mode_t scaler_modes[] = {
     {320, 288, 4},
     {400, 300, 5},
     {256, 240, 6},
+    {640, 480, 7},   /* 4:3; full-res slot 7 (core_top.v scaler_slot_*(7)) */
 };
 
 static const video_scaler_mode_t *video_scaler_mode_for_size(uint16_t width,
@@ -227,10 +228,9 @@ static volatile uint64_t timing_last_present_cycles;
  * normal repeat cadence. If the late window is missed too, the next repeat
  * also uses that fastest timing.
  * The FPGA clamps again and can consume shorter requests in the current frame
- * after active video has completed. The fastest experimental normal-LCD
- * timing is V_TOTAL=257, which measures about 61.30 Hz with the current
- * 12.288 MHz video clock and 780-line horizontal total; exact 61.25 Hz would
- * need a small clock retune. When Analogizer video or SNAC is active, RTL
+ * after active video has completed. The fastest normal-LCD timing is
+ * V_TOTAL=514, which measures about 61.30 Hz with the 24.576 MHz video clock
+ * and 780-line horizontal total. When Analogizer video or SNAC is active, RTL
  * overrides this register with fixed NTSC/PAL timing so external hardware
  * does not see adaptive changes. */
 #define VRR_FASTEST_HZ_MILLI         61299u
