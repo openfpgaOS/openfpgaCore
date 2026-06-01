@@ -29,6 +29,11 @@
 
 static OF_FASTDATA smp_voice_t voices[SMP_MAX_VOICES];
 static OF_FASTDATA uint32_t    tick_counter;
+/* Count of voices currently marked STEAL_PENDING.  voice_cleanup_stolen()
+ * runs every tick; this lets it skip the full SMP_MAX_VOICES scan in the
+ * common case (nothing pending).  Only voice_force_off() sets STEAL_PENDING
+ * (and bumps this); voice_cleanup_stolen() clears them all and zeroes it. */
+static OF_FASTDATA uint8_t     steal_pending_count;
 
 /* ------------------------------------------------------------------ */
 /* Tick-cost probe (Task #10)                                         */
@@ -345,11 +350,16 @@ static int voice_hw_owned_by_music(const smp_voice_t *v)
 {
     if (v->mixer_voice == OF_MIXER_HANDLE_INVALID)
         return 0;
-    if (!of_mixer_handle_active(v->mixer_voice))
-        return 0;
-
+    /* of_mixer_handle_group() validates the handle against active_shadow +
+     * generation and returns -1 for an invalid / inactive / stolen handle, so
+     * this single NON-reaping query replaces the old handle_active +
+     * handle_group pair (one mixer call per voice instead of two).  The HW
+     * voice-end queue is reaped once per tick at the top of smp_voice_tick()
+     * instead of once per voice here — see the reap there. */
     int group = of_mixer_handle_group(v->mixer_voice);
-    return group < 0 || group == OF_MIXER_GROUP_MUSIC;
+    if (group < 0)
+        return 0;
+    return group == OF_MIXER_GROUP_MUSIC;
 }
 
 static void voice_stop_hw_if_owned(smp_voice_t *v)
@@ -461,10 +471,14 @@ static void voice_force_off(int idx)
     of_mixer_set_vol_lr_h(v->mixer_voice, 0, 0);
     of_mixer_set_volume_ramp_h(v->mixer_voice, 16);
     v->active = STEAL_PENDING;
+    steal_pending_count++;
 }
 
 static void voice_cleanup_stolen(void)
 {
+    /* Common case: nothing pending — skip the full scan. */
+    if (steal_pending_count == 0)
+        return;
     for (int i = 0; i < SMP_MAX_VOICES; i++) {
         if (voices[i].active == STEAL_PENDING) {
             voice_stop_hw_if_owned(&voices[i]);
@@ -472,6 +486,7 @@ static void voice_cleanup_stolen(void)
             voices[i].mixer_voice = OF_MIXER_HANDLE_INVALID;
         }
     }
+    steal_pending_count = 0;
 }
 
 /* ------------------------------------------------------------------ */
@@ -627,6 +642,7 @@ void smp_voice_init(void)
 
     master_vol = 255;
     tick_counter = 0;
+    steal_pending_count = 0;
 }
 
 int smp_voice_note_on(const ofsf_zone_t *zone, int midi_ch, int note,
@@ -796,6 +812,17 @@ void smp_voice_tick(void)
 #endif
 
     tick_counter++;
+
+    /* Reap the HW mixer's voice-end queue ONCE per tick.
+     * of_mixer_handle_active() runs mixer_reap_ended_pending() first — a
+     * non-destructive reap that updates active_shadow and pushes ended voices
+     * to the ended-queue WITHOUT consuming it (SFX end-polling is unaffected) —
+     * then validates the handle.  We pass an INVALID handle purely to trigger
+     * that reap; the per-voice voice_hw_owned_by_music() checks below then use
+     * the non-reaping of_mixer_handle_group(), so we no longer pay one MMIO
+     * MIX_IRQ_PENDING read per active voice per tick. */
+    (void)of_mixer_handle_active(OF_MIXER_HANDLE_INVALID);
+
     voice_cleanup_stolen();
 
     for (int i = 0; i < SMP_MAX_VOICES; i++) {
@@ -819,7 +846,7 @@ void smp_voice_tick(void)
          * can force-DONE without any audible click and reclaim the slot
          * immediately — otherwise the envelope's long SUSTAIN parks the
          * voice (especially SF2 drum zones with very long vol_sustain)
-         * and fills all 28 soft voices during dense drum tracks. */
+         * and fills all SMP_MAX_VOICES soft voices during dense drum tracks. */
         if (v->sample_ticks_remaining > 0) {
             if (--v->sample_ticks_remaining == 0) {
                 v->vol_env.stage = ENV_DONE;

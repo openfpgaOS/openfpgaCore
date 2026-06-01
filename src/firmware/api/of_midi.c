@@ -49,6 +49,7 @@ static OF_FASTDATA struct {
     uint16_t division;
 
     uint32_t us_per_beat;
+    uint64_t us_per_tick_q16;  /* (us_per_beat << 16) / division, cached */
     uint32_t last_pump_us;
     uint32_t tick_accum_us;   /* accumulates until >= 1000 µs → one voice tick (matches of_smp_tables.c 1 kHz envelope rate) */
 
@@ -92,6 +93,22 @@ static uint32_t read_var(midi_track_t *t) {
 }
 
 /* ========================================================================
+ * Tempo cache
+ * ======================================================================== */
+
+/* Precompute microseconds-per-MIDI-tick in Q16.16.  Recomputed only when the
+ * tempo (us_per_beat) or the file's division changes, so read_next_delta —
+ * called once per MIDI event — replaces the old per-event 64-bit division
+ * (delta * us_per_beat / division, a costly __divdi3 on RV32) with a 64-bit
+ * multiply + shift.  Q16 keeps sub-microsecond precision so accumulated timing
+ * drift is lower than the old integer-truncating divide. */
+static void recompute_us_per_tick(void) {
+    M.us_per_tick_q16 = M.division
+        ? (((uint64_t)M.us_per_beat << 16) / M.division)
+        : 0;
+}
+
+/* ========================================================================
  * Channel-state reset
  * ======================================================================== */
 
@@ -107,6 +124,7 @@ static void reset_channels(void) {
         M.resonance[i]  = 64;
     }
     M.us_per_beat = 500000;  /* 120 BPM */
+    recompute_us_per_tick();
 }
 
 /* ========================================================================
@@ -209,6 +227,7 @@ static int process_event(midi_track_t *t) {
             M.us_per_beat = ((uint32_t)t->data[t->pos] << 16) |
                             ((uint32_t)t->data[t->pos+1] << 8) |
                             t->data[t->pos+2];
+            recompute_us_per_tick();
         } else if (meta == 0x2F) {
             t->done = 1;
         }
@@ -263,7 +282,10 @@ static void read_next_delta(midi_track_t *t) {
         return;
     }
     uint32_t delta = read_var(t);
-    t->pending_us += (int64_t)delta * M.us_per_beat / M.division;
+    /* delta * (us_per_beat / division), via the cached Q16.16 µs-per-tick — no
+     * per-event 64-bit divide.  (division==0 is rejected in parse_header, so
+     * us_per_tick_q16 is always valid while playing.) */
+    t->pending_us += (int64_t)(((uint64_t)delta * M.us_per_tick_q16) >> 16);
 }
 
 /* ========================================================================
@@ -283,6 +305,9 @@ static int parse_header(void) {
 
     if (M.format > 1)      return OF_MIDI_ERR_FORMAT;
     if (M.num_tracks == 0) return OF_MIDI_ERR_NO_TRACKS;
+    /* division is the per-tick divisor in read_next_delta; 0 would divide by
+     * zero (and SMPTE-format division with bit 15 set is not supported). */
+    if (M.division == 0)   return OF_MIDI_ERR_BAD_HDR;
     if (M.num_tracks > MIDI_MAX_TRACKS) M.num_tracks = MIDI_MAX_TRACKS;
 
     uint32_t offset = 8 + hdr_len;
