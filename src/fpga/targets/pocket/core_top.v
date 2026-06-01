@@ -418,40 +418,42 @@ assign cart_pin30_pwroff_reset = cart_gpio_mode ? 1'b1 : 1'b0;
 // idle-high to UART RX to prevent adapter traffic from becoming console input.
 wire uart_rx_serial = cart_gpio_mode ? 1'b1 : cart_tran_pin31;
 
-wire        analogizer_sd_clk;
-wire [23:0] analogizer_sd_rgb;
-wire        analogizer_sd_hblank;
-wire        analogizer_sd_vblank;
-wire        analogizer_sd_hsync;
-wire        analogizer_sd_vsync;
-
 // Analogizer: video output only — SNAC pins now driven by CPU through above mux
 openFPGA_Pocket_Analogizer #(
-    .MASTER_CLK_FREQ(49_152_000)
+    .MASTER_CLK_FREQ(49_152_000),
+    // openfpgaOS outputs RGBS/RGsB/VGA(scandoubler) only.  Gate out the YPbPr
+    // (vga_out) and Y/C composite (yc_out) encoders — ~700-900 ALMs unused on a
+    // VGA build — to fit the device.  Flip back to 1 to restore those modes.
+    .EN_YPBPR(0),
+    .EN_YC(0)
 ) analogizer (
     .i_clk(clk_core_49152),
     .i_rst(~reset_n_analog),
     .i_ena(analogizer_ena_core),
-    // Video interface
-    .video_clk(clk_core_12288),
-    .sd_video_clk(analogizer_sd_clk),
+    // Video interface — restored to the original (pre-cf2beec) single-path
+    // wiring: the Analogizer is fed the LCD video directly (vidout_rgb + crt_*
+    // sync), and the cart-pin DAC clock is video_clk = clk_vid (clk_core_24576,
+    // 24.576 MHz, the LCD pixel clock, already SDC-constrained) per the upstream
+    // Analogizer (cart pin = video_clk).  The LCD is now itself 640x480/31 kHz —
+    // exactly what the old scandoubler used to PRODUCE — so the Analogizer
+    // bypasses its scandoubler (scandoubler=0) and mirrors the 480p LCD straight
+    // to VGA: same 31 kHz/480-line output as before, with no dedicated analog
+    // raster.  (The dynamic-480p analog machinery in the scanout is left dormant
+    // and pruned — see the scanout instance's analog_480p/unconnected outputs.)
+    .video_clk(clk_vid),
     .analog_video_type(analogizer_video_type_core),
     .R(vidout_rgb[23:16]),
     .G(vidout_rgb[15:8]),
     .B(vidout_rgb[7:0]),
-    .R_Sd(analogizer_sd_rgb[23:16]),
-    .G_Sd(analogizer_sd_rgb[15:8]),
-    .B_Sd(analogizer_sd_rgb[7:0]),
     .Hblank(crt_hblank),
     .Vblank(crt_vblank),
-    .Hblank_Sd(analogizer_sd_hblank),
-    .Vblank_Sd(analogizer_sd_vblank),
     .BLANKn(crt_blankn),
     .Hsync(HSync),
     .Vsync(VSync),
-    .Hsync_Sd(analogizer_sd_hsync),
-    .Vsync_Sd(analogizer_sd_vsync),
     .Csync(crt_csync),
+    .ce_pix(analog_ce_pix),
+    .scandoubler(1'b0),
+    .fx(fx),
     .CHROMA_PHASE_INC(CHROMA_PHASE_INC),
     .PALFLAG(PALFLAG),
     // SNAC cart pin pass-through from CPU GPIO
@@ -2512,12 +2514,20 @@ assign video_hs = vidout_hs;
         .reset_analog_n(reset_n_analog),
         .analog_ce_pix(analog_ce_pix),
         .analog_scanlines(fx[1:0]),
-        .analog_pixel_clk(analogizer_sd_clk),
-        .analog_pixel_color(analogizer_sd_rgb),
-        .analog_hblank(analogizer_sd_hblank),
-        .analog_vblank(analogizer_sd_vblank),
-        .analog_hsync(analogizer_sd_hsync),
-        .analog_vsync(analogizer_sd_vsync),
+        // Analog path retired: the Analogizer is now fed the LCD video directly
+        // (see its instance above), so the scanout's dedicated 240p analog
+        // machinery is unused.  analog_480p=1 disables the dedicated 240p fetch
+        // (so the analog_line_buffer + fetch FSM are dead) and the analog_*
+        // outputs are left unconnected, so Quartus prunes the whole analog-only
+        // cone.  The shared clk_analog pixel-decode pipeline that produces the
+        // LCD pixel_color is untouched.
+        .analog_480p(1'b1),
+        .analog_pixel_clk(),
+        .analog_pixel_color(),
+        .analog_hblank(),
+        .analog_vblank(),
+        .analog_hsync(),
+        .analog_vsync(),
         .fb_base_addr(fb_display_addr),
         .color_mode(color_mode),
         .fb_width(fb_width),

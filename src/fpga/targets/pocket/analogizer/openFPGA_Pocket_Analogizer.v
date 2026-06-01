@@ -69,30 +69,36 @@
 `default_nettype none
 `timescale 1ns / 1ps
 
-module openFPGA_Pocket_Analogizer #(parameter MASTER_CLK_FREQ=50_000_000) (
+// EN_YPBPR / EN_YC gate the analog *output encoders*.  They default to 1 so
+// every existing consumer keeps full functionality; a resource-constrained
+// core that only outputs RGBS/RGsB/VGA (scandoubler) can set them to 0 to drop
+// the YPbPr (vga_out, ~230-400 ALMs) and Y/C composite (yc_out, ~400-490 ALMs)
+// encoders entirely.  When 0 the corresponding mode-mux inputs are tied off, so
+// selecting a YPbPr/Y-C video_type just outputs black instead of the encoder.
+module openFPGA_Pocket_Analogizer #(
+	parameter MASTER_CLK_FREQ=50_000_000,
+	parameter EN_YPBPR=1,
+	parameter EN_YC=1
+) (
 	input wire i_clk,
     input wire i_rst,
 	input wire i_ena,
 	//Video interface
 	input wire video_clk,
-	input wire sd_video_clk,
 	input wire [3:0] analog_video_type,
 	input wire [7:0] R,
 	input wire [7:0] G,
 	input wire [7:0] B,
-	input wire [7:0] R_Sd,
-	input wire [7:0] G_Sd,
-	input wire [7:0] B_Sd,
 	input wire Hblank,
 	input wire Vblank,
-	input wire Hblank_Sd,
-	input wire Vblank_Sd,
 	input wire BLANKn,
 	input wire Hsync,
 	input wire Vsync,
-	input wire Hsync_Sd,
-	input wire Vsync_Sd,
 	input wire Csync,
+	//Video SVGA Scandoubler interface (internal scandoubler re-instated)
+	input wire ce_pix,
+	input wire scandoubler, //logic for disable/enable the scandoubler
+	input wire [2:0] fx, //0 disable, 1 scanlines 25%, 2 50%, 3 75%, 4 hq2x
 	//Video Y/C Encoder interface
 	input wire [39:0] CHROMA_PHASE_INC,
 	input wire PALFLAG,
@@ -127,13 +133,10 @@ module openFPGA_Pocket_Analogizer #(parameter MASTER_CLK_FREQ=50_000_000) (
 		reg [5:0] Rout, Gout, Bout;
 		reg HsyncOut, VsyncOut, BLANKnOut;
 		wire [7:0] Yout, PrOut, PbOut;
+		wire [5:0] R_Sd, G_Sd, B_Sd;
+		wire Hsync_Sd, Vsync_Sd;
+		wire Hblank_Sd, Vblank_Sd;
 		wire BLANKn_SD = ~(Hblank_Sd || Vblank_Sd);
-		wire scandoubler_mode = (analog_video_type == 4'h5) ||
-		                         (analog_video_type == 4'h6) ||
-		                         (analog_video_type == 4'h7) ||
-		                         (analog_video_type == 4'hD) ||
-		                         (analog_video_type == 4'hE) ||
-		                         (analog_video_type == 4'hF);
 
 	always @(*) begin
 		case(analog_video_type)
@@ -170,9 +173,9 @@ module openFPGA_Pocket_Analogizer #(parameter MASTER_CLK_FREQ=50_000_000) (
 				BLANKnOut = 1'b1; //ADV7123 needs this
 			end
 			4'h5, 4'h6, 4'h7, 4'hD, 4'hE, 4'hF: begin //Scandoubler modes
-				Rout = R_Sd[7:2];
-				Gout = G_Sd[7:2];
-				Bout = B_Sd[7:2];
+				Rout = R_Sd;
+				Gout = G_Sd;
+				Bout = B_Sd;
 				HsyncOut = Hsync_Sd;
 				VsyncOut = Vsync_Sd;
 				BLANKnOut = BLANKn_SD;
@@ -217,37 +220,88 @@ module openFPGA_Pocket_Analogizer #(parameter MASTER_CLK_FREQ=50_000_000) (
 	// csync csync_fix(video_clk, HS_fix, VS_fix, CSYNC_fix);
 
 	wire YPbPr_sync, YPbPr_blank;
-	vga_out ybpr_video
-	(
-		.clk(video_clk),
-		.ypbpr_en(1'b1),
-		.csync(Csync),
-		.de(BLANKn),
-		.din({R&{8{BLANKn}},G&{8{BLANKn}},B&{8{BLANKn}}}), //NES specific override, because not zero color data while blanking period.
-		.dout({PrOut,Yout,PbOut}),
-		.csync_o(YPbPr_sync),
-		.de_o(YPbPr_blank)
-	);
+	generate if (EN_YPBPR) begin : g_ypbpr
+		vga_out ybpr_video
+		(
+			.clk(video_clk),
+			.ypbpr_en(1'b1),
+			.csync(Csync),
+			.de(BLANKn),
+			.din({R&{8{BLANKn}},G&{8{BLANKn}},B&{8{BLANKn}}}), //NES specific override, because not zero color data while blanking period.
+			.dout({PrOut,Yout,PbOut}),
+			.csync_o(YPbPr_sync),
+			.de_o(YPbPr_blank)
+		);
+	end else begin : g_no_ypbpr
+		assign {PrOut,Yout,PbOut} = 24'd0;
+		assign YPbPr_sync  = 1'b0;
+		assign YPbPr_blank = 1'b0;
+	end endgenerate
 
 		wire [23:0] yc_o;
 		//wire yc_hs, yc_vs,
 		wire yc_cs;
-	yc_out yc_out
-	(
-		.clk(i_clk),
-		.PHASE_INC(CHROMA_PHASE_INC),
-		.PAL_EN(PALFLAG),
-		.hsync(Hsync),
-		.vsync(Vsync),
-		.csync(Csync),
-    	.din({R&{8{BLANKn}},G&{8{BLANKn}},B&{8{BLANKn}}}),
-		.dout(yc_o),
-		.hsync_o(),
-		.vsync_o(),
-		.csync_o(yc_cs)
+	generate if (EN_YC) begin : g_yc
+		yc_out yc_out
+		(
+			.clk(i_clk),
+			.PHASE_INC(CHROMA_PHASE_INC),
+			.PAL_EN(PALFLAG),
+			.hsync(Hsync),
+			.vsync(Vsync),
+			.csync(Csync),
+	    	.din({R&{8{BLANKn}},G&{8{BLANKn}},B&{8{BLANKn}}}),
+			.dout(yc_o),
+			.hsync_o(),
+			.vsync_o(),
+			.csync_o(yc_cs)
+		);
+	end else begin : g_no_yc
+		assign yc_o  = 24'd0;
+		assign yc_cs = 1'b0;
+	end endgenerate
+
+	// Internal scandoubler (upstream Analogizer): when `scandoubler`=1 it
+	// line-doubles a 240p source to 480p; when `scandoubler`=0 it BYPASSES
+	// (passes the input straight through), for a source that is already at the
+	// output resolution (openfpgaOS drives the Analogizer from the 640x480/31 kHz
+	// LCD video, so it bypasses).  pixel_ena is left UNCONNECTED and the DAC
+	// clock at the cart pin is the real PLL clock video_clk (see cart_video_clk
+	// below) — NOT a logic-derived enable.  Routing a logic enable onto the DAC
+	// clock pin is off the clock network with the wrong duty cycle: it sims fine
+	// but gives a dark VGA on hardware.
+	scandoubler #(
+		.HCNT_WIDTH(10),
+		.COLOR_DEPTH(6),
+		.OUT_COLOR_DEPTH(6)
+	) sc_video (
+		.clk_sys(i_clk),
+		.bypass(~scandoubler),
+		.ce_divider(3'd3),
+		.pixel_ena(),
+		.scanlines(fx[1:0]),
+		.hb_in(Hblank),
+		.vb_in(Vblank),
+		.hs_in(Hsync),
+		.vs_in(Vsync),
+		.r_in(R[7:2] & {6{BLANKn}}),
+		.g_in(G[7:2] & {6{BLANKn}}),
+		.b_in(B[7:2] & {6{BLANKn}}),
+		.hb_out(Hblank_Sd),
+		.vb_out(Vblank_Sd),
+		.hs_out(Hsync_Sd),
+		.vs_out(Vsync_Sd),
+		.r_out(R_Sd),
+		.g_out(G_Sd),
+		.b_out(B_Sd)
 	);
 
-		wire cart_video_clk = scandoubler_mode ? sd_video_clk : video_clk;
+	// DAC clock = video_clk (a real PLL clock), exactly as the upstream
+	// Analogizer (cart_tran_bank1 = {.., video_clk, ..}).  core_top supplies
+	// video_clk = clk_vid (24.576 MHz) = the scandoubled 480p output rate, so
+	// this PLL clock samples the i_clk-domain scandoubler output 1:1 and is
+	// already SDC-constrained.  scandoubler_mode no longer gates the pin.
+	wire cart_video_clk = video_clk;
 
 	// Tri-state buffers for video output cart pins (bank1-3)
 	// Bank0, pin30, pin31 now driven by core_top SNAC/UART mux.

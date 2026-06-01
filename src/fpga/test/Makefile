@@ -208,7 +208,7 @@ SYSTEM_FLAGS = -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC -Wno-CASEINCOMPLETE \
 # ============================================================
 # Targets
 # ============================================================
-.PHONY: all sdram sdram-serialize sdram-native2 sdram-all sram gpu gpu-persp gpu-floor gpu-gpudemo gpu-acceptance gpu-acceptance-single gpu-acceptance-burst2 gpu-acceptance-all gpu-chain \
+.PHONY: all sdram sdram-serialize sdram-native2 sdram-all sram scanout analogchain gpu gpu-persp gpu-floor gpu-gpudemo gpu-acceptance gpu-acceptance-single gpu-acceptance-burst2 gpu-acceptance-all gpu-chain \
         axi-periph bridge-cmd audio audio-mixer arbiter system run run-sram build clean
 
 all: sdram-all sram gpu gpu-persp axi-periph bridge-cmd audio audio-mixer arbiter
@@ -252,6 +252,54 @@ $(SRAM_DIR)/V$(SRAM_TOP): $(SRAM_SRCS) $(SRAM_CPP)
 		$(SRAM_SRCS) $(SRAM_CPP)
 
 run-sram: sram
+
+# ============================================================
+# Scanout — analog (Analogizer) video timing measurement
+# ============================================================
+SCANOUT_SRCS = \
+	tb_scanout.v \
+	altsyncram_stub.v \
+	$(COMMON_DIR)/video_CRT_scanout_indexed_BRAM.v
+SCANOUT_CPP = tb_scanout_main.cpp
+SCANOUT_TOP = tb_scanout
+SCANOUT_DIR = obj_dir_scanout
+
+scanout: $(SCANOUT_DIR)/V$(SCANOUT_TOP)
+	@printf "\n=== Scanout analog-timing test ===\n"
+	./$(SCANOUT_DIR)/V$(SCANOUT_TOP)
+
+$(SCANOUT_DIR)/V$(SCANOUT_TOP): $(SCANOUT_SRCS) $(SCANOUT_CPP)
+	$(VERILATOR) $(VERILATOR_FLAGS_NOTRACE) --top-module $(SCANOUT_TOP) --Mdir $(SCANOUT_DIR) \
+		-I$(COMMON_DIR) \
+		$(SCANOUT_SRCS) $(SCANOUT_CPP)
+
+# ============================================================
+# Analogizer chain — scanout -> real Analogizer -> cart pins (VGA)
+# ============================================================
+ANALOGCHAIN_SRCS = \
+	tb_analogizer_chain.v \
+	altsyncram_stub.v \
+	$(COMMON_DIR)/video_CRT_scanout_indexed_BRAM.v \
+	$(TARGET_DIR)/analogizer/openFPGA_Pocket_Analogizer.v \
+	scandoubler_test.v
+ANALOGCHAIN_CPP = tb_analogizer_chain_main.cpp
+ANALOGCHAIN_TOP = tb_analogizer_chain
+ANALOGCHAIN_DIR = obj_dir_analogchain
+
+# Verilator chokes on scandoubler.v's zero-width part-select [..-:n] in its
+# DEAD (n=0, since COLOR_DEPTH==OUT_COLOR_DEPTH) color-expand branch; Quartus
+# prunes it. Patch -:n -> -:1 in that unreachable branch for sim only.
+scandoubler_test.v: $(TARGET_DIR)/analogizer/scandoubler.v
+	sed 's/ -:n\]/ -:1]/g' $< > $@
+
+analogchain: $(ANALOGCHAIN_DIR)/V$(ANALOGCHAIN_TOP)
+	@printf "\n=== Analogizer cart-pin chain test ===\n"
+	./$(ANALOGCHAIN_DIR)/V$(ANALOGCHAIN_TOP)
+
+$(ANALOGCHAIN_DIR)/V$(ANALOGCHAIN_TOP): $(ANALOGCHAIN_SRCS) $(ANALOGCHAIN_CPP)
+	$(VERILATOR) $(VERILATOR_FLAGS_NOTRACE) --top-module $(ANALOGCHAIN_TOP) --Mdir $(ANALOGCHAIN_DIR) \
+		-I$(COMMON_DIR) -I$(TARGET_DIR)/analogizer \
+		$(ANALOGCHAIN_SRCS) $(ANALOGCHAIN_CPP)
 
 # --- GPU ---
 # Single GPU build. Triangles + perspective spans + pipelined fragment
