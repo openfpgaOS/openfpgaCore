@@ -1,3 +1,9 @@
+//------------------------------------------------------------------------------
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileType: SOURCE
+// SPDX-FileCopyrightText: (c) 2026, ThinkElastic <Think@Elastic.com>
+//------------------------------------------------------------------------------
+
 /*
  * sf2_to_ofsf.c -- Convert SF2 soundfont to openfpgaOS .ofsf runtime bank.
  *

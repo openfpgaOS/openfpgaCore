@@ -1,3 +1,9 @@
+//------------------------------------------------------------------------------
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileType: SOURCE
+// SPDX-FileCopyrightText: (c) 2026, ThinkElastic <Think@Elastic.com>
+//------------------------------------------------------------------------------
+
 /*
  * openfpgaOS SNAC Controller HAL
  * RndMnkIII's Analogizer/SNAC pinout remains the physical adapter layer.

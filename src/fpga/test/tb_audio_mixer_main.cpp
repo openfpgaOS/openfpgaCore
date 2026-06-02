@@ -1,3 +1,9 @@
+//------------------------------------------------------------------------------
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileType: SOURCE
+// SPDX-FileCopyrightText: (c) 2026, ThinkElastic <Think@Elastic.com>
+//------------------------------------------------------------------------------
+
 // Audio mixer (audio_mixer.v v3) Verilator test harness.
 //
 // Drives the same MMIO interface that axi_periph_slave drives in the
@@ -288,6 +294,79 @@ static void test_master_mute(void) {
 }
 
 // ---------------------------------------------------------------------
+// Test 3b: master_fade_tracks_settled_voice
+//
+// Regression guard for any "settled-ramp" fast-path.  Once a voice's
+// VOL_LR has converged to its composed target, a *later* change to
+// master_vol (or group_vol) MUST still propagate: the composed target is
+// raw_vol_target * group_vol * master_vol, so a master fade has to
+// re-converge every voice even when its per-voice ramp already looks done.
+//
+// A fast-path that skips the recompute when cur_vol == old_target without
+// noticing gxm changed would leave the voice stuck at full volume while the
+// master fades — a silent, ship-it-broken bug.  This test fails loudly in
+// that case, and passes on the current always-recompute RTL.
+// ---------------------------------------------------------------------
+static void test_master_fade_tracks_settled_voice(void) {
+    printf("test_master_fade_tracks_settled_voice:\n");
+
+    reset_dut();
+    sdram_fill_constant(0x40004000);
+    dut->master_vol         = 0xFF;
+    dut->group_vol_0        = 0xFF;
+    dut->voice_group_packed = 0;            // all voices in group 0
+
+    // Voice 8: full raw target, snap ramp (VOL_RATE=0), looping constant —
+    // so VOL_LR settles to the composed target within one sample pass.
+    mmio_voice_write(8, VTBL_ADDR,        0);
+    mmio_voice_write(8, VTBL_LEN,         32);
+    mmio_voice_write(8, VTBL_RATE,        0x10000);
+    mmio_voice_write(8, VTBL_LOOP_START,  0);
+    mmio_voice_write(8, VTBL_LOOP_END,    32);
+    mmio_voice_write(8, VTBL_VOL_TARGET,  0xFFFF);     // L=R=0xFF
+    mmio_voice_write(8, VTBL_VOL_RATE,    0);          // snap
+    mmio_voice_write(8, VTBL_VOL_LR,      0);
+    mmio_voice_write(8, VTBL_CTRL,        1 | 4);      // active | loop
+
+    // Composed target with both stages: raw * ((group*master)>>8) >> 8.
+    int exp_full = (0xFF * ((0xFF * 0xFF) >> 8)) >> 8;   // ~0xFD
+
+    // 1) Settle at full master.
+    tick(20000);
+    int settled = vtbl_read(8, VTBL_VOL_LR) & 0xFF;
+    check_in_range("settled vol_l at master=0xFF", settled, exp_full - 3, exp_full + 2);
+
+    // 2) Fade the master DOWN on the already-settled voice — VOL_LR must drop.
+    dut->master_vol = 0x40;
+    tick(20000);
+    int faded_lr = vtbl_read(8, VTBL_VOL_LR) & 0xFFFF;
+    int exp_fade = (0xFF * ((0xFF * 0x40) >> 8)) >> 8;   // ~0x3E
+    check_in_range("settled vol_l follows master fade to 0x40",
+                   faded_lr & 0xFF, exp_fade - 3, exp_fade + 3);
+    check_in_range("settled vol_r follows master fade to 0x40",
+                   (faded_lr >> 8) & 0xFF, exp_fade - 3, exp_fade + 3);
+
+    // 3) Continue the fade to silence.
+    dut->master_vol = 0x00;
+    tick(20000);
+    check_eq_u32("settled vol_lr follows master fade to 0",
+                 vtbl_read(8, VTBL_VOL_LR) & 0xFFFF, 0);
+
+    // 4) Bring the master back — the voice must re-converge upward too.
+    dut->master_vol = 0xFF;
+    tick(20000);
+    check_in_range("settled vol_l recovers when master returns",
+                   vtbl_read(8, VTBL_VOL_LR) & 0xFF, exp_full - 3, exp_full + 2);
+
+    // 5) Group fade (gxm = group*master): voice still settled, must follow.
+    dut->group_vol_0 = 0x80;
+    tick(20000);
+    int exp_group = (0xFF * ((0x80 * 0xFF) >> 8)) >> 8;  // ~0x7E
+    check_in_range("settled vol_l follows group fade to 0x80",
+                   vtbl_read(8, VTBL_VOL_LR) & 0xFF, exp_group - 3, exp_group + 3);
+}
+
+// ---------------------------------------------------------------------
 // Test 4: voice_end_irq
 //
 // Configure a non-looping voice and let it walk off the end.  HW must
@@ -379,6 +458,9 @@ int main(int argc, char **argv) {
 
     reset_dut();
     test_master_mute();
+
+    reset_dut();
+    test_master_fade_tracks_settled_voice();
 
     reset_dut();
     test_voice_end_irq();

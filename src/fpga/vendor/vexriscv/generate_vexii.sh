@@ -1,4 +1,10 @@
 #!/bin/bash
+#------------------------------------------------------------------------------
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileType: SOURCE
+# SPDX-FileCopyrightText: (c) 2026, ThinkElastic <Think@Elastic.com>
+#------------------------------------------------------------------------------
+
 # Generate VexiiRiscv for openfpgaOS using the stock vexiiriscv.Generate
 # entry point (no custom Scala wrapper).  FetchL1 and LsuL1 are exposed
 # directly as AXI4 masters; all region routing is handled by the fabric

@@ -1,3 +1,9 @@
+//------------------------------------------------------------------------------
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileType: SOURCE
+// SPDX-FileCopyrightText: (c) 2026, ThinkElastic <Think@Elastic.com>
+//------------------------------------------------------------------------------
+
 /*
  * Audio mixer Verilator testbench (audio_mixer.v v3).
  *
@@ -12,6 +18,10 @@
  *   1. flat_mmio_independence    — voice 0 + voice 31 writes don't cross-talk
  *   2. group_composition         — vol_target × group_vol × master_vol math
  *   3. master_mute               — master=0 silences the output stream
+ *   3b. master_fade_tracks_settled_voice — a settled voice re-converges when
+ *                                  master_vol / group_vol later change (guards
+ *                                  any settled-ramp fast-path against a stuck
+ *                                  volume during a master/group fade)
  *   4. voice_end_irq             — one-shot voices raise voice_end_pending
  *   5. explicit_lr_targets       — hard-left/hard-right targets reach output
  */
@@ -133,14 +143,11 @@ module tb_audio_mixer (
         .sample_wr          (sample_wr),
         .sample_data        (sample_data),
         .fifo_level         (10'd0),       /* always have headroom */
-        .active_count       (),
         .pos_readback       (pos_readback),
         .irq_clear_wr       (irq_clear_wr),
         .irq_clear          (irq_clear),
         .voice_end_pending  (voice_end_pending),
         .voice_end_irq      (),
-        .last_sample_data   (),
-        .sample_count       (),
         .voice_active_mask  (voice_active_mask)
     );
 

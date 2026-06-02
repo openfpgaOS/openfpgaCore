@@ -1,3 +1,9 @@
+//------------------------------------------------------------------------------
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileType: SOURCE
+// SPDX-FileCopyrightText: (c) 2026, ThinkElastic <Think@Elastic.com>
+//------------------------------------------------------------------------------
+
 // Liveness watchdog — wraps any test bench, asserts that monitored
 // signals make progress within a bounded number of cycles.  Fails
 // loudly with the signal name + last-change cycle so the wedge is

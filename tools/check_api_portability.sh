@@ -1,4 +1,10 @@
 #!/usr/bin/env bash
+#------------------------------------------------------------------------------
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileType: SOURCE
+# SPDX-FileCopyrightText: (c) 2026, ThinkElastic <Think@Elastic.com>
+#------------------------------------------------------------------------------
+
 #
 # check_api_portability.sh — guard against regressions in the SDK app
 # portability contract. Run after any change to src/firmware/api/ or

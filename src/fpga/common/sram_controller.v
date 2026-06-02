@@ -1,3 +1,9 @@
+//------------------------------------------------------------------------------
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileType: SOURCE
+// SPDX-FileCopyrightText: (c) 2026, ThinkElastic <Think@Elastic.com>
+//------------------------------------------------------------------------------
+
 // Async SRAM controller wrapper for 32-bit CPU/video accesses.
 // Targets Analogue Pocket external SRAM (128K x 16 = 256KB).
 // Supports page-mode reads: LO→HI within same page uses fast

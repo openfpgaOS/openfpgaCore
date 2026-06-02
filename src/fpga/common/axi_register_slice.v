@@ -1,3 +1,9 @@
+//------------------------------------------------------------------------------
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileType: SOURCE
+// SPDX-FileCopyrightText: (c) 2026, ThinkElastic <Think@Elastic.com>
+//------------------------------------------------------------------------------
+
 // AXI4 register slice — 1-cycle pipeline stage with full throughput.
 //
 // Drop-in for any valid/ready handshake.  Inserts a register on both

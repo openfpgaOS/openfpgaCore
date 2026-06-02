@@ -1,3 +1,9 @@
+//------------------------------------------------------------------------------
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileType: SOURCE
+// SPDX-FileCopyrightText: (c) 2026, ThinkElastic <Think@Elastic.com>
+//------------------------------------------------------------------------------
+
 /*
  * openfpgaOS OS Services Table
  *
@@ -193,7 +199,6 @@ void services_table_init(void) {
     svc->mixer_set_group     = of_mixer_set_group;
     svc->mixer_set_group_volume = of_mixer_set_group_volume;
     svc->mixer_set_master_volume = of_mixer_set_master_volume;
-    svc->mixer_set_filter    = of_mixer_set_filter;
     svc->mixer_alloc_for_group = of_mixer_alloc_for_group;
     svc->mixer_voice_group   = of_mixer_voice_group;
 
@@ -265,7 +270,6 @@ void services_table_init(void) {
     svc->mixer_set_voice_h       = of_mixer_set_voice_h;
     svc->mixer_set_voice_raw_h   = of_mixer_set_voice_raw_h;
     svc->mixer_set_vol_rate_h    = of_mixer_set_volume_ramp_h;
-    svc->mixer_set_filter_h      = of_mixer_set_filter_h;
     svc->mixer_poll_ended_h      = of_mixer_poll_ended_h;
 
     /* Video timing snapshot */

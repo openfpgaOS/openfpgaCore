@@ -1,3 +1,9 @@
+//------------------------------------------------------------------------------
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileType: SOURCE
+// SPDX-FileCopyrightText: (c) 2026, ThinkElastic <Think@Elastic.com>
+//------------------------------------------------------------------------------
+
 /*
  * openfpgaOS Hardware Mixer HAL
  *
@@ -149,15 +155,8 @@ void of_mixer_set_voice_raw_h(of_mixer_handle_t handle,
                               int vol_l,
                               int vol_r);
 void of_mixer_set_volume_ramp_h(of_mixer_handle_t handle, int rate);
-void of_mixer_set_filter_h(of_mixer_handle_t handle,
-                           int cutoff_q016,
-                           int q,
-                           int enable);
 uint32_t of_mixer_poll_ended_h(of_mixer_handle_t *out_handles,
                                uint32_t max_handles);
-
-/* Retired per-voice SVF filter surface.  Kept as a compatibility no-op. */
-void of_mixer_set_filter(int voice, int cutoff_q016, int q, int enable);
 
 /* Boot-time persistent audio reservations and legacy sample allocation. */
 void of_mixer_memory_init(void);

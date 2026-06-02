@@ -1,3 +1,9 @@
+//------------------------------------------------------------------------------
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileType: SOURCE
+// SPDX-FileCopyrightText: (c) 2026, ThinkElastic <Think@Elastic.com>
+//------------------------------------------------------------------------------
+
 //
 // C++ harness for tb_axi_periph — tests axi_periph_slave's BRAM and
 // peripheral read paths.  Specifically exercises the scenarios that

@@ -1,0 +1,126 @@
+version = 1
+
+# ---------------------------------------------------------------------------
+# Bulk licensing annotations for files that do not carry an inline SPDX header
+# (binaries, generated artifacts, data/config, and third-party code whose own
+# headers are free-text rather than SPDX).  Source files authored by the
+# project carry their own "SPDX-License-Identifier: Apache-2.0" header and are
+# NOT listed here.  See LICENSES/ for every referenced license text.
+# ---------------------------------------------------------------------------
+
+# ===== Analogue Pocket Framework (APF) — proprietary, Analogue Enterprises ==
+[[annotations]]
+path = [
+    "src/fpga/targets/pocket/apf/**",
+    "src/fpga/targets/pocket/core_top.v",
+    "src/fpga/targets/pocket/core_bridge_cmd.v",
+    "src/fpga/targets/pocket/io_sdram.v",
+    "src/chip32/pocket/architectures/chip32.vm.arch",
+]
+precedence = "override"
+SPDX-FileCopyrightText = "Copyright (c) Analogue Enterprises Limited"
+SPDX-License-Identifier = "LicenseRef-Analogue-Pocket-Framework"
+
+# ===== Intel/Altera Quartus megafunction IP (user-generated) ===============
+[[annotations]]
+path = [
+    "src/fpga/targets/pocket/mf_pllbase.v",
+    "src/fpga/targets/pocket/mf_pllbase.bsf",
+    "src/fpga/targets/pocket/mf_pllbase.ppf",
+    "src/fpga/targets/pocket/mf_pllbase.qip",
+    "src/fpga/targets/pocket/mf_pllbase.sip",
+    "src/fpga/targets/pocket/mf_pllbase.spd",
+    "src/fpga/targets/pocket/mf_pllbase/**",
+    "src/fpga/targets/pocket/mf_pllbase_sim/**",
+    "src/fpga/targets/pocket/mf_pllbase_sim.f",
+    "src/fpga/targets/pocket/mf_pllram_133.v",
+    "src/fpga/targets/pocket/pin_ddio_clk.ppf",
+    "src/fpga/targets/pocket/pin_ddio_clk.qip",
+]
+precedence = "override"
+SPDX-FileCopyrightText = "Copyright (C) 1991-2026 Altera Corporation"
+SPDX-License-Identifier = "LicenseRef-Intel-FPGA-IP"
+
+# ===== Analogizer (openFPGA Pocket Analogizer + MiSTer-derived video cores) =
+[[annotations]]
+path = "src/fpga/targets/pocket/analogizer/**"
+precedence = "override"
+SPDX-FileCopyrightText = [
+    "Copyright (c) 2012-2013 Ludvig Strigeus",
+    "Copyright (c) 2017-2018 Sorgelig",
+    "Copyright (c) 2024 RndMnkIII (Analogizer)",
+]
+SPDX-License-Identifier = "GPL-2.0-or-later"
+
+# ===== Individually-licensed third-party files =============================
+[[annotations]]
+path = "src/fpga/common/cram0_phy.sv"
+precedence = "override"
+SPDX-FileCopyrightText = "Copyright (c) 2022 Adam Gastineau"
+SPDX-License-Identifier = "MIT"
+
+[[annotations]]
+path = "src/fpga/test/scandoubler_test.v"
+precedence = "override"
+SPDX-FileCopyrightText = "Copyright (c) 2015 Till Harbaum"
+SPDX-License-Identifier = "GPL-3.0-or-later"
+
+[[annotations]]
+path = ["src/firmware/os/kernel/dlmalloc.c", "src/firmware/os/kernel/of_malloc.c"]
+precedence = "override"
+SPDX-FileCopyrightText = "Copyright 2023 Doug Lea"
+SPDX-License-Identifier = "MIT-0"
+
+[[annotations]]
+path = "src/fpga/targets/pocket/third_party/**"
+precedence = "override"
+SPDX-FileCopyrightText = "Copyright (c) the openrtl_sdram authors"
+SPDX-License-Identifier = "MIT"
+
+# ===== Project files without inline headers (data / config / generated) ====
+# Quartus project + constraints + reports authored by the project.
+[[annotations]]
+path = [
+    "src/fpga/targets/pocket/ap_core.qsf",
+    "src/fpga/targets/pocket/ap_core.qpf",
+    "src/fpga/targets/pocket/ap_core_assignment_defaults.qdf",
+    "src/fpga/targets/pocket/core_constraints.sdc",
+    "src/fpga/targets/pocket/report_critical2.tcl",
+    "src/fpga/targets/pocket/report_critical3.tcl",
+    "src/chip32/pocket/loader.asm",
+]
+SPDX-FileCopyrightText = "(c) 2026, ThinkElastic <Think@Elastic.com>"
+SPDX-License-Identifier = "Apache-2.0"
+
+# Project data/manifests, packaged core, build outputs, images, and binaries.
+[[annotations]]
+path = [
+    "dist/**",
+    "tools/data.64slot-test.json",
+    "tools/portability_baseline.txt",
+    "src/fpga/targets/pocket/firmware.mif",
+    "src/fpga/targets/pocket/output_files/**",
+    "src/fpga/targets/pocket/sta_output.log",
+    "src/emulator/ofemu",
+    "src/emulator/test_save",
+    "README.md",
+    "NOTICE",
+]
+SPDX-FileCopyrightText = "(c) 2026, ThinkElastic <Think@Elastic.com>"
+SPDX-License-Identifier = "Apache-2.0"
+
+# Repository meta / dotfiles.
+[[annotations]]
+path = ["**/.gitignore", ".gitmodules"]
+precedence = "override"
+SPDX-FileCopyrightText = "(c) 2026, ThinkElastic <Think@Elastic.com>"
+SPDX-License-Identifier = "CC0-1.0"
+
+# ===== Third-party-derived sample data (NOT Apache; see LICENSES note) ======
+# sc55.ofsf is converted from github.com/GuihongWang/SC55Soundfont (no license),
+# itself derived from the Roland SC-55 via Kitrinx & NewRisingSun's converter.
+[[annotations]]
+path = "assets/**"
+precedence = "override"
+SPDX-FileCopyrightText = "SC-55 SoundFont from github.com/GuihongWang/SC55Soundfont (converter by Kitrinx & NewRisingSun); underlying samples (c) Roland Corporation"
+SPDX-License-Identifier = "LicenseRef-Proprietary-SampleData"

@@ -1,3 +1,9 @@
+//------------------------------------------------------------------------------
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileType: SOURCE
+// SPDX-FileCopyrightText: (c) 2026, ThinkElastic <Think@Elastic.com>
+//------------------------------------------------------------------------------
+
 /*
  * Misaligned access trap handler for RISC-V
  * Emulates unaligned loads/stores using byte operations
@@ -526,6 +532,17 @@ static void trap_decode_word(const char *label, uint32_t instr) {
 
 __attribute__((section(".text.boot")))
 void fatal_trap(trap_frame_t *frame) {
+    /* Crash recovery: flip the display back to the terminal so the console
+     * (boot log) is visible on-screen instead of a frozen app framebuffer --
+     * the full register/stack dump still goes out over UART below. Direct MMIO
+     * only (mirrors video_program_terminal_mode + TERM_FB_CTRL); no calls into
+     * possibly-corrupted state, so it is safe from this trap context. */
+    SYS_COLOR_MODE    = COLOR_MODE_8BIT;
+    FB_MODE_SIZE      = ((uint32_t)FB_HEIGHT << 16) | (uint32_t)FB_WIDTH;
+    FB_MODE_STRIDE    = FB_STRIDE;
+    VIDEO_SCALER_MODE = VIDEO_SCALER_SLOT_DEFAULT_320X240;
+    TERM_FB_CTRL      = 1u;  /* 1 = terminal overlay shown, 0 = app framebuffer */
+
     /* Shout cause/mepc/mtval to UART first so the host sees it even
      * if the terminal / screen has been torn down.  Format:
      *   ==TRAP==

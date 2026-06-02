@@ -1,3 +1,9 @@
+//------------------------------------------------------------------------------
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileType: SOURCE
+// SPDX-FileCopyrightText: (c) 2026, ThinkElastic <Think@Elastic.com>
+//------------------------------------------------------------------------------
+
 /*
  * openfpgaOS Cache Management HAL
  * Cache management for DMA coherency (conflict eviction)
@@ -32,5 +38,13 @@ void of_cache_invalidate_icache(void);
 /* Full cache flush: D-cache writeback + I-cache invalidate.
  * Use before jumping to newly loaded code. */
 void of_cache_flush(void);
+
+/* Count of cbo ranges that fell (partly) outside the cacheable SDRAM window
+ * and were clamped/skipped by the address guard.  Normally 0; a nonzero,
+ * growing value means out-of-range pointers are reaching the cache ops —
+ * the signature of clk_ram_controller-domain bit corruption (see cache.c).
+ * Surfacing this somewhere visible (debug reg / console) flags the marginal
+ * timing instead of silently masking it. */
+uint32_t of_cache_guard_skips(void);
 
 #endif /* OFOS_CACHE_H */

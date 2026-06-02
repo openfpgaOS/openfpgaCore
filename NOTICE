@@ -1,0 +1,70 @@
+openfpgaOS
+Copyright (c) 2026 ThinkElastic <Think@Elastic.com>
+
+This product includes software developed by ThinkElastic, licensed under the
+Apache License, Version 2.0 (see the LICENSE file). Source files authored by
+the project carry an SPDX Apache-2.0 license tag in their header; other files
+are covered via REUSE.toml.
+
+================================================================================
+Third-party components
+================================================================================
+
+This repository bundles third-party components that are NOT covered by the
+Apache-2.0 license above; each remains under its own license. The list below
+is informational — the authoritative notice is in each file or directory.
+
+FPGA / RTL
+----------
+* src/fpga/vendor/vexriscv/VexiiRiscv/ (incl. ext/SpinalHDL/)
+    VexiiRiscv and SpinalHDL — Copyright (c) 2023 SpinalHDL — MIT License.
+
+* src/fpga/vendor/.../ext/riscv-isa-sim/
+    Spike RISC-V ISA Simulator — Copyright (c) the RISC-V contributors /
+    University of California, Berkeley — BSD License.
+
+* src/fpga/targets/pocket/apf/,
+  src/fpga/targets/pocket/core_top.v,
+  src/fpga/targets/pocket/core_bridge_cmd.v,
+  src/fpga/targets/pocket/io_sdram.v
+    Analogue Pocket Framework (APF) — Copyright (c) Analogue Enterprises Ltd.
+    Licensed under the Analogue Pocket Framework Software License Agreement.
+
+* src/fpga/targets/pocket/analogizer/
+    openFPGA Pocket Analogizer — original work by @RndMnkIII. Includes
+    MiSTer-derived video cores (hq2x.sv, scandoubler.sv, scandoubler_2.sv,
+    yc_out.sv) under their respective upstream (GPL / permissive) licenses.
+
+* src/fpga/targets/pocket/mf_pllbase*.v,
+  src/fpga/targets/pocket/mf_pllram_133.v,
+  src/fpga/targets/pocket/apf/mf_*.v
+    Intel Quartus megafunction-generated IP —
+    Copyright (c) Intel Corporation.
+
+* src/fpga/common/cram0_phy.sv
+    Copyright (c) 2022 Adam Gastineau — MIT License.
+
+* src/fpga/test/scandoubler_test.v
+    Copyright (c) 2015 Till Harbaum — GPL-3.0.
+
+Firmware / C
+------------
+* src/firmware/musl/ (musl libc 1.2.5)
+    Copyright (c) the musl contributors — MIT License.
+
+* src/firmware/os/kernel/dlmalloc.c,
+  src/firmware/os/kernel/of_malloc.c
+    Doug Lea's malloc (dlmalloc) — Copyright 2023 Doug Lea — released to the
+    public domain (CC0 / MIT-0).
+
+* src/firmware/lib/iso9660/lib9660.c, lib9660.h
+    lib9660 — Copyright (c) 2014 Erin Shepherd — ISC License.
+
+================================================================================
+NOTE on GPL components
+================================================================================
+
+src/fpga/test/scandoubler_test.v is GPL-3.0 but is a test-only module (not part
+of the Quartus build / synthesized bitstream). Some Analogizer video cores under
+src/fpga/targets/pocket/analogizer/ are MiSTer-derived and may carry GPL terms;
+review their headers before distributing built artifacts.

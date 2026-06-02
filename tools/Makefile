@@ -1,3 +1,9 @@
+#------------------------------------------------------------------------------
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileType: SOURCE
+# SPDX-FileCopyrightText: (c) 2026, ThinkElastic <Think@Elastic.com>
+#------------------------------------------------------------------------------
+
 CC ?= gcc
 CFLAGS = -O2 -Wall -Wextra -std=c99 -I../src/firmware/api
 LDFLAGS =

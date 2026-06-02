@@ -1,3 +1,9 @@
+//------------------------------------------------------------------------------
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileType: SOURCE
+// SPDX-FileCopyrightText: (c) 2026, ThinkElastic <Think@Elastic.com>
+//------------------------------------------------------------------------------
+
 //
 // Hardware PCM Mixer (v2) — 32 voices from SDRAM
 //
@@ -94,22 +100,17 @@ module audio_mixer (
     input  wire [9:0]  fifo_level,
 
     // ------- Status + IRQ ----------------------------------------
-    output wire [5:0]  active_count,
     output wire [21:0] pos_readback,
     input  wire        irq_clear_wr,
     input  wire [31:0] irq_clear,
     output reg  [31:0] voice_end_pending,
     output wire        voice_end_irq,
 
-    // ------- Status/debug outputs ---------------------------------
-    // active_count, last_sample_data, and sample_count used to be
-    // production diagnostic counters.  They are now tied to zero in
-    // the mixer so the MMIO ABI remains stable without spending ALMs
-    // on counters/popcount trees that shipping firmware does not need.
-    output wire [31:0] last_sample_data,
-    output wire [31:0] sample_count,
-    // voice_active_mask remains functional and is used by firmware to
-    // see which voices the HW mixer still considers active.
+    // ------- Status outputs ---------------------------------------
+    // voice_active_mask is used by firmware to see which voices the HW
+    // mixer still considers active.  (The former active_count /
+    // last_sample_data / sample_count diagnostic ports were removed —
+    // they were tied to zero and unconnected at every instantiation.)
     output wire [31:0] voice_active_mask
 );
 
@@ -297,9 +298,6 @@ end
 
 assign voice_end_irq = |voice_end_pending;
 
-assign active_count = 6'd0;
-assign last_sample_data = 32'd0;
-assign sample_count = 32'd0;
 assign voice_active_mask = voice_active;
 
 // Position readback — latched per-voice for instantaneous CPU reads.
@@ -616,8 +614,18 @@ always @(posedge clk) begin
     end
 
     S_START_SAMPLE: begin
-        vtbl_a_addr <= {cur_voice, VTBL_CTRL};
-        state       <= S_RD_CTRL_W;
+        // Early-out for idle slots: the voice_active shadow is a flop and is
+        // combinationally available here, so an inactive voice can skip the
+        // CTRL fetch (S_RD_CTRL_W) and S_CHECK_ACTIVE entirely — its CTRL
+        // stereo/loop bits are only consumed on the active path.  Saves 2
+        // cycles per idle voice.  The active path still re-checks the shadow
+        // in S_CHECK_ACTIVE, so a CPU deactivate mid-walk is still caught.
+        if (!voice_active[cur_voice]) begin
+            state <= S_NEXT_VOICE;
+        end else begin
+            vtbl_a_addr <= {cur_voice, VTBL_CTRL};
+            state       <= S_RD_CTRL_W;
+        end
     end
 
     // Voice-field read pipeline. The packed table keeps the public
@@ -1030,7 +1038,9 @@ always @(posedge clk) begin
     // Four-stage pipeline to keep the per-voice path inside 10 ns:
     //   S_RAMP_STEP    → pick gxm for cur_voice (cur_voice → voice_group
     //                    → pick_gxm), queue VTBL_VOL_TARGET read
-    //   S_WR_VOL_MULT  → latch raw × cur_gxm_r into tgt_*_r (DSP cycle)
+    //   S_WR_VOL_MULT  → latch raw × cur_gxm_r into tgt_*_r (DSP cycle); if the
+    //                    voice already sits on this fresh target, fast-path
+    //                    straight to S_NEXT_VOICE (skips the 3 stages below)
     //   S_WR_VOL_RAMP  → ramp left channel
     //   S_WR_VOL_RAMP_R→ ramp right channel
     //   S_WR_VOL       → write VTBL_VOL_LR if needed
@@ -1047,6 +1057,7 @@ always @(posedge clk) begin
     S_WR_VOL_MULT: begin : compose_blk
         reg [7:0]  raw_l, raw_r;
         reg [15:0] tgt_l_x, tgt_r_x;
+        reg [7:0]  tgt_l_b, tgt_r_b;
         begin
             // Only thing we do here is the 8x8 multiply against the registered
             // cur_gxm_r — DSP block in isolation, no downstream logic
@@ -1055,9 +1066,21 @@ always @(posedge clk) begin
             raw_r   = vtbl_a_q[15:8];
             tgt_l_x = raw_l * cur_gxm_r;
             tgt_r_x = raw_r * cur_gxm_r;
-            tgt_l_r <= tgt_l_x[15:8];
-            tgt_r_r <= tgt_r_x[15:8];
-            state   <= S_WR_VOL_RAMP;
+            tgt_l_b = tgt_l_x[15:8];
+            tgt_r_b = tgt_r_x[15:8];
+            tgt_l_r <= tgt_l_b;
+            tgt_r_r <= tgt_r_b;
+            // Settled fast-path: the target is recomputed every pass from the
+            // CURRENT gxm (group×master), so when both channels already sit on
+            // that fresh target, ramp_step() is a no-op and S_WR_VOL would
+            // write nothing — skip the 3-cycle ramp/write tail.  This needs no
+            // gxm-dirty tracking: a master/group fade changes gxm, hence the
+            // target, so cur_vol != target and the normal ramp runs (covered
+            // by tb test_master_fade_tracks_settled_voice).
+            if (cur_vol_l == tgt_l_b && cur_vol_r == tgt_r_b)
+                state <= S_NEXT_VOICE;
+            else
+                state <= S_WR_VOL_RAMP;
         end
     end
 

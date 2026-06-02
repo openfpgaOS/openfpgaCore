@@ -331,7 +331,7 @@ assign PALFLAG = (analogizer_video_type_core == 4'h4) || (analogizer_video_type_
 // cen[0] is the pixel-rate pulse; cen[1] is half-rate.
 wire analog_ce_pix, analog_ce_half;
 
-jtframe_frac_cen #(.W(2)) pixel_cen
+frac_cen #(.W(2)) pixel_cen
 (
     .clk(clk_core_49152),
     .n(10'd1),
@@ -431,15 +431,14 @@ openFPGA_Pocket_Analogizer #(
     .i_rst(~reset_n_analog),
     .i_ena(analogizer_ena_core),
     // Video interface — restored to the original (pre-cf2beec) single-path
-    // wiring: the Analogizer is fed the LCD video directly (vidout_rgb + crt_*
+    // wiring: the Analogizer is fed the CRT video directly (vidout_rgb + crt_*
     // sync), and the cart-pin DAC clock is video_clk = clk_vid (clk_core_24576,
-    // 24.576 MHz, the LCD pixel clock, already SDC-constrained) per the upstream
-    // Analogizer (cart pin = video_clk).  The LCD is now itself 640x480/31 kHz —
-    // exactly what the old scandoubler used to PRODUCE — so the Analogizer
-    // bypasses its scandoubler (scandoubler=0) and mirrors the 480p LCD straight
-    // to VGA: same 31 kHz/480-line output as before, with no dedicated analog
-    // raster.  (The dynamic-480p analog machinery in the scanout is left dormant
-    // and pruned — see the scanout instance's analog_480p/unconnected outputs.)
+    // 24.576 MHz, already SDC-constrained) per the upstream Analogizer (cart
+    // pin = video_clk).  When Analogizer video is enabled, the CRT generator
+    // above forces a full 640x480 raw raster and the framebuffer scanout scales
+    // low-res app modes into it, so the Analogizer can bypass its internal
+    // scandoubler (scandoubler=0).  The scanout's dedicated analog path remains
+    // dormant and pruned (analog_480p=1, analog_* outputs unconnected).
     .video_clk(clk_vid),
     .analog_video_type(analogizer_video_type_core),
     .R(vidout_rgb[23:16]),
@@ -2035,8 +2034,21 @@ assign video_hs = vidout_hs;
         end
     endfunction
 
-    wire [9:0] crt_h_active = scaler_slot_width(video_scaler_slot_vid);
-    wire [9:0] crt_v_active = scaler_slot_height(video_scaler_slot_vid);
+    // The Pocket LCD path can advertise low-res scaler slots because the APF
+    // scaler expands them. The Analogizer is wired to the raw CRT stream, so
+    // without an override a 320x200 app is emitted as a 320x200 active island
+    // inside the 640x480 carrier. When Analogizer video is enabled, drive a
+    // full 640x480 raw raster and let the framebuffer scanout scaler expand
+    // the app mode into it. SNAC-only adapter use does not alter video.
+    wire analogizer_full_raster_vid = analogizer_ena_vid;
+    wire [2:0] crt_scaler_slot_vid =
+        analogizer_full_raster_vid ? 3'd7 : video_scaler_slot_vid;
+    wire [9:0] crt_h_active =
+        analogizer_full_raster_vid ? 10'd640 :
+                                     scaler_slot_width(video_scaler_slot_vid);
+    wire [9:0] crt_v_active =
+        analogizer_full_raster_vid ? 10'd480 :
+                                     scaler_slot_height(video_scaler_slot_vid);
     wire [9:0] crt_v_center_offset =
         (crt_v_active < CRT_V_CENTER_HEIGHT) ?
         ((CRT_V_CENTER_HEIGHT - crt_v_active) >> 1) : 10'd0;
@@ -2618,7 +2630,7 @@ always @(posedge clk_vid or negedge reset_n_vid) begin
         // APF scaler-slot command while DE is low.  The Pocket can sample
         // this during menu/screenshot transitions, so keep it stable across
         // the whole blanking interval instead of emitting a one-cycle marker.
-        vidout_rgb <= {8'b0, video_scaler_slot_vid, 13'b0};
+        vidout_rgb <= {8'b0, crt_scaler_slot_vid, 13'b0};
 
         // generate active video, now accounts for CRT specific timings but making compatible with Analogue Pocket video also
         if(x_count >= CRT_H_SYNC + CRT_H_BPORCH  && x_count < crt_h_active_end) begin
@@ -2779,14 +2791,11 @@ audio_mixer audio_mixer_inst (
     .sample_wr        (mixer_sample_wr),
     .sample_data      (mixer_sample_data),
     .fifo_level       (audio_fifo_level),
-    .active_count     (),
     .pos_readback     (mixer_pos_readback),
     .irq_clear_wr     (mixer_irq_clear_wr_mmio),
     .irq_clear        (mixer_irq_clear_mmio),
     .voice_end_pending(mixer_voice_end_pending),
     .voice_end_irq    (mixer_voice_end_irq),
-    .last_sample_data (),
-    .sample_count     (),
     .voice_active_mask(mixer_active_mask)
 );
 

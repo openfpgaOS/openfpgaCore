@@ -1,4 +1,10 @@
 #!/bin/bash
+#------------------------------------------------------------------------------
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileType: SOURCE
+# SPDX-FileCopyrightText: (c) 2026, ThinkElastic <Think@Elastic.com>
+#------------------------------------------------------------------------------
+
 # Build musl libc for RISC-V (rv32imafc / ilp32f)
 # Downloads musl 1.2.5, cross-compiles, installs to this directory.
 

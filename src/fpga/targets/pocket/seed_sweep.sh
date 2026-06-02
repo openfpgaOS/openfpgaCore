@@ -1,4 +1,10 @@
 #!/bin/bash
+#------------------------------------------------------------------------------
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileType: SOURCE
+# SPDX-FileCopyrightText: (c) 2026, ThinkElastic <Think@Elastic.com>
+#------------------------------------------------------------------------------
+
 # Seed sweep — clean build for each seed, print results live
 PROJECT=ap_core
 QSF=${PROJECT}.qsf

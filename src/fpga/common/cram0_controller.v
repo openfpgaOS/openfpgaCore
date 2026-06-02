@@ -1,3 +1,9 @@
+//------------------------------------------------------------------------------
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileType: SOURCE
+// SPDX-FileCopyrightText: (c) 2026, ThinkElastic <Think@Elastic.com>
+//------------------------------------------------------------------------------
+
 // CRAM0 Controller wrapper for VexiiRiscv CPU
 // Provides 32-bit word interface using two 16-bit PSRAM accesses
 // Uses the cram1_phy module (CRAM0/CRAM1 share the AS1C8M16PL phy).

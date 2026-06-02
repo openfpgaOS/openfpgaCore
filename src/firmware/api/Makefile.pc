@@ -1,3 +1,9 @@
+#------------------------------------------------------------------------------
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileType: SOURCE
+# SPDX-FileCopyrightText: (c) 2026, ThinkElastic <Think@Elastic.com>
+#------------------------------------------------------------------------------
+
 # openfpgaOS PC Build (SDL2)
 #
 # Apps use standard SDL2 directly, and openfpgaOS of_* calls are backed by

@@ -1,3 +1,9 @@
+//------------------------------------------------------------------------------
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileType: SOURCE
+// SPDX-FileCopyrightText: (c) 2026, ThinkElastic <Think@Elastic.com>
+//------------------------------------------------------------------------------
+
 //
 // Audio output module for openfpgaOS
 // - Dual-clock FIFO bridges CPU clock to audio clock domain
@@ -140,8 +146,9 @@ wire signed [15:0] sfx_r = fifo_empty ? hold_r : $signed(fifo_r);
 // it caused audible 2:1 compression artifacts on busy/transient mixes
 // ("crackle on busy passages") because the boost pushed in-range
 // mixer samples past the 24576 knee.  Now that the mixer mixes down
-// /8 (sufficient headroom for multi-voice peaks), no post-boost is
-// needed and a clean passthrough is the right answer.
+// /16 (accum >>> 4 in audio_mixer.v S_OUTPUT — ample headroom for
+// multi-voice peaks), no post-boost is needed and a clean passthrough
+// is the right answer.
 // ============================================
 wire [15:0] mix_clamp_l = sfx_l;
 wire [15:0] mix_clamp_r = sfx_r;

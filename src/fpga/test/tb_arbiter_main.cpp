@@ -1,3 +1,9 @@
+//------------------------------------------------------------------------------
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileType: SOURCE
+// SPDX-FileCopyrightText: (c) 2026, ThinkElastic <Think@Elastic.com>
+//------------------------------------------------------------------------------
+
 //
 // C++ harness for tb_arbiter — probes whether axi_sdram_arbiter's
 // "m_arvalid before m_awvalid" priority at ST_IDLE can starve the

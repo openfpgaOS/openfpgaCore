@@ -1,3 +1,9 @@
+//------------------------------------------------------------------------------
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileType: SOURCE
+// SPDX-FileCopyrightText: (c) 2026, ThinkElastic <Think@Elastic.com>
+//------------------------------------------------------------------------------
+
 //
 // Video Scanout with Multiple Color Modes and Hardware Palette
 // Supports: 8-bit indexed, 4-bit indexed, 2-bit indexed,

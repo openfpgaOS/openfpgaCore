@@ -1,3 +1,9 @@
+//------------------------------------------------------------------------------
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileType: SOURCE
+// SPDX-FileCopyrightText: (c) 2026, ThinkElastic <Think@Elastic.com>
+//------------------------------------------------------------------------------
+
 /*
  * openfpgaOS mixer HAL — thin facade over the HW audio_mixer (v2).
  *
@@ -51,7 +57,21 @@ static int8_t   priority_shadow[MIXER_MAX_VOICES];
 static uint8_t  vol_shadow[MIXER_MAX_VOICES];     /* per-voice 0..255 (pre-pan) */
 static uint8_t  pan_shadow[MIXER_MAX_VOICES];     /* 0=L, 128=C, 255=R */
 static uint8_t  group_shadow[MIXER_MAX_VOICES];   /* mirror of HW packed reg */
-static uint64_t generation_shadow[MIXER_MAX_VOICES];
+/* Per-slot reuse counter folded into the high bits of the opaque 64-bit
+ * handle.  32 bits is ample (a slot would have to be reused 4 billion times
+ * before wrapping) and halves the shadow's footprint vs the old 64-bit width
+ * while making the validate compare a single 32-bit op. */
+static uint32_t generation_shadow[MIXER_MAX_VOICES];
+
+/* Last value written to each voice's MIX_VOICE_VOL_TARGET register.  Lets a
+ * value-identical rewrite be skipped (steady-volume plateau, repeated
+ * set_volume with the same arg, positional-audio per-frame target floods).
+ * VOL_TARGET is a pure target latch in HW, so suppressing an unchanged write
+ * is provably a no-op — and it promotes the crackle-class redundant-write
+ * defence from a per-caller convention to a HAL invariant.  Sentinel
+ * VOL_TARGET_UNKNOWN forces the next write (packed values are <= 0xFFFF). */
+#define VOL_TARGET_UNKNOWN 0xFFFFFFFFu
+static uint32_t vol_target_shadow[MIXER_MAX_VOICES];
 
 #define MIXER_NUM_GROUPS 4
 #define MIXER_ENDED_QUEUE_SIZE 64
@@ -81,26 +101,25 @@ static inline void mixer_irq_restore_local(uint32_t prev)
         __asm__ volatile("csrrsi zero, mstatus, 0x8" ::: "memory");
 }
 
-static inline uint64_t mixer_generation_next(uint64_t generation)
+static inline uint32_t mixer_generation_next(uint32_t generation)
 {
-    const uint64_t mask = (UINT64_C(1) << 56) - 1;
-    generation = (generation + 1) & mask;
-    return generation ? generation : 1;
+    generation = generation + 1;          /* 32-bit wrap is acceptable */
+    return generation ? generation : 1;   /* never hand out generation 0 */
 }
 
 static inline of_mixer_handle_t mixer_make_handle_locked(int voice)
 {
-    uint64_t generation = mixer_generation_next(generation_shadow[voice]);
+    uint32_t generation = mixer_generation_next(generation_shadow[voice]);
     generation_shadow[voice] = generation;
-    return (generation << 8) | (uint8_t)voice;
+    return ((of_mixer_handle_t)generation << 8) | (uint8_t)voice;
 }
 
 static inline of_mixer_handle_t mixer_current_handle_locked(int voice)
 {
-    uint64_t generation = generation_shadow[voice];
+    uint32_t generation = generation_shadow[voice];
     if (!generation)
         return OF_MIXER_HANDLE_INVALID;
-    return (generation << 8) | (uint8_t)voice;
+    return ((of_mixer_handle_t)generation << 8) | (uint8_t)voice;
 }
 
 static inline int mixer_handle_voice_index(of_mixer_handle_t handle)
@@ -121,7 +140,7 @@ static inline int mixer_validate_handle_locked(of_mixer_handle_t handle)
         return -1;
     if (!(active_shadow & (1u << voice)))
         return -1;
-    if (generation_shadow[voice] != (handle >> 8))
+    if (generation_shadow[voice] != (uint32_t)(handle >> 8))
         return -1;
     return voice;
 }
@@ -365,13 +384,23 @@ uint32_t of_mixer_stream_uncached_base(void)
  * result to this voice's VOL_TARGET register.  The HW then composes
  * with group_vol × master_vol before the existing per-channel ramp.
  * Equal-power: vol_l = vol × cos(pan), vol_r = vol × sin(pan). */
+/* Single choke point for MIX_VOICE_VOL_TARGET stores: skip the MMIO write
+ * when the packed target is unchanged (see vol_target_shadow). */
+static inline void write_vol_target(int voice, uint32_t packed)
+{
+    if (vol_target_shadow[voice] != packed) {
+        MIX_VOICE_VOL_TARGET(voice) = packed;
+        vol_target_shadow[voice] = packed;
+    }
+}
+
 static void apply_vol_pan(int voice)
 {
     int v = vol_shadow[voice];
     int p = pan_shadow[voice];
     int vol_l = (v * pan_cos[p]) >> 8;
     int vol_r = (v * pan_sin[p]) >> 8;
-    MIX_VOICE_VOL_TARGET(voice) = ((vol_r & 0xFF) << 8) | (vol_l & 0xFF);
+    write_vol_target(voice, (uint32_t)(((vol_r & 0xFF) << 8) | (vol_l & 0xFF)));
 }
 
 static inline void write_ctrl(int voice, uint8_t ctrl)
@@ -396,10 +425,12 @@ void of_mixer_init(int max_voices, int output_rate)
         group_shadow[i]    = 0;
         ctrl_shadow[i]     = 0;
         generation_shadow[i] = mixer_generation_next(generation_shadow[i]);
-        MIX_VOICE_CTRL(i)        = 0;
-        MIX_VOICE_VOL_LR(i)      = 0;
-        MIX_VOICE_VOL_TARGET(i)  = 0;
-        MIX_VOICE_VOL_RATE(i)    = 0;
+        /* Only CTRL=0 (voice deactivate) is load-bearing: the slave-side reset
+         * already clears the per-voice VOL regs, and any slot that later
+         * sounds is fully reprogrammed by program_voice_play first.  Mark the
+         * VOL_TARGET shadow unknown so the first post-arm write always lands. */
+        MIX_VOICE_CTRL(i)    = 0;
+        vol_target_shadow[i] = VOL_TARGET_UNKNOWN;
     }
     /* HW group + master defaults: full-scale (slave-side reset already
      * sets these to 0xFF; rewrite anyway so warm restarts are clean). */
@@ -542,6 +573,9 @@ static of_mixer_handle_t program_voice_play(int voice, const void *pcm,
     vol_shadow[voice]      = volume & 0xFF;
     pan_shadow[voice]      = 128;
     priority_shadow[voice] = (int8_t)priority;
+    /* Re-arm: force the first target to land even if a reused slot happens
+     * to recompute the prior packed value (HW VOL_LR was just reset to 0). */
+    vol_target_shadow[voice] = VOL_TARGET_UNKNOWN;
     apply_vol_pan(voice);
 
     irq = mixer_irq_save_local();
@@ -706,6 +740,8 @@ static of_mixer_handle_t retrigger_voice_h(int voice, const uint8_t *pcm_s16,
 
     vol_shadow[voice] = v;
     pan_shadow[voice] = 128;
+    /* Re-arm: force the first target to land (HW VOL_LR was just snapped). */
+    vol_target_shadow[voice] = VOL_TARGET_UNKNOWN;
     apply_vol_pan(voice);
 
     uint32_t irq = mixer_irq_save_local();
@@ -931,7 +967,7 @@ void of_mixer_set_rate_raw_h(of_mixer_handle_t handle, uint32_t rate_fp16)
 void of_mixer_set_vol_lr(int voice, int vol_l, int vol_r)
 {
     if (!voice_in_range(voice)) return;
-    MIX_VOICE_VOL_TARGET(voice) = ((vol_r & 0xFF) << 8) | (vol_l & 0xFF);
+    write_vol_target(voice, (uint32_t)(((vol_r & 0xFF) << 8) | (vol_l & 0xFF)));
 }
 
 void of_mixer_set_vol_lr_h(of_mixer_handle_t handle, int vol_l, int vol_r)
@@ -939,7 +975,7 @@ void of_mixer_set_vol_lr_h(of_mixer_handle_t handle, int vol_l, int vol_r)
     uint32_t irq = mixer_irq_save_local();
     int voice = mixer_validate_handle_locked(handle);
     if (voice >= 0)
-        MIX_VOICE_VOL_TARGET(voice) = ((vol_r & 0xFF) << 8) | (vol_l & 0xFF);
+        write_vol_target(voice, (uint32_t)(((vol_r & 0xFF) << 8) | (vol_l & 0xFF)));
     mixer_irq_restore_local(irq);
 }
 
@@ -989,7 +1025,7 @@ void of_mixer_set_voice(int voice, int sample_rate_hz, int vol_l, int vol_r)
     if (!voice_in_range(voice)) return;
     uint32_t rate = ((uint64_t)sample_rate_hz << 16) / MIXER_OUTPUT_RATE;
     MIX_VOICE_RATE(voice)       = rate;
-    MIX_VOICE_VOL_TARGET(voice) = ((vol_r & 0xFF) << 8) | (vol_l & 0xFF);
+    write_vol_target(voice, (uint32_t)(((vol_r & 0xFF) << 8) | (vol_l & 0xFF)));
 }
 
 void of_mixer_set_voice_h(of_mixer_handle_t handle,
@@ -1002,7 +1038,7 @@ void of_mixer_set_voice_h(of_mixer_handle_t handle,
     if (voice >= 0) {
         uint32_t rate = ((uint64_t)sample_rate_hz << 16) / MIXER_OUTPUT_RATE;
         MIX_VOICE_RATE(voice)       = rate;
-        MIX_VOICE_VOL_TARGET(voice) = ((vol_r & 0xFF) << 8) | (vol_l & 0xFF);
+        write_vol_target(voice, (uint32_t)(((vol_r & 0xFF) << 8) | (vol_l & 0xFF)));
     }
     mixer_irq_restore_local(irq);
 }
@@ -1011,7 +1047,7 @@ void of_mixer_set_voice_raw(int voice, uint32_t rate_fp16, int vol_l, int vol_r)
 {
     if (!voice_in_range(voice)) return;
     MIX_VOICE_RATE(voice)       = rate_fp16;
-    MIX_VOICE_VOL_TARGET(voice) = ((vol_r & 0xFF) << 8) | (vol_l & 0xFF);
+    write_vol_target(voice, (uint32_t)(((vol_r & 0xFF) << 8) | (vol_l & 0xFF)));
 }
 
 void of_mixer_set_voice_raw_h(of_mixer_handle_t handle,
@@ -1023,7 +1059,7 @@ void of_mixer_set_voice_raw_h(of_mixer_handle_t handle,
     int voice = mixer_validate_handle_locked(handle);
     if (voice >= 0) {
         MIX_VOICE_RATE(voice)       = rate_fp16;
-        MIX_VOICE_VOL_TARGET(voice) = ((vol_r & 0xFF) << 8) | (vol_l & 0xFF);
+        write_vol_target(voice, (uint32_t)(((vol_r & 0xFF) << 8) | (vol_l & 0xFF)));
     }
     mixer_irq_restore_local(irq);
 }
@@ -1110,21 +1146,6 @@ void of_mixer_set_group_volume(int group, int volume)
 void of_mixer_set_master_volume(int volume)
 {
     MIX_MASTER_VOL = volume & 0xFF;
-}
-
-/* Filter surface — the HW mixer v2 doesn't implement per-voice SVF; kept
- * as a no-op so older app binaries link cleanly. */
-void of_mixer_set_filter(int voice, int cutoff_q016, int q, int enable)
-{
-    (void)voice; (void)cutoff_q016; (void)q; (void)enable;
-}
-
-void of_mixer_set_filter_h(of_mixer_handle_t handle,
-                           int cutoff_q016,
-                           int q,
-                           int enable)
-{
-    (void)handle; (void)cutoff_q016; (void)q; (void)enable;
 }
 
 #define MIXER_LEGACY_ALLOC_SLOTS 64
