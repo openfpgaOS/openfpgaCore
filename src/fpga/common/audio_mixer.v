@@ -437,6 +437,7 @@ localparam S_ADV_CHECK      = 6'd33;
 localparam S_ADV_COMMIT     = 6'd34;
 localparam S_FETCH_TAP1_MODE = 6'd35;  // second half of burst-mode decision
 localparam S_WR_VOL_RAMP_R = 6'd36;
+localparam S_WR_VOL_LOAD   = 6'd37;  // latch VOL_TARGET read data before target multiply
 
 reg [5:0] state;
 reg [4:0] cur_voice;
@@ -469,6 +470,7 @@ reg [7:0]  cur_vol_rate;
  * cycles per 48 kHz output sample — the 2083-cycle window has
  * plenty of slack. */
 reg [7:0]  cur_gxm_r;
+reg [7:0]  vol_raw_l_r, vol_raw_r_r;
 reg [7:0]  tgt_l_r, tgt_r_r;
 reg [7:0]  nxt_l_r, nxt_r_r;
 
@@ -598,6 +600,8 @@ always @(posedge clk) begin
         burst_mode_2beat <= 1'b0;
         burst_mode_seam  <= 1'b0;
         burst_mode_dup   <= 1'b0;
+        vol_raw_l_r      <= 8'd0;
+        vol_raw_r_r      <= 8'd0;
     end else case (state)
 
     // ---- Idle: wait for FIFO to drop below half, then start new sample ----
@@ -1038,6 +1042,7 @@ always @(posedge clk) begin
     // Four-stage pipeline to keep the per-voice path inside 10 ns:
     //   S_RAMP_STEP    → pick gxm for cur_voice (cur_voice → voice_group
     //                    → pick_gxm), queue VTBL_VOL_TARGET read
+    //   S_WR_VOL_LOAD  → latch raw target from VTBL_VOL_TARGET
     //   S_WR_VOL_MULT  → latch raw × cur_gxm_r into tgt_*_r (DSP cycle); if the
     //                    voice already sits on this fresh target, fast-path
     //                    straight to S_NEXT_VOICE (skips the 3 stages below)
@@ -1051,21 +1056,24 @@ always @(posedge clk) begin
     S_RAMP_STEP: begin
         vtbl_a_addr <= {cur_voice, VTBL_VOL_TARGET};
         cur_gxm_r   <= pick_gxm(voice_group_packed[cur_voice * 2 +: 2]);
+        state       <= S_WR_VOL_LOAD;
+    end
+
+    S_WR_VOL_LOAD: begin
+        vol_raw_l_r <= vtbl_a_q[7:0];
+        vol_raw_r_r <= vtbl_a_q[15:8];
         state       <= S_WR_VOL_MULT;
     end
 
     S_WR_VOL_MULT: begin : compose_blk
-        reg [7:0]  raw_l, raw_r;
         reg [15:0] tgt_l_x, tgt_r_x;
         reg [7:0]  tgt_l_b, tgt_r_b;
         begin
             // Only thing we do here is the 8x8 multiply against the registered
             // cur_gxm_r — DSP block in isolation, no downstream logic
             // on the same cycle.
-            raw_l   = vtbl_a_q[7:0];
-            raw_r   = vtbl_a_q[15:8];
-            tgt_l_x = raw_l * cur_gxm_r;
-            tgt_r_x = raw_r * cur_gxm_r;
+            tgt_l_x = vol_raw_l_r * cur_gxm_r;
+            tgt_r_x = vol_raw_r_r * cur_gxm_r;
             tgt_l_b = tgt_l_x[15:8];
             tgt_r_b = tgt_r_x[15:8];
             tgt_l_r <= tgt_l_b;
