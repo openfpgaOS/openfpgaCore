@@ -36,6 +36,12 @@
 /* Symbols from linker script */
 extern char __os_bss_end[];
 
+/* OS .text integrity guard (kernel/misaligned.c).  Baseline the loaded code
+ * once it is known-good, then check at each boot checkpoint; the first failing
+ * checkpoint brackets the operation that overwrites the OS .text at runtime. */
+void os_textguard_baseline(void);
+void os_textguard_check(const char *where);
+
 /* Zero OS .bss in SDRAM from BRAM.  This runs before os_main(), while
  * SDRAM has just been populated by the bootloader and before the OS
  * can rely on its own .bss state.  Keep it in .fasttext so the first
@@ -266,9 +272,15 @@ void os_main(void) {
      * while SDRAM .bss is being zeroed. */
     of_irq_init();
 
+    /* Capture the known-good OS .text straight off the bootloader's verified
+     * load, before any subsystem runs.  Every os_textguard_check() below then
+     * brackets where the runtime .text corruption first appears. */
+    os_textguard_baseline();
+
     /* Initialize all hardware */
     of_init();
     of_irq_enable_cpu();
+    os_textguard_check("after of_init");
 
     /* Boot stage: red logo = OS initializing */
     boot_logo("\033[91m");  /* red */
@@ -300,6 +312,7 @@ void os_main(void) {
     /* Initialize syscall subsystem */
     uintptr_t heap_start = ((uintptr_t)__os_bss_end + 15) & ~15;
     syscall_init(heap_start);
+    os_textguard_check("after syscall_init");
 
     of_term_puts("  Syscall init...... ");
     status_ok();
@@ -318,6 +331,7 @@ void os_main(void) {
 
     /* Brief pause to show banner */
     of_timer_delay_ms(800);
+    os_textguard_check("after config_load");
 
     /* Load application ELF */
     of_term_puts("  Loading app....... ");
@@ -325,9 +339,11 @@ void os_main(void) {
     elf_load_result_t app;
     uint32_t app_slot = APP_SLOT_ID;
     int app_argc = 1;
+    os_textguard_check("before app load");
     int rc = prepare_app_launch(&app_slot, &app_argc);
     if (rc == 0)
         rc = load_app_with_retries(app_slot, &app);
+    os_textguard_check("after app load");
 
     if (rc < 0) {
         status_fail();
@@ -436,6 +452,7 @@ void os_main(void) {
     of_timer_delay_ms(200);
 
     /* Execute the app */
+    os_textguard_check("before elf_exec");
     elf_exec(&app, app_argc, app_argv);
 
     /* Should never reach here */

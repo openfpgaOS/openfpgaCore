@@ -176,6 +176,7 @@ os.bin: $(FW_TARGET).elf
 		--only-section=.text \
 		--only-section=.osdata \
 		$< $@
+	@python3 targets/pocket/boot/append_os_crc.py $@
 	@echo "Generated $@ ($$(wc -c < $@) bytes)"
 
 # Disassembly

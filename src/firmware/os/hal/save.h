@@ -29,6 +29,13 @@ void of_save_init(void);
 void of_save_begin_cpu(void);
 void of_save_end_cpu(void);
 
+/* Core-exit security wipe: zero the non-save CRAM0 regions (stale boot
+ * staging, DMA scratch, app file-staging pool) so transient loaded data
+ * cannot survive a warm reset.  PRESERVES the nonvolatile presave + save
+ * window the bridge persists to SD.  Must be called while the CPU still owns
+ * CRAM0 — i.e. before of_check_shutdown hands the mux to the bridge. */
+void of_save_security_wipe(void);
+
 /* Generic nonvolatile APF data slots backed by the CRAM0 window.
  * Supports the one pre-save config/settings slot (id 8 or 9, depending
  * on data.json) plus game save ids 10-19. */

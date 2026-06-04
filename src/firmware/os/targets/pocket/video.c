@@ -128,19 +128,31 @@ static int video_normalize_mode(const of_video_mode_t *in,
     return 0;
 }
 
+/* When the Analogizer runs an RGB/VGA (non-15kHz) mode, core_top.v forces the
+ * LCD raster itself to 640x480 (crt_h/v_active).  The Pocket scaler must then
+ * be parked on the 640x480 slot or it cannot lock onto the core's output and
+ * the Pocket screen goes black — regardless of the app's framebuffer size.
+ * This flag, set via of_video_set_analogizer_fullraster(), overrides the slot. */
+static uint8_t video_analogizer_force_640;
+
+static void video_write_scaler_slot(uint8_t base_slot) {
+    /* slot 7 = 640x480 (scaler_modes[]; core_top.v scaler_slot_*(7)). */
+    VIDEO_SCALER_MODE = video_analogizer_force_640 ? 7u : base_slot;
+}
+
 static void video_program_app_mode(void) {
     SYS_COLOR_MODE = vid_mode.color_mode;
     FB_MODE_SIZE = ((uint32_t)vid_mode.height << 16) | vid_mode.width;
     FB_MODE_STRIDE = vid_mode.stride;
-    VIDEO_SCALER_MODE =
-        video_scaler_mode_for_size(vid_mode.width, vid_mode.height)->slot;
+    video_write_scaler_slot(
+        video_scaler_mode_for_size(vid_mode.width, vid_mode.height)->slot);
 }
 
 static void video_program_terminal_mode(void) {
     SYS_COLOR_MODE = COLOR_MODE_8BIT;
     FB_MODE_SIZE = ((uint32_t)FB_HEIGHT << 16) | FB_WIDTH;
     FB_MODE_STRIDE = FB_STRIDE;
-    VIDEO_SCALER_MODE = VIDEO_SCALER_SLOT_DEFAULT_320X240;
+    video_write_scaler_slot(VIDEO_SCALER_SLOT_DEFAULT_320X240);
 }
 
 static void video_program_visible_mode(void) {
@@ -148,6 +160,16 @@ static void video_program_visible_mode(void) {
         video_program_terminal_mode();
     else
         video_program_app_mode();
+}
+
+void of_video_set_analogizer_fullraster(int on) {
+    uint8_t v = on ? 1u : 0u;
+    if (v == video_analogizer_force_640)
+        return;
+    video_analogizer_force_640 = v;
+    /* Re-apply the scaler slot immediately: the Analogizer state can change
+     * without an app video-mode change. */
+    video_program_visible_mode();
 }
 
 static uint32_t video_clamp_frame_bytes(uint32_t bytes) {

@@ -48,9 +48,20 @@ static uint8_t phdp_seq                __attribute__((section(".bss.boot")));
 volatile unsigned int __attribute__((section(".bss.boot"))) pd_dbg_stage;
 volatile unsigned int __attribute__((section(".bss.boot"))) pd_dbg_info;
 
+/* Counts how many times the loaded OS image failed its CRC and had to be
+ * reloaded this boot (see boot_load_os_sd).  Non-zero means the SD->CRAM0->SDRAM
+ * load pipeline corrupted the image and the reinforcement caught it. */
+volatile unsigned int __attribute__((section(".bss.boot"))) os_load_crc_retries;
+
 /* Data slot IDs */
 #define OS_SLOT_ID      1       /* OS binary */
 #define OS_DT_SIZE_WORD 3       /* entry 1 size word: id word 2, size word 3 */
+
+/* OS image integrity trailer (append_os_crc.py): [magic 'OFC1'][crc32 LE].
+ * 'O','F','C','1' read back as a little-endian word from SDRAM = 0x3143464F. */
+#define OS_CRC_MAGIC         0x3143464Fu
+#define OS_CRC_TRAILER_BYTES 8u
+#define OS_LOAD_MAX_ATTEMPTS 4
 
 /* DMA timeout (~2 seconds at 100MHz) */
 #define BOOT_DMA_TIMEOUT 200000000
@@ -617,8 +628,55 @@ static uint32_t boot_os_slot_size(void) {
     return linked_size;
 }
 
+/* CRC-32/ISO-HDLC (zlib-compatible) over a loaded SDRAM range, read through the
+ * uncached alias so it reflects what landed in DRAM, independent of cache state.
+ * Word-based to minimise slow uncached reads; bytes are folded in LSB-first to
+ * match the on-disk little-endian byte order that append_os_crc.py CRCs. */
 __attribute__((section(".text.boot")))
-static int boot_load_os_sd(uint32_t total) {
+static uint32_t boot_crc32_uncached(uint32_t cached_base, uint32_t len) {
+    volatile const uint32_t *p =
+        (volatile const uint32_t *)boot_sdram_uncached_addr((void *)(uintptr_t)cached_base);
+    uint32_t crc = 0xFFFFFFFFu;
+    uint32_t words = len >> 2;
+    for (uint32_t w = 0; w < words; w++) {
+        uint32_t v = p[w];
+        for (int b = 0; b < 4; b++) {
+            crc ^= (v & 0xFFu);
+            v >>= 8;
+            for (int k = 0; k < 8; k++)
+                crc = (crc >> 1) ^ (0xEDB88320u & (uint32_t)(-(int32_t)(crc & 1u)));
+        }
+    }
+    for (uint32_t b = 0; b < (len & 3u); b++) {
+        uint32_t v = p[words] >> (b * 8);
+        crc ^= (v & 0xFFu);
+        for (int k = 0; k < 8; k++)
+            crc = (crc >> 1) ^ (0xEDB88320u & (uint32_t)(-(int32_t)(crc & 1u)));
+    }
+    return crc ^ 0xFFFFFFFFu;
+}
+
+/* Returns 1 if the just-loaded OS image is trusted, 0 if its CRC trailer is
+ * present and does NOT match (corruption detected).  An unstamped image (no
+ * magic) returns 1 — there is nothing to check it against, so accept it (keeps
+ * older os.bin / dev streams working).  'total' is the number of bytes copied
+ * to SDRAM, including the 8-byte trailer. */
+__attribute__((section(".text.boot")))
+static int boot_verify_os_image(uint32_t total) {
+    if (total < OS_CRC_TRAILER_BYTES)
+        return 1;
+    uint32_t image_len = total - OS_CRC_TRAILER_BYTES;
+    uint32_t base = (uint32_t)(uintptr_t)_osdata_init_vma_start;
+    volatile const uint32_t *trailer =
+        (volatile const uint32_t *)boot_sdram_uncached_addr(
+            (void *)(uintptr_t)(base + image_len));
+    if (trailer[0] != OS_CRC_MAGIC)
+        return 1;   /* unstamped image — cannot verify */
+    return boot_crc32_uncached(base, image_len) == trailer[1];
+}
+
+__attribute__((section(".text.boot")))
+static int boot_load_os_sd_once(uint32_t total) {
     /* v2 arch: CRAM1 retired, OS .text in SDRAM (CRAM0 is non-exec).
      * Single-destination layout: bridge DMAs os.bin into CRAM0
      * scratch, then the CPU copies the whole blob contiguously into
@@ -665,6 +723,27 @@ static int boot_load_os_sd(uint32_t total) {
     /* Leave the mux in bridge mode — later code issuing bridge DMAs
      * is the common case; one-off CPU reads flip it as needed. */
     CRAM0_MODE = CRAM0_MODE_BRIDGE;
+    return 0;
+}
+
+/* Load the OS image, then verify its CRC and reload on mismatch.  The
+ * SD->CRAM0->SDRAM copy occasionally corrupts a word (CRAM0 PSRAM async path);
+ * a corrupt image surfaces later as an illegal-instruction trap.  Re-running
+ * the whole load almost always clears an intermittent fault.  On exhausted
+ * retries we proceed with the last copy rather than bricking the boot (no worse
+ * than the pre-CRC behaviour) and leave os_load_crc_retries / pd_dbg_info set
+ * so the failure is visible. */
+__attribute__((section(".text.boot")))
+static int boot_load_os_sd(uint32_t total) {
+    for (int attempt = 0; attempt < OS_LOAD_MAX_ATTEMPTS; attempt++) {
+        int rc = boot_load_os_sd_once(total);
+        if (rc < 0)
+            return rc;                  /* DMA/IO failure — surface as-is */
+        if (boot_verify_os_image(total))
+            return 0;                   /* image trusted */
+        os_load_crc_retries++;          /* corruption detected — reload */
+    }
+    pd_dbg_info = 0xC0DE0000u | (os_load_crc_retries & 0xFFFFu);
     return 0;
 }
 
@@ -759,7 +838,7 @@ int main(void) {
             boot_dcache_inval_range(_os_load_addr, total_size);
             int rc = phdp_chunk_loop(0, total_size, total_size, os_dst);
 
-            if (rc < 0) {
+            if (rc < 0 || !boot_verify_os_image(total_size)) {
                 boot_fb_clear_row(0);
                 boot_fb_puts(0, 0, "UART failed, trying SD...");
                 goto load_from_sd;
@@ -844,6 +923,15 @@ start_os:
                              RUNTIME_STACK_TOP);
 
     pd_dbg_stage = 5;
+
+    /* If the OS image had to be reloaded to pass its CRC, surface it: the
+     * count survives in BRAM (os_load_crc_retries) for the OS to report, and
+     * we flash it here so it's visible during boot.  Skipped on the sim path,
+     * where retries is always 0 and there is no framebuffer. */
+    if (os_load_crc_retries) {
+        boot_fb_puts(0, 1, "OS reloaded (CRC) x");
+        boot_fb_putchar(19, 1, '0' + (os_load_crc_retries & 7));
+    }
 
     /* Jump to OS */
     switch_to_runtime_stack_and_call(os_main, _runtime_stack_top);

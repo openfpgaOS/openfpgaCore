@@ -37,6 +37,18 @@
                         "name": "None"
                     },
                     {
+                        "value": "0x01",
+                        "name": "DB15"
+                    },
+                    {
+                        "value": "0x09",
+                        "name": "DB15 Fast"
+                    },
+                    {
+                        "value": "0x02",
+                        "name": "NES"
+                    },
+                    {
                         "value": "0x03",
                         "name": "SNES"
                     },
@@ -45,12 +57,32 @@
                         "name": "SNES A,B<->X,Y"
                     },
                     {
+                        "value": "0x04",
+                        "name": "PCE 2-Button"
+                    },
+                    {
+                        "value": "0x05",
+                        "name": "PCE 6-Button"
+                    },
+                    {
+                        "value": "0x06",
+                        "name": "PCE Multitap"
+                    },
+                    {
+                        "value": "0x10",
+                        "name": "PSX"
+                    },
+                    {
                         "value": "0x11",
-                        "name": "PSX (Digital DPAD)"
+                        "name": "PSX Fast"
+                    },
+                    {
+                        "value": "0x12",
+                        "name": "PSX Analog"
                     },
                     {
                         "value": "0x13",
-                        "name": "PSX (Analog DPAD)"
+                        "name": "PSX Analog Fast"
                     }
                 ]
             },
@@ -119,38 +151,6 @@
                     {
                         "value": "0x1C00",
                         "name": "SC HQ2x RGBHV"
-                    },
-                    {
-                        "value": "0x2000",
-                        "name": "RGBS,Pocket OFF"
-                    },
-                    {
-                        "value": "0x2400",
-                        "name": "RGsB,Pocket OFF"
-                    },
-                    {
-                        "value": "0x2800",
-                        "name": "YPbPr,Pocket OFF"
-                    },
-                    {
-                        "value": "0x2C00",
-                        "name": "Y/C NTSC,Pocket OFF"
-                    },
-                    {
-                        "value": "0x3000",
-                        "name": "Y/C PAL,Pocket OFF"
-                    },
-                    {
-                        "value": "0x3400",
-                        "name": "SC 0% RGBHV,Pocket OFF"
-                    },
-                    {
-                        "value": "0x3800",
-                        "name": "SC 50% RGBHV,Pocket OFF"
-                    },
-                    {
-                        "value": "0x3C00",
-                        "name": "SC HQ2x RGBHV,Pocket OFF"
                     }
                 ]
             },

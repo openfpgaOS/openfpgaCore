@@ -178,6 +178,38 @@ void of_save_end_cpu(void) {
         cram0_release_to_bridge();
 }
 
+/* The wiped ranges must NEVER overlap the nonvolatile window
+ * [PRESAVE_OFFSET, SCRATCH_OFFSET) that the bridge persists on exit. */
+_Static_assert(OF_TARGET_CRAM0_PRESAVE_OFFSET < OF_TARGET_CRAM0_SCRATCH_OFFSET,
+               "presave/save window must precede the scratch region");
+_Static_assert(OF_TARGET_CRAM0_APP_DMA_OFFSET + OF_TARGET_CRAM0_APP_DMA_SIZE
+               <= OF_TARGET_CRAM_SIZE, "app-DMA pool exceeds CRAM0");
+
+/* Zero a word-aligned CRAM0 byte range [off, off+len).  CRAM0 is uncached per
+ * PMA, so these stores go straight to PSRAM; len/off are region constants that
+ * are 4-byte multiples, so whole-word stores are always safe (no sub-word RMW
+ * needed — see copy_to_cram). Caller must already hold CPU ownership. */
+static void cram0_wipe_words(uint32_t off, uint32_t len) {
+    volatile uint32_t *p =
+        (volatile uint32_t *)(uintptr_t)(OF_TARGET_CRAM0_BASE + off);
+    uint32_t words = len >> 2;
+    for (uint32_t i = 0; i < words; i++)
+        p[i] = 0;
+}
+
+void of_save_security_wipe(void) {
+    of_save_begin_cpu();
+    fence();
+    /* Below the nonvolatile window: the stale boot-time copy of os.bin. */
+    cram0_wipe_words(0, OF_TARGET_CRAM0_PRESAVE_OFFSET);
+    /* Above it: the DMA scratch and the app file-staging pool. */
+    cram0_wipe_words(OF_TARGET_CRAM0_SCRATCH_OFFSET,
+                     (OF_TARGET_CRAM0_APP_DMA_OFFSET + OF_TARGET_CRAM0_APP_DMA_SIZE)
+                         - OF_TARGET_CRAM0_SCRATCH_OFFSET);
+    fence();
+    of_save_end_cpu();
+}
+
 int of_nvslot_is_supported(uint32_t data_slot_id) {
     return nvslot_map(data_slot_id, 0) == 0;
 }

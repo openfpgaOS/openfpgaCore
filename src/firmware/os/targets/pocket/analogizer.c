@@ -19,6 +19,7 @@
 #include "save.h"
 #include "snac.h"
 #include "syscall.h"
+#include "video.h"
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
@@ -238,6 +239,7 @@ static uint32_t crc32_compute(const void *data, uint32_t len) {
 static void analogizer_clamp_state(of_analogizer_state_t *s) {
     s->enabled = s->enabled ? 1 : 0;
     s->video_mode = (uint8_t)clamp_int(s->video_mode, 0, 15);
+    s->video_mode &= (uint8_t)~ANLG_VIDEO_POCKET_OFF;
     s->snac_type = (uint8_t)clamp_int(s->snac_type, 0, 31);
     if (!snac_type_supported(s->snac_type))
         s->snac_type = SNAC_NONE;
@@ -271,6 +273,15 @@ static void analogizer_init_snac(void) {
         snac_init(SNAC_NONE);
 }
 
+/* Keep the Pocket scaler slot aligned with the Analogizer raster.  Its RGB/VGA
+ * (non-15kHz) modes — video_mode low-3-bits 5..7 — make core_top.v force the
+ * LCD raster to 640x480; the scaler must then sit on slot 7 or the Pocket
+ * screen blanks.  15kHz/240p modes leave the LCD raster alone. */
+static void analogizer_sync_video_scaler(void) {
+    of_video_set_analogizer_fullraster(
+        anlg_state.enabled && ((anlg_state.video_mode & 0x07u) > 4u));
+}
+
 static void analogizer_apply_state(const of_analogizer_state_t *state) {
     anlg_state = *state;
     analogizer_clamp_state(&anlg_state);
@@ -281,6 +292,7 @@ static void analogizer_apply_state(const of_analogizer_state_t *state) {
 
     analogizer_wait_for_registers(&anlg_state);
     analogizer_init_snac();
+    analogizer_sync_video_scaler();
 }
 
 static void analogizer_read_hardware_defaults(void) {
@@ -293,6 +305,8 @@ static void analogizer_read_hardware_defaults(void) {
     anlg_state.h_offset = (int8_t)ANALOGIZER_H_OFFSET;
     anlg_state.v_offset = (int8_t)ANALOGIZER_V_OFFSET;
     analogizer_clamp_state(&anlg_state);
+    ANALOGIZER_SETTINGS = analogizer_pack_settings(&anlg_state);
+    analogizer_sync_video_scaler();
 }
 
 static void analogizer_decode_hardware_state(of_analogizer_state_t *out) {
@@ -367,6 +381,10 @@ static int parse_text_config(char *buf, of_analogizer_state_t *out) {
         {"composite_pal", ANLG_VIDEO_YC_PAL},
         {"cvbs_pal", ANLG_VIDEO_YC_PAL},
         {"pal", ANLG_VIDEO_YC_PAL},
+        {"vga", ANLG_VIDEO_SC_0PCT},
+        {"rgbhv", ANLG_VIDEO_SC_0PCT},
+        {"rgbhv_480p", ANLG_VIDEO_SC_0PCT},
+        {"vga_480p", ANLG_VIDEO_SC_0PCT},
         {"scart", ANLG_VIDEO_SC_0PCT},
         {"rgb_scart", ANLG_VIDEO_SC_0PCT},
         {"sc_0pct", ANLG_VIDEO_SC_0PCT},
@@ -384,6 +402,10 @@ static int parse_text_config(char *buf, of_analogizer_state_t *out) {
         {"svideo_pal_off", ANLG_VIDEO_YC_PAL | ANLG_VIDEO_POCKET_OFF},
         {"composite_pal_off", ANLG_VIDEO_YC_PAL | ANLG_VIDEO_POCKET_OFF},
         {"cvbs_pal_off", ANLG_VIDEO_YC_PAL | ANLG_VIDEO_POCKET_OFF},
+        {"vga_off", ANLG_VIDEO_SC_0PCT | ANLG_VIDEO_POCKET_OFF},
+        {"rgbhv_off", ANLG_VIDEO_SC_0PCT | ANLG_VIDEO_POCKET_OFF},
+        {"rgbhv_480p_off", ANLG_VIDEO_SC_0PCT | ANLG_VIDEO_POCKET_OFF},
+        {"vga_480p_off", ANLG_VIDEO_SC_0PCT | ANLG_VIDEO_POCKET_OFF},
         {"scart_off", ANLG_VIDEO_SC_0PCT | ANLG_VIDEO_POCKET_OFF},
         {"rgb_scart_off", ANLG_VIDEO_SC_0PCT | ANLG_VIDEO_POCKET_OFF},
         {"sc_0pct_off", ANLG_VIDEO_SC_0PCT | ANLG_VIDEO_POCKET_OFF},
@@ -553,6 +575,10 @@ void of_analogizer_init(void) {
 void of_analogizer_refresh(void) {
     of_analogizer_state_t hw;
     analogizer_decode_hardware_state(&hw);
+    uint32_t normalized_settings = analogizer_pack_settings(&hw);
+    if (ANALOGIZER_SETTINGS != normalized_settings)
+        ANALOGIZER_SETTINGS = normalized_settings;
+
     if (!analogizer_state_changed(&hw, &anlg_state))
         return;
 
@@ -561,6 +587,7 @@ void of_analogizer_refresh(void) {
 
     if (anlg_state.snac_type != old_snac_type)
         analogizer_init_snac();
+    analogizer_sync_video_scaler();
 }
 
 int of_analogizer_load_config(const char *filename) {

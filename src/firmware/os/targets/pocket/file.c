@@ -15,6 +15,7 @@
 #include "mixer.h"
 #include "cache.h"
 #include "regs.h"
+#include "save.h"
 #include "terminal.h"
 #include <string.h>
 
@@ -140,6 +141,13 @@ void of_file_init(void) {
  * nonvolatile exit writeback reads the save window. */
 void of_check_shutdown(void) {
     if (SYS_SHUTDOWN & SHUTDOWN_PENDING) {
+        /* Security wipe: scrub the non-save CRAM0 regions (stale boot copy of
+         * os.bin, DMA scratch, app file-staging pool) so transient loaded data
+         * cannot survive a warm reset.  Runs here, before the mux is handed to
+         * the bridge, because the CPU can no longer write CRAM0 afterwards.
+         * It preserves the presave + save window, which the bridge persists to
+         * SD right after the ACK below. */
+        of_save_security_wipe();
         fence();
         CRAM0_MODE = CRAM0_MODE_BRIDGE;
         for (volatile int s = 0; s < 8; s++) {}

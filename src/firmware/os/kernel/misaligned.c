@@ -530,6 +530,106 @@ static void trap_decode_word(const char *label, uint32_t instr) {
     trap_uart_puts("\n");
 }
 
+/* ===== OS .text integrity guard =====================================
+ * The OS .text in SDRAM is verified clean by the bootloader's CRC, yet an
+ * intermittent runtime fault overwrites it: an illegal-instruction trap at a
+ * fixed OS code address (~0x10334358), with the corrupt bytes DIFFERING every
+ * boot.  Different garbage each boot = the code is being overwritten at run
+ * time, after the load.  These hooks CRC .text (read through the uncached alias
+ * so it reflects DRAM, not the I/D-cache) at os_main checkpoints.  The first
+ * checkpoint that trips brackets the operation that corrupts the code; the
+ * per-block CRC pins which 1 KB of .text changed.  Baseline + block table live
+ * in BRAM (.bss.boot) and this code lives in BRAM (.text.boot), so the guard is
+ * never part of the SDRAM region it is checking. */
+#define TEXTGUARD_BLOCK   1024u
+#define TEXTGUARD_MAXBLK  256u
+/* Baseline tables live in SDRAM .bss (BRAM is full): the runtime fault targets
+ * .text (0x1032..0x1033E000); .bss sits above it and is not what gets hit.  A
+ * corrupted baseline would only ever cause a false positive, never a missed
+ * one. */
+static uint32_t tg_block_crc[TEXTGUARD_MAXBLK];
+static uint32_t tg_nblocks;
+static int      tg_valid;
+
+extern char __text_start[];
+extern char __text_end[];
+
+/* In SDRAM .text (ships in os.bin, so deploying needs no bitstream reflash).
+ * That puts this code inside the CRC'd range — harmless, it never changes —
+ * and the trap-UART helpers it calls remain in BRAM. */
+static uint32_t tg_crc_uncached(uint32_t uc_addr, uint32_t len) {
+    volatile const uint32_t *p = (volatile const uint32_t *)(uintptr_t)uc_addr;
+    uint32_t words = len >> 2, crc = 0xFFFFFFFFu;
+    for (uint32_t w = 0; w < words; w++) {
+        uint32_t v = p[w];
+        for (int b = 0; b < 4; b++) {
+            crc ^= (v & 0xFFu);
+            v >>= 8;
+            for (int k = 0; k < 8; k++)
+                crc = (crc >> 1) ^ (0xEDB88320u & (uint32_t)(-(int32_t)(crc & 1u)));
+        }
+    }
+    return crc ^ 0xFFFFFFFFu;
+}
+
+void os_textguard_baseline(void) {
+    uint32_t base  = (uint32_t)(uintptr_t)__text_start;
+    uint32_t total = (uint32_t)(uintptr_t)__text_end - base;
+    uint32_t uc    = base - SDRAM_BASE + SDRAM_UNCACHED_BASE;
+    uint32_t nb    = (total + TEXTGUARD_BLOCK - 1u) / TEXTGUARD_BLOCK;
+    if (nb > TEXTGUARD_MAXBLK)
+        nb = TEXTGUARD_MAXBLK;
+    for (uint32_t i = 0; i < nb; i++) {
+        uint32_t off = i * TEXTGUARD_BLOCK;
+        uint32_t len = total - off;
+        if (len > TEXTGUARD_BLOCK)
+            len = TEXTGUARD_BLOCK;
+        tg_block_crc[i] = tg_crc_uncached(uc + off, len & ~3u);
+    }
+    tg_nblocks = nb;
+    tg_valid   = 1;
+}
+
+void os_textguard_check(const char *where) {
+    if (!tg_valid)
+        return;
+    uint32_t base  = (uint32_t)(uintptr_t)__text_start;
+    uint32_t total = (uint32_t)(uintptr_t)__text_end - base;
+    uint32_t uc    = base - SDRAM_BASE + SDRAM_UNCACHED_BASE;
+    int bad = -1;
+    for (uint32_t i = 0; i < tg_nblocks; i++) {
+        uint32_t off = i * TEXTGUARD_BLOCK;
+        uint32_t len = total - off;
+        if (len > TEXTGUARD_BLOCK)
+            len = TEXTGUARD_BLOCK;
+        if (tg_crc_uncached(uc + off, len & ~3u) != tg_block_crc[i]) {
+            bad = (int)i;
+            break;
+        }
+    }
+    if (bad < 0)
+        return;   /* .text intact at this checkpoint */
+
+    /* Restore the terminal overlay so the report is on-screen too (mirrors
+     * fatal_trap; direct MMIO only, safe from any context). */
+    SYS_COLOR_MODE    = COLOR_MODE_8BIT;
+    FB_MODE_SIZE      = ((uint32_t)FB_HEIGHT << 16) | (uint32_t)FB_WIDTH;
+    FB_MODE_STRIDE    = FB_STRIDE;
+    VIDEO_SCALER_MODE = VIDEO_SCALER_SLOT_DEFAULT_320X240;
+    TERM_FB_CTRL      = 1u;
+
+    trap_uart_puts("\n==TEXTGUARD==\n.text CORRUPT @ ");
+    trap_uart_puts(where);
+    trap_uart_puts("\nfirst bad block=");
+    trap_uart_hex((uint32_t)bad);
+    trap_uart_puts(" addr=");
+    trap_uart_hex(base + (uint32_t)bad * TEXTGUARD_BLOCK);
+    trap_uart_puts("\n");
+    trap_dump_words("words@bad", base + (uint32_t)bad * TEXTGUARD_BLOCK);
+    trap_uart_puts("==END==\n");
+    while (1) {}
+}
+
 __attribute__((section(".text.boot")))
 void fatal_trap(trap_frame_t *frame) {
     /* Crash recovery: flip the display back to the terminal so the console

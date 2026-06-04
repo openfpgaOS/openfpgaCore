@@ -273,10 +273,16 @@ wire       analogizer_ena_cpu  = analogizer_settings_cpu[15];
 wire       analogizer_ena_core = analogizer_settings_core[15];
 wire       analogizer_ena_vid  = analogizer_settings_vid[15];
 wire [3:0] analogizer_video_type_core = analogizer_settings_core[13:10];
+wire [3:0] analogizer_video_type_vid  = analogizer_settings_vid[13:10];
+wire       analogizer_15khz_core = (analogizer_video_type_core[2:0] <= 3'd4);
+wire       analogizer_15khz_vid  = (analogizer_video_type_vid[2:0] <= 3'd4);
 
 
 
-    wire pocket_blank_screen = analogizer_settings_vid[13] && analogizer_ena_vid;
+    // Keep the Pocket LCD live while Analogizer is enabled. Older menu/config
+    // states may still set bit 13 ("Pocket OFF"), but blanking the LCD makes
+    // bad persisted state difficult to recover from and hides useful debug.
+    wire pocket_blank_screen = 1'b0;
 
     wire [23:0] video_rgb_core;
     assign video_rgb_core = (pocket_blank_screen) ? 24'h000000: vidout_rgb;
@@ -351,6 +357,30 @@ wire crt_blankn;
 assign crt_csync = ~(HSync ^ VSync);
 assign crt_blankn   = ~(crt_hblank | crt_vblank);
 
+wire [23:0] analogizer_scan_rgb;
+wire        analogizer_scan_hblank;
+wire        analogizer_scan_vblank;
+wire        analogizer_scan_hsync;
+wire        analogizer_scan_vsync;
+wire        analogizer_scan_blankn = ~(analogizer_scan_hblank | analogizer_scan_vblank);
+wire        analogizer_scan_csync = ~(analogizer_scan_hsync ^ analogizer_scan_vsync);
+
+wire        analogizer_cart_clk = analogizer_15khz_core ? clk_core_12288 : clk_vid;
+wire [23:0] analogizer_src_rgb =
+    analogizer_15khz_core ? analogizer_scan_rgb : vidout_rgb;
+wire        analogizer_src_hblank =
+    analogizer_15khz_core ? analogizer_scan_hblank : crt_hblank;
+wire        analogizer_src_vblank =
+    analogizer_15khz_core ? analogizer_scan_vblank : crt_vblank;
+wire        analogizer_src_blankn =
+    analogizer_15khz_core ? analogizer_scan_blankn : crt_blankn;
+wire        analogizer_src_hsync =
+    analogizer_15khz_core ? analogizer_scan_hsync : HSync;
+wire        analogizer_src_vsync =
+    analogizer_15khz_core ? analogizer_scan_vsync : VSync;
+wire        analogizer_src_csync =
+    analogizer_15khz_core ? analogizer_scan_csync : crt_csync;
+
 // ============================================================
 // SNAC GPIO / UART cart pin mux
 // CPU-controlled via snac_enable from axi_periph_slave.
@@ -421,35 +451,29 @@ wire uart_rx_serial = cart_gpio_mode ? 1'b1 : cart_tran_pin31;
 // Analogizer: video output only — SNAC pins now driven by CPU through above mux
 openFPGA_Pocket_Analogizer #(
     .MASTER_CLK_FREQ(49_152_000),
-    // openfpgaOS outputs RGBS/RGsB/VGA(scandoubler) only.  Gate out the YPbPr
-    // (vga_out) and Y/C composite (yc_out) encoders — ~700-900 ALMs unused on a
-    // VGA build — to fit the device.  Flip back to 1 to restore those modes.
+    // RGBS/RGsB/RGBHV(VGA) only — gate out the YPbPr (component) and Y/C
+    // (S-video) encoders (~700-900 ALMs) so the design fits/closes timing.
+    // SCART-RGB and 640x480 RGBHV both use the base RGB path, unaffected by these.
     .EN_YPBPR(0),
     .EN_YC(0)
 ) analogizer (
     .i_clk(clk_core_49152),
     .i_rst(~reset_n_analog),
     .i_ena(analogizer_ena_core),
-    // Video interface — restored to the original (pre-cf2beec) single-path
-    // wiring: the Analogizer is fed the CRT video directly (vidout_rgb + crt_*
-    // sync), and the cart-pin DAC clock is video_clk = clk_vid (clk_core_24576,
-    // 24.576 MHz, already SDC-constrained) per the upstream Analogizer (cart
-    // pin = video_clk).  When Analogizer video is enabled, the CRT generator
-    // above forces a full 640x480 raw raster and the framebuffer scanout scales
-    // low-res app modes into it, so the Analogizer can bypass its internal
-    // scandoubler (scandoubler=0).  The scanout's dedicated analog path remains
-    // dormant and pruned (analog_480p=1, analog_* outputs unconnected).
-    .video_clk(clk_vid),
+    // Native 15 kHz modes use the scanout's analog raster and a 12.288 MHz DAC
+    // clock. RGBHV modes keep the proven 640x480 carrier and 24.576 MHz DAC
+    // clock, so this restores the extra encoders without disturbing VGA output.
+    .video_clk(analogizer_cart_clk),
     .analog_video_type(analogizer_video_type_core),
-    .R(vidout_rgb[23:16]),
-    .G(vidout_rgb[15:8]),
-    .B(vidout_rgb[7:0]),
-    .Hblank(crt_hblank),
-    .Vblank(crt_vblank),
-    .BLANKn(crt_blankn),
-    .Hsync(HSync),
-    .Vsync(VSync),
-    .Csync(crt_csync),
+    .R(analogizer_src_rgb[23:16]),
+    .G(analogizer_src_rgb[15:8]),
+    .B(analogizer_src_rgb[7:0]),
+    .Hblank(analogizer_src_hblank),
+    .Vblank(analogizer_src_vblank),
+    .BLANKn(analogizer_src_blankn),
+    .Hsync(analogizer_src_hsync),
+    .Vsync(analogizer_src_vsync),
+    .Csync(analogizer_src_csync),
     .ce_pix(analog_ce_pix),
     .scandoubler(1'b0),
     .fx(fx),
@@ -2034,13 +2058,10 @@ assign video_hs = vidout_hs;
         end
     endfunction
 
-    // The Pocket LCD path can advertise low-res scaler slots because the APF
-    // scaler expands them. The Analogizer is wired to the raw CRT stream, so
-    // without an override a 320x200 app is emitted as a 320x200 active island
-    // inside the 640x480 carrier. When Analogizer video is enabled, drive a
-    // full 640x480 raw raster and let the framebuffer scanout scaler expand
-    // the app mode into it. SNAC-only adapter use does not alter video.
-    wire analogizer_full_raster_vid = analogizer_ena_vid;
+    // RGBHV Analogizer output mirrors the 640x480 carrier, so force the raw
+    // CRT stream full-size only for RGBHV modes. Native 15 kHz modes use the
+    // dedicated scanout analog raster and leave the LCD path in its app mode.
+    wire analogizer_full_raster_vid = analogizer_ena_vid && !analogizer_15khz_vid;
     wire [2:0] crt_scaler_slot_vid =
         analogizer_full_raster_vid ? 3'd7 : video_scaler_slot_vid;
     wire [9:0] crt_h_active =
@@ -2072,7 +2093,14 @@ assign video_hs = vidout_hs;
                                 (vrr_vt_sync2 < 10'd514) ? 10'd514 :
                                 (vrr_vt_sync2 > 10'd750) ? 10'd750 :
                                                            vrr_vt_sync2;
+    // 640x480 RGBHV (full-raster) feeds an external analog display, which wants
+    // fixed in-spec timing, and the Pocket's own scaler only locks 47-61 Hz.
+    // VRR's floor (514) at 640x480 = 24.576M/(780*514) = 61.3 Hz, just over the
+    // ceiling -> intermittent black LCD. Pin full-raster to V_TOTAL=525 (60.0 Hz,
+    // and 525 > active-end 498 so no truncation). VRR is unchanged for the
+    // normal LCD slots and the 15 kHz/SCART path.
     wire [9:0] vrr_vt_safe =
+        analogizer_full_raster_vid ? CRT_V_TOTAL_DEFAULT :
         (vrr_vt_clamped < crt_v_total_min) ? crt_v_total_min : vrr_vt_clamped;
 
     // VexiiRiscv CPU system — AXI4 bus routing
@@ -2526,20 +2554,21 @@ assign video_hs = vidout_hs;
         .reset_analog_n(reset_n_analog),
         .analog_ce_pix(analog_ce_pix),
         .analog_scanlines(fx[1:0]),
-        // Analog path retired: the Analogizer is now fed the LCD video directly
-        // (see its instance above), so the scanout's dedicated 240p analog
-        // machinery is unused.  analog_480p=1 disables the dedicated 240p fetch
-        // (so the analog_line_buffer + fetch FSM are dead) and the analog_*
-        // outputs are left unconnected, so Quartus prunes the whole analog-only
-        // cone.  The shared clk_analog pixel-decode pipeline that produces the
-        // LCD pixel_color is untouched.
+        // Disable the scanout's dedicated 240p analog fetch.  When it is armed
+        // (analog_480p=0) it contends with the LCD's framebuffer fetch on the
+        // shared SDRAM burst and starves it -> black Pocket LCD whenever the
+        // Analogizer is enabled in a 15 kHz mode.  Forcing it off makes the
+        // scanout behave exactly as it does with the Analogizer OFF (known-good
+        // LCD).  Trade-off: SCART/15 kHz loses its native 240p analog raster
+        // until the dual-fetch arbitration is fixed; RGBHV analog is unaffected
+        // (it mirrors the LCD video, not this fetch).
         .analog_480p(1'b1),
         .analog_pixel_clk(),
-        .analog_pixel_color(),
-        .analog_hblank(),
-        .analog_vblank(),
-        .analog_hsync(),
-        .analog_vsync(),
+        .analog_pixel_color(analogizer_scan_rgb),
+        .analog_hblank(analogizer_scan_hblank),
+        .analog_vblank(analogizer_scan_vblank),
+        .analog_hsync(analogizer_scan_hsync),
+        .analog_vsync(analogizer_scan_vsync),
         .fb_base_addr(fb_display_addr),
         .color_mode(color_mode),
         .fb_width(fb_width),

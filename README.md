@@ -208,4 +208,3 @@ lookup cost.
 - Analogizer adapter and SNAC pinout reference: RndMnkIII
 - openFPGA framework: Analogue
 - musl libc: Rich Felker
-- jtframe utilities: Jose Tejada
