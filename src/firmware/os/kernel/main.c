@@ -317,23 +317,6 @@ void os_main(void) {
     of_term_puts("  Syscall init...... ");
     status_ok();
 
-    /* Diagnostic: dump the APF datatable id/size pairs.  The save-slot
-     * size commits and slot reads assume a position-indexed layout
-     * (file.c:datatable_entry_candidate_for_slot, core_top.v
-     * SAVE0_SIZE_WORD); this shows where the host really put each slot,
-     * including instance-JSON-added ids that data.json does not define. */
-    of_term_puts("  APF datatable (entry:id/size):\n");
-    for (uint32_t e = 0; e < 26; e++) {
-        uint32_t id = 0, size = 0;
-        if (of_file_datatable_word(e * 2u, &id) < 0 ||
-            of_file_datatable_word(e * 2u + 1u, &size) < 0) {
-            of_term_printf("   dt[%02u] <read failed>\n", (unsigned)e);
-            break;
-        }
-        of_term_printf("   dt[%02u] id=%u size=%u\n",
-                       (unsigned)e, (unsigned)id, (unsigned)size);
-    }
-
     of_term_puts("  Config init....... ");
     int config_rc = of_config_load(OS_CONFIG_SLOT_ID);
     if (config_rc < 0) {

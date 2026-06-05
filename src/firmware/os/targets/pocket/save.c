@@ -26,6 +26,8 @@
 #include "save.h"
 #include "file.h"
 #include "regs.h"
+#include "terminal.h"
+#include "timer.h"
 
 #define SAVE_CRC_MAGIC      0x4F465356  /* "OFSV" */
 #define SAVE_META_ADDR      (SAVE_REGION_ADDR + SAVE_MAX_SLOTS * SAVE_SLOT_SIZE)
@@ -286,6 +288,25 @@ int of_nvslot_flush_size(uint32_t data_slot_id, uint32_t size) {
     int rc = of_nvslot_set_size(data_slot_id, size);
     if (rc < 0)
         return rc;
+
+    /* Diagnostic: read the datatable size word back and compare with what
+     * the SAVE_DT commit was meant to write.  The host's exit-time
+     * nonvolatile writeback truncates each save file to this value, so a
+     * mismatch here is exactly "saves vanish on exit". */
+    {
+        uint32_t entry = (map.dt_slot == NV_DT_SLOT_PRESAVE)
+                       ? 8u : 9u + (uint32_t)map.dt_slot;
+        uint32_t got = 0xFFFFFFFFu;
+        of_timer_delay_us(100);  /* let the commit cross the CDC + arbiter */
+        if (of_file_datatable_word(entry * 2u + 1u, &got) == 0)
+            of_term_printf("[save] slot %u dt[%u] size: want=%u got=%u%s\n",
+                           (unsigned)data_slot_id, (unsigned)entry,
+                           (unsigned)size, (unsigned)got,
+                           got == size ? "" : "  <-- MISMATCH");
+        else
+            of_term_printf("[save] slot %u dt readback FAILED\n",
+                           (unsigned)data_slot_id);
+    }
 
     cram0_cpu_hold_count = 0;
     cram0_release_to_bridge();
