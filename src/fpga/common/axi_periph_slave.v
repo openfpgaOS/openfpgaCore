@@ -69,6 +69,12 @@ module axi_periph_slave (
     input wire [31:0]  cont4_key,
     input wire [31:0]  cont4_joy,
     input wire [15:0]  cont4_trig,
+    // RTC from the APF bridge (clk_74a domain).  Latched once shortly after
+    // boot when the host sends the RTC command and quasi-static afterwards;
+    // the read mux gates the raw value on a 2FF-synced valid so the CPU can
+    // never observe it mid-update.
+    input wire [31:0]  rtc_epoch_seconds,
+    input wire         rtc_valid,
     input wire         target_dataslot_ack,
     input wire         target_dataslot_done,
     input wire [2:0]   target_dataslot_err,
@@ -82,6 +88,16 @@ module axi_periph_slave (
     output wire [9:0]  fb_width,
     output wire [9:0]  fb_height,
     output wire [15:0] fb_stride,
+
+    // Independent analog-output framebuffer (Pocket LCD = Terminal: console on
+    // the LCD, app on the analog DAC).  Base tracks the app's current display
+    // buffer (fb_app_addr); geometry is held in its own registers so it
+    // survives the LCD switching to the 320x240 terminal framebuffer.
+    output wire [24:0] analog_fb_addr,
+    output wire [2:0]  analog_color_mode,
+    output wire [9:0]  analog_fb_width,
+    output wire [9:0]  analog_fb_height,
+    output wire [15:0] analog_fb_stride,
     output wire [2:0]  video_scaler_slot,
 
     // Palette write interface
@@ -164,8 +180,7 @@ module axi_periph_slave (
     input wire  [31:0] app_id,
 
     // Analogizer settings mirror. The Pocket bridge writes these through
-    // interact.json, while firmware can override them after loading
-    // analogizer.cfg. Writes cross to clk_74a in core_top.
+    // interact.json. Writes cross to clk_74a in core_top.
     input  wire [31:0] analogizer_settings,
     input  wire [31:0] analogizer_hoffset,
     input  wire [31:0] analogizer_voffset,
@@ -259,7 +274,8 @@ reg [7:0]  snac_gpio_out_reg;
 reg [7:0]  snac_gpio_dir_reg;   // 0=input, 1=output; bits [1:0] always output
 reg        snac_start_pulse;
 reg        snac_hw_enable_reg;
-reg        snac_hw_analog_reg;
+// (SNAC_HW_CTRL bit 1 reserved — was the analog enable; analogizer_psx
+// auto-detects analog pads from the reported mode ID, digital pads center)
 reg        snac_hw_fast_reg;
 reg        snac_hw_clear_irq_pulse;
 reg        snac_hw_clear_edges_pulse;
@@ -323,29 +339,95 @@ snac_shifter snac_shift (
     .miso_b(snac_miso_b)
 );
 
-snac_psx_poller snac_hw_psx (
-    .clk(clk),
-    .reset_n(reset_n),
-    .enable(snac_hw_enable_reg),
-    .analog_en(snac_hw_analog_reg),
-    .fast_en(snac_hw_fast_reg),
-    .clear_irq(snac_hw_clear_irq_pulse),
-    .clear_edges(snac_hw_clear_edges_pulse),
-    .pin_in(snac_pin_in_sync),
-    .pin_out(snac_hw_pin_out),
-    .pin_dir(snac_hw_pin_dir),
-    .valid(snac_hw_valid),
-    .irq_pending(snac_hw_irq_pending),
-    .buttons(snac_hw_buttons),
-    .buttons_pressed(snac_hw_pressed),
-    .buttons_released(snac_hw_released),
-    .raw_buttons_debug(snac_hw_raw_buttons),
-    .joy_lx(snac_hw_lx),
-    .joy_ly(snac_hw_ly),
-    .joy_rx(snac_hw_rx),
-    .joy_ry(snac_hw_ry),
-    .debug_status(snac_hw_debug_status)
+// ===== PSX SNAC via the upstream analogizer_psx (proven protocol) =========
+// Replaces the hand-rolled snac_psx_poller, whose PSX protocol did not read a
+// real DualShock.  Pin mapping confirmed against the upstream SNAC wrapper:
+//   CLK=pin30(bit6), CMD=pin31(bit7), ATT1=bank1[6](bit0), ATT2=bank1[7](bit1),
+//   DAT=bank0[7](bit5,in), ACK=bank0[6](bit4,in).
+// ~250 kHz PSX strobe (500 kHz fast) from the 100 MHz periph clk.
+reg  [8:0] psx_stb_cnt;
+reg        psx_stb;
+wire [8:0] psx_stb_top = snac_hw_fast_reg ? 9'd199 : 9'd399;
+always @(posedge clk) begin
+    if (reset) begin
+        psx_stb_cnt <= 9'd0;
+        psx_stb     <= 1'b0;
+    end else if (psx_stb_cnt >= psx_stb_top) begin
+        psx_stb_cnt <= 9'd0;
+        psx_stb     <= 1'b1;
+    end else begin
+        psx_stb_cnt <= psx_stb_cnt + 9'd1;
+        psx_stb     <= 1'b0;
+    end
+end
+
+wire [15:0] psx_key1, psx_key2;
+wire [31:0] psx_joy1, psx_joy2;
+wire        psx_clk_o, psx_cmd_o, psx_att1_o, psx_att2_o;
+
+analogizer_psx #(.MASTER_CLK_FREQ(100_000_000)) snac_hw_psx (
+    .i_clk     (clk),
+    .i_rst     (reset),
+    .i_ena     (snac_hw_enable_reg),
+    .i_stb     (psx_stb),
+    .key1      (psx_key1),
+    .joy1      (psx_joy1),
+    .key2      (psx_key2),
+    .joy2      (psx_joy2),
+    .i_VIB_SW1 (2'b00), .i_VIB_DAT1 (8'h00),
+    .i_VIB_SW2 (2'b00), .i_VIB_DAT2 (8'h00),
+    .PSX_CLK   (psx_clk_o),
+    .PSX_DAT   (snac_pin_in_sync[5]),
+    .PSX_CMD   (psx_cmd_o),
+    .PSX_ATT1  (psx_att1_o),
+    .PSX_ATT2  (psx_att2_o),
+    .PSX_ACK   (snac_pin_in_sync[4]),
+    .DBG_TX    ()
 );
+
+// Drive the SNAC cart pins: ATT1/ATT2/CLK/CMD outputs (dir bits 0,1,6,7); the
+// DAT/ACK bits (4,5) stay inputs so the pad can drive them.
+assign snac_hw_pin_out = {psx_cmd_o, psx_clk_o, 4'b0000, psx_att2_o, psx_att1_o};
+assign snac_hw_pin_dir = 8'hC3;
+
+// analogizer_psx already emits the Pocket key format.
+assign snac_hw_buttons      = psx_key1;
+assign snac_hw_raw_buttons  = psx_key1;
+assign snac_hw_valid        = snac_hw_enable_reg;
+assign snac_hw_irq_pending  = 1'b0;
+assign snac_hw_debug_status = 8'h00;
+
+// Pressed/released edges, accumulated until SNAC_HW_CLEAR_EDGES.
+reg [15:0] psx_prev_key1, psx_pressed_acc, psx_released_acc;
+always @(posedge clk) begin
+    if (reset || !snac_hw_enable_reg) begin
+        psx_prev_key1    <= 16'h0000;
+        psx_pressed_acc  <= 16'h0000;
+        psx_released_acc <= 16'h0000;
+    end else begin
+        if (snac_hw_clear_edges_pulse) begin
+            psx_pressed_acc  <= 16'h0000;
+            psx_released_acc <= 16'h0000;
+        end else begin
+            psx_pressed_acc  <= psx_pressed_acc  | ( psx_key1 & ~psx_prev_key1);
+            psx_released_acc <= psx_released_acc | (~psx_key1 &  psx_prev_key1);
+        end
+        psx_prev_key1 <= psx_key1;
+    end
+end
+assign snac_hw_pressed  = psx_pressed_acc;
+assign snac_hw_released = psx_released_acc;
+
+// Analog sticks: joy1 raw bytes (0x80=center) -> (value-128) in the high byte
+// (= the firmware's (value-128)<<8).  Byte->axis order is best-effort and may
+// need a swap after a hardware check; digital pads center these.
+assign snac_hw_rx = {(psx_joy1[23:16] - 8'h80), 8'h00};
+assign snac_hw_ry = {(psx_joy1[31:24] - 8'h80), 8'h00};
+assign snac_hw_lx = {(psx_joy1[7:0]   - 8'h80), 8'h00};
+assign snac_hw_ly = {(psx_joy1[15:8]  - 8'h80), 8'h00};
+
+// (void unused controller-2 outputs from analogizer_psx)
+wire [47:0] psx_p2_unused = {psx_key2, psx_joy2};
 
 // SNAC pin output mux: shifter overrides GPIO when busy
 // Config A: shifter drives [0]=CLK, [1]=LATCH
@@ -436,6 +518,12 @@ reg [2:0] color_mode_reg;
 reg [9:0] fb_width_reg;
 reg [9:0] fb_height_reg;
 reg [15:0] fb_stride_reg;
+// Analog-output framebuffer geometry (firmware keeps these = the app's geometry
+// even while the LCD shows the terminal). Base is fb_app_addr (below).
+reg [2:0]  analog_color_mode_reg;
+reg [9:0]  analog_fb_width_reg;
+reg [9:0]  analog_fb_height_reg;
+reg [15:0] analog_fb_stride_reg;
 reg [2:0] video_scaler_slot_reg;
 
 reg [15:0] ds_slot_id_reg;
@@ -512,6 +600,9 @@ reg fb_swap_pending;
 reg fb_swap_consumed_this_frame;
 assign fb_swap_pending_o = fb_swap_pending;
 reg term_fb_active;  // 1=scanout reads terminal FB, 0=app triple-buffered FB
+reg analog_keep_app; // 1=analog output keeps the app FB while the LCD shows
+                     // the terminal (Pocket LCD = Terminal); 0=analog mirrors
+                     // the LCD selection (terminal included)
 
 // V_TOTAL split: fixed NTSC/PAL value for Analogizer/SNAC adapter mode,
 // firmware-computed value for normal Pocket LCD mode.  The fixed adapter
@@ -540,6 +631,20 @@ assign fb_display_addr = fb_display_addr_reg;
 assign fb_width = fb_width_reg;
 assign fb_height = fb_height_reg;
 assign fb_stride = fb_stride_reg;
+
+// Analog output framebuffer: by default MIRROR the LCD's source selection —
+// terminal FB + the LCD geometry while the terminal is displayed (boot
+// console, OS terminal, trap screens), app FB + ANALOG_FB_* geometry once an
+// app owns the display.  Only when firmware engages Pocket LCD = Terminal
+// (analog_keep_app, TERM_FB_CTRL bit 1) does the analog diverge: it keeps the
+// app's triple-buffered FB while the LCD switches to the console.  The base
+// follows fb_app_addr so it tracks triple-buffer flips.
+wire analog_show_term = term_fb_active && !analog_keep_app;
+assign analog_fb_addr    = analog_show_term ? TERM_FB_ADDR : fb_app_addr;
+assign analog_color_mode = analog_show_term ? color_mode_reg : analog_color_mode_reg;
+assign analog_fb_width   = analog_show_term ? fb_width_reg : analog_fb_width_reg;
+assign analog_fb_height  = analog_show_term ? fb_height_reg : analog_fb_height_reg;
+assign analog_fb_stride  = analog_show_term ? fb_stride_reg : analog_fb_stride_reg;
 assign video_scaler_slot = video_scaler_slot_reg;
 
 // ============================================
@@ -641,6 +746,8 @@ wire target_ack_s = target_ack_sync[2];
 wire target_done_s = target_done_sync[2];
 wire [2:0] target_err_s = {target_err_sync[2][2], target_err_sync[1][2], target_err_sync[0][2]};
 
+reg rtc_valid_meta, rtc_valid_s;
+
 reg [31:0] cont1_key_meta, cont1_key_s;
 reg [31:0] cont1_joy_meta, cont1_joy_s;
 reg [15:0] cont1_trig_meta, cont1_trig_s;
@@ -658,6 +765,9 @@ reg [15:0] cont4_trig_meta, cont4_trig_s;
 // synchronizer flops needed by this clock domain; the APF synch_2 helper also
 // carries edge-detect history that these vector buses never use.
 always @(posedge clk) begin
+    rtc_valid_meta  <= rtc_valid;
+    rtc_valid_s     <= rtc_valid_meta;
+
     cont1_key_meta  <= cont1_key;
     cont1_key_s     <= cont1_key_meta;
     cont1_joy_meta  <= cont1_joy;
@@ -909,12 +1019,17 @@ always @(posedge clk) begin
         fb_width_reg <= 10'd320;
         fb_height_reg <= 10'd240;
         fb_stride_reg <= 16'd320;
+        analog_color_mode_reg <= 3'd0;
+        analog_fb_width_reg <= 10'd320;
+        analog_fb_height_reg <= 10'd240;
+        analog_fb_stride_reg <= 16'd320;
         video_scaler_slot_reg <= 3'd0;
         fb_display_idx <= 2'd0;
         fb_ready_idx <= 2'd0;
         fb_swap_pending <= 1'b0;
         fb_swap_consumed_this_frame <= 1'b0;
         term_fb_active <= 1'b1;  // terminal FB visible by default at boot
+        analog_keep_app <= 1'b0; // analog mirrors the LCD (terminal incl.)
         vrr_v_total_reg <= 10'd525;
         pal_wr <= 0;
         pal_addr <= 0;
@@ -970,7 +1085,6 @@ always @(posedge clk) begin
         snac_bit_count_reg <= 0;
         snac_latch_en_reg <= 0;
         snac_hw_enable_reg <= 1'b0;
-        snac_hw_analog_reg <= 1'b0;
         snac_hw_fast_reg <= 1'b0;
         snac_hw_clear_irq_pulse <= 1'b0;
         snac_hw_clear_edges_pulse <= 1'b0;
@@ -1040,7 +1154,12 @@ always @(posedge clk) begin
 
         if (sysreg_wr_fire && !req_addr[8]) begin
             case (req_addr[7:2])
-                6'd3: term_fb_active <= req_wdata[0];  // TERM_FB_CTRL
+                6'd3: begin  // TERM_FB_CTRL
+                    term_fb_active <= req_wdata[0];
+                    // Bit 1: Pocket LCD = Terminal — analog keeps the app FB
+                    // while the LCD shows the console.
+                    analog_keep_app <= req_wdata[1];
+                end
                 6'd28: color_mode_reg <= req_wdata[2:0];  // offset 0x70
                 6'd6: if (req_wdata[0]) begin
                     fb_ready_idx <= req_wdata[2:1];
@@ -1164,6 +1283,12 @@ always @(posedge clk) begin
                 end
                 6'd58: fb_stride_reg <= clamp_fb_stride(req_wdata[15:0]); // FB_MODE_STRIDE (0xE8)
                 6'd59: video_scaler_slot_reg <= req_wdata[2:0];   // VIDEO_SCALER_MODE (0xEC)
+                6'd60: begin                                      // ANALOG_FB_SIZE (0xF0)
+                    analog_fb_width_reg  <= clamp_fb_width(req_wdata[15:0]);
+                    analog_fb_height_reg <= clamp_fb_height(req_wdata[31:16]);
+                end
+                6'd61: analog_fb_stride_reg <= clamp_fb_stride(req_wdata[15:0]); // ANALOG_FB_STRIDE (0xF4)
+                6'd62: analog_color_mode_reg <= req_wdata[2:0];   // ANALOG_COLOR_MODE (0xF8)
                 6'd63: irq_mask <= req_wdata[5:0];             // IRQ_MASK (0xFC)
 
                 default: ;
@@ -1172,9 +1297,8 @@ always @(posedge clk) begin
 
         if (sysreg_wr_fire && req_addr[8]) begin
             case (req_addr[7:2])
-                6'd24: begin  // SNAC_HW_CTRL (0x160)
+                6'd24: begin  // SNAC_HW_CTRL (0x160) — bit 1 reserved
                     snac_hw_enable_reg <= req_wdata[0];
-                    snac_hw_analog_reg <= req_wdata[1];
                     snac_hw_fast_reg   <= req_wdata[2];
                     if (req_wdata[0])
                         snac_en_reg <= 1'b0;
@@ -1291,7 +1415,7 @@ always @(*) begin
                                         snac_hw_valid,
                                         5'b0,
                                         snac_hw_fast_reg,
-                                        snac_hw_analog_reg,
+                                        1'b0,  /* bit 1 reserved (was analog) */
                                         snac_hw_enable_reg};             // SNAC_HW_CTRL
                 6'd25: sysreg_rdata = {16'b0, snac_hw_buttons};         // SNAC_HW_BUTTONS
                 6'd26: sysreg_rdata = {16'b0, snac_hw_pressed};         // SNAC_HW_PRESSED
@@ -1311,7 +1435,7 @@ always @(*) begin
             6'd0:  sysreg_rdata = {30'b0, dataslot_allcomplete_s, 1'b1};
             6'd1:  sysreg_rdata = cycle_counter[31:0];
             6'd2:  sysreg_rdata = cycle_counter[63:32];
-            6'd3:  sysreg_rdata = {31'b0, term_fb_active};  // TERM_FB_CTRL
+            6'd3:  sysreg_rdata = {30'b0, analog_keep_app, term_fb_active};  // TERM_FB_CTRL
             6'd28: sysreg_rdata = {29'b0, color_mode_reg};
             6'd4:  sysreg_rdata = {7'b0, fb_display_addr_reg};
             6'd5:  sysreg_rdata = {30'b0, fb_display_idx};
@@ -1361,6 +1485,11 @@ always @(*) begin
                                     fb_ready_idx,
                                     fb_display_idx,
                                     fb_swap_pending};
+            // RTC epoch seconds from the APF host (0xC4).  Reads 0 until the
+            // bridge has latched the host RTC command; the value itself is
+            // quasi-static after rtc_valid rises, so sampling it raw behind
+            // the synced valid is safe.
+            6'd49: sysreg_rdata = rtc_valid_s ? rtc_epoch_seconds : 32'b0;
             // Display timing live readback.
             6'd55: sysreg_rdata = {22'b0, vrr_v_total};
             6'd56: sysreg_rdata = 32'b0;  // swap hold retired

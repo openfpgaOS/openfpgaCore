@@ -76,6 +76,10 @@ int of_file_get_name(uint32_t slot_id, char *name_out, uint32_t name_max);
  * APF exposes two words per datatable entry: concrete file id, then
  * current size. Returns the value on success, or <0 if the slot has no
  * datatable entry matching that id. */
+/* Raw datatable word readout (word = entry*2 for id, entry*2+1 for size).
+ * Boot diagnostic for the position-indexed entry layout contract. */
+int of_file_datatable_word(uint32_t word, uint32_t *value_out);
+
 long of_file_flags(uint32_t slot_id);
 long of_file_size(uint32_t slot_id);      /* legacy/saturating on rv32 */
 int64_t of_file_size64(uint32_t slot_id);

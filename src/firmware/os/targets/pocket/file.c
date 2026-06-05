@@ -503,6 +503,14 @@ static int datatable_read_word32(uint32_t word, uint32_t *value_out,
     return -1;
 }
 
+/* Raw datatable word readout for boot diagnostics: the entry layout is a
+ * fragile position-indexed contract (see datatable_entry_candidate_for_slot),
+ * and dumping id/size pairs at boot is the only dependable way to verify it
+ * against what the host actually populated. */
+int of_file_datatable_word(uint32_t word, uint32_t *value_out) {
+    return datatable_read_word32(word, value_out, 0);
+}
+
 static int datatable_probe_size_bit31(uint32_t slot_id, uint32_t low_size) {
     enum { PROBE_LEN = 32 };
 

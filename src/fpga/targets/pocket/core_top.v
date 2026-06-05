@@ -279,13 +279,26 @@ wire       analogizer_15khz_vid  = (analogizer_video_type_vid[2:0] <= 3'd4);
 
 
 
-    // Keep the Pocket LCD live while Analogizer is enabled. Older menu/config
-    // states may still set bit 13 ("Pocket OFF"), but blanking the LCD makes
-    // bad persisted state difficult to recover from and hides useful debug.
-    wire pocket_blank_screen = 1'b0;
+    // "Pocket LCD" interact variable, bits 17:16 of the analogizer settings
+    // register: 00=On (normal), 01=Off (blank the Pocket LCD), 10=Terminal
+    // (firmware shows the OS console on the LCD; handled in software).  Off is
+    // gated on the Analogizer being enabled so it can never blank the only
+    // visible output -- the analog DAC keeps showing the app via its own fetch.
+    // (The old bit-13 "Pocket OFF" kill-switch is intentionally NOT used here.)
+    wire [1:0] pocket_lcd_mode_vid = analogizer_settings_vid[17:16];
+    wire pocket_blank_screen =
+        (pocket_lcd_mode_vid == 2'b01) && analogizer_ena_vid;
 
     wire [23:0] video_rgb_core;
-    assign video_rgb_core = (pocket_blank_screen) ? 24'h000000: vidout_rgb;
+    // Blank ONLY the active pixels (vidout_de). vidout_rgb carries the APF
+    // scaler-slot word on the RGB bus during blanking; zeroing it there
+    // destroys the slot advertisement, the Pocket scaler never locks, and the
+    // LCD goes black with host-side screenshots hanging -- and since the
+    // Pocket LCD choice persists across loads, one persisted "Off" bricks the
+    // LCD on every boot regardless of later menu changes. Gating on vidout_de
+    // keeps the scaler locked; Off just blacks the visible picture.
+    assign video_rgb_core = (pocket_blank_screen && vidout_de) ? 24'h000000
+                                                               : vidout_rgb;
 
     // Controller inputs: SNAC mux removed — firmware handles SNAC→Pocket mapping.
     // APF Pocket controllers pass through directly to the CPU.
@@ -366,8 +379,24 @@ wire        analogizer_scan_blankn = ~(analogizer_scan_hblank | analogizer_scan_
 wire        analogizer_scan_csync = ~(analogizer_scan_hsync ^ analogizer_scan_vsync);
 
 wire        analogizer_cart_clk = analogizer_15khz_core ? clk_core_12288 : clk_vid;
+// Source the Analogizer from the scanout's dedicated analog fetch (its OWN
+// framebuffer) in 15 kHz modes (always) and in Pocket LCD = Terminal (so the
+// app stays on the analog DAC while the LCD shows the OS console). Normal RGBHV
+// keeps using the LCD video stream (vidout_rgb + crt_* sync), unchanged. The
+// 480p analog raster is bit-identical to the LCD raster (H_TOTAL 780, H sync 58,
+// active 120..760, V active base 18, 525 lines), so the analog DAC sees the same
+// timing it does today -- only the pixels come from the app fetch.
+wire        pocket_lcd_terminal_core = (analogizer_settings_core[17:16] == 2'b10);
+wire        use_analog_dedicated = analogizer_15khz_core || pocket_lcd_terminal_core;
+// RGB: switch to the dedicated analog fetch (its own framebuffer = the app) for
+// 15 kHz and for Pocket LCD = Terminal.  SYNC/blank: keep the ORIGINAL gating --
+// 15 kHz uses the scan raster's 240p sync, but RGBHV (normal AND Terminal) keeps
+// the LCD-raster sync (crt_*/HSync/VSync, clk_vid).  The 480p analog raster is
+// bit-identical to the LCD raster, so the app RGB lands in the same active
+// region; using the proven clk_vid sync avoids a clk_analog->clk_vid sync CDC
+// that an external VGA monitor will not lock to.
 wire [23:0] analogizer_src_rgb =
-    analogizer_15khz_core ? analogizer_scan_rgb : vidout_rgb;
+    use_analog_dedicated ? analogizer_scan_rgb : vidout_rgb;
 wire        analogizer_src_hblank =
     analogizer_15khz_core ? analogizer_scan_hblank : crt_hblank;
 wire        analogizer_src_vblank =
@@ -1973,6 +2002,14 @@ assign video_hs = vidout_hs;
     wire [9:0] fb_width;
     wire [9:0] fb_height;
     wire [15:0] fb_stride;
+    // Independent analog-output framebuffer (Pocket LCD = Terminal). Base
+    // follows the app's current display buffer; geometry is held separately so
+    // the analog keeps showing the app while the LCD shows the terminal.
+    wire [24:0] analog_src_fb_addr;
+    wire [2:0]  analog_src_color_mode;
+    wire [9:0]  analog_src_fb_width;
+    wire [9:0]  analog_src_fb_height;
+    wire [15:0] analog_src_fb_stride;
     wire [2:0] video_scaler_slot_cpu;
 
     // VRR: firmware-written V_TOTAL
@@ -2221,6 +2258,8 @@ assign video_hs = vidout_hs;
 	    .cont4_key(cont4_key),
 	    .cont4_joy(cont4_joy),
 	    .cont4_trig(cont4_trig),
+        .rtc_epoch_seconds(rtc_epoch_seconds),
+        .rtc_valid(rtc_valid),
         .bridge_wr_idle(bridge_wr_idle),
 	    .target_dataslot_ack(target_dataslot_ack),
         .target_dataslot_done(target_dataslot_done_safe),
@@ -2233,6 +2272,11 @@ assign video_hs = vidout_hs;
         .fb_width(fb_width),
         .fb_height(fb_height),
         .fb_stride(fb_stride),
+        .analog_fb_addr(analog_src_fb_addr),
+        .analog_color_mode(analog_src_color_mode),
+        .analog_fb_width(analog_src_fb_width),
+        .analog_fb_height(analog_src_fb_height),
+        .analog_fb_stride(analog_src_fb_stride),
         .video_scaler_slot(video_scaler_slot_cpu),
         // Palette write interface
         .pal_wr(cpu_pal_wr),
@@ -2554,15 +2598,17 @@ assign video_hs = vidout_hs;
         .reset_analog_n(reset_n_analog),
         .analog_ce_pix(analog_ce_pix),
         .analog_scanlines(fx[1:0]),
-        // Disable the scanout's dedicated 240p analog fetch.  When it is armed
-        // (analog_480p=0) it contends with the LCD's framebuffer fetch on the
-        // shared SDRAM burst and starves it -> black Pocket LCD whenever the
-        // Analogizer is enabled in a 15 kHz mode.  Forcing it off makes the
-        // scanout behave exactly as it does with the Analogizer OFF (known-good
-        // LCD).  Trade-off: SCART/15 kHz loses its native 240p analog raster
-        // until the dual-fetch arbitration is fixed; RGBHV analog is unaffected
-        // (it mirrors the LCD video, not this fetch).
-        .analog_480p(1'b1),
+        // Native 15 kHz Analogizer modes (RGBS/component/composite) get a
+        // dedicated 240p/15.75 kHz analog raster with its own framebuffer fetch.
+        // VGA/RGBHV and Analogizer-off use the 480p path slaved to the LCD
+        // raster (analog mirrors vidout_rgb).  The dedicated fetch shares the
+        // SDRAM burst port with the LCD fetch, but the LCD has strict priority
+        // in the scanout FSM and the video burst outranks the CPU in io_sdram,
+        // so it cannot be starved: tb_scanout proves the LCD still meets its
+        // 1-line deadline with the 240p fetch interleaved even under ~2.7x
+        // worst-case burst latency.  (The earlier black-LCD bug was a stale
+        // bitstream, not this fetch.)
+        .analog_480p(!analogizer_ena_vid || !analogizer_15khz_vid),
         .analog_pixel_clk(),
         .analog_pixel_color(analogizer_scan_rgb),
         .analog_hblank(analogizer_scan_hblank),
@@ -2576,6 +2622,23 @@ assign video_hs = vidout_hs;
         .fb_stride(fb_stride),
         .out_width(crt_h_active),
         .out_height(crt_v_active),
+        // Analog framebuffer params, driven from the dedicated analog-fb
+        // register set in axi_periph_slave: base = the app's current display
+        // buffer, geometry = the app's geometry held independently of the LCD.
+        // In Pocket LCD = On/Off this equals the app the LCD shows; in Terminal
+        // the LCD switches to the console while the analog keeps the app.
+        .analog_fb_base_addr(analog_src_fb_addr),
+        .analog_color_mode(analog_src_color_mode),
+        .analog_fb_width(analog_src_fb_width),
+        .analog_fb_height(analog_src_fb_height),
+        .analog_fb_stride(analog_src_fb_stride),
+        // Output geometry = the LCD output size (crt_h/v_active), NOT the app's
+        // native FB size. The analog vertical scaler then upscales the native
+        // app (e.g. 320x240) to fill the 480p frame, exactly like the LCD/vidout
+        // path -- otherwise the app paints at native height into a 480-line
+        // raster and the rest of the frame is black.
+        .analog_out_width(crt_h_active),
+        .analog_out_height(crt_v_active),
         .clk_palette(clk_cpu),
         .reset_palette_n(reset_n_cpu_core),
         .clk_sdram(clk_ram_controller),

@@ -1067,6 +1067,84 @@ static void test_fb_mode_sysregs() {
     check_eq("fb-mode-stride-clamp-low-even", mmio_read32(FB_MODE_STRIDE), 2u);
 }
 
+// =====================================================================
+// Analog (Analogizer) framebuffer source mux — regression guard for the
+// "terminal is always black on the analog output" bug: the dedicated
+// analog fetch must MIRROR the LCD selection (terminal FB + the LCD's
+// geometry) whenever the terminal is displayed, and only diverge to the
+// app FB + ANALOG_FB_* geometry when TERM_FB_CTRL bit 1 (Pocket LCD =
+// Terminal -> analog keeps the app) is set.
+// =====================================================================
+static void test_analog_fb_source_mux() {
+    printf("test_analog_fb_source_mux:\n");
+
+    const uint32_t TERM_FB_CTRL_A    = 0x4000000Cu;
+    const uint32_t SYS_COLOR_MODE_A  = 0x40000070u;
+    const uint32_t FB_MODE_SIZE      = 0x400000E4u;
+    const uint32_t FB_MODE_STRIDE    = 0x400000E8u;
+    const uint32_t ANALOG_FB_SIZE    = 0x400000F0u;
+    const uint32_t ANALOG_FB_STRIDE  = 0x400000F4u;
+    const uint32_t ANALOG_COLOR_MODE = 0x400000F8u;
+    const uint32_t TERM_FB_ADDR = 0x0180000u; // terminal FB halfword address
+    const uint32_t FB_ADDR_0    = 0x0000000u; // app buffer 0 (display_idx=0)
+
+    /* Distinct LCD (terminal) vs analog (app) geometry so a wrong mux pick
+     * is visible on every output. */
+    axi_write_single(SYS_COLOR_MODE_A, 0u);              // LCD: 8-bit indexed
+    axi_write_single(FB_MODE_SIZE, (240u << 16) | 320u); // LCD: 320x240
+    axi_write_single(FB_MODE_STRIDE, 320u);
+    axi_write_single(ANALOG_COLOR_MODE, 3u);             // app: RGB565
+    axi_write_single(ANALOG_FB_SIZE, (480u << 16) | 640u);
+    axi_write_single(ANALOG_FB_STRIDE, 1280u);
+
+    /* Boot/console state: terminal on the LCD, no override -> the analog
+     * must read the terminal FB with the LCD's geometry. */
+    axi_write_single(TERM_FB_CTRL_A, 1u);
+    for (int i = 0; i < 3; i++) tick();
+    tb->eval();
+    check_eq("analog-term-mirror-addr",   tb->dbg_analog_fb_addr,   TERM_FB_ADDR);
+    check_eq("analog-term-mirror-mode",   tb->dbg_analog_color_mode,  0u);
+    check_eq("analog-term-mirror-width",  tb->dbg_analog_fb_width,  320u);
+    check_eq("analog-term-mirror-height", tb->dbg_analog_fb_height, 240u);
+    check_eq("analog-term-mirror-stride", tb->dbg_analog_fb_stride, 320u);
+    check_eq("term-ctrl-readback-1", mmio_read32(TERM_FB_CTRL_A), 1u);
+
+    /* App owns the display: analog follows the app FB + ANALOG_FB_*. */
+    axi_write_single(TERM_FB_CTRL_A, 0u);
+    for (int i = 0; i < 3; i++) tick();
+    tb->eval();
+    check_eq("analog-app-addr",   tb->dbg_analog_fb_addr,   FB_ADDR_0);
+    check_eq("analog-app-mode",   tb->dbg_analog_color_mode,   3u);
+    check_eq("analog-app-width",  tb->dbg_analog_fb_width,   640u);
+    check_eq("analog-app-height", tb->dbg_analog_fb_height,  480u);
+    check_eq("analog-app-stride", tb->dbg_analog_fb_stride, 1280u);
+
+    /* Pocket LCD = Terminal: console on the LCD, analog KEEPS the app. */
+    axi_write_single(TERM_FB_CTRL_A, 3u);
+    for (int i = 0; i < 3; i++) tick();
+    tb->eval();
+    check_eq("analog-keepapp-addr",   tb->dbg_analog_fb_addr,   FB_ADDR_0);
+    check_eq("analog-keepapp-mode",   tb->dbg_analog_color_mode,   3u);
+    check_eq("analog-keepapp-width",  tb->dbg_analog_fb_width,   640u);
+    check_eq("analog-keepapp-height", tb->dbg_analog_fb_height,  480u);
+    check_eq("analog-keepapp-stride", tb->dbg_analog_fb_stride, 1280u);
+    check_eq("term-ctrl-readback-3", mmio_read32(TERM_FB_CTRL_A), 3u);
+
+    /* Plain terminal again (trap screen / OS console): mirror returns. */
+    axi_write_single(TERM_FB_CTRL_A, 1u);
+    for (int i = 0; i < 3; i++) tick();
+    tb->eval();
+    check_eq("analog-back-to-mirror-addr", tb->dbg_analog_fb_addr, TERM_FB_ADDR);
+    check_eq("analog-back-to-mirror-mode", tb->dbg_analog_color_mode, 0u);
+
+    /* Restore boot-ish defaults for any later tests. */
+    axi_write_single(FB_MODE_SIZE, (240u << 16) | 320u);
+    axi_write_single(FB_MODE_STRIDE, 320u);
+    axi_write_single(ANALOG_COLOR_MODE, 0u);
+    axi_write_single(ANALOG_FB_SIZE, (240u << 16) | 320u);
+    axi_write_single(ANALOG_FB_STRIDE, 320u);
+}
+
 static void test_hw_features_readback() {
     printf("test_hw_features_readback:\n");
 
@@ -1154,10 +1232,12 @@ static void test_snac_hw_poller_regs() {
     const uint32_t MODE_B = 1u << 8;
 
     axi_write_single(SNAC_HW_CLEAR, 0x3u);
-    axi_write_single(SNAC_HW_CTRL, 0x7u);  // enable, analog, fast
+    /* Write enable+fast and also set bit 1 (reserved, was the analog enable —
+     * analog is auto-detected now): it must read back as 0. */
+    axi_write_single(SNAC_HW_CTRL, 0x7u);
     for (int i = 0; i < 8; i++) tick();
 
-    check_eq("snac-hw-ctrl-readback", mmio_read32(SNAC_HW_CTRL) & 0x7u, 0x7u);
+    check_eq("snac-hw-ctrl-readback", mmio_read32(SNAC_HW_CTRL) & 0x7u, 0x5u);
     check_eq("snac-hw-enable", tb->dbg_snac_enable, 1u);
     check_eq("snac-hw-pin-dir", tb->dbg_snac_pin_dir, 0xC3u);
     check_eq("snac-hw-att-active-out", tb->dbg_snac_pin_out & 0xC3u, 0xC2u);
@@ -1355,6 +1435,7 @@ int main(int argc, char **argv) {
     test_analogizer_sysregs();
     test_video_vtotal_sysreg();
     test_fb_mode_sysregs();
+    test_analog_fb_source_mux();
     test_hw_features_readback();
     test_snac_shifter_regs();
     test_snac_hw_poller_regs();

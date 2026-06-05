@@ -61,6 +61,14 @@ module tb_analogizer_chain (
     wire        burst_rd; wire [24:0] burst_addr; wire [10:0] burst_len; wire burst_32bit;
     reg  [31:0] burst_data; reg burst_data_valid, burst_data_done;
     wire [23:0] pixel_color; wire pal_busy;
+    // Dedicated analog-fetch outputs. This is the Pocket LCD = Terminal RGBHV
+    // path: core_top feeds the Analogizer THESE (the app via the analog fetch)
+    // instead of the LCD video, so the analog keeps the app while the LCD shows
+    // the console. Verifies the 480p analogizer_scan_* -> Analogizer -> cart-pin
+    // chain (clocking/timing), which the LCD-video path never exercised.
+    wire [23:0] a_rgb; wire a_hb, a_vb, a_hs, a_vs;
+    wire a_blankn = ~(a_hb | a_vb);
+    wire a_csync  = ~(a_hs ^ a_vs);
 
     video_CRT_scanout_indexed_BRAM scanout (
         .clk_video(clk_vid), .reset_n(reset_n),
@@ -68,12 +76,17 @@ module tb_analogizer_chain (
         .pixel_color(pixel_color),
         .clk_analog(clk), .reset_analog_n(reset_n), .analog_ce_pix(analog_ce_pix),
         .analog_scanlines(2'd0), .analog_480p(1'b1),
-        .analog_pixel_clk(), .analog_pixel_color(),
-        .analog_hblank(), .analog_vblank(),
-        .analog_hsync(), .analog_vsync(),
+        .analog_pixel_clk(), .analog_pixel_color(a_rgb),
+        .analog_hblank(a_hb), .analog_vblank(a_vb),
+        .analog_hsync(a_hs), .analog_vsync(a_vs),
         .fb_base_addr(25'd0), .color_mode(3'd3), .fb_width(10'd640),
         .fb_height(10'd480), .fb_stride(16'd1280),
         .out_width(10'd640), .out_height(10'd480),
+        // Analog fb params mirror the LCD (this chain runs analog_480p=1).
+        .analog_fb_base_addr(25'd0), .analog_color_mode(3'd3),
+        .analog_fb_width(10'd640), .analog_fb_height(10'd480),
+        .analog_fb_stride(16'd1280),
+        .analog_out_width(10'd640), .analog_out_height(10'd480),
         .clk_palette(clk), .reset_palette_n(reset_n),
         .clk_sdram(clk), .burst_rd(burst_rd), .burst_addr(burst_addr),
         .burst_len(burst_len), .burst_32bit(burst_32bit), .burst_data(burst_data),
@@ -115,7 +128,10 @@ module tb_analogizer_chain (
         .i_clk(clk), .i_rst(~reset_n), .i_ena(1'b1),
         .video_clk(clk_vid),
         .analog_video_type(4'h5),                 // VGA (scandoubler bypassed)
-        .R(pixel_color[23:16]), .G(pixel_color[15:8]), .B(pixel_color[7:0]),
+        // RGBHV Terminal as core_top wires it: dedicated-fetch RGB (the app)
+        // with the LCD-raster sync (crt_*, clk_vid). Verifies the app RGB lands
+        // in the crt active region (RGB-present check) with the proven sync.
+        .R(a_rgb[23:16]), .G(a_rgb[15:8]), .B(a_rgb[7:0]),
         .Hblank(crt_hblank), .Vblank(crt_vblank),
         .BLANKn(crt_blankn),
         .Hsync(crt_hs), .Vsync(crt_vs),

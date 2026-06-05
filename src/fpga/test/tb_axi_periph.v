@@ -69,6 +69,14 @@ module tb_axi_periph (
     output wire [7:0]  dbg_snac_pin_dir,
     output wire        dbg_snac_enable,
     output wire        dbg_pal_commit,
+    // Analog (Analogizer) framebuffer source mux — must mirror the LCD
+    // selection (terminal incl.) unless TERM_FB_CTRL bit 1 (analog_keep_app)
+    // pins it to the app FB + ANALOG_FB_* geometry.
+    output wire [24:0] dbg_analog_fb_addr,
+    output wire [2:0]  dbg_analog_color_mode,
+    output wire [9:0]  dbg_analog_fb_width,
+    output wire [9:0]  dbg_analog_fb_height,
+    output wire [15:0] dbg_analog_fb_stride,
     output reg  [7:0]  dbg_pal_commit_count,
     input  wire        pal_busy_in,
     input  wire [31:0] analogizer_settings_in,
@@ -209,6 +217,8 @@ axi_periph_slave dut (
     .cont4_key           (cont4_key),
     .cont4_joy           (cont4_joy),
     .cont4_trig          (cont4_trig),
+    .rtc_epoch_seconds   (32'd0),
+    .rtc_valid           (1'b0),
     .target_dataslot_ack (target_dataslot_ack),
     .target_dataslot_done(target_dataslot_done),
     .target_dataslot_err (target_dataslot_err),
@@ -219,6 +229,12 @@ axi_periph_slave dut (
     .fb_width       (),
     .fb_height      (),
     .fb_stride      (),
+
+    .analog_fb_addr   (dbg_analog_fb_addr),
+    .analog_color_mode(dbg_analog_color_mode),
+    .analog_fb_width  (dbg_analog_fb_width),
+    .analog_fb_height (dbg_analog_fb_height),
+    .analog_fb_stride (dbg_analog_fb_stride),
 
     .pal_wr  (), .pal_addr(), .pal_data(), .pal_commit(pal_commit_w),
     .pal_busy(pal_busy_in),

@@ -53,6 +53,21 @@ module video_CRT_scanout_indexed_BRAM (
     input wire [9:0] out_width,
     input wire [9:0] out_height,
 
+    // Independent framebuffer parameters for the dedicated 240p analog fetch.
+    // Normally driven identically to the LCD fb_* above (the analog output
+    // mirrors the same source the LCD shows).  For "console on LCD, app on
+    // analog" they point the analog path at the app framebuffer while the LCD
+    // fb_* above point at the terminal framebuffer, so the two paths read
+    // different SDRAM sources simultaneously.  Only consumed by the dedicated
+    // 240p path (analog_480p=0); the 480p path mirrors the LCD video directly.
+    input wire [24:0] analog_fb_base_addr,
+    input wire [2:0]  analog_color_mode,
+    input wire [9:0]  analog_fb_width,
+    input wire [9:0]  analog_fb_height,
+    input wire [15:0] analog_fb_stride,
+    input wire [9:0]  analog_out_width,
+    input wire [9:0]  analog_out_height,
+
     // Palette/sysreg clock domain (CPU clock)
     input wire clk_palette,
     input wire reset_palette_n,
@@ -267,6 +282,13 @@ module video_CRT_scanout_indexed_BRAM (
     wire [15:0] fb_stride_sdram =
         (fb_stride < 16'd2) ? 16'd2 : fb_stride;
 
+    // Same, for the dedicated 240p analog fetch's independent framebuffer.
+    wire [2:0] analog_color_mode_sdram = analog_color_mode;
+    wire [9:0] analog_fb_width_sdram =
+        (analog_fb_width == 10'd0) ? 10'd1 : analog_fb_width;
+    wire [15:0] analog_fb_stride_sdram =
+        (analog_fb_stride < 16'd2) ? 16'd2 : analog_fb_stride;
+
     // Sync framebuffer height to the 12.288 MHz timing domain for vertical
     // source-line selection. Pixel decode runs in the 49.152 MHz domain below.
     reg [9:0] fb_height_video_s1, fb_height_video;
@@ -376,6 +398,16 @@ module video_CRT_scanout_indexed_BRAM (
         end
     endfunction
 
+    // --- LCD pixel-decode params (clk_analog copies of the LCD fb_*) ---
+    // The LCD pixel decode runs in clk_analog (shared output pipeline below),
+    // so the LCD framebuffer width/color must be carried into this domain.
+    // out_width tracks the frame-locked out_width_safe the LCD vertical/fetch
+    // already use, so the horizontal and vertical LCD scalers stay consistent.
+    reg [2:0] color_mode_lcd_a_s1, color_mode_lcd_a;
+    reg [9:0] fb_width_lcd_a_s1, fb_width_lcd_a;
+    reg [9:0] out_width_lcd_a_s1, out_width_lcd_a;
+
+    // --- Analog pixel-decode + fetch params (clk_analog copies of analog_*) ---
     reg [2:0] color_mode_analog_s1, color_mode_analog;
     reg [9:0] fb_width_analog_s1, fb_width_analog;
     reg [9:0] fb_height_analog_s1, fb_height_analog;
@@ -383,6 +415,12 @@ module video_CRT_scanout_indexed_BRAM (
     reg [9:0] out_height_analog_s1, out_height_analog;
     always @(posedge clk_analog or negedge reset_analog_n) begin
         if (!reset_analog_n) begin
+            color_mode_lcd_a_s1 <= MODE_8BIT;
+            color_mode_lcd_a <= MODE_8BIT;
+            fb_width_lcd_a_s1 <= 10'd320;
+            fb_width_lcd_a <= 10'd320;
+            out_width_lcd_a_s1 <= 10'd320;
+            out_width_lcd_a <= 10'd320;
             color_mode_analog_s1 <= MODE_8BIT;
             color_mode_analog <= MODE_8BIT;
             fb_width_analog_s1 <= 10'd320;
@@ -394,22 +432,30 @@ module video_CRT_scanout_indexed_BRAM (
             out_height_analog_s1 <= 10'd240;
             out_height_analog <= 10'd240;
         end else begin
-            color_mode_analog_s1 <= color_mode;
+            // LCD decode params (from the LCD fb_* inputs / frame-locked out).
+            color_mode_lcd_a_s1 <= color_mode;
+            color_mode_lcd_a <= color_mode_lcd_a_s1;
+            fb_width_lcd_a_s1 <= fb_width;
+            fb_width_lcd_a <= fb_width_lcd_a_s1;
+            out_width_lcd_a_s1 <= out_width_safe;
+            out_width_lcd_a <= out_width_lcd_a_s1;
+            // Analog decode + fetch params (from the independent analog_* inputs).
+            color_mode_analog_s1 <= analog_color_mode;
             color_mode_analog <= color_mode_analog_s1;
-            fb_width_analog_s1 <= fb_width;
+            fb_width_analog_s1 <= analog_fb_width;
             fb_width_analog <= fb_width_analog_s1;
-            fb_height_analog_s1 <= fb_height;
+            fb_height_analog_s1 <= analog_fb_height;
             fb_height_analog <= fb_height_analog_s1;
-            // out_width_safe/out_height_safe are now the frame-locked geometry
-            // (latched at frame_start in clk_video), so this 2FF CDC carries
-            // the SAME per-frame value the fetch and LCD paths use.  A mode
-            // change only propagates here after the next frame boundary.
-            out_width_analog_s1 <= out_width_safe;
+            out_width_analog_s1 <= analog_out_width;
             out_width_analog <= out_width_analog_s1;
-            out_height_analog_s1 <= out_height_safe;
+            out_height_analog_s1 <= analog_out_height;
             out_height_analog <= out_height_analog_s1;
         end
     end
+    wire [9:0] fb_width_lcd_a_safe =
+        (fb_width_lcd_a == 10'd0) ? 10'd1 : fb_width_lcd_a;
+    wire [9:0] out_width_lcd_a_safe =
+        (out_width_lcd_a == 10'd0) ? 10'd320 : out_width_lcd_a;
     wire [9:0] fb_width_analog_safe =
         (fb_width_analog == 10'd0) ? 10'd1 : fb_width_analog;
     wire [9:0] fb_height_analog_safe =
@@ -443,12 +489,12 @@ module video_CRT_scanout_indexed_BRAM (
     // x_count is stable for 2 clk_analog cycles and this edge-detect yields a
     // clean 24.576 MHz LCD pixel strobe aligned to x_count.
     reg [9:0] lcd_x_count_prev;
-    wire [10:0] lcd_x_sum = lcd_x_acc + {1'b0, fb_width_analog_safe};
+    wire [10:0] lcd_x_sum = lcd_x_acc + {1'b0, fb_width_lcd_a_safe};
     wire [11:0] lcd_x_sum_ext = {1'b0, lcd_x_sum};
-    wire [11:0] out_width_1x = {2'b0, out_width_analog_safe};
-    wire [11:0] out_width_2x = {1'b0, out_width_analog_safe, 1'b0};
+    wire [11:0] out_width_1x = {2'b0, out_width_lcd_a_safe};
+    wire [11:0] out_width_2x = {1'b0, out_width_lcd_a_safe, 1'b0};
     wire [11:0] out_width_3x = out_width_2x + out_width_1x;
-    wire [11:0] out_width_4x = {out_width_analog_safe, 2'b00};
+    wire [11:0] out_width_4x = {out_width_lcd_a_safe, 2'b00};
     wire [2:0] lcd_x_inc =
         (lcd_x_sum_ext >= out_width_4x) ? 3'd4 :
         (lcd_x_sum_ext >= out_width_3x) ? 3'd3 :
@@ -460,7 +506,7 @@ module video_CRT_scanout_indexed_BRAM (
                          (lcd_x_inc == 3'd2) ? out_width_2x :
                          (lcd_x_inc == 3'd1) ? out_width_1x : 12'd0);
     wire [10:0] lcd_x_acc_next = lcd_x_acc_next_ext[10:0];
-    wire [9:0] lcd_src_x_last = fb_width_analog_safe - 10'd1;
+    wire [9:0] lcd_src_x_last = fb_width_lcd_a_safe - 10'd1;
     wire [10:0] lcd_src_x_next_raw =
         {1'b0, lcd_src_x_scan} + {8'b0, lcd_x_inc};
     wire [9:0] lcd_src_x_next =
@@ -469,7 +515,7 @@ module video_CRT_scanout_indexed_BRAM (
     wire [9:0] lcd_src_x_for_read =
         lcd_in_hactive ? lcd_src_x_scan : 10'd0;
     wire [8:0] lcd_line_rd_index =
-        lcd_in_hactive ? packed_word_index(color_mode_analog,
+        lcd_in_hactive ? packed_word_index(color_mode_lcd_a,
                                            lcd_src_x_for_read) : 9'd0;
     wire [10:0] lcd_line_rd_addr = {lcd_line_bank, lcd_line_rd_index};
 
@@ -537,8 +583,12 @@ module video_CRT_scanout_indexed_BRAM (
     // Issue a fetch when none is in flight, the target line is in the active
     // region, and it stays <=2 lines ahead of the displayed line (so it never
     // overruns the 4-bank cache nor writes the bank being read this line).
+    // Runs for BOTH the 240p raster (free-running analog_line_y) and the 480p
+    // raster (analog_line_y slaved to y_count): in both the analog path reads
+    // its OWN framebuffer (analog_fb_base_addr) so it can differ from the LCD
+    // (e.g. Pocket LCD = Terminal: console on LCD, app on the analog DAC).
     wire analog_fetch_can_issue =
-        !analog_480p && !analog_fetch_request && !analog_fetch_ack_sync2 &&
+        !analog_fetch_request && !analog_fetch_ack_sync2 &&
         (analog_fetch_line < analog_v_active_end[9:0]) &&
         ({1'b0, analog_fetch_line} <= ({1'b0, analog_line_y} + 11'd2));
     wire [10:0] analog_x_sum =
@@ -715,12 +765,13 @@ module video_CRT_scanout_indexed_BRAM (
             end
 
             // Clean per-RAM registered reads (keeps both inferring as M10K).
-            // LCD reads use the shared cache; 240p analog reads use the
-            // dedicated cache. The select is registered to match read latency
-            // and muxes the two registered outputs into bram_rd_data (a wire).
+            // LCD reads use the shared cache; analog reads (240p AND 480p) use
+            // the dedicated cache filled from analog_fb_base_addr. The select is
+            // registered to match read latency and muxes the two registered
+            // outputs into bram_rd_data (a wire).
             lcd_bram_rd_data    <= line_buffer[issue_line_addr];
             analog_bram_rd_data <= analog_line_buffer[issue_line_addr];
-            rd_from_analog      <= (issue_analog_read && !analog_480p);
+            rd_from_analog      <= issue_analog_read;
             read_tag_q1 <= issue_tag;
             read_sub_pixel_q1 <= issue_sub_pixel;
             read_active_q1 <= issue_active;
@@ -729,7 +780,8 @@ module video_CRT_scanout_indexed_BRAM (
             read_analog_hsync_q1 <= analog_hsync_now;
             read_analog_vsync_q1 <= analog_vsync_now;
             read_analog_dim_q1 <= analog_line_second && analog_scanlines[1];
-            read_color_mode_q1 <= color_mode_analog;
+            read_color_mode_q1 <= issue_lcd_read ? color_mode_lcd_a
+                                                 : color_mode_analog;
 
             if (issue_lcd_read) begin
                 if (!lcd_in_hactive) begin
@@ -947,11 +999,11 @@ module video_CRT_scanout_indexed_BRAM (
                         serving_analog <= 0;
                         state <= ST_BURST;
                     end else if (analog_fetch_line_pending) begin
-                        burst_addr <= fb_base_addr +
+                        burst_addr <= analog_fb_base_addr +
                             line_offset_for_stride(analog_fetch_src_sdram,
-                                                   fb_stride_sdram);
-                        burst_len <= burst_len_for_mode(color_mode_sdram,
-                                                        fb_width_sdram);
+                                                   analog_fb_stride_sdram);
+                        burst_len <= burst_len_for_mode(analog_color_mode_sdram,
+                                                        analog_fb_width_sdram);
                         burst_rd <= 1;
                         write_ptr <= 0;
                         write_bank <= analog_fetch_out_sdram[1:0];

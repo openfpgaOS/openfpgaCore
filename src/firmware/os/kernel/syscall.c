@@ -1524,21 +1524,33 @@ struct ts32 { uint32_t tv_sec; uint32_t tv_nsec; };
  * silently corrupt every clock-related syscall. */
 struct ts64 { int64_t tv_sec; int32_t tv_nsec; int32_t _pad; };
 
+/* CLOCK_REALTIME epoch base.  The APF host latches its RTC (epoch seconds,
+ * local wall-clock time) into the RTC_EPOCH sysreg within the first moments
+ * of boot; adding the uptime yields wall-clock time with sub-second boot
+ * skew.  The register reads 0 until the host command lands (or on hosts
+ * without an RTC), in which case REALTIME degrades to plain uptime -- the
+ * pre-existing behavior.  CLOCK_MONOTONIC and friends stay pure uptime so
+ * interval timing is unaffected. */
+static uint32_t clock_epoch_base(long clk_id) {
+    if (clk_id != 0 /* CLOCK_REALTIME */)
+        return 0;
+    return RTC_EPOCH;
+}
+
 static long sys_clock_gettime(long clk_id, long tp) {
-    (void)clk_id;
     struct ts32 *ts = (void *)tp;
     uint32_t ns;
-    ts->tv_sec = of_timer_get_seconds(&ns);
+    ts->tv_sec = of_timer_get_seconds(&ns) + clock_epoch_base(clk_id);
     ts->tv_nsec = ns;
     return 0;
 }
 
 static long sys_clock_gettime_time64(long clk_id, long tp) {
-    (void)clk_id;
     struct ts64 *ts = (void *)tp;
     if (!ts) return 0;
     uint32_t ns;
-    ts->tv_sec = (int64_t)of_timer_get_seconds(&ns);
+    ts->tv_sec = (int64_t)of_timer_get_seconds(&ns) +
+                 (int64_t)clock_epoch_base(clk_id);
     ts->tv_nsec = (int32_t)ns;
     return 0;
 }

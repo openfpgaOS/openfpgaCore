@@ -57,12 +57,6 @@ typedef struct of_video_caps {
 /* Initialize framebuffer subsystem (sets display mode, initial palette) */
 void of_video_init(void);
 
-/* Park the Pocket scaler on the 640x480 slot while the Analogizer forces the
- * LCD raster to 640x480 (its RGB/VGA modes). Pass non-zero to override, 0 to
- * restore the app-framebuffer-derived slot. Without this the Pocket can't lock
- * the core's 640x480 output and the screen stays black. */
-void of_video_set_analogizer_fullraster(int on);
-
 /* Set/query the active app framebuffer geometry. */
 int of_video_set_mode(const of_video_mode_t *mode);
 void of_video_get_mode(of_video_mode_t *out);
@@ -133,6 +127,11 @@ void of_video_set_palette_vga4(const uint8_t *vga_pal, int count);
 
 /* Switch between terminal overlay and framebuffer mode */
 void of_video_set_display_mode(int mode);
+
+/* Apply the "Pocket LCD" mode (0=On, 1=Off, 2=Terminal) to the LCD display.
+ * No-op until an app owns the display. Called every frame from the analogizer
+ * refresh; cheap and idempotent. */
+void of_video_apply_pocket_lcd(uint8_t mode);
 
 /* Switch color decoder and update active stride/frame size. */
 void of_video_set_color_mode(int mode);

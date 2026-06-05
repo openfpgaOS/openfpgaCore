@@ -92,7 +92,15 @@
 #define   SYS_STATUS_ALLCOMPLETE    (1 << 1)
 #define SYS_CYCLE_LO        REG32(SYSREG_BASE + 0x04)
 #define SYS_CYCLE_HI        REG32(SYSREG_BASE + 0x08)
-/* Terminal FB control: bit[0] = 1 scanout reads terminal FB, 0 = app FB */
+/* Unix epoch seconds from the APF host RTC, latched once shortly after boot
+ * by core_bridge_cmd and quasi-static afterwards.  Reads 0 until the host
+ * has delivered the RTC command (treat 0 as "no RTC").  The Pocket host
+ * reports wall-clock local time as epoch seconds. */
+#define RTC_EPOCH           REG32(SYSREG_BASE + 0xC4)
+/* Terminal FB control: bit[0] = 1 scanout reads terminal FB, 0 = app FB.
+ * bit[1] = 1 the analog (Analogizer) output keeps the app FB + ANALOG_FB_*
+ * geometry while bit[0] shows the terminal on the LCD (Pocket LCD=Terminal);
+ * 0 = the analog mirrors the LCD selection, terminal included. */
 #define TERM_FB_CTRL        REG32(SYSREG_BASE + 0x0C)
 #define   DISPLAY_MODE_TERMINAL     0
 #define   DISPLAY_MODE_FRAMEBUFFER  1
@@ -119,6 +127,14 @@
 #define FB_MODE_STRIDE      REG32(SYSREG_BASE + 0xE8)
 #define VIDEO_SCALER_MODE   REG32(SYSREG_BASE + 0xEC)
 #define VIDEO_SCALER_SLOT_DEFAULT_320X240 0u
+
+/* Independent analog-output framebuffer geometry (Pocket LCD = Terminal: the
+ * LCD shows the OS console while the Analogizer keeps showing the app).  Keep
+ * these = the app's geometry; the analog base tracks the app display buffer in
+ * hardware.  Same packing as FB_MODE_SIZE/STRIDE/SYS_COLOR_MODE. */
+#define ANALOG_FB_SIZE      REG32(SYSREG_BASE + 0xF0)
+#define ANALOG_FB_STRIDE    REG32(SYSREG_BASE + 0xF4)
+#define ANALOG_COLOR_MODE   REG32(SYSREG_BASE + 0xF8)
 #define FB_MODE_MAX_WIDTH   800u
 #define FB_MODE_MAX_HEIGHT  600u
 #define FB_MODE_MAX_STRIDE  2048u
@@ -211,7 +227,8 @@
  * disabled or until the raw SNAC_CTRL path is enabled again. */
 #define SNAC_HW_CTRL        REG32(SYSREG_BASE + 0x160)
 #define   SNAC_HW_CTRL_ENABLE      (1 << 0)
-#define   SNAC_HW_CTRL_ANALOG      (1 << 1)
+/* bit 1 reserved (was ANALOG; analog reads are auto-detected from the pad's
+ * reported mode ID, so there is no separate analog enable any more) */
 #define   SNAC_HW_CTRL_FAST        (1 << 2)
 #define   SNAC_HW_STATUS_VALID     (1 << 8)
 #define   SNAC_HW_STATUS_IRQ       (1 << 9)
@@ -232,7 +249,7 @@
 
 /* Analogizer CPU mirror. Pocket interact.json writes the same settings
  * through bridge addresses 0xF7000000/04/08; firmware uses these sysregs
- * to read the bridge defaults and apply analogizer.cfg overrides. */
+ * to read the bridge defaults. */
 #define ANALOGIZER_SETTINGS REG32(SYSREG_BASE + 0x80)
 #define ANALOGIZER_H_OFFSET REG32(SYSREG_BASE + 0x84)
 #define ANALOGIZER_V_OFFSET REG32(SYSREG_BASE + 0x88)
@@ -435,8 +452,9 @@
 #define SNAC_SNES_SWAP      0x0B
 #define SNAC_PSX            0x10
 #define SNAC_PSX_FAST       0x11
-#define SNAC_PSX_ANALOG     0x12
-#define SNAC_PSX_ANALOG_FAST 0x13
+/* 0x12/0x13 (PSX Analog / PSX Analog Fast) retired: analog is auto-detected
+ * from the controller's mode ID; digital pads center the sticks.  Persisted
+ * menu values 0x12/0x13 degrade to SNAC_NONE via snac_type_supported(). */
 
 /* Analogizer video output modes */
 #define ANLG_VIDEO_RGBS             0x0

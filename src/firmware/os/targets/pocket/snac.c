@@ -47,9 +47,7 @@ static void snac_delay(volatile int cycles) {
 
 static int snac_type_is_psx(uint8_t snac_type) {
     return snac_type == SNAC_PSX ||
-           snac_type == SNAC_PSX_FAST ||
-           snac_type == SNAC_PSX_ANALOG ||
-           snac_type == SNAC_PSX_ANALOG_FAST;
+           snac_type == SNAC_PSX_FAST;
 }
 
 static void snac_commit_state(int player, const snac_controller_t *next) {
@@ -445,12 +443,11 @@ void snac_init(uint8_t snac_type) {
     }
 
     if (snac_type_is_psx(snac_type)) {
+        /* Analog is auto-detected by the hardware poller from the pad's mode
+         * ID (digital pads center the sticks), so only the bus-speed option
+         * remains. */
         uint32_t hw_ctrl = SNAC_HW_CTRL_ENABLE;
-        if (snac_type == SNAC_PSX_ANALOG ||
-            snac_type == SNAC_PSX_ANALOG_FAST)
-            hw_ctrl |= SNAC_HW_CTRL_ANALOG;
-        if (snac_type == SNAC_PSX_FAST ||
-            snac_type == SNAC_PSX_ANALOG_FAST)
+        if (snac_type == SNAC_PSX_FAST)
             hw_ctrl |= SNAC_HW_CTRL_FAST;
 
         snac_hw_active_flag = 1;
@@ -506,10 +503,8 @@ void snac_poll(void) {
         break;
     case SNAC_PSX:
     case SNAC_PSX_FAST:
-        poll_psx(0);
-        break;
-    case SNAC_PSX_ANALOG:
-    case SNAC_PSX_ANALOG_FAST:
+        /* Software fallback (normally unreachable: PSX uses the HW poller).
+         * Analog is auto-detected per poll from the controller ID. */
         poll_psx(1);
         break;
     case SNAC_PCE_2BTN:

@@ -26,6 +26,15 @@ module tb_scanout (
     input  wire clk,
     input  wire reset_n,
     input  wire analog_480p,
+    // When 1, point the analog framebuffer at a different base than the LCD
+    // (offset so analog source row R reads as R+1000). Proves the analog fetch
+    // reads its OWN framebuffer while the LCD reads the LCD framebuffer.
+    input  wire analog_split,
+    // When 1, drive the analog OUTPUT height to 480 (2x the 240-tall source) so
+    // the analog scaler must upscale a native app to fill the 480p frame, like
+    // the LCD/vidout path. Without upscaling the app paints at native height and
+    // the rest of the frame is black ("blank in Terminal" on RGBHV).
+    input  wire analog_upscale,
 
     output wire        analog_hsync,
     output wire        analog_vsync,
@@ -34,6 +43,7 @@ module tb_scanout (
     output wire        analog_pixel_clk,
     output wire [23:0] analog_pixel_color_o,
 
+    output wire [23:0] pixel_color_o,        // LCD pixel (for LCD deadline check)
     output wire [9:0]  x_count_o,
     output wire [9:0]  y_count_o
 );
@@ -67,6 +77,7 @@ module tb_scanout (
     end
     assign x_count_o = x_count;
     assign y_count_o = y_count;
+    assign pixel_color_o = pixel_color;
 
     // ----- framebuffer geometry: 320x240 RGB565, base 0, stride 640 bytes -----
     localparam [2:0]  COLOR_MODE = 3'd3;     // MODE_RGB565
@@ -113,6 +124,16 @@ module tb_scanout (
         .out_width(FB_W),
         .out_height(FB_H),
 
+        // Analog framebuffer: same geometry, base 0 (mirror) or +1000 rows
+        // (320000 halfwords = 1000 * 320-halfword stride) when split.
+        .analog_fb_base_addr(analog_split ? 25'd320000 : 25'd0),
+        .analog_color_mode(COLOR_MODE),
+        .analog_fb_width(FB_W),
+        .analog_fb_height(FB_H),
+        .analog_fb_stride(FB_STRIDE),
+        .analog_out_width(analog_upscale ? 10'd640 : FB_W),
+        .analog_out_height(analog_upscale ? 10'd480 : FB_H),
+
         .clk_palette(clk),
         .reset_palette_n(reset_n),
 
@@ -132,37 +153,88 @@ module tb_scanout (
         .pal_busy(pal_busy)
     );
 
-    // ----- address-aware SDRAM burst model -----
+    // ----- address-aware SDRAM burst model WITH realistic latency -----
     // src_line = burst_addr / 320 (stride_halfwords). Every 32-bit word of
-    // that line is two RGB565 pixels both equal to src_line, so the analog
-    // output color encodes the source row it actually read.
+    // that line is two RGB565 pixels both equal to src_line, so the decoded
+    // output color encodes the source row it actually read (LCD or analog).
+    //
+    // Unlike the original zero-latency model, this adds:
+    //   * ACT_LAT cycles of activation/dispatch latency before the first word
+    //     (RAS->CAS + the io_sdram ST_IDLE->ST_REQ_BURST_READ pipeline), and
+    //   * a free-running refresh timer that, when a burst is dispatched while a
+    //     refresh is due, prepends REFRESH_STALL extra cycles (io_sdram serves
+    //     refresh ABOVE the burst in ST_IDLE, but never preempts mid-burst).
+    // This lets the harness verify the LCD fetch still meets its 1-line deadline
+    // with the dedicated 240p analog fetch interleaved on the same burst port.
+    //
+    // These values are deliberately brutal (~128-cycle worst-case per burst, vs
+    // real SDRAM's ~5-15 cycles, and clk_sdram here is 1:1 with clk_analog where
+    // the real controller runs 100 MHz / 2x faster relative to video). The LCD
+    // still renders every line: worst case = one in-flight analog burst + the
+    // LCD burst = (ACT_LAT+REFRESH_STALL+burst_len)*2 = (64+64+160)*2 = 576 clk,
+    // vs the 1560-clk (one LCD line) deadline => 2.7x headroom. This is the
+    // regression guard proving the dual-fetch does not starve the LCD.
+    localparam [8:0]  ACT_LAT       = 9'd64;   // per-burst activation latency
+    localparam [11:0] REFRESH_EVERY = 12'd128; // ~ one refresh window
+    localparam [8:0]  REFRESH_STALL = 9'd64;   // extra stall if refresh coincides
+
+    localparam [1:0] M_IDLE = 2'd0, M_ACT = 2'd1, M_STREAM = 2'd2;
+    reg [11:0] refresh_cnt;
+    reg        refresh_due;
+    reg [1:0]  mstate;
+    reg [8:0]  act_remain;
     reg [10:0] burst_remain;
-    reg        burst_active;
     reg [15:0] burst_src;
     always @(posedge clk or negedge reset_n) begin
         if (!reset_n) begin
-            burst_remain <= 11'd0; burst_active <= 1'b0; burst_src <= 16'd0;
-            burst_data <= 32'd0; burst_data_valid <= 1'b0; burst_data_done <= 1'b0;
+            refresh_cnt <= 12'd0; refresh_due <= 1'b0;
+            mstate <= M_IDLE; act_remain <= 9'd0; burst_remain <= 11'd0;
+            burst_src <= 16'd0; burst_data <= 32'd0;
+            burst_data_valid <= 1'b0; burst_data_done <= 1'b0;
         end else begin
             burst_data_valid <= 1'b0;
             burst_data_done  <= 1'b0;
-            if (burst_rd) begin
-                burst_active <= 1'b1;
-                burst_remain <= burst_len;
-                burst_src    <= burst_addr / 25'd320;   // source row number
-            end else if (burst_active) begin
-                burst_data_valid <= 1'b1;
-                burst_data <= {burst_src, burst_src};    // two RGB565 px = src row
-                if (burst_remain <= 11'd1) begin
-                    burst_data_done <= 1'b1;
-                    burst_active <= 1'b0;
-                    burst_remain <= 11'd0;
-                end else begin
-                    burst_remain <= burst_remain - 11'd1;
-                end
+
+            // Free-running refresh timer. A newly-due refresh always wins over a
+            // same-cycle consume so a refresh tick is never dropped.
+            if (refresh_cnt >= REFRESH_EVERY - 12'd1) begin
+                refresh_cnt <= 12'd0;
+                refresh_due <= 1'b1;
+            end else begin
+                refresh_cnt <= refresh_cnt + 12'd1;
+                if (mstate == M_IDLE && burst_rd)
+                    refresh_due <= 1'b0;     // consume on burst dispatch
             end
+
+            case (mstate)
+                M_IDLE: begin
+                    if (burst_rd) begin
+                        burst_remain <= burst_len;
+                        burst_src    <= burst_addr / 25'd320;   // source row
+                        act_remain   <= ACT_LAT +
+                                        (refresh_due ? REFRESH_STALL : 9'd0);
+                        mstate       <= M_ACT;
+                    end
+                end
+                M_ACT: begin
+                    if (act_remain <= 9'd1) mstate <= M_STREAM;
+                    else act_remain <= act_remain - 9'd1;
+                end
+                M_STREAM: begin
+                    burst_data_valid <= 1'b1;
+                    burst_data <= {burst_src, burst_src};    // two RGB565 px = row
+                    if (burst_remain <= 11'd1) begin
+                        burst_data_done <= 1'b1;
+                        burst_remain <= 11'd0;
+                        mstate <= M_IDLE;
+                    end else begin
+                        burst_remain <= burst_remain - 11'd1;
+                    end
+                end
+                default: mstate <= M_IDLE;
+            endcase
         end
     end
 
-    wire _unused = &{1'b0, burst_addr, burst_32bit, pixel_color, pal_busy, 1'b0};
+    wire _unused = &{1'b0, burst_addr, burst_32bit, pal_busy, 1'b0};
 endmodule

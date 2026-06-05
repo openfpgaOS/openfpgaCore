@@ -30,6 +30,15 @@ static int buf_ready   = -1;  /* buffer queued for next vsync (-1 = none)   */
 
 /* Display mode (tracked here for overlay compositing in of_video_flip) */
 static int vid_display_mode = DISPLAY_MODE_FRAMEBUFFER;
+/* Set once an app has taken the display (called of_video_set_mode). Until then
+ * the OS owns the screen (boot console / no-app), so the Pocket LCD mode is not
+ * applied -- it must never override the boot/console display. */
+static int video_app_active = 0;
+/* Pocket LCD = Terminal engaged: the analog output keeps the app FB while the
+ * LCD shows the console (TERM_FB_CTRL bit 1). When clear, the analog mirrors
+ * the LCD selection -- terminal included -- so the boot console, OS terminal
+ * and trap screens stay visible on the analog DAC. */
+static int vid_pocket_terminal = 0;
 static of_video_mode_t vid_mode = {
     FB_WIDTH, FB_HEIGHT, FB_STRIDE, COLOR_MODE_8BIT, 0
 };
@@ -128,31 +137,28 @@ static int video_normalize_mode(const of_video_mode_t *in,
     return 0;
 }
 
-/* When the Analogizer runs an RGB/VGA (non-15kHz) mode, core_top.v forces the
- * LCD raster itself to 640x480 (crt_h/v_active).  The Pocket scaler must then
- * be parked on the 640x480 slot or it cannot lock onto the core's output and
- * the Pocket screen goes black — regardless of the app's framebuffer size.
- * This flag, set via of_video_set_analogizer_fullraster(), overrides the slot. */
-static uint8_t video_analogizer_force_640;
-
-static void video_write_scaler_slot(uint8_t base_slot) {
-    /* slot 7 = 640x480 (scaler_modes[]; core_top.v scaler_slot_*(7)). */
-    VIDEO_SCALER_MODE = video_analogizer_force_640 ? 7u : base_slot;
-}
-
 static void video_program_app_mode(void) {
     SYS_COLOR_MODE = vid_mode.color_mode;
     FB_MODE_SIZE = ((uint32_t)vid_mode.height << 16) | vid_mode.width;
     FB_MODE_STRIDE = vid_mode.stride;
-    video_write_scaler_slot(
-        video_scaler_mode_for_size(vid_mode.width, vid_mode.height)->slot);
+    VIDEO_SCALER_MODE =
+        video_scaler_mode_for_size(vid_mode.width, vid_mode.height)->slot;
+    /* Keep the analog-output framebuffer geometry = the app's, so the analog
+     * DAC keeps showing the app even when the LCD is switched to the terminal
+     * (Pocket LCD = Terminal). The analog base tracks the app's display buffer
+     * in hardware; only the geometry needs mirroring here. Programmed on every
+     * app-mode update and NOT touched by video_program_terminal_mode, so it
+     * survives the LCD going to the 320x240 terminal framebuffer. */
+    ANALOG_FB_SIZE = ((uint32_t)vid_mode.height << 16) | vid_mode.width;
+    ANALOG_FB_STRIDE = vid_mode.stride;
+    ANALOG_COLOR_MODE = vid_mode.color_mode;
 }
 
 static void video_program_terminal_mode(void) {
     SYS_COLOR_MODE = COLOR_MODE_8BIT;
     FB_MODE_SIZE = ((uint32_t)FB_HEIGHT << 16) | FB_WIDTH;
     FB_MODE_STRIDE = FB_STRIDE;
-    video_write_scaler_slot(VIDEO_SCALER_SLOT_DEFAULT_320X240);
+    VIDEO_SCALER_MODE = VIDEO_SCALER_SLOT_DEFAULT_320X240;
 }
 
 static void video_program_visible_mode(void) {
@@ -160,16 +166,6 @@ static void video_program_visible_mode(void) {
         video_program_terminal_mode();
     else
         video_program_app_mode();
-}
-
-void of_video_set_analogizer_fullraster(int on) {
-    uint8_t v = on ? 1u : 0u;
-    if (v == video_analogizer_force_640)
-        return;
-    video_analogizer_force_640 = v;
-    /* Re-apply the scaler slot immediately: the Analogizer state can change
-     * without an app video-mode change. */
-    video_program_visible_mode();
 }
 
 static uint32_t video_clamp_frame_bytes(uint32_t bytes) {
@@ -591,6 +587,10 @@ int of_video_set_mode(const of_video_mode_t *mode) {
     video_clear_mode_change_buffers(old_frame_bytes);
     video_force_present_clean_buffer();
     of_term_set_display_mode(DISPLAY_MODE_FRAMEBUFFER);
+    /* An app now owns the display.  The next of_analogizer_refresh() applies the
+     * persisted Pocket LCD mode (e.g. boot-with-Terminal, or re-asserting
+     * Terminal after the app changes its framebuffer mode). */
+    video_app_active = 1;
     return 0;
 }
 
@@ -968,8 +968,12 @@ void of_video_set_display_mode(int mode) {
     else
         video_program_app_mode();
 
-    /* Switch scanout between terminal FB and app triple-buffered FB */
-    TERM_FB_CTRL = (mode == DISPLAY_MODE_TERMINAL) ? 1 : 0;
+    /* Switch scanout between terminal FB and app triple-buffered FB. Bit 1
+     * (set only for Pocket LCD = Terminal) makes the analog output keep the
+     * app FB while the LCD shows the console; otherwise the analog mirrors
+     * the LCD selection. */
+    TERM_FB_CTRL = (mode == DISPLAY_MODE_TERMINAL)
+                       ? (vid_pocket_terminal ? 3u : 1u) : 0u;
 
     /* Overlay mode: dim app palette, install bright terminal colors */
     if (mode == DISPLAY_MODE_OVERLAY && prev != DISPLAY_MODE_OVERLAY)
@@ -978,6 +982,27 @@ void of_video_set_display_mode(int mode) {
         overlay_restore_palette();
 
     of_term_set_display_mode(mode);
+}
+
+void of_video_apply_pocket_lcd(uint8_t mode) {
+    /* mode: 0=On, 1=Off, 2=Terminal. On/Off keep the app on the LCD path (Off
+     * is blanked in hardware); Terminal shows the OS console on the LCD while
+     * the analog DAC keeps the app. No-op until an app owns the display so the
+     * boot/console screen is never overridden, and only reprograms when the
+     * target actually differs (cheap to call every frame / idempotent across an
+     * app re-setting its mode). */
+    if (!video_app_active)
+        return;
+    int target = (mode == 2u) ? DISPLAY_MODE_TERMINAL : DISPLAY_MODE_FRAMEBUFFER;
+    vid_pocket_terminal = (mode == 2u);
+    if (target == vid_display_mode) {
+        /* Display mode unchanged, but keep TERM_FB_CTRL bit 1 in sync (e.g.
+         * the console was already shown when Terminal engaged/disengaged). */
+        if (vid_display_mode == DISPLAY_MODE_TERMINAL)
+            TERM_FB_CTRL = vid_pocket_terminal ? 3u : 1u;
+        return;
+    }
+    of_video_set_display_mode(target);
 }
 
 void of_video_clear(uint8_t color) {
