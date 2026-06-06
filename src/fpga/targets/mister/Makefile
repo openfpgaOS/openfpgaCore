@@ -9,8 +9,10 @@
 # Quick start:
 #   make full     Full build: cpu → firmware → compile
 #   make firmware Bootloader + os.bin + MIF patch (~10 sec)
-#   make deploy   scp the core + boot.rom to a MiSTer over the network
+#   make deploy   Refresh build/mister/ (rbf + boot.rom)
+#   make sdk DEST=path   Sync runtime artifacts to an SDK checkout
 #   make help     Show all targets
+# Device pushing lives in the SDK: platforms/mister/copy.sh
 #
 # NOTE: the MiSTer sys/ framework requires Quartus Prime 17.0.x — newer
 # versions are known to miscompile parts of it.  Point QUARTUS at a
@@ -127,7 +129,13 @@ test:
 	@printf "$(C_OK)[test] Done$(C_RESET)\n"
 
 # ── RTL check ────────────────────────────────────────────────────────
-check:
+# build_id.v is gitignored (the framework PRE_FLOW script re-stamps it on
+# every full compile, which would keep the tree perpetually dirty); a
+# fresh clone needs a placeholder for standalone quartus_map / lint runs.
+build_id.v:
+	@printf '`define BUILD_DATE "000000"\n' > $@
+
+check: build_id.v
 	@printf "$(C_HEAD)[check]$(C_RESET) Analysis & Synthesis...\n"
 	@quartus_map $(PROJECT)
 	@printf "$(C_OK)[check] Done$(C_RESET)\n"
@@ -143,11 +151,30 @@ deploy:
 		cp output_files/$(PROJECT).rbf $(BUILD_OUT)/openfpgaOS.rbf && \
 		printf "  $(C_OK)openfpgaOS.rbf$(C_RESET) → $(BUILD_OUT)/\n" || \
 		printf "  $(C_DIM)[ ] bitstream (run make build)$(C_RESET)\n"
-	@test -f $(FW_DIR)/os.bin && \
-		cp $(FW_DIR)/os.bin $(BUILD_OUT)/boot.rom && \
-		printf "  $(C_OK)boot.rom$(C_RESET)       → $(BUILD_OUT)/\n" || \
-		printf "  $(C_DIM)[ ] boot.rom (run make os)$(C_RESET)\n"
+	@if [ -f $(FW_DIR)/os.bin ] && \
+	    [ "$$(cat $(FW_DIR)/.last_target 2>/dev/null)" = "mister" ]; then \
+		cp $(FW_DIR)/os.bin $(BUILD_OUT)/boot.rom; \
+		printf "  $(C_OK)boot.rom$(C_RESET)       → $(BUILD_OUT)/\n"; \
+	else \
+		printf "  $(C_DIM)[ ] boot.rom (run make os — current os.bin is not a mister build)$(C_RESET)\n"; \
+	fi
 	@printf "$(C_OK)[deploy] Done$(C_RESET) $(C_DIM)(push to hardware from the SDK: platforms/mister/copy.sh)$(C_RESET)\n"
+
+# ── JTAG program — Pocket-only ───────────────────────────────────────
+# The root Makefile delegates `program` to every target; MiSTer has no
+# JTAG flow — cores load from the menu / copy.sh.  Fail with guidance
+# instead of make's bare "No rule" error.
+program:
+	@printf "$(C_ERR)JTAG programming is a Pocket flow.$(C_RESET)\n"
+	@printf "Deploy to a MiSTer from the SDK instead: platforms/mister/copy.sh core <ip>\n"
+	@exit 1
+
+# ── SDK sync (delegates to top-level Makefile) ───────────────────────
+# Lets `make sdk DEST=path/to/sdk` work from this directory; the actual
+# sync logic lives at the repo root (it ships BOTH targets' runtime
+# artifacts, including runtime/mister/{openfpgaOS.rbf, os.bin}).
+sdk:
+	@$(MAKE) -C $(ROOT_DIR) sdk DEST="$(DEST)"
 
 # ── Seed sweep ───────────────────────────────────────────────────────
 # Same flow as the Pocket: try fitter seeds, rank by the 100 MHz
@@ -169,14 +196,14 @@ report:
 
 # ── Timing report ────────────────────────────────────────────────────
 timing:
-	@printf "$(C_HEAD)Fmax Summary (Slow 1100mV 85C):$(C_RESET)\n"
+	@printf "$(C_HEAD)Fmax Summary (slow corner):$(C_RESET)\n"
 	@grep -E "^\; [0-9]" output_files/$(PROJECT).sta.rpt 2>/dev/null | head -8 | while IFS=';' read _ fmax rfmax clock _rest; do \
 		fmax=$$(echo "$$fmax" | xargs); \
 		clock=$$(echo "$$clock" | xargs); \
-		short=$$(echo "$$clock" | sed 's/.*emu|pll.*general\[\([0-9]\)\].*/pll_out\1/' | sed 's/.*pll_hdmi.*/pll_hdmi/' | sed 's/.*pll_audio.*/pll_audio/' | sed 's/.*FPGA_CLK\([0-9]\)_50.*/clk\1_50/'); \
+		short=$$(echo "$$clock" | sed 's/.*emu|pllv.*general\[0\].*/clk_vid/' | sed 's/.*emu|pll.*general\[\([0-9]\)\].*/pll_out\1/' | sed 's/.*pll_hdmi.*/pll_hdmi/' | sed 's/.*pll_audio.*/pll_audio/' | sed 's/.*FPGA_CLK\([0-9]\)_50.*/clk\1_50/'); \
 		case "$$short" in \
 			pll_out[01]) target="100.00 MHz" ;; \
-			pll_out2)    target="24.58 MHz" ;; \
+			clk_vid)     target="24.58 MHz" ;; \
 			clk[0-9]_50) target="50.00 MHz" ;; \
 			*)           target="—" ;; \
 		esac; \
@@ -233,5 +260,5 @@ clean:
 
 clean-all: clean
 
-.PHONY: all full help cpu bootloader firmware os compile build test check deploy report sweep
+.PHONY: all full help cpu bootloader firmware os compile build test check deploy report sweep sdk program
 .PHONY: timing summary clean clean-all

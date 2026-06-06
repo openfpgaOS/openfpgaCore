@@ -37,6 +37,7 @@
 #include "terminal.h"
 #include "blockdev.h"
 #include "hps_regs.h"
+#include "mister_file.h"
 #include "fatfs/ff.h"
 #include <string.h>
 
@@ -89,6 +90,17 @@ static struct {
 static int async_token_counter;
 static uint32_t dma_stage_next;
 
+/* FatFs reentrancy guard — see mister_file.h. */
+volatile int mister_fs_depth;
+
+/* One-entry f_stat memo: dir_probe_slots calls of_file_size64 and then
+ * of_file_flags (which re-checks size) for every slot at boot — without
+ * this each slot costs two full FAT path walks.  Invalidated on any
+ * write/open-writable/mount transition. */
+static struct { uint32_t slot_id; int64_t size; int valid; } size_memo;
+
+static void size_memo_invalidate(void) { size_memo.valid = 0; }
+
 /* ---------------------------------------------------------------------- */
 
 void of_file_set_idle_hook(void (*hook)(void)) {
@@ -116,6 +128,7 @@ static int ensure_mounted(void) {
         fs_state = FS_UNMOUNTED;
         dyn_enumerated = 0;
         dyn_slot_count = 0;
+        size_memo_invalidate();
     }
 
     if (!present)
@@ -184,7 +197,11 @@ static void enumerate_dir(const char *dir) {
     DIR dj;
     FILINFO fno;
 
-    FRESULT fr = f_findfirst(&dj, &fno, dir, "*");
+    /* Only close what was opened: on FR_NO_PATH (e.g. /assets/ absent —
+     * a perfectly normal image) dj is uninitialized stack memory, and
+     * f_closedir's validate/dec_share would act on garbage. */
+    FRESULT fr0 = f_findfirst(&dj, &fno, dir, "*");
+    FRESULT fr = fr0;
     while (fr == FR_OK && fno.fname[0]) {
         if (!(fno.fattrib & AM_DIR)) {
             /* Skip files already covered by fixed slots. */
@@ -196,7 +213,8 @@ static void enumerate_dir(const char *dir) {
         }
         fr = f_findnext(&dj, &fno);
     }
-    f_closedir(&dj);
+    if (fr0 == FR_OK)
+        f_closedir(&dj);
 }
 
 static void ensure_enumerated(void) {
@@ -243,7 +261,7 @@ static const char *slot_path(uint32_t slot_id, char *buf, uint32_t max) {
 /* Shared FIL handle cache.  Write opens are exclusive under FF_FS_LOCK, so
  * a cached read handle for the same slot is evicted before reopening
  * writable (and vice versa). */
-FIL *mister_file_open_slot(uint32_t slot_id, int writable) {
+static FIL *open_slot_impl(uint32_t slot_id, int writable) {
     if (!ensure_mounted())
         return (void *)0;
 
@@ -292,13 +310,25 @@ FIL *mister_file_open_slot(uint32_t slot_id, int writable) {
     return &victim->fil;
 }
 
+FIL *mister_file_open_slot(uint32_t slot_id, int writable) {
+    if (writable)
+        size_memo_invalidate();
+    mister_fs_enter();
+    FIL *fil = open_slot_impl(slot_id, writable);
+    mister_fs_exit();
+    return fil;
+}
+
 void mister_file_drop_slot(uint32_t slot_id) {
+    mister_fs_enter();
     for (int i = 0; i < FIL_CACHE_SLOTS; i++) {
         if (fil_cache[i].slot_id == slot_id) {
             f_close(&fil_cache[i].fil);
             fil_cache[i].slot_id = 0;
         }
     }
+    mister_fs_exit();
+    size_memo_invalidate();
 }
 
 void of_file_init(void) {
@@ -316,7 +346,10 @@ void of_file_init(void) {
     async_token_counter = 0;
     dma_stage_next = 0;
 
-    if (ensure_mounted())
+    mister_fs_enter();
+    int mounted = ensure_mounted();
+    mister_fs_exit();
+    if (mounted)
         of_term_printf("[file] disk image mounted (%u MB)\n",
                        (unsigned)(of_blockdev_size() >> 20));
 }
@@ -341,12 +374,9 @@ static int boot_slot_read(uint32_t slot_offset, void *dest, uint32_t length) {
     return 0;
 }
 
-static int fat_read_impl(uint32_t slot_id, uint32_t slot_offset,
+static int fat_read_body(uint32_t slot_id, uint32_t slot_offset,
                          void *dest, uint32_t length) {
-    if (slot_id == BOOT_SLOT_ID)
-        return boot_slot_read(slot_offset, dest, length);
-
-    FIL *fil = mister_file_open_slot(slot_id, 0);
+    FIL *fil = open_slot_impl(slot_id, 0);
     if (!fil)
         return OF_ERR_NOT_SUPPORTED;
 
@@ -360,6 +390,17 @@ static int fat_read_impl(uint32_t slot_id, uint32_t slot_offset,
     if (br != length)
         return OF_ERR_BAD_RANGE;   /* short read past EOF */
     return 0;
+}
+
+static int fat_read_impl(uint32_t slot_id, uint32_t slot_offset,
+                         void *dest, uint32_t length) {
+    if (slot_id == BOOT_SLOT_ID)
+        return boot_slot_read(slot_offset, dest, length);
+
+    mister_fs_enter();
+    int rc = fat_read_body(slot_id, slot_offset, dest, length);
+    mister_fs_exit();
+    return rc;
 }
 
 static int fat_probe(void) {
@@ -412,12 +453,9 @@ int of_file_read_raw(uint32_t slot_id, uint32_t slot_offset,
     return fat_read_impl(slot_id, slot_offset, dest, length);
 }
 
-int of_file_slot_write_at(uint32_t slot_id, uint32_t slot_offset,
-                          uint32_t bridge_addr, uint32_t length) {
-    if (async_state.active)
-        return OF_ERR_BUSY;
-
-    FIL *fil = mister_file_open_slot(slot_id, 1);
+static int slot_write_body(uint32_t slot_id, uint32_t slot_offset,
+                           uint32_t bridge_addr, uint32_t length) {
+    FIL *fil = open_slot_impl(slot_id, 1);
     if (!fil)
         return OF_ERR_NOT_SUPPORTED;
     if (f_lseek(fil, slot_offset) != FR_OK)
@@ -430,6 +468,18 @@ int of_file_slot_write_at(uint32_t slot_id, uint32_t slot_offset,
     if (f_sync(fil) != FR_OK)
         return OF_ERR_IO;
     return 0;
+}
+
+int of_file_slot_write_at(uint32_t slot_id, uint32_t slot_offset,
+                          uint32_t bridge_addr, uint32_t length) {
+    if (async_state.active)
+        return OF_ERR_BUSY;
+
+    size_memo_invalidate();
+    mister_fs_enter();
+    int rc = slot_write_body(slot_id, slot_offset, bridge_addr, length);
+    mister_fs_exit();
+    return rc;
 }
 
 int of_file_slot_write(uint32_t slot_id, uint32_t bridge_addr,
@@ -465,10 +515,15 @@ int of_file_get_name(uint32_t slot_id, char *name_out, uint32_t name_max) {
     const char *base = (void *)0;
     char pathbuf[32];
 
+    if (!name_out || name_max == 0)
+        return -1;
+
     if (slot_id == BOOT_SLOT_ID) {
         base = "boot.rom";
     } else {
+        mister_fs_enter();
         const char *path = slot_path(slot_id, pathbuf, sizeof(pathbuf));
+        mister_fs_exit();
         if (!path)
             return -1;
         base = path;
@@ -489,18 +544,17 @@ long of_file_flags(uint32_t slot_id) {
     /* Pre-created nonvolatile slots always exist; report them present so
      * dir_probe_slots registers them even when logically empty. */
     char pathbuf[32];
-    if (slot_id >= 8 && slot_id < 10 + OF_TARGET_SAVE_MAX_SLOTS &&
-        slot_path(slot_id, pathbuf, sizeof(pathbuf)))
+    mister_fs_enter();
+    const char *p = (slot_id >= 8 && slot_id < 10 + OF_TARGET_SAVE_MAX_SLOTS)
+                        ? slot_path(slot_id, pathbuf, sizeof(pathbuf))
+                        : (void *)0;
+    mister_fs_exit();
+    if (p)
         return (long)slot_id;
     return -1;
 }
 
-int64_t of_file_size64(uint32_t slot_id) {
-    if (slot_id == BOOT_SLOT_ID) {
-        uint32_t len = (HPS_STATUS & HPS_STATUS_BOOT_LOADED) ? HPS_BOOT_LEN : 0;
-        return len ? (int64_t)len : -1;
-    }
-
+static int64_t size64_body(uint32_t slot_id) {
     if (!ensure_mounted())
         return -1;
 
@@ -513,6 +567,25 @@ int64_t of_file_size64(uint32_t slot_id) {
     if (f_stat(path, &fno) != FR_OK)
         return -1;
     return fno.fsize ? (int64_t)fno.fsize : -1;
+}
+
+int64_t of_file_size64(uint32_t slot_id) {
+    if (slot_id == BOOT_SLOT_ID) {
+        uint32_t len = (HPS_STATUS & HPS_STATUS_BOOT_LOADED) ? HPS_BOOT_LEN : 0;
+        return len ? (int64_t)len : -1;
+    }
+
+    if (size_memo.valid && size_memo.slot_id == slot_id)
+        return size_memo.size;
+
+    mister_fs_enter();
+    int64_t sz = size64_body(slot_id);
+    mister_fs_exit();
+
+    size_memo.slot_id = slot_id;
+    size_memo.size = sz;
+    size_memo.valid = 1;
+    return sz;
 }
 
 long of_file_size(uint32_t slot_id) {
@@ -557,8 +630,13 @@ int of_file_datatable_word(uint32_t word, uint32_t *value_out) {
  * The sector engine is synchronous from the CPU's point of view (no
  * completion IRQ in v1), so the read itself happens inline and the
  * callback is deferred to the next of_file_async_poll() or the periodic
- * IRQ drain (of_check_shutdown → of_file_async_irq_service), matching the
- * Pocket's IRQ-context callback semantics.
+ * IRQ drain (of_check_shutdown → of_file_async_irq_service).
+ *
+ * Unlike the Pocket, the IRQ drain is GATED on the FatFs reentrancy
+ * guard (mister_fs_depth, see mister_file.h): a callback may issue new
+ * file I/O, and FatFs is non-reentrant — delivery while the main thread
+ * is inside an f_* call would corrupt filesystem state.  When gated, the
+ * completion is simply picked up by a later tick or by poll().
  * ====================================================================== */
 
 static uint32_t align_up_u32(uint32_t value, uint32_t align) {
@@ -634,7 +712,9 @@ int of_file_read_async(uint32_t slot_id, uint32_t slot_offset,
 }
 
 void of_file_async_irq_service(void) {
-    async_drain();
+    /* IRQ context: only deliver when the main thread is outside FatFs. */
+    if (mister_fs_depth == 0)
+        async_drain();
 }
 
 int of_file_async_poll(void) {

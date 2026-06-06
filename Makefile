@@ -70,7 +70,7 @@ help:
 	@echo "     / __ \\/ __/"
 	@echo "    / /_/ /\\ \\"
 	@printf '    \\____/___/  '
-	@printf "$(C_CMD)v0.5$(C_RESET) OS\n"
+	@printf "$(C_CMD)v0.6$(C_RESET) OS\n"
 	@printf "$(C_RESET)\n"
 	@printf "  $(C_HEAD)Target:$(C_RESET) $(C_CMD)$(TARGET)$(C_RESET) $(C_DIM)(available: $(TARGETS))$(C_RESET)\n\n"
 	@printf "  $(C_HEAD)Targets:$(C_RESET)\n"
@@ -154,6 +154,7 @@ endif
 package-mister:
 	@mkdir -p $(BUILD_DIR)/mister
 	@cp $(TARGET_DIR)/output_files/mister.rbf $(BUILD_DIR)/mister/openfpgaOS.rbf
+	@if [ "$$(cat $(OS_DIR)/.last_target 2>/dev/null)" != "mister" ]; then 		printf "  $(C_DIM)os.bin on disk is not a mister build — run make os TARGET=mister first$(C_RESET)\n"; 		exit 1; 	fi
 	@cp $(OS_DIR)/os.bin $(BUILD_DIR)/mister/boot.rom
 	@printf "  $(C_OK)Package ready$(C_RESET) → $(BUILD_DIR)/mister/ (rbf + boot.rom)\n"
 	@printf "  $(C_DIM)Disk image: make -C <sdk> image PLATFORM=mister$(C_RESET)\n"

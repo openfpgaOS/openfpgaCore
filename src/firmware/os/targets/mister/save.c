@@ -88,12 +88,8 @@ uint32_t of_nvslot_capacity(uint32_t data_slot_id) {
     return nvslot_cap(data_slot_id);
 }
 
-int of_nvslot_read(uint32_t data_slot_id, void *buf,
-                   uint32_t offset, uint32_t len) {
-    uint32_t cap = nvslot_cap(data_slot_id);
-    if (cap == 0 || offset > cap || len > cap - offset)
-        return -1;
-
+static int nvslot_read_body(uint32_t data_slot_id, void *buf,
+                            uint32_t offset, uint32_t len) {
     FIL *fil = mister_file_open_slot(data_slot_id, 0);
     if (!fil)
         return -1;
@@ -113,15 +109,41 @@ int of_nvslot_read(uint32_t data_slot_id, void *buf,
     return (int)len;
 }
 
-int of_nvslot_write(uint32_t data_slot_id, const void *buf,
-                    uint32_t offset, uint32_t len) {
+int of_nvslot_read(uint32_t data_slot_id, void *buf,
+                   uint32_t offset, uint32_t len) {
     uint32_t cap = nvslot_cap(data_slot_id);
     if (cap == 0 || offset > cap || len > cap - offset)
         return -1;
 
+    mister_fs_enter();
+    int rc = nvslot_read_body(data_slot_id, buf, offset, len);
+    mister_fs_exit();
+    return rc;
+}
+
+static int nvslot_write_body(uint32_t data_slot_id, const void *buf,
+                             uint32_t offset, uint32_t len) {
     FIL *fil = mister_file_open_slot(data_slot_id, 1);
     if (!fil)
         return -1;
+
+    /* Durability invariant: writes land in EXISTING data clusters only
+     * (see the file header).  If the backing file is short — an image
+     * built without preallocation — a write past its end would make
+     * FatFs allocate clusters and rewrite directory entries, turning a
+     * power cut into filesystem corruption instead of one stale save.
+     * Refuse loudly; the read path's zero-fill keeps such slots readable. */
+    if ((FSIZE_t)offset + len > f_size(fil)) {
+        static int warned;
+        if (!warned) {
+            warned = 1;
+            of_term_printf("[save] slot %u file is short — image built "
+                           "without preallocation; write refused\n",
+                           (unsigned)data_slot_id);
+        }
+        return -1;
+    }
+
     if (f_lseek(fil, offset) != FR_OK)
         return -1;
 
@@ -132,6 +154,18 @@ int of_nvslot_write(uint32_t data_slot_id, const void *buf,
         return -1;
 
     return (int)len;
+}
+
+int of_nvslot_write(uint32_t data_slot_id, const void *buf,
+                    uint32_t offset, uint32_t len) {
+    uint32_t cap = nvslot_cap(data_slot_id);
+    if (cap == 0 || offset > cap || len > cap - offset)
+        return -1;
+
+    mister_fs_enter();
+    int rc = nvslot_write_body(data_slot_id, buf, offset, len);
+    mister_fs_exit();
+    return rc;
 }
 
 int of_nvslot_set_size(uint32_t data_slot_id, uint32_t size) {
@@ -162,8 +196,9 @@ int of_nvslot_flush_size(uint32_t data_slot_id, uint32_t size) {
 
     /* Pocket flushes its CRAM mirror to SD here; MiSTer writes are already
      * on the medium.  Make sure the handle is synced and report success. */
+    mister_fs_enter();
     FIL *fil = mister_file_open_slot(data_slot_id, 1);
-    if (fil && f_sync(fil) != FR_OK)
-        return -1;
-    return 0;
+    int sync_rc = (fil && f_sync(fil) != FR_OK) ? -1 : 0;
+    mister_fs_exit();
+    return sync_rc;
 }

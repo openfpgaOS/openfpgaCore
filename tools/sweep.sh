@@ -56,30 +56,8 @@ if [ -n "${VARIANT_DEFS:-}" ]; then
     printf "${C_HEAD}[sweep]${C_RESET} Variant defs: ${VARIANT_DEFS}\n\n"
 fi
 
-# Worst setup slack (WNS) + summed per-clock TNS from the slow-corner
-# setup panel.  25.1std titles it "; Slow ... Model Setup Summary";
-# Q17 single-corner runs use a plain "; Setup Summary".  Echoes
-# "wns tns" or nothing when the panel is missing.
-extract_wns_tns() {
-    local rpt="$1" anchor
-    [ -f "$rpt" ] || return 0
-    if grep -q '^; Slow[^;]* Model Setup Summary' "$rpt"; then
-        anchor='^; Slow[^;]* Model Setup Summary'
-    else
-        anchor='^; Setup Summary'
-    fi
-    awk -F';' -v anchor="$anchor" '
-        !f && $0 ~ anchor { f=1; next }
-        f && /^\+/ { dash++; if (dash >= 3) exit; next }
-        f && /^;/ && $3 ~ /-?[0-9]+\.[0-9]/ {
-            slack=$3; gsub(/[ \t]/, "", slack)
-            t=$4;     gsub(/[ \t]/, "", t)
-            if (wns == "" || slack+0 < wns+0) wns=slack
-            tns += t+0
-        }
-        END { if (wns != "") printf "%s %.1f\n", wns, tns }
-    ' "$rpt"
-}
+# Shared STA parsing (sta_wns_tns).
+. "$(dirname "${BASH_SOURCE[0]}")/sta_lib.sh"
 
 mkdir -p output_files
 echo "seed,fmax_mhz,wns_ns,tns_ns" > "${RESULTS}"
@@ -123,7 +101,7 @@ for seed in $(seq ${MIN} ${MAX}); do
             | grep "${CLOCK_RE}" | head -1 \
             | awk -F';' '{print $2}' | xargs)
         [ -z "$fmax" ] && fmax="failed"
-        read -r wns tns <<< "$(extract_wns_tns "output_files/${PROJECT}.sta.rpt")"
+        read -r wns tns <<< "$(sta_wns_tns "output_files/${PROJECT}.sta.rpt")"
     fi
 
     echo "${seed},${fmax},${wns},${tns}" >> "${RESULTS}"

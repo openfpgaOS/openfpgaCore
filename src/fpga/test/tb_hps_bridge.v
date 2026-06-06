@@ -33,7 +33,6 @@ module tb_hps_bridge (
     input  wire        ioctl_download,
     input  wire [15:0] ioctl_index,
     input  wire        ioctl_wr,
-    input  wire [26:0] ioctl_addr,
     input  wire [15:0] ioctl_dout,
     output wire        ioctl_wait,
 
@@ -118,7 +117,6 @@ hps_bridge #(
     .ioctl_download(ioctl_download),
     .ioctl_index(ioctl_index),
     .ioctl_wr(ioctl_wr),
-    .ioctl_addr(ioctl_addr),
     .ioctl_dout(ioctl_dout),
     .ioctl_wait(ioctl_wait),
     .img_mounted(img_mounted),

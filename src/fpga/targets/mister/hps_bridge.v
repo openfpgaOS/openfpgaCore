@@ -59,7 +59,6 @@ module hps_bridge #(
     input  wire        ioctl_download,
     input  wire [15:0] ioctl_index,
     input  wire        ioctl_wr,
-    input  wire [26:0] ioctl_addr,
     input  wire [15:0] ioctl_dout,
     output wire        ioctl_wait,
 
@@ -194,6 +193,14 @@ assign cont2_trig = 16'h0;
 
 // ====================================================================
 // boot.rom ioctl ingest
+//
+// Words are NEVER dropped: half-word assembly accepts every ioctl_wr,
+// and a one-entry skid absorbs a completed word that lands while the
+// previous one is still draining to SDRAM.  ioctl_wait asserts as soon
+// as a word is pending, so the skid covers the HPS's wait-observation
+// latency (one in-flight word); a transport that overruns BOTH would
+// have ignored ioctl_wait for two whole words, which no MiSTer main
+// build does.
 // ====================================================================
 
 reg        boot_active;
@@ -204,13 +211,16 @@ reg [15:0] boot_lo_half;
 reg        boot_have_lo;
 reg        boot_word_pending;   // assembled word awaiting its AXI write
 reg [31:0] boot_word;
+reg        boot_skid_full;      // second word completed during the drain
+reg [31:0] boot_skid;
 reg        ioctl_download_d;
 
 wire boot_index = (ioctl_index[5:0] == 6'd0);
 wire boot_start = ioctl_download && !ioctl_download_d && boot_index;
 wire boot_end   = !ioctl_download && ioctl_download_d && boot_active;
 
-// Throttle the HPS while the posted word drains.
+// Throttle the HPS while a posted word drains (the skid gives one
+// word of slack on top of this).
 assign ioctl_wait = boot_word_pending;
 
 assign boot_rom_loaded = boot_loaded_r;
@@ -292,14 +302,18 @@ end
 always @(posedge clk)
     sd_buff_din <= sd_half_d ? buf_rd_hi : buf_rd_lo;
 
-// Strobe edge detect (the periph holds these level until DONE capture).
-reg ds_read_d, ds_write_d, ds_open_d, ds_get_d;
-wire ds_read_rise  = target_dataslot_read  && !ds_read_d;
-wire ds_write_rise = target_dataslot_write && !ds_write_d;
-wire ds_open_rise  = (target_dataslot_openfile && !ds_open_d) ||
-                     (target_dataslot_getfile  && !ds_get_d);
-wire ds_any_level  = target_dataslot_read | target_dataslot_write |
-                     target_dataslot_openfile | target_dataslot_getfile;
+// Command dispatch is LEVEL-based: the periph holds the strobe high
+// until it captures DONE, and S_DONE below waits for the level to drop
+// before re-arming — so a command can never be missed (an edge detector
+// here could swallow a rise that coincided with a boot-word drain) and
+// can never double-fire.  Read takes priority if both levels were ever
+// high together (the periph's command decode is one-hot, so that would
+// be an upstream fault; the priority just keeps it deterministic).
+wire ds_cmd_read  = target_dataslot_read;
+wire ds_cmd_write = !target_dataslot_read && target_dataslot_write;
+wire ds_cmd_open  = target_dataslot_openfile | target_dataslot_getfile;
+wire ds_any_level = target_dataslot_read | target_dataslot_write |
+                    target_dataslot_openfile | target_dataslot_getfile;
 
 // Request validation (slot 0, sector-aligned, in-bounds, mounted).
 wire [31:0] req_off = target_dataslot_slotoffset;
@@ -318,11 +332,19 @@ localparam [2:0] ERR_AXI       = 3'd4;
 localparam [2:0] ERR_TIMEOUT   = 3'd5;
 localparam [2:0] ERR_NOSUPPORT = 3'd7;
 
+// Boot-word flow control: the FSM consumes the pending word at the B
+// response; the ingest block (sole writer of the word/skid registers)
+// promotes the skid or frees the slot.  boot_slot_free is true when a
+// word completing THIS cycle may take the pending slot directly.
+wire boot_word_consumed = (state == S_BOOT_B) && m_bvalid;
+wire boot_slot_free     = !boot_word_pending ||
+                          (boot_word_consumed && !boot_skid_full);
+
 // Write path fully drained ⇔ no AXI write activity is possible.
 assign bridge_wr_idle = (state != S_DRAIN_AW) && (state != S_DRAIN_W) &&
                         (state != S_DRAIN_B)  && (state != S_BOOT_AW) &&
                         (state != S_BOOT_W)   && (state != S_BOOT_B)  &&
-                        !boot_word_pending;
+                        !boot_word_pending && !boot_skid_full;
 
 assign hps_status   = {27'd0, readonly_r,
                        (target_dataslot_err != 3'd0),
@@ -342,8 +364,6 @@ always @(posedge clk or negedge reset_n) begin
         target_dataslot_ack  <= 1'b0;
         target_dataslot_done <= 1'b0;
         target_dataslot_err  <= 3'd0;
-        ds_read_d <= 1'b0; ds_write_d <= 1'b0;
-        ds_open_d <= 1'b0; ds_get_d <= 1'b0;
         m_awvalid <= 1'b0; m_awaddr <= 32'd0; m_awlen <= 8'd0;
         m_wvalid <= 1'b0; m_wdata <= 32'd0; m_wlast <= 1'b0;
         m_arvalid <= 1'b0; m_araddr <= 32'd0; m_arlen <= 8'd0;
@@ -367,50 +387,78 @@ always @(posedge clk or negedge reset_n) begin
         boot_have_lo <= 1'b0;
         boot_word_pending <= 1'b0;
         boot_word <= 32'd0;
+        boot_skid_full <= 1'b0;
+        boot_skid <= 32'd0;
         ioctl_download_d <= 1'b0;
     end else begin
         sd_ack_d <= sd_ack;
-        ds_read_d  <= target_dataslot_read;
-        ds_write_d <= target_dataslot_write;
-        ds_open_d  <= target_dataslot_openfile;
-        ds_get_d   <= target_dataslot_getfile;
         ioctl_download_d <= ioctl_download;
 
-        // ── boot.rom ingest (word assembly is independent of the FSM;
-        //    the AXI write is sequenced through S_BOOT_* below) ───────
+        // ── boot.rom ingest.  This block is the SINGLE writer of
+        //    boot_word/boot_word_pending/boot_skid — the FSM only signals
+        //    consumption (boot_word_consumed, on the B response) so a
+        //    word completing in the same cycle a drain finishes can never
+        //    be lost to a write-write conflict.  Every ioctl_wr is
+        //    accepted; the skid absorbs the HPS's wait-observation
+        //    latency. ──────────────────────────────────────────────────
         if (boot_start) begin
             boot_active   <= 1'b1;
             boot_loaded_r <= 1'b0;
             boot_len_r    <= 32'd0;
             boot_wr_addr  <= BOOT_STAGE_ADDR;
             boot_have_lo  <= 1'b0;
-        end
+            boot_word_pending <= 1'b0;
+            boot_skid_full <= 1'b0;
+        end else begin
+            // 1. Consumption/promotion (reads pre-cycle state).
+            if (boot_word_consumed) begin
+                if (boot_skid_full) begin
+                    boot_word <= boot_skid;       // promote; pending stays 1
+                    boot_skid_full <= 1'b0;
+                end else
+                    boot_word_pending <= 1'b0;
+            end
 
-        if (boot_active && ioctl_wr && !boot_word_pending) begin
-            boot_len_r <= boot_len_r + 32'd2;
-            if (!boot_have_lo) begin
-                boot_lo_half <= ioctl_dout;
-                boot_have_lo <= 1'b1;
-            end else begin
-                boot_word <= {ioctl_dout, boot_lo_half};
-                boot_word_pending <= 1'b1;
-                boot_have_lo <= 1'b0;
+            // 2. New-word completion.  boot_slot_free accounts for a
+            //    consumption happening THIS cycle (promotion occupied the
+            //    slot again only if the skid had a word).
+            if (boot_active && ioctl_wr) begin
+                boot_len_r <= boot_len_r + 32'd2;
+                if (!boot_have_lo) begin
+                    boot_lo_half <= ioctl_dout;
+                    boot_have_lo <= 1'b1;
+                end else begin
+                    if (boot_slot_free) begin
+                        boot_word <= {ioctl_dout, boot_lo_half};
+                        boot_word_pending <= 1'b1;
+                    end else begin
+                        boot_skid <= {ioctl_dout, boot_lo_half};
+                        boot_skid_full <= 1'b1;
+                    end
+                    boot_have_lo <= 1'b0;
+                end
+            end
+
+            // 3. Download end: flush a dangling odd half through the
+            //    same slot/skid path.
+            if (boot_end) begin
+                if (boot_have_lo) begin
+                    if (boot_slot_free) begin
+                        boot_word <= {16'd0, boot_lo_half};
+                        boot_word_pending <= 1'b1;
+                    end else begin
+                        boot_skid <= {16'd0, boot_lo_half};
+                        boot_skid_full <= 1'b1;
+                    end
+                    boot_have_lo <= 1'b0;
+                end
+                boot_active <= 1'b0;
             end
         end
 
-        if (boot_end) begin
-            if (boot_have_lo) begin
-                // dangling 16 bits: pad and flush
-                boot_word <= {16'd0, boot_lo_half};
-                boot_word_pending <= 1'b1;
-                boot_have_lo <= 1'b0;
-            end
-            boot_active <= 1'b0;
-        end
-
-        // Mark complete once the final word has fully landed.
-        if (!boot_active && !boot_word_pending && !boot_loaded_r &&
-            boot_len_r != 32'd0 &&
+        // Mark complete once every word (incl. skid/half) has landed.
+        if (!boot_active && !boot_word_pending && !boot_skid_full &&
+            !boot_have_lo && !boot_loaded_r && boot_len_r != 32'd0 &&
             state != S_BOOT_AW && state != S_BOOT_W && state != S_BOOT_B)
             boot_loaded_r <= 1'b1;
 
@@ -425,9 +473,9 @@ always @(posedge clk or negedge reset_n) begin
                 m_awaddr  <= boot_wr_addr;
                 m_awlen   <= 8'd0;
                 state     <= S_BOOT_AW;
-            end else if (ds_read_rise || ds_write_rise) begin
+            end else if (ds_cmd_read || ds_cmd_write) begin
                 target_dataslot_ack <= 1'b1;
-                op_is_write    <= ds_write_rise && !ds_read_rise;
+                op_is_write    <= ds_cmd_write;
                 op_lba_bytes   <= req_off;
                 op_dma_addr    <= target_dataslot_bridgeaddr;
                 op_blocks_left <= req_len[31:9] == 23'd0 ? 24'd1
@@ -440,13 +488,13 @@ always @(posedge clk or negedge reset_n) begin
                     target_dataslot_err <= ERR_BADREQ;
                     target_dataslot_done <= 1'b1;
                     state <= S_DONE;
-                end else if (ds_write_rise && !ds_read_rise && readonly_r) begin
+                end else if (ds_cmd_write && readonly_r) begin
                     target_dataslot_err <= ERR_READONLY;
                     target_dataslot_done <= 1'b1;
                     state <= S_DONE;
                 end else begin
                     target_dataslot_err <= ERR_OK;
-                    if (ds_write_rise && !ds_read_rise) begin
+                    if (ds_cmd_write) begin
                         buf_wr_idx <= 7'd0;
                         burst_idx  <= 3'd0;
                         m_arvalid <= 1'b1;
@@ -458,7 +506,7 @@ always @(posedge clk or negedge reset_n) begin
                         state <= S_RD_REQ;
                     end
                 end
-            end else if (ds_open_rise) begin
+            end else if (ds_cmd_open) begin
                 // OPENFILE/GETFILE have no MiSTer backing; fail fast so
                 // the periph dispatch guard never wedges.
                 target_dataslot_ack  <= 1'b1;
@@ -486,9 +534,10 @@ always @(posedge clk or negedge reset_n) begin
             end
         end
         S_BOOT_B: begin
+            // boot_word_consumed fires here; the ingest block (sole
+            // writer) frees the slot or promotes the skid.
             if (m_bvalid) begin
                 boot_wr_addr <= boot_wr_addr + 32'd4;
-                boot_word_pending <= 1'b0;
                 state <= S_IDLE;
             end
         end

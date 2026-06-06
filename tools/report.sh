@@ -46,28 +46,15 @@ awk -F';' '
     }
 ' "$FIT"
 
-# Quick timing verdict from the existing sta report — anchored on the
-# panel title row (the TOC repeats the phrase without a leading ';').
-# Prefer the explicit slow-corner model panel; older/aggregate reports
-# only carry a plain "Setup Summary".
+# Quick timing verdict from the existing sta report (shared parser).
+. "$TOOLS_DIR/sta_lib.sh"
 if [[ -f "$STA" ]]; then
-    if grep -q '^; Slow[^;]* Model Setup Summary' "$STA"; then
-        ANCHOR='^; Slow[^;]* Model Setup Summary'
-    else
-        ANCHOR='^; Setup Summary'
+    read -r WNS TNS <<< "$(sta_wns_tns "$STA")"
+    if [[ -n "$WNS" ]]; then
+        printf "  %-28s %s ns (slow corner, worst clock; TNS %s)\n" \
+               "Worst setup slack" "$WNS" "$TNS" \
+            | sed "s/\(-[0-9.]*\)/${RED}\1${RST}/; s/ \([0-9][0-9.]*\) ns/ ${GRN}\1${RST} ns/"
     fi
-    awk -F';' -v anchor="$ANCHOR" '
-        !f && $0 ~ anchor { f=1; next }
-        f && /^\+/ { dash++; if (dash >= 3) exit; next }
-        f && /^;/ && $3 ~ /-?[0-9]+\.[0-9]/ {
-            slack=$3; gsub(/[ \t]/, "", slack)
-            if (worst == "" || slack+0 < worst+0) worst=slack
-        }
-        END {
-            if (worst != "")
-                printf "  %-28s %s ns (slow corner, worst clock)\n", "Worst setup slack", worst
-        }
-    ' "$STA" | sed "s/\(-[0-9.]*\)/${RED}\1${RST}/; s/ \([0-9][0-9.]*\) ns/ ${GRN}\1${RST} ns/"
 fi
 
 [[ "$FULL" != "full" ]] && exit 0

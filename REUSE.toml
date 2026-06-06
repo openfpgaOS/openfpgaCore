@@ -15,6 +15,7 @@ path = [
     "src/fpga/targets/pocket/core_top.v",
     "src/fpga/targets/pocket/core_bridge_cmd.v",
     "src/fpga/targets/pocket/io_sdram.v",
+    "src/fpga/targets/mister/io_sdram.v",
     "src/chip32/pocket/architectures/chip32.vm.arch",
 ]
 precedence = "override"
@@ -43,7 +44,11 @@ SPDX-License-Identifier = "LicenseRef-Intel-FPGA-IP"
 
 # ===== Analogizer (openFPGA Pocket Analogizer + MiSTer-derived video cores) =
 [[annotations]]
-path = "src/fpga/targets/pocket/analogizer/**"
+path = [
+    "src/fpga/targets/pocket/analogizer/**",
+    "src/fpga/common/analogizer_psx.sv",
+    "src/fpga/common/dualshock_controller.v",
+]
 precedence = "override"
 SPDX-FileCopyrightText = [
     "Copyright (c) 2012-2013 Ludvig Strigeus",
@@ -51,6 +56,24 @@ SPDX-FileCopyrightText = [
     "Copyright (c) 2024 RndMnkIII (Analogizer)",
 ]
 SPDX-License-Identifier = "GPL-2.0-or-later"
+
+
+# ===== MiSTer framework (vendored, pristine — see targets/mister/sys/VENDOR.md)
+[[annotations]]
+path = "src/fpga/targets/mister/sys/**"
+precedence = "override"
+SPDX-FileCopyrightText = [
+    "Copyright (c) 2017-2025 Alexey Melnikov (Sorgelig) and MiSTer-devel contributors",
+    "Copyright (c) 2018-2020 Frederic Requin / TEMLIB (ascal)",
+]
+SPDX-License-Identifier = "GPL-3.0-or-later"
+
+# ===== FatFs (vendored, pristine — ChaN R0.15a) =============================
+[[annotations]]
+path = "src/firmware/os/targets/mister/fatfs/**"
+precedence = "override"
+SPDX-FileCopyrightText = "Copyright (C) 2025, ChaN"
+SPDX-License-Identifier = "BSD-1-Clause"
 
 # ===== Individually-licensed third-party files =============================
 [[annotations]]
@@ -82,6 +105,9 @@ SPDX-License-Identifier = "MIT"
 [[annotations]]
 path = [
     "src/fpga/targets/pocket/ap_core.qsf",
+    "src/fpga/targets/mister/mister.qpf",
+    "src/fpga/targets/mister/mister_assignment_defaults.qdf",
+    "src/fpga/targets/mister/files.qip",
     "src/fpga/targets/pocket/ap_core.qpf",
     "src/fpga/targets/pocket/ap_core_assignment_defaults.qdf",
     "src/fpga/targets/pocket/core_constraints.sdc",
@@ -100,6 +126,9 @@ path = [
     "tools/portability_baseline.txt",
     "src/fpga/targets/pocket/firmware.mif",
     "src/fpga/targets/pocket/output_files/**",
+    "src/fpga/targets/mister/output_files/**",
+    "src/fpga/targets/mister/README.md",
+    "docs/**",
     "src/fpga/targets/pocket/sta_output.log",
     "src/emulator/ofemu",
     "src/emulator/test_save",

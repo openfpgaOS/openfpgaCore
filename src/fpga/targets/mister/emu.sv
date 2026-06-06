@@ -146,6 +146,11 @@ wire         img_readonly;
 wire [63:0]  img_size;
 
 wire [31:0]  sd_lba[1];
+// One 512-byte block per sd_rd/sd_wr — the sector engine's contract.
+// Tied explicitly so the HPS can never stream multi-block transfers
+// that would alias over the 256-word sector buffer.
+wire [5:0]   sd_blk_cnt[1];
+assign sd_blk_cnt[0] = 6'd0;
 wire         sd_rd;
 wire         sd_wr;
 wire         sd_ack;
@@ -182,6 +187,7 @@ hps_io #(.CONF_STR(CONF_STR), .WIDE(1), .VDNUM(1), .BLKSZ(2)) hps_io (
 	.img_size            (img_size),
 
 	.sd_lba              (sd_lba),
+	.sd_blk_cnt          (sd_blk_cnt),
 	.sd_rd               (sd_rd),
 	.sd_wr               (sd_wr),
 	.sd_ack              (sd_ack),
@@ -252,12 +258,18 @@ hps_bridge #(
 	.BOOT_STAGE_ADDR(32'h0330_0000)
 ) bridge (
 	.clk      (clk_cpu),
-	.reset_n  (reset_n_cpu_core),
+	// Never reset — same rationale as the Pocket's bridge_to_sdram
+	// reset_n_axi(1'b1): the arbiter/slave it talks to are never-reset,
+	// so an OSD/status[0] warm reset must not abandon an AXI burst
+	// mid-handshake (that would wedge the whole SDRAM path).  The FSM
+	// self-drains: periph strobes drop on reset and S_DONE/watchdog
+	// return it to idle.  This also keeps boot_rom_loaded latched across
+	// warm resets — the HPS only re-sends boot.rom on core load.
+	.reset_n  (1'b1),
 
 	.ioctl_download (ioctl_download),
 	.ioctl_index    (ioctl_index),
 	.ioctl_wr       (ioctl_wr),
-	.ioctl_addr     (ioctl_addr),
 	.ioctl_dout     (ioctl_dout),
 	.ioctl_wait     (ioctl_wait),
 
@@ -530,7 +542,13 @@ end
 wire vidout_vs_w;
 wire early_vblank_safe_vid;
 
-axi_periph_slave periph (
+axi_periph_slave #(
+	// No Analogizer or Link port on MiSTer.  Apps gate on these via
+	// of_has_feature(); the analogizer HAL stub answers the state
+	// queries with "disabled" to match.
+	.HAS_ANALOGIZER(0),
+	.HAS_LINK(0)
+) periph (
 	.clk(clk_cpu),
 	.reset_n(reset_n_cpu_core),
 	// AXI4 slave interface

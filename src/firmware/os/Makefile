@@ -106,10 +106,19 @@ TARGET_SRCS = $(TARGET_DIR)/video.c \
               $(TARGET_DIR)/save.c \
               $(TARGET_DIR)/file.c \
               $(TARGET_DIR)/analogizer.c \
-              $(TARGET_DIR)/snac.c \
               $(TARGET_DIR)/terminal.c \
               $(TARGET_DIR)/timer.c \
               $(TARGET_DIR)/disk_boot.c \
+
+# SNAC is a Pocket peripheral driver, not a HAL contract the kernel
+# links against — only targets with the Analogizer/SNAC port build it
+# (sim models the Pocket periph, so it builds the same driver).
+# analogizer.c, by contrast, IS a HAL contract: kernel/syscall.c
+# answers the app-facing of_analogizer_* ecalls through it, so every
+# target needs at least the "not present" implementation.
+ifneq ($(filter $(TARGET),pocket sim),)
+TARGET_SRCS += $(TARGET_DIR)/snac.c
+endif
 
 # MiSTer: block-device layer + vendored FatFs (file/save HAL backend)
 ifeq ($(TARGET),mister)
@@ -139,16 +148,34 @@ OBJS = $(ALL_C_SRCS:.c=.o) $(BOOT_SRCS_S:.S=.o) $(HAL_SRCS_S:.S=.o)
 # ── Target-switch detection ──────────────────────────────────────────
 # Shared objects (hal/kernel/api) are compiled against the selected
 # target's target_platform.h, so reusing them across targets would link
-# a wrong memory map. When TARGET differs from the previous build, drop
-# the stale objects at parse time and re-stamp — `make TARGET=mister`
-# after a pocket build (or sim, in any order) Just Works without a
-# manual clean. Same-target rebuilds stay fully incremental.
-LAST_TARGET := $(strip $(shell cat .last_target 2>/dev/null))
-ifneq ($(LAST_TARGET),$(TARGET))
-__retarget := $(shell rm -f $(OBJS) $(OBJS:.o=.d) \
-                  $(FW_TARGET).elf $(FW_TARGET).bin $(FW_TARGET).map os.bin; \
-                  echo $(TARGET) > .last_target)
-endif
+# a wrong memory map.  The .last_target stamp rule clears stale objects
+# when TARGET changes — `make TARGET=mister` after a pocket build (or
+# sim, in any order) Just Works without a manual clean.  Same-target
+# rebuilds stay fully incremental.
+#
+# This is a real RECIPE on purpose (an earlier version was a parse-time
+# $(shell rm ...), which executed during `make -n`/`make help`/`make
+# clean` and raced parallel sub-makes).  Recipe-time means dry runs only
+# print it, -j orders it before any compile via the order-only prereq,
+# and it cleans with globs over EVERY target's objects — including
+# target-exclusive ones (e.g. mister's fatfs/*.o) that the new TARGET's
+# $(OBJS) wouldn't name.
+# The stamp rule below is textually the first rule in this Makefile —
+# keep `make` (no goal) building the firmware, not the stamp.
+.DEFAULT_GOAL := all
+
+RETARGET_GLOBS = hal/*.o kernel/*.o boot/*.o targets/*/*.o \
+                 targets/*/boot/*.o targets/*/fatfs/*.o \
+                 ../api/*.o ../lib/iso9660/*.o
+.last_target: FORCE
+	@if [ "$$(cat .last_target 2>/dev/null)" != "$(TARGET)" ]; then \
+		rm -f $(RETARGET_GLOBS) $(RETARGET_GLOBS:.o=.d) \
+		      $(FW_TARGET).elf $(FW_TARGET).bin $(FW_TARGET).map os.bin; \
+		echo $(TARGET) > .last_target; \
+	fi
+
+FORCE:
+.PHONY: FORCE
 
 # RAM size for MIF generation
 RAM_WORDS = 8192
@@ -157,8 +184,11 @@ RAM_WORDS = 8192
 all: $(FW_TARGET).bin $(FW_TARGET).mif $(FW_TARGET).lst os.bin
 	$(SIZE) $(FW_TARGET).elf
 
+# Every object (and the link) is ordered after the retarget stamp check.
+$(OBJS): | .last_target
+
 # Link
-$(FW_TARGET).elf: $(OBJS) os.ld
+$(FW_TARGET).elf: $(OBJS) os.ld | .last_target
 	$(LD) $(LDFLAGS) -o $@ $(OBJS) $(LIBS)
 
 # Full binary

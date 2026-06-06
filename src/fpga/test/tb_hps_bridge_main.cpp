@@ -218,14 +218,23 @@ static void mount(uint64_t size, bool readonly) {
 }
 
 // ── ioctl boot.rom streamer ─────────────────────────────────────────
-static void ioctl_boot(const uint8_t *data, uint32_t len) {
+// violate_wait=true models an HPS that observes ioctl_wait one word
+// late: each word is sent immediately even if wait just asserted — the
+// bridge's one-entry skid must absorb it without dropping data.
+static void ioctl_boot(const uint8_t *data, uint32_t len,
+                       bool violate_wait = false) {
     tb->ioctl_index = 0;
     tb->ioctl_download = 1;
     ticks(4);
+    bool violated = false;
     for (uint32_t a = 0; a < len; a += 2) {
-        int guard = 0;
-        while (tb->ioctl_wait && guard++ < 10000) tick();
-        tb->ioctl_addr = a;
+        if (!violate_wait || violated) {
+            int guard = 0;
+            while (tb->ioctl_wait && guard++ < 10000) tick();
+            violated = false;
+        } else if (tb->ioctl_wait) {
+            violated = true;    // send THIS word despite wait (depth 1)
+        }
         tb->ioctl_dout = (uint16_t)(data[a] | ((a + 1 < len ? data[a + 1] : 0) << 8));
         tb->ioctl_wr = 1;
         tick();
@@ -235,7 +244,7 @@ static void ioctl_boot(const uint8_t *data, uint32_t len) {
     int guard = 0;
     while (tb->ioctl_wait && guard++ < 10000) tick();
     tb->ioctl_download = 0;
-    ticks(200);     // final word drains, boot_loaded latches
+    ticks(400);     // final word/skid/half drains, boot_loaded latches
 }
 
 // ── main ────────────────────────────────────────────────────────────
@@ -367,6 +376,34 @@ int main(int argc, char **argv) {
               "re-download updates length");
         CHECK(sdram_check(0x03300000u, boot2, sizeof(boot2), "boot2"),
               "re-downloaded bytes in staging");
+    }
+
+    printf("test_boot_wait_violation:\n");
+    {
+        // HPS that reacts to ioctl_wait one word late — skid must absorb.
+        static uint8_t bootv[4096];
+        for (uint32_t i = 0; i < sizeof(bootv); i++) bootv[i] = (uint8_t)(i * 13 + 7);
+        ioctl_boot(bootv, sizeof(bootv), true);
+        CHECK(tb->boot_loaded && tb->hps_boot_len == sizeof(bootv),
+              "length exact under wait violations");
+        CHECK(sdram_check(0x03300000u, bootv, sizeof(bootv), "bootv"),
+              "no words dropped under wait violations");
+    }
+
+    printf("test_boot_odd_length:\n");
+    {
+        // Image with a dangling 16-bit half (len % 4 == 2).
+        static uint8_t booto[514];
+        for (uint32_t i = 0; i < sizeof(booto); i++) booto[i] = (uint8_t)(i ^ 0x5C);
+        ioctl_boot(booto, sizeof(booto));
+        CHECK(tb->boot_loaded && tb->hps_boot_len == sizeof(booto),
+              "odd length latched");
+        CHECK(sdram_check(0x03300000u, booto, 512, "booto-body"),
+              "body bytes in staging");
+        uint32_t last = 0;
+        CHECK(axi_read(0x03300000u + 512, &last) &&
+              (last & 0xFFFF) == (uint32_t)(booto[512] | (booto[513] << 8)),
+              "dangling half flushed (zero-padded)");
     }
 
     printf("\n=== Results: %d passed, %d failed ===\n", tests_passed, tests_failed);

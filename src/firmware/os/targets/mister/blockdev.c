@@ -11,17 +11,29 @@
  * idle hook pumped during sector waits.  Three transfer strategies:
  *
  *   READ,  aligned dest:  inval-range → DMA direct into the buffer → inval
- *   READ,  other dest:    DMA into scratch → memcpy from the UNCACHED alias
+ *   READ,  other dest:    DMA into scratch → inval → memcpy (cached view)
  *   WRITE, any source:    4-aligned: clean-range → DMA from the buffer
- *                         else: memcpy to uncached scratch → DMA from scratch
+ *                         else: memcpy to cached scratch → clean → DMA
  *
- * The scratch window (CRAM0_SCRATCH, 32 KB) is only ever touched through
- * the 0x5xxxxxxx uncached alias, so no cache lines exist for it and DMA
- * landing there needs no maintenance.
+ * The bounce path goes through the CACHED view of the scratch window with
+ * explicit maintenance — a memcpy from the uncached alias would issue one
+ * uncached word read per 4 bytes (128 round-trips per sector); through the
+ * cache it's a handful of line-fill bursts.  The discipline that keeps
+ * this safe: scratch lines are only ever dirtied by the write-bounce
+ * memcpy and are cleaned before the engine reads them, so no dirty
+ * victim can land on top of DMA data; the read-bounce invalidate after
+ * DMA discards any stale/speculative lines before the copy.
  *
- * Cache-line discipline mirrors pocket/file.c's bridge_read_impl: a DMA
- * into cached SDRAM is bracketed by invalidates so dirty victim lines can't
- * overwrite DMA data and stale lines can't mask it.
+ * Cache-line discipline for direct transfers mirrors pocket/file.c's
+ * bridge_read_impl: a DMA into cached SDRAM is bracketed by invalidates
+ * so dirty victim lines can't overwrite DMA data and stale lines can't
+ * mask it.
+ *
+ * The sector engine addresses the image with a 32-bit BYTE offset
+ * (DS_SLOT_OFFSET), so the device is architecturally capped at 4 GiB —
+ * both transfer entry points bound-check, and GET_SECTOR_COUNT clamps
+ * what FatFs is told, so an oversized .vhd degrades to "first 4 GiB
+ * visible" instead of silent offset wraparound.
  */
 
 #include "blockdev.h"
@@ -38,10 +50,15 @@
 #define CACHE_LINE          64u
 #define SCRATCH_SECTORS     (OF_TARGET_CRAM0_DMA_CHUNK_SIZE / SECTOR_BYTES)
 
-/* Scratch, uncached alias only (see file header). */
-#define SCRATCH_UNCACHED    (SDRAM_UNCACHED_BASE + OF_TARGET_CRAM0_BRIDGE + \
+/* Scratch window, cached view (see file header for the discipline). */
+#define SCRATCH_CACHED      (SDRAM_BASE + OF_TARGET_CRAM0_BRIDGE + \
                              OF_TARGET_CRAM0_SCRATCH_OFFSET)
 #define SCRATCH_DMA_ADDR    (OF_TARGET_CRAM0_BRIDGE + OF_TARGET_CRAM0_SCRATCH_OFFSET)
+
+/* 32-bit byte-offset engine limit (see file header). */
+static int range_addressable(uint32_t lba, uint32_t count) {
+    return ((uint64_t)lba + count) * SECTOR_BYTES <= 0x100000000ull;
+}
 
 static void (*idle_hook)(void);
 static int op_count;
@@ -179,6 +196,8 @@ static int addr_in_uncached_sdram(uint32_t addr, uint32_t length) {
 int of_blockdev_read(void *buf, uint32_t lba, uint32_t count) {
     if (!of_blockdev_present())
         return OF_ERR_NOT_SUPPORTED;
+    if (!range_addressable(lba, count))
+        return OF_ERR_BAD_RANGE;
 
     uint8_t *dst = (uint8_t *)buf;
     uint32_t addr = (uintptr_t)buf;
@@ -214,7 +233,10 @@ int of_blockdev_read(void *buf, uint32_t lba, uint32_t count) {
                                 SCRATCH_DMA_ADDR, chunk);
             if (rc < 0)
                 return rc;
-            memcpy(dst + done, (const void *)SCRATCH_UNCACHED, chunk);
+            /* Discard stale/speculative scratch lines, then copy through
+             * the cache (line-fill bursts, not per-word uncached reads). */
+            of_cache_inval_range((void *)SCRATCH_CACHED, chunk);
+            memcpy(dst + done, (const void *)SCRATCH_CACHED, chunk);
         }
 
         done += chunk;
@@ -228,6 +250,8 @@ int of_blockdev_write(const void *buf, uint32_t lba, uint32_t count) {
         return OF_ERR_NOT_SUPPORTED;
     if (of_blockdev_readonly())
         return OF_ERR_NOT_SUPPORTED;
+    if (!range_addressable(lba, count))
+        return OF_ERR_BAD_RANGE;
 
     const uint8_t *src = (const uint8_t *)buf;
     uint32_t addr = (uintptr_t)buf;
@@ -258,7 +282,10 @@ int of_blockdev_write(const void *buf, uint32_t lba, uint32_t count) {
             if (rc < 0)
                 return rc;
         } else {
-            memcpy((void *)SCRATCH_UNCACHED, src + done, chunk);
+            /* Stage through the cached view, clean so the engine's AXI
+             * reads see the data (and no dirty scratch lines remain). */
+            memcpy((void *)SCRATCH_CACHED, src + done, chunk);
+            of_cache_clean_range((void *)SCRATCH_CACHED, chunk);
             fence();
             int rc = sector_cmd(DS_CMD_WRITE, lba + done / SECTOR_BYTES,
                                 SCRATCH_DMA_ADDR, chunk);
@@ -307,9 +334,14 @@ DRESULT disk_ioctl(BYTE pdrv, BYTE cmd, void *buff) {
     case CTRL_SYNC:
         /* sector_cmd is fully synchronous — nothing buffered below FatFs */
         return RES_OK;
-    case GET_SECTOR_COUNT:
-        *(LBA_t *)buff = (LBA_t)(of_blockdev_size() / SECTOR_BYTES);
+    case GET_SECTOR_COUNT: {
+        /* Clamp to the engine's 4 GiB addressing limit (see file header). */
+        uint64_t sz = of_blockdev_size();
+        if (sz > 0x100000000ull)
+            sz = 0x100000000ull;
+        *(LBA_t *)buff = (LBA_t)(sz / SECTOR_BYTES);
         return RES_OK;
+    }
     case GET_SECTOR_SIZE:
         *(WORD *)buff = SECTOR_BYTES;
         return RES_OK;

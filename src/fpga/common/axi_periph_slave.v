@@ -18,7 +18,15 @@
 `default_nettype none
 
 
-module axi_periph_slave (
+module axi_periph_slave #(
+    // Hardware feature advertisement (HW_FEATURES register @ 0x98).
+    // Per-feature switches so the shared capability bits live in exactly
+    // one place (HW_FEATURES_RESOLVED below); a target without a given
+    // peripheral overrides just its switch (MiSTer: HAS_ANALOGIZER(0),
+    // HAS_LINK(0)).  Defaults = the Pocket feature set.
+    parameter HAS_ANALOGIZER = 1,
+    parameter HAS_LINK       = 1
+) (
     input wire clk,
     input wire reset_n,
 
@@ -584,19 +592,22 @@ assign ext_irq = (uart_rx_irq & irq_mask[0]) |
 // Perspective and parametric span commands are implemented and covered by
 // the GPU acceptance tests. Keep the caps exposed so renderers can select
 // these paths without local force-enable hacks.
-localparam [31:0] HW_FEATURES =
-    32'h0000_0001                           // Audio stereo FIFO present
-    |
+//
+// Composed from the HAS_* parameters so each target advertises what it
+// actually has (apps gate on these bits via of_has_feature) while the
+// shared bits are spelled exactly once.
 `ifdef EXCLUDE_LINK
-    32'h0000_0000
+localparam [31:0] FEAT_LINK = 32'h0000_0000;
 `else
-    32'h0000_0004
+localparam [31:0] FEAT_LINK = HAS_LINK ? 32'h0000_0004 : 32'h0000_0000;
 `endif
-    |
-    32'h0000_0010      // GPU span renderer
-    |
-    32'h0007_E000      // GPU persp + fragpipe + param span/list/z/scale caps (bits 13..18)
-    | 32'h0000_0348;  // Analogizer(3) + MIDI(6) + FPU(8) + Save slots(9) — always present
+localparam [31:0] HW_FEATURES_RESOLVED =
+    32'h0000_0001      // Audio stereo FIFO present
+    | 32'h0000_0010    // GPU span renderer
+    | 32'h0007_E000    // GPU persp + fragpipe + param span/list/z/scale caps (bits 13..18)
+    | 32'h0000_0340    // MIDI(6) + FPU(8) + Save slots(9)
+    | FEAT_LINK
+    | (HAS_ANALOGIZER ? 32'h0000_0008 : 32'h0000_0000);
 
 localparam FB_ADDR_0 = 25'h0000000;     // byte 0x000000 → CPU 0x10000000
 localparam FB_ADDR_1 = 25'h0080000;     // byte 0x100000 → CPU 0x10100000
@@ -1471,7 +1482,7 @@ always @(*) begin
             6'd34: sysreg_rdata = analogizer_voffset;              // ANALOGIZER_V_OFFSET
             6'd36: sysreg_rdata = {dt_query_valid, dt_query_data[30:0]};
             6'd37: sysreg_rdata = dt_query_data;                    // DT_QUERY_DATA full 32-bit result
-            6'd38: sysreg_rdata = HW_FEATURES;                     // HW_FEATURES
+            6'd38: sysreg_rdata = HW_FEATURES_RESOLVED;                     // HW_FEATURES
             6'd39: sysreg_rdata = {31'b0, vsync_irq_pending};      // VSYNC_IRQ_PENDING
             // SNAC Shifter + GPIO registers (0xA0-0xAC)
             6'd40: sysreg_rdata = {22'b0, snac_mode_reg, snac_en_reg, 6'b0, snac_busy};
