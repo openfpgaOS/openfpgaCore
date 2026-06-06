@@ -10,7 +10,8 @@
 // Routes 3 AXI4 masters to 1 AXI4 slave (axi_sdram_slave):
 //   M0 = GPU      (span reads + framebuffer writes, merged upstream)
 //   M1 = CPU      (i + d + p merged through cpu_target_port)
-//   M2 = APF bridge file DMA (write-only)
+//   M2 = bridge file DMA (Pocket: APF writes only, AR tied off;
+//                         MiSTer: hps_bridge sector engine, read + write)
 //   M3 = AudioMix (audio_mixer per-voice sample fetch, read-only)
 //
 // Priority: CPU-starvation guard, then AudioMix, then GPU > CPU > Bridge.
@@ -87,7 +88,18 @@ module axi_sdram_arbiter #(
     output wire        m1_bvalid,
     output wire [1:0]  m1_bresp,
 
-    // Master 2: APF bridge file DMA (write-only)
+    // Master 2: bridge file DMA.  Write channel used by both targets;
+    // the read channel exists for MiSTer's hps_bridge (disk-image sector
+    // writeback reads SDRAM → sd_buff).  Pocket ties AR off.
+    input  wire        m2_arvalid,
+    output wire        m2_arready,
+    input  wire [31:0] m2_araddr,
+    input  wire [7:0]  m2_arlen,
+    output wire        m2_rvalid,
+    output wire [31:0] m2_rdata,
+    output wire [1:0]  m2_rresp,
+    output wire        m2_rlast,
+    input  wire        m2_rready,
     input  wire        m2_awvalid,
     output wire        m2_awready,
     input  wire [31:0] m2_awaddr,
@@ -406,10 +418,13 @@ always @(posedge clk or posedge reset) begin
                 arb_state <= ST_WR;
                 gpu_deficit <= 4'd0;
                 if (audio_pending) audio_deficit <= audio_deficit + 4'd1;
-            end else if (m2_awvalid) begin
+            end else if (m2_awvalid || m2_arvalid) begin
+                // Bridge AW preferred over AR within the arm; the bridge
+                // FSM is single-transaction so both are never pending at
+                // once in practice.
                 grant <= 2'd2;
                 active_wr_gpuq <= 1'b0;
-                arb_state <= ST_WR;
+                arb_state <= m2_awvalid ? ST_WR : ST_RD;
                 if (cpu_pending) gpu_deficit <= gpu_deficit + 4'd1;
                 if (audio_pending) audio_deficit <= audio_deficit + 4'd1;
             end else if (m3_arvalid) begin
@@ -450,11 +465,14 @@ end
 // AR channel.
 assign s_arvalid = (active_rd && !rd_completing) ? (grant_m0 ? m0_arvalid :
                                                      grant_m1 ? m1_arvalid :
+                                                     grant_m2 ? m2_arvalid :
                                                                 m3_arvalid) : 1'b0;
 assign s_araddr  = grant_m0 ? m0_araddr  :
-                   grant_m1 ? m1_araddr  : m3_araddr;
+                   grant_m1 ? m1_araddr  :
+                   grant_m2 ? m2_araddr  : m3_araddr;
 assign s_arlen   = grant_m0 ? m0_arlen   :
-                   grant_m1 ? m1_arlen   : m3_arlen;
+                   grant_m1 ? m1_arlen   :
+                   grant_m2 ? m2_arlen   : m3_arlen;
 
 // AW/W channel.  Posted M0 writes drain as native SDRAM bursts: the GPU's
 // contiguous full-strobe framebuffer AW (up to 8 beats) is coalesced into a
@@ -488,27 +506,33 @@ assign s_wlast   = active_wr_gpuq ? active_gpuq_wlast :
 
 assign m0_arready = (active_rd && grant_m0) ? s_arready : 1'b0;
 assign m1_arready = (active_rd && grant_m1) ? s_arready : 1'b0;
+assign m2_arready = (active_rd && grant_m2) ? s_arready : 1'b0;
 assign m3_arready = (active_rd && grant_m3) ? s_arready : 1'b0;
 
 assign m0_rvalid = (active_rd && grant_m0) ? s_rvalid : 1'b0;
 assign m1_rvalid = (active_rd && grant_m1) ? s_rvalid : 1'b0;
+assign m2_rvalid = (active_rd && grant_m2) ? s_rvalid : 1'b0;
 assign m3_rvalid = (active_rd && grant_m3) ? s_rvalid : 1'b0;
 
-// Honor each read master's RREADY.  M1 (CPU) and M3 (AudioMix) can back-
-// pressure; M0 (GPU) has no RREADY because its read consumer (tex cache / DMA)
-// captures every beat the cycle m_rvalid lands, so it is contractually always
-// ready and tied to 1'b1.
+// Honor each read master's RREADY.  M1 (CPU), M2 (bridge) and M3 (AudioMix)
+// can back-pressure; M0 (GPU) has no RREADY because its read consumer (tex
+// cache / DMA) captures every beat the cycle m_rvalid lands, so it is
+// contractually always ready and tied to 1'b1.
 assign s_rready = active_rd ? (grant_m1 ? m1_rready :
+                               grant_m2 ? m2_rready :
                                grant_m3 ? m3_rready : 1'b1) : 1'b1;
 
 assign m0_rdata  = s_rdata;
 assign m1_rdata  = s_rdata;
+assign m2_rdata  = s_rdata;
 assign m3_rdata  = s_rdata;
 assign m0_rresp  = s_rresp;
 assign m1_rresp  = s_rresp;
+assign m2_rresp  = s_rresp;
 assign m3_rresp  = s_rresp;
 assign m0_rlast  = s_rlast;
 assign m1_rlast  = s_rlast;
+assign m2_rlast  = s_rlast;
 assign m3_rlast  = s_rlast;
 
 assign m0_awready = !m0w_active && m0_aw_has_space;

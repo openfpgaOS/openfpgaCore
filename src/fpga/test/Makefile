@@ -177,6 +177,22 @@ ARBITER_DIR = obj_dir_arbiter
 ARBITER_FLAGS = -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC -Wno-CASEINCOMPLETE -Wno-UNUSEDSIGNAL
 
 # ============================================================
+# MiSTer hps_bridge — boot.rom ioctl DMA + disk sector engine
+# ============================================================
+HPSBRG_SRCS = \
+	tb_hps_bridge.v \
+	sdram_fast_model.v \
+	$(MISTER_DIR)/hps_bridge.v \
+	$(COMMON_DIR)/axi_sdram_arbiter.v \
+	$(COMMON_DIR)/axi_sdram_slave.v
+
+MISTER_DIR = ../targets/mister
+HPSBRG_CPP = tb_hps_bridge_main.cpp
+HPSBRG_TOP = tb_hps_bridge
+HPSBRG_DIR = obj_dir_hps_bridge
+HPSBRG_FLAGS = -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC -Wno-CASEINCOMPLETE -Wno-UNUSEDSIGNAL -Wno-PINCONNECTEMPTY
+
+# ============================================================
 # Full system bring-up — CPU + SDRAM + CRAM0 CDC + BRAM
 # ============================================================
 # Boots the VexiiRiscv through the v2 fabric, loads os.bin into the
@@ -217,7 +233,7 @@ SYSTEM_FLAGS = -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC -Wno-CASEINCOMPLETE \
 .PHONY: all sdram sdram-serialize sdram-native2 sdram-all sram scanout analogchain gpu gpu-persp gpu-floor gpu-gpudemo gpu-acceptance gpu-acceptance-single gpu-acceptance-burst2 gpu-acceptance-all gpu-chain \
         axi-periph bridge-cmd audio audio-mixer arbiter system run run-sram build clean
 
-all: sdram-all sram gpu gpu-persp axi-periph bridge-cmd audio audio-mixer arbiter
+all: sdram-all sram gpu gpu-persp axi-periph bridge-cmd audio audio-mixer arbiter hps-bridge
 
 # --- SDRAM ---
 sdram: $(SDRAM_DIR)/V$(SDRAM_TOP)
@@ -464,6 +480,17 @@ $(ARBITER_DIR)/V$(ARBITER_TOP): $(ARBITER_SRCS) $(ARBITER_CPP)
 		--top-module $(ARBITER_TOP) --Mdir $(ARBITER_DIR) \
 		-I$(COMMON_DIR) \
 		$(ARBITER_SRCS) $(ARBITER_CPP)
+
+# --- MiSTer hps_bridge ---
+hps-bridge: $(HPSBRG_DIR)/V$(HPSBRG_TOP)
+	@printf "\n=== MiSTer hps_bridge (boot ioctl + sector engine) ===\n"
+	./$(HPSBRG_DIR)/V$(HPSBRG_TOP)
+
+$(HPSBRG_DIR)/V$(HPSBRG_TOP): $(HPSBRG_SRCS) $(HPSBRG_CPP)
+	$(VERILATOR) $(VERILATOR_FLAGS) $(HPSBRG_FLAGS) \
+		--top-module $(HPSBRG_TOP) --Mdir $(HPSBRG_DIR) \
+		-I$(COMMON_DIR) -I$(MISTER_DIR) \
+		$(HPSBRG_SRCS) $(HPSBRG_CPP)
 
 # --- System bring-up ---
 system: $(SYSTEM_DIR)/V$(SYSTEM_TOP)

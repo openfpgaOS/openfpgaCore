@@ -1,0 +1,30 @@
+# openfpgaOS MiSTer core — source list (paths relative to the project dir)
+
+# Target-specific
+set_global_assignment -name SYSTEMVERILOG_FILE emu.sv
+set_global_assignment -name VERILOG_FILE hps_bridge.v
+set_global_assignment -name VERILOG_FILE io_sdram.v
+set_global_assignment -name VERILOG_FILE pll_sys.v
+set_global_assignment -name VERILOG_FILE sram_bram.v
+set_global_assignment -name VERILOG_FILE synch_3.v
+set_global_assignment -name SDC_FILE mister.sdc
+
+# Shared platform-neutral RTL
+set_global_assignment -name VERILOG_FILE ../../common/audio_mixer.v
+set_global_assignment -name VERILOG_FILE ../../common/gpu_core.v
+set_global_assignment -name VERILOG_FILE ../../common/gpu_tex_cache.v
+set_global_assignment -name VERILOG_FILE ../../common/axi_periph_slave.v
+set_global_assignment -name VERILOG_FILE ../../common/sync_fifo.v
+set_global_assignment -name VERILOG_FILE ../../common/snac_shifter.v
+set_global_assignment -name VERILOG_FILE ../../common/snac_psx_poller.v
+set_global_assignment -name SYSTEMVERILOG_FILE ../../common/analogizer_psx.sv
+set_global_assignment -name VERILOG_FILE ../../common/dualshock_controller.v
+set_global_assignment -name VERILOG_FILE ../../common/axi_register_slice.v
+set_global_assignment -name VERILOG_FILE ../../common/axi_sdram_arbiter.v
+set_global_assignment -name VERILOG_FILE ../../common/axi_sdram_slave.v
+set_global_assignment -name VERILOG_FILE ../../common/cpu_system.v
+set_global_assignment -name VERILOG_FILE ../../common/cpu_target_port.v
+set_global_assignment -name VERILOG_FILE ../../common/video_CRT_scanout_indexed_BRAM.v
+
+# Generated VexiiRiscv netlist (make cpu)
+set_global_assignment -name VERILOG_FILE ../../vendor/vexriscv/VexiiRiscv/VexiiRiscv.v

@@ -11,7 +11,14 @@
 #   MIN   First seed (default: 1)
 #   MAX   Last seed  (default: 30)
 #
-# Compiles each seed sequentially, tracks Fmax, rebuilds with the best.
+# Env (set by the target Makefiles):
+#   PROJECT   Quartus project/revision        (default: ap_core)
+#   CLOCK_RE  BRE matching the 100 MHz clock in the Fmax table
+#             (default: the Pocket's mp_ram general[0]; pipes in clock
+#             names are literal in BRE, so paths like emu|pll|... work)
+#
+# Compiles each seed sequentially, tracks Fmax + setup WNS/TNS, rebuilds
+# with the best.
 #
 # IMPORTANT: "best" means highest restricted Fmax, regardless of whether
 # the seed meets the 100 MHz timing target. Negative-slack seeds are
@@ -23,7 +30,8 @@
 # Note: no `set -e`. We deliberately want the script to keep going past
 # Quartus warnings (timing not met) and to record every seed's result.
 
-PROJECT=ap_core
+PROJECT=${PROJECT:-ap_core}
+CLOCK_RE=${CLOCK_RE:-mp_ram.*general\[0\]}
 MIN=${1:-1}
 MAX=${2:-30}
 RESULTS=output_files/seed_map.log
@@ -48,11 +56,38 @@ if [ -n "${VARIANT_DEFS:-}" ]; then
     printf "${C_HEAD}[sweep]${C_RESET} Variant defs: ${VARIANT_DEFS}\n\n"
 fi
 
+# Worst setup slack (WNS) + summed per-clock TNS from the slow-corner
+# setup panel.  25.1std titles it "; Slow ... Model Setup Summary";
+# Q17 single-corner runs use a plain "; Setup Summary".  Echoes
+# "wns tns" or nothing when the panel is missing.
+extract_wns_tns() {
+    local rpt="$1" anchor
+    [ -f "$rpt" ] || return 0
+    if grep -q '^; Slow[^;]* Model Setup Summary' "$rpt"; then
+        anchor='^; Slow[^;]* Model Setup Summary'
+    else
+        anchor='^; Setup Summary'
+    fi
+    awk -F';' -v anchor="$anchor" '
+        !f && $0 ~ anchor { f=1; next }
+        f && /^\+/ { dash++; if (dash >= 3) exit; next }
+        f && /^;/ && $3 ~ /-?[0-9]+\.[0-9]/ {
+            slack=$3; gsub(/[ \t]/, "", slack)
+            t=$4;     gsub(/[ \t]/, "", t)
+            if (wns == "" || slack+0 < wns+0) wns=slack
+            tns += t+0
+        }
+        END { if (wns != "") printf "%s %.1f\n", wns, tns }
+    ' "$rpt"
+}
+
 mkdir -p output_files
-echo "seed,fmax_mhz" > "${RESULTS}"
+echo "seed,fmax_mhz,wns_ns,tns_ns" > "${RESULTS}"
 
 BEST_SEED=""
 BEST_FMAX="0"
+BEST_WNS=""
+BEST_TNS=""
 COUNT=0
 
 for seed in $(seq ${MIN} ${MAX}); do
@@ -77,29 +112,34 @@ for seed in $(seq ${MIN} ${MAX}); do
         quartus_sh --flow compile ${PROJECT} > "output_files/seed_${seed}_compile.log" 2>&1 || true
     fi
 
-    # Extract restricted Fmax for the SDRAM clock domain (mp_ram general[0]).
+    # Extract restricted Fmax for the 100 MHz clock domain (CLOCK_RE).
     # The STA report exists whether or not timing was met, so we read it
     # unconditionally and only mark a seed "failed" if the report is
     # missing or unparseable (= the fitter crashed before STA ran).
     fmax="failed"
+    wns=""; tns=""
     if [ -f "output_files/${PROJECT}.sta.rpt" ]; then
         fmax=$(grep -E "^\; [0-9]" "output_files/${PROJECT}.sta.rpt" 2>/dev/null \
-            | grep "mp_ram.*general\[0\]" | head -1 \
+            | grep "${CLOCK_RE}" | head -1 \
             | awk -F';' '{print $2}' | xargs)
         [ -z "$fmax" ] && fmax="failed"
+        read -r wns tns <<< "$(extract_wns_tns "output_files/${PROJECT}.sta.rpt")"
     fi
 
-    echo "${seed},${fmax}" >> "${RESULTS}"
+    echo "${seed},${fmax},${wns},${tns}" >> "${RESULTS}"
     cp "output_files/${PROJECT}.sta.rpt" "output_files/seed_${seed}_sta.log" 2>/dev/null || true
 
     # Track best
     if [ "$fmax" != "failed" ]; then
-        printf "${C_OK}%s${C_RESET}\n" "${fmax}"
+        printf "${C_OK}%-12s${C_RESET} ${C_DIM}WNS %-8s TNS %s${C_RESET}\n" \
+               "${fmax}" "${wns:--}" "${tns:--}"
         fmax_num=$(echo "$fmax" | sed 's/ MHz//' | tr -d ' ')
         best_num=$(echo "$BEST_FMAX" | sed 's/ MHz//' | tr -d ' ')
         if [ "$(echo "$fmax_num > $best_num" | bc -l 2>/dev/null || echo 0)" = "1" ]; then
             BEST_SEED=${seed}
             BEST_FMAX=${fmax}
+            BEST_WNS=${wns}
+            BEST_TNS=${tns}
         fi
     else
         printf "${C_ERR}failed${C_RESET}\n"
@@ -109,13 +149,14 @@ done
 # Summary
 echo ""
 printf "${C_HEAD}Results:${C_RESET}\n"
-tail -n +2 "${RESULTS}" | sort -t, -k2 -rn | while IFS=, read seed fmax; do
+printf "  ${C_DIM}%-8s %-12s %-10s %s${C_RESET}\n" "Seed" "Fmax" "WNS" "TNS"
+tail -n +2 "${RESULTS}" | sort -t, -k2 -rn | while IFS=, read seed fmax wns tns; do
     if echo "$fmax" | grep -qE "^.*(9[5-9]|[1-9][0-9]{2})"; then
-        printf "  ${C_OK}Seed %-3s  %s${C_RESET}\n" "$seed" "$fmax"
+        printf "  ${C_OK}%-8s %-12s %-10s %s${C_RESET}\n" "$seed" "$fmax" "${wns:--}" "${tns:--}"
     elif echo "$fmax" | grep -qE "^.*(9[0-4])"; then
-        printf "  ${C_WARN}Seed %-3s  %s${C_RESET}\n" "$seed" "$fmax"
+        printf "  ${C_WARN}%-8s %-12s %-10s %s${C_RESET}\n" "$seed" "$fmax" "${wns:--}" "${tns:--}"
     else
-        printf "  ${C_DIM}Seed %-3s  %s${C_RESET}\n" "$seed" "$fmax"
+        printf "  ${C_DIM}%-8s %-12s %-10s %s${C_RESET}\n" "$seed" "$fmax" "${wns:--}" "${tns:--}"
     fi
 done
 
@@ -125,7 +166,7 @@ if [ -z "$BEST_SEED" ]; then
 fi
 
 echo ""
-printf "${C_HEAD}Best: seed ${BEST_SEED} (${BEST_FMAX})${C_RESET}"
+printf "${C_HEAD}Best: seed ${BEST_SEED} (${BEST_FMAX}, WNS ${BEST_WNS:--}, TNS ${BEST_TNS:--})${C_RESET}"
 # Warn if even the best seed doesn't meet the 100 MHz target -- but
 # still ship it. Closer-to-meeting beats not-shipping-at-all.
 best_num=$(echo "$BEST_FMAX" | sed 's/ MHz//' | tr -d ' ')

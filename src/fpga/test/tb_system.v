@@ -272,7 +272,11 @@ axi_sdram_arbiter sdram_arb (
     .m1_wlast  (cpu_sdram_wlast),
     .m1_bvalid (cpu_sdram_bvalid),  .m1_bresp  (cpu_sdram_bresp),
 
-    // M2 — APF bridge DMA unused in this system test
+    // M2 — bridge DMA unused in this system test
+    .m2_arvalid(1'b0), .m2_arready(),
+    .m2_araddr (32'd0), .m2_arlen(8'd0),
+    .m2_rvalid (), .m2_rdata(), .m2_rresp(), .m2_rlast(),
+    .m2_rready (1'b1),
     .m2_awvalid(1'b0), .m2_awready(bridge_awready_unused),
     .m2_awaddr (32'd0), .m2_awlen(8'd0),
     .m2_wvalid (1'b0), .m2_wready(bridge_wready_unused),
@@ -559,6 +563,9 @@ axi_periph_slave periph (
     .target_dataslot_ack (target_dataslot_ack),
     .target_dataslot_done(target_dataslot_done),
     .target_dataslot_err (target_dataslot_err),
+    .hps_status          (32'd0),
+    .hps_img_size        (64'd0),
+    .hps_boot_len        (32'd0),
     .bridge_wr_idle      (bridge_wr_idle),
 
     .color_mode     (),

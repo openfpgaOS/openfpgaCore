@@ -477,6 +477,9 @@ axi_periph_slave dut (
     .target_dataslot_ack (1'b0),
     .target_dataslot_done(1'b0),
     .target_dataslot_err (3'b0),
+    .hps_status          (32'd0),
+    .hps_img_size        (64'd0),
+    .hps_boot_len        (32'd0),
     .bridge_wr_idle      (1'b1),
 
     .color_mode     (),

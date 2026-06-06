@@ -21,7 +21,12 @@ SIZE = $(CROSS)size
 FW_TARGET = firmware
 
 # Target platform (inherited from top-level Makefile)
-TARGET ?= pocket
+# Default target: command line > environment > repo-root .target file
+# (written by `make use-<target>` at the root) > pocket.
+TARGET ?= $(strip $(shell cat ../../../.target 2>/dev/null))
+ifeq ($(TARGET),)
+override TARGET := pocket
+endif
 
 # Directories
 FPGA_CORE_DIR = ../../fpga/targets/$(TARGET)
@@ -106,6 +111,13 @@ TARGET_SRCS = $(TARGET_DIR)/video.c \
               $(TARGET_DIR)/timer.c \
               $(TARGET_DIR)/disk_boot.c \
 
+# MiSTer: block-device layer + vendored FatFs (file/save HAL backend)
+ifeq ($(TARGET),mister)
+TARGET_SRCS += $(TARGET_DIR)/blockdev.c \
+               $(TARGET_DIR)/fatfs/ff.c \
+               $(TARGET_DIR)/fatfs/ffunicode.c
+endif
+
 # Source files - Kernel
 KERNEL_SRCS = $(KERNEL_DIR)/main.c \
               $(KERNEL_DIR)/syscall.c \
@@ -123,6 +135,20 @@ KERNEL_SRCS = $(KERNEL_DIR)/main.c \
 # All sources
 ALL_C_SRCS = $(BOOT_SRCS_C) $(HAL_SRCS) $(TARGET_SRCS) $(KERNEL_SRCS)
 OBJS = $(ALL_C_SRCS:.c=.o) $(BOOT_SRCS_S:.S=.o) $(HAL_SRCS_S:.S=.o)
+
+# ── Target-switch detection ──────────────────────────────────────────
+# Shared objects (hal/kernel/api) are compiled against the selected
+# target's target_platform.h, so reusing them across targets would link
+# a wrong memory map. When TARGET differs from the previous build, drop
+# the stale objects at parse time and re-stamp — `make TARGET=mister`
+# after a pocket build (or sim, in any order) Just Works without a
+# manual clean. Same-target rebuilds stay fully incremental.
+LAST_TARGET := $(strip $(shell cat .last_target 2>/dev/null))
+ifneq ($(LAST_TARGET),$(TARGET))
+__retarget := $(shell rm -f $(OBJS) $(OBJS:.o=.d) \
+                  $(FW_TARGET).elf $(FW_TARGET).bin $(FW_TARGET).map os.bin; \
+                  echo $(TARGET) > .last_target)
+endif
 
 # RAM size for MIF generation
 RAM_WORDS = 8192
@@ -176,7 +202,7 @@ os.bin: $(FW_TARGET).elf
 		--only-section=.text \
 		--only-section=.osdata \
 		$< $@
-	@python3 targets/pocket/boot/append_os_crc.py $@
+	@python3 $(firstword $(wildcard $(BOOT_DIR)/append_os_crc.py) targets/pocket/boot/append_os_crc.py) $@
 	@echo "Generated $@ ($$(wc -c < $@) bytes)"
 
 # Disassembly
@@ -235,6 +261,7 @@ clean:
 	rm -f $(OBJS) $(FW_TARGET).elf $(FW_TARGET).bin $(FW_TARGET).mif $(FW_TARGET).map $(FW_TARGET).lst
 	rm -f boot.bin os.bin
 	rm -f $(DEPS)
+	rm -f .last_target
 
 rebuild: clean all
 

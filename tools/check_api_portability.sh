@@ -147,6 +147,15 @@ else
     bad "TARGET=sim build failed -- see /tmp/_check_sim.log"
 fi
 
+# ── Check 5b: mister kernel builds ───────────────────────────────────
+( cd "$OS" && make clean >/dev/null 2>&1 && make TARGET=mister >/tmp/_check_mister.log 2>&1 )
+if [ -f "$OS/os.bin" ]; then
+    ok "TARGET=mister builds ($(stat -c%s "$OS/os.bin") bytes)"
+    cp "$OS/os.bin" /tmp/_check_mister_os.bin
+else
+    bad "TARGET=mister build failed -- see /tmp/_check_mister.log"
+fi
+
 # ── Check 6: divergent gpu_base proves runtime indirection ───────────
 if [ -f /tmp/_check_sim.elf ]; then
     if riscv64-elf-objdump -d /tmp/_check_sim.elf 2>/dev/null \

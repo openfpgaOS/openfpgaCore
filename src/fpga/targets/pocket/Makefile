@@ -220,6 +220,13 @@ program:
 	@quartus_pgm -m jtag -o "p;output_files/$(PROJECT).sof"
 	@printf "$(C_OK)[jtag] Done$(C_RESET)\n"
 
+# ── Resource / timing report ─────────────────────────────────────────
+# Summary of resource usage; FULL=true adds the top ALM-consuming
+# entities and the 25 worst setup paths (re-runs quartus_sta).
+report:
+	@chmod +x $(TOOLS_DIR)/report.sh 2>/dev/null || true
+	@bash $(TOOLS_DIR)/report.sh $(PROJECT) $(if $(filter true,$(FULL)),full)
+
 # ── Timing report ────────────────────────────────────────────────────
 timing:
 	@printf "$(C_HEAD)Fmax Summary (Slow 85°C):$(C_RESET)\n"
@@ -295,7 +302,9 @@ SWEEP_MIN ?= 1
 SWEEP_MAX ?= 30
 
 sweep: firmware
-	@VARIANT_DEFS="$(VARIANT_DEFS)" bash $(ROOT_DIR)/tools/sweep.sh $(SWEEP_MIN) $(SWEEP_MAX)
+	@VARIANT_DEFS="$(VARIANT_DEFS)" PROJECT=$(PROJECT) \
+		CLOCK_RE='mp_ram.*general\[0\]' \
+		bash $(ROOT_DIR)/tools/sweep.sh $(SWEEP_MIN) $(SWEEP_MAX)
 
 # ── Tools ────────────────────────────────────────────────────────────
 $(REVERSE_BITS): $(TOOLS_DIR)/reverse_bits.c
@@ -315,5 +324,5 @@ clean:
 # Alias for root Makefile compatibility
 clean-all: clean
 
-.PHONY: all full help cpu bootloader firmware os compile build test check deploy sdk program
+.PHONY: all full help cpu bootloader firmware os compile build test check deploy sdk program report
 .PHONY: install-os install-bitstream timing summary sweep clean clean-all

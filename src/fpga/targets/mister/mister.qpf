@@ -1,0 +1,9 @@
+# -------------------------------------------------------------------------- #
+# SPDX-License-Identifier: Apache-2.0
+# openfpgaOS — MiSTer (DE10-Nano / SuperStation One)
+# Build with Quartus Prime 17.0.x (the MiSTer framework requirement).
+# -------------------------------------------------------------------------- #
+
+QUARTUS_VERSION = "17.0"
+
+PROJECT_REVISION = "mister"

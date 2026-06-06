@@ -14,7 +14,15 @@
 #   make os           Just os.bin → build/
 
 # ── Target ───────────────────────────────────────────────────────────
-TARGET ?= pocket
+# Default target resolution, highest priority first:
+#   1. command line:  make build TARGET=mister
+#   2. environment:   export TARGET=mister
+#   3. .target file:  make use-mister   (gitignored, per-checkout sticky)
+#   4. fallback:      pocket
+TARGET ?= $(strip $(shell cat .target 2>/dev/null))
+ifeq ($(TARGET),)
+override TARGET := pocket
+endif
 TARGET_DIR = src/fpga/targets/$(TARGET)
 TARGETS = $(notdir $(wildcard src/fpga/targets/*))
 
@@ -61,12 +69,19 @@ help:
 	@echo "      /_/_/_/___\\___/_/ |_|"
 	@echo "     / __ \\/ __/"
 	@echo "    / /_/ /\\ \\"
-	@echo "    \\____/___/  \033[93mv0.5\033[0m OS"
+	@printf '    \\____/___/  '
+	@printf "$(C_CMD)v0.5$(C_RESET) OS\n"
 	@printf "$(C_RESET)\n"
-	@printf "  $(C_HEAD)Target: $(TARGET)$(C_RESET)\n\n"
+	@printf "  $(C_HEAD)Target:$(C_RESET) $(C_CMD)$(TARGET)$(C_RESET) $(C_DIM)(available: $(TARGETS))$(C_RESET)\n\n"
+	@printf "  $(C_HEAD)Targets:$(C_RESET)\n"
+	@printf "    Every goal below takes $(C_CMD)TARGET=$(C_CMD)<name>$(C_RESET) — e.g. $(C_CMD)make full TARGET=mister$(C_RESET)\n"
+	@printf "    $(C_DIM)pocket = Analogue Pocket (Quartus 25.1std)   mister = MiSTer/DE10-Nano (Quartus 17.0.x)$(C_RESET)\n"
+	@printf "    $(C_DIM)Switching targets auto-rebuilds the firmware objects — no manual clean needed.$(C_RESET)\n"
+	@printf "    $(C_CMD)make $(C_CMD)use-mister$(C_RESET)        Make a target the default for this checkout $(C_DIM)(stored in .target;$(C_RESET)\n"
+	@printf "    $(C_DIM)                       undo with make use-default — built-in default is pocket)$(C_RESET)\n\n"
 	@printf "  $(C_HEAD)Build:$(C_RESET)\n"
-	@printf "    $(C_CMD)make $(C_CMD)full$(C_RESET)              bootloader → os → build → test     $(C_DIM)(~9 min)$(C_RESET)\n"
-	@printf "    $(C_CMD)make $(C_CMD)build$(C_RESET)             cpu → compile → reverse bits       $(C_DIM)(~7 min)$(C_RESET)\n"
+	@printf "    $(C_CMD)make $(C_CMD)full$(C_RESET)              cpu → bootloader → os → build      $(C_DIM)(~9 min)$(C_RESET)\n"
+	@printf "    $(C_CMD)make $(C_CMD)build$(C_RESET)             cpu → Quartus compile → bitstream  $(C_DIM)(~7 min)$(C_RESET)\n"
 	@printf "    $(C_CMD)make $(C_CMD)firmware$(C_RESET)          bootloader → os → MIF patch        $(C_DIM)(~10 sec)$(C_RESET)\n"
 	@printf "    $(C_CMD)make $(C_CMD)os$(C_RESET)                Builds os.bin                      $(C_DIM)(~5 sec)$(C_RESET)\n"
 	@printf "    $(C_CMD)make $(C_CMD)clean$(C_RESET)             Remove all build artifacts\n"
@@ -75,10 +90,28 @@ help:
 	@printf "    $(C_CMD)make $(C_CMD)test$(C_RESET)              Run Verilator test suite           $(C_DIM)(~30 sec)$(C_RESET)\n"
 	@printf "    $(C_CMD)make $(C_CMD)check$(C_RESET)             RTL check (Analysis & Synthesis)   $(C_DIM)(~45 sec)$(C_RESET)\n"
 	@printf "    $(C_CMD)make $(C_CMD)timing$(C_RESET)            Show Fmax and slack from last build\n"
+	@printf "    $(C_CMD)make $(C_CMD)report$(C_RESET)            Resource summary $(C_DIM)(FULL=true: +top entities, 25 worst paths)$(C_RESET)\n"
 	@printf "    $(C_CMD)make $(C_CMD)sweep $(C_CMD)SEEDS=$(C_CMD)1-30$(C_RESET)  Seed sweep, pick best Fmax         $(C_DIM)(~7 min/seed)$(C_RESET)\n"
 	@printf "    $(C_CMD)make $(C_CMD)sdk $(C_CMD)DEST=$(C_CMD)\"path\"$(C_RESET)   Sync headers + runtime to SDK repo(s)\n"
-	@printf "    $(C_CMD)make $(C_CMD)program$(C_RESET)           JTAG program via USB Blaster\n"
+	@printf "    $(C_CMD)make $(C_CMD)program$(C_RESET)           JTAG program via USB Blaster $(C_DIM)(pocket)$(C_RESET)\n"
+	@printf "    $(C_CMD)make $(C_CMD)deploy$(C_RESET)            Refresh build/ core artifacts $(C_DIM)(device push lives in the SDK)$(C_RESET)\n"
+	@printf "    $(C_CMD)make $(C_CMD)package$(C_RESET)           SD-card layout → build/ $(C_DIM)(APF tree or rbf+boot.rom)$(C_RESET)\n"
 	@echo ""
+
+# ── Sticky default target ────────────────────────────────────────────
+# `make use-mister` / `make use-pocket` writes .target (gitignored);
+# subsequent makes default to it. `make use-default` removes the file.
+use-%:
+	@test -d src/fpga/targets/$* || { \
+		printf "$(C_ERR)Error: unknown target '$*'$(C_RESET) (available: $(TARGETS))\n"; \
+		exit 1; \
+	}
+	@echo $* > .target
+	@printf "  $(C_OK)default target$(C_RESET) → $(C_CMD)$*$(C_RESET) (stored in .target)\n"
+
+use-default:
+	@rm -f .target
+	@printf "  $(C_OK)default target$(C_RESET) → $(C_CMD)pocket$(C_RESET) (built-in)\n"
 
 # ── Target validation ────────────────────────────────────────────────
 check-target:
@@ -98,18 +131,32 @@ SWEEP_MIN = $(word 1,$(subst -, ,$(SEEDS)))
 SWEEP_MAX = $(word 2,$(subst -, ,$(SEEDS)))
 
 # ── Delegate to target Makefile ──────────────────────────────────────
-cpu bootloader firmware os compile build check test timing program: check-target
-	@$(MAKE) -C $(TARGET_DIR) $@
+cpu bootloader firmware os compile build check test timing report program deploy: check-target
+	@$(MAKE) -C $(TARGET_DIR) $@ FULL=$(FULL)
 
 sweep: check-target
 	@$(MAKE) -C $(TARGET_DIR) sweep SWEEP_MIN=$(SWEEP_MIN) SWEEP_MAX=$(SWEEP_MAX)
 
 # ── Package ──────────────────────────────────────────────────────────
+# Pocket: APF SD-card layout (Cores/Assets/Platforms + reversed bitstream).
+# MiSTer: plain rbf + boot.rom under build/mister/ (the SDK's
+# platforms/mister/mkimage.sh assembles the .vhd disk image).
+ifeq ($(TARGET),mister)
+package: package-mister
+else
 package: $(REVERSE_BITS) package-dirs package-bitstream package-chip32 package-firmware package-json package-platform package-icon package-install
 	@echo ""
 	@printf "  $(C_OK)Package ready$(C_RESET) → $(BUILD_DIR)/\n"
 	@echo ""
 	@tree -L 4 $(BUILD_DIR) 2>/dev/null || find $(BUILD_DIR) -type f | sort
+endif
+
+package-mister:
+	@mkdir -p $(BUILD_DIR)/mister
+	@cp $(TARGET_DIR)/output_files/mister.rbf $(BUILD_DIR)/mister/openfpgaOS.rbf
+	@cp $(OS_DIR)/os.bin $(BUILD_DIR)/mister/boot.rom
+	@printf "  $(C_OK)Package ready$(C_RESET) → $(BUILD_DIR)/mister/ (rbf + boot.rom)\n"
+	@printf "  $(C_DIM)Disk image: make -C <sdk> image PLATFORM=mister$(C_RESET)\n"
 
 package-dirs:
 	@rm -rf $(BUILD_DIR)
@@ -247,14 +294,30 @@ sdk: check-target
 		# filter, so nuke them here once. \
 		rm -rf  "$$dir/src/sdk/libc" "$$dir/src/sdk/crt"; \
 		\
-		# Runtime binaries (bitstream, kernel, loader) \
+		# Runtime binaries (bitstream, kernel, loader).  os.bin is routed \
+		# by the firmware build stamp so a mister-built kernel can never \
+		# land in the pocket slot (and vice versa). \
 		mkdir -p "$$dir/runtime"; \
-		if [ -f $(TARGET_DIR)/output_files/ap_core.rbf ]; then \
-			$(REVERSE_BITS) $(TARGET_DIR)/output_files/ap_core.rbf "$$dir/runtime/bitstream.rbf_r"; \
+		FW_STAMP=$$(cat $(OS_DIR)/.last_target 2>/dev/null || echo pocket); \
+		if [ -f src/fpga/targets/pocket/output_files/ap_core.rbf ]; then \
+			$(REVERSE_BITS) src/fpga/targets/pocket/output_files/ap_core.rbf "$$dir/runtime/bitstream.rbf_r"; \
 			printf "  $(C_OK)bitstream$(C_RESET)      → runtime/\n"; \
 		fi; \
-		test -f $(OS_DIR)/os.bin && cp $(OS_DIR)/os.bin "$$dir/runtime/" && \
-			printf "  $(C_OK)os.bin$(C_RESET)         → runtime/\n" || true; \
+		if [ "$$FW_STAMP" = "pocket" ] && [ -f $(OS_DIR)/os.bin ]; then \
+			cp $(OS_DIR)/os.bin "$$dir/runtime/"; \
+			printf "  $(C_OK)os.bin$(C_RESET)         → runtime/ (pocket)\n"; \
+		fi; \
+		\
+		# MiSTer runtime artifacts (consumed by platforms/mister/copy.sh) \
+		mkdir -p "$$dir/runtime/mister"; \
+		if [ -f src/fpga/targets/mister/output_files/mister.rbf ]; then \
+			cp src/fpga/targets/mister/output_files/mister.rbf "$$dir/runtime/mister/openfpgaOS.rbf"; \
+			printf "  $(C_OK)openfpgaOS.rbf$(C_RESET) → runtime/mister/\n"; \
+		fi; \
+		if [ "$$FW_STAMP" = "mister" ] && [ -f $(OS_DIR)/os.bin ]; then \
+			cp $(OS_DIR)/os.bin "$$dir/runtime/mister/os.bin"; \
+			printf "  $(C_OK)os.bin$(C_RESET)         → runtime/mister/\n"; \
+		fi; \
 		test -f $(CHIP32_DIR)/loader.bin && cp $(CHIP32_DIR)/loader.bin "$$dir/runtime/" && \
 			printf "  $(C_OK)loader.bin$(C_RESET)     → runtime/\n" || true; \
 		\
@@ -265,8 +328,8 @@ sdk: check-target
 		# .sof for JTAG reset via quartus_pgm. scripts/debug.sh in the \
 		# SDK consumer reloads this over JTAG between push and stream so \
 		# the core comes up clean before the new ELF runs. \
-		test -f $(TARGET_DIR)/output_files/ap_core.sof && \
-			cp $(TARGET_DIR)/output_files/ap_core.sof "$$dir/runtime/" && \
+		test -f src/fpga/targets/pocket/output_files/ap_core.sof && \
+			cp src/fpga/targets/pocket/output_files/ap_core.sof "$$dir/runtime/" && \
 			printf "  $(C_OK)ap_core.sof$(C_RESET)    → runtime/ (JTAG reset)\n" || true; \
 		printf "$(C_OK)[sdk] Done$(C_RESET) $$dir\n\n"; \
 	done
@@ -278,8 +341,8 @@ clean:
 	@rm -rf $(BUILD_DIR)
 	@rm -f $(REVERSE_BITS)
 
-.PHONY: all help check-target full cpu bootloader firmware os compile build check test timing program sdk
+.PHONY: all help check-target full cpu bootloader firmware os compile build check test timing program sdk deploy
 .PHONY: sweep
-.PHONY: package package-only package-dirs package-bitstream package-chip32
+.PHONY: package package-mister package-only package-dirs package-bitstream package-chip32
 .PHONY: package-firmware package-json package-platform package-icon package-install
 .PHONY: clean

@@ -79,6 +79,14 @@ module axi_periph_slave (
     input wire         target_dataslot_done,
     input wire [2:0]   target_dataslot_err,
 
+    // HPS bridge status block (REGION_HPS @ 0x49000000, read-only).
+    // MiSTer: driven by hps_bridge.v (boot.rom delivery + disk image
+    // mount state).  Pocket: tie all three to 0 — the region reads as
+    // zeros and firmware never touches it there.
+    input wire [31:0]  hps_status,
+    input wire [63:0]  hps_img_size,
+    input wire [31:0]  hps_boot_len,
+
     // Bridge write drain status (for pacing DMA reads)
     input wire         bridge_wr_idle,
 
@@ -1665,6 +1673,7 @@ localparam [3:0] REGION_LINK   = 4'd5;
 localparam [3:0] REGION_UART   = 4'd6;
 localparam [3:0] REGION_GPU    = 4'd7;
 localparam [3:0] REGION_MIXER  = 4'd8;
+localparam [3:0] REGION_HPS    = 4'd9;
 
 reg [3:0] req_region;
 
@@ -1676,6 +1685,14 @@ wire req_is_link   = (req_region == REGION_LINK);
 wire req_is_uart   = (req_region == REGION_UART);
 wire req_is_gpu    = (req_region == REGION_GPU);
 wire req_is_mixer  = (req_region == REGION_MIXER);
+wire req_is_hps    = (req_region == REGION_HPS);
+
+/* HPS status block read mux (read-only; writes are ignored):
+ *   0x00 HPS_STATUS   0x04 IMG_SIZE_LO   0x08 IMG_SIZE_HI   0x0C BOOT_LEN */
+wire [31:0] hps_rdata = (req_addr[3:2] == 2'd0) ? hps_status :
+                        (req_addr[3:2] == 2'd1) ? hps_img_size[31:0] :
+                        (req_addr[3:2] == 2'd2) ? hps_img_size[63:32] :
+                                                  hps_boot_len;
 
 wire beat_is_last = (burst_count == burst_len);
 wire [31:0] periph_next_addr = burst_is_fixed ? req_addr : (req_addr + 32'd4);
@@ -1735,6 +1752,7 @@ function [3:0] decode_region;
                 8'h4A: decode_region = REGION_GPU;
                 8'h4C: decode_region = REGION_AUDIO;
                 8'h4D: decode_region = REGION_LINK;
+                8'h49: decode_region = REGION_HPS;
                 8'h4E: decode_region = REGION_CRAM0;
                 8'h4F: decode_region = REGION_UART;
                 default: decode_region = REGION_NONE;
@@ -1938,6 +1956,8 @@ always @(posedge clk or posedge reset) begin
                     periph_rd_data_r <= audio_rdata;
                 else if (req_is_cram0)
                     periph_rd_data_r <= cram0_mode_rdata;
+                else if (req_is_hps)
+                    periph_rd_data_r <= hps_rdata;
                 else if (req_is_link)
                     periph_rd_data_r <= link_reg_rdata;
                 else if (req_is_uart)

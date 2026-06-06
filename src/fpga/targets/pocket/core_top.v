@@ -2264,6 +2264,10 @@ assign video_hs = vidout_hs;
 	    .target_dataslot_ack(target_dataslot_ack),
         .target_dataslot_done(target_dataslot_done_safe),
         .target_dataslot_err(target_dataslot_err),
+        // HPS status block (REGION_HPS) — MiSTer-only, reads as zeros here
+        .hps_status(32'd0),
+        .hps_img_size(64'd0),
+        .hps_boot_len(32'd0),
         // Terminal moved to software — no hardware VRAM
         // Display control
         // display_mode removed — terminal rendering in software
@@ -2462,6 +2466,12 @@ assign video_hs = vidout_hs;
         .m1_wlast(cpu_sdram_bus_wlast),
         .m1_bvalid(cpu_sdram_bus_bvalid),   .m1_bresp(cpu_sdram_bus_bresp),
         // M2: APF bridge data-slot writes into SDRAM
+        // M2 read channel is MiSTer-only (hps_bridge sector writeback) —
+        // the APF bridge never reads SDRAM through the arbiter.
+        .m2_arvalid(1'b0), .m2_arready(),
+        .m2_araddr(32'd0), .m2_arlen(8'd0),
+        .m2_rvalid(), .m2_rdata(), .m2_rresp(), .m2_rlast(),
+        .m2_rready(1'b1),
         .m2_awvalid(brg_sdram_awvalid), .m2_awready(brg_sdram_awready),
         .m2_awaddr(brg_sdram_awaddr),   .m2_awlen(brg_sdram_awlen),
         .m2_wvalid(brg_sdram_wvalid),   .m2_wready(brg_sdram_wready),

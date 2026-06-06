@@ -1,0 +1,1263 @@
+//------------------------------------------------------------------------------
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileType: SOURCE
+// SPDX-FileCopyrightText: (c) 2026, ThinkElastic <Think@Elastic.com>
+//------------------------------------------------------------------------------
+
+//
+// openfpgaOS — MiSTer core top (the `emu` module instantiated by sys_top).
+//
+// This is the MiSTer counterpart of pocket/core_top.v: the same
+// platform-neutral internals (cpu_system, axi_periph_slave,
+// axi_sdram_arbiter/slave, io_sdram, scanout, audio_mixer, gpu_core)
+// with the Pocket-specific glue replaced:
+//
+//   APF bridge + CRAM staging  →  hps_bridge.v (ioctl boot.rom DMA +
+//                                 disk-image sector engine on arbiter M2)
+//   Pocket LCD + Analogizer    →  VGA_*/CE_PIXEL into the framework
+//                                 scaler (fixed 60 Hz raster; the
+//                                 dedicated 15 kHz analog raster is a
+//                                 post-v1 item)
+//   I2S audio_output           →  parallel AUDIO_L/R (sys_top samples)
+//   APF cont1/2 inputs         →  hps_io joysticks remapped in
+//                                 hps_bridge (OF_BTN bit order)
+//   External async SRAM        →  sram_bram.v (32 KB M10K, GPU LUT)
+//
+// Clocking: one PLL — clk_cpu = clk_ram_controller = 100 MHz,
+// clk_ram_chip = 100 MHz phase-shifted (SDRAM CK), clk_vid = 24.576 MHz.
+// hps_io runs with clk_sys = clk_cpu so the bridge needs no CDC.
+//
+
+module emu
+(
+	`include "sys/emu_ports.vh"
+);
+
+///////// Default values for ports not used in this core /////////
+
+assign ADC_BUS  = 'Z;
+assign USER_OUT = '1;
+assign {UART_RTS, UART_TXD, UART_DTR} = 0;
+assign {SD_SCK, SD_MOSI, SD_CS} = 'Z;
+assign {DDRAM_CLK, DDRAM_BURSTCNT, DDRAM_ADDR, DDRAM_DIN, DDRAM_BE, DDRAM_RD, DDRAM_WE} = '0;
+
+assign VGA_SL = 0;
+assign VGA_F1 = 0;
+assign VGA_SCALER  = 0;
+assign VGA_DISABLE = 0;
+assign HDMI_FREEZE = 0;
+assign HDMI_BLACKOUT = 0;
+assign HDMI_BOB_DEINT = 0;
+
+assign AUDIO_S = 1;        // signed samples from the mixer
+assign AUDIO_MIX = 0;
+
+assign LED_POWER = 0;
+assign BUTTONS = 0;
+
+wire [1:0] ar = status[122:121];
+assign VIDEO_ARX = (!ar) ? 13'd4 : {11'd0, ar - 1'd1};
+assign VIDEO_ARY = (!ar) ? 13'd3 : 13'd0;
+
+///////////////////////  CONF_STR  ///////////////////////////////
+
+`include "build_id.v"
+localparam CONF_STR = {
+	"openfpgaOS;;",
+	"S0,VHDIMG,Mount Disk;",
+	"-;",
+	"O[122:121],Aspect ratio,Original,Full Screen,[ARC1],[ARC2];",
+	"-;",
+	"R[0],Reset and close OSD;",
+	// Button order is the input ABI: bits 4+ of joystick_0 land 1:1 on
+	// OF_BTN_{A,B,X,Y,L1,R1,L2,R2,L3,R3,SELECT,START}.  Do not reorder
+	// without updating hps_bridge.v's key_remap + firmware input.c.
+	"J1,A,B,X,Y,L,R,L2,R2,L3,R3,Select,Start;",
+	"V,v",`BUILD_DATE
+};
+
+///////////////////////   CLOCKS   ///////////////////////////////
+
+wire clk_cpu;
+wire clk_ram_controller = clk_cpu;
+wire clk_ram_chip;
+wire clk_vid;
+wire pll_sys_locked, pll_vid_locked;
+wire pll_locked = pll_sys_locked & pll_vid_locked;
+
+// Two PLLs: 100 MHz pair is integer-mode, 24.576 MHz needs its own
+// fractional VCO (no legal shared VCO with 100 MHz — see pll_sys.v).
+pll_sys pll (
+	.refclk   (CLK_50M),
+	.rst      (0),
+	.outclk_0 (clk_cpu),
+	.outclk_1 (clk_ram_chip),
+	.locked   (pll_sys_locked)
+);
+
+pll_vid pllv (
+	.refclk   (CLK_50M),
+	.rst      (0),
+	.outclk_0 (clk_vid),
+	.locked   (pll_vid_locked)
+);
+
+wire reset_n = ~RESET & ~status[0] & pll_locked;
+
+// clk_cpu-domain reset replicas (same split as core_top.v so fitter
+// placement is not constrained by one monolithic reset tree).
+reg [1:0] reset_cpu_core_sync;
+reg [1:0] reset_cpu_media_sync;
+always @(posedge clk_cpu or negedge reset_n) begin
+	if (~reset_n) begin
+		reset_cpu_core_sync  <= 2'b00;
+		reset_cpu_media_sync <= 2'b00;
+	end else begin
+		reset_cpu_core_sync  <= {reset_cpu_core_sync[0],  1'b1};
+		reset_cpu_media_sync <= {reset_cpu_media_sync[0], 1'b1};
+	end
+end
+wire reset_n_cpu_core  = reset_cpu_core_sync[1];
+wire reset_n_cpu_media = reset_cpu_media_sync[1];
+
+reg [1:0] reset_vid_sync;
+wire reset_n_vid = reset_vid_sync[1];
+always @(posedge clk_vid or negedge reset_n) begin
+	if (~reset_n)
+		reset_vid_sync <= 2'b0;
+	else
+		reset_vid_sync <= {reset_vid_sync[0], 1'b1};
+end
+
+///////////////////////   HPS IO   ///////////////////////////////
+
+wire [127:0] status;
+wire  [1:0]  buttons;
+
+wire         ioctl_download;
+wire [15:0]  ioctl_index;
+wire         ioctl_wr;
+wire [26:0]  ioctl_addr;
+wire [15:0]  ioctl_dout;
+wire         ioctl_wait;
+
+wire         img_mounted;
+wire         img_readonly;
+wire [63:0]  img_size;
+
+wire [31:0]  sd_lba[1];
+wire         sd_rd;
+wire         sd_wr;
+wire         sd_ack;
+wire [12:0]  sd_buff_addr;
+wire [15:0]  sd_buff_dout;
+wire [15:0]  sd_buff_din[1];
+wire         sd_buff_wr;
+
+wire [31:0]  joystick_0, joystick_1;
+wire [15:0]  joystick_l_analog_0, joystick_r_analog_0;
+wire [15:0]  joystick_l_analog_1, joystick_r_analog_1;
+
+wire [32:0]  timestamp;
+
+hps_io #(.CONF_STR(CONF_STR), .WIDE(1), .VDNUM(1), .BLKSZ(2)) hps_io (
+	.clk_sys             (clk_cpu),
+	.HPS_BUS             (HPS_BUS),
+	.EXT_BUS             (),
+	.gamma_bus           (),
+
+	.buttons             (buttons),
+	.status              (status),
+	.status_menumask     (0),
+
+	.ioctl_download      (ioctl_download),
+	.ioctl_index         (ioctl_index),
+	.ioctl_wr            (ioctl_wr),
+	.ioctl_addr          (ioctl_addr),
+	.ioctl_dout          (ioctl_dout),
+	.ioctl_wait          (ioctl_wait),
+
+	.img_mounted         (img_mounted),
+	.img_readonly        (img_readonly),
+	.img_size            (img_size),
+
+	.sd_lba              (sd_lba),
+	.sd_rd               (sd_rd),
+	.sd_wr               (sd_wr),
+	.sd_ack              (sd_ack),
+	.sd_buff_addr        (sd_buff_addr),
+	.sd_buff_dout        (sd_buff_dout),
+	.sd_buff_din         (sd_buff_din),
+	.sd_buff_wr          (sd_buff_wr),
+
+	.joystick_0          (joystick_0),
+	.joystick_1          (joystick_1),
+	.joystick_l_analog_0 (joystick_l_analog_0),
+	.joystick_r_analog_0 (joystick_r_analog_0),
+	.joystick_l_analog_1 (joystick_l_analog_1),
+	.joystick_r_analog_1 (joystick_r_analog_1),
+
+	.TIMESTAMP           (timestamp)
+);
+
+///////////////////////  HPS BRIDGE  /////////////////////////////
+
+// Periph-side data-slot interface (all clk_cpu — no CDC on MiSTer).
+wire        cpu_target_dataslot_read;
+wire        cpu_target_dataslot_write;
+wire        cpu_target_dataslot_openfile;
+wire        cpu_target_dataslot_getfile;
+wire [15:0] cpu_target_dataslot_id;
+wire [31:0] cpu_target_dataslot_slotoffset;
+wire [31:0] cpu_target_dataslot_bridgeaddr;
+wire [31:0] cpu_target_dataslot_length;
+wire        target_dataslot_ack;
+wire        target_dataslot_done;
+wire [2:0]  target_dataslot_err;
+wire        bridge_wr_idle;
+
+wire [31:0] hps_status;
+wire [63:0] hps_img_size;
+wire [31:0] hps_boot_len;
+wire        boot_rom_loaded;
+
+wire [31:0] p1_controls, p1_joypad;
+wire [15:0] p1_trigger;
+wire [31:0] p2_controls, p2_joypad;
+wire [15:0] p2_trigger;
+wire [31:0] rtc_epoch_seconds;
+wire        rtc_valid;
+
+// hps_bridge AXI master → arbiter M2
+wire        brg_awvalid, brg_awready;
+wire [31:0] brg_awaddr;
+wire [7:0]  brg_awlen;
+wire        brg_wvalid, brg_wready;
+wire [31:0] brg_wdata;
+wire [3:0]  brg_wstrb;
+wire        brg_wlast;
+wire        brg_bvalid;
+wire [1:0]  brg_bresp;
+wire        brg_arvalid, brg_arready;
+wire [31:0] brg_araddr;
+wire [7:0]  brg_arlen;
+wire        brg_rvalid;
+wire [31:0] brg_rdata;
+wire [1:0]  brg_rresp;
+wire        brg_rlast;
+wire        brg_rready;
+
+hps_bridge #(
+	// SDRAM byte offset of the staging arena (OF_TARGET_CRAM0_BRIDGE)
+	.BOOT_STAGE_ADDR(32'h0330_0000)
+) bridge (
+	.clk      (clk_cpu),
+	.reset_n  (reset_n_cpu_core),
+
+	.ioctl_download (ioctl_download),
+	.ioctl_index    (ioctl_index),
+	.ioctl_wr       (ioctl_wr),
+	.ioctl_addr     (ioctl_addr),
+	.ioctl_dout     (ioctl_dout),
+	.ioctl_wait     (ioctl_wait),
+
+	.img_mounted    (img_mounted),
+	.img_readonly   (img_readonly),
+	.img_size       (img_size),
+
+	.sd_lba         (sd_lba[0]),
+	.sd_rd          (sd_rd),
+	.sd_wr          (sd_wr),
+	.sd_ack         (sd_ack),
+	.sd_buff_addr   (sd_buff_addr[7:0]),
+	.sd_buff_dout   (sd_buff_dout),
+	.sd_buff_din    (sd_buff_din[0]),
+	.sd_buff_wr     (sd_buff_wr),
+
+	.timestamp      (timestamp),
+	.joystick_0     (joystick_0),
+	.joystick_1     (joystick_1),
+	.joystick_l_analog_0 (joystick_l_analog_0),
+	.joystick_r_analog_0 (joystick_r_analog_0),
+	.joystick_l_analog_1 (joystick_l_analog_1),
+	.joystick_r_analog_1 (joystick_r_analog_1),
+
+	.target_dataslot_read       (cpu_target_dataslot_read),
+	.target_dataslot_write      (cpu_target_dataslot_write),
+	.target_dataslot_openfile   (cpu_target_dataslot_openfile),
+	.target_dataslot_getfile    (cpu_target_dataslot_getfile),
+	.target_dataslot_id         (cpu_target_dataslot_id),
+	.target_dataslot_slotoffset (cpu_target_dataslot_slotoffset),
+	.target_dataslot_bridgeaddr (cpu_target_dataslot_bridgeaddr),
+	.target_dataslot_length     (cpu_target_dataslot_length),
+	.target_dataslot_ack        (target_dataslot_ack),
+	.target_dataslot_done       (target_dataslot_done),
+	.target_dataslot_err        (target_dataslot_err),
+	.bridge_wr_idle             (bridge_wr_idle),
+
+	.hps_status      (hps_status),
+	.hps_img_size    (hps_img_size),
+	.hps_boot_len    (hps_boot_len),
+	.boot_rom_loaded (boot_rom_loaded),
+
+	.cont1_key  (p1_controls),
+	.cont1_joy  (p1_joypad),
+	.cont1_trig (p1_trigger),
+	.cont2_key  (p2_controls),
+	.cont2_joy  (p2_joypad),
+	.cont2_trig (p2_trigger),
+	.rtc_epoch_seconds (rtc_epoch_seconds),
+	.rtc_valid         (rtc_valid),
+
+	.m_awvalid (brg_awvalid), .m_awready (brg_awready),
+	.m_awaddr  (brg_awaddr),  .m_awlen   (brg_awlen),
+	.m_wvalid  (brg_wvalid),  .m_wready  (brg_wready),
+	.m_wdata   (brg_wdata),   .m_wstrb   (brg_wstrb),
+	.m_wlast   (brg_wlast),
+	.m_bvalid  (brg_bvalid),  .m_bresp   (brg_bresp),
+	.m_arvalid (brg_arvalid), .m_arready (brg_arready),
+	.m_araddr  (brg_araddr),  .m_arlen   (brg_arlen),
+	.m_rvalid  (brg_rvalid),  .m_rdata   (brg_rdata),
+	.m_rresp   (brg_rresp),   .m_rlast   (brg_rlast),
+	.m_rready  (brg_rready)
+);
+
+assign LED_USER = ioctl_download;
+assign LED_DISK = {1'b0, sd_rd | sd_wr | sd_ack};
+
+///////////////////////  CPU SYSTEM  /////////////////////////////
+
+// CPU master buses (direct, no top-level register slices — the SE
+// device has far more routing headroom than the Pocket's CEBA4).
+wire        cpu_m_sdram_arvalid, cpu_m_sdram_arready;
+wire [31:0] cpu_m_sdram_araddr;
+wire [7:0]  cpu_m_sdram_arlen;
+wire        cpu_m_sdram_rvalid, cpu_m_sdram_rready;
+wire [31:0] cpu_m_sdram_rdata;
+wire [1:0]  cpu_m_sdram_rresp;
+wire        cpu_m_sdram_rlast;
+wire        cpu_m_sdram_awvalid, cpu_m_sdram_awready;
+wire [31:0] cpu_m_sdram_awaddr;
+wire [7:0]  cpu_m_sdram_awlen;
+wire        cpu_m_sdram_wvalid, cpu_m_sdram_wready;
+wire [31:0] cpu_m_sdram_wdata;
+wire [3:0]  cpu_m_sdram_wstrb;
+wire        cpu_m_sdram_wlast;
+wire        cpu_m_sdram_bvalid;
+wire [1:0]  cpu_m_sdram_bresp;
+
+wire        cpu_m_local_arvalid, cpu_m_local_arready;
+wire [31:0] cpu_m_local_araddr;
+wire [7:0]  cpu_m_local_arlen;
+wire        cpu_m_local_rvalid, cpu_m_local_rready;
+wire [31:0] cpu_m_local_rdata;
+wire [1:0]  cpu_m_local_rresp;
+wire        cpu_m_local_rlast;
+wire        cpu_m_local_awvalid, cpu_m_local_awready;
+wire [31:0] cpu_m_local_awaddr;
+wire [7:0]  cpu_m_local_awlen;
+wire [1:0]  cpu_m_local_awburst;
+wire        cpu_m_local_wvalid, cpu_m_local_wready;
+wire [31:0] cpu_m_local_wdata;
+wire [3:0]  cpu_m_local_wstrb;
+wire        cpu_m_local_wlast;
+wire        cpu_m_local_bvalid;
+wire [1:0]  cpu_m_local_bresp;
+
+wire        timer_irq;
+wire        uart_rx_irq;
+wire        ext_irq;
+
+// Two-flop IRQ synchronizers (see core_top.v rationale: VexiiRiscv
+// latches meip/mtip with no internal synchronizer).
+reg [1:0] ext_irq_sync;
+reg [1:0] timer_irq_sync;
+always @(posedge clk_cpu) begin
+	ext_irq_sync   <= {ext_irq_sync[0],   ext_irq};
+	timer_irq_sync <= {timer_irq_sync[0], timer_irq};
+end
+
+cpu_system cpu (
+	.clk(clk_cpu),
+	.reset_n(reset_n_cpu_core),
+	// SDRAM AXI4 master interface
+	.m_sdram_arvalid(cpu_m_sdram_arvalid),
+	.m_sdram_arready(cpu_m_sdram_arready),
+	.m_sdram_araddr(cpu_m_sdram_araddr),
+	.m_sdram_arlen(cpu_m_sdram_arlen),
+	.m_sdram_rvalid(cpu_m_sdram_rvalid),
+	.m_sdram_rready(cpu_m_sdram_rready),
+	.m_sdram_rdata(cpu_m_sdram_rdata),
+	.m_sdram_rresp(cpu_m_sdram_rresp),
+	.m_sdram_rlast(cpu_m_sdram_rlast),
+	.m_sdram_awvalid(cpu_m_sdram_awvalid),
+	.m_sdram_awready(cpu_m_sdram_awready),
+	.m_sdram_awaddr(cpu_m_sdram_awaddr),
+	.m_sdram_awlen(cpu_m_sdram_awlen),
+	.m_sdram_wvalid(cpu_m_sdram_wvalid),
+	.m_sdram_wready(cpu_m_sdram_wready),
+	.m_sdram_wdata(cpu_m_sdram_wdata),
+	.m_sdram_wstrb(cpu_m_sdram_wstrb),
+	.m_sdram_wlast(cpu_m_sdram_wlast),
+	.m_sdram_bvalid(cpu_m_sdram_bvalid),
+	.m_sdram_bresp(cpu_m_sdram_bresp),
+	// CRAM0 AXI4 master — unbacked on MiSTer (the staging arena lives in
+	// SDRAM and firmware never touches 0x30000000).  Tied off: an access
+	// would stall, which is the desired loud failure for a firmware bug.
+	.m_cram0_arvalid(),
+	.m_cram0_arready(1'b0),
+	.m_cram0_araddr (),
+	.m_cram0_arlen  (),
+	.m_cram0_rvalid (1'b0),
+	.m_cram0_rready (),
+	.m_cram0_rdata  (32'd0),
+	.m_cram0_rresp  (2'd0),
+	.m_cram0_rlast  (1'b0),
+	.m_cram0_awvalid(),
+	.m_cram0_awready(1'b0),
+	.m_cram0_awaddr (),
+	.m_cram0_awlen  (),
+	.m_cram0_wvalid (),
+	.m_cram0_wready (1'b0),
+	.m_cram0_wdata  (),
+	.m_cram0_wstrb  (),
+	.m_cram0_wlast  (),
+	.m_cram0_bvalid (1'b0),
+	.m_cram0_bresp  (2'd0),
+	// Local peripheral AXI4 master interface
+	.m_local_arvalid(cpu_m_local_arvalid),
+	.m_local_arready(cpu_m_local_arready),
+	.m_local_araddr(cpu_m_local_araddr),
+	.m_local_arlen(cpu_m_local_arlen),
+	.m_local_rvalid(cpu_m_local_rvalid),
+	.m_local_rready(cpu_m_local_rready),
+	.m_local_rdata(cpu_m_local_rdata),
+	.m_local_rresp(cpu_m_local_rresp),
+	.m_local_rlast(cpu_m_local_rlast),
+	.m_local_awvalid(cpu_m_local_awvalid),
+	.m_local_awready(cpu_m_local_awready),
+	.m_local_awaddr(cpu_m_local_awaddr),
+	.m_local_awlen(cpu_m_local_awlen),
+	.m_local_awburst(cpu_m_local_awburst),
+	.m_local_wvalid(cpu_m_local_wvalid),
+	.m_local_wready(cpu_m_local_wready),
+	.m_local_wdata(cpu_m_local_wdata),
+	.m_local_wstrb(cpu_m_local_wstrb),
+	.m_local_wlast(cpu_m_local_wlast),
+	.m_local_bvalid(cpu_m_local_bvalid),
+	.m_local_bresp(cpu_m_local_bresp),
+	.int_m_external(ext_irq_sync[1]),
+	.int_m_timer(timer_irq_sync[1])
+);
+
+///////////////////////  VIDEO REGISTERS  ////////////////////////
+
+wire [2:0]  color_mode;
+wire [24:0] fb_display_addr;
+wire [9:0]  fb_width;
+wire [9:0]  fb_height;
+wire [15:0] fb_stride;
+wire [24:0] analog_src_fb_addr;
+wire [2:0]  analog_src_color_mode;
+wire [9:0]  analog_src_fb_width;
+wire [9:0]  analog_src_fb_height;
+wire [15:0] analog_src_fb_stride;
+wire [2:0]  video_scaler_slot_cpu;
+wire [9:0]  vrr_v_total_cpu;
+
+// Scaler-slot CDC clk_cpu → clk_vid (quasi-static).
+reg [2:0] video_scaler_slot_s1, video_scaler_slot_vid;
+always @(posedge clk_vid or negedge reset_n_vid) begin
+	if (~reset_n_vid) begin
+		video_scaler_slot_s1  <= 3'd0;
+		video_scaler_slot_vid <= 3'd0;
+	end else begin
+		video_scaler_slot_s1  <= video_scaler_slot_cpu;
+		video_scaler_slot_vid <= video_scaler_slot_s1;
+	end
+end
+
+///////////////////////  PERIPH SLAVE  ///////////////////////////
+
+wire        cpu_pal_wr;
+wire [7:0]  cpu_pal_addr;
+wire [23:0] cpu_pal_data;
+wire        cpu_pal_commit;
+wire        cpu_pal_busy;
+
+wire [9:0]  audio_fifo_level = 10'd0;   // no I2S FIFO on MiSTer
+wire        audio_fifo_full  = 1'b0;
+
+wire        mixer_enable_mmio;
+wire        mixer_voice_wr_mmio;
+wire [4:0]  mixer_voice_sel_mmio;
+wire [3:0]  mixer_voice_field_mmio;
+wire [31:0] mixer_voice_wdata_mmio;
+wire        mixer_irq_clear_wr_mmio;
+wire [31:0] mixer_irq_clear_mmio;
+wire [7:0]  mixer_master_vol_mmio;
+wire [7:0]  mixer_group_vol_0_mmio;
+wire [7:0]  mixer_group_vol_1_mmio;
+wire [7:0]  mixer_group_vol_2_mmio;
+wire [7:0]  mixer_group_vol_3_mmio;
+wire [63:0] mixer_voice_group_packed_mmio;
+wire [4:0]  mixer_voice_sel_rd_mmio;
+
+wire        gpu_reg_wr;
+wire [3:0]  gpu_reg_addr;
+wire [31:0] gpu_reg_wdata;
+wire [31:0] gpu_reg_rdata;
+wire        gpu_swap_req;
+wire [1:0]  gpu_swap_idx;
+wire        slave_swap_pending;
+
+wire        link_irq = 1'b0;
+wire [31:0] link_reg_rdata = 32'd0;
+
+// Mixer status boundary registers (see core_top.v timing rationale).
+wire [31:0] mixer_active_mask;
+wire [21:0] mixer_pos_readback;
+wire [31:0] mixer_voice_end_pending;
+reg [31:0] mixer_active_mask_r;
+reg [21:0] mixer_pos_readback_r;
+reg [31:0] mixer_voice_end_pending_r;
+always @(posedge clk_cpu) begin
+	mixer_active_mask_r       <= mixer_active_mask;
+	mixer_pos_readback_r      <= mixer_pos_readback;
+	mixer_voice_end_pending_r <= mixer_voice_end_pending;
+end
+
+wire vidout_vs_w;
+wire early_vblank_safe_vid;
+
+axi_periph_slave periph (
+	.clk(clk_cpu),
+	.reset_n(reset_n_cpu_core),
+	// AXI4 slave interface
+	.s_axi_arvalid(cpu_m_local_arvalid),
+	.s_axi_arready(cpu_m_local_arready),
+	.s_axi_araddr(cpu_m_local_araddr),
+	.s_axi_arlen(cpu_m_local_arlen),
+	.s_axi_rvalid(cpu_m_local_rvalid),
+	.s_axi_rready(cpu_m_local_rready),
+	.s_axi_rdata(cpu_m_local_rdata),
+	.s_axi_rresp(cpu_m_local_rresp),
+	.s_axi_rlast(cpu_m_local_rlast),
+	.s_axi_awvalid(cpu_m_local_awvalid),
+	.s_axi_awready(cpu_m_local_awready),
+	.s_axi_awaddr(cpu_m_local_awaddr),
+	.s_axi_awlen(cpu_m_local_awlen),
+	.s_axi_awburst(cpu_m_local_awburst),
+	.s_axi_wvalid(cpu_m_local_wvalid),
+	.s_axi_wready(cpu_m_local_wready),
+	.s_axi_wdata(cpu_m_local_wdata),
+	.s_axi_wstrb(cpu_m_local_wstrb),
+	.s_axi_wlast(cpu_m_local_wlast),
+	.s_axi_bvalid(cpu_m_local_bvalid),
+	.s_axi_bready(1'b1),
+	.s_axi_bresp(cpu_m_local_bresp),
+	// Status inputs
+	.dataslot_allcomplete(boot_rom_loaded && bridge_wr_idle),
+	.vsync(vidout_vs_w),
+	.early_vblank(early_vblank_safe_vid),
+	.os_inmenu(OSD_STATUS),
+	.cont1_key(p1_controls),
+	.cont1_joy(p1_joypad),
+	.cont1_trig(p1_trigger),
+	.cont2_key(p2_controls),
+	.cont2_joy(p2_joypad),
+	.cont2_trig(p2_trigger),
+	.cont3_key(32'd0),
+	.cont3_joy(32'd0),
+	.cont3_trig(16'd0),
+	.cont4_key(32'd0),
+	.cont4_joy(32'd0),
+	.cont4_trig(16'd0),
+	.rtc_epoch_seconds(rtc_epoch_seconds),
+	.rtc_valid(rtc_valid),
+	.bridge_wr_idle(bridge_wr_idle),
+	.target_dataslot_ack(target_dataslot_ack),
+	.target_dataslot_done(target_dataslot_done),
+	.target_dataslot_err(target_dataslot_err),
+	// HPS status block (REGION_HPS)
+	.hps_status(hps_status),
+	.hps_img_size(hps_img_size),
+	.hps_boot_len(hps_boot_len),
+	// Display control
+	.color_mode(color_mode),
+	.fb_display_addr(fb_display_addr),
+	.fb_width(fb_width),
+	.fb_height(fb_height),
+	.fb_stride(fb_stride),
+	.analog_fb_addr(analog_src_fb_addr),
+	.analog_color_mode(analog_src_color_mode),
+	.analog_fb_width(analog_src_fb_width),
+	.analog_fb_height(analog_src_fb_height),
+	.analog_fb_stride(analog_src_fb_stride),
+	.video_scaler_slot(video_scaler_slot_cpu),
+	// Palette write interface
+	.pal_wr(cpu_pal_wr),
+	.pal_addr(cpu_pal_addr),
+	.pal_data(cpu_pal_data),
+	.pal_commit(cpu_pal_commit),
+	.pal_busy(cpu_pal_busy),
+	// Target dataslot interface → hps_bridge (no CDC)
+	.target_dataslot_read(cpu_target_dataslot_read),
+	.target_dataslot_write(cpu_target_dataslot_write),
+	.target_dataslot_openfile(cpu_target_dataslot_openfile),
+	.target_dataslot_getfile(cpu_target_dataslot_getfile),
+	.target_dataslot_id(cpu_target_dataslot_id),
+	.target_dataslot_slotoffset(cpu_target_dataslot_slotoffset),
+	.target_dataslot_bridgeaddr(cpu_target_dataslot_bridgeaddr),
+	.target_dataslot_length(cpu_target_dataslot_length),
+	.target_buffer_param_struct(),
+	.target_buffer_resp_struct(),
+	// Audio FIFO status (no FIFO on MiSTer — mixer paces internally)
+	.audio_fifo_level(audio_fifo_level),
+	.audio_fifo_full(audio_fifo_full),
+	// Hardware mixer MMIO
+	.mix_enable             (mixer_enable_mmio),
+	.mix_voice_wr           (mixer_voice_wr_mmio),
+	.mix_voice_sel          (mixer_voice_sel_mmio),
+	.mix_voice_field        (mixer_voice_field_mmio),
+	.mix_voice_wdata        (mixer_voice_wdata_mmio),
+	.mix_irq_clear_wr       (mixer_irq_clear_wr_mmio),
+	.mix_irq_clear          (mixer_irq_clear_mmio),
+	.mix_master_vol         (mixer_master_vol_mmio),
+	.mix_group_vol_0        (mixer_group_vol_0_mmio),
+	.mix_group_vol_1        (mixer_group_vol_1_mmio),
+	.mix_group_vol_2        (mixer_group_vol_2_mmio),
+	.mix_group_vol_3        (mixer_group_vol_3_mmio),
+	.mix_voice_group_packed (mixer_voice_group_packed_mmio),
+	.mix_voice_sel_rd       (mixer_voice_sel_rd_mmio),
+	.mix_active_mask        (mixer_active_mask_r),
+	.mix_pos_readback       (mixer_pos_readback_r),
+	.mix_voice_end_pending  (mixer_voice_end_pending_r),
+	// CRAM0 ownership mode — no CRAM on MiSTer; register is inert
+	.cram0_mode             (),
+	// Link MMIO — no link port on MiSTer
+	.link_reg_wr(),
+	.link_reg_rd(),
+	.link_reg_addr(),
+	.link_reg_wdata(),
+	.link_reg_rdata(link_reg_rdata),
+	// UART — no DevKey serial on MiSTer v1
+	.uart_tx_dv(),
+	.uart_tx_byte(),
+	.uart_tx_active(1'b0),
+	.uart_rx_dv(1'b0),
+	.uart_rx_byte(8'd0),
+	// Save datatable — no APF datatable; sizes live in the FAT image
+	.save_dt_slot(),
+	.save_dt_size(),
+	.save_dt_commit(),
+	.app_id(32'd0),
+	// Analogizer — not present
+	.analogizer_settings(32'd0),
+	.analogizer_hoffset(32'd0),
+	.analogizer_voffset(32'd0),
+	.analogizer_cpu_wr_toggle(),
+	.analogizer_cpu_wr_settings(),
+	.analogizer_cpu_wr_hoffset(),
+	.analogizer_cpu_wr_voffset(),
+	// Shutdown handshake — MiSTer cores exit by hard reset
+	.shutdown_pending(1'b0),
+	.shutdown_ack(),
+	.timer_irq(timer_irq),
+	.uart_rx_irq(uart_rx_irq),
+	.link_irq(link_irq),
+	.ext_irq(ext_irq),
+	// Datatable query — answered instantly with zeros (firmware
+	// synthesizes the datatable view in software on MiSTer)
+	.dt_query_addr(),
+	.dt_query_toggle(),
+	.dt_query_data(32'd0),
+	.dt_query_valid(1'b1),
+	.vrr_v_total(vrr_v_total_cpu),
+	.analogizer_enabled(1'b0),
+	// SNAC — not present
+	.snac_pin_out(),
+	.snac_pin_dir(),
+	.snac_pin_in(8'd0),
+	.snac_enable(),
+	// GPU register interface
+	.gpu_reg_wr(gpu_reg_wr),
+	.gpu_reg_addr(gpu_reg_addr),
+	.gpu_reg_wdata(gpu_reg_wdata),
+	.gpu_reg_rdata(gpu_reg_rdata),
+	.gpu_swap_req(gpu_swap_req),
+	.gpu_swap_idx(gpu_swap_idx),
+	.fb_swap_pending_o(slave_swap_pending)
+);
+
+///////////////////////  SDRAM PATH  /////////////////////////////
+
+// Arbiter ↔ slave bus
+wire        arb_s_arvalid, arb_s_arready;
+wire [31:0] arb_s_araddr;
+wire [7:0]  arb_s_arlen;
+wire        arb_s_rvalid, arb_s_rlast, arb_s_rready;
+wire [31:0] arb_s_rdata;
+wire [1:0]  arb_s_rresp;
+wire        arb_s_awvalid, arb_s_awready;
+wire [31:0] arb_s_awaddr;
+wire [7:0]  arb_s_awlen;
+wire        arb_s_wvalid, arb_s_wready, arb_s_wlast;
+wire [31:0] arb_s_wdata;
+wire [3:0]  arb_s_wstrb;
+wire        arb_s_bvalid;
+wire [1:0]  arb_s_bresp;
+wire        arb_s_wcont;
+
+// GPU AXI master
+wire        gpu_rd_arvalid, gpu_rd_arready;
+wire [31:0] gpu_rd_araddr;
+wire [7:0]  gpu_rd_arlen;
+wire        gpu_rd_rvalid;
+wire [31:0] gpu_rd_rdata;
+wire        gpu_rd_rlast;
+wire        gpu_wr_awvalid, gpu_wr_awready;
+wire [31:0] gpu_wr_awaddr;
+wire [7:0]  gpu_wr_awlen;
+wire        gpu_wr_wvalid, gpu_wr_wready;
+wire [31:0] gpu_wr_wdata;
+wire [3:0]  gpu_wr_wstrb;
+wire        gpu_wr_wlast;
+wire        gpu_wr_bvalid;
+
+// Mixer AXI master
+wire        mixer_arvalid, mixer_arready;
+wire [31:0] mixer_araddr;
+wire [7:0]  mixer_arlen;
+wire        mixer_rvalid;
+wire [31:0] mixer_rdata;
+wire [1:0]  mixer_rresp;
+wire        mixer_rlast;
+wire        mixer_rready;
+
+axi_sdram_arbiter sdram_arb (
+	.clk(clk_cpu),
+	.reset_n(1'b1),
+	// M0: GPU (merged read + write)
+	.m0_arvalid(gpu_rd_arvalid), .m0_arready(gpu_rd_arready),
+	.m0_araddr(gpu_rd_araddr),   .m0_arlen(gpu_rd_arlen),
+	.m0_rvalid(gpu_rd_rvalid),   .m0_rdata(gpu_rd_rdata),
+	.m0_rresp(),                 .m0_rlast(gpu_rd_rlast),
+	.m0_awvalid(gpu_wr_awvalid), .m0_awready(gpu_wr_awready),
+	.m0_awaddr(gpu_wr_awaddr),   .m0_awlen(gpu_wr_awlen),
+	.m0_wvalid(gpu_wr_wvalid),   .m0_wready(gpu_wr_wready),
+	.m0_wdata(gpu_wr_wdata),     .m0_wstrb(gpu_wr_wstrb),
+	.m0_wlast(gpu_wr_wlast),
+	.m0_bvalid(gpu_wr_bvalid),   .m0_bresp(),
+	// M1: CPU
+	.m1_arvalid(cpu_m_sdram_arvalid), .m1_arready(cpu_m_sdram_arready),
+	.m1_araddr(cpu_m_sdram_araddr),   .m1_arlen(cpu_m_sdram_arlen),
+	.m1_rvalid(cpu_m_sdram_rvalid),   .m1_rdata(cpu_m_sdram_rdata),
+	.m1_rresp(cpu_m_sdram_rresp),     .m1_rlast(cpu_m_sdram_rlast),
+	.m1_rready(cpu_m_sdram_rready),
+	.m1_awvalid(cpu_m_sdram_awvalid), .m1_awready(cpu_m_sdram_awready),
+	.m1_awaddr(cpu_m_sdram_awaddr),   .m1_awlen(cpu_m_sdram_awlen),
+	.m1_wvalid(cpu_m_sdram_wvalid),   .m1_wready(cpu_m_sdram_wready),
+	.m1_wdata(cpu_m_sdram_wdata),     .m1_wstrb(cpu_m_sdram_wstrb),
+	.m1_wlast(cpu_m_sdram_wlast),
+	.m1_bvalid(cpu_m_sdram_bvalid),   .m1_bresp(cpu_m_sdram_bresp),
+	// M2: hps_bridge (boot.rom DMA + sector engine, read + write)
+	.m2_arvalid(brg_arvalid), .m2_arready(brg_arready),
+	.m2_araddr(brg_araddr),   .m2_arlen(brg_arlen),
+	.m2_rvalid(brg_rvalid),   .m2_rdata(brg_rdata),
+	.m2_rresp(brg_rresp),     .m2_rlast(brg_rlast),
+	.m2_rready(brg_rready),
+	.m2_awvalid(brg_awvalid), .m2_awready(brg_awready),
+	.m2_awaddr(brg_awaddr),   .m2_awlen(brg_awlen),
+	.m2_wvalid(brg_wvalid),   .m2_wready(brg_wready),
+	.m2_wdata(brg_wdata),     .m2_wstrb(brg_wstrb),
+	.m2_wlast(brg_wlast),
+	.m2_bvalid(brg_bvalid),   .m2_bresp(brg_bresp),
+	// M3: Audio Mixer
+	.m3_arvalid(mixer_arvalid),   .m3_arready(mixer_arready),
+	.m3_araddr(mixer_araddr),     .m3_arlen(mixer_arlen),
+	.m3_rvalid(mixer_rvalid),     .m3_rdata(mixer_rdata),
+	.m3_rresp(mixer_rresp),       .m3_rlast(mixer_rlast),
+	.m3_rready(mixer_rready),
+	// Slave output
+	.s_arvalid(arb_s_arvalid), .s_arready(arb_s_arready),
+	.s_araddr(arb_s_araddr),   .s_arlen(arb_s_arlen),
+	.s_rvalid(arb_s_rvalid),   .s_rready(arb_s_rready),
+	.s_rdata(arb_s_rdata),
+	.s_rresp(arb_s_rresp),     .s_rlast(arb_s_rlast),
+	.s_awvalid(arb_s_awvalid), .s_awready(arb_s_awready),
+	.s_awaddr(arb_s_awaddr),   .s_awlen(arb_s_awlen),
+	.s_wvalid(arb_s_wvalid),   .s_wready(arb_s_wready),
+	.s_wdata(arb_s_wdata),     .s_wstrb(arb_s_wstrb),
+	.s_wlast(arb_s_wlast),
+	.s_bvalid(arb_s_bvalid),   .s_bresp(arb_s_bresp),
+	.s_wcont(arb_s_wcont),
+	.dbg_arb_state(),
+	.dbg_cpu_pending(),
+	.dbg_grant()
+);
+
+// Slave → io_sdram word interface
+wire        sdram_slave_rd, sdram_slave_wr;
+wire [23:0] sdram_slave_addr;
+wire [31:0] sdram_slave_wdata;
+wire [3:0]  sdram_slave_wstrb;
+wire [3:0]  sdram_slave_burst_len;
+wire [3:0]  sdram_slave_burst_wr_len;
+wire [31:0] sdram_slave_next_wdata;
+wire [3:0]  sdram_slave_next_wstrb;
+wire [31:0] sdram_slave_preload_wdata;
+wire [3:0]  sdram_slave_preload_wstrb;
+wire        sdram_slave_wr_data_next;
+wire        sdram_slave_wr_done;
+
+reg         ram1_word_rd, ram1_word_wr;
+reg  [23:0] ram1_word_addr;
+reg  [31:0] ram1_word_data;
+reg  [3:0]  ram1_word_wstrb;
+reg  [31:0] ram1_word_data_next;
+reg  [3:0]  ram1_word_wstrb_next;
+reg  [3:0]  ram1_word_burst_len;
+reg  [3:0]  ram1_word_burst_wr_len;
+wire [31:0] ram1_word_q;
+wire        ram1_word_busy;
+wire        ram1_word_q_valid;
+
+axi_sdram_slave #(
+	.SERIALIZE_WRITE_BURSTS(1'b0),
+	.MAX_NATIVE_WRITE_BURST_LEN(8'd15)
+) sdram_axi_slave (
+	.clk(clk_cpu),
+	.reset_n(1'b1),
+	.s_axi_arvalid(arb_s_arvalid),
+	.s_axi_arready(arb_s_arready),
+	.s_axi_araddr(arb_s_araddr),
+	.s_axi_arlen(arb_s_arlen),
+	.s_axi_rvalid(arb_s_rvalid),
+	.s_axi_rready(arb_s_rready),
+	.s_axi_rdata(arb_s_rdata),
+	.s_axi_rresp(arb_s_rresp),
+	.s_axi_rlast(arb_s_rlast),
+	.s_axi_awvalid(arb_s_awvalid),
+	.s_axi_awready(arb_s_awready),
+	.s_axi_awaddr(arb_s_awaddr),
+	.s_axi_awlen(arb_s_awlen),
+	.s_axi_wvalid(arb_s_wvalid),
+	.s_axi_wready(arb_s_wready),
+	.s_axi_wdata(arb_s_wdata),
+	.s_axi_wstrb(arb_s_wstrb),
+	.s_axi_wlast(arb_s_wlast),
+	.s_axi_bvalid(arb_s_bvalid),
+	.s_axi_bready(1'b1),
+	.s_axi_bresp(arb_s_bresp),
+	.s_axi_wcont(arb_s_wcont),
+	.sdram_rd(sdram_slave_rd),
+	.sdram_wr(sdram_slave_wr),
+	.sdram_addr(sdram_slave_addr),
+	.sdram_wdata(sdram_slave_wdata),
+	.sdram_wstrb(sdram_slave_wstrb),
+	.sdram_burst_len(sdram_slave_burst_len),
+	.sdram_burst_wr_len(sdram_slave_burst_wr_len),
+	.sdram_rdata(ram1_word_q),
+	.sdram_busy(ram1_word_busy),
+	.sdram_accepted(sdram_accepted_r),
+	.sdram_rdata_valid(ram1_word_q_valid),
+	.sdram_wr_data_next(sdram_slave_wr_data_next),
+	.sdram_wr_done(sdram_slave_wr_done),
+	.sdram_next_wdata(sdram_slave_next_wdata),
+	.sdram_next_wstrb(sdram_slave_next_wstrb),
+	.sdram_preload_wdata(sdram_slave_preload_wdata),
+	.sdram_preload_wstrb(sdram_slave_preload_wstrb)
+);
+
+// Slave → io_sdram pulse adapter (verbatim from core_top.v)
+reg sdram_accepted_r;
+reg sdram_cmd_forwarded;
+always @(posedge clk_ram_controller) begin
+	ram1_word_rd <= 0;
+	ram1_word_wr <= 0;
+	ram1_word_burst_len <= 4'd0;
+	ram1_word_burst_wr_len <= 4'd0;
+	sdram_accepted_r <= 0;
+
+	if (!sdram_slave_rd && !sdram_slave_wr)
+		sdram_cmd_forwarded <= 0;
+
+	if (!ram1_word_busy && !sdram_cmd_forwarded &&
+	    (sdram_slave_rd || sdram_slave_wr)) begin
+		ram1_word_rd <= sdram_slave_rd;
+		ram1_word_wr <= sdram_slave_wr;
+		ram1_word_addr <= sdram_slave_addr;
+		ram1_word_data <= sdram_slave_wdata;
+		ram1_word_wstrb <= sdram_slave_wstrb;
+		ram1_word_data_next <= sdram_slave_preload_wdata;
+		ram1_word_wstrb_next <= sdram_slave_preload_wstrb;
+		ram1_word_burst_len <= sdram_slave_burst_len;
+		ram1_word_burst_wr_len <= sdram_slave_burst_wr_len;
+		sdram_accepted_r <= 1;
+		sdram_cmd_forwarded <= 1;
+	end
+end
+
+///////////////////////  SCANOUT + RASTER  ///////////////////////
+
+reg [9:0]  x_count;
+reg [9:0]  y_count;
+reg [23:0] vidout_rgb;
+reg        vidout_de;
+reg        vidout_vs;
+reg        vidout_hs;
+reg        crt_hs, crt_vs;
+
+assign vidout_vs_w = vidout_vs;
+
+localparam CRT_V_SYNC   = 3;
+localparam CRT_V_BPORCH = 15;
+localparam CRT_H_SYNC   = 58;
+localparam CRT_H_BPORCH = 62;
+localparam CRT_H_FPORCH = 20;
+localparam CRT_H_TOTAL  = CRT_H_SYNC + CRT_H_BPORCH + 640 + CRT_H_FPORCH;
+localparam [9:0] CRT_V_ACTIVE_BASE = CRT_V_SYNC + CRT_V_BPORCH;
+localparam [9:0] CRT_V_CENTER_HEIGHT = 10'd240;
+// Fixed 60.0 Hz — ascal wants a stable input frame rate, so the
+// firmware VRR register is accepted but ignored on MiSTer v1.
+localparam [9:0] CRT_V_TOTAL_60HZ = 10'd525;
+
+function [9:0] scaler_slot_width;
+	input [2:0] slot;
+	begin
+		case (slot)
+			3'd5: scaler_slot_width = 10'd400;
+			3'd6: scaler_slot_width = 10'd256;
+			3'd7: scaler_slot_width = 10'd640;
+			default: scaler_slot_width = 10'd320;
+		endcase
+	end
+endfunction
+
+function [9:0] scaler_slot_height;
+	input [2:0] slot;
+	begin
+		case (slot)
+			3'd1: scaler_slot_height = 10'd200;
+			3'd2: scaler_slot_height = 10'd224;
+			3'd3: scaler_slot_height = 10'd256;
+			3'd4: scaler_slot_height = 10'd288;
+			3'd5: scaler_slot_height = 10'd300;
+			3'd7: scaler_slot_height = 10'd480;
+			default: scaler_slot_height = 10'd240;
+		endcase
+	end
+endfunction
+
+wire [9:0] crt_h_active = scaler_slot_width(video_scaler_slot_vid);
+wire [9:0] crt_v_active = scaler_slot_height(video_scaler_slot_vid);
+wire [9:0] crt_v_center_offset =
+	(crt_v_active < CRT_V_CENTER_HEIGHT) ?
+	((CRT_V_CENTER_HEIGHT - crt_v_active) >> 1) : 10'd0;
+wire [9:0] crt_h_active_end  = CRT_H_SYNC + CRT_H_BPORCH + crt_h_active;
+wire [9:0] crt_v_active_start = CRT_V_ACTIVE_BASE + crt_v_center_offset;
+wire [9:0] crt_v_active_end   = crt_v_active_start + crt_v_active;
+
+assign early_vblank_safe_vid = (y_count < crt_v_active_start);
+
+wire [23:0] framebuffer_pixel_color;
+reg line_start;
+always @(posedge clk_vid) begin
+	line_start <= (x_count == 0);
+end
+
+// SDRAM burst interface for video scanout
+wire        video_burst_rd;
+wire [24:0] video_burst_addr;
+wire [10:0] video_burst_len;
+wire        video_burst_32bit;
+wire [31:0] video_burst_data;
+wire        video_burst_data_valid;
+wire        video_burst_data_done;
+
+video_CRT_scanout_indexed_BRAM scanout (
+	.clk_video(clk_vid),
+	.reset_n(reset_n_vid),
+	.x_count(x_count),
+	.y_count(y_count),
+	.line_start(line_start),
+	.pixel_color(framebuffer_pixel_color),
+	// Dedicated 15 kHz analog raster unused on MiSTer v1 — the path is
+	// parked in 480p mode (no fetches) and its outputs are ignored.
+	.clk_analog(clk_vid),
+	.reset_analog_n(reset_n_vid),
+	.analog_ce_pix(),
+	.analog_scanlines(2'b00),
+	.analog_480p(1'b1),
+	.analog_pixel_clk(),
+	.analog_pixel_color(),
+	.analog_hblank(),
+	.analog_vblank(),
+	.analog_hsync(),
+	.analog_vsync(),
+	.fb_base_addr(fb_display_addr),
+	.color_mode(color_mode),
+	.fb_width(fb_width),
+	.fb_height(fb_height),
+	.fb_stride(fb_stride),
+	.out_width(crt_h_active),
+	.out_height(crt_v_active),
+	.analog_fb_base_addr(analog_src_fb_addr),
+	.analog_color_mode(analog_src_color_mode),
+	.analog_fb_width(analog_src_fb_width),
+	.analog_fb_height(analog_src_fb_height),
+	.analog_fb_stride(analog_src_fb_stride),
+	.analog_out_width(crt_h_active),
+	.analog_out_height(crt_v_active),
+	.clk_palette(clk_cpu),
+	.reset_palette_n(reset_n_cpu_core),
+	.clk_sdram(clk_ram_controller),
+	.burst_rd(video_burst_rd),
+	.burst_addr(video_burst_addr),
+	.burst_len(video_burst_len),
+	.burst_32bit(video_burst_32bit),
+	.burst_data(video_burst_data),
+	.burst_data_valid(video_burst_data_valid),
+	.burst_data_done(video_burst_data_done),
+	.pal_wr(cpu_pal_wr),
+	.pal_addr(cpu_pal_addr),
+	.pal_data(cpu_pal_data),
+	.pal_commit(cpu_pal_commit),
+	.pal_busy(cpu_pal_busy)
+);
+
+always @(posedge clk_vid or negedge reset_n_vid) begin
+	if (~reset_n_vid) begin
+		x_count <= 0;
+		y_count <= 0;
+		vidout_rgb <= 24'd0;
+		vidout_de <= 0;
+		vidout_vs <= 0;
+		vidout_hs <= 0;
+		crt_hs <= 0;
+		crt_vs <= 0;
+	end else begin
+		vidout_de <= 0;
+		vidout_vs <= 0;
+		vidout_hs <= 0;
+		vidout_rgb <= 24'd0;
+
+		x_count <= x_count + 1'b1;
+		if (x_count == CRT_H_TOTAL-1) begin
+			x_count <= 0;
+			y_count <= y_count + 1'b1;
+			if (y_count >= CRT_V_TOTAL_60HZ - 1)
+				y_count <= 0;
+		end
+
+		// Full-width syncs for the framework scaler (active high; the
+		// Pocket's vidout_hs/vs are 1-cycle APF markers — those are kept
+		// only as the periph's frame tick below).
+		crt_hs <= (x_count < CRT_H_SYNC);
+		crt_vs <= (y_count < CRT_V_SYNC);
+
+		if (x_count == 0 && y_count == 0)
+			vidout_vs <= 1;
+		if (x_count == 3)
+			vidout_hs <= 1;
+
+		if (x_count >= CRT_H_SYNC + CRT_H_BPORCH && x_count < crt_h_active_end) begin
+			if (y_count >= crt_v_active_start && y_count < crt_v_active_end) begin
+				vidout_de <= 1;
+				vidout_rgb <= framebuffer_pixel_color;
+			end
+		end
+	end
+end
+
+assign CLK_VIDEO = clk_vid;
+assign CE_PIXEL  = 1'b1;
+assign VGA_R  = vidout_rgb[23:16];
+assign VGA_G  = vidout_rgb[15:8];
+assign VGA_B  = vidout_rgb[7:0];
+assign VGA_DE = vidout_de;
+assign VGA_HS = crt_hs;
+assign VGA_VS = crt_vs;
+
+///////////////////////  AUDIO  //////////////////////////////////
+
+wire        mixer_sample_wr;
+wire [31:0] mixer_sample_data;
+
+audio_mixer audio_mixer_inst (
+	.clk              (clk_cpu),
+	.reset_n          (reset_n_cpu_media),
+	.mixer_enable     (mixer_enable_mmio),
+	.voice_wr         (mixer_voice_wr_mmio),
+	.voice_field      (mixer_voice_field_mmio),
+	.voice_sel        (mixer_voice_sel_mmio),
+	.voice_sel_rd     (mixer_voice_sel_rd_mmio),
+	.voice_wdata      (mixer_voice_wdata_mmio),
+	.master_vol       (mixer_master_vol_mmio),
+	.group_vol_0      (mixer_group_vol_0_mmio),
+	.group_vol_1      (mixer_group_vol_1_mmio),
+	.group_vol_2      (mixer_group_vol_2_mmio),
+	.group_vol_3      (mixer_group_vol_3_mmio),
+	.voice_group_packed(mixer_voice_group_packed_mmio),
+	.m_arvalid        (mixer_arvalid),
+	.m_arready        (mixer_arready),
+	.m_araddr         (mixer_araddr),
+	.m_arlen          (mixer_arlen),
+	.m_rvalid         (mixer_rvalid),
+	.m_rdata          (mixer_rdata),
+	.m_rresp          (mixer_rresp),
+	.m_rlast          (mixer_rlast),
+	.m_rready         (mixer_rready),
+	.sample_wr        (mixer_sample_wr),
+	.sample_data      (mixer_sample_data),
+	.fifo_level       (audio_fifo_level),
+	.pos_readback     (mixer_pos_readback),
+	.irq_clear_wr     (mixer_irq_clear_wr_mmio),
+	.irq_clear        (mixer_irq_clear_mmio),
+	.voice_end_pending(mixer_voice_end_pending),
+	.voice_end_irq    (),
+	.voice_active_mask(mixer_active_mask)
+);
+
+// Latch the 48 kHz stereo pair for sys_top's audio chain (it handles
+// the clock crossing; AUDIO_S=1 marks the samples signed).
+reg [15:0] audio_l_reg, audio_r_reg;
+always @(posedge clk_cpu) begin
+	if (mixer_sample_wr) begin
+		audio_l_reg <= mixer_sample_data[31:16];
+		audio_r_reg <= mixer_sample_data[15:0];
+	end
+end
+assign AUDIO_L = audio_l_reg;
+assign AUDIO_R = audio_r_reg;
+
+///////////////////////  GPU  ////////////////////////////////////
+
+// GPU-private LUT scratch (BRAM-backed; external SRAM on the Pocket)
+wire        sram_word_rd, sram_word_wr;
+wire        sram_word_rd_half, sram_word_rd_hi;
+wire [21:0] sram_word_addr;
+wire [31:0] sram_word_wdata;
+wire [3:0]  sram_word_wstrb;
+wire [31:0] sram_word_rdata;
+wire        sram_word_busy;
+wire        sram_word_rdata_valid;
+
+sram_bram gpu_lut_sram (
+	.clk(clk_ram_controller),
+	.reset_n(1'b1),
+	.word_rd(sram_word_rd),
+	.word_wr(sram_word_wr),
+	.word_rd_half(sram_word_rd_half),
+	.word_rd_hi(sram_word_rd_hi),
+	.word_addr(sram_word_addr),
+	.word_data(sram_word_wdata),
+	.word_wstrb(sram_word_wstrb),
+	.word_q(sram_word_rdata),
+	.word_busy(sram_word_busy),
+	.word_q_valid(sram_word_rdata_valid)
+);
+
+gpu_core gpu (
+	.clk(clk_cpu),
+	.reset_n(reset_n_cpu_media),
+	.gpu_enable(1'b1),
+	.m_rd_arvalid(gpu_rd_arvalid),
+	.m_rd_arready(gpu_rd_arready),
+	.m_rd_araddr(gpu_rd_araddr),
+	.m_rd_arlen(gpu_rd_arlen),
+	.m_rd_rvalid(gpu_rd_rvalid),
+	.m_rd_rdata(gpu_rd_rdata),
+	.m_rd_rlast(gpu_rd_rlast),
+	.m_wr_awvalid(gpu_wr_awvalid),
+	.m_wr_awready(gpu_wr_awready),
+	.m_wr_awaddr(gpu_wr_awaddr),
+	.m_wr_awlen(gpu_wr_awlen),
+	.m_wr_wvalid(gpu_wr_wvalid),
+	.m_wr_wready(gpu_wr_wready),
+	.m_wr_wdata(gpu_wr_wdata),
+	.m_wr_wstrb(gpu_wr_wstrb),
+	.m_wr_wlast(gpu_wr_wlast),
+	.m_wr_bvalid(gpu_wr_bvalid),
+	.sram_rd(sram_word_rd),
+	.sram_wr(sram_word_wr),
+	.sram_rd_half(sram_word_rd_half),
+	.sram_rd_hi(sram_word_rd_hi),
+	.sram_addr(sram_word_addr),
+	.sram_wdata(sram_word_wdata),
+	.sram_wstrb(sram_word_wstrb),
+	.sram_rdata(sram_word_rdata),
+	.sram_busy(sram_word_busy),
+	.sram_rdata_valid(sram_word_rdata_valid),
+	.reg_wr(gpu_reg_wr),
+	.reg_addr(gpu_reg_addr),
+	.reg_wdata(gpu_reg_wdata),
+	.reg_rdata(gpu_reg_rdata),
+	.gpu_swap_req(gpu_swap_req),
+	.gpu_swap_idx(gpu_swap_idx),
+	.slave_swap_pending(slave_swap_pending),
+	.busy(),
+	.fence_reached()
+);
+
+///////////////////////  SDRAM PHY  //////////////////////////////
+
+// The MiSTer SDRAM module shares the Pocket's chip family/pinout; the
+// only extra pin is nCS, tied active (io_sdram idles with NOP commands).
+assign SDRAM_nCS = 1'b0;
+
+io_sdram isr0 (
+	.controller_clk ( clk_ram_controller ),
+	.chip_clk       ( clk_ram_chip ),
+	.clk_90         ( clk_ram_chip ),
+	.reset_n        ( 1'b1 ),
+
+	.phy_cke        ( SDRAM_CKE ),
+	.phy_clk        ( SDRAM_CLK ),
+	.phy_cas        ( SDRAM_nCAS ),
+	.phy_ras        ( SDRAM_nRAS ),
+	.phy_we         ( SDRAM_nWE ),
+	.phy_ba         ( SDRAM_BA ),
+	.phy_a          ( SDRAM_A ),
+	.phy_dq         ( SDRAM_DQ ),
+	.phy_dqm        ( {SDRAM_DQMH, SDRAM_DQML} ),
+
+	// Burst interface — video scanout
+	.burst_rd           ( video_burst_rd ),
+	.burst_addr         ( video_burst_addr ),
+	.burst_len          ( video_burst_len ),
+	.burst_32bit        ( video_burst_32bit ),
+	.burst_data         ( video_burst_data ),
+	.burst_data_valid   ( video_burst_data_valid ),
+	.burst_data_done    ( video_burst_data_done ),
+
+	// Burst write interface — not used
+	.burstwr        ( 1'b0 ),
+	.burstwr_addr   ( 25'b0 ),
+	.burstwr_ready  ( ),
+	.burstwr_strobe ( 1'b0 ),
+	.burstwr_data   ( 16'b0 ),
+	.burstwr_done   ( 1'b0 ),
+	.dbg_io         ( ),
+
+	// Word interface — CPU access via AXI
+	.word_rd    ( ram1_word_rd ),
+	.word_wr    ( ram1_word_wr ),
+	.word_addr  ( ram1_word_addr ),
+	.word_data  ( ram1_word_data ),
+	.word_wstrb ( ram1_word_wstrb ),
+	.word_data_next ( ram1_word_data_next ),
+	.word_wstrb_next ( ram1_word_wstrb_next ),
+	.word_burst_len ( ram1_word_burst_len ),
+	.word_burst_wr_len ( ram1_word_burst_wr_len ),
+	.word_q     ( ram1_word_q ),
+	.word_busy  ( ram1_word_busy ),
+	.word_q_valid ( ram1_word_q_valid ),
+	.word_wr_data_next ( sdram_slave_wr_data_next ),
+	.word_wr_done ( sdram_slave_wr_done ),
+	.burst_wr_direct_data ( sdram_slave_next_wdata ),
+	.burst_wr_direct_strb ( sdram_slave_next_wstrb )
+);
+
+endmodule
