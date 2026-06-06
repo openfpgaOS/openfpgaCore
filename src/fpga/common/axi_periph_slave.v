@@ -1881,9 +1881,10 @@ always @(posedge clk or posedge reset) begin
                     /* All peripheral reads now stage through a local data
                      * register before driving AXI RDATA.  That breaks the
                      * large final periph read mux out of the AXI response
-                     * path.  Mixer position readback still needs one extra
-                     * latch cycle inside S_PERIPH_RD_WAIT because core_top
-                     * registers the selected voice after req_addr changes. */
+                     * path.  Mixer/sysreg reads take one extra latch cycle
+                     * (S_PERIPH_RD_LATCH) so registered readback paths —
+                     * e.g. the mixer's synchronous pos_latch MLAB read —
+                     * settle before periph_rd_data_r captures. */
                     state <= S_PERIPH_RD_WAIT;
                     if (ar_region == REGION_LINK) begin
                         link_reg_addr <= ar_addr[6:2];

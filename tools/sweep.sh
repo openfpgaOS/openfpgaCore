@@ -113,7 +113,9 @@ for seed in $(seq ${MIN} ${MAX}); do
                "${fmax}" "${wns:--}" "${tns:--}"
         fmax_num=$(echo "$fmax" | sed 's/ MHz//' | tr -d ' ')
         best_num=$(echo "$BEST_FMAX" | sed 's/ MHz//' | tr -d ' ')
-        if [ "$(echo "$fmax_num > $best_num" | bc -l 2>/dev/null || echo 0)" = "1" ]; then
+        # awk, not bc: bc is not part of a base install and a silent
+        # fallback here once made every seed rank as "not better".
+        if awk -v a="$fmax_num" -v b="$best_num" 'BEGIN { exit !(a > b) }'; then
             BEST_SEED=${seed}
             BEST_FMAX=${fmax}
             BEST_WNS=${wns}
@@ -148,7 +150,7 @@ printf "${C_HEAD}Best: seed ${BEST_SEED} (${BEST_FMAX}, WNS ${BEST_WNS:--}, TNS 
 # Warn if even the best seed doesn't meet the 100 MHz target -- but
 # still ship it. Closer-to-meeting beats not-shipping-at-all.
 best_num=$(echo "$BEST_FMAX" | sed 's/ MHz//' | tr -d ' ')
-if [ "$(echo "$best_num < 100" | bc -l 2>/dev/null || echo 0)" = "1" ]; then
+if awk -v a="$best_num" 'BEGIN { exit !(a < 100) }'; then
     printf " ${C_WARN}(below 100 MHz target -- shipping anyway)${C_RESET}"
 fi
 echo ""

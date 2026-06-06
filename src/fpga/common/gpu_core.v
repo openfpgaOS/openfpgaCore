@@ -106,6 +106,17 @@ module gpu_core (
 
 localparam GPU_ENABLE_PERSP     = 1'b1;
 
+// GPU byte-address datapath width.  The SDRAM slave (axi_sdram_slave.v)
+// physically decodes only address bits [25:2] — a 64 MB (2^26-byte) space —
+// and ignores [31:26].  Every framebuffer / z-buffer / texture byte-address
+// register and adder in this core therefore carries 6 dead high bits when
+// kept at 32.  Narrowing the address datapath to GPU_ADDR_W bits drops those
+// dead bits; the mod-2^26 wraparound is identical to mod-2^32 truncated at
+// the slave, so address compares and +N steps keep the same semantics.
+// Where a narrowed address drives a 32-bit AXI port it is zero-padded with
+// {6'b0, addr}; where a 32-bit source loads a narrowed reg it is sliced.
+localparam GPU_ADDR_W = 26;
+
 wire active = reset_n & gpu_enable;
 
 assign dbg_state = 6'd0;
@@ -173,7 +184,7 @@ reg [25:0] palookup_base;
 // Latched on MMIO writes; consumed by the dedicated DMA FSM below.
 // dma_words_left counts words remaining in the entire kick; the FSM
 // re-issues an AR for each 16-beat sub-burst until the count drains.
-reg [31:0] dma_src_latched;       // SDRAM byte addr (from GPU_DMA_SRC)
+reg [GPU_ADDR_W-1:0] dma_src_latched;  // SDRAM byte addr (from GPU_DMA_SRC)
 reg [12:0] dma_len_latched;       // Total words to pull (max 4096; 13-bit fits)
 localparam DMA_S_IDLE    = 2'd0;
 localparam DMA_S_AR      = 2'd1;
@@ -181,11 +192,11 @@ localparam DMA_S_R       = 2'd2;
 localparam DMA_S_PUBLISH = 2'd3;  // 1-cycle pulse to publish ring_wrptr
 reg [1:0]  dma_state;
 reg        dma_publish_wrptr;     // 1-cycle pulse, latched by ring_wrptr
-reg [31:0] dma_burst_addr;        // SDRAM byte addr of next sub-burst
+reg [GPU_ADDR_W-1:0] dma_burst_addr;  // SDRAM byte addr of next sub-burst
 reg [12:0] dma_words_left;        // Words remaining in the kick (across sub-bursts)
 reg [8:0]  dma_burst_words;       // Words remaining in current sub-burst (1..256)
 
-reg [31:0] dma_desc_src [0:1];
+reg [GPU_ADDR_W-1:0] dma_desc_src [0:1];
 reg [12:0] dma_desc_len [0:1];
 reg        dma_desc_rd;
 reg        dma_desc_wr;
@@ -245,7 +256,7 @@ always @(posedge clk) begin
         tex_flush_req   <= 0;
         soft_reset      <= 0;
         ring_reset      <= 0;
-        dma_src_latched <= 32'd0;
+        dma_src_latched <= {GPU_ADDR_W{1'b0}};
         dma_len_latched <= 13'd0;
         palookup_base   <= PALOOKUP_BASE_DEFAULT;
     end else begin
@@ -278,7 +289,7 @@ always @(posedge clk) begin
                 4'd1: begin end // GPU_RING_WRPTR is read-only now
                 4'd2: begin end
                 4'd3: begin  // GPU_DMA_SRC
-                    dma_src_latched <= reg_wdata;
+                    dma_src_latched <= reg_wdata[GPU_ADDR_W-1:0];
                 end
                 4'd7: begin  // GPU_DMA_LEN — clamp to ring depth
                     dma_len_latched <= reg_wdata[12:0];
@@ -634,7 +645,7 @@ assign m_rd_arvalid    = dma_owns_ar   ? dma_arvalid
                        : blend_owns_m0 ? blend_arvalid
                        :                 tex_axi_arvalid;
 assign m_rd_araddr     = dma_owns_ar   ? dma_araddr
-                       : blend_owns_m0 ? blend_araddr
+                       : blend_owns_m0 ? {{(32-GPU_ADDR_W){1'b0}}, blend_araddr}
                        :                 tex_axi_araddr;
 assign m_rd_arlen      = dma_owns_ar   ? dma_arlen
                        : blend_owns_m0 ? 8'd0
@@ -662,7 +673,7 @@ assign dma_ring_wdata_raw = m_rd_rdata;
 always @(posedge clk) begin
     if (!reset_n) begin
         dma_state         <= DMA_S_IDLE;
-        dma_burst_addr    <= 32'd0;
+        dma_burst_addr    <= {GPU_ADDR_W{1'b0}};
         dma_words_left    <= 13'd0;
         dma_burst_words   <= 9'd0;
         dma_arvalid       <= 1'b0;
@@ -670,8 +681,8 @@ always @(posedge clk) begin
         dma_arlen         <= 8'd0;
         dma_publish_wrptr <= 1'b0;
         dma_starve_count  <= 10'd0;
-        dma_desc_src[0]   <= 32'd0;
-        dma_desc_src[1]   <= 32'd0;
+        dma_desc_src[0]   <= {GPU_ADDR_W{1'b0}};
+        dma_desc_src[1]   <= {GPU_ADDR_W{1'b0}};
         dma_desc_len[0]   <= 13'd0;
         dma_desc_len[1]   <= 13'd0;
         dma_desc_rd       <= 1'b0;
@@ -747,7 +758,7 @@ always @(posedge clk) begin
                     dma_arlen       <= dma_words_left[7:0] - 8'd1;
                     dma_burst_words <= {1'b0, dma_words_left[7:0]};
                 end
-                dma_araddr  <= dma_burst_addr;
+                dma_araddr  <= {{(32-GPU_ADDR_W){1'b0}}, dma_burst_addr};
                 dma_arvalid <= 1'b1;
             end
             // else: bus is busy and starvation bound not yet hit — wait
@@ -759,7 +770,7 @@ always @(posedge clk) begin
             if (m_rd_rvalid) begin
                 dma_burst_words <= dma_burst_words - 9'd1;
                 dma_words_left  <= dma_words_left  - 13'd1;
-                dma_burst_addr  <= dma_burst_addr  + 32'd4;
+                dma_burst_addr  <= dma_burst_addr  + {{(GPU_ADDR_W-3){1'b0}}, 3'd4};
                 if (m_rd_rlast) begin
                     // Sub-burst complete.  Either we're done with the
                     // whole kick (all words landed → publish ring_wrptr
@@ -847,8 +858,8 @@ reg [15:0] st_fb_stride;
 // ================================================================
 // Span Registers (loaded from command payload)
 // ================================================================
-reg [31:0] sp_fb_addr;
-reg [31:0] sp_tex_addr;
+reg [GPU_ADDR_W-1:0] sp_fb_addr;
+reg [GPU_ADDR_W-1:0] sp_tex_addr;
 reg signed [31:0] sp_s, sp_t;
 reg signed [31:0] sp_sstep, sp_tstep;
 reg [15:0] sp_count;
@@ -862,7 +873,10 @@ wire [5:0]        sp_light = sp_light_q[21:16];
 reg [3:0]  sp_flags;
 // Per-span colormap_id for direct-affine and parametric dispatch.
 reg [3:0]  sp_colormap_id;
-reg signed [31:0] sp_fb_stride;
+// Address delta (byte stride).  Narrowed to the address datapath width;
+// signed semantics are preserved because mod-2^26 wraparound matches the
+// SDRAM-visible address arithmetic.
+reg signed [GPU_ADDR_W-1:0] sp_fb_stride;
 reg [15:0] sp_tex_width;
 // POT wrap masks: (sp_s[31:16] & sp_tex_w_mask) and
 // (sp_t[31:16] & sp_tex_h_mask)
@@ -879,8 +893,10 @@ reg signed [31:0] sp_t_clamp_min;
 reg signed [31:0] sp_t_clamp_max;
 reg        sp_z_write_enable;
 reg        sp_z_test_enable;
-reg [31:0] sp_z_addr;
-reg signed [31:0] sp_z_step;
+reg [GPU_ADDR_W-1:0] sp_z_addr;
+// z ADDRESS delta (byte stride into the z-buffer) — narrow.  Distinct from
+// sp_z_value/sp_z_value_step below, which are the 32-bit z VALUES written.
+reg signed [GPU_ADDR_W-1:0] sp_z_step;
 reg signed [31:0] sp_z_value;
 reg signed [31:0] sp_z_value_step;
 reg        sp_q29_z_enable;
@@ -897,10 +913,13 @@ reg [1:0]  spanprod_idx;
 reg [2:0]  spanprod_record_count;
 reg [15:0] spanprod_records_left;
 reg [2:0]  spanprod_calc_step;
-reg [31:0] spanprod_fb_base;
-reg signed [31:0] spanprod_fb_major_step;
-reg signed [31:0] spanprod_fb_minor_step;
-reg [31:0] spanprod_tex_addr;
+reg [GPU_ADDR_W-1:0] spanprod_fb_base;
+// fb/z major/minor steps are byte-address deltas.  They are sign-extended
+// to 32 bits where they drive the shared DSP multiplier (address-product
+// math) and assigned straight into the narrowed sp_fb_stride/sp_z_step.
+reg signed [GPU_ADDR_W-1:0] spanprod_fb_major_step;
+reg signed [GPU_ADDR_W-1:0] spanprod_fb_minor_step;
+reg [GPU_ADDR_W-1:0] spanprod_tex_addr;
 reg [15:0] spanprod_tex_width;
 reg [15:0] spanprod_tex_w_mask;
 reg [15:0] spanprod_tex_h_mask;
@@ -929,20 +948,20 @@ reg signed [31:0] spanprod_clamp0_min;
 reg signed [31:0] spanprod_clamp0_max;
 reg signed [31:0] spanprod_clamp1_min;
 reg signed [31:0] spanprod_clamp1_max;
-reg [31:0] spanprod_z_base;
-reg signed [31:0] spanprod_z_major_step;
-reg signed [31:0] spanprod_z_minor_step;
+reg [GPU_ADDR_W-1:0] spanprod_z_base;
+reg signed [GPU_ADDR_W-1:0] spanprod_z_major_step;
+reg signed [GPU_ADDR_W-1:0] spanprod_z_minor_step;
 reg signed [15:0] spanprod_u [0:3];
 reg signed [15:0] spanprod_v [0:3];
 reg [15:0] spanprod_count [0:3];
-reg [31:0] spanprod_fb_addr_r;
-reg [31:0] spanprod_z_addr_r;
+reg [GPU_ADDR_W-1:0] spanprod_fb_addr_r;
+reg [GPU_ADDR_W-1:0] spanprod_z_addr_r;
 reg signed [31:0] spanprod_attr0_start_r;
 reg signed [31:0] spanprod_attr1_start_r;
 reg signed [31:0] spanprod_attr2_start_r;
 reg signed [23:0] spanprod_light_start_r;
-reg [31:0] spanprod_direct_fb_addr [0:3];
-reg [31:0] spanprod_direct_tex_addr [0:3];
+reg [GPU_ADDR_W-1:0] spanprod_direct_fb_addr [0:3];
+reg [GPU_ADDR_W-1:0] spanprod_direct_tex_addr [0:3];
 reg signed [31:0] spanprod_direct_s [0:3];
 reg signed [31:0] spanprod_direct_t [0:3];
 reg signed [31:0] spanprod_direct_sstep [0:3];
@@ -953,8 +972,8 @@ reg signed [15:0] spanprod_cur_u;
 reg signed [15:0] spanprod_cur_v;
 reg [15:0] spanprod_cur_count;
 reg        spanprod_cur_nonzero;
-reg [31:0] spanprod_cur_direct_fb_addr;
-reg [31:0] spanprod_cur_direct_tex_addr;
+reg [GPU_ADDR_W-1:0] spanprod_cur_direct_fb_addr;
+reg [GPU_ADDR_W-1:0] spanprod_cur_direct_tex_addr;
 reg signed [31:0] spanprod_cur_direct_s;
 reg signed [31:0] spanprod_cur_direct_t;
 reg signed [31:0] spanprod_cur_direct_sstep;
@@ -1033,30 +1052,30 @@ task load_param_span_list_payload_word;
                     spanprod_tex_w_mask <= (data[15:0]  == 16'd0) ? 16'hFFFF : data[15:0];
                     spanprod_tex_h_mask <= (data[31:16] == 16'd0) ? 16'hFFFF : data[31:16];
                 end
-                6'd3: spanprod_fb_minor_step <= data;
-                6'd4: spanprod_direct_fb_addr[0] <= data;
-                6'd5: spanprod_direct_tex_addr[0] <= data;
+                6'd3: spanprod_fb_minor_step <= data[GPU_ADDR_W-1:0];
+                6'd4: spanprod_direct_fb_addr[0] <= data[GPU_ADDR_W-1:0];
+                6'd5: spanprod_direct_tex_addr[0] <= data[GPU_ADDR_W-1:0];
                 6'd6: begin spanprod_count[0] <= data[15:0]; spanprod_direct_light[0] <= data[21:16]; spanprod_direct_colormap_id[0] <= data[31:28]; end
                 6'd7: spanprod_direct_s[0] <= data;
                 6'd8: spanprod_direct_t[0] <= data;
                 6'd9: spanprod_direct_sstep[0] <= data;
                 6'd10: spanprod_direct_tstep[0] <= data;
-                6'd11: spanprod_direct_fb_addr[1] <= data;
-                6'd12: spanprod_direct_tex_addr[1] <= data;
+                6'd11: spanprod_direct_fb_addr[1] <= data[GPU_ADDR_W-1:0];
+                6'd12: spanprod_direct_tex_addr[1] <= data[GPU_ADDR_W-1:0];
                 6'd13: begin spanprod_count[1] <= data[15:0]; spanprod_direct_light[1] <= data[21:16]; spanprod_direct_colormap_id[1] <= data[31:28]; end
                 6'd14: spanprod_direct_s[1] <= data;
                 6'd15: spanprod_direct_t[1] <= data;
                 6'd16: spanprod_direct_sstep[1] <= data;
                 6'd17: spanprod_direct_tstep[1] <= data;
-                6'd18: spanprod_direct_fb_addr[2] <= data;
-                6'd19: spanprod_direct_tex_addr[2] <= data;
+                6'd18: spanprod_direct_fb_addr[2] <= data[GPU_ADDR_W-1:0];
+                6'd19: spanprod_direct_tex_addr[2] <= data[GPU_ADDR_W-1:0];
                 6'd20: begin spanprod_count[2] <= data[15:0]; spanprod_direct_light[2] <= data[21:16]; spanprod_direct_colormap_id[2] <= data[31:28]; end
                 6'd21: spanprod_direct_s[2] <= data;
                 6'd22: spanprod_direct_t[2] <= data;
                 6'd23: spanprod_direct_sstep[2] <= data;
                 6'd24: spanprod_direct_tstep[2] <= data;
-                6'd25: spanprod_direct_fb_addr[3] <= data;
-                6'd26: spanprod_direct_tex_addr[3] <= data;
+                6'd25: spanprod_direct_fb_addr[3] <= data[GPU_ADDR_W-1:0];
+                6'd26: spanprod_direct_tex_addr[3] <= data[GPU_ADDR_W-1:0];
                 6'd27: begin spanprod_count[3] <= data[15:0]; spanprod_direct_light[3] <= data[21:16]; spanprod_direct_colormap_id[3] <= data[31:28]; end
                 6'd28: spanprod_direct_s[3] <= data;
                 6'd29: spanprod_direct_t[3] <= data;
@@ -1066,10 +1085,10 @@ task load_param_span_list_payload_word;
             endcase
         end else begin
             case (idx)
-                6'd0:  spanprod_fb_base <= data;
-                6'd1:  spanprod_fb_major_step <= data;
-                6'd2:  spanprod_fb_minor_step <= data;
-                6'd3:  spanprod_tex_addr <= data;
+                6'd0:  spanprod_fb_base <= data[GPU_ADDR_W-1:0];
+                6'd1:  spanprod_fb_major_step <= data[GPU_ADDR_W-1:0];
+                6'd2:  spanprod_fb_minor_step <= data[GPU_ADDR_W-1:0];
+                6'd3:  spanprod_tex_addr <= data[GPU_ADDR_W-1:0];
                 6'd4:  spanprod_tex_width <= data[15:0];
                 6'd5:  spanprod_tex_w_mask <= (data[15:0] == 16'd0) ? 16'hFFFF : data[15:0];
                 6'd6:  spanprod_tex_h_mask <= (data[15:0] == 16'd0) ? 16'hFFFF : data[15:0];
@@ -1077,7 +1096,7 @@ task load_param_span_list_payload_word;
                     spanprod_direct_affine <= 1'b0;
                     spanprod_flags         <= span_flags_from_wire(data[7:0]);
                     spanprod_colormap_id   <= data[11:8];
-                    spanprod_attr_persp    <= data[12] && (data[23:20] == PARAM_RECORD_U16V16_COUNT16);
+                    spanprod_attr_persp    <= GPU_ENABLE_PERSP && data[12] && (data[23:20] == PARAM_RECORD_U16V16_COUNT16);
                     spanprod_attr_q29      <= data[13] && data[12] && (data[23:20] == PARAM_RECORD_U16V16_COUNT16);
                     spanprod_q29_attr_shift <= 5'd0;
                     spanprod_span_axis     <= data[16];
@@ -1112,9 +1131,9 @@ task load_param_span_list_payload_word;
                 6'd21: spanprod_clamp0_max <= data;
                 6'd22: spanprod_clamp1_min <= data;
                 6'd23: spanprod_clamp1_max <= data;
-                6'd26: spanprod_z_base <= data;
-                6'd27: spanprod_z_major_step <= data;
-                6'd28: spanprod_z_minor_step <= data;
+                6'd26: spanprod_z_base <= data[GPU_ADDR_W-1:0];
+                6'd27: spanprod_z_major_step <= data[GPU_ADDR_W-1:0];
+                6'd28: spanprod_z_minor_step <= data[GPU_ADDR_W-1:0];
                 6'd29: begin
                     if (data[15:0] == 16'd0) begin
                         spanprod_record_count <= 3'd0;
@@ -1189,17 +1208,19 @@ task spanprod_select_current_record;
 endtask
 
 task spanprod_launch_fb_mul;
+    // Address-step operands are GPU_ADDR_W-bit signed; sign-extend to the
+    // 32-bit DSP operand width so the screen-space address product is exact.
     begin
         if (spanprod_span_axis) begin
             dsp_a  <= $signed({{16{spanprod_cur_u[15]}}, spanprod_cur_u});
-            dsp_b  <= spanprod_fb_major_step;
+            dsp_b  <= {{(32-GPU_ADDR_W){spanprod_fb_major_step[GPU_ADDR_W-1]}}, spanprod_fb_major_step};
             dsp2_a <= $signed({{16{spanprod_cur_v[15]}}, spanprod_cur_v});
-            dsp2_b <= spanprod_fb_minor_step;
+            dsp2_b <= {{(32-GPU_ADDR_W){spanprod_fb_minor_step[GPU_ADDR_W-1]}}, spanprod_fb_minor_step};
         end else begin
             dsp_a  <= $signed({{16{spanprod_cur_v[15]}}, spanprod_cur_v});
-            dsp_b  <= spanprod_fb_major_step;
+            dsp_b  <= {{(32-GPU_ADDR_W){spanprod_fb_major_step[GPU_ADDR_W-1]}}, spanprod_fb_major_step};
             dsp2_a <= $signed({{16{spanprod_cur_u[15]}}, spanprod_cur_u});
-            dsp2_b <= spanprod_fb_minor_step;
+            dsp2_b <= {{(32-GPU_ADDR_W){spanprod_fb_minor_step[GPU_ADDR_W-1]}}, spanprod_fb_minor_step};
         end
     end
 endtask
@@ -1208,14 +1229,14 @@ task spanprod_launch_z_mul;
     begin
         if (spanprod_span_axis) begin
             dsp_a  <= $signed({{16{spanprod_cur_u[15]}}, spanprod_cur_u});
-            dsp_b  <= spanprod_z_major_step;
+            dsp_b  <= {{(32-GPU_ADDR_W){spanprod_z_major_step[GPU_ADDR_W-1]}}, spanprod_z_major_step};
             dsp2_a <= $signed({{16{spanprod_cur_v[15]}}, spanprod_cur_v});
-            dsp2_b <= spanprod_z_minor_step;
+            dsp2_b <= {{(32-GPU_ADDR_W){spanprod_z_minor_step[GPU_ADDR_W-1]}}, spanprod_z_minor_step};
         end else begin
             dsp_a  <= $signed({{16{spanprod_cur_v[15]}}, spanprod_cur_v});
-            dsp_b  <= spanprod_z_major_step;
+            dsp_b  <= {{(32-GPU_ADDR_W){spanprod_z_major_step[GPU_ADDR_W-1]}}, spanprod_z_major_step};
             dsp2_a <= $signed({{16{spanprod_cur_u[15]}}, spanprod_cur_u});
-            dsp2_b <= spanprod_z_minor_step;
+            dsp2_b <= {{(32-GPU_ADDR_W){spanprod_z_minor_step[GPU_ADDR_W-1]}}, spanprod_z_minor_step};
         end
     end
 endtask
@@ -1249,8 +1270,8 @@ task spanprod_load_generated_span;
             sp_clamp_enable <= 2'b00;
             sp_z_write_enable <= 1'b0;
             sp_z_test_enable  <= 1'b0;
-            sp_z_addr       <= 32'd0;
-            sp_z_step       <= 32'sd0;
+            sp_z_addr       <= {GPU_ADDR_W{1'b0}};
+            sp_z_step       <= {GPU_ADDR_W{1'b0}};
             sp_z_value      <= 32'sd0;
             sp_z_value_step <= 32'sd0;
             sp_q29_z_enable     <= 1'b0;
@@ -1578,14 +1599,14 @@ reg        p0a_valid;
 reg [5:0]  p0a_light;
 reg [3:0]  p0a_colormap_id;
 reg [3:0]  p0a_flags;
-reg [31:0] p0a_fb_addr;
+reg [GPU_ADDR_W-1:0] p0a_fb_addr;
 reg signed [15:0] p0a_s_int;
-reg [31:0] p0a_tex_base;
+reg [GPU_ADDR_W-1:0] p0a_tex_base;
 (* preserve *) reg signed [15:0] p0a_t_y;
 (* preserve *) reg [15:0] p0a_tex_width;
 reg        p0a_z_test;
 reg        p0a_z_write;
-reg [31:0] p0a_z_addr;
+reg [GPU_ADDR_W-1:0] p0a_z_addr;
 reg [15:0] p0a_z_value;
 
 // p0: cache-issue stage. Holds the pixel whose texture-row multiply output is
@@ -1596,12 +1617,12 @@ reg        p0_valid;
 reg [5:0]  p0_light;
 reg [3:0]  p0_colormap_id;
 reg [3:0]  p0_flags;
-reg [31:0] p0_fb_addr;
+reg [GPU_ADDR_W-1:0] p0_fb_addr;
 reg signed [15:0] p0_s_int;     // for the post-mul add
-reg [31:0] p0_tex_base;         // sp_tex_addr at issue time
+reg [GPU_ADDR_W-1:0] p0_tex_base;         // sp_tex_addr at issue time
 reg        p0_z_test;
 reg        p0_z_write;
-reg [31:0] p0_z_addr;
+reg [GPU_ADDR_W-1:0] p0_z_addr;
 reg [15:0] p0_z_value;
 
 // DSP-pipelined texture multiply.  The p0a source snapshot gives this DSP a
@@ -1614,10 +1635,10 @@ reg        p1_valid;
 reg [5:0]  p1_light;
 reg [3:0]  p1_colormap_id;
 reg [3:0]  p1_flags;
-reg [31:0] p1_fb_addr;
+reg [GPU_ADDR_W-1:0] p1_fb_addr;
 reg        p1_z_test;
 reg        p1_z_write;
-reg [31:0] p1_z_addr;
+reg [GPU_ADDR_W-1:0] p1_z_addr;
 reg [15:0] p1_z_value;
 reg        p1_tex_ready;
 reg [7:0]  p1_tex_color;
@@ -1625,11 +1646,11 @@ reg [7:0]  p1_tex_color;
 reg        p2_valid;
 reg [7:0]  p2_color;          // tex result
 reg [3:0]  p2_flags;
-reg [31:0] p2_fb_addr;
+reg [GPU_ADDR_W-1:0] p2_fb_addr;
 reg        p2_discard;        // skip-zero outcome
 reg        p2_z_test;
 reg        p2_z_write;
-reg [31:0] p2_z_addr;
+reg [GPU_ADDR_W-1:0] p2_z_addr;
 reg [15:0] p2_z_value;
 
 // p2b: 1-cycle delay between p2 (cmap addr issued) and p3 (cmap data captured).
@@ -1638,21 +1659,21 @@ reg [15:0] p2_z_value;
 reg        p2b_valid;
 reg [7:0]  p2b_color;
 reg [3:0]  p2b_flags;
-reg [31:0] p2b_fb_addr;
+reg [GPU_ADDR_W-1:0] p2b_fb_addr;
 reg        p2b_discard;
 reg        p2b_z_test;
 reg        p2b_z_write;
-reg [31:0] p2b_z_addr;
+reg [GPU_ADDR_W-1:0] p2b_z_addr;
 reg [15:0] p2b_z_value;
 
 reg        p3_valid;
 reg [7:0]  p3_color;          // final color (post-cmap if applicable)
 reg [3:0]  p3_flags;
-reg [31:0] p3_fb_addr;
+reg [GPU_ADDR_W-1:0] p3_fb_addr;
 reg        p3_discard;
 reg        p3_z_test;
 reg        p3_z_write;
-reg [31:0] p3_z_addr;
+reg [GPU_ADDR_W-1:0] p3_z_addr;
 reg [15:0] p3_z_value;
 
 // FB write sub-FSM (lives within S3, pauses pipeline when not IDLE)
@@ -1691,21 +1712,21 @@ reg [15:0] ztest_acc_value;
 reg        ztest_acc_hi;
 reg        ztest_acc_write;
 reg        ztest_acc_from_read;
-reg [31:0] ztest_acc_addr;
+reg [GPU_ADDR_W-1:0] ztest_acc_addr;
 reg [31:0] ztest_acc_word;
 
 // BLEND same-word group state.  Source bytes are stored per framebuffer byte
 // lane; duplicate lanes flush the current group first so overdraw order is
 // preserved exactly.
 reg        blend_group_active;
-reg [31:0] blend_group_word_addr;
+reg [GPU_ADDR_W-1:0] blend_group_word_addr;
 reg [3:0]  blend_group_mask;
 reg [31:0] blend_group_src_data;
 reg [31:0] blend_result_word;
 reg [1:0]  blend_lane_iter;
 reg [1:0]  blend_lut_lane;
 reg        blend_arvalid;
-reg [31:0] blend_araddr;
+reg [GPU_ADDR_W-1:0] blend_araddr;
 wire [7:0]  blend_lut_src_byte = fb_lane_read(blend_group_src_data, blend_lane_iter);
 wire [7:0]  blend_lut_fb_byte  = fb_lane_read(blend_result_word, blend_lane_iter);
 wire [14:0] blend_lut_addr_w   = {blend_lut_src_byte[7:1], blend_lut_fb_byte};
@@ -1770,21 +1791,40 @@ reg src_done;            // source has issued its last pixel; pipeline draining
 // Small write FIFO in front of the AXI write master. Producers enqueue
 // 32-bit word writes and the drain path emits up to 8-beat AXI bursts when
 // adjacent full-word writes are already buffered.
+// FBWQ design notes (2026-06 simplification audit — both REFUTED, keep as-is):
+//  - The burst coalescer here is NOT redundant with the arbiter's gpu_wq
+//    run-merge: the arbiter's chains stop at WLAST ("one B per GPU AW"),
+//    so it can only merge beats WITHIN an AW this queue built.  Emitting
+//    single-beat writes would drain the SDRAM as 1-word bursts.
+//  - Depth 16 (vs the arbiter's 8) is what lets 8-beat runs accumulate
+//    while the head drains; halving it shortens formed bursts under
+//    continuous flow.  FB write throughput is the fps-critical path.
 localparam FBWQ_DEPTH = 16;
-reg [31:0] fbwq_addr [0:FBWQ_DEPTH-1];
+// addr/strb carry an MLAB hint: fbwq_data already infers as block RAM,
+// and with the tail shadow below these two are 1W+1R-sync as well.  MLAB
+// keeps them off the Pocket's fully-committed M10K budget (~576 FFs +
+// two 16:1 mux trees reclaimed vs. the flattened form).
+(* ramstyle = "MLAB" *) reg [GPU_ADDR_W-1:0] fbwq_addr [0:FBWQ_DEPTH-1];
 reg [31:0] fbwq_data [0:FBWQ_DEPTH-1];
-reg [3:0]  fbwq_strb [0:FBWQ_DEPTH-1];
+(* ramstyle = "MLAB" *) reg [3:0]  fbwq_strb [0:FBWQ_DEPTH-1];
 reg [15:0] fbwq_link_next;
+// Shadow of the most-recently-enqueued entry (== the array slots at
+// fbwq_prev_wr_ptr, which is only ever the last slot written).  The
+// burst-coalesce check needs addr/strb combinationally; reading the
+// arrays at a second, asynchronous address would force them into
+// registers.
+reg [GPU_ADDR_W-1:0] fbwq_tail_addr;
+reg [3:0]  fbwq_tail_strb;
 reg [3:0]  fbwq_rd_ptr;
 reg [3:0]  fbwq_wr_ptr;
 reg [4:0]  fbwq_count;
 reg [3:0]  fbwq_burst_remaining;
 reg        fbwq_req_valid;
-reg [31:0] fbwq_req_addr;
+reg [GPU_ADDR_W-1:0] fbwq_req_addr;
 reg [31:0] fbwq_req_data;
 reg [3:0]  fbwq_req_strb;
 reg        fbwq_stage_valid;
-reg [31:0] fbwq_stage_addr;
+reg [GPU_ADDR_W-1:0] fbwq_stage_addr;
 reg [31:0] fbwq_stage_data;
 reg [3:0]  fbwq_stage_strb;
 reg        fbwq_stage_link_tail;
@@ -1854,9 +1894,9 @@ wire [3:0] fbwq_prev_wr_ptr = fbwq_wr_ptr - 4'd1;
 wire fbwq_has_tail_after_pop = (fbwq_count > fbwq_pop_count);
 wire p3_needs_fb_flush = p3_valid && !p3_discard && !p3_flags[SPAN_TRANSLUC]
                        && fb_acc_valid
-                       && (fb_acc_addr[31:2] != p3_fb_addr[31:2]);
+                       && (fb_acc_addr[GPU_ADDR_W-1:2] != p3_fb_addr[GPU_ADDR_W-1:2]);
 wire fb_write_buffer_stall = p3_needs_fb_flush && !fb_write_can_issue;
-wire [31:0] p3_fb_word_addr_w = p3_fb_addr & 32'hFFFFFFFC;
+wire [GPU_ADDR_W-1:0] p3_fb_word_addr_w = p3_fb_addr & {{(GPU_ADDR_W-2){1'b1}}, 2'b00};
 wire [3:0]  p3_fb_lane_mask_w = fb_lane_mask(p3_fb_addr[1:0]);
 wire        fb_acc_p3_word_match = !fb_acc_valid
                                   || (fb_acc_addr == p3_fb_word_addr_w);
@@ -1883,12 +1923,18 @@ wire fp_pipe_stall = fp_pipe_shift_blocked || cmap_pipe_wait;
 // tex_width = 64).  The old shift-mode p0_shift_addr path was dead
 // code; removing it saves the 32-bit 2:1 mux + the p0_shift_addr
 // register and its variable-barrel-shift update logic.
-wire [31:0] fp_tex_addr_full = p0_tex_base + tx_mul_q
-                             + {{16{p0_s_int[15]}}, p0_s_int};
+// Texture byte address = base + (t>>16)*width + (s>>16).  tx_mul_q and the
+// sign-extended s_int are signed 32-bit contributions; the sum is taken
+// mod-2^26 (the SDRAM-visible address space) and only [GPU_ADDR_W-1:0]
+// reaches tex_req_addr / gpu_tex_cache, so the add lives in the narrow
+// domain.  Slicing each addend to GPU_ADDR_W keeps the addition width-clean.
+wire [GPU_ADDR_W-1:0] fp_tex_addr_full = p0_tex_base
+                             + tx_mul_q[GPU_ADDR_W-1:0]
+                             + {{(GPU_ADDR_W-16){p0_s_int[15]}}, p0_s_int};
 
 assign tex_req_valid = (state == S_FRAG_PIPE) && p0_valid
                     && !p1_valid;
-assign tex_req_addr  = fp_tex_addr_full[25:0];
+assign tex_req_addr  = fp_tex_addr_full;
 assign tex_req_wide  = 1'b0;
 
 // ----------------------------------------------------------------
@@ -2224,7 +2270,7 @@ wire [9:0]  recip_top10_pipe = recip_norm_pipe[30:21];
 // FB write accumulator
 reg [31:0] fb_acc_data;
 reg [3:0]  fb_acc_mask;       // Byte enables
-reg [31:0] fb_acc_addr;       // Word-aligned SDRAM address
+reg [GPU_ADDR_W-1:0] fb_acc_addr;       // Word-aligned SDRAM address
 reg        fb_acc_valid;      // Has pending data
 
 // Param-span z-write accumulator.  Quake's z buffer is a CPU-visible short*
@@ -2234,15 +2280,15 @@ reg        fb_acc_valid;      // Has pending data
 reg [15:0] z_acc_lo;
 reg [15:0] z_acc_hi;
 reg [3:0]  z_acc_mask;
-reg [31:0] z_acc_addr;
+reg [GPU_ADDR_W-1:0] z_acc_addr;
 reg        z_acc_valid;
 wire [31:0] z_acc_data = {z_acc_hi, z_acc_lo};
 reg        z_flush_valid;
-reg [31:0] z_flush_addr;
+reg [GPU_ADDR_W-1:0] z_flush_addr;
 reg [31:0] z_flush_data;
 reg [3:0]  z_flush_strb;
 reg        z_src_pending_valid;
-reg [31:0] z_src_pending_addr;
+reg [GPU_ADDR_W-1:0] z_src_pending_addr;
 reg        z_src_pending_hi;
 reg [15:0] z_src_pending_half;
 
@@ -2262,8 +2308,8 @@ reg [15:0] z_src_pending_half;
 // see openfpgaOS/docs/cr-gpu-clear-rect-stride.md.  The 8-bit cr_color
 // is just the low byte of CMD_CLEAR_RECT's color word, replicated
 // 4× per AXI write.
-reg [31:0] cr_addr;
-reg [31:0] cr_row_addr;
+reg [GPU_ADDR_W-1:0] cr_addr;
+reg [GPU_ADDR_W-1:0] cr_row_addr;
 reg [15:0] cr_w_remaining;
 reg [15:0] cr_w_total;
 reg [15:0] cr_y_remaining;
@@ -2303,7 +2349,7 @@ endtask
 // ================================================================
 always @(posedge clk) begin : main_fsm
     reg        fbwq_push_req;
-    reg [31:0] fbwq_push_addr;
+    reg [GPU_ADDR_W-1:0] fbwq_push_addr;
     reg [31:0] fbwq_push_data;
     reg [3:0]  fbwq_push_strb;
     reg        fbwq_req_links_fifo_tail;
@@ -2311,14 +2357,14 @@ always @(posedge clk) begin : main_fsm
     reg        fbwq_req_link_tail;
     reg        z_flush_set;
     reg        z_src_push;
-    reg [31:0] z_src_push_addr;
+    reg [GPU_ADDR_W-1:0] z_src_push_addr;
     reg        z_src_push_hi;
     reg [15:0] z_src_push_half;
     reg        z_src_pending_consume;
     reg        z_src_pending_applied;
 
     fbwq_push_req  = 1'b0;
-    fbwq_push_addr = 32'b0;
+    fbwq_push_addr = {GPU_ADDR_W{1'b0}};
     fbwq_push_data = 32'b0;
     fbwq_push_strb = 4'b0;
     fbwq_req_links_fifo_tail = 1'b0;
@@ -2326,7 +2372,7 @@ always @(posedge clk) begin : main_fsm
     fbwq_req_link_tail = 1'b0;
     z_flush_set = 1'b0;
     z_src_push = 1'b0;
-    z_src_push_addr = 32'd0;
+    z_src_push_addr = {GPU_ADDR_W{1'b0}};
     z_src_push_hi = 1'b0;
     z_src_push_half = 16'd0;
     z_src_pending_consume = z_src_pending_valid && !z_flush_valid;
@@ -2342,13 +2388,15 @@ always @(posedge clk) begin : main_fsm
         fbwq_wr_ptr <= 4'b0;
         fbwq_count  <= 5'b0;
         fbwq_link_next <= 16'b0;
+        fbwq_tail_addr <= {GPU_ADDR_W{1'b0}};
+        fbwq_tail_strb <= 4'b0;
         fbwq_burst_remaining <= 4'b0;
         fbwq_req_valid <= 1'b0;
-        fbwq_req_addr <= 32'd0;
+        fbwq_req_addr <= {GPU_ADDR_W{1'b0}};
         fbwq_req_data <= 32'd0;
         fbwq_req_strb <= 4'd0;
         fbwq_stage_valid <= 1'b0;
-        fbwq_stage_addr <= 32'd0;
+        fbwq_stage_addr <= {GPU_ADDR_W{1'b0}};
         fbwq_stage_data <= 32'd0;
         fbwq_stage_strb <= 4'd0;
         fbwq_stage_link_tail <= 1'b0;
@@ -2360,11 +2408,11 @@ always @(posedge clk) begin : main_fsm
         z_acc_lo <= 16'd0;
         z_acc_hi <= 16'd0;
         z_flush_valid <= 1'b0;
-        z_flush_addr <= 32'd0;
+        z_flush_addr <= {GPU_ADDR_W{1'b0}};
         z_flush_data <= 32'd0;
         z_flush_strb <= 4'd0;
         z_src_pending_valid <= 1'b0;
-        z_src_pending_addr <= 32'd0;
+        z_src_pending_addr <= {GPU_ADDR_W{1'b0}};
         z_src_pending_hi <= 1'b0;
         z_src_pending_half <= 16'd0;
         fence_reached <= 0;
@@ -2420,7 +2468,7 @@ always @(posedge clk) begin : main_fsm
         ztest_acc_hi <= 1'b0;
         ztest_acc_write <= 1'b0;
         ztest_acc_from_read <= 1'b0;
-        ztest_acc_addr <= 32'd0;
+        ztest_acc_addr <= {GPU_ADDR_W{1'b0}};
         ztest_acc_word <= 32'd0;
         blend_arvalid    <= 0;
         blend_araddr     <= 0;
@@ -2453,8 +2501,8 @@ always @(posedge clk) begin : main_fsm
         spanprod_cur_v <= 16'sd0;
         spanprod_cur_count <= 16'd0;
         spanprod_cur_nonzero <= 1'b0;
-        spanprod_cur_direct_fb_addr <= 32'd0;
-        spanprod_cur_direct_tex_addr <= 32'd0;
+        spanprod_cur_direct_fb_addr <= {GPU_ADDR_W{1'b0}};
+        spanprod_cur_direct_tex_addr <= {GPU_ADDR_W{1'b0}};
         spanprod_cur_direct_s <= 32'sd0;
         spanprod_cur_direct_t <= 32'sd0;
         spanprod_cur_direct_sstep <= 32'sd0;
@@ -2524,9 +2572,11 @@ always @(posedge clk) begin : main_fsm
             fbwq_wr_ptr  <= 4'b0;
             fbwq_count   <= 5'b0;
             fbwq_link_next <= 16'b0;
+            fbwq_tail_addr <= {GPU_ADDR_W{1'b0}};
+            fbwq_tail_strb <= 4'b0;
             fbwq_burst_remaining <= 4'b0;
             fbwq_req_valid <= 1'b0;
-            fbwq_req_addr <= 32'd0;
+            fbwq_req_addr <= {GPU_ADDR_W{1'b0}};
             fbwq_req_data <= 32'd0;
             fbwq_req_strb <= 4'd0;
             fbwq_stage_valid <= 1'b0;
@@ -2536,11 +2586,11 @@ always @(posedge clk) begin : main_fsm
             z_acc_valid <= 1'b0;
             z_acc_mask  <= 4'b0;
             z_flush_valid <= 1'b0;
-            z_flush_addr <= 32'd0;
+            z_flush_addr <= {GPU_ADDR_W{1'b0}};
             z_flush_data <= 32'd0;
             z_flush_strb <= 4'b0;
             z_src_pending_valid <= 1'b0;
-            z_src_pending_addr <= 32'd0;
+            z_src_pending_addr <= {GPU_ADDR_W{1'b0}};
             z_src_pending_hi <= 1'b0;
             z_src_pending_half <= 16'd0;
             p0a_valid <= 1'b0;
@@ -2566,7 +2616,7 @@ always @(posedge clk) begin : main_fsm
             ztest_acc_hi <= 1'b0;
             ztest_acc_write <= 1'b0;
             ztest_acc_from_read <= 1'b0;
-            ztest_acc_addr <= 32'd0;
+            ztest_acc_addr <= {GPU_ADDR_W{1'b0}};
             ztest_acc_word <= 32'd0;
             blend_arvalid <= 1'b0;
             blend_group_active <= 1'b0;
@@ -2717,8 +2767,8 @@ always @(posedge clk) begin : main_fsm
             end
             else if (cmd_is_clear_rect) begin
                 if (pay_idx == 13'd0) begin
-                    cr_addr     <= ring_rd_data;
-                    cr_row_addr <= ring_rd_data;
+                    cr_addr     <= ring_rd_data[GPU_ADDR_W-1:0];
+                    cr_row_addr <= ring_rd_data[GPU_ADDR_W-1:0];
                 end else if (pay_idx == 13'd1) begin
                     cr_w_total     <= ring_rd_data[31:16];
                     cr_w_remaining <= ring_rd_data[31:16];
@@ -2897,7 +2947,7 @@ always @(posedge clk) begin : main_fsm
         S_SPANPROD_CAPTURE: begin
             case (spanprod_calc_step)
                 3'd0: begin
-                    spanprod_fb_addr_r <= spanprod_fb_base + dsp_p[31:0] + dsp2_p[31:0];
+                    spanprod_fb_addr_r <= spanprod_fb_base + dsp_p[GPU_ADDR_W-1:0] + dsp2_p[GPU_ADDR_W-1:0];
                     if (spanprod_z_write || spanprod_z_test) begin
                         spanprod_launch_z_mul;
                         spanprod_calc_step <= 3'd5;
@@ -2908,7 +2958,7 @@ always @(posedge clk) begin : main_fsm
                     state <= S_SPANPROD_MUL_WAIT;
                 end
                 3'd5: begin
-                    spanprod_z_addr_r <= spanprod_z_base + dsp_p[31:0] + dsp2_p[31:0];
+                    spanprod_z_addr_r <= spanprod_z_base + dsp_p[GPU_ADDR_W-1:0] + dsp2_p[GPU_ADDR_W-1:0];
                     spanprod_launch_attr_mul(spanprod_attr0_du, spanprod_attr0_dv);
                     spanprod_calc_step <= 3'd1;
                     state <= S_SPANPROD_MUL_WAIT;
@@ -2988,7 +3038,7 @@ always @(posedge clk) begin : main_fsm
         // advances when p0a snapshots a source pixel.
         S_FRAG_PIPE: begin : frag_pipe_blk
             reg scalar_span_last_issue;
-            reg [31:0] p3_word_addr;
+            reg [GPU_ADDR_W-1:0] p3_word_addr;
             reg [1:0]  p3_byte_lane;
             reg        p3_word_match;
             reg        issue_committed;
@@ -3000,22 +3050,22 @@ always @(posedge clk) begin : main_fsm
             reg        load_p0a;
             reg        load_p0a_z;
             reg        p3_consumed;
-            reg [31:0] source_fb_addr;
-            reg [31:0] source_tex_base;
+            reg [GPU_ADDR_W-1:0] source_fb_addr;
+            reg [GPU_ADDR_W-1:0] source_tex_base;
             reg signed [31:0] source_s;
             reg signed [31:0] source_t;
             reg signed [31:0] source_s_clamped;
             reg signed [31:0] source_t_clamped;
             reg [5:0] source_light;
             reg [3:0] source_colormap_id;
-            reg [31:0] source_z_word_addr;
+            reg [GPU_ADDR_W-1:0] source_z_word_addr;
             reg        source_z_hi;
             reg [15:0] source_z_half;
             reg        source_z_stage_ready;
             reg        source_z_ready;
             reg        source_z_write_only_active;
             reg        source_z_advance_active;
-            reg [31:0] p3_z_word_addr;
+            reg [GPU_ADDR_W-1:0] p3_z_word_addr;
             reg        p3_z_hi;
 
             // Was the (combinational) tex_req accepted by the cache this
@@ -3060,7 +3110,7 @@ always @(posedge clk) begin : main_fsm
                 sp_z_write_enable && !sp_z_test_enable;
             source_z_advance_active =
                 sp_z_write_enable || sp_z_test_enable;
-            source_z_word_addr = sp_z_addr & 32'hFFFFFFFC;
+            source_z_word_addr = sp_z_addr & {{(GPU_ADDR_W-2){1'b1}}, 2'b00};
             source_z_hi = sp_z_addr[1];
             source_z_half = sp_q29_z_enable
                           ? sp_q29_z_value[29:14]
@@ -3093,7 +3143,7 @@ always @(posedge clk) begin : main_fsm
             end
             source_light = sp_light;
             source_colormap_id = sp_colormap_id;
-            p3_z_word_addr = p3_z_addr & 32'hFFFFFFFC;
+            p3_z_word_addr = p3_z_addr & {{(GPU_ADDR_W-2){1'b1}}, 2'b00};
             p3_z_hi = p3_z_addr[1];
             // External z reads only reach FBSS_ZTEST_R_WAIT after any dirty
             // z_acc word has either matched the p3 word or been flushed.  The
@@ -3311,7 +3361,7 @@ always @(posedge clk) begin : main_fsm
                     // following opaque pixel flushes the group first so draw
                     // order stays byte-exact.
                     if (p3_valid && !p3_discard && p3_flags[SPAN_TRANSLUC]) begin
-                        p3_word_addr = p3_fb_addr & 32'hFFFFFFFC;
+                        p3_word_addr = p3_fb_addr & {{(GPU_ADDR_W-2){1'b1}}, 2'b00};
                         p3_byte_lane = p3_fb_addr[1:0];
                         if (!blend_group_active) begin
                             blend_group_active    <= 1'b1;
@@ -3363,7 +3413,7 @@ always @(posedge clk) begin : main_fsm
                     end
                     // Process p3 if it has a non-discard pixel (and no pending depth work)
                     else if (p3_valid && !p3_discard) begin : fb_acc_blk
-                        p3_word_addr  = p3_fb_addr & 32'hFFFFFFFC;
+                        p3_word_addr  = p3_fb_addr & {{(GPU_ADDR_W-2){1'b1}}, 2'b00};
                         p3_byte_lane  = p3_fb_addr[1:0];
                         p3_word_match = fb_acc_p3_word_match;
 
@@ -4248,7 +4298,7 @@ always @(posedge clk) begin : main_fsm
 
             if (fbwq_can_push) begin
                 fbwq_push_req  = 1'b1;
-                fbwq_push_addr = cr_addr & 32'hFFFFFFFC;
+                fbwq_push_addr = cr_addr & {{(GPU_ADDR_W-2){1'b1}}, 2'b00};
                 fbwq_push_data = {cr_color, cr_color, cr_color, cr_color};
                 fbwq_push_strb = cr_strobe;
 
@@ -4263,14 +4313,14 @@ always @(posedge clk) begin : main_fsm
                         reg [15:0] cr_eff_stride;
                         cr_eff_stride = (cr_stride != 16'd0) ? cr_stride
                                                               : st_fb_stride;
-                        cr_row_addr    <= cr_row_addr + {16'b0, cr_eff_stride};
-                        cr_addr        <= cr_row_addr + {16'b0, cr_eff_stride};
+                        cr_row_addr    <= cr_row_addr + {{(GPU_ADDR_W-16){1'b0}}, cr_eff_stride};
+                        cr_addr        <= cr_row_addr + {{(GPU_ADDR_W-16){1'b0}}, cr_eff_stride};
                         cr_w_remaining <= cr_w_total;
                         cr_y_remaining <= cr_y_remaining - 16'd1;
                         state          <= S_CLEAR_RECT_WORD;
                     end
                 end else begin
-                    cr_addr        <= cr_addr + {29'b0, cr_bytes_this};
+                    cr_addr        <= cr_addr + {{(GPU_ADDR_W-3){1'b0}}, cr_bytes_this};
                     cr_w_remaining <= cr_w_remaining - {13'b0, cr_bytes_this};
                     state          <= S_CLEAR_RECT_WORD;
                 end
@@ -4340,15 +4390,15 @@ always @(posedge clk) begin : main_fsm
             end
 
             fbwq_req_links_fifo_tail =
-                   (fbwq_strb[fbwq_prev_wr_ptr] == 4'hF)
+                   (fbwq_tail_strb == 4'hF)
                 && (fbwq_req_strb == 4'hF)
-                && (fbwq_addr[fbwq_prev_wr_ptr][11:0] <= 12'hFF8)
-                && (fbwq_req_addr == fbwq_addr[fbwq_prev_wr_ptr] + 32'd4);
+                && (fbwq_tail_addr[11:0] <= 12'hFF8)
+                && (fbwq_req_addr == fbwq_tail_addr + {{(GPU_ADDR_W-3){1'b0}}, 3'd4});
             fbwq_req_links_stage_tail =
                    (fbwq_stage_strb == 4'hF)
                 && (fbwq_req_strb == 4'hF)
                 && (fbwq_stage_addr[11:0] <= 12'hFF8)
-                && (fbwq_req_addr == fbwq_stage_addr + 32'd4);
+                && (fbwq_req_addr == fbwq_stage_addr + {{(GPU_ADDR_W-3){1'b0}}, 3'd4});
             fbwq_req_link_tail = fbwq_stage_drain_now
                                ? fbwq_req_links_stage_tail
                                : fbwq_req_links_fifo_tail;
@@ -4361,7 +4411,7 @@ always @(posedge clk) begin : main_fsm
             // --------------------------------------------------------
             if (fbwq_start_now) begin
                 m_wr_awvalid <= 1'b1;
-                m_wr_awaddr  <= fbwq_addr[fbwq_rd_ptr];
+                m_wr_awaddr  <= {{(32-GPU_ADDR_W){1'b0}}, fbwq_addr[fbwq_rd_ptr]};
                 m_wr_awlen   <= {4'b0, fbwq_start_burst_words - 4'd1};
                 m_wr_wvalid  <= 1'b1;
                 m_wr_wdata   <= fbwq_data[fbwq_rd_ptr];
@@ -4382,6 +4432,8 @@ always @(posedge clk) begin : main_fsm
                 fbwq_addr[fbwq_wr_ptr] <= fbwq_stage_addr;
                 fbwq_data[fbwq_wr_ptr] <= fbwq_stage_data;
                 fbwq_strb[fbwq_wr_ptr] <= fbwq_stage_strb;
+                fbwq_tail_addr         <= fbwq_stage_addr;
+                fbwq_tail_strb         <= fbwq_stage_strb;
                 fbwq_link_next[fbwq_wr_ptr] <= 1'b0;
                 if (fbwq_has_tail_after_pop)
                     fbwq_link_next[fbwq_prev_wr_ptr] <= fbwq_stage_link_tail;

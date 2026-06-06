@@ -64,7 +64,7 @@ module audio_mixer (
     input wire        voice_wr,
     input wire [3:0]  voice_field,
     input wire [4:0]  voice_sel,
-    input wire [4:0]  voice_sel_rd,    // selects which voice's pos_latch is on the readback bus (combinational)
+    input wire [4:0]  voice_sel_rd,    // pos_latch readback select (registered read, 1-cycle latency)
     input wire [31:0] voice_wdata,
 
     // ------- Group + master volume composition (HW) ----------------
@@ -300,9 +300,21 @@ assign voice_end_irq = |voice_end_pending;
 
 assign voice_active_mask = voice_active;
 
-// Position readback — latched per-voice for instantaneous CPU reads.
-reg [21:0] pos_latch [0:31];
-assign pos_readback = pos_latch[voice_sel_rd];
+// Position readback — per-voice snapshot bank for CPU MMIO reads.
+//
+// SYNCHRONOUS read (MLAB) by design: voice_sel_rd derives from the
+// periph's REGISTERED req_addr, and the read FSM routes mixer reads
+// through an extra S_PERIPH_RD_LATCH state — so the select is stable
+// for two full cycles before periph_rd_data_r captures.  The free-
+// running registered read below lands one cycle in, with a cycle of
+// margin (tb_axi_periph's pos_read_registered_boundary test pins this
+// contract, including back-to-back different-voice reads).  An async
+// read here would burn ~700 FFs + a 32:1 mux for slack we already have.
+(* ramstyle = "MLAB" *) reg [21:0] pos_latch [0:31];
+reg [21:0] pos_readback_r;
+always @(posedge clk)
+    pos_readback_r <= pos_latch[voice_sel_rd];
+assign pos_readback = pos_readback_r;
 
 // Voice-end IRQ pending with W1C (write-one-to-clear) support.
 reg [31:0] voice_end_set_mask;
