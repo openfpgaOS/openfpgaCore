@@ -30,6 +30,15 @@
 #include "of_error.h"
 #include "of_syscall_numbers.h"
 #include "../kernel/syscall.h"
+#include "sw_mixer.h"   /* of_mixer_pump() drives the SW render/pump when SW-backed */
+
+/* Mixer-backend selector.  0 = hardware audio_mixer.v MMIO (default: OS25 /
+ * MiSTer / default Pocket); 1 = CPU software mixer (OS30 Pocket, audio_mixer.v
+ * cut).  Set once at boot by of_init() from the HW_FEATURES OF_HW_MIXER_HW bit
+ * (HW_FEAT_MIXER_HW).  Defaults to 0 so any path that touches a MIX_* macro
+ * before of_init() runs uses the safe MMIO form.  See regs.h for how the MIX_*
+ * macros branch on this. */
+int of_mixer_use_sw;
 
 extern void of_irq_register_mixer_end(void (*cb)(uint32_t ended_mask));
 
@@ -895,9 +904,14 @@ int of_mixer_handle_voice(of_mixer_handle_t handle)
     return voice;
 }
 
-/* Hardware mixer runs autonomously — no CPU pump needed.  of_mixer_pump
- * is a no-op retained only for the services table (svc->mixer_pump). */
-void of_mixer_pump(void)      {}
+/* HW mixer runs autonomously — no CPU pump needed.  When SW-backed (OS30,
+ * of_mixer_use_sw=1) the CPU owns the per-sample mix, so of_mixer_pump()
+ * drives it; sw_mixer_pump() itself early-returns on the HW path so the
+ * call costs ~nothing there.  of_mixer_pump() is also driven from the 1 kHz
+ * timer ISR; the extra call here lets apps that pump explicitly
+ * (svc->mixer_pump) keep the FIFO topped up between ticks during long
+ * single-thread frames. */
+void of_mixer_pump(void)      { sw_mixer_pump(); }
 
 void of_mixer_set_loop(int voice, int loop_start, int loop_end)
 {

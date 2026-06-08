@@ -97,9 +97,15 @@
 
 /* Dynamic audio memory.  The stream ring and any boot-time .ofsf
  * bank are reserved top-down from below the OS file cache.
- * Stream ring is 64 KB = 16384 stereo pairs = ~341 ms (audio.c
- * AUDIO_RING_PAIRS * 4 bytes); deep enough that main-thread-fed music
- * survives heavy frames / asset loads without underrunning. */
+ *
+ * OF_TARGET_AUDIO_STREAM_SIZE is the SINGLE KNOB for the SW music ring:
+ * audio.c derives AUDIO_RING_PAIRS = OF_TARGET_AUDIO_STREAM_SIZE / 4 (4 bytes
+ * per stereo pair), and the HW voice length follows it at runtime. Default is
+ * 64 KB = 16384 pairs = ~341 ms. To give music more coast through a long
+ * blocking load, raise this to a power-of-two byte size (e.g. 0x40000 = 256 KB
+ * = ~1.37 s) and rebuild os.bin -- nothing else changes. Must stay a power of
+ * two (audio.c static-asserts it); music latency is irrelevant and SFX use
+ * separate HW-mixer voices, so a deeper ring has no downside but the SDRAM. */
 #define OF_TARGET_AUDIO_RESERVE_TOP    OF_TARGET_FILE_CACHE_BASE
 #define OF_TARGET_AUDIO_STREAM_SIZE    0x00010000u
 #define OF_TARGET_AUDIO_RESERVE_ALIGN  0x00001000u

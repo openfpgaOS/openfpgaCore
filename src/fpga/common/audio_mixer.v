@@ -238,14 +238,29 @@ always @(posedge clk) begin
     end
 end
 
+// OS30 (Pocket Quake/Quake2): MIXER_LITE halves the voice count 32->16.
+// The two packed voice tables shrink 512->256 words (16-word stride x 16
+// voices).  The MMIO port widths (voice_sel[4:0], 32-bit masks) are
+// unchanged so axi_periph_slave's contract is identical; only voices 0-15
+// are functional (the per-sample FSM loop bound below stops at 15) and the
+// firmware uses only those slots in lite builds.  Default (macro undefined)
+// keeps the full 32-voice / 512-word tables.
+`ifdef MIXER_LITE
+reg [31:0] vtbl_cpu_mem [0:255] /*verilator public_flat_rw*/;
+`else
 reg [31:0] vtbl_cpu_mem [0:511] /*verilator public_flat_rw*/;
+`endif
 always @(posedge clk) begin
     if (vtbl_cpu_b_wr)
         vtbl_cpu_mem[vtbl_b_addr] <= vtbl_b_data;
 end
 assign vtbl_cpu_q = vtbl_cpu_mem[vtbl_a_addr];
 
+`ifdef MIXER_LITE
+reg [31:0] vtbl_fsm_mem [0:255] /*verilator public_flat_rw*/;
+`else
 reg [31:0] vtbl_fsm_mem [0:511] /*verilator public_flat_rw*/;
+`endif
 always @(posedge clk) begin
     if (vtbl_fsm_wren_a)
         vtbl_fsm_mem[vtbl_fsm_addr_a] <= vtbl_fsm_data_a;
@@ -310,7 +325,12 @@ assign voice_active_mask = voice_active;
 // margin (tb_axi_periph's pos_read_registered_boundary test pins this
 // contract, including back-to-back different-voice reads).  An async
 // read here would burn ~700 FFs + a 32:1 mux for slack we already have.
+// OS30 MIXER_LITE: pos_latch readback array tracks the active voice count.
+`ifdef MIXER_LITE
+(* ramstyle = "MLAB" *) reg [21:0] pos_latch [0:15];
+`else
 (* ramstyle = "MLAB" *) reg [21:0] pos_latch [0:31];
+`endif
 reg [21:0] pos_readback_r;
 always @(posedge clk)
     pos_readback_r <= pos_latch[voice_sel_rd];
@@ -1140,7 +1160,13 @@ always @(posedge clk) begin
     end
 
     S_NEXT_VOICE: begin
+        // OS30 MIXER_LITE: per-sample voice-scan loop bound.  Lite walks
+        // voices 0-15; the full build walks 0-31.
+`ifdef MIXER_LITE
+        if (cur_voice == 5'd15) begin
+`else
         if (cur_voice == 5'd31) begin
+`endif
             state <= S_OUTPUT;
         end else begin
             cur_voice <= cur_voice + 5'd1;

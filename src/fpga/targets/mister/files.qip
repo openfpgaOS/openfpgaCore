@@ -12,6 +12,7 @@ set_global_assignment -name SDC_FILE mister.sdc
 # Shared platform-neutral RTL
 set_global_assignment -name VERILOG_FILE ../../common/audio_mixer.v
 set_global_assignment -name VERILOG_FILE ../../common/gpu_core.v
+set_global_assignment -name VERILOG_FILE ../../common/gpu_edge_walker.v
 set_global_assignment -name VERILOG_FILE ../../common/gpu_tex_cache.v
 set_global_assignment -name VERILOG_FILE ../../common/axi_periph_slave.v
 set_global_assignment -name VERILOG_FILE ../../common/sync_fifo.v

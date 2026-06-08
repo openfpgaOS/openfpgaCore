@@ -147,10 +147,32 @@ firmware: bootloader os
 
 # ── FPGA compile ─────────────────────────────────────────────────────
 
-# Optional build knobs forwarded to Quartus as --verilog_macro=<NAME>.
-# Reserved for future per-build flags; empty by default.
+# ── Pocket variant selector ──────────────────────────────────────────
+# VARIANT picks which Pocket build to produce:
+#   os25 (default) — 2.5D games (Doom/Duke3D/ScummVM/Wolf): full feature set,
+#                    full HW audio mixer, no hardware vertex-triangle.
+#   os30           — 3D games (Quake/Quake2): hardware vert-tri plane derivation
+#                    (CMD_DRAW_VERT_TRI 0x4B) ungated. Pays for it by cutting
+#                    what those games never use — Analogizer/SNAC, GPU blend,
+#                    link cable, 4-player input — and replacing the HW mixer
+#                    with the runtime caps-driven SW mixer (the bitstream clears
+#                    OF_HW_MIXER_HW; the single os.bin auto-selects SW at boot).
+# Firmware is ONE caps-driven os.bin for both — no per-variant build flag.
+VARIANT ?= os25
+ifeq ($(VARIANT),os30)
+  VARIANT_DEFS += OS30_VERT_TRI EXCLUDE_ANALOGIZER EXCLUDE_TRANSLUC \
+                  EXCLUDE_MIXER EXCLUDE_4PLAYER EXCLUDE_LINK
+endif
+
+# Optional extra build knobs forwarded to Quartus as --verilog_macro=<NAME>.
 VARIANT_DEFS ?=
 VERILOG_MACROS = $(foreach d,$(VARIANT_DEFS),--verilog_macro="$(d)")
+
+# Variant-named bitstream copy target: `make rbf-named VARIANT=os30`
+# produces output_files/openfpgaOS30.rbf from the just-built core.
+rbf-named: output_files/$(PROJECT).rbf
+	@cp output_files/$(PROJECT).rbf output_files/openfpgaOS$(if $(filter os30,$(VARIANT)),30,25).rbf
+	@printf "  $(C_OK)openfpgaOS$(if $(filter os30,$(VARIANT)),30,25).rbf$(C_RESET) → output_files/\n"
 
 # `compile` is kept as an alias for `build` so old muscle memory and
 # anything that calls `make compile` still works. Both run a clean

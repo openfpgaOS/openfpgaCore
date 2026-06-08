@@ -11,6 +11,10 @@
 #include "hal.h"
 #include "regs.h"
 
+/* Mixer-backend selector, defined in hal/mixer.c.  0 = HW audio_mixer.v MMIO,
+ * 1 = CPU software mixer.  Set here at boot from HW_FEATURES (one os.bin). */
+extern int of_mixer_use_sw;
+
 #ifndef OF_BOOT_UART_DEBUG
 #define OF_BOOT_UART_DEBUG 0
 #endif
@@ -54,6 +58,15 @@ void of_init(void) {
     of_file_init();
 
     if (features & HW_FEAT_MIXER) {
+        /* Pick the mixer backend ONCE, before any MIX_* access: HW MMIO when
+         * audio_mixer.v is present (HW_FEAT_MIXER_HW set), else the CPU
+         * software mixer.  HW_FEAT_MIXER (bit 0) is set on every variant, so a
+         * mixer is always available to apps; bit 1 only chooses the backend. */
+#ifdef OF_MIXER_FORCE_SW
+        of_mixer_use_sw = 1;   /* debug override: force the CPU software mixer */
+#else
+        of_mixer_use_sw = !(features & HW_FEAT_MIXER_HW);
+#endif
         uart_dbg_puts("[init] mixer..\n");
         of_mixer_init(32, 48000);
         uart_dbg_puts("[init] audio..\n");

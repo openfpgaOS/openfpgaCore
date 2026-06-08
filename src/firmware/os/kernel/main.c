@@ -291,6 +291,7 @@ void os_main(void) {
     of_term_puts("  HAL init.......... ");
     status_ok();
 
+
     /* Disk backend banner: SD = production (green), UART = service
      * host attached (yellow), none = file I/O will fail (red).
      * Labels are left-aligned with the OK / FAIL column above and

@@ -252,6 +252,16 @@ static void gpu_init() {
     mmio_write(REG_RING_WRPTR, 0);
 }
 
+/* Pulse GPU_CTRL bit1 = soft_reset.  Returns the FSM to idle and clears the
+ * 0x4A sticky bank (tri_state_valid).  Call only when the ring is drained so no
+ * pending command is lost: soft_reset snaps ring_rdptr to the current
+ * ring_wrptr, so the host ring_wrptr stays valid and new commands append after
+ * it as usual (no ring_reset, so the device write pointer is unchanged). */
+static void gpu_soft_reset() {
+    mmio_write(REG_CTRL, 2);
+    for (int i = 0; i < 4; i++) tick();
+}
+
 /* Submit a fence and return the token. Auto-incrementing tokens. */
 static uint32_t next_fence_token = 1;
 static uint32_t submit_fence() {
@@ -599,6 +609,73 @@ static void append_span_group_stream_raw(std::vector<uint32_t> &stream,
 static void emit_span_group_stream_raw(const std::vector<SpanGroupWire> &spans) {
     for (const auto &s : spans)
         emit_span_group_raw(s);
+}
+
+// ============================================================================
+// CMD_DRAW_COLUMN_LIST (0x4C) wire encoder + byte-exact oracle helpers.
+//
+// 0x4C is the 5-word-lane-record twin of the 0x48 direct-affine variant for
+// vertical 1-wide textured columns (s/sstep always 0, dropped on the wire).
+// The RTL decoder FORCES s=0/sstep=0, so a 0x4C column MUST be byte-identical
+// to the 0x48 direct-affine encoding of the SAME geometry with s=0/sstep=0.
+// The oracle below renders both forms (into FB_BASE vs FB_ALT_BASE) and
+// compares the two GPU framebuffers byte-for-byte — no CPU model required.
+// ============================================================================
+static const uint8_t CMD_DRAW_COLUMN_LIST = 0x4C;
+
+// Encode one native chunk (<=4 lanes) of a column list: 4-word header + 5N
+// lane records.  Mirrors encode_affine_span_group_chunk but drops s/sstep.
+// `fb_base_override` lets the oracle re-target a second framebuffer.
+static std::vector<uint32_t> encode_column_list_chunk(const SpanGroupWire &s,
+                                                      int first_lane,
+                                                      int lane_count,
+                                                      uint32_t fb_base_override) {
+    std::vector<uint32_t> w(4 + lane_count * 5);
+    w[0] = ((uint32_t)lane_count << 28)
+         | ((uint32_t)s.flags << 20);
+    w[1] = (uint32_t)s.tex_width;
+    w[2] = ((uint32_t)s.tex_h_mask << 16) | (uint32_t)s.tex_w_mask;
+    w[3] = (uint32_t)(int32_t)s.fb_stride;       // == fb_step (per-pixel byte step)
+    for (int lane = 0; lane < lane_count; lane++) {
+        int src = first_lane + lane;
+        int base = 4 + lane * 5;
+        w[base + 0] = fb_base_override + (uint32_t)((int32_t)s.lane_delta * src);
+        w[base + 1] = s.tex_addr[src];
+        w[base + 2] = (((uint32_t)s.colormap_id[src] & 0x0Fu) << 28) |
+                      (((uint32_t)s.light[src] & 0x3Fu) << 16) |
+                      (uint32_t)span_group_lane_count_value(s, src);
+        w[base + 3] = (uint32_t)s.t[src];        // v origin
+        w[base + 4] = (uint32_t)s.tstep[src];    // v step
+    }
+    return w;
+}
+
+// Emit the column geometry via 0x4C, targeting fb_base_override.
+static void emit_column_list_raw(const SpanGroupWire &s, uint32_t fb_base_override) {
+    int lane_count = span_group_effective_lanes(s.lane_count);
+    for (int first = 0; first < lane_count;) {
+        int n = span_group_chunk_lanes(lane_count - first);
+        std::vector<uint32_t> w = encode_column_list_chunk(s, first, n, fb_base_override);
+        ring_cmd(CMD_DRAW_COLUMN_LIST, (uint32_t)w.size());
+        for (uint32_t x : w) ring_write(x);
+        first += n;
+    }
+}
+
+// Emit the SAME column geometry via the 0x48 direct-affine variant with
+// s=0/sstep=0 (the byte-exact reference path), targeting fb_base_override.
+static void emit_column_as_affine_raw(const SpanGroupWire &s, uint32_t fb_base_override) {
+    SpanGroupWire a = s;
+    a.fb_addr = fb_base_override;
+    for (int i = 0; i < 8; i++) { a.s[i] = 0; a.sstep[i] = 0; }
+    int lane_count = span_group_effective_lanes(a.lane_count);
+    for (int first = 0; first < lane_count;) {
+        int n = span_group_chunk_lanes(lane_count - first);
+        std::vector<uint32_t> w = encode_affine_span_group_chunk(a, first, n);
+        ring_cmd(CMD_PARAM_SPAN_LIST, (uint32_t)w.size());
+        for (uint32_t x : w) ring_write(x);
+        first += n;
+    }
 }
 
 struct SpanGroupVarWire {
@@ -1596,6 +1673,38 @@ static bool compare_bytes(const char *name, const FbModel &model,
     snprintf(buf, sizeof(buf),
              "%d byte mismatches; first @ +0x%x got=0x%02x exp=0x%02x",
              diffs, first_off, first_got, first_exp);
+    check_fail(name, buf);
+    return false;
+}
+
+/* Compare two GPU framebuffer regions in SDRAM byte-for-byte (no CPU model).
+ * Used by the CMD_DRAW_COLUMN_LIST (0x4C) oracle: the 0x4C and 0x48-with-s=0
+ * renders of the same geometry must be bit-identical. */
+static bool compare_fb_to_fb(const char *name,
+                             uint32_t base_a, uint32_t base_b,
+                             uint16_t stride, int x, int y, int w, int h) {
+    int diffs = 0;
+    int first_x = -1, first_y = -1;
+    uint8_t first_a = 0, first_b = 0;
+    for (int dy = 0; dy < h; dy++) {
+        for (int dx = 0; dx < w; dx++) {
+            uint32_t off = (uint32_t)(y + dy) * stride + (uint32_t)(x + dx);
+            uint8_t a = sdram_read_byte(base_a + off);
+            uint8_t b = sdram_read_byte(base_b + off);
+            if (a != b) {
+                if (diffs == 0) {
+                    first_x = x + dx; first_y = y + dy;
+                    first_a = a; first_b = b;
+                }
+                diffs++;
+            }
+        }
+    }
+    if (diffs == 0) { check_pass(name); return true; }
+    char buf[256];
+    snprintf(buf, sizeof(buf),
+             "%d byte diffs (0x4C vs 0x48); first @ (x=%d,y=%d) 0x4C=0x%02x 0x48=0x%02x",
+             diffs, first_x, first_y, first_a, first_b);
     check_fail(name, buf);
     return false;
 }
@@ -4092,6 +4201,242 @@ static void test_span_group_masked_equals_four_spans() {
                       FB_BASE_BYTE, 320, 3, 12, 4, q.count);
 }
 
+// ============================================================================
+// CMD_DRAW_COLUMN_LIST (0x4C) byte-exact oracle.
+//
+// For each column-geometry case below, render it TWICE into two distinct
+// framebuffers:
+//   FB_BASE      <- via 0x4C CMD_DRAW_COLUMN_LIST (5-word lane records)
+//   FB_ALT_BASE  <- via 0x48 direct-affine with s=0/sstep=0 (the reference)
+// then assert the two framebuffers are BYTE-IDENTICAL.  Because the 0x4C RTL
+// decoder forces s/sstep=0 and reuses the SAME staging/pipeline as 0x48, a
+// single byte of difference means the decode is wrong.  This proves 0x4C is a
+// pure command-traffic optimisation with zero pixel difference.
+// ============================================================================
+
+// Render one column case both ways and compare.  The columns occupy
+// x=[x0, x0+lanes) and y=[y0, y0+max_count) with fb_step == stride (320),
+// i.e. lane L is the 1-wide column at (x0+L) running max_count pixels DOWN.
+static void run_column_case(const char *name, const SpanGroupWire &geom,
+                            int x0, int y0, int max_count) {
+    int lanes = span_group_effective_lanes(geom.lane_count);
+
+    SpanGroupWire g4c = geom;   // 0x4C path: fb_addr column base in FB_BASE
+    g4c.fb_addr = FB_BASE_BYTE + (uint32_t)y0 * 320u + (uint32_t)x0;
+
+    // 0x48 reference column base in FB_ALT_BASE (same (x0,y0) offset).
+    uint32_t alt_base = FB_ALT_BASE_BYTE + (uint32_t)y0 * 320u + (uint32_t)x0;
+
+    emit_column_list_raw(g4c, g4c.fb_addr);   // -> FB_BASE
+    emit_column_as_affine_raw(geom, alt_base); // -> FB_ALT_BASE (s=0/sstep=0)
+
+    if (!submit_and_wait()) {
+        check_fail(name, "timeout");
+        return;
+    }
+    // Primary assertion: the 0x4C and 0x48-with-s=0 framebuffers are identical.
+    compare_fb_to_fb(name, FB_BASE_BYTE, FB_ALT_BASE_BYTE, 320,
+                     x0, y0, lanes, max_count);
+    // Anti-vacuity guard (distinct sub-name): the 0x4C render must actually
+    // have written something, so a "both blank" comparison can't pass trivially.
+    bool any = false;
+    for (int dy = 0; dy < max_count && !any; dy++)
+        for (int dx = 0; dx < lanes && !any; dx++)
+            if (sdram_read_byte(FB_BASE_BYTE + (uint32_t)(y0 + dy) * 320u
+                                + (uint32_t)(x0 + dx)) != SENTINEL_BYTE)
+                any = true;
+    char nm[128];
+    snprintf(nm, sizeof(nm), "%s.nonvacuous", name);
+    if (!any)
+        check_fail(nm, "0x4C framebuffer untouched (vacuous match)");
+    else
+        check_pass(nm);
+}
+
+static void test_column_list_single_column_matches_affine() {
+    printf("TEST column_list_single_column_matches_affine\n");
+    gpu_init();
+    auto m = preload_with_sentinel();
+    std::vector<uint8_t> tex(64);
+    for (int i = 0; i < 64; i++) tex[i] = (uint8_t)(0x40 + i);
+    upload_texture(TEX_BASE_BYTE, tex);
+    m.snapshot_from_sdram();
+
+    SpanGroupWire g = make_span_group();
+    g.lane_count = 1;
+    g.lane_delta = 1;
+    g.fb_stride  = 320;          // fb_step: walk DOWN one pixel per row
+    g.count      = 24;
+    g.flags      = 0;
+    g.tex_width  = 64;
+    g.tex_w_mask = 0x3F;
+    g.tex_h_mask = 0x3F;
+    g.tex_addr[0] = TEX_BASE_BYTE;
+    g.t[0]     = 0;
+    g.tstep[0] = 0x10000;        // one texel per pixel down
+    g.light[0] = 0;
+    run_column_case("column_list_single_column_matches_affine", g, 12, 4, 24);
+}
+
+static void test_column_list_multi_lane_matches_affine() {
+    printf("TEST column_list_multi_lane_matches_affine\n");
+    gpu_init();
+    auto m = preload_with_sentinel();
+    for (int lane = 0; lane < 4; lane++) {
+        std::vector<uint8_t> tex(64);
+        for (int i = 0; i < 64; i++)
+            tex[i] = (uint8_t)(0x10 + lane * 0x30 + i);
+        upload_texture(TEX_BASE_BYTE + (uint32_t)lane * 0x100, tex);
+    }
+    m.snapshot_from_sdram();
+
+    // 2-lane, 3-lane, 4-lane cases — exercise the native chunking edge.
+    const int lane_counts[3] = {2, 3, 4};
+    const char *names[3] = {
+        "column_list_2lane_matches_affine",
+        "column_list_3lane_matches_affine",
+        "column_list_4lane_matches_affine"};
+    const int y0s[3] = {6, 40, 80};
+    for (int c = 0; c < 3; c++) {
+        SpanGroupWire g = make_span_group();
+        g.lane_count = (uint8_t)lane_counts[c];
+        g.lane_delta = 1;
+        g.fb_stride  = 320;
+        g.count      = 30;
+        g.flags      = 0;
+        g.tex_width  = 64;
+        g.tex_w_mask = 0x3F;
+        g.tex_h_mask = 0x3F;
+        for (int lane = 0; lane < lane_counts[c]; lane++) {
+            g.tex_addr[lane] = TEX_BASE_BYTE + (uint32_t)lane * 0x100;
+            // Distinct v origin + step per lane to stress the t/tstep mapping.
+            g.t[lane]     = (int32_t)(lane << 16);
+            g.tstep[lane] = 0x10000 + (lane * 0x4000);
+            g.light[lane] = 0;
+        }
+        run_column_case(names[c], g, 30, y0s[c], 30);
+    }
+}
+
+static void test_column_list_colormap_matches_affine() {
+    printf("TEST column_list_colormap_matches_affine\n");
+    gpu_init();
+    auto m = preload_with_sentinel();
+    // Per-lane colormap slot + light row, like a shaded Doom wall.
+    for (int lane = 0; lane < 4; lane++) {
+        for (int row = 0; row < 8; row++)
+            upload_palookup_const_row((uint8_t)(lane + 2), (uint8_t)row,
+                                      (uint8_t)(0x50 + lane * 0x10 + row));
+        std::vector<uint8_t> tex(64);
+        for (int i = 0; i < 64; i++)
+            tex[i] = (uint8_t)(0x01 + lane * 0x20 + i);
+        upload_texture(TEX_BASE_BYTE + (uint32_t)lane * 0x100, tex);
+    }
+    m.snapshot_from_sdram();
+
+    SpanGroupWire g = make_span_group();
+    g.lane_count = 4;
+    g.lane_delta = 1;
+    g.fb_stride  = 320;
+    g.count      = 28;
+    g.flags      = 0x1;                          // SPAN_COLORMAP (bit 0)
+    g.tex_width  = 64;
+    g.tex_w_mask = 0x3F;
+    g.tex_h_mask = 0x3F;
+    for (int lane = 0; lane < 4; lane++) {
+        g.colormap_id[lane] = (uint8_t)(lane + 2);
+        g.tex_addr[lane] = TEX_BASE_BYTE + (uint32_t)lane * 0x100;
+        g.t[lane]     = 0;
+        g.tstep[lane] = 0x10000;
+        g.light[lane] = (uint8_t)(lane * 2);     // distinct shade row per lane
+    }
+    run_column_case("column_list_colormap_matches_affine", g, 60, 30, 28);
+}
+
+static void test_column_list_skipzero_and_negstep_matches_affine() {
+    printf("TEST column_list_skipzero_and_negstep_matches_affine\n");
+    gpu_init();
+    auto m = preload_with_sentinel();
+    // Texture with embedded 0xFF holes so SKIP_ZERO has visible effect.
+    std::vector<uint8_t> tex(64);
+    for (int i = 0; i < 64; i++)
+        tex[i] = (uint8_t)((i % 5 == 0) ? 0xFF : (0x30 + i));
+    upload_texture(TEX_BASE_BYTE, tex);
+    m.snapshot_from_sdram();
+
+    // Case A: SKIP_ZERO masking (transparent texels must be byte-identical).
+    {
+        SpanGroupWire g = make_span_group();
+        g.lane_count = 2;
+        g.lane_delta = 1;
+        g.fb_stride  = 320;
+        g.count      = 26;
+        g.flags      = (1 << 2);                 // SPAN_SKIP_ZERO (bit 2)
+        g.tex_width  = 64;
+        g.tex_w_mask = 0x3F;
+        g.tex_h_mask = 0x3F;
+        for (int lane = 0; lane < 2; lane++) {
+            g.tex_addr[lane] = TEX_BASE_BYTE;
+            g.t[lane]     = (int32_t)(lane << 16);
+            g.tstep[lane] = 0x10000;
+            g.light[lane] = 0;
+        }
+        run_column_case("column_list_skipzero_matches_affine", g, 90, 10, 26);
+    }
+    // Case B: negative tstep (texture scrolls UP) + non-zero t origin.
+    {
+        SpanGroupWire g = make_span_group();
+        g.lane_count = 3;
+        g.lane_delta = 1;
+        g.fb_stride  = 320;
+        g.count      = 22;
+        g.flags      = 0;
+        g.tex_width  = 64;
+        g.tex_w_mask = 0x3F;
+        g.tex_h_mask = 0x3F;
+        for (int lane = 0; lane < 3; lane++) {
+            g.tex_addr[lane] = TEX_BASE_BYTE;
+            g.t[lane]     = (int32_t)(0x200000 + (lane << 16));
+            g.tstep[lane] = -(int32_t)0x10000;       // walk texture upward
+            g.light[lane] = 0;
+        }
+        run_column_case("column_list_negstep_matches_affine", g, 90, 50, 22);
+    }
+}
+
+static void test_column_list_varcount_and_zerolane_matches_affine() {
+    printf("TEST column_list_varcount_and_zerolane_matches_affine\n");
+    gpu_init();
+    auto m = preload_with_sentinel();
+    for (int lane = 0; lane < 4; lane++) {
+        std::vector<uint8_t> tex(64);
+        for (int i = 0; i < 64; i++)
+            tex[i] = (uint8_t)(0x05 + lane * 0x11 + i);
+        upload_texture(TEX_BASE_BYTE + (uint32_t)lane * 0x100, tex);
+    }
+    m.snapshot_from_sdram();
+
+    // Per-lane variable heights (Doom walls have different column heights);
+    // lane 2 has count 0 (a clipped-away column) and must be skipped in BOTH.
+    SpanGroupWire g = make_span_group();
+    g.lane_count = 4;
+    g.lane_delta = 1;
+    g.fb_stride  = 320;
+    g.flags      = 0;
+    g.tex_width  = 64;
+    g.tex_w_mask = 0x3F;
+    g.tex_h_mask = 0x3F;
+    const uint16_t heights[4] = {31, 18, 0, 25};
+    for (int lane = 0; lane < 4; lane++) {
+        g.tex_addr[lane] = TEX_BASE_BYTE + (uint32_t)lane * 0x100;
+        g.t[lane]     = 0;
+        g.tstep[lane] = 0x10000;
+        g.light[lane] = 0;
+        g.count_lane[lane] = heights[lane];
+    }
+    run_column_case("column_list_varcount_matches_affine", g, 120, 30, 31);
+}
+
 static void test_span_group_explicit_colormap_slot() {
     printf("TEST span_group_explicit_colormap_slot\n");
     gpu_init();
@@ -5477,8 +5822,10 @@ static void test_param_span_list_colormap_skip_zero() {
                       FB_BASE_BYTE, 320, 0, 0, 8, 1);
 }
 
-static void test_reserved_49_command_noop_drains() {
-    printf("TEST reserved_49_command_noop_drains\n");
+// 0x49 is CMD_DRAW_PARAM_TRI; any payload size other than the fixed 36
+// words must drain through S_PAY_DATA undecoded and retire as a no-op.
+static void test_param_tri_wrong_size_noop_drains() {
+    printf("TEST param_tri_wrong_size_noop_drains\n");
     gpu_init();
     FbModel m = preload_with_sentinel();
     m.snapshot_from_sdram();
@@ -5492,11 +5839,878 @@ static void test_reserved_49_command_noop_drains() {
     m.apply_clear_rect(FB_BASE_BYTE + 7u * 320u + 5u, 9, 2, 0, 0x42);
 
     if (!submit_and_wait()) {
-        check_fail("reserved_49_command_noop_drains", "timeout");
+        check_fail("param_tri_wrong_size_noop_drains", "timeout");
         return;
     }
-    compare_fb_region("reserved_49_command_noop_drains.fb",
+    compare_fb_region("param_tri_wrong_size_noop_drains.fb",
                       m, FB_BASE_BYTE, 320, 0, 0, 32, 12);
+}
+
+// ================================================================
+// CMD_DRAW_PARAM_TRI (0x49) — hardware edge walker
+// ================================================================
+// The walker turns 3 vertices into the same {u,v,count} records a packed
+// span list carries, so the reference path is: software edge walk (below,
+// mirroring the RTL datapath bit-for-bit) -> the existing per-record
+// affine reference. attr_mode/persp/z behaviour downstream of the records
+// is covered by the span-list tests; these tests prove record equivalence.
+
+// Software mirror of gpu_edge_walker.v: y-sort, cross-product winding,
+// truncating Q16.16 slope divide, ceil fill, left-closed right-open,
+// clip rect. x is Q12.4, y is integer scanlines.
+static void ref_tri_records(const int16_t vx[3], const int16_t vy[3],
+                            int cx0, int cx1, int cy0, int cy1,
+                            std::vector<ParamSpanRecordWire> &out) {
+    int16_t x[3] = {vx[0], vx[1], vx[2]};
+    int16_t y[3] = {vy[0], vy[1], vy[2]};
+    if (y[1] < y[0]) { std::swap(x[0], x[1]); std::swap(y[0], y[1]); }
+    if (y[2] < y[1]) { std::swap(x[1], x[2]); std::swap(y[1], y[2]); }
+    if (y[1] < y[0]) { std::swap(x[0], x[1]); std::swap(y[0], y[1]); }
+
+    long long z = (long long)(x[1] - x[0]) * (y[2] - y[0])
+                - (long long)(x[2] - x[0]) * (y[1] - y[0]);
+    bool long_left = (z > 0);
+
+    auto slope = [](int dx, int dy) -> long long {
+        if (dy == 0) return 0;
+        long long q = ((long long)llabs(dx) << 12) / llabs(dy);
+        return ((dx < 0) ^ (dy < 0)) ? -q : q;
+    };
+    long long sl = slope(x[2] - x[0], y[2] - y[0]);
+    long long st = slope(x[1] - x[0], y[1] - y[0]);
+    long long sb = slope(x[2] - x[1], y[2] - y[1]);
+
+    int ystart = (y[0] < cy0) ? cy0 : y[0];
+    int yend   = (y[2] > cy1) ? cy1 : y[2];
+    if (ystart >= yend) return;
+
+    bool bottom = (ystart >= y[1]);
+    long long xl, xr;
+    long long xlong  = ((long long)x[0] << 12) + sl * (ystart - y[0]);
+    long long xshort = bottom
+        ? ((long long)x[1] << 12) + sb * (ystart - y[1])
+        : ((long long)x[0] << 12) + st * (ystart - y[0]);
+    if (long_left) { xl = xlong; xr = xshort; }
+    else           { xr = xlong; xl = xshort; }
+
+    for (int yy = ystart; yy < yend; yy++) {
+        int ul = (int)((xl + 0xFFFF) >> 16);
+        int ur = (int)((xr + 0xFFFF) >> 16);
+        int u0 = (ul < cx0) ? cx0 : ul;
+        int u1 = (ur > cx1) ? cx1 : ur;
+        if (u1 - u0 > 0)
+            out.push_back({(uint16_t)u0, (uint16_t)yy, (uint16_t)(u1 - u0)});
+        if (!bottom && (yy + 1 >= y[1])) {
+            bottom = true;
+            /* Bottom edge starts AT v1: x = x1 exactly on scanline y[1]
+             * (matches the clip-entry prestep x1 + sb*(ystart - y1));
+             * the first sb step lands on y[1]+1.  Keeps a shared edge
+             * identical whether a neighbour walks it as long or
+             * bottom-short — crack-free adjacency. */
+            if (long_left) { xl += sl; xr = ((long long)x[1] << 12); }
+            else           { xr += sl; xl = ((long long)x[1] << 12); }
+        } else {
+            if (long_left) { xl += sl; xr += bottom ? sb : st; }
+            else           { xr += sl; xl += bottom ? sb : st; }
+        }
+    }
+}
+
+static void emit_param_tri_raw(const ParamSpanListWire &p,
+                               const int16_t vx[3], const int16_t vy[3],
+                               int16_t cx0, int16_t cx1,
+                               int16_t cy0, int16_t cy1) {
+    auto w = encode_param_span_list_wire(p, {});
+    w.resize(36, 0);
+    w[31] = ((uint32_t)(uint16_t)cx1 << 16) | (uint16_t)cx0;
+    w[32] = ((uint32_t)(uint16_t)cy1 << 16) | (uint16_t)cy0;
+    w[33] = ((uint32_t)(uint16_t)vy[0] << 16) | (uint16_t)vx[0];
+    w[34] = ((uint32_t)(uint16_t)vy[1] << 16) | (uint16_t)vx[1];
+    w[35] = ((uint32_t)(uint16_t)vy[2] << 16) | (uint16_t)vx[2];
+    ring_cmd(0x49, (uint32_t)w.size());
+    for (uint32_t x : w)
+        ring_write(x);
+}
+
+static ParamSpanListWire make_tri_plane_setup() {
+    ParamSpanListWire p {};
+    p.fb_base = FB_BASE_BYTE;
+    p.fb_major_step = 320;
+    p.fb_minor_step = 1;
+    p.tex_addr = TEX_BASE_BYTE;
+    p.tex_width = 64;
+    p.tex_w_mask = 0x3F;
+    p.tex_h_mask = 0x3F;
+    p.attr_mode = 0;
+    p.span_axis = 0;
+    p.attr_du[0] = 1 << 16;   // s = u, t = v: screen-aligned texture
+    p.attr_dv[1] = 1 << 16;
+    return p;
+}
+
+static void apply_tri_ref(FbModel &m, const ParamSpanListWire &p,
+                          const int16_t vx[3], const int16_t vy[3],
+                          int cx0, int cx1, int cy0, int cy1) {
+    std::vector<ParamSpanRecordWire> records;
+    ref_tri_records(vx, vy, cx0, cx1, cy0, cy1, records);
+    for (const auto &r : records)
+        m.apply_span_ref(param_affine_ref_span(p, r));
+}
+
+static void test_param_tri_affine_basic() {
+    printf("TEST param_tri_affine_basic\n");
+    gpu_init();
+    FbModel m = preload_with_sentinel();
+    upload_texture(TEX_BASE_BYTE, make_param_test_texture());
+    m.snapshot_from_sdram();
+
+    ParamSpanListWire p = make_tri_plane_setup();
+
+    // General triangle (subpixel x), flat-top, flat-bottom.
+    const int16_t tris[3][2][3] = {
+        { { (int16_t)(5*16+7), (int16_t)(40*16+3), (int16_t)(20*16) },
+          { 2, 6, 22 } },
+        { { (int16_t)(8*16), (int16_t)(30*16), (int16_t)(18*16+9) },
+          { 3, 3, 14 } },
+        { { (int16_t)(24*16+5), (int16_t)(44*16), (int16_t)(60*16) },
+          { 4, 18, 18 } },
+    };
+    for (int i = 0; i < 3; i++) {
+        emit_param_tri_raw(p, tris[i][0], tris[i][1], 0, 64, 0, 28);
+        apply_tri_ref(m, p, tris[i][0], tris[i][1], 0, 64, 0, 28);
+    }
+
+    if (!submit_and_wait()) {
+        check_fail("param_tri_affine_basic", "timeout");
+        return;
+    }
+    compare_fb_region("param_tri_affine_basic.fb", m,
+                      FB_BASE_BYTE, 320, 0, 0, 72, 32);
+}
+
+static void test_param_tri_clip_all_sides() {
+    printf("TEST param_tri_clip_all_sides\n");
+    gpu_init();
+    FbModel m = preload_with_sentinel();
+    upload_texture(TEX_BASE_BYTE, make_param_test_texture());
+    m.snapshot_from_sdram();
+
+    ParamSpanListWire p = make_tri_plane_setup();
+
+    // Big triangle overhanging the clip rect on every side; clip is
+    // interior so every record is bounded by it, not by the screen.
+    const int16_t vx[3] = { (int16_t)(-30*16+5), (int16_t)(90*16),
+                            (int16_t)(20*16+11) };
+    const int16_t vy[3] = { -12, 8, 45 };
+    emit_param_tri_raw(p, vx, vy, 6, 58, 3, 26);
+    apply_tri_ref(m, p, vx, vy, 6, 58, 3, 26);
+
+    if (!submit_and_wait()) {
+        check_fail("param_tri_clip_all_sides", "timeout");
+        return;
+    }
+    compare_fb_region("param_tri_clip_all_sides.fb", m,
+                      FB_BASE_BYTE, 320, 0, 0, 72, 32);
+}
+
+static void test_param_tri_degenerate_noop() {
+    printf("TEST param_tri_degenerate_noop\n");
+    gpu_init();
+    FbModel m = preload_with_sentinel();
+    upload_texture(TEX_BASE_BYTE, make_param_test_texture());
+    m.snapshot_from_sdram();
+
+    ParamSpanListWire p = make_tri_plane_setup();
+
+    // Collinear (zero area, walks to zero-width spans), one-scanline-tall
+    // (y0==y1==y2), fully above clip, fully below clip.  None may draw
+    // or hang; the trailing clear_rect proves the FSM retired them all.
+    const int16_t degen[4][2][3] = {
+        { { (int16_t)(4*16), (int16_t)(20*16), (int16_t)(36*16) },
+          { 5, 10, 15 } },                       // collinear in x/y
+        { { (int16_t)(4*16), (int16_t)(20*16), (int16_t)(12*16) },
+          { 7, 7, 7 } },                         // zero height
+        { { (int16_t)(4*16), (int16_t)(20*16), (int16_t)(12*16) },
+          { -20, -15, -8 } },                    // fully above clip
+        { { (int16_t)(4*16), (int16_t)(20*16), (int16_t)(12*16) },
+          { 40, 44, 50 } },                      // fully below clip
+    };
+    for (int i = 0; i < 4; i++)
+        emit_param_tri_raw(p, degen[i][0], degen[i][1], 0, 64, 0, 28);
+
+    // Collinear triangles may still rasterize sub-pixel slivers in exact
+    // arithmetic; mirror whatever the reference says (usually nothing).
+    for (int i = 0; i < 4; i++)
+        apply_tri_ref(m, p, degen[i][0], degen[i][1], 0, 64, 0, 28);
+
+    cmd_clear_rect(FB_BASE_BYTE + 30u * 320u + 2u, 7, 2, 0, 0x42);
+    m.apply_clear_rect(FB_BASE_BYTE + 30u * 320u + 2u, 7, 2, 0, 0x42);
+
+    if (!submit_and_wait()) {
+        check_fail("param_tri_degenerate_noop", "timeout");
+        return;
+    }
+    compare_fb_region("param_tri_degenerate_noop.fb", m,
+                      FB_BASE_BYTE, 320, 0, 0, 72, 36);
+}
+
+// Two triangles sharing a steep edge E (slope 4 px/line): E is the TOP
+// short edge of A and the BOTTOM short edge of B.  The bottom-short walk
+// historically restarted at v1 + slope_bot (the edge evaluated at y+1),
+// displacing E by one slope step against the neighbour's correct at-y
+// walk — a 4 px crack here.  Assert the two spans meet exactly on every
+// shared scanline (left-closed right-open: A's end == B's start), then
+// the usual byte-exact RTL-vs-model compare.
+static void test_param_tri_shared_edge_adjacency() {
+    printf("TEST param_tri_shared_edge_adjacency\n");
+    gpu_init();
+    FbModel m = preload_with_sentinel();
+    upload_texture(TEX_BASE_BYTE, make_param_test_texture());
+    m.snapshot_from_sdram();
+
+    ParamSpanListWire p = make_tri_plane_setup();
+
+    // E: (20,10) -> (100,30).  A right boundary = E (top short edge);
+    // B left boundary = E (bottom short edge).
+    const int16_t ax[3] = { (int16_t)(20*16), (int16_t)(100*16), (int16_t)(30*16) };
+    const int16_t ay[3] = { 10, 30, 45 };
+    const int16_t bx[3] = { (int16_t)(60*16), (int16_t)(20*16), (int16_t)(100*16) };
+    const int16_t by[3] = { 5, 10, 30 };
+
+    emit_param_tri_raw(p, ax, ay, 0, 320, 0, 64);
+    apply_tri_ref(m, p, ax, ay, 0, 320, 0, 64);
+    emit_param_tri_raw(p, bx, by, 0, 320, 0, 64);
+    apply_tri_ref(m, p, bx, by, 0, 320, 0, 64);
+
+    // Adjacency property on the reference walker (the RTL is then held
+    // to it by the byte-exact compare below).
+    {
+        std::vector<ParamSpanRecordWire> ra, rb;
+        ref_tri_records(ax, ay, 0, 320, 0, 64, ra);
+        ref_tri_records(bx, by, 0, 320, 0, 64, rb);
+        for (int yy = 11; yy <= 29; yy++) {
+            const ParamSpanRecordWire *sa = nullptr, *sb = nullptr;
+            for (const auto &r : ra) if ((int)r.v == yy) sa = &r;
+            for (const auto &r : rb) if ((int)r.v == yy) sb = &r;
+            if (!sa || !sb) {
+                check_fail("param_tri_shared_edge_adjacency",
+                           "missing span on shared scanline y=" +
+                           std::to_string(yy));
+                return;
+            }
+            int a_end   = (int)sa->u + (int)sa->count;
+            int b_start = (int)sb->u;
+            if (a_end != b_start) {
+                check_fail("param_tri_shared_edge_adjacency",
+                           "y=" + std::to_string(yy) +
+                           " A ends " + std::to_string(a_end) +
+                           " B starts " + std::to_string(b_start) +
+                           (a_end < b_start ? " (crack)" : " (overlap)"));
+                return;
+            }
+        }
+    }
+
+    if (!submit_and_wait()) {
+        check_fail("param_tri_shared_edge_adjacency", "timeout");
+        return;
+    }
+    compare_fb_region("param_tri_shared_edge_adjacency.fb", m,
+                      FB_BASE_BYTE, 320, 0, 0, 112, 48);
+}
+
+static void test_param_tri_unsupported_header_noop() {
+    printf("TEST param_tri_unsupported_header_noop\n");
+    gpu_init();
+    FbModel m = preload_with_sentinel();
+    m.snapshot_from_sdram();
+
+    // Unsupported record format nibble must clear header_supported and
+    // retire the command without launching the walker.
+    ParamSpanListWire p = make_tri_plane_setup();
+    auto w = encode_param_span_list_wire(p, {});
+    w.resize(36, 0);
+    w[7] |= (0x5u << 20);   // record_fmt != U16V16_COUNT16
+    const int16_t vx[3] = { (int16_t)(4*16), (int16_t)(30*16),
+                            (int16_t)(16*16) };
+    const int16_t vy[3] = { 2, 4, 20 };
+    w[31] = (64u << 16) | 0u;
+    w[32] = (28u << 16) | 0u;
+    w[33] = ((uint32_t)(uint16_t)vy[0] << 16) | (uint16_t)vx[0];
+    w[34] = ((uint32_t)(uint16_t)vy[1] << 16) | (uint16_t)vx[1];
+    w[35] = ((uint32_t)(uint16_t)vy[2] << 16) | (uint16_t)vx[2];
+    ring_cmd(0x49, (uint32_t)w.size());
+    for (uint32_t x : w)
+        ring_write(x);
+
+    cmd_clear_rect(FB_BASE_BYTE + 5u * 320u + 3u, 5, 2, 0, 0x37);
+    m.apply_clear_rect(FB_BASE_BYTE + 5u * 320u + 3u, 5, 2, 0, 0x37);
+
+    if (!submit_and_wait()) {
+        check_fail("param_tri_unsupported_header_noop", "timeout");
+        return;
+    }
+    compare_fb_region("param_tri_unsupported_header_noop.fb", m,
+                      FB_BASE_BYTE, 320, 0, 0, 48, 24);
+}
+
+static void test_param_tri_fuzz_affine() {
+    printf("TEST param_tri_fuzz_affine\n");
+    gpu_init();
+    FbModel m = preload_with_sentinel();
+    upload_texture(TEX_BASE_BYTE, make_param_test_texture());
+    m.snapshot_from_sdram();
+
+    ParamSpanListWire p = make_tri_plane_setup();
+
+    srand(0x71717171);
+    for (int n = 0; n < 16; n++) {
+        int16_t vx[3], vy[3];
+        for (int i = 0; i < 3; i++) {
+            vx[i] = (int16_t)((rand() % (80 * 16)) - (8 * 16)); // Q12.4
+            vy[i] = (int16_t)((rand() % 44) - 6);
+        }
+        emit_param_tri_raw(p, vx, vy, 0, 64, 0, 30);
+        apply_tri_ref(m, p, vx, vy, 0, 64, 0, 30);
+    }
+
+    if (!submit_and_wait()) {
+        check_fail("param_tri_fuzz_affine", "timeout");
+        return;
+    }
+    compare_fb_region("param_tri_fuzz_affine.fb", m,
+                      FB_BASE_BYTE, 320, 0, 0, 72, 34);
+}
+
+// ================================================================
+// CMD_SET_TRI_STATE (0x4A) + CMD_DRAW_VERT_TRI (0x4B) — hardware
+// triangle plane derivation.
+// ================================================================
+// Strategy: the equivalence we prove is that the GPU's RTL derivation lands
+// the SAME spanprod attr planes that this C reference computes.  We therefore
+// render a triangle two ways and byte-compare:
+//   (A) via 0x4A + 0x4B (the GPU derives the planes from raw verts), and
+//   (B) via 0x49 (CMD_DRAW_PARAM_TRI) carrying the planes this reference solved
+//       with the IDENTICAL fixed-point path.
+// Both run the same proven walker + spanprod fragment path, so byte-exact
+// output follows iff the derived planes match the reference planes bit-for-bit.
+//
+// FIXED-POINT CONTRACT — mirrors gpu_core.v's S_TRI_DERIVE exactly:
+//   N = 44, SPLIT = 24 (only matters in RTL as a DSP-pass boundary; the C ref
+//   multiplies directly in 128-bit, which is bit-identical to the exact two-pass
+//   recombination).  rdet capped at 2^31-1.  Truncations toward -inf via
+//   arithmetic shifts.  See gpu_core.v for the full derivation.
+static const int DERIV_N_REF = 44;
+
+static int32_t deriv_sat32_ref(int64_t v) {
+    if (v > INT32_MAX) return INT32_MAX;
+    if (v < INT32_MIN) return INT32_MIN;
+    return (int32_t)v;
+}
+
+// rounded reciprocal: round(2^44/|det|), capped at 2^31-1 (sliver saturation).
+static uint64_t deriv_rdet_ref(uint64_t detabs) {
+    if (detabs == 0) detabs = 1;                  // collinear -> det floored to 1
+    uint64_t r = (((unsigned __int128)1 << DERIV_N_REF) + (detabs >> 1)) / detabs;
+    if (r > 0x7FFFFFFFull) r = 0x7FFFFFFFull;
+    return r;
+}
+
+// du/dv = sat32( ((num * rdet) >>> N) * sign )
+static int32_t deriv_scale_ref(int64_t num, uint64_t rdet, int sign) {
+    __int128 p = (__int128)num * (__int128)rdet;  // exact == RTL two-pass split
+    int64_t q = (int64_t)(p >> DERIV_N_REF);      // arithmetic shift, trunc -inf
+    return deriv_sat32_ref((int64_t)q * sign);
+}
+
+// Derived planes for the four attributes (szi, tzi, zi, light), in the exact
+// spanprod attr_origin/du/dv format an 0x49 PERSP header would carry.
+struct DerivedTriPlanes {
+    int32_t attr_origin[3];   // 0=szi 1=tzi 2=zi
+    int32_t attr_du[3];
+    int32_t attr_dv[3];
+    int32_t light_origin;     // Q6.16, truncated to 24b like spanprod_light_*
+    int32_t light_du;
+    int32_t light_dv;
+};
+
+// Mirror of S_TRI_DERIVE.  Inputs: raw per-vertex {x(Q12.4), y(int), s/t/zi
+// (Q16.16), light row(Q6)} in payload order (pre-sort).
+static DerivedTriPlanes derive_tri_planes_ref(const int16_t vx[3],
+                                              const int16_t vy[3],
+                                              const int32_t s[3],
+                                              const int32_t t[3],
+                                              const int32_t zi[3],
+                                              const uint8_t lrow[3]) {
+    // 1. y-sort with the walker's exact rule, carrying the attr tuple.
+    int16_t x[3] = {vx[0], vx[1], vx[2]};
+    int16_t y[3] = {vy[0], vy[1], vy[2]};
+    int64_t S[3] = {s[0], s[1], s[2]};
+    int64_t T[3] = {t[0], t[1], t[2]};
+    int64_t Z[3] = {zi[0], zi[1], zi[2]};
+    int64_t L[3] = {(int64_t)(lrow[0] & 0x3F) << 16,
+                    (int64_t)(lrow[1] & 0x3F) << 16,
+                    (int64_t)(lrow[2] & 0x3F) << 16};
+    auto swap2 = [&](int a, int b) {
+        std::swap(x[a], x[b]); std::swap(y[a], y[b]);
+        std::swap(S[a], S[b]); std::swap(T[a], T[b]);
+        std::swap(Z[a], Z[b]); std::swap(L[a], L[b]);
+    };
+    if (y[1] < y[0]) swap2(0, 1);
+    if (y[2] < y[1]) swap2(1, 2);
+    if (y[1] < y[0]) swap2(0, 1);
+
+    // 2. per-vertex numerator products szi_k = (s_k*zi_k)>>16, tzi_k likewise
+    //    (arithmetic shift, trunc toward -inf; matches dsp_p[47:16]).
+    int64_t szi[3], tzi[3];
+    for (int k = 0; k < 3; k++) {
+        szi[k] = (int64_t)(int32_t)((S[k] * Z[k]) >> 16);
+        tzi[k] = (int64_t)(int32_t)((T[k] * Z[k]) >> 16);
+    }
+
+    // 3. edge deltas, determinant, reciprocal.
+    int64_t d1x = (int64_t)x[1] - x[0];   // Q12.4
+    int64_t d2x = (int64_t)x[2] - x[0];
+    int64_t d1y = (int64_t)y[1] - y[0];   // int
+    int64_t d2y = (int64_t)y[2] - y[0];
+    int64_t det = d1x * d2y - d2x * d1y;  // Q12.4-scaled
+    uint64_t detabs = (det < 0) ? (uint64_t)(-det) : (uint64_t)det;
+    int sign = (det < 0) ? -1 : 1;
+    uint64_t rdet = deriv_rdet_ref(detabs);
+
+    int64_t x0px = (int64_t)(x[0] >> 4);  // floor toward -inf (Q12.4 >> 4)
+    int64_t y0 = y[0];
+
+    DerivedTriPlanes pl {};
+    int64_t a0arr[4] = {szi[0], tzi[0], Z[0], L[0]};
+    int64_t a1arr[4] = {szi[1], tzi[1], Z[1], L[1]};
+    int64_t a2arr[4] = {szi[2], tzi[2], Z[2], L[2]};
+    for (int a = 0; a < 4; a++) {
+        // da clamped to int32 before the numerator products (matches the RTL
+        // deriv_sat32 on da1/da2).
+        int64_t da1 = deriv_sat32_ref(a1arr[a] - a0arr[a]);
+        int64_t da2 = deriv_sat32_ref(a2arr[a] - a0arr[a]);
+        int64_t num_du = 16 * (da1 * d2y - da2 * d1y);
+        int64_t num_dv =      (da2 * d1x - da1 * d2x);
+        int32_t du = deriv_scale_ref(num_du, rdet, sign);
+        int32_t dv = deriv_scale_ref(num_dv, rdet, sign);
+        // origin = a0 - du*x0px - dv*y0 (mod 2^32)
+        int32_t org = (int32_t)(uint32_t)(a0arr[a]
+                    - (int64_t)du * x0px - (int64_t)dv * y0);
+        if (a < 3) {
+            pl.attr_origin[a] = org;
+            pl.attr_du[a] = du;
+            pl.attr_dv[a] = dv;
+        } else {
+            // light plane truncated to 24b (Q6.16) like spanprod_light_*.
+            pl.light_origin = (int32_t)((uint32_t)org & 0x00FFFFFFu);
+            pl.light_du = (int32_t)((uint32_t)du & 0x00FFFFFFu);
+            pl.light_dv = (int32_t)((uint32_t)dv & 0x00FFFFFFu);
+        }
+    }
+    return pl;
+}
+
+// Build the 0x4A sticky-state payload (16 words) from a ParamSpanListWire-like
+// surface description.  flags/colormap/attr_mode(PERSP)/z_mode in the control
+// word; clip rect packed into w14/w15.
+static std::vector<uint32_t>
+encode_set_tri_state_wire(const ParamSpanListWire &p,
+                          int16_t cx0, int16_t cx1, int16_t cy0, int16_t cy1) {
+    std::vector<uint32_t> w(16, 0);
+    uint32_t control = ((uint32_t)p.flags & 0xFFu)
+                     | (((uint32_t)p.colormap_id & 0x0Fu) << 8)
+                     | (((uint32_t)p.attr_mode & 0x0Fu) << 12)
+                     | (((uint32_t)p.span_axis & 0x0Fu) << 16)
+                     | (((uint32_t)p.z_mode & 0x0Fu) << 24);
+    w[0]  = p.fb_base;
+    w[1]  = (uint32_t)p.fb_major_step;
+    w[2]  = (uint32_t)p.fb_minor_step;
+    w[3]  = p.tex_addr;
+    w[4]  = p.tex_width;
+    w[5]  = ((uint32_t)p.tex_h_mask << 16) | (uint32_t)p.tex_w_mask;
+    w[6]  = control;
+    w[7]  = (uint32_t)p.clamp_min[0];
+    w[8]  = (uint32_t)p.clamp_max[0];
+    w[9]  = (uint32_t)p.clamp_min[1];
+    w[10] = (uint32_t)p.clamp_max[1];
+    w[11] = p.z_base;
+    w[12] = (uint32_t)p.z_major_step;
+    w[13] = (uint32_t)p.z_minor_step;
+    w[14] = ((uint32_t)(uint16_t)cx1 << 16) | (uint16_t)cx0;
+    w[15] = ((uint32_t)(uint16_t)cy1 << 16) | (uint16_t)cy0;
+    return w;
+}
+
+static void emit_set_tri_state_raw(const ParamSpanListWire &p,
+                                   int16_t cx0, int16_t cx1,
+                                   int16_t cy0, int16_t cy1) {
+    auto w = encode_set_tri_state_wire(p, cx0, cx1, cy0, cy1);
+    ring_cmd(0x4A, (uint32_t)w.size());
+    for (uint32_t x : w)
+        ring_write(x);
+}
+
+// Emit a 0x4B (14-word) vertex triangle.
+static void emit_draw_vert_tri_raw(const int16_t vx[3], const int16_t vy[3],
+                                   const int32_t s[3], const int32_t t[3],
+                                   const int32_t zi[3], const uint8_t lrow[3]) {
+    std::vector<uint32_t> w(14, 0);
+    w[0]  = ((uint32_t)(uint16_t)vy[0] << 16) | (uint16_t)vx[0];
+    w[1]  = ((uint32_t)(uint16_t)vy[1] << 16) | (uint16_t)vx[1];
+    w[2]  = ((uint32_t)(uint16_t)vy[2] << 16) | (uint16_t)vx[2];
+    w[3]  = (uint32_t)s[0];  w[4]  = (uint32_t)s[1];  w[5]  = (uint32_t)s[2];
+    w[6]  = (uint32_t)t[0];  w[7]  = (uint32_t)t[1];  w[8]  = (uint32_t)t[2];
+    w[9]  = (uint32_t)zi[0]; w[10] = (uint32_t)zi[1]; w[11] = (uint32_t)zi[2];
+    w[12] = ((uint32_t)(lrow[0] & 0x3F))
+          | ((uint32_t)(lrow[1] & 0x3F) << 6)
+          | ((uint32_t)(lrow[2] & 0x3F) << 12);
+    w[13] = 0;
+    ring_cmd(0x4B, (uint32_t)w.size());
+    for (uint32_t x : w)
+        ring_write(x);
+}
+
+// Build an 0x49 ParamSpanListWire that carries the reference-derived planes for
+// a vertex triangle, so the two paths are held byte-exact.
+static ParamSpanListWire make_equiv_param_from_derived(const ParamSpanListWire &base,
+                                                       const DerivedTriPlanes &d) {
+    ParamSpanListWire p = base;
+    p.attr_mode = 1;            // PERSP — same record/attr semantics 0x4B implies
+    p.flags |= SPAN_PERSP;
+    p.span_axis = 0;
+    for (int i = 0; i < 3; i++) {
+        p.attr_origin[i] = d.attr_origin[i];
+        p.attr_du[i] = d.attr_du[i];
+        p.attr_dv[i] = d.attr_dv[i];
+    }
+    p.light_origin = d.light_origin;
+    p.light_du = d.light_du;
+    p.light_dv = d.light_dv;
+    return p;
+}
+
+// Common surface for the vert-tri tests: textured PERSP, screen FB at base.
+static ParamSpanListWire make_vert_tri_surface() {
+    ParamSpanListWire p {};
+    p.fb_base = FB_BASE_BYTE;
+    p.fb_major_step = 320;
+    p.fb_minor_step = 1;
+    p.tex_addr = TEX_BASE_BYTE;
+    p.tex_width = 64;
+    p.tex_w_mask = 0x3F;
+    p.tex_h_mask = 0x3F;
+    p.attr_mode = 1;       // PERSP
+    p.span_axis = 0;
+    p.flags = SPAN_PERSP;
+    return p;
+}
+
+// Render one vert-triangle two ways (0x4A+0x4B at FB_BASE; 0x49-with-derived
+// planes at FB_ALT_BASE) and return the per-pixel mismatch count over the walk
+// region.  alt_base lets the caller place the 0x49 copy elsewhere.
+static int vert_tri_equiv_diffs(const ParamSpanListWire &surf,
+                                const int16_t vx[3], const int16_t vy[3],
+                                const int32_t s[3], const int32_t t[3],
+                                const int32_t zi[3], const uint8_t lrow[3],
+                                int16_t cx0, int16_t cx1, int16_t cy0, int16_t cy1,
+                                int rx0, int rx1, int ry0, int ry1) {
+    gpu_init();
+    preload_with_sentinel();
+    upload_texture(TEX_BASE_BYTE, make_projection_test_texture());
+    upload_palookup_identity_row(0, 0);
+
+    // Path A: 0x4A + 0x4B at FB_BASE.
+    ParamSpanListWire a = surf;
+    a.fb_base = FB_BASE_BYTE;
+    emit_set_tri_state_raw(a, cx0, cx1, cy0, cy1);
+    emit_draw_vert_tri_raw(vx, vy, s, t, zi, lrow);
+
+    // Path B: 0x49 carrying the reference-derived planes at FB_ALT_BASE.
+    DerivedTriPlanes d = derive_tri_planes_ref(vx, vy, s, t, zi, lrow);
+    ParamSpanListWire b = make_equiv_param_from_derived(surf, d);
+    b.fb_base = FB_ALT_BASE_BYTE;
+    emit_param_tri_raw(b, vx, vy, cx0, cx1, cy0, cy1);
+
+    if (!submit_and_wait())
+        return -1;
+
+    int diffs = 0;
+    for (int y = ry0; y < ry1; y++)
+        for (int x = rx0; x < rx1; x++) {
+            uint32_t pa = FB_BASE_BYTE     + (uint32_t)y * 320u + (uint32_t)x;
+            uint32_t pb = FB_ALT_BASE_BYTE + (uint32_t)y * 320u + (uint32_t)x;
+            if (sdram_read_byte(pa) != sdram_read_byte(pb))
+                diffs++;
+        }
+    return diffs;
+}
+
+// (b) equivalence over a representative triangle set: large, thin slivers,
+// steep gradients, shared-edge pairs, fully/partially clipped, degenerate.
+static void test_vert_tri_equivalence_vs_param() {
+    printf("TEST vert_tri_equivalence_vs_param\n");
+    ParamSpanListWire surf = make_vert_tri_surface();
+
+    struct Case { const char *name; int16_t vx[3], vy[3];
+                  int32_t s[3], t[3], zi[3]; uint8_t l[3];
+                  int16_t cx0, cx1, cy0, cy1; };
+    const int Q = 1 << 16;
+    Case cases[] = {
+        { "large",
+          {(int16_t)(8*16), (int16_t)(80*16), (int16_t)(30*16)}, {4, 10, 50},
+          {0, 48*Q, 12*Q}, {0, 8*Q, 40*Q}, {Q, Q, Q}, {0, 10, 30},
+          0, 120, 0, 60 },
+        { "thin_sliver",
+          {(int16_t)(10*16), (int16_t)(12*16), (int16_t)(11*16)}, {4, 40, 8},
+          {0, 4*Q, 2*Q}, {0, 30*Q, 6*Q}, {Q, Q, Q}, {0, 5, 2},
+          0, 64, 0, 48 },
+        { "steep_gradient",
+          {(int16_t)(6*16), (int16_t)(60*16), (int16_t)(20*16)}, {3, 7, 38},
+          {0, 1000*Q, 30*Q}, {0, 900*Q, 20*Q},
+          {Q, Q/8, Q/4}, {0, 20, 8},
+          0, 80, 0, 44 },
+        { "partial_clip",
+          {(int16_t)(-20*16), (int16_t)(70*16), (int16_t)(25*16)}, {-6, 12, 40},
+          {0, 50*Q, 16*Q}, {0, 10*Q, 36*Q}, {Q, Q, Q}, {0, 8, 24},
+          5, 55, 3, 30 },
+        { "degenerate_collinear",
+          {(int16_t)(10*16), (int16_t)(40*16), (int16_t)(25*16)}, {5, 5, 5},
+          {0, 30*Q, 15*Q}, {0, 0, 0}, {Q, Q, Q}, {0, 0, 0},
+          0, 64, 0, 30 },
+    };
+
+    int total_diffs = 0, ncases = 0;
+    for (auto &c : cases) {
+        int d = vert_tri_equiv_diffs(surf, c.vx, c.vy, c.s, c.t, c.zi, c.l,
+                                     c.cx0, c.cx1, c.cy0, c.cy1,
+                                     0, 120, 0, 60);
+        if (d < 0) {
+            check_fail("vert_tri_equivalence_vs_param",
+                       std::string("timeout on case ") + c.name);
+            return;
+        }
+        char nm[96];
+        snprintf(nm, sizeof(nm), "vert_tri_equivalence_vs_param.%s", c.name);
+        if (d == 0) check_pass(nm);
+        else {
+            char buf[64];
+            snprintf(buf, sizeof(buf), "%d pixel diffs", d);
+            check_fail(nm, buf);
+        }
+        total_diffs += d;
+        ncases++;
+    }
+    (void)total_diffs; (void)ncases;
+}
+
+// (c) sliver / steep-gradient set that used to need Q29 client-side: must
+// render with in-range attrs and NOT drop spans.  We assert the 0x4B path
+// actually paints the triangle interior (non-sentinel) on a set of awkward
+// triangles, and that it matches the 0x49 derived-plane render.
+static void test_vert_tri_sliver_renders_in_range() {
+    printf("TEST vert_tri_sliver_renders_in_range\n");
+    ParamSpanListWire surf = make_vert_tri_surface();
+    const int Q = 1 << 16;
+
+    // A steep, near-degenerate triangle with a large attribute swing — the
+    // case that would overflow a non-anchored Q16.16 plane solve.
+    const int16_t vx[3] = {(int16_t)(15*16), (int16_t)(17*16), (int16_t)(16*16+8)};
+    const int16_t vy[3] = {2, 50, 6};
+    const int32_t s[3]  = {0, 2000*Q, 60*Q};
+    const int32_t t[3]  = {0, 1800*Q, 40*Q};
+    const int32_t zi[3] = {Q, Q/16, Q/2};
+    const uint8_t l[3]  = {0, 30, 10};
+
+    int diffs = vert_tri_equiv_diffs(surf, vx, vy, s, t, zi, l,
+                                     0, 64, 0, 56, 0, 64, 0, 56);
+    if (diffs < 0) { check_fail("vert_tri_sliver_renders_in_range", "timeout"); return; }
+    if (diffs == 0) check_pass("vert_tri_sliver_renders_in_range.equiv");
+    else {
+        char buf[64]; snprintf(buf, sizeof(buf), "%d pixel diffs", diffs);
+        check_fail("vert_tri_sliver_renders_in_range.equiv", buf);
+    }
+
+    // The triangle must actually have painted some interior (no dropped spans).
+    int painted = 0;
+    for (int y = 0; y < 56; y++)
+        for (int x = 0; x < 64; x++)
+            if (sdram_read_byte(FB_BASE_BYTE + (uint32_t)y*320u + (uint32_t)x)
+                != SENTINEL_BYTE)
+                painted++;
+    if (painted > 0) check_pass("vert_tri_sliver_renders_in_range.painted");
+    else check_fail("vert_tri_sliver_renders_in_range.painted",
+                    "no interior pixels painted");
+}
+
+// (d) shared-edge adjacency through 0x4B — mirror param_tri_shared_edge_adjacency
+// but draw each triangle with 0x4B and compare to the 0x49 derived-plane render.
+static void test_vert_tri_shared_edge_adjacency() {
+    printf("TEST vert_tri_shared_edge_adjacency\n");
+    gpu_init();
+    preload_with_sentinel();
+    upload_texture(TEX_BASE_BYTE, make_projection_test_texture());
+    upload_palookup_identity_row(0, 0);
+
+    ParamSpanListWire surf = make_vert_tri_surface();
+    const int Q = 1 << 16;
+
+    // Same geometry as the 0x49 shared-edge test.  Screen-aligned-ish attrs.
+    const int16_t ax[3] = {(int16_t)(20*16), (int16_t)(100*16), (int16_t)(30*16)};
+    const int16_t ay[3] = {10, 30, 45};
+    const int16_t bx[3] = {(int16_t)(60*16), (int16_t)(20*16), (int16_t)(100*16)};
+    const int16_t by[3] = {5, 10, 30};
+    const int32_t as[3] = {0, 80*Q, 10*Q}, at[3] = {0, 20*Q, 35*Q};
+    const int32_t azi[3] = {Q, Q, Q};
+    const int32_t bs[3] = {40*Q, 0, 80*Q}, bt[3] = {0, 5*Q, 25*Q};
+    const int32_t bzi[3] = {Q, Q, Q};
+    const uint8_t al[3] = {0, 0, 0}, bl[3] = {0, 0, 0};
+
+    // Path A: 0x4B pair at FB_BASE.
+    emit_set_tri_state_raw(surf, 0, 320, 0, 64);
+    emit_draw_vert_tri_raw(ax, ay, as, at, azi, al);
+    emit_draw_vert_tri_raw(bx, by, bs, bt, bzi, bl);
+
+    // Path B: 0x49 derived-plane pair at FB_ALT_BASE.
+    DerivedTriPlanes da = derive_tri_planes_ref(ax, ay, as, at, azi, al);
+    DerivedTriPlanes db = derive_tri_planes_ref(bx, by, bs, bt, bzi, bl);
+    ParamSpanListWire pa = make_equiv_param_from_derived(surf, da);
+    ParamSpanListWire pb = make_equiv_param_from_derived(surf, db);
+    pa.fb_base = FB_ALT_BASE_BYTE; pb.fb_base = FB_ALT_BASE_BYTE;
+    emit_param_tri_raw(pa, ax, ay, 0, 320, 0, 64);
+    emit_param_tri_raw(pb, bx, by, 0, 320, 0, 64);
+
+    if (!submit_and_wait()) {
+        check_fail("vert_tri_shared_edge_adjacency", "timeout");
+        return;
+    }
+    int diffs = 0;
+    for (int y = 0; y < 48; y++)
+        for (int x = 0; x < 112; x++) {
+            uint32_t pA = FB_BASE_BYTE     + (uint32_t)y*320u + (uint32_t)x;
+            uint32_t pB = FB_ALT_BASE_BYTE + (uint32_t)y*320u + (uint32_t)x;
+            if (sdram_read_byte(pA) != sdram_read_byte(pB)) diffs++;
+        }
+    if (diffs == 0) check_pass("vert_tri_shared_edge_adjacency");
+    else {
+        char buf[64]; snprintf(buf, sizeof(buf), "%d pixel diffs", diffs);
+        check_fail("vert_tri_shared_edge_adjacency", buf);
+    }
+}
+
+// (e) sticky semantics: one 0x4A re-arms several 0x4B; 0x4B without 0x4A is a
+// no-op; soft_reset clears the sticky bank.
+static void test_vert_tri_sticky_semantics() {
+    printf("TEST vert_tri_sticky_semantics\n");
+    const int Q = 1 << 16;
+    ParamSpanListWire surf = make_vert_tri_surface();
+
+    // --- (e1) one 0x4A + three 0x4B at FB_BASE == three 0x49 derived at ALT ---
+    gpu_init();
+    preload_with_sentinel();
+    upload_texture(TEX_BASE_BYTE, make_projection_test_texture());
+    upload_palookup_identity_row(0, 0);
+
+    const int16_t vx[3][3] = {
+        {(int16_t)(5*16), (int16_t)(40*16), (int16_t)(20*16)},
+        {(int16_t)(45*16), (int16_t)(80*16), (int16_t)(60*16)},
+        {(int16_t)(8*16), (int16_t)(34*16), (int16_t)(18*16)},
+    };
+    const int16_t vy[3][3] = { {2, 6, 22}, {4, 8, 28}, {30, 34, 50} };
+    const int32_t s3[3] = {0, 30*Q, 14*Q}, t3[3] = {0, 6*Q, 20*Q};
+    const int32_t zi3[3] = {Q, Q, Q};
+    const uint8_t l3[3] = {0, 0, 0};
+
+    emit_set_tri_state_raw(surf, 0, 320, 0, 64);
+    for (int i = 0; i < 3; i++)
+        emit_draw_vert_tri_raw(vx[i], vy[i], s3, t3, zi3, l3);
+
+    for (int i = 0; i < 3; i++) {
+        DerivedTriPlanes d = derive_tri_planes_ref(vx[i], vy[i], s3, t3, zi3, l3);
+        ParamSpanListWire p = make_equiv_param_from_derived(surf, d);
+        p.fb_base = FB_ALT_BASE_BYTE;
+        emit_param_tri_raw(p, vx[i], vy[i], 0, 320, 0, 64);
+    }
+    if (!submit_and_wait()) {
+        check_fail("vert_tri_sticky_semantics", "timeout(e1)");
+        return;
+    }
+    int diffs = 0;
+    for (int y = 0; y < 56; y++)
+        for (int x = 0; x < 88; x++) {
+            uint32_t pA = FB_BASE_BYTE     + (uint32_t)y*320u + (uint32_t)x;
+            uint32_t pB = FB_ALT_BASE_BYTE + (uint32_t)y*320u + (uint32_t)x;
+            if (sdram_read_byte(pA) != sdram_read_byte(pB)) diffs++;
+        }
+    if (diffs == 0) check_pass("vert_tri_sticky_semantics.one_a_three_b");
+    else {
+        char buf[64]; snprintf(buf, sizeof(buf), "%d diffs", diffs);
+        check_fail("vert_tri_sticky_semantics.one_a_three_b", buf);
+    }
+
+    // --- (e2) 0x4B with NO prior 0x4A is a no-op (after a fresh hard reset) ---
+    gpu_init();   // gpu_init issues a soft reset, clearing tri_state_valid
+    FbModel m2 = preload_with_sentinel();
+    upload_texture(TEX_BASE_BYTE, make_projection_test_texture());
+    m2.snapshot_from_sdram();
+    emit_draw_vert_tri_raw(vx[0], vy[0], s3, t3, zi3, l3);  // no 0x4A first
+    // A following clear proves the stream advanced (the 0x4B drained as no-op).
+    cmd_clear_rect(FB_BASE_BYTE + 2u * 320u + 1u, 4, 2, 0, 0x5A);
+    m2.apply_clear_rect(FB_BASE_BYTE + 2u * 320u + 1u, 4, 2, 0, 0x5A);
+    if (!submit_and_wait()) {
+        check_fail("vert_tri_sticky_semantics", "timeout(e2)");
+        return;
+    }
+    compare_fb_region("vert_tri_sticky_semantics.noop_without_a", m2,
+                      FB_BASE_BYTE, 320, 0, 0, 48, 24);
+
+    // --- (e3) soft_reset clears the bank: 0x4A, soft reset, then 0x4B no-op ---
+    gpu_init();
+    FbModel m3 = preload_with_sentinel();
+    upload_texture(TEX_BASE_BYTE, make_projection_test_texture());
+    m3.snapshot_from_sdram();
+    emit_set_tri_state_raw(surf, 0, 320, 0, 64);
+    if (!submit_and_wait()) {  // let the 0x4A retire
+        check_fail("vert_tri_sticky_semantics", "timeout(e3a)");
+        return;
+    }
+    gpu_soft_reset();          // clears tri_state_valid
+    emit_draw_vert_tri_raw(vx[0], vy[0], s3, t3, zi3, l3);  // must be a no-op now
+    cmd_clear_rect(FB_BASE_BYTE + 2u * 320u + 1u, 4, 2, 0, 0x6B);
+    m3.apply_clear_rect(FB_BASE_BYTE + 2u * 320u + 1u, 4, 2, 0, 0x6B);
+    if (!submit_and_wait()) {
+        check_fail("vert_tri_sticky_semantics", "timeout(e3b)");
+        return;
+    }
+    compare_fb_region("vert_tri_sticky_semantics.soft_reset_clears", m3,
+                      FB_BASE_BYTE, 320, 0, 0, 48, 24);
+}
+
+// Wrong-sized 0x4A / 0x4B payloads must drain and retire as no-ops.
+static void test_vert_tri_wrong_size_noop() {
+    printf("TEST vert_tri_wrong_size_noop\n");
+    gpu_init();
+    FbModel m = preload_with_sentinel();
+    m.snapshot_from_sdram();
+
+    // 0x4A with 15 words (should be 16) -> tri_state_valid stays clear.
+    std::vector<uint32_t> bad_a(15, 0xA5A5A5A5u);
+    ring_cmd(0x4A, (uint32_t)bad_a.size());
+    for (uint32_t x : bad_a) ring_write(x);
+    // 0x4B with 13 words (should be 14) -> no-op.
+    std::vector<uint32_t> bad_b(13, 0xB6B6B6B6u);
+    ring_cmd(0x4B, (uint32_t)bad_b.size());
+    for (uint32_t x : bad_b) ring_write(x);
+    // Marker clear proves the stream advanced past both bad commands.
+    cmd_clear_rect(FB_BASE_BYTE + 1u * 320u + 2u, 6, 3, 0, 0x4D);
+    m.apply_clear_rect(FB_BASE_BYTE + 1u * 320u + 2u, 6, 3, 0, 0x4D);
+
+    if (!submit_and_wait()) {
+        check_fail("vert_tri_wrong_size_noop", "timeout");
+        return;
+    }
+    compare_fb_region("vert_tri_wrong_size_noop.fb", m,
+                      FB_BASE_BYTE, 320, 0, 0, 48, 24);
 }
 
 static void test_param_span_list_persp_matches_helper() {
@@ -7153,7 +8367,18 @@ int main(int argc, char **argv) {
     test_param_span_list_streams_many_records();
     test_param_span_list_unsupported_noop();
     test_param_span_list_colormap_skip_zero();
-    test_reserved_49_command_noop_drains();
+    test_param_tri_wrong_size_noop_drains();
+    test_param_tri_affine_basic();
+    test_param_tri_clip_all_sides();
+    test_param_tri_degenerate_noop();
+    test_param_tri_shared_edge_adjacency();
+    test_param_tri_unsupported_header_noop();
+    test_param_tri_fuzz_affine();
+    test_vert_tri_equivalence_vs_param();
+    test_vert_tri_sliver_renders_in_range();
+    test_vert_tri_shared_edge_adjacency();
+    test_vert_tri_sticky_semantics();
+    test_vert_tri_wrong_size_noop();
     test_param_span_list_persp_matches_helper();
     test_param_span_quake_projection_math();
     test_param_span_q29_high_angle_floor_no_flatten();
@@ -7179,6 +8404,12 @@ int main(int argc, char **argv) {
     test_span_group_masked_equals_four_spans();
     test_span_group_explicit_colormap_slot();
     test_span_group_per_lane_colormap_slots();
+    // ---- CMD_DRAW_COLUMN_LIST (0x4C) byte-exact oracle vs 0x48 ----
+    test_column_list_single_column_matches_affine();
+    test_column_list_multi_lane_matches_affine();
+    test_column_list_colormap_matches_affine();
+    test_column_list_skipzero_and_negstep_matches_affine();
+    test_column_list_varcount_and_zerolane_matches_affine();
     test_span_group_varcount_opaque_equals_spans();
     test_span_group_varcount_masked_equals_spans();
     test_span_group_varcount_explicit_colormap_slot();

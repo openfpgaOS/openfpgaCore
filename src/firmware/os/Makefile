@@ -47,6 +47,7 @@ CFLAGS += -ffreestanding -nostdlib -nostartfiles
 CFLAGS += -ffunction-sections -fdata-sections
 CFLAGS += -fno-builtin
 CFLAGS += -fsingle-precision-constant
+CFLAGS += $(EXTRA_CFLAGS)
 # Cache-line align hot code so I$ refills are one transaction.
 CFLAGS += -falign-functions=64 -falign-loops=64
 # Don't auto-rewrite plain loops as memset/memcpy calls.
@@ -86,16 +87,33 @@ BOOT_SRCS_C = $(BOOT_DIR)/boot.c
 BOOT_SRCS_S = $(BOOT_DIR)/start.S
 
 # Source files - HAL (portable)
+#
+# sw_mixer.c is always linked now: ONE os.bin runs on every bitstream and
+# picks the mixer backend at boot.  of_init() reads the HW_FEATURES
+# OF_HW_MIXER_HW bit and sets of_mixer_use_sw — 0 (HW audio_mixer.v MMIO) on
+# OS25/MiSTer/default Pocket, 1 (CPU software mixer) on the OS30 Pocket
+# variant that cuts audio_mixer.v.  The regs.h MIX_* macros branch on that
+# flag at runtime, so hal/mixer.c and targets/pocket/audio.c stay byte-
+# identical source.  No MIXER= flag is required.
 HAL_SRCS = $(HAL_DIR)/hal.c \
            $(HAL_DIR)/platform.c \
            $(HAL_DIR)/cache.c \
            $(HAL_DIR)/mixer.c \
+           $(HAL_DIR)/sw_mixer.c \
            $(HAL_DIR)/net.c \
            $(HAL_DIR)/link.c \
            $(HAL_DIR)/codec.c \
            $(HAL_DIR)/lzw.c \
            $(HAL_DIR)/disk.c \
            ../api/of_smp_tables.c
+
+# Optional debug force-override: MIXER=sw pins of_mixer_use_sw=1 (CPU software
+# mixer) regardless of the HW caps bit, for testing the SW path on a core that
+# still has audio_mixer.v.  Normal builds leave this unset and select at boot.
+ifeq ($(MIXER),sw)
+CFLAGS    += -DOF_MIXER_FORCE_SW
+OS_CFLAGS += -DOF_MIXER_FORCE_SW
+endif
 
 HAL_SRCS_S = $(HAL_DIR)/fast_mem.S
 

@@ -66,12 +66,21 @@ static inline void sys_irq_restore_local(uint32_t prev)
         __asm__ volatile("csrrsi zero, mstatus, 0x8" ::: "memory");
 }
 
+/* Software mixer DAC pump, driven from the 1 kHz audio tick when the HW
+ * audio_mixer.v is cut (OS30).  Always linked; self-no-ops when a HW mixer
+ * is present (of_mixer_use_sw==0), so the call is cheap on every build. */
+void sw_mixer_pump(void);
+
 /* Called from irq_handler() on machine timer interrupt */
 void timer_isr_callback(void) {
     /* Service the terminal UART hook before app callbacks.  The Pocket
      * implementation is currently synchronous/no-op here, but keeping the
      * call preserves the HAL contract for targets with buffered output. */
     of_term_uart_drain();
+    /* Keep the DAC FIFO fed at the 1 kHz tick when the SW mixer is active.
+     * The 1024-deep FIFO gives ~21 ms of slack, so even a delayed tick won't
+     * underrun.  Cheap no-op (one branch) when a HW mixer is present. */
+    sw_mixer_pump();
     if (timer_callback_ptr)
         timer_callback_ptr();
     if (sigalrm_handler)

@@ -28,12 +28,12 @@
 
 /* Idle hook — called during any blocking wait (DMA, bridge, etc.)
  * Apps register this via OF_SYS_SET_IDLE_HOOK to do background
- * work (audio pump, input polling) during file I/O.
+ * work (audio pump, input polling) during file I/O, INCLUDING during app
+ * reads (which run in trap context with MIE clear).
  *
- * The hook may use syscalls only when file I/O is running from normal
- * app/OS context. When a blocking file syscall is already executing inside
- * the trap handler, call_idle_hook() suppresses the hook to avoid nested
- * ecall clobbering the outer trap frame. */
+ * CONTRACT: the hook MUST be entirely ecall-free (no syscalls at all). It runs
+ * in trap context during app reads, so any ecall it issued would trap and
+ * clobber the single BRAM trap frame of the outer read. See call_idle_hook(). */
 static void (*idle_hook)(void);
 
 /* Forward decl: bridge backend implementation lives below, but
@@ -164,7 +164,11 @@ void of_check_shutdown(void) {
  * running from normal context; while already inside a file syscall trap, MIE is
  * clear and we skip the hook to avoid overwriting the outer BRAM trap frame.
  * Note: the hook must NOT use syscalls that trigger file I/O, since that would
- * recurse into file_wait_complete(). */
+ * recurse into file_wait_complete().
+ *
+ * Do NOT drop the MIE gate to make the hook fire during app reads -- it was
+ * tried and regressed steady-state audio on HW; feed app audio across loads
+ * app-side instead. */
 static inline void call_idle_hook(void) {
     if (!idle_hook) return;
 

@@ -390,7 +390,8 @@
 
 /* Hardware features (0x98) — read-only, set at synthesis time in RTL */
 #define HW_FEATURES         REG32(SYSREG_BASE + 0x98)
-#define   HW_FEAT_MIXER         (1 << 0)
+#define   HW_FEAT_MIXER         (1 << 0)   /* a 32-voice mixer is available (always set) */
+#define   HW_FEAT_MIXER_HW      (1 << 1)   /* mixer is HW audio_mixer.v (clear → SW mixer) */
 #define   HW_FEAT_LINK          (1 << 2)
 #define   HW_FEAT_ANALOGIZER    (1 << 3)
 #define   HW_FEAT_GPU_SPAN      (1 << 4)   /* GPU span renderer (always set) */
@@ -405,6 +406,19 @@
 
 #define AUDIO_BASE          0x4C000000
 #define AUDIO_STATUS        REG32(AUDIO_BASE + 0x00)    /* Read: FIFO status */
+/* DAC FIFO status read (+0x00): {21'b0, fifo_full, fifo_level[9:0]}.
+ * fifo_full is the only reliable "full" condition — a completely full
+ * 1024-deep dcfifo reads back fifo_level == 0 (wrusedw wraps).  Used by
+ * the CPU software mixer pump (sw_mixer.c, active when of_mixer_use_sw) to
+ * throttle sample pushes. */
+#define   AUDIO_FIFO_LEVEL_MASK 0x3FFu
+#define   AUDIO_FIFO_FULL       (1u << 10)
+/* AUDIO_PCM_SAMPLE write (+0x04): {left[15:0], right[15:0]} pushes ONE
+ * stereo sample into the DAC FIFO.  On a HW-mixer core (of_mixer_use_sw==0)
+ * the mixer FSM drives the FIFO directly and firmware never touches this; on
+ * an OS30 core (of_mixer_use_sw==1) the CPU software mixer renders samples and
+ * pushes them here.  Same physical contract the RTL half implements. */
+#define AUDIO_PCM_SAMPLE    REG32(AUDIO_BASE + 0x04)    /* Write: push {L,R} stereo sample */
 
 /* CRAM0 ownership mux (v2 memory arch).  CRAM0 runs on the bridge
  * clock (clk_74a) and is time-sliced between the APF bridge and the
@@ -537,5 +551,121 @@ static inline uint32_t cpu_to_bridge(void *addr) {
     if (a >= CRAM0_BASE && a < CRAM0_BASE + CRAM_SIZE) return (a - CRAM0_BASE) + CRAM0_BRIDGE;
     return sdram_to_bridge(addr);
 }
+
+/* ======================================================================
+ * Runtime mixer-backend selection: HW MMIO vs CPU software mixer.
+ *
+ * ONE os.bin runs on every bitstream.  At boot of_init() sets the global
+ * `of_mixer_use_sw` from the HW_FEATURES OF_HW_MIXER_HW bit (bit 1): the
+ * default Pocket / OS25 / MiSTer cores have the hardware audio_mixer.v at
+ * 0x48000000 (bit 1 set → of_mixer_use_sw=0, MMIO path); the OS30 Pocket
+ * variant cuts audio_mixer.v to free FPGA budget (bit 1 clear →
+ * of_mixer_use_sw=1, CPU software mixer in hal/sw_mixer.c).
+ *
+ * The MIX_VOICE_x / MIX_MASTER_x / MIX_CTRL / MIX_IRQ macros above are
+ * REDEFINED here to branch on of_mixer_use_sw at every access, so
+ * hal/mixer.c and targets/pocket/audio.c stay byte-for-byte identical
+ * source.  When of_mixer_use_sw==0 the macro yields the SAME MMIO
+ * address/value as before (compile to the identical volatile load/store):
+ * apps + OS25 + MiSTer are byte-equivalent on the HW path.  When
+ * of_mixer_use_sw==1 every access is retargeted onto sw_mix_regs[], the
+ * flat voice-register backing store owned by hal/sw_mixer.c, whose CPU
+ * render loop mixes the voices per-sample (byte-exact port of
+ * audio_mixer.v) and pushes finished stereo pairs to the DAC FIFO via
+ * AUDIO_PCM_SAMPLE.  sw_mixer.c is ALWAYS compiled/linked now; its
+ * render/pump self-no-op when of_mixer_use_sw==0.
+ * ====================================================================== */
+
+/* Set once at boot by of_init(): 1 = CPU software mixer, 0 = HW MMIO. */
+extern int of_mixer_use_sw;
+
+/* The whole 0x000..0x8FF mixer MMIO aperture (the HW slave's decode
+ * window) is mirrored by a flat 32-bit word array owned by hal/sw_mixer.c.
+ * Indexing by (byte_offset >> 2).  A few HW registers have read != write
+ * semantics (MIX_IRQ_PENDING reads the pending bitmap; MIX_IRQ_CLEAR W1Cs
+ * it; MIX_ACTIVE_MASK / MIX_VOICE_POS are read-only snapshots); sw_mixer.c
+ * special-cases those addresses via the helper accessors below. */
+#define SW_MIX_APERTURE_WORDS  0x240u   /* 0x900 bytes >> 2 */
+extern volatile uint32_t sw_mix_regs[SW_MIX_APERTURE_WORDS];
+
+/* Read-divergent registers (IRQ-pending bitmap, active-mask, per-voice pos
+ * snapshot) route through this accessor so they behave like the HW. */
+uint32_t sw_mixer_reg_read(uint32_t mix_byte_addr);
+volatile uint32_t *sw_mix_irq_doorbell(void);
+
+/* Runtime-select an lvalue: SW array slot when of_mixer_use_sw, else MMIO.
+ * Both ternary arms are (volatile uint32_t *), so the dereference is a
+ * plain volatile load/store usable as lvalue OR rvalue — every MIX_*
+ * call site compiles unchanged.  With of_mixer_use_sw==0 the optimizer
+ * folds this to the exact `*(volatile uint32_t *)(MIX_BASE + off)` the
+ * old MMIO macro emitted (HW path byte-equivalent). */
+#define SW_MIX_SEL(byteoff)                                                  \
+    (*(of_mixer_use_sw ? &sw_mix_regs[(byteoff) >> 2]                        \
+                       : (volatile uint32_t *)(MIX_BASE + (byteoff))))
+
+#undef MIX_VOICE_FIELD
+#undef MIX_VOICE_ADDR
+#undef MIX_VOICE_LEN
+#undef MIX_VOICE_RATE
+#undef MIX_VOICE_CTRL
+#undef MIX_VOICE_POS_WR
+#undef MIX_VOICE_VOL_LR
+#undef MIX_VOICE_LOOP_END
+#undef MIX_VOICE_LOOP_START
+#undef MIX_VOICE_VOL_TARGET
+#undef MIX_VOICE_VOL_RATE
+#undef MIX_MASTER_VOL
+#undef MIX_GROUP_VOL
+#undef MIX_VOICE_GROUP_LO
+#undef MIX_VOICE_GROUP_HI
+#undef MIX_CTRL
+#undef MIX_IRQ_PENDING
+#undef MIX_IRQ_CLEAR
+#undef MIX_ACTIVE_MASK
+#undef MIX_VOICE_POS
+
+/* Plain RW fields: runtime-selected lvalue/rvalue, identical call-site source. */
+#define MIX_VOICE_FIELD(v, f)    SW_MIX_SEL(((v) << 6) + ((f) << 2))
+#define MIX_VOICE_ADDR(v)        MIX_VOICE_FIELD((v), 0)
+#define MIX_VOICE_LEN(v)         MIX_VOICE_FIELD((v), 1)
+#define MIX_VOICE_RATE(v)        MIX_VOICE_FIELD((v), 2)
+#define MIX_VOICE_CTRL(v)        MIX_VOICE_FIELD((v), 3)
+#define MIX_VOICE_POS_WR(v)      MIX_VOICE_FIELD((v), 4)
+#define MIX_VOICE_VOL_LR(v)      MIX_VOICE_FIELD((v), 6)
+#define MIX_VOICE_LOOP_END(v)    MIX_VOICE_FIELD((v), 7)
+#define MIX_VOICE_LOOP_START(v)  MIX_VOICE_FIELD((v), 8)
+#define MIX_VOICE_VOL_TARGET(v)  MIX_VOICE_FIELD((v), 9)
+#define MIX_VOICE_VOL_RATE(v)    MIX_VOICE_FIELD((v), 10)
+#define MIX_MASTER_VOL           SW_MIX_SEL(0x800)
+#define MIX_GROUP_VOL(g)         SW_MIX_SEL(0x804 + ((g) << 2))
+#define MIX_VOICE_GROUP_LO       SW_MIX_SEL(0x814)
+#define MIX_VOICE_GROUP_HI       SW_MIX_SEL(0x818)
+#define MIX_CTRL                 SW_MIX_SEL(0x820)
+
+/* Read/write-divergent registers.  Each call site uses only ONE form of a
+ * given name (read OR assign), so a read-macro and an assign-target-macro
+ * are sufficient and unambiguous:
+ *
+ *   MIX_IRQ_PENDING            rvalue  — voice-end pending bitmap
+ *   MIX_IRQ_CLEAR  = bits      assign  — W1C clear of pending bits
+ *   MIX_ACTIVE_MASK            rvalue  — active-voice bitmap
+ *   MIX_VOICE_POS(v)           rvalue  — per-voice pos_int snapshot
+ *
+ * MMIO path (of_mixer_use_sw==0): straight REG32 read / W1C write at the
+ * physical address — byte-equivalent to the old HW macros.
+ *
+ * SW path (of_mixer_use_sw==1): pending uses a W1C doorbell.  Writes to
+ * MIX_IRQ_CLEAR OR the bits to clear into a doorbell word; every reader of
+ * pending (and the render loop) drains the doorbell first (pending &=
+ * ~doorbell), so W1C is correct regardless of who observes it when.
+ * sw_mixer_reg_read() implements that drain for the read side. */
+#define MIX_IRQ_PENDING   (of_mixer_use_sw ? sw_mixer_reg_read(0x824)        \
+                                           : REG32(MIX_BASE + 0x824))
+#define MIX_IRQ_CLEAR     (*(of_mixer_use_sw ? sw_mix_irq_doorbell()         \
+                                             : (volatile uint32_t *)(MIX_BASE + 0x824)))
+#define MIX_ACTIVE_MASK   (of_mixer_use_sw ? sw_mixer_reg_read(0x830)        \
+                                           : REG32(MIX_BASE + 0x830))
+#define MIX_VOICE_POS(v)  (of_mixer_use_sw ? sw_mixer_reg_read(0x880 + ((v) << 2)) \
+                                           : REG32(MIX_BASE + 0x880 + ((v) << 2)))
 
 #endif /* OFOS_REGS_H */

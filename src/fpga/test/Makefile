@@ -73,6 +73,7 @@ GPU_SRCS = \
 	tb_gpu.v \
 	altsyncram_stub.v \
 	$(COMMON_DIR)/gpu_core.v \
+	$(COMMON_DIR)/gpu_edge_walker.v \
 	$(COMMON_DIR)/gpu_tex_cache.v
 
 GPU_CPP = tb_gpu_main.cpp
@@ -214,6 +215,7 @@ SYSTEM_SRCS = \
 	$(COMMON_DIR)/snac_shifter.v \
 	$(COMMON_DIR)/snac_psx_poller.v \
 	$(COMMON_DIR)/gpu_core.v \
+	$(COMMON_DIR)/gpu_edge_walker.v \
 	$(COMMON_DIR)/gpu_tex_cache.v \
 	../vendor/vexriscv/VexiiRiscv/VexiiRiscv.v \
 	$(TARGET_DIR)/apf/common.v

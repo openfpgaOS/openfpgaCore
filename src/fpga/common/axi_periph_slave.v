@@ -25,7 +25,21 @@ module axi_periph_slave #(
     // peripheral overrides just its switch (MiSTer: HAS_ANALOGIZER(0),
     // HAS_LINK(0)).  Defaults = the Pocket feature set.
     parameter HAS_ANALOGIZER = 1,
-    parameter HAS_LINK       = 1
+    parameter HAS_LINK       = 1,
+    // Mixer backend indicator (HW_FEATURES bit 1, OF_HW_MIXER_HW).  The
+    // mixer-available bit 0 (OF_HW_MIXER) stays SET on every target — a
+    // 32-voice mixer is always exposed to apps — but bit 1 advertises
+    // whether that mixer is the hardware audio_mixer.v (MMIO @ 0x48000000)
+    // or the CPU software mixer.  The OS reads this once at boot to choose
+    // the backend, so ONE os.bin runs on both.  Default 1 (HW mixer
+    // present); the EXCLUDE_MIXER (OS30) build passes HAS_MIXER_HW(0).
+    parameter HAS_MIXER_HW   = 1,
+    // GPU hardware vertex-triangle plane derivation (CMD_SET_TRI_STATE 0x4A +
+    // CMD_DRAW_VERT_TRI 0x4B).  Advertised in HW_FEATURES bit 20.  Must track
+    // gpu_core's GPU_HAS_VERT_TRI parameter on the same target so apps don't
+    // submit 0x4A/0x4B to a core that drains them as no-ops.  Pocket gates this
+    // out on ALM budget (Pocket: HAS_VERT_TRI(0)); MiSTer keeps the default 1.
+    parameter HAS_VERT_TRI   = 1
 ) (
     input wire clk,
     input wire reset_n,
@@ -141,6 +155,15 @@ module axi_periph_slave #(
     // now; mixer manages its own rate-limiting).
     input wire  [9:0]  audio_fifo_level,
     input wire         audio_fifo_full,
+
+    // CPU PCM sample push (AUDIO_PCM_SAMPLE @ 0x4C + 0x04).
+    // A SW mixer running on the CPU produces finished stereo samples and
+    // writes them here; this drives audio_output's sample_wr/sample_data
+    // FIFO push directly.  audio_sample_wr is a one-cycle clk_cpu strobe.
+    // Always present (not macro-gated): a harmless additive MMIO that
+    // no-ops if nothing consumes the strobe.
+    output reg         audio_sample_wr,
+    output reg  [31:0] audio_sample_data,
 
     // CRAM0 ownership mode register (0x4E000000 bit 0):
     //   0 = bridge owns CRAM0 (APF load/save transfers drive the chip)
@@ -336,6 +359,33 @@ wire snac_miso_b = snac_pin_in_sync[5];  // IN4/bank0[7] (Config B: DAT)
 reg [4:0] snac_bit_count_reg;
 reg       snac_latch_en_reg;
 
+`ifdef EXCLUDE_ANALOGIZER
+// OS30 (Pocket Quake/Quake2): EXCLUDE_ANALOGIZER prunes the SNAC poller path.
+// The snac_shifter (bit-bang adapter) and the analogizer_psx wrapper
+// (DualShock controller poller) are removed; all of their outputs that the
+// rest of this module consumes are tied to constant 0 so they constant-fold
+// away.  snac_pin_out/snac_pin_dir/snac_enable then collapse to inert pins.
+// ~144 ALM, confirmed prunable.  Default (macro undefined) keeps the full SNAC.
+assign snac_rx_data         = 32'h0000_0000;
+assign snac_busy            = 1'b0;
+assign snac_done            = 1'b0;
+assign snac_shift_clk       = 1'b0;
+assign snac_shift_mosi      = 1'b0;
+assign snac_shift_latch     = 1'b0;
+assign snac_hw_pin_out      = 8'h00;
+assign snac_hw_pin_dir      = 8'h00;
+assign snac_hw_buttons      = 16'h0000;
+assign snac_hw_raw_buttons  = 16'h0000;
+assign snac_hw_valid        = 1'b0;
+assign snac_hw_irq_pending  = 1'b0;
+assign snac_hw_debug_status = 8'h00;
+assign snac_hw_pressed      = 16'h0000;
+assign snac_hw_released     = 16'h0000;
+assign snac_hw_rx           = 16'h0000;
+assign snac_hw_ry           = 16'h0000;
+assign snac_hw_lx           = 16'h0000;
+assign snac_hw_ly           = 16'h0000;
+`else
 snac_shifter snac_shift (
     .clk(clk),
     .reset_n(reset_n),
@@ -444,6 +494,7 @@ assign snac_hw_ly = {(psx_joy1[15:8]  - 8'h80), 8'h00};
 
 // (void unused controller-2 outputs from analogizer_psx)
 wire [47:0] psx_p2_unused = {psx_key2, psx_joy2};
+`endif // EXCLUDE_ANALOGIZER
 
 // SNAC pin output mux: shifter overrides GPIO when busy
 // Config A: shifter drives [0]=CLK, [1]=LATCH
@@ -587,7 +638,13 @@ assign ext_irq = (uart_rx_irq & irq_mask[0]) |
 //                                          Bit 16: GPU param span z-write
 //                                          Bit 17: GPU param span z-test/write
 //                                          Bit 18: GPU param span Q29 scale
-//                                          Bit 19: reserved
+//                                          Bit 19: GPU param-tri edge walker
+//                                                  (CMD_DRAW_PARAM_TRI 0x49;
+//                                                   always present)
+//                                          Bit 20: GPU vertex-triangle
+//                                                  (CMD_SET_TRI_STATE 0x4A +
+//                                                   CMD_DRAW_VERT_TRI 0x4B);
+//                                                  gated by HAS_VERT_TRI
 //
 // Perspective and parametric span commands are implemented and covered by
 // the GPU acceptance tests. Keep the caps exposed so renderers can select
@@ -602,12 +659,21 @@ localparam [31:0] FEAT_LINK = 32'h0000_0000;
 localparam [31:0] FEAT_LINK = HAS_LINK ? 32'h0000_0004 : 32'h0000_0000;
 `endif
 localparam [31:0] HW_FEATURES_RESOLVED =
-    32'h0000_0001      // Audio stereo FIFO present
+    32'h0000_0001      // bit 0  OF_HW_MIXER: a 32-voice mixer is available (SET on
+                       //        every target; SW-backed when bit 1 is clear)
     | 32'h0000_0010    // GPU span renderer
-    | 32'h0007_E000    // GPU persp + fragpipe + param span/list/z/scale caps (bits 13..18)
+    | 32'h000F_E000    // GPU persp + fragpipe + param span/list/z/scale caps (bits 13..19)
+    | 32'h0020_0000    // bit 21 OF_HW_GPU_COLUMN_LIST: CMD_DRAW_COLUMN_LIST
+                       //        (0x4C) 5-word column records.  UNCONDITIONAL —
+                       //        a small general decode path present on every
+                       //        variant (incl. OS30); harmless to non-column
+                       //        games and byte-identical to a 0x48 column.
     | 32'h0000_0340    // MIDI(6) + FPU(8) + Save slots(9)
     | FEAT_LINK
-    | (HAS_ANALOGIZER ? 32'h0000_0008 : 32'h0000_0000);
+    | (HAS_ANALOGIZER ? 32'h0000_0008 : 32'h0000_0000)
+    | (HAS_MIXER_HW   ? 32'h0000_0002 : 32'h0000_0000)  // bit 1  OF_HW_MIXER_HW: HW
+                       //        audio_mixer.v present (clear under EXCLUDE_MIXER/OS30)
+    | (HAS_VERT_TRI   ? 32'h0010_0000 : 32'h0000_0000); // bit 20: GPU vertex-triangle (0x4A/0x4B)
 
 localparam FB_ADDR_0 = 25'h0000000;     // byte 0x000000 → CPU 0x10000000
 localparam FB_ADDR_1 = 25'h0080000;     // byte 0x100000 → CPU 0x10100000
@@ -1840,6 +1906,10 @@ always @(posedge clk or posedge reset) begin
         mix_group_vol_3        <= 8'hFF;
         mix_voice_group_packed <= 64'd0;
 
+        // CPU PCM sample push strobe (AUDIO_PCM_SAMPLE)
+        audio_sample_wr   <= 1'b0;
+        audio_sample_data <= 32'd0;
+
     end else begin
         // Defaults: deassert single-cycle pulses.  rvalid and bvalid
         // are NOT here — they are held until their corresponding
@@ -1858,6 +1928,7 @@ always @(posedge clk or posedge reset) begin
         gpu_reg_wr <= 0;
         mix_voice_wr     <= 1'b0;   // one-cycle pulse
         mix_irq_clear_wr <= 1'b0;   // one-cycle pulse
+        audio_sample_wr  <= 1'b0;   // one-cycle pulse (CPU PCM push)
 
         case (state)
 
@@ -2021,10 +2092,16 @@ always @(posedge clk or posedge reset) begin
             if (|req_wstrb) begin
                 if (req_is_sysreg)
                     sysreg_wr_fire <= 1'b1;
-                /* AUDIO_BASE writes retired in v2.  The HW mixer drives
-                 * audio_output directly via MIX_* registers.  The address
-                 * range is still accepted so legacy probes no-op rather than
-                 * raising a bus fault. */
+                /* AUDIO_PCM_SAMPLE @ 0x4C + 0x04 (req_addr[4:2]==3'd1):
+                 * a SW mixer on the CPU pushes one finished stereo sample
+                 * {left[31:16], right[15:0]} into audio_output's FIFO.
+                 * One-cycle strobe; req_wdata holds this beat's data.
+                 * 0x00 (status) and other offsets remain read-only / no-op,
+                 * so legacy probes don't raise a bus fault. */
+                if (req_is_audio && req_addr[4:2] == 3'd1) begin
+                    audio_sample_wr   <= 1'b1;
+                    audio_sample_data <= req_wdata;
+                end
                 if (req_is_cram0 && req_addr[3:2] == 2'd0)
                     cram0_mode <= req_wdata[0];
                 if (req_is_link) begin

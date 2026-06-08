@@ -477,6 +477,21 @@ assign cart_pin30_pwroff_reset = cart_gpio_mode ? 1'b1 : 1'b0;
 // idle-high to UART RX to prevent adapter traffic from becoming console input.
 wire uart_rx_serial = cart_gpio_mode ? 1'b1 : cart_tran_pin31;
 
+`ifdef EXCLUDE_ANALOGIZER
+// OS30 (Pocket Quake/Quake2): EXCLUDE_ANALOGIZER prunes the analog-video
+// encoder + SNAC GPIO entirely.  The cartridge video pins (bank1-3) are tied
+// to high-Z with their direction bits forced to input (0); the SNAC pins on
+// bank0/pin30/pin31 already fall back to the snac_enable=0 UART wiring above
+// (snac_enable is driven 0 by the periph's EXCLUDE_ANALOGIZER branch).  No
+// undriven/multidriven nets result.  Default (macro undefined) instantiates
+// the full openFPGA_Pocket_Analogizer below.
+assign cart_tran_bank1     = 8'hZZ;
+assign cart_tran_bank1_dir = 1'b0;
+assign cart_tran_bank2     = 8'hZZ;
+assign cart_tran_bank2_dir = 1'b0;
+assign cart_tran_bank3     = 8'hZZ;
+assign cart_tran_bank3_dir = 1'b0;
+`else
 // Analogizer: video output only — SNAC pins now driven by CPU through above mux
 openFPGA_Pocket_Analogizer #(
     .MASTER_CLK_FREQ(49_152_000),
@@ -525,6 +540,7 @@ openFPGA_Pocket_Analogizer #(
     .cart_tran_bank1(cart_tran_bank1),
     .cart_tran_bank1_dir(cart_tran_bank1_dir)
 );
+`endif // EXCLUDE_ANALOGIZER
 
 // Link port directions
 assign port_tran_si = 1'bz;
@@ -2215,7 +2231,33 @@ assign video_hs = vidout_hs;
     );
 
     // AXI4 peripheral slave
-    axi_periph_slave periph (
+    axi_periph_slave #(
+`ifdef EXCLUDE_ANALOGIZER
+        // OS30 (Pocket Quake/Quake2): EXCLUDE_ANALOGIZER advertises no analog
+        // video so the periph's ANALOGIZER capability bit reads 0 and the SNAC
+        // instances (gated out in axi_periph_slave.v) constant-fold away.
+        .HAS_ANALOGIZER(0),
+`endif
+        // Mixer backend bit (HW_FEATURES bit 1, OF_HW_MIXER_HW).  The HW
+        // audio_mixer.v instance below is cut under EXCLUDE_MIXER (OS30), so
+        // advertise HAS_MIXER_HW(0) there and the OS picks its CPU software
+        // mixer at boot.  Bit 0 (OF_HW_MIXER, "mixer available") stays SET in
+        // both cases.  Default (OS25/MiSTer) keeps the HW mixer → HAS_MIXER_HW(1).
+`ifdef EXCLUDE_MIXER
+        .HAS_MIXER_HW(0),
+`else
+        .HAS_MIXER_HW(1),
+`endif
+        // Vert-tri: gated OFF by default (OS25 — device budget, see
+        // docs/gpu-utilization-handoff.md).  OS30_VERT_TRI enables it for the
+        // Quake/Quake2 variant, paid for by the EXCLUDE_* cuts.  Must match
+        // gpu's GPU_HAS_VERT_TRI.
+`ifdef OS30_VERT_TRI
+        .HAS_VERT_TRI(1)
+`else
+        .HAS_VERT_TRI(0)
+`endif
+    ) periph (
         .clk(clk_cpu),
         .reset_n(reset_n_cpu_core),
         // AXI4 slave interface
@@ -2252,12 +2294,24 @@ assign video_hs = vidout_hs;
         .cont2_key(p2_controls),
         .cont2_joy(p2_joypad),
         .cont2_trig(p2_trigger),
+`ifdef EXCLUDE_4PLAYER
+        // OS30 (Quake/Quake2 single-player): tie players 3-4 to 0 so the
+        // periph's cont3/4 sync registers + input-scan/rdata mux arms
+        // constant-fold away.  Players 1-2 (cont1/2) retained.
+        .cont3_key(32'd0),
+        .cont3_joy(32'd0),
+        .cont3_trig(16'd0),
+	    .cont4_key(32'd0),
+	    .cont4_joy(32'd0),
+	    .cont4_trig(16'd0),
+`else
         .cont3_key(cont3_key),
         .cont3_joy(cont3_joy),
         .cont3_trig(cont3_trig),
 	    .cont4_key(cont4_key),
 	    .cont4_joy(cont4_joy),
 	    .cont4_trig(cont4_trig),
+`endif
         .rtc_epoch_seconds(rtc_epoch_seconds),
         .rtc_valid(rtc_valid),
         .bridge_wr_idle(bridge_wr_idle),
@@ -2302,6 +2356,10 @@ assign video_hs = vidout_hs;
         // Audio FIFO status (read-only; HW mixer drives the FIFO directly)
         .audio_fifo_level(audio_fifo_level),
         .audio_fifo_full(audio_fifo_full),
+        // CPU PCM sample push (AUDIO_PCM_SAMPLE @ 0x4C + 0x04).  Always
+        // present; consumed by audio_output only in the EXCLUDE_MIXER build.
+        .audio_sample_wr        (periph_audio_sample_wr),
+        .audio_sample_data      (periph_audio_sample_data),
         // Hardware mixer MMIO ↔ audio_mixer (flat addressing, 0x4B000000)
         .mix_enable             (mixer_enable_mmio),
         .mix_voice_wr           (mixer_voice_wr_mmio),
@@ -2826,8 +2884,12 @@ wire [31:0] mixer_rdata;
 wire [1:0]  mixer_rresp;
 wire        mixer_rlast;
 wire        mixer_rready;
+`ifndef EXCLUDE_MIXER
+// HW-mixer sample stream into audio_output (absent in the EXCLUDE_MIXER
+// build, where audio_output is fed by the periph PCM path instead).
 wire        mixer_sample_wr;
 wire [31:0] mixer_sample_data;
+`endif
 wire [31:0] mixer_active_mask;
 wire [21:0] mixer_pos_readback;
 wire [31:0] mixer_voice_end_pending;
@@ -2866,6 +2928,30 @@ wire [7:0]  mixer_group_vol_3_mmio;
 wire [63:0] mixer_voice_group_packed_mmio;
 wire [4:0]  mixer_voice_sel_rd_mmio;
 
+// CPU PCM sample push (AUDIO_PCM_SAMPLE @ 0x4C + 0x04) from axi_periph_slave.
+// Always wired (the periph port is unconditional); only consumed by
+// audio_output in the EXCLUDE_MIXER build, where the SW mixer on the CPU
+// produces finished stereo samples in place of the HW mixer.
+wire        periph_audio_sample_wr;
+wire [31:0] periph_audio_sample_data;
+
+`ifdef EXCLUDE_MIXER
+// ─── HW mixer cut (OS30) ───────────────────────────────────────────
+// The HW audio_mixer congested the device (~99% → WNS -1.9).  The CPU
+// runs a software mixer against the same MMIO contract and pushes
+// finished stereo samples through AUDIO_PCM_SAMPLE.  audio_mixer is not
+// instantiated; its periph-facing readbacks and its M3 arbiter port are
+// tied off so nothing is left undriven / multidriven.
+assign mixer_pos_readback      = 22'd0;
+assign mixer_voice_end_pending = 32'd0;
+assign mixer_voice_end_irq     = 1'b0;
+assign mixer_active_mask       = 32'd0;
+// M3 arbiter port (read-only mixer master) parked idle.
+assign mixer_arvalid           = 1'b0;
+assign mixer_araddr            = 32'd0;
+assign mixer_arlen             = 8'd0;
+assign mixer_rready            = 1'b0;
+`else
 audio_mixer audio_mixer_inst (
     .clk              (clk_cpu),
     .reset_n          (reset_n_cpu_media),
@@ -2900,6 +2986,7 @@ audio_mixer audio_mixer_inst (
     .voice_end_irq    (mixer_voice_end_irq),
     .voice_active_mask(mixer_active_mask)
 );
+`endif
 
 // cram1_burst_mmio retired with CRAM1 chip; 0x4E000000 MMIO slot is
 // repurposed in v2 as the CRAM0 ownership mode bit (see axi_periph_slave).
@@ -2916,8 +3003,15 @@ audio_output audio_out (
     .clk_audio    (clk_core_12288),
     .reset_n      (reset_n_cpu_media),
 
+`ifdef EXCLUDE_MIXER
+    // SW mixer: CPU pushes finished stereo samples via AUDIO_PCM_SAMPLE.
+    .sample_wr    (periph_audio_sample_wr),
+    .sample_data  (periph_audio_sample_data),
+`else
+    // HW mixer is the sole producer into audio_output.
     .sample_wr    (mixer_sample_wr),
     .sample_data  (mixer_sample_data),
+`endif
     .fifo_level   (audio_fifo_level),
     .fifo_full    (audio_fifo_full),
 
@@ -2966,7 +3060,18 @@ wire [1:0]  gpu_swap_idx;
 wire        slave_swap_pending;  // from axi_periph_slave → stalls gpu_core CMD_FLIP
 
 `ifndef EXCLUDE_GPU
-gpu_core gpu (
+gpu_core #(
+    // Exclude the hardware vertex-triangle plane derivation (0x4A/0x4B +
+    // S_TRI_DERIVE FSM): device budget — see docs/gpu-utilization-handoff.md.
+    // OS30_VERT_TRI enables it for the Quake/Quake2 variant (paid for by the
+    // EXCLUDE_* cuts).  The 0x49 param-tri path + edge walker stay present in
+    // both.  Must match the periph's HAS_VERT_TRI above.
+`ifdef OS30_VERT_TRI
+    .GPU_HAS_VERT_TRI(1)
+`else
+    .GPU_HAS_VERT_TRI(0)
+`endif
+) gpu (
     .clk(clk_cpu),
     .reset_n(reset_n_cpu_media),
     .gpu_enable(1'b1),

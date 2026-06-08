@@ -26,7 +26,22 @@
 
 `default_nettype none
 
-module gpu_core (
+module gpu_core #(
+    // ----------------------------------------------------------------
+    // Per-target feature gate: hardware vertex-triangle plane derivation
+    // (CMD_SET_TRI_STATE 0x4A + CMD_DRAW_VERT_TRI 0x4B + the S_TRI_DERIVE
+    // derivation sub-FSM).  When 0, both opcodes take the same payload-drain
+    // no-op path an unrecognised command takes, and every writer of the
+    // vert-tri staging / derivation registers goes constant-inactive so
+    // Quartus sweeps the ~2k ALMs of derivation logic (verified via the
+    // pocket map "Estimate of Logic" prune proof — see
+    // docs/gpu-utilization-handoff.md).
+    //
+    // SCOPE: this gates ONLY the 0x4A/0x4B vertex-tri path.  The 0x49
+    // CMD_DRAW_PARAM_TRI param-triangle path and the shared gpu_edge_walker
+    // are NOT gated — they stay present on every target regardless.
+    parameter GPU_HAS_VERT_TRI = 1
+) (
     input wire clk,
     input wire reset_n,
 
@@ -375,6 +390,45 @@ wire transluc_sram_lookup_ready =
 
 assign transluc_upload_busy = (lutsram_state != LUTSRAM_IDLE);
 
+`ifdef EXCLUDE_TRANSLUC
+// OS30 (Pocket Quake/Quake2): EXCLUDE_TRANSLUC removes the transluc[] LUT
+// upload/lookup FSM and its 4-entry transluc_cache entirely.  The GPU's
+// external SRAM port (used only for the blend LUT) goes idle and the cache
+// registers hold 0, so transluc_cache_hit always reads 0 in the (now
+// unreachable, chokepointed) FBSS_BLEND states.  Default (macro undefined)
+// keeps the full LUT upload window + cache below.
+always @(posedge clk) begin
+    if (!reset_n) begin
+        sram_rd                 <= 1'b0;
+        sram_wr                 <= 1'b0;
+        sram_rd_half            <= 1'b0;
+        sram_rd_hi              <= 1'b0;
+        sram_addr               <= 22'd0;
+        sram_wdata              <= 32'd0;
+        sram_wstrb              <= 4'd0;
+        transluc_wr_addr        <= 15'd0;
+        lutsram_state           <= LUTSRAM_IDLE;
+        lutsram_seen_busy       <= 1'b0;
+        transluc_cache_valid    <= 4'b0;
+        transluc_cache_addr[0]  <= 14'd0;
+        transluc_cache_addr[1]  <= 14'd0;
+        transluc_cache_addr[2]  <= 14'd0;
+        transluc_cache_addr[3]  <= 14'd0;
+        transluc_cache_data[0]  <= 16'd0;
+        transluc_cache_data[1]  <= 16'd0;
+        transluc_cache_data[2]  <= 16'd0;
+        transluc_cache_data[3]  <= 16'd0;
+        transluc_cache_replace  <= 2'd0;
+    end else begin
+        // SRAM port permanently idle; cache held at 0.
+        sram_rd      <= 1'b0;
+        sram_wr      <= 1'b0;
+        sram_rd_half <= 1'b0;
+        sram_rd_hi   <= 1'b0;
+        sram_wstrb   <= 4'd0;
+    end
+end
+`else
 always @(posedge clk) begin
     if (!reset_n) begin
         sram_rd                 <= 1'b0;
@@ -454,6 +508,7 @@ always @(posedge clk) begin
         endcase
     end
 end
+`endif // EXCLUDE_TRANSLUC
 
 // Cmap read path through gpu_tex_cache port B.  At p1→p2 shift, latch
 // the SDRAM byte address for the upcoming p2 fragment's cmap lookup;
@@ -842,9 +897,120 @@ localparam CMD_SET_FB         = 8'h23;
 // direct-affine commands use the same opcode with the shorter 4+7N payload
 // for already-prepared independent lanes.
 localparam CMD_DRAW_PARAM_SPAN_LIST   = 8'h48;
+// Triangle form of the param-span command: payload words 0-30 are the
+// identical param-span header (planes/control/z); words 31-32 carry the
+// clip rect and words 33-35 the three vertices (x Q12.4, y integer).
+// The edge walker generates the {u,v,count} records the CPU would have
+// packed after word 30.
+localparam CMD_DRAW_PARAM_TRI         = 8'h49;
 // 8'h49 is reserved.  The experimental staged-lightmap span command is no
 // longer part of the advertised GPU surface; unsupported commands drain their
 // payload and retire as no-ops.
+//
+// CMD_SET_TRI_STATE (0x4A) + CMD_DRAW_VERT_TRI (0x4B): hardware triangle
+// plane derivation.  0x4A latches a sticky surface/control bank (mirroring an
+// 0x49 PERSP header field-for-field); each 0x4B then carries only raw
+// per-vertex {x,y,s,t,zi,light}, and the GPU derives the four attribute planes
+// (szi, tzi, zi, light) the 0x49 client used to solve in software.  0x49 stays
+// the byte-exact fallback ABI; 0x4B without a prior 0x4A is a no-op.
+//
+// CONTRACT CHANGE (staging-dedup, 2026-06): 0x4A no longer keeps a dedicated
+//   sticky surface/control bank.  Its payload words are decoded DIRECTLY into
+//   the SHARED spanprod staging regs (the same regs an 0x49 PERSP header /
+//   0x48 span-list header fill), and only the clip rect (4×16b) + a
+//   tri_state_valid flag persist.  Consequences for the client:
+//     * The sticky surface state now LIVES in the shared param staging.  A
+//       subsequent 0x48 DRAW_PARAM_SPAN_LIST or 0x49 DRAW_PARAM_TRI header
+//       OVERWRITES it.  After interleaving an 0x48/0x49 between an 0x4A and a
+//       later 0x4B, the client MUST re-issue 0x4A before more 0x4B draws.
+//     * To make a stale-state 0x4B a guarded no-op (not garbage) instead of
+//       reusing the overwritten staging, tri_state_valid is CLEARED whenever an
+//       0x48/0x49 header decodes.  A 0x4B with cleared tri_state_valid drains
+//       and retires with no draw, exactly like a 0x4B with no prior 0x4A.
+//     * Per-0x4B attribute-plane overwrites by the derivation FSM are fine and
+//       expected: each 0x4B rederives all four attr planes (szi/tzi/zi/light)
+//       into the staging from scratch, so back-to-back 0x4B after a single 0x4A
+//       still works (only the surface/control/clamp/z fields are sticky, and
+//       those the derivation never touches).
+//
+// 0x4A payload (16 words; tri_state_valid set on accept, cleared by soft_reset
+//   AND by any 0x48/0x49 header decode).  Layout is field-compatible with the
+//   0x49 header where the formats match (control word == 0x49 word 7
+//   semantics); each word is decoded into the shared spanprod staging reg the
+//   matching 0x49 header field would land in:
+//     w0  = fb_base            (byte addr, like 0x49 w0)
+//     w1  = fb_major_step      (signed, like 0x49 w1)
+//     w2  = fb_minor_step      (signed, like 0x49 w2)
+//     w3  = tex_addr           (byte addr, like 0x49 w3)
+//     w4  = tex_width[15:0]    (like 0x49 w4)
+//     w5  = {tex_h_mask[31:16], tex_w_mask[15:0]}  (packed; 0x49 split w5/w6)
+//     w6  = control            (== 0x49 w7: flags[7:0], colormap_id[11:8],
+//                               attr_mode[15:12], span_axis[16],
+//                               z_mode[25:24]; record fmt nibble forced
+//                               to U16V16_COUNT16 / attr_mode PERSP by 0x4B)
+//     w7  = clamp0_min   (s clamp lo, like 0x49 w20)
+//     w8  = clamp0_max   (s clamp hi, like 0x49 w21)
+//     w9  = clamp1_min   (t clamp lo, like 0x49 w22)
+//     w10 = clamp1_max   (t clamp hi, like 0x49 w23)
+//     w11 = z_base       (byte addr, like 0x49 w26)
+//     w12 = z_major_step (signed, like 0x49 w27)
+//     w13 = z_minor_step (signed, like 0x49 w28)
+//     w14 = {clip_x1[31:16], clip_x0[15:0]}  (same pack as 0x49 w31)
+//     w15 = {clip_y1[31:16], clip_y0[15:0]}  (same pack as 0x49 w32)
+//
+// 0x4B payload (14 words, one triangle).  Same packed vertex format and fill
+//   convention as 0x49 (x Q12.4, y int; ceil both edges, left-closed
+//   right-open):
+//     w0  = {v0_y[31:16], v0_x[15:0]}   (x Q12.4, y int)
+//     w1  = {v1_y[31:16], v1_x[15:0]}
+//     w2  = {v2_y[31:16], v2_x[15:0]}
+//     w3  = s0   (Q16.16 raw texel s, NOT pre-multiplied by zi)
+//     w4  = s1
+//     w5  = s2
+//     w6  = t0   (Q16.16 raw texel t)
+//     w7  = t1
+//     w8  = t2
+//     w9  = zi0  (Q16.16, the scale the z window consumes)
+//     w10 = zi1
+//     w11 = zi2
+//     w12 = packed per-vertex light rows {l2[17:12], l1[11:6], l0[5:0]} (Q6)
+//     w13 = reserved / 0
+//   On payload: the szi/tzi numerator products are folded INTO payload arrival
+//   (when zi_k lands at w9-11 the DSPs — idle during S_PAY_DATA — launch
+//   s_k*zi_k / t_k*zi_k and capture into the dv_szi/dv_tzi storage), so the
+//   derivation FSM no longer needs its per-vertex product states.
+//   On EXECUTE: the spanprod staging regs already hold the 0x4A surface/control
+//   state (decoded directly in S_PAY_DATA, not copied), so just derive the four
+//   attribute planes (szi=s*zi, tzi=t*zi, zi, light) from the raw verts, start
+//   the walker, and run the derivation FSM.  Rejected (payload drained, no
+//   draw) if tri_state_valid is clear or the payload is the wrong size.
+localparam CMD_SET_TRI_STATE          = 8'h4A;
+localparam CMD_DRAW_VERT_TRI          = 8'h4B;
+
+// CMD_DRAW_COLUMN_LIST (0x4C): bandwidth-optimised variant of the 0x48
+// direct-affine span list for VERTICAL 1-wide textured columns (Doom/Wolf3D/
+// Duke3D walls + sprites), where the s (u) coordinate and its per-pixel step
+// are ALWAYS 0 — a column samples one texture column straight down.  Dropping
+// the constant s/sstep words shrinks each lane record from 7 words to 5,
+// cutting CPU→GPU command traffic ~28% for column-heavy renderers.
+//
+// Same 4-word header as the 0x48 direct-affine variant:
+//   w0 = {count_nibble[31:28], flags[27:20]}  (lane count 1..4, span flags)
+//   w1 = tex_width[15:0]
+//   w2 = {tex_h_mask[31:16], tex_w_mask[15:0]}
+//   w3 = fb_step  (byte step per pixel inside each column == fb_minor_step)
+// Then a 5-word lane record per lane (4 lanes native, same cap as 0x48):
+//   +0 fb_addr   (==0x48 lane +0)
+//   +1 tex_addr  (==0x48 lane +1)
+//   +2 {colormap_id[31:28], light[21:16], count[15:0]}  (==0x48 lane +2)
+//   +3 t         (==0x48 lane +4 — the v coordinate)
+//   +4 tstep     (==0x48 lane +6 — the per-pixel v step)
+// The decoder FORCES spanprod_direct_s[lane]=0 and spanprod_direct_sstep[lane]
+// =0 internally (the dropped 0x48 +3/+5 words), so everything downstream
+// (spanprod → fragment pipe p0a..p3 → fbwq/tex) is BYTE-IDENTICAL to a 0x48
+// direct-affine column the client sent with s=0/sstep=0.  This is a pure
+// command-traffic optimisation: ZERO pixel difference vs the 0x48 equivalent.
+localparam CMD_DRAW_COLUMN_LIST       = 8'h4C;
 
 localparam PARAM_RECORD_U16V16_COUNT16 = 4'd0;
 
@@ -1000,7 +1166,19 @@ function [3:0] span_flags_from_wire;
         span_flags_from_wire[SPAN_COLORMAP] = flags[0];
         span_flags_from_wire[SPAN_SKIP_ZERO] = flags[2];
         span_flags_from_wire[SPAN_PERSP] = GPU_ENABLE_PERSP && flags[5];
+`ifdef EXCLUDE_TRANSLUC
+        // OS30 (Pocket Quake/Quake2): EXCLUDE_TRANSLUC chokepoints the
+        // per-pixel translucent flag to 0.  Every SPAN_TRANSLUC fragment then
+        // falls through to the opaque-write path (p3_needs_fb_flush below),
+        // so the FBSS_BLEND_* states, transluc_cache, the GPU_TRANSLUC_ADDR/
+        // DATA LUT-upload window, and blend_group logic all become unreachable
+        // and prune away (~388 ALM).  Translucent spans render as opaque
+        // instead of blended — they never hang.  Default (macro undefined)
+        // keeps the full blend path.  Opaque/z/colormap pipeline untouched.
+        span_flags_from_wire[SPAN_TRANSLUC] = 1'b0;
+`else
         span_flags_from_wire[SPAN_TRANSLUC] = flags[6];
+`endif
     end
 endfunction
 
@@ -1187,6 +1365,107 @@ task load_param_span_list_payload_word;
                 default: ;
             endcase
         end
+    end
+endtask
+
+// CMD_DRAW_COLUMN_LIST (0x4C) payload loader.  Reuses the SAME shared spanprod
+// staging regs as the 0x48 direct-affine path (so S_EXECUTE / S_SPANPROD / the
+// fragment pipe are byte-identical), but parses a 5-word lane record instead of
+// 7 words: the always-zero s/sstep words are NOT in the wire payload, so we
+// force spanprod_direct_s[lane]=0 and spanprod_direct_sstep[lane]=0 here.
+//
+//   idx 0..3   -> the IDENTICAL 4-word direct-affine header decode (we just
+//                 reuse the compact-direct word-0..3 arms of
+//                 load_param_span_list_payload_word — same fields, same
+//                 spanprod_direct_affine<=1 / record_count / flags / masks /
+//                 fb_minor_step setup, and the same per-lane s/sstep=0
+//                 initialisation that word 0 already performs below).
+//   lane L word 0 (idx 4+5L)   -> spanprod_direct_fb_addr[L]
+//   lane L word 1 (idx 5+5L)   -> spanprod_direct_tex_addr[L]
+//   lane L word 2 (idx 6+5L)   -> {colormap_id<<28, light<<16, count}
+//   lane L word 3 (idx 7+5L)   -> spanprod_direct_t[L]
+//   lane L word 4 (idx 8+5L)   -> spanprod_direct_tstep[L]
+// s and sstep are forced to 0 in word 0 (all four lanes) and never written.
+task load_column_list_payload_word;
+    input [5:0]  idx;
+    input [31:0] data;
+    begin
+        case (idx)
+            // ---- 4-word header (shared with the 0x48 direct-affine header) ----
+            6'd0: begin
+                spanprod_direct_affine <= 1'b1;
+                spanprod_record_count <= {1'b0, (data[31:28] >= 4'd4) ? 2'd3
+                                           : (data[31:28] == 4'd3) ? 2'd2
+                                           : (data[31:28] == 4'd2) ? 2'd1
+                                           : 2'd0} + 3'd1;
+                spanprod_records_left <= {14'd0, (data[31:28] >= 4'd4) ? 2'd3
+                                          : (data[31:28] == 4'd3) ? 2'd2
+                                          : (data[31:28] == 4'd2) ? 2'd1
+                                          : 2'd0} + 16'd1;
+                spanprod_flags        <= span_flags_from_wire(data[27:20]);
+                spanprod_attr_persp   <= 1'b0;
+                spanprod_attr_q29     <= 1'b0;
+                spanprod_q29_attr_shift <= 5'd0;
+                spanprod_span_axis    <= 1'b0;
+                spanprod_header_supported <= 1'b1;
+                spanprod_z_write      <= 1'b0;
+                spanprod_z_test       <= 1'b0;
+                spanprod_clamp0_min   <= 32'sd0;
+                spanprod_clamp0_max   <= 32'sd0;
+                spanprod_clamp1_min   <= 32'sd0;
+                spanprod_clamp1_max   <= 32'sd0;
+                spanprod_count[0] <= 16'd0;
+                spanprod_count[1] <= 16'd0;
+                spanprod_count[2] <= 16'd0;
+                spanprod_count[3] <= 16'd0;
+                spanprod_direct_colormap_id[0] <= 4'd0;
+                spanprod_direct_colormap_id[1] <= 4'd0;
+                spanprod_direct_colormap_id[2] <= 4'd0;
+                spanprod_direct_colormap_id[3] <= 4'd0;
+                // Force the dropped s/sstep words to 0 for every lane — a column
+                // never carries them, and the pixel path must match a 0x48
+                // column with s=0/sstep=0 exactly.
+                spanprod_direct_s[0] <= 32'sd0;
+                spanprod_direct_s[1] <= 32'sd0;
+                spanprod_direct_s[2] <= 32'sd0;
+                spanprod_direct_s[3] <= 32'sd0;
+                spanprod_direct_sstep[0] <= 32'sd0;
+                spanprod_direct_sstep[1] <= 32'sd0;
+                spanprod_direct_sstep[2] <= 32'sd0;
+                spanprod_direct_sstep[3] <= 32'sd0;
+            end
+            6'd1: spanprod_tex_width <= data[15:0];
+            6'd2: begin
+                spanprod_tex_w_mask <= (data[15:0]  == 16'd0) ? 16'hFFFF : data[15:0];
+                spanprod_tex_h_mask <= (data[31:16] == 16'd0) ? 16'hFFFF : data[31:16];
+            end
+            6'd3: spanprod_fb_minor_step <= data[GPU_ADDR_W-1:0];
+            // ---- lane 0 (5-word record at idx 4..8) ----
+            6'd4: spanprod_direct_fb_addr[0] <= data[GPU_ADDR_W-1:0];
+            6'd5: spanprod_direct_tex_addr[0] <= data[GPU_ADDR_W-1:0];
+            6'd6: begin spanprod_count[0] <= data[15:0]; spanprod_direct_light[0] <= data[21:16]; spanprod_direct_colormap_id[0] <= data[31:28]; end
+            6'd7: spanprod_direct_t[0] <= data;
+            6'd8: spanprod_direct_tstep[0] <= data;
+            // ---- lane 1 (idx 9..13) ----
+            6'd9:  spanprod_direct_fb_addr[1] <= data[GPU_ADDR_W-1:0];
+            6'd10: spanprod_direct_tex_addr[1] <= data[GPU_ADDR_W-1:0];
+            6'd11: begin spanprod_count[1] <= data[15:0]; spanprod_direct_light[1] <= data[21:16]; spanprod_direct_colormap_id[1] <= data[31:28]; end
+            6'd12: spanprod_direct_t[1] <= data;
+            6'd13: spanprod_direct_tstep[1] <= data;
+            // ---- lane 2 (idx 14..18) ----
+            6'd14: spanprod_direct_fb_addr[2] <= data[GPU_ADDR_W-1:0];
+            6'd15: spanprod_direct_tex_addr[2] <= data[GPU_ADDR_W-1:0];
+            6'd16: begin spanprod_count[2] <= data[15:0]; spanprod_direct_light[2] <= data[21:16]; spanprod_direct_colormap_id[2] <= data[31:28]; end
+            6'd17: spanprod_direct_t[2] <= data;
+            6'd18: spanprod_direct_tstep[2] <= data;
+            // ---- lane 3 (idx 19..23) ----
+            6'd19: spanprod_direct_fb_addr[3] <= data[GPU_ADDR_W-1:0];
+            6'd20: spanprod_direct_tex_addr[3] <= data[GPU_ADDR_W-1:0];
+            6'd21: begin spanprod_count[3] <= data[15:0]; spanprod_direct_light[3] <= data[21:16]; spanprod_direct_colormap_id[3] <= data[31:28]; end
+            6'd22: spanprod_direct_t[3] <= data;
+            6'd23: spanprod_direct_tstep[3] <= data;
+            default: ;
+        endcase
     end
 endtask
 
@@ -1489,6 +1768,9 @@ localparam S_SPANPROD_MUL_WAIT = 6'd10; // DSP latency wait
 localparam S_SPANPROD_CAPTURE = 6'd11; // capture product pair / launch next
 localparam S_SPANPROD_EMIT    = 6'd12; // emit generated span into fragment pipe
 localparam S_SPANPROD_SELECT  = 6'd13; // register current record before setup
+localparam S_TRI_FILL         = 6'd14; // collect walker records into chunk regs
+localparam S_TRI_DERIVE       = 6'd15; // run the 0x4B plane-derivation sub-FSM
+                                       // (overlaps the walker setup window)
 
 reg [5:0] state;
 
@@ -1505,7 +1787,403 @@ reg cmd_is_fence;
 reg cmd_is_clear_rect;
 reg cmd_is_set_fb;
 reg cmd_is_draw_param_span_list;
+reg cmd_is_draw_column_list;
+reg cmd_is_draw_param_tri;
+reg cmd_is_set_tri_state;
+reg cmd_is_draw_vert_tri;
 reg cmd_is_flip;
+
+// ================================================================
+// Triangle edge walker (CMD_DRAW_PARAM_TRI)
+// ================================================================
+// The walker turns three vertices into the same {u,v,count} records the
+// packed span list carries after word 30.  S_TRI_FILL drains its record
+// stream into the spanprod_u/v/count chunk regs four at a time; the
+// chunk-advance sites return to S_TRI_FILL (instead of the ring refill)
+// while the walker still has output.
+reg signed [15:0] tri_v0_x, tri_v0_y;
+reg signed [15:0] tri_v1_x, tri_v1_y;
+reg signed [15:0] tri_v2_x, tri_v2_y;
+reg signed [15:0] tri_clip_x0, tri_clip_x1;
+reg signed [15:0] tri_clip_y0, tri_clip_y1;
+reg               tri_start;        // 1-cycle start pulse into the walker
+reg [2:0]         tri_fill_idx;     // chunk slot being filled (0..4)
+
+wire               tri_busy;
+wire               tri_rec_valid;
+wire signed [15:0] tri_rec_u;
+wire signed [15:0] tri_rec_v;
+wire       [15:0]  tri_rec_count;
+// Capture happens on the same edge the walker consumes the handshake.
+wire               tri_rec_ready = (state == S_TRI_FILL);
+
+gpu_edge_walker tri_walker (
+    .clk      (clk),
+    .reset_n  (reset_n),
+    .abort    (soft_reset),
+    .start    (tri_start),
+    .v0_x     (tri_v0_x), .v0_y (tri_v0_y),
+    .v1_x     (tri_v1_x), .v1_y (tri_v1_y),
+    .v2_x     (tri_v2_x), .v2_y (tri_v2_y),
+    .clip_x0  (tri_clip_x0), .clip_x1 (tri_clip_x1),
+    .clip_y0  (tri_clip_y0), .clip_y1 (tri_clip_y1),
+    .busy     (tri_busy),
+    .rec_valid(tri_rec_valid),
+    .rec_u    (tri_rec_u),
+    .rec_v    (tri_rec_v),
+    .rec_count(tri_rec_count),
+    .rec_ready(tri_rec_ready)
+);
+
+// Walker has emitted everything and gone idle: the start pulse has been
+// consumed, no walk in progress, no record waiting.  The tri_start term
+// covers the one-cycle dispatch-to-busy gap (saw-busy rule).
+wire tri_walker_done = !tri_start && !tri_busy && !tri_rec_valid;
+
+// Both walker-sourced commands (0x49 param-tri and 0x4B vertex-tri) drain the
+// walker's record stream through S_TRI_FILL, so the S_TRI_FILL transitions and
+// the drain-gate "more records from the walker?" decision key off this.  The
+// only difference is the front end: 0x49 carries planes in its header, 0x4B
+// derives them in S_TRI_DERIVE before the walk records are consumed.
+wire cmd_is_tri_walker = cmd_is_draw_param_tri || cmd_is_draw_vert_tri;
+
+// ================================================================
+// CMD_SET_TRI_STATE (0x4A) sticky state
+// ================================================================
+// Staging-dedup: 0x4A no longer keeps a dedicated surface/control shadow bank.
+// Its surface/control/clamp/z words are decoded DIRECTLY into the shared
+// spanprod staging regs in S_PAY_DATA (the same regs a 0x48/0x49 header fills),
+// so the only state that must persist across the gap from the 0x4A to a later
+// 0x4B is the clip rect (the walker consumes it per draw; 0x49 carries its own
+// clip in words 31-32, so there is no staging overlap with the spanprod regs)
+// and the tri_state_valid flag.
+//
+// tri_state_valid gates 0x4B: a 0x4B with no valid sticky state drains its
+// payload and retires as a no-op.  It is SET when an 0x4A retires, and CLEARED
+// by soft_reset AND by any 0x48/0x49 header decode (because that header
+// overwrites the shared spanprod staging the 0x4A wrote — see the opcode
+// CONTRACT CHANGE comment).
+reg                  tri_state_valid;
+reg signed [15:0]    tri_state_clip_x0, tri_state_clip_x1;
+reg signed [15:0]    tri_state_clip_y0, tri_state_clip_y1;
+
+// ================================================================
+// CMD_DRAW_VERT_TRI (0x4B) — raw per-vertex attribute latches
+// ================================================================
+// Latched straight from the payload (pre-sort).  The derivation FSM y-sorts
+// them with the walker's exact compare rule so the anchor follows sorted v0.
+// Staging-dedup: raw s/t are NOT kept in dedicated vt_s/vt_t regs.  s_k/t_k
+// arrive at w3-5 / w6-8 and are parked directly in the dv_szi/dv_tzi product
+// slots (declared with the derivation FSM below).  raw zi (vt_zi) and light
+// (vt_lrow) are parked as zi/light w9-12.  TIMING DE-FOLD (2026-06): the
+// s_k*zi_k / t_k*zi_k products are NO longer folded into payload arrival; they
+// run in the dedicated DRV_PROD_* derivation-FSM states (off the S_PAY_DATA
+// decode cone), overwriting dv_szi/dv_tzi in place before DRV_DELTA.
+reg signed [31:0] vt_zi[0:2];   // Q16.16 zi
+reg [5:0]         vt_lrow [0:2]; // Q6 light rows
+
+// ================================================================
+// Triangle plane derivation FSM
+// ================================================================
+// Derives the four attribute planes (szi = s*zi, tzi = t*zi, zi, light) that
+// an 0x49 PERSP header would have carried, from the raw 0x4B vertices.  Runs
+// during the walker's ~95-cycle setup window (dsp/dsp2 are idle there).  The
+// FSM only enters S_TRI_FILL (which drains the walker's records into the
+// spanprod path) from S_TRI_DERIVE's DRV_DONE, so the four planes are always
+// staged before the first record is consumed — the interlock the spec calls
+// for, enforced structurally by the state sequencing.
+//
+// FIXED-POINT CONTRACT (RTL and the acceptance C reference share these EXACTLY):
+//   * Vertices sorted with the walker's rule: 3 strict-(y1<y0) compare-swaps in
+//     order (v0,v1),(v1,v2),(v0,v1) carrying the {x,y,s,t,zi,lrow} tuple.
+//   * Anchor = sorted v0.  Edge deltas from the anchor:
+//       d1x = x1-x0, d2x = x2-x0  (Q12.4, 17-bit signed)
+//       d1y = y1-y0, d2y = y2-y0  (integer scanline, 17-bit signed)
+//   * Per-vertex numerator products (truncate toward -inf):
+//       szi_k = (s_k * zi_k) >>> 16   (Q16.16 * Q16.16 -> Q16.16, arith shift)
+//       tzi_k = (t_k * zi_k) >>> 16
+//       zi plane uses zi_k directly; light plane uses (lrow_k << 16) as Q6.16.
+//     Staging-dedup: these products are NOT computed by the derivation FSM.
+//     They are folded into payload arrival — when zi_k lands (w9-11) the idle
+//     S_PAY_DATA DSPs launch s_k*zi_k / t_k*zi_k and capture into dv_szi/dv_tzi
+//     one cycle later (as the next zi word arrives).  The math/truncation is
+//     bit-identical; only the schedule moved earlier.  da is clamped to signed
+//     32 bits (DERIV_SAT32) before the plane solve so every numerator multiply
+//     stays within one 32x32 DSP pass; this is the same clamp the C ref applies.
+//   * Determinant:  det = d1x*d2y - d2x*d1y  (Q12.4-scaled, signed 35-bit).
+//   * Reciprocal:  rdet = min(2^N + (|det|>>1)) / |det|, RDET_MAX) with N=44.
+//       N=44 gives >=12 guard bits over a <=1024px bbox at Q16.16 attrs.
+//       RDET_MAX = 2^32-1 caps rdet so it fits one 32-bit DSP operand; for
+//       sliver triangles (|det| so small that 2^44/|det| > 2^32-1) rdet
+//       saturates, the plane slopes blow up bounded, and the final du/dv
+//       clamp to INT32 — deterministic, overflow-free.  |det|==0 (collinear)
+//       is treated as |det|==1; such triangles also clip out in the walker.
+//   * Plane terms, per attribute a (da1 = a1-a0, da2 = a2-a0, both clamped):
+//       num_du = 16 * (da1*d2y - da2*d1y)   (the x16 corrects det's Q12.4 scale
+//                                            to per-integer-pixel-x du units)
+//       num_dv =      (da2*d1x - da1*d2x)   (dv numerator already in Q12.4 x
+//                                            units -> unit-correct vs det)
+//       du = DERIV_SAT32( ((num_du * rdet) >>> N) * sign(det) )
+//       dv = DERIV_SAT32( ((num_dv * rdet) >>> N) * sign(det) )
+//       num*rdet is exact via a two-pass split at bit 24 on the SHARED DSP
+//       (num_hi*rdet then num_lo*rdet), recombined as
+//         (num_hi*rdet) + (num_lo*rdet >>> SPLIT)  arith->> (N-SPLIT)
+//       which is bit-identical to ((H<<SPLIT)+L)>>>N but keeps the single
+//       shared accumulator/shift/saturate at 64 bits (no 96-bit cone).
+//
+// DSP SHARING / MUTUAL EXCLUSION:
+//   EVERY multiply in this derivation goes through the two shared DSP ports
+//   dsp_a/dsp_b->dsp_p and dsp2_a/dsp2_b->dsp2_p (signed 32x32->64, 1-cycle).
+//   Wide products are decomposed into multiple 32x32 passes across FSM states
+//   (e.g. num_hi*rdet then num_lo*rdet); no operand wider than 32 bits is ever
+//   written to a dsp operand register.  Per-plane du/dv (8 results) reuse ONE
+//   accumulator (dv_acc), ONE shift, and ONE saturate, computed strictly
+//   sequentially — nothing is replicated per plane.
+//   The derivation owns the DSP ports inside S_TRI_DERIVE — ALL of its multiplies
+//   (TIMING DE-FOLD, 2026-06: including the per-vertex szi/tzi numerator products,
+//   which used to fold into S_PAY_DATA but now run in the DRV_PROD_* states).
+//   Keeping the szi/tzi fold in S_PAY_DATA put a DSP multiply + the dsp_p[47:16]
+//   capture in the per-word payload decode cone that also writes spanprod_count,
+//   deepening the pay_idx -> spanprod_count setup path; moving it into the
+//   derivation FSM takes it off that combinational path.  PSS (the perspective
+//   Newton-Raphson) owns the DSPs only inside S_FRAG_PIPE.  The two windows are
+//   mutually exclusive in the top FSM: 0x4B advances S_PAY_DATA (operand parking
+//   only, no DSP) -> S_EXECUTE -> S_TRI_DERIVE (all DSP work: DRV_PROD_* products
+//   then the plane solve) -> (DRV_DONE) -> S_TRI_FILL -> S_SPANPROD_*, and PSS
+//   bring-up (persp_pss) only runs once spans are being filled in S_FRAG_PIPE,
+//   long after DRV_DONE released the DSPs.  So no DSP usage window overlaps
+//   another; no arbitration.
+//   * Origin lands the spanprod plane in the SAME (0,0)-extrapolated form the
+//     0x49 header uses:  origin = (a0 - du*x0_px - dv*y0) truncated to 32 bits,
+//     where x0_px = x0(Q12.4) >>> 4 (floor).  spanprod evaluates
+//     origin + u*du + v*dv mod 2^32 at each record's absolute integer (u,v);
+//     the mod-2^32 wraparound cancels the large anchor offset, so the visible
+//     value equals a0 + (u-x0_px)*du + (v-y0)*dv with no overflow (the spec's
+//     "anchoring" property).  The light plane truncates origin/du/dv to 24 bits
+//     (Q6.16) to match spanprod_light_*.
+//
+// FINAL CONSTANTS (validated against the acceptance C reference, bit-for-bit):
+//   N = 44  : rounded reciprocal Q-format.  >=12 guard bits over a <=1024px
+//             bbox at Q16.16 attrs; rdet = round(2^44/|det|) caps at 2^31-1.
+//   SPLIT = 24 : DSP two-pass numerator split (num_hi*rdet then num_lo*rdet).
+//   |det| floored to 1 (collinear); rdet saturates at 2^31-1 for slivers, then
+//   du/dv clamp to INT32 — deterministic, overflow-free, mirrored in the ref.
+// STORAGE: vertices are NOT physically sorted.  The 3 compare-swaps only build
+//   the order permutation dv_ord[]; x/y come straight from tri_v*_x/y and zi/
+//   light straight from vt_zi/vt_lrow, both indexed through dv_ord.  The
+//   s*zi / t*zi products live in dv_szi/dv_tzi, which (staging-dedup) ALSO
+//   serve as the raw-s/t parking slots during payload — there is no separate
+//   vt_s/vt_t bank.  This removes the sorted dv_x/dv_y copies, the dv_ziv/
+//   dv_lit copies, the wide attribute swap-mux network of the original
+//   six-array sort, AND the 6x32-bit vt_s/vt_t raw-attr bank.
+// SCHEDULE: ~123 cycles (3 sort + 5 szi/tzi products + 3 delta/det + 46
+//   reciprocal divide + 4 attrs x ~17 plane terms).  TIMING DE-FOLD (2026-06):
+//   the per-vertex szi/tzi products run in the 5 DRV_PROD_* states between the
+//   y-sort and the edge-delta stage (DRV_SORT_C -> DRV_PROD_L0 -> ... ->
+//   DRV_PROD_C2 -> DRV_DELTA), rather than being folded into payload arrival.
+//   The walker's ~95-cycle edge-divide setup runs in parallel (started in
+//   S_EXECUTE), and the whole derivation still finishes well inside that window,
+//   so the +5 cycles are free in throughput (the GPU is fragment-bound; triangle
+//   setup is control-rate).  Per-triangle GPU cost stays at/under the 0x49 path
+//   while removing ~180 cy/triangle of CPU plane-solve work.
+localparam DERIV_N      = 6'd44;
+localparam DERIV_SPLIT  = 6'd24;
+// rdet is fed to the signed 32x32 DSP, so it is capped at 2^31-1 (always
+// non-negative — sign(det) is applied separately to the final du/dv).  The cap
+// only engages for extreme slivers where the true gradient already exceeds
+// Q16.16; those du/dv then clamp to INT32 deterministically (see rdet_ovf).
+
+// Saturating clamp of a signed 64-bit value to int32 — the single shared
+// saturate unit for the num_hi shift before the DSP multiply and for the final
+// (num*rdet)>>>N quotient (the deterministic du/dv sliver/overflow rule).
+function signed [31:0] deriv_sat32;
+    input signed [63:0] v;
+    begin
+        if (v > 64'sd2147483647)              // > INT32_MAX
+            deriv_sat32 = 32'sh7FFFFFFF;
+        else if (v < -64'sd2147483648)        // < INT32_MIN
+            deriv_sat32 = -32'sh80000000;
+        else
+            deriv_sat32 = v[31:0];
+    end
+endfunction
+
+// Saturating clamp of a 33-bit signed difference (a_k - a0) to int32.  Used
+// for the per-attribute da numerators — these are differences of two signed
+// 32-bit attributes, so 33 bits is exact and avoids a 64-bit comparator cone.
+function signed [31:0] deriv_sat33;
+    input signed [32:0] v;
+    begin
+        if (v > 33'sd2147483647)              // > INT32_MAX
+            deriv_sat33 = 32'sh7FFFFFFF;
+        else if (v < -33'sd2147483648)        // < INT32_MIN
+            deriv_sat33 = -32'sh80000000;
+        else
+            deriv_sat33 = v[31:0];
+    end
+endfunction
+
+// Per-vertex working set, kept in RAW (unsorted) vertex order.  Rather than
+// physically swapping six attribute arrays through the sort (a wide register
+// file plus a big swap-mux network), the sort only produces a 3-element order
+// permutation dv_ord[]; every later read indexes the raw arrays through it.
+// This removes the dv_x/dv_y sorted copies (x/y come straight from tri_v*_x/y
+// via dv_ord) and all attribute-swap muxing.  The attribute values are
+// order-independent per vertex: dv_szi/dv_tzi start as raw s/t and are
+// overwritten in place with s*zi / t*zi.
+// Staging-dedup: dv_szi/dv_tzi ARE the only raw-s/t storage (there is no
+// separate vt_s/vt_t bank).  S_PAY_DATA parks s_k at dv_szi[k] (w3-5) and t_k
+// at dv_tzi[k] (w6-8).  TIMING DE-FOLD (2026-06): the s_k*zi_k / t_k*zi_k
+// products are formed in the DRV_PROD_* derivation states (after the y-sort,
+// before DRV_DELTA) and overwritten IN PLACE over dv_szi[k]/dv_tzi[k] there —
+// NOT during payload arrival.  This keeps the DSP multiply + dsp_p[47:16]
+// capture out of the S_PAY_DATA decode cone (which also writes spanprod_count).
+// zi and light are read directly from the raw vt_zi/vt_lrow inputs (no copy).
+reg signed [31:0] dv_szi [0:2];   // Q16.16: raw s (parked at w3-5), then s*zi
+reg signed [31:0] dv_tzi [0:2];   // Q16.16: raw t (parked at w6-8), then t*zi
+// Sorted order: dv_ord[s] = raw vertex index in sorted slot s (0 = top vertex).
+reg [1:0]         dv_ord [0:2];
+// Raw vertex x (Q12.4) / y (int) as an indexable bus for the delta/origin
+// stages (read through dv_ord; no separate sorted copy is stored).
+wire signed [15:0] dvx [0:2];
+wire signed [15:0] dvy [0:2];
+assign dvx[0] = tri_v0_x; assign dvx[1] = tri_v1_x; assign dvx[2] = tri_v2_x;
+assign dvy[0] = tri_v0_y; assign dvy[1] = tri_v1_y; assign dvy[2] = tri_v2_y;
+
+// Edge deltas + determinant.
+reg signed [16:0] dd1x, dd2x, dd1y, dd2y;
+reg               dd_detsign;     // 1 = det<0
+reg [34:0]        dd_detabs;
+reg signed [15:0] dd_x0px, dd_y0;
+
+// Serial restoring divider for rdet = (2^N rounded) / |det|.
+// Dividend is the 45-bit rounded numerator (2^44 + (|det|>>1)); divisor is the
+// 35-bit |det|.  Quotient is capped at 2^31-1 (rdet_ovf) — a sliver with |det|
+// small enough that the rounded reciprocal needs >=2^31 saturates there, so
+// rdet stays a non-negative signed-32 DSP operand.  Mirrors the walker's
+// restoring divider; 46 beats (1 load + 45 iterate).
+reg [31:0]  rdet_q;               // running quotient (>=2^31 trips rdet_ovf)
+reg [44:0]  rdet_dividend;
+reg [34:0]  rdet_divisor;
+reg [34:0]  rdet_rem;             // partial remainder (< divisor < 2^35)
+reg [5:0]   rdet_cnt;
+reg         rdet_ovf;             // quotient reached >=2^31 -> saturate rdet
+// Reciprocal as a signed 32b DSP operand: capped non-negative value.
+wire signed [31:0] rdet_operand = rdet_ovf ? 32'sh7FFFFFFF : {1'b0, rdet_q[30:0]};
+wire [35:0] rdet_try  = {rdet_rem, rdet_dividend[44]};
+wire        rdet_ge   = rdet_try >= {1'b0, rdet_divisor};
+// When rdet_ge, rdet_try - divisor < divisor < 2^35, so the 35-bit subtract is
+// exact; when !rdet_ge, rdet_try < 2^35 already.
+wire [34:0] rdet_next = rdet_ge ? (rdet_try[34:0] - rdet_divisor) : rdet_try[34:0];
+
+// Per-attribute plane working registers.
+reg signed [31:0] dv_du, dv_dv;
+// Scale accumulator: holds H = num_hi*rdet (signed, <=63 bits) across the two
+// DSP passes.  The final quotient is (H + (num_lo*rdet >> SPLIT)) >>> (N-SPLIT)
+// — algebraically identical to ((H<<SPLIT) + num_lo*rdet) >>> N, but the
+// equivalent (H + L>>SPLIT) form keeps the shared accumulator/add at 64 bits
+// instead of 96 (the low SPLIT bits of num_lo*rdet are below bit SPLIT of the
+// recombined product and are discarded by the final >>>N anyway).  Verified
+// bit-identical to the C reference across the full acceptance suite.
+reg signed [63:0] dv_acc;
+// Shared DSP-product capture registers for the derivation FSM.  The derivation
+// is strictly sequential (one DSP launch/capture in flight at a time), so one
+// 64-bit capture per DSP port is enough.  Splitting "read dsp_p -> arithmetic
+// -> next dsp operand" into a capture cycle + a form cycle pulls the DSP output
+// off the combinational path into the operand mux (the WNS -1.588 MiSTer chain:
+// Mult1~mult_ll_pl -> 64-bit add -> shift -> saturate -> dsp_a, ~11.3 ns).
+reg signed [63:0] drv_prod_r;
+reg signed [63:0] drv2_prod_r;
+// Low SPLIT bits of the current numerator (unsigned), preserved across the
+// hi-product DSP latency so DRV_SCALE_HC can launch the lo product.
+reg [DERIV_SPLIT-1:0] dv_num_lo;
+reg               dv_doing_dv;    // 0 = computing du, 1 = computing dv
+reg [2:0]         dv_attr;        // 0=szi 1=tzi 2=zi 3=light
+reg [4:0]         dstate;         // derivation sub-FSM state
+
+// Per-attribute clamped edge differences da1 = sat33(a1-a0), da2 = sat33(a2-a0)
+// (area-shrink Lever 1, 2026-06).  Both du and dv numerators reuse the SAME two
+// clamped differences (du: da1*d2y-da2*d1y; dv: da2*d1x-da1*d2x), so they are
+// computed ONCE per attribute in DRV_DA_PREP and held here.  This hoists the two
+// 33-bit subtract+deriv_sat33 cones OUT of the dsp_a/dsp2_a operand-select muxes
+// (DRV_PLANE_NUM now loads plain registers) — shrinking the wide operand muxes
+// the fitter flagged (dsp_a 50:1, dsp2_a 42:1/33:1) — and also removes the
+// duplicate sat33 evaluation that the du and dv passes used to each recompute.
+// Bit-exact: the operand values reaching the DSP are unchanged.
+reg signed [31:0] da1_sat, da2_sat;
+
+// Current attribute's per-vertex values in SORTED order.  dv_attr selects the
+// attribute (0=szi, 1=tzi, 2=zi, 3=light); dv_ord[] maps each sorted slot back
+// to the raw vertex index, so a0/a1/a2 are the sorted-anchor/edge-1/edge-2
+// values without keeping a separate sorted attribute copy.
+reg signed [31:0] deriv_attr [0:2];   // current-attribute values, raw order
+reg signed [31:0] deriv_a0, deriv_a1, deriv_a2;
+always @(*) begin
+    case (dv_attr)
+        3'd0: begin deriv_attr[0] = dv_szi[0]; deriv_attr[1] = dv_szi[1]; deriv_attr[2] = dv_szi[2]; end
+        3'd1: begin deriv_attr[0] = dv_tzi[0]; deriv_attr[1] = dv_tzi[1]; deriv_attr[2] = dv_tzi[2]; end
+        3'd2: begin deriv_attr[0] = vt_zi[0]; deriv_attr[1] = vt_zi[1]; deriv_attr[2] = vt_zi[2]; end
+        default: begin
+            deriv_attr[0] = {10'd0, vt_lrow[0], 16'd0};
+            deriv_attr[1] = {10'd0, vt_lrow[1], 16'd0};
+            deriv_attr[2] = {10'd0, vt_lrow[2], 16'd0};
+        end
+    endcase
+    deriv_a0 = deriv_attr[dv_ord[0]];
+    deriv_a1 = deriv_attr[dv_ord[1]];
+    deriv_a2 = deriv_attr[dv_ord[2]];
+end
+
+// Derivation sub-FSM states (run inside S_TRI_DERIVE).
+// TIMING DE-FOLD (2026-06): the per-vertex szi/tzi numerator products run in the
+// DRV_PROD_* states (between the y-sort and the edge-delta stage), NOT during
+// payload arrival.  S_PAY_DATA only parks the raw operands; this takes the DSP
+// multiply + capture off the pay_idx->spanprod_count combinational decode cone.
+localparam DRV_SORT_A   = 5'd0;   // compare-swap (v0,v1)  — walker's sort rule
+localparam DRV_SORT_B   = 5'd1;   // compare-swap (v1,v2)
+localparam DRV_SORT_C   = 5'd2;   // compare-swap (v0,v1)
+localparam DRV_DELTA    = 5'd3;   // edge deltas + launch det products
+localparam DRV_DET_W    = 5'd4;   // DSP latency
+localparam DRV_DET_CAP  = 5'd5;   // form det, set up reciprocal divide
+localparam DRV_RDET     = 5'd6;   // serial restoring divide for rdet
+localparam DRV_PLANE_NUM = 5'd7;  // launch the current attr's numerator products
+localparam DRV_PLANE_NW  = 5'd8;  // DSP latency
+localparam DRV_PLANE_NC  = 5'd9;  // form num_du or num_dv, launch hi*rdet
+localparam DRV_SCALE_HW  = 5'd10; // DSP latency (hi pass)
+localparam DRV_SCALE_HC  = 5'd11; // capture hi product, launch lo*rdet
+localparam DRV_SCALE_LW  = 5'd12; // DSP latency (lo pass)
+localparam DRV_SCALE_LC  = 5'd13; // combine, shift, saturate -> du or dv
+localparam DRV_PLANE_ORG = 5'd14; // launch origin offset products (du*x0,dv*y0)
+localparam DRV_ORG_W     = 5'd15; // DSP latency
+localparam DRV_ORG_CAP   = 5'd16; // form origin, store plane, advance attr
+localparam DRV_DONE      = 5'd17;
+// Capture states: each splits a former one-cycle "consume dsp_p -> arithmetic ->
+// reg" cone in two.  The capture state latches the DSP product(s) into the
+// shared drv_prod_r/drv2_prod_r pair; the following *_FORM state does the
+// accumulate/shift/saturate/subtract from those captures, off the critical
+// DSP-output-to-operand-register path.  (timing: WNS -1.588 fix — see header.)
+localparam DRV_DET_FORM  = 5'd18; // form det from captured products
+localparam DRV_PLANE_NF  = 5'd19; // form num, shift/sat, launch hi*rdet
+localparam DRV_SCALE_LF  = 5'd20; // recombine (H + L>>SPLIT)>>>(N-SPLIT) -> du/dv
+localparam DRV_ORG_FORM  = 5'd21; // form origin from captured products, store plane
+// Pre-stage the two clamped edge differences for the current attribute (da1_sat,
+// da2_sat) ONE cycle before DRV_PLANE_NUM, on fresh-attr entry only.  Lets
+// DRV_PLANE_NUM load the DSP operands from plain registers instead of two
+// deriv_sat33 subtract cones, collapsing the dsp_a/dsp2_a operand muxes.
+localparam DRV_DA_PREP   = 5'd22; // sat33(a1-a0), sat33(a2-a0) -> da1_sat/da2_sat
+// TIMING DE-FOLD (2026-06): per-vertex szi/tzi numerator products, formed in the
+// derivation FSM (off the S_PAY_DATA decode cone).  Run after the y-sort, before
+// the edge-delta stage, inside the walker's idle setup window.  Raw s_k/t_k are
+// parked in dv_szi/dv_tzi (S_PAY_DATA w3-8) and raw zi_k in vt_zi (w9-11); these
+// states launch s_k*zi_k on dsp / t_k*zi_k on dsp2 (1-cycle DSP) and capture
+// dsp_p[47:16] (Q16.16*Q16.16 -> Q16.16, arith trunc toward -inf) back into the
+// SAME dv_szi[k]/dv_tzi[k] slot.  Launch trails capture by 2 cycles (DSP
+// latency), so launch k=0/1/2 then capture k=0/1/2 two states later.
+localparam DRV_PROD_L0   = 5'd23; // launch k=0 (s0*zi0, t0*zi0)
+localparam DRV_PROD_L1   = 5'd24; // launch k=1
+localparam DRV_PROD_L2C0 = 5'd25; // launch k=2, capture k=0
+localparam DRV_PROD_C1   = 5'd26; // capture k=1
+localparam DRV_PROD_C2   = 5'd27; // capture k=2 -> DRV_DELTA
 
 // Outstanding-write tracker for CMD_FENCE / CMD_FLIP drain semantics.
 // Increments on m_wr_* AW handshake.  Decrements on m_wr_bvalid (slave
@@ -1898,6 +2576,8 @@ wire p3_needs_fb_flush = p3_valid && !p3_discard && !p3_flags[SPAN_TRANSLUC]
 wire fb_write_buffer_stall = p3_needs_fb_flush && !fb_write_can_issue;
 wire [GPU_ADDR_W-1:0] p3_fb_word_addr_w = p3_fb_addr & {{(GPU_ADDR_W-2){1'b1}}, 2'b00};
 wire [3:0]  p3_fb_lane_mask_w = fb_lane_mask(p3_fb_addr[1:0]);
+wire [31:0] p3_fb_lane_data_w = fb_lane_data(p3_fb_addr[1:0], p3_color);
+wire [31:0] p3_fb_lane_data_mask_w = fb_lane_data_mask(p3_fb_addr[1:0]);
 wire        fb_acc_p3_word_match = !fb_acc_valid
                                   || (fb_acc_addr == p3_fb_word_addr_w);
 wire        fb_acc_blend_word_match = !fb_acc_valid
@@ -2425,6 +3105,13 @@ always @(posedge clk) begin : main_fsm
         cr_y_remaining <= 0; cr_stride <= 0; cr_color <= 0;
         cmd_is_set_fb <= 0;
         cmd_is_draw_param_span_list <= 0;
+        cmd_is_draw_column_list <= 0;
+        cmd_is_draw_param_tri <= 0;
+        cmd_is_set_tri_state <= 0;
+        cmd_is_draw_vert_tri <= 0;
+        tri_state_valid <= 1'b0;
+        tri_start <= 1'b0;
+        tri_fill_idx <= 3'd0;
         cmd_is_flip <= 0;
         spanprod_compact_direct <= 1'b0;
         m_wr_inflight       <= 4'b0;
@@ -2550,6 +3237,7 @@ always @(posedge clk) begin : main_fsm
         nr_two_minus_xy <= 0;
         dsp_a <= 0; dsp_b <= 0;
         dsp2_a <= 0; dsp2_b <= 0;
+        drv_prod_r <= 0; drv2_prod_r <= 0;
         recip_rd_addr <= 0;
         // State registers
         sp_tex_w_mask <= 16'hFFFF; sp_tex_h_mask <= 16'hFFFF;
@@ -2624,6 +3312,15 @@ always @(posedge clk) begin : main_fsm
             spanprod_active <= 1'b0;
             spanprod_compact_direct <= 1'b0;
             spanprod_direct_affine <= 1'b0;
+            cmd_is_draw_column_list <= 1'b0;
+            cmd_is_draw_param_tri <= 1'b0;
+            cmd_is_set_tri_state <= 1'b0;
+            cmd_is_draw_vert_tri <= 1'b0;
+            // 0x4A sticky bank is invalidated on soft_reset so a 0x4B after a
+            // reset is a no-op until a fresh 0x4A re-arms the state.
+            tri_state_valid <= 1'b0;
+            tri_start <= 1'b0;
+            tri_fill_idx <= 3'd0;
             spanprod_q29_attr_shift <= 5'd0;
             spanprod_cur_u <= 16'sd0;
             spanprod_cur_v <= 16'sd0;
@@ -2718,6 +3415,41 @@ always @(posedge clk) begin : main_fsm
                 (cmd_type == CMD_DRAW_PARAM_SPAN_LIST && cmd_payload_words >= 13'd11);
             spanprod_compact_direct <= (cmd_type == CMD_DRAW_PARAM_SPAN_LIST &&
                                         cmd_payload_words <= 13'd32);
+            // CMD_DRAW_COLUMN_LIST (0x4C): 4-word header + 5N lane records
+            // (N=1..4), so a valid payload is 9/14/19/24 words.  Accept the
+            // 9..24 range here (the header count nibble re-derives the lane
+            // count exactly); wrong-sized payloads outside the range drain and
+            // retire as a no-op.  This is a SEPARATE decode path from the 0x48
+            // compact-direct loader (5-word stride vs 7), so it does NOT set
+            // spanprod_compact_direct — its own loader writes the shared
+            // direct-affine staging and forces s/sstep=0.
+            cmd_is_draw_column_list <=
+                (cmd_type == CMD_DRAW_COLUMN_LIST
+                 && cmd_payload_words >= 13'd9 && cmd_payload_words <= 13'd24);
+            // Triangle form: fixed 36-word payload (31 header + 2 clip +
+            // 3 vertex).  Wrong-sized payloads drain through S_PAY_DATA
+            // without decode and retire at S_EXECUTE as a no-op.
+            cmd_is_draw_param_tri <=
+                (cmd_type == CMD_DRAW_PARAM_TRI && cmd_payload_words == 13'd36);
+            // Vertex-triangle pair (hardware plane derivation): 0x4A latches the
+            // sticky bank (16-word payload), 0x4B draws one triangle from raw
+            // verts (14-word payload).  Wrong-sized payloads drain and retire.
+            //
+            // PRUNE GATE: when GPU_HAS_VERT_TRI==0 these decode terms are
+            // constant 0, so neither flag is ever set.  Both opcodes then fall
+            // through the S_PAY_DATA if-else chain (no destination writes; the
+            // payload still drains word-by-word via pay_remaining) and through
+            // the S_EXECUTE chain to the final `else state <= S_IDLE` — i.e. the
+            // exact unrecognised-command no-op drain path.  With both flags
+            // constant 0, every writer of the vert-tri staging (tri_state_valid
+            // set, tri_state_clip_*, dv_szi/dv_tzi/vt_zi/vt_lrow) and of the
+            // derivation FSM (dstate and the S_TRI_DERIVE-only regs, reachable
+            // only via `state <= S_TRI_DERIVE` in the gated 0x4B EXECUTE arm)
+            // becomes constant-inactive, so the derivation logic sweeps.
+            cmd_is_set_tri_state <= (GPU_HAS_VERT_TRI != 0) &&
+                (cmd_type == CMD_SET_TRI_STATE && cmd_payload_words == 13'd16);
+            cmd_is_draw_vert_tri <= (GPU_HAS_VERT_TRI != 0) &&
+                (cmd_type == CMD_DRAW_VERT_TRI && cmd_payload_words == 13'd14);
             cmd_is_flip           <= (cmd_type == CMD_FLIP);
 
             if (cmd_payload_words == 0) begin
@@ -2784,7 +3516,141 @@ always @(posedge clk) begin : main_fsm
                 if (pay_idx == 13'd1) st_fb_stride <= ring_rd_data[15:0];
             end
             else if (cmd_is_draw_param_span_list) begin
+                // Staging-dedup contract: a 0x48 header overwrites the shared
+                // spanprod staging an 0x4A may have written, so invalidate the
+                // sticky vert-tri state — a stale 0x4B after this is a guarded
+                // no-op (see the 0x4A CONTRACT CHANGE comment).
+                if (pay_idx == 13'd0) tri_state_valid <= 1'b0;
                 load_param_span_list_payload_word(pay_idx[5:0], ring_rd_data);
+            end
+            else if (cmd_is_draw_column_list) begin
+                // CMD_DRAW_COLUMN_LIST (0x4C): same staging-dedup invalidation as
+                // 0x48 — the column header overwrites the shared spanprod
+                // direct-affine staging, so a stale 0x4B after this is a guarded
+                // no-op.  The 5-word lane-record loader forces s/sstep=0.
+                if (pay_idx == 13'd0) tri_state_valid <= 1'b0;
+                load_column_list_payload_word(pay_idx[5:0], ring_rd_data);
+            end
+            else if (cmd_is_draw_param_tri) begin
+                // Same staging-dedup invalidation as 0x48: the 0x49 header
+                // overwrites the shared spanprod staging.
+                if (pay_idx == 13'd0) tri_state_valid <= 1'b0;
+                // Words 0-30: identical param-span header decode.
+                if (pay_idx <= 13'd30)
+                    load_param_span_list_payload_word(pay_idx[5:0], ring_rd_data);
+                else if (pay_idx == 13'd31) begin
+                    tri_clip_x0 <= ring_rd_data[15:0];
+                    tri_clip_x1 <= ring_rd_data[31:16];
+                end else if (pay_idx == 13'd32) begin
+                    tri_clip_y0 <= ring_rd_data[15:0];
+                    tri_clip_y1 <= ring_rd_data[31:16];
+                end else if (pay_idx == 13'd33) begin
+                    tri_v0_x <= ring_rd_data[15:0];
+                    tri_v0_y <= ring_rd_data[31:16];
+                end else if (pay_idx == 13'd34) begin
+                    tri_v1_x <= ring_rd_data[15:0];
+                    tri_v1_y <= ring_rd_data[31:16];
+                end else if (pay_idx == 13'd35) begin
+                    tri_v2_x <= ring_rd_data[15:0];
+                    tri_v2_y <= ring_rd_data[31:16];
+                end
+            end
+            else if (cmd_is_set_tri_state) begin
+                // 0x4A sticky state.  Staging-dedup: surface/control/clamp/z
+                // words are decoded DIRECTLY into the SHARED spanprod staging
+                // regs (reusing the 0x49-header arms of
+                // load_param_span_list_payload_word — the layouts are
+                // field-compatible), so there is no dedicated tri_state_* bank
+                // to copy at EXECUTE.  Only the clip rect persists (the walker
+                // consumes it per draw and 0x49 carries its own clip, so it
+                // doesn't overlap the spanprod staging).  See the opcode CONTRACT
+                // CHANGE comment: a later 0x48/0x49 header overwrites this
+                // staging and clears tri_state_valid, so the client must
+                // re-issue 0x4A before more 0x4B draws.
+                //   0x4A word -> spanprod_arm idx :
+                //     w0..w4 -> 0..4 (fb_base/major/minor, tex_addr, tex_width)
+                //     w5     -> packed {h_mask,w_mask}  (custom, see below)
+                //     w6     -> 7  (control == 0x49 header word 7 semantics)
+                //     w7..w10 -> 20..23 (clamps)
+                //     w11..w13 -> 26..28 (z_base/major/minor)
+                //     w14,w15 -> clip rect (kept)
+                case (pay_idx)
+                    13'd0:  load_param_span_list_payload_word(6'd0, ring_rd_data);
+                    13'd1:  load_param_span_list_payload_word(6'd1, ring_rd_data);
+                    13'd2:  load_param_span_list_payload_word(6'd2, ring_rd_data);
+                    13'd3:  load_param_span_list_payload_word(6'd3, ring_rd_data);
+                    13'd4:  load_param_span_list_payload_word(6'd4, ring_rd_data);
+                    13'd5:  begin
+                        // 0x4A packs both POT masks in one word; the 0x49 arms
+                        // (idx 5/6) take one mask each from data[15:0], so
+                        // unpack here instead of routing through the task.
+                        spanprod_tex_w_mask <= (ring_rd_data[15:0]  == 16'd0)
+                                             ? 16'hFFFF : ring_rd_data[15:0];
+                        spanprod_tex_h_mask <= (ring_rd_data[31:16] == 16'd0)
+                                             ? 16'hFFFF : ring_rd_data[31:16];
+                    end
+                    13'd6:  load_param_span_list_payload_word(6'd7,  ring_rd_data);
+                    13'd7:  load_param_span_list_payload_word(6'd20, ring_rd_data);
+                    13'd8:  load_param_span_list_payload_word(6'd21, ring_rd_data);
+                    13'd9:  load_param_span_list_payload_word(6'd22, ring_rd_data);
+                    13'd10: load_param_span_list_payload_word(6'd23, ring_rd_data);
+                    13'd11: load_param_span_list_payload_word(6'd26, ring_rd_data);
+                    13'd12: load_param_span_list_payload_word(6'd27, ring_rd_data);
+                    13'd13: load_param_span_list_payload_word(6'd28, ring_rd_data);
+                    13'd14: begin
+                        tri_state_clip_x0 <= ring_rd_data[15:0];
+                        tri_state_clip_x1 <= ring_rd_data[31:16];
+                    end
+                    13'd15: begin
+                        tri_state_clip_y0 <= ring_rd_data[15:0];
+                        tri_state_clip_y1 <= ring_rd_data[31:16];
+                    end
+                    default: ;
+                endcase
+            end
+            else if (cmd_is_draw_vert_tri) begin
+                // 0x4B raw vertex triangle — see the opcode comment.
+                // TIMING DE-FOLD (2026-06, OS30 pipelining): the szi/tzi
+                // numerator products are NO LONGER folded into payload arrival.
+                // Launching the DSP product (dsp_a<=dv_szi[k]; dsp_b<=ring_rd_data)
+                // and capturing dsp_p[47:16] back into dv_szi[k] during S_PAY_DATA
+                // put a DSP multiply + the [47:16] capture in the per-word decode
+                // cone that also writes spanprod_count via the other command arms
+                // (load_param_span_list_payload_word).  That deepened the
+                // pay_idx -> spanprod_count setup path (OS30 WNS ~-1.7..-2.0).
+                // Here we ONLY park the raw operands: s_k/t_k in dv_szi/dv_tzi
+                // (w3-8), zi_k in vt_zi (w9-11), light in vt_lrow (w12).  The six
+                // products run in DEDICATED derivation-FSM states (DRV_PROD_*),
+                // inside the walker's idle setup window, off this combinational
+                // path.  The DSP operands are NOT touched in S_PAY_DATA anymore.
+                case (pay_idx)
+                    13'd0: begin tri_v0_x <= ring_rd_data[15:0];
+                                 tri_v0_y <= ring_rd_data[31:16]; end
+                    13'd1: begin tri_v1_x <= ring_rd_data[15:0];
+                                 tri_v1_y <= ring_rd_data[31:16]; end
+                    13'd2: begin tri_v2_x <= ring_rd_data[15:0];
+                                 tri_v2_y <= ring_rd_data[31:16]; end
+                    // w3-5 / w6-8: park raw s_k / t_k in the product slots.
+                    13'd3: dv_szi[0] <= ring_rd_data;
+                    13'd4: dv_szi[1] <= ring_rd_data;
+                    13'd5: dv_szi[2] <= ring_rd_data;
+                    13'd6: dv_tzi[0] <= ring_rd_data;
+                    13'd7: dv_tzi[1] <= ring_rd_data;
+                    13'd8: dv_tzi[2] <= ring_rd_data;
+                    // w9-11: park raw zi (the zi plane needs the raw value; the
+                    // DRV_PROD_* states also consume it for s_k*zi_k/t_k*zi_k).
+                    // No DSP launch here — products run in the derivation FSM.
+                    13'd9:  vt_zi[0] <= ring_rd_data;
+                    13'd10: vt_zi[1] <= ring_rd_data;
+                    13'd11: vt_zi[2] <= ring_rd_data;
+                    13'd12: begin
+                        // latch light rows.
+                        vt_lrow[0] <= ring_rd_data[5:0];
+                        vt_lrow[1] <= ring_rd_data[11:6];
+                        vt_lrow[2] <= ring_rd_data[17:12];
+                    end
+                    default: ;
+                endcase
             end
 
             if (pay_remaining <= 13'd1) begin
@@ -2848,7 +3714,11 @@ always @(posedge clk) begin : main_fsm
             else if (cmd_is_clear_rect) begin
                 state <= S_CLEAR_RECT;
             end
-            else if (cmd_is_draw_param_span_list) begin
+            else if (cmd_is_draw_param_span_list || cmd_is_draw_column_list) begin
+                // Shared spanprod bring-up.  The 0x4C column list lands its
+                // (s/sstep-forced-0) direct-affine staging via its own loader,
+                // then reuses this EXECUTE / S_SPANPROD path byte-for-byte —
+                // there is no column-specific pixel logic.
                 spanprod_idx <= 2'd0;
                 spanprod_calc_step <= 3'd0;
                 src_done <= 1'b0;
@@ -2863,6 +3733,74 @@ always @(posedge clk) begin : main_fsm
 	                state <= (spanprod_header_supported && (spanprod_record_count != 3'd0))
 	                       ? S_SPANPROD_SELECT : S_IDLE;
 	            end
+            else if (cmd_is_draw_param_tri) begin
+                // Same spanprod bring-up as the span list, but records come
+                // from the edge walker via S_TRI_FILL instead of the ring.
+                spanprod_idx <= 2'd0;
+                spanprod_calc_step <= 3'd0;
+                src_done <= 1'b0;
+                persp_active      <= 1'b0;
+                persp_first_done  <= 1'b0;
+                persp_swap_pending <= 1'b0;
+                persp_pss         <= PSS_IDLE;
+                persp_pass        <= PSS_PASS_ANCHOR;
+                sp_seg_left       <= 4'd0;
+                spanprod_active <= spanprod_header_supported;
+                tri_start       <= spanprod_header_supported;
+                tri_fill_idx    <= 3'd0;
+                state <= spanprod_header_supported ? S_TRI_FILL : S_IDLE;
+            end
+            else if (cmd_is_set_tri_state) begin
+                // 0x4A: the surface/control/clamp/z words are already decoded
+                // into the SHARED spanprod staging in S_PAY_DATA (staging-dedup)
+                // and the clip rect into tri_state_clip_*.  Just mark the sticky
+                // state valid so subsequent 0x4B draws reuse the staging, then
+                // retire.
+                tri_state_valid <= 1'b1;
+                state <= S_IDLE;
+            end
+            else if (cmd_is_draw_vert_tri) begin
+                // 0x4B: a 0x4B with no valid sticky state (no prior 0x4A, after
+                // soft_reset, or after an 0x48/0x49 overwrote the staging) is a
+                // no-op — drain already happened, just retire.
+                //
+                // PRUNE GATE: the GPU_HAS_VERT_TRI term is redundant with
+                // cmd_is_draw_vert_tri (constant 0 when the feature is off) but
+                // is spelled here AS A CONSTANT so Quartus's FSM extraction sees
+                // `state <= S_TRI_DERIVE` as hard-unreachable and drops the
+                // S_TRI_DERIVE state + the entire dstate derivation sub-FSM.
+                // Without this explicit constant, FSM extraction kept dstate and
+                // ~1k ALMs of derivation datapath alive (the cmd_is_* constant
+                // folds too late for the state-machine recognizer).
+                if ((GPU_HAS_VERT_TRI != 0) && tri_state_valid) begin
+                    // The spanprod surface/control staging already holds the
+                    // 0x4A state (decoded in S_PAY_DATA — no copy needed), and
+                    // the szi/tzi products are already in dv_szi/dv_tzi (folded
+                    // during payload).  Copy the clip rect, kick the walker, and
+                    // run the derivation FSM.  S_TRI_DERIVE blocks the walk
+                    // record drain (S_TRI_FILL) until the four planes are staged.
+                    spanprod_idx <= 2'd0;
+                    spanprod_calc_step <= 3'd0;
+                    src_done <= 1'b0;
+                    persp_active      <= 1'b0;
+                    persp_first_done  <= 1'b0;
+                    persp_swap_pending <= 1'b0;
+                    persp_pss         <= PSS_IDLE;
+                    persp_pass        <= PSS_PASS_ANCHOR;
+                    sp_seg_left       <= 4'd0;
+                    spanprod_active <= 1'b1;
+                    tri_clip_x0 <= tri_state_clip_x0;
+                    tri_clip_x1 <= tri_state_clip_x1;
+                    tri_clip_y0 <= tri_state_clip_y0;
+                    tri_clip_y1 <= tri_state_clip_y1;
+                    tri_start    <= 1'b1;     // walker runs in parallel with derive
+                    tri_fill_idx <= 3'd0;
+                    dstate       <= DRV_SORT_A;
+                    state        <= S_TRI_DERIVE;
+                end else begin
+                    state <= S_IDLE;
+                end
+            end
 	            else state <= S_IDLE;
 	        end
 
@@ -2874,6 +3812,432 @@ always @(posedge clk) begin : main_fsm
 	            spanprod_select_current_record;
 	            state <= S_SPANPROD_SETUP;
 	        end
+
+        // ============================================================
+        // Triangle plane derivation (CMD_DRAW_VERT_TRI / 0x4B)
+        // ============================================================
+        // Derives the four attribute planes from raw per-vertex {x,y,s,t,zi,
+        // light} and lands them in the spanprod staging regs in the SAME format
+        // an 0x49 PERSP header would have carried.  The edge walker is already
+        // running (started in S_EXECUTE) and computes its setup in parallel;
+        // this sub-FSM finishes well inside that ~95-cycle window.  The state
+        // only advances to S_TRI_FILL at DRV_DONE, so the planes are staged
+        // before the first record is consumed.  See the FIXED-POINT CONTRACT
+        // block above for the exact widths / N / saturation rules; the
+        // acceptance C reference mirrors them bit-for-bit.
+        S_TRI_DERIVE: begin
+            tri_start <= 1'b0;   // start pulse consumed by the walker
+            // PRUNE GATE: every writer of dstate and the derivation datapath
+            // (dd*/rdet*/dv_*) lives inside this case.  Wrapping it in the
+            // constant-folding `if (GPU_HAS_VERT_TRI != 0)` means that when the
+            // feature is off the whole case is dead logic, so Quartus drops the
+            // dstate state machine and the ~1k ALMs of derivation arithmetic.
+            // (S_TRI_DERIVE is also unreachable — its only entry in S_EXECUTE is
+            // gated by the same parameter — so this branch never executes
+            // either way; the explicit constant just guarantees the sweep.)
+            if (GPU_HAS_VERT_TRI != 0) begin
+            case (dstate)
+                // ---- y-sort: 3 compare-swaps, walker's exact rule.  Only the
+                //      order permutation dv_ord[] is swapped (not six attribute
+                //      arrays); the raw per-vertex attrs are loaded once in
+                //      DRV_SORT_A and read later through dv_ord.  Comparisons are
+                //      bit-identical to the array-swapping version: slot s's y is
+                //      dvy[dv_ord[s]].  DRV_SORT_A loads + compare-swap (slot0,1);
+                //      DRV_SORT_B (slot1,2); DRV_SORT_C (slot0,1).
+                DRV_SORT_A: begin : drv_sort_a_blk
+                    // Seed the order and apply the first compare-swap in one
+                    // cycle.  Staging-dedup: dv_szi/dv_tzi already hold the
+                    // s*zi / t*zi products (folded during payload arrival), so
+                    // there is NO raw-attr seed here; zi/light are read directly
+                    // from vt_zi/vt_lrow later, no copy needed.
+                    dv_ord[2] <= 2'd2;
+                    if (tri_v1_y < tri_v0_y) begin
+                        dv_ord[0] <= 2'd1; dv_ord[1] <= 2'd0;
+                    end else begin
+                        dv_ord[0] <= 2'd0; dv_ord[1] <= 2'd1;
+                    end
+                    dstate <= DRV_SORT_B;
+                end
+                DRV_SORT_B: begin
+                    // compare-swap (slot1,slot2)
+                    if (dvy[dv_ord[2]] < dvy[dv_ord[1]]) begin
+                        dv_ord[1] <= dv_ord[2];
+                        dv_ord[2] <= dv_ord[1];
+                    end
+                    dstate <= DRV_SORT_C;
+                end
+                DRV_SORT_C: begin
+                    // compare-swap (slot0,slot1) — completes the walker's sort.
+                    // TIMING DE-FOLD: dv_szi/dv_tzi still hold the RAW s/t parked
+                    // in S_PAY_DATA; the szi/tzi products are now formed in the
+                    // DRV_PROD_* states (the product fold moved out of payload
+                    // arrival).  These run before the edge-delta stage, inside the
+                    // walker's idle setup window — free in throughput.
+                    if (dvy[dv_ord[1]] < dvy[dv_ord[0]]) begin
+                        dv_ord[0] <= dv_ord[1];
+                        dv_ord[1] <= dv_ord[0];
+                    end
+                    dstate <= DRV_PROD_L0;
+                end
+                // ---- per-vertex szi/tzi numerator products (de-fold) ----
+                // dsp_p <= dsp_a*dsp_b is 1-cycle; a product launched in state N
+                // is readable in state N+2.  Launch k=0/1/2 in L0/L1/L2C0, capture
+                // k=0/1/2 in L2C0/C1/C2.  Products: dv_szi[k]=(s_k*zi_k)>>>16,
+                // dv_tzi[k]=(t_k*zi_k)>>>16 (Q16.16, arith trunc toward -inf),
+                // bit-identical to the old payload fold.  Read-vs-write slots are
+                // distinct each cycle (e.g. write dv_szi[0], read dv_szi[2]), so
+                // the in-place overwrite never reads a value it just clobbered.
+                DRV_PROD_L0: begin
+                    // launch k=0: s0*zi0, t0*zi0
+                    dsp_a  <= dv_szi[0];   // raw s0
+                    dsp_b  <= vt_zi[0];
+                    dsp2_a <= dv_tzi[0];   // raw t0
+                    dsp2_b <= vt_zi[0];
+                    dstate <= DRV_PROD_L1;
+                end
+                DRV_PROD_L1: begin
+                    // launch k=1: s1*zi1, t1*zi1
+                    dsp_a  <= dv_szi[1];   // raw s1
+                    dsp_b  <= vt_zi[1];
+                    dsp2_a <= dv_tzi[1];   // raw t1
+                    dsp2_b <= vt_zi[1];
+                    dstate <= DRV_PROD_L2C0;
+                end
+                DRV_PROD_L2C0: begin
+                    // launch k=2 AND capture k=0.  dv_szi[2]/dv_tzi[2] still hold
+                    // raw s2/t2; the dv_szi[0]/dv_tzi[0] writes are distinct slots.
+                    dsp_a  <= dv_szi[2];   // raw s2
+                    dsp_b  <= vt_zi[2];
+                    dsp2_a <= dv_tzi[2];   // raw t2
+                    dsp2_b <= vt_zi[2];
+                    dv_szi[0] <= dsp_p[47:16];
+                    dv_tzi[0] <= dsp2_p[47:16];
+                    dstate <= DRV_PROD_C1;
+                end
+                DRV_PROD_C1: begin
+                    // capture k=1
+                    dv_szi[1] <= dsp_p[47:16];
+                    dv_tzi[1] <= dsp2_p[47:16];
+                    dstate <= DRV_PROD_C2;
+                end
+                DRV_PROD_C2: begin
+                    // capture k=2 (last product); dv_szi/dv_tzi now hold the
+                    // settled s*zi / t*zi products read by DRV_DA_PREP later.
+                    dv_szi[2] <= dsp_p[47:16];
+                    dv_tzi[2] <= dsp2_p[47:16];
+                    dstate <= DRV_DELTA;
+                end
+                // ---- edge deltas + determinant products ----
+                DRV_DELTA: begin : drv_delta_blk
+                    // Edge deltas from the anchor (sorted slot 0).  d*x Q12.4
+                    // (17b), d*y int (17b).  Sorted x/y are the raw tri_v*
+                    // values selected through the order permutation dv_ord.
+                    reg signed [16:0] e1x, e2x, e1y, e2y;
+                    reg signed [15:0] sx0, sx1, sx2, sy0, sy1, sy2;
+                    sx0 = dvx[dv_ord[0]]; sx1 = dvx[dv_ord[1]]; sx2 = dvx[dv_ord[2]];
+                    sy0 = dvy[dv_ord[0]]; sy1 = dvy[dv_ord[1]]; sy2 = dvy[dv_ord[2]];
+                    e1x = {sx1[15], sx1} - {sx0[15], sx0};
+                    e2x = {sx2[15], sx2} - {sx0[15], sx0};
+                    e1y = {sy1[15], sy1} - {sy0[15], sy0};
+                    e2y = {sy2[15], sy2} - {sy0[15], sy0};
+                    dd1x <= e1x; dd2x <= e2x; dd1y <= e1y; dd2y <= e2y;
+                    dd_x0px <= {{4{sx0[15]}}, sx0[15:4]}; // x0 Q12.4 >>4
+                    dd_y0   <= sy0;
+                    // det = d1x*d2y - d2x*d1y : launch both products.  17-bit
+                    // edge deltas sign-extended to the 32-bit signed DSP.
+                    dsp_a  <= {{15{e1x[16]}}, e1x};
+                    dsp_b  <= {{15{e2y[16]}}, e2y};
+                    dsp2_a <= {{15{e2x[16]}}, e2x};
+                    dsp2_b <= {{15{e1y[16]}}, e1y};
+                    dstate <= DRV_DET_W;
+                end
+                DRV_DET_W: dstate <= DRV_DET_CAP;
+                DRV_DET_CAP: begin
+                    // timing: products captured in drv_prod_r/drv2_prod_r the
+                    // cycle before; DRV_DET_FORM does the 35-bit subtract + abs
+                    // off the DSP-output combinational path.  Pure capture here.
+                    drv_prod_r  <= dsp_p;
+                    drv2_prod_r <= dsp2_p;
+                    dstate <= DRV_DET_FORM;
+                end
+                DRV_DET_FORM: begin : drv_det_form_blk
+                    // det = d1x*d2y - d2x*d1y.  d*x is Q12.4 (17b), d*y int
+                    // (17b), product 34b; the difference fits signed 35b.
+                    // Operands come from the captured products (drv*_prod_r), not
+                    // dsp_p/dsp2_p directly — keeps DSP output off this cone.
+                    reg signed [34:0] det_now;
+                    det_now = $signed(drv_prod_r[34:0]) - $signed(drv2_prod_r[34:0]);
+                    // |det| floored to 1 (collinear -> walker also clips it out)
+                    // so the reciprocal divisor is always >=1.  sign tracked
+                    // separately and applied to the final du/dv.
+                    if (det_now == 35'sd0) begin
+                        dd_detabs  <= 35'd1;
+                        dd_detsign <= 1'b0;
+                    end else if (det_now < 35'sd0) begin
+                        dd_detabs  <= (~det_now) + 35'd1;
+                        dd_detsign <= 1'b1;
+                    end else begin
+                        dd_detabs  <= det_now;
+                        dd_detsign <= 1'b0;
+                    end
+                    dstate <= DRV_RDET;
+                    rdet_cnt <= 6'd46;   // beat 46 loads operands, 45..1 iterate
+                    rdet_q   <= 32'd0;
+                    rdet_rem <= 35'd0;
+                    rdet_ovf <= 1'b0;
+                    rdet_dividend <= 45'd0;
+                    rdet_divisor  <= 35'd0;
+                end
+                // ---- serial restoring divide: rdet = round(2^44/|det|) ----
+                DRV_RDET: begin
+                    if (rdet_cnt == 6'd46) begin
+                        rdet_dividend <= ({10'd0, dd_detabs} >> 1) + (45'd1 << DERIV_N);
+                        rdet_divisor  <= dd_detabs;
+                        rdet_rem      <= 35'd0;
+                        rdet_q        <= 32'd0;
+                        rdet_ovf      <= 1'b0;
+                        rdet_cnt      <= rdet_cnt - 6'd1;
+                    end else begin : drv_rdet_iter
+                        // Next quotient value after shifting in this beat's bit.
+                        reg [31:0] q_next;
+                        q_next = {rdet_q[30:0], rdet_ge};
+                        rdet_rem      <= rdet_next;
+                        // Saturate the reciprocal at 2^31-1 (fits the signed DSP
+                        // operand).  rdet_q[31] catches a 1 about to shift OUT of
+                        // the 32-bit register; q_next[31] catches the final
+                        // value's MSB (set on the last beat, which would never
+                        // shift out) — both mean the rounded reciprocal needs
+                        // >=2^31, i.e. a sliver triangle (du/dv then clamp).
+                        if (rdet_q[31] || q_next[31])
+                            rdet_ovf <= 1'b1;
+                        rdet_q        <= q_next;
+                        rdet_dividend <= {rdet_dividend[43:0], 1'b0};
+                        if (rdet_cnt == 6'd1) begin
+                            dstate  <= DRV_DA_PREP; // pre-stage da*_sat for attr 0
+                            dv_attr <= 3'd0;        // attr 0 = szi
+                            dv_doing_dv <= 1'b0;
+                        end else begin
+                            rdet_cnt <= rdet_cnt - 6'd1;
+                        end
+                    end
+                end
+                // ---- per-attribute plane terms ----
+                // For attr a (selected by dv_attr -> a0/a1/a2 sorted values),
+                // compute du then dv: each is sat32(((num*rdet)>>N)*sign).
+                // DRV_DA_PREP runs once per attribute (fresh-attr entry only) and
+                // forms da1_sat = sat33(a1-a0), da2_sat = sat33(a2-a0).  Both the
+                // du and dv numerators reuse these, so the two 33-bit subtract +
+                // deriv_sat33 cones are computed ONCE here instead of inside the
+                // dsp_a/dsp2_a operand mux on every DRV_PLANE_NUM pass.  da1/da2
+                // are differences of two signed 32-bit attributes -> exact in 33
+                // bits, saturated to int32 to match the reference.
+                DRV_DA_PREP: begin
+                    da1_sat <= deriv_sat33({deriv_a1[31], deriv_a1}
+                                         - {deriv_a0[31], deriv_a0});
+                    da2_sat <= deriv_sat33({deriv_a2[31], deriv_a2}
+                                         - {deriv_a0[31], deriv_a0});
+                    dstate  <= DRV_PLANE_NUM;
+                end
+                DRV_PLANE_NUM: begin
+                    // Launch the two numerator sub-products for du or dv from the
+                    // pre-staged clamped differences (da1_sat/da2_sat).
+                    // du: num_du = 16*(da1*d2y - da2*d1y)
+                    // dv: num_dv =    (da2*d1x - da1*d2x)
+                    if (!dv_doing_dv) begin
+                        dsp_a  <= da1_sat;
+                        dsp_b  <= {{15{dd2y[16]}}, dd2y};
+                        dsp2_a <= da2_sat;
+                        dsp2_b <= {{15{dd1y[16]}}, dd1y};
+                    end else begin
+                        dsp_a  <= da2_sat;
+                        dsp_b  <= {{15{dd1x[16]}}, dd1x};
+                        dsp2_a <= da1_sat;
+                        dsp2_b <= {{15{dd2x[16]}}, dd2x};
+                    end
+                    dstate <= DRV_PLANE_NW;
+                end
+                DRV_PLANE_NW: dstate <= DRV_PLANE_NC;
+                DRV_PLANE_NC: begin
+                    // timing: products captured in drv_prod_r/drv2_prod_r the
+                    // cycle before.  This was the WNS -1.588 critical state — it
+                    // fused dsp_p -> 64-bit subtract -> <<4 -> >>>SPLIT ->
+                    // deriv_sat32 -> dsp_a (DSP output straight back into a DSP
+                    // operand register).  Now a pure capture; DRV_PLANE_NF below
+                    // does the subtract/shift/saturate from the captured regs.
+                    drv_prod_r  <= dsp_p;
+                    drv2_prod_r <= dsp2_p;
+                    dstate <= DRV_PLANE_NF;
+                end
+                DRV_PLANE_NF: begin : drv_plane_nf_blk
+                    // num = product0 - product1, x16 for du.  Each product is a
+                    // sat32 numerator (<=2^31) times a 17-bit edge delta, so the
+                    // product fits 49 bits, the difference fits 50 bits, and num
+                    // (after <<4) fits 54 bits — the subtract/shift cone stays
+                    // narrow.  Launch num_hi*rdet in the same cycle, reusing the
+                    // 1-launch/1-wait/1-capture DSP cadence; the low SPLIT bits
+                    // feed the lo pass next.  Operands are the captured products.
+                    reg signed [63:0] num_now;
+                    num_now = (!dv_doing_dv)
+                            ? (($signed(drv_prod_r) - $signed(drv2_prod_r)) <<< 4)
+                            :  ($signed(drv_prod_r) - $signed(drv2_prod_r));
+                    dv_num_lo <= num_now[DERIV_SPLIT-1:0];   // low bits for lo pass
+                    // num_hi = num_now >>> SPLIT (<=30-bit signed); deriv_sat32
+                    // is the deterministic sliver clamp.
+                    dsp_a  <= deriv_sat32(num_now >>> DERIV_SPLIT);
+                    dsp_b  <= rdet_operand;
+                    dstate <= DRV_SCALE_HW;
+                end
+                DRV_SCALE_HW: dstate <= DRV_SCALE_HC;   // hi-product DSP latency
+                DRV_SCALE_HC: begin
+                    // Capture H = num_hi*rdet (signed, <=63 bits) into the shared
+                    // 64-bit accumulator; launch num_lo*rdet (unsigned).
+                    dv_acc <= dsp_p;
+                    dsp_a  <= {{(32-DERIV_SPLIT){1'b0}}, dv_num_lo};   // num_lo (unsigned)
+                    dsp_b  <= rdet_operand;
+                    dstate <= DRV_SCALE_LW;
+                end
+                DRV_SCALE_LW: dstate <= DRV_SCALE_LC;   // lo-product DSP latency
+                DRV_SCALE_LC: begin
+                    // timing: lo product (L = num_lo*rdet) captured in drv_prod_r
+                    // the cycle before.  This state used to fuse dsp_p -> 64-bit
+                    // add (H + L>>>SPLIT) -> >>> -> negate -> deriv_sat32 ->
+                    // dv_du/dv_dv, and dv_du is read into dsp_a next cycle
+                    // (DRV_PLANE_ORG), so the long cone reached a DSP operand.
+                    // Pure capture; DRV_SCALE_LF does the recombination.
+                    drv_prod_r <= dsp_p;
+                    dstate <= DRV_SCALE_LF;
+                end
+                DRV_SCALE_LF: begin : drv_scale_lf_blk
+                    // qsigned = (num*rdet) >>> N.  Algebraic identity used here:
+                    //   ((H<<SPLIT) + L) >>> N  ==  (H + (L>>>SPLIT)) >>> (N-SPLIT)
+                    // because L's bits below SPLIT are below bit SPLIT of the
+                    // recombined product and are shifted out by >>>N regardless.
+                    // L = num_lo*rdet is unsigned (num_lo unsigned, rdet>=0); H
+                    // is signed.  Their sum fits 64 bits signed, so the shared
+                    // shift/saturate runs at 64 bits, not 96.  sign(det) applied,
+                    // then deriv_sat32 clamps to int32 (the sliver/overflow rule).
+                    // L comes from the captured drv_prod_r, not dsp_p directly.
+                    reg signed [63:0] qsigned;
+                    qsigned = (dv_acc + $signed({1'b0, drv_prod_r[54:DERIV_SPLIT]}))
+                                  >>> (DERIV_N - DERIV_SPLIT);
+                    if (dd_detsign) qsigned = -qsigned;
+                    if (!dv_doing_dv) begin
+                        dv_du <= deriv_sat32(qsigned);
+                        dv_doing_dv <= 1'b1;
+                        dstate <= DRV_PLANE_NUM;   // now compute dv
+                    end else begin
+                        dv_dv <= deriv_sat32(qsigned);
+                        dv_doing_dv <= 1'b0;
+                        // both du,dv done -> launch origin offset products.
+                        dstate <= DRV_PLANE_ORG;
+                    end
+                end
+                // ---- origin = a0 - du*x0px - dv*y0  (mod 2^32) ----
+                DRV_PLANE_ORG: begin
+                    dsp_a  <= dv_du;
+                    dsp_b  <= {{16{dd_x0px[15]}}, dd_x0px};
+                    dsp2_a <= dv_dv;
+                    dsp2_b <= {{16{dd_y0[15]}}, dd_y0};
+                    dstate <= DRV_ORG_W;
+                end
+                DRV_ORG_W: dstate <= DRV_ORG_CAP;
+                DRV_ORG_CAP: begin
+                    // timing: origin products (du*x0px, dv*y0) captured in
+                    // drv_prod_r/drv2_prod_r the cycle before.  This state used to
+                    // fuse dsp_p/dsp2_p -> subtract -> spanprod_attr*_origin (a
+                    // plane-staging write); now a pure capture.  dv_attr is NOT
+                    // advanced here, so deriv_a0 stays stable into DRV_ORG_FORM.
+                    drv_prod_r  <= dsp_p;
+                    drv2_prod_r <= dsp2_p;
+                    dstate <= DRV_ORG_FORM;
+                end
+                DRV_ORG_FORM: begin : drv_org_form_blk
+                    // origin = a0 - du*x0px - dv*y0, truncated to 32 bits (the
+                    // spanprod plane eval wraps mod 2^32, so the large anchor
+                    // offset cancels for on-screen records — the "anchoring").
+                    // Products come from the captured regs, not dsp_p directly.
+                    reg signed [31:0] org_now;
+                    org_now = deriv_a0 - $signed(drv_prod_r[31:0]) - $signed(drv2_prod_r[31:0]);
+                    // store this attr's plane into the spanprod staging reg.
+                    case (dv_attr)
+                        3'd0: begin
+                            spanprod_attr0_origin <= org_now;
+                            spanprod_attr0_du     <= dv_du;
+                            spanprod_attr0_dv     <= dv_dv;
+                        end
+                        3'd1: begin
+                            spanprod_attr1_origin <= org_now;
+                            spanprod_attr1_du     <= dv_du;
+                            spanprod_attr1_dv     <= dv_dv;
+                        end
+                        3'd2: begin
+                            spanprod_attr2_origin <= org_now;
+                            spanprod_attr2_du     <= dv_du;
+                            spanprod_attr2_dv     <= dv_dv;
+                        end
+                        default: begin
+                            spanprod_light_origin <= org_now[23:0];
+                            spanprod_light_du     <= dv_du[23:0];
+                            spanprod_light_dv     <= dv_dv[23:0];
+                        end
+                    endcase
+                    if (dv_attr == 3'd3) begin
+                        dstate <= DRV_DONE;
+                    end else begin
+                        dv_attr <= dv_attr + 3'd1;
+                        dstate  <= DRV_DA_PREP;  // pre-stage da*_sat for next attr
+                    end
+                end
+                default: begin   // DRV_DONE
+                    // Planes staged.  Hand off to the record-fill drain; it will
+                    // wait on the walker via tri_walker_done if still busy.
+                    tri_fill_idx <= 3'd0;
+                    state <= S_TRI_FILL;
+                end
+            endcase
+            end // GPU_HAS_VERT_TRI
+        end
+
+        // ============================================================
+        // Triangle record fill — drain the edge walker's record stream
+        // into the 4-entry chunk regs, then run the normal spanprod loop.
+        // tri_rec_ready is combinational on this state, so each record is
+        // captured on the same edge the walker's handshake consumes it.
+        // ============================================================
+        S_TRI_FILL: begin
+            tri_start <= 1'b0;   // start pulse consumed by the walker
+            if (tri_rec_valid) begin
+                spanprod_u[tri_fill_idx[1:0]]     <= tri_rec_u;
+                spanprod_v[tri_fill_idx[1:0]]     <= tri_rec_v;
+                spanprod_count[tri_fill_idx[1:0]] <= tri_rec_count;
+                if (tri_fill_idx == 3'd3) begin
+                    spanprod_record_count <= 3'd4;
+                    spanprod_records_left <= 16'd4;
+                    spanprod_idx <= 2'd0;
+                    spanprod_calc_step <= 3'd0;
+                    tri_fill_idx <= 3'd0;
+                    state <= S_SPANPROD_SELECT;
+                end else begin
+                    tri_fill_idx <= tri_fill_idx + 3'd1;
+                end
+            end else if (tri_walker_done) begin
+                if (tri_fill_idx != 3'd0) begin
+                    // Dispatch the final partial chunk.
+                    spanprod_record_count <= tri_fill_idx;
+                    spanprod_records_left <= {13'd0, tri_fill_idx};
+                    spanprod_idx <= 2'd0;
+                    spanprod_calc_step <= 3'd0;
+                    tri_fill_idx <= 3'd0;
+                    state <= S_SPANPROD_SELECT;
+                end else begin
+                    // Nothing (left) to draw: drain accumulators and
+                    // retire.  S_FB_FLUSH is idempotent when empty.
+                    spanprod_active <= 1'b0;
+                    state <= S_FB_FLUSH;
+                end
+            end
+            // else: walker still computing — hold here.
+        end
 
 	        S_SPANPROD_SETUP: begin
 	            if (!spanprod_active) begin
@@ -2905,7 +4269,15 @@ always @(posedge clk) begin : main_fsm
 	                        fb_acc_valid <= 1'b0;
 	                        fb_acc_mask  <= 4'b0;
 	                        if (spanprod_idx == spanprod_last_idx) begin
-	                            if ((spanprod_records_left > {13'd0, spanprod_record_count})
+	                            if (cmd_is_tri_walker) begin
+	                                if (!tri_walker_done) begin
+	                                    state <= S_TRI_FILL;
+	                                end else begin
+	                                    spanprod_active <= 1'b0;
+	                                    state <= S_IDLE;
+	                                end
+	                            end
+	                            else if ((spanprod_records_left > {13'd0, spanprod_record_count})
 	                                && (pay_remaining != 13'd0)) begin
 	                                spanprod_prepare_next_record_chunk;
 	                            end else begin
@@ -2918,7 +4290,15 @@ always @(posedge clk) begin : main_fsm
 	                        end
 	                    end
 	                end else if (spanprod_idx == spanprod_last_idx) begin
-	                    if ((spanprod_records_left > {13'd0, spanprod_record_count})
+	                    if (cmd_is_tri_walker) begin
+	                        if (!tri_walker_done) begin
+	                            state <= S_TRI_FILL;
+	                        end else begin
+	                            spanprod_active <= 1'b0;
+	                            state <= S_IDLE;
+	                        end
+	                    end
+	                    else if ((spanprod_records_left > {13'd0, spanprod_record_count})
 	                        && (pay_remaining != 13'd0)) begin
 	                        spanprod_prepare_next_record_chunk;
 	                    end else begin
@@ -3038,8 +4418,6 @@ always @(posedge clk) begin : main_fsm
         // advances when p0a snapshots a source pixel.
         S_FRAG_PIPE: begin : frag_pipe_blk
             reg scalar_span_last_issue;
-            reg [GPU_ADDR_W-1:0] p3_word_addr;
-            reg [1:0]  p3_byte_lane;
             reg        p3_word_match;
             reg        issue_committed;
             reg        p1_to_p2;
@@ -3361,19 +4739,17 @@ always @(posedge clk) begin : main_fsm
                     // following opaque pixel flushes the group first so draw
                     // order stays byte-exact.
                     if (p3_valid && !p3_discard && p3_flags[SPAN_TRANSLUC]) begin
-                        p3_word_addr = p3_fb_addr & {{(GPU_ADDR_W-2){1'b1}}, 2'b00};
-                        p3_byte_lane = p3_fb_addr[1:0];
                         if (!blend_group_active) begin
                             blend_group_active    <= 1'b1;
-                            blend_group_word_addr <= p3_word_addr;
-                            blend_group_mask      <= fb_lane_mask(p3_byte_lane);
-                            blend_group_src_data  <= fb_lane_data(p3_byte_lane, p3_color);
+                            blend_group_word_addr <= p3_fb_word_addr_w;
+                            blend_group_mask      <= p3_fb_lane_mask_w;
+                            blend_group_src_data  <= p3_fb_lane_data_w;
                             p3_consumed = 1'b1;
-                        end else if (blend_group_word_addr == p3_word_addr
-                                  && !(|(blend_group_mask & fb_lane_mask(p3_byte_lane)))) begin
-                            blend_group_mask <= blend_group_mask | fb_lane_mask(p3_byte_lane);
+                        end else if (blend_group_word_addr == p3_fb_word_addr_w
+                                  && !(|(blend_group_mask & p3_fb_lane_mask_w))) begin
+                            blend_group_mask <= blend_group_mask | p3_fb_lane_mask_w;
                             blend_group_src_data <= blend_group_src_data
-                                                  | fb_lane_data(p3_byte_lane, p3_color);
+                                                  | p3_fb_lane_data_w;
                             p3_consumed = 1'b1;
                         end else begin
                             fbss <= FBSS_BLEND_REQ;
@@ -3413,8 +4789,6 @@ always @(posedge clk) begin : main_fsm
                     end
                     // Process p3 if it has a non-discard pixel (and no pending depth work)
                     else if (p3_valid && !p3_discard) begin : fb_acc_blk
-                        p3_word_addr  = p3_fb_addr & {{(GPU_ADDR_W-2){1'b1}}, 2'b00};
-                        p3_byte_lane  = p3_fb_addr[1:0];
                         p3_word_match = fb_acc_p3_word_match;
 
                         if (!p3_word_match) begin
@@ -3425,9 +4799,9 @@ always @(posedge clk) begin : main_fsm
                                 fbwq_push_strb = fb_acc_mask;
 
                                 fb_acc_valid <= 1'b1;
-                                fb_acc_addr  <= p3_word_addr;
-                                fb_acc_data  <= fb_lane_data(p3_byte_lane, p3_color);
-                                fb_acc_mask  <= fb_lane_mask(p3_byte_lane);
+                                fb_acc_addr  <= p3_fb_word_addr_w;
+                                fb_acc_data  <= p3_fb_lane_data_w;
+                                fb_acc_mask  <= p3_fb_lane_mask_w;
                                 p3_consumed = 1'b1;
                             end else begin
                                 // The write queue is full.  Park FBSS for one
@@ -3437,10 +4811,10 @@ always @(posedge clk) begin : main_fsm
                             end
                         end else begin
                             fb_acc_valid <= 1'b1;
-                            fb_acc_addr  <= p3_word_addr;
-                            fb_acc_data  <= (fb_acc_data & ~fb_lane_data_mask(p3_byte_lane))
-                                          | fb_lane_data(p3_byte_lane, p3_color);
-                            fb_acc_mask  <= fb_acc_mask | fb_lane_mask(p3_byte_lane);
+                            fb_acc_addr  <= p3_fb_word_addr_w;
+                            fb_acc_data  <= (fb_acc_data & ~p3_fb_lane_data_mask_w)
+                                          | p3_fb_lane_data_w;
+                            fb_acc_mask  <= fb_acc_mask | p3_fb_lane_mask_w;
                             p3_consumed = 1'b1;
                         end
 
@@ -4204,7 +5578,15 @@ always @(posedge clk) begin : main_fsm
 	                persp_first_done  <= 0;
                 if (spanprod_active) begin
 	                    if (spanprod_idx == spanprod_last_idx) begin
-	                        if ((spanprod_records_left > {13'd0, spanprod_record_count})
+	                        if (cmd_is_tri_walker) begin
+	                            if (!tri_walker_done) begin
+	                                state <= S_TRI_FILL;
+	                            end else begin
+	                                spanprod_active <= 1'b0;
+	                                state <= S_FB_FLUSH;
+	                            end
+	                        end
+	                        else if ((spanprod_records_left > {13'd0, spanprod_record_count})
 	                            && (pay_remaining != 13'd0)) begin
 	                            spanprod_prepare_next_record_chunk;
 	                        end else begin

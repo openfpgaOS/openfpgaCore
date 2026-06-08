@@ -1150,7 +1150,8 @@ static void test_hw_features_readback() {
 
     const uint32_t HW_FEATURES = 0x40000098u;
     const uint32_t REQUIRED =
-        (1u << 0) |   // audio
+        (1u << 0) |   // audio mixer available (OF_HW_MIXER)
+        (1u << 1) |   // HW mixer backend present (OF_HW_MIXER_HW; HAS_MIXER_HW default 1)
         (1u << 2) |   // link
         (1u << 3) |   // analogizer
         (1u << 4) |   // GPU spans
