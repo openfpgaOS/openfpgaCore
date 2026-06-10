@@ -42,7 +42,7 @@
 /* The SW music ring's depth is derived from its SDRAM reservation, so there is
  * ONE knob (OF_TARGET_AUDIO_STREAM_SIZE in target_platform.h) rather than a
  * separately-hardcoded pair count. 4 bytes per stereo pair (pocket default
- * 256 KB => 65536 pairs => ~1.37 s at 48 kHz). Apps software-mix music into
+ * 512 KB => 131072 pairs => ~2.7 s at 48 kHz). Apps software-mix music into
  * this ring from the main loop; the depth is how long music keeps playing
  * through a single-thread stall before the stream-mode fade. Music latency
  * through the ring is irrelevant and SFX bypass it. */
@@ -71,7 +71,7 @@ static inline void ensure_audio_ring(void)
         /* One-time zero at first use.  Re-zeroing on every init/stop is
          * unnecessary under stream mode (the voice never fetches at or
          * past WPTR, so stale contents are unreachable) and would cost
-         * ~65536 B-response-stalled stores (~tens of ms) per call. */
+         * AUDIO_RING_PAIRS B-response-stalled stores (~tens of ms) per call. */
         for (int i = 0; i < AUDIO_RING_PAIRS; i++) audio_ring[i] = 0;
     }
 }

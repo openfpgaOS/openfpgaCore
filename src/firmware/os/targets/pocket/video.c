@@ -224,12 +224,37 @@ static void palette_wait_ready(void) {
     }
 }
 
-static void palette_upload_shadow(void) {
-    palette_wait_ready();
+/* Deferred palette upload.
+ *
+ * The staged palette commits at vblank, so an upload issued while the
+ * previous commit is pending used to SPIN in palette_wait_ready for up
+ * to a frame (33 ms cap).  Apps that animate the palette every frame
+ * (SVid movie fades, game palette cycling) paid that stall per frame --
+ * visible stutter exactly when palettes change.  Instead: pal_shadow is
+ * the source of truth; try the upload immediately when the engine is
+ * free, otherwise mark dirty and let the vblank IRQ retire it (which is
+ * also the correct latch point -- palette and frame swap then apply at
+ * the same vsync).  Multiple updates before retire coalesce to the
+ * newest shadow.  pal_uploading interlocks the IRQ against a main-line
+ * upload in progress (single core: the ISR can preempt main, never the
+ * reverse). */
+static volatile int pal_dirty;
+static volatile int pal_uploading;
+
+static int palette_try_upload_shadow(void) {
+    if (PAL_INDEX & PAL_INDEX_BUSY)
+        return 0;
     PAL_INDEX = 0;
     for (int i = 0; i < 256; i++)
         PAL_WRITE = pal_shadow[i];
     palette_commit_staged();
+    return 1;
+}
+
+static void palette_upload_shadow(void) {
+    pal_uploading = 1;
+    pal_dirty = !palette_try_upload_shadow();
+    pal_uploading = 0;
 }
 
 static volatile uint32_t timing_vblank_count;
@@ -879,6 +904,16 @@ void of_video_vsync_irq_service(void) {
     timing_last_vblank_cycles = read_cycles();
     sync_swap_state();
     vrr_update_on_vblank(timing_present_count != present_count_before);
+
+    /* Retire a deferred palette upload (see palette_upload_shadow).  The
+     * previous commit latched at this vblank, so the engine is normally
+     * free here; if not, the next vblank retries.  Skipped in overlay
+     * mode (the dimmed overlay palette owns the hardware there) and
+     * while the main line is mid-upload. */
+    if (pal_dirty && !pal_uploading && vid_display_mode != DISPLAY_MODE_OVERLAY) {
+        if (palette_try_upload_shadow())
+            pal_dirty = 0;
+    }
 }
 
 void of_video_get_timing(of_video_timing_t *out) {
