@@ -403,6 +403,18 @@ static inline void write_vol_target(int voice, uint32_t packed)
     }
 }
 
+/* For code that programs a voice's VOL_TARGET register DIRECTLY (the
+ * pocket audio stream voice in targets/pocket/audio.c): mark the shadow
+ * unknown so the next of_mixer_set_volume()/set_vol_lr() is not
+ * suppressed by a stale dedupe match.  Without this, a raw 0xFFFF
+ * target write after a faded-to-0 stop left shadow==0, and the NEXT
+ * fade's set_volume(.., 0) was skipped -- full-volume hard-cut click. */
+void of_mixer_vol_target_invalidate(int voice)
+{
+    if (voice_in_range(voice))
+        vol_target_shadow[voice] = VOL_TARGET_UNKNOWN;
+}
+
 static void apply_vol_pan(int voice)
 {
     int v = vol_shadow[voice];

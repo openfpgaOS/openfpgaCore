@@ -57,7 +57,13 @@ module tb_audio_mixer (
     output wire [31:0] sample_data,
     output wire [21:0] pos_readback,
     output wire [31:0] voice_end_pending,
-    output wire [31:0] voice_active_mask
+    output wire [31:0] voice_active_mask,
+
+    /* Highest SDRAM byte address the mixer has fetched (inclusive of
+     * burst beats).  Lets the stream-mode tests assert that a starved
+     * stream voice NEVER fetches past the published write pointer —
+     * the literal stale-replay bug.  Cleared by reset. */
+    output reg  [31:0] max_araddr_seen
 );
 
     /* ---------- AXI4 read master <-> SDRAM stub ---------- */
@@ -90,6 +96,15 @@ module tb_audio_mixer (
     integer si;
     initial begin
         for (si = 0; si < 1024; si = si + 1) sdram_mem[si] = 32'd0;
+    end
+
+    always @(posedge clk) begin
+        if (!reset_n) begin
+            max_araddr_seen <= 32'd0;
+        end else if (m_arvalid && m_arready) begin
+            if (m_araddr + {22'd0, m_arlen, 2'b00} > max_araddr_seen)
+                max_araddr_seen <= m_araddr + {22'd0, m_arlen, 2'b00};
+        end
     end
 
     always @(posedge clk) begin

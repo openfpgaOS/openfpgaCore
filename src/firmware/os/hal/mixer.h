@@ -167,6 +167,9 @@ uint32_t of_mixer_reserved_size(void);
 uint32_t of_mixer_app_memory_top(void);
 uint32_t of_mixer_stream_base(void);
 uint32_t of_mixer_stream_uncached_base(void);
+/* Invalidate a voice's VOL_TARGET dedupe shadow after writing the
+ * register directly (see targets/pocket/audio.c configure_stream_voice). */
+void of_mixer_vol_target_invalidate(int voice);
 void *of_mixer_alloc_samples(uint32_t size);
 void of_mixer_free_samples(void);
 

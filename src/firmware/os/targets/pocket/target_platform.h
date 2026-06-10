@@ -100,14 +100,16 @@
  *
  * OF_TARGET_AUDIO_STREAM_SIZE is the SINGLE KNOB for the SW music ring:
  * audio.c derives AUDIO_RING_PAIRS = OF_TARGET_AUDIO_STREAM_SIZE / 4 (4 bytes
- * per stereo pair), and the HW voice length follows it at runtime. Default is
- * 64 KB = 16384 pairs = ~341 ms. To give music more coast through a long
- * blocking load, raise this to a power-of-two byte size (e.g. 0x40000 = 256 KB
- * = ~1.37 s) and rebuild os.bin -- nothing else changes. Must stay a power of
- * two (audio.c static-asserts it); music latency is irrelevant and SFX use
- * separate HW-mixer voices, so a deeper ring has no downside but the SDRAM. */
+ * per stereo pair), and the HW voice length follows it at runtime. 256 KB =
+ * 65536 pairs = ~1.37 s of coast through a blocking load; with the mixer's
+ * stream mode the ring depth is purely a continuity knob (overrun/stale
+ * replay is impossible -- the voice holds at the write pointer), so size it
+ * to span typical loads. Must stay a power of two (audio.c static-asserts
+ * it) and fit the 22-bit HW voice length; note the pump fills the ring to
+ * full, so app-side decode-time volume changes lag by the ring depth --
+ * keep it ~1-2 s unless music volume moves to the HW voice. */
 #define OF_TARGET_AUDIO_RESERVE_TOP    OF_TARGET_FILE_CACHE_BASE
-#define OF_TARGET_AUDIO_STREAM_SIZE    0x00010000u
+#define OF_TARGET_AUDIO_STREAM_SIZE    0x00040000u
 #define OF_TARGET_AUDIO_RESERVE_ALIGN  0x00001000u
 #define OF_TARGET_APP_STACK_TOP        OF_TARGET_AUDIO_RESERVE_TOP
 #define OF_TARGET_APP_STATIC_END       (OF_TARGET_APP_STACK_TOP - OF_TARGET_AUDIO_STREAM_SIZE - OF_TARGET_RUNTIME_STACK_SIZE)

@@ -36,7 +36,8 @@
 //   Word 0:  base_byte[31:0]   — absolute SDRAM byte address of sample 0
 //   Word 1:  length[21:0]      — total sample count
 //   Word 2:  rate_fp16[31:0]   — Q16.16 playback rate (0x10000 = 1.0)
-//   Word 3:  ctrl              — {loop[2], stereo[1], active[0]} (fmt=16 always)
+//   Word 3:  ctrl              — {stream[3], loop[2], stereo[1], active[0]}
+//                                (fmt=16 always)
 //   Word 4:  pos_int[21:0]
 //   Word 5:  pos_frac[15:0]
 //   Word 6:  vol_lr            — {vol_r[7:0], vol_l[7:0]}  (current, ramped)
@@ -44,7 +45,8 @@
 //   Word 8:  loop_start[21:0]
 //   Word 9:  vol_target        — {tgt_r[7:0], tgt_l[7:0]}
 //   Word 10: vol_rate[7:0]     — ramp step size (0 = snap)
-//   Word 11-15: reserved
+//   Word 11: wptr[21:0]        — stream-mode producer write pointer
+//   Word 12-15: reserved
 //
 
 `default_nettype none
@@ -128,6 +130,26 @@ localparam VTBL_LOOP_END   = 4'd7;
 localparam VTBL_LOOP_START = 4'd8;
 localparam VTBL_VOL_TARGET = 4'd9;
 localparam VTBL_VOL_RATE   = 4'd10;
+localparam VTBL_WPTR       = 4'd11;  // stream-mode producer write pointer (sample/pair index)
+
+// Stream mode (ctrl[3]): the voice is a FIFO fed by the CPU.  The FSM
+// refuses to fetch or advance past the published write pointer; below
+// STREAM_LOW pairs of backlog it fades the voice toward 0 via the
+// existing volume ramp (click-free), and below STREAM_FLOOR it holds
+// position in silence until the CPU advances WPTR — so a stalled
+// producer (CPU blocked in an SD read) yields ramped silence + seamless
+// resume instead of replaying stale ring contents forever.
+// STREAM_FLOOR=4 is safe for rates up to 2.0 (firmware clamps).
+//
+// STREAM-MODE CONTRACT (firmware must honor; nothing enforces it here):
+// the backlog math wraps at LENGTH while the advance path wraps at
+// LOOP_END back to LOOP_START, so a stream voice MUST be configured
+// with loop_start == 0 and loop_end == length == ring size (and
+// wptr < length, pos < length).  Any other loop window makes avail
+// overestimate the backlog after a wrap and the FSM could fetch past
+// WPTR — the exact bug class this mode exists to eliminate.
+localparam [21:0] STREAM_LOW   = 22'd256;
+localparam [21:0] STREAM_FLOOR = 22'd4;
 
 /* =================================================================
  * Voice table backing store.
@@ -166,7 +188,14 @@ wire        is_cpu_field =
     (voice_field == VTBL_LOOP_END)   ||
     (voice_field == VTBL_LOOP_START) ||
     (voice_field == VTBL_VOL_TARGET) ||
-    (voice_field == VTBL_VOL_RATE);
+    (voice_field == VTBL_VOL_RATE)   ||
+    /* WPTR MUST stay on the immediate path, never in cpu_fsm_q: queued
+     * writes force-clear the voice's active bit until the queue drains
+     * (see voice_active logic below), which would glitch the stream
+     * voice inactive on EVERY ring refill.  Immediate is safe: the FSM
+     * reads WPTR once per 48 kHz pass and a one-pass-stale value only
+     * delays resume by one sample period. */
+    (voice_field == VTBL_WPTR);
 wire        vtbl_cpu_b_wr = voice_wr && is_cpu_field;
 
 /* MIX_VOICE_POS_WR (VTBL_POS_INT) and MIX_VOICE_VOL_LR (VTBL_VOL_LR)
@@ -476,6 +505,9 @@ localparam S_ADV_COMMIT     = 6'd34;
 localparam S_FETCH_TAP1_MODE = 6'd35;  // second half of burst-mode decision
 localparam S_WR_VOL_RAMP_R = 6'd36;
 localparam S_WR_VOL_LOAD   = 6'd37;  // latch VOL_TARGET read data before target multiply
+localparam S_RD_LSTART_W   = 6'd38;  // capture LOOP_START (moved out of S_FETCH_TAP0_CALC); queue WPTR read
+localparam S_STREAM_WPTR_W = 6'd39;  // capture WPTR; register both ring-distance adder cones
+localparam S_STREAM_CHK    = 6'd40;  // backlog thresholds; hold-branch for a starved stream voice
 
 reg [5:0] state;
 reg [4:0] cur_voice;
@@ -483,7 +515,7 @@ reg [4:0] cur_voice;
 reg [31:0] voice_base;          // absolute SDRAM byte address from voice state
 reg [21:0] cur_length;
 reg [31:0] cur_rate;
-reg [2:0]  cur_ctrl;        // {loop, stereo, active}
+reg [3:0]  cur_ctrl;        // {stream, loop, stereo, active}
 reg [21:0] cur_pos_int;
 reg [15:0] cur_pos_frac;
 reg [7:0]  cur_vol_l, cur_vol_r;
@@ -514,6 +546,20 @@ reg [7:0]  nxt_l_r, nxt_r_r;
 
 wire cur_stereo = cur_ctrl[1];
 wire cur_loop   = cur_ctrl[2];
+wire cur_stream = cur_ctrl[3];
+
+// Stream-mode pipeline registers (one job per cycle, same discipline as
+// the advance/volume pipelines): S_STREAM_WPTR_W registers the two
+// parallel ring-distance cones off the WPTR RAM read; S_STREAM_CHK
+// muxes them (conditional-add modular distance — no power-of-2 length
+// contract) and branches.  stream_quiet is consumed later in the SAME
+// voice pass by S_WR_VOL_MULT; it is re-assigned on every pass through
+// S_STREAM_CHK (0 for non-stream voices), so it can never leak across
+// voices.
+reg [22:0] stream_lmp;     // length - pos (precomputed so WPTR_W is one adder deep)
+reg [22:0] stream_d0;      // wptr - pos            (borrow in bit 22)
+reg [22:0] stream_d1;      // wptr + (length - pos) (wrap-corrected)
+reg        stream_quiet;   // backlog < STREAM_LOW → fade volume target to 0
 
 // Tap fetch state — linear interp needs 2 consecutive samples.
 reg signed [15:0] tap0_l, tap0_r;
@@ -665,6 +711,10 @@ always @(posedge clk) begin
         burst_mode_dup   <= 1'b0;
         vol_raw_l_r      <= 8'd0;
         vol_raw_r_r      <= 8'd0;
+        stream_lmp       <= 23'd0;
+        stream_d0        <= 23'd0;
+        stream_d1        <= 23'd0;
+        stream_quiet     <= 1'b0;
     end else case (state)
 
     // ---- Idle: wait for FIFO to drop below half, then start new sample ----
@@ -698,7 +748,7 @@ always @(posedge clk) begin
     // Voice-field read pipeline. The packed table keeps the public
     // 16-word-per-voice ABI while avoiding one physical RAM per field.
     S_RD_CTRL_W: begin
-        cur_ctrl <= vtbl_a_q[2:0];
+        cur_ctrl <= vtbl_a_q[3:0];
         state    <= S_CHECK_ACTIVE;
     end
 
@@ -767,7 +817,47 @@ always @(posedge clk) begin
     S_RD_VOL: begin
         cur_loop_end <= vtbl_a_q[21:0];
         vtbl_a_addr  <= {cur_voice, VTBL_LOOP_START};
-        state        <= S_FETCH_TAP0_CALC;
+        state        <= S_RD_LSTART_W;
+    end
+
+    // Capture LOOP_START (moved here from S_FETCH_TAP0_CALC so the
+    // stream-mode states can slot in before the fetch), queue the WPTR
+    // read, and precompute (length - pos) so S_STREAM_WPTR_W's d1 cone
+    // is a single adder off the RAM read.
+    S_RD_LSTART_W: begin
+        cur_loop_start <= vtbl_a_q[21:0];
+        cur_loop_valid <= (cur_loop_end > vtbl_a_q[21:0]);
+        cur_loop_len   <= cur_loop_end - vtbl_a_q[21:0];
+        stream_lmp     <= {1'b0, cur_length} - {1'b0, cur_pos_int};
+        vtbl_a_addr    <= {cur_voice, VTBL_WPTR};
+        state          <= S_STREAM_WPTR_W;
+    end
+
+    // Two PARALLEL ring-distance cones registered straight off the WPTR
+    // RAM read (conditional-add modular distance — no power-of-2 length
+    // contract baked into silicon).  d1 is only consumed when wptr < pos,
+    // where it provably fits 22 bits (wptr < pos ⇒ d1 < length).
+    S_STREAM_WPTR_W: begin
+        stream_d0 <= {1'b0, vtbl_a_q[21:0]} - {1'b0, cur_pos_int};
+        stream_d1 <= {1'b0, vtbl_a_q[21:0]} + stream_lmp;
+        state     <= S_STREAM_CHK;
+    end
+
+    // Backlog thresholds.  stream_quiet (re-assigned EVERY pass, 0 for
+    // non-stream voices) fades the volume target to 0 via the existing
+    // ramp hardware while real samples still play — click-free — and
+    // ramps back up automatically once the backlog recovers.  Below
+    // STREAM_FLOOR the voice is held: no fetch, no advance, no position
+    // commit; the volume pipeline still runs so ramps progress, and the
+    // next 48 kHz pass re-reads WPTR (resume needs zero CPU help).
+    S_STREAM_CHK: begin : stream_chk_blk
+        reg [21:0] avail;
+        avail = stream_d0[22] ? stream_d1[21:0] : stream_d0[21:0];
+        stream_quiet <= cur_stream && (avail < STREAM_LOW);
+        if (cur_stream && (avail < STREAM_FLOOR))
+            state <= S_RAMP_STEP;     // starved: silence + hold position
+        else
+            state <= S_FETCH_TAP0_CALC;
     end
 
     // ---- Fetch tap0 + tap1 with one ARLEN=1 burst when safe ----
@@ -801,9 +891,7 @@ always @(posedge clk) begin
     //                            beat 0, optionally receive beat 1.
     S_FETCH_TAP0_CALC: begin : fetch_tap0_calc_blk
         reg [31:0] sample_addr;
-        cur_loop_start <= vtbl_a_q[21:0];
-        cur_loop_valid <= (cur_loop_end > vtbl_a_q[21:0]);
-        cur_loop_len   <= cur_loop_end - vtbl_a_q[21:0];
+        // (LOOP_START capture lives in S_RD_LSTART_W now.)
         if (cur_pos_int >= cur_length) begin
             state <= S_VOICE_END;
         end else begin
@@ -1125,8 +1213,13 @@ always @(posedge clk) begin
     end
 
     S_WR_VOL_LOAD: begin
-        vol_raw_l_r <= vtbl_a_q[7:0];
-        vol_raw_r_r <= vtbl_a_q[15:8];
+        // stream_quiet substitutes a raw target of 0 here (a 2:1 mux on
+        // the RAM capture — cheaper than muxing the DSP output in
+        // S_WR_VOL_MULT).  0 × gxm = 0, so the existing ramp fades the
+        // starving stream voice out, and back in on recovery, with the
+        // app's programmed VOL_TARGET untouched in storage.
+        vol_raw_l_r <= stream_quiet ? 8'd0 : vtbl_a_q[7:0];
+        vol_raw_r_r <= stream_quiet ? 8'd0 : vtbl_a_q[15:8];
         state       <= S_WR_VOL_MULT;
     end
 

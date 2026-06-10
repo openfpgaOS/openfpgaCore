@@ -32,7 +32,7 @@
  *   field 0  ADDR        absolute SDRAM byte address of sample 0
  *   field 1  LEN         total sample count (22-bit)
  *   field 2  RATE        Q16.16 playback step (0x10000 = 1.0)
- *   field 3  CTRL        {loop[2], stereo[1], active[0]}
+ *   field 3  CTRL        {stream[3], loop[2], stereo[1], active[0]}
  *   field 4  POS_INT     integer sample position (22-bit)
  *   field 5  POS_FRAC    Q0.16 fractional position
  *   field 6  VOL_LR      {vol_r[15:8], vol_l[7:0]} current (ramped) volume
@@ -40,6 +40,7 @@
  *   field 8  LOOP_START  loop start sample index (22-bit)
  *   field 9  VOL_TARGET  {tgt_r[15:8], tgt_l[7:0]} pre-gxm target
  *   field 10 VOL_RATE    ramp step (0 = snap)
+ *   field 11 WPTR        stream-mode producer write pointer (22-bit)
  */
 
 #include "sw_mixer.h"
@@ -60,6 +61,12 @@
 #define VF_LOOP_START  8u
 #define VF_VOL_TARGET  9u
 #define VF_VOL_RATE   10u
+#define VF_WPTR       11u
+
+/* Stream-mode thresholds — must match audio_mixer.v's STREAM_LOW /
+ * STREAM_FLOOR so SW and HW builds sound identical. */
+#define SW_STREAM_LOW    256u
+#define SW_STREAM_FLOOR  4u
 
 /* Control-register byte offsets inside the emulated MMIO aperture. */
 #define OFF_MASTER_VOL   0x800u
@@ -377,6 +384,30 @@ void sw_mixer_render(int16_t *out, int nframes)
             uint32_t loop_start = s->loop_start;
             sw_memo_t *memo = &sw_memo[v];
 
+            /* ---- stream-mode backlog check (S_STREAM_CHK) ----
+             * WPTR is re-read every frame (not snapshotted) to mirror the
+             * HW's per-sample re-read — the producer may advance it
+             * mid-chunk and resume must be immediate. */
+            int stream_quiet = 0;
+            if (s->ctrl & 8u) {
+                uint32_t wptr  = *vfield(v, VF_WPTR) & 0x3FFFFFu;
+                /* Same contract as the HW (audio_mixer.v): the backlog
+                 * wraps at LENGTH while the advance wraps at LOOP_END→
+                 * LOOP_START, so stream voices require loop_start==0,
+                 * loop_end==length==ring size, wptr<length. */
+                uint32_t avail = (wptr >= pos_int)
+                               ? (wptr - pos_int)
+                               : (wptr + length - pos_int);
+                stream_quiet = (avail < SW_STREAM_LOW);
+                if (avail < SW_STREAM_FLOOR) {
+                    /* Starved: no fetch, no advance — silence with the
+                     * position held.  Jump straight to the volume ramp so
+                     * the stream_quiet fade still progresses (the HW skip
+                     * to S_RAMP_STEP). */
+                    goto volume_ramp;
+                }
+            }
+
             /* ---- one-shot end check (S_FETCH_TAP0_CALC) ---- */
             if (pos_int >= length) {
                 /* S_VOICE_END: retire one-shot, raise IRQ, clear active. */
@@ -471,8 +502,12 @@ void sw_mixer_render(int16_t *out, int nframes)
              * Composed target = (raw_target * gxm[group]) >> 8 per channel,
              * then ramp the current vol toward it by vol_rate.  Updates
              * VF_VOL_LR for the NEXT sample (this sample mixed with the
-             * pre-ramp current vol, exactly as the HW pipeline does). */
-            uint32_t vt = s->vol_target;
+             * pre-ramp current vol, exactly as the HW pipeline does).
+             * A stream voice running low on backlog substitutes a raw
+             * target of 0 (the HW's S_WR_VOL_LOAD mux) so it fades out
+             * click-free before starving and back in on recovery. */
+            volume_ramp:;
+            uint32_t vt = stream_quiet ? 0u : s->vol_target;
             uint8_t raw_l = (uint8_t)(vt & 0xFFu);
             uint8_t raw_r = (uint8_t)((vt >> 8) & 0xFFu);
             uint8_t g = s->gxm;

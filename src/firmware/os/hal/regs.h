@@ -357,13 +357,22 @@
 #define MIX_VOICE_ADDR(v)        MIX_VOICE_FIELD((v), 0)   /* W: absolute SDRAM byte address */
 #define MIX_VOICE_LEN(v)         MIX_VOICE_FIELD((v), 1)   /* W: sample count */
 #define MIX_VOICE_RATE(v)        MIX_VOICE_FIELD((v), 2)   /* W: Q16.16 playback rate */
-#define MIX_VOICE_CTRL(v)        MIX_VOICE_FIELD((v), 3)   /* W: [0]=active [1]=stereo [2]=loop */
+#define MIX_VOICE_CTRL(v)        MIX_VOICE_FIELD((v), 3)   /* W: [0]=active [1]=stereo [2]=loop [3]=stream */
 #define MIX_VOICE_POS_WR(v)      MIX_VOICE_FIELD((v), 4)   /* W: set pos_int (0 or jump) */
 #define MIX_VOICE_VOL_LR(v)      MIX_VOICE_FIELD((v), 6)   /* W: {vol_r[15:8], vol_l[7:0]} current */
 #define MIX_VOICE_LOOP_END(v)    MIX_VOICE_FIELD((v), 7)   /* W: loop_end sample index */
 #define MIX_VOICE_LOOP_START(v)  MIX_VOICE_FIELD((v), 8)   /* W: loop_start sample index */
 #define MIX_VOICE_VOL_TARGET(v)  MIX_VOICE_FIELD((v), 9)   /* W: {tgt_r[15:8], tgt_l[7:0]} */
 #define MIX_VOICE_VOL_RATE(v)    MIX_VOICE_FIELD((v), 10)  /* W: ramp step (0=snap) */
+/* Stream mode (ctrl[3]): producer write pointer, sample/pair index.  A
+ * stream voice plays only up to WPTR — when it catches up it fades out
+ * (via the voice's vol ramp), holds position in silence, and resumes by
+ * itself once WPTR advances.  Bitstreams older than the stream-mode RTL
+ * ignore both ctrl[3] and this field (legacy loop/replay behavior).
+ * CONTRACT: a stream voice must use loop_start=0, loop_end=length=ring
+ * size, wptr<length (the HW backlog math wraps at LENGTH, the advance
+ * at LOOP_END→LOOP_START — other loop windows break the hold). */
+#define MIX_VOICE_WPTR(v)        MIX_VOICE_FIELD((v), 11)  /* W: stream write pointer */
 #define MIX_MASTER_VOL       REG32(MIX_BASE + 0x800)
 #define MIX_GROUP_VOL(g)     REG32(MIX_BASE + 0x804 + ((g) << 2))
 #define MIX_VOICE_GROUP_LO   REG32(MIX_BASE + 0x814)  /* voices 0..15  packed 2 bits each */
@@ -628,6 +637,7 @@ volatile uint32_t *sw_mix_irq_doorbell(void);
 #undef MIX_VOICE_LOOP_START
 #undef MIX_VOICE_VOL_TARGET
 #undef MIX_VOICE_VOL_RATE
+#undef MIX_VOICE_WPTR
 #undef MIX_MASTER_VOL
 #undef MIX_GROUP_VOL
 #undef MIX_VOICE_GROUP_LO
@@ -650,6 +660,7 @@ volatile uint32_t *sw_mix_irq_doorbell(void);
 #define MIX_VOICE_LOOP_START(v)  MIX_VOICE_FIELD((v), 8)
 #define MIX_VOICE_VOL_TARGET(v)  MIX_VOICE_FIELD((v), 9)
 #define MIX_VOICE_VOL_RATE(v)    MIX_VOICE_FIELD((v), 10)
+#define MIX_VOICE_WPTR(v)        MIX_VOICE_FIELD((v), 11)
 #define MIX_MASTER_VOL           SW_MIX_SEL(0x800)
 #define MIX_GROUP_VOL(g)         SW_MIX_SEL(0x804 + ((g) << 2))
 #define MIX_VOICE_GROUP_LO       SW_MIX_SEL(0x814)
