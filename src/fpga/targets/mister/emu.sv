@@ -530,12 +530,14 @@ wire [31:0] link_reg_rdata = 32'd0;
 wire [31:0] mixer_active_mask;
 wire [21:0] mixer_pos_readback;
 wire [31:0] mixer_voice_end_pending;
+// pos_readback is NOT boundary-registered: audio_mixer registers its
+// MLAB read internally, and the periph FSM's S_PERIPH_RD_LATCH budget
+// is exactly two cycles after req_addr — one register stage on the
+// select-dependent path, no more.
 reg [31:0] mixer_active_mask_r;
-reg [21:0] mixer_pos_readback_r;
 reg [31:0] mixer_voice_end_pending_r;
 always @(posedge clk_cpu) begin
 	mixer_active_mask_r       <= mixer_active_mask;
-	mixer_pos_readback_r      <= mixer_pos_readback;
 	mixer_voice_end_pending_r <= mixer_voice_end_pending;
 end
 
@@ -594,6 +596,9 @@ axi_periph_slave #(
 	.rtc_epoch_seconds(rtc_epoch_seconds),
 	.rtc_valid(rtc_valid),
 	.bridge_wr_idle(bridge_wr_idle),
+	// F2i bridge word counters are a Pocket APF-bridge diagnostic; the
+	// MiSTer HPS path has no equivalent tap — the register reads 0.
+	.bridge_dbg_wcnt(32'd0),
 	.target_dataslot_ack(target_dataslot_ack),
 	.target_dataslot_done(target_dataslot_done),
 	.target_dataslot_err(target_dataslot_err),
@@ -649,7 +654,7 @@ axi_periph_slave #(
 	.mix_voice_group_packed (mixer_voice_group_packed_mmio),
 	.mix_voice_sel_rd       (mixer_voice_sel_rd_mmio),
 	.mix_active_mask        (mixer_active_mask_r),
-	.mix_pos_readback       (mixer_pos_readback_r),
+	.mix_pos_readback       (mixer_pos_readback),  // already registered inside audio_mixer (MLAB read flop) — a 2nd boundary register here overruns the periph FSM's 2-cycle latch budget and returns the PREVIOUS transaction's voice
 	.mix_voice_end_pending  (mixer_voice_end_pending_r),
 	// CRAM0 ownership mode — no CRAM on MiSTer; register is inert
 	.cram0_mode             (),

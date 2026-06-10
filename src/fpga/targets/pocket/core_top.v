@@ -844,7 +844,7 @@ cram0_controller #(
     .cram_a(cram0_a),
     .cram_dq(cram0_dq),
     .cram_wait(cram0_wait),
-    .cram_clk(),             // PLL / clk_74a drives cram0_clk directly
+    .cram_clk(),             // unused: cram0_clk pin tied LOW (async mode, F5)
     .cram_adv_n(cram0_adv_n),
     .cram_cre(cram0_cre),
     .cram_ce0_n(cram0_ce0_n),
@@ -1402,6 +1402,7 @@ wire        brg_sdram_bvalid;
 wire        brg_sdram_idle;
 wire        brg_sdram_fifo_full;
 wire        brg_sdram_overrun;
+wire        brg_sdram_detect_wr;   // per-word pulse, clk_74a (F2i counter tap)
 // Combined bridge write-overrun diagnostic.  Both overrun flags are sticky
 // error indicators that are NO LONGER allowed to gate idle/busy (that caused a
 // permanent data-slot wedge); they are observable here for SignalTap and can
@@ -1748,6 +1749,66 @@ end
             target_buffer_resp_struct <= cpu_ds_resp_sync2;
         end
     end
+
+// ============================================================
+// F2i: per-DS-command bridge word counters (clk_74a)
+// ============================================================
+// Cold-start bridge-corruption forensics: count every bridge word the
+// APF host pushes at us during one data-slot command, on BOTH write
+// legs, BEFORE any FIFO/mux drop.  Firmware compares the count against
+// length/4: a short count means words never made it out of the SPI RX
+// capture (RX-side drop); an exact count with bad content means the
+// words arrived already corrupted.
+//   [14:0]  CRAM0-leg words   (bridge_cram0_wr_pulse, saturates 0x7FFF)
+//   [15]    sticky (F6): CRAM0-range bridge write arrived while the CPU
+//           owned the CRAM0 mux — the write was silently dropped by the
+//           bridge_wr_accept gate above
+//   [30:16] SDRAM-leg words   (bridge_to_sdram detect_wr, saturates
+//           0x7FFF; large direct-SDRAM DMAs >128KB will peg it — the
+//           primary forensic use is the 4KB boot/OS-load chunks)
+//   [31]    sticky: CRAM0 bridge write FIFO overrun drop this command
+// All four fields clear on the DS command issue pulse (same edge that
+// latches target_dataslot_* into the bridge handler below), so after
+// DONE the register describes exactly the command that just ran.
+reg         target_dataslot_getfile_cnt_1 = 1'b0;
+reg [14:0]  brg_wcnt_cram0 = 15'd0;
+reg [14:0]  brg_wcnt_sdram = 15'd0;
+reg         brg_cram0_drop_cpu_owned = 1'b0;
+reg         brg_cram0_drop_overrun   = 1'b0;
+
+wire ds_cmd_pulse_74a =
+    (target_dataslot_read     && !target_dataslot_read_1)     ||
+    (target_dataslot_write    && !target_dataslot_write_1)    ||
+    (target_dataslot_openfile && !target_dataslot_openfile_1) ||
+    (target_dataslot_getfile  && !target_dataslot_getfile_cnt_1);
+
+always @(posedge clk_74a) begin
+    target_dataslot_getfile_cnt_1 <= target_dataslot_getfile;
+    if (ds_cmd_pulse_74a) begin
+        brg_wcnt_cram0 <= 15'd0;
+        brg_wcnt_sdram <= 15'd0;
+        brg_cram0_drop_cpu_owned <= 1'b0;
+        brg_cram0_drop_overrun   <= 1'b0;
+    end else begin
+        if (bridge_cram0_wr_pulse && brg_wcnt_cram0 != 15'h7FFF)
+            brg_wcnt_cram0 <= brg_wcnt_cram0 + 15'd1;
+        if (brg_sdram_detect_wr && brg_wcnt_sdram != 15'h7FFF)
+            brg_wcnt_sdram <= brg_wcnt_sdram + 15'd1;
+        // F6 sticky: a CRAM0-range bridge write while cram0_mode_74a=1
+        // (CPU owns the mux) is dropped by the bridge_wr_accept gate.
+        if (bridge_cram0_wr_pulse && cram0_mode_74a)
+            brg_cram0_drop_cpu_owned <= 1'b1;
+        if (bridge_wr_overrun_pulse)
+            brg_cram0_drop_overrun <= 1'b1;
+    end
+end
+
+// Read by axi_periph_slave (clk_cpu) through a plain 2FF-per-bit sync:
+// quasi-static use only — firmware samples it AFTER DS_STATUS reports
+// DONE + WR_IDLE, when the counters have stopped moving, so per-bit
+// synchronizer skew cannot tear a live value.
+wire [31:0] bridge_dbg_wcnt_74a = {brg_cram0_drop_overrun,   brg_wcnt_sdram,
+                                   brg_cram0_drop_cpu_owned, brg_wcnt_cram0};
 
     reg     [9:0]   datatable_addr;
     wire    [31:0]  datatable_q;
@@ -2248,14 +2309,19 @@ assign video_hs = vidout_hs;
 `else
         .HAS_MIXER_HW(1),
 `endif
-        // Vert-tri: gated OFF by default (OS25 — device budget, see
-        // docs/gpu-utilization-handoff.md).  OS30_VERT_TRI enables it for the
-        // Quake/Quake2 variant, paid for by the EXCLUDE_* cuts.  Must match
-        // gpu's GPU_HAS_VERT_TRI.
+        // Triangle extras: gated OFF by default (OS25 — device budget, see
+        // docs/gpu-utilization-handoff.md).  OS30_VERT_TRI enables them for
+        // the Quake/Quake2 variant, paid for by the EXCLUDE_* cuts.
+        //   HAS_VERT_TRI       (HW_FEATURES bit 20) must match the gpu's
+        //                      GPU_HAS_VERT_TRI;
+        //   HAS_PARAM_TRI_RECS (HW_FEATURES bit 22) must match the gpu's
+        //                      GPU_HAS_PARAM_TRI_RECS.
 `ifdef OS30_VERT_TRI
-        .HAS_VERT_TRI(1)
+        .HAS_VERT_TRI(1),
+        .HAS_PARAM_TRI_RECS(1)
 `else
-        .HAS_VERT_TRI(0)
+        .HAS_VERT_TRI(0),
+        .HAS_PARAM_TRI_RECS(0)
 `endif
     ) periph (
         .clk(clk_cpu),
@@ -2315,6 +2381,8 @@ assign video_hs = vidout_hs;
         .rtc_epoch_seconds(rtc_epoch_seconds),
         .rtc_valid(rtc_valid),
         .bridge_wr_idle(bridge_wr_idle),
+        // F2i diagnostic counters (clk_74a, quasi-static after DONE)
+        .bridge_dbg_wcnt(bridge_dbg_wcnt_74a),
 	    .target_dataslot_ack(target_dataslot_ack),
         .target_dataslot_done(target_dataslot_done_safe),
         .target_dataslot_err(target_dataslot_err),
@@ -2376,7 +2444,7 @@ assign video_hs = vidout_hs;
         .mix_voice_group_packed (mixer_voice_group_packed_mmio),
         .mix_voice_sel_rd       (mixer_voice_sel_rd_mmio),
         .mix_active_mask        (mixer_active_mask_r),
-        .mix_pos_readback       (mixer_pos_readback_r),
+        .mix_pos_readback       (mixer_pos_readback),  // already registered inside audio_mixer (MLAB read flop) — a 2nd boundary register here overruns the periph FSM's 2-cycle latch budget and returns the PREVIOUS transaction's voice
         .mix_voice_end_pending  (mixer_voice_end_pending_r),
         // CRAM0 ownership mode (0 = bridge, 1 = CPU)
         .cram0_mode            (cram0_mode_cpu),
@@ -2474,6 +2542,7 @@ assign video_hs = vidout_hs;
         .idle           (brg_sdram_idle),
         .fifo_full      (brg_sdram_fifo_full),
         .overrun        (brg_sdram_overrun),
+        .detect_wr_o    (brg_sdram_detect_wr),
         .clk_axi        (clk_cpu),
         // Never-reset (config-init only), symmetric with the arbiter/slave it
         // drives, so it cannot async-drop AW/W mid-handshake on a warm reset.
@@ -2903,12 +2972,14 @@ wire        mixer_voice_end_irq;
  * which made the FPU critical path in VexiiRiscv worse because the
  * CPU had to be squeezed in too.  Firmware MMIO reads already incur
  * multi-cycle AXI handshake latency, so +1 cycle here is invisible. */
+/* pos_readback is NOT boundary-registered: audio_mixer registers its
+ * MLAB read internally, and the periph FSM's S_PERIPH_RD_LATCH budget
+ * is exactly two cycles after req_addr — one register stage on the
+ * select-dependent path, no more. */
 reg [31:0] mixer_active_mask_r;
-reg [21:0] mixer_pos_readback_r;
 reg [31:0] mixer_voice_end_pending_r;
 always @(posedge clk_cpu) begin
     mixer_active_mask_r       <= mixer_active_mask;
-    mixer_pos_readback_r      <= mixer_pos_readback;
     mixer_voice_end_pending_r <= mixer_voice_end_pending;
 end
 
@@ -3061,15 +3132,28 @@ wire        slave_swap_pending;  // from axi_periph_slave → stalls gpu_core CM
 
 `ifndef EXCLUDE_GPU
 gpu_core #(
-    // Exclude the hardware vertex-triangle plane derivation (0x4A/0x4B +
-    // S_TRI_DERIVE FSM): device budget — see docs/gpu-utilization-handoff.md.
-    // OS30_VERT_TRI enables it for the Quake/Quake2 variant (paid for by the
-    // EXCLUDE_* cuts).  The 0x49 param-tri path + edge walker stay present in
-    // both.  Must match the periph's HAS_VERT_TRI above.
+    // OS25 (default) excludes the triangle extras: the hardware
+    // vertex-triangle plane derivation (0x4A/0x4B + S_TRI_DERIVE FSM), the
+    // records-only param-tri (0x4D), and the 4-word z read window (depth 1 =
+    // pre-window single-word fill).  Device budget — see
+    // docs/gpu-utilization-handoff.md.  OS30_VERT_TRI enables all three for
+    // the Quake/Quake2 variant (paid for by the EXCLUDE_* cuts).  The 0x49
+    // param-tri path + edge walker stay present in BOTH variants;
+    // GPU_EW_PARALLEL_DIVS only selects the walker's slope-divide layout
+    // (OS30: three parallel dividers, ~48 cy setup/tri; OS25: the single
+    // shared divider, ~110 cy setup/tri — bit-identical quotients, so
+    // pixels do not change).  GPU_HAS_VERT_TRI / GPU_HAS_PARAM_TRI_RECS
+    // must match the periph's HAS_VERT_TRI / HAS_PARAM_TRI_RECS above.
 `ifdef OS30_VERT_TRI
-    .GPU_HAS_VERT_TRI(1)
+    .GPU_HAS_VERT_TRI(1),
+    .GPU_HAS_PARAM_TRI_RECS(1),
+    .GPU_Z_READ_WINDOW(4),
+    .GPU_EW_PARALLEL_DIVS(1)
 `else
-    .GPU_HAS_VERT_TRI(0)
+    .GPU_HAS_VERT_TRI(0),
+    .GPU_HAS_PARAM_TRI_RECS(0),
+    .GPU_Z_READ_WINDOW(1),
+    .GPU_EW_PARALLEL_DIVS(0)
 `endif
 ) gpu (
     .clk(clk_cpu),
@@ -3193,17 +3277,39 @@ mf_pllram_133 mp_ram (
 
 assign clk_cpu = clk_ram_controller;
 
-// Drive CRAM0 clock pin directly from clk_74a.  The controller now
-// runs in the clk_74a domain (v2 memory architecture), so the chip
-// CK and the controller FSM share the same clock tree with zero
-// cross-domain skew.  The CRAM chip is rated well above 74 MHz; the
-// shared-tree arrangement has been validated across many FMax runs.
+// F5 (bridge-corruption mitigation, 2026-06): hold the CRAM0 clock pin
+// LOW.  The CellularRAM datasheet requires CLK to be held low for ASYNC
+// operation — and the core runs the chip exclusively in async page mode
+// (BCR_VALUE = 16'h9D1F above, burst_rd tied 1'b0 at the controller
+// instance).  The previous `assign cram0_clk = clk_74a` free-ran the
+// chip clock through every async read/write AND through the
+// CRE-controlled BCR write itself, which is out of spec for async
+// CellularRAM operation and a plausible contributor to cold-start
+// flakiness.  Tie-low is chosen over routing cram0_phy.sv's cram_clk
+// output because, with burst_rd tied off, that output is provably
+// constant-low anyway (only ever assigned 0) — a literal constant makes
+// the intent explicit and costs no logic.
+//
+// Re-evaluate if sync-burst reads return: a synchronous BCR mode needs
+// a real CK (restore the clk_74a drive + the cram0_clk_pin generated
+// clock and IO delays in core_constraints.sdc).
 //
 // CRAM1 retired in v2 - pin unassigned in the qsf.
-assign cram0_clk = clk_74a;
+assign cram0_clk = clk_74a;  // F5 revert (A/B): tie-low suspected in field regression, restore legacy free-running clock
 
 // SDRAM controller
-io_sdram isr0 (
+io_sdram #(
+    // Open-page tracking layout (see io_sdram.v).  OS30 keeps the
+    // per-bank open_row[0:3] tracking for triangle/texture bandwidth;
+    // OS25 (2.5D span games) degenerates to the single open_bank/open_row
+    // — same protocol, lower row-hit rate, sheds the per-bank entries and
+    // bank-indexed muxes for device budget.  MiSTer keeps the default (1).
+`ifdef OS30_VERT_TRI
+    .BANK_ROW_TRACK(1)
+`else
+    .BANK_ROW_TRACK(0)
+`endif
+) isr0 (
     .controller_clk ( clk_ram_controller ),
     .chip_clk       ( clk_ram_chip ),
     .clk_90         ( clk_ram_chip ),

@@ -105,6 +105,7 @@ localparam S_WR_NEXT   = 4'd5;  // Accept next W beat (single-word writes)
 localparam S_WR_BURST  = 4'd6;  // Streaming: io_sdram pulls data via wr_data_next
 localparam S_WR_NATIVE_W0 = 4'd7; // Capture beat 0 on a real W handshake
 localparam S_WR_NATIVE_W1 = 4'd8; // Capture beat 1 before issuing a 2-beat write
+localparam S_WR_FILL   = 4'd9;  // Buffered writeback: fill local FIFO, then native burst
 
 reg [3:0] state;
 
@@ -118,9 +119,38 @@ reg [3:0]  next_wstrb;
 reg [31:0] active_next_wdata; // Beat selected by the last sdram_wr_data_next pull
 reg [3:0]  active_next_wstrb;
 reg        wready_given; // Next W beat already accepted
-reg        burst_preloaded; // 2-beat write has next_wdata before command issue
 reg        wcont_r;      // latched s_axi_wcont for the in-flight write
 reg        wr_op_done_seen; // sdram_wr_done pulse latched after our write was accepted; preferred over !sdram_busy because the busy signal stays high across unrelated io_sdram ops (scanout burst_rd, autorefresh) and starves single-word writes
+
+// Buffered writeback path (de-serialized CPU cache-line evictions).
+// A !wcont multi-beat write may stall WVALID mid-burst, so it cannot
+// stream straight into io_sdram's continuation pulls.  Instead, accept
+// the whole W burst into this local FIFO first (S_WR_FILL), then issue
+// ONE native io_sdram burst write fed from the FIFO.  Once fully
+// buffered, the burst is underrun-immune by construction — exactly the
+// invariant s_axi_wcont exists to guarantee.  16x36 → MLAB.
+// Structured as a textbook simple-dual-port memory (write in its own
+// always block, free-running registered read head) so Quartus infers a
+// memory instead of ~150 ALMs of FFs: same-block read+write tripped the
+// read-during-write check ("uninferred due to asynchronous read logic")
+// even though fill and drain are temporally disjoint by construction.
+// The registered head is valid because io_sdram continuation pulls are
+// >=2 cycles apart (ST_WRITE_2/3 datapath), pinned by sdram-wcont0.
+// NOTE: an inline (* ramstyle *) attribute here reproducibly crashes
+// Quartus 25.1std's Verific frontend (VRFX operators.cpp:2349) — the
+// MLAB request lives in ap_core.qsf as a RAMSTYLE_ATTRIBUTE instance
+// assignment instead.
+reg [35:0] wbuf [0:15];
+reg [35:0] wbuf_head;
+wire wbuf_we = (state == S_WR_FILL) && s_axi_wvalid && s_axi_wready;
+always @(posedge clk) begin
+    if (wbuf_we)
+        wbuf[wbuf_wptr] <= {s_axi_wstrb, s_axi_wdata};
+    wbuf_head <= wbuf[wbuf_rptr];
+end
+reg [3:0]  wbuf_wptr;     // fill index (0..burst_len)
+reg [3:0]  wbuf_rptr;     // pull-service index
+reg        wbuf_active;   // in-flight write is FIFO-fed (treated as wcont)
 
 // Stable continuation export for io_sdram burst write forwarding.  This is
 // latched on the pull pulse, so longer native bursts can accept/pre-stage the
@@ -150,15 +180,26 @@ reg        rskid_valid, rskid2_valid;
 
 wire beat_is_last = (beat_count == burst_len);
 // Serialize a multi-beat write unless its W stream is continuously available
-// (s_axi_wcont).  This keeps native streaming bursts for the GPU (queue-fed,
-// underrun-immune) while forcing CPU writebacks onto the safe per-beat path.
+// (s_axi_wcont) or it was fully buffered locally (wbuf_active).  This keeps
+// native streaming bursts for the GPU (queue-fed, underrun-immune) and the
+// buffered writeback path, while anything too long for a native io_sdram
+// burst stays on the safe per-beat path.
 wire write_burst_serialized = SERIALIZE_WRITE_BURSTS ||
                               (burst_len > MAX_NATIVE_WRITE_BURST_LEN) ||
-                              (!wcont_r && (burst_len != 8'd0));
+                              (!wcont_r && !wbuf_active && (burst_len != 8'd0));
 wire idle_aw_serialized = SERIALIZE_WRITE_BURSTS ||
                           (s_axi_awlen > MAX_NATIVE_WRITE_BURST_LEN) ||
                           (!s_axi_wcont && (s_axi_awlen != 8'd0));
-wire idle_aw_native_burst2 = !idle_aw_serialized && (s_axi_awlen == 8'd1);
+// Any native (streaming) multi-beat write now preloads beats 0 and 1 via
+// strict W handshakes before the command issues — io_sdram's rolling
+// preload needs beat 1 resident at issue time so continuation beats can
+// stream back-to-back without the old 2-dead-cycle pull bubble.
+wire idle_aw_native = !idle_aw_serialized && (s_axi_awlen != 8'd0);
+// Multi-beat write whose W stream may stall (CPU dirty-line writeback):
+// buffer-then-native-burst instead of 16 independent word writes.
+wire idle_aw_buffered = !SERIALIZE_WRITE_BURSTS && !s_axi_wcont &&
+                        (s_axi_awlen != 8'd0) &&
+                        (s_axi_awlen <= MAX_NATIVE_WRITE_BURST_LEN);
 
 always @(posedge clk or posedge reset) begin
     if (reset) begin
@@ -191,9 +232,11 @@ always @(posedge clk or posedge reset) begin
         active_next_wdata <= 0;
         active_next_wstrb <= 0;
         wready_given <= 0;
-        burst_preloaded <= 0;
         wcont_r <= 0;
         wr_op_done_seen <= 0;
+        wbuf_wptr <= 0;
+        wbuf_rptr <= 0;
+        wbuf_active <= 0;
 
         rskid_data   <= 0;
         rskid_last   <= 0;
@@ -268,15 +311,21 @@ always @(posedge clk or posedge reset) begin
                 addr_r <= s_axi_awaddr;
                 burst_len <= s_axi_awlen;
                 beat_count <= 0;
-                burst_preloaded <= 1'b0;
                 wcont_r <= s_axi_wcont;
-                if (idle_aw_native_burst2) begin
-                    // Native 2-beat writes need a stricter W handshake than
+                if (idle_aw_buffered) begin
+                    // CPU writeback-class burst: collect every W beat into
+                    // the local FIFO before any SDRAM command is issued.
+                    wbuf_wptr <= 4'd0;
+                    state <= S_WR_FILL;
+                end else if (idle_aw_native) begin
+                    // Native burst writes need a stricter W handshake than
                     // the legacy early-capture path below.  WREADY is a
                     // register, so sampling beat 1 immediately after sampling
                     // beat 0 duplicates beat 0 on a normal master.  Wait for
                     // two observed WVALID&WREADY handshakes first, then start
-                    // io_sdram with both beats preloaded.
+                    // io_sdram with beats 0 and 1 preloaded; beats 2+ stream
+                    // through the pull interface (wcont guarantees they
+                    // cannot underrun).
                     state <= S_WR_NATIVE_W0;
                 end else if (s_axi_wvalid) begin
                     // Also accept W if valid (common case: AW and W arrive
@@ -419,7 +468,11 @@ always @(posedge clk or posedge reset) begin
                     if (burst_len == 0 || write_burst_serialized)
                         state <= S_WR_DON;   // Single/serialized word: wait for done pulse
                     else begin
-                        wready_given <= burst_preloaded;
+                        // Beat 1 went out as the command-time preload
+                        // (sdram_preload_*), so the pre-stage slot is
+                        // empty: the first pull must take a fresh beat,
+                        // never re-serve next_wdata.
+                        wready_given <= 1'b0;
                         wr_op_done_seen <= 0;
                         state <= S_WR_BURST;  // Burst: stream data
                     end
@@ -439,11 +492,24 @@ always @(posedge clk or posedge reset) begin
                 cmd_issued <= 0;
                 started <= 0;
                 wready_given <= 0;
-                burst_preloaded <= 1'b0;
+                wbuf_active <= 1'b0;
                 wr_op_done_seen <= 0;
                 s_axi_bvalid <= 1;
                 s_axi_bresp <= 2'b00;
                 state <= S_IDLE;
+            end else if (wbuf_active) begin
+                /* Buffered writeback: serve io_sdram's continuation pulls
+                 * straight from the local FIFO.  Every beat is already
+                 * resident, so the pull is answered on the very next edge —
+                 * never slower than the wcont streaming path below — and the
+                 * AXI W channel is not touched (all beats were consumed in
+                 * S_WR_FILL). */
+                if (sdram_wr_data_next) begin
+                    beat_count <= beat_count + 1;
+                    active_next_wdata <= wbuf_head[31:0];
+                    active_next_wstrb <= wbuf_head[35:32];
+                    wbuf_rptr <= wbuf_rptr + 4'd1;
+                end
             end else begin
                 /* Select the pulled beat into active_next_* on io_sdram's
                  * pull.  io_sdram captures burst_wr_direct_* a few cycles
@@ -513,7 +579,6 @@ always @(posedge clk or posedge reset) begin
                     wr_op_done_seen <= 0;
                     state <= S_WR_NEXT;
                 end else begin
-                    burst_preloaded <= 1'b0;
                     s_axi_bvalid <= 1;
                     s_axi_bresp <= 2'b00;
                     state <= S_IDLE;
@@ -533,15 +598,52 @@ always @(posedge clk or posedge reset) begin
         end
 
         S_WR_NATIVE_W1: begin
-            // Capture beat 1 on its own handshake, then issue one native
-            // io_sdram two-word write.
-            s_axi_wready <= 1'b1;
+            // Capture beat 1 on its own handshake, then issue the native
+            // io_sdram burst write with beats 0/1 preloaded.  WREADY must
+            // drop on the capturing edge (fall through to the cycle-default
+            // 0): leaving it high one more cycle lets a >2-beat master hand
+            // over beat 2 while we sit in S_WR_CMD ignoring W — the beat
+            // would be silently dropped and the whole burst shifted.
             if (s_axi_wvalid && s_axi_wready) begin
                 next_wdata <= s_axi_wdata;
                 next_wstrb <= s_axi_wstrb;
-                wready_given <= 1'b1;
-                burst_preloaded <= 1'b1;
                 state <= S_WR_CMD;
+            end else begin
+                s_axi_wready <= 1'b1;
+            end
+        end
+
+        S_WR_FILL: begin
+            // Buffered writeback fill.  Strict W handshake (sample only when
+            // the registered WREADY was already visible to the master), one
+            // push per accepted beat.  Beat 0 mirrors into sdram_wdata and
+            // beat 1 into next_wdata so the issue looks identical to the
+            // native preloaded path (sdram_preload_* feeds io_sdram's
+            // word_data_next for the 2-beat case).  The W stream may stall
+            // here indefinitely — io_sdram has not been started, so scanout
+            // and other word ops proceed unimpeded.
+            s_axi_wready <= 1'b1;
+            if (s_axi_wvalid && s_axi_wready) begin
+                /* wbuf write itself happens in the dedicated SDP write
+                 * block above (memory-inference structure). */
+                if (wbuf_wptr == 4'd0) begin
+                    sdram_wdata <= s_axi_wdata;
+                    sdram_wstrb <= s_axi_wstrb;
+                end
+                if (wbuf_wptr == 4'd1) begin
+                    next_wdata <= s_axi_wdata;
+                    next_wstrb <= s_axi_wstrb;
+                end
+                wbuf_wptr <= wbuf_wptr + 4'd1;
+                if (wbuf_wptr == burst_len[3:0]) begin
+                    // Final beat buffered — issue one native burst.  Beats 0
+                    // and 1 ride the command itself (sdram_wdata + preload);
+                    // the first continuation pull fetches beat 2.
+                    s_axi_wready <= 1'b0;
+                    wbuf_rptr <= 4'd2;
+                    wbuf_active <= 1'b1;
+                    state <= S_WR_CMD;
+                end
             end
         end
 

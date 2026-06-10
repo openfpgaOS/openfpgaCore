@@ -325,6 +325,12 @@ assign voice_active_mask = voice_active;
 // margin (tb_axi_periph's pos_read_registered_boundary test pins this
 // contract, including back-to-back different-voice reads).  An async
 // read here would burn ~700 FFs + a 32:1 mux for slack we already have.
+//
+// INTEGRATION CONTRACT: this register is the ONLY stage allowed on the
+// select-dependent path.  core_top/emu must wire pos_readback straight
+// to the periph's mix_pos_readback port — adding a boundary register
+// there consumes the margin cycle and every MIX_VOICE_POS read returns
+// the PREVIOUS transaction's voice index (shipped broken 2026-06-06..09).
 // OS30 MIXER_LITE: pos_latch readback array tracks the active voice count.
 `ifdef MIXER_LITE
 (* ramstyle = "MLAB" *) reg [21:0] pos_latch [0:15];
@@ -607,6 +613,31 @@ function [7:0] ramp_step;
 endfunction
 
 // ============================================================
+// Shared serial-FSM arithmetic cones
+// ============================================================
+// (1) ramp_step: S_WR_VOL_RAMP (left) and S_WR_VOL_RAMP_R (right) are
+// sequential states by design ("one ramp_step compare chain per cycle"),
+// but two textual function calls still synthesized two add/compare/mux
+// chains.  One instance with 8-bit operand muxes keyed on the state bit
+// serves both; results steer to nxt_l_r/nxt_r_r via the existing state
+// enables.  The 2:1 mux adds one LUT level ahead of a compare chain the
+// 4-stage volume pipeline already made short.
+wire       ramp_is_l = (state == S_WR_VOL_RAMP);
+wire [7:0] ramp_cur  = ramp_is_l ? cur_vol_l : cur_vol_r;
+wire [7:0] ramp_tgt  = ramp_is_l ? tgt_l_r   : tgt_r_r;
+wire [7:0] ramp_out  = ramp_step(ramp_cur, ramp_tgt, cur_vol_rate);
+
+// (2) sample_byte_addr: S_FETCH_TAP0_CALC computes the tap0 address from
+// cur_pos_int, S_FETCH_SEAM_AR recomputes it from cur_loop_start —
+// voice_base and cur_stereo are identical in both, and both consumers
+// latch the same registers.  Share the 32-bit add through a 22-bit index
+// mux keyed on the state.
+wire [21:0] samp_idx = (state == S_FETCH_SEAM_AR) ? cur_loop_start
+                                                  : cur_pos_int;
+wire [31:0] samp_addr_shared = sample_byte_addr(voice_base, samp_idx,
+                                                cur_stereo);
+
+// ============================================================
 // FSM body
 // ============================================================
 always @(posedge clk) begin
@@ -776,7 +807,8 @@ always @(posedge clk) begin
         if (cur_pos_int >= cur_length) begin
             state <= S_VOICE_END;
         end else begin
-            sample_addr   = sample_byte_addr(voice_base, cur_pos_int, cur_stereo);
+            // state==S_FETCH_TAP0_CALC ⇒ shared cone carries cur_pos_int.
+            sample_addr   = samp_addr_shared;
             tap_byte_addr <= sample_addr;
             tap_araddr    <= word_aligned(sample_addr);
             tap_nxt_raw   <= cur_pos_int + 22'd1;
@@ -878,7 +910,8 @@ always @(posedge clk) begin
     // cur_loop_start so the SEAM_R extract picks the right mono half.
     S_FETCH_SEAM_AR: begin : fetch_seam_ar_blk
         reg [31:0] sample_addr;
-        sample_addr   = sample_byte_addr(voice_base, cur_loop_start, cur_stereo);
+        // state==S_FETCH_SEAM_AR ⇒ shared cone carries cur_loop_start.
+        sample_addr   = samp_addr_shared;
         tap_byte_addr <= sample_addr;
         m_araddr      <= word_aligned(sample_addr);
         m_arlen       <= 8'd0;
@@ -1128,12 +1161,15 @@ always @(posedge clk) begin
         // Run one ramp_step compare chain per cycle.  Sharing the left
         // and right ramp hardware costs one extra active-voice cycle
         // but avoids duplicating the add/compare/mux chain in ALMs.
-        nxt_l_r <= ramp_step(cur_vol_l, tgt_l_r, cur_vol_rate);
+        // ramp_out is the SHARED cone (see above the FSM): in this state
+        // its operand muxes select the left channel.
+        nxt_l_r <= ramp_out;
         state   <= S_WR_VOL_RAMP_R;
     end
 
     S_WR_VOL_RAMP_R: begin
-        nxt_r_r <= ramp_step(cur_vol_r, tgt_r_r, cur_vol_rate);
+        // Shared cone again — operand muxes now select the right channel.
+        nxt_r_r <= ramp_out;
         state   <= S_WR_VOL;
     end
 

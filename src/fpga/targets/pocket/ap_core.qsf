@@ -277,13 +277,13 @@ set_global_assignment -name SYNTH_PROTECT_SDC_CONSTRAINT ON
 set_global_assignment -name PRE_MAPPING_RESYNTHESIS ON
 set_global_assignment -name OPTIMIZATION_TECHNIQUE SPEED
 set_global_assignment -name MUX_RESTRUCTURE ON
-set_global_assignment -name PHYSICAL_SYNTHESIS_COMBO_LOGIC ON
+set_global_assignment -name PHYSICAL_SYNTHESIS_COMBO_LOGIC OFF
 set_global_assignment -name PHYSICAL_SYNTHESIS_REGISTER_DUPLICATION ON
-set_global_assignment -name PHYSICAL_SYNTHESIS_REGISTER_RETIMING ON
-set_global_assignment -name PHYSICAL_SYNTHESIS_ASYNCHRONOUS_SIGNAL_PIPELINING ON
+set_global_assignment -name PHYSICAL_SYNTHESIS_REGISTER_RETIMING OFF
+set_global_assignment -name PHYSICAL_SYNTHESIS_ASYNCHRONOUS_SIGNAL_PIPELINING OFF
 set_global_assignment -name ROUTER_LCELL_INSERTION_AND_LOGIC_DUPLICATION ON
 set_global_assignment -name ROUTER_TIMING_OPTIMIZATION_LEVEL MAXIMUM
-set_global_assignment -name PHYSICAL_SYNTHESIS_EFFORT EXTRA
+set_global_assignment -name PHYSICAL_SYNTHESIS_EFFORT NORMAL
 
 # Fitter Assignments
 # ==================
@@ -778,6 +778,7 @@ set_global_assignment -name VERILOG_FILE ../../common/axi_sdram_arbiter.v
 set_global_assignment -name VERILOG_FILE ../../common/axi_sdram_slave.v
 set_global_assignment -name VERILOG_FILE ../../common/cpu_system.v
 set_global_assignment -name VERILOG_FILE ../../common/cpu_target_port.v
+set_global_assignment -name VERILOG_FILE ../../common/cpu_target_port_per.v
 set_global_assignment -name VERILOG_FILE ../../common/frac_cen.v
 set_global_assignment -name VERILOG_FILE ../../common/link_lite.v
 set_global_assignment -name VERILOG_FILE ../../common/cram0_controller.v
@@ -790,7 +791,22 @@ set_global_assignment -name VERILOG_FILE ../../common/video_CRT_scanout_indexed_
 set_global_assignment -name VERILOG_FILE ../../vendor/vexriscv/VexiiRiscv/VexiiRiscv.v
 set_global_assignment -name VERILOG_FILE mf_pllram_133.v
 set_global_assignment -name SDC_FILE core_constraints.sdc
-set_global_assignment -name SEED 1
+set_global_assignment -name SEED 37
 # Phase 5 fitter-tuning experiments were done while the design was above
 # 94% ALMs.  They are no longer representative after the span-only GPU
 # profile reduced the design to roughly 76% ALMs.
+
+# wbuf (axi_sdram_slave write-burst buffer) must land in MLAB, not LAB FFs.
+# The inline ramstyle attribute crashes Quartus 25.1std Verific (VRFX
+# operators.cpp:2349) - assign from QSF instead, bypassing the HDL parser.
+set_instance_assignment -name RAMSTYLE_ATTRIBUTE MLAB -to "*sdram_axi_slave|wbuf*"
+
+# NOTE 2026-06-09: a LogicLock region to anchor io_bridge_peripheral's
+# RX capture FFs next to the bridge pins was attempted (the fitter at
+# 92% fill placed them ~19 ns of routing from the pins — the enabling
+# condition for the phase-latched cold-boot RX corruption) but Quartus
+# LITE does not license LogicLock (region silently stripped).  If the
+# RX toggle-protocol hardening alone proves insufficient on hardware,
+# the Lite-compatible fallback is set_location_assignment on the ~20
+# spiclk-domain FFs (ibs|rx_dat*, ibs|rx_byte_*, ibs|ss_tgl) near the
+# bridge pin bank (pins at X54_Y20 / X42_Y45).

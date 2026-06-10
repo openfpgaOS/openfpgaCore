@@ -1232,6 +1232,13 @@ static void test_snac_hw_poller_regs() {
     const uint32_t ENABLE = 1u << 7;
     const uint32_t MODE_B = 1u << 8;
 
+    /* A real PSX bus idles HIGH (DAT/ACK are open-collector with pull-ups).
+     * The analogizer_psx poller shifts DAT in directly: an all-high DAT frame
+     * reads as ID=0xFF -> "no gamepad" -> key1 = 0x0000.  Holding DAT low
+     * (the old snac_psx_poller tb default) instead produces ID=0x00 ->
+     * "gamepad present" with every active-low button asserted -> 0xFFFF. */
+    tb->snac_pin_in_in = (1u << 5) | (1u << 4);  /* DAT=1, ACK=1 (bus idle) */
+
     axi_write_single(SNAC_HW_CLEAR, 0x3u);
     /* Write enable+fast and also set bit 1 (reserved, was the analog enable —
      * analog is auto-detected now): it must read back as 0. */
@@ -1241,8 +1248,35 @@ static void test_snac_hw_poller_regs() {
     check_eq("snac-hw-ctrl-readback", mmio_read32(SNAC_HW_CTRL) & 0x7u, 0x5u);
     check_eq("snac-hw-enable", tb->dbg_snac_enable, 1u);
     check_eq("snac-hw-pin-dir", tb->dbg_snac_pin_dir, 0xC3u);
-    check_eq("snac-hw-att-active-out", tb->dbg_snac_pin_out & 0xC3u, 0xC2u);
-    check_eq("snac-hw-raw-buttons-reset", mmio_read32(SNAC_HW_RAW_BUTTONS), 0u);
+
+    /* ATT1 asserts (active-low) only when a poll transaction starts: the
+     * dualshock Timer advances on R_CE = every 2nd ~500 kHz (fast) strobe,
+     * so the first assertion lands up to ~2 strobe periods (~800 clk) after
+     * enable — not within the handful of cycles the old poller needed.
+     * Poll for the falling edge; CLK/CMD stay high until 12 R_CEs into the
+     * frame, so sampling at the observed drop is race-free. */
+    {
+        int att_timeout = 10000;
+        while (att_timeout > 0 && (tb->dbg_snac_pin_out & 0x1u)) {
+            tick();
+            att_timeout--;
+        }
+        check_eq("snac-hw-att-active-out", tb->dbg_snac_pin_out & 0xC3u, 0xC2u);
+    }
+
+    /* key1 (-> SNAC_HW_RAW_BUTTONS) is captured on the ATT1 *release* edge
+     * at the end of the frame (Timer R_CE count 158 for a type-0/absent
+     * device ≈ 63k clk in fast mode).  Wait for the full transaction, then
+     * the idle bus (DAT high) must read back as no buttons pressed. */
+    {
+        int frame_timeout = 200000;
+        while (frame_timeout > 0 && !(tb->dbg_snac_pin_out & 0x1u)) {
+            tick();
+            frame_timeout--;
+        }
+        for (int i = 0; i < 8; i++) tick();
+        check_eq("snac-hw-raw-buttons-reset", mmio_read32(SNAC_HW_RAW_BUTTONS), 0u);
+    }
 
     axi_write_single(SNAC_CTRL, ENABLE | MODE_B);
     for (int i = 0; i < 8; i++) tick();

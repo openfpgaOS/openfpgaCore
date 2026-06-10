@@ -46,8 +46,11 @@ _Static_assert((AUDIO_RING_PAIRS & (AUDIO_RING_PAIRS - 1)) == 0,
 
 /* Interleaved L,R,L,R... via the uncached SDRAM alias (see file header
  * for why).  HW mixer's AXI master sees the same physical SDRAM
- * regardless of which CPU alias we write through. */
-static volatile int16_t *audio_ring;
+ * regardless of which CPU alias we write through.  Addressed as one
+ * 32-bit word per stereo pair ({hi=R, lo=L} little-endian — the same
+ * memory image as adjacent L,R int16 stores) so each pair costs ONE
+ * uncached store's B-response stall instead of two. */
+static volatile uint32_t *audio_ring;
 static uint32_t audio_write_idx;        /* next stereo pair to fill (mod AUDIO_RING_PAIRS) */
 static int      audio_voice_active;
 static uint32_t audio_voice_rate = 0x10000u;  /* Q16.16: 1.0 = 48 kHz */
@@ -57,7 +60,7 @@ static uint32_t audio_voice_rate = 0x10000u;  /* Q16.16: 1.0 = 48 kHz */
 static inline void ensure_audio_ring(void)
 {
     if (!audio_ring)
-        audio_ring = (volatile int16_t *)(uintptr_t)of_mixer_stream_uncached_base();
+        audio_ring = (volatile uint32_t *)(uintptr_t)of_mixer_stream_uncached_base();
 }
 
 static inline uint32_t ring_read_pos(void)
@@ -90,7 +93,7 @@ void of_audio_init(void)
     ensure_audio_ring();
     /* Uncached writes — each store stalls on its B-response, so by
      * the loop's end the ring is fully zeroed in SDRAM.  No flush. */
-    for (int i = 0; i < AUDIO_RING_PAIRS * 2; i++) audio_ring[i] = 0;
+    for (int i = 0; i < AUDIO_RING_PAIRS; i++) audio_ring[i] = 0;
     audio_write_idx = 0;
 
     /* Stream voice is dormant until the first write; configure_stream_voice
@@ -127,8 +130,8 @@ int of_audio_write(const int16_t *samples, int count)
      * store's B-response.  No post-write flush needed. */
     uint32_t idx = audio_write_idx;
     for (int i = 0; i < count; i++) {
-        audio_ring[(idx * 2)]     = samples[i * 2];      /* L */
-        audio_ring[(idx * 2) + 1] = samples[i * 2 + 1];  /* R */
+        audio_ring[idx] = ((uint32_t)(uint16_t)samples[i * 2 + 1] << 16)  /* R */
+                        | (uint16_t)samples[i * 2];                       /* L */
         idx = (idx + 1) & (AUDIO_RING_PAIRS - 1);
     }
     audio_write_idx = idx;
@@ -148,7 +151,7 @@ int of_audio_stream_open(int sample_rate)
     ensure_audio_ring();
     uint32_t rate = ((uint64_t)sample_rate << 16) / 48000;
     /* Uncached zeroing — same rationale as of_audio_init. */
-    for (int i = 0; i < AUDIO_RING_PAIRS * 2; i++) audio_ring[i] = 0;
+    for (int i = 0; i < AUDIO_RING_PAIRS; i++) audio_ring[i] = 0;
     audio_write_idx = 0;
     configure_stream_voice(rate);
     return 0;

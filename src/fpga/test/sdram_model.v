@@ -97,9 +97,16 @@ reg        rd_beat;
 reg [31:0] cycle_count;
 
 // Refresh enforcement
-// IS42S16160G: 8192 refreshes per 64ms. At 100MHz = 781 cycles max between refreshes.
-// Use a generous margin (1000 cycles) to avoid false positives during init.
-localparam T_REF_MAX = 1000;  // Max cycles between auto-refreshes
+// IS42S16160G: 8192 refreshes per 64ms = 781 cycles AVERAGE at 100MHz.
+// io_sdram posts refreshes (refresh_pending counter): a tick that lands
+// while a long op is in flight is issued immediately at the next ST_IDLE,
+// so the legitimate worst-case single gap is one 736-cycle interval plus
+// the longest uninterruptible op (an 800px scanout line burst, ~830
+// cycles) ≈ 1570 — the average stays well inside spec because the posted
+// refresh catches up right after.  Bound the per-gap check just above
+// that documented worst case: a genuinely dropped tick shows up as
+// ~2x736 + op and still trips it.
+localparam T_REF_MAX = 1700;  // Max cycles between auto-refreshes
 reg [31:0] last_refresh_cycle;
 reg [31:0] refresh_count;
 reg        refresh_tracking;  // Don't enforce during init sequence

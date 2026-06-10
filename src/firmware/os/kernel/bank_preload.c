@@ -139,6 +139,14 @@ int bank_preload(void) {
         return -3;
     }
 
+    /* Poison the destination magic before the load: the reserve address
+     * is deterministic across boots, so a failed or short DMA must not
+     * pass validation on the PREVIOUS boot's bank still sitting in
+     * SDRAM at this same address (cold-boot staging forensics,
+     * 2026-06-09). */
+    *(volatile uint32_t *)buf = 0;
+    of_cache_flush_range(buf, 64);
+
     if (of_file_read_chunked(slot_id, 0, buf, (uint32_t)sz) < 0) {
         of_term_puts(" \033[93mNONE\033[0m\n");
         return -4;

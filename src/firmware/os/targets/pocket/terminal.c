@@ -14,6 +14,7 @@
 #include "terminal.h"
 #include "video.h"
 #include "regs.h"
+#include "cache.h"
 #include <stdarg.h>
 #include <string.h>
 
@@ -209,23 +210,45 @@ static inline uint8_t term_color_byte(uint8_t fg, uint8_t bg) {
     return (uint8_t)((bg & 0xF) << 4) | (fg & 0xF);
 }
 
+/* Cached SDRAM alias of the terminal FB.  Bulk scroll/clear run through
+ * the D$ (burst line fills + 1-cycle stores) and end with cbo.flush of
+ * every line they touched; glyph blits keep writing the uncached alias.
+ * Invariant: no terminal-FB line stays resident in the D$ across public
+ * calls, so the cached scroll reads never see data staled by an earlier
+ * uncached blit. */
+#define TERM_FB_CACHED ((uint8_t *)(TERM_FB_BASE - SDRAM_UNCACHED_BASE + SDRAM_BASE))
+
+/* Expand a glyph nibble to a 4-pixel byte mask: nibble bit3 = leftmost
+ * pixel = LSB byte (little-endian word goes to the lower FB address). */
+static const uint32_t glyph_nib_mask[16] __attribute__((section(".fastrodata"))) = {
+    0x00000000u, 0xFF000000u, 0x00FF0000u, 0xFFFF0000u,
+    0x0000FF00u, 0xFF00FF00u, 0x00FFFF00u, 0xFFFFFF00u,
+    0x000000FFu, 0xFF0000FFu, 0x00FF00FFu, 0xFFFF00FFu,
+    0x0000FFFFu, 0xFF00FFFFu, 0x00FFFFFFu, 0xFFFFFFFFu,
+};
+
 /*
  * Blit an 8x8 glyph to the dedicated terminal framebuffer.
  * Always writes both fg and bg pixels (terminal FB is independent of app FB).
+ * Word-wise: each glyph row is two 32-bit stores (4 pixels per word), so a
+ * glyph costs 16 uncached stores instead of 64 — an uncached word store is
+ * the same AXI round trip as a byte store.
  */
 static void term_blit_glyph(int col, int row, uint8_t ch, uint8_t fg_idx, uint8_t bg_idx) {
-    uint8_t *fb = (uint8_t *)TERM_FB_BASE;
     const uint8_t *glyph = &font8x8[(unsigned)ch * 8];
-    int px = col * 8;
-    int py = row * 8;
+    uint32_t fgw = (uint32_t)fg_idx * 0x01010101u;
+    uint32_t bgw = (uint32_t)bg_idx * 0x01010101u;
+    /* col*8 keeps the destination word-aligned (FB_WIDTH is 64B-aligned). */
+    uint32_t *dst = (uint32_t *)TERM_FB_BASE
+                  + ((unsigned)row * 8u * FB_WIDTH + (unsigned)col * 8u) / 4u;
 
     for (int y = 0; y < 8; y++) {
         uint8_t bits = glyph[y];
-        uint8_t *dst = &fb[(py + y) * FB_WIDTH + px];
-        for (int x = 0; x < 8; x++) {
-            dst[x] = (bits & 0x80) ? fg_idx : bg_idx;
-            bits <<= 1;
-        }
+        uint32_t m_hi = glyph_nib_mask[bits >> 4];
+        uint32_t m_lo = glyph_nib_mask[bits & 0xF];
+        dst[0] = (fgw & m_hi) | (bgw & ~m_hi);
+        dst[1] = (fgw & m_lo) | (bgw & ~m_lo);
+        dst += FB_WIDTH / 4u;
     }
 }
 
@@ -269,8 +292,11 @@ void of_term_clear(void) {
     memset(term_chars,  ' ', TERM_COLS * TERM_ROWS);
     memset(term_colors, clr, TERM_COLS * TERM_ROWS);
 
-    /* Clear terminal framebuffer to palette index 0 (black) */
-    memset((void *)TERM_FB_BASE, 0, FB_WIDTH * FB_HEIGHT);
+    /* Clear terminal framebuffer to palette index 0 (black) through the
+     * cached alias, then cbo.flush the range for the continuously-reading
+     * scanout — ~8 ms of uncached word stores becomes well under 1 ms. */
+    memset(TERM_FB_CACHED, 0, FB_WIDTH * FB_HEIGHT);
+    of_cache_flush_range(TERM_FB_CACHED, FB_WIDTH * FB_HEIGHT);
 
     term_col = 0;
     term_row = 0;
@@ -289,11 +315,22 @@ void of_term_scroll(void) {
     memset(term_chars  + total, ' ', stride);
     memset(term_colors + total, clr, stride);
 
-    /* Scroll terminal framebuffer: move pixel rows 8..239 up to 0..231 */
-    uint8_t *fb = (uint8_t *)TERM_FB_BASE;
-    int fb_row_bytes = FB_WIDTH * 8;
-    int fb_scroll    = FB_WIDTH * (FB_HEIGHT - 8);
-    memmove(fb, fb + fb_row_bytes, fb_scroll);
+    /* Scroll terminal framebuffer: move pixel rows 8..239 up to 0..231.
+     * Copy through the cached alias (burst line fills instead of an
+     * uncached round trip per word) and cbo.flush each pixel row as soon
+     * as it lands — the scanout reads this FB continuously, so the prompt
+     * per-row flush bounds tearing to a single row.  Rows start 64B-
+     * aligned (FB_WIDTH = 320 = 5 cache lines). */
+    uint8_t *fb = TERM_FB_CACHED;
+    for (int y = 0; y < (int)(FB_HEIGHT - 8u); y++) {
+        memcpy(fb + (unsigned)y * FB_WIDTH, fb + ((unsigned)y + 8u) * FB_WIDTH, FB_WIDTH);
+        of_cache_flush_range(fb + (unsigned)y * FB_WIDTH, FB_WIDTH);
+    }
+    /* The bottom 8 source rows were read-allocated by the loop but are
+     * not destination rows: flush them out of the D$ before the uncached
+     * blit below rewrites them, or the next scroll's cached reads would
+     * see stale lines. */
+    of_cache_flush_range(fb + (FB_HEIGHT - 8u) * FB_WIDTH, 8u * FB_WIDTH);
 
     /* Re-render only the bottom text row */
     int last_row = TERM_ROWS - 1;
@@ -388,41 +425,114 @@ volatile int uart_mirror_on __attribute__((section(".bss.boot")));
 
 void of_term_enable_uart_mirror(void) { uart_mirror_on = 1; }
 
-/* UART TX -- synchronous, unbuffered.
- * Direct poll-and-write: each char waits for the FPGA UART to accept
- * the byte, then writes UART_TX_DATA.  No ring buffer, no ISR drain,
- * no batching -- every printf char shows up on the wire before
- * term_emit_char returns.  Use this when you need real-time visibility
- * (audio glitch debugging, crash diagnostics).
+/* UART TX -- buffered, drained from the 1 kHz timer tick.
  *
- * Cost: at 2 Mbaud each byte takes about 5 us to shift out, so a
- * 100-byte printf blocks the caller for about 500 us. Acceptable for
- * diagnostics;
- * the ring path can be reinstated if printf-heavy hot paths get too
- * slow.  The poll has a bounded retry (~64 cycles) so a stuck UART
- * never hangs the kernel -- if the byte can't be accepted it's
- * dropped, matching the prior fire-and-forget overflow semantics. */
+ * term_emit_char() enqueues into a TX ring, then opportunistically
+ * pushes ring bytes whenever the UART can take one WITHOUT waiting
+ * (TX_RDY already high).  Steady printf output still leaves at line
+ * rate, but the caller no longer eats the ~500-cycle-per-byte shift-out
+ * stall (2 Mbaud: 100 MHz / 50 CLKS_PER_BIT x 10 bits).  The fabric
+ * UART is a single-byte passthrough (no TX FIFO), so each push is at
+ * most one byte per ~5 us byte time; the ring absorbs the bursts and
+ * the 1 kHz tick drains whatever a print burst left behind.
+ *
+ * When the ring is FULL the producer falls back to the old blocking
+ * behaviour: a bounded TX_RDY poll to drain one byte and make room.
+ * If the UART is wedged past the bound, the oldest byte is dropped --
+ * matching the prior fire-and-forget overflow semantics; never hangs.
+ *
+ * Crash visibility: of_term_uart_flush() spins the ring out
+ * synchronously; the fatal trap path calls it before its register dump
+ * so log lines printed just before a crash are not lost. */
+#define UART_RING_SIZE 1024u            /* power of two (index masks) */
+static uint8_t uart_ring[UART_RING_SIZE];
+static volatile uint32_t uart_ring_head;     /* producer write index */
+static volatile uint32_t uart_ring_tail;     /* consumer read index  */
+
+/* Local IRQ mask helpers (mirror kernel/syscall.c): the ring's consumer
+ * side runs in the timer ISR, so producer-side dequeue/push sections
+ * take a short MIE-off critical section instead of atomics. */
+static inline uint32_t term_irq_save(void) {
+    uint32_t prev;
+    __asm__ volatile("csrrci %0, mstatus, 0x8" : "=r"(prev) :: "memory");
+    return prev & 0x8u;
+}
+
+static inline void term_irq_restore(uint32_t prev) {
+    if (prev)
+        __asm__ volatile("csrrsi zero, mstatus, 0x8" ::: "memory");
+}
+
+/* Push ring bytes while the UART accepts them without waiting.
+ * Caller holds IRQs off. */
+static void uart_ring_push_nowait(void) {
+    while (uart_ring_tail != uart_ring_head) {
+        if (!(UART_STATUS & UART_TX_RDY))
+            break;
+        UART_TX_DATA = uart_ring[uart_ring_tail & (UART_RING_SIZE - 1u)];
+        uart_ring_tail++;
+    }
+}
+
+/* 1 kHz tick drain: bounded poll budget (~10 byte times) so a deep
+ * backlog drains across ticks without turning the ISR into the old
+ * blocking writer. */
 void of_term_uart_drain(void) {
-    /* No-op kept for ABI compatibility -- the timer ISR still calls
-     * this; with no ring there is nothing to drain. */
+    if (uart_ring_tail == uart_ring_head)
+        return;
+    uint32_t irq = term_irq_save();
+    for (int budget = 256; budget > 0 && uart_ring_tail != uart_ring_head; budget--) {
+        if (UART_STATUS & UART_TX_RDY) {
+            UART_TX_DATA = uart_ring[uart_ring_tail & (UART_RING_SIZE - 1u)];
+            uart_ring_tail++;
+        }
+    }
+    term_irq_restore(irq);
+}
+
+/* Synchronous flush for the fatal/trap path: spin the whole ring out so
+ * the last pre-crash log lines precede the trap dump on the wire.
+ * Bounded per byte (~16 byte times, like trap_uart_putb) and bounded in
+ * total bytes, so corrupted indices or a wedged UART can't hang the
+ * trap handler.  (.text.boot: runs from BRAM even if SDRAM .text is the
+ * thing that crashed.) */
+__attribute__((section(".text.boot")))
+void of_term_uart_flush(void) {
+    for (uint32_t n = 0; n < UART_RING_SIZE && uart_ring_tail != uart_ring_head; n++) {
+        int rdy = 0;
+        for (int i = 0; i < 8000; i++) {
+            if (UART_STATUS & UART_TX_RDY) { rdy = 1; break; }
+        }
+        if (!rdy)
+            return;
+        UART_TX_DATA = uart_ring[uart_ring_tail & (UART_RING_SIZE - 1u)];
+        uart_ring_tail++;
+    }
 }
 
 /* Emit a raw character (no escape processing). */
 void term_emit_char(char c) {
     uint8_t color = term_color_byte(term_fg, term_bg);
 
-    /* UART console mirror: poll TX_RDY then write.
-     * No buffering, immediate output. Each byte takes about 500 cycles
-     * to shift out at 2 Mbaud (100 MHz / 50 CLKS_PER_BIT x 10 bits).
-     * Loop bound = 2000 cycles, enough to cover a back-to-back byte
-     * plus jitter, but never hangs. */
+    /* UART console mirror: enqueue + opportunistic no-wait push (see the
+     * ring commentary above). */
     if (uart_mirror_on && c != 0x02) {
-        for (int i = 0; i < 2000; i++) {
-            if (UART_STATUS & UART_TX_RDY) {
-                UART_TX_DATA = (uint8_t)c;
-                break;
+        uint32_t irq = term_irq_save();
+        if (uart_ring_head - uart_ring_tail >= UART_RING_SIZE) {
+            /* Full: drain one byte with the old bounded poll (~4 byte
+             * times); drop the oldest if the UART is wedged. */
+            for (int i = 0; i < 2000; i++) {
+                if (UART_STATUS & UART_TX_RDY) {
+                    UART_TX_DATA = uart_ring[uart_ring_tail & (UART_RING_SIZE - 1u)];
+                    break;
+                }
             }
+            uart_ring_tail++;
         }
+        uart_ring[uart_ring_head & (UART_RING_SIZE - 1u)] = (uint8_t)c;
+        uart_ring_head++;
+        uart_ring_push_nowait();
+        term_irq_restore(irq);
     }
 
     if (c == '\n') {

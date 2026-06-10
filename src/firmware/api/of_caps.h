@@ -84,6 +84,18 @@ extern "C" {
                                          * a small general decode path, present
                                          * on all cores, byte-identical to a
                                          * 0x48 direct-affine column. */
+#define OF_HW_GPU_PARAM_TRI_RECS (1 << 22) /* CMD_DRAW_PARAM_TRI_RECS (0x4D):
+                                         * records-only 0x49 variant — 16-word
+                                         * payload of per-triangle attr/light
+                                         * planes + q29 + vertices, reusing the
+                                         * 0x4A sticky surface/control/clamp/z/
+                                         * clip state (re-arm 0x4A after any
+                                         * 0x48/0x49, which overwrites the
+                                         * shared staging).  Drops ~21 constant
+                                         * header words per triangle vs full
+                                         * 0x49.  SET on EVERY variant: the 0x4A
+                                         * sticky decode + 0x4D path do not need
+                                         * the 0x4B derivation hardware. */
 
 /* Convenience: all the GPU bits an app might care about for renderer choice. */
 #define OF_HW_GPU_LITE_MASK  (OF_HW_GPU_SPAN | OF_HW_GPU_FRAGPIPE)

@@ -262,6 +262,8 @@ reg         word_rd_sd, word_wr_sd;
 reg  [23:0] word_addr_sd;
 reg  [31:0] word_data_sd;
 reg  [3:0]  word_wstrb_sd;
+reg  [31:0] word_data_next_sd;
+reg  [3:0]  word_wstrb_next_sd;
 reg  [3:0]  word_burst_len_sd;
 reg  [3:0]  word_burst_wr_len_sd;
 reg         accepted_r;
@@ -321,6 +323,8 @@ always @(posedge clk) begin
         word_addr_sd <= sdram_addr;
         word_data_sd <= sdram_wdata;
         word_wstrb_sd <= sdram_wstrb;
+        word_data_next_sd <= sdram_preload_wdata;
+        word_wstrb_next_sd <= sdram_preload_wstrb;
         word_burst_len_sd <= sdram_burst_len;
         word_burst_wr_len_sd <= sdram_burst_wr_len;
         accepted_r <= 1;
@@ -336,6 +340,8 @@ sdram_fast_model sdram_mem (
     .word_addr(word_addr_sd),
     .word_data(word_data_sd),
     .word_wstrb(word_wstrb_sd),
+    .word_data_next(word_data_next_sd),
+    .word_wstrb_next(word_wstrb_next_sd),
     .word_burst_len(word_burst_len_sd),
     .word_burst_wr_len(word_burst_wr_len_sd),
     .word_q(word_q_sd),
@@ -343,8 +349,8 @@ sdram_fast_model sdram_mem (
     .word_q_valid(word_q_valid_sd),
     .word_wr_data_next(word_wr_data_next_sd),
     .word_wr_done(word_wr_done_sd),
-    .burst_wr_direct_data(word_data_sd),
-    .burst_wr_direct_strb(word_wstrb_sd)
+    .burst_wr_direct_data(sdram_next_wdata),
+    .burst_wr_direct_strb(sdram_next_wstrb)
 );
 
 endmodule

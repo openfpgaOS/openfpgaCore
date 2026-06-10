@@ -30,6 +30,12 @@ module bridge_to_sdram #(
     output wire        idle,
     output wire        fifo_full,
     output reg         overrun,
+    // Diagnostic tap (clk_bridge): one-cycle pulse for every bridge word
+    // that decodes into the SDRAM window, BEFORE any FIFO-full drop.
+    // core_top counts these per data-slot command (F2i bridge word
+    // counters) so firmware can tell "words never arrived" (short count
+    // = RX-side drop) from "words arrived corrupted" (exact count).
+    output wire        detect_wr_o,
 
     input  wire        clk_axi,
     // Reset for the clk_axi AXI write FSM.  Held at 1'b1 (config-init only) by
@@ -51,6 +57,7 @@ module bridge_to_sdram #(
 );
 
 wire detect_wr = bridge_wr && (bridge_addr[31:26] == 6'b000000);
+assign detect_wr_o = detect_wr;
 
 reg [63:0] fifo_in;
 reg        fifo_wrreq;

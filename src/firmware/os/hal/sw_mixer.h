@@ -48,10 +48,14 @@
 void sw_mixer_init(void);
 
 /* Render `nframes` stereo s16 frames into `out` (interleaved L,R,L,R...).
- * Each frame walks all voices exactly as audio_mixer.v's per-sample FSM
- * does and commits the advanced position / ramped volume back into the
+ * Each frame walks the active voices exactly as audio_mixer.v's per-sample
+ * FSM does and commits the advanced position / ramped volume back into the
  * register store, so MIX_VOICE_POS(v) reads stay coherent for callers
- * (e.g. the of_audio stream's ring read pointer). */
+ * (e.g. the of_audio stream's ring read pointer).  The active set and the
+ * read-only voice parameters are snapshotted once per call: voice register
+ * writes take effect at the next render call (chunk-boundary exact, see
+ * sw_mixer.c).  NOT reentrant — the sw_pump_busy guard in sw_mixer_pump()
+ * is the only sanctioned call path on target. */
 void sw_mixer_render(int16_t *out, int nframes);
 
 /* Poll the DAC FIFO and push freshly-rendered stereo samples until full.

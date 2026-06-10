@@ -23,10 +23,10 @@
  *   memmove bwd:     word-aligned backward copy
  */
 
-/* cbo.inval macro placeholder.  The current assembly path keeps this as a
- * no-op because the generic copy still performs well and stays portable
- * across CPU cache configurations. */
+/* cbo.inval (Zicbom), same .insn encoding as hal/cache.c: opcode 0x0F
+ * (MISC-MEM), funct3=2, rd=x0, rs1=line address, imm=0. */
 .macro CBO_INVAL reg
+    .insn i 0x0F, 2, x0, \reg, 0
 .endm
 
 .section .fasttext, "ax"
@@ -53,13 +53,22 @@ memcpy:
     li      t1, 64
     bltu    a2, t1, .Lcpy_32_enter
 
-    /* cbo.inval only safe on cached regions (SDRAM 0x10-0x13, PSRAM 0x30-0x37) */
+    /* cbo.inval is only legal on the cached SDRAM window 0x10-0x13 — the
+     * sole PMA main=1 region (generate_vexii.sh).  CRAM0 at 0x30 is
+     * uncached (main=0) in the v2 memory arch; a cbo there takes an
+     * access fault. */
     srli    t1, a0, 26
     li      t2, 4
-    beq     t1, t2, .Lcpy_align
-    srli    t1, a0, 27
-    li      t2, 6
     bne     t1, t2, .Lcpy_32_enter
+
+    /* memmove forwards through memcpy with dest <= src: if src sits
+     * within 64B of dest, cbo.inval on a dest line would discard
+     * not-yet-read src bytes sharing that line — take the plain copy.
+     * (Disjoint memcpy with src below dest wraps to a huge unsigned
+     * distance and keeps the cbo path.) */
+    sub     t1, a1, a0
+    li      t2, 64
+    bltu    t1, t2, .Lcpy_32_enter
 
 .Lcpy_align:
     /* Word-copy head until dest is 64B-aligned */
@@ -84,7 +93,7 @@ memcpy:
     li      t1, 64
 .Lcpy_64_loop:
     bltu    a2, t1, .Lcpy_32_enter
-    CBO_INVAL 10
+    CBO_INVAL a0
     lw      t2,  0(a1)
     lw      t3,  4(a1)
     sw      t2,  0(a0)

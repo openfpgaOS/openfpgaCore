@@ -78,8 +78,13 @@ void of_term_set_display_mode(int mode);
 /* Enable UART console mirror after boot has confirmed the cart pins are free. */
 void of_term_enable_uart_mirror(void);
 
-/* Service target-specific terminal UART output.  Pocket output is
- * synchronous, so this is a compatibility no-op there. */
+/* Service target-specific terminal UART output.  Called from the 1 kHz
+ * timer tick; drains a bounded burst of the buffered UART mirror ring. */
 void of_term_uart_drain(void);
+
+/* Synchronously flush the buffered UART mirror ring.  For the fatal
+ * trap path: guarantees pre-crash log lines reach the wire before the
+ * trap dump.  Bounded; never hangs on a wedged UART. */
+void of_term_uart_flush(void);
 
 #endif /* OFOS_TERMINAL_H */

@@ -4,7 +4,24 @@
 // 2019-2022 Analogue
 //
 
-module io_sdram (
+module io_sdram #(
+    // Open-page row-tracking layout.
+    //   1 (default) — per-bank tracking: four independently open rows
+    //       (open_row[0:3] / row_open_v[3:0]), so cross-bank alternation
+    //       between the CPU / GPU / scanout / audio regions hits an
+    //       already-open row instead of paying PRECHG+tRP+ACT+tRCD on
+    //       every switch.
+    //   0 — single tracked {open_bank, open_row}: a hit requires the SAME
+    //       bank AND the same row, and a miss precharges the tracked open
+    //       bank (not the request's) before activating — the original
+    //       single-bank behaviour.  Every track access degenerates to
+    //       entry 0, so entries 1-3 and the bank-indexed muxes are swept;
+    //       area-constrained variants trade row-hit rate for ALMs.
+    // Both configs keep the registered row-hit decision (req_* registered
+    // at ST_IDLE dispatch, consumed in ST_REQ_*) and the refresh
+    // precharge-ALL (A10=1) path.
+    parameter BANK_ROW_TRACK = 1
+) (
 
 input   wire            controller_clk,
 input   wire            chip_clk,
@@ -112,8 +129,9 @@ assign {phy_ras, phy_cas, phy_we} = cmd;
     localparam      ST_WRITE_2          = 'd22;
     localparam      ST_WRITE_3          = 'd23;
     localparam      ST_WRITE_4          = 'd24;
-    localparam      ST_WRITE_5          = 'd25;
-    localparam      ST_WRITE_6          = 'd26;
+    // ('d25/'d26 were ST_WRITE_5/ST_WRITE_6, the 2-dead-cycle continuation
+    //  bubble.  Retired: the rolling preload below streams continuation
+    //  beats back-to-back on the WRITE_3->WRITE_2 edge.)
     localparam      ST_WRITE_7          = 'd27;
     localparam      ST_WRITE_4_NEWROW   = 'd28;
     localparam      ST_WRITE_4_NR_PRECHG = 'd29;
@@ -147,12 +165,20 @@ assign {phy_ras, phy_cas, phy_we} = cmd;
     // this one only needs to cover tRFC=8 cycles, so keep it narrow to avoid
     // wide terminal-count compares on the 100MHz SDRAM command path.
     reg     [3:0]   dc;
-    // Refresh every ~5.12us at 100MHz (512 cycles) to satisfy 8K-row SDRAM timing.
-    reg     [8:0]   refresh_count;
+    // Refresh every 7.36us at 100MHz (736 cycles).  8192 refreshes / 64ms
+    // (8K-row part, A0-A12 row addressing) requires a <=7.8125us average;
+    // 736 keeps >5% margin while issuing ~30% fewer refreshes than the old
+    // 5.12us interval.  Unlike dc above, this terminal-count compare feeds
+    // only the slow pending counter, not the SDRAM command path.
+    localparam      REFRESH_INTERVAL = 10'd736;
+    reg     [9:0]   refresh_count;
     // Pending-refresh counter (was a single flag).  A counter cannot drop a
     // refresh tick if a previous refresh is still being serviced when the next
     // tick arrives, so it stays correct even if a future longer op or clock
-    // change pushes a single operation past the 5.12us interval.
+    // change pushes a single operation past the refresh interval.  Refresh has
+    // top priority at every ST_IDLE entry, so pending only accumulates across
+    // ONE op; the longest (an 800px 16bpp scanout line burst, ~830 cycles) is
+    // under two intervals, so pending never exceeds 2 of the 3 this holds.
     reg     [1:0]   refresh_pending;
 
     wire reset_n_s;
@@ -177,8 +203,26 @@ assign dbg_io = {1'b0, (refresh_pending != 2'd0), state[5:0]};
     reg [3:0]  word_burst_len_captured;
     reg [3:0]  word_burst_wr_len_captured;
     reg [3:0]  wr_burst_remaining;
+    // Rolling-preload bookkeeping for native burst writes.  Every native
+    // burst is issued with beat 0 in word_data_captured and beat 1 in
+    // word_data_next_captured (the AXI slave preloads both before raising
+    // the command).  ST_WRITE_3 then shifts preload->active each beat, and
+    // ST_WRITE_2 pulls beat N+2 while writing beat N: pull asserted at the
+    // WRITE_2 edge, slave registers the selected beat one cycle later, and
+    // the next WRITE_2 edge (two cycles after the pull — one full register-
+    // to-register cycle of slack) captures it into the freed preload slot.
+    // pull_inflight marks a pull whose data has not been captured yet, so a
+    // row-crossing pause (ST_WRITE_4_NEWROW) can complete the capture in
+    // ST_WRITE_4_NR_ACT — the slave holds the selected beat stable until
+    // the next pull, so late capture is always safe.
+    reg        pull_inflight;
 
     reg burst_rd_queue;
+    // Set when burst_rd arrives while a word op is already queued (or its
+    // request pulse lands on the same edge): that word op was accepted first
+    // and must be serviced before the burst.  One-shot — cleared on the next
+    // ST_IDLE dispatch — so it delays a scanout fetch by at most one word op.
+    reg burst_defer_word;
     reg burstwr_queue;
 
     reg             word_op;
@@ -196,10 +240,28 @@ assign dbg_io = {1'b0, (refresh_pending != 2'd0), state[5:0]};
     reg             read_cmd_issued;    // Full-page burst: track if READ issued for current row
     reg             burstwr_newrow;
 
-    // Open-page: single-bank tracking (only one bank open at a time)
-    reg     [1:0]   open_bank;          // Which bank is currently open
-    reg     [12:0]  open_row;           // Which row is open in that bank
-    reg             row_open;           // Whether any row is currently open
+    // Open-page tracking (layout selected by BANK_ROW_TRACK — see the
+    // parameter comment).  Per-bank (1): SDR SDRAM keeps four
+    // independently open rows (one per bank), so cross-bank alternation
+    // between the CPU / GPU / scanout / audio regions hits an
+    // already-open row instead of paying PRECHG+tRP+ACT+tRCD (~7 cycles)
+    // on every switch; a precharge is only needed when the REQUEST's own
+    // bank holds a different row.  Single (0): only entry 0 + open_bank
+    // are live; a hit additionally requires the bank to match, and a
+    // miss precharges the TRACKED open bank.  Refresh precharges ALL
+    // banks (A10=1) and clears every valid bit in both configs.
+    reg     [12:0]  open_row [0:3];     // Open row, per bank (entry 0 only when BANK_ROW_TRACK==0)
+    reg     [3:0]   row_open_v;         // Per-bank open-row valid (bit 0 only when BANK_ROW_TRACK==0)
+    reg     [1:0]   open_bank;          // BANK_ROW_TRACK==0: bank of the single tracked row (swept when 1)
+
+    // Track-entry index: per-bank tracking indexes by the bank itself;
+    // the single-row config degenerates every access to entry 0 (constant
+    // fold), so entries 1-3 lose all writers/readers and the bank-indexed
+    // muxes collapse.
+    function [1:0] trk;
+        input [1:0] b;
+        trk = (BANK_ROW_TRACK != 0) ? b : 2'd0;
+    endfunction
     // (No tRAS counter: the dead open_timer reg was removed — tRAS is met
     //  implicitly by the FSM's ACT->...->PRECHARGE command latency.)
     reg     [1:0]   prechg_return;      // After precharge: 0=READ_0, 1=WRITE_0, 2=BURSTWR_0, 3=REFRESH_0
@@ -207,15 +269,25 @@ assign dbg_io = {1'b0, (refresh_pending != 2'd0), state[5:0]};
     reg             req_need_prechg;
     reg     [1:0]   req_bank;
     reg     [1:0]   req_prechg_bank;
+    reg     [1:0]   nr_prechg_bank;     // Bank to precharge on a burst-write row crossing
 
-    // Open-page row-hit detection (combinational)
+    // Open-page row-hit detection (combinational; the decision is still
+    // REGISTERED into req_* at ST_IDLE dispatch — the bank-indexed mux
+    // adds one LUT level there, not on the SDRAM command output path)
     wire    [24:0]  pending_addr      = word_addr_captured << 1;
     wire    [1:0]   pending_bank      = pending_addr[24:23];
     wire    [12:0]  pending_row       = pending_addr[22:10];
-    wire            pending_row_hit   = row_open && (pending_bank == open_bank) &&
-                                        (pending_row == open_row);
-    wire            pending_need_prechg = row_open && ((pending_bank != open_bank) ||
-                                          (pending_row != open_row));
+    // BANK_ROW_TRACK==1: bank term is constant 1 (per-bank entries imply
+    // the bank), reducing to the pure row compare.  ==0: a hit requires
+    // the same bank AND the same row of the single tracked entry.
+    wire            pending_bank_ok   = (BANK_ROW_TRACK != 0) ||
+                                        (open_bank == pending_bank);
+    wire            pending_row_hit   = row_open_v[trk(pending_bank)] &&
+                                        pending_bank_ok &&
+                                        (open_row[trk(pending_bank)] == pending_row);
+    wire            pending_need_prechg = row_open_v[trk(pending_bank)] &&
+                                          !(pending_bank_ok &&
+                                            (open_row[trk(pending_bank)] == pending_row));
 
     reg     [15:0]  phy_dq_latched;
 always @(posedge controller_clk) begin
@@ -372,13 +444,15 @@ always @(posedge controller_clk) begin
 
         if(refresh_pending != 2'd0) begin
             word_busy <= 1;
-            if(row_open) begin
-                // Precharge open bank before refresh
+            if(row_open_v != 4'd0) begin
+                // Precharge ALL banks before refresh: with per-bank
+                // tracking any subset of the four banks may hold an open
+                // row, and AUTOREFRESH requires every bank idle.  A10=1 is
+                // the all-banks precharge (phy_ba is don't-care).
                 dc <= 0;
                 cmd <= CMD_PRECHG;
-                phy_ba <= open_bank;
-                phy_a[10] <= 1'b0;
-                row_open <= 0;
+                phy_a[10] <= 1'b1;
+                row_open_v <= 4'd0;
                 prechg_return <= 2'd3;  // 3 = refresh
                 state <= ST_PRECHG_WAIT;
             end else begin
@@ -393,22 +467,43 @@ always @(posedge controller_clk) begin
         // heavy GPU writer cannot starve it.  The fetch is a single bounded
         // line-burst per scanline, so CPU/GPU traffic only sees a small, bounded
         // added latency (their posted queues / cache absorb it).
-        if(burst_rd_queue) begin
+        //
+        // Exception (burst_defer_word): a word op that was already queued —
+        // i.e. ACCEPTED — when the burst_rd arrived must not be preempted.
+        // axi_sdram_slave treats acceptance as "committed soon" (S_WR_DON
+        // waits for word_wr_done to release B); letting a later line fetch
+        // jump ahead of an accepted write stalls that B response for the
+        // whole line burst (~170 cycles).  The deference is one-shot: the
+        // scanout fetch waits for at most ONE word op (~15 cycles for a
+        // single word, ~40 for a 16-beat native burst write), which is
+        // negligible against a scanline period, so it cannot be starved.
+        if(burst_rd_queue && !(burst_defer_word && (word_rd_queue || word_wr_queue))) begin
             burst_rd_queue <= 0;
+            burst_defer_word <= 0;
             addr <= burst_addr;
             phy_ba <= burst_addr[24:23];
             length <= burst_len;
             word_busy <= 1;
-            req_row_hit <= row_open && (burst_addr[24:23] == open_bank) &&
-                           (burst_addr[22:10] == open_row);
-            req_need_prechg <= row_open && ((burst_addr[24:23] != open_bank) ||
-                                (burst_addr[22:10] != open_row));
+            req_row_hit <= row_open_v[trk(burst_addr[24:23])] &&
+                           ((BANK_ROW_TRACK != 0) ||
+                            (open_bank == burst_addr[24:23])) &&
+                           (open_row[trk(burst_addr[24:23])] == burst_addr[22:10]);
+            req_need_prechg <= row_open_v[trk(burst_addr[24:23])] &&
+                               !(((BANK_ROW_TRACK != 0) ||
+                                  (open_bank == burst_addr[24:23])) &&
+                                 (open_row[trk(burst_addr[24:23])] == burst_addr[22:10]));
             req_bank <= burst_addr[24:23];
-            req_prechg_bank <= open_bank;
+            // Per-bank: only the request's own bank ever needs precharging.
+            // Single-row config: the precharge target is the TRACKED open
+            // bank — the request's own bank is untracked and must not be
+            // ACTivated while another bank's row is open.
+            req_prechg_bank <= (BANK_ROW_TRACK != 0) ? burst_addr[24:23]
+                                                     : open_bank;
             state <= ST_REQ_BURST_READ;
         end else
         if(word_rd_queue) begin
             word_rd_queue <= 0;
+            burst_defer_word <= 0;
             word_op <= 1;
             addr <= pending_addr;
             phy_ba <= pending_bank;
@@ -418,11 +513,13 @@ always @(posedge controller_clk) begin
             req_row_hit <= pending_row_hit;
             req_need_prechg <= pending_need_prechg;
             req_bank <= pending_bank;
-            req_prechg_bank <= open_bank;
+            req_prechg_bank <= (BANK_ROW_TRACK != 0) ? pending_bank
+                                                     : open_bank;
             state <= ST_REQ_READ;
         end else
         if(word_wr_queue) begin
             word_wr_queue <= 0;
+            burst_defer_word <= 0;
             word_op <= 1;
             addr <= pending_addr;
             phy_ba <= pending_bank;
@@ -432,7 +529,8 @@ always @(posedge controller_clk) begin
             req_row_hit <= pending_row_hit;
             req_need_prechg <= pending_need_prechg;
             req_bank <= pending_bank;
-            req_prechg_bank <= open_bank;
+            req_prechg_bank <= (BANK_ROW_TRACK != 0) ? pending_bank
+                                                     : open_bank;
             state <= ST_REQ_WRITE;
         end else
         if(burstwr_queue) begin
@@ -440,14 +538,15 @@ always @(posedge controller_clk) begin
             addr <= burstwr_addr;
             phy_ba <= burstwr_addr[24:23];
             word_busy <= 1;
-            req_need_prechg <= row_open;
-            req_prechg_bank <= open_bank;
+            req_need_prechg <= row_open_v[trk(burstwr_addr[24:23])];
+            req_prechg_bank <= (BANK_ROW_TRACK != 0) ? burstwr_addr[24:23]
+                                                     : open_bank;
             state <= ST_REQ_BURST_WRITE;
         end
 
     end
 
-    // Registered request dispatch.  This keeps open_row/open_bank out of
+    // Registered request dispatch.  This keeps the per-bank open-row state out of
     // the SDRAM command output mux and gives the fitter one cycle between
     // row-hit comparison and PRECHG/READ/WRITE command issue.
     ST_REQ_READ: begin
@@ -462,7 +561,7 @@ always @(posedge controller_clk) begin
             cmd <= CMD_PRECHG;
             phy_ba <= req_prechg_bank;
             phy_a[10] <= 1'b0;
-            row_open <= 0;
+            row_open_v[trk(req_prechg_bank)] <= 1'b0;
             prechg_return <= 2'd0;
             state <= ST_PRECHG_WAIT;
         end else begin
@@ -482,7 +581,7 @@ always @(posedge controller_clk) begin
             cmd <= CMD_PRECHG;
             phy_ba <= req_prechg_bank;
             phy_a[10] <= 1'b0;
-            row_open <= 0;
+            row_open_v[trk(req_prechg_bank)] <= 1'b0;
             prechg_return <= 2'd1;
             state <= ST_PRECHG_WAIT;
         end else begin
@@ -503,7 +602,7 @@ always @(posedge controller_clk) begin
             cmd <= CMD_PRECHG;
             phy_ba <= req_prechg_bank;
             phy_a[10] <= 1'b0;
-            row_open <= 0;
+            row_open_v[trk(req_prechg_bank)] <= 1'b0;
             prechg_return <= 2'd0;
             state <= ST_PRECHG_WAIT;
         end else begin
@@ -519,7 +618,7 @@ always @(posedge controller_clk) begin
             cmd <= CMD_PRECHG;
             phy_ba <= req_prechg_bank;
             phy_a[10] <= 1'b0;
-            row_open <= 0;
+            row_open_v[trk(req_prechg_bank)] <= 1'b0;
             prechg_return <= 2'd2;
             state <= ST_PRECHG_WAIT;
         end else begin
@@ -563,10 +662,13 @@ always @(posedge controller_clk) begin
         phy_a <= addr[22:10]; // A0-A12 row address
         cmd <= CMD_ACT;
 
-        // Track open row
-        row_open <= 1;
+        // Track open row (per-bank).  phy_ba is re-driven from addr so a
+        // row-crossing resume that lands in a new bank (16MB boundary)
+        // activates the correct bank.
+        phy_ba <= addr[24:23];
+        row_open_v[trk(addr[24:23])] <= 1'b1;
+        open_row[trk(addr[24:23])] <= addr[22:10];
         open_bank <= addr[24:23];
-        open_row <= addr[22:10];
 
         state <= ST_WRITE_1;
     end
@@ -587,11 +689,18 @@ always @(posedge controller_clk) begin
         phy_dq_out <= word_data_captured[15:0];
         phy_dqm <= ~word_wstrb_captured[1:0];
 
-        // Longer legacy bursts still pull continuation data from the AXI
-        // slave.  Native 2-word blocks already captured beat 1 locally when
-        // the command was accepted, so they avoid this timing-sensitive bus.
-        if (wr_burst_remaining > 0 && word_burst_wr_len_captured != 4'd1)
+        // Rolling preload: capture the beat requested by the PREVIOUS
+        // WRITE_2's pull into the preload slot (freed by last WRITE_3's
+        // shift), and pull the beat after the one in the preload slot.
+        // A pull is only needed while at least two beats remain after the
+        // current one (the next beat is already preloaded).
+        if (pull_inflight) begin
+            word_data_next_captured <= burst_wr_direct_data;
+            word_wstrb_next_captured <= burst_wr_direct_strb;
+        end
+        if (wr_burst_remaining >= 4'd2)
             word_wr_data_next <= 1;
+        pull_inflight <= (wr_burst_remaining >= 4'd2);
 
         state <= ST_WRITE_3;
     end
@@ -605,20 +714,22 @@ always @(posedge controller_clk) begin
         if (wr_burst_remaining > 0) begin
             wr_burst_remaining <= wr_burst_remaining - 4'd1;
             addr <= addr + 2'd2;
+            // Shift preload->active: the continuation beat is already in
+            // controller registers, so the next BL=2 write issues on the
+            // very next cycle — no cross-module pull/capture bubble.
+            word_data_captured <= word_data_next_captured;
+            word_wstrb_captured <= word_wstrb_next_captured;
             if ((addr[9:0] + 10'd2) <= 10'd1) begin
                 // Next write would cross SDRAM row boundary.
                 // Must finish current write, precharge, activate
-                // new row, then continue burst.
+                // new row, then continue burst.  Stash the bank being
+                // written NOW (pre-increment addr): if the crossing also
+                // crosses a 16MB bank boundary, that is the bank the
+                // precharge must target, not the new one.
+                nr_prechg_bank <= addr[24:23];
                 state <= ST_WRITE_4_NEWROW;
-            end else if (word_burst_wr_len_captured == 4'd1) begin
-                // openRTL-style local block continuation: beat 1 is already
-                // in controller registers, so issue the second BL=2 write
-                // without a cross-module pull/capture bubble.
-                word_data_captured <= word_data_next_captured;
-                word_wstrb_captured <= word_wstrb_next_captured;
-                state <= ST_WRITE_2;
             end else begin
-                state <= ST_WRITE_5;  // two gap cycles, then capture
+                state <= ST_WRITE_2;
             end
         end else begin
             state <= ST_WRITE_4;
@@ -635,23 +746,26 @@ always @(posedge controller_clk) begin
     ST_WRITE_4_NEWROW: begin
         phy_dqm <= 2'b00;
         if(dc == TIMING_WRITE-1+1) begin
-            // Precharge current bank
+            // Precharge the bank that was just written (stashed in
+            // ST_WRITE_3 before addr advanced into the new row)
             cmd <= CMD_PRECHG;
             phy_a[10] <= 0;
-            phy_ba <= addr[24:23];
-            row_open <= 0;
+            phy_ba <= nr_prechg_bank;
+            row_open_v[trk(nr_prechg_bank)] <= 1'b0;
             dc <= 0;
             state <= ST_WRITE_4_NR_PRECHG;
         end
     end
     ST_WRITE_4_NR_PRECHG: begin
         if(dc == TIMING_PRECHARGE-1) begin
-            // Activate new row
+            // Activate new row (addr already points into it; re-drive
+            // phy_ba in case the crossing entered a new bank)
             phy_a <= addr[22:10];
+            phy_ba <= addr[24:23];
             cmd <= CMD_ACT;
-            row_open <= 1;
+            row_open_v[trk(addr[24:23])] <= 1'b1;
+            open_row[trk(addr[24:23])] <= addr[22:10];
             open_bank <= addr[24:23];
-            open_row <= addr[22:10];
             dc <= 0;
             state <= ST_WRITE_4_NR_ACT;
         end
@@ -660,35 +774,19 @@ always @(posedge controller_clk) begin
         phy_a[10] <= 1'b0;
         if(dc == TIMING_ACT_RW-1) begin
             dc <= 0;
-            // Capture next word data then resume writing.  Native 2-word
-            // blocks use the command-time local preload; longer legacy
-            // bursts use the pull-driven continuation bus.
-            if (word_burst_wr_len_captured == 4'd1) begin
-                word_data_captured <= word_data_next_captured;
-                word_wstrb_captured <= word_wstrb_next_captured;
-            end else begin
-                word_data_captured <= burst_wr_direct_data;
-                word_wstrb_captured <= burst_wr_direct_strb;
+            // The resume beat was already shifted into word_data_captured
+            // by ST_WRITE_3 before the crossing.  Complete any outstanding
+            // pull here: the slave holds the selected beat stable on
+            // burst_wr_direct_* until the next pull, so capturing it during
+            // the precharge/activate pause is always safe.
+            if (pull_inflight) begin
+                word_data_next_captured <= burst_wr_direct_data;
+                word_wstrb_next_captured <= burst_wr_direct_strb;
+                pull_inflight <= 0;
             end
             phy_dq_oe <= 1;
             state <= ST_WRITE_2;
         end
-    end
-    // Burst write continuation: request in WRITE_2, then wait two cycles
-    // before capturing the next beat.  The extra bubble costs one controller
-    // cycle per additional word, but it gives the AXI-slave→io_sdram data
-    // handoff enough slack on hardware.
-    ST_WRITE_5: begin
-        phy_dq_oe <= 1;
-        phy_dqm <= 2'b00;
-        state <= ST_WRITE_6;
-    end
-    ST_WRITE_6: begin
-        phy_dq_oe <= 1;
-        phy_dqm <= 2'b00;
-        word_data_captured <= burst_wr_direct_data;
-        word_wstrb_captured <= burst_wr_direct_strb;
-        state <= ST_WRITE_2;
     end
     ST_WRITE_7: begin
         state <= ST_WRITE_2;
@@ -701,10 +799,13 @@ always @(posedge controller_clk) begin
         phy_a <= addr[22:10]; // A0-A12 row address
         cmd <= CMD_ACT;
 
-        // Track open row
-        row_open <= 1;
+        // Track open row (per-bank).  phy_ba is re-driven from addr so a
+        // row-crossing resume that lands in a new bank (16MB boundary)
+        // activates the correct bank.
+        phy_ba <= addr[24:23];
+        row_open_v[trk(addr[24:23])] <= 1'b1;
+        open_row[trk(addr[24:23])] <= addr[22:10];
         open_bank <= addr[24:23];
-        open_row <= addr[22:10];
 
         state <= ST_READ_1;
     end
@@ -763,10 +864,13 @@ always @(posedge controller_clk) begin
             // (applies to both word and burst reads)
             state <= ST_IDLE;
         end else begin
-            // Row-crossing: precharge and activate next row
+            // Row-crossing: precharge and activate next row.  phy_ba still
+            // holds the bank of the row being read (set at dispatch or the
+            // last ST_READ_0 ACT), which is exactly the precharge target —
+            // addr has already advanced and may point into a new bank.
             cmd <= CMD_PRECHG;
             phy_a[10] <= 0; // only precharge current bank
-            row_open <= 0;
+            row_open_v[trk(phy_ba)] <= 1'b0;
             state <= ST_READ_7;
         end
     end
@@ -824,7 +928,7 @@ always @(posedge controller_clk) begin
         cmd <= CMD_PRECHG;
         phy_a[10] <= 0; // only precharge current bank
         phy_dqm <= 2'b00;  // Restore DQM for future operations
-        row_open <= 0;  // Track bank close
+        row_open_v[trk(addr[24:23])] <= 1'b0;  // Track bank close (burstwr never crosses banks)
         state <= ST_BURSTWR_6;
     end
     ST_BURSTWR_6: begin
@@ -879,23 +983,26 @@ always @(posedge controller_clk) begin
     end
     if(burst_rd) begin
         burst_rd_queue <= 1;
+        // word_rd/word_wr cover a request pulse landing on this same edge;
+        // the *_queue flags cover one already accepted on an earlier edge.
+        burst_defer_word <= word_rd | word_wr | word_rd_queue | word_wr_queue;
     end
     if(burstwr) begin
         burstwr_queue <= 1;
     end
 
     // autorefresh generator
-    // every 5.12us @100MHz (512 cycles); 8192 refreshes / 64ms requires a
-    // <=7.8125us average interval, so 5.12us has comfortable margin.
+    // every REFRESH_INTERVAL cycles; see the declaration comment for the
+    // spec margin.
     refresh_count <= refresh_count + 1'b1;
-    if(&refresh_count)
+    if(refresh_count == REFRESH_INTERVAL - 1)
         refresh_count <= 0;
     // A refresh tick (counter wrap) increments the pending count; issuing one
     // in ST_REFRESH_0 decrements it.  Combined into a single assignment so a
     // simultaneous tick+issue nets correctly — the old single flag dropped the
     // second tick in that case.
     refresh_pending <= refresh_pending
-                     + (&refresh_count ? 2'd1 : 2'd0)
+                     + ((refresh_count == REFRESH_INTERVAL - 1) ? 2'd1 : 2'd0)
                      - ((state == ST_REFRESH_0) ? 2'd1 : 2'd0);
 
     if(~reset_n_s) begin
@@ -906,6 +1013,7 @@ always @(posedge controller_clk) begin
         word_rd_queue <= 0;
         word_wr_queue <= 0;
         burst_rd_queue <= 0;
+        burst_defer_word <= 0;
         burstwr_queue <= 0;
         word_addr_captured <= 0;
         word_data_captured <= 0;
@@ -915,18 +1023,21 @@ always @(posedge controller_clk) begin
         word_burst_len_captured <= 0;
         word_burst_wr_len_captured <= 0;
         wr_burst_remaining <= 0;
+        pull_inflight <= 0;
         word_q <= 0;
         word_busy <= 0;
         word_q_valid <= 0;
         word_wr_data_next <= 0;
         word_wr_done <= 0;
         enable_dq_read_toggle <= 0;
-        row_open <= 0;
+        row_open_v <= 4'd0;
+        open_bank <= 2'd0;
         prechg_return <= 2'd0;
         req_row_hit <= 0;
         req_need_prechg <= 0;
         req_bank <= 0;
         req_prechg_bank <= 0;
+        nr_prechg_bank <= 0;
     end
 end
 

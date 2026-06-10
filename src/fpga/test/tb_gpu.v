@@ -17,7 +17,17 @@
 
 `default_nettype none
 
-module tb_gpu (
+module tb_gpu #(
+    // Forwarded verbatim to gpu_core so per-variant configs can be built
+    // straight from the command line with Verilator -G overrides, e.g.
+    //   verilator ... -GGPU_HAS_PARAM_TRI_RECS=0 -GGPU_Z_READ_WINDOW=1
+    // Defaults match gpu_core's defaults (everything on), so the standard
+    // gpu / gpu-persp / gpu-acceptance builds are unchanged.
+    parameter GPU_HAS_VERT_TRI       = 1,
+    parameter GPU_HAS_PARAM_TRI_RECS = 1,
+    parameter GPU_Z_READ_WINDOW      = 4,
+    parameter GPU_EW_PARALLEL_DIVS   = 1
+) (
     input  wire        clk,
     input  wire        reset_n,
 
@@ -97,7 +107,12 @@ wire        gpu_sram_rdata_valid;
 // ============================================================
 // GPU Core
 // ============================================================
-gpu_core gpu (
+gpu_core #(
+    .GPU_HAS_VERT_TRI(GPU_HAS_VERT_TRI),
+    .GPU_HAS_PARAM_TRI_RECS(GPU_HAS_PARAM_TRI_RECS),
+    .GPU_Z_READ_WINDOW(GPU_Z_READ_WINDOW),
+    .GPU_EW_PARALLEL_DIVS(GPU_EW_PARALLEL_DIVS)
+) gpu (
     .clk(clk),
     .reset_n(reset_n),
     .gpu_enable(1'b1),

@@ -28,6 +28,29 @@ set_clock_groups -asynchronous \
  -group { ic|mp_ram|altera_pll_i|general[0].gpll~PLL_OUTPUT_COUNTER|divclk \
           ic|mp_ram|altera_pll_i|general[1].gpll~PLL_OUTPUT_COUNTER|divclk }
 
+# ============================================================================
+# APF bridge SPI I/O timing (F4, bridge-corruption mitigation 2026-06).
+# These pins previously had NO set_input_delay/set_output_delay at all:
+# bridge_spiclk got a create_clock (apf_constraints.sdc) and its own async
+# clock group above, so STA never reported a single pad-to-register path for
+# the RX capture flops in io_bridge_peripheral.v (clocked directly on
+# bridge_spiclk).  That STA silence was vacuous — the paths were
+# unconstrained, not proven.  The Pocket host publishes no formal timing
+# budget for this link, so constrain a conservative +/-2 ns data-valid
+# window around the bridge_spiclk edge (~15% of the 13.468 ns bit cell) so
+# the fitter must place the capture IOB paths tightly and STA actually
+# analyzes them.  bridge_spimosi/bridge_spimiso are inout (4-bit-bus style
+# APF phy): the input delays cover the host->FPGA RX direction; the
+# matching output delays cover the FPGA->host TX direction.  Note the TX
+# launch registers live in clk_74a (io_bridge_peripheral drives spiclk
+# itself during TX), so the async clock-group above cuts the internal TX
+# domain crossing — the output-delay lines still document the pin-side
+# budget and become live if the TX path is ever made source-synchronous.
+# F4-AB-disabled: set_input_delay  -clock bridge_spiclk -max  2.0 [get_ports {bridge_spimosi bridge_spimiso bridge_spiss}]
+# F4-AB-disabled: set_input_delay  -clock bridge_spiclk -min -2.0 [get_ports {bridge_spimosi bridge_spimiso bridge_spiss}]
+# F4-AB-disabled: set_output_delay -clock bridge_spiclk -max  2.0 [get_ports {bridge_spimosi bridge_spimiso}]
+# F4-AB-disabled: set_output_delay -clock bridge_spiclk -min -2.0 [get_ports {bridge_spimosi bridge_spimiso}]
+
 # SDRAM I/O timing
 # The io_sdram controller uses clk_ram_chip (243° phase shift) internally
 # to manage setup/hold timing. The phase relationship is fixed by the PLL,
@@ -45,17 +68,26 @@ set_output_delay -clock dram_clk_pin -min -1.0 [get_ports {dram_a[*] dram_ba[*] 
 # by the PLL phase relationship, not fitter placement.
 set_false_path -from [get_ports {dram_dq[*]}]
 
-# PSRAM sync burst timing constraints for CRAM0.
-# Memory-arch v2: cram0_clk is a direct assign from clk_74a (core_top.v:2632),
-# so the pin clock derives 1:1 from the clk_74a input port.
-create_generated_clock -name cram0_clk_pin \
-  -source [get_ports clk_74a] \
-  [get_ports cram0_clk]
-
-set_output_delay -clock cram0_clk_pin -max 3.0 [get_ports {cram0_a[*] cram0_dq[*] cram0_adv_n cram0_cre cram0_ce0_n cram0_ce1_n cram0_oe_n cram0_we_n cram0_ub_n cram0_lb_n}]
-set_output_delay -clock cram0_clk_pin -min -1.0 [get_ports {cram0_a[*] cram0_dq[*] cram0_adv_n cram0_cre cram0_ce0_n cram0_ce1_n cram0_oe_n cram0_we_n cram0_ub_n cram0_lb_n}]
-set_input_delay -clock cram0_clk_pin -max 6.5 [get_ports {cram0_dq[*] cram0_wait}]
-set_input_delay -clock cram0_clk_pin -min 1.0 [get_ports {cram0_dq[*] cram0_wait}]
+# CRAM0 async-mode pin timing (F5, bridge-corruption mitigation 2026-06).
+# cram0_clk is now tied LOW in core_top.v: the chip runs exclusively in
+# async page mode (BCR 0x9D1F, burst_rd tied off) and the CellularRAM spec
+# requires CLK held low for async operation — including during the
+# CRE-controlled BCR write.  The old cram0_clk_pin generated clock
+# (sourced from clk_74a when the pin free-ran) no longer exists, so the
+# set_output_delay/set_input_delay block that referenced it is retired
+# with it; left in place it would only raise unmatched-clock warnings and
+# hide real issues.
+#
+# The async protocol's setup/hold is met STRUCTURALLY, not by single-cycle
+# pin timing: cram0_phy.sv stretches every ADV#/WE#/OE#/data edge across
+# whole 13.47 ns clk_74a cycles (cycle-count localparams derived from the
+# datasheet minimums plus a +2 ns guardband), and read data is sampled
+# tens of ns after OE# asserts.  Declare the pin paths false so the fitter
+# does not burn effort on a protocol that is cycle-quantized by design.
+# Re-evaluate if sync-burst reads return: restore the generated clock and
+# real IO delays together with the clk_74a drive in core_top.v.
+set_false_path -to [get_ports {cram0_a[*] cram0_dq[*] cram0_adv_n cram0_cre cram0_ce0_n cram0_ce1_n cram0_oe_n cram0_we_n cram0_ub_n cram0_lb_n cram0_clk}]
+set_false_path -from [get_ports {cram0_dq[*] cram0_wait}]
 
 # CRAM1 retired in memory-arch v2 — chip is not pin-assigned in ap_core.qsf
 # and the top-level ports have been removed. Old cram1_* IO/clock constraints
@@ -81,3 +113,17 @@ set_multicycle_path -from [get_registers {*VexiiRiscv*|execute_ctrl2_up_COMPLETI
 # span-only profile, so its DSP input-shadow constraints are intentionally
 # absent.  If the triangle path is restored, also restore the narrow hold-only
 # exceptions for tri_A/tri_B -> tri_A_dsp_in/tri_B_dsp_in.
+
+# Quasi-static video-mode configuration -> scanout fetch address cone.
+# term_fb_active / analog_keep_app / fb_stride_reg / analog_fb_stride_reg
+# change only on mode switches (terminal toggle, analogizer mode, video
+# mode set) — never during steady-state scanout — and a late toggle can
+# at worst mis-fetch one line on the switching frame, which mid-frame
+# reconfiguration produces anyway.  Cutting them keeps the fitter's
+# effort on real paths.  fb_app_addr is deliberately NOT cut: it flips
+# every frame and must meet timing.
+set_false_path -from [get_registers {*axi_periph_slave:periph|term_fb_active \
+                                     *axi_periph_slave:periph|analog_keep_app \
+                                     *axi_periph_slave:periph|fb_stride_reg[*] \
+                                     *axi_periph_slave:periph|analog_fb_stride_reg[*]}] \
+               -to [get_registers {*video_CRT_scanout_indexed_BRAM:scanout|*}]

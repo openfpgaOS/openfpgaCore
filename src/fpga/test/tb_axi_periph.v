@@ -226,6 +226,7 @@ axi_periph_slave dut (
     .hps_img_size        (64'd0),
     .hps_boot_len        (32'd0),
     .bridge_wr_idle      (bridge_wr_idle),
+    .bridge_dbg_wcnt     (32'd0),
 
     .color_mode     (),
     .fb_display_addr(),

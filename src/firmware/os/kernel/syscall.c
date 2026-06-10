@@ -163,6 +163,30 @@ typedef struct {
 static io_cache_entry_t io_cache[IO_CACHE_ENTRIES];
 static uint32_t io_lru_counter;
 
+/* Lookup accelerators.  Both are stale-tolerant hints validated against
+ * the entry before use, so eviction/invalidation never needs to touch
+ * them — correctness rests solely on the io_cache[] contents, exactly
+ * as with the plain scan.  io_cache_mru catches the dominant pattern
+ * (consecutive read() calls walking one cached block); the hash hint
+ * catches alternation between a few hot blocks.  The full scan remains
+ * as the miss-path fallback. */
+#define IO_CACHE_HINTS 256u   /* power of two; entry index fits a byte */
+static int io_cache_mru = -1;
+static uint8_t io_cache_hint[IO_CACHE_HINTS];
+
+static inline uint32_t io_cache_hash(uint32_t slot_id, uint32_t aligned_off)
+{
+    return ((slot_id * 2654435761u) ^ (aligned_off / IO_CACHE_BLOCK_SIZE))
+           & (IO_CACHE_HINTS - 1u);
+}
+
+static inline int io_cache_entry_is(int i, uint32_t slot_id, uint32_t aligned_off)
+{
+    return io_cache[i].valid > 0 &&
+           io_cache[i].slot_id == slot_id &&
+           io_cache[i].file_off == aligned_off;
+}
+
 static inline const uint8_t *io_cache_data(int entry)
 {
     return (const uint8_t *)(uintptr_t)
@@ -171,15 +195,24 @@ static inline const uint8_t *io_cache_data(int entry)
 
 static int io_cache_lookup(uint32_t slot_id, uint32_t aligned_off)
 {
-    for (int i = 0; i < IO_CACHE_ENTRIES; i++) {
-        if (io_cache[i].valid > 0 &&
-            io_cache[i].slot_id == slot_id &&
-            io_cache[i].file_off == aligned_off) {
-            io_cache[i].lru = ++io_lru_counter;
-            return i;
-        }
-    }
+    uint32_t h = io_cache_hash(slot_id, aligned_off);
+    int i = io_cache_mru;
+
+    if (i >= 0 && io_cache_entry_is(i, slot_id, aligned_off))
+        goto hit;
+    i = io_cache_hint[h];
+    if (i < IO_CACHE_ENTRIES && io_cache_entry_is(i, slot_id, aligned_off))
+        goto hit;
+    for (i = 0; i < IO_CACHE_ENTRIES; i++)
+        if (io_cache_entry_is(i, slot_id, aligned_off))
+            goto hit;
     return -1;
+
+hit:
+    io_cache[i].lru = ++io_lru_counter;
+    io_cache_mru = i;
+    io_cache_hint[h] = (uint8_t)i;
+    return i;
 }
 
 static int io_cache_evict(void)

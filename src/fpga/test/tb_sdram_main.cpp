@@ -367,7 +367,18 @@ static Write2Stats axi_write_2beat_observed(uint32_t byte_addr,
             st.second_presented = true;
         }
 
-        if (inject_burst_rd && st.w_beats == 2 && tb->busy && burst_started < 0) {
+        // Inject the scanout-style burst only once io_sdram is actually
+        // executing OUR word write (FSM in a write state).  Gating on
+        // tb->busy alone is racy: busy is also high across an unrelated
+        // read tail or autorefresh, and a burst injected in that window
+        // legally preempts the not-yet-accepted write (scanout priority),
+        // which is not the contention this test is about.
+        int st_io = tb->dbg_io & 0x3F;
+        bool in_word_write = (st_io == 9)  ||  // ST_WRITE_HIT
+                             (st_io == 10) ||  // ST_WRITE_4_NR_ACT
+                             (st_io == 12) ||  // ST_REQ_WRITE
+                             (st_io >= 20 && st_io <= 29);  // ST_WRITE_*
+        if (inject_burst_rd && st.w_beats == 2 && in_word_write && burst_started < 0) {
             tb->inj_burst_rd   = 1;
             tb->inj_burst_addr = 0x00204000;
             tb->inj_burst_len  = 160;

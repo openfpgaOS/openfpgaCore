@@ -324,12 +324,13 @@ wire [3:0]  sdram_preload_wstrb;
 // Pulse adapter (mirror of core_top.v lines 1713–1746)
 reg         cmd_forwarded;
 reg         accepted_r;
-reg         wr_data_fwd_d1;
 reg         word_rd_sd;
 reg         word_wr_sd;
 reg  [23:0] word_addr_sd;
 reg  [31:0] word_data_sd;
 reg  [3:0]  word_wstrb_sd;
+reg  [31:0] word_data_next_sd;
+reg  [3:0]  word_wstrb_next_sd;
 reg  [3:0]  word_burst_len_sd;
 reg  [3:0]  word_burst_wr_len_sd;
 wire [31:0] word_q_sd;
@@ -342,8 +343,9 @@ always @(posedge clk_cpu or negedge reset_n) begin
     if (!reset_n) begin
         word_rd_sd <= 0; word_wr_sd <= 0;
         word_addr_sd <= 0; word_data_sd <= 0; word_wstrb_sd <= 0;
+        word_data_next_sd <= 0; word_wstrb_next_sd <= 0;
         word_burst_len_sd <= 0; word_burst_wr_len_sd <= 0;
-        cmd_forwarded <= 0; accepted_r <= 0; wr_data_fwd_d1 <= 0;
+        cmd_forwarded <= 0; accepted_r <= 0;
     end else begin
         word_rd_sd <= 0; word_wr_sd <= 0;
         word_burst_len_sd <= 0; word_burst_wr_len_sd <= 0;
@@ -358,17 +360,16 @@ always @(posedge clk_cpu or negedge reset_n) begin
             word_addr_sd <= sdram_addr;
             word_data_sd <= sdram_wdata;
             word_wstrb_sd <= sdram_wstrb;
+            word_data_next_sd <= sdram_preload_wdata;
+            word_wstrb_next_sd <= sdram_preload_wstrb;
             word_burst_len_sd <= sdram_burst_len;
             word_burst_wr_len_sd <= sdram_burst_wr_len;
             accepted_r <= 1;
             cmd_forwarded <= 1;
         end
-
-        wr_data_fwd_d1 <= word_wr_data_next_sd;
-        if (wr_data_fwd_d1) begin
-            word_data_sd <= sdram_wdata;
-            word_wstrb_sd <= sdram_wstrb;
-        end
+        // (The old wr_data_fwd_d1 refresh of word_data_sd is gone: native
+        // burst continuation beats now flow over the direct
+        // sdram_next_wdata/strb bus, matching io_sdram on hardware.)
     end
 end
 
@@ -414,6 +415,8 @@ sdram_fast_model sdram_mem (
     .word_addr          (word_addr_sd),
     .word_data          (word_data_sd),
     .word_wstrb         (word_wstrb_sd),
+    .word_data_next     (word_data_next_sd),
+    .word_wstrb_next    (word_wstrb_next_sd),
     .word_burst_len     (word_burst_len_sd),
     .word_burst_wr_len  (word_burst_wr_len_sd),
     .word_q             (word_q_sd),
@@ -421,8 +424,8 @@ sdram_fast_model sdram_mem (
     .word_q_valid       (word_q_valid_sd),
     .word_wr_data_next  (word_wr_data_next_sd),
     .word_wr_done       (word_wr_done_sd),
-    .burst_wr_direct_data(word_data_sd),
-    .burst_wr_direct_strb(word_wstrb_sd)
+    .burst_wr_direct_data(sdram_next_wdata),
+    .burst_wr_direct_strb(sdram_next_wstrb)
 );
 
 // ============================================================
@@ -567,6 +570,7 @@ axi_periph_slave periph (
     .hps_img_size        (64'd0),
     .hps_boot_len        (32'd0),
     .bridge_wr_idle      (bridge_wr_idle),
+    .bridge_dbg_wcnt     (32'd0),
 
     .color_mode     (),
     .fb_display_addr(),

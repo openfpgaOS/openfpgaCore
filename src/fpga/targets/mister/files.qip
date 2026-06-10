@@ -25,6 +25,7 @@ set_global_assignment -name VERILOG_FILE ../../common/axi_sdram_arbiter.v
 set_global_assignment -name VERILOG_FILE ../../common/axi_sdram_slave.v
 set_global_assignment -name VERILOG_FILE ../../common/cpu_system.v
 set_global_assignment -name VERILOG_FILE ../../common/cpu_target_port.v
+set_global_assignment -name VERILOG_FILE ../../common/cpu_target_port_per.v
 set_global_assignment -name VERILOG_FILE ../../common/video_CRT_scanout_indexed_BRAM.v
 
 # Generated VexiiRiscv netlist (make cpu)

@@ -1,10 +1,4 @@
 #!/bin/bash
-#------------------------------------------------------------------------------
-# SPDX-License-Identifier: Apache-2.0
-# SPDX-FileType: SOURCE
-# SPDX-FileCopyrightText: (c) 2026, ThinkElastic <Think@Elastic.com>
-#------------------------------------------------------------------------------
-
 # Generate VexiiRiscv for openfpgaOS using the stock vexiiriscv.Generate
 # entry point (no custom Scala wrapper).  FetchL1 and LsuL1 are exposed
 # directly as AXI4 masters; all region routing is handled by the fabric
@@ -12,19 +6,21 @@
 # pre-FMax openfpgaOS config.
 #
 # Config highlights:
-#   Issue  : single-issue front end.  Dual issue proved too route-heavy on
-#            Cyclone V at 100 MHz (front-end/decode/I-cache enable cone).
-#   I-cache: 32 KB (256 sets × 2 ways × 64 B line, NL prefetch,
-#            64-bit refill/fetch fabric)
+#   I-cache: 32 KB (256 sets × 2 ways × 64 B line, NL prefetch)
 #            readAt=1 / ctrlAt=3 gives the fitter one extra fetch stage
 #            between execute-side backpressure and the M10K read-enable
 #            cone. This recovers much of the old high-Fmax pipeline win
 #            without disabling the proven-safe bypass network.
-#   D-cache: 128 KB (1024 sets × 2 ways × 64 B line, 64-bit refill/
-#            writeback fabric, next-line HW prefetch —
-#            the `rpt` prefetcher speculated past PMA boundaries and
-#            surfaced bus faults to commit, so use the simpler `nl`
-#            prefetcher.)
+#   D-cache: 128 KB (1024 sets × 2 ways × 64 B line, 32-bit banks, NO HW
+#            prefetch — the `rpt` prefetcher speculated past PMA
+#            boundaries and surfaced bus faults to commit).  Fits the
+#            Pocket ONLY with the qsf PHYSICAL_SYNTHESIS_* knobs OFF
+#            (their register duplication/retiming inflated the design
+#            ~1,000 ALMs; measured 2026-06-09: 92% ALM / 308/308 M10K /
+#            WNS -0.73 with them off vs LAB overflow with them on).
+#            64-bit banks buy nothing through the 32-bit AXI fabric and
+#            their 512-set emission crashes Quartus 25.1's Verific
+#            frontend (VRFX operators.cpp:2349) — keep 32-bit banks.
 #   FPU    : shared add/FMA pipeline starts pre-shift one stage later so
 #            ctrl5 FMA lane selection is captured before the exponent and
 #            mantissa compare cone. The packer writeback stage is shortened
@@ -53,7 +49,13 @@
 #   0x00000000  32 KB  BRAM    — main=0, exe=1  (non-speculative, executable)
 #   0x10000000  64 MB  SDRAM   — main=1, exe=1  (cached, executable)
 #   0x20000000 256 MB  reserved — main=0, exe=0
-#   0x30000000  16 MB  CRAM0   — main=1, exe=1  (cacheable bridge staging)
+#   0x30000000  16 MB  CRAM0   — main=0, exe=0  (uncached, non-executable:
+#                                ALL CRAM0 traffic goes down the LSU's
+#                                uncached per_axi path; cpu_system.v's
+#                                port_cram0 per_axi-only specialization
+#                                depends on these flags — re-extend it to
+#                                the full cpu_target_port if main/exe is
+#                                ever re-enabled here)
 #   0x38000000 128 MB  uncached alias — main=0, exe=0
 #   0x40000000   1 GB  IO + SDRAM_UC — main=0, exe=0
 #
@@ -83,19 +85,20 @@ sbt -Dsbt.server.forcestart=true --batch "Test/runMain vexiiriscv.Generate \
       --fetch-l1-bank-muxes-at=2 --fetch-l1-bank-mux-at=3 --fetch-l1-ctrl-at=3 \
       --fetch-l1-hardware-prefetch=nl --fetch-axi4 \
       --with-lsu-l1 --lsu-l1-sets=1024 --lsu-l1-ways=2 \
-      --lsu-l1-mem-data-width-min=64 \
       --lsu-l1-refill-count=2 --lsu-l1-writeback-count=2 \
       --lsu-l1-store-buffer-slots=2 --lsu-l1-store-buffer-ops=16 \
       --lsu-l1-axi4 \
-      --lsu-software-prefetch --lsu-hardware-prefetch=nl \
-      --with-btb --btb-sets=256 --relaxed-btb --relaxed-btb-hit \
-      --with-gshare --gshare-bytes=1024 --with-ras \
+      --lsu-software-prefetch --lsu-hardware-prefetch=none \
+      --with-btb --btb-sets=512 --relaxed-btb --relaxed-btb-hit \
+      --with-gshare --gshare-bytes=4096 --with-ras \
       --allow-bypass-from=0 \
       --fpu-ignore-subnormal \
       --fpu-wb-at=1 \
       --fpu-add-preshift-stage=1 --fpu-add-shifter-stage=2 \
       --fpu-add-math-stage=3 --fpu-add-norm-stage=4 --fpu-add-pack-at=5 \
-      --relaxed-src --relaxed-branch --relaxed-div \
+      --relaxed-src --relaxed-branch --relaxed-div --relaxed-shift \
+      --div-radix=4 --with-store-rs2-late \
+      --dispatcher-at=2 \
       --reset-vector=0 \
       --region base=0,size=8000,main=0,exe=1 \
       --region base=10000000,size=4000000,main=1,exe=1 \
@@ -120,11 +123,22 @@ if ! grep -q "maxfan = 16.*execute_freeze_valid" "$OUTPUT"; then
     exit 1
 fi
 
-# Some generated helpers emit simulation randomisation inside `ifndef
-# SYNTHESIS` blocks, but Quartus does not define SYNTHESIS for this flow and
-# rejects $urandom during Analysis & Synthesis.  The values are not
-# architecturally observable, so scrub them to deterministic zero
-# initialisation in the generated Verilog.
+# NOTE: maxfan=8 annotations on LsuL1 banksWrite_mask/waysWrite_mask were
+# A/B-tested 2026-06-09 and REGRESSED (WNS -1.119 -> -1.252, TNS -254 ->
+# -464) — same backfire mode as the decode_ctrls_0_up_isReady trial.
+# Mid-cone replication hurts this design; do not re-add either.
+
+# NOTE: a decode_ctrls_0_up_isReady maxfan=16 annotation was trialled
+# (2026-06-09) and REGRESSED WNS -0.95 -> -1.75: the replicas fed the
+# AlignerPlugin buffer through extra hops.  The structural fix for the
+# fetch->aligner->decode->dispatch cone is --dispatcher-at=2 above
+# (registers the rsHazardChecker inputs); do not re-add the annotation.
+
+# Some SpinalHDL emitter paths produce simulation randomisation
+# ($urandom) that Quartus rejects during Analysis & Synthesis.  The
+# current flag set emits none, but any future flag/version change can
+# reintroduce it — scrub to deterministic zero (the values are not
+# architecturally observable) and fail fast if any survive.
 perl -pi -e 's/= \{\$urandom\};/= 0;/' "$OUTPUT"
 if grep -q '\$urandom' "$OUTPUT"; then
     echo "ERROR: unsupported \$urandom remains in generated Verilog"

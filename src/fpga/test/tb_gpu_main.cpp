@@ -8007,6 +8007,7 @@ int main(int argc, char **argv) {
 
     printf("\n=== Results: %d passed, %d failed ===\n",
            pass_count, fail_count);
+    printf("=== Total sim_time: %llu ===\n", (unsigned long long)sim_time);
 
     delete tb;
     return fail_count > 0 ? 1 : 0;

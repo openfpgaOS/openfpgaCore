@@ -45,6 +45,7 @@ SDRAM_TOP = tb_sdram
 SDRAM_DIR = obj_dir
 SDRAM_SERIAL_DIR = obj_dir_sdram_serial
 SDRAM_NATIVE2_DIR = obj_dir_sdram_native2
+SDRAM_WCONT0_DIR = obj_dir_sdram_wcont0
 
 # Generate test variant of io_sdram with split DQ (no inout for Verilator)
 io_sdram_test.v: $(TARGET_DIR)/io_sdram.v
@@ -117,6 +118,24 @@ BRIDGE_CMD_TOP = tb_core_bridge_cmd
 BRIDGE_CMD_DIR = obj_dir_bridge_cmd
 BRIDGE_CMD_FLAGS = -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC -Wno-CASEINCOMPLETE \
                    -Wno-SYNCASYNCNET -Wno-UNUSEDSIGNAL
+
+# ============================================================
+# Pocket bridge RX CDC — phase sweep of the REAL io_bridge_peripheral.
+# bridge_spiclk and clk_74a are both 74.25 MHz with a power-up-latched
+# relative phase; the harness sweeps that phase in sub-ns steps while
+# playing full-rate Aristotle-style bulk write bursts and checks that
+# every (addr, word) lands exactly once, in order, on the pmp port.
+# ============================================================
+BRIDGE_RX_SRCS = \
+	tb_io_bridge.v \
+	$(TARGET_DIR)/apf/io_bridge_peripheral.v \
+	$(TARGET_DIR)/apf/common.v
+
+BRIDGE_RX_CPP = tb_io_bridge_main.cpp
+BRIDGE_RX_TOP = tb_io_bridge
+BRIDGE_RX_DIR = obj_dir_bridge_rx
+BRIDGE_RX_FLAGS = -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC -Wno-CASEINCOMPLETE \
+                  -Wno-SYNCASYNCNET -Wno-UNUSEDSIGNAL -Wno-PINMISSING
 
 # ============================================================
 # GPU chain — exercises (slices + cpu_target_port + axi_periph_slave)
@@ -206,6 +225,7 @@ SYSTEM_SRCS = \
 	cram0_sim_model.v \
 	$(COMMON_DIR)/cpu_system.v \
 	$(COMMON_DIR)/cpu_target_port.v \
+	$(COMMON_DIR)/cpu_target_port_per.v \
 	$(COMMON_DIR)/cram0_cdc.v \
 	$(COMMON_DIR)/axi_register_slice.v \
 	$(COMMON_DIR)/axi_sdram_arbiter.v \
@@ -232,10 +252,10 @@ SYSTEM_FLAGS = -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC -Wno-CASEINCOMPLETE \
 # ============================================================
 # Targets
 # ============================================================
-.PHONY: all sdram sdram-serialize sdram-native2 sdram-all sram scanout analogchain gpu gpu-persp gpu-floor gpu-gpudemo gpu-acceptance gpu-acceptance-single gpu-acceptance-burst2 gpu-acceptance-all gpu-chain \
-        axi-periph bridge-cmd audio audio-mixer arbiter system run run-sram build clean
+.PHONY: all sdram sdram-serialize sdram-native2 sdram-wcont0 sdram-all sram scanout analogchain gpu gpu-persp gpu-floor gpu-gpudemo gpu-acceptance gpu-acceptance-single gpu-acceptance-burst2 gpu-acceptance-all gpu-chain \
+        axi-periph bridge-cmd bridge-rx audio audio-mixer arbiter system run run-sram build clean
 
-all: sdram-all sram gpu gpu-persp axi-periph bridge-cmd audio audio-mixer arbiter hps-bridge
+all: sdram-all sram gpu gpu-persp axi-periph bridge-cmd bridge-rx audio audio-mixer arbiter hps-bridge
 
 # --- SDRAM ---
 sdram: $(SDRAM_DIR)/V$(SDRAM_TOP)
@@ -261,7 +281,18 @@ $(SDRAM_NATIVE2_DIR)/V$(SDRAM_TOP): $(SDRAM_SRCS) $(SDRAM_SYNCH) $(SDRAM_CPP)
 		--top-module $(SDRAM_TOP) --Mdir $(SDRAM_NATIVE2_DIR) \
 		$(SDRAM_SRCS) $(SDRAM_SYNCH) $(SDRAM_CPP)
 
-sdram-all: sdram sdram-serialize sdram-native2
+# Same 491 checks with s_axi_wcont tied low: every multi-beat write takes
+# the buffered writeback path (S_WR_FILL FIFO → one native io_sdram burst),
+# the route CPU dirty-line evictions use on hardware.
+sdram-wcont0: $(SDRAM_WCONT0_DIR)/V$(SDRAM_TOP)
+	./$(SDRAM_WCONT0_DIR)/V$(SDRAM_TOP)
+
+$(SDRAM_WCONT0_DIR)/V$(SDRAM_TOP): $(SDRAM_SRCS) $(SDRAM_SYNCH) $(SDRAM_CPP)
+	$(VERILATOR) $(VERILATOR_FLAGS) -GWCONT_TIE=0 \
+		--top-module $(SDRAM_TOP) --Mdir $(SDRAM_WCONT0_DIR) \
+		$(SDRAM_SRCS) $(SDRAM_SYNCH) $(SDRAM_CPP)
+
+sdram-all: sdram sdram-serialize sdram-native2 sdram-wcont0
 
 # Backward compat aliases
 build: $(SDRAM_DIR)/V$(SDRAM_TOP)
@@ -438,6 +469,17 @@ $(BRIDGE_CMD_DIR)/V$(BRIDGE_CMD_TOP): $(BRIDGE_CMD_SRCS) $(BRIDGE_CMD_CPP)
 		--top-module $(BRIDGE_CMD_TOP) --Mdir $(BRIDGE_CMD_DIR) \
 		-I$(COMMON_DIR) \
 		$(BRIDGE_CMD_SRCS) $(BRIDGE_CMD_CPP)
+
+# --- Pocket bridge RX CDC phase sweep ---
+bridge-rx: $(BRIDGE_RX_DIR)/V$(BRIDGE_RX_TOP)
+	@printf "\n=== Pocket bridge RX CDC (io_bridge_peripheral phase sweep) ===\n"
+	./$(BRIDGE_RX_DIR)/V$(BRIDGE_RX_TOP)
+
+$(BRIDGE_RX_DIR)/V$(BRIDGE_RX_TOP): $(BRIDGE_RX_SRCS) $(BRIDGE_RX_CPP)
+	$(VERILATOR) $(VERILATOR_FLAGS) $(BRIDGE_RX_FLAGS) \
+		--top-module $(BRIDGE_RX_TOP) --Mdir $(BRIDGE_RX_DIR) \
+		-I$(COMMON_DIR) \
+		$(BRIDGE_RX_SRCS) $(BRIDGE_RX_CPP)
 
 # --- GPU chain (slices + cpu_target_port + axi_periph_slave) ---
 gpu-chain: $(GPU_CHAIN_DIR)/V$(GPU_CHAIN_TOP)

@@ -39,7 +39,16 @@ module axi_periph_slave #(
     // gpu_core's GPU_HAS_VERT_TRI parameter on the same target so apps don't
     // submit 0x4A/0x4B to a core that drains them as no-ops.  Pocket gates this
     // out on ALM budget (Pocket: HAS_VERT_TRI(0)); MiSTer keeps the default 1.
-    parameter HAS_VERT_TRI   = 1
+    parameter HAS_VERT_TRI   = 1,
+    // Records-only param-tri (CMD_DRAW_PARAM_TRI_RECS 0x4D): per-triangle
+    // attr/light planes + q29 + vertices, reusing the 0x4A sticky
+    // surface/control/clamp/z/clip staging — the CPU stops re-sending the
+    // ~21 constant header words per triangle.  HW_FEATURES bit 22.  Must
+    // track gpu_core's GPU_HAS_PARAM_TRI_RECS parameter on the same target
+    // so apps don't submit 0x4D to a core that drains it as a no-op.
+    // Pocket OS25 gates it out on ALM budget (HAS_PARAM_TRI_RECS(0));
+    // Pocket OS30 (OS30_VERT_TRI) and MiSTer keep the default 1.
+    parameter HAS_PARAM_TRI_RECS = 1
 ) (
     input wire clk,
     input wire reset_n,
@@ -111,6 +120,15 @@ module axi_periph_slave #(
 
     // Bridge write drain status (for pacing DMA reads)
     input wire         bridge_wr_idle,
+
+    // F2i bridge word counters (clk_74a domain, see core_top.v).
+    // Packed {sdram_overrun_drop, sdram_wcnt[14:0],
+    //         cram0_drop_cpu_owned, cram0_wcnt[14:0]}; cleared on each
+    // DS command issue.  Synced below with a plain 2FF-per-bit bank:
+    // QUASI-STATIC USE ONLY — firmware must sample it after DS_STATUS
+    // reports DONE+WR_IDLE (counters stopped) or individual bits may be
+    // from different source cycles.  Targets without the counters tie 0.
+    input wire [31:0]  bridge_dbg_wcnt,
 
     // Display control outputs
     output wire [2:0]  color_mode,      // 0=8bit, 1=4bit, 2=2bit, 3=RGB565, 4=RGB555, 5=RGBA5551
@@ -673,7 +691,15 @@ localparam [31:0] HW_FEATURES_RESOLVED =
     | (HAS_ANALOGIZER ? 32'h0000_0008 : 32'h0000_0000)
     | (HAS_MIXER_HW   ? 32'h0000_0002 : 32'h0000_0000)  // bit 1  OF_HW_MIXER_HW: HW
                        //        audio_mixer.v present (clear under EXCLUDE_MIXER/OS30)
-    | (HAS_VERT_TRI   ? 32'h0010_0000 : 32'h0000_0000); // bit 20: GPU vertex-triangle (0x4A/0x4B)
+    | (HAS_VERT_TRI   ? 32'h0010_0000 : 32'h0000_0000)  // bit 20: GPU vertex-triangle (0x4A/0x4B)
+    | (HAS_PARAM_TRI_RECS ? 32'h0040_0000 : 32'h0000_0000); // bit 22
+                       //        OF_HW_GPU_PARAM_TRI_RECS: records-only
+                       //        param-tri (CMD_DRAW_PARAM_TRI_RECS 0x4D) —
+                       //        per-triangle planes + verts reusing the 0x4A
+                       //        sticky surface state.  Present on every
+                       //        target (the 0x4A sticky decode is ungated in
+                       //        gpu_core; only the 0x4B derivation needs
+                       //        GPU_HAS_VERT_TRI).
 
 localparam FB_ADDR_0 = 25'h0000000;     // byte 0x000000 → CPU 0x10000000
 localparam FB_ADDR_1 = 25'h0080000;     // byte 0x100000 → CPU 0x10100000
@@ -740,6 +766,16 @@ always @(posedge clk) begin
     dataslot_allcomplete_sync <= {dataslot_allcomplete_sync[1:0], dataslot_allcomplete};
 end
 wire dataslot_allcomplete_s = dataslot_allcomplete_sync[2];
+
+// F2i bridge word counters: plain 2FF-per-bit bank from clk_74a.
+// Stale-tolerant by contract — the value is only meaningful once the
+// data-slot command has reported DONE+WR_IDLE and the source counters
+// are static; a read taken mid-transfer may mix source cycles per bit.
+reg [31:0] bridge_dbg_wcnt_meta, bridge_dbg_wcnt_s;
+always @(posedge clk) begin
+    bridge_dbg_wcnt_meta <= bridge_dbg_wcnt;
+    bridge_dbg_wcnt_s    <= bridge_dbg_wcnt_meta;
+end
 
 reg [2:0] vsync_sync;
 always @(posedge clk) begin
@@ -896,53 +932,33 @@ reg [31:0] input_prev_joy0, input_prev_joy1, input_prev_joy2, input_prev_joy3;
 reg [15:0] input_prev_trig0, input_prev_trig1, input_prev_trig2, input_prev_trig3;
 reg [1:0]  input_scan_slot;
 
-reg [31:0] input_cur_key_sel;
-reg [31:0] input_cur_joy_sel;
-reg [15:0] input_cur_trig_sel;
-reg [31:0] input_prev_key_sel;
-reg [31:0] input_prev_joy_sel;
-reg [15:0] input_prev_trig_sel;
+// Compare-before-mux: the old 80-bit cur/prev 4:1 mux pair fed ONLY the
+// three != comparators below, so the mux/compare order is swappable.
+// Twelve fixed per-slot comparators plus one 3-bit 4:1 result mux replace
+// two 80-bit 4:1 mux banks + three comparators — same values on the same
+// cycle, materially fewer ALUTs.
+wire [2:0] input_chg_slot0 = {cont1_trig_s != input_prev_trig0,
+                              cont1_joy_s  != input_prev_joy0,
+                              cont1_key_s  != input_prev_key0};
+wire [2:0] input_chg_slot1 = {cont2_trig_s != input_prev_trig1,
+                              cont2_joy_s  != input_prev_joy1,
+                              cont2_key_s  != input_prev_key1};
+wire [2:0] input_chg_slot2 = {cont3_trig_s != input_prev_trig2,
+                              cont3_joy_s  != input_prev_joy2,
+                              cont3_key_s  != input_prev_key2};
+wire [2:0] input_chg_slot3 = {cont4_trig_s != input_prev_trig3,
+                              cont4_joy_s  != input_prev_joy3,
+                              cont4_key_s  != input_prev_key3};
 
+reg [2:0] input_event_fields;
 always @(*) begin
     case (input_scan_slot)
-        2'd0: begin
-            input_cur_key_sel   = cont1_key_s;
-            input_cur_joy_sel   = cont1_joy_s;
-            input_cur_trig_sel  = cont1_trig_s;
-            input_prev_key_sel  = input_prev_key0;
-            input_prev_joy_sel  = input_prev_joy0;
-            input_prev_trig_sel = input_prev_trig0;
-        end
-        2'd1: begin
-            input_cur_key_sel   = cont2_key_s;
-            input_cur_joy_sel   = cont2_joy_s;
-            input_cur_trig_sel  = cont2_trig_s;
-            input_prev_key_sel  = input_prev_key1;
-            input_prev_joy_sel  = input_prev_joy1;
-            input_prev_trig_sel = input_prev_trig1;
-        end
-        2'd2: begin
-            input_cur_key_sel   = cont3_key_s;
-            input_cur_joy_sel   = cont3_joy_s;
-            input_cur_trig_sel  = cont3_trig_s;
-            input_prev_key_sel  = input_prev_key2;
-            input_prev_joy_sel  = input_prev_joy2;
-            input_prev_trig_sel = input_prev_trig2;
-        end
-        default: begin
-            input_cur_key_sel   = cont4_key_s;
-            input_cur_joy_sel   = cont4_joy_s;
-            input_cur_trig_sel  = cont4_trig_s;
-            input_prev_key_sel  = input_prev_key3;
-            input_prev_joy_sel  = input_prev_joy3;
-            input_prev_trig_sel = input_prev_trig3;
-        end
+        2'd0:    input_event_fields = input_chg_slot0;
+        2'd1:    input_event_fields = input_chg_slot1;
+        2'd2:    input_event_fields = input_chg_slot2;
+        default: input_event_fields = input_chg_slot3;
     endcase
 end
-
-wire [2:0] input_event_fields = {input_cur_trig_sel != input_prev_trig_sel,
-                                 input_cur_joy_sel  != input_prev_joy_sel,
-                                 input_cur_key_sel  != input_prev_key_sel};
 wire [1:0] input_event_slot = input_scan_slot;
 wire       input_event_valid = input_irq_mask[input_scan_slot] && (|input_event_fields);
 
@@ -1442,8 +1458,35 @@ reg [15:0] input_slot_trig_rdata;
 reg        input_slot_irq_en_rdata;
 reg [31:0] input_slot_rdata;
 
+// Shared input-slot read mux selects.  On the input page (0x110-0x14C) the
+// slot/field decode straight from the address.  Low-page sysreg words
+// 6'd20..25 (legacy cont1/cont2 key/joy/trig readback) carry the SAME data
+// the slot mux already selects, so remap them onto it instead of keeping
+// six duplicate 32-bit sources alive in the sysreg_rdata tree.  Both paths
+// are combinational into sysreg_rdata, so the S_PERIPH_RD_LATCH capture
+// sees identical values at identical times.
+wire low_page_cont_read = !sysreg_input_page &&
+                          (sysreg_word >= 6'd20) && (sysreg_word <= 6'd25);
+reg [3:0] input_slot_sel;
+reg [1:0] input_field_sel;
 always @(*) begin
-    case (req_addr[7:4])
+    if (low_page_cont_read) begin
+        // words 20/21/22 -> cont1 (slot 1) key/joy/trig
+        // words 23/24/25 -> cont2 (slot 2) key/joy/trig
+        input_slot_sel = (sysreg_word <= 6'd22) ? 4'h1 : 4'h2;
+        case (sysreg_word)
+            6'd20, 6'd23: input_field_sel = 2'd1; // key
+            6'd21, 6'd24: input_field_sel = 2'd2; // joy
+            default:      input_field_sel = 2'd3; // trig
+        endcase
+    end else begin
+        input_slot_sel  = req_addr[7:4];
+        input_field_sel = req_addr[3:2];
+    end
+end
+
+always @(*) begin
+    case (input_slot_sel)
         4'h1: begin
             input_slot_key_rdata    = cont1_key_s;
             input_slot_joy_rdata    = cont1_joy_s;
@@ -1470,7 +1513,7 @@ always @(*) begin
         end
     endcase
 
-    case (req_addr[3:2])
+    case (input_field_sel)
         2'd0: input_slot_rdata = {23'b0, input_slot_irq_en_rdata, 7'b0, 1'b1};
         2'd1: input_slot_rdata = input_slot_key_rdata;
         2'd2: input_slot_rdata = input_slot_joy_rdata;
@@ -1525,6 +1568,10 @@ always @(*) begin
             6'd4:  sysreg_rdata = {7'b0, fb_display_addr_reg};
             6'd5:  sysreg_rdata = {30'b0, fb_display_idx};
             6'd6:  sysreg_rdata = {29'b0, fb_display_idx, fb_swap_pending};
+            // DS_BRIDGE_WCNT (0x1C): F2i per-DS-command bridge word
+            // counters + drop stickies (see port comment).  Read-only;
+            // quasi-static after DS_STATUS DONE+WR_IDLE.
+            6'd7:  sysreg_rdata = bridge_dbg_wcnt_s;
             6'd8:  sysreg_rdata = {16'b0, ds_slot_id_reg};
             6'd9:  sysreg_rdata = ds_slot_offset_reg;
             6'd10: sysreg_rdata = ds_bridge_addr_reg;
@@ -1536,12 +1583,12 @@ always @(*) begin
                                     ds_done_latched, ds_ack_latched};
             6'd16: sysreg_rdata = {pal_busy, 23'b0, pal_index_reg};
             // 0x44 (PAL_DATA write) has no meaningful read-back.
-            6'd20: sysreg_rdata = cont1_key_s;
-            6'd21: sysreg_rdata = cont1_joy_s;
-            6'd22: sysreg_rdata = {16'b0, cont1_trig_s};
-            6'd23: sysreg_rdata = cont2_key_s;
-            6'd24: sysreg_rdata = cont2_joy_s;
-            6'd25: sysreg_rdata = {16'b0, cont2_trig_s};
+            // Legacy cont1/cont2 key/joy/trig: aliased onto the shared
+            // input-slot read mux (see low_page_cont_read above) so the six
+            // duplicate 32-bit sources collapse into one.
+            6'd20, 6'd21, 6'd22,
+            6'd23, 6'd24, 6'd25:
+                   sysreg_rdata = input_slot_rdata;
             6'd26: sysreg_rdata = app_id;
             6'd32: sysreg_rdata = analogizer_settings;             // ANALOGIZER_SETTINGS
             6'd33: sysreg_rdata = analogizer_hoffset;              // ANALOGIZER_H_OFFSET
@@ -1683,9 +1730,12 @@ wire [31:0] cram0_mode_rdata = (req_addr[3:2] == 2'd0) ? {31'b0, cram0_mode} :
  *   - control regs (group/master/voice_group/ctrl/irq)
  *   - per-voice POS readback
  * The per-voice POS path needs voice_sel_rd driven combinationally to
- * audio_mixer.v before this read mux fires, so the pos_latch[voice_sel_rd]
- * mux there has settled.  audio_mixer's pos_latch is a plain reg array,
- * so the indexed read is purely combinational — no extra cycle. */
+ * audio_mixer.v from the registered req_addr.  audio_mixer's pos_latch
+ * is a synchronous MLAB read registered ONCE inside the mixer; the
+ * S_PERIPH_RD_WAIT -> S_PERIPH_RD_LATCH sequence budgets exactly that
+ * one stage.  The integration must NOT add another register between
+ * audio_mixer.pos_readback and mix_pos_readback (core_top/emu connect
+ * it directly) or the latch captures the previous transaction's voice. */
 assign mix_voice_sel_rd = req_addr[6:2];
 
 wire mixer_per_voice_rd = (req_addr[11] == 1'b1) && (req_addr[7] == 1'b1);
@@ -1772,7 +1822,13 @@ wire [31:0] hps_rdata = (req_addr[3:2] == 2'd0) ? hps_status :
                                                   hps_boot_len;
 
 wire beat_is_last = (burst_count == burst_len);
-wire [31:0] periph_next_addr = burst_is_fixed ? req_addr : (req_addr + 32'd4);
+/* Beat-to-beat address increment.  AXI4 forbids any burst from crossing a
+ * 4KB boundary, and every in-repo master (VexiiRiscv I$/D$ fills, the LSU
+ * shim) issues <=16-beat bursts, so only bits [11:2] can change between
+ * beats of one burst: ride a 10-bit adder and pass the upper 20 bits
+ * through instead of carrying a full 30-bit increment. */
+wire [31:0] req_addr_plus4 = {req_addr[31:12], req_addr[11:2] + 10'd1, req_addr[1:0]};
+wire [31:0] periph_next_addr = burst_is_fixed ? req_addr : req_addr_plus4;
 
 // Terminal moved to software; state 4 is reused as a peripheral read latch.
 
@@ -2008,7 +2064,7 @@ always @(posedge clk or posedge reset) begin
                 s_axi_rlast  <= beat_is_last;
                 burst_count  <= burst_count + 1;
                 if (beat_is_last) state <= S_IDLE;
-                else req_addr <= req_addr + 32'd4;
+                else req_addr <= req_addr_plus4;
             end
             // else: hold (bram_hold freezes BRAM read)
         end
@@ -2023,7 +2079,7 @@ always @(posedge clk or posedge reset) begin
                 s_axi_bresp <= 2'b00;
                 state <= S_IDLE;
             end else begin
-                if (!burst_is_fixed) req_addr <= req_addr + 32'd4;
+                if (!burst_is_fixed) req_addr <= req_addr_plus4;
                 state <= S_WR_NEXT;
             end
         end
@@ -2032,34 +2088,31 @@ always @(posedge clk or posedge reset) begin
         // Peripheral read — same hold-until-drain pattern
         // ============================================
         S_PERIPH_RD_WAIT: begin
-            if (req_is_mixer || req_is_sysreg) begin
-                state <= S_PERIPH_RD_LATCH;
-            end else begin
-                if (req_is_audio)
-                    periph_rd_data_r <= audio_rdata;
-                else if (req_is_cram0)
-                    periph_rd_data_r <= cram0_mode_rdata;
-                else if (req_is_hps)
-                    periph_rd_data_r <= hps_rdata;
-                else if (req_is_link)
-                    periph_rd_data_r <= link_reg_rdata;
-                else if (req_is_uart)
-                    periph_rd_data_r <= uart_rdata;
-                else if (req_is_gpu)
-                    periph_rd_data_r <= gpu_reg_rdata;
-                else
-                    periph_rd_data_r <= 32'h0;
-                state <= S_PERIPH_RD;
-            end
+            /* Every region takes the two-stage WAIT -> LATCH path so that
+             * ONE region-indexed 8:1 mux (in S_PERIPH_RD_LATCH) feeds
+             * periph_rd_data_r, instead of two parallel mux trees (the old
+             * 7-way priority chain here plus a 3-way mux in LATCH).
+             * Cost: +1 cycle on audio/cram0/hps/link/uart/gpu MMIO reads
+             * (sysreg/mixer latency is unchanged).  All peripheral rdata
+             * inputs remain combinational into this module and now get
+             * MORE settle margin before capture, and the mixer one-stage
+             * pos_readback budget (see the comment above mix_voice_sel_rd)
+             * is untouched: the mixer is still captured at LATCH. */
+            state <= S_PERIPH_RD_LATCH;
         end
 
         S_PERIPH_RD_LATCH: begin
-            if (req_is_mixer)
-                periph_rd_data_r <= mixer_rdata;
-            else if (req_is_sysreg)
-                periph_rd_data_r <= sysreg_rdata;
-            else
-                periph_rd_data_r <= 32'h0;
+            case (req_region)
+                REGION_SYSREG: periph_rd_data_r <= sysreg_rdata;
+                REGION_AUDIO:  periph_rd_data_r <= audio_rdata;
+                REGION_CRAM0:  periph_rd_data_r <= cram0_mode_rdata;
+                REGION_LINK:   periph_rd_data_r <= link_reg_rdata;
+                REGION_UART:   periph_rd_data_r <= uart_rdata;
+                REGION_GPU:    periph_rd_data_r <= gpu_reg_rdata;
+                REGION_MIXER:  periph_rd_data_r <= mixer_rdata;
+                REGION_HPS:    periph_rd_data_r <= hps_rdata;
+                default:       periph_rd_data_r <= 32'h0;
+            endcase
             state <= S_PERIPH_RD;
         end
 
@@ -2174,7 +2227,7 @@ always @(posedge clk or posedge reset) begin
                 end else begin
                     state <= S_PERIPH_WR;
                     if (!burst_is_fixed)
-                        req_addr <= req_addr + 32'd4;
+                        req_addr <= req_addr_plus4;
                 end
             end
         end

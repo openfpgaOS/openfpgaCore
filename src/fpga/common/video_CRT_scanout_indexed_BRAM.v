@@ -489,29 +489,9 @@ module video_CRT_scanout_indexed_BRAM (
     // x_count is stable for 2 clk_analog cycles and this edge-detect yields a
     // clean 24.576 MHz LCD pixel strobe aligned to x_count.
     reg [9:0] lcd_x_count_prev;
-    wire [10:0] lcd_x_sum = lcd_x_acc + {1'b0, fb_width_lcd_a_safe};
-    wire [11:0] lcd_x_sum_ext = {1'b0, lcd_x_sum};
-    wire [11:0] out_width_1x = {2'b0, out_width_lcd_a_safe};
-    wire [11:0] out_width_2x = {1'b0, out_width_lcd_a_safe, 1'b0};
-    wire [11:0] out_width_3x = out_width_2x + out_width_1x;
-    wire [11:0] out_width_4x = {out_width_lcd_a_safe, 2'b00};
-    wire [2:0] lcd_x_inc =
-        (lcd_x_sum_ext >= out_width_4x) ? 3'd4 :
-        (lcd_x_sum_ext >= out_width_3x) ? 3'd3 :
-        (lcd_x_sum_ext >= out_width_2x) ? 3'd2 :
-        (lcd_x_sum_ext >= out_width_1x) ? 3'd1 : 3'd0;
-    wire [11:0] lcd_x_acc_next_ext =
-        lcd_x_sum_ext - ((lcd_x_inc == 3'd4) ? out_width_4x :
-                         (lcd_x_inc == 3'd3) ? out_width_3x :
-                         (lcd_x_inc == 3'd2) ? out_width_2x :
-                         (lcd_x_inc == 3'd1) ? out_width_1x : 12'd0);
-    wire [10:0] lcd_x_acc_next = lcd_x_acc_next_ext[10:0];
-    wire [9:0] lcd_src_x_last = fb_width_lcd_a_safe - 10'd1;
-    wire [10:0] lcd_src_x_next_raw =
-        {1'b0, lcd_src_x_scan} + {8'b0, lcd_x_inc};
-    wire [9:0] lcd_src_x_next =
-        (lcd_src_x_next_raw > {1'b0, lcd_src_x_last}) ?
-        lcd_src_x_last : lcd_src_x_next_raw[9:0];
+    // LCD horizontal-scaler arithmetic shares one cone with the analog
+    // scaler — see "Shared horizontal scaler cone" below the issue_*
+    // selects.
     wire [9:0] lcd_src_x_for_read =
         lcd_in_hactive ? lcd_src_x_scan : 10'd0;
     wire [8:0] lcd_line_rd_index =
@@ -591,20 +571,8 @@ module video_CRT_scanout_indexed_BRAM (
         !analog_fetch_request && !analog_fetch_ack_sync2 &&
         (analog_fetch_line < analog_v_active_end[9:0]) &&
         ({1'b0, analog_fetch_line} <= ({1'b0, analog_line_y} + 11'd2));
-    wire [10:0] analog_x_sum =
-        analog_x_acc + {1'b0, fb_width_analog_safe};
-    wire [1:0] analog_x_inc =
-        (analog_x_sum >= 11'd1280) ? 2'd2 :
-        (analog_x_sum >= 11'd640)  ? 2'd1 : 2'd0;
-    wire [10:0] analog_x_acc_next =
-        analog_x_sum - ((analog_x_inc == 2'd2) ? 11'd1280 :
-                        (analog_x_inc == 2'd1) ? 11'd640 : 11'd0);
-    wire [9:0] analog_src_x_last = fb_width_analog_safe - 10'd1;
-    wire [10:0] analog_src_x_next_raw =
-        {1'b0, analog_src_x_scan} + {9'b0, analog_x_inc};
-    wire [9:0] analog_src_x_next =
-        (analog_src_x_next_raw > {1'b0, analog_src_x_last}) ?
-        analog_src_x_last : analog_src_x_next_raw[9:0];
+    // Analog horizontal-scaler arithmetic shares one cone with the LCD
+    // scaler — see "Shared horizontal scaler cone" below.
     wire [9:0] analog_src_x_for_read =
         analog_active_now ? analog_src_x_scan : 10'd0;
     wire [8:0] analog_line_rd_index =
@@ -627,6 +595,50 @@ module video_CRT_scanout_indexed_BRAM (
     wire [1:0] issue_tag =
         issue_lcd_read ? READ_LCD :
         (issue_analog_read ? READ_ANALOG : READ_NONE);
+
+    // --- Shared horizontal scaler cone (LCD + analog) ---
+    // Both horizontal scalers live in this clk_analog domain and update on
+    // mutually exclusive cycles by construction (issue_analog_read =
+    // !issue_lcd_read && ...), so ONE accumulate-compare-subtract-clamp
+    // cone serves both, with operand muxes keyed on the issue type.  The
+    // analog leg substitutes the constants out_w=640 (so 2x=1280) for the
+    // LCD's out_width_lcd_a_safe; with out_w=640 the 3x/4x rungs are
+    // unreachable (x_sum < 640 + 1024 < 1920), so the generalized 4-step
+    // ladder is exactly the old 2-step analog ladder.  Results commit on
+    // the same posedge as before through the existing per-path enables —
+    // no latency or cadence change; the vertical scalers are NOT shared
+    // (LCD-y is clk_video, analog-fy is clk_analog: cross-domain).
+    wire        sh_x_is_analog = issue_analog_read;
+    wire [9:0]  sh_fb_width = sh_x_is_analog ? fb_width_analog_safe
+                                             : fb_width_lcd_a_safe;
+    wire [10:0] sh_x_acc    = sh_x_is_analog ? analog_x_acc : lcd_x_acc;
+    wire [9:0]  sh_src_x    = sh_x_is_analog ? analog_src_x_scan
+                                             : lcd_src_x_scan;
+    wire [9:0]  sh_out_w    = sh_x_is_analog ? 10'd640
+                                             : out_width_lcd_a_safe;
+    wire [10:0] sh_x_sum     = sh_x_acc + {1'b0, sh_fb_width};
+    wire [11:0] sh_x_sum_ext = {1'b0, sh_x_sum};
+    wire [11:0] sh_outw_1x = {2'b0, sh_out_w};
+    wire [11:0] sh_outw_2x = {1'b0, sh_out_w, 1'b0};
+    wire [11:0] sh_outw_3x = sh_outw_2x + sh_outw_1x;
+    wire [11:0] sh_outw_4x = {sh_out_w, 2'b00};
+    wire [2:0] sh_x_inc =
+        (sh_x_sum_ext >= sh_outw_4x) ? 3'd4 :
+        (sh_x_sum_ext >= sh_outw_3x) ? 3'd3 :
+        (sh_x_sum_ext >= sh_outw_2x) ? 3'd2 :
+        (sh_x_sum_ext >= sh_outw_1x) ? 3'd1 : 3'd0;
+    wire [11:0] sh_x_acc_next_ext =
+        sh_x_sum_ext - ((sh_x_inc == 3'd4) ? sh_outw_4x :
+                        (sh_x_inc == 3'd3) ? sh_outw_3x :
+                        (sh_x_inc == 3'd2) ? sh_outw_2x :
+                        (sh_x_inc == 3'd1) ? sh_outw_1x : 12'd0);
+    wire [10:0] sh_x_acc_next = sh_x_acc_next_ext[10:0];
+    wire [9:0]  sh_src_x_last = sh_fb_width - 10'd1;
+    wire [10:0] sh_src_x_next_raw =
+        {1'b0, sh_src_x} + {8'b0, sh_x_inc};
+    wire [9:0]  sh_src_x_next =
+        (sh_src_x_next_raw > {1'b0, sh_src_x_last}) ?
+        sh_src_x_last : sh_src_x_next_raw[9:0];
     wire [10:0] issue_line_addr =
         issue_lcd_read ? lcd_line_rd_addr :
         (issue_analog_read ? analog_line_rd_addr : 11'd0);
@@ -788,8 +800,9 @@ module video_CRT_scanout_indexed_BRAM (
                     lcd_src_x_scan <= 10'd0;
                     lcd_x_acc <= 11'd0;
                 end else begin
-                    lcd_src_x_scan <= lcd_src_x_next;
-                    lcd_x_acc <= lcd_x_acc_next;
+                    // issue_lcd_read ⇒ shared cone carries LCD operands.
+                    lcd_src_x_scan <= sh_src_x_next;
+                    lcd_x_acc <= sh_x_acc_next;
                 end
             end
 
@@ -820,8 +833,10 @@ module video_CRT_scanout_indexed_BRAM (
                         analog_src_x_scan <= 10'd0;
                         analog_x_acc <= 11'd0;
                     end else begin
-                        analog_src_x_scan <= analog_src_x_next;
-                        analog_x_acc <= analog_x_acc_next;
+                        // issue_analog_read ⇒ shared cone carries analog
+                        // operands.
+                        analog_src_x_scan <= sh_src_x_next;
+                        analog_x_acc <= sh_x_acc_next;
                     end
                 end
             end
@@ -911,8 +926,23 @@ module video_CRT_scanout_indexed_BRAM (
     localparam ST_IDLE = 2'd0;
     localparam ST_BURST = 2'd1;
     localparam ST_WAIT = 2'd2;
+    localparam ST_CALC = 2'd3;
 
     reg [1:0] state;
+
+    // Shared burst address/length cone operands (2-cycle dispatch):
+    // ST_IDLE picks the pending source (LCD priority first, exactly as
+    // before) and latches its operands here; ST_CALC then computes
+    // burst_addr/burst_len through ONE shared multiply+add+len cone and
+    // asserts burst_rd.  This replaces the two per-branch copies of the
+    // stride multiply, base adder and burst_len_for_mode shift cone.
+    // The +1 clk_sdram cycle (~15 ns) per line fetch is dispatched
+    // against whole-blanking-period slack (line period ~32-64 us).
+    reg [24:0] calc_base;
+    reg [9:0]  calc_line;
+    reg [15:0] calc_stride;
+    reg [2:0]  calc_mode;
+    reg [9:0]  calc_width;
 
     function [10:0] burst_len_for_mode;
         input [2:0] mode;
@@ -958,6 +988,11 @@ module video_CRT_scanout_indexed_BRAM (
             analog_fetch_src_sdram <= 0;
             analog_fetch_line_pending <= 0;
             serving_analog <= 0;
+            calc_base <= 0;
+            calc_line <= 0;
+            calc_stride <= 0;
+            calc_mode <= 0;
+            calc_width <= 0;
         end else begin
             fetch_request_sync1 <= fetch_request;
             fetch_request_sync2 <= fetch_request_sync1;
@@ -986,31 +1021,42 @@ module video_CRT_scanout_indexed_BRAM (
 
             case (state)
                 ST_IDLE: begin
+                    // LCD-priority ordering between the two pending flags
+                    // is preserved exactly: LCD wins when both are pending.
                     if (fetch_line_pending) begin
-                        burst_addr <= fb_base_addr +
-                            line_offset_for_stride(fetch_src_line_sdram,
-                                                   fb_stride_sdram);
-                        burst_len <= burst_len_for_mode(color_mode_sdram,
-                                                        fb_width_sdram);
-                        burst_rd <= 1;
+                        calc_base   <= fb_base_addr;
+                        calc_line   <= fetch_src_line_sdram;
+                        calc_stride <= fb_stride_sdram;
+                        calc_mode   <= color_mode_sdram;
+                        calc_width  <= fb_width_sdram;
                         write_ptr <= 0;
                         write_bank <= fetch_output_line_sdram[1:0];
                         fetch_line_pending <= 0;
                         serving_analog <= 0;
-                        state <= ST_BURST;
+                        state <= ST_CALC;
                     end else if (analog_fetch_line_pending) begin
-                        burst_addr <= analog_fb_base_addr +
-                            line_offset_for_stride(analog_fetch_src_sdram,
-                                                   analog_fb_stride_sdram);
-                        burst_len <= burst_len_for_mode(analog_color_mode_sdram,
-                                                        analog_fb_width_sdram);
-                        burst_rd <= 1;
+                        calc_base   <= analog_fb_base_addr;
+                        calc_line   <= analog_fetch_src_sdram;
+                        calc_stride <= analog_fb_stride_sdram;
+                        calc_mode   <= analog_color_mode_sdram;
+                        calc_width  <= analog_fb_width_sdram;
                         write_ptr <= 0;
                         write_bank <= analog_fetch_out_sdram[1:0];
                         analog_fetch_line_pending <= 0;
                         serving_analog <= 1;
-                        state <= ST_BURST;
+                        state <= ST_CALC;
                     end
+                end
+
+                // Shared dispatch cycle: one multiply+add+len cone serves
+                // both LCD and analog line fetches.  burst_addr/burst_len
+                // latch on the same edge burst_rd asserts, as before.
+                ST_CALC: begin
+                    burst_addr <= calc_base +
+                        line_offset_for_stride(calc_line, calc_stride);
+                    burst_len <= burst_len_for_mode(calc_mode, calc_width);
+                    burst_rd <= 1;
+                    state <= ST_BURST;
                 end
 
                 ST_BURST: begin

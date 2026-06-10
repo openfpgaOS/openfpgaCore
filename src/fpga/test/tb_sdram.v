@@ -15,7 +15,16 @@
 
 module tb_sdram #(
     parameter SERIALIZE_WRITE_BURSTS = 1'b0,
-    parameter [7:0] MAX_NATIVE_WRITE_BURST_LEN = 8'd15
+    parameter [7:0] MAX_NATIVE_WRITE_BURST_LEN = 8'd15,
+    // Tie-off for the slave's s_axi_wcont input.  1 = continuous W stream
+    // (GPU-style native streaming bursts).  0 = W stream may stall →
+    // exercises the buffered writeback path (S_WR_FILL FIFO → one native
+    // io_sdram burst), the same route CPU dirty-line evictions take.
+    parameter WCONT_TIE = 1'b1,
+    // Forwarded verbatim to io_sdram so the OS25 single open-bank/row
+    // config can be exercised straight from the command line with
+    // -GBANK_ROW_TRACK=0.  Default matches io_sdram's default (per-bank).
+    parameter BANK_ROW_TRACK = 1
 ) (
     input  wire        clk,
     input  wire        reset_n,
@@ -56,6 +65,11 @@ module tb_sdram #(
 
     output wire        dbg_word_wr_data_next,
     output wire        dbg_serialize_write_bursts,
+    // io_sdram diagnostic tap: bits 5:0 = FSM state.  Lets the harness gate
+    // burst_rd injection on "our word write is actually executing" instead
+    // of word_busy, which is also high across unrelated ops (read tail,
+    // autorefresh) where preempting an unaccepted write is legal behaviour.
+    output wire [7:0]  dbg_io,
 
     output wire        busy
 );
@@ -157,7 +171,7 @@ axi_sdram_slave #(
     .s_axi_wvalid(s_axi_wvalid), .s_axi_wready(s_axi_wready),
     .s_axi_wdata(s_axi_wdata), .s_axi_wstrb(s_axi_wstrb), .s_axi_wlast(s_axi_wlast),
     .s_axi_bvalid(s_axi_bvalid), .s_axi_bready(1'b1), .s_axi_bresp(s_axi_bresp),
-    .s_axi_wcont(1'b1),  // tb holds WVALID continuously → exercise the native burst path
+    .s_axi_wcont(WCONT_TIE),  // 1: native streaming path; 0: buffered writeback path
     .sdram_rd(sdram_rd), .sdram_wr(sdram_wr),
     .sdram_addr(sdram_addr), .sdram_wdata(sdram_wdata), .sdram_wstrb(sdram_wstrb),
     .sdram_burst_len(sdram_burst_len), .sdram_burst_wr_len(sdram_burst_wr_len),
@@ -172,7 +186,9 @@ axi_sdram_slave #(
 );
 
 // io_sdram (test variant with split DQ)
-io_sdram sdram_ctrl (
+io_sdram #(
+    .BANK_ROW_TRACK(BANK_ROW_TRACK)
+) sdram_ctrl (
     .controller_clk(clk), .chip_clk(clk), .clk_90(clk), .reset_n(reset_n),
     .phy_cke(phy_cke), .phy_clk(phy_clk),
     .phy_cas(phy_cas), .phy_ras(phy_ras), .phy_we(phy_we),
@@ -193,7 +209,8 @@ io_sdram sdram_ctrl (
     .word_wr_data_next(word_wr_data_next),
     .word_wr_done(word_wr_done),
     .burst_wr_direct_data(sdram_next_wdata),
-    .burst_wr_direct_strb(sdram_next_wstrb)
+    .burst_wr_direct_strb(sdram_next_wstrb),
+    .dbg_io(dbg_io)
 );
 
 // Behavioral SDRAM model

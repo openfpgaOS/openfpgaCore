@@ -573,6 +573,9 @@ static uint32_t tg_crc_uncached(uint32_t uc_addr, uint32_t len) {
 }
 
 void os_textguard_baseline(void) {
+#if OF_TARGET_PLATFORM_ID == OF_PLATFORM_SIM
+    return;
+#endif
     uint32_t base  = (uint32_t)(uintptr_t)__text_start;
     uint32_t total = (uint32_t)(uintptr_t)__text_end - base;
     uint32_t uc    = base - SDRAM_BASE + SDRAM_UNCACHED_BASE;
@@ -618,6 +621,11 @@ void os_textguard_check(const char *where) {
     VIDEO_SCALER_MODE = VIDEO_SCALER_SLOT_DEFAULT_320X240;
     TERM_FB_CTRL      = 1u;
 
+    /* Push out any log bytes still queued in the terminal's buffered
+     * UART mirror before the report — the lines printed just before the
+     * corruption was detected are usually the ones that matter. */
+    of_term_uart_flush();
+
     trap_uart_puts("\n==TEXTGUARD==\n.text CORRUPT @ ");
     trap_uart_puts(where);
     trap_uart_puts("\nfirst bad block=");
@@ -655,6 +663,11 @@ void fatal_trap(trap_frame_t *frame) {
     uint32_t mstatus_v;
     __asm__ volatile ("csrr %0, mstatus" : "=r"(mstatus_v));
     uint32_t fs = (mstatus_v >> 13) & 0x3u;
+
+    /* Drain the buffered UART mirror ring first so the log lines printed
+     * just before the crash precede the dump on the wire instead of
+     * being lost in the ring. */
+    of_term_uart_flush();
 
     trap_uart_puts("\n==TRAP==\nmcause=");
     trap_uart_hex(frame->mcause);

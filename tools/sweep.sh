@@ -97,9 +97,13 @@ for seed in $(seq ${MIN} ${MAX}); do
     fmax="failed"
     wns=""; tns=""
     if [ -f "output_files/${PROJECT}.sta.rpt" ]; then
-        fmax=$(grep -E "^\; [0-9]" "output_files/${PROJECT}.sta.rpt" 2>/dev/null \
-            | grep "${CLOCK_RE}" | head -1 \
-            | awk -F';' '{print $2}' | xargs)
+        # Single-awk extraction (restricted Fmax, field 3 of the Fmax
+        # Summary row).  The old grep|grep|awk pipeline silently broke
+        # under Quartus 25.1 + ugrep-flavored greps, marking every seed
+        # "failed" and disabling best-seed selection for a whole sweep.
+        fmax=$(awk -F';' -v re="${CLOCK_RE}" \
+            '/^; [0-9]/ && $4 ~ re { gsub(/^ +| +$/, "", $3); print $3; exit }' \
+            "output_files/${PROJECT}.sta.rpt" 2>/dev/null)
         [ -z "$fmax" ] && fmax="failed"
         read -r wns tns <<< "$(sta_wns_tns "output_files/${PROJECT}.sta.rpt")"
     fi
@@ -107,15 +111,16 @@ for seed in $(seq ${MIN} ${MAX}); do
     echo "${seed},${fmax},${wns},${tns}" >> "${RESULTS}"
     cp "output_files/${PROJECT}.sta.rpt" "output_files/seed_${seed}_sta.log" 2>/dev/null || true
 
-    # Track best
-    if [ "$fmax" != "failed" ]; then
+    # Track best.  Rank by setup WNS on the target clock, not by the
+    # Fmax string: WNS comes from the same table, parses robustly, and
+    # for a single constrained clock ranks identically (fmax ~ 1/(T-wns)).
+    # Fmax stays in the table for display.  A seed only counts as failed
+    # if STA produced no WNS at all (fitter crash).
+    if [ -n "$wns" ]; then
         printf "${C_OK}%-12s${C_RESET} ${C_DIM}WNS %-8s TNS %s${C_RESET}\n" \
                "${fmax}" "${wns:--}" "${tns:--}"
-        fmax_num=$(echo "$fmax" | sed 's/ MHz//' | tr -d ' ')
-        best_num=$(echo "$BEST_FMAX" | sed 's/ MHz//' | tr -d ' ')
-        # awk, not bc: bc is not part of a base install and a silent
-        # fallback here once made every seed rank as "not better".
-        if awk -v a="$fmax_num" -v b="$best_num" 'BEGIN { exit !(a > b) }'; then
+        if [ -z "$BEST_SEED" ] || \
+           awk -v a="$wns" -v b="$BEST_WNS" 'BEGIN { exit !(a > b) }'; then
             BEST_SEED=${seed}
             BEST_FMAX=${fmax}
             BEST_WNS=${wns}
@@ -130,7 +135,7 @@ done
 echo ""
 printf "${C_HEAD}Results:${C_RESET}\n"
 printf "  ${C_DIM}%-8s %-12s %-10s %s${C_RESET}\n" "Seed" "Fmax" "WNS" "TNS"
-tail -n +2 "${RESULTS}" | sort -t, -k2 -rn | while IFS=, read seed fmax wns tns; do
+tail -n +2 "${RESULTS}" | sort -t, -k3 -rn | while IFS=, read seed fmax wns tns; do
     if echo "$fmax" | grep -qE "^.*(9[5-9]|[1-9][0-9]{2})"; then
         printf "  ${C_OK}%-8s %-12s %-10s %s${C_RESET}\n" "$seed" "$fmax" "${wns:--}" "${tns:--}"
     elif echo "$fmax" | grep -qE "^.*(9[0-4])"; then
@@ -149,8 +154,7 @@ echo ""
 printf "${C_HEAD}Best: seed ${BEST_SEED} (${BEST_FMAX}, WNS ${BEST_WNS:--}, TNS ${BEST_TNS:--})${C_RESET}"
 # Warn if even the best seed doesn't meet the 100 MHz target -- but
 # still ship it. Closer-to-meeting beats not-shipping-at-all.
-best_num=$(echo "$BEST_FMAX" | sed 's/ MHz//' | tr -d ' ')
-if awk -v a="$best_num" 'BEGIN { exit !(a < 100) }'; then
+if awk -v a="$BEST_WNS" 'BEGIN { exit !(a < 0) }'; then
     printf " ${C_WARN}(below 100 MHz target -- shipping anyway)${C_RESET}"
 fi
 echo ""

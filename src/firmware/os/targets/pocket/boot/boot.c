@@ -18,6 +18,7 @@
  * All hardware access is done via direct register writes.
  */
 
+#define BUILDING_BOOTLOADER
 #include "../hal/regs.h"
 #include "phdp_proto.h"
 #include "boot_disk.h"
@@ -98,7 +99,9 @@ extern char _osdata_init_size[];
 extern void os_main(void);
 extern void switch_to_runtime_stack_and_call(void (*entry)(void), void *stack_top);
 
-__attribute__((section(".text.boot")))
+/* noinline: expanded at ~10 call sites; one out-of-line copy keeps the
+ * loader inside the BRAM budget. */
+__attribute__((section(".text.boot"), noinline))
 static uintptr_t boot_sdram_uncached_addr(const void *addr) {
     uint32_t a = (uint32_t)(uintptr_t)addr;
     if (a >= SDRAM_BASE && a < SDRAM_BASE + SDRAM_SIZE)
@@ -205,6 +208,55 @@ static void flush_icache(void) {
     __asm__ volatile(".word 0x0000100f");  /* fence.i */
 }
 
+/* Shared tiny helpers (noinline): the CRAM0 mode flip + settle and the
+ * 100 ms retry delay are repeated all over the loader; out-of-lining
+ * them buys back the BRAM bytes the F1/F2ii forensics paths cost. */
+__attribute__((section(".text.boot"), noinline))
+static void boot_settle(void) {
+    for (volatile int s = 0; s < 8; s++) {}  /* settle ~4 clk_74a */
+}
+
+__attribute__((section(".text.boot"), noinline))
+static void boot_cram0_mode(uint32_t mode) {
+    CRAM0_MODE = mode;
+    boot_settle();
+}
+
+__attribute__((section(".text.boot"), noinline))
+static void boot_delay_100ms(void) {
+    uint32_t t0 = SYS_CYCLE_LO;          /* ~100 ms @ 100 MHz */
+    while ((SYS_CYCLE_LO - t0) < 10000000u) {}
+}
+
+/* Forward decls — boot_warmup_note shares the on-screen retry pattern
+ * between the CRAM warmup and the F1 bridge-leg warmup loops. */
+static void boot_fb_puts(int col, int row, const char *s);
+static void boot_fb_hex32(int col, int row, uint32_t v);
+static int  boot_ds_wait(uint32_t mask);
+
+/* Column-0 text is the overwhelmingly common case — shrink every call
+ * site by a register setup. */
+__attribute__((section(".text.boot"), noinline))
+static void boot_fb_puts0(int row, const char *s) {
+    boot_fb_puts(0, row, s);
+}
+
+__attribute__((section(".text.boot"), noinline))
+static void boot_warmup_note(const char *label, int hexcol, unsigned n) {
+    boot_fb_puts0(1, label);
+    boot_fb_hex32(hexcol, 1, n);
+    boot_delay_100ms();
+}
+
+/* Little-endian 32-bit store into a byte buffer (PHDP payload packing). */
+__attribute__((section(".text.boot"), noinline))
+static void boot_store_le32(uint8_t *p, uint32_t v) {
+    for (int i = 0; i < 4; i++) {
+        p[i] = (uint8_t)v;
+        v >>= 8;
+    }
+}
+
 __attribute__((section(".text.boot")))
 static void boot_hw_stabilize(void) {
     __asm__ volatile("fence" ::: "memory");
@@ -238,21 +290,16 @@ static void boot_hw_stabilize(void) {
 
     /* CRAM0 is bridge-owned by default.  The loader only flips to CPU mode
      * for the short scratch-copy window inside boot_load_os_sd(). */
-    CRAM0_MODE = CRAM0_MODE_BRIDGE;
-    for (volatile int i = 0; i < 8; i++) {}
-    uint32_t bridge_wait = BOOT_HW_IDLE_TIMEOUT;
-    while ((DS_STATUS & (DS_STATUS_READY | DS_STATUS_WR_IDLE)) !=
-           (DS_STATUS_READY | DS_STATUS_WR_IDLE)) {
-        if (--bridge_wait == 0)
-            break;
-    }
+    boot_cram0_mode(CRAM0_MODE_BRIDGE);
+    /* Shared waiter (BOOT_DMA_TIMEOUT bound, ~2 s): a wedged bridge now
+     * stalls stabilize longer than the old 10 ms bail, but boot cannot
+     * proceed usefully on a wedged bridge anyway (the F1 bridge-leg
+     * warmup below would spin on it forever regardless). */
+    (void)boot_ds_wait(DS_STATUS_READY | DS_STATUS_WR_IDLE);
 
-    DS_SLOT_ID = 0;
-    DS_SLOT_OFFSET = 0;
-    DS_BRIDGE_ADDR = 0;
-    DS_LENGTH = 0;
-    DS_PARAM_ADDR = 0;
-    DS_RESP_ADDR = 0;
+    /* DS_SLOT_ID..DS_RESP_ADDR are six consecutive words at 0x20..0x34. */
+    for (uint32_t r = 0; r < 6u; r++)
+        REG32(SYSREG_BASE + 0x20u + (r << 2)) = 0;
 
     /* Stop subsystems that can continue producing bus traffic or IRQs after
      * an app/OS warm restart.  Apps and the OS reprogram these explicitly. */
@@ -260,10 +307,8 @@ static void boot_hw_stabilize(void) {
     for (uint32_t v = 0; v < 32u; v++)
         MIX_VOICE_CTRL(v) = 0;
     MIX_MASTER_VOL = 0xFFu;
-    MIX_GROUP_VOL(0) = 0xFFu;
-    MIX_GROUP_VOL(1) = 0xFFu;
-    MIX_GROUP_VOL(2) = 0xFFu;
-    MIX_GROUP_VOL(3) = 0xFFu;
+    for (uint32_t g = 0; g < 4u; g++)
+        MIX_GROUP_VOL(g) = 0xFFu;
     MIX_VOICE_GROUP_LO = 0;
     MIX_VOICE_GROUP_HI = 0;
     MIX_IRQ_CLEAR = 0xFFFFFFFFu;
@@ -278,7 +323,7 @@ static void boot_hw_stabilize(void) {
     LINK_CTRL = BOOT_LINK_CTRL_RESET;
 
     BOOT_GPU_CTRL = BOOT_GPU_CTRL_SOFT_RESET;
-    for (volatile int i = 0; i < 8; i++) {}
+    boot_settle();
     uint32_t gpu_wait = BOOT_HW_IDLE_TIMEOUT;
     while (BOOT_GPU_STATUS & BOOT_GPU_STATUS_DMA_BUSY) {
         if (--gpu_wait == 0)
@@ -288,7 +333,7 @@ static void boot_hw_stabilize(void) {
     BOOT_GPU_DMA_LEN = 0;
     BOOT_GPU_TEX_FLUSH = 1;
     BOOT_GPU_CTRL = BOOT_GPU_CTRL_RING_RESET;
-    for (volatile int i = 0; i < 8; i++) {}
+    boot_settle();
 
     __asm__ volatile("fence" ::: "memory");
 }
@@ -322,10 +367,7 @@ __attribute__((section(".text.boot"), unused))
 static int phdp_discover(void) {
     /* EVT_BOOT_ALIVE payload: Core ID (4B) + Version (2B) + Max Chunk (2B) */
     uint8_t alive_payload[8];
-    alive_payload[0] = (PHDP_CORE_ID >>  0) & 0xFF;
-    alive_payload[1] = (PHDP_CORE_ID >>  8) & 0xFF;
-    alive_payload[2] = (PHDP_CORE_ID >> 16) & 0xFF;
-    alive_payload[3] = (PHDP_CORE_ID >> 24) & 0xFF;
+    boot_store_le32(alive_payload, PHDP_CORE_ID);
     alive_payload[4] = (PHDP_VERSION >>  0) & 0xFF;
     alive_payload[5] = (PHDP_VERSION >>  8) & 0xFF;
     alive_payload[6] = (PHDP_MAX_CHUNK >> 0) & 0xFF;
@@ -439,10 +481,7 @@ static int phdp_chunk_loop(uint32_t slot_offset, uint32_t length,
             retries = 0;
 
             uint8_t prog[4];
-            prog[0] = (received >>  0) & 0xFF;
-            prog[1] = (received >>  8) & 0xFF;
-            prog[2] = (received >> 16) & 0xFF;
-            prog[3] = (received >> 24) & 0xFF;
+            boot_store_le32(prog, received);
             phdp_send(PHDP_REPORT_PROGRESS, prog, 4);
         } else if (c < 0) {
             retries++;
@@ -532,22 +571,30 @@ long boot_disk_size(uint32_t slot_id) {
  * Standard SD card boot (original path)
  * ====================================================================== */
 
+/* Shared DS_STATUS wait: spin until (DS_STATUS & mask) == mask, capture
+ * the failing status in pd_dbg_info on timeout.  Every wait point in
+ * boot_dma_read wants exactly this shape; sharing it keeps the loader
+ * inside the BRAM budget. */
+__attribute__((section(".text.boot"), noinline))
+static int boot_ds_wait(uint32_t mask) {
+    uint32_t timeout = BOOT_DMA_TIMEOUT;
+    while ((DS_STATUS & mask) != mask) {
+        if (--timeout == 0) { pd_dbg_info = DS_STATUS; return -1; }
+    }
+    return 0;
+}
+
 /* Inline DMA read -- does not call any SDRAM functions */
 __attribute__((section(".text.boot")))
 static int boot_dma_read(uint32_t slot_id, uint32_t slot_offset,
                          uint32_t bridge_addr, uint32_t length) {
-    uint32_t timeout;
-
     __asm__ volatile("fence" ::: "memory");
 
     /* Wait for bridge to be idle before issuing a new command. READY
      * means the APF command FSM can accept work; WR_IDLE means any
      * prior bridge writes to CRAM0 have fully drained. */
-    timeout = BOOT_DMA_TIMEOUT;
-    while ((DS_STATUS & (DS_STATUS_READY | DS_STATUS_WR_IDLE)) !=
-           (DS_STATUS_READY | DS_STATUS_WR_IDLE)) {
-        if (--timeout == 0) { pd_dbg_info = DS_STATUS; return -3; }
-    }
+    if (boot_ds_wait(DS_STATUS_READY | DS_STATUS_WR_IDLE))
+        return -3;
 
     DS_SLOT_ID     = slot_id;
     DS_SLOT_OFFSET = slot_offset;
@@ -576,16 +623,12 @@ static int boot_dma_read(uint32_t slot_id, uint32_t slot_offset,
 accepted:
 
     /* Wait for ACK */
-    timeout = BOOT_DMA_TIMEOUT;
-    while (!(DS_STATUS & DS_STATUS_ACK)) {
-        if (--timeout == 0) { pd_dbg_info = DS_STATUS; return -1; }
-    }
+    if (boot_ds_wait(DS_STATUS_ACK))
+        return -1;
 
     /* Wait for DONE */
-    timeout = BOOT_DMA_TIMEOUT;
-    while (!(DS_STATUS & DS_STATUS_DONE)) {
-        if (--timeout == 0) { pd_dbg_info = DS_STATUS; return -2; }
-    }
+    if (boot_ds_wait(DS_STATUS_DONE))
+        return -2;
 
     /* Check bridge/APF error and capture the same status byte that the
      * failure screen prints. */
@@ -599,10 +642,8 @@ accepted:
     /* DONE reports APF command completion. Do not switch CRAM0 to CPU
      * ownership until the live drain bit confirms the last bridge write
      * has landed in memory. */
-    timeout = BOOT_DMA_TIMEOUT;
-    while (!(DS_STATUS & DS_STATUS_WR_IDLE)) {
-        if (--timeout == 0) { pd_dbg_info = DS_STATUS; return -4; }
-    }
+    if (boot_ds_wait(DS_STATUS_WR_IDLE))
+        return -4;
 
     return 0;
 }
@@ -656,27 +697,29 @@ static uint32_t boot_crc32_uncached(uint32_t cached_base, uint32_t len) {
     return crc ^ 0xFFFFFFFFu;
 }
 
-/* Returns 1 if the just-loaded OS image is trusted, 0 if its CRC trailer is
- * present and does NOT match (corruption detected).  An unstamped image (no
- * magic) returns 1 — there is nothing to check it against, so accept it (keeps
- * older os.bin / dev streams working).  'total' is the number of bytes copied
- * to SDRAM, including the 8-byte trailer. */
+/* Returns 1 if the just-loaded OS image is trusted, 0 otherwise.  The build
+ * pipeline stamps every os.bin with an 8-byte CRC trailer (magic 'OFC1' +
+ * crc32), so a missing/garbled magic is treated as CORRUPTION, not as an
+ * unstamped dev image: on a cold boot a lost SDRAM write can hit the trailer
+ * word itself, and the old accept-if-unstamped escape booted exactly such a
+ * corrupted image (2026-06-09 cold-boot forensics).  'total' is the number of
+ * bytes copied to SDRAM, including the 8-byte trailer. */
 __attribute__((section(".text.boot")))
-static int boot_verify_os_image(uint32_t total) {
+static int boot_verify_os_image_at(uint32_t total, uint32_t base) {
     if (total < OS_CRC_TRAILER_BYTES)
-        return 1;
+        return 0;   /* too small to carry the mandatory trailer */
     uint32_t image_len = total - OS_CRC_TRAILER_BYTES;
-    uint32_t base = (uint32_t)(uintptr_t)_osdata_init_vma_start;
     volatile const uint32_t *trailer =
         (volatile const uint32_t *)boot_sdram_uncached_addr(
             (void *)(uintptr_t)(base + image_len));
     if (trailer[0] != OS_CRC_MAGIC)
-        return 1;   /* unstamped image — cannot verify */
+        return 0;   /* trailer lost/garbled — reload, do not trust */
     return boot_crc32_uncached(base, image_len) == trailer[1];
 }
 
+
 __attribute__((section(".text.boot")))
-static int boot_load_os_sd_once(uint32_t total) {
+static int boot_load_os_sd_once_to(uint32_t total, uint32_t dst_cached) {
     /* v2 arch: CRAM1 retired, OS .text in SDRAM (CRAM0 is non-exec).
      * Single-destination layout: bridge DMAs os.bin into CRAM0
      * scratch, then the CPU copies the whole blob contiguously into
@@ -686,10 +729,11 @@ static int boot_load_os_sd_once(uint32_t total) {
     uint32_t bounce_bridge = CRAM0_SCRATCH_BRIDGE;
     volatile uint8_t *bounce_src = (volatile uint8_t *)CRAM0_SCRATCH;
     volatile uint8_t *sdram_dst =
-        (volatile uint8_t *)boot_sdram_uncached_addr(_osdata_init_vma_start);
+        (volatile uint8_t *)boot_sdram_uncached_addr(
+            (void *)(uintptr_t)dst_cached);
     uint32_t done = 0;
 
-    boot_dcache_inval_range(_osdata_init_vma_start, total);
+    boot_dcache_inval_range((void *)(uintptr_t)dst_cached, total);
 
     while (done < total) {
         uint32_t chunk = total - done;
@@ -697,8 +741,7 @@ static int boot_load_os_sd_once(uint32_t total) {
             chunk = BOOT_DMA_CHUNK_SIZE;
 
         /* Bridge DMA: SD card → CRAM0 scratch */
-        CRAM0_MODE = CRAM0_MODE_BRIDGE;
-        for (volatile int s = 0; s < 8; s++) {}  /* settle ~4 clk_74a */
+        boot_cram0_mode(CRAM0_MODE_BRIDGE);
         int rc = boot_dma_read(OS_SLOT_ID, done, bounce_bridge, chunk);
         if (rc < 0)
             return rc;
@@ -706,8 +749,7 @@ static int boot_load_os_sd_once(uint32_t total) {
         /* CPU reads CRAM0 scratch, writes uncached SDRAM.  The OS executes
          * from SDRAM immediately after this loader, so avoid depending on a
          * best-effort D-cache eviction sweep to publish instruction bytes. */
-        CRAM0_MODE = CRAM0_MODE_CPU;
-        for (volatile int s = 0; s < 8; s++) {}  /* settle ~4 clk_74a */
+        boot_cram0_mode(CRAM0_MODE_CPU);
         volatile uint32_t *src32 = (volatile uint32_t *)bounce_src;
         volatile uint32_t *dst32 = (volatile uint32_t *)(sdram_dst + done);
         for (uint32_t i = 0; i < chunk / 4; i++)
@@ -722,30 +764,107 @@ static int boot_load_os_sd_once(uint32_t total) {
 
     /* Leave the mux in bridge mode — later code issuing bridge DMAs
      * is the common case; one-off CPU reads flip it as needed. */
-    CRAM0_MODE = CRAM0_MODE_BRIDGE;
+    boot_cram0_mode(CRAM0_MODE_BRIDGE);
     return 0;
 }
 
 /* Load the OS image, then verify its CRC and reload on mismatch.  The
- * SD->CRAM0->SDRAM copy occasionally corrupts a word (CRAM0 PSRAM async path);
- * a corrupt image surfaces later as an illegal-instruction trap.  Re-running
- * the whole load almost always clears an intermittent fault.  On exhausted
- * retries we proceed with the last copy rather than bricking the boot (no worse
- * than the pre-CRC behaviour) and leave os_load_crc_retries / pd_dbg_info set
- * so the failure is visible. */
+ * SD->CRAM0->SDRAM copy occasionally corrupts a word (CRAM0 PSRAM async path,
+ * cold-boot lost SDRAM writes); a corrupt image surfaces later as an
+ * illegal-instruction trap or silent data corruption.  Re-running the whole
+ * load almost always clears an intermittent fault, so retry FOREVER rather
+ * than ever booting a corrupt image: a visible retry loop the user can see
+ * (and power-cycle out of) is strictly better than the old proceed-anyway
+ * escape, which produced undebuggable in-game corruption on cold boots.
+ * os_load_crc_retries / pd_dbg_info keep the count visible to the OS. */
+__attribute__((section(".text.boot")))
+static void boot_fb_hex32(int col, int row, uint32_t v) {
+    for (int i = 7; i >= 0; i--) {
+        unsigned d = (v >> (i * 4)) & 0xF;
+        boot_fb_putchar(col++, row, (d < 10) ? ('0' + d) : ('a' + d - 10));
+    }
+}
+
+/* (CRC double-load forensics lived here 2026-06-09; removed after the
+ * bridge investigation closed — the CRC retry + UNVERIFIED banner remain.) */
+
 __attribute__((section(".text.boot")))
 static int boot_load_os_sd(uint32_t total) {
-    for (int attempt = 0; attempt < OS_LOAD_MAX_ATTEMPTS; attempt++) {
-        int rc = boot_load_os_sd_once(total);
-        if (rc < 0)
-            return rc;                  /* DMA/IO failure — surface as-is */
-        if (boot_verify_os_image(total))
-            return 0;                   /* image trusted */
-        os_load_crc_retries++;          /* corruption detected — reload */
+    for (;;) {
+        for (int attempt = 0; attempt < OS_LOAD_MAX_ATTEMPTS; attempt++) {
+            int rc = boot_load_os_sd_once_to(
+                total, (uint32_t)(uintptr_t)_osdata_init_vma_start);
+            if (rc < 0)
+                return rc;              /* DMA/IO failure — surface as-is */
+            if (boot_verify_os_image_at(total,
+                    (uint32_t)(uintptr_t)_osdata_init_vma_start))
+                return 0;               /* image trusted */
+            os_load_crc_retries++;      /* corruption detected — reload */
+        }
+        pd_dbg_info = 0xC0DE0000u | (os_load_crc_retries & 0xFFFFu);
+        boot_fb_puts0(1, "OS CRC retry x");
+        boot_fb_putchar(14, 1, '0' + (os_load_crc_retries & 7));
+        if (os_load_crc_retries >= 2 * OS_LOAD_MAX_ATTEMPTS) {
+            /* Bounded fail-open: booting a possibly-corrupt image with a
+             * visible warning beats a boot jail — warm boots historically
+             * load intact images, and the forensics rows carry the
+             * evidence either way. */
+            boot_fb_puts0(1, "BOOTING UNVERIFIED IMAGE ");
+            return 0;
+        }
     }
-    pd_dbg_info = 0xC0DE0000u | (os_load_crc_retries & 0xFFFFu);
-    return 0;
 }
+
+/* CRAM0 wait-until-healthy self-test (cold-boot forensics 2026-06-09).
+ * Bench data: cold starts fail the OS load with DETERMINISTIC,
+ * load-repeatable corruption (CRC forensic D:0 B:0) that heals after
+ * ~30-40 s of sitting in the menu — a boot-time-latched PSRAM/rail
+ * settling marginality, not a per-read race.  Every load path bounces
+ * through CRAM0 scratch, so: pattern-test the scratch and simply WAIT
+ * (re-testing every ~100 ms, counter on screen) until the chip answers
+ * correctly.  Converts the manual wait into an automatic minimal one. */
+__attribute__((section(".text.boot")))
+static void boot_cram_warmup(void) {
+    volatile uint32_t *scr = (volatile uint32_t *)CRAM0_SCRATCH;
+    unsigned warm_tries = 0;
+    for (;;) {
+        boot_cram0_mode(CRAM0_MODE_CPU);
+        /* FULL 4 KB scratch sweep: the original 64-word test passed on
+         * boots where high scratch offsets read 0xFFFFFFFF (bench
+         * 2026-06-09: ~0xB5C floats cold, low offsets fine) — an
+         * address-dependent fault the short test was blind to. */
+        for (uint32_t i = 0; i < 1024; i++)
+            scr[i] = (i * 0x01010101u) ^ 0xA5C35A3Cu;
+        __asm__ volatile("fence" ::: "memory");
+        int ok = 1;
+        for (uint32_t i = 0; i < 1024; i++)
+            if (scr[i] != ((i * 0x01010101u) ^ 0xA5C35A3Cu))
+                { ok = 0; break; }
+        boot_cram0_mode(CRAM0_MODE_BRIDGE);
+        if (ok)
+            break;
+        warm_tries++;
+        boot_warmup_note("CRAM warmup x", 13, warm_tries);
+    }
+    if (warm_tries)
+        boot_fb_clear_row(1);
+}
+
+/* F1: bridge-leg self-test, wait-until-healthy (cold-boot forensics
+ * 2026-06).  boot_cram_warmup() only proves the CPU<->CRAM0 leg;
+ * cold-start corruption lives on the bridge leg (APF SPI RX -> write
+ * FIFO -> CRAM0).  Exercise EXACTLY that leg with ground truth: DS-read
+ * the last 8 bytes of the OS slot (the 'OFC1' CRC trailer stamped by
+ * append_os_crc.py) into CRAM0 scratch and check the magic.  On
+ * mismatch, wait ~100 ms and retry forever with an on-screen counter —
+ * converting the user's manual 30-40 s "sit in menu until it heals"
+ * into an automatic minimal wait REGARDLESS of the root cause.  If
+ * os_size is wrong (DT query fell back to the linked size), the CRC
+ * verify in boot_load_os_sd would loop forever anyway, so gating here
+ * on the same trailer position adds no new failure mode. */
+/* (Bridge-leg boot probe lived here 2026-06-09; removed — it measured
+ * only the known first-DS-command-after-boot quirk, not bridge health.
+ * The load CRC + bounded retries are the real gate.) */
 
 /* ======================================================================
  * Main
@@ -779,13 +898,42 @@ int main(void) {
     /* Wait for APF bridge */
     unsigned int start_wait = SYS_CYCLE_LO;
     while (!(SYS_STATUS & SYS_STATUS_ALLCOMPLETE)) {
-        if ((SYS_CYCLE_LO - start_wait) > 500000000)
+        if ((SYS_CYCLE_LO - start_wait) > 500000000) {
+            /* APF never raised ALLCOMPLETE (e.g. slow cold SD mount).
+             * Do NOT charge into boot_hw_stabilize's DS-register
+             * zeroing while the bridge may still be streaming
+             * nonvolatile slots — wait (bounded) for the bridge to go
+             * quiet first, then fall back to the old behaviour.
+             *
+             * F6 (bridge-corruption mitigation 2026-06): a single LIVE
+             * sample of READY|WR_IDLE races mid-burst gaps — between
+             * two nonvolatile-slot bursts the bridge transiently reads
+             * idle, and proceeding then lets boot_hw_stabilize zero the
+             * DS registers under an active stream.  Require a SUSTAINED
+             * ~50 ms window of continuous READY|WR_IDLE before
+             * proceeding: any busy sample restarts the window.  Still
+             * bounded by the 3 s wedge escape. */
+            unsigned int quiet_wait = SYS_CYCLE_LO;
+            unsigned int quiet_t0 = SYS_CYCLE_LO;
+            for (;;) {
+                if ((DS_STATUS & (DS_STATUS_READY | DS_STATUS_WR_IDLE))
+                        != (DS_STATUS_READY | DS_STATUS_WR_IDLE))
+                    quiet_t0 = SYS_CYCLE_LO;   /* busy — restart window */
+                else if ((SYS_CYCLE_LO - quiet_t0) >= 5000000u)
+                    break;          /* ~50 ms continuously quiet */
+                if ((SYS_CYCLE_LO - quiet_wait) > 300000000)
+                    break;          /* bridge truly wedged */
+            }
             break;
+        }
     }
 
     pd_dbg_stage = 2;
 
     boot_hw_stabilize();
+
+    /* CRAM0 wait-until-healthy self-test — see boot_cram_warmup(). */
+    boot_cram_warmup();
 
     /* A soft reset can leave dirty D-cache lines from the previous run.
      * Drain them before any boot-critical SDRAM writes; later targeted
@@ -806,7 +954,7 @@ int main(void) {
         for (int i = 0; i < (320 * 240) / 4; i++) p[i] = 0;
     }
 
-    boot_fb_puts(0, 0, "Booting...");
+    boot_fb_puts0(0, "Booting...");
 
     /* ── PHDP Discovery ─────────────────────────────────────────── */
     int debug_mode = 0;
@@ -817,7 +965,7 @@ int main(void) {
 
     if (debug_mode) {
         boot_fb_clear_row(0);
-        boot_fb_puts(0, 0, "Service host connected");
+        boot_fb_puts0(0, "Service host connected");
 
         uint32_t total_size = 0;
         uint16_t chunk_size = 0;
@@ -825,7 +973,7 @@ int main(void) {
         if (phdp_request_override(OS_SLOT_ID, &total_size, &chunk_size)) {
             /* Stream OS binary over UART */
             boot_fb_clear_row(0);
-            boot_fb_puts(0, 0, "Loading via UART...");
+            boot_fb_puts0(0, "Loading via UART...");
 
             /* v2 arch: OS is ONE contiguous section in SDRAM
              * (__os_load_addr == __osdata_init_vma_start, same
@@ -838,9 +986,10 @@ int main(void) {
             boot_dcache_inval_range(_os_load_addr, total_size);
             int rc = phdp_chunk_loop(0, total_size, total_size, os_dst);
 
-            if (rc < 0 || !boot_verify_os_image(total_size)) {
+            if (rc < 0 || !boot_verify_os_image_at(total_size,
+                    (uint32_t)(uintptr_t)_osdata_init_vma_start)) {
                 boot_fb_clear_row(0);
-                boot_fb_puts(0, 0, "UART failed, trying SD...");
+                boot_fb_puts0(0, "UART failed, trying SD...");
                 goto load_from_sd;
             }
 
@@ -851,11 +1000,7 @@ int main(void) {
 
             /* Send EVT_EXEC_START */
             uint8_t exec_payload[4];
-            uint32_t entry = (uint32_t)(uintptr_t)os_main;
-            exec_payload[0] = (entry >>  0) & 0xFF;
-            exec_payload[1] = (entry >>  8) & 0xFF;
-            exec_payload[2] = (entry >> 16) & 0xFF;
-            exec_payload[3] = (entry >> 24) & 0xFF;
+            boot_store_le32(exec_payload, (uint32_t)(uintptr_t)os_main);
             phdp_send(PHDP_EVT_EXEC_START, exec_payload, 4);
 
             /* Enable UART mirror before jumping to OS */
@@ -879,27 +1024,25 @@ int main(void) {
 load_from_sd:
     /* ── Standard SD card boot ──────────────────────────────────── */
     boot_fb_clear_row(0);
-    boot_fb_puts(0, 0, "Loading...");
+    boot_fb_puts0(0, "Loading...");
 
     pd_dbg_stage = 3;
 
     uint32_t os_size = boot_os_slot_size();
 
+
+
     int rc = boot_load_os_sd(os_size);
 
     if (rc < 0) {
         boot_fb_clear_row(0);
-        boot_fb_puts(0, 0, "Load failed E");
+        boot_fb_puts0(0, "Load failed E");
         boot_fb_putchar(14, 0, '0' + (unsigned int)(-rc));
-        /* pd_dbg_info now holds DS_STATUS captured at timeout — show
-         * the bottom byte as 2 hex chars after the error digit so we
-         * can see which bridge handshake bit was stuck.
-         * Bits: 0=ACK 1=DONE 2-4=ERR 5=READY 6=WR_IDLE. */
-        unsigned st = pd_dbg_info & 0xFF;
-        unsigned h = (st >> 4) & 0xF;
-        unsigned l = st & 0xF;
-        boot_fb_putchar(16, 0, (h < 10) ? ('0' + h) : ('a' + h - 10));
-        boot_fb_putchar(17, 0, (l < 10) ? ('0' + l) : ('a' + l - 10));
+        /* pd_dbg_info holds DS_STATUS captured at timeout — show the
+         * full word after the error digit so we can see which bridge
+         * handshake bit was stuck (low byte: 0=ACK 1=DONE 2-4=ERR
+         * 5=READY 6=WR_IDLE).  Reuses the shared hex routine. */
+        boot_fb_hex32(16, 0, pd_dbg_info);
         while (1) {}
     }
 
@@ -922,6 +1065,39 @@ start_os:
     boot_zero_uncached_sdram(RUNTIME_STACK_TOP - RUNTIME_STACK_SIZE,
                              RUNTIME_STACK_TOP);
 
+    /* Write-landing probe (cold-boot lost-write forensics, 2026-06-09):
+     * the loop above just streamed zeros through the uncached alias
+     * across the whole stack window.  Sample it back; any non-zero word
+     * means SDRAM is dropping writes RIGHT NOW.  Re-zero once, and if
+     * it still fails halt with a visible code instead of letting
+     * os_main run on memory that loses stores. */
+    for (int probe_try = 0; ; probe_try++) {
+        uint32_t bad = 0;
+        for (uint32_t a = RUNTIME_STACK_TOP - RUNTIME_STACK_SIZE;
+             a < RUNTIME_STACK_TOP && !bad; a += 8192) {
+            volatile uint32_t *w = (volatile uint32_t *)
+                boot_sdram_uncached_addr((void *)(uintptr_t)a);
+            if (w[0] | w[1])
+                bad = a;
+        }
+        /* Always check the very top words — os_main's first frames. */
+        volatile uint32_t *top = (volatile uint32_t *)
+            boot_sdram_uncached_addr(
+                (void *)(uintptr_t)(RUNTIME_STACK_TOP - 64));
+        for (int i = 0; i < 16 && !bad; i++)
+            if (top[i])
+                bad = RUNTIME_STACK_TOP - 64 + (uint32_t)i * 4u;
+        if (!bad)
+            break;
+        pd_dbg_info = 0xBADB0000u | ((bad >> 8) & 0xFFFFu);
+        if (probe_try >= 1) {
+            boot_fb_puts0(1, "SDRAM WRITE FAIL");
+            while (1) {}
+        }
+        boot_zero_uncached_sdram(RUNTIME_STACK_TOP - RUNTIME_STACK_SIZE,
+                                 RUNTIME_STACK_TOP);
+    }
+
     pd_dbg_stage = 5;
 
     /* If the OS image had to be reloaded to pass its CRC, surface it: the
@@ -929,7 +1105,7 @@ start_os:
      * we flash it here so it's visible during boot.  Skipped on the sim path,
      * where retries is always 0 and there is no framebuffer. */
     if (os_load_crc_retries) {
-        boot_fb_puts(0, 1, "OS reloaded (CRC) x");
+        boot_fb_puts0(1, "OS reloaded (CRC) x");
         boot_fb_putchar(19, 1, '0' + (os_load_crc_retries & 7));
     }
 

@@ -85,6 +85,12 @@ static int bridge_addr_targets_cram0(uint32_t bridge_addr, uint32_t length) {
     return addr_in_range(bridge_addr, length, CRAM0_BRIDGE, CRAM_SIZE);
 }
 
+/* OS image trailer magic stamped by append_os_crc.py ('OFC1' read back as a
+ * little-endian word).  Mirrors OS_CRC_MAGIC in boot/boot.c; the trailer is
+ * the only CPU-known ground truth a bridge read can be checked against. */
+#define OS_BIN_SLOT_ID    1u
+#define OS_BIN_CRC_MAGIC  0x3143464Fu
+
 static void bridge_warmup_once(void) {
     if (bridge_warmed || bridge_warmup_active)
         return;
@@ -92,6 +98,29 @@ static void bridge_warmup_once(void) {
     bridge_warmup_active = 1;
     (void)bridge_read_impl(1, 0, (void *)CRAM0_SCRATCH, 4);
     of_cache_flush_dcache();
+
+    /* F1 mirror (bridge-corruption forensics 2026-06): one-shot trailer
+     * verify of the bridge leg.  After a UART/PHDP boot the boot ROM's
+     * BRG-warmup gate never ran, so a cold bridge can reach here still
+     * corrupting bulk reads — and the first visible symptom used to be a
+     * mysterious os.ini parse failure.  Read the last 8 bytes of the
+     * os.bin slot (its 'OFC1' CRC trailer) through the exact failing leg
+     * (bridge RX -> write FIFO -> CRAM0 scratch bounce) and say so
+     * explicitly if the magic comes back wrong.  Diagnostic only: the
+     * boot path stays unchanged either way. */
+    long os_size = of_file_size(OS_BIN_SLOT_ID);
+    if (os_size >= 8) {
+        uint32_t trailer[2] = { 0u, 0u };
+        int rc = bridge_read_impl(OS_BIN_SLOT_ID, (uint32_t)os_size - 8u,
+                                  trailer, 8u);
+        if (rc == 0 && trailer[0] != OS_BIN_CRC_MAGIC)
+            of_term_printf("[file] bridge leg corrupt: os.bin trailer "
+                           "%08x != %08x (W=%08x)\n",
+                           (unsigned)trailer[0],
+                           (unsigned)OS_BIN_CRC_MAGIC,
+                           (unsigned)DS_BRIDGE_WCNT);
+    }
+
     bridge_warmup_active = 0;
     bridge_warmed = 1;
 }

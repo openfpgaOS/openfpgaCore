@@ -6713,6 +6713,187 @@ static void test_vert_tri_wrong_size_noop() {
                       FB_BASE_BYTE, 320, 0, 0, 48, 24);
 }
 
+// ============================================================================
+// CMD_DRAW_PARAM_TRI_RECS (0x4D) — records-only 0x49 variant on the 0x4A
+// sticky state.  Mirrors the 0x49 param-tri tests: same planes, same fill
+// convention, byte-exact against both the CPU reference and a full 0x49.
+// ============================================================================
+
+// Emit a 0x4D (16-word) records-only param-tri: per-triangle planes (the
+// 0x49 header words 8..19), the q29 word (0x49 w30), and the vertices.
+static void emit_param_tri_recs_raw(const ParamSpanListWire &p,
+                                    const int16_t vx[3], const int16_t vy[3]) {
+    auto h = encode_param_span_list_wire(p, {});
+    std::vector<uint32_t> w(16, 0);
+    for (int i = 0; i < 12; i++)
+        w[i] = h[8 + i];
+    w[12] = h[30];
+    w[13] = ((uint32_t)(uint16_t)vy[0] << 16) | (uint16_t)vx[0];
+    w[14] = ((uint32_t)(uint16_t)vy[1] << 16) | (uint16_t)vx[1];
+    w[15] = ((uint32_t)(uint16_t)vy[2] << 16) | (uint16_t)vx[2];
+    ring_cmd(0x4D, (uint32_t)w.size());
+    for (uint32_t x : w)
+        ring_write(x);
+}
+
+// (a) Byte-exact equivalence: one 0x4A + N×0x4D at FB_BASE vs N full 0x49 at
+// FB_ALT_BASE, plus the CPU reference model on the FB_BASE copy.  Also proves
+// the sticky state survives back-to-back 0x4D draws.
+static void test_param_tri_recs_equivalence_vs_param() {
+    printf("TEST param_tri_recs_equivalence_vs_param\n");
+    gpu_init();
+    FbModel m = preload_with_sentinel();
+    upload_texture(TEX_BASE_BYTE, make_param_test_texture());
+    m.snapshot_from_sdram();
+
+    ParamSpanListWire p = make_tri_plane_setup();
+
+    const int16_t tris[3][2][3] = {
+        { { (int16_t)(5*16+7), (int16_t)(40*16+3), (int16_t)(20*16) },
+          { 2, 6, 22 } },
+        { { (int16_t)(8*16), (int16_t)(30*16), (int16_t)(18*16+9) },
+          { 3, 3, 14 } },
+        { { (int16_t)(24*16+5), (int16_t)(44*16), (int16_t)(60*16) },
+          { 4, 18, 18 } },
+    };
+
+    // Path A: one 0x4A arms the sticky surface + clip, then 3 × 0x4D.
+    emit_set_tri_state_raw(p, 0, 64, 0, 28);
+    for (int i = 0; i < 3; i++) {
+        emit_param_tri_recs_raw(p, tris[i][0], tris[i][1]);
+        apply_tri_ref(m, p, tris[i][0], tris[i][1], 0, 64, 0, 28);
+    }
+
+    // Path B: the same triangles via full 0x49 at FB_ALT_BASE.
+    ParamSpanListWire pb = p;
+    pb.fb_base = FB_ALT_BASE_BYTE;
+    for (int i = 0; i < 3; i++)
+        emit_param_tri_raw(pb, tris[i][0], tris[i][1], 0, 64, 0, 28);
+
+    if (!submit_and_wait()) {
+        check_fail("param_tri_recs_equivalence_vs_param", "timeout");
+        return;
+    }
+
+    // CPU-reference check on the 0x4D copy.
+    compare_fb_region("param_tri_recs_equivalence_vs_param.fb", m,
+                      FB_BASE_BYTE, 320, 0, 0, 72, 32);
+
+    // GPU-vs-GPU check: 0x4D output must equal the full-0x49 output.
+    int diffs = 0;
+    for (int y = 0; y < 32; y++)
+        for (int x = 0; x < 72; x++) {
+            uint32_t pa = FB_BASE_BYTE     + (uint32_t)y * 320u + (uint32_t)x;
+            uint32_t pbb = FB_ALT_BASE_BYTE + (uint32_t)y * 320u + (uint32_t)x;
+            if (sdram_read_byte(pa) != sdram_read_byte(pbb))
+                diffs++;
+        }
+    if (diffs == 0)
+        check_pass("param_tri_recs_equivalence_vs_param.vs_0x49");
+    else {
+        char buf[96];
+        snprintf(buf, sizeof(buf), "%d pixels differ from full 0x49", diffs);
+        check_fail("param_tri_recs_equivalence_vs_param.vs_0x49", buf);
+    }
+}
+
+// (b) Sticky gating: 0x4D without an armed 0x4A is a guarded no-op; an
+// interleaved 0x48 header invalidates the sticky state (0x4D no-op again);
+// re-issuing 0x4A re-arms.  Mirrors vert_tri_sticky_semantics.
+static void test_param_tri_recs_sticky_semantics() {
+    printf("TEST param_tri_recs_sticky_semantics\n");
+    gpu_init();
+    FbModel m = preload_with_sentinel();
+    upload_texture(TEX_BASE_BYTE, make_param_test_texture());
+    m.snapshot_from_sdram();
+
+    ParamSpanListWire p = make_tri_plane_setup();
+    // The would-be no-op draws use THIS triangle (columns ~5..40); the
+    // legitimate (b3) draw uses a disjoint one (columns ~44..60), so any
+    // wrongly-executed no-op lands on sentinel bytes and is caught.
+    const int16_t vx[3] = { (int16_t)(5*16+7), (int16_t)(40*16+3),
+                            (int16_t)(20*16) };
+    const int16_t vy[3] = { 2, 6, 22 };
+    const int16_t vx3[3] = { (int16_t)(44*16), (int16_t)(60*16),
+                             (int16_t)(50*16+9) };
+    const int16_t vy3[3] = { 2, 6, 20 };
+
+    // (b1) no prior 0x4A: must not draw.
+    emit_param_tri_recs_raw(p, vx, vy);
+
+    // (b2) 0x4A, then a 0x48 span list (overwrites staging + clears
+    // tri_state_valid), then 0x4D: must not draw either.  The 0x48 span
+    // itself draws and is part of the reference image.
+    emit_set_tri_state_raw(p, 0, 64, 0, 28);
+    ParamSpanListWire ps = make_tri_plane_setup();
+    std::vector<ParamSpanRecordWire> recs = { {1, 26, 12} };
+    emit_param_span_list_raw(ps, recs);
+    for (const auto &r : recs)
+        m.apply_span_ref(param_affine_ref_span(ps, r));
+    emit_param_tri_recs_raw(p, vx, vy);
+
+    // (b3) fresh 0x4A re-arms: this (disjoint) one draws.
+    emit_set_tri_state_raw(p, 0, 64, 0, 28);
+    emit_param_tri_recs_raw(p, vx3, vy3);
+    apply_tri_ref(m, p, vx3, vy3, 0, 64, 0, 28);
+
+    if (!submit_and_wait()) {
+        check_fail("param_tri_recs_sticky_semantics", "timeout");
+        return;
+    }
+    compare_fb_region("param_tri_recs_sticky_semantics.fb", m,
+                      FB_BASE_BYTE, 320, 0, 0, 72, 32);
+
+    // (b4) soft reset clears the sticky state: a 0x4D after it (aimed at
+    // still-sentinel rows) is a no-op.
+    gpu_soft_reset();
+    FbModel m2 = m;
+    m2.snapshot_from_sdram();
+    const int16_t vy4[3] = { 26, 30, 38 };
+    emit_param_tri_recs_raw(p, vx, vy4);
+    cmd_clear_rect(FB_BASE_BYTE + 40u * 320u, 8, 1, 0, 0x77);
+    m2.apply_clear_rect(FB_BASE_BYTE + 40u * 320u, 8, 1, 0, 0x77);
+    if (!submit_and_wait()) {
+        check_fail("param_tri_recs_sticky_semantics.soft_reset", "timeout");
+        return;
+    }
+    compare_fb_region("param_tri_recs_sticky_semantics.soft_reset", m2,
+                      FB_BASE_BYTE, 320, 0, 0, 72, 42);
+}
+
+// (c) Wrong-size payload drains and retires as a no-op without wedging the
+// stream, and does not consume the armed sticky state.
+static void test_param_tri_recs_wrong_size_noop() {
+    printf("TEST param_tri_recs_wrong_size_noop\n");
+    gpu_init();
+    FbModel m = preload_with_sentinel();
+    upload_texture(TEX_BASE_BYTE, make_param_test_texture());
+    m.snapshot_from_sdram();
+
+    ParamSpanListWire p = make_tri_plane_setup();
+    emit_set_tri_state_raw(p, 0, 64, 0, 28);
+
+    // 0x4D with 15 words (should be 16) -> drains, no draw.
+    std::vector<uint32_t> bad(15, 0xC7C7C7C7u);
+    ring_cmd(0x4D, (uint32_t)bad.size());
+    for (uint32_t x : bad) ring_write(x);
+
+    // A correct 0x4D right after still draws (sticky state untouched by
+    // the malformed drain).
+    const int16_t vx[3] = { (int16_t)(8*16), (int16_t)(30*16),
+                            (int16_t)(18*16+9) };
+    const int16_t vy[3] = { 3, 3, 14 };
+    emit_param_tri_recs_raw(p, vx, vy);
+    apply_tri_ref(m, p, vx, vy, 0, 64, 0, 28);
+
+    if (!submit_and_wait()) {
+        check_fail("param_tri_recs_wrong_size_noop", "timeout");
+        return;
+    }
+    compare_fb_region("param_tri_recs_wrong_size_noop.fb", m,
+                      FB_BASE_BYTE, 320, 0, 0, 48, 24);
+}
+
 static void test_param_span_list_persp_matches_helper() {
     printf("TEST param_span_list_persp_matches_helper\n");
     gpu_init();
@@ -8379,6 +8560,9 @@ int main(int argc, char **argv) {
     test_vert_tri_shared_edge_adjacency();
     test_vert_tri_sticky_semantics();
     test_vert_tri_wrong_size_noop();
+    test_param_tri_recs_equivalence_vs_param();
+    test_param_tri_recs_sticky_semantics();
+    test_param_tri_recs_wrong_size_noop();
     test_param_span_list_persp_matches_helper();
     test_param_span_quake_projection_math();
     test_param_span_q29_high_angle_floor_no_flatten();
@@ -8439,6 +8623,7 @@ int main(int argc, char **argv) {
 
     printf("\n=== Acceptance Results: %d passed, %d failed ===\n",
            pass_count, fail_count);
+    printf("=== Total sim_time: %llu ===\n", (unsigned long long)sim_time);
 
     delete tb;
     return fail_count > 0 ? 1 : 0;

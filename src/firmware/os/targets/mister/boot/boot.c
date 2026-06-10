@@ -26,6 +26,7 @@
  * All hardware access is done via direct register writes.
  */
 
+#define BUILDING_BOOTLOADER
 #include "../hal/regs.h"
 #include "../targets/mister/hps_regs.h"
 

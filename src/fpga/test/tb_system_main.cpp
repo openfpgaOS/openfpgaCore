@@ -28,7 +28,10 @@
 //      (max_cycles), or trap-stall heuristic.
 //
 
+#define private public
 #include "Vtb_system.h"
+#include "Vtb_system__Syms.h"
+#undef private
 #include "Vtb_system___024root.h"
 #include "Vtb_system_tb_system.h"
 #include <verilated.h>
@@ -184,11 +187,10 @@ static bool load_os_bin(const char *path) {
     }
 
     // SDRAM preload: byte address 0x10320000 → word index (0x320000/4).
-    // The behavioural sim SDRAM is 1 Mword = 4 MB and wraps, so mask
-    // accordingly.  OS image start at word 0x0C8000 fits below the
-    // 1M boundary since 0x0C8000 + 21405 < 0x100000.
+    // The behavioural sim SDRAM is 16 Mword = 64 MB and wraps, so mask
+    // accordingly.
     const uint32_t SDRAM_OS_WORD = 0x10320000u / 4u;
-    const uint32_t SDRAM_MEM_MASK = (1u << 20) - 1u;  // must match sdram_fast_model.v
+    const uint32_t SDRAM_MEM_MASK = (1u << 24) - 1u;  // must match sdram_fast_model.v
     for (size_t w = 0; w < words; w++) {
         uint32_t v = 0;
         for (int b = 0; b < 4; b++) {
@@ -212,7 +214,7 @@ int main(int argc, char **argv) {
     Verilated::commandArgs(argc, argv);
 
     const char *os_bin_path = "../../firmware/os/os.bin";
-    uint64_t max_cycles = 2000000;
+    uint64_t max_cycles = 8000000;
     if (argc > 1) os_bin_path = argv[1];
     if (argc > 2) max_cycles = std::strtoull(argv[2], nullptr, 0);
 
@@ -351,15 +353,19 @@ int main(int argc, char **argv) {
         if (!tb->dbg_periph_arvalid) prev_periph_araddr = 0xFFFFFFFF;
         if (!tb->dbg_periph_awvalid) prev_periph_awaddr = 0xFFFFFFFF;
         if (!tb->dbg_cram0_arvalid)  prev_cram0_araddr = 0xFFFFFFFF;
-
-        // Periodic status every 500000 cycles
         if (c - last_report >= 500000) {
             last_report = c;
-            std::printf("[c=%llu] periph_ar=0x%08x/%d  sdram_ar=0x%08x/%d  "
-                        "cram0_ar=0x%08x/%d  mode=%d  uart_bytes=%zu\n"
+            uint32_t current_pc = tb->vlSymsp->TOP__tb_system__cpu_sys__cpu.__PVT__PcPlugin_logic_harts_0_self_state;
+            uint32_t a0 = tb->vlSymsp->TOP__tb_system__cpu_sys__cpu__integer_RegFilePlugin_logic_regfile_fpga.asMem_ram[10];
+            uint32_t a1 = tb->vlSymsp->TOP__tb_system__cpu_sys__cpu__integer_RegFilePlugin_logic_regfile_fpga.asMem_ram[11];
+            uint32_t a3 = tb->vlSymsp->TOP__tb_system__cpu_sys__cpu__integer_RegFilePlugin_logic_regfile_fpga.asMem_ram[13];
+            uint32_t a4 = tb->vlSymsp->TOP__tb_system__cpu_sys__cpu__integer_RegFilePlugin_logic_regfile_fpga.asMem_ram[14];
+            uint32_t a5 = tb->vlSymsp->TOP__tb_system__cpu_sys__cpu__integer_RegFilePlugin_logic_regfile_fpga.asMem_ram[15];
+            std::printf("[c=%llu] PC=0x%08x a0=0x%08x a1=0x%08x a3=0x%08x a4=0x%08x a5=0x%08x\n"
+                        "    periph_ar=0x%08x/%d  sdram_ar=0x%08x/%d  cram0_ar=0x%08x/%d  mode=%d  uart_bytes=%zu\n"
                         "    sdram slave_st=%d model_st=%d busy=%d  "
                         "arb: st=%d grant_cpu=%d  cmd_fwd=%d accepted=%d\n",
-                        (unsigned long long)c,
+                        (unsigned long long)c, current_pc, a0, a1, a3, a4, a5,
                         tb->dbg_periph_araddr, tb->dbg_periph_arvalid,
                         tb->dbg_sdram_araddr, tb->dbg_sdram_arvalid,
                         tb->dbg_cram0_araddr, tb->dbg_cram0_arvalid,
@@ -384,11 +390,20 @@ int main(int argc, char **argv) {
         // legitimately be executing cached code in tight loops and not
         // issuing any AR for thousands of cycles.  Only timeout on
         // max_cycles.
-    }
+     }
 
     if (exit_code == 1) {
+        uint32_t current_pc = tb->vlSymsp->TOP__tb_system__cpu_sys__cpu.__PVT__PcPlugin_logic_harts_0_self_state;
+        uint32_t a0 = tb->vlSymsp->TOP__tb_system__cpu_sys__cpu__integer_RegFilePlugin_logic_regfile_fpga.asMem_ram[10];
+        uint32_t a1 = tb->vlSymsp->TOP__tb_system__cpu_sys__cpu__integer_RegFilePlugin_logic_regfile_fpga.asMem_ram[11];
+        uint32_t a3 = tb->vlSymsp->TOP__tb_system__cpu_sys__cpu__integer_RegFilePlugin_logic_regfile_fpga.asMem_ram[13];
+        uint32_t a4 = tb->vlSymsp->TOP__tb_system__cpu_sys__cpu__integer_RegFilePlugin_logic_regfile_fpga.asMem_ram[14];
+        uint32_t a5 = tb->vlSymsp->TOP__tb_system__cpu_sys__cpu__integer_RegFilePlugin_logic_regfile_fpga.asMem_ram[15];
         std::printf("\n\n=== TIMEOUT at %llu cycles ===\n",
                     (unsigned long long)max_cycles);
+        std::printf("  Current PC: 0x%08x\n", current_pc);
+        std::printf("  Registers: a0=0x%08x a1=0x%08x a3=0x%08x a4=0x%08x a5=0x%08x\n",
+                    a0, a1, a3, a4, a5);
         std::printf("  UART bytes observed: %zu\n", uart_buf.size());
         if (!uart_buf.empty()) {
             size_t take = uart_buf.size() > 200 ? 200 : uart_buf.size();

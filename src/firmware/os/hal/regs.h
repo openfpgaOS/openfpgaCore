@@ -176,6 +176,20 @@
 #define   DS_CMD_WRITE      2
 #define   DS_CMD_OPENFILE   3
 #define   DS_CMD_GETFILE    4
+/* F2i bridge word counters (read-only diagnostic, cleared in hardware on
+ * each DS_COMMAND issue).  Counts every bridge word the host pushed during
+ * the current/last data-slot command on both write legs, BEFORE any
+ * FIFO/mux drop, so firmware can split "words never arrived" (count <
+ * length/4 => RX-side drop) from "words arrived corrupt" (exact count).
+ * Quasi-static contract: only meaningful after DS_STATUS reports
+ * DONE|WR_IDLE — the CDC is a plain per-bit 2FF bank.
+ * Pocket-only tap; reads 0 on targets without the APF bridge. */
+#define DS_BRIDGE_WCNT      REG32(SYSREG_BASE + 0x1C)
+#define   DS_BWC_CRAM0_MASK     0x00007FFFu /* CRAM0-leg words (sat 0x7FFF) */
+#define   DS_BWC_CRAM0_DROPPED  (1u << 15)  /* sticky: CRAM0 write arrived while CPU owned mux */
+#define   DS_BWC_SDRAM_MASK     0x7FFF0000u /* SDRAM-leg words (sat 0x7FFF) */
+#define   DS_BWC_SDRAM_SHIFT    16
+#define   DS_BWC_CRAM0_OVERRUN  (1u << 31)  /* sticky: CRAM0 write FIFO overrun drop */
 #define DS_STATUS           REG32(SYSREG_BASE + 0x3C)
 #define   DS_STATUS_ACK     (1 << 0)
 #define   DS_STATUS_DONE    (1 << 1)
@@ -667,5 +681,24 @@ volatile uint32_t *sw_mix_irq_doorbell(void);
                                            : REG32(MIX_BASE + 0x830))
 #define MIX_VOICE_POS(v)  (of_mixer_use_sw ? sw_mixer_reg_read(0x880 + ((v) << 2)) \
                                            : REG32(MIX_BASE + 0x880 + ((v) << 2)))
+
+#ifdef BUILDING_BOOTLOADER
+/* Clean compile-time bypass of software mixer for bootloader (BRAM) context.
+ * Direct MMIO writes only. */
+#undef SW_MIX_SEL
+#define SW_MIX_SEL(byteoff)   (*(volatile uint32_t *)(MIX_BASE + (byteoff)))
+
+#undef MIX_IRQ_PENDING
+#define MIX_IRQ_PENDING       REG32(MIX_BASE + 0x824)
+
+#undef MIX_IRQ_CLEAR
+#define MIX_IRQ_CLEAR         (*(volatile uint32_t *)(MIX_BASE + 0x824))
+
+#undef MIX_ACTIVE_MASK
+#define MIX_ACTIVE_MASK       REG32(MIX_BASE + 0x830)
+
+#undef MIX_VOICE_POS
+#define MIX_VOICE_POS(v)      REG32(MIX_BASE + 0x880 + ((v) << 2))
+#endif
 
 #endif /* OFOS_REGS_H */

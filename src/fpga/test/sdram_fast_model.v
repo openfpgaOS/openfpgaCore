@@ -36,23 +36,28 @@ module sdram_fast_model (
     input  wire [3:0]  word_burst_len,      // N+1 word burst
     input  wire [3:0]  word_burst_wr_len,
 
+    // Beat-1 preload for native burst writes (latched by the pulse adapter
+    // from sdram_preload_* at command forward, exactly like io_sdram's
+    // word_data_next capture)
+    input  wire [31:0] word_data_next,
+    input  wire [3:0]  word_wstrb_next,
+
     output reg  [31:0] word_q,
     output reg         word_busy,
     output reg         word_q_valid,
     output reg         word_wr_data_next,
     output reg         word_wr_done,        // Pulse: write op committed (matches io_sdram ST_WRITE_4→IDLE)
 
-    // Pre-staged next word (driven combinatorially by axi_sdram_slave)
+    // Continuation bus for pulled beats (axi_sdram_slave's active_next_*,
+    // i.e. the same sdram_next_wdata/strb wires io_sdram consumes)
     input  wire [31:0] burst_wr_direct_data,
     input  wire [3:0]  burst_wr_direct_strb
 );
 
-// Scaled-down backing: 4 MB / 4 = 1 Mword plus a wrap-around mask.
+// Full backing matching physical hardware: 64 MB / 4 = 16 Mword plus a wrap-around mask.
 // The CPU boots out of 0x10320000+, touches framebuffers, stacks and
-// heap all within the bottom 4 MB of SDRAM, so wrapping higher
-// addresses into this window doesn't collide.  Gives a 2^20 = 1M-word
-// array that fits comfortably in a stack-allocated Verilator instance.
-localparam MEM_WORDS = 1 * 1024 * 1024;
+// heap all within the 64 MB of SDRAM.
+localparam MEM_WORDS = 16 * 1024 * 1024;
 localparam MEM_MASK  = MEM_WORDS - 1;
 reg [31:0] mem [0:MEM_WORDS-1] /*verilator public_flat_rw*/;
 
@@ -74,6 +79,15 @@ reg [23:0] addr_r;
 reg [3:0]  burst_r;     // N (0-based — N+1 beats total)
 reg [3:0]  beat_r;      // beats completed
 
+// Native burst-write rolling preload (mirror of io_sdram's scheme):
+// beat 0 rides word_data, beat 1 rides word_data_next, beats 2+ are
+// pulled — pull asserted while writing beat N, slave registers the
+// selected beat one cycle later, capture lands on beat N+1's write
+// edge into the slot freed by the shift in between.
+reg [31:0] wdata_cur, wdata_nxt;
+reg [3:0]  wstrb_cur, wstrb_nxt;
+reg        pull_pend;   // pull issued, capture still outstanding
+
 always @(posedge clk or negedge reset_n) begin
     if (!reset_n) begin
         state             <= S_IDLE;
@@ -85,6 +99,11 @@ always @(posedge clk or negedge reset_n) begin
         word_q_valid      <= 1'b0;
         word_wr_data_next <= 1'b0;
         word_wr_done      <= 1'b0;
+        wdata_cur         <= 32'd0;
+        wdata_nxt         <= 32'd0;
+        wstrb_cur         <= 4'd0;
+        wstrb_nxt         <= 4'd0;
+        pull_pend         <= 1'b0;
     end else begin
         // Default: pulses deassert each cycle
         word_q_valid      <= 1'b0;
@@ -106,8 +125,13 @@ always @(posedge clk or negedge reset_n) begin
                 burst_r   <= word_burst_wr_len;
                 beat_r    <= 4'd0;
                 word_busy <= 1'b1;
-                // First beat's data arrives via word_data on the same
-                // cycle; latch it in S_WR_BEAT.
+                // Capture beats 0 and 1 at command time (io_sdram does the
+                // same with word_data_captured / word_data_next_captured).
+                wdata_cur <= word_data;
+                wstrb_cur <= word_wstrb;
+                wdata_nxt <= word_data_next;
+                wstrb_nxt <= word_wstrb_next;
+                pull_pend <= 1'b0;
                 state     <= S_WR_BEAT;
             end
         end
@@ -146,14 +170,18 @@ always @(posedge clk or negedge reset_n) begin
 
         S_WR_BEAT: begin
             word_busy <= 1'b1;
-            // Write the beat that's currently on word_data.  For the
-            // first beat (beat_r == 0) the slave placed it on word_data
-            // before asserting word_wr; for subsequent beats the slave
-            // forwards on word_wr_data_next pulses into word_data.
-            if (word_wstrb[0]) mem[(addr_r + beat_r) & MEM_MASK][ 7: 0] <= word_data[ 7: 0];
-            if (word_wstrb[1]) mem[(addr_r + beat_r) & MEM_MASK][15: 8] <= word_data[15: 8];
-            if (word_wstrb[2]) mem[(addr_r + beat_r) & MEM_MASK][23:16] <= word_data[23:16];
-            if (word_wstrb[3]) mem[(addr_r + beat_r) & MEM_MASK][31:24] <= word_data[31:24];
+            // Write the current beat from the rolling-preload registers.
+            if (wstrb_cur[0]) mem[(addr_r + beat_r) & MEM_MASK][ 7: 0] <= wdata_cur[ 7: 0];
+            if (wstrb_cur[1]) mem[(addr_r + beat_r) & MEM_MASK][15: 8] <= wdata_cur[15: 8];
+            if (wstrb_cur[2]) mem[(addr_r + beat_r) & MEM_MASK][23:16] <= wdata_cur[23:16];
+            if (wstrb_cur[3]) mem[(addr_r + beat_r) & MEM_MASK][31:24] <= wdata_cur[31:24];
+
+            // Capture the beat requested by the PREVIOUS S_WR_BEAT's pull:
+            // the slave registered it on burst_wr_direct_* one cycle ago.
+            if (pull_pend) begin
+                wdata_nxt <= burst_wr_direct_data;
+                wstrb_nxt <= burst_wr_direct_strb;
+            end
 
             if (beat_r == burst_r) begin
                 // Last beat — drop busy next cycle to let the slave see
@@ -162,19 +190,27 @@ always @(posedge clk or negedge reset_n) begin
                 word_wr_done <= 1'b1;  // Pulse: matches io_sdram ST_WRITE_4→IDLE
                 state        <= S_IDLE;
             end else begin
-                // Pull the next beat from the slave's pre-staged word.
-                word_wr_data_next <= 1'b1;
-                beat_r            <= beat_r + 4'd1;
-                state             <= S_WR_LATCH;
+                // Pull beat N+2 if it exists (the next beat is already in
+                // the preload slot).  N-2 pulls total for an N-beat burst.
+                if ({1'b0, beat_r} + 5'd2 <= {1'b0, burst_r}) begin
+                    word_wr_data_next <= 1'b1;
+                    pull_pend         <= 1'b1;
+                end else begin
+                    pull_pend         <= 1'b0;
+                end
+                beat_r <= beat_r + 4'd1;
+                state  <= S_WR_LATCH;
             end
         end
 
         S_WR_LATCH: begin
             word_busy <= 1'b1;
-            // The axi_sdram_slave promoted next_wdata into sdram_wdata
-            // on its wr_data_next pulse (one cycle earlier); the pulse
-            // adapter in tb_system forwards it into word_data with a
-            // 1-cycle delay.  Latch the new value now.
+            // Shift preload -> current between beats (io_sdram's
+            // ST_WRITE_3 shift).  The outstanding pull's data is captured
+            // on the NEXT S_WR_BEAT edge, after the slave's registered
+            // response has settled.
+            wdata_cur <= wdata_nxt;
+            wstrb_cur <= wstrb_nxt;
             state <= S_WR_BEAT;
         end
 
