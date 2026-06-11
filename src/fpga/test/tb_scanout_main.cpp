@@ -162,6 +162,33 @@ int main(int argc, char **argv) {
     Verilated::commandArgs(argc, argv);
     tb = new Vtb_scanout;
     const double CLK_HZ = 49.152e6;
+
+#ifdef SCANOUT_TEST_LEAN
+    /* HAS_ANALOG_RASTER=0 build (OS30 lean): the dedicated analog raster /
+     * fetch / line-cache are pruned, so the analog hsync/vsync never fire and
+     * every analog timing/data assertion is vacuous — skip them.  The LCD
+     * path through the shared output pipeline is untouched, so KEEP the LCD
+     * assertions: the same brutal-latency SDRAM model still has to meet the
+     * LCD 1-line deadline (lcd_mismatch == 0 over the steady-state frame). */
+    (void)CLK_HZ;
+    printf("=== scanout LCD-only (HAS_ANALOG_RASTER=0) timing + data ===\n");
+
+    Result p480 = measure(1, 0, 0);
+    report("analog_480p=1 (pruned analog; LCD deadline check)", p480);
+    Result p240 = measure(0, 0, 0);
+    report("analog_480p=0 (pruned analog; LCD deadline check)", p240);
+
+    bool lcd480 = (p480.lcd_checked > 200 && p480.lcd_mismatch == 0);
+    bool lcd240 = (p240.lcd_checked > 200 && p240.lcd_mismatch == 0);
+
+    printf("\nLCD DATA (1-line deadline) 480p: %s   240p: %s\n",
+           lcd480 ? "PASS" : "FAIL", lcd240 ? "PASS" : "FAIL");
+    printf("ANALOG checks: SKIPPED (HAS_ANALOG_RASTER=0 — raster pruned)\n");
+    bool ok = lcd480 && lcd240;
+    printf("RESULT: %s\n", ok ? "PASS" : "FAIL");
+    delete tb;
+    return ok ? 0 : 1;
+#else
     printf("=== scanout analog timing + data ===\n");
 
     Result p480 = measure(1, 0, 0); report("analog_480p=1 (VGA / scandoubler path)", p480);
@@ -221,4 +248,5 @@ int main(int argc, char **argv) {
     printf("RESULT: %s\n", ok ? "PASS" : "FAIL");
     delete tb;
     return ok ? 0 : 1;
+#endif
 }

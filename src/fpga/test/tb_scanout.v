@@ -22,7 +22,14 @@
 //
 `default_nettype none
 
-module tb_scanout (
+module tb_scanout #(
+    // Forwarded verbatim to the DUT so the OS30 lean (analog raster pruned)
+    // config can be built straight from the command line with a Verilator
+    // -G override, e.g. -GHAS_ANALOG_RASTER=0.  Default matches the DUT's
+    // default (analog raster present), so the standard scanout build is
+    // unchanged.
+    parameter HAS_ANALOG_RASTER = 1
+) (
     input  wire clk,
     input  wire reset_n,
     input  wire analog_480p,
@@ -96,7 +103,9 @@ module tb_scanout (
     wire [23:0] pixel_color;
     wire        pal_busy;
 
-    video_CRT_scanout_indexed_BRAM dut (
+    video_CRT_scanout_indexed_BRAM #(
+        .HAS_ANALOG_RASTER(HAS_ANALOG_RASTER)
+    ) dut (
         .clk_video(clk_video),
         .reset_n(reset_n),
         .x_count(x_count),

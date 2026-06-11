@@ -42,6 +42,21 @@
 #define GPU_TEST_ENABLE_TRIANGLES 0
 #endif
 
+/* OS30 lean GPU build (make gpu-acceptance-os30): GPU_HAS_COMPACT_SPAN=0,
+ * GPU_HAS_COLUMN_LIST=0, +define+EXCLUDE_TRANSLUC.  The compact-direct 0x48
+ * form (11..32-word payloads = 4-word header + 7/lane), the 0x4C column
+ * lists and the transluc[] LUT are architecturally removed and DRAIN as
+ * no-ops, so every test whose vehicle is one of those paths is compiled
+ * out under GPU_TEST_OS30_LEAN.  Long-form 0x48 (>=33 words), 0x49, the
+ * 0x4A/0x4B vert-tri pair and 0x4D stay enabled and byte-identical, so
+ * those tests run unchanged.  The lean_* negative tests at the bottom run
+ * in BOTH configs with expectations switched on this flag. */
+#ifdef GPU_TEST_OS30_LEAN
+static const bool LEAN_CONFIG = true;
+#else
+static const bool LEAN_CONFIG = false;
+#endif
+
 // ============================================================================
 // 0. Globals
 // ============================================================================
@@ -1143,7 +1158,11 @@ static bool compare_quake_persp_group_to_oracles(const char *name,
             QuakePerspOraclePixel seg16 = quake_persp_segment16_oracle(q, lane, p);
             bool exact_mismatch = got != exact.color;
             bool seg_mismatch = got != seg16.color;
-            bool split_mismatch = got != split;
+            /* The split oracle is rendered by the GPU through compact-direct
+             * 0x48 spans; the lean config drains those, so the split leg is
+             * skipped there (the segment16 CPU oracle above stays the
+             * byte-exact reference in both configs). */
+            bool split_mismatch = !LEAN_CONFIG && (got != split);
 
             if (exact_mismatch)
                 exact_diffs++;
@@ -3787,7 +3806,13 @@ static bool run_quake_persp_payload_case(const char *name,
     }
     emit_raw_command(CMD_PARAM_SPAN_LIST, payload);
     uint32_t split_fb_base = FB_ALT_BASE_BYTE + (q.fb_addr - FB_BASE_BYTE);
+#ifndef GPU_TEST_OS30_LEAN
+    /* GPU-vs-GPU split oracle (compact-direct 0x48 segment fallback) —
+     * full config only; the lean config drains compact 0x48 so this leg
+     * would render nothing.  compare_quake_persp_group_to_oracles skips
+     * the split comparison under GPU_TEST_OS30_LEAN to match. */
     emit_quake_segment16_affine_fallback(q, split_fb_base);
+#endif
     if (!submit_and_wait()) {
         check_fail(name, "timeout");
         return false;
@@ -8483,6 +8508,230 @@ static void test_param_span_list_z_test_write_skip_zero() {
 // ============================================================================
 // Main runner
 // ============================================================================
+// ============================================================================
+// 9. OS30 lean-variant contract tests — active in BOTH configs.
+//
+// Expectations switch on GPU_TEST_OS30_LEAN (LEAN_CONFIG):
+//   * compact-direct 0x48 (11..32 words) and 0x4C drain as no-ops in the
+//     lean config but draw normally in the full config;
+//   * the 0x4A sticky-state invalidation on a raw 0x48 header is
+//     variant-invariant — it fires even when the draw itself drains;
+//   * a 33-word 0x48 sits exactly on the long-form decode boundary and
+//     must draw IDENTICALLY in both configs.
+// ============================================================================
+
+// (a) A valid compact-direct 11-word 0x48 span.  Full config: draws and is
+// byte-exact vs the CPU reference.  Lean config: the FB stays completely
+// untouched (sentinel) and the GPU still retires (fence completes).
+static void test_lean_compact_0x48_drains() {
+    printf("TEST lean_compact_0x48_drains (lean=%d)\n", LEAN_CONFIG ? 1 : 0);
+    gpu_init();
+    FbModel m = preload_with_sentinel();
+    std::vector<uint8_t> tex(16);
+    for (int i = 0; i < 16; i++) tex[i] = (uint8_t)(0x60 + i);
+    upload_texture(TEX_BASE_BYTE, tex);
+    m.snapshot_from_sdram();
+    cmd_set_fb(FB_BASE_BYTE, 320); m.st_fb_addr = FB_BASE_BYTE;
+
+    SpanWire s = make_span();
+    s.fb_addr = FB_BASE_BYTE + 8u * 320u + 4u;
+    s.tex_addr = TEX_BASE_BYTE;
+    s.tex_width = 16; s.tex_w_mask = 0xF;
+    s.s = 0; s.t = 0; s.sstep = 0x10000; s.tstep = 0;
+    s.count = 16; s.flags = 0;
+    emit_span_raw(s);                 // wire form: (0x48<<24)|11 — compact
+    if (!LEAN_CONFIG)
+        m.apply_span_ref(s);          // full: draws; lean: model untouched
+
+    if (!submit_and_wait()) {         // fence completion proves retirement
+        check_fail("lean_compact_0x48_drains",
+                   "timeout: compact 0x48 did not retire");
+        return;
+    }
+    /* Region covers the span and a wide margin: in the lean config the
+     * model is all-sentinel, so this asserts the FB is untouched. */
+    compare_fb_region("lean_compact_0x48_drains.fb", m,
+                      FB_BASE_BYTE, 320, 0, 0, 48, 24);
+    compare_sentinel_border("lean_compact_0x48_drains.border",
+                            FB_BASE_BYTE, 320, 4, 8, 16, 1);
+}
+
+// (b) A valid 9-word single-lane 0x4C column list.  Full config: byte-exact
+// vs the CPU reference of the equivalent s=0/sstep=0 affine column (the
+// documented 0x4C contract).  Lean config: drains, FB untouched, retires.
+static void test_lean_column_list_drains() {
+    printf("TEST lean_column_list_drains (lean=%d)\n", LEAN_CONFIG ? 1 : 0);
+    gpu_init();
+    FbModel m = preload_with_sentinel();
+    std::vector<uint8_t> tex(64);
+    for (int i = 0; i < 64; i++) tex[i] = (uint8_t)(0x90 + i);
+    upload_texture(TEX_BASE_BYTE, tex);
+    m.snapshot_from_sdram();
+    cmd_set_fb(FB_BASE_BYTE, 320); m.st_fb_addr = FB_BASE_BYTE;
+
+    SpanGroupWire g = make_span_group();
+    g.lane_count = 1;                 // 4-word header + 5 = 9-word payload
+    g.fb_addr = FB_BASE_BYTE + 2u * 320u + 6u;
+    g.tex_addr[0] = TEX_BASE_BYTE;
+    g.t[0] = 0; g.tstep[0] = 0x10000; // descend the 64-entry column texture
+    g.count = 12;
+    g.fb_stride = 320;                // per-pixel byte step = one row down
+    g.tex_width = 1;
+    g.tex_h_mask = 0x3F;
+    g.flags = 0;
+    emit_column_list_raw(g, g.fb_addr);
+    if (!LEAN_CONFIG) {
+        /* CPU reference: 0x4C forces s=0/sstep=0 on the same staging the
+         * 0x48 direct-affine path uses, so the affine model with zeroed
+         * s/sstep is the byte-exact oracle. */
+        SpanGroupWire a = g;
+        for (int i = 0; i < 8; i++) { a.s[i] = 0; a.sstep[i] = 0; }
+        m.apply_span_group_affine(a);
+    }
+
+    if (!submit_and_wait()) {
+        check_fail("lean_column_list_drains",
+                   "timeout: 0x4C did not retire");
+        return;
+    }
+    compare_fb_region("lean_column_list_drains.fb", m,
+                      FB_BASE_BYTE, 320, 0, 0, 32, 20);
+    compare_sentinel_border("lean_column_list_drains.border",
+                            FB_BASE_BYTE, 320, 6, 2, 1, 12);
+}
+
+// (c) Variant-invariant sticky-state contract: a compact-sized 0x48 header
+// invalidates the 0x4A sticky bank EVEN when the draw itself is gated off
+// and drains (lean config).  So 0x4A -> compact 0x48 -> 0x4B must be a
+// guarded no-op 0x4B in BOTH configs; after re-issuing 0x4A the same 0x4B
+// draws (byte-exact vs the 0x49 derived-planes twin).
+static void test_lean_sticky_state_contract() {
+    printf("TEST lean_sticky_state_contract (lean=%d)\n", LEAN_CONFIG ? 1 : 0);
+    const int Q = 1 << 16;
+    gpu_init();
+    FbModel m = preload_with_sentinel();
+    upload_texture(TEX_BASE_BYTE, make_projection_test_texture());
+    upload_palookup_identity_row(0, 0);
+    m.snapshot_from_sdram();
+    m.st_fb_addr = FB_BASE_BYTE;
+
+    ParamSpanListWire surf = make_vert_tri_surface();
+
+    // Triangle interior spans rows 2..22, columns ~5..40 (the proven
+    // vert_tri_sticky_semantics geometry).
+    const int16_t vx[3] = {(int16_t)(5*16), (int16_t)(40*16), (int16_t)(20*16)};
+    const int16_t vy[3] = {2, 6, 22};
+    const int32_t s3[3] = {0, 30*Q, 14*Q}, t3[3] = {0, 6*Q, 20*Q};
+    const int32_t zi3[3] = {Q, Q, Q};
+    const uint8_t l3[3] = {0, 0, 0};
+
+    // Compact 0x48 span aimed at row 30 — disjoint from the tri bbox so a
+    // wrongly-executed 0x4B lands on sentinel bytes and is caught.
+    SpanWire sp = make_span();
+    sp.fb_addr = FB_BASE_BYTE + 30u * 320u + 2u;
+    sp.tex_addr = TEX_BASE_BYTE;
+    sp.tex_width = 64; sp.tex_w_mask = 0x3F; sp.tex_h_mask = 0x3F;
+    sp.s = 0; sp.t = 0; sp.sstep = 0x10000; sp.tstep = 0;
+    sp.count = 24; sp.flags = 0;
+
+    // Phase 1: arm, invalidate via the compact 0x48 header, then 0x4B.
+    emit_set_tri_state_raw(surf, 0, 320, 0, 64);
+    emit_span_raw(sp);                // draws (full) / drains (lean) — but
+                                      // invalidates the sticky bank in BOTH
+    if (!LEAN_CONFIG)
+        m.apply_span_ref(sp);
+    emit_draw_vert_tri_raw(vx, vy, s3, t3, zi3, l3);  // must NOT draw
+    // Marker clear proves the stream advanced past the no-op 0x4B.
+    cmd_clear_rect(FB_BASE_BYTE + 26u * 320u + 1u, 4, 1, 0, 0x5C);
+    m.apply_clear_rect(FB_BASE_BYTE + 26u * 320u + 1u, 4, 1, 0, 0x5C);
+    if (!submit_and_wait()) {
+        check_fail("lean_sticky_state_contract", "timeout(phase1)");
+        return;
+    }
+    // Sentinel everywhere except the marker and (full config) the span row;
+    // any 0x4B paint inside rows 0..25 fails the compare.
+    compare_fb_region("lean_sticky_state_contract.invalidated_noop", m,
+                      FB_BASE_BYTE, 320, 0, 0, 64, 34);
+
+    // Phase 2: re-issue 0x4A — the SAME 0x4B must draw now.  Byte-exact
+    // GPU-vs-GPU against the 0x49 derived-planes twin at FB_ALT_BASE, plus
+    // a non-vacuous paint count so both-blank can't pass.
+    emit_set_tri_state_raw(surf, 0, 320, 0, 64);
+    emit_draw_vert_tri_raw(vx, vy, s3, t3, zi3, l3);
+    DerivedTriPlanes d = derive_tri_planes_ref(vx, vy, s3, t3, zi3, l3);
+    ParamSpanListWire pb = make_equiv_param_from_derived(surf, d);
+    pb.fb_base = FB_ALT_BASE_BYTE;
+    emit_param_tri_raw(pb, vx, vy, 0, 320, 0, 64);
+    if (!submit_and_wait()) {
+        check_fail("lean_sticky_state_contract", "timeout(phase2)");
+        return;
+    }
+    int diffs = 0, painted = 0;
+    for (int y = 0; y < 26; y++)
+        for (int x = 0; x < 48; x++) {
+            uint8_t a = sdram_read_byte(FB_BASE_BYTE
+                                        + (uint32_t)y * 320u + (uint32_t)x);
+            uint8_t b = sdram_read_byte(FB_ALT_BASE_BYTE
+                                        + (uint32_t)y * 320u + (uint32_t)x);
+            if (a != b) diffs++;
+            if (a != SENTINEL_BYTE) painted++;
+        }
+    if (diffs == 0 && painted > 50) {
+        check_pass("lean_sticky_state_contract.rearm_draws");
+    } else {
+        char buf[96];
+        snprintf(buf, sizeof(buf),
+                 "%d diffs vs 0x49 twin, %d painted pixels", diffs, painted);
+        check_fail("lean_sticky_state_contract.rearm_draws", buf);
+    }
+}
+
+// (d) 33-word 0x48 = the exact long-form decode boundary in BOTH configs
+// (full: 33 > 32 so not compact-direct; lean: 33 >= the raised long-form
+// minimum).  The wire layout carries record A entirely inside words 31..32
+// (word 33 of a full pair only holds the dummy record-B fields), so a
+// 33-word payload with rec_count=1 must draw record A byte-exactly — and
+// identically in both configs.  A boundary bug in either direction (lean
+// bound >33, or full compact bound >32) breaks the byte-exact compare.
+static void test_lean_wrong_size_0x48_33w() {
+    printf("TEST lean_wrong_size_0x48_33w (lean=%d)\n", LEAN_CONFIG ? 1 : 0);
+    gpu_init();
+    FbModel m = preload_with_sentinel();
+    upload_texture(TEX_BASE_BYTE, make_param_test_texture());
+    m.snapshot_from_sdram();
+
+    ParamSpanListWire p {};
+    p.fb_base = FB_BASE_BYTE;
+    p.fb_major_step = 320;
+    p.fb_minor_step = 1;
+    p.tex_addr = TEX_BASE_BYTE;
+    p.tex_width = 64;
+    p.tex_w_mask = 0x3F;
+    p.tex_h_mask = 0x3F;
+    p.attr_mode = 0;
+    p.span_axis = 0;
+    p.attr_du[0] = 1 << 16;
+    p.attr_dv[1] = 1 << 16;
+
+    ParamSpanRecordWire rec {3, 4, 5};
+    auto w = encode_param_span_list_wire(p, {rec});   // 34 words
+    w.resize(33);                                     // drop the record-B word
+    emit_raw_command(0x48, w);
+    m.apply_span_ref(param_affine_ref_span(p, rec));
+
+    // Marker clear proves the stream advanced past the 33-word command.
+    cmd_clear_rect(FB_BASE_BYTE + 8u * 320u + 1u, 4, 1, 0, 0x6E);
+    m.apply_clear_rect(FB_BASE_BYTE + 8u * 320u + 1u, 4, 1, 0, 0x6E);
+
+    if (!submit_and_wait()) {
+        check_fail("lean_wrong_size_0x48_33w",
+                   "timeout: 33-word 0x48 wedged the stream");
+        return;
+    }
+    compare_fb_region("lean_wrong_size_0x48_33w.fb", m,
+                      FB_BASE_BYTE, 320, 0, 0, 24, 12);
+}
+
 int main(int argc, char **argv) {
     Verilated::commandArgs(argc, argv);
     Verilated::traceEverOn(false);
@@ -8501,13 +8750,17 @@ int main(int argc, char **argv) {
     test_fence_token_high_bits();
     test_set_fb_two_bases();
     test_set_fb_unusual_stride();
+#ifndef GPU_TEST_OS30_LEAN
     test_set_texture_does_not_affect_direct_span();
+#endif
 #if GPU_TEST_ENABLE_TRIANGLES
     test_set_texture_via_triangle();
     test_set_texture_width_via_triangle();
 #endif
+#ifndef GPU_TEST_OS30_LEAN
     test_single_lane_span_explicit_colormap_slots();
     test_per_span_colormap_explicit_slots();
+#endif
 #if GPU_TEST_ENABLE_TRIANGLES
     test_triangle_no_global_skip_zero();
 #endif
@@ -8517,6 +8770,9 @@ int main(int argc, char **argv) {
     test_clear_does_not_touch_rows_200_to_239();
     test_clear_rect_edge_lanes();
     test_clear_rect_zero_dimensions();
+#ifndef GPU_TEST_OS30_LEAN
+    /* Compact-direct 0x48 vehicle tests (drain as no-ops in the lean
+     * config) + transluc tests (LUT chokepointed by EXCLUDE_TRANSLUC). */
     test_span_raw_count_boundary();
     test_span_raw_count_4096_preserved();
     test_span_raw_negative_stride();
@@ -8530,6 +8786,7 @@ int main(int argc, char **argv) {
     test_transluc_basic_blend();
     test_transluc_overdraw_same_word();
     test_transluc_duplicate_lane_order();
+#endif
     test_persp_constant_z_matches_affine();
     test_persp_span_group_varcount_const_z_equals_single_lane_spans();
     test_persp_span_group_doom_wall_layout_matches_reference();
@@ -8575,10 +8832,16 @@ int main(int argc, char **argv) {
     test_param_q29_dynamic_scale_all_records_touch();
     test_param_q29_dynamic_scale_z_restore_saturates();
     test_param_q29_dynamic_scale_reserved_bits_noop();
+#ifndef GPU_TEST_OS30_LEAN
     test_affine_span_group_quake_alias_carry_math();
+#endif
     test_param_span_list_z_write_zi();
     test_param_span_list_z_test_zi();
     test_param_span_list_z_test_write_skip_zero();
+#ifndef GPU_TEST_OS30_LEAN
+    /* Compact-direct 0x48 span-group / batch / DMA-mix tests — every one
+     * emits 11/18/25/32-word 0x48 payloads, the form the lean config
+     * drains. */
     test_batch_equals_individual();
     test_batch_mixed_per_span_colormap();
     test_span_group_opaque_equals_four_spans();
@@ -8604,13 +8867,15 @@ int main(int argc, char **argv) {
     test_command_stream_dma_mixed_affine_groups();
     test_command_stream_dma_mixed_persp_span_group();
     test_dma_descriptor_queue_two_streams();
+#endif
 #if GPU_TEST_ENABLE_TRIANGLES
     test_triangle_uses_colormap_slot_zero();
 #endif
     test_framebuffer_writes_burst_full_words();
     test_flip_no_writes_pulses_immediately();
 
-    // ---- Combination tests ----
+#ifndef GPU_TEST_OS30_LEAN
+    // ---- Combination tests (compact-span vehicles) ----
     test_combo_a_setfb_then_colormapped_span();
     test_combo_b_clear_then_span_paints_span();
     test_combo_c_three_slots_in_one_batch();
@@ -8618,8 +8883,15 @@ int main(int argc, char **argv) {
     test_combo_e_lane_writes_into_one_word();
     test_combo_f_dma_then_inline();
 
-    // ---- Wire-format gap ----
+    // ---- Wire-format gap (compact single-lane SDK encoding) ----
     test_sdk_count_4096_does_not_leak_into_colormap_id();
+#endif
+
+    // ---- OS30 lean-variant contract tests (run in BOTH configs) ----
+    test_lean_compact_0x48_drains();
+    test_lean_column_list_drains();
+    test_lean_sticky_state_contract();
+    test_lean_wrong_size_0x48_33w();
 
     printf("\n=== Acceptance Results: %d passed, %d failed ===\n",
            pass_count, fail_count);

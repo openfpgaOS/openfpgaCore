@@ -26,7 +26,9 @@ module tb_gpu #(
     parameter GPU_HAS_VERT_TRI       = 1,
     parameter GPU_HAS_PARAM_TRI_RECS = 1,
     parameter GPU_Z_READ_WINDOW      = 4,
-    parameter GPU_EW_PARALLEL_DIVS   = 1
+    parameter GPU_EW_PARALLEL_DIVS   = 1,
+    parameter GPU_HAS_COMPACT_SPAN   = 1,
+    parameter GPU_HAS_COLUMN_LIST    = 1
 ) (
     input  wire        clk,
     input  wire        reset_n,
@@ -111,7 +113,9 @@ gpu_core #(
     .GPU_HAS_VERT_TRI(GPU_HAS_VERT_TRI),
     .GPU_HAS_PARAM_TRI_RECS(GPU_HAS_PARAM_TRI_RECS),
     .GPU_Z_READ_WINDOW(GPU_Z_READ_WINDOW),
-    .GPU_EW_PARALLEL_DIVS(GPU_EW_PARALLEL_DIVS)
+    .GPU_EW_PARALLEL_DIVS(GPU_EW_PARALLEL_DIVS),
+    .GPU_HAS_COMPACT_SPAN(GPU_HAS_COMPACT_SPAN),
+    .GPU_HAS_COLUMN_LIST(GPU_HAS_COLUMN_LIST)
 ) gpu (
     .clk(clk),
     .reset_n(reset_n),

@@ -151,12 +151,18 @@ firmware: bootloader os
 # VARIANT picks which Pocket build to produce:
 #   os25 (default) — 2.5D games (Doom/Duke3D/ScummVM/Wolf): full feature set,
 #                    full HW audio mixer, no hardware vertex-triangle.
-#   os30           — 3D games (Quake/Quake2): hardware vert-tri plane derivation
-#                    (CMD_DRAW_VERT_TRI 0x4B) ungated. Pays for it by cutting
-#                    what those games never use — Analogizer/SNAC, GPU blend,
-#                    link cable, 4-player input — and replacing the HW mixer
-#                    with the runtime caps-driven SW mixer (the bitstream clears
-#                    OF_HW_MIXER_HW; the single os.bin auto-selects SW at boot).
+#   os30           — Quake2 (3D, pure triangles): hardware vert-tri plane
+#                    derivation (0x4A/0x4B) + records-only param-tri (0x4D)
+#                    ungated. Pays for it by cutting what Quake2 never uses —
+#                    Analogizer/SNAC + the analog raster, GPU blend, link
+#                    cable, 4-player input, the 0x48 compact span-group form,
+#                    0x4C column lists, the parallel edge-walker dividers —
+#                    and replacing the HW mixer with the runtime caps-driven
+#                    SW mixer (the bitstream clears OF_HW_MIXER_HW; the single
+#                    os.bin auto-selects SW at boot).  Quake1 and the 2.5D
+#                    span-group titles stay on os25 (caps bits 21/23 clear
+#                    here; the SDK emitters self-gate).  See
+#                    docs/os30-quake2-cut-plan.md.
 # Firmware is ONE caps-driven os.bin for both — no per-variant build flag.
 VARIANT ?= os25
 ifeq ($(VARIANT),os30)

@@ -252,7 +252,7 @@ SYSTEM_FLAGS = -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC -Wno-CASEINCOMPLETE \
 # ============================================================
 # Targets
 # ============================================================
-.PHONY: all sdram sdram-serialize sdram-native2 sdram-wcont0 sdram-all sram scanout analogchain gpu gpu-persp gpu-floor gpu-gpudemo gpu-acceptance gpu-acceptance-single gpu-acceptance-burst2 gpu-acceptance-all gpu-chain \
+.PHONY: all sdram sdram-serialize sdram-native2 sdram-wcont0 sdram-all sram scanout scanout-lean analogchain gpu gpu-persp gpu-floor gpu-gpudemo gpu-acceptance gpu-acceptance-single gpu-acceptance-os30 gpu-acceptance-burst2 gpu-acceptance-all gpu-chain \
         axi-periph bridge-cmd bridge-rx audio audio-mixer arbiter system run run-sram build clean
 
 all: sdram-all sram gpu gpu-persp axi-periph bridge-cmd bridge-rx audio audio-mixer arbiter hps-bridge
@@ -318,6 +318,7 @@ SCANOUT_SRCS = \
 SCANOUT_CPP = tb_scanout_main.cpp
 SCANOUT_TOP = tb_scanout
 SCANOUT_DIR = obj_dir_scanout
+SCANOUT_LEAN_DIR = obj_dir_scanout_lean
 
 scanout: $(SCANOUT_DIR)/V$(SCANOUT_TOP)
 	@printf "\n=== Scanout analog-timing test ===\n"
@@ -325,6 +326,23 @@ scanout: $(SCANOUT_DIR)/V$(SCANOUT_TOP)
 
 $(SCANOUT_DIR)/V$(SCANOUT_TOP): $(SCANOUT_SRCS) $(SCANOUT_CPP)
 	$(VERILATOR) $(VERILATOR_FLAGS_NOTRACE) --top-module $(SCANOUT_TOP) --Mdir $(SCANOUT_DIR) \
+		-I$(COMMON_DIR) \
+		$(SCANOUT_SRCS) $(SCANOUT_CPP)
+
+# OS30 lean variant: HAS_ANALOG_RASTER=0 prunes the dedicated analog
+# raster/fetch/line-cache.  The harness (-DSCANOUT_TEST_LEAN) skips the
+# now-vacuous analog timing/data assertions but KEEPS the LCD-side
+# assertions, including the 1-line-deadline check against the brutal
+# latency SDRAM model.
+scanout-lean: $(SCANOUT_LEAN_DIR)/V$(SCANOUT_TOP)
+	@printf "\n=== Scanout LCD-only test (HAS_ANALOG_RASTER=0) ===\n"
+	./$(SCANOUT_LEAN_DIR)/V$(SCANOUT_TOP)
+
+$(SCANOUT_LEAN_DIR)/V$(SCANOUT_TOP): $(SCANOUT_SRCS) $(SCANOUT_CPP)
+	$(VERILATOR) $(VERILATOR_FLAGS_NOTRACE) \
+		-CFLAGS "-std=c++17 -O2 -DSCANOUT_TEST_LEAN" \
+		-GHAS_ANALOG_RASTER=0 \
+		--top-module $(SCANOUT_TOP) --Mdir $(SCANOUT_LEAN_DIR) \
 		-I$(COMMON_DIR) \
 		$(SCANOUT_SRCS) $(SCANOUT_CPP)
 
@@ -423,6 +441,7 @@ $(GPU_GPUDEMO_DIR)/V$(GPU_TOP): $(GPU_SRCS) $(GPU_GPUDEMO_CPP)
 GPU_ACCEPT_CPP = tb_gpu_acceptance_main.cpp
 GPU_ACCEPT_DIR = obj_dir_gpu_acceptance
 GPU_ACCEPT_SINGLE_DIR = obj_dir_gpu_acceptance_single
+GPU_ACCEPT_OS30_DIR = obj_dir_gpu_acceptance_os30
 gpu-acceptance: $(GPU_ACCEPT_DIR)/V$(GPU_TOP)
 	@printf "\n=== GPU acceptance suite ===\n"
 	./$(GPU_ACCEPT_DIR)/V$(GPU_TOP)
@@ -446,7 +465,34 @@ $(GPU_ACCEPT_SINGLE_DIR)/V$(GPU_TOP): $(GPU_SRCS) $(GPU_ACCEPT_CPP)
 
 gpu-acceptance-burst2: gpu-acceptance
 
-gpu-acceptance-all: gpu-acceptance gpu-acceptance-single
+# OS30 lean GPU variant (Pocket Quake/Quake2 build): compact-direct 0x48
+# (GPU_HAS_COMPACT_SPAN=0) and 0x4C column lists (GPU_HAS_COLUMN_LIST=0)
+# drain as no-ops, the translucency LUT is chokepointed out
+# (+define+EXCLUDE_TRANSLUC), and the edge walker runs the serial divider
+# (GPU_EW_PARALLEL_DIVS=0).  0x4A/0x4B vert-tri, 0x4D recs-tri, long-form
+# 0x48 and the z window all stay ENABLED.  -DGPU_TEST_OS30_LEAN compiles
+# out the harness tests whose vehicle is the removed compact/column/
+# transluc paths and switches the lean negative tests' expectations.
+gpu-acceptance-os30: $(GPU_ACCEPT_OS30_DIR)/V$(GPU_TOP)
+	@printf "\n=== GPU acceptance suite (OS30 lean variant) ===\n"
+	./$(GPU_ACCEPT_OS30_DIR)/V$(GPU_TOP)
+
+$(GPU_ACCEPT_OS30_DIR)/V$(GPU_TOP): $(GPU_SRCS) $(GPU_ACCEPT_CPP)
+	$(VERILATOR) $(VERILATOR_FLAGS) \
+		-CFLAGS "-std=c++17 -O2 -DGPU_TEST_OS30_LEAN" \
+		+define+EXCLUDE_TRANSLUC \
+		-GGPU_HAS_COMPACT_SPAN=0 \
+		-GGPU_HAS_COLUMN_LIST=0 \
+		-GGPU_EW_PARALLEL_DIVS=0 \
+		-GGPU_HAS_VERT_TRI=1 \
+		-GGPU_HAS_PARAM_TRI_RECS=1 \
+		-GGPU_Z_READ_WINDOW=4 \
+		--top-module $(GPU_TOP) \
+		--Mdir $(GPU_ACCEPT_OS30_DIR) \
+		-I$(COMMON_DIR) \
+		$(GPU_SRCS) $(GPU_ACCEPT_CPP)
+
+gpu-acceptance-all: gpu-acceptance gpu-acceptance-single gpu-acceptance-os30
 
 # --- AXI periph slave ---
 axi-periph: $(AXI_PERIPH_DIR)/V$(AXI_PERIPH_TOP)
@@ -551,6 +597,7 @@ $(SYSTEM_DIR)/V$(SYSTEM_TOP): $(SYSTEM_SRCS) $(SYSTEM_CPP)
 clean:
 	rm -rf $(SDRAM_DIR) $(SDRAM_SERIAL_DIR) $(SDRAM_NATIVE2_DIR) $(SRAM_DIR) $(GPU_DIR) $(GPU_FLOOR_DIR) \
 	       $(GPU_GPUDEMO_DIR) $(GPU_ACCEPT_DIR) $(GPU_ACCEPT_SINGLE_DIR) \
+	       $(GPU_ACCEPT_OS30_DIR) $(SCANOUT_LEAN_DIR) \
 	       $(AXI_PERIPH_DIR) \
 	       $(AUDIO_DIR) $(MIXER_DIR) $(SYSTEM_DIR) \
 	       $(ARBITER_DIR) \

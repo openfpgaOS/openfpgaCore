@@ -79,7 +79,38 @@ module gpu_core #(
     //       subtract/compare chains on area-constrained variants.
     // Quotients are bit-identical between the two configs, so emitted
     // spans — and therefore pixels — do not change.
-    parameter GPU_EW_PARALLEL_DIVS = 1
+    parameter GPU_EW_PARALLEL_DIVS = 1,
+
+    // ----------------------------------------------------------------
+    // 0x48 compact-direct lane form (4-word header + 7 words/lane, payload
+    // 11/18/25/32 words) and the 4-lane spanprod_direct_* staging bank plus
+    // the sp_fastpath relaxed continuation it enables.
+    //
+    // PRUNE GATE: when 0, the 0x48 size bound in S_DECODE rises from >=11
+    // to >=33 (long-form record-style only) and spanprod_compact_direct is
+    // a constant 0, so an 11-32-word 0x48 drains word-by-word through
+    // S_PAY_DATA with no destination writes and retires at S_EXECUTE as the
+    // unrecognised-command no-op — EXCEPT the sticky-state contract, which
+    // is variant-invariant: the S_DECODE tri_state_valid clear fires on the
+    // raw opcode/size ranges full hardware would decode (see S_DECODE).
+    // With the flag constant 0 the compact loader branch, the
+    // spanprod_cur_direct_* capture muxes, the direct arm of
+    // spanprod_load_generated_span, sp_fastpath and its early-handoff /
+    // tail-safe-bounce logic all fold; spanprod_direct_affine has no
+    // remaining 1-writer so every direct-affine branch folds with it.
+    // Pocket OS30 (Quake2: long-form 2D + 0x49 world + 0x4B alias) sets 0;
+    // OS25 and MiSTer keep the default 1.  Must track axi_periph_slave's
+    // HAS_SPAN_GROUP (HW_FEATURES bit 23) on the same target.
+    parameter GPU_HAS_COMPACT_SPAN = 1,
+
+    // ----------------------------------------------------------------
+    // CMD_DRAW_COLUMN_LIST (0x4C) decode.  The column loader is the compact
+    // arms behind column_compact_idx_remap, so this feature REQUIRES
+    // GPU_HAS_COMPACT_SPAN — the effective gate below forces 0 when the
+    // compact machinery is absent (a 0x4C then drains as a no-op, exactly
+    // like a wrong-sized payload on full hardware).
+    // Must track axi_periph_slave's HAS_COLUMN_LIST (HW_FEATURES bit 21).
+    parameter GPU_HAS_COLUMN_LIST = 1
 ) (
     input wire clk,
     input wire reset_n,
@@ -1131,6 +1162,13 @@ localparam CMD_DRAW_PARAM_TRI_RECS    = 8'h4D;
 // direct-affine column the client sent with s=0/sstep=0.  This is a pure
 // command-traffic optimisation: ZERO pixel difference vs the 0x48 equivalent.
 localparam CMD_DRAW_COLUMN_LIST       = 8'h4C;
+// 0x4C delegates its payload to the 0x48 compact-direct loader arms, so the
+// column decode can only exist where the compact machinery does.  Deriving
+// the effective gate here (instead of trusting the instantiation) makes the
+// broken combination GPU_HAS_COLUMN_LIST=1 && GPU_HAS_COMPACT_SPAN=0
+// degrade to a drained no-op instead of a dead loader.
+localparam GPU_HAS_COLUMN_LIST_EFF =
+    (GPU_HAS_COMPACT_SPAN != 0) ? GPU_HAS_COLUMN_LIST : 0;
 
 localparam PARAM_RECORD_U16V16_COUNT16 = 4'd0;
 
@@ -1194,6 +1232,16 @@ reg signed [31:0] sp_z_value_step;
 reg        sp_q29_z_enable;
 reg signed [31:0] sp_q29_z_value;
 reg signed [31:0] sp_q29_z_value_step;
+// Free-running registered copy of the z-step plane operand (timing: 99 of
+// the 200 worst paths on the second OS30 fit ran spanprod_span_axis ->
+// attr2 du/dv mux -> the 64-bit q29_restore_z_saturating barrel shift ->
+// sp_q29_z_value_step in ONE cycle at span EMIT).  All inputs are header
+// fields, stable from S_EXECUTE on, and EMIT is always >=3 states after
+// the header lands — so this register simply re-captures the mux every
+// cycle and EMIT shifts from a plain register.  No reset needed: it is
+// unconditionally reloaded every cycle and only consumed >=1 cycle after
+// its inputs settle.
+reg signed [31:0] q29_zstep_op_r;
 
 // Unified span front-end.  Parametric records derive scalar spans from
 // compact screen-space planes.  Direct-affine records carry already-computed
@@ -1331,7 +1379,12 @@ task load_param_span_list_payload_word;
     input [5:0]  idx;
     input [31:0] data;
     begin
-        if (spanprod_compact_direct) begin
+        // Branch select doubles as the GPU_HAS_COMPACT_SPAN prune gate:
+        // with the parameter 0 the S_DECODE setter is constant 0 so the reg
+        // already folds, but spelling the constant here too keeps the whole
+        // compact case dead even if a future writer of
+        // spanprod_compact_direct appears.
+        if ((GPU_HAS_COMPACT_SPAN != 0) && spanprod_compact_direct) begin
             case (idx)
                 6'd0: begin
                     spanprod_direct_affine <= 1'b1;
@@ -1580,14 +1633,22 @@ task spanprod_select_current_record;
         spanprod_cur_v <= spanprod_v[spanprod_idx];
         spanprod_cur_count <= spanprod_count[spanprod_idx];
         spanprod_cur_nonzero <= (spanprod_count[spanprod_idx] != 16'd0);
-        spanprod_cur_direct_fb_addr <= spanprod_direct_fb_addr[spanprod_idx];
-        spanprod_cur_direct_tex_addr <= spanprod_direct_tex_addr[spanprod_idx];
-        spanprod_cur_direct_s <= spanprod_direct_s[spanprod_idx];
-        spanprod_cur_direct_t <= spanprod_direct_t[spanprod_idx];
-        spanprod_cur_direct_sstep <= spanprod_direct_sstep[spanprod_idx];
-        spanprod_cur_direct_tstep <= spanprod_direct_tstep[spanprod_idx];
-        spanprod_cur_direct_colormap_id <= spanprod_direct_colormap_id[spanprod_idx];
-        spanprod_cur_direct_light <= spanprod_direct_light[spanprod_idx];
+        // The eight per-lane captures below are compact-direct-only (their
+        // sole reader is the direct branch of spanprod_load_generated_span);
+        // this record select runs on EVERY path — 0x49/0x4B walker records
+        // and 0x48 long-form included — so the 4:1 capture muxes must be
+        // explicitly gated or they survive the GPU_HAS_COMPACT_SPAN=0 sweep
+        // as live fabric fed by the (swept) lane arrays.
+        if (GPU_HAS_COMPACT_SPAN != 0) begin
+            spanprod_cur_direct_fb_addr <= spanprod_direct_fb_addr[spanprod_idx];
+            spanprod_cur_direct_tex_addr <= spanprod_direct_tex_addr[spanprod_idx];
+            spanprod_cur_direct_s <= spanprod_direct_s[spanprod_idx];
+            spanprod_cur_direct_t <= spanprod_direct_t[spanprod_idx];
+            spanprod_cur_direct_sstep <= spanprod_direct_sstep[spanprod_idx];
+            spanprod_cur_direct_tstep <= spanprod_direct_tstep[spanprod_idx];
+            spanprod_cur_direct_colormap_id <= spanprod_direct_colormap_id[spanprod_idx];
+            spanprod_cur_direct_light <= spanprod_direct_light[spanprod_idx];
+        end
     end
 endtask
 
@@ -1774,11 +1835,13 @@ task spanprod_load_generated_span;
                              ? q29_restore_z_saturating(spanprod_attr2_start_r,
                                                         spanprod_q29_attr_shift)
                              : 32'sd0;
+            // Operand comes from the free-running q29_zstep_op_r capture
+            // (see its declaration) — the EMIT cycle pays only the barrel
+            // shift + saturate, not the span_axis mux in front of it.
             sp_q29_z_value_step <= (spanprod_attr_q29
                                    && (spanprod_z_write || spanprod_z_test))
                                   ? q29_restore_z_saturating(
-                                      spanprod_span_axis
-                                      ? spanprod_attr2_dv : spanprod_attr2_du,
+                                      q29_zstep_op_r,
                                       spanprod_q29_attr_shift)
                                   : 32'sd0;
             sp_sZstep      <= spanprod_span_axis
@@ -2264,6 +2327,11 @@ reg signed [31:0] dv_du, dv_dv;
 // recombined product and are discarded by the final >>>N anyway).  Verified
 // bit-identical to the C reference across the full acceptance suite.
 reg signed [63:0] dv_acc;
+// DRV_SCALE_LS -> DRV_SCALE_LF staging register: the recombined 64-bit sum
+// (H + L>>>SPLIT), registered so the shift/negate/saturate in DRV_SCALE_LF
+// starts from a register instead of behind the 64-bit adder.  No reset:
+// written by DRV_SCALE_LS strictly before DRV_SCALE_LF reads it.
+reg signed [63:0] drv_qsum_r;
 // Shared DSP-product capture registers for the derivation FSM.  The derivation
 // is strictly sequential (one DSP launch/capture in flight at a time), so one
 // 64-bit capture per DSP port is enough.  Splitting "read dsp_p -> arithmetic
@@ -2289,6 +2357,17 @@ reg [4:0]         dstate;         // derivation sub-FSM state
 // duplicate sat33 evaluation that the du and dv passes used to each recompute.
 // Bit-exact: the operand values reaching the DSP are unchanged.
 reg signed [31:0] da1_sat, da2_sat;
+
+// Registered copies of the attribute-select mux outputs, captured in
+// DRV_DA_SEL one cycle before DRV_DA_PREP (timing: WNS -1.508 fix on the
+// first OS30 fit — the dv_attr 4:1 attr mux + dv_ord 3:1 sorted-slot mux
+// fed the 33-bit subtract + sat33 compare + da*_sat sclr in ONE cycle,
+// ~4.5 ns of mux/routing before the adder even started).  Same
+// capture-split medicine as the DRV_*_FORM states below.  DRV_ORG_FORM's
+// origin subtract reads deriv_a0_q too, taking the same mux cone off that
+// path.  Values are bit-identical; the derive pays +1 cycle per attribute
+// (+4 of ~123), still overlapped with the walker's serial setup.
+reg signed [31:0] deriv_a0_q, deriv_a1_q, deriv_a2_q;
 
 // Current attribute's per-vertex values in SORTED order.  dv_attr selects the
 // attribute (0=szi, 1=tzi, 2=zi, 3=light); dv_ord[] maps each sorted slot back
@@ -2349,6 +2428,12 @@ localparam DRV_ORG_FORM  = 5'd21; // form origin from captured products, store p
 // DRV_PLANE_NUM load the DSP operands from plain registers instead of two
 // deriv_sat33 subtract cones, collapsing the dsp_a/dsp2_a operand muxes.
 localparam DRV_DA_PREP   = 5'd22; // sat33(a1-a0), sat33(a2-a0) -> da1_sat/da2_sat
+localparam DRV_DA_SEL    = 5'd28; // capture attr-mux outputs -> deriv_a*_q
+                                  // (one cycle ahead of DRV_DA_PREP, so the
+                                  // subtract/saturate runs on plain registers)
+localparam DRV_SCALE_LS  = 5'd29; // register the 64-bit recombine sum
+                                  // (H + L>>>SPLIT) -> drv_qsum_r, one cycle
+                                  // ahead of DRV_SCALE_LF's shift/negate/sat
 // TIMING DE-FOLD (2026-06): per-vertex szi/tzi numerator products, formed in the
 // derivation FSM (off the S_PAY_DATA decode cone).  Run after the y-sort, before
 // the edge-delta stage, inside the walker's idle setup window.  Raw s_k/t_k are
@@ -2619,6 +2704,19 @@ reg [3:0]              zw_valid;
 reg [GPU_ADDR_W-5:0]   zw_base;       // byte addr [GPU_ADDR_W-1:4]
 reg [31:0]             zw_word [0:3];
 reg [1:0]              zw_fill_beat;
+// Registered write snoop (timing: 156 of the 200 worst paths on the first
+// OS30 fit ended at zw_valid — the push-address mux from fb_acc/z_acc/p3
+// plus the queue-full enable fed the line compare + word decode in ONE
+// cycle).  The snoop now runs one cycle late off fbwq_req_addr (which the
+// queue ALREADY captures on push-accept), so the compare is register-to-
+// register; zw_snoop_pending marks the in-flight cycle and SUPPRESSES
+// window hits for exactly that cycle.  Visibility is identical to the
+// combinational snoop: in both versions a push at cycle N is reflected in
+// zw_valid reads from N+1 — the suppression covers N+1 while the delayed
+// clear lands at N+2, after which zw_valid is identical again.  The
+// same-cycle (N) hit case is unchanged and remains covered by z_acc
+// priority, exactly as before (exactness rules 1-3 untouched).
+reg                    zw_snoop_pending;
 wire [7:0]  blend_lut_src_byte = fb_lane_read(blend_group_src_data, blend_lane_iter);
 wire [7:0]  blend_lut_fb_byte  = fb_lane_read(blend_result_word, blend_lane_iter);
 wire [14:0] blend_lut_addr_w   = {blend_lut_src_byte[7:1], blend_lut_fb_byte};
@@ -3498,6 +3596,7 @@ always @(posedge clk) begin : main_fsm
         zw_valid         <= 4'b0;
         zw_base          <= {(GPU_ADDR_W-4){1'b0}};
         zw_fill_beat     <= 2'd0;
+        zw_snoop_pending <= 1'b0;
         blend_group_active <= 0;
         blend_group_word_addr <= 0;
         blend_group_mask <= 0;
@@ -3655,6 +3754,7 @@ always @(posedge clk) begin : main_fsm
             blend_arlen   <= 8'd0;
             zw_valid      <= 4'b0;
             zw_fill_beat  <= 2'd0;
+            zw_snoop_pending <= 1'b0;
             blend_group_active <= 1'b0;
             blend_group_mask <= 4'b0;
             spanprod_active <= 1'b0;
@@ -3832,25 +3932,54 @@ always @(posedge clk) begin : main_fsm
             cmd_is_fence          <= (cmd_type == CMD_FENCE);
             cmd_is_clear_rect     <= (cmd_type == CMD_CLEAR_RECT);
             cmd_is_set_fb         <= (cmd_type == CMD_SET_FB);
+            // PRUNE GATE: when GPU_HAS_COMPACT_SPAN==0 the size bound rises
+            // to the long-form minimum (31-word header + first record pair),
+            // so a compact-sized 0x48 (11..32 words) falls through the
+            // S_PAY_DATA if-else chain (payload drains word-by-word via
+            // pay_remaining, no destination writes) and through the
+            // S_EXECUTE chain to the final `else state <= S_IDLE` — the
+            // exact unrecognised-command no-op drain path.  Long-form
+            // payloads (>=33 words) decode identically in both configs.
             cmd_is_draw_param_span_list <=
-                (cmd_type == CMD_DRAW_PARAM_SPAN_LIST && cmd_payload_words >= 13'd11);
+                (cmd_type == CMD_DRAW_PARAM_SPAN_LIST && cmd_payload_words >=
+                 ((GPU_HAS_COMPACT_SPAN != 0) ? 13'd11 : 13'd33));
             // Decode dedup: 0x4C reuses the 0x48 compact-direct case arms of
             // load_param_span_list_payload_word through the 5-word->7-word
             // index remap (column_compact_idx_remap), so the column decode
             // ALSO selects the compact branch.  The flag is read only by that
             // loader's branch select, so this is decode-routing only.
-            spanprod_compact_direct <= (cmd_type == CMD_DRAW_PARAM_SPAN_LIST &&
+            // PRUNE GATE: constant 0 when GPU_HAS_COMPACT_SPAN==0 — the
+            // compact loader branch, lane bank and capture muxes all fold.
+            spanprod_compact_direct <= (GPU_HAS_COMPACT_SPAN != 0) &&
+                                    ((cmd_type == CMD_DRAW_PARAM_SPAN_LIST &&
                                         cmd_payload_words <= 13'd32)
-                                    || (cmd_type == CMD_DRAW_COLUMN_LIST);
+                                    || (cmd_type == CMD_DRAW_COLUMN_LIST));
             // CMD_DRAW_COLUMN_LIST (0x4C): 4-word header + 5N lane records
             // (N=1..4), so a valid payload is 9/14/19/24 words.  Accept the
             // 9..24 range here (the header count nibble re-derives the lane
             // count exactly); wrong-sized payloads outside the range drain and
             // retire as a no-op.  The loader delegates to the 0x48
             // compact-direct arms via the index remap and forces s/sstep=0.
-            cmd_is_draw_column_list <=
+            // PRUNE GATE: GPU_HAS_COLUMN_LIST_EFF==0 makes the decode term
+            // constant 0 — a 0x4C then takes the same drained-no-op path as
+            // a wrong-sized payload on full hardware.
+            cmd_is_draw_column_list <= (GPU_HAS_COLUMN_LIST_EFF != 0) &&
                 (cmd_type == CMD_DRAW_COLUMN_LIST
                  && cmd_payload_words >= 13'd9 && cmd_payload_words <= 13'd24);
+            // Staging-dedup contract, variant-invariant (0x48/0x4C/0x49
+            // alike): a header that FULL hardware would decode overwrites
+            // the shared spanprod staging an 0x4A may have written, so the
+            // sticky vert-tri state is invalidated on the raw opcode/size
+            // ranges — deliberately NOT on the param-gated cmd_is_* flags,
+            // so a lean variant that drains the draw still honours the
+            // contract and a stale 0x4B after it stays a guarded no-op.
+            if ((cmd_type == CMD_DRAW_PARAM_SPAN_LIST
+                 && cmd_payload_words >= 13'd11)
+             || (cmd_type == CMD_DRAW_COLUMN_LIST
+                 && cmd_payload_words >= 13'd9 && cmd_payload_words <= 13'd24)
+             || (cmd_type == CMD_DRAW_PARAM_TRI
+                 && cmd_payload_words == 13'd36))
+                tri_state_valid <= 1'b0;
             // Triangle form: fixed 36-word payload (31 header + 2 clip +
             // 3 vertex).  Wrong-sized payloads drain through S_PAY_DATA
             // without decode and retire at S_EXECUTE as a no-op.
@@ -3966,12 +4095,10 @@ always @(posedge clk) begin : main_fsm
             end
             else if (cmd_is_draw_param_span_list || cmd_is_draw_column_list
                   || cmd_is_draw_param_tri) begin
-                // Staging-dedup contract (0x48 / 0x4C / 0x49 alike): the
-                // header overwrites the shared spanprod staging an 0x4A may
-                // have written, so invalidate the sticky vert-tri state — a
-                // stale 0x4B after this is a guarded no-op (see the 0x4A
-                // CONTRACT CHANGE comment).
-                if (pay_idx == 6'd0) tri_state_valid <= 1'b0;
+                // Staging-dedup contract: tri_state_valid is cleared in
+                // S_DECODE on the raw opcode/size ranges (variant-invariant
+                // — see the comment there), not here, so lean variants that
+                // drain these draws still invalidate the 0x4A sticky state.
                 // Loader-expansion dedup: 0x48 (all words), 0x4C (via the
                 // column->compact index remap; S_DECODE selects the compact
                 // branch) and 0x49 words 0-30 route through ONE
@@ -4547,7 +4674,7 @@ always @(posedge clk) begin : main_fsm
                         rdet_q        <= q_next;
                         rdet_dividend <= {rdet_dividend[43:0], 1'b0};
                         if (rdet_cnt == 6'd1) begin
-                            dstate  <= DRV_DA_PREP; // pre-stage da*_sat for attr 0
+                            dstate  <= DRV_DA_SEL;  // capture attr-0 operands
                             dv_attr <= 3'd0;        // attr 0 = szi
                             dv_doing_dv <= 1'b0;
                         end else begin
@@ -4565,11 +4692,20 @@ always @(posedge clk) begin : main_fsm
                 // dsp_a/dsp2_a operand mux on every DRV_PLANE_NUM pass.  da1/da2
                 // are differences of two signed 32-bit attributes -> exact in 33
                 // bits, saturated to int32 to match the reference.
+                // Mux-capture stage: dv_attr was written on the previous
+                // edge, so this cycle is pure attr-select + sorted-slot
+                // muxing into registers — no arithmetic behind it.
+                DRV_DA_SEL: begin
+                    deriv_a0_q <= deriv_a0;
+                    deriv_a1_q <= deriv_a1;
+                    deriv_a2_q <= deriv_a2;
+                    dstate     <= DRV_DA_PREP;
+                end
                 DRV_DA_PREP: begin
-                    da1_sat <= deriv_sat33({deriv_a1[31], deriv_a1}
-                                         - {deriv_a0[31], deriv_a0});
-                    da2_sat <= deriv_sat33({deriv_a2[31], deriv_a2}
-                                         - {deriv_a0[31], deriv_a0});
+                    da1_sat <= deriv_sat33({deriv_a1_q[31], deriv_a1_q}
+                                         - {deriv_a0_q[31], deriv_a0_q});
+                    da2_sat <= deriv_sat33({deriv_a2_q[31], deriv_a2_q}
+                                         - {deriv_a0_q[31], deriv_a0_q});
                     dstate  <= DRV_PLANE_NUM;
                 end
                 DRV_PLANE_NUM: begin
@@ -4637,8 +4773,22 @@ always @(posedge clk) begin : main_fsm
                     // add (H + L>>>SPLIT) -> >>> -> negate -> deriv_sat32 ->
                     // dv_du/dv_dv, and dv_du is read into dsp_a next cycle
                     // (DRV_PLANE_ORG), so the long cone reached a DSP operand.
-                    // Pure capture; DRV_SCALE_LF does the recombination.
+                    // Pure capture; DRV_SCALE_LS + DRV_SCALE_LF recombine.
                     drv_prod_r <= dsp_p;
+                    dstate <= DRV_SCALE_LS;
+                end
+                DRV_SCALE_LS: begin
+                    // Recombine split, stage 1 (timing: 182 of the 200 worst
+                    // paths on the third OS30 fit ran drv_prod_r -> 64-bit add
+                    // -> negate -> sat32 -> dv_du in one cycle — two chained
+                    // 64-bit carry chains).  This state registers the sum;
+                    // DRV_SCALE_LF keeps the shift/negate/saturate.  The
+                    // negate cannot be hoisted into the operands: -(x >>> k)
+                    // != (-x) >>> k under floor division, so splitting is the
+                    // only bit-exact cut.  +1 cycle per du/dv pass (+8 of
+                    // ~127 per triangle, still overlapped with the walker).
+                    drv_qsum_r <= dv_acc
+                                + $signed({1'b0, drv_prod_r[54:DERIV_SPLIT]});
                     dstate <= DRV_SCALE_LF;
                 end
                 DRV_SCALE_LF: begin : drv_scale_lf_blk
@@ -4650,10 +4800,11 @@ always @(posedge clk) begin : main_fsm
                     // is signed.  Their sum fits 64 bits signed, so the shared
                     // shift/saturate runs at 64 bits, not 96.  sign(det) applied,
                     // then deriv_sat32 clamps to int32 (the sliver/overflow rule).
-                    // L comes from the captured drv_prod_r, not dsp_p directly.
+                    // The 64-bit sum comes pre-registered from DRV_SCALE_LS;
+                    // this cycle pays only the (constant) shift, the negate
+                    // and the saturate.
                     reg signed [63:0] qsigned;
-                    qsigned = (dv_acc + $signed({1'b0, drv_prod_r[54:DERIV_SPLIT]}))
-                                  >>> (DERIV_N - DERIV_SPLIT);
+                    qsigned = drv_qsum_r >>> (DERIV_N - DERIV_SPLIT);
                     if (dd_detsign) qsigned = -qsigned;
                     if (!dv_doing_dv) begin
                         dv_du <= deriv_sat32(qsigned);
@@ -4680,7 +4831,7 @@ always @(posedge clk) begin : main_fsm
                     // drv_prod_r/drv2_prod_r the cycle before.  This state used to
                     // fuse dsp_p/dsp2_p -> subtract -> spanprod_attr*_origin (a
                     // plane-staging write); now a pure capture.  dv_attr is NOT
-                    // advanced here, so deriv_a0 stays stable into DRV_ORG_FORM.
+                    // advanced here, so deriv_a0_q stays stable into DRV_ORG_FORM.
                     drv_prod_r  <= dsp_p;
                     drv2_prod_r <= dsp2_p;
                     dstate <= DRV_ORG_FORM;
@@ -4691,7 +4842,10 @@ always @(posedge clk) begin : main_fsm
                     // offset cancels for on-screen records — the "anchoring").
                     // Products come from the captured regs, not dsp_p directly.
                     reg signed [31:0] org_now;
-                    org_now = deriv_a0 - $signed(drv_prod_r[31:0]) - $signed(drv2_prod_r[31:0]);
+                    // deriv_a0_q (registered in DRV_DA_SEL) instead of the
+                    // combinational deriv_a0 mux — same value, and it keeps
+                    // the attr/sorted-slot mux cone off this subtract too.
+                    org_now = deriv_a0_q - $signed(drv_prod_r[31:0]) - $signed(drv2_prod_r[31:0]);
                     // store this attr's plane into the spanprod staging reg.
                     case (dv_attr)
                         3'd0: begin
@@ -4719,7 +4873,7 @@ always @(posedge clk) begin : main_fsm
                         dstate <= DRV_DONE;
                     end else begin
                         dv_attr <= dv_attr + 3'd1;
-                        dstate  <= DRV_DA_PREP;  // pre-stage da*_sat for next attr
+                        dstate  <= DRV_DA_SEL;   // capture next attr's operands
                     end
                 end
                 default: begin   // DRV_DONE
@@ -4811,9 +4965,18 @@ always @(posedge clk) begin : main_fsm
                             // the full drain detector retires through
                             // S_FB_FLUSH as usual.  With an empty tail this
                             // keeps the original one-cycle S_IDLE retire.
-                            if (p0a_valid || p0_valid || p1_valid || p2_valid
-                                || p2b_valid || p3_valid
-                                || (fbss != FBSS_IDLE) || blend_group_active) begin
+                            // The frozen-tail case only exists downstream of
+                            // the sp_fastpath relaxed continuation (compact
+                            // direct-affine only — see the early-handoff
+                            // comment in S_FRAG_PIPE); every other arrival
+                            // here has fully drained, so the wide-OR bounce
+                            // is gated with the compact machinery instead of
+                            // hoping synthesis proves the pipe empty.
+                            if ((GPU_HAS_COMPACT_SPAN != 0)
+                                && (p0a_valid || p0_valid || p1_valid
+                                    || p2_valid || p2b_valid || p3_valid
+                                    || (fbss != FBSS_IDLE)
+                                    || blend_group_active)) begin
                                 src_done <= 1'b1;
                                 state <= S_FRAG_PIPE;
                             end else begin
@@ -5308,6 +5471,7 @@ always @(posedge clk) begin : main_fsm
                             ztest_cap_word = {z_acc_hi, z_acc_lo};
                             fbss               <= FBSS_ZTEST_ACC_EVAL;
                         end else if ((GPU_Z_READ_WINDOW > 1)
+                                  && !zw_snoop_pending
                                   && zw_valid[p3_z_word_addr[3:2]]
                                   && (zw_base == p3_z_word_addr[GPU_ADDR_W-1:4])) begin
                             // Z-window hit: serve the old word from the
@@ -6474,16 +6638,30 @@ always @(posedge clk) begin : main_fsm
                         + ((fbwq_stage_drain_now || fbwq_swap_now) ? 5'd1 : 5'd0)
                         - fbwq_pop_count;
 
+            // Free-running z-step operand capture for the span EMIT's Q29
+            // restore (see q29_zstep_op_r declaration for the timing story).
+            q29_zstep_op_r <= spanprod_span_axis ? spanprod_attr2_dv
+                                                 : spanprod_attr2_du;
+
             // Z-window write snoop (item 5 exactness rule 2): every write
             // entering the queue that lands in the window's 16-byte line
-            // invalidates that word.  Placed LAST in the block so it wins
-            // over any same-cycle zw_valid fill (non-blocking, per-bit).
+            // invalidates that word.  REGISTERED (timing): the compare runs
+            // one cycle after push-accept on fbwq_req_addr — the register
+            // the queue already loads at accept — instead of on the
+            // combinational push-address mux; zw_snoop_pending suppresses
+            // window hits for the one in-flight cycle (see the zw_valid
+            // declaration comment for the exactness argument).  Placed LAST
+            // in the block so the clear wins over any same-cycle zw_valid
+            // fill (non-blocking, per-bit) — same win-over property as the
+            // old combinational snoop.
             // PRUNE GATE: constant-dead with GPU_Z_READ_WINDOW==1 (nothing
-            // is ever cached — zw_valid is constant 0), so the zw_base
-            // comparator sweeps with the rest of the window.
-            if ((GPU_Z_READ_WINDOW > 1) && fbwq_push_req && fbwq_can_push
-                && (fbwq_push_addr[GPU_ADDR_W-1:4] == zw_base))
-                zw_valid[fbwq_push_addr[3:2]] <= 1'b0;
+            // is ever cached — zw_valid is constant 0), so the pending bit
+            // and zw_base comparator sweep with the rest of the window.
+            zw_snoop_pending <= (GPU_Z_READ_WINDOW > 1)
+                              && fbwq_push_req && fbwq_can_push;
+            if ((GPU_Z_READ_WINDOW > 1) && zw_snoop_pending
+                && (fbwq_req_addr[GPU_ADDR_W-1:4] == zw_base))
+                zw_valid[fbwq_req_addr[3:2]] <= 1'b0;
         end  // closes the housekeeping `begin` introduced for m_wr_inflight + gpu_swap_req auto-clear
     end
 end

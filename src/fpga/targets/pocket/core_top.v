@@ -350,6 +350,13 @@ assign PALFLAG = (analogizer_video_type_core == 4'h4) || (analogizer_video_type_
 // cen[0] is the pixel-rate pulse; cen[1] is half-rate.
 wire analog_ce_pix, analog_ce_half;
 
+`ifdef EXCLUDE_ANALOGIZER
+// Both consumers are gone (the analogizer instance and the scanout's
+// analog read slots, pruned by HAS_ANALOG_RASTER(0)), so the divider goes
+// too.  Constant 0 = "pixel enable never fires", which the pruned scanout
+// ignores entirely.
+assign {analog_ce_half, analog_ce_pix} = 2'b00;
+`else
 frac_cen #(.W(2)) pixel_cen
 (
     .clk(clk_core_49152),
@@ -357,6 +364,7 @@ frac_cen #(.W(2)) pixel_cen
     .m(10'd4),
     .cen({analog_ce_half, analog_ce_pix})
 );
+`endif
 
 // The generated source is progressive on this non-interlaced timing.  A
 // field-alternating resync would inject every-other-frame offsets, so feed
@@ -930,6 +938,26 @@ assign sram_we_n  = sram_we_n_w;
 assign sram_ub_n  = sram_ub_n_w;
 assign sram_lb_n  = sram_lb_n_w;
 
+`ifdef EXCLUDE_TRANSLUC
+// The GPU translucency LUT is this controller's ONLY client, and under
+// EXCLUDE_TRANSLUC gpu_core holds its SRAM word port permanently idle — so
+// the controller itself is dropped (docs/os30-quake2-cut-plan.md C5).
+// The physical pins MUST be parked explicitly: left undriven, Quartus
+// grounds them, and sram_we_n=0 would hold the chip in a continuous write.
+// All control strobes deasserted (active-low high), DQ bus high-Z.
+assign sram_a_w    = 17'd0;
+assign sram_dq_out = 16'd0;
+assign sram_dq_oe  = 1'b0;   // sram_dq -> 16'hZZZZ at the top-level mux
+assign sram_oe_n_w = 1'b1;
+assign sram_we_n_w = 1'b1;
+assign sram_ub_n_w = 1'b1;
+assign sram_lb_n_w = 1'b1;
+// GPU-side word interface: never busy, never returns data (the port is
+// constant-idle in gpu_core under the same define).
+assign sram_word_rdata       = 32'd0;
+assign sram_word_busy        = 1'b0;
+assign sram_word_rdata_valid = 1'b0;
+`else
 sram_controller #(
     .WAIT_CYCLES(6)
 ) sram0 (
@@ -954,6 +982,7 @@ sram_controller #(
     .sram_ub_n(sram_ub_n_w),
     .sram_lb_n(sram_lb_n_w)
 );
+`endif
 
 // ============================================================
 // UART (2 Mbaud, 8N1): DevKey/Cartridge service interface.
@@ -1445,19 +1474,32 @@ always @(posedge clk_74a) begin
 end
 
 // Interact variable writes (SNAC adapter type from APF menu)
+//
+// EXCLUDE_ANALOGIZER (docs/os30-quake2-cut-plan.md C2): the analogizer
+// settings/hoff/voff writes are dropped — menu and CPU writes still
+// complete on the bridge/MMIO side, they just no longer land anywhere.
+// The three source registers then hold their reset value forever, so the
+// whole downstream cone folds: the 3-domain settings CDC copies, the
+// ena/video-type/preclaim decode, fx and the chroma constants, AND
+// pocket_blank_screen — which is exactly right, because with no analog
+// output the LCD is the only display and "Pocket LCD = Off" must never
+// blank it.  The cart port likewise stays in UART-console mode
+// unconditionally.  app_id is NOT analogizer-specific (periph .app_id)
+// and keeps its write arm in both configs.
 always @(posedge clk_74a) begin
     if (bridge_wr) begin
         casex (bridge_addr)
+`ifndef EXCLUDE_ANALOGIZER
         32'hF7000000: analogizer_settings <= {
-        bridge_wr_data[7:0], 
-        bridge_wr_data[15:8], 
-        bridge_wr_data[23:16], 
+        bridge_wr_data[7:0],
+        bridge_wr_data[15:8],
+        bridge_wr_data[23:16],
         bridge_wr_data[31:24]};
 
         32'hF7000004: signed_hoff <= {
-        bridge_wr_data[7:0], 
-        bridge_wr_data[15:8], 
-        bridge_wr_data[23:16], 
+        bridge_wr_data[7:0],
+        bridge_wr_data[15:8],
+        bridge_wr_data[23:16],
         bridge_wr_data[31:24]};
 
         32'hF7000008: signed_voff <= {
@@ -1465,6 +1507,7 @@ always @(posedge clk_74a) begin
         bridge_wr_data[15:8],
         bridge_wr_data[23:16],
         bridge_wr_data[31:24]};
+`endif
 
         32'hF7000010: app_id_74a <= {
         bridge_wr_data[7:0],
@@ -1474,12 +1517,14 @@ always @(posedge clk_74a) begin
         endcase
     end
 
+`ifndef EXCLUDE_ANALOGIZER
     if (analogizer_cpu_wr_event[0])
         analogizer_settings <= analogizer_cpu_wr_settings_s2;
     if (analogizer_cpu_wr_event[1])
         signed_hoff <= analogizer_cpu_wr_hoffset_s2;
     if (analogizer_cpu_wr_event[2])
         signed_voff <= analogizer_cpu_wr_voffset_s2;
+`endif
 end
 
 // bridge_wr_idle: true when both bridge write targets have drained.
@@ -2311,17 +2356,22 @@ assign video_hs = vidout_hs;
 `endif
         // Triangle extras: gated OFF by default (OS25 — device budget, see
         // docs/gpu-utilization-handoff.md).  OS30_VERT_TRI enables them for
-        // the Quake/Quake2 variant, paid for by the EXCLUDE_* cuts.
-        //   HAS_VERT_TRI       (HW_FEATURES bit 20) must match the gpu's
-        //                      GPU_HAS_VERT_TRI;
-        //   HAS_PARAM_TRI_RECS (HW_FEATURES bit 22) must match the gpu's
-        //                      GPU_HAS_PARAM_TRI_RECS.
+        // the Quake2 variant, paid for by the EXCLUDE_* cuts plus the lean
+        // GPU (docs/os30-quake2-cut-plan.md): OS30 is Quake2-only, so the
+        // compact span groups (bit 23) and column lists (bit 21) Quake2
+        // never emits are cut there and advertised clear — span-group apps
+        // (Quake1/Doom/gpudemo) self-gate via the SDK and stay on OS25.
+        // Each HAS_* must match the gpu's same-named GPU_HAS_* below.
 `ifdef OS30_VERT_TRI
         .HAS_VERT_TRI(1),
-        .HAS_PARAM_TRI_RECS(1)
+        .HAS_PARAM_TRI_RECS(1),
+        .HAS_COLUMN_LIST(0),
+        .HAS_SPAN_GROUP(0)
 `else
         .HAS_VERT_TRI(0),
-        .HAS_PARAM_TRI_RECS(0)
+        .HAS_PARAM_TRI_RECS(0),
+        .HAS_COLUMN_LIST(1),
+        .HAS_SPAN_GROUP(1)
 `endif
     ) periph (
         .clk(clk_cpu),
@@ -2724,7 +2774,17 @@ assign video_hs = vidout_hs;
     wire        video_burst_data_valid;
     wire        video_burst_data_done;
     
-    video_CRT_scanout_indexed_BRAM  scanout (
+    video_CRT_scanout_indexed_BRAM #(
+        // No Analogizer ⇒ no consumer for the analog raster: prune the
+        // dedicated 240p fetch, the analog leg of the shared output
+        // pipeline and the 2048x32 analog line cache (8 M10Ks).  The LCD
+        // fetch/decode path is identical in both configs.
+`ifdef EXCLUDE_ANALOGIZER
+        .HAS_ANALOG_RASTER(0)
+`else
+        .HAS_ANALOG_RASTER(1)
+`endif
+    ) scanout (
         .clk_video(clk_vid),
         .reset_n(reset_n_vid),
         .x_count(x_count),
@@ -3136,24 +3196,35 @@ gpu_core #(
     // vertex-triangle plane derivation (0x4A/0x4B + S_TRI_DERIVE FSM), the
     // records-only param-tri (0x4D), and the 4-word z read window (depth 1 =
     // pre-window single-word fill).  Device budget — see
-    // docs/gpu-utilization-handoff.md.  OS30_VERT_TRI enables all three for
-    // the Quake/Quake2 variant (paid for by the EXCLUDE_* cuts).  The 0x49
-    // param-tri path + edge walker stay present in BOTH variants;
-    // GPU_EW_PARALLEL_DIVS only selects the walker's slope-divide layout
-    // (OS30: three parallel dividers, ~48 cy setup/tri; OS25: the single
-    // shared divider, ~110 cy setup/tri — bit-identical quotients, so
-    // pixels do not change).  GPU_HAS_VERT_TRI / GPU_HAS_PARAM_TRI_RECS
-    // must match the periph's HAS_VERT_TRI / HAS_PARAM_TRI_RECS above.
+    // docs/gpu-utilization-handoff.md.  OS30_VERT_TRI enables the triangle
+    // extras for the Quake2 variant (paid for by the EXCLUDE_* cuts) and,
+    // since the 2026-06 lean pass (docs/os30-quake2-cut-plan.md), ALSO cuts
+    // what Quake2 never emits: the 0x48 compact-direct lane form + its
+    // direct-affine fastpath (GPU_HAS_COMPACT_SPAN=0 — long-form
+    // record-style 0x48 stays) and the 0x4C column list
+    // (GPU_HAS_COLUMN_LIST=0).  The 0x49 param-tri path + edge walker stay
+    // present in BOTH variants — 0x49 is Quake2's world pass.
+    // GPU_EW_PARALLEL_DIVS selects the walker's slope-divide layout
+    // (bit-identical quotients, so pixels do not change); since the lean
+    // pass OS30 uses the single shared divider too — the ~110 cy serial
+    // setup hides under the ~123 cy 0x4B derivation, and the 0x49 world
+    // exposure only appears when GPU-bound (heartbeat-verify; flip back to
+    // 1 if the world pass regresses).  Each GPU_HAS_* must match the
+    // periph's same-named HAS_* above.
 `ifdef OS30_VERT_TRI
     .GPU_HAS_VERT_TRI(1),
     .GPU_HAS_PARAM_TRI_RECS(1),
     .GPU_Z_READ_WINDOW(4),
-    .GPU_EW_PARALLEL_DIVS(1)
+    .GPU_EW_PARALLEL_DIVS(0),
+    .GPU_HAS_COMPACT_SPAN(0),
+    .GPU_HAS_COLUMN_LIST(0)
 `else
     .GPU_HAS_VERT_TRI(0),
     .GPU_HAS_PARAM_TRI_RECS(0),
     .GPU_Z_READ_WINDOW(1),
-    .GPU_EW_PARALLEL_DIVS(0)
+    .GPU_EW_PARALLEL_DIVS(0),
+    .GPU_HAS_COMPACT_SPAN(1),
+    .GPU_HAS_COLUMN_LIST(1)
 `endif
 ) gpu (
     .clk(clk_cpu),

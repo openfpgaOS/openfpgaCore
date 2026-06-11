@@ -12,7 +12,25 @@
 
 `default_nettype none
 
-module video_CRT_scanout_indexed_BRAM (
+module video_CRT_scanout_indexed_BRAM #(
+    // Analogizer raster machinery: the dedicated 240p/15.75 kHz analog
+    // raster + 480p mirror, its private 2048x32 line cache, the dedicated
+    // SDRAM line fetch, and the analog leg of the shared output pipeline.
+    //
+    // PRUNE GATE (docs/os30-quake2-cut-plan.md C2): when 0 the two analog
+    // issue points fold (analog_fetch_can_issue and issue_analog_read are
+    // constant 0), which kills — transitively, by constant propagation and
+    // dangling-register sweep — the analog raster counters/sync cone, the
+    // analog tag-pipeline flags, serving_analog and the analog arm of the
+    // burst FSM, and analog_line_buffer itself (no writer, dead reader).
+    // The LCD path is untouched: it runs through the SAME shared output
+    // pipeline (pixel_color is produced in the clk_analog domain) and the
+    // shared horizontal-scaler cone simply loses its analog operand muxes.
+    // Analog outputs park at their reset values (blank, syncs idle).
+    // Set 0 only under EXCLUDE_ANALOGIZER builds (Pocket OS30); the
+    // Analogizer-capable OS25 build keeps the default 1.
+    parameter HAS_ANALOG_RASTER = 1
+) (
     // Video clock domain (12.288 MHz)
     input wire clk_video,
     input wire reset_n,
@@ -567,7 +585,10 @@ module video_CRT_scanout_indexed_BRAM (
     // raster (analog_line_y slaved to y_count): in both the analog path reads
     // its OWN framebuffer (analog_fb_base_addr) so it can differ from the LCD
     // (e.g. Pocket LCD = Terminal: console on LCD, app on the analog DAC).
-    wire analog_fetch_can_issue =
+    // PRUNE GATE choke point 1: constant 0 without the analog raster — no
+    // analog fetch is ever requested, so the clk_sdram analog handshake,
+    // serving_analog and the analog_line_buffer write port all fold.
+    wire analog_fetch_can_issue = (HAS_ANALOG_RASTER != 0) &&
         !analog_fetch_request && !analog_fetch_ack_sync2 &&
         (analog_fetch_line < analog_v_active_end[9:0]) &&
         ({1'b0, analog_fetch_line} <= ({1'b0, analog_line_y} + 11'd2));
@@ -588,7 +609,12 @@ module video_CRT_scanout_indexed_BRAM (
     // 480p: two analog reads per 12.288 MHz window (phases 1 and 3) ->
     // 24.576 MHz pixel advance -> 31.5 kHz line. 240p: one read (phase 1) ->
     // 12.288 MHz advance -> 15.75 kHz line.
-    wire issue_analog_read =
+    // PRUNE GATE choke point 2: constant 0 without the analog raster — the
+    // issue tag can then never be READ_ANALOG (its bit 1 is provably 0
+    // through the whole tag pipeline), rd_from_analog stays 0 so the line
+    // cache read mux folds to the LCD bank, and every out_tag==READ_ANALOG
+    // consumer — the analog output registers included — sweeps.
+    wire issue_analog_read = (HAS_ANALOG_RASTER != 0) &&
         !issue_lcd_read &&
         ((analog_mux_phase == 2'd1) ||
          (analog_480p && (analog_mux_phase == 2'd3)));
@@ -747,33 +773,41 @@ module video_CRT_scanout_indexed_BRAM (
             out_direct_color_q <= 24'b0;
             out_use_direct_q <= 1'b0;
         end else begin
-            analog_pixel_clk <= ~analog_pixel_clk;
-            analog_line_start_ce_d <= analog_line_start_ce;
+            // analog_mux_phase stays live in both configs: it paces the
+            // shared read-slot schedule (issue_analog_read derives from it),
+            // and folding it without the analog raster saves nothing — the
+            // gated issue_analog_read already kills its consumers.
             lcd_x_count_prev <= x_count;
             if (analog_ce_pix)
                 analog_mux_phase <= 2'd1;
             else
                 analog_mux_phase <= analog_mux_phase + 2'd1;
 
-            // Dedicated 240p analog source fetch (handshake to the SDRAM FSM):
-            // walk the active lines a couple ahead of the display, requesting
-            // one source row at a time into analog_line_buffer.
-            analog_fetch_ack_sync1 <= analog_fetch_ack;
-            analog_fetch_ack_sync2 <= analog_fetch_ack_sync1;
-            if (analog_fetch_ack_sync2)
-                analog_fetch_request <= 1'b0;
-            if (analog_frame_start) begin
-                analog_fetch_request <= 1'b0;
-                analog_fetch_line <= analog_v_active_start[9:0];
-                analog_fetch_src  <= 10'd0;
-                analog_fy_acc     <= 11'd0;
-            end else if (analog_fetch_can_issue) begin
-                analog_fetch_request     <= 1'b1;
-                analog_fetch_out_latched <= analog_fetch_line - analog_v_active_start[9:0];
-                analog_fetch_src_latched <= analog_fetch_src;
-                analog_fetch_line <= analog_fetch_line + 10'd1;
-                analog_fetch_src  <= analog_fetch_src_next;
-                analog_fy_acc     <= analog_fy_acc_next;
+            if (HAS_ANALOG_RASTER != 0) begin
+                analog_pixel_clk <= ~analog_pixel_clk;
+                analog_line_start_ce_d <= analog_line_start_ce;
+
+                // Dedicated 240p analog source fetch (handshake to the SDRAM
+                // FSM): walk the active lines a couple ahead of the display,
+                // requesting one source row at a time into
+                // analog_line_buffer.
+                analog_fetch_ack_sync1 <= analog_fetch_ack;
+                analog_fetch_ack_sync2 <= analog_fetch_ack_sync1;
+                if (analog_fetch_ack_sync2)
+                    analog_fetch_request <= 1'b0;
+                if (analog_frame_start) begin
+                    analog_fetch_request <= 1'b0;
+                    analog_fetch_line <= analog_v_active_start[9:0];
+                    analog_fetch_src  <= 10'd0;
+                    analog_fy_acc     <= 11'd0;
+                end else if (analog_fetch_can_issue) begin
+                    analog_fetch_request     <= 1'b1;
+                    analog_fetch_out_latched <= analog_fetch_line - analog_v_active_start[9:0];
+                    analog_fetch_src_latched <= analog_fetch_src;
+                    analog_fetch_line <= analog_fetch_line + 10'd1;
+                    analog_fetch_src  <= analog_fetch_src_next;
+                    analog_fy_acc     <= analog_fy_acc_next;
+                end
             end
 
             // Clean per-RAM registered reads (keeps both inferring as M10K).
@@ -782,7 +816,10 @@ module video_CRT_scanout_indexed_BRAM (
             // registered to match read latency and muxes the two registered
             // outputs into bram_rd_data (a wire).
             lcd_bram_rd_data    <= line_buffer[issue_line_addr];
-            analog_bram_rd_data <= analog_line_buffer[issue_line_addr];
+            // Gated read keeps the cut explicit: with no writer AND no
+            // reader the 2048x32 analog cache (8 M10Ks) cannot survive.
+            if (HAS_ANALOG_RASTER != 0)
+                analog_bram_rd_data <= analog_line_buffer[issue_line_addr];
             rd_from_analog      <= issue_analog_read;
             read_tag_q1 <= issue_tag;
             read_sub_pixel_q1 <= issue_sub_pixel;
@@ -792,8 +829,11 @@ module video_CRT_scanout_indexed_BRAM (
             read_analog_hsync_q1 <= analog_hsync_now;
             read_analog_vsync_q1 <= analog_vsync_now;
             read_analog_dim_q1 <= analog_line_second && analog_scanlines[1];
+            // Without the analog raster the non-LCD leg folds to the LCD
+            // mode, so the analog CDC param copies lose their last reader.
             read_color_mode_q1 <= issue_lcd_read ? color_mode_lcd_a
-                                                 : color_mode_analog;
+                                : ((HAS_ANALOG_RASTER != 0) ? color_mode_analog
+                                                            : color_mode_lcd_a);
 
             if (issue_lcd_read) begin
                 if (!lcd_in_hactive) begin
@@ -811,7 +851,8 @@ module video_CRT_scanout_indexed_BRAM (
             // analog_out_x free-runs 0..779 and analog_line_y is its own
             // 262-line counter, so the analog scan decouples from the LCD line
             // cadence and lands at 15.75 kHz / ~60 Hz.
-            if (analog_480p ? analog_line_start : analog_frame_start) begin
+            if ((HAS_ANALOG_RASTER != 0) &&
+                (analog_480p ? analog_line_start : analog_frame_start)) begin
                 analog_out_x <= 10'd0;
                 analog_line_y <= analog_480p ? y_count : 10'd0;
                 analog_line_second <= 1'b0;
@@ -894,7 +935,7 @@ module video_CRT_scanout_indexed_BRAM (
             if (out_tag_q == READ_LCD)
                 pixel_color <= out_active_q ? out_rgb : 24'h000000;
 
-            if (out_tag_q == READ_ANALOG) begin
+            if ((HAS_ANALOG_RASTER != 0) && (out_tag_q == READ_ANALOG)) begin
                 analog_hblank <= out_analog_hblank_q;
                 analog_vblank <= out_analog_vblank_q;
                 analog_hsync <= out_analog_hsync_q;
@@ -1008,15 +1049,17 @@ module video_CRT_scanout_indexed_BRAM (
             end
 
             // Analog fetch request handshake (mirrors the LCD's above).
-            analog_fetch_req_sync1 <= analog_fetch_request;
-            analog_fetch_req_sync2 <= analog_fetch_req_sync1;
-            if (analog_fetch_req_sync2 && !analog_fetch_ack && !analog_fetch_line_pending) begin
-                analog_fetch_out_sdram <= analog_fetch_out_latched;
-                analog_fetch_src_sdram <= analog_fetch_src_latched;
-                analog_fetch_line_pending <= 1;
-                analog_fetch_ack <= 1;
-            end else if (!analog_fetch_req_sync2) begin
-                analog_fetch_ack <= 0;
+            if (HAS_ANALOG_RASTER != 0) begin
+                analog_fetch_req_sync1 <= analog_fetch_request;
+                analog_fetch_req_sync2 <= analog_fetch_req_sync1;
+                if (analog_fetch_req_sync2 && !analog_fetch_ack && !analog_fetch_line_pending) begin
+                    analog_fetch_out_sdram <= analog_fetch_out_latched;
+                    analog_fetch_src_sdram <= analog_fetch_src_latched;
+                    analog_fetch_line_pending <= 1;
+                    analog_fetch_ack <= 1;
+                end else if (!analog_fetch_req_sync2) begin
+                    analog_fetch_ack <= 0;
+                end
             end
 
             case (state)
@@ -1034,7 +1077,8 @@ module video_CRT_scanout_indexed_BRAM (
                         fetch_line_pending <= 0;
                         serving_analog <= 0;
                         state <= ST_CALC;
-                    end else if (analog_fetch_line_pending) begin
+                    end else if ((HAS_ANALOG_RASTER != 0)
+                                 && analog_fetch_line_pending) begin
                         calc_base   <= analog_fb_base_addr;
                         calc_line   <= analog_fetch_src_sdram;
                         calc_stride <= analog_fb_stride_sdram;

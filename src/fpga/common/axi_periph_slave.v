@@ -48,7 +48,20 @@ module axi_periph_slave #(
     // so apps don't submit 0x4D to a core that drains it as a no-op.
     // Pocket OS25 gates it out on ALM budget (HAS_PARAM_TRI_RECS(0));
     // Pocket OS30 (OS30_VERT_TRI) and MiSTer keep the default 1.
-    parameter HAS_PARAM_TRI_RECS = 1
+    parameter HAS_PARAM_TRI_RECS = 1,
+    // CMD_DRAW_COLUMN_LIST (0x4C) decode.  HW_FEATURES bit 21.  Must track
+    // gpu_core's GPU_HAS_COLUMN_LIST on the same target.  Default 1 (the
+    // historic unconditional value); Pocket OS30 (Quake2-only, lean GPU)
+    // passes 0 — Quake2 never emits columns (Doom does, on OS25).
+    parameter HAS_COLUMN_LIST = 1,
+    // 0x48 compact-direct lane form ("span groups": the SDK's
+    // of_gpu_draw_affine_span_group / 0x4C fallback shape).  NEW
+    // HW_FEATURES bit 23, claimed 2026-06-10: the compact form previously
+    // had no caps bit of its own (bit 15 covers the long-form record-style
+    // command, which stays on every target).  Must track gpu_core's
+    // GPU_HAS_COMPACT_SPAN.  Default 1; Pocket OS30 passes 0, so SDK
+    // emitters can self-gate instead of silently draining.
+    parameter HAS_SPAN_GROUP = 1
 ) (
     input wire clk,
     input wire reset_n,
@@ -663,6 +676,13 @@ assign ext_irq = (uart_rx_irq & irq_mask[0]) |
 //                                                  (CMD_SET_TRI_STATE 0x4A +
 //                                                   CMD_DRAW_VERT_TRI 0x4B);
 //                                                  gated by HAS_VERT_TRI
+//                                          Bit 21: GPU column list (0x4C);
+//                                                  gated by HAS_COLUMN_LIST
+//                                          Bit 22: GPU records-only param-tri
+//                                                  (0x4D); HAS_PARAM_TRI_RECS
+//                                          Bit 23: GPU 0x48 compact-direct
+//                                                  span groups; gated by
+//                                                  HAS_SPAN_GROUP
 //
 // Perspective and parametric span commands are implemented and covered by
 // the GPU acceptance tests. Keep the caps exposed so renderers can select
@@ -681,25 +701,33 @@ localparam [31:0] HW_FEATURES_RESOLVED =
                        //        every target; SW-backed when bit 1 is clear)
     | 32'h0000_0010    // GPU span renderer
     | 32'h000F_E000    // GPU persp + fragpipe + param span/list/z/scale caps (bits 13..19)
-    | 32'h0020_0000    // bit 21 OF_HW_GPU_COLUMN_LIST: CMD_DRAW_COLUMN_LIST
-                       //        (0x4C) 5-word column records.  UNCONDITIONAL —
-                       //        a small general decode path present on every
-                       //        variant (incl. OS30); harmless to non-column
-                       //        games and byte-identical to a 0x48 column.
     | 32'h0000_0340    // MIDI(6) + FPU(8) + Save slots(9)
     | FEAT_LINK
     | (HAS_ANALOGIZER ? 32'h0000_0008 : 32'h0000_0000)
     | (HAS_MIXER_HW   ? 32'h0000_0002 : 32'h0000_0000)  // bit 1  OF_HW_MIXER_HW: HW
                        //        audio_mixer.v present (clear under EXCLUDE_MIXER/OS30)
     | (HAS_VERT_TRI   ? 32'h0010_0000 : 32'h0000_0000)  // bit 20: GPU vertex-triangle (0x4A/0x4B)
-    | (HAS_PARAM_TRI_RECS ? 32'h0040_0000 : 32'h0000_0000); // bit 22
+    | (HAS_COLUMN_LIST ? 32'h0020_0000 : 32'h0000_0000) // bit 21
+                       //        OF_HW_GPU_COLUMN_LIST: CMD_DRAW_COLUMN_LIST
+                       //        (0x4C) 5-word column records, byte-identical
+                       //        to a 0x48 column.  Parameterized 2026-06-10
+                       //        (was unconditional): the lean OS30 GPU
+                       //        drains 0x4C, so it must not advertise it.
+    | (HAS_PARAM_TRI_RECS ? 32'h0040_0000 : 32'h0000_0000) // bit 22
                        //        OF_HW_GPU_PARAM_TRI_RECS: records-only
                        //        param-tri (CMD_DRAW_PARAM_TRI_RECS 0x4D) —
                        //        per-triangle planes + verts reusing the 0x4A
-                       //        sticky surface state.  Present on every
-                       //        target (the 0x4A sticky decode is ungated in
-                       //        gpu_core; only the 0x4B derivation needs
-                       //        GPU_HAS_VERT_TRI).
+                       //        sticky surface state.  The 0x4A sticky decode
+                       //        is ungated in gpu_core; only the 0x4B
+                       //        derivation needs GPU_HAS_VERT_TRI.  OS25
+                       //        clears it (ALM); OS30 keeps it — it is the
+                       //        Quake2 world-pass header-dedup opcode.
+    | (HAS_SPAN_GROUP ? 32'h0080_0000 : 32'h0000_0000); // bit 23
+                       //        OF_HW_GPU_SPAN_GROUP: 0x48 compact-direct
+                       //        lane form (SDK span-group emitters).  NEW
+                       //        2026-06-10 — previously implied by bit 15;
+                       //        bit 15 now strictly means the long-form
+                       //        record-style 0x48, which every target keeps.
 
 localparam FB_ADDR_0 = 25'h0000000;     // byte 0x000000 → CPU 0x10000000
 localparam FB_ADDR_1 = 25'h0080000;     // byte 0x100000 → CPU 0x10100000
