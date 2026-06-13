@@ -67,23 +67,26 @@ static uint32_t analogizer_pack_settings(const of_analogizer_state_t *s) {
            (s->enabled ? (1u << 15) : 0u);
 }
 
-/* The "Pocket LCD" interact variable (On/Off/Terminal) lives in bits 17:16 of
- * the same settings register but is owned by the video layer, not the
- * analogizer.  analogizer_pack_settings() never sets those bits, so every
- * write-back must OR back the current hardware value or the per-frame normalize
- * in of_analogizer_refresh() would reset the user's Pocket LCD choice. */
-#define POCKET_LCD_SETTINGS_MASK 0x00030000u
+/* Settings bits owned by OTHER layers than the analogizer state machine:
+ * bits 17:16 = "Pocket LCD" interact variable (On/Off/Terminal), owned by
+ * the video layer; bits 19:18 = "Analogizer 15kHz Timing" interact variable
+ * (ANLG_TIMING_*: 240p/480i/576i), consumed directly by the FPGA's analog
+ * raster with no firmware action (reserved encoding 3 falls back to 240p in
+ * hardware).  analogizer_pack_settings() never sets these bits, so every
+ * write-back must OR back the current hardware value or the per-frame
+ * normalize in of_analogizer_refresh() would reset the user's choice. */
+#define ANLG_PRESERVED_SETTINGS_MASK 0x000F0000u
 
 static void analogizer_write_settings(uint32_t packed) {
-    ANALOGIZER_SETTINGS = (packed & ~POCKET_LCD_SETTINGS_MASK) |
-                          (ANALOGIZER_SETTINGS & POCKET_LCD_SETTINGS_MASK);
+    ANALOGIZER_SETTINGS = (packed & ~ANLG_PRESERVED_SETTINGS_MASK) |
+                          (ANALOGIZER_SETTINGS & ANLG_PRESERVED_SETTINGS_MASK);
 }
 
 static void analogizer_wait_for_registers(const of_analogizer_state_t *s) {
     uint32_t settings = analogizer_pack_settings(s);
 
     for (volatile int i = 0; i < 1024; i++) {
-        if ((ANALOGIZER_SETTINGS & ~POCKET_LCD_SETTINGS_MASK) == settings &&
+        if ((ANALOGIZER_SETTINGS & ~ANLG_PRESERVED_SETTINGS_MASK) == settings &&
             (int8_t)ANALOGIZER_H_OFFSET == s->h_offset &&
             (int8_t)ANALOGIZER_V_OFFSET == s->v_offset)
             break;
@@ -155,9 +158,10 @@ void of_analogizer_refresh(void) {
     analogizer_decode_hardware_state(&hw);
     uint32_t cur_settings = ANALOGIZER_SETTINGS;
     /* Normalize the analogizer fields, but keep the Pocket LCD mode (bits
-     * 17:16, owned by the video layer) so this per-frame write never resets it. */
+     * 17:16, video layer) and the 15 kHz timing (bits 19:18, FPGA raster)
+     * so this per-frame write never resets them. */
     uint32_t normalized_settings = analogizer_pack_settings(&hw) |
-                                   (cur_settings & POCKET_LCD_SETTINGS_MASK);
+                                   (cur_settings & ANLG_PRESERVED_SETTINGS_MASK);
     if (cur_settings != normalized_settings)
         ANALOGIZER_SETTINGS = normalized_settings;
 

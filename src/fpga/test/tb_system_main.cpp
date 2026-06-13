@@ -38,6 +38,18 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstdint>
+
+/* Debug peek into the CPU's integer register file (progress + timeout
+ * diagnostics).  The Pocket single-issue netlist keeps the regfile as its
+ * own Verilator scope; the dual-issue MiSTer netlist inlines it, so that
+ * Syms member doesn't exist there — the system-mister build defines
+ * SYSTEM_NO_REGFILE_PEEK and those diagnostics print zeros instead. */
+#ifndef SYSTEM_NO_REGFILE_PEEK
+#define REGFILE_PEEK(i) \
+    (tb->vlSymsp->TOP__tb_system__cpu_sys__cpu__integer_RegFilePlugin_logic_regfile_fpga.asMem_ram[i])
+#else
+#define REGFILE_PEEK(i) 0u
+#endif
 #include <cstring>
 #include <string>
 #include <vector>
@@ -356,11 +368,11 @@ int main(int argc, char **argv) {
         if (c - last_report >= 500000) {
             last_report = c;
             uint32_t current_pc = tb->vlSymsp->TOP__tb_system__cpu_sys__cpu.__PVT__PcPlugin_logic_harts_0_self_state;
-            uint32_t a0 = tb->vlSymsp->TOP__tb_system__cpu_sys__cpu__integer_RegFilePlugin_logic_regfile_fpga.asMem_ram[10];
-            uint32_t a1 = tb->vlSymsp->TOP__tb_system__cpu_sys__cpu__integer_RegFilePlugin_logic_regfile_fpga.asMem_ram[11];
-            uint32_t a3 = tb->vlSymsp->TOP__tb_system__cpu_sys__cpu__integer_RegFilePlugin_logic_regfile_fpga.asMem_ram[13];
-            uint32_t a4 = tb->vlSymsp->TOP__tb_system__cpu_sys__cpu__integer_RegFilePlugin_logic_regfile_fpga.asMem_ram[14];
-            uint32_t a5 = tb->vlSymsp->TOP__tb_system__cpu_sys__cpu__integer_RegFilePlugin_logic_regfile_fpga.asMem_ram[15];
+            uint32_t a0 = REGFILE_PEEK(10);
+            uint32_t a1 = REGFILE_PEEK(11);
+            uint32_t a3 = REGFILE_PEEK(13);
+            uint32_t a4 = REGFILE_PEEK(14);
+            uint32_t a5 = REGFILE_PEEK(15);
             std::printf("[c=%llu] PC=0x%08x a0=0x%08x a1=0x%08x a3=0x%08x a4=0x%08x a5=0x%08x\n"
                         "    periph_ar=0x%08x/%d  sdram_ar=0x%08x/%d  cram0_ar=0x%08x/%d  mode=%d  uart_bytes=%zu\n"
                         "    sdram slave_st=%d model_st=%d busy=%d  "
@@ -394,14 +406,14 @@ int main(int argc, char **argv) {
 
     if (exit_code == 1) {
         uint32_t current_pc = tb->vlSymsp->TOP__tb_system__cpu_sys__cpu.__PVT__PcPlugin_logic_harts_0_self_state;
-        uint32_t a0 = tb->vlSymsp->TOP__tb_system__cpu_sys__cpu__integer_RegFilePlugin_logic_regfile_fpga.asMem_ram[10];
-        uint32_t a1 = tb->vlSymsp->TOP__tb_system__cpu_sys__cpu__integer_RegFilePlugin_logic_regfile_fpga.asMem_ram[11];
-        uint32_t a3 = tb->vlSymsp->TOP__tb_system__cpu_sys__cpu__integer_RegFilePlugin_logic_regfile_fpga.asMem_ram[13];
-        uint32_t a4 = tb->vlSymsp->TOP__tb_system__cpu_sys__cpu__integer_RegFilePlugin_logic_regfile_fpga.asMem_ram[14];
-        uint32_t a5 = tb->vlSymsp->TOP__tb_system__cpu_sys__cpu__integer_RegFilePlugin_logic_regfile_fpga.asMem_ram[15];
         std::printf("\n\n=== TIMEOUT at %llu cycles ===\n",
                     (unsigned long long)max_cycles);
         std::printf("  Current PC: 0x%08x\n", current_pc);
+        uint32_t a0 = REGFILE_PEEK(10);
+        uint32_t a1 = REGFILE_PEEK(11);
+        uint32_t a3 = REGFILE_PEEK(13);
+        uint32_t a4 = REGFILE_PEEK(14);
+        uint32_t a5 = REGFILE_PEEK(15);
         std::printf("  Registers: a0=0x%08x a1=0x%08x a3=0x%08x a4=0x%08x a5=0x%08x\n",
                     a0, a1, a3, a4, a5);
         std::printf("  UART bytes observed: %zu\n", uart_buf.size());

@@ -23,7 +23,11 @@ PROJECT    = mister
 TARGET     = mister
 FW_DIR     = ../../../firmware/os
 VEXII_DIR  = ../../vendor/vexriscv/VexiiRiscv
-VEXII_OUT  = $(VEXII_DIR)/VexiiRiscv.v
+# MiSTer-specific DUAL-ISSUE netlist (--decoders=2 --lanes=2): the
+# DE10-Nano's A6/I7 part has the area and speed-grade headroom the
+# Pocket lacks.  Same module name / AXI interface — only the file
+# differs (see generate_vexii.sh variants).
+VEXII_OUT  = $(VEXII_DIR)/VexiiRiscv_mister.v
 TEST_DIR   = ../../test
 ROOT_DIR   = ../../../..
 
@@ -79,10 +83,10 @@ help:
 	@printf "    $(C_DIM)Push to hardware from the SDK: platforms/mister/copy.sh$(C_RESET)\n"
 	@echo ""
 
-# ── CPU generation (file target — shared netlist with the Pocket) ────
+# ── CPU generation (file target — MiSTer dual-issue variant) ─────────
 $(VEXII_OUT):
-	@printf "$(C_HEAD)[cpu]$(C_RESET) Generating VexiiRiscv (file missing)...\n"
-	@cd $(VEXII_DIR) && bash ../generate_vexii.sh
+	@printf "$(C_HEAD)[cpu]$(C_RESET) Generating VexiiRiscv (dual-issue, file missing)...\n"
+	@cd $(VEXII_DIR) && bash ../generate_vexii.sh mister
 	@printf "$(C_OK)[cpu] Done$(C_RESET)\n"
 
 cpu: $(VEXII_OUT)
@@ -159,6 +163,24 @@ deploy:
 		printf "  $(C_DIM)[ ] boot.rom (run make os — current os.bin is not a mister build)$(C_RESET)\n"; \
 	fi
 	@printf "$(C_OK)[deploy] Done$(C_RESET) $(C_DIM)(push to hardware from the SDK: platforms/mister/copy.sh)$(C_RESET)\n"
+
+# ── Package: rbf + boot.rom → build/mister/ ──────────────────────────
+# The MiSTer deliverable is a plain bitstream + kernel pair (the SDK's
+# platforms/mister/mkimage.sh assembles the .vhd disk image around them).
+# Invoked by the root `make package`, which delegates per target — the
+# root names no target.  Stricter than `deploy`: errors out if the
+# on-disk os.bin is not a MiSTer build, so a release can't ship a Pocket
+# kernel as boot.rom.
+package:
+	@mkdir -p $(BUILD_OUT)
+	@cp output_files/$(PROJECT).rbf $(BUILD_OUT)/openfpgaOS.rbf
+	@if [ "$$(cat $(FW_DIR)/.last_target 2>/dev/null)" != "mister" ]; then \
+		printf "  $(C_ERR)os.bin on disk is not a mister build — run make os TARGET=mister first$(C_RESET)\n"; \
+		exit 1; \
+	fi
+	@cp $(FW_DIR)/os.bin $(BUILD_OUT)/boot.rom
+	@printf "  $(C_OK)Package ready$(C_RESET) → build/mister/ (rbf + boot.rom)\n"
+	@printf "  $(C_DIM)Disk image: openfpgaSDK platforms/mister/mkimage.sh$(C_RESET)\n"
 
 # ── JTAG program — Pocket-only ───────────────────────────────────────
 # The root Makefile delegates `program` to every target; MiSTer has no
@@ -260,5 +282,5 @@ clean:
 
 clean-all: clean
 
-.PHONY: all full help cpu bootloader firmware os compile build test check deploy report sweep sdk program
+.PHONY: all full help cpu bootloader firmware os compile build test check deploy report sweep sdk program package
 .PHONY: timing summary clean clean-all

@@ -12,7 +12,7 @@
 // fed the 480p LCD video directly (the scanout's pixel_color + crt_* sync), the
 // scandoubler is BYPASSED (scandoubler=0, since the LCD is already 480p/31 kHz),
 // and the cart-pin DAC clock is video_clk = clk_vid.  The scanout's dedicated
-// analog path is dormant (analog_480p=1, analog_* outputs unconnected → pruned).
+// analog path is dormant (analog_timing=480p, analog_* outputs unconnected → pruned).
 // The encoders are gated (EN_YPBPR/EN_YC=0).  Observes the cart pins: do
 // hsync/vsync + the DAC clock TOGGLE, and is RGB present during active?
 //
@@ -57,7 +57,7 @@ module tb_analogizer_chain (
         end
     end
 
-    // ----- scanout (640x480 RGB565, VGA => analog_480p=1) -----
+    // ----- scanout (640x480 RGB565, VGA => analog_timing=480p) -----
     wire        burst_rd; wire [24:0] burst_addr; wire [10:0] burst_len; wire burst_32bit;
     reg  [31:0] burst_data; reg burst_data_valid, burst_data_done;
     wire [23:0] pixel_color; wire pal_busy;
@@ -75,14 +75,14 @@ module tb_analogizer_chain (
         .x_count(x_count), .y_count(y_count), .line_start(line_start),
         .pixel_color(pixel_color),
         .clk_analog(clk), .reset_analog_n(reset_n), .analog_ce_pix(analog_ce_pix),
-        .analog_scanlines(2'd0), .analog_480p(1'b1),
+        .analog_scanlines(2'd0), .analog_timing(2'd1),
         .analog_pixel_clk(), .analog_pixel_color(a_rgb),
         .analog_hblank(a_hb), .analog_vblank(a_vb),
         .analog_hsync(a_hs), .analog_vsync(a_vs),
         .fb_base_addr(25'd0), .color_mode(3'd3), .fb_width(10'd640),
         .fb_height(10'd480), .fb_stride(16'd1280),
         .out_width(10'd640), .out_height(10'd480),
-        // Analog fb params mirror the LCD (this chain runs analog_480p=1).
+        // Analog fb params mirror the LCD (this chain runs the 480p timing).
         .analog_fb_base_addr(25'd0), .analog_color_mode(3'd3),
         .analog_fb_width(10'd640), .analog_fb_height(10'd480),
         .analog_fb_stride(16'd1280),

@@ -48,11 +48,18 @@ module video_CRT_scanout_indexed_BRAM #(
     input wire reset_analog_n,
     input wire analog_ce_pix,
     input wire [1:0] analog_scanlines,
-    // Analog raster select: 1 = 480p/31.5 kHz (slaved to the LCD raster, the
-    // pre-existing behavior, for VGA/scandoubler Analogizer modes); 0 = a
-    // dedicated 240p/15.75 kHz raster for the 15 kHz Analogizer modes
-    // (RGBS/component/composite), independent of the 640x480 LCD raster.
-    input wire analog_480p,
+    // Analog raster timing select:
+    //   2'd0 = 240p/15.75 kHz — dedicated raster for the 15 kHz Analogizer
+    //          modes (RGBS/component/composite), independent of the LCD.
+    //   2'd1 = 480p/31.5 kHz — slaved to the LCD raster (the pre-existing
+    //          behavior, for VGA/scandoubler Analogizer modes).
+    //   2'd2 = 480i NTSC — same 15.75 kHz line off the dedicated raster, but
+    //          interlaced 525-line frames (262.5-line fields, ~60 Hz), each
+    //          field fetching alternate source rows of a 480-tall FB.
+    //   2'd3 = 576i PAL — 786-clock line (15.63 kHz) and 625-line interlaced
+    //          frames (312.5-line fields, 50.03 Hz), free-running (a 50 Hz
+    //          raster cannot phase-lock to the 60 Hz LCD frame).
+    input wire [1:0] analog_timing,
     output reg analog_pixel_clk,
     output reg [23:0] analog_pixel_color,
     output reg analog_hblank,
@@ -126,6 +133,15 @@ module video_CRT_scanout_indexed_BRAM #(
     localparam [9:0] VID_V_ACTIVE_BASE  = 10'd18;
     localparam [9:0] VID_V_CENTER_HEIGHT = 10'd240;
     localparam [9:0] ANALOG_H_ACTIVE_END = 10'd760;
+
+    // Analog raster timing select (see the analog_timing port).
+    localparam [1:0] ATIMING_240P = 2'd0;
+    localparam [1:0] ATIMING_480P = 2'd1;
+    localparam [1:0] ATIMING_480I = 2'd2;
+    localparam [1:0] ATIMING_576I = 2'd3;
+    wire analog_480p       = (analog_timing == ATIMING_480P);
+    wire analog_interlaced = analog_timing[1];
+    wire analog_pal        = (analog_timing == ATIMING_576I);
 
     // Frame-boundary latch for the output geometry.  out_width/out_height are
     // driven from the CPU sysreg domain and may update at any point; if every
@@ -489,8 +505,13 @@ module video_CRT_scanout_indexed_BRAM #(
     wire [9:0] analog_v_center_offset =
         (out_height_analog_safe < VID_V_CENTER_HEIGHT) ?
         ((VID_V_CENTER_HEIGHT - out_height_analog_safe) >> 1) : 10'd0;
+    // 576i letterbox: the active window stays 240 lines per field (480
+    // content lines per frame) inside the ~288 visible lines of a 312/313
+    // line PAL field; +28 raster lines past the NTSC base roughly centers
+    // the picture (top border ~23 visible lines, bottom ~26).
     wire [10:0] analog_v_active_start =
-        {1'b0, VID_V_ACTIVE_BASE} + {1'b0, analog_v_center_offset};
+        {1'b0, VID_V_ACTIVE_BASE} + {1'b0, analog_v_center_offset} +
+        (analog_pal ? 11'd28 : 11'd0);
 
     wire [9:0] lcd_visible_y = y_count - vid_v_active_start[9:0];
     wire [1:0] lcd_line_bank = lcd_visible_y[1:0];
@@ -518,6 +539,12 @@ module video_CRT_scanout_indexed_BRAM #(
     wire [10:0] lcd_line_rd_addr = {lcd_line_bank, lcd_line_rd_index};
 
     localparam [9:0] ANALOG_H_TOTAL_LAST = 10'd779;
+    // PAL line: H_TOTAL 786 advanced at the same 12.288 MHz pixel clock =
+    // 15.634 kHz / 63.96 us (nominal 15.625 kHz / 64.00 us, +0.06% — inside
+    // any PAL TV's tolerance), so no new PLL output is needed.  The active
+    // window (120..760 = 640 px = 52.1 us) and H sync (58 px = 4.72 us) are
+    // correct for both standards and stay shared.
+    localparam [9:0] ANALOG_H_TOTAL_LAST_PAL = 10'd785;
     // 240p frame: H_TOTAL 780 advanced at 12.288 MHz = 15.75 kHz line; 262
     // lines => ~60.1 Hz. (480p keeps following the LCD's y_count / 525 lines.)
     localparam [9:0] ANALOG_V_TOTAL_240  = 10'd262;
@@ -529,6 +556,31 @@ module video_CRT_scanout_indexed_BRAM #(
     reg analog_line_start_ce_d;
     reg [9:0] analog_src_x_scan;
     reg [10:0] analog_x_acc;
+    // Interlace state. analog_field=0 is the SHORT field (262/312 lines,
+    // vsync aligned to line start, shows even source rows); analog_field=1
+    // is the LONG field (263/313 lines, vsync delayed by half a line, shows
+    // odd source rows). The delayed vsync MUST pair with the long field:
+    // delta(f0->f1) = len(f0)+0.5 and delta(f1->f0) = len(f1)-0.5, so only
+    // len 262/263 (312/313) makes consecutive vsyncs sit uniformly 262.5
+    // (312.5) lines apart — the uniform field period the TV's vertical
+    // oscillator holds onto, with the half-line offset that interlaces.
+    reg analog_field;
+    // 480i lock: one interlaced frame = two LCD frames exactly (525 analog
+    // lines of 780 px at 12.288 MHz == 2 x 525 LCD lines of 780 px at
+    // 24.576 MHz), so resyncing on every OTHER LCD wrap is a no-op once
+    // locked and re-acquires within two frames after reset/mode change.
+    reg analog_resync_parity;
+
+    wire [9:0] analog_h_total_last =
+        analog_pal ? ANALOG_H_TOTAL_LAST_PAL : ANALOG_H_TOTAL_LAST;
+    // Mid-line position for the long field's delayed vsync (H_TOTAL/2).
+    wire [9:0] analog_half_line = analog_pal ? 10'd393 : 10'd390;
+    // Lines in the CURRENT field, minus one (counter wrap compare value):
+    // short field 0 = 262 (312), long field 1 = 263 (313) — see analog_field.
+    wire [9:0] analog_v_total_last =
+        analog_pal        ? (analog_field ? 10'd312 : 10'd311) :
+        analog_interlaced ? (analog_field ? 10'd262 : 10'd261) :
+                            (ANALOG_V_TOTAL_240 - 10'd1);
 
     wire analog_line_start_ce = analog_ce_pix && line_start;
     wire analog_line_start = analog_line_start_ce && !analog_line_start_ce_d;
@@ -536,6 +588,14 @@ module video_CRT_scanout_indexed_BRAM #(
     // V counter and only resyncs here, so it stays phase-locked to the 60 Hz
     // frame without inheriting the LCD's 525-line / 31.5 kHz line cadence.
     wire analog_frame_start = analog_line_start && (y_count == 10'd0);
+    // Raster resync policy per timing mode: 240p realigns at every LCD wrap
+    // (pre-existing), 480i at every other wrap (see analog_resync_parity),
+    // 576i never — 50 Hz cannot lock to the 60 Hz LCD, so it free-runs and
+    // accepts tearing against the 60 Hz renderer instead of sync loss.
+    wire analog_raster_resync =
+        analog_pal        ? 1'b0 :
+        analog_interlaced ? (analog_frame_start && analog_resync_parity) :
+                            analog_frame_start;
     wire analog_hblank_now = (analog_out_x < VID_H_ACTIVE_START) ||
                              (analog_out_x >= ANALOG_H_ACTIVE_END);
     wire analog_hsync_now = (analog_out_x < VID_H_SYNC);
@@ -543,7 +603,17 @@ module video_CRT_scanout_indexed_BRAM #(
         analog_v_active_start + {1'b0, analog_active_h};
     wire analog_vblank_now = ({1'b0, analog_line_y} < analog_v_active_start) ||
                              ({1'b0, analog_line_y} >= analog_v_active_end);
-    wire analog_vsync_now = (analog_line_y < VID_V_SYNC);
+    // Vsync: 3 full lines from line start in progressive modes and in the
+    // short field; the long field's vsync is delayed by half a line (starts
+    // mid-line 0, ends mid-line 3) — the half-line offset a TV requires to
+    // deflect this field's lines between the short field's on the CRT face.
+    wire analog_vsync_even = (analog_line_y < VID_V_SYNC);
+    wire analog_vsync_odd =
+        ((analog_line_y == 10'd0) && (analog_out_x >= analog_half_line)) ||
+        (analog_line_y == 10'd1) || (analog_line_y == 10'd2) ||
+        ((analog_line_y == 10'd3) && (analog_out_x < analog_half_line));
+    wire analog_vsync_now = (analog_interlaced && analog_field)
+                            ? analog_vsync_odd : analog_vsync_even;
     wire analog_active_now = !analog_hblank_now && !analog_vblank_now;
     wire [9:0] analog_visible_y = analog_line_y - analog_v_active_start[9:0];
     wire [1:0] analog_line_bank = analog_visible_y[1:0];
@@ -578,6 +648,46 @@ module video_CRT_scanout_indexed_BRAM #(
     wire [9:0]  analog_fetch_src_next =
         (analog_fsrc_next_raw > {1'b0, analog_fsrc_last}) ?
             analog_fsrc_last : analog_fsrc_next_raw[9:0];
+
+    // --- Interlace fetch seeding ---
+    // Each interlaced field walks the same 240-line active window, but the
+    // ODD field must sample the source half a frame-line lower: seed the
+    // vertical accumulator with fb_height/2, expressed in the per-field
+    // accumulator's 1/active_h units. For the canonical 480-tall FB that is
+    // exactly one source row (240 = 1x240 rem 0): even fields fetch rows
+    // 0,2,4,.. and odd fields 1,3,5,.. For a 240-tall FB it is half a step
+    // (rem 120): both fields show every row — line-doubled 240p content on
+    // an interlaced raster, which is the correct degradation.
+    wire [10:0] analog_seed_half = {2'b00, fb_height_analog_safe[9:1]};
+    wire [1:0]  analog_seed_div =
+        (analog_seed_half >= analog_outh_2x) ? 2'd2 :
+        (analog_seed_half >= analog_outh_1x) ? 2'd1 : 2'd0;
+    // Field about to start at a fetch restart: a natural wrap toggles the
+    // field on the same edge (next = ~analog_field); a forced raster resync
+    // forces field 0 instead.
+    wire analog_seed_field = analog_raster_resync ? 1'b0 : ~analog_field;
+    wire analog_fetch_seed_odd = analog_interlaced && analog_seed_field;
+    wire [9:0] analog_fetch_seed_src =
+        analog_fetch_seed_odd ? {8'b0, analog_seed_div} : 10'd0;
+    wire [10:0] analog_fetch_seed_acc =
+        analog_fetch_seed_odd
+            ? (analog_seed_half -
+               ((analog_seed_div == 2'd2) ? analog_outh_2x :
+                (analog_seed_div == 2'd1) ? analog_outh_1x : 11'd0))
+            : 11'd0;
+    // Fetch restart: per LCD frame for 240p/480p (pre-existing), per FIELD
+    // for the interlaced rasters — at the raster's own field wrap, and at
+    // the forced 480i resync (which resets the raster to field 0). In the
+    // locked 480i steady state the resync preempts the natural wrap by one
+    // clk_analog cycle, so the OR is what keeps the fetch restarting there.
+    // No fetch is in flight at either event: the fetch walker stops at the
+    // active end, >=3 (NTSC) / >=25 (PAL) lines before the field wraps.
+    wire analog_field_wrap = issue_analog_read &&
+        (analog_out_x == analog_h_total_last) &&
+        (analog_line_y >= analog_v_total_last);
+    wire analog_fetch_restart = analog_interlaced
+        ? (analog_field_wrap || analog_raster_resync)
+        : analog_frame_start;
     // Issue a fetch when none is in flight, the target line is in the active
     // region, and it stays <=2 lines ahead of the displayed line (so it never
     // overruns the 4-bank cache nor writes the bank being read this line).
@@ -730,6 +840,8 @@ module video_CRT_scanout_indexed_BRAM #(
             analog_mux_phase <= 2'd0;
             analog_out_x <= 10'd0;
             analog_line_y <= 10'd0;
+            analog_field <= 1'b0;
+            analog_resync_parity <= 1'b0;
             analog_line_second <= 1'b0;
             analog_line_start_ce_d <= 1'b0;
             analog_src_x_scan <= 10'd0;
@@ -795,11 +907,15 @@ module video_CRT_scanout_indexed_BRAM #(
                 analog_fetch_ack_sync2 <= analog_fetch_ack_sync1;
                 if (analog_fetch_ack_sync2)
                     analog_fetch_request <= 1'b0;
-                if (analog_frame_start) begin
+                // 480i resync cadence: every other LCD wrap (see
+                // analog_resync_parity declaration).
+                if (analog_frame_start)
+                    analog_resync_parity <= ~analog_resync_parity;
+                if (analog_fetch_restart) begin
                     analog_fetch_request <= 1'b0;
                     analog_fetch_line <= analog_v_active_start[9:0];
-                    analog_fetch_src  <= 10'd0;
-                    analog_fy_acc     <= 11'd0;
+                    analog_fetch_src  <= analog_fetch_seed_src;
+                    analog_fy_acc     <= analog_fetch_seed_acc;
                 end else if (analog_fetch_can_issue) begin
                     analog_fetch_request     <= 1'b1;
                     analog_fetch_out_latched <= analog_fetch_line - analog_v_active_start[9:0];
@@ -850,24 +966,32 @@ module video_CRT_scanout_indexed_BRAM #(
             // LCD 525-line raster). 240p: restart only at the frame boundary;
             // analog_out_x free-runs 0..779 and analog_line_y is its own
             // 262-line counter, so the analog scan decouples from the LCD line
-            // cadence and lands at 15.75 kHz / ~60 Hz.
+            // cadence and lands at 15.75 kHz / ~60 Hz. 480i: same free-running
+            // raster, resynced at every other LCD wrap (forcing field 0).
+            // 576i: fully free-running (analog_raster_resync is constant 0).
             if ((HAS_ANALOG_RASTER != 0) &&
-                (analog_480p ? analog_line_start : analog_frame_start)) begin
+                (analog_480p ? analog_line_start : analog_raster_resync)) begin
                 analog_out_x <= 10'd0;
                 analog_line_y <= analog_480p ? y_count : 10'd0;
+                analog_field <= 1'b0;
                 analog_line_second <= 1'b0;
                 analog_src_x_scan <= 10'd0;
                 analog_x_acc <= 11'd0;
             end else if (issue_analog_read) begin
-                if (analog_out_x == ANALOG_H_TOTAL_LAST) begin
+                if (analog_out_x == analog_h_total_last) begin
                     analog_out_x <= 10'd0;
                     analog_line_second <= ~analog_line_second;
                     analog_src_x_scan <= 10'd0;
                     analog_x_acc <= 11'd0;
-                    if (!analog_480p)
-                        analog_line_y <=
-                            (analog_line_y >= ANALOG_V_TOTAL_240 - 10'd1)
-                            ? 10'd0 : analog_line_y + 10'd1;
+                    if (!analog_480p) begin
+                        if (analog_line_y >= analog_v_total_last) begin
+                            analog_line_y <= 10'd0;
+                            analog_field <= analog_interlaced ? ~analog_field
+                                                              : 1'b0;
+                        end else begin
+                            analog_line_y <= analog_line_y + 10'd1;
+                        end
+                    end
                 end else begin
                     analog_out_x <= analog_out_x + 10'd1;
                     if (!analog_active_now) begin

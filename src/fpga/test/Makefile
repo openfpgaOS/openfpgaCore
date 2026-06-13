@@ -218,7 +218,15 @@ HPSBRG_FLAGS = -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC -Wno-CASEINCOMPLETE -Wno-UNUSEDS
 # Boots the VexiiRiscv through the v2 fabric, loads os.bin into the
 # simulated CRAM0, and prints anything the kernel pushes out UART.
 # Requires firmware.mif + os.bin to be present in ../../firmware/os/.
-SYSTEM_SRCS = \
+# The CPU netlist is per-target since the MiSTer went dual-issue:
+# VexiiRiscv.v = Pocket single-issue, VexiiRiscv_mister.v = MiSTer
+# --decoders=2 --lanes=2 (same module name and AXI interface, so the
+# surrounding fabric sources are identical).  `make system` boots the
+# Pocket netlist, `make system-mister` the dual-issue one.
+VEXII_POCKET = ../vendor/vexriscv/VexiiRiscv/VexiiRiscv.v
+VEXII_MISTER = ../vendor/vexriscv/VexiiRiscv/VexiiRiscv_mister.v
+
+SYSTEM_SRCS_BASE = \
 	tb_system.v \
 	bram_model.v \
 	sdram_fast_model.v \
@@ -237,12 +245,14 @@ SYSTEM_SRCS = \
 	$(COMMON_DIR)/gpu_core.v \
 	$(COMMON_DIR)/gpu_edge_walker.v \
 	$(COMMON_DIR)/gpu_tex_cache.v \
-	../vendor/vexriscv/VexiiRiscv/VexiiRiscv.v \
 	$(TARGET_DIR)/apf/common.v
+
+SYSTEM_SRCS = $(SYSTEM_SRCS_BASE) $(VEXII_POCKET)
 
 SYSTEM_CPP = tb_system_main.cpp
 SYSTEM_TOP = tb_system
 SYSTEM_DIR = obj_dir_system
+SYSTEM_MISTER_DIR = obj_dir_system_mister
 SYSTEM_FLAGS = -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC -Wno-CASEINCOMPLETE \
                -Wno-SYNCASYNCNET -Wno-UNOPTFLAT -Wno-STMTDLY -Wno-PINMISSING \
                -Wno-UNUSEDSIGNAL -Wno-UNDRIVEN -Wno-UNUSEDPARAM \
@@ -253,7 +263,7 @@ SYSTEM_FLAGS = -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC -Wno-CASEINCOMPLETE \
 # Targets
 # ============================================================
 .PHONY: all sdram sdram-serialize sdram-native2 sdram-wcont0 sdram-all sram scanout scanout-lean analogchain gpu gpu-persp gpu-floor gpu-gpudemo gpu-acceptance gpu-acceptance-single gpu-acceptance-os30 gpu-acceptance-burst2 gpu-acceptance-all gpu-chain \
-        axi-periph bridge-cmd bridge-rx audio audio-mixer arbiter system run run-sram build clean
+        axi-periph bridge-cmd bridge-rx audio audio-mixer arbiter system system-mister run run-sram build clean
 
 all: sdram-all sram gpu gpu-persp axi-periph bridge-cmd bridge-rx audio audio-mixer arbiter hps-bridge
 
@@ -592,6 +602,19 @@ $(SYSTEM_DIR)/V$(SYSTEM_TOP): $(SYSTEM_SRCS) $(SYSTEM_CPP)
 		--top-module $(SYSTEM_TOP) --Mdir $(SYSTEM_DIR) \
 		-I$(COMMON_DIR) -I$(TARGET_DIR) -I. \
 		$(SYSTEM_SRCS) $(SYSTEM_CPP)
+
+# Same bring-up against the MiSTer dual-issue netlist. Requires
+# TARGET=sim firmware in ../../firmware/os/ exactly like `make system`.
+system-mister: $(SYSTEM_MISTER_DIR)/V$(SYSTEM_TOP)
+	@printf "\n=== system bring-up (tb_system, dual-issue MiSTer CPU) ===\n"
+	./$(SYSTEM_MISTER_DIR)/V$(SYSTEM_TOP)
+
+$(SYSTEM_MISTER_DIR)/V$(SYSTEM_TOP): $(SYSTEM_SRCS_BASE) $(VEXII_MISTER) $(SYSTEM_CPP)
+	$(VERILATOR) $(VERILATOR_FLAGS_NOTRACE) $(SYSTEM_FLAGS) \
+		-CFLAGS -DSYSTEM_NO_REGFILE_PEEK \
+		--top-module $(SYSTEM_TOP) --Mdir $(SYSTEM_MISTER_DIR) \
+		-I$(COMMON_DIR) -I$(TARGET_DIR) -I. \
+		$(SYSTEM_SRCS_BASE) $(VEXII_MISTER) $(SYSTEM_CPP)
 
 # --- Clean ---
 clean:

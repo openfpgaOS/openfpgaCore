@@ -8,8 +8,11 @@ is the original and `sim` shows the minimal firmware-only shape.
 
 Everything is auto-discovered: a directory under `src/fpga/targets/<name>/`
 with a `Makefile` makes `make <goal> TARGET=<name>` and `make use-<name>`
-work from the root with **no root-Makefile edits** (only `package`/`sdk`
-need an arm if the target ships artifacts differently).
+work from the root with **zero root-Makefile edits**. The root names no
+target — it forwards every goal (including `package`) to your target
+Makefile, loops every target's `sdk-runtime.sh` for `make sdk`, and reads
+each target's `about.txt` for `make help`. Add the directory, implement
+the contract, done.
 
 ---
 
@@ -68,11 +71,33 @@ contracts when instantiating the common RTL:
   BRAM init inside `axi_periph_slave`).
 - **`Makefile`** — mirror `mister/Makefile`. The root delegates these
   goals, so provide them all: `full cpu bootloader os firmware compile
-  build check test timing report sweep deploy clean`. Set `PROJECT` and
-  pass `PROJECT=`/`CLOCK_RE=` (the 100 MHz clock's BRE in the Fmax table)
-  to `tools/sweep.sh`; `tools/report.sh` only needs `PROJECT`.
-  `deploy` refreshes `build/<name>/` only — device pushing belongs to
-  the SDK (see §5).
+  build check test timing report sweep deploy package clean`. Set
+  `PROJECT` and pass `PROJECT=`/`CLOCK_RE=` (the 100 MHz clock's BRE in
+  the Fmax table) to `tools/sweep.sh`; `tools/report.sh` only needs
+  `PROJECT`. `deploy` refreshes `build/<name>/` from on-disk artifacts;
+  `package` assembles the **release** layout under `build/<name>/` (Pocket
+  = APF `Cores/Assets/Platforms` tree; MiSTer = `rbf + boot.rom`). A goal
+  that doesn't apply must still exist — MiSTer's `program` just prints
+  guidance and exits 1, so the root's delegation never hits make's "no
+  rule" error.
+- **`about.txt`** — one line shown in `make help`'s target list, e.g.
+  `MiSTer / DE10-Nano — Cyclone V SE A6 (Quartus 17.0.x)`.
+- **`sdk-runtime.sh <sdk_dir>`** — copies THIS target's runtime artifacts
+  into an SDK checkout under `runtime/<target>/` (bitstream, kernel,
+  loader, …). Run from anywhere (resolve paths via `$0`); the root `make
+  sdk` loops every target's script. Gate the kernel copy on the firmware
+  build stamp (`src/firmware/os/.last_target`) so you never publish
+  another target's `os.bin`. Each target gets its own subdir — Pocket
+  writes `runtime/pocket/{bitstream.rbf_r, os.bin, loader.bin,
+  ap_core.sof}`, MiSTer writes `runtime/mister/{openfpgaOS.rbf, os.bin}`.
+  Only genuinely target-agnostic files (the SC-55 `bank.ofsf`) live at
+  `runtime/` root, written by the root sdk rule.
+
+A different FPGA **vendor** (Xilinx/Vivado, Lattice/oss-cad, Gowin, …) is
+just a target whose Makefile invokes that vendor's tools inside these
+goals — the root and the shared RTL under `src/fpga/common/` are
+vendor-neutral, and `make help` reads your toolchain string straight from
+`about.txt`.
 
 Validate before any hardware exists:
 
@@ -154,17 +179,33 @@ hardware or Verilator. The stub-header pattern there (`-include` a fake
 
 ## 5. SDK: `openfpgaSDK/src/sdk/platforms/<name>/`
 
-- `copy.sh` with the **pocket-compatible signature**
-  `copy.sh <APP> <ELF> [DEST]` — that's what scaffolded app Makefiles
-  call, so `make copy TARGET=<name>` works from any app dir. Support a
-  `core` mode for core-only bring-up.
-- Whatever packaging your platform needs (MiSTer: `mkimage.{c,sh}`
-  builds the FAT32 image with FatFs itself — steal it if your target
-  also uses a disk image; preallocation-contiguity of the save files is
-  part of the power-cut safety story).
-- The OS repo's `make sdk DEST=` should sync your runtime artifacts —
-  add an arm next to the `runtime/mister/` block in the root Makefile,
-  using the firmware `.last_target` stamp to route os.bin.
+The SDK is target-generic the same way the OS repo is: every verb
+(`build`/`copy`/`package`/`release`) dispatches to your platform
+directory, so adding a target = add `src/sdk/platforms/<name>/` plus a
+`runtime/<name>/`. The shared SDK Makefile + `scripts/` name no target.
+Full contract in `openfpgaSDK` — provide these four scripts/files:
+
+- `platform.conf` — sourced by `scripts/release.sh`:
+  `PLATFORM_PRODUCT`, `PLATFORM_TAG_SUFFIX`, `PLATFORM_BUNDLE_KIND`
+  (`apf`|`image`), `PLATFORM_COREJSON` (`bundle`|`dist`).
+- `image.sh <app> <elf> <sdk_root> <dist_dir|""> [assets...]` — assemble
+  ONE app's deliverable into `build/<name>/<app>/`. Custom cores pass a
+  `dist_dir`; SDK demo apps pass `""` (a platform with a shared demo core
+  like Pocket should no-op then — those apps bundle via `make build
+  CORE=sdk`).
+- `copy.sh <app> <elf> [host]` — deploy to the device. `MISTER_IP` (or
+  your own host var) arrives via the environment, so the shared `copy`
+  rule needs no per-target branch; support a `core` mode for core-only
+  bring-up. (MiSTer: `mkimage.{c,sh}` builds the FAT32 image with FatFs
+  itself — steal it if you also use a disk image; the save files'
+  preallocation-contiguity is part of the power-cut-safety story.)
+- `package.sh <build_dir> <label> <releases_dir>` — zip one built bundle
+  into `releases/<name>/`; exit 0 to skip a dir that isn't your kind.
+
+`make sdk DEST=<sdk>` from the OS repo populates `runtime/<name>/`
+automatically (it runs your target's `sdk-runtime.sh`, §2) — **no SDK or
+OS root-Makefile edits.** `make help` lists `TARGET=<discovered
+platforms>` on its own.
 
 ## 6. Final checklist
 
@@ -178,7 +219,11 @@ hardware or Verilator. The stub-header pattern there (`-include` a fake
 - [ ] Pocket `make check` still passes if you touched shared RTL —
       MiSTer-only hooks in shared files are tied off on other targets
       (see `axi_periph_slave.v` REGION_HPS / arbiter M2 read channel)
-- [ ] `make package TARGET=<name>` arm in the root Makefile
+- [ ] `make package TARGET=<name>` works (the target Makefile's own
+      `package` goal — no root edit) and `about.txt` + `sdk-runtime.sh`
+      are present
+- [ ] SDK platform dir (`platforms/<name>/`: platform.conf, image.sh,
+      copy.sh, package.sh) + `runtime/<name>/` populated by `make sdk`
 - [ ] Target README (`targets/<name>/README.md`) + root README updated
 - [ ] Bring-up phases planned smallest-first: terminal → input → storage
       → saves → full app suite

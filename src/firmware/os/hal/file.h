@@ -80,6 +80,12 @@ int of_file_get_name(uint32_t slot_id, char *name_out, uint32_t name_max);
  * Boot diagnostic for the position-indexed entry layout contract. */
 int of_file_datatable_word(uint32_t word, uint32_t *value_out);
 
+/* Resolve a data slot id to its datatable ENTRY index by scanning the
+ * entries' id words (never the positional fast path — see file.c).  Used
+ * by save.c's entry-resolved size commits (OF_HW_SAVE_DT_WORD).  Returns
+ * <0 when no entry holds that id (file never loaded/created). */
+int of_file_datatable_entry_for_slot(uint32_t slot_id, uint32_t *entry_out);
+
 long of_file_flags(uint32_t slot_id);
 long of_file_size(uint32_t slot_id);      /* legacy/saturating on rv32 */
 int64_t of_file_size64(uint32_t slot_id);

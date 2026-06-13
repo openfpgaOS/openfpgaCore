@@ -973,8 +973,27 @@ function [9:0] scaler_slot_height;
 	end
 endfunction
 
-wire [9:0] crt_h_active = scaler_slot_width(video_scaler_slot_vid);
-wire [9:0] crt_v_active = scaler_slot_height(video_scaler_slot_vid);
+// v1: pin the raster to the FULL 640x480 active window for every mode and
+// let the scanout DDA upscale the app framebuffer to fill it (the exact
+// path the Pocket uses for Analogizer RGBHV, and the tb_scanout UPSCALE
+// test).  Hardware observation 2026-06-12: with the slot-sized windows
+// (e.g. Doom/Quake at 320x200) the ascal INPUT stage is fine — OSD
+// screenshots capture the game correctly — but the HDMI output stays
+// BLANK; the terminal and Diablo at the full 640x480 window are solid on
+// the same chain.  Pinning the window makes the framework see a constant
+// 640x480@60 input regardless of app mode, sidestepping whatever the
+// ARM-side mode filter dislikes about a 200-line active region on a
+// 31.5 kHz raster.  The slot functions above are kept for the future
+// native-window revival (single-pass ascal scale is crisper than
+// DDA-then-ascal); video_scaler_slot_vid keeps arriving from the periph.
+wire [9:0] crt_h_active = 10'd640;
+wire [9:0] crt_v_active = 10'd480;
+// Lint: slot-sized windows parked until the framework blank is
+// root-caused; keep the decode functions referenced but folded.
+wire [9:0] crt_unused_slot_dims =
+	scaler_slot_width(video_scaler_slot_vid) ^
+	scaler_slot_height(video_scaler_slot_vid);
+wire crt_unused_slot_dims_nc = &{1'b0, crt_unused_slot_dims};
 wire [9:0] crt_v_center_offset =
 	(crt_v_active < CRT_V_CENTER_HEIGHT) ?
 	((CRT_V_CENTER_HEIGHT - crt_v_active) >> 1) : 10'd0;
@@ -1012,7 +1031,7 @@ video_CRT_scanout_indexed_BRAM scanout (
 	.reset_analog_n(reset_n_vid),
 	.analog_ce_pix(),
 	.analog_scanlines(2'b00),
-	.analog_480p(1'b1),
+	.analog_timing(2'd1),    // 480p (analog raster dormant on MiSTer)
 	.analog_pixel_clk(),
 	.analog_pixel_color(),
 	.analog_hblank(),

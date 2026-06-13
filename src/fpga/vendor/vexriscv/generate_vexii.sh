@@ -60,9 +60,39 @@
 #   0x40000000   1 GB  IO + SDRAM_UC — main=0, exe=0
 #
 # Prerequisites: java, sbt
-# Usage: ./generate_vexii.sh
+# Usage: ./generate_vexii.sh [pocket|mister]
+#
+# Variants (same ISA, same PMA map, same AXI master interface — the
+# downstream cpu_system.v fabric is identical for both):
+#   pocket (default) — single-issue, every flag above tuned against the
+#                      Pocket's Cyclone V E A4 / C8 grade at 100 MHz.
+#                      Output: VexiiRiscv/VexiiRiscv.v
+#   mister           — the same config plus DUAL ISSUE (--decoders=2
+#                      --lanes=2) for the DE10-Nano's Cyclone V SE A6 /
+#                      I7 grade (2.3x the ALMs, faster grade than C8).
+#                      Issue width is microarchitectural: firmware and
+#                      apps are unchanged.  Late-ALU is a deliberate
+#                      follow-up knob — enable only after STA shows
+#                      headroom on a plain dual-issue build.
+#                      Output: VexiiRiscv/VexiiRiscv_mister.v
 
 set -e
+
+VARIANT="${1:-pocket}"
+case "$VARIANT" in
+    pocket)
+        EXTRA_FLAGS=""
+        OUTPUT_NAME="VexiiRiscv.v"
+        ;;
+    mister)
+        EXTRA_FLAGS="--decoders=2 --lanes=2"
+        OUTPUT_NAME="VexiiRiscv_mister.v"
+        ;;
+    *)
+        echo "Error: unknown variant '$VARIANT' (pocket|mister)"
+        exit 1
+        ;;
+esac
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 VEXII_DIR="$SCRIPT_DIR/VexiiRiscv"
@@ -72,8 +102,16 @@ if [ ! -d "$VEXII_DIR" ]; then
     exit 1
 fi
 
-echo "Generating VexiiRiscv (stock vexiiriscv.Generate, openfpgaOS cache sizing)..."
+echo "Generating VexiiRiscv [$VARIANT] (stock vexiiriscv.Generate, openfpgaOS cache sizing)..."
 cd "$VEXII_DIR"
+
+# sbt always emits VexiiRiscv.v; protect another variant's netlist from
+# being clobbered while this variant generates (it is mv'd back below).
+STASHED=""
+if [ "$OUTPUT_NAME" != "VexiiRiscv.v" ] && [ -f "$VEXII_DIR/VexiiRiscv.v" ]; then
+    mv "$VEXII_DIR/VexiiRiscv.v" "$VEXII_DIR/VexiiRiscv.v.stash"
+    STASHED="yes"
+fi
 
 sbt -Dsbt.server.forcestart=true --batch "Test/runMain vexiiriscv.Generate \
       --xlen=32 \
@@ -104,23 +142,39 @@ sbt -Dsbt.server.forcestart=true --batch "Test/runMain vexiiriscv.Generate \
       --region base=10000000,size=4000000,main=1,exe=1 \
       --region base=20000000,size=10000000,main=0,exe=0 \
       --region base=30000000,size=1000000,main=0,exe=0 \
-      --region base=40000000,size=40000000,main=0,exe=0"
+      --region base=40000000,size=40000000,main=0,exe=0 \
+      $EXTRA_FLAGS"
 
-OUTPUT="$VEXII_DIR/VexiiRiscv.v"
-if [ ! -f "$OUTPUT" ]; then
+GENERATED="$VEXII_DIR/VexiiRiscv.v"
+OUTPUT="$VEXII_DIR/$OUTPUT_NAME"
+if [ ! -f "$GENERATED" ]; then
     echo "ERROR: VexiiRiscv.v not found after generation"
     exit 1
 fi
+# Non-default variants are renamed so the targets keep independent
+# netlists (the module name inside stays VexiiRiscv — cpu_system.v
+# instantiates it by name; only the file differs per target).
+if [ "$GENERATED" != "$OUTPUT" ]; then
+    mv "$GENERATED" "$OUTPUT"
+fi
+if [ -n "$STASHED" ]; then
+    mv "$VEXII_DIR/VexiiRiscv.v.stash" "$VEXII_DIR/VexiiRiscv.v"
+fi
 
+if [ "$VARIANT" = "pocket" ]; then
 # The generated execute_freeze_valid cone fans into the whole CPU
 # ready/valid network.  Quartus otherwise tends to keep it as one huge
 # high-fanout control net, which leaves the worst path from execute/FPU
 # control back to the I-cache read enable route-limited.  Add a local
 # synthesis hint after generation so the fitter can insert replicas.
+# POCKET-ONLY: this hint (and the rejected ones in the notes below) was
+# A/B-tuned against the A4/C8 fitter; the MiSTer A6/I7 netlist starts
+# clean and gets its own pass only if STA demands one.
 perl -0pi -e 's/  wire                execute_freeze_valid;/  (* maxfan = 16 *) wire                execute_freeze_valid;/' "$OUTPUT"
 if ! grep -q "maxfan = 16.*execute_freeze_valid" "$OUTPUT"; then
     echo "ERROR: failed to annotate execute_freeze_valid maxfan hint"
     exit 1
+fi
 fi
 
 # NOTE: maxfan=8 annotations on LsuL1 banksWrite_mask/waysWrite_mask were
@@ -146,6 +200,6 @@ if grep -q '\$urandom' "$OUTPUT"; then
 fi
 
 echo ""
-echo "Done! Generated $OUTPUT"
+echo "Done! Generated $OUTPUT ($VARIANT)"
 echo "Top module: VexiiRiscv"
 echo "Masters   : FetchL1Axi4Plugin_logic_axi_* (I\$), LsuL1Axi4Plugin_logic_axi_* (D\$)"

@@ -65,6 +65,10 @@ input   wire    [31:0]  savestate_size,
 input   wire    [31:0]  savestate_maxloadsize,
 
 output  reg             osnotify_inmenu,
+// OS Notify: Docked State (host cmd 0x00B2) — 1 while the Pocket sits in
+// the Dock.  Latched and ACKed (see the 0x00B2 arm); also the clean signal
+// for dock-aware policies (e.g. fixed-60Hz VRR when docked).
+output  reg             osnotify_docked,
 
 output  reg             savestate_start,        // core should detect rising edge on this,
 input   wire            savestate_start_ack,    // and then assert ack for at least 1 cycle
@@ -199,6 +203,7 @@ initial begin
     savestate_start <= 0;
     savestate_load <= 0;
     osnotify_inmenu <= 0;
+    osnotify_docked <= 0;
     shutdown_pending <= 0;
 
     status_setup_done_queue <= 0;
@@ -492,6 +497,28 @@ always @(posedge clk) begin
         16'h00B0: begin
             // OS Notify: Menu State
             osnotify_inmenu <= host_20[0];
+            hstate <= ST_DONE_OK;
+        end
+        // DOCK FIX 2026-06-11: the three OS-Notify commands below used to
+        // fall into `default` and answer 0x4F4BFFFF ("unknown command").
+        // 0x00B2 is sent by the host exactly when the Pocket is docked —
+        // an ERR reply there is the one signal path that fires ONLY in the
+        // dock-and-broken case (LCD never sends it), and is the prime
+        // suspect for the host refusing to bring core video up on HDMI
+        // (orange placeholder).  Notifies must be ACKed OK like 0x00B0.
+        16'h00B1: begin
+            // OS Notify: Cartridge Adapter — informational; ACK OK.
+            hstate <= ST_DONE_OK;
+        end
+        16'h00B2: begin
+            // OS Notify: Docked State
+            osnotify_docked <= host_20[0];
+            hstate <= ST_DONE_OK;
+        end
+        16'h00B8: begin
+            // OS Notify: Display Mode — the docs note some modes mandate
+            // acknowledgment; ACK OK.  (Grayscale-mandating modes would
+            // additionally want grayscale rendering — not gated here.)
             hstate <= ST_DONE_OK;
         end
         default: begin

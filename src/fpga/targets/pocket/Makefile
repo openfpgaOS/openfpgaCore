@@ -19,8 +19,8 @@ VEXII_DIR  = ../../vendor/vexriscv/VexiiRiscv
 VEXII_OUT  = $(VEXII_DIR)/VexiiRiscv.v
 TEST_DIR   = ../../test
 ROOT_DIR   = ../../../..
-RELEASE_DIR = $(ROOT_DIR)/build/Cores/ThinkElastic.openfpgaOS
-ASSETS_DIR  = $(ROOT_DIR)/build/Assets/openfpgaos/common
+RELEASE_DIR = $(ROOT_DIR)/build/pocket/Cores/ThinkElastic.openfpgaOS
+ASSETS_DIR  = $(ROOT_DIR)/build/pocket/Assets/openfpgaos/common
 TOOLS_DIR   = $(ROOT_DIR)/tools
 REVERSE_BITS = $(TOOLS_DIR)/reverse_bits
 
@@ -234,6 +234,47 @@ deploy: install-os install-bitstream
 # patches the .sof's MIF, and reinstalls the bitstream + os.bin to
 # build/). The old `flash` was identical except for the recipe order.
 
+# ── Package: APF SD-card tree → build/pocket/ ────────────────────────
+# Assembles the Analogue Pocket SD-card layout (Cores/Assets/Platforms)
+# from the on-disk build artifacts.  Invoked by the root `make package`,
+# which delegates to whichever target is selected — the root names no
+# target, so this layout is entirely the Pocket target's concern.
+DIST_DIR      = $(ROOT_DIR)/dist/core
+PLATFORM_DIST = $(ROOT_DIR)/dist/platforms
+CHIP32_LOADER = $(ROOT_DIR)/src/chip32/pocket/loader.bin
+PKG_DIR       = $(ROOT_DIR)/build/pocket
+JSON_FILES    = core.json video.json audio.json input.json data.json variants.json interact.json
+
+define INSTALL_TEXT
+openfpgaOS — Installation
+
+1. Copy the contents of this folder to your SD card root (merge with existing)
+2. Power on your Analogue Pocket → Cores → ThinkElastic.openfpgaOS
+
+For game development, use the SDK: https://github.com/ThinkElastic/openfpgaOS-SDK
+endef
+export INSTALL_TEXT
+
+package: $(REVERSE_BITS)
+	@rm -rf $(PKG_DIR)
+	@mkdir -p $(RELEASE_DIR) $(PKG_DIR)/Platforms/_images $(ASSETS_DIR)
+	@$(REVERSE_BITS) output_files/$(PROJECT).rbf $(RELEASE_DIR)/bitstream.rbf_r > /dev/null
+	@# chip32 loader is a small assembled artifact; build it on demand so
+	@# packaging never fails on a fresh checkout.
+	@test -f $(CHIP32_LOADER) || $(MAKE) -s -C $(ROOT_DIR)/src/chip32/pocket
+	@cp $(CHIP32_LOADER) $(RELEASE_DIR)/loader.bin
+	@cp $(FW_DIR)/os.bin $(RELEASE_DIR)/os.bin
+	@cp $(FW_DIR)/os.bin $(ASSETS_DIR)/os.bin
+	@for f in $(JSON_FILES); do cp $(DIST_DIR)/$$f $(RELEASE_DIR)/; done
+	@cp $(PLATFORM_DIST)/*.json $(PKG_DIR)/Platforms/
+	@cp $(PLATFORM_DIST)/_images/*.bin $(PKG_DIR)/Platforms/_images/
+	@test -f $(DIST_DIR)/icon.bin && cp $(DIST_DIR)/icon.bin $(RELEASE_DIR)/ || true
+	@echo "$$INSTALL_TEXT" > $(PKG_DIR)/INSTALL.txt
+	@echo ""
+	@printf "  $(C_OK)Package ready$(C_RESET) → build/pocket/\n"
+	@echo ""
+	@tree -L 4 $(PKG_DIR) 2>/dev/null || find $(PKG_DIR) -type f | sort
+
 # ── SDK sync (delegates to top-level Makefile) ───────────────────────
 # Lets you run `make sdk DEST=path/to/sdk` from this directory and
 # have it forward to the openfpgaOS root, where the actual sync logic
@@ -352,5 +393,5 @@ clean:
 # Alias for root Makefile compatibility
 clean-all: clean
 
-.PHONY: all full help cpu bootloader firmware os compile build test check deploy sdk program report
+.PHONY: all full help cpu bootloader firmware os compile build test check deploy sdk program report package
 .PHONY: install-os install-bitstream timing summary sweep clean clean-all

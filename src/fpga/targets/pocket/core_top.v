@@ -276,6 +276,16 @@ wire [3:0] analogizer_video_type_core = analogizer_settings_core[13:10];
 wire [3:0] analogizer_video_type_vid  = analogizer_settings_vid[13:10];
 wire       analogizer_15khz_core = (analogizer_video_type_core[2:0] <= 3'd4);
 wire       analogizer_15khz_vid  = (analogizer_video_type_vid[2:0] <= 3'd4);
+// "Analogizer Timing" menu field, bits 19:18 of the settings register:
+// 00=240p (default, pre-existing), 01=480i NTSC, 10=576i PAL.  Only the
+// 15 kHz modes consume it; RGBHV/scandoubler stays on the 480p raster.
+wire [1:0] analogizer_timing_sel_vid = analogizer_settings_vid[19:18];
+// Scanout analog raster timing select (ATIMING_* in the scanout module):
+// 0=240p, 1=480p, 2=480i, 3=576i.
+wire [1:0] analog_timing_vid =
+    (!analogizer_ena_vid || !analogizer_15khz_vid) ? 2'd1 :
+    (analogizer_timing_sel_vid == 2'd1)            ? 2'd2 :
+    (analogizer_timing_sel_vid == 2'd2)            ? 2'd3 : 2'd0;
 
 
 
@@ -503,11 +513,15 @@ assign cart_tran_bank3_dir = 1'b0;
 // Analogizer: video output only — SNAC pins now driven by CPU through above mux
 openFPGA_Pocket_Analogizer #(
     .MASTER_CLK_FREQ(49_152_000),
-    // RGBS/RGsB/RGBHV(VGA) only — gate out the YPbPr (component) and Y/C
-    // (S-video) encoders (~700-900 ALMs) so the design fits/closes timing.
-    // SCART-RGB and 640x480 RGBHV both use the base RGB path, unaffected by these.
-    .EN_YPBPR(0),
-    .EN_YC(0)
+    // Full encoder set: YPbPr (component) and Y/C (S-Video NTSC + PAL-60)
+    // re-enabled 2026-06-12 — the historic cut (~700-900 ALM estimate) was
+    // made against a >94% ALM design; measuring against today's ~93% OS25.
+    // The Y/C support inputs the module actually takes (CHROMA_PHASE_INC,
+    // PALFLAG) are driven above with 49.152 MHz-domain NTSC/PAL constants.
+    // If ALM/WNS regress past the OS25 reference (-0.526 on mp_ram
+    // general[0]), revert to (0,0) or fund with a donor cut.
+    .EN_YPBPR(1),
+    .EN_YC(1)
 ) analogizer (
     .i_clk(clk_core_49152),
     .i_rst(~reset_n_analog),
@@ -1722,6 +1736,10 @@ end
     wire            savestate_load_err;
 
     wire            osnotify_inmenu;
+    // Docked-state notify (host cmd 0x00B2) — latched by core_bridge_cmd.
+    // Currently observation-only; the planned consumer is the VRR policy
+    // (fixed 60 Hz while docked, adaptive when handheld).
+    wire            osnotify_docked;
 
     // CPU-side signals (in clk_ram_controller domain)
     wire            cpu_target_dataslot_read;
@@ -1884,6 +1902,17 @@ wire bridge_datatable_write =
 wire [3:0]  cpu_save_dt_slot;
 wire [31:0] cpu_save_dt_size;
 wire        cpu_save_dt_commit;
+// Entry-resolved commit address (SAVE_DT_WORD, HW_FEATURES bit 24): the OS
+// scans the datatable for the entry whose id word matches the data slot and
+// supplies entry*2+1 directly, because the legacy fixed mapping below is
+// only valid for layouts where every declared slot loaded a file (the
+// Pocket compacts the table to loaded slots — Diablo's optional slots shift
+// every save entry, landing legacy commits on the WRONG entry: ini flushed
+// at the save archive's size, saves never created).  word_mode arms on a
+// SAVE_DT_WORD write and clears on a SAVE_DT_SLOT write, so an old os.bin
+// (which never writes 0xC8) drives the legacy path bit-identically.
+wire [9:0]  cpu_save_dt_word;
+wire        cpu_save_dt_word_mode;
 
 // CDC: synchronize the commit toggle from clk_ram_controller to clk_74a.
 // A single-cycle pulse can be missed between 100 MHz and 74.25 MHz; the
@@ -1894,29 +1923,47 @@ always @(posedge clk_74a)
 
 wire save_dt_commit_event = save_dt_commit_sync[1] ^ save_dt_commit_sync[2];
 
-// Latch slot/size in clk_ram_controller domain (stable when commit arrives)
+// Latch slot/size/word in clk_ram_controller domain (stable when commit
+// arrives — the OS writes the selector registers strictly before the
+// SAVE_DT_SIZE commit write, so all of these are settled long before the
+// commit toggle crosses).
 reg [3:0]  save_dt_slot_latch;
 reg [31:0] save_dt_size_latch;
+reg [9:0]  save_dt_word_latch;
+reg        save_dt_word_mode_latch;
 always @(posedge clk_ram_controller) begin
     save_dt_slot_latch <= cpu_save_dt_slot;
     save_dt_size_latch <= cpu_save_dt_size;
+    save_dt_word_latch <= cpu_save_dt_word;
+    save_dt_word_mode_latch <= cpu_save_dt_word_mode;
 end
 
 // CDC the latched values (they're stable for many cycles before commit rises)
 reg [3:0]  save_dt_slot_sync;
 reg [31:0] save_dt_size_sync;
+reg [9:0]  save_dt_word_sync;
+reg        save_dt_word_mode_sync;
 always @(posedge clk_74a) begin
     save_dt_slot_sync <= save_dt_slot_latch;
     save_dt_size_sync <= save_dt_size_latch;
+    save_dt_word_sync <= save_dt_word_latch;
+    save_dt_word_mode_sync <= save_dt_word_mode_latch;
 end
 
+// Word mode: the OS supplied the exact datatable word address (entry*2+1,
+// resolved by id scan) — no range gate beyond the 10-bit address itself;
+// the legacy mapping keeps its original slot validity check unchanged.
 wire save_dt_commit_valid =
     save_dt_commit_event &&
-    ((save_dt_slot_sync == PRESAVE_DT_SLOT) || (save_dt_slot_sync < 4'd10));
+    (save_dt_word_mode_sync
+        || (save_dt_slot_sync == PRESAVE_DT_SLOT)
+        || (save_dt_slot_sync < 4'd10));
 wire [9:0] save_dt_commit_addr =
-    (save_dt_slot_sync == PRESAVE_DT_SLOT)
-        ? PRESAVE_SIZE_WORD
-        : SAVE0_SIZE_WORD + {5'd0, save_dt_slot_sync, 1'b0};
+    save_dt_word_mode_sync
+        ? save_dt_word_sync
+        : (save_dt_slot_sync == PRESAVE_DT_SLOT)
+            ? PRESAVE_SIZE_WORD
+            : SAVE0_SIZE_WORD + {5'd0, save_dt_slot_sync, 1'b0};
 
 // Datatable slot size query: CDC from CPU (clk_ram_controller) → clk_74a → back
 wire [9:0]  cpu_dt_query_addr;
@@ -2063,6 +2110,7 @@ core_bridge_cmd icb (
     .savestate_load_err     ( savestate_load_err ),
 
     .osnotify_inmenu        ( osnotify_inmenu ),
+    .osnotify_docked        ( osnotify_docked ),
 
     .target_dataslot_read       ( target_dataslot_read ),
     .target_dataslot_write      ( target_dataslot_write ),
@@ -2512,6 +2560,8 @@ assign video_hs = vidout_hs;
         .uart_rx_byte(uart_rx_byte),
         .save_dt_slot(cpu_save_dt_slot),
         .save_dt_size(cpu_save_dt_size),
+        .save_dt_word(cpu_save_dt_word),
+        .save_dt_word_mode(cpu_save_dt_word_mode),
         .save_dt_commit(cpu_save_dt_commit),
         .app_id(app_id_sync2),
         .analogizer_settings(analogizer_settings_cpu),
@@ -2796,7 +2846,8 @@ assign video_hs = vidout_hs;
         .analog_ce_pix(analog_ce_pix),
         .analog_scanlines(fx[1:0]),
         // Native 15 kHz Analogizer modes (RGBS/component/composite) get a
-        // dedicated 240p/15.75 kHz analog raster with its own framebuffer fetch.
+        // dedicated analog raster with its own framebuffer fetch — 240p by
+        // default, menu-selectable 480i (NTSC) / 576i (PAL) interlace.
         // VGA/RGBHV and Analogizer-off use the 480p path slaved to the LCD
         // raster (analog mirrors vidout_rgb).  The dedicated fetch shares the
         // SDRAM burst port with the LCD fetch, but the LCD has strict priority
@@ -2805,7 +2856,7 @@ assign video_hs = vidout_hs;
         // 1-line deadline with the 240p fetch interleaved even under ~2.7x
         // worst-case burst latency.  (The earlier black-LCD bug was a stale
         // bitstream, not this fetch.)
-        .analog_480p(!analogizer_ena_vid || !analogizer_15khz_vid),
+        .analog_timing(analog_timing_vid),
         .analog_pixel_clk(),
         .analog_pixel_color(analogizer_scan_rgb),
         .analog_hblank(analogizer_scan_hblank),
@@ -2916,10 +2967,32 @@ always @(posedge clk_vid or negedge reset_n_vid) begin
             vidout_hs <= 1;
         end
 
-        // APF scaler-slot command while DE is low.  The Pocket can sample
-        // this during menu/screenshot transitions, so keep it stable across
-        // the whole blanking interval instead of emitting a one-cycle marker.
-        vidout_rgb <= {8'b0, crt_scaler_slot_vid, 13'b0};
+        // APF blanking RGB — template-exact shape (Dock fix, iteration 2).
+        // The contract (buscomm): "RGB pixel value should remain all zero
+        // when DE is deasserted unless using the frame feature bits or
+        // end-of-line bits."  Iteration 1 held the slot command across all
+        // of blanking and zeroed only the exact VS cycle (the feature-word
+        // parse point); the Dock still rejected — if its feature-word
+        // sampler is registered (reads RGB a cycle after it sees VS), the
+        // held slot word still lands in feature bits [23:4]
+        // reserved-must-be-zero and poisons HDMI generation, while the LCD
+        // tolerates it.  So: drive the safe value 24'h0 across ALL of
+        // blanking (feature word = progressive, no rescan), and emit the
+        // Set-Scaler-Slot end-of-line word ONLY on the official parse
+        // cycle — exactly one cycle after DE falls (once per active line;
+        // "last command in frame wins" keeps the selection stable).  This
+        // is the official template shape, field-proven by third-party
+        // multi-slot cores on the Dock.
+        vidout_rgb <= 24'h0;
+        if (vidout_de
+            && !((x_count >= CRT_H_SYNC + CRT_H_BPORCH)
+                 && (x_count < crt_h_active_end)
+                 && (y_count >= crt_v_active_start)
+                 && (y_count < crt_v_active_end)))
+            // DE is high this output cycle and falls on the next one: the
+            // next RGB word is the end-of-line slot command
+            // (Parameter[2:0] = slot at bits [15:13], function 3'b000).
+            vidout_rgb <= {8'b0, crt_scaler_slot_vid, 13'b0};
 
         // generate active video, now accounts for CRT specific timings but making compatible with Analogue Pocket video also
         if(x_count >= CRT_H_SYNC + CRT_H_BPORCH  && x_count < crt_h_active_end) begin

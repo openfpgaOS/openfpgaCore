@@ -304,7 +304,35 @@ static int vrr_recovery_fast;
 static int vrr_trend_nudge_allowed;
 static uint32_t vrr_manual_v_total;  /* 0 = automatic cadence/recovery policy */
 
+/* APF cont1 type nibble (cont1_key[31:28]): 0x1 = Pocket built-in
+ * buttons, which the bridge only reports handheld.  Docked, slot 1
+ * carries a paired controller type (or 0x0 when none is connected). */
+#define CONT_TYPE_POCKET_BUILTIN 0x1u
+
+/* The adaptive VRR policy rewrites VIDEO_VTOTAL continuously (cadence
+ * recomputes, trend nudges, late-recovery stretches) across a
+ * 42.01-61.30 Hz span — outside the APF video contract's 47-61 Hz
+ * window at BOTH ends.  Only the Pocket's self-syncing LCD tolerates
+ * that; fixed-rate sinks need a stable raster:
+ *   - the Dock's HDMI output must lock a rate (the 2026-06 "orange
+ *     square" symptom — the dock-verified pre-VRR build ran a fixed
+ *     525-line 60.02 Hz raster);
+ *   - the Analogizer DAC drives TVs/scalers with the same expectation.
+ * So: adaptive VRR only when handheld (cont1 type = built-in buttons,
+ * only reportable undocked) with analog video off; otherwise pin to
+ * 60.02 Hz.  Every policy write then collapses to VIDEO_VTOTAL_60HZ
+ * and vrr_apply_v_total()'s change-check makes VIDEO_VTOTAL
+ * effectively write-once until the sink changes (dock/undock and menu
+ * toggles re-evaluate on the next policy write). */
+static int vrr_fixed_rate_sink(void) {
+    if (of_analogizer_is_enabled())
+        return 1;
+    return ((CONT1_KEY >> 28) & 0xFu) != CONT_TYPE_POCKET_BUILTIN;
+}
+
 static uint32_t vrr_clamp_v_total(uint32_t v_total) {
+    if (vrr_fixed_rate_sink())
+        return VIDEO_VTOTAL_60HZ;
     if (v_total < VIDEO_VTOTAL_MIN)
         return VIDEO_VTOTAL_MIN;
     if (v_total > VIDEO_VTOTAL_MAX)

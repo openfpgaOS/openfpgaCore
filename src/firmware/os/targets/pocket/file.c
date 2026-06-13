@@ -605,6 +605,17 @@ static int datatable_entry_for_slot(uint32_t slot_id, uint32_t *entry_out) {
     return datatable_entry_scan_for_slot(slot_id, entry_out);
 }
 
+/* Scan-only entry resolver for nonvolatile SIZE COMMITS (save.c).
+ * Deliberately SKIPS datatable_entry_candidate_for_slot: the positional
+ * candidate map is exactly the assumption that broke size commits on
+ * compacted layouts (the Pocket populates entries only for slots whose
+ * files actually loaded — Diablo's optional slots shift every save entry),
+ * and a commit through a wrong entry corrupts ANOTHER file's size word.
+ * Reads tolerate the fast path; writes must take the verified scan. */
+int of_file_datatable_entry_for_slot(uint32_t slot_id, uint32_t *entry_out) {
+    return datatable_entry_scan_for_slot(slot_id, entry_out);
+}
+
 long of_file_flags(uint32_t slot_id) {
     uint32_t entry;
     if (datatable_entry_for_slot(slot_id, &entry) < 0)

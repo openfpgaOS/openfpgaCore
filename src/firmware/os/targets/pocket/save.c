@@ -28,6 +28,7 @@
 #include "regs.h"
 #include "terminal.h"
 #include "timer.h"
+#include "of_caps.h"   /* OF_HW_SAVE_DT_WORD (HW_FEATURES bit 24) */
 
 #define SAVE_CRC_MAGIC      0x4F465356  /* "OFSV" */
 #define SAVE_META_ADDR      (SAVE_REGION_ADDR + SAVE_MAX_SLOTS * SAVE_SLOT_SIZE)
@@ -259,6 +260,64 @@ int of_nvslot_write(uint32_t data_slot_id, const void *buf,
     return (int)len;
 }
 
+/* Commit `size` into the APF datatable for data_slot_id, returning the
+ * datatable entry index actually targeted via entry_out (for readback
+ * diagnostics).
+ *
+ * New bitstreams (OF_HW_SAVE_DT_WORD, HW_FEATURES bit 24) take the
+ * entry-RESOLVED path: scan the datatable for the entry whose id word
+ * matches the slot id and commit through SAVE_DT_WORD at entry*2+1.  The
+ * legacy SAVE_DT_SLOT fixed mapping ("entry 8 = pre-save, 9-18 = saves
+ * 0-9") only holds when every declared data slot loaded a file — the
+ * Pocket compacts the table to LOADED slots, so layouts with optional
+ * slots (Diablo) shift every save entry and legacy commits land on the
+ * wrong entry: the ini gets flushed at the save archive's size and the
+ * save file is never created.  On layouts where the fixed mapping is
+ * valid (Duke3D/Quake) the resolved address equals the legacy constant,
+ * so behavior there is unchanged by construction.
+ *
+ * Old bitstreams (bit 24 absent) fall back to the legacy mapping —
+ * unchanged behavior, no worse than today, for every {old,new} pairing. */
+static int nvslot_commit_size(uint32_t data_slot_id, const nvslot_map_t *map,
+                              uint32_t size, uint32_t *entry_out)
+{
+    if (hw_feature_present(OF_HW_SAVE_DT_WORD)) {
+        uint32_t entry;
+        if (of_file_datatable_entry_for_slot(data_slot_id, &entry) < 0) {
+            /* No datatable entry: the host never loaded/created a file
+             * for this slot (data.json missing a filename / create
+             * flags), so there is nothing to size — and a positional
+             * write would land on some OTHER file's entry.  Refuse. */
+            static int warned_missing;
+            if (!warned_missing) {
+                warned_missing = 1;
+                of_term_printf("[save] slot %u has NO datatable entry; "
+                               "size commit refused (data.json filename/"
+                               "create flags missing?)\n",
+                               (unsigned)data_slot_id);
+            }
+            return -1;
+        }
+        /* SAVE_DT_WORD arms word-addressed routing; the SAVE_DT_SIZE
+         * write commits the pair across the FPGA-side CDC into exactly
+         * that datatable word. */
+        SAVE_DT_WORD = entry * 2u + 1u;
+        SAVE_DT_SIZE = size;
+        if (entry_out)
+            *entry_out = entry;
+    } else {
+        /* Legacy: SAVE_DT_SLOT selects save slot 0-9 or the pre-save
+         * sentinel; SAVE_DT_SIZE commits the pair. */
+        SAVE_DT_SLOT = map->dt_slot;
+        SAVE_DT_SIZE = size;
+        if (entry_out)
+            *entry_out = (map->dt_slot == NV_DT_SLOT_PRESAVE)
+                       ? 8u : 9u + (uint32_t)map->dt_slot;
+    }
+    fence();
+    return 0;
+}
+
 int of_nvslot_set_size(uint32_t data_slot_id, uint32_t size) {
     nvslot_map_t map;
     if (!of_nvslot_is_supported(data_slot_id) ||
@@ -267,14 +326,7 @@ int of_nvslot_set_size(uint32_t data_slot_id, uint32_t size) {
     if (size > map.capacity)
         size = map.capacity;
 
-    /* SAVE_DT_SLOT selects either save slot 0-9 or the pre-save
-     * config/settings sentinel. Writing SAVE_DT_SIZE commits the pair
-     * across the FPGA-side CDC into the APF datatable size word. */
-    SAVE_DT_SLOT = map.dt_slot;
-    SAVE_DT_SIZE = size;
-    fence();
-
-    return 0;
+    return nvslot_commit_size(data_slot_id, &map, size, 0);
 }
 
 int of_nvslot_flush_size(uint32_t data_slot_id, uint32_t size) {
@@ -285,17 +337,19 @@ int of_nvslot_flush_size(uint32_t data_slot_id, uint32_t size) {
     if (size > map.capacity)
         size = map.capacity;
 
-    int rc = of_nvslot_set_size(data_slot_id, size);
+    uint32_t entry = 0;
+    int rc = nvslot_commit_size(data_slot_id, &map, size, &entry);
     if (rc < 0)
         return rc;
 
     /* Diagnostic: read the datatable size word back and compare with what
      * the SAVE_DT commit was meant to write.  The host's exit-time
      * nonvolatile writeback truncates each save file to this value, so a
-     * mismatch here is exactly "saves vanish on exit". */
+     * mismatch here is exactly "saves vanish on exit".  With the
+     * entry-resolved path this readback targets the entry the commit
+     * ACTUALLY wrote (id-scanned), so it now genuinely catches mismatches
+     * instead of agreeing with the same wrong positional guess. */
     {
-        uint32_t entry = (map.dt_slot == NV_DT_SLOT_PRESAVE)
-                       ? 8u : 9u + (uint32_t)map.dt_slot;
         uint32_t got = 0xFFFFFFFFu;
         of_timer_delay_us(100);  /* let the commit cross the CDC + arbiter */
         if (of_file_datatable_word(entry * 2u + 1u, &got) == 0)

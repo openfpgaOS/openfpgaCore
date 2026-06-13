@@ -238,6 +238,20 @@ module axi_periph_slave #(
     output reg  [3:0]  save_dt_slot,
     output reg  [31:0] save_dt_size,    // size to write
     output reg         save_dt_commit,  // toggle: write save_dt_size to datatable
+    // Entry-resolved nonvolatile size commits (SAVE_DT_WORD @ 0xC8,
+    // advertised by HW_FEATURES bit 24).  The legacy save_dt_slot mapping
+    // assumes the fixed "entry 8 = pre-save, entries 9-18 = saves 0-9"
+    // datatable layout; the Pocket populates entries ONLY for slots whose
+    // files actually loaded, compacted in order, so cores with a different
+    // slot population (Diablo) get every size commit landed on the WRONG
+    // entry (ini flushed at the save archive's size, saves never created).
+    // save_dt_word carries a raw datatable WORD address resolved by the OS
+    // (entry*2+1, found by scanning entry id words); writing it ARMS
+    // word-addressed routing for the next SAVE_DT_SIZE commit, and a
+    // SAVE_DT_SLOT write re-arms the legacy mapping — so an old OS that
+    // never touches 0xC8 behaves bit-identically to before.
+    output reg  [9:0]  save_dt_word,
+    output reg         save_dt_word_mode,
 
     // UART interface
     output reg         uart_tx_dv,      // TX data valid (1 cycle pulse)
@@ -722,12 +736,20 @@ localparam [31:0] HW_FEATURES_RESOLVED =
                        //        derivation needs GPU_HAS_VERT_TRI.  OS25
                        //        clears it (ALM); OS30 keeps it — it is the
                        //        Quake2 world-pass header-dedup opcode.
-    | (HAS_SPAN_GROUP ? 32'h0080_0000 : 32'h0000_0000); // bit 23
+    | (HAS_SPAN_GROUP ? 32'h0080_0000 : 32'h0000_0000)  // bit 23
                        //        OF_HW_GPU_SPAN_GROUP: 0x48 compact-direct
                        //        lane form (SDK span-group emitters).  NEW
                        //        2026-06-10 — previously implied by bit 15;
                        //        bit 15 now strictly means the long-form
                        //        record-style 0x48, which every target keeps.
+    | 32'h0100_0000;   // bit 24 OF_HW_SAVE_DT_WORD: SAVE_DT_WORD (0xC8)
+                       //        entry-resolved nonvolatile size commits.
+                       //        UNCONDITIONAL on new bitstreams; a new OS
+                       //        probes this bit and falls back to the
+                       //        legacy SAVE_DT_SLOT fixed mapping when it
+                       //        is absent (old bitstream) — so every
+                       //        {old,new} OS x bitstream pairing behaves
+                       //        no worse than before.
 
 localparam FB_ADDR_0 = 25'h0000000;     // byte 0x000000 → CPU 0x10000000
 localparam FB_ADDR_1 = 25'h0080000;     // byte 0x100000 → CPU 0x10100000
@@ -1198,6 +1220,8 @@ always @(posedge clk) begin
         save_dt_slot <= 0;
         save_dt_size <= 0;
         save_dt_commit <= 0;
+        save_dt_word <= 0;
+        save_dt_word_mode <= 0;
         analogizer_cpu_wr_toggle <= 0;
         analogizer_cpu_wr_settings <= 0;
         analogizer_cpu_wr_hoffset <= 0;
@@ -1344,10 +1368,22 @@ always @(posedge clk) begin
                     pal_index_reg <= pal_index_reg + 1;
                 end
 
-                6'd18: save_dt_slot <= req_wdata[3:0];  // SAVE_DT_SLOT (0x48)
+                6'd18: begin                            // SAVE_DT_SLOT (0x48)
+                    save_dt_slot <= req_wdata[3:0];
+                    // Selecting by slot re-arms the legacy fixed mapping.
+                    save_dt_word_mode <= 1'b0;
+                end
                 6'd19: begin                               // SAVE_DT_SIZE (0x4C) — write triggers commit
                     save_dt_size <= req_wdata;
                     save_dt_commit <= ~save_dt_commit;
+                end
+                6'd50: begin                               // SAVE_DT_WORD (0xC8)
+                    // Latch a raw datatable word address and ARM
+                    // word-addressed routing for the next SAVE_DT_SIZE
+                    // commit (entry-resolved nonvolatile sizes; see the
+                    // port comment).  SAVE_DT_SLOT re-arms legacy mode.
+                    save_dt_word <= req_wdata[9:0];
+                    save_dt_word_mode <= 1'b1;
                 end
 
                 6'd32: begin  // ANALOGIZER_SETTINGS (0x80)
@@ -1650,6 +1686,7 @@ always @(*) begin
             // quasi-static after rtc_valid rises, so sampling it raw behind
             // the synced valid is safe.
             6'd49: sysreg_rdata = rtc_valid_s ? rtc_epoch_seconds : 32'b0;
+            6'd50: sysreg_rdata = {21'b0, save_dt_word_mode, save_dt_word};  // SAVE_DT_WORD + armed flag (diagnostic)
             // Display timing live readback.
             6'd55: sysreg_rdata = {22'b0, vrr_v_total};
             6'd56: sysreg_rdata = 32'b0;  // swap hold retired

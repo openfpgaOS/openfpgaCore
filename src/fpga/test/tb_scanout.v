@@ -32,7 +32,9 @@ module tb_scanout #(
 ) (
     input  wire clk,
     input  wire reset_n,
-    input  wire analog_480p,
+    // Analog raster timing select (ATIMING_* in the DUT):
+    // 0=240p, 1=480p (slaved to LCD), 2=480i NTSC, 3=576i PAL.
+    input  wire [1:0] analog_timing,
     // When 1, point the analog framebuffer at a different base than the LCD
     // (offset so analog source row R reads as R+1000). Proves the analog fetch
     // reads its OWN framebuffer while the LCD reads the LCD framebuffer.
@@ -42,6 +44,10 @@ module tb_scanout #(
     // the LCD/vidout path. Without upscaling the app paints at native height and
     // the rest of the frame is black ("blank in Terminal" on RGBHV).
     input  wire analog_upscale,
+    // When 1, drive a 480-tall analog framebuffer (the canonical interlace
+    // source): each 240-line field must then fetch alternate source rows —
+    // even field rows 0,2,4,.. / odd field rows 1,3,5,..
+    input  wire analog_tall,
 
     output wire        analog_hsync,
     output wire        analog_vsync,
@@ -117,7 +123,7 @@ module tb_scanout #(
         .reset_analog_n(reset_n),
         .analog_ce_pix(analog_ce_pix),
         .analog_scanlines(2'd0),
-        .analog_480p(analog_480p),
+        .analog_timing(analog_timing),
         .analog_pixel_clk(analog_pixel_clk),
         .analog_pixel_color(analog_pixel_color_o),
         .analog_hblank(analog_hblank),
@@ -135,10 +141,11 @@ module tb_scanout #(
 
         // Analog framebuffer: same geometry, base 0 (mirror) or +1000 rows
         // (320000 halfwords = 1000 * 320-halfword stride) when split.
+        // analog_tall doubles the source height to 480 rows (interlace).
         .analog_fb_base_addr(analog_split ? 25'd320000 : 25'd0),
         .analog_color_mode(COLOR_MODE),
         .analog_fb_width(FB_W),
-        .analog_fb_height(FB_H),
+        .analog_fb_height(analog_tall ? 10'd480 : FB_H),
         .analog_fb_stride(FB_STRIDE),
         .analog_out_width(analog_upscale ? 10'd640 : FB_W),
         .analog_out_height(analog_upscale ? 10'd480 : FB_H),

@@ -28,5 +28,6 @@ set_global_assignment -name VERILOG_FILE ../../common/cpu_target_port.v
 set_global_assignment -name VERILOG_FILE ../../common/cpu_target_port_per.v
 set_global_assignment -name VERILOG_FILE ../../common/video_CRT_scanout_indexed_BRAM.v
 
-# Generated VexiiRiscv netlist (make cpu)
-set_global_assignment -name VERILOG_FILE ../../vendor/vexriscv/VexiiRiscv/VexiiRiscv.v
+# Generated VexiiRiscv netlist (make cpu) — MiSTer dual-issue variant
+# (--decoders=2 --lanes=2; the Pocket keeps single-issue VexiiRiscv.v)
+set_global_assignment -name VERILOG_FILE ../../vendor/vexriscv/VexiiRiscv/VexiiRiscv_mister.v

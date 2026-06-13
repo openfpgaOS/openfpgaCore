@@ -208,6 +208,17 @@
 /* Save datatable control (per-slot size for bridge shutdown saves) */
 #define SAVE_DT_SLOT        REG32(SYSREG_BASE + 0x48)
 #define SAVE_DT_SIZE        REG32(SYSREG_BASE + 0x4C)
+/* Entry-resolved nonvolatile size commits (HW_FEATURES bit 24,
+ * OF_HW_SAVE_DT_WORD).  The legacy SAVE_DT_SLOT mapping assumes the fixed
+ * "entry 8 = pre-save, entries 9-18 = saves 0-9" layout, which only holds
+ * when every declared data slot loaded a file — the Pocket compacts the
+ * datatable to loaded slots, so optional slots (Diablo) shift every save
+ * entry and legacy commits land on the WRONG entry.  Write the raw
+ * datatable WORD address here (entry*2+1, entry resolved by scanning the
+ * id words) to ARM word-addressed routing; the next SAVE_DT_SIZE write
+ * commits to exactly that word.  A SAVE_DT_SLOT write re-arms legacy mode.
+ * Probe the feature bit and fall back to SAVE_DT_SLOT on old bitstreams. */
+#define SAVE_DT_WORD        REG32(SYSREG_BASE + 0xC8)
 
 /* Controller input */
 #define CONT1_KEY           REG32(SYSREG_BASE + 0x50)
@@ -475,7 +486,9 @@
  * addresses below are used by interact.json and are not CPU MMIO.
  * ====================================================================== */
 
-/* Bits [4:0]: SNAC controller type, [9:6]: assignment, [13:10]: video type, [15]: enable */
+/* Bits [4:0]: SNAC controller type, [9:6]: assignment, [13:10]: video type,
+ * [15]: enable, [17:16]: Pocket LCD mode (owned by the video layer),
+ * [19:18]: 15 kHz timing (ANLG_TIMING_*, ignored by RGBHV/scandoubler modes) */
 
 /* SNAC controller type IDs */
 #define SNAC_NONE           0x00
@@ -504,6 +517,16 @@
 #define ANLG_VIDEO_SC_HQ2X          0x7
 /* Modes 0x8-0xF: same as above but with Pocket screen OFF */
 #define ANLG_VIDEO_POCKET_OFF       0x8
+
+/* Analogizer 15 kHz timing (settings bits [19:18]).  Selects the dedicated
+ * analog raster for the 15 kHz video modes (RGBS/RGsB/YPbPr/Y-C): 240p
+ * progressive (default, pre-existing), 480i NTSC interlace (60 Hz fields,
+ * full 480-line vertical resolution from a 640x480 FB), or 576i PAL
+ * interlace (50 Hz fields, 480 lines letterboxed; makes Y/C PAL true
+ * PAL-50 instead of PAL-60).  RGBHV/scandoubler modes ignore it. */
+#define ANLG_TIMING_240P            0x0
+#define ANLG_TIMING_480I            0x1
+#define ANLG_TIMING_576I            0x2
 
 /* ======================================================================
  * Controller Button Bits

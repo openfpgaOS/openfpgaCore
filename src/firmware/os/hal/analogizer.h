@@ -15,6 +15,12 @@
 #include <stdint.h>
 #include "regs.h"
 
+/* NOTE: this struct is memcpy'd verbatim to apps via the
+ * OF_ANALOGIZER_FID_GET_STATE syscall and mirrored in api/of_analogizer.h —
+ * layout changes break the app ABI.  The 15 kHz timing field (settings bits
+ * 19:18, ANLG_TIMING_*) is deliberately NOT part of this state: the FPGA
+ * raster consumes those bits directly and the firmware only preserves them
+ * (see ANLG_PRESERVED_SETTINGS_MASK in targets/pocket/analogizer.c). */
 typedef struct {
     uint8_t  enabled;           /* analog video output enabled */
     uint8_t  video_mode;        /* ANLG_VIDEO_* value */

@@ -24,15 +24,17 @@ ifeq ($(TARGET),)
 override TARGET := pocket
 endif
 TARGET_DIR = src/fpga/targets/$(TARGET)
-TARGETS = $(notdir $(wildcard src/fpga/targets/*))
+# Directories only (trailing-slash glob) so a stray file never reads as a target.
+TARGETS = $(notdir $(patsubst %/,%,$(wildcard src/fpga/targets/*/)))
 
 # ── Paths ────────────────────────────────────────────────────────────
+# The root knows only the SDK-sync inputs and the shared clean targets.
+# Each target owns its own build/<target>/ layout and packaging — the
+# root delegates `package` and per-target `sdk-runtime.sh` so no target
+# name appears here (see docs/ADDING_A_TARGET.md).
 CORE_NAME    = ThinkElastic.openfpgaOS
-OS_DIR       = src/firmware/os
-CHIP32_DIR   = src/chip32/$(TARGET)
+CHIP32_DIR   = src/chip32/$(TARGET)   # cleaned per-target; absent targets no-op
 BUILD_DIR    = build
-RELEASE_DIR  = $(BUILD_DIR)/Cores/$(CORE_NAME)
-ASSETS_DIR   = $(BUILD_DIR)/Assets/openfpgaos/common
 TOOLS_DIR    = tools
 DIST_DIR     = dist/core
 REVERSE_BITS = $(TOOLS_DIR)/reverse_bits
@@ -74,10 +76,15 @@ help:
 	@printf "$(C_RESET)\n"
 	@printf "  $(C_HEAD)Target:$(C_RESET) $(C_CMD)$(TARGET)$(C_RESET) $(C_DIM)(available: $(TARGETS))$(C_RESET)\n\n"
 	@printf "  $(C_HEAD)Targets:$(C_RESET)\n"
-	@printf "    Every goal below takes $(C_CMD)TARGET=$(C_CMD)<name>$(C_RESET) — e.g. $(C_CMD)make full TARGET=mister$(C_RESET)\n"
-	@printf "    $(C_DIM)pocket = Analogue Pocket (Quartus 25.1std)   mister = MiSTer/DE10-Nano (Quartus 17.0.x)$(C_RESET)\n"
+	@printf "    Every goal below takes $(C_CMD)TARGET=$(C_CMD)<name>$(C_RESET) — e.g. $(C_CMD)make full TARGET=$(firstword $(filter-out $(TARGET),$(TARGETS)) <name>)$(C_RESET)\n"
+	@# Target list is generated from the directories under src/fpga/targets/,
+	@# each with an optional one-line about.txt — add a target = add a dir.
+	@for t in $(TARGETS); do \
+		a=""; [ -f src/fpga/targets/$$t/about.txt ] && a="$$(cat src/fpga/targets/$$t/about.txt)"; \
+		printf "    $(C_DIM)%-8s %s$(C_RESET)\n" "$$t" "$$a"; \
+	done
 	@printf "    $(C_DIM)Switching targets auto-rebuilds the firmware objects — no manual clean needed.$(C_RESET)\n"
-	@printf "    $(C_CMD)make $(C_CMD)use-mister$(C_RESET)        Make a target the default for this checkout $(C_DIM)(stored in .target;$(C_RESET)\n"
+	@printf "    $(C_CMD)make $(C_CMD)use-<target>$(C_RESET)      Make a target the default for this checkout $(C_DIM)(stored in .target;$(C_RESET)\n"
 	@printf "    $(C_DIM)                       undo with make use-default — built-in default is pocket)$(C_RESET)\n\n"
 	@printf "  $(C_HEAD)Build:$(C_RESET)\n"
 	@printf "    $(C_CMD)make $(C_CMD)full$(C_RESET)              cpu → bootloader → os → build      $(C_DIM)(~9 min)$(C_RESET)\n"
@@ -94,8 +101,8 @@ help:
 	@printf "    $(C_CMD)make $(C_CMD)sweep $(C_CMD)SEEDS=$(C_CMD)1-30$(C_RESET)  Seed sweep, pick best Fmax         $(C_DIM)(~7 min/seed)$(C_RESET)\n"
 	@printf "    $(C_CMD)make $(C_CMD)sdk $(C_CMD)DEST=$(C_CMD)\"path\"$(C_RESET)   Sync headers + runtime to SDK repo(s)\n"
 	@printf "    $(C_CMD)make $(C_CMD)program$(C_RESET)           JTAG program via USB Blaster $(C_DIM)(pocket)$(C_RESET)\n"
-	@printf "    $(C_CMD)make $(C_CMD)deploy$(C_RESET)            Refresh build/ core artifacts $(C_DIM)(device push lives in the SDK)$(C_RESET)\n"
-	@printf "    $(C_CMD)make $(C_CMD)package$(C_RESET)           SD-card layout → build/ $(C_DIM)(APF tree or rbf+boot.rom)$(C_RESET)\n"
+	@printf "    $(C_CMD)make $(C_CMD)deploy$(C_RESET)            Refresh build/<target>/ core artifacts $(C_DIM)(device push lives in the SDK)$(C_RESET)\n"
+	@printf "    $(C_CMD)make $(C_CMD)package$(C_RESET)           SD-card layout → build/<target>/ $(C_DIM)(pocket=APF tree, mister=rbf+boot.rom)$(C_RESET)\n"
 	@echo ""
 
 # ── Sticky default target ────────────────────────────────────────────
@@ -131,75 +138,20 @@ SWEEP_MIN = $(word 1,$(subst -, ,$(SEEDS)))
 SWEEP_MAX = $(word 2,$(subst -, ,$(SEEDS)))
 
 # ── Delegate to target Makefile ──────────────────────────────────────
-cpu bootloader firmware os compile build check test timing report program deploy: check-target
+# Every standard goal is forwarded verbatim to the selected target's
+# Makefile (src/fpga/targets/<target>/Makefile).  The shared root names
+# no target: a new target is "add a directory implementing this goal
+# set" (see docs/ADDING_A_TARGET.md for the contract).  `package` is in
+# the list too — each target owns its own packaging layout (pocket = APF
+# SD tree, mister = rbf + boot.rom, …).
+cpu bootloader firmware os compile build check test timing report program deploy package: check-target
 	@$(MAKE) -C $(TARGET_DIR) $@ FULL=$(FULL)
 
 sweep: check-target
 	@$(MAKE) -C $(TARGET_DIR) sweep SWEEP_MIN=$(SWEEP_MIN) SWEEP_MAX=$(SWEEP_MAX)
 
-# ── Package ──────────────────────────────────────────────────────────
-# Pocket: APF SD-card layout (Cores/Assets/Platforms + reversed bitstream).
-# MiSTer: plain rbf + boot.rom under build/mister/ (the SDK's
-# platforms/mister/mkimage.sh assembles the .vhd disk image).
-ifeq ($(TARGET),mister)
-package: package-mister
-else
-package: $(REVERSE_BITS) package-dirs package-bitstream package-chip32 package-firmware package-json package-platform package-icon package-install
-	@echo ""
-	@printf "  $(C_OK)Package ready$(C_RESET) → $(BUILD_DIR)/\n"
-	@echo ""
-	@tree -L 4 $(BUILD_DIR) 2>/dev/null || find $(BUILD_DIR) -type f | sort
-endif
-
-package-mister:
-	@mkdir -p $(BUILD_DIR)/mister
-	@cp $(TARGET_DIR)/output_files/mister.rbf $(BUILD_DIR)/mister/openfpgaOS.rbf
-	@if [ "$$(cat $(OS_DIR)/.last_target 2>/dev/null)" != "mister" ]; then 		printf "  $(C_DIM)os.bin on disk is not a mister build — run make os TARGET=mister first$(C_RESET)\n"; 		exit 1; 	fi
-	@cp $(OS_DIR)/os.bin $(BUILD_DIR)/mister/boot.rom
-	@printf "  $(C_OK)Package ready$(C_RESET) → $(BUILD_DIR)/mister/ (rbf + boot.rom)\n"
-	@printf "  $(C_DIM)Disk image: make -C <sdk> image PLATFORM=mister$(C_RESET)\n"
-
-package-dirs:
-	@rm -rf $(BUILD_DIR)
-	@mkdir -p $(RELEASE_DIR) $(BUILD_DIR)/Platforms/_images $(ASSETS_DIR)
-
-$(REVERSE_BITS): tools/reverse_bits.c
-	@gcc -O2 -o $@ $<
-
-package-bitstream: $(REVERSE_BITS)
-	@$(REVERSE_BITS) $(TARGET_DIR)/output_files/ap_core.rbf $(RELEASE_DIR)/bitstream.rbf_r
-
-package-chip32:
-	@cp $(CHIP32_DIR)/loader.bin $(RELEASE_DIR)/loader.bin
-
-package-firmware:
-	@cp $(OS_DIR)/os.bin $(RELEASE_DIR)/os.bin
-	@cp $(OS_DIR)/os.bin $(ASSETS_DIR)/os.bin
-
-package-json:
-	@for f in core.json video.json audio.json input.json data.json variants.json interact.json; do \
-		cp $(DIST_DIR)/$$f $(RELEASE_DIR)/; \
-	done
-
-package-platform:
-	@cp dist/platforms/*.json $(BUILD_DIR)/Platforms/
-	@cp dist/platforms/_images/*.bin $(BUILD_DIR)/Platforms/_images/
-
-package-icon:
-	@test -f dist/core/icon.bin && cp dist/core/icon.bin $(RELEASE_DIR)/ || true
-
-define INSTALL_TEXT
-openfpgaOS — Installation
-
-1. Copy the contents of this folder to your SD card root (merge with existing)
-2. Power on your Analogue Pocket → Cores → $(CORE_NAME)
-
-For game development, use the SDK: https://github.com/ThinkElastic/openfpgaOS-SDK
-endef
-export INSTALL_TEXT
-
-package-install:
-	@echo "$$INSTALL_TEXT" > $(BUILD_DIR)/INSTALL.txt
+# (package now lives entirely inside each target's Makefile — see the
+# delegated-goal list above and docs/ADDING_A_TARGET.md.)
 
 # ── SDK sync ─────────────────────────────────────────────────────────
 #
@@ -214,9 +166,9 @@ package-install:
 #   src/sdk/musl/include/      <- src/firmware/musl/include/
 #   src/sdk/musl/lib/          <- src/firmware/musl/lib/
 #                                  (libc.a, libm.a, crt1.o, crti.o, crtn.o)
-#   runtime/bitstream.rbf_r    <- pocket build output
-#   runtime/os.bin             <- kernel build output
-#   runtime/loader.bin         <- chip32 loader
+#   runtime/…                  <- each target's sdk-runtime.sh (bitstream,
+#                                  kernel, loader, .sof — per-target layout)
+#   runtime/bank.ofsf          <- SC-55 GM bank (target-agnostic)
 #
 # Stale files retired in earlier OS-source cleanups (libc/, of_libc.h,
 # of_link.h, of_bram.h, of_posix.c, crt/start.S, ...) are removed from
@@ -276,18 +228,22 @@ sdk: check-target
 		cp src/firmware/musl/lib/crtn.o    "$$dir/src/sdk/musl/lib/"; \
 		printf "  $(C_OK)musl$(C_RESET)           → src/sdk/musl/\n"; \
 		\
-		# Core metadata JSON. Keep the SDK-deployed core description in \
-		# step with this repo so apps can request the current video modes. \
+		# Core metadata JSON (APF manifests).  Keep the SDK-deployed core \
+		# description in step with this repo.  Refresh any already-built \
+		# demo-core tree and any platform that keeps APF templates — both \
+		# discovered per target ([ -d ] guards), so no target is named. \
 		mkdir -p "$$dir/dist/sdk/Cores/$(CORE_NAME)"; \
 		for f in core.json video.json audio.json input.json data.json variants.json interact.json; do \
 			cp "$(DIST_DIR)/$$f" "$$dir/dist/sdk/Cores/$(CORE_NAME)/"; \
-			if [ -d "$$dir/build/sdk/Cores/$(CORE_NAME)" ]; then \
-				cp "$(DIST_DIR)/$$f" "$$dir/build/sdk/Cores/$(CORE_NAME)/"; \
-			fi; \
+			for t in $(TARGETS); do \
+				[ -d "$$dir/build/$$t/sdk/Cores/$(CORE_NAME)" ] && \
+					cp "$(DIST_DIR)/$$f" "$$dir/build/$$t/sdk/Cores/$(CORE_NAME)/" || true; \
+			done; \
 		done; \
-		if [ -d "$$dir/src/sdk/platforms/pocket/templates" ]; then \
-			cp "$(DIST_DIR)/video.json" "$$dir/src/sdk/platforms/pocket/templates/video.json"; \
-		fi; \
+		for t in $(TARGETS); do \
+			[ -d "$$dir/src/sdk/platforms/$$t/templates" ] && \
+				cp "$(DIST_DIR)/video.json" "$$dir/src/sdk/platforms/$$t/templates/video.json" || true; \
+		done; \
 		printf "  $(C_OK)core json$(C_RESET)      → dist/sdk/Cores/$(CORE_NAME)/\n"; \
 		\
 		# Legacy directories that used to live under src/sdk/ — the \
@@ -295,43 +251,22 @@ sdk: check-target
 		# filter, so nuke them here once. \
 		rm -rf  "$$dir/src/sdk/libc" "$$dir/src/sdk/crt"; \
 		\
-		# Runtime binaries (bitstream, kernel, loader).  os.bin is routed \
-		# by the firmware build stamp so a mister-built kernel can never \
-		# land in the pocket slot (and vice versa). \
+		# Target-specific runtime artifacts (bitstream, kernel, loader, \
+		# .sof, …).  Each target exports its OWN via sdk-runtime.sh, run \
+		# from the repo root with the destination SDK dir as $$1, so \
+		# adding a target needs NO edit here — it just appears in \
+		# $(TARGETS).  os.bin is gated on the firmware build stamp inside \
+		# each script so a target never publishes another target's kernel. \
 		mkdir -p "$$dir/runtime"; \
-		FW_STAMP=$$(cat $(OS_DIR)/.last_target 2>/dev/null || echo pocket); \
-		if [ -f src/fpga/targets/pocket/output_files/ap_core.rbf ]; then \
-			$(REVERSE_BITS) src/fpga/targets/pocket/output_files/ap_core.rbf "$$dir/runtime/bitstream.rbf_r"; \
-			printf "  $(C_OK)bitstream$(C_RESET)      → runtime/\n"; \
-		fi; \
-		if [ "$$FW_STAMP" = "pocket" ] && [ -f $(OS_DIR)/os.bin ]; then \
-			cp $(OS_DIR)/os.bin "$$dir/runtime/"; \
-			printf "  $(C_OK)os.bin$(C_RESET)         → runtime/ (pocket)\n"; \
-		fi; \
+		absdest=$$(cd "$$dir" && pwd); \
+		for t in $(TARGETS); do \
+			[ -f src/fpga/targets/$$t/sdk-runtime.sh ] && \
+				bash src/fpga/targets/$$t/sdk-runtime.sh "$$absdest" || true; \
+		done; \
 		\
-		# MiSTer runtime artifacts (consumed by platforms/mister/copy.sh) \
-		mkdir -p "$$dir/runtime/mister"; \
-		if [ -f src/fpga/targets/mister/output_files/mister.rbf ]; then \
-			cp src/fpga/targets/mister/output_files/mister.rbf "$$dir/runtime/mister/openfpgaOS.rbf"; \
-			printf "  $(C_OK)openfpgaOS.rbf$(C_RESET) → runtime/mister/\n"; \
-		fi; \
-		if [ "$$FW_STAMP" = "mister" ] && [ -f $(OS_DIR)/os.bin ]; then \
-			cp $(OS_DIR)/os.bin "$$dir/runtime/mister/os.bin"; \
-			printf "  $(C_OK)os.bin$(C_RESET)         → runtime/mister/\n"; \
-		fi; \
-		test -f $(CHIP32_DIR)/loader.bin && cp $(CHIP32_DIR)/loader.bin "$$dir/runtime/" && \
-			printf "  $(C_OK)loader.bin$(C_RESET)     → runtime/\n" || true; \
-		\
-		# SC-55 General MIDI bank (for of_midi playback). \
+		# SC-55 General MIDI bank — target-agnostic, shared by all targets. \
 		test -f assets/banks/sc55.ofsf && cp assets/banks/sc55.ofsf "$$dir/runtime/bank.ofsf" && \
 			printf "  $(C_OK)sc55.ofsf$(C_RESET)      → runtime/bank.ofsf\n" || true; \
-		\
-		# .sof for JTAG reset via quartus_pgm. scripts/debug.sh in the \
-		# SDK consumer reloads this over JTAG between push and stream so \
-		# the core comes up clean before the new ELF runs. \
-		test -f src/fpga/targets/pocket/output_files/ap_core.sof && \
-			cp src/fpga/targets/pocket/output_files/ap_core.sof "$$dir/runtime/" && \
-			printf "  $(C_OK)ap_core.sof$(C_RESET)    → runtime/ (JTAG reset)\n" || true; \
 		printf "$(C_OK)[sdk] Done$(C_RESET) $$dir\n\n"; \
 	done
 
@@ -342,8 +277,5 @@ clean:
 	@rm -rf $(BUILD_DIR)
 	@rm -f $(REVERSE_BITS)
 
-.PHONY: all help check-target full cpu bootloader firmware os compile build check test timing program sdk deploy
-.PHONY: sweep
-.PHONY: package package-mister package-only package-dirs package-bitstream package-chip32
-.PHONY: package-firmware package-json package-platform package-icon package-install
-.PHONY: clean
+.PHONY: all help check-target full cpu bootloader firmware os compile build check test timing report program sdk deploy
+.PHONY: sweep package clean use-default
