@@ -7672,6 +7672,322 @@ static void test_param_q29_record_counts_and_odd_pairs() {
     }
 }
 
+/* DOOM WALL REPRO: PERSP_Q29 + AXIS_Y multi-chunk record consumption.
+ * The acceptance suite's Q29 multi-record tests all use span_axis=0
+ * (AXIS_X, fb_major_step=stride, fb_minor_step=1).  The Doom param-wall
+ * path (R_GPU_WallTierBegin) emits span_axis=AXIS_Y with fb_major_step=1
+ * and fb_minor_step=stride, batched up to GPU_WALL_BAND_RECORDS(128) per
+ * 0x48 command.  This exercises the SAME multi-chunk continuation
+ * (pay_idx==36 -> S_EXECUTE -> spanprod_prepare_next_record_chunk) but
+ * with the AXIS_Y operand routing in spanprod_launch_fb_mul and the
+ * axis-dependent per-record step setup.  Byte-compare a single multi-
+ * record AXIS_Y command against the per-record single-command form. */
+static void test_param_q29_axis_y_multichunk_wall_repro() {
+    printf("TEST param_q29_axis_y_multichunk_wall_repro\n");
+
+    const int fb_stride = 320;
+    const int tex_w = 64;
+    const int tex_h = 64;
+    /* Counts straddling the 4-record chunk boundary: 5,7,9 and 33,127,128
+     * (band capacity) plus the odd-pair tail cases. */
+    const uint16_t record_counts[] = {
+        1, 2, 3, 4, 5, 6, 7, 8, 9, 16, 17, 33, 64, 65, 127, 128
+    };
+
+    for (uint16_t record_count : record_counts) {
+        gpu_init();
+        preload_with_sentinel();
+        std::vector<uint8_t> tex = make_quake_distinct_texture(tex_w, tex_h);
+        upload_texture(TEX_BASE_BYTE, tex);
+
+        QuakeQ29RefSetup q = make_quake_q29_ref_setup(tex_w, tex_h);
+        /* AXIS_Y wall params: per-column major step = 1, per-pixel walk =
+         * row stride.  Identical to R_GPU_WallTierBegin/SpriteBegin. */
+        ParamSpanListWire p = make_quake_q29_param(q, FB_BASE_BYTE,
+                                                   TEX_BASE_BYTE, fb_stride,
+                                                   tex_w, tex_h);
+        p.fb_major_step = 1;
+        p.fb_minor_step = fb_stride;
+        p.span_axis = 1;                 /* OF_GPU_PARAM_AXIS_Y */
+        ParamSpanListWire p_single = p;
+        p_single.fb_base = FB_ALT_BASE_BYTE;
+
+        /* One record per column: u=x, v=top row, count=vertical extent.
+         * Each column starts at a distinct y so a dropped record leaves a
+         * visible sentinel column (the "vertical black bar"). */
+        std::vector<ParamSpanRecordWire> records;
+        records.reserve(record_count);
+        for (uint16_t i = 0; i < record_count; i++) {
+            /* Realistic wall geometry: one record per consecutive screen
+             * column.  Wrap the texel-space clamp by keeping u within a
+             * sane 256-wide viewport so the perspective attr stays valid. */
+            uint16_t u = (uint16_t)(2u + (i % 250u));     /* column x */
+            uint16_t v = (uint16_t)(4u + (i & 7u));       /* top row */
+            uint16_t count = (uint16_t)(8u + (i & 15u));  /* col height */
+            if ((uint32_t)v + count >= 200u)
+                count = (uint16_t)(199u - v);
+            records.push_back({u, v, count});
+        }
+
+        char name[96];
+        snprintf(name, sizeof(name),
+                 "param_q29_axis_y_multichunk_wall_repro.%u", record_count);
+
+        emit_param_span_list_raw(p, records);
+        if (!submit_and_wait(1600000)) {
+            check_fail(name, "timeout in multi-record AXIS_Y command");
+            continue;
+        }
+
+        bool ref_ok = true;
+        for (const auto &r : records) {
+            emit_param_span_list_raw(p_single,
+                                     std::vector<ParamSpanRecordWire>{r});
+            /* Flush before the staged single-record stream can exceed the
+             * 4096-word device ring: N single commands (35 words each)
+             * overflow it past ~117 records, clobbering early commands and
+             * leaving sentinel reference columns.  Same guard the AXIS_X
+             * record_counts_and_odd_pairs test uses. */
+            if (pending_stream.size() > 3000u) {
+                if (!submit_and_wait(1600000)) {
+                    check_fail(name, "timeout in single-record AXIS_Y stream");
+                    ref_ok = false;
+                    break;
+                }
+            }
+        }
+        if (!ref_ok)
+            continue;
+        if (!pending_stream.empty() && !submit_and_wait(1600000)) {
+            check_fail(name, "timeout in final single-record AXIS_Y stream");
+            continue;
+        }
+
+        int diffs = 0;
+        char first[176] = {0};
+        for (const auto &r : records) {
+            for (uint16_t i = 0; i < r.count; i++) {
+                /* AXIS_Y: walk DOWN the column (row stride per pixel). */
+                uint32_t off = ((uint32_t)r.v + i) * (uint32_t)fb_stride
+                             + (uint32_t)r.u;
+                uint8_t got = sdram_read_byte(FB_BASE_BYTE + off);
+                uint8_t want = sdram_read_byte(FB_ALT_BASE_BYTE + off);
+                if (got != want) {
+                    if (diffs == 0) {
+                        snprintf(first, sizeof(first),
+                                 "rc=%u col_u=%u v=%u i=%u got=%02x want=%02x",
+                                 record_count, r.u, r.v, i, got, want);
+                    }
+                    diffs++;
+                }
+            }
+        }
+
+        if (diffs == 0)
+            check_pass(name);
+        else {
+            char msg[224];
+            snprintf(msg, sizeof(msg), "%d mismatches; first %s", diffs, first);
+            check_fail(name, msg);
+        }
+    }
+}
+
+/* ============================================================================
+ * DOOM REAL-CAPTURE REPLAY.
+ *
+ * Feeds the EXACT GPU command records captured from Doom's real param-wall
+ * emitter (tb_gpu_doom_capture.c: real finetangent / projection / Q29 encode
+ * / SDK wire packing, swept across 322k views) and asserts no accepted column
+ * is left at the FB sentinel.  A sentinel column == the framebuffer pixel was
+ * never written == the "vertical black bar" on real hardware.
+ *
+ * The captured fb_base/tex_addr are host placeholders; we remap them onto the
+ * sim's SDRAM map and keep every perspective / q29 / u / v / count value
+ * byte-for-byte as Doom emitted (the load-bearing values).
+ * ========================================================================== */
+#include "doom_capture_replay.h"
+
+static void test_doom_real_capture_replay_no_black_columns() {
+    printf("TEST doom_real_capture_replay_no_black_columns\n");
+    gpu_init();
+    preload_with_sentinel();
+
+    const int fb_stride = 320;
+    const int tex_w = 64, tex_h = 64;
+    /* Non-sentinel texture: every byte != SENTINEL so any GPU write is
+     * distinguishable from "never written". */
+    std::vector<uint8_t> tex((size_t)tex_w * tex_h);
+    for (size_t i = 0; i < tex.size(); i++) {
+        uint8_t b = (uint8_t)((i * 7u + 3u) & 0xFF);
+        if (b == SENTINEL_BYTE) b ^= 0x55;
+        tex[i] = b;
+    }
+    upload_texture(TEX_BASE_BYTE, tex);
+    /* Identity palookup, all shade rows Doom walls can index (0..15), slot 0. */
+    for (uint8_t row = 0; row < 16; row++)
+        upload_palookup_identity_row(0, row);
+
+    /* Track which (u, row) pixels the captured stream claims to paint. */
+    std::vector<uint8_t> expect_painted((size_t)fb_stride * 200u, 0);
+
+    for (int c = 0; c < doom_cap_cmd_count; c++) {
+        const DoomCapCmd &cc = doom_cap_cmds[c];
+        ParamSpanListWire p {};
+        p.fb_base = FB_BASE_BYTE;        /* remap: host 0 -> sim FB */
+        p.fb_major_step = cc.fb_major_step;
+        p.fb_minor_step = cc.fb_minor_step;
+        p.tex_addr = TEX_BASE_BYTE;      /* remap: host dummy -> sim tex */
+        p.tex_width = (uint16_t)cc.tex_width;
+        p.tex_w_mask = (uint16_t)cc.tex_w_mask;
+        p.tex_h_mask = (uint16_t)cc.tex_h_mask;
+        p.flags = (uint8_t)cc.flags;
+        p.colormap_id = (uint8_t)cc.colormap_id;
+        p.attr_mode = (uint8_t)cc.attr_mode;
+        p.span_axis = (uint8_t)cc.span_axis;
+        p.z_mode = (uint8_t)cc.z_mode;
+        p.q29_attr_shift = (uint8_t)cc.q29_attr_shift;
+        for (int i = 0; i < 3; i++) {
+            p.attr_origin[i] = cc.attr_origin[i];
+            p.attr_du[i] = cc.attr_du[i];
+            p.attr_dv[i] = cc.attr_dv[i];
+        }
+        p.light_origin = cc.light_origin;
+        p.light_du = cc.light_du;
+        p.light_dv = cc.light_dv;
+
+        std::vector<ParamSpanRecordWire> records;
+        records.reserve(cc.record_count);
+        for (int i = 0; i < cc.record_count; i++) {
+            records.push_back({cc.u[i], cc.v[i], cc.cnt[i]});
+            /* AXIS_Y: walk DOWN the column. */
+            for (uint16_t k = 0; k < cc.cnt[i]; k++) {
+                uint32_t row = (uint32_t)cc.v[i] + k;
+                if (cc.u[i] < (uint16_t)fb_stride && row < 200u)
+                    expect_painted[row * fb_stride + cc.u[i]] = 1;
+            }
+        }
+        emit_param_span_list_raw(p, records);
+    }
+    if (!submit_and_wait(4000000)) {
+        check_fail("doom_real_capture_replay_no_black_columns", "timeout");
+        return;
+    }
+
+    /* Any pixel the stream claimed to paint that is still SENTINEL == black. */
+    int black = 0; char first[160] = {0};
+    int black_cols_lo = 9999, black_cols_hi = -1;
+    for (uint32_t row = 0; row < 200u; row++) {
+        for (uint32_t u = 0; u < (uint32_t)fb_stride; u++) {
+            if (!expect_painted[row * fb_stride + u]) continue;
+            uint8_t got = sdram_read_byte(FB_BASE_BYTE + row * fb_stride + u);
+            if (got == SENTINEL_BYTE) {
+                if (black == 0)
+                    snprintf(first, sizeof(first),
+                             "col u=%u row=%u still SENTINEL", u, row);
+                if ((int)u < black_cols_lo) black_cols_lo = u;
+                if ((int)u > black_cols_hi) black_cols_hi = u;
+                black++;
+            }
+        }
+    }
+
+    if (black == 0) {
+        check_pass("doom_real_capture_replay_no_black_columns");
+    } else {
+        char msg[224];
+        snprintf(msg, sizeof(msg),
+                 "%d black pixels (cols %d..%d); first %s",
+                 black, black_cols_lo, black_cols_hi, first);
+        check_fail("doom_real_capture_replay_no_black_columns", msg);
+    }
+}
+
+/* Replay a whole captured multi-wall FRAME (several real walls back-to-back in
+ * one command stream) and assert no painted column is left black.  Exposes any
+ * inter-command / band-eviction / state-carryover column drop. */
+static void test_doom_real_capture_frame_no_black_columns() {
+    printf("TEST doom_real_capture_frame_no_black_columns\n");
+    gpu_init();
+    preload_with_sentinel();
+
+    const int fb_stride = 320;
+    const int tex_w = 64, tex_h = 64;
+    std::vector<uint8_t> tex((size_t)tex_w * tex_h);
+    for (size_t i = 0; i < tex.size(); i++) {
+        uint8_t b = (uint8_t)((i * 11u + 5u) & 0xFF);
+        if (b == SENTINEL_BYTE) b ^= 0x55;
+        tex[i] = b;
+    }
+    upload_texture(TEX_BASE_BYTE, tex);
+    for (uint8_t row = 0; row < 16; row++)
+        upload_palookup_identity_row(0, row);
+
+    std::vector<uint8_t> expect_painted((size_t)fb_stride * 200u, 0);
+
+    for (int c = 0; c < doom_frame_cmd_count; c++) {
+        const DoomCapCmd &cc = doom_frame_cmds[c];
+        ParamSpanListWire p {};
+        p.fb_base = FB_BASE_BYTE;
+        p.fb_major_step = cc.fb_major_step;
+        p.fb_minor_step = cc.fb_minor_step;
+        p.tex_addr = TEX_BASE_BYTE;
+        p.tex_width = (uint16_t)cc.tex_width;
+        p.tex_w_mask = (uint16_t)cc.tex_w_mask;
+        p.tex_h_mask = (uint16_t)cc.tex_h_mask;
+        p.flags = (uint8_t)cc.flags;
+        p.colormap_id = (uint8_t)cc.colormap_id;
+        p.attr_mode = (uint8_t)cc.attr_mode;
+        p.span_axis = (uint8_t)cc.span_axis;
+        p.z_mode = (uint8_t)cc.z_mode;
+        p.q29_attr_shift = (uint8_t)cc.q29_attr_shift;
+        for (int i = 0; i < 3; i++) {
+            p.attr_origin[i] = cc.attr_origin[i];
+            p.attr_du[i] = cc.attr_du[i];
+            p.attr_dv[i] = cc.attr_dv[i];
+        }
+        p.light_origin = cc.light_origin;
+        p.light_du = cc.light_du;
+        p.light_dv = cc.light_dv;
+
+        std::vector<ParamSpanRecordWire> records;
+        for (int i = 0; i < cc.record_count; i++) {
+            records.push_back({cc.u[i], cc.v[i], cc.cnt[i]});
+            for (uint16_t k = 0; k < cc.cnt[i]; k++) {
+                uint32_t row = (uint32_t)cc.v[i] + k;
+                if (cc.u[i] < (uint16_t)fb_stride && row < 200u)
+                    expect_painted[row * fb_stride + cc.u[i]] = 1;
+            }
+        }
+        emit_param_span_list_raw(p, records);
+    }
+    if (!submit_and_wait(4000000)) {
+        check_fail("doom_real_capture_frame_no_black_columns", "timeout");
+        return;
+    }
+
+    int black = 0; char first[160] = {0};
+    int lo = 9999, hi = -1;
+    for (uint32_t row = 0; row < 200u; row++)
+        for (uint32_t u = 0; u < (uint32_t)fb_stride; u++) {
+            if (!expect_painted[row * fb_stride + u]) continue;
+            if (sdram_read_byte(FB_BASE_BYTE + row * fb_stride + u) == SENTINEL_BYTE) {
+                if (black == 0)
+                    snprintf(first, sizeof(first), "col u=%u row=%u SENTINEL", u, row);
+                if ((int)u < lo) lo = u; if ((int)u > hi) hi = u;
+                black++;
+            }
+        }
+
+    if (black == 0) check_pass("doom_real_capture_frame_no_black_columns");
+    else {
+        char msg[224];
+        snprintf(msg, sizeof(msg), "%d black pixels (cols %d..%d); first %s",
+                 black, lo, hi, first);
+        check_fail("doom_real_capture_frame_no_black_columns", msg);
+    }
+}
+
 static void test_param_q29_zero_counts_mixed_no_drop() {
     printf("TEST param_q29_zero_counts_mixed_no_drop\n");
     gpu_init();
@@ -8732,6 +9048,598 @@ static void test_lean_wrong_size_0x48_33w() {
                       FB_BASE_BYTE, 320, 0, 0, 24, 12);
 }
 
+// ============================================================================
+// DECISIVE multi-chunk record-drop reproduction (additive).
+//
+// Goal: emit ONE 0x48 DRAW_PARAM_SPAN_LIST carrying MORE THAN 4 records so the
+// multi-chunk continuation boundary (4 records / 2 pairs / 6 payload words per
+// chunk, pay_idx 31..36 -> S_EXECUTE -> spanprod_prepare_next_record_chunk ->
+// S_PAY_DATA pay_idx=31) is crossed, for EVERY total count in {5,6,7,8,9,17}
+// (both parities + a larger straddler).  Each record is a DISTINCT solid color
+// at a DISTINCT adjacent screen column, exactly like the Doom param-wall path
+// (attr_mode=affine, span_axis=AXIS_Y, fb_major_step=1 so record u indexes the
+// column, fb_minor_step=stride so count steps down that column).  SKIP_ZERO is
+// exercised the same way Doom/Quake do (flags=COLORMAP|SKIP_ZERO, texel 0xFF =
+// transparent), with a couple of records deliberately fully transparent.
+//
+// The oracle is INDEPENDENT: expected pixels are computed directly from the
+// record geometry + a 1-row texture + an IDENTITY palookup (so a painted pixel
+// MUST equal its texel index).  It does NOT re-run the RTL, does NOT compare
+// 0x4C==0x48, and does NOT compare batched-vs-single.  Every non-transparent
+// record's whole column is asserted painted with the exact distinct color and
+// NOT the sentinel; every transparent (0xFF) record's column is asserted to
+// remain sentinel.  A dropped record therefore surfaces as a sentinel column
+// (BLACK) reported by its index and the total record count/parity.
+// ============================================================================
+static int g_drop_repro_failures = 0;
+
+// Build the 1-row texture used by the repro: tex[col] is a distinct, non-zero,
+// non-sentinel, non-0xFF color for every paintable column; 0xFF (transparent)
+// is planted only at the columns named in `transparent_cols`.
+static std::vector<uint8_t> make_drop_repro_texture(int width,
+                                                    const std::vector<int> &transparent_cols) {
+    std::vector<uint8_t> tex((size_t)width, 0);
+    for (int u = 0; u < width; u++) {
+        // Distinct color per column.  Avoid 0x00, 0xFF (transparent key) and
+        // the framebuffer sentinel 0xAB so a "painted" pixel is unmistakable.
+        uint8_t c = (uint8_t)(1 + (u * 7 + 3) % 200);   // 1..200, never 0
+        if (c == 0xFF) c = 0xFE;
+        if (c == SENTINEL_BYTE) c = (uint8_t)(SENTINEL_BYTE + 1);
+        tex[(size_t)u] = c;
+    }
+    for (int tc : transparent_cols)
+        if (tc >= 0 && tc < width)
+            tex[(size_t)tc] = 0xFF;        // SKIP_ZERO transparent key
+    return tex;
+}
+
+// Run ONE total-record-count case and verify against the independent oracle.
+// Returns the dropped record index (>=0) or -1 if all records survived.
+static int run_drop_repro_case_0x48(uint16_t total_records,
+                                    int col_height,
+                                    const std::vector<int> &transparent_cols) {
+    char tag[96];
+    snprintf(tag, sizeof(tag), "param_q48_multichunk_drop_repro.rc%u", total_records);
+    printf("TEST %s\n", tag);
+    gpu_init();
+    preload_with_sentinel();
+
+    const int fb_stride = 320;
+    const int base_col  = 8;      // first screen column the list paints
+    const int top_row   = 4;      // top row of every column
+    const int tex_w     = base_col + (int)total_records + 4;  // 1-row texture
+
+    std::vector<uint8_t> tex = make_drop_repro_texture(tex_w, transparent_cols);
+    upload_texture(TEX_BASE_BYTE, tex);
+    // Identity palookup at slot 3, light row 0: post-colormap color == texel.
+    upload_palookup_identity_row(3, 0);
+
+    ParamSpanListWire p {};
+    p.fb_base       = FB_BASE_BYTE;
+    p.fb_major_step = 1;            // record u indexes the screen column
+    p.fb_minor_step = fb_stride;    // count steps down that column
+    p.tex_addr      = TEX_BASE_BYTE;
+    p.tex_width     = (uint16_t)tex_w;
+    p.tex_w_mask    = 0;            // 0 -> identity mask in RTL/model
+    p.tex_h_mask    = 0;
+    p.flags         = (1u << 0) | (1u << 2);   // COLORMAP | SKIP_ZERO (Doom/Quake-sprite)
+    p.colormap_id   = 3;
+    p.attr_mode     = 0;            // AFFINE
+    p.span_axis     = 1;            // AXIS_Y (Doom param-wall)
+    // s = attr_origin[0] + u*attr_du[0] + v*attr_dv[0].  With du[0]=1<<16,
+    // dv[0]=0, every pixel of column u samples texel s=u, t=0 -> solid color.
+    p.attr_du[0]    = 1 << 16;
+    // t stays 0 (1-row texture); no per-pixel-down texture change.
+    p.light_origin  = 0;           // identity row 0
+
+    // One record per adjacent column: u = base_col + i, v = top_row, count = H.
+    std::vector<ParamSpanRecordWire> records;
+    for (uint16_t i = 0; i < total_records; i++)
+        records.push_back({ (uint16_t)(base_col + i),
+                            (uint16_t)top_row,
+                            (uint16_t)col_height });
+
+    emit_param_span_list_raw(p, records);
+    if (!submit_and_wait()) {
+        char msg[64];
+        snprintf(msg, sizeof(msg), "timeout (rc=%u)", total_records);
+        check_fail(tag, msg);
+        g_drop_repro_failures++;
+        return -2;
+    }
+
+    // ---- INDEPENDENT per-record oracle + per-record assertion ----
+    int first_dropped = -1;
+    int dropped_records = 0;
+    int painted_records = 0;
+    int transparent_records = 0;
+    int pixel_diffs = 0;
+    char first_diff[192] = {0};
+
+    for (uint16_t i = 0; i < total_records; i++) {
+        const int col = base_col + i;
+        const uint8_t texel = tex[(size_t)col];          // s=col, t=0
+        const bool transparent = (texel == 0xFF);        // SKIP_ZERO key
+        // Identity palookup row 0 => painted color == texel index.
+        const uint8_t want = transparent ? SENTINEL_BYTE : texel;
+
+        bool this_record_all_sentinel = true;
+        bool this_record_any_diff = false;
+        for (int row = 0; row < col_height; row++) {
+            const uint32_t addr = FB_BASE_BYTE
+                                + (uint32_t)(top_row + row) * (uint32_t)fb_stride
+                                + (uint32_t)col;
+            const uint8_t got = sdram_read_byte(addr);
+            if (got != SENTINEL_BYTE)
+                this_record_all_sentinel = false;
+            if (got != want) {
+                this_record_any_diff = true;
+                if (pixel_diffs == 0) {
+                    snprintf(first_diff, sizeof(first_diff),
+                             "rec=%u col=%d row=%d got=%02x want=%02x%s",
+                             i, col, top_row + row, got, want,
+                             transparent ? " (transparent)" : "");
+                }
+                pixel_diffs++;
+            }
+        }
+
+        if (transparent) {
+            transparent_records++;
+            // A transparent record must leave its whole column at sentinel.
+            // (Already folded into pixel_diffs vs want==SENTINEL above.)
+        } else {
+            // A paintable record that is entirely sentinel == DROPPED -> BLACK.
+            if (this_record_all_sentinel) {
+                dropped_records++;
+                if (first_dropped < 0) first_dropped = (int)i;
+            }
+            if (!this_record_any_diff)
+                painted_records++;
+        }
+    }
+
+    if (pixel_diffs == 0 && dropped_records == 0) {
+        char msg[96];
+        snprintf(msg, sizeof(msg),
+                 "rc=%u painted=%d transparent=%d (no drop)",
+                 total_records, painted_records, transparent_records);
+        check_pass(tag);
+        printf("    %s\n", msg);
+        return -1;
+    }
+
+    char msg[320];
+    snprintf(msg, sizeof(msg),
+             "rc=%u parity=%s dropped_records=%d first_dropped_index=%d "
+             "pixel_diffs=%d painted=%d transparent=%d; first %s",
+             total_records, (total_records & 1) ? "odd" : "even",
+             dropped_records, first_dropped, pixel_diffs,
+             painted_records, transparent_records, first_diff);
+    check_fail(tag, msg);
+    g_drop_repro_failures++;
+    return first_dropped;
+}
+
+static void test_param_q48_multichunk_distinct_column_drop_repro() {
+    // Counts straddling the 4-record chunk boundary, both parities, plus a
+    // larger ~17 (crosses the boundary 4 times: 4|4|4|4|1).
+    const uint16_t counts[] = { 5, 6, 7, 8, 9, 17 };
+    // For each count, make the 3rd and 6th columns (when present) transparent
+    // so SKIP_ZERO is genuinely exercised AND the records around them must
+    // still survive (a continuation off-by-one near a transparent record would
+    // be the smoking gun).
+    for (uint16_t rc : counts) {
+        std::vector<int> transparent;
+        if (rc >= 3) transparent.push_back(8 + 2);   // 3rd record's column
+        if (rc >= 6) transparent.push_back(8 + 5);   // 6th record's column
+        run_drop_repro_case_0x48(rc, /*col_height=*/12, transparent);
+    }
+    // Also an all-opaque sweep (no transparent records) so a drop cannot hide
+    // behind an expected-sentinel column.
+    for (uint16_t rc : counts)
+        run_drop_repro_case_0x48(rc, /*col_height=*/12, {});
+
+    if (g_drop_repro_failures == 0)
+        check_pass("param_q48_multichunk_distinct_column_drop_repro.summary_no_drops");
+    else {
+        char msg[96];
+        snprintf(msg, sizeof(msg),
+                 "%d case(s) dropped a record/column", g_drop_repro_failures);
+        check_fail("param_q48_multichunk_distinct_column_drop_repro.summary_no_drops", msg);
+    }
+}
+
+// Analogous >4-lane 0x4C DRAW_COLUMN_LIST sweep, against the SAME independent
+// oracle (NOT 0x4C==0x48).  0x4C packs <=4 lanes per command, so >4 columns
+// span multiple 0x4C commands; we verify every column is painted with its
+// distinct color (identity palookup) and transparent columns stay sentinel.
+static int g_drop_repro_failures_4c = 0;
+
+static void run_drop_repro_case_0x4c(int total_lanes,
+                                     int col_height,
+                                     const std::vector<int> &transparent_lanes) {
+    char tag[96];
+    snprintf(tag, sizeof(tag), "param_q4c_multilane_drop_repro.lanes%d", total_lanes);
+    printf("TEST %s\n", tag);
+    gpu_init();
+    preload_with_sentinel();
+
+    const int fb_stride = 320;
+    const int base_col  = 8;
+    const int top_row   = 4;
+    const int tex_w     = base_col + total_lanes + 4;
+
+    std::vector<uint8_t> tex = make_drop_repro_texture(tex_w, {});
+    // 0x4C forces s=0/sstep=0 (single texel column per lane), so each lane's
+    // color comes from its OWN tex_addr (we point lane i at tex[base_col+i]).
+    // Plant transparency by setting that per-lane source byte to 0xFF.
+    for (int tl : transparent_lanes) {
+        int col = base_col + tl;
+        if (col >= 0 && col < tex_w) tex[(size_t)col] = 0xFF;
+    }
+    upload_texture(TEX_BASE_BYTE, tex);
+    upload_palookup_identity_row(3, 0);
+
+    // emit_column_list_raw supports only 1/2/4/8 lanes per group and applies
+    // fb_base_override + lane_delta*src (src restarts at 0 per group).  We emit
+    // arbitrary totals as fixed 4-lane (or 1/2-lane tail) groups, baking each
+    // group's starting column into the fb_base_override and per-lane tex_addr.
+    int painted_records = 0, transparent_records = 0, dropped_records = 0;
+    int first_dropped = -1, pixel_diffs = 0;
+    char first_diff[192] = {0};
+
+    for (int first = 0; first < total_lanes; ) {
+        int n = total_lanes - first;
+        // round to a supported group lane count: 4, else 2, else 1
+        int grp_lanes = (n >= 4) ? 4 : (n >= 2) ? 2 : 1;
+        SpanGroupWire grp {};
+        grp.lane_count = (uint8_t)grp_lanes;
+        grp.flags      = (uint8_t)((1u << 0) | (1u << 2)); // COLORMAP | SKIP_ZERO
+        grp.fb_stride  = (int16_t)fb_stride;   // per-pixel byte step (down column)
+        grp.lane_delta = 1;                    // adjacent columns within group
+        grp.tex_width  = 1;
+        grp.tex_w_mask = 0;
+        grp.tex_h_mask = 0;
+        for (int lane = 0; lane < grp_lanes; lane++) {
+            int idx = first + lane;
+            int col = base_col + idx;
+            // 0x4C forces s=0/sstep=0.  With t=0/tstep=0 too, every pixel of
+            // the column samples the SAME texel (tex_addr byte) -> a solid
+            // distinct color per column, so the oracle expects tex[col].
+            grp.tex_addr[lane]    = TEX_BASE_BYTE + (uint32_t)col;
+            grp.colormap_id[lane] = 3;
+            grp.light[lane]       = 0;
+            grp.t[lane]           = 0;            // constant v -> solid column
+            grp.tstep[lane]       = 0;
+            grp.count_lane[lane]  = (uint16_t)col_height;
+        }
+        // Group's column 0 is base_col+first; emit_column_list_raw adds
+        // lane_delta*lane on top, so columns land at base_col+first+lane.
+        // The vertical run starts at top_row (baked into the fb base).
+        uint32_t grp_fb_base = FB_BASE_BYTE
+                             + (uint32_t)top_row * (uint32_t)fb_stride
+                             + (uint32_t)(base_col + first);
+        emit_column_list_raw(grp, grp_fb_base);
+        first += grp_lanes;
+    }
+
+    if (!submit_and_wait()) {
+        char msg[64];
+        snprintf(msg, sizeof(msg), "timeout (lanes=%d)", total_lanes);
+        check_fail(tag, msg);
+        g_drop_repro_failures_4c++;
+        return;
+    }
+
+    for (int i = 0; i < total_lanes; i++) {
+        const int col = base_col + i;
+        const uint8_t texel = tex[(size_t)col];
+        const bool transparent = (texel == 0xFF);
+        const uint8_t want = transparent ? SENTINEL_BYTE : texel;
+        bool all_sentinel = true, any_diff = false;
+        for (int row = 0; row < col_height; row++) {
+            const uint32_t addr = FB_BASE_BYTE
+                                + (uint32_t)(top_row + row) * (uint32_t)fb_stride
+                                + (uint32_t)col;
+            const uint8_t got = sdram_read_byte(addr);
+            if (got != SENTINEL_BYTE) all_sentinel = false;
+            if (got != want) {
+                any_diff = true;
+                if (pixel_diffs == 0)
+                    snprintf(first_diff, sizeof(first_diff),
+                             "lane=%d col=%d row=%d got=%02x want=%02x%s",
+                             i, col, top_row + row, got, want,
+                             transparent ? " (transparent)" : "");
+                pixel_diffs++;
+            }
+        }
+        if (transparent) transparent_records++;
+        else {
+            if (all_sentinel) { dropped_records++; if (first_dropped < 0) first_dropped = i; }
+            if (!any_diff) painted_records++;
+        }
+    }
+
+    if (pixel_diffs == 0 && dropped_records == 0) {
+        check_pass(tag);
+        printf("    lanes=%d painted=%d transparent=%d (no drop)\n",
+               total_lanes, painted_records, transparent_records);
+        return;
+    }
+    char msg[320];
+    snprintf(msg, sizeof(msg),
+             "lanes=%d dropped_records=%d first_dropped_index=%d pixel_diffs=%d "
+             "painted=%d transparent=%d; first %s",
+             total_lanes, dropped_records, first_dropped, pixel_diffs,
+             painted_records, transparent_records, first_diff);
+    check_fail(tag, msg);
+    g_drop_repro_failures_4c++;
+}
+
+static void test_param_q4c_multilane_distinct_column_drop_repro() {
+    const int lane_counts[] = { 5, 6, 7, 8, 9, 17 };
+    for (int n : lane_counts)
+        run_drop_repro_case_0x4c(n, /*col_height=*/12, {});
+    if (g_drop_repro_failures_4c == 0)
+        check_pass("param_q4c_multilane_distinct_column_drop_repro.summary_no_drops");
+    else {
+        char msg[96];
+        snprintf(msg, sizeof(msg),
+                 "%d case(s) dropped a lane/column", g_drop_repro_failures_4c);
+        check_fail("param_q4c_multilane_distinct_column_drop_repro.summary_no_drops", msg);
+    }
+}
+
+// ============================================================================
+// DECISIVE port-B (colormap) STARVATION reproduction under real DRAM latency.
+// (ADDITIVE, test-only.  See the campaign brief for SUSPECT 1.)
+//
+// Why the existing param_q48_*_drop_repro can't see SUSPECT 1: it walks the
+// texel along the SAME 16-byte cache line for ~16 adjacent columns (s = u,
+// 1 byte/column), so port A misses only once every 16 columns.  The Doom
+// param-wall pathology is the opposite: EVERY wall column samples a NEW
+// texture column on a NEW 16-byte cache line, so port A misses on (nearly)
+// every pixel and the shared fill machine sits in S_FILL_* almost
+// continuously — which is the only condition that can starve port B
+// (gpu_tex_cache req_ready_b is LOW in every S_FILL_* state for the OTHER
+// port; gpu_tex_cache.v:236-240).  Under the historical 2-cycle SDRAM stub
+// the fill is so short the S_PIPE windows are wide and B never starves; the
+// new +gpu_rd_latency / +gpu_rd_latency_var modes (tb_gpu.v) crank the fill
+// long enough to expose it if it is real.
+//
+// Texture layout: attr_du[0] = LINE_STRIDE_BYTES << 16 so column u samples
+// texel s = u*LINE_STRIDE_BYTES.  With LINE_STRIDE_BYTES >= 16 each column's
+// texel lives on its OWN cache line => one port-A miss per column.  s is
+// constant down each column (attr_dv[0]=0) and t stays 0 => a solid distinct
+// color per column.
+//
+// Two cases, BOTH using port B every pixel (flags = COLORMAP|SKIP_ZERO):
+//   (1) "doom": constant light, IDENTITY palookup  => expected = texel.
+//       A port-B drift/starve surfaces as BLACK (sentinel) columns.
+//   (2) "quake": light INCREMENTS per column (light_du = 1<<16) into a
+//       palookup whose every shade row maps texel -> a DIFFERENT byte
+//       (row r: cm[r][texel] = texel ^ (0x40 + r)).  Now a port-B response
+//       fetched for the WRONG pixel (a drift) produces a WRONG NON-BLACK
+//       color (the neighbouring column's light row applied), and a starved
+//       column is BLACK.  This models Quake's surface-edge light changes:
+//       content-correlated wrong/missing geometry.
+//
+// The oracle is INDEPENDENT (computed from geometry + texture + palette
+// directly).  Every column is asserted to its exact expected color.  We also
+// classify any failure as black(FB-clear sentinel) vs wrong-nonblack and
+// report the first failing (col,row,got,want) and the column period.
+// ============================================================================
+static int g_portb_starve_failures = 0;
+
+// Distinct-cache-line texture: tex[u*line_stride] is a distinct, non-0x00,
+// non-0xFF, non-sentinel color for column u; the in-between bytes are filler.
+static std::vector<uint8_t> make_distinct_line_texture(int columns,
+                                                       int line_stride,
+                                                       const std::vector<int> &transparent_cols) {
+    std::vector<uint8_t> tex((size_t)columns * (size_t)line_stride, 0x11);
+    for (int u = 0; u < columns; u++) {
+        uint8_t c = (uint8_t)(1 + (u * 13 + 5) % 200);   // 1..200
+        if (c == 0xFF) c = 0xFE;
+        if (c == SENTINEL_BYTE) c = (uint8_t)(SENTINEL_BYTE + 1);
+        tex[(size_t)u * (size_t)line_stride] = c;
+    }
+    for (int tc : transparent_cols)
+        if (tc >= 0 && tc < columns)
+            tex[(size_t)tc * (size_t)line_stride] = 0xFF;   // SKIP_ZERO key
+    return tex;
+}
+
+enum PortBVariant { PB_DOOM_IDENTITY = 0, PB_QUAKE_LIGHTVARY = 1 };
+
+// Upload a "light-varying" palookup slot: row r maps cm[r][texel] = texel ^
+// (0x40 + r), for rows 0..63 (light is 6-bit).  Guaranteed != texel for the
+// identity-detect and produces a distinct color per (row,texel) so a drift
+// across a column boundary (where the light row changes) yields a WRONG byte.
+static void upload_palookup_lightvary_slot(uint8_t slot) {
+    for (int r = 0; r < 64; r++) {
+        std::vector<uint8_t> row(256);
+        for (int i = 0; i < 256; i++) {
+            uint8_t v = (uint8_t)(i ^ (0x40 + r));
+            if (v == 0xFF) v = 0xFE;                 // keep out of SKIP_ZERO key space post-cmap
+            if (v == SENTINEL_BYTE) v = (uint8_t)(SENTINEL_BYTE + 1);
+            row[(size_t)i] = v;
+        }
+        upload_palookup_slot(slot, row, (uint32_t)r * 256);
+    }
+}
+
+static void run_portb_starve_case(int columns, int col_height,
+                                  int line_stride, PortBVariant variant,
+                                  const std::vector<int> &transparent_cols) {
+    char tag[128];
+    snprintf(tag, sizeof(tag), "portb_starve_%s.cols%d_stride%d",
+             variant == PB_DOOM_IDENTITY ? "doom" : "quake",
+             columns, line_stride);
+    printf("TEST %s\n", tag);
+    gpu_init();
+    preload_with_sentinel();
+
+    const int fb_stride = 320;
+    const int base_col  = 8;
+    const int top_row   = 4;
+    const uint8_t SLOT  = 3;
+
+    std::vector<uint8_t> tex =
+        make_distinct_line_texture(base_col + columns, line_stride, {});
+    // Plant transparency by indexing the per-column texel byte.
+    for (int tc : transparent_cols) {
+        int col = base_col + tc;
+        if (col >= 0 && col < base_col + columns)
+            tex[(size_t)col * (size_t)line_stride] = 0xFF;
+    }
+    // Texture is (base_col+columns) * line_stride bytes wide (1 row, s indexes).
+    upload_texture(TEX_BASE_BYTE, tex);
+
+    if (variant == PB_DOOM_IDENTITY)
+        upload_palookup_identity_row(SLOT, 0);   // every row irrelevant (light const 0)
+    else
+        upload_palookup_lightvary_slot(SLOT);    // rows 0..63 each distinct
+
+    ParamSpanListWire p {};
+    p.fb_base       = FB_BASE_BYTE;
+    p.fb_major_step = 1;            // record u indexes screen column
+    p.fb_minor_step = fb_stride;    // count steps down the column
+    p.tex_addr      = TEX_BASE_BYTE;
+    p.tex_width     = (uint16_t)((base_col + columns) * line_stride); // 1-row tex
+    p.tex_w_mask    = 0;            // identity
+    p.tex_h_mask    = 0;
+    p.flags         = (1u << 0) | (1u << 2);   // COLORMAP | SKIP_ZERO
+    p.colormap_id   = SLOT;
+    p.attr_mode     = 0;            // AFFINE
+    p.span_axis     = 1;            // AXIS_Y (Doom param-wall)
+    // s = u * line_stride  => each column on its OWN cache line (port-A miss
+    // per column).  v term 0 => s constant down the column => solid color.
+    p.attr_du[0]    = (int32_t)((uint32_t)line_stride << 16);
+    p.attr_dv[0]    = 0;
+    // light: constant 0 (doom) OR +1 per column u (quake surface-edge).
+    p.light_origin  = 0;
+    p.light_du      = (variant == PB_QUAKE_LIGHTVARY) ? (1 << 16) : 0;
+    p.light_dv      = 0;
+
+    std::vector<ParamSpanRecordWire> records;
+    for (int i = 0; i < columns; i++)
+        records.push_back({ (uint16_t)(base_col + i),
+                            (uint16_t)top_row,
+                            (uint16_t)col_height });
+
+    emit_param_span_list_raw(p, records);
+    if (!submit_and_wait(800000)) {
+        char msg[64];
+        snprintf(msg, sizeof(msg), "timeout (cols=%d)", columns);
+        check_fail(tag, msg);
+        g_portb_starve_failures++;
+        return;
+    }
+
+    int dropped_cols = 0, wrong_cols = 0, painted_cols = 0, transparent_cols_n = 0;
+    int first_fail_col = -1, first_fail_row = -1;
+    uint8_t first_got = 0, first_want = 0;
+    bool first_is_black = false;
+    int prev_fail_col = -1, fail_period = -1, fail_period_consistent = 1;
+
+    for (int i = 0; i < columns; i++) {
+        const int col   = base_col + i;
+        const uint8_t texel = tex[(size_t)col * (size_t)line_stride];
+        const bool transparent = (texel == 0xFF);
+        // light for column u = i (u-derived): light_origin + u*light_du, >>16, &0x3F
+        const uint8_t light = (variant == PB_QUAKE_LIGHTVARY)
+                            ? (uint8_t)((col) & 0x3F)
+                            : 0;
+        uint8_t want;
+        if (transparent) want = SENTINEL_BYTE;
+        else if (variant == PB_DOOM_IDENTITY) want = texel;       // identity row
+        else {
+            uint8_t v = (uint8_t)(texel ^ (0x40 + light));
+            if (v == 0xFF) v = 0xFE;
+            if (v == SENTINEL_BYTE) v = (uint8_t)(SENTINEL_BYTE + 1);
+            want = v;
+        }
+
+        bool col_all_sentinel = true, col_any_diff = false;
+        for (int row = 0; row < col_height; row++) {
+            const uint32_t addr = FB_BASE_BYTE
+                                + (uint32_t)(top_row + row) * (uint32_t)fb_stride
+                                + (uint32_t)col;
+            const uint8_t got = sdram_read_byte(addr);
+            if (got != SENTINEL_BYTE) col_all_sentinel = false;
+            if (got != want) {
+                col_any_diff = true;
+                if (first_fail_col < 0) {
+                    first_fail_col = col; first_fail_row = top_row + row;
+                    first_got = got; first_want = want;
+                    first_is_black = (got == SENTINEL_BYTE);
+                }
+            }
+        }
+        if (transparent) { transparent_cols_n++; continue; }
+        if (col_any_diff) {
+            if (col_all_sentinel) dropped_cols++; else wrong_cols++;
+            if (prev_fail_col >= 0) {
+                int d = col - prev_fail_col;
+                if (fail_period < 0) fail_period = d;
+                else if (fail_period != d) fail_period_consistent = 0;
+            }
+            prev_fail_col = col;
+        } else painted_cols++;
+    }
+
+    if (dropped_cols == 0 && wrong_cols == 0) {
+        check_pass(tag);
+        printf("    cols=%d painted=%d transparent=%d stride=%d (no starve/drift) "
+               "last_lat=%u txns=%u\n",
+               columns, painted_cols, transparent_cols_n, line_stride,
+               (unsigned)tb->dbg_rd_last_latency_o,
+               (unsigned)tb->dbg_rd_txn_count_o);
+        return;
+    }
+
+    char msg[320];
+    snprintf(msg, sizeof(msg),
+             "cols=%d dropped(black)=%d wrong(nonblack)=%d painted=%d "
+             "first: col=%d row=%d got=%02x want=%02x (%s); fail_period=%d%s; "
+             "last_lat=%u",
+             columns, dropped_cols, wrong_cols, painted_cols,
+             first_fail_col, first_fail_row, first_got, first_want,
+             first_is_black ? "BLACK" : "WRONG-COLOR",
+             fail_period, fail_period_consistent ? "" : " (varies)",
+             (unsigned)tb->dbg_rd_last_latency_o);
+    check_fail(tag, msg);
+    g_portb_starve_failures++;
+}
+
+static void test_portb_starve_distinct_cache_line_wall() {
+    // Force distinct cache line per column (stride 16 = exactly one line; 64
+    // = 4 lines apart, so even the burst-fill prefetch can't pre-warm the
+    // next column).  >64 adjacent columns as the brief requires.
+    const int strides[] = { 16, 64 };
+    const int col_counts[] = { 80, 96 };
+    for (int st : strides) {
+        for (int cc : col_counts) {
+            run_portb_starve_case(cc, /*col_height=*/16, st, PB_DOOM_IDENTITY, {});
+            run_portb_starve_case(cc, /*col_height=*/16, st, PB_QUAKE_LIGHTVARY, {});
+        }
+    }
+    // A SKIP_ZERO-laced variant so a starve cannot hide behind an expected
+    // sentinel column, and to mirror Doom/Quake transparent masked columns.
+    run_portb_starve_case(80, 16, 16, PB_DOOM_IDENTITY, {10, 25, 40, 55, 70});
+    run_portb_starve_case(80, 16, 16, PB_QUAKE_LIGHTVARY, {10, 25, 40, 55, 70});
+
+    if (g_portb_starve_failures == 0)
+        check_pass("portb_starve_distinct_cache_line_wall.summary");
+    else {
+        char msg[96];
+        snprintf(msg, sizeof(msg), "%d case(s) starved/drifted port B",
+                 g_portb_starve_failures);
+        check_fail("portb_starve_distinct_cache_line_wall.summary", msg);
+    }
+}
+
 int main(int argc, char **argv) {
     Verilated::commandArgs(argc, argv);
     Verilated::traceEverOn(false);
@@ -8825,7 +9733,16 @@ int main(int argc, char **argv) {
     test_param_span_q29_high_angle_floor_no_flatten();
     test_param_q29_tail_counts_and_boundaries();
     test_param_q29_record_counts_and_odd_pairs();
+    test_param_q29_axis_y_multichunk_wall_repro();
+    test_doom_real_capture_replay_no_black_columns();
+    test_doom_real_capture_frame_no_black_columns();
     test_param_q29_zero_counts_mixed_no_drop();
+    test_param_q48_multichunk_distinct_column_drop_repro();
+    test_param_q4c_multilane_distinct_column_drop_repro();
+    // Decisive port-B (colormap) starvation repro: distinct cache line per
+    // column => port-A miss per pixel + port-B used every pixel.  Inert under
+    // the 2-cycle stub; the SUSPECT-1 vehicle under +gpu_rd_latency[_var].
+    test_portb_starve_distinct_cache_line_wall();
     test_param_q29_wrap_and_fb_byte_lanes();
     test_param_q29_static_repeat_300();
     test_param_q29_dynamic_scale_projection();

@@ -50,6 +50,13 @@ module tb_gpu #(
     output reg  [31:0] dbg_aw_burst_count,
     output reg  [7:0]  dbg_aw_max_len,
 
+    // Read-latency diagnostics (ADDITIVE, test-only). Surface the
+    // configurable SDRAM read responder's last-picked initial latency and
+    // the transaction count so the C++ harness can confirm the high /
+    // variable latency mode is actually engaged.
+    output wire [9:0]  dbg_rd_last_latency_o,
+    output wire [31:0] dbg_rd_txn_count_o,
+
     // CMD_FLIP side-port (observed by C++ harness for the drain test)
     output wire        gpu_swap_req,
     output wire [1:0]  gpu_swap_idx,
@@ -249,29 +256,141 @@ end
 assign bd_rd_data = sdram_mem[bd_rd_addr[19:0]];
 
 // ---- AXI4 Read responder ----
+//
+// ADDITIVE (test-only) variable / high-latency mode.  By default this is
+// byte-identical to the historical fixed 2-cycle, single-outstanding,
+// non-backpressuring stub (gpu_rd_arready stays low while a read is
+// active — matching the real single-outstanding axi_sdram_slave).  Two
+// runtime plusargs (read at reset, via $value$plusargs) let the C++
+// harness crank up the *initial* latency without touching the AXI
+// contract so the existing 279/0 baseline is preserved when neither
+// plusarg is present:
+//
+//   +gpu_rd_latency=N        : fixed initial latency of N cycles per
+//                              transaction (default 2).  Back-to-back
+//                              beats inside a burst still deliver at
+//                              1/cycle (matches the real slave's
+//                              line-fill behaviour).
+//   +gpu_rd_latency_var=1    : deterministic pseudo-random initial
+//                              latency in [LAT_VAR_MIN .. LAT_VAR_MAX],
+//                              derived from an internal LFSR (NO real
+//                              RNG — Verilator scripts forbid it).  The
+//                              per-transaction value is published on
+//                              dbg_rd_last_latency for the harness.
+//
+// The single-outstanding contract is UNCHANGED in every mode: arready
+// is low while rd_active, exactly one AR is in flight, beats are in
+// order, rlast on the final beat.  The ONLY thing the modes change is
+// how many bubble cycles precede the first beat.
+localparam [9:0] LAT_VAR_MIN = 10'd8;
+localparam [9:0] LAT_VAR_MAX = 10'd60;
+
 reg        rd_active;
 reg [23:0] rd_addr;
 reg [7:0]  rd_beats_left;
-reg [1:0]  rd_delay;
+reg [9:0]  rd_delay;       // 10 bits so the texlat boost (up to ~1023) fits
+
+// Latency configuration latched once at reset from plusargs.
+reg [9:0]  cfg_rd_latency;     // fixed initial latency
+reg        cfg_rd_latency_var; // variable (LFSR) mode select
+reg [15:0] lat_lfsr;           // deterministic pseudo-random source
+
+// SUSPECT-1 escalation (step 5): an EXTRA, port-A-region-selective latency
+// boost.  Reads whose AR byte address falls in [cfg_texlat_lo,cfg_texlat_hi]
+// (the texture region) get cfg_texlat additional bubble cycles.  This keeps
+// the shared fill FSM parked in S_FILL_* on PORT-A (texture) fills far
+// longer than port-B (colormap) fills, the strongest possible starvation
+// pressure on port B's req_ready_b (which is LOW in every S_FILL_* state for
+// the other port).  Off by default (cfg_texlat=0).
+reg [9:0]  cfg_texlat;
+reg [31:0] cfg_texlat_lo;      // inclusive byte address
+reg [31:0] cfg_texlat_hi;      // inclusive byte address
+
+// Diagnostics for the C++ harness.
+reg [9:0]  dbg_rd_last_latency;
+reg [31:0] dbg_rd_txn_count;
+assign dbg_rd_last_latency_o = dbg_rd_last_latency;
+assign dbg_rd_txn_count_o    = dbg_rd_txn_count;
+
+// Pick the initial latency for the transaction now being accepted.
+// Pure function of cfg + the current LFSR state (so it is deterministic
+// and reproducible run-to-run).
+wire [9:0] lat_span      = LAT_VAR_MAX - LAT_VAR_MIN + 10'd1;   // 53
+wire [9:0] lat_var_pick  = LAT_VAR_MIN + (lat_lfsr[9:0] % lat_span);
+wire [9:0] lat_base      = cfg_rd_latency_var ? lat_var_pick : cfg_rd_latency;
+// Region-selective boost for the texture (port-A) region.
+wire       ar_in_texregion = (gpu_rd_araddr >= cfg_texlat_lo)
+                          && (gpu_rd_araddr <= cfg_texlat_hi);
+wire [9:0] lat_pick      = (cfg_texlat != 10'd0 && ar_in_texregion)
+                         ? (lat_base + cfg_texlat)
+                         : lat_base;
 
 assign gpu_rd_arready = !rd_active;
 assign gpu_rd_rvalid  = rd_active && (rd_delay == 0);
 assign gpu_rd_rdata   = sdram_mem[rd_addr[19:0]];
 assign gpu_rd_rlast   = rd_active && (rd_delay == 0) && (rd_beats_left == 0);
 
+// Plusarg latch + LFSR seed (one-time, at reset).
+integer plusarg_lat;
+integer plusarg_var;
+integer plusarg_texlat;
+integer plusarg_texlo;
+integer plusarg_texhi;
+initial begin
+    cfg_rd_latency     = 10'd2;   // historical default
+    cfg_rd_latency_var = 1'b0;
+    lat_lfsr           = 16'hACE1;
+    dbg_rd_last_latency = 10'd2;
+    dbg_rd_txn_count    = 32'd0;
+    cfg_texlat         = 10'd0;
+    cfg_texlat_lo      = 32'h0004_0000;  // default = TEX_BASE_BYTE
+    cfg_texlat_hi      = 32'h0007_FFFF;  // default = up to FB_BASE_BYTE-1
+    plusarg_lat = 0;
+    plusarg_var = 0;
+    plusarg_texlat = 0;
+    plusarg_texlo = 0;
+    plusarg_texhi = 0;
+    if ($value$plusargs("gpu_rd_latency=%d", plusarg_lat)) begin
+        if (plusarg_lat < 0)    plusarg_lat = 0;
+        if (plusarg_lat > 1023) plusarg_lat = 1023;
+        cfg_rd_latency = plusarg_lat[9:0];
+    end
+    if ($value$plusargs("gpu_rd_latency_var=%d", plusarg_var)) begin
+        cfg_rd_latency_var = (plusarg_var != 0);
+    end
+    if ($value$plusargs("gpu_rd_texlat=%d", plusarg_texlat)) begin
+        if (plusarg_texlat < 0)    plusarg_texlat = 0;
+        if (plusarg_texlat > 1023) plusarg_texlat = 1023;
+        cfg_texlat = plusarg_texlat[9:0];
+    end
+    if ($value$plusargs("gpu_rd_texlat_lo=%d", plusarg_texlo))
+        cfg_texlat_lo = plusarg_texlo[31:0];
+    if ($value$plusargs("gpu_rd_texlat_hi=%d", plusarg_texhi))
+        cfg_texlat_hi = plusarg_texhi[31:0];
+end
+
 always @(posedge clk) begin
     if (!reset_n) begin
         rd_active <= 0;
         rd_delay <= 0;
+        // LFSR / diag keep their initial-block values across reset so a
+        // single seed produces the same deterministic sequence.
     end else begin
         if (!rd_active && gpu_rd_arvalid) begin
             rd_active     <= 1;
             rd_addr       <= gpu_rd_araddr[25:2];
             rd_beats_left <= gpu_rd_arlen;
-            rd_delay      <= 2;  // 2-cycle initial latency
+            rd_delay      <= lat_pick;   // configurable initial latency
+            dbg_rd_last_latency <= lat_pick;
+            dbg_rd_txn_count    <= dbg_rd_txn_count + 32'd1;
+            // Advance the LFSR once per accepted transaction (16-bit
+            // maximal-length xnor taps 16,14,13,11) so the next txn's
+            // pick differs deterministically.
+            lat_lfsr <= {lat_lfsr[14:0],
+                         lat_lfsr[15] ^~ lat_lfsr[13] ^~ lat_lfsr[12] ^~ lat_lfsr[10]};
         end else if (rd_active) begin
             if (rd_delay > 0) begin
-                rd_delay <= rd_delay - 1;
+                rd_delay <= rd_delay - 10'd1;
             end else begin
                 // Beat delivered
                 if (rd_beats_left == 0) begin

@@ -183,6 +183,193 @@ MIXER_DIR = obj_dir_audio_mixer
 MIXER_FLAGS = -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC -Wno-CASEINCOMPLETE -Wno-SYNCASYNCNET -Wno-UNOPTFLAT
 
 # ============================================================
+# MiSTer SDRAM write-path multi-master contention — the convergent
+# experiment.  Wires the REAL production write path that only MiSTer's
+# 4-master shared SDRAM exercises under load:
+#   axi_sdram_arbiter -> axi_sdram_slave -> io_sdram_test (== MiSTer
+#   io_sdram.v, DQ-split) -> sdram_model (cycle-accurate, refresh-enforced).
+# Drives GPU FB-write traffic (M0) against CPU/bridge/audio aggressors
+# (M1/M2/M3) + scanout burst_rd injection and verifies every committed byte
+# read back through the slave is byte-exact (golden shadow).  Additive,
+# test-only.  Internal signal access (sdram_model.errors) needs the
+# verilated internals header, enabled by --public-flat-rw.
+# ============================================================
+SDRAM_CONT_SRCS = \
+	tb_sdram_cont.v \
+	sdram_model_full.v \
+	$(COMMON_DIR)/axi_sdram_arbiter.v \
+	$(COMMON_DIR)/axi_sdram_slave.v \
+	../targets/mister/synch_3.v \
+	io_sdram_test.v
+
+SDRAM_CONT_CPP = tb_sdram_cont_main.cpp
+SDRAM_CONT_TOP = tb_sdram_cont
+SDRAM_CONT_DIR = obj_dir_sdram_cont
+SDRAM_CONT_FLAGS = -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC -Wno-CASEINCOMPLETE \
+                   -Wno-SYNCASYNCNET -Wno-UNUSEDSIGNAL -Wno-PINMISSING \
+                   --public-flat-rw
+
+sdram-cont: $(SDRAM_CONT_DIR)/V$(SDRAM_CONT_TOP)
+	@printf "\n=== MiSTer SDRAM write-path multi-master contention ===\n"
+	./$(SDRAM_CONT_DIR)/V$(SDRAM_CONT_TOP)
+
+$(SDRAM_CONT_DIR)/V$(SDRAM_CONT_TOP): $(SDRAM_CONT_SRCS) $(SDRAM_CONT_CPP)
+	$(VERILATOR) $(VERILATOR_FLAGS_NOTRACE) $(SDRAM_CONT_FLAGS) \
+		--top-module $(SDRAM_CONT_TOP) --Mdir $(SDRAM_CONT_DIR) \
+		-I$(COMMON_DIR) \
+		$(SDRAM_CONT_SRCS) $(SDRAM_CONT_CPP)
+
+# ============================================================
+# REAL gpu_core FB-write path through the MiSTer SDRAM stack under
+# multi-master contention.  Differential test: render an identical dense
+# FB-write scene with aggressors OFF (reference / Pocket-like) and ON
+# (DUT / MiSTer-like), both through gpu_core's own fbwq coalescer + the
+# real arbiter+slave+io_sdram, then diff the framebuffers.  Closes the gap
+# left by sdram-cont (idealized M0 generator) by driving the REAL fbwq AW/W
+# bursts under genuine W-channel backpressure.  Additive, test-only.
+# ============================================================
+GPU_WRPATH_SRCS = \
+	tb_gpu_wrpath.v \
+	sdram_model_full.v \
+	altsyncram_stub.v \
+	$(COMMON_DIR)/gpu_core.v \
+	$(COMMON_DIR)/gpu_edge_walker.v \
+	$(COMMON_DIR)/gpu_tex_cache.v \
+	$(COMMON_DIR)/axi_sdram_arbiter.v \
+	$(COMMON_DIR)/axi_sdram_slave.v \
+	../targets/mister/synch_3.v \
+	io_sdram_test.v
+
+GPU_WRPATH_CPP = tb_gpu_wrpath_main.cpp
+GPU_WRPATH_TOP = tb_gpu_wrpath
+GPU_WRPATH_DIR = obj_dir_gpu_wrpath
+GPU_WRPATH_FLAGS = -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC -Wno-CASEINCOMPLETE \
+                   -Wno-SYNCASYNCNET -Wno-UNUSEDSIGNAL -Wno-PINMISSING \
+                   -Wno-UNOPTFLAT -Wno-UNDRIVEN -Wno-UNUSEDPARAM \
+                   -Wno-MULTIDRIVEN -Wno-LATCH -Wno-CASEOVERLAP
+
+gpu-wrpath: $(GPU_WRPATH_DIR)/V$(GPU_WRPATH_TOP)
+	@printf "\n=== REAL gpu_core FB-write path under MiSTer SDRAM contention ===\n"
+	./$(GPU_WRPATH_DIR)/V$(GPU_WRPATH_TOP)
+
+$(GPU_WRPATH_DIR)/V$(GPU_WRPATH_TOP): $(GPU_WRPATH_SRCS) $(GPU_WRPATH_CPP)
+	$(VERILATOR) $(VERILATOR_FLAGS_NOTRACE) $(GPU_WRPATH_FLAGS) \
+		--top-module $(GPU_WRPATH_TOP) --Mdir $(GPU_WRPATH_DIR) \
+		-I$(COMMON_DIR) \
+		$(GPU_WRPATH_SRCS) $(GPU_WRPATH_CPP)
+
+# ============================================================
+# gpu-wstall — FINAL convergent experiment: exercise the gpu_core fbwq
+# AW-ahead OVERLAP path to a BYTE-EXACT verdict by backpressuring the
+# FB-write W channel EXCLUSIVELY (command-fetch READ uncontended -> fences
+# never starve).  Real gpu_core fbwq -> arbiter -> slave -> io_sdram ->
+# sdram_model_full, golden FB check, AW-ahead path-fired counters.
+# Additive, test-only; no production RTL change.  --hierarchical-child off so
+# the testbench can tap gpu.fbwq_* internals.
+# ============================================================
+GPU_WSTALL_SRCS = \
+	tb_gpu_wstall.v \
+	sdram_model_full.v \
+	altsyncram_stub.v \
+	$(COMMON_DIR)/gpu_core.v \
+	$(COMMON_DIR)/gpu_edge_walker.v \
+	$(COMMON_DIR)/gpu_tex_cache.v \
+	$(COMMON_DIR)/axi_sdram_arbiter.v \
+	$(COMMON_DIR)/axi_sdram_slave.v \
+	../targets/mister/synch_3.v \
+	io_sdram_test.v
+
+GPU_WSTALL_CPP = tb_gpu_wstall_main.cpp
+GPU_WSTALL_TOP = tb_gpu_wstall
+GPU_WSTALL_DIR = obj_dir_gpu_wstall
+GPU_WSTALL_FLAGS = -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC -Wno-CASEINCOMPLETE \
+                   -Wno-SYNCASYNCNET -Wno-UNUSEDSIGNAL -Wno-PINMISSING \
+                   -Wno-UNOPTFLAT -Wno-UNDRIVEN -Wno-UNUSEDPARAM \
+                   -Wno-MULTIDRIVEN -Wno-LATCH -Wno-CASEOVERLAP
+
+gpu-wstall: $(GPU_WSTALL_DIR)/V$(GPU_WSTALL_TOP)
+	@printf "\n=== gpu_core fbwq AW-ahead path: W-channel-exclusive stall verdict ===\n"
+	./$(GPU_WSTALL_DIR)/V$(GPU_WSTALL_TOP)
+
+$(GPU_WSTALL_DIR)/V$(GPU_WSTALL_TOP): $(GPU_WSTALL_SRCS) $(GPU_WSTALL_CPP)
+	$(VERILATOR) $(VERILATOR_FLAGS_NOTRACE) $(GPU_WSTALL_FLAGS) \
+		--top-module $(GPU_WSTALL_TOP) --Mdir $(GPU_WSTALL_DIR) \
+		-I$(COMMON_DIR) \
+		$(GPU_WSTALL_SRCS) $(GPU_WSTALL_CPP)
+
+# ============================================================
+# scanout-race — SCANOUT vs GPU read-during-write across the page flip.
+# Wires the REAL scanout (io_sdram burst_rd master, hard-real-time) against the
+# REAL gpu_core FB-write path (arbiter+slave+io_sdram word ports) on a SHARED
+# sdram_model_full, plus a byte-faithful copy of axi_periph_slave's triple-
+# buffer swap SM.  Runs a realistic MiSTer 640x480 frame loop with the firmware's
+# request-only flip discipline and detects (a) scanout reading the buffer the GPU
+# is concurrently drawing and (b) any pixel that scans out as the clear color
+# where the golden frame had content.  OUT_HEIGHT defaults to 480 (MiSTer: the
+# raster is pinned to 480 for every mode, emu.sv:990); the -pocket variant uses
+# the app-native height to model Pocket's lower scanout bandwidth.
+# Additive, test-only; no production RTL change.
+# ============================================================
+SCANOUT_RACE_SRCS = \
+	tb_scanout_race.v \
+	sdram_model_full.v \
+	altsyncram_stub.v \
+	$(COMMON_DIR)/video_CRT_scanout_indexed_BRAM.v \
+	$(COMMON_DIR)/gpu_core.v \
+	$(COMMON_DIR)/gpu_edge_walker.v \
+	$(COMMON_DIR)/gpu_tex_cache.v \
+	$(COMMON_DIR)/axi_sdram_arbiter.v \
+	$(COMMON_DIR)/axi_sdram_slave.v \
+	../targets/mister/synch_3.v \
+	io_sdram_test.v
+
+SCANOUT_RACE_CPP = tb_scanout_race_main.cpp
+SCANOUT_RACE_TOP = tb_scanout_race
+SCANOUT_RACE_DIR = obj_dir_scanout_race
+SCANOUT_RACE_POCKET_DIR = obj_dir_scanout_race_pocket
+SCANOUT_RACE_FLAGS = -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC -Wno-CASEINCOMPLETE \
+                     -Wno-SYNCASYNCNET -Wno-UNUSEDSIGNAL -Wno-PINMISSING \
+                     -Wno-UNOPTFLAT -Wno-UNDRIVEN -Wno-UNUSEDPARAM \
+                     -Wno-MULTIDRIVEN -Wno-LATCH -Wno-CASEOVERLAP
+
+# MiSTer model: out_height pinned to 480 (DDA-upscales the 320x200 source).
+# Runs: (1) the REAL GPU-triggered flip path (must REFUTE the race),
+#       (2) the CPU FB_SWAP_CTRL no-backpressure flip path (must REFUTE too),
+#       (3) the detector SELF-TEST (forced 2-buffer reuse, must REPRODUCE) so a
+#           clean (1)/(2) is provably meaningful.
+scanout-race: $(SCANOUT_RACE_DIR)/V$(SCANOUT_RACE_TOP)
+	@printf "\n=== SCANOUT vs GPU read-during-write race (MiSTer: out 640x480) ===\n"
+	@printf "\n--- (1) REAL GPU-triggered flip path (slave_swap_pending backpressure) ---\n"
+	./$(SCANOUT_RACE_DIR)/V$(SCANOUT_RACE_TOP) 16 0 0 0
+	@printf "\n--- (2) CPU FB_SWAP_CTRL flip path (NO backpressure) ---\n"
+	./$(SCANOUT_RACE_DIR)/V$(SCANOUT_RACE_TOP) 16 0 0 1
+	@printf "\n--- (3) detector SELF-TEST (forced 2-buffer reuse; MUST reproduce) ---\n"
+	./$(SCANOUT_RACE_DIR)/V$(SCANOUT_RACE_TOP) 8 0 0 2
+
+$(SCANOUT_RACE_DIR)/V$(SCANOUT_RACE_TOP): $(SCANOUT_RACE_SRCS) $(SCANOUT_RACE_CPP)
+	$(VERILATOR) $(VERILATOR_FLAGS_NOTRACE) $(SCANOUT_RACE_FLAGS) \
+		-GOUT_HEIGHT=480 \
+		--top-module $(SCANOUT_RACE_TOP) --Mdir $(SCANOUT_RACE_DIR) \
+		-I$(COMMON_DIR) \
+		$(SCANOUT_RACE_SRCS) $(SCANOUT_RACE_CPP)
+
+# Pocket model: out_height = app-native (200) — lower scanout bandwidth, the
+# source buffer is freed faster, so the GPU should never overtake the reader.
+scanout-race-pocket: $(SCANOUT_RACE_POCKET_DIR)/V$(SCANOUT_RACE_TOP)
+	@printf "\n=== SCANOUT vs GPU read-during-write race (Pocket: out 640x200) ===\n"
+	@printf "\n--- REAL GPU-triggered flip path (Pocket scanout bandwidth) ---\n"
+	./$(SCANOUT_RACE_POCKET_DIR)/V$(SCANOUT_RACE_TOP) 16 0 0 0
+	@printf "\n--- detector SELF-TEST (forced 2-buffer reuse; MUST reproduce) ---\n"
+	./$(SCANOUT_RACE_POCKET_DIR)/V$(SCANOUT_RACE_TOP) 8 0 0 2
+
+$(SCANOUT_RACE_POCKET_DIR)/V$(SCANOUT_RACE_TOP): $(SCANOUT_RACE_SRCS) $(SCANOUT_RACE_CPP)
+	$(VERILATOR) $(VERILATOR_FLAGS_NOTRACE) $(SCANOUT_RACE_FLAGS) \
+		-GOUT_HEIGHT=200 \
+		--top-module $(SCANOUT_RACE_TOP) --Mdir $(SCANOUT_RACE_POCKET_DIR) \
+		-I$(COMMON_DIR) \
+		$(SCANOUT_RACE_SRCS) $(SCANOUT_RACE_CPP)
+
+# ============================================================
 # AXI SDRAM arbiter — focused 4-master grant FSM probe.
 # Hunts the read-vs-write priority pathology suspected of wedging
 # the GPU's framebuffer-flush during Duke3D hangs.
@@ -262,8 +449,8 @@ SYSTEM_FLAGS = -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC -Wno-CASEINCOMPLETE \
 # ============================================================
 # Targets
 # ============================================================
-.PHONY: all sdram sdram-serialize sdram-native2 sdram-wcont0 sdram-all sram scanout scanout-lean analogchain gpu gpu-persp gpu-floor gpu-gpudemo gpu-acceptance gpu-acceptance-single gpu-acceptance-os30 gpu-acceptance-burst2 gpu-acceptance-all gpu-chain \
-        axi-periph bridge-cmd bridge-rx audio audio-mixer arbiter system system-mister run run-sram build clean
+.PHONY: all sdram sdram-serialize sdram-native2 sdram-wcont0 sdram-all sdram-cont sram scanout scanout-lean analogchain gpu gpu-persp gpu-floor gpu-gpudemo gpu-acceptance gpu-acceptance-single gpu-acceptance-os30 gpu-acceptance-burst2 gpu-acceptance-all gpu-chain \
+        gpu-wrpath gpu-wstall scanout-race scanout-race-pocket axi-periph bridge-cmd bridge-rx audio audio-mixer arbiter system system-mister run run-sram build clean
 
 all: sdram-all sram gpu gpu-persp axi-periph bridge-cmd bridge-rx audio audio-mixer arbiter hps-bridge
 
