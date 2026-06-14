@@ -18,6 +18,27 @@
 /* Initialize file subsystem */
 void of_file_init(void);
 
+/* Per-instance root for the nonvolatile game files (e.g. "/games/Quake").
+ * Empty selects the legacy image-root layout.  Set by the kernel during an
+ * in-OS relaunch before re-reading the instance's os.ini.  Targets without a
+ * writable instance tree (Pocket: the host supplies per-instance files) carry
+ * a no-op implementation, so callers stay target-agnostic.  Pass NULL or ""
+ * to clear back to the root layout. */
+void of_file_set_instance_root(const char *root);
+const char *of_file_get_instance_root(void);
+
+/* Tear down per-app file state ahead of an in-OS relaunch: close any cached
+ * backing-file handles (so no FatFs lock or unsynced write leaks), cancel a
+ * pending async read, and force the dynamic asset registry to re-enumerate for
+ * the next app.  No-op on targets that don't support relaunch. */
+void of_file_relaunch_reset(void);
+
+/* Enumerate game instances: subdirectories of /games that contain an os.ini.
+ * Writes up to `max` directory names into the flat buffer `names`, one every
+ * `stride` bytes (NUL-terminated).  Returns the number written.  0 on targets
+ * without an instance tree. */
+int of_file_list_instances(char *names, uint32_t stride, uint32_t max);
+
 /* Set idle hook — called during DMA/bridge polling waits.
  * Apps use this for background work (audio, input) during file I/O.
  * Set to NULL to disable. */

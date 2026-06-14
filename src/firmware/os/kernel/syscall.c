@@ -15,6 +15,7 @@
 #include "../os_string.h"
 #include "of_version.h"
 #include "iso9660_vfs.h"
+#include "launch.h"
 
 /* dlmalloc functions (provided by of_malloc.c, USE_DL_PREFIX) */
 extern void *dlmalloc(size_t);
@@ -2173,6 +2174,14 @@ static long linux_dispatch(long n, long a0, long a1, long a2,
 
     case SYS_exit:
     case SYS_exit_group:
+#ifdef OF_TARGET_SUPPORTS_RELAUNCH
+        /* If a launcher (menu.elf) is registered, an app exit returns to it
+         * instead of halting — game → exit → menu.  Does not return. */
+        if (os_menu_pending()) {
+            os_request_menu_relaunch();
+            os_relaunch();
+        }
+#endif
         /* Switch scanout back to the legacy 8-bit terminal path so user sees
          * boot screen even if the app left RGB565/low-bit/dynamic mode set. */
         SYS_COLOR_MODE = COLOR_MODE_8BIT;
@@ -2376,6 +2385,26 @@ static long of_vendor_dispatch(long eid, long fid,
         switch (fid) {
         case OF_BASE_FID_GET_VERSION:
             return OF_API_VERSION;
+#ifdef OF_TARGET_SUPPORTS_RELAUNCH
+        case OF_BASE_FID_RELAUNCH:
+            /* a0 = instance root, a1 = ELF (either may be NULL).  Capture the
+             * strings before any teardown, then hand off — does not return. */
+            os_request_relaunch((const char *)a0, (const char *)a1);
+            os_relaunch();           /* noreturn on success */
+            return OF_ERR_NOT_SUPPORTED;   /* unreachable */
+        case OF_BASE_FID_SET_MENU:
+            os_set_menu((const char *)a0, (const char *)a1);
+            return 0;
+#else
+        case OF_BASE_FID_RELAUNCH:
+        case OF_BASE_FID_SET_MENU:
+            return OF_ERR_NOT_SUPPORTED;
+#endif
+        case OF_BASE_FID_LIST_INSTANCES:
+            /* a0 = names buffer, a1 = stride, a2 = max.  Backed by the file
+             * HAL on every target (returns 0 where there is no /games tree). */
+            return of_file_list_instances((char *)a0, (uint32_t)a1,
+                                          (uint32_t)a2);
         }
         break;
 

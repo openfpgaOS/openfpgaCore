@@ -40,6 +40,13 @@
 #define OF_TARGET_PLATFORM_ID          OF_PLATFORM_MISTER
 #define OF_TARGET_CPU_FREQ_HZ          100000000u
 
+/* In-OS application relaunch (menu.elf hand-off without an FPGA reset).
+ * Supported on MiSTer: saves are write-through FAT files (durable per write)
+ * and the single full-feature bitstream runs every instance.  NOT defined on
+ * Pocket, where instance switching goes through the Analogue host (a core
+ * reload) and nonvolatile persistence only happens at core exit. */
+#define OF_TARGET_SUPPORTS_RELAUNCH    1
+
 #define OF_TARGET_BRAM_BASE            0x00000000u
 #define OF_TARGET_BRAM_SIZE            (32u * 1024u)
 #define OF_TARGET_APP_BRAM_BASE        0x00004000u

@@ -16,6 +16,9 @@
 #include <stdint.h>
 #include "fatfs/ff.h"
 
+/* Per-instance root (of_file_set/get_instance_root) is declared in hal/file.h
+ * and consumed by slot_path() in file.c. */
+
 /* Open (or fetch the cached handle for) a slot's backing file.
  * writable=1 reopens read-only handles in FA_READ|FA_WRITE.
  * Returns NULL if the image is unmounted or the file doesn't exist. */

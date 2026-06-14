@@ -17,6 +17,7 @@
 #include "bank_preload.h"
 #include "irq.h"
 #include "config.h"
+#include "launch.h"
 #include <stddef.h>
 #include <string.h>
 
@@ -240,18 +241,28 @@ static int build_app_argv(int *argc_out) {
     return 0;
 }
 
-static int prepare_app_launch(uint32_t *slot_out, int *argc_out) {
-    strncpy(app_elf_name, APP_DEFAULT_ELF, sizeof(app_elf_name));
-    app_elf_name[sizeof(app_elf_name) - 1] = '\0';
+/* Resolve the app to launch and build its argv.  When elf_override is non-empty
+ * it takes precedence over [os] ELF (used by the in-OS relaunch path, where the
+ * launcher names the target directly); otherwise the os.ini [os] ELF is used,
+ * defaulting to APP_DEFAULT_ELF. */
+static int prepare_app_launch_ex(const char *elf_override,
+                                 uint32_t *slot_out, int *argc_out) {
+    if (elf_override && elf_override[0]) {
+        strncpy(app_elf_name, elf_override, sizeof(app_elf_name));
+        app_elf_name[sizeof(app_elf_name) - 1] = '\0';
+    } else {
+        strncpy(app_elf_name, APP_DEFAULT_ELF, sizeof(app_elf_name));
+        app_elf_name[sizeof(app_elf_name) - 1] = '\0';
+
+        int rc = of_config_get("os", "ELF", app_elf_name, sizeof(app_elf_name));
+        if (rc == OF_CONFIG_ERR_NOENT)
+            rc = 0;
+        if (rc < 0)
+            return rc;
+    }
+
     app_args_buf[0] = '\0';
-
-    int rc = of_config_get("os", "ELF", app_elf_name, sizeof(app_elf_name));
-    if (rc == OF_CONFIG_ERR_NOENT)
-        rc = 0;
-    if (rc < 0)
-        return rc;
-
-    rc = of_config_get("os", "ARGS", app_args_buf, sizeof(app_args_buf));
+    int rc = of_config_get("os", "ARGS", app_args_buf, sizeof(app_args_buf));
     if (rc == OF_CONFIG_ERR_NOENT)
         rc = 0;
     if (rc < 0)
@@ -264,6 +275,10 @@ static int prepare_app_launch(uint32_t *slot_out, int *argc_out) {
         return OF_CONFIG_ERR_NOENT;
 
     return build_app_argv(argc_out);
+}
+
+static int prepare_app_launch(uint32_t *slot_out, int *argc_out) {
+    return prepare_app_launch_ex(NULL, slot_out, argc_out);
 }
 
 void os_main(void) {
@@ -454,3 +469,154 @@ void os_main(void) {
     /* Should never reach here */
     while (1) {}
 }
+
+#ifdef OF_TARGET_SUPPORTS_RELAUNCH
+/* ======================================================================
+ * In-OS application relaunch (Architecture A) — see kernel/launch.h.
+ *
+ * A launcher app (menu.elf) selects an instance and ecalls OF_BASE_FID_
+ * RELAUNCH; the kernel tears down the outgoing app, re-points the file
+ * system at the instance, re-reads its os.ini, and execs the chosen ELF —
+ * all without resetting the FPGA.  MiSTer only (saves are write-through FAT
+ * files; one bitstream runs every instance).
+ * ====================================================================== */
+
+#define RELAUNCH_INSTANCE_MAX 64
+
+/* Captured out of the caller's memory before any teardown (the app's strings
+ * disappear once the next ELF is loaded over it). */
+static char relaunch_instance[RELAUNCH_INSTANCE_MAX];
+static char relaunch_elf[APP_ELF_NAME_MAX];
+static int  relaunch_elf_set;
+
+/* Launcher to re-enter when the running app exit()s (os_set_menu). */
+static char menu_instance[RELAUNCH_INSTANCE_MAX];
+static char menu_elf[APP_ELF_NAME_MAX];
+static int  menu_set;
+
+static void launch_str_copy(char *dst, uint32_t dst_sz, const char *src) {
+    uint32_t i = 0;
+    if (src)
+        for (; src[i] && i < dst_sz - 1u; i++)
+            dst[i] = src[i];
+    dst[i] = '\0';
+}
+
+void os_request_relaunch(const char *instance, const char *elf) {
+    launch_str_copy(relaunch_instance, sizeof(relaunch_instance), instance);
+    relaunch_elf_set = (elf && elf[0]) ? 1 : 0;
+    launch_str_copy(relaunch_elf, sizeof(relaunch_elf),
+                    relaunch_elf_set ? elf : "");
+}
+
+void os_set_menu(const char *instance, const char *elf) {
+    launch_str_copy(menu_instance, sizeof(menu_instance), instance);
+    launch_str_copy(menu_elf, sizeof(menu_elf), elf);
+    menu_set = (menu_instance[0] || menu_elf[0]) ? 1 : 0;
+}
+
+int os_menu_pending(void) { return menu_set; }
+
+void os_request_menu_relaunch(void) {
+    os_request_relaunch(menu_instance, menu_elf);
+}
+
+/* menu_set intentionally PERSISTS across relaunches: once a launcher registers,
+ * every subsequent game exit must return to it, so os_relaunch() must NOT clear
+ * it.  The launcher re-arms it on each entry; it never exit()s itself. */
+
+static void relaunch_fail(const char *what, int rc) {
+    /* Reached only on an unrecoverable relaunch error -> halt forever.  Keep
+     * interrupts disabled so a timer/vsync IRQ can't fire into the now-stale
+     * trap frame while we spin (os_relaunch may have already re-enabled them). */
+    __asm__ volatile("csrci mstatus, 0x8" ::: "memory");
+    of_term_printf("  \033[91mrelaunch: %s (rc=%d)\033[0m\n", what, rc);
+    while (1)
+        of_timer_delay_ms(1000);
+}
+
+void os_relaunch(void) {
+    /* We run in the M-mode ecall trap handler, on the OS runtime stack (never
+     * the outgoing app's stack), with interrupts globally disabled — so the
+     * teardown below races nothing.  We never mret: exactly like the cold-boot
+     * elf_exec(), we jr straight into the next app once it is loaded. */
+
+    /* Drop the outgoing app's IRQ callbacks and source masks. */
+    of_irq_init();
+
+    /* Quiesce the dynamic HW the app may have dirtied.  Per the of_init()
+     * idempotency audit, re-running of_init() is safe ONLY after these — it
+     * does not stop voices, release sample allocations, or close file handles
+     * itself, so doing so here prevents leaked voices/allocs/FILs. */
+    of_mixer_stop_all();
+    of_mixer_free_samples();
+    of_file_relaunch_reset();
+
+    /* Re-point the file system at the selected instance (no-op when empty). */
+    of_file_set_instance_root(relaunch_instance);
+
+    /* Re-init the HAL to a clean state for the next app.  Interrupts stay
+     * globally disabled through all of the fallible setup below: of_irq_enable_
+     * cpu() is deferred to just before the hand-off so a relaunch_fail() halt
+     * can never spin with IRQs live against the stale ecall trap frame. */
+    of_init();
+
+    logo_drawn = 0;
+    boot_logo("\033[94m");           /* blue: launching */
+    of_term_puts("  Relaunching...\n");
+
+    /* Load the selected instance's os.ini (slot 2 resolves under the instance
+     * root on MiSTer).  Missing/empty falls back to defaults. */
+    (void)of_config_load(OS_CONFIG_SLOT_ID);
+
+    /* Capture and clear the one-shot ELF override up front, so it never leaks
+     * into a later relaunch regardless of which path we take from here. */
+    const char *elf_override = relaunch_elf_set ? relaunch_elf : NULL;
+    relaunch_elf_set = 0;
+
+    elf_load_result_t app;
+    uint32_t app_slot = APP_SLOT_ID;
+    int app_argc = 1;
+    int rc = prepare_app_launch_ex(elf_override, &app_slot, &app_argc);
+    if (rc == 0)
+        rc = load_app_with_retries(app_slot, &app);
+    if (rc < 0)
+        relaunch_fail(app_elf_name, rc);
+
+    /* Per-app kernel state — mirrors the os_main() launch tail; keep in sync. */
+    syscall_init(app.bss_end);
+    services_table_init();
+
+    uintptr_t audio_floor = (app.bss_end + APP_STACK_SIZE
+                           + OF_TARGET_AUDIO_RESERVE_ALIGN - 1u)
+                          & ~(uintptr_t)(OF_TARGET_AUDIO_RESERVE_ALIGN - 1u);
+    if (of_mixer_memory_set_floor((uint32_t)audio_floor) < 0)
+        relaunch_fail("app too large for audio reserve", 0);
+
+    filesystem_init();
+    bank_preload();
+
+    app.stack_top = of_mixer_app_memory_top();
+    if (syscall_set_app_stack_top(app.stack_top) < 0)
+        relaunch_fail("not enough SDRAM for app stack", 0);
+
+    caps_table_init(app.bss_end);
+
+    /* Mirror the boot console to UART only when neither Analogizer nor SNAC
+     * owns the shared cart pins — same gate os_main() applies at cold boot. */
+    {
+        const of_analogizer_state_t *az = of_analogizer_get_state();
+        if (!az->enabled && az->snac_type == SNAC_NONE)
+            of_term_enable_uart_mirror();
+    }
+
+    /* of_input_init() (run inside of_init) zeroed prev_buttons; prime it so the
+     * new app's first poll sees correct press edges, not every held button. */
+    of_input_poll();
+
+    /* All fallible setup done — safe to take interrupts now, then hand off. */
+    of_irq_enable_cpu();
+    elf_exec(&app, app_argc, app_argv);
+    while (1) {}  /* unreachable */
+}
+#endif /* OF_TARGET_SUPPORTS_RELAUNCH */

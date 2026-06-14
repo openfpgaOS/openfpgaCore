@@ -82,34 +82,11 @@ static void analogizer_write_settings(uint32_t packed) {
                           (ANALOGIZER_SETTINGS & ANLG_PRESERVED_SETTINGS_MASK);
 }
 
-static void analogizer_wait_for_registers(const of_analogizer_state_t *s) {
-    uint32_t settings = analogizer_pack_settings(s);
-
-    for (volatile int i = 0; i < 1024; i++) {
-        if ((ANALOGIZER_SETTINGS & ~ANLG_PRESERVED_SETTINGS_MASK) == settings &&
-            (int8_t)ANALOGIZER_H_OFFSET == s->h_offset &&
-            (int8_t)ANALOGIZER_V_OFFSET == s->v_offset)
-            break;
-    }
-}
-
 static void analogizer_init_snac(void) {
     if (anlg_state.snac_type != SNAC_NONE)
         snac_init(anlg_state.snac_type);
     else
         snac_init(SNAC_NONE);
-}
-
-static void analogizer_apply_state(const of_analogizer_state_t *state) {
-    anlg_state = *state;
-    analogizer_clamp_state(&anlg_state);
-
-    ANALOGIZER_H_OFFSET = (uint32_t)(int32_t)anlg_state.h_offset;
-    ANALOGIZER_V_OFFSET = (uint32_t)(int32_t)anlg_state.v_offset;
-    analogizer_write_settings(analogizer_pack_settings(&anlg_state));
-
-    analogizer_wait_for_registers(&anlg_state);
-    analogizer_init_snac();
 }
 
 static void analogizer_read_hardware_defaults(void) {

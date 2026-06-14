@@ -129,6 +129,18 @@ void of_file_set_idle_hook(void (*hook)(void)) {
     idle_hook = hook;
 }
 
+/* Instance roots and in-OS relaunch are MiSTer features.  On the Pocket the
+ * Analogue host supplies per-instance nonvolatile files and switches games by
+ * reloading the core, so these are inert no-ops here (shared by the sim
+ * target, which #includes this file).  Defined so the HAL contract resolves
+ * on every target without changing any Pocket behavior. */
+void of_file_set_instance_root(const char *root) { (void)root; }
+const char *of_file_get_instance_root(void) { return ""; }
+void of_file_relaunch_reset(void) {}
+int of_file_list_instances(char *names, uint32_t stride, uint32_t max) {
+    (void)names; (void)stride; (void)max; return 0;
+}
+
 void of_file_init(void) {
     idle_hook = (void *)0;
     bridge_warmed = 0;

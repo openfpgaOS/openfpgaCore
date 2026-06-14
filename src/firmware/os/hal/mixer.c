@@ -617,6 +617,9 @@ static of_mixer_handle_t play_internal_h(const void *pcm, uint32_t sample_count,
     int voice = alloc_voice(priority);
     if (voice < 0)
         return OF_MIXER_HANDLE_INVALID;
+    /* Ungrouped play: reset any stale group left on this slot by a prior
+     * grouped use, else the sound inherits the wrong group's volume. */
+    group_shadow[voice] = (uint8_t)OF_MIXER_GROUP_SFX;
     return program_voice_play(voice, pcm, sample_count, sample_rate,
                               priority, volume);
 }
@@ -843,6 +846,12 @@ void of_mixer_stop_all(void)
             generation_shadow[i] = mixer_generation_next(generation_shadow[i]);
     }
     active_shadow = 0;
+    /* Fully quiesce: drop any voice-ended handles so a caller that stops
+     * everything (e.g. an app teardown) doesn't inherit stale ended state. */
+    ended_head = 0;
+    ended_tail = 0;
+    ended_count = 0;
+    ended_legacy_latch = 0;
     mixer_irq_restore_local(irq);
 }
 

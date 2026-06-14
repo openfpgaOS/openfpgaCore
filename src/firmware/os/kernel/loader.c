@@ -103,6 +103,10 @@ static int seg_in_app_vmap(uint32_t vaddr, uint32_t memsz) {
     /* Empty segments (memsz == 0) are vacuously in-range. */
     if (memsz == 0)
         return 1;
+    /* Reject a vaddr+memsz that would wrap the 32-bit space (malformed ELF):
+     * an overflowed `end` could otherwise pass the range tests below. */
+    if (vaddr > 0xFFFFFFFFu - memsz)
+        return 0;
     uint32_t end = vaddr + memsz;
     if (vaddr >= APP_VMAP_V1_BRAM_BASE && end <= APP_VMAP_V1_BRAM_END)
         return 1;
@@ -159,15 +163,20 @@ static int elf_copy_to_bram(uint32_t slot_id, uint32_t file_offset,
     return 0;
 }
 
-/* Process RELA relocations */
-static void process_rela(uintptr_t load_base, Elf32_Rela *rela, uint32_t count) {
+/* Process RELA relocations.  [img_lo, img_hi) bounds the loaded SDRAM image;
+ * relocations whose target falls outside it (a malformed/corrupt ELF) are
+ * skipped rather than allowed to scribble arbitrary memory. */
+static void process_rela(uintptr_t load_base, uintptr_t img_lo, uintptr_t img_hi,
+                         Elf32_Rela *rela, uint32_t count) {
     for (uint32_t i = 0; i < count; i++) {
         uint32_t type = rela[i].r_info & 0xFF;
 
         if (type == R_RISCV_RELATIVE) {
             /* R_RISCV_RELATIVE: *(base + offset) = base + addend */
-            uint32_t *target = (uint32_t *)(load_base + rela[i].r_offset);
-            *target = (uint32_t)(load_base + (uintptr_t)rela[i].r_addend);
+            uintptr_t target = load_base + rela[i].r_offset;
+            if (target < img_lo || target + 4u > img_hi || target < load_base)
+                continue;  /* relocation outside the loaded image — skip */
+            *(uint32_t *)target = (uint32_t)(load_base + (uintptr_t)rela[i].r_addend);
         }
         /* Other relocation types are not supported for static-PIE */
     }
@@ -251,6 +260,12 @@ int elf_load(uint32_t slot_id, uintptr_t load_addr,
              * every target, even targets that can't back them. */
             if (phdr.p_vaddr >= APP_VMAP_V1_BRAM_BASE &&
                 phdr.p_vaddr < APP_VMAP_V1_BRAM_END) {
+                /* A BRAM-range start passes the vmap test on its start
+                 * address alone; ET_DYN is exempt from that test entirely.
+                 * Re-check the END here so a large memsz can't run the copy/
+                 * memset past the hot region into kernel BRAM. */
+                if (phdr.p_memsz > APP_VMAP_V1_BRAM_END - phdr.p_vaddr)
+                    return -7;
                 /* Refuse to load an OF_FASTTEXT app on a target that
                  * has no real BRAM in the v1 region. The alternative
                  * (load to LMA in SDRAM) would leave VMA-relative
@@ -275,6 +290,16 @@ int elf_load(uint32_t slot_id, uintptr_t load_addr,
                 /* BRAM segments don't contribute to SDRAM bss_end */
             } else {
                 uintptr_t seg_addr = load_base + phdr.p_vaddr;
+
+                /* Validate the *relocated* SDRAM address.  The PT_LOAD vmap
+                 * check above runs on phdr.p_vaddr and is skipped entirely for
+                 * ET_DYN, so a malformed ET_DYN vaddr would otherwise wrap
+                 * load_base and DMA/memset to a wild address.  (For ET_EXEC
+                 * load_base is 0, so seg_addr == p_vaddr and this is the same
+                 * check that already passed — harmless.) */
+                if (seg_addr < load_base ||
+                    !seg_in_app_vmap((uint32_t)seg_addr, phdr.p_memsz))
+                    return -7;
 
                 /* Load file contents directly to SDRAM via DMA */
                 if (phdr.p_filesz > 0) {
@@ -303,27 +328,38 @@ int elf_load(uint32_t slot_id, uintptr_t load_addr,
         }
     }
 
-    /* Process dynamic section for relocations */
+    /* Process dynamic section for relocations.  The loaded SDRAM image spans
+     * [load_base, bss_end); the dynamic array, the RELA table, and every
+     * relocation target must live inside it — anything else is a malformed or
+     * corrupt ELF and is refused rather than dereferenced. */
     if (dynamic_size > 0 && ehdr.e_type == ET_DYN) {
-        /* Dynamic section is already loaded in memory */
-        Elf32_Dyn *dyn = (Elf32_Dyn *)(load_base + dynamic_offset);
+        const uintptr_t img_lo = load_base;
+        const uintptr_t img_hi = bss_end;
 
-        uint32_t rela_addr = 0, rela_size = 0, rela_ent = 0;
-
-        /* Parse dynamic entries for RELA info */
-        /* Actually, dynamic section vaddr may differ from offset.
-         * Re-read it to find the addresses. */
+        /* The dynamic section's run-time vaddr may differ from its file
+         * offset; find PT_DYNAMIC's vaddr. */
+        uint32_t dyn_vaddr = dynamic_offset;
         for (int i = 0; i < ehdr.e_phnum; i++) {
             Elf32_Phdr phdr;
-            elf_read(slot_id, ehdr.e_phoff + i * ehdr.e_phentsize,
-                     &phdr, sizeof(phdr));
+            if (elf_read(slot_id, ehdr.e_phoff + i * ehdr.e_phentsize,
+                         &phdr, sizeof(phdr)) < 0)
+                return -5;
             if (phdr.p_type == PT_DYNAMIC) {
-                dyn = (Elf32_Dyn *)(load_base + phdr.p_vaddr);
+                dyn_vaddr = phdr.p_vaddr;
                 break;
             }
         }
 
-        for (int i = 0; dyn[i].d_tag != DT_NULL; i++) {
+        uintptr_t dyn_addr = load_base + dyn_vaddr;
+        if (dyn_addr < img_lo ||
+            (uintptr_t)dynamic_size > img_hi - dyn_addr)
+            return -9;  /* dynamic section outside the loaded image */
+
+        Elf32_Dyn *dyn = (Elf32_Dyn *)dyn_addr;
+        uint32_t max_entries = dynamic_size / (uint32_t)sizeof(Elf32_Dyn);
+        uint32_t rela_addr = 0, rela_size = 0, rela_ent = 0;
+
+        for (uint32_t i = 0; i < max_entries && dyn[i].d_tag != DT_NULL; i++) {
             switch (dyn[i].d_tag) {
             case DT_RELA:     rela_addr = dyn[i].d_val; break;
             case DT_RELASZ:   rela_size = dyn[i].d_val; break;
@@ -331,10 +367,12 @@ int elf_load(uint32_t slot_id, uintptr_t load_addr,
             }
         }
 
-        if (rela_addr && rela_size && rela_ent) {
-            Elf32_Rela *rela = (Elf32_Rela *)(load_base + rela_addr);
-            uint32_t count = rela_size / rela_ent;
-            process_rela(load_base, rela, count);
+        if (rela_addr && rela_size && rela_ent == (uint32_t)sizeof(Elf32_Rela)) {
+            uintptr_t rela_lo = load_base + rela_addr;
+            if (rela_lo >= img_lo && (uintptr_t)rela_size <= img_hi - rela_lo) {
+                Elf32_Rela *rela = (Elf32_Rela *)rela_lo;
+                process_rela(load_base, img_lo, img_hi, rela, rela_size / rela_ent);
+            }
         }
     }
 

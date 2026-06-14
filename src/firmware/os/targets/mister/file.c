@@ -46,7 +46,11 @@
 #define DYN_SLOT_FIRST_LOW  4u    /* dynamic ids 4..6 first (Pocket layout), */
 #define DYN_SLOT_FIRST_HIGH 20u   /* then 20..31 */
 #define DYN_SLOT_END        32u
-#define DYN_NAME_MAX        64u
+#define MISTER_INSTANCE_ROOT_MAX 48u   /* "/games/<name>" */
+#define MISTER_PATH_MAX          96u   /* instance_root + "/saves/slot_N.sav" */
+/* Dynamic-slot stored path must hold a full instance-relative path
+ * (instance_root + "/assets/" + filename), so it tracks MISTER_PATH_MAX. */
+#define DYN_NAME_MAX        MISTER_PATH_MAX
 
 /* os.bin staging copy, read through the uncached alias so the CPU never
  * caches lines the boot.rom ioctl DMA may rewrite on a reload. */
@@ -193,6 +197,25 @@ static int dyn_register(const char *dir, const char *name) {
     return 0;
 }
 
+/* Optional per-instance root for the game's files, e.g. "/games/Quake".
+ * Empty (the default) selects the legacy single-game layout where files live
+ * at the image root.  The launcher (menu.elf / Arch-A relaunch) sets this
+ * before switching into an instance; with it empty every join_root() result
+ * is byte-identical to the pre-instance paths, so existing single-game images
+ * are unaffected. */
+static char instance_root[MISTER_INSTANCE_ROOT_MAX];
+
+/* Join instance_root + leaf (leaf begins with '/') into buf. */
+static const char *join_root(const char *leaf, char *buf, uint32_t max) {
+    uint32_t pos = 0;
+    for (uint32_t i = 0; instance_root[i] && pos < max - 1u; i++)
+        buf[pos++] = instance_root[i];
+    for (uint32_t i = 0; leaf[i] && pos < max - 1u; i++)
+        buf[pos++] = leaf[i];
+    buf[pos] = '\0';
+    return buf;
+}
+
 static void enumerate_dir(const char *dir) {
     DIR dj;
     FILINFO fno;
@@ -221,32 +244,126 @@ static void ensure_enumerated(void) {
     if (dyn_enumerated || !ensure_mounted())
         return;
     dyn_enumerated = 1;
-    enumerate_dir("/");
-    enumerate_dir("/assets/");
+    /* Enumerate the active instance's tree (root when no instance is set). */
+    char dirbuf[MISTER_PATH_MAX];
+    enumerate_dir(join_root("/", dirbuf, sizeof(dirbuf)));
+    enumerate_dir(join_root("/assets/", dirbuf, sizeof(dirbuf)));
 }
 
-/* Resolve a slot id to a FAT path.  Returns NULL for unmapped slots and
- * for the RAM-backed boot slot. */
+void of_file_set_instance_root(const char *root) {
+    uint32_t i = 0;
+    if (root && root[0] == '/') {
+        while (root[i] && i < MISTER_INSTANCE_ROOT_MAX - 1u) {
+            instance_root[i] = root[i];
+            i++;
+        }
+        /* Drop a trailing '/': leaves are always joined as "/<leaf>". */
+        while (i > 1u && instance_root[i - 1u] == '/')
+            i--;
+    }
+    instance_root[i] = '\0';
+}
+
+const char *of_file_get_instance_root(void) {
+    return instance_root;
+}
+
+void of_file_relaunch_reset(void) {
+    mister_fs_enter();
+    /* Close every cached backing FIL (releases FF_FS_LOCK and flushes any
+     * FatFs-buffered tail; nv writes are already f_sync'd per write). */
+    fil_cache_drop_all();
+    /* Cancel a pending async read whose completion callback points into the
+     * outgoing app's now-stale code. */
+    async_state.active = 0;
+    async_state.completed = 0;
+    async_state.callback = (void *)0;
+    /* Force the dynamic asset slots to re-enumerate for the next instance. */
+    dyn_enumerated = 0;
+    dyn_slot_count = 0;
+    size_memo_invalidate();
+    mister_fs_exit();
+}
+
+/* "/games/<name>/os.ini" -> buf. */
+static void build_instance_ini(const char *name, char *buf, uint32_t max) {
+    const char *pfx = "/games/";
+    const char *sfx = "/os.ini";
+    uint32_t pos = 0;
+    for (uint32_t i = 0; pfx[i] && pos < max - 1u; i++) buf[pos++] = pfx[i];
+    for (uint32_t i = 0; name[i] && pos < max - 1u; i++) buf[pos++] = name[i];
+    for (uint32_t i = 0; sfx[i] && pos < max - 1u; i++) buf[pos++] = sfx[i];
+    buf[pos] = '\0';
+}
+
+int of_file_list_instances(char *names, uint32_t stride, uint32_t max) {
+    if (!names || stride == 0u || max == 0u || !ensure_mounted())
+        return 0;
+
+    mister_fs_enter();
+    DIR dj;
+    FILINFO fno;
+    int count = 0;
+    /* f_findfirst leaves dj uninitialized on FR_NO_PATH (no /games dir — a
+     * normal single-game image), so only close on FR_OK (see enumerate_dir). */
+    FRESULT fr0 = f_findfirst(&dj, &fno, "/games", "*");
+    FRESULT fr = fr0;
+    while (fr == FR_OK && fno.fname[0] && (uint32_t)count < max) {
+        if (fno.fattrib & AM_DIR) {
+            /* Only a directory that actually carries an os.ini is a launchable
+             * instance — "read the ini" to qualify it. */
+            char ini[MISTER_PATH_MAX];
+            FILINFO si;
+            build_instance_ini(fno.fname, ini, sizeof(ini));
+            if (f_stat(ini, &si) == FR_OK) {
+                /* Skip a name that won't fit the caller's stride rather than
+                 * emit a truncated one the caller would then fail to relaunch. */
+                uint32_t nlen = 0;
+                while (fno.fname[nlen]) nlen++;
+                if (nlen < stride) {
+                    char *dst = names + (uint32_t)count * stride;
+                    for (uint32_t k = 0; k <= nlen; k++)
+                        dst[k] = fno.fname[k];
+                    count++;
+                }
+            }
+        }
+        fr = f_findnext(&dj, &fno);
+    }
+    if (fr0 == FR_OK)
+        f_closedir(&dj);
+    mister_fs_exit();
+    return count;
+}
+
+/* Resolve a slot id to a FAT path.  Returns NULL for unmapped slots and for
+ * the RAM-backed boot slot.  A game's own files — os.ini, app.elf, sound bank,
+ * per-game settings, and saves — resolve under instance_root when an instance
+ * is active; the shared config (8) is global across instances. */
 static const char *slot_path(uint32_t slot_id, char *buf, uint32_t max) {
     switch (slot_id) {
-    case 2:  return "/os.ini";
-    case 3:  return "/app.elf";
-    case 7:  return "/bank.ofsf";
-    case 8:  return "/config/shared.cfg";
-    case 9:  return "/config/duke3d.cfg";
+    case 2:  return join_root("/os.ini", buf, max);
+    case 3:  return join_root("/app.elf", buf, max);
+    case 7:  return join_root("/bank.ofsf", buf, max);
+    case 8:  return "/config/shared.cfg";              /* shared across instances */
+    case 9:  return join_root("/config/duke3d.cfg", buf, max);
     default: break;
     }
 
     if (slot_id >= 10 && slot_id < 10 + OF_TARGET_SAVE_MAX_SLOTS) {
         uint32_t n = slot_id - 10;
-        /* "/saves/slot_N.sav" */
+        /* slot_N.sav uses a single digit; the save-file contract (and the
+         * image builder's preallocation) depend on it.  Guard the assumption. */
+        _Static_assert(OF_TARGET_SAVE_MAX_SLOTS <= 10,
+                       "single-digit slot_N.sav naming requires <=10 save slots");
+        char leaf[20];   /* "/saves/slot_N.sav" + NUL */
         const char *pfx = "/saves/slot_";
         uint32_t pos = 0;
-        while (pfx[pos] && pos < max - 7) { buf[pos] = pfx[pos]; pos++; }
-        buf[pos++] = (char)('0' + n);
-        buf[pos++] = '.'; buf[pos++] = 's'; buf[pos++] = 'a'; buf[pos++] = 'v';
-        buf[pos] = '\0';
-        return buf;
+        while (pfx[pos]) { leaf[pos] = pfx[pos]; pos++; }
+        leaf[pos++] = (char)('0' + n);
+        leaf[pos++] = '.'; leaf[pos++] = 's'; leaf[pos++] = 'a'; leaf[pos++] = 'v';
+        leaf[pos] = '\0';
+        return join_root(leaf, buf, max);
     }
 
     ensure_enumerated();
@@ -265,7 +382,7 @@ static FIL *open_slot_impl(uint32_t slot_id, int writable) {
     if (!ensure_mounted())
         return (void *)0;
 
-    char pathbuf[32];
+    char pathbuf[MISTER_PATH_MAX];
     const char *path = slot_path(slot_id, pathbuf, sizeof(pathbuf));
     if (!path)
         return (void *)0;
@@ -513,7 +630,7 @@ int of_file_slot_write_chunked(uint32_t slot_id, uint32_t slot_offset,
 
 int of_file_get_name(uint32_t slot_id, char *name_out, uint32_t name_max) {
     const char *base = (void *)0;
-    char pathbuf[32];
+    char pathbuf[MISTER_PATH_MAX];
 
     if (!name_out || name_max == 0)
         return -1;
@@ -543,7 +660,7 @@ long of_file_flags(uint32_t slot_id) {
         return (long)slot_id;
     /* Pre-created nonvolatile slots always exist; report them present so
      * dir_probe_slots registers them even when logically empty. */
-    char pathbuf[32];
+    char pathbuf[MISTER_PATH_MAX];
     mister_fs_enter();
     const char *p = (slot_id >= 8 && slot_id < 10 + OF_TARGET_SAVE_MAX_SLOTS)
                         ? slot_path(slot_id, pathbuf, sizeof(pathbuf))
@@ -558,7 +675,7 @@ static int64_t size64_body(uint32_t slot_id) {
     if (!ensure_mounted())
         return -1;
 
-    char pathbuf[32];
+    char pathbuf[MISTER_PATH_MAX];
     const char *path = slot_path(slot_id, pathbuf, sizeof(pathbuf));
     if (!path)
         return -1;
@@ -705,6 +822,9 @@ int of_file_read_async(uint32_t slot_id, uint32_t slot_offset,
     async_state.token = token;
     async_state.result = rc;
     async_state.callback = callback;
+    /* Publish the payload before the flags async_drain() gates on, so the IRQ
+     * drain can never observe completed=1 with a stale token/result/callback. */
+    __sync_synchronize();
     async_state.completed = 1;
     async_state.active = 1;
 
