@@ -28,6 +28,19 @@
 
 module gpu_core #(
     // ----------------------------------------------------------------
+    // Per-target feature gate: the 0x49 CMD_DRAW_PARAM_TRI param-triangle
+    // path (header-carried planes + 3 vertices through the shared edge
+    // walker).  When 0, the 0x49 decode term is constant 0, so the opcode
+    // takes the unrecognised-command payload-drain no-op path.  When this and
+    // INCLUDE_VERT_TRI and INCLUDE_PARAM_TRI_RECS are ALL 0, NO triangle
+    // command remains and the shared gpu_edge_walker (tri_walker) loses every
+    // producer — it constant-folds away entirely (the os25 reclaim).
+    //
+    // Must track axi_periph_slave's INCLUDE_PARAM_TRI (HW_FEATURES bit 19)
+    // on the same target so apps don't submit 0x49 to a core that drains it.
+    parameter INCLUDE_PARAM_TRI = 1,
+
+    // ----------------------------------------------------------------
     // Per-target feature gate: hardware vertex-triangle plane derivation
     // (CMD_SET_TRI_STATE 0x4A + CMD_DRAW_VERT_TRI 0x4B + the S_TRI_DERIVE
     // derivation sub-FSM).  When 0, both opcodes take the same payload-drain
@@ -38,24 +51,24 @@ module gpu_core #(
     // docs/gpu-utilization-handoff.md).
     //
     // SCOPE: this gates ONLY the 0x4A/0x4B vertex-tri path.  The 0x49
-    // CMD_DRAW_PARAM_TRI param-triangle path and the shared gpu_edge_walker
-    // are NOT gated — they stay present on every target regardless.
-    parameter GPU_HAS_VERT_TRI = 1,
+    // CMD_DRAW_PARAM_TRI param-triangle path is gated by INCLUDE_PARAM_TRI;
+    // the shared gpu_edge_walker is present iff ANY triangle command is.
+    parameter INCLUDE_VERT_TRI = 1,
 
     // ----------------------------------------------------------------
     // Per-target feature gate: records-only param-tri (CMD_DRAW_PARAM_TRI_RECS
     // 0x4D).  When 0, the 0x4D decode term is constant 0, so the opcode takes
     // the unknown-command payload-drain no-op path and Quartus sweeps its
     // S_PAY_DATA routing arm and S_EXECUTE bring-up arm.  When BOTH this and
-    // GPU_HAS_VERT_TRI are 0 the 0x4A sticky persistents (tri_state_valid +
+    // INCLUDE_VERT_TRI are 0 the 0x4A sticky persistents (tri_state_valid +
     // tri_state_clip_*) lose their last consumers (the 0x4D/0x4B EXECUTE
     // gates are spelled as the same constants) and sweep too; the 0x4A
     // decode itself stays ungated — its payload lands in the SHARED spanprod
     // staging, which the 0x48/0x49 paths keep alive on every target.
     //
-    // Must track axi_periph_slave's HAS_PARAM_TRI_RECS (HW_FEATURES bit 22)
-    // on the same target so apps don't submit 0x4D to a core that drains it.
-    parameter GPU_HAS_PARAM_TRI_RECS = 1,
+    // Must track axi_periph_slave's INCLUDE_PARAM_TRI_RECS (HW_FEATURES bit
+    // 22) on the same target so apps don't submit 0x4D to a core that drains it.
+    parameter INCLUDE_PARAM_TRI_RECS = 1,
 
     // ----------------------------------------------------------------
     // Z read-window depth: 4 (default) or 1.
@@ -100,17 +113,30 @@ module gpu_core #(
     // remaining 1-writer so every direct-affine branch folds with it.
     // Pocket OS30 (Quake2: long-form 2D + 0x49 world + 0x4B alias) sets 0;
     // OS25 and MiSTer keep the default 1.  Must track axi_periph_slave's
-    // HAS_SPAN_GROUP (HW_FEATURES bit 23) on the same target.
-    parameter GPU_HAS_COMPACT_SPAN = 1,
+    // INCLUDE_COMPACT_SPAN (HW_FEATURES bit 23) on the same target.
+    parameter INCLUDE_COMPACT_SPAN = 1,
 
     // ----------------------------------------------------------------
     // CMD_DRAW_COLUMN_LIST (0x4C) decode.  The column loader is the compact
     // arms behind column_compact_idx_remap, so this feature REQUIRES
-    // GPU_HAS_COMPACT_SPAN — the effective gate below forces 0 when the
+    // INCLUDE_COMPACT_SPAN — the effective gate below forces 0 when the
     // compact machinery is absent (a 0x4C then drains as a no-op, exactly
     // like a wrong-sized payload on full hardware).
-    // Must track axi_periph_slave's HAS_COLUMN_LIST (HW_FEATURES bit 21).
-    parameter GPU_HAS_COLUMN_LIST = 1
+    // Must track axi_periph_slave's INCLUDE_COLUMN_LIST (HW_FEATURES bit 21).
+    parameter INCLUDE_COLUMN_LIST = 1,
+
+    // ----------------------------------------------------------------
+    // Dedicated fast texture memory present (a target-specific sync-burst
+    // texture chip, routed externally by the wrapper).
+    // When 1, the texture-cache line fills can be redirected off the SDRAM
+    // read master onto the gpu_tex_mem_* fill master (toggled by the
+    // GPU_TEX_MEM_ROUTE MMIO register), and the GPU exposes the upload regs
+    // that drive the external fast-texture controller.  When 0, the
+    // gpu_tex_mem_* outputs are held idle, the upload regs no-op, the route
+    // register reads 0, and texture fills always stay on SDRAM (m_rd_*) —
+    // every redirect-mux and upload-reg branch constant-folds away.  Must
+    // track axi_periph_slave's INCLUDE_TEX_MEM (HW_FEATURES bit 25).
+    parameter INCLUDE_TEX_MEM = 1
 ) (
     input wire clk,
     input wire reset_n,
@@ -128,6 +154,35 @@ module gpu_core #(
     input  wire        m_rd_rvalid,
     input  wire [31:0] m_rd_rdata,
     input  wire        m_rd_rlast,
+
+    // ================================================================
+    // AXI4 Read Master — fast texture memory fills.  When the
+    // GPU_TEX_MEM_ROUTE MMIO register is set, the texture cache's line
+    // fills are redirected off m_rd_* to THIS master, which the target
+    // routes to its fast-texture controller (a dedicated sync-burst chip).
+    // Same AXI fill contract as m_rd_* (arlen=3, no rready).  Independent
+    // of m_rd_*, so fast-texture fills never contend with DMA/blend on
+    // SDRAM.  Idle (held 0) when INCLUDE_TEX_MEM == 0.
+    // ================================================================
+    output wire        gpu_tex_mem_arvalid,
+    input  wire        gpu_tex_mem_arready,
+    output wire [31:0] gpu_tex_mem_araddr,
+    output wire [7:0]  gpu_tex_mem_arlen,
+    input  wire        gpu_tex_mem_rvalid,
+    input  wire [31:0] gpu_tex_mem_rdata,
+    input  wire        gpu_tex_mem_rlast,
+
+    // ================================================================
+    // Fast texture memory upload (MMIO).  reg 2 (0x08) = word address,
+    // reg 15 (0x3C) = data word (kicks a word_wr to the fast-texture
+    // controller and auto-increments the address).  reg 15 read =
+    // upload-in-flight.  The GPU owns its texture store, so uploads route
+    // through the GPU regs.  No-op when INCLUDE_TEX_MEM == 0.
+    // ================================================================
+    output reg         gpu_tex_mem_up_wr,
+    output reg  [21:0] gpu_tex_mem_up_addr,
+    output reg  [31:0] gpu_tex_mem_up_wdata,
+    input  wire        gpu_tex_mem_up_busy,
 
     // ================================================================
     // AXI4 Write Master — framebuffer writes + clear DMA
@@ -265,6 +320,22 @@ reg        ring_reset;         // Pulse: reset ring_rdptr (from MMIO, consumed b
 localparam [25:0] PALOOKUP_BASE_DEFAULT = 26'h3fc0000;  // byte offset 0x03FC0000
 reg [25:0] palookup_base;
 
+// When set, texture-cache line fills are redirected off the SDRAM read master
+// (m_rd_*) to the fast-texture fill master (gpu_tex_mem_* master).  The
+// texture's GPU byte address then indexes the fast-texture chip directly (the
+// adapter masks the low 24 bits = the 16 MB chip), so firmware uploads each
+// texture to the SAME byte offset the app addresses it at.  Toggle only while
+// the GPU is idle (no in-flight tex fill) so the fill-response routing can't
+// switch domains mid-burst.  Held constant 0 when INCLUDE_TEX_MEM == 0.
+reg gpu_tex_mem_route;
+
+// Fast-texture upload state.  gpu_tex_mem_up_ptr is the running word pointer
+// set by reg 2 and auto-bumped per reg-15 data write; gpu_tex_mem_up_inflight
+// is the upload-busy status (saw-busy gated on the controller's word_busy).
+reg [21:0] gpu_tex_mem_up_ptr;
+reg        gpu_tex_mem_up_inflight;
+reg        gpu_tex_mem_up_busy_seen;
+
 // ---- Doorbell-DMA pull from SDRAM into ring BRAM ----
 // Latched on MMIO writes; consumed by the dedicated DMA FSM below.
 // dma_words_left counts words remaining in the entire kick; the FSM
@@ -344,10 +415,27 @@ always @(posedge clk) begin
         dma_src_latched <= {GPU_ADDR_W{1'b0}};
         dma_len_latched <= 13'd0;
         palookup_base   <= PALOOKUP_BASE_DEFAULT;
+        gpu_tex_mem_route        <= 1'b0;
+        gpu_tex_mem_up_wr        <= 1'b0;
+        gpu_tex_mem_up_addr      <= 22'd0;
+        gpu_tex_mem_up_wdata     <= 32'd0;
+        gpu_tex_mem_up_ptr       <= 22'd0;
+        gpu_tex_mem_up_inflight  <= 1'b0;
+        gpu_tex_mem_up_busy_seen <= 1'b0;
     end else begin
         tex_flush_req <= 0;
         soft_reset    <= 0;
         ring_reset    <= 0;
+        gpu_tex_mem_up_wr <= 1'b0;   // single-cycle word_wr pulse to the controller
+
+        // upload-in-flight saw-busy: hold inflight from the data write until the
+        // controller's word_busy has risen then fallen (so firmware polling
+        // reg 15 never false-completes in the kick->busy gap).  Constant-dead
+        // when INCLUDE_TEX_MEM == 0 (gpu_tex_mem_up_inflight is never set).
+        if ((INCLUDE_TEX_MEM != 0) && gpu_tex_mem_up_inflight) begin
+            if (gpu_tex_mem_up_busy)            gpu_tex_mem_up_busy_seen <= 1'b1;
+            else if (gpu_tex_mem_up_busy_seen)  gpu_tex_mem_up_inflight  <= 1'b0;
+        end
 
         // ring_wr_addr advances once per DMA beat.  Keeping it here
         // (not in the BRAM-write block) means the BRAM block stays canonical.
@@ -372,7 +460,11 @@ always @(posedge clk) begin
                     end
                 end
                 4'd1: begin end // GPU_RING_WRPTR is read-only now
-                4'd2: begin end
+                4'd2: begin // GPU_TEX_MEM_UP_ADDR: set the upload word pointer
+                    // No-op when INCLUDE_TEX_MEM == 0 (the ptr has no consumer).
+                    if (INCLUDE_TEX_MEM != 0)
+                        gpu_tex_mem_up_ptr <= reg_wdata[21:0];
+                end
                 4'd3: begin  // GPU_DMA_SRC
                     dma_src_latched <= reg_wdata[GPU_ADDR_W-1:0];
                 end
@@ -389,6 +481,23 @@ always @(posedge clk) begin
                 end
                 4'd12: begin // GPU_PALOOKUP_BASE
                     palookup_base <= reg_wdata[25:0];
+                end
+                4'd14: begin // GPU_TEX_MEM_ROUTE: bit0 routes tex fills to fast tex
+                    // No-op when INCLUDE_TEX_MEM == 0 (route stays constant 0,
+                    // so the redirect mux always selects the SDRAM master).
+                    if (INCLUDE_TEX_MEM != 0)
+                        gpu_tex_mem_route <= reg_wdata[0];
+                end
+                4'd15: begin // GPU_TEX_MEM_UP_DATA: write data word, auto-inc ptr
+                    // No-op when INCLUDE_TEX_MEM == 0 (no fast-tex controller).
+                    if (INCLUDE_TEX_MEM != 0) begin
+                        gpu_tex_mem_up_addr      <= gpu_tex_mem_up_ptr;
+                        gpu_tex_mem_up_wdata     <= reg_wdata;
+                        gpu_tex_mem_up_wr        <= 1'b1;
+                        gpu_tex_mem_up_inflight  <= 1'b1;
+                        gpu_tex_mem_up_busy_seen <= 1'b0;
+                        gpu_tex_mem_up_ptr       <= gpu_tex_mem_up_ptr + 22'd1;
+                    end
                 end
                 default: ;
             endcase
@@ -414,6 +523,10 @@ always @(*) begin
         4'd12:   reg_rdata = {6'b0, palookup_base};
         // Compact current-inflight readback for the write-balance test.
         4'd13:   reg_rdata = {28'b0, m_wr_inflight};
+        // reg14 reads the route bit (0 when INCLUDE_TEX_MEM == 0);
+        // reg15 reads upload-busy (also 0 when fast tex is absent).
+        4'd14:   reg_rdata = {31'b0, (INCLUDE_TEX_MEM != 0) ? gpu_tex_mem_route       : 1'b0};
+        4'd15:   reg_rdata = {31'b0, (INCLUDE_TEX_MEM != 0) ? gpu_tex_mem_up_inflight : 1'b0};  // upload busy
         default: reg_rdata = 32'b0;
     endcase
 end
@@ -460,12 +573,12 @@ wire transluc_sram_lookup_ready =
 
 assign transluc_upload_busy = (lutsram_state != LUTSRAM_IDLE);
 
-`ifdef EXCLUDE_TRANSLUC
-// OS30 (Pocket Quake/Quake2): EXCLUDE_TRANSLUC removes the transluc[] LUT
+`ifndef INCLUDE_TRANSLUC
+// Targets without INCLUDE_TRANSLUC (Pocket OS30): remove the transluc[] LUT
 // upload/lookup FSM and its 4-entry transluc_cache entirely.  The GPU's
 // external SRAM port (used only for the blend LUT) goes idle and the cache
 // registers hold 0, so transluc_cache_hit always reads 0 in the (now
-// unreachable, chokepointed) FBSS_BLEND states.  Default (macro undefined)
+// unreachable, chokepointed) FBSS_BLEND states.  INCLUDE_TRANSLUC
 // keeps the full LUT upload window + cache below.
 always @(posedge clk) begin
     if (!reset_n) begin
@@ -578,7 +691,7 @@ always @(posedge clk) begin
         endcase
     end
 end
-`endif // EXCLUDE_TRANSLUC
+`endif // INCLUDE_TRANSLUC
 
 // Cmap read path through gpu_tex_cache port B.  At the p1→p2 shift, the
 // SDRAM byte address for the fragment's cmap lookup is staged into the
@@ -814,8 +927,18 @@ reg  [7:0]  dma_arlen;
 // enters S_AR; new tex/blend ARs are rejected until DMA's burst has
 // fully drained back to S_IDLE).  R channel: dma_owns_r wins only
 // while DMA is actively in S_R — see comment block above for why.
+// Texture-cache fills go to fast texture memory (gpu_tex_mem_* master) when
+// GPU_TEX_MEM_ROUTE is set; otherwise they share the SDRAM read master below
+// exactly as before.  DMA and blend ALWAYS stay on SDRAM.  When redirected, the
+// SDRAM tex fallthrough is suppressed and the tex-cache's fill responses come
+// from the fast-texture adapter.  (tex_route==0 collapses every branch below to
+// the original behaviour; when INCLUDE_TEX_MEM == 0, gpu_tex_mem_route is held
+// constant 0, so tex_route is a constant 0 and the whole redirect folds away.)
+wire tex_route = (INCLUDE_TEX_MEM != 0) ? gpu_tex_mem_route : 1'b0;
+
 assign m_rd_arvalid    = dma_owns_ar   ? dma_arvalid
                        : blend_owns_m0 ? blend_arvalid
+                       : tex_route     ? 1'b0
                        :                 tex_axi_arvalid;
 assign m_rd_araddr     = dma_owns_ar   ? dma_araddr
                        : blend_owns_m0 ? {{(32-GPU_ADDR_W){1'b0}}, blend_araddr}
@@ -823,10 +946,25 @@ assign m_rd_araddr     = dma_owns_ar   ? dma_araddr
 assign m_rd_arlen      = dma_owns_ar   ? dma_arlen
                        : blend_owns_m0 ? blend_arlen
                        :                 tex_axi_arlen;
-assign tex_axi_arready = (dma_owns_ar || blend_owns_m0) ? 1'b0 : m_rd_arready;
-assign tex_axi_rvalid  = (dma_owns_r  || blend_owns_m0) ? 1'b0 : m_rd_rvalid;
-assign tex_axi_rdata   = m_rd_rdata;
-assign tex_axi_rlast   = (dma_owns_r  || blend_owns_m0) ? 1'b0 : m_rd_rlast;
+
+// Fast-texture fill master — driven only when redirected.  Independent of the
+// SDRAM bus, so a fast-texture fill can overlap a DMA/blend SDRAM read.  Held
+// idle (arvalid 0) when INCLUDE_TEX_MEM == 0 (tex_route is then constant 0).
+assign gpu_tex_mem_arvalid = tex_route ? tex_axi_arvalid : 1'b0;
+assign gpu_tex_mem_araddr  = tex_axi_araddr;
+assign gpu_tex_mem_arlen   = tex_axi_arlen;
+
+// Texture-cache fill responses: from fast texture memory when redirected, else
+// the SDRAM read master (gated by DMA/blend ownership, exactly as before).
+// With INCLUDE_TEX_MEM == 0, tex_route is constant 0 and every fill response
+// folds to the SDRAM master.
+assign tex_axi_arready = tex_route ? gpu_tex_mem_arready
+                       : (dma_owns_ar || blend_owns_m0) ? 1'b0 : m_rd_arready;
+assign tex_axi_rvalid  = tex_route ? gpu_tex_mem_rvalid
+                       : (dma_owns_r  || blend_owns_m0) ? 1'b0 : m_rd_rvalid;
+assign tex_axi_rdata   = tex_route ? gpu_tex_mem_rdata : m_rd_rdata;
+assign tex_axi_rlast   = tex_route ? gpu_tex_mem_rlast
+                       : (dma_owns_r  || blend_owns_m0) ? 1'b0 : m_rd_rlast;
 
 wire blend_arready = (blend_owns_m0 && !dma_owns_ar) ? m_rd_arready : 1'b0;
 wire blend_rvalid  = (blend_owns_m0 && !dma_owns_r ) ? m_rd_rvalid  : 1'b0;
@@ -977,6 +1115,10 @@ end
 always @(posedge clk) begin
     if (!reset_n) begin
         tex_m0_in_flight <= 1'b0;
+    end else if (tex_route) begin
+        // Tex fills are on the fast-texture master, never the SDRAM bus, so
+        // the doorbell-DMA bus-idle test must not count them.
+        tex_m0_in_flight <= 1'b0;
     end else if (!blend_owns_m0) begin
         if (tex_axi_arvalid && m_rd_arready)
             tex_m0_in_flight <= 1'b1;
@@ -1110,7 +1252,7 @@ localparam CMD_DRAW_VERT_TRI          = 8'h4B;
 // state with every triangle; this variant carries ONLY the per-triangle
 // payload and reuses the 0x4A sticky staging for everything else.  Available
 // on EVERY target — the 0x4A sticky decode and this path are independent of
-// GPU_HAS_VERT_TRI (only the 0x4B plane DERIVATION needs that hardware), so
+// INCLUDE_VERT_TRI (only the 0x4B plane DERIVATION needs that hardware), so
 // the Pocket gets the header-dedup win even with vert-tri gated out.
 //
 // Payload (16 words):
@@ -1165,10 +1307,10 @@ localparam CMD_DRAW_COLUMN_LIST       = 8'h4C;
 // 0x4C delegates its payload to the 0x48 compact-direct loader arms, so the
 // column decode can only exist where the compact machinery does.  Deriving
 // the effective gate here (instead of trusting the instantiation) makes the
-// broken combination GPU_HAS_COLUMN_LIST=1 && GPU_HAS_COMPACT_SPAN=0
+// broken combination INCLUDE_COLUMN_LIST=1 && INCLUDE_COMPACT_SPAN=0
 // degrade to a drained no-op instead of a dead loader.
-localparam GPU_HAS_COLUMN_LIST_EFF =
-    (GPU_HAS_COMPACT_SPAN != 0) ? GPU_HAS_COLUMN_LIST : 0;
+localparam INCLUDE_COLUMN_LIST_EFF =
+    (INCLUDE_COMPACT_SPAN != 0) ? INCLUDE_COLUMN_LIST : 0;
 
 localparam PARAM_RECORD_U16V16_COUNT16 = 4'd0;
 
@@ -1346,14 +1488,14 @@ function [3:0] span_flags_from_wire;
         span_flags_from_wire[SPAN_COLORMAP] = flags[0];
         span_flags_from_wire[SPAN_SKIP_ZERO] = flags[2];
         span_flags_from_wire[SPAN_PERSP] = GPU_ENABLE_PERSP && flags[5];
-`ifdef EXCLUDE_TRANSLUC
-        // OS30 (Pocket Quake/Quake2): EXCLUDE_TRANSLUC chokepoints the
+`ifndef INCLUDE_TRANSLUC
+        // Targets without INCLUDE_TRANSLUC (Pocket OS30): chokepoint the
         // per-pixel translucent flag to 0.  Every SPAN_TRANSLUC fragment then
         // falls through to the opaque-write path (p3_needs_fb_flush below),
         // so the FBSS_BLEND_* states, transluc_cache, the GPU_TRANSLUC_ADDR/
         // DATA LUT-upload window, and blend_group logic all become unreachable
         // and prune away (~388 ALM).  Translucent spans render as opaque
-        // instead of blended — they never hang.  Default (macro undefined)
+        // instead of blended — they never hang.  INCLUDE_TRANSLUC
         // keeps the full blend path.  Opaque/z/colormap pipeline untouched.
         span_flags_from_wire[SPAN_TRANSLUC] = 1'b0;
 `else
@@ -1379,12 +1521,12 @@ task load_param_span_list_payload_word;
     input [5:0]  idx;
     input [31:0] data;
     begin
-        // Branch select doubles as the GPU_HAS_COMPACT_SPAN prune gate:
+        // Branch select doubles as the INCLUDE_COMPACT_SPAN prune gate:
         // with the parameter 0 the S_DECODE setter is constant 0 so the reg
         // already folds, but spelling the constant here too keeps the whole
         // compact case dead even if a future writer of
         // spanprod_compact_direct appears.
-        if ((GPU_HAS_COMPACT_SPAN != 0) && spanprod_compact_direct) begin
+        if ((INCLUDE_COMPACT_SPAN != 0) && spanprod_compact_direct) begin
             case (idx)
                 6'd0: begin
                     spanprod_direct_affine <= 1'b1;
@@ -1637,9 +1779,9 @@ task spanprod_select_current_record;
         // sole reader is the direct branch of spanprod_load_generated_span);
         // this record select runs on EVERY path — 0x49/0x4B walker records
         // and 0x48 long-form included — so the 4:1 capture muxes must be
-        // explicitly gated or they survive the GPU_HAS_COMPACT_SPAN=0 sweep
+        // explicitly gated or they survive the INCLUDE_COMPACT_SPAN=0 sweep
         // as live fabric fed by the (swept) lane arrays.
-        if (GPU_HAS_COMPACT_SPAN != 0) begin
+        if (INCLUDE_COMPACT_SPAN != 0) begin
             spanprod_cur_direct_fb_addr <= spanprod_direct_fb_addr[spanprod_idx];
             spanprod_cur_direct_tex_addr <= spanprod_direct_tex_addr[spanprod_idx];
             spanprod_cur_direct_s <= spanprod_direct_s[spanprod_idx];
@@ -2049,25 +2191,48 @@ wire       [15:0]  tri_rec_count;
 // Capture happens on the same edge the walker consumes the handshake.
 wire               tri_rec_ready = (state == S_TRI_FILL);
 
-gpu_edge_walker #(
-    .EW_PARALLEL_DIVS(GPU_EW_PARALLEL_DIVS)
-) tri_walker (
-    .clk      (clk),
-    .reset_n  (reset_n),
-    .abort    (soft_reset),
-    .start    (tri_start),
-    .v0_x     (tri_v0_x), .v0_y (tri_v0_y),
-    .v1_x     (tri_v1_x), .v1_y (tri_v1_y),
-    .v2_x     (tri_v2_x), .v2_y (tri_v2_y),
-    .clip_x0  (tri_clip_x0), .clip_x1 (tri_clip_x1),
-    .clip_y0  (tri_clip_y0), .clip_y1 (tri_clip_y1),
-    .busy     (tri_busy),
-    .rec_valid(tri_rec_valid),
-    .rec_u    (tri_rec_u),
-    .rec_v    (tri_rec_v),
-    .rec_count(tri_rec_count),
-    .rec_ready(tri_rec_ready)
-);
+// The shared triangle rasterizer is present iff ANY triangle command is
+// included (0x49 param-tri, 0x4A/0x4B vertex-tri, or 0x4D records-tri).  When
+// all three are 0 (os25) the walker has no producer at all, so we drop the
+// instance and tie its outputs to the idle/"done" constants — every
+// cmd_is_tri_walker path is already constant-dead, and tri_walker_done folds
+// to 1.  Quartus then sweeps the ~690-ALM edge walker.
+localparam INCLUDE_TRI_WALKER =
+    ((INCLUDE_PARAM_TRI != 0) || (INCLUDE_VERT_TRI != 0)
+     || (INCLUDE_PARAM_TRI_RECS != 0)) ? 1 : 0;
+
+generate
+if (INCLUDE_TRI_WALKER != 0) begin : g_tri_walker
+    gpu_edge_walker #(
+        .EW_PARALLEL_DIVS(GPU_EW_PARALLEL_DIVS)
+    ) tri_walker (
+        .clk      (clk),
+        .reset_n  (reset_n),
+        .abort    (soft_reset),
+        .start    (tri_start),
+        .v0_x     (tri_v0_x), .v0_y (tri_v0_y),
+        .v1_x     (tri_v1_x), .v1_y (tri_v1_y),
+        .v2_x     (tri_v2_x), .v2_y (tri_v2_y),
+        .clip_x0  (tri_clip_x0), .clip_x1 (tri_clip_x1),
+        .clip_y0  (tri_clip_y0), .clip_y1 (tri_clip_y1),
+        .busy     (tri_busy),
+        .rec_valid(tri_rec_valid),
+        .rec_u    (tri_rec_u),
+        .rec_v    (tri_rec_v),
+        .rec_count(tri_rec_count),
+        .rec_ready(tri_rec_ready)
+    );
+end else begin : g_no_tri_walker
+    // No triangle command included: idle the walker outputs (never busy,
+    // never a record) so tri_walker_done is constant 1 and the S_TRI_FILL
+    // arms are unreachable.
+    assign tri_busy      = 1'b0;
+    assign tri_rec_valid = 1'b0;
+    assign tri_rec_u     = 16'sd0;
+    assign tri_rec_v     = 16'sd0;
+    assign tri_rec_count = 16'd0;
+end
+endgenerate
 
 // Walker has emitted everything and gone idle: the start pulse has been
 // consumed, no walk in progress, no record waiting.  The tri_start term
@@ -3932,7 +4097,7 @@ always @(posedge clk) begin : main_fsm
             cmd_is_fence          <= (cmd_type == CMD_FENCE);
             cmd_is_clear_rect     <= (cmd_type == CMD_CLEAR_RECT);
             cmd_is_set_fb         <= (cmd_type == CMD_SET_FB);
-            // PRUNE GATE: when GPU_HAS_COMPACT_SPAN==0 the size bound rises
+            // PRUNE GATE: when INCLUDE_COMPACT_SPAN==0 the size bound rises
             // to the long-form minimum (31-word header + first record pair),
             // so a compact-sized 0x48 (11..32 words) falls through the
             // S_PAY_DATA if-else chain (payload drains word-by-word via
@@ -3942,15 +4107,15 @@ always @(posedge clk) begin : main_fsm
             // payloads (>=33 words) decode identically in both configs.
             cmd_is_draw_param_span_list <=
                 (cmd_type == CMD_DRAW_PARAM_SPAN_LIST && cmd_payload_words >=
-                 ((GPU_HAS_COMPACT_SPAN != 0) ? 13'd11 : 13'd33));
+                 ((INCLUDE_COMPACT_SPAN != 0) ? 13'd11 : 13'd33));
             // Decode dedup: 0x4C reuses the 0x48 compact-direct case arms of
             // load_param_span_list_payload_word through the 5-word->7-word
             // index remap (column_compact_idx_remap), so the column decode
             // ALSO selects the compact branch.  The flag is read only by that
             // loader's branch select, so this is decode-routing only.
-            // PRUNE GATE: constant 0 when GPU_HAS_COMPACT_SPAN==0 — the
+            // PRUNE GATE: constant 0 when INCLUDE_COMPACT_SPAN==0 — the
             // compact loader branch, lane bank and capture muxes all fold.
-            spanprod_compact_direct <= (GPU_HAS_COMPACT_SPAN != 0) &&
+            spanprod_compact_direct <= (INCLUDE_COMPACT_SPAN != 0) &&
                                     ((cmd_type == CMD_DRAW_PARAM_SPAN_LIST &&
                                         cmd_payload_words <= 13'd32)
                                     || (cmd_type == CMD_DRAW_COLUMN_LIST));
@@ -3960,10 +4125,10 @@ always @(posedge clk) begin : main_fsm
             // count exactly); wrong-sized payloads outside the range drain and
             // retire as a no-op.  The loader delegates to the 0x48
             // compact-direct arms via the index remap and forces s/sstep=0.
-            // PRUNE GATE: GPU_HAS_COLUMN_LIST_EFF==0 makes the decode term
+            // PRUNE GATE: INCLUDE_COLUMN_LIST_EFF==0 makes the decode term
             // constant 0 — a 0x4C then takes the same drained-no-op path as
             // a wrong-sized payload on full hardware.
-            cmd_is_draw_column_list <= (GPU_HAS_COLUMN_LIST_EFF != 0) &&
+            cmd_is_draw_column_list <= (INCLUDE_COLUMN_LIST_EFF != 0) &&
                 (cmd_type == CMD_DRAW_COLUMN_LIST
                  && cmd_payload_words >= 13'd9 && cmd_payload_words <= 13'd24);
             // Staging-dedup contract, variant-invariant (0x48/0x4C/0x49
@@ -3983,7 +4148,15 @@ always @(posedge clk) begin : main_fsm
             // Triangle form: fixed 36-word payload (31 header + 2 clip +
             // 3 vertex).  Wrong-sized payloads drain through S_PAY_DATA
             // without decode and retire at S_EXECUTE as a no-op.
-            cmd_is_draw_param_tri <=
+            //
+            // PRUNE GATE: when INCLUDE_PARAM_TRI==0 the 0x49 decode term is
+            // constant 0, so a 0x49 falls through the S_PAY_DATA / S_EXECUTE
+            // chains as the unrecognised-command no-op drain.  Combined with
+            // INCLUDE_VERT_TRI==0 and INCLUDE_PARAM_TRI_RECS==0 (os25), the
+            // edge walker loses all producers and constant-folds away.  Note
+            // the tri_state_valid clear above stays keyed on the RAW opcode
+            // (the variant-invariant sticky-state contract), NOT this flag.
+            cmd_is_draw_param_tri <= (INCLUDE_PARAM_TRI != 0) &&
                 (cmd_type == CMD_DRAW_PARAM_TRI && cmd_payload_words == 13'd36);
             // Vertex-triangle pair (hardware plane derivation): 0x4A latches the
             // sticky bank (16-word payload), 0x4B draws one triangle from raw
@@ -3993,13 +4166,13 @@ always @(posedge clk) begin : main_fsm
             // the shared spanprod staging + the small tri_state_clip_* /
             // tri_state_valid persistents, which the records-only 0x4D path
             // below consumes — no derivation hardware involved.  When BOTH
-            // GPU_HAS_VERT_TRI and GPU_HAS_PARAM_TRI_RECS are 0, the sticky
+            // INCLUDE_VERT_TRI and INCLUDE_PARAM_TRI_RECS are 0, the sticky
             // persistents have no remaining consumer (the 0x4B and 0x4D
             // EXECUTE arms are both gated by spelled-out constants) and sweep
             // naturally; the 0x4A decode + payload routing stays, writing only
             // the shared staging the 0x48/0x49 paths keep alive.
             //
-            // PRUNE GATE: when GPU_HAS_VERT_TRI==0 the 0x4B decode term is
+            // PRUNE GATE: when INCLUDE_VERT_TRI==0 the 0x4B decode term is
             // constant 0, so the flag is never set.  The opcode then falls
             // through the S_PAY_DATA if-else chain (no destination writes; the
             // payload still drains word-by-word via pay_remaining) and through
@@ -4014,19 +4187,19 @@ always @(posedge clk) begin : main_fsm
             // a live register on every target.
             cmd_is_set_tri_state <=
                 (cmd_type == CMD_SET_TRI_STATE && cmd_payload_words == 13'd16);
-            cmd_is_draw_vert_tri <= (GPU_HAS_VERT_TRI != 0) &&
+            cmd_is_draw_vert_tri <= (INCLUDE_VERT_TRI != 0) &&
                 (cmd_type == CMD_DRAW_VERT_TRI && cmd_payload_words == 13'd14);
             // Records-only param-tri (0x4D): per-triangle planes + verts on
             // top of the 0x4A sticky state.  Wrong-sized payloads drain and
             // retire as a no-op.
             //
-            // PRUNE GATE: when GPU_HAS_PARAM_TRI_RECS==0 the decode term is
+            // PRUNE GATE: when INCLUDE_PARAM_TRI_RECS==0 the decode term is
             // constant 0, so a 0x4D falls through the S_PAY_DATA if-else chain
             // (payload drains word-by-word via pay_remaining, no destination
             // writes) and through the S_EXECUTE chain to the final
             // `else state <= S_IDLE` — the exact unrecognised-command no-op
             // drain path — and Quartus sweeps the 0x4D routing/bring-up arms.
-            cmd_is_draw_param_tri_recs <= (GPU_HAS_PARAM_TRI_RECS != 0) &&
+            cmd_is_draw_param_tri_recs <= (INCLUDE_PARAM_TRI_RECS != 0) &&
                 (cmd_type == CMD_DRAW_PARAM_TRI_RECS && cmd_payload_words == 13'd16);
             cmd_is_flip           <= (cmd_type == CMD_FLIP);
 
@@ -4381,14 +4554,14 @@ always @(posedge clk) begin : main_fsm
                 // the sticky control word's validation (set by the 0x4A's
                 // idx-7 decode) plus this command's own w12/q29 validation.
                 //
-                // PRUNE GATE: the GPU_HAS_PARAM_TRI_RECS term is redundant
+                // PRUNE GATE: the INCLUDE_PARAM_TRI_RECS term is redundant
                 // with cmd_is_draw_param_tri_recs (constant 0 when the feature
                 // is off) but is spelled here AS A CONSTANT — same recipe as
                 // the 0x4B arm below — so that when BOTH triangle-extra
                 // features are off, tri_state_valid / tri_state_clip_* lose
                 // their last consumers at elaboration time and sweep, without
                 // depending on the cmd_is_* constant folding first.
-                if ((GPU_HAS_PARAM_TRI_RECS != 0) && tri_state_valid) begin
+                if ((INCLUDE_PARAM_TRI_RECS != 0) && tri_state_valid) begin
                     spanprod_idx <= 2'd0;
                     spanprod_calc_step <= 3'd0;
                     src_done <= 1'b0;
@@ -4424,7 +4597,7 @@ always @(posedge clk) begin : main_fsm
                 // soft_reset, or after an 0x48/0x49 overwrote the staging) is a
                 // no-op — drain already happened, just retire.
                 //
-                // PRUNE GATE: the GPU_HAS_VERT_TRI term is redundant with
+                // PRUNE GATE: the INCLUDE_VERT_TRI term is redundant with
                 // cmd_is_draw_vert_tri (constant 0 when the feature is off) but
                 // is spelled here AS A CONSTANT so Quartus's FSM extraction sees
                 // `state <= S_TRI_DERIVE` as hard-unreachable and drops the
@@ -4432,7 +4605,7 @@ always @(posedge clk) begin : main_fsm
                 // Without this explicit constant, FSM extraction kept dstate and
                 // ~1k ALMs of derivation datapath alive (the cmd_is_* constant
                 // folds too late for the state-machine recognizer).
-                if ((GPU_HAS_VERT_TRI != 0) && tri_state_valid) begin
+                if ((INCLUDE_VERT_TRI != 0) && tri_state_valid) begin
                     // The spanprod surface/control staging already holds the
                     // 0x4A state (decoded in S_PAY_DATA — no copy needed), and
                     // the szi/tzi products are already in dv_szi/dv_tzi (folded
@@ -4490,13 +4663,13 @@ always @(posedge clk) begin : main_fsm
             tri_start <= 1'b0;   // start pulse consumed by the walker
             // PRUNE GATE: every writer of dstate and the derivation datapath
             // (dd*/rdet*/dv_*) lives inside this case.  Wrapping it in the
-            // constant-folding `if (GPU_HAS_VERT_TRI != 0)` means that when the
+            // constant-folding `if (INCLUDE_VERT_TRI != 0)` means that when the
             // feature is off the whole case is dead logic, so Quartus drops the
             // dstate state machine and the ~1k ALMs of derivation arithmetic.
             // (S_TRI_DERIVE is also unreachable — its only entry in S_EXECUTE is
             // gated by the same parameter — so this branch never executes
             // either way; the explicit constant just guarantees the sweep.)
-            if (GPU_HAS_VERT_TRI != 0) begin
+            if (INCLUDE_VERT_TRI != 0) begin
             case (dstate)
                 // ---- y-sort: 3 compare-swaps, walker's exact rule.  Only the
                 //      order permutation dv_ord[] is swapped (not six attribute
@@ -4883,7 +5056,7 @@ always @(posedge clk) begin : main_fsm
                     state <= S_TRI_FILL;
                 end
             endcase
-            end // GPU_HAS_VERT_TRI
+            end // INCLUDE_VERT_TRI
         end
 
         // ============================================================
@@ -4972,7 +5145,7 @@ always @(posedge clk) begin : main_fsm
                             // here has fully drained, so the wide-OR bounce
                             // is gated with the compact machinery instead of
                             // hoping synthesis proves the pipe empty.
-                            if ((GPU_HAS_COMPACT_SPAN != 0)
+                            if ((INCLUDE_COMPACT_SPAN != 0)
                                 && (p0a_valid || p0_valid || p1_valid
                                     || p2_valid || p2b_valid || p3_valid
                                     || (fbss != FBSS_IDLE)

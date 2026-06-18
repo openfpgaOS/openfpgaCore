@@ -66,6 +66,7 @@ help:
 	@printf "  $(C_HEAD)Build:$(C_RESET)\n"
 	@printf "    $(C_CMD)make $(C_CMD)full$(C_RESET)              bootloader → os → build            $(C_DIM)(~9 min)$(C_RESET)\n"
 	@printf "    $(C_CMD)make $(C_CMD)build$(C_RESET)             cpu → compile → reverse bits       $(C_DIM)(~7 min)$(C_RESET)\n"
+	@printf "      $(C_DIM)VARIANT=os25|os30  → os25.rbf_r / os30.rbf_r (seed stored in seeds/<variant>.seed)$(C_RESET)\n"
 	@printf "    $(C_CMD)make $(C_CMD)firmware$(C_RESET)          bootloader → os → MIF patch        $(C_DIM)(~10 sec)$(C_RESET)\n"
 	@printf "    $(C_CMD)make $(C_CMD)os$(C_RESET)                Builds os.bin                      $(C_DIM)(~5 sec)$(C_RESET)\n"
 	@printf "    $(C_CMD)make $(C_CMD)clean$(C_RESET)             Remove all build artifacts\n"
@@ -108,8 +109,11 @@ install-os: $(FW_DIR)/os.bin
 
 install-bitstream: $(REVERSE_BITS) output_files/$(PROJECT).rbf
 	@mkdir -p $(RELEASE_DIR)
-	@$(REVERSE_BITS) output_files/$(PROJECT).rbf $(RELEASE_DIR)/bitstream.rbf_r > /dev/null
-	@printf "  $(C_OK)bitstream$(C_RESET)  → $(RELEASE_DIR)/\n"
+	@$(REVERSE_BITS) output_files/$(PROJECT).rbf $(RELEASE_DIR)/$(BITSTREAM).rbf_r > /dev/null
+	@# Record which variant produced the current rbf so `make sdk` (which
+	@# only sees output_files/) publishes it under the right name.
+	@echo $(VARIANT) > output_files/.last_variant
+	@printf "  $(C_OK)$(BITSTREAM).rbf_r$(C_RESET)  → $(RELEASE_DIR)/\n"
 
 # ── Bootloader / OS / Firmware ──────────────────────────────────────
 #
@@ -165,20 +169,49 @@ firmware: bootloader os
 #                    docs/os30-quake2-cut-plan.md.
 # Firmware is ONE caps-driven os.bin for both — no per-variant build flag.
 VARIANT ?= os25
+
+# Per-variant INCLUDE list (positive include-set; a feature is PRESENT iff its
+# INCLUDE_* macro is defined here).  4-player, link, vert/param/recs-tri and
+# fast tex are simply absent from the Pocket variants — they read only player 0
+# (or 0-1 for Doom), no game uses the link cable, and OS25 has no fast-tex chip.
 ifeq ($(VARIANT),os30)
-  VARIANT_DEFS += OS30_VERT_TRI EXCLUDE_ANALOGIZER EXCLUDE_TRANSLUC \
-                  EXCLUDE_MIXER EXCLUDE_4PLAYER EXCLUDE_LINK
+  # OS30 (Quake2): triangles + fast texture memory IN; analogizer, HW mixer,
+  # translucency, column lists and compact span groups OUT (Quake2 never emits
+  # those, and the cuts pay for the triangle path + fast tex on the device).
+  VARIANT_DEFS = INCLUDE_PARAM_TRI INCLUDE_VERT_TRI INCLUDE_PARAM_TRI_RECS \
+                 INCLUDE_TEX_MEM
+else
+  # OS25 (default, 2.5D games — Doom/Duke3D/ScummVM/Wolf + Quake1 SW alias):
+  # analogizer, full HW mixer, translucency, column lists, compact span groups
+  # IN; NO triangle path (the edge walker constant-folds away) and NO fast tex
+  # (textures + colormap render from SDRAM, caps tex_fast_size 0).
+  VARIANT_DEFS = INCLUDE_ANALOGIZER INCLUDE_HW_MIXER INCLUDE_TRANSLUC \
+                 INCLUDE_COLUMN_LIST INCLUDE_COMPACT_SPAN
 endif
 
-# Optional extra build knobs forwarded to Quartus as --verilog_macro=<NAME>.
-VARIANT_DEFS ?=
+# Each VARIANT_DEFS entry is forwarded to quartus_map as --verilog_macro=<NAME>.
 VERILOG_MACROS = $(foreach d,$(VARIANT_DEFS),--verilog_macro="$(d)")
 
-# Variant-named bitstream copy target: `make rbf-named VARIANT=os30`
+# Variant-named bitstream.  Deployed cores ship os25.rbf_r / os30.rbf_r
+# (the name IS the variant token, and the core.json "filename" matches),
+# so an os25 and an os30 core coexist on one SD card / SDK runtime.  Kept
+# short + lowercase: the Pocket caps the bitstream filename (~15 chars) —
+# the old "bitstream.rbf_r" was exactly 15; longer names fail to load.
+BITSTREAM := $(VARIANT)
+
+# Fitter seed — STORED in the repo, per variant, as committed data in
+# seeds/<variant>.seed (NOT a build parameter).  os25 and os30 are
+# different netlists and close at different seeds, so each gets its own
+# file.  `make build` reads it; `make sweep` searches and writes the
+# winner back into it.  Set one by hand by editing the file.
+SEED_FILE := seeds/$(VARIANT).seed
+SEED      := $(strip $(shell cat $(SEED_FILE) 2>/dev/null))
+
+# Variant-named (non-reversed) copy: `make rbf-named VARIANT=os30`
 # produces output_files/openfpgaOS30.rbf from the just-built core.
 rbf-named: output_files/$(PROJECT).rbf
-	@cp output_files/$(PROJECT).rbf output_files/openfpgaOS$(if $(filter os30,$(VARIANT)),30,25).rbf
-	@printf "  $(C_OK)openfpgaOS$(if $(filter os30,$(VARIANT)),30,25).rbf$(C_RESET) → output_files/\n"
+	@cp output_files/$(PROJECT).rbf output_files/$(BITSTREAM).rbf
+	@printf "  $(C_OK)$(BITSTREAM).rbf$(C_RESET) → output_files/\n"
 
 # `compile` is kept as an alias for `build` so old muscle memory and
 # anything that calls `make compile` still works. Both run a clean
@@ -189,20 +222,18 @@ compile: build
 # The GPU is a single-config core (triangles + perspective spans +
 # pipelined fragment processor all unconditional).
 build: $(VEXII_OUT) bootloader
-	@printf "$(C_HEAD)[fpga]$(C_RESET) Clean compile...\n"
+	@test -n "$(SEED)" || { printf "$(C_ERR)[fpga] No seed stored for VARIANT=$(VARIANT) — expected $(SEED_FILE)$(C_RESET)\n"; exit 1; }
+	@printf "$(C_HEAD)[fpga]$(C_RESET) Clean compile (VARIANT=$(VARIANT), seed $(SEED) from $(SEED_FILE))...\n"
 	@rm -rf db incremental_db
-	@# quartus_sh --flow compile does not accept --verilog_macro at the top
-	@# level (that flag is only valid for quartus_map), so explicit stages
-	@# are used when VARIANT_DEFS is set. When unset, the faster --flow
-	@# form is still used.
-	@if [ -n "$(VARIANT_DEFS)" ]; then \
-		quartus_map $(PROJECT) $(VERILOG_MACROS) && \
-		quartus_fit $(PROJECT) && \
-		quartus_asm $(PROJECT) && \
-		quartus_sta $(PROJECT); \
-	else \
-		quartus_sh --flow compile $(PROJECT); \
-	fi
+	@# Explicit stages (not `quartus_sh --flow compile`) so two things work
+	@# uniformly across variants: --verilog_macro (only valid on quartus_map,
+	@# carries VARIANT_DEFS) and --seed (only valid on quartus_fit, carries
+	@# the per-variant fitter seed).  asm emits the .rbf install-bitstream
+	@# reverses; sta produces the timing report `make timing` reads.
+	@quartus_map $(PROJECT) $(VERILOG_MACROS)
+	@quartus_fit $(PROJECT) --seed=$(SEED)
+	@quartus_asm $(PROJECT)
+	@quartus_sta $(PROJECT)
 	@$(MAKE) --no-print-directory install-bitstream
 	@printf "$(C_OK)[fpga] Done$(C_RESET)\n"
 
@@ -258,14 +289,21 @@ export INSTALL_TEXT
 package: $(REVERSE_BITS)
 	@rm -rf $(PKG_DIR)
 	@mkdir -p $(RELEASE_DIR) $(PKG_DIR)/Platforms/_images $(ASSETS_DIR)
-	@$(REVERSE_BITS) output_files/$(PROJECT).rbf $(RELEASE_DIR)/bitstream.rbf_r > /dev/null
+	@$(REVERSE_BITS) output_files/$(PROJECT).rbf $(RELEASE_DIR)/$(BITSTREAM).rbf_r > /dev/null
 	@# chip32 loader is a small assembled artifact; build it on demand so
 	@# packaging never fails on a fresh checkout.
 	@test -f $(CHIP32_LOADER) || $(MAKE) -s -C $(ROOT_DIR)/src/chip32/pocket
 	@cp $(CHIP32_LOADER) $(RELEASE_DIR)/loader.bin
 	@cp $(FW_DIR)/os.bin $(RELEASE_DIR)/os.bin
 	@cp $(FW_DIR)/os.bin $(ASSETS_DIR)/os.bin
-	@for f in $(JSON_FILES); do cp $(DIST_DIR)/$$f $(RELEASE_DIR)/; done
+	@# core.json's bitstream "filename" must match the variant we just
+	@# reversed; the rest of the manifests copy verbatim.
+	@for f in $(JSON_FILES); do \
+		if [ "$$f" = "core.json" ]; then \
+			sed 's/\("filename":[[:space:]]*"\)[^"]*\(\.rbf_r"\)/\1$(BITSTREAM)\2/' \
+				$(DIST_DIR)/$$f > $(RELEASE_DIR)/$$f; \
+		else cp $(DIST_DIR)/$$f $(RELEASE_DIR)/; fi; \
+	done
 	@cp $(PLATFORM_DIST)/*.json $(PKG_DIR)/Platforms/
 	@cp $(PLATFORM_DIST)/_images/*.bin $(PKG_DIR)/Platforms/_images/
 	@test -f $(DIST_DIR)/icon.bin && cp $(DIST_DIR)/icon.bin $(RELEASE_DIR)/ || true
@@ -361,8 +399,8 @@ summary:
 	else \
 		printf "  $(C_DIM)[ ] FPGA$(C_RESET)\n"; \
 	fi
-	@test -f $(RELEASE_DIR)/bitstream.rbf_r \
-		&& printf "  $(C_OK)[x]$(C_RESET) Deployed\n" \
+	@test -f $(RELEASE_DIR)/$(BITSTREAM).rbf_r \
+		&& printf "  $(C_OK)[x]$(C_RESET) Deployed ($(BITSTREAM).rbf_r)\n" \
 		|| printf "  $(C_DIM)[ ] Deploy$(C_RESET)\n"
 	@echo ""
 
@@ -370,9 +408,12 @@ summary:
 SWEEP_MIN ?= 1
 SWEEP_MAX ?= 30
 
+# Searches seeds for the selected VARIANT and writes the winner into that
+# variant's stored seed file (seeds/<variant>.seed), so the next `make build
+# VARIANT=<v>` uses it.  Sweep a variant with e.g. `make sweep VARIANT=os30`.
 sweep: firmware
-	@VARIANT_DEFS="$(VARIANT_DEFS)" PROJECT=$(PROJECT) \
-		CLOCK_RE='mp_ram.*general\[0\]' \
+	@VARIANT_DEFS="$(VARIANT_DEFS)" PROJECT=$(PROJECT) VARIANT=$(VARIANT) \
+		SEED_FILE="$(SEED_FILE)" CLOCK_RE='mp_ram.*general\[0\]' \
 		bash $(ROOT_DIR)/tools/sweep.sh $(SWEEP_MIN) $(SWEEP_MAX)
 
 # ── Tools ────────────────────────────────────────────────────────────

@@ -84,8 +84,19 @@ output  wire            cram0_we_n,
 output  wire            cram0_ub_n,
 output  wire            cram0_lb_n,
 
-// cram1 chip retired in memory-arch v2 - pins are unassigned in the
-// qsf so this block is gone from the module port list.
+// cram1 revived as a dedicated GPU sync-burst texture memory (Phase 2).
+output  wire    [21:16] cram1_a,
+inout   wire    [15:0]  cram1_dq,
+input   wire            cram1_wait,
+output  wire            cram1_clk,
+output  wire            cram1_adv_n,
+output  wire            cram1_cre,
+output  wire            cram1_ce0_n,
+output  wire            cram1_ce1_n,
+output  wire            cram1_oe_n,
+output  wire            cram1_we_n,
+output  wire            cram1_ub_n,
+output  wire            cram1_lb_n,
 
 ///////////////////////////////////////////////////
 // sdram, 512mbit 16bit
@@ -360,7 +371,7 @@ assign PALFLAG = (analogizer_video_type_core == 4'h4) || (analogizer_video_type_
 // cen[0] is the pixel-rate pulse; cen[1] is half-rate.
 wire analog_ce_pix, analog_ce_half;
 
-`ifdef EXCLUDE_ANALOGIZER
+`ifndef INCLUDE_ANALOGIZER
 // Both consumers are gone (the analogizer instance and the scanout's
 // analog read slots, pruned by HAS_ANALOG_RASTER(0)), so the divider goes
 // too.  Constant 0 = "pixel enable never fires", which the pruned scanout
@@ -495,13 +506,13 @@ assign cart_pin30_pwroff_reset = cart_gpio_mode ? 1'b1 : 1'b0;
 // idle-high to UART RX to prevent adapter traffic from becoming console input.
 wire uart_rx_serial = cart_gpio_mode ? 1'b1 : cart_tran_pin31;
 
-`ifdef EXCLUDE_ANALOGIZER
-// OS30 (Pocket Quake/Quake2): EXCLUDE_ANALOGIZER prunes the analog-video
-// encoder + SNAC GPIO entirely.  The cartridge video pins (bank1-3) are tied
-// to high-Z with their direction bits forced to input (0); the SNAC pins on
+`ifndef INCLUDE_ANALOGIZER
+// Targets without analogizer (Pocket OS30): prune the analog-video encoder +
+// SNAC GPIO entirely.  The cartridge video pins (bank1-3) are tied to high-Z
+// with their direction bits forced to input (0); the SNAC pins on
 // bank0/pin30/pin31 already fall back to the snac_enable=0 UART wiring above
-// (snac_enable is driven 0 by the periph's EXCLUDE_ANALOGIZER branch).  No
-// undriven/multidriven nets result.  Default (macro undefined) instantiates
+// (snac_enable is driven 0 by the periph's no-analogizer branch).  No
+// undriven/multidriven nets result.  INCLUDE_ANALOGIZER (OS25) instantiates
 // the full openFPGA_Pocket_Analogizer below.
 assign cart_tran_bank1     = 8'hZZ;
 assign cart_tran_bank1_dir = 1'b0;
@@ -562,7 +573,7 @@ openFPGA_Pocket_Analogizer #(
     .cart_tran_bank1(cart_tran_bank1),
     .cart_tran_bank1_dir(cart_tran_bank1_dir)
 );
-`endif // EXCLUDE_ANALOGIZER
+`endif // INCLUDE_ANALOGIZER
 
 // Link port directions
 assign port_tran_si = 1'bz;
@@ -848,6 +859,154 @@ wire [31:0] bridge_cram0_rdata      = ctrl_word_rdata;
 wire        bridge_cram0_rdata_valid= ctrl_word_rdata_valid;
 
 // ============================================================
+// CRAM1 — dedicated GPU sync-burst texture memory (Phase 2).
+//
+// A separate physical chip from CRAM0 (saves), so textures NEVER touch the
+// latency-sensitive bridge/save path.  Runs on clk_cpu in BCR 0x641F sync-burst
+// mode (the mode that hangs CRAM0's shared async reads, but is exactly right for
+// a read-mostly dedicated texture chip).  Two masters into the one controller:
+//   - GPU texture fills  -> burst_rd via gpu_cram1_tex_adapter (priority).
+//   - CPU texture upload -> word_wr from gpu_core's MMIO upload regs.
+// No CDC: GPU, the CPU-upload regs and the controller are all clk_cpu.
+// ============================================================
+
+// GPU texture-cache AXI fill master (gpu_core CRAM0-tex port) -> burst adapter.
+wire        gpu_tex_arvalid;
+wire        gpu_tex_arready;
+wire [31:0] gpu_tex_araddr;
+wire [7:0]  gpu_tex_arlen;
+wire        gpu_tex_rvalid;
+wire [31:0] gpu_tex_rdata;
+wire        gpu_tex_rlast;
+
+// CPU texture upload (gpu_core MMIO regs) -> controller word_wr.  Declared
+// for BOTH variants — gpu_core always wires these; on OS25 (CRAM1 gated out)
+// cram1_up_busy is tied idle in the `else branch below.  These connect to the
+// gpu_core's generic gpu_tex_mem_up_* upload port (CRAM1 is Pocket's
+// fast-texture chip — the mapping lives entirely in this Pocket-only block).
+wire        cram1_up_wr;
+wire [21:0] cram1_up_addr;
+wire [31:0] cram1_up_wdata;
+wire        cram1_up_busy;
+
+`ifdef INCLUDE_TEX_MEM
+// CRAM1 controller burst-read interface (adapter <-> controller)
+wire        c1_burst_rd;
+wire [21:0] c1_burst_addr;
+wire [4:0]  c1_burst_len;
+wire [31:0] c1_burst_q;
+wire        c1_burst_q_valid;
+wire        c1_burst_busy;
+
+// CRAM1 controller physical-pin nets (active-low; DQ tristated at top below)
+wire [21:16] c1a_a;
+wire [15:0]  c1a_dq_out;
+wire         c1a_dq_oe;
+wire         c1a_adv_n, c1a_cre, c1a_ce0_n, c1a_ce1_n, c1a_oe_n, c1a_we_n, c1a_ub_n, c1a_lb_n;
+
+// CRAM1 BCR-init FSM control
+reg          cram1_bcr_config_en;
+reg          cram1_bcr_bank_sel;
+wire         cram1_a_raw_busy;
+wire         cram1_a_bcr_done;
+
+// pll_ram_locked synced into clk_cpu — reset for the CRAM1 controller + BCR FSM
+reg [2:0]    pll_ram_locked_c1_sync;
+always @(posedge clk_cpu)
+    pll_ram_locked_c1_sync <= {pll_ram_locked_c1_sync[1:0], pll_ram_locked};
+wire         cram1_reset_n = pll_ram_locked_c1_sync[2];
+
+cram1_controller #(.CLOCK_SPEED(100.0)) psram1 (
+    .clk(clk_cpu), .reset_n(cram1_reset_n),
+    // word interface — CPU texture upload (word_wr); word_rd unused
+    .word_rd(1'b0),
+    .word_wr(cram1_up_wr),
+    .word_addr(cram1_up_addr), .word_data(cram1_up_wdata), .word_wstrb(4'b1111),
+    .word_q(), .word_busy(cram1_up_busy), .word_q_valid(),
+    // sync-burst read — GPU texture fills
+    .burst_rd(c1_burst_rd), .burst_addr(c1_burst_addr), .burst_len(c1_burst_len),
+    .burst_q(c1_burst_q), .burst_q_valid(c1_burst_q_valid), .burst_busy(c1_burst_busy),
+    // BCR config (sync burst 0x641F)
+    .config_en(cram1_bcr_config_en), .config_data(16'h641F),
+    .config_bank_sel(cram1_bcr_bank_sel),
+    .raw_busy(cram1_a_raw_busy), .bcr_init_done(cram1_a_bcr_done),
+    // physical pins (cram_clk unused — chip clock is the pin driven below)
+    .cram_a(c1a_a), .cram_dq_out(c1a_dq_out), .cram_dq_oe(c1a_dq_oe),
+    .cram_dq_in(cram1_dq), .cram_wait(cram1_wait), .cram_clk(),
+    .cram_adv_n(c1a_adv_n), .cram_cre(c1a_cre),
+    .cram_ce0_n(c1a_ce0_n), .cram_ce1_n(c1a_ce1_n),
+    .cram_oe_n(c1a_oe_n), .cram_we_n(c1a_we_n),
+    .cram_ub_n(c1a_ub_n), .cram_lb_n(c1a_lb_n)
+);
+
+gpu_cram1_tex_adapter cram1_tex_adapter (
+    .clk(clk_cpu), .reset_n(cram1_reset_n),
+    .arvalid(gpu_tex_arvalid), .arready(gpu_tex_arready),
+    .araddr(gpu_tex_araddr), .arlen(gpu_tex_arlen),
+    .rvalid(gpu_tex_rvalid), .rdata(gpu_tex_rdata), .rlast(gpu_tex_rlast),
+    .burst_rd(c1_burst_rd), .burst_addr(c1_burst_addr), .burst_len(c1_burst_len),
+    .burst_q(c1_burst_q), .burst_q_valid(c1_burst_q_valid), .burst_busy(c1_burst_busy)
+);
+
+// CRAM1 BCR-init FSM: program sync-burst mode (0x641F) into both dies at boot.
+// Pulses config_en per die, edge-detecting raw_busy for the inter-die handoff.
+reg [3:0] cram1_bcr_state;
+localparam [3:0] C1_BCR_WAIT_PLL=4'd0, C1_BCR_PULSE_DIE0=4'd1, C1_BCR_BUSY_DIE0=4'd2,
+                 C1_BCR_IDLE_DIE0=4'd3, C1_BCR_PULSE_DIE1=4'd4, C1_BCR_BUSY_DIE1=4'd5,
+                 C1_BCR_IDLE_DIE1=4'd6, C1_BCR_DONE=4'd7;
+initial begin
+    cram1_bcr_state = C1_BCR_WAIT_PLL; cram1_bcr_config_en = 1'b0; cram1_bcr_bank_sel = 1'b0;
+end
+always @(posedge clk_cpu) begin
+    cram1_bcr_config_en <= 1'b0;   // single-cycle pulse default
+    case (cram1_bcr_state)
+        C1_BCR_WAIT_PLL:   if (cram1_reset_n) cram1_bcr_state <= C1_BCR_PULSE_DIE0;
+        C1_BCR_PULSE_DIE0: begin cram1_bcr_bank_sel<=1'b0; cram1_bcr_config_en<=1'b1; cram1_bcr_state<=C1_BCR_BUSY_DIE0; end
+        C1_BCR_BUSY_DIE0:  if (cram1_a_raw_busy)  cram1_bcr_state <= C1_BCR_IDLE_DIE0;
+        C1_BCR_IDLE_DIE0:  if (!cram1_a_raw_busy) cram1_bcr_state <= C1_BCR_PULSE_DIE1;
+        C1_BCR_PULSE_DIE1: begin cram1_bcr_bank_sel<=1'b1; cram1_bcr_config_en<=1'b1; cram1_bcr_state<=C1_BCR_BUSY_DIE1; end
+        C1_BCR_BUSY_DIE1:  if (cram1_a_raw_busy)  cram1_bcr_state <= C1_BCR_IDLE_DIE1;
+        C1_BCR_IDLE_DIE1:  if (!cram1_a_raw_busy) cram1_bcr_state <= C1_BCR_DONE;
+        C1_BCR_DONE: ;  // sticky
+    endcase
+end
+
+// CRAM1 pin fan-out (DQ tristated at top level; chip clock = clk_cpu).
+assign cram1_a     = c1a_a;
+assign cram1_dq    = c1a_dq_oe ? c1a_dq_out : 16'hZZZZ;
+assign cram1_clk   = clk_cpu;
+assign cram1_adv_n = c1a_adv_n;
+assign cram1_cre   = c1a_cre;
+assign cram1_ce0_n = c1a_ce0_n;
+assign cram1_ce1_n = c1a_ce1_n;
+assign cram1_oe_n  = c1a_oe_n;
+assign cram1_we_n  = c1a_we_n;
+assign cram1_ub_n  = c1a_ub_n;
+assign cram1_lb_n  = c1a_lb_n;
+`else
+// ── OS25: CRAM1 disabled — controller/phy/adapter/BCR-FSM gated out above ──
+// The gpu_core CRAM1 fill + upload ports stay idle (firmware never asserts
+// the route-enable because caps->tex_fast_size is 0 here), and the CRAM1
+// chip is held deselected/quiescent so the unused part is inert.
+assign gpu_tex_arready = 1'b0;
+assign gpu_tex_rvalid  = 1'b0;
+assign gpu_tex_rdata   = 32'd0;
+assign gpu_tex_rlast   = 1'b0;
+assign cram1_up_busy   = 1'b0;
+assign cram1_a     = 6'd0;
+assign cram1_dq    = 16'hZZZZ;
+assign cram1_clk   = 1'b0;
+assign cram1_adv_n = 1'b1;
+assign cram1_cre   = 1'b0;
+assign cram1_ce0_n = 1'b1;
+assign cram1_ce1_n = 1'b1;
+assign cram1_oe_n  = 1'b1;
+assign cram1_we_n  = 1'b1;
+assign cram1_ub_n  = 1'b1;
+assign cram1_lb_n  = 1'b1;
+`endif // INCLUDE_TEX_MEM
+
+// ============================================================
 // PSRAM Controller for CRAM0 (16 MB, bridge scratch — clk_74a)
 // ============================================================
 cram0_controller #(
@@ -952,9 +1111,9 @@ assign sram_we_n  = sram_we_n_w;
 assign sram_ub_n  = sram_ub_n_w;
 assign sram_lb_n  = sram_lb_n_w;
 
-`ifdef EXCLUDE_TRANSLUC
-// The GPU translucency LUT is this controller's ONLY client, and under
-// EXCLUDE_TRANSLUC gpu_core holds its SRAM word port permanently idle — so
+`ifndef INCLUDE_TRANSLUC
+// The GPU translucency LUT is this controller's ONLY client, and without
+// INCLUDE_TRANSLUC gpu_core holds its SRAM word port permanently idle — so
 // the controller itself is dropped (docs/os30-quake2-cut-plan.md C5).
 // The physical pins MUST be parked explicitly: left undriven, Quartus
 // grounds them, and sram_we_n=0 would hold the chip in a continuous write.
@@ -1489,7 +1648,7 @@ end
 
 // Interact variable writes (SNAC adapter type from APF menu)
 //
-// EXCLUDE_ANALOGIZER (docs/os30-quake2-cut-plan.md C2): the analogizer
+// No analogizer (docs/os30-quake2-cut-plan.md C2): the analogizer
 // settings/hoff/voff writes are dropped — menu and CPU writes still
 // complete on the bridge/MMIO side, they just no longer land anywhere.
 // The three source registers then hold their reset value forever, so the
@@ -1503,7 +1662,7 @@ end
 always @(posedge clk_74a) begin
     if (bridge_wr) begin
         casex (bridge_addr)
-`ifndef EXCLUDE_ANALOGIZER
+`ifdef INCLUDE_ANALOGIZER
         32'hF7000000: analogizer_settings <= {
         bridge_wr_data[7:0],
         bridge_wr_data[15:8],
@@ -1531,7 +1690,7 @@ always @(posedge clk_74a) begin
         endcase
     end
 
-`ifndef EXCLUDE_ANALOGIZER
+`ifdef INCLUDE_ANALOGIZER
     if (analogizer_cpu_wr_event[0])
         analogizer_settings <= analogizer_cpu_wr_settings_s2;
     if (analogizer_cpu_wr_event[1])
@@ -2385,42 +2544,38 @@ assign video_hs = vidout_hs;
     );
 
     // AXI4 peripheral slave
+    //
+    // Every feature param is set from its INCLUDE_* build macro via the
+    // `ifdef INCLUDE_X 1 `else 0 `endif pattern, so each variant's caps bits
+    // are a direct echo of its include-list (Makefile VARIANT_DEFS).  Each
+    // INCLUDE_* MUST match the gpu's same-named param below.
     axi_periph_slave #(
-`ifdef EXCLUDE_ANALOGIZER
-        // OS30 (Pocket Quake/Quake2): EXCLUDE_ANALOGIZER advertises no analog
-        // video so the periph's ANALOGIZER capability bit reads 0 and the SNAC
-        // instances (gated out in axi_periph_slave.v) constant-fold away.
-        .HAS_ANALOGIZER(0),
-`endif
+        // ANALOGIZER (HW_FEATURES bit 3): the SNAC instances inside
+        // axi_periph_slave.v gate on this; clear → they constant-fold away.
+        .INCLUDE_ANALOGIZER(`ifdef INCLUDE_ANALOGIZER 1 `else 0 `endif),
+        // LINK (HW_FEATURES bit 2).  No Pocket game uses the link cable, so
+        // neither variant includes it; FEAT_LINK also keys on the macro.
+        .INCLUDE_LINK(`ifdef INCLUDE_LINK 1 `else 0 `endif),
         // Mixer backend bit (HW_FEATURES bit 1, OF_HW_MIXER_HW).  The HW
-        // audio_mixer.v instance below is cut under EXCLUDE_MIXER (OS30), so
-        // advertise HAS_MIXER_HW(0) there and the OS picks its CPU software
-        // mixer at boot.  Bit 0 (OF_HW_MIXER, "mixer available") stays SET in
-        // both cases.  Default (OS25/MiSTer) keeps the HW mixer → HAS_MIXER_HW(1).
-`ifdef EXCLUDE_MIXER
-        .HAS_MIXER_HW(0),
-`else
-        .HAS_MIXER_HW(1),
-`endif
-        // Triangle extras: gated OFF by default (OS25 — device budget, see
-        // docs/gpu-utilization-handoff.md).  OS30_VERT_TRI enables them for
-        // the Quake2 variant, paid for by the EXCLUDE_* cuts plus the lean
-        // GPU (docs/os30-quake2-cut-plan.md): OS30 is Quake2-only, so the
-        // compact span groups (bit 23) and column lists (bit 21) Quake2
-        // never emits are cut there and advertised clear — span-group apps
+        // audio_mixer.v instance below is cut when INCLUDE_HW_MIXER is absent
+        // (OS30), so advertise 0 there and the OS picks its CPU software mixer
+        // at boot.  Bit 0 (OF_HW_MIXER, "mixer available") stays SET in both
+        // cases.  OS25/MiSTer keep the HW mixer → INCLUDE_HW_MIXER 1.
+        .INCLUDE_HW_MIXER(`ifdef INCLUDE_HW_MIXER 1 `else 0 `endif),
+        // Triangle extras.  OS25 includes none of them (only Quake1 emits 0x49,
+        // and it falls back to SW alias rendering); OS30 (Quake2) includes
+        // PARAM_TRI/VERT_TRI/PARAM_TRI_RECS but NOT column/compact (Quake2
+        // never emits those); MiSTer includes all.  span-group / column apps
         // (Quake1/Doom/gpudemo) self-gate via the SDK and stay on OS25.
-        // Each HAS_* must match the gpu's same-named GPU_HAS_* below.
-`ifdef OS30_VERT_TRI
-        .HAS_VERT_TRI(1),
-        .HAS_PARAM_TRI_RECS(1),
-        .HAS_COLUMN_LIST(0),
-        .HAS_SPAN_GROUP(0)
-`else
-        .HAS_VERT_TRI(0),
-        .HAS_PARAM_TRI_RECS(0),
-        .HAS_COLUMN_LIST(1),
-        .HAS_SPAN_GROUP(1)
-`endif
+        .INCLUDE_PARAM_TRI(`ifdef INCLUDE_PARAM_TRI 1 `else 0 `endif),
+        .INCLUDE_VERT_TRI(`ifdef INCLUDE_VERT_TRI 1 `else 0 `endif),
+        .INCLUDE_PARAM_TRI_RECS(`ifdef INCLUDE_PARAM_TRI_RECS 1 `else 0 `endif),
+        .INCLUDE_COLUMN_LIST(`ifdef INCLUDE_COLUMN_LIST 1 `else 0 `endif),
+        .INCLUDE_COMPACT_SPAN(`ifdef INCLUDE_COMPACT_SPAN 1 `else 0 `endif),
+        // Fast texture memory advertisement (HW_FEATURES bit 25).  The CRAM1
+        // controller/phy below is gated on the same INCLUDE_TEX_MEM macro, so
+        // OS25 (no macro) advertises 0 → caps->tex_fast_size 0 → SDRAM textures.
+        .INCLUDE_TEX_MEM(`ifdef INCLUDE_TEX_MEM 1 `else 0 `endif)
     ) periph (
         .clk(clk_cpu),
         .reset_n(reset_n_cpu_core),
@@ -2458,8 +2613,8 @@ assign video_hs = vidout_hs;
         .cont2_key(p2_controls),
         .cont2_joy(p2_joypad),
         .cont2_trig(p2_trigger),
-`ifdef EXCLUDE_4PLAYER
-        // OS30 (Quake/Quake2 single-player): tie players 3-4 to 0 so the
+`ifndef INCLUDE_4PLAYER
+        // No 4-player (every Pocket variant): tie players 3-4 to 0 so the
         // periph's cont3/4 sync registers + input-scan/rdata mux arms
         // constant-fold away.  Players 1-2 (cont1/2) retained.
         .cont3_key(32'd0),
@@ -2523,7 +2678,7 @@ assign video_hs = vidout_hs;
         .audio_fifo_level(audio_fifo_level),
         .audio_fifo_full(audio_fifo_full),
         // CPU PCM sample push (AUDIO_PCM_SAMPLE @ 0x4C + 0x04).  Always
-        // present; consumed by audio_output only in the EXCLUDE_MIXER build.
+        // present; consumed by audio_output only without INCLUDE_HW_MIXER (SW mixer).
         .audio_sample_wr        (periph_audio_sample_wr),
         .audio_sample_data      (periph_audio_sample_data),
         // Hardware mixer MMIO ↔ audio_mixer (flat addressing, 0x4B000000)
@@ -2829,10 +2984,10 @@ assign video_hs = vidout_hs;
         // dedicated 240p fetch, the analog leg of the shared output
         // pipeline and the 2048x32 analog line cache (8 M10Ks).  The LCD
         // fetch/decode path is identical in both configs.
-`ifdef EXCLUDE_ANALOGIZER
-        .HAS_ANALOG_RASTER(0)
-`else
+`ifdef INCLUDE_ANALOGIZER
         .HAS_ANALOG_RASTER(1)
+`else
+        .HAS_ANALOG_RASTER(0)
 `endif
     ) scanout (
         .clk_video(clk_vid),
@@ -3011,7 +3166,7 @@ end
 //
 // Link MMIO peripheral
 //
-`ifndef EXCLUDE_LINK
+`ifdef INCLUDE_LINK
 link_lite #(
     .CLK_HZ(100000000),
     .SCK_HZ(256000)
@@ -3086,9 +3241,9 @@ wire [31:0] mixer_rdata;
 wire [1:0]  mixer_rresp;
 wire        mixer_rlast;
 wire        mixer_rready;
-`ifndef EXCLUDE_MIXER
-// HW-mixer sample stream into audio_output (absent in the EXCLUDE_MIXER
-// build, where audio_output is fed by the periph PCM path instead).
+`ifdef INCLUDE_HW_MIXER
+// HW-mixer sample stream into audio_output (absent without INCLUDE_HW_MIXER,
+// where audio_output is fed by the periph PCM path instead).
 wire        mixer_sample_wr;
 wire [31:0] mixer_sample_data;
 `endif
@@ -3134,12 +3289,12 @@ wire [4:0]  mixer_voice_sel_rd_mmio;
 
 // CPU PCM sample push (AUDIO_PCM_SAMPLE @ 0x4C + 0x04) from axi_periph_slave.
 // Always wired (the periph port is unconditional); only consumed by
-// audio_output in the EXCLUDE_MIXER build, where the SW mixer on the CPU
+// audio_output without INCLUDE_HW_MIXER, where the SW mixer on the CPU
 // produces finished stereo samples in place of the HW mixer.
 wire        periph_audio_sample_wr;
 wire [31:0] periph_audio_sample_data;
 
-`ifdef EXCLUDE_MIXER
+`ifndef INCLUDE_HW_MIXER
 // ─── HW mixer cut (OS30) ───────────────────────────────────────────
 // The HW audio_mixer congested the device (~99% → WNS -1.9).  The CPU
 // runs a software mixer against the same MMIO contract and pushes
@@ -3207,7 +3362,7 @@ audio_output audio_out (
     .clk_audio    (clk_core_12288),
     .reset_n      (reset_n_cpu_media),
 
-`ifdef EXCLUDE_MIXER
+`ifndef INCLUDE_HW_MIXER
     // SW mixer: CPU pushes finished stereo samples via AUDIO_PCM_SAMPLE.
     .sample_wr    (periph_audio_sample_wr),
     .sample_data  (periph_audio_sample_data),
@@ -3265,40 +3420,25 @@ wire        slave_swap_pending;  // from axi_periph_slave → stalls gpu_core CM
 
 `ifndef EXCLUDE_GPU
 gpu_core #(
-    // OS25 (default) excludes the triangle extras: the hardware
-    // vertex-triangle plane derivation (0x4A/0x4B + S_TRI_DERIVE FSM), the
-    // records-only param-tri (0x4D), and the 4-word z read window (depth 1 =
-    // pre-window single-word fill).  Device budget — see
-    // docs/gpu-utilization-handoff.md.  OS30_VERT_TRI enables the triangle
-    // extras for the Quake2 variant (paid for by the EXCLUDE_* cuts) and,
-    // since the 2026-06 lean pass (docs/os30-quake2-cut-plan.md), ALSO cuts
-    // what Quake2 never emits: the 0x48 compact-direct lane form + its
-    // direct-affine fastpath (GPU_HAS_COMPACT_SPAN=0 — long-form
-    // record-style 0x48 stays) and the 0x4C column list
-    // (GPU_HAS_COLUMN_LIST=0).  The 0x49 param-tri path + edge walker stay
-    // present in BOTH variants — 0x49 is Quake2's world pass.
-    // GPU_EW_PARALLEL_DIVS selects the walker's slope-divide layout
-    // (bit-identical quotients, so pixels do not change); since the lean
-    // pass OS30 uses the single shared divider too — the ~110 cy serial
-    // setup hides under the ~123 cy 0x4B derivation, and the 0x49 world
-    // exposure only appears when GPU-bound (heartbeat-verify; flip back to
-    // 1 if the world pass regresses).  Each GPU_HAS_* must match the
-    // periph's same-named HAS_* above.
-`ifdef OS30_VERT_TRI
-    .GPU_HAS_VERT_TRI(1),
-    .GPU_HAS_PARAM_TRI_RECS(1),
-    .GPU_Z_READ_WINDOW(4),
-    .GPU_EW_PARALLEL_DIVS(0),
-    .GPU_HAS_COMPACT_SPAN(0),
-    .GPU_HAS_COLUMN_LIST(0)
-`else
-    .GPU_HAS_VERT_TRI(0),
-    .GPU_HAS_PARAM_TRI_RECS(0),
-    .GPU_Z_READ_WINDOW(1),
-    .GPU_EW_PARALLEL_DIVS(0),
-    .GPU_HAS_COMPACT_SPAN(1),
-    .GPU_HAS_COLUMN_LIST(1)
-`endif
+    // Every feature param echoes its INCLUDE_* build macro (variant include
+    // list).  OS25 includes NO triangle command (0x49/0x4A-0x4B/0x4D all
+    // absent → the shared edge walker constant-folds away) but keeps the 2.5D
+    // fastpaths (0x48 compact span groups + 0x4C column lists + translucency).
+    // OS30 (Quake2) is the inverse: triangles + fast tex IN, compact/column
+    // OUT (Quake2 never emits them).  MiSTer includes all but analogizer +
+    // fast tex.  Each INCLUDE_* MUST match the periph's same-named param above.
+    .INCLUDE_PARAM_TRI(`ifdef INCLUDE_PARAM_TRI 1 `else 0 `endif),
+    .INCLUDE_VERT_TRI(`ifdef INCLUDE_VERT_TRI 1 `else 0 `endif),
+    .INCLUDE_PARAM_TRI_RECS(`ifdef INCLUDE_PARAM_TRI_RECS 1 `else 0 `endif),
+    .INCLUDE_COMPACT_SPAN(`ifdef INCLUDE_COMPACT_SPAN 1 `else 0 `endif),
+    .INCLUDE_COLUMN_LIST(`ifdef INCLUDE_COLUMN_LIST 1 `else 0 `endif),
+    .INCLUDE_TEX_MEM(`ifdef INCLUDE_TEX_MEM 1 `else 0 `endif),
+    // Numeric tuning (not feature gates).  The z read window is 4 on the
+    // triangle-heavy variant (fast-tex / OS30) and degenerates to 1 on OS25
+    // (single-word z fill, sweeps the window logic).  EW_PARALLEL_DIVS=0 on
+    // every Pocket variant (single shared divider — bit-identical quotients).
+    .GPU_Z_READ_WINDOW(`ifdef INCLUDE_TEX_MEM 4 `else 1 `endif),
+    .GPU_EW_PARALLEL_DIVS(0)
 ) gpu (
     .clk(clk_cpu),
     .reset_n(reset_n_cpu_media),
@@ -3311,6 +3451,21 @@ gpu_core #(
     .m_rd_rvalid(gpu_rd_rvalid),
     .m_rd_rdata(gpu_rd_rdata),
     .m_rd_rlast(gpu_rd_rlast),
+    // AXI4 read master — fast texture memory fills (redirected tex cache).
+    // Pocket routes these to the CRAM1 controller/adapter (the INCLUDE_TEX_MEM
+    // block above); the gpu_tex_* local wires are the Pocket-side mapping.
+    .gpu_tex_mem_arvalid(gpu_tex_arvalid),
+    .gpu_tex_mem_arready(gpu_tex_arready),
+    .gpu_tex_mem_araddr(gpu_tex_araddr),
+    .gpu_tex_mem_arlen(gpu_tex_arlen),
+    .gpu_tex_mem_rvalid(gpu_tex_rvalid),
+    .gpu_tex_mem_rdata(gpu_tex_rdata),
+    .gpu_tex_mem_rlast(gpu_tex_rlast),
+    // Fast texture upload (MMIO regs -> cram1_controller word_wr)
+    .gpu_tex_mem_up_wr(cram1_up_wr),
+    .gpu_tex_mem_up_addr(cram1_up_addr),
+    .gpu_tex_mem_up_wdata(cram1_up_wdata),
+    .gpu_tex_mem_up_busy(cram1_up_busy),
     // AXI4 write master (FB writes + clear)
     .m_wr_awvalid(gpu_wr_awvalid),
     .m_wr_awready(gpu_wr_awready),
@@ -3350,6 +3505,12 @@ gpu_core #(
 assign gpu_rd_arvalid = 1'b0;
 assign gpu_rd_araddr  = 32'b0;
 assign gpu_rd_arlen   = 8'b0;
+assign gpu_tex_arvalid = 1'b0;
+assign gpu_tex_araddr  = 32'b0;
+assign gpu_tex_arlen   = 8'b0;
+assign cram1_up_wr     = 1'b0;
+assign cram1_up_addr   = 22'b0;
+assign cram1_up_wdata  = 32'b0;
 assign gpu_wr_awvalid = 1'b0;
 assign gpu_wr_awaddr  = 32'b0;
 assign gpu_wr_awlen   = 8'b0;
@@ -3443,12 +3604,13 @@ assign cram0_clk = clk_74a;  // F5 revert (A/B): tie-low suspected in field regr
 
 // SDRAM controller
 io_sdram #(
-    // Open-page tracking layout (see io_sdram.v).  OS30 keeps the
+    // Open-page tracking layout (see io_sdram.v).  OS30 (fast tex) keeps the
     // per-bank open_row[0:3] tracking for triangle/texture bandwidth;
     // OS25 (2.5D span games) degenerates to the single open_bank/open_row
     // — same protocol, lower row-hit rate, sheds the per-bank entries and
-    // bank-indexed muxes for device budget.  MiSTer keeps the default (1).
-`ifdef OS30_VERT_TRI
+    // bank-indexed muxes for device budget.  Keyed on INCLUDE_TEX_MEM (the
+    // OS30 marker).  MiSTer keeps the default (1).
+`ifdef INCLUDE_TEX_MEM
     .BANK_ROW_TRACK(1)
 `else
     .BANK_ROW_TRACK(0)

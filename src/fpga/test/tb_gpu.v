@@ -20,15 +20,16 @@
 module tb_gpu #(
     // Forwarded verbatim to gpu_core so per-variant configs can be built
     // straight from the command line with Verilator -G overrides, e.g.
-    //   verilator ... -GGPU_HAS_PARAM_TRI_RECS=0 -GGPU_Z_READ_WINDOW=1
+    //   verilator ... -GINCLUDE_PARAM_TRI_RECS=0 -GGPU_Z_READ_WINDOW=1
     // Defaults match gpu_core's defaults (everything on), so the standard
     // gpu / gpu-persp / gpu-acceptance builds are unchanged.
-    parameter GPU_HAS_VERT_TRI       = 1,
-    parameter GPU_HAS_PARAM_TRI_RECS = 1,
+    parameter INCLUDE_PARAM_TRI      = 1,
+    parameter INCLUDE_VERT_TRI       = 1,
+    parameter INCLUDE_PARAM_TRI_RECS = 1,
     parameter GPU_Z_READ_WINDOW      = 4,
     parameter GPU_EW_PARALLEL_DIVS   = 1,
-    parameter GPU_HAS_COMPACT_SPAN   = 1,
-    parameter GPU_HAS_COLUMN_LIST    = 1
+    parameter INCLUDE_COMPACT_SPAN   = 1,
+    parameter INCLUDE_COLUMN_LIST    = 1
 ) (
     input  wire        clk,
     input  wire        reset_n,
@@ -117,12 +118,13 @@ wire        gpu_sram_rdata_valid;
 // GPU Core
 // ============================================================
 gpu_core #(
-    .GPU_HAS_VERT_TRI(GPU_HAS_VERT_TRI),
-    .GPU_HAS_PARAM_TRI_RECS(GPU_HAS_PARAM_TRI_RECS),
+    .INCLUDE_PARAM_TRI(INCLUDE_PARAM_TRI),
+    .INCLUDE_VERT_TRI(INCLUDE_VERT_TRI),
+    .INCLUDE_PARAM_TRI_RECS(INCLUDE_PARAM_TRI_RECS),
     .GPU_Z_READ_WINDOW(GPU_Z_READ_WINDOW),
     .GPU_EW_PARALLEL_DIVS(GPU_EW_PARALLEL_DIVS),
-    .GPU_HAS_COMPACT_SPAN(GPU_HAS_COMPACT_SPAN),
-    .GPU_HAS_COLUMN_LIST(GPU_HAS_COLUMN_LIST)
+    .INCLUDE_COMPACT_SPAN(INCLUDE_COMPACT_SPAN),
+    .INCLUDE_COLUMN_LIST(INCLUDE_COLUMN_LIST)
 ) gpu (
     .clk(clk),
     .reset_n(reset_n),

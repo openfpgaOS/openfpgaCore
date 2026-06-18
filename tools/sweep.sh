@@ -159,6 +159,14 @@ if awk -v a="$BEST_WNS" 'BEGIN { exit !(a < 0) }'; then
 fi
 echo ""
 
+# Persist the winner into the variant's stored seed file, the repo's source
+# of truth for the seed that `make build` reads.  (The qsf patching in this
+# script is just the per-candidate test mechanism.)  Caller sets SEED_FILE.
+if [ -n "${SEED_FILE:-}" ]; then
+    printf "%s\n" "${BEST_SEED}" > "${SEED_FILE}"
+    printf "${C_OK}[sweep]${C_RESET} stored seed ${BEST_SEED} → ${SEED_FILE}\n"
+fi
+
 # Rebuild with best seed. Tolerate timing-not-met -- Quartus will exit
 # non-zero with a warning but still produce a valid bitstream.
 printf "${C_HEAD}[rebuild]${C_RESET} Final compile with seed ${BEST_SEED}...\n"

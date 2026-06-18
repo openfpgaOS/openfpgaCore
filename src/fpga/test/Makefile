@@ -450,7 +450,8 @@ SYSTEM_FLAGS = -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC -Wno-CASEINCOMPLETE \
 # Targets
 # ============================================================
 .PHONY: all sdram sdram-serialize sdram-native2 sdram-wcont0 sdram-all sdram-cont sram scanout scanout-lean analogchain gpu gpu-persp gpu-floor gpu-gpudemo gpu-acceptance gpu-acceptance-single gpu-acceptance-os30 gpu-acceptance-burst2 gpu-acceptance-all gpu-chain \
-        gpu-wrpath gpu-wstall scanout-race scanout-race-pocket axi-periph bridge-cmd bridge-rx audio audio-mixer arbiter system system-mister run run-sram build clean
+        gpu-wrpath gpu-wstall scanout-race scanout-race-pocket axi-periph bridge-cmd bridge-rx audio audio-mixer arbiter system system-mister run run-sram build clean \
+        cram0-tex cram0-tex-adapter cram0-arb cram0-tex-chain cram1-tex-chain cram1-cmap-chain gpu-cram1-repro
 
 all: sdram-all sram gpu gpu-persp axi-periph bridge-cmd bridge-rx audio audio-mixer arbiter hps-bridge
 
@@ -578,8 +579,11 @@ gpu: $(GPU_DIR)/V$(GPU_TOP)
 	@printf "\n=== GPU tests ===\n"
 	./$(GPU_DIR)/V$(GPU_TOP)
 
+# Full-feature config: define INCLUDE_TRANSLUC so the blend path is present
+# (matches the hardware default — translucency is in the OS25/MiSTer builds).
 $(GPU_DIR)/V$(GPU_TOP): $(GPU_SRCS) $(GPU_CPP)
 	$(VERILATOR) $(VERILATOR_FLAGS) --top-module $(GPU_TOP) --Mdir $(GPU_DIR) \
+		+define+INCLUDE_TRANSLUC \
 		-I$(COMMON_DIR) \
 		$(GPU_SRCS) $(GPU_CPP)
 
@@ -590,6 +594,7 @@ gpu-persp: $(GPU_PERSP_DIR)/V$(GPU_TOP)
 $(GPU_PERSP_DIR)/V$(GPU_TOP): $(GPU_SRCS) $(GPU_CPP)
 	$(VERILATOR) $(VERILATOR_FLAGS) \
 		-CFLAGS "-std=c++17 -O2 -DGPU_TEST_ENABLE_PERSP=1" \
+		+define+INCLUDE_TRANSLUC \
 		--top-module $(GPU_TOP) --Mdir $(GPU_PERSP_DIR) \
 		-I$(COMMON_DIR) \
 		$(GPU_SRCS) $(GPU_CPP)
@@ -643,8 +648,11 @@ gpu-acceptance: $(GPU_ACCEPT_DIR)/V$(GPU_TOP)
 	@printf "\n=== GPU acceptance suite ===\n"
 	./$(GPU_ACCEPT_DIR)/V$(GPU_TOP)
 
+# Full-feature config: define INCLUDE_TRANSLUC so the blend path is present
+# (the tb_gpu -G params already default the triangle/compact/column gates ON).
 $(GPU_ACCEPT_DIR)/V$(GPU_TOP): $(GPU_SRCS) $(GPU_ACCEPT_CPP)
 	$(VERILATOR) $(VERILATOR_FLAGS) --top-module $(GPU_TOP) \
+		+define+INCLUDE_TRANSLUC \
 		--Mdir $(GPU_ACCEPT_DIR) \
 		-I$(COMMON_DIR) \
 		$(GPU_SRCS) $(GPU_ACCEPT_CPP)
@@ -656,6 +664,7 @@ gpu-acceptance-single: $(GPU_ACCEPT_SINGLE_DIR)/V$(GPU_TOP)
 $(GPU_ACCEPT_SINGLE_DIR)/V$(GPU_TOP): $(GPU_SRCS) $(GPU_ACCEPT_CPP)
 	$(VERILATOR) $(VERILATOR_FLAGS) \
 		--top-module $(GPU_TOP) \
+		+define+INCLUDE_TRANSLUC \
 		--Mdir $(GPU_ACCEPT_SINGLE_DIR) \
 		-I$(COMMON_DIR) \
 		$(GPU_SRCS) $(GPU_ACCEPT_CPP)
@@ -663,12 +672,12 @@ $(GPU_ACCEPT_SINGLE_DIR)/V$(GPU_TOP): $(GPU_SRCS) $(GPU_ACCEPT_CPP)
 gpu-acceptance-burst2: gpu-acceptance
 
 # OS30 lean GPU variant (Pocket Quake/Quake2 build): compact-direct 0x48
-# (GPU_HAS_COMPACT_SPAN=0) and 0x4C column lists (GPU_HAS_COLUMN_LIST=0)
-# drain as no-ops, the translucency LUT is chokepointed out
-# (+define+EXCLUDE_TRANSLUC), and the edge walker runs the serial divider
-# (GPU_EW_PARALLEL_DIVS=0).  0x4A/0x4B vert-tri, 0x4D recs-tri, long-form
-# 0x48 and the z window all stay ENABLED.  -DGPU_TEST_OS30_LEAN compiles
-# out the harness tests whose vehicle is the removed compact/column/
+# (INCLUDE_COMPACT_SPAN=0) and 0x4C column lists (INCLUDE_COLUMN_LIST=0)
+# drain as no-ops, the translucency LUT is chokepointed out (INCLUDE_TRANSLUC
+# not defined), and the edge walker runs the serial divider
+# (GPU_EW_PARALLEL_DIVS=0).  0x49 param-tri, 0x4A/0x4B vert-tri, 0x4D recs-tri,
+# long-form 0x48 and the z window all stay ENABLED.  -DGPU_TEST_OS30_LEAN
+# compiles out the harness tests whose vehicle is the removed compact/column/
 # transluc paths and switches the lean negative tests' expectations.
 gpu-acceptance-os30: $(GPU_ACCEPT_OS30_DIR)/V$(GPU_TOP)
 	@printf "\n=== GPU acceptance suite (OS30 lean variant) ===\n"
@@ -677,12 +686,12 @@ gpu-acceptance-os30: $(GPU_ACCEPT_OS30_DIR)/V$(GPU_TOP)
 $(GPU_ACCEPT_OS30_DIR)/V$(GPU_TOP): $(GPU_SRCS) $(GPU_ACCEPT_CPP)
 	$(VERILATOR) $(VERILATOR_FLAGS) \
 		-CFLAGS "-std=c++17 -O2 -DGPU_TEST_OS30_LEAN" \
-		+define+EXCLUDE_TRANSLUC \
-		-GGPU_HAS_COMPACT_SPAN=0 \
-		-GGPU_HAS_COLUMN_LIST=0 \
+		-GINCLUDE_COMPACT_SPAN=0 \
+		-GINCLUDE_COLUMN_LIST=0 \
 		-GGPU_EW_PARALLEL_DIVS=0 \
-		-GGPU_HAS_VERT_TRI=1 \
-		-GGPU_HAS_PARAM_TRI_RECS=1 \
+		-GINCLUDE_PARAM_TRI=1 \
+		-GINCLUDE_VERT_TRI=1 \
+		-GINCLUDE_PARAM_TRI_RECS=1 \
 		-GGPU_Z_READ_WINDOW=4 \
 		--top-module $(GPU_TOP) \
 		--Mdir $(GPU_ACCEPT_OS30_DIR) \
@@ -691,13 +700,102 @@ $(GPU_ACCEPT_OS30_DIR)/V$(GPU_TOP): $(GPU_SRCS) $(GPU_ACCEPT_CPP)
 
 gpu-acceptance-all: gpu-acceptance gpu-acceptance-single gpu-acceptance-os30
 
+# --- CRAM0 texture store (Phase 3): adapter + arbiter + full chain ---
+# Self-checking pure-Verilog TBs (--binary --timing).  cram0-tex runs all three.
+CRAM0_TEX_VFLAGS = --binary --timing -Wno-fatal -Wno-WIDTH -Wno-UNOPTFLAT -Wno-CASEINCOMPLETE -I../common -I.
+
+cram0-tex-adapter: obj_dir_cram0_tex_adapter/Vtb_gpu_cram0_tex_adapter
+	@printf "\n=== CRAM0 tex adapter (AXI fill -> 4 async word reads) ===\n"
+	./obj_dir_cram0_tex_adapter/Vtb_gpu_cram0_tex_adapter
+obj_dir_cram0_tex_adapter/Vtb_gpu_cram0_tex_adapter: tb_gpu_cram0_tex_adapter.v ../common/gpu_cram0_tex_adapter.v
+	$(VERILATOR) $(CRAM0_TEX_VFLAGS) --Mdir obj_dir_cram0_tex_adapter \
+		--top-module tb_gpu_cram0_tex_adapter \
+		tb_gpu_cram0_tex_adapter.v ../common/gpu_cram0_tex_adapter.v
+
+cram0-arb: obj_dir_cram0_arb/Vtb_cram0_arb
+	@printf "\n=== CRAM0 controller 2-client arbiter ===\n"
+	./obj_dir_cram0_arb/Vtb_cram0_arb
+obj_dir_cram0_arb/Vtb_cram0_arb: tb_cram0_arb.v ../common/cram0_arb.v
+	$(VERILATOR) $(CRAM0_TEX_VFLAGS) --Mdir obj_dir_cram0_arb \
+		--top-module tb_cram0_arb \
+		tb_cram0_arb.v ../common/cram0_arb.v
+
+cram0-tex-chain: obj_dir_cram0_tex_chain/Vtb_cram0_tex_chain
+	@printf "\n=== CRAM0 tex chain (tex_cache -> adapter -> arb -> CRAM0), byte-exact ===\n"
+	./obj_dir_cram0_tex_chain/Vtb_cram0_tex_chain
+obj_dir_cram0_tex_chain/Vtb_cram0_tex_chain: tb_cram0_tex_chain.v ../common/gpu_cram0_tex_adapter.v ../common/cram0_arb.v ../common/gpu_tex_cache.v
+	$(VERILATOR) $(CRAM0_TEX_VFLAGS) --Mdir obj_dir_cram0_tex_chain \
+		--top-module tb_cram0_tex_chain \
+		tb_cram0_tex_chain.v ../common/gpu_cram0_tex_adapter.v ../common/cram0_arb.v ../common/gpu_tex_cache.v
+
+cram0-tex: cram0-tex-adapter cram0-arb cram0-tex-chain
+
+# --- CRAM1 sync-burst texture path: GPU tex fill -> burst read, REAL models ---
+# Real cram1_controller + cram1_phy + cram_chip_model (pin-level).  Proves the
+# sync-burst read AND that async word_wr upload coexists with sync-burst-read BCR.
+cram1-tex-chain: obj_dir_cram1_tex_chain/Vtb_cram1_tex_chain
+	@printf "\n=== CRAM1 tex chain (tex_cache -> burst adapter -> cram1_controller+phy -> chip model) ===\n"
+	./obj_dir_cram1_tex_chain/Vtb_cram1_tex_chain
+obj_dir_cram1_tex_chain/Vtb_cram1_tex_chain: tb_cram1_tex_chain.v $(TARGET_DIR)/gpu_cram1_tex_adapter.v $(TARGET_DIR)/cram1_controller.v $(TARGET_DIR)/cram1_phy.sv ../common/gpu_tex_cache.v cram_chip_model.v
+	$(VERILATOR) $(CRAM0_TEX_VFLAGS) -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC --Mdir obj_dir_cram1_tex_chain \
+		--top-module tb_cram1_tex_chain \
+		tb_cram1_tex_chain.v $(TARGET_DIR)/gpu_cram1_tex_adapter.v $(TARGET_DIR)/cram1_controller.v $(TARGET_DIR)/cram1_phy.sv ../common/gpu_tex_cache.v cram_chip_model.v
+
+# --- CRAM1 sync-burst COLORMAP path: GPU tex_cache PORT B (cmap) fill ->
+# burst read, REAL models.  Fills the coverage hole where no test drives
+# gpu_tex_cache port B through the real cram1 sync-burst chain (the SDRAM-stub
+# acceptance suite uses a different R-beat pattern; tb_cram1_tex_chain ties
+# port B to 0).  Port A runs concurrently to thrash/evict.
+cram1-cmap-chain: obj_dir_cram1_cmap_chain/Vtb_cram1_cmap_chain
+	@printf "\n=== CRAM1 COLORMAP chain (tex_cache PORT B -> burst adapter -> cram1_controller+phy -> chip model) ===\n"
+	./obj_dir_cram1_cmap_chain/Vtb_cram1_cmap_chain
+obj_dir_cram1_cmap_chain/Vtb_cram1_cmap_chain: tb_cram1_cmap_chain.v $(TARGET_DIR)/gpu_cram1_tex_adapter.v $(TARGET_DIR)/cram1_controller.v $(TARGET_DIR)/cram1_phy.sv ../common/gpu_tex_cache.v cram_chip_model.v
+	$(VERILATOR) $(CRAM0_TEX_VFLAGS) -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC --Mdir obj_dir_cram1_cmap_chain \
+		--top-module tb_cram1_cmap_chain \
+		tb_cram1_cmap_chain.v $(TARGET_DIR)/gpu_cram1_tex_adapter.v $(TARGET_DIR)/cram1_controller.v $(TARGET_DIR)/cram1_phy.sv ../common/gpu_tex_cache.v cram_chip_model.v
+
+# --- CRAM1 colormap repro through the REAL gpu_core (NOT the tex_cache alone) ---
+# Drives the REAL gpu_core's texture/colormap fills through the REAL CRAM1
+# sync-burst chain (adapter + controller + phy + chip model) by wiring the
+# core's cram0_tex_* redirect master to the chain and setting reg14 bit0=1.
+# Renders a light-varying colormap wall twice (SDRAM route reg14=0 vs CRAM1
+# route reg14=1) and reports whether CRAM1 yields a wrong/shifted palette.
+# Built with the C++ harness (--cc --exe) so it shares tb_gpu's plumbing; the
+# cram1 RTL is synthesizable (no --timing needed) and links straight in.
+GPU_CRAM1_SRCS = \
+	tb_gpu_cram1.v \
+	altsyncram_stub.v \
+	$(COMMON_DIR)/gpu_core.v \
+	$(COMMON_DIR)/gpu_edge_walker.v \
+	$(COMMON_DIR)/gpu_tex_cache.v \
+	$(TARGET_DIR)/gpu_cram1_tex_adapter.v \
+	$(TARGET_DIR)/cram1_controller.v \
+	$(TARGET_DIR)/cram1_phy.sv \
+	cram_chip_model.v
+GPU_CRAM1_CPP = tb_gpu_cram1_main.cpp
+GPU_CRAM1_DIR = obj_dir_gpu_cram1
+gpu-cram1-repro: $(GPU_CRAM1_DIR)/Vtb_gpu
+	@printf "\n=== GPU CRAM1 colormap (palookup) repro through the REAL gpu_core ===\n"
+	./$(GPU_CRAM1_DIR)/Vtb_gpu
+
+$(GPU_CRAM1_DIR)/Vtb_gpu: $(GPU_CRAM1_SRCS) $(GPU_CRAM1_CPP)
+	$(VERILATOR) $(VERILATOR_FLAGS_NOTRACE) -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC \
+		-Wno-UNOPTFLAT -Wno-CASEINCOMPLETE \
+		--top-module tb_gpu --Mdir $(GPU_CRAM1_DIR) \
+		-I$(COMMON_DIR) \
+		$(GPU_CRAM1_SRCS) $(GPU_CRAM1_CPP)
+
 # --- AXI periph slave ---
 axi-periph: $(AXI_PERIPH_DIR)/V$(AXI_PERIPH_TOP)
 	@printf "\n=== AXI periph slave ===\n"
 	./$(AXI_PERIPH_DIR)/V$(AXI_PERIPH_TOP)
 
+# Full-feature config: the harness expects the analogizer SNAC path present
+# and the LINK caps bit set, so define both INCLUDE_ macros (post-polarity-flip
+# these gate the SNAC instances and FEAT_LINK).
 $(AXI_PERIPH_DIR)/V$(AXI_PERIPH_TOP): $(AXI_PERIPH_SRCS) $(AXI_PERIPH_CPP)
 	$(VERILATOR) $(VERILATOR_FLAGS) $(AXI_PERIPH_FLAGS) \
+		+define+INCLUDE_ANALOGIZER +define+INCLUDE_LINK \
 		--top-module $(AXI_PERIPH_TOP) --Mdir $(AXI_PERIPH_DIR) \
 		-I$(COMMON_DIR) \
 		$(AXI_PERIPH_SRCS) $(AXI_PERIPH_CPP)
@@ -813,4 +911,5 @@ clean:
 	       $(ARBITER_DIR) \
 	       obj_dir_gpu obj_dir_gpu_floor obj_dir_gpu_gpudemo \
 	       obj_dir_gpu_acceptance \
+	       obj_dir_cram0_tex_adapter obj_dir_cram0_arb obj_dir_cram0_tex_chain obj_dir_cram1_tex_chain \
 	       obj_dir_cdc io_sdram_test.v

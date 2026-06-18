@@ -60,6 +60,7 @@ typedef struct {
     uint32_t save_max_slots;
 
     uint32_t gpu_base;          /* GPU MMIO window base, 0 if no GPU */
+    uint32_t tex_fast_size;     /* dedicated fast texture memory bytes; 0=none */
 } of_target_platform_t;
 
 const of_target_platform_t *of_target_platform_get(void);

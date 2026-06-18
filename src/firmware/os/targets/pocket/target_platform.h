@@ -63,6 +63,13 @@
  * alias — there is now only one CRAM0 address. */
 #define OF_TARGET_CRAM0_BASE           0x30000000u
 #define OF_TARGET_CRAM_SIZE            (16u * 1024u * 1024u)
+
+/* Fast texture memory (Pocket: CRAM1) — dedicated GPU sync-burst texture
+ * memory (16 MB), a separate chip from CRAM0 (saves).  CPU-invisible: textures
+ * are uploaded via the GPU's fast-texture upload regs and addressed by GPU
+ * byte offset.  Exposed to apps as caps->tex_fast_size via the of_texture.h
+ * API. */
+#define OF_TARGET_TEX_FAST_SIZE        (16u * 1024u * 1024u)
 #define OF_TARGET_CRAM0_BRIDGE         0x20000000u
 /* APF data slot offset inside CRAM0 for OS boot payload (slot 1).
  * The bootloader in BRAM reads from CRAM0_BASE + this and copies to
@@ -75,6 +82,17 @@
 #define OF_TARGET_CRAM0_ASYNC_BOUNCE_OFFSET (OF_TARGET_CRAM0_SCRATCH_OFFSET + OF_TARGET_CRAM0_DMA_CHUNK_SIZE)
 #define OF_TARGET_CRAM0_APP_DMA_OFFSET 0x00500000u   /* App-visible async file staging pool */
 #define OF_TARGET_CRAM0_APP_DMA_SIZE   0x00100000u   /* 1 MB */
+
+/* GPU texture store in CRAM0 (Phase 3).  When the GPU's CRAM0-tex mode register
+ * is enabled, gpu_tex_cache fills its 16-byte lines from CRAM0 (via
+ * gpu_cram0_tex_adapter + cram0_arb) instead of SDRAM.  The region is the whole
+ * CRAM0 tail above the app-DMA pool (~10 MB).  Textures are uploaded CPU-side to
+ * OF_TARGET_CRAM0_BASE + (this offset + local), then the GPU reads them at the
+ * SAME byte offset — the adapter masks the low 24 bits = the 16 MB CRAM0 chip,
+ * so app of_gpu_texture_t.addr for a CRAM0 texture is just this byte offset. */
+#define OF_TARGET_CRAM0_TEX_OFFSET     0x00600000u   /* 6 MB in — directly above the app-DMA pool */
+#define OF_TARGET_CRAM0_TEX_SIZE       (OF_TARGET_CRAM_SIZE - OF_TARGET_CRAM0_TEX_OFFSET) /* ~10 MB */
+#define OF_TARGET_CRAM0_TEX_BASE       (OF_TARGET_CRAM0_BASE + OF_TARGET_CRAM0_TEX_OFFSET)
 
 /* SRAM is GPU-private in v2 — no AXI alias, not CPU-addressable. */
 
@@ -145,6 +163,14 @@
 
 #if (OF_TARGET_CRAM0_APP_DMA_OFFSET + OF_TARGET_CRAM0_APP_DMA_SIZE) > OF_TARGET_CRAM_SIZE
 #error "CRAM0 app DMA pool exceeds CRAM0"
+#endif
+
+#if OF_TARGET_CRAM0_TEX_OFFSET < (OF_TARGET_CRAM0_APP_DMA_OFFSET + OF_TARGET_CRAM0_APP_DMA_SIZE)
+#error "CRAM0 GPU texture region overlaps the app DMA pool"
+#endif
+
+#if (OF_TARGET_CRAM0_TEX_OFFSET + OF_TARGET_CRAM0_TEX_SIZE) > OF_TARGET_CRAM_SIZE
+#error "CRAM0 GPU texture region exceeds CRAM0"
 #endif
 
 #if OF_TARGET_FILE_CACHE_SIZE == 0

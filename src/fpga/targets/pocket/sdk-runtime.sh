@@ -29,10 +29,16 @@ mkdir -p "$RTP"
 RB="$ROOT/tools/reverse_bits"
 [ -x "$RB" ] || gcc -O2 -o "$RB" "$ROOT/tools/reverse_bits.c"
 
-# Reversed FPGA bitstream.
+# Reversed FPGA bitstream, named by the variant that produced the current
+# rbf (os25 → os25.rbf_r, os30 → os30.rbf_r — the name is the variant token,
+# kept short for the Pocket's ~15-char filename cap).  The build stamps
+# output_files/.last_variant; successive os25/os30 builds + syncs accumulate
+# BOTH files here so one SDK can build cores of either variant.
+VARIANT="$(cat "$SCRIPT_DIR/output_files/.last_variant" 2>/dev/null || echo os25)"
+case "$VARIANT" in os30) BNAME=os30 ;; *) BNAME=os25 ;; esac
 if [ -f "$SCRIPT_DIR/output_files/ap_core.rbf" ]; then
-    "$RB" "$SCRIPT_DIR/output_files/ap_core.rbf" "$RTP/bitstream.rbf_r" >/dev/null
-    ok "bitstream" "runtime/pocket/"
+    "$RB" "$SCRIPT_DIR/output_files/ap_core.rbf" "$RTP/$BNAME.rbf_r" >/dev/null
+    ok "$BNAME.rbf_r" "runtime/pocket/"
 fi
 
 # Kernel — only when the on-disk os.bin was built for THIS target (the

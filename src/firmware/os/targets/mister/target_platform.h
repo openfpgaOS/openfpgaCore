@@ -80,6 +80,8 @@
 /* Staging arena ("CRAM0" role) — cached SDRAM + uncached alias. */
 #define OF_TARGET_CRAM0_BASE           0x13300000u
 #define OF_TARGET_CRAM_SIZE            (8u * 1024u * 1024u)
+/* No dedicated fast texture memory — MiSTer textures live in SDRAM. */
+#define OF_TARGET_TEX_FAST_SIZE        0u
 /* SDRAM byte offset of the arena = DMA-engine address of the arena. */
 #define OF_TARGET_CRAM0_BRIDGE         (OF_TARGET_CRAM0_BASE - OF_TARGET_SDRAM_BASE)
 #define OF_TARGET_CRAM0_OS_OFFSET      0x00000000u

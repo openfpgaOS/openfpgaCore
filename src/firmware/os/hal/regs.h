@@ -430,6 +430,8 @@
 #define   HW_FEAT_ANALOGIZER    (1 << 3)
 #define   HW_FEAT_GPU_SPAN      (1 << 4)   /* GPU span renderer (always set) */
 #define   HW_FEAT_SAVE_SLOTS    (1 << 9)
+#define   HW_FEAT_GPU_FAST_TEX  (1 << 25)  /* dedicated fast texture memory present
+                                            * (clear → tex_fast_size 0, SDRAM textures) */
 
 
 /* ======================================================================

@@ -212,19 +212,7 @@ output  wire            aux_scl
 
 assign bist = 1'bZ;
 
-// cram1 retired in memory-arch v2 - deassert everything and let DQ float.
-// The chip sits idle (CE# high) so the Pocket's cram1 RAM is never accessed.
-assign cram1_a     = 6'b0;
-assign cram1_dq    = 16'bZ;
-assign cram1_clk   = 1'b0;
-assign cram1_adv_n = 1'b1;
-assign cram1_cre   = 1'b0;
-assign cram1_ce0_n = 1'b1;
-assign cram1_ce1_n = 1'b1;
-assign cram1_oe_n  = 1'b1;
-assign cram1_we_n  = 1'b1;
-assign cram1_ub_n  = 1'b1;
-assign cram1_lb_n  = 1'b1;
+// cram1 revived: core_top drives the chip as a GPU sync-burst texture memory.
 
 // reset generation
 
@@ -406,12 +394,19 @@ core_top ic (
     .cram0_we_n             ( cram0_we_n ),
     .cram0_ub_n             ( cram0_ub_n ),
     .cram0_lb_n             ( cram0_lb_n ),
-    // cram1 retired in memory-arch v2 - core_top no longer drives the
-    // chip.  Tie the outputs to safe idle values at this level so the
-    // FPGA pins stay deasserted; the chip itself sits unpowered from
-    // the design's POV.
-    // (cram1_a / cram1_dq / cram1_wait are handled by the default tie-offs
-    // below in apf_top's own logic - see the deassignments after this block.)
+    // cram1 revived as a dedicated GPU sync-burst texture memory.
+    .cram1_a                ( cram1_a ),
+    .cram1_dq               ( cram1_dq ),
+    .cram1_wait             ( cram1_wait ),
+    .cram1_clk              ( cram1_clk ),
+    .cram1_adv_n            ( cram1_adv_n ),
+    .cram1_cre              ( cram1_cre ),
+    .cram1_ce0_n            ( cram1_ce0_n ),
+    .cram1_ce1_n            ( cram1_ce1_n ),
+    .cram1_oe_n            ( cram1_oe_n ),
+    .cram1_we_n            ( cram1_we_n ),
+    .cram1_ub_n            ( cram1_ub_n ),
+    .cram1_lb_n            ( cram1_lb_n ),
 
     .dram_a                 ( dram_a ),
     .dram_ba                ( dram_ba ),

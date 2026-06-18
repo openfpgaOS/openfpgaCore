@@ -27,9 +27,15 @@
         },
         "cores": [
             {
-                "name": "default",
+                "name": "os25",
                 "id": 0,
-                "filename": "bitstream.rbf_r",
+                "filename": "os25.rbf_r",
+                "chip32_vm": "loader.bin"
+            },
+            {
+                "name": "os30",
+                "id": 1,
+                "filename": "os30.rbf_r",
                 "chip32_vm": "loader.bin"
             }
         ]

@@ -36,6 +36,18 @@ export PATH := $(QUARTUS):$(PATH)
 
 BUILD_OUT = $(ROOT_DIR)/build/mister
 
+# ── Feature include-list ─────────────────────────────────────────────
+# Positive include-set (a feature is PRESENT iff its INCLUDE_* macro is
+# defined).  MiSTer has the full feature set EXCEPT analogizer (Pocket-only
+# HW) and fast texture memory (no CRAM1 chip — textures render from SDRAM).
+# Forwarded to quartus_map as --verilog_macro=<NAME>; the gpu_core /
+# axi_periph_slave instances in emu.sv echo each macro into their INCLUDE_*
+# params via the `ifdef INCLUDE_X 1 `else 0 `endif pattern.
+INCLUDE_DEFS = INCLUDE_HW_MIXER INCLUDE_LINK INCLUDE_4PLAYER INCLUDE_TRANSLUC \
+               INCLUDE_COLUMN_LIST INCLUDE_COMPACT_SPAN INCLUDE_PARAM_TRI \
+               INCLUDE_VERT_TRI INCLUDE_PARAM_TRI_RECS
+VERILOG_MACROS = $(foreach d,$(INCLUDE_DEFS),--verilog_macro="$(d)")
+
 # ── Colors ───────────────────────────────────────────────────────────
 ifneq ($(shell tput colors 2>/dev/null),)
 C_LOGO  := \033[96m
@@ -120,10 +132,18 @@ compile: build
 # Full compile with fresh placement.  Quartus emits output_files/mister.rbf
 # directly (GENERATE_RBF_FILE ON) — no reverse_bits step; MiSTer loads a
 # plain .rbf.
-build: $(VEXII_OUT) bootloader
+#
+# Explicit stages (not `quartus_sh --flow compile`) so the feature
+# include-list reaches synthesis: --verilog_macro is only valid on
+# quartus_map.  The sys/build_id.tcl PRE_FLOW script still runs ahead of
+# quartus_map (stamps build_id.v); quartus_asm emits the .rbf.
+build: $(VEXII_OUT) bootloader build_id.v
 	@printf "$(C_HEAD)[fpga]$(C_RESET) Clean compile (Quartus 17.0.x)...\n"
 	@rm -rf db incremental_db
-	@quartus_sh --flow compile $(PROJECT)
+	@quartus_map $(PROJECT) $(VERILOG_MACROS)
+	@quartus_fit $(PROJECT)
+	@quartus_asm $(PROJECT)
+	@quartus_sta $(PROJECT)
 	@printf "$(C_OK)[fpga] Done$(C_RESET) → output_files/$(PROJECT).rbf\n"
 
 # ── Test ─────────────────────────────────────────────────────────────
@@ -141,7 +161,7 @@ build_id.v:
 
 check: build_id.v
 	@printf "$(C_HEAD)[check]$(C_RESET) Analysis & Synthesis...\n"
-	@quartus_map $(PROJECT)
+	@quartus_map $(PROJECT) $(VERILOG_MACROS)
 	@printf "$(C_OK)[check] Done$(C_RESET)\n"
 
 # ── Deploy ───────────────────────────────────────────────────────────

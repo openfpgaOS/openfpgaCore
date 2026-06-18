@@ -545,11 +545,20 @@ wire vidout_vs_w;
 wire early_vblank_safe_vid;
 
 axi_periph_slave #(
-	// No Analogizer or Link port on MiSTer.  Apps gate on these via
-	// of_has_feature(); the analogizer HAL stub answers the state
-	// queries with "disabled" to match.
-	.HAS_ANALOGIZER(0),
-	.HAS_LINK(0)
+	// MiSTer feature set: every INCLUDE_* param echoes its build macro
+	// (Makefile INCLUDE_DEFS).  No Analogizer (Pocket-only HW) and no fast
+	// texture memory (no CRAM1 chip) — those two macros are NOT in the
+	// MiSTer include list, so INCLUDE_ANALOGIZER / INCLUDE_TEX_MEM resolve
+	// to 0.  This fixes the old HAS_CRAM1(1) vs tex_fast_size=0 inconsistency.
+	.INCLUDE_ANALOGIZER(`ifdef INCLUDE_ANALOGIZER 1 `else 0 `endif),
+	.INCLUDE_LINK(`ifdef INCLUDE_LINK 1 `else 0 `endif),
+	.INCLUDE_HW_MIXER(`ifdef INCLUDE_HW_MIXER 1 `else 0 `endif),
+	.INCLUDE_PARAM_TRI(`ifdef INCLUDE_PARAM_TRI 1 `else 0 `endif),
+	.INCLUDE_VERT_TRI(`ifdef INCLUDE_VERT_TRI 1 `else 0 `endif),
+	.INCLUDE_PARAM_TRI_RECS(`ifdef INCLUDE_PARAM_TRI_RECS 1 `else 0 `endif),
+	.INCLUDE_COLUMN_LIST(`ifdef INCLUDE_COLUMN_LIST 1 `else 0 `endif),
+	.INCLUDE_COMPACT_SPAN(`ifdef INCLUDE_COMPACT_SPAN 1 `else 0 `endif),
+	.INCLUDE_TEX_MEM(`ifdef INCLUDE_TEX_MEM 1 `else 0 `endif)
 ) periph (
 	.clk(clk_cpu),
 	.reset_n(reset_n_cpu_core),
@@ -1201,7 +1210,17 @@ sram_bram gpu_lut_sram (
 	.word_q_valid(sram_word_rdata_valid)
 );
 
-gpu_core gpu (
+gpu_core #(
+	// MiSTer feature set: triangles + 2.5D fastpaths all IN; fast texture
+	// memory OUT (no CRAM1 chip).  Each INCLUDE_* echoes its build macro and
+	// MUST match the periph's same-named param above.
+	.INCLUDE_PARAM_TRI(`ifdef INCLUDE_PARAM_TRI 1 `else 0 `endif),
+	.INCLUDE_VERT_TRI(`ifdef INCLUDE_VERT_TRI 1 `else 0 `endif),
+	.INCLUDE_PARAM_TRI_RECS(`ifdef INCLUDE_PARAM_TRI_RECS 1 `else 0 `endif),
+	.INCLUDE_COMPACT_SPAN(`ifdef INCLUDE_COMPACT_SPAN 1 `else 0 `endif),
+	.INCLUDE_COLUMN_LIST(`ifdef INCLUDE_COLUMN_LIST 1 `else 0 `endif),
+	.INCLUDE_TEX_MEM(`ifdef INCLUDE_TEX_MEM 1 `else 0 `endif)
+) gpu (
 	.clk(clk_cpu),
 	.reset_n(reset_n_cpu_media),
 	.gpu_enable(1'b1),
@@ -1212,6 +1231,14 @@ gpu_core gpu (
 	.m_rd_rvalid(gpu_rd_rvalid),
 	.m_rd_rdata(gpu_rd_rdata),
 	.m_rd_rlast(gpu_rd_rlast),
+	// Fast texture memory not present on MiSTer (INCLUDE_TEX_MEM 0): tie the
+	// fill-master inputs idle and leave the outputs unconnected.  The
+	// upload-reg ports are unused (no fast-tex controller).
+	.gpu_tex_mem_arready(1'b0),
+	.gpu_tex_mem_rvalid(1'b0),
+	.gpu_tex_mem_rdata(32'b0),
+	.gpu_tex_mem_rlast(1'b0),
+	.gpu_tex_mem_up_busy(1'b0),
 	.m_wr_awvalid(gpu_wr_awvalid),
 	.m_wr_awready(gpu_wr_awready),
 	.m_wr_awaddr(gpu_wr_awaddr),

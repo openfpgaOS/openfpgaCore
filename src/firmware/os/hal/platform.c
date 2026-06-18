@@ -55,6 +55,7 @@ static const of_target_platform_t g_target_platform = {
     .save_max_slots = OF_TARGET_SAVE_MAX_SLOTS,
 
     .gpu_base = OF_TARGET_GPU_BASE,
+    .tex_fast_size = OF_TARGET_TEX_FAST_SIZE,
 };
 
 const of_target_platform_t *of_target_platform_get(void)

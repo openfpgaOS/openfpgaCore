@@ -74,6 +74,12 @@ void caps_table_init(uintptr_t heap_base) {
     caps->sdram_base          = platform->sdram_base;
     caps->sdram_uncached_base = platform->sdram_uncached_base;
     caps->gpu_base            = platform->gpu_base;
+    /* Fast texture memory (CRAM1) only when the bitstream advertises it
+     * (Pocket OS30).  OS25 gates the CRAM1 controller out and clears the
+     * bit → tex_fast_size 0 → of_texture.h keeps textures + colormap in
+     * SDRAM. */
+    caps->tex_fast_size       = (features & HW_FEAT_GPU_FAST_TEX)
+                              ? platform->tex_fast_size : 0u;
 }
 
 const struct of_capabilities *caps_table_get(void) {

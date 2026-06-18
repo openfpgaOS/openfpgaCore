@@ -22,46 +22,60 @@ module axi_periph_slave #(
     // Hardware feature advertisement (HW_FEATURES register @ 0x98).
     // Per-feature switches so the shared capability bits live in exactly
     // one place (HW_FEATURES_RESOLVED below); a target without a given
-    // peripheral overrides just its switch (MiSTer: HAS_ANALOGIZER(0),
-    // HAS_LINK(0)).  Defaults = the Pocket feature set.
-    parameter HAS_ANALOGIZER = 1,
-    parameter HAS_LINK       = 1,
+    // peripheral overrides just its switch (MiSTer: INCLUDE_ANALOGIZER(0),
+    // INCLUDE_LINK(0)).  Defaults = the Pocket feature set.
+    parameter INCLUDE_ANALOGIZER = 1,
+    parameter INCLUDE_LINK       = 1,
     // Mixer backend indicator (HW_FEATURES bit 1, OF_HW_MIXER_HW).  The
     // mixer-available bit 0 (OF_HW_MIXER) stays SET on every target — a
     // 32-voice mixer is always exposed to apps — but bit 1 advertises
     // whether that mixer is the hardware audio_mixer.v (MMIO @ 0x48000000)
     // or the CPU software mixer.  The OS reads this once at boot to choose
     // the backend, so ONE os.bin runs on both.  Default 1 (HW mixer
-    // present); the EXCLUDE_MIXER (OS30) build passes HAS_MIXER_HW(0).
-    parameter HAS_MIXER_HW   = 1,
+    // present); the OS30 build passes INCLUDE_HW_MIXER(0).
+    parameter INCLUDE_HW_MIXER   = 1,
+    // GPU param-triangle (CMD_DRAW_PARAM_TRI 0x49) + the shared edge walker.
+    // Advertised in HW_FEATURES bit 19.  Must track gpu_core's
+    // INCLUDE_PARAM_TRI on the same target so apps don't submit 0x49 to a
+    // core that drains it as a no-op.  Pocket OS25 gates it out on ALM budget
+    // (only Quake1 emits 0x49 → it falls back to SW alias rendering); Pocket
+    // OS30 and MiSTer keep the default 1.
+    parameter INCLUDE_PARAM_TRI  = 1,
     // GPU hardware vertex-triangle plane derivation (CMD_SET_TRI_STATE 0x4A +
     // CMD_DRAW_VERT_TRI 0x4B).  Advertised in HW_FEATURES bit 20.  Must track
-    // gpu_core's GPU_HAS_VERT_TRI parameter on the same target so apps don't
-    // submit 0x4A/0x4B to a core that drains them as no-ops.  Pocket gates this
-    // out on ALM budget (Pocket: HAS_VERT_TRI(0)); MiSTer keeps the default 1.
-    parameter HAS_VERT_TRI   = 1,
+    // gpu_core's INCLUDE_VERT_TRI parameter on the same target so apps don't
+    // submit 0x4A/0x4B to a core that drains them as no-ops.  Pocket OS25
+    // gates this out on ALM budget (INCLUDE_VERT_TRI(0)); MiSTer/OS30 keep 1.
+    parameter INCLUDE_VERT_TRI   = 1,
     // Records-only param-tri (CMD_DRAW_PARAM_TRI_RECS 0x4D): per-triangle
     // attr/light planes + q29 + vertices, reusing the 0x4A sticky
     // surface/control/clamp/z/clip staging — the CPU stops re-sending the
     // ~21 constant header words per triangle.  HW_FEATURES bit 22.  Must
-    // track gpu_core's GPU_HAS_PARAM_TRI_RECS parameter on the same target
+    // track gpu_core's INCLUDE_PARAM_TRI_RECS parameter on the same target
     // so apps don't submit 0x4D to a core that drains it as a no-op.
-    // Pocket OS25 gates it out on ALM budget (HAS_PARAM_TRI_RECS(0));
-    // Pocket OS30 (OS30_VERT_TRI) and MiSTer keep the default 1.
-    parameter HAS_PARAM_TRI_RECS = 1,
+    // Pocket OS25 gates it out on ALM budget (INCLUDE_PARAM_TRI_RECS(0));
+    // Pocket OS30 and MiSTer keep the default 1.
+    parameter INCLUDE_PARAM_TRI_RECS = 1,
     // CMD_DRAW_COLUMN_LIST (0x4C) decode.  HW_FEATURES bit 21.  Must track
-    // gpu_core's GPU_HAS_COLUMN_LIST on the same target.  Default 1 (the
+    // gpu_core's INCLUDE_COLUMN_LIST on the same target.  Default 1 (the
     // historic unconditional value); Pocket OS30 (Quake2-only, lean GPU)
     // passes 0 — Quake2 never emits columns (Doom does, on OS25).
-    parameter HAS_COLUMN_LIST = 1,
+    parameter INCLUDE_COLUMN_LIST = 1,
     // 0x48 compact-direct lane form ("span groups": the SDK's
     // of_gpu_draw_affine_span_group / 0x4C fallback shape).  NEW
     // HW_FEATURES bit 23, claimed 2026-06-10: the compact form previously
     // had no caps bit of its own (bit 15 covers the long-form record-style
     // command, which stays on every target).  Must track gpu_core's
-    // GPU_HAS_COMPACT_SPAN.  Default 1; Pocket OS30 passes 0, so SDK
+    // INCLUDE_COMPACT_SPAN.  Default 1; Pocket OS30 passes 0, so SDK
     // emitters can self-gate instead of silently draining.
-    parameter HAS_SPAN_GROUP = 1
+    parameter INCLUDE_COMPACT_SPAN = 1,
+    // Dedicated fast texture memory present.  HW_FEATURES bit 25
+    // (OF_HW_GPU_FAST_TEX).  The OS resolves caps->tex_fast_size from this
+    // bit: set → 16 MB (of_texture.h uploads to fast tex); clear → 0
+    // (textures stay in SDRAM).  Pocket OS30 keeps fast tex (default 1);
+    // Pocket OS25 and MiSTer pass 0 — no fast-texture chip is wired, and
+    // textures + colormap render from SDRAM.
+    parameter INCLUDE_TEX_MEM = 1
 ) (
     input wire clk,
     input wire reset_n,
@@ -404,13 +418,13 @@ wire snac_miso_b = snac_pin_in_sync[5];  // IN4/bank0[7] (Config B: DAT)
 reg [4:0] snac_bit_count_reg;
 reg       snac_latch_en_reg;
 
-`ifdef EXCLUDE_ANALOGIZER
-// OS30 (Pocket Quake/Quake2): EXCLUDE_ANALOGIZER prunes the SNAC poller path.
-// The snac_shifter (bit-bang adapter) and the analogizer_psx wrapper
+`ifndef INCLUDE_ANALOGIZER
+// Targets without analogizer (Pocket OS30 / MiSTer): prune the SNAC poller
+// path.  The snac_shifter (bit-bang adapter) and the analogizer_psx wrapper
 // (DualShock controller poller) are removed; all of their outputs that the
 // rest of this module consumes are tied to constant 0 so they constant-fold
 // away.  snac_pin_out/snac_pin_dir/snac_enable then collapse to inert pins.
-// ~144 ALM, confirmed prunable.  Default (macro undefined) keeps the full SNAC.
+// ~144 ALM, confirmed prunable.  INCLUDE_ANALOGIZER (OS25) keeps the full SNAC.
 assign snac_rx_data         = 32'h0000_0000;
 assign snac_busy            = 1'b0;
 assign snac_done            = 1'b0;
@@ -539,7 +553,7 @@ assign snac_hw_ly = {(psx_joy1[15:8]  - 8'h80), 8'h00};
 
 // (void unused controller-2 outputs from analogizer_psx)
 wire [47:0] psx_p2_unused = {psx_key2, psx_joy2};
-`endif // EXCLUDE_ANALOGIZER
+`endif // INCLUDE_ANALOGIZER
 
 // SNAC pin output mux: shifter overrides GPIO when busy
 // Config A: shifter drives [0]=CLK, [1]=LATCH
@@ -684,64 +698,73 @@ assign ext_irq = (uart_rx_irq & irq_mask[0]) |
 //                                          Bit 17: GPU param span z-test/write
 //                                          Bit 18: GPU param span Q29 scale
 //                                          Bit 19: GPU param-tri edge walker
-//                                                  (CMD_DRAW_PARAM_TRI 0x49;
-//                                                   always present)
+//                                                  (CMD_DRAW_PARAM_TRI 0x49);
+//                                                  gated by INCLUDE_PARAM_TRI
 //                                          Bit 20: GPU vertex-triangle
 //                                                  (CMD_SET_TRI_STATE 0x4A +
 //                                                   CMD_DRAW_VERT_TRI 0x4B);
-//                                                  gated by HAS_VERT_TRI
+//                                                  gated by INCLUDE_VERT_TRI
 //                                          Bit 21: GPU column list (0x4C);
-//                                                  gated by HAS_COLUMN_LIST
+//                                                  gated by INCLUDE_COLUMN_LIST
 //                                          Bit 22: GPU records-only param-tri
-//                                                  (0x4D); HAS_PARAM_TRI_RECS
+//                                                  (0x4D); INCLUDE_PARAM_TRI_RECS
 //                                          Bit 23: GPU 0x48 compact-direct
 //                                                  span groups; gated by
-//                                                  HAS_SPAN_GROUP
+//                                                  INCLUDE_COMPACT_SPAN
 //
 // Perspective and parametric span commands are implemented and covered by
 // the GPU acceptance tests. Keep the caps exposed so renderers can select
 // these paths without local force-enable hacks.
 //
-// Composed from the HAS_* parameters so each target advertises what it
+// Composed from the INCLUDE_* parameters so each target advertises what it
 // actually has (apps gate on these bits via of_has_feature) while the
 // shared bits are spelled exactly once.
-`ifdef EXCLUDE_LINK
-localparam [31:0] FEAT_LINK = 32'h0000_0000;
+`ifdef INCLUDE_LINK
+localparam [31:0] FEAT_LINK = INCLUDE_LINK ? 32'h0000_0004 : 32'h0000_0000;
 `else
-localparam [31:0] FEAT_LINK = HAS_LINK ? 32'h0000_0004 : 32'h0000_0000;
+localparam [31:0] FEAT_LINK = 32'h0000_0000;
 `endif
 localparam [31:0] HW_FEATURES_RESOLVED =
     32'h0000_0001      // bit 0  OF_HW_MIXER: a 32-voice mixer is available (SET on
                        //        every target; SW-backed when bit 1 is clear)
     | 32'h0000_0010    // GPU span renderer
-    | 32'h000F_E000    // GPU persp + fragpipe + param span/list/z/scale caps (bits 13..19)
+    | 32'h0007_E000    // GPU persp + fragpipe + param span/list/z/scale caps (bits 13..18)
     | 32'h0000_0340    // MIDI(6) + FPU(8) + Save slots(9)
     | FEAT_LINK
-    | (HAS_ANALOGIZER ? 32'h0000_0008 : 32'h0000_0000)
-    | (HAS_MIXER_HW   ? 32'h0000_0002 : 32'h0000_0000)  // bit 1  OF_HW_MIXER_HW: HW
-                       //        audio_mixer.v present (clear under EXCLUDE_MIXER/OS30)
-    | (HAS_VERT_TRI   ? 32'h0010_0000 : 32'h0000_0000)  // bit 20: GPU vertex-triangle (0x4A/0x4B)
-    | (HAS_COLUMN_LIST ? 32'h0020_0000 : 32'h0000_0000) // bit 21
+    | (INCLUDE_ANALOGIZER ? 32'h0000_0008 : 32'h0000_0000)
+    | (INCLUDE_HW_MIXER   ? 32'h0000_0002 : 32'h0000_0000)  // bit 1  OF_HW_MIXER_HW: HW
+                       //        audio_mixer.v present (clear when SW mixer / OS30)
+    | (INCLUDE_PARAM_TRI  ? 32'h0008_0000 : 32'h0000_0000)  // bit 19: GPU param-tri
+                       //        edge walker (CMD_DRAW_PARAM_TRI 0x49).  Split
+                       //        out of the bits-13..19 constant 2026-06: OS25
+                       //        clears it (only Quake1 emits 0x49 → SW alias).
+    | (INCLUDE_VERT_TRI   ? 32'h0010_0000 : 32'h0000_0000)  // bit 20: GPU vertex-triangle (0x4A/0x4B)
+    | (INCLUDE_COLUMN_LIST ? 32'h0020_0000 : 32'h0000_0000) // bit 21
                        //        OF_HW_GPU_COLUMN_LIST: CMD_DRAW_COLUMN_LIST
                        //        (0x4C) 5-word column records, byte-identical
                        //        to a 0x48 column.  Parameterized 2026-06-10
                        //        (was unconditional): the lean OS30 GPU
                        //        drains 0x4C, so it must not advertise it.
-    | (HAS_PARAM_TRI_RECS ? 32'h0040_0000 : 32'h0000_0000) // bit 22
+    | (INCLUDE_PARAM_TRI_RECS ? 32'h0040_0000 : 32'h0000_0000) // bit 22
                        //        OF_HW_GPU_PARAM_TRI_RECS: records-only
                        //        param-tri (CMD_DRAW_PARAM_TRI_RECS 0x4D) —
                        //        per-triangle planes + verts reusing the 0x4A
                        //        sticky surface state.  The 0x4A sticky decode
                        //        is ungated in gpu_core; only the 0x4B
-                       //        derivation needs GPU_HAS_VERT_TRI.  OS25
+                       //        derivation needs INCLUDE_VERT_TRI.  OS25
                        //        clears it (ALM); OS30 keeps it — it is the
                        //        Quake2 world-pass header-dedup opcode.
-    | (HAS_SPAN_GROUP ? 32'h0080_0000 : 32'h0000_0000)  // bit 23
+    | (INCLUDE_COMPACT_SPAN ? 32'h0080_0000 : 32'h0000_0000)  // bit 23
                        //        OF_HW_GPU_SPAN_GROUP: 0x48 compact-direct
                        //        lane form (SDK span-group emitters).  NEW
                        //        2026-06-10 — previously implied by bit 15;
                        //        bit 15 now strictly means the long-form
                        //        record-style 0x48, which every target keeps.
+    | (INCLUDE_TEX_MEM ? 32'h0200_0000 : 32'h0000_0000)       // bit 25
+                       //        OF_HW_GPU_FAST_TEX: dedicated fast texture
+                       //        memory present.  OS25 + MiSTer clear it (no
+                       //        fast-tex chip) → caps->tex_fast_size 0 →
+                       //        SDRAM textures.  OS30 keeps it.
     | 32'h0100_0000;   // bit 24 OF_HW_SAVE_DT_WORD: SAVE_DT_WORD (0xC8)
                        //        entry-resolved nonvolatile size commits.
                        //        UNCONDITIONAL on new bitstreams; a new OS

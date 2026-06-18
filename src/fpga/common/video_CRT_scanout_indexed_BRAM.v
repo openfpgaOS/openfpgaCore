@@ -27,8 +27,8 @@ module video_CRT_scanout_indexed_BRAM #(
     // pipeline (pixel_color is produced in the clk_analog domain) and the
     // shared horizontal-scaler cone simply loses its analog operand muxes.
     // Analog outputs park at their reset values (blank, syncs idle).
-    // Set 0 only under EXCLUDE_ANALOGIZER builds (Pocket OS30); the
-    // Analogizer-capable OS25 build keeps the default 1.
+    // Set 0 on builds without INCLUDE_ANALOGIZER (Pocket OS30 / MiSTer);
+    // the Analogizer-capable OS25 build keeps the default 1.
     parameter HAS_ANALOG_RASTER = 1
 ) (
     // Video clock domain (12.288 MHz)
