@@ -81,7 +81,7 @@ static void boot_logo(const char *color) {
     of_term_puts("    /_/_/_/___\\___/_/ |_|\n");
     of_term_puts("   / __ \\/ __/\n");
     of_term_puts("  / /_/ /\\ \\\n");
-    of_term_puts("  \\____/___/  \033[93mv0.6\033[0m\n\n");
+    of_term_puts("  \\____/___/  \033[93mv0.7\033[0m\n\n");
 }
 
 static void status_ok(void) {

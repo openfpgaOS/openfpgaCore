@@ -26,7 +26,13 @@ constant core_os30      = 0x1    // hardware vertex-triangle bitstream
 // bare "os30") keeps prose — comments, ARGS, ELF names mentioning os30 — from
 // false-triggering the raw byte scan.
 constant ini_slot       = 0x2
-constant ini_addr       = 0x10000000   // must match data.json slot 2 "address"
+// Bridge-space CRAM0 address the .ini is DMA'd to — must match data.json
+// slot 2 "address".  CRAM0 bridge base is 0x20000000 (saves live at
+// 0x20100000); 0x203C0000 is the free 256 KB gap between the shared-config
+// window (ends 0x203C0000) and the os.bin load scratch (0x20400000), so it
+// is a valid bridge target that does NOT collide with SDRAM/framebuffer
+// (0x10000000) or the OS-load pipeline.
+constant ini_addr       = 0x203C0000
 
 // ASCII for the "=os30" marker scanned out of the .ini.
 constant ch_eq          = 0x3D
