@@ -908,8 +908,11 @@ set_global_assignment -name VERILOG_FILE ../../common/sram_controller.v
 set_global_assignment -name VERILOG_FILE ../../common/uart_rx.v
 set_global_assignment -name VERILOG_FILE ../../common/uart_tx.v
 set_global_assignment -name VERILOG_FILE ../../common/video_CRT_scanout_indexed_BRAM.v
-set_global_assignment -name VERILOG_FILE ../../vendor/vexriscv/VexiiRiscv/vexii_active.v
-set_global_assignment -name SEARCH_PATH ../../vendor/vexriscv/VexiiRiscv
+# Per-variant CPU netlist (VexiiRiscv_<variant>.v) is injected into the
+# generated bld/<job>/ap_core.qsf by the pocket Makefile (see VEXII_OUT).
+# Not added here in the master qsf so a raw `quartus_sh --flow` doesn't
+# accidentally link an arbitrary variant — the Makefile is the source of
+# truth for which CPU to fit.
 set_global_assignment -name VERILOG_FILE mf_pllram_133.v
 set_global_assignment -name SDC_FILE core_constraints.sdc
 # Fallback seed for raw quartus_sh runs.  `make build` overrides this per

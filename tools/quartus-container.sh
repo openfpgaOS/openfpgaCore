@@ -13,7 +13,15 @@
 # ones).  Combined with the per-job bld/<job>/ dir (own db/ + output_files/),
 # this gives full build isolation: 4+ fits of the SAME variant at once.
 #
-# Quartus is bind-mounted read-only from the host (not baked into the image).
+# Two image modes — preferred FIRST:
+#   1. Baked image   (openfpgaos-quartus-full) — Quartus is inside the image.
+#      No bind-mount, no host install needed.  Built once per machine via
+#      `make quartus-image SRC=<altera_lite-path>` / tools/build-quartus-image.sh.
+#      Use this on macOS / fresh CI / contributor machines.
+#   2. Bind-mount    (openfpgaos-quartus)      — host Quartus mounted read-only.
+#      Smaller image, but every machine needs $ALTERA_ROOT pointing at an
+#      installed Quartus tree.  Original setup; still works on Linux dev boxes.
+#
 # The host must have already generated <build-dir>/ap_core.qsf (+ .qpf) and the
 # CPU netlist + firmware.mif it references — all by ABSOLUTE path, so they
 # resolve identically inside the container (the repo is mounted at the same path).
@@ -23,9 +31,10 @@ set -euo pipefail
 
 BDIR="${1:?usage: quartus-container.sh <absolute-build-dir>}"
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+IMG_FULL="${QUARTUS_FULL_IMG:-openfpgaos-quartus-full}"
+IMG_BIND="${QUARTUS_IMG:-openfpgaos-quartus}"
 ALTERA="${ALTERA_ROOT:-/home/alberto/altera_lite}"
 QROOT="$ALTERA/25.1std/quartus"
-IMG="${QUARTUS_IMG:-openfpgaos-quartus}"
 
 [ -f "$BDIR/ap_core.qsf" ] || { echo "ERROR: $BDIR/ap_core.qsf missing (generate it first)"; exit 1; }
 
@@ -33,23 +42,119 @@ IMG="${QUARTUS_IMG:-openfpgaos-quartus}"
 # `make build` keeps Quartus's colored output (tools disable color when they see
 # a pipe instead of a tty).  When stdout is redirected — build-all/sweep write
 # to bld/<job>.log — we omit -t so the logs stay clean (no \r / escape codes).
+# The ${TTY[@]+"${TTY[@]}"} idiom is required for bash 3.2 (macOS default) under
+# set -u — plain "${TTY[@]}" errors on an empty array there.
 TTY=()
 [ -t 1 ] && TTY=(-t)
 
-# The fitter's processor count is pinned in the generated qsf
-# (NUM_PARALLEL_PROCESSORS), so a single build and every parallel sweep fit place
-# identically and reproducibly — no per-invocation flag needed.  MAXJOBS x that
-# count is what keeps concurrent fits from oversubscribing the host cores.
-# --user keeps outputs owned by the host user.  HOME + /tmp are container-private
-# tmpfs => the Quartus per-user state that segfaults under concurrency is isolated.
-exec docker run --rm "${TTY[@]}" \
-  --user "$(id -u):$(id -g)" \
-  -v "$REPO:$REPO" \
-  -v "$ALTERA:$ALTERA:ro" \
-  --tmpfs /tmp:exec --tmpfs /qhome:exec \
-  -e HOME=/qhome -e QUARTUS_ROOTDIR="$QROOT" \
-  -e PATH="$QROOT/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
-  -e LANG=en_US.UTF-8 -e LC_ALL=en_US.UTF-8 \
-  -w "$BDIR" \
-  "$IMG" \
-  bash -c 'rm -rf db incremental_db && quartus_map ap_core && quartus_fit ap_core && quartus_asm ap_core && quartus_sta ap_core'
+# ── License passthrough (Quartus Standard / Pro / IP) ────────────────────
+# Quartus Lite needs no license; Standard/Pro do.  If the user has a license
+# file pointed at by $LM_LICENSE_FILE (or a host-side license at one of the
+# usual paths), bind-mount it into the container at the same path and forward
+# the env var.  No-op for Lite users.
+LIC_MOUNTS=()
+LIC_ENV=()
+LIC_HOST=""
+if [ -n "${LM_LICENSE_FILE:-}" ] && [ -f "$LM_LICENSE_FILE" ]; then
+    LIC_HOST="$LM_LICENSE_FILE"
+elif [ -f "$HOME/flexlm/license.dat" ]; then
+    LIC_HOST="$HOME/flexlm/license.dat"
+elif [ -f "$ALTERA/license.dat" ]; then
+    LIC_HOST="$ALTERA/license.dat"
+fi
+if [ -n "$LIC_HOST" ]; then
+    LIC_MOUNTS=(-v "$LIC_HOST:$LIC_HOST:ro")
+    LIC_ENV=(-e "LM_LICENSE_FILE=$LIC_HOST")
+fi
+
+# ── Auto-bake the image if user dropped the installer under tools/ ──────
+# When the baked image is missing but a Quartus tarball is sitting in
+# tools/, run the bake automatically — saves the user from a separate
+# `make quartus-image` step.  ~10 min first time; cached after that.
+if ! docker image inspect "$IMG_FULL" >/dev/null 2>&1; then
+    INSTALLER="$(find "$REPO/tools" -maxdepth 4 -type f -name 'Quartus-*-linux.tar' 2>/dev/null | head -1 || true)"
+    if [ -n "$INSTALLER" ]; then
+        echo "[quartus] image '$IMG_FULL' not present, but found tarball at:"
+        echo "         $INSTALLER"
+        echo "[quartus] baking image (one-time, ~10 min)..."
+        bash "$REPO/tools/build-quartus-image.sh"
+    fi
+fi
+
+# ── Mode selection: baked image first, bind-mount fallback ─────────────
+# Note: --user keeps outputs owned by the host user.  HOME + /tmp are container-
+# private tmpfs => the Quartus per-user state that segfaults under concurrency
+# is isolated.  NUM_PARALLEL_PROCESSORS is pinned in the generated qsf so
+# parallel sweep fits place reproducibly with no per-invocation flag.
+if docker image inspect "$IMG_FULL" >/dev/null 2>&1; then
+    # Baked image — Quartus is INSIDE.  No -v $ALTERA, no PATH/QUARTUS_ROOTDIR
+    # env (already in the image ENV).
+    exec docker run --rm ${TTY[@]+"${TTY[@]}"} \
+      --platform linux/amd64 \
+      --user "$(id -u):$(id -g)" \
+      -v "$REPO:$REPO" \
+      ${LIC_MOUNTS[@]+"${LIC_MOUNTS[@]}"} \
+      --tmpfs /tmp:exec --tmpfs /qhome:exec \
+      -e HOME=/qhome \
+      ${LIC_ENV[@]+"${LIC_ENV[@]}"} \
+      -w "$BDIR" \
+      "$IMG_FULL" \
+      bash -c 'rm -rf db incremental_db && quartus_map ap_core && quartus_fit ap_core && quartus_asm ap_core && quartus_sta ap_core'
+elif docker image inspect "$IMG_BIND" >/dev/null 2>&1 && [ -x "$QROOT/bin/quartus_map" ]; then
+    # Bind-mount image + host install — original setup.
+    exec docker run --rm ${TTY[@]+"${TTY[@]}"} \
+      --user "$(id -u):$(id -g)" \
+      -v "$REPO:$REPO" \
+      -v "$ALTERA:$ALTERA:ro" \
+      ${LIC_MOUNTS[@]+"${LIC_MOUNTS[@]}"} \
+      --tmpfs /tmp:exec --tmpfs /qhome:exec \
+      -e HOME=/qhome -e QUARTUS_ROOTDIR="$QROOT" \
+      -e PATH="$QROOT/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+      -e LANG=en_US.UTF-8 -e LC_ALL=en_US.UTF-8 \
+      ${LIC_ENV[@]+"${LIC_ENV[@]}"} \
+      -w "$BDIR" \
+      "$IMG_BIND" \
+      bash -c 'rm -rf db incremental_db && quartus_map ap_core && quartus_fit ap_core && quartus_asm ap_core && quartus_sta ap_core'
+fi
+
+# ── Neither mode is set up: print actionable instructions ──────────────
+cat >&2 <<EOF
+
+ERROR: cannot run Quartus — no usable build environment found.
+
+  Looked for:
+    1. Baked image     '$IMG_FULL'     (preferred)            ── not present
+    2. Bind-mount image '$IMG_BIND' + Quartus at $QROOT       ── not present
+
+  RECOMMENDED — bake Quartus into a local image (one-time, ~10–30 min,
+  ~5 GB).  The image stays on YOUR machine (Intel/Altera Quartus EULA is
+  not OK with redistribution).  Works on Linux and macOS (Apple Silicon
+  via Rosetta).
+
+  Steps:
+    1. Download a Quartus 25.1 (Linux) offline tarball (~9 GB).  Either
+       edition works — both ship the same setup.sh + Bitrock installer.
+       Lite is free and covers Cyclone V (what the Pocket uses), so it's
+       the simplest choice:
+         Lite (free, no license):
+           https://www.altera.com/downloads/fpga-development-tools/quartus-prime-lite-edition-design-software-version-25-1-linux
+         Standard (license required):
+           https://www.altera.com/downloads/fpga-development-tools/quartus-prime-standard-edition-design-software-version-25-1-linux
+
+    2. Move it into the repo (gitignored path, anywhere under tools/):
+         mv ~/Downloads/Quartus-*-linux.tar tools/
+
+    3. Bake the image (this script will then pick it up automatically):
+         make -C src/fpga/targets/pocket quartus-image
+         # or directly:
+         tools/build-quartus-image.sh
+
+  ALTERNATIVE — bind-mount mode (Linux only, host Quartus required):
+    Build the minimal image once:
+      docker build -t $IMG_BIND tools/docker/
+    Set ALTERA_ROOT so this script finds your install:
+      export ALTERA_ROOT=/path/to/altera_lite        # parent of 25.1std/
+    Then rerun \`make build\`.
+
+EOF
+exit 1

@@ -72,22 +72,42 @@ Porting to a new platform: see
 provide (RTL glue, firmware HAL files, memory contract, SDK packaging),
 with the MiSTer port as the worked reference.
 
+Slicing the FPGA into feature profiles (the os25 / os30 variants and
+the `INCLUDE_*` addon system): see
+[docs/VARIANTS_AND_ADDONS.md](docs/VARIANTS_AND_ADDONS.md).
+
 ## Requirements
 
-- RISC-V embedded toolchain providing `riscv64-elf-*`
-- Intel Quartus Prime Lite:
-  - pocket: 25.1std, expected at `/home/alberto/altera_lite/25.1std/quartus`
-  - mister: **17.0.x** (newer versions miscompile the MiSTer framework),
-    expected at `/home/alberto/intelFPGA_lite/17.0/quartus`
-- Java plus sbt for VexiiRiscv generation (one netlist serves both targets)
-- Verilator for RTL tests
-- Standard Unix tools: `make`, `gcc`, `rsync`, `find`, `grep`
+The pocket build flow runs every long-lived toolchain (sbt / SpinalHDL,
+riscv64 GCC + libc, Quartus Prime) inside Docker containers, so a fresh
+clone on Linux or macOS (including Apple Silicon) needs only:
 
-Initialize submodules after a fresh checkout:
+- **Docker** (Docker Desktop, OrbStack, Colima, or native dockerd)
+- **git**, **make**, **bash**
 
-```bash
-git submodule update --init --recursive
-```
+The first invocation of `make full` builds the three container images
+(vexii / firmware / quartus) on demand. They're tagged
+`openfpgaos-{vexii,firmware,quartus-full}` and cached locally — subsequent
+builds reuse them.
+
+The mister target still uses a host Quartus install (`17.0.x`, expected
+at `/home/alberto/intelFPGA_lite/17.0/quartus`) because Quartus 17 is a
+hard MiSTer framework requirement and isn't worth containerizing for the
+single-host Linux build flow it expects.
+
+Quartus is not redistributable, so each contributor supplies their own
+copy.  Download the Lite (free, covers Cyclone V) or Standard tarball:
+
+- Lite: <https://www.altera.com/downloads/fpga-development-tools/quartus-prime-lite-edition-design-software-version-25-1-linux>
+- Standard: <https://www.altera.com/downloads/fpga-development-tools/quartus-prime-standard-edition-design-software-version-25-1-linux>
+
+Drop the resulting `Quartus-*-linux.tar` (~9 GB) anywhere under `tools/`
+(top level works); `make full` auto-bakes it into the image on first run
+(~10 min, one-time).  See `tools/build-quartus-image.sh` for details.
+
+Submodules auto-init on first build — no manual `git submodule update`
+needed.  (For Verilator-based RTL tests, install Verilator 5.x and run
+`make test` directly; tests are not part of the default build.)
 
 ## Build
 

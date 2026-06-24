@@ -25,7 +25,11 @@ IMG="${VEXII_IMG:-openfpgaos-vexii}"
 VEXII_DIR="$REPO/src/fpga/vendor/vexriscv/VexiiRiscv"
 HOME_CACHE="$REPO/tools/.vexii-home"   # persistent sbt/ivy/coursier dep cache (gitignored)
 
-[ -d "$VEXII_DIR" ] || { echo "ERROR: $VEXII_DIR missing (VexiiRiscv submodule not checked out?)"; exit 1; }
+if [ ! -f "$VEXII_DIR/build.sbt" ]; then
+    echo "ERROR: $VEXII_DIR/build.sbt missing — VexiiRiscv submodule is not checked out."
+    echo "       Run: git submodule update --init --recursive"
+    exit 1
+fi
 mkdir -p "$HOME_CACHE"
 
 # Build the image on first use (one-time) so `make cpu` just works on a fresh
@@ -42,7 +46,7 @@ TTY=()
 
 # --user => host-owned outputs.  HOME is a persistent mounted dir (the dep cache),
 # NOT tmpfs — that is the whole point: download Scala/SpinalHDL once, reuse it.
-exec docker run --rm "${TTY[@]}" \
+exec docker run --rm ${TTY[@]+"${TTY[@]}"} \
   --user "$(id -u):$(id -g)" \
   -v "$REPO:$REPO" \
   -v "$HOME_CACHE:/vexiihome" \

@@ -73,14 +73,15 @@ LDFLAGS += $(LTO_FLAGS)
 LIBGCC = $(shell $(CC) -march=$(ARCH) -mabi=$(ABI) -print-libgcc-file-name)
 LIBS = $(LIBGCC)
 
-# Check for musl libc.a
+# musl libc — provides memcmp/strncpy/etc. that the bootloader+OS call.
+# Auto-built on first use by build_musl.sh (downloads musl 1.2.5, patches
+# for ilp32f, cross-compiles).  Treated as a required dependency so a fresh
+# clone builds end-to-end; see the $(MUSL_LIBC) rule below.
 MUSL_DIR = ../musl
 MUSL_LIBC = $(MUSL_DIR)/lib/libc.a
-ifneq ($(wildcard $(MUSL_LIBC)),)
-    LIBS += $(MUSL_LIBC)
-    CFLAGS += -I$(MUSL_DIR)/include
-    OS_CFLAGS += -I$(MUSL_DIR)/include
-endif
+LIBS += $(MUSL_LIBC)
+CFLAGS += -I$(MUSL_DIR)/include
+OS_CFLAGS += -I$(MUSL_DIR)/include
 
 # Source files - Bootloader (BRAM)
 BOOT_SRCS_C = $(BOOT_DIR)/boot.c
@@ -206,8 +207,16 @@ all: $(FW_TARGET).bin $(FW_TARGET).mif $(FW_TARGET).lst os.bin
 $(OBJS): | .last_target
 
 # Link
-$(FW_TARGET).elf: $(OBJS) os.ld | .last_target
+$(FW_TARGET).elf: $(OBJS) os.ld $(MUSL_LIBC) | .last_target
 	$(LD) $(LDFLAGS) -o $@ $(OBJS) $(LIBS)
+
+# Auto-build musl libc on first use (downloads + cross-compiles ~1 min).
+# The build runs with whatever toolchain is on PATH — inside the firmware
+# container that's riscv64-unknown-elf-gcc with picolibc headers.  Output
+# is gitignored.
+$(MUSL_LIBC):
+	@echo "[musl] libc.a missing — building (~1 min, downloads musl 1.2.5)..."
+	@bash $(MUSL_DIR)/build_musl.sh
 
 # Full binary
 $(FW_TARGET).bin: $(FW_TARGET).elf
