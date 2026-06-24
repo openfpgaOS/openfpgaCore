@@ -106,7 +106,6 @@ reg [31:0] latched_data;
 reg [21:0] latched_addr;
 reg latched_chip_sel;
 reg [3:0] latched_wstrb;
-reg [15:0] lo_captured;
 
 reg         psram_write_en;
 reg         psram_read_en;
@@ -173,11 +172,7 @@ cram1_phy #(
     .cram_oe_n(cram_oe_n),
     .cram_we_n(cram_we_n),
     .cram_ub_n(cram_ub_n),
-    .cram_lb_n(cram_lb_n),
-    .dbg_wait_seen(),
-    .dbg_wait_cycles(),
-    .dbg_burst_count(),
-    .dbg_stale_count()
+    .cram_lb_n(cram_lb_n)
 );
 
 always @(posedge clk or negedge reset_n) begin
@@ -190,7 +185,6 @@ always @(posedge clk or negedge reset_n) begin
         latched_addr <= 22'b0;
         latched_chip_sel <= 1'b0;
         latched_wstrb <= 4'b1111;
-        lo_captured <= 16'b0;
         psram_write_en <= 1'b0;
         psram_read_en <= 1'b0;
         psram_addr <= 22'b0;

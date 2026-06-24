@@ -39,7 +39,6 @@
 
 module axi_sdram_arbiter #(
     parameter [3:0] CPU_FAIR_THRESHOLD   = 4'd8, // Force CPU grant after this many non-CPU grants
-    parameter [3:0] AUDIO_FAIR_THRESHOLD = 4'd4, // Force AudioMix grant after this many non-audio grants
     parameter [3:0] GPU_WRITE_READ_BUDGET = 4'd4 // Max GPU reads while posted writes wait
 ) (
     input wire clk,
@@ -112,7 +111,7 @@ module axi_sdram_arbiter #(
     output wire        m2_bvalid,
     output wire [1:0]  m2_bresp,
 
-    // Master 3: Audio Mixer (read-only, lowest priority)
+    // Master 3: Audio Mixer (read-only)
     input  wire        m3_arvalid,
     output wire        m3_arready,
     input  wire [31:0] m3_araddr,
@@ -167,7 +166,7 @@ localparam ST_RD   = 2'd1;  // Read transaction active (AR→R)
 localparam ST_WR   = 2'd2;  // Write transaction active (AW→W→B)
 
 reg [1:0] arb_state;
-reg [1:0] grant;  // 0=GPU, 1=CPU, 3=AudioMix
+reg [1:0] grant;  // 0=GPU, 1=CPU, 2=Bridge, 3=AudioMix
 reg       active_wr_gpuq;
 reg [2:0] active_gpuq_awlen;   // beats-1 of the GPU write burst currently draining (0..7)
 reg [2:0] gpuq_w_idx;          // beat index within that burst
@@ -180,11 +179,9 @@ reg [2:0] gpuq_w_idx;          // beat index within that burst
 reg [3:0] gpu_deficit;
 wire cpu_pending = m1_arvalid | m1_awvalid;
 
-// Audio fairness: bounds the worst-case wait the AudioMix master can
-// experience.  Without this, GPU + CPU traffic can starve the audio
-// FSM during heavy frame rendering, draining the output dcfifo (1024
-// entries / ~21 ms) and producing framerate-correlated clicks.
-reg [3:0] audio_deficit;
+// Audio fairness is provided by the fixed 2nd-priority audio grant below (the
+// unconditional `else if (audio_pending)` arm), which bounds AudioMix latency
+// to one in-flight transaction — no deficit counter needed.
 wire audio_pending = m3_arvalid;
 
 // Posted M0 write queue.  Entries are single 32-bit word writes; AWLEN>0
@@ -307,7 +304,6 @@ always @(posedge clk or posedge reset) begin
         active_gpuq_awlen <= 3'd0;
         gpuq_w_idx <= 3'd0;
         gpu_deficit <= 4'd0;
-        audio_deficit <= 4'd0;
         gpu_wq_rd_ptr <= {GPU_WQ_PTR_W{1'b0}};
         gpu_wq_wr_ptr <= {GPU_WQ_PTR_W{1'b0}};
         gpu_wq_count <= 4'd0;
@@ -361,7 +357,6 @@ always @(posedge clk or posedge reset) begin
                 grant <= 2'd1;
                 active_wr_gpuq <= 1'b0;
                 gpu_deficit <= 4'd0;
-                if (audio_pending) audio_deficit <= audio_deficit + 4'd1;
                 arb_state <= m1_arvalid ? ST_RD : ST_WR;
             end else if (audio_pending) begin
                 // AudioMix promoted to 2nd-highest (just under the CPU-starvation
@@ -377,7 +372,6 @@ always @(posedge clk or posedge reset) begin
                 // preempt a pathological audio burst, so no master starves.
                 grant <= 2'd3;
                 active_wr_gpuq <= 1'b0;
-                audio_deficit <= 4'd0;
                 arb_state <= ST_RD;
                 if (cpu_pending) gpu_deficit <= gpu_deficit + 4'd1;
             end else if (m0_arvalid && !gpu_wq_should_drain) begin
@@ -389,7 +383,6 @@ always @(posedge clk or posedge reset) begin
                 else
                     gpu_reads_since_write <= 4'd0;
                 if (cpu_pending) gpu_deficit <= gpu_deficit + 4'd1;
-                if (audio_pending) audio_deficit <= audio_deficit + 4'd1;
             end else if (gpu_wq_head_ready) begin
                 grant <= 2'd0;
                 active_wr_gpuq <= 1'b1;
@@ -398,26 +391,22 @@ always @(posedge clk or posedge reset) begin
                 arb_state <= ST_WR;
                 gpu_reads_since_write <= 4'd0;
                 if (cpu_pending) gpu_deficit <= gpu_deficit + 4'd1;
-                if (audio_pending) audio_deficit <= audio_deficit + 4'd1;
             end else if (m0_arvalid) begin
                 grant <= 2'd0;
                 active_wr_gpuq <= 1'b0;
                 arb_state <= ST_RD;
                 gpu_reads_since_write <= 4'd0;
                 if (cpu_pending) gpu_deficit <= gpu_deficit + 4'd1;
-                if (audio_pending) audio_deficit <= audio_deficit + 4'd1;
             end else if (m1_arvalid) begin
                 grant <= 2'd1;
                 active_wr_gpuq <= 1'b0;
                 arb_state <= ST_RD;
                 gpu_deficit <= 4'd0;
-                if (audio_pending) audio_deficit <= audio_deficit + 4'd1;
             end else if (m1_awvalid) begin
                 grant <= 2'd1;
                 active_wr_gpuq <= 1'b0;
                 arb_state <= ST_WR;
                 gpu_deficit <= 4'd0;
-                if (audio_pending) audio_deficit <= audio_deficit + 4'd1;
             end else if (m2_awvalid || m2_arvalid) begin
                 // Bridge AW preferred over AR within the arm; the bridge
                 // FSM is single-transaction so both are never pending at
@@ -426,15 +415,12 @@ always @(posedge clk or posedge reset) begin
                 active_wr_gpuq <= 1'b0;
                 arb_state <= m2_awvalid ? ST_WR : ST_RD;
                 if (cpu_pending) gpu_deficit <= gpu_deficit + 4'd1;
-                if (audio_pending) audio_deficit <= audio_deficit + 4'd1;
             end else if (m3_arvalid) begin
                 grant <= 2'd3;
                 active_wr_gpuq <= 1'b0;
                 arb_state <= ST_RD;
-                audio_deficit <= 4'd0;
             end else begin
                 gpu_deficit <= 4'd0;
-                audio_deficit <= 4'd0;
             end
         end
 

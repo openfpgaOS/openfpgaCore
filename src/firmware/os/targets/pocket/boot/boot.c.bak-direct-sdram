@@ -661,20 +661,12 @@ static uint32_t boot_dt_read_word(uint32_t word) {
 
 __attribute__((section(".text.boot")))
 static uint32_t boot_os_slot_size(void) {
-    /* Prefer the LIVE DataTable size so the os.bin size is DECOUPLED from the
-     * baked boot ROM — a resized os.bin must not require a bitstream rebake.
-     * The OS reads this same table reliably (of_file_size), so the value is
-     * present; at boot the APF may not have populated it the instant the bridge
-     * reports ALLCOMPLETE, so retry briefly until it reports a sane size.  The
-     * baked _os_copy_size stays ONLY as a last-resort safety net (a table that
-     * never reports still boots), so this can never regress vs the old code. */
-    for (int attempt = 0; attempt < 64; attempt++) {
-        uint32_t dt_size = boot_dt_read_word(OS_DT_SIZE_WORD);
-        if (dt_size >= 4096u && dt_size <= 768u * 1024u)
-            return dt_size;
-        for (volatile int d = 0; d < 200000; d++) {}   /* ~ms-scale settle, then re-query */
-    }
-    return (uint32_t)(uintptr_t)_os_copy_size;
+    uint32_t linked_size = (uint32_t)(uintptr_t)_os_copy_size;
+    uint32_t dt_size = boot_dt_read_word(OS_DT_SIZE_WORD);
+
+    if (dt_size >= 4096u && dt_size <= 768u * 1024u)
+        return dt_size;
+    return linked_size;
 }
 
 /* CRC-32/ISO-HDLC (zlib-compatible) over a loaded SDRAM range, read through the
@@ -726,14 +718,14 @@ static int boot_verify_os_image_at(uint32_t total, uint32_t base) {
 }
 
 
-/* OS image load: bridge DMAs os.bin into CRAM0 scratch, then the CPU copies the
- * whole blob contiguously into SDRAM starting at __osdata_vma (== __os_entry).
- * One .osdata section, so no text/data split.  (The direct SD->SDRAM bridge path
- * was removed: bridge_to_sdram corrupted the loaded image on silicon — a sparse
- * single-bit flip — so the CRAM0 bounce + CPU copy is the only SDRAM-dest load
- * path now.  The RTL module is gone; there is no direct alternative to select.) */
 __attribute__((section(".text.boot")))
 static int boot_load_os_sd_once_to(uint32_t total, uint32_t dst_cached) {
+    /* v2 arch: CRAM1 retired, OS .text in SDRAM (CRAM0 is non-exec).
+     * Single-destination layout: bridge DMAs os.bin into CRAM0
+     * scratch, then the CPU copies the whole blob contiguously into
+     * SDRAM starting at __osdata_vma (== __os_entry).  No
+     * text-vs-data split needed since the linker put everything in
+     * one .osdata section. */
     uint32_t bounce_bridge = CRAM0_SCRATCH_BRIDGE;
     volatile uint8_t *bounce_src = (volatile uint8_t *)CRAM0_SCRATCH;
     volatile uint8_t *sdram_dst =

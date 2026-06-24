@@ -70,17 +70,6 @@ static int addr_in_sdram(uint32_t addr, uint32_t length) {
            addr_in_range(addr, length, SDRAM_UNCACHED_BASE, SDRAM_SIZE);
 }
 
-static int addr_in_cached_sdram(uint32_t addr, uint32_t length) {
-    return addr_in_range(addr, length, SDRAM_BASE, SDRAM_SIZE);
-}
-
-static uint32_t sdram_alias_to_bridge(void *addr) {
-    uint32_t a = (uintptr_t)addr;
-    if (a >= SDRAM_UNCACHED_BASE && a < SDRAM_UNCACHED_BASE + SDRAM_SIZE)
-        return a - SDRAM_UNCACHED_BASE;
-    return a - SDRAM_BASE;
-}
-
 static int bridge_addr_targets_cram0(uint32_t bridge_addr, uint32_t length) {
     return addr_in_range(bridge_addr, length, CRAM0_BRIDGE, CRAM_SIZE);
 }
@@ -295,6 +284,22 @@ static int file_wait_complete(void) {
         }
     }
 
+    /* CRAM0 ingress FIFO overrun guard.  The CRAM0 chunk cap was raised above
+     * the 4 KB FIFO depth on the premise that the host delivers SD-paced (so
+     * the FIFO smooths jitter, not whole-burst) — proven by the 256 KB save
+     * slots auto-loading through this same FIFO.  This catches the case where
+     * that premise fails for a commanded read: the sticky bit is set and words
+     * were dropped, so the transfer is corrupt.  The bit clears on the next
+     * command issue, so here it describes the command that just completed; only
+     * reads-into-CRAM0 can set it (SDRAM reads + all writes leave it 0), so
+     * this is a safe global guard. */
+    if (DS_BRIDGE_WCNT & DS_BWC_CRAM0_OVERRUN) {
+        of_term_printf("[CRAM0 FIFO overrun #%d wcnt=%08x]\n",
+                       file_op_count, (unsigned)DS_BRIDGE_WCNT);
+        DS_STATUS = DS_STATUS_IRQ_PENDING;   /* clear W1C pending like the other exits */
+        return OF_ERR_IO;
+    }
+
     DS_STATUS = DS_STATUS_IRQ_PENDING;
     return 0;
 }
@@ -313,7 +318,6 @@ static int bridge_read_impl(uint32_t slot_id, uint32_t slot_offset,
                     && (length <= CRAM_SIZE)
                     && (dest_addr <= CRAM0_BASE + CRAM_SIZE - length);
     int direct_sdram = addr_in_sdram(dest_addr, length);
-    int cached_sdram = addr_in_cached_sdram(dest_addr, length);
 
     /* v2 arch: CRAM1 retired, scratch moved to CRAM0.  CRAM0 is
      * uncached per PMA, so no D-cache invalidation is needed around
@@ -324,43 +328,17 @@ static int bridge_read_impl(uint32_t slot_id, uint32_t slot_offset,
         uint32_t chunk = length - done;
         int rc;
 
+        /* SDRAM destinations ALWAYS route through the CRAM0 bounce + CPU memcpy.
+         * The direct bridge_to_sdram write path corrupts the loaded image on
+         * silicon (verified: sparse single-bit flips, HW-verify pending), so it
+         * is disabled until that RTL is fixed.  The bounce is cache-coherent by
+         * construction — the CPU memcpy stores through the cache — so no cbo
+         * invalidation is needed (the old bridge-direct write bypassed the cache
+         * and required it).  Any alignment works, so no head/tail splitting. */
         if (direct_sdram && !direct_cram0) {
-            uint32_t cur = dest_addr + done;
-
-            if (cached_sdram && (cur & (DMA_CACHE_LINE_SIZE - 1u))) {
-                chunk = DMA_CACHE_LINE_SIZE -
-                        (cur & (DMA_CACHE_LINE_SIZE - 1u));
-                if (chunk > length - done)
-                    chunk = length - done;
-                if (chunk > OF_TARGET_CRAM0_DMA_CHUNK_SIZE)
-                    chunk = OF_TARGET_CRAM0_DMA_CHUNK_SIZE;
-                goto bounce_via_cram0;
-            }
-
-            if (cached_sdram) {
-                chunk &= ~(DMA_CACHE_LINE_SIZE - 1u);
-                if (chunk == 0) {
-                    chunk = length - done;
-                    if (chunk > OF_TARGET_CRAM0_DMA_CHUNK_SIZE)
-                        chunk = OF_TARGET_CRAM0_DMA_CHUNK_SIZE;
-                    goto bounce_via_cram0;
-                }
-            }
-
-            if (chunk > DMA_CHUNK_SIZE)
-                chunk = DMA_CHUNK_SIZE;
-            if (cached_sdram)
-                of_cache_inval_range(dst + done, chunk);
-
-            rc = of_file_read_raw(slot_id, slot_offset + done,
-                                  sdram_alias_to_bridge(dst + done), chunk);
-            if (rc < 0)
-                return rc;
-
-            if (cached_sdram)
-                of_cache_inval_range(dst + done, chunk);
-            done += chunk;
-            continue;
+            if (chunk > OF_TARGET_CRAM0_DMA_CHUNK_SIZE)
+                chunk = OF_TARGET_CRAM0_DMA_CHUNK_SIZE;
+            goto bounce_via_cram0;
         }
 
         if (chunk > OF_TARGET_CRAM0_DMA_CHUNK_SIZE)

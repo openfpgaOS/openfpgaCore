@@ -17,7 +17,6 @@ set_global_assignment -name VERILOG_FILE ../../common/gpu_tex_cache.v
 set_global_assignment -name VERILOG_FILE ../../common/axi_periph_slave.v
 set_global_assignment -name VERILOG_FILE ../../common/sync_fifo.v
 set_global_assignment -name VERILOG_FILE ../../common/snac_shifter.v
-set_global_assignment -name VERILOG_FILE ../../common/snac_psx_poller.v
 set_global_assignment -name SYSTEMVERILOG_FILE ../../common/analogizer_psx.sv
 set_global_assignment -name VERILOG_FILE ../../common/dualshock_controller.v
 set_global_assignment -name VERILOG_FILE ../../common/axi_register_slice.v

@@ -5,32 +5,40 @@
 //------------------------------------------------------------------------------
 
 //
-// Hardware PCM Mixer (v2) — 32 voices from SDRAM
+// Hardware PCM Mixer (v3) — 32 voices from SDRAM
 //
 // Derived from the original CRAM1-era audio_mixer.v (retired in
-// f11811c).  This is a simplified v2 port that fetches from SDRAM
-// via a dedicated AXI4 read master instead of CRAM1 burst IO, and
-// writes the final stereo pair directly into audio_output's dcfifo
-// (audio_dma is retired — removed from core_top and the QSF in v2).
+// f11811c).  This port fetches from SDRAM via a dedicated AXI4 read
+// master instead of CRAM1 burst IO, and writes the final stereo pair
+// directly into audio_output's dcfifo (audio_dma is retired — removed
+// from core_top and the QSF in v3).
 //
 // Runs on clk_cpu (100 MHz).  Produces a stereo int16 pair at 48 kHz
-// (sample period = 2083 cycles).  With 32 voices × ~30 cycles/voice
-// worst-case per SDRAM fetch, steady-state budget ~960 cycles per
-// sample — well under the 2083-cycle slot — with plenty of slack
-// for worst-case SDRAM arbitration.
+// (sample period = 2083 cycles).  Each active voice now walks a long
+// pipelined per-voice sequence (field reads, stream-backlog check,
+// burst-mode decision, two-phase LERP, position advance, and a 4-stage
+// volume-write pipeline) plus its SDRAM round-trip(s), so the old
+// ~30-cycle/voice estimate no longer holds — but the worst-case
+// 32-voice pass still sits comfortably within the 2083-cycle slot,
+// with slack for SDRAM arbitration.
 //
-// What's in this version (phase 1):
+// What's in this version:
 //   - 32 voices, mono/stereo 16-bit PCM in SDRAM
-//   - Forward loop / one-shot (no bidi — deferred)
+//   - Forward loop / one-shot, with loop-seam tap interpolation
+//   - Stream-mode (FIFO) voices: ring-buffer wptr/backlog tracking
+//     (ctrl[3], STREAM_LOW/FLOOR thresholds, S_STREAM_* states)
 //   - 2-tap linear interpolation (Q16.16 position)
-//   - Per-channel HW volume ramp (target/rate pair)
+//   - Per-channel HW volume ramp (target/rate pair), 4-stage pipeline
+//   - Group × master HW volume composition (gxm pipeline)
+//   - ARLEN=1 burst tap-fetch with loop-seam interpolation
 //   - Voice-end IRQ bitmap (W1C from CPU)
 //
 // What's missing vs the old mixer (deliberately deferred):
 //   - Reverb, chorus, per-voice send levels
 //   - Bidi loop (reverse direction)
 //   - 8-bit PCM samples
-//   - Per-voice sample burst cache
+//   - A true cross-pass sample cache (a burst-FETCH path exists, but
+//     samples are not retained across passes)
 //
 // Voice table layout (16-word stride × 32 voices = 512 words = 1 M10K):
 //   Word 0:  base_byte[31:0]   — absolute SDRAM byte address of sample 0
@@ -470,29 +478,29 @@ endfunction
 // ============================================================
 localparam S_IDLE           = 5'd0;
 localparam S_START_SAMPLE   = 5'd1;   // begin a new stereo-out sample period
-localparam S_ADV_COMPUTE    = 5'd2;   // repurposed from unused S_RD_CTRL
+localparam S_ADV_COMPUTE    = 5'd2;
 localparam S_RD_CTRL_W      = 5'd3;
 localparam S_CHECK_ACTIVE   = 5'd4;
-localparam S_FETCH_TAP1_NXT_CALC = 5'd5;  // repurposed from unused S_RD_POS
+localparam S_FETCH_TAP1_NXT_CALC = 5'd5;
 localparam S_RD_POS_W       = 5'd6;
 localparam S_RD_BASE        = 5'd7;
 localparam S_RD_BASE_W      = 5'd8;
 localparam S_RD_RATE_W      = 5'd10;
-localparam S_FETCH_SEAM_R   = 5'd11;  // (was S_RD_LEN, dead) receive tap1 fetched from cur_loop_start
+localparam S_FETCH_SEAM_R   = 5'd11;  // receive tap1 fetched from cur_loop_start
 localparam S_RD_LEN_W       = 5'd12;
-localparam S_RD_VOL         = 5'd13;
+localparam S_RD_LOOP_END    = 5'd13;  // captures LOOP_END (does NOT read volume)
 localparam S_RD_VOL_W       = 5'd14;
 localparam S_FETCH_TAP0_CALC = 5'd29;  // register byte addr (adder cycle)
 localparam S_FETCH_TAP0_AR  = 5'd15;    // drive m_araddr from registered addr
 localparam S_FETCH_TAP0_R   = 5'd16;
-localparam S_WR_VOL_RAMP     = 5'd31;   // (was S_FETCH_TAP1_NXT, dead) register ramp_step output
-localparam S_FETCH_SEAM_AR  = 5'd30;  // (was S_FETCH_TAP1_CALC, dead) issue tap1 fetch at cur_loop_start
-localparam S_RD_VOL_RATE    = 5'd17;  // (was S_FETCH_TAP1_AR, dead) capture VOL_RATE field
+localparam S_WR_VOL_RAMP     = 5'd31;   // register ramp_step output
+localparam S_FETCH_SEAM_AR  = 5'd30;  // issue tap1 fetch at cur_loop_start
+localparam S_RD_VOL_RATE    = 5'd17;  // capture VOL_RATE field
 localparam S_FETCH_TAP1_R   = 5'd18;
 localparam S_LERP_INTERP    = 5'd19;   // stage 1: diff, mult by pos_frac, + tap0
 localparam S_LERP_MIX       = 5'd20;   // stage 2: * vol, accumulate
 localparam S_ADVANCE        = 5'd21;
-localparam S_WR_VOL_MULT    = 5'd22;  // (was S_WR_POS_INT, dead code) register raw × cur_gxm output
+localparam S_WR_VOL_MULT    = 5'd22;  // register raw × cur_gxm output
 localparam S_WR_POS_FRAC    = 5'd23;
 localparam S_NEXT_VOICE     = 5'd24;
 localparam S_OUTPUT         = 5'd25;
@@ -811,10 +819,10 @@ always @(posedge clk) begin
     S_RD_VOL_RATE: begin
         cur_vol_rate <= vtbl_a_q[7:0];
         vtbl_a_addr  <= {cur_voice, VTBL_LOOP_END};
-        state        <= S_RD_VOL;
+        state        <= S_RD_LOOP_END;
     end
 
-    S_RD_VOL: begin
+    S_RD_LOOP_END: begin
         cur_loop_end <= vtbl_a_q[21:0];
         vtbl_a_addr  <= {cur_voice, VTBL_LOOP_START};
         state        <= S_RD_LSTART_W;

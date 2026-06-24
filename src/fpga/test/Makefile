@@ -92,7 +92,6 @@ AXI_PERIPH_SRCS = \
 	altsyncram_stub.v \
 	$(COMMON_DIR)/axi_periph_slave.v \
 	$(COMMON_DIR)/snac_shifter.v \
-	$(COMMON_DIR)/snac_psx_poller.v \
 	$(COMMON_DIR)/sync_fifo.v \
 	$(TARGET_DIR)/apf/common.v
 
@@ -181,6 +180,12 @@ MIXER_CPP = tb_audio_mixer_main.cpp
 MIXER_TOP = tb_audio_mixer
 MIXER_DIR = obj_dir_audio_mixer
 MIXER_FLAGS = -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC -Wno-CASEINCOMPLETE -Wno-SYNCASYNCNET -Wno-UNOPTFLAT
+
+# AXI skid buffer (full-throughput valid/ready register slice primitive)
+SKID_SRCS = $(COMMON_DIR)/skid_buffer.v
+SKID_CPP  = tb_skid_buffer_main.cpp
+SKID_TOP  = skid_buffer
+SKID_DIR  = obj_dir_skid
 
 # ============================================================
 # MiSTer SDRAM write-path multi-master contention — the convergent
@@ -428,7 +433,6 @@ SYSTEM_SRCS_BASE = \
 	$(COMMON_DIR)/axi_periph_slave.v \
 	$(COMMON_DIR)/sync_fifo.v \
 	$(COMMON_DIR)/snac_shifter.v \
-	$(COMMON_DIR)/snac_psx_poller.v \
 	$(COMMON_DIR)/gpu_core.v \
 	$(COMMON_DIR)/gpu_edge_walker.v \
 	$(COMMON_DIR)/gpu_tex_cache.v \
@@ -449,11 +453,11 @@ SYSTEM_FLAGS = -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC -Wno-CASEINCOMPLETE \
 # ============================================================
 # Targets
 # ============================================================
-.PHONY: all sdram sdram-serialize sdram-native2 sdram-wcont0 sdram-all sdram-cont sram scanout scanout-lean analogchain gpu gpu-persp gpu-floor gpu-gpudemo gpu-acceptance gpu-acceptance-single gpu-acceptance-os30 gpu-acceptance-burst2 gpu-acceptance-all gpu-chain \
+.PHONY: all sdram sdram-serialize sdram-native2 sdram-wcont0 sdram-all sdram-cont sram scanout scanout-lean analogchain gpu gpu-persp gpu-floor gpu-gpudemo gpu-acceptance gpu-acceptance-single gpu-acceptance-os30 gpu-acceptance-zraw gpu-acceptance-burst2 gpu-acceptance-all gpu-chain \
         gpu-wrpath gpu-wstall scanout-race scanout-race-pocket axi-periph bridge-cmd bridge-rx audio audio-mixer arbiter system system-mister run run-sram build clean \
-        cram0-tex cram0-tex-adapter cram0-arb cram0-tex-chain cram1-tex-chain cram1-cmap-chain gpu-cram1-repro
+        cram1-tex-chain cram1-cmap-chain gpu-cram1-repro
 
-all: sdram-all sram gpu gpu-persp axi-periph bridge-cmd bridge-rx audio audio-mixer arbiter hps-bridge
+all: sdram-all sram gpu gpu-persp axi-periph bridge-cmd bridge-rx audio audio-mixer arbiter hps-bridge skid
 
 # --- SDRAM ---
 sdram: $(SDRAM_DIR)/V$(SDRAM_TOP)
@@ -644,6 +648,7 @@ GPU_ACCEPT_CPP = tb_gpu_acceptance_main.cpp
 GPU_ACCEPT_DIR = obj_dir_gpu_acceptance
 GPU_ACCEPT_SINGLE_DIR = obj_dir_gpu_acceptance_single
 GPU_ACCEPT_OS30_DIR = obj_dir_gpu_acceptance_os30
+GPU_ACCEPT_ZRAW_DIR = obj_dir_gpu_acceptance_zraw
 gpu-acceptance: $(GPU_ACCEPT_DIR)/V$(GPU_TOP)
 	@printf "\n=== GPU acceptance suite ===\n"
 	./$(GPU_ACCEPT_DIR)/V$(GPU_TOP)
@@ -700,35 +705,177 @@ $(GPU_ACCEPT_OS30_DIR)/V$(GPU_TOP): $(GPU_SRCS) $(GPU_ACCEPT_CPP)
 
 gpu-acceptance-all: gpu-acceptance gpu-acceptance-single gpu-acceptance-os30
 
-# --- CRAM0 texture store (Phase 3): adapter + arbiter + full chain ---
-# Self-checking pure-Verilog TBs (--binary --timing).  cram0-tex runs all three.
-CRAM0_TEX_VFLAGS = --binary --timing -Wno-fatal -Wno-WIDTH -Wno-UNOPTFLAT -Wno-CASEINCOMPLETE -I../common -I.
+# In-flight z-RAW coherency variant.  Same full-feature config as
+# gpu-acceptance (GPU_Z_READ_WINDOW=4, INCLUDE_TRANSLUC), but the binary is
+# RUN with +gpu_wr_latency=24 so the SDRAM write stub holds the z-write
+# commit and the directed test_param_span_z_raw_inflight_same_line assertion
+# goes active (it skips when +gpu_wr_latency<8).  Proves the z-read /
+# color-write drain decouple does not surface stale in-flight z.
+gpu-acceptance-zraw: $(GPU_ACCEPT_ZRAW_DIR)/V$(GPU_TOP)
+	@printf "\n=== GPU acceptance suite (in-flight z-RAW, +gpu_wr_latency=24) ===\n"
+	./$(GPU_ACCEPT_ZRAW_DIR)/V$(GPU_TOP) +gpu_wr_latency=24
 
-cram0-tex-adapter: obj_dir_cram0_tex_adapter/Vtb_gpu_cram0_tex_adapter
-	@printf "\n=== CRAM0 tex adapter (AXI fill -> 4 async word reads) ===\n"
-	./obj_dir_cram0_tex_adapter/Vtb_gpu_cram0_tex_adapter
-obj_dir_cram0_tex_adapter/Vtb_gpu_cram0_tex_adapter: tb_gpu_cram0_tex_adapter.v ../common/gpu_cram0_tex_adapter.v
-	$(VERILATOR) $(CRAM0_TEX_VFLAGS) --Mdir obj_dir_cram0_tex_adapter \
-		--top-module tb_gpu_cram0_tex_adapter \
-		tb_gpu_cram0_tex_adapter.v ../common/gpu_cram0_tex_adapter.v
+$(GPU_ACCEPT_ZRAW_DIR)/V$(GPU_TOP): $(GPU_SRCS) $(GPU_ACCEPT_CPP)
+	$(VERILATOR) $(VERILATOR_FLAGS) --top-module $(GPU_TOP) \
+		+define+INCLUDE_TRANSLUC \
+		--Mdir $(GPU_ACCEPT_ZRAW_DIR) \
+		-I$(COMMON_DIR) \
+		$(GPU_SRCS) $(GPU_ACCEPT_CPP)
 
-cram0-arb: obj_dir_cram0_arb/Vtb_cram0_arb
-	@printf "\n=== CRAM0 controller 2-client arbiter ===\n"
-	./obj_dir_cram0_arb/Vtb_cram0_arb
-obj_dir_cram0_arb/Vtb_cram0_arb: tb_cram0_arb.v ../common/cram0_arb.v
-	$(VERILATOR) $(CRAM0_TEX_VFLAGS) --Mdir obj_dir_cram0_arb \
-		--top-module tb_cram0_arb \
-		tb_cram0_arb.v ../common/cram0_arb.v
+# Truecolor (RGB565 direct-color) variant: os30 lean config + INCLUDE_DIRECT_COLOR=1.
+# -DGPU_TEST_TRUECOLOR compiles in the truecolor-specific tests and enables the
+# direct-color RTL path (which is parameter-gated, never exercised by the other
+# configs).  This is the ONLY config that runs the truecolor fragment pipeline.
+GPU_ACCEPT_TC_DIR = obj_dir_gpu_acceptance_tc
+gpu-acceptance-tc: $(GPU_ACCEPT_TC_DIR)/V$(GPU_TOP)
+	@printf "\n=== GPU acceptance suite (truecolor RGB565 variant) ===\n"
+	./$(GPU_ACCEPT_TC_DIR)/V$(GPU_TOP)
 
-cram0-tex-chain: obj_dir_cram0_tex_chain/Vtb_cram0_tex_chain
-	@printf "\n=== CRAM0 tex chain (tex_cache -> adapter -> arb -> CRAM0), byte-exact ===\n"
-	./obj_dir_cram0_tex_chain/Vtb_cram0_tex_chain
-obj_dir_cram0_tex_chain/Vtb_cram0_tex_chain: tb_cram0_tex_chain.v ../common/gpu_cram0_tex_adapter.v ../common/cram0_arb.v ../common/gpu_tex_cache.v
-	$(VERILATOR) $(CRAM0_TEX_VFLAGS) --Mdir obj_dir_cram0_tex_chain \
-		--top-module tb_cram0_tex_chain \
-		tb_cram0_tex_chain.v ../common/gpu_cram0_tex_adapter.v ../common/cram0_arb.v ../common/gpu_tex_cache.v
+$(GPU_ACCEPT_TC_DIR)/V$(GPU_TOP): $(GPU_SRCS) $(GPU_ACCEPT_CPP)
+	$(VERILATOR) $(VERILATOR_FLAGS) \
+		-CFLAGS "-std=c++17 -O2 -DGPU_TEST_OS30_LEAN -DGPU_TEST_TRUECOLOR" \
+		-GINCLUDE_COMPACT_SPAN=0 \
+		-GINCLUDE_COLUMN_LIST=0 \
+		-GGPU_EW_PARALLEL_DIVS=0 \
+		-GINCLUDE_PARAM_TRI=1 \
+		-GINCLUDE_VERT_TRI=1 \
+		-GINCLUDE_PARAM_TRI_RECS=1 \
+		-GGPU_Z_READ_WINDOW=4 \
+		-GINCLUDE_DIRECT_COLOR=1 \
+		-GINCLUDE_CLIP_TRI=0 \
+		--top-module $(GPU_TOP) \
+		--Mdir $(GPU_ACCEPT_TC_DIR) \
+		-I$(COMMON_DIR) \
+		$(GPU_SRCS) $(GPU_ACCEPT_CPP)
 
-cram0-tex: cram0-tex-adapter cram0-arb cram0-tex-chain
+# SM64 FUNCTIONAL test target: verifies the new GPU transform/lighting front-end
+# (T1 0x52 xform-rgb, T3 0x53/0x54 vertex cache, T4 0x55 lighting).  This is a
+# VERIFICATION config, NOT the shipped SM64 bitstream gating: PARAM_TRI/RECS and
+# the palette lane stay ON so the full existing suite (which exercises 0x49/0x4D
+# and palettized paths) stays green alongside the new -DGPU_TEST_SM64 tests.  The
+# shipped SM64 prune (PARAM_TRI=0, PALETTE=0, TEX off) is validated separately by
+# the elaboration smoke target `gpu-elab-sm64` and the Quartus fit.
+GPU_ACCEPT_SM64_DIR = obj_dir_gpu_acceptance_sm64
+gpu-acceptance-sm64: $(GPU_ACCEPT_SM64_DIR)/V$(GPU_TOP)
+	@printf "\n=== GPU acceptance suite (SM64 functional config) ===\n"
+	./$(GPU_ACCEPT_SM64_DIR)/V$(GPU_TOP)
+
+$(GPU_ACCEPT_SM64_DIR)/V$(GPU_TOP): $(GPU_SRCS) $(GPU_ACCEPT_CPP)
+	$(VERILATOR) $(VERILATOR_FLAGS) \
+		-CFLAGS "-std=c++17 -O2 -DGPU_TEST_OS30_LEAN -DGPU_TEST_TRUECOLOR -DGPU_TEST_SM64" \
+		-GINCLUDE_COMPACT_SPAN=0 \
+		-GINCLUDE_COLUMN_LIST=0 \
+		-GGPU_EW_PARALLEL_DIVS=0 \
+		-GINCLUDE_PARAM_TRI=1 \
+		-GINCLUDE_VERT_TRI=1 \
+		-GINCLUDE_PARAM_TRI_RECS=1 \
+		-GGPU_Z_READ_WINDOW=4 \
+		-GINCLUDE_DIRECT_COLOR=1 \
+		-GINCLUDE_XFORM_RGB=1 \
+		-GINCLUDE_VTX_CACHE=1 \
+		-GINCLUDE_GPU_LIGHT=1 \
+		-GINCLUDE_PALETTE=1 \
+		--top-module $(GPU_TOP) \
+		--Mdir $(GPU_ACCEPT_SM64_DIR) \
+		-I$(COMMON_DIR) \
+		$(GPU_SRCS) $(GPU_ACCEPT_CPP)
+
+# Truecolor-ONLY functional build (INCLUDE_PALETTE=0) — proves the palette-gated
+# truecolor + SM64 paths still render with the colormap lane pruned.  Palettized
+# tests in the suite are EXPECTED to fail here (their lane is gone); only the
+# truecolor_* and SM64 (xform/indexed/lit) tests are asserted by the caller.
+GPU_ACCEPT_NOPAL_DIR = obj_dir_gpu_acceptance_nopal
+gpu-acceptance-sm64-nopal: $(GPU_ACCEPT_NOPAL_DIR)/V$(GPU_TOP)
+	@printf "\n=== GPU acceptance (SM64, truecolor-only / palette gated out) ===\n"
+	-./$(GPU_ACCEPT_NOPAL_DIR)/V$(GPU_TOP)
+
+$(GPU_ACCEPT_NOPAL_DIR)/V$(GPU_TOP): $(GPU_SRCS) $(GPU_ACCEPT_CPP)
+	$(VERILATOR) $(VERILATOR_FLAGS) \
+		-CFLAGS "-std=c++17 -O2 -DGPU_TEST_OS30_LEAN -DGPU_TEST_TRUECOLOR -DGPU_TEST_SM64" \
+		-GINCLUDE_COMPACT_SPAN=0 -GINCLUDE_COLUMN_LIST=0 -GGPU_EW_PARALLEL_DIVS=0 \
+		-GINCLUDE_PARAM_TRI=1 -GINCLUDE_VERT_TRI=1 -GINCLUDE_PARAM_TRI_RECS=1 \
+		-GGPU_Z_READ_WINDOW=4 -GINCLUDE_DIRECT_COLOR=1 -GINCLUDE_XFORM_RGB=1 \
+		-GINCLUDE_VTX_CACHE=1 -GINCLUDE_GPU_LIGHT=1 -GINCLUDE_PALETTE=0 \
+		--top-module $(GPU_TOP) --Mdir $(GPU_ACCEPT_NOPAL_DIR) -I$(COMMON_DIR) \
+		$(GPU_SRCS) $(GPU_ACCEPT_CPP)
+
+# Elaboration smoke test of the SHIPPED SM64 bitstream gating: PARAM_TRI/RECS off,
+# palette off, fast-tex off (z-burst kept).  Must elaborate cleanly — the pruned
+# paths fold to constant 0.  Catches prune-folding errors before the Quartus fit.
+gpu-elab-sm64:
+	@printf "\n=== GPU elaboration smoke (SM64 shipped prune) ===\n"
+	$(VERILATOR) --lint-only -Wall -Wno-fatal -Wno-BADVLTPRAGMA \
+		-Wno-WIDTH -Wno-UNOPTFLAT -Wno-CASEINCOMPLETE \
+		-GINCLUDE_COMPACT_SPAN=0 \
+		-GINCLUDE_COLUMN_LIST=0 \
+		-GGPU_EW_PARALLEL_DIVS=0 \
+		-GINCLUDE_PARAM_TRI=0 \
+		-GINCLUDE_VERT_TRI=1 \
+		-GINCLUDE_PARAM_TRI_RECS=0 \
+		-GGPU_Z_READ_WINDOW=4 \
+		-GINCLUDE_DIRECT_COLOR=1 \
+		-GINCLUDE_XFORM_RGB=1 \
+		-GINCLUDE_VTX_CACHE=1 \
+		-GINCLUDE_GPU_LIGHT=1 \
+		-GINCLUDE_PALETTE=0 \
+		--top-module $(GPU_TOP) \
+		-I$(COMMON_DIR) \
+		$(GPU_SRCS)
+	@printf "=== SM64 prune elaborates clean ===\n"
+
+# --- GPU cyc/pixel EMPIRICAL measurement (SM64-class triangle) ---
+# Drives ONE large textured RGB565-truecolor z-buffered triangle through the
+# real gpu_core fragment pipeline and measures GPU clocks (kick->fence) and
+# pixels written => cyc/pixel.  Varies tex / z / truecolor / overdraw one at a
+# time to attribute the cost.  Same RTL config as gpu-acceptance-sm64
+# (INCLUDE_DIRECT_COLOR=1, VERT_TRI=1, PARAM_TRI=1, PALETTE=1, Z_READ_WINDOW=4)
+# so both the 0x4E truecolor and 0x4B palettized paths are live.
+#
+# SDRAM read latency: tb_gpu's model defaults to 2-cycle initial read latency.
+# Pass +gpu_rd_latency=N at runtime to model realistic axi_sdram_slave latency,
+# e.g.  make gpu-perf GPU_PERF_ARGS="+gpu_rd_latency=24"
+GPU_PERF_CPP = tb_gpu_perf_main.cpp
+GPU_PERF_DIR = obj_dir_gpu_perf
+GPU_PERF_ARGS ?=
+gpu-perf: $(GPU_PERF_DIR)/V$(GPU_TOP)
+	@printf "\n=== GPU cyc/pixel measurement (SM64-class tri) ===\n"
+	./$(GPU_PERF_DIR)/V$(GPU_TOP) $(GPU_PERF_ARGS)
+
+$(GPU_PERF_DIR)/V$(GPU_TOP): $(GPU_SRCS) $(GPU_PERF_CPP)
+	$(VERILATOR) $(VERILATOR_FLAGS_NOTRACE) \
+		-CFLAGS "-std=c++17 -O2" \
+		-GINCLUDE_COMPACT_SPAN=0 -GINCLUDE_COLUMN_LIST=0 -GGPU_EW_PARALLEL_DIVS=0 \
+		-GINCLUDE_PARAM_TRI=1 -GINCLUDE_VERT_TRI=1 -GINCLUDE_PARAM_TRI_RECS=1 \
+		-GGPU_Z_READ_WINDOW=4 -GINCLUDE_DIRECT_COLOR=1 -GINCLUDE_XFORM_RGB=1 \
+		-GINCLUDE_VTX_CACHE=1 -GINCLUDE_GPU_LIGHT=1 -GINCLUDE_PALETTE=1 \
+		--top-module $(GPU_TOP) --Mdir $(GPU_PERF_DIR) -I$(COMMON_DIR) \
+		$(GPU_SRCS) $(GPU_PERF_CPP)
+
+# --- GPU per-triangle SETUP vs PER-PIXEL split (small-triangle sweep) ---
+# Renders single 0x4A+0x4E truecolor z-buffered triangles of varying area as
+# their own kick->fence and fits cycles = SETUP + PERPX*pixels to separate the
+# fixed write-channel-idle setup cost from the marginal write-bound per-pixel
+# cost.  Same RTL config as gpu-perf.  Pass +gpu_rd_latency=N for io_sdram.
+GPU_SETUP_CPP = tb_gpu_setup_main.cpp
+GPU_SETUP_DIR = obj_dir_gpu_setup
+GPU_SETUP_ARGS ?=
+gpu-setup: $(GPU_SETUP_DIR)/V$(GPU_TOP)
+	@printf "\n=== GPU setup-vs-pixel split (SM64 small tris) ===\n"
+	./$(GPU_SETUP_DIR)/V$(GPU_TOP) $(GPU_SETUP_ARGS)
+
+$(GPU_SETUP_DIR)/V$(GPU_TOP): $(GPU_SRCS) $(GPU_SETUP_CPP)
+	$(VERILATOR) $(VERILATOR_FLAGS_NOTRACE) \
+		-CFLAGS "-std=c++17 -O2" \
+		-GINCLUDE_COMPACT_SPAN=0 -GINCLUDE_COLUMN_LIST=0 -GGPU_EW_PARALLEL_DIVS=0 \
+		-GINCLUDE_PARAM_TRI=1 -GINCLUDE_VERT_TRI=1 -GINCLUDE_PARAM_TRI_RECS=1 \
+		-GGPU_Z_READ_WINDOW=4 -GINCLUDE_DIRECT_COLOR=1 -GINCLUDE_XFORM_RGB=1 \
+		-GINCLUDE_VTX_CACHE=1 -GINCLUDE_GPU_LIGHT=1 -GINCLUDE_PALETTE=1 \
+		--top-module $(GPU_TOP) --Mdir $(GPU_SETUP_DIR) -I$(COMMON_DIR) \
+		$(GPU_SRCS) $(GPU_SETUP_CPP)
+
+# --- Shared Verilator flags for the texture-chain TBs (cram1-tex/cmap-chain) ---
+TEX_CHAIN_VFLAGS = --binary --timing -Wno-fatal -Wno-WIDTH -Wno-UNOPTFLAT -Wno-CASEINCOMPLETE -I../common -I.
+
 
 # --- CRAM1 sync-burst texture path: GPU tex fill -> burst read, REAL models ---
 # Real cram1_controller + cram1_phy + cram_chip_model (pin-level).  Proves the
@@ -737,7 +884,7 @@ cram1-tex-chain: obj_dir_cram1_tex_chain/Vtb_cram1_tex_chain
 	@printf "\n=== CRAM1 tex chain (tex_cache -> burst adapter -> cram1_controller+phy -> chip model) ===\n"
 	./obj_dir_cram1_tex_chain/Vtb_cram1_tex_chain
 obj_dir_cram1_tex_chain/Vtb_cram1_tex_chain: tb_cram1_tex_chain.v $(TARGET_DIR)/gpu_cram1_tex_adapter.v $(TARGET_DIR)/cram1_controller.v $(TARGET_DIR)/cram1_phy.sv ../common/gpu_tex_cache.v cram_chip_model.v
-	$(VERILATOR) $(CRAM0_TEX_VFLAGS) -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC --Mdir obj_dir_cram1_tex_chain \
+	$(VERILATOR) $(TEX_CHAIN_VFLAGS) -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC --Mdir obj_dir_cram1_tex_chain \
 		--top-module tb_cram1_tex_chain \
 		tb_cram1_tex_chain.v $(TARGET_DIR)/gpu_cram1_tex_adapter.v $(TARGET_DIR)/cram1_controller.v $(TARGET_DIR)/cram1_phy.sv ../common/gpu_tex_cache.v cram_chip_model.v
 
@@ -750,7 +897,7 @@ cram1-cmap-chain: obj_dir_cram1_cmap_chain/Vtb_cram1_cmap_chain
 	@printf "\n=== CRAM1 COLORMAP chain (tex_cache PORT B -> burst adapter -> cram1_controller+phy -> chip model) ===\n"
 	./obj_dir_cram1_cmap_chain/Vtb_cram1_cmap_chain
 obj_dir_cram1_cmap_chain/Vtb_cram1_cmap_chain: tb_cram1_cmap_chain.v $(TARGET_DIR)/gpu_cram1_tex_adapter.v $(TARGET_DIR)/cram1_controller.v $(TARGET_DIR)/cram1_phy.sv ../common/gpu_tex_cache.v cram_chip_model.v
-	$(VERILATOR) $(CRAM0_TEX_VFLAGS) -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC --Mdir obj_dir_cram1_cmap_chain \
+	$(VERILATOR) $(TEX_CHAIN_VFLAGS) -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC --Mdir obj_dir_cram1_cmap_chain \
 		--top-module tb_cram1_cmap_chain \
 		tb_cram1_cmap_chain.v $(TARGET_DIR)/gpu_cram1_tex_adapter.v $(TARGET_DIR)/cram1_controller.v $(TARGET_DIR)/cram1_phy.sv ../common/gpu_tex_cache.v cram_chip_model.v
 
@@ -855,6 +1002,17 @@ $(MIXER_DIR)/V$(MIXER_TOP): $(MIXER_SRCS) $(MIXER_CPP)
 		-I$(COMMON_DIR) \
 		$(MIXER_SRCS) $(MIXER_CPP)
 
+# --- AXI skid buffer (register slice primitive) ---
+skid: $(SKID_DIR)/V$(SKID_TOP)
+	@printf "\n=== AXI skid buffer (register slice) ===\n"
+	./$(SKID_DIR)/V$(SKID_TOP)
+
+$(SKID_DIR)/V$(SKID_TOP): $(SKID_SRCS) $(SKID_CPP)
+	$(VERILATOR) $(VERILATOR_FLAGS) \
+		--top-module $(SKID_TOP) --Mdir $(SKID_DIR) \
+		-I$(COMMON_DIR) \
+		$(SKID_SRCS) $(SKID_CPP)
+
 # --- AXI SDRAM arbiter ---
 arbiter: $(ARBITER_DIR)/V$(ARBITER_TOP)
 	@printf "\n=== AXI SDRAM arbiter ===\n"
@@ -905,11 +1063,11 @@ $(SYSTEM_MISTER_DIR)/V$(SYSTEM_TOP): $(SYSTEM_SRCS_BASE) $(VEXII_MISTER) $(SYSTE
 clean:
 	rm -rf $(SDRAM_DIR) $(SDRAM_SERIAL_DIR) $(SDRAM_NATIVE2_DIR) $(SRAM_DIR) $(GPU_DIR) $(GPU_FLOOR_DIR) \
 	       $(GPU_GPUDEMO_DIR) $(GPU_ACCEPT_DIR) $(GPU_ACCEPT_SINGLE_DIR) \
-	       $(GPU_ACCEPT_OS30_DIR) $(SCANOUT_LEAN_DIR) \
+	       $(GPU_ACCEPT_OS30_DIR) $(GPU_ACCEPT_ZRAW_DIR) $(SCANOUT_LEAN_DIR) \
 	       $(AXI_PERIPH_DIR) \
 	       $(AUDIO_DIR) $(MIXER_DIR) $(SYSTEM_DIR) \
 	       $(ARBITER_DIR) \
 	       obj_dir_gpu obj_dir_gpu_floor obj_dir_gpu_gpudemo \
 	       obj_dir_gpu_acceptance \
-	       obj_dir_cram0_tex_adapter obj_dir_cram0_arb obj_dir_cram0_tex_chain obj_dir_cram1_tex_chain \
+	       obj_dir_cram1_tex_chain \
 	       obj_dir_cdc io_sdram_test.v

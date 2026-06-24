@@ -90,7 +90,6 @@ module video_CRT_scanout_indexed_BRAM #(
     input wire [9:0]  analog_fb_width,
     input wire [9:0]  analog_fb_height,
     input wire [15:0] analog_fb_stride,
-    input wire [9:0]  analog_out_width,
     input wire [9:0]  analog_out_height,
 
     // Palette/sysreg clock domain (CPU clock)
@@ -445,7 +444,8 @@ module video_CRT_scanout_indexed_BRAM #(
     reg [2:0] color_mode_analog_s1, color_mode_analog;
     reg [9:0] fb_width_analog_s1, fb_width_analog;
     reg [9:0] fb_height_analog_s1, fb_height_analog;
-    reg [9:0] out_width_analog_s1, out_width_analog;
+    // Analog output width is unused (the analog H scaler is hardwired to 640),
+    // so its CDC chain + analog_out_width port were removed.
     reg [9:0] out_height_analog_s1, out_height_analog;
     always @(posedge clk_analog or negedge reset_analog_n) begin
         if (!reset_analog_n) begin
@@ -461,8 +461,6 @@ module video_CRT_scanout_indexed_BRAM #(
             fb_width_analog <= 10'd320;
             fb_height_analog_s1 <= 10'd240;
             fb_height_analog <= 10'd240;
-            out_width_analog_s1 <= 10'd320;
-            out_width_analog <= 10'd320;
             out_height_analog_s1 <= 10'd240;
             out_height_analog <= 10'd240;
         end else begin
@@ -480,8 +478,6 @@ module video_CRT_scanout_indexed_BRAM #(
             fb_width_analog <= fb_width_analog_s1;
             fb_height_analog_s1 <= analog_fb_height;
             fb_height_analog <= fb_height_analog_s1;
-            out_width_analog_s1 <= analog_out_width;
-            out_width_analog <= out_width_analog_s1;
             out_height_analog_s1 <= analog_out_height;
             out_height_analog <= out_height_analog_s1;
         end
@@ -494,8 +490,6 @@ module video_CRT_scanout_indexed_BRAM #(
         (fb_width_analog == 10'd0) ? 10'd1 : fb_width_analog;
     wire [9:0] fb_height_analog_safe =
         (fb_height_analog == 10'd0) ? 10'd1 : fb_height_analog;
-    wire [9:0] out_width_analog_safe =
-        (out_width_analog == 10'd0) ? 10'd320 : out_width_analog;
     wire [9:0] out_height_analog_safe =
         (out_height_analog == 10'd0) ? 10'd240 : out_height_analog;
     // Analog active height: fixed 240 lines for the dedicated 240p raster,
@@ -1090,7 +1084,6 @@ module video_CRT_scanout_indexed_BRAM #(
 
     localparam ST_IDLE = 2'd0;
     localparam ST_BURST = 2'd1;
-    localparam ST_WAIT = 2'd2;
     localparam ST_CALC = 2'd3;
 
     reg [1:0] state;
@@ -1238,10 +1231,6 @@ module video_CRT_scanout_indexed_BRAM #(
                     if (burst_data_done) begin
                         state <= ST_IDLE;
                     end
-                end
-
-                ST_WAIT: begin
-                    state <= ST_IDLE;
                 end
 
                 default: begin

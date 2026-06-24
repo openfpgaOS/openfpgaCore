@@ -7,8 +7,9 @@
 //
 // cpu_target_port — single-target AXI4 port with concurrent read/write sub-FSMs.
 //
-// Instantiated once per downstream target (SDRAM / CRAM0 / CRAM1 /
-// SRAM / LOCAL) by cpu_system.v.  Owns the AXI4 master interface to
+// Instantiated once per downstream target (SDRAM / LOCAL) by
+// cpu_system.v.  (CRAM0 uses the cpu_target_port_per specialization.)
+// Owns the AXI4 master interface to
 // one slave and independently arbitrates traffic from THREE CPU
 // masters:
 //

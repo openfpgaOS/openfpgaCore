@@ -99,7 +99,6 @@ end
 // SCLK generation (3.072 MHz = MCLK / 4)
 // ============================================
 reg [1:0] sclk_div;
-wire      audgen_sclk = sclk_div[1] /* synthesis keep */;
 
 always @(posedge clk_audio) begin
     if (!reset_n)
@@ -138,22 +137,10 @@ end
 wire signed [15:0] sfx_l = fifo_empty ? hold_l : $signed(fifo_l);
 wire signed [15:0] sfx_r = fifo_empty ? hold_r : $signed(fifo_r);
 
-// ============================================
-// Pass-through to DAC.  Mixer output is already 16-bit hard-saturated
-// in audio_mixer.v (S_OUTPUT clamp at ±32767), so no further headroom
-// or knee is required.  An earlier 1.25× post-boost + 2:1 soft-knee
-// compressor lived here to compensate for the old /2 mixer mixdown;
-// it caused audible 2:1 compression artifacts on busy/transient mixes
-// ("crackle on busy passages") because the boost pushed in-range
-// mixer samples past the 24576 knee.  Now that the mixer mixes down
-// /16 (accum >>> 4 in audio_mixer.v S_OUTPUT — ample headroom for
-// multi-voice peaks), no post-boost is needed and a clean passthrough
-// is the right answer.
-// ============================================
-wire [15:0] mix_clamp_l = sfx_l;
-wire [15:0] mix_clamp_r = sfx_r;
-
 // Latch mixer output on audio_pop (48 kHz) for stable I2S serialization.
+// Clean passthrough: the mixer already hard-saturates to 16-bit
+// (S_OUTPUT clamp at ±32767, accum >>> 4 mixdown in audio_mixer.v), so
+// no post-boost or compressor knee is needed here.
 reg [15:0] active_l = 16'h0;
 reg [15:0] active_r = 16'h0;
 always @(posedge clk_audio) begin
@@ -161,8 +148,8 @@ always @(posedge clk_audio) begin
         active_l <= 16'h0;
         active_r <= 16'h0;
     end else if (audio_pop) begin
-        active_l <= mix_clamp_l;
-        active_r <= mix_clamp_r;
+        active_l <= sfx_l;
+        active_r <= sfx_r;
     end
 end
 
@@ -188,8 +175,17 @@ always @(posedge clk_audio) begin
             // Switch channels
             audgen_lrck <= ~audgen_lrck;
 
-            // Reload sample data at start of left channel
-            if (~audgen_lrck) begin
+            // Reload {left,right} at the LRCK 1→0 edge so the left sample
+            // (high half, shifted out MSB-first over the next 16 SCLK) is
+            // transmitted while audio_lrck is LOW.  The Analogue Pocket I2S
+            // convention is LRCK-low = LEFT (per Analogue dev docs and
+            // shipping stereo cores, e.g. nullobject/openfpga-tecmo).
+            // Reloading on the 0→1 edge instead (~audgen_lrck) puts left on
+            // LRCK-high = the physical RIGHT pin, swapping every stereo
+            // sample on Pocket — music and positional SFX alike.  (MiSTer is
+            // unaffected: emu.sv splits mixer_sample_data straight to
+            // AUDIO_L/R with no I2S serializer; this module is Pocket-only.)
+            if (audgen_lrck) begin
                 audgen_sampshift <= {active_l, active_r};
             end
         end else if (audgen_lrck_cnt < 5'd16) begin

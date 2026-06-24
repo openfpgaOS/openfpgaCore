@@ -25,7 +25,8 @@
 //    everything else                              → LOCAL
 //
 // v2 changes vs the previous iteration:
-//   - CRAM1 target port removed: the CRAM1 chip is retired.
+//   - CRAM1 target port removed: CRAM1 is now GPU-private (texture store
+//     via gpu_cram1_tex_adapter) and off the CPU fabric.
 //   - SRAM target port removed: SRAM is GPU-private and off the fabric.
 //
 
@@ -175,13 +176,6 @@ wire [0:0]  i_rid_cpu;
 wire [1:0]  i_rresp_cpu;
 wire        i_rlast_cpu;
 
-// i_axi has AW/W/B ports on the CPU top but VexiiRiscv ties them off
-// internally (read-only bridge), so the cpu_system side only connects R.
-wire        i_awvalid_tie;
-wire        i_wvalid_tie;
-wire [0:0]  i_bid_tie;
-wire [1:0]  i_bresp_tie;
-
 // mem_axi (D$ cached) — post-slice, drives target ports
 wire        mem_arvalid;  wire        mem_arready;
 wire [31:0] mem_araddr;
@@ -197,7 +191,6 @@ wire [31:0] mem_awaddr;
 wire [1:0]  mem_awid;
 wire [7:0]  mem_awlen;
 wire [1:0]  mem_awburst;
-wire        mem_awallStrb;
 wire        mem_wvalid;   wire        mem_wready;
 wire [31:0] mem_wdata;    wire [3:0]  mem_wstrb;
 wire        mem_wlast;
@@ -219,9 +212,6 @@ wire [31:0] mem_awaddr_cpu;
 wire [1:0]  mem_awid_cpu;
 wire [7:0]  mem_awlen_cpu;
 wire [1:0]  mem_awburst_cpu;
-// mem_awallStrb is unused by cpu_target_port (no slave reads it) so it
-// doesn't need a slice — declared on the post-slice side only, tied to
-// 0 since VexiiRiscv doesn't expose it.  Same for per_awallStrb below.
 wire        mem_wvalid_cpu, mem_wready_cpu;
 wire [31:0] mem_wdata_cpu;
 wire [3:0]  mem_wstrb_cpu;
@@ -248,7 +238,6 @@ wire        per_awvalid;  wire        per_awready;
 wire [31:0] per_awaddr;
 wire [7:0]  per_awlen;
 wire [1:0]  per_awburst;
-wire        per_awallStrb;
 wire        per_wvalid;   wire        per_wready;
 wire [31:0] per_wdata;    wire [3:0]  per_wstrb;
 wire        per_wlast;
@@ -514,10 +503,6 @@ assign per_awvalid_cpu = !wr_fifo_empty & ~lsu_aw_sent;
 assign per_awaddr_cpu  = w_addr;
 assign per_awlen_cpu   = {{(8-WR_PTR_W){1'b0}}, burst_awlen_calc};
 assign per_awburst_cpu = (burst_awlen_calc != {WR_PTR_W{1'b0}}) ? 2'b00 : 2'b01;
-// awallStrb is a side-band hint not consumed by cpu_target_port —
-// drive the post-slice wire directly; no slice needed.
-assign per_awallStrb   = &w_mask;
-assign mem_awallStrb   = 1'b0;
 
 // W channel — beat data from FIFO[head + w_idx]; wlast on the final beat.
 assign per_wvalid_cpu  = !wr_fifo_empty & ~lsu_w_sent;
@@ -525,12 +510,6 @@ assign per_wdata_cpu   = w_data;
 assign per_wstrb_cpu   = w_mask;
 assign per_wlast_cpu   = w_is_last;
 assign per_bready_cpu  = 1'b1;
-
-// i_axi AW/W/B tie-offs retained for backwards-compatible placeholders.
-assign i_awvalid_tie = 1'b0;
-assign i_wvalid_tie  = 1'b0;
-assign i_bid_tie     = 1'b0;
-assign i_bresp_tie   = 2'b00;
 
 VexiiRiscv cpu (
     .clk  (clk),

@@ -47,7 +47,7 @@ module psram_cram0_drv #(
     parameter MIN_WRITE_PULSE = 45, // Minimum time (ns) for we_n to be held low to latch data (t_wp)
     parameter MIN_WRITE_TIME_FROM_ADV = 70, // Minimum time (ns) for write to complete after adv_n goes low (after setup) (t_aw)
 
-    // -- Async reads (for non-sync-burst instances like CRAM1) --
+    // -- Async reads (used by the CRAM0 async-page-mode instance; the CRAM1 instance routes all reads through sync-burst and leaves this dead) --
     parameter MIN_OE_AFTER_ADDR_UNLATCHED = 3, // Minimum time (ns) until oe_n goes low after addr unlatch
     parameter MAX_ACCESS_TIME_FROM_ADV = 70, // Maximum time (ns) for valid data to appear after adv_n goes low
 
@@ -64,7 +64,7 @@ module psram_cram0_drv #(
     input wire write_high_byte,
     input wire write_low_byte,
 
-    input wire read_en,              // Async single-word read (for non-sync-burst instances)
+    input wire read_en,              // Async single-word read (used by the CRAM0 async-page-mode instance; CRAM1 routes all reads through sync-burst and leaves this dead)
 
     input wire sync_burst_en,        // Start synchronous burst read (single-cycle pulse)
     input wire [5:0] sync_burst_len, // Number of 16-bit reads minus 1 (max 63)
@@ -76,12 +76,6 @@ module psram_cram0_drv #(
     output reg [15:0] data_out,
 
     output reg busy,
-
-    // Diagnostic outputs (sticky counters, cleared on sync_burst_en)
-    output reg        dbg_wait_seen,     // Sticky: WAIT was HIGH during STATE_SYNC_DATA
-    output reg [15:0] dbg_wait_cycles,   // Total cycles WAIT HIGH during STATE_SYNC_DATA
-    output reg [15:0] dbg_burst_count,   // Completed sync bursts since last clear
-    output reg [15:0] dbg_stale_count,   // Bursts where first h0 in cram_dq_r == prev burst's last
 
     // PSRAM signals
     output reg [21:16] cram_a,
@@ -117,14 +111,8 @@ module psram_cram0_drv #(
   `CEIL_C0(MIN_ADDRESS_HOLD_AFTER_ADV_HIGH / PERIOD);
 
   // -- Write cycle counts
-  localparam DATA_SETUP_BEFORE_WE_ENDS_CYCLE_COUNT =
-  `CEIL_C0(MIN_DATA_SETUP_BEFORE_WE_HIGH / PERIOD);
-
   localparam DATA_AFTER_ADDR_UNLATCH_CYCLE_COUNT =
   `CEIL_C0(MIN_DATA_AFTER_ADDR_UNLATCHED / PERIOD);
-
-  localparam WRITE_PULSE_CYCLE_COUNT =
-  `CEIL_C0(MIN_WRITE_PULSE / PERIOD);
 
   localparam TOTAL_WRITE_CYCLE_COUNT =
   `CEIL_C0(`MAX_C0(MIN_WRITE_TIME_FROM_ADV, MIN_WRITE_PULSE) / PERIOD);
@@ -150,7 +138,7 @@ module psram_cram0_drv #(
 
   localparam STATE_WRITE_DATA_END = WRITE_INITIAL_COUNT + TOTAL_WRITE_CYCLE_COUNT;
 
-  // -- Async read states (for non-sync-burst instances) --
+  // -- Async read states (CRAM0 async-page-mode instance; CRAM1 routes all reads through sync-burst and leaves this dead) --
   localparam READ_INITIAL_COUNT = 20;
   localparam STATE_READ_ADV_END = READ_INITIAL_COUNT - 1 + ADV_CYCLE_COUNT;
   localparam STATE_READ_ADDR_LATCH_END = STATE_READ_ADV_END + ADDR_HOLD_AFTER_ADV_CYCLE_COUNT;
@@ -203,23 +191,6 @@ module psram_cram0_drv #(
   // Sync burst counters
   reg [5:0] latency_counter;
   reg [5:0] burst_counter;
-
-  // Diagnostic counters (no reset; accumulate until power cycle)
-  initial begin
-    dbg_wait_seen = 0;
-    dbg_wait_cycles = 0;
-    dbg_burst_count = 0;
-  end
-
-  // Stale-detection diagnostic: track whether cram_dq_r holds stale data
-  // on the first valid capture of each burst.
-  reg [15:0] prev_burst_last_dq;   // Last cram_dq_r from previous burst
-  reg        first_capture_pending; // Waiting for first data capture
-  initial begin
-    prev_burst_last_dq = 16'h0;
-    first_capture_pending = 0;
-    dbg_stale_count = 0;
-  end
 
   // Saw-WAIT-high capture gate.  Between bursts the chip's WAIT
   // pin is not driven (CE# HIGH, chip idle) and the IOB captures
@@ -363,7 +334,6 @@ module psram_cram0_drv #(
 
           latency_counter <= SYNC_LATENCY[5:0];
           burst_counter <= sync_burst_len;
-          first_capture_pending <= 1;
           saw_wait_high <= 0;       /* reset gate for this burst */
           busy <= 1;
         end
@@ -409,7 +379,7 @@ module psram_cram0_drv #(
       end
 
       // ============================================
-      // Async reads (for non-sync-burst instances)
+      // Async reads (CRAM0 async-page-mode instance; CRAM1 routes all reads through sync-burst and leaves this dead)
       // ============================================
       STATE_READ_ADV_END: begin
         cram_adv_n <= 1;
@@ -504,8 +474,6 @@ module psram_cram0_drv #(
         if (cram_wait_r2) begin
           // WAIT HIGH — initial latency or row boundary crossing pause.
           saw_wait_high <= 1'b1;
-          dbg_wait_seen <= 1'b1;
-          dbg_wait_cycles <= dbg_wait_cycles + 16'd1;
           state <= STATE_SYNC_DATA;
         end else if (!saw_wait_high) begin
           // WAIT LOW but we haven't seen HIGH yet — stale idle-period
@@ -516,17 +484,8 @@ module psram_cram0_drv #(
           read_avail <= 1;
           data_out <= cram_dq_r2;
 
-          // Stale detection: on first capture, check if data matches
-          // the last halfword from the previous burst
-          if (first_capture_pending) begin
-            first_capture_pending <= 0;
-            if (cram_dq_r2 == prev_burst_last_dq)
-              dbg_stale_count <= dbg_stale_count + 16'd1;
-          end
-
           if (burst_counter == 6'd0) begin
-            // Last halfword — save for stale detection on next burst
-            prev_burst_last_dq <= cram_dq_r2;
+            // Last halfword of the burst
             state <= STATE_SYNC_END;
           end else begin
             burst_counter <= burst_counter - 6'd1;
@@ -537,7 +496,6 @@ module psram_cram0_drv #(
 
       STATE_SYNC_END: begin
         // Burst complete — release everything
-        dbg_burst_count <= dbg_burst_count + 16'd1;
         state <= STATE_NONE;
         cram_ce0_n <= 1;
         cram_ce1_n <= 1;

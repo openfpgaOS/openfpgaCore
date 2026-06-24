@@ -86,7 +86,7 @@ module tb_analogizer_chain (
         .analog_fb_base_addr(25'd0), .analog_color_mode(3'd3),
         .analog_fb_width(10'd640), .analog_fb_height(10'd480),
         .analog_fb_stride(16'd1280),
-        .analog_out_width(10'd640), .analog_out_height(10'd480),
+        .analog_out_height(10'd480),
         .clk_palette(clk), .reset_palette_n(reset_n),
         .clk_sdram(clk), .burst_rd(burst_rd), .burst_addr(burst_addr),
         .burst_len(burst_len), .burst_32bit(burst_32bit), .burst_data(burst_data),

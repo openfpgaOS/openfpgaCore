@@ -29,7 +29,13 @@ module tb_gpu #(
     parameter GPU_Z_READ_WINDOW      = 4,
     parameter GPU_EW_PARALLEL_DIVS   = 1,
     parameter INCLUDE_COMPACT_SPAN   = 1,
-    parameter INCLUDE_COLUMN_LIST    = 1
+    parameter INCLUDE_COLUMN_LIST    = 1,
+    parameter INCLUDE_DIRECT_COLOR   = 0,
+    parameter INCLUDE_XFORM_RGB      = 0,
+    parameter INCLUDE_CLIP_TRI       = 1,
+    parameter INCLUDE_VTX_CACHE      = 0,
+    parameter INCLUDE_GPU_LIGHT      = 0,
+    parameter INCLUDE_PALETTE        = 1
 ) (
     input  wire        clk,
     input  wire        reset_n,
@@ -50,6 +56,26 @@ module tb_gpu #(
     output reg  [31:0] dbg_aw_count,
     output reg  [31:0] dbg_aw_burst_count,
     output reg  [7:0]  dbg_aw_max_len,
+
+    // Write-channel occupancy counters (test-only, ADDITIVE). Let the C++
+    // harness separate write-channel-busy cycles from write-channel-idle
+    // cycles to attribute triangle SETUP (write-idle) vs pixel-write time.
+    //   dbg_w_beat_cycles  : cycles a W data beat actually transferred
+    //   dbg_w_busy_cycles  : cycles ANY write txn occupied the channel
+    //                        (AW accepted / W beats / B / commit-delay pending)
+    output reg  [31:0] dbg_w_beat_cycles,
+    output reg  [31:0] dbg_w_busy_cycles,
+
+    // Read-channel occupancy (test-only). A read txn (z-read / tex fill / ring)
+    // holds the SDRAM read port. rd_busy = cycles rd_active is set. Combined
+    // with w_busy this gives TOTAL SDRAM (single-port) occupancy: the only time
+    // a *second* triangle could do useful work is when SDRAM is idle.
+    output reg  [31:0] dbg_rd_busy_cycles,
+
+    // Cycles BOTH a read txn and a write txn occupied their ports at once.
+    // On the real single-port io_sdram these would serialize, so the true
+    // single-port busy = rd_busy + wr_busy - rw_overlap (union, not sum).
+    output reg  [31:0] dbg_rw_overlap_cycles,
 
     // Read-latency diagnostics (ADDITIVE, test-only). Surface the
     // configurable SDRAM read responder's last-picked initial latency and
@@ -124,7 +150,13 @@ gpu_core #(
     .GPU_Z_READ_WINDOW(GPU_Z_READ_WINDOW),
     .GPU_EW_PARALLEL_DIVS(GPU_EW_PARALLEL_DIVS),
     .INCLUDE_COMPACT_SPAN(INCLUDE_COMPACT_SPAN),
-    .INCLUDE_COLUMN_LIST(INCLUDE_COLUMN_LIST)
+    .INCLUDE_COLUMN_LIST(INCLUDE_COLUMN_LIST),
+    .INCLUDE_DIRECT_COLOR(INCLUDE_DIRECT_COLOR),
+    .INCLUDE_XFORM_RGB(INCLUDE_XFORM_RGB),
+    .INCLUDE_CLIP_TRI(INCLUDE_CLIP_TRI),
+    .INCLUDE_VTX_CACHE(INCLUDE_VTX_CACHE),
+    .INCLUDE_GPU_LIGHT(INCLUDE_GPU_LIGHT),
+    .INCLUDE_PALETTE(INCLUDE_PALETTE)
 ) gpu (
     .clk(clk),
     .reset_n(reset_n),
@@ -375,9 +407,14 @@ always @(posedge clk) begin
     if (!reset_n) begin
         rd_active <= 0;
         rd_delay <= 0;
+        dbg_rd_busy_cycles <= 0;
         // LFSR / diag keep their initial-block values across reset so a
         // single seed produces the same deterministic sequence.
     end else begin
+        // Read-port occupancy: AR being accepted this cycle, or a read txn
+        // already in flight (waiting on initial latency or streaming beats).
+        if ((!rd_active && gpu_rd_arvalid) || rd_active)
+            dbg_rd_busy_cycles <= dbg_rd_busy_cycles + 32'd1;
         if (!rd_active && gpu_rd_arvalid) begin
             rd_active     <= 1;
             rd_addr       <= gpu_rd_araddr[25:2];
@@ -408,11 +445,48 @@ always @(posedge clk) begin
 end
 
 // ---- AXI4 Write responder ----
+//
+// ADDITIVE (test-only) write-commit latency knob `+gpu_wr_latency=N`
+// (default 0).  At N==0 the model is BYTE-IDENTICAL to the historical
+// stub: each accepted W beat commits to sdram_mem the same cycle, and B
+// raises the cycle after WLAST.  At N!=0 the per-beat byte-strobed writes
+// are STAGED in registers and applied to sdram_mem (and B raised) only
+// after N cycles of post-WLAST hold — exposing in-flight z-RAW that the
+// instant-commit stub masks.  The single-outstanding AXI contract is
+// UNCHANGED in every mode: awready is low while a burst is active OR a
+// delayed commit is pending, exactly one AW in flight, wready high during
+// the burst, one B per WLAST.  Up to 8-beat bursts (fbwq cap) are staged;
+// size to 16 for headroom.
 reg        wr_aw_active;
 reg [23:0] wr_addr;
 reg        wr_b_pending;
 
-assign gpu_wr_awready = !wr_aw_active && !wr_b_pending;
+// Delayed-commit staging (only used when cfg_wr_latency != 0).
+reg [9:0]  cfg_wr_latency;          // post-WLAST commit hold, in cycles
+reg        wr_commit_pending;       // a staged burst is waiting to commit
+reg [9:0]  wr_commit_delay;         // countdown to commit
+reg [4:0]  wr_stage_n;              // # staged beats (0..16)
+reg [19:0] wr_stage_addr [0:15];    // word address per staged beat
+reg [31:0] wr_stage_data [0:15];    // wdata per staged beat
+reg [3:0]  wr_stage_strb [0:15];    // wstrb per staged beat
+integer    wr_apply_i;
+integer    plusarg_wrlat;
+
+initial begin
+    cfg_wr_latency = 10'd0;          // historical default: same-cycle commit
+    plusarg_wrlat  = 0;
+    if ($value$plusargs("gpu_wr_latency=%d", plusarg_wrlat)) begin
+        if (plusarg_wrlat < 0)    plusarg_wrlat = 0;
+        if (plusarg_wrlat > 1023) plusarg_wrlat = 1023;
+        cfg_wr_latency = plusarg_wrlat[9:0];
+    end
+end
+
+// awready stays low while a burst is active OR a delayed commit is pending,
+// so at most one AW is outstanding (matches the real single-outstanding
+// slave).  wr_commit_pending is constant 0 in latency-0 mode, so this term
+// reduces to the historical `!wr_aw_active && !wr_b_pending`.
+assign gpu_wr_awready = !wr_aw_active && !wr_b_pending && !wr_commit_pending;
 assign gpu_wr_wready  = wr_aw_active;
 assign gpu_wr_bvalid  = wr_b_pending;
 
@@ -423,11 +497,35 @@ always @(posedge clk) begin
         dbg_aw_count <= 0;
         dbg_aw_burst_count <= 0;
         dbg_aw_max_len <= 0;
-    end else begin
+        wr_commit_pending <= 0;
+        wr_commit_delay   <= 0;
+        wr_stage_n        <= 0;
+        dbg_w_beat_cycles <= 0;
+        dbg_w_busy_cycles <= 0;
+        dbg_rw_overlap_cycles <= 0;
+    end else begin : wr_occ_blk
+        reg wbusy_now;
+        wbusy_now = (gpu_wr_awvalid && gpu_wr_awready)
+                 || wr_aw_active || wr_b_pending || wr_commit_pending;
+        // Write-channel occupancy accounting (sampled each cycle).
+        // beat: a W data word is actually moving this cycle.
+        if (wr_aw_active && gpu_wr_wvalid && gpu_wr_wready)
+            dbg_w_beat_cycles <= dbg_w_beat_cycles + 32'd1;
+        // busy: any phase of a write transaction occupies the channel — an AW
+        // is being accepted, a burst is mid-flight, a response is pending, or a
+        // delayed commit is draining. Everything else is write-channel IDLE.
+        if (wbusy_now)
+            dbg_w_busy_cycles <= dbg_w_busy_cycles + 32'd1;
+        // Overlap: a read txn is in flight at the same time as a write txn.
+        // (gpu_rd_arvalid acceptance OR rd_active mirrors the rd_busy term.)
+        if (wbusy_now && ((!rd_active && gpu_rd_arvalid) || rd_active))
+            dbg_rw_overlap_cycles <= dbg_rw_overlap_cycles + 32'd1;
+
         // Accept AW
-        if (!wr_aw_active && !wr_b_pending && gpu_wr_awvalid) begin
+        if (!wr_aw_active && !wr_b_pending && !wr_commit_pending && gpu_wr_awvalid) begin
             wr_aw_active <= 1;
             wr_addr      <= gpu_wr_awaddr[25:2];
+            wr_stage_n   <= 0;
             dbg_aw_count <= dbg_aw_count + 32'd1;
             if (gpu_wr_awlen != 8'd0)
                 dbg_aw_burst_count <= dbg_aw_burst_count + 32'd1;
@@ -437,17 +535,56 @@ always @(posedge clk) begin
 
         // Accept W beats
         if (wr_aw_active && gpu_wr_wvalid) begin
-            // Byte-strobe write
-            if (gpu_wr_wstrb[0]) sdram_mem[wr_addr[19:0]][7:0]   <= gpu_wr_wdata[7:0];
-            if (gpu_wr_wstrb[1]) sdram_mem[wr_addr[19:0]][15:8]  <= gpu_wr_wdata[15:8];
-            if (gpu_wr_wstrb[2]) sdram_mem[wr_addr[19:0]][23:16] <= gpu_wr_wdata[23:16];
-            if (gpu_wr_wstrb[3]) sdram_mem[wr_addr[19:0]][31:24] <= gpu_wr_wdata[31:24];
+            if (cfg_wr_latency == 10'd0) begin
+                // Same-cycle commit (historical, byte-identical path).
+                if (gpu_wr_wstrb[0]) sdram_mem[wr_addr[19:0]][7:0]   <= gpu_wr_wdata[7:0];
+                if (gpu_wr_wstrb[1]) sdram_mem[wr_addr[19:0]][15:8]  <= gpu_wr_wdata[15:8];
+                if (gpu_wr_wstrb[2]) sdram_mem[wr_addr[19:0]][23:16] <= gpu_wr_wdata[23:16];
+                if (gpu_wr_wstrb[3]) sdram_mem[wr_addr[19:0]][31:24] <= gpu_wr_wdata[31:24];
 
-            if (gpu_wr_wlast) begin
-                wr_aw_active <= 0;
-                wr_b_pending <= 1;
+                if (gpu_wr_wlast) begin
+                    wr_aw_active <= 0;
+                    wr_b_pending <= 1;
+                end else begin
+                    wr_addr <= wr_addr + 1;
+                end
             end else begin
-                wr_addr <= wr_addr + 1;
+                // Delayed commit: stage this beat; commit the whole burst
+                // after wr_commit_delay cycles past WLAST.
+                wr_stage_addr[wr_stage_n[3:0]] <= wr_addr[19:0];
+                wr_stage_data[wr_stage_n[3:0]] <= gpu_wr_wdata;
+                wr_stage_strb[wr_stage_n[3:0]] <= gpu_wr_wstrb;
+                wr_stage_n <= wr_stage_n + 5'd1;
+
+                if (gpu_wr_wlast) begin
+                    wr_aw_active      <= 0;
+                    wr_commit_pending <= 1;
+                    wr_commit_delay   <= cfg_wr_latency;
+                end else begin
+                    wr_addr <= wr_addr + 1;
+                end
+            end
+        end
+
+        // Delayed-commit countdown + apply (latency mode only).
+        if (wr_commit_pending) begin
+            if (wr_commit_delay != 10'd0) begin
+                wr_commit_delay <= wr_commit_delay - 10'd1;
+            end else begin
+                for (wr_apply_i = 0; wr_apply_i < 16; wr_apply_i = wr_apply_i + 1) begin
+                    if (wr_apply_i < wr_stage_n) begin
+                        if (wr_stage_strb[wr_apply_i][0])
+                            sdram_mem[wr_stage_addr[wr_apply_i]][7:0]   <= wr_stage_data[wr_apply_i][7:0];
+                        if (wr_stage_strb[wr_apply_i][1])
+                            sdram_mem[wr_stage_addr[wr_apply_i]][15:8]  <= wr_stage_data[wr_apply_i][15:8];
+                        if (wr_stage_strb[wr_apply_i][2])
+                            sdram_mem[wr_stage_addr[wr_apply_i]][23:16] <= wr_stage_data[wr_apply_i][23:16];
+                        if (wr_stage_strb[wr_apply_i][3])
+                            sdram_mem[wr_stage_addr[wr_apply_i]][31:24] <= wr_stage_data[wr_apply_i][31:24];
+                    end
+                end
+                wr_commit_pending <= 0;
+                wr_b_pending      <= 1;
             end
         end
 

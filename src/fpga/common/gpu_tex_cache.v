@@ -16,12 +16,10 @@
 //          — historically the texture-fetch port.  Drives the AXI fill
 //          machine when port A misses.
 //   Port B (req_valid_b ... resp_data_b)
-//          — second read-only client (commit 2 will wire this to the
-//          colormap-lookup path so palookup tables can live in SDRAM
-//          and be cache-served instead of consuming a dedicated
-//          16 KB cmap_bram).  Today gpu_core ties port B inputs to 0
-//          and ignores its outputs; existing tests therefore exercise
-//          only port A and continue to pass byte-exact.
+//          — the live colormap/palookup read client.  gpu_core drives
+//          this port with the cmap read path so palookup tables live in
+//          SDRAM and are cache-served instead of consuming a dedicated
+//          16 KB cmap_bram.
 //
 // Per port:
 //   Stage 1 (req in):  RAM tag/data read at req_addr's set (combinational
@@ -64,7 +62,7 @@ module gpu_tex_cache (
     output wire         resp_valid,
     output wire  [15:0] resp_data,
 
-    // Port B — second read-only client (cmap read path in commit 2).
+    // Port B — active cmap/palookup read port (driven by gpu_core).
     input  wire         req_valid_b,
     output wire         req_ready_b,
     input  wire  [25:0] req_addr_b,
@@ -152,9 +150,8 @@ reg [SET_BITS-1:0] init_counter;
 (* keep, syn_keep, maxfan = 64 *) wire state_fillout_ready  = (state == S_FILL_OUT);
 (* keep, syn_keep, maxfan = 64 *) wire state_fillout_prime  = (state == S_FILL_OUT);
 
-// Pending flush: see prior (SDP) version for the full rationale.  TL;DR:
-// flush is a 1-cycle pulse that can arrive any cycle; we latch and apply
-// it at the next safe transition.
+// Pending flush: flush is a 1-cycle pulse that can arrive any cycle; we
+// latch it and apply it at the next safe transition.
 reg flush_pending;
 wire flush_block = flush || flush_pending;
 

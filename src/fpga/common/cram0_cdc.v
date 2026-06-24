@@ -21,20 +21,20 @@
 // Request flow:
 //   1. AXI AR/AW accepted → latch address / wdata / wstrb / is_write.
 //   2. Flip req_toggle_cpu.
-//   3. req_toggle_cpu + latched data cross to clk_bridge via 3-flop
-//      synchronisers (data is held stable by the CPU FSM for the
-//      entire round trip, so the 3-flop chain on each signal is a
-//      simplifying formality — no ordering race is possible because
-//      the bridge FSM gates on the toggle edge only AFTER the whole
-//      synchroniser chain for that transaction has settled).
+//   3. req_toggle_cpu crosses to clk_bridge via a 3-flop synchroniser;
+//      the latched data buses cross via 2-flop chains.  This is safe
+//      because data is held stable by the CPU FSM for the entire round
+//      trip and the bridge FSM gates on the toggle edge only AFTER the
+//      synchroniser chains for that transaction have settled — no
+//      ordering race is possible.
 //   4. Bridge FSM on toggle edge pulses b_word_rd or b_word_wr with
 //      the synced fields.
 //   5. Bridge FSM waits for the controller:
 //        - writes → busy rises then falls (saw-busy gate)
 //        - reads  → b_word_rdata_valid pulse (latch b_word_rdata)
 //   6. Flip resp_toggle_bridge on completion.
-//   7. resp_toggle_bridge + latched rdata cross back to clk_cpu via
-//      matching 3-flop chains.
+//   7. resp_toggle_bridge crosses back to clk_cpu via a 3-flop
+//      synchroniser; the latched rdata crosses via a 2-flop chain.
 //   8. CPU FSM on edge detect emits the AXI R or B response.
 //
 // Worst-case round trip: a write takes ~8-10 clk_bridge cycles
@@ -293,7 +293,6 @@ end
 // Bridge-side state machine
 // ============================================================
 localparam B_IDLE    = 2'd0;
-localparam B_ISSUE   = 2'd1;  // pulse b_word_rd/wr
 localparam B_WAIT    = 2'd2;  // wait for completion
 
 reg [1:0]  b_state;
@@ -347,11 +346,10 @@ always @(posedge clk_bridge or negedge reset_n_bridge) begin
         B_IDLE: begin
             if (b_req_pending && !b_word_busy) begin
                 // Convert byte address → word address.
-                // 16 MB = 4 M words ⇒ word-addr width = 22 bits.
-                // axi_cram0_slave's convention: word_addr = byte_addr[27:2].
-                // Bits [25:24] are within the 16 MB range; address
-                // decode happens upstream so c_addr is already
-                // guaranteed to live in the CRAM0 range.
+                // 16 MB = 4 M words ⇒ word-addr width = 22 bits, so
+                // word_addr = byte_addr[23:2].  Address decode happens
+                // upstream, so c_addr is already guaranteed to live in
+                // the CRAM0 range.
                 b_word_addr   <= b_pending_addr[23:2];
                 b_word_wdata  <= b_pending_wdata;
                 b_word_wstrb  <= b_pending_wstrb;
@@ -364,12 +362,6 @@ always @(posedge clk_bridge or negedge reset_n_bridge) begin
                 b_busy_seen <= 1'b0;
                 b_state     <= B_WAIT;
             end
-        end
-
-        B_ISSUE: begin
-            // Unused — kept for naming clarity.  B_IDLE issues
-            // directly once the toggle edge fires.
-            b_state <= B_WAIT;
         end
 
         B_WAIT: begin

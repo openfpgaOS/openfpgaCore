@@ -164,7 +164,6 @@ wire [31:0] shim_awaddr;
 wire [7:0]  shim_awlen;
 wire [1:0]  shim_awburst;
 wire        shim_awready;
-wire        shim_awallStrb;
 
 wire        shim_wvalid;
 wire [31:0] shim_wdata;
@@ -198,7 +197,6 @@ lsu_axi_shim u_shim (
     .per_awvalid_cpu(shim_awvalid), .per_awready_cpu(shim_awready),
     .per_awaddr_cpu (shim_awaddr),  .per_awlen_cpu  (shim_awlen),
     .per_awburst_cpu(shim_awburst),
-    .per_awallStrb  (shim_awallStrb),
     .per_wvalid_cpu (shim_wvalid),  .per_wready_cpu (shim_wready),
     .per_wdata_cpu  (shim_wdata),   .per_wstrb_cpu  (shim_wstrb),
     .per_wlast_cpu  (shim_wlast),

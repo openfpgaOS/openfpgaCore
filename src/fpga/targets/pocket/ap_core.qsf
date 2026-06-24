@@ -878,15 +878,14 @@ set_global_assignment -name VERILOG_FILE ../../common/gpu_tex_cache.v
 set_global_assignment -name VERILOG_FILE ../../common/axi_periph_slave.v
 set_global_assignment -name VERILOG_FILE ../../common/sync_fifo.v
 set_global_assignment -name VERILOG_FILE ../../common/snac_shifter.v
-set_global_assignment -name VERILOG_FILE ../../common/snac_psx_poller.v
-# PSX SNAC: upstream Analogizer DualShock decoder (replaces snac_psx_poller's
-# hand-rolled PSX protocol; instantiated in axi_periph_slave.v)
+# PSX SNAC: upstream Analogizer DualShock decoder (instantiated in axi_periph_slave.v)
 set_global_assignment -name SYSTEMVERILOG_FILE ../../common/analogizer_psx.sv
 set_global_assignment -name VERILOG_FILE ../../common/dualshock_controller.v
 # axi_cram0_slave.v retired - cram0_cdc is the CPU-side AXI slave for
 # CRAM0 in v2, owner-muxed against the bridge.  File deleted from tree.
 set_global_assignment -name VERILOG_FILE ../../common/axi_register_slice.v
-set_global_assignment -name VERILOG_FILE ../../common/bridge_to_sdram.v
+# bridge_to_sdram.v removed — direct SD->SDRAM bridge write path corrupted the
+# image on silicon; SDRAM-dest loads use the firmware CRAM0 bounce. File deleted.
 set_global_assignment -name VERILOG_FILE ../../common/axi_sdram_arbiter.v
 set_global_assignment -name VERILOG_FILE ../../common/axi_sdram_slave.v
 set_global_assignment -name VERILOG_FILE ../../common/cpu_system.v
@@ -909,7 +908,8 @@ set_global_assignment -name VERILOG_FILE ../../common/sram_controller.v
 set_global_assignment -name VERILOG_FILE ../../common/uart_rx.v
 set_global_assignment -name VERILOG_FILE ../../common/uart_tx.v
 set_global_assignment -name VERILOG_FILE ../../common/video_CRT_scanout_indexed_BRAM.v
-set_global_assignment -name VERILOG_FILE ../../vendor/vexriscv/VexiiRiscv/VexiiRiscv.v
+set_global_assignment -name VERILOG_FILE ../../vendor/vexriscv/VexiiRiscv/vexii_active.v
+set_global_assignment -name SEARCH_PATH ../../vendor/vexriscv/VexiiRiscv
 set_global_assignment -name VERILOG_FILE mf_pllram_133.v
 set_global_assignment -name SDC_FILE core_constraints.sdc
 # Fallback seed for raw quartus_sh runs.  `make build` overrides this per
@@ -923,7 +923,7 @@ set_global_assignment -name SEED 6
 # wbuf (axi_sdram_slave write-burst buffer) must land in MLAB, not LAB FFs.
 # The inline ramstyle attribute crashes Quartus 25.1std Verific (VRFX
 # operators.cpp:2349) - assign from QSF instead, bypassing the HDL parser.
-set_instance_assignment -name RAMSTYLE_ATTRIBUTE MLAB -to "*sdram_axi_slave|wbuf*"
+set_instance_assignment -name RAMSTYLE_ATTRIBUTE MLAB -to *sdram_axi_slave|wbuf*
 
 # NOTE 2026-06-09: a LogicLock region to anchor io_bridge_peripheral's
 # RX capture FFs next to the bridge pins was attempted (the fitter at

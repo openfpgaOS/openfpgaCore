@@ -6,12 +6,15 @@
 
 // CRAM0 Controller wrapper for VexiiRiscv CPU
 // Provides 32-bit word interface using two 16-bit PSRAM accesses
-// Uses the cram1_phy module (CRAM0/CRAM1 share the AS1C8M16PL phy).
+// Uses psram_cram0_drv (cram0_phy.sv); CRAM0/CRAM1 use separate but
+// near-identical PHY modules for the AS1C8M16PL.
 
 `default_nettype none
 
 module cram0_controller #(
-    parameter CLOCK_SPEED = 100.0  // MHz - matches CPU / SDRAM / mp_ram PLL
+    parameter CLOCK_SPEED = 100.0  // MHz - overridden to 74.25 by the only
+                                   // instance (core_top.v): CRAM0 runs on the
+                                   // 74.25 MHz APF bridge clock (clk_74a)
 ) (
     input wire clk,
     input wire reset_n,
@@ -148,7 +151,7 @@ end
 // module defined in cram0_phy.sv).
 psram_cram0_drv #(
     .CLOCK_SPEED(CLOCK_SPEED),
-    .MAX_ACCESS_TIME_FROM_ADV(80)  // ns — 70 ns chip spec + 10 ns margin at 100 MHz
+    .MAX_ACCESS_TIME_FROM_ADV(80)  // ns — 70 ns chip spec + 10 ns margin at 74.25 MHz
 ) psram_inst (
     .clk(clk),
 

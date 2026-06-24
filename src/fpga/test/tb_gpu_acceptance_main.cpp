@@ -895,6 +895,9 @@ struct ParamSpanListWire {
     uint16_t tex_width;
     uint16_t tex_w_mask;
     uint16_t tex_h_mask;
+    uint8_t mirror_s;   // G_TX_MIRROR S (control word bit 28)
+    uint8_t mirror_t;   // G_TX_MIRROR T (control word bit 29)
+    uint8_t const_alpha; // OF_GPU_SPAN_BLEND src alpha (0x4A word 16); emits 17 words when flags bit1 set
     uint8_t flags;
     uint8_t colormap_id;
     uint8_t attr_mode;
@@ -922,7 +925,9 @@ encode_param_span_list_wire(const ParamSpanListWire &p,
                      | (((uint32_t)p.colormap_id & 0x0Fu) << 8)
                      | (((uint32_t)p.attr_mode & 0x0Fu) << 12)
                      | (((uint32_t)p.span_axis & 0x0Fu) << 16)
-                     | (((uint32_t)p.z_mode & 0x0Fu) << 24);
+                     | (((uint32_t)p.z_mode & 0x0Fu) << 24)
+                     | (((uint32_t)(p.mirror_s & 1u)) << 28)
+                     | (((uint32_t)(p.mirror_t & 1u)) << 29);
 
     w[0] = p.fb_base;
     w[1] = (uint32_t)p.fb_major_step;
@@ -6347,7 +6352,9 @@ encode_set_tri_state_wire(const ParamSpanListWire &p,
                      | (((uint32_t)p.colormap_id & 0x0Fu) << 8)
                      | (((uint32_t)p.attr_mode & 0x0Fu) << 12)
                      | (((uint32_t)p.span_axis & 0x0Fu) << 16)
-                     | (((uint32_t)p.z_mode & 0x0Fu) << 24);
+                     | (((uint32_t)p.z_mode & 0x0Fu) << 24)
+                     | (((uint32_t)(p.mirror_s & 1u)) << 28)
+                     | (((uint32_t)(p.mirror_t & 1u)) << 29);
     w[0]  = p.fb_base;
     w[1]  = (uint32_t)p.fb_major_step;
     w[2]  = (uint32_t)p.fb_minor_step;
@@ -6364,6 +6371,12 @@ encode_set_tri_state_wire(const ParamSpanListWire &p,
     w[13] = (uint32_t)p.z_minor_step;
     w[14] = ((uint32_t)(uint16_t)cx1 << 16) | (uint16_t)cx0;
     w[15] = ((uint32_t)(uint16_t)cy1 << 16) | (uint16_t)cy0;
+    /* OF_GPU_SPAN_BLEND (flag bit 1): emit the 17-word form carrying the
+     * per-surface const alpha.  Without it the 16-word form is unchanged. */
+    if (p.flags & 0x02u) {
+        w.resize(17, 0);
+        w[16] = (uint32_t)p.const_alpha;
+    }
     return w;
 }
 
@@ -6527,6 +6540,101 @@ static void test_vert_tri_equivalence_vs_param() {
         ncases++;
     }
     (void)total_diffs; (void)ncases;
+}
+
+// G_TX_MIRROR: a mirrored read of a W-wide texture must equal a plain wrap of
+// the pre-mirrored 2W-wide texture [0..W-1, W-1..0].  Render both with identical
+// geometry into two FBs and require byte-identical pixels.  The pre-mirror-wrap
+// reference is the known-correct N64 mirror pattern (period 2W).
+static void test_texture_mirror_s() {
+    printf("TEST texture_mirror_s\n");
+    gpu_init();
+    preload_with_sentinel();
+    std::vector<uint8_t> tex4 = {0x11, 0x22, 0x33, 0x44};                       // A B C D
+    std::vector<uint8_t> pre8 = {0x11,0x22,0x33,0x44, 0x44,0x33,0x22,0x11};     // mirror
+    upload_texture(TEX_BASE_BYTE,          tex4);
+    upload_texture(TEX_BASE_BYTE + 0x800u, pre8);
+    upload_palookup_identity_row(0, 0);
+
+    const int Q = 1 << 16;
+    int16_t vx[3] = {(int16_t)(0*16), (int16_t)(64*16), (int16_t)(0*16)};
+    int16_t vy[3] = {0, 0, 40};
+    int32_t s[3]  = {0, 8*Q, 0};     // s spans 0..8 (two mirror periods) across x
+    int32_t t[3]  = {0, 0, 0};
+    int32_t zi[3] = {Q, Q, Q};       // affine
+    uint8_t l[3]  = {0, 0, 0};
+
+    ParamSpanListWire a = make_vert_tri_surface();   // mirror-ON, 4-wide
+    a.fb_base = FB_BASE_BYTE; a.tex_addr = TEX_BASE_BYTE;
+    a.tex_width = 4; a.tex_w_mask = 3; a.tex_h_mask = 0; a.mirror_s = 1;
+    emit_set_tri_state_raw(a, 0, 320, 0, 200);
+    emit_draw_vert_tri_raw(vx, vy, s, t, zi, l);
+
+    ParamSpanListWire b = make_vert_tri_surface();   // mirror-OFF, pre-mirrored 8-wide
+    b.fb_base = FB_ALT_BASE_BYTE; b.tex_addr = TEX_BASE_BYTE + 0x800u;
+    b.tex_width = 8; b.tex_w_mask = 7; b.tex_h_mask = 0; b.mirror_s = 0;
+    emit_set_tri_state_raw(b, 0, 320, 0, 200);
+    emit_draw_vert_tri_raw(vx, vy, s, t, zi, l);
+
+    if (!submit_and_wait()) { check_fail("texture_mirror_s", "timeout"); return; }
+
+    int diffs = 0, painted = 0;
+    for (int y = 1; y < 38; y++)
+        for (int x = 1; x < 62; x++) {
+            uint8_t pa = sdram_read_byte(FB_BASE_BYTE     + (uint32_t)y * 320 + x);
+            uint8_t pb = sdram_read_byte(FB_ALT_BASE_BYTE + (uint32_t)y * 320 + x);
+            if (pa != SENTINEL_BYTE) painted++;
+            if (pa != pb) diffs++;
+        }
+    if (diffs == 0 && painted > 50) check_pass("texture_mirror_s");
+    else { char m[80]; snprintf(m, sizeof m, "%d diffs, %d painted", diffs, painted);
+           check_fail("texture_mirror_s", m); }
+}
+
+// Same, T axis: 1-wide x H-tall texture mirrored in T vs pre-mirrored 2H-tall.
+static void test_texture_mirror_t() {
+    printf("TEST texture_mirror_t\n");
+    gpu_init();
+    preload_with_sentinel();
+    std::vector<uint8_t> tex4 = {0x11, 0x22, 0x33, 0x44};
+    std::vector<uint8_t> pre8 = {0x11,0x22,0x33,0x44, 0x44,0x33,0x22,0x11};
+    upload_texture(TEX_BASE_BYTE,          tex4);   // tex_width=1 -> rows
+    upload_texture(TEX_BASE_BYTE + 0x800u, pre8);
+    upload_palookup_identity_row(0, 0);
+
+    const int Q = 1 << 16;
+    int16_t vx[3] = {(int16_t)(0*16), (int16_t)(64*16), (int16_t)(0*16)};
+    int16_t vy[3] = {0, 0, 40};
+    int32_t s[3]  = {0, 0, 0};
+    int32_t t[3]  = {0, 0, 8*Q};     // t spans 0..8 down y
+    int32_t zi[3] = {Q, Q, Q};
+    uint8_t l[3]  = {0, 0, 0};
+
+    ParamSpanListWire a = make_vert_tri_surface();   // mirror-ON, 4-tall
+    a.fb_base = FB_BASE_BYTE; a.tex_addr = TEX_BASE_BYTE;
+    a.tex_width = 1; a.tex_w_mask = 0; a.tex_h_mask = 3; a.mirror_t = 1;
+    emit_set_tri_state_raw(a, 0, 320, 0, 200);
+    emit_draw_vert_tri_raw(vx, vy, s, t, zi, l);
+
+    ParamSpanListWire b = make_vert_tri_surface();   // mirror-OFF, pre-mirrored 8-tall
+    b.fb_base = FB_ALT_BASE_BYTE; b.tex_addr = TEX_BASE_BYTE + 0x800u;
+    b.tex_width = 1; b.tex_w_mask = 0; b.tex_h_mask = 7; b.mirror_t = 0;
+    emit_set_tri_state_raw(b, 0, 320, 0, 200);
+    emit_draw_vert_tri_raw(vx, vy, s, t, zi, l);
+
+    if (!submit_and_wait()) { check_fail("texture_mirror_t", "timeout"); return; }
+
+    int diffs = 0, painted = 0;
+    for (int y = 1; y < 38; y++)
+        for (int x = 1; x < 62; x++) {
+            uint8_t pa = sdram_read_byte(FB_BASE_BYTE     + (uint32_t)y * 320 + x);
+            uint8_t pb = sdram_read_byte(FB_ALT_BASE_BYTE + (uint32_t)y * 320 + x);
+            if (pa != SENTINEL_BYTE) painted++;
+            if (pa != pb) diffs++;
+        }
+    if (diffs == 0 && painted > 50) check_pass("texture_mirror_t");
+    else { char m[80]; snprintf(m, sizeof m, "%d diffs, %d painted", diffs, painted);
+           check_fail("texture_mirror_t", m); }
 }
 
 // (c) sliver / steep-gradient set that used to need Q29 client-side: must
@@ -8821,6 +8929,148 @@ static void test_param_span_list_z_test_write_skip_zero() {
         check_fail("param_span_list_z_test_write_skip_zero", first);
 }
 
+// ----------------------------------------------------------------------------
+// In-flight z-RAW coherency test (z-read / color-write decouple).
+//
+// The byte-exact suite cannot catch an in-flight z read-after-write because
+// the SDRAM stub commits writes ~instantly (cfg_wr_latency==0).  This test
+// runs only when +gpu_wr_latency>=8 holds the z-write commit long enough
+// that a too-early z-read (a broken z_read_safe) observes STALE z memory.
+//
+// Geometry: a single row of `count` pixels with z_minor_step=16 so EVERY
+// pixel owns a private 16-byte z line (== the GPU_Z_READ_WINDOW=4 line).
+// That forces a real SDRAM z read+write per pixel and thrashes the z
+// window so the read path is exercised (no z_acc / window short-circuit).
+//
+//   Pass 1 (z_mode=1, WRITE only): zi -> z half = Z1, paints C1, writes Z1
+//           to lines L0..L(count-1).
+//   Pass 2 (z_mode=3, TEST+WRITE): same lines, zi -> z half = Z2 with
+//           SENTINEL <= Z2 < Z1.  The depth test is `new >= old`, so with
+//           the CORRECT Z1 in memory (Z2 < Z1) every pixel is REJECTED:
+//           color stays C1, z stays Z1.
+//
+// Both passes sample a uniform texture (all bytes C1), so the FB color is
+// C1 whether or not pass 2 is (wrongly) accepted — the Z BUFFER is the
+// discriminator.  A broken design reads the stale pre-pass-1 sentinel
+// (0x5A5A); since Z2 >= 0x5A5A it WRONGLY accepts pass 2 and overwrites
+// z Z1->Z2.  Correct result: z == Z1 everywhere.
+// ----------------------------------------------------------------------------
+static int parse_plusarg_uint(const char *key) {
+    // Returns the integer after `+key=`; -1 if absent.
+    const char *m = Verilated::commandArgsPlusMatch(key);
+    if (!m || !*m)
+        return -1;
+    const char *eq = std::strchr(m, '=');
+    if (!eq)
+        return -1;
+    return (int)std::strtol(eq + 1, nullptr, 10);
+}
+
+static void test_param_span_z_raw_inflight_same_line() {
+    printf("TEST param_span_z_raw_inflight_same_line\n");
+
+    const int wr_lat = parse_plusarg_uint("gpu_wr_latency=");
+    if (wr_lat < 8) {
+        // The masking SDRAM stub (instant commit) cannot expose the RAW.
+        // Skip cleanly so default suites are unaffected.
+        printf("  SKIP param_span_z_raw_inflight_same_line "
+               "(needs +gpu_wr_latency>=8, got %d)\n", wr_lat);
+        return;
+    }
+
+    gpu_init();
+    preload_with_sentinel();
+
+    const uint8_t  C1 = 0x44;                 // uniform texture color
+    upload_texture(TEX_BASE_BYTE, std::vector<uint8_t>(64 * 64, C1));
+
+    // z_minor_step=16 -> private 16-byte z line per pixel (window thrash).
+    const uint32_t z_base       = 0x00180000u;
+    const int32_t  z_minor_step = 16;
+    const int32_t  z_major_step = 16;
+    const int      count        = 24;         // 24 distinct private z lines
+    // Pre-fill the z region with the harness sentinel half (0x5A5A); a stale
+    // read sees this, a correct read sees Z1.
+    sdram_fill(z_base, (uint32_t)count * 16u, 0x5A);
+
+    const uint16_t Z1 = 0x9000;               // pass-1 depth (the near winner)
+    const uint16_t Z2 = 0x6000;               // pass-2 depth: 0x5A5A <= Z2 < Z1
+    // Stored z half == attr_origin[2] >> 1 (see source_z_half: sp_z_value[16:1]).
+    const int32_t  zi1 = (int32_t)((uint32_t)Z1 << 1);
+    const int32_t  zi2 = (int32_t)((uint32_t)Z2 << 1);
+
+    ParamSpanListWire base {};
+    base.fb_base       = FB_BASE_BYTE;
+    base.fb_major_step = 320;
+    base.fb_minor_step = 1;
+    base.tex_addr      = TEX_BASE_BYTE;
+    base.tex_width     = 64;
+    base.tex_w_mask    = 0x3F;
+    base.tex_h_mask    = 0x3F;
+    base.flags         = SPAN_PERSP;
+    base.attr_mode     = 1;
+    base.span_axis     = 0;
+    // Constant zi across the span (no per-pixel/per-row z value step) so the
+    // stored z half is exactly Z1 / Z2 at every pixel.  s/t held constant too
+    // (uniform texture, so the sampled color is C1 regardless).
+    base.attr_du[0] = 0; base.attr_du[1] = 0; base.attr_du[2] = 0;
+    base.attr_dv[0] = 0; base.attr_dv[1] = 0; base.attr_dv[2] = 0;
+    base.z_base        = z_base;
+    base.z_major_step  = z_major_step;
+    base.z_minor_step  = z_minor_step;
+
+    std::vector<ParamSpanRecordWire> records = {{0, 0, (uint16_t)count}};
+
+    ParamSpanListWire p1 = base;             // pass 1: write-only
+    p1.z_mode = 1;
+    p1.attr_origin[2] = zi1;
+
+    ParamSpanListWire p2 = base;             // pass 2: test+write, must reject
+    p2.z_mode = 3;
+    p2.attr_origin[2] = zi2;
+
+    emit_param_span_list_raw(p1, records);
+    emit_param_span_list_raw(p2, records);
+
+    if (!submit_and_wait()) {
+        check_fail("param_span_z_raw_inflight_same_line", "timeout");
+        return;
+    }
+
+    // Correct outcome (pass 2 fully rejected): every line keeps Z1 and the
+    // FB keeps C1.  A stale in-flight z read overwrites z with Z2.
+    int    z_diffs = 0, c_diffs = 0;
+    char   first[192] = {0};
+    for (int i = 0; i < count; i++) {
+        uint16_t got_z = sdram_read_u16_le(z_base + (uint32_t)i * 16u);
+        uint8_t  got_c = sdram_read_byte(FB_BASE_BYTE + (uint32_t)i);
+        if (got_z != Z1) {
+            if (z_diffs == 0 && c_diffs == 0)
+                snprintf(first, sizeof(first),
+                         "i=%d z got=%04x want=%04x (stale=%04x) color got=%02x",
+                         i, got_z, Z1, (uint16_t)0x5A5Au, got_c);
+            z_diffs++;
+        }
+        if (got_c != C1) {
+            if (z_diffs == 0 && c_diffs == 0)
+                snprintf(first, sizeof(first),
+                         "i=%d color got=%02x want=%02x z got=%04x",
+                         i, got_c, C1, got_z);
+            c_diffs++;
+        }
+    }
+
+    if (z_diffs == 0 && c_diffs == 0) {
+        check_pass("param_span_z_raw_inflight_same_line");
+    } else {
+        char msg[256];
+        snprintf(msg, sizeof(msg),
+                 "%d z + %d color mismatch(es) (in-flight z-RAW); first %s",
+                 z_diffs, c_diffs, first);
+        check_fail("param_span_z_raw_inflight_same_line", msg);
+    }
+}
+
 // ============================================================================
 // Main runner
 // ============================================================================
@@ -9640,6 +9890,63 @@ static void test_portb_starve_distinct_cache_line_wall() {
     }
 }
 
+#ifdef GPU_TEST_TRUECOLOR
+// Truecolor constant-alpha src-over blend (OF_GPU_SPAN_BLEND).  Preload the FB
+// with dst, draw a blue-texel truecolor tri (light=63 -> src=texel) with blend
+// at const_alpha, read back the interior pixel (20,20).
+static uint16_t tc_blend_one(uint16_t dst565, uint16_t texel565, uint8_t alpha) {
+    gpu_init();
+    preload_with_sentinel();
+    sdram_write_u16_le(TEX_BASE_BYTE, texel565);          // 1x1 src texel
+    for (int y = 0; y <= 64; y++)                          // dst over the tri area
+        for (int x = 0; x <= 64; x++)
+            sdram_write_u16_le(FB_BASE_BYTE + (uint32_t)y * 640u + (uint32_t)x * 2u,
+                               dst565);
+
+    ParamSpanListWire p = make_vert_tri_surface();
+    p.flags        = SPAN_PERSP | (1u << 7) | (1u << 1);  // PERSP + TRUECOLOR + BLEND
+    p.fb_base      = FB_BASE_BYTE;
+    p.fb_minor_step = 2;
+    p.fb_major_step = 320 * 2;
+    p.tex_addr     = TEX_BASE_BYTE;
+    p.tex_width = 1; p.tex_w_mask = 0; p.tex_h_mask = 0;
+    p.z_mode = 0;                                          // no depth test
+    p.const_alpha = alpha;
+
+    const int32_t Q = 1 << 16;
+    int16_t vx[3] = { (int16_t)(10 * 16), (int16_t)(60 * 16), (int16_t)(10 * 16) };
+    int16_t vy[3] = { 10, 10, 60 };
+    int32_t s[3] = {0,0,0}, t[3] = {0,0,0}, zi[3] = { Q, Q, Q };
+    uint8_t l[3] = { 63, 63, 63 };                         // full bright -> src = texel
+    emit_set_tri_state_raw(p, 0, 320, 0, 200);
+    emit_draw_vert_tri_raw(vx, vy, s, t, zi, l);
+    if (!submit_and_wait()) return 0xDEAD;
+    return sdram_read_u16_le(FB_BASE_BYTE + 20u * 640u + 20u * 2u);
+}
+
+static void test_truecolor_blend() {
+    printf("TEST truecolor_blend\n");
+    // dst = red 0xF800, src = blue 0x001F.  a=255 -> src, a=0 -> dst,
+    // a=128 -> a6=32 -> half: R=31*32>>6=15, B=31*32>>6=15 -> 0x780F.
+    uint16_t a255 = tc_blend_one(0xF800, 0x001F, 255);
+    uint16_t a0   = tc_blend_one(0xF800, 0x001F, 0);
+    uint16_t a128 = tc_blend_one(0xF800, 0x001F, 128);
+    /* (21,20) shares the 32-bit fb word with (20,20): both halves must blend
+     * correctly (same-word RMW hazard — flush-before-read serialization). */
+    uint16_t a128_adj = sdram_read_u16_le(FB_BASE_BYTE + 20u * 640u + 21u * 2u);
+    printf("  a255=0x%04X(want 001F) a0=0x%04X(want F800) a128=0x%04X(want 780F) sameword=0x%04X\n",
+           a255, a0, a128, a128_adj);
+    if (a255 == 0x001F && a0 == 0xF800 && a128 == 0x780F && a128_adj == 0x780F)
+        check_pass("truecolor_blend");
+    else {
+        char m[112];
+        snprintf(m, sizeof m, "a255=%04X a0=%04X a128=%04X adj=%04X",
+                 a255, a0, a128, a128_adj);
+        check_fail("truecolor_blend", m);
+    }
+}
+#endif
+
 int main(int argc, char **argv) {
     Verilated::commandArgs(argc, argv);
     Verilated::traceEverOn(false);
@@ -9721,6 +10028,8 @@ int main(int argc, char **argv) {
     test_param_tri_unsupported_header_noop();
     test_param_tri_fuzz_affine();
     test_vert_tri_equivalence_vs_param();
+    test_texture_mirror_s();
+    test_texture_mirror_t();
     test_vert_tri_sliver_renders_in_range();
     test_vert_tri_shared_edge_adjacency();
     test_vert_tri_sticky_semantics();
@@ -9755,6 +10064,9 @@ int main(int argc, char **argv) {
     test_param_span_list_z_write_zi();
     test_param_span_list_z_test_zi();
     test_param_span_list_z_test_write_skip_zero();
+    // In-flight z-RAW: only asserts when +gpu_wr_latency>=8 (see fn);
+    // skips cleanly on default runs so they stay byte-identical.
+    test_param_span_z_raw_inflight_same_line();
 #ifndef GPU_TEST_OS30_LEAN
     /* Compact-direct 0x48 span-group / batch / DMA-mix tests — every one
      * emits 11/18/25/32-word 0x48 payloads, the form the lean config
@@ -9809,6 +10121,10 @@ int main(int argc, char **argv) {
     test_lean_column_list_drains();
     test_lean_sticky_state_contract();
     test_lean_wrong_size_0x48_33w();
+
+#ifdef GPU_TEST_TRUECOLOR
+    test_truecolor_blend();
+#endif
 
     printf("\n=== Acceptance Results: %d passed, %d failed ===\n",
            pass_count, fail_count);

@@ -46,11 +46,19 @@
 #define OF_TARGET_FB_STRIDE            320u
 #define OF_TARGET_TERM_FB_BASE         0x50300000u
 
-/* Normal APF data-slot reads target SDRAM directly.  CRAM0 transfers still
- * use the smaller safe raw size because the bridge-side CRAM0 ingress FIFO
- * is intentionally shallow. */
+/* Normal APF data-slot reads target SDRAM directly.  The CRAM0 ingress FIFO
+ * is shallow (1024 words = 4 KB), but that bounds JITTER, not transfer size:
+ * the host delivers SD-paced (slower than CRAM0 drains), so the FIFO never
+ * fills on a sustained transfer.  Proof: the 256 KB nonvolatile save slots
+ * (data.json id 10/11, addr 0x2010_0000 = CRAM0 range) auto-load through this
+ * exact bridge->FIFO->CRAM0 path without overrun.  The old 4 KB cap was
+ * therefore over-conservative; raised to 64 KB.  A large commanded read is
+ * verified safe by reading DS_BRIDGE_WCNT bit 31 (DS_BWC_CRAM0_OVERRUN) after
+ * it completes — it must read 0 (the bit is sticky, cleared on command issue).
+ * Layout asserts cap this at 512 KB (scratch + async-bounce both scale with
+ * it: SCRATCH_OFFSET + 2*CHUNK must stay <= APP_DMA_OFFSET). */
 #define OF_TARGET_DMA_CHUNK_SIZE       (32u * 1024u)
-#define OF_TARGET_CRAM0_DMA_CHUNK_SIZE (4u * 1024u)
+#define OF_TARGET_CRAM0_DMA_CHUNK_SIZE (64u * 1024u)
 
 #define OF_TARGET_INTERACT_BASE        0x103FE000u
 #define OF_TARGET_INTERACT_UNCACHED    0x503FE000u
@@ -83,13 +91,12 @@
 #define OF_TARGET_CRAM0_APP_DMA_OFFSET 0x00500000u   /* App-visible async file staging pool */
 #define OF_TARGET_CRAM0_APP_DMA_SIZE   0x00100000u   /* 1 MB */
 
-/* GPU texture store in CRAM0 (Phase 3).  When the GPU's CRAM0-tex mode register
- * is enabled, gpu_tex_cache fills its 16-byte lines from CRAM0 (via
- * gpu_cram0_tex_adapter + cram0_arb) instead of SDRAM.  The region is the whole
- * CRAM0 tail above the app-DMA pool (~10 MB).  Textures are uploaded CPU-side to
- * OF_TARGET_CRAM0_BASE + (this offset + local), then the GPU reads them at the
- * SAME byte offset — the adapter masks the low 24 bits = the 16 MB CRAM0 chip,
- * so app of_gpu_texture_t.addr for a CRAM0 texture is just this byte offset. */
+/* Reserved CRAM0 tail region (~10 MB above the app-DMA pool).  NOTE: the GPU
+ * CRAM0-texture-fill experiment that used it was reverted — the live GPU
+ * texture store is the CRAM1 sync-burst path (gpu_cram1_tex_adapter).  These
+ * defines remain as the reserved CRAM0 map + the bounds asserts below; if a
+ * future path puts textures in CRAM0, they upload CPU-side to
+ * OF_TARGET_CRAM0_BASE + this offset and the GPU reads at the same byte offset. */
 #define OF_TARGET_CRAM0_TEX_OFFSET     0x00600000u   /* 6 MB in — directly above the app-DMA pool */
 #define OF_TARGET_CRAM0_TEX_SIZE       (OF_TARGET_CRAM_SIZE - OF_TARGET_CRAM0_TEX_OFFSET) /* ~10 MB */
 #define OF_TARGET_CRAM0_TEX_BASE       (OF_TARGET_CRAM0_BASE + OF_TARGET_CRAM0_TEX_OFFSET)

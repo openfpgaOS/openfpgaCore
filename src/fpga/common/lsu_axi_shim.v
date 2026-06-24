@@ -8,9 +8,8 @@
 // lsu_axi_shim.v
 //
 // Native LsuPlugin cmd/rsp bus → AXI4 master shim.  Lifted verbatim
-// from the inline block in cpu_system.v (see commit history of
-// cpu_system.v lines ~308-525) so it can also be instantiated by
-// tb_gpu_chain — gives us the full
+// from the inline shim block in cpu_system.v so it can also be
+// instantiated by tb_gpu_chain — gives us the full
 //   shim → slices → cpu_target_port → axi_periph_slave
 // path under sim without dragging VexiiRiscv in.
 //
@@ -68,7 +67,6 @@ module lsu_axi_shim (
     output wire [31:0] per_awaddr_cpu,
     output wire [7:0]  per_awlen_cpu,
     output wire [1:0]  per_awburst_cpu,
-    output wire        per_awallStrb,
 
     output wire        per_wvalid_cpu,
     input  wire        per_wready_cpu,
@@ -241,7 +239,6 @@ assign per_awvalid_cpu = !wr_fifo_empty & ~lsu_aw_sent;
 assign per_awaddr_cpu  = w_addr;
 assign per_awlen_cpu   = {{(8-WR_PTR_W){1'b0}}, burst_awlen_calc};
 assign per_awburst_cpu = (burst_awlen_calc != {WR_PTR_W{1'b0}}) ? 2'b00 : 2'b01;
-assign per_awallStrb   = &w_mask;
 
 // W channel
 assign per_wvalid_cpu  = !wr_fifo_empty & ~lsu_w_sent;

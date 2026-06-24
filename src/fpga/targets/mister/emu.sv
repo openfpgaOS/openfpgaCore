@@ -1059,7 +1059,6 @@ video_CRT_scanout_indexed_BRAM scanout (
 	.analog_fb_width(analog_src_fb_width),
 	.analog_fb_height(analog_src_fb_height),
 	.analog_fb_stride(analog_src_fb_stride),
-	.analog_out_width(crt_h_active),
 	.analog_out_height(crt_v_active),
 	.clk_palette(clk_cpu),
 	.reset_palette_n(reset_n_cpu_core),

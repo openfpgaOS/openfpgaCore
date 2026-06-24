@@ -9,7 +9,6 @@
 // Handles all local/peripheral accesses from the CPU:
 //   - BRAM (32KB, burst reads for I-cache line fills)
 //   - System registers (cycle counter, display, palette, dataslot, controllers)
-//   - Terminal forwarding
 //   - Audio / Link register dispatch
 //
 // AXI4 slave (NOT AXI4-Lite) — iBus issues burst reads to BRAM for I-cache fills.
@@ -75,7 +74,15 @@ module axi_periph_slave #(
     // (textures stay in SDRAM).  Pocket OS30 keeps fast tex (default 1);
     // Pocket OS25 and MiSTer pass 0 — no fast-texture chip is wired, and
     // textures + colormap render from SDRAM.
-    parameter INCLUDE_TEX_MEM = 1
+    parameter INCLUDE_TEX_MEM = 1,
+    // GPU direct-color (truecolor RGB565) path.  Advertised in HW_FEATURES
+    // bit 10 (OF_HW_GPU_VCOLOR) so apps gate the truecolor renderer.  Must
+    // track gpu_core's INCLUDE_DIRECT_COLOR on the same target (Pocket OS30).
+    parameter INCLUDE_DIRECT_COLOR = 0,
+    // GPU transform front-end truecolor + vertex cache + lighting (HW_FEATURES
+    // bit 26, OF_HW_GPU_XFORM_RGB).  Must track gpu_core's INCLUDE_XFORM_RGB on
+    // the same target (Pocket os30/SM64).
+    parameter INCLUDE_XFORM_RGB = 0
 ) (
     input wire clk,
     input wire reset_n,
@@ -375,7 +382,6 @@ reg        snac_hw_enable_reg;
 // (SNAC_HW_CTRL bit 1 reserved — was the analog enable; analogizer_psx
 // auto-detects analog pads from the reported mode ID, digital pads center)
 reg        snac_hw_fast_reg;
-reg        snac_hw_clear_irq_pulse;
 reg        snac_hw_clear_edges_pulse;
 
 wire        snac_busy;
@@ -631,11 +637,6 @@ altsyncram #(
 );
 
 // ============================================
-// Terminal forwarding
-// ============================================
-// Terminal moved to software — no hardware VRAM forwarding
-
-// ============================================
 // System registers
 // ============================================
 reg [31:0] sysreg_rdata;
@@ -671,8 +672,9 @@ assign uart_rx_irq = !uart_rx_empty;  // IRQ when UART RX FIFO has data
 
 // External IRQ mask — bit 5=data-slot completion, bit 4=input,
 // bit 3=vsync, bit 2=reserved, bit 1=link, bit 0=uart_rx.
-// Bit 2 was the hardware-mixer voice-end IRQ; mixer retired, bit kept
-// reserved so firmware IRQ_MASK_* bit positions stay stable.
+// Bit 2 was the hardware-mixer voice-end IRQ; that IRQ is no longer routed
+// into ext_irq (firmware polls mixer reg 0x824 / VOICE_END_PENDING instead).
+// Bit kept reserved so firmware IRQ_MASK_* positions stay stable.
 reg [5:0] irq_mask;
 reg vsync_irq_pending;
 reg dataslot_irq_pending;
@@ -687,11 +689,11 @@ assign ext_irq = (uart_rx_irq & irq_mask[0]) |
 // 25-bit SDRAM half-word addresses (16-bit bus, byte addr = word addr × 2)
 // Hardware feature flags — read-only, derived from variant defines at synthesis time
 // Bit  0: Audio (stereo FIFO + CPU mixer)  Bit  8: FPU (RISC-V F ext)
-// Bit  1: (reserved)                       Bit  9: Save slots
+// Bit  1: HW mixer present (OF_HW_MIXER_HW) Bit  9: Save slots
 // Bit  2: Link cable                       Bit 10: GPU vertex color
-// Bit  3: Analogizer                       Bit 11: GPU bilinear filter
-// Bit  4: GPU span renderer (always)       Bit 12: GPU alpha blending
-// Bit  5: GPU triangle rasterizer          Bit 13: GPU perspective spans
+// Bit  3: Analogizer                       Bit 11: GPU bilinear (alloc, not adv)
+// Bit  4: GPU span renderer (always)       Bit 12: GPU alpha    (alloc, not adv)
+// Bit  5: (reserved/unused)                Bit 13: GPU perspective spans
 // Bit  6: MIDI (sample-based synth)        Bit 14: GPU pipelined fragments
 // Bit  7: WiFi (reserved)                  Bit 15: GPU param span-list
 //                                          Bit 16: GPU param span z-write
@@ -739,6 +741,13 @@ localparam [31:0] HW_FEATURES_RESOLVED =
                        //        out of the bits-13..19 constant 2026-06: OS25
                        //        clears it (only Quake1 emits 0x49 → SW alias).
     | (INCLUDE_VERT_TRI   ? 32'h0010_0000 : 32'h0000_0000)  // bit 20: GPU vertex-triangle (0x4A/0x4B)
+    | (INCLUDE_DIRECT_COLOR ? 32'h0000_0400 : 32'h0000_0000) // bit 10: OF_HW_GPU_VCOLOR —
+                       //        truecolor RGB565 path (per-surface OF_GPU_SPAN_TRUECOLOR
+                       //        flag; texel x interpolated brightness, direct framebuffer)
+    | (INCLUDE_XFORM_RGB  ? 32'h0400_0000 : 32'h0000_0000)  // bit 26: OF_HW_GPU_XFORM_RGB —
+                       //        GPU transform front-end truecolor + vertex cache +
+                       //        per-vertex lighting (0x52/0x53/0x54/0x55/0x57).
+                       //        Must track gpu_core's INCLUDE_XFORM_RGB (Pocket os30/SM64).
     | (INCLUDE_COLUMN_LIST ? 32'h0020_0000 : 32'h0000_0000) // bit 21
                        //        OF_HW_GPU_COLUMN_LIST: CMD_DRAW_COLUMN_LIST
                        //        (0x4C) 5-word column records, byte-identical
@@ -1262,7 +1271,6 @@ always @(posedge clk) begin
         snac_latch_en_reg <= 0;
         snac_hw_enable_reg <= 1'b0;
         snac_hw_fast_reg <= 1'b0;
-        snac_hw_clear_irq_pulse <= 1'b0;
         snac_hw_clear_edges_pulse <= 1'b0;
         /* mix_* reset lives in the main FSM always block
          * to avoid Quartus multi-driver errors (10028).  Verilator
@@ -1273,7 +1281,6 @@ always @(posedge clk) begin
         pal_wr <= 0;
         pal_commit <= 0;
         snac_start_pulse <= 0;
-        snac_hw_clear_irq_pulse <= 1'b0;
         snac_hw_clear_edges_pulse <= 1'b0;
 
         // Hardware timer countdown
@@ -1492,7 +1499,7 @@ always @(posedge clk) begin
                         snac_en_reg <= 1'b0;
                 end
                 6'd31: begin  // SNAC_HW_CLEAR (0x17C)
-                    snac_hw_clear_irq_pulse   <= req_wdata[0];
+                    // bit 0 (irq-clear) retired: snac_hw_irq_pending is hardwired 0
                     snac_hw_clear_edges_pulse <= req_wdata[1];
                 end
                 default: ;
@@ -1803,9 +1810,7 @@ wire [31:0] uart_rdata = (req_addr[3:2] == 2'b00) ?
 
 /* Audio region read decode:
  *   0x00: {21'b0, fifo_full, fifo_level[9:0]}
- *   0x04: DMA ring_base (readback)
- *   0x08: DMA ring_len  (readback)
- *   0x04/0x08/0x0C/0x10: retired DMA registers, read as 0 */
+ *   all other offsets: read as 0 (retired audio_dma ring registers) */
 wire [31:0] audio_rdata = (req_addr[4:2] == 3'd0) ? {21'b0, audio_fifo_full, audio_fifo_level} :
                           32'h0;
 

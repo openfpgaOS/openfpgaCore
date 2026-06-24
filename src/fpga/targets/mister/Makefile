@@ -225,7 +225,7 @@ SWEEP_MIN ?= 1
 SWEEP_MAX ?= 30
 
 sweep: firmware
-	@PROJECT=$(PROJECT) \
+	@USE_CONTAINER=0 MAXJOBS=1 PROJECT=$(PROJECT) \
 		CLOCK_RE='emu|pll|pll_inst.*general\[0\]' \
 		bash $(ROOT_DIR)/tools/sweep.sh $(SWEEP_MIN) $(SWEEP_MAX)
 
@@ -234,7 +234,7 @@ sweep: firmware
 # entities and the 25 worst setup paths (re-runs quartus_sta).
 report:
 	@chmod +x $(ROOT_DIR)/tools/report.sh 2>/dev/null || true
-	@bash $(ROOT_DIR)/tools/report.sh $(PROJECT) $(if $(filter true,$(FULL)),full)
+	@TARGET="$(TARGET)" bash $(ROOT_DIR)/tools/report.sh $(PROJECT) $(if $(filter true,$(FULL)),full)
 
 # ── Timing report ────────────────────────────────────────────────────
 timing:

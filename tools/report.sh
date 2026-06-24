@@ -22,18 +22,32 @@ PROJECT="$1"
 FULL="${2:-}"
 TOP="${TOP:-20}"
 NPATHS="${PATHS:-25}"
-FIT="output_files/$PROJECT.fit.rpt"
-STA="output_files/$PROJECT.sta.rpt"
 TOOLS_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 B=$'\033[1m'; DIM=$'\033[2m'; RED=$'\033[31m'; GRN=$'\033[32m'; RST=$'\033[0m'
 [ -t 1 ] || { B=""; DIM=""; RED=""; GRN=""; RST=""; }
 
 [[ -z "$PROJECT" ]] && { echo "usage: report.sh <project> [full]"; exit 1; }
-[[ -f "$FIT" ]] || { echo "${RED}no $FIT — run make build first${RST}"; exit 1; }
+
+# Per-job isolated build dir (bld/<job>/): cd in so output_files/ + the project
+# db resolve here (incl. the FULL-mode quartus_sta re-run).  MiSTer builds in
+# place and sets no BLD_DIR, so this stays a no-op there.
+if [ -n "${BLD_DIR:-}" ]; then
+    cd "$BLD_DIR" 2>/dev/null || {
+        echo "${RED}no build dir $BLD_DIR — run 'make build${VARIANT:+ VARIANT=$VARIANT}' first${RST}"; exit 1; }
+fi
+
+FIT="output_files/$PROJECT.fit.rpt"
+STA="output_files/$PROJECT.sta.rpt"
+[[ -f "$FIT" ]] || { echo "${RED}no $FIT — run 'make build${VARIANT:+ VARIANT=$VARIANT}' first${RST}"; exit 1; }
 
 # ── Resource summary ─────────────────────────────────────────────────
-echo "${B}Resource Summary${RST} ${DIM}($PROJECT)${RST}"
+# Header names the project + which target/variant/job this report covers.
+INFO="$PROJECT"
+[ -n "${TARGET:-}" ]  && INFO="$INFO  target=$TARGET"
+[ -n "${VARIANT:-}" ] && INFO="$INFO  variant=$VARIANT"
+[ -n "${JOB:-}" ] && [ "${JOB:-}" != "${VARIANT:-}" ] && INFO="$INFO  job=$JOB"
+echo "${B}Resource Summary${RST} ${DIM}($INFO)${RST}"
 awk -F';' '
     /^; Fitter Summary/   { insum=1 }
     insum && /^\+--/      { dash++; if (dash == 2) exit }

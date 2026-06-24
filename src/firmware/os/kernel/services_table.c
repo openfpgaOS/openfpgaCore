@@ -58,8 +58,8 @@ static void svc_input_read_mouse_state(void *out) {
     of_input_read_mouse_state((of_mouse_state_t *)out);
 }
 
-/* Timer set_callback: managed in syscall.c, replicate here */
-extern void (*timer_callback_ptr)(void);  /* from syscall.c */
+/* Timer policy is owned by syscall.c (shared 1 kHz tick + SW-mixer pump). */
+extern void of_os_timer_set_callback(void (*cb)(void), uint32_t app_hz, int self_divide);
 
 static inline uint32_t svc_irq_save_local(void)
 {
@@ -76,30 +76,18 @@ static inline void svc_irq_restore_local(uint32_t prev)
 }
 
 static void svc_timer_set_callback(void (*cb)(void), uint32_t hz) {
-    /* Pin the hardware timer at 1 kHz regardless of the app's requested
-     * rate.  The HW audio mixer runs autonomously so it no longer drives
-     * the tick, but of_smp_tables still bakes MIDI envelopes at 1 kHz —
-     * the pump accumulates elapsed time and fires smp_voice_tick the
-     * appropriate number of times per wake, so 50 Hz MIDI callbacks
-     * still resolve correctly on a 1 kHz hardware tick. */
+    /* Pin the hardware timer at 1 kHz regardless of the app's requested rate.
+     * of_smp_tables bakes MIDI envelopes at 1 kHz and of_midi_pump accumulates
+     * elapsed time to fire smp_voice_tick the right number of times per wake,
+     * so this consumer always wants the raw 1 kHz tick (self_divide=1).  On a
+     * SW-mixer build of_os_timer_set_callback also keeps the timer pinned ON
+     * so PCM/SFX audio survives of_midi_stop(). */
     (void)hz;
-    uint32_t irq = svc_irq_save_local();
-    if (cb) {
-        TIMER_PERIOD = CPU_FREQ_HZ / 1000u;
-        timer_callback_ptr = cb;
-        TIMER_CTRL = TIMER_CTRL_ENABLE;
-    } else {
-        timer_callback_ptr = NULL;
-        TIMER_CTRL = 0;
-    }
-    svc_irq_restore_local(irq);
+    of_os_timer_set_callback(cb, 1000u, 1 /* consumer self-divides */);
 }
 
 static void svc_timer_stop(void) {
-    uint32_t irq = svc_irq_save_local();
-    timer_callback_ptr = NULL;
-    TIMER_CTRL = 0;
-    svc_irq_restore_local(irq);
+    of_os_timer_set_callback(NULL, 0u, 0);
 }
 
 /* Mixer end callback: wraps irq registration */

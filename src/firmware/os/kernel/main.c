@@ -43,6 +43,9 @@ extern char __os_bss_end[];
 void os_textguard_baseline(void);
 void os_textguard_check(const char *where);
 
+/* SW-mixer DAC pump driver: OS-owned 1 kHz timer arm (syscall.c). */
+void of_os_timer_boot_arm(void);
+
 /* Zero OS .bss in SDRAM from BRAM.  This runs before os_main(), while
  * SDRAM has just been populated by the bootloader and before the OS
  * can rely on its own .bss state.  Keep it in .fasttext so the first
@@ -295,6 +298,11 @@ void os_main(void) {
     /* Initialize all hardware */
     of_init();
     of_irq_enable_cpu();
+    /* On a SW-audio-mixer build (of_mixer_use_sw, e.g. OS30) the OS owns a
+     * permanent 1 kHz machine-timer tick that drives the CPU DAC pump
+     * (sw_mixer_pump).  Without it audio is silent unless an app happens to
+     * arm the timer via MIDI playback.  No-op on HW-mixer builds. */
+    of_os_timer_boot_arm();
     os_textguard_check("after of_init");
 
     /* Boot stage: red logo = OS initializing */

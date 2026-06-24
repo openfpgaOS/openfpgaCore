@@ -147,7 +147,6 @@ module tb_scanout #(
         .analog_fb_width(FB_W),
         .analog_fb_height(analog_tall ? 10'd480 : FB_H),
         .analog_fb_stride(FB_STRIDE),
-        .analog_out_width(analog_upscale ? 10'd640 : FB_W),
         .analog_out_height(analog_upscale ? 10'd480 : FB_H),
 
         .clk_palette(clk),

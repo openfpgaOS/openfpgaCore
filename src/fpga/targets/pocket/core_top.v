@@ -1025,7 +1025,7 @@ cram0_controller #(
     .cram_a(cram0_a),
     .cram_dq(cram0_dq),
     .cram_wait(cram0_wait),
-    .cram_clk(),             // unused: cram0_clk pin tied LOW (async mode, F5)
+    .cram_clk(),             // unused: cram0_clk pin driven from clk_74a at top level (see assign at end of file)
     .cram_adv_n(cram0_adv_n),
     .cram_cre(cram0_cre),
     .cram_ce0_n(cram0_ce0_n),
@@ -1283,7 +1283,7 @@ wire        cpu_m_cram0_bvalid;
 wire [1:0]  cpu_m_cram0_bresp;
 
 // SRAM CPU path removed - GPU has exclusive direct access (Z-buffer).
-// CRAM1 removed - memory arch v2 retires the chip.
+// CRAM1 has no CPU AXI target port (the chip is GPU-private texture memory).
 
 // Audio FIFO status — HW mixer drives the FIFO directly (v2).
 wire [9:0]  audio_fifo_level;
@@ -1589,27 +1589,13 @@ wire        arb_s_bvalid;
 wire [1:0]  arb_s_bresp;
 wire        arb_s_wcont;   // arbiter → slave: GPU write bursts are continuous (native-streaming OK)
 
-// Bridge -> SDRAM AXI4 write master.  Normal APF file reads now target
-// SDRAM directly; CRAM0 remains for boot/save windows and small bounce ops.
-wire        brg_sdram_awvalid;
-wire        brg_sdram_awready;
-wire [31:0] brg_sdram_awaddr;
-wire [7:0]  brg_sdram_awlen;
-wire        brg_sdram_wvalid;
-wire        brg_sdram_wready;
-wire [31:0] brg_sdram_wdata;
-wire [3:0]  brg_sdram_wstrb;
-wire        brg_sdram_wlast;
-wire        brg_sdram_bvalid;
-wire        brg_sdram_idle;
-wire        brg_sdram_fifo_full;
-wire        brg_sdram_overrun;
-wire        brg_sdram_detect_wr;   // per-word pulse, clk_74a (F2i counter tap)
-// Combined bridge write-overrun diagnostic.  Both overrun flags are sticky
-// error indicators that are NO LONGER allowed to gate idle/busy (that caused a
-// permanent data-slot wedge); they are observable here for SignalTap and can
-// be surfaced to firmware via a status bit as a follow-up.
-wire        bridge_any_overrun = bridge_wr_overrun | brg_sdram_overrun;
+// Bridge -> SDRAM AXI4 write master REMOVED.  The direct SD->SDRAM load path
+// corrupted the loaded image on silicon (sparse single-bit flip) and is
+// permanently disabled in firmware — the legacy CRAM0 bounce + CPU copy is the
+// only SDRAM-destination path.  The dead bridge_to_sdram module and its arbiter
+// M2 AW/W leg are gone; arbiter M2 AW/W is tied idle below.
+// (The CRAM0-leg overrun is observable via bridge_wr_overrun -> brg_cram0_drop_overrun,
+// surfaced to firmware in the DS_BRIDGE_WCNT debug word; no separate alias needed.)
 
 // ============================================================
 // Bridge read data mux (registered — one cycle after bridge_rd)
@@ -1729,7 +1715,9 @@ reg [2:0] bridge_active_cpu_sync;
 always @(posedge clk_cpu)
     bridge_active_cpu_sync <= {bridge_active_cpu_sync[1:0], bridge_active_74a};
 wire bridge_cram0_idle_cpu = ~bridge_active_cpu_sync[2];
-wire bridge_wr_idle = bridge_cram0_idle_cpu && brg_sdram_idle;
+// SDRAM-leg idle term dropped with bridge_to_sdram — the only bridge write
+// destination is now CRAM0, so CRAM0 idle alone gates the DS DONE waiter.
+wire bridge_wr_idle = bridge_cram0_idle_cpu;
 
 // Bridge DMA active tracking
 reg bridge_dma_active;
@@ -1895,10 +1883,6 @@ end
     wire            savestate_load_err;
 
     wire            osnotify_inmenu;
-    // Docked-state notify (host cmd 0x00B2) — latched by core_bridge_cmd.
-    // Currently observation-only; the planned consumer is the VRR policy
-    // (fixed 60 Hz while docked, adaptive when handheld).
-    wire            osnotify_docked;
 
     // CPU-side signals (in clk_ram_controller domain)
     wire            cpu_target_dataslot_read;
@@ -1985,9 +1969,8 @@ end
 //   [15]    sticky (F6): CRAM0-range bridge write arrived while the CPU
 //           owned the CRAM0 mux — the write was silently dropped by the
 //           bridge_wr_accept gate above
-//   [30:16] SDRAM-leg words   (bridge_to_sdram detect_wr, saturates
-//           0x7FFF; large direct-SDRAM DMAs >128KB will peg it — the
-//           primary forensic use is the 4KB boot/OS-load chunks)
+//   [30:16] RESERVED, reads 0 — was the SDRAM-leg word count (bridge_to_sdram
+//           detect_wr), removed with the dead direct-SDRAM write path
 //   [31]    sticky: CRAM0 bridge write FIFO overrun drop this command
 // All four fields clear on the DS command issue pulse (same edge that
 // latches target_dataslot_* into the bridge handler below), so after
@@ -2014,8 +1997,7 @@ always @(posedge clk_74a) begin
     end else begin
         if (bridge_cram0_wr_pulse && brg_wcnt_cram0 != 15'h7FFF)
             brg_wcnt_cram0 <= brg_wcnt_cram0 + 15'd1;
-        if (brg_sdram_detect_wr && brg_wcnt_sdram != 15'h7FFF)
-            brg_wcnt_sdram <= brg_wcnt_sdram + 15'd1;
+        // SDRAM-leg counter removed with bridge_to_sdram; brg_wcnt_sdram stays 0.
         // F6 sticky: a CRAM0-range bridge write while cram0_mode_74a=1
         // (CPU owns the mux) is dropped by the bridge_wr_accept gate.
         if (bridge_cram0_wr_pulse && cram0_mode_74a)
@@ -2269,7 +2251,6 @@ core_bridge_cmd icb (
     .savestate_load_err     ( savestate_load_err ),
 
     .osnotify_inmenu        ( osnotify_inmenu ),
-    .osnotify_docked        ( osnotify_docked ),
 
     .target_dataslot_read       ( target_dataslot_read ),
     .target_dataslot_write      ( target_dataslot_write ),
@@ -2310,16 +2291,14 @@ assign video_skip = vidout_skip;
 assign video_vs = vidout_vs;
 assign video_hs = vidout_hs;
 
-    reg [15:0]  frame_count;
-
     reg [9:0]   x_count;
     reg [9:0]   y_count;
 
     reg [23:0]  vidout_rgb;
-    reg         vidout_de, vidout_de_1;
+    reg         vidout_de;
     reg         vidout_skip;
     reg         vidout_vs;
-    reg         vidout_hs, vidout_hs_1;
+    reg         vidout_hs;
     wire        early_vblank_safe_vid;
 
     // Terminal moved to software — no hardware VRAM interface
@@ -2575,7 +2554,11 @@ assign video_hs = vidout_hs;
         // Fast texture memory advertisement (HW_FEATURES bit 25).  The CRAM1
         // controller/phy below is gated on the same INCLUDE_TEX_MEM macro, so
         // OS25 (no macro) advertises 0 → caps->tex_fast_size 0 → SDRAM textures.
-        .INCLUDE_TEX_MEM(`ifdef INCLUDE_TEX_MEM 1 `else 0 `endif)
+        .INCLUDE_TEX_MEM(`ifdef INCLUDE_TEX_MEM 1 `else 0 `endif),
+        .INCLUDE_DIRECT_COLOR(`ifdef INCLUDE_DIRECT_COLOR 1 `else 0 `endif),
+        // GPU transform front-end truecolor + cache + lighting cap (bit 26).
+        // Tracks gpu_core's INCLUDE_XFORM_RGB on the same target.
+        .INCLUDE_XFORM_RGB(`ifdef INCLUDE_XFORM_RGB 1 `else 0 `endif)
     ) periph (
         .clk(clk_cpu),
         .reset_n(reset_n_cpu_core),
@@ -2730,7 +2713,7 @@ assign video_hs = vidout_hs;
         .shutdown_pending(shutdown_pending_cpu),
         .shutdown_ack(shutdown_ack_cpu),
         .timer_irq(timer_irq),
-        .uart_rx_irq(uart_rx_irq),
+        .uart_rx_irq(),
         .link_irq(link_irq),
         .ext_irq(ext_irq),
         // Datatable slot size query
@@ -2788,31 +2771,9 @@ assign video_hs = vidout_hs;
         end
     end
 
-    bridge_to_sdram brg_sdram (
-        .clk_bridge     (clk_74a),
-        .reset_n        (reset_n),
-        .bridge_addr    (bridge_addr),
-        .bridge_wr      (bridge_wr),
-        .bridge_wr_data (bridge_wr_data),
-        .idle           (brg_sdram_idle),
-        .fifo_full      (brg_sdram_fifo_full),
-        .overrun        (brg_sdram_overrun),
-        .detect_wr_o    (brg_sdram_detect_wr),
-        .clk_axi        (clk_cpu),
-        // Never-reset (config-init only), symmetric with the arbiter/slave it
-        // drives, so it cannot async-drop AW/W mid-handshake on a warm reset.
-        .reset_n_axi    (1'b1),
-        .m_awvalid      (brg_sdram_awvalid),
-        .m_awready      (brg_sdram_awready),
-        .m_awaddr       (brg_sdram_awaddr),
-        .m_awlen        (brg_sdram_awlen),
-        .m_wvalid       (brg_sdram_wvalid),
-        .m_wready       (brg_sdram_wready),
-        .m_wdata        (brg_sdram_wdata),
-        .m_wstrb        (brg_sdram_wstrb),
-        .m_wlast        (brg_sdram_wlast),
-        .m_bvalid       (brg_sdram_bvalid)
-    );
+    // bridge_to_sdram (the direct SD->SDRAM bridge write master) REMOVED — it
+    // corrupted the loaded image on silicon and the only SDRAM-dest path is now
+    // the firmware CRAM0 bounce + CPU copy.  Arbiter M2 AW/W is tied idle below.
 
     // ============================================================
     // AXI4 SDRAM arbiter (GPU, CPU, APF bridge, Audio)
@@ -2847,19 +2808,20 @@ assign video_hs = vidout_hs;
         .m1_wdata(cpu_sdram_bus_wdata),     .m1_wstrb(cpu_sdram_bus_wstrb),
         .m1_wlast(cpu_sdram_bus_wlast),
         .m1_bvalid(cpu_sdram_bus_bvalid),   .m1_bresp(cpu_sdram_bus_bresp),
-        // M2: APF bridge data-slot writes into SDRAM
-        // M2 read channel is MiSTer-only (hps_bridge sector writeback) —
-        // the APF bridge never reads SDRAM through the arbiter.
+        // M2: tied idle on Pocket — the APF bridge no longer writes SDRAM
+        // through the arbiter (bridge_to_sdram removed; SDRAM-dest goes via the
+        // firmware CRAM0 bounce).  M2 read channel is MiSTer-only (hps_bridge
+        // sector writeback); the Pocket bridge never reads SDRAM through it.
         .m2_arvalid(1'b0), .m2_arready(),
         .m2_araddr(32'd0), .m2_arlen(8'd0),
         .m2_rvalid(), .m2_rdata(), .m2_rresp(), .m2_rlast(),
         .m2_rready(1'b1),
-        .m2_awvalid(brg_sdram_awvalid), .m2_awready(brg_sdram_awready),
-        .m2_awaddr(brg_sdram_awaddr),   .m2_awlen(brg_sdram_awlen),
-        .m2_wvalid(brg_sdram_wvalid),   .m2_wready(brg_sdram_wready),
-        .m2_wdata(brg_sdram_wdata),     .m2_wstrb(brg_sdram_wstrb),
-        .m2_wlast(brg_sdram_wlast),
-        .m2_bvalid(brg_sdram_bvalid),   .m2_bresp(),
+        .m2_awvalid(1'b0), .m2_awready(),
+        .m2_awaddr(32'd0), .m2_awlen(8'd0),
+        .m2_wvalid(1'b0),  .m2_wready(),
+        .m2_wdata(32'd0),  .m2_wstrb(4'd0),
+        .m2_wlast(1'b0),
+        .m2_bvalid(),      .m2_bresp(),
         // M3: Audio Mixer (read-only, lowest priority) — per-voice
         // sample fetches from SDRAM.
         .m3_arvalid(mixer_arvalid),   .m3_arready(mixer_arready),
@@ -2895,10 +2857,10 @@ assign video_hs = vidout_hs;
         // Native streaming write bursts are gated per-master by s_axi_wcont
         // (driven from the arbiter's s_wcont): the GPU's queue-fed framebuffer
         // bursts (continuous WVALID, underrun-immune) stream natively up to 8
-        // beats, while CPU cache-line writebacks (which can stall WVALID mid-
-        // burst, risking a stale/duplicated word in the pre-staged streaming
-        // path) are forced onto the serialized per-beat path.  MAX cap stays at
-        // 15 (the io_sdram/AXI 4-bit ARLEN/AWLEN limit).
+        // beats.  With SERIALIZE_WRITE_BURSTS=0 and AWLEN<=15, a CPU cache-line
+        // writeback (!wcont) takes the slave's buffered path (S_WR_FILL ->
+        // single native io_sdram burst), not a serialized per-beat path.  MAX
+        // cap stays at 15 (the io_sdram/AXI 4-bit ARLEN/AWLEN limit).
         .SERIALIZE_WRITE_BURSTS(1'b0),
         .MAX_NATIVE_WRITE_BURST_LEN(8'd15)
     ) sdram_axi_slave (
@@ -2949,8 +2911,9 @@ assign video_hs = vidout_hs;
     // top of the file with the CRAM0 controller block).  No per-chip
     // AXI sub-slave is needed - the CDC *is* the CPU-side AXI slave.
     //
-    // CRAM1 axi slave and pin fan-out retired with the chip.  SRAM is
-    // GPU-exclusive (Z-buffer) and has no CPU AXI surface.
+    // CRAM1 has no CPU AXI surface (it is GPU-private texture memory driven
+    // by cram1_controller above).  SRAM is GPU-exclusive (Z-buffer/translucency
+    // LUT) and has no CPU AXI surface either.
 
     // Terminal rendering moved to software (firmware renders to framebuffer)
 
@@ -3040,7 +3003,6 @@ assign video_hs = vidout_hs;
         // app (e.g. 320x240) to fill the 480p frame, exactly like the LCD/vidout
         // path -- otherwise the app paints at native height into a 480-line
         // raster and the rest of the frame is black.
-        .analog_out_width(crt_h_active),
         .analog_out_height(crt_v_active),
         .clk_palette(clk_cpu),
         .reset_palette_n(reset_n_cpu_core),
@@ -3074,9 +3036,6 @@ always @(posedge clk_vid or negedge reset_n_vid) begin
         vidout_skip <= 0;
         vidout_vs <= 0;
         vidout_hs <= 0;
-
-        vidout_hs_1 <= vidout_hs;
-        vidout_de_1 <= vidout_de;
 
         // x and y counters
         // Refresh the target at line boundaries so a frame that becomes ready
@@ -3197,12 +3156,11 @@ assign link_irq = 1'b0;
 //
 // Audio output (dcfifo + I2S)
 //
-// Hardware mixer retired — CPU writes stereo samples directly via
-// AUDIO_BASE MMIO (axi_periph_slave drives audio_sample_wr/data).
+// Producer is selected by INCLUDE_HW_MIXER: HW audio_mixer when present
+// (OS25/MiSTer), else CPU SW-mixer PCM samples via AUDIO_PCM_SAMPLE (OS30).
 // dcfifo bridges clk_cpu → clk_audio (12.288 MHz).
 //
 wire        timer_irq;
-wire        uart_rx_irq;
 wire        link_irq;
 wire        ext_irq;  // Masked combination from axi_periph_slave
 
@@ -3231,7 +3189,7 @@ wire int_m_timer_sync    = timer_irq_sync[1];
 // ─── HW audio mixer ────────────────────────────────────────────────
 // Per-voice sample fetch from SDRAM via M3 on the arbiter; writes
 // stereo pairs directly into the audio_output dcfifo.  (audio_dma
-// retired in v2 — see line 2199 comment block.)
+// retired in v2 — see the audio_dma retirement note below.)
 wire        mixer_arvalid;
 wire        mixer_arready;
 wire [31:0] mixer_araddr;
@@ -3250,7 +3208,6 @@ wire [31:0] mixer_sample_data;
 wire [31:0] mixer_active_mask;
 wire [21:0] mixer_pos_readback;
 wire [31:0] mixer_voice_end_pending;
-wire        mixer_voice_end_irq;
 
 /* 1-cycle register stage between audio_mixer status outputs and
  * axi_periph_slave read mux.  The sysreg read mux in the periph slave
@@ -3303,7 +3260,6 @@ wire [31:0] periph_audio_sample_data;
 // tied off so nothing is left undriven / multidriven.
 assign mixer_pos_readback      = 22'd0;
 assign mixer_voice_end_pending = 32'd0;
-assign mixer_voice_end_irq     = 1'b0;
 assign mixer_active_mask       = 32'd0;
 // M3 arbiter port (read-only mixer master) parked idle.
 assign mixer_arvalid           = 1'b0;
@@ -3342,7 +3298,7 @@ audio_mixer audio_mixer_inst (
     .irq_clear_wr     (mixer_irq_clear_wr_mmio),
     .irq_clear        (mixer_irq_clear_mmio),
     .voice_end_pending(mixer_voice_end_pending),
-    .voice_end_irq    (mixer_voice_end_irq),
+    .voice_end_irq    (),
     .voice_active_mask(mixer_active_mask)
 );
 `endif
@@ -3433,12 +3389,29 @@ gpu_core #(
     .INCLUDE_COMPACT_SPAN(`ifdef INCLUDE_COMPACT_SPAN 1 `else 0 `endif),
     .INCLUDE_COLUMN_LIST(`ifdef INCLUDE_COLUMN_LIST 1 `else 0 `endif),
     .INCLUDE_TEX_MEM(`ifdef INCLUDE_TEX_MEM 1 `else 0 `endif),
+    .INCLUDE_DIRECT_COLOR(`ifdef INCLUDE_DIRECT_COLOR 1 `else 0 `endif),
+    // GPU transform front-end SM64 extensions (T1/T3/T4) + truecolor-only.
+    // All default off; os30 (SM64) turns them on via VARIANT_DEFS.  EXCLUDE_PALETTE
+    // gates OUT the 8-bit palettized/colormap lane (INCLUDE_PALETTE=0).
+    .INCLUDE_XFORM_RGB(`ifdef INCLUDE_XFORM_RGB 1 `else 0 `endif),
+    // os30 lean: EXCLUDE_CLIP_TRI prunes the S_XFORM/clip front-end (SM64 emits no 0x4F).
+    .INCLUDE_CLIP_TRI(`ifdef EXCLUDE_CLIP_TRI 0 `else 1 `endif),
+    .INCLUDE_VTX_CACHE(`ifdef INCLUDE_VTX_CACHE 1 `else 0 `endif),
+    .INCLUDE_GPU_LIGHT(`ifdef INCLUDE_GPU_LIGHT 1 `else 0 `endif),
+    .INCLUDE_GPU_XFORM_MAC(`ifdef EXCLUDE_GPU_XFORM_MAC 0 `else 1 `endif),
+    .INCLUDE_PALETTE(`ifdef EXCLUDE_PALETTE 0 `else 1 `endif),
     // Numeric tuning (not feature gates).  The z read window is 4 on the
-    // triangle-heavy variant (fast-tex / OS30) and degenerates to 1 on OS25
-    // (single-word z fill, sweeps the window logic).  EW_PARALLEL_DIVS=0 on
-    // every Pocket variant (single shared divider — bit-identical quotients).
-    .GPU_Z_READ_WINDOW(`ifdef INCLUDE_TEX_MEM 4 `else 1 `endif),
-    .GPU_EW_PARALLEL_DIVS(0)
+    // triangle-heavy variants and degenerates to 1 on OS25 (single-word z fill,
+    // sweeps the window logic).  Keyed off INCLUDE_Z_BURST (NOT INCLUDE_TEX_MEM)
+    // so OS30/SM64 keeps the 16-byte z-line burst even with the fast-tex chip
+    // disabled — SM64 z-tests every fragment.
+    // EW_PARALLEL_DIVS: OS30/SM64 uses 1 — three slope dividers run concurrently
+    // (~28 beats vs ~87 serial).  The serial walker was the per-triangle setup
+    // long pole (vs the ~61-cycle derive), so parallelising it cuts triangle
+    // setup ~30%.  Bit-identical quotients (the gpu-acceptance default is 1).
+    // OS25 stays 0 (single shared divider — ALM-constrained for its feature set).
+    .GPU_Z_READ_WINDOW(`ifdef INCLUDE_Z_BURST 4 `else 1 `endif),
+    .GPU_EW_PARALLEL_DIVS(`ifdef EXCLUDE_PARALLEL_DIVS 0 `elsif INCLUDE_DIRECT_COLOR 1 `else 0 `endif)
 ) gpu (
     .clk(clk_cpu),
     .reset_n(reset_n_cpu_media),
@@ -3548,9 +3521,6 @@ assign sram_word_wstrb = 4'b0;
 
     wire    pll_core_locked;
     wire    pll_ram_locked;
-    wire    pll_locked_all = pll_core_locked & pll_ram_locked;
-    wire    pll_core_locked_s;
-synch_3 s01(pll_locked_all, pll_core_locked_s, clk_74a);
 
 assign clk_vid = clk_core_24576;
 assign clk_vid_90deg = clk_core_24576_90deg;
@@ -3569,48 +3539,40 @@ mf_pllbase mp1 (
     .locked         ( pll_core_locked )
 );
 
-    wire    clk_cram;
-
 mf_pllram_133 mp_ram (
     .refclk         ( clk_74a ),
     .rst            ( 0 ),
     .outclk_0       ( clk_ram_controller ),
     .outclk_1       ( clk_ram_chip ),
-    .outclk_2       ( clk_cram ),
+    .outclk_2       ( ),
     .locked         ( pll_ram_locked )
 );
 
 assign clk_cpu = clk_ram_controller;
 
-// F5 (bridge-corruption mitigation, 2026-06): hold the CRAM0 clock pin
-// LOW.  The CellularRAM datasheet requires CLK to be held low for ASYNC
-// operation — and the core runs the chip exclusively in async page mode
-// (BCR_VALUE = 16'h9D1F above, burst_rd tied 1'b0 at the controller
-// instance).  The previous `assign cram0_clk = clk_74a` free-ran the
-// chip clock through every async read/write AND through the
-// CRE-controlled BCR write itself, which is out of spec for async
-// CellularRAM operation and a plausible contributor to cold-start
-// flakiness.  Tie-low is chosen over routing cram0_phy.sv's cram_clk
-// output because, with burst_rd tied off, that output is provably
-// constant-low anyway (only ever assigned 0) — a literal constant makes
-// the intent explicit and costs no logic.
-//
-// Re-evaluate if sync-burst reads return: a synchronous BCR mode needs
-// a real CK (restore the clk_74a drive + the cram0_clk_pin generated
-// clock and IO delays in core_constraints.sdc).
-//
-// CRAM1 retired in v2 - pin unassigned in the qsf.
-assign cram0_clk = clk_74a;  // F5 revert (A/B): tie-low suspected in field regression, restore legacy free-running clock
+// cram0_clk: chip currently runs in async page mode (BCR_VALUE = 16'h9D1F
+// above, burst_rd tied 1'b0 at the controller instance) with the clock pin
+// free-running on clk_74a.  (F5, 2026-06: tying the pin LOW for strict async
+// operation was tried then reverted — tie-low was suspected in a field
+// regression.)  If sync-burst reads ever return, a synchronous BCR mode needs
+// a real CK (restore the generated clock + IO delays in core_constraints.sdc).
+assign cram0_clk = clk_74a;  // F5 revert (A/B): restore legacy free-running clock
 
 // SDRAM controller
 io_sdram #(
-    // Open-page tracking layout (see io_sdram.v).  OS30 (fast tex) keeps the
-    // per-bank open_row[0:3] tracking for triangle/texture bandwidth;
+    // Open-page tracking layout (see io_sdram.v).  Per-bank open_row[0:3]
+    // tracking (4 open rows) lets the FB and z-buffer keep separate open rows
+    // when they live in different SDRAM banks, killing the per-pixel
+    // FB-write/Z-write row-thrash turnaround.  Enabled on OS30 either via fast
+    // texture (INCLUDE_TEX_MEM, e.g. Quake2) OR explicitly via
+    // INCLUDE_BANK_ROW_TRACK (SM64, which has TEX_MEM off but still benefits
+    // from the FB/Z bank split — the firmware places z in a different bank).
     // OS25 (2.5D span games) degenerates to the single open_bank/open_row
     // — same protocol, lower row-hit rate, sheds the per-bank entries and
-    // bank-indexed muxes for device budget.  Keyed on INCLUDE_TEX_MEM (the
-    // OS30 marker).  MiSTer keeps the default (1).
+    // bank-indexed muxes for device budget.  MiSTer keeps the default (1).
 `ifdef INCLUDE_TEX_MEM
+    .BANK_ROW_TRACK(1)
+`elsif INCLUDE_BANK_ROW_TRACK
     .BANK_ROW_TRACK(1)
 `else
     .BANK_ROW_TRACK(0)

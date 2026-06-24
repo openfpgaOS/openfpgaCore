@@ -55,6 +55,11 @@ module gpu_core #(
     // the shared gpu_edge_walker is present iff ANY triangle command is.
     parameter INCLUDE_VERT_TRI = 1,
 
+    // os30/SM64 lean: 0x4F clip-tri is the only live producer of the S_XFORM
+    // front-end (0x51 folds via GPU_XFORM_MAC=0, 0x52 via XFORM_RGB=0).  Gating
+    // it (EXCLUDE_CLIP_TRI on os30) prunes S_XFORM + XF_RECIP/XF_PROJ + xf_* regs.
+    parameter INCLUDE_CLIP_TRI = 1,
+
     // ----------------------------------------------------------------
     // Per-target feature gate: records-only param-tri (CMD_DRAW_PARAM_TRI_RECS
     // 0x4D).  When 0, the 0x4D decode term is constant 0, so the opcode takes
@@ -136,7 +141,34 @@ module gpu_core #(
     // register reads 0, and texture fills always stay on SDRAM (m_rd_*) —
     // every redirect-mux and upload-reg branch constant-folds away.  Must
     // track axi_periph_slave's INCLUDE_TEX_MEM (HW_FEATURES bit 25).
-    parameter INCLUDE_TEX_MEM = 1
+    parameter INCLUDE_TEX_MEM = 1,
+    // Direct-color (truecolor RGB565) fragment path.  A per-surface flag
+    // (0x4A/0x49 control word bit 7) selects a 16-bit texel -> RGB565
+    // framebuffer write, bypassing the palookup colormap.  Default 0 forces
+    // the truecolor flag constant 0 so the whole path prunes on non-truecolor
+    // builds and the palettized pipeline stays byte-exact.
+    parameter INCLUDE_DIRECT_COLOR = 0,
+    // T1: GPU transform front-end TRUECOLOR draw (0x52 CMD_DRAW_XFORM_TRI_RGB).
+    // Reuses the S_XFORM transform, then runs the full 7-attr 0x4E derive so the
+    // transform path can produce per-vertex RGB565 Gouraud (not just the 0x51
+    // single-light path).  Requires INCLUDE_VERT_TRI + INCLUDE_DIRECT_COLOR.
+    // Default 0 prunes the 0x52 decode arm and its loader.
+    parameter INCLUDE_XFORM_RGB = 0,
+    // On-GPU matrix transform: the 64-bit M*v MAC + xf_M M10K + 0x51 + the 0x50
+    // matrix load.  Default 1 (back-compat).  Set 0 (EXCLUDE_GPU_XFORM_MAC) when
+    // the host pre-transforms and uses CMD_DRAW_CLIP_TRI (0x4F) — then the matrix
+    // MAC + xf_M fold away and only XF_RECIP/XF_PROJ remain.
+    parameter INCLUDE_GPU_XFORM_MAC = 1,
+    // T3: GPU vertex cache + indexed draw (0x53 LOAD_VERTS / 0x54
+    // DRAW_INDEXED_TRI) — transform-once / draw-many.  Requires INCLUDE_XFORM_RGB.
+    parameter INCLUDE_VTX_CACHE = 0,
+    // T4: GPU per-vertex lighting (0x55 SET_LIGHT_STATE + normal transform +
+    // N.L in S_XFORM generating per-vertex RGB565).  Requires INCLUDE_XFORM_RGB.
+    parameter INCLUDE_GPU_LIGHT = 0,
+    // Truecolor-only builds gate out the 8-bit palettized/colormap fragment
+    // lane.  Default 1 keeps the palettized pipeline byte-exact; set 0 (os30/
+    // SM64) to prune the colormap request/response pipe and the 8-bit lane.
+    parameter INCLUDE_PALETTE = 1
 ) (
     input wire clk,
     input wire reset_n,
@@ -269,7 +301,7 @@ assign dbg_frag = 32'd0;
 // ================================================================
 // 0x00  GPU_CTRL          W   bit0=enable, bit1=soft_reset, bit2=ring_reset
 // 0x04  GPU_RING_WRPTR    R   Published ring write pointer
-// 0x08  Reserved
+// 0x08  GPU_TEX_MEM_UP_ADDR W   Fast-texture upload word pointer
 // 0x0C  GPU_DMA_SRC       W   SDRAM byte address of command buffer to pull
 // 0x10  GPU_RING_RDPTR    R   GPU read pointer
 // 0x14  GPU_STATUS        R   bit0=busy, bit1=ring_empty, bit2=dma_busy,
@@ -283,8 +315,8 @@ assign dbg_frag = 32'd0;
 // 0x2C  GPU_DMA_KICK      W   Write 1 to fire DMA pull from (SRC, LEN)
 // 0x30  GPU_PALOOKUP_BASE W/R SDRAM byte base for 16x16KB colormap slots
 // 0x34  GPU_DBG_WR_INFLIGHT R Low 4 bits = outstanding FB write responses
-// 0x38  Reserved
-// 0x3C  Reserved
+// 0x38  GPU_TEX_MEM_ROUTE   W   Fast-texture-memory route select
+// 0x3C  GPU_TEX_MEM_UP_DATA W   Fast-texture upload word data
 //
 // Upload semantics:
 //   * GPU_DMA_* pulls either homogeneous payloads or already-encoded mixed
@@ -777,7 +809,9 @@ always @(posedge clk) dsp2_p <= dsp2_a * dsp2_b;
 localparam DSP_OWNER_SPANPROD = 2'd0;
 localparam DSP_OWNER_PSS      = 2'd1;
 localparam DSP_OWNER_DERIVE   = 2'd2;
-wire [1:0] dsp_owner = (state == S_TRI_DERIVE) ? DSP_OWNER_DERIVE :
+localparam DSP_OWNER_XFORM    = 2'd3;   // 0x51 transform front-end MAC/projection
+wire [1:0] dsp_owner = (state == S_XFORM) ? DSP_OWNER_XFORM :
+                       (state == S_TRI_DERIVE) ? DSP_OWNER_DERIVE :
                        (persp_pss != PSS_IDLE) ? DSP_OWNER_PSS :
                        DSP_OWNER_SPANPROD;
 
@@ -802,6 +836,10 @@ always @(*) begin
         DSP_OWNER_DERIVE: begin
             dsp_a = drv_dsp_a;  dsp_b = drv_dsp_b;
             dsp2_a = drv_dsp2_a; dsp2_b = drv_dsp2_b;
+        end
+        DSP_OWNER_XFORM: begin
+            dsp_a = xf_dsp_a;  dsp_b = xf_dsp_b;   // single multiplier; dsp2 idle
+            dsp2_a = 32'sd0; dsp2_b = 32'sd0;
         end
         default: begin
             dsp_a = 32'sd0; dsp_b = 32'sd0;
@@ -832,6 +870,11 @@ endfunction
 reg [9:0]  recip_rd_addr;
 reg [15:0] recip_rd_data;
 always @(posedge clk) recip_rd_data <= recip_lut[recip_rd_addr];
+// T3: vertex-cache registered read port (MLAB).  Single read port — 0x54 reads
+// its 3 indices sequentially in S_VCREAD.  Omitted entirely when the cache is off.
+generate if (INCLUDE_VTX_CACHE != 0) begin : g_vcache_rd
+    always @(posedge clk) vc_q <= vc_mem[vc_raddr];
+end endgenerate
 integer ri;
 initial begin
     for (ri = 0; ri < 1024; ri = ri + 1)
@@ -914,7 +957,9 @@ gpu_tex_cache tex_cache (
 wire blend_owns_m0  = (fbss == FBSS_ZTEST_AR_WAIT)
                    || (fbss == FBSS_ZTEST_R_WAIT)
                    || (fbss == FBSS_BLEND_AR_WAIT)
-                   || (fbss == FBSS_BLEND_R_WAIT);
+                   || (fbss == FBSS_BLEND_R_WAIT)
+                   || (fbss == FBSS_CB_AR)
+                   || (fbss == FBSS_CB_R);
 wire dma_owns_ar    = (dma_state == DMA_S_AR)
                    || (dma_state == DMA_S_R);
 wire dma_owns_r     = (dma_state == DMA_S_R);
@@ -969,6 +1014,7 @@ assign tex_axi_rlast   = tex_route ? gpu_tex_mem_rlast
 wire blend_arready = (blend_owns_m0 && !dma_owns_ar) ? m_rd_arready : 1'b0;
 wire blend_rvalid  = (blend_owns_m0 && !dma_owns_r ) ? m_rd_rvalid  : 1'b0;
 wire [31:0] blend_rdata = m_rd_rdata;
+
 
 // ---- Doorbell-DMA FSM ----
 // Streams queued DMA descriptors into ring BRAM port A, splitting each
@@ -1163,9 +1209,6 @@ localparam CMD_DRAW_PARAM_SPAN_LIST   = 8'h48;
 // The edge walker generates the {u,v,count} records the CPU would have
 // packed after word 30.
 localparam CMD_DRAW_PARAM_TRI         = 8'h49;
-// 8'h49 is reserved.  The experimental staged-lightmap span command is no
-// longer part of the advertised GPU surface; unsupported commands drain their
-// payload and retire as no-ops.
 //
 // CMD_SET_TRI_STATE (0x4A) + CMD_DRAW_VERT_TRI (0x4B): hardware triangle
 // plane derivation.  0x4A latches a sticky surface/control bank (mirroring an
@@ -1246,6 +1289,11 @@ localparam CMD_DRAW_PARAM_TRI         = 8'h49;
 //   draw) if tri_state_valid is clear or the payload is the wrong size.
 localparam CMD_SET_TRI_STATE          = 8'h4A;
 localparam CMD_DRAW_VERT_TRI          = 8'h4B;
+// 0x4E DRAW_VERT_TRI_RGB: like 0x4B but words 12-14 carry per-vertex RGB565
+// colour (replacing the single packed light word); the truecolor fragment
+// modulate becomes per-channel Gouraud (texel x vtxRGB).  Gated on
+// INCLUDE_VERT_TRI && INCLUDE_DIRECT_COLOR — prunes everywhere but os30.
+localparam CMD_DRAW_VERT_TRI_RGB      = 8'h4E;
 
 // CMD_DRAW_PARAM_TRI_RECS (0x4D): records-only variant of CMD_DRAW_PARAM_TRI.
 // A full 0x49 re-sends ~21 words of constant surface/control/clamp/z/clip
@@ -1279,6 +1327,16 @@ localparam CMD_DRAW_VERT_TRI          = 8'h4B;
 //     draws, exactly per the 0x4A CONTRACT CHANGE rules above.
 // Advertised in HW_FEATURES bit 22 (OF_HW_GPU_PARAM_TRI_RECS).
 localparam CMD_DRAW_PARAM_TRI_RECS    = 8'h4D;
+localparam CMD_SET_OBJECT_STATE       = 8'h50;  // sticky transform matrix + proj consts
+localparam CMD_DRAW_XFORM_TRI         = 8'h51;  // raw verts -> GPU transform+project+derive
+localparam CMD_DRAW_XFORM_TRI_RGB     = 8'h52;  // T1: as 0x51 + per-vertex RGB565 truecolor
+localparam CMD_LOAD_VERTS             = 8'h53;  // T3: transform N raw verts -> vertex cache
+localparam CMD_DRAW_INDEXED_TRI       = 8'h54;  // T3: 3 cache indices -> derive (draw-many)
+localparam CMD_SET_LIGHT_STATE        = 8'h55;  // T4: sticky light dir/colour/ambient
+localparam CMD_LOAD_VERT_LIT          = 8'h57;  // T4: transform+light one vert -> cache
+localparam CMD_DRAW_CLIP_TRI          = 8'h4F;  // clip-space feed: CPU sends M*v clip {x,y,w},
+                                                //   GPU does ONLY recip+project (skips the MAC).
+                                                //   Wire-identical to 0x52 (18w), truecolor.
 
 // CMD_DRAW_COLUMN_LIST (0x4C): bandwidth-optimised variant of the 0x48
 // direct-affine span list for VERTICAL 1-wide textured columns (Doom/Wolf3D/
@@ -1328,6 +1386,13 @@ reg [GPU_ADDR_W-1:0] sp_fb_addr;
 reg [GPU_ADDR_W-1:0] sp_tex_addr;
 reg signed [31:0] sp_s, sp_t;
 reg signed [31:0] sp_sstep, sp_tstep;
+// Per-pixel running 2nd-difference (curvature) for the QUADRATIC perspective
+// sub-segment interpolation: sp_sstep += sp_scc each pixel so s/t trace a
+// parabola through three perspective-exact anchors instead of an affine chord,
+// killing the residual two-triangle texture seam.  CONSTANT within a segment,
+// loaded at slot swap.  Forced 0 on the affine / palettized / non-truecolor
+// path, so sp_sstep += sp_scc is a bit-exact hold there.
+reg signed [31:0] sp_scc, sp_tcc;
 reg [15:0] sp_count;
 // Phase 4d — Gouraud-capable light.  Palookups have 64 shade rows, so
 // light is carried as signed Q6.16 and the fragment pipe sees bits [21:16].
@@ -1336,6 +1401,21 @@ reg [15:0] sp_count;
 reg signed [23:0] sp_light_q;
 reg signed [23:0] sp_light_step;
 wire [5:0]        sp_light = sp_light_q[21:16];
+// Truecolor RGB Gouraud red/blue per-pixel accumulators (green = sp_light).
+// 5-bit channels read from [20:16].
+reg signed [23:0] sp_R_q, sp_R_step;
+reg signed [23:0] sp_B_q, sp_B_step;
+wire [4:0]        sp_R = sp_R_q[20:16];
+wire [4:0]        sp_B = sp_B_q[20:16];
+// Combiner D (additive) per-pixel accumulators — second per-vertex RGB triple
+// interpolated identically to R/light/B; consumed by rgb565_cd_finish.  Kept in
+// ALM (ramstyle logic) — the texel*C+D pipeline must not spill to M10K.
+(* ramstyle = "logic" *) reg signed [23:0] sp_Dr_q, sp_Dr_step;
+(* ramstyle = "logic" *) reg signed [23:0] sp_Dg_q, sp_Dg_step;
+(* ramstyle = "logic" *) reg signed [23:0] sp_Db_q, sp_Db_step;
+wire [4:0]        sp_Dr = sp_Dr_q[20:16];
+wire [5:0]        sp_Dg = sp_Dg_q[21:16];
+wire [4:0]        sp_Db = sp_Db_q[20:16];
 reg [3:0]  sp_flags;
 // Round-2 early record handoff (cheap B1 subset): set once at EMIT.
 // True only for the opaque non-z direct fastpath — direct-affine record
@@ -1350,6 +1430,11 @@ reg [3:0]  sp_colormap_id;
 // SDRAM-visible address arithmetic.
 reg signed [GPU_ADDR_W-1:0] sp_fb_stride;
 reg [15:0] sp_tex_width;
+reg        sp_truecolor;       // sticky: this surface renders direct RGB565
+reg        sp_rgb;             // sticky: this surface modulates by per-vertex RGB (0x4E)
+reg        sp_blend;           // sticky: src-over alpha blend (OF_GPU_SPAN_BLEND)
+reg [7:0]  sp_const_alpha;     // sticky: per-surface src alpha (0x4A word 16)
+reg [6:0]  sp_a6;              // sticky: precomputed blend weight 0..64 (off the per-pixel path)
 // POT wrap masks: (sp_s[31:16] & sp_tex_w_mask) and
 // (sp_t[31:16] & sp_tex_h_mask)
 // before the address math.  Default 16'hFFFF (no-op) so callers that
@@ -1358,6 +1443,9 @@ reg [15:0] sp_tex_width;
 // are powers of two (always true for BUILD/Quake/Doom textures).
 reg [15:0] sp_tex_w_mask;
 reg [15:0] sp_tex_h_mask;
+reg        sp_mirror_s;       // sticky: G_TX_MIRROR on S / T (control bits 28/29)
+reg        sp_mirror_t;
+reg        sp_cd_combine;     // sticky: texel*C+D combine enable (control bit 30)
 reg [1:0]  sp_clamp_enable;
 reg signed [31:0] sp_s_clamp_min;
 reg signed [31:0] sp_s_clamp_max;
@@ -1371,6 +1459,20 @@ reg [GPU_ADDR_W-1:0] sp_z_addr;
 reg signed [GPU_ADDR_W-1:0] sp_z_step;
 reg signed [31:0] sp_z_value;
 reg signed [31:0] sp_z_value_step;
+// Decoupled depth accumulator (0x4E): high-range 1/w depth, interpolated affine,
+// float-compressed into the z-buffer instead of the perspective zi.
+reg signed [31:0] sp_depth_value;
+reg signed [31:0] sp_depth_step;
+// Pipelined z_compress: zc_s1_* = stage1 (CLZ) reg, zc_s2_* = stage2 (shift) reg.
+// source_z_half reads zc_s2_* (a flop) instead of running z_compress combinationally
+// on the -1.594ns write path.  Fed by 2-deep lookahead accumulators sp_*_la
+// (= value + 2*step) so zc_s2_* == z_compress(current value) in steady state; a
+// 2-cycle warm (g_zwarm) fills the pipe at span start (single cone/cycle).
+reg [37:0] zc_s1_z;  reg [15:0] zc_s2_z;   // sp_z_value (0x4B truecolor) path
+reg [37:0] zc_s1_d;  reg [15:0] zc_s2_d;   // sp_depth_value (0x4E rgb) path
+reg signed [31:0] sp_z_la;       // lookahead: sp_z_value + 2*sp_z_value_step
+reg signed [31:0] sp_depth_la;   // lookahead: sp_depth_value + 2*sp_depth_step
+reg [1:0]  g_zwarm;              // span-start fill counter (2 -> 0), truecolor only
 reg        sp_q29_z_enable;
 reg signed [31:0] sp_q29_z_value;
 reg signed [31:0] sp_q29_z_value_step;
@@ -1394,13 +1496,15 @@ reg        spanprod_direct_affine;
 reg [1:0]  spanprod_idx;
 reg [2:0]  spanprod_record_count;
 reg [15:0] spanprod_records_left;
-reg [2:0]  spanprod_calc_step;
+// 4-bit so the truecolor RGB path can add R (8) and B (9) setup steps after
+// light (4); palettized/scalar codes 0..5,7 are unchanged.
+reg [3:0]  spanprod_calc_step;
 // Round-2 MUL_WAIT pipelining: identity of the NEXT setup product to
 // launch (same encoding as spanprod_calc_step, plus 7 = none).  The
 // capture pointer (calc_step) trails the launch pointer by exactly two
 // pipeline slots; both walk the same flag-stable successor chain
 // (spanprod_next_calc).
-reg [2:0]  spanprod_launch_step;
+reg [3:0]  spanprod_launch_step;
 reg [GPU_ADDR_W-1:0] spanprod_fb_base;
 // fb/z major/minor steps are byte-address deltas.  They are sign-extended
 // to 32 bits where they drive the shared DSP multiplier (address-product
@@ -1409,10 +1513,16 @@ reg signed [GPU_ADDR_W-1:0] spanprod_fb_major_step;
 reg signed [GPU_ADDR_W-1:0] spanprod_fb_minor_step;
 reg [GPU_ADDR_W-1:0] spanprod_tex_addr;
 reg [15:0] spanprod_tex_width;
+reg        spanprod_mirror_s;   // staged G_TX_MIRROR S/T (control word bits 28/29)
+reg        spanprod_mirror_t;
+reg        spanprod_cd_combine; // staged texel*C+D combine enable (control bit 30)
 reg [15:0] spanprod_tex_w_mask;
 reg [15:0] spanprod_tex_h_mask;
 reg [3:0]  spanprod_flags;
 reg [3:0]  spanprod_colormap_id;
+reg        spanprod_truecolor;   // staged direct-color flag (control word bit 7)
+reg        spanprod_blend;       // staged alpha-blend flag (control flag bit 1)
+reg [7:0]  spanprod_const_alpha; // staged per-surface src alpha (0x4A word 16)
 reg        spanprod_attr_persp;
 reg        spanprod_attr_q29;
 reg [4:0]  spanprod_q29_attr_shift;
@@ -1429,9 +1539,27 @@ reg signed [31:0] spanprod_attr1_dv;
 reg signed [31:0] spanprod_attr2_origin;
 reg signed [31:0] spanprod_attr2_du;
 reg signed [31:0] spanprod_attr2_dv;
+// Decoupled depth plane (0x4E truecolor): a 32-bit affine 1/w-scaled depth,
+// independent of the perspective zi, float-compressed for the z-buffer.  Mirrors
+// attr2; prunes when INCLUDE_DIRECT_COLOR=0 (only the 0x4E path writes it).
+reg signed [31:0] spanprod_depth_origin;
+reg signed [31:0] spanprod_depth_du;
+reg signed [31:0] spanprod_depth_dv;
 reg signed [23:0] spanprod_light_origin;
 reg signed [23:0] spanprod_light_du;
 reg signed [23:0] spanprod_light_dv;
+// Truecolor RGB Gouraud (0x4E): red & blue planes mirror the light plane
+// (green reuses the light slot).  Only written/read on the RGB path; prune
+// when INCLUDE_DIRECT_COLOR=0 (spanprod_rgb folds to a constant 0).
+reg signed [23:0] spanprod_R_origin, spanprod_R_du, spanprod_R_dv;
+reg signed [23:0] spanprod_B_origin, spanprod_B_du, spanprod_B_dv;
+// Combiner D triple (additive per-vertex RGB): three more planes mirroring
+// R/light/B, only derived/read on the combine path (spanprod_cd_combine).
+reg signed [23:0] spanprod_Dr_origin, spanprod_Dr_du, spanprod_Dr_dv;
+reg signed [23:0] spanprod_Dg_origin, spanprod_Dg_du, spanprod_Dg_dv;
+reg signed [23:0] spanprod_Db_origin, spanprod_Db_du, spanprod_Db_dv;
+// The RGB path keys off cmd_is_draw_vert_tri_rgb (stable DECODE..EMIT, and a
+// constant 0 when INCLUDE_DIRECT_COLOR=0) — no separate spanprod_rgb reg.
 reg signed [31:0] spanprod_clamp0_min;
 reg signed [31:0] spanprod_clamp0_max;
 reg signed [31:0] spanprod_clamp1_min;
@@ -1448,6 +1576,9 @@ reg signed [31:0] spanprod_attr0_start_r;
 reg signed [31:0] spanprod_attr1_start_r;
 reg signed [31:0] spanprod_attr2_start_r;
 reg signed [23:0] spanprod_light_start_r;
+reg signed [23:0] spanprod_R_start_r, spanprod_B_start_r;
+reg signed [23:0] spanprod_Dr_start_r, spanprod_Dg_start_r, spanprod_Db_start_r;
+reg signed [31:0] spanprod_depth_start_r;
 reg [GPU_ADDR_W-1:0] spanprod_direct_fb_addr [0:3];
 reg [GPU_ADDR_W-1:0] spanprod_direct_tex_addr [0:3];
 reg signed [31:0] spanprod_direct_s [0:3];
@@ -1504,6 +1635,26 @@ function [3:0] span_flags_from_wire;
     end
 endfunction
 
+// Texel-index wrap with optional N64-style MIRROR (G_TX_MIRROR).  For a
+// power-of-two texture (mask = W-1, mask+1 = W = the "octave" bit) the
+// coordinate mirrors with period 2W: indices [0,W) map normally, [W,2W)
+// reverse.  mirror_en=0 is the plain bitmask wrap (byte-exact unchanged).
+// Two's-complement & handles negative coords (e.g. raw=-31,W=32: -31&32 set
+// -> reversed -> 31-(-31&31)=31-1=30, matching N64 mirror(-31)).
+function [15:0] mirror_idx;
+    input [15:0] raw;        // clamped coord integer part
+    input [15:0] mask;       // sp_tex_w_mask / sp_tex_h_mask (W-1 for POT)
+    input        mirror_en;
+    reg   [15:0] wrapped;
+    begin
+        wrapped = raw & mask;
+        if (mirror_en && ((raw & (mask + 16'd1)) != 16'd0))
+            mirror_idx = mask - wrapped;   // reversed half of the 2W period
+        else
+            mirror_idx = wrapped;
+    end
+endfunction
+
 wire [1:0] spanprod_last_idx =
       (spanprod_record_count >= 3'd4) ? 2'd3
     : (spanprod_record_count == 3'd3) ? 2'd2
@@ -1539,6 +1690,12 @@ task load_param_span_list_payload_word;
                                               : (data[31:28] == 4'd2) ? 2'd1
                                               : 2'd0} + 16'd1;
                     spanprod_flags        <= span_flags_from_wire(data[27:20]);
+                    spanprod_truecolor    <= INCLUDE_DIRECT_COLOR && data[27];
+                    spanprod_mirror_s     <= 1'b0;   // compact 0x48 path: no mirror
+                    spanprod_mirror_t     <= 1'b0;
+                    spanprod_cd_combine   <= 1'b0;   // compact 0x48 path: no combine
+                    spanprod_blend        <= 1'b0;   // compact 0x48 path: no blend
+                    spanprod_const_alpha  <= 8'd0;
                     spanprod_attr_persp   <= 1'b0;
                     spanprod_attr_q29     <= 1'b0;
                     spanprod_q29_attr_shift <= 5'd0;
@@ -1607,7 +1764,16 @@ task load_param_span_list_payload_word;
                 6'd7: begin
                     spanprod_direct_affine <= 1'b0;
                     spanprod_flags         <= span_flags_from_wire(data[7:0]);
+                    spanprod_truecolor     <= INCLUDE_DIRECT_COLOR && data[7];
+                    spanprod_blend         <= INCLUDE_DIRECT_COLOR && data[1];  // OF_GPU_SPAN_BLEND
+                    spanprod_const_alpha   <= 8'd0;   // default; 17-word 0x4A overrides at w16
                     spanprod_colormap_id   <= data[11:8];
+                    spanprod_mirror_s      <= data[28];   // G_TX_MIRROR S (live on os25 — palettized tex mirroring)
+                    spanprod_mirror_t      <= data[29];   // G_TX_MIRROR T (live on os25 — palettized tex mirroring)
+                    // Combine is truecolor-only (its C/D operands come from the vert-tri RGB
+                    // derive states); gate with the rest of the truecolor lane so the combine
+                    // mux + rgb565_cd_finish + texel*C cone constant-folds away on os25.
+                    spanprod_cd_combine    <= INCLUDE_DIRECT_COLOR && data[30];   // texel*C+D combine enable
                     spanprod_attr_persp    <= GPU_ENABLE_PERSP && data[12] && (data[23:20] == PARAM_RECORD_U16V16_COUNT16);
                     spanprod_attr_q29      <= data[13] && data[12] && (data[23:20] == PARAM_RECORD_U16V16_COUNT16);
                     spanprod_q29_attr_shift <= 5'd0;
@@ -1856,21 +2022,41 @@ endtask
 // Product codes reuse the spanprod_calc_step encoding:
 //   0 = fb addr, 5 = z addr, 1 = attr0, 2 = attr1, 3 = attr2,
 //   4 = light, 7 = none (chain exhausted)
-localparam [2:0] SPANPROD_STEP_NONE = 3'd7;
+localparam [3:0] SPANPROD_STEP_NONE = 4'd7;
+localparam [3:0] SPANPROD_STEP_R    = 4'd8;   // truecolor RGB: red start_r
+localparam [3:0] SPANPROD_STEP_B    = 4'd9;   // truecolor RGB: blue start_r
+localparam [3:0] SPANPROD_STEP_DEPTH = 4'd10; // 0x4E decoupled depth start_r
+localparam [3:0] SPANPROD_STEP_DR   = 4'd11;  // combine: D-red start_r
+localparam [3:0] SPANPROD_STEP_DG   = 4'd12;  // combine: D-green start_r
+localparam [3:0] SPANPROD_STEP_DB   = 4'd13;  // combine: D-blue start_r
 
-function [2:0] spanprod_next_calc;
-    input [2:0] cur;
+function [3:0] spanprod_next_calc;
+    input [3:0] cur;
     begin
         case (cur)
-            3'd0: spanprod_next_calc = (spanprod_z_write || spanprod_z_test)
-                                     ? 3'd5 : 3'd1;
-            3'd5: spanprod_next_calc = 3'd1;
-            3'd1: spanprod_next_calc = 3'd2;
-            3'd2: spanprod_next_calc = spanprod_attr_persp ? 3'd3
-                                     : (spanprod_flags[SPAN_COLORMAP]
-                                        ? 3'd4 : SPANPROD_STEP_NONE);
-            3'd3: spanprod_next_calc = spanprod_flags[SPAN_COLORMAP]
-                                     ? 3'd4 : SPANPROD_STEP_NONE;
+            4'd0: spanprod_next_calc = (spanprod_z_write || spanprod_z_test)
+                                     ? 4'd5 : 4'd1;
+            4'd5: spanprod_next_calc = 4'd1;
+            4'd1: spanprod_next_calc = 4'd2;
+            4'd2: spanprod_next_calc = spanprod_attr_persp ? 4'd3
+                                     : ((spanprod_flags[SPAN_COLORMAP] || spanprod_truecolor)
+                                        ? 4'd4 : SPANPROD_STEP_NONE);
+            4'd3: spanprod_next_calc = (spanprod_flags[SPAN_COLORMAP] || spanprod_truecolor)
+                                     ? 4'd4 : SPANPROD_STEP_NONE;
+            // After light (4): truecolor RGB surfaces continue to R then B so
+            // sp_R_q/sp_B_q get their span-start values (green is the light slot).
+            4'd4: spanprod_next_calc = (cmd_is_draw_vert_tri_rgb || cmd_is_draw_xform_tri_rgb
+                                        || cmd_is_draw_indexed_tri || cmd_is_draw_clip_tri) ? SPANPROD_STEP_R
+                                                                : SPANPROD_STEP_NONE;
+            SPANPROD_STEP_R: spanprod_next_calc = SPANPROD_STEP_B;
+            SPANPROD_STEP_B: spanprod_next_calc = SPANPROD_STEP_DEPTH;
+            // After depth: combine surfaces continue to the D triple (Dr,Dg,Db);
+            // legacy RGB terminates at DEPTH exactly as before.
+            SPANPROD_STEP_DEPTH: spanprod_next_calc = spanprod_cd_combine
+                                     ? SPANPROD_STEP_DR : SPANPROD_STEP_NONE;
+            SPANPROD_STEP_DR: spanprod_next_calc = SPANPROD_STEP_DG;
+            SPANPROD_STEP_DG: spanprod_next_calc = SPANPROD_STEP_DB;
+            SPANPROD_STEP_DB: spanprod_next_calc = SPANPROD_STEP_NONE;
             default: spanprod_next_calc = SPANPROD_STEP_NONE;
         endcase
     end
@@ -1882,17 +2068,34 @@ endfunction
 // CAPTURE arms produced; only the select term changed (launch pointer
 // instead of capture pointer).  The DSP owner mux is untouched.
 task spanprod_launch_step_mul;
-    input [2:0] stepv;
+    input [3:0] stepv;
     begin
         case (stepv)
-            3'd0: spanprod_launch_fb_mul;
-            3'd5: spanprod_launch_z_mul;
-            3'd1: spanprod_launch_attr_mul(spanprod_attr0_du, spanprod_attr0_dv);
-            3'd2: spanprod_launch_attr_mul(spanprod_attr1_du, spanprod_attr1_dv);
-            3'd3: spanprod_launch_attr_mul(spanprod_attr2_du, spanprod_attr2_dv);
-            3'd4: spanprod_launch_attr_mul(
+            4'd0: spanprod_launch_fb_mul;
+            4'd5: spanprod_launch_z_mul;
+            4'd1: spanprod_launch_attr_mul(spanprod_attr0_du, spanprod_attr0_dv);
+            4'd2: spanprod_launch_attr_mul(spanprod_attr1_du, spanprod_attr1_dv);
+            4'd3: spanprod_launch_attr_mul(spanprod_attr2_du, spanprod_attr2_dv);
+            4'd4: spanprod_launch_attr_mul(
                       {{8{spanprod_light_du[23]}}, spanprod_light_du},
                       {{8{spanprod_light_dv[23]}}, spanprod_light_dv});
+            SPANPROD_STEP_R: spanprod_launch_attr_mul(
+                      {{8{spanprod_R_du[23]}}, spanprod_R_du},
+                      {{8{spanprod_R_dv[23]}}, spanprod_R_dv});
+            SPANPROD_STEP_B: spanprod_launch_attr_mul(
+                      {{8{spanprod_B_du[23]}}, spanprod_B_du},
+                      {{8{spanprod_B_dv[23]}}, spanprod_B_dv});
+            SPANPROD_STEP_DEPTH: spanprod_launch_attr_mul(spanprod_depth_du,
+                                                          spanprod_depth_dv);
+            SPANPROD_STEP_DR: spanprod_launch_attr_mul(
+                      {{8{spanprod_Dr_du[23]}}, spanprod_Dr_du},
+                      {{8{spanprod_Dr_dv[23]}}, spanprod_Dr_dv});
+            SPANPROD_STEP_DG: spanprod_launch_attr_mul(
+                      {{8{spanprod_Dg_du[23]}}, spanprod_Dg_du},
+                      {{8{spanprod_Dg_dv[23]}}, spanprod_Dg_dv});
+            SPANPROD_STEP_DB: spanprod_launch_attr_mul(
+                      {{8{spanprod_Db_du[23]}}, spanprod_Db_du},
+                      {{8{spanprod_Db_dv[23]}}, spanprod_Db_dv});
             default: ;  // none pending — sp_dsp_* hold, product unused
         endcase
     end
@@ -1903,8 +2106,18 @@ task spanprod_load_generated_span;
         sp_count       <= spanprod_cur_count;
         sp_fb_stride   <= spanprod_fb_minor_step;
         sp_tex_width   <= (spanprod_tex_width == 16'd0) ? 16'd1 : spanprod_tex_width;
+        sp_truecolor   <= spanprod_truecolor;
+        sp_blend       <= spanprod_blend;
+        sp_const_alpha <= spanprod_const_alpha;
+        sp_a6          <= (spanprod_const_alpha == 8'd255) ? 7'd64
+                                                          : {1'b0, spanprod_const_alpha[7:2]};
+        sp_rgb         <= cmd_is_draw_vert_tri_rgb || cmd_is_draw_xform_tri_rgb
+                          || cmd_is_draw_indexed_tri || cmd_is_draw_clip_tri; // per-vertex RGB modulate (0x4E/0x52/0x54/0x4F)
         sp_tex_w_mask  <= spanprod_tex_w_mask;
         sp_tex_h_mask  <= spanprod_tex_h_mask;
+        sp_mirror_s    <= spanprod_mirror_s;
+        sp_mirror_t    <= spanprod_mirror_t;
+        sp_cd_combine  <= spanprod_cd_combine;
 
         if (spanprod_direct_affine) begin
             // Fastpath gate: direct && !z && !transluc (&& !persp — this
@@ -1915,6 +2128,11 @@ task spanprod_load_generated_span;
             sp_colormap_id <= spanprod_cur_direct_colormap_id;
             sp_light_q     <= {2'b00, spanprod_cur_direct_light, 16'b0};
             sp_light_step  <= 24'sd0;
+            sp_R_q <= 24'sd0; sp_R_step <= 24'sd0;   // direct-affine never RGB
+            sp_B_q <= 24'sd0; sp_B_step <= 24'sd0;
+            sp_Dr_q <= 24'sd0; sp_Dr_step <= 24'sd0; // direct-affine never combine
+            sp_Dg_q <= 24'sd0; sp_Dg_step <= 24'sd0;
+            sp_Db_q <= 24'sd0; sp_Db_step <= 24'sd0;
             sp_flags       <= spanprod_flags & ~(4'b0001 << SPAN_PERSP);
             sp_clamp_enable <= 2'b00;
             sp_z_write_enable <= 1'b0;
@@ -1923,6 +2141,9 @@ task spanprod_load_generated_span;
             sp_z_step       <= {GPU_ADDR_W{1'b0}};
             sp_z_value      <= 32'sd0;
             sp_z_value_step <= 32'sd0;
+            sp_depth_value  <= 32'sd0;
+            sp_depth_step   <= 32'sd0;
+            sp_z_la <= 32'sd0; sp_depth_la <= 32'sd0; g_zwarm <= 2'd0;
             sp_q29_z_enable     <= 1'b0;
             sp_q29_z_value      <= 32'sd0;
             sp_q29_z_value_step <= 32'sd0;
@@ -1952,6 +2173,18 @@ task spanprod_load_generated_span;
             sp_light_q     <= spanprod_light_start_r;
             sp_light_step  <= spanprod_span_axis
                             ? spanprod_light_dv : spanprod_light_du;
+            // Truecolor RGB red/blue per-pixel accumulators (green = light).
+            sp_R_q    <= spanprod_R_start_r;
+            sp_R_step <= spanprod_span_axis ? spanprod_R_dv : spanprod_R_du;
+            sp_B_q    <= spanprod_B_start_r;
+            sp_B_step <= spanprod_span_axis ? spanprod_B_dv : spanprod_B_du;
+            // Combine D triple span accumulators (mirror R/light/B).
+            sp_Dr_q    <= spanprod_Dr_start_r;
+            sp_Dr_step <= spanprod_span_axis ? spanprod_Dr_dv : spanprod_Dr_du;
+            sp_Dg_q    <= spanprod_Dg_start_r;
+            sp_Dg_step <= spanprod_span_axis ? spanprod_Dg_dv : spanprod_Dg_du;
+            sp_Db_q    <= spanprod_Db_start_r;
+            sp_Db_step <= spanprod_span_axis ? spanprod_Db_dv : spanprod_Db_du;
             sp_flags       <= spanprod_attr_persp
                             ? (spanprod_flags | (4'b0001 << SPAN_PERSP))
                             : (spanprod_flags & ~(4'b0001 << SPAN_PERSP));
@@ -1970,6 +2203,15 @@ task spanprod_load_generated_span;
             sp_z_value      <= spanprod_attr2_start_r;
             sp_z_value_step <= spanprod_span_axis
                              ? spanprod_attr2_dv : spanprod_attr2_du;
+            sp_depth_value  <= spanprod_depth_start_r;
+            sp_depth_step   <= spanprod_span_axis
+                             ? spanprod_depth_dv : spanprod_depth_du;
+            // Prime the z_compress lookahead to the span start; the 2-cycle warm
+            // (g_zwarm) advances it to the steady-state +2*step and fills the
+            // pipe so pixel 0 sees z_compress(start).  Truecolor builds only.
+            sp_z_la     <= spanprod_attr2_start_r;
+            sp_depth_la <= spanprod_depth_start_r;
+            g_zwarm     <= (INCLUDE_DIRECT_COLOR != 0) ? 2'd2 : 2'd0;
             sp_q29_z_enable <= spanprod_attr_q29
                              && (spanprod_z_write || spanprod_z_test);
             sp_q29_z_value <= (spanprod_attr_q29
@@ -2002,11 +2244,18 @@ task spanprod_load_generated_span;
             sp_t           <= 32'sd0;
             sp_sstep       <= 32'sd0;
             sp_tstep       <= 32'sd0;
+            sp_scc         <= 32'sd0;
+            sp_tcc         <= 32'sd0;
             sp_sZ          <= spanprod_attr0_start_r;
             sp_tZ          <= spanprod_attr1_start_r;
             sp_zinv        <= spanprod_attr2_start_r;
             persp_active      <= 1'b1;
             persp_first_done  <= 1'b0;
+            persp_prev_valid    <= 1'b0;    // each span starts linear (no A_{N-1})
+            persp_prev_anchor_s <= 32'sd0;
+            persp_prev_anchor_t <= 32'sd0;
+            persp_pend_scc      <= 32'sd0;
+            persp_pend_tcc      <= 32'sd0;
             persp_seg_a_ready <= 1'b0;
             persp_seg_b_ready <= 1'b0;
             persp_swap_pending <= 1'b0;
@@ -2034,6 +2283,71 @@ task spanprod_load_generated_span;
         src_done <= 1'b0;
     end
 endtask
+
+// N64-style monotonic floating-point depth code (truecolor z-buffer only).
+// Maps a 32-bit interpolated z magnitude to a 16-bit code: 5-bit exponent
+// (MSB position 0..31) in [15:11] + 11-bit mantissa (the 11 bits below the
+// leading 1) in [10:0].  Monotonic non-decreasing in v, so the existing
+// unsigned `>=` depth compare keeps the same near-occludes-far meaning while
+// giving relative (float) precision across the depth range instead of a flat
+// linear slice.  Only instantiated on sp_truecolor surfaces (which are const 0
+// when INCLUDE_DIRECT_COLOR=0, so this whole cone sweeps on palettized builds).
+function [15:0] z_compress;
+    input [31:0] v;
+    integer i;
+    reg [4:0]  e;
+    reg        found;
+    reg [10:0] mant;
+    begin
+        if (v == 32'd0) begin
+            z_compress = 16'd0;
+        end else begin
+            e = 5'd0; found = 1'b0;
+            for (i = 31; i >= 0; i = i - 1) begin
+                if (!found && v[i]) begin
+                    e = i[4:0];
+                    found = 1'b1;
+                end
+            end
+            if (e >= 5'd11)
+                mant = v >> (e - 5'd11);   // 11 bits below the leading 1
+            else
+                mant = v << (5'd11 - e);   // small value: left-align low bits
+            z_compress = {e, mant};
+        end
+    end
+endfunction
+
+// ---- z_compress split into 2 pipeline stages (timing) -----------------------
+// zc_stage1 = zero-detect + CLZ exponent (packs {is_zero, e[4:0], v[31:0]} = 38b)
+// zc_stage2 = the e-indexed barrel shift -> {e,mant}.  Together they are
+// bit-identical to z_compress(v) above (same zero case, same CLZ, same shift).
+// A register between them halves the ~3ns z_compress cone so the truecolor
+// z-write path (source_z_half -> z_src_pending_half) starts from a flop.
+function [37:0] zc_stage1;
+    input [31:0] v;
+    integer i;
+    reg [4:0] e; reg found;
+    begin
+        e = 5'd0; found = 1'b0;
+        for (i = 31; i >= 0; i = i - 1)
+            if (!found && v[i]) begin e = i[4:0]; found = 1'b1; end
+        zc_stage1 = {(v == 32'd0), e, v};   // [37]=is_zero, [36:32]=e, [31:0]=v
+    end
+endfunction
+function [15:0] zc_stage2;
+    input [37:0] s1;
+    reg is_zero; reg [4:0] e; reg [31:0] v; reg [10:0] mant;
+    begin
+        is_zero = s1[37]; e = s1[36:32]; v = s1[31:0];
+        if (is_zero) zc_stage2 = 16'd0;
+        else begin
+            if (e >= 5'd11) mant = v >> (e - 5'd11);
+            else            mant = v << (5'd11 - e);
+            zc_stage2 = {e, mant};
+        end
+    end
+endfunction
 
 function [3:0] fb_lane_mask;
     input [1:0] lane;
@@ -2077,6 +2391,90 @@ function [15:0] fb_halfword_read;
     input lane_hi;
     begin
         fb_halfword_read = lane_hi ? word_value[31:16] : word_value[15:0];
+    end
+endfunction
+
+// Truecolor Gouraud: scale an RGB565 texel by a 6-bit per-pixel brightness
+// (the interpolated `light` value, 0..63, reused from the palettized path).
+// scale = light+1 (1..64); each channel * scale >> 6 keeps full range at 63.
+function [15:0] rgb565_modulate;
+    input [15:0] texel;
+    input [5:0]  light;
+    reg   [6:0]  scale;
+    reg   [11:0] pr, pg, pb;
+    begin
+        scale = {1'b0, light} + 7'd1;
+        pr = texel[15:11] * scale;
+        pg = texel[10:5]  * scale;
+        pb = texel[4:0]   * scale;
+        rgb565_modulate = {pr[10:6], pg[11:6], pb[10:6]};
+    end
+endfunction
+
+// Truecolor per-channel Gouraud: scale each RGB565 texel channel by its own
+// interpolated vertex-colour channel (r 5b, g 6b, b 5b).  scale = ch+1 so a
+// full-range vertex colour (31,63,31) is identity (texel passes through), and
+// an untextured white texel (0xFFFF) yields the vertex colour itself.
+function [15:0] rgb565_gouraud;
+    input [15:0] texel;
+    input [4:0]  r;     // red   0..31
+    input [5:0]  g;     // green 0..63 (reuses the light slot)
+    input [4:0]  b;     // blue  0..31
+    reg   [5:0]  sr, sb;
+    reg   [6:0]  sg;
+    reg   [10:0] pr, pb;   // 5b * 6b -> <=992
+    reg   [12:0] pg;       // 6b * 7b -> <=4032
+    begin
+        sr = {1'b0, r} + 6'd1;
+        sg = {1'b0, g} + 7'd1;
+        sb = {1'b0, b} + 6'd1;
+        pr = texel[15:11] * sr;
+        pg = texel[10:5]  * sg;
+        pb = texel[4:0]   * sb;
+        rgb565_gouraud = {pr[9:5], pg[11:6], pb[9:5]};
+    end
+endfunction
+
+// SPIKE (Phase-0 timing): second stage of clamp(texel*C + D).  The signed
+// per-channel products texel*C are computed and registered in p1->p2; this
+// function does the +D add, clamp, and RGB565 repack in p2->p2b so the MAC is
+// split across the existing pipe boundary (not deepening p1->p2).
+function [15:0] rgb565_cd_finish;
+    input signed [13:0] pr;   // texel_r * C_r  (signed)
+    input signed [13:0] pg;   // texel_g * C_g
+    input signed [13:0] pb;   // texel_b * C_b
+    input [4:0] dr;           // D red   (additive)
+    input [5:0] dg;           // D green
+    input [4:0] db;           // D blue
+    reg signed [15:0] ar, ag, ab;
+    reg [4:0] or5, ob5;
+    reg [5:0] og6;
+    begin
+        ar = (pr >>> 5) + $signed({2'b0, dr});
+        ag = (pg >>> 6) + $signed({2'b0, dg});
+        ab = (pb >>> 5) + $signed({2'b0, db});
+        or5 = ar[15] ? 5'd0 : (ar > 16'sd31 ? 5'd31 : ar[4:0]);
+        og6 = ag[15] ? 6'd0 : (ag > 16'sd63 ? 6'd63 : ag[5:0]);
+        ob5 = ab[15] ? 5'd0 : (ab > 16'sd31 ? 5'd31 : ab[4:0]);
+        rgb565_cd_finish = {or5, og6, ob5};
+    end
+endfunction
+
+// Src-over alpha blend of two RGB565 colors: out = (src*a + dst*(64-a)) >> 6,
+// per channel.  a in 0..64 (64 = fully src/opaque, 0 = fully dst).  Used by the
+// truecolor constant-alpha blend path (OF_GPU_SPAN_BLEND).
+function [15:0] rgb565_blend;
+    input [15:0] src;
+    input [15:0] dst;
+    input [6:0]  a;        // 0..64
+    reg   [6:0]  na;
+    reg   [12:0] pr, pg, pb;
+    begin
+        na = 7'd64 - a;
+        pr = src[15:11] * a + dst[15:11] * na;   // 5b*7b + 5b*7b
+        pg = src[10:5]  * a + dst[10:5]  * na;   // 6b*7b + 6b*7b
+        pb = src[4:0]   * a + dst[4:0]   * na;   // 5b*7b + 5b*7b
+        rgb565_blend = {pr[10:6], pg[11:6], pb[10:6]};
     end
 endfunction
 
@@ -2143,6 +2541,8 @@ localparam S_SPANPROD_EMIT    = 6'd12; // emit generated span into fragment pipe
 localparam S_SPANPROD_SELECT  = 6'd13; // register current record before setup
 localparam S_TRI_FILL         = 6'd14; // collect walker records into chunk regs
 localparam S_TRI_DERIVE       = 6'd15; // run the 0x4B plane-derivation sub-FSM
+localparam S_XFORM            = 6'd16; // 0x51 transform front-end (feeds S_TRI_DERIVE)
+localparam S_VCREAD           = 6'd17; // T3: sequential 3-vert cache read (0x54)
                                        // (overlaps the walker setup window)
 
 reg [5:0] state;
@@ -2164,7 +2564,16 @@ reg cmd_is_draw_column_list;
 reg cmd_is_draw_param_tri;
 reg cmd_is_set_tri_state;
 reg cmd_is_draw_vert_tri;
+reg cmd_is_draw_vert_tri_rgb;    // 0x4E (truecolor per-vertex RGB)
 reg cmd_is_draw_param_tri_recs;
+reg cmd_is_set_object_state;     // 0x50
+reg cmd_is_draw_xform_tri;       // 0x51
+reg cmd_is_draw_xform_tri_rgb;   // 0x52 (T1 truecolor transform tri)
+reg cmd_is_draw_clip_tri;        // 0x4F clip-space-feed truecolor tri (skips the MAC)
+reg cmd_is_load_verts;           // 0x53 (T3 transform -> vertex cache)
+reg cmd_is_draw_indexed_tri;     // 0x54 (T3 indexed draw from cache)
+reg cmd_is_set_light_state;      // 0x55 (T4 sticky light state)
+reg cmd_is_load_vert_lit;        // 0x57 (T4 transform+light -> cache)
 reg cmd_is_flip;
 
 // ================================================================
@@ -2247,7 +2656,9 @@ wire tri_walker_done = !tri_start && !tri_busy && !tri_rec_valid;
 // 0x4D carries planes in its (short) payload and reuses the 0x4A sticky
 // surface state for everything else.
 wire cmd_is_tri_walker = cmd_is_draw_param_tri || cmd_is_draw_vert_tri
-                       || cmd_is_draw_param_tri_recs;
+                       || cmd_is_draw_param_tri_recs || cmd_is_draw_xform_tri
+                       || cmd_is_draw_vert_tri_rgb || cmd_is_draw_xform_tri_rgb
+                       || cmd_is_draw_indexed_tri || cmd_is_draw_clip_tri;
 
 // ================================================================
 // CMD_SET_TRI_STATE (0x4A) sticky state
@@ -2282,7 +2693,19 @@ reg signed [15:0]    tri_state_clip_y0, tri_state_clip_y1;
 // run in the dedicated DRV_PROD_* derivation-FSM states (off the S_PAY_DATA
 // decode cone), overwriting dv_szi/dv_tzi in place before DRV_DELTA.
 reg signed [31:0] vt_zi[0:2];   // Q16.16 zi
-reg [5:0]         vt_lrow [0:2]; // Q6 light rows
+reg signed [31:0] vt_depth[0:2]; // 0x4E per-vertex decoupled depth (1/w high-range)
+reg [5:0]         vt_lrow [0:2]; // Q6 light rows (= green for 0x4E RGB)
+reg [4:0]         vt_rrow [0:2]; // 0x4E per-vertex red   (5-bit)
+reg [4:0]         vt_brow [0:2]; // 0x4E per-vertex blue  (5-bit)
+// Combine D triple per-vertex inputs (22-word 0x4E words 19/20/21, RGB565).
+reg [4:0]         vt_Drrow [0:2]; // D red   (5-bit)
+reg [5:0]         vt_Dgrow [0:2]; // D green (6-bit)
+reg [4:0]         vt_Dbrow [0:2]; // D blue  (5-bit)
+// Per-triangle Q29 override (0x4B w13): q29_en selects Q29-scaled attr planes
+// (s*zi/t*zi/zi) for the world pre-lit-cache sampling path; shift is the shared
+// CPU magnitude estimate.  w13==0 => legacy Q16.16 derive (backward compatible).
+reg               vt_q29_en;
+reg [4:0]         vt_q29_shift;
 
 // ================================================================
 // Triangle plane derivation FSM
@@ -2429,6 +2852,17 @@ function signed [31:0] deriv_sat33;
     end
 endfunction
 
+// Saturating clamp of a signed 64-bit value to int16 — the transform
+// front-end's screen-coordinate clamp (matches the world path's int16 clamp).
+function signed [15:0] xf_sat16;
+    input signed [63:0] v;
+    begin
+        if (v > 64'sd32767)       xf_sat16 = 16'sd32767;
+        else if (v < -64'sd32768) xf_sat16 = -16'sd32768;
+        else                      xf_sat16 = v[15:0];
+    end
+endfunction
+
 // Per-vertex working set, kept in RAW (unsorted) vertex order.  Rather than
 // physically swapping six attribute arrays through the sort (a wide register
 // file plus a big swap-mux network), the sort only produces a 3-element order
@@ -2497,6 +2931,12 @@ reg signed [63:0] dv_acc;
 // starts from a register instead of behind the 64-bit adder.  No reset:
 // written by DRV_SCALE_LS strictly before DRV_SCALE_LF reads it.
 reg signed [63:0] drv_qsum_r;
+// Q29 timing pipeline (the -3.97 dv_du cone): the variable barrel shift is split
+// coarse(byte)/fine(0-7) across two registered stages + a negate/sat32 third.
+// q29_shamt is precomputed in DRV_SCALE_LS so the shift control is a register,
+// not a combinational mux off vt_q29_shift.
+reg [5:0]         q29_shamt_r;
+reg signed [63:0] drv_q_coarse, drv_q_fine;
 // Shared DSP-product capture registers for the derivation FSM.  The derivation
 // is strictly sequential (one DSP launch/capture in flight at a time), so one
 // 64-bit capture per DSP port is enough.  Splitting "read dsp_p -> arithmetic
@@ -2505,11 +2945,16 @@ reg signed [63:0] drv_qsum_r;
 // Mult1~mult_ll_pl -> 64-bit add -> shift -> saturate -> dsp_a, ~11.3 ns).
 reg signed [63:0] drv_prod_r;
 reg signed [63:0] drv2_prod_r;
+// Q29 anchor a0<<(13-sh) pre-formed in DRV_ORG_CAP (variable barrel shift) so
+// DRV_ORG_FORM is only the two 32-bit subtracts — splits the shift+sub+sub cone
+// that became the worst GPU path once tri_v* was decoupled.  deriv_a0_q +
+// vt_q29_shift + dv_attr are all stable between DRV_ORG_CAP and DRV_ORG_FORM.
+reg signed [31:0] a0_eff_r;
 // Low SPLIT bits of the current numerator (unsigned), preserved across the
 // hi-product DSP latency so DRV_SCALE_HC can launch the lo product.
 reg [DERIV_SPLIT-1:0] dv_num_lo;
 reg               dv_doing_dv;    // 0 = computing du, 1 = computing dv
-reg [2:0]         dv_attr;        // 0=szi 1=tzi 2=zi 3=light
+reg [3:0]         dv_attr;        // 0=szi 1=tzi 2=zi 3=light 4=R 5=B 6=depth 7=Dr 8=Dg 9=Db
 reg [4:0]         dstate;         // derivation sub-FSM state
 
 // Per-attribute clamped edge differences da1 = sat33(a1-a0), da2 = sat33(a2-a0)
@@ -2545,7 +2990,39 @@ always @(*) begin
         3'd0: begin deriv_attr[0] = dv_szi[0]; deriv_attr[1] = dv_szi[1]; deriv_attr[2] = dv_szi[2]; end
         3'd1: begin deriv_attr[0] = dv_tzi[0]; deriv_attr[1] = dv_tzi[1]; deriv_attr[2] = dv_tzi[2]; end
         3'd2: begin deriv_attr[0] = vt_zi[0]; deriv_attr[1] = vt_zi[1]; deriv_attr[2] = vt_zi[2]; end
-        default: begin
+        // attr 4 = RED, attr 5 = BLUE (truecolor RGB; 5-bit -> Q*.16).  Only
+        // reached when cmd_is_draw_vert_tri_rgb extends the derive loop past 3.
+        3'd4: begin
+            deriv_attr[0] = {11'd0, vt_rrow[0], 16'd0};
+            deriv_attr[1] = {11'd0, vt_rrow[1], 16'd0};
+            deriv_attr[2] = {11'd0, vt_rrow[2], 16'd0};
+        end
+        3'd5: begin
+            deriv_attr[0] = {11'd0, vt_brow[0], 16'd0};
+            deriv_attr[1] = {11'd0, vt_brow[1], 16'd0};
+            deriv_attr[2] = {11'd0, vt_brow[2], 16'd0};
+        end
+        3'd6: begin      // attr 6 = decoupled depth (0x4E), full 32-bit
+            deriv_attr[0] = vt_depth[0];
+            deriv_attr[1] = vt_depth[1];
+            deriv_attr[2] = vt_depth[2];
+        end
+        4'd7: begin      // attr 7 = D-red (combine), 5-bit -> Q*.16
+            deriv_attr[0] = {11'd0, vt_Drrow[0], 16'd0};
+            deriv_attr[1] = {11'd0, vt_Drrow[1], 16'd0};
+            deriv_attr[2] = {11'd0, vt_Drrow[2], 16'd0};
+        end
+        4'd8: begin      // attr 8 = D-green (combine), 6-bit -> Q*.16
+            deriv_attr[0] = {10'd0, vt_Dgrow[0], 16'd0};
+            deriv_attr[1] = {10'd0, vt_Dgrow[1], 16'd0};
+            deriv_attr[2] = {10'd0, vt_Dgrow[2], 16'd0};
+        end
+        4'd9: begin      // attr 9 = D-blue (combine), 5-bit -> Q*.16
+            deriv_attr[0] = {11'd0, vt_Dbrow[0], 16'd0};
+            deriv_attr[1] = {11'd0, vt_Dbrow[1], 16'd0};
+            deriv_attr[2] = {11'd0, vt_Dbrow[2], 16'd0};
+        end
+        default: begin   // attr 3 = light (= green for RGB, in vt_lrow)
             deriv_attr[0] = {10'd0, vt_lrow[0], 16'd0};
             deriv_attr[1] = {10'd0, vt_lrow[1], 16'd0};
             deriv_attr[2] = {10'd0, vt_lrow[2], 16'd0};
@@ -2599,6 +3076,8 @@ localparam DRV_DA_SEL    = 5'd28; // capture attr-mux outputs -> deriv_a*_q
 localparam DRV_SCALE_LS  = 5'd29; // register the 64-bit recombine sum
                                   // (H + L>>>SPLIT) -> drv_qsum_r, one cycle
                                   // ahead of DRV_SCALE_LF's shift/negate/sat
+localparam DRV_SCALE_LF2 = 5'd30; // Q29 barrel pipeline: fine shift (0-7)
+localparam DRV_SCALE_LF3 = 5'd31; // Q29 barrel pipeline: negate + sat32
 // TIMING DE-FOLD (2026-06): per-vertex szi/tzi numerator products, formed in the
 // derivation FSM (off the S_PAY_DATA decode cone).  Run after the y-sort, before
 // the edge-delta stage, inside the walker's idle setup window.  Raw s_k/t_k are
@@ -2613,6 +3092,115 @@ localparam DRV_PROD_L2C0 = 5'd25; // launch k=2, capture k=0
 localparam DRV_PROD_C1   = 5'd26; // capture k=1
 localparam DRV_PROD_C2   = 5'd27; // capture k=2 -> DRV_DELTA
 
+// ============================================================
+// CMD_DRAW_XFORM_TRI (0x51) transform front-end registers.
+// Per-vertex cam = M*{v,1} (Q16.16) + perspective projection, producing the
+// derive's existing inputs (tri_v*_x/y screen, dv_szi/dv_tzi raw s/t, vt_zi).
+// Matrix + proj consts are loaded by CMD_SET_OBJECT_STATE (0x50, sticky).
+// ============================================================
+// M10K-backed (frees ~the 640 FF + the two async 20:1 read muxes from ALMs).
+// Single sync read port (xf_M_q): the MAC loop serializes the 4 reads per row
+// (M[row][0..2] products + M[row][3] translate) through it; no_rw_check because
+// the 0x50 sticky load and the transform reads never overlap in time.
+(* ramstyle = "M10K, no_rw_check" *)
+reg signed [31:0] xf_M [0:19];          // up to 5x4 matrix (rows 0-2 cam,
+                                        // 3-4 = s/t for N=5 world), Q16.16
+reg signed [31:0] xf_xc, xf_yc;         // screen center (px)
+reg signed [31:0] xf_xscale, xf_yscale; // pixel scale
+reg signed [31:0] xf_nearclip;          // Q16.16 min cam.z
+reg signed [31:0] xf_vx [0:2];          // raw verts {x,y,z} Q16.16
+reg signed [31:0] xf_vy [0:2];
+reg signed [31:0] xf_vz [0:2];
+reg signed [31:0] xf_camx, xf_camy, xf_camz;
+reg signed [63:0] xf_acc;               // MAC accumulator (full products, Q32.32)
+reg [1:0]  xf_vtx, xf_idx;
+reg [2:0]  xf_row;                      // 0-2 cam, 3-4 s/t (N=5 world)
+reg [2:0]  xf_rows;                     // matrix row count: 3 (alias) or 5 (world)
+reg        xf_q29_en;                   // world path: Q29-scale the derived planes
+reg [4:0]  xf_q29_shift;                // CPU conservative magnitude shift
+reg signed [31:0] xf_dsp_a, xf_dsp_b;   // xform DSP domain (single multiplier)
+reg [4:0]  xf_state;                    // transform sub-FSM
+reg [1:0]  xf_behind;                    // T2: count of verts with cam.z<nearclip
+                                        // (==3 -> whole tri behind near -> reject)
+reg signed [63:0] xf_sx_r, xf_sy_r;     // projection: the screen.x/y 64-bit add
+// Dedicated projected-vertex holding regs: the transform writes these, and a
+// single XF_PROJ_LAUNCH state parallel-loads them into the shared tri_v*_x/y.
+// Keeps the saturating projection compute OUT of the tri_v* next-state mux,
+// which (merged with the param/vert payload writers) was the -1.59 ns cone.
+reg signed [15:0] xf_sx [0:2], xf_sy [0:2];
+                                        // result, registered to split it from the
+                                        // sat16 (the post-Q29-fix worst cone).
+// transform reciprocal: zi = floor(2^32 / cz), restoring division (33 beats)
+reg [32:0] xf_div_dividend;
+reg [31:0] xf_div_divisor;
+reg [31:0] xf_div_rem;
+reg [31:0] xf_div_q;
+reg [5:0]  xf_div_cnt;
+wire [32:0] xf_div_try  = {xf_div_rem, xf_div_dividend[32]};
+wire        xf_div_ge   = xf_div_try >= {1'b0, xf_div_divisor};
+wire [31:0] xf_div_next = xf_div_ge ? (xf_div_try - {1'b0, xf_div_divisor})
+                                    :  xf_div_try[31:0];
+// xf_M M10K read port: xf_idx walks 0..3 per row (0-2 = cam/texvec products,
+// 3 = the translate column M[row][3]); xf_rd_addr = row*4 + xf_idx.  XF_MAC_A
+// issues the read, xf_M_q is valid one cycle later in XF_MAC_L.
+wire [4:0] xf_rd_addr = {xf_row, 2'b00} + {3'b0, xf_idx};
+reg signed [31:0] xf_M_q;               // registered read data
+reg signed [31:0] xf_transl;            // captured M[row][3] for XF_ROW_DONE
+// AND in INCLUDE_VERT_TRI so xf_M's read port constant-folds to 0 on os25 (no
+// writer there — the 0x50 set_object_state decode is INCLUDE_VERT_TRI-gated), so
+// the 20x32 array prunes deterministically at elaboration instead of relying on
+// Quartus late dead-output elimination (which left a synthesized-away warning).
+always @(posedge clk) xf_M_q <= ((INCLUDE_GPU_XFORM_MAC != 0) && (INCLUDE_VERT_TRI != 0)) ? xf_M[xf_rd_addr] : 32'sd0;
+localparam XF_MAC_L=5'd0, XF_MAC_W=5'd1, XF_MAC_C=5'd2, XF_ROW_DONE=5'd3,
+           XF_RECIP_INIT=5'd4, XF_RECIP_RUN=5'd5,
+           XF_PROJ_XA=5'd6,  XF_PROJ_XW=5'd7,  XF_PROJ_XC=5'd8,
+           XF_PROJ_XW2=5'd9, XF_PROJ_XS=5'd10,
+           XF_PROJ_YA=5'd11, XF_PROJ_YW=5'd12, XF_PROJ_YC=5'd13,
+           XF_PROJ_YW2=5'd14, XF_PROJ_YS=5'd15,
+           XF_PROJ_XS2=5'd16, XF_PROJ_YS2=5'd17,
+           XF_PROJ_LAUNCH=5'd18;
+
+// ============================================================
+// T3: GPU vertex cache (transform-once / draw-many; Fast3D G_VTX/G_TRI).
+// 0x53 LOAD_VERTS transforms one raw vert through S_XFORM and writes a cache
+// slot; 0x54 DRAW_INDEXED_TRI reads 3 slots into the derive's existing inputs
+// and launches the derive (sp_rgb=1).  Folds to a 1-slot stub when disabled.
+// ============================================================
+localparam VC_SLOTS = (INCLUDE_VTX_CACHE != 0) ? 32 : 1;
+// One packed slot per entry: {b5,g6,r5, depth32, t32, s32, zi32, sy16, sx16}.
+// MLAB-backed (NOT a register file) so it stays off the near-full M10K budget
+// and out of ALMs-as-FFs: single write port (0x53/0x57) + single registered
+// read port (0x54 reads the 3 indices SEQUENTIALLY over 3 cycles in S_VCREAD).
+localparam VC_W = 176;
+// no_rw_check: 0x53/0x57 (write) and 0x54 (read) are distinct commands, never
+// the same cycle, so read-during-write behaviour is don't-care — required or
+// Quartus leaves vc_mem as a register file (RAM logic uninferred).
+(* ramstyle = "MLAB, no_rw_check" *) reg [VC_W-1:0] vc_mem [0:VC_SLOTS-1];
+reg [VC_W-1:0] vc_q;            // registered read data
+reg [4:0]      vc_raddr;        // cache read address
+reg [1:0]      vcr_cnt;         // sequential 3-vert read counter (0x54)
+reg        xf_to_cache;        // T3: this S_XFORM run writes the cache (0x53/0x57)
+reg [1:0]  xf_last_vtx;        // T3: last vert index (0 for load, 2 for tri)
+reg [4:0]  xf_load_slot;       // T3: destination cache slot for 0x53/0x57
+reg [4:0]  vc_i0, vc_i1, vc_i2; // T3: 0x54 indexed-draw cache indices
+
+// T4: GPU per-vertex lighting — sticky state (0x55) + lit cache-load (0x57).
+// color = clamp(ambient + clamp(N.L,0) * lightcolor), per RGB565 channel.
+reg signed [31:0] lt_lx, lt_ly, lt_lz;   // light direction (object space), Q16.16
+reg [4:0]  lt_lr, lt_lb;                  // light colour R/B (5-bit)
+reg [5:0]  lt_lg;                         // light colour G (6-bit)
+reg [4:0]  lt_ar, lt_ab;                  // ambient R/B
+reg [5:0]  lt_ag;                         // ambient G
+reg        lt_enable;
+reg signed [31:0] xf_nx, xf_ny, xf_nz;    // per-vertex normal (lit load), Q16.16
+reg        xf_lit;                         // this S_XFORM run computes lighting
+reg        xf_clip;                        // this S_XFORM run is a clip-space feed (skips the MAC)
+reg signed [31:0] xf_dot;                  // clamped N.L (Q16.16, 0..0x10000)
+localparam XF_LIT_DL=5'd19, XF_LIT_DW=5'd20, XF_LIT_DC=5'd21, XF_LIT_CLAMP=5'd22,
+           XF_LIT_CL=5'd23, XF_LIT_CW=5'd24, XF_LIT_CC=5'd25;
+localparam XF_MAC_A=5'd26;   // M10K read-issue cycle before XF_MAC_L (xf_M_q latency)
+localparam XF_CLIP_FEED=5'd27;  // clip-tri: load cam{x,y,z}<=clip{x,y,w}, jump to XF_RECIP_INIT
+
 // Outstanding-write tracker for CMD_FENCE / CMD_FLIP drain semantics.
 // Increments on m_wr_* AW handshake.  Decrements on m_wr_bvalid (slave
 // pulses it for one cycle since axi_sdram_slave's bready is hardwired to 1
@@ -2621,6 +3209,7 @@ localparam DRV_PROD_C2   = 5'd27; // capture k=2 -> DRV_DELTA
 // / gpu_swap_req only fire after pixel writes commit to SDRAM.  4 bits is
 // plenty (typical inflight is 1-3).
 reg [3:0] m_wr_inflight;
+
 
 // Latched payload for CMD_FENCE / CMD_FLIP — published only after
 // m_wr_inflight drains in S_EXECUTE.  Pre-CR the fence token was
@@ -2699,12 +3288,14 @@ endtask
 //   * fb_write_buffer_stall          — p3 crossed words while the FB write
 //                                      queue has no free entry
 //
-// Source mode: 0 = SPAN (sp_*).
 // p0a: source snapshot / DSP-input stage.  This stage is intentionally small
 // and local: it breaks the timing path from the wide sp_* source muxes into
 // the texture-row multiply.
 reg        p0a_valid;
 reg [5:0]  p0a_light;
+reg [4:0]  p0a_R, p0a_B;   // truecolor RGB Gouraud red/blue (green = p0a_light)
+(* ramstyle = "logic" *) reg [4:0] p0a_Dr, p0a_Db;   // combine D red/blue
+(* ramstyle = "logic" *) reg [5:0] p0a_Dg;            // combine D green
 reg [3:0]  p0a_colormap_id;
 reg [3:0]  p0a_flags;
 reg [GPU_ADDR_W-1:0] p0a_fb_addr;
@@ -2723,6 +3314,9 @@ reg [15:0] p0a_z_value;
 // req_valid.
 reg        p0_valid;
 reg [5:0]  p0_light;
+reg [4:0]  p0_R, p0_B;
+(* ramstyle = "logic" *) reg [4:0] p0_Dr, p0_Db;
+(* ramstyle = "logic" *) reg [5:0] p0_Dg;
 reg [3:0]  p0_colormap_id;
 reg [3:0]  p0_flags;
 reg [GPU_ADDR_W-1:0] p0_fb_addr;
@@ -2741,6 +3335,9 @@ reg [15:0] p0_z_value;
 
 reg        p1_valid;
 reg [5:0]  p1_light;
+reg [4:0]  p1_R, p1_B;
+(* ramstyle = "logic" *) reg [4:0] p1_Dr, p1_Db;
+(* ramstyle = "logic" *) reg [5:0] p1_Dg;
 reg [3:0]  p1_colormap_id;
 reg [3:0]  p1_flags;
 reg [GPU_ADDR_W-1:0] p1_fb_addr;
@@ -2749,10 +3346,17 @@ reg        p1_z_write;
 reg [GPU_ADDR_W-1:0] p1_z_addr;
 reg [15:0] p1_z_value;
 reg        p1_tex_ready;
-reg [7:0]  p1_tex_color;
+reg [15:0] p1_tex_color;       // 16-bit for truecolor RGB565; low byte = CI8
 
 reg        p2_valid;
-reg [7:0]  p2_color;          // tex result
+reg [15:0] p2_color;          // tex result (16-bit RGB565 in truecolor)
+// Combiner texel*C+D: registered signed per-channel products texel*C computed
+// in p1->p2; +D/clamp/RGB565-repack finished in p2->p2b (rgb565_cd_finish), so
+// the MAC is split across the existing pipe boundary.  p2_dC_* stage the
+// independent per-vertex D triple to the p2->p2b add.
+(* ramstyle = "logic" *) reg signed [13:0] p2_pr, p2_pg, p2_pb;
+(* ramstyle = "logic" *) reg [4:0]  p2_dC_r, p2_dC_b;   // staged D red/blue (p2->p2b)
+(* ramstyle = "logic" *) reg [5:0]  p2_dC_g;            // staged D green
 reg [3:0]  p2_flags;
 reg [GPU_ADDR_W-1:0] p2_fb_addr;
 reg        p2_discard;        // skip-zero outcome
@@ -2765,7 +3369,7 @@ reg [15:0] p2_z_value;
 // Cmap BRAM has 2-cycle effective latency from NB-set of cmap_rd_addr to
 // cmap_rd_data being valid for that index, so we need a no-op shift stage.
 reg        p2b_valid;
-reg [7:0]  p2b_color;
+reg [15:0] p2b_color;
 reg [3:0]  p2b_flags;
 reg [GPU_ADDR_W-1:0] p2b_fb_addr;
 reg        p2b_discard;
@@ -2775,7 +3379,7 @@ reg [GPU_ADDR_W-1:0] p2b_z_addr;
 reg [15:0] p2b_z_value;
 
 reg        p3_valid;
-reg [7:0]  p3_color;          // final color (post-cmap if applicable)
+reg [15:0] p3_color;          // final color (post-cmap; 16-bit RGB565 in truecolor)
 reg [3:0]  p3_flags;
 reg [GPU_ADDR_W-1:0] p3_fb_addr;
 reg        p3_discard;
@@ -2809,7 +3413,22 @@ localparam FBSS_BLEND_LUT_WAIT = 4'd9;
 localparam FBSS_BLEND_APPLY    = 4'd10;
 localparam FBSS_BLEND_SELECT   = 4'd11;
 localparam FBSS_BLEND_LOOKUP   = 4'd13;
-reg [3:0] fbss;
+// Truecolor constant-alpha src-over blend (OF_GPU_SPAN_BLEND): read the dst
+// RGB565 pixel, mix with p3_color by sp_const_alpha, write back.  Uses the free
+// fbss codes; INCLUDE_DIRECT_COLOR-gated (unreachable when sp_blend is const 0).
+localparam FBSS_CB_REQ         = 4'd1;   // flush fb_acc, wait drain, issue read
+localparam FBSS_CB_AR          = 4'd3;   // wait AR accepted
+localparam FBSS_CB_R           = 4'd14;  // capture dst halfword (read response)
+localparam FBSS_CB_BLEND       = 4'd15;  // stage-1: per-channel weighted sums (pipeline)
+localparam FBSS_CB_BLEND2      = 5'd16;  // stage-2: >>6 + repack -> fb_acc (pipeline)
+reg [4:0] fbss;
+// Pipeline reg: the dst halfword captured in FBSS_CB_R so rgb565_blend runs
+// register-to-register in FBSS_CB_BLEND (splits the read-response -> 6-mul blend
+// -> fb_acc logic-depth cone that was the worst GPU timing path).
+reg [15:0] cb_dst_r;
+// Stage-1 per-channel weighted sums (src*a6 + dst*(64-a6)); >>6+repacked in
+// FBSS_CB_BLEND2 so the 6-multiply blend cone is split register-to-register.
+reg [12:0] cb_sr, cb_sg, cb_sb;
 
 // Registered accumulator-hit depth test.  The hot z path was previously:
 // p3_z_addr -> z_acc_addr compare -> halfword select -> depth compare ->
@@ -2869,6 +3488,7 @@ reg [3:0]              zw_valid;
 reg [GPU_ADDR_W-5:0]   zw_base;       // byte addr [GPU_ADDR_W-1:4]
 reg [31:0]             zw_word [0:3];
 reg [1:0]              zw_fill_beat;
+
 // Registered write snoop (timing: 156 of the 200 worst paths on the first
 // OS30 fit ended at zw_valid — the push-address mux from fb_acc/z_acc/p3
 // plus the queue-full enable fed the line compare + word decode in ONE
@@ -3162,8 +3782,24 @@ wire p3_needs_fb_flush = p3_valid && !p3_discard && !p3_flags[SPAN_TRANSLUC]
                        && (fb_acc_addr[GPU_ADDR_W-1:2] != p3_fb_addr[GPU_ADDR_W-1:2]);
 wire fb_write_buffer_stall = p3_needs_fb_flush && !fb_write_can_issue;
 wire [GPU_ADDR_W-1:0] p3_fb_word_addr_w = p3_fb_addr & {{(GPU_ADDR_W-2){1'b1}}, 2'b00};
-wire [3:0]  p3_fb_lane_mask_w = fb_lane_mask(p3_fb_addr[1:0]);
-wire [31:0] p3_fb_lane_data_w = fb_lane_data(p3_fb_addr[1:0], p3_color);
+// Truecolor writes a 16-bit RGB565 pixel (2 byte lanes, selected by
+// p3_fb_addr[1]); palettized writes one CI8 byte lane (existing path).
+wire [3:0]  p3_fb_lane_mask_w = sp_truecolor
+                              ? (p3_fb_addr[1] ? 4'b1100 : 4'b0011)
+                              : fb_lane_mask(p3_fb_addr[1:0]);
+wire [31:0] p3_fb_lane_data_w = sp_truecolor
+                              ? (p3_fb_addr[1] ? {p3_color[15:0], 16'b0}
+                                               : {16'b0, p3_color[15:0]})
+                              : fb_lane_data(p3_fb_addr[1:0], p3_color[7:0]);
+// Constant-alpha blend (OF_GPU_SPAN_BLEND), pipelined to keep the 6-multiply
+// cone off the critical path: weight sp_a6 (0..64) is precomputed at EMIT;
+// cb_dst_half_w = read-response halfword captured into cb_dst_r in FBSS_CB_R;
+// FBSS_CB_BLEND multiplies into cb_sr/cb_sg/cb_sb (register->register); cb_mixed_w
+// is the >>6 + repack, written in FBSS_CB_BLEND2.  Prunes when sp_blend const 0.
+wire [15:0] cb_dst_half_w  = p3_fb_addr[1] ? blend_rdata[31:16] : blend_rdata[15:0];
+wire [15:0] cb_mixed_w     = {cb_sr[10:6], cb_sg[11:6], cb_sb[10:6]};
+wire [31:0] cb_lane_data_w = p3_fb_addr[1] ? {cb_mixed_w, 16'b0}
+                                           : {16'b0, cb_mixed_w};
 // ADDR dedup (audit A1): the 32-bit byte-lane data mask is the byte-wise
 // replication of the 4-bit strobe — derive it from the ONE lane decoder
 // above instead of elaborating fb_lane_data_mask()'s second 2:4 decode.
@@ -3202,14 +3838,18 @@ wire fp_pipe_stall = fp_pipe_shift_blocked || cmap_pipe_wait;
 // mod-2^26 (the SDRAM-visible address space) and only [GPU_ADDR_W-1:0]
 // reaches tex_req_addr / gpu_tex_cache, so the add lives in the narrow
 // domain.  Slicing each addend to GPU_ADDR_W keeps the addition width-clean.
-wire [GPU_ADDR_W-1:0] fp_tex_addr_full = p0_tex_base
-                             + tx_mul_q[GPU_ADDR_W-1:0]
+// Texel offset in texels (t*width + s); the GPU works in texel units so
+// tex_width/masks stay identical for both formats.  Truecolor texels are
+// 2 bytes, so the byte offset is the texel offset << 1.
+wire [GPU_ADDR_W-1:0] fp_tex_offset = tx_mul_q[GPU_ADDR_W-1:0]
                              + {{(GPU_ADDR_W-16){p0_s_int[15]}}, p0_s_int};
+wire [GPU_ADDR_W-1:0] fp_tex_addr_full = p0_tex_base
+                             + (sp_truecolor ? (fp_tex_offset << 1) : fp_tex_offset);
 
 assign tex_req_valid = (state == S_FRAG_PIPE) && p0_valid
                     && !p1_valid;
 assign tex_req_addr  = fp_tex_addr_full;
-assign tex_req_wide  = 1'b0;
+assign tex_req_wide  = sp_truecolor;   // 16-bit texel fetch for direct-color surfaces
 
 // ----------------------------------------------------------------
 // Perspective span — projection-space state + segment setup
@@ -3293,6 +3933,16 @@ reg signed [31:0] persp_pend_s;
 reg signed [31:0] persp_pend_t;
 reg signed [31:0] persp_pend_sstep;
 reg signed [31:0] persp_pend_tstep;
+// Pending-slot (slot B) quadratic 2nd-difference, copied into sp_scc/sp_tcc on
+// the segment swap.  Zero except on a TRUECOLOR full-16px quadratic segment.
+reg signed [31:0] persp_pend_scc;
+reg signed [31:0] persp_pend_tcc;
+// Previous segment's start anchor A_{N-1} (the 3-point parabola baseline) plus
+// its validity (0 until persp_anchor has advanced once this span, so the first
+// full segment stays linear — no A_{N-1} exists yet).
+reg signed [31:0] persp_prev_anchor_s;
+reg signed [31:0] persp_prev_anchor_t;
+reg        persp_prev_valid;
 reg        persp_seg_b_ready;
 reg        persp_swap_pending;
 
@@ -3598,8 +4248,7 @@ reg [7:0]  cr_color;
 // Stage 1: register multiply inputs for DSP inference.
 // Stage 2: DSP multiply + add, submit to cache.
 //
-// Multiply mode (tex_width > 0): addr = base + (t>>16)*width + (s>>16)
-// Shift mode (tex_width == 0):   addr = base + ((t>>shift)<<bits) | (s>>(32-bits))
+// Multiply mode: addr = base + (t>>16)*width + (s>>16)
 
 // The pipelined fragment processor uses tx_mul_q (the dedicated
 // DSP-inferred register below) for the per-pixel tex-coord multiply.
@@ -3707,7 +4356,21 @@ always @(posedge clk) begin : main_fsm
         cmd_is_draw_param_tri <= 0;
         cmd_is_set_tri_state <= 0;
         cmd_is_draw_vert_tri <= 0;
+        cmd_is_draw_vert_tri_rgb <= 0;
         cmd_is_draw_param_tri_recs <= 0;
+        cmd_is_set_object_state <= 0;
+        cmd_is_draw_xform_tri <= 0;
+        cmd_is_draw_xform_tri_rgb <= 0;
+        cmd_is_draw_clip_tri <= 0;
+        cmd_is_load_verts <= 0;
+        cmd_is_draw_indexed_tri <= 0;
+        cmd_is_set_light_state <= 0;
+        cmd_is_load_vert_lit <= 0;
+        xf_to_cache <= 1'b0;
+        xf_lit <= 1'b0;
+        lt_enable <= 1'b0;
+        zc_s1_z <= 38'd0; zc_s2_z <= 16'd0; zc_s1_d <= 38'd0; zc_s2_d <= 16'd0;
+        sp_z_la <= 32'sd0; sp_depth_la <= 32'sd0; g_zwarm <= 2'd0;
         tri_state_valid <= 1'b0;
         tri_start <= 1'b0;
         tri_fill_idx <= 3'd0;
@@ -3720,6 +4383,12 @@ always @(posedge clk) begin : main_fsm
         pay_remaining <= 0;
         // Pipelined fragment processor reset
         p0a_valid <= 0; p0a_light <= 0; p0a_colormap_id <= 0; p0a_flags <= 0;
+        p0a_R <= 0; p0a_B <= 0; p0_R <= 0; p0_B <= 0; p1_R <= 0; p1_B <= 0;
+        sp_R_q <= 0; sp_R_step <= 0; sp_B_q <= 0; sp_B_step <= 0; sp_rgb <= 0;
+        p0a_Dr <= 0; p0a_Dg <= 0; p0a_Db <= 0;
+        p0_Dr <= 0; p0_Dg <= 0; p0_Db <= 0; p1_Dr <= 0; p1_Dg <= 0; p1_Db <= 0;
+        sp_Dr_q <= 0; sp_Dr_step <= 0; sp_Dg_q <= 0; sp_Dg_step <= 0;
+        sp_Db_q <= 0; sp_Db_step <= 0;
         p0a_fb_addr <= 0;
         p0a_s_int <= 0; p0a_tex_base <= 0;
         p0a_t_y <= 0; p0a_tex_width <= 0;
@@ -3733,8 +4402,10 @@ always @(posedge clk) begin : main_fsm
         p1_fb_addr <= 0;
         p1_z_test <= 0; p1_z_write <= 0; p1_z_addr <= 0; p1_z_value <= 0;
         p1_tex_ready <= 1'b0;
-        p1_tex_color <= 8'd0;
+        p1_tex_color <= 16'd0;
         p2_valid <= 0; p2_color <= 0; p2_flags <= 0;
+        p2_pr <= 0; p2_pg <= 0; p2_pb <= 0;        // SPIKE
+        p2_dC_r <= 0; p2_dC_g <= 0; p2_dC_b <= 0;  // SPIKE
         p2_fb_addr <= 0; p2_discard <= 0;
         p2_z_test <= 0; p2_z_write <= 0; p2_z_addr <= 0; p2_z_value <= 0;
         p2b_valid <= 0; p2b_color <= 0; p2b_flags <= 0;
@@ -3807,9 +4478,13 @@ always @(posedge clk) begin : main_fsm
         sp_seg_left <= 0;
         persp_seg_a_ready <= 0;
         persp_anchor_s <= 0; persp_anchor_t <= 0;
+        persp_prev_anchor_s <= 0; persp_prev_anchor_t <= 0;
+        persp_prev_valid <= 0;
+        sp_scc <= 0; sp_tcc <= 0;
         persp_first_done <= 0;
         persp_pend_s <= 0; persp_pend_t <= 0;
         persp_pend_sstep <= 0; persp_pend_tstep <= 0;
+        persp_pend_scc <= 0; persp_pend_tcc <= 0;
         persp_seg_b_ready <= 0;
         persp_swap_pending <= 1'b0;
         persp_pss <= PSS_IDLE;
@@ -3847,6 +4522,8 @@ always @(posedge clk) begin : main_fsm
         recip_rd_addr <= 0;
         // State registers
         sp_tex_w_mask <= 16'hFFFF; sp_tex_h_mask <= 16'hFFFF;
+        sp_mirror_s <= 1'b0; sp_mirror_t <= 1'b0;
+        sp_cd_combine <= 1'b0; spanprod_cd_combine <= 1'b0;
         st_fb_stride <= 320;
     end else begin
         // Ring reset: set the read pointer to the start of ring BRAM.
@@ -3893,7 +4570,7 @@ always @(posedge clk) begin : main_fsm
             p0_valid <= 1'b0;
             p1_valid <= 1'b0;
             p1_tex_ready <= 1'b0;
-            p1_tex_color <= 8'd0;
+            p1_tex_color <= 16'd0;
             p2_valid <= 1'b0;
             p2b_valid <= 1'b0;
             p3_valid <= 1'b0;
@@ -3929,7 +4606,15 @@ always @(posedge clk) begin : main_fsm
             cmd_is_draw_param_tri <= 1'b0;
             cmd_is_set_tri_state <= 1'b0;
             cmd_is_draw_vert_tri <= 1'b0;
+            cmd_is_draw_vert_tri_rgb <= 1'b0;
             cmd_is_draw_param_tri_recs <= 1'b0;
+            cmd_is_set_object_state <= 1'b0;
+            cmd_is_draw_xform_tri <= 1'b0;
+            cmd_is_draw_xform_tri_rgb <= 1'b0;
+            cmd_is_draw_clip_tri <= 1'b0;
+            cmd_is_load_verts <= 1'b0;
+            cmd_is_draw_indexed_tri <= 1'b0;
+            cmd_is_set_light_state <= 1'b0;
             // 0x4A sticky bank is invalidated on soft_reset so a 0x4B after a
             // reset is a no-op until a fresh 0x4A re-arms the state.
             tri_state_valid <= 1'b0;
@@ -4185,10 +4870,20 @@ always @(posedge clk) begin : main_fsm
             // ALSO wrapped in the same constant) stays constant-inactive, so
             // the derivation logic sweeps even though tri_state_valid is now
             // a live register on every target.
+            // Accept 16-word (legacy) OR 17-word (w16 = OF_GPU_SPAN_BLEND const
+            // alpha) 0x4A.  Forcing ==17 would no-op every existing 16-word
+            // sender (palettized/Quake2, all current tests).
             cmd_is_set_tri_state <=
-                (cmd_type == CMD_SET_TRI_STATE && cmd_payload_words == 13'd16);
+                (cmd_type == CMD_SET_TRI_STATE
+                 && (cmd_payload_words == 13'd16 || cmd_payload_words == 13'd17));
             cmd_is_draw_vert_tri <= (INCLUDE_VERT_TRI != 0) &&
                 (cmd_type == CMD_DRAW_VERT_TRI && cmd_payload_words == 13'd14);
+            // 0x4E: per-vertex RGB truecolor triangle (16-word payload).  Gated
+            // on BOTH INCLUDE_VERT_TRI and INCLUDE_DIRECT_COLOR so the whole RGB
+            // path (extra derive passes, sp_R/B, modulate) prunes off os30.
+            cmd_is_draw_vert_tri_rgb <= (INCLUDE_VERT_TRI != 0) && (INCLUDE_DIRECT_COLOR != 0) &&
+                (cmd_type == CMD_DRAW_VERT_TRI_RGB &&
+                 (cmd_payload_words == 13'd19 || cmd_payload_words == 13'd22));
             // Records-only param-tri (0x4D): per-triangle planes + verts on
             // top of the 0x4A sticky state.  Wrong-sized payloads drain and
             // retire as a no-op.
@@ -4201,6 +4896,42 @@ always @(posedge clk) begin : main_fsm
             // drain path — and Quartus sweeps the 0x4D routing/bring-up arms.
             cmd_is_draw_param_tri_recs <= (INCLUDE_PARAM_TRI_RECS != 0) &&
                 (cmd_type == CMD_DRAW_PARAM_TRI_RECS && cmd_payload_words == 13'd16);
+            // 0x50 sticky transform matrix/proj; 0x51 raw-vertex transform tri.
+            // Gated on INCLUDE_VERT_TRI (they feed the same derive datapath).
+            cmd_is_set_object_state <= (INCLUDE_VERT_TRI != 0) &&
+                ((INCLUDE_GPU_XFORM_MAC != 0) || (INCLUDE_XFORM_RGB != 0) || (INCLUDE_CLIP_TRI != 0)) &&
+                (cmd_type == CMD_SET_OBJECT_STATE && cmd_payload_words == 13'd26);
+            cmd_is_draw_xform_tri <= (INCLUDE_VERT_TRI != 0) && (INCLUDE_GPU_XFORM_MAC != 0) &&
+                (cmd_type == CMD_DRAW_XFORM_TRI && cmd_payload_words == 13'd16);
+            // T1: 0x52 truecolor transform tri.  18-word payload: 3 verts {x,y,z}
+            // + 3 {s,t} + 3 RGB565.  GPU computes zi+depth (no per-draw zi/depth
+            // words).  Gated on the RGB datapath (XFORM_RGB+DIRECT_COLOR+VERT_TRI).
+            cmd_is_draw_xform_tri_rgb <= (INCLUDE_VERT_TRI != 0) && (INCLUDE_DIRECT_COLOR != 0) &&
+                (INCLUDE_XFORM_RGB != 0) &&
+                (cmd_type == CMD_DRAW_XFORM_TRI_RGB && cmd_payload_words == 13'd18);
+            // Clip-space feed (0x4F): wire-identical to 0x52 (18w), but the 3
+            // "verts" are CPU-computed M*v clip {x,y,w}; S_XFORM skips the matrix
+            // MAC and feeds recip+project directly.  Truecolor; needs no matrix.
+            cmd_is_draw_clip_tri <= (INCLUDE_VERT_TRI != 0) && (INCLUDE_DIRECT_COLOR != 0) &&
+                (INCLUDE_CLIP_TRI != 0) &&
+                (cmd_type == CMD_DRAW_CLIP_TRI && cmd_payload_words == 13'd18);
+            // T3: 0x53 LOAD_VERTS (header word + up to 8 verts x 6 words -> <=49
+            // payload words, fits the 6-bit pay_idx) and 0x54 DRAW_INDEXED_TRI
+            // (1 word: 3 cache indices).  Gated on the vertex cache.
+            cmd_is_load_verts <= (INCLUDE_VTX_CACHE != 0) && (INCLUDE_XFORM_RGB != 0) &&
+                (cmd_type == CMD_LOAD_VERTS &&
+                 cmd_payload_words >= 13'd7 && cmd_payload_words <= 13'd49);
+            cmd_is_draw_indexed_tri <= (INCLUDE_VTX_CACHE != 0) && (INCLUDE_XFORM_RGB != 0) &&
+                (cmd_type == CMD_DRAW_INDEXED_TRI && cmd_payload_words == 13'd1);
+            // T4: 0x55 SET_LIGHT_STATE sticky (6 words: dir x/y/z, light RGB565,
+            // ambient RGB565, enable/count).
+            cmd_is_set_light_state <= (INCLUDE_GPU_LIGHT != 0) && (INCLUDE_XFORM_RGB != 0) &&
+                (cmd_type == CMD_SET_LIGHT_STATE && cmd_payload_words == 13'd6);
+            // T4: 0x57 LOAD_VERT_LIT (9 words: slot + xyz + normal-xyz + s/t) —
+            // GPU transforms position AND computes lighting -> cache slot.
+            cmd_is_load_vert_lit <= (INCLUDE_GPU_LIGHT != 0) && (INCLUDE_VTX_CACHE != 0) &&
+                (INCLUDE_XFORM_RGB != 0) &&
+                (cmd_type == CMD_LOAD_VERT_LIT && cmd_payload_words == 13'd9);
             cmd_is_flip           <= (cmd_type == CMD_FLIP);
 
             if (cmd_payload_words == 0) begin
@@ -4367,6 +5098,7 @@ always @(posedge clk) begin : main_fsm
                         tri_state_clip_y0 <= ring_rd_data[15:0];
                         tri_state_clip_y1 <= ring_rd_data[31:16];
                     end
+                    6'd16: spanprod_const_alpha <= ring_rd_data[7:0]; // 17-word 0x4A: OF_GPU_SPAN_BLEND src alpha
                     default: ;
                 endcase
             end
@@ -4411,6 +5143,199 @@ always @(posedge clk) begin : main_fsm
                         vt_lrow[1] <= ring_rd_data[11:6];
                         vt_lrow[2] <= ring_rd_data[17:12];
                     end
+                    6'd13: begin
+                        // per-triangle Q29 override: bit5 = q29 enable, [4:0] =
+                        // shared attr shift (the CPU magnitude estimate).  w13==0
+                        // keeps the legacy Q16.16 derive (fully backward-compat).
+                        vt_q29_en    <= ring_rd_data[5];
+                        vt_q29_shift <= ring_rd_data[4:0];
+                    end
+                    default: ;
+                endcase
+            end
+            else if (cmd_is_draw_vert_tri_rgb) begin
+                // 0x4E: identical to 0x4B for w0-11 (verts, s, t, zi); w12-14
+                // carry per-vertex RGB565 colour; w15 = per-tri Q29 override.
+                case (pay_idx)
+                    6'd0: begin tri_v0_x <= ring_rd_data[15:0];
+                                 tri_v0_y <= ring_rd_data[31:16]; end
+                    6'd1: begin tri_v1_x <= ring_rd_data[15:0];
+                                 tri_v1_y <= ring_rd_data[31:16]; end
+                    6'd2: begin tri_v2_x <= ring_rd_data[15:0];
+                                 tri_v2_y <= ring_rd_data[31:16]; end
+                    6'd3: dv_szi[0] <= ring_rd_data;
+                    6'd4: dv_szi[1] <= ring_rd_data;
+                    6'd5: dv_szi[2] <= ring_rd_data;
+                    6'd6: dv_tzi[0] <= ring_rd_data;
+                    6'd7: dv_tzi[1] <= ring_rd_data;
+                    6'd8: dv_tzi[2] <= ring_rd_data;
+                    6'd9:  vt_zi[0] <= ring_rd_data;
+                    6'd10: vt_zi[1] <= ring_rd_data;
+                    6'd11: vt_zi[2] <= ring_rd_data;
+                    // RGB565 per vertex: R=[15:11], G(=light slot)=[10:5], B=[4:0]
+                    6'd12: begin vt_rrow[0] <= ring_rd_data[15:11];
+                                 vt_lrow[0] <= ring_rd_data[10:5];
+                                 vt_brow[0] <= ring_rd_data[4:0]; end
+                    6'd13: begin vt_rrow[1] <= ring_rd_data[15:11];
+                                 vt_lrow[1] <= ring_rd_data[10:5];
+                                 vt_brow[1] <= ring_rd_data[4:0]; end
+                    6'd14: begin vt_rrow[2] <= ring_rd_data[15:11];
+                                 vt_lrow[2] <= ring_rd_data[10:5];
+                                 vt_brow[2] <= ring_rd_data[4:0]; end
+                    6'd15: begin vt_q29_en    <= ring_rd_data[5];
+                                 vt_q29_shift <= ring_rd_data[4:0]; end
+                    // w16-18: per-vertex decoupled depth (high-range 1/w)
+                    6'd16: vt_depth[0] <= ring_rd_data;
+                    6'd17: vt_depth[1] <= ring_rd_data;
+                    6'd18: vt_depth[2] <= ring_rd_data;
+                    // w19-21 (22-word combine only): per-vertex additive D, RGB565.
+                    // Never reached on the 19-word legacy payload, so byte-exact.
+                    6'd19: begin vt_Drrow[0] <= ring_rd_data[15:11];
+                                 vt_Dgrow[0] <= ring_rd_data[10:5];
+                                 vt_Dbrow[0] <= ring_rd_data[4:0]; end
+                    6'd20: begin vt_Drrow[1] <= ring_rd_data[15:11];
+                                 vt_Dgrow[1] <= ring_rd_data[10:5];
+                                 vt_Dbrow[1] <= ring_rd_data[4:0]; end
+                    6'd21: begin vt_Drrow[2] <= ring_rd_data[15:11];
+                                 vt_Dgrow[2] <= ring_rd_data[10:5];
+                                 vt_Dbrow[2] <= ring_rd_data[4:0]; end
+                    default: ;
+                endcase
+            end
+            else if (cmd_is_set_object_state) begin
+                // 0x50: load the up-to-5x4 transform matrix (row-major) + proj
+                // consts + row count.  Sticky like 0x4A — does NOT clear
+                // tri_state_valid or touch the surface staging.
+                //   w0..w19  -> matrix (rows 0-2 cam, 3-4 s/t)
+                //   w20..w24 -> xc/yc/xscale/yscale/nearclip
+                //   w25      -> matrix row count (3 alias / 5 world)
+                if (pay_idx < 6'd20) begin
+                    if (INCLUDE_GPU_XFORM_MAC != 0)   // xf_M folds away when 0 (clip-feed)
+                        xf_M[pay_idx[4:0]] <= ring_rd_data;
+                end
+                else case (pay_idx)
+                    6'd20: xf_xc       <= ring_rd_data;
+                    6'd21: xf_yc       <= ring_rd_data;
+                    6'd22: xf_xscale   <= ring_rd_data;
+                    6'd23: xf_yscale   <= ring_rd_data;
+                    6'd24: xf_nearclip <= ring_rd_data;
+                    6'd25: begin
+                        // w25: [2:0]=row count, [3]=q29 enable (world), [8:4]=shift
+                        xf_rows      <= ring_rd_data[2:0];
+                        xf_q29_en    <= ring_rd_data[3];
+                        xf_q29_shift <= ring_rd_data[8:4];
+                    end
+                    default: ;
+                endcase
+            end
+            else if (cmd_is_draw_xform_tri) begin
+                // 0x51: 3 raw verts {x,y,z} Q16.16 + s/t passthrough (parked in
+                // the derive's raw-s/t slots) + light.  S_XFORM transforms them.
+                case (pay_idx)
+                    6'd0: xf_vx[0] <= ring_rd_data; 6'd1: xf_vy[0] <= ring_rd_data;
+                    6'd2: xf_vz[0] <= ring_rd_data;
+                    6'd3: xf_vx[1] <= ring_rd_data; 6'd4: xf_vy[1] <= ring_rd_data;
+                    6'd5: xf_vz[1] <= ring_rd_data;
+                    6'd6: xf_vx[2] <= ring_rd_data; 6'd7: xf_vy[2] <= ring_rd_data;
+                    6'd8: xf_vz[2] <= ring_rd_data;
+                    6'd9:  dv_szi[0] <= ring_rd_data; 6'd10: dv_szi[1] <= ring_rd_data;
+                    6'd11: dv_szi[2] <= ring_rd_data;
+                    6'd12: dv_tzi[0] <= ring_rd_data; 6'd13: dv_tzi[1] <= ring_rd_data;
+                    6'd14: dv_tzi[2] <= ring_rd_data;
+                    6'd15: begin
+                        vt_lrow[0] <= ring_rd_data[5:0];
+                        vt_lrow[1] <= ring_rd_data[11:6];
+                        vt_lrow[2] <= ring_rd_data[17:12];
+                    end
+                    default: ;
+                endcase
+            end
+            else if (cmd_is_draw_xform_tri_rgb || cmd_is_draw_clip_tri) begin
+                // T1 0x52 / clip-feed 0x4F (identical wire — verts hold clip {x,y,w}
+                // for 0x4F): 3 verts {x,y,z} Q16.16 (w0-8) + s/t passthrough
+                // (w9-14) — identical to 0x51 — then per-vertex RGB565 (w15-17)
+                // in place of 0x51's packed light word.  zi+depth are GPU-computed
+                // in S_XFORM (no per-draw zi/depth words).
+                case (pay_idx)
+                    6'd0: xf_vx[0] <= ring_rd_data; 6'd1: xf_vy[0] <= ring_rd_data;
+                    6'd2: xf_vz[0] <= ring_rd_data;
+                    6'd3: xf_vx[1] <= ring_rd_data; 6'd4: xf_vy[1] <= ring_rd_data;
+                    6'd5: xf_vz[1] <= ring_rd_data;
+                    6'd6: xf_vx[2] <= ring_rd_data; 6'd7: xf_vy[2] <= ring_rd_data;
+                    6'd8: xf_vz[2] <= ring_rd_data;
+                    6'd9:  dv_szi[0] <= ring_rd_data; 6'd10: dv_szi[1] <= ring_rd_data;
+                    6'd11: dv_szi[2] <= ring_rd_data;
+                    6'd12: dv_tzi[0] <= ring_rd_data; 6'd13: dv_tzi[1] <= ring_rd_data;
+                    6'd14: dv_tzi[2] <= ring_rd_data;
+                    // RGB565 per vertex: R=[15:11], G(=light slot)=[10:5], B=[4:0]
+                    6'd15: begin vt_rrow[0] <= ring_rd_data[15:11];
+                                 vt_lrow[0] <= ring_rd_data[10:5];
+                                 vt_brow[0] <= ring_rd_data[4:0]; end
+                    6'd16: begin vt_rrow[1] <= ring_rd_data[15:11];
+                                 vt_lrow[1] <= ring_rd_data[10:5];
+                                 vt_brow[1] <= ring_rd_data[4:0]; end
+                    6'd17: begin vt_rrow[2] <= ring_rd_data[15:11];
+                                 vt_lrow[2] <= ring_rd_data[10:5];
+                                 vt_brow[2] <= ring_rd_data[4:0]; end
+                    default: ;
+                endcase
+            end
+            else if (cmd_is_load_verts) begin
+                // T3 0x53: one raw vert {x,y,z}+{s,t}+RGB565 (parked in the
+                // transform's vert-0 slots) + destination cache slot.  S_XFORM
+                // transforms it and writes the slot (see XF_PROJ_LAUNCH).
+                case (pay_idx)
+                    6'd0: xf_load_slot <= ring_rd_data[4:0];
+                    6'd1: xf_vx[0] <= ring_rd_data;
+                    6'd2: xf_vy[0] <= ring_rd_data;
+                    6'd3: xf_vz[0] <= ring_rd_data;
+                    6'd4: dv_szi[0] <= ring_rd_data;   // raw s (rows==3 passthrough)
+                    6'd5: dv_tzi[0] <= ring_rd_data;   // raw t
+                    6'd6: begin vt_rrow[0] <= ring_rd_data[15:11];
+                                vt_lrow[0] <= ring_rd_data[10:5];
+                                vt_brow[0] <= ring_rd_data[4:0]; end
+                    default: ;
+                endcase
+            end
+            else if (cmd_is_draw_indexed_tri) begin
+                // T3 0x54: one word = 3 cache indices {i2[14:10],i1[9:5],i0[4:0]}.
+                if (pay_idx == 6'd0) begin
+                    vc_i0 <= ring_rd_data[4:0];
+                    vc_i1 <= ring_rd_data[9:5];
+                    vc_i2 <= ring_rd_data[14:10];
+                end
+            end
+            else if (cmd_is_set_light_state) begin
+                // T4 0x55 sticky: light dir (Q16.16), light colour + ambient
+                // (RGB565), enable.  Used by 0x57 lit loads.
+                case (pay_idx)
+                    6'd0: lt_lx <= ring_rd_data;
+                    6'd1: lt_ly <= ring_rd_data;
+                    6'd2: lt_lz <= ring_rd_data;
+                    6'd3: begin lt_lr <= ring_rd_data[15:11];
+                                lt_lg <= ring_rd_data[10:5];
+                                lt_lb <= ring_rd_data[4:0]; end
+                    6'd4: begin lt_ar <= ring_rd_data[15:11];
+                                lt_ag <= ring_rd_data[10:5];
+                                lt_ab <= ring_rd_data[4:0]; end
+                    6'd5: lt_enable <= ring_rd_data[0];
+                    default: ;
+                endcase
+            end
+            else if (cmd_is_load_vert_lit) begin
+                // T4 0x57: one raw vert {x,y,z} + object-space normal {nx,ny,nz}
+                // + {s,t} + destination cache slot.  S_XFORM transforms position
+                // and computes lighting -> RGB565, then writes the cache slot.
+                case (pay_idx)
+                    6'd0: xf_load_slot <= ring_rd_data[4:0];
+                    6'd1: xf_vx[0] <= ring_rd_data;
+                    6'd2: xf_vy[0] <= ring_rd_data;
+                    6'd3: xf_vz[0] <= ring_rd_data;
+                    6'd4: xf_nx <= ring_rd_data;
+                    6'd5: xf_ny <= ring_rd_data;
+                    6'd6: xf_nz <= ring_rd_data;
+                    6'd7: dv_szi[0] <= ring_rd_data;   // raw s
+                    6'd8: dv_tzi[0] <= ring_rd_data;   // raw t
                     default: ;
                 endcase
             end
@@ -4592,10 +5517,11 @@ always @(posedge clk) begin : main_fsm
                 tri_state_valid <= 1'b1;
                 state <= S_IDLE;
             end
-            else if (cmd_is_draw_vert_tri) begin
-                // 0x4B: a 0x4B with no valid sticky state (no prior 0x4A, after
-                // soft_reset, or after an 0x48/0x49 overwrote the staging) is a
-                // no-op — drain already happened, just retire.
+            else if (cmd_is_draw_vert_tri || cmd_is_draw_vert_tri_rgb) begin
+                // 0x4B / 0x4E: a vert-tri with no valid sticky state (no prior
+                // 0x4A, after soft_reset, or after an 0x48/0x49 overwrote the
+                // staging) is a no-op — drain already happened, just retire.
+                // 0x4E adds per-vertex RGB (spanprod_rgb); both share the derive.
                 //
                 // PRUNE GATE: the INCLUDE_VERT_TRI term is redundant with
                 // cmd_is_draw_vert_tri (constant 0 when the feature is off) but
@@ -4626,10 +5552,82 @@ always @(posedge clk) begin : main_fsm
                     tri_clip_x1 <= tri_state_clip_x1;
                     tri_clip_y0 <= tri_state_clip_y0;
                     tri_clip_y1 <= tri_state_clip_y1;
+                    // route the per-triangle Q29 selection into the same sticky
+                    // staging the (frozen) fragment Q29 consume reads.
+                    spanprod_attr_q29       <= vt_q29_en;
+                    spanprod_q29_attr_shift <= vt_q29_shift;
                     tri_start    <= 1'b1;     // walker runs in parallel with derive
                     tri_fill_idx <= 3'd0;
                     dstate       <= DRV_SORT_A;
                     state        <= S_TRI_DERIVE;
+                end else begin
+                    state <= S_IDLE;
+                end
+            end
+            else if (cmd_is_draw_xform_tri || cmd_is_draw_xform_tri_rgb
+                     || cmd_is_draw_clip_tri) begin
+                // 0x51 / 0x52 (T1): run the transform front-end, then the derive.
+                // 0x4F (clip-feed): the verts are already M*v clip {x,y,w}, so skip
+                // the matrix MAC and enter at XF_CLIP_FEED (recip+project only).
+                // Needs the 0x4A sticky surface state (same as 0x4B) — refuse if
+                // not armed.  0x52/0x4F additionally derive RGB/depth (sp_rgb).
+                if ((INCLUDE_VERT_TRI != 0) && tri_state_valid) begin
+                    xf_vtx      <= 2'd0;
+                    xf_row      <= 2'd0;
+                    xf_idx      <= 2'd0;
+                    xf_behind   <= 2'd0;   // T2: near-plane reject accumulator
+                    xf_to_cache <= 1'b0;   // T3: draw, not a cache load
+                    xf_lit      <= 1'b0;   // T4: explicit RGB, no GPU lighting
+                    xf_clip     <= cmd_is_draw_clip_tri;  // 0x4F: skip the MAC
+                    xf_last_vtx <= 2'd2;   // 3 verts -> a triangle
+                    xf_state    <= cmd_is_draw_clip_tri ? XF_CLIP_FEED : XF_MAC_A;
+                    state       <= S_XFORM;
+                end else begin
+                    state <= S_IDLE;
+                end
+            end
+            else if (cmd_is_load_verts) begin
+                // T3 0x53: transform ONE vert through S_XFORM and write the cache
+                // slot (XF_PROJ_LAUNCH branches on xf_to_cache).  Needs the 0x4A
+                // sticky surface + the 0x50 sticky matrix, same as 0x52.
+                if ((INCLUDE_VTX_CACHE != 0) && tri_state_valid) begin
+                    xf_vtx      <= 2'd0;
+                    xf_row      <= 2'd0;
+                    xf_idx      <= 2'd0;
+                    xf_behind   <= 2'd0;
+                    xf_to_cache <= 1'b1;   // T3: write the cache, do NOT draw
+                    xf_lit      <= 1'b0;   // explicit RGB load (no lighting)
+                    xf_last_vtx <= 2'd0;   // single vert
+                    xf_state    <= XF_MAC_A;
+                    state       <= S_XFORM;
+                end else begin
+                    state <= S_IDLE;
+                end
+            end
+            else if (cmd_is_load_vert_lit) begin
+                // T4 0x57: transform + light one vert -> cache slot.
+                if ((INCLUDE_GPU_LIGHT != 0) && (INCLUDE_VTX_CACHE != 0) && tri_state_valid) begin
+                    xf_vtx      <= 2'd0;
+                    xf_row      <= 2'd0;
+                    xf_idx      <= 2'd0;
+                    xf_behind   <= 2'd0;
+                    xf_to_cache <= 1'b1;   // write the cache
+                    xf_lit      <= 1'b1;   // compute lighting -> RGB565
+                    xf_last_vtx <= 2'd0;   // single vert
+                    xf_state    <= XF_MAC_A;
+                    state       <= S_XFORM;
+                end else begin
+                    state <= S_IDLE;
+                end
+            end
+            else if (cmd_is_draw_indexed_tri) begin
+                // T3 0x54: read 3 cached verts SEQUENTIALLY (single MLAB read port)
+                // in S_VCREAD, then launch the derive.  Issue the vert-0 read addr
+                // here; vc_q reflects it next cycle.
+                if ((INCLUDE_VTX_CACHE != 0) && tri_state_valid) begin
+                    vc_raddr <= vc_i0;
+                    vcr_cnt  <= 2'd0;
+                    state    <= S_VCREAD;
                 end else begin
                     state <= S_IDLE;
                 end
@@ -4848,7 +5846,7 @@ always @(posedge clk) begin : main_fsm
                         rdet_dividend <= {rdet_dividend[43:0], 1'b0};
                         if (rdet_cnt == 6'd1) begin
                             dstate  <= DRV_DA_SEL;  // capture attr-0 operands
-                            dv_attr <= 3'd0;        // attr 0 = szi
+                            dv_attr <= 4'd0;        // attr 0 = szi
                             dv_doing_dv <= 1'b0;
                         end else begin
                             rdet_cnt <= rdet_cnt - 6'd1;
@@ -4962,23 +5960,33 @@ always @(posedge clk) begin : main_fsm
                     // ~127 per triangle, still overlapped with the walker).
                     drv_qsum_r <= dv_acc
                                 + $signed({1'b0, drv_prod_r[54:DERIV_SPLIT]});
+                    // precompute the final shift here so the barrel shift in
+                    // DRV_SCALE_LF reads a register, not a mux off vt_q29_shift.
+                    q29_shamt_r <= (vt_q29_en && (dv_attr != 3'd3))
+                                 ? (6'd7 + {1'b0, vt_q29_shift})
+                                 : (DERIV_N - DERIV_SPLIT);
                     dstate <= DRV_SCALE_LF;
                 end
-                DRV_SCALE_LF: begin : drv_scale_lf_blk
-                    // qsigned = (num*rdet) >>> N.  Algebraic identity used here:
-                    //   ((H<<SPLIT) + L) >>> N  ==  (H + (L>>>SPLIT)) >>> (N-SPLIT)
-                    // because L's bits below SPLIT are below bit SPLIT of the
-                    // recombined product and are shifted out by >>>N regardless.
-                    // L = num_lo*rdet is unsigned (num_lo unsigned, rdet>=0); H
-                    // is signed.  Their sum fits 64 bits signed, so the shared
-                    // shift/saturate runs at 64 bits, not 96.  sign(det) applied,
-                    // then deriv_sat32 clamps to int32 (the sliver/overflow rule).
-                    // The 64-bit sum comes pre-registered from DRV_SCALE_LS;
-                    // this cycle pays only the (constant) shift, the negate
-                    // and the saturate.
+                // Q29 BARREL-SHIFT PIPELINE (fixes the -3.97 dv_du cone — all 400+
+                // worst paths funneled here).  The legacy path's shift is a CONSTANT
+                // 20 (free wiring); the Q29 path's (7+sh) makes it a VARIABLE 64-bit
+                // barrel, which with the negate+sat32 was a 9-level / 13.7ns cone.
+                // Split: DRV_SCALE_LF coarse (byte multiple), DRV_SCALE_LF2 fine
+                // (0-7), DRV_SCALE_LF3 negate+sat32.  Bit-exact: for signed x,
+                // x >>> (8a+b) == (x >>> 8a) >>> b.  +2 cy/du-dv pass, free under
+                // the walker.  q29_shamt_r precomputed in DRV_SCALE_LS.
+                DRV_SCALE_LF: begin
+                    drv_q_coarse <= drv_qsum_r >>> {q29_shamt_r[5:3], 3'b000};
+                    dstate <= DRV_SCALE_LF2;
+                end
+                DRV_SCALE_LF2: begin
+                    drv_q_fine <= drv_q_coarse >>> q29_shamt_r[2:0];
+                    dstate <= DRV_SCALE_LF3;
+                end
+                DRV_SCALE_LF3: begin : drv_scale_lf3_blk
+                    // sign(det) applied, then deriv_sat32 clamps to int32.
                     reg signed [63:0] qsigned;
-                    qsigned = drv_qsum_r >>> (DERIV_N - DERIV_SPLIT);
-                    if (dd_detsign) qsigned = -qsigned;
+                    qsigned = dd_detsign ? -drv_q_fine : drv_q_fine;
                     if (!dv_doing_dv) begin
                         dv_du <= deriv_sat32(qsigned);
                         dv_doing_dv <= 1'b1;
@@ -5007,18 +6015,26 @@ always @(posedge clk) begin : main_fsm
                     // advanced here, so deriv_a0_q stays stable into DRV_ORG_FORM.
                     drv_prod_r  <= dsp_p;
                     drv2_prod_r <= dsp2_p;
+                    // Pre-form the Q29-scaled anchor (a0 << (13-sh), arithmetic,
+                    // mod 2^32) here so DRV_ORG_FORM stays a pure subtract.  Same
+                    // value the in-line a0_eff produced — deriv_a0_q/vt_q29_shift/
+                    // dv_attr don't change before DRV_ORG_FORM consumes it.
+                    if (vt_q29_en && (dv_attr != 3'd3))
+                        a0_eff_r <= (vt_q29_shift <= 5'd13)
+                            ? ({{32{deriv_a0_q[31]}}, deriv_a0_q} <<< (5'd13 - vt_q29_shift))
+                            : ({{32{deriv_a0_q[31]}}, deriv_a0_q} >>> (vt_q29_shift - 5'd13));
+                    else
+                        a0_eff_r <= deriv_a0_q;
                     dstate <= DRV_ORG_FORM;
                 end
                 DRV_ORG_FORM: begin : drv_org_form_blk
-                    // origin = a0 - du*x0px - dv*y0, truncated to 32 bits (the
+                    // origin = a0_eff - du*x0px - dv*y0, truncated to 32 bits (the
                     // spanprod plane eval wraps mod 2^32, so the large anchor
                     // offset cancels for on-screen records — the "anchoring").
-                    // Products come from the captured regs, not dsp_p directly.
+                    // a0_eff (the Q29 anchor scale) was pre-formed in DRV_ORG_CAP,
+                    // so this state is just the two captured-product subtracts.
                     reg signed [31:0] org_now;
-                    // deriv_a0_q (registered in DRV_DA_SEL) instead of the
-                    // combinational deriv_a0 mux — same value, and it keeps
-                    // the attr/sorted-slot mux cone off this subtract too.
-                    org_now = deriv_a0_q - $signed(drv_prod_r[31:0]) - $signed(drv2_prod_r[31:0]);
+                    org_now = a0_eff_r - $signed(drv_prod_r[31:0]) - $signed(drv2_prod_r[31:0]);
                     // store this attr's plane into the spanprod staging reg.
                     case (dv_attr)
                         3'd0: begin
@@ -5036,16 +6052,50 @@ always @(posedge clk) begin : main_fsm
                             spanprod_attr2_du     <= dv_du;
                             spanprod_attr2_dv     <= dv_dv;
                         end
-                        default: begin
+                        3'd4: begin   // RED plane (truecolor RGB)
+                            spanprod_R_origin <= org_now[23:0];
+                            spanprod_R_du     <= dv_du[23:0];
+                            spanprod_R_dv     <= dv_dv[23:0];
+                        end
+                        3'd5: begin   // BLUE plane (truecolor RGB)
+                            spanprod_B_origin <= org_now[23:0];
+                            spanprod_B_du     <= dv_du[23:0];
+                            spanprod_B_dv     <= dv_dv[23:0];
+                        end
+                        3'd6: begin   // decoupled depth plane (0x4E), full 32-bit
+                            spanprod_depth_origin <= org_now;
+                            spanprod_depth_du     <= dv_du;
+                            spanprod_depth_dv     <= dv_dv;
+                        end
+                        4'd7: begin   // D-red plane (combine)
+                            spanprod_Dr_origin <= org_now[23:0];
+                            spanprod_Dr_du     <= dv_du[23:0];
+                            spanprod_Dr_dv     <= dv_dv[23:0];
+                        end
+                        4'd8: begin   // D-green plane (combine)
+                            spanprod_Dg_origin <= org_now[23:0];
+                            spanprod_Dg_du     <= dv_du[23:0];
+                            spanprod_Dg_dv     <= dv_dv[23:0];
+                        end
+                        4'd9: begin   // D-blue plane (combine)
+                            spanprod_Db_origin <= org_now[23:0];
+                            spanprod_Db_du     <= dv_du[23:0];
+                            spanprod_Db_dv     <= dv_dv[23:0];
+                        end
+                        default: begin   // attr 3 = light / green
                             spanprod_light_origin <= org_now[23:0];
                             spanprod_light_du     <= dv_du[23:0];
                             spanprod_light_dv     <= dv_dv[23:0];
                         end
                     endcase
-                    if (dv_attr == 3'd3) begin
+                    // Derive depth: combine surfaces derive 10 attrs (..R,B,depth,
+                    // Dr,Dg,Db); legacy RGB stops at 7 (..R,B,depth); others at 4.
+                    if (dv_attr == (((cmd_is_draw_vert_tri_rgb || cmd_is_draw_xform_tri_rgb
+                                      || cmd_is_draw_indexed_tri || cmd_is_draw_clip_tri))
+                                    ? (spanprod_cd_combine ? 4'd9 : 4'd6) : 4'd3)) begin
                         dstate <= DRV_DONE;
                     end else begin
-                        dv_attr <= dv_attr + 3'd1;
+                        dv_attr <= dv_attr + 4'd1;
                         dstate  <= DRV_DA_SEL;   // capture next attr's operands
                     end
                 end
@@ -5057,6 +6107,320 @@ always @(posedge clk) begin : main_fsm
                 end
             endcase
             end // INCLUDE_VERT_TRI
+        end
+
+        // ============================================================
+        // Transform front-end (CMD_DRAW_XFORM_TRI / 0x51) — per vertex:
+        // cam = M*{v,1} (Q16.16), zi = 2^32/cam.z, perspective project to
+        // screen Q12.4 x / int y, then hand off to the derive (S_TRI_DERIVE)
+        // exactly as 0x4B does.  Single multiplier (dsp_p), DSP_OWNER_XFORM.
+        // ============================================================
+        S_XFORM: begin
+            case (xf_state)
+                // ---- cam[row] = ((M[row][0..2]*v) >>> 16) + M[row][3] ----
+                // xf_M is M10K: XF_MAC_A issues the read (xf_rd_addr=row*4+idx),
+                // xf_M_q is valid in XF_MAC_L.  idx 0-2 = products, idx 3 = the
+                // translate column (captured into xf_transl, no multiply).
+                XF_MAC_A: xf_state <= XF_MAC_L;
+                XF_MAC_L: begin
+                    if (xf_idx == 2'd3) begin
+                        xf_transl <= xf_M_q;             // M[row][3]
+                        xf_state  <= XF_ROW_DONE;
+                    end else begin
+                        xf_dsp_a <= xf_M_q;
+                        xf_dsp_b <= (xf_idx == 2'd0) ? xf_vx[xf_vtx]
+                                  : (xf_idx == 2'd1) ? xf_vy[xf_vtx]
+                                                     : xf_vz[xf_vtx];
+                        xf_state <= XF_MAC_W;
+                    end
+                end
+                XF_MAC_W: xf_state <= XF_MAC_C;   // DSP latency
+                XF_MAC_C: begin
+                    xf_acc <= (xf_idx == 2'd0) ? dsp_p : (xf_acc + dsp_p);
+                    xf_idx <= xf_idx + 2'd1;             // -> next product, or idx 3 = translate
+                    xf_state <= XF_MAC_A;               // issue the next M10K read
+                end
+                XF_ROW_DONE: begin : xf_row_done_blk
+                    reg signed [31:0] camv;
+                    camv = (xf_acc >>> 16) + xf_transl;   // captured M[row][3]
+                    case (xf_row)
+                        3'd0: xf_camx <= camv;
+                        3'd1: xf_camy <= camv;
+                        3'd2: xf_camz <= camv;
+                        3'd3: dv_szi[xf_vtx] <= camv;    // s (N=5 world)
+                        default: dv_tzi[xf_vtx] <= camv; // t (N=5 world, row 4)
+                    endcase
+                    if (xf_row == xf_rows - 3'd1) xf_state <= XF_RECIP_INIT;
+                    else begin
+                        xf_row <= xf_row + 3'd1; xf_idx <= 2'd0;
+                        xf_state <= XF_MAC_A;            // M10K read-issue for next row
+                    end
+                end
+                // ---- clip-feed (0x4F): the CPU already did M*v, so the 3 "verts"
+                // ARE clip {x,y,w}.  Load cam{x,y,z} directly and skip to the recip
+                // (no matrix MAC).  cam.z = clip.w is the perspective divisor. ----
+                XF_CLIP_FEED: begin
+                    xf_camx  <= xf_vx[xf_vtx];
+                    xf_camy  <= xf_vy[xf_vtx];
+                    xf_camz  <= xf_vz[xf_vtx];
+                    xf_state <= XF_RECIP_INIT;
+                end
+                // ---- zi = floor(2^32 / max(cam.z, near_clip)) ----
+                XF_RECIP_INIT: begin
+                    xf_div_rem      <= 32'd0;
+                    xf_div_dividend <= 33'h1_0000_0000;   // 2^32, MSB-first
+                    xf_div_q        <= 32'd0;
+                    xf_div_divisor  <= (xf_camz < xf_nearclip) ? xf_nearclip : xf_camz;
+                    xf_div_cnt      <= 6'd33;
+                    // T2: tally verts behind the near plane (same compare as the
+                    // divisor floor).  All three behind => trivial-reject at LAUNCH.
+                    if (xf_camz < xf_nearclip) xf_behind <= xf_behind + 2'd1;
+                    xf_state        <= XF_RECIP_RUN;
+                end
+                XF_RECIP_RUN: begin
+                    xf_div_rem      <= xf_div_next;
+                    xf_div_q        <= {xf_div_q[30:0], xf_div_ge};
+                    xf_div_dividend <= {xf_div_dividend[31:0], 1'b0};
+                    if (xf_div_cnt == 6'd1) xf_state <= XF_PROJ_XA;
+                    else xf_div_cnt <= xf_div_cnt - 6'd1;
+                end
+                // ---- screen.x = (xc<<4) + ((xscale*ratio_x) >>> 12) ----
+                XF_PROJ_XA: begin
+                    xf_dsp_a <= xf_camx;
+                    xf_dsp_b <= xf_div_q;          // zi
+                    xf_state <= XF_PROJ_XW;
+                end
+                XF_PROJ_XW: xf_state <= XF_PROJ_XC;
+                XF_PROJ_XC: begin
+                    xf_dsp_a <= xf_xscale;
+                    xf_dsp_b <= dsp_p[47:16];      // ratio_x = (cam.x*zi)>>16
+                    xf_state <= XF_PROJ_XW2;
+                end
+                XF_PROJ_XW2: xf_state <= XF_PROJ_XS;
+                // Split the 64-bit add from xf_sat16: dsp_p -> >>>12 -> add ->
+                // sat16 -> tri_v was the post-Q29-fix worst cone.  $signed() the
+                // xc term — an unsigned operand poisons the add and turns dsp_p>>>12
+                // into a LOGICAL shift, corrupting negative screen offsets.
+                XF_PROJ_XS: begin
+                    xf_sx_r <= ($signed({{32{xf_xc[31]}}, xf_xc}) <<< 4)
+                             + (dsp_p >>> 12);
+                    xf_state <= XF_PROJ_XS2;
+                end
+                XF_PROJ_XS2: begin   // saturate to int16 + store screen.x
+                    case (xf_vtx)
+                        2'd0:    xf_sx[0] <= xf_sat16(xf_sx_r);
+                        2'd1:    xf_sx[1] <= xf_sat16(xf_sx_r);
+                        default: xf_sx[2] <= xf_sat16(xf_sx_r);
+                    endcase
+                    xf_state <= XF_PROJ_YA;
+                end
+                // ---- screen.y = yc - ((yscale*ratio_y) >>> 16) ----
+                XF_PROJ_YA: begin
+                    xf_dsp_a <= xf_camy;
+                    xf_dsp_b <= xf_div_q;          // zi
+                    xf_state <= XF_PROJ_YW;
+                end
+                XF_PROJ_YW: xf_state <= XF_PROJ_YC;
+                XF_PROJ_YC: begin
+                    xf_dsp_a <= xf_yscale;
+                    xf_dsp_b <= dsp_p[47:16];      // ratio_y
+                    xf_state <= XF_PROJ_YW2;
+                end
+                XF_PROJ_YW2: xf_state <= XF_PROJ_YS;
+                XF_PROJ_YS: begin   // register screen.y add (split from sat16)
+                    xf_sy_r <= $signed({{32{xf_yc[31]}}, xf_yc}) - (dsp_p >>> 16);
+                    xf_state <= XF_PROJ_YS2;
+                end
+                XF_PROJ_YS2: begin : xf_projys2_blk  // sat16 + store y/zi; advance
+                    // Also stash zi into vt_depth so the 0x52 truecolor path's
+                    // depth plane (attr6, read when sp_rgb=1) uses the GPU-computed
+                    // zi as the z-buffer value — z_compress is float-like so the
+                    // absolute scale is irrelevant, only frame-consistent ordering.
+                    // Harmless for 0x51 (sp_rgb=0 never derives attr6/vt_depth).
+                    case (xf_vtx)
+                        2'd0:    begin xf_sy[0] <= xf_sat16(xf_sy_r); vt_zi[0] <= xf_div_q; vt_depth[0] <= xf_div_q; end
+                        2'd1:    begin xf_sy[1] <= xf_sat16(xf_sy_r); vt_zi[1] <= xf_div_q; vt_depth[1] <= xf_div_q; end
+                        default: begin xf_sy[2] <= xf_sat16(xf_sy_r); vt_zi[2] <= xf_div_q; vt_depth[2] <= xf_div_q; end
+                    endcase
+                    if (xf_vtx == xf_last_vtx) begin
+                        // last vert projected -> the parallel-load + derive
+                        // launch happens in XF_PROJ_LAUNCH (one cycle later) so
+                        // the tri_v* writes are plain register copies, not this
+                        // saturating cone, keeping them off the critical mux.
+                        // (LOAD_VERTS sets xf_last_vtx=0 -> writes the cache there.)
+                        // T4: lit loads detour through the lighting MACs first,
+                        // computing per-vertex RGB565 before the cache write.
+                        if (xf_lit) begin
+                            xf_idx   <= 2'd0;
+                            xf_state <= XF_LIT_DL;
+                        end else begin
+                            xf_state <= XF_PROJ_LAUNCH;
+                        end
+                    end else begin
+                        xf_vtx   <= xf_vtx + 2'd1;
+                        xf_row   <= 2'd0;
+                        xf_idx   <= 2'd0;
+                        xf_state <= xf_clip ? XF_CLIP_FEED : XF_MAC_A;
+                    end
+                end
+                XF_PROJ_LAUNCH: begin : xf_proj_launch_blk
+                    // T2: trivial near-plane reject — if all three verts are
+                    // behind near, the projected tri is degenerate/garbage, so
+                    // drop it instead of launching the derive.  Straddlers (1-2
+                    // behind) fall through and are clipped on the CPU (hybrid).
+                    if (xf_to_cache) begin
+                        // T3 0x53/0x57: pack the transformed (+ lit) vert into the
+                        // cache slot.  vt_zi[0]/vt_depth[0] set in XF_PROJ_YS2; raw
+                        // s/t in dv_szi/dv_tzi[0]; RGB in vt_rrow/lrow/brow[0].
+                        // Layout: {b5,g6,r5, depth32, t32, s32, zi32, sy16, sx16}.
+                        vc_mem[xf_load_slot] <= { vt_brow[0], vt_lrow[0], vt_rrow[0],
+                                                  vt_depth[0], dv_tzi[0], dv_szi[0],
+                                                  vt_zi[0], xf_sy[0], xf_sx[0] };
+                        state <= S_IDLE;
+                    end else if (xf_behind == 2'd3) begin
+                        state <= S_IDLE;
+                    end else begin
+                    // parallel-load the walker's vertex regs from the held
+                    // projection results (register-to-register copy), then
+                    // launch the derive (mirror 0x4B).  DRV_SORT_A reads the
+                    // tri_v*_y written here on the next edge (NBA), unchanged.
+                    tri_v0_x <= xf_sx[0]; tri_v1_x <= xf_sx[1]; tri_v2_x <= xf_sx[2];
+                    tri_v0_y <= xf_sy[0]; tri_v1_y <= xf_sy[1]; tri_v2_y <= xf_sy[2];
+                    spanprod_idx       <= 2'd0;
+                    spanprod_calc_step <= 3'd0;
+                    src_done           <= 1'b0;
+                    persp_active       <= 1'b0;
+                    persp_first_done   <= 1'b0;
+                    persp_swap_pending <= 1'b0;
+                    persp_pss          <= PSS_IDLE;
+                    persp_pass         <= PSS_PASS_ANCHOR;
+                    sp_seg_left        <= 4'd0;
+                    spanprod_active    <= 1'b1;
+                    tri_clip_x0 <= tri_state_clip_x0;
+                    tri_clip_x1 <= tri_state_clip_x1;
+                    tri_clip_y0 <= tri_state_clip_y0;
+                    tri_clip_y1 <= tri_state_clip_y1;
+                    // world (N=5) uses Q29 planes (CPU-provided shift); alias
+                    // (N=3) keeps Q16.16.  Routes through the verified derive.
+                    spanprod_attr_q29       <= xf_q29_en;
+                    spanprod_q29_attr_shift <= xf_q29_shift;
+                    vt_q29_en    <= xf_q29_en;
+                    vt_q29_shift <= xf_q29_shift;
+                    tri_start   <= 1'b1;
+                    tri_fill_idx <= 3'd0;
+                    dstate <= DRV_SORT_A;
+                    state  <= S_TRI_DERIVE;
+                    end   // else (not all-behind-near)
+                end
+                // ---- T4: per-vertex lighting (lit cache-load 0x57) ----
+                // dot = sum_k normal[k]*lightdir[k] (Q32.32), clamp [0,1.0], then
+                // per channel: clamp(ambient + (dot*lightcolor)>>16) -> RGB565.
+                XF_LIT_DL: begin   // launch N[idx]*L[idx]
+                    xf_dsp_a <= (xf_idx == 2'd0) ? xf_nx : (xf_idx == 2'd1) ? xf_ny : xf_nz;
+                    xf_dsp_b <= (xf_idx == 2'd0) ? lt_lx : (xf_idx == 2'd1) ? lt_ly : lt_lz;
+                    xf_state <= XF_LIT_DW;
+                end
+                XF_LIT_DW: xf_state <= XF_LIT_DC;   // DSP latency
+                XF_LIT_DC: begin
+                    xf_acc <= (xf_idx == 2'd0) ? dsp_p : (xf_acc + dsp_p);  // Q32.32
+                    if (xf_idx == 2'd2) xf_state <= XF_LIT_CLAMP;
+                    else begin xf_idx <= xf_idx + 2'd1; xf_state <= XF_LIT_DL; end
+                end
+                XF_LIT_CLAMP: begin : xf_lit_clamp_blk
+                    reg signed [63:0] dotf;
+                    dotf = xf_acc >>> 16;                 // Q32.32 -> Q16.16
+                    if (dotf < 0)               xf_dot <= 32'sd0;
+                    else if (dotf > 64'sd65536) xf_dot <= 32'sd65536;   // clamp to 1.0
+                    else                        xf_dot <= dotf[31:0];
+                    xf_idx   <= 2'd0;
+                    xf_state <= XF_LIT_CL;
+                end
+                XF_LIT_CL: begin   // launch dot * lightcolor[idx]
+                    xf_dsp_a <= xf_dot;
+                    xf_dsp_b <= (xf_idx == 2'd0) ? {27'd0, lt_lr}
+                              : (xf_idx == 2'd1) ? {26'd0, lt_lg}
+                                                 : {27'd0, lt_lb};
+                    xf_state <= XF_LIT_CW;
+                end
+                XF_LIT_CW: xf_state <= XF_LIT_CC;   // DSP latency
+                XF_LIT_CC: begin : xf_lit_cc_blk
+                    // contrib = (dot*lightcolor)>>16 (0..channel); chan=clamp(amb+contrib)
+                    reg [7:0] sum8;
+                    case (xf_idx)
+                        2'd0: begin sum8 = {3'd0, lt_ar} + {1'b0, dsp_p[22:16]};
+                                    vt_rrow[0] <= (sum8 > 8'd31) ? 5'd31 : sum8[4:0]; end
+                        2'd1: begin sum8 = {2'd0, lt_ag} + {1'b0, dsp_p[22:16]};
+                                    vt_lrow[0] <= (sum8 > 8'd63) ? 6'd63 : sum8[5:0]; end
+                        default: begin sum8 = {3'd0, lt_ab} + {1'b0, dsp_p[22:16]};
+                                    vt_brow[0] <= (sum8 > 8'd31) ? 5'd31 : sum8[4:0]; end
+                    endcase
+                    if (xf_idx == 2'd2) xf_state <= XF_PROJ_LAUNCH;  // RGB done -> cache write
+                    else begin xf_idx <= xf_idx + 2'd1; xf_state <= XF_LIT_CL; end
+                end
+                default: xf_state <= XF_MAC_A;
+            endcase
+        end
+
+        // ============================================================
+        // T3: sequential 3-vertex cache read for 0x54 DRAW_INDEXED_TRI.
+        // vc_q lags vc_raddr by one cycle (registered MLAB read), so cnt0 primes
+        // (vc_q not yet valid); cnt1..3 capture verts 0..2; cnt3 launches the
+        // derive with the XF_PROJ_LAUNCH bring-up.  Unpack layout matches the
+        // write: {b5,g6,r5, depth32, t32, s32, zi32, sy16, sx16}.
+        // ============================================================
+        S_VCREAD: begin : s_vcread_blk
+            case (vcr_cnt)
+                2'd0: begin   // prime: vc_q still stale; queue vert-1 read
+                    vc_raddr <= vc_i1;
+                    vcr_cnt  <= 2'd1;
+                end
+                2'd1: begin   // vc_q = cache[i0]
+                    tri_v0_x <= vc_q[15:0];   tri_v0_y <= vc_q[31:16];
+                    vt_zi[0] <= vc_q[63:32];  dv_szi[0] <= vc_q[95:64];
+                    dv_tzi[0] <= vc_q[127:96]; vt_depth[0] <= vc_q[159:128];
+                    vt_rrow[0] <= vc_q[164:160]; vt_lrow[0] <= vc_q[170:165];
+                    vt_brow[0] <= vc_q[175:171];
+                    vc_raddr <= vc_i2;
+                    vcr_cnt  <= 2'd2;
+                end
+                2'd2: begin   // vc_q = cache[i1]
+                    tri_v1_x <= vc_q[15:0];   tri_v1_y <= vc_q[31:16];
+                    vt_zi[1] <= vc_q[63:32];  dv_szi[1] <= vc_q[95:64];
+                    dv_tzi[1] <= vc_q[127:96]; vt_depth[1] <= vc_q[159:128];
+                    vt_rrow[1] <= vc_q[164:160]; vt_lrow[1] <= vc_q[170:165];
+                    vt_brow[1] <= vc_q[175:171];
+                    vcr_cnt  <= 2'd3;
+                end
+                default: begin   // cnt3: vc_q = cache[i2]; capture + launch derive
+                    tri_v2_x <= vc_q[15:0];   tri_v2_y <= vc_q[31:16];
+                    vt_zi[2] <= vc_q[63:32];  dv_szi[2] <= vc_q[95:64];
+                    dv_tzi[2] <= vc_q[127:96]; vt_depth[2] <= vc_q[159:128];
+                    vt_rrow[2] <= vc_q[164:160]; vt_lrow[2] <= vc_q[170:165];
+                    vt_brow[2] <= vc_q[175:171];
+                    spanprod_idx       <= 2'd0;
+                    spanprod_calc_step <= 3'd0;
+                    src_done           <= 1'b0;
+                    persp_active       <= 1'b0;
+                    persp_first_done   <= 1'b0;
+                    persp_swap_pending <= 1'b0;
+                    persp_pss          <= PSS_IDLE;
+                    persp_pass         <= PSS_PASS_ANCHOR;
+                    sp_seg_left        <= 4'd0;
+                    spanprod_active    <= 1'b1;
+                    tri_clip_x0 <= tri_state_clip_x0;
+                    tri_clip_x1 <= tri_state_clip_x1;
+                    tri_clip_y0 <= tri_state_clip_y0;
+                    tri_clip_y1 <= tri_state_clip_y1;
+                    spanprod_attr_q29       <= 1'b0;   // cache holds legacy Q16.16 planes
+                    spanprod_q29_attr_shift <= 5'd0;
+                    vt_q29_en    <= 1'b0;
+                    vt_q29_shift <= 5'd0;
+                    tri_start    <= 1'b1;
+                    tri_fill_idx <= 3'd0;
+                    dstate <= DRV_SORT_A;
+                    state  <= S_TRI_DERIVE;
+                end
+            endcase
         end
 
         // ============================================================
@@ -5207,7 +6571,7 @@ always @(posedge clk) begin : main_fsm
                                          + $signed(dsp2_p[31:0]);
                     if (!spanprod_attr_persp) begin
                         spanprod_attr2_start_r <= 32'sd0;
-                        if (!spanprod_flags[SPAN_COLORMAP])
+                        if (!(spanprod_flags[SPAN_COLORMAP] || spanprod_truecolor))
                             spanprod_light_start_r <= 24'sd0;
                     end
                 end
@@ -5215,9 +6579,24 @@ always @(posedge clk) begin : main_fsm
                     spanprod_attr2_start_r <= spanprod_attr2_origin
                                          + $signed(dsp_p[31:0])
                                          + $signed(dsp2_p[31:0]);
-                    if (!spanprod_flags[SPAN_COLORMAP])
+                    if (!(spanprod_flags[SPAN_COLORMAP] || spanprod_truecolor))
                         spanprod_light_start_r <= 24'sd0;
                 end
+                SPANPROD_STEP_R: spanprod_R_start_r <= spanprod_R_origin
+                                         + $signed(dsp_p[23:0])
+                                         + $signed(dsp2_p[23:0]);
+                SPANPROD_STEP_B: spanprod_B_start_r <= spanprod_B_origin
+                                         + $signed(dsp_p[23:0])
+                                         + $signed(dsp2_p[23:0]);
+                SPANPROD_STEP_DEPTH: spanprod_depth_start_r <= spanprod_depth_origin
+                                         + $signed(dsp_p[31:0])
+                                         + $signed(dsp2_p[31:0]);
+                SPANPROD_STEP_DR: spanprod_Dr_start_r <= spanprod_Dr_origin
+                                         + $signed(dsp_p[23:0]) + $signed(dsp2_p[23:0]);
+                SPANPROD_STEP_DG: spanprod_Dg_start_r <= spanprod_Dg_origin
+                                         + $signed(dsp_p[23:0]) + $signed(dsp2_p[23:0]);
+                SPANPROD_STEP_DB: spanprod_Db_start_r <= spanprod_Db_origin
+                                         + $signed(dsp_p[23:0]) + $signed(dsp2_p[23:0]);
                 default: spanprod_light_start_r <= spanprod_light_origin
                                          + $signed(dsp_p[23:0])
                                          + $signed(dsp2_p[23:0]);
@@ -5278,6 +6657,9 @@ always @(posedge clk) begin : main_fsm
             reg signed [31:0] source_s_clamped;
             reg signed [31:0] source_t_clamped;
             reg [5:0] source_light;
+            reg [4:0] source_R, source_B;   // truecolor RGB red/blue
+            reg [4:0] source_Dr, source_Db; // combine D red/blue
+            reg [5:0] source_Dg;            // combine D green
             reg [3:0] source_colormap_id;
             reg [GPU_ADDR_W-1:0] source_z_word_addr;
             reg        source_z_hi;
@@ -5294,6 +6676,12 @@ always @(posedge clk) begin : main_fsm
             reg        pss_slope_commit_fire;
             reg signed [31:0] pss_commit_s_step;
             reg signed [31:0] pss_commit_t_step;
+            // Quadratic 2nd-difference committed alongside the step by the
+            // shared pss_slope_commit_fire block.  Set only by the full-16px
+            // quadratic arm; 0 elsewhere (pow2 / partial / DIV / constZ / Q29),
+            // so those commits leave sp_scc/persp_pend_scc at 0 (byte-exact).
+            reg signed [31:0] pss_commit_scc;
+            reg signed [31:0] pss_commit_tcc;
 
             // Was the (combinational) tex_req accepted by the cache this
             // same cycle? Both signals are visible NOW.  p1 is the decoupling
@@ -5310,6 +6698,8 @@ always @(posedge clk) begin : main_fsm
             pss_slope_commit_fire = 1'b0;
             pss_commit_s_step = 32'sd0;
             pss_commit_t_step = 32'sd0;
+            pss_commit_scc = 32'sd0;
+            pss_commit_tcc = 32'sd0;
 
             // Load/refresh p0a only if the one-entry source snapshot will be
             // free after this cycle.  p0 itself remains the cache-issue stage;
@@ -5345,17 +6735,28 @@ always @(posedge clk) begin : main_fsm
                 sp_z_write_enable || sp_z_test_enable;
             source_z_word_addr = sp_z_addr & {{(GPU_ADDR_W-2){1'b1}}, 2'b00};
             source_z_hi = sp_z_addr[1];
+            // Truecolor surfaces store an N64-style float-encoded depth code
+            // (better far precision than the flat linear [16:1] slice); the
+            // compress feeds the p0a_z_value register, so it is pipelined many
+            // stages ahead of the z compare cone.  sp_truecolor is const 0 when
+            // INCLUDE_DIRECT_COLOR=0, so palettized z is byte-exact unchanged.
             source_z_half = sp_q29_z_enable
                           ? sp_q29_z_value[29:14]
-                          : sp_z_value[16:1];
+                          : sp_rgb
+                            ? zc_s2_d                      // 0x4E decoupled depth (pipelined z_compress)
+                            : sp_truecolor
+                              ? zc_s2_z                    // 0x4B truecolor zi (pipelined z_compress)
+                              : sp_z_value[16:1];          // palettized: linear (unchanged)
             source_z_stage_ready = !z_flush_valid
                                  && (!z_src_pending_valid
                                      || z_src_pending_consume);
             source_z_ready = !source_z_write_only_active
                            || source_z_stage_ready;
-            load_p0a = p0a_free_after && source_pixel_available && source_z_ready;
+            load_p0a = p0a_free_after && source_pixel_available && source_z_ready
+                       && (g_zwarm == 2'd0);   // hold consume while the z pipe warms
             load_p0a_z = p0a_free_after && scalar_source_pixel_available
-                       && source_z_ready && source_z_write_only_active;
+                       && source_z_ready && source_z_write_only_active
+                       && (g_zwarm == 2'd0);
             source_fb_addr = sp_fb_addr;
             source_tex_base = sp_tex_addr;
             source_s = sp_s;
@@ -5375,6 +6776,11 @@ always @(posedge clk) begin : main_fsm
                     source_t_clamped = sp_t_clamp_max;
             end
             source_light = sp_light;
+            source_R = sp_R;
+            source_B = sp_B;
+            source_Dr = sp_Dr;
+            source_Dg = sp_Dg;
+            source_Db = sp_Db;
             source_colormap_id = sp_colormap_id;
             p3_z_word_addr = p3_z_addr & {{(GPU_ADDR_W-2){1'b1}}, 2'b00};
             p3_z_hi = p3_z_addr[1];
@@ -5391,7 +6797,15 @@ always @(posedge clk) begin : main_fsm
 
             if (p1_valid && !p1_tex_ready && tex_resp_valid) begin
                 p1_tex_ready <= 1'b1;
-                p1_tex_color <= tex_resp_data[7:0];
+                // Capture the RAW texel (RGB565 for truecolor, CI8 byte
+                // otherwise).  The truecolor brightness modulate is applied at
+                // the p1->p2 shift instead of here: this is the cache-output
+                // path and adding the multiplies here failed timing badly
+                // (WNS -2.4ns on clk_cpu).  Moving the modulate to the
+                // register-to-register p1->p2 stage pipelines it cleanly.
+                p1_tex_color <= sp_truecolor
+                              ? tex_resp_data[15:0]
+                              : {8'b0, tex_resp_data[7:0]};
             end
 
             if (!fp_pipe_stall) begin
@@ -5400,7 +6814,8 @@ always @(posedge clk) begin : main_fsm
                 // outstanding — p2b's — and cmap_resp_pop_b retires it
                 // from the cache's response queue on this same shift)
                 p3_valid     <= p2b_valid;
-                p3_color     <= p2b_flags[SPAN_COLORMAP] ? cmap_rd_data : p2b_color;
+                p3_color     <= (p2b_flags[SPAN_COLORMAP] && !sp_truecolor)
+                                ? {8'b0, cmap_rd_data} : p2b_color;
                 p3_flags     <= p2b_flags;
                 p3_fb_addr   <= p2b_fb_addr;
                 p3_discard   <= p2b_discard;
@@ -5411,7 +6826,12 @@ always @(posedge clk) begin : main_fsm
 
 	                // p2b <- p2  (no-op shift, gives cmap port B time to respond)
                 p2b_valid   <= p2_valid;
-                p2b_color   <= p2_color;
+                // Combine gate: when the sticky cd_combine flag is set, take the
+                // texel*C+D result (products from p1->p2, +D/clamp here); else the
+                // untouched legacy rgb565_gouraud/modulate result in p2_color.
+                p2b_color   <= sp_cd_combine
+                             ? rgb565_cd_finish(p2_pr, p2_pg, p2_pb, p2_dC_r, p2_dC_g, p2_dC_b)
+                             : p2_color;
                 p2b_flags   <= p2_flags;
                 p2b_fb_addr <= p2_fb_addr;
                 p2b_discard <= p2_discard;
@@ -5423,16 +6843,42 @@ always @(posedge clk) begin : main_fsm
                 // p2 <- p1  (captures tex_resp; stages the cmap request)
                 p2_valid   <= p1_valid;
                 if (p1_valid) begin
-                    p2_color   <= p1_tex_color;
+                    // Truecolor brightness modulate, pipelined here (register
+                    // inputs p1_tex_color + p1_light -> register p2_color) so
+                    // the multiplies are off the cache-output critical path.
+                    p2_color   <= sp_rgb
+                                ? rgb565_gouraud(p1_tex_color, p1_R, p1_light, p1_B)
+                                : (sp_truecolor
+                                   ? rgb565_modulate(p1_tex_color, p1_light)
+                                   : p1_tex_color);
+                    // Combine products texel*C.  C rides the per-vertex RGB planes
+                    // as BIASED-UNSIGNED (firmware enc_C5/C6 add bias 16/32) so it
+                    // interpolates monotonically like an unsigned colour (zero-extend
+                    // in the derive is then correct — fixes the signed-C-as-unsigned
+                    // wrap that faceted the head).  Recover signed C by subtracting
+                    // the bias here, after interpolation, before the product:
+                    //   R/B 5-bit: C = field - 16 ;  G 6-bit: C = field - 32.
+                    // texel stays unsigned ({1'b0,...}).
+                    p2_pr   <= $signed({1'b0, p1_tex_color[15:11]}) * ($signed({1'b0, p1_R})     - 6'sd16);
+                    p2_pg   <= $signed({1'b0, p1_tex_color[10:5]})  * ($signed({1'b0, p1_light}) - 7'sd32);
+                    p2_pb   <= $signed({1'b0, p1_tex_color[4:0]})   * ($signed({1'b0, p1_B})     - 6'sd16);
+                    // Independent additive D (combine path); zero/unused on legacy.
+                    p2_dC_r <= p1_Dr; p2_dC_g <= p1_Dg; p2_dC_b <= p1_Db;
                     p2_flags   <= p1_flags;
                     p2_fb_addr <= p1_fb_addr;
                     p2_discard <= p1_flags[SPAN_SKIP_ZERO]
-                               && (p1_tex_color == 8'hFF);
+                               && (sp_truecolor ? (p1_tex_color == 16'h0000)
+                                                : (p1_tex_color[7:0] == 8'hFF));
                     p2_z_test  <= p1_z_test;
                     p2_z_write <= p1_z_write;
                     p2_z_addr  <= p1_z_addr;
                     p2_z_value <= p1_z_value;
-                    if (p1_flags[SPAN_COLORMAP]) begin
+                    if (p1_flags[SPAN_COLORMAP] && (INCLUDE_PALETTE != 0)) begin
+                        // Truecolor-only builds (INCLUDE_PALETTE=0) never issue a
+                        // cmap request, so the entire port-B colormap pipe
+                        // (cmap_pending/resp, the palookup reads) constant-folds
+                        // away — truecolor surfaces take the rgb565_* resolve and
+                        // never set SPAN_COLORMAP.
                         // SDRAM byte address for the cmap lookup.  Slot
                         // base + per-pixel (shade × 256 + texel).  The
                         // 16 KB per colormap slot, expressed as a shift here
@@ -5453,7 +6899,7 @@ always @(posedge clk) begin : main_fsm
                         // whenever this shift fires.
                         cmap_pending_valid <= 1'b1;
                         cmap_pending_addr  <= cmap_slot_addr
-                                            | {12'b0, p1_light, p1_tex_color};
+                                            | {12'b0, p1_light, p1_tex_color[7:0]};
                     end
                 end
 
@@ -5470,6 +6916,11 @@ always @(posedge clk) begin : main_fsm
             if (issue_committed) begin
                 p1_valid   <= 1'b1;
                 p1_light   <= p0_light;
+                p1_R       <= p0_R;
+                p1_B       <= p0_B;
+                p1_Dr      <= p0_Dr;
+                p1_Dg      <= p0_Dg;
+                p1_Db      <= p0_Db;
                 p1_colormap_id <= p0_colormap_id;
                 p1_flags   <= p0_flags;
                 p1_fb_addr <= p0_fb_addr;
@@ -5478,7 +6929,7 @@ always @(posedge clk) begin : main_fsm
                 p1_z_addr  <= p0_z_addr;
                 p1_z_value <= p0_z_value;
                 p1_tex_ready <= 1'b0;
-                p1_tex_color <= 8'd0;
+                p1_tex_color <= 16'd0;
                 p0_valid <= 1'b0;
             end
 
@@ -5489,6 +6940,11 @@ always @(posedge clk) begin : main_fsm
             if (p0a_to_p0) begin
                 p0_valid     <= 1;
                 p0_light     <= p0a_light;
+                p0_R         <= p0a_R;
+                p0_B         <= p0a_B;
+                p0_Dr        <= p0a_Dr;
+                p0_Dg        <= p0a_Dg;
+                p0_Db        <= p0a_Db;
                 p0_colormap_id <= p0a_colormap_id;
                 p0_flags     <= p0a_flags;
                 p0_fb_addr   <= p0a_fb_addr;
@@ -5510,9 +6966,26 @@ always @(posedge clk) begin : main_fsm
             // source fragment while p1/p2/p3 are stalled on a cache or FB event.
             // This removes a hot `p1_valid -> sp_t/sp_s enable` timing cone and
             // gives the fragment pipe one extra cycle of elasticity.
+            // z_compress pipe warm-up at span start: while g_zwarm!=0, load_p0a is
+            // held off (above), so advance only the lookahead + 2 compress stages
+            // (single cone/cycle) to fill the pipe; after 2 cycles zc_s2_* holds
+            // z_compress(start) and sp_z_la is the steady-state +2*step.  Truecolor
+            // builds only (g_zwarm primed 0 otherwise).
+            if (g_zwarm != 2'd0) begin
+                sp_z_la     <= sp_z_la + sp_z_value_step;
+                sp_depth_la <= sp_depth_la + sp_depth_step;
+                zc_s1_z <= zc_stage1(sp_z_la);     zc_s2_z <= zc_stage2(zc_s1_z);
+                zc_s1_d <= zc_stage1(sp_depth_la); zc_s2_d <= zc_stage2(zc_s1_d);
+                g_zwarm <= g_zwarm - 2'd1;
+            end
             if (load_p0a) begin
                 p0a_valid     <= 1;
                 p0a_light     <= source_light;
+                p0a_R         <= source_R;
+                p0a_B         <= source_B;
+                p0a_Dr        <= source_Dr;
+                p0a_Dg        <= source_Dg;
+                p0a_Db        <= source_Db;
                 p0a_colormap_id <= source_colormap_id;
                 p0a_flags     <= sp_flags;
                 p0a_fb_addr   <= source_fb_addr;
@@ -5522,8 +6995,8 @@ always @(posedge clk) begin : main_fsm
                 p0a_z_write   <= sp_z_test_enable && sp_z_write_enable;
                 p0a_z_addr    <= sp_z_addr;
                 p0a_z_value   <= source_z_half;
-                p0a_s_int <= source_s_clamped[31:16] & sp_tex_w_mask;
-                p0a_t_y   <= source_t_clamped[31:16] & sp_tex_h_mask;
+                p0a_s_int <= mirror_idx(source_s_clamped[31:16], sp_tex_w_mask, sp_mirror_s);
+                p0a_t_y   <= mirror_idx(source_t_clamped[31:16], sp_tex_h_mask, sp_mirror_t);
 
                 if (load_p0a_z) begin
                     z_src_push      = 1'b1;
@@ -5532,21 +7005,38 @@ always @(posedge clk) begin : main_fsm
                     z_src_push_half = source_z_half;
                     sp_z_addr  <= sp_z_addr + sp_z_step;
                     sp_z_value <= sp_z_value + sp_z_value_step;
+                    sp_depth_value <= sp_depth_value + sp_depth_step;
                     if (sp_q29_z_enable)
                         sp_q29_z_value <= sat_add32(sp_q29_z_value,
                                                     sp_q29_z_value_step);
+                    // pipelined z_compress: advance lookahead + both stages in
+                    // lockstep with sp_z_value (prunes on non-truecolor builds).
+                    sp_z_la     <= sp_z_la + sp_z_value_step;
+                    sp_depth_la <= sp_depth_la + sp_depth_step;
+                    zc_s1_z <= zc_stage1(sp_z_la);     zc_s2_z <= zc_stage2(zc_s1_z);
+                    zc_s1_d <= zc_stage1(sp_depth_la); zc_s2_d <= zc_stage2(zc_s1_d);
                 end
                 else if (source_z_advance_active) begin
                     sp_z_addr  <= sp_z_addr + sp_z_step;
                     sp_z_value <= sp_z_value + sp_z_value_step;
+                    sp_depth_value <= sp_depth_value + sp_depth_step;
                     if (sp_q29_z_enable)
                         sp_q29_z_value <= sat_add32(sp_q29_z_value,
                                                     sp_q29_z_value_step);
+                    sp_z_la     <= sp_z_la + sp_z_value_step;
+                    sp_depth_la <= sp_depth_la + sp_depth_step;
+                    zc_s1_z <= zc_stage1(sp_z_la);     zc_s2_z <= zc_stage2(zc_s1_z);
+                    zc_s1_d <= zc_stage1(sp_depth_la); zc_s2_d <= zc_stage2(zc_s1_d);
                 end
 
                 sp_fb_addr <= sp_fb_addr + sp_fb_stride;
                 sp_count   <= sp_count - 16'd1;
                 sp_light_q <= sp_light_q + sp_light_step;
+                sp_R_q <= sp_R_q + sp_R_step;   // truecolor RGB red advance
+                sp_B_q <= sp_B_q + sp_B_step;   // truecolor RGB blue advance
+                sp_Dr_q <= sp_Dr_q + sp_Dr_step; // combine D advance
+                sp_Dg_q <= sp_Dg_q + sp_Dg_step;
+                sp_Db_q <= sp_Db_q + sp_Db_step;
                 if (scalar_span_last_issue) src_done <= 1;
 
                 if (persp_active) begin
@@ -5558,6 +7048,14 @@ always @(posedge clk) begin : main_fsm
                     end else begin
                         sp_s        <= sp_s + sp_sstep;
                         sp_t        <= sp_t + sp_tstep;
+                        // QUADRATIC sub-segment: advance the running step by the
+                        // per-pixel 2nd difference (forward-differenced parabola).
+                        // sp_scc/sp_tcc are 0 on the affine/palettized path, so
+                        // this reduces to sp_sstep <= sp_sstep (a hold) and is
+                        // bit-identical to the old constant-step behaviour.  Plain
+                        // register reads keep it out of the swap timing cone.
+                        sp_sstep    <= sp_sstep + sp_scc;
+                        sp_tstep    <= sp_tstep + sp_tcc;
                         sp_seg_left <= sp_seg_left - 4'd1;
                     end
                 end else begin
@@ -5588,6 +7086,8 @@ always @(posedge clk) begin : main_fsm
                 sp_t                 <= persp_pend_t;
                 sp_sstep             <= persp_pend_sstep;
                 sp_tstep             <= persp_pend_tstep;
+                sp_scc               <= persp_pend_scc;   // quadratic 2nd-diff (0 on affine)
+                sp_tcc               <= persp_pend_tcc;
                 sp_seg_left          <= PERSPECTIVE_SEG_LAST;
                 persp_swap_pending   <= 1'b0;
             end
@@ -5664,8 +7164,11 @@ always @(posedge clk) begin : main_fsm
                         end else if (!tex_axi_arvalid && !tex_m0_in_flight
                                   && fb_write_drain_complete) begin
                             // Z-window fill: 4-beat burst read of the whole
-                            // 16-byte z line (drain barrier identical to the
-                            // old single-word read).  GPU_Z_READ_WINDOW==1
+                            // 16-byte z line.  The drain barrier is the
+                            // conservative fb_write_drain_complete: the whole
+                            // fb write queue drains before the z line is read,
+                            // so no z-read overlaps any pending write.
+                            // GPU_Z_READ_WINDOW==1
                             // degenerates to exactly that old shape: a
                             // single-word read (arlen 0) of the word under
                             // test, nothing cached.
@@ -5684,6 +7187,14 @@ always @(posedge clk) begin : main_fsm
                     end
                     // Process p3 if it has a non-discard pixel (and no pending depth work)
                     else if (p3_valid && !p3_discard) begin : fb_acc_blk
+                        if (sp_truecolor && sp_blend) begin
+                            // Translucent truecolor pixel: read-modify-write
+                            // src-over blend instead of an opaque accumulate.
+                            // p3 stays valid (fbss != IDLE stalls the pipe) and
+                            // is retired in FBSS_CB_BLEND.  Const 0 / pruned when
+                            // INCLUDE_DIRECT_COLOR is off -> byte-exact opaque.
+                            fbss <= FBSS_CB_REQ;
+                        end else begin
                         p3_word_match = fb_acc_p3_word_match;
 
                         if (!p3_word_match) begin
@@ -5711,6 +7222,7 @@ always @(posedge clk) begin : main_fsm
                                           | p3_fb_lane_data_w;
                             fb_acc_mask  <= fb_acc_mask | p3_fb_lane_mask_w;
                             p3_consumed = 1'b1;
+                        end
                         end
 
                     end
@@ -5807,6 +7319,70 @@ always @(posedge clk) begin : main_fsm
 	                    end
 	                    fbss <= FBSS_IDLE;
 	                end
+
+                // --------------------------------------------------------
+                // Truecolor constant-alpha src-over blend (OF_GPU_SPAN_BLEND):
+                // read the dst RGB565 pixel, mix p3_color by sp_const_alpha,
+                // write the blended pixel back via fb_acc.  Flush-before-read,
+                // serialized per pixel -> no RAW/group hazards.  Unreachable
+                // (pruned) when sp_blend is const 0 (INCLUDE_DIRECT_COLOR off).
+                // --------------------------------------------------------
+                FBSS_CB_REQ: begin
+                    if (fb_acc_valid) begin
+                        // Flush any pending accumulator first so the blend read
+                        // sees committed pixels (it may target the same word).
+                        if (fb_write_can_issue) begin
+                            fbwq_push_req  = 1'b1;
+                            fbwq_push_addr = fb_acc_addr;
+                            fbwq_push_data = fb_acc_data;
+                            fbwq_push_strb = fb_acc_mask;
+                            fb_acc_valid   <= 1'b0;
+                        end else begin
+                            fbss <= FBSS_FLUSH_W_RSP;   // queue full: drain, retry
+                        end
+                    end else if (!tex_axi_arvalid && !tex_m0_in_flight
+                              && fb_write_drain_complete) begin
+                        // All writes drained: issue the single-word dst read.
+                        blend_arvalid <= 1'b1;
+                        blend_araddr  <= p3_fb_word_addr_w;
+                        blend_arlen   <= 8'd0;
+                        fbss          <= FBSS_CB_AR;
+                    end
+                end
+                FBSS_CB_AR: begin
+                    if (blend_arready) begin
+                        blend_arvalid <= 1'b0;
+                        fbss          <= FBSS_CB_R;
+                    end
+                end
+                FBSS_CB_R: begin
+                    if (blend_rvalid) begin
+                        // Capture the dst halfword (consumes the read beat); do
+                        // the blend math next cycle so read-response -> blend ->
+                        // fb_acc is split register-to-register (timing).
+                        cb_dst_r <= cb_dst_half_w;
+                        fbss     <= FBSS_CB_BLEND;
+                    end
+                end
+                FBSS_CB_BLEND: begin
+                    // Stage 1: per-channel weighted sums src*a6 + dst*(64-a6)
+                    // into registers (the 6 multiplies, register->register).
+                    // p3 stays valid (retired in CB_BLEND2) so p3_color holds.
+                    cb_sr <= p3_color[15:11] * sp_a6 + cb_dst_r[15:11] * (7'd64 - sp_a6);
+                    cb_sg <= p3_color[10:5]  * sp_a6 + cb_dst_r[10:5]  * (7'd64 - sp_a6);
+                    cb_sb <= p3_color[4:0]   * sp_a6 + cb_dst_r[4:0]   * (7'd64 - sp_a6);
+                    fbss  <= FBSS_CB_BLEND2;
+                end
+                FBSS_CB_BLEND2: begin
+                    // Stage 2: >>6 + repack (cb_mixed_w) into p3's lane; retire
+                    // p3.  p3 still valid here so p3_fb_word_addr_w / mask hold.
+                    fb_acc_valid <= 1'b1;
+                    fb_acc_addr  <= p3_fb_word_addr_w;
+                    fb_acc_data  <= cb_lane_data_w;
+                    fb_acc_mask  <= p3_fb_lane_mask_w;
+                    p3_valid     <= 1'b0;
+                    fbss         <= FBSS_IDLE;
+                end
 
 	                // --------------------------------------------------------
                 // Translucent-blend sub-flow.  Entry from FBSS_IDLE has
@@ -6336,6 +7912,28 @@ always @(posedge clk) begin : main_fsm
                             pss_slope_t_delta <= $signed(pss_t_end_r) - $signed(persp_anchor_t);
                             persp_pend_s      <= persp_anchor_s;
                             persp_pend_t      <= persp_anchor_t;
+                            // PIPELINE the quadratic curvature ONE cycle early
+                            // (registered into persp_pend_scc/tcc) so its 2-sub
+                            // cone from the anchors terminates HERE, off the
+                            // sp_sstep commit path (STA #7..#24: persp_anchor_s
+                            // -> sp_sstep was the GPU limiter at -2.27).  Three
+                            // consecutive perspective-exact anchors:
+                            //   c = (A_{N+1} - 2*A_N + A_{N-1}) >>> 8
+                            // TRUECOLOR-gated; 0 unless a real A_{N-1} exists
+                            // (persp_prev_valid) and not Q29.  SLOPE_PREP consumes
+                            // persp_pend_scc next cycle for the d0 step.
+                            if ((INCLUDE_DIRECT_COLOR != 0) && sp_truecolor
+                                && persp_prev_valid && !sp_persp_q29_mode) begin
+                                persp_pend_scc <= ($signed(pss_s_end_r)
+                                                   - ($signed(persp_anchor_s) <<< 1)
+                                                   + $signed(persp_prev_anchor_s)) >>> 8;
+                                persp_pend_tcc <= ($signed(pss_t_end_r)
+                                                   - ($signed(persp_anchor_t) <<< 1)
+                                                   + $signed(persp_prev_anchor_t)) >>> 8;
+                            end else begin
+                                persp_pend_scc <= 32'sd0;
+                                persp_pend_tcc <= 32'sd0;
+                            end
                             persp_pss         <= PSS_SLOPE_PREP;
                         end
                         default: ;
@@ -6377,10 +7975,40 @@ always @(posedge clk) begin : main_fsm
                         pss_dsp2_b <= $signed(pss_div_recip32(pss_slope_divisor));
                         persp_pss <= PSS_SLOPE_DIV_WAIT;
                     end else begin
-                        // Shared slope commit — full-segment >>4 step source.
+                        // Full-segment (divisor==16) step commit.  The per-pixel
+                        // 2nd-difference c was computed and REGISTERED one cycle
+                        // earlier in PSS_PASS_TO_B (persp_pend_scc/tcc), so the
+                        // qc cone stays OFF the sp_sstep commit path.
+                        //   d0 = (delta - 120*c) >>> 4   (120c = (c<<7)-(c<<3))
+                        // d0 hits both endpoints (f(0)=A_N, f(16)=A_{N+1}) so the
+                        // segment boundary stays continuous.
+                        // SLOT A (the span's FIRST segment) is always linear (no
+                        // A_{N-1}) and commits DIRECTLY to sp_sstep — give it the
+                        // plain delta>>4 with NO curvature logic in its cone, so
+                        // the only path to sp_sstep is the original affine one.
+                        // SLOT B's quadratic d0 commits to persp_pend_sstep (a
+                        // register the segment swap copies 1:1 into sp_sstep), so
+                        // its deeper cone never reaches sp_sstep directly.  c=0
+                        // (palettized / non-truecolor / Q29 -> persp_pend_scc=0)
+                        // collapses both branches to the exact original delta>>4.
                         pss_slope_commit_fire = 1'b1;
-                        pss_commit_s_step = pss_slope_s_delta >>> PERSPECTIVE_SEG_SHIFT;
-                        pss_commit_t_step = pss_slope_t_delta >>> PERSPECTIVE_SEG_SHIFT;
+                        if (persp_pass == PSS_PASS_TO_A) begin
+                            pss_commit_s_step = pss_slope_s_delta >>> PERSPECTIVE_SEG_SHIFT;
+                            pss_commit_t_step = pss_slope_t_delta >>> PERSPECTIVE_SEG_SHIFT;
+                            pss_commit_scc = 32'sd0;
+                            pss_commit_tcc = 32'sd0;
+                        end else begin
+                            pss_commit_scc = persp_pend_scc;   // registered in PASS_TO_B
+                            pss_commit_tcc = persp_pend_tcc;
+                            pss_commit_s_step = (pss_slope_s_delta
+                                                 - (($signed(persp_pend_scc) <<< 7)
+                                                    - ($signed(persp_pend_scc) <<< 3)))
+                                                >>> PERSPECTIVE_SEG_SHIFT;
+                            pss_commit_t_step = (pss_slope_t_delta
+                                                 - (($signed(persp_pend_tcc) <<< 7)
+                                                    - ($signed(persp_pend_tcc) <<< 3)))
+                                                >>> PERSPECTIVE_SEG_SHIFT;
+                        end
                     end
                 end
 
@@ -6473,7 +8101,15 @@ always @(posedge clk) begin : main_fsm
                     PSS_PASS_TO_A: begin
                         sp_sstep          <= pss_commit_s_step;
                         sp_tstep          <= pss_commit_t_step;
+                        sp_scc            <= pss_commit_scc;   // quadratic 2nd-diff -> slot A
+                        sp_tcc            <= pss_commit_tcc;
                         sp_seg_left       <= PERSPECTIVE_SEG_LAST;
+                        // Capture A_{N-1} before persp_anchor advances to A_{N+1},
+                        // and arm curvature for the NEXT segment (this first full
+                        // segment itself stays linear: persp_prev_valid was 0).
+                        persp_prev_anchor_s <= persp_anchor_s;
+                        persp_prev_anchor_t <= persp_anchor_t;
+                        persp_prev_valid    <= 1'b1;
                         persp_anchor_s    <= pss_s_end_r;
                         persp_anchor_t    <= pss_t_end_r;
                         persp_seg_a_ready <= 1;
@@ -6481,6 +8117,12 @@ always @(posedge clk) begin : main_fsm
                     PSS_PASS_TO_B: begin
                         persp_pend_sstep  <= pss_commit_s_step;
                         persp_pend_tstep  <= pss_commit_t_step;
+                        persp_pend_scc    <= pss_commit_scc;   // quadratic 2nd-diff -> slot B
+                        persp_pend_tcc    <= pss_commit_tcc;
+                        // Advance anchors: A_{N-1} <- A_N, A_N <- new endpoint.
+                        persp_prev_anchor_s <= persp_anchor_s;
+                        persp_prev_anchor_t <= persp_anchor_t;
+                        persp_prev_valid    <= 1'b1;
                         persp_anchor_s    <= pss_s_end_r;
                         persp_anchor_t    <= pss_t_end_r;
                         persp_seg_b_ready <= 1;

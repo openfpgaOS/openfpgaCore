@@ -131,8 +131,8 @@ assign {phy_ras, phy_cas, phy_we} = cmd;
     localparam      ST_WRITE_4          = 'd24;
     // ('d25/'d26 were ST_WRITE_5/ST_WRITE_6, the 2-dead-cycle continuation
     //  bubble.  Retired: the rolling preload below streams continuation
-    //  beats back-to-back on the WRITE_3->WRITE_2 edge.)
-    localparam      ST_WRITE_7          = 'd27;
+    //  beats back-to-back on the WRITE_3->WRITE_2 edge.  'd27 was a leftover
+    //  ST_WRITE_7 trampoline state, also retired.)
     localparam      ST_WRITE_4_NEWROW   = 'd28;
     localparam      ST_WRITE_4_NR_PRECHG = 'd29;
     localparam      ST_WRITE_4_NR_ACT   = 'd10;
@@ -227,18 +227,14 @@ assign dbg_io = {1'b0, (refresh_pending != 2'd0), state[5:0]};
 
     reg             word_op;
     reg     [24:0]  addr;
-    wire    [9:0]   addr_col9_next_1 = addr[9:0] + 'h1;
 
     reg     [10:0]  length;
-    wire    [10:0]  length_next = length - 'h1;
-    reg             enable_dq_read, enable_dq_read_1, enable_dq_read_2, enable_dq_read_3, enable_dq_read_4, enable_dq_read_5;
+    reg             enable_dq_read, enable_dq_read_1, enable_dq_read_2, enable_dq_read_3, enable_dq_read_4;
     reg             enable_dq_read_toggle;
 
     reg             enable_data_done, enable_data_done_1, enable_data_done_2, enable_data_done_3, enable_data_done_4;
 
     reg             read_newrow;
-    reg             read_cmd_issued;    // Full-page burst: track if READ issued for current row
-    reg             burstwr_newrow;
 
     // Open-page tracking (layout selected by BANK_ROW_TRACK — see the
     // parameter comment).  Per-bank (1): SDR SDRAM keeps four
@@ -315,7 +311,6 @@ always @(posedge controller_clk) begin
     word_wr_data_next <= 0;
     word_wr_done <= 0;  // 1-cycle pulse, default low
 
-    enable_dq_read_5 <= enable_dq_read_4;
     enable_dq_read_4 <= enable_dq_read_3;
     enable_dq_read_3 <= enable_dq_read_2;
     enable_dq_read_2 <= enable_dq_read_1;
@@ -372,7 +367,6 @@ always @(posedge controller_clk) begin
         delay_boot <= 0;
         refresh_pending <= 2'd0;
         phy_dqm <= 2'b00;
-        read_cmd_issued <= 0;
 
         state <= ST_BOOT_0;
     end
@@ -788,9 +782,6 @@ always @(posedge controller_clk) begin
             state <= ST_WRITE_2;
         end
     end
-    ST_WRITE_7: begin
-        state <= ST_WRITE_2;
-    end
 
 
     ST_READ_0: begin
@@ -853,7 +844,7 @@ always @(posedge controller_clk) begin
         state <= ST_READ_9;
     end
     ST_READ_9: begin
-        state <= ST_READ_6;// hmm do we need this
+        state <= ST_READ_6;
     end
     ST_READ_6: begin
         if(!read_newrow && !word_op) enable_data_done <= 1;
@@ -898,7 +889,6 @@ always @(posedge controller_clk) begin
     end
     ST_BURSTWR_3: begin
         burstwr_ready <= 1;
-        burstwr_newrow <= 0;
 
         if(burstwr_strobe) begin
 
@@ -908,14 +898,8 @@ always @(posedge controller_clk) begin
             phy_dq_out <= burstwr_data;
 
             addr <= addr + 1'b1;
-            /*if(addr_col9_next_1 == 9'h0) begin
-                burstwr_ready <= 0;
-                burstwr_newrow <= 1;
-                state <= ST_BURSTWR_4;
-            end */
         end
         if(burstwr_strobe | burstwr_done) begin
-            burstwr_newrow <= 0;
             state <= ST_BURSTWR_4;
         end
     end
@@ -938,12 +922,6 @@ always @(posedge controller_clk) begin
     ST_BURSTWR_7: begin
         cmd <= CMD_NOP;
         state <= ST_IDLE;
-        if(burstwr_newrow) begin
-            state <= ST_BURSTWR_0;
-            if(refresh_pending != 2'd0) begin
-                state <= ST_REFRESH_0;
-            end
-        end
     end
 
 
@@ -957,9 +935,6 @@ always @(posedge controller_clk) begin
     ST_REFRESH_1: begin
         if(dc == TIMING_AUTOREFRESH-1)  begin
             state <= ST_IDLE;
-            if(burstwr_newrow) begin
-                state <= ST_BURSTWR_0;
-            end
         end
     end
 

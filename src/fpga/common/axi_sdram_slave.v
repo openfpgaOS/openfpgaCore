@@ -11,7 +11,7 @@
 //   word_rd/wr pulse → accepted → busy → rdata_valid (reads)
 //
 // Features:
-//   - Burst reads: ARLEN → word_burst_len (0=1 word, 7=8 words)
+//   - Burst reads: ARLEN → word_burst_len (0=1 word, 15=16 words)
 //   - Single and burst writes: each W beat → word_wr
 //   - Optional serialized write-burst execution: keep the AXI side as one
 //     AWLEN>0 transaction, but issue one conservative io_sdram word write per
@@ -26,9 +26,10 @@
 module axi_sdram_slave #(
     parameter SERIALIZE_WRITE_BURSTS = 1'b0,
     // Largest AXI AWLEN that may execute as a native io_sdram burst when
-    // SERIALIZE_WRITE_BURSTS is clear.  AWLEN=1 is the GPU framebuffer
-    // coalescer's 2-word command.  Longer CPU writebacks can be kept on the
-    // conservative serialized path at the Pocket top level.
+    // SERIALIZE_WRITE_BURSTS is clear.  The arbiter coalesces contiguous GPU
+    // framebuffer writes into bursts up to 8 beats (AWLEN 0..7); CPU writebacks
+    // (AWLEN<=15) take the buffered S_WR_FILL path and issue one native burst.
+    // Serialization only applies to AWLEN>15 or when SERIALIZE_WRITE_BURSTS set.
     parameter [7:0] MAX_NATIVE_WRITE_BURST_LEN = 8'd15
 ) (
     input wire clk,

@@ -1,0 +1,24 @@
+# openfpgaOS — VexiiRiscv (SpinalHDL/sbt) CPU-netlist generation container.
+#
+# Mirrors the Quartus build container's role, but for `make cpu`: the sbt /
+# SpinalHDL invocation in generate_vexii.sh runs in here, so a fresh checkout
+# needs only Docker + internet — no host JDK/sbt.  Unlike the Quartus image
+# (which bind-mounts the host's Quartus to stay small / sidestep redistribution),
+# the whole JDK+sbt toolchain is baked in here — it is small and freely
+# redistributable.  Scala/SpinalHDL DEPENDENCIES are NOT baked: they download on
+# the first `make cpu` into a persistent, host-owned HOME mounted by
+# vexii-container.sh (tools/.vexii-home), so subsequent generations run offline.
+#
+# Intentionally minimal/headless — the upstream VexiiRiscv docker/ image is a
+# full XFCE + VNC IntelliJ/Konata dev desktop, which we do not want for builds/CI.
+FROM eclipse-temurin:21-jdk-jammy
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV SBT_VERSION=1.10.0
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends curl ca-certificates make git \
+ && curl -fsSL "https://github.com/sbt/sbt/releases/download/v${SBT_VERSION}/sbt-${SBT_VERSION}.tgz" -o /tmp/sbt.tgz \
+ && tar -xzf /tmp/sbt.tgz -C /opt \
+ && ln -s /opt/sbt/bin/sbt /usr/local/bin/sbt \
+ && rm /tmp/sbt.tgz \
+ && apt-get clean && rm -rf /var/lib/apt/lists/*

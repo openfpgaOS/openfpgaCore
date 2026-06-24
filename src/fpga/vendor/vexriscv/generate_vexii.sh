@@ -78,18 +78,35 @@
 
 set -e
 
-VARIANT="${1:-pocket}"
+VARIANT="${1:-os25}"
+
+# ── Per-variant cache sizing ──────────────────────────────────────────
+# Both are (sets × 2 ways × 64 B line):
+#   I$ sets:  256 = 32 KB,  128 = 16 KB
+#   D$ sets: 1024 = 128 KB,  512 = 64 KB
+# All current Pocket/MiSTer variants run 32 KB I$ / 128 KB D$.  These are the
+# ONLY place cache size is set — change a variant's sets here and re-run
+# `make cpu VARIANT=<v>`; nothing else (no qsf macro) encodes cache size.
+ICACHE_SETS=256          # 32 KB I$
+DCACHE_SETS=1024         # 128 KB D$
+
+# Each variant generates its OWN netlist file (VexiiRiscv_<variant>.v); the
+# per-variant build picks it up directly.  No shared "default" netlist.
 case "$VARIANT" in
-    pocket)
+    os25)
         EXTRA_FLAGS=""
-        OUTPUT_NAME="VexiiRiscv.v"
+        OUTPUT_NAME="VexiiRiscv_os25.v"
+        ;;
+    os30)
+        EXTRA_FLAGS=""
+        OUTPUT_NAME="VexiiRiscv_os30.v"
         ;;
     mister)
         EXTRA_FLAGS="--decoders=2 --lanes=2"
         OUTPUT_NAME="VexiiRiscv_mister.v"
         ;;
     *)
-        echo "Error: unknown variant '$VARIANT' (pocket|mister)"
+        echo "Error: unknown variant '$VARIANT' (os25|os30|mister)"
         exit 1
         ;;
 esac
@@ -105,24 +122,21 @@ fi
 echo "Generating VexiiRiscv [$VARIANT] (stock vexiiriscv.Generate, openfpgaOS cache sizing)..."
 cd "$VEXII_DIR"
 
-# sbt always emits VexiiRiscv.v; protect another variant's netlist from
-# being clobbered while this variant generates (it is mv'd back below).
-STASHED=""
-if [ "$OUTPUT_NAME" != "VexiiRiscv.v" ] && [ -f "$VEXII_DIR/VexiiRiscv.v" ]; then
-    mv "$VEXII_DIR/VexiiRiscv.v" "$VEXII_DIR/VexiiRiscv.v.stash"
-    STASHED="yes"
-fi
+# sbt always emits the bare name VexiiRiscv.v here; clear any stale copy from
+# an interrupted run so the post-gen rename can't pick up an old netlist.
+# Each variant's final file is VexiiRiscv_<variant>.v (no shared default).
+rm -f "$VEXII_DIR/VexiiRiscv.v"
 
 sbt -Dsbt.server.forcestart=true --batch "Test/runMain vexiiriscv.Generate \
       --xlen=32 \
       --with-rvm --with-rva --with-rvf --with-rvc \
       --with-rvZcbm \
-      --with-fetch-l1 --fetch-l1-sets=256 --fetch-l1-ways=2 --fetch-l1-refill-count=2 \
+      --with-fetch-l1 --fetch-l1-sets=$ICACHE_SETS --fetch-l1-ways=2 --fetch-l1-refill-count=2 \
       --fetch-l1-mem-data-width-min=64 \
       --fetch-l1-read-at=1 --fetch-l1-hits-at=2 --fetch-l1-hit-at=2 \
       --fetch-l1-bank-muxes-at=2 --fetch-l1-bank-mux-at=3 --fetch-l1-ctrl-at=3 \
       --fetch-l1-hardware-prefetch=nl --fetch-axi4 \
-      --with-lsu-l1 --lsu-l1-sets=1024 --lsu-l1-ways=2 \
+      --with-lsu-l1 --lsu-l1-sets=$DCACHE_SETS --lsu-l1-ways=2 \
       --lsu-l1-refill-count=2 --lsu-l1-writeback-count=2 \
       --lsu-l1-store-buffer-slots=2 --lsu-l1-store-buffer-ops=16 \
       --lsu-l1-axi4 \
@@ -135,7 +149,7 @@ sbt -Dsbt.server.forcestart=true --batch "Test/runMain vexiiriscv.Generate \
       --fpu-add-preshift-stage=1 --fpu-add-shifter-stage=2 \
       --fpu-add-math-stage=3 --fpu-add-norm-stage=4 --fpu-add-pack-at=5 \
       --relaxed-src --relaxed-branch --relaxed-div --relaxed-shift \
-      --div-radix=4 --with-store-rs2-late \
+      --div-radix=2 --with-store-rs2-late \
       --dispatcher-at=2 \
       --reset-vector=0 \
       --region base=0,size=8000,main=0,exe=1 \
@@ -151,17 +165,11 @@ if [ ! -f "$GENERATED" ]; then
     echo "ERROR: VexiiRiscv.v not found after generation"
     exit 1
 fi
-# Non-default variants are renamed so the targets keep independent
-# netlists (the module name inside stays VexiiRiscv — cpu_system.v
-# instantiates it by name; only the file differs per target).
-if [ "$GENERATED" != "$OUTPUT" ]; then
-    mv "$GENERATED" "$OUTPUT"
-fi
-if [ -n "$STASHED" ]; then
-    mv "$VEXII_DIR/VexiiRiscv.v.stash" "$VEXII_DIR/VexiiRiscv.v"
-fi
+# The module inside stays named VexiiRiscv (cpu_system.v instantiates it by
+# name); only the file is per-variant.  Rename the bare sbt output.
+mv -f "$GENERATED" "$OUTPUT"
 
-if [ "$VARIANT" = "pocket" ]; then
+if [ "$VARIANT" = "os25" ] || [ "$VARIANT" = "os30" ]; then
 # The generated execute_freeze_valid cone fans into the whole CPU
 # ready/valid network.  Quartus otherwise tends to keep it as one huge
 # high-fanout control net, which leaves the worst path from execute/FPU

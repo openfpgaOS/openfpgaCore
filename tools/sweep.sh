@@ -4,188 +4,179 @@
 # SPDX-FileType: SOURCE
 # SPDX-FileCopyrightText: (c) 2026, ThinkElastic <Think@Elastic.com>
 #------------------------------------------------------------------------------
-
-# Seed sweep for Quartus fitter
 #
-# Usage: ./sweep.sh [MIN] [MAX]
-#   MIN   First seed (default: 1)
-#   MAX   Last seed  (default: 30)
+# Quartus fitter seed sweep.  Tries a range of seeds, ranks them by setup WNS on
+# the target 100 MHz clock (Fmax/TNS shown alongside), and writes the winning
+# seed into the variant's stored seed file so the next `make build` uses it.
 #
-# Env (set by the target Makefiles):
-#   PROJECT   Quartus project/revision        (default: ap_core)
-#   CLOCK_RE  BRE matching the 100 MHz clock in the Fmax table
-#             (default: the Pocket's mp_ram general[0]; pipes in clock
-#             names are literal in BRE, so paths like emu|pll|... work)
+# Two backends, selected by USE_CONTAINER:
 #
-# Compiles each seed sequentially, tracks Fmax + setup WNS/TNS, rebuilds
-# with the best.
+#   container (default — Pocket / Quartus 25.1): each seed compiles in its OWN
+#     bld/<variant>-s<seed>/ dir inside an isolated Docker container, so MAXJOBS
+#     fits run AT ONCE without the shared-state segfault that crashes concurrent
+#     host Quartus (each container has a private $HOME + /tmp).  The per-seed qsf
+#     (verilog macros + seed baked in) is regenerated via `make bld/<job>/...`.
+#     Needs: VARIANT, TARGET_DIR (dir holding the target Makefile).
 #
-# IMPORTANT: "best" means highest restricted Fmax, regardless of whether
-# the seed meets the 100 MHz timing target. Negative-slack seeds are
-# included in the ranking -- we'd rather ship the closest-to-meeting
-# bitstream than fail the build outright. Quartus is allowed to exit
-# with timing warnings; only a hard fitter/compile crash counts as
-# "failed" and removes a seed from consideration.
-
-# Note: no `set -e`. We deliberately want the script to keep going past
-# Quartus warnings (timing not met) and to record every seed's result.
+#   host (USE_CONTAINER=0 — MiSTer / Quartus 17): one host quartus compile per
+#     seed, MAXJOBS-throttled to 1 (the host Quartus concurrency segfault makes
+#     parallel host fits unsafe).  Sweeps in BLD_DIR (or CWD), sed-patching the
+#     seed into <PROJECT>.qsf, and does a final rebuild with the best seed.
+#     Needs: BLD_DIR (optional), VARIANT_DEFS (optional verilog macros).
+#
+# Usage: sweep.sh <min> <max>
+# Common env: PROJECT(=ap_core)  CLOCK_RE  MAXJOBS(=4)  USE_CONTAINER(=1)
+#             VARIANT  SEED_FILE
+#
+# No `set -e`: Quartus exits non-zero when timing isn't met, but still produces a
+# valid bitstream — we keep going and rank every seed; only a fitter crash (no
+# STA report) drops a seed from consideration.
+set -uo pipefail
 
 PROJECT=${PROJECT:-ap_core}
 CLOCK_RE=${CLOCK_RE:-mp_ram.*general\[0\]}
-MIN=${1:-1}
-MAX=${2:-30}
-RESULTS=output_files/seed_map.log
-VERILOG_MACROS=()
-if [ -n "${VARIANT_DEFS:-}" ]; then
-    for def in ${VARIANT_DEFS}; do
-        VERILOG_MACROS+=(--verilog_macro="${def}")
+MIN=${1:-1}; MAX=${2:-30}
+USE_CONTAINER=${USE_CONTAINER:-1}
+MAXJOBS=${MAXJOBS:-4}
+VARIANT=${VARIANT:-}
+TOOLS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Shared STA parsing (sta_wns_tns).  Source BEFORE any cd — BASH_SOURCE resolves
+# relative to the invocation CWD.
+. "$TOOLS/sta_lib.sh"
+
+C_HEAD='\033[1m'; C_OK='\033[32m'; C_WARN='\033[33m'; C_ERR='\033[31m'
+C_DIM='\033[2m'; C_RESET='\033[0m'
+
+TOTAL=$(( MAX - MIN + 1 ))
+declare -A R_WNS R_TNS R_FMAX
+
+# parse_sta <sta.rpt> -> sets _wns _tns _fmax (restricted Fmax on CLOCK_RE).
+parse_sta() {
+    _wns=""; _tns=""; _fmax="failed"
+    [ -f "$1" ] || return
+    read -r _wns _tns < <(sta_wns_tns "$1")
+    _fmax=$(awk -F';' -v re="$CLOCK_RE" \
+        '/^; [0-9]/ && $4 ~ re { gsub(/^ +| +$/, "", $3); print $3; exit }' \
+        "$1" 2>/dev/null)
+    [ -z "$_fmax" ] && _fmax="failed"
+}
+
+if [ "$USE_CONTAINER" = 1 ]; then
+    # ── Container backend: MAXJOBS-wide parallel fits ────────────────────
+    : "${VARIANT:?VARIANT required for container sweep}"
+    : "${TARGET_DIR:?TARGET_DIR required for container sweep}"
+    cd "$TARGET_DIR"
+    # Per-fit processor count is pinned in each generated qsf (NUM_PARALLEL_PROCESSORS
+    # = QPROCS in the Makefile), so MAXJOBS fits share the host cores without
+    # oversubscribing — and each fit places identically to the production build.
+    printf "${C_HEAD}[sweep]${C_RESET} $VARIANT seeds $MIN-$MAX, ${MAXJOBS}-wide (containers; procs pinned in qsf)\n"
+
+    # Shared inputs once: the CPU netlist + firmware are identical across seeds.
+    make --no-print-directory cpu VARIANT="$VARIANT" >/dev/null
+    make --no-print-directory bootloader >/dev/null
+
+    run_one() {
+        local s="$1" job="${VARIANT}-s$1"
+        make --no-print-directory "bld/$job/ap_core.qsf" \
+            VARIANT="$VARIANT" JOB="$job" SEED="$s" >/dev/null 2>&1
+        bash "$TOOLS/quartus-container.sh" "$TARGET_DIR/bld/$job" >"bld/$job.log" 2>&1
+    }
+
+    for s in $(seq "$MIN" "$MAX"); do
+        run_one "$s" &
+        while [ "$(jobs -rp | wc -l)" -ge "$MAXJOBS" ]; do wait -n; done
+    done
+    wait
+
+    for s in $(seq "$MIN" "$MAX"); do
+        parse_sta "bld/${VARIANT}-s$s/output_files/${PROJECT}.sta.rpt"
+        R_WNS[$s]=$_wns; R_TNS[$s]=$_tns; R_FMAX[$s]=$_fmax
+    done
+else
+    # ── Host backend: serial in-place compile per seed ───────────────────
+    [ -n "${BLD_DIR:-}" ] && cd "$BLD_DIR"
+    mkdir -p output_files
+    printf "${C_HEAD}[sweep]${C_RESET} Seeds $MIN-$MAX ($TOTAL builds, host serial)\n"
+    [ -n "${VARIANT_DEFS:-}" ] && printf "${C_HEAD}[sweep]${C_RESET} Variant defs: ${VARIANT_DEFS}\n"
+
+    VERILOG_MACROS=()
+    if [ -n "${VARIANT_DEFS:-}" ]; then
+        for def in ${VARIANT_DEFS}; do VERILOG_MACROS+=(--verilog_macro="${def}"); done
+    fi
+
+    n=0
+    for s in $(seq "$MIN" "$MAX"); do
+        n=$((n + 1))
+        printf "${C_DIM}[%d/%d]${C_RESET} Seed %-3s " "$n" "$TOTAL" "$s"
+        sed -i "s/^set_global_assignment -name SEED .*/set_global_assignment -name SEED ${s}/" "${PROJECT}.qsf"
+        rm -rf db incremental_db
+        if [ ${#VERILOG_MACROS[@]} -gt 0 ]; then
+            {
+                quartus_map ${PROJECT} "${VERILOG_MACROS[@]}" &&
+                quartus_fit ${PROJECT} &&
+                quartus_asm ${PROJECT} &&
+                quartus_sta ${PROJECT}
+            } > "output_files/seed_${s}_compile.log" 2>&1 || true
+        else
+            quartus_sh --flow compile ${PROJECT} > "output_files/seed_${s}_compile.log" 2>&1 || true
+        fi
+        parse_sta "output_files/${PROJECT}.sta.rpt"
+        cp "output_files/${PROJECT}.sta.rpt" "output_files/seed_${s}_sta.log" 2>/dev/null || true
+        R_WNS[$s]=$_wns; R_TNS[$s]=$_tns; R_FMAX[$s]=$_fmax
+        if [ -n "$_wns" ]; then
+            printf "${C_OK}%-10s${C_RESET} ${C_DIM}WNS %-8s TNS %s${C_RESET}\n" "$_fmax" "${_wns:--}" "${_tns:--}"
+        else
+            printf "${C_ERR}failed${C_RESET}\n"
+        fi
     done
 fi
 
-# Colors
-C_HEAD='\033[1m'
-C_OK='\033[32m'
-C_WARN='\033[33m'
-C_ERR='\033[31m'
-C_DIM='\033[2m'
-C_RESET='\033[0m'
-
-TOTAL=$(( MAX - MIN + 1 ))
-printf "${C_HEAD}[sweep]${C_RESET} Seeds ${MIN}-${MAX} (${TOTAL} builds)\n\n"
-if [ -n "${VARIANT_DEFS:-}" ]; then
-    printf "${C_HEAD}[sweep]${C_RESET} Variant defs: ${VARIANT_DEFS}\n\n"
-fi
-
-# Shared STA parsing (sta_wns_tns).
-. "$(dirname "${BASH_SOURCE[0]}")/sta_lib.sh"
-
-mkdir -p output_files
-echo "seed,fmax_mhz,wns_ns,tns_ns" > "${RESULTS}"
-
-BEST_SEED=""
-BEST_FMAX="0"
-BEST_WNS=""
-BEST_TNS=""
-COUNT=0
-
-for seed in $(seq ${MIN} ${MAX}); do
-    COUNT=$((COUNT + 1))
-    printf "${C_DIM}[${COUNT}/${TOTAL}]${C_RESET} Seed %-3s " "${seed}"
-
-    # Patch seed in QSF
-    sed -i "s/^set_global_assignment -name SEED .*/set_global_assignment -name SEED ${seed}/" ${PROJECT}.qsf
-
-    # Clean and compile. Quartus may exit non-zero when timing isn't
-    # met; we don't care -- as long as the STA report exists with an
-    # Fmax line, we'll consider this seed for the "best" ranking.
-    rm -rf db incremental_db
-    if [ ${#VERILOG_MACROS[@]} -gt 0 ]; then
-        {
-            quartus_map ${PROJECT} "${VERILOG_MACROS[@]}" &&
-            quartus_fit ${PROJECT} &&
-            quartus_asm ${PROJECT} &&
-            quartus_sta ${PROJECT}
-        } > "output_files/seed_${seed}_compile.log" 2>&1 || true
-    else
-        quartus_sh --flow compile ${PROJECT} > "output_files/seed_${seed}_compile.log" 2>&1 || true
-    fi
-
-    # Extract restricted Fmax for the 100 MHz clock domain (CLOCK_RE).
-    # The STA report exists whether or not timing was met, so we read it
-    # unconditionally and only mark a seed "failed" if the report is
-    # missing or unparseable (= the fitter crashed before STA ran).
-    fmax="failed"
-    wns=""; tns=""
-    if [ -f "output_files/${PROJECT}.sta.rpt" ]; then
-        # Single-awk extraction (restricted Fmax, field 3 of the Fmax
-        # Summary row).  The old grep|grep|awk pipeline silently broke
-        # under Quartus 25.1 + ugrep-flavored greps, marking every seed
-        # "failed" and disabling best-seed selection for a whole sweep.
-        fmax=$(awk -F';' -v re="${CLOCK_RE}" \
-            '/^; [0-9]/ && $4 ~ re { gsub(/^ +| +$/, "", $3); print $3; exit }' \
-            "output_files/${PROJECT}.sta.rpt" 2>/dev/null)
-        [ -z "$fmax" ] && fmax="failed"
-        read -r wns tns <<< "$(sta_wns_tns "output_files/${PROJECT}.sta.rpt")"
-    fi
-
-    echo "${seed},${fmax},${wns},${tns}" >> "${RESULTS}"
-    cp "output_files/${PROJECT}.sta.rpt" "output_files/seed_${seed}_sta.log" 2>/dev/null || true
-
-    # Track best.  Rank by setup WNS on the target clock, not by the
-    # Fmax string: WNS comes from the same table, parses robustly, and
-    # for a single constrained clock ranks identically (fmax ~ 1/(T-wns)).
-    # Fmax stays in the table for display.  A seed only counts as failed
-    # if STA produced no WNS at all (fitter crash).
-    if [ -n "$wns" ]; then
-        printf "${C_OK}%-12s${C_RESET} ${C_DIM}WNS %-8s TNS %s${C_RESET}\n" \
-               "${fmax}" "${wns:--}" "${tns:--}"
-        if [ -z "$BEST_SEED" ] || \
-           awk -v a="$wns" -v b="$BEST_WNS" 'BEGIN { exit !(a > b) }'; then
-            BEST_SEED=${seed}
-            BEST_FMAX=${fmax}
-            BEST_WNS=${wns}
-            BEST_TNS=${tns}
-        fi
-    else
-        printf "${C_ERR}failed${C_RESET}\n"
-    fi
-done
-
-# Summary
+# ── Rank by setup WNS on the target clock (robust; fmax ~ 1/(T-wns)) ─────
 echo ""
 printf "${C_HEAD}Results:${C_RESET}\n"
-printf "  ${C_DIM}%-8s %-12s %-10s %s${C_RESET}\n" "Seed" "Fmax" "WNS" "TNS"
-tail -n +2 "${RESULTS}" | sort -t, -k3 -rn | while IFS=, read seed fmax wns tns; do
-    if echo "$fmax" | grep -qE "^.*(9[5-9]|[1-9][0-9]{2})"; then
-        printf "  ${C_OK}%-8s %-12s %-10s %s${C_RESET}\n" "$seed" "$fmax" "${wns:--}" "${tns:--}"
-    elif echo "$fmax" | grep -qE "^.*(9[0-4])"; then
-        printf "  ${C_WARN}%-8s %-12s %-10s %s${C_RESET}\n" "$seed" "$fmax" "${wns:--}" "${tns:--}"
-    else
-        printf "  ${C_DIM}%-8s %-12s %-10s %s${C_RESET}\n" "$seed" "$fmax" "${wns:--}" "${tns:--}"
+BEST=""; BEST_WNS=""
+for s in $(seq "$MIN" "$MAX"); do
+    w=${R_WNS[$s]:-}
+    if [ -z "$w" ]; then printf "  ${C_ERR}seed %-3s failed${C_RESET}\n" "$s"; continue; fi
+    printf "  seed %-3s Fmax %-10s WNS %-9s TNS %s\n" "$s" "${R_FMAX[$s]:--}" "$w" "${R_TNS[$s]:--}"
+    if [ -z "$BEST" ] || awk -v a="$w" -v b="$BEST_WNS" 'BEGIN{exit !(a>b)}'; then
+        BEST=$s; BEST_WNS=$w
     fi
 done
 
-if [ -z "$BEST_SEED" ]; then
-    printf "\n${C_ERR}All seeds failed${C_RESET}\n"
-    exit 1
-fi
+if [ -z "$BEST" ]; then printf "\n${C_ERR}[sweep] All seeds failed${C_RESET}\n"; exit 1; fi
 
-echo ""
-printf "${C_HEAD}Best: seed ${BEST_SEED} (${BEST_FMAX}, WNS ${BEST_WNS:--}, TNS ${BEST_TNS:--})${C_RESET}"
-# Warn if even the best seed doesn't meet the 100 MHz target -- but
-# still ship it. Closer-to-meeting beats not-shipping-at-all.
-if awk -v a="$BEST_WNS" 'BEGIN { exit !(a < 0) }'; then
-    printf " ${C_WARN}(below 100 MHz target -- shipping anyway)${C_RESET}"
-fi
+printf "\n${C_HEAD}Best: seed %s (Fmax %s, WNS %s, TNS %s)${C_RESET}" \
+    "$BEST" "${R_FMAX[$BEST]}" "$BEST_WNS" "${R_TNS[$BEST]:--}"
+awk -v a="$BEST_WNS" 'BEGIN{exit !(a<0)}' && \
+    printf " ${C_WARN}(below 100 MHz target — shipping anyway)${C_RESET}"
 echo ""
 
-# Persist the winner into the variant's stored seed file, the repo's source
-# of truth for the seed that `make build` reads.  (The qsf patching in this
-# script is just the per-candidate test mechanism.)  Caller sets SEED_FILE.
+# Persist the winner into the variant's stored seed file (the source of truth
+# `make build` reads).  The per-candidate qsf patching above is just the test.
 if [ -n "${SEED_FILE:-}" ]; then
-    printf "%s\n" "${BEST_SEED}" > "${SEED_FILE}"
-    printf "${C_OK}[sweep]${C_RESET} stored seed ${BEST_SEED} → ${SEED_FILE}\n"
+    printf "%s\n" "$BEST" > "$SEED_FILE"
+    printf "${C_OK}[sweep]${C_RESET} stored seed $BEST → $SEED_FILE\n"
 fi
 
-# Rebuild with best seed. Tolerate timing-not-met -- Quartus will exit
-# non-zero with a warning but still produce a valid bitstream.
-printf "${C_HEAD}[rebuild]${C_RESET} Final compile with seed ${BEST_SEED}...\n"
-sed -i "s/^set_global_assignment -name SEED .*/set_global_assignment -name SEED ${BEST_SEED}/" ${PROJECT}.qsf
-rm -rf db incremental_db
-if [ ${#VERILOG_MACROS[@]} -gt 0 ]; then
-    quartus_map ${PROJECT} "${VERILOG_MACROS[@]}" &&
-    quartus_fit ${PROJECT} &&
-    quartus_asm ${PROJECT} &&
-    quartus_sta ${PROJECT} || true
-else
-    quartus_sh --flow compile ${PROJECT} || true
+# Host mode rebuilds the best seed in place (MiSTer relies on the .sof landing
+# here).  Container mode already produced a full bitstream per seed in
+# bld/<variant>-s<best>/ and wrote the seed file, so `make build` is ready —
+# no in-place rebuild needed.
+if [ "$USE_CONTAINER" != 1 ]; then
+    printf "${C_HEAD}[rebuild]${C_RESET} Final compile with seed $BEST...\n"
+    sed -i "s/^set_global_assignment -name SEED .*/set_global_assignment -name SEED ${BEST}/" "${PROJECT}.qsf"
+    rm -rf db incremental_db
+    if [ -n "${VARIANT_DEFS:-}" ]; then
+        quartus_map ${PROJECT} "${VERILOG_MACROS[@]}" &&
+        quartus_fit ${PROJECT} && quartus_asm ${PROJECT} && quartus_sta ${PROJECT} || true
+    else
+        quartus_sh --flow compile ${PROJECT} || true
+    fi
+    if [ ! -f "output_files/${PROJECT}.sof" ]; then
+        printf "\n${C_ERR}[sweep] Final rebuild failed — no .sof produced${C_RESET}\n"; exit 1
+    fi
 fi
 
-# Verify the bitstream actually came out -- this is the real success
-# criterion, not Quartus's exit code.
-if [ ! -f "output_files/${PROJECT}.sof" ]; then
-    printf "\n${C_ERR}[sweep] Final rebuild failed -- no .sof produced${C_RESET}\n"
-    exit 1
-fi
-
-printf "\n${C_OK}[sweep] Done${C_RESET} — seed ${BEST_SEED} (${BEST_FMAX})\n"
+printf "\n${C_OK}[sweep] Done${C_RESET} — seed $BEST (${R_FMAX[$BEST]})\n"

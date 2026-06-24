@@ -29,17 +29,21 @@ mkdir -p "$RTP"
 RB="$ROOT/tools/reverse_bits"
 [ -x "$RB" ] || gcc -O2 -o "$RB" "$ROOT/tools/reverse_bits.c"
 
-# Reversed FPGA bitstream, named by the variant that produced the current
-# rbf (os25 → os25.rbf_r, os30 → os30.rbf_r — the name is the variant token,
-# kept short for the Pocket's ~15-char filename cap).  The build stamps
-# output_files/.last_variant; successive os25/os30 builds + syncs accumulate
-# BOTH files here so one SDK can build cores of either variant.
-VARIANT="$(cat "$SCRIPT_DIR/output_files/.last_variant" 2>/dev/null || echo os25)"
-case "$VARIANT" in os30) BNAME=os30 ;; *) BNAME=os25 ;; esac
-if [ -f "$SCRIPT_DIR/output_files/ap_core.rbf" ]; then
-    "$RB" "$SCRIPT_DIR/output_files/ap_core.rbf" "$RTP/$BNAME.rbf_r" >/dev/null
-    ok "$BNAME.rbf_r" "runtime/pocket/"
-fi
+# Reversed FPGA bitstream(s).  Each variant builds in its OWN isolated dir
+# bld/<variant>/output_files/; publish every variant that has been built,
+# named by the variant token (os25.rbf_r / os30.rbf_r — kept short for the
+# Pocket's ~15-char filename cap).  One SDK can then build cores of either.
+for d in "$SCRIPT_DIR"/bld/*/output_files; do
+    [ -f "$d/ap_core.rbf" ] || continue
+    v="$(basename "$(dirname "$d")")"
+    # Skip the seed-sweep scratch dirs (bld/<variant>-s<N>/): they are not
+    # deployable builds, just per-seed timing fits.  Publish only the canonical
+    # per-variant dirs (bld/<variant>/), so `make sdk` after a sweep ships one
+    # bitstream per variant, not one per seed.
+    case "$v" in *-s[0-9]*) continue ;; esac
+    "$RB" "$d/ap_core.rbf" "$RTP/$v.rbf_r" >/dev/null
+    ok "$v.rbf_r" "runtime/pocket/"
+done
 
 # Kernel — only when the on-disk os.bin was built for THIS target (the
 # firmware build stamp), so a mister kernel never lands in the pocket slot.
@@ -52,7 +56,9 @@ fi
 # chip32 loader + .sof for JTAG reset (scripts/debug.sh on the SDK side).
 [ -f "$ROOT/src/chip32/pocket/loader.bin" ] && \
     cp "$ROOT/src/chip32/pocket/loader.bin" "$RTP/" && ok "loader.bin" "runtime/pocket/"
-[ -f "$SCRIPT_DIR/output_files/ap_core.sof" ] && \
-    cp "$SCRIPT_DIR/output_files/ap_core.sof" "$RTP/" && ok "ap_core.sof" "runtime/pocket/ (JTAG reset)"
+for d in "$SCRIPT_DIR"/bld/*/output_files; do \
+    v="$(basename "$(dirname "$d")")"; case "$v" in *-s[0-9]*) continue ;; esac; \
+    if [ -f "$d/ap_core.sof" ]; then cp "$d/ap_core.sof" "$RTP/ap_core.sof"; ok "ap_core.sof" "runtime/pocket/ (JTAG reset)"; break; fi; \
+done
 
 exit 0

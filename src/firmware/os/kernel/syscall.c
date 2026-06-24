@@ -53,6 +53,19 @@ extern void *dlcalloc(size_t, size_t);
 static void (*sigalrm_handler)(int) = NULL;
 void (*timer_callback_ptr)(void) = NULL;  /* non-static: accessed by services_table.c */
 
+/* ---- Shared 100 MHz machine-timer policy --------------------------------
+ * On a SW-audio-mixer build (of_mixer_use_sw, e.g. OS30 Pocket) the DAC FIFO
+ * is fed ONLY by sw_mixer_pump() running inside timer_isr_callback, so the OS
+ * must keep the machine timer firing at OS_TIMER_HZ (1 kHz) for the whole
+ * session — independent of whatever rate, or none, an app requests.  An app's
+ * requested callback / itimer rate is then recreated by dividing the 1 kHz
+ * tick in software (timer_cb_div / sigalrm_div).  On a HW-mixer build both
+ * dividers stay 1 and the HW timer takes the app's rate directly and is
+ * disabled on clear (legacy behaviour, unchanged). */
+#define OS_TIMER_HZ  1000u
+static uint32_t timer_cb_div = 1u, timer_cb_cnt = 0u;  /* divides timer_callback_ptr */
+static uint32_t sigalrm_div  = 1u, sigalrm_cnt  = 0u;  /* divides SIGALRM */
+
 static inline uint32_t sys_irq_save_local(void)
 {
     uint32_t prev;
@@ -72,20 +85,76 @@ static inline void sys_irq_restore_local(uint32_t prev)
  * is present (of_mixer_use_sw==0), so the call is cheap on every build. */
 void sw_mixer_pump(void);
 
+/* Program the native timer callback (OF_TIMER / MIDI service path).
+ *   cb==NULL      -> clear the callback
+ *   self_divide!=0-> the consumer divides the tick itself (e.g. of_midi_pump
+ *                    accumulates elapsed ms), so feed it the raw HW tick.
+ * When of_mixer_use_sw the HW timer is pinned ON at 1 kHz (never disabled,
+ * never slower) so the DAC pump keeps running; the app callback rate is
+ * recreated by timer_cb_div.  Otherwise the HW timer takes the app rate
+ * directly and is disabled on clear (legacy HW-mixer behaviour). */
+void of_os_timer_set_callback(void (*cb)(void), uint32_t app_hz, int self_divide) {
+    uint32_t irq = sys_irq_save_local();
+    if (cb) {
+        timer_callback_ptr = cb;
+        if (of_mixer_use_sw) {
+            TIMER_PERIOD = CPU_FREQ_HZ / OS_TIMER_HZ;
+            timer_cb_div = (self_divide || app_hz == 0u || app_hz >= OS_TIMER_HZ)
+                         ? 1u : (OS_TIMER_HZ / app_hz);
+        } else {
+            TIMER_PERIOD = CPU_FREQ_HZ / (app_hz ? app_hz : OS_TIMER_HZ);
+            timer_cb_div = 1u;
+        }
+        timer_cb_cnt = 0u;
+        TIMER_CTRL = TIMER_CTRL_ENABLE;
+    } else {
+        timer_callback_ptr = NULL;
+        timer_cb_div = 1u;
+        timer_cb_cnt = 0u;
+        if (of_mixer_use_sw) {
+            /* Keep the SW DAC pump alive — only the app callback is cleared. */
+            TIMER_PERIOD = CPU_FREQ_HZ / OS_TIMER_HZ;
+            TIMER_CTRL = TIMER_CTRL_ENABLE;
+        } else {
+            TIMER_CTRL = 0;
+        }
+    }
+    sys_irq_restore_local(irq);
+}
+
+/* Boot-time arm: on a SW-mixer build the OS owns a permanent 1 kHz tick so
+ * audio plays even when no app ever touches the timer (the dominant OS30
+ * "no music -> no sound at all" failure).  No-op on HW-mixer builds. */
+void of_os_timer_boot_arm(void) {
+    if (!of_mixer_use_sw)
+        return;
+    uint32_t irq = sys_irq_save_local();
+    TIMER_PERIOD = CPU_FREQ_HZ / OS_TIMER_HZ;
+    TIMER_CTRL = TIMER_CTRL_ENABLE;
+    sys_irq_restore_local(irq);
+}
+
 /* Called from irq_handler() on machine timer interrupt */
 void timer_isr_callback(void) {
     /* Service the terminal UART hook before app callbacks.  The Pocket
      * implementation is currently synchronous/no-op here, but keeping the
      * call preserves the HAL contract for targets with buffered output. */
     of_term_uart_drain();
-    /* Keep the DAC FIFO fed at the 1 kHz tick when the SW mixer is active.
-     * The 1024-deep FIFO gives ~21 ms of slack, so even a delayed tick won't
-     * underrun.  Cheap no-op (one branch) when a HW mixer is present. */
+    /* Feed the DAC FIFO every HW tick when the SW mixer is active (the OS
+     * pins this timer at 1 kHz on that path; the 1024-deep FIFO gives ~21 ms
+     * of slack).  Cheap no-op (one branch) when a HW mixer is present. */
     sw_mixer_pump();
-    if (timer_callback_ptr)
+    /* App native callback, divided down from the 1 kHz tick when the SW mixer
+     * owns the timer (timer_cb_div==1 on HW-mixer builds => fires every tick,
+     * identical to the legacy path). */
+    if (timer_callback_ptr && ++timer_cb_cnt >= timer_cb_div) {
+        timer_cb_cnt = 0u;
         timer_callback_ptr();
-    if (sigalrm_handler)
+    }
+    if (sigalrm_handler && ++sigalrm_cnt >= sigalrm_div) {
+        sigalrm_cnt = 0u;
         sigalrm_handler(SIGALRM);
+    }
 }
 
 /* ======================================================================
@@ -2247,8 +2316,27 @@ static long linux_dispatch(long n, long a0, long a1, long a2,
                        + (uint64_t)usec * (CPU_FREQ_HZ / 1000000);
             }
             if (cycles == 0) {
-                TIMER_CTRL = 0;  /* disarm */
+                sigalrm_div = 1u;
+                sigalrm_cnt = 0u;
+                if (of_mixer_use_sw) {
+                    /* Keep the SW DAC pump tick alive; just stop SIGALRM. */
+                    TIMER_PERIOD = CPU_FREQ_HZ / OS_TIMER_HZ;
+                    TIMER_CTRL = TIMER_CTRL_ENABLE;
+                } else {
+                    TIMER_CTRL = 0;  /* disarm */
+                }
+            } else if (of_mixer_use_sw) {
+                /* Pin the HW timer at 1 kHz for the DAC pump and divide that
+                 * tick down to the requested SIGALRM interval (ceil). */
+                uint64_t hw  = CPU_FREQ_HZ / OS_TIMER_HZ;       /* cycles / 1 ms */
+                uint32_t div = (uint32_t)((cycles + hw - 1) / hw);
+                sigalrm_div = div ? div : 1u;
+                sigalrm_cnt = 0u;
+                TIMER_PERIOD = (uint32_t)hw;
+                TIMER_CTRL = TIMER_CTRL_ENABLE;
             } else {
+                sigalrm_div = 1u;
+                sigalrm_cnt = 0u;
                 TIMER_PERIOD = (uint32_t)(cycles > 0xFFFFFFFF ? 0xFFFFFFFF : cycles);
                 TIMER_CTRL = TIMER_CTRL_ENABLE;
             }
@@ -2435,27 +2523,14 @@ static long of_vendor_dispatch(long eid, long fid,
     case OF_EID_TIMER:
         switch (fid) {
         case OF_TIMER_FID_SET_CALLBACK:
-        {
-            uint32_t irq = sys_irq_save_local();
-            if (a0 && a1 > 0) {
-                TIMER_PERIOD = CPU_FREQ_HZ / (uint32_t)a1;
-                timer_callback_ptr = (void (*)(void))a0;
-                TIMER_CTRL = TIMER_CTRL_ENABLE;
-            } else {
-                timer_callback_ptr = NULL;
-                TIMER_CTRL = 0;
-            }
-            sys_irq_restore_local(irq);
+            /* App expects its callback at a1 Hz; on a SW-mixer build the OS
+             * divides the pinned 1 kHz tick down to that rate. */
+            of_os_timer_set_callback((a0 && a1 > 0) ? (void (*)(void))a0 : NULL,
+                                     (uint32_t)a1, 0 /* OS divides to app rate */);
             return 0;
-        }
         case OF_TIMER_FID_STOP:
-        {
-            uint32_t irq = sys_irq_save_local();
-            timer_callback_ptr = NULL;
-            TIMER_CTRL = 0;
-            sys_irq_restore_local(irq);
+            of_os_timer_set_callback(NULL, 0u, 0);
             return 0;
-        }
         case OF_TIMER_FID_GET_US:
             return of_timer_get_us();
         case OF_TIMER_FID_GET_MS:
