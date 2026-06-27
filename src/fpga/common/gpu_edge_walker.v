@@ -54,8 +54,13 @@ module gpu_edge_walker #(
 
     // Command load: pulse start with vertices + clip rect held stable.
     input  wire        start,
+    // subpix_y = 0 (legacy): v*_y are INTEGER scanlines, byte-exact behaviour.
+    // subpix_y = 1: v*_y are Q12.4 subpixel (same as x), so triangle vertices
+    // are not snapped to whole scanlines.  Gated so the integer path is wholly
+    // unchanged — only callers that opt in (SM64 truecolor 0x4E) set it.
+    input  wire        subpix_y,
     input  wire signed [15:0] v0_x,   // Q12.4
-    input  wire signed [15:0] v0_y,   // integer scanline
+    input  wire signed [15:0] v0_y,   // integer scanline (subpix_y=0) / Q12.4 (subpix_y=1)
     input  wire signed [15:0] v1_x,
     input  wire signed [15:0] v1_y,
     input  wire signed [15:0] v2_x,
@@ -103,6 +108,8 @@ localparam S_EMIT_B      = 5'd21;  // width subtract/compare, raise valid
 localparam S_WAIT        = 5'd22;  // hold for rec_ready
 localparam S_STEP        = 5'd23;  // DDA advance, mid-vertex swap
 localparam S_DONE        = 5'd24;
+localparam S_PRESTEP_MIDW = 5'd25; // subpix: DSP latency for slope_bot*dy_clip_mid
+localparam S_PRESTEP_MIDC = 5'd26; // subpix: capture bot_mid_off (>>4 -> Q16.16)
 
 reg [4:0] state;
 
@@ -211,6 +218,8 @@ reg               long_left;     // long edge is the left edge
 // Walk state
 // ----------------------------------------------------------------
 reg signed [31:0] xl, xr;        // Q16.16 DDA accumulators
+reg signed [31:0] bot_mid_off;   // subpix: prestep of the bottom edge from v1 to
+                                 // scanline y_mid (Q16.16); 0 for integer Y / no swap
 reg signed [15:0] y_cur;
 reg signed [15:0] y_start, y_mid, y_end;
 reg               in_bottom_half;
@@ -233,8 +242,25 @@ reg signed [15:0] span_u0_r, span_u1_r;
 wire signed [16:0] span_w = {span_u1_r[15], span_u1_r}
                           - {span_u0_r[15], span_u0_r};
 
-wire signed [15:0] dy_clip_long = y_start - y0;
-wire signed [15:0] dy_clip_bot  = y_start - y1;
+// Integer scanline of each sorted vertex.  subpix_y=0: y* are already integer
+// scanlines (identity).  subpix_y=1: y* are Q12.4, and the top-left fill rule
+// covers scanlines [ceil(y_top), ceil(y_bot)) — ceil(yQ12.4) = (y+15)>>4 (y>=0).
+wire signed [15:0] y0_scan = subpix_y ? (($signed(y0) + 16'sd15) >>> 4) : y0;
+wire signed [15:0] y1_scan = subpix_y ? (($signed(y1) + 16'sd15) >>> 4) : y1;
+wire signed [15:0] y2_scan = subpix_y ? (($signed(y2) + 16'sd15) >>> 4) : y2;
+
+// Prestep distance from the vertex to the first walked scanline.
+// subpix_y=0: integer line count (y_start - y_vertex), exactly as before.
+// subpix_y=1: Q12.4 distance (y_start<<4 - y_vertexQ12.4); the prestep multiply
+// product is then >>4 back to a Q16.16 x offset (see S_PRESTEP_LC capture).
+wire signed [15:0] dy_clip_long = subpix_y ? (($signed(y_start) <<< 4) - y0)
+                                           : (y_start - y0);
+wire signed [15:0] dy_clip_bot  = subpix_y ? (($signed(y_start) <<< 4) - y1)
+                                           : (y_start - y1);
+// subpix: Q12.4 distance from the bottom-edge start vertex v1 to scanline y_mid,
+// used to prestep the bottom edge when it is re-seeded at the mid-vertex swap.
+// Only consumed in the subpix && !in_bottom_half branch (y1 is Q12.4 there).
+wire signed [15:0] dy_clip_mid  = ($signed(y_mid) <<< 4) - y1;
 
 always @(posedge clk) begin
     if (!reset_n || abort) begin
@@ -427,34 +453,38 @@ always @(posedge clk) begin
             end
 
             S_DIV_DONE: if (EW_PARALLEL_DIVS != 0) begin
+                // subpix_y=1: dy is Q12.4, so the divider produced a Q20.12
+                // quotient (dividend dx<<12 / divisor dyQ12.4); <<4 recovers the
+                // Q16.16 slope (12 real fractional bits — sub-0.1px over a full
+                // screen).  subpix_y=0: dy integer, quotient already Q16.16.
                 slope_long <= div_skip0 ? 32'sd0
-                            : div_neg0  ? -{4'b0, div_quot0}
-                                        :  {4'b0, div_quot0};
+                            : div_neg0  ? -(subpix_y ? {div_quot0, 4'd0} : {4'b0, div_quot0})
+                                        :  (subpix_y ? {div_quot0, 4'd0} : {4'b0, div_quot0});
                 slope_top  <= div_skip1 ? 32'sd0
-                            : div_neg1  ? -{4'b0, div_quot1}
-                                        :  {4'b0, div_quot1};
+                            : div_neg1  ? -(subpix_y ? {div_quot1, 4'd0} : {4'b0, div_quot1})
+                                        :  (subpix_y ? {div_quot1, 4'd0} : {4'b0, div_quot1});
                 slope_bot  <= div_skip2 ? 32'sd0
-                            : div_neg2  ? -{4'b0, div_quot2}
-                                        :  {4'b0, div_quot2};
-                // Clip the walk range before prestep.
-                y_start <= (y0 < clip_y0) ? clip_y0 : y0;
-                y_mid   <= y1;
-                y_end   <= (y2 > clip_y1) ? clip_y1 : y2;
+                            : div_neg2  ? -(subpix_y ? {div_quot2, 4'd0} : {4'b0, div_quot2})
+                                        :  (subpix_y ? {div_quot2, 4'd0} : {4'b0, div_quot2});
+                // Clip the walk range before prestep (scanline bounds).
+                y_start <= (y0_scan < clip_y0) ? clip_y0 : y0_scan;
+                y_mid   <= y1_scan;
+                y_end   <= (y2_scan > clip_y1) ? clip_y1 : y2_scan;
                 state   <= S_PRESTEP_LL;
             end else begin
                 case (edge_sel)
-                    2'd0: slope_long <= div_neg ? -{4'b0, div_quot}
-                                                :  {4'b0, div_quot};
-                    2'd1: slope_top  <= div_neg ? -{4'b0, div_quot}
-                                                :  {4'b0, div_quot};
-                    default: slope_bot <= div_neg ? -{4'b0, div_quot}
-                                                  :  {4'b0, div_quot};
+                    2'd0: slope_long <= div_neg ? -(subpix_y ? {div_quot, 4'd0} : {4'b0, div_quot})
+                                                :  (subpix_y ? {div_quot, 4'd0} : {4'b0, div_quot});
+                    2'd1: slope_top  <= div_neg ? -(subpix_y ? {div_quot, 4'd0} : {4'b0, div_quot})
+                                                :  (subpix_y ? {div_quot, 4'd0} : {4'b0, div_quot});
+                    default: slope_bot <= div_neg ? -(subpix_y ? {div_quot, 4'd0} : {4'b0, div_quot})
+                                                  :  (subpix_y ? {div_quot, 4'd0} : {4'b0, div_quot});
                 endcase
                 if (edge_sel == 2'd2) begin
-                    // Clip the walk range before prestep.
-                    y_start <= (y0 < clip_y0) ? clip_y0 : y0;
-                    y_mid   <= y1;
-                    y_end   <= (y2 > clip_y1) ? clip_y1 : y2;
+                    // Clip the walk range before prestep (scanline bounds).
+                    y_start <= (y0_scan < clip_y0) ? clip_y0 : y0_scan;
+                    y_mid   <= y1_scan;
+                    y_end   <= (y2_scan > clip_y1) ? clip_y1 : y2_scan;
                     state   <= S_PRESTEP_LL;
                 end else begin
                     edge_sel <= edge_sel + 2'd1;
@@ -477,7 +507,9 @@ always @(posedge clk) begin
             end
             S_PRESTEP_W1: state <= S_PRESTEP_LC;
             S_PRESTEP_LC: begin
-                xprod0_r <= mul_p_pipe;  // long-edge prestep offset, Q16.16
+                // subpix_y=1: dy_clip was Q12.4, so the product is 16x the
+                // Q16.16 x offset — shift back.  subpix_y=0: already Q16.16.
+                xprod0_r <= subpix_y ? (mul_p_pipe >>> 4) : mul_p_pipe;  // long-edge prestep offset, Q16.16
                 // Short edge: top half steps from v0 with slope_top;
                 // bottom half steps from v1 with slope_bot.
                 mul_a <= slope_sat27(in_bottom_half ? slope_bot : slope_top);
@@ -486,8 +518,24 @@ always @(posedge clk) begin
             end
             S_PRESTEP_W2: state <= S_PRESTEP_SC;
             S_PRESTEP_SC: begin
-                mul_p_r <= mul_p_pipe;   // short-edge prestep offset
-                state   <= S_PRESTEP_CM;
+                mul_p_r <= subpix_y ? (mul_p_pipe >>> 4) : mul_p_pipe;   // short-edge prestep offset
+                // subpix only: prestep the bottom edge from v1 to scanline y_mid
+                // (the mid-vertex swap re-seeds it there).  Integer Y / a walk
+                // that already starts in the bottom half need no correction, so
+                // bot_mid_off stays 0 and the swap re-seeds to exactly x1_q16.
+                if (subpix_y && !in_bottom_half) begin
+                    mul_a <= slope_sat27(slope_bot);
+                    mul_b <= dy_clip_mid;
+                    state <= S_PRESTEP_MIDW;
+                end else begin
+                    bot_mid_off <= 32'sd0;
+                    state <= S_PRESTEP_CM;
+                end
+            end
+            S_PRESTEP_MIDW: state <= S_PRESTEP_MIDC;
+            S_PRESTEP_MIDC: begin
+                bot_mid_off <= mul_p_pipe >>> 4;   // slope_bot*(y_mid<<4 - y1) >> 4
+                state <= S_PRESTEP_CM;
             end
             S_PRESTEP_CM: begin
                 if (long_left) begin
@@ -552,12 +600,15 @@ always @(posedge clk) begin
                         // neighbour walks it as long or bottom-short
                         // (crack-free adjacency).
                         in_bottom_half <= 1'b1;
+                        // bot_mid_off prelaces the bottom edge from v1 to scanline
+                        // y_mid (subpix); it is 0 for integer Y so this is the
+                        // exact original x1_q16 re-seed (byte-exact, crack-free).
                         if (long_left) begin
                             xl <= xl + slope_long;
-                            xr <= x1_q16;
+                            xr <= x1_q16 + bot_mid_off;
                         end else begin
                             xr <= xr + slope_long;
-                            xl <= x1_q16;
+                            xl <= x1_q16 + bot_mid_off;
                         end
                     end else begin
                         if (long_left) begin

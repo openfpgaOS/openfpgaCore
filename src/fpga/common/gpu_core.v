@@ -1516,6 +1516,7 @@ reg [15:0] spanprod_tex_width;
 reg        spanprod_mirror_s;   // staged G_TX_MIRROR S/T (control word bits 28/29)
 reg        spanprod_mirror_t;
 reg        spanprod_cd_combine; // staged texel*C+D combine enable (control bit 30)
+reg        spanprod_subpix_y;   // sticky: vert-tri vertex Y is Q12.4 subpixel (control bit 31); const 0 on palettized
 reg [15:0] spanprod_tex_w_mask;
 reg [15:0] spanprod_tex_h_mask;
 reg [3:0]  spanprod_flags;
@@ -1616,7 +1617,15 @@ function [3:0] span_flags_from_wire;
     input [7:0] flags;
     begin
         span_flags_from_wire = 4'b0;
-        span_flags_from_wire[SPAN_COLORMAP] = flags[0];
+        // Chokepoint SPAN_COLORMAP to 0 on truecolor-only targets (Pocket OS30 =
+        // EXCLUDE_PALETTE -> INCLUDE_PALETTE 0).  The whole palettized colormap
+        // lane then constant-folds: the p*_flags[SPAN_COLORMAP] chain, the p3
+        // cmap-merge mux, cmap_resp_pop_b/cmap_pipe_wait, and gpu_tex_cache's
+        // dead PORT B (the cmap read port + its response skid) all prune.  os30
+        // firmware issues no colormap spans, so this is behavior-preserving;
+        // the cmap REQUEST side is already INCLUDE_PALETTE-gated.  Mirrors the
+        // SPAN_TRANSLUC chokepoint below.  Untouched on os25/MiSTer (PALETTE on).
+        span_flags_from_wire[SPAN_COLORMAP] = (INCLUDE_PALETTE != 0) ? flags[0] : 1'b0;
         span_flags_from_wire[SPAN_SKIP_ZERO] = flags[2];
         span_flags_from_wire[SPAN_PERSP] = GPU_ENABLE_PERSP && flags[5];
 `ifndef INCLUDE_TRANSLUC
@@ -1774,6 +1783,7 @@ task load_param_span_list_payload_word;
                     // derive states); gate with the rest of the truecolor lane so the combine
                     // mux + rgb565_cd_finish + texel*C cone constant-folds away on os25.
                     spanprod_cd_combine    <= INCLUDE_DIRECT_COLOR && data[30];   // texel*C+D combine enable
+                    spanprod_subpix_y      <= INCLUDE_DIRECT_COLOR && data[31];   // vertex Y is Q12.4 subpixel (vert-tri walker)
                     spanprod_attr_persp    <= GPU_ENABLE_PERSP && data[12] && (data[23:20] == PARAM_RECORD_U16V16_COUNT16);
                     spanprod_attr_q29      <= data[13] && data[12] && (data[23:20] == PARAM_RECORD_U16V16_COUNT16);
                     spanprod_q29_attr_shift <= 5'd0;
@@ -2619,6 +2629,7 @@ if (INCLUDE_TRI_WALKER != 0) begin : g_tri_walker
         .reset_n  (reset_n),
         .abort    (soft_reset),
         .start    (tri_start),
+        .subpix_y (spanprod_subpix_y),
         .v0_x     (tri_v0_x), .v0_y (tri_v0_y),
         .v1_x     (tri_v1_x), .v1_y (tri_v1_y),
         .v2_x     (tri_v2_x), .v2_y (tri_v2_y),
@@ -2888,6 +2899,12 @@ reg [1:0]         dv_ord [0:2];
 wire signed [15:0] dvx [0:2];
 wire signed [15:0] dvy [0:2];
 assign dvx[0] = tri_v0_x; assign dvx[1] = tri_v1_x; assign dvx[2] = tri_v2_x;
+// subpix_y: the derive consumes the SAME Q12.4 vertex Y the walker does, so a
+// thin sliver whose vertices share an integer scanline is NOT degenerate here
+// (rounding Y collapsed det -> garbage du/dv on sharp-angle planes).  Using
+// Q12.4 Y makes du still correct (its x16 + det's extra y-x16 cancel) but dv
+// 16x too small and the origin's y0 in Q12.4 — both compensated below
+// (num_dv <<4 and dd_y0 = sy0>>4 under spanprod_subpix_y).
 assign dvy[0] = tri_v0_y; assign dvy[1] = tri_v1_y; assign dvy[2] = tri_v2_y;
 
 // Edge deltas + determinant.
@@ -4524,6 +4541,7 @@ always @(posedge clk) begin : main_fsm
         sp_tex_w_mask <= 16'hFFFF; sp_tex_h_mask <= 16'hFFFF;
         sp_mirror_s <= 1'b0; sp_mirror_t <= 1'b0;
         sp_cd_combine <= 1'b0; spanprod_cd_combine <= 1'b0;
+        spanprod_subpix_y <= 1'b0;
         st_fb_stride <= 320;
     end else begin
         // Ring reset: set the read pointer to the start of ring BRAM.
@@ -4881,9 +4899,11 @@ always @(posedge clk) begin : main_fsm
             // 0x4E: per-vertex RGB truecolor triangle (16-word payload).  Gated
             // on BOTH INCLUDE_VERT_TRI and INCLUDE_DIRECT_COLOR so the whole RGB
             // path (extra derive passes, sp_R/B, modulate) prunes off os30.
+            // Shrunk format: 17-word common, 19-word combine (was 19/22).  q29
+            // word dropped + 3 RGB565 packed into 2 words; combine D packed 3->2.
             cmd_is_draw_vert_tri_rgb <= (INCLUDE_VERT_TRI != 0) && (INCLUDE_DIRECT_COLOR != 0) &&
                 (cmd_type == CMD_DRAW_VERT_TRI_RGB &&
-                 (cmd_payload_words == 13'd19 || cmd_payload_words == 13'd22));
+                 (cmd_payload_words == 13'd17 || cmd_payload_words == 13'd19));
             // Records-only param-tri (0x4D): per-triangle planes + verts on
             // top of the 0x4A sticky state.  Wrong-sized payloads drain and
             // retire as a no-op.
@@ -5154,11 +5174,19 @@ always @(posedge clk) begin : main_fsm
                 endcase
             end
             else if (cmd_is_draw_vert_tri_rgb) begin
-                // 0x4E: identical to 0x4B for w0-11 (verts, s, t, zi); w12-14
-                // carry per-vertex RGB565 colour; w15 = per-tri Q29 override.
+                // 0x4E (shrunk): w0-11 identical to 0x4B (verts, s, t, zi).
+                // w12-13 carry the three per-vertex RGB565 colours PACKED
+                // (w12=[rgb1|rgb0], w13=rgb2); w14-16 = per-vertex decoupled
+                // depth; w17-18 (19-word combine payload only) add the packed
+                // additive-D RGB565 triple.  The legacy per-tri Q29 word is GONE
+                // (SM64 always sent 0); vt_q29_en is force-cleared at idx0 so a
+                // prior 0x51/0x52 enable cannot leak in.  Combine is selected by
+                // the 0x4A bit-30 sticky state (sp_cd_combine), NOT the payload
+                // size, so a stale vt_Drrow on the 17-word path is never read.
                 case (pay_idx)
                     6'd0: begin tri_v0_x <= ring_rd_data[15:0];
-                                 tri_v0_y <= ring_rd_data[31:16]; end
+                                 tri_v0_y <= ring_rd_data[31:16];
+                                 vt_q29_en <= 1'b0; vt_q29_shift <= 5'd0; end
                     6'd1: begin tri_v1_x <= ring_rd_data[15:0];
                                  tri_v1_y <= ring_rd_data[31:16]; end
                     6'd2: begin tri_v2_x <= ring_rd_data[15:0];
@@ -5172,31 +5200,31 @@ always @(posedge clk) begin : main_fsm
                     6'd9:  vt_zi[0] <= ring_rd_data;
                     6'd10: vt_zi[1] <= ring_rd_data;
                     6'd11: vt_zi[2] <= ring_rd_data;
-                    // RGB565 per vertex: R=[15:11], G(=light slot)=[10:5], B=[4:0]
+                    // w12: vert0 RGB565 in [15:0], vert1 in [31:16] (packed).
+                    // RGB565: R=[15:11], G(=light slot)=[10:5], B=[4:0].
                     6'd12: begin vt_rrow[0] <= ring_rd_data[15:11];
                                  vt_lrow[0] <= ring_rd_data[10:5];
-                                 vt_brow[0] <= ring_rd_data[4:0]; end
-                    6'd13: begin vt_rrow[1] <= ring_rd_data[15:11];
-                                 vt_lrow[1] <= ring_rd_data[10:5];
-                                 vt_brow[1] <= ring_rd_data[4:0]; end
-                    6'd14: begin vt_rrow[2] <= ring_rd_data[15:11];
+                                 vt_brow[0] <= ring_rd_data[4:0];
+                                 vt_rrow[1] <= ring_rd_data[31:27];
+                                 vt_lrow[1] <= ring_rd_data[26:21];
+                                 vt_brow[1] <= ring_rd_data[20:16]; end
+                    // w13: vert2 RGB565 in [15:0]
+                    6'd13: begin vt_rrow[2] <= ring_rd_data[15:11];
                                  vt_lrow[2] <= ring_rd_data[10:5];
                                  vt_brow[2] <= ring_rd_data[4:0]; end
-                    6'd15: begin vt_q29_en    <= ring_rd_data[5];
-                                 vt_q29_shift <= ring_rd_data[4:0]; end
-                    // w16-18: per-vertex decoupled depth (high-range 1/w)
-                    6'd16: vt_depth[0] <= ring_rd_data;
-                    6'd17: vt_depth[1] <= ring_rd_data;
-                    6'd18: vt_depth[2] <= ring_rd_data;
-                    // w19-21 (22-word combine only): per-vertex additive D, RGB565.
-                    // Never reached on the 19-word legacy payload, so byte-exact.
-                    6'd19: begin vt_Drrow[0] <= ring_rd_data[15:11];
+                    // w14-16: per-vertex decoupled depth (high-range 1/w)
+                    6'd14: vt_depth[0] <= ring_rd_data;
+                    6'd15: vt_depth[1] <= ring_rd_data;
+                    6'd16: vt_depth[2] <= ring_rd_data;
+                    // w17-18 (19-word combine only): packed additive-D RGB565.
+                    // w17 = vert0 [15:0] + vert1 [31:16]; w18 = vert2 [15:0].
+                    6'd17: begin vt_Drrow[0] <= ring_rd_data[15:11];
                                  vt_Dgrow[0] <= ring_rd_data[10:5];
-                                 vt_Dbrow[0] <= ring_rd_data[4:0]; end
-                    6'd20: begin vt_Drrow[1] <= ring_rd_data[15:11];
-                                 vt_Dgrow[1] <= ring_rd_data[10:5];
-                                 vt_Dbrow[1] <= ring_rd_data[4:0]; end
-                    6'd21: begin vt_Drrow[2] <= ring_rd_data[15:11];
+                                 vt_Dbrow[0] <= ring_rd_data[4:0];
+                                 vt_Drrow[1] <= ring_rd_data[31:27];
+                                 vt_Dgrow[1] <= ring_rd_data[26:21];
+                                 vt_Dbrow[1] <= ring_rd_data[20:16]; end
+                    6'd18: begin vt_Drrow[2] <= ring_rd_data[15:11];
                                  vt_Dgrow[2] <= ring_rd_data[10:5];
                                  vt_Dbrow[2] <= ring_rd_data[4:0]; end
                     default: ;
@@ -5774,7 +5802,9 @@ always @(posedge clk) begin : main_fsm
                     e2y = {sy2[15], sy2} - {sy0[15], sy0};
                     dd1x <= e1x; dd2x <= e2x; dd1y <= e1y; dd2y <= e2y;
                     dd_x0px <= {{4{sx0[15]}}, sx0[15:4]}; // x0 Q12.4 >>4
-                    dd_y0   <= sy0;
+                    // subpix: y0 is Q12.4 here, floor to a scanline (like x0px)
+                    // so origin = a0 - du*x0px - dv*y0 anchors at integer (u,v).
+                    dd_y0   <= spanprod_subpix_y ? {{4{sy0[15]}}, sy0[15:4]} : sy0;
                     // det = d1x*d2y - d2x*d1y : launch both products.  17-bit
                     // edge deltas sign-extended to the 32-bit signed DSP.
                     drv_dsp_a  <= {{15{e1x[16]}}, e1x};
@@ -5918,9 +5948,14 @@ always @(posedge clk) begin : main_fsm
                     // 1-launch/1-wait/1-capture DSP cadence; the low SPLIT bits
                     // feed the lo pass next.  Operands are the captured products.
                     reg signed [63:0] num_now;
+                    // num_du always x16 (corrects det's Q12.4 x scale).  num_dv
+                    // gets x16 too ONLY for subpix: Q12.4 y scales det an extra
+                    // 16x, so dv would otherwise be 16x too small.
                     num_now = (!dv_doing_dv)
                             ? (($signed(drv_prod_r) - $signed(drv2_prod_r)) <<< 4)
-                            :  ($signed(drv_prod_r) - $signed(drv2_prod_r));
+                            : (spanprod_subpix_y
+                                ? (($signed(drv_prod_r) - $signed(drv2_prod_r)) <<< 4)
+                                :  ($signed(drv_prod_r) - $signed(drv2_prod_r)));
                     dv_num_lo <= num_now[DERIV_SPLIT-1:0];   // low bits for lo pass
                     // num_hi = num_now >>> SPLIT (<=30-bit signed); deriv_sat32
                     // is the deterministic sliver clamp.
@@ -6034,7 +6069,17 @@ always @(posedge clk) begin : main_fsm
                     // a0_eff (the Q29 anchor scale) was pre-formed in DRV_ORG_CAP,
                     // so this state is just the two captured-product subtracts.
                     reg signed [31:0] org_now;
-                    org_now = a0_eff_r - $signed(drv_prod_r[31:0]) - $signed(drv2_prod_r[31:0]);
+                    // Pixel-CENTER sampling: the plane is evaluated per-pixel as
+                    // origin + x*du + y*dv at INTEGER (x,y) = the pixel CORNER.
+                    // Bias the origin by +0.5*du +0.5*dv so it samples the pixel
+                    // CENTER (x+0.5, y+0.5) — fixes the sub-texel texture slide on
+                    // steep-gradient (small/character) surfaces (SM64 faces). All
+                    // attrs (szi/tzi/zi/depth/colour) shift through this one org_now,
+                    // so the perspective num+denom and z stay co-sampled. Derive-only
+                    // (0x4B/0x4E/xform); the 0x48 CPU-loaded planes bypass this state
+                    // and are unaffected. dv_du/dv_dv are this attr's Q16.16 deltas.
+                    org_now = a0_eff_r - $signed(drv_prod_r[31:0]) - $signed(drv2_prod_r[31:0])
+                            + (dv_du >>> 1) + (dv_dv >>> 1);
                     // store this attr's plane into the spanprod staging reg.
                     case (dv_attr)
                         3'd0: begin

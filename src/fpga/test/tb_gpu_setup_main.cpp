@@ -165,15 +165,17 @@ static void emit_set_tri_state(const Surface &p, int16_t cx0, int16_t cx1, int16
 static void emit_vert_tri_4e(const int16_t vx[3], const int16_t vy[3],
                              const int32_t s[3], const int32_t t[3],
                              const int32_t zi[3], const uint16_t col[3]) {
-    std::vector<uint32_t> w(19, 0);
+    /* shrunk 0x4E: 17 words — RGB565 packed 3->2 (w12-13), q29 dropped,
+       depth at w14-16 (zi reused as depth, as before). */
+    std::vector<uint32_t> w(17, 0);
     w[0]=((uint32_t)(uint16_t)vy[0]<<16)|(uint16_t)vx[0];
     w[1]=((uint32_t)(uint16_t)vy[1]<<16)|(uint16_t)vx[1];
     w[2]=((uint32_t)(uint16_t)vy[2]<<16)|(uint16_t)vx[2];
     w[3]=(uint32_t)s[0]; w[4]=(uint32_t)s[1]; w[5]=(uint32_t)s[2];
     w[6]=(uint32_t)t[0]; w[7]=(uint32_t)t[1]; w[8]=(uint32_t)t[2];
     w[9]=(uint32_t)zi[0]; w[10]=(uint32_t)zi[1]; w[11]=(uint32_t)zi[2];
-    w[12]=col[0]; w[13]=col[1]; w[14]=col[2]; w[15]=0;
-    w[16]=(uint32_t)zi[0]; w[17]=(uint32_t)zi[1]; w[18]=(uint32_t)zi[2];
+    w[12]=((uint32_t)col[1]<<16)|(uint32_t)col[0]; w[13]=(uint32_t)col[2];
+    w[14]=(uint32_t)zi[0]; w[15]=(uint32_t)zi[1]; w[16]=(uint32_t)zi[2];
     ring_cmd(0x4E, (uint32_t)w.size());
     for (uint32_t x : w) ring_write(x);
 }

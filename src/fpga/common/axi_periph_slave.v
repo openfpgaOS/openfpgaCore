@@ -1416,6 +1416,7 @@ always @(posedge clk) begin
                     save_dt_word_mode <= 1'b1;
                 end
 
+`ifdef INCLUDE_ANALOGIZER
                 6'd32: begin  // ANALOGIZER_SETTINGS (0x80)
                     analogizer_cpu_wr_settings <= req_wdata;
                     analogizer_cpu_wr_toggle[0] <= ~analogizer_cpu_wr_toggle[0];
@@ -1428,8 +1429,13 @@ always @(posedge clk) begin
                     analogizer_cpu_wr_voffset <= req_wdata;
                     analogizer_cpu_wr_toggle[2] <= ~analogizer_cpu_wr_toggle[2];
                 end
+`endif
 
-                // SNAC Shifter + GPIO registers (0xA0-0xAC)
+`ifdef INCLUDE_ANALOGIZER
+                // SNAC Shifter + GPIO registers (0xA0-0xAC).  Gated on
+                // INCLUDE_ANALOGIZER: targets without it (Pocket OS30) never
+                // write the snac_*_reg file, so it folds to constant 0 (the
+                // ~77 register FFs prune) and snac_enable -> 0 (UART mode).
                 6'd40: begin  // SNAC_CTRL (0xA0)
                     snac_en_reg   <= req_wdata[7];
                     snac_mode_reg <= req_wdata[9:8];
@@ -1448,6 +1454,7 @@ always @(posedge clk) begin
                     snac_gpio_out_reg <= req_wdata[7:0];
                     snac_gpio_dir_reg <= req_wdata[15:8];
                 end
+`endif
 
                 6'd44: begin  // SYS_SHUTDOWN (0xB0)
                     shutdown_ack <= req_wdata[0];
@@ -1492,6 +1499,7 @@ always @(posedge clk) begin
 
         if (sysreg_wr_fire && req_addr[8]) begin
             case (req_addr[7:2])
+`ifdef INCLUDE_ANALOGIZER
                 6'd24: begin  // SNAC_HW_CTRL (0x160) — bit 1 reserved
                     snac_hw_enable_reg <= req_wdata[0];
                     snac_hw_fast_reg   <= req_wdata[2];
@@ -1502,6 +1510,7 @@ always @(posedge clk) begin
                     // bit 0 (irq-clear) retired: snac_hw_irq_pending is hardwired 0
                     snac_hw_clear_edges_pulse <= req_wdata[1];
                 end
+`endif
                 default: ;
             endcase
         end

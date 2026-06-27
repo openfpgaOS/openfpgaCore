@@ -274,8 +274,8 @@ DEFS_os25 := INCLUDE_ANALOGIZER INCLUDE_HW_MIXER INCLUDE_TRANSLUC \
 #   mixer, translucency, column/compact.  (BANK_ROW_TRACK experiment reverted —
 #   ~no win, +859 ALM; see git history.)
 DEFS_os30 := INCLUDE_VERT_TRI INCLUDE_DIRECT_COLOR INCLUDE_Z_BURST \
-             EXCLUDE_PALETTE EXCLUDE_GPU_XFORM_MAC EXCLUDE_CLIP_TRI \
-             EXCLUDE_PARALLEL_DIVS
+             EXCLUDE_PALETTE EXCLUDE_GPU_XFORM_MAC EXCLUDE_CLIP_TRI VEXII_CPU_OS30 \
+             EXCLUDE_PARALLEL_DIVS INCLUDE_HW_MIXER
 
 # Fail loudly on an unknown VARIANT (the old ifeq/else silently built os25).
 $(if $(filter $(VARIANT),$(VARIANTS)),,$(error Unknown VARIANT '$(VARIANT)' — known variants: $(VARIANTS)))

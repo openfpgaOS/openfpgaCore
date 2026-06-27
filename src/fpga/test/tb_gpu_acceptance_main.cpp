@@ -897,6 +897,7 @@ struct ParamSpanListWire {
     uint16_t tex_h_mask;
     uint8_t mirror_s;   // G_TX_MIRROR S (control word bit 28)
     uint8_t mirror_t;   // G_TX_MIRROR T (control word bit 29)
+    uint8_t subpix_y;   // vert-tri vertex Y is Q12.4 subpixel (control word bit 31)
     uint8_t const_alpha; // OF_GPU_SPAN_BLEND src alpha (0x4A word 16); emits 17 words when flags bit1 set
     uint8_t flags;
     uint8_t colormap_id;
@@ -927,7 +928,8 @@ encode_param_span_list_wire(const ParamSpanListWire &p,
                      | (((uint32_t)p.span_axis & 0x0Fu) << 16)
                      | (((uint32_t)p.z_mode & 0x0Fu) << 24)
                      | (((uint32_t)(p.mirror_s & 1u)) << 28)
-                     | (((uint32_t)(p.mirror_t & 1u)) << 29);
+                     | (((uint32_t)(p.mirror_t & 1u)) << 29)
+                     | (((uint32_t)(p.subpix_y & 1u)) << 31);   // vert-tri Q12.4 subpixel Y
 
     w[0] = p.fb_base;
     w[1] = (uint32_t)p.fb_major_step;
@@ -5888,9 +5890,14 @@ static void test_param_tri_wrong_size_noop_drains() {
 // Software mirror of gpu_edge_walker.v: y-sort, cross-product winding,
 // truncating Q16.16 slope divide, ceil fill, left-closed right-open,
 // clip rect. x is Q12.4, y is integer scanlines.
+// subpix=false: vy[] are integer scanlines (legacy, byte-exact).
+// subpix=true: vy[] are Q12.4 subpixel (mirrors gpu_edge_walker.v's gated
+// subpix_y path) — Q12.4 dy divisor (slope = quot<<4 -> Q16.16), ceil-to-scanline
+// bounds, fractional prestep (>>4), and the mid-vertex bot_mid_off correction.
 static void ref_tri_records(const int16_t vx[3], const int16_t vy[3],
                             int cx0, int cx1, int cy0, int cy1,
-                            std::vector<ParamSpanRecordWire> &out) {
+                            std::vector<ParamSpanRecordWire> &out,
+                            bool subpix = false) {
     int16_t x[3] = {vx[0], vx[1], vx[2]};
     int16_t y[3] = {vy[0], vy[1], vy[2]};
     if (y[1] < y[0]) { std::swap(x[0], x[1]); std::swap(y[0], y[1]); }
@@ -5901,27 +5908,42 @@ static void ref_tri_records(const int16_t vx[3], const int16_t vy[3],
                 - (long long)(x[2] - x[0]) * (y[1] - y[0]);
     bool long_left = (z > 0);
 
-    auto slope = [](int dx, int dy) -> long long {
+    auto slope = [&](int dx, int dy) -> long long {
         if (dy == 0) return 0;
         long long q = ((long long)llabs(dx) << 12) / llabs(dy);
+        if (subpix) q <<= 4;        // Q20.12 quotient -> Q16.16 slope
         return ((dx < 0) ^ (dy < 0)) ? -q : q;
     };
     long long sl = slope(x[2] - x[0], y[2] - y[0]);
     long long st = slope(x[1] - x[0], y[1] - y[0]);
     long long sb = slope(x[2] - x[1], y[2] - y[1]);
 
-    int ystart = (y[0] < cy0) ? cy0 : y[0];
-    int yend   = (y[2] > cy1) ? cy1 : y[2];
+    auto yscan = [&](int yy) -> int { return subpix ? ((yy + 15) >> 4) : yy; };
+    int y0s = yscan(y[0]), y1s = yscan(y[1]), y2s = yscan(y[2]);
+    int ystart = (y0s < cy0) ? cy0 : y0s;
+    int yend   = (y2s > cy1) ? cy1 : y2s;
+    int ymid   = y1s;
     if (ystart >= yend) return;
 
-    bool bottom = (ystart >= y[1]);
+    // Prestep offset (Q16.16): for subpix the dy_clip is Q12.4 and the product
+    // is >>4 back to a Q16.16 x offset; for integer Y it is the plain product.
+    auto preoff = [&](long long sp, int yvert) -> long long {
+        long long dyc = subpix ? (((long long)ystart << 4) - yvert) : (ystart - yvert);
+        long long p = sp * dyc;
+        return subpix ? (p >> 4) : p;
+    };
+    bool bottom = (ystart >= ymid);
     long long xl, xr;
-    long long xlong  = ((long long)x[0] << 12) + sl * (ystart - y[0]);
-    long long xshort = bottom
-        ? ((long long)x[1] << 12) + sb * (ystart - y[1])
-        : ((long long)x[0] << 12) + st * (ystart - y[0]);
+    long long xlong  = ((long long)x[0] << 12) + preoff(sl, y[0]);
+    long long xshort = bottom ? (((long long)x[1] << 12) + preoff(sb, y[1]))
+                              : (((long long)x[0] << 12) + preoff(st, y[0]));
     if (long_left) { xl = xlong; xr = xshort; }
     else           { xr = xlong; xl = xshort; }
+
+    // Mid-vertex bottom-edge prestep to scanline ymid (subpix; 0 otherwise).
+    long long bot_mid_off = 0;
+    if (subpix && !bottom)
+        bot_mid_off = (sb * (((long long)ymid << 4) - y[1])) >> 4;
 
     for (int yy = ystart; yy < yend; yy++) {
         int ul = (int)((xl + 0xFFFF) >> 16);
@@ -5930,15 +5952,12 @@ static void ref_tri_records(const int16_t vx[3], const int16_t vy[3],
         int u1 = (ur > cx1) ? cx1 : ur;
         if (u1 - u0 > 0)
             out.push_back({(uint16_t)u0, (uint16_t)yy, (uint16_t)(u1 - u0)});
-        if (!bottom && (yy + 1 >= y[1])) {
+        if (!bottom && (yy + 1 >= ymid)) {
             bottom = true;
-            /* Bottom edge starts AT v1: x = x1 exactly on scanline y[1]
-             * (matches the clip-entry prestep x1 + sb*(ystart - y1));
-             * the first sb step lands on y[1]+1.  Keeps a shared edge
-             * identical whether a neighbour walks it as long or
-             * bottom-short — crack-free adjacency. */
-            if (long_left) { xl += sl; xr = ((long long)x[1] << 12); }
-            else           { xr += sl; xl = ((long long)x[1] << 12); }
+            // Bottom edge re-seeds to v1, prestepped to scanline ymid for subpix
+            // (bot_mid_off==0 for integer Y -> exact x1<<12, crack-free).
+            if (long_left) { xl += sl; xr = ((long long)x[1] << 12) + bot_mid_off; }
+            else           { xr += sl; xl = ((long long)x[1] << 12) + bot_mid_off; }
         } else {
             if (long_left) { xl += sl; xr += bottom ? sb : st; }
             else           { xr += sl; xl += bottom ? sb : st; }
@@ -6271,7 +6290,8 @@ static DerivedTriPlanes derive_tri_planes_ref(const int16_t vx[3],
                                               const int32_t s[3],
                                               const int32_t t[3],
                                               const int32_t zi[3],
-                                              const uint8_t lrow[3]) {
+                                              const uint8_t lrow[3],
+                                              bool subpix = false) {
     // 1. y-sort with the walker's exact rule, carrying the attr tuple.
     int16_t x[3] = {vx[0], vx[1], vx[2]};
     int16_t y[3] = {vy[0], vy[1], vy[2]};
@@ -6309,7 +6329,8 @@ static DerivedTriPlanes derive_tri_planes_ref(const int16_t vx[3],
     uint64_t rdet = deriv_rdet_ref(detabs);
 
     int64_t x0px = (int64_t)(x[0] >> 4);  // floor toward -inf (Q12.4 >> 4)
-    int64_t y0 = y[0];
+    // subpix: y is Q12.4 here too, so floor y0 to a scanline (like x0px).
+    int64_t y0 = subpix ? (int64_t)(y[0] >> 4) : (int64_t)y[0];
 
     DerivedTriPlanes pl {};
     int64_t a0arr[4] = {szi[0], tzi[0], Z[0], L[0]};
@@ -6321,12 +6342,18 @@ static DerivedTriPlanes derive_tri_planes_ref(const int16_t vx[3],
         int64_t da1 = deriv_sat32_ref(a1arr[a] - a0arr[a]);
         int64_t da2 = deriv_sat32_ref(a2arr[a] - a0arr[a]);
         int64_t num_du = 16 * (da1 * d2y - da2 * d1y);
-        int64_t num_dv =      (da2 * d1x - da1 * d2x);
+        // num_dv gets the x16 too under subpix (Q12.4 y scales det an extra 16x).
+        int64_t num_dv = subpix ? 16 * (da2 * d1x - da1 * d2x)
+                                :      (da2 * d1x - da1 * d2x);
         int32_t du = deriv_scale_ref(num_du, rdet, sign);
         int32_t dv = deriv_scale_ref(num_dv, rdet, sign);
-        // origin = a0 - du*x0px - dv*y0 (mod 2^32)
+        // origin = a0 - du*x0px - dv*y0 + 0.5*du + 0.5*dv (mod 2^32)
+        // The +0.5*du/+0.5*dv is the pixel-CENTER half-pixel bias mirroring the RTL
+        // DRV_ORG_FORM fix (gpu_core.v): the plane samples (x+0.5, y+0.5). du/dv are
+        // int32_t so >>1 is arithmetic, matching the RTL >>>1.
         int32_t org = (int32_t)(uint32_t)(a0arr[a]
-                    - (int64_t)du * x0px - (int64_t)dv * y0);
+                    - (int64_t)du * x0px - (int64_t)dv * y0
+                    + (du >> 1) + (dv >> 1));
         if (a < 3) {
             pl.attr_origin[a] = org;
             pl.attr_du[a] = du;
@@ -6354,7 +6381,8 @@ encode_set_tri_state_wire(const ParamSpanListWire &p,
                      | (((uint32_t)p.span_axis & 0x0Fu) << 16)
                      | (((uint32_t)p.z_mode & 0x0Fu) << 24)
                      | (((uint32_t)(p.mirror_s & 1u)) << 28)
-                     | (((uint32_t)(p.mirror_t & 1u)) << 29);
+                     | (((uint32_t)(p.mirror_t & 1u)) << 29)
+                     | (((uint32_t)(p.subpix_y & 1u)) << 31);   // vert-tri Q12.4 subpixel Y
     w[0]  = p.fb_base;
     w[1]  = (uint32_t)p.fb_major_step;
     w[2]  = (uint32_t)p.fb_minor_step;
@@ -6452,7 +6480,8 @@ static int vert_tri_equiv_diffs(const ParamSpanListWire &surf,
                                 const int32_t s[3], const int32_t t[3],
                                 const int32_t zi[3], const uint8_t lrow[3],
                                 int16_t cx0, int16_t cx1, int16_t cy0, int16_t cy1,
-                                int rx0, int rx1, int ry0, int ry1) {
+                                int rx0, int rx1, int ry0, int ry1,
+                                bool subpix = false) {
     gpu_init();
     preload_with_sentinel();
     upload_texture(TEX_BASE_BYTE, make_projection_test_texture());
@@ -6461,13 +6490,17 @@ static int vert_tri_equiv_diffs(const ParamSpanListWire &surf,
     // Path A: 0x4A + 0x4B at FB_BASE.
     ParamSpanListWire a = surf;
     a.fb_base = FB_BASE_BYTE;
+    a.subpix_y = subpix;
     emit_set_tri_state_raw(a, cx0, cx1, cy0, cy1);
     emit_draw_vert_tri_raw(vx, vy, s, t, zi, lrow);
 
-    // Path B: 0x49 carrying the reference-derived planes at FB_ALT_BASE.
-    DerivedTriPlanes d = derive_tri_planes_ref(vx, vy, s, t, zi, lrow);
+    // Path B: 0x49 carrying the reference-derived planes at FB_ALT_BASE.  Both
+    // paths set subpix_y so their walker coverage matches; the equality then
+    // isolates the DERIVE (RTL-derived planes == ref-derived planes).
+    DerivedTriPlanes d = derive_tri_planes_ref(vx, vy, s, t, zi, lrow, subpix);
     ParamSpanListWire b = make_equiv_param_from_derived(surf, d);
     b.fb_base = FB_ALT_BASE_BYTE;
+    b.subpix_y = subpix;
     emit_param_tri_raw(b, vx, vy, cx0, cx1, cy0, cy1);
 
     if (!submit_and_wait())
@@ -9924,6 +9957,104 @@ static uint16_t tc_blend_one(uint16_t dst565, uint16_t texel565, uint8_t alpha) 
     return sdram_read_u16_le(FB_BASE_BYTE + 20u * 640u + 20u * 2u);
 }
 
+// ---- 0x4E shrunk-command byte-exact test (RGB pack + depth renumber) --------
+// z_compress mirror of gpu_core.v z_compress(): 16-bit float {e[4:0], mant[10:0]}.
+static uint16_t z_compress_ref(uint32_t v) {
+    if (v == 0) return 0;
+    int e = 31; while (e > 0 && !((v >> e) & 1u)) e--;        // leading-1 position
+    uint32_t mant = (e >= 11) ? (v >> (e - 11)) : (v << (11 - e));
+    return (uint16_t)(((uint32_t)e << 11) | (mant & 0x7FFu));
+}
+// White-texel (0xFFFF) Gouraud passthrough: rgb565_gouraud(0xFFFF, R, G, B).
+static uint16_t gouraud_white_ref(int R, int G, int B) {
+    int Ro = (31 * (R + 1) >> 5) & 0x1F;   // texel R=31; pr[9:5]
+    int Go = (63 * (G + 1) >> 6) & 0x3F;   // texel G=63; pg[11:6]
+    int Bo = (31 * (B + 1) >> 5) & 0x1F;   // texel B=31; pb[9:5]
+    return (uint16_t)((Ro << 11) | (Go << 5) | Bo);
+}
+// Emit the SHRUNK 17-word 0x4E (q29 word dropped, RGB565 packed 3->2 at w12-13,
+// depth at w14-16) — matches of_gpu.h of_gpu_draw_vert_tri_rgb.
+static void emit_draw_vert_tri_rgb_raw(const int16_t vx[3], const int16_t vy[3],
+                                       const int32_t s[3], const int32_t t[3],
+                                       const int32_t zi[3], const uint16_t rgb[3],
+                                       const int32_t depth[3]) {
+    std::vector<uint32_t> w(17, 0);
+    w[0]=((uint32_t)(uint16_t)vy[0]<<16)|(uint16_t)vx[0];
+    w[1]=((uint32_t)(uint16_t)vy[1]<<16)|(uint16_t)vx[1];
+    w[2]=((uint32_t)(uint16_t)vy[2]<<16)|(uint16_t)vx[2];
+    w[3]=(uint32_t)s[0]; w[4]=(uint32_t)s[1]; w[5]=(uint32_t)s[2];
+    w[6]=(uint32_t)t[0]; w[7]=(uint32_t)t[1]; w[8]=(uint32_t)t[2];
+    w[9]=(uint32_t)zi[0]; w[10]=(uint32_t)zi[1]; w[11]=(uint32_t)zi[2];
+    w[12]=((uint32_t)rgb[1]<<16)|(uint32_t)rgb[0]; w[13]=(uint32_t)rgb[2];
+    w[14]=(uint32_t)depth[0]; w[15]=(uint32_t)depth[1]; w[16]=(uint32_t)depth[2];
+    ring_cmd(0x4E, (uint32_t)w.size());
+    for (uint32_t x : w) ring_write(x);
+}
+// Renders ONE 0x4E truecolor triangle with three DISTINCT per-vertex RGB565
+// colours (exercises the rgb0/rgb1/rgb2 PACK at w12-13) and three DISTINCT
+// per-vertex depths with z-write (exercises the depth RENUMBER to w14-16).
+// White texel => the Gouraud modulate passes the interpolated vertex colour
+// through, so the expected FB is gouraud_white(plane-eval) and expected z is
+// z_compress(depth plane) — both referenced independently of the command format.
+static void test_vert_tri_rgb_pack_depth() {
+    printf("TEST vert_tri_rgb_pack_depth\n");
+    gpu_init();
+    preload_with_sentinel();
+    sdram_write_u16_le(TEX_BASE_BYTE, 0xFFFF);              // 1x1 white texel
+    const uint32_t Z_BASE = 0x00200000u;
+    const int z_stride = 320, fb_h = 80;
+    sdram_fill(Z_BASE, (uint32_t)z_stride * fb_h * 2u, 0x00);   // z prefill 0 -> all pass
+
+    ParamSpanListWire p = make_vert_tri_surface();
+    p.fb_base = FB_BASE_BYTE; p.fb_major_step = 320 * 2; p.fb_minor_step = 2;
+    p.tex_addr = TEX_BASE_BYTE; p.tex_width = 1; p.tex_w_mask = 0; p.tex_h_mask = 0;
+    p.flags = SPAN_PERSP | (1u << 7);                       // PERSP + TRUECOLOR
+    p.attr_mode = 1;
+    p.z_mode = 3;                                          // z test+write (bits 24,25)
+    p.z_base = Z_BASE; p.z_major_step = z_stride * 2; p.z_minor_step = 2;
+
+    int16_t vx[3] = { (int16_t)(20*16), (int16_t)(70*16), (int16_t)(15*16) };
+    int16_t vy[3] = { 12, 20, 60 };                        // integer Y (no subpix)
+    int32_t s[3] = {0,0,0}, t[3] = {0,0,0};
+    int32_t zi[3] = { 1<<16, 1<<16, 1<<16 };
+    uint16_t rgb[3] = { 0xF800, 0x07E0, 0x001F };          // red / green / blue (distinct R,G,B)
+    int32_t depth[3] = { 0x30000000, 0x50000000, 0x18000000 };   // distinct, nonzero
+
+    emit_set_tri_state_raw(p, 0, 320, 0, 200);
+    emit_draw_vert_tri_rgb_raw(vx, vy, s, t, zi, rgb, depth);
+    if (!submit_and_wait()) { check_fail("vert_tri_rgb_pack_depth", "timeout"); return; }
+
+    // Per-channel planes via the proven derive (channel value in the light slot);
+    // depth plane via the zi slot (attr index 2).  subpix=false (integer vy).
+    uint8_t cR[3], cG[3], cB[3], z0[3] = {0,0,0};
+    for (int k=0;k<3;k++){ cR[k]=(rgb[k]>>11)&0x1F; cG[k]=(rgb[k]>>5)&0x3F; cB[k]=rgb[k]&0x1F; }
+    DerivedTriPlanes plR = derive_tri_planes_ref(vx, vy, s, t, zi, cR);
+    DerivedTriPlanes plG = derive_tri_planes_ref(vx, vy, s, t, zi, cG);
+    DerivedTriPlanes plB = derive_tri_planes_ref(vx, vy, s, t, zi, cB);
+    DerivedTriPlanes plD = derive_tri_planes_ref(vx, vy, s, t, depth, z0);
+
+    int fb_diffs=0, z_diffs=0, covered=0; char first[176]={0};
+    for (int Y=10; Y<=66; Y++) for (int X=10; X<=76; X++) {
+        uint16_t fbg = sdram_read_u16_le(FB_BASE_BYTE + (uint32_t)Y*640u + (uint32_t)X*2u);
+        if (fbg == 0xABAB) continue;                       // not covered
+        covered++;
+        int R = (int)(((int64_t)plR.light_origin + (int64_t)plR.light_du*X + (int64_t)plR.light_dv*Y) >> 16) & 0x1F;
+        int G = (int)(((int64_t)plG.light_origin + (int64_t)plG.light_du*X + (int64_t)plG.light_dv*Y) >> 16) & 0x3F;
+        int B = (int)(((int64_t)plB.light_origin + (int64_t)plB.light_du*X + (int64_t)plB.light_dv*Y) >> 16) & 0x1F;
+        uint16_t want_fb = gouraud_white_ref(R, G, B);
+        uint32_t dv = (uint32_t)(int32_t)((int64_t)plD.attr_origin[2] + (int64_t)plD.attr_du[2]*X + (int64_t)plD.attr_dv[2]*Y);
+        uint16_t want_z = z_compress_ref(dv);
+        uint16_t zg = sdram_read_u16_le(Z_BASE + (uint32_t)Y*(uint32_t)z_stride*2u + (uint32_t)X*2u);
+        if (fbg != want_fb && fb_diffs++ == 0 && z_diffs == 0)
+            snprintf(first, sizeof first, "FB x=%d y=%d got=%04x want=%04x", X, Y, fbg, want_fb);
+        if (zg != want_z && z_diffs++ == 0 && fb_diffs == 0)
+            snprintf(first, sizeof first, "Z x=%d y=%d got=%04x want=%04x", X, Y, zg, want_z);
+    }
+    if (covered < 100) { char m[96]; snprintf(m,sizeof m,"only %d covered px (dropped?)",covered); check_fail("vert_tri_rgb_pack_depth", m); return; }
+    if (fb_diffs==0 && z_diffs==0) check_pass("vert_tri_rgb_pack_depth");
+    else { char m[224]; snprintf(m,sizeof m,"fb_diffs=%d z_diffs=%d covered=%d first %s",fb_diffs,z_diffs,covered,first); check_fail("vert_tri_rgb_pack_depth", m); }
+}
+
 static void test_truecolor_blend() {
     printf("TEST truecolor_blend\n");
     // dst = red 0xF800, src = blue 0x001F.  a=255 -> src, a=0 -> dst,
@@ -9944,6 +10075,128 @@ static void test_truecolor_blend() {
                  a255, a0, a128, a128_adj);
         check_fail("truecolor_blend", m);
     }
+}
+
+// Subpixel-Y vert-tri coverage.  With 0x4A control bit 31 set, the walker takes
+// Q12.4 vertex Y instead of integer scanlines.  A SOLID texture isolates
+// COVERAGE (the new subpix walker: Q12.4-dy slope, ceil bounds, fractional
+// prestep, mid-vertex bottom-edge prestep) from the attribute derive — every
+// covered pixel samples the same texel, so the framebuffer must match the
+// subpix software walker (ref_tri_records subpix=true) bit-for-bit.
+static void test_vert_tri_subpixel_y() {
+    printf("TEST vert_tri_subpixel_y\n");
+    gpu_init();
+    FbModel m = preload_with_sentinel();
+    upload_texture(TEX_BASE_BYTE, std::vector<uint8_t>(64 * 64, 0xAB));
+    m.snapshot_from_sdram();
+
+    ParamSpanListWire surf = make_vert_tri_surface();
+    surf.subpix_y = 1;
+    emit_set_tri_state_raw(surf, 0, 64, 0, 28);
+
+    // Triangles with FRACTIONAL Q12.4 Y (mixed subpixel offsets) exercising the
+    // ceil bounds, the fractional prestep, and the mid-vertex bottom prestep.
+    const int16_t tris[6][2][3] = {
+        { { (int16_t)(5*16+7),  (int16_t)(40*16+3), (int16_t)(20*16)   },
+          { (int16_t)(2*16+5),  (int16_t)(6*16+11), (int16_t)(22*16+3) } },
+        { { (int16_t)(8*16),    (int16_t)(30*16),   (int16_t)(18*16+9) },
+          { (int16_t)(3*16+1),  (int16_t)(3*16+9),  (int16_t)(14*16+13)} },
+        { { (int16_t)(24*16+5), (int16_t)(44*16),   (int16_t)(60*16)   },
+          { (int16_t)(4*16+2),  (int16_t)(18*16+8), (int16_t)(18*16+15)} },
+        // --- SHARP-ANGLE / grazing slivers (the user-reported tree-side case) ---
+        // tall + thin (near-vertical edges)
+        { { (int16_t)(20*16+2), (int16_t)(22*16),   (int16_t)(21*16+8) },
+          { (int16_t)(1*16),    (int16_t)(26*16+4), (int16_t)(13*16+9) } },
+        // wide + short (near-horizontal edges, ~2-scanline tall)
+        { { (int16_t)(1*16),    (int16_t)(62*16),   (int16_t)(31*16+5) },
+          { (int16_t)(9*16+2),  (int16_t)(9*16+13), (int16_t)(11*16+1) } },
+        // wide OFF-SCREEN x + sub-scanline dy: steep edge -> quot<<4 overflow risk
+        { { (int16_t)(-1024*16),(int16_t)(1024*16), (int16_t)(0)       },
+          { (int16_t)(5*16),    (int16_t)(5*16+1),  (int16_t)(5*16+2)  } },
+    };
+    const int32_t s[3] = {0,0,0}, t[3] = {0,0,0}, zi[3] = {1<<16,1<<16,1<<16};
+    const uint8_t lrow[3] = {0,0,0};
+    for (int i = 0; i < 6; i++) {
+        emit_draw_vert_tri_raw(tris[i][0], tris[i][1], s, t, zi, lrow);
+        std::vector<ParamSpanRecordWire> records;
+        ref_tri_records(tris[i][0], tris[i][1], 0, 64, 0, 28, records, /*subpix=*/true);
+        for (const auto &r : records)
+            m.apply_span_ref(param_affine_ref_span(surf, r));
+    }
+
+    if (!submit_and_wait()) { check_fail("vert_tri_subpixel_y", "timeout"); return; }
+    compare_fb_region("vert_tri_subpixel_y.fb", m, FB_BASE_BYTE, 320, 0, 0, 72, 32);
+}
+
+// Subpixel-Y ATTRIBUTE equivalence: thin sharp-angle slivers (vertices sharing
+// or adjacent to an integer scanline) with steep texcoord gradients — the class
+// that GARBLED when the derive rounded Y to integer (collapsing det -> degenerate
+// du/dv).  With the Q12.4-Y-consistent derive (num_dv x16, y0 floored), the
+// RTL-derived planes must equal the ref-derived planes, so the 0x4B-subpix render
+// (RTL derive) matches the 0x49-subpix render (ref-derived planes) bit-for-bit.
+static void test_vert_tri_subpixel_y_attrib() {
+    printf("TEST vert_tri_subpixel_y_attrib\n");
+    ParamSpanListWire surf = make_vert_tri_surface();
+    const int Q = 1 << 16;
+    struct C { int16_t vx[3], vy[3]; int32_t s[3], t[3], zi[3]; uint8_t l[3];
+               int16_t cx0, cx1, cy0, cy1; };
+    C cs[] = {
+        // v0,v1 share integer scanline 8 (Q12.4 8.125 / 8.8125) — degenerate
+        // under round-Y, fine under Q12.4.
+        { {(int16_t)(10*16),(int16_t)(50*16),(int16_t)(30*16+5)},
+          {(int16_t)(8*16+2),(int16_t)(8*16+13),(int16_t)(10*16+7)},
+          {0,40*Q,20*Q},{0,8*Q,30*Q},{Q,Q,Q},{0,0,0}, 0,64,0,28 },
+        // tall thin sliver, steep s/t gradient
+        { {(int16_t)(20*16+3),(int16_t)(22*16),(int16_t)(21*16+8)},
+          {(int16_t)(1*16+5),(int16_t)(26*16+4),(int16_t)(13*16+9)},
+          {0,2*Q,1*Q},{0,60*Q,30*Q},{Q,Q,Q},{0,0,0}, 0,64,0,28 },
+        // wide short + varying zi (perspective) at subpixel Y
+        { {(int16_t)(2*16),(int16_t)(60*16),(int16_t)(31*16+5)},
+          {(int16_t)(9*16+2),(int16_t)(9*16+13),(int16_t)(12*16+1)},
+          {0,50*Q,25*Q},{0,4*Q,40*Q},{Q,Q/2,Q/3},{0,0,0}, 0,64,0,28 },
+    };
+    int total = 0;
+    for (auto &c : cs) {
+        int d = vert_tri_equiv_diffs(surf, c.vx, c.vy, c.s, c.t, c.zi, c.l,
+                                     c.cx0, c.cx1, c.cy0, c.cy1, 0, 64, 0, 28,
+                                     /*subpix=*/true);
+        if (d < 0) { check_fail("vert_tri_subpixel_y_attrib", "timeout"); return; }
+        total += d;
+    }
+    if (total == 0) check_pass("vert_tri_subpixel_y_attrib");
+    else { char mm[64]; snprintf(mm, sizeof mm, "%d attr diffs across slivers", total);
+           check_fail("vert_tri_subpixel_y_attrib", mm); }
+}
+
+// Texture-plane (szi/tzi) half-texel derive-bias coverage THROUGH the
+// perspective divide.  The other 0x4E truecolor test (pack_depth) uses FLAT
+// s/t, so attr0/attr1 never exercise the corner->center bias added to
+// DRV_ORG_FORM.  Here: a STEEP s/t gradient (>>1 texel/pixel) with strong
+// per-vertex perspective (zi varies 8x) over the non-trivial projection
+// texture, compared 0x4B-RTL-derive vs 0x49-reference-derive (both carry the
+// bias).  Byte-identical FBs prove the RTL texture-plane bias == the reference
+// bias through the perspective divide; breaking the RTL szi/tzi bias makes the
+// sampled texels diverge -> pixel diffs (the mutation check below relies on it).
+static void test_vert_tri_tex_persp_bias() {
+    printf("TEST vert_tri_tex_persp_bias\n");
+    ParamSpanListWire surf = make_vert_tri_surface();
+    const int Q = 1 << 16;
+    // s: 0..1200 texels, t: 0..1100 texels across ~54 px (steep, >>1 texel/px);
+    // zi: Q, Q/8, Q/4 (strong perspective -> genuine szi/zi, tzi/zi divide).
+    int16_t vx[3] = {(int16_t)(6*16), (int16_t)(60*16), (int16_t)(20*16)};
+    int16_t vy[3] = {3, 7, 38};
+    int32_t s[3]  = {0, 1200*Q, 40*Q};
+    int32_t t[3]  = {0, 1100*Q, 24*Q};
+    int32_t zi[3] = {Q, Q/8, Q/4};
+    uint8_t l[3]  = {0, 20, 8};
+    int d = vert_tri_equiv_diffs(surf, vx, vy, s, t, zi, l,
+                                 0, 80, 0, 44,    // scissor
+                                 0, 80, 0, 44);   // compare region
+    if (d < 0) { check_fail("vert_tri_tex_persp_bias", "timeout"); return; }
+    if (d == 0) check_pass("vert_tri_tex_persp_bias");
+    else { char b[80]; snprintf(b, sizeof b,
+               "%d pixel diffs (szi/tzi texture-plane derive-bias mismatch)", d);
+           check_fail("vert_tri_tex_persp_bias", b); }
 }
 #endif
 
@@ -10123,7 +10376,11 @@ int main(int argc, char **argv) {
     test_lean_wrong_size_0x48_33w();
 
 #ifdef GPU_TEST_TRUECOLOR
+    test_vert_tri_rgb_pack_depth();
     test_truecolor_blend();
+    test_vert_tri_subpixel_y();
+    test_vert_tri_subpixel_y_attrib();
+    test_vert_tri_tex_persp_bias();
 #endif
 
     printf("\n=== Acceptance Results: %d passed, %d failed ===\n",
