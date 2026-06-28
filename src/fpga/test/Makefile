@@ -21,6 +21,7 @@ VERILATOR = verilator
 VERILATOR_FLAGS = --cc --exe --build \
 	-Wall -Wno-fatal -Wno-BADVLTPRAGMA \
 	-CFLAGS "-std=c++17 -O2" \
+	-I$(COMMON_DIR)/analogizer \
 	--trace
 
 # Trace-free flags used by the heavyweight system tb (full CPU) — VCD
@@ -28,7 +29,8 @@ VERILATOR_FLAGS = --cc --exe --build \
 # a few seconds instead of minutes.
 VERILATOR_FLAGS_NOTRACE = --cc --exe --build \
 	-Wall -Wno-fatal -Wno-BADVLTPRAGMA \
-	-CFLAGS "-std=c++17 -O2"
+	-CFLAGS "-std=c++17 -O2" \
+	-I$(COMMON_DIR)/analogizer
 
 # ============================================================
 # SDRAM
@@ -91,7 +93,7 @@ AXI_PERIPH_SRCS = \
 	tb_axi_periph.v \
 	altsyncram_stub.v \
 	$(COMMON_DIR)/axi_periph_slave.v \
-	$(COMMON_DIR)/snac_shifter.v \
+	$(COMMON_DIR)/analogizer/snac_shifter.v \
 	$(COMMON_DIR)/sync_fifo.v \
 	$(TARGET_DIR)/apf/common.v
 
@@ -432,7 +434,7 @@ SYSTEM_SRCS_BASE = \
 	$(COMMON_DIR)/axi_sdram_slave.v \
 	$(COMMON_DIR)/axi_periph_slave.v \
 	$(COMMON_DIR)/sync_fifo.v \
-	$(COMMON_DIR)/snac_shifter.v \
+	$(COMMON_DIR)/analogizer/snac_shifter.v \
 	$(COMMON_DIR)/gpu_core.v \
 	$(COMMON_DIR)/gpu_edge_walker.v \
 	$(COMMON_DIR)/gpu_tex_cache.v \
@@ -775,6 +777,7 @@ $(GPU_ACCEPT_SM64_DIR)/V$(GPU_TOP): $(GPU_SRCS) $(GPU_ACCEPT_CPP)
 		-GINCLUDE_VTX_CACHE=1 \
 		-GINCLUDE_GPU_LIGHT=1 \
 		-GINCLUDE_PALETTE=1 \
+		-GINCLUDE_COMBINE=1 \
 		--top-module $(GPU_TOP) \
 		--Mdir $(GPU_ACCEPT_SM64_DIR) \
 		-I$(COMMON_DIR) \
@@ -797,6 +800,29 @@ $(GPU_ACCEPT_NOPAL_DIR)/V$(GPU_TOP): $(GPU_SRCS) $(GPU_ACCEPT_CPP)
 		-GGPU_Z_READ_WINDOW=4 -GINCLUDE_DIRECT_COLOR=1 -GINCLUDE_XFORM_RGB=1 \
 		-GINCLUDE_VTX_CACHE=1 -GINCLUDE_GPU_LIGHT=1 -GINCLUDE_PALETTE=0 \
 		--top-module $(GPU_TOP) --Mdir $(GPU_ACCEPT_NOPAL_DIR) -I$(COMMON_DIR) \
+		$(GPU_SRCS) $(GPU_ACCEPT_CPP)
+
+# EXACT shipped os30 bitstream GPU config (mirrors core_top.v gpu_core params for
+# DEFS_os30 = VERT_TRI DIRECT_COLOR COMBINE Z_BURST HW_MIXER): every other module
+# folds OFF — PARAM_TRI/RECS=0, COMPACT/COLUMN=0, XFORM/CLIP/VTX/LIGHT/XFORM_MAC=0,
+# PALETTE=0, TEX_MEM=0, PARAM_SPAN_Q29=0.  Runs the truecolor fragment suite in the
+# REAL os30 fold so the untextured-truecolor (white-texel Gouraud = Mario base face)
+# path is exercised in the config that ships — the kitchen-sink sm64 target never is.
+GPU_ACCEPT_OS30X_DIR = obj_dir_gpu_acceptance_os30x
+gpu-acceptance-os30-exact: $(GPU_ACCEPT_OS30X_DIR)/V$(GPU_TOP)
+	@printf "\n=== GPU acceptance suite (EXACT shipped os30 GPU config) ===\n"
+	-./$(GPU_ACCEPT_OS30X_DIR)/V$(GPU_TOP)
+
+$(GPU_ACCEPT_OS30X_DIR)/V$(GPU_TOP): $(GPU_SRCS) $(GPU_ACCEPT_CPP)
+	$(VERILATOR) $(VERILATOR_FLAGS) \
+		-CFLAGS "-std=c++17 -O2 -DGPU_TEST_OS30_LEAN -DGPU_TEST_TRUECOLOR" \
+		-GINCLUDE_COMPACT_SPAN=0 -GINCLUDE_COLUMN_LIST=0 -GGPU_EW_PARALLEL_DIVS=0 \
+		-GINCLUDE_PARAM_TRI=0 -GINCLUDE_VERT_TRI=1 -GINCLUDE_PARAM_TRI_RECS=0 \
+		-GGPU_Z_READ_WINDOW=4 -GINCLUDE_DIRECT_COLOR=1 -GINCLUDE_COMBINE=1 \
+		-GINCLUDE_XFORM_RGB=0 -GINCLUDE_CLIP_TRI=0 -GINCLUDE_VTX_CACHE=0 \
+		-GINCLUDE_GPU_LIGHT=0 -GINCLUDE_PALETTE=0 \
+		-GINCLUDE_PARAM_SPAN_Q29=0 \
+		--top-module $(GPU_TOP) --Mdir $(GPU_ACCEPT_OS30X_DIR) -I$(COMMON_DIR) \
 		$(GPU_SRCS) $(GPU_ACCEPT_CPP)
 
 # Elaboration smoke test of the SHIPPED SM64 bitstream gating: PARAM_TRI/RECS off,

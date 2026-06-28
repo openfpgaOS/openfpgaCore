@@ -82,7 +82,17 @@ module axi_periph_slave #(
     // GPU transform front-end truecolor + vertex cache + lighting (HW_FEATURES
     // bit 26, OF_HW_GPU_XFORM_RGB).  Must track gpu_core's INCLUDE_XFORM_RGB on
     // the same target (Pocket os30/SM64).
-    parameter INCLUDE_XFORM_RGB = 0
+    parameter INCLUDE_XFORM_RGB = 0,
+    // GPU full texel*C+D color combiner (HILITE/specular class).  Advertised in
+    // HW_FEATURES bit 27 (OF_HW_GPU_COMBINE), gated AND with INCLUDE_DIRECT_COLOR
+    // (combine only exists on the truecolor path).  Must track gpu_core's
+    // INCLUDE_COMBINE on the same target.  Pocket OS30/SM64 clears it
+    // (EXCLUDE_COMBINE) so the app falls back to plain texel*shade instead of
+    // emitting biased-C/D payload words a gated GPU would mis-read.
+    parameter INCLUDE_COMBINE = 1,
+    // Param-span/tri Q29 dynamic-scale caps (bit 18, OF_HW_GPU_PARAM_SPAN_Q29_SCALE).
+    // Tracks gpu_core's INCLUDE_PARAM_SPAN_Q29; os30/SM64 clears it (Q29 cone folded).
+    parameter INCLUDE_PARAM_SPAN_Q29 = 1
 ) (
     input wire clk,
     input wire reset_n,
@@ -730,7 +740,8 @@ localparam [31:0] HW_FEATURES_RESOLVED =
     32'h0000_0001      // bit 0  OF_HW_MIXER: a 32-voice mixer is available (SET on
                        //        every target; SW-backed when bit 1 is clear)
     | 32'h0000_0010    // GPU span renderer
-    | 32'h0007_E000    // GPU persp + fragpipe + param span/list/z/scale caps (bits 13..18)
+    | 32'h0003_E000    // GPU persp + fragpipe + param span/list/z caps (bits 13..17)
+    | ((INCLUDE_PARAM_SPAN_Q29 != 0) ? 32'h0004_0000 : 32'h0000_0000) // bit 18 Q29 dynamic scale (os30 clears)
     | 32'h0000_0340    // MIDI(6) + FPU(8) + Save slots(9)
     | FEAT_LINK
     | (INCLUDE_ANALOGIZER ? 32'h0000_0008 : 32'h0000_0000)
@@ -774,6 +785,13 @@ localparam [31:0] HW_FEATURES_RESOLVED =
                        //        memory present.  OS25 + MiSTer clear it (no
                        //        fast-tex chip) → caps->tex_fast_size 0 →
                        //        SDRAM textures.  OS30 keeps it.
+    | ((INCLUDE_DIRECT_COLOR && INCLUDE_COMBINE) ? 32'h0800_0000 : 32'h0000_0000) // bit 27
+                       //        OF_HW_GPU_COMBINE: full texel*C+D combiner
+                       //        (HILITE/specular).  Gated AND with DIRECT_COLOR
+                       //        (combine is truecolor-only).  Pocket OS30/SM64
+                       //        clears it (EXCLUDE_COMBINE) so the app emits
+                       //        plain texel*shade — a gated GPU would otherwise
+                       //        mis-read the biased-C/D payload words.
     | 32'h0100_0000;   // bit 24 OF_HW_SAVE_DT_WORD: SAVE_DT_WORD (0xC8)
                        //        entry-resolved nonvolatile size commits.
                        //        UNCONDITIONAL on new bitstreams; a new OS

@@ -301,6 +301,13 @@ end
 always @(posedge controller_clk) begin
     phy_dq_oe <= 0;
     cmd <= CMD_NOP;
+    // Default DQM low (no mask) every cycle so phy_dqm is a clean load-only
+    // output register (no clear+load conflict) → packs into the IOB output
+    // register, fixing the dram_dqm output-setup path.  Write states override
+    // it the same cycle the SDRAM samples DQM (behaviour identical; verified
+    // byte-exact via the shared sdram-all suite on the pocket copy).  ⚠️Needs a
+    // MiSTer Quartus-17 re-fit to confirm the IOB packing on that flow.
+    phy_dqm <= 2'b00;
     dc <= dc + 1'b1;
 
     // (word_rd/word_wr are same clock domain - no edge detection needed)

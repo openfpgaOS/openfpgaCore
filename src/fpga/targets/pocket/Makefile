@@ -255,27 +255,35 @@ VARIANT ?= os25
 # fast tex are simply absent where unlisted.
 VARIANTS := os25 os30
 
+# Module lists are ADDITIVE (docs/MODULES.md): a variant lists the INCLUDE_
+# modules it wants; everything else is off (zero cost).  core_top wires every
+# gpu_core/periph param off these macros, so the gpu_core param defaults never
+# apply here.  Dependency pull-ups (combine/xform ⇒ truecolor) live in core_top.
+#
 # OS25 (default, 2.5D games — Doom/Duke3D/ScummVM/Wolf + Quake1 SW alias):
-# analogizer, full HW mixer, translucency, column lists, compact span groups
-# IN; NO triangle path (the edge walker constant-folds away) and NO fast tex
-# (textures + colormap render from SDRAM, caps tex_fast_size 0).
+# analogizer, full HW mixer, translucency, the palettized/colormap lane, column
+# lists, compact span groups.  NO triangle path (edge walker folds away), NO
+# truecolor/combine/xform, NO fast tex.  (Dropping INCLUDE_XFORM also sheds the
+# previously-dead 0x50/0x51/0x4F cones os25 used to synthesize via defaults.)
 DEFS_os25 := INCLUDE_ANALOGIZER INCLUDE_HW_MIXER INCLUDE_TRANSLUC \
-             INCLUDE_COLUMN_LIST INCLUDE_COMPACT_SPAN
+             INCLUDE_PALETTE INCLUDE_COLUMN_LIST INCLUDE_COMPACT_SPAN \
+             INCLUDE_PARAM_SPAN_Q29
 
-# OS30 (SM64 focus): HW vertex-triangle plane derive + truecolor RGB565 + the GPU
-# transform/lighting front-end (0x52 xform_tri_rgb, 0x53/0x54 vertex cache +
-# indexed draw, 0x55 lighting).  Clip-space feed (0x4F) replaces the on-GPU matrix
-# transform, so the matrix front-end is excluded: XFORM_RGB/VTX_CACHE/GPU_LIGHT
-# off and EXCLUDE_GPU_XFORM_MAC drops 0x51 + the matrix MAC + xf_M M10K.
-#   GATED OUT (reclaims ALM): PARAM_TRI (0x49), PARAM_TRI_RECS (0x4D), fast texture
-#   (INCLUDE_TEX_MEM — textures fill from SDRAM).  KEPT: INCLUDE_Z_BURST forces
-#   GPU_Z_READ_WINDOW=4 (SM64 z-tests every fragment).  Truecolor-only: palette/
-#   colormap lane gated off via EXCLUDE_PALETTE.  Already OUT: analogizer, HW
-#   mixer, translucency, column/compact.  (BANK_ROW_TRACK experiment reverted —
-#   ~no win, +859 ALM; see git history.)
-DEFS_os30 := INCLUDE_VERT_TRI INCLUDE_DIRECT_COLOR INCLUDE_Z_BURST \
-             EXCLUDE_PALETTE EXCLUDE_GPU_XFORM_MAC EXCLUDE_CLIP_TRI VEXII_CPU_OS30 \
-             EXCLUDE_PARALLEL_DIVS INCLUDE_HW_MIXER
+# OS30 (SM64 ∪ Quake2): HW vertex-triangle plane derive (0x4A/0x4B) + truecolor
+# RGB565 + the texel*C+D combiner (HILITE/specular, e.g. the Mario head) + HW
+# mixer.  INCLUDE_Z_BURST forces GPU_Z_READ_WINDOW=4 (SM64 z-tests every
+# fragment).  VEXII_CPU_OS30 selects the os30 CPU netlist.
+#   NOT listed (= off, additive): PALETTE (truecolor-only), the XFORM transform
+#   front-end (CPU does geometry — sheds 0x52/0x50/0x51/0x53-57/0x4F + xf_M M10K),
+#   PARAM_TRI/PARAM_TRI_RECS, COMPACT_SPAN/COLUMN_LIST, TEX_MEM, ANALOGIZER,
+#   TRANSLUC, PARALLEL_DIVS.  This is bit-identical to the prior EXCLUDE_* form.
+# NOTE: combiner is KEPT (INCLUDE_COMBINE) — gating it freed ~884 ALM but gave NO
+# WNS gain (wall is the CPU decode→FPU cone, not GPU congestion) AND darkened the
+# Mario head (its brightness is the combiner's additive D term).  The
+# OF_HW_GPU_COMBINE caps bit + app g_combine gate stay, so it can be gated
+# cleanly in a FUTURE ALM-starved build.  See docs/MODULES.md.
+DEFS_os30 := INCLUDE_VERT_TRI INCLUDE_DIRECT_COLOR INCLUDE_COMBINE INCLUDE_Z_BURST \
+             VEXII_CPU_OS30 INCLUDE_HW_MIXER
 
 # Fail loudly on an unknown VARIANT (the old ifeq/else silently built os25).
 $(if $(filter $(VARIANT),$(VARIANTS)),,$(error Unknown VARIANT '$(VARIANT)' — known variants: $(VARIANTS)))
@@ -465,9 +473,12 @@ package: $(REVERSE_BITS)
 	@rm -rf $(PKG_DIR)
 	@mkdir -p $(RELEASE_DIR) $(PKG_DIR)/Platforms/_images $(ASSETS_DIR)
 	@$(REVERSE_BITS) $(QOUT)/$(PROJECT).rbf $(RELEASE_DIR)/$(BITSTREAM).rbf_r > /dev/null
-	@# chip32 loader is a small assembled artifact; build it on demand so
-	@# packaging never fails on a fresh checkout.
-	@test -f $(CHIP32_LOADER) || $(MAKE) -s -C $(ROOT_DIR)/src/chip32/pocket
+	@# chip32 loader is a small assembled artifact.  Invoke its sub-make
+	@# UNCONDITIONALLY so bass reassembles whenever loader.asm (or the .arch)
+	@# changed: a `test -f` existence guard skips the prerequisite check and
+	@# would ship a stale binary (e.g. a pre-`=os30`-scan loader.bin that
+	@# always selects core 0 / os25).  The chip32 Makefile no-ops when fresh.
+	@$(MAKE) -s -C $(ROOT_DIR)/src/chip32/pocket
 	@cp $(CHIP32_LOADER) $(RELEASE_DIR)/loader.bin
 	@cp $(FW_DIR)/os.bin $(RELEASE_DIR)/os.bin
 	@cp $(FW_DIR)/os.bin $(ASSETS_DIR)/os.bin

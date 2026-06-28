@@ -16,23 +16,24 @@ output "loader.bin", create
 constant core_os25      = 0x0    // default 2.5D / span-group bitstream
 constant core_os30      = 0x1    // hardware vertex-triangle bitstream
 
-// Per-instance variant selection by reading the app's os.ini directly.
-// data.json gives the OS Config slot (id 2) a fixed load address, so the
-// bridge places the .ini text where the VM can byte-scan it BEFORE the FPGA is
-// configured (the chip32 loader runs on the Pocket host, ahead of the core).
-// An app that needs the vertex-triangle bitstream puts a line `VARIANT=os30`
-// in its .ini; the loader scans for the marker "=os30" and loads core 1, else
-// it defaults to core 0 (os25).  Anchoring on the '=' (a value assignment, not
-// bare "os30") keeps prose — comments, ARGS, ELF names mentioning os30 — from
-// false-triggering the raw byte scan.
+// ── Per-instance variant selection ──────────────────────────────────
+// The chip32 loader runs on the Pocket host BEFORE the FPGA core is
+// configured, so it cannot touch PSRAM/the bridge (0x2xxxxxxx CRAM0 lives
+// behind the not-yet-loaded core's controller — chicken-and-egg).  The only
+// pre-core way to see a data slot's bytes is to `open` it and `read` it into
+// chip32's own 8 KB RAM, exactly as in Analogue's core-example-basicchip32
+// (`open r3,r0 / read rambuf,len`).  We read the app's os.ini (slot 2) into a
+// scratch buffer and scan it for the marker "=os30": found → core 1 (os30),
+// else core 0 (os25, default).  Anchoring on '=' (a value assignment, not bare
+// "os30") keeps prose — comments, ARGS, ELF names — from false-triggering.
 constant ini_slot       = 0x2
-// Bridge-space CRAM0 address the .ini is DMA'd to — must match data.json
-// slot 2 "address".  CRAM0 bridge base is 0x20000000 (saves live at
-// 0x20100000); 0x203C0000 is the free 256 KB gap between the shared-config
-// window (ends 0x203C0000) and the os.bin load scratch (0x20400000), so it
-// is a valid bridge target that does NOT collide with SDRAM/framebuffer
-// (0x10000000) or the OS-load pipeline.
-constant ini_addr       = 0x203C0000
+// Scratch buffer in chip32's 8 KB RAM (0x0000-0x1FFF).  The program + strings
+// occupy only the low ~256 B, so 0x0800 is clear of code, and an os.ini (a few
+// hundred bytes) read in at 0x0800 stays well inside the 8 KB RAM.  read caps a
+// single transfer at 4 KB; an os.ini is far smaller, so we read the whole file
+// in one go (no length clamp — that avoids any carry-flag polarity assumption,
+// and a pathological >4 KB .ini simply fails the read and defaults to os25).
+constant rambuf         = 0x0800
 
 // ASCII for the "=os30" marker scanned out of the .ini.
 constant ch_eq          = 0x3D
@@ -61,18 +62,25 @@ start:
                 // --- Load bitstream (first boot only) ---
                 bit r13,#bit_coreloaded
                 jp nz,skip_core
-                // Open the os.ini (slot 2) to bound the scan to its real size,
-                // so stray memory past EOF can't spuriously match "os30".
+                // Open the os.ini (slot 2).  chip32 `open Rx,Ry`: Rx = slot id
+                // (INPUT, left unchanged), Ry = file length (output), ZERO FLAG
+                // = success (set = opened).  Rx is NOT a status return, so we
+                // branch on the flag — a `cmp r0,#0` would test the slot id
+                // (still 2 → always nz) and wrongly default every app to os25.
                 ld r0,#ini_slot
-                open r0,r1                  // r0 = status, r1 = size
-                cmp r0,#0000
-                jp nz,pick_os25             // no .ini → default os25
-                ld r4,#ini_addr             // r4 = scan pointer
-                ld r5,r1
-                add r5,r4                   // r5 = end = ini_addr + size
+                open r0,r1                  // r1 = size; zero flag = opened OK
+                jp nz,pick_os25             // open failed (no .ini) → default os25
+                ld r7,r1                    // r7 = byte count (for the scan end)
+                ld r0,#rambuf               // r0 = destination in chip32 RAM
+                read r0,r1                  // copy the whole .ini into rambuf
+                close                       // (close preserves the read's flag)
+                jp nz,pick_os25             // read error (.ini > 4 KB) → default os25
+                ld r4,#rambuf               // r4 = scan pointer
+                ld r5,#rambuf
+                add r5,r7                   // r5 = end = rambuf + bytecount
 scan:
                 cmp r4,r5
-                jp z,scan_done              // reached EOF → default os25
+                jp z,pick_os25              // reached EOF, no match → default os25
                 ld.b r2,(r4)
                 cmp r2,#ch_eq               // '=' (anchor) ?
                 jp nz,scan_next
@@ -94,14 +102,11 @@ scan:
                 cmp r2,#ch_0                // '0' ?
                 jp nz,scan_next
                 // matched "=os30"
-                close
                 ld r0,#core_os30
                 jp pick_core
 scan_next:
                 add r4,#1
                 jp scan
-scan_done:
-                close
 pick_os25:
                 ld r0,#core_os25
 pick_core:

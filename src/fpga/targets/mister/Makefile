@@ -43,7 +43,12 @@ BUILD_OUT = $(ROOT_DIR)/build/mister
 # Forwarded to quartus_map as --verilog_macro=<NAME>; the gpu_core /
 # axi_periph_slave instances in emu.sv echo each macro into their INCLUDE_*
 # params via the `ifdef INCLUDE_X 1 `else 0 `endif pattern.
-INCLUDE_DEFS = INCLUDE_HW_MIXER INCLUDE_LINK INCLUDE_4PLAYER INCLUDE_TRANSLUC \
+# LINK + 4PLAYER dropped 2026-06-27 (module audit): LINK is stubbed in emu.sv
+# (advertised cap, no HW, no firmware check) and 4PLAYER is a dead macro on MiSTer
+# (the only gate is pocket core_top.v; MiSTer multiplayer comes via HPS/USB).
+# INCLUDE_LINK=0 folds the periph link logic — the same config pocket already
+# ships — so this is low-risk, but RE-FIT MiSTer on Quartus 17 to confirm.
+INCLUDE_DEFS = INCLUDE_HW_MIXER INCLUDE_TRANSLUC \
                INCLUDE_COLUMN_LIST INCLUDE_COMPACT_SPAN INCLUDE_PARAM_TRI \
                INCLUDE_VERT_TRI INCLUDE_PARAM_TRI_RECS
 VERILOG_MACROS = $(foreach d,$(INCLUDE_DEFS),--verilog_macro="$(d)")

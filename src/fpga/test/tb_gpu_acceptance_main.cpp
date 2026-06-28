@@ -10055,6 +10055,91 @@ static void test_vert_tri_rgb_pack_depth() {
     else { char m[224]; snprintf(m,sizeof m,"fb_diffs=%d z_diffs=%d covered=%d first %s",fb_diffs,z_diffs,covered,first); check_fail("vert_tri_rgb_pack_depth", m); }
 }
 
+// ABSOLUTE subpixel-Y untextured-truecolor (white-texel Gouraud) test — the REAL
+// SM64 main-face path (g_subpix_tri=1). The integer-Y sibling above passes in the
+// shipped os30 config, and the subpix-Y *attribute* derive is otherwise only ever
+// EQUIVALENCE-checked against 0x49 param_tri — which os30 PRUNES (INCLUDE_PARAM_TRI=0),
+// so that twin draws nothing and the equivalence test is a dead signal here. This
+// test instead computes an ABSOLUTE reference: the subpix coverage walker
+// (ref_tri_records subpix=true) tells us which pixels the HW must paint, and the
+// subpix attribute derive (derive_tri_planes_ref subpix=true) gives the expected
+// Gouraud colour + z at each. White texel => Gouraud passes the interpolated vertex
+// colour through. Byte-exact, self-contained — no 0x49 dependency. If this FAILS in
+// gpu-acceptance-os30-exact, the shipped os30 subpix-Y truecolor derive is broken.
+static void test_vert_tri_rgb_pack_depth_subpix_y() {
+    printf("TEST vert_tri_rgb_pack_depth_subpix_y\n");
+    gpu_init();
+    preload_with_sentinel();
+    sdram_write_u16_le(TEX_BASE_BYTE, 0xFFFF);              // 1x1 white texel
+    const uint32_t Z_BASE = 0x00200000u;
+    const int z_stride = 320, fb_h = 80;
+    sdram_fill(Z_BASE, (uint32_t)z_stride * fb_h * 2u, 0x00);   // z prefill 0 -> all pass
+
+    ParamSpanListWire p = make_vert_tri_surface();
+    p.fb_base = FB_BASE_BYTE; p.fb_major_step = 320 * 2; p.fb_minor_step = 2;
+    p.tex_addr = TEX_BASE_BYTE; p.tex_width = 1; p.tex_w_mask = 0; p.tex_h_mask = 0;
+    p.flags = SPAN_PERSP | (1u << 7);                       // PERSP + TRUECOLOR
+    p.attr_mode = 1;
+    p.z_mode = 3;                                          // z test+write (bits 24,25)
+    p.z_base = Z_BASE; p.z_major_step = z_stride * 2; p.z_minor_step = 2;
+    p.subpix_y = 1;                                        // Q12.4 subpixel Y (ctl bit 31)
+
+    // Q12.4 SUBPIXEL vy: integer scanlines *16 plus DISTINCT fractional offsets so
+    // the Q12.4-dy slope, ceil bounds, fractional prestep and mid-vertex bottom
+    // prestep are all exercised (the real SM64 g_subpix_tri=1 path).
+    int16_t vx[3] = { (int16_t)(20*16), (int16_t)(70*16), (int16_t)(15*16) };
+    int16_t vy[3] = { (int16_t)(12*16+5), (int16_t)(20*16+11), (int16_t)(60*16+3) };
+    int32_t s[3] = {0,0,0}, t[3] = {0,0,0};
+    int32_t zi[3] = { 1<<16, 1<<16, 1<<16 };
+    uint16_t rgb[3] = { 0xF800, 0x07E0, 0x001F };          // red / green / blue (distinct R,G,B)
+    int32_t depth[3] = { 0x30000000, 0x50000000, 0x18000000 };   // distinct, nonzero
+
+    emit_set_tri_state_raw(p, 0, 320, 0, 200);
+    emit_draw_vert_tri_rgb_raw(vx, vy, s, t, zi, rgb, depth);
+    if (!submit_and_wait()) { check_fail("vert_tri_rgb_pack_depth_subpix_y", "timeout"); return; }
+
+    // Per-channel attribute planes via the proven derive (channel value in the light
+    // slot); depth plane via the zi slot.  subpix=true (Q12.4 vy).
+    uint8_t cR[3], cG[3], cB[3], z0[3] = {0,0,0};
+    for (int k=0;k<3;k++){ cR[k]=(rgb[k]>>11)&0x1F; cG[k]=(rgb[k]>>5)&0x3F; cB[k]=rgb[k]&0x1F; }
+    DerivedTriPlanes plR = derive_tri_planes_ref(vx, vy, s, t, zi, cR, /*subpix=*/true);
+    DerivedTriPlanes plG = derive_tri_planes_ref(vx, vy, s, t, zi, cG, /*subpix=*/true);
+    DerivedTriPlanes plB = derive_tri_planes_ref(vx, vy, s, t, zi, cB, /*subpix=*/true);
+    DerivedTriPlanes plD = derive_tri_planes_ref(vx, vy, s, t, depth, z0, /*subpix=*/true);
+
+    // ABSOLUTE coverage: the subpix edge-walker tells us EXACTLY which pixels HW must
+    // paint (records carry {u=x_start, v=scanline, count}). We verify every covered
+    // pixel was written (not left at the 0xABAB sentinel) AND matches the derive — so
+    // a black/unwritten subpix face is caught, not silently skipped.
+    std::vector<ParamSpanRecordWire> records;
+    ref_tri_records(vx, vy, 0, 320, 0, 200, records, /*subpix=*/true);
+
+    int fb_diffs=0, z_diffs=0, unwritten=0, covered=0; char first[176]={0};
+    for (const auto &r : records) {
+        int Y = (int)r.v;
+        for (int X = r.u; X < (int)r.u + (int)r.count; X++) {
+            covered++;
+            uint16_t fbg = sdram_read_u16_le(FB_BASE_BYTE + (uint32_t)Y*640u + (uint32_t)X*2u);
+            int R = (int)(((int64_t)plR.light_origin + (int64_t)plR.light_du*X + (int64_t)plR.light_dv*Y) >> 16) & 0x1F;
+            int G = (int)(((int64_t)plG.light_origin + (int64_t)plG.light_du*X + (int64_t)plG.light_dv*Y) >> 16) & 0x3F;
+            int B = (int)(((int64_t)plB.light_origin + (int64_t)plB.light_du*X + (int64_t)plB.light_dv*Y) >> 16) & 0x1F;
+            uint16_t want_fb = gouraud_white_ref(R, G, B);
+            uint32_t dv = (uint32_t)(int32_t)((int64_t)plD.attr_origin[2] + (int64_t)plD.attr_du[2]*X + (int64_t)plD.attr_dv[2]*Y);
+            uint16_t want_z = z_compress_ref(dv);
+            uint16_t zg = sdram_read_u16_le(Z_BASE + (uint32_t)Y*(uint32_t)z_stride*2u + (uint32_t)X*2u);
+            if (fbg == 0xABAB && unwritten++ == 0 && fb_diffs == 0 && z_diffs == 0)
+                snprintf(first, sizeof first, "UNWRITTEN(black/dropped) x=%d y=%d want=%04x", X, Y, want_fb);
+            if (fbg != want_fb && fb_diffs++ == 0 && z_diffs == 0 && unwritten == 0)
+                snprintf(first, sizeof first, "FB x=%d y=%d got=%04x want=%04x", X, Y, fbg, want_fb);
+            if (zg != want_z && z_diffs++ == 0 && fb_diffs == 0 && unwritten == 0)
+                snprintf(first, sizeof first, "Z x=%d y=%d got=%04x want=%04x", X, Y, zg, want_z);
+        }
+    }
+    if (covered < 100) { char m[96]; snprintf(m,sizeof m,"only %d covered px (walker dropped?)",covered); check_fail("vert_tri_rgb_pack_depth_subpix_y", m); return; }
+    if (fb_diffs==0 && z_diffs==0 && unwritten==0) check_pass("vert_tri_rgb_pack_depth_subpix_y");
+    else { char m[256]; snprintf(m,sizeof m,"unwritten=%d fb_diffs=%d z_diffs=%d covered=%d first %s",unwritten,fb_diffs,z_diffs,covered,first); check_fail("vert_tri_rgb_pack_depth_subpix_y", m); }
+}
+
 static void test_truecolor_blend() {
     printf("TEST truecolor_blend\n");
     // dst = red 0xF800, src = blue 0x001F.  a=255 -> src, a=0 -> dst,
@@ -10377,6 +10462,7 @@ int main(int argc, char **argv) {
 
 #ifdef GPU_TEST_TRUECOLOR
     test_vert_tri_rgb_pack_depth();
+    test_vert_tri_rgb_pack_depth_subpix_y();
     test_truecolor_blend();
     test_vert_tri_subpixel_y();
     test_vert_tri_subpixel_y_attrib();

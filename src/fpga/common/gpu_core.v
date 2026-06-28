@@ -168,7 +168,20 @@ module gpu_core #(
     // Truecolor-only builds gate out the 8-bit palettized/colormap fragment
     // lane.  Default 1 keeps the palettized pipeline byte-exact; set 0 (os30/
     // SM64) to prune the colormap request/response pipe and the 8-bit lane.
-    parameter INCLUDE_PALETTE = 1
+    parameter INCLUDE_PALETTE = 1,
+    // Truecolor texel*C+D combiner (HILITE/specular, 0x4A control bit 30).
+    // Default 1.  Set 0 (EXCLUDE_COMBINE, SM64-dedicated os30) to const-0
+    // spanprod_cd_combine so the texel*C cone + rgb565_cd_finish + additive-D
+    // staging fold away (the same fold os25 gets via INCLUDE_DIRECT_COLOR=0).
+    parameter INCLUDE_COMBINE = 1,
+    // Param-span/tri Q29 dynamic-scale precision mode (perspective + zi shift).
+    // Default 1.  Set 0 (os30/SM64) to const-0 spanprod_attr_q29 so the entire
+    // Q29 cone folds: the q29_restore_z_saturating 64-bit barrel shift feeding
+    // sp_q29_z_value_step (the GPU's #1 critical path) AND the sp_persp_q29_mode
+    // perspective branches.  SM64 never arms Q29 (gpu_q29_word stub=0, vt_q29_en=0,
+    // no param-span/tri path), so it is dead logic on os30; os25/mister keep it
+    // (Quake param-span perspective precision).
+    parameter INCLUDE_PARAM_SPAN_Q29 = 1
 ) (
     input wire clk,
     input wire reset_n,
@@ -1362,6 +1375,23 @@ localparam CMD_DRAW_CLIP_TRI          = 8'h4F;  // clip-space feed: CPU sends M*
 // direct-affine column the client sent with s=0/sstep=0.  This is a pure
 // command-traffic optimisation: ZERO pixel difference vs the 0x48 equivalent.
 localparam CMD_DRAW_COLUMN_LIST       = 8'h4C;
+// ════════════════════════════════════════════════════════════════════════
+// Module dependency resolver (single source of truth — see docs/MODULES.md).
+// A module's cone is built iff it is requested AND its prerequisites are
+// present; centralizing the dependency edges here keeps a build config from
+// desyncing (e.g. enabling combine without the truecolor datapath it needs).
+// These edges are AND-down (a leaf folds when its prereq is absent) and are
+// behaviour-identical to the per-site guards they replace.  The additive
+// pull-up form (a requested leaf forcing its prereq ON, e.g.
+// EFF_TRUECOLOR |= INCLUDE_COMBINE) lands together with the INCLUDE-polarity
+// flip + default→0 change, so it cannot mis-fire on today's default=1 params.
+// INCLUDE_TRI_WALKER (near the edge-walker instance) and INCLUDE_COLUMN_LIST_EFF
+// (just below) are the pre-existing resolver edges.
+// ════════════════════════════════════════════════════════════════════════
+localparam EFF_TRUECOLOR = (INCLUDE_DIRECT_COLOR != 0);              // truecolor RGB565 fragment datapath
+localparam EFF_COMBINE   = EFF_TRUECOLOR && (INCLUDE_COMBINE != 0); // texel*C+D HILITE: needs truecolor
+localparam EFF_Q29       = (INCLUDE_PARAM_SPAN_Q29 != 0);           // param-span/tri Q29 dynamic-scale precision (folds the z-step cone when 0)
+
 // 0x4C delegates its payload to the 0x48 compact-direct loader arms, so the
 // column decode can only exist where the compact machinery does.  Deriving
 // the effective gate here (instead of trusting the instantiation) makes the
@@ -1782,10 +1812,10 @@ task load_param_span_list_payload_word;
                     // Combine is truecolor-only (its C/D operands come from the vert-tri RGB
                     // derive states); gate with the rest of the truecolor lane so the combine
                     // mux + rgb565_cd_finish + texel*C cone constant-folds away on os25.
-                    spanprod_cd_combine    <= INCLUDE_DIRECT_COLOR && data[30];   // texel*C+D combine enable
+                    spanprod_cd_combine    <= EFF_COMBINE && data[30];   // texel*C+D combine (resolver: EFF_COMBINE = truecolor && combine; folds when either absent)
                     spanprod_subpix_y      <= INCLUDE_DIRECT_COLOR && data[31];   // vertex Y is Q12.4 subpixel (vert-tri walker)
                     spanprod_attr_persp    <= GPU_ENABLE_PERSP && data[12] && (data[23:20] == PARAM_RECORD_U16V16_COUNT16);
-                    spanprod_attr_q29      <= data[13] && data[12] && (data[23:20] == PARAM_RECORD_U16V16_COUNT16);
+                    spanprod_attr_q29      <= EFF_Q29 && data[13] && data[12] && (data[23:20] == PARAM_RECORD_U16V16_COUNT16);
                     spanprod_q29_attr_shift <= 5'd0;
                     spanprod_span_axis     <= data[16];
                     spanprod_z_write       <= data[24] && (data[23:20] == PARAM_RECORD_U16V16_COUNT16);
@@ -2222,9 +2252,15 @@ task spanprod_load_generated_span;
             sp_z_la     <= spanprod_attr2_start_r;
             sp_depth_la <= spanprod_depth_start_r;
             g_zwarm     <= (INCLUDE_DIRECT_COLOR != 0) ? 2'd2 : 2'd0;
-            sp_q29_z_enable <= spanprod_attr_q29
+            // EFF_Q29 (localparam) gates these directly so the whole z-step
+            // cone provably const-folds when Q29 is excluded (os30).  Gating
+            // spanprod_attr_q29 (a reg) alone was insufficient — the per-pixel
+            // feedback on sp_q29_z_value defeated const-propagation, leaving
+            // q29_restore_z_saturating (spanprod_q29_attr_shift -> sp_q29_z_value)
+            // live as a critical path.  EFF_Q29 forces the fold.
+            sp_q29_z_enable <= EFF_Q29 && spanprod_attr_q29
                              && (spanprod_z_write || spanprod_z_test);
-            sp_q29_z_value <= (spanprod_attr_q29
+            sp_q29_z_value <= (EFF_Q29 && spanprod_attr_q29
                               && (spanprod_z_write || spanprod_z_test))
                              ? q29_restore_z_saturating(spanprod_attr2_start_r,
                                                         spanprod_q29_attr_shift)
@@ -2232,7 +2268,7 @@ task spanprod_load_generated_span;
             // Operand comes from the free-running q29_zstep_op_r capture
             // (see its declaration) — the EMIT cycle pays only the barrel
             // shift + saturate, not the span_axis mux in front of it.
-            sp_q29_z_value_step <= (spanprod_attr_q29
+            sp_q29_z_value_step <= (EFF_Q29 && spanprod_attr_q29
                                    && (spanprod_z_write || spanprod_z_test))
                                   ? q29_restore_z_saturating(
                                       q29_zstep_op_r,
@@ -5582,7 +5618,7 @@ always @(posedge clk) begin : main_fsm
                     tri_clip_y1 <= tri_state_clip_y1;
                     // route the per-triangle Q29 selection into the same sticky
                     // staging the (frozen) fragment Q29 consume reads.
-                    spanprod_attr_q29       <= vt_q29_en;
+                    spanprod_attr_q29       <= EFF_Q29 && vt_q29_en;
                     spanprod_q29_attr_shift <= vt_q29_shift;
                     tri_start    <= 1'b1;     // walker runs in parallel with derive
                     tri_fill_idx <= 3'd0;
@@ -6347,7 +6383,7 @@ always @(posedge clk) begin : main_fsm
                     tri_clip_y1 <= tri_state_clip_y1;
                     // world (N=5) uses Q29 planes (CPU-provided shift); alias
                     // (N=3) keeps Q16.16.  Routes through the verified derive.
-                    spanprod_attr_q29       <= xf_q29_en;
+                    spanprod_attr_q29       <= EFF_Q29 && xf_q29_en;
                     spanprod_q29_attr_shift <= xf_q29_shift;
                     vt_q29_en    <= xf_q29_en;
                     vt_q29_shift <= xf_q29_shift;

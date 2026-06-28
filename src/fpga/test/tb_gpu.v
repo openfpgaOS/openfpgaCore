@@ -35,7 +35,9 @@ module tb_gpu #(
     parameter INCLUDE_CLIP_TRI       = 1,
     parameter INCLUDE_VTX_CACHE      = 0,
     parameter INCLUDE_GPU_LIGHT      = 0,
-    parameter INCLUDE_PALETTE        = 1
+    parameter INCLUDE_PALETTE        = 1,
+    parameter INCLUDE_COMBINE        = 1,
+    parameter INCLUDE_PARAM_SPAN_Q29 = 1
 ) (
     input  wire        clk,
     input  wire        reset_n,
@@ -156,7 +158,9 @@ gpu_core #(
     .INCLUDE_CLIP_TRI(INCLUDE_CLIP_TRI),
     .INCLUDE_VTX_CACHE(INCLUDE_VTX_CACHE),
     .INCLUDE_GPU_LIGHT(INCLUDE_GPU_LIGHT),
-    .INCLUDE_PALETTE(INCLUDE_PALETTE)
+    .INCLUDE_PALETTE(INCLUDE_PALETTE),
+    .INCLUDE_COMBINE(INCLUDE_COMBINE),
+    .INCLUDE_PARAM_SPAN_Q29(INCLUDE_PARAM_SPAN_Q29)
 ) gpu (
     .clk(clk),
     .reset_n(reset_n),

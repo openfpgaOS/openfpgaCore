@@ -2555,10 +2555,17 @@ assign video_hs = vidout_hs;
         // controller/phy below is gated on the same INCLUDE_TEX_MEM macro, so
         // OS25 (no macro) advertises 0 → caps->tex_fast_size 0 → SDRAM textures.
         .INCLUDE_TEX_MEM(`ifdef INCLUDE_TEX_MEM 1 `else 0 `endif),
-        .INCLUDE_DIRECT_COLOR(`ifdef INCLUDE_DIRECT_COLOR 1 `else 0 `endif),
-        // GPU transform front-end truecolor + cache + lighting cap (bit 26).
-        // Tracks gpu_core's INCLUDE_XFORM_RGB on the same target.
-        .INCLUDE_XFORM_RGB(`ifdef INCLUDE_XFORM_RGB 1 `else 0 `endif)
+        // Truecolor cap (bit 10) with the same dependency pull-up as gpu_core
+        // (combine / xform imply truecolor) so the caps word tracks what is built.
+        .INCLUDE_DIRECT_COLOR(`ifdef INCLUDE_DIRECT_COLOR 1 `elsif INCLUDE_COMBINE 1 `elsif INCLUDE_XFORM 1 `else 0 `endif),
+        // XFORM bundle cap (bit 26): tracks the gpu_core transform front-end.
+        .INCLUDE_XFORM_RGB(`ifdef INCLUDE_XFORM 1 `else 0 `endif),
+        // GPU texel*C+D combiner cap (bit 27, OF_HW_GPU_COMBINE), additive —
+        // advertised only when the build lists INCLUDE_COMBINE (gated AND with
+        // truecolor inside axi_periph_slave).
+        .INCLUDE_COMBINE(`ifdef INCLUDE_COMBINE 1 `else 0 `endif),
+        // Q29 caps bit 18: advertised only when the build keeps the module (os30 clears it).
+        .INCLUDE_PARAM_SPAN_Q29(`ifdef INCLUDE_PARAM_SPAN_Q29 1 `else 0 `endif)
     ) periph (
         .clk(clk_cpu),
         .reset_n(reset_n_cpu_core),
@@ -3389,17 +3396,27 @@ gpu_core #(
     .INCLUDE_COMPACT_SPAN(`ifdef INCLUDE_COMPACT_SPAN 1 `else 0 `endif),
     .INCLUDE_COLUMN_LIST(`ifdef INCLUDE_COLUMN_LIST 1 `else 0 `endif),
     .INCLUDE_TEX_MEM(`ifdef INCLUDE_TEX_MEM 1 `else 0 `endif),
-    .INCLUDE_DIRECT_COLOR(`ifdef INCLUDE_DIRECT_COLOR 1 `else 0 `endif),
-    // GPU transform front-end SM64 extensions (T1/T3/T4) + truecolor-only.
-    // All default off; os30 (SM64) turns them on via VARIANT_DEFS.  EXCLUDE_PALETTE
-    // gates OUT the 8-bit palettized/colormap lane (INCLUDE_PALETTE=0).
-    .INCLUDE_XFORM_RGB(`ifdef INCLUDE_XFORM_RGB 1 `else 0 `endif),
-    // os30 lean: EXCLUDE_CLIP_TRI prunes the S_XFORM/clip front-end (SM64 emits no 0x4F).
-    .INCLUDE_CLIP_TRI(`ifdef EXCLUDE_CLIP_TRI 0 `else 1 `endif),
-    .INCLUDE_VTX_CACHE(`ifdef INCLUDE_VTX_CACHE 1 `else 0 `endif),
-    .INCLUDE_GPU_LIGHT(`ifdef INCLUDE_GPU_LIGHT 1 `else 0 `endif),
-    .INCLUDE_GPU_XFORM_MAC(`ifdef EXCLUDE_GPU_XFORM_MAC 0 `else 1 `endif),
-    .INCLUDE_PALETTE(`ifdef EXCLUDE_PALETTE 0 `else 1 `endif),
+    // Dependency pull-up (resolver): combine / xform front-end imply the
+    // truecolor RGB565 datapath, so a build can list INCLUDE_COMBINE or
+    // INCLUDE_XFORM alone and get truecolor automatically.  See docs/MODULES.md.
+    .INCLUDE_DIRECT_COLOR(`ifdef INCLUDE_DIRECT_COLOR 1 `elsif INCLUDE_COMBINE 1 `elsif INCLUDE_XFORM 1 `else 0 `endif),
+    // XFORM module (coarse bundle): the whole GPU transform front-end — 0x52
+    // xform + 0x50/0x51 matrix-MAC + 0x53/0x54 vtx-cache + 0x55/0x57 lighting +
+    // 0x4F clip — is one INCLUDE_XFORM.  Off on every shipping variant (CPU
+    // geometry); os25 thus sheds its previously-dead 0x50/0x51/0x4F cones.
+    .INCLUDE_XFORM_RGB(`ifdef INCLUDE_XFORM 1 `else 0 `endif),
+    .INCLUDE_CLIP_TRI(`ifdef INCLUDE_XFORM 1 `else 0 `endif),
+    .INCLUDE_VTX_CACHE(`ifdef INCLUDE_XFORM 1 `else 0 `endif),
+    .INCLUDE_GPU_LIGHT(`ifdef INCLUDE_XFORM 1 `else 0 `endif),
+    .INCLUDE_GPU_XFORM_MAC(`ifdef INCLUDE_XFORM 1 `else 0 `endif),
+    // Palette / colormap lane (additive): os25/mister list INCLUDE_PALETTE; os30 omits it.
+    .INCLUDE_PALETTE(`ifdef INCLUDE_PALETTE 1 `else 0 `endif),
+    // Combiner texel*C+D (additive): os30 lists INCLUDE_COMBINE (Mario head).
+    .INCLUDE_COMBINE(`ifdef INCLUDE_COMBINE 1 `else 0 `endif),
+    // Q29 param-span dynamic-scale precision (additive): os25/mister keep it
+    // (Quake perspective); os30 omits it so the Q29 z-step cone + perspective
+    // branches fold — removes the GPU's #1 critical path + frees ~150-220 ALM.
+    .INCLUDE_PARAM_SPAN_Q29(`ifdef INCLUDE_PARAM_SPAN_Q29 1 `else 0 `endif),
     // Numeric tuning (not feature gates).  The z read window is 4 on the
     // triangle-heavy variants and degenerates to 1 on OS25 (single-word z fill,
     // sweeps the window logic).  Keyed off INCLUDE_Z_BURST (NOT INCLUDE_TEX_MEM)
@@ -3411,7 +3428,11 @@ gpu_core #(
     // setup ~30%.  Bit-identical quotients (the gpu-acceptance default is 1).
     // OS25 stays 0 (single shared divider — ALM-constrained for its feature set).
     .GPU_Z_READ_WINDOW(`ifdef INCLUDE_Z_BURST 4 `else 1 `endif),
-    .GPU_EW_PARALLEL_DIVS(`ifdef EXCLUDE_PARALLEL_DIVS 0 `elsif INCLUDE_DIRECT_COLOR 1 `else 0 `endif)
+    // Additive: only a build that lists INCLUDE_PARALLEL_DIVS gets the concurrent
+    // slope dividers.  Neither pocket variant lists it today (both = 0), which is
+    // bit-identical to the old EXCLUDE_PARALLEL_DIVS/DIRECT_COLOR derivation and
+    // removes that load-bearing ifdef ordering.
+    .GPU_EW_PARALLEL_DIVS(`ifdef INCLUDE_PARALLEL_DIVS 1 `else 0 `endif)
 ) gpu (
     .clk(clk_cpu),
     .reset_n(reset_n_cpu_media),

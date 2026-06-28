@@ -54,6 +54,9 @@ if [ "$(cat "$ROOT/src/firmware/os/.last_target" 2>/dev/null)" = "pocket" ] && \
 fi
 
 # chip32 loader + .sof for JTAG reset (scripts/debug.sh on the SDK side).
+# Reassemble first (bass no-ops when loader.asm is unchanged) so a stale
+# loader.bin is never propagated into the SDK.
+make -s -C "$ROOT/src/chip32/pocket" >/dev/null 2>&1 || true
 [ -f "$ROOT/src/chip32/pocket/loader.bin" ] && \
     cp "$ROOT/src/chip32/pocket/loader.bin" "$RTP/" && ok "loader.bin" "runtime/pocket/"
 for d in "$SCRIPT_DIR"/bld/*/output_files; do \

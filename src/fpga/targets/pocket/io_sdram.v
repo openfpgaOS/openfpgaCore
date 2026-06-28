@@ -301,6 +301,14 @@ end
 always @(posedge controller_clk) begin
     phy_dq_oe <= 0;
     cmd <= CMD_NOP;
+    // Default DQM low (no mask) every cycle.  This makes phy_dqm a clean
+    // load-only output register (no clear+load conflict), so Quartus can pack
+    // it into the IOB output register (FAST_OUTPUT_REGISTER) instead of leaving
+    // it in the fabric — fixing the dram_dqm output-setup path (was ~-1.2 ns
+    // from a 3.8 ns FF->pin route).  The write states (ST_WRITE_2/3,
+    // ST_BURSTWR_4) override this the SAME cycle the SDRAM samples DQM, and no
+    // state relies on phy_dqm holding across cycles, so behaviour is identical.
+    phy_dqm <= 2'b00;
     dc <= dc + 1'b1;
 
     // (word_rd/word_wr are same clock domain - no edge detection needed)

@@ -785,9 +785,6 @@ set_global_assignment -name VERILOG_FILE io_sdram.v
 set_global_assignment -name QIP_FILE mf_pllbase.qip
 set_global_assignment -name SIP_FILE mf_pllbase.sip
 
-# Audio filter modules
-# audio_filters removed - never instantiated (OpenGateware template leftover)
-
 # PSRAM sync burst: IOB input registers for fast data capture
 set_instance_assignment -name FAST_INPUT_REGISTER ON -to cram0_dq[0]
 set_instance_assignment -name FAST_INPUT_REGISTER ON -to cram0_dq[1]
@@ -877,15 +874,11 @@ set_global_assignment -name VERILOG_FILE ../../common/gpu_edge_walker.v
 set_global_assignment -name VERILOG_FILE ../../common/gpu_tex_cache.v
 set_global_assignment -name VERILOG_FILE ../../common/axi_periph_slave.v
 set_global_assignment -name VERILOG_FILE ../../common/sync_fifo.v
-set_global_assignment -name VERILOG_FILE ../../common/snac_shifter.v
+set_global_assignment -name VERILOG_FILE ../../common/analogizer/snac_shifter.v
 # PSX SNAC: upstream Analogizer DualShock decoder (instantiated in axi_periph_slave.v)
-set_global_assignment -name SYSTEMVERILOG_FILE ../../common/analogizer_psx.sv
-set_global_assignment -name VERILOG_FILE ../../common/dualshock_controller.v
-# axi_cram0_slave.v retired - cram0_cdc is the CPU-side AXI slave for
-# CRAM0 in v2, owner-muxed against the bridge.  File deleted from tree.
+set_global_assignment -name SYSTEMVERILOG_FILE ../../common/analogizer/analogizer_psx.sv
+set_global_assignment -name VERILOG_FILE ../../common/analogizer/dualshock_controller.v
 set_global_assignment -name VERILOG_FILE ../../common/axi_register_slice.v
-# bridge_to_sdram.v removed — direct SD->SDRAM bridge write path corrupted the
-# image on silicon; SDRAM-dest loads use the firmware CRAM0 bounce. File deleted.
 set_global_assignment -name VERILOG_FILE ../../common/axi_sdram_arbiter.v
 set_global_assignment -name VERILOG_FILE ../../common/axi_sdram_slave.v
 set_global_assignment -name VERILOG_FILE ../../common/cpu_system.v
@@ -895,9 +888,6 @@ set_global_assignment -name VERILOG_FILE ../../common/frac_cen.v
 set_global_assignment -name VERILOG_FILE ../../common/link_lite.v
 set_global_assignment -name VERILOG_FILE ../../common/cram0_controller.v
 set_global_assignment -name VERILOG_FILE ../../common/cram0_cdc.v
-# CRAM0 re-clock CDC + arbiter + async-read tex adapter removed: CRAM0 stays on
-# the bridge clock (proven save path); GPU textures move to a dedicated CRAM1
-# sync-burst controller.  Files kept in-tree for reference, not built.
 set_global_assignment -name SYSTEMVERILOG_FILE ../../common/cram0_phy.sv
 # CRAM1: dedicated GPU sync-burst texture memory (Pocket-only fast texture
 # memory).  Pocket-specific, so these live in targets/pocket/ (not common/).

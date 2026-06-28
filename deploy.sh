@@ -50,12 +50,14 @@ if [ -n "$DEST" ] && [ -f "$DEST/src/sdk/sdk.mk" ]; then
         echo -e "  ${YELLOW}⚠${RESET} bitstream not found — run 'make fpga' first"
     fi
 
-    # Loader
+    # Loader — reassemble first (bass no-ops when loader.asm is unchanged)
+    # so a stale loader.bin is never deployed.
+    make -s -C src/chip32/pocket >/dev/null 2>&1 || true
     if [ -f "$LOADER" ]; then
         cp "$LOADER" "$RUNTIME/"
         echo -e "  ${GREEN}✓${RESET} loader.bin"
     else
-        echo -e "  ${YELLOW}⚠${RESET} loader.bin not found — run 'make chip32' first"
+        echo -e "  ${YELLOW}⚠${RESET} loader.bin not found — run 'make -C src/chip32/pocket'"
     fi
 
     # OS
