@@ -265,9 +265,12 @@ VARIANTS := os25 os30
 # lists, compact span groups.  NO triangle path (edge walker folds away), NO
 # truecolor/combine/xform, NO fast tex.  (Dropping INCLUDE_XFORM also sheds the
 # previously-dead 0x50/0x51/0x4F cones os25 used to synthesize via defaults.)
+# INCLUDE_4PLAYER wires APF dock slots 2/3 (cont3/cont4) through to the core so
+# the firmware's keyboard/mouse decode (poll_hid_slots) sees real data instead
+# of the tied-0 default; without it those slots are hardcoded 0 (core_top.v).
 DEFS_os25 := INCLUDE_ANALOGIZER INCLUDE_HW_MIXER INCLUDE_TRANSLUC \
              INCLUDE_PALETTE INCLUDE_COLUMN_LIST INCLUDE_COMPACT_SPAN \
-             INCLUDE_PARAM_SPAN_Q29
+             INCLUDE_PARAM_SPAN_Q29 INCLUDE_4PLAYER
 
 # OS30 (SM64 ∪ Quake2): HW vertex-triangle plane derive (0x4A/0x4B) + truecolor
 # RGB565 + the texel*C+D combiner (HILITE/specular, e.g. the Mario head) + HW
