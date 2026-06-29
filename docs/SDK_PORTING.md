@@ -2,8 +2,8 @@
 
 The openfpgaOS SDK ships a containerized RISC-V toolchain so app
 developers — and downstream cores reusing this SDK — don't need to
-install `riscv64-unknown-elf-gcc` + musl by hand.  Just Docker, git,
-and make.
+install `riscv64-unknown-elf-gcc` + musl by hand.  Just a container
+runtime (Docker, or Apple `container` on Apple silicon), git, and make.
 
 This doc covers:
 
@@ -84,12 +84,15 @@ src/sdk/
 
 tools/
 ├── sdk-container.sh             # wrapper invoked by `make container-*`
+├── oci.sh                       # runtime abstraction (Docker | Apple container)
 └── docker/Dockerfile.firmware   # toolchain image
 ```
 
 After the mirror, the downstream core's contributors can build any SDK
 app — including new apps written specifically for that core — with
-just Docker + git + make.  No openfpgaCore checkout required.
+just a container runtime + git + make.  No openfpgaCore checkout required.
+The runtime is auto-detected (Docker, or Apple `container` on Apple
+silicon); force one with `OCI=docker` / `OCI=container`.
 
 ### Steps to port
 

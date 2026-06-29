@@ -373,14 +373,26 @@ build: $(VEXII_OUT) bootloader $(BDIR)/ap_core.qsf
 	@$(MAKE) --no-print-directory install-bitstream
 	@printf "$(C_OK)[fpga] Done$(C_RESET)\n"
 
-# Apple Silicon hosts run Quartus inside a linux/amd64 container under
-# Rosetta, whose thread allocation/locking overhead makes Quartus die with
-# `Error (112002): Can not read any output from quartus_map` when too many
-# threads are spawned (within a fit AND across parallel fits).  Default to
-# single-threaded everywhere on Apple Silicon; native x86_64 Linux keeps
-# the wide defaults.  Override with `QPROCS=N MAXJOBS=N make build`.
+# Container runtime, mirroring tools/oci.sh's detection (prefer docker, else
+# Apple `container`).  This decides the threading model on Apple Silicon below.
+OCI ?= $(shell command -v docker >/dev/null 2>&1 && echo docker || { command -v container >/dev/null 2>&1 && echo container; })
+
+# Apple Silicon hosts run Quartus inside a linux/amd64 container under Rosetta.
+# Under DOCKER/OrbStack, Rosetta's thread allocation/locking overhead makes
+# Quartus die with `Error (112002): Can not read any output from quartus_map`
+# when too many threads are spawned (within a fit AND across parallel fits) —
+# so we force single-threaded there.  Apple's `container` does NOT have this
+# problem: multi-threaded x86 scales fine under its Rosetta (measured ~2x on the
+# fitter, 5.7x on a pure-CPU bench) and each fit is its OWN VM, so concurrent
+# fits are safe too.  So under Apple `container` we keep the same wide defaults
+# as native x86_64 Linux — which also matches the processor count the committed
+# seeds were tuned at on Linux.  Override with `QPROCS=N MAXJOBS=N make build`.
 ifeq ($(shell uname -s)/$(shell uname -m),Darwin/arm64)
+ifeq ($(OCI),container)
+ROSETTA := 0
+else
 ROSETTA := 1
+endif
 else
 ROSETTA := 0
 endif
@@ -391,7 +403,8 @@ MAXJOBS ?= $(if $(filter 1,$(ROSETTA)),1,4)
 # Fitter processor count, pinned into every generated qsf (NUM_PARALLEL_PROCESSORS)
 # so builds are reproducible and a sweep fit matches the eventual production build
 # (Quartus's parallel placement varies with processor count).  QPROCS x MAXJOBS
-# should fit the host cores (native: 4 x 4 = 16; Rosetta: 1 x 1 to avoid 112002).
+# should fit the host cores (native / Apple `container`: 4 x 4 = 16;
+# Docker-on-Apple-Silicon: 1 x 1 to avoid Rosetta's 112002).
 QPROCS ?= $(if $(filter 1,$(ROSETTA)),1,4)
 
 # ── Build ALL variants — concurrent isolated container fits ──────────

@@ -217,8 +217,9 @@ sdk: check-target
 		mkdir -p "$$dir/tools/docker"; \
 		cp tools/sdk-container.sh         "$$dir/tools/sdk-container.sh"; \
 		chmod +x                          "$$dir/tools/sdk-container.sh"; \
+		cp tools/oci.sh                   "$$dir/tools/oci.sh"; \
 		cp tools/docker/Dockerfile.firmware "$$dir/tools/docker/Dockerfile.firmware"; \
-		printf "  $(C_OK)container$(C_RESET)      → tools/sdk-container.sh + tools/docker/Dockerfile.firmware\n"; \
+		printf "  $(C_OK)container$(C_RESET)      → tools/sdk-container.sh + tools/oci.sh + tools/docker/Dockerfile.firmware\n"; \
 		mkdir -p "$$dir/dist/sdk/Cores/$(CORE_NAME)"; \
 		for f in core.json video.json audio.json input.json data.json variants.json interact.json; do \
 			cp "$(DIST_DIR)/$$f" "$$dir/dist/sdk/Cores/$(CORE_NAME)/"; \

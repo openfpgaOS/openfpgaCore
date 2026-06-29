@@ -13,7 +13,8 @@
 # Why this exists: SDK app developers (and downstream cores reusing this
 # SDK) shouldn't have to install a RISC-V toolchain by hand — particularly
 # painful on macOS where Homebrew's `riscv64-elf-gcc` ships without a libc.
-# `bash sdk-container.sh make <targets>` Just Works on any host with Docker.
+# `bash sdk-container.sh make <targets>` Just Works on any host with a
+# container runtime (Docker, or Apple `container` on Apple silicon — see oci.sh).
 #
 # This script is mirrored to the openfpgaOS-SDK repo (and to any other core
 # repo that does `make sdk DEST=<path>`) so SDK consumers get the same
