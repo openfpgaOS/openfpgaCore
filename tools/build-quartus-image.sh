@@ -35,16 +35,21 @@ set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 IMG="${QUARTUS_FULL_IMG:-openfpgaos-quartus-full}"
+source "$REPO/tools/oci.sh"   # $OCI + oci_build (docker buildx | container build)
 URL_LITE="https://www.altera.com/downloads/fpga-development-tools/quartus-prime-lite-edition-design-software-version-25-1-linux"
 URL_STD="https://www.altera.com/downloads/fpga-development-tools/quartus-prime-standard-edition-design-software-version-25-1-linux"
 
-# Search ANYWHERE under tools/ for a Quartus offline tarball.  Newest by mtime
-# wins (handles multiple downloads sitting around).  Plain while-read for
+# Search ANYWHERE under tools/ for a Quartus 25.x offline tarball.  Newest by
+# mtime wins (handles multiple downloads sitting around).  Plain while-read for
 # bash 3.2 compat — macOS ships bash 3.2 with no `mapfile`/`readarray`.
+# NOTE the '25' in the glob: this is the *pocket* (Quartus 25.1) bake, and a
+# coexisting *mister* tarball (Quartus-lite-17.0.0.*-linux.tar) ALSO matches a
+# bare 'Quartus-*-linux.tar' — and would win on mtime, baking the wrong (and
+# Rosetta-incompatible) 2017 installer.  Constrain to 25.x so the two never collide.
 QUARTUS_CANDIDATES=()
 while IFS= read -r line; do
     QUARTUS_CANDIDATES+=("$line")
-done < <(find "$REPO/tools" -maxdepth 4 -type f -name 'Quartus-*-linux.tar' 2>/dev/null)
+done < <(find "$REPO/tools" -maxdepth 4 -type f -name 'Quartus-*25*-linux.tar' 2>/dev/null)
 
 if [ ${#QUARTUS_CANDIDATES[@]} -eq 0 ]; then
     cat >&2 <<EOF
@@ -93,8 +98,8 @@ trap 'rm -rf "$CTX"' EXIT
 cp "$REPO/tools/docker/Dockerfile.quartus-full" "$CTX/Dockerfile"
 ln "$QUARTUS_PATH" "$CTX/$QUARTUS_NAME" 2>/dev/null || cp "$QUARTUS_PATH" "$CTX/$QUARTUS_NAME"
 
-echo "[quartus-image] docker build (linux/amd64 — Quartus is x86_64 only; ~10 min on first build)..."
-DOCKER_BUILDKIT=1 docker buildx build \
+echo "[quartus-image] $OCI build (linux/amd64 — Quartus is x86_64 only; ~10 min on first build)..."
+oci_build \
     --platform linux/amd64 \
     --build-arg "QUARTUS_TAR=$QUARTUS_NAME" \
     -t "$IMG" \

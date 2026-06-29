@@ -76,19 +76,38 @@ Slicing the FPGA into feature profiles (the os25 / os30 variants and
 the `INCLUDE_*` addon system): see
 [docs/VARIANTS_AND_ADDONS.md](docs/VARIANTS_AND_ADDONS.md).
 
+The SDK app build system runs the RISC-V toolchain in a Docker
+container — no host install needed; downstream cores can reuse the
+same flow.  See [docs/SDK_PORTING.md](docs/SDK_PORTING.md).
+
 ## Requirements
 
 The pocket build flow runs every long-lived toolchain (sbt / SpinalHDL,
-riscv64 GCC + libc, Quartus Prime) inside Docker containers, so a fresh
+riscv64 GCC + libc, Quartus Prime) inside containers, so a fresh
 clone on Linux or macOS (including Apple Silicon) needs only:
 
-- **Docker** (Docker Desktop, OrbStack, Colima, or native dockerd)
+- a **container runtime** — either:
+  - **Docker** (Docker Desktop, OrbStack, Colima, or native dockerd), or
+  - **Apple `container`** (<https://github.com/apple/container>) on
+    Apple-silicon macOS — Quartus's x86_64 binaries run via Rosetta.
 - **git**, **make**, **bash**
+
+The runtime is auto-detected (Docker is preferred when both are present);
+force one with `OCI=docker` or `OCI=container`.  See [`tools/oci.sh`](tools/oci.sh)
+for the detection + flag-translation details.
 
 The first invocation of `make full` builds the three container images
 (vexii / firmware / quartus) on demand. They're tagged
 `openfpgaos-{vexii,firmware,quartus-full}` and cached locally — subsequent
 builds reuse them.
+
+> **Apple `container` note:** each container is its own lightweight VM
+> capped at ~1 GiB by default, so the Quartus/sbt wrappers pass `--memory`
+> (16 GiB for Quartus, 8 GiB for sbt; override with `CONTAINER_MEM`).
+> Quartus 25.1 installs and runs fine under Rosetta; the *mister* Quartus
+> 17.0 installer does **not** translate (`rosetta error: bss_size overflow`),
+> so bake the mister image from a pre-extracted tree (the `prebuilt` path in
+> `build-quartus17-image.sh`) rather than the raw 2017 installer.
 
 The mister target still uses a host Quartus install (`17.0.x`, expected
 at `/home/alberto/intelFPGA_lite/17.0/quartus`) because Quartus 17 is a

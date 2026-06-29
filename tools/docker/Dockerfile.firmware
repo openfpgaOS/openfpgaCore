@@ -27,9 +27,10 @@ RUN apt-get update \
  && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Ubuntu's gcc-riscv64-unknown-elf ships without a libc in its default search
-# path; picolibc is installed as a sibling package and needs to be exposed
-# explicitly.  Setting CPATH (gcc-equivalent of -isystem) so the firmware
-# build's `#include <string.h>` resolves with no extra CFLAGS — keeps the
-# firmware Makefile portable across this toolchain and the host's newlib-
-# bundled toolchain on the Linux build box.
-ENV CPATH=/usr/lib/picolibc/riscv64-unknown-elf/include
+# path; picolibc is installed as a sibling package.  The firmware build needs
+# picolibc on the include path (firmware-container.sh exports CPATH for that),
+# but SDK app builds use musl via `-isystem $(MUSL_DIR)/include` with -nostdinc
+# and MUST NOT see picolibc — its types collide with musl's.  So we do NOT set
+# CPATH in the image's global ENV.  Each wrapper script sets it as needed:
+#   - firmware-container.sh:  exports CPATH=/usr/lib/picolibc/... (firmware build)
+#   - sdk-container.sh:       leaves CPATH unset            (SDK app build)

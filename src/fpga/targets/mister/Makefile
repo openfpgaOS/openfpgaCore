@@ -31,8 +31,23 @@ VEXII_OUT  = $(VEXII_DIR)/VexiiRiscv_mister.v
 TEST_DIR   = ../../test
 ROOT_DIR   = ../../../..
 
+# Quartus 17.0.x runs in Docker by DEFAULT — the mister sys/ framework is a
+# hard Q17 requirement, and containerizing it removes the host-toolchain
+# dependency (so a fresh checkout on Linux OR macOS only needs Docker).
+# Image is openfpgaos-quartus17, auto-baked on first use from a contributor-
+# supplied tarball at tools/Quartus-*17.0*-linux.tar; see
+# tools/build-quartus17-image.sh.
+#
+# Set USE_QUARTUS_CONTAINER=0 to use a host install instead — $(QUARTUS)
+# default still points at the conventional MiSTer Q17 path.
+USE_QUARTUS_CONTAINER ?= 1
+ifeq ($(USE_QUARTUS_CONTAINER),1)
+Q = bash $(ROOT_DIR)/tools/quartus17-container.sh
+else
 QUARTUS   ?= /home/alberto/intelFPGA_lite/17.0/quartus/bin
 export PATH := $(QUARTUS):$(PATH)
+Q =
+endif
 
 BUILD_OUT = $(ROOT_DIR)/build/mister
 
@@ -126,8 +141,8 @@ os:
 firmware: bootloader os
 	@if [ -f output_files/$(PROJECT).sof ]; then \
 		printf "$(C_HEAD)[fw]$(C_RESET) Patching .sof MIF with new bootloader...\n"; \
-		quartus_cdb $(PROJECT) --update_mif > /dev/null 2>&1; \
-		quartus_asm $(PROJECT) > /dev/null 2>&1; \
+		$(Q) quartus_cdb $(PROJECT) --update_mif > /dev/null 2>&1; \
+		$(Q) quartus_asm $(PROJECT) > /dev/null 2>&1; \
 	fi
 	@printf "$(C_OK)[fw] Done$(C_RESET)\n"
 
@@ -145,10 +160,12 @@ compile: build
 build: $(VEXII_OUT) bootloader build_id.v
 	@printf "$(C_HEAD)[fpga]$(C_RESET) Clean compile (Quartus 17.0.x)...\n"
 	@rm -rf db incremental_db
-	@quartus_map $(PROJECT) $(VERILOG_MACROS)
-	@quartus_fit $(PROJECT)
-	@quartus_asm $(PROJECT)
-	@quartus_sta $(PROJECT)
+	@# One container call for the whole map/fit/asm/sta chain — Q17's
+	@# per-tool startup adds up under Rosetta; one container start amortizes.
+	@$(Q) bash -c 'quartus_map $(PROJECT) $(VERILOG_MACROS) && \
+	               quartus_fit $(PROJECT) && \
+	               quartus_asm $(PROJECT) && \
+	               quartus_sta $(PROJECT)'
 	@printf "$(C_OK)[fpga] Done$(C_RESET) → output_files/$(PROJECT).rbf\n"
 
 # ── Test ─────────────────────────────────────────────────────────────
@@ -166,8 +183,14 @@ build_id.v:
 
 check: build_id.v
 	@printf "$(C_HEAD)[check]$(C_RESET) Analysis & Synthesis...\n"
-	@quartus_map $(PROJECT) $(VERILOG_MACROS)
+	@$(Q) quartus_map $(PROJECT) $(VERILOG_MACROS)
 	@printf "$(C_OK)[check] Done$(C_RESET)\n"
+
+# Bake the Quartus 17.0.x container image (one-time per machine; the build
+# rules auto-trigger this on first use too).  See tools/build-quartus17-image.sh.
+.PHONY: quartus17-image
+quartus17-image:
+	@bash $(ROOT_DIR)/tools/build-quartus17-image.sh
 
 # ── Deploy ───────────────────────────────────────────────────────────
 # Same semantics as the Pocket target: refresh the core artifacts in

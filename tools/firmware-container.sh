@@ -23,14 +23,15 @@ set -euo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 FW_DIR="$REPO/src/firmware/os"
 IMG="${FIRMWARE_IMG:-openfpgaos-firmware}"
+source "$REPO/tools/oci.sh"   # $OCI + oci_run/oci_build/oci_image_exists/oci_rm_force
 
 [ -d "$FW_DIR" ] || { echo "ERROR: $FW_DIR missing"; exit 1; }
 
 # Build the image on first use (one-time) so `make bootloader` / `make os`
-# just works on a fresh machine with only Docker installed.
-if ! docker image inspect "$IMG" >/dev/null 2>&1; then
-    echo "[firmware] building $IMG image (one-time, ~2-3 min)..."
-    docker build -t "$IMG" -f "$REPO/tools/docker/Dockerfile.firmware" "$REPO/tools/docker/"
+# just works on a fresh machine with only a container runtime installed.
+if ! oci_image_exists "$IMG"; then
+    echo "[firmware] building $IMG image with $OCI (one-time, ~2-3 min)..."
+    oci_build -t "$IMG" -f "$REPO/tools/docker/Dockerfile.firmware" "$REPO/tools/docker/"
 fi
 
 # Pseudo-TTY only when our stdout is a terminal, so an interactive run keeps
@@ -44,11 +45,24 @@ TTY=()
 # Repo bind-mounted at the SAME path so absolute paths inside the firmware
 # Makefile (and any generated .d depfiles) resolve identically inside and
 # outside the container.
-exec docker run --rm ${TTY[@]+"${TTY[@]}"} \
+# CPATH exposes picolibc's headers to gcc — needed for the firmware build's
+# `#include <string.h>` etc. (Ubuntu's gcc-riscv64-unknown-elf doesn't include
+# them in its default search path).  Scoped to firmware builds only because
+# the SDK app build path uses musl via -isystem + -nostdinc and would
+# conflict with picolibc's types.
+# Name the container + tear it down from a trap so Ctrl+C (SIGINT) cleanly
+# kills the build instead of orphaning it: `docker run` does not forward
+# signals to the container when a -t TTY is allocated without -i.  Run in the
+# background and `wait` (interruptible) so the trap fires on INT/TERM/EXIT.
+CNAME="ofpgaos-fw-$$"
+trap 'oci_rm_force "$CNAME"' EXIT INT TERM
+oci_run --rm --name "$CNAME" ${TTY[@]+"${TTY[@]}"} \
   --user "$(id -u):$(id -g)" \
   -v "$REPO:$REPO" \
   --tmpfs /tmp:exec \
   -e HOME=/tmp \
+  -e CPATH=/usr/lib/picolibc/riscv64-unknown-elf/include \
   -w "$FW_DIR" \
   "$IMG" \
-  make "$@"
+  make "$@" &
+wait $!

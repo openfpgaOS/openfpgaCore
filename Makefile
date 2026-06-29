@@ -193,32 +193,19 @@ sdk: check-target
 			continue; \
 		}; \
 		printf "$(C_HEAD)[sdk]$(C_RESET) $$dir\n"; \
-		\
-		# Headers — all .h recursively under src/firmware/api/ (includes \
-		# the SDL2/ subtree) mirror into the SDK's include/.  --delete so \
-		# retired headers vanish from the SDK on their own. \
 		rsync -a --delete \
 			--include='*/' --include='*.h' --exclude='*' \
 			src/firmware/api/ "$$dir/src/sdk/include/"; \
 		printf "  $(C_OK)headers + SDL2$(C_RESET) → src/sdk/include/\n"; \
-		\
-		# OS-owned files at src/sdk/ top level: opt-in SDK sources \
-		# (of_*.c, of_*.cpp), build rules (sdk.mk), and linker script \
-		# (app.ld).  --delete + --include/--exclude filters make this a \
-		# one-way mirror of exactly these patterns. \
 		rsync -a --delete \
 			--include='of_*.c' --include='of_*.cpp' \
 			--include='sdk.mk' --include='app.ld' \
 			--exclude='*' \
 			src/firmware/api/ "$$dir/src/sdk/"; \
 		printf "  $(C_OK)sources + sdk.mk + app.ld$(C_RESET) → src/sdk/\n"; \
-		\
-		# PC SDL backend used by sdk.mk's app_pc target. \
 		mkdir -p "$$dir/src/sdk/pc"; \
 		rsync -a --delete src/firmware/api/pc/ "$$dir/src/sdk/pc/"; \
 		printf "  $(C_OK)pc SDL backend$(C_RESET) → src/sdk/pc/\n"; \
-		\
-		# musl headers + static library + crt objects \
 		mkdir -p "$$dir/src/sdk/musl/include" "$$dir/src/sdk/musl/lib"; \
 		rsync -a --delete src/firmware/musl/include/ "$$dir/src/sdk/musl/include/"; \
 		cp src/firmware/musl/lib/libc.a    "$$dir/src/sdk/musl/lib/"; \
@@ -227,11 +214,11 @@ sdk: check-target
 		cp src/firmware/musl/lib/crti.o    "$$dir/src/sdk/musl/lib/"; \
 		cp src/firmware/musl/lib/crtn.o    "$$dir/src/sdk/musl/lib/"; \
 		printf "  $(C_OK)musl$(C_RESET)           → src/sdk/musl/\n"; \
-		\
-		# Core metadata JSON (APF manifests).  Keep the SDK-deployed core \
-		# description in step with this repo.  Refresh any already-built \
-		# demo-core tree and any platform that keeps APF templates — both \
-		# discovered per target ([ -d ] guards), so no target is named. \
+		mkdir -p "$$dir/tools/docker"; \
+		cp tools/sdk-container.sh         "$$dir/tools/sdk-container.sh"; \
+		chmod +x                          "$$dir/tools/sdk-container.sh"; \
+		cp tools/docker/Dockerfile.firmware "$$dir/tools/docker/Dockerfile.firmware"; \
+		printf "  $(C_OK)container$(C_RESET)      → tools/sdk-container.sh + tools/docker/Dockerfile.firmware\n"; \
 		mkdir -p "$$dir/dist/sdk/Cores/$(CORE_NAME)"; \
 		for f in core.json video.json audio.json input.json data.json variants.json interact.json; do \
 			cp "$(DIST_DIR)/$$f" "$$dir/dist/sdk/Cores/$(CORE_NAME)/"; \
@@ -245,26 +232,13 @@ sdk: check-target
 				cp "$(DIST_DIR)/video.json" "$$dir/src/sdk/platforms/$$t/templates/video.json" || true; \
 		done; \
 		printf "  $(C_OK)core json$(C_RESET)      → dist/sdk/Cores/$(CORE_NAME)/\n"; \
-		\
-		# Legacy directories that used to live under src/sdk/ — the \
-		# rsync above won't touch them because they're outside its \
-		# filter, so nuke them here once. \
 		rm -rf  "$$dir/src/sdk/libc" "$$dir/src/sdk/crt"; \
-		\
-		# Target-specific runtime artifacts (bitstream, kernel, loader, \
-		# .sof, …).  Each target exports its OWN via sdk-runtime.sh, run \
-		# from the repo root with the destination SDK dir as $$1, so \
-		# adding a target needs NO edit here — it just appears in \
-		# $(TARGETS).  os.bin is gated on the firmware build stamp inside \
-		# each script so a target never publishes another target's kernel. \
 		mkdir -p "$$dir/runtime"; \
 		absdest=$$(cd "$$dir" && pwd); \
 		for t in $(TARGETS); do \
 			[ -f src/fpga/targets/$$t/sdk-runtime.sh ] && \
 				bash src/fpga/targets/$$t/sdk-runtime.sh "$$absdest" || true; \
 		done; \
-		\
-		# SC-55 General MIDI bank — target-agnostic, shared by all targets. \
 		test -f assets/banks/sc55.ofsf && cp assets/banks/sc55.ofsf "$$dir/runtime/bank.ofsf" && \
 			printf "  $(C_OK)sc55.ofsf$(C_RESET)      → runtime/bank.ofsf\n" || true; \
 		printf "$(C_OK)[sdk] Done$(C_RESET) $$dir\n\n"; \

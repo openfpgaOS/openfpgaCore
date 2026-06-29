@@ -79,4 +79,11 @@ $(APP).elf: $(OBJS)
 clean:
 	rm -f $(OBJS) $(APP).elf $(APP).map
 
-.PHONY: all clean
+# Containerized build (no host RISC-V toolchain needed) — prefix any target
+# with `container-` to run it inside the openfpgaos-firmware image instead
+# of on the host.  Works on any host with Docker.  See docs/SDK_PORTING.md.
+SDK_CONTAINER ?= $(SDK_ROOT)/tools/sdk-container.sh
+container-%:
+	@bash $(SDK_CONTAINER) make -f $(firstword $(MAKEFILE_LIST)) APP=$(APP) SRCS="$(SRCS)" $*
+
+.PHONY: all clean container-%

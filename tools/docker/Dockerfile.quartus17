@@ -1,0 +1,75 @@
+# syntax=docker/dockerfile:1.6
+# openfpgaOS — Quartus 17.0.x container WITH Quartus baked in.
+#
+# Quartus 17 is a hard MiSTer framework requirement (newer Quartus versions
+# miscompile parts of sys/; HPS bridge regeneration, SDRAM timing, and PHY
+# placement all shift in subtle bitstream-runtime ways across major Quartus
+# releases).  This image is sibling to Dockerfile.quartus-full (25.1, used
+# by pocket) but pinned to 17.0.x for the mister target.
+#
+# Built locally via `make quartus17-image` after the contributor drops a
+# PRE-EXTRACTED Quartus 17 install tree at tools/altera-17-quartus.tar*.
+# Image is NOT redistributable (Intel/Altera Quartus EULA) — local-only.
+#
+# Why pre-extracted (not the installer tarball):
+#   Q17's Bitrock installer (QuartusLiteSetup-17.0.0.595-linux.run) has a
+#   ~2 GB BSS segment that Rosetta on Apple Silicon refuses to load with
+#   `rosetta error: bss_size overflow`.  The installer can only be run on
+#   a real Linux x86_64 host.  The INSTALLED quartus_* binaries run fine
+#   under Rosetta, so we let the user install Q17 once on their Linux box,
+#   tar the install tree, and bake from that.  Procedure documented in
+#   tools/build-quartus17-image.sh.
+#
+# Base is Ubuntu 18.04: Q17's binaries link against an older glibc/libssl
+# than 22.04 ships; 18.04 is the cleanest no-shim base.  i386 multilib is
+# included because several Q17 utilities are 32-bit even though quartus_map
+# /fit/asm are 64-bit.
+#
+# Pinned to linux/amd64 because Quartus is x86_64-only.  Same ffreep x87
+# patch as the 25.1 image (libccl_sqlite3.so is the same Altera bundled
+# lib for years).
+FROM --platform=linux/amd64 ubuntu:18.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+RUN dpkg --add-architecture i386 \
+ && apt-get update && apt-get install -y --no-install-recommends \
+      libglib2.0-0 libsm6 libice6 libxext6 libxrender1 libxft2 libxt6 \
+      libxmu6 libxi6 libxtst6 libxfixes3 libxcursor1 libxinerama1 \
+      libxrandr2 libxdamage1 libxcomposite1 libfontconfig1 libfreetype6 \
+      libgl1 libglu1-mesa zlib1g libpng16-16 \
+      libnss3 libxshmfence1 \
+      libc6:i386 libstdc++6:i386 lib32ncurses5 \
+      ca-certificates \
+      locales make file perl-base \
+    && locale-gen en_US.UTF-8 \
+    && rm -rf /var/lib/apt/lists/*
+ENV LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8
+
+# Extract the PRE-INSTALLED Q17 tree via BuildKit bind mount.  The tarball
+# is created on a Linux box that has Q17 installed (the user's existing
+# /home/alberto/intelFPGA_lite/17.0/quartus/), so the contents look like:
+#   quartus/bin/quartus_map
+#   quartus/linux64/libccl_sqlite3.so
+#   quartus/eda/...
+# We extract into /opt/altera-17/ so quartus_map lands at
+# /opt/altera-17/quartus/bin/quartus_map.
+ARG QUARTUS_TAR
+RUN --mount=type=bind,source=${QUARTUS_TAR},target=/tmp/quartus.tar.ro \
+    mkdir -p /opt/altera-17 && \
+    tar -xf /tmp/quartus.tar.ro -C /opt/altera-17 && \
+    test -x /opt/altera-17/quartus/bin/quartus_map \
+        || { echo "ERROR: quartus_map missing after extract"; ls -la /opt/altera-17/ 2>&1 || true; exit 1; }
+
+# Rosetta / OrbStack ffreep x87 workaround — identical patch to the 25.1
+# image, applied to the Q17 SQLite shipped under linux64/.
+RUN TARGETS="/opt/altera-17/quartus/linux64/libccl_sqlite3.so" && \
+    for f in $TARGETS; do \
+        [ -f "$f" ] || { echo "MISSING: $f"; exit 1; }; \
+        before=$(perl -e 'local $/; open my $h,q{<},$ARGV[0]; binmode $h; my $d=<$h>; print scalar(()=$d=~/\xdf\xc0/g)' "$f"); \
+        perl -pi -e 'BEGIN{binmode STDIN;binmode STDOUT} s/\xdf\xc0/\xdd\xd8/g' "$f"; \
+        after=$(perl -e 'local $/; open my $h,q{<},$ARGV[0]; binmode $h; my $d=<$h>; print scalar(()=$d=~/\xdf\xc0/g)' "$f"); \
+        echo "  patched $f: $before df-c0 -> $after"; \
+    done
+
+ENV QUARTUS_ROOTDIR=/opt/altera-17/quartus
+ENV PATH=/opt/altera-17/quartus/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin

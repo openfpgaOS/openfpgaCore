@@ -35,6 +35,7 @@ IMG_FULL="${QUARTUS_FULL_IMG:-openfpgaos-quartus-full}"
 IMG_BIND="${QUARTUS_IMG:-openfpgaos-quartus}"
 ALTERA="${ALTERA_ROOT:-/home/alberto/altera_lite}"
 QROOT="$ALTERA/25.1std/quartus"
+source "$REPO/tools/oci.sh"   # $OCI + oci_run/oci_build/oci_image_exists/oci_rm_force
 
 [ -f "$BDIR/ap_core.qsf" ] || { echo "ERROR: $BDIR/ap_core.qsf missing (generate it first)"; exit 1; }
 
@@ -46,6 +47,27 @@ QROOT="$ALTERA/25.1std/quartus"
 # set -u — plain "${TTY[@]}" errors on an empty array there.
 TTY=()
 [ -t 1 ] && TTY=(-t)
+
+# ── Ctrl+C handling ────────────────────────────────────────────────────
+# `docker run` does NOT forward signals to the container when a -t TTY is
+# allocated without -i (the case here — interactive `make build` allocates a
+# TTY but we never attach stdin).  So a bare Ctrl+C kills the docker CLI but
+# leaves Quartus running headless in a detached container — holding the build
+# dir, pegging a CPU, and surviving the build.  Fix: give the container a
+# unique name, run it in the background, and on INT/TERM/EXIT force-remove it.
+# The trap runs whether the build finishes, fails, or is interrupted.
+CNAME="ofpgaos-q-$$-$(basename "$BDIR")"
+trap 'oci_rm_force "$CNAME"' EXIT INT TERM
+# Apple `container` caps each guest VM at ~1 GiB by default — Quartus map/fit
+# blow past that and get OOM-killed ("Killed" mid-synthesis).  Give the VM a
+# generous slice (override with CONTAINER_MEM).  Docker shares host RAM, so it
+# gets no --memory and the array stays empty.
+QMEM=()
+oci_is_apple && QMEM=(--memory "${CONTAINER_MEM:-16g}")
+run_quartus() {                      # args: all docker-run flags + image + command
+    oci_run --rm --name "$CNAME" ${QMEM[@]+"${QMEM[@]}"} "$@" &
+    wait $!                           # wait is interruptible -> Ctrl+C reaches the trap
+}
 
 # ── License passthrough (Quartus Standard / Pro / IP) ────────────────────
 # Quartus Lite needs no license; Standard/Pro do.  If the user has a license
@@ -71,8 +93,8 @@ fi
 # When the baked image is missing but a Quartus tarball is sitting in
 # tools/, run the bake automatically — saves the user from a separate
 # `make quartus-image` step.  ~10 min first time; cached after that.
-if ! docker image inspect "$IMG_FULL" >/dev/null 2>&1; then
-    INSTALLER="$(find "$REPO/tools" -maxdepth 4 -type f -name 'Quartus-*-linux.tar' 2>/dev/null | head -1 || true)"
+if ! oci_image_exists "$IMG_FULL"; then
+    INSTALLER="$(find "$REPO/tools" -maxdepth 4 -type f -name 'Quartus-*25*-linux.tar' 2>/dev/null | head -1 || true)"
     if [ -n "$INSTALLER" ]; then
         echo "[quartus] image '$IMG_FULL' not present, but found tarball at:"
         echo "         $INSTALLER"
@@ -86,10 +108,10 @@ fi
 # private tmpfs => the Quartus per-user state that segfaults under concurrency
 # is isolated.  NUM_PARALLEL_PROCESSORS is pinned in the generated qsf so
 # parallel sweep fits place reproducibly with no per-invocation flag.
-if docker image inspect "$IMG_FULL" >/dev/null 2>&1; then
+if oci_image_exists "$IMG_FULL"; then
     # Baked image — Quartus is INSIDE.  No -v $ALTERA, no PATH/QUARTUS_ROOTDIR
     # env (already in the image ENV).
-    exec docker run --rm ${TTY[@]+"${TTY[@]}"} \
+    run_quartus ${TTY[@]+"${TTY[@]}"} \
       --platform linux/amd64 \
       --user "$(id -u):$(id -g)" \
       -v "$REPO:$REPO" \
@@ -100,9 +122,10 @@ if docker image inspect "$IMG_FULL" >/dev/null 2>&1; then
       -w "$BDIR" \
       "$IMG_FULL" \
       bash -c 'rm -rf db incremental_db && quartus_map ap_core && quartus_fit ap_core && quartus_asm ap_core && quartus_sta ap_core'
-elif docker image inspect "$IMG_BIND" >/dev/null 2>&1 && [ -x "$QROOT/bin/quartus_map" ]; then
+    exit $?
+elif oci_image_exists "$IMG_BIND" && [ -x "$QROOT/bin/quartus_map" ]; then
     # Bind-mount image + host install — original setup.
-    exec docker run --rm ${TTY[@]+"${TTY[@]}"} \
+    run_quartus ${TTY[@]+"${TTY[@]}"} \
       --user "$(id -u):$(id -g)" \
       -v "$REPO:$REPO" \
       -v "$ALTERA:$ALTERA:ro" \
@@ -115,6 +138,7 @@ elif docker image inspect "$IMG_BIND" >/dev/null 2>&1 && [ -x "$QROOT/bin/quartu
       -w "$BDIR" \
       "$IMG_BIND" \
       bash -c 'rm -rf db incremental_db && quartus_map ap_core && quartus_fit ap_core && quartus_asm ap_core && quartus_sta ap_core'
+    exit $?
 fi
 
 # ── Neither mode is set up: print actionable instructions ──────────────
