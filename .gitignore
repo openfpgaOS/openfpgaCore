@@ -80,6 +80,17 @@ src/chip32/pocket/loader.bin
 src/emulator/ofemu
 src/emulator/test_save
 
+# Locally-supplied Altera Quartus tarballs for the quartus-image bakes.
+# Intel/Altera Quartus EULA forbids redistribution — keep these out of the repo.
+# pocket (25.1, installer):     Quartus-*-linux.tar
+# mister (17.0.x, pre-extract): altera-17*.tar* / intelFPGA*17*.tar*
+tools/**/Quartus-*-linux.tar
+tools/**/altera-17*.tar*
+tools/**/intelFPGA*17*.tar*
+
+# Persistent sbt/ivy/coursier cache for the vexii container (host-owned).
+tools/.vexii-home/
+
 # Editor/IDE
 *.swp
 *.swo
