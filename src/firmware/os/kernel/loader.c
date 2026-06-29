@@ -187,14 +187,16 @@ int elf_load(uint32_t slot_id, uintptr_t load_addr,
     Elf32_Ehdr ehdr;
     int rc;
 
-    /* Bail out cleanly on missing slots. The bridge backend's read
-     * hangs forever on an empty slot (no ACK), so we always check
-     * size first; the dispatcher routes the query to whichever
-     * backend is active. */
-    if (of_disk_size(slot_id) <= 0)
-        return -1;
-
-    /* Read ELF header */
+    /* Probe the slot by reading the ELF header directly — do NOT gate on
+     * of_disk_size().  The datatable size query (DT_QUERY) is metadata that
+     * a bitstream built against an older OS can report as 0 for a populated
+     * slot (ABI drift), so it is not an authoritative "slot present" check
+     * and would wrongly reject a valid app — decoupling app-load from that
+     * metadata removes the os.bin <-> .rbf lockstep on slot sizing.  The
+     * historical reason for the gate (the bridge read "hangs forever" on an
+     * empty slot) no longer holds: file_wait_complete bounds every wait with
+     * DMA_TIMEOUT, so an empty/absent slot returns OF_ERR_TIMEOUT here
+     * instead of hanging. */
     rc = elf_read(slot_id, 0, &ehdr, sizeof(ehdr));
     if (rc < 0)
         return -1;
