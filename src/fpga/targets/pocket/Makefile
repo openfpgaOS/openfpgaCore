@@ -471,7 +471,7 @@ deploy: install-os install-bitstream
 # target, so this layout is entirely the Pocket target's concern.
 DIST_DIR      = $(ROOT_DIR)/dist/core
 PLATFORM_DIST = $(ROOT_DIR)/dist/platforms
-CHIP32_LOADER = $(ROOT_DIR)/src/chip32/pocket/loader.bin
+CHIP32_LOADER = $(ROOT_DIR)/src/fpga/targets/pocket/chip32/loader.bin
 PKG_DIR       = $(ROOT_DIR)/build/pocket
 JSON_FILES    = core.json video.json audio.json input.json data.json variants.json interact.json
 
@@ -494,7 +494,7 @@ package: $(REVERSE_BITS)
 	@# changed: a `test -f` existence guard skips the prerequisite check and
 	@# would ship a stale binary (e.g. a pre-`=os30`-scan loader.bin that
 	@# always selects core 0 / os25).  The chip32 Makefile no-ops when fresh.
-	@$(MAKE) -s -C $(ROOT_DIR)/src/chip32/pocket
+	@$(MAKE) -s -C $(ROOT_DIR)/src/fpga/targets/pocket/chip32
 	@cp $(CHIP32_LOADER) $(RELEASE_DIR)/loader.bin
 	@cp $(FW_DIR)/os.bin $(RELEASE_DIR)/os.bin
 	@cp $(FW_DIR)/os.bin $(ASSETS_DIR)/os.bin

@@ -56,9 +56,9 @@ fi
 # chip32 loader + .sof for JTAG reset (scripts/debug.sh on the SDK side).
 # Reassemble first (bass no-ops when loader.asm is unchanged) so a stale
 # loader.bin is never propagated into the SDK.
-make -s -C "$ROOT/src/chip32/pocket" >/dev/null 2>&1 || true
-[ -f "$ROOT/src/chip32/pocket/loader.bin" ] && \
-    cp "$ROOT/src/chip32/pocket/loader.bin" "$RTP/" && ok "loader.bin" "runtime/pocket/"
+make -s -C "$ROOT/src/fpga/targets/pocket/chip32" >/dev/null 2>&1 || true
+[ -f "$ROOT/src/fpga/targets/pocket/chip32/loader.bin" ] && \
+    cp "$ROOT/src/fpga/targets/pocket/chip32/loader.bin" "$RTP/" && ok "loader.bin" "runtime/pocket/"
 for d in "$SCRIPT_DIR"/bld/*/output_files; do \
     v="$(basename "$(dirname "$d")")"; case "$v" in *-s[0-9]*) continue ;; esac; \
     if [ -f "$d/ap_core.sof" ]; then cp "$d/ap_core.sof" "$RTP/ap_core.sof"; ok "ap_core.sof" "runtime/pocket/ (JTAG reset)"; break; fi; \

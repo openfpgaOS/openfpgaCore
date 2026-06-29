@@ -33,7 +33,7 @@ TARGETS = $(notdir $(patsubst %/,%,$(wildcard src/fpga/targets/*/)))
 # root delegates `package` and per-target `sdk-runtime.sh` so no target
 # name appears here (see docs/ADDING_A_TARGET.md).
 CORE_NAME    = ThinkElastic.openfpgaOS
-CHIP32_DIR   = src/chip32/$(TARGET)   # cleaned per-target; absent targets no-op
+CHIP32_DIR   = src/fpga/targets/$(TARGET)/chip32   # cleaned per-target; absent targets no-op
 BUILD_DIR    = build
 TOOLS_DIR    = tools
 DIST_DIR     = dist/core

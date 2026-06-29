@@ -30,18 +30,18 @@ FPGA / RTL
     Analogue Pocket Framework (APF) — Copyright (c) Analogue Enterprises Ltd.
     Licensed under the Analogue Pocket Framework Software License Agreement.
 
-* src/fpga/targets/pocket/analogizer/
+* src/fpga/targets/pocket/third_party/analogizer/
     openFPGA Pocket Analogizer — original work by @RndMnkIII. Includes
     MiSTer-derived video cores (hq2x.sv, scandoubler.sv, scandoubler_2.sv,
     yc_out.sv) under their respective upstream (GPL / permissive) licenses.
 
-* src/fpga/targets/pocket/mf_pllbase*.v,
-  src/fpga/targets/pocket/mf_pllram_133.v,
+* src/fpga/targets/pocket/megafunctions/mf_pllbase*.v,
+  src/fpga/targets/pocket/megafunctions/mf_pllram_133.v,
   src/fpga/targets/pocket/apf/mf_*.v
     Intel Quartus megafunction-generated IP —
     Copyright (c) Intel Corporation.
 
-* src/fpga/common/cram0_phy.sv
+* src/fpga/targets/pocket/third_party/cram0_phy.sv
     Copyright (c) 2022 Adam Gastineau — MIT License.
 
 * src/fpga/test/scandoubler_test.v
@@ -66,5 +66,5 @@ NOTE on GPL components
 
 src/fpga/test/scandoubler_test.v is GPL-3.0 but is a test-only module (not part
 of the Quartus build / synthesized bitstream). Some Analogizer video cores under
-src/fpga/targets/pocket/analogizer/ are MiSTer-derived and may carry GPL terms;
+src/fpga/targets/pocket/third_party/analogizer/ are MiSTer-derived and may carry GPL terms;
 review their headers before distributing built artifacts.

@@ -33,7 +33,7 @@ if [ -n "$DEST" ] && [ -f "$DEST/src/sdk/sdk.mk" ]; then
 
     RUNTIME="$DEST/runtime"
     BITSTREAM="src/fpga/targets/pocket/output_files/ap_core.rbf"
-    LOADER="src/chip32/pocket/loader.bin"
+    LOADER="src/fpga/targets/pocket/chip32/loader.bin"
     OS_BIN="src/firmware/os/os.bin"
 
     echo -e "${CYAN}Updating SDK runtime: $RUNTIME${RESET}"
@@ -52,12 +52,12 @@ if [ -n "$DEST" ] && [ -f "$DEST/src/sdk/sdk.mk" ]; then
 
     # Loader — reassemble first (bass no-ops when loader.asm is unchanged)
     # so a stale loader.bin is never deployed.
-    make -s -C src/chip32/pocket >/dev/null 2>&1 || true
+    make -s -C src/fpga/targets/pocket/chip32 >/dev/null 2>&1 || true
     if [ -f "$LOADER" ]; then
         cp "$LOADER" "$RUNTIME/"
         echo -e "  ${GREEN}✓${RESET} loader.bin"
     else
-        echo -e "  ${YELLOW}⚠${RESET} loader.bin not found — run 'make -C src/chip32/pocket'"
+        echo -e "  ${YELLOW}⚠${RESET} loader.bin not found — run 'make -C src/fpga/targets/pocket/chip32'"
     fi
 
     # OS

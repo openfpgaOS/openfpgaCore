@@ -775,15 +775,15 @@ set_instance_assignment -name WEAK_PULL_UP_RESISTOR ON -to bridge_spimosi
 
 
 set_instance_assignment -name PARTITION_HIERARCHY root_partition -to | -section_id Top
-set_global_assignment -name QIP_FILE analogizer/analogizer.qip
+set_global_assignment -name QIP_FILE third_party/analogizer/analogizer.qip
 set_global_assignment -name QIP_FILE apf/apf.qip
 set_global_assignment -name QIP_FILE apf/mf_ddio_bidir_12.qip
 set_global_assignment -name VERILOG_FILE core_top.v
 set_global_assignment -name VERILOG_FILE core_bridge_cmd.v
 set_global_assignment -name MIF_FILE firmware.mif
 set_global_assignment -name VERILOG_FILE io_sdram.v
-set_global_assignment -name QIP_FILE mf_pllbase.qip
-set_global_assignment -name SIP_FILE mf_pllbase.sip
+set_global_assignment -name QIP_FILE megafunctions/mf_pllbase.qip
+set_global_assignment -name SIP_FILE megafunctions/mf_pllbase.sip
 
 # PSRAM sync burst: IOB input registers for fast data capture
 set_instance_assignment -name FAST_INPUT_REGISTER ON -to cram0_dq[0]
@@ -868,42 +868,42 @@ set_instance_assignment -name FAST_OUTPUT_ENABLE_REGISTER ON -to dram_dq[15]
 set_global_assignment -name VERILOG_FILE ../../common/audio_mixer.v
 # cram1_controller.v / cram1_phy.sv / axi_cram1_slave.v / bridge_to_cram1.v /
 # cram1_burst_mmio.v retired in memory-arch v2.
-set_global_assignment -name VERILOG_FILE ../../common/audio_output.v
+set_global_assignment -name VERILOG_FILE audio_output.v
 set_global_assignment -name VERILOG_FILE ../../common/gpu_core.v
 set_global_assignment -name VERILOG_FILE ../../common/gpu_edge_walker.v
 set_global_assignment -name VERILOG_FILE ../../common/gpu_tex_cache.v
 set_global_assignment -name VERILOG_FILE ../../common/axi_periph_slave.v
 set_global_assignment -name VERILOG_FILE ../../common/sync_fifo.v
-set_global_assignment -name VERILOG_FILE ../../common/analogizer/snac_shifter.v
+set_global_assignment -name VERILOG_FILE snac_shifter.v
 # PSX SNAC: upstream Analogizer DualShock decoder (instantiated in axi_periph_slave.v)
-set_global_assignment -name SYSTEMVERILOG_FILE ../../common/analogizer/analogizer_psx.sv
-set_global_assignment -name VERILOG_FILE ../../common/analogizer/dualshock_controller.v
+set_global_assignment -name SYSTEMVERILOG_FILE third_party/analogizer/analogizer_psx.sv
+set_global_assignment -name VERILOG_FILE third_party/analogizer/dualshock_controller.v
 set_global_assignment -name VERILOG_FILE ../../common/axi_register_slice.v
 set_global_assignment -name VERILOG_FILE ../../common/axi_sdram_arbiter.v
 set_global_assignment -name VERILOG_FILE ../../common/axi_sdram_slave.v
 set_global_assignment -name VERILOG_FILE ../../common/cpu_system.v
 set_global_assignment -name VERILOG_FILE ../../common/cpu_target_port.v
 set_global_assignment -name VERILOG_FILE ../../common/cpu_target_port_per.v
-set_global_assignment -name VERILOG_FILE ../../common/frac_cen.v
-set_global_assignment -name VERILOG_FILE ../../common/link_lite.v
-set_global_assignment -name VERILOG_FILE ../../common/cram0_controller.v
-set_global_assignment -name VERILOG_FILE ../../common/cram0_cdc.v
-set_global_assignment -name SYSTEMVERILOG_FILE ../../common/cram0_phy.sv
+set_global_assignment -name VERILOG_FILE frac_cen.v
+set_global_assignment -name VERILOG_FILE link_lite.v
+set_global_assignment -name VERILOG_FILE cram0_controller.v
+set_global_assignment -name VERILOG_FILE cram0_cdc.v
+set_global_assignment -name SYSTEMVERILOG_FILE third_party/cram0_phy.sv
 # CRAM1: dedicated GPU sync-burst texture memory (Pocket-only fast texture
 # memory).  Pocket-specific, so these live in targets/pocket/ (not common/).
 set_global_assignment -name VERILOG_FILE cram1_controller.v
 set_global_assignment -name SYSTEMVERILOG_FILE cram1_phy.sv
 set_global_assignment -name VERILOG_FILE gpu_cram1_tex_adapter.v
-set_global_assignment -name VERILOG_FILE ../../common/sram_controller.v
-set_global_assignment -name VERILOG_FILE ../../common/uart_rx.v
-set_global_assignment -name VERILOG_FILE ../../common/uart_tx.v
+set_global_assignment -name VERILOG_FILE sram_controller.v
+set_global_assignment -name VERILOG_FILE uart_rx.v
+set_global_assignment -name VERILOG_FILE uart_tx.v
 set_global_assignment -name VERILOG_FILE ../../common/video_CRT_scanout_indexed_BRAM.v
 # Per-variant CPU netlist (VexiiRiscv_<variant>.v) is injected into the
 # generated bld/<job>/ap_core.qsf by the pocket Makefile (see VEXII_OUT).
 # Not added here in the master qsf so a raw `quartus_sh --flow` doesn't
 # accidentally link an arbitrary variant — the Makefile is the source of
 # truth for which CPU to fit.
-set_global_assignment -name VERILOG_FILE mf_pllram_133.v
+set_global_assignment -name VERILOG_FILE megafunctions/mf_pllram_133.v
 set_global_assignment -name SDC_FILE core_constraints.sdc
 # Fallback seed for raw quartus_sh runs.  `make build` overrides this per
 # variant with --seed from the repo-stored seeds/<variant>.seed (the source

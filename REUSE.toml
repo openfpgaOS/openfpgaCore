@@ -16,7 +16,7 @@ path = [
     "src/fpga/targets/pocket/core_bridge_cmd.v",
     "src/fpga/targets/pocket/io_sdram.v",
     "src/fpga/targets/mister/io_sdram.v",
-    "src/chip32/pocket/architectures/chip32.vm.arch",
+    "src/fpga/targets/pocket/chip32/architectures/chip32.vm.arch",
 ]
 precedence = "override"
 SPDX-FileCopyrightText = "Copyright (c) Analogue Enterprises Limited"
@@ -25,30 +25,29 @@ SPDX-License-Identifier = "LicenseRef-Analogue-Pocket-Framework"
 # ===== Intel/Altera Quartus megafunction IP (user-generated) ===============
 [[annotations]]
 path = [
-    "src/fpga/targets/pocket/mf_pllbase.v",
-    "src/fpga/targets/pocket/mf_pllbase.bsf",
-    "src/fpga/targets/pocket/mf_pllbase.ppf",
-    "src/fpga/targets/pocket/mf_pllbase.qip",
-    "src/fpga/targets/pocket/mf_pllbase.sip",
-    "src/fpga/targets/pocket/mf_pllbase.spd",
-    "src/fpga/targets/pocket/mf_pllbase/**",
-    "src/fpga/targets/pocket/mf_pllbase_sim/**",
-    "src/fpga/targets/pocket/mf_pllbase_sim.f",
-    "src/fpga/targets/pocket/mf_pllram_133.v",
-    "src/fpga/targets/pocket/pin_ddio_clk.ppf",
-    "src/fpga/targets/pocket/pin_ddio_clk.qip",
+    "src/fpga/targets/pocket/megafunctions/mf_pllbase.v",
+    "src/fpga/targets/pocket/megafunctions/mf_pllbase.bsf",
+    "src/fpga/targets/pocket/megafunctions/mf_pllbase.ppf",
+    "src/fpga/targets/pocket/megafunctions/mf_pllbase.qip",
+    "src/fpga/targets/pocket/megafunctions/mf_pllbase.sip",
+    "src/fpga/targets/pocket/megafunctions/mf_pllbase.spd",
+    "src/fpga/targets/pocket/megafunctions/mf_pllbase/**",
+    "src/fpga/targets/pocket/megafunctions/mf_pllbase_sim/**",
+    "src/fpga/targets/pocket/megafunctions/mf_pllbase_sim.f",
+    "src/fpga/targets/pocket/megafunctions/mf_pllram_133.v",
+    "src/fpga/targets/pocket/megafunctions/pin_ddio_clk.ppf",
+    "src/fpga/targets/pocket/megafunctions/pin_ddio_clk.qip",
 ]
 precedence = "override"
 SPDX-FileCopyrightText = "Copyright (C) 1991-2026 Altera Corporation"
 SPDX-License-Identifier = "LicenseRef-Intel-FPGA-IP"
 
 # ===== Analogizer (openFPGA Pocket Analogizer + MiSTer-derived video cores) =
+# Vendored upstream GPL — all under targets/pocket/third_party/analogizer/.
+# (snac_shifter.v is ThinkElastic Apache-2.0 and was moved OUT to the pocket
+# root, so it's no longer under this glob and keeps its own inline header.)
 [[annotations]]
-path = [
-    "src/fpga/targets/pocket/analogizer/**",
-    "src/fpga/common/analogizer_psx.sv",
-    "src/fpga/common/dualshock_controller.v",
-]
+path = ["src/fpga/targets/pocket/third_party/analogizer/**"]
 precedence = "override"
 SPDX-FileCopyrightText = [
     "Copyright (c) 2012-2013 Ludvig Strigeus",
@@ -77,7 +76,7 @@ SPDX-License-Identifier = "BSD-1-Clause"
 
 # ===== Individually-licensed third-party files =============================
 [[annotations]]
-path = "src/fpga/common/cram0_phy.sv"
+path = "src/fpga/targets/pocket/third_party/cram0_phy.sv"
 precedence = "override"
 SPDX-FileCopyrightText = "Copyright (c) 2022 Adam Gastineau"
 SPDX-License-Identifier = "MIT"
@@ -95,7 +94,7 @@ SPDX-FileCopyrightText = "Copyright 2023 Doug Lea"
 SPDX-License-Identifier = "MIT-0"
 
 [[annotations]]
-path = "src/fpga/targets/pocket/third_party/**"
+path = "src/fpga/targets/pocket/third_party/openrtl_sdram/**"
 precedence = "override"
 SPDX-FileCopyrightText = "Copyright (c) the openrtl_sdram authors"
 SPDX-License-Identifier = "MIT"
@@ -113,7 +112,7 @@ path = [
     "src/fpga/targets/pocket/core_constraints.sdc",
     "src/fpga/targets/pocket/report_critical2.tcl",
     "src/fpga/targets/pocket/report_critical3.tcl",
-    "src/chip32/pocket/loader.asm",
+    "src/fpga/targets/pocket/chip32/loader.asm",
 ]
 SPDX-FileCopyrightText = "(c) 2026, ThinkElastic <Think@Elastic.com>"
 SPDX-License-Identifier = "Apache-2.0"

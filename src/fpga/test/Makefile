@@ -21,7 +21,7 @@ VERILATOR = verilator
 VERILATOR_FLAGS = --cc --exe --build \
 	-Wall -Wno-fatal -Wno-BADVLTPRAGMA \
 	-CFLAGS "-std=c++17 -O2" \
-	-I$(COMMON_DIR)/analogizer \
+	-I$(TARGET_DIR)/third_party/analogizer \
 	--trace
 
 # Trace-free flags used by the heavyweight system tb (full CPU) — VCD
@@ -30,7 +30,7 @@ VERILATOR_FLAGS = --cc --exe --build \
 VERILATOR_FLAGS_NOTRACE = --cc --exe --build \
 	-Wall -Wno-fatal -Wno-BADVLTPRAGMA \
 	-CFLAGS "-std=c++17 -O2" \
-	-I$(COMMON_DIR)/analogizer
+	-I$(TARGET_DIR)/third_party/analogizer
 
 # ============================================================
 # SDRAM
@@ -63,7 +63,7 @@ io_sdram_test.v: $(TARGET_DIR)/io_sdram.v
 SRAM_SRCS = \
 	tb_sram.v \
 	sram_chip_model.v \
-	$(COMMON_DIR)/sram_controller.v
+	$(TARGET_DIR)/sram_controller.v
 
 SRAM_CPP = tb_sram_main.cpp
 SRAM_TOP = tb_sram
@@ -93,7 +93,7 @@ AXI_PERIPH_SRCS = \
 	tb_axi_periph.v \
 	altsyncram_stub.v \
 	$(COMMON_DIR)/axi_periph_slave.v \
-	$(COMMON_DIR)/analogizer/snac_shifter.v \
+	$(TARGET_DIR)/snac_shifter.v \
 	$(COMMON_DIR)/sync_fifo.v \
 	$(TARGET_DIR)/apf/common.v
 
@@ -149,7 +149,7 @@ GPU_CHAIN_SRCS = \
 	$(COMMON_DIR)/cpu_target_port.v \
 	$(COMMON_DIR)/axi_periph_slave.v \
 	$(COMMON_DIR)/sync_fifo.v \
-	$(COMMON_DIR)/lsu_axi_shim.v \
+	lsu_axi_shim.v \
 	$(TARGET_DIR)/apf/common.v
 GPU_CHAIN_CPP = tb_gpu_chain_main.cpp
 GPU_CHAIN_TOP = tb_gpu_chain
@@ -164,7 +164,7 @@ GPU_CHAIN_FLAGS = -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC -Wno-CASEINCOMPLETE \
 AUDIO_SRCS = \
 	tb_audio_pipeline.v \
 	dcfifo_stub.v \
-	$(COMMON_DIR)/audio_output.v
+	$(TARGET_DIR)/audio_output.v
 
 AUDIO_CPP = tb_audio_pipeline_main.cpp
 AUDIO_TOP = tb_audio_pipeline
@@ -428,13 +428,13 @@ SYSTEM_SRCS_BASE = \
 	$(COMMON_DIR)/cpu_system.v \
 	$(COMMON_DIR)/cpu_target_port.v \
 	$(COMMON_DIR)/cpu_target_port_per.v \
-	$(COMMON_DIR)/cram0_cdc.v \
+	$(TARGET_DIR)/cram0_cdc.v \
 	$(COMMON_DIR)/axi_register_slice.v \
 	$(COMMON_DIR)/axi_sdram_arbiter.v \
 	$(COMMON_DIR)/axi_sdram_slave.v \
 	$(COMMON_DIR)/axi_periph_slave.v \
 	$(COMMON_DIR)/sync_fifo.v \
-	$(COMMON_DIR)/analogizer/snac_shifter.v \
+	$(TARGET_DIR)/snac_shifter.v \
 	$(COMMON_DIR)/gpu_core.v \
 	$(COMMON_DIR)/gpu_edge_walker.v \
 	$(COMMON_DIR)/gpu_tex_cache.v \
@@ -557,7 +557,7 @@ ANALOGCHAIN_SRCS = \
 	tb_analogizer_chain.v \
 	altsyncram_stub.v \
 	$(COMMON_DIR)/video_CRT_scanout_indexed_BRAM.v \
-	$(TARGET_DIR)/analogizer/openFPGA_Pocket_Analogizer.v \
+	$(TARGET_DIR)/third_party/analogizer/openFPGA_Pocket_Analogizer.v \
 	scandoubler_test.v
 ANALOGCHAIN_CPP = tb_analogizer_chain_main.cpp
 ANALOGCHAIN_TOP = tb_analogizer_chain
@@ -566,7 +566,7 @@ ANALOGCHAIN_DIR = obj_dir_analogchain
 # Verilator chokes on scandoubler.v's zero-width part-select [..-:n] in its
 # DEAD (n=0, since COLOR_DEPTH==OUT_COLOR_DEPTH) color-expand branch; Quartus
 # prunes it. Patch -:n -> -:1 in that unreachable branch for sim only.
-scandoubler_test.v: $(TARGET_DIR)/analogizer/scandoubler.v
+scandoubler_test.v: $(TARGET_DIR)/third_party/analogizer/scandoubler.v
 	sed 's/ -:n\]/ -:1]/g' $< > $@
 
 analogchain: $(ANALOGCHAIN_DIR)/V$(ANALOGCHAIN_TOP)
@@ -575,7 +575,7 @@ analogchain: $(ANALOGCHAIN_DIR)/V$(ANALOGCHAIN_TOP)
 
 $(ANALOGCHAIN_DIR)/V$(ANALOGCHAIN_TOP): $(ANALOGCHAIN_SRCS) $(ANALOGCHAIN_CPP)
 	$(VERILATOR) $(VERILATOR_FLAGS_NOTRACE) --top-module $(ANALOGCHAIN_TOP) --Mdir $(ANALOGCHAIN_DIR) \
-		-I$(COMMON_DIR) -I$(TARGET_DIR)/analogizer \
+		-I$(COMMON_DIR) -I$(TARGET_DIR)/third_party/analogizer \
 		$(ANALOGCHAIN_SRCS) $(ANALOGCHAIN_CPP)
 
 # --- GPU ---

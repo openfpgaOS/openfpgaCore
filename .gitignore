@@ -75,7 +75,7 @@ src/fpga/targets/*/apf/build_id.mif
 # Build tools / generated binaries (compiled from source on demand)
 tools/reverse_bits
 tools/sf2_to_ofsf
-src/chip32/pocket/loader.bin
+src/fpga/targets/pocket/chip32/loader.bin
 src/emulator/ofemu
 src/emulator/test_save
 
