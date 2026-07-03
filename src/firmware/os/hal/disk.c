@@ -51,8 +51,21 @@ const of_disk_driver_t *of_disk_active(void) {
     return active_disk;
 }
 
+/* Lazy re-probe: of_disk_init runs once inside of_init(), BEFORE anything
+ * guarantees the medium exists (on MiSTer the HPS mounts .vhd images with
+ * no ordering against boot).  If no backend answered then, active_disk
+ * stayed NULL — without this, every later read would fail forever even
+ * after the image appears.  Probes are cheap and side-effect-free by
+ * contract, so retrying on each access while unbound is safe; once a
+ * backend answers, the normal selection sticks. */
+static void reprobe_if_unbound(void) {
+    if (!active_disk)
+        of_disk_init();
+}
+
 int of_disk_read(uint32_t slot_id, uint32_t slot_offset,
                  void *dest, uint32_t length) {
+    reprobe_if_unbound();
     if (!active_disk)
         return OF_ERR_NOT_SUPPORTED;
     int rc = active_disk->read(slot_id, slot_offset, dest, length);
@@ -70,6 +83,7 @@ int of_disk_read(uint32_t slot_id, uint32_t slot_offset,
 }
 
 long of_disk_size(uint32_t slot_id) {
+    reprobe_if_unbound();
     if (!active_disk)
         return -1;
     long sz = active_disk->size(slot_id);

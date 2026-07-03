@@ -278,6 +278,9 @@ void services_table_init(void) {
 
     /* File I/O idle hook: lets the app feed audio during blocking SD reads. */
     svc->file_set_idle_hook = of_file_set_idle_hook;
+
+    /* Dock state */
+    svc->input_is_docked = of_input_is_docked;
 }
 
 void services_table_set_smp_bank(const void *base, uint32_t size) {

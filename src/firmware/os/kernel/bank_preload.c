@@ -122,20 +122,20 @@ int bank_preload(void) {
     }
 
     if (!name) {
-        of_term_puts(" \033[93mNONE\033[0m\n");
+        of_term_puts(" \033[93mNONE(no .ofsf)\033[0m\n");
         return -1;
     }
 
     long sz = of_file_size(slot_id);
     if (sz <= 0) {
-        of_term_puts(" \033[93mNONE\033[0m\n");
+        of_term_puts(" \033[93mNONE(size)\033[0m\n");
         return -2;
     }
 
     void *buf = of_mixer_reserve_persistent((uint32_t)sz,
                                             OF_TARGET_AUDIO_RESERVE_ALIGN);
     if (!buf) {
-        of_term_puts(" \033[93mNONE\033[0m\n");
+        of_term_puts(" \033[93mNONE(reserve)\033[0m\n");
         return -3;
     }
 
@@ -148,7 +148,7 @@ int bank_preload(void) {
     of_cache_flush_range(buf, 64);
 
     if (of_file_read_chunked(slot_id, 0, buf, (uint32_t)sz) < 0) {
-        of_term_puts(" \033[93mNONE\033[0m\n");
+        of_term_puts(" \033[93mNONE(read)\033[0m\n");
         return -4;
     }
 
@@ -160,7 +160,7 @@ int bank_preload(void) {
         /* Cache flush still required — same rationale as the success path. */
         of_cache_flush_range(buf, (uint32_t)sz);
         of_cache_invalidate_icache();
-        of_term_puts(" \033[93mNONE\033[0m\n");
+        of_term_puts(" \033[93mNONE(header)\033[0m\n");
         return -5;
     }
 

@@ -77,6 +77,11 @@ static uint32_t nvslot_cap(uint32_t data_slot_id) {
     if (data_slot_id >= NV_SLOT_ID_SAVE_BASE &&
         data_slot_id < NV_SLOT_ID_SAVE_BASE + (uint32_t)SAVE_MAX_SLOTS)
         return SAVE_SLOT_SIZE;
+    /* By-name config slots (file.c, hal/file.h of_file_config_slot) are
+     * nonvolatile text configs with the same preallocated capacity as the
+     * fixed config slots. */
+    if (mister_file_cfg_slot_valid(data_slot_id))
+        return OF_TARGET_PRESAVE_SLOT_SIZE;
     return 0;
 }
 
@@ -168,6 +173,54 @@ int of_nvslot_write(uint32_t data_slot_id, const void *buf,
     return rc;
 }
 
+/* A rewritten named config can be SHORTER than its previous contents; the
+ * backing file stays at the full 256 KB preallocation, so bytes of the old
+ * text would survive beyond the new logical end and be re-parsed on the
+ * next load (the fd size comes from file.c's cfg_logical_size — bytes
+ * before the first 0x00/0xFF).  Zero the old extent's remainder: scan
+ * forward from `size` and zero-fill up to the first 0x00/0xFF byte (the
+ * old terminator / untouched preallocation fill).  Bounded by capacity; a
+ * write to a fresh zero-filled slot, or a longer rewrite, hits a zero byte
+ * immediately and writes nothing. */
+static int cfg_zero_stale_tail(uint32_t data_slot_id, uint32_t size,
+                               uint32_t cap) {
+    if (size >= cap)
+        return 0;
+
+    uint8_t buf[256];
+    uint32_t end = size;
+    int found = 0;
+    while (end < cap && !found) {
+        uint32_t n = cap - end;
+        if (n > sizeof(buf))
+            n = sizeof(buf);
+        if (of_nvslot_read(data_slot_id, buf, end, n) != (int)n)
+            return -1;
+        uint32_t i = 0;
+        while (i < n && buf[i] != 0x00u && buf[i] != 0xFFu)
+            i++;
+        end += i;
+        if (i < n)
+            found = 1;
+    }
+
+    if (end == size)
+        return 0;
+
+    uint8_t zeros[256];
+    memset(zeros, 0, sizeof(zeros));
+    uint32_t off = size;
+    while (off < end) {
+        uint32_t n = end - off;
+        if (n > sizeof(zeros))
+            n = sizeof(zeros);
+        if (of_nvslot_write(data_slot_id, zeros, off, n) != (int)n)
+            return -1;
+        off += n;
+    }
+    return 0;
+}
+
 int of_nvslot_set_size(uint32_t data_slot_id, uint32_t size) {
     uint32_t cap = nvslot_cap(data_slot_id);
     if (cap == 0)
@@ -182,6 +235,11 @@ int of_nvslot_set_size(uint32_t data_slot_id, uint32_t size) {
             return -1;
         return 0;
     }
+
+    /* Named text configs need their stale tail cleared on close (this is
+     * where sys_close's dirty-fd flush lands). */
+    if (mister_file_cfg_slot_valid(data_slot_id))
+        return cfg_zero_stale_tail(data_slot_id, size, cap);
 
     /* Logical size is carried by the app's save format; the backing file
      * stays at full capacity (see file header).  Writes are already

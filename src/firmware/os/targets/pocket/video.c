@@ -325,9 +325,16 @@ static uint32_t vrr_manual_v_total;  /* 0 = automatic cadence/recovery policy */
  * effectively write-once until the sink changes (dock/undock and menu
  * toggles re-evaluate on the next policy write). */
 static int vrr_fixed_rate_sink(void) {
+#ifdef OF_TARGET_VIDEO_FIXED_RATE_SINK
+    /* Platform sink is always fixed-rate (MiSTer: the framework scaler owns
+     * output timing and the raster ignores vrr_v_total) — adaptive VRR and
+     * manual vtotal requests all pin to the 60.02 Hz raster. */
+    return 1;
+#else
     if (of_analogizer_is_enabled())
         return 1;
     return ((CONT1_KEY >> 28) & 0xFu) != CONT_TYPE_POCKET_BUILTIN;
+#endif
 }
 
 static uint32_t vrr_clamp_v_total(uint32_t v_total) {
@@ -941,6 +948,50 @@ void of_video_vsync_irq_service(void) {
     if (pal_dirty && !pal_uploading && vid_display_mode != DISPLAY_MODE_OVERLAY) {
         if (palette_try_upload_shadow())
             pal_dirty = 0;
+    }
+
+    /* TEMPORARY freeze diagnostic — remove after the 30-45 min hang is
+     * found.  Two heartbeats driven from this IRQ: a flickering 4-byte
+     * block in the scanout buffer's top-left corner, and a short UART
+     * tick every 600 vblanks (~10 s).  If both stop at the freeze, the
+     * CPU is bus-stalled (RTL fault); if they keep going, the hang is a
+     * software loop with IRQs live.  UART poll is guard-bounded. */
+    {
+        volatile uint8_t *hb = (volatile uint8_t *)
+            sdram_uncached((void *)(uintptr_t)fb_addr[buf_display]);
+        uint8_t v = (uint8_t)timing_vblank_count;
+        hb[0] = v; hb[1] = v; hb[2] = v; hb[3] = v;
+
+        if ((timing_vblank_count % 600u) == 0u) {
+            /* Sample interrupted PC + peek the app's sim clocks so we can
+             * tell "sim frozen, render looping" from "just slow": if
+             * gametic/leveltime advance ~350 per 10 s line the sim is
+             * live and the freeze is pathological slowness; if they stall
+             * while present keeps moving the sim is wedged.  App globals
+             * (Doom app.elf): gametic 0x104dd08c, leveltime 0x104dd6a8. */
+            static const char hexd[] = "0123456789abcdef";
+            uint32_t pc;
+            uint32_t vals[4];
+            char msg[64];
+            int n = 0;
+            __asm__ volatile ("csrr %0, mepc" : "=r"(pc));
+            vals[0] = pc;
+            vals[1] = *(volatile uint32_t *)0x104dd08cu;  /* gametic */
+            vals[2] = *(volatile uint32_t *)0x104dd6a8u;  /* leveltime */
+            vals[3] = timing_present_count;
+            msg[n++] = 'h'; msg[n++] = 'b';
+            for (int v = 0; v < 4; v++) {
+                msg[n++] = ' ';
+                for (int i = 0; i < 8; i++)
+                    msg[n++] = hexd[(vals[v] >> (28 - 4 * i)) & 0xFu];
+            }
+            msg[n++] = '\n';
+            for (int i = 0; i < n; i++) {
+                uint32_t guard = 100000u;
+                while (!(UART_STATUS & UART_TX_RDY) && --guard) {}
+                UART_TX_DATA = (uint32_t)msg[i];
+            }
+        }
     }
 }
 

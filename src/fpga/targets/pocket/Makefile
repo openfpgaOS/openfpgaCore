@@ -126,7 +126,7 @@ FW_MAKE = bash $(ROOT_DIR)/tools/firmware-container.sh
 else
 FW_MAKE = $(MAKE) -C $(FW_DIR)
 endif
-$(VEXII_OUT): | $(VEXII_DIR)/build.sbt
+$(VEXII_OUT): | $(VEXII_DIR)/build.sbt $(VEXII_DIR)/ext/SpinalHDL/build.sbt
 	@printf "$(C_HEAD)[cpu]$(C_RESET) Generating VexiiRiscv ($(VARIANT), file missing)...\n"
 ifeq ($(USE_VEXII_CONTAINER),1)
 	@bash $(ROOT_DIR)/tools/vexii-container.sh $(VARIANT)
@@ -151,6 +151,25 @@ $(VEXII_DIR)/build.sbt:
 	    rm -rf $(VEXII_DIR) $(ROOT_DIR)/.git/modules/src/fpga/vendor/vexriscv/VexiiRiscv; \
 	    git clone --branch $(VEXII_FALLBACK_BRANCH) --recurse-submodules "$$url" $(VEXII_DIR) || exit 1; \
 	fi
+
+# Nested-submodule guard (submodule-of-a-submodule).  VexiiRiscv/build.sbt does
+#   lazy val spinalHdlIdslPlugin = ProjectRef(file("./ext/SpinalHDL"), "idslplugin")
+# so ext/SpinalHDL MUST be checked out or sbt aborts loading the build with
+#   [error] No project 'idslplugin' in '.../ext/SpinalHDL/'.
+#   [error] Valid project IDs: spinalhdl
+# (an empty dir makes sbt synthesize a lone default project named after the dir).
+# The outer rule above only fires when VexiiRiscv/build.sbt is ABSENT, so a clone
+# that has VexiiRiscv but was init'd NON-recursively (empty ext/SpinalHDL) would
+# NOT self-heal.  This separate guard keys on the nested build.sbt to catch that.
+# Only ext/SpinalHDL is needed for netlist generation (ext/rvls, NaxSoftware,
+# riscv-isa-sim are sim/verification-only), so init just that submodule.
+$(VEXII_DIR)/ext/SpinalHDL/build.sbt: | $(VEXII_DIR)/build.sbt
+	@printf "$(C_HEAD)[submodule]$(C_RESET) Checking out VexiiRiscv nested submodule (ext/SpinalHDL)...\n"
+	@git -C $(VEXII_DIR) submodule update --init --recursive ext/SpinalHDL || { \
+	    printf "$(C_ERR)[submodule] Failed to init ext/SpinalHDL — sbt needs its 'idslplugin' project.$(C_RESET)\n"; \
+	    printf "$(C_DIM)  Retry manually: git -C $(VEXII_DIR) submodule update --init --recursive$(C_RESET)\n"; \
+	    exit 1; \
+	}
 
 # Build the CPU-generation container image (one-time; vexii-container.sh also
 # auto-builds it on first `make cpu`).  Mirrors `docker build -t openfpgaos-quartus`.

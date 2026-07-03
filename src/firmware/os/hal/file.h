@@ -48,6 +48,16 @@ void of_file_set_idle_hook(void (*hook)(void));
  * Flushes D-cache and acknowledges if bridge requests shutdown. */
 void of_check_shutdown(void);
 
+/* Boot has finished (kernel/main.c calls this once, right before handing
+ * control to the app).  Targets may relax fail-fast transport policies
+ * that must hold during init/probe: MiSTer arms the DS ERR_TIMEOUT retry
+ * loop for operational reads here — at core load the HPS legitimately
+ * doesn't service sector ops for a while, so boot-time ops must fail
+ * fast (retrying there blank-screens the core), while the same error
+ * during gameplay means "host busy in the OSD" and is retried.  No-op on
+ * Pocket/sim. */
+void of_file_boot_complete(void);
+
 /* Read data from a file slot into memory.
  * slot_id: APF file slot ID
  * slot_offset: byte offset within slot
@@ -92,6 +102,33 @@ int of_file_read_raw(uint32_t slot_id, uint32_t slot_offset,
 /* Get the filename for a data slot from the bridge.
  * Returns 0 on success, <0 on error or empty slot. */
 int of_file_get_name(uint32_t slot_id, char *name_out, uint32_t name_max);
+
+/* Registry-miss fall-through: resolve a BASENAME directly against the
+ * target's backing store and return a read-only slot id usable with
+ * of_file_read/of_file_size64, or -1.  The id must stay stable until the
+ * next relaunch/init (fds and the kernel io cache key on it).  MiSTer
+ * searches its mounted FAT volumes (S1 instance -> S2 borrow -> S0 family)
+ * and hands out overflow ids beyond the enumerated slot registry, so
+ * libraries larger than the registry stay reachable by name; targets whose
+ * host enumerates every file up front (Pocket/sim) return -1. */
+int of_file_resolve_name(const char *name);
+
+/* By-NAME nonvolatile config slots.  Per-game settings are saved through
+ * fopen("<name>.cfg", "wb") (e.g. chocolate-doom M_SaveDefaults with a
+ * -config filename); the backing store is a PREALLOCATED /config/<name>
+ * file on the target's pinned nonvolatile volume.  of_file_config_slot
+ * resolves such a basename to a slot id in
+ * [OF_FILE_CFG_SLOT_BASE, OF_FILE_CFG_SLOT_BASE + OF_FILE_CFG_SLOT_COUNT)
+ * that works with the full of_nvslot_* API exactly like slots 8/9, or -1
+ * when no preallocated backing file exists for that name.  The durability
+ * contract holds: files are never created/extended/truncated at runtime —
+ * O_TRUNC maps to a logical rewrite from 0 (of_nvslot_set_size(id, 0)),
+ * and a missing backing file is a clean open failure, never a create.
+ * Ids are stable until relaunch/init.  Targets without named-config
+ * support (Pocket/sim: the host owns settings persistence) return -1. */
+#define OF_FILE_CFG_SLOT_BASE  96u
+#define OF_FILE_CFG_SLOT_COUNT 8u
+int of_file_config_slot(const char *name);
 
 /* Query APF datatable metadata for a data slot ID.
  * APF exposes two words per datatable entry: concrete file id, then

@@ -27,6 +27,11 @@ FIL *mister_file_open_slot(uint32_t slot_id, int writable);
 /* Drop a cached handle (closes the file). */
 void mister_file_drop_slot(uint32_t slot_id);
 
+/* 1 if slot_id is a currently-bound by-name config slot (hal/file.h
+ * of_file_config_slot).  save.c keys the of_nvslot_* dispatch — capacity
+ * and the stale-tail zeroing in of_nvslot_set_size — on this. */
+int mister_file_cfg_slot_valid(uint32_t slot_id);
+
 /*
  * FatFs reentrancy guard (FF_FS_REENTRANT=0).
  *

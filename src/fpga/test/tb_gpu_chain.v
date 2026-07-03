@@ -478,6 +478,8 @@ axi_periph_slave dut (
     .hps_status          (32'd0),
     .hps_img_size        (64'd0),
     .hps_boot_len        (32'd0),
+    .hps_img1_size       (64'd0),
+    .hps_img2_size       (64'd0),
     .bridge_wr_idle      (1'b1),
     .bridge_dbg_wcnt     (32'd0),
 

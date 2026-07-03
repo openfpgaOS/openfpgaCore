@@ -20,15 +20,21 @@
 //
 //  2. Disk-image sector engine: serves the existing data-slot register
 //     handshake in axi_periph_slave (DS_* regs).  Firmware (the MiSTer
-//     blockdev HAL) issues sector-aligned DS_CMD_READ/DS_CMD_WRITE on
-//     slot 0 with DS_SLOT_OFFSET = byte offset into the mounted image,
-//     DS_BRIDGE_ADDR = SDRAM byte offset, DS_LENGTH = 512-multiple.
-//     Blocks move through a 512-byte sector buffer:
-//       read:  sd_rd → sd_buff stream in → 8×16-beat AXI write bursts
-//       write: 8×16-beat AXI read bursts → sd_wr → sd_buff stream out
+//     blockdev HAL) issues sector-aligned DS_CMD_READ/DS_CMD_WRITE with
+//     DS_SLOT_ID[3:0] = disk index (0=S0 family/legacy, 1=S1 instance,
+//     2=S2 borrow — hps_io VDNUM=3), DS_SLOT_OFFSET = byte offset into
+//     the mounted image, DS_BRIDGE_ADDR = SDRAM byte offset, DS_LENGTH =
+//     512-multiple.  One op in flight; the op's disk index is latched at
+//     dispatch and selects which sd_rd/sd_wr bit is asserted, which
+//     sd_ack bit is watched, and which disk's mounted/readonly/size
+//     latches validate the request.  Blocks move through one shared
+//     512-byte sector buffer:
+//       read:  sd_rd[i] → sd_buff stream in → 8×16-beat AXI write bursts
+//       write: 8×16-beat AXI read bursts → sd_wr[i] → sd_buff stream out
 //
-//  3. Plumbing: img_mounted/size/readonly latch (HPS_STATUS block),
-//     RTC passthrough, and MiSTer joystick → APF cont1/2 remap.
+//  3. Plumbing: per-disk img_mounted/size/readonly latches (HPS_STATUS
+//     block: bit5 = MULTIDISK_CAP, always 1 on this RTL), RTC
+//     passthrough, and MiSTer joystick → APF cont1/2 remap.
 //
 // Handshake contract with axi_periph_slave (matches core_bridge_cmd):
 //   - target_dataslot_read/write are LEVEL signals, held until the periph
@@ -62,15 +68,19 @@ module hps_bridge #(
     input  wire [15:0] ioctl_dout,
     output wire        ioctl_wait,
 
-    // ── hps_io: disk image (S0) ─────────────────────────────────────
-    input  wire        img_mounted,    // strobe: (re)mount/unmount event
-    input  wire        img_readonly,
-    input  wire [63:0] img_size,
+    // ── hps_io: disk images (S0/S1/S2, VDNUM=3) ─────────────────────
+    input  wire [2:0]  img_mounted,    // per-disk strobe: (re)mount/unmount
+    input  wire        img_readonly,   // valid only during an img_mounted pulse
+    input  wire [63:0] img_size,       // valid only during an img_mounted pulse
 
-    output wire [31:0] sd_lba,
-    output reg         sd_rd,
-    output reg         sd_wr,
-    input  wire        sd_ack,
+    // hps_io's sd_lba is a per-disk array port; only the active op's
+    // element carries the LBA, the others are held at 0.
+    output wire [31:0] sd_lba0,
+    output wire [31:0] sd_lba1,
+    output wire [31:0] sd_lba2,
+    output reg  [2:0]  sd_rd,
+    output reg  [2:0]  sd_wr,
+    input  wire [2:0]  sd_ack,
     input  wire [7:0]  sd_buff_addr,   // 256 × 16-bit within one sector
     input  wire [15:0] sd_buff_dout,
     output reg  [15:0] sd_buff_din,
@@ -101,7 +111,9 @@ module hps_bridge #(
 
     // ── HPS status block (REGION_HPS read-back) ─────────────────────
     output wire [31:0] hps_status,
-    output wire [63:0] hps_img_size,
+    output wire [63:0] hps_img_size,    // disk 0 (S0) — legacy 0x04/0x08 view
+    output wire [63:0] hps_img1_size,   // disk 1 (S1)
+    output wire [63:0] hps_img2_size,   // disk 2 (S2)
     output wire [31:0] hps_boot_len,
     output wire        boot_rom_loaded,
 
@@ -146,21 +158,40 @@ assign m_rready = 1'b1;
 // Mount / RTC / joystick plumbing
 // ====================================================================
 
-reg        mounted_r;
-reg        readonly_r;
-reg [63:0] img_size_r;
+// Per-disk mount state (quasi-static: updated ONLY by img_mounted[n]
+// pulses).  hps_io pulses img_mounted[n] on both mount and unmount; an
+// unmount reports size 0.  img_size/img_readonly are SCALAR on hps_io
+// and valid only for the disk(s) whose pulse bit is high — hence the
+// per-bit latch here.
+reg [2:0]  mounted_r;
+reg [2:0]  readonly_r;
+reg [63:0] img_size0_r;
+reg [63:0] img_size1_r;
+reg [63:0] img_size2_r;
 
 always @(posedge clk or negedge reset_n) begin
     if (!reset_n) begin
-        mounted_r  <= 1'b0;
-        readonly_r <= 1'b0;
-        img_size_r <= 64'd0;
-    end else if (img_mounted) begin
-        // hps_io pulses img_mounted on both mount and unmount; an unmount
-        // reports size 0.
-        mounted_r  <= (img_size != 64'd0);
-        readonly_r <= img_readonly;
-        img_size_r <= img_size;
+        mounted_r   <= 3'b000;
+        readonly_r  <= 3'b000;
+        img_size0_r <= 64'd0;
+        img_size1_r <= 64'd0;
+        img_size2_r <= 64'd0;
+    end else begin
+        if (img_mounted[0]) begin
+            mounted_r[0]  <= (img_size != 64'd0);
+            readonly_r[0] <= img_readonly;
+            img_size0_r   <= img_size;
+        end
+        if (img_mounted[1]) begin
+            mounted_r[1]  <= (img_size != 64'd0);
+            readonly_r[1] <= img_readonly;
+            img_size1_r   <= img_size;
+        end
+        if (img_mounted[2]) begin
+            mounted_r[2]  <= (img_size != 64'd0);
+            readonly_r[2] <= img_readonly;
+            img_size2_r   <= img_size;
+        end
     end
 end
 
@@ -255,6 +286,7 @@ localparam S_BOOT_B     = 4'd13;  // boot word: response
 
 reg [3:0]  state;
 reg        op_is_write;
+reg [1:0]  op_disk;           // disk index of the op in flight (latched at dispatch)
 reg [31:0] op_lba_bytes;      // byte offset of current block in the image
 reg [31:0] op_dma_addr;       // SDRAM byte offset of current block
 reg [23:0] op_blocks_left;
@@ -270,10 +302,23 @@ reg        fetch_settled;     // BRAM read addr stable for one cycle
 reg        next_valid;        // next_word holds buf word [buf_rd_idx]
 reg [31:0] next_word;
 
-wire sd_ack_rise = sd_ack && !sd_ack_d;
-wire sd_ack_fall = !sd_ack && sd_ack_d;
+// Only the active op's ack bit is watched.  Explicit mux (not a
+// variable index) so an op_disk of 3 — impossible past validation, but
+// latched even on error dispatches — degrades to disk 0 instead of an
+// out-of-range select.
+wire sd_ack_cur  = (op_disk == 2'd1) ? sd_ack[1] :
+                   (op_disk == 2'd2) ? sd_ack[2] : sd_ack[0];
+wire sd_ack_rise = sd_ack_cur && !sd_ack_d;
+wire sd_ack_fall = !sd_ack_cur && sd_ack_d;
 
-assign sd_lba = {9'd0, op_lba_bytes[31:9]};
+// One-hot sd_rd/sd_wr drive for the op's disk.
+wire [2:0] op_disk_onehot = (op_disk == 2'd1) ? 3'b010 :
+                            (op_disk == 2'd2) ? 3'b100 : 3'b001;
+
+wire [31:0] op_lba = {9'd0, op_lba_bytes[31:9]};
+assign sd_lba0 = (op_disk == 2'd0) ? op_lba : 32'd0;
+assign sd_lba1 = (op_disk == 2'd1) ? op_lba : 32'd0;
+assign sd_lba2 = (op_disk == 2'd2) ? op_lba : 32'd0;
 
 // Read-address mux: HPS readback while serving sd_wr, AXI drain otherwise.
 wire [6:0] buf_rd_addr = (state == S_WR_REQ || state == S_WR_DATA)
@@ -315,13 +360,24 @@ wire ds_cmd_open  = target_dataslot_openfile | target_dataslot_getfile;
 wire ds_any_level = target_dataslot_read | target_dataslot_write |
                     target_dataslot_openfile | target_dataslot_getfile;
 
-// Request validation (slot 0, sector-aligned, in-bounds, mounted).
-wire [31:0] req_off = target_dataslot_slotoffset;
-wire [31:0] req_len = target_dataslot_length;
+// Request validation (disk index 0-2, sector-aligned, in-bounds,
+// mounted) — all against the INDEXED disk's latched state.
+// DS_SLOT_ID low 4 bits = disk index; any value > 2 (including nonzero
+// bits 15:4) is a bad request.  Old firmware always writes 0 → disk 0
+// (S0), byte-identical to the single-disk RTL.
+wire [31:0] req_off  = target_dataslot_slotoffset;
+wire [31:0] req_len  = target_dataslot_length;
+wire [1:0]  req_disk = target_dataslot_id[1:0];
 wire req_misaligned = (req_off[8:0] != 9'd0) || (req_len[8:0] != 9'd0) ||
                       (req_len == 32'd0);
-wire req_oob        = ({32'd0, req_off} + {32'd0, req_len}) > img_size_r;
-wire req_bad_slot   = (target_dataslot_id != 16'd0);
+wire        req_mounted  = (req_disk == 2'd1) ? mounted_r[1] :
+                           (req_disk == 2'd2) ? mounted_r[2] : mounted_r[0];
+wire        req_readonly = (req_disk == 2'd1) ? readonly_r[1] :
+                           (req_disk == 2'd2) ? readonly_r[2] : readonly_r[0];
+wire [63:0] req_img_size = (req_disk == 2'd1) ? img_size1_r :
+                           (req_disk == 2'd2) ? img_size2_r : img_size0_r;
+wire req_oob        = ({32'd0, req_off} + {32'd0, req_len}) > req_img_size;
+wire req_bad_slot   = (target_dataslot_id > 16'd2);
 
 // err codes surfaced to DS_STATUS[4:2]
 localparam [2:0] ERR_OK        = 3'd0;
@@ -346,10 +402,22 @@ assign bridge_wr_idle = (state != S_DRAIN_AW) && (state != S_DRAIN_W) &&
                         (state != S_BOOT_W)   && (state != S_BOOT_B)  &&
                         !boot_word_pending && !boot_skid_full;
 
-assign hps_status   = {27'd0, readonly_r,
-                       (target_dataslot_err != 3'd0),
-                       (state != S_IDLE), mounted_r, boot_loaded_r};
-assign hps_img_size = img_size_r;
+// Bits 4:0 keep their legacy (disk-0) semantics so old firmware sees
+// exactly the single-disk encoding.  Bit 5 = MULTIDISK_CAP: constant 1
+// on this RTL, reads 0 on the old single-disk RTL — the firmware
+// capability probe.
+assign hps_status   = {22'd0,
+                       readonly_r[2], readonly_r[1],           // 9:8
+                       mounted_r[2],  mounted_r[1],            // 7:6
+                       1'b1,                                   // 5 MULTIDISK_CAP
+                       readonly_r[0],                          // 4
+                       (target_dataslot_err != 3'd0),          // 3
+                       (state != S_IDLE),                      // 2
+                       mounted_r[0],                           // 1
+                       boot_loaded_r};                         // 0
+assign hps_img_size  = img_size0_r;
+assign hps_img1_size = img_size1_r;
+assign hps_img2_size = img_size2_r;
 
 // ====================================================================
 // Main FSM
@@ -358,8 +426,8 @@ assign hps_img_size = img_size_r;
 always @(posedge clk or negedge reset_n) begin
     if (!reset_n) begin
         state <= S_IDLE;
-        sd_rd <= 1'b0;
-        sd_wr <= 1'b0;
+        sd_rd <= 3'b000;
+        sd_wr <= 3'b000;
         sd_ack_d <= 1'b0;
         target_dataslot_ack  <= 1'b0;
         target_dataslot_done <= 1'b0;
@@ -368,6 +436,7 @@ always @(posedge clk or negedge reset_n) begin
         m_wvalid <= 1'b0; m_wdata <= 32'd0; m_wlast <= 1'b0;
         m_arvalid <= 1'b0; m_araddr <= 32'd0; m_arlen <= 8'd0;
         op_is_write <= 1'b0;
+        op_disk <= 2'd0;
         op_lba_bytes <= 32'd0;
         op_dma_addr <= 32'd0;
         op_blocks_left <= 24'd0;
@@ -391,7 +460,10 @@ always @(posedge clk or negedge reset_n) begin
         boot_skid <= 32'd0;
         ioctl_download_d <= 1'b0;
     end else begin
-        sd_ack_d <= sd_ack;
+        // Edge-detect only the op's ack bit.  op_disk changes only at
+        // dispatch, when no transfer is in flight (all acks low), so the
+        // history bit can never mix two disks' acks.
+        sd_ack_d <= sd_ack_cur;
         ioctl_download_d <= ioctl_download;
 
         // ── boot.rom ingest.  This block is the SINGLE writer of
@@ -476,19 +548,29 @@ always @(posedge clk or negedge reset_n) begin
             end else if (ds_cmd_read || ds_cmd_write) begin
                 target_dataslot_ack <= 1'b1;
                 op_is_write    <= ds_cmd_write;
+                op_disk        <= req_disk;
                 op_lba_bytes   <= req_off;
                 op_dma_addr    <= target_dataslot_bridgeaddr;
                 op_blocks_left <= req_len[31:9] == 23'd0 ? 24'd1
                                                          : {1'b0, req_len[31:9]};
-                if (!mounted_r) begin
-                    target_dataslot_err <= ERR_NOMOUNT;
-                    target_dataslot_done <= 1'b1;
-                    state <= S_DONE;
-                end else if (req_bad_slot || req_misaligned || req_oob) begin
+                // A bad index fails BADREQ before any per-disk state is
+                // consulted (the muxes would alias index 3 onto disk 0).
+                // For valid indices the order matches the legacy RTL:
+                // NOMOUNT, then BADREQ (align/OOB), then READONLY — so
+                // disk-0 ops behave byte-identically.
+                if (req_bad_slot) begin
                     target_dataslot_err <= ERR_BADREQ;
                     target_dataslot_done <= 1'b1;
                     state <= S_DONE;
-                end else if (ds_cmd_write && readonly_r) begin
+                end else if (!req_mounted) begin
+                    target_dataslot_err <= ERR_NOMOUNT;
+                    target_dataslot_done <= 1'b1;
+                    state <= S_DONE;
+                end else if (req_misaligned || req_oob) begin
+                    target_dataslot_err <= ERR_BADREQ;
+                    target_dataslot_done <= 1'b1;
+                    state <= S_DONE;
+                end else if (ds_cmd_write && req_readonly) begin
                     target_dataslot_err <= ERR_READONLY;
                     target_dataslot_done <= 1'b1;
                     state <= S_DONE;
@@ -502,7 +584,10 @@ always @(posedge clk or negedge reset_n) begin
                         m_arlen   <= 8'd15;
                         state <= S_WR_FILL;
                     end else begin
-                        sd_rd <= 1'b1;
+                        // req_disk is validated 0-2 here; op_disk latches
+                        // the same value this cycle.
+                        sd_rd <= (req_disk == 2'd1) ? 3'b010 :
+                                 (req_disk == 2'd2) ? 3'b100 : 3'b001;
                         state <= S_RD_REQ;
                     end
                 end
@@ -546,11 +631,11 @@ always @(posedge clk or negedge reset_n) begin
         S_RD_REQ: begin
             wd_count <= wd_count + 28'd1;
             if (sd_ack_rise) begin
-                sd_rd <= 1'b0;
+                sd_rd <= 3'b000;
                 wd_count <= 28'd0;
                 state <= S_RD_DATA;
             end else if (wd_count == SD_TIMEOUT) begin
-                sd_rd <= 1'b0;
+                sd_rd <= 3'b000;
                 target_dataslot_err <= ERR_TIMEOUT;
                 target_dataslot_done <= 1'b1;
                 state <= S_DONE;
@@ -656,7 +741,7 @@ always @(posedge clk or negedge reset_n) begin
                         target_dataslot_done <= 1'b1;
                         state <= S_DONE;
                     end else if (burst_idx == 3'd7) begin
-                        sd_wr <= 1'b1;
+                        sd_wr <= op_disk_onehot;
                         wd_count <= 28'd0;
                         state <= S_WR_REQ;
                     end else begin
@@ -671,11 +756,11 @@ always @(posedge clk or negedge reset_n) begin
         S_WR_REQ: begin
             wd_count <= wd_count + 28'd1;
             if (sd_ack_rise) begin
-                sd_wr <= 1'b0;
+                sd_wr <= 3'b000;
                 wd_count <= 28'd0;
                 state <= S_WR_DATA;
             end else if (wd_count == SD_TIMEOUT) begin
-                sd_wr <= 1'b0;
+                sd_wr <= 3'b000;
                 target_dataslot_err <= ERR_TIMEOUT;
                 target_dataslot_done <= 1'b1;
                 state <= S_DONE;
@@ -710,7 +795,7 @@ always @(posedge clk or negedge reset_n) begin
                     m_arlen   <= 8'd15;
                     state <= S_WR_FILL;
                 end else begin
-                    sd_rd <= 1'b1;
+                    sd_rd <= op_disk_onehot;
                     state <= S_RD_REQ;
                 end
             end

@@ -222,9 +222,14 @@ axi_periph_slave dut (
     .target_dataslot_ack (target_dataslot_ack),
     .target_dataslot_done(target_dataslot_done),
     .target_dataslot_err (target_dataslot_err),
-    .hps_status          (32'd0),
-    .hps_img_size        (64'd0),
-    .hps_boot_len        (32'd0),
+    // Distinct constants so the REGION_HPS word decode (req_addr[5:2])
+    // can be verified by readback — see test_hps_region_decode() in
+    // tb_axi_periph_main.cpp.
+    .hps_status          (32'h0000_0125),
+    .hps_img_size        (64'h1111_2222_3333_4444),
+    .hps_boot_len        (32'h000A_BC00),
+    .hps_img1_size       (64'h5555_6666_7777_8888),
+    .hps_img2_size       (64'h9999_AAAA_BBBB_CCCC),
     .bridge_wr_idle      (bridge_wr_idle),
     .bridge_dbg_wcnt     (32'd0),
 

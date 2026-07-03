@@ -5,7 +5,17 @@
 //------------------------------------------------------------------------------
 
 //
-// tb_system.v — full CPU + SDRAM + CRAM0 + BRAM sim for v2 architecture.
+// tb_system_sdram.v — tb_system with the REAL MiSTer SDRAM back-end.
+//
+// Same top-level as tb_system.v (module name kept: tb_system) except the
+// idealized sdram_fast_model is replaced by the real chain:
+//     axi_sdram_slave → pulse adapter → io_sdram (mister copy, DQ-split)
+//         → sdram_model_full (cycle-accurate chip, refresh-enforced)
+// plus a scanout burst_rd injection port at io_sdram (the MiSTer video
+// scanout enters BELOW the AXI fabric on hardware) and observation taps
+// for a C++ R-beat data checker.  Purpose: reproduce the MiSTer
+// kernel-layout boot lottery (suspected i-fetch corruption/hang under
+// concurrent scanout) in simulation.
 //
 // Brings up:
 //   - OpenFpgaVexii CPU            (clk_cpu)
@@ -49,6 +59,92 @@ module tb_system (
     input  wire        bd_cram0_wr,
     input  wire [21:0] bd_cram0_addr,
     input  wire [31:0] bd_cram0_wdata,
+
+    // SDRAM chip-model backdoor: clocked preload writes + combinational
+    // live peek (the C++ checker compares every delivered R beat against
+    // the model's current content through this port).
+    input  wire        bd_sdram_we,
+    input  wire [23:0] bd_sdram_word_addr,
+    input  wire [31:0] bd_sdram_wdata,
+    input  wire [23:0] bd_sdram_rd_word_addr,
+    output wire [31:0] bd_sdram_rd_data,
+
+    // Scanout burst injection — drives io_sdram's burst_rd port at the
+    // real video cadence (C++-driven).  burst_addr is a HALFWORD address,
+    // burst_len counts 32-bit words (burst_32bit=1).
+    input  wire        inj_burst_rd,
+    input  wire [24:0] inj_burst_addr,
+    input  wire [10:0] inj_burst_len,
+    output wire [31:0] inj_burst_data,
+    output wire        inj_burst_data_valid,
+    output wire        inj_burst_data_done,
+
+    // M1 (CPU→arbiter) AXI observation taps for the R-beat checker
+    output wire        dbg_m1_arvalid,
+    output wire        dbg_m1_arready,
+    output wire [31:0] dbg_m1_araddr,
+    output wire [7:0]  dbg_m1_arlen,
+    output wire        dbg_m1_rvalid,
+    output wire        dbg_m1_rready,
+    output wire [31:0] dbg_m1_rdata,
+    output wire        dbg_m1_rlast,
+    output wire        dbg_m1_awvalid,
+    output wire        dbg_m1_awready,
+    output wire [31:0] dbg_m1_awaddr,
+
+    // Chip-model write-beat events (harness written-address bitmap)
+    output wire        dbg_model_wr_evt,
+    output wire [24:0] dbg_model_wr_hw_addr,
+    output wire [1:0]  dbg_model_wr_dqm,
+
+    // CPU-boundary per-master taps (i/mem/per as the CPU sees them) —
+    // catch response mis-routing that is invisible at M1 (data valid for
+    // the address presented downstream but delivered to the wrong master
+    // or wrong refill slot).
+    output wire        dbg_i_arvalid,
+    output wire        dbg_i_arready,
+    output wire [31:0] dbg_i_araddr,
+    output wire        dbg_i_arid,
+    output wire [7:0]  dbg_i_arlen,
+    output wire        dbg_i_rvalid,
+    output wire        dbg_i_rready,
+    output wire [31:0] dbg_i_rdata,
+    output wire        dbg_i_rid,
+    output wire        dbg_i_rlast,
+    output wire        dbg_mem_arvalid,
+    output wire        dbg_mem_arready,
+    output wire [31:0] dbg_mem_araddr,
+    output wire [1:0]  dbg_mem_arid,
+    output wire [7:0]  dbg_mem_arlen,
+    output wire        dbg_mem_rvalid,
+    output wire        dbg_mem_rready,
+    output wire [31:0] dbg_mem_rdata,
+    output wire [1:0]  dbg_mem_rid,
+    output wire        dbg_mem_rlast,
+    output wire        dbg_per_arvalid,
+    output wire        dbg_per_arready,
+    output wire [31:0] dbg_per_araddr,
+    output wire [7:0]  dbg_per_arlen,
+    output wire        dbg_per_rvalid,
+    output wire        dbg_per_rready,
+    output wire [31:0] dbg_per_rdata,
+    output wire        dbg_per_rlast,
+    output wire        dbg_slave_rd,
+    output wire        dbg_slave_wr,
+
+    // Arbiter→slave write-channel taps + chip write-beat data (ordered
+    // write-stream conformance checking in the harness)
+    output wire        dbg_aw_valid,
+    output wire        dbg_aw_ready,
+    output wire [31:0] dbg_aw_addr,
+    output wire [7:0]  dbg_aw_len,
+    output wire        dbg_w_valid,
+    output wire        dbg_w_ready,
+    output wire [31:0] dbg_w_data,
+    output wire [3:0]  dbg_w_strb,
+    output wire        dbg_w_last,
+    output wire        dbg_w_cont,
+    output wire [15:0] dbg_model_wr_data,
 
     // CPU debug hoists
     output wire [31:0] dbg_periph_araddr,
@@ -407,26 +503,88 @@ axi_sdram_slave sdram_axi_slave (
     .sdram_preload_wstrb(sdram_preload_wstrb)
 );
 
-sdram_fast_model sdram_mem (
-    .clk (clk_cpu),
+// ============================================================
+// Real MiSTer SDRAM back-end (replaces sdram_fast_model): the slave's
+// word ops cross the real io_sdram FSM — bank/row management, CAS
+// pipeline, refresh, and scanout burst arbitration — against a
+// cycle-accurate chip model, exactly as on hardware.
+// ============================================================
+wire        phy_cke, phy_clk, phy_cas, phy_ras, phy_we;
+wire [1:0]  phy_ba;
+wire [12:0] phy_a;
+wire [1:0]  phy_dqm;
+wire [15:0] ctrl_dq_out;
+wire        ctrl_dq_oe;     // unused (split-DQ shim drives port directly)
+wire [15:0] model_dq_out;
+wire        model_dq_oe;
+wire [15:0] dq_to_ctrl = model_dq_oe ? model_dq_out : 16'h0;
+wire [7:0]  dbg_io_sd;
+
+io_sdram sdram_ctrl (
+    .controller_clk(clk_cpu), .chip_clk(clk_cpu), .clk_90(clk_cpu),
     .reset_n(reset_n),
-    .word_rd            (word_rd_sd),
-    .word_wr            (word_wr_sd),
-    .word_addr          (word_addr_sd),
-    .word_data          (word_data_sd),
-    .word_wstrb         (word_wstrb_sd),
-    .word_data_next     (word_data_next_sd),
-    .word_wstrb_next    (word_wstrb_next_sd),
-    .word_burst_len     (word_burst_len_sd),
-    .word_burst_wr_len  (word_burst_wr_len_sd),
-    .word_q             (word_q_sd),
-    .word_busy          (word_busy_sd),
-    .word_q_valid       (word_q_valid_sd),
-    .word_wr_data_next  (word_wr_data_next_sd),
-    .word_wr_done       (word_wr_done_sd),
+    .phy_cke(phy_cke), .phy_clk(phy_clk),
+    .phy_cas(phy_cas), .phy_ras(phy_ras), .phy_we(phy_we),
+    .phy_ba(phy_ba), .phy_a(phy_a),
+    .phy_dq_in(dq_to_ctrl),
+    .phy_dq_out_port(ctrl_dq_out),
+    .phy_dq_oe_port(ctrl_dq_oe),
+    .phy_dqm(phy_dqm),
+    .burst_rd(inj_burst_rd), .burst_addr(inj_burst_addr),
+    .burst_len(inj_burst_len), .burst_32bit(1'b1),
+    .burst_data(inj_burst_data), .burst_data_valid(inj_burst_data_valid),
+    .burst_data_done(inj_burst_data_done),
+    .burstwr(1'b0), .burstwr_addr(25'b0), .burstwr_ready(),
+    .burstwr_strobe(1'b0), .burstwr_data(16'b0), .burstwr_done(1'b0),
+    .word_rd(word_rd_sd), .word_wr(word_wr_sd),
+    .word_addr(word_addr_sd), .word_data(word_data_sd), .word_wstrb(word_wstrb_sd),
+    .word_data_next(word_data_next_sd), .word_wstrb_next(word_wstrb_next_sd),
+    .word_burst_len(word_burst_len_sd), .word_burst_wr_len(word_burst_wr_len_sd),
+    .word_q(word_q_sd), .word_busy(word_busy_sd), .word_q_valid(word_q_valid_sd),
+    .word_wr_data_next(word_wr_data_next_sd),
+    .word_wr_done(word_wr_done_sd),
     .burst_wr_direct_data(sdram_next_wdata),
-    .burst_wr_direct_strb(sdram_next_wstrb)
+    .burst_wr_direct_strb(sdram_next_wstrb),
+    .dbg_io(dbg_io_sd)
 );
+
+sdram_model_full sdram_chip (
+    .clk(phy_clk), .cke(phy_cke), .cs_n(1'b0),
+    .ras_n(phy_ras), .cas_n(phy_cas), .we_n(phy_we),
+    .ba(phy_ba), .a(phy_a),
+    .dq_in(ctrl_dq_out),
+    .dq_out(model_dq_out), .dq_oe(model_dq_oe),
+    .dqm(phy_dqm),
+    .bd_we(bd_sdram_we), .bd_word_addr(bd_sdram_word_addr),
+    .bd_wdata(bd_sdram_wdata),
+    .bd_rd_word_addr(bd_sdram_rd_word_addr), .bd_rd_data(bd_sdram_rd_data),
+    .wr_evt(dbg_model_wr_evt), .wr_evt_hw_addr(dbg_model_wr_hw_addr),
+    .wr_evt_dqm(dbg_model_wr_dqm), .wr_evt_data(dbg_model_wr_data)
+);
+
+assign dbg_aw_valid = arb_awvalid;
+assign dbg_aw_ready = arb_awready;
+assign dbg_aw_addr  = arb_awaddr;
+assign dbg_aw_len   = arb_awlen;
+assign dbg_w_valid  = arb_wvalid;
+assign dbg_w_ready  = arb_wready;
+assign dbg_w_data   = arb_wdata;
+assign dbg_w_strb   = arb_wstrb;
+assign dbg_w_last   = arb_wlast;
+assign dbg_w_cont   = arb_wcont;
+
+// M1 observation taps (CPU master port into the SDRAM arbiter)
+assign dbg_m1_arvalid = cpu_sdram_arvalid;
+assign dbg_m1_arready = cpu_sdram_arready;
+assign dbg_m1_araddr  = cpu_sdram_araddr;
+assign dbg_m1_arlen   = cpu_sdram_arlen;
+assign dbg_m1_rvalid  = cpu_sdram_rvalid;
+assign dbg_m1_rready  = cpu_sdram_rready;
+assign dbg_m1_rdata   = cpu_sdram_rdata;
+assign dbg_m1_rlast   = cpu_sdram_rlast;
+assign dbg_m1_awvalid = cpu_sdram_awvalid;
+assign dbg_m1_awready = cpu_sdram_awready;
+assign dbg_m1_awaddr  = cpu_sdram_awaddr;
 
 // ============================================================
 // CRAM0 — CDC from clk_cpu to clk_74a, then word interface mux to
@@ -775,7 +933,7 @@ assign dbg_sdram_awaddr   = cpu_sdram_awaddr;
 assign dbg_sdram_awvalid  = cpu_sdram_awvalid;
 assign dbg_periph_state   = periph.state;
 assign dbg_sdram_slave_state = sdram_axi_slave.state;
-assign dbg_sdram_model_state = sdram_mem.state;
+assign dbg_sdram_model_state = dbg_io_sd[3:0];
 assign dbg_sdram_model_busy  = word_busy_sd;
 assign dbg_arb_grant_cpu     = (sdram_arb.grant == 2'd1);
 assign dbg_arb_state         = sdram_arb.arb_state;
@@ -786,5 +944,37 @@ assign dbg_word_wr_sd        = word_wr_sd;
 assign dbg_word_addr_sd      = word_addr_sd;
 assign dbg_word_burst_len_sd = word_burst_len_sd;
 assign dbg_word_q_valid_sd   = word_q_valid_sd;
+
+// CPU-boundary taps (hierarchical refs into cpu_system internals)
+assign dbg_i_arvalid   = cpu_sys.i_arvalid_cpu;
+assign dbg_i_arready   = cpu_sys.i_arready_cpu;
+assign dbg_i_araddr    = cpu_sys.i_araddr_cpu;
+assign dbg_i_arid      = cpu_sys.i_arid_cpu;
+assign dbg_i_arlen     = cpu_sys.i_arlen_cpu;
+assign dbg_i_rvalid    = cpu_sys.i_rvalid_cpu;
+assign dbg_i_rready    = cpu_sys.i_rready_cpu;
+assign dbg_i_rdata     = cpu_sys.i_rdata_cpu;
+assign dbg_i_rid       = cpu_sys.i_rid_cpu;
+assign dbg_i_rlast     = cpu_sys.i_rlast_cpu;
+assign dbg_mem_arvalid = cpu_sys.mem_arvalid_cpu;
+assign dbg_mem_arready = cpu_sys.mem_arready_cpu;
+assign dbg_mem_araddr  = cpu_sys.mem_araddr_cpu;
+assign dbg_mem_arid    = cpu_sys.mem_arid_cpu;
+assign dbg_mem_arlen   = cpu_sys.mem_arlen_cpu;
+assign dbg_mem_rvalid  = cpu_sys.mem_rvalid_cpu;
+assign dbg_mem_rready  = cpu_sys.mem_rready_cpu;
+assign dbg_mem_rdata   = cpu_sys.mem_rdata_cpu;
+assign dbg_mem_rid     = cpu_sys.mem_rid_cpu;
+assign dbg_mem_rlast   = cpu_sys.mem_rlast_cpu;
+assign dbg_per_arvalid = cpu_sys.per_arvalid_cpu;
+assign dbg_per_arready = cpu_sys.per_arready_cpu;
+assign dbg_per_araddr  = cpu_sys.per_araddr_cpu;
+assign dbg_per_arlen   = cpu_sys.per_arlen_cpu;
+assign dbg_per_rvalid  = cpu_sys.per_rvalid_cpu;
+assign dbg_per_rready  = cpu_sys.per_rready_cpu;
+assign dbg_per_rdata   = cpu_sys.per_rdata_cpu;
+assign dbg_per_rlast   = cpu_sys.per_rlast_cpu;
+assign dbg_slave_rd    = sdram_rd;
+assign dbg_slave_wr    = sdram_wr;
 
 endmodule

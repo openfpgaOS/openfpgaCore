@@ -35,7 +35,9 @@ output  wire            phy_ras,
 output  wire            phy_we,
 output  reg     [1:0]   phy_ba,
 output  reg     [12:0]  phy_a,
-inout   wire    [15:0]  phy_dq,
+input   wire    [15:0]  phy_dq_in,
+output  wire    [15:0]  phy_dq_out_port,
+output  wire            phy_dq_oe_port,
 output  reg     [1:0]   phy_dqm,
 
 input   wire            burst_rd, // must be synchronous to clk_ram
@@ -82,7 +84,8 @@ output  wire    [7:0]   dbg_io
 
     // tristate for DQ
     reg             phy_dq_oe;
-    assign          phy_dq = phy_dq_oe ? phy_dq_out : 16'bZZZZZZZZZZZZZZZZ;
+    assign phy_dq_out_port = phy_dq_out;
+assign phy_dq_oe_port = phy_dq_oe;
     reg     [15:0]  phy_dq_out;
 
     reg     [2:0]   cmd;
@@ -287,7 +290,7 @@ assign dbg_io = {1'b0, (refresh_pending != 2'd0), state[5:0]};
 
     reg     [15:0]  phy_dq_latched;
 always @(posedge controller_clk) begin
-    phy_dq_latched <= phy_dq;
+    phy_dq_latched <= phy_dq_in;
 end
 
 

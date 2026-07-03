@@ -213,6 +213,11 @@ static bool load_os_bin(const char *path) {
         uint32_t sdram_idx = (SDRAM_OS_WORD + w) & SDRAM_MEM_MASK;
         tb->rootp->tb_system->sdram_mem__DOT__mem[sdram_idx] = v;
     }
+    // Sim boot mailbox at 0x13FFFFF0: 'OSSZ' magic + true image size so
+    // the bootloader can locate the OSE2 metadata block (image-carried
+    // entry + bss bounds; legacy baked-symbol fallback when absent).
+    tb->rootp->tb_system->sdram_mem__DOT__mem[(0x13FFFFF0u / 4u) & SDRAM_MEM_MASK] = 0x5A53534Fu;
+    tb->rootp->tb_system->sdram_mem__DOT__mem[(0x13FFFFF4u / 4u) & SDRAM_MEM_MASK] = (uint32_t)sz;
     std::printf("Loaded %zu bytes (%zu words) of os.bin into CRAM0 and SDRAM@0x10320000\n",
                 sz, words);
     return true;

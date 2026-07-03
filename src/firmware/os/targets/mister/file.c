@@ -27,6 +27,27 @@
  * fopen-by-name works exactly as on Pocket.  Saves never resolve through
  * the registry (save_slot_from_filename parses "*_N.sav" first), so the
  * fixed slot_N.sav backing names are never visible to apps.
+ *
+ * Multi-vhd model (multidisk-capable RTL): up to three images mount as
+ * FatFs volumes, one per blockdev disk index:
+ *
+ *   volume 0  S0 family library (or the legacy all-in-one image)
+ *   volume 1  S1 writable instance volume (os.ini, saves, config)
+ *   volume 2  S2 borrow library
+ *
+ * By-name and fixed-slot resolution searches mounted volumes S1 -> S2 -> S0
+ * (os.ini prefers 1:/os.ini then 0:/os.ini); every nonvolatile write slot
+ * (8, 9, 10-19) pins to volume 1 while in instance mode (multidisk cap AND
+ * S1 mounted), else to volume 0.  Cross-volume duplicate basenames register
+ * once (first volume in search order wins), so an S1 file shadows S2/S0.
+ * Names the 16-entry dynamic table can't hold (a 60+-file library) are
+ * resolved on demand by of_file_resolve_name() into overflow slot ids
+ * (32+), which the kernel uses as a registry-miss fall-through.
+ *
+ * Legacy: with the multidisk cap clear (old RTL) or only S0 mounted, every
+ * path resolves on volume 0 exactly as the single-volume code did ("0:" is
+ * FatFs's default drive), no cross-volume probing happens, and behavior is
+ * unchanged.
  */
 
 #include "file.h"
@@ -46,10 +67,23 @@
 #define DYN_SLOT_FIRST_LOW  4u    /* dynamic ids 4..6 first (Pocket layout), */
 #define DYN_SLOT_FIRST_HIGH 20u   /* then 20..31 */
 #define DYN_SLOT_END        32u
+/* Overflow name slots: ids handed out by of_file_resolve_name() when a
+ * basename isn't held by the dynamic table (the kernel registry tops out
+ * at 32 entries / 16 dyn ids — a 60+-file library needs more).  Ids are
+ * stable for the app's lifetime (never rebound while fds / the kernel io
+ * cache may reference them); the table resets on init/relaunch only. */
+#define OVF_SLOT_FIRST      DYN_SLOT_END   /* 32.. */
+#define OVF_SLOT_COUNT      64u
 #define MISTER_INSTANCE_ROOT_MAX 48u   /* "/games/<name>" */
-#define MISTER_PATH_MAX          96u   /* instance_root + "/saves/slot_N.sav" */
-/* Dynamic-slot stored path must hold a full instance-relative path
- * (instance_root + "/assets/" + filename), so it tracks MISTER_PATH_MAX. */
+#define MISTER_PATH_MAX          100u  /* "N:" + instance_root + longest leaf */
+/* Path budget: the "N:" volume prefix (2 chars) + a full instance root +
+ * the longest fixed leaf must fit every pathbuf[MISTER_PATH_MAX]. */
+_Static_assert(2u + (MISTER_INSTANCE_ROOT_MAX - 1u)
+                  + sizeof("/config/duke3d.cfg") <= MISTER_PATH_MAX,
+               "MISTER_PATH_MAX too small for volume-prefixed slot paths");
+/* Dynamic-slot stored path must hold a full volume-prefixed path
+ * ("N:" + instance_root + "/assets/" + filename), so it tracks
+ * MISTER_PATH_MAX.  Longer filenames truncate exactly as before. */
 #define DYN_NAME_MAX        MISTER_PATH_MAX
 
 /* os.bin staging copy, read through the uncached alias so the CPU never
@@ -59,9 +93,20 @@
 
 /* ---------------------------------------------------------------------- */
 
-static FATFS fat_volume;
-static enum { FS_UNMOUNTED, FS_MOUNTED, FS_FAILED } fs_state;
-static int fs_prev_present;
+typedef enum { FS_UNMOUNTED, FS_MOUNTED, FS_FAILED } fs_state_t;
+
+static FATFS      fat_volume[FF_VOLUMES];
+static fs_state_t fs_state[FF_VOLUMES];
+static int        fs_prev_present[FF_VOLUMES];
+
+/* FatFs logical-drive prefixes, indexed by volume. */
+static const char *const vol_drv[FF_VOLUMES] = { "0:", "1:", "2:" };
+
+/* By-name / fixed-slot search order: S1 instance -> S2 borrow -> S0 family.
+ * os.ini has its own S1 -> S0 order (the borrow library never carries the
+ * launch config). */
+static const uint8_t vol_order_game[3]  = { 1, 2, 0 };
+static const uint8_t vol_order_osini[2] = { 1, 0 };
 
 typedef struct {
     uint32_t slot_id;
@@ -71,6 +116,26 @@ typedef struct {
 static dyn_slot_t dyn_slots[16];
 static int dyn_slot_count;
 static int dyn_enumerated;
+/* First dyn index belonging to the volume currently being enumerated —
+ * entries below it came from earlier (higher-priority) volumes and dedup
+ * new registrations by basename; entries at/above it are same-volume and
+ * keep the historical no-dedup behavior. */
+static int dyn_vol_start;
+
+/* Overflow name slots (see OVF_SLOT_FIRST above).  path[0]=='\0' = free;
+ * id = OVF_SLOT_FIRST + index. */
+static char ovf_paths[OVF_SLOT_COUNT][DYN_NAME_MAX];
+static int  ovf_count;
+
+/* By-name config slots (hal/file.h of_file_config_slot): per-game settings
+ * files opened for writing by NAME (fopen("doom.cfg","wb")).  Only the LEAF
+ * name is stored; slot_path() builds "N:" + instance_root + "/config/<name>"
+ * live against nv_volume(), so the binding follows the mount/instance state
+ * exactly like the fixed config slots 8/9 and writes can never land on a
+ * library volume.  id = OF_FILE_CFG_SLOT_BASE + index. */
+#define CFG_NAME_MAX 32u
+static char cfg_names[OF_FILE_CFG_SLOT_COUNT][CFG_NAME_MAX];
+static int  cfg_count;
 
 typedef struct {
     uint32_t slot_id;   /* 0 = empty */
@@ -119,17 +184,21 @@ static void fil_cache_drop_all(void) {
     }
 }
 
-static int ensure_mounted(void) {
-    int present = of_blockdev_present();
+static int ensure_vol_mounted(unsigned vol) {
+    int present = of_blockdev_present(vol);
 
-    /* Image came or went — restart the mount state machine. */
-    if (present != fs_prev_present) {
-        fs_prev_present = present;
-        if (fs_state == FS_MOUNTED || fs_state == FS_FAILED) {
+    /* Image came or went — restart this volume's mount state machine.
+     * Slot->volume bindings can change under any transition (a slot that
+     * resolved on S0 may now shadow-resolve on S1), so the whole shared
+     * FIL cache is dropped, not just this volume's handles — exactly the
+     * conservative reset the single-volume code did. */
+    if (present != fs_prev_present[vol]) {
+        fs_prev_present[vol] = present;
+        if (fs_state[vol] == FS_MOUNTED || fs_state[vol] == FS_FAILED) {
             fil_cache_drop_all();
-            f_unmount("");
+            f_unmount(vol_drv[vol]);
         }
-        fs_state = FS_UNMOUNTED;
+        fs_state[vol] = FS_UNMOUNTED;
         dyn_enumerated = 0;
         dyn_slot_count = 0;
         size_memo_invalidate();
@@ -137,20 +206,47 @@ static int ensure_mounted(void) {
 
     if (!present)
         return 0;
-    if (fs_state == FS_MOUNTED)
+    if (fs_state[vol] == FS_MOUNTED)
         return 1;
-    if (fs_state == FS_FAILED)
+    if (fs_state[vol] == FS_FAILED)
         return 0;
 
-    FRESULT fr = f_mount(&fat_volume, "", 1);
+    FRESULT fr = f_mount(&fat_volume[vol], vol_drv[vol], 1);
     if (fr != FR_OK) {
-        of_term_printf("[file] FAT mount failed (%d)\n", (int)fr);
-        fs_state = FS_FAILED;
+        of_term_printf("[file] FAT mount failed on %s (%d)\n",
+                       vol_drv[vol], (int)fr);
+        fs_state[vol] = FS_FAILED;
         return 0;
     }
 
-    fs_state = FS_MOUNTED;
+    fs_state[vol] = FS_MOUNTED;
     return 1;
+}
+
+/* Refresh every volume's mount state machine; 1 if ANY volume is usable.
+ * Absent S1/S2 (or a capability-less bitstream, where their present bits
+ * read 0) simply stay unmounted — never an error. */
+static int ensure_mounted(void) {
+    int any = 0;
+    for (unsigned vol = 0; vol < FF_VOLUMES; vol++)
+        any |= ensure_vol_mounted(vol);
+    return any;
+}
+
+static int vol_mounted(unsigned vol) {
+    return fs_state[vol] == FS_MOUNTED;
+}
+
+/* Instance mode: multidisk-capable RTL with the S1 instance volume
+ * mounted.  All nonvolatile writes (saves + config) pin to volume 1 then;
+ * otherwise they stay on volume 0 (legacy).  Callers must have run
+ * ensure_mounted() first. */
+static int instance_mode(void) {
+    return of_blockdev_multidisk_cap() && vol_mounted(1);
+}
+
+static unsigned nv_volume(void) {
+    return instance_mode() ? 1u : 0u;
 }
 
 /* Small local case-insensitive compare (kernel's stricmp is static). */
@@ -165,9 +261,27 @@ static int name_ieq(const char *a, const char *b) {
     return *a == *b;
 }
 
+/* Basename of a stored (volume-prefixed) path. */
+static const char *stored_basename(const char *path) {
+    const char *base = path;
+    for (const char *p = path; *p; p++)
+        if (*p == '/') base = p + 1;
+    return base;
+}
+
 static int dyn_register(const char *dir, const char *name) {
     if (dyn_slot_count >= (int)(sizeof(dyn_slots) / sizeof(dyn_slots[0])))
         return -1;
+
+    /* Cross-volume shadow: a basename already registered by an earlier
+     * (higher-priority) volume wins; the duplicate is not re-registered
+     * and does not consume a dyn slot.  Same-volume duplicates (across
+     * /, /assets/, /config/) keep the historical no-dedup behavior so a
+     * legacy single-volume image enumerates byte-identically. */
+    for (int i = 0; i < dyn_vol_start; i++) {
+        if (name_ieq(stored_basename(dyn_slots[i].path), name))
+            return 0;
+    }
 
     uint32_t id;
     int low_used = 0, high_used = 0;
@@ -200,20 +314,62 @@ static int dyn_register(const char *dir, const char *name) {
 /* Optional per-instance root for the game's files, e.g. "/games/Quake".
  * Empty (the default) selects the legacy single-game layout where files live
  * at the image root.  The launcher (menu.elf / Arch-A relaunch) sets this
- * before switching into an instance; with it empty every join_root() result
- * is byte-identical to the pre-instance paths, so existing single-game images
- * are unaffected. */
+ * before switching into an instance; with it empty every vol_join() result
+ * is "N:" + the pre-instance path, so existing single-game images are
+ * unaffected (an unprefixed path and a "0:" path name the same file). */
 static char instance_root[MISTER_INSTANCE_ROOT_MAX];
 
-/* Join instance_root + leaf (leaf begins with '/') into buf. */
-static const char *join_root(const char *leaf, char *buf, uint32_t max) {
+/* "V:" + (optional instance_root) + leaf (leaf begins with '/') into buf. */
+static const char *vol_join_ex(unsigned vol, int with_root, const char *leaf,
+                               char *buf, uint32_t max) {
     uint32_t pos = 0;
-    for (uint32_t i = 0; instance_root[i] && pos < max - 1u; i++)
-        buf[pos++] = instance_root[i];
+    if (max < 3u) {
+        if (max) buf[0] = '\0';
+        return buf;
+    }
+    buf[pos++] = (char)('0' + vol);
+    buf[pos++] = ':';
+    if (with_root)
+        for (uint32_t i = 0; instance_root[i] && pos < max - 1u; i++)
+            buf[pos++] = instance_root[i];
     for (uint32_t i = 0; leaf[i] && pos < max - 1u; i++)
         buf[pos++] = leaf[i];
     buf[pos] = '\0';
     return buf;
+}
+
+static const char *vol_join(unsigned vol, const char *leaf,
+                            char *buf, uint32_t max) {
+    return vol_join_ex(vol, 1, leaf, buf, max);
+}
+
+/* Resolve a leaf across mounted volumes in `order`, preferring the first
+ * volume where the file exists (f_stat).  With zero or one volume mounted
+ * this collapses to a plain path build with NO extra FAT walks, so legacy
+ * single-image behavior (and cost) is unchanged.  When the file exists on
+ * no volume, the path on the first mounted volume in order is returned so
+ * open/stat fail there exactly as they would today. */
+static const char *resolve_search(const uint8_t *order, unsigned n,
+                                  const char *leaf, char *buf, uint32_t max) {
+    int first = -1, mounted = 0;
+    for (unsigned i = 0; i < n; i++) {
+        if (!vol_mounted(order[i]))
+            continue;
+        if (first < 0) first = (int)order[i];
+        mounted++;
+    }
+    if (mounted <= 1)
+        return vol_join(first < 0 ? 0u : (unsigned)first, leaf, buf, max);
+
+    for (unsigned i = 0; i < n; i++) {
+        unsigned vol = order[i];
+        if (!vol_mounted(vol))
+            continue;
+        FILINFO fno;
+        if (f_stat(vol_join(vol, leaf, buf, max), &fno) == FR_OK)
+            return buf;
+    }
+    return vol_join((unsigned)first, leaf, buf, max);
 }
 
 static void enumerate_dir(const char *dir) {
@@ -244,10 +400,20 @@ static void ensure_enumerated(void) {
     if (dyn_enumerated || !ensure_mounted())
         return;
     dyn_enumerated = 1;
-    /* Enumerate the active instance's tree (root when no instance is set). */
+    /* Enumerate each mounted volume's tree in search order (S1 -> S2 -> S0)
+     * so an instance file shadows a borrow/family duplicate; within one
+     * volume: root when no instance is set, /assets/ for loose data, and
+     * /config/ because per-game settings (e.g. doom.cfg) open BY NAME. */
     char dirbuf[MISTER_PATH_MAX];
-    enumerate_dir(join_root("/", dirbuf, sizeof(dirbuf)));
-    enumerate_dir(join_root("/assets/", dirbuf, sizeof(dirbuf)));
+    for (unsigned i = 0; i < sizeof(vol_order_game); i++) {
+        unsigned vol = vol_order_game[i];
+        if (!vol_mounted(vol))
+            continue;
+        dyn_vol_start = dyn_slot_count;
+        enumerate_dir(vol_join(vol, "/", dirbuf, sizeof(dirbuf)));
+        enumerate_dir(vol_join(vol, "/assets/", dirbuf, sizeof(dirbuf)));
+        enumerate_dir(vol_join(vol, "/config/", dirbuf, sizeof(dirbuf)));
+    }
 }
 
 void of_file_set_instance_root(const char *root) {
@@ -262,6 +428,9 @@ void of_file_set_instance_root(const char *root) {
             i--;
     }
     instance_root[i] = '\0';
+    /* The root changes every slot's path resolution — a memoized size for
+     * the old tree must not answer for the new one. */
+    size_memo_invalidate();
 }
 
 const char *of_file_get_instance_root(void) {
@@ -281,6 +450,13 @@ void of_file_relaunch_reset(void) {
     /* Force the dynamic asset slots to re-enumerate for the next instance. */
     dyn_enumerated = 0;
     dyn_slot_count = 0;
+    dyn_vol_start = 0;
+    /* Overflow name bindings die with the app: syscall_init wipes the fd
+     * table and the io cache at relaunch, so no stale reference survives
+     * and the ids are free to rebind for the next app.  Named config
+     * bindings follow the same lifetime. */
+    ovf_count = 0;
+    cfg_count = 0;
     size_memo_invalidate();
     mister_fs_exit();
 }
@@ -339,14 +515,27 @@ int of_file_list_instances(char *names, uint32_t stride, uint32_t max) {
 /* Resolve a slot id to a FAT path.  Returns NULL for unmapped slots and for
  * the RAM-backed boot slot.  A game's own files — os.ini, app.elf, sound bank,
  * per-game settings, and saves — resolve under instance_root when an instance
- * is active; the shared config (8) is global across instances. */
+ * is active; the shared config (8) is global across instances.
+ *
+ * Volume policy (see file header): read-searchable slots (os.ini, app.elf,
+ * bank.ofsf) probe mounted volumes in search order; every nonvolatile write
+ * slot (8, 9, saves) pins to nv_volume() so writes NEVER land on a library
+ * volume — the S1 image preallocates those files, and a missing one fails
+ * loudly (save.c's durability invariant) instead of falling back. */
 static const char *slot_path(uint32_t slot_id, char *buf, uint32_t max) {
+    ensure_mounted();
+
     switch (slot_id) {
-    case 2:  return join_root("/os.ini", buf, max);
-    case 3:  return join_root("/app.elf", buf, max);
-    case 7:  return join_root("/bank.ofsf", buf, max);
-    case 8:  return "/config/shared.cfg";              /* shared across instances */
-    case 9:  return join_root("/config/duke3d.cfg", buf, max);
+    case 2:  return resolve_search(vol_order_osini, sizeof(vol_order_osini),
+                                   "/os.ini", buf, max);
+    case 3:  return resolve_search(vol_order_game, sizeof(vol_order_game),
+                                   "/app.elf", buf, max);
+    case 7:  return resolve_search(vol_order_game, sizeof(vol_order_game),
+                                   "/bank.ofsf", buf, max);
+    case 8:  /* shared across instances (no instance_root), but per-world:
+              * the S1 instance volume owns it in instance mode. */
+             return vol_join_ex(nv_volume(), 0, "/config/shared.cfg", buf, max);
+    case 9:  return vol_join(nv_volume(), "/config/duke3d.cfg", buf, max);
     default: break;
     }
 
@@ -363,8 +552,30 @@ static const char *slot_path(uint32_t slot_id, char *buf, uint32_t max) {
         leaf[pos++] = (char)('0' + n);
         leaf[pos++] = '.'; leaf[pos++] = 's'; leaf[pos++] = 'a'; leaf[pos++] = 'v';
         leaf[pos] = '\0';
-        return join_root(leaf, buf, max);
+        return vol_join(nv_volume(), leaf, buf, max);
     }
+
+    if (slot_id >= OF_FILE_CFG_SLOT_BASE &&
+        slot_id < OF_FILE_CFG_SLOT_BASE + (uint32_t)cfg_count) {
+        /* "/config/" + bound leaf name, pinned to the nonvolatile volume
+         * (same policy as slots 8/9 — see the header comment above). */
+        _Static_assert(2u + (MISTER_INSTANCE_ROOT_MAX - 1u) + 8u + CFG_NAME_MAX
+                           <= MISTER_PATH_MAX,
+                       "MISTER_PATH_MAX too small for named config paths");
+        char leaf[8u + CFG_NAME_MAX];   /* "/config/" + name + NUL */
+        const char *pfx = "/config/";
+        const char *nm = cfg_names[slot_id - OF_FILE_CFG_SLOT_BASE];
+        uint32_t pos = 0;
+        while (pfx[pos]) { leaf[pos] = pfx[pos]; pos++; }
+        for (uint32_t k = 0; nm[k]; k++)
+            leaf[pos++] = nm[k];
+        leaf[pos] = '\0';
+        return vol_join(nv_volume(), leaf, buf, max);
+    }
+
+    if (slot_id >= OVF_SLOT_FIRST &&
+        slot_id < OVF_SLOT_FIRST + (uint32_t)ovf_count)
+        return ovf_paths[slot_id - OVF_SLOT_FIRST];
 
     ensure_enumerated();
     for (int i = 0; i < dyn_slot_count; i++) {
@@ -375,16 +586,161 @@ static const char *slot_path(uint32_t slot_id, char *buf, uint32_t max) {
     return (void *)0;
 }
 
+/* Directories searched for by-name resolution, mirroring enumerate_dir. */
+static const char *const resolve_dirs[3] = { "/", "/assets/", "/config/" };
+
+static int resolve_name_body(const char *name) {
+    if (!name || !name[0])
+        return -1;
+
+    ensure_enumerated();
+
+    /* Already held by a dynamic slot? */
+    for (int i = 0; i < dyn_slot_count; i++) {
+        if (name_ieq(stored_basename(dyn_slots[i].path), name))
+            return (int)dyn_slots[i].slot_id;
+    }
+    /* Already bound to an overflow slot?  Ids must stay stable — fds and
+     * the kernel io cache key on them — so a name never binds twice. */
+    for (int i = 0; i < ovf_count; i++) {
+        if (name_ieq(stored_basename(ovf_paths[i]), name))
+            return (int)(OVF_SLOT_FIRST + (uint32_t)i);
+    }
+
+    /* Names owned by fixed slots resolve through the registry, never here. */
+    if (name_ieq(name, "os.ini") || name_ieq(name, "app.elf") ||
+        name_ieq(name, "bank.ofsf") || name_ieq(name, "boot.rom"))
+        return -1;
+
+    if (ovf_count >= (int)OVF_SLOT_COUNT)
+        return -1;
+
+    /* Probe the search dirs on each mounted volume in S1 -> S2 -> S0 order
+     * and bind the first hit to a fresh overflow id. */
+    for (unsigned i = 0; i < sizeof(vol_order_game); i++) {
+        unsigned vol = vol_order_game[i];
+        if (!vol_mounted(vol))
+            continue;
+        for (unsigned d = 0; d < 3u; d++) {
+            char *buf = ovf_paths[ovf_count];
+            vol_join(vol, resolve_dirs[d], buf, DYN_NAME_MAX);
+            uint32_t pos = 0;
+            while (buf[pos]) pos++;
+            for (uint32_t k = 0; name[k] && pos < DYN_NAME_MAX - 1u; k++)
+                buf[pos++] = name[k];
+            buf[pos] = '\0';
+
+            FILINFO fno;
+            if (f_stat(buf, &fno) == FR_OK && !(fno.fattrib & AM_DIR))
+                return (int)(OVF_SLOT_FIRST + (uint32_t)ovf_count++);
+        }
+    }
+    return -1;
+}
+
+/* Registry-miss fall-through used by kernel/syscall.c: resolve a basename
+ * directly against the mounted volumes.  Returns a stable read-only slot
+ * id (dyn or overflow) or -1.  See hal/file.h. */
+int of_file_resolve_name(const char *name) {
+    mister_fs_enter();
+    int id = resolve_name_body(name);
+    mister_fs_exit();
+    return id;
+}
+
+/* ---- by-name config slots (see hal/file.h) --------------------------- */
+
+int mister_file_cfg_slot_valid(uint32_t slot_id) {
+    return slot_id >= OF_FILE_CFG_SLOT_BASE &&
+           slot_id < OF_FILE_CFG_SLOT_BASE + (uint32_t)cfg_count;
+}
+
+/* Evict cached READ handles that alias a named config file under its
+ * dyn/overflow registration (the /config tree is enumerated, so the same
+ * physical file can be reachable as both a read id and a config slot).
+ * FF_FS_LOCK refuses a writable open while any other handle to the file is
+ * live (FR_LOCKED), so the alias handle must be dropped before the config
+ * slot's own open. */
+static void cfg_drop_alias_handles(const char *name) {
+    uint32_t alias[2];
+    int n = 0;
+    for (int i = 0; i < dyn_slot_count && n < 2; i++)
+        if (name_ieq(stored_basename(dyn_slots[i].path), name))
+            alias[n++] = dyn_slots[i].slot_id;
+    for (int i = 0; i < ovf_count && n < 2; i++)
+        if (name_ieq(stored_basename(ovf_paths[i]), name))
+            alias[n++] = OVF_SLOT_FIRST + (uint32_t)i;
+    for (int a = 0; a < n; a++) {
+        for (int i = 0; i < FIL_CACHE_SLOTS; i++) {
+            if (fil_cache[i].slot_id == alias[a]) {
+                f_close(&fil_cache[i].fil);
+                fil_cache[i].slot_id = 0;
+            }
+        }
+    }
+}
+
+static int cfg_slot_body(const char *name) {
+    if (!ensure_mounted())
+        return -1;
+
+    /* Already bound — ids stay stable for the app's lifetime (fds and the
+     * kernel nv size cache key on them). */
+    for (int i = 0; i < cfg_count; i++)
+        if (name_ieq(cfg_names[i], name))
+            return (int)(OF_FILE_CFG_SLOT_BASE + (uint32_t)i);
+
+    if (cfg_count >= (int)OF_FILE_CFG_SLOT_COUNT)
+        return -1;
+
+    uint32_t len = 0;
+    while (name[len]) len++;
+    if (len == 0 || len >= CFG_NAME_MAX)
+        return -1;
+
+    /* The backing file must already exist ON THE PINNED VOLUME — the
+     * nonvolatile-write contract shared with slots 8/9: writes never land
+     * on a library volume, and files are never created at runtime.  A
+     * config the image builder didn't preallocate fails the open cleanly
+     * (the SDK tooling owns that gap). */
+    char leaf[8u + CFG_NAME_MAX];
+    const char *pfx = "/config/";
+    uint32_t pos = 0;
+    while (pfx[pos]) { leaf[pos] = pfx[pos]; pos++; }
+    for (uint32_t k = 0; k < len; k++)
+        leaf[pos++] = name[k];
+    leaf[pos] = '\0';
+
+    char pathbuf[MISTER_PATH_MAX];
+    FILINFO fno;
+    if (f_stat(vol_join(nv_volume(), leaf, pathbuf, sizeof(pathbuf)), &fno)
+            != FR_OK || (fno.fattrib & AM_DIR))
+        return -1;
+
+    for (uint32_t k = 0; k <= len; k++)
+        cfg_names[cfg_count][k] = name[k];
+    return (int)(OF_FILE_CFG_SLOT_BASE + (uint32_t)cfg_count++);
+}
+
+int of_file_config_slot(const char *name) {
+    if (!name || !name[0])
+        return -1;
+    /* Names owned by the fixed nonvolatile slots keep their fixed routes
+     * (kernel registry -> slot 8/9); binding them here would open the same
+     * file under two ids and trip FF_FS_LOCK. */
+    if (name_ieq(name, "shared.cfg") || name_ieq(name, "duke3d.cfg"))
+        return -1;
+    mister_fs_enter();
+    int id = cfg_slot_body(name);
+    mister_fs_exit();
+    return id;
+}
+
 /* Shared FIL handle cache.  Write opens are exclusive under FF_FS_LOCK, so
  * a cached read handle for the same slot is evicted before reopening
  * writable (and vice versa). */
 static FIL *open_slot_impl(uint32_t slot_id, int writable) {
     if (!ensure_mounted())
-        return (void *)0;
-
-    char pathbuf[MISTER_PATH_MAX];
-    const char *path = slot_path(slot_id, pathbuf, sizeof(pathbuf));
-    if (!path)
         return (void *)0;
 
     fil_cache_t *hit = (void *)0, *victim = (void *)0;
@@ -398,11 +754,19 @@ static FIL *open_slot_impl(uint32_t slot_id, int writable) {
             victim = c;
     }
 
+    /* Cache hit with a compatible mode: no path resolution at all — this
+     * keeps the per-chunk read path free of cross-volume f_stat probes. */
+    if (hit && (hit->writable == writable || (hit->writable && !writable))) {
+        hit->stamp = ++fil_stamp;
+        return &hit->fil;
+    }
+
+    char pathbuf[MISTER_PATH_MAX];
+    const char *path = slot_path(slot_id, pathbuf, sizeof(pathbuf));
+    if (!path)
+        return (void *)0;
+
     if (hit) {
-        if (hit->writable == writable || (hit->writable && !writable)) {
-            hit->stamp = ++fil_stamp;
-            return &hit->fil;
-        }
         /* Mode upgrade: reopen writable. */
         f_close(&hit->fil);
         hit->slot_id = 0;
@@ -415,6 +779,13 @@ static FIL *open_slot_impl(uint32_t slot_id, int writable) {
         f_close(&victim->fil);
         victim->slot_id = 0;
     }
+
+    /* A named config slot aliases a file that may also sit in the cache
+     * under its dyn/overflow READ id; FF_FS_LOCK would refuse this open
+     * (FR_LOCKED, writable case) while that handle lives. */
+    if (slot_id >= OF_FILE_CFG_SLOT_BASE &&
+        slot_id < OF_FILE_CFG_SLOT_BASE + (uint32_t)cfg_count)
+        cfg_drop_alias_handles(cfg_names[slot_id - OF_FILE_CFG_SLOT_BASE]);
 
     BYTE mode = writable ? (FA_READ | FA_WRITE) : FA_READ;
     FRESULT fr = f_open(&victim->fil, path, mode);
@@ -450,10 +821,15 @@ void mister_file_drop_slot(uint32_t slot_id) {
 
 void of_file_init(void) {
     of_blockdev_init();
-    fs_state = FS_UNMOUNTED;
-    fs_prev_present = -1;       /* force state machine through first call */
+    for (unsigned vol = 0; vol < FF_VOLUMES; vol++) {
+        fs_state[vol] = FS_UNMOUNTED;
+        fs_prev_present[vol] = -1;  /* force state machine through first call */
+    }
     dyn_enumerated = 0;
     dyn_slot_count = 0;
+    dyn_vol_start = 0;
+    ovf_count = 0;
+    cfg_count = 0;
     fil_stamp = 0;
     for (int i = 0; i < FIL_CACHE_SLOTS; i++)
         fil_cache[i].slot_id = 0;
@@ -466,9 +842,17 @@ void of_file_init(void) {
     mister_fs_enter();
     int mounted = ensure_mounted();
     mister_fs_exit();
-    if (mounted)
-        of_term_printf("[file] disk image mounted (%u MB)\n",
-                       (unsigned)(of_blockdev_size() >> 20));
+    if (mounted) {
+        if (vol_mounted(0))
+            of_term_printf("[file] disk image mounted (%u MB)\n",
+                           (unsigned)(of_blockdev_size(0) >> 20));
+        if (vol_mounted(1))
+            of_term_printf("[file] S1 instance volume mounted (%u MB)\n",
+                           (unsigned)(of_blockdev_size(1) >> 20));
+        if (vol_mounted(2))
+            of_term_printf("[file] S2 borrow volume mounted (%u MB)\n",
+                           (unsigned)(of_blockdev_size(2) >> 20));
+    }
 }
 
 /* MiSTer has no APF shutdown handshake — the framework hard-resets the
@@ -477,6 +861,13 @@ void of_file_init(void) {
  * completion.  Called periodically from IRQ context (kernel/irq.c). */
 void of_check_shutdown(void) {
     of_file_async_irq_service();
+}
+
+/* Boot finished: arm the DS ERR_TIMEOUT retry loop (see blockdev.h — it
+ * must stay OFF during init/probe so a not-yet-responding HPS fails fast
+ * instead of blank-screening the boot for minutes). */
+void of_file_boot_complete(void) {
+    of_blockdev_enable_retries();
 }
 
 /* ---------------------------------------------------------------------- */
@@ -521,7 +912,12 @@ static int fat_read_impl(uint32_t slot_id, uint32_t slot_offset,
 }
 
 static int fat_probe(void) {
-    return of_blockdev_present();
+    /* Any mounted image makes the FAT backend usable — an instance-only
+     * boot (S1 without a family library) still carries os.ini + app.elf. */
+    for (uint32_t disk = 0; disk < OF_BLOCKDEV_DISK_COUNT; disk++)
+        if (of_blockdev_present(disk))
+            return 1;
+    return 0;
 }
 
 static long fat_size_impl(uint32_t slot_id) {
@@ -671,9 +1067,43 @@ long of_file_flags(uint32_t slot_id) {
     return -1;
 }
 
+/* Logical text extent of a named config slot: bytes before the first
+ * 0x00/0xFF (the terminator the stale-tail zeroing in save.c maintains, and
+ * the preallocation fill).  The nv fd layer sizes read fds from this, so a
+ * reloaded config parses exactly what was written — never the 256 KB
+ * physical preallocation.  -1 = logically empty (matches the size64
+ * "empty slot" convention). */
+static int64_t cfg_logical_size(uint32_t slot_id) {
+    FIL *fil = open_slot_impl(slot_id, 0);
+    if (!fil)
+        return -1;
+    if (f_lseek(fil, 0) != FR_OK)
+        return -1;
+
+    int64_t extent = 0;
+    for (;;) {
+        uint8_t buf[512];
+        UINT br = 0;
+        if (f_read(fil, buf, sizeof(buf), &br) != FR_OK)
+            return -1;
+        for (UINT i = 0; i < br; i++) {
+            if (buf[i] == 0x00u || buf[i] == 0xFFu)
+                return extent > 0 ? extent : -1;
+            extent++;
+        }
+        if (br < sizeof(buf))
+            break;
+    }
+    return extent > 0 ? extent : -1;
+}
+
 static int64_t size64_body(uint32_t slot_id) {
     if (!ensure_mounted())
         return -1;
+
+    if (slot_id >= OF_FILE_CFG_SLOT_BASE &&
+        slot_id < OF_FILE_CFG_SLOT_BASE + (uint32_t)cfg_count)
+        return cfg_logical_size(slot_id);
 
     char pathbuf[MISTER_PATH_MAX];
     const char *path = slot_path(slot_id, pathbuf, sizeof(pathbuf));

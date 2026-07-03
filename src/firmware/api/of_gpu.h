@@ -486,9 +486,13 @@ static inline void _gpu_select_batch_buffer(uint32_t index) {
 }
 
 static inline void _gpu_wait_dma_idle_debug(void) {
+    /* Bounded like of_gpu_wait: a wedged doorbell DMA otherwise spins
+     * here forever with no diagnostic. */
     uint32_t dma_spins = 0;
-    while (GPU_STATUS & GPU_STATUS_DMA_BUSY)
-        dma_spins++;
+    while (GPU_STATUS & GPU_STATUS_DMA_BUSY) {
+        if (++dma_spins == 50000000u)
+            __builtin_trap();  /* → fatal_trap dumps GPU state */
+    }
     _gpu_batch_inflight_mask = 0;
     if (dma_spins) {
         _gpu_dbg_dma_waits++;
@@ -504,8 +508,10 @@ static inline void _gpu_wait_dma_desc_slot_debug(void) {
         return;
 
     uint32_t dma_spins = 0;
-    while (GPU_STATUS & GPU_STATUS_DMA_DESC_FULL)
-        dma_spins++;
+    while (GPU_STATUS & GPU_STATUS_DMA_DESC_FULL) {
+        if (++dma_spins == 50000000u)
+            __builtin_trap();  /* wedged DMA queue — see of_gpu_wait */
+    }
     if (dma_spins) {
         _gpu_dbg_dma_waits++;
         _gpu_dbg_dma_spin_iters += dma_spins;
@@ -575,13 +581,35 @@ static inline void _gpu_flush_cmd_stream(void) {
     uint32_t submit_words = _gpu_cmd_words;
     uint32_t submit_index = _gpu_batch_index;
 
-    _gpu_flush_cmd_cache_range(_gpu_batch_buf, submit_words * 4u);
-    _gpu_drain_cmd_writeback(submit_words * 4u);
+    /* Publish the staged commands to DRAM through the UNCACHED alias.
+     *
+     * The previous cbo.flush + same-master cached-readback "drain" was a
+     * timing heuristic, and it loses on MiSTer: the doorbell DMA has
+     * GPU-over-CPU priority at the SDRAM arbiter, and a dirty line whose
+     * writeback hadn't physically landed was read back by the GPU as the
+     * line's PREVIOUS content — valid-looking command words from two
+     * submissions ago in the same staging slot (screen-visible as stale
+     * replayed draws + contiguous missing column runs; same failure class
+     * as the HW-confirmed white-texel bug).  Uncached stores are ordered
+     * by construction: each completes on its AXI B-response through the
+     * same single-outstanding fabric the GPU's pull reads, so when the
+     * kick lands every word is in SDRAM.  The cached copy stays valid for
+     * the CPU (no invalidate), so emission reads/writes stay fast; the
+     * uncached copy below is the only publish step.  (_gpu_flush_cmd_
+     * cache_range/_gpu_drain_cmd_writeback above are retired from this
+     * path — kept only for reference.) */
+    {
+        volatile uint32_t *dst =
+            (volatile uint32_t *)of_uncached(_gpu_batch_buf);
+        for (uint32_t w = 0; w < submit_words; w++)
+            dst[w] = _gpu_batch_buf[w];
+    }
+    __asm__ volatile("fence" ::: "memory");
     _gpu_wait_dma_desc_slot_debug();
 
-    /* The writeback drain above is the data-visibility barrier.  The GPU MMIO
-     * doorbell registers sit on a single in-order peripheral path, so extra
-     * CPU fences between these volatile writes only add submit latency. */
+    /* The uncached publish above is the data-visibility barrier.  The GPU
+     * MMIO doorbell registers sit on a single in-order peripheral path, so
+     * extra CPU fences between these volatile writes only add latency. */
     GPU_DMA_SRC  = _gpu_batch_dma_addr;
     GPU_DMA_LEN  = submit_words;
     GPU_DMA_KICK = 1;
@@ -612,13 +640,18 @@ static inline void _gpu_ring_ensure(uint32_t bytes) {
     _gpu_wait_dma_idle_debug();
 
     {
+        /* Bounded like of_gpu_wait: if the GPU stops draining the ring
+         * (starved bus, wedged pipeline), the old unbounded spin froze
+         * the machine here silently — the ring fills within one frame,
+         * so a hang lands in this wait long before any fence wait. */
         uint32_t ring_spins = 0;
         do {
             ring_free = _gpu_ring_free_now();
             _gpu_note_ring_free(ring_free);
             if (ring_free >= bytes)
                 break;
-            ring_spins++;
+            if (++ring_spins == 50000000u)
+                __builtin_trap();  /* → fatal_trap dumps GPU state */
         } while (1);
         _gpu_dbg_ring_waits++;
         _gpu_dbg_ring_spin_iters += ring_spins;

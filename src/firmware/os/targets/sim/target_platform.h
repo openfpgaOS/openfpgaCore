@@ -68,6 +68,10 @@
 /* v2 memory arch: CRAM1 retired, CRAM0 on bridge clock. */
 #define OF_TARGET_CRAM0_BASE           0x30000000u
 #define OF_TARGET_CRAM_SIZE            (16u * 1024u * 1024u)
+/* Fast texture memory — mirrors the Pocket (see pocket/target_platform.h);
+ * the sim fabric does not model the chip, but the platform caps report the
+ * same size so caps-driven app paths match the Pocket in tb_system. */
+#define OF_TARGET_TEX_FAST_SIZE        (16u * 1024u * 1024u)
 #define OF_TARGET_CRAM0_BRIDGE         0x20000000u
 #define OF_TARGET_CRAM0_OS_OFFSET      0x00000000u
 #define OF_TARGET_CRAM0_PRESAVE_OFFSET 0x000C0000u

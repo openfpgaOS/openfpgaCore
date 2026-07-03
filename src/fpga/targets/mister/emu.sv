@@ -64,7 +64,11 @@ assign VIDEO_ARY = (!ar) ? 13'd3 : 13'd0;
 `include "build_id.v"
 localparam CONF_STR = {
 	"openfpgaOS;;",
-	"S0,VHDIMG,Mount Disk;",
+	// Sn index = hps_io disk/bit number = DS_SLOT_ID index in firmware:
+	// 0 = family/legacy image, 1 = per-instance image, 2 = borrow slot.
+	"S0,VHDIMG,Family Data;",
+	"S1,VHDIMG,Instance;",
+	"S2,VHDIMG,Extra Data;",
 	"-;",
 	"O[122:121],Aspect ratio,Original,Full Screen,[ARC1],[ARC2];",
 	"-;",
@@ -102,7 +106,24 @@ pll_vid pllv (
 	.locked   (pll_vid_locked)
 );
 
-wire reset_n = ~RESET & ~status[0] & pll_locked;
+// Auto-reset on image mount: mounting (or changing) a vhd in the OSD
+// pulses img_mounted[n]; restarting the core makes the OS re-read the
+// mounted set and launch the newly selected instance — no manual reset
+// needed.  img_size!=0 distinguishes mount from eject (eject alone does
+// not reset; the follow-up mount does).  The pulse is stretched well past
+// the reset synchronizer depth.  Note the framework re-announces
+// remembered mounts right after core load, so one benign extra reset
+// fires at startup (standard for MiSTer cores that reset on image load).
+reg [7:0] mount_reset_cnt = 8'd0;
+always @(posedge clk_cpu) begin
+	if ((|img_mounted) && img_size != 64'd0)
+		mount_reset_cnt <= 8'hFF;
+	else if (mount_reset_cnt != 8'd0)
+		mount_reset_cnt <= mount_reset_cnt - 8'd1;
+end
+wire mount_reset = (mount_reset_cnt != 8'd0);
+
+wire reset_n = ~RESET & ~status[0] & ~mount_reset & pll_locked;
 
 // clk_cpu-domain reset replicas (same split as core_top.v so fitter
 // placement is not constrained by one monolithic reset tree).
@@ -141,23 +162,36 @@ wire [26:0]  ioctl_addr;
 wire [15:0]  ioctl_dout;
 wire         ioctl_wait;
 
-wire         img_mounted;
+// Three virtual disks (VDNUM=3): S0 = family/legacy, S1 = instance,
+// S2 = borrow.  img_readonly/img_size stay scalar per the hps_io
+// contract (valid only for the active img_mounted[n] pulse bit);
+// hps_bridge latches them per disk.
+wire [2:0]   img_mounted;
 wire         img_readonly;
 wire [63:0]  img_size;
 
-wire [31:0]  sd_lba[1];
+wire [31:0]  sd_lba[3];
 // One 512-byte block per sd_rd/sd_wr — the sector engine's contract.
 // Tied explicitly so the HPS can never stream multi-block transfers
 // that would alias over the 256-word sector buffer.
-wire [5:0]   sd_blk_cnt[1];
+wire [5:0]   sd_blk_cnt[3];
 assign sd_blk_cnt[0] = 6'd0;
-wire         sd_rd;
-wire         sd_wr;
-wire         sd_ack;
+assign sd_blk_cnt[1] = 6'd0;
+assign sd_blk_cnt[2] = 6'd0;
+wire [2:0]   sd_rd;
+wire [2:0]   sd_wr;
+wire [2:0]   sd_ack;
 wire [12:0]  sd_buff_addr;
 wire [15:0]  sd_buff_dout;
-wire [15:0]  sd_buff_din[1];
+wire [15:0]  sd_buff_din[3];
 wire         sd_buff_wr;
+// The engine serializes one op at a time through one shared sector
+// buffer, so a single registered din stream feeds every array element;
+// hps_io picks by the acked disk (sdn_ack) and Quartus dedups the fanout.
+wire [15:0]  sd_buff_din_brg;
+assign sd_buff_din[0] = sd_buff_din_brg;
+assign sd_buff_din[1] = sd_buff_din_brg;
+assign sd_buff_din[2] = sd_buff_din_brg;
 
 wire [31:0]  joystick_0, joystick_1;
 wire [15:0]  joystick_l_analog_0, joystick_r_analog_0;
@@ -165,7 +199,7 @@ wire [15:0]  joystick_l_analog_1, joystick_r_analog_1;
 
 wire [32:0]  timestamp;
 
-hps_io #(.CONF_STR(CONF_STR), .WIDE(1), .VDNUM(1), .BLKSZ(2)) hps_io (
+hps_io #(.CONF_STR(CONF_STR), .WIDE(1), .VDNUM(3), .BLKSZ(2)) hps_io (
 	.clk_sys             (clk_cpu),
 	.HPS_BUS             (HPS_BUS),
 	.EXT_BUS             (),
@@ -224,6 +258,8 @@ wire        bridge_wr_idle;
 
 wire [31:0] hps_status;
 wire [63:0] hps_img_size;
+wire [63:0] hps_img1_size;
+wire [63:0] hps_img2_size;
 wire [31:0] hps_boot_len;
 wire        boot_rom_loaded;
 
@@ -277,13 +313,15 @@ hps_bridge #(
 	.img_readonly   (img_readonly),
 	.img_size       (img_size),
 
-	.sd_lba         (sd_lba[0]),
+	.sd_lba0        (sd_lba[0]),
+	.sd_lba1        (sd_lba[1]),
+	.sd_lba2        (sd_lba[2]),
 	.sd_rd          (sd_rd),
 	.sd_wr          (sd_wr),
 	.sd_ack         (sd_ack),
 	.sd_buff_addr   (sd_buff_addr[7:0]),
 	.sd_buff_dout   (sd_buff_dout),
-	.sd_buff_din    (sd_buff_din[0]),
+	.sd_buff_din    (sd_buff_din_brg),
 	.sd_buff_wr     (sd_buff_wr),
 
 	.timestamp      (timestamp),
@@ -309,6 +347,8 @@ hps_bridge #(
 
 	.hps_status      (hps_status),
 	.hps_img_size    (hps_img_size),
+	.hps_img1_size   (hps_img1_size),
+	.hps_img2_size   (hps_img2_size),
 	.hps_boot_len    (hps_boot_len),
 	.boot_rom_loaded (boot_rom_loaded),
 
@@ -335,7 +375,7 @@ hps_bridge #(
 );
 
 assign LED_USER = ioctl_download;
-assign LED_DISK = {1'b0, sd_rd | sd_wr | sd_ack};
+assign LED_DISK = {1'b0, |sd_rd | |sd_wr | |sd_ack};
 
 ///////////////////////  CPU SYSTEM  /////////////////////////////
 
@@ -497,8 +537,50 @@ wire [23:0] cpu_pal_data;
 wire        cpu_pal_commit;
 wire        cpu_pal_busy;
 
-wire [9:0]  audio_fifo_level = 10'd0;   // no I2S FIFO on MiSTer
-wire        audio_fifo_full  = 1'b0;
+// Mixer sample pacing.  audio_mixer paces itself against the Pocket's I2S
+// dcfifo fill level (it starts a new sample whenever level < 768, and the
+// FIFO drains at 48 kHz).  MiSTer has no FIFO — sys_top samples AUDIO_L/R
+// directly — so a hardwired level of 0 lets the mixer free-run at FSM speed
+// (heard as SFX/music playing far too fast).  Emulate the backpressure with
+// a CREDIT pacer: a 48 kHz phase-accumulator strobe grants one sample
+// credit (small saturating pool so the mixer can catch up after SDRAM
+// stalls, like the real FIFO's slack); each produced sample consumes one.
+// The emulated level reads "room" only while a credit is available — and
+// mixer_sample_wr is folded in COMBINATIONALLY so the cycle a sample
+// completes cannot double-start against a credit whose decrement is still
+// one flop away (the documented one-per-tick off-by-one, 2026-07-02).
+// All-register and boot-inert: with mixer_enable=0 the mixer never starts
+// regardless of this logic.  The tick is the CARRY OUT of a 32-bit
+// accumulator sampled every cycle, so rate = K / 2^32 * 100 MHz and
+// K = round(48000 / 100e6 * 2^32) = 2061584 → 47.99999 kHz.  (The first
+// deployment used the 2^33-scaled K from an older half-rate strobe design
+// and paced the mixer at 96 kHz — music/SFX at exactly double speed.)
+reg  [32:0] audio_pace_acc /* synthesis preserve */;
+reg  [2:0]  audio_credits;
+wire        audio_pace_tick = audio_pace_acc[32];
+always @(posedge clk_cpu) begin
+	audio_pace_acc <= {1'b0, audio_pace_acc[31:0]} + 33'd2061584;
+	case ({audio_pace_tick && (audio_credits != 3'd7),
+	       mixer_sample_wr && (audio_credits != 3'd0)})
+		2'b10:   audio_credits <= audio_credits + 3'd1;
+		2'b01:   audio_credits <= audio_credits - 3'd1;
+		default: ;   // both or neither: net zero
+	endcase
+end
+wire audio_have_credit = (audio_credits != 3'd0) &&
+                         !((audio_credits == 3'd1) && mixer_sample_wr);
+// Raw pacing wires for the MIXER only; level>=768 ([9:8]==2'b11) = hold.
+wire [9:0]  audio_fifo_level = audio_have_credit ? 10'd0 : 10'd1023;
+wire        audio_fifo_full  = ~audio_have_credit;
+// REGISTERED copies for the periph slave's MMIO readback mux — the raw
+// wires reach deep into audio_mixer placement and must stay out of the
+// periph's combinational rdata cone (see 2026-07-02 campaign notes).
+reg  [9:0]  audio_fifo_level_mmio;
+reg         audio_fifo_full_mmio;
+always @(posedge clk_cpu) begin
+	audio_fifo_level_mmio <= audio_fifo_level;
+	audio_fifo_full_mmio  <= audio_fifo_full;
+end
 
 wire        mixer_enable_mmio;
 wire        mixer_voice_wr_mmio;
@@ -615,6 +697,8 @@ axi_periph_slave #(
 	.hps_status(hps_status),
 	.hps_img_size(hps_img_size),
 	.hps_boot_len(hps_boot_len),
+	.hps_img1_size(hps_img1_size),
+	.hps_img2_size(hps_img2_size),
 	// Display control
 	.color_mode(color_mode),
 	.fb_display_addr(fb_display_addr),
@@ -645,8 +729,8 @@ axi_periph_slave #(
 	.target_buffer_param_struct(),
 	.target_buffer_resp_struct(),
 	// Audio FIFO status (no FIFO on MiSTer — mixer paces internally)
-	.audio_fifo_level(audio_fifo_level),
-	.audio_fifo_full(audio_fifo_full),
+	.audio_fifo_level(audio_fifo_level_mmio),
+	.audio_fifo_full(audio_fifo_full_mmio),
 	// Hardware mixer MMIO
 	.mix_enable             (mixer_enable_mmio),
 	.mix_voice_wr           (mixer_voice_wr_mmio),
@@ -1275,6 +1359,44 @@ gpu_core #(
 // only extra pin is nCS, tied active (io_sdram idles with NOP commands).
 assign SDRAM_nCS = 1'b0;
 
+// SDRAM CK: DDIO-forwarded inverted controller clock — the standard MiSTer
+// core scheme (see any MiSTer-devel sdram.v).  The clock leaves through the
+// same IOB structure as the FAST_OUTPUT_REGISTER-packed data/control pins,
+// so clock-vs-data pin delay is matched by construction and the chip samples
+// half a period (5 ns) after the IOB launch edge.  Replaces forwarding the
+// raw PLL outclk_1 (6750 ps — the POCKET board's tuned phase) out as a data
+// signal, which needed per-board phase tuning the DDIO scheme does not.
+// Validated on HW 2026-07-02 (boot, word/burst read+write, memtest-clean
+// module).  clk_ram_chip is now unused here.
+// (The late-2026-07-02 phase-sweep experiments that temporarily bypassed
+// this with raw PLL forwarding were retroactively invalidated: those
+// black boots were the kernel-layout boot lottery, not the clock scheme.
+// This DDIO structure is what the deployed, user-validated fits carry.)
+altddio_out #(
+	.extend_oe_disable("OFF"),
+	.intended_device_family("Cyclone V"),
+	.invert_output("OFF"),
+	.lpm_hint("UNUSED"),
+	.lpm_type("altddio_out"),
+	.oe_reg("UNREGISTERED"),
+	.power_up_high("OFF"),
+	.width(1)
+) sdramclk_ddr (
+	.datain_h(1'b0),
+	.datain_l(1'b1),
+	.outclock(clk_ram_controller),
+	.dataout(SDRAM_CLK),
+	.aclr(1'b0),
+	.aset(1'b0),
+	.oe(1'b1),
+	.oe_out(),
+	.outclocken(1'b1),
+	.sclr(1'b0),
+	.sset(1'b0)
+);
+
+wire unused_phy_clk;
+
 io_sdram isr0 (
 	.controller_clk ( clk_ram_controller ),
 	.chip_clk       ( clk_ram_chip ),
@@ -1282,7 +1404,7 @@ io_sdram isr0 (
 	.reset_n        ( 1'b1 ),
 
 	.phy_cke        ( SDRAM_CKE ),
-	.phy_clk        ( SDRAM_CLK ),
+	.phy_clk        ( unused_phy_clk ),
 	.phy_cas        ( SDRAM_nCAS ),
 	.phy_ras        ( SDRAM_nRAS ),
 	.phy_we         ( SDRAM_nWE ),

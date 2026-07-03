@@ -106,6 +106,12 @@ const of_keyboard_state_t *of_input_get_keyboard_state(void) {
     return &keyboard_state;
 }
 
+int of_input_is_docked(void) {
+    /* MiSTer always drives an external display with detached
+     * controllers -- permanently in the docked/console posture. */
+    return 1;
+}
+
 void of_input_read_mouse_state(of_mouse_state_t *out) {
     if (out)
         *out = mouse_state;

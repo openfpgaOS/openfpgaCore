@@ -24,12 +24,16 @@
 set_clock_groups -asynchronous \
  -group { emu|pllv|pll_inst|altera_pll_i|general[0].gpll~PLL_OUTPUT_COUNTER|divclk }
 
-# SDRAM I/O timing — same loose-constraint scheme as the Pocket: the
-# clk_ram_chip phase shift (set in the PLL, not the fitter) manages the
-# actual setup/hold window; DQ inputs are sampled at the shifted phase
-# inside io_sdram, so the cross path is a false path for the fitter.
+# SDRAM I/O timing.  SDRAM CK is a DDIO-forwarded INVERTED copy of the
+# 100 MHz controller clock (the standard MiSTer core scheme — see emu.sv
+# sdramclk_ddr): the chip samples half a period after the IOB launch edge,
+# and clock-vs-data pin delays are matched by the shared IOB structure.
+# The old scheme forwarded the raw PLL general[1] output (6750 ps — the
+# Pocket board's tuned phase) as a data signal; that left DQM transitions
+# marginal at the chip (HW-proven sub-word write corruption, 2026-07-02).
 create_generated_clock -name sdram_clk_pin \
-  -source [get_pins {emu|pll|pll_inst|altera_pll_i|general[1].gpll~PLL_OUTPUT_COUNTER|divclk}] \
+  -source [get_pins {emu|pll|pll_inst|altera_pll_i|general[0].gpll~PLL_OUTPUT_COUNTER|divclk}] \
+  -invert \
   [get_ports {SDRAM_CLK}]
 
 set_output_delay -clock sdram_clk_pin -max  3.0 [get_ports {SDRAM_A[*] SDRAM_BA[*] SDRAM_DQ[*] SDRAM_DQML SDRAM_DQMH SDRAM_nRAS SDRAM_nCAS SDRAM_nWE SDRAM_CKE SDRAM_nCS}]

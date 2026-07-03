@@ -57,6 +57,17 @@ io_sdram_test.v: $(TARGET_DIR)/io_sdram.v
 	  -e 's/phy_dq_latched <= phy_dq;/phy_dq_latched <= phy_dq_in;/' \
 	  $< > $@
 
+# Same split-DQ generation from the MISTER io_sdram copy (kept twinned
+# with pocket except the SS1 A[12:11] DQM write-mask mirror).  Used by
+# the system-sdram boot repro so the SHIPPING mister controller is the
+# one under test.
+io_sdram_mister_test.v: ../targets/mister/io_sdram.v
+	sed \
+	  -e 's/inout   wire    \[15:0\]  phy_dq,/input   wire    [15:0]  phy_dq_in,\noutput  wire    [15:0]  phy_dq_out_port,\noutput  wire            phy_dq_oe_port,/' \
+	  -e "s/assign          phy_dq = phy_dq_oe ? phy_dq_out : 16'bZZZZZZZZZZZZZZZZ;/assign phy_dq_out_port = phy_dq_out;\nassign phy_dq_oe_port = phy_dq_oe;/" \
+	  -e 's/phy_dq_latched <= phy_dq;/phy_dq_latched <= phy_dq_in;/' \
+	  $< > $@
+
 # ============================================================
 # SRAM
 # ============================================================
@@ -413,11 +424,11 @@ HPSBRG_FLAGS = -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC -Wno-CASEINCOMPLETE -Wno-UNUSEDS
 # simulated CRAM0, and prints anything the kernel pushes out UART.
 # Requires firmware.mif + os.bin to be present in ../../firmware/os/.
 # The CPU netlist is per-target since the MiSTer went dual-issue:
-# VexiiRiscv.v = Pocket single-issue, VexiiRiscv_mister.v = MiSTer
+# VexiiRiscv_os25.v = Pocket single-issue, VexiiRiscv_mister.v = MiSTer
 # --decoders=2 --lanes=2 (same module name and AXI interface, so the
 # surrounding fabric sources are identical).  `make system` boots the
 # Pocket netlist, `make system-mister` the dual-issue one.
-VEXII_POCKET = ../vendor/vexriscv/VexiiRiscv/VexiiRiscv.v
+VEXII_POCKET = ../vendor/vexriscv/VexiiRiscv/VexiiRiscv_os25.v
 VEXII_MISTER = ../vendor/vexriscv/VexiiRiscv/VexiiRiscv_mister.v
 
 SYSTEM_SRCS_BASE = \
@@ -825,6 +836,60 @@ $(GPU_ACCEPT_OS30X_DIR)/V$(GPU_TOP): $(GPU_SRCS) $(GPU_ACCEPT_CPP)
 		--top-module $(GPU_TOP) --Mdir $(GPU_ACCEPT_OS30X_DIR) -I$(COMMON_DIR) \
 		$(GPU_SRCS) $(GPU_ACCEPT_CPP)
 
+# EXACT shipped MiSTer bitstream GPU config (mirrors emu.sv's gpu_core params
+# for targets/mister INCLUDE_DEFS = HW_MIXER TRANSLUC COLUMN_LIST COMPACT_SPAN
+# PARAM_TRI VERT_TRI PARAM_TRI_RECS).  emu.sv passes exactly six params —
+# PARAM_TRI/VERT_TRI/PARAM_TRI_RECS/COMPACT_SPAN/COLUMN_LIST=1, TEX_MEM=0 —
+# and leaves the rest at gpu_core defaults (Z_WINDOW=4, EW_DIVS=1,
+# DIRECT_COLOR=0, XFORM_RGB=0, CLIP_TRI=1, VTX/LIGHT=0, PALETTE=1, COMBINE=1,
+# PARAM_SPAN_Q29=1) with the INCLUDE_TRANSLUC macro defined by the qsf.  The
+# ONLY delta vs the always-green full-feature gpu-acceptance build is
+# INCLUDE_TEX_MEM=0 — the fold no other acceptance config has ever elaborated
+# (same coverage-gap class the os30-exact variant closed).  Full suite, full
+# assertions: must be green.
+GPU_ACCEPT_MISTERX_DIR = obj_dir_gpu_acceptance_misterx
+gpu-acceptance-mister-exact: $(GPU_ACCEPT_MISTERX_DIR)/V$(GPU_TOP)
+	@printf "\n=== GPU acceptance suite (EXACT shipped MiSTer GPU config) ===\n"
+	./$(GPU_ACCEPT_MISTERX_DIR)/V$(GPU_TOP)
+
+$(GPU_ACCEPT_MISTERX_DIR)/V$(GPU_TOP): $(GPU_SRCS) $(GPU_ACCEPT_CPP)
+	$(VERILATOR) $(VERILATOR_FLAGS) \
+		+define+INCLUDE_TRANSLUC \
+		-GINCLUDE_PARAM_TRI=1 -GINCLUDE_VERT_TRI=1 -GINCLUDE_PARAM_TRI_RECS=1 \
+		-GINCLUDE_COMPACT_SPAN=1 -GINCLUDE_COLUMN_LIST=1 \
+		-GINCLUDE_TEX_MEM=0 \
+		-GGPU_Z_READ_WINDOW=4 -GGPU_EW_PARALLEL_DIVS=1 \
+		-GINCLUDE_DIRECT_COLOR=0 -GINCLUDE_XFORM_RGB=0 -GINCLUDE_CLIP_TRI=1 \
+		-GINCLUDE_VTX_CACHE=0 -GINCLUDE_GPU_LIGHT=0 -GINCLUDE_PALETTE=1 \
+		-GINCLUDE_COMBINE=1 -GINCLUDE_PARAM_SPAN_Q29=1 \
+		--top-module $(GPU_TOP) --Mdir $(GPU_ACCEPT_MISTERX_DIR) -I$(COMMON_DIR) \
+		$(GPU_SRCS) $(GPU_ACCEPT_CPP)
+
+# MAP01 courtyard "fence scene" interleave test against the EXACT MiSTer GPU
+# config (same -G set as gpu-acceptance-mister-exact).  Models the field
+# symptom shape — near-wall AXIS_Y Q29 columns + AXIS_X Q29 visplane spans +
+# two 0x4C sky visplanes (incl. the fence-gap BAND) + masked-bar overdraw —
+# in the app's real phase-batched submission cadence, byte-compared against
+# a drained isolated-oracle render, plus a per-region wrong-texture check.
+GPU_SCENE_MISTER_CPP = tb_gpu_mister_scene_main.cpp
+GPU_SCENE_MISTER_DIR = obj_dir_gpu_scene_misterx
+gpu-acceptance-mister-scene: $(GPU_SCENE_MISTER_DIR)/V$(GPU_TOP)
+	@printf "\n=== GPU MiSTer courtyard scene test (EXACT shipped MiSTer config) ===\n"
+	./$(GPU_SCENE_MISTER_DIR)/V$(GPU_TOP)
+
+$(GPU_SCENE_MISTER_DIR)/V$(GPU_TOP): $(GPU_SRCS) $(GPU_SCENE_MISTER_CPP) $(GPU_ACCEPT_CPP)
+	$(VERILATOR) $(VERILATOR_FLAGS) \
+		+define+INCLUDE_TRANSLUC \
+		-GINCLUDE_PARAM_TRI=1 -GINCLUDE_VERT_TRI=1 -GINCLUDE_PARAM_TRI_RECS=1 \
+		-GINCLUDE_COMPACT_SPAN=1 -GINCLUDE_COLUMN_LIST=1 \
+		-GINCLUDE_TEX_MEM=0 \
+		-GGPU_Z_READ_WINDOW=4 -GGPU_EW_PARALLEL_DIVS=1 \
+		-GINCLUDE_DIRECT_COLOR=0 -GINCLUDE_XFORM_RGB=0 -GINCLUDE_CLIP_TRI=1 \
+		-GINCLUDE_VTX_CACHE=0 -GINCLUDE_GPU_LIGHT=0 -GINCLUDE_PALETTE=1 \
+		-GINCLUDE_COMBINE=1 -GINCLUDE_PARAM_SPAN_Q29=1 \
+		--top-module $(GPU_TOP) --Mdir $(GPU_SCENE_MISTER_DIR) -I$(COMMON_DIR) \
+		$(GPU_SRCS) $(GPU_SCENE_MISTER_CPP)
+
 # Elaboration smoke test of the SHIPPED SM64 bitstream gating: PARAM_TRI/RECS off,
 # palette off, fast-tex off (z-burst kept).  Must elaborate cleanly — the pruned
 # paths fold to constant 0.  Catches prune-folding errors before the Quartus fit.
@@ -1085,6 +1150,65 @@ $(SYSTEM_MISTER_DIR)/V$(SYSTEM_TOP): $(SYSTEM_SRCS_BASE) $(VEXII_MISTER) $(SYSTE
 		-I$(COMMON_DIR) -I$(TARGET_DIR) -I. \
 		$(SYSTEM_SRCS_BASE) $(VEXII_MISTER) $(SYSTEM_CPP)
 
+# --- Read-storm vs scanout phase hammer (mister io_sdram layer) -------
+# Data-checked word-READ bursts colliding with scanout burst_rd at every
+# phase alignment — the coverage hole behind the boot-lottery hunt.
+SDRAM_RDSCAN_DIR = obj_dir_sdram_rdscan
+SDRAM_RDSCAN_SRCS = \
+	tb_sdram_rdscan.v \
+	sdram_model_full.v \
+	$(COMMON_DIR)/axi_sdram_slave.v \
+	io_sdram_mister_test.v
+
+sdram-rdscan: $(SDRAM_RDSCAN_DIR)/Vtb_sdram_rdscan
+	./$(SDRAM_RDSCAN_DIR)/Vtb_sdram_rdscan
+
+$(SDRAM_RDSCAN_DIR)/Vtb_sdram_rdscan: $(SDRAM_RDSCAN_SRCS) $(SDRAM_SYNCH) tb_sdram_rdscan_main.cpp
+	$(VERILATOR) $(VERILATOR_FLAGS) $(SDRAM_FLAGS) \
+		--top-module tb_sdram_rdscan --Mdir $(SDRAM_RDSCAN_DIR) \
+		-I$(COMMON_DIR) -I. \
+		$(SDRAM_RDSCAN_SRCS) $(SDRAM_SYNCH) tb_sdram_rdscan_main.cpp
+
+# --- System bring-up over the REAL MiSTer SDRAM chain -----------------
+# tb_system with sdram_fast_model swapped for io_sdram (mister copy) +
+# sdram_model_full, plus scanout burst injection and a C++ R-beat data
+# checker.  Boot-lottery repro vehicle: same TARGET=sim firmware as
+# `make system`, MiSTer dual-issue netlist.
+SYSTEM_SDRAM_DIR = obj_dir_system_sdram
+SYSTEM_SDRAM_SRCS = \
+	tb_system_sdram.v \
+	bram_model.v \
+	io_sdram_mister_test.v \
+	sdram_model_full.v \
+	cram0_sim_model.v \
+	$(COMMON_DIR)/cpu_system.v \
+	$(COMMON_DIR)/cpu_target_port.v \
+	$(COMMON_DIR)/cpu_target_port_per.v \
+	$(TARGET_DIR)/cram0_cdc.v \
+	$(COMMON_DIR)/axi_register_slice.v \
+	$(COMMON_DIR)/axi_sdram_arbiter.v \
+	$(COMMON_DIR)/axi_sdram_slave.v \
+	$(COMMON_DIR)/axi_periph_slave.v \
+	$(COMMON_DIR)/sync_fifo.v \
+	$(TARGET_DIR)/snac_shifter.v \
+	$(COMMON_DIR)/gpu_core.v \
+	$(COMMON_DIR)/gpu_edge_walker.v \
+	$(COMMON_DIR)/gpu_tex_cache.v \
+	$(TARGET_DIR)/apf/common.v
+
+SYSTEM_SDRAM_CPP = tb_system_sdram_main.cpp
+
+system-sdram: $(SYSTEM_SDRAM_DIR)/V$(SYSTEM_TOP)
+	@printf "\n=== system bring-up (tb_system_sdram: real io_sdram + scanout) ===\n"
+	./$(SYSTEM_SDRAM_DIR)/V$(SYSTEM_TOP)
+
+$(SYSTEM_SDRAM_DIR)/V$(SYSTEM_TOP): $(SYSTEM_SDRAM_SRCS) $(VEXII_MISTER) $(SYSTEM_SDRAM_CPP)
+	$(VERILATOR) $(VERILATOR_FLAGS_NOTRACE) $(SYSTEM_FLAGS) \
+		-CFLAGS -DSYSTEM_NO_REGFILE_PEEK \
+		--top-module $(SYSTEM_TOP) --Mdir $(SYSTEM_SDRAM_DIR) \
+		-I$(COMMON_DIR) -I$(TARGET_DIR) -I. \
+		$(SYSTEM_SDRAM_SRCS) $(VEXII_MISTER) $(SYSTEM_SDRAM_CPP)
+
 # --- Clean ---
 clean:
 	rm -rf $(SDRAM_DIR) $(SDRAM_SERIAL_DIR) $(SDRAM_NATIVE2_DIR) $(SRAM_DIR) $(GPU_DIR) $(GPU_FLOOR_DIR) \
@@ -1097,3 +1221,45 @@ clean:
 	       obj_dir_gpu_acceptance \
 	       obj_dir_cram1_tex_chain \
 	       obj_dir_cdc io_sdram_test.v
+
+# ============================================================
+# gpu-transluc — MiSTer translucent-sprite span-dropout repro rig.
+# Full-stack gpu_core WITH +define+INCLUDE_TRANSLUC (the acceptance-build
+# mechanism) on the REAL MiSTer SDRAM stack (io_sdram_mister_test.v =
+# shipping targets/mister/io_sdram.v, DQ-split), parameterized exactly like
+# emu.sv.  Native 0x4C translucent column lists (Doom II fireball path)
+# under scanout injection + M1/M2/M3 contention, verified byte-exact
+# against a CPU reference; slave drop-arm / DMA-starvation / ring-desync
+# taps counted per frame.  Additive, test-only.
+#   ./obj_dir_gpu_transluc/Vtb_gpu_transluc [all|sanity|soak] [soak_frames]
+# ============================================================
+GPU_TRANSLUC_SRCS = \
+	tb_gpu_transluc.v \
+	sdram_model_full.v \
+	altsyncram_stub.v \
+	$(COMMON_DIR)/gpu_core.v \
+	$(COMMON_DIR)/gpu_edge_walker.v \
+	$(COMMON_DIR)/gpu_tex_cache.v \
+	$(COMMON_DIR)/axi_sdram_arbiter.v \
+	$(COMMON_DIR)/axi_sdram_slave.v \
+	../targets/mister/synch_3.v \
+	io_sdram_mister_test.v
+
+GPU_TRANSLUC_CPP = tb_gpu_transluc_main.cpp
+GPU_TRANSLUC_TOP = tb_gpu_transluc
+GPU_TRANSLUC_DIR = obj_dir_gpu_transluc
+GPU_TRANSLUC_FLAGS = -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC -Wno-CASEINCOMPLETE \
+                   -Wno-SYNCASYNCNET -Wno-UNUSEDSIGNAL -Wno-PINMISSING \
+                   -Wno-UNOPTFLAT -Wno-UNDRIVEN -Wno-UNUSEDPARAM \
+                   -Wno-MULTIDRIVEN -Wno-LATCH -Wno-CASEOVERLAP
+
+gpu-transluc: $(GPU_TRANSLUC_DIR)/V$(GPU_TRANSLUC_TOP)
+	@printf "\n=== MiSTer translucent-column span-dropout repro (full SDRAM stack) ===\n"
+	./$(GPU_TRANSLUC_DIR)/V$(GPU_TRANSLUC_TOP)
+
+$(GPU_TRANSLUC_DIR)/V$(GPU_TRANSLUC_TOP): $(GPU_TRANSLUC_SRCS) $(GPU_TRANSLUC_CPP)
+	$(VERILATOR) $(VERILATOR_FLAGS_NOTRACE) $(GPU_TRANSLUC_FLAGS) \
+		--top-module $(GPU_TRANSLUC_TOP) --Mdir $(GPU_TRANSLUC_DIR) \
+		+define+INCLUDE_TRANSLUC \
+		-I$(COMMON_DIR) \
+		$(GPU_TRANSLUC_SRCS) $(GPU_TRANSLUC_CPP)

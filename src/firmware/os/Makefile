@@ -15,6 +15,7 @@ LD = $(CROSS)gcc
 OBJCOPY = $(CROSS)objcopy
 OBJDUMP = $(CROSS)objdump
 SIZE = $(CROSS)size
+NM = $(CROSS)nm
 
 # Target
 # Binary name
@@ -259,7 +260,10 @@ os.bin: $(FW_TARGET).elf
 		--only-section=.text \
 		--only-section=.osdata \
 		$< $@
-	@python3 $(firstword $(wildcard $(BOOT_DIR)/append_os_crc.py) targets/pocket/boot/append_os_crc.py) $@
+	@python3 $(firstword $(wildcard $(BOOT_DIR)/append_os_crc.py) targets/pocket/boot/append_os_crc.py) $@ \
+		$$($(NM) $< | awk '$$3=="os_main"        {print $$1}') \
+		$$($(NM) $< | awk '$$3=="__os_bss_start" {print $$1}') \
+		$$($(NM) $< | awk '$$3=="__os_bss_end"   {print $$1}')
 	@echo "Generated $@ ($$(wc -c < $@) bytes)"
 
 # Disassembly

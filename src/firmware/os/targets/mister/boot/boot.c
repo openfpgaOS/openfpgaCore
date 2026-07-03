@@ -46,6 +46,20 @@ volatile unsigned int __attribute__((section(".bss.boot"))) os_load_crc_retries;
 #define OS_CRC_TRAILER_BYTES 8u
 #define OS_LOAD_MAX_ATTEMPTS 4
 
+/* Image-carried metadata block (append_os_crc.py), 16 bytes immediately
+ * before the CRC trailer: [magic 'OSE2'][entry][bss_start][bss_end], LE,
+ * covered by the CRC.
+ *
+ * WHY: this bootloader is baked into the bitstream while boot.rom
+ * (os.bin) swaps freely.  Zeroing .bss and jumping to os_main via OUR
+ * linked symbols uses bounds/entry frozen at bitstream build time — any
+ * kernel whose layout shifted gets a stale .bss clear (tail statics
+ * keep power-on DRAM junk → per-layout trap/hang: the 2026-07-02
+ * MiSTer boot lottery) and/or a stale entry jump.  Prefer the loaded
+ * image's own values; unstamped images fall back to the baked symbols. */
+#define OS_META_MAGIC  0x3245534Fu
+#define OS_META_BYTES  16u
+
 #define BOOT_ROM_WAIT_CYCLES 1000000000u   /* ~10 s for HPS file delivery */
 #define BOOT_OS_SIZE_MAX     (768u * 1024u)
 #define BOOT_CACHE_LINE_SIZE 64u
@@ -274,6 +288,38 @@ static int boot_verify_os_image(uint32_t total) {
     return boot_crc32_uncached(base, image_len) == trailer[1];
 }
 
+/* Image-carried entry + .bss bounds (OSE2 block — see the #define block
+ * at the top for why this exists).  Fills the os_meta_* globals and
+ * returns 1 when a plausible block is present; on any doubt returns 0
+ * and the caller keeps the legacy baked symbols. */
+volatile uint32_t __attribute__((section(".bss.boot"))) os_meta_entry;
+volatile uint32_t __attribute__((section(".bss.boot"))) os_meta_bss_lo;
+volatile uint32_t __attribute__((section(".bss.boot"))) os_meta_bss_hi;
+
+__attribute__((section(".text.boot")))
+static int boot_read_os_meta(uint32_t total) {
+    os_meta_entry = 0;
+    if (total < OS_CRC_TRAILER_BYTES + OS_META_BYTES)
+        return 0;
+    uint32_t base = (uint32_t)(uintptr_t)_osdata_init_vma_start;
+    volatile const uint32_t *m =
+        (volatile const uint32_t *)boot_sdram_uncached_addr(
+            (void *)(uintptr_t)(base + total - OS_CRC_TRAILER_BYTES - OS_META_BYTES));
+    if (m[0] != OS_META_MAGIC)
+        return 0;
+    uint32_t entry = m[1], lo = m[2], hi = m[3];
+    /* Plausibility: entry inside the loaded image; .bss at/above the
+     * image start, ordered, within the SDRAM PMA window. */
+    if (entry < base || entry >= base + total)
+        return 0;
+    if (lo < base || hi < lo || hi > (OF_TARGET_SDRAM_BASE + OF_TARGET_SDRAM_SIZE))
+        return 0;
+    os_meta_entry  = entry;
+    os_meta_bss_lo = lo;
+    os_meta_bss_hi = hi;
+    return 1;
+}
+
 /* Copy os.bin from the ioctl staging region to its runtime VMA.  Both
  * sides go through the uncached alias: the staging bytes were DMA'd by
  * hps_bridge (never cached), and the destination must be visible to the
@@ -357,12 +403,26 @@ int main(void) {
     pd_dbg_stage = 4;
     boot_fb_clear_row(0);
 
-    boot_dcache_inval_range(_os_bss_start,
-                            (uint32_t)(_os_bss_end - _os_bss_start));
+    /* .bss bounds and entry from the image's own OSE2 metadata when
+     * present (os_meta_entry != 0) — the baked _os_bss_* / os_main
+     * symbols only describe the kernel THIS bitstream was built with;
+     * a swapped boot.rom with a shifted layout would otherwise get a
+     * stale clear range and/or a stale entry jump (the boot lottery). */
+    (void)boot_read_os_meta(os_size);
+    {
+    char *bss_lo = os_meta_entry ? (char *)(uintptr_t)os_meta_bss_lo
+                                 : _os_bss_start;
+    char *bss_hi = os_meta_entry ? (char *)(uintptr_t)os_meta_bss_hi
+                                 : _os_bss_end;
+    void (*os_entry_fn)(void) = os_meta_entry
+                                 ? (void (*)(void))(uintptr_t)os_meta_entry
+                                 : os_main;
+
+    boot_dcache_inval_range(bss_lo, (uint32_t)(bss_hi - bss_lo));
     boot_dcache_inval_range((void *)(uintptr_t)(RUNTIME_STACK_TOP - RUNTIME_STACK_SIZE),
                             RUNTIME_STACK_SIZE);
     flush_icache();
-    os_finalize_memory((void *)_os_bss_start, (void *)_os_bss_end);
+    os_finalize_memory(bss_lo, bss_hi);
     boot_zero_uncached_sdram(RUNTIME_STACK_TOP - RUNTIME_STACK_SIZE,
                              RUNTIME_STACK_TOP);
 
@@ -374,7 +434,8 @@ int main(void) {
     }
 
     /* Jump to OS */
-    switch_to_runtime_stack_and_call(os_main, _runtime_stack_top);
+    switch_to_runtime_stack_and_call(os_entry_fn, _runtime_stack_top);
+    }
 
     while (1) {}
     return 0;

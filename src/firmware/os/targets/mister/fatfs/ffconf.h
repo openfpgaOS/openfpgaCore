@@ -166,8 +166,11 @@
 / Drive/Volume Configurations
 /---------------------------------------------------------------------------*/
 
-#define FF_VOLUMES		1
-/* Number of volumes (logical drives) to be used. (1-10) */
+#define FF_VOLUMES		3
+/* Number of volumes (logical drives) to be used. (1-10)
+/  openfpgaOS multi-vhd model: drive 0 = S0 family library / legacy image,
+/  drive 1 = S1 writable instance volume, drive 2 = S2 borrow library.
+/  Logical drive N binds to blockdev disk index N (FF_MULTI_PARTITION=0). */
 
 
 #define FF_STR_VOLUME_ID	0

@@ -390,7 +390,10 @@ static int slot_read_cached(uint32_t slot_id, uint32_t off,
 #define DUKE_SETTINGS_SLOT_ID 9u
 #define NV_CONFIG_CACHE_IDX 0
 #define NV_SAVE_CACHE_BASE  1
-#define NV_CACHE_SLOTS      (SAVE_MAX_SLOTS + 1)
+/* By-name config slots (hal/file.h of_file_config_slot) get their own
+ * size-cache entries so each named .cfg tracks its own logical size. */
+#define NV_NAMED_CFG_CACHE_BASE (NV_SAVE_CACHE_BASE + SAVE_MAX_SLOTS)
+#define NV_CACHE_SLOTS      (NV_NAMED_CFG_CACHE_BASE + OF_FILE_CFG_SLOT_COUNT)
 
 #define O_ACCMODE       03
 #define O_WRONLY        01
@@ -474,6 +477,11 @@ static int nv_cache_index_from_data_id(uint32_t slot_id) {
     int save_slot = save_slot_from_data_id(slot_id);
     if (save_slot >= 0)
         return NV_SAVE_CACHE_BASE + save_slot;
+
+    if (slot_id >= OF_FILE_CFG_SLOT_BASE &&
+        slot_id < OF_FILE_CFG_SLOT_BASE + OF_FILE_CFG_SLOT_COUNT)
+        return NV_NAMED_CFG_CACHE_BASE +
+               (int)(slot_id - OF_FILE_CFG_SLOT_BASE);
 
     return -1;
 }
@@ -559,6 +567,15 @@ const char *file_slot_get(int idx, uint32_t *slot_id_out) {
 
 int file_slot_find(const char *filename, uint32_t *slot_id_out) {
     int slot = file_slot_lookup(filename);
+    /* Registry miss — the same target-HAL fall-through sys_openat and
+     * sys_mount_iso already use.  The registry only holds the <=31 probed
+     * ids; on MiSTer a full dynamic table pushes library files into the
+     * overflow registry (ids 32+), and without this fall-through
+     * of_file_slot_find() returned -1 for exactly those files — a
+     * streaming app (CD music wad on the S2 volume) never obtained its
+     * slot id and every subsequent of_file_read_async() refill failed. */
+    if (slot < 0)
+        slot = of_file_resolve_name(path_basename(filename));
     if (slot < 0)
         return -1;
 
@@ -785,6 +802,8 @@ static long sys_mount_iso(const char *source, const char *target) {
         if (file_slot_count == 0)
             dir_probe_slots();
         slot = file_slot_lookup(source);
+        if (slot < 0)
+            slot = of_file_resolve_name(path_basename(source));
         if (slot < 0)
             return -ENOENT;
     }
@@ -1479,6 +1498,17 @@ static long sys_openat(long dirfd, long pathname, long flags, long mode) {
         if (of_nvslot_is_supported((uint32_t)slot))
             return open_nv_fd(fd, (uint32_t)slot, flags);
 
+        /* Per-game settings opened by NAME (fopen("doom.cfg","wb")): route
+         * to the target's preallocated /config backing slot.  This is what
+         * makes settings writes land at all (the registry id is read-only,
+         * so they used to die with -EACCES and the app's M_SaveDefaults
+         * silently wrote nothing), and it keeps READS on the same slot so
+         * the fd is bounded by the LOGICAL config size instead of the
+         * 256 KB physical preallocation. */
+        int cfg_slot = of_file_config_slot(path_basename(path));
+        if (cfg_slot >= 0)
+            return open_nv_fd(fd, (uint32_t)cfg_slot, flags);
+
         if (open_flags_want_write(flags)) {
             fd_table[fd].in_use = 0;
             return -EACCES;
@@ -1503,6 +1533,35 @@ static long sys_openat(long dirfd, long pathname, long flags, long mode) {
     int settings_slot = nv_settings_slot_from_filename(path);
     if (settings_slot >= 0 && of_nvslot_is_supported((uint32_t)settings_slot))
         return open_nv_fd(fd, (uint32_t)settings_slot, flags);
+
+    /* Same named-config route for config names the registry doesn't hold
+     * (e.g. a full dynamic table on a large library card). */
+    int cfg_slot = of_file_config_slot(path_basename(path));
+    if (cfg_slot >= 0)
+        return open_nv_fd(fd, (uint32_t)cfg_slot, flags);
+
+    /* Registry miss — last resort: ask the target file HAL to resolve the
+     * basename directly (MiSTer searches its mounted FAT volumes S1 -> S2
+     * -> S0; targets without a filesystem return -1).  The returned id is
+     * stable until relaunch, so fd/io-cache slot keying works unchanged.
+     * Read-only by construction: writable names (saves, settings) were
+     * already handled above. */
+    int direct = of_file_resolve_name(path_basename(path));
+    if (direct >= 0) {
+        if (open_flags_want_write(flags)) {
+            fd_table[fd].in_use = 0;
+            return -EACCES;
+        }
+        int64_t dsz = of_file_size64((uint32_t)direct);
+        if (dsz <= 0) {
+            fd_table[fd].in_use = 0;
+            return -ENOENT;
+        }
+        f->slot_id = (uint32_t)direct;
+        f->kind = FD_KIND_SLOT_FILE;
+        f->size = (uint64_t)dsz;
+        return fd;
+    }
 
     /* Unknown path -- no filesystem */
     fd_table[fd].in_use = 0;
@@ -2073,6 +2132,8 @@ static long of_input_dispatch(long fid, long a0, long a1) {
     case OF_INPUT_FID_READ_MOUSE_STATE:
         of_input_read_mouse_state((of_mouse_state_t *)a0);
         return 0;
+    case OF_INPUT_FID_IS_DOCKED:
+        return of_input_is_docked();
     default:
         return OF_ERR_NOT_SUPPORTED;
     }

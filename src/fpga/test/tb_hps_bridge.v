@@ -36,14 +36,19 @@ module tb_hps_bridge (
     input  wire [15:0] ioctl_dout,
     output wire        ioctl_wait,
 
-    input  wire        img_mounted,
+    // Three virtual disks (VDNUM=3 shapes).  img_readonly/img_size are
+    // scalar per the hps_io contract: valid only for the active
+    // img_mounted[n] pulse bit.
+    input  wire [2:0]  img_mounted,
     input  wire        img_readonly,
     input  wire [63:0] img_size,
 
-    output wire [31:0] sd_lba,
-    output wire        sd_rd,
-    output wire        sd_wr,
-    input  wire        sd_ack,
+    output wire [31:0] sd_lba0,
+    output wire [31:0] sd_lba1,
+    output wire [31:0] sd_lba2,
+    output wire [2:0]  sd_rd,
+    output wire [2:0]  sd_wr,
+    input  wire [2:0]  sd_ack,
     input  wire [7:0]  sd_buff_addr,
     input  wire [15:0] sd_buff_dout,
     output wire [15:0] sd_buff_din,
@@ -64,6 +69,9 @@ module tb_hps_bridge (
     output wire        wr_idle,
 
     output wire [31:0] hps_status,
+    output wire [63:0] hps_img_size,
+    output wire [63:0] hps_img1_size,
+    output wire [63:0] hps_img2_size,
     output wire [31:0] hps_boot_len,
     output wire        boot_loaded,
 
@@ -105,7 +113,6 @@ wire [31:0] brg_rdata;
 wire [1:0]  brg_rresp;
 wire        brg_rlast;
 wire        brg_rready;
-wire [63:0] hps_img_size_w;
 
 hps_bridge #(
     .BOOT_STAGE_ADDR(32'h0330_0000),
@@ -122,7 +129,9 @@ hps_bridge #(
     .img_mounted(img_mounted),
     .img_readonly(img_readonly),
     .img_size(img_size),
-    .sd_lba(sd_lba),
+    .sd_lba0(sd_lba0),
+    .sd_lba1(sd_lba1),
+    .sd_lba2(sd_lba2),
     .sd_rd(sd_rd),
     .sd_wr(sd_wr),
     .sd_ack(sd_ack),
@@ -150,7 +159,9 @@ hps_bridge #(
     .target_dataslot_err(ds_err),
     .bridge_wr_idle(wr_idle),
     .hps_status(hps_status),
-    .hps_img_size(hps_img_size_w),
+    .hps_img_size(hps_img_size),
+    .hps_img1_size(hps_img1_size),
+    .hps_img2_size(hps_img2_size),
     .hps_boot_len(hps_boot_len),
     .boot_rom_loaded(boot_loaded),
     .cont1_key(), .cont1_joy(), .cont1_trig(),

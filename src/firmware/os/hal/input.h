@@ -49,6 +49,12 @@ const of_keyboard_state_t *of_input_get_keyboard_state(void);
  * previous read.  Button state remains level-based like controller state. */
 void of_input_read_mouse_state(of_mouse_state_t *out);
 
+/* Nonzero while running on an external display with detached controllers.
+ * Pocket: the APF cont1 report type -- built-in buttons (0x1) are only
+ * reportable handheld; docked, slot 1 carries the paired controller type
+ * (or 0x0 with nothing paired).  MiSTer: always 1.  Live state. */
+int of_input_is_docked(void);
+
 /* Single-player fast path: poll hardware + return P0 state in one call */
 void of_input_poll_p0(of_input_state_t *out);
 

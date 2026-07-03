@@ -21,6 +21,17 @@
 #include <stddef.h>
 #include <string.h>
 
+/* Layout-shift pad for boot-lottery bisection (sim + HW pad sweeps).
+ * Build with EXTRA_CFLAGS=-DOS_LAYOUT_PAD=<bytes> to insert N bytes of
+ * never-referenced data into .text, shifting every symbol downstream of
+ * this translation unit's placement — the same class of byte-layout
+ * change that separates booting from black kernels on MiSTer.  Zero
+ * runtime effect; absent from normal builds. */
+#if defined(OS_LAYOUT_PAD) && OS_LAYOUT_PAD > 0
+__attribute__((used, section(".text.zzz_os_layout_pad"), aligned(4)))
+static const unsigned char os_layout_pad[OS_LAYOUT_PAD] = { 0x13 };
+#endif
+
 /* Data slot IDs (match data.json) */
 #define APP_SLOT_ID     3       /* Default application ELF binary */
 #define APP_DEFAULT_ELF "app.elf"
@@ -469,6 +480,12 @@ void os_main(void) {
         of_term_set_pos(saved_col, saved_row);
     }
     of_timer_delay_ms(200);
+
+    /* Boot is done — every init/probe sector op above ran fail-fast.
+     * From here on the target may treat transport timeouts as transient
+     * (MiSTer: DS ERR_TIMEOUT while the user sits in the OSD is retried
+     * instead of failing the app's read).  See hal/file.h. */
+    of_file_boot_complete();
 
     /* Execute the app */
     os_textguard_check("before elf_exec");

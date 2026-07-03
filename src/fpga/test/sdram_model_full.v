@@ -53,7 +53,16 @@ module sdram_model_full (
     // Uses the SAME flat addressing as the write path so write-then-backdoor-
     // read is self-consistent regardless of the controller's column decode.
     input  wire [23:0] bd_rd_word_addr,
-    output wire [31:0] bd_rd_data
+    output wire [31:0] bd_rd_data,
+
+    // Write-beat event tap (for harness-side written-address bitmaps):
+    // pulses once per BL=2 halfword beat that reaches the array, with the
+    // flat halfword address and the dqm mask that gated it.  Left
+    // unconnected by testbenches that don't need it.
+    output reg         wr_evt,
+    output reg  [24:0] wr_evt_hw_addr,
+    output reg  [1:0]  wr_evt_dqm,
+    output reg  [15:0] wr_evt_data
 );
 
 // Commands decoded from {ras_n, cas_n, we_n}
@@ -169,6 +178,12 @@ end
 always @(posedge clk) begin
     cycle_count <= cycle_count + 1;
 
+    // Write-event tap defaults (pulse semantics)
+    wr_evt <= 1'b0;
+    wr_evt_hw_addr <= 25'b0;
+    wr_evt_dqm <= 2'b11;
+    wr_evt_data <= 16'b0;
+
     // Refresh enforcement.  io_sdram issues exactly TWO auto-refreshes during
     // its power-up/init sequence (ST_BOOT_2 / ST_BOOT_3) and then sits in a
     // long (~30000-cycle) boot delay before normal post-boot refreshes begin.
@@ -219,6 +234,10 @@ always @(posedge clk) begin
             if (!dqm[0]) mem[flat_addr(wr_bank, wr_row, wr_col + 10'd1)][7:0]  <= dq_in[7:0];
             if (!dqm[1]) mem[flat_addr(wr_bank, wr_row, wr_col + 10'd1)][15:8] <= dq_in[15:8];
             wr_pending <= 0;
+            wr_evt <= 1'b1;
+            wr_evt_hw_addr <= flat_addr(wr_bank, wr_row, wr_col + 10'd1);
+            wr_evt_dqm <= dqm;
+            wr_evt_data <= dq_in;
         end
     end
 
@@ -282,6 +301,10 @@ always @(posedge clk) begin
             // Capture first BL=2 beat (low halfword)
             if (!dqm[0]) mem[flat_addr(ba, bank_row[ba], a[9:0])][7:0]  <= dq_in[7:0];
             if (!dqm[1]) mem[flat_addr(ba, bank_row[ba], a[9:0])][15:8] <= dq_in[15:8];
+            wr_evt <= 1'b1;
+            wr_evt_hw_addr <= flat_addr(ba, bank_row[ba], a[9:0]);
+            wr_evt_dqm <= dqm;
+            wr_evt_data <= dq_in;
         end
 
         CMD_PRECHG: begin

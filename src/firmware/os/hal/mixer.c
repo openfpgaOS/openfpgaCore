@@ -301,7 +301,10 @@ static int mixer_sdram_addr(const void *ptr, uint32_t bytes,
 static uint32_t audio_reserve_top;
 static uint32_t audio_reserve_cursor;
 static uint32_t audio_reserved_base;
-static uint32_t audio_reserve_floor = OF_TARGET_SDRAM_BASE;
+#ifndef OF_TARGET_AUDIO_RESERVE_FLOOR
+#define OF_TARGET_AUDIO_RESERVE_FLOOR OF_TARGET_SDRAM_BASE
+#endif
+static uint32_t audio_reserve_floor = OF_TARGET_AUDIO_RESERVE_FLOOR;
 static uint32_t audio_stream_base;
 static int audio_memory_initialized;
 
@@ -325,6 +328,8 @@ int of_mixer_memory_set_floor(uint32_t floor)
 {
     of_mixer_memory_init();
     floor = align_up_u32(floor, OF_TARGET_AUDIO_RESERVE_ALIGN);
+    if (floor < OF_TARGET_AUDIO_RESERVE_FLOOR)
+        floor = OF_TARGET_AUDIO_RESERVE_FLOOR;
     if (floor > audio_reserved_base)
         return -1;
     audio_reserve_floor = floor;

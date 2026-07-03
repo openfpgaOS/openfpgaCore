@@ -37,7 +37,13 @@ module tb_gpu #(
     parameter INCLUDE_GPU_LIGHT      = 0,
     parameter INCLUDE_PALETTE        = 1,
     parameter INCLUDE_COMBINE        = 1,
-    parameter INCLUDE_PARAM_SPAN_Q29 = 1
+    parameter INCLUDE_PARAM_SPAN_Q29 = 1,
+    // Fast texture memory fold.  Default 1 = gpu_core's default (matches every
+    // pre-existing acceptance config).  The tb has no fast-tex model: the
+    // gpu_tex_mem_* fill-master inputs are tied idle below, exactly like the
+    // MiSTer emu.sv instantiation, so -GINCLUDE_TEX_MEM=0 builds the exact
+    // shipped MiSTer fold (gpu-acceptance-mister-exact).
+    parameter INCLUDE_TEX_MEM        = 1
 ) (
     input  wire        clk,
     input  wire        reset_n,
@@ -160,11 +166,21 @@ gpu_core #(
     .INCLUDE_GPU_LIGHT(INCLUDE_GPU_LIGHT),
     .INCLUDE_PALETTE(INCLUDE_PALETTE),
     .INCLUDE_COMBINE(INCLUDE_COMBINE),
-    .INCLUDE_PARAM_SPAN_Q29(INCLUDE_PARAM_SPAN_Q29)
+    .INCLUDE_PARAM_SPAN_Q29(INCLUDE_PARAM_SPAN_Q29),
+    .INCLUDE_TEX_MEM(INCLUDE_TEX_MEM)
 ) gpu (
     .clk(clk),
     .reset_n(reset_n),
     .gpu_enable(1'b1),
+    // Fast texture memory: no tb model — fill-master inputs tied idle,
+    // exactly like MiSTer's emu.sv (INCLUDE_TEX_MEM=0) instantiation.
+    // Previously left unconnected (Verilator floats inputs to 0), so the
+    // explicit ties are behaviour-identical for every existing config.
+    .gpu_tex_mem_arready(1'b0),
+    .gpu_tex_mem_rvalid(1'b0),
+    .gpu_tex_mem_rdata(32'b0),
+    .gpu_tex_mem_rlast(1'b0),
+    .gpu_tex_mem_up_busy(1'b0),
     // AXI4 read
     .m_rd_arvalid(gpu_rd_arvalid),
     .m_rd_arready(gpu_rd_arready),

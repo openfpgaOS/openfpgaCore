@@ -155,12 +155,15 @@ module axi_periph_slave #(
     input wire [2:0]   target_dataslot_err,
 
     // HPS bridge status block (REGION_HPS @ 0x49000000, read-only).
-    // MiSTer: driven by hps_bridge.v (boot.rom delivery + disk image
-    // mount state).  Pocket: tie all three to 0 — the region reads as
-    // zeros and firmware never touches it there.
+    // MiSTer: driven by hps_bridge.v (boot.rom delivery + per-disk
+    // image mount state, VDNUM=3).  Pocket / testbenches: tie all five
+    // to 0 — the region reads as zeros and firmware never touches it
+    // there.
     input wire [31:0]  hps_status,
-    input wire [63:0]  hps_img_size,
+    input wire [63:0]  hps_img_size,     // disk 0 (S0) — legacy view
     input wire [31:0]  hps_boot_len,
+    input wire [63:0]  hps_img1_size,    // disk 1 (S1)
+    input wire [63:0]  hps_img2_size,    // disk 2 (S2)
 
     // Bridge write drain status (for pacing DMA reads)
     input wire         bridge_wr_idle,
@@ -1935,11 +1938,21 @@ wire req_is_mixer  = (req_region == REGION_MIXER);
 wire req_is_hps    = (req_region == REGION_HPS);
 
 /* HPS status block read mux (read-only; writes are ignored):
- *   0x00 HPS_STATUS   0x04 IMG_SIZE_LO   0x08 IMG_SIZE_HI   0x0C BOOT_LEN */
-wire [31:0] hps_rdata = (req_addr[3:2] == 2'd0) ? hps_status :
-                        (req_addr[3:2] == 2'd1) ? hps_img_size[31:0] :
-                        (req_addr[3:2] == 2'd2) ? hps_img_size[63:32] :
-                                                  hps_boot_len;
+ *   0x00 HPS_STATUS    0x04 IMG0_SIZE_LO  0x08 IMG0_SIZE_HI  0x0C BOOT_LEN
+ *   0x10 IMG1_SIZE_LO  0x14 IMG1_SIZE_HI  0x18 IMG2_SIZE_LO  0x1C IMG2_SIZE_HI
+ * 0x00-0x0C keep their legacy decode exactly (old firmware reads only
+ * those); 0x20-0x3C read as zero.  All sources are quasi-static
+ * registers in hps_bridge; the mux stays combinational into the
+ * two-stage S_PERIPH_RD_WAIT -> S_PERIPH_RD_LATCH capture. */
+wire [31:0] hps_rdata = (req_addr[5:2] == 4'd0) ? hps_status :
+                        (req_addr[5:2] == 4'd1) ? hps_img_size[31:0] :
+                        (req_addr[5:2] == 4'd2) ? hps_img_size[63:32] :
+                        (req_addr[5:2] == 4'd3) ? hps_boot_len :
+                        (req_addr[5:2] == 4'd4) ? hps_img1_size[31:0] :
+                        (req_addr[5:2] == 4'd5) ? hps_img1_size[63:32] :
+                        (req_addr[5:2] == 4'd6) ? hps_img2_size[31:0] :
+                        (req_addr[5:2] == 4'd7) ? hps_img2_size[63:32] :
+                                                  32'd0;
 
 wire beat_is_last = (burst_count == burst_len);
 /* Beat-to-beat address increment.  AXI4 forbids any burst from crossing a

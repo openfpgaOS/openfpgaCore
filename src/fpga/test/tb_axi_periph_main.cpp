@@ -1451,6 +1451,37 @@ static void test_mixer_pos_read_registered_boundary(void) {
     check_eq("mixer-pos-registered-readback", ok, 1);
 }
 
+// ====================================================================
+// REGION_HPS (0x49000000) read decode — widened to req_addr[5:2] for
+// multi-vhd.  The tb ties the five hps_* inputs to distinct constants
+// (see tb_axi_periph.v); 0x00-0x0C must keep the legacy layout,
+// 0x10-0x1C carry the IMG1/IMG2 sizes, 0x20-0x3C read as zero.
+// ====================================================================
+static void test_hps_region_decode() {
+    printf("test_hps_region_decode:\n");
+    static const uint32_t expect[16] = {
+        0x00000125u,            // 0x00 HPS_STATUS
+        0x33334444u,            // 0x04 IMG0_SIZE_LO
+        0x11112222u,            // 0x08 IMG0_SIZE_HI
+        0x000ABC00u,            // 0x0C BOOT_LEN
+        0x77778888u,            // 0x10 IMG1_SIZE_LO
+        0x55556666u,            // 0x14 IMG1_SIZE_HI
+        0xBBBBCCCCu,            // 0x18 IMG2_SIZE_LO
+        0x9999AAAAu,            // 0x1C IMG2_SIZE_HI
+        0, 0, 0, 0, 0, 0, 0, 0  // 0x20-0x3C reserved
+    };
+    std::vector<uint32_t> r;
+    bool ok = true;
+    for (int w = 0; w < 16; w++) {
+        if (!axi_read_burst(0x49000000u + w * 4, 0, r) || r[0] != expect[w]) {
+            printf("    word 0x%02x got=0x%08x exp=0x%08x\n",
+                   w * 4, r.empty() ? 0xDEADDEADu : r[0], expect[w]);
+            ok = false;
+        }
+    }
+    check_eq("hps-region-16-word-decode", ok, 1);
+}
+
 int main(int argc, char **argv) {
     Verilated::commandArgs(argc, argv);
     tb = new Vtb_axi_periph;
@@ -1459,6 +1490,7 @@ int main(int argc, char **argv) {
     reset_sequence();
 
     test_single_word_bram_read();
+    test_hps_region_decode();
     test_cacheline_bram_burst();
     test_back_to_back_cachelines();
     test_burst_with_backpressure();

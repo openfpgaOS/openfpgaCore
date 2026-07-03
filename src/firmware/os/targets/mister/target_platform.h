@@ -47,6 +47,14 @@
  * reload) and nonvolatile persistence only happens at core exit. */
 #define OF_TARGET_SUPPORTS_RELAUNCH    1
 
+/* The video sink is ALWAYS fixed-rate on MiSTer: the core raster feeds the
+ * framework scaler (HDMI/analog IO board), and emu.sv does not wire
+ * vrr_v_total into the raster at all.  Defining this pins the adaptive-VRR
+ * policy in video.c to the 525-line 60.02 Hz raster unconditionally instead
+ * of relying on the joystick type-nibble accident (hps_bridge reports
+ * cont type 0, which merely happens to read as "not handheld"). */
+#define OF_TARGET_VIDEO_FIXED_RATE_SINK 1
+
 #define OF_TARGET_BRAM_BASE            0x00000000u
 #define OF_TARGET_BRAM_SIZE            (32u * 1024u)
 #define OF_TARGET_APP_BRAM_BASE        0x00004000u
@@ -86,11 +94,17 @@
 #define OF_TARGET_CRAM0_BRIDGE         (OF_TARGET_CRAM0_BASE - OF_TARGET_SDRAM_BASE)
 #define OF_TARGET_CRAM0_OS_OFFSET      0x00000000u
 #define OF_TARGET_CRAM0_PRESAVE_OFFSET 0x000C0000u   /* mirror/assembly only */
-#define OF_TARGET_CRAM0_SAVE_OFFSET    0x00100000u   /* mirror/assembly only */
-#define OF_TARGET_CRAM0_SCRATCH_OFFSET 0x00400000u   /* sector DMA bounce */
+/* Arena repack 2026-07-02: the 3 MB save-mirror window (0x100000-0x400000)
+ * had NO consumer on MiSTer (FAT write-through persistence; only the presave
+ * assembly buffer is used).  Scratch and the app DMA pool slide down over it
+ * and the freed arena top becomes the audio reserve — the old below-arena
+ * reserve left ~2.5 MB above Doom2's bss, too small for the 2.7 MB
+ * SoundFont (bank_preload NONE(reserve) → no music). */
+#define OF_TARGET_CRAM0_SCRATCH_OFFSET 0x00100000u   /* sector DMA bounce */
 #define OF_TARGET_CRAM0_ASYNC_BOUNCE_OFFSET (OF_TARGET_CRAM0_SCRATCH_OFFSET + OF_TARGET_CRAM0_DMA_CHUNK_SIZE)
-#define OF_TARGET_CRAM0_APP_DMA_OFFSET 0x00500000u   /* app async staging pool */
+#define OF_TARGET_CRAM0_APP_DMA_OFFSET 0x00120000u   /* app async staging pool */
 #define OF_TARGET_CRAM0_APP_DMA_SIZE   0x00100000u   /* 1 MB */
+#define OF_TARGET_CRAM0_AUDIO_OFFSET   (OF_TARGET_CRAM0_APP_DMA_OFFSET + OF_TARGET_CRAM0_APP_DMA_SIZE)
 
 /* High SDRAM reservations — identical to Pocket above the staging arena:
  *   0x13FC0000-0x14000000  GPU palookup tables (fixed RTL address)
@@ -110,10 +124,11 @@
 
 /* Dynamic audio memory — carved below the staging arena (the Pocket carves
  * below the file cache; the arena slots in between on MiSTer). */
-#define OF_TARGET_AUDIO_RESERVE_TOP    OF_TARGET_CRAM0_BASE
+#define OF_TARGET_AUDIO_RESERVE_TOP    (OF_TARGET_CRAM0_BASE + OF_TARGET_CRAM_SIZE)
+#define OF_TARGET_AUDIO_RESERVE_FLOOR  (OF_TARGET_CRAM0_BASE + OF_TARGET_CRAM0_AUDIO_OFFSET)
 #define OF_TARGET_AUDIO_STREAM_SIZE    0x00010000u
 #define OF_TARGET_AUDIO_RESERVE_ALIGN  0x00001000u
-#define OF_TARGET_APP_STACK_TOP        OF_TARGET_AUDIO_RESERVE_TOP
+#define OF_TARGET_APP_STACK_TOP        OF_TARGET_CRAM0_BASE
 #define OF_TARGET_APP_STATIC_END       (OF_TARGET_APP_STACK_TOP - OF_TARGET_AUDIO_STREAM_SIZE - OF_TARGET_RUNTIME_STACK_SIZE)
 
 /* Nonvolatile slots: persistence is FAT files inside the mounted disk image
@@ -123,7 +138,7 @@
 #define OF_TARGET_PRESAVE_REGION_ADDR  (OF_TARGET_CRAM0_BASE + OF_TARGET_CRAM0_PRESAVE_OFFSET)
 #define OF_TARGET_PRESAVE_SLOT_SIZE    0x00040000u
 
-#define OF_TARGET_SAVE_REGION_ADDR     (OF_TARGET_CRAM0_BASE + OF_TARGET_CRAM0_SAVE_OFFSET)
+#define OF_TARGET_SAVE_REGION_ADDR     OF_TARGET_PRESAVE_REGION_ADDR  /* mirror role collapsed; nothing persists from it */
 #define OF_TARGET_SAVE_SLOT_SIZE       0x00040000u
 #define OF_TARGET_SAVE_MAX_SLOTS       10u
 #define OF_TARGET_SAVE_WRITEBACK_CHUNK_SIZE 0x00008000u
@@ -131,12 +146,12 @@
 /* Disk-image block device (hps_io sd_rd/sd_wr sector engine). */
 #define OF_TARGET_BLOCKDEV_SECTOR_BYTES 512u
 
-#if (OF_TARGET_CRAM0_PRESAVE_OFFSET + OF_TARGET_PRESAVE_SLOT_SIZE) > OF_TARGET_CRAM0_SAVE_OFFSET
-#error "Pre-save mirror overlaps the save mirror window"
+#if (OF_TARGET_CRAM0_PRESAVE_OFFSET + OF_TARGET_PRESAVE_SLOT_SIZE) > OF_TARGET_CRAM0_SCRATCH_OFFSET
+#error "Pre-save mirror overlaps the DMA scratch window"
 #endif
 
-#if OF_TARGET_CRAM0_SCRATCH_OFFSET < (OF_TARGET_CRAM0_SAVE_OFFSET + OF_TARGET_SAVE_SLOT_SIZE * OF_TARGET_SAVE_MAX_SLOTS)
-#error "DMA scratch overlaps the save mirror window"
+#if (OF_TARGET_CRAM0_APP_DMA_OFFSET + OF_TARGET_CRAM0_APP_DMA_SIZE) > OF_TARGET_CRAM0_AUDIO_OFFSET
+#error "App DMA pool overlaps the audio reserve"
 #endif
 
 #if (OF_TARGET_CRAM0_ASYNC_BOUNCE_OFFSET + OF_TARGET_CRAM0_DMA_CHUNK_SIZE) > OF_TARGET_CRAM0_APP_DMA_OFFSET

@@ -483,6 +483,16 @@ const of_keyboard_state_t *of_input_get_keyboard_state(void) {
     return &keyboard_state;
 }
 
+int of_input_is_docked(void) {
+    /* Slot 1's built-in-buttons type is only reportable handheld; docked,
+     * the bridge reports the paired controller type or 0x0 when nothing
+     * is paired (same invariant video.c's vrr_fixed_rate_sink relies on).
+     * read_apf covers both the input-hub and legacy CONT1 register paths. */
+    uint32_t keys, joy, trig;
+    read_apf(0, &keys, &joy, &trig);
+    return apf_input_type(keys) != OF_INPUT_TYPE_POCKET;
+}
+
 void of_input_read_mouse_state(of_mouse_state_t *out) {
     if (out)
         *out = mouse_state;

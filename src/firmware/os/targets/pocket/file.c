@@ -129,6 +129,15 @@ void of_file_relaunch_reset(void) {}
 int of_file_list_instances(char *names, uint32_t stride, uint32_t max) {
     (void)names; (void)stride; (void)max; return 0;
 }
+/* Registry-miss by-name resolution is a MiSTer (FAT volume) feature; APF
+ * enumerates every data slot up front, so there is nothing to fall back to. */
+int of_file_resolve_name(const char *name) { (void)name; return -1; }
+/* By-name config write slots are likewise MiSTer-only (preallocated FAT
+ * /config files); Pocket settings ride the fixed APF nonvolatile slots. */
+int of_file_config_slot(const char *name) { (void)name; return -1; }
+/* Boot-complete transport-policy hook: MiSTer arms its DS ERR_TIMEOUT
+ * retry loop here; the APF bridge needs no boot/operational split. */
+void of_file_boot_complete(void) {}
 
 void of_file_init(void) {
     idle_hook = (void *)0;
@@ -989,11 +998,34 @@ int of_file_read_async(uint32_t slot_id, uint32_t slot_offset,
     DS_COMMAND     = DS_CMD_READ;
     fence();
 
-    /* This is intentionally fire-and-return.  ACK is the APF host accepting
-     * the command, not a cheap local "doorbell latched" bit, and it can take
-     * far longer than a few CPU cycles on slow SD cards.  Completion is
-     * reported by the data-slot IRQ or by of_file_async_poll() observing DONE. */
-    return token;
+    /* Verify the dispatch guard latched the command (ACK up, or cmd_active
+     * set → READY cleared) — the same silent-drop window of_file_read_raw
+     * retries.  A dropped async command never completes, so async_state.active
+     * would stay latched forever and every later bridge op would fail
+     * OF_ERR_BUSY.  This only polls the local latch, NOT the (slow) APF host
+     * ACK, so the call stays fire-and-return.  Completion is still reported
+     * by the data-slot IRQ or by of_file_async_poll() observing DONE. */
+    for (int attempt = 0; ; attempt++) {
+        for (int i = 0; i < 100; i++) {
+            uint32_t ast = DS_STATUS;
+            if ((ast & DS_STATUS_ACK) || !(ast & DS_STATUS_READY))
+                return token;
+        }
+        if (attempt == 1)
+            break;
+        fence();
+        DS_COMMAND = DS_CMD_READ;   /* likely dropped — retry once */
+        fence();
+    }
+
+    /* Dropped twice — unwind so the caller can fall back to a synchronous
+     * read instead of wedging the whole file subsystem. */
+    async_state.active = 0;
+    async_state.callback = (void *)0;
+    IRQ_MASK &= ~IRQ_MASK_DATASLOT;
+    CRAM0_MODE = CRAM0_MODE_CPU;
+    for (volatile int s = 0; s < 8; s++) {}
+    return OF_ERR_TIMEOUT;
 }
 
 void of_file_async_irq_service(void) {

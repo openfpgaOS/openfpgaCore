@@ -29,7 +29,13 @@ MKIMAGE    := $(SDK_MISTER)/.mkimage
 
 BUILD := build
 IMAGE := $(BUILD)/test.vhd
+# Multi-vhd (S0 family / S1 instance / S2 borrow) fixture images.
+IMAGE_S0 := $(BUILD)/s0.vhd
+IMAGE_S1 := $(BUILD)/s1.vhd
+IMAGE_S2 := $(BUILD)/s2.vhd
+IMAGES   := $(IMAGE) $(IMAGE_S0) $(IMAGE_S1) $(IMAGE_S2)
 SIZE_MB ?= 64
+INST_MB ?= 48
 
 # ── Toolchain ────────────────────────────────────────────────────────
 CC ?= cc
@@ -68,11 +74,11 @@ GENFIX  := $(BUILD)/genfix
 
 # ── Default ──────────────────────────────────────────────────────────
 .PHONY: all run clean
-all: $(HARNESS) $(IMAGE)
+all: $(HARNESS) $(IMAGES)
 
-run: $(HARNESS) $(IMAGE)
+run: $(HARNESS) $(IMAGES)
 	@echo "── running MiSTer FAT-stack host tests ──"
-	@$(HARNESS) $(IMAGE)
+	@$(HARNESS) $(IMAGE) $(IMAGE_S0) $(IMAGE_S1) $(IMAGE_S2)
 
 # ── Harness link ─────────────────────────────────────────────────────
 $(HARNESS): $(FW_OBJS) $(HOST_OBJS)
@@ -87,9 +93,9 @@ $(BUILD)/fw/disk.o: $(HAL_DIR)/disk.c | $(BUILD)/fw
 	$(CC) $(CFLAGS) -c -o $@ $<
 $(BUILD)/fw/disk_boot.o: $(MISTER_DIR)/disk_boot.c | $(BUILD)/fw
 	$(CC) $(CFLAGS) -c -o $@ $<
-$(BUILD)/fw/ff.o: $(FATFS_DIR)/ff.c | $(BUILD)/fw
+$(BUILD)/fw/ff.o: $(FATFS_DIR)/ff.c $(FATFS_DIR)/ffconf.h | $(BUILD)/fw
 	$(CC) $(CFLAGS) -Wno-unused-parameter -c -o $@ $<
-$(BUILD)/fw/ffunicode.o: $(FATFS_DIR)/ffunicode.c | $(BUILD)/fw
+$(BUILD)/fw/ffunicode.o: $(FATFS_DIR)/ffunicode.c $(FATFS_DIR)/ffconf.h | $(BUILD)/fw
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 $(BUILD)/host/test_main.o: test_main.c | $(BUILD)/host
@@ -110,14 +116,56 @@ $(MKIMAGE):
 		"$(SDK_MISTER)/fatfs/ff.c" \
 		"$(SDK_MISTER)/fatfs/ffunicode.c"
 
-$(IMAGE): $(GENFIX) $(MKIMAGE) | $(BUILD)
+# One shared fixture tree feeds all four images.
+FIXSTAMP := $(BUILD)/fix/.stamp
+$(FIXSTAMP): $(GENFIX) | $(BUILD)
 	@rm -rf $(BUILD)/fix && mkdir -p $(BUILD)/fix
 	$(GENFIX) $(BUILD)/fix
+	@touch $@
+
+$(IMAGE): $(FIXSTAMP) $(MKIMAGE)
 	"$(MKIMAGE)" $(IMAGE) $(SIZE_MB) \
 		$(BUILD)/fix/os.ini=/os.ini \
 		$(BUILD)/fix/app.elf=/app.elf \
 		$(BUILD)/fix/data1.bin=/assets/data1.bin \
-		$(BUILD)/fix/level2.dat=/assets/level2.dat
+		$(BUILD)/fix/level2.dat=/assets/level2.dat \
+		$(BUILD)/fix/doommus.wad=/assets/doommus.wad \
+		$(BUILD)/fix/cfg_prealloc.bin=/config/doom.cfg
+
+# S0 family library: fallback os.ini/app.elf, a shadowed name, and enough
+# library files to overflow the 16-entry dynamic slot table.
+$(IMAGE_S0): $(FIXSTAMP) $(MKIMAGE)
+	"$(MKIMAGE)" $@ $(SIZE_MB) \
+		$(BUILD)/fix/s0_os.ini=/os.ini \
+		$(BUILD)/fix/s0_app.elf=/app.elf \
+		$(BUILD)/fix/s0_shared_lib.dat=/assets/shared_lib.dat \
+		$(BUILD)/fix/s0_family.dat=/assets/family.dat \
+		$(BUILD)/fix/cfg_prealloc.bin=/config/doom.cfg \
+		$$(for i in $$(seq -w 1 14); do \
+			echo $(BUILD)/fix/s0_family$$i.dat=/assets/family$$i.dat; done)
+
+# S1 instance volume: its own os.ini (must shadow S0's), an instance-only
+# file, and the shadowing copy of shared_lib.dat.  mkimage preallocates the
+# /saves + /config nonvolatile skeleton on every image, which is exactly
+# what the instance-image contract requires.  The fill01..11 files pack the
+# 16-entry dyn table so S2's doommus.wad lands in the overflow registry
+# (see fixture_pattern.h).
+$(IMAGE_S1): $(FIXSTAMP) $(MKIMAGE)
+	"$(MKIMAGE)" $@ $(INST_MB) \
+		$(BUILD)/fix/s1_os.ini=/os.ini \
+		$(BUILD)/fix/s1_inst_only.dat=/assets/inst_only.dat \
+		$(BUILD)/fix/s1_shared_lib.dat=/assets/shared_lib.dat \
+		$(BUILD)/fix/cfg_prealloc.bin=/config/doom.cfg \
+		$$(for i in $$(seq -w 1 11); do \
+			echo $(BUILD)/fix/s1_fill$$i.dat=/assets/fill$$i.dat; done)
+
+# S2 borrow library: one unique file + the >=2 MB CD-music streaming wad.
+# The dyn table is already full after S1's enumeration, so both resolve
+# through the overflow registry (ids 32+) on the full multi mount.
+$(IMAGE_S2): $(FIXSTAMP) $(MKIMAGE)
+	"$(MKIMAGE)" $@ $(INST_MB) \
+		$(BUILD)/fix/s2_borrow.dat=/assets/borrow.dat \
+		$(BUILD)/fix/doommus.wad=/assets/doommus.wad
 
 # ── Dirs ─────────────────────────────────────────────────────────────
 $(BUILD) $(BUILD)/fw $(BUILD)/host:
