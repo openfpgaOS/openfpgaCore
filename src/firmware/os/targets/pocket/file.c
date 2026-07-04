@@ -125,6 +125,8 @@ void of_file_set_idle_hook(void (*hook)(void)) {
  * on every target without changing any Pocket behavior. */
 void of_file_set_instance_root(const char *root) { (void)root; }
 const char *of_file_get_instance_root(void) { return ""; }
+void of_file_set_common_root(const char *root) { (void)root; }
+const char *of_file_get_common_root(void) { return ""; }
 void of_file_relaunch_reset(void) {}
 int of_file_list_instances(char *names, uint32_t stride, uint32_t max) {
     (void)names; (void)stride; (void)max; return 0;
@@ -138,6 +140,10 @@ int of_file_config_slot(const char *name) { (void)name; return -1; }
 /* Boot-complete transport-policy hook: MiSTer arms its DS ERR_TIMEOUT
  * retry loop here; the APF bridge needs no boot/operational split. */
 void of_file_boot_complete(void) {}
+/* Instance-selection gate is a MiSTer (F-load) feature; the Analogue host
+ * hands the picked instance's files to the core directly, so Pocket/sim are
+ * always ready to launch. */
+int of_file_instance_ready(void) { return 1; }
 
 void of_file_init(void) {
     idle_hook = (void *)0;

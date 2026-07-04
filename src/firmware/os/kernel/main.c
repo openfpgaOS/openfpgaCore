@@ -295,6 +295,67 @@ static int prepare_app_launch(uint32_t *slot_out, int *argc_out) {
     return prepare_app_launch_ex(NULL, slot_out, argc_out);
 }
 
+#ifdef OF_TARGET_SUPPORTS_RELAUNCH
+/* Two-root derivation for the MiSTer F-load instance model (see
+ * targets/mister/file.c).  The F-loaded os.ini carries [os] GAME + INSTANCE;
+ * from them the OS builds a READ-ONLY shared root ("/<GAME>/common", for
+ * app.elf / sound bank / wads) and a WRITABLE per-instance root
+ * ("/<GAME>/<INSTANCE>", for config + saves), both on the mounted boot.vhd
+ * (volume 0).  When either key is absent (a legacy image), BOTH roots are
+ * cleared so every path stays root-relative — exactly the pre-instance
+ * behavior.  MiSTer only: the of_file_set_*_root setters are no-ops on
+ * Pocket/sim, and this block is not compiled there. */
+#define OS_ROOT_NAME_MAX 48
+#define OS_ROOT_PATH_MAX 112
+static char os_root_game[OS_ROOT_NAME_MAX];
+static char os_root_instance[OS_ROOT_NAME_MAX];
+static char os_common_root[OS_ROOT_PATH_MAX];
+static char os_instance_root[OS_ROOT_PATH_MAX];
+
+static char *os_root_append(char *dst, char *end, const char *src) {
+    while (*src && dst < end - 1)
+        *dst++ = *src++;
+    return dst;
+}
+
+static void os_apply_instance_roots(void) {
+    os_root_game[0] = '\0';
+    os_root_instance[0] = '\0';
+
+    int rg = of_config_get("os", "GAME", os_root_game, sizeof(os_root_game));
+    int ri = of_config_get("os", "INSTANCE",
+                           os_root_instance, sizeof(os_root_instance));
+
+    if (rg == 0 && ri == 0 && os_root_game[0] && os_root_instance[0]) {
+        char *p, *e;
+
+        /* common_root = "/" + GAME + "/common" */
+        p = os_common_root;
+        e = os_common_root + sizeof(os_common_root);
+        *p++ = '/';
+        p = os_root_append(p, e, os_root_game);
+        p = os_root_append(p, e, "/common");
+        *p = '\0';
+
+        /* instance_root = "/" + GAME + "/" + INSTANCE */
+        p = os_instance_root;
+        e = os_instance_root + sizeof(os_instance_root);
+        *p++ = '/';
+        p = os_root_append(p, e, os_root_game);
+        p = os_root_append(p, e, "/");
+        p = os_root_append(p, e, os_root_instance);
+        *p = '\0';
+
+        of_file_set_common_root(os_common_root);
+        of_file_set_instance_root(os_instance_root);
+    } else {
+        /* Legacy image / no keys: root-relative paths (regression-safe). */
+        of_file_set_common_root("");
+        of_file_set_instance_root("");
+    }
+}
+#endif /* OF_TARGET_SUPPORTS_RELAUNCH */
+
 void os_main(void) {
     /* Clear IRQ callback state and hardware source masks before enabling
      * machine interrupts.  The bootloader deliberately keeps MIE disabled
@@ -352,6 +413,40 @@ void os_main(void) {
     of_term_puts("  Syscall init...... ");
     status_ok();
 
+    /* MiSTer F-load instance model: the OSD/MGL F-loads a menu-picked .ini
+     * into SDRAM staging, and that becomes this boot's os.ini (slot 2 is
+     * served from staging while HPS_STATUS_INI_LOADED is set — see
+     * targets/mister/file.c).  The mounted S0 .vhd is the shared family
+     * (wads under /assets, /app.elf, /bank.ofsf); the pushed ini selects the
+     * game.  Wait for that selection before loading the config and launching;
+     * if one is already staged we fall straight through.  Gated on
+     * OF_TARGET_SUPPORTS_RELAUNCH so Pocket/sim (no HPS_STATUS) are wholly
+     * unaffected — of_file_instance_ready() is a no-op '1' there and this
+     * block is not compiled at all. */
+#ifdef OF_TARGET_SUPPORTS_RELAUNCH
+    if (!of_file_instance_ready()) {
+        /* Recolor the logo blue (awaiting input) without disturbing the
+         * status lines already printed below it — same save/restore idiom the
+         * blue "launching" redraw uses further down. */
+        int saved_col, saved_row;
+        of_term_get_pos(&saved_col, &saved_row);
+        boot_logo("\033[94m");
+        of_term_set_pos(saved_col, saved_row);
+        of_term_puts("  Select an instance from the menu...\n");
+        /* Bounded wait so a plain core load (or a misconfigured MGL that never
+         * F-loads a nonzero-index ini) can't hang here forever: after the
+         * timeout, fall through to of_config_load, which serves the mounted
+         * vhd's own /os.ini (the family default) — a graceful default boot
+         * instead of a silent hang.  An MGL F-loads its ini ~1-2 s after boot,
+         * far inside this window, so the selected game always wins. */
+        unsigned waited_ms = 0u;
+        while (!of_file_instance_ready() && waited_ms < 8000u) {
+            of_timer_delay_ms(100);
+            waited_ms += 100u;
+        }
+    }
+#endif
+
     of_term_puts("  Config init....... ");
     int config_rc = of_config_load(OS_CONFIG_SLOT_ID);
     if (config_rc < 0) {
@@ -363,6 +458,13 @@ void os_main(void) {
         while (1) of_timer_delay_ms(1000);
     }
     status_ok();
+
+#ifdef OF_TARGET_SUPPORTS_RELAUNCH
+    /* Derive the two roots (common_root / instance_root) from the loaded
+     * os.ini's [os] GAME/INSTANCE before resolving app.elf or any save/config
+     * path.  Absent keys clear both roots (legacy root-relative layout). */
+    os_apply_instance_roots();
+#endif
 
     /* Brief pause to show banner */
     of_timer_delay_ms(800);
@@ -593,6 +695,11 @@ void os_relaunch(void) {
     /* Load the selected instance's os.ini (slot 2 resolves under the instance
      * root on MiSTer).  Missing/empty falls back to defaults. */
     (void)of_config_load(OS_CONFIG_SLOT_ID);
+
+    /* Re-derive both roots from the freshly loaded os.ini's [os] GAME/INSTANCE
+     * so every read (app.elf/bank) and write (config/save) resolves against
+     * the relaunched instance.  Absent keys clear them (legacy layout). */
+    os_apply_instance_roots();
 
     /* Capture and clear the one-shot ELF override up front, so it never leaks
      * into a later relaunch regardless of which path we take from here. */

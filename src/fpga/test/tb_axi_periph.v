@@ -230,6 +230,7 @@ axi_periph_slave dut (
     .hps_boot_len        (32'h000A_BC00),
     .hps_img1_size       (64'h5555_6666_7777_8888),
     .hps_img2_size       (64'h9999_AAAA_BBBB_CCCC),
+    .hps_ini_len         (32'hFACE_1234),
     .bridge_wr_idle      (bridge_wr_idle),
     .bridge_dbg_wcnt     (32'd0),
 

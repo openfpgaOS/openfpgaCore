@@ -27,11 +27,28 @@ void of_file_init(void);
 void of_file_set_instance_root(const char *root);
 const char *of_file_get_instance_root(void);
 
+/* Shared READ-ONLY root for the MiSTer two-root F-load instance model, e.g.
+ * "/Doom/common".  The kernel derives it (with instance_root) from os.ini's
+ * [os] GAME/INSTANCE and sets it before app launch: reads that resolve shared
+ * data — app.elf, the sound bank, wads — join through this root, while writes
+ * (config + saves) join through instance_root.  Empty selects the legacy
+ * image-root layout.  No-op on targets without a writable instance tree
+ * (Pocket/sim), so callers stay target-agnostic.  Pass NULL or "" to clear. */
+void of_file_set_common_root(const char *root);
+const char *of_file_get_common_root(void);
+
 /* Tear down per-app file state ahead of an in-OS relaunch: close any cached
  * backing-file handles (so no FatFs lock or unsynced write leaks), cancel a
  * pending async read, and force the dynamic asset registry to re-enumerate for
  * the next app.  No-op on targets that don't support relaunch. */
 void of_file_relaunch_reset(void);
+
+/* MiSTer F-load instance model: 1 once the HPS has DMA'd a menu/MGL-picked
+ * .ini into staging (HPS_STATUS_INI_LOADED), meaning os.ini (slot 2) is now
+ * served from that staging.  The kernel cold path waits on this before
+ * loading os.ini + launching (gated to MiSTer).  Targets that do not gate
+ * boot on an instance selection (Pocket/sim) always return 1. */
+int of_file_instance_ready(void);
 
 /* Enumerate game instances: subdirectories of /games that contain an os.ini.
  * Writes up to `max` directory names into the flat buffer `names`, one every

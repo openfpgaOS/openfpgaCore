@@ -14,13 +14,22 @@
  * enumeration for everything else:
  *
  *   slot 1      boot.rom        RAM-backed (the ioctl-DMA'd os.bin staging)
- *   slot 2      /os.ini
- *   slot 3      /app.elf
- *   slot 7      /bank.ofsf
- *   slot 8      /config/shared.cfg     (nonvolatile, pre-created 256 KB)
- *   slot 9      /config/duke3d.cfg     (nonvolatile, pre-created 256 KB)
- *   slot 10-19  /saves/slot_N.sav      (nonvolatile, pre-created 256 KB)
- *   slot 4-6, 20+  assigned to files enumerated from / and /assets
+ *   slot 2      /os.ini                (F-load staging when INI_LOADED)
+ *   slot 3      app.elf                (READ  — under common_root when set)
+ *   slot 7      bank.ofsf              (READ  — under common_root when set)
+ *   slot 8      shared.cfg             (WRITE — under instance_root, flat)
+ *   slot 9      duke3d.cfg             (WRITE — under instance_root, flat)
+ *   slot 10-19  slot_N.sav             (WRITE — under instance_root, flat)
+ *   slot 4-6, 20+  assigned to files enumerated from common_root
+ *
+ * Two-root F-load instance model: os.ini's [os] GAME/INSTANCE keys give the
+ * OS a READ-ONLY shared root  common_root  = "/<GAME>/common" (all the app's
+ * code + data — app.elf, bank.ofsf, wads, flat) and a WRITABLE per-instance
+ * root  instance_root = "/<GAME>/<INSTANCE>" (config + saves, flat: no
+ * /config or /saves subdirs).  Both live on the mounted boot.vhd (volume 0);
+ * the kernel sets them before app launch (kernel/main.c).  With BOTH empty
+ * (legacy image / no keys) every path is root-relative and keeps its historic
+ * /config + /saves + /assets layout — see build_cfg_leaf/read_search_dir.
  *
  * dir_probe_slots() in kernel/syscall.c walks ids 1..31 through
  * of_file_size64/of_file_flags/of_file_get_name and registers filenames, so
@@ -63,6 +72,7 @@
 #include <string.h>
 
 #define BOOT_SLOT_ID        1u
+#define OSINI_SLOT_ID       2u    /* os.ini (kernel OS_CONFIG_SLOT_ID) */
 #define FIL_CACHE_SLOTS     4
 #define DYN_SLOT_FIRST_LOW  4u    /* dynamic ids 4..6 first (Pocket layout), */
 #define DYN_SLOT_FIRST_HIGH 20u   /* then 20..31 */
@@ -90,6 +100,13 @@ _Static_assert(2u + (MISTER_INSTANCE_ROOT_MAX - 1u)
  * caches lines the boot.rom ioctl DMA may rewrite on a reload. */
 #define BOOT_STAGE_UNCACHED (SDRAM_UNCACHED_BASE + OF_TARGET_CRAM0_BRIDGE + \
                              OF_TARGET_CRAM0_OS_OFFSET)
+
+/* F-loaded instance ini staging copy — bridge offset 0x00600000 above the
+ * arena base (the 2 MB "reserved" spare window in target_platform.h).  Read
+ * through the uncached alias exactly like boot.rom, so the CPU never caches
+ * lines the HPS ini DMA may rewrite.  Mirrors BOOT_STAGE_UNCACHED. */
+#define INI_STAGE_UNCACHED  (SDRAM_UNCACHED_BASE + OF_TARGET_CRAM0_BRIDGE + \
+                             0x00600000u)
 
 /* ---------------------------------------------------------------------- */
 
@@ -311,17 +328,24 @@ static int dyn_register(const char *dir, const char *name) {
     return 0;
 }
 
-/* Optional per-instance root for the game's files, e.g. "/games/Quake".
- * Empty (the default) selects the legacy single-game layout where files live
- * at the image root.  The launcher (menu.elf / Arch-A relaunch) sets this
- * before switching into an instance; with it empty every vol_join() result
- * is "N:" + the pre-instance path, so existing single-game images are
- * unaffected (an unprefixed path and a "0:" path name the same file). */
+/* Two roots for the F-load instance model (see the file header).
+ *   instance_root — WRITABLE per-instance tree "/<GAME>/<INSTANCE>" (config +
+ *                   saves land here, FLAT).  Reads that are per-game-config
+ *                   also join through it.
+ *   common_root   — READ-ONLY shared tree "/<GAME>/common" (app.elf, sound
+ *                   bank, wads/data, FLAT).
+ * The kernel sets both from os.ini's [os] GAME/INSTANCE before app launch (and
+ * on an in-OS relaunch).  BOTH empty (the default) selects the legacy layout:
+ * every join result is "N:" + the pre-instance path, so existing single-game
+ * images are unaffected (an unprefixed path and a "0:" path name the same
+ * file). */
 static char instance_root[MISTER_INSTANCE_ROOT_MAX];
+static char common_root[MISTER_INSTANCE_ROOT_MAX];
 
-/* "V:" + (optional instance_root) + leaf (leaf begins with '/') into buf. */
-static const char *vol_join_ex(unsigned vol, int with_root, const char *leaf,
-                               char *buf, uint32_t max) {
+/* "V:" + (optional root) + leaf (leaf begins with '/') into buf.  root may be
+ * NULL or "" for a bare "V:" + leaf. */
+static const char *vol_join_root(unsigned vol, const char *root,
+                                 const char *leaf, char *buf, uint32_t max) {
     uint32_t pos = 0;
     if (max < 3u) {
         if (max) buf[0] = '\0';
@@ -329,18 +353,46 @@ static const char *vol_join_ex(unsigned vol, int with_root, const char *leaf,
     }
     buf[pos++] = (char)('0' + vol);
     buf[pos++] = ':';
-    if (with_root)
-        for (uint32_t i = 0; instance_root[i] && pos < max - 1u; i++)
-            buf[pos++] = instance_root[i];
+    if (root)
+        for (uint32_t i = 0; root[i] && pos < max - 1u; i++)
+            buf[pos++] = root[i];
     for (uint32_t i = 0; leaf[i] && pos < max - 1u; i++)
         buf[pos++] = leaf[i];
     buf[pos] = '\0';
     return buf;
 }
 
+/* WRITE / per-instance join (prefixes instance_root). */
 static const char *vol_join(unsigned vol, const char *leaf,
                             char *buf, uint32_t max) {
-    return vol_join_ex(vol, 1, leaf, buf, max);
+    return vol_join_root(vol, instance_root, leaf, buf, max);
+}
+
+/* READ / shared join (prefixes common_root). */
+static const char *vol_join_common(unsigned vol, const char *leaf,
+                                   char *buf, uint32_t max) {
+    return vol_join_root(vol, common_root, leaf, buf, max);
+}
+
+/* Build a nonvolatile config leaf into `leaf`: FLAT "/<name>" when a
+ * per-instance root is active, else the legacy "/config/<name>".  With no
+ * instance_root this is byte-identical to the historical single-game layout,
+ * so legacy images (and the host test fixtures) resolve exactly as before. */
+static void build_cfg_leaf(char *leaf, uint32_t max, const char *name) {
+    uint32_t pos = 0;
+    if (max < 2u) {
+        if (max) leaf[0] = '\0';
+        return;
+    }
+    leaf[pos++] = '/';
+    if (!instance_root[0]) {
+        const char *c = "config/";
+        while (*c && pos < max - 1u)
+            leaf[pos++] = *c++;
+    }
+    for (uint32_t k = 0; name[k] && pos < max - 1u; k++)
+        leaf[pos++] = name[k];
+    leaf[pos] = '\0';
 }
 
 /* Resolve a leaf across mounted volumes in `order`, preferring the first
@@ -350,7 +402,8 @@ static const char *vol_join(unsigned vol, const char *leaf,
  * no volume, the path on the first mounted volume in order is returned so
  * open/stat fail there exactly as they would today. */
 static const char *resolve_search(const uint8_t *order, unsigned n,
-                                  const char *leaf, char *buf, uint32_t max) {
+                                  const char *root, const char *leaf,
+                                  char *buf, uint32_t max) {
     int first = -1, mounted = 0;
     for (unsigned i = 0; i < n; i++) {
         if (!vol_mounted(order[i]))
@@ -359,17 +412,41 @@ static const char *resolve_search(const uint8_t *order, unsigned n,
         mounted++;
     }
     if (mounted <= 1)
-        return vol_join(first < 0 ? 0u : (unsigned)first, leaf, buf, max);
+        return vol_join_root(first < 0 ? 0u : (unsigned)first, root,
+                             leaf, buf, max);
 
     for (unsigned i = 0; i < n; i++) {
         unsigned vol = order[i];
         if (!vol_mounted(vol))
             continue;
         FILINFO fno;
-        if (f_stat(vol_join(vol, leaf, buf, max), &fno) == FR_OK)
+        if (f_stat(vol_join_root(vol, root, leaf, buf, max), &fno) == FR_OK)
             return buf;
     }
-    return vol_join((unsigned)first, leaf, buf, max);
+    return vol_join_root((unsigned)first, root, leaf, buf, max);
+}
+
+/* Read-search directory prefixes for one volume, in order (each ends in '/').
+ * Two-root model (common_root set): reads are FLAT under common_root, plus the
+ * per-instance root so instance config/saves stay reachable by name (mirroring
+ * the legacy /config scan).  Legacy (no common_root): image root, /assets and
+ * /config under the (empty) instance_root — byte-identical to the historical
+ * scan.  Returns NULL past the last directory. */
+static const char *read_search_dir(unsigned vol, unsigned idx,
+                                   char *buf, uint32_t max) {
+    if (common_root[0]) {
+        switch (idx) {
+        case 0:  return vol_join_common(vol, "/", buf, max);
+        case 1:  return vol_join(vol, "/", buf, max);   /* instance_root */
+        default: return (void *)0;
+        }
+    }
+    switch (idx) {
+    case 0:  return vol_join(vol, "/", buf, max);
+    case 1:  return vol_join(vol, "/assets/", buf, max);
+    case 2:  return vol_join(vol, "/config/", buf, max);
+    default: return (void *)0;
+    }
 }
 
 static void enumerate_dir(const char *dir) {
@@ -400,19 +477,23 @@ static void ensure_enumerated(void) {
     if (dyn_enumerated || !ensure_mounted())
         return;
     dyn_enumerated = 1;
-    /* Enumerate each mounted volume's tree in search order (S1 -> S2 -> S0)
-     * so an instance file shadows a borrow/family duplicate; within one
-     * volume: root when no instance is set, /assets/ for loose data, and
-     * /config/ because per-game settings (e.g. doom.cfg) open BY NAME. */
+    /* Enumerate each mounted volume's read tree in search order (S1 -> S2 ->
+     * S0) so an instance file shadows a borrow/family duplicate.  The set of
+     * directories is two-root aware (see read_search_dir): common_root (flat
+     * wads/data) + instance_root in the F-load model, or root + /assets +
+     * /config in the legacy layout. */
     char dirbuf[MISTER_PATH_MAX];
     for (unsigned i = 0; i < sizeof(vol_order_game); i++) {
         unsigned vol = vol_order_game[i];
         if (!vol_mounted(vol))
             continue;
         dyn_vol_start = dyn_slot_count;
-        enumerate_dir(vol_join(vol, "/", dirbuf, sizeof(dirbuf)));
-        enumerate_dir(vol_join(vol, "/assets/", dirbuf, sizeof(dirbuf)));
-        enumerate_dir(vol_join(vol, "/config/", dirbuf, sizeof(dirbuf)));
+        for (unsigned d = 0; ; d++) {
+            const char *dir = read_search_dir(vol, d, dirbuf, sizeof(dirbuf));
+            if (!dir)
+                break;
+            enumerate_dir(dir);
+        }
     }
 }
 
@@ -435,6 +516,29 @@ void of_file_set_instance_root(const char *root) {
 
 const char *of_file_get_instance_root(void) {
     return instance_root;
+}
+
+/* Shared read root (see of_file_set_instance_root — same idiom).  Passing NULL
+ * or "" (or any string not starting with '/') clears it back to the legacy
+ * image-root layout. */
+void of_file_set_common_root(const char *root) {
+    uint32_t i = 0;
+    if (root && root[0] == '/') {
+        while (root[i] && i < MISTER_INSTANCE_ROOT_MAX - 1u) {
+            common_root[i] = root[i];
+            i++;
+        }
+        while (i > 1u && common_root[i - 1u] == '/')
+            i--;
+    }
+    common_root[i] = '\0';
+    /* The root changes every read slot's path resolution — a memoized size for
+     * the old tree must not answer for the new one. */
+    size_memo_invalidate();
+}
+
+const char *of_file_get_common_root(void) {
+    return common_root;
 }
 
 void of_file_relaunch_reset(void) {
@@ -513,29 +617,35 @@ int of_file_list_instances(char *names, uint32_t stride, uint32_t max) {
 }
 
 /* Resolve a slot id to a FAT path.  Returns NULL for unmapped slots and for
- * the RAM-backed boot slot.  A game's own files — os.ini, app.elf, sound bank,
- * per-game settings, and saves — resolve under instance_root when an instance
- * is active; the shared config (8) is global across instances.
+ * the RAM-backed boot slot.
  *
- * Volume policy (see file header): read-searchable slots (os.ini, app.elf,
- * bank.ofsf) probe mounted volumes in search order; every nonvolatile write
- * slot (8, 9, saves) pins to nv_volume() so writes NEVER land on a library
- * volume — the S1 image preallocates those files, and a missing one fails
- * loudly (save.c's durability invariant) instead of falling back. */
+ * Root policy (see file header): READ-searchable slots resolve under
+ * common_root — app.elf (3) and bank.ofsf (7); os.ini (2) keeps its own
+ * search (served from staging when INI_LOADED, never here).  Every WRITE slot
+ * — shared.cfg (8), duke3d.cfg (9), named config, saves (10-19) — resolves
+ * FLAT under instance_root and pins to nv_volume() so writes NEVER land on a
+ * library volume.  With both roots empty (legacy) reads collapse to the image
+ * root and writes keep the historic /config + /saves layout. */
 static const char *slot_path(uint32_t slot_id, char *buf, uint32_t max) {
     ensure_mounted();
 
     switch (slot_id) {
     case 2:  return resolve_search(vol_order_osini, sizeof(vol_order_osini),
-                                   "/os.ini", buf, max);
+                                   instance_root, "/os.ini", buf, max);
     case 3:  return resolve_search(vol_order_game, sizeof(vol_order_game),
-                                   "/app.elf", buf, max);
+                                   common_root, "/app.elf", buf, max);
     case 7:  return resolve_search(vol_order_game, sizeof(vol_order_game),
-                                   "/bank.ofsf", buf, max);
-    case 8:  /* shared across instances (no instance_root), but per-world:
-              * the S1 instance volume owns it in instance mode. */
-             return vol_join_ex(nv_volume(), 0, "/config/shared.cfg", buf, max);
-    case 9:  return vol_join(nv_volume(), "/config/duke3d.cfg", buf, max);
+                                   common_root, "/bank.ofsf", buf, max);
+    case 8: {  /* per-instance (flat under instance_root), pinned to nv_volume() */
+        char leaf[8u + CFG_NAME_MAX];
+        build_cfg_leaf(leaf, sizeof(leaf), "shared.cfg");
+        return vol_join(nv_volume(), leaf, buf, max);
+    }
+    case 9: {
+        char leaf[8u + CFG_NAME_MAX];
+        build_cfg_leaf(leaf, sizeof(leaf), "duke3d.cfg");
+        return vol_join(nv_volume(), leaf, buf, max);
+    }
     default: break;
     }
 
@@ -545,10 +655,17 @@ static const char *slot_path(uint32_t slot_id, char *buf, uint32_t max) {
          * image builder's preallocation) depend on it.  Guard the assumption. */
         _Static_assert(OF_TARGET_SAVE_MAX_SLOTS <= 10,
                        "single-digit slot_N.sav naming requires <=10 save slots");
-        char leaf[20];   /* "/saves/slot_N.sav" + NUL */
-        const char *pfx = "/saves/slot_";
+        /* FLAT "/slot_N.sav" under a set instance_root; legacy
+         * "/saves/slot_N.sav" when no instance is active. */
+        char leaf[20];   /* "/saves/slot_N.sav" + NUL (legacy worst case) */
         uint32_t pos = 0;
-        while (pfx[pos]) { leaf[pos] = pfx[pos]; pos++; }
+        leaf[pos++] = '/';
+        if (!instance_root[0]) {
+            const char *sv = "saves/";
+            while (*sv) leaf[pos++] = *sv++;
+        }
+        const char *sl = "slot_";
+        while (*sl) leaf[pos++] = *sl++;
         leaf[pos++] = (char)('0' + n);
         leaf[pos++] = '.'; leaf[pos++] = 's'; leaf[pos++] = 'a'; leaf[pos++] = 'v';
         leaf[pos] = '\0';
@@ -557,19 +674,14 @@ static const char *slot_path(uint32_t slot_id, char *buf, uint32_t max) {
 
     if (slot_id >= OF_FILE_CFG_SLOT_BASE &&
         slot_id < OF_FILE_CFG_SLOT_BASE + (uint32_t)cfg_count) {
-        /* "/config/" + bound leaf name, pinned to the nonvolatile volume
-         * (same policy as slots 8/9 — see the header comment above). */
+        /* Bound leaf name, pinned to the nonvolatile volume (same policy as
+         * slots 8/9): flat "/<name>" under instance_root, legacy "/config/<name>". */
         _Static_assert(2u + (MISTER_INSTANCE_ROOT_MAX - 1u) + 8u + CFG_NAME_MAX
                            <= MISTER_PATH_MAX,
                        "MISTER_PATH_MAX too small for named config paths");
-        char leaf[8u + CFG_NAME_MAX];   /* "/config/" + name + NUL */
-        const char *pfx = "/config/";
-        const char *nm = cfg_names[slot_id - OF_FILE_CFG_SLOT_BASE];
-        uint32_t pos = 0;
-        while (pfx[pos]) { leaf[pos] = pfx[pos]; pos++; }
-        for (uint32_t k = 0; nm[k]; k++)
-            leaf[pos++] = nm[k];
-        leaf[pos] = '\0';
+        char leaf[8u + CFG_NAME_MAX];   /* "/config/" + name + NUL (legacy) */
+        build_cfg_leaf(leaf, sizeof(leaf),
+                       cfg_names[slot_id - OF_FILE_CFG_SLOT_BASE]);
         return vol_join(nv_volume(), leaf, buf, max);
     }
 
@@ -585,9 +697,6 @@ static const char *slot_path(uint32_t slot_id, char *buf, uint32_t max) {
 
     return (void *)0;
 }
-
-/* Directories searched for by-name resolution, mirroring enumerate_dir. */
-static const char *const resolve_dirs[3] = { "/", "/assets/", "/config/" };
 
 static int resolve_name_body(const char *name) {
     if (!name || !name[0])
@@ -615,15 +724,17 @@ static int resolve_name_body(const char *name) {
     if (ovf_count >= (int)OVF_SLOT_COUNT)
         return -1;
 
-    /* Probe the search dirs on each mounted volume in S1 -> S2 -> S0 order
-     * and bind the first hit to a fresh overflow id. */
+    /* Probe the read-search dirs (see read_search_dir — two-root aware) on
+     * each mounted volume in S1 -> S2 -> S0 order and bind the first hit to a
+     * fresh overflow id. */
     for (unsigned i = 0; i < sizeof(vol_order_game); i++) {
         unsigned vol = vol_order_game[i];
         if (!vol_mounted(vol))
             continue;
-        for (unsigned d = 0; d < 3u; d++) {
+        for (unsigned d = 0; ; d++) {
             char *buf = ovf_paths[ovf_count];
-            vol_join(vol, resolve_dirs[d], buf, DYN_NAME_MAX);
+            if (!read_search_dir(vol, d, buf, DYN_NAME_MAX))
+                break;
             uint32_t pos = 0;
             while (buf[pos]) pos++;
             for (uint32_t k = 0; name[k] && pos < DYN_NAME_MAX - 1u; k++)
@@ -702,14 +813,10 @@ static int cfg_slot_body(const char *name) {
      * nonvolatile-write contract shared with slots 8/9: writes never land
      * on a library volume, and files are never created at runtime.  A
      * config the image builder didn't preallocate fails the open cleanly
-     * (the SDK tooling owns that gap). */
+     * (the SDK tooling owns that gap).  Same leaf policy as slot_path:
+     * flat "/<name>" under instance_root, legacy "/config/<name>". */
     char leaf[8u + CFG_NAME_MAX];
-    const char *pfx = "/config/";
-    uint32_t pos = 0;
-    while (pfx[pos]) { leaf[pos] = pfx[pos]; pos++; }
-    for (uint32_t k = 0; k < len; k++)
-        leaf[pos++] = name[k];
-    leaf[pos] = '\0';
+    build_cfg_leaf(leaf, sizeof(leaf), name);
 
     char pathbuf[MISTER_PATH_MAX];
     FILINFO fno;
@@ -882,6 +989,32 @@ static int boot_slot_read(uint32_t slot_offset, void *dest, uint32_t length) {
     return 0;
 }
 
+/* Serve the F-loaded instance os.ini out of SDRAM staging (see
+ * INI_STAGE_UNCACHED / HPS_STATUS_INI_LOADED).  Mirrors boot_slot_read:
+ * length-capped by HPS_INI_LEN and read through the uncached alias so the
+ * CPU never caches bytes the HPS ini DMA may rewrite between boots. */
+static int ini_slot_read(uint32_t slot_offset, void *dest, uint32_t length) {
+    uint32_t ini_len = HPS_INI_LEN;
+    if (!(HPS_STATUS & HPS_STATUS_INI_LOADED) || ini_len == 0)
+        return OF_ERR_NOT_SUPPORTED;
+    if (slot_offset > ini_len || length > ini_len - slot_offset)
+        return OF_ERR_BAD_RANGE;
+    memcpy(dest, (const void *)(INI_STAGE_UNCACHED + slot_offset), length);
+    return 0;
+}
+
+/* True when a menu/MGL-picked instance ini has been staged by the HPS.  The
+ * kernel cold path waits on this (MiSTer only) before loading os.ini; Pocket
+ * and sim carry a no-op that always reports ready. */
+int of_file_instance_ready(void) {
+    /* F-load instance model: ready once the OSD/MGL has DMA'd a menu-picked
+     * .ini into staging (HPS bit 10) — that staged ini becomes os.ini (slot
+     * 2).  The two-root split (common_root / instance_root) is derived from
+     * that os.ini's GAME/INSTANCE by the kernel, so a mounted-S1 instance vhd
+     * is no longer a launch trigger. */
+    return (HPS_STATUS & HPS_STATUS_INI_LOADED) ? 1 : 0;
+}
+
 static int fat_read_body(uint32_t slot_id, uint32_t slot_offset,
                          void *dest, uint32_t length) {
     FIL *fil = open_slot_impl(slot_id, 0);
@@ -904,6 +1037,10 @@ static int fat_read_impl(uint32_t slot_id, uint32_t slot_offset,
                          void *dest, uint32_t length) {
     if (slot_id == BOOT_SLOT_ID)
         return boot_slot_read(slot_offset, dest, length);
+    /* os.ini served from the F-loaded instance staging when one is loaded;
+     * else falls through to the vhd/FAT resolution below (unchanged). */
+    if (slot_id == OSINI_SLOT_ID && (HPS_STATUS & HPS_STATUS_INI_LOADED))
+        return ini_slot_read(slot_offset, dest, length);
 
     mister_fs_enter();
     int rc = fat_read_body(slot_id, slot_offset, dest, length);
@@ -1119,6 +1256,14 @@ static int64_t size64_body(uint32_t slot_id) {
 int64_t of_file_size64(uint32_t slot_id) {
     if (slot_id == BOOT_SLOT_ID) {
         uint32_t len = (HPS_STATUS & HPS_STATUS_BOOT_LOADED) ? HPS_BOOT_LEN : 0;
+        return len ? (int64_t)len : -1;
+    }
+
+    /* os.ini served from the F-loaded instance staging (see fat_read_impl);
+     * mirror the boot-slot special case and skip the FAT/memo path.  When no
+     * ini is staged this falls through to the normal vhd resolution. */
+    if (slot_id == OSINI_SLOT_ID && (HPS_STATUS & HPS_STATUS_INI_LOADED)) {
+        uint32_t len = HPS_INI_LEN;
         return len ? (int64_t)len : -1;
     }
 

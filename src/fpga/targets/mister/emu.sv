@@ -63,12 +63,16 @@ assign VIDEO_ARY = (!ar) ? 13'd3 : 13'd0;
 
 `include "build_id.v"
 localparam CONF_STR = {
-	"openfpgaOS;;",
+	"OpenfpgaOS;;",
 	// Sn index = hps_io disk/bit number = DS_SLOT_ID index in firmware:
 	// 0 = family/legacy image, 1 = per-instance image, 2 = borrow slot.
 	"S0,VHDIMG,Family Data;",
 	"S1,VHDIMG,Instance;",
 	"S2,VHDIMG,Extra Data;",
+	// F-load: the native "Load Instance" browser (and MGL <file type="f">)
+	// streams a picked .ini to the OS over ioctl (non-zero index); the OS
+	// launches that instance.  See hps_bridge.v ini-staging routing.
+	"F1,INI,Load Instance;",
 	"-;",
 	"O[122:121],Aspect ratio,Original,Full Screen,[ARC1],[ARC2];",
 	"-;",
@@ -123,7 +127,26 @@ always @(posedge clk_cpu) begin
 end
 wire mount_reset = (mount_reset_cnt != 8'd0);
 
-wire reset_n = ~RESET & ~status[0] & ~mount_reset & pll_locked;
+// Reset the SoC when a NEW instance ini is F-loaded, so switching games
+// works even mid-session (not only when the MGL happens to re-mount the
+// family vhd).  hps_status[10] = ini_loaded (from hps_bridge) rises on each
+// completed F-load.  hps_bridge is tied .reset_n(1'b1) — never reset — so the
+// ini staging, ini_loaded, and the boot.rom staging all SURVIVE this reset;
+// the rebooted OS re-reads the newly-picked ini from staging and launches it.
+// Same one-shot stretch pattern as mount_reset (clk_cpu domain; ini_loaded is
+// already clk_cpu, so no CDC).
+reg  [7:0] ini_reset_cnt = 8'd0;
+reg        ini_loaded_d  = 1'b0;
+always @(posedge clk_cpu) begin
+	ini_loaded_d <= hps_status[10];
+	if (hps_status[10] && !ini_loaded_d)
+		ini_reset_cnt <= 8'hFF;
+	else if (ini_reset_cnt != 8'd0)
+		ini_reset_cnt <= ini_reset_cnt - 8'd1;
+end
+wire ini_reset = (ini_reset_cnt != 8'd0);
+
+wire reset_n = ~RESET & ~status[0] & ~mount_reset & ~ini_reset & pll_locked;
 
 // clk_cpu-domain reset replicas (same split as core_top.v so fitter
 // placement is not constrained by one monolithic reset tree).
@@ -261,6 +284,7 @@ wire [63:0] hps_img_size;
 wire [63:0] hps_img1_size;
 wire [63:0] hps_img2_size;
 wire [31:0] hps_boot_len;
+wire [31:0] hps_ini_len;
 wire        boot_rom_loaded;
 
 wire [31:0] p1_controls, p1_joypad;
@@ -350,6 +374,7 @@ hps_bridge #(
 	.hps_img1_size   (hps_img1_size),
 	.hps_img2_size   (hps_img2_size),
 	.hps_boot_len    (hps_boot_len),
+	.hps_ini_len     (hps_ini_len),
 	.boot_rom_loaded (boot_rom_loaded),
 
 	.cont1_key  (p1_controls),
@@ -699,6 +724,7 @@ axi_periph_slave #(
 	.hps_boot_len(hps_boot_len),
 	.hps_img1_size(hps_img1_size),
 	.hps_img2_size(hps_img2_size),
+	.hps_ini_len(hps_ini_len),
 	// Display control
 	.color_mode(color_mode),
 	.fb_display_addr(fb_display_addr),

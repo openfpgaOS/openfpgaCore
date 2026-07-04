@@ -968,7 +968,8 @@ void of_video_vsync_irq_service(void) {
              * gametic/leveltime advance ~350 per 10 s line the sim is
              * live and the freeze is pathological slowness; if they stall
              * while present keeps moving the sim is wedged.  App globals
-             * (Doom app.elf): gametic 0x104dd08c, leveltime 0x104dd6a8. */
+             * (Doom app.elf, post r_draw revert): gametic 0x104dd34c,
+             * leveltime 0x104dd968. */
             static const char hexd[] = "0123456789abcdef";
             uint32_t pc;
             uint32_t vals[4];
@@ -976,8 +977,8 @@ void of_video_vsync_irq_service(void) {
             int n = 0;
             __asm__ volatile ("csrr %0, mepc" : "=r"(pc));
             vals[0] = pc;
-            vals[1] = *(volatile uint32_t *)0x104dd08cu;  /* gametic */
-            vals[2] = *(volatile uint32_t *)0x104dd6a8u;  /* leveltime */
+            vals[1] = *(volatile uint32_t *)0x104dd34cu;  /* gametic */
+            vals[2] = *(volatile uint32_t *)0x104dd968u;  /* leveltime */
             vals[3] = timing_present_count;
             msg[n++] = 'h'; msg[n++] = 'b';
             for (int v = 0; v < 4; v++) {

@@ -261,14 +261,15 @@ static const uint32_t ST_MOUNT1    = 1u << 6;
 static const uint32_t ST_MOUNT2    = 1u << 7;
 static const uint32_t ST_RO1       = 1u << 8;
 static const uint32_t ST_RO2       = 1u << 9;
+static const uint32_t ST_INI       = 1u << 10;  // instance-ini F-load done
 
 // ── ioctl boot.rom streamer ─────────────────────────────────────────
 // violate_wait=true models an HPS that observes ioctl_wait one word
 // late: each word is sent immediately even if wait just asserted — the
 // bridge's one-entry skid must absorb it without dropping data.
 static void ioctl_boot(const uint8_t *data, uint32_t len,
-                       bool violate_wait = false) {
-    tb->ioctl_index = 0;
+                       bool violate_wait = false, uint16_t index = 0) {
+    tb->ioctl_index = index;
     tb->ioctl_download = 1;
     ticks(4);
     bool violated = false;
@@ -466,6 +467,47 @@ int main(int argc, char **argv) {
         CHECK(axi_read(0x03300000u + 512, &last) &&
               (last & 0xFFFF) == (uint32_t)(booto[512] | (booto[513] << 8)),
               "dangling half flushed (zero-padded)");
+    }
+
+    printf("test_ini_fload:\n");
+    {
+        // (a) A normal boot.rom load (index 0) establishes the baseline
+        //     boot staging + boot_loaded + boot_len that the ini F-load
+        //     below must leave completely undisturbed.
+        static uint8_t boot[2048];
+        for (uint32_t i = 0; i < sizeof(boot); i++)
+            boot[i] = (uint8_t)(i * 3u + 0x11);
+        ioctl_boot(boot, sizeof(boot));                 // index 0 = boot.rom
+        CHECK(tb->boot_loaded, "boot loaded before ini F-load");
+        CHECK(tb->hps_boot_len == sizeof(boot), "boot length latched before ini");
+        CHECK(sdram_check(0x03300000u, boot, sizeof(boot), "boot-pre-ini"),
+              "boot.rom bytes staged at BOOT_STAGE");
+        CHECK((tb->hps_status & ST_INI) == 0,
+              "status bit10 low before any ini F-load");
+        CHECK(tb->hps_ini_len == 0, "ini length 0 before any ini F-load");
+
+        // (b) A SECOND ioctl download with a NON-ZERO index (instance ini):
+        //     a small known payload that must DMA to INI_STAGE_ADDR
+        //     (0x03900000) via the SAME drain pipeline, without touching
+        //     the boot staging/length/flag.
+        static uint8_t ini[600];
+        for (uint32_t i = 0; i < sizeof(ini); i++)
+            ini[i] = (uint8_t)(i ^ 0x3C);
+        ioctl_boot(ini, sizeof(ini), false, /*index=*/1);
+
+        CHECK(sdram_check(0x03900000u, ini, sizeof(ini), "ini"),
+              "ini bytes DMA'd to INI_STAGE_ADDR (0x03900000)");
+        CHECK((tb->hps_status & ST_INI) != 0, "hps_status bit10 = ini loaded");
+        CHECK(tb->hps_ini_len == sizeof(ini), "hps_ini_len == ini byte length");
+
+        // boot state must be entirely undisturbed by the ini F-load
+        CHECK(tb->boot_loaded, "boot_loaded still set after ini F-load");
+        CHECK(tb->hps_boot_len == sizeof(boot),
+              "hps_boot_len unchanged by ini F-load");
+        CHECK((tb->hps_status & ST_BOOT) != 0,
+              "status bit0 = boot still loaded after ini F-load");
+        CHECK(sdram_check(0x03300000u, boot, sizeof(boot), "boot-post-ini"),
+              "boot staging bytes untouched by ini F-load");
     }
 
     // ════════════════ multi-vhd (VDNUM=3) coverage ════════════════

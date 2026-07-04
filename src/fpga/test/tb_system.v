@@ -571,6 +571,7 @@ axi_periph_slave periph (
     .hps_boot_len        (32'd0),
     .hps_img1_size       (64'd0),
     .hps_img2_size       (64'd0),
+    .hps_ini_len         (32'd0),
     .bridge_wr_idle      (bridge_wr_idle),
     .bridge_dbg_wcnt     (32'd0),
 
