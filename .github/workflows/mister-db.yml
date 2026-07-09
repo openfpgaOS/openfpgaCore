@@ -1,0 +1,82 @@
+# openfpgaOS — MiSTer Downloader database build (DRAFT / scaffold)
+#
+# Builds the MiSTer artifacts, packages the freeware vhd shells into a release
+# zip, and generates the custom Downloader database JSON so users can install
+# via `update_all` / downloader.ini.  See dist/mister/README.md for the design.
+#
+# This is a PROPOSAL — the build steps assume the container toolchain is
+# available in CI (or that artifacts are fetched from an upstream build).  Wire
+# the specifics (runner, secrets, upstream) in the PR.
+
+name: mister-db
+
+on:
+  workflow_dispatch: {}
+  push:
+    tags:
+      - "mister-*"
+
+permissions:
+  contents: write   # attach release assets + push the dist branch
+
+env:
+  DB_ID: thinkelastic/openfpgaos
+  # Raw base for small files (rbf/os.bin/script) served straight from the repo
+  # dist branch; large vhd shells ride the release zip instead.
+  BASE_FILES_URL: https://raw.githubusercontent.com/${{ github.repository }}/dist/dist/mister/release/
+  RELEASE_TAG: mister-latest
+
+jobs:
+  build-db:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # 1. MiSTer artifacts.  Two options — build here (needs the Quartus/
+      #    firmware toolchain container) or download from an upstream build
+      #    artifact.  Placeholder: expect them under dist/mister/release/.
+      - name: Stage core + os.bin + engine + setup script
+        run: |
+          mkdir -p dist/mister/release/_Console \
+                   dist/mister/release/games/openfpgaOS/vhd \
+                   dist/mister/release/Scripts
+          # cp <built>/openfpgaOS.rbf  dist/mister/release/_Console/openfpgaOS.rbf
+          # cp <built>/os.bin          dist/mister/release/games/openfpgaOS/boot.rom
+          cp dist/mister/setup.sh      dist/mister/release/Scripts/openfpgaOS_setup.sh
+          echo "TODO: wire the built rbf/os.bin/app.elf + freeware shells here"
+
+      # 2. Freeware vhd shells (no commercial IWADs) → one zip.
+      - name: Build freeware shells + zip
+        run: |
+          # Using the SDK per-game packager (make package TARGET=mister -> mkgame.sh):
+          # a read-only boot.vhd shell (freeware wads only; commercial IWADs are
+          # user-supplied on-device via setup.sh) + writable saves image + .mgl
+          # launchers, with preallocated /config + /saves.  Then:
+          #   (cd shells && zip -r ../openfpgaos-shells.zip .)
+          echo "TODO: build the per-game bundle via make package TARGET=mister, zip to openfpgaos-shells.zip"
+
+      # 3. Publish the release (zip + rbf + os.bin).
+      - name: Publish release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          files: |
+            openfpgaos-shells.zip
+            dist/mister/release/_Console/openfpgaOS.rbf
+            dist/mister/release/games/openfpgaOS/boot.rom
+
+      # 4. Generate the DB JSON.  Recommended: the community template generator,
+      #    which walks the release tree, computes MD5+size, and emits the
+      #    files/archives blocks + the *.json.zip the ecosystem expects.
+      - name: Generate database
+        run: |
+          curl --fail --location \
+            https://raw.githubusercontent.com/theypsilon/Downloader_DB-Template_MiSTer/main/.github/build_db.py \
+            | python3 -
+          # Env consumed by the template: DB_ID, BASE_FILES_URL, FINDER_IGNORE, …
+          # Adjust to emit the `archives` entry for openfpgaos-shells.zip (§3 README).
+
+      # 5. Publish the DB (raw file on the `dist` branch, referenced by db_url).
+      - name: Commit database to dist branch
+        run: |
+          echo "TODO: push generated openfpgaos.json.zip to the dist branch at dist/mister/db/"

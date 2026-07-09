@@ -1,6 +1,9 @@
 .target
+.variant
 # Build output
 build/
+# Release bundles (make package/release TARGET=mister → core zip + Downloader DB)
+releases/
 
 # Quartus intermediate files
 db/
@@ -17,7 +20,7 @@ incremental_db/
 src/firmware/**/*.o
 src/firmware/**/*.d
 src/firmware/**/*.elf
-src/firmware/os/.last_target
+src/firmware/os/bld/
 src/firmware/**/*.bin
 src/firmware/**/*.map
 src/firmware/**/*.lst

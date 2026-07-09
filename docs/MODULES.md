@@ -133,14 +133,16 @@ BASE rasterizer + minimal CPU only.
 
 | Core | Geometry | Color | Other GPU | CPU | Periph |
 |---|---|---|---|---|---|
+| **2D** (Diablo/ScummVM point-and-click) | — (BASE rasterizer only) | PALETTE + TRANSLUC | — | FPU, **dual-issue**, 64 KB D$ | HW_MIXER, ANALOGIZER, 4PLAYER |
 | **2.5D** (Doom/Duke/Wolf/ScummVM) | COMPACT_SPAN + COLUMN_LIST | PALETTE + TRANSLUC | — | FPU | HW_MIXER, ANALOGIZER |
 | **Quake1 (SW)** | PARAM_TRI | PALETTE | — | FPU | HW_MIXER, ANALOGIZER |
 | **SM64** | VERT_TRI | TRUECOLOR + COMBINE | Z-window=4 | FPU | HW_MIXER |
 | **Quake2** | VERT_TRI + PARAM_TRI_RECS | TRUECOLOR | Z-window=4 | FPU | HW_MIXER |
 | **MiSTer (all)** | all | all | TEX_MEM | FPU + L2 | HW_MIXER |
 
-(Today's variants map to these: os25 = the 2.5D + Quake1 union; os30 = SM64 ∪ Quake2 — **both use the HW
-mixer**: `DEFS_os30` carries `INCLUDE_HW_MIXER`.)
+(Today's variants map to these: os20 = the 2D row (dual-issue CPU — the span-form cuts fund the second
+issue lane); os25 = the 2.5D + Quake1 union; os30 = SM64 ∪ Quake2 — **all use the HW
+mixer**: every `variants/<v>.mk` DEFS list carries `INCLUDE_HW_MIXER`.)
 
 > **LINK and 4PLAYER are NOT required by MiSTer** (verified): LINK is *stubbed* in `emu.sv` — advertises
 > caps bit 2 but `link_irq=0`/`link_reg_rdata=0` with `.link_reg_*()` ports unconnected (no HW, no firmware

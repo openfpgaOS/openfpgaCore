@@ -69,7 +69,10 @@ QUARTUS ?= /home/alberto/altera_lite/25.1std/quartus/bin
 ifeq ($(USE_QUARTUS_CONTAINER),1)
 QRUN = bash $(ROOT_DIR)/tools/quartus-container.sh "$(CURDIR)/$(BDIR)"
 # report.sh cd's into the build dir before invoking $QRUN — absolute path.
-REPORT_QRUN = bash $(abspath $(TOOLS_DIR))/quartus-container.sh "$(CURDIR)/$(BDIR)"
+# NO embedded quotes: report.sh expands $QRUN unquoted (word-splitting only,
+# no quote removal), so quoted args would reach the script with literal
+# quote characters.  Repo paths contain no spaces.
+REPORT_QRUN = bash $(abspath $(TOOLS_DIR))/quartus-container.sh $(CURDIR)/$(BDIR)
 else
 export PATH := $(QUARTUS):$(PATH)
 QRUN = cd $(BDIR) &&
