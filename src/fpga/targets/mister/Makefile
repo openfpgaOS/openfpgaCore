@@ -23,13 +23,32 @@ PROJECT    = mister
 TARGET     = mister
 FW_DIR     = ../../../firmware/os
 VEXII_DIR  = ../../vendor/vexriscv/VexiiRiscv
-# MiSTer-specific DUAL-ISSUE netlist (--decoders=2 --lanes=2): the
-# DE10-Nano's A6/I7 part has the area and speed-grade headroom the
-# Pocket lacks.  Same module name / AXI interface — only the file
-# differs (see generate_vexii.sh variants).
-VEXII_OUT  = $(VEXII_DIR)/VexiiRiscv_mister.v
 TEST_DIR   = ../../test
 ROOT_DIR   = ../../../..
+
+# ── Variant registry + resolution (same model as the pocket target) ──
+# MiSTer currently has ONE variant ("mister", the default) — but it uses
+# the same auto-discovered variants/<name>.mk registry, so VARIANT= is
+# validated instead of silently ignored, and a future variant is a file
+# drop.  The sticky root .variant is SOFT (applies only when it names one
+# of THIS target's variants — a sticky pocket os30 never breaks a mister
+# build); an explicit unknown VARIANT= is a hard error.
+# NOTE: unlike pocket, mister builds in place (no bld/<job>/ isolation —
+# a Quartus 17 / sys-framework constraint), so its variants cannot build
+# in parallel; one at a time.
+VARIANTS := $(sort $(patsubst variants/%.mk,%,$(wildcard variants/*.mk)))
+DEFAULT_VARIANT := mister
+STICKY_VARIANT := $(strip $(shell cat $(ROOT_DIR)/.variant 2>/dev/null))
+ifeq ($(strip $(VARIANT)),)
+override VARIANT := $(if $(filter $(STICKY_VARIANT),$(VARIANTS)),$(STICKY_VARIANT),$(DEFAULT_VARIANT))
+endif
+$(if $(filter $(VARIANT),$(VARIANTS)),,$(error Unknown VARIANT '$(VARIANT)' — known mister variants: $(VARIANTS)))
+
+# Per-variant CPU netlist — the mister config is DUAL-ISSUE (--decoders=2
+# --lanes=2): the DE10-Nano's A6/I7 part has the area and speed-grade
+# headroom the Pocket lacks.  Same module name / AXI interface — only the
+# file differs (see src/fpga/vendor/vexriscv/configs/$(VARIANT).cfg).
+VEXII_OUT  = $(VEXII_DIR)/VexiiRiscv_$(VARIANT).v
 
 # Quartus 17.0.x runs in Docker by DEFAULT — the mister sys/ framework is a
 # hard Q17 requirement, and containerizing it removes the host-toolchain
@@ -49,6 +68,24 @@ export PATH := $(QUARTUS):$(PATH)
 Q =
 endif
 
+# Firmware (bootloader + os.bin) runs in the SAME Docker container as the
+# pocket target's — one riscv64-unknown-elf toolchain for every target, so
+# an os.bin never depends on which host (or which target) built it.  LTO
+# objects are compiler-locked, so mixing host and container objects is a
+# hard error (the firmware Makefile's .ccid guard).  Set
+# USE_FIRMWARE_CONTAINER=0 to use the host toolchain instead.
+USE_FIRMWARE_CONTAINER ?= 1
+ifeq ($(USE_FIRMWARE_CONTAINER),1)
+FW_MAKE = bash $(ROOT_DIR)/tools/firmware-container.sh
+else
+FW_MAKE = $(MAKE) -C $(FW_DIR)
+endif
+
+# CPU netlist generation runs in the shared vexii container by default
+# (mirrors the pocket target) — no host JDK/sbt needed.  Set
+# USE_VEXII_CONTAINER=0 to use host sbt instead.
+USE_VEXII_CONTAINER ?= 1
+
 BUILD_OUT = $(ROOT_DIR)/build/mister
 
 # ── MiSTer core release (make package / make release) ────────────────
@@ -67,21 +104,13 @@ MISTER_DB_ID       ?= thinkelastic/openfpgaos
 MISTER_DB_BASE_URL ?= https://raw.githubusercontent.com/thinkelastic/openfpgaOS/mister-dist/
 MISTER_DB_URL      ?= https://raw.githubusercontent.com/thinkelastic/openfpgaOS/mister-dist/openfpgaos.json.zip
 
-# ── Feature include-list ─────────────────────────────────────────────
-# Positive include-set (a feature is PRESENT iff its INCLUDE_* macro is
-# defined).  MiSTer has the full feature set EXCEPT analogizer (Pocket-only
-# HW) and fast texture memory (no CRAM1 chip — textures render from SDRAM).
-# Forwarded to quartus_map as --verilog_macro=<NAME>; the gpu_core /
-# axi_periph_slave instances in emu.sv echo each macro into their INCLUDE_*
-# params via the `ifdef INCLUDE_X 1 `else 0 `endif pattern.
-# LINK + 4PLAYER dropped 2026-06-27 (module audit): LINK is stubbed in emu.sv
-# (advertised cap, no HW, no firmware check) and 4PLAYER is a dead macro on MiSTer
-# (the only gate is pocket core_top.v; MiSTer multiplayer comes via HPS/USB).
-# INCLUDE_LINK=0 folds the periph link logic — the same config pocket already
-# ships — so this is low-risk, but RE-FIT MiSTer on Quartus 17 to confirm.
-INCLUDE_DEFS = INCLUDE_HW_MIXER INCLUDE_TRANSLUC \
-               INCLUDE_COLUMN_LIST INCLUDE_COMPACT_SPAN INCLUDE_PARAM_TRI \
-               INCLUDE_VERT_TRI INCLUDE_PARAM_TRI_RECS
+# ── Feature include-list: variants/<name>.mk ─────────────────────────
+# The variant file owns the ADDITIVE module list (a feature is PRESENT iff
+# its INCLUDE_* macro is listed) — see variants/mister.mk for the full
+# rationale.  Forwarded to quartus_map as --verilog_macro=<NAME>.
+DEFS :=
+include variants/$(VARIANT).mk
+INCLUDE_DEFS := $(DEFS)
 VERILOG_MACROS = $(foreach d,$(INCLUDE_DEFS),--verilog_macro="$(d)")
 
 # ── Colors ───────────────────────────────────────────────────────────
@@ -133,8 +162,12 @@ help:
 
 # ── CPU generation (file target — MiSTer dual-issue variant) ─────────
 $(VEXII_OUT):
-	@printf "$(C_HEAD)[cpu]$(C_RESET) Generating VexiiRiscv (dual-issue, file missing)...\n"
-	@cd $(VEXII_DIR) && bash ../generate_vexii.sh mister
+	@printf "$(C_HEAD)[cpu]$(C_RESET) Generating VexiiRiscv ($(VARIANT), file missing)...\n"
+ifeq ($(USE_VEXII_CONTAINER),1)
+	@bash $(ROOT_DIR)/tools/vexii-container.sh $(VARIANT)
+else
+	@cd $(VEXII_DIR) && bash ../generate_vexii.sh $(VARIANT)
+endif
 	@printf "$(C_OK)[cpu] Done$(C_RESET)\n"
 
 cpu: $(VEXII_OUT)
@@ -146,12 +179,12 @@ cpu: $(VEXII_OUT)
 #   firmware   — bootloader → os → MIF patch of an existing .sof
 bootloader:
 	@printf "$(C_HEAD)[boot]$(C_RESET) Building bootloader (firmware.mif)...\n"
-	@$(MAKE) -C $(FW_DIR) install TARGET=$(TARGET)
+	@$(FW_MAKE) install TARGET=$(TARGET)
 	@printf "$(C_OK)[boot] Done$(C_RESET)\n"
 
 os:
 	@printf "$(C_HEAD)[os]$(C_RESET) Building os.bin...\n"
-	@$(MAKE) -C $(FW_DIR) os.bin TARGET=$(TARGET)
+	@$(FW_MAKE) os.bin TARGET=$(TARGET)
 	@printf "$(C_OK)[os] Done$(C_RESET)\n"
 
 firmware: bootloader os
@@ -164,6 +197,11 @@ firmware: bootloader os
 
 # ── FPGA compile ─────────────────────────────────────────────────────
 compile: build
+
+# Root-delegated aliases: mister has a single variant and no bld/<job>/
+# isolation, so "all variants" degenerates to the one build/sweep.
+build-all: build
+sweep-all: sweep
 
 # Full compile with fresh placement.  Quartus emits output_files/mister.rbf
 # directly (GENERATE_RBF_FILE ON) — no reverse_bits step; MiSTer loads a
@@ -324,22 +362,36 @@ sdk:
 	@$(MAKE) -C $(ROOT_DIR) sdk DEST="$(DEST)"
 
 # ── Seed sweep ───────────────────────────────────────────────────────
-# Same flow as the Pocket: try fitter seeds, rank by the 100 MHz
-# domain's restricted Fmax (WNS/TNS reported alongside), rebuild best.
+# Same ranking as the Pocket (setup WNS on the 100 MHz clock), but in-place
+# serial: mister has no bld/<job>/ isolation, so one fit at a time, seed
+# sed-patched into mister.qsf, best seed rebuilt in place.  Two fixes over
+# the old form are load-bearing:
+#   VARIANT_DEFS — every sweep fit compiles WITH the variant's INCLUDE_*
+#     macros.  Without them the sweep ranked (and left in output_files/) a
+#     featureless design whose best seed means nothing for the real build.
+#   QRUN — every quartus call runs in the same Q17 container as `make
+#     build` (empty when USE_QUARTUS_CONTAINER=0 → host PATH).
+# `firmware` runs FIRST so the .mif the fits bake in is fresh — a stale
+# baked bootloader after a sweep is the classic mister black-boot.
 SWEEP_MIN ?= 1
 SWEEP_MAX ?= 30
 
 sweep: firmware
 	@USE_CONTAINER=0 MAXJOBS=1 PROJECT=$(PROJECT) \
 		CLOCK_RE='emu|pll|pll_inst.*general\[0\]' \
+		VARIANT_DEFS="$(INCLUDE_DEFS)" \
+		QRUN='$(Q)' \
 		bash $(ROOT_DIR)/tools/sweep.sh $(SWEEP_MIN) $(SWEEP_MAX)
 
 # ── Resource / timing report ─────────────────────────────────────────
 # Summary of resource usage; FULL=true adds the top ALM-consuming
 # entities and the 25 worst setup paths (re-runs quartus_sta).
+# QRUN sends the FULL-mode quartus_sta re-run through the same Q17
+# container as the build (empty with USE_QUARTUS_CONTAINER=0 → host PATH).
 report:
 	@chmod +x $(ROOT_DIR)/tools/report.sh 2>/dev/null || true
-	@TARGET="$(TARGET)" bash $(ROOT_DIR)/tools/report.sh $(PROJECT) $(if $(filter true,$(FULL)),full)
+	@TARGET="$(TARGET)" VARIANT="$(VARIANT)" QRUN='$(Q)' \
+		bash $(ROOT_DIR)/tools/report.sh $(PROJECT) $(if $(filter true,$(FULL)),full)
 
 # ── Timing report ────────────────────────────────────────────────────
 timing:
@@ -402,10 +454,10 @@ clean:
 	@rm -f output_files/*.rpt output_files/*.summary output_files/*.sof
 	@rm -f output_files/*.rbf output_files/*.done output_files/*.smsg
 	@rm -f output_files/*.pin output_files/*.jdi
-	@$(MAKE) -s -C $(FW_DIR) clean
+	@$(FW_MAKE) -s clean
 	@rm -f $(VEXII_OUT)
 
 clean-all: clean
 
-.PHONY: all full help cpu bootloader firmware os compile build test check deploy report sweep sdk program package
+.PHONY: all full help cpu bootloader firmware os compile build build-all test check deploy report sweep sweep-all sdk program package
 .PHONY: timing summary clean clean-all

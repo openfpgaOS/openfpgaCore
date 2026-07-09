@@ -20,8 +20,11 @@ toolchain below is on `PATH`.
 
 ## Toolchain (mostly containerized — `make full` on a fresh clone needs only Docker + git + make)
 
-The pocket build runs every long-lived toolchain inside Docker by default,
-so a fresh checkout needs no host installs of Quartus / sbt / riscv64-elf-gcc:
+Both targets run every long-lived toolchain inside Docker by default,
+so a fresh checkout needs no host installs of Quartus / sbt / riscv64-elf-gcc
+(the same is true of SDK app builds — the canonical `sdk.mk` here delegates
+RISC-V compiles to the `openfpgaos-firmware` container by default,
+`USE_SDK_CONTAINER=0` to opt out):
 
 - **Docker** — drives all three containers (vexii / firmware / quartus-full),
   built on demand by `vexii-container.sh`, `firmware-container.sh`,
@@ -35,21 +38,36 @@ so a fresh checkout needs no host installs of Quartus / sbt / riscv64-elf-gcc:
   under Rosetta on Apple Silicon (see `Dockerfile.quartus-full`).
   Bind-mount mode still works for Linux boxes with a host install at
   `$ALTERA_ROOT` (defaults to `/home/alberto/altera_lite`) — see
-  `tools/quartus-container.sh`.
-- **mister target** — still uses a host **Quartus 17.0.x** at
-  `/home/alberto/intelFPGA_lite/17.0/quartus` (a hard MiSTer framework
-  requirement; not containerized).
+  `tools/quartus-container.sh`.  EVERY pocket Quartus step runs in this
+  container — full compiles, the `make firmware` MIF patch, `make check`,
+  and the `report FULL=true` STA re-run (exec mode of
+  `quartus-container.sh`); only `make program` (JTAG over USB) uses a
+  host install.
+- **mister target** — **Quartus 17.0.x in a container by default**
+  (`openfpgaos-quartus17`, baked from a pre-extracted tarball under
+  `tools/` — the sys/ framework is a hard Q17 requirement).  Build,
+  sweep, MIF patch and report all run through `quartus17-container.sh`;
+  `USE_QUARTUS_CONTAINER=0` falls back to a host install at
+  `/home/alberto/intelFPGA_lite/17.0/quartus`.
 - **Verilator 5.x** — host-installed (or via your distro) for the RTL
   test suite (`make test`).  Not part of the default build.
+  (Deliberate host exception: tests produce no shipped artifacts.  The
+  chip32 `bass` assembler is the other documented host tool.)
 
-Setting `USE_VEXII_CONTAINER=0` or `USE_FIRMWARE_CONTAINER=0` falls back
-to host `sbt`/`riscv64-(unknown-)elf-gcc` if you'd rather not use Docker
-for those steps.
+Both targets build firmware and the CPU netlist in containers by
+default.  Setting `USE_VEXII_CONTAINER=0` / `USE_FIRMWARE_CONTAINER=0` /
+`USE_QUARTUS_CONTAINER=0` falls back to host `sbt` /
+`riscv64-(unknown-)elf-gcc` / Quartus if you'd rather not use Docker for
+those steps — but shipped artifacts should always come from the
+containers so every machine (and every target) compiles with the SAME
+toolchains.
 
 ## Targets & variants
 
-- **Target** = board. Selected by `.target` (gitignored), default `pocket`. Override per-command with `TARGET=mister`, or set sticky with `make use-mister` / `make use-pocket`. (Note: the root Makefile may carry an `override TARGET := pocket`; build mister by `cd src/fpga/targets/mister` directly.)
-- **VARIANT** (pocket only) = feature profile, default `os25`:
+- **Target** = board. Selected by `.target` (gitignored), default `pocket`. Override per-command with `TARGET=mister`, or set sticky with `make use-mister` / `make use-pocket`.
+- **VARIANT** = feature profile of a target, **auto-discovered** from `src/fpga/targets/<t>/variants/<name>.mk`. Resolution: command line > environment > `.variant` (root file written by `make use-os30` etc., gitignored) > target default (pocket→`os25`, mister→`mister`). The sticky `.variant` is SOFT (applies only when the selected target has that variant); an explicit `VARIANT=<unknown>` errors. `make use-<name>` at the root auto-detects whether `<name>` is a target or a variant; `make use-default` clears both.
+- **Adding a variant = 3 file drops, zero edits**: `variants/<name>.mk` (its `DEFS` module list), `src/fpga/vendor/vexriscv/configs/<name>.cfg` (its CPU config — cache geometry, extra Generate flags, maxfan hint), `seeds/<name>.seed`. Then `build`/`sweep`/`build-all` just work, shipping `<name>.rbf_r`.
+- Pocket variants, default `os25`:
   - **os25** — 2.5D games (Doom/Duke3D/ScummVM/Wolf + Quake1 SW). Full HW audio mixer, Analogizer/SNAC, translucency, column lists, compact span groups. No HW triangle path, no fast-texture. **At 308/308 M10K (100%).**
   - **os30** — Quake2 / SM64 (3D triangles). HW vertex-triangle + truecolor; cuts Analogizer/SNAC, HW mixer (→ **CPU software mixer**), translucency, column/compact.
   - **One caps-driven `os.bin` runs on both** — the bitstream sets `HW_FEATURES`; firmware auto-selects features at boot. There is no per-variant firmware flag.
@@ -117,7 +135,7 @@ builds end-to-end on **Docker + internet alone** — no host Quartus, JDK, or sb
 make sweep VARIANT=os30 SWEEP_MIN=1 SWEEP_MAX=12 MAXJOBS=4
 ```
 
-> MiSTer's `make sweep` runs the **same** `tools/sweep.sh` in host-serial mode (`USE_CONTAINER=0 MAXJOBS=1`), since it builds on Quartus 17, not the container's 25.1.
+> MiSTer's `make sweep` runs the **same** `tools/sweep.sh` in in-place serial mode (`USE_CONTAINER=0 MAXJOBS=1` — no `bld/<job>/` isolation on the Q17 flow), but every quartus invocation goes through the **Q17 container** (`QRUN=quartus17-container.sh`) and now carries the variant's `INCLUDE_*` macros (`VARIANT_DEFS`) — an unmacro'd sweep ranks a featureless design and its seed is meaningless. `sweep` depends on `firmware` so the baked `.mif` is fresh (stale-mif black-boot guard).
 
 Always **include the current stored seed in the range** so the sweep can't replace it with a worse one. The "failed" in the Fmax column is a cosmetic parse quirk — ranking is by WNS, which is correct.
 
@@ -131,8 +149,8 @@ make report      # resource summary  (FULL=true → top ALM entities + 25 worst 
 - Generated by `src/fpga/vendor/vexriscv/generate_vexii.sh` (sbt). Output is **gitignored**; `make cpu VARIANT=<v>` regenerates **only if missing** — to force: `rm src/fpga/vendor/vexriscv/VexiiRiscv/VexiiRiscv_<v>.v && make cpu VARIANT=<v>`.
 - **Runs in a Docker container by default** (`tools/vexii-container.sh`, image `openfpgaos-vexii` = JDK21 + sbt, auto-built on first use) — no host JDK/sbt needed. Scala/SpinalHDL deps download once into `tools/.vexii-home` (gitignored, ~250 MB) then reuse offline; the `Generate` itself is ~3 s. Output is **byte-identical** to host sbt (the netlist header carries only the SpinalHDL + VexiiRiscv git hashes, no timestamp → deterministic). Use host sbt instead with `make cpu USE_VEXII_CONTAINER=0`.
 - **One netlist per variant**, generated separately: `VexiiRiscv_os25.v`, `VexiiRiscv_os30.v`, `VexiiRiscv_mister.v`. Each per-job `bld/<job>/ap_core.qsf` names its variant's netlist directly via `VERILOG_FILE` (injected by the pocket Makefile's qsf-gen rule); mister's qsf does the same. `grep VERILOG_FILE bld/<job>/ap_core.qsf` shows exactly which CPU is being fit.
-- **Cache sizes live in ONE place** — `ICACHE_SETS`/`DCACHE_SETS` in `generate_vexii.sh`. All variants are currently **32 KB I$ / 128 KB D$**. (The old `VEXII_DCACHE_64K` macro was a misnomer and is gone.)
-- Config (RV32IMAFC + Zicbom): `--allow-bypass-from=0` (mandatory for correctness), `--lsu-hardware-prefetch=none`. Changing cache size / config needs an sbt regen.
+- **Per-variant CPU config lives in `src/fpga/vendor/vexriscv/configs/<variant>.cfg`** (sourced by `generate_vexii.sh`): `ICACHE_SETS`/`DCACHE_SETS`, `EXTRA_FLAGS` (os30 = `--fma-reduced-accuracy`, mister = `--decoders=2 --lanes=2`), and `MAXFAN_HINT` (the pocket-tuned `execute_freeze_valid` annotation; 0 on mister). All variants currently run **32 KB I$ / 128 KB D$**. Adding a variant's CPU = drop a `.cfg`; unknown variants error listing the available configs.
+- Shared base config (RV32IMAFC + Zicbom): `--allow-bypass-from=0` (mandatory for correctness), `--lsu-hardware-prefetch=none`. Changing a `.cfg` needs an sbt regen (`rm` the netlist, `make cpu VARIANT=<v>`).
 
 ## Firmware / OS
 

@@ -24,21 +24,57 @@ ASSETS_DIR  = $(ROOT_DIR)/build/pocket/Assets/openfpgaos/common
 TOOLS_DIR   = $(ROOT_DIR)/tools
 REVERSE_BITS = $(TOOLS_DIR)/reverse_bits
 
-QUARTUS    = /home/alberto/altera_lite/25.1std/quartus/bin
-export PATH := $(QUARTUS):$(PATH)
+# ── Variant registry + resolution (defined early: used by rules below) ──
+# Variants are AUTO-DISCOVERED from variants/<name>.mk — adding one is a
+# file drop, no Makefile edits (see the registry block further down).
+VARIANTS := $(sort $(patsubst variants/%.mk,%,$(wildcard variants/*.mk)))
+DEFAULT_VARIANT := os25
 
-# ── Variant + per-variant build dir (defined early: used by rules below) ──
-# os25 (default) / os30 — see the detailed VARIANT block further down for the
-# feature sets.  BDIR/QOUT give each variant its OWN db/ + output_files/ so
-# os25 and os30 build with zero shared writable paths (concurrent-safe).
-VARIANT ?= os25
+# VARIANT resolution, highest priority first:
+#   1. command line:  make build VARIANT=os30
+#   2. environment:   export VARIANT=os30
+#   3. .variant file: make use-os30 at the repo root (gitignored, sticky)
+#   4. fallback:      $(DEFAULT_VARIANT)
+# The sticky .variant is SOFT — it applies only when it names one of THIS
+# target's variants (so a sticky pocket variant never breaks a mister
+# build); an explicit VARIANT=<unknown> is a hard error (validated below).
+STICKY_VARIANT := $(strip $(shell cat $(ROOT_DIR)/.variant 2>/dev/null))
+ifeq ($(strip $(VARIANT)),)
+override VARIANT := $(if $(filter $(STICKY_VARIANT),$(VARIANTS)),$(STICKY_VARIANT),$(DEFAULT_VARIANT))
+endif
+# Fail loudly on an unknown VARIANT (the old ifeq/else silently built os25).
+$(if $(filter $(VARIANT),$(VARIANTS)),,$(error Unknown VARIANT '$(VARIANT)' — known variants: $(VARIANTS)))
+
 # JOB names the build INSTANCE.  Defaults to the variant (so `make build
 # VARIANT=os30` → bld/os30), but a parallel seed search assigns distinct jobs
 # (e.g. JOB=os30-s7) so MANY builds of the SAME variant get separate bld/<job>/
 # dirs and never collide.  SEED can be overridden per job on the command line.
+# BDIR/QOUT give each job its OWN db/ + output_files/ so builds share zero
+# writable paths (concurrent-safe).
 JOB ?= $(VARIANT)
 BDIR := bld/$(JOB)
 QOUT := $(BDIR)/output_files
+
+# ── Quartus 25.1: containerized for EVERY invocation ─────────────────
+# Full compiles always run via tools/quartus-container.sh (that isolation is
+# what lets build-all/sweep fan out — never add a host build path back).  The
+# lighter single-tool steps (firmware MIF patch, check, report FULL) go
+# through the same container in exec mode via $(QRUN), so no step ever mixes
+# a host Quartus into container-built artifacts.  USE_QUARTUS_CONTAINER=0
+# falls back to a host install at $(QUARTUS) for THOSE steps only; `program`
+# (JTAG over USB) always uses the host install — a container can't own the
+# USB Blaster.
+USE_QUARTUS_CONTAINER ?= 1
+QUARTUS ?= /home/alberto/altera_lite/25.1std/quartus/bin
+ifeq ($(USE_QUARTUS_CONTAINER),1)
+QRUN = bash $(ROOT_DIR)/tools/quartus-container.sh "$(CURDIR)/$(BDIR)"
+# report.sh cd's into the build dir before invoking $QRUN — absolute path.
+REPORT_QRUN = bash $(abspath $(TOOLS_DIR))/quartus-container.sh "$(CURDIR)/$(BDIR)"
+else
+export PATH := $(QUARTUS):$(PATH)
+QRUN = cd $(BDIR) &&
+REPORT_QRUN =
+endif
 
 # ── Colors ───────────────────────────────────────────────────────────
 ifneq ($(shell tput colors 2>/dev/null),)
@@ -79,7 +115,8 @@ help:
 	@printf "  $(C_HEAD)Build:$(C_RESET)\n"
 	@printf "    $(C_CMD)make $(C_CMD)full$(C_RESET)              bootloader → os → build            $(C_DIM)(~9 min)$(C_RESET)\n"
 	@printf "    $(C_CMD)make $(C_CMD)build$(C_RESET)             cpu → container compile → rbf      $(C_DIM)(~7 min)$(C_RESET)\n"
-	@printf "      $(C_DIM)VARIANT=os25|os30  → os25.rbf_r / os30.rbf_r (seed stored in seeds/<variant>.seed)$(C_RESET)\n"
+	@printf "      $(C_DIM)VARIANT=$(subst $() $(),|,$(VARIANTS))  → <variant>.rbf_r (seed stored in seeds/<variant>.seed)$(C_RESET)\n"
+	@printf "      $(C_DIM)current: $(VARIANT) — sticky via make use-<variant> at the repo root$(C_RESET)\n"
 	@printf "    $(C_CMD)make $(C_CMD)build-all$(C_RESET)         all variants in parallel containers $(C_DIM)(~7 min)$(C_RESET)\n"
 	@printf "    $(C_CMD)make $(C_CMD)firmware$(C_RESET)          bootloader → os → MIF patch        $(C_DIM)(~10 sec)$(C_RESET)\n"
 	@printf "    $(C_CMD)make $(C_CMD)os$(C_RESET)                Builds os.bin                      $(C_DIM)(~5 sec)$(C_RESET)\n"
@@ -232,84 +269,39 @@ os:
 	@$(MAKE) --no-print-directory install-os
 	@printf "$(C_OK)[os] Done$(C_RESET)\n"
 
+# The MIF patch runs in the SAME containerized Quartus as the build (exec
+# mode of quartus-container.sh) — patching a container-built .sof with a
+# host Quartus is exactly the compiler mixing this Makefile forbids.
 firmware: bootloader os
 	@if [ -f $(QOUT)/$(PROJECT).sof ]; then \
 		printf "$(C_HEAD)[fw]$(C_RESET) Patching .sof MIF with new bootloader ($(VARIANT))...\n"; \
-		( cd $(BDIR) && quartus_cdb $(PROJECT) --update_mif > /dev/null 2>&1 && quartus_asm $(PROJECT) > /dev/null 2>&1 ); \
+		$(QRUN) bash -c 'quartus_cdb $(PROJECT) --update_mif && quartus_asm $(PROJECT)' > /dev/null 2>&1; \
 		$(MAKE) --no-print-directory install-bitstream; \
 	fi
 	@printf "$(C_OK)[fw] Done$(C_RESET)\n"
 
 # ── FPGA compile ─────────────────────────────────────────────────────
 
-# ── Pocket variant selector ──────────────────────────────────────────
-# VARIANT picks which Pocket build to produce:
-#   os25 (default) — 2.5D games (Doom/Duke3D/ScummVM/Wolf): full feature set,
-#                    full HW audio mixer, no hardware vertex-triangle.
-#   os30           — Quake2 (3D, pure triangles): hardware vert-tri plane
-#                    derivation (0x4A/0x4B) + records-only param-tri (0x4D)
-#                    ungated. Pays for it by cutting what Quake2 never uses —
-#                    Analogizer/SNAC + the analog raster, GPU blend, link
-#                    cable, 4-player input, the 0x48 compact span-group form,
-#                    0x4C column lists, the parallel edge-walker dividers —
-#                    and replacing the HW mixer with the runtime caps-driven
-#                    SW mixer (the bitstream clears OF_HW_MIXER_HW; the single
-#                    os.bin auto-selects SW at boot).  Quake1 and the 2.5D
-#                    span-group titles stay on os25 (caps bits 21/23 clear
-#                    here; the SDK emitters self-gate).  See
-#                    docs/os30-quake2-cut-plan.md.
-# Firmware is ONE caps-driven os.bin for both — no per-variant build flag.
-VARIANT ?= os25
-
-# ── Variant registry ─────────────────────────────────────────────────
-# Add a variant in 3 steps: (1) append its name to VARIANTS, (2) add a
-# DEFS_<name> line below, (3) drop a seeds/<name>.seed.  Then `make build
-# VARIANT=<name>`, `make sweep VARIANT=<name>`, and `make build-all` just work,
-# shipping <name>.rbf_r.  A feature is PRESENT iff its INCLUDE_* macro is in the
-# variant's list (positive include-set); 4-player, link, vert/param/recs-tri and
-# fast tex are simply absent where unlisted.
-VARIANTS := os25 os30
-
-# Module lists are ADDITIVE (docs/MODULES.md): a variant lists the INCLUDE_
-# modules it wants; everything else is off (zero cost).  core_top wires every
-# gpu_core/periph param off these macros, so the gpu_core param defaults never
-# apply here.  Dependency pull-ups (combine/xform ⇒ truecolor) live in core_top.
+# ── Variant registry: variants/<name>.mk (auto-discovered) ───────────
+# A variant is a feature profile of this target (os25 = 2.5D games,
+# os30 = Quake2/SM64 3D triangles — the full story lives in each file).
+# $(VARIANTS) was discovered near the top from variants/*.mk.
 #
-# OS25 (default, 2.5D games — Doom/Duke3D/ScummVM/Wolf + Quake1 SW alias):
-# analogizer, full HW mixer, translucency, the palettized/colormap lane, column
-# lists, compact span groups.  NO triangle path (edge walker folds away), NO
-# truecolor/combine/xform, NO fast tex.  (Dropping INCLUDE_XFORM also sheds the
-# previously-dead 0x50/0x51/0x4F cones os25 used to synthesize via defaults.)
-# INCLUDE_4PLAYER wires APF dock slots 2/3 (cont3/cont4) through to the core so
-# the firmware's keyboard/mouse decode (poll_hid_slots) sees real data instead
-# of the tied-0 default; without it those slots are hardcoded 0 (core_top.v).
-DEFS_os25 := INCLUDE_ANALOGIZER INCLUDE_HW_MIXER INCLUDE_TRANSLUC \
-             INCLUDE_PALETTE INCLUDE_COLUMN_LIST INCLUDE_COMPACT_SPAN \
-             INCLUDE_PARAM_SPAN_Q29 INCLUDE_4PLAYER
-
-# OS30 (SM64 ∪ Quake2): HW vertex-triangle plane derive (0x4A/0x4B) + truecolor
-# RGB565 + the texel*C+D combiner (HILITE/specular, e.g. the Mario head) + HW
-# mixer.  INCLUDE_Z_BURST forces GPU_Z_READ_WINDOW=4 (SM64 z-tests every
-# fragment).  VEXII_CPU_OS30 selects the os30 CPU netlist.
-#   NOT listed (= off, additive): PALETTE (truecolor-only), the XFORM transform
-#   front-end (CPU does geometry — sheds 0x52/0x50/0x51/0x53-57/0x4F + xf_M M10K),
-#   PARAM_TRI/PARAM_TRI_RECS, COMPACT_SPAN/COLUMN_LIST, TEX_MEM, ANALOGIZER,
-#   TRANSLUC, PARALLEL_DIVS.  This is bit-identical to the prior EXCLUDE_* form.
-# NOTE: combiner is KEPT (INCLUDE_COMBINE) — gating it freed ~884 ALM but gave NO
-# WNS gain (wall is the CPU decode→FPU cone, not GPU congestion) AND darkened the
-# Mario head (its brightness is the combiner's additive D term).  The
-# OF_HW_GPU_COMBINE caps bit + app g_combine gate stay, so it can be gated
-# cleanly in a FUTURE ALM-starved build.  See docs/MODULES.md.
-DEFS_os30 := INCLUDE_VERT_TRI INCLUDE_DIRECT_COLOR INCLUDE_COMBINE INCLUDE_Z_BURST \
-             VEXII_CPU_OS30 INCLUDE_HW_MIXER
-
-# Fail loudly on an unknown VARIANT (the old ifeq/else silently built os25).
-$(if $(filter $(VARIANT),$(VARIANTS)),,$(error Unknown VARIANT '$(VARIANT)' — known variants: $(VARIANTS)))
-
-VARIANT_DEFS := $(DEFS_$(VARIANT))
-
-# Each VARIANT_DEFS entry is forwarded to quartus_map as --verilog_macro=<NAME>.
-VERILOG_MACROS = $(foreach d,$(VARIANT_DEFS),--verilog_macro="$(d)")
+# Adding a variant is a FILE DROP — no edits to this Makefile or any script:
+#   1. variants/<name>.mk                              its DEFS module list
+#   2. ../../vendor/vexriscv/configs/<name>.cfg        its CPU config
+#   3. seeds/<name>.seed                               its committed seed
+# Then `make build VARIANT=<name>`, `make sweep VARIANT=<name>` and
+# `make build-all` just work, shipping <name>.rbf_r.
+#
+# Module lists are ADDITIVE (docs/MODULES.md): a variant lists the INCLUDE_
+# modules it wants; everything else is off (zero cost).  Each DEFS entry is
+# forwarded to quartus_map as --verilog_macro=<NAME> via the generated
+# per-job qsf.  Firmware is ONE caps-driven os.bin for every variant — the
+# bitstream sets HW_FEATURES; no per-variant firmware flag.
+DEFS :=
+include variants/$(VARIANT).mk
+VARIANT_DEFS := $(DEFS)
 
 # Variant-named bitstream.  Deployed cores ship os25.rbf_r / os30.rbf_r
 # (the name IS the variant token, and the core.json "filename" matches),
@@ -329,10 +321,11 @@ SEED      := $(strip $(shell cat $(SEED_FILE) 2>/dev/null))
 # Generate the per-variant project: rewrite every source path in the master
 # ap_core.qsf to absolute (so the deeper bld/ dir resolves them), append the
 # variant CPU netlist + macros + seed, drop the master's fixed SEED.
-# Regenerate when the source qsf, the stored seed, or the build config (Makefile:
-# VARIANT_DEFS / QPROCS) change — so `make build` after a sweep actually picks up
-# the new seed and the pinned processor count instead of reusing a stale qsf.
-$(BDIR)/ap_core.qsf: ap_core.qsf ap_core.qpf $(SEED_FILE) Makefile | $(VEXII_OUT)
+# Regenerate when the source qsf, the stored seed, the variant's module list
+# (variants/<v>.mk) or the build config (Makefile: QPROCS) change — so `make
+# build` after a sweep or a variant edit actually picks up the new seed /
+# macros and the pinned processor count instead of reusing a stale qsf.
+$(BDIR)/ap_core.qsf: ap_core.qsf ap_core.qpf $(SEED_FILE) variants/$(VARIANT).mk Makefile | $(VEXII_OUT)
 	@mkdir -p $(QOUT)
 	@awk -v base="$(CURDIR)" '\
 	  $$1=="set_global_assignment" && $$2=="-name" && \
@@ -461,8 +454,8 @@ test:
 # Quick map-only sanity check (no fit / asm / sta).  Pairs with
 # VARIANT_DEFS for optional build-flag checks.
 check: $(BDIR)/ap_core.qsf
-	@printf "$(C_HEAD)[check]$(C_RESET) Analysis & Synthesis (VARIANT=$(VARIANT))...\n"
-	@cd $(BDIR) && quartus_map $(PROJECT)
+	@printf "$(C_HEAD)[check]$(C_RESET) Analysis & Synthesis (VARIANT=$(VARIANT), containerized)...\n"
+	@$(QRUN) quartus_map $(PROJECT)
 	@printf "$(C_OK)[check] Done$(C_RESET)\n"
 
 # ── Deploy ───────────────────────────────────────────────────────────
@@ -535,17 +528,22 @@ sdk:
 	@$(MAKE) -C $(ROOT_DIR) sdk DEST="$(DEST)"
 
 # ── JTAG program ─────────────────────────────────────────────────────
+# The ONE deliberate host-Quartus step: quartus_pgm needs the USB Blaster,
+# which a container can't own.  PATH is scoped to this recipe only.
 program:
-	@printf "$(C_HEAD)[jtag]$(C_RESET) Programming via USB Blaster...\n"
-	@quartus_pgm -m jtag -o "p;$(QOUT)/$(PROJECT).sof"
+	@printf "$(C_HEAD)[jtag]$(C_RESET) Programming via USB Blaster (host quartus_pgm)...\n"
+	@PATH="$(QUARTUS):$$PATH" quartus_pgm -m jtag -o "p;$(QOUT)/$(PROJECT).sof"
 	@printf "$(C_OK)[jtag] Done$(C_RESET)\n"
 
 # ── Resource / timing report ─────────────────────────────────────────
 # Summary of resource usage; FULL=true adds the top ALM-consuming
 # entities and the 25 worst setup paths (re-runs quartus_sta).
+# QRUN sends the FULL-mode quartus_sta re-run through the same container
+# as the build (empty with USE_QUARTUS_CONTAINER=0 → host PATH).
 report:
 	@chmod +x $(TOOLS_DIR)/report.sh 2>/dev/null || true
 	@BLD_DIR="$(CURDIR)/$(BDIR)" VARIANT="$(VARIANT)" TARGET="$(TARGET)" JOB="$(JOB)" \
+		QRUN='$(REPORT_QRUN)' \
 		bash $(TOOLS_DIR)/report.sh $(PROJECT) $(if $(filter true,$(FULL)),full)
 
 # ── Timing report ────────────────────────────────────────────────────

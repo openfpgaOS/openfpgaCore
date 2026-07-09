@@ -27,6 +27,16 @@ TARGET_DIR = src/fpga/targets/$(TARGET)
 # Directories only (trailing-slash glob) so a stray file never reads as a target.
 TARGETS = $(notdir $(patsubst %/,%,$(wildcard src/fpga/targets/*/)))
 
+# ── Variant (sticky display only — resolution lives in each target) ──
+# `make use-<variant>` (e.g. use-os30) writes .variant; each target Makefile
+# reads it as a SOFT default (applied only when the name is one of that
+# target's variants/<name>.mk, so a sticky pocket variant never breaks a
+# mister build).  VARIANT=<v> on any root goal forwards to the target via
+# MAKEFLAGS.  Built-in default: os25 (pocket).
+STICKY_VARIANT := $(strip $(shell cat .variant 2>/dev/null))
+# Every variant of every target, for use-% validation/help.
+ALL_VARIANTS = $(sort $(basename $(notdir $(wildcard src/fpga/targets/*/variants/*.mk))))
+
 # ── Paths ────────────────────────────────────────────────────────────
 # The root knows only the SDK-sync inputs and the shared clean targets.
 # Each target owns its own build/<target>/ layout and packaging — the
@@ -45,6 +55,7 @@ C_LOGO  := \033[96m
 C_HEAD  := \033[1m
 C_CMD   := \033[93m
 C_OK    := \033[32m
+C_ERR   := \033[31m
 C_DIM   := \033[2m
 C_RESET := \033[0m
 else
@@ -52,6 +63,7 @@ C_LOGO  :=
 C_HEAD  :=
 C_CMD   :=
 C_OK    :=
+C_ERR   :=
 C_DIM   :=
 C_RESET :=
 endif
@@ -74,9 +86,10 @@ help:
 	@printf '    \\____/___/  '
 	@printf "$(C_CMD)v0.7$(C_RESET) OS\n"
 	@printf "$(C_RESET)\n"
-	@printf "  $(C_HEAD)Target:$(C_RESET) $(C_CMD)$(TARGET)$(C_RESET) $(C_DIM)(available: $(TARGETS))$(C_RESET)\n\n"
+	@printf "  $(C_HEAD)Target:$(C_RESET) $(C_CMD)$(TARGET)$(C_RESET) $(C_DIM)(available: $(TARGETS))$(C_RESET)   $(C_HEAD)Variant:$(C_RESET) $(C_CMD)$(if $(STICKY_VARIANT),$(STICKY_VARIANT),target default)$(C_RESET) $(C_DIM)(available: $(ALL_VARIANTS))$(C_RESET)\n\n"
 	@printf "  $(C_HEAD)Targets:$(C_RESET)\n"
-	@printf "    Every goal below takes $(C_CMD)TARGET=$(C_CMD)<name>$(C_RESET) — e.g. $(C_CMD)make full TARGET=$(firstword $(filter-out $(TARGET),$(TARGETS)) <name>)$(C_RESET)\n"
+	@printf "    Every goal below takes $(C_CMD)TARGET=$(C_CMD)<name>$(C_RESET) and (where the target defines them) $(C_CMD)VARIANT=$(C_CMD)<name>$(C_RESET)\n"
+	@printf "    — e.g. $(C_CMD)make full TARGET=$(firstword $(filter-out $(TARGET),$(TARGETS)) <name>)$(C_RESET) or $(C_CMD)make build VARIANT=os30$(C_RESET)\n"
 	@# Target list is generated from the directories under src/fpga/targets/,
 	@# each with an optional one-line about.txt — add a target = add a dir.
 	@for t in $(TARGETS); do \
@@ -84,8 +97,9 @@ help:
 		printf "    $(C_DIM)%-8s %s$(C_RESET)\n" "$$t" "$$a"; \
 	done
 	@printf "    $(C_DIM)Switching targets auto-rebuilds the firmware objects — no manual clean needed.$(C_RESET)\n"
-	@printf "    $(C_CMD)make $(C_CMD)use-<target>$(C_RESET)      Make a target the default for this checkout $(C_DIM)(stored in .target;$(C_RESET)\n"
-	@printf "    $(C_DIM)                       undo with make use-default — built-in default is pocket)$(C_RESET)\n\n"
+	@printf "    $(C_CMD)make $(C_CMD)use-<name>$(C_RESET)        Make a target OR variant the default for this checkout\n"
+	@printf "    $(C_DIM)                       (use-mister → .target, use-os30 → .variant; undo with$(C_RESET)\n"
+	@printf "    $(C_DIM)                       make use-default — built-in default is pocket / os25)$(C_RESET)\n\n"
 	@printf "  $(C_HEAD)Build:$(C_RESET)\n"
 	@printf "    $(C_CMD)make $(C_CMD)full$(C_RESET)              cpu → bootloader → os → build      $(C_DIM)(~9 min)$(C_RESET)\n"
 	@printf "    $(C_CMD)make $(C_CMD)build$(C_RESET)             cpu → Quartus compile → bitstream  $(C_DIM)(~7 min)$(C_RESET)\n"
@@ -106,20 +120,32 @@ help:
 	@printf "    $(C_CMD)make $(C_CMD)release$(C_RESET)           Package + draft a GitHub release $(C_DIM)(mister core)$(C_RESET)\n"
 	@echo ""
 
-# ── Sticky default target ────────────────────────────────────────────
-# `make use-mister` / `make use-pocket` writes .target (gitignored);
-# subsequent makes default to it. `make use-default` removes the file.
+# ── Sticky default target / variant ──────────────────────────────────
+# `make use-<name>` resolves <name> against BOTH registries:
+#   a target dir  (src/fpga/targets/<name>/)             → written to .target
+#   a variant     (src/fpga/targets/*/variants/<name>.mk) → written to .variant
+# Both files are gitignored, per-checkout sticky.  Target and variant are
+# independent — `make use-mister` then `make use-os30` keeps both settings
+# (the variant applies whenever the selected target has it).
+# `make use-default` removes both (back to pocket / os25).
 use-%:
-	@test -d src/fpga/targets/$* || { \
-		printf "$(C_ERR)Error: unknown target '$*'$(C_RESET) (available: $(TARGETS))\n"; \
+	@if [ -d src/fpga/targets/$* ]; then \
+		echo $* > .target; \
+		printf "  $(C_OK)default target$(C_RESET) → $(C_CMD)$*$(C_RESET) (stored in .target)\n"; \
+	elif ls src/fpga/targets/*/variants/$*.mk >/dev/null 2>&1; then \
+		echo $* > .variant; \
+		t=$$(basename $$(dirname $$(dirname $$(ls src/fpga/targets/*/variants/$*.mk | head -1)))); \
+		printf "  $(C_OK)default variant$(C_RESET) → $(C_CMD)$*$(C_RESET) (stored in .variant; a $$t variant)\n"; \
+	else \
+		printf "$(C_ERR)Error: '$*' is neither a target nor a variant$(C_RESET)\n"; \
+		printf "  targets:  $(TARGETS)\n"; \
+		printf "  variants: $(ALL_VARIANTS)\n"; \
 		exit 1; \
-	}
-	@echo $* > .target
-	@printf "  $(C_OK)default target$(C_RESET) → $(C_CMD)$*$(C_RESET) (stored in .target)\n"
+	fi
 
 use-default:
-	@rm -f .target
-	@printf "  $(C_OK)default target$(C_RESET) → $(C_CMD)pocket$(C_RESET) (built-in)\n"
+	@rm -f .target .variant
+	@printf "  $(C_OK)default target$(C_RESET) → $(C_CMD)pocket$(C_RESET), $(C_OK)variant$(C_RESET) → $(C_CMD)os25$(C_RESET) (built-in)\n"
 
 # ── Target validation ────────────────────────────────────────────────
 check-target:
@@ -145,7 +171,7 @@ SWEEP_MAX = $(word 2,$(subst -, ,$(SEEDS)))
 # set" (see docs/ADDING_A_TARGET.md for the contract).  `package` is in
 # the list too — each target owns its own packaging layout (pocket = APF
 # SD tree, mister = rbf + boot.rom, …).
-cpu bootloader firmware os compile build check test timing report program deploy package release: check-target
+cpu bootloader firmware os compile build build-all check test timing report program deploy package release sweep-all: check-target
 	@$(MAKE) -C $(TARGET_DIR) $@ FULL=$(FULL) PREV="$(PREV)" PUBLISH="$(PUBLISH)"
 
 sweep: check-target
@@ -175,17 +201,28 @@ sweep: check-target
 # of_link.h, of_bram.h, of_posix.c, crt/start.S, ...) are removed from
 # the SDK so the new musl-static build path takes effect cleanly.
 #
+# musl ships to the SDK, so it MUST come from the same containerized
+# riscv64-unknown-elf toolchain as the firmware and the SDK app builds —
+# auto-build it in the firmware container instead of asking for a host
+# build (USE_FIRMWARE_CONTAINER=0 opts into host, matching the targets).
+USE_FIRMWARE_CONTAINER ?= 1
+ifeq ($(USE_FIRMWARE_CONTAINER),1)
+FW_MAKE = bash tools/firmware-container.sh
+else
+FW_MAKE = $(MAKE) -C src/firmware/os
+endif
+
 sdk: check-target
 	@test -n "$(DEST)" || { \
 		printf "$(C_ERR)Usage: make sdk DEST=\"path/to/sdk\"$(C_RESET)\n"; \
 		exit 1; \
 	}
 	@test -f src/firmware/musl/lib/libc.a || { \
-		printf "$(C_ERR)musl not built -- run src/firmware/musl/build_musl.sh first$(C_RESET)\n"; \
-		exit 1; \
+		printf "$(C_HEAD)[sdk]$(C_RESET) musl not built — building in the firmware container...\n"; \
+		$(FW_MAKE) musl; \
 	}
 	@test -f src/firmware/musl/lib/crt1.o || { \
-		printf "$(C_ERR)musl crt1.o missing -- rerun build_musl.sh$(C_RESET)\n"; \
+		printf "$(C_ERR)musl crt1.o missing -- musl build incomplete, see src/firmware/musl/build_musl.sh$(C_RESET)\n"; \
 		exit 1; \
 	}
 	@for dir in $(DEST); do \
@@ -253,5 +290,5 @@ clean:
 	@rm -rf $(BUILD_DIR)
 	@rm -f $(REVERSE_BITS)
 
-.PHONY: all help check-target full cpu bootloader firmware os compile build check test timing report program sdk deploy
-.PHONY: sweep package release clean use-default
+.PHONY: all help check-target full cpu bootloader firmware os compile build build-all check test timing report program sdk deploy
+.PHONY: sweep sweep-all package release clean use-default

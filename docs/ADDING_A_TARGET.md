@@ -71,10 +71,16 @@ contracts when instantiating the common RTL:
   BRAM init inside `axi_periph_slave`).
 - **`Makefile`** — mirror `mister/Makefile`. The root delegates these
   goals, so provide them all: `full cpu bootloader os firmware compile
-  build check test timing report sweep deploy package clean`. Set
-  `PROJECT` and pass `PROJECT=`/`CLOCK_RE=` (the 100 MHz clock's BRE in
-  the Fmax table) to `tools/sweep.sh`; `tools/report.sh` only needs
-  `PROJECT`. `deploy` refreshes `build/<name>/` from on-disk artifacts;
+  build build-all check test timing report sweep sweep-all deploy package
+  clean`. Set `PROJECT` and pass `PROJECT=`/`CLOCK_RE=` (the 100 MHz
+  clock's BRE in the Fmax table) to `tools/sweep.sh`; `tools/report.sh`
+  only needs `PROJECT`. Compile with the CONTAINER wrappers, never a bare
+  host toolchain: firmware through `tools/firmware-container.sh`
+  (`FW_MAKE` + `USE_FIRMWARE_CONTAINER`), the CPU netlist through
+  `tools/vexii-container.sh`, and every Quartus/vendor-tool invocation
+  (including sweep's, via `QRUN=`, and report's FULL mode) through your
+  target's quartus container script. `deploy` refreshes `build/<name>/`
+  from on-disk artifacts;
   `package` assembles the **release** layout (Pocket = APF
   `Cores/Assets/Platforms` tree under `build/<name>/`; MiSTer = a versioned
   core-release zip under `releases/mister/` — `_Computer/OpenfpgaOS.rbf` +
@@ -83,6 +89,13 @@ contracts when instantiating the common RTL:
   that doesn't apply must still exist — MiSTer's `program` just prints
   guidance and exits 1, so the root's delegation never hits make's "no
   rule" error.
+- **`variants/<name>.mk`** — at least one (your default variant), holding
+  the `DEFS` feature-module list. Variants are auto-discovered from this
+  dir; give the target's default in `DEFAULT_VARIANT` and resolve VARIANT
+  the way pocket/mister do (command line > env > root `.variant` soft
+  sticky > default). Pair each variant with a CPU config at
+  `src/fpga/vendor/vexriscv/configs/<name>.cfg` — that file is the only
+  place its cache geometry / Generate flags live.
 - **`about.txt`** — one line shown in `make help`'s target list, e.g.
   `MiSTer / DE10-Nano — Cyclone V SE A6 (Quartus 17.0.x)`.
 - **`sdk-runtime.sh <sdk_dir>`** — copies THIS target's runtime artifacts

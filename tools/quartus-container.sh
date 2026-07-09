@@ -26,10 +26,21 @@
 # CPU netlist + firmware.mif it references — all by ABSOLUTE path, so they
 # resolve identically inside the container (the repo is mounted at the same path).
 #
-# Usage: quartus-container.sh <absolute-build-dir>
+# Usage: quartus-container.sh <absolute-build-dir> [command...]
+#   No command  → the default full flow: map → fit → asm → sta.
+#   With command → run it in <build-dir> inside the SAME container/toolchain
+#     instead (exec mode) — e.g. the firmware MIF patch or a lone quartus_map:
+#       quartus-container.sh "$BDIR" bash -c 'quartus_cdb ap_core --update_mif && quartus_asm ap_core'
+#       quartus-container.sh "$BDIR" quartus_map ap_core
+#     This is what keeps `make firmware` / `make check` / `make report` on the
+#     container Quartus 25.1 — never a host install.
 set -euo pipefail
 
-BDIR="${1:?usage: quartus-container.sh <absolute-build-dir>}"
+BDIR="${1:?usage: quartus-container.sh <absolute-build-dir> [command...]}"
+shift
+# Exec mode: any remaining args are the command to run; default is the flow.
+CMD=(bash -c 'rm -rf db incremental_db && quartus_map ap_core && quartus_fit ap_core && quartus_asm ap_core && quartus_sta ap_core')
+[ $# -gt 0 ] && CMD=("$@")
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 IMG_FULL="${QUARTUS_FULL_IMG:-openfpgaos-quartus-full}"
 IMG_BIND="${QUARTUS_IMG:-openfpgaos-quartus}"
@@ -121,7 +132,7 @@ if oci_image_exists "$IMG_FULL"; then
       ${LIC_ENV[@]+"${LIC_ENV[@]}"} \
       -w "$BDIR" \
       "$IMG_FULL" \
-      bash -c 'rm -rf db incremental_db && quartus_map ap_core && quartus_fit ap_core && quartus_asm ap_core && quartus_sta ap_core'
+      "${CMD[@]}"
     exit $?
 elif oci_image_exists "$IMG_BIND" && [ -x "$QROOT/bin/quartus_map" ]; then
     # Bind-mount image + host install — original setup.
@@ -137,7 +148,7 @@ elif oci_image_exists "$IMG_BIND" && [ -x "$QROOT/bin/quartus_map" ]; then
       ${LIC_ENV[@]+"${LIC_ENV[@]}"} \
       -w "$BDIR" \
       "$IMG_BIND" \
-      bash -c 'rm -rf db incremental_db && quartus_map ap_core && quartus_fit ap_core && quartus_asm ap_core && quartus_sta ap_core'
+      "${CMD[@]}"
     exit $?
 fi
 

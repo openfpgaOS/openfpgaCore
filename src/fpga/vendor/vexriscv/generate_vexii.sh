@@ -60,59 +60,54 @@
 #   0x40000000   1 GB  IO + SDRAM_UC — main=0, exe=0
 #
 # Prerequisites: java, sbt
-# Usage: ./generate_vexii.sh [pocket|mister]
+# Usage: ./generate_vexii.sh [<variant>]        (default: os25)
 #
-# Variants (same ISA, same PMA map, same AXI master interface — the
-# downstream cpu_system.v fabric is identical for both):
-#   pocket (default) — single-issue, every flag above tuned against the
-#                      Pocket's Cyclone V E A4 / C8 grade at 100 MHz.
-#                      Output: VexiiRiscv/VexiiRiscv.v
-#   mister           — the same config plus DUAL ISSUE (--decoders=2
-#                      --lanes=2) for the DE10-Nano's Cyclone V SE A6 /
-#                      I7 grade (2.3x the ALMs, faster grade than C8).
-#                      Issue width is microarchitectural: firmware and
-#                      apps are unchanged.  Late-ALU is a deliberate
-#                      follow-up knob — enable only after STA shows
-#                      headroom on a plain dual-issue build.
-#                      Output: VexiiRiscv/VexiiRiscv_mister.v
+# ── Per-variant CPU config: configs/<variant>.cfg ────────────────────
+# Every variant/target sources its OWN config file next to this script:
+#   configs/os25.cfg   configs/os30.cfg   configs/mister.cfg   ...
+# A config sets the cache geometry (ICACHE_SETS/DCACHE_SETS), any extra
+# vexiiriscv.Generate flags (EXTRA_FLAGS — e.g. dual issue, FMA accuracy),
+# and post-generation synthesis hints (MAXFAN_HINT).  Adding a variant is a
+# file drop — no edits to this script.  The shared base config below (ISA,
+# PMA map, pipeline/branch/FPU tuning, AXI interface) is identical for all
+# variants; the downstream cpu_system.v fabric never changes.
+#
+# Each variant generates its OWN netlist file (VexiiRiscv_<variant>.v); the
+# per-variant build names it directly in its qsf.  No shared "default"
+# netlist.  The module inside stays named VexiiRiscv.
 
 set -e
 
 VARIANT="${1:-os25}"
 
-# ── Per-variant cache sizing ──────────────────────────────────────────
-# Both are (sets × 2 ways × 64 B line):
-#   I$ sets:  256 = 32 KB,  128 = 16 KB
-#   D$ sets: 1024 = 128 KB,  512 = 64 KB
-# All current Pocket/MiSTer variants run 32 KB I$ / 128 KB D$.  These are the
-# ONLY place cache size is set — change a variant's sets here and re-run
-# `make cpu VARIANT=<v>`; nothing else (no qsf macro) encodes cache size.
-ICACHE_SETS=256          # 32 KB I$
-DCACHE_SETS=1024         # 128 KB D$
-
-# Each variant generates its OWN netlist file (VexiiRiscv_<variant>.v); the
-# per-variant build picks it up directly.  No shared "default" netlist.
-case "$VARIANT" in
-    os25)
-        EXTRA_FLAGS=""
-        OUTPUT_NAME="VexiiRiscv_os25.v"
-        ;;
-    os30)
-        EXTRA_FLAGS="--fma-reduced-accuracy"
-        OUTPUT_NAME="VexiiRiscv_os30.v"
-        ;;
-    mister)
-        EXTRA_FLAGS="--decoders=2 --lanes=2"
-        OUTPUT_NAME="VexiiRiscv_mister.v"
-        ;;
-    *)
-        echo "Error: unknown variant '$VARIANT' (os25|os30|mister)"
-        exit 1
-        ;;
-esac
-
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 VEXII_DIR="$SCRIPT_DIR/VexiiRiscv"
+
+# ── Load the variant config ───────────────────────────────────────────
+# Defaults (overridden by the sourced .cfg): 32 KB I$ / 128 KB D$, no extra
+# flags, no maxfan hint.  Cache sets are (sets × 2 ways × 64 B line):
+#   I$ sets:  256 = 32 KB,  128 = 16 KB
+#   D$ sets: 1024 = 128 KB,  512 = 64 KB
+# The .cfg is the ONLY place a variant's cache size / CPU flags are set —
+# change it and re-run `make cpu VARIANT=<v>`; nothing else (no qsf macro)
+# encodes CPU config.
+ICACHE_SETS=256          # 32 KB I$
+DCACHE_SETS=1024         # 128 KB D$
+EXTRA_FLAGS=""
+MAXFAN_HINT=0
+
+CONFIG="$SCRIPT_DIR/configs/$VARIANT.cfg"
+if [ ! -f "$CONFIG" ]; then
+    echo "Error: unknown variant '$VARIANT' — no $CONFIG"
+    echo "Available configs:"
+    for f in "$SCRIPT_DIR"/configs/*.cfg; do
+        [ -f "$f" ] && echo "  $(basename "$f" .cfg)"
+    done
+    exit 1
+fi
+# shellcheck source=/dev/null
+. "$CONFIG"
+OUTPUT_NAME="VexiiRiscv_$VARIANT.v"
 
 if [ ! -d "$VEXII_DIR" ]; then
     echo "Error: VexiiRiscv directory not found at $VEXII_DIR"
@@ -169,17 +164,17 @@ fi
 # name); only the file is per-variant.  Rename the bare sbt output.
 mv -f "$GENERATED" "$OUTPUT"
 
-if [ "$VARIANT" = "os25" ] || [ "$VARIANT" = "os30" ]; then
+if [ "${MAXFAN_HINT:-0}" != 0 ]; then
 # The generated execute_freeze_valid cone fans into the whole CPU
 # ready/valid network.  Quartus otherwise tends to keep it as one huge
 # high-fanout control net, which leaves the worst path from execute/FPU
 # control back to the I-cache read enable route-limited.  Add a local
 # synthesis hint after generation so the fitter can insert replicas.
-# POCKET-ONLY: this hint (and the rejected ones in the notes below) was
-# A/B-tuned against the A4/C8 fitter; the MiSTer A6/I7 netlist starts
-# clean and gets its own pass only if STA demands one.
-perl -0pi -e 's/  wire                execute_freeze_valid;/  (* maxfan = 16 *) wire                execute_freeze_valid;/' "$OUTPUT"
-if ! grep -q "maxfan = 16.*execute_freeze_valid" "$OUTPUT"; then
+# Enabled per-variant via MAXFAN_HINT in configs/<variant>.cfg (the hint
+# and the rejected ones in the notes below were A/B-tuned against the
+# Pocket A4/C8 fitter; the MiSTer A6/I7 config leaves it off).
+perl -0pi -e 's/  wire                execute_freeze_valid;/  (* maxfan = '"$MAXFAN_HINT"' *) wire                execute_freeze_valid;/' "$OUTPUT"
+if ! grep -q "maxfan = $MAXFAN_HINT.*execute_freeze_valid" "$OUTPUT"; then
     echo "ERROR: failed to annotate execute_freeze_valid maxfan hint"
     exit 1
 fi

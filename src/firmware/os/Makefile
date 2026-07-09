@@ -234,6 +234,12 @@ $(MUSL_LIBC):
 	@echo "[musl] libc.a missing — building (~1 min, downloads musl 1.2.5)..."
 	@bash $(MUSL_DIR)/build_musl.sh
 
+# Explicit entry point so callers can build musl with the SAME containerized
+# toolchain as the firmware: `firmware-container.sh musl` (the root
+# Makefile's `make sdk` uses this instead of asking for a host build).
+.PHONY: musl
+musl: $(MUSL_LIBC)
+
 # Full binary
 $(FW_TARGET).bin: $(FW_TARGET).elf
 	$(OBJCOPY) -O binary $< $@

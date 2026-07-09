@@ -18,15 +18,20 @@
 #     (verilog macros + seed baked in) is regenerated via `make bld/<job>/...`.
 #     Needs: VARIANT, TARGET_DIR (dir holding the target Makefile).
 #
-#   host (USE_CONTAINER=0 — MiSTer / Quartus 17): one host quartus compile per
-#     seed, MAXJOBS-throttled to 1 (the host Quartus concurrency segfault makes
-#     parallel host fits unsafe).  Sweeps in BLD_DIR (or CWD), sed-patching the
-#     seed into <PROJECT>.qsf, and does a final rebuild with the best seed.
-#     Needs: BLD_DIR (optional), VARIANT_DEFS (optional verilog macros).
+#   in-place (USE_CONTAINER=0 — MiSTer / Quartus 17): one quartus compile per
+#     seed, serial (the in-place db/ + output_files/ leave nothing to
+#     parallelize).  Sweeps in BLD_DIR (or CWD), sed-patching the seed into
+#     <PROJECT>.qsf, and does a final rebuild with the best seed.  Every
+#     quartus invocation is prefixed with $QRUN — the mister target passes
+#     the quartus17-container.sh wrapper so the sweep uses the SAME
+#     containerized Quartus 17 as `make build` (empty QRUN = host quartus
+#     on PATH, the USE_QUARTUS_CONTAINER=0 escape hatch).
+#     Needs: BLD_DIR (optional), VARIANT_DEFS (optional verilog macros),
+#     QRUN (optional container-wrapper prefix).
 #
 # Usage: sweep.sh <min> <max>
 # Common env: PROJECT(=ap_core)  CLOCK_RE  MAXJOBS(=4)  USE_CONTAINER(=1)
-#             VARIANT  SEED_FILE
+#             VARIANT  SEED_FILE  QRUN
 #
 # No `set -e`: Quartus exits non-zero when timing isn't met, but still produces a
 # valid bitstream — we keep going and rank every seed; only a fitter crash (no
@@ -94,16 +99,26 @@ if [ "$USE_CONTAINER" = 1 ]; then
         R_WNS[$s]=$_wns; R_TNS[$s]=$_tns; R_FMAX[$s]=$_fmax
     done
 else
-    # ── Host backend: serial in-place compile per seed ───────────────────
+    # ── In-place backend: serial compile per seed (mister / Quartus 17) ──
     [ -n "${BLD_DIR:-}" ] && cd "$BLD_DIR"
     mkdir -p output_files
-    printf "${C_HEAD}[sweep]${C_RESET} Seeds $MIN-$MAX ($TOTAL builds, host serial)\n"
+    QRUN=${QRUN:-}
+    printf "${C_HEAD}[sweep]${C_RESET} Seeds $MIN-$MAX ($TOTAL builds, in-place serial${QRUN:+, containerized})\n"
     [ -n "${VARIANT_DEFS:-}" ] && printf "${C_HEAD}[sweep]${C_RESET} Variant defs: ${VARIANT_DEFS}\n"
 
+    # The macros MUST be part of every sweep fit — a sweep without them
+    # compiles a different (featureless) design, so its seed ranking and
+    # in-place artifacts are meaningless for the real build.  Elements are
+    # bare identifiers, so inlining ${VERILOG_MACROS[*]} into the one-shot
+    # chain below is safe.
     VERILOG_MACROS=()
     if [ -n "${VARIANT_DEFS:-}" ]; then
         for def in ${VARIANT_DEFS}; do VERILOG_MACROS+=(--verilog_macro="${def}"); done
     fi
+    # One $QRUN call runs the whole map→fit→asm→sta chain: Q17's per-tool
+    # startup adds up (especially under Rosetta), so a single container
+    # start per seed amortizes it — same shape as the mister `make build`.
+    FLOW="quartus_map ${PROJECT}${VERILOG_MACROS[*]:+ ${VERILOG_MACROS[*]}} && quartus_fit ${PROJECT} && quartus_asm ${PROJECT} && quartus_sta ${PROJECT}"
 
     n=0
     for s in $(seq "$MIN" "$MAX"); do
@@ -111,16 +126,7 @@ else
         printf "${C_DIM}[%d/%d]${C_RESET} Seed %-3s " "$n" "$TOTAL" "$s"
         sed -i "s/^set_global_assignment -name SEED .*/set_global_assignment -name SEED ${s}/" "${PROJECT}.qsf"
         rm -rf db incremental_db
-        if [ ${#VERILOG_MACROS[@]} -gt 0 ]; then
-            {
-                quartus_map ${PROJECT} "${VERILOG_MACROS[@]}" &&
-                quartus_fit ${PROJECT} &&
-                quartus_asm ${PROJECT} &&
-                quartus_sta ${PROJECT}
-            } > "output_files/seed_${s}_compile.log" 2>&1 || true
-        else
-            quartus_sh --flow compile ${PROJECT} > "output_files/seed_${s}_compile.log" 2>&1 || true
-        fi
+        $QRUN bash -c "$FLOW" > "output_files/seed_${s}_compile.log" 2>&1 || true
         parse_sta "output_files/${PROJECT}.sta.rpt"
         cp "output_files/${PROJECT}.sta.rpt" "output_files/seed_${s}_sta.log" 2>/dev/null || true
         R_WNS[$s]=$_wns; R_TNS[$s]=$_tns; R_FMAX[$s]=$_fmax
@@ -160,20 +166,16 @@ if [ -n "${SEED_FILE:-}" ]; then
     printf "${C_OK}[sweep]${C_RESET} stored seed $BEST → $SEED_FILE\n"
 fi
 
-# Host mode rebuilds the best seed in place (MiSTer relies on the .sof landing
-# here).  Container mode already produced a full bitstream per seed in
+# In-place mode rebuilds the best seed where it swept (MiSTer relies on the
+# .sof landing here), through the same $QRUN wrapper/macros as the sweep fits.
+# Container mode already produced a full bitstream per seed in
 # bld/<variant>-s<best>/ and wrote the seed file, so `make build` is ready —
 # no in-place rebuild needed.
 if [ "$USE_CONTAINER" != 1 ]; then
     printf "${C_HEAD}[rebuild]${C_RESET} Final compile with seed $BEST...\n"
     sed -i "s/^set_global_assignment -name SEED .*/set_global_assignment -name SEED ${BEST}/" "${PROJECT}.qsf"
     rm -rf db incremental_db
-    if [ -n "${VARIANT_DEFS:-}" ]; then
-        quartus_map ${PROJECT} "${VERILOG_MACROS[@]}" &&
-        quartus_fit ${PROJECT} && quartus_asm ${PROJECT} && quartus_sta ${PROJECT} || true
-    else
-        quartus_sh --flow compile ${PROJECT} || true
-    fi
+    $QRUN bash -c "$FLOW" || true
     if [ ! -f "output_files/${PROJECT}.sof" ]; then
         printf "\n${C_ERR}[sweep] Final rebuild failed — no .sof produced${C_RESET}\n"; exit 1
     fi

@@ -46,6 +46,20 @@ RUN dpkg --add-architecture i386 \
     && rm -rf /var/lib/apt/lists/*
 ENV LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8
 
+# Remove libudev from the image ON PURPOSE.  Q17's bundled 2017 FlexLM
+# (libsys_cpt.so) computes the license host-id at startup via
+# udev_enumerate_scan_devices(), and that 2017-FlexLM + modern-libudev
+# combination heap-corrupts INSIDE A CONTAINER (no live udevd):
+#   realloc(): invalid pointer → Fatal Segment Violation in qexe startup,
+#   backtrace lc_getid_type → udev_enumerate_scan_devices → libc realloc.
+# Every quartus_* tool dies before reading the project.  Bind-mounting the
+# host's /run/udev does NOT help; base-image glibc (22.04/24.04/Arch) makes
+# no difference.  With libudev absent, FlexLM silently takes its pre-udev
+# host-id fallback and every tool runs clean (verified: full A&E of the
+# mister project).  Nothing else in the headless CLI flow needs udev —
+# JTAG/USB tools are host-side, never containerized.
+RUN rm -f /lib/x86_64-linux-gnu/libudev.so.1* /usr/lib/x86_64-linux-gnu/libudev.so.1*
+
 # Extract the PRE-INSTALLED Q17 tree via BuildKit bind mount.  The tarball
 # is created on a Linux box that has Q17 installed (the user's existing
 # /home/alberto/intelFPGA_lite/17.0/quartus/), so the contents look like:

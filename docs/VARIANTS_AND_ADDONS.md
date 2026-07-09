@@ -38,18 +38,21 @@ Each variant gets its own:
 
 ## Adding a variant
 
-Three lines in `src/fpga/targets/pocket/Makefile`, one new file:
+Three **file drops** — no edits to any Makefile or script.  Variants are
+auto-discovered from `variants/*.mk`:
 
-1. **Register the name** — append it to `VARIANTS`:
+1. **Its module list** — `src/fpga/targets/pocket/variants/myvariant.mk`:
    ```make
-   VARIANTS := os25 os30 myvariant
+   DEFS := INCLUDE_HW_MIXER INCLUDE_TRANSLUC INCLUDE_FOO
    ```
-2. **List its macros** — add a `DEFS_<name>` line.  Each macro toggles a
-   feature module on; macros not listed leave the module out.
-   ```make
-   DEFS_myvariant := INCLUDE_HW_MIXER INCLUDE_TRANSLUC INCLUDE_FOO
-   ```
-3. **Drop a seed file** — `seeds/myvariant.seed` (any valid Quartus fitter
+   Each macro toggles a feature module on; macros not listed leave the
+   module out.
+2. **Its CPU config** — `src/fpga/vendor/vexriscv/configs/myvariant.cfg`
+   (copy `os25.cfg` for the stock CPU).  Cache geometry (`ICACHE_SETS` /
+   `DCACHE_SETS`), extra `vexiiriscv.Generate` flags (`EXTRA_FLAGS`) and
+   the maxfan post-annotation (`MAXFAN_HINT`) all live here — this is the
+   ONLY place a variant's CPU shape is set.
+3. **Its seed** — `seeds/myvariant.seed` (any valid Quartus fitter
    seed, e.g. `1`).  `make sweep VARIANT=myvariant` will refine it.
 
 Then:
@@ -57,14 +60,13 @@ Then:
 ```bash
 make cpu   VARIANT=myvariant    # generates VexiiRiscv_myvariant.v
 make build VARIANT=myvariant    # → myvariant.rbf_r
+make use-myvariant              # (root) make it the checkout default
 ```
 
-If your variant needs a different CPU configuration (cache sizes,
-extensions, FPU shape), edit `src/fpga/vendor/vexriscv/generate_vexii.sh`
-— add a `case "$VARIANT" in myvariant) ... ;; esac` branch and re-run
-`make cpu VARIANT=myvariant`.  Keep the netlist filename
-`VexiiRiscv_<variant>.v`; the pocket Makefile names it directly in the
-generated qsf.
+The netlist filename stays `VexiiRiscv_<variant>.v`; the pocket Makefile
+names it directly in the generated qsf.  The same registry exists on
+mister (`targets/mister/variants/`, single `mister` variant today) —
+`VARIANT=` is validated on every target instead of silently ignored.
 
 > **Note:** the Pocket filename cap means variant names should stay short
 > (`<variant>.rbf_r` ≤ 15 chars).  Three-letter names are safe; four is
@@ -92,10 +94,10 @@ Steps to add `INCLUDE_FOO`:
 1. **Wrap your RTL** with `\`ifdef INCLUDE_FOO` / `\`endif`.  Provide a
    tie-off in the `\`else` branch so downstream consumers stay
    well-formed when the addon is absent (don't leave outputs floating).
-2. **Opt variants in** by listing `INCLUDE_FOO` in the relevant
-   `DEFS_<variant>` lines in the pocket Makefile.  Variants that omit
-   the macro get the tie-off and Quartus's `--gc-sections`-style
-   synthesis prunes the dead RTL — there's no ALM cost for unused addons.
+2. **Opt variants in** by listing `INCLUDE_FOO` in the `DEFS` line of the
+   relevant `variants/<name>.mk` files.  Variants that omit the macro get
+   the tie-off and Quartus's `--gc-sections`-style synthesis prunes the
+   dead RTL — there's no ALM cost for unused addons.
 3. **(Optional) Wire a runtime cap** — if firmware needs to know whether
    the addon was compiled in, advertise it through `HW_FEATURES`:
    - Add a bit in `src/fpga/common/caps.v` (or wherever the variant
@@ -114,7 +116,8 @@ including new HW would otherwise exceed the M10K budget.
 
 ## How macros become bitstream features (under the hood)
 
-1. `make build VARIANT=<v>` resolves `VARIANT_DEFS := $(DEFS_<v>)`.
+1. `make build VARIANT=<v>` includes `variants/<v>.mk` and resolves
+   `VARIANT_DEFS := $(DEFS)`.
 2. The qsf-generation rule rewrites the master `ap_core.qsf` into
    `bld/<v>/ap_core.qsf` with one `set_global_assignment -name
    VERILOG_MACRO <NAME>` line per entry in `VARIANT_DEFS`, plus a

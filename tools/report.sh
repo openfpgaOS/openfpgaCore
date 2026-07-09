@@ -109,10 +109,16 @@ awk -F';' -v top="$TOP" '
 ' "$FIT" | sort -rn | head -"$TOP" | cut -f2-
 
 # ── Worst setup paths (fresh quartus_sta run) ────────────────────────
+# QRUN (optional) is a command prefix that runs quartus_sta inside the
+# right container (pocket: quartus-container.sh exec mode; mister:
+# quartus17-container.sh) so `make report FULL=true` uses the SAME Quartus
+# as the build — never a host install.  Empty QRUN = host quartus_sta.
+# The scratch report lands in the build dir (NOT /tmp): a container's /tmp
+# is a private tmpfs the host-side awk below could never read.
 echo ""
 echo "${B}Worst $NPATHS setup paths${RST} ${DIM}(slow model — running quartus_sta, ~1-2 min)${RST}"
-PATHS_OUT=$(mktemp /tmp/report_paths.XXXXXX.txt)
-if quartus_sta -t "$TOOLS_DIR/report_paths.tcl" "$PROJECT" "$NPATHS" "$PATHS_OUT" \
+PATHS_OUT=$(mktemp "$(pwd)/report_paths.XXXXXX.txt")
+if ${QRUN:-} quartus_sta -t "$TOOLS_DIR/report_paths.tcl" "$PROJECT" "$NPATHS" "$PATHS_OUT" \
         > /tmp/report_sta.log 2>&1; then
     # Compact two-line format: hierarchy prefixes stripped to the leaf
     # register names, PLL clock paths abbreviated to instance[counter].
