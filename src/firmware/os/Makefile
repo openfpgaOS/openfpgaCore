@@ -19,7 +19,7 @@ NM = $(CROSS)nm
 
 # Target
 # Binary name
-FW_TARGET = firmware
+FW_TARGET = $(BLD)/firmware
 
 # Target platform (inherited from top-level Makefile)
 # Default target: command line > environment > repo-root .target file
@@ -39,6 +39,26 @@ API_DIR = ../api
 SHARED_DIR = shared
 LIB_DIR = ../lib
 ISO9660_DIR = $(LIB_DIR)/iso9660
+
+# ── Per-target build dir ─────────────────────────────────────────────
+# Objects + firmware.elf/mif/os.bin land under bld/<target>/ so pocket,
+# mister and sim builds coexist and never clobber each other (mirrors the
+# FPGA bld/<job>/ model).  No target-switch object-clearing needed — each
+# target owns its own tree, switching is instant/incremental.
+BLD = bld/$(TARGET)
+
+# ── Boot ABI id ──────────────────────────────────────────────────────
+# The BRAM bootloader (firmware.mif, baked into the bitstream) and the OS
+# image (os.bin, deployed as boot.rom) must agree on the memory map — but
+# the CRC is content-, not layout-checked, so a wrong-target or stale pair
+# still "passes" and then black-boots (loads/runs at the wrong addresses).
+# This id is a hash of the target name + the memory-map constants the
+# bootloader bakes in.  It is BOTH -D'd into the bootloader (single source
+# of truth, see the boot compile rule) AND stamped into os.bin by
+# append_os_crc.py; boot.c compares them and halts with a visible error on
+# mismatch.  Derived, so it changes automatically on a target switch or a
+# target_platform.h memory-map edit — no manual version bump.
+BOOT_ABI := 0x$(shell { echo "$(TARGET)"; grep -hE '#define[[:space:]]+OF_TARGET_(SDRAM_BASE|SDRAM_SIZE|SDRAM_UNCACHED_BASE|CRAM0_BASE|CRAM0_BRIDGE|CRAM0_OS_OFFSET)[[:space:]]' $(TARGET_DIR)/target_platform.h 2>/dev/null; } | md5sum | cut -c1-8)
 
 # Compiler flags
 ARCH = rv32imafc
@@ -163,52 +183,47 @@ KERNEL_SRCS = $(KERNEL_DIR)/main.c \
 
 # All sources
 ALL_C_SRCS = $(BOOT_SRCS_C) $(HAL_SRCS) $(TARGET_SRCS) $(KERNEL_SRCS)
-OBJS = $(ALL_C_SRCS:.c=.o) $(BOOT_SRCS_S:.S=.o) $(HAL_SRCS_S:.S=.o)
+# Object path = $(BLD)/<src-with-leading-../-stripped>.o, so ../api and
+# ../lib sources land inside bld/<target>/ (as api/… and lib/…).
+OBJS = $(addprefix $(BLD)/,$(patsubst ../%,%,\
+         $(ALL_C_SRCS:.c=.o) $(BOOT_SRCS_S:.S=.o) $(HAL_SRCS_S:.S=.o)))
 
-# ── Target-switch detection ──────────────────────────────────────────
-# Shared objects (hal/kernel/api) are compiled against the selected
-# target's target_platform.h, so reusing them across targets would link
-# a wrong memory map.  The .last_target stamp rule clears stale objects
-# when TARGET changes — `make TARGET=mister` after a pocket build (or
-# sim, in any order) Just Works without a manual clean.  Same-target
-# rebuilds stay fully incremental.
-#
-# This is a real RECIPE on purpose (an earlier version was a parse-time
-# $(shell rm ...), which executed during `make -n`/`make help`/`make
-# clean` and raced parallel sub-makes).  Recipe-time means dry runs only
-# print it, -j orders it before any compile via the order-only prereq,
-# and it cleans with globs over EVERY target's objects — including
-# target-exclusive ones (e.g. mister's fatfs/*.o) that the new TARGET's
-# $(OBJS) wouldn't name.
-# The stamp rule below is textually the first rule in this Makefile —
-# keep `make` (no goal) building the firmware, not the stamp.
+# Per-target build dirs (bld/<target>/) mean pocket/mister/sim objects
+# never share a path — no cross-target contamination, no clear-on-switch.
 .DEFAULT_GOAL := all
 
-RETARGET_GLOBS = hal/*.o kernel/*.o boot/*.o targets/*/*.o \
-                 targets/*/boot/*.o targets/*/fatfs/*.o \
-                 ../api/*.o ../lib/iso9660/*.o
-.last_target: FORCE
-	@if [ "$$(cat .last_target 2>/dev/null)" != "$(TARGET)" ]; then \
-		rm -f $(RETARGET_GLOBS) $(RETARGET_GLOBS:.o=.d) \
-		      $(FW_TARGET).elf $(FW_TARGET).bin $(FW_TARGET).map os.bin; \
-		echo $(TARGET) > .last_target; \
+# ── Toolchain guard ──────────────────────────────────────────────────
+# LTO bytecode is locked to the exact compiler build, so objects made by the
+# host riscv64-elf-gcc and the firmware-container riscv64-unknown-elf-gcc can
+# NOT be linked together ("LTO version X instead of Y" fatal error).  Stamp
+# each bld/<target>/ with the compiler id and, if it changed since the tree
+# was built (a host↔container switch), fail EARLY (order-only, before any
+# compile/link) with a clear message — instead of a cryptic LTO error mid-
+# link.  Auto-deleting the objects here would race make's up-to-date cache
+# (it links the deleted files), so we ask for an explicit `make clean`.
+CC_ID := $(CROSS)$(shell $(CC) -dumpfullversion 2>/dev/null)
+$(BLD)/.ccid: FORCE
+	@mkdir -p $(BLD)
+	@if [ -s $@ ] && [ "$$(cat $@)" != "$(CC_ID)" ]; then \
+		printf '*** firmware: toolchain changed (%s -> %s).\n' "$$(cat $@)" "$(CC_ID)"; \
+		printf '*** LTO objects cannot mix across compilers — run: make clean\n'; \
+		exit 1; \
 	fi
-
+	@echo "$(CC_ID)" > $@
 FORCE:
 .PHONY: FORCE
+$(OBJS): | $(BLD)/.ccid
 
 # RAM size for MIF generation
 RAM_WORDS = 8192
 
 # Default target
-all: $(FW_TARGET).bin $(FW_TARGET).mif $(FW_TARGET).lst os.bin
+all: $(FW_TARGET).bin $(FW_TARGET).mif $(FW_TARGET).lst $(BLD)/os.bin
 	$(SIZE) $(FW_TARGET).elf
 
-# Every object (and the link) is ordered after the retarget stamp check.
-$(OBJS): | .last_target
-
 # Link
-$(FW_TARGET).elf: $(OBJS) os.ld $(MUSL_LIBC) | .last_target
+$(FW_TARGET).elf: $(OBJS) os.ld $(MUSL_LIBC)
+	@mkdir -p $(BLD)
 	$(LD) $(LDFLAGS) -o $@ $(OBJS) $(LIBS)
 
 # Auto-build musl libc on first use (downloads + cross-compiles ~1 min).
@@ -231,7 +246,7 @@ $(FW_TARGET).mif: $(FW_TARGET).elf
 		--only-section=.boot_bss \
 		--only-section=.fasttext \
 		--only-section=.fastdata \
-		$< boot.bin
+		$< $(BLD)/boot.bin
 	@echo "-- Firmware RAM initialization - $(RAM_WORDS) x 32-bit words" > $@
 	@echo "-- Auto-generated from boot sections" >> $@
 	@echo "" >> $@
@@ -242,20 +257,26 @@ $(FW_TARGET).mif: $(FW_TARGET).elf
 	@echo "DATA_RADIX=HEX;" >> $@
 	@echo "" >> $@
 	@echo "CONTENT BEGIN" >> $@
-	@hexdump -v -e '1/4 "%08X\n"' boot.bin | awk '{printf "%d : %s;\n", NR-1, $$1}' >> $@
-	@LAST=$$(hexdump -v -e '1/4 "%08X\n"' boot.bin | wc -l); \
+	@hexdump -v -e '1/4 "%08X\n"' $(BLD)/boot.bin | awk '{printf "%d : %s;\n", NR-1, $$1}' >> $@
+	@LAST=$$(hexdump -v -e '1/4 "%08X\n"' $(BLD)/boot.bin | wc -l); \
 	if [ $$LAST -lt $(RAM_WORDS) ]; then \
 		echo "[$$LAST..$$(($(RAM_WORDS)-1))] : 00000013;" >> $@; \
 	fi
 	@echo "END;" >> $@
-	@echo "Generated $@ with $$(hexdump -v -e '1/4 "%08X\n"' boot.bin | wc -l) words of BRAM image"
+	@echo "Generated $@ with $$(hexdump -v -e '1/4 "%08X\n"' $(BLD)/boot.bin | wc -l) words of BRAM image"
 
 # OS binary (loaded by bootloader via deferload).  Includes the
 # split-memory sections: .text stays in CRAM0, .osdata_rodata and
 # .osdata_data have their LMA packed into CRAM0 right after .text
 # (AT> CRAM0 in os.ld).  The bootloader splits the blob at runtime
 # and streams the .rodata / .data portion directly to its SDRAM VMA.
-os.bin: $(FW_TARGET).elf
+# `make os.bin` — the target-agnostic name the FPGA target Makefiles invoke
+# ($(FW_MAKE) os.bin); alias it to this target's bld/<target>/os.bin.
+.PHONY: os.bin
+os.bin: $(BLD)/os.bin
+
+$(BLD)/os.bin: $(FW_TARGET).elf
+	@mkdir -p $(BLD)
 	$(OBJCOPY) -O binary \
 		--only-section=.text \
 		--only-section=.osdata \
@@ -263,7 +284,8 @@ os.bin: $(FW_TARGET).elf
 	@python3 $(firstword $(wildcard $(BOOT_DIR)/append_os_crc.py) targets/pocket/boot/append_os_crc.py) $@ \
 		$$($(NM) $< | awk '$$3=="os_main"        {print $$1}') \
 		$$($(NM) $< | awk '$$3=="__os_bss_start" {print $$1}') \
-		$$($(NM) $< | awk '$$3=="__os_bss_end"   {print $$1}')
+		$$($(NM) $< | awk '$$3=="__os_bss_end"   {print $$1}') \
+		$(BOOT_ABI)
 	@echo "Generated $@ ($$(wc -c < $@) bytes)"
 
 # Disassembly
@@ -278,38 +300,54 @@ $(FW_TARGET).lst: $(FW_TARGET).elf
 # alignment pads push .fasttext past the APP_BRAM_BASE (0x2000)
 # assertion.  The boot code isn't performance-critical (runs once),
 # so losing the I-cache line alignment is fine.
-$(BOOT_DIR)/%.o: $(BOOT_DIR)/%.c
-	$(CC) $(filter-out -falign-functions=64 -falign-loops=64,$(CFLAGS)) -falign-functions=4 -falign-loops=4 -c -o $@ $<
+$(BLD)/$(BOOT_DIR)/%.o: $(BOOT_DIR)/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(filter-out -falign-functions=64 -falign-loops=64,$(CFLAGS)) -falign-functions=4 -falign-loops=4 -DOF_TARGET_BOOT_ABI=$(BOOT_ABI)u -c -o $@ $<
 
-$(BOOT_DIR)/%.o: $(BOOT_DIR)/%.S
+$(BLD)/$(BOOT_DIR)/%.o: $(BOOT_DIR)/%.S
+	@mkdir -p $(dir $@)
 	$(AS) $(ASFLAGS) -c -o $@ $<
 
-$(HAL_DIR)/%.o: $(HAL_DIR)/%.S
+$(BLD)/$(HAL_DIR)/%.o: $(HAL_DIR)/%.S
+	@mkdir -p $(dir $@)
 	$(AS) $(ASFLAGS) -c -o $@ $<
 
-$(HAL_DIR)/%.o: $(HAL_DIR)/%.c
+$(BLD)/$(HAL_DIR)/%.o: $(HAL_DIR)/%.c
+	@mkdir -p $(dir $@)
 	$(CC) $(OS_CFLAGS) -c -o $@ $<
 
-$(TARGET_DIR)/%.o: $(TARGET_DIR)/%.c
+$(BLD)/$(TARGET_DIR)/%.o: $(TARGET_DIR)/%.c
+	@mkdir -p $(dir $@)
 	$(CC) $(OS_CFLAGS) -c -o $@ $<
 
 # syscall.c without LTO — LTO strips functions called only via
 # runtime-determined if-chains from the assembly trap handler.
-$(KERNEL_DIR)/syscall.o: $(KERNEL_DIR)/syscall.c
+$(BLD)/$(KERNEL_DIR)/syscall.o: $(KERNEL_DIR)/syscall.c
+	@mkdir -p $(dir $@)
 	$(CC) $(filter-out -flto -flto=%,$(OS_CFLAGS)) -c -o $@ $<
 
 # irq.c without LTO — called from assembly trap handler via function pointer.
-$(KERNEL_DIR)/irq.o: $(KERNEL_DIR)/irq.c
+$(BLD)/$(KERNEL_DIR)/irq.o: $(KERNEL_DIR)/irq.c
+	@mkdir -p $(dir $@)
 	$(CC) $(filter-out -flto -flto=%,$(OS_CFLAGS)) -c -o $@ $<
 
-$(KERNEL_DIR)/%.o: $(KERNEL_DIR)/%.c
+$(BLD)/$(KERNEL_DIR)/%.o: $(KERNEL_DIR)/%.c
+	@mkdir -p $(dir $@)
 	$(CC) $(OS_CFLAGS) -c -o $@ $<
 
-$(ISO9660_DIR)/%.o: $(ISO9660_DIR)/%.c
+# ../api and ../lib sources: object paths have the leading ../ stripped,
+# so they build under bld/<target>/api/ and bld/<target>/lib/.  (api used
+# make's implicit %.o:%.c rule before — keep its $(CFLAGS) to match.)
+$(BLD)/api/%.o: $(API_DIR)/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+$(BLD)/lib/iso9660/%.o: $(ISO9660_DIR)/%.c
+	@mkdir -p $(dir $@)
 	$(CC) $(OS_CFLAGS) -c -o $@ $<
 
-# Auto-dependency files (header tracking)
-DEPS = $(ALL_C_SRCS:.c=.d)
+# Auto-dependency files (header tracking) — under bld/<target>/ with the objects.
+DEPS = $(OBJS:.o=.d)
 -include $(DEPS)
 
 # Install MIF to FPGA
@@ -317,12 +355,15 @@ install: $(FW_TARGET).mif
 	cp $(FW_TARGET).mif $(FPGA_CORE_DIR)/firmware.mif
 	@echo "MIF installed to $(FPGA_CORE_DIR)/firmware.mif"
 
-# Clean
+# Clean — wipes every target's build tree (bld/), plus a sweep of the old
+# pre-bld/ in-place objects/artifacts so a checkout that predates the split
+# tidies up.
 clean:
-	rm -f $(OBJS) $(FW_TARGET).elf $(FW_TARGET).bin $(FW_TARGET).mif $(FW_TARGET).map $(FW_TARGET).lst
-	rm -f boot.bin os.bin
-	rm -f $(DEPS)
-	rm -f .last_target
+	rm -rf bld
+	rm -f os.bin firmware.elf firmware.bin firmware.mif firmware.map firmware.lst boot.bin .last_target
+	rm -f hal/*.o hal/*.d kernel/*.o kernel/*.d targets/*/*.o targets/*/*.d \
+	      targets/*/boot/*.o targets/*/boot/*.d targets/*/fatfs/*.o targets/*/fatfs/*.d \
+	      ../api/*.o ../api/*.d ../lib/iso9660/*.o ../lib/iso9660/*.d
 
 rebuild: clean all
 

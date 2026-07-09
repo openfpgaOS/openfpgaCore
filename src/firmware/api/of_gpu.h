@@ -202,6 +202,12 @@ typedef struct {
     int32_t  light_du;
     int32_t  light_dv;
 
+    /* Per-axis texture coordinate clamp window (signed Q16.16); 0/0 =
+     * clamp disabled for that axis.  CONTRACT: clamp_min[i] <=
+     * clamp_max[i] (signed) per axis — the HW clamps the coordinate's
+     * integer part with 16-bit top-half compares that are equivalent to
+     * the full 32-bit clamp ONLY under this ordering; behavior is
+     * UNDEFINED for min > max. */
     int32_t  clamp_min[3];
     int32_t  clamp_max[3];
 
@@ -1626,7 +1632,12 @@ typedef struct {
     uint8_t  colormap_id;
     uint8_t  z_mode;         /* OF_GPU_PARAM_Z_* */
 
-    int32_t  clamp_min[2];   /* s, t (0/0 = disabled, as 0x49) */
+    int32_t  clamp_min[2];   /* s, t (0/0 = disabled, as 0x49).
+                              * CONTRACT: min <= max per axis (signed
+                              * Q16.16); the HW clamp compares only the
+                              * top 16 bits, which matches the 32-bit
+                              * clamp ONLY under this ordering — behavior
+                              * is UNDEFINED for min > max. */
     int32_t  clamp_max[2];
 
     uint32_t z_base;
@@ -2042,7 +2053,8 @@ typedef struct {
     uint8_t  colormap_id;
     uint8_t  z_mode;
 
-    int32_t  clamp_min[2];
+    int32_t  clamp_min[2];   /* CONTRACT: min <= max per axis — see the
+                              * non-PC definition above */
     int32_t  clamp_max[2];
 
     uint32_t z_base;

@@ -2246,6 +2246,15 @@ struct of_sbiret syscall_dispatch(long a0, long a1, long a2, long a3,
     /* SBI vendor extensions live in the openfpgaOS namespace. */
     if (OF_EID_IS_VENDOR(eid)) {
         long val = of_vendor_dispatch(eid, fid, a0, a1, a2, a3, a4, a5);
+        /* The timer read FIDs return a free-running unsigned 32-bit count
+         * (us/ms since boot).  The us count crosses bit 31 at ~35.8 min, so
+         * it must NOT go through the negative=error convention below -- doing
+         * so returns 0 for every read past that point, which freezes any app
+         * clock built on of_time_us() (app hangs ~35 min into a session).
+         * These are pure values, never errors: pass them straight through. */
+        if ((unsigned long)eid == OF_EID_TIMER &&
+            (fid == OF_TIMER_FID_GET_US || fid == OF_TIMER_FID_GET_MS))
+            return (struct of_sbiret){ .error = OF_OK, .value = val };
         /* Convention: vendor helpers return either a non-negative value
          * (success -> goes in sbiret.value) or one of the of_error.h
          * negative codes (failure -> goes in sbiret.error). */

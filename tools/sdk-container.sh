@@ -65,7 +65,9 @@ fi
 # The ${TTY[@]+"${TTY[@]}"} idiom is required for bash 3.2 (macOS default)
 # under set -u — plain "${TTY[@]}" errors on an empty array there.
 TTY=()
-[ -t 1 ] && TTY=(-i -t)
+# Both stdin and stdout must be TTYs — `-i -t` fails ("cannot attach stdin to a
+# TTY-enabled container...") when stdin isn't a terminal, e.g. under make.
+[ -t 0 ] && [ -t 1 ] && TTY=(-i -t)
 
 # --user keeps outputs owned by the host user.  Repo bind-mounted at the
 # SAME path so absolute paths inside the app Makefile resolve identically.
@@ -81,11 +83,15 @@ TTY=()
 # `wait` (interruptible) so the trap fires on INT/TERM/EXIT.
 CNAME="ofpgaos-sdk-$$"
 trap 'oci_rm_force "$CNAME"' EXIT INT TERM
+# The shared image sets CPATH=/usr/lib/picolibc/... for the firmware build,
+# but SDK apps link musl and must NOT see picolibc (its types collide with
+# musl's, and CPATH dirs survive -nostdinc).  Clear CPATH for the app build.
 oci_run --rm --name "$CNAME" ${TTY[@]+"${TTY[@]}"} \
   --user "$(id -u):$(id -g)" \
   -v "$REPO:$REPO" \
   --tmpfs /sdkhome:exec \
   -e HOME=/sdkhome \
+  -e CPATH= \
   -w "$WORKDIR" \
   "$IMG" \
   "$@" &

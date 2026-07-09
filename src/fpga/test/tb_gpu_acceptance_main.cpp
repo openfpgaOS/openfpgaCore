@@ -10385,7 +10385,13 @@ int main(int argc, char **argv) {
     test_doom_real_capture_frame_no_black_columns();
     test_param_q29_zero_counts_mixed_no_drop();
     test_param_q48_multichunk_distinct_column_drop_repro();
+#ifndef GPU_TEST_OS30_LEAN
+    /* >4-lane 0x4C paint sweep — 0x4C is a documented no-op in the lean
+     * config (INCLUDE_COLUMN_LIST=0; lean_column_list_drains asserts the
+     * drain), so this absolute paint oracle only holds where the column
+     * machinery is compiled in, like the 0x4C oracle tests below. */
     test_param_q4c_multilane_distinct_column_drop_repro();
+#endif
     // Decisive port-B (colormap) starvation repro: distinct cache line per
     // column => port-A miss per pixel + port-B used every pixel.  Inert under
     // the 2-cycle stub; the SUSPECT-1 vehicle under +gpu_rd_latency[_var].

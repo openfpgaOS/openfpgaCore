@@ -204,7 +204,7 @@ static uint32_t env_u32(const char *name, uint32_t dflt) {
 int main(int argc, char **argv) {
     Verilated::commandArgs(argc, argv);
 
-    const char *os_bin_path = "../../firmware/os/os.bin";
+    const char *os_bin_path = "../../firmware/os/bld/sim/os.bin";
     uint64_t max_cycles = 40000000;
     if (argc > 1) os_bin_path = argv[1];
     if (argc > 2) max_cycles = std::strtoull(argv[2], nullptr, 0);
@@ -236,7 +236,7 @@ int main(int argc, char **argv) {
 
     const char *mif_candidates[] = {
         "firmware.mif",
-        "../../firmware/os/firmware.mif",
+        "../../firmware/os/bld/sim/firmware.mif",
         "../targets/pocket/firmware.mif"
     };
     bool bram_loaded = false;

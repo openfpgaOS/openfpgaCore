@@ -262,6 +262,7 @@ static const uint32_t ST_MOUNT2    = 1u << 7;
 static const uint32_t ST_RO1       = 1u << 8;
 static const uint32_t ST_RO2       = 1u << 9;
 static const uint32_t ST_INI       = 1u << 10;  // instance-ini F-load done
+static const uint32_t ST_ELF       = 1u << 11;  // app.elf F-load done
 
 // ── ioctl boot.rom streamer ─────────────────────────────────────────
 // violate_wait=true models an HPS that observes ioctl_wait one word
@@ -508,6 +509,58 @@ int main(int argc, char **argv) {
               "status bit0 = boot still loaded after ini F-load");
         CHECK(sdram_check(0x03300000u, boot, sizeof(boot), "boot-post-ini"),
               "boot staging bytes untouched by ini F-load");
+    }
+
+    printf("test_elf_fload:\n");
+    {
+        // (a) Establish BOTH baselines the app.elf F-load must leave
+        //     undisturbed: a boot.rom (index 0) and an instance ini (index 1).
+        static uint8_t boot[2048];
+        for (uint32_t i = 0; i < sizeof(boot); i++)
+            boot[i] = (uint8_t)(i * 5u + 0x22);
+        ioctl_boot(boot, sizeof(boot));                 // index 0 = boot.rom
+
+        static uint8_t ini[600];
+        for (uint32_t i = 0; i < sizeof(ini); i++)
+            ini[i] = (uint8_t)(i ^ 0x5A);
+        ioctl_boot(ini, sizeof(ini), false, /*index=*/1);   // index 1 = ini
+
+        CHECK(tb->boot_loaded && tb->hps_boot_len == sizeof(boot),
+              "boot baseline before elf F-load");
+        CHECK((tb->hps_status & ST_INI) && tb->hps_ini_len == sizeof(ini),
+              "ini baseline before elf F-load");
+        CHECK((tb->hps_status & ST_ELF) == 0,
+              "status bit11 low before any elf F-load");
+        CHECK(tb->hps_elf_len == 0, "elf length 0 before any elf F-load");
+
+        // (b) A THIRD ioctl download with index 2 (app.elf): a known payload
+        //     that must DMA to ELF_STAGE_ADDR (0x03700000) via the SAME drain
+        //     pipeline, without touching boot OR ini staging/length/flag.
+        static uint8_t elf[1500];
+        for (uint32_t i = 0; i < sizeof(elf); i++)
+            elf[i] = (uint8_t)(i * 9u + 0x81);
+        ioctl_boot(elf, sizeof(elf), false, /*index=*/2);
+
+        CHECK(sdram_check(0x03700000u, elf, sizeof(elf), "elf"),
+              "elf bytes DMA'd to ELF_STAGE_ADDR (0x03700000)");
+        CHECK((tb->hps_status & ST_ELF) != 0, "hps_status bit11 = elf loaded");
+        CHECK(tb->hps_elf_len == sizeof(elf), "hps_elf_len == elf byte length");
+
+        // boot state entirely undisturbed by the elf F-load
+        CHECK(tb->boot_loaded && tb->hps_boot_len == sizeof(boot),
+              "boot_loaded/len unchanged by elf F-load");
+        CHECK((tb->hps_status & ST_BOOT) != 0,
+              "status bit0 = boot still loaded after elf F-load");
+        CHECK(sdram_check(0x03300000u, boot, sizeof(boot), "boot-post-elf"),
+              "boot staging bytes untouched by elf F-load");
+
+        // ini state entirely undisturbed by the elf F-load
+        CHECK((tb->hps_status & ST_INI) != 0,
+              "status bit10 = ini still loaded after elf F-load");
+        CHECK(tb->hps_ini_len == sizeof(ini),
+              "hps_ini_len unchanged by elf F-load");
+        CHECK(sdram_check(0x03900000u, ini, sizeof(ini), "ini-post-elf"),
+              "ini staging bytes untouched by elf F-load");
     }
 
     // ════════════════ multi-vhd (VDNUM=3) coverage ════════════════

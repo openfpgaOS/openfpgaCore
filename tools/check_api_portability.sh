@@ -130,28 +130,28 @@ fi
 
 # ── Check 4: Pocket kernel builds ────────────────────────────────────
 ( cd "$OS" && make clean >/dev/null 2>&1 && make TARGET=pocket >/tmp/_check_pocket.log 2>&1 )
-if [ -f "$OS/os.bin" ]; then
-    ok "TARGET=pocket builds ($(stat -c%s "$OS/os.bin") bytes)"
-    cp "$OS/os.bin" /tmp/_check_pocket_os.bin
+if [ -f "$OS/bld/pocket/os.bin" ]; then
+    ok "TARGET=pocket builds ($(stat -c%s "$OS/bld/pocket/os.bin") bytes)"
+    cp "$OS/bld/pocket/os.bin" /tmp/_check_pocket_os.bin
 else
     bad "TARGET=pocket build failed -- see /tmp/_check_pocket.log"
 fi
 
 # ── Check 5: sim kernel builds ───────────────────────────────────────
 ( cd "$OS" && make clean >/dev/null 2>&1 && make TARGET=sim >/tmp/_check_sim.log 2>&1 )
-if [ -f "$OS/os.bin" ]; then
-    ok "TARGET=sim builds ($(stat -c%s "$OS/os.bin") bytes)"
-    cp "$OS/os.bin" /tmp/_check_sim_os.bin
-    cp "$OS/firmware.elf" /tmp/_check_sim.elf
+if [ -f "$OS/bld/sim/os.bin" ]; then
+    ok "TARGET=sim builds ($(stat -c%s "$OS/bld/sim/os.bin") bytes)"
+    cp "$OS/bld/sim/os.bin" /tmp/_check_sim_os.bin
+    cp "$OS/bld/sim/firmware.elf" /tmp/_check_sim.elf
 else
     bad "TARGET=sim build failed -- see /tmp/_check_sim.log"
 fi
 
 # ── Check 5b: mister kernel builds ───────────────────────────────────
 ( cd "$OS" && make clean >/dev/null 2>&1 && make TARGET=mister >/tmp/_check_mister.log 2>&1 )
-if [ -f "$OS/os.bin" ]; then
-    ok "TARGET=mister builds ($(stat -c%s "$OS/os.bin") bytes)"
-    cp "$OS/os.bin" /tmp/_check_mister_os.bin
+if [ -f "$OS/bld/mister/os.bin" ]; then
+    ok "TARGET=mister builds ($(stat -c%s "$OS/bld/mister/os.bin") bytes)"
+    cp "$OS/bld/mister/os.bin" /tmp/_check_mister_os.bin
 else
     bad "TARGET=mister build failed -- see /tmp/_check_mister.log"
 fi

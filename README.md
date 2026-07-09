@@ -63,9 +63,10 @@ Every build goal takes `TARGET=<name>`. Resolution order:
    file; `make use-default` removes it
 4. built-in default — `pocket`
 
-Switching targets auto-rebuilds the firmware objects (a `.last_target`
-stamp detects the switch and drops stale shared objects) — no manual
-clean is needed between `pocket`, `mister`, and `sim` builds.
+Each target builds into its own isolated tree
+(`src/firmware/os/bld/<target>/`), so `pocket`, `mister`, and `sim`
+coexist and switching between them recompiles nothing — no shared
+objects, no manual clean.
 
 Porting to a new platform: see
 [docs/ADDING_A_TARGET.md](docs/ADDING_A_TARGET.md) — what a target must
@@ -145,7 +146,9 @@ make report          # resource summary; FULL=true adds top ALM entities
                      #   and the 25 worst setup paths (TOP=/PATHS= to tune)
 make sweep SEEDS=1-30  # fitter seed sweep; ranks Fmax, reports WNS/TNS,
                      #   rebuilds with the best seed (both targets)
-make package         # SD-card layout (pocket) / rbf+boot.rom (mister) → build/
+make package         # SD-card layout (pocket) → build/; MiSTer builds a
+                     #   core-release zip + Downloader DB in releases/mister/
+                     #   (make release TARGET=mister then drafts the GH release)
 make clean           # remove generated build artifacts
 ```
 
@@ -203,17 +206,27 @@ make sdk DEST=/path/to/openfpgaOS-SDK
 ```
 
 This mirrors the SDK headers/sources, musl headers + `libc.a`/crt
-objects, the Pocket core JSON, the sample bank, and the runtime binaries
-of both targets — including `runtime/mister/{openfpgaOS.rbf, os.bin}`.
-The os.bin copy is routed by the firmware build stamp, so a mister-built
-kernel can never land in the pocket runtime slot or vice versa.
+objects, the Pocket core JSON, the sample bank, and the `os.bin` runtime
+binary of both targets (`runtime/mister/os.bin`). The os.bin copy is
+read from the target's own build tree (`src/firmware/os/bld/<target>/os.bin`),
+so a mister-built kernel can never land in the pocket runtime slot or vice versa. The MiSTer core bitstream
+is no longer vendored per game: it ships once from the openfpgaOS core
+release (`make package`/`make release TARGET=mister`), so `make sdk` no
+longer copies `openfpgaOS.rbf` into `runtime/mister/`.
 
 Device deployment then happens from the SDK:
 
 - pocket: `platforms/pocket/copy.sh` → SD card
-- mister: `platforms/mister/copy.sh <app|core> [ip]` → network push of the
-  disk image, `boot.rom`, and core (`core` mode = core-only bring-up).
-  The disk image itself is assembled by `platforms/mister/mkimage.sh`.
+- mister: the primary flow is a per-game engine update —
+  `platforms/mister/copy.sh game <Game> <GameElf> <elf> [ip]` atomically
+  scp's the built engine ELF to the loose file
+  `games/OpenfpgaOS/<Game>/<GameElf>` (e.g. `doom.elf`), leaving the
+  read-only `boot.vhd` (the wads) and the writable saves volume untouched
+  (no Main-stop, no loop-mount). `make copy TARGET=mister` (aliased by
+  `make copy-app`) drives this. The core is installed once from the
+  openfpgaOS core release (see `make package`/`make release TARGET=mister`
+  above), not vendored per game, so `copy.sh core` now pushes only
+  `boot.rom`. Full flow: `src/sdk/platforms/mister/PACKAGING.md`.
 
 ## Runtime Model
 
@@ -316,7 +329,7 @@ firmware VRR register is accepted but ignored there.
 Port status: first full Quartus 17.0.2 compile is clean and timing-closed
 (setup +0.68 ns at the slow corner, 51 % ALMs), the bridge datapath has a
 27-assertion Verilator suite and the FAT stack a 99-assertion host-native
-suite. Hardware bring-up (terminal-over-HDMI first) is the next step.
+suite. The MiSTer core boots the OS and runs the per-game Doom bundle on hardware.
 
 Key architecture points (details in `src/fpga/targets/mister/README.md`):
 
@@ -361,7 +374,7 @@ cost.
 
 - Keep source, core metadata, and required runtime assets tracked.
 - Keep generated Quartus/Verilator/seed/simulation artifacts ignored
-  (including `.target` and the firmware `.last_target` stamp).
+  (including `.target` and the per-target firmware build trees `src/firmware/os/bld/`).
 - Keep target-specific behavior under `targets/<target>/`; keep reusable
   RTL and firmware interfaces in `common/`, `hal/`, `kernel/`, and `api/`.
 - Vendored trees are pristine: `targets/mister/sys/` (MiSTer framework)

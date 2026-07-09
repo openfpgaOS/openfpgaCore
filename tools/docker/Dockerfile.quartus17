@@ -20,15 +20,16 @@
 #   tar the install tree, and bake from that.  Procedure documented in
 #   tools/build-quartus17-image.sh.
 #
-# Base is Ubuntu 18.04: Q17's binaries link against an older glibc/libssl
-# than 22.04 ships; 18.04 is the cleanest no-shim base.  i386 multilib is
+# Base is Ubuntu 22.04: Q17's installed binaries run cleanly on newer glibc
+# (they build fine on the host's glibc 2.4x); 18.04's glibc 2.27 aborts them
+# with realloc() heap corruption mid-compile.  i386 multilib is
 # included because several Q17 utilities are 32-bit even though quartus_map
 # /fit/asm are 64-bit.
 #
 # Pinned to linux/amd64 because Quartus is x86_64-only.  Same ffreep x87
 # patch as the 25.1 image (libccl_sqlite3.so is the same Altera bundled
 # lib for years).
-FROM --platform=linux/amd64 ubuntu:18.04
+FROM --platform=linux/amd64 ubuntu:22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 RUN dpkg --add-architecture i386 \
@@ -38,7 +39,7 @@ RUN dpkg --add-architecture i386 \
       libxrandr2 libxdamage1 libxcomposite1 libfontconfig1 libfreetype6 \
       libgl1 libglu1-mesa zlib1g libpng16-16 \
       libnss3 libxshmfence1 \
-      libc6:i386 libstdc++6:i386 lib32ncurses5 \
+      libc6:i386 libstdc++6:i386 lib32ncurses6 \
       ca-certificates \
       locales make file perl-base \
     && locale-gen en_US.UTF-8 \

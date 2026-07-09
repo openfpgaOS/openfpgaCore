@@ -74,6 +74,7 @@ module tb_hps_bridge (
     output wire [63:0] hps_img2_size,
     output wire [31:0] hps_boot_len,
     output wire [31:0] hps_ini_len,
+    output wire [31:0] hps_elf_len,
     output wire        boot_loaded,
 
     // ── M1 verification master (raw AXI from C++) ───────────────────
@@ -165,6 +166,7 @@ hps_bridge #(
     .hps_img2_size(hps_img2_size),
     .hps_boot_len(hps_boot_len),
     .hps_ini_len(hps_ini_len),
+    .hps_elf_len(hps_elf_len),
     .boot_rom_loaded(boot_loaded),
     .cont1_key(), .cont1_joy(), .cont1_trig(),
     .cont2_key(), .cont2_joy(), .cont2_trig(),

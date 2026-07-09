@@ -98,7 +98,7 @@ case "$VARIANT" in
         OUTPUT_NAME="VexiiRiscv_os25.v"
         ;;
     os30)
-        EXTRA_FLAGS=""
+        EXTRA_FLAGS="--fma-reduced-accuracy"
         OUTPUT_NAME="VexiiRiscv_os30.v"
         ;;
     mister)

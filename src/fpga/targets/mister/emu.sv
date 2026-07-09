@@ -66,13 +66,16 @@ localparam CONF_STR = {
 	"OpenfpgaOS;;",
 	// Sn index = hps_io disk/bit number = DS_SLOT_ID index in firmware:
 	// 0 = family/legacy image, 1 = per-instance image, 2 = borrow slot.
+	// NOTE: an H0<opt> menu-mask hide was tried here to declutter the OSD but it
+	// WEDGED the framework on HW (stuck "loading boot.vhd", no render) — reverted
+	// to the plain full menu.  Do NOT re-add H-flags without a verified syntax.
+	// These entries must stay: the .mgl drives the mounts (S0/S1/S2) and the
+	// F-loads (F1 ini / F2 elf) by index.
 	"S0,VHDIMG,Family Data;",
 	"S1,VHDIMG,Instance;",
 	"S2,VHDIMG,Extra Data;",
-	// F-load: the native "Load Instance" browser (and MGL <file type="f">)
-	// streams a picked .ini to the OS over ioctl (non-zero index); the OS
-	// launches that instance.  See hps_bridge.v ini-staging routing.
 	"F1,INI,Load Instance;",
+	"F2,ELF,Load App;",
 	"-;",
 	"O[122:121],Aspect ratio,Original,Full Screen,[ARC1],[ARC2];",
 	"-;",
@@ -230,7 +233,8 @@ hps_io #(.CONF_STR(CONF_STR), .WIDE(1), .VDNUM(3), .BLKSZ(2)) hps_io (
 
 	.buttons             (buttons),
 	.status              (status),
-	.status_menumask     (0),
+	.status_menumask     (16'h0000),   // no H-hidden CONF_STR entries — keep the full menu
+	                                    // (an H0 hide wedged ARM Main: "loading boot.vhd", see CONF_STR note)
 
 	.ioctl_download      (ioctl_download),
 	.ioctl_index         (ioctl_index),
@@ -285,6 +289,7 @@ wire [63:0] hps_img1_size;
 wire [63:0] hps_img2_size;
 wire [31:0] hps_boot_len;
 wire [31:0] hps_ini_len;
+wire [31:0] hps_elf_len;
 wire        boot_rom_loaded;
 
 wire [31:0] p1_controls, p1_joypad;
@@ -375,6 +380,7 @@ hps_bridge #(
 	.hps_img2_size   (hps_img2_size),
 	.hps_boot_len    (hps_boot_len),
 	.hps_ini_len     (hps_ini_len),
+	.hps_elf_len     (hps_elf_len),
 	.boot_rom_loaded (boot_rom_loaded),
 
 	.cont1_key  (p1_controls),
@@ -725,6 +731,7 @@ axi_periph_slave #(
 	.hps_img1_size(hps_img1_size),
 	.hps_img2_size(hps_img2_size),
 	.hps_ini_len(hps_ini_len),
+	.hps_elf_len(hps_elf_len),
 	// Display control
 	.color_mode(color_mode),
 	.fb_display_addr(fb_display_addr),

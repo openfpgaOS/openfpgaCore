@@ -20,16 +20,16 @@ ok() { printf "  ${GREEN}%s${RESET} → %s\n" "$1" "$2"; }
 
 mkdir -p "$DEST/runtime/mister"
 
-# MiSTer loads a plain (non-reversed) .rbf.
-if [ -f "$SCRIPT_DIR/output_files/mister.rbf" ]; then
-    cp "$SCRIPT_DIR/output_files/mister.rbf" "$DEST/runtime/mister/openfpgaOS.rbf"
-    ok "openfpgaOS.rbf" "runtime/mister/"
-fi
+# NB: the MiSTer core bitstream (openfpgaOS.rbf) is intentionally NOT synced
+# here.  The core is released independently from the openfpgaOS repo
+# (`make package/release TARGET=mister` -> a release zip + Downloader DB) and
+# installed once to _Computer/OpenfpgaOS.rbf.  Game repos reference the
+# released core; they no longer vendor the bitstream in their runtime tree.
 
-# Kernel — only when the on-disk os.bin was built for THIS target.
-if [ "$(cat "$ROOT/src/firmware/os/.last_target" 2>/dev/null)" = "mister" ] && \
-   [ -f "$ROOT/src/firmware/os/os.bin" ]; then
-    cp "$ROOT/src/firmware/os/os.bin" "$DEST/runtime/mister/os.bin"
+# Kernel (boot.rom) — the mister build tree is per-target, so its os.bin
+# is unambiguously a mister build (copied only if it exists).
+if [ -f "$ROOT/src/firmware/os/bld/mister/os.bin" ]; then
+    cp "$ROOT/src/firmware/os/bld/mister/os.bin" "$DEST/runtime/mister/os.bin"
     ok "os.bin" "runtime/mister/"
 fi
 

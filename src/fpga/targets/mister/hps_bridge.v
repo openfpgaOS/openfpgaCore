@@ -60,6 +60,13 @@ module hps_bridge #(
     // (boot and ini downloads are time-disjoint, so the drain pipeline
     // is shared; only the target address / length / done flag differ).
     parameter [31:0] INI_STAGE_ADDR  = 32'h0390_0000,
+    // SDRAM byte offset of the app.elf (F-load) staging region: a second
+    // 2 MB window directly BELOW the ini staging.  The mgl F-loads app.elf
+    // as ioctl index 2 (index 1 stays the instance ini); the OS then serves
+    // the app slot out of this staging instead of the mounted boot.vhd.
+    // Both F-load windows are boot-time-only borrows from the top of the
+    // audio reserve — see targets/mister/target_platform.h.
+    parameter [31:0] ELF_STAGE_ADDR  = 32'h0370_0000,
     // Watchdog: abort a sector op if the HPS doesn't answer (~1.3 s).
     parameter [27:0] SD_TIMEOUT      = 28'd134_000_000
 ) (
@@ -121,6 +128,7 @@ module hps_bridge #(
     output wire [63:0] hps_img2_size,   // disk 2 (S2)
     output wire [31:0] hps_boot_len,
     output wire [31:0] hps_ini_len,     // instance-ini (F-load) byte count
+    output wire [31:0] hps_elf_len,     // app.elf (F-load) byte count
     output wire        boot_rom_loaded,
 
     // ── APF-style controller registers ──────────────────────────────
@@ -260,10 +268,21 @@ reg        is_ini_load;
 reg        ini_loaded_r;
 reg [31:0] ini_len_r;
 
+// App.elf F-load (ioctl index 2): a third staging target on the SAME word
+// pipeline, draining to ELF_STAGE_ADDR, counting bytes into elf_len_r, and
+// latching elf_loaded_r on completion.  is_ini_load / is_elf_load are
+// mutually exclusive (at most one high); boot is neither.  A boot/ini/elf
+// load each leaves the OTHER two staging/len/flag sets completely untouched.
+reg        is_elf_load;
+reg        elf_loaded_r;
+reg [31:0] elf_len_r;
+
 wire boot_index = (ioctl_index[5:0] == 6'd0);
+wire elf_index  = (ioctl_index[5:0] == 6'd2);
 wire dl_start   = ioctl_download && !ioctl_download_d;
-wire boot_start = dl_start && boot_index;    // index 0  = boot.rom
-wire ini_start  = dl_start && !boot_index;   // index !=0 = instance ini
+wire boot_start = dl_start && boot_index;                 // index 0  = boot.rom
+wire elf_start  = dl_start && elf_index;                  // index 2  = app.elf
+wire ini_start  = dl_start && !boot_index && !elf_index;  // else     = instance ini
 wire boot_end   = !ioctl_download && ioctl_download_d && boot_active;
 
 // Throttle the HPS while a posted word drains (the skid gives one
@@ -273,6 +292,7 @@ assign ioctl_wait = boot_word_pending;
 assign boot_rom_loaded = boot_loaded_r;
 assign hps_boot_len    = boot_len_r;
 assign hps_ini_len     = ini_len_r;
+assign hps_elf_len     = elf_len_r;
 
 // ====================================================================
 // Sector buffer — 512 B as two 128×16 simple-dual-port RAMs.
@@ -423,7 +443,8 @@ assign bridge_wr_idle = (state != S_DRAIN_AW) && (state != S_DRAIN_W) &&
 // exactly the single-disk encoding.  Bit 5 = MULTIDISK_CAP: constant 1
 // on this RTL, reads 0 on the old single-disk RTL — the firmware
 // capability probe.
-assign hps_status   = {21'd0,
+assign hps_status   = {20'd0,
+                       elf_loaded_r,                           // 11 elf F-load done
                        ini_loaded_r,                           // 10 ini F-load done
                        readonly_r[2], readonly_r[1],           // 9:8
                        mounted_r[2],  mounted_r[1],            // 7:6
@@ -480,6 +501,9 @@ always @(posedge clk or negedge reset_n) begin
         is_ini_load <= 1'b0;
         ini_loaded_r <= 1'b0;
         ini_len_r <= 32'd0;
+        is_elf_load <= 1'b0;
+        elf_loaded_r <= 1'b0;
+        elf_len_r <= 32'd0;
     end else begin
         // Edge-detect only the op's ack bit.  op_disk changes only at
         // dispatch, when no transfer is in flight (all acks low), so the
@@ -496,6 +520,7 @@ always @(posedge clk or negedge reset_n) begin
         //    latency. ──────────────────────────────────────────────────
         if (boot_start) begin
             is_ini_load   <= 1'b0;
+            is_elf_load   <= 1'b0;
             boot_active   <= 1'b1;
             boot_loaded_r <= 1'b0;
             boot_len_r    <= 32'd0;
@@ -503,11 +528,25 @@ always @(posedge clk or negedge reset_n) begin
             boot_have_lo  <= 1'b0;
             boot_word_pending <= 1'b0;
             boot_skid_full <= 1'b0;
+        end else if (elf_start) begin
+            // App.elf F-load: same drain pipeline, only the target address /
+            // length counter / done flag differ.  Boot AND ini state
+            // (boot_*_r / ini_*_r) are deliberately left untouched.
+            is_ini_load   <= 1'b0;
+            is_elf_load   <= 1'b1;
+            boot_active   <= 1'b1;
+            boot_wr_addr  <= ELF_STAGE_ADDR;
+            elf_loaded_r  <= 1'b0;
+            elf_len_r     <= 32'd0;
+            boot_have_lo  <= 1'b0;
+            boot_word_pending <= 1'b0;
+            boot_skid_full <= 1'b0;
         end else if (ini_start) begin
             // Instance-ini F-load: same drain pipeline, only the target
-            // address / length counter / done flag differ.  Boot state
-            // (boot_len_r/boot_loaded_r) is deliberately left untouched.
+            // address / length counter / done flag differ.  Boot AND elf
+            // state (boot_*_r / elf_*_r) are deliberately left untouched.
             is_ini_load   <= 1'b1;
+            is_elf_load   <= 1'b0;
             boot_active   <= 1'b1;
             boot_wr_addr  <= INI_STAGE_ADDR;
             ini_loaded_r  <= 1'b0;
@@ -529,8 +568,9 @@ always @(posedge clk or negedge reset_n) begin
             //    consumption happening THIS cycle (promotion occupied the
             //    slot again only if the skid had a word).
             if (boot_active && ioctl_wr) begin
-                if (is_ini_load) ini_len_r  <= ini_len_r  + 32'd2;
-                else             boot_len_r <= boot_len_r + 32'd2;
+                if (is_elf_load)      elf_len_r  <= elf_len_r  + 32'd2;
+                else if (is_ini_load) ini_len_r  <= ini_len_r  + 32'd2;
+                else                  boot_len_r <= boot_len_r + 32'd2;
                 if (!boot_have_lo) begin
                     boot_lo_half <= ioctl_dout;
                     boot_have_lo <= 1'b1;
@@ -564,12 +604,16 @@ always @(posedge clk or negedge reset_n) begin
         end
 
         // Mark complete once every word (incl. skid/half) has landed.
-        // A boot completion NEVER sets ini_loaded_r and vice-versa — the
-        // active load's type is carried by is_ini_load.
+        // A boot/ini/elf completion sets ONLY its own done flag — the active
+        // load's type is carried by is_elf_load / is_ini_load (mutually
+        // exclusive; boot is neither).
         if (!boot_active && !boot_word_pending && !boot_skid_full &&
             !boot_have_lo &&
             state != S_BOOT_AW && state != S_BOOT_W && state != S_BOOT_B) begin
-            if (is_ini_load) begin
+            if (is_elf_load) begin
+                if (!elf_loaded_r && elf_len_r != 32'd0)
+                    elf_loaded_r <= 1'b1;
+            end else if (is_ini_load) begin
                 if (!ini_loaded_r && ini_len_r != 32'd0)
                     ini_loaded_r <= 1'b1;
             end else begin

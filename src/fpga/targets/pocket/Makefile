@@ -7,9 +7,8 @@
 # openfpgaOS — Analogue Pocket Build System
 #
 # Quick start:
-#   make          Full build: cpu → firmware → compile → test → deploy
-#   make flash    Quick: firmware → patch bitstream → deploy (~10 sec)
-#   make help     Show all targets
+#   make full     Full build: cpu → bootloader → os → build
+#   make help     Show all targets (also the default)
 
 # ── Configuration ────────────────────────────────────────────────────
 PROJECT    = ap_core
@@ -197,18 +196,15 @@ cpu: $(VEXII_OUT)
 # refresh its output in $(RELEASE_DIR) so build/ always matches the
 # latest in-tree binary. The SDK / SD-card sync runs separately against
 # build/.
-install-os: $(FW_DIR)/os.bin
+install-os: $(FW_DIR)/bld/pocket/os.bin
 	@mkdir -p $(RELEASE_DIR) $(ASSETS_DIR)
-	@cp $(FW_DIR)/os.bin $(RELEASE_DIR)/os.bin
-	@cp $(FW_DIR)/os.bin $(ASSETS_DIR)/os.bin
+	@cp $(FW_DIR)/bld/pocket/os.bin $(RELEASE_DIR)/os.bin
+	@cp $(FW_DIR)/bld/pocket/os.bin $(ASSETS_DIR)/os.bin
 	@printf "  $(C_OK)os.bin$(C_RESET)     → $(RELEASE_DIR)/\n"
 
 install-bitstream: $(REVERSE_BITS) $(QOUT)/$(PROJECT).rbf
 	@mkdir -p $(RELEASE_DIR)
 	@$(REVERSE_BITS) $(QOUT)/$(PROJECT).rbf $(RELEASE_DIR)/$(BITSTREAM).rbf_r > /dev/null
-	@# Record which variant produced the current rbf so `make sdk` (which
-	@# only sees output_files/) publishes it under the right name.
-	@echo $(VARIANT) > $(QOUT)/.last_variant
 	@printf "  $(C_OK)$(BITSTREAM).rbf_r$(C_RESET)  → $(RELEASE_DIR)/\n"
 
 # ── Bootloader / OS / Firmware ──────────────────────────────────────
@@ -227,12 +223,12 @@ install-bitstream: $(REVERSE_BITS) $(QOUT)/$(PROJECT).rbf
 #                  re-run Quartus just to ship a new bootloader.
 bootloader:
 	@printf "$(C_HEAD)[boot]$(C_RESET) Building bootloader (firmware.mif)...\n"
-	@$(FW_MAKE) install
+	@$(FW_MAKE) install TARGET=$(TARGET)
 	@printf "$(C_OK)[boot] Done$(C_RESET)\n"
 
 os:
 	@printf "$(C_HEAD)[os]$(C_RESET) Building os.bin...\n"
-	@$(FW_MAKE) os.bin
+	@$(FW_MAKE) os.bin TARGET=$(TARGET)
 	@$(MAKE) --no-print-directory install-os
 	@printf "$(C_OK)[os] Done$(C_RESET)\n"
 
@@ -479,10 +475,6 @@ check: $(BDIR)/ap_core.qsf
 deploy: install-os install-bitstream
 	@printf "$(C_OK)[deploy] Done$(C_RESET)\n"
 
-# `flash` removed — `firmware` now does the same thing (it builds os,
-# patches the .sof's MIF, and reinstalls the bitstream + os.bin to
-# build/). The old `flash` was identical except for the recipe order.
-
 # ── Package: APF SD-card tree → build/pocket/ ────────────────────────
 # Assembles the Analogue Pocket SD-card layout (Cores/Assets/Platforms)
 # from the on-disk build artifacts.  Invoked by the root `make package`,
@@ -515,8 +507,8 @@ package: $(REVERSE_BITS)
 	@# always selects core 0 / os25).  The chip32 Makefile no-ops when fresh.
 	@$(MAKE) -s -C $(ROOT_DIR)/src/fpga/targets/pocket/chip32
 	@cp $(CHIP32_LOADER) $(RELEASE_DIR)/loader.bin
-	@cp $(FW_DIR)/os.bin $(RELEASE_DIR)/os.bin
-	@cp $(FW_DIR)/os.bin $(ASSETS_DIR)/os.bin
+	@cp $(FW_DIR)/bld/pocket/os.bin $(RELEASE_DIR)/os.bin
+	@cp $(FW_DIR)/bld/pocket/os.bin $(ASSETS_DIR)/os.bin
 	@# core.json's bitstream "filename" must match the variant we just
 	@# reversed; the rest of the manifests copy verbatim.
 	@for f in $(JSON_FILES); do \
@@ -604,11 +596,11 @@ summary:
 	@test -f $(VEXII_OUT) \
 		&& printf "  $(C_OK)[x]$(C_RESET) CPU generated\n" \
 		|| printf "  $(C_DIM)[ ] CPU$(C_RESET)\n"
-	@test -f $(FW_DIR)/firmware.mif \
+	@test -f $(FW_DIR)/bld/pocket/firmware.mif \
 		&& printf "  $(C_OK)[x]$(C_RESET) Firmware built\n" \
 		|| printf "  $(C_DIM)[ ] Firmware$(C_RESET)\n"
-	@test -f $(FW_DIR)/os.bin \
-		&& SIZE=$$(stat -c%s $(FW_DIR)/os.bin 2>/dev/null || stat -f%z $(FW_DIR)/os.bin 2>/dev/null) \
+	@test -f $(FW_DIR)/bld/pocket/os.bin \
+		&& SIZE=$$(stat -c%s $(FW_DIR)/bld/pocket/os.bin 2>/dev/null || stat -f%z $(FW_DIR)/bld/pocket/os.bin 2>/dev/null) \
 		&& printf "  $(C_OK)[x]$(C_RESET) OS built ($$SIZE bytes)\n" \
 		|| printf "  $(C_DIM)[ ] OS$(C_RESET)\n"
 	@if test -f $(QOUT)/$(PROJECT).rbf; then \

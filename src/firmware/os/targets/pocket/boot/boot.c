@@ -78,6 +78,20 @@ volatile unsigned int __attribute__((section(".bss.boot"))) os_load_crc_retries;
 #define OS_META_MAGIC  0x3245534Fu
 #define OS_META_BYTES  16u
 
+/* Boot-ABI block (append_os_crc.py), 8 bytes immediately before the OSE2
+ * block: [magic 'OABI'][boot_abi], LE, covered by the CRC.  The CRC is
+ * content-, not layout-checked, so a wrong-target or stale mif+os.bin pair
+ * still passes it and then black-boots (loads/runs at the wrong addresses).
+ * The Makefile -D's OF_TARGET_BOOT_ABI (a hash of the target + memory-map
+ * constants) into this bootloader AND stamps the same value into os.bin;
+ * boot.c compares them and halts with a visible error on mismatch.  Unstamped
+ * images (no OABI, or no id injected at build time) skip the check. */
+#ifndef OF_TARGET_BOOT_ABI
+#define OF_TARGET_BOOT_ABI 0u   /* build injected no id → check disabled */
+#endif
+#define OS_ABI_MAGIC   0x4942414Fu   /* 'OABI' read LE from SDRAM */
+#define OS_ABI_BYTES   8u
+
 /* DMA timeout (~2 seconds at 100MHz) */
 #define BOOT_DMA_TIMEOUT 200000000
 #define BOOT_DMA_CHUNK_SIZE 4096u
@@ -104,10 +118,8 @@ volatile unsigned int __attribute__((section(".bss.boot"))) os_load_crc_retries;
 extern char _os_bss_start[], _os_bss_end[];
 extern char _runtime_stack_top[];
 extern char _os_load_addr[];
-extern char _os_text_size[];
 extern char _os_copy_size[];
 extern char _osdata_init_vma_start[];
-extern char _osdata_init_size[];
 
 /* OS entry point */
 extern void os_main(void);
@@ -771,6 +783,27 @@ static int boot_read_os_meta(uint32_t total) {
     return 1;
 }
 
+/* Boot-ABI guard.  Returns 1 to proceed (id matches, or the image is
+ * unstamped / the id is build-disabled), 0 to stop (id present and differs —
+ * a wrong-target or stale mif+os.bin pair).  Reads the OABI block from the
+ * loaded blob's tail ([OABI][OSE2][CRC]); the blob is raw-copied to
+ * _osdata_init_vma_start, so the tail is readable even when the map is wrong. */
+__attribute__((section(".text.boot")))
+static int boot_check_os_abi(uint32_t total) {
+    if ((uint32_t)OF_TARGET_BOOT_ABI == 0u)
+        return 1;   /* no id injected at build time — check disabled */
+    if (total < OS_CRC_TRAILER_BYTES + OS_META_BYTES + OS_ABI_BYTES)
+        return 1;   /* too small to carry an OABI block — legacy image */
+    uint32_t base = (uint32_t)(uintptr_t)_osdata_init_vma_start;
+    volatile const uint32_t *a =
+        (volatile const uint32_t *)boot_sdram_uncached_addr(
+            (void *)(uintptr_t)(base + total - OS_CRC_TRAILER_BYTES
+                                - OS_META_BYTES - OS_ABI_BYTES));
+    if (a[0] != OS_ABI_MAGIC)
+        return 1;   /* unstamped (no OABI) — don't enforce */
+    return a[1] == (uint32_t)OF_TARGET_BOOT_ABI;
+}
+
 
 /* OS image load: bridge DMAs os.bin into CRAM0 scratch, then the CPU copies the
  * whole blob contiguously into SDRAM starting at __osdata_vma (== __os_entry).
@@ -839,9 +872,6 @@ static void boot_fb_hex32(int col, int row, uint32_t v) {
     }
 }
 
-/* (CRC double-load forensics lived here 2026-06-09; removed after the
- * bridge investigation closed — the CRC retry + UNVERIFIED banner remain.) */
-
 __attribute__((section(".text.boot")))
 static int boot_load_os_sd(uint32_t total) {
     for (;;) {
@@ -903,22 +933,6 @@ static void boot_cram_warmup(void) {
     if (warm_tries)
         boot_fb_clear_row(1);
 }
-
-/* F1: bridge-leg self-test, wait-until-healthy (cold-boot forensics
- * 2026-06).  boot_cram_warmup() only proves the CPU<->CRAM0 leg;
- * cold-start corruption lives on the bridge leg (APF SPI RX -> write
- * FIFO -> CRAM0).  Exercise EXACTLY that leg with ground truth: DS-read
- * the last 8 bytes of the OS slot (the 'OFC1' CRC trailer stamped by
- * append_os_crc.py) into CRAM0 scratch and check the magic.  On
- * mismatch, wait ~100 ms and retry forever with an on-screen counter —
- * converting the user's manual 30-40 s "sit in menu until it heals"
- * into an automatic minimal wait REGARDLESS of the root cause.  If
- * os_size is wrong (DT query fell back to the linked size), the CRC
- * verify in boot_load_os_sd would loop forever anyway, so gating here
- * on the same trailer position adds no new failure mode. */
-/* (Bridge-leg boot probe lived here 2026-06-09; removed — it measured
- * only the known first-DS-command-after-boot quirk, not bridge health.
- * The load CRC + bounded retries are the real gate.) */
 
 /* ======================================================================
  * Main
@@ -1111,6 +1125,18 @@ load_from_sd:
          * handshake bit was stuck (low byte: 0=ACK 1=DONE 2-4=ERR
          * 5=READY 6=WR_IDLE).  Reuses the shared hex routine. */
         boot_fb_hex32(16, 0, pd_dbg_info);
+        while (1) {}
+    }
+
+    /* Refuse to run an os.bin whose memory map differs from this baked
+     * bootloader (wrong target / stale mif): it would pass the content CRC
+     * yet load+run at the wrong addresses (silent black).  Show why + stop. */
+    if (!boot_check_os_abi(os_size)) {
+        boot_fb_clear_row(0);
+        boot_fb_clear_row(1);
+        boot_fb_puts0(0, "BOOT ABI MISMATCH");
+        boot_fb_puts0(1, "os.bin != this core's bootloader");
+        boot_fb_puts0(2, "Rebuild firmware.mif");
         while (1) {}
     }
 

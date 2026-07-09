@@ -60,6 +60,24 @@ volatile unsigned int __attribute__((section(".bss.boot"))) os_load_crc_retries;
 #define OS_META_MAGIC  0x3245534Fu
 #define OS_META_BYTES  16u
 
+/* Boot-ABI block (append_os_crc.py), 8 bytes immediately before the OSE2
+ * block: [magic 'OABI'][boot_abi], LE, covered by the CRC.
+ *
+ * WHY: OSE2 fixed the entry/.bss drift, but the bootloader still bakes in
+ * memory-map constants (staging offset, the CRC base _osdata_init_vma_start,
+ * the SDRAM window) that OSE2 does NOT carry.  A wrong-target or stale
+ * mif+os.bin pair still passes the CRC (which is content-, not layout-checked)
+ * and then loads/runs the image at the wrong addresses → silent black.  The
+ * Makefile -D's OF_TARGET_BOOT_ABI (a hash of the target + those constants)
+ * into this bootloader AND stamps the same value into os.bin; we compare them
+ * below and stop with a visible message on mismatch.  Unstamped images (no
+ * OABI block, or a build that injected no id) skip the check. */
+#ifndef OF_TARGET_BOOT_ABI
+#define OF_TARGET_BOOT_ABI 0u   /* build injected no id → check disabled */
+#endif
+#define OS_ABI_MAGIC   0x4942414Fu   /* 'OABI' read LE from SDRAM */
+#define OS_ABI_BYTES   8u
+
 #define BOOT_ROM_WAIT_CYCLES 1000000000u   /* ~10 s for HPS file delivery */
 #define BOOT_OS_SIZE_MAX     (768u * 1024u)
 #define BOOT_CACHE_LINE_SIZE 64u
@@ -320,6 +338,27 @@ static int boot_read_os_meta(uint32_t total) {
     return 1;
 }
 
+/* Boot-ABI guard.  Returns 1 to proceed (id matches, or the image is
+ * unstamped / the id is build-disabled), 0 to stop (id present and differs —
+ * a wrong-target or stale mif+os.bin pair).  Reads the OABI block from the
+ * loaded blob's tail ([OABI][OSE2][CRC]); the blob is raw-copied to
+ * _osdata_init_vma_start, so the tail is readable even when the map is wrong. */
+__attribute__((section(".text.boot")))
+static int boot_check_os_abi(uint32_t total) {
+    if ((uint32_t)OF_TARGET_BOOT_ABI == 0u)
+        return 1;   /* no id injected at build time — check disabled */
+    if (total < OS_CRC_TRAILER_BYTES + OS_META_BYTES + OS_ABI_BYTES)
+        return 1;   /* too small to carry an OABI block — legacy image */
+    uint32_t base = (uint32_t)(uintptr_t)_osdata_init_vma_start;
+    volatile const uint32_t *a =
+        (volatile const uint32_t *)boot_sdram_uncached_addr(
+            (void *)(uintptr_t)(base + total - OS_CRC_TRAILER_BYTES
+                                - OS_META_BYTES - OS_ABI_BYTES));
+    if (a[0] != OS_ABI_MAGIC)
+        return 1;   /* unstamped (no OABI) — don't enforce */
+    return a[1] == (uint32_t)OF_TARGET_BOOT_ABI;
+}
+
 /* Copy os.bin from the ioctl staging region to its runtime VMA.  Both
  * sides go through the uncached alias: the staging bytes were DMA'd by
  * hps_bridge (never cached), and the destination must be visible to the
@@ -399,6 +438,18 @@ int main(void) {
 
     uint32_t os_size = boot_os_image_size();
     (void)boot_load_os(os_size);
+
+    /* Refuse to run an os.bin whose memory map differs from this baked
+     * bootloader (wrong target / stale mif): it would pass the content CRC
+     * yet load+run at the wrong addresses (silent black).  Show why + stop. */
+    if (!boot_check_os_abi(os_size)) {
+        boot_fb_clear_row(0);
+        boot_fb_clear_row(1);
+        boot_fb_puts(0, 0, "BOOT ABI MISMATCH");
+        boot_fb_puts(0, 1, "os.bin != this core's bootloader");
+        boot_fb_puts(0, 2, "Rebuild firmware.mif (make firmware)");
+        while (1) { }
+    }
 
     pd_dbg_stage = 4;
     boot_fb_clear_row(0);

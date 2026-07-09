@@ -72,7 +72,7 @@ help:
 	@echo "     / __ \\/ __/"
 	@echo "    / /_/ /\\ \\"
 	@printf '    \\____/___/  '
-	@printf "$(C_CMD)v0.6$(C_RESET) OS\n"
+	@printf "$(C_CMD)v0.7$(C_RESET) OS\n"
 	@printf "$(C_RESET)\n"
 	@printf "  $(C_HEAD)Target:$(C_RESET) $(C_CMD)$(TARGET)$(C_RESET) $(C_DIM)(available: $(TARGETS))$(C_RESET)\n\n"
 	@printf "  $(C_HEAD)Targets:$(C_RESET)\n"
@@ -102,7 +102,8 @@ help:
 	@printf "    $(C_CMD)make $(C_CMD)sdk $(C_CMD)DEST=$(C_CMD)\"path\"$(C_RESET)   Sync headers + runtime to SDK repo(s)\n"
 	@printf "    $(C_CMD)make $(C_CMD)program$(C_RESET)           JTAG program via USB Blaster $(C_DIM)(pocket)$(C_RESET)\n"
 	@printf "    $(C_CMD)make $(C_CMD)deploy$(C_RESET)            Refresh build/<target>/ core artifacts $(C_DIM)(device push lives in the SDK)$(C_RESET)\n"
-	@printf "    $(C_CMD)make $(C_CMD)package$(C_RESET)           SD-card layout → build/<target>/ $(C_DIM)(pocket=APF tree, mister=rbf+boot.rom)$(C_RESET)\n"
+	@printf "    $(C_CMD)make $(C_CMD)package$(C_RESET)           SD-card layout → build/<target>/ $(C_DIM)(pocket=APF tree, mister=rbf+boot.rom+release zip)$(C_RESET)\n"
+	@printf "    $(C_CMD)make $(C_CMD)release$(C_RESET)           Package + draft a GitHub release $(C_DIM)(mister core)$(C_RESET)\n"
 	@echo ""
 
 # ── Sticky default target ────────────────────────────────────────────
@@ -144,8 +145,8 @@ SWEEP_MAX = $(word 2,$(subst -, ,$(SEEDS)))
 # set" (see docs/ADDING_A_TARGET.md for the contract).  `package` is in
 # the list too — each target owns its own packaging layout (pocket = APF
 # SD tree, mister = rbf + boot.rom, …).
-cpu bootloader firmware os compile build check test timing report program deploy package: check-target
-	@$(MAKE) -C $(TARGET_DIR) $@ FULL=$(FULL)
+cpu bootloader firmware os compile build check test timing report program deploy package release: check-target
+	@$(MAKE) -C $(TARGET_DIR) $@ FULL=$(FULL) PREV="$(PREV)" PUBLISH="$(PUBLISH)"
 
 sweep: check-target
 	@$(MAKE) -C $(TARGET_DIR) sweep SWEEP_MIN=$(SWEEP_MIN) SWEEP_MAX=$(SWEEP_MAX)
@@ -253,4 +254,4 @@ clean:
 	@rm -f $(REVERSE_BITS)
 
 .PHONY: all help check-target full cpu bootloader firmware os compile build check test timing report program sdk deploy
-.PHONY: sweep package clean use-default
+.PHONY: sweep package release clean use-default

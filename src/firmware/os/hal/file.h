@@ -50,6 +50,19 @@ void of_file_relaunch_reset(void);
  * boot on an instance selection (Pocket/sim) always return 1. */
 int of_file_instance_ready(void);
 
+/* MiSTer F-load app model (Phase 2): 1 once the HPS has DMA'd a menu/MGL-picked
+ * app.elf (ioctl index 2) into the ELF staging window (HPS_STATUS_ELF_LOADED),
+ * meaning the app ELF is now served from staging through the fixed app-elf slot
+ * (targets/mister/file.c elf_slot_read).  The kernel app loader FORCES the
+ * resolved app slot to that fixed slot when this reports 1 — otherwise the
+ * by-name os.ini "ELF=..." lookup resolves the name in the mounted vhd and the
+ * staged bytes are never read.  of_file_app_staging_len() reports the staged
+ * length (HPS_ELF_LEN; 0 = none) for a boot diagnostic.  Targets with no F-load
+ * staging (Pocket/sim: the host hands the picked ELF to the core directly)
+ * return 0. */
+int of_file_app_from_staging(void);
+uint32_t of_file_app_staging_len(void);
+
 /* Enumerate game instances: subdirectories of /games that contain an os.ini.
  * Writes up to `max` directory names into the flat buffer `names`, one every
  * `stride` bytes (NUL-terminated).  Returns the number written.  0 on targets

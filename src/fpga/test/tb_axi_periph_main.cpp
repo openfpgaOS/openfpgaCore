@@ -1455,7 +1455,8 @@ static void test_mixer_pos_read_registered_boundary(void) {
 // REGION_HPS (0x49000000) read decode — widened to req_addr[5:2] for
 // multi-vhd.  The tb ties the five hps_* inputs to distinct constants
 // (see tb_axi_periph.v); 0x00-0x0C must keep the legacy layout,
-// 0x10-0x1C carry the IMG1/IMG2 sizes, 0x20 = INI_LEN, 0x24-0x3C zero.
+// 0x10-0x1C carry the IMG1/IMG2 sizes, 0x20 = INI_LEN, 0x24 = ELF_LEN,
+// 0x28-0x3C zero.
 // ====================================================================
 static void test_hps_region_decode() {
     printf("test_hps_region_decode:\n");
@@ -1469,7 +1470,8 @@ static void test_hps_region_decode() {
         0xBBBBCCCCu,            // 0x18 IMG2_SIZE_LO
         0x9999AAAAu,            // 0x1C IMG2_SIZE_HI
         0xFACE1234u,            // 0x20 INI_LEN
-        0, 0, 0, 0, 0, 0, 0     // 0x24-0x3C reserved
+        0xE1F05678u,            // 0x24 ELF_LEN
+        0, 0, 0, 0, 0, 0        // 0x28-0x3C reserved
     };
     std::vector<uint32_t> r;
     bool ok = true;

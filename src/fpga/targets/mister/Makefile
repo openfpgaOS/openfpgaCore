@@ -51,6 +51,22 @@ endif
 
 BUILD_OUT = $(ROOT_DIR)/build/mister
 
+# ── MiSTer core release (make package / make release) ────────────────
+# The core = the game-agnostic bitstream + OS kernel (openfpgaOS.rbf +
+# boot.rom).  `make package` stages build/mister/ AND builds a release zip
+# (+ a Downloader DB); `make release` drafts a GitHub release from it.
+# Paths are absolutised because the release recipe cd's into the stage dir.
+ABS_ROOT  = $(abspath $(ROOT_DIR))
+REL_DIR   = $(ABS_ROOT)/releases/mister
+REL_STAGE = $(ABS_ROOT)/build/mister/release
+CORE_VER  = $(shell python3 -c "import json;print(json.load(open('$(ABS_ROOT)/dist/core/core.json'))['core']['metadata']['version'])" 2>/dev/null || echo 0.0.0)
+CORE_ZIP  = $(REL_DIR)/openfpgaos-core-v$(CORE_VER).zip
+# Downloader-DB generator lives in the SDK (not vendored here); overridable.
+MKDB     ?= $(abspath $(ROOT_DIR)/../openfpgaSDK)/src/sdk/platforms/mister/mkdb.py
+MISTER_DB_ID       ?= thinkelastic/openfpgaos
+MISTER_DB_BASE_URL ?= https://raw.githubusercontent.com/thinkelastic/openfpgaOS/mister-dist/
+MISTER_DB_URL      ?= https://raw.githubusercontent.com/thinkelastic/openfpgaOS/mister-dist/openfpgaos.json.zip
+
 # ── Feature include-list ─────────────────────────────────────────────
 # Positive include-set (a feature is PRESENT iff its INCLUDE_* macro is
 # defined).  MiSTer has the full feature set EXCEPT analogizer (Pocket-only
@@ -111,7 +127,7 @@ help:
 	@printf "    $(C_CMD)make $(C_CMD)test$(C_RESET)              Run Verilator test suite\n"
 	@printf "    $(C_CMD)make $(C_CMD)check$(C_RESET)             RTL check (Analysis & Synthesis)\n"
 	@printf "    $(C_CMD)make $(C_CMD)timing$(C_RESET)            Show Fmax and slack from last build\n"
-	@printf "    $(C_CMD)make $(C_CMD)deploy$(C_RESET)            Refresh build/mister/ (rbf + boot.rom)\n"
+	@printf "    $(C_CMD)make $(C_CMD)deploy$(C_RESET)            Stage build/mister/; $(C_CMD)MISTER_IP=<ip>$(C_RESET) also pushes to HW\n"
 	@printf "    $(C_DIM)Push to hardware from the SDK: platforms/mister/copy.sh$(C_RESET)\n"
 	@echo ""
 
@@ -193,28 +209,48 @@ quartus17-image:
 	@bash $(ROOT_DIR)/tools/build-quartus17-image.sh
 
 # ── Deploy ───────────────────────────────────────────────────────────
-# Same semantics as the Pocket target: refresh the core artifacts in
-# build/mister/ from whatever is on disk.  Pushing to hardware is the
-# SDK's job (openfpgaSDK: src/sdk/platforms/mister/copy.sh) — sync the
-# artifacts there with `make sdk DEST=path/to/sdk` first.
+# Refresh the core artifacts in build/mister/ from whatever is on disk
+# (like the Pocket target).  Add MISTER_IP=<ip> to ALSO push them to a
+# MiSTer over the network: scp's the bitstream + kernel straight to the
+# card (then reload the core / relaunch a .mgl).  One ssh ControlMaster
+# connection means it asks for the root password just once — set up an
+# SSH key to skip it.  `copy.sh core` in the SDK does the same push from
+# an SDK checkout if you prefer that path.
+HW_CORE_DIR  = /media/fat/_Computer
+HW_GAMES_DIR = /media/fat/games/OpenfpgaOS
+SSH_OPTS     = -o ControlMaster=auto -o ControlPath=/tmp/.of-mister-mux-%r@%h:%p -o ControlPersist=20
 deploy:
 	@mkdir -p $(BUILD_OUT)
 	@test -f output_files/$(PROJECT).rbf && \
 		cp output_files/$(PROJECT).rbf $(BUILD_OUT)/openfpgaOS.rbf && \
 		printf "  $(C_OK)openfpgaOS.rbf$(C_RESET) → $(BUILD_OUT)/\n" || \
 		printf "  $(C_DIM)[ ] bitstream (run make build)$(C_RESET)\n"
-	@if [ -f $(FW_DIR)/os.bin ] && \
-	    [ "$$(cat $(FW_DIR)/.last_target 2>/dev/null)" = "mister" ]; then \
-		cp $(FW_DIR)/os.bin $(BUILD_OUT)/boot.rom; \
+	@if [ -f $(FW_DIR)/bld/mister/os.bin ]; then \
+		cp $(FW_DIR)/bld/mister/os.bin $(BUILD_OUT)/boot.rom; \
 		printf "  $(C_OK)boot.rom$(C_RESET)       → $(BUILD_OUT)/\n"; \
 	else \
-		printf "  $(C_DIM)[ ] boot.rom (run make os — current os.bin is not a mister build)$(C_RESET)\n"; \
+		printf "  $(C_DIM)[ ] boot.rom (run make os TARGET=mister first)$(C_RESET)\n"; \
 	fi
-	@printf "$(C_OK)[deploy] Done$(C_RESET) $(C_DIM)(push to hardware from the SDK: platforms/mister/copy.sh)$(C_RESET)\n"
+ifeq ($(strip $(MISTER_IP)),)
+	@printf "$(C_OK)[deploy] Done$(C_RESET) $(C_DIM)(add MISTER_IP=<ip> to also push to hardware)$(C_RESET)\n"
+else
+	@printf "$(C_HEAD)[deploy]$(C_RESET) pushing to root@$(MISTER_IP) ...\n"
+	@ssh $(SSH_OPTS) root@$(MISTER_IP) 'mkdir -p $(HW_CORE_DIR) $(HW_GAMES_DIR)' || \
+		{ printf "  $(C_ERR)ssh to root@$(MISTER_IP) failed (host reachable? password?)$(C_RESET)\n"; exit 1; }
+	@if [ -f $(BUILD_OUT)/openfpgaOS.rbf ]; then \
+		scp $(SSH_OPTS) $(BUILD_OUT)/openfpgaOS.rbf root@$(MISTER_IP):$(HW_CORE_DIR)/OpenfpgaOS.rbf && \
+		printf "  $(C_OK)OpenfpgaOS.rbf$(C_RESET) → root@$(MISTER_IP):$(HW_CORE_DIR)/\n"; \
+	else printf "  $(C_ERR)no bitstream to push — run make build$(C_RESET)\n"; fi
+	@if [ -f $(BUILD_OUT)/boot.rom ]; then \
+		scp $(SSH_OPTS) $(BUILD_OUT)/boot.rom root@$(MISTER_IP):$(HW_GAMES_DIR)/boot.rom && \
+		printf "  $(C_OK)boot.rom$(C_RESET)       → root@$(MISTER_IP):$(HW_GAMES_DIR)/\n"; \
+	else printf "  $(C_ERR)no boot.rom to push — run make os TARGET=mister$(C_RESET)\n"; fi
+	@printf "$(C_OK)[deploy] pushed to root@$(MISTER_IP)$(C_RESET) $(C_DIM)— reload the core (relaunch a .mgl) to run it$(C_RESET)\n"
+endif
 
 # ── Package: rbf + boot.rom → build/mister/ ──────────────────────────
 # The MiSTer deliverable is a plain bitstream + kernel pair (the SDK's
-# platforms/mister/mkimage.sh assembles the .vhd disk image around them).
+# per-game packager, platforms/mister/mkgame.sh, assembles the .vhd images).
 # Invoked by the root `make package`, which delegates per target — the
 # root names no target.  Stricter than `deploy`: errors out if the
 # on-disk os.bin is not a MiSTer build, so a release can't ship a Pocket
@@ -222,13 +258,54 @@ deploy:
 package:
 	@mkdir -p $(BUILD_OUT)
 	@cp output_files/$(PROJECT).rbf $(BUILD_OUT)/openfpgaOS.rbf
-	@if [ "$$(cat $(FW_DIR)/.last_target 2>/dev/null)" != "mister" ]; then \
-		printf "  $(C_ERR)os.bin on disk is not a mister build — run make os TARGET=mister first$(C_RESET)\n"; \
+	@if [ ! -f $(FW_DIR)/bld/mister/os.bin ]; then \
+		printf "  $(C_ERR)no mister os.bin — run make os TARGET=mister first$(C_RESET)\n"; \
 		exit 1; \
 	fi
-	@cp $(FW_DIR)/os.bin $(BUILD_OUT)/boot.rom
-	@printf "  $(C_OK)Package ready$(C_RESET) → build/mister/ (rbf + boot.rom)\n"
-	@printf "  $(C_DIM)Disk image: openfpgaSDK platforms/mister/mkimage.sh$(C_RESET)\n"
+	@cp $(FW_DIR)/bld/mister/os.bin $(BUILD_OUT)/boot.rom
+	@printf "  $(C_OK)staged$(C_RESET)         → build/mister/ (rbf + boot.rom)\n"
+	@# Release bundle: an SD-rooted zip plus an optional Downloader DB.
+	@rm -rf $(REL_STAGE)
+	@mkdir -p "$(REL_STAGE)/_Computer" "$(REL_STAGE)/games/OpenfpgaOS" "$(REL_DIR)"
+	@cp $(BUILD_OUT)/openfpgaOS.rbf "$(REL_STAGE)/_Computer/OpenfpgaOS.rbf"
+	@cp $(BUILD_OUT)/boot.rom "$(REL_STAGE)/games/OpenfpgaOS/boot.rom"
+	@{ \
+		echo "openfpgaOS core for MiSTer  v$(CORE_VER)"; \
+		echo ""; \
+		echo "The game-agnostic core (bitstream + OS kernel).  Games ship as"; \
+		echo "separate per-game packages that drop into games/OpenfpgaOS/."; \
+		echo ""; \
+		echo "Install once:"; \
+		echo "  1. Unzip this archive into /media/fat/ (merge folders):"; \
+		echo "       _Computer/OpenfpgaOS.rbf    the core bitstream"; \
+		echo "       games/OpenfpgaOS/boot.rom   the OS kernel"; \
+		echo "  2. Install a game package (e.g. Doom) into games/OpenfpgaOS/."; \
+		echo "  3. Launch a game .mgl from the MiSTer menu."; \
+		echo ""; \
+		echo "Or via MiSTer Downloader: add the [$(MISTER_DB_ID)] snippet from"; \
+		echo "openfpgaos.downloader.ini to /media/fat/downloader.ini and sync."; \
+	} > "$(REL_STAGE)/INSTALL.txt"
+	@cd "$(REL_STAGE)" && rm -f "$(CORE_ZIP)" && zip -rq "$(CORE_ZIP)" .
+	@printf "  $(C_OK)core zip$(C_RESET)       → releases/mister/openfpgaos-core-v$(CORE_VER).zip\n"
+	@if [ -x "$(MKDB)" ]; then \
+		"$(MKDB)" --staging "$(REL_STAGE)" --sd-prefix "" \
+			--base-url "$(MISTER_DB_BASE_URL)" --db-id "$(MISTER_DB_ID)" \
+			--reboot '_Computer/OpenfpgaOS.rbf' --reboot 'games/OpenfpgaOS/boot.rom' \
+			--db-url "$(MISTER_DB_URL)" \
+			--output "$(REL_DIR)/openfpgaos.json.zip" \
+			--ini-out "$(REL_DIR)/openfpgaos.downloader.ini" \
+			&& printf "  $(C_OK)Downloader DB$(C_RESET)  → releases/mister/openfpgaos.json.zip\n" || true; \
+	else \
+		printf "  $(C_DIM)[ ] Downloader DB skipped — SDK mkdb.py not at $(MKDB)$(C_RESET)\n"; \
+	fi
+	@printf "$(C_OK)[package] Done$(C_RESET) → releases/mister/\n"
+
+# ── Release: publish the core zip (+ DB) to GitHub ───────────────────
+# Builds the package first, then drafts a GitHub release.  PUBLISH=1 = live
+# (default draft); PREV=<tag> overrides the changelog baseline.
+release: package
+	@CORE_VER="$(CORE_VER)" MISTER_DB_ID="$(MISTER_DB_ID)" PREV="$(PREV)" PUBLISH="$(PUBLISH)" \
+		bash "$(ABS_ROOT)/dist/mister/release.sh"
 
 # ── JTAG program — Pocket-only ───────────────────────────────────────
 # The root Makefile delegates `program` to every target; MiSTer has no
@@ -309,8 +386,8 @@ summary:
 	@test -f firmware.mif \
 		&& printf "  $(C_OK)[x]$(C_RESET) Firmware built\n" \
 		|| printf "  $(C_DIM)[ ] Firmware$(C_RESET)\n"
-	@test -f $(FW_DIR)/os.bin \
-		&& SIZE=$$(stat -c%s $(FW_DIR)/os.bin 2>/dev/null) \
+	@test -f $(FW_DIR)/bld/mister/os.bin \
+		&& SIZE=$$(stat -c%s $(FW_DIR)/bld/mister/os.bin 2>/dev/null) \
 		&& printf "  $(C_OK)[x]$(C_RESET) OS built ($$SIZE bytes)\n" \
 		|| printf "  $(C_DIM)[ ] OS$(C_RESET)\n"
 	@test -f output_files/$(PROJECT).rbf \

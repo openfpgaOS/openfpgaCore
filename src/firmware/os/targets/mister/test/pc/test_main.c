@@ -70,6 +70,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#include <sys/mman.h>   /* MAP_FIXED for the F-loaded ELF staging window */
 
 /* Must match genfix.c. */
 #define APP_ELF_SIZE   140000u
@@ -1168,7 +1169,7 @@ static void test_config_by_name_legacy(void) {
  *      own /config/doom.cfg.  With no backing file the OS refuses the
  *      by-name config open, so the app's M_SaveDefaults writes nothing and
  *      the settings silently vanish.  Fixed in the SDK builder
- *      (mkimage.sh: nv=/config/<app>.cfg; mkfamily/mkinstance: <family>.cfg).
+ *      (mkgame.sh preallocates each instance's /config/<name>.cfg slots).
  *
  *   B  FIRMWARE FLUSH (ruled out).  Hypothesis: config close() commits the
  *      logical size but not the DATA (like the historical save-close
@@ -1442,6 +1443,143 @@ static void run_legacy_suite(void) {
     test_config_field_failure_repro();
 }
 
+/* ====================================================================== */
+/* F-loaded app.elf staging (Phase-2 update-safe app delivery)            */
+/* ====================================================================== */
+
+/* Target-physical uncached address the firmware's elf_slot_read() memcpy's
+ * from — computed identically to file.c's ELF_STAGE_UNCACHED so a host page
+ * mapped here (MAP_FIXED) stands in for the HPS elf DMA target. */
+#define ELF_STAGE_UNCACHED_HOST                                              \
+    ((uintptr_t)OF_TARGET_SDRAM_UNCACHED_BASE + OF_TARGET_CRAM0_BRIDGE +     \
+     OF_TARGET_CRAM0_ELF_STAGE_OFFSET)
+
+/* HPS status block MMIO byte addresses (see hps_regs.h). */
+#define HPS_STATUS_ADDR   0x49000000u
+#define HPS_ELF_LEN_ADDR  0x49000024u
+#define HPS_ELF_LOADED    (1u << 11)
+
+static uint8_t elf_stage_byte(uint32_t off) {
+    return (uint8_t)(off * 31u + 0x5Cu);   /* != of_fix_byte(SEED_APP, .) */
+}
+
+/* Prove the routing: with HPS_STATUS_ELF_LOADED set, a slot-3 (APP) read must
+ * return the STAGED ELF bytes, not the FAT app.elf on the mounted image. */
+static void test_elf_fload_staging(void) {
+    mount_image(0);   /* slot 3 = FAT app.elf under the bridge backend */
+
+    /* Baseline: with no elf staged, slot 3 resolves to the FAT app.elf. */
+    CHECK(of_file_size64(3) == (int64_t)APP_ELF_SIZE,
+          "slot 3 = FAT app.elf before elf F-load (size64=%lld)",
+          (long long)of_file_size64(3));
+
+    /* Map a host page at the staging address and stage a DISTINCT pattern. */
+    const uint32_t elf_len = 4096u * 7u + 123u;   /* not a chunk multiple */
+    void *stage = mmap((void *)ELF_STAGE_UNCACHED_HOST,
+                       OF_TARGET_CRAM0_ELF_STAGE_SIZE,
+                       PROT_READ | PROT_WRITE,
+                       MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0);
+    CHECK(stage == (void *)ELF_STAGE_UNCACHED_HOST,
+          "mmap ELF staging @0x%lx (got %p)",
+          (unsigned long)ELF_STAGE_UNCACHED_HOST, stage);
+    if (stage != (void *)ELF_STAGE_UNCACHED_HOST) return;
+    uint8_t *sb = stage;
+    for (uint32_t i = 0; i < elf_len; i++)
+        sb[i] = elf_stage_byte(i);
+
+    /* Model the HPS status block: ELF loaded + byte count. */
+    of_test_mmio_set(HPS_STATUS_ADDR, HPS_ELF_LOADED);
+    of_test_mmio_set(HPS_ELF_LEN_ADDR, elf_len);
+
+    /* New cross-target routing hooks: the kernel app loader
+     * (kernel/main.c prepare_app_launch_ex) forces the resolved app slot to
+     * APP_SLOT_ID when of_file_app_from_staging() reports an F-loaded ELF, so
+     * load_app reads through elf_slot_read instead of the by-name vhd lookup;
+     * of_file_app_staging_len() feeds the [elf_fload=..] boot diagnostic. */
+    CHECK(of_file_app_from_staging() == 1,
+          "of_file_app_from_staging()=1 when ELF_LOADED set");
+    CHECK(of_file_app_staging_len() == elf_len,
+          "of_file_app_staging_len()=%u want %u",
+          (unsigned)of_file_app_staging_len(), elf_len);
+
+    /* Model the kernel routing (prepare_app_launch_ex): os.ini "ELF=doom.elf"
+     * resolves to some by-name/vhd slot, then the F-load override forces
+     * APP_SLOT_ID.  Prove the routed slot is 3 and reading it returns the
+     * STAGED bytes — the whole point of the fix (an unrouted by-name load would
+     * read the FAT app.elf or fail the name lookup, never the staged engine). */
+    {
+        const uint32_t name_slot = 3u + 100u;  /* stands in for resolve_app_slot("doom.elf") */
+        uint32_t routed = of_file_app_from_staging() ? 3u : name_slot;
+        CHECK(routed == 3u,
+              "ELF_LOADED routes app-load to APP_SLOT_ID (got %u)", routed);
+        uint8_t rb[256];
+        int rrc = of_file_read(routed, 0, rb, sizeof(rb));
+        int rok = (rrc == 0);
+        for (uint32_t j = 0; rok && j < sizeof(rb); j++)
+            if (rb[j] != elf_stage_byte(j)) rok = 0;
+        CHECK(rok, "routed app-load reads STAGED elf bytes (rc=%d)", rrc);
+    }
+
+    /* size64 now reports the staged length, not the FAT app.elf size. */
+    CHECK(of_file_size64(3) == (int64_t)elf_len,
+          "slot 3 size64 = staged elf len (%lld want %u)",
+          (long long)of_file_size64(3), elf_len);
+
+    /* Reads return the STAGED bytes (would be the FAT pattern if unrouted). */
+    static const struct { uint32_t off, len; } cases[] = {
+        { 0, 1 }, { 1, 3 }, { 0, 4096 }, { 4097, 2000 },
+        { elf_len - 1, 1 }, { elf_len - 100, 100 },
+    };
+    uint8_t buf[8192];
+    for (size_t i = 0; i < sizeof(cases)/sizeof(cases[0]); i++) {
+        uint32_t off = cases[i].off, len = cases[i].len;
+        memset(buf, 0xEE, sizeof(buf));
+        int rc = of_file_read(3, off, buf, len);
+        CHECK(rc == 0, "staged elf read off=%u len=%u rc=%d", off, len, rc);
+        int ok = 1;
+        for (uint32_t j = 0; j < len; j++)
+            if (buf[j] != elf_stage_byte(off + j)) { ok = 0; break; }
+        CHECK(ok, "staged elf bytes off=%u len=%u (served FAT instead?)",
+              off, len);
+    }
+
+    /* Whole-file chunked read exercises the 32 KB DMA path through staging. */
+    uint8_t *whole = malloc(elf_len);
+    if (whole) {
+        int rc = of_file_read_chunked(3, 0, whole, elf_len);
+        int ok = (rc == 0);
+        for (uint32_t j = 0; ok && j < elf_len; j++)
+            if (whole[j] != elf_stage_byte(j)) ok = 0;
+        CHECK(ok, "chunked staged elf read (rc=%d)", rc);
+        free(whole);
+    }
+
+    /* Out-of-range guard: a read past the staged length must fail. */
+    CHECK(of_file_read(3, elf_len - 4, buf, 64) < 0,
+          "read past staged elf end must fail");
+
+    /* Clear the modeled HPS state; slot 3 reverts to the FAT app.elf. */
+    of_test_mmio_set(HPS_STATUS_ADDR, 0);
+    of_test_mmio_set(HPS_ELF_LEN_ADDR, 0);
+    munmap(stage, OF_TARGET_CRAM0_ELF_STAGE_SIZE);
+    CHECK(of_file_size64(3) == (int64_t)APP_ELF_SIZE,
+          "slot 3 reverts to FAT app.elf after elf F-load cleared");
+
+    /* Hooks and routing revert with ELF_LOADED clear: the app loader keeps the
+     * by-name/vhd slot (backward compat — a non-F-loaded core, and step 1 of
+     * this bring-up, read app.elf from the mounted vhd exactly as before). */
+    CHECK(of_file_app_from_staging() == 0,
+          "of_file_app_from_staging()=0 when ELF_LOADED clear");
+    CHECK(of_file_app_staging_len() == 0,
+          "of_file_app_staging_len()=0 when ELF_LOADED clear");
+    {
+        const uint32_t name_slot = 3u + 100u;
+        uint32_t routed = of_file_app_from_staging() ? 3u : name_slot;
+        CHECK(routed == name_slot,
+              "ELF_LOADED clear keeps the by-name/vhd slot (got %u)", routed);
+    }
+}
+
 int main(int argc, char **argv) {
     if (argc != 5) {
         fprintf(stderr,
@@ -1480,6 +1618,7 @@ int main(int argc, char **argv) {
     test_gapped_boot();
     test_late_mount_reprobe();
     test_instance_root_path_budget();
+    test_elf_fload_staging();
 
     of_test_blockdev_close();
 

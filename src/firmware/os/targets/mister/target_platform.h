@@ -14,15 +14,30 @@
  * The Pocket's CRAM0 (bridge staging PSRAM) has no MiSTer equivalent —
  * MiSTer's hps_io lets the core DMA incoming data anywhere — so the CRAM0
  * macros are repointed at an 8 MB staging arena carved from the top of the
- * 64 MB map, directly below the OS file cache:
+ * 64 MB map, directly below the OS file cache (offsets track the macros
+ * below; the 2026-07-02 repack collapsed the unused save mirror):
  *
  *   0x13300000  os.bin staging   (boot.rom ioctl DMA target, 768 KB)
  *   0x133C0000  presave mirror   (256 KB, assembly buffer only — real
- *   0x13400000  save mirror      (2.5 MB)   persistence is FAT files)
- *   0x13700000  DMA scratch      (sector-engine bounce, 1 MB)
- *   0x13800000  app async pool   (of_file_dma_stage_alloc, 1 MB)
- *   0x13900000  reserved         (2 MB spare)
+ *                                 persistence is FAT files)
+ *   0x13400000  DMA scratch      (sector-engine bounce, 32 KB)
+ *   0x13408000  async bounce     (32 KB)
+ *   0x13420000  app async pool   (of_file_dma_stage_alloc, 1 MB)
+ *   0x13520000  audio reserve    (mixer/SoundFont; grows DOWN from the top,
+ *                                 floor here, top at 0x13B00000)
+ *   0x13700000  app.elf F-load   (2 MB) ─┐ boot-time staging borrows from the
+ *   0x13900000  os.ini  F-load   (2 MB) ─┘ TOP of the audio reserve (below)
  *   0x13B00000  (file cache — unchanged from Pocket)
+ *
+ * The two F-load windows (app.elf @ 0x13700000, os.ini @ 0x13900000) overlap
+ * the top of the audio reserve ON PURPOSE.  The mgl streams os.ini (ioctl
+ * index 1) and app.elf (ioctl index 2) into them at core start; the OS reads
+ * os.ini and copies the app's ELF segments out of staging into app RAM
+ * (kernel/main.c cold-boot order) BEFORE of_mixer_memory_set_floor() or any
+ * SoundFont allocation runs, and the mixer reserve grows top-down from
+ * 0x13B00000 — so audio is free to reuse both windows once the app is loaded.
+ * (NB: the in-place RELAUNCH path re-reads os.ini + app.elf from staging;
+ * this is a pre-existing property of the ini window.)
  *
  * IMPORTANT vs Pocket: this arena is CACHED SDRAM (the Pocket CRAM0 was
  * uncached per PMA). The MiSTer file/save HAL does explicit cache
@@ -106,6 +121,21 @@
 #define OF_TARGET_CRAM0_APP_DMA_SIZE   0x00100000u   /* 1 MB */
 #define OF_TARGET_CRAM0_AUDIO_OFFSET   (OF_TARGET_CRAM0_APP_DMA_OFFSET + OF_TARGET_CRAM0_APP_DMA_SIZE)
 
+/* F-load staging windows (Phase-2 update-safe app delivery).  The mgl streams
+ * a menu-picked os.ini (ioctl index 1) and app.elf (ioctl index 2) into these
+ * two windows at the TOP of the arena; the OS then serves os.ini (slot 2) and
+ * the app ELF (slot 3) out of SDRAM staging instead of the mounted boot.vhd,
+ * so an engine/config update is a single loose-file replacement.  Both are
+ * boot-time-only borrows from the top of the audio reserve (consumed before
+ * any audio allocation — see the map above and hps_bridge.v INI/ELF_STAGE_ADDR
+ * which must equal CRAM0_BRIDGE + these offsets).  ELF sized for the Doom-class
+ * engine (~1.3 MB) with margin; larger engines keep their app.elf in the vhd
+ * (ELF_LOADED just stays clear → slot 3 falls back to FAT). */
+#define OF_TARGET_CRAM0_ELF_STAGE_OFFSET 0x00400000u   /* app.elf F-load — CPU 0x13700000 */
+#define OF_TARGET_CRAM0_ELF_STAGE_SIZE   0x00200000u   /* 2 MB */
+#define OF_TARGET_CRAM0_INI_STAGE_OFFSET 0x00600000u   /* os.ini  F-load — CPU 0x13900000 */
+#define OF_TARGET_CRAM0_INI_STAGE_SIZE   0x00200000u   /* 2 MB */
+
 /* High SDRAM reservations — identical to Pocket above the staging arena:
  *   0x13FC0000-0x14000000  GPU palookup tables (fixed RTL address)
  *   0x13F80000-0x13FC0000  speculation headroom / guard
@@ -160,6 +190,19 @@
 
 #if (OF_TARGET_CRAM0_APP_DMA_OFFSET + OF_TARGET_CRAM0_APP_DMA_SIZE) > OF_TARGET_CRAM_SIZE
 #error "App DMA pool exceeds the staging arena"
+#endif
+
+/* F-load windows sit in the upper (audio-reserve-shared) arena: above the app
+ * DMA pool, disjoint from each other, and within the arena.  They may overlap
+ * the audio reserve (time-disjoint borrow — see the header map). */
+#if OF_TARGET_CRAM0_ELF_STAGE_OFFSET < (OF_TARGET_CRAM0_APP_DMA_OFFSET + OF_TARGET_CRAM0_APP_DMA_SIZE)
+#error "ELF staging must sit above the app DMA pool"
+#endif
+#if (OF_TARGET_CRAM0_ELF_STAGE_OFFSET + OF_TARGET_CRAM0_ELF_STAGE_SIZE) > OF_TARGET_CRAM0_INI_STAGE_OFFSET
+#error "ELF staging window overlaps the ini staging window"
+#endif
+#if (OF_TARGET_CRAM0_INI_STAGE_OFFSET + OF_TARGET_CRAM0_INI_STAGE_SIZE) > OF_TARGET_CRAM_SIZE
+#error "INI staging window exceeds the staging arena"
 #endif
 
 #if (OF_TARGET_CRAM0_BASE + OF_TARGET_CRAM_SIZE) != OF_TARGET_FILE_CACHE_BASE

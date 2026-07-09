@@ -26,23 +26,38 @@ The Pocket target keeps its own 25.1std toolchain — they don't conflict.
 make full TARGET=mister        # from the repo root: cpu → firmware → compile
 make firmware TARGET=mister    # fast bootloader iteration (MIF patch, ~10 s)
 make deploy TARGET=mister      # refresh build/mister/ (rbf + boot.rom)
-make sdk DEST=path/to/sdk      # sync headers + runtime/mister artifacts
+make sdk DEST=path/to/sdk      # sync headers + os.bin into runtime/mister (core NOT vendored)
+make package TARGET=mister     # releases/mister/openfpgaos-core-v<ver>.zip (_Computer/OpenfpgaOS.rbf
+                               #   + games/OpenfpgaOS/boot.rom + INSTALL.txt) + Downloader custom DB
+                               #   openfpgaos.json.zip (+ .downloader.ini) via the SDK's mkdb.py
+make release TARGET=mister     # draft a GitHub release (dist/mister/release.sh)
 ```
 
-This repo **builds** the core; the **SDK pushes to hardware** (same split
-as the Pocket). After `make sdk`, deploy from the SDK:
+This repo **builds and releases** the core; the **SDK pushes games to
+hardware** (same split as the Pocket). Install the core once from the
+release (`make package` / `make release`), then push a game's engine ELF
+from the SDK. See `src/sdk/platforms/mister/PACKAGING.md` for the full flow.
 
 ```sh
-# openfpgaSDK
-src/sdk/platforms/mister/copy.sh core 192.168.x.x      # core-only bring-up
-src/sdk/platforms/mister/copy.sh <app> 192.168.x.x     # app image + core
+# openfpgaSDK — per-game engine update (primary; wrapped by make copy /
+# make copy-app): scp the built ELF atomically to the loose F-loaded engine
+# games/OpenfpgaOS/<Game>/<GameElf> (e.g. doom.elf); boot.vhd (wads) and the
+# saves volume are untouched — no Main-stop / loop-mount.
+src/sdk/platforms/mister/copy.sh game <Game> <GameElf> <elf> [192.168.x.x]
+
+# Legacy single-image model:
+src/sdk/platforms/mister/copy.sh core 192.168.x.x      # push boot.rom only
+src/sdk/platforms/mister/copy.sh <app> <elf>           # build + push full ~64 MB openfpgaOS.vhd
+src/sdk/platforms/mister/copy.sh update <elf>          # loop-mount on-card vhd, swap in-vhd ELF
 ```
 
-Artifacts on the MiSTer:
-- `openfpgaOS.rbf` → `/media/fat/_Console/`
-- `boot.rom` (= os.bin, auto-loaded at core start) and `openfpgaOS.vhd`
-  (built by `mkimage.sh`, mounted once from the OSD)
-  → `/media/fat/games/openfpgaOS/`
+Artifacts on the MiSTer (primary per-game / update-safe model):
+- `OpenfpgaOS.rbf` — the game-agnostic core → `/media/fat/_Computer/`
+- `boot.rom` (= os.bin, auto-loaded at core start) → `/media/fat/games/OpenfpgaOS/`
+- per instance: a loose F-loaded engine ELF at
+  `games/OpenfpgaOS/<Game>/<GameElf>` (e.g. `doom.elf`), a read-only
+  `boot.vhd` (the wads, slot S0), a writable `<Game>.vhd` (saves, slot S1)
+  under `/media/fat/saves/OpenfpgaOS/`, and one 4-line `.mgl` per instance.
 
 ## Bring-up phases
 

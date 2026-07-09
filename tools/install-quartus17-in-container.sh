@@ -39,7 +39,7 @@ apt-get install -y --no-install-recommends \
     libxmu6 libxi6 libxtst6 libxfixes3 libxcursor1 libxinerama1 \
     libxrandr2 libxdamage1 libxcomposite1 libfontconfig1 libfreetype6 \
     libgl1 libglu1-mesa zlib1g libpng16-16 libnss3 libxshmfence1 \
-    ca-certificates locales tar gzip > /dev/null
+    ca-certificates locales tar gzip xvfb > /dev/null
 
 echo "[install] extracting installer payload..."
 mkdir -p /tmp/qsrc
@@ -56,11 +56,16 @@ echo "          (under QEMU on arm64 hosts allow ~30 min)"
 # binfmt qemu-x86_64.  Call the Bitrock .run directly; binfmt routes the
 # exec automatically when the registration is in place.  Same Bitrock
 # flags as setup.sh would have passed.
-"$SETUP_RUN" \
+#
+# Wrap in xvfb-run: the main installer honors --unattendedmodeui none, but it
+# spawns sub-installers (e.g. QuartusHelpSetup) with --unattendedmodeui minimal
+# hardcoded, and that minimal UI hangs forever trying to init an X display in a
+# headless container.  A virtual framebuffer lets those sub-installers draw
+# their (non-interactive) progress UI and finish.
+xvfb-run -a "$SETUP_RUN" \
     --mode unattended \
     --unattendedmodeui none \
-    --installdir /opt/altera-17 \
-    --accept_eula 1
+    --installdir /opt/altera-17
 
 [ -x /opt/altera-17/quartus/bin/quartus_map ] || {
     echo "ERROR: quartus_map missing after install"

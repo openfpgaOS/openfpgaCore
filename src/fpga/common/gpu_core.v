@@ -395,7 +395,6 @@ reg [1:0]  dma_state;
 reg        dma_publish_wrptr;     // 1-cycle pulse, latched by ring_wrptr
 reg [GPU_ADDR_W-1:0] dma_burst_addr;  // SDRAM byte addr of next sub-burst
 reg [12:0] dma_words_left;        // Words remaining in the kick (across sub-bursts)
-reg [8:0]  dma_burst_words;       // Words remaining in current sub-burst (1..256)
 
 reg [GPU_ADDR_W-1:0] dma_desc_src [0:1];
 reg [12:0] dma_desc_len [0:1];
@@ -608,10 +607,10 @@ reg        lutsram_seen_busy;
 
 reg [14:0] transluc_rd_addr;
 reg        transluc_lookup_fire;
-reg [3:0]  transluc_cache_valid;
-reg [13:0] transluc_cache_addr [0:3];
-reg [15:0] transluc_cache_data [0:3];
-reg [1:0]  transluc_cache_replace;
+reg [1:0]  transluc_cache_valid;
+reg [13:0] transluc_cache_addr [0:1];
+reg [15:0] transluc_cache_data [0:1];
+reg        transluc_cache_replace;
 
 wire transluc_sram_lookup_ready =
     (lutsram_state == LUTSRAM_IDLE) && !sram_busy;
@@ -620,7 +619,7 @@ assign transluc_upload_busy = (lutsram_state != LUTSRAM_IDLE);
 
 `ifndef INCLUDE_TRANSLUC
 // Targets without INCLUDE_TRANSLUC (Pocket OS30): remove the transluc[] LUT
-// upload/lookup FSM and its 4-entry transluc_cache entirely.  The GPU's
+// upload/lookup FSM and its 2-entry transluc_cache entirely.  The GPU's
 // external SRAM port (used only for the blend LUT) goes idle and the cache
 // registers hold 0, so transluc_cache_hit always reads 0 in the (now
 // unreachable, chokepointed) FBSS_BLEND states.  INCLUDE_TRANSLUC
@@ -637,16 +636,12 @@ always @(posedge clk) begin
         transluc_wr_addr        <= 15'd0;
         lutsram_state           <= LUTSRAM_IDLE;
         lutsram_seen_busy       <= 1'b0;
-        transluc_cache_valid    <= 4'b0;
+        transluc_cache_valid    <= 2'b0;
         transluc_cache_addr[0]  <= 14'd0;
         transluc_cache_addr[1]  <= 14'd0;
-        transluc_cache_addr[2]  <= 14'd0;
-        transluc_cache_addr[3]  <= 14'd0;
         transluc_cache_data[0]  <= 16'd0;
         transluc_cache_data[1]  <= 16'd0;
-        transluc_cache_data[2]  <= 16'd0;
-        transluc_cache_data[3]  <= 16'd0;
-        transluc_cache_replace  <= 2'd0;
+        transluc_cache_replace  <= 1'b0;
     end else begin
         // SRAM port permanently idle; cache held at 0.
         sram_rd      <= 1'b0;
@@ -669,16 +664,12 @@ always @(posedge clk) begin
         transluc_wr_addr        <= 15'd0;
         lutsram_state           <= LUTSRAM_IDLE;
         lutsram_seen_busy       <= 1'b0;
-        transluc_cache_valid    <= 4'b0;
+        transluc_cache_valid    <= 2'b0;
         transluc_cache_addr[0]  <= 14'd0;
         transluc_cache_addr[1]  <= 14'd0;
-        transluc_cache_addr[2]  <= 14'd0;
-        transluc_cache_addr[3]  <= 14'd0;
         transluc_cache_data[0]  <= 16'd0;
         transluc_cache_data[1]  <= 16'd0;
-        transluc_cache_data[2]  <= 16'd0;
-        transluc_cache_data[3]  <= 16'd0;
-        transluc_cache_replace  <= 2'd0;
+        transluc_cache_replace  <= 1'b0;
     end else begin
         sram_rd    <= 1'b0;
         sram_wr    <= 1'b0;
@@ -688,7 +679,7 @@ always @(posedge clk) begin
 
         if (reg_wr && reg_addr == 4'd8) begin
             transluc_wr_addr <= reg_wdata[14:0];
-            transluc_cache_valid <= 4'b0;
+            transluc_cache_valid <= 2'b0;
         end
 
         case (lutsram_state)
@@ -706,7 +697,7 @@ always @(posedge clk) begin
                     sram_wdata       <= reg_wdata;
                     sram_wstrb       <= 4'hF;
                     transluc_wr_addr <= transluc_wr_addr + 15'd4;
-                    transluc_cache_valid <= 4'b0;
+                    transluc_cache_valid <= 2'b0;
                     lutsram_state    <= LUTSRAM_WRITE_WAIT;
                 end
             end
@@ -725,7 +716,7 @@ always @(posedge clk) begin
                     transluc_cache_data[transluc_cache_replace]  <= transluc_rd_addr[1]
                                                                   ? sram_rdata[31:16]
                                                                   : sram_rdata[15:0];
-                    transluc_cache_replace <= transluc_cache_replace + 2'd1;
+                    transluc_cache_replace <= ~transluc_cache_replace;
                     lutsram_state         <= LUTSRAM_IDLE;
                 end
             end
@@ -816,57 +807,21 @@ reg signed [31:0] dsp2_b;
 (* multstyle = "dsp" *) reg signed [63:0] dsp2_p;
 always @(posedge clk) dsp2_p <= dsp2_a * dsp2_b;
 
-// ---- Hierarchical DSP operand routing ----
-// Domain-local operand registers: each subsystem writes only its own.
-// A 3:1 owner-select mux feeds the DSP, replacing the flat 50:1 mux.
-localparam DSP_OWNER_SPANPROD = 2'd0;
-localparam DSP_OWNER_PSS      = 2'd1;
-localparam DSP_OWNER_DERIVE   = 2'd2;
-localparam DSP_OWNER_XFORM    = 2'd3;   // 0x51 transform front-end MAC/projection
-wire [1:0] dsp_owner = (state == S_XFORM) ? DSP_OWNER_XFORM :
-                       (state == S_TRI_DERIVE) ? DSP_OWNER_DERIVE :
-                       (persp_pss != PSS_IDLE) ? DSP_OWNER_PSS :
-                       DSP_OWNER_SPANPROD;
-
-reg signed [31:0] sp_dsp_a,  sp_dsp_b;   // spanprod domain
-reg signed [31:0] sp_dsp2_a, sp_dsp2_b;
-reg signed [31:0] pss_dsp_a,  pss_dsp_b;  // PSS domain
-reg signed [31:0] pss_dsp2_a, pss_dsp2_b;
-reg signed [31:0] drv_dsp_a,  drv_dsp_b;  // derivation domain
-reg signed [31:0] drv_dsp2_a, drv_dsp2_b;
-
-// Owner-select: combinational mux from domain-local regs to DSP inputs
-always @(*) begin
-    case (dsp_owner)
-        DSP_OWNER_SPANPROD: begin
-            dsp_a = sp_dsp_a;  dsp_b = sp_dsp_b;
-            dsp2_a = sp_dsp2_a; dsp2_b = sp_dsp2_b;
-        end
-        DSP_OWNER_PSS: begin
-            dsp_a = pss_dsp_a;  dsp_b = pss_dsp_b;
-            dsp2_a = pss_dsp2_a; dsp2_b = pss_dsp2_b;
-        end
-        DSP_OWNER_DERIVE: begin
-            dsp_a = drv_dsp_a;  dsp_b = drv_dsp_b;
-            dsp2_a = drv_dsp2_a; dsp2_b = drv_dsp2_b;
-        end
-        DSP_OWNER_XFORM: begin
-            dsp_a = xf_dsp_a;  dsp_b = xf_dsp_b;   // single multiplier; dsp2 idle
-            dsp2_a = 32'sd0; dsp2_b = 32'sd0;
-        end
-        default: begin
-            dsp_a = 32'sd0; dsp_b = 32'sd0;
-            dsp2_a = 32'sd0; dsp2_b = 32'sd0;
-        end
-    endcase
-end
-
-function signed [31:0] q16_round_product;
-    input signed [63:0] product;
-    begin
-        q16_round_product = (product + 64'sd32768) >>> 16;
-    end
-endfunction
+// ---- DSP operand routing (B7 collapse) ----
+// ONE shared operand register pair per DSP, written directly by every
+// launch site; the former per-domain banks (sp_dsp_*/pss_dsp_*/
+// drv_dsp_*) and the 3:1 owner-select mux are gone.  Bit-exact because
+// the three writer domains are keyed on mutually exclusive FSM states
+// (spanprod: S_SPANPROD_SETUP/MUL_WAIT/CAPTURE arms; PSS: persp_pss
+// arms inside S_FRAG_PIPE; derive+xform: S_TRI_DERIVE/S_XFORM arms),
+// every product is consumed exactly two cycles after its own domain's
+// launch with the FSM confined to that domain's states in between,
+// and every S_FRAG_PIPE exit is !persp_active-gated — the same cycle
+// that makes an exit eligible also re-idles persp_pss — so no foreign
+// write can interpose between a launch and its capture.  The operand
+// regs self-clear each cycle (always-on housekeeping block) exactly
+// as the domain banks did, so an idle cycle contributes the same
+// 0-operand product either way.
 
 
 // Reciprocal LUT: 1024 × 16-bit in M10K (Phase 4b — widened from 256 to
@@ -877,8 +832,8 @@ endfunction
 // recip_rd_addr, result in recip_rd_data next cycle.
 // Stored value: recip_lut[i] = 0x1000000 / (1024 + i) → 16-bit Q14
 // (i.e. recip_lut[0] = 16384 = 1.0 in Q14, recip_lut[1023] ≈ 0.501).
-// LUT output Q-format unchanged — the PSS_RECIP_SHIFT shift constant
-// (5'd13) is independent of the input bit-width, so no shift change.
+// LUT output Q-format unchanged — the PSS_RECIP_SHIFT funnel slice
+// offset (13) is independent of the input bit-width, so no shift change.
 (* ramstyle = "M10K" *) reg [15:0] recip_lut [0:1023];
 reg [9:0]  recip_rd_addr;
 reg [15:0] recip_rd_data;
@@ -1002,7 +957,7 @@ assign m_rd_araddr     = dma_owns_ar   ? dma_araddr
                        : blend_owns_m0 ? {{(32-GPU_ADDR_W){1'b0}}, blend_araddr}
                        :                 tex_axi_araddr;
 assign m_rd_arlen      = dma_owns_ar   ? dma_arlen
-                       : blend_owns_m0 ? blend_arlen
+                       : blend_owns_m0 ? {6'b0, blend_ar_is_burst, blend_ar_is_burst}
                        :                 tex_axi_arlen;
 
 // Fast-texture fill master — driven only when redirected.  Independent of the
@@ -1045,7 +1000,6 @@ always @(posedge clk) begin
         dma_state         <= DMA_S_IDLE;
         dma_burst_addr    <= {GPU_ADDR_W{1'b0}};
         dma_words_left    <= 13'd0;
-        dma_burst_words   <= 9'd0;
         dma_arvalid       <= 1'b0;
         dma_araddr        <= 32'd0;
         dma_arlen         <= 8'd0;
@@ -1123,10 +1077,8 @@ always @(posedge clk) begin
                 // end-to-end DMA fetch.
                 if (dma_words_left >= 13'd16) begin
                     dma_arlen       <= 8'd15;
-                    dma_burst_words <= 9'd16;
                 end else begin
                     dma_arlen       <= dma_words_left[7:0] - 8'd1;
-                    dma_burst_words <= {1'b0, dma_words_left[7:0]};
                 end
                 dma_araddr  <= {{(32-GPU_ADDR_W){1'b0}}, dma_burst_addr};
                 dma_arvalid <= 1'b1;
@@ -1138,7 +1090,6 @@ always @(posedge clk) begin
         DMA_S_R: begin
             dma_arvalid <= 1'b0;
             if (m_rd_rvalid) begin
-                dma_burst_words <= dma_burst_words - 9'd1;
                 dma_words_left  <= dma_words_left  - 13'd1;
                 dma_burst_addr  <= dma_burst_addr  + {{(GPU_ADDR_W-3){1'b0}}, 3'd4};
                 if (m_rd_rlast) begin
@@ -1473,6 +1424,13 @@ reg [6:0]  sp_a6;              // sticky: precomputed blend weight 0..64 (off th
 // are powers of two (always true for BUILD/Quake/Doom textures).
 reg [15:0] sp_tex_w_mask;
 reg [15:0] sp_tex_h_mask;
+// EMIT-hoist: span-constant mask+1 (mod 2^16, so the default 16'hFFFF mask
+// yields octave 16'h0000 — the mirror test then never fires, exactly as the
+// old per-pixel `mask + 16'd1` wrap behaved).  Written at EVERY sp_tex_*_mask
+// write site (EMIT load + reset) so the per-pixel mirror_idx() cone reads a
+// flop instead of adding 1 to the mask per pixel.
+reg [15:0] sp_tex_w_octave;
+reg [15:0] sp_tex_h_octave;
 reg        sp_mirror_s;       // sticky: G_TX_MIRROR on S / T (control bits 28/29)
 reg        sp_mirror_t;
 reg        sp_cd_combine;     // sticky: texel*C+D combine enable (control bit 30)
@@ -1489,20 +1447,23 @@ reg [GPU_ADDR_W-1:0] sp_z_addr;
 reg signed [GPU_ADDR_W-1:0] sp_z_step;
 reg signed [31:0] sp_z_value;
 reg signed [31:0] sp_z_value_step;
-// Decoupled depth accumulator (0x4E): high-range 1/w depth, interpolated affine,
-// float-compressed into the z-buffer instead of the perspective zi.
-reg signed [31:0] sp_depth_value;
-reg signed [31:0] sp_depth_step;
-// Pipelined z_compress: zc_s1_* = stage1 (CLZ) reg, zc_s2_* = stage2 (shift) reg.
-// source_z_half reads zc_s2_* (a flop) instead of running z_compress combinationally
-// on the -1.594ns write path.  Fed by 2-deep lookahead accumulators sp_*_la
-// (= value + 2*step) so zc_s2_* == z_compress(current value) in steady state; a
-// 2-cycle warm (g_zwarm) fills the pipe at span start (single cone/cycle).
-reg [37:0] zc_s1_z;  reg [15:0] zc_s2_z;   // sp_z_value (0x4B truecolor) path
-reg [37:0] zc_s1_d;  reg [15:0] zc_s2_d;   // sp_depth_value (0x4E rgb) path
-reg signed [31:0] sp_z_la;       // lookahead: sp_z_value + 2*sp_z_value_step
-reg signed [31:0] sp_depth_la;   // lookahead: sp_depth_value + 2*sp_depth_step
-reg [1:0]  g_zwarm;              // span-start fill counter (2 -> 0), truecolor only
+// Pipelined z_compress (UNIFIED z/depth pipe): zc_s1 = stage1 (CLZ) reg,
+// zc_s2 = stage2 (shift) reg.  source_z_half reads zc_s2 (a flop) instead of
+// running z_compress combinationally on the z-write path.  Fed by ONE 2-deep
+// lookahead accumulator sp_zc_la (= value + 2*step) so zc_s2 ==
+// z_compress(current value) in steady state; a 2-cycle warm (g_zwarm) fills
+// the pipe at span start (single cone/cycle).  The operand pair is
+// mode-selected at span EMIT using the same-cycle value written into sp_rgb:
+// rgb spans (0x4E/0x52/0x54/0x4F) load the decoupled depth start/step
+// (high-range 1/w depth, interpolated affine, float-compressed into the
+// z-buffer instead of the perspective zi) — matching the old sp_rgb-wins
+// priority even when truecolor is also set; all other spans load the
+// sp_z_value (attr2) start/step, so truecolor 0x4B spans see z_compress(zi)
+// exactly as the former dedicated z pipe produced.
+reg [37:0] zc_s1;  reg [15:0] zc_s2;
+reg signed [31:0] sp_zc_la;      // lookahead: value + 2*step (mode-selected)
+reg signed [31:0] sp_zc_step;    // per-pixel step for sp_zc_la (mode-selected)
+reg [1:0]  g_zwarm;              // span-start fill counter (2 -> 0), direct-color builds only
 reg        sp_q29_z_enable;
 reg signed [31:0] sp_q29_z_value;
 reg signed [31:0] sp_q29_z_value_step;
@@ -1543,6 +1504,12 @@ reg signed [GPU_ADDR_W-1:0] spanprod_fb_major_step;
 reg signed [GPU_ADDR_W-1:0] spanprod_fb_minor_step;
 reg [GPU_ADDR_W-1:0] spanprod_tex_addr;
 reg [15:0] spanprod_tex_width;
+// EMIT-hoist: (spanprod_tex_width != 0), written at BOTH load sites of the
+// register (compact w1 / long w4 — its only writers; it is stable from load
+// to EMIT and carries no reset).  Both power up 0 (flag 0 -> "zero" -> EMIT
+// substitutes 16'd1, exactly what the old (reg==0) test produced), so the
+// flag mirrors the register from time zero.
+reg        spanprod_tex_width_nz;
 reg        spanprod_mirror_s;   // staged G_TX_MIRROR S/T (control word bits 28/29)
 reg        spanprod_mirror_t;
 reg        spanprod_cd_combine; // staged texel*C+D combine enable (control bit 30)
@@ -1561,46 +1528,109 @@ reg        spanprod_span_axis;
 reg        spanprod_header_supported;
 reg        spanprod_z_write;
 reg        spanprod_z_test;
-reg signed [31:0] spanprod_attr0_origin;
-reg signed [31:0] spanprod_attr0_du;
-reg signed [31:0] spanprod_attr0_dv;
-reg signed [31:0] spanprod_attr1_origin;
-reg signed [31:0] spanprod_attr1_du;
-reg signed [31:0] spanprod_attr1_dv;
-reg signed [31:0] spanprod_attr2_origin;
+// B4: attribute-plane staging bank.  The ten planes' {origin, du, dv} live
+// in three MLAB-hinted register files indexed by the SPANPROD step code
+// (attr0=1, attr1=2, attr2=3, light=4, R=8, B=9, depth=10, Dr=11, Dg=12,
+// Db=13; rows 0/5-7/14-15 unused).  24-bit planes (light/R/B/Dr/Dg/Db) are
+// stored SIGN-EXTENDED to 32 bits at write time, so an indexed row read is
+// bit-identical to the old {{8{v[23]}},v} per-plane operand muxes.  Exactly
+// one write port each: the payload loader writes one field per cycle and
+// the derive FSM writes one plane's origin+du+dv per DRV_ORG_FORM pass —
+// mutually exclusive states of the one command FSM.  One async read address
+// per array: the launch pointer for du/dv (spanprod_launch_step_mul), the
+// capture pointer for origin (spanprod_capture_origin_w).  Writes never
+// coincide with a consumed read (payload/derive states vs the S_SPANPROD
+// walk), and the staging had no reset before, so last-written-value
+// semantics are preserved exactly.
+(* ramstyle = "MLAB, no_rw_check" *) reg signed [31:0] spanprod_pl_origin [0:15];
+(* ramstyle = "MLAB, no_rw_check" *) reg signed [31:0] spanprod_pl_du     [0:15];
+(* ramstyle = "MLAB, no_rw_check" *) reg signed [31:0] spanprod_pl_dv     [0:15];
+// Walk-time pre-captures of (span_axis ? dv : du) for the two planes whose
+// walk slots run UNCONDITIONALLY on every parametric record (chain
+// 0 -> [5] -> 1 -> 2): loaded when launch slot 1/2 fires, consumed at EMIT.
+// Bit-exact vs the old EMIT-time staging-reg mux because the plane rows and
+// span_axis are only written in payload/derive states — never between a
+// record's walk and its EMIT (q29_zstep_op_r is the precedent).
+reg signed [31:0] spanprod_attr0_step_pre;
+reg signed [31:0] spanprod_attr1_step_pre;
+// Flop mirrors for the CONDITIONALLY-walked planes' du/dv, written wherever
+// the corresponding array row is written.  Their EMIT reads (sp_zinv_step /
+// sp_z_value_step / sp_zc_step / sp_light_step / sp_R,B,Dr,Dg,Db_step) are
+// unconditional while their walk slots are gated (attr2: attr_persp; light:
+// colormap||truecolor; R/B/depth: the rgb chain; D*: cd_combine), so a
+// walk-slot pre-capture is NOT provably equivalent for degenerate command
+// streams — these stay flops.  attr2's mirror also feeds the free-running
+// q29_zstep_op_r capture.
 reg signed [31:0] spanprod_attr2_du;
 reg signed [31:0] spanprod_attr2_dv;
 // Decoupled depth plane (0x4E truecolor): a 32-bit affine 1/w-scaled depth,
 // independent of the perspective zi, float-compressed for the z-buffer.  Mirrors
 // attr2; prunes when INCLUDE_DIRECT_COLOR=0 (only the 0x4E path writes it).
-reg signed [31:0] spanprod_depth_origin;
 reg signed [31:0] spanprod_depth_du;
 reg signed [31:0] spanprod_depth_dv;
-reg signed [23:0] spanprod_light_origin;
 reg signed [23:0] spanprod_light_du;
 reg signed [23:0] spanprod_light_dv;
 // Truecolor RGB Gouraud (0x4E): red & blue planes mirror the light plane
 // (green reuses the light slot).  Only written/read on the RGB path; prune
 // when INCLUDE_DIRECT_COLOR=0 (spanprod_rgb folds to a constant 0).
-reg signed [23:0] spanprod_R_origin, spanprod_R_du, spanprod_R_dv;
-reg signed [23:0] spanprod_B_origin, spanprod_B_du, spanprod_B_dv;
+reg signed [23:0] spanprod_R_du, spanprod_R_dv;
+reg signed [23:0] spanprod_B_du, spanprod_B_dv;
 // Combiner D triple (additive per-vertex RGB): three more planes mirroring
 // R/light/B, only derived/read on the combine path (spanprod_cd_combine).
-reg signed [23:0] spanprod_Dr_origin, spanprod_Dr_du, spanprod_Dr_dv;
-reg signed [23:0] spanprod_Dg_origin, spanprod_Dg_du, spanprod_Dg_dv;
-reg signed [23:0] spanprod_Db_origin, spanprod_Db_du, spanprod_Db_dv;
+reg signed [23:0] spanprod_Dr_du, spanprod_Dr_dv;
+reg signed [23:0] spanprod_Dg_du, spanprod_Dg_dv;
+reg signed [23:0] spanprod_Db_du, spanprod_Db_dv;
 // The RGB path keys off cmd_is_draw_vert_tri_rgb (stable DECODE..EMIT, and a
 // constant 0 when INCLUDE_DIRECT_COLOR=0) — no separate spanprod_rgb reg.
 reg signed [31:0] spanprod_clamp0_min;
 reg signed [31:0] spanprod_clamp0_max;
 reg signed [31:0] spanprod_clamp1_min;
 reg signed [31:0] spanprod_clamp1_max;
+// EMIT-hoist: 1-bit (!=0) mirrors of the four clamp staging words above,
+// computed at the payload-load sites (0x49/0x4A words 20-23 write, compact
+// 0x48 w0 clear — the ONLY write sites of the 32-bit regs) so the EMIT
+// clamp-enable derivation reads flags instead of four 32-bit reductions.
+// Deliberately no reset term: the 32-bit regs carry none either, and both
+// initialize to 0 (Verilator runtime default / Cyclone V FF power-up), so
+// flag == (reg != 0) holds from time zero.
+reg spanprod_clamp0_min_nz;
+reg spanprod_clamp0_max_nz;
+reg spanprod_clamp1_min_nz;
+reg spanprod_clamp1_max_nz;
 reg [GPU_ADDR_W-1:0] spanprod_z_base;
 reg signed [GPU_ADDR_W-1:0] spanprod_z_major_step;
 reg signed [GPU_ADDR_W-1:0] spanprod_z_minor_step;
-reg signed [15:0] spanprod_u [0:3];
-reg signed [15:0] spanprod_v [0:3];
-reg [15:0] spanprod_count [0:3];
+// B5: the 4-lane record/lane staging banks are MLAB-hinted register files
+// (single write port each — the payload loader / tri-fill write one lane
+// per cycle; the old multi-lane clears are replaced by the per-lane
+// validity masks below).  Single async read site: S_SPANPROD_SELECT
+// captures lane [spanprod_idx] into the spanprod_cur_* registers, in an
+// FSM state mutually exclusive with every writer state, so
+// last-written-value semantics are preserved exactly.  MLABs don't reset;
+// the masks reset to "reads-as-0", reproducing the old arrays' pre-first-
+// write simulation value (the arrays had no reset clause before either).
+//
+// Per-lane architectural-zero tracking (replaces the multi-lane clears):
+//   cnt_valid[L]  — lane L's count word written since the last clear site
+//                   (compact w0 / long-form w29 / prepare_next_record_chunk).
+//                   Clear = the old count[L]<=0; SELECT reads 0 when clear.
+//   cmap_valid[L] — same for colormap_id (cleared at compact w0 / long w29,
+//                   set ONLY by the compact per-lane count word — long-form
+//                   count words never wrote colormap, exactly as before).
+//   s_zeroed[L] / sstep_zeroed[L] — lane L's s/sstep architecturally 0:
+//                   set for ALL lanes by the 0x4C column header (which used
+//                   to write 0 into the arrays), cleared when a compact
+//                   0x48 lane s/sstep word overwrites the lane.  SELECT
+//                   forces the capture to 0 while set, so the sticky
+//                   cross-command zeroing of the old arrays is reproduced
+//                   bit-exactly (invariant: old_array[L] == mask-gated read).
+reg [3:0]  spanprod_cnt_valid;
+reg [3:0]  spanprod_cmap_valid;
+reg [3:0]  spanprod_s_zeroed;
+reg [3:0]  spanprod_sstep_zeroed;
+(* ramstyle = "MLAB, no_rw_check" *) reg signed [15:0] spanprod_u [0:3];
+(* ramstyle = "MLAB, no_rw_check" *) reg signed [15:0] spanprod_v [0:3];
+(* ramstyle = "MLAB, no_rw_check" *) reg [15:0] spanprod_count [0:3];
 reg [GPU_ADDR_W-1:0] spanprod_fb_addr_r;
 reg [GPU_ADDR_W-1:0] spanprod_z_addr_r;
 reg signed [31:0] spanprod_attr0_start_r;
@@ -1610,14 +1640,14 @@ reg signed [23:0] spanprod_light_start_r;
 reg signed [23:0] spanprod_R_start_r, spanprod_B_start_r;
 reg signed [23:0] spanprod_Dr_start_r, spanprod_Dg_start_r, spanprod_Db_start_r;
 reg signed [31:0] spanprod_depth_start_r;
-reg [GPU_ADDR_W-1:0] spanprod_direct_fb_addr [0:3];
-reg [GPU_ADDR_W-1:0] spanprod_direct_tex_addr [0:3];
-reg signed [31:0] spanprod_direct_s [0:3];
-reg signed [31:0] spanprod_direct_t [0:3];
-reg signed [31:0] spanprod_direct_sstep [0:3];
-reg signed [31:0] spanprod_direct_tstep [0:3];
-reg [3:0]  spanprod_direct_colormap_id [0:3];
-reg [5:0]  spanprod_direct_light [0:3];
+(* ramstyle = "MLAB, no_rw_check" *) reg [GPU_ADDR_W-1:0] spanprod_direct_fb_addr [0:3];
+(* ramstyle = "MLAB, no_rw_check" *) reg [GPU_ADDR_W-1:0] spanprod_direct_tex_addr [0:3];
+(* ramstyle = "MLAB, no_rw_check" *) reg signed [31:0] spanprod_direct_s [0:3];
+(* ramstyle = "MLAB, no_rw_check" *) reg signed [31:0] spanprod_direct_t [0:3];
+(* ramstyle = "MLAB, no_rw_check" *) reg signed [31:0] spanprod_direct_sstep [0:3];
+(* ramstyle = "MLAB, no_rw_check" *) reg signed [31:0] spanprod_direct_tstep [0:3];
+(* ramstyle = "MLAB, no_rw_check" *) reg [3:0]  spanprod_direct_colormap_id [0:3];
+(* ramstyle = "MLAB, no_rw_check" *) reg [5:0]  spanprod_direct_light [0:3];
 reg signed [15:0] spanprod_cur_u;
 reg signed [15:0] spanprod_cur_v;
 reg [15:0] spanprod_cur_count;
@@ -1683,11 +1713,13 @@ endfunction
 function [15:0] mirror_idx;
     input [15:0] raw;        // clamped coord integer part
     input [15:0] mask;       // sp_tex_w_mask / sp_tex_h_mask (W-1 for POT)
+    input [15:0] octave;     // precomputed mask+1 mod 2^16 (span-constant;
+                             // sp_tex_w_octave / sp_tex_h_octave)
     input        mirror_en;
     reg   [15:0] wrapped;
     begin
         wrapped = raw & mask;
-        if (mirror_en && ((raw & (mask + 16'd1)) != 16'd0))
+        if (mirror_en && ((raw & octave) != 16'd0))
             mirror_idx = mask - wrapped;   // reversed half of the 2W period
         else
             mirror_idx = wrapped;
@@ -1746,16 +1778,17 @@ task load_param_span_list_payload_word;
                     spanprod_clamp0_max   <= 32'sd0;
                     spanprod_clamp1_min   <= 32'sd0;
                     spanprod_clamp1_max   <= 32'sd0;
-                    spanprod_count[0] <= 16'd0;
-                    spanprod_count[1] <= 16'd0;
-                    spanprod_count[2] <= 16'd0;
-                    spanprod_count[3] <= 16'd0;
-                    spanprod_direct_colormap_id[0] <= 4'd0;
-                    spanprod_direct_colormap_id[1] <= 4'd0;
-                    spanprod_direct_colormap_id[2] <= 4'd0;
-                    spanprod_direct_colormap_id[3] <= 4'd0;
+                    spanprod_clamp0_min_nz <= 1'b0;
+                    spanprod_clamp0_max_nz <= 1'b0;
+                    spanprod_clamp1_min_nz <= 1'b0;
+                    spanprod_clamp1_max_nz <= 1'b0;
+                    // B5: multi-lane count/colormap clear -> mask clear
+                    // (SELECT reads 0 for un-rewritten lanes, as before).
+                    spanprod_cnt_valid  <= 4'b0000;
+                    spanprod_cmap_valid <= 4'b0000;
                 end
-                6'd1: spanprod_tex_width <= data[15:0];
+                6'd1: begin spanprod_tex_width <= data[15:0];
+                            spanprod_tex_width_nz <= (data[15:0] != 16'd0); end
                 6'd2: begin
                     spanprod_tex_w_mask <= (data[15:0]  == 16'd0) ? 16'hFFFF : data[15:0];
                     spanprod_tex_h_mask <= (data[31:16] == 16'd0) ? 16'hFFFF : data[31:16];
@@ -1763,31 +1796,31 @@ task load_param_span_list_payload_word;
                 6'd3: spanprod_fb_minor_step <= data[GPU_ADDR_W-1:0];
                 6'd4: spanprod_direct_fb_addr[0] <= data[GPU_ADDR_W-1:0];
                 6'd5: spanprod_direct_tex_addr[0] <= data[GPU_ADDR_W-1:0];
-                6'd6: begin spanprod_count[0] <= data[15:0]; spanprod_direct_light[0] <= data[21:16]; spanprod_direct_colormap_id[0] <= data[31:28]; end
-                6'd7: spanprod_direct_s[0] <= data;
+                6'd6: begin spanprod_count[0] <= data[15:0]; spanprod_direct_light[0] <= data[21:16]; spanprod_direct_colormap_id[0] <= data[31:28]; spanprod_cnt_valid[0] <= 1'b1; spanprod_cmap_valid[0] <= 1'b1; end
+                6'd7: begin spanprod_direct_s[0] <= data; spanprod_s_zeroed[0] <= 1'b0; end
                 6'd8: spanprod_direct_t[0] <= data;
-                6'd9: spanprod_direct_sstep[0] <= data;
+                6'd9: begin spanprod_direct_sstep[0] <= data; spanprod_sstep_zeroed[0] <= 1'b0; end
                 6'd10: spanprod_direct_tstep[0] <= data;
                 6'd11: spanprod_direct_fb_addr[1] <= data[GPU_ADDR_W-1:0];
                 6'd12: spanprod_direct_tex_addr[1] <= data[GPU_ADDR_W-1:0];
-                6'd13: begin spanprod_count[1] <= data[15:0]; spanprod_direct_light[1] <= data[21:16]; spanprod_direct_colormap_id[1] <= data[31:28]; end
-                6'd14: spanprod_direct_s[1] <= data;
+                6'd13: begin spanprod_count[1] <= data[15:0]; spanprod_direct_light[1] <= data[21:16]; spanprod_direct_colormap_id[1] <= data[31:28]; spanprod_cnt_valid[1] <= 1'b1; spanprod_cmap_valid[1] <= 1'b1; end
+                6'd14: begin spanprod_direct_s[1] <= data; spanprod_s_zeroed[1] <= 1'b0; end
                 6'd15: spanprod_direct_t[1] <= data;
-                6'd16: spanprod_direct_sstep[1] <= data;
+                6'd16: begin spanprod_direct_sstep[1] <= data; spanprod_sstep_zeroed[1] <= 1'b0; end
                 6'd17: spanprod_direct_tstep[1] <= data;
                 6'd18: spanprod_direct_fb_addr[2] <= data[GPU_ADDR_W-1:0];
                 6'd19: spanprod_direct_tex_addr[2] <= data[GPU_ADDR_W-1:0];
-                6'd20: begin spanprod_count[2] <= data[15:0]; spanprod_direct_light[2] <= data[21:16]; spanprod_direct_colormap_id[2] <= data[31:28]; end
-                6'd21: spanprod_direct_s[2] <= data;
+                6'd20: begin spanprod_count[2] <= data[15:0]; spanprod_direct_light[2] <= data[21:16]; spanprod_direct_colormap_id[2] <= data[31:28]; spanprod_cnt_valid[2] <= 1'b1; spanprod_cmap_valid[2] <= 1'b1; end
+                6'd21: begin spanprod_direct_s[2] <= data; spanprod_s_zeroed[2] <= 1'b0; end
                 6'd22: spanprod_direct_t[2] <= data;
-                6'd23: spanprod_direct_sstep[2] <= data;
+                6'd23: begin spanprod_direct_sstep[2] <= data; spanprod_sstep_zeroed[2] <= 1'b0; end
                 6'd24: spanprod_direct_tstep[2] <= data;
                 6'd25: spanprod_direct_fb_addr[3] <= data[GPU_ADDR_W-1:0];
                 6'd26: spanprod_direct_tex_addr[3] <= data[GPU_ADDR_W-1:0];
-                6'd27: begin spanprod_count[3] <= data[15:0]; spanprod_direct_light[3] <= data[21:16]; spanprod_direct_colormap_id[3] <= data[31:28]; end
-                6'd28: spanprod_direct_s[3] <= data;
+                6'd27: begin spanprod_count[3] <= data[15:0]; spanprod_direct_light[3] <= data[21:16]; spanprod_direct_colormap_id[3] <= data[31:28]; spanprod_cnt_valid[3] <= 1'b1; spanprod_cmap_valid[3] <= 1'b1; end
+                6'd28: begin spanprod_direct_s[3] <= data; spanprod_s_zeroed[3] <= 1'b0; end
                 6'd29: spanprod_direct_t[3] <= data;
-                6'd30: spanprod_direct_sstep[3] <= data;
+                6'd30: begin spanprod_direct_sstep[3] <= data; spanprod_sstep_zeroed[3] <= 1'b0; end
                 6'd31: spanprod_direct_tstep[3] <= data;
                 default: ;
             endcase
@@ -1797,7 +1830,8 @@ task load_param_span_list_payload_word;
                 6'd1:  spanprod_fb_major_step <= data[GPU_ADDR_W-1:0];
                 6'd2:  spanprod_fb_minor_step <= data[GPU_ADDR_W-1:0];
                 6'd3:  spanprod_tex_addr <= data[GPU_ADDR_W-1:0];
-                6'd4:  spanprod_tex_width <= data[15:0];
+                6'd4:  begin spanprod_tex_width <= data[15:0];
+                             spanprod_tex_width_nz <= (data[15:0] != 16'd0); end
                 6'd5:  spanprod_tex_w_mask <= (data[15:0] == 16'd0) ? 16'hFFFF : data[15:0];
                 6'd6:  spanprod_tex_h_mask <= (data[15:0] == 16'd0) ? 16'hFFFF : data[15:0];
                 6'd7: begin
@@ -1833,22 +1867,44 @@ task load_param_span_list_payload_word;
                                 || (data[12] && !data[6]
                                     && (!data[24] || data[25] || !data[2]))));
                 end
-                6'd8:  spanprod_attr0_origin <= data;
-                6'd9:  spanprod_attr0_du <= data;
-                6'd10: spanprod_attr0_dv <= data;
-                6'd11: spanprod_attr1_origin <= data;
-                6'd12: spanprod_attr1_du <= data;
-                6'd13: spanprod_attr1_dv <= data;
-                6'd14: spanprod_attr2_origin <= data;
-                6'd15: spanprod_attr2_du <= data;
-                6'd16: spanprod_attr2_dv <= data;
-                6'd17: spanprod_light_origin <= data[23:0];
-                6'd18: spanprod_light_du <= data[23:0];
-                6'd19: spanprod_light_dv <= data[23:0];
-                6'd20: spanprod_clamp0_min <= data;
-                6'd21: spanprod_clamp0_max <= data;
-                6'd22: spanprod_clamp1_min <= data;
-                6'd23: spanprod_clamp1_max <= data;
+                // B4: plane fields land in the MLAB bank rows (attr0=1,
+                // attr1=2, attr2=3, light=4).  One field per word = one
+                // write per array per cycle.  attr2 du/dv and light du/dv
+                // also mirror into their dedicated flops (EMIT/r4 readers).
+                // light is stored sign-extended so indexed reads reproduce
+                // the old {{8{v[23]}},v} operand exactly.
+                6'd8:  spanprod_pl_origin[4'd1] <= data;
+                6'd9:  spanprod_pl_du[4'd1] <= data;
+                6'd10: spanprod_pl_dv[4'd1] <= data;
+                6'd11: spanprod_pl_origin[4'd2] <= data;
+                6'd12: spanprod_pl_du[4'd2] <= data;
+                6'd13: spanprod_pl_dv[4'd2] <= data;
+                6'd14: spanprod_pl_origin[4'd3] <= data;
+                6'd15: begin
+                    spanprod_pl_du[4'd3] <= data;
+                    spanprod_attr2_du <= data;
+                end
+                6'd16: begin
+                    spanprod_pl_dv[4'd3] <= data;
+                    spanprod_attr2_dv <= data;
+                end
+                6'd17: spanprod_pl_origin[4'd4] <= {{8{data[23]}}, data[23:0]};
+                6'd18: begin
+                    spanprod_pl_du[4'd4] <= {{8{data[23]}}, data[23:0]};
+                    spanprod_light_du <= data[23:0];
+                end
+                6'd19: begin
+                    spanprod_pl_dv[4'd4] <= {{8{data[23]}}, data[23:0]};
+                    spanprod_light_dv <= data[23:0];
+                end
+                6'd20: begin spanprod_clamp0_min <= data;
+                             spanprod_clamp0_min_nz <= (data != 32'd0); end
+                6'd21: begin spanprod_clamp0_max <= data;
+                             spanprod_clamp0_max_nz <= (data != 32'd0); end
+                6'd22: begin spanprod_clamp1_min <= data;
+                             spanprod_clamp1_min_nz <= (data != 32'd0); end
+                6'd23: begin spanprod_clamp1_max <= data;
+                             spanprod_clamp1_max_nz <= (data != 32'd0); end
                 6'd26: spanprod_z_base <= data[GPU_ADDR_W-1:0];
                 6'd27: spanprod_z_major_step <= data[GPU_ADDR_W-1:0];
                 6'd28: spanprod_z_minor_step <= data[GPU_ADDR_W-1:0];
@@ -1863,14 +1919,9 @@ task load_param_span_list_payload_word;
                         spanprod_record_count <= {1'b0, data[1:0]};
                         spanprod_records_left <= data[15:0];
                     end
-                    spanprod_count[0] <= 16'd0;
-                    spanprod_count[1] <= 16'd0;
-                    spanprod_count[2] <= 16'd0;
-                    spanprod_count[3] <= 16'd0;
-                    spanprod_direct_colormap_id[0] <= 4'd0;
-                    spanprod_direct_colormap_id[1] <= 4'd0;
-                    spanprod_direct_colormap_id[2] <= 4'd0;
-                    spanprod_direct_colormap_id[3] <= 4'd0;
+                    // B5: multi-lane count/colormap clear -> mask clear.
+                    spanprod_cnt_valid  <= 4'b0000;
+                    spanprod_cmap_valid <= 4'b0000;
                 end
                 6'd30: begin
                     spanprod_q29_attr_shift <= spanprod_attr_q29 ? data[4:0] : 5'd0;
@@ -1884,11 +1935,13 @@ task load_param_span_list_payload_word;
                 end
                 6'd32: begin
                     spanprod_count[0] <= data[15:0];
+                    spanprod_cnt_valid[0] <= 1'b1;
                     spanprod_u[1] <= data[31:16];
                 end
                 6'd33: begin
                     spanprod_v[1] <= data[15:0];
                     spanprod_count[1] <= data[31:16];
+                    spanprod_cnt_valid[1] <= 1'b1;
                 end
                 6'd34: begin
                     spanprod_u[2] <= data[15:0];
@@ -1896,11 +1949,13 @@ task load_param_span_list_payload_word;
                 end
                 6'd35: begin
                     spanprod_count[2] <= data[15:0];
+                    spanprod_cnt_valid[2] <= 1'b1;
                     spanprod_u[3] <= data[31:16];
                 end
                 6'd36: begin
                     spanprod_v[3] <= data[15:0];
                     spanprod_count[3] <= data[31:16];
+                    spanprod_cnt_valid[3] <= 1'b1;
                 end
                 default: ;
             endcase
@@ -1979,8 +2034,14 @@ task spanprod_select_current_record;
     begin
         spanprod_cur_u <= spanprod_u[spanprod_idx];
         spanprod_cur_v <= spanprod_v[spanprod_idx];
-        spanprod_cur_count <= spanprod_count[spanprod_idx];
-        spanprod_cur_nonzero <= (spanprod_count[spanprod_idx] != 16'd0);
+        // B5: the lane banks are MLAB register files; the old multi-lane
+        // clears are per-lane validity masks gating this one read site.
+        // A lane whose count/colormap word was not (re)written since the
+        // last clear reads as 0 — identical to the old cleared array.
+        spanprod_cur_count <= spanprod_cnt_valid[spanprod_idx]
+                            ? spanprod_count[spanprod_idx] : 16'd0;
+        spanprod_cur_nonzero <= spanprod_cnt_valid[spanprod_idx]
+                            && (spanprod_count[spanprod_idx] != 16'd0);
         // The eight per-lane captures below are compact-direct-only (their
         // sole reader is the direct branch of spanprod_load_generated_span);
         // this record select runs on EVERY path — 0x49/0x4B walker records
@@ -1990,11 +2051,17 @@ task spanprod_select_current_record;
         if (INCLUDE_COMPACT_SPAN != 0) begin
             spanprod_cur_direct_fb_addr <= spanprod_direct_fb_addr[spanprod_idx];
             spanprod_cur_direct_tex_addr <= spanprod_direct_tex_addr[spanprod_idx];
-            spanprod_cur_direct_s <= spanprod_direct_s[spanprod_idx];
+            // s/sstep read as 0 while the sticky column zeroing holds
+            // (the 0x4C header used to write 0 into all four lanes; a
+            // later compact s/sstep word clears the lane's mask bit).
+            spanprod_cur_direct_s <= spanprod_s_zeroed[spanprod_idx]
+                                   ? 32'sd0 : spanprod_direct_s[spanprod_idx];
             spanprod_cur_direct_t <= spanprod_direct_t[spanprod_idx];
-            spanprod_cur_direct_sstep <= spanprod_direct_sstep[spanprod_idx];
+            spanprod_cur_direct_sstep <= spanprod_sstep_zeroed[spanprod_idx]
+                                   ? 32'sd0 : spanprod_direct_sstep[spanprod_idx];
             spanprod_cur_direct_tstep <= spanprod_direct_tstep[spanprod_idx];
-            spanprod_cur_direct_colormap_id <= spanprod_direct_colormap_id[spanprod_idx];
+            spanprod_cur_direct_colormap_id <= spanprod_cmap_valid[spanprod_idx]
+                                   ? spanprod_direct_colormap_id[spanprod_idx] : 4'd0;
             spanprod_cur_direct_light <= spanprod_direct_light[spanprod_idx];
         end
     end
@@ -2005,15 +2072,15 @@ task spanprod_launch_fb_mul;
     // 32-bit DSP operand width so the screen-space address product is exact.
     begin
         if (spanprod_span_axis) begin
-            sp_dsp_a  <= $signed({{16{spanprod_cur_u[15]}}, spanprod_cur_u});
-            sp_dsp_b  <= {{(32-GPU_ADDR_W){spanprod_fb_major_step[GPU_ADDR_W-1]}}, spanprod_fb_major_step};
-            sp_dsp2_a <= $signed({{16{spanprod_cur_v[15]}}, spanprod_cur_v});
-            sp_dsp2_b <= {{(32-GPU_ADDR_W){spanprod_fb_minor_step[GPU_ADDR_W-1]}}, spanprod_fb_minor_step};
+            dsp_a  <= $signed({{16{spanprod_cur_u[15]}}, spanprod_cur_u});
+            dsp_b  <= {{(32-GPU_ADDR_W){spanprod_fb_major_step[GPU_ADDR_W-1]}}, spanprod_fb_major_step};
+            dsp2_a <= $signed({{16{spanprod_cur_v[15]}}, spanprod_cur_v});
+            dsp2_b <= {{(32-GPU_ADDR_W){spanprod_fb_minor_step[GPU_ADDR_W-1]}}, spanprod_fb_minor_step};
         end else begin
-            sp_dsp_a  <= $signed({{16{spanprod_cur_v[15]}}, spanprod_cur_v});
-            sp_dsp_b  <= {{(32-GPU_ADDR_W){spanprod_fb_major_step[GPU_ADDR_W-1]}}, spanprod_fb_major_step};
-            sp_dsp2_a <= $signed({{16{spanprod_cur_u[15]}}, spanprod_cur_u});
-            sp_dsp2_b <= {{(32-GPU_ADDR_W){spanprod_fb_minor_step[GPU_ADDR_W-1]}}, spanprod_fb_minor_step};
+            dsp_a  <= $signed({{16{spanprod_cur_v[15]}}, spanprod_cur_v});
+            dsp_b  <= {{(32-GPU_ADDR_W){spanprod_fb_major_step[GPU_ADDR_W-1]}}, spanprod_fb_major_step};
+            dsp2_a <= $signed({{16{spanprod_cur_u[15]}}, spanprod_cur_u});
+            dsp2_b <= {{(32-GPU_ADDR_W){spanprod_fb_minor_step[GPU_ADDR_W-1]}}, spanprod_fb_minor_step};
         end
     end
 endtask
@@ -2021,15 +2088,15 @@ endtask
 task spanprod_launch_z_mul;
     begin
         if (spanprod_span_axis) begin
-            sp_dsp_a  <= $signed({{16{spanprod_cur_u[15]}}, spanprod_cur_u});
-            sp_dsp_b  <= {{(32-GPU_ADDR_W){spanprod_z_major_step[GPU_ADDR_W-1]}}, spanprod_z_major_step};
-            sp_dsp2_a <= $signed({{16{spanprod_cur_v[15]}}, spanprod_cur_v});
-            sp_dsp2_b <= {{(32-GPU_ADDR_W){spanprod_z_minor_step[GPU_ADDR_W-1]}}, spanprod_z_minor_step};
+            dsp_a  <= $signed({{16{spanprod_cur_u[15]}}, spanprod_cur_u});
+            dsp_b  <= {{(32-GPU_ADDR_W){spanprod_z_major_step[GPU_ADDR_W-1]}}, spanprod_z_major_step};
+            dsp2_a <= $signed({{16{spanprod_cur_v[15]}}, spanprod_cur_v});
+            dsp2_b <= {{(32-GPU_ADDR_W){spanprod_z_minor_step[GPU_ADDR_W-1]}}, spanprod_z_minor_step};
         end else begin
-            sp_dsp_a  <= $signed({{16{spanprod_cur_v[15]}}, spanprod_cur_v});
-            sp_dsp_b  <= {{(32-GPU_ADDR_W){spanprod_z_major_step[GPU_ADDR_W-1]}}, spanprod_z_major_step};
-            sp_dsp2_a <= $signed({{16{spanprod_cur_u[15]}}, spanprod_cur_u});
-            sp_dsp2_b <= {{(32-GPU_ADDR_W){spanprod_z_minor_step[GPU_ADDR_W-1]}}, spanprod_z_minor_step};
+            dsp_a  <= $signed({{16{spanprod_cur_v[15]}}, spanprod_cur_v});
+            dsp_b  <= {{(32-GPU_ADDR_W){spanprod_z_major_step[GPU_ADDR_W-1]}}, spanprod_z_major_step};
+            dsp2_a <= $signed({{16{spanprod_cur_u[15]}}, spanprod_cur_u});
+            dsp2_b <= {{(32-GPU_ADDR_W){spanprod_z_minor_step[GPU_ADDR_W-1]}}, spanprod_z_minor_step};
         end
     end
 endtask
@@ -2038,10 +2105,10 @@ task spanprod_launch_attr_mul;
     input signed [31:0] du;
     input signed [31:0] dv;
     begin
-        sp_dsp_a  <= $signed({{16{spanprod_cur_u[15]}}, spanprod_cur_u});
-        sp_dsp_b  <= du;
-        sp_dsp2_a <= $signed({{16{spanprod_cur_v[15]}}, spanprod_cur_v});
-        sp_dsp2_b <= dv;
+        dsp_a  <= $signed({{16{spanprod_cur_u[15]}}, spanprod_cur_u});
+        dsp_b  <= du;
+        dsp2_a <= $signed({{16{spanprod_cur_v[15]}}, spanprod_cur_v});
+        dsp2_b <= dv;
     end
 endtask
 
@@ -2049,7 +2116,7 @@ endtask
 // Round-2 S_SPANPROD pipelining: the per-record setup products are
 // independent of each other (every launch reads only spanprod_cur_u/v
 // plus per-attribute du/dv staging constants, never a prior product),
-// and the registered sp_dsp_* -> dsp_p path accepts new operands every
+// and the registered dsp_a/dsp_b -> dsp_p path accepts new operands every
 // cycle (a product launched in state N is readable in state N+2 — see
 // the DRV_PROD_* schedule comment).  Instead of the strictly serial
 // (MUL_WAIT + CAPTURE) ping-pong, the schedule now launches the next
@@ -2104,7 +2171,7 @@ endfunction
 
 // Launch dispatch — the SAME dedicated launch tasks the serial schedule
 // used, selected by the pending launch code.  No new operand muxes: these
-// case arms are the identical sp_dsp_* write sites the old calc_step-keyed
+// case arms are the identical DSP-operand write sites the old calc_step-keyed
 // CAPTURE arms produced; only the select term changed (launch pointer
 // instead of capture pointer).  The DSP owner mux is untouched.
 task spanprod_launch_step_mul;
@@ -2113,48 +2180,82 @@ task spanprod_launch_step_mul;
         case (stepv)
             4'd0: spanprod_launch_fb_mul;
             4'd5: spanprod_launch_z_mul;
-            4'd1: spanprod_launch_attr_mul(spanprod_attr0_du, spanprod_attr0_dv);
-            4'd2: spanprod_launch_attr_mul(spanprod_attr1_du, spanprod_attr1_dv);
-            4'd3: spanprod_launch_attr_mul(spanprod_attr2_du, spanprod_attr2_dv);
-            4'd4: spanprod_launch_attr_mul(
-                      {{8{spanprod_light_du[23]}}, spanprod_light_du},
-                      {{8{spanprod_light_dv[23]}}, spanprod_light_dv});
-            SPANPROD_STEP_R: spanprod_launch_attr_mul(
-                      {{8{spanprod_R_du[23]}}, spanprod_R_du},
-                      {{8{spanprod_R_dv[23]}}, spanprod_R_dv});
-            SPANPROD_STEP_B: spanprod_launch_attr_mul(
-                      {{8{spanprod_B_du[23]}}, spanprod_B_du},
-                      {{8{spanprod_B_dv[23]}}, spanprod_B_dv});
-            SPANPROD_STEP_DEPTH: spanprod_launch_attr_mul(spanprod_depth_du,
-                                                          spanprod_depth_dv);
-            SPANPROD_STEP_DR: spanprod_launch_attr_mul(
-                      {{8{spanprod_Dr_du[23]}}, spanprod_Dr_du},
-                      {{8{spanprod_Dr_dv[23]}}, spanprod_Dr_dv});
-            SPANPROD_STEP_DG: spanprod_launch_attr_mul(
-                      {{8{spanprod_Dg_du[23]}}, spanprod_Dg_du},
-                      {{8{spanprod_Dg_dv[23]}}, spanprod_Dg_dv});
-            SPANPROD_STEP_DB: spanprod_launch_attr_mul(
-                      {{8{spanprod_Db_du[23]}}, spanprod_Db_du},
-                      {{8{spanprod_Db_dv[23]}}, spanprod_Db_dv});
-            default: ;  // none pending — sp_dsp_* hold, product unused
+            SPANPROD_STEP_NONE: ;  // none pending — operands default-clear, product unused
+            default: begin
+                // B4: ONE indexed async row read per array replaces the ten
+                // per-plane operand mux arms (rows for the 24-bit planes hold
+                // the sign-extended value, so the read IS the old
+                // {{8{v[23]}},v}).  Codes 6/14/15 never occur: launch_step is
+                // only ever 7 (init) or a spanprod_next_calc output.
+                spanprod_launch_attr_mul(spanprod_pl_du[stepv],
+                                         spanprod_pl_dv[stepv]);
+                // Walk-time pre-capture of the EMIT step operand for the two
+                // unconditionally-walked planes (slots 1/2 fire exactly once
+                // per parametric record, strictly before that record's EMIT;
+                // the rows and span_axis are stable from here to EMIT).
+                if (stepv == 4'd1)
+                    spanprod_attr0_step_pre <= spanprod_span_axis
+                        ? spanprod_pl_dv[stepv] : spanprod_pl_du[stepv];
+                if (stepv == 4'd2)
+                    spanprod_attr1_step_pre <= spanprod_span_axis
+                        ? spanprod_pl_dv[stepv] : spanprod_pl_du[stepv];
+            end
         endcase
     end
 endtask
+
+// S_SPANPROD_CAPTURE shared adder — every capture arm computes
+// origin + dsp_p + dsp2_p into a different register, differing only in
+// the origin operand and destination width (26-bit addr, 32-bit
+// attr/depth, 24-bit color).  All product slices are LSB-aligned, so
+// ONE 32-bit ternary adder serves every arm: the low N bits of the
+// 32-bit sum depend only on the low N bits of the operands, making
+// each truncated capture bit-identical to a dedicated N-bit adder.
+// B4: the per-plane origin operand is ONE indexed async MLAB row read (the
+// capture pointer is the row id); only the fb/z ADDRESS bases — which are
+// not planes — remain as mux arms.  calc_step is only ever 0 or a
+// spanprod_next_calc output, so every plane-row index it presents (1-4,
+// 8-13) addresses a row written by this command's payload/derive exactly
+// where the old per-plane staging reg was written; the 24-bit planes'
+// rows hold the sign-extended value the old 24->32 function return
+// produced.
+wire signed [31:0] spanprod_capture_origin_w =
+      (spanprod_calc_step == 4'd0)
+        ? $signed({{(32-GPU_ADDR_W){1'b0}}, spanprod_fb_base})
+    : (spanprod_calc_step == 4'd5)
+        ? $signed({{(32-GPU_ADDR_W){1'b0}}, spanprod_z_base})
+    : spanprod_pl_origin[spanprod_calc_step];
+
+wire signed [31:0] spanprod_capture_sum =
+    spanprod_capture_origin_w
+    + $signed(dsp_p[31:0]) + $signed(dsp2_p[31:0]);
+
+// Same-cycle rgb-mode select for the unified zc pipeline: this is the exact
+// value being written into sp_rgb at EMIT (NOT the stale sp_rgb register,
+// which still holds the previous surface's mode during the EMIT cycle).
+wire spanprod_rgb_mode_w = cmd_is_draw_vert_tri_rgb || cmd_is_draw_xform_tri_rgb
+                        || cmd_is_draw_indexed_tri || cmd_is_draw_clip_tri;
 
 task spanprod_load_generated_span;
     begin
         sp_count       <= spanprod_cur_count;
         sp_fb_stride   <= spanprod_fb_minor_step;
-        sp_tex_width   <= (spanprod_tex_width == 16'd0) ? 16'd1 : spanprod_tex_width;
+        // EMIT-hoist: the 16-bit ==0 reduction moved to the payload-load
+        // sites (spanprod_tex_width_nz).
+        sp_tex_width   <= spanprod_tex_width_nz ? spanprod_tex_width : 16'd1;
         sp_truecolor   <= spanprod_truecolor;
         sp_blend       <= spanprod_blend;
         sp_const_alpha <= spanprod_const_alpha;
         sp_a6          <= (spanprod_const_alpha == 8'd255) ? 7'd64
                                                           : {1'b0, spanprod_const_alpha[7:2]};
-        sp_rgb         <= cmd_is_draw_vert_tri_rgb || cmd_is_draw_xform_tri_rgb
-                          || cmd_is_draw_indexed_tri || cmd_is_draw_clip_tri; // per-vertex RGB modulate (0x4E/0x52/0x54/0x4F)
+        sp_rgb         <= spanprod_rgb_mode_w; // per-vertex RGB modulate (0x4E/0x52/0x54/0x4F)
         sp_tex_w_mask  <= spanprod_tex_w_mask;
         sp_tex_h_mask  <= spanprod_tex_h_mask;
+        // Span-rate +1 (16-bit wrap) replaces the per-pixel add inside
+        // mirror_idx() — bit-identical because the old `mask + 16'd1` was
+        // also a 16-bit self-determined add (0xFFFF -> 0x0000).
+        sp_tex_w_octave <= spanprod_tex_w_mask + 16'd1;
+        sp_tex_h_octave <= spanprod_tex_h_mask + 16'd1;
         sp_mirror_s    <= spanprod_mirror_s;
         sp_mirror_t    <= spanprod_mirror_t;
         sp_cd_combine  <= spanprod_cd_combine;
@@ -2181,9 +2282,8 @@ task spanprod_load_generated_span;
             sp_z_step       <= {GPU_ADDR_W{1'b0}};
             sp_z_value      <= 32'sd0;
             sp_z_value_step <= 32'sd0;
-            sp_depth_value  <= 32'sd0;
-            sp_depth_step   <= 32'sd0;
-            sp_z_la <= 32'sd0; sp_depth_la <= 32'sd0; g_zwarm <= 2'd0;
+            sp_zc_step      <= 32'sd0;
+            sp_zc_la <= 32'sd0; g_zwarm <= 2'd0;
             sp_q29_z_enable     <= 1'b0;
             sp_q29_z_value      <= 32'sd0;
             sp_q29_z_value_step <= 32'sd0;
@@ -2228,10 +2328,14 @@ task spanprod_load_generated_span;
             sp_flags       <= spanprod_attr_persp
                             ? (spanprod_flags | (4'b0001 << SPAN_PERSP))
                             : (spanprod_flags & ~(4'b0001 << SPAN_PERSP));
-            sp_clamp_enable[0] <= (spanprod_clamp0_min != 32'sd0)
-                               || (spanprod_clamp0_max != 32'sd0);
-            sp_clamp_enable[1] <= (spanprod_clamp1_min != 32'sd0)
-                               || (spanprod_clamp1_max != 32'sd0);
+            // EMIT-hoist: the four 32-bit (!=0) reductions moved to the
+            // payload-load sites (the *_nz flags above); this is now a
+            // 2-bit OR.  Signed-vs-unsigned compare against zero is
+            // bit-identical, so the flags reproduce the old reductions.
+            sp_clamp_enable[0] <= spanprod_clamp0_min_nz
+                               || spanprod_clamp0_max_nz;
+            sp_clamp_enable[1] <= spanprod_clamp1_min_nz
+                               || spanprod_clamp1_max_nz;
             sp_s_clamp_min <= spanprod_clamp0_min;
             sp_s_clamp_max <= spanprod_clamp0_max;
             sp_t_clamp_min <= spanprod_clamp1_min;
@@ -2243,14 +2347,16 @@ task spanprod_load_generated_span;
             sp_z_value      <= spanprod_attr2_start_r;
             sp_z_value_step <= spanprod_span_axis
                              ? spanprod_attr2_dv : spanprod_attr2_du;
-            sp_depth_value  <= spanprod_depth_start_r;
-            sp_depth_step   <= spanprod_span_axis
-                             ? spanprod_depth_dv : spanprod_depth_du;
-            // Prime the z_compress lookahead to the span start; the 2-cycle warm
-            // (g_zwarm) advances it to the steady-state +2*step and fills the
-            // pipe so pixel 0 sees z_compress(start).  Truecolor builds only.
-            sp_z_la     <= spanprod_attr2_start_r;
-            sp_depth_la <= spanprod_depth_start_r;
+            sp_zc_step  <= spanprod_rgb_mode_w
+                         ? (spanprod_span_axis ? spanprod_depth_dv : spanprod_depth_du)
+                         : (spanprod_span_axis ? spanprod_attr2_dv : spanprod_attr2_du);
+            // Prime the unified z_compress lookahead to the span start (depth
+            // plane for rgb spans, attr2/zi otherwise — same-cycle sp_rgb value
+            // selects); the 2-cycle warm (g_zwarm) advances it to the
+            // steady-state +2*step and fills the pipe so pixel 0 sees
+            // z_compress(start).  Direct-color builds only.
+            sp_zc_la    <= spanprod_rgb_mode_w ? spanprod_depth_start_r
+                                               : spanprod_attr2_start_r;
             g_zwarm     <= (INCLUDE_DIRECT_COLOR != 0) ? 2'd2 : 2'd0;
             // EFF_Q29 (localparam) gates these directly so the whole z-step
             // cone provably const-folds when Q29 is excluded (os30).  Gating
@@ -2274,10 +2380,11 @@ task spanprod_load_generated_span;
                                       q29_zstep_op_r,
                                       spanprod_q29_attr_shift)
                                   : 32'sd0;
-            sp_sZstep      <= spanprod_span_axis
-                            ? spanprod_attr0_dv : spanprod_attr0_du;
-            sp_tZstep      <= spanprod_span_axis
-                            ? spanprod_attr1_dv : spanprod_attr1_du;
+            // B4: attr0/attr1 step operands were pre-captured at their walk
+            // slots (always visited, strictly before EMIT) — the wide
+            // EMIT-cycle staging muxes are gone.
+            sp_sZstep      <= spanprod_attr0_step_pre;
+            sp_tZstep      <= spanprod_attr1_step_pre;
             sp_zinv_step   <= spanprod_span_axis
                             ? spanprod_attr2_dv : spanprod_attr2_du;
             sp_zinv_step_zero <= ((spanprod_span_axis
@@ -2311,10 +2418,8 @@ task spanprod_load_generated_span;
             end else begin
                 sp_s           <= spanprod_attr0_start_r;
                 sp_t           <= spanprod_attr1_start_r;
-                sp_sstep       <= spanprod_span_axis
-                                ? spanprod_attr0_dv : spanprod_attr0_du;
-                sp_tstep       <= spanprod_span_axis
-                                ? spanprod_attr1_dv : spanprod_attr1_du;
+                sp_sstep       <= spanprod_attr0_step_pre;
+                sp_tstep       <= spanprod_attr1_step_pre;
                 sp_sZ          <= 32'sd0;
                 sp_tZ          <= 32'sd0;
                 sp_zinv        <= 32'sd0;
@@ -2621,6 +2726,39 @@ reg cmd_is_draw_indexed_tri;     // 0x54 (T3 indexed draw from cache)
 reg cmd_is_set_light_state;      // 0x55 (T4 sticky light state)
 reg cmd_is_load_vert_lit;        // 0x57 (T4 transform+light -> cache)
 reg cmd_is_flip;
+
+// Registered command class for the S_PAY_DATA / S_EXECUTE dispatch.
+// The cmd_is_* flags above are one-hot by construction (each decodes a
+// distinct cmd_type), but Quartus cannot prove that, so an if/else
+// priority chain over them folds every higher flag's negation into each
+// lower branch's register enables — multiplied across ~50 shared
+// destination regs.  cmd_class is decoded in S_DECODE (same cycle, same
+// cmd_type/cmd_payload_words expressions as the flags) with one code per
+// finest-common partition cell of the two chains, so both dispatches
+// become a parallel case.  CMDCLS_NONE is the unrecognised / wrong-size /
+// feature-gated-out drain: no S_PAY_DATA destination writes, S_EXECUTE
+// retires to S_IDLE — exactly the old chains' fall-through.  Sticky-only
+// commands with no S_EXECUTE arm (0x50/0x55) share that default arm.
+localparam [4:0] CMDCLS_NONE             = 5'd0;
+localparam [4:0] CMDCLS_FENCE            = 5'd1;
+localparam [4:0] CMDCLS_FLIP             = 5'd2;
+localparam [4:0] CMDCLS_CLEAR_RECT       = 5'd3;
+localparam [4:0] CMDCLS_SET_FB           = 5'd4;
+localparam [4:0] CMDCLS_SET_TEXTURE      = 5'd5;
+localparam [4:0] CMDCLS_SPAN_COL         = 5'd6;   // 0x48 span list / 0x4C column list
+localparam [4:0] CMDCLS_PARAM_TRI        = 5'd7;   // 0x49
+localparam [4:0] CMDCLS_SET_TRI_STATE    = 5'd8;   // 0x4A
+localparam [4:0] CMDCLS_VERT_TRI         = 5'd9;   // 0x4B
+localparam [4:0] CMDCLS_VERT_TRI_RGB     = 5'd10;  // 0x4E
+localparam [4:0] CMDCLS_PARAM_TRI_RECS   = 5'd11;  // 0x4D
+localparam [4:0] CMDCLS_SET_OBJECT_STATE = 5'd12;  // 0x50
+localparam [4:0] CMDCLS_XFORM_TRI        = 5'd13;  // 0x51
+localparam [4:0] CMDCLS_XFORM_RGB_CLIP   = 5'd14;  // 0x52 / 0x4F (identical wire)
+localparam [4:0] CMDCLS_LOAD_VERTS       = 5'd15;  // 0x53
+localparam [4:0] CMDCLS_INDEXED_TRI      = 5'd16;  // 0x54
+localparam [4:0] CMDCLS_SET_LIGHT_STATE  = 5'd17;  // 0x55
+localparam [4:0] CMDCLS_LOAD_VERT_LIT    = 5'd18;  // 0x57
+reg [4:0] cmd_class;
 
 // ================================================================
 // Triangle edge walker (CMD_DRAW_PARAM_TRI)
@@ -3171,11 +3309,14 @@ reg [2:0]  xf_row;                      // 0-2 cam, 3-4 s/t (N=5 world)
 reg [2:0]  xf_rows;                     // matrix row count: 3 (alias) or 5 (world)
 reg        xf_q29_en;                   // world path: Q29-scale the derived planes
 reg [4:0]  xf_q29_shift;                // CPU conservative magnitude shift
-reg signed [31:0] xf_dsp_a, xf_dsp_b;   // xform DSP domain (single multiplier)
 reg [4:0]  xf_state;                    // transform sub-FSM
 reg [1:0]  xf_behind;                    // T2: count of verts with cam.z<nearclip
                                         // (==3 -> whole tri behind near -> reject)
-reg signed [63:0] xf_sx_r, xf_sy_r;     // projection: the screen.x/y 64-bit add
+reg signed [63:0] xf_sproj_r;           // projection: the screen.x/y 64-bit add
+                                        // (shared — lifetimes disjoint: x is
+                                        // captured in XF_PROJ_XS2 before
+                                        // XF_PROJ_YS overwrites with y)
+wire signed [15:0] xf_sproj_sat = xf_sat16(xf_sproj_r);  // single sat16 cone for both
 // Dedicated projected-vertex holding regs: the transform writes these, and a
 // single XF_PROJ_LAUNCH state parallel-loads them into the shared tri_v*_x/y.
 // Keeps the saturating projection compute OUT of the tri_v* next-state mux,
@@ -3183,16 +3324,24 @@ reg signed [63:0] xf_sx_r, xf_sy_r;     // projection: the screen.x/y 64-bit add
 reg signed [15:0] xf_sx [0:2], xf_sy [0:2];
                                         // result, registered to split it from the
                                         // sat16 (the post-Q29-fix worst cone).
-// transform reciprocal: zi = floor(2^32 / cz), restoring division (33 beats)
-reg [32:0] xf_div_dividend;
-reg [31:0] xf_div_divisor;
-reg [31:0] xf_div_rem;
-reg [31:0] xf_div_q;
-reg [5:0]  xf_div_cnt;
-wire [32:0] xf_div_try  = {xf_div_rem, xf_div_dividend[32]};
-wire        xf_div_ge   = xf_div_try >= {1'b0, xf_div_divisor};
-wire [31:0] xf_div_next = xf_div_ge ? (xf_div_try - {1'b0, xf_div_divisor})
-                                    :  xf_div_try[31:0];
+// transform reciprocal: zi = floor(2^32 / cz), restoring division (33 beats).
+// SHARED DATAPATH: reuses the rdet_* divider registers + try/compare/subtract
+// cone (S_XFORM and S_TRI_DERIVE are mutually exclusive states of the one main
+// FSM; each mode fully reloads every shared register at its own init beat, and
+// each mode's quotient is consumed before the other mode can load — xf_div_q's
+// last read is XF_PROJ_YS2, before XF_PROJ_LAUNCH enters the derive; rdet's
+// last read is DRV_SCALE, inside S_TRI_DERIVE — so the lifetimes never
+// overlap).  The 33-bit dividend (2^32) is loaded LEFT-ALIGNED at bit 44 so
+// the shared MSB tap rdet_dividend[44] sees exactly the bit sequence the old
+// xf_div_dividend[32] tap did; divisor/remainder zero-extend (rem < divisor
+// < 2^32 keeps the top remainder bits 0, and a zero divisor makes ge stuck-1
+// at either width), so the quotient bits shifted into rdet_q are bit-identical
+// to the old xf_div_q.  rdet_ovf is NOT written in recip mode (only DRV_RDET
+// writes it, and both its entry points re-initialize it before use).
+wire [31:0] xf_div_q = rdet_q;    // zi quotient (shared register, read-only alias)
+// zi divisor: max(cam.z, near_clip).  Signed compare (as before); the selected
+// value's bits then become the unsigned divisor, exactly like the old 32-bit reg.
+wire [31:0] xf_recip_divisor = (xf_camz < xf_nearclip) ? xf_nearclip : xf_camz;
 // xf_M M10K read port: xf_idx walks 0..3 per row (0-2 = cam/texvec products,
 // 3 = the translate column M[row][3]); xf_rd_addr = row*4 + xf_idx.  XF_MAC_A
 // issues the read, xf_M_q is valid one cycle later in XF_MAC_L.
@@ -3297,10 +3446,9 @@ task spanprod_prepare_next_record_chunk;
         else
             spanprod_record_count <= {1'b0, next_left[1:0]};
 
-        spanprod_count[0] <= 16'd0;
-        spanprod_count[1] <= 16'd0;
-        spanprod_count[2] <= 16'd0;
-        spanprod_count[3] <= 16'd0;
+        // B5: multi-lane count clear -> mask clear (lanes the next partial
+        // chunk doesn't rewrite read count=0 at SELECT, exactly as before).
+        spanprod_cnt_valid <= 4'b0000;
         spanprod_idx       <= 2'd0;
         spanprod_calc_step <= 3'd0;
 
@@ -3507,9 +3655,10 @@ reg [1:0]  blend_lane_iter;
 reg [1:0]  blend_lut_lane;
 reg        blend_arvalid;
 reg [GPU_ADDR_W-1:0] blend_araddr;
-// Per-issue AR length for the blend/z M0 reads: 0 for the translucent
-// FB word read, 3 for the 4-word z-window fill (item 5).
-reg [7:0]  blend_arlen;
+// Per-issue AR length for the blend/z M0 reads: only ever 0 (translucent
+// FB word read) or 3 (4-word z-window fill, item 5), so it is stored as
+// one bit and expanded to arlen {6'b0, b, b} at the m_rd_arlen mux.
+reg        blend_ar_is_burst;
 
 // ----------------------------------------------------------------
 // Z read window (4 words = 8 z pixels).  The z-test detour used to
@@ -3563,18 +3712,10 @@ wire        transluc_cache_hit0 = transluc_cache_valid[0]
                                && (transluc_cache_addr[0] == transluc_cache_lookup_addr);
 wire        transluc_cache_hit1 = transluc_cache_valid[1]
                                && (transluc_cache_addr[1] == transluc_cache_lookup_addr);
-wire        transluc_cache_hit2 = transluc_cache_valid[2]
-                               && (transluc_cache_addr[2] == transluc_cache_lookup_addr);
-wire        transluc_cache_hit3 = transluc_cache_valid[3]
-                               && (transluc_cache_addr[3] == transluc_cache_lookup_addr);
 wire        transluc_cache_hit = transluc_cache_hit0
-                              || transluc_cache_hit1
-                              || transluc_cache_hit2
-                              || transluc_cache_hit3;
+                              || transluc_cache_hit1;
 wire [15:0] transluc_cache_half = transluc_cache_hit0 ? transluc_cache_data[0] :
-                                  transluc_cache_hit1 ? transluc_cache_data[1] :
-                                  transluc_cache_hit2 ? transluc_cache_data[2] :
-                                  transluc_cache_data[3];
+                                  transluc_cache_data[1];
 wire [7:0]  transluc_cache_byte = transluc_rd_addr[0]
                                 ? transluc_cache_half[15:8]
                                 : transluc_cache_half[7:0];
@@ -3648,9 +3789,16 @@ localparam FBWQ_DEPTH = 16;
 // and with the tail shadow below these two are 1W+1R-sync as well.  MLAB
 // keeps them off the Pocket's fully-committed M10K budget (~576 FFs +
 // two 16:1 mux trees reclaimed vs. the flattened form).
-(* ramstyle = "MLAB" *) reg [GPU_ADDR_W-1:0] fbwq_addr [0:FBWQ_DEPTH-1];
+// no_rw_check is REQUIRED for inference: without it Quartus refuses the
+// MLAB (Info 276009 "uninferred due to unsupported read-during-write
+// behavior") and flattens both arrays — plus a duplicated fbwq_addr__dual
+// — into FFs + 16:1 muxes.  The don't-care RDW semantics are safe here:
+// reads are at fbwq_rd_ptr (head entry always counted), writes at
+// fbwq_wr_ptr gated on !fbwq_full, and rd_ptr == wr_ptr only at count
+// 0 or 16 — so a same-cycle same-address read-during-write never occurs.
+(* ramstyle = "MLAB, no_rw_check" *) reg [GPU_ADDR_W-1:0] fbwq_addr [0:FBWQ_DEPTH-1];
 reg [31:0] fbwq_data [0:FBWQ_DEPTH-1];
-(* ramstyle = "MLAB" *) reg [3:0]  fbwq_strb [0:FBWQ_DEPTH-1];
+(* ramstyle = "MLAB, no_rw_check" *) reg [3:0]  fbwq_strb [0:FBWQ_DEPTH-1];
 reg [15:0] fbwq_link_next;
 // Shadow of the most-recently-enqueued entry (== the array slots at
 // fbwq_prev_wr_ptr, which is only ever the last slot written).  The
@@ -3791,21 +3939,27 @@ wire fbwq_can_enqueue = !fbwq_full;
 // Burst-link compares, hoisted to wires (also reused by the swap path
 // below).  "older entry links newer" = both full-word strobes, older's
 // address word-consecutive with newer's, and no 4 KB-page cross.
+// The req-side ±4 offsets are computed ONCE and the compares moved onto
+// them (equality under mod-2^GPU_ADDR_W addition is bijective, so
+// (a == b + 4) <=> (a - 4 == b) — bit-identical) so the three predicates
+// share two adders instead of embedding one each.
+wire [GPU_ADDR_W-1:0] fbwq_req_m4 = fbwq_req_addr - {{(GPU_ADDR_W-3){1'b0}}, 3'd4};
+wire [GPU_ADDR_W-1:0] fbwq_req_p4 = fbwq_req_addr + {{(GPU_ADDR_W-3){1'b0}}, 3'd4};
 wire fbwq_req_links_fifo_tail_w =
        (fbwq_tail_strb == 4'hF)
     && (fbwq_req_strb == 4'hF)
     && (fbwq_tail_addr[11:0] <= 12'hFF8)
-    && (fbwq_req_addr == fbwq_tail_addr + {{(GPU_ADDR_W-3){1'b0}}, 3'd4});
+    && (fbwq_req_m4 == fbwq_tail_addr);
 wire fbwq_req_links_stage_tail_w =
        (fbwq_stage_strb == 4'hF)
     && (fbwq_req_strb == 4'hF)
     && (fbwq_stage_addr[11:0] <= 12'hFF8)
-    && (fbwq_req_addr == fbwq_stage_addr + {{(GPU_ADDR_W-3){1'b0}}, 3'd4});
+    && (fbwq_req_m4 == fbwq_stage_addr);
 wire fbwq_stage_links_req_w =
        (fbwq_req_strb == 4'hF)
     && (fbwq_stage_strb == 4'hF)
     && (fbwq_req_addr[11:0] <= 12'hFF8)
-    && (fbwq_stage_addr == fbwq_req_addr + {{(GPU_ADDR_W-3){1'b0}}, 3'd4});
+    && (fbwq_stage_addr == fbwq_req_p4);
 // Tail-1 link repair ("skid swap"): FB/Z interleave lands entries in
 // the order ...FB1, Z1, FB2... and the FB1->FB2 link is lost because Z1
 // sits between them.  When the req slot holds an entry that EXTENDS the
@@ -4001,8 +4155,9 @@ reg        persp_swap_pending;
 
 // PSS — segment-setup sub-FSM. Runs alongside the issue stage (and fbss)
 // inside S_FRAG_PIPE. Drives dsp_a/dsp_b and recip_rd_addr; reads
-// dsp_p / recip_rd_data. ~16 cycles per advanced pass (15 on the
-// no-advance first pass).
+// dsp_p / recip_rd_data. ~17 cycles per advanced pass (16 on the
+// no-advance first pass) — +1 vs the pre-T-split shape for the
+// PSS_FINAL_PROD raw-product stage.
 //
 // Setup-side pipeline (PSS_ADV → PSS_ADV_ISSUE → PSS_ADV_CLAMP →
 // PSS_CLZ → PSS_TOP8)
@@ -4011,23 +4166,23 @@ reg        persp_swap_pending;
 // chain (sp_zinv → +step<<4 → abs → 32-line CLZ casez → 32-bit barrel
 // shift → top8 → recip_rd_addr) was the worst critical path in the
 // design with -3.451 ns slack at 50 MHz. The split is:
-//   PSS_ADV       : plan advance/tail amount from span counters
-//   PSS_ADV_ISSUE : sp_zinv += step<<4 or launch variable-tail DSP advance
+//   PSS_ADV       : plan advance amount from span counters
+//   PSS_ADV_ISSUE : launch DSP advance (step * advance; 16 or tail)
 //   PSS_ADV_CLAMP : register |sp_zinv_new| and clamp decision
 //   PSS_CLZ       : compute CLZ from registered abs; register persp_clz
 //   PSS_TOP8      : compute top8 from (abs << clz); write recip_rd_addr
 // PSS_RECIP_NA shares the same PSS_CLZ → PSS_TOP8 tail by registering
 // abs of un-advanced sp_zinv into persp_zinv_abs_r and falling through.
-localparam PSS_IDLE      = 5'd0;
-localparam PSS_ADV       = 5'd1;   // stage 1: plan projection advance
-localparam PSS_CLZ       = 5'd2;   // stage 3: compute CLZ from registered abs
-localparam PSS_TOP8      = 5'd3;   // stage 4: compute top8; write recip_rd_addr
-localparam PSS_RECIP_W   = 5'd4;   // BRAM read latency
-localparam PSS_MUL       = 5'd5;   // kick BOTH dsp + dsp2 multiplies (operands pre-registered)
-localparam PSS_MUL_W     = 5'd6;   // DSP pipeline delay (shared, both multiplies)
-localparam PSS_FINAL     = 5'd7;   // capture both projected endpoints
-localparam PSS_RECIP_NA  = 5'd8;   // ANCHOR_ONLY entry — register abs without advance
-localparam PSS_RECIP_SHIFT = 5'd9; // stage between RECIP_W and MUL: compute recip_q16
+localparam PSS_IDLE      = 6'd0;
+localparam PSS_ADV       = 6'd1;   // stage 1: plan projection advance
+localparam PSS_CLZ       = 6'd2;   // stage 3: compute CLZ from registered abs
+localparam PSS_TOP8      = 6'd3;   // stage 4: compute top8; write recip_rd_addr
+localparam PSS_RECIP_W   = 6'd4;   // BRAM read latency
+localparam PSS_MUL       = 6'd5;   // kick BOTH dsp + dsp2 multiplies (operands pre-registered)
+localparam PSS_MUL_W     = 6'd6;   // DSP pipeline delay (shared, both multiplies)
+localparam PSS_FINAL     = 6'd7;   // round/slice both projected endpoints (from pss_prod_*_r)
+localparam PSS_RECIP_NA  = 6'd8;   // ANCHOR_ONLY entry — register abs without advance
+localparam PSS_RECIP_SHIFT = 6'd9; // stage between RECIP_W and MUL: compute recip_q16
                                     // and register it, so PSS_MUL becomes a simple
                                     // reg-to-reg load into dsp_b/dsp2_b instead of
                                     // synthesizing a 32-bit variable barrel shift
@@ -4039,31 +4194,37 @@ localparam PSS_RECIP_SHIFT = 5'd9; // stage between RECIP_W and MUL: compute rec
 // N-R iteration y1 = y0 * (2 - x*y0) doubles the precision to ~20
 // bits — well past Q16.16 — at the cost of 6 cycles per recip.
 // Reuses the existing dsp slot, no new DSPs.
-localparam PSS_NR_MUL_X    = 5'd10;  // launch x * y0
-localparam PSS_NR_MUL_X_W  = 5'd11;  // DSP pipeline delay
-localparam PSS_NR_SUB      = 5'd12;  // capture xy, register 2 - xy
-localparam PSS_NR_MUL_Y    = 5'd13;  // launch y0 * (2 - xy)
-localparam PSS_NR_MUL_Y_W  = 5'd14;  // DSP pipeline delay
-localparam PSS_NR_CAPTURE  = 5'd15;  // refined recip → recip_q16_r
-localparam PSS_ADV_CLAMP   = 5'd16;  // stage 2: register abs/clamp from old/new zinv
-localparam PSS_SLOPE       = 5'd17;  // commit anchor/slope from registered endpoints
-localparam PSS_CONSTZ_STEP_W = 5'd18; // wait for constant-Z step multiplies
-localparam PSS_CONSTZ_STEP_CAPTURE = 5'd19; // commit constant-Z affine step
-localparam PSS_SLOPE_PREP = 5'd20; // derive slope class from registered deltas
-localparam PSS_SLOPE_DIV_WAIT = 5'd21; // wait for reused DSP small-divisor slope multiplies
-localparam PSS_SLOPE_DIV_COMMIT = 5'd22; // capture small-divisor quotients
-localparam PSS_SLOPE_DIV_CORR_WAIT = 5'd23; // wait for DSP quotient*divisor correction products
-localparam PSS_SLOPE_DIV_CORR_COMMIT = 5'd24; // capture correction flags from DSP products
-localparam PSS_SLOPE_DIV_QUOT_COMMIT = 5'd25; // apply quotient correction
-localparam PSS_SLOPE_DIV_STEP_COMMIT = 5'd26; // sign/commit small-divisor slopes
-localparam PSS_ADV_TAIL_ST_WAIT = 5'd27; // wait for Q29 tail sZ/tZ advance products
-localparam PSS_ADV_TAIL_ST_CAPTURE = 5'd28; // capture sZ/tZ products, launch zinv product
-localparam PSS_ADV_TAIL_Z_WAIT = 5'd29; // wait for Q29 tail zinv advance product
-localparam PSS_ADV_TAIL_COMMIT = 5'd30; // commit Q29 tail advance
-localparam PSS_ADV_ISSUE = 5'd31; // registered tail/normal advance issue
+localparam PSS_NR_MUL_X    = 6'd10;  // launch x * y0
+localparam PSS_NR_MUL_X_W  = 6'd11;  // DSP pipeline delay
+localparam PSS_NR_SUB      = 6'd12;  // capture xy, register 2 - xy
+localparam PSS_NR_MUL_Y    = 6'd13;  // launch y0 * (2 - xy)
+localparam PSS_NR_MUL_Y_W  = 6'd14;  // DSP pipeline delay
+localparam PSS_NR_CAPTURE  = 6'd15;  // refined recip → recip_q16_r
+localparam PSS_ADV_CLAMP   = 6'd16;  // stage 2: register abs/clamp from old/new zinv
+localparam PSS_SLOPE       = 6'd17;  // commit anchor/slope from registered endpoints
+localparam PSS_CONSTZ_STEP_W = 6'd18; // constant-Z step multiplies in flight; capture raw products
+localparam PSS_CONSTZ_STEP_CAPTURE = 6'd19; // round/slice/commit constant-Z affine step
+localparam PSS_SLOPE_PREP = 6'd20; // derive slope class from registered deltas
+localparam PSS_SLOPE_DIV_WAIT = 6'd21; // wait for reused DSP small-divisor slope multiplies
+localparam PSS_SLOPE_DIV_COMMIT = 6'd22; // capture small-divisor quotients
+localparam PSS_SLOPE_DIV_CORR_WAIT = 6'd23; // wait for DSP quotient*divisor correction products
+localparam PSS_SLOPE_DIV_CORR_COMMIT = 6'd24; // capture correction flags from DSP products
+localparam PSS_SLOPE_DIV_QUOT_COMMIT = 6'd25; // apply quotient correction
+localparam PSS_SLOPE_DIV_STEP_COMMIT = 6'd26; // sign/commit small-divisor slopes
+localparam PSS_ADV_TAIL_ST_WAIT = 6'd27; // wait for Q29 tail sZ/tZ advance products
+localparam PSS_ADV_TAIL_ST_CAPTURE = 6'd28; // capture sZ/tZ products, launch zinv product
+localparam PSS_ADV_TAIL_Z_WAIT = 6'd29; // wait for Q29 tail zinv advance product
+localparam PSS_ADV_TAIL_COMMIT = 6'd30; // commit Q29 tail advance
+localparam PSS_ADV_ISSUE = 6'd31; // launch unified DSP advance (full-16 and tail)
+localparam PSS_FINAL_PROD = 6'd32; // register RAW endpoint products ahead of PSS_FINAL
+                                    // (T-split of the STA #1 cone: Mult fabric
+                                    // recombination terminates here; the shared
+                                    // Q29/Q16 rounding adder + shift/slice run a
+                                    // state later in PSS_FINAL.  +1 PSS cycle per
+                                    // pass, absorbed by the seg_a/b_ready handshake.)
 localparam [5:0] PSS_Q29_RECIP_EXTRA = 6'd4;
 localparam integer PSS_Q29_RECIP_EXTRA_INT = 4;
-reg [4:0] persp_pss;
+reg [5:0] persp_pss;
 reg signed [31:0] recip_q16_r;       // Q16, or Q(16+PSS_Q29_RECIP_EXTRA) for Q29
 reg signed [31:0] nr_two_minus_xy;
 reg        sp_persp_q29_mode;
@@ -4082,6 +4243,26 @@ reg [31:0] recip_norm_abs_r;    // Shared reciprocal-normalizer input for PSS
 reg [4:0]  recip_norm_clz_r;    // Registered CLZ used by the shared normalizer shifter
 reg signed [31:0] pss_s_end_r;
 reg signed [31:0] pss_t_end_r;
+
+// T-split pipeline registers (2026-07 STA #1: Mult0 fabric recombination ->
+// shared Q29/Q16 rounding adder -> shift/slice -> sp_sstep-family commit was
+// one cycle).  The RAW 64-bit dsp/dsp2 products are registered here one PSS
+// state before the rounding adder + slice, so the multiplier's fabric
+// recombination and the 64-bit rounding carry never share a cycle with the
+// slice/commit.  Written by the unique predecessor (PSS_FINAL_PROD /
+// PSS_CONSTZ_STEP_W) of the state that reads them — B6 idiom, no reset.
+reg signed [63:0] pss_prod_s_r;
+reg signed [63:0] pss_prod_t_r;
+// Pre-decoded constant-Z launch qualifier (2026-07 STA #2: the PSS_SLOPE
+// state decode + persp_pass compare + sp_zinv_step_zero cone fed the shared
+// dsp2_b operand-select).  Registered every S_FRAG_PIPE cycle as
+// (persp_pass == PSS_PASS_ANCHOR) && sp_zinv_step_zero; both inputs are
+// stable from PSS_IDLE / span emit through the whole pass (persp_pass is
+// only written in PSS_IDLE and at span emit, sp_zinv_step_zero only at span
+// emit, and any PSS pass spends >=8 S_FRAG_PIPE cycles before PSS_FINAL),
+// so the flag is valid wherever the PSS sub-FSM samples it.  This collapses
+// the DSP operand-select term to one state bit AND one FF.
+reg pss_constz_go_r;
 
 // PSS slope clamp on perspective singularity.
 //
@@ -4139,7 +4320,6 @@ reg        pss_slope_t_corr;
 reg signed [31:0] pss_tail_s_delta;
 reg signed [31:0] pss_tail_t_delta;
 reg [4:0] pss_tail_advance;
-reg       pss_adv_tail_dynamic;
 // Cheap "<<2 magnitude shrink" check:
 // |post-advance zinv| < |pre-advance zinv| >> 2.
 
@@ -4179,19 +4359,19 @@ endfunction
 function signed [31:0] pss_div_pow2_trunc;
     input signed [31:0] value;
     input [1:0] shift;
-    reg neg;
-    reg [31:0] mag;
-    reg [31:0] quot;
+    reg signed [31:0] bias;
     begin
-        neg = value[31];
-        mag = neg ? (32'd0 - value[31:0]) : value[31:0];
+        // Truncate-toward-zero divide by 2^shift as bias-then-arith-shift:
+        // negatives add (1<<shift)-1 first, turning the floor of >>> into
+        // trunc.  Bit-exact with the old negate/shift/negate form for ALL
+        // inputs incl. -2^31 (-2^31 + 7 still fits), one shifter shorter.
         case (shift)
-            2'd0: quot = mag;
-            2'd1: quot = mag >> 1;
-            2'd2: quot = mag >> 2;
-            default: quot = mag >> 3;
+            2'd0: bias = 32'sd0;
+            2'd1: bias = 32'sd1;
+            2'd2: bias = 32'sd3;
+            default: bias = 32'sd7;
         endcase
-        pss_div_pow2_trunc = neg ? -$signed(quot) : $signed(quot);
+        pss_div_pow2_trunc = (value + (value[31] ? bias : 32'sd0)) >>> shift;
     end
 endfunction
 
@@ -4422,12 +4602,18 @@ always @(posedge clk) begin : main_fsm
         xf_to_cache <= 1'b0;
         xf_lit <= 1'b0;
         lt_enable <= 1'b0;
-        zc_s1_z <= 38'd0; zc_s2_z <= 16'd0; zc_s1_d <= 38'd0; zc_s2_d <= 16'd0;
-        sp_z_la <= 32'sd0; sp_depth_la <= 32'sd0; g_zwarm <= 2'd0;
+        // B6: zc_s1/zc_s2/sp_zc_la carry no reset — any consumed zc_s2 read
+        // (load_p0a with z enabled, rgb/truecolor) is preceded by a parametric
+        // EMIT writing sp_zc_la/sp_zc_step + the 2-cycle g_zwarm warm rewriting
+        // both stages; direct-affine spans have z off, so their p0a_z_value
+        // capture of zc_s2 is dead (every consumer gates on p3_z_test/z_write).
+        // g_zwarm KEEPS its reset (control counter gating load_p0a).
+        g_zwarm <= 2'd0;
         tri_state_valid <= 1'b0;
         tri_start <= 1'b0;
         tri_fill_idx <= 3'd0;
         cmd_is_flip <= 0;
+        cmd_class <= CMDCLS_NONE;
         spanprod_compact_direct <= 1'b0;
         m_wr_inflight       <= 4'b0;
         gpu_swap_req        <= 1'b0;
@@ -4437,11 +4623,13 @@ always @(posedge clk) begin : main_fsm
         // Pipelined fragment processor reset
         p0a_valid <= 0; p0a_light <= 0; p0a_colormap_id <= 0; p0a_flags <= 0;
         p0a_R <= 0; p0a_B <= 0; p0_R <= 0; p0_B <= 0; p1_R <= 0; p1_B <= 0;
-        sp_R_q <= 0; sp_R_step <= 0; sp_B_q <= 0; sp_B_step <= 0; sp_rgb <= 0;
+        // B6: sp_R_q/sp_B_q/sp_Dr,g,b_q + their _step regs carry no reset —
+        // written by BOTH arms of spanprod_load_generated_span at every span
+        // EMIT, and read only in the S_FRAG_PIPE pixel loop (source snapshot /
+        // per-pixel advance), which is reachable only through that EMIT.
+        sp_rgb <= 0;
         p0a_Dr <= 0; p0a_Dg <= 0; p0a_Db <= 0;
         p0_Dr <= 0; p0_Dg <= 0; p0_Db <= 0; p1_Dr <= 0; p1_Dg <= 0; p1_Db <= 0;
-        sp_Dr_q <= 0; sp_Dr_step <= 0; sp_Dg_q <= 0; sp_Dg_step <= 0;
-        sp_Db_q <= 0; sp_Db_step <= 0;
         p0a_fb_addr <= 0;
         p0a_s_int <= 0; p0a_tex_base <= 0;
         p0a_t_y <= 0; p0a_tex_width <= 0;
@@ -4481,7 +4669,7 @@ always @(posedge clk) begin : main_fsm
         ztest_acc_word <= 32'd0;
         blend_arvalid    <= 0;
         blend_araddr     <= 0;
-        blend_arlen      <= 8'd0;
+        blend_ar_is_burst <= 1'b0;
         zw_valid         <= 4'b0;
         zw_base          <= {(GPU_ADDR_W-4){1'b0}};
         zw_fill_beat     <= 2'd0;
@@ -4517,14 +4705,22 @@ always @(posedge clk) begin : main_fsm
         spanprod_cur_v <= 16'sd0;
         spanprod_cur_count <= 16'd0;
         spanprod_cur_nonzero <= 1'b0;
-        spanprod_cur_direct_fb_addr <= {GPU_ADDR_W{1'b0}};
-        spanprod_cur_direct_tex_addr <= {GPU_ADDR_W{1'b0}};
-        spanprod_cur_direct_s <= 32'sd0;
-        spanprod_cur_direct_t <= 32'sd0;
-        spanprod_cur_direct_sstep <= 32'sd0;
-        spanprod_cur_direct_tstep <= 32'sd0;
-        spanprod_cur_direct_colormap_id <= 4'd0;
-        spanprod_cur_direct_light <= 6'd0;
+        // B6: the eight spanprod_cur_direct_* capture regs carry no reset —
+        // their sole reader is the direct-affine arm of
+        // spanprod_load_generated_span (S_SPANPROD_EMIT), which is reachable
+        // only via S_SPANPROD_SELECT -> S_SPANPROD_SETUP, and SELECT writes
+        // all eight every pass.  (With INCLUDE_COMPACT_SPAN=0 the reader is
+        // hard-dead: spanprod_direct_affine's only set-site is compact-gated.)
+        // B5 lane-bank masks.  The MLAB banks themselves have no reset (the
+        // old arrays had none either); mask=0 makes count/colormap read as 0
+        // — identical to the pre-first-write behavior of the old uncleared
+        // arrays, and every compact/long command re-clears them at w0/w29
+        // before any SELECT.  spanprod_s_zeroed/sstep_zeroed are deliberately
+        // NOT reset here: they mirror column-written zeros in the unreset
+        // s/sstep banks, whose lifetime spanned warm resets in the old FF
+        // form (FFs power up 0, so cold boot matches without a reset term).
+        spanprod_cnt_valid    <= 4'b0000;
+        spanprod_cmap_valid   <= 4'b0000;
         sp_sZ <= 0; sp_tZ <= 0; sp_zinv <= 0;
         sp_sZstep <= 0; sp_tZstep <= 0; sp_zinv_step <= 0; sp_zinv_step_zero <= 1'b1;
         persp_active <= 0;
@@ -4544,37 +4740,42 @@ always @(posedge clk) begin : main_fsm
         persp_pass <= PSS_PASS_ANCHOR;
         persp_zinv_abs_r <= 0;
         pss_zinv_clamp_r <= 0;
+        pss_constz_go_r <= 1'b0;
+        // B6: pss_prod_s_r/pss_prod_t_r carry no reset — written by the
+        // unique predecessor (PSS_FINAL_PROD / PSS_CONSTZ_STEP_W) of the
+        // state that reads them.
         pss_zinv_adv_r <= 0;
         pss_zinv_prev_r <= 0;
         pss_zinv_abs_na_r <= 0;
         pss_slope_divisor <= 5'd16;
-        pss_slope_s_delta <= 32'sd0;
-        pss_slope_t_delta <= 32'sd0;
+        // B6: pss_slope_{s,t}_{delta,mag,quot} carry no reset — each is
+        // written by the unique predecessor of its reading PSS state
+        // (delta: PSS_SLOPE TO_A/TO_B -> SLOPE_PREP; mag: SLOPE_PREP ->
+        // DIV_CORR_COMMIT; quot: DIV_COMMIT -> QUOT/STEP_COMMIT), and the
+        // chain is only entered from PSS_IDLE, which every launch site forces.
         pss_slope_s_neg <= 1'b0;
         pss_slope_t_neg <= 1'b0;
-        pss_slope_s_mag <= 32'd0;
-        pss_slope_t_mag <= 32'd0;
-        pss_slope_s_quot <= 32'd0;
-        pss_slope_t_quot <= 32'd0;
         pss_slope_s_corr <= 1'b0;
         pss_slope_t_corr <= 1'b0;
         pss_tail_s_delta <= 32'sd0;
         pss_tail_t_delta <= 32'sd0;
         pss_tail_advance <= 5'd0;
-        pss_adv_tail_dynamic <= 1'b0;
         pss_s_end_r <= 0;
         pss_t_end_r <= 0;
         persp_clz <= 0;
         recip_norm_abs_r <= 0;
         recip_norm_clz_r <= 0;
         nr_two_minus_xy <= 0;
-        sp_dsp_a <= 0; sp_dsp_b <= 0; sp_dsp2_a <= 0; sp_dsp2_b <= 0;
-        pss_dsp_a <= 0; pss_dsp_b <= 0; pss_dsp2_a <= 0; pss_dsp2_b <= 0;
-        drv_dsp_a <= 0; drv_dsp_b <= 0; drv_dsp2_a <= 0; drv_dsp2_b <= 0;
-        drv_prod_r <= 0; drv2_prod_r <= 0;
+        dsp_a <= 0; dsp_b <= 0; dsp2_a <= 0; dsp2_b <= 0;
+        // B6: drv_prod_r/drv2_prod_r carry no reset — each reading derive
+        // state (DRV_DET_FORM / DRV_PLANE_NF / DRV_SCALE_LS / DRV_ORG_FORM)
+        // is entered ONLY from its capture predecessor, which writes both.
         recip_rd_addr <= 0;
         // State registers
         sp_tex_w_mask <= 16'hFFFF; sp_tex_h_mask <= 16'hFFFF;
+        // octave = mask+1 mod 2^16: 16'hFFFF + 1 wraps to 0 (mirror test
+        // can never fire on the default no-op mask, as before).
+        sp_tex_w_octave <= 16'h0000; sp_tex_h_octave <= 16'h0000;
         sp_mirror_s <= 1'b0; sp_mirror_t <= 1'b0;
         sp_cd_combine <= 1'b0; spanprod_cd_combine <= 1'b0;
         spanprod_subpix_y <= 1'b0;
@@ -4647,7 +4848,7 @@ always @(posedge clk) begin : main_fsm
             ztest_acc_addr <= {GPU_ADDR_W{1'b0}};
             ztest_acc_word <= 32'd0;
             blend_arvalid <= 1'b0;
-            blend_arlen   <= 8'd0;
+            blend_ar_is_burst <= 1'b0;
             zw_valid      <= 4'b0;
             zw_fill_beat  <= 2'd0;
             zw_snoop_pending <= 1'b0;
@@ -4679,7 +4880,6 @@ always @(posedge clk) begin : main_fsm
             spanprod_cur_v <= 16'sd0;
             spanprod_cur_count <= 16'd0;
             spanprod_cur_nonzero <= 1'b0;
-            pss_adv_tail_dynamic <= 1'b0;
             m_wr_inflight <= 4'b0;
             gpu_swap_req <= 1'b0;
             transluc_lookup_fire <= 1'b0;
@@ -4689,22 +4889,14 @@ always @(posedge clk) begin : main_fsm
             // ------------------------------------------------------------
             // Always-on housekeeping (runs every non-reset cycle).
             //
-            // Keep the domain-local DSP operand registers driven every cycle.
+            // Keep the shared DSP operand registers driven every cycle.
             // Otherwise Quartus maps the sparse state-machine assignments
             // into a wide DSP input clock-enable cone that reaches through
             // the texture-cache stall path.
-            sp_dsp_a <= 32'sd0;
-            sp_dsp_b <= 32'sd0;
-            sp_dsp2_a <= 32'sd0;
-            sp_dsp2_b <= 32'sd0;
-            pss_dsp_a <= 32'sd0;
-            pss_dsp_b <= 32'sd0;
-            pss_dsp2_a <= 32'sd0;
-            pss_dsp2_b <= 32'sd0;
-            drv_dsp_a <= 32'sd0;
-            drv_dsp_b <= 32'sd0;
-            drv_dsp2_a <= 32'sd0;
-            drv_dsp2_b <= 32'sd0;
+            dsp_a <= 32'sd0;
+            dsp_b <= 32'sd0;
+            dsp2_a <= 32'sd0;
+            dsp2_b <= 32'sd0;
             // m_wr inflight counter for CMD_FENCE / CMD_FLIP drain.
             // Increment when an AW handshake fires; decrement when a B
             // beat lands (slave pulses bvalid for one cycle since
@@ -4838,12 +5030,12 @@ always @(posedge clk) begin : main_fsm
             cmd_is_set_fb         <= (cmd_type == CMD_SET_FB);
             // PRUNE GATE: when INCLUDE_COMPACT_SPAN==0 the size bound rises
             // to the long-form minimum (31-word header + first record pair),
-            // so a compact-sized 0x48 (11..32 words) falls through the
-            // S_PAY_DATA if-else chain (payload drains word-by-word via
-            // pay_remaining, no destination writes) and through the
-            // S_EXECUTE chain to the final `else state <= S_IDLE` — the
-            // exact unrecognised-command no-op drain path.  Long-form
-            // payloads (>=33 words) decode identically in both configs.
+            // so a compact-sized 0x48 (11..32 words) falls to CMDCLS_NONE:
+            // the S_PAY_DATA default arm (payload drains word-by-word via
+            // pay_remaining, no destination writes) and the S_EXECUTE
+            // `default: state <= S_IDLE` — the exact unrecognised-command
+            // no-op drain path.  Long-form payloads (>=33 words) decode
+            // identically in both configs.
             cmd_is_draw_param_span_list <=
                 (cmd_type == CMD_DRAW_PARAM_SPAN_LIST && cmd_payload_words >=
                  ((INCLUDE_COMPACT_SPAN != 0) ? 13'd11 : 13'd33));
@@ -4889,8 +5081,8 @@ always @(posedge clk) begin : main_fsm
             // without decode and retire at S_EXECUTE as a no-op.
             //
             // PRUNE GATE: when INCLUDE_PARAM_TRI==0 the 0x49 decode term is
-            // constant 0, so a 0x49 falls through the S_PAY_DATA / S_EXECUTE
-            // chains as the unrecognised-command no-op drain.  Combined with
+            // constant 0, so a 0x49 falls to the S_PAY_DATA / S_EXECUTE
+            // default arms as the unrecognised-command no-op drain.  Combined with
             // INCLUDE_VERT_TRI==0 and INCLUDE_PARAM_TRI_RECS==0 (os25), the
             // edge walker loses all producers and constant-folds away.  Note
             // the tri_state_valid clear above stays keyed on the RAW opcode
@@ -4912,11 +5104,11 @@ always @(posedge clk) begin : main_fsm
             // the shared staging the 0x48/0x49 paths keep alive.
             //
             // PRUNE GATE: when INCLUDE_VERT_TRI==0 the 0x4B decode term is
-            // constant 0, so the flag is never set.  The opcode then falls
-            // through the S_PAY_DATA if-else chain (no destination writes; the
-            // payload still drains word-by-word via pay_remaining) and through
-            // the S_EXECUTE chain to the final `else state <= S_IDLE` — i.e. the
-            // exact unrecognised-command no-op drain path.  With the flag
+            // constant 0, so the flag is never set (and cmd_class falls to
+            // CMDCLS_NONE: the S_PAY_DATA default arm — no destination
+            // writes; the payload still drains word-by-word via
+            // pay_remaining — and the S_EXECUTE `default: state <= S_IDLE`,
+            // i.e. the exact unrecognised-command no-op drain path).  With the flag
             // constant 0, every writer of the 0x4B-only staging
             // (dv_szi/dv_tzi/vt_zi/vt_lrow) and of the derivation FSM (dstate
             // and the S_TRI_DERIVE-only regs, reachable only via
@@ -4945,11 +5137,11 @@ always @(posedge clk) begin : main_fsm
             // retire as a no-op.
             //
             // PRUNE GATE: when INCLUDE_PARAM_TRI_RECS==0 the decode term is
-            // constant 0, so a 0x4D falls through the S_PAY_DATA if-else chain
-            // (payload drains word-by-word via pay_remaining, no destination
-            // writes) and through the S_EXECUTE chain to the final
-            // `else state <= S_IDLE` — the exact unrecognised-command no-op
-            // drain path — and Quartus sweeps the 0x4D routing/bring-up arms.
+            // constant 0, so a 0x4D falls to CMDCLS_NONE: the S_PAY_DATA
+            // default arm (payload drains word-by-word via pay_remaining,
+            // no destination writes) and the S_EXECUTE
+            // `default: state <= S_IDLE` — the exact unrecognised-command
+            // no-op drain path — and Quartus sweeps the 0x4D routing/bring-up arms.
             cmd_is_draw_param_tri_recs <= (INCLUDE_PARAM_TRI_RECS != 0) &&
                 (cmd_type == CMD_DRAW_PARAM_TRI_RECS && cmd_payload_words == 13'd16);
             // 0x50 sticky transform matrix/proj; 0x51 raw-vertex transform tri.
@@ -4989,6 +5181,89 @@ always @(posedge clk) begin : main_fsm
                 (INCLUDE_XFORM_RGB != 0) &&
                 (cmd_type == CMD_LOAD_VERT_LIT && cmd_payload_words == 13'd9);
             cmd_is_flip           <= (cmd_type == CMD_FLIP);
+            // Registered command class — same decode, same cycle as the
+            // cmd_is_* flags above, but as a parallel case on cmd_type so
+            // the S_PAY_DATA / S_EXECUTE dispatch is a case select instead
+            // of a priority chain (see the CMDCLS_* block).  Every size /
+            // feature gate here MUST stay bit-identical to the flag it
+            // mirrors; a failed gate falls to CMDCLS_NONE, the
+            // unrecognised-command drain.
+            case (cmd_type)
+                CMD_FENCE:       cmd_class <= CMDCLS_FENCE;
+                CMD_FLIP:        cmd_class <= CMDCLS_FLIP;
+                CMD_CLEAR_RECT:  cmd_class <= CMDCLS_CLEAR_RECT;
+                CMD_SET_FB:      cmd_class <= CMDCLS_SET_FB;
+                CMD_SET_TEXTURE: cmd_class <= CMDCLS_SET_TEXTURE;
+                CMD_DRAW_PARAM_SPAN_LIST:
+                    cmd_class <= (cmd_payload_words >=
+                                  ((INCLUDE_COMPACT_SPAN != 0) ? 13'd11 : 13'd33))
+                               ? CMDCLS_SPAN_COL : CMDCLS_NONE;
+                CMD_DRAW_COLUMN_LIST:
+                    cmd_class <= ((INCLUDE_COLUMN_LIST_EFF != 0)
+                                  && cmd_payload_words >= 13'd9
+                                  && cmd_payload_words <= 13'd24)
+                               ? CMDCLS_SPAN_COL : CMDCLS_NONE;
+                CMD_DRAW_PARAM_TRI:
+                    cmd_class <= ((INCLUDE_PARAM_TRI != 0)
+                                  && cmd_payload_words == 13'd36)
+                               ? CMDCLS_PARAM_TRI : CMDCLS_NONE;
+                CMD_SET_TRI_STATE:
+                    cmd_class <= (cmd_payload_words == 13'd16
+                                  || cmd_payload_words == 13'd17)
+                               ? CMDCLS_SET_TRI_STATE : CMDCLS_NONE;
+                CMD_DRAW_VERT_TRI:
+                    cmd_class <= ((INCLUDE_VERT_TRI != 0)
+                                  && cmd_payload_words == 13'd14)
+                               ? CMDCLS_VERT_TRI : CMDCLS_NONE;
+                CMD_DRAW_VERT_TRI_RGB:
+                    cmd_class <= ((INCLUDE_VERT_TRI != 0) && (INCLUDE_DIRECT_COLOR != 0)
+                                  && (cmd_payload_words == 13'd17
+                                      || cmd_payload_words == 13'd19))
+                               ? CMDCLS_VERT_TRI_RGB : CMDCLS_NONE;
+                CMD_DRAW_PARAM_TRI_RECS:
+                    cmd_class <= ((INCLUDE_PARAM_TRI_RECS != 0)
+                                  && cmd_payload_words == 13'd16)
+                               ? CMDCLS_PARAM_TRI_RECS : CMDCLS_NONE;
+                CMD_SET_OBJECT_STATE:
+                    cmd_class <= ((INCLUDE_VERT_TRI != 0)
+                                  && ((INCLUDE_GPU_XFORM_MAC != 0) || (INCLUDE_XFORM_RGB != 0)
+                                      || (INCLUDE_CLIP_TRI != 0))
+                                  && cmd_payload_words == 13'd26)
+                               ? CMDCLS_SET_OBJECT_STATE : CMDCLS_NONE;
+                CMD_DRAW_XFORM_TRI:
+                    cmd_class <= ((INCLUDE_VERT_TRI != 0) && (INCLUDE_GPU_XFORM_MAC != 0)
+                                  && cmd_payload_words == 13'd16)
+                               ? CMDCLS_XFORM_TRI : CMDCLS_NONE;
+                CMD_DRAW_XFORM_TRI_RGB:
+                    cmd_class <= ((INCLUDE_VERT_TRI != 0) && (INCLUDE_DIRECT_COLOR != 0)
+                                  && (INCLUDE_XFORM_RGB != 0)
+                                  && cmd_payload_words == 13'd18)
+                               ? CMDCLS_XFORM_RGB_CLIP : CMDCLS_NONE;
+                CMD_DRAW_CLIP_TRI:
+                    cmd_class <= ((INCLUDE_VERT_TRI != 0) && (INCLUDE_DIRECT_COLOR != 0)
+                                  && (INCLUDE_CLIP_TRI != 0)
+                                  && cmd_payload_words == 13'd18)
+                               ? CMDCLS_XFORM_RGB_CLIP : CMDCLS_NONE;
+                CMD_LOAD_VERTS:
+                    cmd_class <= ((INCLUDE_VTX_CACHE != 0) && (INCLUDE_XFORM_RGB != 0)
+                                  && cmd_payload_words >= 13'd7
+                                  && cmd_payload_words <= 13'd49)
+                               ? CMDCLS_LOAD_VERTS : CMDCLS_NONE;
+                CMD_DRAW_INDEXED_TRI:
+                    cmd_class <= ((INCLUDE_VTX_CACHE != 0) && (INCLUDE_XFORM_RGB != 0)
+                                  && cmd_payload_words == 13'd1)
+                               ? CMDCLS_INDEXED_TRI : CMDCLS_NONE;
+                CMD_SET_LIGHT_STATE:
+                    cmd_class <= ((INCLUDE_GPU_LIGHT != 0) && (INCLUDE_XFORM_RGB != 0)
+                                  && cmd_payload_words == 13'd6)
+                               ? CMDCLS_SET_LIGHT_STATE : CMDCLS_NONE;
+                CMD_LOAD_VERT_LIT:
+                    cmd_class <= ((INCLUDE_GPU_LIGHT != 0) && (INCLUDE_VTX_CACHE != 0)
+                                  && (INCLUDE_XFORM_RGB != 0)
+                                  && cmd_payload_words == 13'd9)
+                               ? CMDCLS_LOAD_VERT_LIT : CMDCLS_NONE;
+                default:         cmd_class <= CMDCLS_NONE;
+            endcase
 
             if (cmd_payload_words == 0) begin
                 state <= S_EXECUTE;
@@ -5021,21 +5296,25 @@ always @(posedge clk) begin : main_fsm
                 pay_idx <= pay_idx + 6'd1;
             pay_remaining <= pay_remaining - 13'd1;
 
-            // Per-command dispatch.  The if-else chain mirrors the pre-
-            // decoded cmd_is_* one-hot flags set in S_DECODE — keeps the
-            // combinational cone to each destination reg short.
-            if (cmd_is_fence) begin
+            // Per-command dispatch.  A parallel case on the cmd_class code
+            // registered in S_DECODE — the cmd_is_* flags are one-hot but
+            // a priority chain over them folds every higher flag's negation
+            // into each lower branch's register enables (see the CMDCLS_*
+            // block).  Shared arms still read individual cmd_is_* flags
+            // where they must route per-command.
+            case (cmd_class)
+            CMDCLS_FENCE: begin
                 // Publish the token only AFTER outstanding m_wr_* writes
                 // drain in S_EXECUTE — fixes the flashing-pixel race
                 // documented in cr-gpu-fence-write-completion.md.
                 if (pay_idx == 6'd0) pending_fence_token <= ring_rd_data;
             end
-            else if (cmd_is_flip) begin
+            CMDCLS_FLIP: begin
                 // CMD_FLIP payload: word 0 = idx, word 1 = fence token.
                 if (pay_idx == 6'd0) pending_swap_idx    <= ring_rd_data[1:0];
                 if (pay_idx == 6'd1) pending_fence_token <= ring_rd_data;
             end
-            else if (cmd_is_clear_rect) begin
+            CMDCLS_CLEAR_RECT: begin
                 if (pay_idx == 6'd0) begin
                     cr_addr     <= ring_rd_data[GPU_ADDR_W-1:0];
                     cr_row_addr <= ring_rd_data[GPU_ADDR_W-1:0];
@@ -5050,11 +5329,10 @@ always @(posedge clk) begin : main_fsm
                     cr_color  <= ring_rd_data[7:0];
                 end
             end
-            else if (cmd_is_set_fb) begin
+            CMDCLS_SET_FB: begin
                 if (pay_idx == 6'd1) st_fb_stride <= ring_rd_data[15:0];
             end
-            else if (cmd_is_draw_param_span_list || cmd_is_draw_column_list
-                  || cmd_is_draw_param_tri) begin
+            CMDCLS_SPAN_COL, CMDCLS_PARAM_TRI: begin
                 // Staging-dedup contract: tri_state_valid is cleared in
                 // S_DECODE on the raw opcode/size ranges (variant-invariant
                 // — see the comment there), not here, so lean variants that
@@ -5074,15 +5352,13 @@ always @(posedge clk) begin : main_fsm
                 if (cmd_is_draw_column_list && pay_idx == 6'd0) begin
                     // Force the dropped s/sstep words to 0 for every lane — a
                     // column never carries them, and the pixel path must match
-                    // a 0x48 column with s=0/sstep=0 exactly.
-                    spanprod_direct_s[0] <= 32'sd0;
-                    spanprod_direct_s[1] <= 32'sd0;
-                    spanprod_direct_s[2] <= 32'sd0;
-                    spanprod_direct_s[3] <= 32'sd0;
-                    spanprod_direct_sstep[0] <= 32'sd0;
-                    spanprod_direct_sstep[1] <= 32'sd0;
-                    spanprod_direct_sstep[2] <= 32'sd0;
-                    spanprod_direct_sstep[3] <= 32'sd0;
+                    // a 0x48 column with s=0/sstep=0 exactly.  B5: the arrays
+                    // are MLABs now, so the 4-lane zeroing is the sticky
+                    // per-lane masks (SELECT forces the capture to 0 until a
+                    // compact s/sstep word rewrites the lane — the exact
+                    // lifetime of the old written-0 array entries).
+                    spanprod_s_zeroed     <= 4'b1111;
+                    spanprod_sstep_zeroed <= 4'b1111;
                 end
                 // 0x49 words 31-35: clip rect + vertices.
                 if (cmd_is_draw_param_tri) begin
@@ -5104,7 +5380,7 @@ always @(posedge clk) begin : main_fsm
                     end
                 end
             end
-            else if (cmd_is_set_tri_state) begin
+            CMDCLS_SET_TRI_STATE: begin
                 // 0x4A sticky state.  Staging-dedup: surface/control/clamp/z
                 // words are decoded DIRECTLY into the SHARED spanprod staging
                 // regs (reusing the 0x49-header arms of
@@ -5158,7 +5434,7 @@ always @(posedge clk) begin : main_fsm
                     default: ;
                 endcase
             end
-            else if (cmd_is_draw_vert_tri) begin
+            CMDCLS_VERT_TRI: begin
                 // 0x4B raw vertex triangle — see the opcode comment.
                 // TIMING DE-FOLD (2026-06, OS30 pipelining): the szi/tzi
                 // numerator products are NO LONGER folded into payload arrival.
@@ -5209,7 +5485,7 @@ always @(posedge clk) begin : main_fsm
                     default: ;
                 endcase
             end
-            else if (cmd_is_draw_vert_tri_rgb) begin
+            CMDCLS_VERT_TRI_RGB: begin
                 // 0x4E (shrunk): w0-11 identical to 0x4B (verts, s, t, zi).
                 // w12-13 carry the three per-vertex RGB565 colours PACKED
                 // (w12=[rgb1|rgb0], w13=rgb2); w14-16 = per-vertex decoupled
@@ -5266,7 +5542,7 @@ always @(posedge clk) begin : main_fsm
                     default: ;
                 endcase
             end
-            else if (cmd_is_set_object_state) begin
+            CMDCLS_SET_OBJECT_STATE: begin
                 // 0x50: load the up-to-5x4 transform matrix (row-major) + proj
                 // consts + row count.  Sticky like 0x4A — does NOT clear
                 // tri_state_valid or touch the surface staging.
@@ -5292,7 +5568,7 @@ always @(posedge clk) begin : main_fsm
                     default: ;
                 endcase
             end
-            else if (cmd_is_draw_xform_tri) begin
+            CMDCLS_XFORM_TRI: begin
                 // 0x51: 3 raw verts {x,y,z} Q16.16 + s/t passthrough (parked in
                 // the derive's raw-s/t slots) + light.  S_XFORM transforms them.
                 case (pay_idx)
@@ -5314,7 +5590,7 @@ always @(posedge clk) begin : main_fsm
                     default: ;
                 endcase
             end
-            else if (cmd_is_draw_xform_tri_rgb || cmd_is_draw_clip_tri) begin
+            CMDCLS_XFORM_RGB_CLIP: begin
                 // T1 0x52 / clip-feed 0x4F (identical wire — verts hold clip {x,y,w}
                 // for 0x4F): 3 verts {x,y,z} Q16.16 (w0-8) + s/t passthrough
                 // (w9-14) — identical to 0x51 — then per-vertex RGB565 (w15-17)
@@ -5344,7 +5620,7 @@ always @(posedge clk) begin : main_fsm
                     default: ;
                 endcase
             end
-            else if (cmd_is_load_verts) begin
+            CMDCLS_LOAD_VERTS: begin
                 // T3 0x53: one raw vert {x,y,z}+{s,t}+RGB565 (parked in the
                 // transform's vert-0 slots) + destination cache slot.  S_XFORM
                 // transforms it and writes the slot (see XF_PROJ_LAUNCH).
@@ -5361,7 +5637,7 @@ always @(posedge clk) begin : main_fsm
                     default: ;
                 endcase
             end
-            else if (cmd_is_draw_indexed_tri) begin
+            CMDCLS_INDEXED_TRI: begin
                 // T3 0x54: one word = 3 cache indices {i2[14:10],i1[9:5],i0[4:0]}.
                 if (pay_idx == 6'd0) begin
                     vc_i0 <= ring_rd_data[4:0];
@@ -5369,7 +5645,7 @@ always @(posedge clk) begin : main_fsm
                     vc_i2 <= ring_rd_data[14:10];
                 end
             end
-            else if (cmd_is_set_light_state) begin
+            CMDCLS_SET_LIGHT_STATE: begin
                 // T4 0x55 sticky: light dir (Q16.16), light colour + ambient
                 // (RGB565), enable.  Used by 0x57 lit loads.
                 case (pay_idx)
@@ -5386,7 +5662,7 @@ always @(posedge clk) begin : main_fsm
                     default: ;
                 endcase
             end
-            else if (cmd_is_load_vert_lit) begin
+            CMDCLS_LOAD_VERT_LIT: begin
                 // T4 0x57: one raw vert {x,y,z} + object-space normal {nx,ny,nz}
                 // + {s,t} + destination cache slot.  S_XFORM transforms position
                 // and computes lighting -> RGB565, then writes the cache slot.
@@ -5403,7 +5679,7 @@ always @(posedge clk) begin : main_fsm
                     default: ;
                 endcase
             end
-            else if (cmd_is_draw_param_tri_recs) begin
+            CMDCLS_PARAM_TRI_RECS: begin
                 // 0x4D records-only param-tri: per-triangle attr/light planes
                 // (w0..w11 -> the identical 0x49 header arms idx 8..19), the
                 // q29 shift word (w12 -> idx 30, same validation), and the
@@ -5434,6 +5710,11 @@ always @(posedge clk) begin : main_fsm
                     default: ;
                 endcase
             end
+            // CMDCLS_NONE / CMDCLS_SET_TEXTURE: payload drains word-by-word
+            // via pay_remaining with no destination writes — the old chain's
+            // fall-through.
+            default: ;
+            endcase
 
             if (pay_remaining <= 13'd1) begin
                 state <= S_EXECUTE;
@@ -5465,7 +5746,10 @@ always @(posedge clk) begin : main_fsm
         // perspective sub-FSM bring-up from sp_flags[SPAN_PERSP]) runs
         // here, reading the regs S_PAY_DATA just wrote.
         S_EXECUTE: begin
-            if (cmd_is_fence) begin
+            // Parallel case on the S_DECODE-registered class code — same
+            // rationale as the S_PAY_DATA dispatch (see the CMDCLS_* block).
+            case (cmd_class)
+            CMDCLS_FENCE: begin
                 // Stall until all outstanding m_wr_* writes commit; then
                 // publish the fence token and retire to S_IDLE.
                 if (fb_write_drain_complete) begin
@@ -5475,7 +5759,7 @@ always @(posedge clk) begin : main_fsm
                 // else: stay in S_EXECUTE — m_wr_inflight ticks down via
                 // the global counter update below.
             end
-            else if (cmd_is_flip) begin
+            CMDCLS_FLIP: begin
                 // Same drain wait as CMD_FENCE, plus display-queue
                 // backpressure.  axi_periph_slave has one pending swap slot;
                 // if we pulse while it is already full, the ready index is
@@ -5488,15 +5772,13 @@ always @(posedge clk) begin : main_fsm
                     state         <= S_IDLE;
                 end
             end
-            else if ((cmd_type == CMD_SET_TEXTURE)
-                || cmd_is_set_fb
-            ) begin
+            CMDCLS_SET_TEXTURE, CMDCLS_SET_FB: begin
                 state <= S_IDLE;
             end
-            else if (cmd_is_clear_rect) begin
+            CMDCLS_CLEAR_RECT: begin
                 state <= S_CLEAR_RECT;
             end
-            else if (cmd_is_draw_param_span_list || cmd_is_draw_column_list) begin
+            CMDCLS_SPAN_COL: begin
                 // Shared spanprod bring-up.  The 0x4C column list lands its
                 // (s/sstep-forced-0) direct-affine staging via its own loader,
                 // then reuses this EXECUTE / S_SPANPROD path byte-for-byte —
@@ -5515,7 +5797,7 @@ always @(posedge clk) begin : main_fsm
 	                state <= (spanprod_header_supported && (spanprod_record_count != 3'd0))
 	                       ? S_SPANPROD_SELECT : S_IDLE;
 	            end
-            else if (cmd_is_draw_param_tri) begin
+            CMDCLS_PARAM_TRI: begin
                 // Same spanprod bring-up as the span list, but records come
                 // from the edge walker via S_TRI_FILL instead of the ring.
                 spanprod_idx <= 2'd0;
@@ -5532,7 +5814,7 @@ always @(posedge clk) begin : main_fsm
                 tri_fill_idx    <= 3'd0;
                 state <= spanprod_header_supported ? S_TRI_FILL : S_IDLE;
             end
-            else if (cmd_is_draw_param_tri_recs) begin
+            CMDCLS_PARAM_TRI_RECS: begin
                 // 0x4D records-only param-tri: same spanprod/walker bring-up
                 // as the full 0x49, but the surface/control/clamp/z staging
                 // and clip rect come from the 0x4A sticky state.  Without a
@@ -5572,7 +5854,7 @@ always @(posedge clk) begin : main_fsm
                     state <= S_IDLE;
                 end
             end
-            else if (cmd_is_set_tri_state) begin
+            CMDCLS_SET_TRI_STATE: begin
                 // 0x4A: the surface/control/clamp/z words are already decoded
                 // into the SHARED spanprod staging in S_PAY_DATA (staging-dedup)
                 // and the clip rect into tri_state_clip_*.  Just mark the sticky
@@ -5581,7 +5863,7 @@ always @(posedge clk) begin : main_fsm
                 tri_state_valid <= 1'b1;
                 state <= S_IDLE;
             end
-            else if (cmd_is_draw_vert_tri || cmd_is_draw_vert_tri_rgb) begin
+            CMDCLS_VERT_TRI, CMDCLS_VERT_TRI_RGB: begin
                 // 0x4B / 0x4E: a vert-tri with no valid sticky state (no prior
                 // 0x4A, after soft_reset, or after an 0x48/0x49 overwrote the
                 // staging) is a no-op — drain already happened, just retire.
@@ -5628,8 +5910,7 @@ always @(posedge clk) begin : main_fsm
                     state <= S_IDLE;
                 end
             end
-            else if (cmd_is_draw_xform_tri || cmd_is_draw_xform_tri_rgb
-                     || cmd_is_draw_clip_tri) begin
+            CMDCLS_XFORM_TRI, CMDCLS_XFORM_RGB_CLIP: begin
                 // 0x51 / 0x52 (T1): run the transform front-end, then the derive.
                 // 0x4F (clip-feed): the verts are already M*v clip {x,y,w}, so skip
                 // the matrix MAC and enter at XF_CLIP_FEED (recip+project only).
@@ -5650,7 +5931,7 @@ always @(posedge clk) begin : main_fsm
                     state <= S_IDLE;
                 end
             end
-            else if (cmd_is_load_verts) begin
+            CMDCLS_LOAD_VERTS: begin
                 // T3 0x53: transform ONE vert through S_XFORM and write the cache
                 // slot (XF_PROJ_LAUNCH branches on xf_to_cache).  Needs the 0x4A
                 // sticky surface + the 0x50 sticky matrix, same as 0x52.
@@ -5668,7 +5949,7 @@ always @(posedge clk) begin : main_fsm
                     state <= S_IDLE;
                 end
             end
-            else if (cmd_is_load_vert_lit) begin
+            CMDCLS_LOAD_VERT_LIT: begin
                 // T4 0x57: transform + light one vert -> cache slot.
                 if ((INCLUDE_GPU_LIGHT != 0) && (INCLUDE_VTX_CACHE != 0) && tri_state_valid) begin
                     xf_vtx      <= 2'd0;
@@ -5684,7 +5965,7 @@ always @(posedge clk) begin : main_fsm
                     state <= S_IDLE;
                 end
             end
-            else if (cmd_is_draw_indexed_tri) begin
+            CMDCLS_INDEXED_TRI: begin
                 // T3 0x54: read 3 cached verts SEQUENTIALLY (single MLAB read port)
                 // in S_VCREAD, then launch the derive.  Issue the vert-0 read addr
                 // here; vc_q reflects it next cycle.
@@ -5696,7 +5977,11 @@ always @(posedge clk) begin : main_fsm
                     state <= S_IDLE;
                 end
             end
-	            else state <= S_IDLE;
+	            // CMDCLS_NONE (unrecognised / wrong-size / feature-gated-out
+	            // drain) and the sticky-only classes with no EXECUTE action
+	            // (0x50 SET_OBJECT_STATE / 0x55 SET_LIGHT_STATE): retire.
+	            default: state <= S_IDLE;
+	            endcase
 	        end
 
         // ============================================================
@@ -5724,7 +6009,11 @@ always @(posedge clk) begin : main_fsm
         S_TRI_DERIVE: begin
             tri_start <= 1'b0;   // start pulse consumed by the walker
             // PRUNE GATE: every writer of dstate and the derivation datapath
-            // (dd*/rdet*/dv_*) lives inside this case.  Wrapping it in the
+            // (dd*/rdet*/dv_*) lives inside this case, except the shared
+            // rdet_* divider registers, whose recip-mode writers live in the
+            // S_XFORM XF_RECIP states — themselves reachable only through
+            // INCLUDE_VERT_TRI/INCLUDE_VTX_CACHE-gated EXECUTE arms, so the
+            // shared regs still sweep when the features are off.  Wrapping it in the
             // constant-folding `if (INCLUDE_VERT_TRI != 0)` means that when the
             // feature is off the whole case is dead logic, so Quartus drops the
             // dstate state machine and the ~1k ALMs of derivation arithmetic.
@@ -5785,27 +6074,27 @@ always @(posedge clk) begin : main_fsm
                 // the in-place overwrite never reads a value it just clobbered.
                 DRV_PROD_L0: begin
                     // launch k=0: s0*zi0, t0*zi0
-                    drv_dsp_a  <= dv_szi[0];   // raw s0
-                    drv_dsp_b  <= vt_zi[0];
-                    drv_dsp2_a <= dv_tzi[0];   // raw t0
-                    drv_dsp2_b <= vt_zi[0];
+                    dsp_a  <= dv_szi[0];   // raw s0
+                    dsp_b  <= vt_zi[0];
+                    dsp2_a <= dv_tzi[0];   // raw t0
+                    dsp2_b <= vt_zi[0];
                     dstate <= DRV_PROD_L1;
                 end
                 DRV_PROD_L1: begin
                     // launch k=1: s1*zi1, t1*zi1
-                    drv_dsp_a  <= dv_szi[1];   // raw s1
-                    drv_dsp_b  <= vt_zi[1];
-                    drv_dsp2_a <= dv_tzi[1];   // raw t1
-                    drv_dsp2_b <= vt_zi[1];
+                    dsp_a  <= dv_szi[1];   // raw s1
+                    dsp_b  <= vt_zi[1];
+                    dsp2_a <= dv_tzi[1];   // raw t1
+                    dsp2_b <= vt_zi[1];
                     dstate <= DRV_PROD_L2C0;
                 end
                 DRV_PROD_L2C0: begin
                     // launch k=2 AND capture k=0.  dv_szi[2]/dv_tzi[2] still hold
                     // raw s2/t2; the dv_szi[0]/dv_tzi[0] writes are distinct slots.
-                    drv_dsp_a  <= dv_szi[2];   // raw s2
-                    drv_dsp_b  <= vt_zi[2];
-                    drv_dsp2_a <= dv_tzi[2];   // raw t2
-                    drv_dsp2_b <= vt_zi[2];
+                    dsp_a  <= dv_szi[2];   // raw s2
+                    dsp_b  <= vt_zi[2];
+                    dsp2_a <= dv_tzi[2];   // raw t2
+                    dsp2_b <= vt_zi[2];
                     dv_szi[0] <= dsp_p[47:16];
                     dv_tzi[0] <= dsp2_p[47:16];
                     dstate <= DRV_PROD_C1;
@@ -5843,10 +6132,10 @@ always @(posedge clk) begin : main_fsm
                     dd_y0   <= spanprod_subpix_y ? {{4{sy0[15]}}, sy0[15:4]} : sy0;
                     // det = d1x*d2y - d2x*d1y : launch both products.  17-bit
                     // edge deltas sign-extended to the 32-bit signed DSP.
-                    drv_dsp_a  <= {{15{e1x[16]}}, e1x};
-                    drv_dsp_b  <= {{15{e2y[16]}}, e2y};
-                    drv_dsp2_a <= {{15{e2x[16]}}, e2x};
-                    drv_dsp2_b <= {{15{e1y[16]}}, e1y};
+                    dsp_a  <= {{15{e1x[16]}}, e1x};
+                    dsp_b  <= {{15{e2y[16]}}, e2y};
+                    dsp2_a <= {{15{e2x[16]}}, e2x};
+                    dsp2_b <= {{15{e1y[16]}}, e1y};
                     dstate <= DRV_DET_W;
                 end
                 DRV_DET_W: dstate <= DRV_DET_CAP;
@@ -5951,15 +6240,15 @@ always @(posedge clk) begin : main_fsm
                     // du: num_du = 16*(da1*d2y - da2*d1y)
                     // dv: num_dv =    (da2*d1x - da1*d2x)
                     if (!dv_doing_dv) begin
-                        drv_dsp_a  <= da1_sat;
-                        drv_dsp_b  <= {{15{dd2y[16]}}, dd2y};
-                        drv_dsp2_a <= da2_sat;
-                        drv_dsp2_b <= {{15{dd1y[16]}}, dd1y};
+                        dsp_a  <= da1_sat;
+                        dsp_b  <= {{15{dd2y[16]}}, dd2y};
+                        dsp2_a <= da2_sat;
+                        dsp2_b <= {{15{dd1y[16]}}, dd1y};
                     end else begin
-                        drv_dsp_a  <= da2_sat;
-                        drv_dsp_b  <= {{15{dd1x[16]}}, dd1x};
-                        drv_dsp2_a <= da1_sat;
-                        drv_dsp2_b <= {{15{dd2x[16]}}, dd2x};
+                        dsp_a  <= da2_sat;
+                        dsp_b  <= {{15{dd1x[16]}}, dd1x};
+                        dsp2_a <= da1_sat;
+                        dsp2_b <= {{15{dd2x[16]}}, dd2x};
                     end
                     dstate <= DRV_PLANE_NW;
                 end
@@ -5995,8 +6284,8 @@ always @(posedge clk) begin : main_fsm
                     dv_num_lo <= num_now[DERIV_SPLIT-1:0];   // low bits for lo pass
                     // num_hi = num_now >>> SPLIT (<=30-bit signed); deriv_sat32
                     // is the deterministic sliver clamp.
-                    drv_dsp_a  <= deriv_sat32(num_now >>> DERIV_SPLIT);
-                    drv_dsp_b  <= rdet_operand;
+                    dsp_a  <= deriv_sat32(num_now >>> DERIV_SPLIT);
+                    dsp_b  <= rdet_operand;
                     dstate <= DRV_SCALE_HW;
                 end
                 DRV_SCALE_HW: dstate <= DRV_SCALE_HC;   // hi-product DSP latency
@@ -6004,8 +6293,8 @@ always @(posedge clk) begin : main_fsm
                     // Capture H = num_hi*rdet (signed, <=63 bits) into the shared
                     // 64-bit accumulator; launch num_lo*rdet (unsigned).
                     dv_acc <= dsp_p;
-                    drv_dsp_a  <= {{(32-DERIV_SPLIT){1'b0}}, dv_num_lo};   // num_lo (unsigned)
-                    drv_dsp_b  <= rdet_operand;
+                    dsp_a  <= {{(32-DERIV_SPLIT){1'b0}}, dv_num_lo};   // num_lo (unsigned)
+                    dsp_b  <= rdet_operand;
                     dstate <= DRV_SCALE_LW;
                 end
                 DRV_SCALE_LW: dstate <= DRV_SCALE_LC;   // lo-product DSP latency
@@ -6071,10 +6360,10 @@ always @(posedge clk) begin : main_fsm
                 end
                 // ---- origin = a0 - du*x0px - dv*y0  (mod 2^32) ----
                 DRV_PLANE_ORG: begin
-                    drv_dsp_a  <= dv_du;
-                    drv_dsp_b  <= {{16{dd_x0px[15]}}, dd_x0px};
-                    drv_dsp2_a <= dv_dv;
-                    drv_dsp2_b <= {{16{dd_y0[15]}}, dd_y0};
+                    dsp_a  <= dv_du;
+                    dsp_b  <= {{16{dd_x0px[15]}}, dd_x0px};
+                    dsp2_a <= dv_dv;
+                    dsp2_b <= {{16{dd_y0[15]}}, dd_y0};
                     dstate <= DRV_ORG_W;
                 end
                 DRV_ORG_W: dstate <= DRV_ORG_CAP;
@@ -6090,10 +6379,12 @@ always @(posedge clk) begin : main_fsm
                     // mod 2^32) here so DRV_ORG_FORM stays a pure subtract.  Same
                     // value the in-line a0_eff produced — deriv_a0_q/vt_q29_shift/
                     // dv_attr don't change before DRV_ORG_FORM consumes it.
+                    // Single right barrel: the <<13 is constant wiring (held
+                    // exactly in 64 bits), so >>> sh gives the same [31:0] as
+                    // the old bidirectional <<(13-sh) / >>>(sh-13) pair.
                     if (vt_q29_en && (dv_attr != 3'd3))
-                        a0_eff_r <= (vt_q29_shift <= 5'd13)
-                            ? ({{32{deriv_a0_q[31]}}, deriv_a0_q} <<< (5'd13 - vt_q29_shift))
-                            : ({{32{deriv_a0_q[31]}}, deriv_a0_q} >>> (vt_q29_shift - 5'd13));
+                        a0_eff_r <= $signed({{19{deriv_a0_q[31]}}, deriv_a0_q, 13'b0})
+                                    >>> vt_q29_shift;
                     else
                         a0_eff_r <= deriv_a0_q;
                     dstate <= DRV_ORG_FORM;
@@ -6116,57 +6407,79 @@ always @(posedge clk) begin : main_fsm
                     // and are unaffected. dv_du/dv_dv are this attr's Q16.16 deltas.
                     org_now = a0_eff_r - $signed(drv_prod_r[31:0]) - $signed(drv2_prod_r[31:0])
                             + (dv_du >>> 1) + (dv_dv >>> 1);
-                    // store this attr's plane into the spanprod staging reg.
+                    // store this attr's plane into the MLAB staging bank (B4):
+                    // one row per plane, one write per array per pass.  24-bit
+                    // planes store the [23:0] truncation SIGN-EXTENDED from
+                    // bit 23 — exactly what the old 24-bit reg + read-side
+                    // {{8{v[23]}},v} pair produced.  Conditionally-walked
+                    // planes' du/dv also land in their flop mirrors (the
+                    // EMIT / q29_zstep_op_r readers).
                     case (dv_attr)
                         3'd0: begin
-                            spanprod_attr0_origin <= org_now;
-                            spanprod_attr0_du     <= dv_du;
-                            spanprod_attr0_dv     <= dv_dv;
+                            spanprod_pl_origin[4'd1] <= org_now;
+                            spanprod_pl_du[4'd1]     <= dv_du;
+                            spanprod_pl_dv[4'd1]     <= dv_dv;
                         end
                         3'd1: begin
-                            spanprod_attr1_origin <= org_now;
-                            spanprod_attr1_du     <= dv_du;
-                            spanprod_attr1_dv     <= dv_dv;
+                            spanprod_pl_origin[4'd2] <= org_now;
+                            spanprod_pl_du[4'd2]     <= dv_du;
+                            spanprod_pl_dv[4'd2]     <= dv_dv;
                         end
                         3'd2: begin
-                            spanprod_attr2_origin <= org_now;
-                            spanprod_attr2_du     <= dv_du;
-                            spanprod_attr2_dv     <= dv_dv;
+                            spanprod_pl_origin[4'd3] <= org_now;
+                            spanprod_pl_du[4'd3]     <= dv_du;
+                            spanprod_pl_dv[4'd3]     <= dv_dv;
+                            spanprod_attr2_du        <= dv_du;
+                            spanprod_attr2_dv        <= dv_dv;
                         end
                         3'd4: begin   // RED plane (truecolor RGB)
-                            spanprod_R_origin <= org_now[23:0];
-                            spanprod_R_du     <= dv_du[23:0];
-                            spanprod_R_dv     <= dv_dv[23:0];
+                            spanprod_pl_origin[4'd8] <= {{8{org_now[23]}}, org_now[23:0]};
+                            spanprod_pl_du[4'd8]     <= {{8{dv_du[23]}}, dv_du[23:0]};
+                            spanprod_pl_dv[4'd8]     <= {{8{dv_dv[23]}}, dv_dv[23:0]};
+                            spanprod_R_du            <= dv_du[23:0];
+                            spanprod_R_dv            <= dv_dv[23:0];
                         end
                         3'd5: begin   // BLUE plane (truecolor RGB)
-                            spanprod_B_origin <= org_now[23:0];
-                            spanprod_B_du     <= dv_du[23:0];
-                            spanprod_B_dv     <= dv_dv[23:0];
+                            spanprod_pl_origin[4'd9] <= {{8{org_now[23]}}, org_now[23:0]};
+                            spanprod_pl_du[4'd9]     <= {{8{dv_du[23]}}, dv_du[23:0]};
+                            spanprod_pl_dv[4'd9]     <= {{8{dv_dv[23]}}, dv_dv[23:0]};
+                            spanprod_B_du            <= dv_du[23:0];
+                            spanprod_B_dv            <= dv_dv[23:0];
                         end
                         3'd6: begin   // decoupled depth plane (0x4E), full 32-bit
-                            spanprod_depth_origin <= org_now;
-                            spanprod_depth_du     <= dv_du;
-                            spanprod_depth_dv     <= dv_dv;
+                            spanprod_pl_origin[4'd10] <= org_now;
+                            spanprod_pl_du[4'd10]     <= dv_du;
+                            spanprod_pl_dv[4'd10]     <= dv_dv;
+                            spanprod_depth_du         <= dv_du;
+                            spanprod_depth_dv         <= dv_dv;
                         end
                         4'd7: begin   // D-red plane (combine)
-                            spanprod_Dr_origin <= org_now[23:0];
-                            spanprod_Dr_du     <= dv_du[23:0];
-                            spanprod_Dr_dv     <= dv_dv[23:0];
+                            spanprod_pl_origin[4'd11] <= {{8{org_now[23]}}, org_now[23:0]};
+                            spanprod_pl_du[4'd11]     <= {{8{dv_du[23]}}, dv_du[23:0]};
+                            spanprod_pl_dv[4'd11]     <= {{8{dv_dv[23]}}, dv_dv[23:0]};
+                            spanprod_Dr_du            <= dv_du[23:0];
+                            spanprod_Dr_dv            <= dv_dv[23:0];
                         end
                         4'd8: begin   // D-green plane (combine)
-                            spanprod_Dg_origin <= org_now[23:0];
-                            spanprod_Dg_du     <= dv_du[23:0];
-                            spanprod_Dg_dv     <= dv_dv[23:0];
+                            spanprod_pl_origin[4'd12] <= {{8{org_now[23]}}, org_now[23:0]};
+                            spanprod_pl_du[4'd12]     <= {{8{dv_du[23]}}, dv_du[23:0]};
+                            spanprod_pl_dv[4'd12]     <= {{8{dv_dv[23]}}, dv_dv[23:0]};
+                            spanprod_Dg_du            <= dv_du[23:0];
+                            spanprod_Dg_dv            <= dv_dv[23:0];
                         end
                         4'd9: begin   // D-blue plane (combine)
-                            spanprod_Db_origin <= org_now[23:0];
-                            spanprod_Db_du     <= dv_du[23:0];
-                            spanprod_Db_dv     <= dv_dv[23:0];
+                            spanprod_pl_origin[4'd13] <= {{8{org_now[23]}}, org_now[23:0]};
+                            spanprod_pl_du[4'd13]     <= {{8{dv_du[23]}}, dv_du[23:0]};
+                            spanprod_pl_dv[4'd13]     <= {{8{dv_dv[23]}}, dv_dv[23:0]};
+                            spanprod_Db_du            <= dv_du[23:0];
+                            spanprod_Db_dv            <= dv_dv[23:0];
                         end
                         default: begin   // attr 3 = light / green
-                            spanprod_light_origin <= org_now[23:0];
-                            spanprod_light_du     <= dv_du[23:0];
-                            spanprod_light_dv     <= dv_dv[23:0];
+                            spanprod_pl_origin[4'd4] <= {{8{org_now[23]}}, org_now[23:0]};
+                            spanprod_pl_du[4'd4]     <= {{8{dv_du[23]}}, dv_du[23:0]};
+                            spanprod_pl_dv[4'd4]     <= {{8{dv_dv[23]}}, dv_dv[23:0]};
+                            spanprod_light_du        <= dv_du[23:0];
+                            spanprod_light_dv        <= dv_dv[23:0];
                         end
                     endcase
                     // Derive depth: combine surfaces derive 10 attrs (..R,B,depth,
@@ -6194,7 +6507,8 @@ always @(posedge clk) begin : main_fsm
         // Transform front-end (CMD_DRAW_XFORM_TRI / 0x51) — per vertex:
         // cam = M*{v,1} (Q16.16), zi = 2^32/cam.z, perspective project to
         // screen Q12.4 x / int y, then hand off to the derive (S_TRI_DERIVE)
-        // exactly as 0x4B does.  Single multiplier (dsp_p), DSP_OWNER_XFORM.
+        // exactly as 0x4B does.  Single multiplier (dsp_p) on the shared
+        // shared operand regs (dsp_a/dsp_b); dsp2 runs stale operands, unread here.
         // ============================================================
         S_XFORM: begin
             case (xf_state)
@@ -6208,8 +6522,8 @@ always @(posedge clk) begin : main_fsm
                         xf_transl <= xf_M_q;             // M[row][3]
                         xf_state  <= XF_ROW_DONE;
                     end else begin
-                        xf_dsp_a <= xf_M_q;
-                        xf_dsp_b <= (xf_idx == 2'd0) ? xf_vx[xf_vtx]
+                        dsp_a <= xf_M_q;
+                        dsp_b <= (xf_idx == 2'd0) ? xf_vx[xf_vtx]
                                   : (xf_idx == 2'd1) ? xf_vy[xf_vtx]
                                                      : xf_vz[xf_vtx];
                         xf_state <= XF_MAC_W;
@@ -6247,34 +6561,38 @@ always @(posedge clk) begin : main_fsm
                     xf_state <= XF_RECIP_INIT;
                 end
                 // ---- zi = floor(2^32 / max(cam.z, near_clip)) ----
+                // Runs on the SHARED rdet_* divider datapath (see the xf_div_q
+                // alias declaration): dividend left-aligned at bit 44, divisor
+                // zero-extended, 33 iterate beats.  rdet_ovf is untouched here
+                // (derive-mode only; DRV_RDET re-initializes it before use).
                 XF_RECIP_INIT: begin
-                    xf_div_rem      <= 32'd0;
-                    xf_div_dividend <= 33'h1_0000_0000;   // 2^32, MSB-first
-                    xf_div_q        <= 32'd0;
-                    xf_div_divisor  <= (xf_camz < xf_nearclip) ? xf_nearclip : xf_camz;
-                    xf_div_cnt      <= 6'd33;
+                    rdet_rem      <= 35'd0;
+                    rdet_dividend <= {1'b1, 44'd0};   // 2^32 << 12: MSB at the shared bit-44 tap
+                    rdet_q        <= 32'd0;
+                    rdet_divisor  <= {3'b000, xf_recip_divisor};
+                    rdet_cnt      <= 6'd33;
                     // T2: tally verts behind the near plane (same compare as the
                     // divisor floor).  All three behind => trivial-reject at LAUNCH.
                     if (xf_camz < xf_nearclip) xf_behind <= xf_behind + 2'd1;
                     xf_state        <= XF_RECIP_RUN;
                 end
                 XF_RECIP_RUN: begin
-                    xf_div_rem      <= xf_div_next;
-                    xf_div_q        <= {xf_div_q[30:0], xf_div_ge};
-                    xf_div_dividend <= {xf_div_dividend[31:0], 1'b0};
-                    if (xf_div_cnt == 6'd1) xf_state <= XF_PROJ_XA;
-                    else xf_div_cnt <= xf_div_cnt - 6'd1;
+                    rdet_rem      <= rdet_next;
+                    rdet_q        <= {rdet_q[30:0], rdet_ge};
+                    rdet_dividend <= {rdet_dividend[43:0], 1'b0};
+                    if (rdet_cnt == 6'd1) xf_state <= XF_PROJ_XA;
+                    else rdet_cnt <= rdet_cnt - 6'd1;
                 end
                 // ---- screen.x = (xc<<4) + ((xscale*ratio_x) >>> 12) ----
                 XF_PROJ_XA: begin
-                    xf_dsp_a <= xf_camx;
-                    xf_dsp_b <= xf_div_q;          // zi
+                    dsp_a <= xf_camx;
+                    dsp_b <= xf_div_q;          // zi
                     xf_state <= XF_PROJ_XW;
                 end
                 XF_PROJ_XW: xf_state <= XF_PROJ_XC;
                 XF_PROJ_XC: begin
-                    xf_dsp_a <= xf_xscale;
-                    xf_dsp_b <= dsp_p[47:16];      // ratio_x = (cam.x*zi)>>16
+                    dsp_a <= xf_xscale;
+                    dsp_b <= dsp_p[47:16];      // ratio_x = (cam.x*zi)>>16
                     xf_state <= XF_PROJ_XW2;
                 end
                 XF_PROJ_XW2: xf_state <= XF_PROJ_XS;
@@ -6283,33 +6601,33 @@ always @(posedge clk) begin : main_fsm
                 // xc term — an unsigned operand poisons the add and turns dsp_p>>>12
                 // into a LOGICAL shift, corrupting negative screen offsets.
                 XF_PROJ_XS: begin
-                    xf_sx_r <= ($signed({{32{xf_xc[31]}}, xf_xc}) <<< 4)
-                             + (dsp_p >>> 12);
+                    xf_sproj_r <= ($signed({{32{xf_xc[31]}}, xf_xc}) <<< 4)
+                                + (dsp_p >>> 12);
                     xf_state <= XF_PROJ_XS2;
                 end
                 XF_PROJ_XS2: begin   // saturate to int16 + store screen.x
                     case (xf_vtx)
-                        2'd0:    xf_sx[0] <= xf_sat16(xf_sx_r);
-                        2'd1:    xf_sx[1] <= xf_sat16(xf_sx_r);
-                        default: xf_sx[2] <= xf_sat16(xf_sx_r);
+                        2'd0:    xf_sx[0] <= xf_sproj_sat;
+                        2'd1:    xf_sx[1] <= xf_sproj_sat;
+                        default: xf_sx[2] <= xf_sproj_sat;
                     endcase
                     xf_state <= XF_PROJ_YA;
                 end
                 // ---- screen.y = yc - ((yscale*ratio_y) >>> 16) ----
                 XF_PROJ_YA: begin
-                    xf_dsp_a <= xf_camy;
-                    xf_dsp_b <= xf_div_q;          // zi
+                    dsp_a <= xf_camy;
+                    dsp_b <= xf_div_q;          // zi
                     xf_state <= XF_PROJ_YW;
                 end
                 XF_PROJ_YW: xf_state <= XF_PROJ_YC;
                 XF_PROJ_YC: begin
-                    xf_dsp_a <= xf_yscale;
-                    xf_dsp_b <= dsp_p[47:16];      // ratio_y
+                    dsp_a <= xf_yscale;
+                    dsp_b <= dsp_p[47:16];      // ratio_y
                     xf_state <= XF_PROJ_YW2;
                 end
                 XF_PROJ_YW2: xf_state <= XF_PROJ_YS;
                 XF_PROJ_YS: begin   // register screen.y add (split from sat16)
-                    xf_sy_r <= $signed({{32{xf_yc[31]}}, xf_yc}) - (dsp_p >>> 16);
+                    xf_sproj_r <= $signed({{32{xf_yc[31]}}, xf_yc}) - (dsp_p >>> 16);
                     xf_state <= XF_PROJ_YS2;
                 end
                 XF_PROJ_YS2: begin : xf_projys2_blk  // sat16 + store y/zi; advance
@@ -6319,9 +6637,9 @@ always @(posedge clk) begin : main_fsm
                     // absolute scale is irrelevant, only frame-consistent ordering.
                     // Harmless for 0x51 (sp_rgb=0 never derives attr6/vt_depth).
                     case (xf_vtx)
-                        2'd0:    begin xf_sy[0] <= xf_sat16(xf_sy_r); vt_zi[0] <= xf_div_q; vt_depth[0] <= xf_div_q; end
-                        2'd1:    begin xf_sy[1] <= xf_sat16(xf_sy_r); vt_zi[1] <= xf_div_q; vt_depth[1] <= xf_div_q; end
-                        default: begin xf_sy[2] <= xf_sat16(xf_sy_r); vt_zi[2] <= xf_div_q; vt_depth[2] <= xf_div_q; end
+                        2'd0:    begin xf_sy[0] <= xf_sproj_sat; vt_zi[0] <= xf_div_q; vt_depth[0] <= xf_div_q; end
+                        2'd1:    begin xf_sy[1] <= xf_sproj_sat; vt_zi[1] <= xf_div_q; vt_depth[1] <= xf_div_q; end
+                        default: begin xf_sy[2] <= xf_sproj_sat; vt_zi[2] <= xf_div_q; vt_depth[2] <= xf_div_q; end
                     endcase
                     if (xf_vtx == xf_last_vtx) begin
                         // last vert projected -> the parallel-load + derive
@@ -6397,8 +6715,8 @@ always @(posedge clk) begin : main_fsm
                 // dot = sum_k normal[k]*lightdir[k] (Q32.32), clamp [0,1.0], then
                 // per channel: clamp(ambient + (dot*lightcolor)>>16) -> RGB565.
                 XF_LIT_DL: begin   // launch N[idx]*L[idx]
-                    xf_dsp_a <= (xf_idx == 2'd0) ? xf_nx : (xf_idx == 2'd1) ? xf_ny : xf_nz;
-                    xf_dsp_b <= (xf_idx == 2'd0) ? lt_lx : (xf_idx == 2'd1) ? lt_ly : lt_lz;
+                    dsp_a <= (xf_idx == 2'd0) ? xf_nx : (xf_idx == 2'd1) ? xf_ny : xf_nz;
+                    dsp_b <= (xf_idx == 2'd0) ? lt_lx : (xf_idx == 2'd1) ? lt_ly : lt_lz;
                     xf_state <= XF_LIT_DW;
                 end
                 XF_LIT_DW: xf_state <= XF_LIT_DC;   // DSP latency
@@ -6417,8 +6735,8 @@ always @(posedge clk) begin : main_fsm
                     xf_state <= XF_LIT_CL;
                 end
                 XF_LIT_CL: begin   // launch dot * lightcolor[idx]
-                    xf_dsp_a <= xf_dot;
-                    xf_dsp_b <= (xf_idx == 2'd0) ? {27'd0, lt_lr}
+                    dsp_a <= xf_dot;
+                    dsp_b <= (xf_idx == 2'd0) ? {27'd0, lt_lr}
                               : (xf_idx == 2'd1) ? {26'd0, lt_lg}
                                                  : {27'd0, lt_lb};
                     xf_state <= XF_LIT_CW;
@@ -6516,6 +6834,7 @@ always @(posedge clk) begin : main_fsm
                 spanprod_u[tri_fill_idx[1:0]]     <= tri_rec_u;
                 spanprod_v[tri_fill_idx[1:0]]     <= tri_rec_v;
                 spanprod_count[tri_fill_idx[1:0]] <= tri_rec_count;
+                spanprod_cnt_valid[tri_fill_idx[1:0]] <= 1'b1;
                 if (tri_fill_idx == 3'd3) begin
                     spanprod_record_count <= 3'd4;
                     spanprod_records_left <= 16'd4;
@@ -6624,7 +6943,7 @@ always @(posedge clk) begin : main_fsm
             // now launches the second product (z when enabled, else attr0)
             // while the fb product is still in the multiplier.  Operands
             // changing on consecutive cycles is supported by the registered
-            // sp_dsp_* -> dsp_p path (DRV_PROD_* does exactly this).
+            // dsp_a/dsp_b -> dsp_p path (DRV_PROD_* does exactly this).
             spanprod_launch_step_mul(spanprod_launch_step);
             spanprod_launch_step <= spanprod_next_calc(spanprod_launch_step);
             state <= S_SPANPROD_CAPTURE;
@@ -6638,18 +6957,16 @@ always @(posedge clk) begin : main_fsm
             // pair (dsp_p/dsp2_p) belong to the capture slot, exactly as in
             // the serial schedule.  Skipped products keep their old zero
             // defaults, written while capturing the predecessor.
+            // All arms take the shared spanprod_capture_sum adder (origin
+            // muxed by calc_step); narrow destinations slice its low bits.
             spanprod_launch_step_mul(spanprod_launch_step);
             spanprod_launch_step <= spanprod_next_calc(spanprod_launch_step);
             case (spanprod_calc_step)
-                3'd0: spanprod_fb_addr_r <= spanprod_fb_base + dsp_p[GPU_ADDR_W-1:0] + dsp2_p[GPU_ADDR_W-1:0];
-                3'd5: spanprod_z_addr_r <= spanprod_z_base + dsp_p[GPU_ADDR_W-1:0] + dsp2_p[GPU_ADDR_W-1:0];
-                3'd1: spanprod_attr0_start_r <= spanprod_attr0_origin
-                                         + $signed(dsp_p[31:0])
-                                         + $signed(dsp2_p[31:0]);
+                3'd0: spanprod_fb_addr_r <= spanprod_capture_sum[GPU_ADDR_W-1:0];
+                3'd5: spanprod_z_addr_r <= spanprod_capture_sum[GPU_ADDR_W-1:0];
+                3'd1: spanprod_attr0_start_r <= spanprod_capture_sum;
                 3'd2: begin
-                    spanprod_attr1_start_r <= spanprod_attr1_origin
-                                         + $signed(dsp_p[31:0])
-                                         + $signed(dsp2_p[31:0]);
+                    spanprod_attr1_start_r <= spanprod_capture_sum;
                     if (!spanprod_attr_persp) begin
                         spanprod_attr2_start_r <= 32'sd0;
                         if (!(spanprod_flags[SPAN_COLORMAP] || spanprod_truecolor))
@@ -6657,30 +6974,17 @@ always @(posedge clk) begin : main_fsm
                     end
                 end
                 3'd3: begin
-                    spanprod_attr2_start_r <= spanprod_attr2_origin
-                                         + $signed(dsp_p[31:0])
-                                         + $signed(dsp2_p[31:0]);
+                    spanprod_attr2_start_r <= spanprod_capture_sum;
                     if (!(spanprod_flags[SPAN_COLORMAP] || spanprod_truecolor))
                         spanprod_light_start_r <= 24'sd0;
                 end
-                SPANPROD_STEP_R: spanprod_R_start_r <= spanprod_R_origin
-                                         + $signed(dsp_p[23:0])
-                                         + $signed(dsp2_p[23:0]);
-                SPANPROD_STEP_B: spanprod_B_start_r <= spanprod_B_origin
-                                         + $signed(dsp_p[23:0])
-                                         + $signed(dsp2_p[23:0]);
-                SPANPROD_STEP_DEPTH: spanprod_depth_start_r <= spanprod_depth_origin
-                                         + $signed(dsp_p[31:0])
-                                         + $signed(dsp2_p[31:0]);
-                SPANPROD_STEP_DR: spanprod_Dr_start_r <= spanprod_Dr_origin
-                                         + $signed(dsp_p[23:0]) + $signed(dsp2_p[23:0]);
-                SPANPROD_STEP_DG: spanprod_Dg_start_r <= spanprod_Dg_origin
-                                         + $signed(dsp_p[23:0]) + $signed(dsp2_p[23:0]);
-                SPANPROD_STEP_DB: spanprod_Db_start_r <= spanprod_Db_origin
-                                         + $signed(dsp_p[23:0]) + $signed(dsp2_p[23:0]);
-                default: spanprod_light_start_r <= spanprod_light_origin
-                                         + $signed(dsp_p[23:0])
-                                         + $signed(dsp2_p[23:0]);
+                SPANPROD_STEP_R: spanprod_R_start_r <= spanprod_capture_sum[23:0];
+                SPANPROD_STEP_B: spanprod_B_start_r <= spanprod_capture_sum[23:0];
+                SPANPROD_STEP_DEPTH: spanprod_depth_start_r <= spanprod_capture_sum;
+                SPANPROD_STEP_DR: spanprod_Dr_start_r <= spanprod_capture_sum[23:0];
+                SPANPROD_STEP_DG: spanprod_Dg_start_r <= spanprod_capture_sum[23:0];
+                SPANPROD_STEP_DB: spanprod_Db_start_r <= spanprod_capture_sum[23:0];
+                default: spanprod_light_start_r <= spanprod_capture_sum[23:0];
             endcase
             if (spanprod_next_calc(spanprod_calc_step) == SPANPROD_STEP_NONE)
                 state <= S_SPANPROD_EMIT;
@@ -6733,10 +7037,13 @@ always @(posedge clk) begin : main_fsm
             reg [31:0] ztest_cap_word;
             reg [GPU_ADDR_W-1:0] source_fb_addr;
             reg [GPU_ADDR_W-1:0] source_tex_base;
-            reg signed [31:0] source_s;
-            reg signed [31:0] source_t;
-            reg signed [31:0] source_s_clamped;
-            reg signed [31:0] source_t_clamped;
+            // TEX CLAMP top halves only: every consumer of the clamped
+            // coordinate reads [31:16] (the mirror_idx() calls feeding
+            // p0a_s_int / p0a_t_y), so the clamp compares and muxes are
+            // 16-bit — see the contract/equivalence note at the compute
+            // site below.
+            reg signed [15:0] source_s_clamped;
+            reg signed [15:0] source_t_clamped;
             reg [5:0] source_light;
             reg [4:0] source_R, source_B;   // truecolor RGB red/blue
             reg [4:0] source_Dr, source_Db; // combine D red/blue
@@ -6823,11 +7130,9 @@ always @(posedge clk) begin : main_fsm
             // INCLUDE_DIRECT_COLOR=0, so palettized z is byte-exact unchanged.
             source_z_half = sp_q29_z_enable
                           ? sp_q29_z_value[29:14]
-                          : sp_rgb
-                            ? zc_s2_d                      // 0x4E decoupled depth (pipelined z_compress)
-                            : sp_truecolor
-                              ? zc_s2_z                    // 0x4B truecolor zi (pipelined z_compress)
-                              : sp_z_value[16:1];          // palettized: linear (unchanged)
+                          : (sp_rgb || sp_truecolor)
+                            ? zc_s2                        // unified pipelined z_compress (depth for rgb, zi for truecolor)
+                            : sp_z_value[16:1];            // palettized: linear (unchanged)
             source_z_stage_ready = !z_flush_valid
                                  && (!z_src_pending_valid
                                      || z_src_pending_consume);
@@ -6840,21 +7145,44 @@ always @(posedge clk) begin : main_fsm
                        && (g_zwarm == 2'd0);
             source_fb_addr = sp_fb_addr;
             source_tex_base = sp_tex_addr;
-            source_s = sp_s;
-            source_t = sp_t;
-            source_s_clamped = sp_s;
+            // TEX CLAMP — compares narrowed to the top 16 bits.  SDK
+            // CONTRACT (of_gpu.h clamp_min/clamp_max): span clamp payload
+            // words satisfy min <= max per axis (s and t, signed Q16.16);
+            // behavior is UNDEFINED for min > max.  Under that contract,
+            //   clamp32(s, min, max)[31:16]
+            //     == clamp16(s[31:16], min[31:16], max[31:16])
+            // with the same if / else-if priority.  Proof — write
+            // f(x) = x >>> 16 (monotonic non-decreasing), and note only
+            // [31:16] of the 32-bit result was ever consumed:
+            //   * s < min: 32b picks min, top = min16.  Monotonicity gives
+            //     s16 <= min16.  If s16 < min16 the 16-bit clamp picks
+            //     min16 too.  The boundary s16 == min16 (equal top halves,
+            //     differing low bits) falls through the min branch — and
+            //     min <= max forces min16 <= max16, so the max branch
+            //     stays false — passing s16, which EQUALS min16.
+            //   * s > max: 32b picks max, top = max16.  Symmetric: s16 >=
+            //     max16, and min16 <= max16 keeps the min branch false;
+            //     s16 > max16 picks max16, the s16 == max16 boundary
+            //     passes s16 == max16.
+            //   * min <= s <= max: 32b passes s, top = s16; monotonicity
+            //     gives min16 <= s16 <= max16, both branches false, the
+            //     16-bit clamp passes s16.
+            // The old 32-bit-only counterexample (min = 0x00018000,
+            // max = 0x0000FFFF, s = 0x00017000: 32b top = 1, 16b top = 0)
+            // needs min > max and is excluded by the contract.
+            source_s_clamped = sp_s[31:16];
             if (sp_clamp_enable[0]) begin
-                if (source_s < sp_s_clamp_min)
-                    source_s_clamped = sp_s_clamp_min;
-                else if (source_s > sp_s_clamp_max)
-                    source_s_clamped = sp_s_clamp_max;
+                if (source_s_clamped < $signed(sp_s_clamp_min[31:16]))
+                    source_s_clamped = sp_s_clamp_min[31:16];
+                else if (source_s_clamped > $signed(sp_s_clamp_max[31:16]))
+                    source_s_clamped = sp_s_clamp_max[31:16];
             end
-            source_t_clamped = sp_t;
+            source_t_clamped = sp_t[31:16];
             if (sp_clamp_enable[1]) begin
-                if (source_t < sp_t_clamp_min)
-                    source_t_clamped = sp_t_clamp_min;
-                else if (source_t > sp_t_clamp_max)
-                    source_t_clamped = sp_t_clamp_max;
+                if (source_t_clamped < $signed(sp_t_clamp_min[31:16]))
+                    source_t_clamped = sp_t_clamp_min[31:16];
+                else if (source_t_clamped > $signed(sp_t_clamp_max[31:16]))
+                    source_t_clamped = sp_t_clamp_max[31:16];
             end
             source_light = sp_light;
             source_R = sp_R;
@@ -7049,14 +7377,12 @@ always @(posedge clk) begin : main_fsm
             // gives the fragment pipe one extra cycle of elasticity.
             // z_compress pipe warm-up at span start: while g_zwarm!=0, load_p0a is
             // held off (above), so advance only the lookahead + 2 compress stages
-            // (single cone/cycle) to fill the pipe; after 2 cycles zc_s2_* holds
-            // z_compress(start) and sp_z_la is the steady-state +2*step.  Truecolor
-            // builds only (g_zwarm primed 0 otherwise).
+            // (single cone/cycle) to fill the pipe; after 2 cycles zc_s2 holds
+            // z_compress(start) and sp_zc_la is the steady-state +2*step.
+            // Direct-color builds only (g_zwarm primed 0 otherwise).
             if (g_zwarm != 2'd0) begin
-                sp_z_la     <= sp_z_la + sp_z_value_step;
-                sp_depth_la <= sp_depth_la + sp_depth_step;
-                zc_s1_z <= zc_stage1(sp_z_la);     zc_s2_z <= zc_stage2(zc_s1_z);
-                zc_s1_d <= zc_stage1(sp_depth_la); zc_s2_d <= zc_stage2(zc_s1_d);
+                sp_zc_la <= sp_zc_la + sp_zc_step;
+                zc_s1 <= zc_stage1(sp_zc_la); zc_s2 <= zc_stage2(zc_s1);
                 g_zwarm <= g_zwarm - 2'd1;
             end
             if (load_p0a) begin
@@ -7076,8 +7402,10 @@ always @(posedge clk) begin : main_fsm
                 p0a_z_write   <= sp_z_test_enable && sp_z_write_enable;
                 p0a_z_addr    <= sp_z_addr;
                 p0a_z_value   <= source_z_half;
-                p0a_s_int <= mirror_idx(source_s_clamped[31:16], sp_tex_w_mask, sp_mirror_s);
-                p0a_t_y   <= mirror_idx(source_t_clamped[31:16], sp_tex_h_mask, sp_mirror_t);
+                p0a_s_int <= mirror_idx(source_s_clamped, sp_tex_w_mask,
+                                        sp_tex_w_octave, sp_mirror_s);
+                p0a_t_y   <= mirror_idx(source_t_clamped, sp_tex_h_mask,
+                                        sp_tex_h_octave, sp_mirror_t);
 
                 if (load_p0a_z) begin
                     z_src_push      = 1'b1;
@@ -7086,28 +7414,22 @@ always @(posedge clk) begin : main_fsm
                     z_src_push_half = source_z_half;
                     sp_z_addr  <= sp_z_addr + sp_z_step;
                     sp_z_value <= sp_z_value + sp_z_value_step;
-                    sp_depth_value <= sp_depth_value + sp_depth_step;
                     if (sp_q29_z_enable)
                         sp_q29_z_value <= sat_add32(sp_q29_z_value,
                                                     sp_q29_z_value_step);
-                    // pipelined z_compress: advance lookahead + both stages in
-                    // lockstep with sp_z_value (prunes on non-truecolor builds).
-                    sp_z_la     <= sp_z_la + sp_z_value_step;
-                    sp_depth_la <= sp_depth_la + sp_depth_step;
-                    zc_s1_z <= zc_stage1(sp_z_la);     zc_s2_z <= zc_stage2(zc_s1_z);
-                    zc_s1_d <= zc_stage1(sp_depth_la); zc_s2_d <= zc_stage2(zc_s1_d);
+                    // pipelined z_compress: advance the unified lookahead + both
+                    // stages in lockstep (prunes on non-direct-color builds).
+                    sp_zc_la <= sp_zc_la + sp_zc_step;
+                    zc_s1 <= zc_stage1(sp_zc_la); zc_s2 <= zc_stage2(zc_s1);
                 end
                 else if (source_z_advance_active) begin
                     sp_z_addr  <= sp_z_addr + sp_z_step;
                     sp_z_value <= sp_z_value + sp_z_value_step;
-                    sp_depth_value <= sp_depth_value + sp_depth_step;
                     if (sp_q29_z_enable)
                         sp_q29_z_value <= sat_add32(sp_q29_z_value,
                                                     sp_q29_z_value_step);
-                    sp_z_la     <= sp_z_la + sp_z_value_step;
-                    sp_depth_la <= sp_depth_la + sp_depth_step;
-                    zc_s1_z <= zc_stage1(sp_z_la);     zc_s2_z <= zc_stage2(zc_s1_z);
-                    zc_s1_d <= zc_stage1(sp_depth_la); zc_s2_d <= zc_stage2(zc_s1_d);
+                    sp_zc_la <= sp_zc_la + sp_zc_step;
+                    zc_s1 <= zc_stage1(sp_zc_la); zc_s2 <= zc_stage2(zc_s1);
                 end
 
                 sp_fb_addr <= sp_fb_addr + sp_fb_stride;
@@ -7258,8 +7580,7 @@ always @(posedge clk) begin : main_fsm
                                            ? {p3_z_word_addr[GPU_ADDR_W-1:4],
                                               4'b0}
                                            : p3_z_word_addr;
-                            blend_arlen   <= (GPU_Z_READ_WINDOW > 1) ? 8'd3
-                                                                     : 8'd0;
+                            blend_ar_is_burst <= (GPU_Z_READ_WINDOW > 1);
                             zw_base       <= p3_z_word_addr[GPU_ADDR_W-1:4];
                             zw_valid      <= 4'b0;
                             zw_fill_beat  <= 2'd0;
@@ -7426,7 +7747,7 @@ always @(posedge clk) begin : main_fsm
                         // All writes drained: issue the single-word dst read.
                         blend_arvalid <= 1'b1;
                         blend_araddr  <= p3_fb_word_addr_w;
-                        blend_arlen   <= 8'd0;
+                        blend_ar_is_burst <= 1'b0;
                         fbss          <= FBSS_CB_AR;
                     end
                 end
@@ -7496,7 +7817,7 @@ always @(posedge clk) begin : main_fsm
                               && fb_write_drain_complete) begin
                         blend_arvalid <= 1;
                         blend_araddr  <= blend_group_word_addr;
-                        blend_arlen   <= 8'd0;
+                        blend_ar_is_burst <= 1'b0;
                         fbss          <= FBSS_BLEND_AR_WAIT;
                     end
                 end
@@ -7635,6 +7956,11 @@ always @(posedge clk) begin : main_fsm
             //   PSS_PASS_ANCHOR  pass 1, span start: anchor at pos 0
             //   PSS_PASS_TO_A    pass 2: derive slot A slopes from anchor → pos 16
             //   PSS_PASS_TO_B    pass 3+: derive slot B slopes (fills pending)
+            //
+            // Free-running pre-decode of the constant-Z launch qualifier —
+            // see pss_constz_go_r declaration for the stability argument.
+            pss_constz_go_r <= (persp_pass == PSS_PASS_ANCHOR)
+                             && sp_zinv_step_zero;
             if (!persp_active) begin
                 persp_pss <= PSS_IDLE;
             end else case (persp_pss)
@@ -7664,7 +7990,6 @@ always @(posedge clk) begin : main_fsm
 	                    reg [15:0] current_segment_left;
 	                    reg [4:0]  end_advance;
 	                    reg [4:0]  slope_divisor;
-	                    reg        tail_dynamic;
                     // Stage 1 of pipelined setup: advance projection-space
                     // counters and register whether this pass needs a
                     // variable-length tail advance.  The following
@@ -7681,7 +8006,6 @@ always @(posedge clk) begin : main_fsm
 	                    if (!sp_persp_q29_mode) begin
 	                        end_advance = PERSPECTIVE_SEG_LEN[4:0];
 	                        slope_divisor = PERSPECTIVE_SEG_LEN[4:0];
-	                        tail_dynamic = 1'b0;
 	                    end else begin
                         if (persp_pass == PSS_PASS_TO_A) begin
                             future_count = sp_count;
@@ -7695,15 +8019,12 @@ always @(posedge clk) begin : main_fsm
 	                        if (future_count > PERSPECTIVE_SEG_LEN) begin
 	                            end_advance = PERSPECTIVE_SEG_LEN[4:0];
 	                            slope_divisor = PERSPECTIVE_SEG_LEN[4:0];
-	                            tail_dynamic = 1'b0;
 	                        end else if (future_count > 16'd1) begin
 	                            end_advance = future_count[4:0] - 5'd1;
 	                            slope_divisor = future_count[4:0] - 5'd1;
-	                            tail_dynamic = 1'b1;
 	                        end else begin
 	                            end_advance = 5'd0;
 	                            slope_divisor = 5'd1;
-	                            tail_dynamic = 1'b1;
 	                        end
 	                    end
 
@@ -7711,24 +8032,21 @@ always @(posedge clk) begin : main_fsm
 	                    pss_zinv_prev_r  <= sp_zinv;
 	                    pss_zinv_abs_na_r <= persp_zinv_abs_na;
 	                    pss_tail_advance <= end_advance;
-	                    pss_adv_tail_dynamic <= tail_dynamic;
 	                    persp_pss <= PSS_ADV_ISSUE;
 	                end
 
 	                PSS_ADV_ISSUE: begin
-	                    if (pss_adv_tail_dynamic) begin
-	                        pss_dsp_a  <= sp_sZstep;
-	                        pss_dsp_b  <= $signed({27'd0, pss_tail_advance});
-	                        pss_dsp2_a <= sp_tZstep;
-	                        pss_dsp2_b <= $signed({27'd0, pss_tail_advance});
-	                        persp_pss <= PSS_ADV_TAIL_ST_WAIT;
-	                    end else begin
-	                        sp_sZ          <= sp_sZ   + (sp_sZstep   <<< PERSPECTIVE_SEG_SHIFT);
-	                        sp_tZ          <= sp_tZ   + (sp_tZstep   <<< PERSPECTIVE_SEG_SHIFT);
-	                        sp_zinv        <= sp_zinv + (sp_zinv_step <<< PERSPECTIVE_SEG_SHIFT);
-	                        pss_zinv_adv_r <= sp_zinv + (sp_zinv_step <<< PERSPECTIVE_SEG_SHIFT);
-	                        persp_pss      <= PSS_ADV_CLAMP;
-	                    end
+	                    // Unified advance: full 16-pixel segments and variable
+	                    // tails both go through the shared DSP (step * advance).
+	                    // dsp_p[31:0] of step*16 is bit-identical to the old
+	                    // dedicated (step <<< 4) adders mod 2^32 for every
+	                    // operand value (lower product bits are sign-agnostic),
+	                    // at +4 cycles per full segment.
+	                    dsp_a  <= sp_sZstep;
+	                    dsp_b  <= $signed({27'd0, pss_tail_advance});
+	                    dsp2_a <= sp_tZstep;
+	                    dsp2_b <= $signed({27'd0, pss_tail_advance});
+	                    persp_pss <= PSS_ADV_TAIL_ST_WAIT;
 	                end
 
 	                PSS_ADV_TAIL_ST_WAIT: begin
@@ -7738,8 +8056,8 @@ always @(posedge clk) begin : main_fsm
 	                PSS_ADV_TAIL_ST_CAPTURE: begin
 	                    pss_tail_s_delta <= dsp_p[31:0];
 	                    pss_tail_t_delta <= dsp2_p[31:0];
-	                    pss_dsp_a  <= sp_zinv_step;
-	                    pss_dsp_b  <= $signed({27'd0, pss_tail_advance});
+	                    dsp_a  <= sp_zinv_step;
+	                    dsp_b  <= $signed({27'd0, pss_tail_advance});
 	                    persp_pss <= PSS_ADV_TAIL_Z_WAIT;
 	                end
 
@@ -7817,7 +8135,9 @@ always @(posedge clk) begin : main_fsm
                     persp_pss <= PSS_RECIP_SHIFT;
                 end
 
-                PSS_RECIP_SHIFT: begin
+                PSS_RECIP_SHIFT: begin : pss_recip_shift_blk
+                    reg [5:0]  recip_shamt;
+                    reg [44:0] recip_funnel;
                     // Compute the reciprocal from LUT mantissa + clz shift
                     // and latch it before the N-R refinement. Normal spans
                     // use Q16.16.  Quake param-span Q29 mode carries a much
@@ -7825,20 +8145,18 @@ always @(posedge clk) begin : main_fsm
                     // in the reciprocal and compensate in the final multiply;
                     // otherwise the reciprocal often has only ~10 integer
                     // levels and texel boundaries drift.
-                    if (sp_persp_q29_mode) begin
-                        if (pss_q29_recip_shift >= 6'd13)
-                            recip_q16_r <= $signed({16'b0, recip_rd_data})
-                                         <<< (pss_q29_recip_shift - 6'd13);
-                        else
-                            recip_q16_r <= $signed({16'b0, recip_rd_data})
-                                         >>> (6'd13 - pss_q29_recip_shift);
-                    end else if (persp_clz >= 5'd13) begin
-                        recip_q16_r <= $signed({16'b0, recip_rd_data})
-                                     <<< (persp_clz - 5'd13);
-                    end else begin
-                        recip_q16_r <= $signed({16'b0, recip_rd_data})
-                                     >>> (5'd13 - persp_clz);
-                    end
+                    //
+                    // ONE left funnel replaces the old two-direction shifter
+                    // pair: result = recip <<< (shamt-13) or >>> (13-shamt)
+                    // == bits [44:13] of (recip << shamt).  recip_rd_data is
+                    // 16 bits unsigned (so <<</>>> coincide) and shamt caps
+                    // at 35 (persp_clz max 31 + Q29 extra 4), so a 45-bit
+                    // container keeps every bit of the consumed slice; bits
+                    // above 44 match the original 32-bit truncation.
+                    recip_shamt  = sp_persp_q29_mode ? pss_q29_recip_shift
+                                                     : {1'b0, persp_clz};
+                    recip_funnel = {29'd0, recip_rd_data} << recip_shamt;
+                    recip_q16_r <= $signed(recip_funnel[44:13]);
                     persp_pss <= PSS_NR_MUL_X;
                 end
 
@@ -7849,8 +8167,8 @@ always @(posedge clk) begin : main_fsm
                 // signed Q16.16; products taken as dsp_p[47:16].
                 PSS_NR_MUL_X: begin
                     // Launch x * y0 on dsp.  dsp2 idle this round.
-                    pss_dsp_a <= $signed(persp_zinv_abs_r);
-                    pss_dsp_b <= recip_q16_r;
+                    dsp_a <= $signed(persp_zinv_abs_r);
+                    dsp_b <= recip_q16_r;
                     persp_pss <= PSS_NR_MUL_X_W;
                 end
                 PSS_NR_MUL_X_W: persp_pss <= PSS_NR_SUB;
@@ -7869,8 +8187,8 @@ always @(posedge clk) begin : main_fsm
                 end
                 PSS_NR_MUL_Y: begin
                     // Launch y0 * (2 - x * y0).
-                    pss_dsp_a <= recip_q16_r;
-                    pss_dsp_b <= nr_two_minus_xy;
+                    dsp_a <= recip_q16_r;
+                    dsp_b <= nr_two_minus_xy;
                     persp_pss <= PSS_NR_MUL_Y_W;
                 end
                 PSS_NR_MUL_Y_W: persp_pss <= PSS_NR_CAPTURE;
@@ -7899,26 +8217,43 @@ always @(posedge clk) begin : main_fsm
                 PSS_MUL: begin
                     // Kick BOTH multiplies (sZ×recip on dsp, tZ×recip on dsp2)
                     // in parallel using the pre-registered recip_q16_r.
-                    // They land together at PSS_FINAL one DSP cycle later.
-                    pss_dsp_a     <= sp_sZ;
-                    pss_dsp_b     <= recip_q16_r;
-                    pss_dsp2_a    <= sp_tZ;
-                    pss_dsp2_b    <= recip_q16_r;
+                    // They land together at PSS_FINAL_PROD one DSP cycle later.
+                    dsp_a     <= sp_sZ;
+                    dsp_b     <= recip_q16_r;
+                    dsp2_a    <= sp_tZ;
+                    dsp2_b    <= recip_q16_r;
                     persp_pss <= PSS_MUL_W;
                 end
 
                 PSS_MUL_W: begin
                     // DSP pipeline delay — dsp_p and dsp2_p both update here.
-                    persp_pss <= PSS_FINAL;
+                    persp_pss <= PSS_FINAL_PROD;
+                end
+
+                PSS_FINAL_PROD: begin
+                    // T-split stage (STA #1): register the RAW 64-bit endpoint
+                    // products.  The multiplier's fabric recombination
+                    // terminates in these plain registers; the shared Q29/Q16
+                    // rounding adder + shift/slice run next state (PSS_FINAL)
+                    // from register outputs.  Values are bit-identical — the
+                    // products merely cross one extra FF stage.  The +1 cycle
+                    // sits inside the PSS busy window: the issue stage samples
+                    // persp_seg_a_ready / persp_seg_b_ready flags (set only by
+                    // the commit states), never a fixed cycle count.
+                    pss_prod_s_r <= dsp_p;
+                    pss_prod_t_r <= dsp2_p;
+                    persp_pss    <= PSS_FINAL;
                 end
 
                 PSS_FINAL: begin : pss_final_blk
                     reg signed [31:0] s_projected;
                     reg signed [31:0] t_projected;
+                    reg signed [63:0] s_round64;
+                    reg signed [63:0] t_round64;
                     reg signed [63:0] s_projected64;
                     reg signed [63:0] t_projected64;
-                    // dsp_p  = sZ × recip → s_end
-                    // dsp2_p = tZ × recip → t_end
+                    // pss_prod_s_r = sZ × recip → s_end   (staged in PSS_FINAL_PROD)
+                    // pss_prod_t_r = tZ × recip → t_end
                     //
                     // Task #89 clamp: when the sub-segment advance
                     // brought sp_zinv too close to zero (or
@@ -7932,21 +8267,52 @@ always @(posedge clk) begin : main_fsm
                     // Register endpoints before deriving slopes.  The previous
                     // single-cycle path ran DSP output -> 32-bit subtract ->
                     // sp_sstep/sp_tstep and was the post-fit 100 MHz limiter.
+                    // ONE rounding adder per DSP product (the Q29/Q16
+                    // branches add only a different constant): mux the
+                    // round constant on the registered mode flag, keep the
+                    // per-mode shift/slice after the shared adder.
+                    //
+                    // T-split (STA #1): the raw products were registered in
+                    // PSS_FINAL_PROD, so this cone starts at pss_prod_*_r
+                    // FF outputs — the Mult fabric recombination no longer
+                    // shares this cycle with the 64-bit rounding carry.
+                    s_round64 = pss_prod_s_r + (sp_persp_q29_mode
+                                          ? (64'sd1 << (15 + PSS_Q29_RECIP_EXTRA_INT))
+                                          : 64'sd32768);
+                    t_round64 = pss_prod_t_r + (sp_persp_q29_mode
+                                          ? (64'sd1 << (15 + PSS_Q29_RECIP_EXTRA_INT))
+                                          : 64'sd32768);
                     if (sp_persp_q29_mode) begin
-                        s_projected64 = (dsp_p + (64'sd1 << (15 + PSS_Q29_RECIP_EXTRA_INT)))
-                                      >>> (16 + PSS_Q29_RECIP_EXTRA_INT);
-                        t_projected64 = (dsp2_p + (64'sd1 << (15 + PSS_Q29_RECIP_EXTRA_INT)))
-                                      >>> (16 + PSS_Q29_RECIP_EXTRA_INT);
-                        s_projected = s_projected64[31:0];
-                        t_projected = t_projected64[31:0];
+                        s_projected64 = s_round64 >>> (16 + PSS_Q29_RECIP_EXTRA_INT);
+                        t_projected64 = t_round64 >>> (16 + PSS_Q29_RECIP_EXTRA_INT);
                     end else begin
-                        s_projected = q16_round_product(dsp_p);
-                        t_projected = q16_round_product(dsp2_p);
+                        s_projected64 = s_round64 >>> 16;
+                        t_projected64 = t_round64 >>> 16;
                     end
+                    s_projected = s_projected64[31:0];
+                    t_projected = t_projected64[31:0];
                     pss_s_end_r <= pss_zinv_clamp_r ? persp_anchor_s
                                                      : s_projected;
                     pss_t_end_r <= pss_zinv_clamp_r ? persp_anchor_t
                                                      : t_projected;
+                    // Constant-Z anchor pass: launch the projection-space
+                    // minor-step multiplies HERE (one state earlier than the
+                    // old PSS_SLOPE launch — all four operands are stable:
+                    // recip_q16_r since PSS_NR_CAPTURE, sp_sZstep/sp_tZstep
+                    // since span emit).  The dsp2_b operand-select term is
+                    // now one state bit AND the pre-decoded pss_constz_go_r
+                    // FF instead of the STA #2 PSS_SLOPE-decode + persp_pass
+                    // compare + sp_zinv_step_zero cone.  Products land at
+                    // the end of PSS_SLOPE; PSS_CONSTZ_STEP_W captures them
+                    // raw and PSS_CONSTZ_STEP_CAPTURE rounds/slices — same
+                    // total state count as the old launch position, so
+                    // constant-Z spans pay only the PSS_FINAL_PROD cycle.
+                    if (pss_constz_go_r) begin
+                        dsp_a  <= sp_sZstep;
+                        dsp_b  <= recip_q16_r;
+                        dsp2_a <= sp_tZstep;
+                        dsp2_b <= recip_q16_r;
+                    end
                     persp_pss   <= PSS_SLOPE;
                 end
 
@@ -7963,12 +8329,11 @@ always @(posedge clk) begin : main_fsm
                                 // reciprocal.  This avoids the 16-pixel PSS
                                 // segment loop entirely while preserving the
                                 // perspective-correct result for constant 1/Z.
+                                // (The step multiplies were launched in
+                                // PSS_FINAL — they are in flight now and land
+                                // in dsp_p/dsp2_p at the end of this state.)
                                 sp_s <= pss_s_end_r;
                                 sp_t <= pss_t_end_r;
-                                pss_dsp_a  <= sp_sZstep;
-                                pss_dsp_b  <= recip_q16_r;
-                                pss_dsp2_a <= sp_tZstep;
-                                pss_dsp2_b <= recip_q16_r;
                                 persp_first_done <= 1'b1;
                                 persp_pss <= PSS_CONSTZ_STEP_W;
                             end else begin
@@ -8050,10 +8415,10 @@ always @(posedge clk) begin : main_fsm
                         pss_slope_t_neg <= pss_slope_t_delta[31];
                         pss_slope_s_mag <= s_mag;
                         pss_slope_t_mag <= t_mag;
-                        pss_dsp_a  <= $signed(s_mag);
-                        pss_dsp_b  <= $signed(pss_div_recip32(pss_slope_divisor));
-                        pss_dsp2_a <= $signed(t_mag);
-                        pss_dsp2_b <= $signed(pss_div_recip32(pss_slope_divisor));
+                        dsp_a  <= $signed(s_mag);
+                        dsp_b  <= $signed(pss_div_recip32(pss_slope_divisor));
+                        dsp2_a <= $signed(t_mag);
+                        dsp2_b <= $signed(pss_div_recip32(pss_slope_divisor));
                         persp_pss <= PSS_SLOPE_DIV_WAIT;
                     end else begin
                         // Full-segment (divisor==16) step commit.  The per-pixel
@@ -8100,10 +8465,10 @@ always @(posedge clk) begin : main_fsm
                 PSS_SLOPE_DIV_COMMIT: begin
                     pss_slope_s_quot <= dsp_p[63:32];
                     pss_slope_t_quot <= dsp2_p[63:32];
-                    pss_dsp_a  <= $signed(dsp_p[63:32]);
-                    pss_dsp_b  <= $signed({27'd0, pss_slope_divisor});
-                    pss_dsp2_a <= $signed(dsp2_p[63:32]);
-                    pss_dsp2_b <= $signed({27'd0, pss_slope_divisor});
+                    dsp_a  <= $signed(dsp_p[63:32]);
+                    dsp_b  <= $signed({27'd0, pss_slope_divisor});
+                    dsp2_a <= $signed(dsp2_p[63:32]);
+                    dsp2_b <= $signed({27'd0, pss_slope_divisor});
                     persp_pss <= PSS_SLOPE_DIV_CORR_WAIT;
                 end
 
@@ -8135,25 +8500,39 @@ always @(posedge clk) begin : main_fsm
                 end
 
                 PSS_CONSTZ_STEP_W: begin
+                    // T-split stage (STA #1): the step products (launched in
+                    // PSS_FINAL, latched into dsp_p/dsp2_p at the end of
+                    // PSS_SLOPE) are valid this whole state — register them
+                    // RAW so the round/slice/commit into sp_sstep/sp_tstep
+                    // next state starts from plain FF outputs, exactly like
+                    // the PSS_FINAL_PROD -> PSS_FINAL endpoint split.
+                    pss_prod_s_r <= dsp_p;
+                    pss_prod_t_r <= dsp2_p;
                     persp_pss <= PSS_CONSTZ_STEP_CAPTURE;
                 end
 
                 PSS_CONSTZ_STEP_CAPTURE: begin : pss_constz_step_capture_blk
+                    reg signed [63:0] s_round64;
+                    reg signed [63:0] t_round64;
                     reg signed [63:0] s_step_projected;
                     reg signed [63:0] t_step_projected;
+                    // Shared Q29/Q16 rounding adder — see PSS_FINAL.  Reads
+                    // the pss_prod_*_r stage registers (T-split), not dsp_p.
+                    s_round64 = pss_prod_s_r + (sp_persp_q29_mode
+                                          ? (64'sd1 << (15 + PSS_Q29_RECIP_EXTRA_INT))
+                                          : 64'sd32768);
+                    t_round64 = pss_prod_t_r + (sp_persp_q29_mode
+                                          ? (64'sd1 << (15 + PSS_Q29_RECIP_EXTRA_INT))
+                                          : 64'sd32768);
                     if (sp_persp_q29_mode) begin
-                        s_step_projected =
-                            (dsp_p + (64'sd1 << (15 + PSS_Q29_RECIP_EXTRA_INT)))
-                         >>> (16 + PSS_Q29_RECIP_EXTRA_INT);
-                        t_step_projected =
-                            (dsp2_p + (64'sd1 << (15 + PSS_Q29_RECIP_EXTRA_INT)))
-                         >>> (16 + PSS_Q29_RECIP_EXTRA_INT);
-                        sp_sstep <= s_step_projected[31:0];
-                        sp_tstep <= t_step_projected[31:0];
+                        s_step_projected = s_round64 >>> (16 + PSS_Q29_RECIP_EXTRA_INT);
+                        t_step_projected = t_round64 >>> (16 + PSS_Q29_RECIP_EXTRA_INT);
                     end else begin
-                        sp_sstep <= q16_round_product(dsp_p);
-                        sp_tstep <= q16_round_product(dsp2_p);
+                        s_step_projected = s_round64 >>> 16;
+                        t_step_projected = t_round64 >>> 16;
                     end
+                    sp_sstep <= s_step_projected[31:0];
+                    sp_tstep <= t_step_projected[31:0];
                     sp_flags          <= sp_flags & ~(4'b0001 << SPAN_PERSP);
                     sp_seg_left       <= 4'd0;
                     persp_active      <= 1'b0;

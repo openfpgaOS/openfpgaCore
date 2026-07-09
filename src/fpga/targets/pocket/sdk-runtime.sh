@@ -45,11 +45,10 @@ for d in "$SCRIPT_DIR"/bld/*/output_files; do
     ok "$v.rbf_r" "runtime/pocket/"
 done
 
-# Kernel — only when the on-disk os.bin was built for THIS target (the
-# firmware build stamp), so a mister kernel never lands in the pocket slot.
-if [ "$(cat "$ROOT/src/firmware/os/.last_target" 2>/dev/null)" = "pocket" ] && \
-   [ -f "$ROOT/src/firmware/os/os.bin" ]; then
-    cp "$ROOT/src/firmware/os/os.bin" "$RTP/os.bin"
+# Kernel — the pocket build tree is per-target now, so its os.bin is
+# unambiguously a pocket build (a mister kernel can't land here).
+if [ -f "$ROOT/src/firmware/os/bld/pocket/os.bin" ]; then
+    cp "$ROOT/src/firmware/os/bld/pocket/os.bin" "$RTP/os.bin"
     ok "os.bin" "runtime/pocket/"
 fi
 

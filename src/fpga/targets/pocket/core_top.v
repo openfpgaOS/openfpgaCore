@@ -2636,6 +2636,7 @@ assign video_hs = vidout_hs;
         .hps_img1_size(64'd0),
         .hps_img2_size(64'd0),
         .hps_ini_len(32'd0),
+        .hps_elf_len(32'd0),
         // Terminal moved to software — no hardware VRAM
         // Display control
         // display_mode removed — terminal rendering in software

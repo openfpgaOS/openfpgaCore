@@ -44,12 +44,12 @@ PREBUILT="$(find "$REPO/tools" -maxdepth 4 -type f \
     \( -name 'altera-17-quartus.tar*' \
     -o -name 'altera-17*quartus*.tar*' \
     -o -name 'intelFPGA*17*quartus*.tar*' \) 2>/dev/null \
-    | xargs ls -1t 2>/dev/null | head -1 || true)"
+    | xargs -r ls -1t 2>/dev/null | head -1 || true)"
 
 # Installer tar (fallback, requires an install step).
 INSTALLER="$(find "$REPO/tools" -maxdepth 4 -type f \
     -name 'Quartus-*17.0*-linux.tar' 2>/dev/null \
-    | xargs ls -1t 2>/dev/null | head -1 || true)"
+    | xargs -r ls -1t 2>/dev/null | head -1 || true)"
 
 # Decide which install path to take.
 INSTALL_PATH="${Q17_INSTALL_PATH:-}"
@@ -106,8 +106,11 @@ case "$INSTALL_PATH" in
 prebuilt)
     echo "[quartus17-image] using pre-extracted tree: $PREBUILT"
     PREBUILT_NAME="$(basename "$PREBUILT")"
-    # Sanity-check layout — same check as before.
-    if ! tar -tf "$PREBUILT" 2>/dev/null | grep -q '^quartus/bin/quartus_map'; then
+    # Sanity-check layout.  NOTE: `|| true` on tar is required — grep -q closes
+    # the pipe on first match, tar dies with SIGPIPE (141), and under the
+    # script's `set -o pipefail` that 141 would become the pipeline status and
+    # spuriously fail the check even though quartus_map WAS found.
+    if ! { tar -tf "$PREBUILT" 2>/dev/null || true; } | grep -q '^quartus/bin/quartus_map'; then
         echo "ERROR: $PREBUILT_NAME missing quartus/bin/quartus_map at top level."
         echo "       Re-tar from the PARENT of quartus/, not from inside it."
         exit 1

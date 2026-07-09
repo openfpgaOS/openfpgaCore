@@ -69,10 +69,12 @@ EOF
     fi
 fi
 
-# Pseudo-TTY only when stdout is a terminal.  Same idiom as the other
-# wrappers (bash 3.2 compat for the empty array case).
+# Pseudo-TTY only when BOTH stdin and stdout are terminals.  `-i -t` fails with
+# "cannot attach stdin to a TTY-enabled container..." when stdin is not a
+# terminal — which is the case under `make` recipes even in an interactive
+# shell.  Same idiom as the other wrappers (bash 3.2 compat for empty array).
 TTY=()
-[ -t 1 ] && TTY=(-i -t)
+[ -t 0 ] && [ -t 1 ] && TTY=(-i -t)
 
 # Resolve cwd via pwd -P (macOS /tmp -> /private/tmp consistency), same fix
 # we made for sdk-container.sh.
@@ -92,6 +94,12 @@ trap 'oci_rm_force "$CNAME"' EXIT INT TERM
 # OOM-killed.  Docker shares host RAM, so QMEM stays empty there.
 QMEM=()
 oci_is_apple && QMEM=(--memory "${CONTAINER_MEM:-16g}")
+# Backgrounding below (so the EXIT/INT trap cleans up the container on Ctrl+C)
+# detaches stdin to /dev/null, which a -t TTY rejects ("cannot attach stdin to
+# a TTY-enabled container").  When a TTY was allocated, hand the controlling
+# terminal (/dev/tty) to the backgrounded run; otherwise /dev/null is correct.
+STDIN_SRC=/dev/null
+[ ${#TTY[@]} -gt 0 ] && STDIN_SRC=/dev/tty
 oci_run --rm --name "$CNAME" ${QMEM[@]+"${QMEM[@]}"} ${TTY[@]+"${TTY[@]}"} \
   --platform linux/amd64 \
   --user "$(id -u):$(id -g)" \
@@ -100,5 +108,5 @@ oci_run --rm --name "$CNAME" ${QMEM[@]+"${QMEM[@]}"} ${TTY[@]+"${TTY[@]}"} \
   -e HOME=/qhome \
   -w "$WORKDIR" \
   "$IMG" \
-  "$@" &
+  "$@" < "$STDIN_SRC" &
 wait $!

@@ -288,6 +288,23 @@ static int prepare_app_launch_ex(const char *elf_override,
     if (rc < 0)
         return OF_CONFIG_ERR_NOENT;
 
+#ifdef OF_TARGET_SUPPORTS_RELAUNCH
+    /* MiSTer F-load app model (Phase 2): when the OSD/MGL has F-loaded an
+     * app.elf into SDRAM staging (HPS_STATUS_ELF_LOADED), the loader must read
+     * those STAGED bytes, not the os.ini "ELF=..." name looked up in the vhd.
+     * targets/mister/file.c serves the staged ELF only through the fixed app-elf
+     * slot (APP_SLOT_ID), so force the resolved slot there; load_app(APP_SLOT_ID)
+     * then reads through elf_slot_read and of_file_size64(APP_SLOT_ID) returns
+     * HPS_ELF_LEN.  of_file_app_from_staging() is '0' on MiSTer when no ELF is
+     * staged, so the by-name/vhd resolution above stands unchanged then —
+     * backward compatible (that is what keeps a non-F-loaded core, and step 1
+     * of this bring-up, reading app.elf from the mounted vhd).  Gated to
+     * OF_TARGET_SUPPORTS_RELAUNCH so Pocket/sim are wholly unaffected (the hook
+     * has a no-op '0' stub there, matching of_file_instance_ready). */
+    if (of_file_app_from_staging())
+        *slot_out = APP_SLOT_ID;
+#endif
+
     return build_app_argv(argc_out);
 }
 
@@ -471,6 +488,16 @@ void os_main(void) {
     os_textguard_check("after config_load");
 
     /* Load application ELF */
+#ifdef OF_TARGET_SUPPORTS_RELAUNCH
+    /* Diagnostic (MiSTer only): did the MGL/RTL index-2 F-load actually stage an
+     * app.elf?  elf_fload=1 len=N confirms the staged engine reached the SoC and
+     * this boot reads it via APP_SLOT_ID -> elf_slot_read; elf_fload=0 means the
+     * F-load never fired — look upstream (CONF_STR / MGL / RTL), not at this
+     * routing.  Compiled out on Pocket/sim so their boot output is unchanged. */
+    of_term_printf("  [elf_fload=%d len=%u]\n",
+                   of_file_app_from_staging(),
+                   (unsigned)of_file_app_staging_len());
+#endif
     of_term_puts("  Loading app....... ");
 
     elf_load_result_t app;

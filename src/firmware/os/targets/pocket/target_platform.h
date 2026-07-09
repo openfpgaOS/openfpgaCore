@@ -91,16 +91,6 @@
 #define OF_TARGET_CRAM0_APP_DMA_OFFSET 0x00500000u   /* App-visible async file staging pool */
 #define OF_TARGET_CRAM0_APP_DMA_SIZE   0x00100000u   /* 1 MB */
 
-/* Reserved CRAM0 tail region (~10 MB above the app-DMA pool).  NOTE: the GPU
- * CRAM0-texture-fill experiment that used it was reverted — the live GPU
- * texture store is the CRAM1 sync-burst path (gpu_cram1_tex_adapter).  These
- * defines remain as the reserved CRAM0 map + the bounds asserts below; if a
- * future path puts textures in CRAM0, they upload CPU-side to
- * OF_TARGET_CRAM0_BASE + this offset and the GPU reads at the same byte offset. */
-#define OF_TARGET_CRAM0_TEX_OFFSET     0x00600000u   /* 6 MB in — directly above the app-DMA pool */
-#define OF_TARGET_CRAM0_TEX_SIZE       (OF_TARGET_CRAM_SIZE - OF_TARGET_CRAM0_TEX_OFFSET) /* ~10 MB */
-#define OF_TARGET_CRAM0_TEX_BASE       (OF_TARGET_CRAM0_BASE + OF_TARGET_CRAM0_TEX_OFFSET)
-
 /* SRAM is GPU-private in v2 — no AXI alias, not CPU-addressable. */
 
 /* High SDRAM reservations, from top down:
@@ -170,14 +160,6 @@
 
 #if (OF_TARGET_CRAM0_APP_DMA_OFFSET + OF_TARGET_CRAM0_APP_DMA_SIZE) > OF_TARGET_CRAM_SIZE
 #error "CRAM0 app DMA pool exceeds CRAM0"
-#endif
-
-#if OF_TARGET_CRAM0_TEX_OFFSET < (OF_TARGET_CRAM0_APP_DMA_OFFSET + OF_TARGET_CRAM0_APP_DMA_SIZE)
-#error "CRAM0 GPU texture region overlaps the app DMA pool"
-#endif
-
-#if (OF_TARGET_CRAM0_TEX_OFFSET + OF_TARGET_CRAM0_TEX_SIZE) > OF_TARGET_CRAM_SIZE
-#error "CRAM0 GPU texture region exceeds CRAM0"
 #endif
 
 #if OF_TARGET_FILE_CACHE_SIZE == 0

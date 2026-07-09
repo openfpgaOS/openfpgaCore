@@ -32,6 +32,12 @@
  * is served straight from the APF datatable on the Pocket. */
 extern long of_file_size(uint32_t slot_id);
 
+/* Fixed SoundFont slot on targets that pin bank.ofsf to a slot rather than the
+ * dynamic filename registry (MiSTer: slot 7 = <common_root>/bank.ofsf, and
+ * targets/mister/file.c dyn_register deliberately SKIPS bank.ofsf to avoid
+ * double-registering a fixed slot).  Probed as a fallback below. */
+#define BANK_FIXED_SLOT_ID 7u
+
 static const void *g_bank_base;
 static uint32_t    g_bank_size;
 
@@ -121,6 +127,16 @@ int bank_preload(void) {
         }
     }
 
+    /* Fixed-slot fallback: MiSTer pins bank.ofsf to slot 7
+     * (<common_root>/bank.ofsf) and targets/mister/file.c dyn_register
+     * deliberately SKIPS it (to avoid double-registering a fixed slot), so the
+     * by-name scan above never sees it.  If the filename pass found nothing,
+     * probe the fixed slot before giving up.  On Pocket the .ofsf IS in the
+     * filename registry, so this fallback is only reached on MiSTer. */
+    if (!name && of_file_size(BANK_FIXED_SLOT_ID) > 0) {
+        slot_id = BANK_FIXED_SLOT_ID;
+        name    = "bank.ofsf";
+    }
     if (!name) {
         of_term_puts(" \033[93mNONE(no .ofsf)\033[0m\n");
         return -1;

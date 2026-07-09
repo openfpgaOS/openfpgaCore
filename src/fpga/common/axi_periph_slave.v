@@ -165,6 +165,7 @@ module axi_periph_slave #(
     input wire [63:0]  hps_img1_size,    // disk 1 (S1)
     input wire [63:0]  hps_img2_size,    // disk 2 (S2)
     input wire [31:0]  hps_ini_len,      // instance-ini (F-load) byte count
+    input wire [31:0]  hps_elf_len,      // app.elf (F-load) byte count
 
     // Bridge write drain status (for pacing DMA reads)
     input wire         bridge_wr_idle,
@@ -1942,8 +1943,9 @@ wire req_is_hps    = (req_region == REGION_HPS);
  *   0x00 HPS_STATUS    0x04 IMG0_SIZE_LO  0x08 IMG0_SIZE_HI  0x0C BOOT_LEN
  *   0x10 IMG1_SIZE_LO  0x14 IMG1_SIZE_HI  0x18 IMG2_SIZE_LO  0x1C IMG2_SIZE_HI
  *   0x20 INI_LEN       (instance-ini F-load byte count)
+ *   0x24 ELF_LEN       (app.elf F-load byte count)
  * 0x00-0x0C keep their legacy decode exactly (old firmware reads only
- * those); 0x24-0x3C read as zero.  All sources are quasi-static
+ * those); 0x28-0x3C read as zero.  All sources are quasi-static
  * registers in hps_bridge; the mux stays combinational into the
  * two-stage S_PERIPH_RD_WAIT -> S_PERIPH_RD_LATCH capture. */
 wire [31:0] hps_rdata = (req_addr[5:2] == 4'd0) ? hps_status :
@@ -1955,6 +1957,7 @@ wire [31:0] hps_rdata = (req_addr[5:2] == 4'd0) ? hps_status :
                         (req_addr[5:2] == 4'd6) ? hps_img2_size[31:0] :
                         (req_addr[5:2] == 4'd7) ? hps_img2_size[63:32] :
                         (req_addr[5:2] == 4'd8) ? hps_ini_len :
+                        (req_addr[5:2] == 4'd9) ? hps_elf_len :
                                                   32'd0;
 
 wire beat_is_last = (burst_count == burst_len);

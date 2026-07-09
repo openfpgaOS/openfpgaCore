@@ -73,6 +73,7 @@
 
 #define BOOT_SLOT_ID        1u
 #define OSINI_SLOT_ID       2u    /* os.ini (kernel OS_CONFIG_SLOT_ID) */
+#define APP_SLOT_ID         3u    /* app.elf (matches kernel/main.c APP_SLOT_ID) */
 #define FIL_CACHE_SLOTS     4
 #define DYN_SLOT_FIRST_LOW  4u    /* dynamic ids 4..6 first (Pocket layout), */
 #define DYN_SLOT_FIRST_HIGH 20u   /* then 20..31 */
@@ -106,7 +107,14 @@ _Static_assert(2u + (MISTER_INSTANCE_ROOT_MAX - 1u)
  * through the uncached alias exactly like boot.rom, so the CPU never caches
  * lines the HPS ini DMA may rewrite.  Mirrors BOOT_STAGE_UNCACHED. */
 #define INI_STAGE_UNCACHED  (SDRAM_UNCACHED_BASE + OF_TARGET_CRAM0_BRIDGE + \
-                             0x00600000u)
+                             OF_TARGET_CRAM0_INI_STAGE_OFFSET)
+
+/* F-loaded app.elf staging copy — a second 2 MB window directly below the ini
+ * staging (see target_platform.h).  Read through the uncached alias exactly
+ * like os.bin/os.ini so the CPU never caches lines the HPS elf DMA may rewrite
+ * on a reload.  Mirrors INI_STAGE_UNCACHED. */
+#define ELF_STAGE_UNCACHED  (SDRAM_UNCACHED_BASE + OF_TARGET_CRAM0_BRIDGE + \
+                             OF_TARGET_CRAM0_ELF_STAGE_OFFSET)
 
 /* ---------------------------------------------------------------------- */
 
@@ -1003,6 +1011,22 @@ static int ini_slot_read(uint32_t slot_offset, void *dest, uint32_t length) {
     return 0;
 }
 
+/* Serve the F-loaded app.elf out of SDRAM staging (see ELF_STAGE_UNCACHED /
+ * HPS_STATUS_ELF_LOADED).  Mirrors ini_slot_read: length-capped by HPS_ELF_LEN
+ * and read through the uncached alias so the CPU never caches bytes the HPS
+ * elf DMA may rewrite between core loads.  The ELF loader reads the app slot
+ * in chunks at advancing offsets, so arbitrary in-bounds (offset,length)
+ * requests must resolve — exactly the boot/ini staging contract. */
+static int elf_slot_read(uint32_t slot_offset, void *dest, uint32_t length) {
+    uint32_t elf_len = HPS_ELF_LEN;
+    if (!(HPS_STATUS & HPS_STATUS_ELF_LOADED) || elf_len == 0)
+        return OF_ERR_NOT_SUPPORTED;
+    if (slot_offset > elf_len || length > elf_len - slot_offset)
+        return OF_ERR_BAD_RANGE;
+    memcpy(dest, (const void *)(ELF_STAGE_UNCACHED + slot_offset), length);
+    return 0;
+}
+
 /* True when a menu/MGL-picked instance ini has been staged by the HPS.  The
  * kernel cold path waits on this (MiSTer only) before loading os.ini; Pocket
  * and sim carry a no-op that always reports ready. */
@@ -1013,6 +1037,24 @@ int of_file_instance_ready(void) {
      * that os.ini's GAME/INSTANCE by the kernel, so a mounted-S1 instance vhd
      * is no longer a launch trigger. */
     return (HPS_STATUS & HPS_STATUS_INI_LOADED) ? 1 : 0;
+}
+
+/* True when a menu/MGL-picked app.elf has been F-loaded (ioctl index 2) into
+ * SDRAM staging (HPS_STATUS_ELF_LOADED — see elf_slot_read / ELF_STAGE_UNCACHED).
+ * The kernel forces the app-load slot to APP_SLOT_ID when this reports 1, so the
+ * loader reads the staged bytes via elf_slot_read instead of resolving the
+ * os.ini "ELF=..." name against the mounted vhd.  With it clear the by-name/vhd
+ * path stands (a core with no F-loaded engine keeps reading app.elf from the
+ * mounted boot.vhd — backward compatible). */
+int of_file_app_from_staging(void) {
+    return (HPS_STATUS & HPS_STATUS_ELF_LOADED) ? 1 : 0;
+}
+
+/* Length of the F-loaded app.elf staging (HPS_ELF_LEN), 0 when none is staged.
+ * A boot diagnostic (kernel/main.c) prints this to confirm the RTL/MGL index-2
+ * F-load actually reached the SoC. */
+uint32_t of_file_app_staging_len(void) {
+    return (HPS_STATUS & HPS_STATUS_ELF_LOADED) ? (uint32_t)HPS_ELF_LEN : 0u;
 }
 
 static int fat_read_body(uint32_t slot_id, uint32_t slot_offset,
@@ -1041,6 +1083,11 @@ static int fat_read_impl(uint32_t slot_id, uint32_t slot_offset,
      * else falls through to the vhd/FAT resolution below (unchanged). */
     if (slot_id == OSINI_SLOT_ID && (HPS_STATUS & HPS_STATUS_INI_LOADED))
         return ini_slot_read(slot_offset, dest, length);
+    /* app.elf served from the F-loaded staging when one is loaded; else falls
+     * through to the vhd/FAT resolution below (unchanged), so a core with no
+     * F-loaded engine keeps reading app.elf from the mounted boot.vhd. */
+    if (slot_id == APP_SLOT_ID && (HPS_STATUS & HPS_STATUS_ELF_LOADED))
+        return elf_slot_read(slot_offset, dest, length);
 
     mister_fs_enter();
     int rc = fat_read_body(slot_id, slot_offset, dest, length);
@@ -1264,6 +1311,14 @@ int64_t of_file_size64(uint32_t slot_id) {
      * ini is staged this falls through to the normal vhd resolution. */
     if (slot_id == OSINI_SLOT_ID && (HPS_STATUS & HPS_STATUS_INI_LOADED)) {
         uint32_t len = HPS_INI_LEN;
+        return len ? (int64_t)len : -1;
+    }
+
+    /* app.elf served from the F-loaded staging (see fat_read_impl); mirror the
+     * boot/ini special case and skip the FAT/memo path.  When no elf is staged
+     * this falls through to the normal vhd resolution. */
+    if (slot_id == APP_SLOT_ID && (HPS_STATUS & HPS_STATUS_ELF_LOADED)) {
+        uint32_t len = HPS_ELF_LEN;
         return len ? (int64_t)len : -1;
     }
 

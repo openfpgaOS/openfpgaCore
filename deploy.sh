@@ -34,7 +34,7 @@ if [ -n "$DEST" ] && [ -f "$DEST/src/sdk/sdk.mk" ]; then
     RUNTIME="$DEST/runtime"
     BITSTREAM="src/fpga/targets/pocket/output_files/ap_core.rbf"
     LOADER="src/fpga/targets/pocket/chip32/loader.bin"
-    OS_BIN="src/firmware/os/os.bin"
+    OS_BIN="src/firmware/os/bld/pocket/os.bin"
 
     echo -e "${CYAN}Updating SDK runtime: $RUNTIME${RESET}"
     mkdir -p "$RUNTIME"

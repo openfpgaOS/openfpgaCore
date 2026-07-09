@@ -75,8 +75,11 @@ contracts when instantiating the common RTL:
   `PROJECT` and pass `PROJECT=`/`CLOCK_RE=` (the 100 MHz clock's BRE in
   the Fmax table) to `tools/sweep.sh`; `tools/report.sh` only needs
   `PROJECT`. `deploy` refreshes `build/<name>/` from on-disk artifacts;
-  `package` assembles the **release** layout under `build/<name>/` (Pocket
-  = APF `Cores/Assets/Platforms` tree; MiSTer = `rbf + boot.rom`). A goal
+  `package` assembles the **release** layout (Pocket = APF
+  `Cores/Assets/Platforms` tree under `build/<name>/`; MiSTer = a versioned
+  core-release zip under `releases/mister/` — `_Computer/OpenfpgaOS.rbf` +
+  `games/OpenfpgaOS/boot.rom` + INSTALL.txt — plus a Downloader custom DB,
+  drafted onto GitHub by `make release`). A goal
   that doesn't apply must still exist — MiSTer's `program` just prints
   guidance and exits 1, so the root's delegation never hits make's "no
   rule" error.
@@ -85,11 +88,12 @@ contracts when instantiating the common RTL:
 - **`sdk-runtime.sh <sdk_dir>`** — copies THIS target's runtime artifacts
   into an SDK checkout under `runtime/<target>/` (bitstream, kernel,
   loader, …). Run from anywhere (resolve paths via `$0`); the root `make
-  sdk` loops every target's script. Gate the kernel copy on the firmware
-  build stamp (`src/firmware/os/.last_target`) so you never publish
-  another target's `os.bin`. Each target gets its own subdir — Pocket
+  sdk` loops every target's script. Read the kernel from this target's
+  own build tree (`src/firmware/os/bld/<target>/os.bin`) so you never
+  publish another target's `os.bin`. Each target gets its own subdir — Pocket
   writes `runtime/pocket/{bitstream.rbf_r, os.bin, loader.bin,
-  ap_core.sof}`, MiSTer writes `runtime/mister/{openfpgaOS.rbf, os.bin}`.
+  ap_core.sof}`, MiSTer writes `runtime/mister/{os.bin}` (the core is no longer vendored
+  per game — it installs from the openfpgaOS core release, not via `make sdk`).
   Only genuinely target-agnostic files (the SC-55 `bank.ofsf`) live at
   `runtime/` root, written by the root sdk rule.
 

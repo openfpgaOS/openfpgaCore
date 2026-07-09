@@ -144,6 +144,11 @@ void of_file_boot_complete(void) {}
  * hands the picked instance's files to the core directly, so Pocket/sim are
  * always ready to launch. */
 int of_file_instance_ready(void) { return 1; }
+/* F-load app-from-staging is a MiSTer-only feature (loose-file app.elf DMA'd
+ * into an SDRAM staging window); Pocket/sim resolve the app ELF from a data
+ * slot the host supplies, so there is never a staging override. */
+int of_file_app_from_staging(void) { return 0; }
+uint32_t of_file_app_staging_len(void) { return 0u; }
 
 void of_file_init(void) {
     idle_hook = (void *)0;

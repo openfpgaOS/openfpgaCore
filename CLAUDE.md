@@ -87,7 +87,7 @@ make cpu VARIANT=os30          # regenerate THIS variant's netlist (VexiiRiscv_o
 `--verilog_macro`/`--seed` flags), then runs `quartus_map → fit → asm → sta` in a container with `bld/<job>/`
 mounted, and reverses the `.rbf` into `build/pocket/Cores/ThinkElastic.openfpgaOS/<variant>.rbf_r`.
 
-> **Deploy = the Makefile**, not a top-level `deploy.sh`. Device push lives in the SDK; `make deploy`/`make package` only refresh `build/<target>/`.
+> **Deploy = the Makefile**, not a top-level `deploy.sh`. Device push lives in the SDK (`copy.sh`), invoked via Makefile targets. On **pocket**, `make deploy`/`make package` refresh the `build/pocket/` SD tree. On **mister** the model is **per-game / update-safe**: `make copy TARGET=mister` (alias `make copy-app`) does a per-game engine update — atomically scp's the built ELF to the loose F-loaded engine `games/OpenfpgaOS/<Game>/<GameElf>` (e.g. `doom.elf`), leaving the user's `boot.vhd` wads and `<Game>.vhd` saves untouched. The game-agnostic **core** ships separately: `make package TARGET=mister` → `releases/mister/openfpgaos-core-v<ver>.zip` (`_Computer/OpenfpgaOS.rbf` + `games/OpenfpgaOS/boot.rom` + `INSTALL.txt`) plus a Downloader DB `openfpgaos.json.zip`; `make release TARGET=mister` drafts the GitHub release. `make sdk` stages `os.bin` into game repos but no longer vendors the `.rbf`. Full flow: `src/sdk/platforms/mister/PACKAGING.md`.
 
 ## Container builds & parallel jobs
 
