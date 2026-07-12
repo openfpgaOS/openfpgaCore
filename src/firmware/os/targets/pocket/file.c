@@ -610,8 +610,23 @@ static int datatable_entry_scan_for_slot(uint32_t slot_id, uint32_t *entry_out) 
 }
 
 static int datatable_entry_for_slot(uint32_t slot_id, uint32_t *entry_out) {
-    if (datatable_entry_candidate_for_slot(slot_id, entry_out) == 0)
+    /* The positional candidate map is a fast-path GUESS, not a contract:
+     * on hardware the Pocket populates one entry per DECLARED slot in
+     * declaration order (entry index == id on cores like Diablo that
+     * declare ids 0..22 densely), which shifts every nonvolatile entry
+     * one off the map's legacy "ids 10-19 -> entries 9-18" layout.
+     * Reads through the unverified candidate returned the NEIGHBOURING
+     * file's size (save slot 10 read the ini's size at boot -> archive
+     * unreadable -> heroes vanish after power cycle).  Verify the
+     * candidate's id word and fall back to the scan on mismatch, same
+     * as the commit path. */
+    uint32_t e = 0, w0 = 0;
+    if (datatable_entry_candidate_for_slot(slot_id, &e) == 0 &&
+        datatable_read_word32(e * 2u, &w0, NULL) == 0 &&
+        (w0 & 0xFFFFu) == slot_id) {
+        *entry_out = e;
         return 0;
+    }
     return datatable_entry_scan_for_slot(slot_id, entry_out);
 }
 

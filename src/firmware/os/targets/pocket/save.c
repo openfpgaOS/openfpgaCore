@@ -71,8 +71,28 @@ static volatile uint8_t *slot_base(int slot) {
 static uint32_t cram0_cpu_hold_count;
 
 static int nvslot_map(uint32_t data_slot_id, nvslot_map_t *map) {
-    if (data_slot_id == NV_SLOT_ID_SHARED_CONFIG ||
-        data_slot_id == NV_SLOT_ID_DUKE_SETTINGS) {
+    if (data_slot_id == NV_SLOT_ID_SHARED_CONFIG) {
+        /* Id 8 gets its OWN 256 KB window at the save_meta region
+         * (bridge 0x20380000) — the address the data.json contract
+         * declares for it (SDK template, Quake, SM64, Diablo stash).
+         * It was previously aliased onto the presave window, so ids 8
+         * and 9 clobbered each other in CRAM and the host loaded /
+         * persisted the slot-8 file at 0x20380000, bytes this kernel
+         * never wrote.  dt_slot keeps the presave sentinel: the legacy
+         * fixed-index commit has no slot for this window (unchanged
+         * behavior on old bitstreams); entry-resolved bitstreams
+         * (OF_HW_SAVE_DT_WORD) ignore dt_slot and scan by id. */
+        if (map) {
+            map->base = (volatile uint8_t *)SAVE_META_ADDR;
+            map->bridge_addr = CRAM0_BRIDGE + OF_TARGET_CRAM0_SAVE_OFFSET +
+                               (uint32_t)SAVE_MAX_SLOTS * SAVE_SLOT_SIZE;
+            map->capacity = SAVE_SLOT_SIZE;
+            map->dt_slot = NV_DT_SLOT_PRESAVE;
+        }
+        return 0;
+    }
+
+    if (data_slot_id == NV_SLOT_ID_DUKE_SETTINGS) {
         if (map) {
             map->base = (volatile uint8_t *)OF_TARGET_PRESAVE_REGION_ADDR;
             map->bridge_addr = CRAM0_BRIDGE + OF_TARGET_CRAM0_PRESAVE_OFFSET;
