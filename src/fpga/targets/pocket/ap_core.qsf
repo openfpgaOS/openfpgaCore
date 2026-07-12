@@ -783,7 +783,6 @@ set_global_assignment -name VERILOG_FILE core_bridge_cmd.v
 set_global_assignment -name MIF_FILE firmware.mif
 set_global_assignment -name VERILOG_FILE io_sdram.v
 set_global_assignment -name QIP_FILE megafunctions/mf_pllbase.qip
-set_global_assignment -name SIP_FILE megafunctions/mf_pllbase.sip
 
 # PSRAM sync burst: IOB input registers for fast data capture
 set_instance_assignment -name FAST_INPUT_REGISTER ON -to cram0_dq[0]

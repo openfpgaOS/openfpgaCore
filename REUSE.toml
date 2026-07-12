@@ -26,17 +26,10 @@ SPDX-License-Identifier = "LicenseRef-Analogue-Pocket-Framework"
 [[annotations]]
 path = [
     "src/fpga/targets/pocket/megafunctions/mf_pllbase.v",
-    "src/fpga/targets/pocket/megafunctions/mf_pllbase.bsf",
     "src/fpga/targets/pocket/megafunctions/mf_pllbase.ppf",
     "src/fpga/targets/pocket/megafunctions/mf_pllbase.qip",
-    "src/fpga/targets/pocket/megafunctions/mf_pllbase.sip",
-    "src/fpga/targets/pocket/megafunctions/mf_pllbase.spd",
     "src/fpga/targets/pocket/megafunctions/mf_pllbase/**",
-    "src/fpga/targets/pocket/megafunctions/mf_pllbase_sim/**",
-    "src/fpga/targets/pocket/megafunctions/mf_pllbase_sim.f",
     "src/fpga/targets/pocket/megafunctions/mf_pllram_133.v",
-    "src/fpga/targets/pocket/megafunctions/pin_ddio_clk.ppf",
-    "src/fpga/targets/pocket/megafunctions/pin_ddio_clk.qip",
 ]
 precedence = "override"
 SPDX-FileCopyrightText = "Copyright (C) 1991-2026 Altera Corporation"
@@ -110,8 +103,6 @@ path = [
     "src/fpga/targets/pocket/ap_core.qpf",
     "src/fpga/targets/pocket/ap_core_assignment_defaults.qdf",
     "src/fpga/targets/pocket/core_constraints.sdc",
-    "src/fpga/targets/pocket/report_critical2.tcl",
-    "src/fpga/targets/pocket/report_critical3.tcl",
     "src/fpga/targets/pocket/chip32/loader.asm",
 ]
 SPDX-FileCopyrightText = "(c) 2026, ThinkElastic <Think@Elastic.com>"
@@ -121,7 +112,6 @@ SPDX-License-Identifier = "Apache-2.0"
 [[annotations]]
 path = [
     "dist/**",
-    "tools/data.64slot-test.json",
     "tools/portability_baseline.txt",
     "src/fpga/targets/pocket/firmware.mif",
     "src/fpga/targets/pocket/output_files/**",
@@ -129,7 +119,6 @@ path = [
     "src/fpga/targets/mister/README.md",
     "docs/**",
     "src/fpga/targets/pocket/sta_output.log",
-    "src/emulator/ofemu",
     "src/emulator/test_save",
     "README.md",
     "NOTICE",
