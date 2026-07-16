@@ -9,17 +9,25 @@
 # Altera installer tarball, then tars the result to /out/altera-17-quartus.tar.gz
 # for the host to pick up.
 #
-# The same script runs on both amd64 (native, no emulation) and arm64+qemu
-# (Bitrock installer goes through qemu-x86_64; helper binaries via binfmt).
-# Architecture differences are handled by the host bake script before docker
-# run; this script just installs Q17 and tars it.
+# The container is ALWAYS amd64: native on x86_64 hosts, emulated by QEMU on
+# ARM hosts (Docker Desktop with Rosetta disabled, or arm64-Linux + binfmt).
+# It is deliberately NOT arm64+binfmt — the Bitrock installer is a
+# dynamically-linked x86_64 ELF and needs the x86 loader/libs, which only a
+# fully-amd64 userland provides (arm64+qemu dies with exit 127).  The host bake
+# script sets the platform; this script just installs Q17 and tars it.
 #
-# Bind mounts (set up by the host):
-#   /work/quartus-installer.tar   read-only Altera Q17 installer .tar
-#   /out                          host-writable artifact dir (gets the tar)
+# Bind mounts (set up by the host — DIRECTORIES only; Apple `container` can't
+# mount a single file):
+#   /work        read-only dir holding the Altera Q17 installer .tar
+#                (its name is passed in $INSTALLER_TAR)
+#   /tools       read-only repo tools/ dir (this script runs from here)
+#   /out         host-writable artifact dir (gets the produced tar)
 set -euo pipefail
 
-INSTALLER_TAR=/work/quartus-installer.tar
+# Path to the installer tar inside the container.  The host mounts the tar's
+# PARENT dir at /work and passes the full in-container path here; fall back to
+# the legacy fixed path so older callers still work.
+INSTALLER_TAR="${INSTALLER_TAR:-/work/quartus-installer.tar}"
 ARTIFACT=/out/altera-17-quartus.tar.gz
 
 [ -f "$INSTALLER_TAR" ] || { echo "ERROR: $INSTALLER_TAR not bind-mounted"; exit 1; }
@@ -29,11 +37,9 @@ export DEBIAN_FRONTEND=noninteractive
 echo "[install] apt-get update + libs..."
 apt-get update -qq
 # Lib set the Bitrock installer dynamically links.  NO i386 multilib here —
-# the installer step only unpacks files (no 32-bit-helper execution).  The
-# RUNTIME image (Dockerfile.quartus17) adds i386 libs separately; that
-# image is amd64 so its apt fetches from archive.ubuntu.com (which has
-# i386), whereas this install container is arm64 on Mac hosts and goes
-# through ports.ubuntu.com (which doesn't ship i386 packages).
+# the installer step only unpacks files (no 32-bit-helper execution); the
+# RUNTIME image (Dockerfile.quartus17) adds i386 libs separately.  This
+# container is amd64, so apt fetches from archive.ubuntu.com.
 apt-get install -y --no-install-recommends \
     libglib2.0-0 libsm6 libice6 libxext6 libxrender1 libxft2 libxt6 \
     libxmu6 libxi6 libxtst6 libxfixes3 libxcursor1 libxinerama1 \
@@ -50,22 +56,35 @@ SETUP_RUN="$(ls /tmp/qsrc/components/QuartusLiteSetup-*-linux.run 2>/dev/null | 
 
 echo "[install] running Q17 installer in unattended mode..."
 echo "          (under QEMU on arm64 hosts allow ~30 min)"
+# Neutralize the optional sub-installers BEFORE the main setup runs.  The main
+# installer spawns QuartusHelpSetup (docs) — and ModelSimSetup — as SEPARATE
+# .run sub-installers with a HARD-CODED `--unattendedmodeui minimal`, and that
+# minimal UI DEADLOCKS forever under QEMU (even with a virtual framebuffer): the
+# main installer then blocks in wait() and the whole bake wedges (observed: the
+# main .run pinned at ~0% CPU for an hour with docs still "installing", and the
+# device .qdz packages — incl. Cyclone V — never unpacked → a broken tree that
+# fails builds with "Error 292025: License file is not specified").  Neither
+# docs nor ModelSim are needed to build bitstreams.  The main setup exec's these
+# component .run files directly (confirmed via ps), so replacing each with a
+# `#!/bin/sh; exit 0` stub makes it record an instant successful "install" and
+# move straight on to unpacking the device families (the part we DO need).
+for h in /tmp/qsrc/components/*HelpSetup*.run /tmp/qsrc/components/*ModelSimSetup*.run; do
+    [ -e "$h" ] || continue
+    echo "[install] stubbing optional sub-installer: $(basename "$h")"
+    printf '#!/bin/sh\nexit 0\n' > "$h"
+    chmod +x "$h"
+done
 # Skip setup.sh — it does a `uname -m != x86_64` check that triggers an
-# interactive "continue? (y/n)" loop when run in an arm64 container, even
-# though the actual binaries it'd invoke are x86_64 and would run fine via
-# binfmt qemu-x86_64.  Call the Bitrock .run directly; binfmt routes the
-# exec automatically when the registration is in place.  Same Bitrock
-# flags as setup.sh would have passed.
-#
-# Wrap in xvfb-run: the main installer honors --unattendedmodeui none, but it
-# spawns sub-installers (e.g. QuartusHelpSetup) with --unattendedmodeui minimal
-# hardcoded, and that minimal UI hangs forever trying to init an X display in a
-# headless container.  A virtual framebuffer lets those sub-installers draw
-# their (non-interactive) progress UI and finish.
-xvfb-run -a "$SETUP_RUN" \
+# interactive "continue? (y/n)" loop when run in an arm64 container.  Call the
+# Bitrock .run directly.  xvfb-run still provides a virtual display for any
+# component that briefly touches X.  `timeout` is a backstop so an unforeseen
+# hang can't wedge the bake indefinitely — we verify the REAL result
+# (quartus_map) right after regardless of the exit status.
+timeout --preserve-status 3600 xvfb-run -a "$SETUP_RUN" \
     --mode unattended \
     --unattendedmodeui none \
-    --installdir /opt/altera-17
+    --installdir /opt/altera-17 \
+    || echo "[install] installer exited non-zero / timed out — verifying tree..."
 
 [ -x /opt/altera-17/quartus/bin/quartus_map ] || {
     echo "ERROR: quartus_map missing after install"

@@ -26,43 +26,61 @@ source "$REPO/tools/oci.sh"   # $OCI + oci_run/oci_build/oci_image_exists/oci_rm
 
 [ $# -ge 1 ] || { echo "usage: quartus17-container.sh <command> [args...]"; exit 2; }
 
+# Runtime must be usable before we probe for the image or (maybe) bake it.
+# oci.sh already exit'd if NO runtime CLI is on PATH; this additionally catches
+# a present-but-stopped daemon/VM so `oci_image_exists` can't misfire the bake.
+oci_require_daemon || exit 1
+
 # Auto-bake on first use, if a tarball is available.  Same UX as the q25
-# auto-bake hook in quartus-container.sh.
+# auto-bake hook in quartus-container.sh.  Two accepted inputs (build-quartus17-
+# image.sh auto-picks the right install path):
+#   * pre-extracted tree  (altera-17-quartus.tar*)          → ~2 min bake
+#   * installer tarball   (Quartus-*17.0*-linux.tar)        → install-in-container
+#                                                             first (native ~5-10 min,
+#                                                             Apple Silicon/qemu ~30 min)
 if ! oci_image_exists "$IMG"; then
     PREBUILT="$(find "$REPO/tools" -maxdepth 4 -type f \
         \( -name 'altera-17-quartus.tar*' \
         -o -name 'altera-17*quartus*.tar*' \
         -o -name 'intelFPGA*17*quartus*.tar*' \) 2>/dev/null | head -1 || true)"
+    INSTALLER="$(find "$REPO/tools" -maxdepth 4 -type f \
+        -name 'Quartus-*17.0*-linux.tar' 2>/dev/null | head -1 || true)"
     if [ -n "$PREBUILT" ]; then
         echo "[quartus17] image '$IMG' not present, but found pre-extracted tree at:"
         echo "            $PREBUILT"
         echo "[quartus17] baking image (one-time, ~2 min)..."
         bash "$REPO/tools/build-quartus17-image.sh"
+    elif [ -n "$INSTALLER" ]; then
+        echo "[quartus17] image '$IMG' not present, but found installer tarball at:"
+        echo "            $INSTALLER"
+        echo "[quartus17] baking image -- installs Q17 in a container first"
+        echo "            (native amd64 ~5-10 min; Apple Silicon via qemu ~30 min)..."
+        bash "$REPO/tools/build-quartus17-image.sh"
     else
         cat >&2 <<EOF
 
-ERROR: cannot run mister Quartus -- no Q17.0.x image or pre-extracted tar.
+ERROR: cannot run mister Quartus -- no Q17.0.x image or tarball under tools/.
 
-  Image '$IMG' isn't built, and no altera-17-quartus.tar* under tools/.
+  Image '$IMG' isn't built, and no Q17 tarball was found under tools/.
+  Two inputs are accepted -- either one auto-bakes the image on next build:
 
-  Q17's Bitrock installer can't run under Rosetta on Apple Silicon
-  (rosetta error: bss_size overflow), so this image is baked from an
-  already-installed Q17 tree.
+  A. Installer tarball (simplest -- just download & drop):
+       Get the Q17.0 Lite installer (~6 GB) for Linux from Altera:
+         https://www.intel.com/content/www/us/en/software-kit/666220/intel-quartus-prime-lite-edition-design-software-version-17-0-for-linux.html
+       Drop it at:
+         $REPO/tools/Quartus-lite-17.0.0.595-linux.tar
+       Rerun -- the build installs Q17 in a container and bakes the image:
+         make build
+       (On Apple Silicon the install runs x86_64 under qemu, ~30 min one-time;
+        the extracted tree is cached to tools/ so future bakes skip it.)
 
-  Procedure:
-    1. On a Linux box that has Q17 installed:
+  B. Pre-extracted tree (faster bake; handy for CI/sharing):
+       On a Linux box that has Q17 installed:
          tar czf altera-17-quartus.tar.gz \\
              -C /home/alberto/intelFPGA_lite/17.0 quartus
-    2. Copy to this machine and drop in tools/:
+       Copy here and drop in tools/:
          mv ~/Downloads/altera-17-quartus.tar.gz tools/
-    3. Rerun -- the build auto-bakes:
-         make build
-       or bake explicitly:
-         make quartus17-image
-
-  Don't have Q17 on a Linux box?  Install it from:
-    https://www.intel.com/content/www/us/en/software-kit/666220/intel-quartus-prime-lite-edition-design-software-version-17-0-for-linux.html
-  on any Linux x86_64 machine (a throwaway VM is fine), then steps 1-3.
+       Rerun:  make build   (or bake explicitly:  make quartus17-image)
 
 EOF
         exit 1
@@ -94,13 +112,25 @@ trap 'oci_rm_force "$CNAME"' EXIT INT TERM
 # OOM-killed.  Docker shares host RAM, so QMEM stays empty there.
 QMEM=()
 oci_is_apple && QMEM=(--memory "${CONTAINER_MEM:-16g}")
+# On an ARM host (Apple Silicon) the amd64 Quartus runs emulated (Rosetta on
+# Docker Desktop, or QEMU).  With NUM_PARALLEL_PROCESSORS=ALL, Quartus otherwise
+# spawns one worker per host core (e.g. 18), and under Rosetta's per-thread
+# translation + locking overhead that is both slow and destabilising (cf. the
+# Error 112002 note in CLAUDE.md).  Pin the container to a small CPU SET —
+# `--cpuset-cpus`, not `--cpus`: cpuset is honoured by sched_getaffinity, so
+# `nproc` (and therefore Quartus) sees exactly that many CPUs and spawns that
+# many threads.  Default 4; override with QCPUS.  Native x86_64 stays uncapped.
+QCPU=()
+case "$(uname -m)" in
+    arm64|aarch64) QCPU=(--cpuset-cpus "0-$(( ${QCPUS:-4} - 1 ))") ;;
+esac
 # Backgrounding below (so the EXIT/INT trap cleans up the container on Ctrl+C)
 # detaches stdin to /dev/null, which a -t TTY rejects ("cannot attach stdin to
 # a TTY-enabled container").  When a TTY was allocated, hand the controlling
 # terminal (/dev/tty) to the backgrounded run; otherwise /dev/null is correct.
 STDIN_SRC=/dev/null
 [ ${#TTY[@]} -gt 0 ] && STDIN_SRC=/dev/tty
-oci_run --rm --name "$CNAME" ${QMEM[@]+"${QMEM[@]}"} ${TTY[@]+"${TTY[@]}"} \
+oci_run --rm --name "$CNAME" ${QMEM[@]+"${QMEM[@]}"} ${QCPU[@]+"${QCPU[@]}"} ${TTY[@]+"${TTY[@]}"} \
   --platform linux/amd64 \
   --user "$(id -u):$(id -g)" \
   -v "$REPO:$REPO" \

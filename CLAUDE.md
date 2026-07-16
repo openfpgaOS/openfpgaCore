@@ -44,11 +44,34 @@ RISC-V compiles to the `openfpgaos-firmware` container by default,
   `quartus-container.sh`); only `make program` (JTAG over USB) uses a
   host install.
 - **mister target** — **Quartus 17.0.x in a container by default**
-  (`openfpgaos-quartus17`, baked from a pre-extracted tarball under
-  `tools/` — the sys/ framework is a hard Q17 requirement).  Build,
-  sweep, MIF patch and report all run through `quartus17-container.sh`;
-  `USE_QUARTUS_CONTAINER=0` falls back to a host install at
-  `/home/alberto/intelFPGA_lite/17.0/quartus`.
+  (`openfpgaos-quartus17` — the sys/ framework is a hard Q17 requirement).
+  The image is baked (`build-quartus17-image.sh`, one-time) from either a
+  **pre-extracted** Q17 tree (`altera-17-quartus.tar*`) or the **Altera
+  installer tar** (`Quartus-*17.0*-linux.tar`) dropped under `tools/`.  From
+  the installer the bake installs Q17 in a container first: native on x86_64
+  Linux, or via **QEMU** on ARM.  **On Apple Silicon this install step
+  requires Docker/OrbStack** — Apple `container`'s only x86 engine is Rosetta,
+  which overflows on Q17's Bitrock installer (`bss_size overflow`), and QEMU
+  needs `binfmt_misc`/`--privileged` that Apple container doesn't grant
+  (apple/container#206).  `build-quartus17-image.sh` auto-borrows Docker just
+  for this bake when it's up, then caches `tools/altera-17-quartus.tar.gz` so
+  later bakes (and other machines) skip the install.  A pre-extracted tree
+  needs no Docker/QEMU at all.  Build, sweep, MIF patch and report all run
+  through `quartus17-container.sh`; `USE_QUARTUS_CONTAINER=0` falls back to a
+  host install at `/home/alberto/intelFPGA_lite/17.0/quartus`.
+  - **Apple Silicon + Docker Desktop — Rosetta setting is opposite for install
+    vs. run:** the one-time *installer* bake needs Rosetta **OFF** (Settings →
+    "Use Rosetta for x86/amd64 emulation" unchecked) so x86 runs under QEMU —
+    Rosetta overflows the Bitrock installer, and QEMU's default CPU is fine for
+    it.  *Running* Quartus (every build/sweep/report) needs Rosetta **ON** —
+    QEMU's emulated CPU fails Quartus's SSE/CPU-model check ("will not function
+    properly on this processor model"), whereas Rosetta passes it (the image's
+    ffreep x87 patch makes Quartus run cleanly under Rosetta).  Because the
+    extracted tree is cached after the first install, you normally keep Rosetta
+    **ON** — you only flip it OFF for a rare from-installer re-bake.  The
+    install container is always amd64 (never arm64+binfmt: the dynamically
+    linked Bitrock installer needs the x86 loader, absent in an arm64 userland
+    → exit 127).
 - **Verilator 5.x** — host-installed (or via your distro) for the RTL
   test suite (`make test`).  Not part of the default build.
   (Deliberate host exception: tests produce no shipped artifacts.  The
