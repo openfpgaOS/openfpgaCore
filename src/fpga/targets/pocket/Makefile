@@ -413,10 +413,11 @@ endif
 MAXJOBS ?= $(if $(filter 1,$(ROSETTA)),1,4)
 # Fitter processor count, pinned into every generated qsf (NUM_PARALLEL_PROCESSORS)
 # so builds are reproducible and a sweep fit matches the eventual production build
-# (Quartus's parallel placement varies with processor count).  QPROCS x MAXJOBS
-# should fit the host cores (native / Apple `container`: 4 x 4 = 16;
-# Docker-on-Apple-Silicon: 1 x 1 to avoid Rosetta's 112002).
-QPROCS ?= $(if $(filter 1,$(ROSETTA)),1,4)
+# (Quartus's parallel placement varies with processor count).  4 everywhere —
+# including Docker-on-Apple-Silicon — so every host fits with the same processor
+# count the committed seeds were tuned at.  QPROCS x MAXJOBS should fit the host
+# cores (Docker-on-Apple-Silicon keeps MAXJOBS=1 against Rosetta's 112002).
+QPROCS ?= 4
 
 # ── Build ALL variants — concurrent isolated container fits ──────────
 # Fans out over $(VARIANTS); each builds in its OWN container + dir (bld/<v>),
