@@ -93,6 +93,9 @@ VEXII_DIR="$SCRIPT_DIR/VexiiRiscv"
 # encodes CPU config.
 ICACHE_SETS=256          # 32 KB I$
 DCACHE_SETS=1024         # 128 KB D$
+GSHARE_BYTES=4096        # GShare predictor RAM (4 M10K at 4096)
+BTB_SETS=512             # BTB sets (3 M10K at 512)
+LSU_SW_PREFETCH=1        # Zicbop prefetch.r/w decode (0 = omit)
 EXTRA_FLAGS=""
 MAXFAN_HINT=0
 
@@ -108,6 +111,9 @@ fi
 # shellcheck source=/dev/null
 . "$CONFIG"
 OUTPUT_NAME="VexiiRiscv_$VARIANT.v"
+
+LSU_SW_PREFETCH_FLAG="--lsu-software-prefetch"
+[ "$LSU_SW_PREFETCH" = 0 ] && LSU_SW_PREFETCH_FLAG=""
 
 if [ ! -d "$VEXII_DIR" ]; then
     echo "Error: VexiiRiscv directory not found at $VEXII_DIR"
@@ -135,9 +141,9 @@ sbt -Dsbt.server.forcestart=true --batch "Test/runMain vexiiriscv.Generate \
       --lsu-l1-refill-count=2 --lsu-l1-writeback-count=2 \
       --lsu-l1-store-buffer-slots=2 --lsu-l1-store-buffer-ops=16 \
       --lsu-l1-axi4 \
-      --lsu-software-prefetch --lsu-hardware-prefetch=none \
-      --with-btb --btb-sets=512 --relaxed-btb --relaxed-btb-hit \
-      --with-gshare --gshare-bytes=4096 --with-ras \
+      $LSU_SW_PREFETCH_FLAG --lsu-hardware-prefetch=none \
+      --with-btb --btb-sets=$BTB_SETS --relaxed-btb --relaxed-btb-hit \
+      --with-gshare --gshare-bytes=$GSHARE_BYTES --with-ras \
       --allow-bypass-from=0 \
       --fpu-ignore-subnormal \
       --fpu-wb-at=1 \
