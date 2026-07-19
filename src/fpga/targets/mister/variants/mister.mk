@@ -28,4 +28,10 @@
 
 DEFS := INCLUDE_HW_MIXER INCLUDE_TRANSLUC \
         INCLUDE_COLUMN_LIST INCLUDE_COMPACT_SPAN INCLUDE_PARAM_TRI \
-        INCLUDE_VERT_TRI INCLUDE_PARAM_TRI_RECS
+        INCLUDE_VERT_TRI INCLUDE_PARAM_TRI_RECS \
+        MISTER_FB MISTER_FB_PALETTE
+
+# MISTER_FB / MISTER_FB_PALETTE are framework macros, not INCLUDE_* feature
+# modules: they unlock the sys/ direct-framebuffer interface (emu FB_* ports
+# + ascal core palette) that the ddr3_fb pipeline drives.  They ride DEFS so
+# every quartus_map (build AND sweep) sees them uniformly.

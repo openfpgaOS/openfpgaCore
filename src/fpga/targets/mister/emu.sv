@@ -39,7 +39,9 @@ assign ADC_BUS  = 'Z;
 assign USER_OUT = '1;
 assign {UART_RTS, UART_TXD, UART_DTR} = 0;
 assign {SD_SCK, SD_MOSI, SD_CS} = 'Z;
-assign {DDRAM_CLK, DDRAM_BURSTCNT, DDRAM_ADDR, DDRAM_DIN, DDRAM_BE, DDRAM_RD, DDRAM_WE} = '0;
+// DDRAM is driven by the ddr3_fb direct-framebuffer pipeline (see the
+// video section below) — frames are copied from SDRAM into a 2-slot DDR3
+// ring that the framework scaler reads via the MISTER_FB interface.
 
 assign VGA_SL = 0;
 assign VGA_F1 = 0;
@@ -78,6 +80,11 @@ localparam CONF_STR = {
 	"F2,ELF,Load App;",
 	"-;",
 	"O[122:121],Aspect ratio,Original,Full Screen,[ARC1],[ARC2];",
+	// Direct FB = frames DMA'd to DDR3 and scaled natively by ascal
+	// (single-pass, tear-free).  Original = the legacy scanout->VGA input
+	// path, kept alive as a fallback; unsupported color modes fall back
+	// automatically regardless of this setting.
+	"O[1],Video Output,Direct FB,Original;",
 	"-;",
 	"R[0],Reset and close OSD;",
 	// Button order is the input ABI: bits 4+ of joystick_0 land 1:1 on
@@ -1135,14 +1142,49 @@ always @(posedge clk_vid) begin
 	line_start <= (x_count == 0);
 end
 
-// SDRAM burst interface for video scanout
+// SDRAM burst interface for video scanout (client V of the burst arbiter)
 wire        video_burst_rd;
 wire [24:0] video_burst_addr;
 wire [10:0] video_burst_len;
 wire        video_burst_32bit;
-wire [31:0] video_burst_data;
+wire [31:0] video_burst_data;      // shared read-data bus from io_sdram
 wire        video_burst_data_valid;
 wire        video_burst_data_done;
+
+// Frame-DMA client (client D) + arbiter->io_sdram side
+wire        fbdma_req, fbdma_gnt;
+wire [24:0] fbdma_addr;
+wire [10:0] fbdma_len;
+wire        fbdma_data_valid, fbdma_data_done;
+wire        arb_burst_rd;
+wire [24:0] arb_burst_addr;
+wire [10:0] arb_burst_len;
+wire        arb_burst_32bit;
+wire        isr_burst_data_valid;
+wire        isr_burst_data_done;
+
+video_burst_arb vburst_arb (
+	.clk(clk_ram_controller),
+	.reset_n(reset_n_cpu_core),
+	.vid_rd(video_burst_rd),
+	.vid_addr(video_burst_addr),
+	.vid_len(video_burst_len),
+	.vid_32bit(video_burst_32bit),
+	.vid_data_valid(video_burst_data_valid),
+	.vid_data_done(video_burst_data_done),
+	.dma_req(fbdma_req),
+	.dma_addr(fbdma_addr),
+	.dma_len(fbdma_len),
+	.dma_gnt(fbdma_gnt),
+	.dma_data_valid(fbdma_data_valid),
+	.dma_data_done(fbdma_data_done),
+	.burst_rd(arb_burst_rd),
+	.burst_addr(arb_burst_addr),
+	.burst_len(arb_burst_len),
+	.burst_32bit(arb_burst_32bit),
+	.burst_data_valid(isr_burst_data_valid),
+	.burst_data_done(isr_burst_data_done)
+);
 
 video_CRT_scanout_indexed_BRAM scanout (
 	.clk_video(clk_vid),
@@ -1192,6 +1234,68 @@ video_CRT_scanout_indexed_BRAM scanout (
 	.pal_data(cpu_pal_data),
 	.pal_commit(cpu_pal_commit),
 	.pal_busy(cpu_pal_busy)
+);
+
+// ---- Direct-framebuffer pipeline (DDR3) --------------------------------
+// Copies the displayed SDRAM frame into a 2-slot DDR3 ring each frame and
+// exposes it through the framework's MISTER_FB interface; the palette
+// stream from the periph slave is mirrored into ascal's core palette.
+// The legacy scanout->VGA path above keeps running as the fallback (OSD
+// "Video Output: Original", or automatically for unsupported modes).
+wire fb_direct_enable = ~status[1];
+
+ddr3_fb fbpipe (
+	.clk(clk_ram_controller),
+	.reset_n(reset_n_cpu_core),
+	.enable(fb_direct_enable),
+	.clk_vid(clk_vid),
+	.crt_vs(crt_vs),
+	.fb_display_addr(fb_display_addr),
+	.color_mode(color_mode),
+	.fb_width(fb_width),
+	.fb_height(fb_height),
+	.fb_stride(fb_stride),
+	.dma_req(fbdma_req),
+	.dma_gnt(fbdma_gnt),
+	.dma_addr(fbdma_addr),
+	.dma_len(fbdma_len),
+	.dma_data(video_burst_data),
+	.dma_data_valid(fbdma_data_valid),
+	.dma_data_done(fbdma_data_done),
+	.DDRAM_CLK(DDRAM_CLK),
+	.DDRAM_BUSY(DDRAM_BUSY),
+	.DDRAM_BURSTCNT(DDRAM_BURSTCNT),
+	.DDRAM_ADDR(DDRAM_ADDR),
+	.DDRAM_DOUT(DDRAM_DOUT),
+	.DDRAM_DOUT_READY(DDRAM_DOUT_READY),
+	.DDRAM_RD(DDRAM_RD),
+	.DDRAM_DIN(DDRAM_DIN),
+	.DDRAM_BE(DDRAM_BE),
+	.DDRAM_WE(DDRAM_WE),
+`ifdef MISTER_FB
+	.FB_EN(FB_EN),
+	.FB_FORMAT(FB_FORMAT),
+	.FB_WIDTH(FB_WIDTH),
+	.FB_HEIGHT(FB_HEIGHT),
+	.FB_BASE(FB_BASE),
+	.FB_STRIDE(FB_STRIDE),
+	.FB_VBL(FB_VBL),
+	.FB_FORCE_BLANK(FB_FORCE_BLANK),
+`ifdef MISTER_FB_PALETTE
+	.FB_PAL_CLK(FB_PAL_CLK),
+	.FB_PAL_ADDR(FB_PAL_ADDR),
+	.FB_PAL_DOUT(FB_PAL_DOUT),
+	.FB_PAL_WR(FB_PAL_WR),
+`endif
+`else
+	// MISTER_FB not defined in this build: pipeline outputs dangle and
+	// the palette streamer times off the input vsync instead of FB_VBL.
+	.FB_VBL(crt_vs),
+`endif
+	.pal_wr(cpu_pal_wr),
+	.pal_addr(cpu_pal_addr),
+	.pal_data(cpu_pal_data),
+	.pal_commit(cpu_pal_commit)
 );
 
 always @(posedge clk_vid or negedge reset_n_vid) begin
@@ -1335,7 +1439,15 @@ gpu_core #(
 	.INCLUDE_PARAM_TRI_RECS(`ifdef INCLUDE_PARAM_TRI_RECS 1 `else 0 `endif),
 	.INCLUDE_COMPACT_SPAN(`ifdef INCLUDE_COMPACT_SPAN 1 `else 0 `endif),
 	.INCLUDE_COLUMN_LIST(`ifdef INCLUDE_COLUMN_LIST 1 `else 0 `endif),
-	.INCLUDE_TEX_MEM(`ifdef INCLUDE_TEX_MEM 1 `else 0 `endif)
+	.INCLUDE_TEX_MEM(`ifdef INCLUDE_TEX_MEM 1 `else 0 `endif),
+	// 32 KB tex/cmap cache (2048 sets x 16 B) vs the Pocket's 16 KB
+	// default: with no CRAM1 every texel + cmap read is SDRAM-backed
+	// through this cache.  Size-only knob — protocol and wiring unchanged.
+	// M10K cost is ~70 blocks (the dual-read data RAM is REPLICATED, one
+	// copy per read port, so every extra SET_BIT doubles TWO copies);
+	// 12 = 64 KB costs ~140 blocks and only fits if the D$ stays 128 KB —
+	// 11 keeps ~119 blocks free for a future BRAM framebuffer.
+	.GPU_TEX_CACHE_SET_BITS(11)
 ) gpu (
 	.clk(clk_cpu),
 	.reset_n(reset_n_cpu_media),
@@ -1446,14 +1558,14 @@ io_sdram isr0 (
 	.phy_dq         ( SDRAM_DQ ),
 	.phy_dqm        ( {SDRAM_DQMH, SDRAM_DQML} ),
 
-	// Burst interface — video scanout
-	.burst_rd           ( video_burst_rd ),
-	.burst_addr         ( video_burst_addr ),
-	.burst_len          ( video_burst_len ),
-	.burst_32bit        ( video_burst_32bit ),
+	// Burst interface — video scanout + frame DMA via video_burst_arb
+	.burst_rd           ( arb_burst_rd ),
+	.burst_addr         ( arb_burst_addr ),
+	.burst_len          ( arb_burst_len ),
+	.burst_32bit        ( arb_burst_32bit ),
 	.burst_data         ( video_burst_data ),
-	.burst_data_valid   ( video_burst_data_valid ),
-	.burst_data_done    ( video_burst_data_done ),
+	.burst_data_valid   ( isr_burst_data_valid ),
+	.burst_data_done    ( isr_burst_data_done ),
 
 	// Burst write interface — not used
 	.burstwr        ( 1'b0 ),

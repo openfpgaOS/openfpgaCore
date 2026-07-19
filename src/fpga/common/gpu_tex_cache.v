@@ -5,9 +5,16 @@
 //------------------------------------------------------------------------------
 
 //
-// GPU Texture Cache -- 16 KB, Direct-Mapped, 2-Stage Pipelined, Dual Port
+// GPU Texture Cache -- Direct-Mapped, 2-Stage Pipelined, Dual Port
 //
-// 1024 sets x 16 bytes/line = 16,384 bytes.
+// SET_BITS parameterizes the size: 2^SET_BITS sets x 16 bytes/line.
+// Default SET_BITS=10 = 16 KB (the Pocket geometry, unchanged); MiSTer
+// passes 11 = 32 KB (no CRAM1 fast-tex chip there, so every texel and
+// cmap read is SDRAM-backed through this cache).
+// M10K sizing caveat: the dual-read data RAM is REPLICATED by the fitter
+// (one full copy per read port), so block cost grows at 2x the logical
+// bits — 10=~36 blocks, 11=~70, 12=~140 (the 64 KB point overflowed the
+// MiSTer A6 alongside a 256 KB D$: 632/553 blocks).
 // Single tag + data RAM, inferred as M10K with TDP read access (Cyclone V).
 //
 // Two consumer ports:
@@ -47,7 +54,9 @@
 
 `default_nettype none
 
-module gpu_tex_cache (
+module gpu_tex_cache #(
+    parameter SET_BITS = 10   // 2^SET_BITS sets x 16 B/line; 10 = 16 KB
+) (
     input wire clk,
     input wire reset_n,
     input wire flush,
@@ -92,12 +101,12 @@ module gpu_tex_cache (
     input wire          axi_rlast
 );
 
-//   addr[3:0]   = byte offset within 16-byte line
-//   addr[13:4]  = set index (10 bits, 1024 sets)
-//   addr[25:14] = tag (12 bits)
-localparam SET_BITS   = 10;
-localparam SETS       = 1024;
-localparam TAG_BITS   = 12;
+//   addr[3:0]           = byte offset within 16-byte line
+//   addr[TAG_LO-1:4]    = set index (SET_BITS bits)
+//   addr[25:TAG_LO]     = tag
+localparam SETS       = 1 << SET_BITS;
+localparam TAG_LO     = 4 + SET_BITS;
+localparam TAG_BITS   = 26 - TAG_LO;
 localparam LINE_WORDS = 4;
 
 // ---- Storage ----
@@ -166,7 +175,7 @@ reg  [TAG_BITS-1:0] pipe_tag_b_r;
 reg  [1:0]          pipe_byte_b_r;
 reg         pipe_wide_b;
 
-wire [TAG_BITS-1:0] pipe_tag_a  = pipe_addr_a[25:14];
+wire [TAG_BITS-1:0] pipe_tag_a  = pipe_addr_a[25:TAG_LO];
 wire [1:0]          pipe_byte_a = pipe_addr_a[1:0];
 
 wire [TAG_BITS-1:0] pipe_tag_b  = pipe_tag_b_r;
@@ -256,10 +265,10 @@ assign resp_valid_b = held_valid_b
 // Same gate-on-accept rationale as the SDP-era cache (without it, rd_*
 // drift to the next pixel's address while pipe_addr is still the prior
 // pixel — produces glitched bytes when the consumer is mid-stall).
-wire [SET_BITS-1:0] addr_set_a  = req_addr[13:4];
+wire [SET_BITS-1:0] addr_set_a  = req_addr[TAG_LO-1:4];
 wire [1:0]          addr_word_a = req_addr[3:2];
 
-wire [SET_BITS-1:0] addr_set_b  = req_addr_b[13:4];
+wire [SET_BITS-1:0] addr_set_b  = req_addr_b[TAG_LO-1:4];
 wire [1:0]          addr_word_b = req_addr_b[3:2];
 
 // Quartus M10K-inference rule: each rd_*_x reg has exactly one source
@@ -333,8 +342,8 @@ wire [15:0] hw_from_rd_b = pipe_byte_b[1] ? rd_data_b[31:16] : rd_data_b[15:0];
 reg [25:0] lat_addr;
 reg        lat_wide;
 
-wire [TAG_BITS-1:0] lat_tag  = lat_addr[25:14];
-wire [SET_BITS-1:0] lat_set  = lat_addr[13:4];
+wire [TAG_BITS-1:0] lat_tag  = lat_addr[25:TAG_LO];
+wire [SET_BITS-1:0] lat_set  = lat_addr[TAG_LO-1:4];
 wire [1:0]          lat_word = lat_addr[3:2];
 
 reg [1:0]  fill_beat;
@@ -525,7 +534,7 @@ always @(posedge clk) begin
             if (accept_b) begin
                 pipe_valid_b <= 1;
                 pipe_addr_b  <= req_addr_b;
-                pipe_tag_b_r <= req_addr_b[25:14];
+                pipe_tag_b_r <= req_addr_b[25:TAG_LO];
                 pipe_byte_b_r <= req_addr_b[1:0];
                 pipe_wide_b  <= req_wide_b;
             end
@@ -616,13 +625,13 @@ always @(posedge clk) begin
                     if (accept_b) begin
                         pipe_valid_b <= 1;
                         pipe_addr_b  <= req_addr_b;
-                        pipe_tag_b_r <= req_addr_b[25:14];
+                        pipe_tag_b_r <= req_addr_b[25:TAG_LO];
                         pipe_byte_b_r <= req_addr_b[1:0];
                         pipe_wide_b  <= req_wide_b;
                     end else begin
                         pipe_valid_b <= 1;
                         pipe_addr_b  <= lat_addr;
-                        pipe_tag_b_r <= lat_addr[25:14];
+                        pipe_tag_b_r <= lat_addr[25:TAG_LO];
                         pipe_byte_b_r <= lat_addr[1:0];
                         pipe_wide_b  <= lat_wide;
                     end

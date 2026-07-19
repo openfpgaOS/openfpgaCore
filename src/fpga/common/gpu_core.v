@@ -100,6 +100,17 @@ module gpu_core #(
     parameter GPU_EW_PARALLEL_DIVS = 1,
 
     // ----------------------------------------------------------------
+    // Texture/cmap cache size, forwarded verbatim to gpu_tex_cache's
+    // SET_BITS (2^SET_BITS sets x 16 B/line).  Default 10 = 16 KB — the
+    // Pocket geometry, unchanged.  MiSTer passes 11 = 32 KB: with no
+    // CRAM1 fast-tex chip every texel + cmap read there is SDRAM-backed
+    // through this cache.  Size-only knob: hit/miss protocol, fill
+    // machine and both port interfaces are identical at any value.  Block
+    // cost doubles per step (replicated dual-read RAM — see the
+    // gpu_tex_cache header before going bigger).
+    parameter GPU_TEX_CACHE_SET_BITS = 10,
+
+    // ----------------------------------------------------------------
     // 0x48 compact-direct lane form (4-word header + 7 words/lane, payload
     // 11/18/25/32 words) and the 4-lane spanprod_direct_* staging bank plus
     // the sp_fastpath relaxed continuation it enables.
@@ -877,7 +888,9 @@ wire        tex_axi_rlast;
 // head response on the p2b→p3 capture.  Misses route through the
 // shared AXI fill machine; the consumer-side stall is enforced by
 // fp_pipe_stall's cmap_pipe_wait term.
-gpu_tex_cache tex_cache (
+gpu_tex_cache #(
+    .SET_BITS(GPU_TEX_CACHE_SET_BITS)
+) tex_cache (
     .clk(clk),
     .reset_n(reset_n),
     .flush(tex_flush_req),

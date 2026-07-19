@@ -18,7 +18,10 @@ set_global_assignment -name LAST_QUARTUS_VERSION "17.0.0 Lite Edition"
 
 set_global_assignment -name GENERATE_RBF_FILE ON
 set_global_assignment -name PROJECT_OUTPUT_DIRECTORY output_files
-set_global_assignment -name NUM_PARALLEL_PROCESSORS ALL
+# Pinned to 4 (was ALL, which resolves to 4 in the build container's
+# cpuset) so fits are reproducible on any host — same rationale as the
+# pocket QPROCS=4 pin; the committed seed is tuned at this count.
+set_global_assignment -name NUM_PARALLEL_PROCESSORS 4
 set_global_assignment -name SAVE_DISK_SPACE OFF
 set_global_assignment -name SMART_RECOMPILE ON
 set_global_assignment -name MIN_CORE_JUNCTION_TEMP "-40"
@@ -49,7 +52,7 @@ set_global_assignment -name ECO_OPTIMIZE_TIMING ON
 set_global_assignment -name PERIPHERY_TO_CORE_PLACEMENT_AND_ROUTING_OPTIMIZATION ON
 set_global_assignment -name PHYSICAL_SYNTHESIS_ASYNCHRONOUS_SIGNAL_PIPELINING ON
 set_global_assignment -name ALM_REGISTER_PACKING_EFFORT MEDIUM
-set_global_assignment -name SEED 8
+set_global_assignment -name SEED 6
 
 # Bootloader BRAM image (axi_periph_slave's altsyncram init_file).
 # `make bootloader` regenerates it; `make firmware` patches it into an
@@ -215,6 +218,7 @@ set_global_assignment -name FAMILY "Cyclone V"
 set_global_assignment -name CDF_FILE jtag.cdf
 set_global_assignment -name QIP_FILE sys/sys.qip
 set_global_assignment -name SYSTEMVERILOG_FILE emu.sv
+set_global_assignment -name SYSTEMVERILOG_FILE ddr3_fb.sv
 set_global_assignment -name VERILOG_FILE hps_bridge.v
 set_global_assignment -name VERILOG_FILE io_sdram.v
 set_global_assignment -name VERILOG_FILE pll_sys.v

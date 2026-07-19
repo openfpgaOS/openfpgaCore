@@ -200,6 +200,13 @@ SKID_CPP  = tb_skid_buffer_main.cpp
 SKID_TOP  = skid_buffer
 SKID_DIR  = obj_dir_skid
 
+# MiSTer direct-framebuffer pipeline (SDRAM->DDR3 frame DMA + burst arbiter)
+DDR3FB_SRCS = tb_ddr3_fb.v ../targets/mister/ddr3_fb.sv
+DDR3FB_CPP  = tb_ddr3_fb_main.cpp
+DDR3FB_TOP  = tb_ddr3_fb
+DDR3FB_DIR  = obj_dir_ddr3_fb
+DDR3FB_FLAGS = -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC -Wno-CASEINCOMPLETE
+
 # ============================================================
 # MiSTer SDRAM write-path multi-master contention — the convergent
 # experiment.  Wires the REAL production write path that only MiSTer's
@@ -470,7 +477,7 @@ SYSTEM_FLAGS = -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC -Wno-CASEINCOMPLETE \
         gpu-wrpath gpu-wstall scanout-race scanout-race-pocket axi-periph bridge-cmd bridge-rx audio audio-mixer arbiter system system-mister run run-sram build clean \
         cram1-tex-chain cram1-cmap-chain gpu-cram1-repro
 
-all: sdram-all sram gpu gpu-persp axi-periph bridge-cmd bridge-rx audio audio-mixer arbiter hps-bridge skid
+all: sdram-all sram gpu gpu-persp axi-periph bridge-cmd bridge-rx audio audio-mixer arbiter hps-bridge skid ddr3-fb
 
 # --- SDRAM ---
 sdram: $(SDRAM_DIR)/V$(SDRAM_TOP)
@@ -1097,6 +1104,17 @@ $(MIXER_DIR)/V$(MIXER_TOP): $(MIXER_SRCS) $(MIXER_CPP)
 skid: $(SKID_DIR)/V$(SKID_TOP)
 	@printf "\n=== AXI skid buffer (register slice) ===\n"
 	./$(SKID_DIR)/V$(SKID_TOP)
+
+# --- MiSTer direct-framebuffer pipeline (ddr3_fb + video_burst_arb) ---
+ddr3-fb: $(DDR3FB_DIR)/V$(DDR3FB_TOP)
+	@printf "\n=== MiSTer direct-FB pipeline (SDRAM->DDR3 frame DMA) ===\n"
+	./$(DDR3FB_DIR)/V$(DDR3FB_TOP)
+
+$(DDR3FB_DIR)/V$(DDR3FB_TOP): $(DDR3FB_SRCS) $(DDR3FB_CPP)
+	$(VERILATOR) $(VERILATOR_FLAGS_NOTRACE) $(DDR3FB_FLAGS) \
+		--top-module $(DDR3FB_TOP) --Mdir $(DDR3FB_DIR) \
+		-I$(COMMON_DIR) \
+		$(DDR3FB_SRCS) $(DDR3FB_CPP)
 
 $(SKID_DIR)/V$(SKID_TOP): $(SKID_SRCS) $(SKID_CPP)
 	$(VERILATOR) $(VERILATOR_FLAGS) \
