@@ -15,6 +15,14 @@
  * 1 = CPU software mixer.  Set here at boot from HW_FEATURES (one os.bin). */
 extern int of_mixer_use_sw;
 
+/* Live CPU/RAM clock frequency (CPU_FREQ_HZ in regs.h).  Same one-os.bin
+ * pattern as the mixer backend: reduced-clock bitstreams advertise their
+ * real frequency in CLK_FREQ_REG (0xD4); 100 MHz bitstreams return 0 there
+ * and the compile-time default stands.  Must be final before
+ * of_timer_init() below — TIMER_PERIOD and the video pacing windows
+ * derive from it. */
+uint32_t g_cpu_freq_hz = OF_TARGET_CPU_FREQ_HZ;
+
 #ifndef OF_BOOT_UART_DEBUG
 #define OF_BOOT_UART_DEBUG 0
 #endif
@@ -38,6 +46,13 @@ static void uart_dbg_puts(const char *s) {
 void of_init(void) {
     uart_dbg_puts("[init] enter\n");
     uint32_t features = HW_FEATURES;
+
+    /* Adopt the bitstream's advertised clock before anything derives time
+     * from CPU_FREQ_HZ.  Plausibility-gated (50-150 MHz): 0 = register not
+     * present (100 MHz bitstream / older RTL) → keep the compile default. */
+    uint32_t clk_hz = CLK_FREQ_REG;
+    if (clk_hz >= 50000000u && clk_hz <= 150000000u)
+        g_cpu_freq_hz = clk_hz;
 
     uart_dbg_puts("[init] cache..\n");
     of_cache_init();

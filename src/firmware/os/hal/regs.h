@@ -247,6 +247,11 @@
 #define INPUT_FIFO_DATA0    REG32(SYSREG_BASE + 0x150)
 #define INPUT_FIFO_DATA1    REG32(SYSREG_BASE + 0x154)  /* read pops */
 #define INPUT_FIFO_COUNT    REG32(SYSREG_BASE + 0x158)
+/* Event record: DATA1 = {type[31:24], slot[17:16], changed_fields[10:8]},
+ * DATA0 = {seq[15:0]} */
+#define   INPUT_EVENT_TYPE(hi)      (((hi) >> 24) & 0xFFu)
+#define   INPUT_EVENT_SLOT(hi)      (((hi) >> 16) & 0x3u)
+#define   INPUT_EVENT_SLOT_CHANGE   1u
 /* Optional decoded PSX SNAC poller. This is layered above the same physical
  * pinout as SNAC_GPIO; enabling it takes ownership of the SNAC pins until
  * disabled or until the raw SNAC_CTRL path is enabled again. */
@@ -433,6 +438,13 @@
 #define   HW_FEAT_GPU_FAST_TEX  (1 << 25)  /* dedicated fast texture memory present
                                             * (clear → tex_fast_size 0, SDRAM textures) */
 
+/* CPU/RAM clock frequency in Hz (0xD4) — read-only, set at synthesis time.
+ * Present ONLY on reduced-clock bitstreams (INCLUDE_CLK96, e.g. the 96 MHz os20 @
+ * 96 MHz); every 100 MHz bitstream returns the unmapped-read value 0 and
+ * the HAL keeps its compile-time OF_TARGET_CPU_FREQ_HZ.  Read once in
+ * of_init() into g_cpu_freq_hz (= CPU_FREQ_HZ) before the timers start. */
+#define CLK_FREQ_REG        REG32(SYSREG_BASE + 0xD4)
+
 
 /* ======================================================================
  * Audio FIFO status (0x4C000000) — HW mixer drives the FIFO directly in
@@ -545,7 +557,14 @@
  * CPU Constants
  * ====================================================================== */
 
-#define CPU_FREQ_HZ         OF_TARGET_CPU_FREQ_HZ
+/* Live CPU/RAM clock frequency.  Defaults to the target's compile-time
+ * OF_TARGET_CPU_FREQ_HZ; of_init() overwrites it from CLK_FREQ_REG when a
+ * reduced-clock bitstream (e.g. 96 MHz os20) advertises one, so ONE
+ * os.bin paces timers/video correctly on every clock variant.  All
+ * frequency-derived math (TIMER_PERIOD, vsync windows, cycles→µs) must go
+ * through CPU_FREQ_HZ — never OF_TARGET_CPU_FREQ_HZ directly. */
+extern uint32_t g_cpu_freq_hz;
+#define CPU_FREQ_HZ         g_cpu_freq_hz
 
 /* ======================================================================
  * Inline helpers

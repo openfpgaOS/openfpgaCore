@@ -96,6 +96,11 @@ DCACHE_SETS=1024         # 128 KB D$
 GSHARE_BYTES=4096        # GShare predictor RAM (4 M10K at 4096)
 BTB_SETS=512             # BTB sets (3 M10K at 512)
 LSU_SW_PREFETCH=1        # Zicbop prefetch.r/w decode (0 = omit)
+FPU_WB_AT=1              # FPU→int writeback stage (upstream default 2; we
+                         # ship 1 — tighter.  Overridable per-variant .cfg.)
+LSU_L1_WAYS=2            # D$ associativity (sets x ways x 64 B line)
+LSU_SB_SLOTS=2           # D$ store-buffer line slots
+LSU_SB_OPS=16            # D$ store-buffer op capacity
 EXTRA_FLAGS=""
 MAXFAN_HINT=0
 
@@ -137,16 +142,16 @@ sbt -Dsbt.server.forcestart=true --batch "Test/runMain vexiiriscv.Generate \
       --fetch-l1-read-at=1 --fetch-l1-hits-at=2 --fetch-l1-hit-at=2 \
       --fetch-l1-bank-muxes-at=2 --fetch-l1-bank-mux-at=3 --fetch-l1-ctrl-at=3 \
       --fetch-l1-hardware-prefetch=nl --fetch-axi4 \
-      --with-lsu-l1 --lsu-l1-sets=$DCACHE_SETS --lsu-l1-ways=2 \
+      --with-lsu-l1 --lsu-l1-sets=$DCACHE_SETS --lsu-l1-ways=$LSU_L1_WAYS \
       --lsu-l1-refill-count=2 --lsu-l1-writeback-count=2 \
-      --lsu-l1-store-buffer-slots=2 --lsu-l1-store-buffer-ops=16 \
+      --lsu-l1-store-buffer-slots=$LSU_SB_SLOTS --lsu-l1-store-buffer-ops=$LSU_SB_OPS \
       --lsu-l1-axi4 \
       $LSU_SW_PREFETCH_FLAG --lsu-hardware-prefetch=none \
       --with-btb --btb-sets=$BTB_SETS --relaxed-btb --relaxed-btb-hit \
       --with-gshare --gshare-bytes=$GSHARE_BYTES --with-ras \
       --allow-bypass-from=0 \
       --fpu-ignore-subnormal \
-      --fpu-wb-at=1 \
+      --fpu-wb-at=$FPU_WB_AT \
       --fpu-add-preshift-stage=1 --fpu-add-shifter-stage=2 \
       --fpu-add-math-stage=3 --fpu-add-norm-stage=4 --fpu-add-pack-at=5 \
       --relaxed-src --relaxed-branch --relaxed-div --relaxed-shift \

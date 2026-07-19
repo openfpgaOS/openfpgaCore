@@ -68,7 +68,10 @@ void caps_table_init(uintptr_t heap_base) {
 
     /* OS info */
     caps->os_version      = OF_API_VERSION;
-    caps->cpu_freq_hz     = platform->cpu_freq_hz;
+    /* Live value (g_cpu_freq_hz), not the platform descriptor's compile-time
+     * constant — reduced-clock bitstreams (the 96 MHz os20) advertise their real
+     * frequency at boot and apps must see it. */
+    caps->cpu_freq_hz     = CPU_FREQ_HZ;
     /* v2 fields: memory bases for inline accessors that previously
      * baked the addresses into every app .elf. */
     caps->sdram_base          = platform->sdram_base;

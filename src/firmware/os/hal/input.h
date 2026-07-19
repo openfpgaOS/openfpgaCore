@@ -45,8 +45,9 @@ const of_input_state_t *of_input_get_state(int player);
 /* Get current dock keyboard state.  Keyboard reports use USB HID usage IDs. */
 const of_keyboard_state_t *of_input_get_keyboard_state(void);
 
-/* Read mouse state and consume relative movement accumulated since the
- * previous read.  Button state remains level-based like controller state. */
+/* Read mouse state and consume the relative movement and button edge
+ * masks accumulated since the previous read.  buttons itself remains
+ * level-based like controller state. */
 void of_input_read_mouse_state(of_mouse_state_t *out);
 
 /* Nonzero while running on an external display with detached controllers.

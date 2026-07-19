@@ -425,6 +425,21 @@ HPSBRG_DIR = obj_dir_hps_bridge
 HPSBRG_FLAGS = -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC -Wno-CASEINCOMPLETE -Wno-UNUSEDSIGNAL -Wno-PINCONNECTEMPTY
 
 # ============================================================
+# MiSTer hps_mouse — framework mouse → input-hub slot 3 encoder.
+# UNUSEDSIGNAL: the hps_io ports are contract-width; the PS/2 always-1
+# bit and the wheel/reserved ext bits are deliberately ignored (frozen
+# of_mouse_state_t ABI).
+# ============================================================
+HPSMOUSE_SRCS = \
+	tb_hps_mouse.v \
+	$(MISTER_DIR)/hps_mouse.v
+
+HPSMOUSE_CPP = tb_hps_mouse_main.cpp
+HPSMOUSE_TOP = tb_hps_mouse
+HPSMOUSE_DIR = obj_dir_hps_mouse
+HPSMOUSE_FLAGS = -Wno-UNUSEDSIGNAL
+
+# ============================================================
 # Full system bring-up — CPU + SDRAM + CRAM0 CDC + BRAM
 # ============================================================
 # Boots the VexiiRiscv through the v2 fabric, loads os.bin into the
@@ -477,7 +492,7 @@ SYSTEM_FLAGS = -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC -Wno-CASEINCOMPLETE \
         gpu-wrpath gpu-wstall scanout-race scanout-race-pocket axi-periph bridge-cmd bridge-rx audio audio-mixer arbiter system system-mister run run-sram build clean \
         cram1-tex-chain cram1-cmap-chain gpu-cram1-repro
 
-all: sdram-all sram gpu gpu-persp axi-periph bridge-cmd bridge-rx audio audio-mixer arbiter hps-bridge skid ddr3-fb
+all: sdram-all sram gpu gpu-persp axi-periph bridge-cmd bridge-rx audio audio-mixer arbiter hps-bridge hps-mouse skid ddr3-fb
 
 # --- SDRAM ---
 sdram: $(SDRAM_DIR)/V$(SDRAM_TOP)
@@ -1143,6 +1158,17 @@ $(HPSBRG_DIR)/V$(HPSBRG_TOP): $(HPSBRG_SRCS) $(HPSBRG_CPP)
 		--top-module $(HPSBRG_TOP) --Mdir $(HPSBRG_DIR) \
 		-I$(COMMON_DIR) -I$(MISTER_DIR) \
 		$(HPSBRG_SRCS) $(HPSBRG_CPP)
+
+# --- MiSTer hps_mouse ---
+hps-mouse: $(HPSMOUSE_DIR)/V$(HPSMOUSE_TOP)
+	@printf "\n=== MiSTer hps_mouse (framework mouse -> input-hub slot 3) ===\n"
+	./$(HPSMOUSE_DIR)/V$(HPSMOUSE_TOP)
+
+$(HPSMOUSE_DIR)/V$(HPSMOUSE_TOP): $(HPSMOUSE_SRCS) $(HPSMOUSE_CPP)
+	$(VERILATOR) $(VERILATOR_FLAGS) $(HPSMOUSE_FLAGS) \
+		--top-module $(HPSMOUSE_TOP) --Mdir $(HPSMOUSE_DIR) \
+		-I$(COMMON_DIR) -I$(MISTER_DIR) \
+		$(HPSMOUSE_SRCS) $(HPSMOUSE_CPP)
 
 # --- System bring-up ---
 system: $(SYSTEM_DIR)/V$(SYSTEM_TOP)

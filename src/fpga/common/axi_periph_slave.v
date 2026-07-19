@@ -18,6 +18,13 @@
 
 
 module axi_periph_slave #(
+    // CPU/RAM clock frequency in Hz (CLK_FREQ_HZ register @ 0xD4, read-
+    // only).  Set by the target's core_top to match its clk_cpu PLL so the
+    // OS derives timers/pacing from the REAL frequency — one os.bin serves
+    // 100 MHz and reduced-clock (96 MHz) bitstreams alike.  Older
+    // bitstreams without this register read 0 → firmware falls back to its
+    // compile-time OF_TARGET_CPU_FREQ_HZ.
+    parameter CLK_HZ             = 32'd100_000_000,
     // Hardware feature advertisement (HW_FEATURES register @ 0x98).
     // Per-feature switches so the shared capability bits live in exactly
     // one place (HW_FEATURES_RESOLVED below); a target without a given
@@ -1751,6 +1758,13 @@ always @(*) begin
             6'd50: sysreg_rdata = {21'b0, save_dt_word_mode, save_dt_word};  // SAVE_DT_WORD + armed flag (diagnostic)
             // Display timing live readback.
             6'd55: sysreg_rdata = {22'b0, vrr_v_total};
+`ifdef INCLUDE_CLK96
+            // CLK_FREQ_HZ (0xD4).  Emitted ONLY for reduced-clock builds so
+            // every existing 100 MHz variant keeps a bit-identical netlist;
+            // on those, 0xD4 falls through to the default read value and
+            // firmware falls back to its compile-time frequency.
+            6'd53: sysreg_rdata = CLK_HZ;
+`endif
             6'd56: sysreg_rdata = 32'b0;  // swap hold retired
             6'd57: sysreg_rdata = {6'b0, fb_height_reg, 6'b0, fb_width_reg};
             6'd58: sysreg_rdata = {16'b0, fb_stride_reg};

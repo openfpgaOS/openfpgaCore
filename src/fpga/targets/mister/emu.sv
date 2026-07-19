@@ -230,6 +230,9 @@ wire [31:0]  joystick_0, joystick_1;
 wire [15:0]  joystick_l_analog_0, joystick_r_analog_0;
 wire [15:0]  joystick_l_analog_1, joystick_r_analog_1;
 
+wire [24:0]  ps2_mouse;
+wire [15:0]  ps2_mouse_ext;
+
 wire [32:0]  timestamp;
 
 hps_io #(.CONF_STR(CONF_STR), .WIDE(1), .VDNUM(3), .BLKSZ(2)) hps_io (
@@ -271,7 +274,32 @@ hps_io #(.CONF_STR(CONF_STR), .WIDE(1), .VDNUM(3), .BLKSZ(2)) hps_io (
 	.joystick_l_analog_1 (joystick_l_analog_1),
 	.joystick_r_analog_1 (joystick_r_analog_1),
 
+	.ps2_mouse           (ps2_mouse),
+	.ps2_mouse_ext       (ps2_mouse_ext),
+
 	.TIMESTAMP           (timestamp)
+);
+
+// Framework mouse → input-hub slot 3 (periph cont4_*).  Same clk_cpu
+// domain as hps_io; the periph 2FF-syncs the cont buses internally.
+wire [31:0] mouse_controls, mouse_joypad;
+wire [15:0] mouse_trigger;
+
+hps_mouse mouse (
+	.clk      (clk_cpu),
+	// Never reset — hps_io isn't reset by the core's warm resets either,
+	// so ps2_mouse[24] keeps toggling across them; clearing stb_prev would
+	// desync the toggle tracker (one phantom packet).  The accumulators
+	// are free-running by contract (firmware re-baselines its differencing
+	// on restart) and "seen" persisting is correct: the mouse is still there.
+	.reset_n  (1'b1),
+
+	.ps2_mouse     (ps2_mouse),
+	.ps2_mouse_ext (ps2_mouse_ext),
+
+	.cont4_key  (mouse_controls),
+	.cont4_joy  (mouse_joypad),
+	.cont4_trig (mouse_trigger)
 );
 
 ///////////////////////  HPS BRIDGE  /////////////////////////////
@@ -719,9 +747,9 @@ axi_periph_slave #(
 	.cont3_key(32'd0),
 	.cont3_joy(32'd0),
 	.cont3_trig(16'd0),
-	.cont4_key(32'd0),
-	.cont4_joy(32'd0),
-	.cont4_trig(16'd0),
+	.cont4_key(mouse_controls),
+	.cont4_joy(mouse_joypad),
+	.cont4_trig(mouse_trigger),
 	.rtc_epoch_seconds(rtc_epoch_seconds),
 	.rtc_valid(rtc_valid),
 	.bridge_wr_idle(bridge_wr_idle),

@@ -64,6 +64,12 @@ BOOT_ABI := 0x$(shell { echo "$(TARGET)"; grep -hE '#define[[:space:]]+OF_TARGET
 ARCH = rv32imafc
 ABI = ilp32f
 CFLAGS = -march=$(ARCH) -mabi=$(ABI) -Os -Wall -Wextra -fdiagnostics-color=always
+# Schedule for a dual-issue in-order pipeline (VexiiRiscv --decoders=2: the
+# mister target and pocket os20).  ISA-neutral — pure instruction
+# ordering, so the ONE os.bin still runs on every single-issue variant
+# (os25/os30), where in-order execution makes the ordering ~performance-
+# neutral.  sifive-7-series is GCC's closest dual-issue in-order model.
+CFLAGS += -mtune=sifive-7-series
 CFLAGS += -ffreestanding -nostdlib -nostartfiles
 CFLAGS += -ffunction-sections -fdata-sections
 CFLAGS += -fno-builtin
@@ -127,6 +133,7 @@ HAL_SRCS = $(HAL_DIR)/hal.c \
            $(HAL_DIR)/codec.c \
            $(HAL_DIR)/lzw.c \
            $(HAL_DIR)/disk.c \
+           $(HAL_DIR)/hid_mouse.c \
            ../api/of_smp_tables.c
 
 # Optional debug force-override: MIXER=sw pins of_mixer_use_sw=1 (CPU software

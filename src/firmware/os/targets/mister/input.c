@@ -18,18 +18,26 @@
  *                        MiSTer's signed axes with 0x80)
  *   CONT1_TRIG           0 (no analog triggers on MiSTer pads)
  *
- * No input hub, SNAC, dock keyboard or mouse on MiSTer v1 — the HID state
- * objects exist but always read disconnected.  USB keyboards via hps_io
- * ps2_key are a follow-up.
+ * The USB mouse rides input-hub slot 3 (INPUT_SLOT_KEY/JOY/TRIG(3)) with
+ * the unified layout — KEY[31:28]=5, KEY[15:0]=report counter,
+ * JOY[31:16]=buttons — except X/Y are free-running wrapping accumulators
+ * the RTL encoder adds each packet's delta into, so pure polling is
+ * lossless with no hub IRQ.  No probe: a bitstream without the encoder
+ * reads type nibble 0 and the mouse simply stays absent.
+ *
+ * No input hub IRQs, SNAC or dock keyboard on MiSTer v1 — the keyboard
+ * state object exists but always reads disconnected.  USB keyboards via
+ * hps_io ps2_key are a follow-up.
  */
 
 #include "input.h"
 #include "regs.h"
+#include "hid_mouse.h"
 
 of_input_state_t of_input_states[INPUT_MAX_PLAYERS];
 
 static of_keyboard_state_t keyboard_state;
-static of_mouse_state_t mouse_state;
+static hid_mouse_t hid_mouse;
 static uint32_t prev_buttons[INPUT_MAX_PLAYERS];
 static int16_t stick_deadzone = 8000;
 
@@ -39,11 +47,29 @@ void of_input_init(void) {
         prev_buttons[i] = 0;
     }
     keyboard_state = (of_keyboard_state_t){0};
-    mouse_state = (of_mouse_state_t){0};
+    hid_mouse_init(&hid_mouse, HID_MOUSE_XY_ACCUM);
 }
 
 void of_input_irq_service(void) {
     /* No input hub IRQs on MiSTer. */
+}
+
+/* Nothing here decodes from IRQ context, but the HAL permits apps to
+ * read mouse state from IRQ callbacks, so the decode/consume pairs get
+ * the same critical sections as the pocket implementation.  Nesting is
+ * safe: the inner restore re-writes the already-cleared MIE. */
+static inline uint32_t input_irq_save_local(void)
+{
+    uint32_t prev;
+    __asm__ volatile("csrrci %0, mstatus, 0x8"
+                     : "=r"(prev) :: "memory");
+    return prev & 0x8u;
+}
+
+static inline void input_irq_restore_local(uint32_t prev)
+{
+    if (prev)
+        __asm__ volatile("csrrsi zero, mstatus, 0x8" ::: "memory");
 }
 
 void of_input_vblank_service(void) {
@@ -86,13 +112,22 @@ static void fill_state(int player, uint32_t keys, uint32_t joy, uint32_t trig) {
     of_input_states[player].trigger_r = (trig >> 16) & 0xFFFF;
 }
 
+static void poll_mouse_slot(void) {
+    uint32_t irq = input_irq_save_local();
+    hid_mouse_decode(&hid_mouse, INPUT_SLOT_KEY(3), INPUT_SLOT_JOY(3),
+                     INPUT_SLOT_TRIG(3));
+    input_irq_restore_local(irq);
+}
+
 void of_input_poll(void) {
     fill_state(0, CONT1_KEY, CONT1_JOY, CONT1_TRIG);
     fill_state(1, CONT2_KEY, CONT2_JOY, CONT2_TRIG);
+    poll_mouse_slot();
 }
 
 void of_input_poll_p0(of_input_state_t *out) {
     fill_state(0, CONT1_KEY, CONT1_JOY, CONT1_TRIG);
+    poll_mouse_slot();
     *out = of_input_states[0];
 }
 
@@ -113,10 +148,14 @@ int of_input_is_docked(void) {
 }
 
 void of_input_read_mouse_state(of_mouse_state_t *out) {
-    if (out)
-        *out = mouse_state;
-    mouse_state.dx = 0;
-    mouse_state.dy = 0;
+    /* Refresh the slot here too: with no hub IRQ the accumulators only
+     * advance when someone decodes them, and pure state-getter apps may
+     * never call of_input_poll().  Counter dedup keeps this idempotent
+     * with the poll path. */
+    uint32_t irq = input_irq_save_local();
+    poll_mouse_slot();
+    hid_mouse_read(&hid_mouse, out);
+    input_irq_restore_local(irq);
 }
 
 void of_input_set_deadzone(int16_t deadzone) {

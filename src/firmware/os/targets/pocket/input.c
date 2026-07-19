@@ -17,18 +17,16 @@
 #include "regs.h"
 #include "snac.h"
 #include "analogizer.h"
+#include "hid_mouse.h"
 
 /* Global state accessible via inline functions in input.h */
 of_input_state_t of_input_states[INPUT_MAX_PLAYERS];
 
 static of_keyboard_state_t keyboard_state;
-static of_mouse_state_t mouse_state;
+static hid_mouse_t hid_mouse;
 static uint32_t prev_buttons[INPUT_MAX_PLAYERS];
 static uint32_t prev_keyboard_keys[OF_KEYBOARD_WORDS];
 static uint16_t prev_keyboard_modifiers;
-static uint16_t prev_mouse_buttons;
-static uint16_t prev_mouse_report_counter;
-static int mouse_report_valid;
 static int16_t stick_deadzone = 8000;
 static int input_hub_present;
 static volatile uint32_t input_hw_last_event_lo;
@@ -103,11 +101,8 @@ void of_input_init(void) {
         prev_buttons[i] = 0;
     }
     keyboard_state = (of_keyboard_state_t){0};
-    mouse_state = (of_mouse_state_t){0};
+    hid_mouse_init(&hid_mouse, HID_MOUSE_XY_DELTA);
     prev_keyboard_modifiers = 0;
-    prev_mouse_buttons = 0;
-    prev_mouse_report_counter = 0;
-    mouse_report_valid = 0;
     for (int i = 0; i < (int)OF_KEYBOARD_WORDS; i++)
         prev_keyboard_keys[i] = 0;
 
@@ -171,6 +166,7 @@ void of_input_irq_service(void) {
      * the high word and pops the FIFO in RTL.  The current v1 pipeline
      * still computes app-visible pressed/released edges from of_input_poll()
      * so this ISR does not mutate of_input_states[]. */
+    int mouse_event = 0;
     for (int i = 0; i < 64; i++) {
         uint32_t status = INPUT_STATUS;
         if (!(status & INPUT_STATUS_PENDING))
@@ -184,8 +180,24 @@ void of_input_irq_service(void) {
             break;
         }
 
-        input_hw_last_event_lo = INPUT_FIFO_DATA0;
-        input_hw_last_event_hi = INPUT_FIFO_DATA1;
+        uint32_t lo = INPUT_FIFO_DATA0;
+        uint32_t hi = INPUT_FIFO_DATA1;
+        input_hw_last_event_lo = lo;
+        input_hw_last_event_hi = hi;
+        if (INPUT_EVENT_TYPE(hi) == INPUT_EVENT_SLOT_CHANGE &&
+            INPUT_EVENT_SLOT(hi) == 3u)
+            mouse_event = 1;
+    }
+
+    /* Slot-3 change: decode the mouse report here so per-report deltas
+     * survive multiple hardware reports per frame.  Change records carry
+     * no payload, so coalesced events yield one decode of the newest
+     * report; the counter dedup keeps the poll-path fallback idempotent.
+     * Runs with interrupts already disabled (trap context). */
+    if (mouse_event) {
+        uint32_t key, joy, trig;
+        read_apf(3, &key, &joy, &trig);
+        hid_mouse_decode(&hid_mouse, key, joy, trig);
     }
 }
 
@@ -332,50 +344,10 @@ static void decode_keyboard(uint32_t key, uint32_t joy, uint32_t trig) {
     }
 }
 
-static void mouse_disconnect(void) {
-    mouse_state.present = 0;
-    mouse_state.reserved0 = 0;
-    mouse_state.buttons = 0;
-    mouse_state.buttons_pressed = 0;
-    mouse_state.buttons_released = prev_mouse_buttons;
-    mouse_state.report_counter = 0;
-    mouse_state.dx = 0;
-    mouse_state.dy = 0;
-    prev_mouse_buttons = 0;
-    prev_mouse_report_counter = 0;
-    mouse_report_valid = 0;
-}
-
-static void decode_mouse(uint32_t key, uint32_t joy, uint32_t trig) {
-    if (apf_input_type(key) != OF_INPUT_TYPE_MOUSE) {
-        mouse_disconnect();
-        return;
-    }
-
-    uint16_t report_counter = (uint16_t)(key & 0xFFFFu);
-    uint16_t buttons = (uint16_t)((joy >> 16) & 0xFFFFu);
-
-    mouse_state.present = 1;
-    mouse_state.reserved0 = 0;
-    mouse_state.buttons = buttons;
-    mouse_state.buttons_pressed = buttons & (uint16_t)~prev_mouse_buttons;
-    mouse_state.buttons_released = (uint16_t)~buttons & prev_mouse_buttons;
-    mouse_state.report_counter = report_counter;
-
-    if (mouse_report_valid && report_counter != prev_mouse_report_counter) {
-        mouse_state.dx += (int16_t)(joy & 0xFFFFu);
-        mouse_state.dy += (int16_t)(trig & 0xFFFFu);
-    }
-
-    mouse_report_valid = 1;
-    prev_mouse_report_counter = report_counter;
-    prev_mouse_buttons = buttons;
-}
-
 static void poll_hid_slots(void) {
     if (!input_hub_present) {
         keyboard_disconnect();
-        mouse_disconnect();
+        hid_mouse_disconnect(&hid_mouse);
         return;
     }
 
@@ -383,8 +355,14 @@ static void poll_hid_slots(void) {
     read_apf(2, &key, &joy, &trig);
     decode_keyboard(key, joy, trig);
 
+    /* Poll-path fallback for the IRQ decode.  The register read and the
+     * decode must share one critical section: an IRQ decode of a newer
+     * report in between would let this stale snapshot re-pass the
+     * counter dedup and double-count its delta. */
+    uint32_t irq = input_irq_save_local();
     read_apf(3, &key, &joy, &trig);
-    decode_mouse(key, joy, trig);
+    hid_mouse_decode(&hid_mouse, key, joy, trig);
+    input_irq_restore_local(irq);
 }
 
 void of_input_poll(void) {
@@ -494,10 +472,9 @@ int of_input_is_docked(void) {
 }
 
 void of_input_read_mouse_state(of_mouse_state_t *out) {
-    if (out)
-        *out = mouse_state;
-    mouse_state.dx = 0;
-    mouse_state.dy = 0;
+    uint32_t irq = input_irq_save_local();
+    hid_mouse_read(&hid_mouse, out);
+    input_irq_restore_local(irq);
 }
 
 void of_input_set_deadzone(int16_t deadzone) {

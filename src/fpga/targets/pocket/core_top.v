@@ -2529,6 +2529,11 @@ assign video_hs = vidout_hs;
     // are a direct echo of its include-list (Makefile VARIANT_DEFS).  Each
     // INCLUDE_* MUST match the gpu's same-named param below.
     axi_periph_slave #(
+        // CPU/RAM clock frequency advertisement (CLK_FREQ_HZ @ 0xD4) —
+        // must track the mp_ram PLL selection above.  Firmware reads it at
+        // boot (fallback: compile-time OF_TARGET_CPU_FREQ_HZ when 0), so
+        // ONE os.bin serves 100 MHz and 96 MHz bitstreams alike.
+        .CLK_HZ(`ifdef INCLUDE_CLK96 32'd96_000_000 `else 32'd100_000_000 `endif),
         // ANALOGIZER (HW_FEATURES bit 3): the SNAC instances inside
         // axi_periph_slave.v gate on this; clear → they constant-fold away.
         .INCLUDE_ANALOGIZER(`ifdef INCLUDE_ANALOGIZER 1 `else 0 `endif),
@@ -3564,7 +3569,17 @@ mf_pllbase mp1 (
     .locked         ( pll_core_locked )
 );
 
+// CPU/RAM clock: 100 MHz (mf_pllram_133) by default; INCLUDE_CLK96 selects
+// the 96 MHz PLL (reduced-clock variants, e.g. os20 — dual-issue closes
+// timing at 96 where 100 sits at WNS −1.0).  Same instance name so the SDC
+// derived-clock paths (ic|mp_ram|altera_pll_i|...) hold for both.  The
+// actual frequency is advertised to firmware via CLK_FREQ_HZ (sysreg 0xD4,
+// CLK_HZ parameter on axi_periph_slave below).
+`ifdef INCLUDE_CLK96
+mf_pllram_96 mp_ram (
+`else
 mf_pllram_133 mp_ram (
+`endif
     .refclk         ( clk_74a ),
     .rst            ( 0 ),
     .outclk_0       ( clk_ram_controller ),
