@@ -90,7 +90,9 @@ perspective + edge core + z-test/write; SoC: CPU core, SDRAM, scanout, save-slot
 |---|---|---|---|---|
 | Fast texture (CRAM1) | `TEX_MEM` | dedicated sync-burst tex chip | 25 | [file] |
 | Z-read window | `GPU_Z_READ_WINDOW` (derived) | 4 if any tri module else 1 | — | param |
+| Blend-dst window | `GPU_CB_READ_WINDOW` (4/2/1; `CB_WINDOW2`/`CB_WINDOW1` macros) | truecolor-blend read amortisation; 1 = legacy per-pixel | — | param |
 | Edge parallel divs | `GPU_EW_PARALLEL_DIVS` (derived) | concurrent slope dividers | — | param |
+| VI output filter | `VI_FILTER` | N64 VI-style 2-tap horizontal soften, LCD direct-color only (scanout) | — | [gen] |
 
 ### CPU / memory (netlist-select modules)
 | Module | `INCLUDE_` | What | Resolves to | Caps |

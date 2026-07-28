@@ -39,7 +39,13 @@
 module tb_gpu_transluc #(
     parameter GPU_Z_READ_WINDOW      = 4,
     parameter GPU_EW_PARALLEL_DIVS   = 1,
-    parameter BANK_ROW_TRACK         = 1
+    parameter BANK_ROW_TRACK         = 1,
+    // Truecolor CB-blend chain coverage (gpu-cb-chain target): the
+    // acceptance suite proves the CB path byte-exact on the 1-cycle stub;
+    // only THIS rig marries its dst reads + halfword blended writes to the
+    // real arbiter/slave/io_sdram under aggressor contention.
+    parameter INCLUDE_DIRECT_COLOR   = 0,
+    parameter GPU_CB_READ_WINDOW     = 4
 ) (
     input  wire        clk,
     input  wire        reset_n,
@@ -253,7 +259,9 @@ gpu_core #(
     .INCLUDE_COMPACT_SPAN(1),
     .INCLUDE_COLUMN_LIST(1),
     .INCLUDE_TEX_MEM(0),
+    .INCLUDE_DIRECT_COLOR(INCLUDE_DIRECT_COLOR),
     .GPU_Z_READ_WINDOW(GPU_Z_READ_WINDOW),
+    .GPU_CB_READ_WINDOW(GPU_CB_READ_WINDOW),
     .GPU_EW_PARALLEL_DIVS(GPU_EW_PARALLEL_DIVS)
 ) gpu (
     .clk(clk), .reset_n(reset_n), .gpu_enable(1'b1),

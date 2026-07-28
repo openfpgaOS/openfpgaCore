@@ -45,7 +45,11 @@ static int bridge_warmed;
 static int bridge_warmup_active;
 
 /* Async data-slot read state. Completion is IRQ-driven on Pocket hardware;
- * of_file_async_poll() remains as a compatibility/fallback drain. */
+ * of_file_async_poll() and the 1 kHz kernel tick (of_file_async_tick) are
+ * fallback drains for lost IRQs.  `active` stays set from issue until the
+ * app-facing completion (callback fired / poll returned), which for a
+ * non-CRAM0 destination includes the deferred bounce copy — the bridge
+ * itself is free once `copy_pending` is set. */
 static struct {
     volatile int      active;
     volatile uint32_t completed_count;
@@ -55,7 +59,26 @@ static struct {
     void             *dma_dest;
     int               bounce_to_dest;
     void            (*callback)(int token, int result);
+    volatile int      copy_pending;   /* DMA done, bounce copy in progress */
+    volatile uint32_t copy_off;       /* bounce copy progress in bytes     */
+    int               copy_result;
+    volatile uint32_t age_ms;         /* 1 kHz ticks with no DONE (watchdog) */
 } async_state;
+
+/* Local IRQ mask save/restore for tick-vs-app-context critical sections
+ * (same pattern as kernel/syscall.c). */
+static inline uint32_t file_irq_save(void)
+{
+    uint32_t prev;
+    __asm__ volatile("csrrci %0, mstatus, 0x8" : "=r"(prev) :: "memory");
+    return prev & 0x8u;
+}
+
+static inline void file_irq_restore(uint32_t prev)
+{
+    if (prev)
+        __asm__ volatile("csrrsi zero, mstatus, 0x8" ::: "memory");
+}
 
 static int async_token_counter;
 static uint32_t dma_stage_next;
@@ -85,6 +108,10 @@ static void bridge_warmup_once(void) {
         return;
 
     bridge_warmup_active = 1;
+    /* Boot breadcrumb: visible only if the warmup wedges — a successful
+     * boot clears the terminal right before the banner.  A blank screen
+     * WITHOUT this line means the kernel never reached the file layer. */
+    of_term_printf("[file] bridge warmup\n");
     (void)bridge_read_impl(1, 0, (void *)CRAM0_SCRATCH, 4);
     of_cache_flush_dcache();
 
@@ -242,6 +269,100 @@ static inline void call_idle_hook(void) {
 }
 
 static int file_op_count;
+
+/* ---- Command dispatch with acceptance verification -----------------------
+ * The DS_COMMAND dispatch guard (axi_periph_slave.v) silently ignores the
+ * write while the previous command's request lines or target_ack_s are still
+ * up.  DS_STATUS carries no ds_cmd_active bit, so an "ACK yet?" probe CANNOT
+ * tell a dropped write from an accepted command whose host ACK (ms-scale,
+ * host-paced) hasn't arrived: the old ~100-iteration probe false-negatived
+ * on ACCEPTED commands issued right after prior bridge traffic, unwound the
+ * async state with the DMA still in flight, and the app's sync-read fallback
+ * then adopted the zombie command's completion (the doom1/doom2 music
+ * sync-livelock, `issue fail tok=-12`).
+ *
+ * What IS observable µs after the write: an accepted command RESETS the
+ * per-command ACK/DONE status latches (DS_STATUS bits 0/1), and every
+ * completed command leaves at least ACK latched high — so capture DS_STATUS
+ * right before the write and treat those bits clearing as acceptance,
+ * independent of host latency.  Fallback proofs: the ACK latch setting, or
+ * READY dropping (= target_ack_s up).  Retrying an indeterminate command is
+ * safe: if it WAS accepted, its request lines stay up for the whole host
+ * round trip (~25 ms) and the guard refuses the duplicate.
+ *
+ * The quiet pre-wait is time-bounded (not iteration-bounded) so it spans
+ * the full CDC deassertion window; on expiry the bridge is genuinely
+ * busy/owned and the caller gets OF_ERR_BUSY (defer), never a wedge. */
+#define DS_ISSUE_PROBE_US    50u    /* acceptance confirmation probe bound */
+
+static inline uint32_t us_to_cycles(uint32_t us) {
+    return (CPU_FREQ_HZ / 1000000u) * us;
+}
+
+/* Issue a DS command the way the field-proven firmware always has: fire
+ * once, probe briefly, retry once if nothing was observed, and PROCEED
+ * REGARDLESS.  Never fails.
+ *
+ * The probe is confirmation-only.  Device evidence (doom1 CD music,
+ * `issue fail tok=-12` persisting through the latch-reset detector): an
+ * ACCEPTED command can present exactly like a dropped one for its whole
+ * host round trip — READY high, ACK/DONE latches unchanged — so there is
+ * NO reliable CPU-visible acceptance indicator in the current RTL (no
+ * ds_cmd_active bit in DS_STATUS).  Treating an unconfirmed issue as an
+ * error therefore false-negatives on live commands; the old async unwind
+ * on that false negative orphaned the in-flight DMA and the app's
+ * sync-read fallback adopted the zombie's completion (the music
+ * sync-livelock).  So: on the sync path a genuine drop is caught by
+ * file_wait_complete's timeout, on the async path by the age-out
+ * watchdog.  The single blind retry matches the legacy code (a duplicate
+ * of an accepted in-flight command is refused by the dispatch guard while
+ * its request lines are up, i.e. for the whole ~25 ms round trip).
+ * A real acceptance bit in DS_STATUS is the RTL fix.
+ *
+ * Deliberately NO idle pre-wait here: callers own their own tolerance
+ * (sync paths block DMA_TIMEOUT-long, the async path defers with a short
+ * bound).  An earlier version re-gated on READY|WR_IDLE with a 2 ms
+ * budget and broke BOOT: at kernel start the APF host is still
+ * auto-loading nonvolatile slots (WR_IDLE low for long stretches), the
+ * outer wait exits in a momentary gap, and the 2 ms re-check then failed
+ * the warmup/os.ini reads outright — loading → black screen. */
+static int ds_issue_command(uint32_t cmd) {
+    for (int attempt = 0; attempt < 2; attempt++) {
+        uint32_t pre = DS_STATUS & (DS_STATUS_ACK | DS_STATUS_DONE);
+        fence();
+        DS_COMMAND = cmd;
+        fence();
+
+        uint64_t start = read_cycles();
+        for (;;) {
+            uint32_t st = DS_STATUS;
+            if (pre && (st & pre) != pre)
+                return 0;               /* latches reset -> accepted        */
+            if (st & DS_STATUS_ACK)
+                return 0;               /* ACK latched for this command     */
+            if (!(st & DS_STATUS_READY))
+                return 0;               /* target_ack_s up -> host acked    */
+            if (read_cycles() - start > us_to_cycles(DS_ISSUE_PROBE_US))
+                break;
+        }
+    }
+    return 0;                           /* unconfirmed — proceed anyway     */
+}
+
+/* Serialize against the async machinery.  A DMA in flight owns the bridge:
+ * callers must defer (OF_ERR_BUSY).  A pending deferred bounce copy does
+ * NOT own the bridge — finish it inline (bounded <= one chunk) and let the
+ * caller proceed, so sync file I/O never bounces off a completed-but-
+ * uncopied async read. */
+static void async_copy_drain(void);
+
+static int async_gate(void) {
+    if (async_state.copy_pending) {
+        async_copy_drain();
+        return 0;
+    }
+    return async_state.active ? OF_ERR_BUSY : 0;
+}
 
 static int file_wait_complete(void) {
     uint32_t timeout;
@@ -445,18 +566,23 @@ int of_file_read_raw(uint32_t slot_id, uint32_t slot_offset,
 
     if (length > max_len)
         return OF_ERR_BAD_RANGE;
-    if (async_state.active)
-        return OF_ERR_BUSY;
+    {
+        int rc = async_gate();
+        if (rc)
+            return rc;
+    }
 
-    /* Wait for bridge fully idle — READY (cmd FSM idle) AND WR_IDLE
-     * (all write data drained).  Both must be true before issuing a
-     * new command, otherwise the dispatch guard may silently drop it
-     * if target_ack_s hasn't fully deasserted through the CDC. */
+    /* Wait for bridge fully idle — READY (ack quiet) AND WR_IDLE (all
+     * write data drained).  ds_issue_command re-verifies with a short
+     * bound; this long blocking wait (with idle hook) is the sync path's
+     * tolerance for OSD ownership / a busy host. */
     {
         uint32_t wait = DMA_TIMEOUT;
         while ((DS_STATUS & (DS_STATUS_READY | DS_STATUS_WR_IDLE))
                != (DS_STATUS_READY | DS_STATUS_WR_IDLE)) {
             if (--wait == 0) return OF_ERR_TIMEOUT;
+            if ((wait & 0x3FF) == 0)
+                call_idle_hook();
         }
     }
 
@@ -464,22 +590,13 @@ int of_file_read_raw(uint32_t slot_id, uint32_t slot_offset,
     DS_SLOT_OFFSET = slot_offset;
     DS_BRIDGE_ADDR = bridge_addr;
     DS_LENGTH      = length;
-    fence();
-    DS_COMMAND     = DS_CMD_READ;
 
-    /* Verify command was accepted — if the dispatch guard dropped it,
-     * ds_cmd_active won't be set and ACK will never come.  Retry once. */
-    fence();
-    for (int i = 0; i < 100; i++) {
-        uint32_t st = DS_STATUS;
-        if (st & DS_STATUS_ACK)  goto accepted;  /* ACK already */
-        if (!(st & DS_STATUS_READY)) goto accepted;  /* cmd_active set → READY cleared */
+    {
+        int rc = ds_issue_command(DS_CMD_READ);
+        if (rc)
+            return rc;
     }
-    /* Command likely dropped — retry */
-    fence();
-    DS_COMMAND = DS_CMD_READ;
 
-accepted:
     return file_wait_complete();
 }
 
@@ -494,7 +611,13 @@ static int datatable_entry_candidate_for_slot(uint32_t slot_id,
      *   ids 10-19    -> entries 9-18  (ten nonvolatile save slots)
      * If you add or remove a pre-save slot in data.json, this map MUST
      * be updated in lockstep -- the relationship is contractual and
-     * APF does not expose a dependable runtime layout query. */
+     * APF does not expose a dependable runtime layout query.
+     * NOTE this is only the FAST-PATH CANDIDATE for reads: cores that
+     * declare BOTH ids 8 and 9 (Diablo) or optional slots that compact
+     * the table make this map wrong, which is why every result is
+     * verified (and writes always use the scan resolver below).  The
+     * dual-window 8+9 layout itself is fully supported -- see
+     * nvslot_map in targets/pocket/save.c. */
     if (slot_id <= 7) {
         *entry_out = slot_id;
         return 0;
@@ -557,7 +680,7 @@ int of_file_datatable_word(uint32_t word, uint32_t *value_out) {
 static int datatable_probe_size_bit31(uint32_t slot_id, uint32_t low_size) {
     enum { PROBE_LEN = 32 };
 
-    if (low_size == 0 || async_state.active)
+    if (low_size == 0 || async_gate())
         return 0;
 
     volatile uint8_t *probe = (volatile uint8_t *)CRAM0_SCRATCH;
@@ -697,8 +820,11 @@ long of_file_size(uint32_t slot_id) {
  * Filename is written to `name_out` (max `name_max` chars).
  */
 int of_file_get_name(uint32_t slot_id, char *name_out, uint32_t name_max) {
-    if (async_state.active)
-        return OF_ERR_BUSY;
+    {
+        int rc = async_gate();
+        if (rc)
+            return rc;
+    }
 
     /* v2 arch: response buffer lands in CRAM0 scratch (uncached per
      * PMA, so no D-cache dance is needed).  Use a dedicated GETFILE
@@ -740,17 +866,13 @@ int of_file_get_name(uint32_t slot_id, char *name_out, uint32_t name_max) {
     CRAM0_MODE = CRAM0_MODE_BRIDGE;
     for (volatile int s = 0; s < 8; s++) {}
 
-    /* Wait for bridge idle */
-    {
-        uint32_t wait = 5000000;
-        while (!(DS_STATUS & DS_STATUS_READY)) {
-            if (--wait == 0) return OF_ERR_TIMEOUT;
-        }
-    }
-
     DS_SLOT_ID     = slot_id;
     DS_RESP_ADDR   = bridge_addr;
-    DS_COMMAND     = DS_CMD_GETFILE;
+    {
+        int rc = ds_issue_command(DS_CMD_GETFILE);
+        if (rc)
+            return rc;
+    }
 
     /* Wait for command completion and all bridge writes to drain.
      * The APF host fetches the filename from SD and writes the response
@@ -797,31 +919,16 @@ int of_file_get_name(uint32_t slot_id, char *name_out, uint32_t name_max) {
 }
 
 int of_file_slot_write(uint32_t slot_id, uint32_t bridge_addr, uint32_t length) {
-    if (async_state.active)
-        return OF_ERR_BUSY;
-
-    /* Wait for bridge idle before issuing command */
-    {
-        uint32_t wait = DMA_TIMEOUT;
-        while ((DS_STATUS & (DS_STATUS_READY | DS_STATUS_WR_IDLE))
-               != (DS_STATUS_READY | DS_STATUS_WR_IDLE)) {
-            if (--wait == 0) return OF_ERR_TIMEOUT;
-        }
-    }
-
-    DS_SLOT_ID     = slot_id;
-    DS_SLOT_OFFSET = 0;
-    DS_BRIDGE_ADDR = bridge_addr;
-    DS_LENGTH      = length;
-    DS_COMMAND     = DS_CMD_WRITE;
-
-    return file_wait_complete();
+    return of_file_slot_write_at(slot_id, 0, bridge_addr, length);
 }
 
 int of_file_slot_write_at(uint32_t slot_id, uint32_t slot_offset,
                            uint32_t bridge_addr, uint32_t length) {
-    if (async_state.active)
-        return OF_ERR_BUSY;
+    {
+        int rc = async_gate();
+        if (rc)
+            return rc;
+    }
 
     /* Wait for bridge idle before issuing command */
     {
@@ -836,7 +943,12 @@ int of_file_slot_write_at(uint32_t slot_id, uint32_t slot_offset,
     DS_SLOT_OFFSET = slot_offset;
     DS_BRIDGE_ADDR = bridge_addr;
     DS_LENGTH      = length;
-    DS_COMMAND     = DS_CMD_WRITE;
+
+    {
+        int rc = ds_issue_command(DS_CMD_WRITE);
+        if (rc)
+            return rc;
+    }
 
     return file_wait_complete();
 }
@@ -917,8 +1029,11 @@ void *of_file_dma_stage_alloc(uint32_t size, uint32_t align) {
 }
 
 int of_file_dma_stage_reset(void) {
-    if (async_state.active)
-        return OF_ERR_BUSY;
+    {
+        int rc = async_gate();
+        if (rc)
+            return rc;
+    }
     dma_stage_next = 0;
     return 0;
 }
@@ -938,26 +1053,12 @@ static int async_dest_in_cram0(void *dest, uint32_t length) {
            addr <= (CRAM0_BASE + CRAM_SIZE - length);
 }
 
-static void async_complete(uint32_t status) {
-    uint32_t err = (status & DS_STATUS_ERR_MASK) >> DS_STATUS_ERR_SHIFT;
-    int result = err ? -((int)err) : 0;
-
-    void *dest = async_state.dest;
-    void *dma_dest = async_state.dma_dest;
-    int bounce_to_dest = async_state.bounce_to_dest;
-    uint32_t length = async_state.length;
+/* App-facing completion: clears the in-flight state and fires the callback.
+ * Runs at DMA-done for CRAM0-direct destinations, or after the deferred
+ * bounce copy finishes for SDRAM destinations. */
+static void async_finalize(int result) {
     int token = async_state.token;
     void (*cb)(int, int) = async_state.callback;
-
-    CRAM0_MODE = CRAM0_MODE_CPU;
-    for (volatile int s = 0; s < 8; s++) {}
-
-    /* The bridge DMA target is always CRAM0: either the app-provided staging
-     * buffer or the OS bounce window.  CRAM0 is uncached in the CPU PMA, so
-     * cache maintenance here is both unnecessary and unsafe while the CRAM0
-     * mux is being handed back from the bridge. */
-    if (result == 0 && bounce_to_dest)
-        memcpy(dest, dma_dest, length);
 
     async_state.active = 0;
     async_state.dest = (void *)0;
@@ -965,16 +1066,91 @@ static void async_complete(uint32_t status) {
     async_state.bounce_to_dest = 0;
     async_state.length = 0;
     async_state.callback = (void *)0;
+    async_state.copy_pending = 0;
+    async_state.copy_off = 0;
+    async_state.age_ms = 0;
     async_state.completed_count++;
-    IRQ_MASK &= ~IRQ_MASK_DATASLOT;
 
     if (cb)
         cb(token, result);
 }
 
+/* DMA-done: latch the result and hand CRAM0 back to the CPU.  The bridge DMA
+ * target is always CRAM0 (app staging buffer or OS bounce window) — uncached
+ * per PMA, so no cache maintenance.  For a non-CRAM0 destination the chunk
+ * still has to be copied out of the bounce window; that copy is DEFERRED:
+ * running a whole-chunk memcpy inside the data-slot IRQ produced ~ms IRQ
+ * blackouts that froze the mixer pump ISR, input, and the frame loop (the
+ * residual music stutter with async otherwise working).  The 1 kHz kernel
+ * tick advances it in bounded slices; of_file_async_poll() or the next file
+ * op drains it fully.  The app callback fires only after the copy. */
+static void async_complete(uint32_t status) {
+    uint32_t err = (status & DS_STATUS_ERR_MASK) >> DS_STATUS_ERR_SHIFT;
+    int result = err ? -((int)err) : 0;
+
+    CRAM0_MODE = CRAM0_MODE_CPU;
+    for (volatile int s = 0; s < 8; s++) {}
+
+    IRQ_MASK &= ~IRQ_MASK_DATASLOT;
+    async_state.age_ms = 0;
+
+    /* Defer the bounce copy ONLY when the 1 kHz machine timer is armed —
+     * the tick is what pumps a deferred copy, and the mixer/input ISRs the
+     * deferral protects only run off that same timer.  Timer off means
+     * nothing would ever advance the copy (a waiter spinning on its
+     * callback flag would hang) and nothing is starved by doing it inline,
+     * so inline is both safe and required there. */
+    if (result == 0 && async_state.bounce_to_dest) {
+        if (TIMER_CTRL & TIMER_CTRL_ENABLE) {
+            async_state.copy_off = 0;
+            async_state.copy_result = result;
+            async_state.copy_pending = 1;
+            return;             /* active stays set until the copy delivers */
+        }
+        memcpy(async_state.dest, async_state.dma_dest, async_state.length);
+    }
+
+    async_finalize(result);
+}
+
+/* Advance the deferred bounce copy by at most max_bytes (0 = no cap, i.e.
+ * finish it).  IRQ-protected: the 1 kHz tick (timer IRQ) and app-context
+ * drains both land here.  Finishing the copy fires the app callback. */
+static void async_copy_slice(uint32_t max_bytes) {
+    uint32_t irq = file_irq_save();
+    if (!async_state.copy_pending) {
+        file_irq_restore(irq);
+        return;
+    }
+
+    uint32_t off = async_state.copy_off;
+    uint32_t n = async_state.length - off;
+    if (max_bytes && n > max_bytes)
+        n = max_bytes;
+
+    memcpy((uint8_t *)async_state.dest + off,
+           (const uint8_t *)async_state.dma_dest + off, n);
+    off += n;
+    async_state.copy_off = off;
+
+    if (off == async_state.length) {
+        async_state.copy_pending = 0;
+        async_finalize(async_state.copy_result);
+    }
+    file_irq_restore(irq);
+}
+
+static void async_copy_drain(void) {
+    async_copy_slice(0);
+}
+
 int of_file_read_async(uint32_t slot_id, uint32_t slot_offset,
                        void *dest, uint32_t length,
                        void (*callback)(int token, int result)) {
+    /* A pending bounce copy doesn't own the bridge — deliver the previous
+     * completion inline so back-to-back streaming can't wedge on it. */
+    if (async_state.copy_pending)
+        async_copy_drain();
     if (async_state.active)
         return OF_ERR_BUSY;
     if (length > OF_TARGET_CRAM0_DMA_CHUNK_SIZE)
@@ -986,6 +1162,9 @@ int of_file_read_async(uint32_t slot_id, uint32_t slot_offset,
     if (!bridge_warmup_active)
         bridge_warmup_once();
 
+    /* Fail fast (defer) when the bridge isn't idle — the fire-and-return
+     * contract can't block here, and the app re-issues on its next poll.
+     * Single read, no wait: legacy async behavior. */
     uint32_t st = DS_STATUS;
     if ((st & (DS_STATUS_READY | DS_STATUS_WR_IDLE))
         != (DS_STATUS_READY | DS_STATUS_WR_IDLE))
@@ -1011,47 +1190,34 @@ int of_file_read_async(uint32_t slot_id, uint32_t slot_offset,
     async_state.dma_dest = dma_dest;
     async_state.bounce_to_dest = !direct_cram0;
     async_state.callback = callback;
+    async_state.copy_pending = 0;
+    async_state.copy_off = 0;
+    async_state.age_ms = 0;
 
     DS_STATUS = DS_STATUS_IRQ_PENDING;
     IRQ_MASK |= IRQ_MASK_DATASLOT;
 
-    /* Fire the DMA */
     DS_SLOT_ID     = slot_id;
     DS_SLOT_OFFSET = slot_offset;
     DS_BRIDGE_ADDR = bridge_addr;
     DS_LENGTH      = length;
-    fence();
-    DS_COMMAND     = DS_CMD_READ;
-    fence();
 
-    /* Verify the dispatch guard latched the command (ACK up, or cmd_active
-     * set → READY cleared) — the same silent-drop window of_file_read_raw
-     * retries.  A dropped async command never completes, so async_state.active
-     * would stay latched forever and every later bridge op would fail
-     * OF_ERR_BUSY.  This only polls the local latch, NOT the (slow) APF host
-     * ACK, so the call stays fire-and-return.  Completion is still reported
-     * by the data-slot IRQ or by of_file_async_poll() observing DONE. */
-    for (int attempt = 0; ; attempt++) {
-        for (int i = 0; i < 100; i++) {
-            uint32_t ast = DS_STATUS;
-            if ((ast & DS_STATUS_ACK) || !(ast & DS_STATUS_READY))
-                return token;
-        }
-        if (attempt == 1)
-            break;
-        fence();
-        DS_COMMAND = DS_CMD_READ;   /* likely dropped — retry once */
-        fence();
-    }
+    /* ds_issue_command bounds the ack-quiet pre-wait in TIME (~µs-scale in
+     * practice) and verifies acceptance via the status-latch reset, so the
+     * call stays effectively fire-and-return and never false-negatives on
+     * an accepted command (the old unwind-with-DMA-in-flight bug).  A
+     * nonzero rc here means the command was genuinely never dispatched, so
+     * the unwind below cannot orphan an in-flight transfer. */
+    int rc = ds_issue_command(DS_CMD_READ);
+    if (rc == 0)
+        return token;
 
-    /* Dropped twice — unwind so the caller can fall back to a synchronous
-     * read instead of wedging the whole file subsystem. */
     async_state.active = 0;
     async_state.callback = (void *)0;
     IRQ_MASK &= ~IRQ_MASK_DATASLOT;
     CRAM0_MODE = CRAM0_MODE_CPU;
     for (volatile int s = 0; s < 8; s++) {}
-    return OF_ERR_TIMEOUT;
+    return rc;
 }
 
 void of_file_async_irq_service(void) {
@@ -1061,7 +1227,9 @@ void of_file_async_irq_service(void) {
 
     DS_STATUS = DS_STATUS_IRQ_PENDING;
 
-    if (!async_state.active) {
+    if (!async_state.active || async_state.copy_pending) {
+        /* No transfer we know of (e.g. a previously aged-out command
+         * finally completing) — clear and move on. */
         IRQ_MASK &= ~IRQ_MASK_DATASLOT;
         return;
     }
@@ -1070,21 +1238,36 @@ void of_file_async_irq_service(void) {
 }
 
 int of_file_async_poll(void) {
+    if (async_state.copy_pending)
+        async_copy_drain();
+
     if (async_state.completed_count) {
         async_state.completed_count--;
         return 1;
     }
 
     if (async_state.active) {
+        /* IRQ-protected: the 1 kHz tick and the data-slot IRQ run the same
+         * completion — without the guard a tick landing between our status
+         * read and W1C write would double-complete. */
+        uint32_t irq = file_irq_save();
         uint32_t st = DS_STATUS;
         if (st & DS_STATUS_IRQ_PENDING) {
-            of_file_async_irq_service();
+            DS_STATUS = DS_STATUS_IRQ_PENDING;
+            if (async_state.active && !async_state.copy_pending)
+                async_complete(st);
+            else
+                IRQ_MASK &= ~IRQ_MASK_DATASLOT;
         } else if ((st & DS_STATUS_DONE) &&
                    ((st & (DS_STATUS_READY | DS_STATUS_WR_IDLE))
                     == (DS_STATUS_READY | DS_STATUS_WR_IDLE))) {
             DS_STATUS = DS_STATUS_IRQ_PENDING;
             async_complete(st);
         }
+        file_irq_restore(irq);
+
+        if (async_state.copy_pending)
+            async_copy_drain();
 
         if (async_state.completed_count) {
             async_state.completed_count--;
@@ -1093,6 +1276,57 @@ int of_file_async_poll(void) {
     }
 
     return 0;
+}
+
+/* 1 kHz kernel tick (timer_isr_callback -> here).  Three jobs:
+ *  (a) Copy pump: advance a deferred bounce copy in bounded slices
+ *      (~<=100 µs per tick at IRQ priority) so SDRAM-destination
+ *      completions never run a whole-chunk memcpy in IRQ context.
+ *  (b) Lost-IRQ completion: complete a DONE-latched transfer whose
+ *      data-slot IRQ never delivered (observed on device across Pocket
+ *      OSD visits — async_state.active wedged forever and every later
+ *      bridge op failed OF_ERR_BUSY).  Kernel-driven so recovery does
+ *      not depend on the app calling of_file_async_poll().
+ *  (c) Age-out: a transfer with no DONE after ASYNC_AGE_LIMIT_MS is
+ *      failed to the app (OF_ERR_TIMEOUT).  The APF host cannot be
+ *      canceled — if the zombie completes later its IRQ lands in the
+ *      !active branch of the IRQ service and is cleared harmlessly.
+ *      Recovery-only: today that state wedges the async API forever. */
+#define ASYNC_COPY_SLICE_BYTES 2048u
+#define ASYNC_AGE_LIMIT_MS     2000u   /* < the CD ring depth (5 s), so a
+                                        * reclaimed dead transfer refills
+                                        * before the stream laps; a live one
+                                        * completing later is absorbed by the
+                                        * aged-out guard in the IRQ path. */
+
+void of_file_async_tick(void) {
+    if (async_state.copy_pending) {
+        async_copy_slice(ASYNC_COPY_SLICE_BYTES);
+        return;
+    }
+    if (!async_state.active)
+        return;
+
+    uint32_t st = DS_STATUS;
+    if (st & DS_STATUS_IRQ_PENDING) {
+        of_file_async_irq_service();
+        return;
+    }
+    if ((st & DS_STATUS_DONE) &&
+        ((st & (DS_STATUS_READY | DS_STATUS_WR_IDLE))
+         == (DS_STATUS_READY | DS_STATUS_WR_IDLE))) {
+        DS_STATUS = DS_STATUS_IRQ_PENDING;
+        async_complete(st);
+        return;
+    }
+
+    if (++async_state.age_ms >= ASYNC_AGE_LIMIT_MS) {
+        of_term_printf("[file] async age-out: no DONE after %us (st=%02x)\n",
+                       (unsigned)(ASYNC_AGE_LIMIT_MS / 1000u),
+                       (unsigned)(st & 0xFF));
+        IRQ_MASK &= ~IRQ_MASK_DATASLOT;
+        async_finalize(OF_ERR_TIMEOUT);
+    }
 }
 
 int of_file_async_busy(void) {

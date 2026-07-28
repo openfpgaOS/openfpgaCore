@@ -119,10 +119,37 @@ reg         psram_write_low;
 reg         sync_burst_en_r;
 reg  [5:0]  sync_burst_len_r;
 
-// Burst tracking.
-reg  [4:0]  burst_words_rem;     // 32-bit words remaining (incl current)
+// Burst tracking.  6 bits so burst_len=31 -> 32 words is representable:
+// the old 5-bit reg computed 31+1 = 0 and worked only by accidental
+// mod-32 arithmetic in the decrement chain.
+reg  [5:0]  burst_words_rem;     // 32-bit words remaining (incl current)
 reg  [15:0] burst_lo_half;       // latched low halfword
 reg         is_burst_op;         // 0 = word_rd port, 1 = burst_rd port
+
+/* Pending-command capture.  All three command channels are single-cycle
+ * pulses, but this FSM historically sampled them ONLY in ST_IDLE — a
+ * pulse landing while the FSM was busy with the OTHER channel was
+ * silently lost (a burst_rd during a word write deadlocked the GPU
+ * tex-cache fill; a word_wr during a burst read dropped the upload
+ * word, the exact wrong-colormap signature seen on Pocket HW).  Every
+ * pulse is now latched here with its payload (capture runs AFTER the
+ * state case so a dispatch-cycle clear cannot race it) and dispatched
+ * from ST_IDLE; the channel's busy rises AT the pulse and holds across
+ * the pended wait so caller saw-busy protocols never see a false
+ * completion between back-to-back ops.  Cost: one extra cycle of
+ * dispatch latency per command, bought for lossless interleave. */
+reg         burst_pend;
+reg  [21:0] burst_pend_addr;
+reg  [4:0]  burst_pend_len;
+reg         word_wr_pend;
+reg         word_rd_pend;
+reg  [21:0] word_pend_addr;
+reg  [31:0] word_pend_data;
+reg  [3:0]  word_pend_wstrb;
+
+/* total halfwords - 1 for the sync-burst length field (max 32 words =
+ * 64 halfwords -> 63, exactly filling 6 bits). */
+wire [6:0]  burst_halfwords_m1 = {burst_words_rem, 1'b0} - 7'd1;
 
 wire [15:0] psram_data_out;
 wire        psram_busy;
@@ -194,13 +221,21 @@ always @(posedge clk or negedge reset_n) begin
         psram_write_low <= 1'b1;
         sync_burst_en_r <= 1'b0;
         sync_burst_len_r <= 6'd0;
-        burst_words_rem <= 5'd0;
+        burst_words_rem <= 6'd0;
         burst_lo_half <= 16'd0;
         burst_q <= 32'd0;
         burst_q_valid <= 1'b0;
         burst_busy <= 1'b0;
         is_burst_op <= 1'b0;
         bcr_init_done <= 1'b0;
+        burst_pend <= 1'b0;
+        burst_pend_addr <= 22'b0;
+        burst_pend_len <= 5'd0;
+        word_wr_pend <= 1'b0;
+        word_rd_pend <= 1'b0;
+        word_pend_addr <= 22'b0;
+        word_pend_data <= 32'b0;
+        word_pend_wstrb <= 4'b1111;
     end else begin
         psram_write_en <= 1'b0;
         psram_read_en <= 1'b0;
@@ -210,12 +245,17 @@ always @(posedge clk or negedge reset_n) begin
 
         case (state)
             ST_IDLE: begin
-                word_busy <= 1'b0;
-                burst_busy <= 1'b0;
+                /* busy tracks the pend flags: it rose at the pulse
+                 * (capture below) and must hold through the pended wait
+                 * — dropping it here for one cycle would false-complete
+                 * caller saw-busy protocols. */
+                word_busy <= word_wr_pend || word_rd_pend;
+                burst_busy <= burst_pend;
                 /* BCR config takes top priority — runs once at boot
                  * before any data path activity.  After config, all
                  * three command channels (word_wr / word_rd / burst_rd)
-                 * accept commands. */
+                 * accept commands, dispatched from the pending-capture
+                 * registers (one cycle after their pulse). */
                 if (config_en) begin
                     /* Latch the requested die into psram_bank_sel.  PHY
                      * samples bank_sel in STATE_CONFIG_CRE_SETUP which
@@ -226,41 +266,45 @@ always @(posedge clk or negedge reset_n) begin
                      * silently lands on die 0 and die 1 stays in async POR. */
                     psram_bank_sel <= config_bank_sel;
                     state <= ST_CFG_PULSE;
-                end else if (burst_rd) begin
+                end else if (burst_pend) begin
+                    burst_pend <= 1'b0;
                     burst_busy <= 1'b1;
                     is_burst_op <= 1'b1;
-                    latched_addr <= burst_addr;
-                    latched_chip_sel <= burst_addr[21];
-                    burst_words_rem <= burst_len + 5'd1;
+                    latched_addr <= burst_pend_addr;
+                    latched_chip_sel <= burst_pend_addr[21];
+                    burst_words_rem <= {1'b0, burst_pend_len} + 6'd1;
                     state <= ST_BURST_START;
-                end else if (word_wr) begin
+                end else if (word_wr_pend) begin
+                    word_wr_pend <= 1'b0;
                     word_busy <= 1'b1;
-                    latched_data <= word_data;
-                    latched_addr <= word_addr;
-                    latched_chip_sel <= word_addr[21];
-                    latched_wstrb <= word_wstrb;
-                    if (word_wstrb[1:0] == 2'b00)
+                    latched_data <= word_pend_data;
+                    latched_addr <= word_pend_addr;
+                    latched_chip_sel <= word_pend_addr[21];
+                    latched_wstrb <= word_pend_wstrb;
+                    if (word_pend_wstrb[1:0] == 2'b00)
                         state <= ST_WR_HI;
                     else
                         state <= ST_WR_LO;
-                end else if (word_rd) begin
+                end else if (word_rd_pend) begin
                     /* Async word_rd hangs in BCR=0x641F mode.  Route
                      * single-word reads through the sync-burst path
                      * with words_rem=1.  is_burst_op=0 steers the
                      * assembled 32-bit word back to word_q in
                      * ST_BURST_HI. */
+                    word_rd_pend <= 1'b0;
                     word_busy <= 1'b1;
                     is_burst_op <= 1'b0;
-                    latched_addr <= word_addr;
-                    latched_chip_sel <= word_addr[21];
-                    burst_words_rem <= 5'd1;
+                    latched_addr <= word_pend_addr;
+                    latched_chip_sel <= word_pend_addr[21];
+                    burst_words_rem <= 6'd1;
                     state <= ST_BURST_START;
                 end
             end
 
             ST_DONE: begin
-                word_busy <= 1'b0;
-                burst_busy <= 1'b0;
+                /* Hold busy across pended commands (see ST_IDLE note). */
+                word_busy <= word_wr_pend || word_rd_pend;
+                burst_busy <= burst_pend;
                 state <= ST_IDLE;
             end
 
@@ -313,7 +357,7 @@ always @(posedge clk or negedge reset_n) begin
                 psram_addr <= {latched_addr[20:0], 1'b0};
                 sync_burst_en_r <= 1'b1;
                 /* total halfwords = 2 × words; len field = halfwords - 1 */
-                sync_burst_len_r <= {burst_words_rem[4:0], 1'b0} - 6'd1;
+                sync_burst_len_r <= burst_halfwords_m1[5:0];
                 state <= ST_BURST_LO;
             end
             ST_BURST_LO: begin
@@ -331,8 +375,8 @@ always @(posedge clk or negedge reset_n) begin
                         word_q <= {psram_data_out, burst_lo_half};
                         word_q_valid <= 1'b1;
                     end
-                    burst_words_rem <= burst_words_rem - 5'd1;
-                    if (burst_words_rem == 5'd1) begin
+                    burst_words_rem <= burst_words_rem - 6'd1;
+                    if (burst_words_rem == 6'd1) begin
                         state <= ST_BURST_DONE;
                     end else begin
                         state <= ST_BURST_LO;
@@ -373,6 +417,28 @@ always @(posedge clk or negedge reset_n) begin
 
             default: state <= ST_IDLE;
         endcase
+
+        /* Pending-command capture (see declaration note).  Placed AFTER
+         * the case so the busy-raise here wins over the ST_IDLE/ST_DONE
+         * busy-tracking assignments in the same cycle. */
+        if (burst_rd) begin
+            burst_pend      <= 1'b1;
+            burst_pend_addr <= burst_addr;
+            burst_pend_len  <= burst_len;
+            burst_busy      <= 1'b1;
+        end
+        if (word_wr) begin
+            word_wr_pend    <= 1'b1;
+            word_pend_addr  <= word_addr;
+            word_pend_data  <= word_data;
+            word_pend_wstrb <= word_wstrb;
+            word_busy       <= 1'b1;
+        end
+        if (word_rd) begin
+            word_rd_pend    <= 1'b1;
+            word_pend_addr  <= word_addr;
+            word_busy       <= 1'b1;
+        end
     end
 end
 

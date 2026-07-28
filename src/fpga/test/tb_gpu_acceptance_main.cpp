@@ -57,6 +57,24 @@ static const bool LEAN_CONFIG = true;
 static const bool LEAN_CONFIG = false;
 #endif
 
+/* Shipped-config prune gates (exact-bitstream targets).  Each -DGPU_TEST_NO_*
+ * compiles out ONLY the tests whose ORACLE needs a module that config prunes;
+ * the drain/no-op contracts of the pruned commands keep running everywhere.
+ *   GPU_TEST_NO_PALETTE        INCLUDE_PALETTE=0 strips SPAN_COLORMAP at
+ *                              decode (gpu_core ~1701): raw-texel output is
+ *                              CORRECT there, so colormap-byte oracles and
+ *                              the port-B (cmap) starvation cases don't hold.
+ *   GPU_TEST_NO_PARAM_TRI      INCLUDE_PARAM_TRI=0 + INCLUDE_PARAM_TRI_RECS=0
+ *                              (set together in every config so far): 0x49 /
+ *                              0x4D draws drain as no-ops, so param renders
+ *                              and every vert-tri-vs-param twin comparison
+ *                              are compiled out.
+ *   GPU_TEST_NO_PARAM_SPAN_Q29 INCLUDE_PARAM_SPAN_Q29=0 folds the q29
+ *                              dynamic-scale z attribute (spanprod_attr_q29):
+ *                              z-projection oracles (and the Doom captures,
+ *                              which replay q29_attr_shift/z_mode streams)
+ *                              don't hold; count/drain q29 tests still run. */
+
 // ============================================================================
 // 0. Globals
 // ============================================================================
@@ -6688,6 +6706,7 @@ static void test_vert_tri_sliver_renders_in_range() {
     const int32_t zi[3] = {Q, Q/16, Q/2};
     const uint8_t l[3]  = {0, 30, 10};
 
+#ifndef GPU_TEST_NO_PARAM_TRI
     int diffs = vert_tri_equiv_diffs(surf, vx, vy, s, t, zi, l,
                                      0, 64, 0, 56, 0, 64, 0, 56);
     if (diffs < 0) { check_fail("vert_tri_sliver_renders_in_range", "timeout"); return; }
@@ -6696,6 +6715,24 @@ static void test_vert_tri_sliver_renders_in_range() {
         char buf[64]; snprintf(buf, sizeof(buf), "%d pixel diffs", diffs);
         check_fail("vert_tri_sliver_renders_in_range.equiv", buf);
     }
+#else
+    /* No 0x49 twin in this config — render Path A alone (same steps as
+     * vert_tri_equiv_diffs) so the .painted no-dropped-spans check below
+     * still bites. */
+    printf("  SKIP vert_tri_sliver_renders_in_range.equiv (config: no param-tri)\n");
+    gpu_init();
+    preload_with_sentinel();
+    upload_texture(TEX_BASE_BYTE, make_projection_test_texture());
+    upload_palookup_identity_row(0, 0);
+    ParamSpanListWire a = surf;
+    a.fb_base = FB_BASE_BYTE;
+    emit_set_tri_state_raw(a, 0, 64, 0, 56);
+    emit_draw_vert_tri_raw(vx, vy, s, t, zi, l);
+    if (!submit_and_wait()) {
+        check_fail("vert_tri_sliver_renders_in_range", "timeout");
+        return;
+    }
+#endif
 
     // The triangle must actually have painted some interior (no dropped spans).
     int painted = 0;
@@ -6791,16 +6828,19 @@ static void test_vert_tri_sticky_semantics() {
     for (int i = 0; i < 3; i++)
         emit_draw_vert_tri_raw(vx[i], vy[i], s3, t3, zi3, l3);
 
+#ifndef GPU_TEST_NO_PARAM_TRI
     for (int i = 0; i < 3; i++) {
         DerivedTriPlanes d = derive_tri_planes_ref(vx[i], vy[i], s3, t3, zi3, l3);
         ParamSpanListWire p = make_equiv_param_from_derived(surf, d);
         p.fb_base = FB_ALT_BASE_BYTE;
         emit_param_tri_raw(p, vx[i], vy[i], 0, 320, 0, 64);
     }
+#endif
     if (!submit_and_wait()) {
         check_fail("vert_tri_sticky_semantics", "timeout(e1)");
         return;
     }
+#ifndef GPU_TEST_NO_PARAM_TRI
     int diffs = 0;
     for (int y = 0; y < 56; y++)
         for (int x = 0; x < 88; x++) {
@@ -6813,6 +6853,12 @@ static void test_vert_tri_sticky_semantics() {
         char buf[64]; snprintf(buf, sizeof(buf), "%d diffs", diffs);
         check_fail("vert_tri_sticky_semantics.one_a_three_b", buf);
     }
+#else
+    /* No 0x49 twin: e1 becomes "three 0x4B on one 0x4A retire without
+     * wedging" (the submit above still asserts drain); the sticky-bank
+     * compare is carried by e2/e3 below. */
+    printf("  SKIP vert_tri_sticky_semantics.one_a_three_b (config: no param-tri)\n");
+#endif
 
     // --- (e2) 0x4B with NO prior 0x4A is a no-op (after a fresh hard reset) ---
     gpu_init();   // gpu_init issues a soft reset, clearing tri_state_valid
@@ -9104,6 +9150,200 @@ static void test_param_span_z_raw_inflight_same_line() {
     }
 }
 
+// ----------------------------------------------------------------------------
+// Adjacent-pixel same-word z RAW oracles (roadmap 3.2 "do FIRST").
+//
+// z is 16-bit, two per 32-bit word, so consecutive z-tested pixels share
+// words — and with z_minor_step==0 they share the exact HALF.  Any z-test
+// shortcut that evaluates pixel N+1 against anything other than pixel N's
+// just-committed value (stale memory, a rejected value wrongly forwarded,
+// a mangled word merge) changes the verdict below and lands as a byte
+// difference in the z buffer and/or FB — silent-overdraw turned test-fail.
+// All five run on the plain suite (no latency plusargs): the hazard they
+// pin is pipe-internal, not SDRAM-timing.
+// ----------------------------------------------------------------------------
+struct ZRawPairCfg {
+    const char *name;
+    uint32_t z_base;        // first pixel's z byte address (halfword-aligned)
+    int32_t  z_minor_step;  // z address step per pixel
+    int32_t  zi_origin;     // attr plane 2 origin (half = zi >> 1)
+    int32_t  zi_du;         // per-pixel zi step
+    uint16_t count;
+    // preload halves, ascending byte address from min(addr) of the walk
+    std::vector<uint16_t> old_halves;
+    // expected halves at the same addresses after the draw
+    std::vector<uint16_t> want_halves;
+    // expected FB byte per pixel: true = painted (0x44), false = sentinel
+    std::vector<bool> want_paint;
+    uint32_t preload_base;  // byte address of old_halves[0]/want_halves[0]
+};
+
+static void run_z_raw_pair_case(const ZRawPairCfg &c) {
+    printf("TEST %s\n", c.name);
+    gpu_init();
+    preload_with_sentinel();
+    upload_texture(TEX_BASE_BYTE, std::vector<uint8_t>(64 * 64, 0x44));
+
+    for (size_t i = 0; i < c.old_halves.size(); i++)
+        sdram_write_u16_le(c.preload_base + (uint32_t)i * 2u, c.old_halves[i]);
+
+    ParamSpanListWire p {};
+    p.fb_base = FB_BASE_BYTE;
+    p.fb_major_step = 320;
+    p.fb_minor_step = 1;
+    p.tex_addr = TEX_BASE_BYTE;
+    p.tex_width = 64;
+    p.tex_w_mask = 0x3F;
+    p.tex_h_mask = 0x3F;
+    p.flags = SPAN_PERSP;
+    p.attr_mode = 1;
+    p.span_axis = 0;
+    p.z_mode = 3;                    // TEST+WRITE
+    p.attr_origin[2] = c.zi_origin;
+    p.attr_du[2] = c.zi_du;
+    p.z_base = c.z_base;
+    p.z_major_step = 64;
+    p.z_minor_step = c.z_minor_step;
+
+    std::vector<ParamSpanRecordWire> records = {{0, 0, c.count}};
+    emit_param_span_list_raw(p, records);
+
+    if (!submit_and_wait()) {
+        check_fail(c.name, "timeout");
+        return;
+    }
+
+    char first[192] = {0};
+    bool ok = true;
+    for (size_t i = 0; i < c.want_halves.size() && ok; i++) {
+        uint16_t got = sdram_read_u16_le(c.preload_base + (uint32_t)i * 2u);
+        if (got != c.want_halves[i]) {
+            snprintf(first, sizeof(first),
+                     "z[%zu]@%08x got=%04x want=%04x (old=%04x)",
+                     i, c.preload_base + (uint32_t)i * 2u, got,
+                     c.want_halves[i], c.old_halves[i]);
+            ok = false;
+        }
+    }
+    for (uint16_t i = 0; i < c.count && ok; i++) {
+        uint8_t want = c.want_paint[i] ? 0x44 : SENTINEL_BYTE;
+        uint8_t got = sdram_read_byte(FB_BASE_BYTE + i);
+        if (got != want) {
+            snprintf(first, sizeof(first),
+                     "fb[%u] got=%02x want=%02x", i, got, want);
+            ok = false;
+        }
+    }
+
+    if (ok)
+        check_pass(c.name);
+    else
+        check_fail(c.name, first);
+}
+
+static void test_param_span_z_raw_pair_same_half_fwd() {
+    // px0 passes and writes 0x2000 to the half; px1 (SAME half) carries
+    // 0x1800: against the forwarded 0x2000 it must REJECT.  A stale read
+    // of the 0x1000 preload would wrongly accept it (z=0x1800, fb[1]
+    // painted).
+    run_z_raw_pair_case({
+        "param_span_z_raw_pair_same_half_fwd",
+        0x00181000u, 0, 0x00004000, -0x00001000, 2,
+        {0x1000}, {0x2000}, {true, false}, 0x00181000u});
+}
+
+static void test_param_span_z_raw_pair_same_half_no_fwd_on_reject() {
+    // px0 REJECTS (0x2000 < old 0x5000) and must write nothing; px1 (SAME
+    // half) carries 0x4000 and must also reject against the ORIGINAL
+    // 0x5000.  A design that forwards px0's rejected value would compare
+    // 0x4000 >= 0x2000 and wrongly accept.
+    run_z_raw_pair_case({
+        "param_span_z_raw_pair_same_half_no_fwd_on_reject",
+        0x00181100u, 0, 0x00004000, 0x00004000, 2,
+        {0x5000}, {0x5000}, {false, false}, 0x00181100u});
+}
+
+static void test_param_span_z_raw_pair_word_halves_lo_hi() {
+    // Adjacent halves of ONE 32-bit word, walked lo->hi.  px0 pass-writes
+    // the lo half; px1 tests the hi half and must see the ORIGINAL hi
+    // (0x7000 -> reject), i.e. px0's write must merge into the word
+    // without clobbering its sibling.
+    run_z_raw_pair_case({
+        "param_span_z_raw_pair_word_halves_lo_hi",
+        0x00181200u, 2, 0x00004000, 0x00001000, 2,
+        {0x1000, 0x7000}, {0x2000, 0x7000}, {true, false}, 0x00181200u});
+}
+
+static void test_param_span_z_raw_pair_word_halves_hi_lo() {
+    // Same word walked hi->lo (z_base at the hi half, negative address
+    // step), both pixels pass: hi gets 0x2000, then lo gets 0x2800.  The
+    // second write must land beside — not over — the first.
+    run_z_raw_pair_case({
+        "param_span_z_raw_pair_word_halves_hi_lo",
+        0x00181302u, -2, 0x00004000, 0x00001000, 2,
+        {0x1000, 0x0800}, {0x2800, 0x2000}, {true, true}, 0x00181300u});
+}
+
+static void test_param_span_z_raw_pair_skip_zero_between() {
+    // Three pixels on ONE half with a SKIP_ZERO-discarded pixel in the
+    // middle: px0 pass-writes 0x2000; px1's texel is zero, so it is
+    // discarded and its z (0x1C00) must NOT be written or forwarded; px2
+    // carries 0x1800 and must reject against px0's 0x2000.  Stale memory
+    // (0x1000) or a leaked px1 value both flip the outcome.
+    printf("TEST param_span_z_raw_pair_skip_zero_between\n");
+    gpu_init();
+    preload_with_sentinel();
+    std::vector<uint8_t> tex(64 * 64, 0x44);
+    tex[1] = 0x00;                      // px1 samples texel (1,0) == zero
+    upload_texture(TEX_BASE_BYTE, tex);
+
+    const uint32_t z_base = 0x00181400u;
+    sdram_write_u16_le(z_base, 0x1000);
+
+    ParamSpanListWire p {};
+    p.fb_base = FB_BASE_BYTE;
+    p.fb_major_step = 320;
+    p.fb_minor_step = 1;
+    p.tex_addr = TEX_BASE_BYTE;
+    p.tex_width = 64;
+    p.tex_w_mask = 0x3F;
+    p.tex_h_mask = 0x3F;
+    p.flags = SPAN_PERSP | (1u << 2);   // SKIP_ZERO
+    p.attr_mode = 1;
+    p.span_axis = 0;
+    p.z_mode = 3;
+    p.attr_origin[0] = 0;
+    p.attr_du[0] = 0x00010000;          // s advances 1 texel per pixel
+    p.attr_origin[2] = 0x00004000;      // halves: 2000, 1C00, 1800
+    p.attr_du[2] = -0x00000800;
+    p.z_base = z_base;
+    p.z_major_step = 64;
+    p.z_minor_step = 0;                 // all three share the half
+
+    std::vector<ParamSpanRecordWire> records = {{0, 0, 3}};
+    emit_param_span_list_raw(p, records);
+
+    if (!submit_and_wait()) {
+        check_fail("param_span_z_raw_pair_skip_zero_between", "timeout");
+        return;
+    }
+
+    uint16_t got_z = sdram_read_u16_le(z_base);
+    uint8_t c0 = sdram_read_byte(FB_BASE_BYTE + 0);
+    uint8_t c1 = sdram_read_byte(FB_BASE_BYTE + 1);
+    uint8_t c2 = sdram_read_byte(FB_BASE_BYTE + 2);
+    if (got_z == 0x2000 && c0 == 0x44 && c1 == SENTINEL_BYTE
+        && c2 == SENTINEL_BYTE) {
+        check_pass("param_span_z_raw_pair_skip_zero_between");
+    } else {
+        char msg[192];
+        snprintf(msg, sizeof(msg),
+                 "z got=%04x want=2000; fb got=%02x,%02x,%02x want=44,%02x,%02x",
+                 got_z, c0, c1, c2, SENTINEL_BYTE, SENTINEL_BYTE);
+        check_fail("param_span_z_raw_pair_skip_zero_between", msg);
+    }
+}
+
 // ============================================================================
 // Main runner
 // ============================================================================
@@ -9257,6 +9497,7 @@ static void test_lean_sticky_state_contract() {
     // a non-vacuous paint count so both-blank can't pass.
     emit_set_tri_state_raw(surf, 0, 320, 0, 64);
     emit_draw_vert_tri_raw(vx, vy, s3, t3, zi3, l3);
+#ifndef GPU_TEST_NO_PARAM_TRI
     DerivedTriPlanes d = derive_tri_planes_ref(vx, vy, s3, t3, zi3, l3);
     ParamSpanListWire pb = make_equiv_param_from_derived(surf, d);
     pb.fb_base = FB_ALT_BASE_BYTE;
@@ -9283,6 +9524,31 @@ static void test_lean_sticky_state_contract() {
                  "%d diffs vs 0x49 twin, %d painted pixels", diffs, painted);
         check_fail("lean_sticky_state_contract.rearm_draws", buf);
     }
+#else
+    /* No 0x49 twin: assert the re-arm directly — the 0x4B after a fresh
+     * 0x4A must paint interior pixels again (phase 1 proved the same 0x4B
+     * was a no-op while invalidated). */
+    if (!submit_and_wait()) {
+        check_fail("lean_sticky_state_contract", "timeout(phase2)");
+        return;
+    }
+    int painted = 0;
+    for (int y = 0; y < 26; y++)
+        for (int x = 0; x < 48; x++)
+            if (sdram_read_byte(FB_BASE_BYTE
+                                + (uint32_t)y * 320u + (uint32_t)x)
+                != SENTINEL_BYTE)
+                painted++;
+    if (painted > 50) {
+        check_pass("lean_sticky_state_contract.rearm_draws");
+    } else {
+        char buf[96];
+        snprintf(buf, sizeof(buf),
+                 "%d painted pixels after re-arm (no 0x49 twin in config)",
+                 painted);
+        check_fail("lean_sticky_state_contract.rearm_draws", buf);
+    }
+#endif
 }
 
 // (d) 33-word 0x48 = the exact long-form decode boundary in BOTH configs
@@ -9905,13 +10171,23 @@ static void test_portb_starve_distinct_cache_line_wall() {
     for (int st : strides) {
         for (int cc : col_counts) {
             run_portb_starve_case(cc, /*col_height=*/16, st, PB_DOOM_IDENTITY, {});
+#ifndef GPU_TEST_NO_PALETTE
             run_portb_starve_case(cc, /*col_height=*/16, st, PB_QUAKE_LIGHTVARY, {});
+#endif
         }
     }
     // A SKIP_ZERO-laced variant so a starve cannot hide behind an expected
     // sentinel column, and to mirror Doom/Quake transparent masked columns.
     run_portb_starve_case(80, 16, 16, PB_DOOM_IDENTITY, {10, 25, 40, 55, 70});
+#ifndef GPU_TEST_NO_PALETTE
     run_portb_starve_case(80, 16, 16, PB_QUAKE_LIGHTVARY, {10, 25, 40, 55, 70});
+#else
+    /* The LIGHTVARY cases assert real colormap rows on port B — with the
+     * palette lane pruned (SPAN_COLORMAP stripped) raw texels are correct
+     * and the WRONG-COLOR oracle doesn't hold.  The IDENTITY cases above
+     * keep the drift/starve coverage alive in this config. */
+    printf("  SKIP portb_starve quake (lightvary) cases (config: no palette)\n");
+#endif
 
     if (g_portb_starve_failures == 0)
         check_pass("portb_starve_distinct_cache_line_wall.summary");
@@ -10162,6 +10438,366 @@ static void test_truecolor_blend() {
     }
 }
 
+// Full-region truecolor blend (the CB path under a REAL workload shape).
+// tc_blend_one probes ONE pixel over a UNIFORM dst — a per-column artifact
+// (vertical lines through translucent surfaces, SM64 letter/dialog) escapes
+// both the single probe and the uniform dst (halfword-crossed blends read
+// identical halves).  Here: dst = position-dependent RGB565 pattern, one
+// large triangle, EVERY pixel byte-exact.  Coverage comes from an identical
+// OPAQUE pass (white texel src) so no rasterizer model is needed; mismatches
+// print a per-column histogram so a vertical-line artifact names itself.
+static uint16_t tcbf_pattern(int x, int y) {
+    uint16_t r = (uint16_t)((x * 7 + y * 13) & 0x1F);
+    uint16_t g = (uint16_t)((x * 3 + y) & 0x3E);       /* never 0x3F -> never white */
+    uint16_t b = (uint16_t)((x + y * 5) & 0x1F);
+    return (uint16_t)((r << 11) | (g << 5) | b);
+}
+static void tcbf_setup(void) {
+    gpu_init();
+    preload_with_sentinel();
+    sdram_write_u16_le(TEX_BASE_BYTE, 0xFFFF);            /* 1x1 white texel */
+    for (int y = 0; y < 80; y++)
+        for (int x = 0; x < 80; x++)
+            sdram_write_u16_le(FB_BASE_BYTE + (uint32_t)y * 640u + (uint32_t)x * 2u,
+                               tcbf_pattern(x, y));
+}
+static void tcbf_tri(uint8_t alpha, int blend_on, int xoff) {
+    ParamSpanListWire p = make_vert_tri_surface();
+    p.flags        = SPAN_PERSP | (1u << 7) | (blend_on ? (1u << 1) : 0u);
+    p.fb_base      = FB_BASE_BYTE;
+    p.fb_minor_step = 2;
+    p.fb_major_step = 320 * 2;
+    p.tex_addr     = TEX_BASE_BYTE;
+    p.tex_width = 1; p.tex_w_mask = 0; p.tex_h_mask = 0;
+    p.z_mode = 0;
+    p.const_alpha = alpha;
+
+    const int32_t Q = 1 << 16;
+    /* Odd x0 so spans start mid-word; wide + tall to cross many words/rows. */
+    int16_t vx[3] = { (int16_t)((5 + xoff) * 16), (int16_t)((75 + xoff) * 16),
+                      (int16_t)((5 + xoff) * 16) };
+    int16_t vy[3] = { 4, 4, 74 };
+    int32_t s[3] = {0,0,0}, t[3] = {0,0,0}, zi[3] = { Q, Q, Q };
+    uint8_t l[3] = { 63, 63, 63 };                        /* src = texel = white */
+    emit_set_tri_state_raw(p, 0, 320, 0, 200);
+    emit_draw_vert_tri_raw(vx, vy, s, t, zi, l);
+}
+static void tcbf_draw(uint8_t alpha, int blend_on) {
+    tcbf_setup();
+    tcbf_tri(alpha, blend_on, 0);
+}
+static void test_truecolor_blend_full() {
+    printf("TEST truecolor_blend_full\n");
+    static uint8_t cov[80][80];
+
+    /* Pass 1 — opaque: coverage mask (covered pixels == white). */
+    tcbf_draw(160, 0);
+    uint64_t t0 = sim_time;
+    if (!submit_and_wait()) { check_fail("truecolor_blend_full", "opaque timeout"); return; }
+    uint64_t opaque_cycles = sim_time - t0;
+    for (int y = 0; y < 80; y++)
+        for (int x = 0; x < 80; x++)
+            cov[y][x] = (sdram_read_u16_le(FB_BASE_BYTE + (uint32_t)y * 640u
+                                           + (uint32_t)x * 2u) == 0xFFFF);
+
+    /* Pass 2 — blend at alpha 160 (a6 = 40): byte-exact everywhere. */
+    tcbf_draw(160, 1);
+    uint64_t t1 = sim_time;
+    if (!submit_and_wait()) { check_fail("truecolor_blend_full", "blend timeout"); return; }
+    uint64_t blend_cycles = sim_time - t1;
+
+    /* PERF GUARD: byte-exact checks cannot see a silently-degraded read
+     * window (misses render correctly too — the WINSEL suppression bug
+     * shipped exactly that way: correct output, ~no speedup).  With a
+     * working window the blended pass costs a small multiple of the opaque
+     * pass; per-pixel barrier+read serialization blows the ratio out.
+     * Bound is loose (stub SDRAM flatters the broken case most). */
+    double ratio = (double)blend_cycles / (double)(opaque_cycles ? opaque_cycles : 1);
+    printf("  perf: opaque=%llu blend=%llu ratio=%.1f\n",
+           (unsigned long long)opaque_cycles, (unsigned long long)blend_cycles,
+           ratio);
+    /* Working window measures 2.1-2.3 under the 1-cycle stub; per-pixel /
+     * per-word serialization lands >= ~5.  Bound assumes the config runs a
+     * multi-word window (both truecolor gate configs do). */
+    if (ratio > 4.0) {
+        char m[64];
+        snprintf(m, sizeof m, "blend/opaque ratio %.1f > 4.0 (window degraded?)", ratio);
+        check_fail("truecolor_blend_full", m);
+        return;
+    }
+
+    const int a6 = 160 >> 2;
+    int bad = 0, covered = 0;
+    static int colbad[80];
+    memset(colbad, 0, sizeof colbad);
+    for (int y = 0; y < 80; y++) {
+        for (int x = 0; x < 80; x++) {
+            uint16_t d = tcbf_pattern(x, y);
+            uint16_t want = d;
+            if (cov[y][x]) {
+                covered++;
+                int r = (31 * a6 + ((d >> 11) & 0x1F) * (64 - a6)) >> 6;
+                int g = (63 * a6 + ((d >> 5)  & 0x3F) * (64 - a6)) >> 6;
+                int b = (31 * a6 + ( d        & 0x1F) * (64 - a6)) >> 6;
+                want = (uint16_t)((r << 11) | (g << 5) | b);
+            }
+            uint16_t got = sdram_read_u16_le(FB_BASE_BYTE + (uint32_t)y * 640u
+                                             + (uint32_t)x * 2u);
+            if (got != want) {
+                if (bad < 8)
+                    printf("  (%d,%d) cov=%d want=%04X got=%04X dst=%04X\n",
+                           x, y, cov[y][x], want, got, d);
+                bad++;
+                colbad[x]++;
+            }
+        }
+    }
+    if (bad) {
+        printf("  %d mismatches / %d covered; per-column:", bad, covered);
+        for (int x = 0; x < 80; x++)
+            if (colbad[x]) printf(" c%d=%d", x, colbad[x]);
+        printf("\n");
+        char m[96];
+        snprintf(m, sizeof m, "%d mismatches (%d covered)", bad, covered);
+        check_fail("truecolor_blend_full", m);
+    } else if (covered < 1000) {
+        check_fail("truecolor_blend_full", "coverage too small");
+    } else {
+        check_pass("truecolor_blend_full");
+    }
+}
+
+// ABUTTING translucent triangles sharing an edge (the SM64 water-mesh /
+// letter-strip shape).  If the walker paints a shared edge in BOTH
+// triangles, opaque rendering hides it (same color twice) but blend applies
+// TWICE along the seam — the "grid over water / vertical lines through the
+// letter" artifact.  Model: every covered pixel blends EXACTLY once.
+static int tcbf_subpix;   /* when set: coords below are Q12.4 and subpix_y=1 */
+static void tcbf_tri_at(uint8_t alpha, int blend_on,
+                        int x0, int x1, int x2, int y0, int y1, int y2) {
+    ParamSpanListWire p = make_vert_tri_surface();
+    p.flags        = SPAN_PERSP | (1u << 7) | (blend_on ? (1u << 1) : 0u);
+    p.fb_base      = FB_BASE_BYTE;
+    p.fb_minor_step = 2;
+    p.fb_major_step = 320 * 2;
+    p.tex_addr     = TEX_BASE_BYTE;
+    p.tex_width = 1; p.tex_w_mask = 0; p.tex_h_mask = 0;
+    p.z_mode = 0;
+    p.const_alpha = alpha;
+    p.subpix_y     = tcbf_subpix ? 1 : 0;
+    const int32_t Q = 1 << 16;
+    int16_t vx[3], vy[3];
+    if (tcbf_subpix) {          /* caller passes Q12.4 for BOTH axes */
+        vx[0] = (int16_t)x0; vx[1] = (int16_t)x1; vx[2] = (int16_t)x2;
+        vy[0] = (int16_t)y0; vy[1] = (int16_t)y1; vy[2] = (int16_t)y2;
+    } else {                    /* caller passes integer pixels */
+        vx[0] = (int16_t)(x0 * 16); vx[1] = (int16_t)(x1 * 16); vx[2] = (int16_t)(x2 * 16);
+        vy[0] = (int16_t)y0; vy[1] = (int16_t)y1; vy[2] = (int16_t)y2;
+    }
+    int32_t s[3] = {0,0,0}, t[3] = {0,0,0}, zi[3] = { Q, Q, Q };
+    uint8_t l[3] = { 63, 63, 63 };
+    emit_set_tri_state_raw(p, 0, 320, 0, 200);
+    emit_draw_vert_tri_raw(vx, vy, s, t, zi, l);
+}
+static void tcbf_scene_abut(int scenario, int blend_on) {
+    tcbf_subpix = (scenario >= 3);
+    switch (scenario) {
+    case 0:  /* one quad split on the diagonal (10,10)-(70,60) */
+        tcbf_tri_at(160, blend_on, 10, 70, 10, 10, 10, 60);
+        tcbf_tri_at(160, blend_on, 70, 70, 10, 10, 60, 60);
+        break;
+    case 1:  /* two quads sharing the VERTICAL edge x=40 (water-mesh seam) */
+        tcbf_tri_at(160, blend_on, 10, 40, 10, 10, 10, 60);
+        tcbf_tri_at(160, blend_on, 40, 40, 10, 10, 60, 60);
+        tcbf_tri_at(160, blend_on, 40, 70, 40, 10, 10, 60);
+        tcbf_tri_at(160, blend_on, 70, 70, 40, 10, 60, 60);
+        break;
+    case 2:  /* two quads sharing the HORIZONTAL edge y=35 */
+        tcbf_tri_at(160, blend_on, 10, 70, 10, 10, 10, 35);
+        tcbf_tri_at(160, blend_on, 70, 70, 10, 10, 35, 35);
+        tcbf_tri_at(160, blend_on, 10, 70, 10, 35, 35, 60);
+        tcbf_tri_at(160, blend_on, 70, 70, 10, 35, 60, 60);
+        break;
+    case 3:  /* SUBPIX: vertical seam at x=40.5, fractional y bounds
+              * (Q12.4 both axes) — the transformed-water-mesh case. */
+        tcbf_tri_at(160, blend_on, 160, 648, 160, 170, 170, 954);
+        tcbf_tri_at(160, blend_on, 648, 648, 160, 170, 954, 954);
+        tcbf_tri_at(160, blend_on, 648, 1120, 648, 170, 170, 954);
+        tcbf_tri_at(160, blend_on, 1120, 1120, 648, 170, 954, 954);
+        break;
+    default: /* SUBPIX: horizontal seam at y=35.5 (Q12.4 568) */
+        tcbf_tri_at(160, blend_on, 160, 1120, 160, 170, 170, 568);
+        tcbf_tri_at(160, blend_on, 1120, 1120, 160, 170, 568, 568);
+        tcbf_tri_at(160, blend_on, 160, 1120, 160, 568, 568, 954);
+        tcbf_tri_at(160, blend_on, 1120, 1120, 160, 568, 954, 954);
+        break;
+    }
+    tcbf_subpix = 0;
+}
+static void test_truecolor_blend_abutting() {
+    printf("TEST truecolor_blend_abutting\n");
+    static uint8_t cov[80][80];
+
+    for (int sc = 0; sc < 5; sc++) {
+    /* Opaque union pass gives coverage (double-paint invisible there). */
+    tcbf_setup();
+    tcbf_scene_abut(sc, 0);
+    if (!submit_and_wait()) { check_fail("truecolor_blend_abutting", "cov timeout"); return; }
+    for (int y = 0; y < 80; y++)
+        for (int x = 0; x < 80; x++)
+            cov[y][x] = (sdram_read_u16_le(FB_BASE_BYTE + (uint32_t)y * 640u
+                                           + (uint32_t)x * 2u) == 0xFFFF);
+
+    /* SEAM GAP CHECK: an uncovered pixel strictly inside the union is the
+     * "bright grid line" artifact (background shows through between
+     * abutting translucent quads) even though blend-exactness holds. */
+    {
+        int gaps = 0, gx = -1, gy = -1;
+        for (int y = 20; y <= 50; y++)
+            for (int x = 15; x <= 65; x++)
+                if (!cov[y][x] && cov[y][x-1] && cov[y][x+1]
+                                && cov[y-1][x] && cov[y+1][x]) {
+                    if (!gaps) { gx = x; gy = y; }
+                    gaps++;
+                }
+        if (gaps) {
+            char m[96];
+            snprintf(m, sizeof m, "sc%d: %d interior seam GAPS (first %d,%d)",
+                     sc, gaps, gx, gy);
+            check_fail("truecolor_blend_abutting", m);
+            return;
+        }
+    }
+
+    /* Blend pass: same triangles.  Every covered pixel must show EXACTLY
+     * one application of the blend — a double-blended seam pixel
+     * mismatches (it shows blend(blend(dst)) instead). */
+    tcbf_setup();
+    tcbf_scene_abut(sc, 1);
+    if (!submit_and_wait()) { check_fail("truecolor_blend_abutting", "blend timeout"); return; }
+
+    const int a6 = 160 >> 2;
+    int bad = 0, dbl = 0, covered = 0;
+    for (int y = 0; y < 80; y++) {
+        for (int x = 0; x < 80; x++) {
+            uint16_t d = tcbf_pattern(x, y);
+            uint16_t once = d, twice;
+            {
+                int r = (31 * a6 + ((d >> 11) & 0x1F) * (64 - a6)) >> 6;
+                int g = (63 * a6 + ((d >> 5)  & 0x3F) * (64 - a6)) >> 6;
+                int b = (31 * a6 + ( d        & 0x1F) * (64 - a6)) >> 6;
+                once = (uint16_t)((r << 11) | (g << 5) | b);
+                int r2 = (31 * a6 + r * (64 - a6)) >> 6;
+                int g2 = (63 * a6 + g * (64 - a6)) >> 6;
+                int b2 = (31 * a6 + b * (64 - a6)) >> 6;
+                twice = (uint16_t)((r2 << 11) | (g2 << 5) | b2);
+            }
+            uint16_t want = cov[y][x] ? once : d;
+            uint16_t got = sdram_read_u16_le(FB_BASE_BYTE + (uint32_t)y * 640u
+                                             + (uint32_t)x * 2u);
+            if (cov[y][x]) covered++;
+            if (got != want) {
+                if (got == twice) dbl++;
+                if (bad < 8)
+                    printf("  (%d,%d) cov=%d want=%04X got=%04X%s\n",
+                           x, y, cov[y][x], want, got,
+                           got == twice ? " [DOUBLE-BLENDED]" : "");
+                bad++;
+            }
+        }
+    }
+    if (bad) {
+        char m[96];
+        snprintf(m, sizeof m, "sc%d: %d mismatches, %d double-blended (seam), %d covered",
+                 sc, bad, dbl, covered);
+        check_fail("truecolor_blend_abutting", m);
+        return;
+    } else if (covered < 1000) {
+        check_fail("truecolor_blend_abutting", "coverage too small");
+        return;
+    }
+    }  /* scenario loop */
+    check_pass("truecolor_blend_abutting");
+}
+
+// Overlapping translucent passes: two blend triangles, the second offset one
+// pixel (staggered word phase).  Exercises what a single pass cannot: the
+// second pass's dst reads must observe the FIRST pass's blended writes
+// (cross-command RAW through the CB_REQ barrier — the blend window drops at
+// S_DECODE and refills from committed memory), and within each pass the
+// window-hit path, fb_acc same-word bypass, and BLEND2 sibling merge.
+static void test_truecolor_blend_overlap() {
+    printf("TEST truecolor_blend_overlap\n");
+    static uint8_t cov1[80][80], cov2[80][80];
+
+    tcbf_setup();
+    tcbf_tri(160, 0, 0);
+    if (!submit_and_wait()) { check_fail("truecolor_blend_overlap", "cov1 timeout"); return; }
+    for (int y = 0; y < 80; y++)
+        for (int x = 0; x < 80; x++)
+            cov1[y][x] = (sdram_read_u16_le(FB_BASE_BYTE + (uint32_t)y * 640u
+                                            + (uint32_t)x * 2u) == 0xFFFF);
+    tcbf_setup();
+    tcbf_tri(160, 0, 1);
+    if (!submit_and_wait()) { check_fail("truecolor_blend_overlap", "cov2 timeout"); return; }
+    for (int y = 0; y < 80; y++)
+        for (int x = 0; x < 80; x++)
+            cov2[y][x] = (sdram_read_u16_le(FB_BASE_BYTE + (uint32_t)y * 640u
+                                            + (uint32_t)x * 2u) == 0xFFFF);
+
+    /* Blended double pass: alpha 160 then alpha 96, back-to-back commands. */
+    tcbf_setup();
+    tcbf_tri(160, 1, 0);
+    tcbf_tri(96, 1, 1);
+    if (!submit_and_wait()) { check_fail("truecolor_blend_overlap", "blend timeout"); return; }
+
+    int bad = 0, both = 0;
+    static int colbad[80];
+    memset(colbad, 0, sizeof colbad);
+    for (int y = 0; y < 80; y++) {
+        for (int x = 0; x < 80; x++) {
+            uint16_t want = tcbf_pattern(x, y);
+            if (cov1[y][x]) {
+                const int a6 = 160 >> 2;
+                int r = (31 * a6 + ((want >> 11) & 0x1F) * (64 - a6)) >> 6;
+                int g = (63 * a6 + ((want >> 5)  & 0x3F) * (64 - a6)) >> 6;
+                int b = (31 * a6 + ( want        & 0x1F) * (64 - a6)) >> 6;
+                want = (uint16_t)((r << 11) | (g << 5) | b);
+            }
+            if (cov2[y][x]) {
+                const int a6 = 96 >> 2;
+                int r = (31 * a6 + ((want >> 11) & 0x1F) * (64 - a6)) >> 6;
+                int g = (63 * a6 + ((want >> 5)  & 0x3F) * (64 - a6)) >> 6;
+                int b = (31 * a6 + ( want        & 0x1F) * (64 - a6)) >> 6;
+                want = (uint16_t)((r << 11) | (g << 5) | b);
+                if (cov1[y][x]) both++;
+            }
+            uint16_t got = sdram_read_u16_le(FB_BASE_BYTE + (uint32_t)y * 640u
+                                             + (uint32_t)x * 2u);
+            if (got != want) {
+                if (bad < 8)
+                    printf("  (%d,%d) c1=%d c2=%d want=%04X got=%04X\n",
+                           x, y, cov1[y][x], cov2[y][x], want, got);
+                bad++;
+                colbad[x]++;
+            }
+        }
+    }
+    if (bad) {
+        printf("  %d mismatches (%d double-covered); per-column:", bad, both);
+        for (int x = 0; x < 80; x++)
+            if (colbad[x]) printf(" c%d=%d", x, colbad[x]);
+        printf("\n");
+        char m[96];
+        snprintf(m, sizeof m, "%d mismatches (%d double-covered)", bad, both);
+        check_fail("truecolor_blend_overlap", m);
+    } else if (both < 1000) {
+        check_fail("truecolor_blend_overlap", "overlap too small");
+    } else {
+        check_pass("truecolor_blend_overlap");
+    }
+}
+
 // Subpixel-Y vert-tri coverage.  With 0x4A control bit 31 set, the walker takes
 // Q12.4 vertex Y instead of integer scanlines.  A SOLID texture isolates
 // COVERAGE (the new subpix walker: Q12.4-dy slope, ceil bounds, fractional
@@ -10342,7 +10978,10 @@ int main(int argc, char **argv) {
 #endif
     test_persp_constant_z_matches_affine();
     test_persp_span_group_varcount_const_z_equals_single_lane_spans();
+#ifndef GPU_TEST_NO_PALETTE
+    /* Asserts colormapped wall bytes (palookup rows 0..15). */
     test_persp_span_group_doom_wall_layout_matches_reference();
+#endif
     test_persp_span_group_doom_wall_layout_8lane_chunk_positions();
     test_persp_span_group_doom_wall_negative_t_wrap();
     test_persp_span_group_doom_wall_7lane_partial_chunk();
@@ -10357,32 +10996,52 @@ int main(int argc, char **argv) {
     test_param_span_list_zero_counts_skip();
     test_param_span_list_streams_many_records();
     test_param_span_list_unsupported_noop();
+#ifndef GPU_TEST_NO_PALETTE
     test_param_span_list_colormap_skip_zero();
+#endif
+    /* Wrong-size / degenerate / unsupported-header drains hold with the
+     * param-tri module pruned too — the commands must still drain. */
     test_param_tri_wrong_size_noop_drains();
+    test_param_tri_degenerate_noop();
+    test_param_tri_unsupported_header_noop();
+#ifndef GPU_TEST_NO_PARAM_TRI
     test_param_tri_affine_basic();
     test_param_tri_clip_all_sides();
-    test_param_tri_degenerate_noop();
     test_param_tri_shared_edge_adjacency();
-    test_param_tri_unsupported_header_noop();
     test_param_tri_fuzz_affine();
     test_vert_tri_equivalence_vs_param();
+#endif
     test_texture_mirror_s();
     test_texture_mirror_t();
     test_vert_tri_sliver_renders_in_range();
+#ifndef GPU_TEST_NO_PARAM_TRI
+    /* 0x4B render is compared against its 0x49 derived-plane twin. */
     test_vert_tri_shared_edge_adjacency();
+#endif
     test_vert_tri_sticky_semantics();
     test_vert_tri_wrong_size_noop();
+#ifndef GPU_TEST_NO_PARAM_TRI
+    /* 0x4D recs tests all reference full-0x49 twins (and recs itself is
+     * pruned alongside param-tri in every config so far). */
     test_param_tri_recs_equivalence_vs_param();
     test_param_tri_recs_sticky_semantics();
     test_param_tri_recs_wrong_size_noop();
+#endif
     test_param_span_list_persp_matches_helper();
+#ifndef GPU_TEST_NO_PARAM_SPAN_Q29
+    /* z-projection oracles need the q29 dynamic-scale z cone; the Doom
+     * captures replay real q29_attr_shift/z_mode streams whose z tests
+     * reject differently once the cone is folded. */
     test_param_span_quake_projection_math();
     test_param_span_q29_high_angle_floor_no_flatten();
+#endif
     test_param_q29_tail_counts_and_boundaries();
     test_param_q29_record_counts_and_odd_pairs();
     test_param_q29_axis_y_multichunk_wall_repro();
+#ifndef GPU_TEST_NO_PARAM_SPAN_Q29
     test_doom_real_capture_replay_no_black_columns();
     test_doom_real_capture_frame_no_black_columns();
+#endif
     test_param_q29_zero_counts_mixed_no_drop();
     test_param_q48_multichunk_distinct_column_drop_repro();
 #ifndef GPU_TEST_OS30_LEAN
@@ -10398,9 +11057,13 @@ int main(int argc, char **argv) {
     test_portb_starve_distinct_cache_line_wall();
     test_param_q29_wrap_and_fb_byte_lanes();
     test_param_q29_static_repeat_300();
+#ifndef GPU_TEST_NO_PARAM_SPAN_Q29
     test_param_q29_dynamic_scale_projection();
     test_param_q29_dynamic_scale_all_records_touch();
     test_param_q29_dynamic_scale_z_restore_saturates();
+#endif
+    /* reserved_bits_noop holds in BOTH folds: with the cone folded the
+     * reserved bits are no-ops by construction. */
     test_param_q29_dynamic_scale_reserved_bits_noop();
 #ifndef GPU_TEST_OS30_LEAN
     test_affine_span_group_quake_alias_carry_math();
@@ -10411,6 +11074,11 @@ int main(int argc, char **argv) {
     // In-flight z-RAW: only asserts when +gpu_wr_latency>=8 (see fn);
     // skips cleanly on default runs so they stay byte-identical.
     test_param_span_z_raw_inflight_same_line();
+    test_param_span_z_raw_pair_same_half_fwd();
+    test_param_span_z_raw_pair_same_half_no_fwd_on_reject();
+    test_param_span_z_raw_pair_word_halves_lo_hi();
+    test_param_span_z_raw_pair_word_halves_hi_lo();
+    test_param_span_z_raw_pair_skip_zero_between();
 #ifndef GPU_TEST_OS30_LEAN
     /* Compact-direct 0x48 span-group / batch / DMA-mix tests — every one
      * emits 11/18/25/32-word 0x48 payloads, the form the lean config
@@ -10470,9 +11138,16 @@ int main(int argc, char **argv) {
     test_vert_tri_rgb_pack_depth();
     test_vert_tri_rgb_pack_depth_subpix_y();
     test_truecolor_blend();
+    test_truecolor_blend_full();
+    test_truecolor_blend_overlap();
+    test_truecolor_blend_abutting();
     test_vert_tri_subpixel_y();
+#ifndef GPU_TEST_NO_PARAM_TRI
+    /* Both are vert_tri_equiv_diffs users: the attribute/bias oracle is the
+     * 0x49 derived-plane twin render. */
     test_vert_tri_subpixel_y_attrib();
     test_vert_tri_tex_persp_bias();
+#endif
 #endif
 
     printf("\n=== Acceptance Results: %d passed, %d failed ===\n",

@@ -144,6 +144,9 @@ void timer_isr_callback(void) {
      * pins this timer at 1 kHz on that path; the 1024-deep FIFO gives ~21 ms
      * of slack).  Cheap no-op (one branch) when a HW mixer is present. */
     sw_mixer_pump();
+    /* Async file-I/O watchdog + deferred bounce-copy pump (hal/file.h).
+     * Two-branch no-op when no async transfer is pending. */
+    of_file_async_tick();
     /* App native callback, divided down from the 1 kHz tick when the SW mixer
      * owns the timer (timer_cb_div==1 on HW-mixer builds => fires every tick,
      * identical to the legacy path). */

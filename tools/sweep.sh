@@ -77,6 +77,15 @@ if [ "$USE_CONTAINER" = 1 ]; then
     # oversubscribing — and each fit places identically to the production build.
     printf "${C_HEAD}[sweep]${C_RESET} $VARIANT seeds $MIN-$MAX, ${MAXJOBS}-wide (containers; procs pinned in qsf)\n"
 
+    # Per-seed results are parsed and persisted THE MOMENT each fit finishes
+    # (one atomic line append per seed), so the final ranking never depends on
+    # the bld/<variant>-s*/ scratch dirs still existing.  A 2.5 h 50-seed run
+    # once lost EVERY result because an external disk cleanup removed the
+    # scratch dirs between fit completion and the end-of-run parse.  The live
+    # per-seed lines printed below land in the caller's log as a second copy.
+    RESULTS="bld/${VARIANT}-sweep.results"
+    : > "$RESULTS"
+
     # Shared inputs once: the CPU netlist + firmware are identical across seeds.
     make --no-print-directory cpu VARIANT="$VARIANT" >/dev/null
     make --no-print-directory bootloader >/dev/null
@@ -86,6 +95,15 @@ if [ "$USE_CONTAINER" = 1 ]; then
         make --no-print-directory "bld/$job/ap_core.qsf" \
             VARIANT="$VARIANT" JOB="$job" SEED="$s" >/dev/null 2>&1
         bash "$TOOLS/quartus-container.sh" "$TARGET_DIR/bld/$job" >"bld/$job.log" 2>&1
+        # Harvest this seed's numbers NOW (subshell-local parse; single-line
+        # O_APPEND write is atomic across the MAXJOBS parallel jobs).
+        parse_sta "bld/$job/output_files/${PROJECT}.sta.rpt"
+        printf "%s|%s|%s|%s\n" "$s" "$_wns" "$_tns" "$_fmax" >> "$RESULTS"
+        if [ -n "$_wns" ]; then
+            printf "  seed %-3s ${C_DIM}fit done:${C_RESET} WNS %-9s TNS %s\n" "$s" "$_wns" "${_tns:--}"
+        else
+            printf "  seed %-3s ${C_ERR}fit failed (no STA)${C_RESET}\n" "$s"
+        fi
     }
 
     for s in $(seq "$MIN" "$MAX"); do
@@ -94,9 +112,15 @@ if [ "$USE_CONTAINER" = 1 ]; then
     done
     wait
 
+    # Load the harvested results; fall back to a live dir parse only for a
+    # seed whose line is missing AND whose scratch dir still exists.
+    while IFS='|' read -r s w t f; do
+        R_WNS[$s]=$w; R_TNS[$s]=$t; R_FMAX[$s]=$f
+    done < "$RESULTS"
     for s in $(seq "$MIN" "$MAX"); do
+        [ -n "${R_WNS[$s]:-}" ] && continue
         parse_sta "bld/${VARIANT}-s$s/output_files/${PROJECT}.sta.rpt"
-        R_WNS[$s]=$_wns; R_TNS[$s]=$_tns; R_FMAX[$s]=$_fmax
+        [ -n "$_wns" ] && { R_WNS[$s]=$_wns; R_TNS[$s]=$_tns; R_FMAX[$s]=$_fmax; }
     done
 else
     # ── In-place backend: serial compile per seed (mister / Quartus 17) ──

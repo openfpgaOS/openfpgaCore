@@ -454,6 +454,23 @@ wire wr_per_awready_pulse = wr_grant_per;
 reg wr_mem_wready_pulse;
 reg wr_per_wready_pulse;
 
+// Full-rate W for mem bursts (D$ evictions).  The pulse protocol above
+// paces the master at 1 beat / 2 cycles (capture -> registered-ready
+// handshake -> next beat); a 16-beat eviction spent ~32 cycles just
+// handing beats over.  For the mem path in WR_W we instead hold a
+// REGISTERED level ready (wr_mem_wready_level) backed by a 2-slot
+// elastic buffer (the m_w* output slot + the skid below), so the master
+// streams 1 beat/cycle while downstream drains at its own pace.  The
+// ready stays registered — no combinational valid->ready path is added
+// to the CPU-side cone.  The periph path and the WR_IDLE single-beat
+// bundle keep the pulse protocol unchanged.
+reg        wr_mem_wready_level;
+reg        wr_w_skid_valid;
+reg [31:0] wr_w_skid_data;
+reg [3:0]  wr_w_skid_strb;
+reg        wr_w_skid_last;
+reg        wr_w_captured_last;   // consumed the master's WLAST beat
+
 reg       mem_bvalid_r;
 reg [1:0] mem_bid_r;
 reg [1:0] mem_bresp_r;
@@ -461,6 +478,13 @@ reg       per_bvalid_r;
 reg [1:0] per_bresp_r;
 
 wire wr_beat_is_last = (wr_burst_count == wr_burst_len);
+
+// Elastic-buffer bookkeeping for the mem full-rate W path (WR_W only).
+wire       wr_w_hs      = wr_mem_wready_level && mem_wvalid;   // beat consumed from master this cycle
+wire       wr_w_accept  = m_wvalid && m_wready;                // beat accepted downstream this cycle
+wire [1:0] wr_w_occ     = {1'b0, m_wvalid} + {1'b0, wr_w_skid_valid};
+wire [1:0] wr_w_occ_nxt = wr_w_occ + (wr_w_hs ? 2'd1 : 2'd0) - (wr_w_accept ? 2'd1 : 2'd0);
+wire       wr_w_capt_last_nxt = wr_w_captured_last || (wr_w_hs && mem_wlast);
 
 always @(posedge clk or posedge reset) begin
     if (reset) begin
@@ -480,6 +504,12 @@ always @(posedge clk or posedge reset) begin
         m_wlast            <= 1'b0;
         wr_mem_wready_pulse <= 1'b0;
         wr_per_wready_pulse <= 1'b0;
+        wr_mem_wready_level <= 1'b0;
+        wr_w_skid_valid     <= 1'b0;
+        wr_w_skid_data      <= 32'b0;
+        wr_w_skid_strb      <= 4'b0;
+        wr_w_skid_last      <= 1'b0;
+        wr_w_captured_last  <= 1'b0;
         mem_bvalid_r <= 1'b0;
         mem_bid_r    <= 2'b0;
         mem_bresp_r  <= 2'b0;
@@ -513,12 +543,15 @@ always @(posedge clk or posedge reset) begin
                 m_awburst         <= mem_awburst;
                 last_grant_wr_mem <= 1'b1;
                 wr_state          <= WR_AW;
+                wr_w_captured_last <= 1'b0;
+                wr_w_skid_valid    <= 1'b0;
                 if (mem_wvalid) begin
                     m_wvalid <= 1'b1;
                     m_wdata  <= mem_wdata;
                     m_wstrb  <= mem_wstrb;
                     m_wlast  <= mem_wlast;
                     wr_mem_wready_pulse <= 1'b1;
+                    wr_w_captured_last <= mem_wlast;
                 end
             end else if (wr_grant_per) begin
                 wr_active_is_mem  <= 1'b0;
@@ -556,21 +589,67 @@ always @(posedge clk or posedge reset) begin
                     // else: AW not done yet, stay in WR_AW until awready
                 end else begin
                     wr_state <= WR_W;
+                    // mem bursts stream full-rate in WR_W (both slots
+                    // free after this accept; more beats to capture).
+                    wr_mem_wready_level <= wr_active_is_mem && !wr_w_captured_last;
                 end
             end else if (m_awready && !m_wvalid) begin
                 wr_state <= WR_W;
+                wr_mem_wready_level <= wr_active_is_mem && !wr_w_captured_last;
             end
         end
 
         WR_W: begin
             if (wr_active_is_mem) begin
-                if (mem_wvalid && !wr_mem_wready_pulse && !m_wvalid) begin
-                    wr_mem_wready_pulse <= 1'b1;
-                    m_wvalid <= 1'b1;
-                    m_wdata  <= mem_wdata;
-                    m_wstrb  <= mem_wstrb;
-                    m_wlast  <= mem_wlast;
+                // Full-rate elastic capture: the level ready consumed a
+                // master beat this cycle iff wr_w_hs.  Route it into the
+                // output slot when that slot is free (or freed by this
+                // cycle's downstream accept and the skid is empty);
+                // otherwise park it in the skid.  On a downstream accept
+                // with a parked beat, promote the skid in the same cycle
+                // — the W stream never inserts a dead cycle.
+                if (wr_w_accept) begin
+                    if (wr_w_skid_valid) begin
+                        m_wdata  <= wr_w_skid_data;
+                        m_wstrb  <= wr_w_skid_strb;
+                        m_wlast  <= wr_w_skid_last;
+                        // m_wvalid stays 1
+                        if (wr_w_hs) begin
+                            wr_w_skid_data  <= mem_wdata;
+                            wr_w_skid_strb  <= mem_wstrb;
+                            wr_w_skid_last  <= mem_wlast;
+                            // skid_valid stays 1
+                        end else begin
+                            wr_w_skid_valid <= 1'b0;
+                        end
+                    end else if (wr_w_hs) begin
+                        m_wdata  <= mem_wdata;
+                        m_wstrb  <= mem_wstrb;
+                        m_wlast  <= mem_wlast;
+                        // m_wvalid stays 1 (straight-through reload)
+                    end else begin
+                        m_wvalid <= 1'b0;
+                    end
+                end else if (wr_w_hs) begin
+                    if (!m_wvalid) begin
+                        m_wvalid <= 1'b1;
+                        m_wdata  <= mem_wdata;
+                        m_wstrb  <= mem_wstrb;
+                        m_wlast  <= mem_wlast;
+                    end else begin
+                        wr_w_skid_valid <= 1'b1;
+                        wr_w_skid_data  <= mem_wdata;
+                        wr_w_skid_strb  <= mem_wstrb;
+                        wr_w_skid_last  <= mem_wlast;
+                    end
                 end
+                wr_w_captured_last <= wr_w_capt_last_nxt;
+                // Keep the level ready up while beats remain and the
+                // buffer can absorb one more (registered; never a
+                // combinational valid->ready path).
+                wr_mem_wready_level <= !wr_w_capt_last_nxt
+                                    && (wr_w_occ_nxt < 2'd2)
+                                    && !(wr_w_accept && wr_beat_is_last);
             end else begin
                 if (per_wvalid && !wr_per_wready_pulse && !m_wvalid) begin
                     wr_per_wready_pulse <= 1'b1;
@@ -582,10 +661,13 @@ always @(posedge clk or posedge reset) begin
             end
 
             if (m_wready && m_wvalid) begin
-                m_wvalid <= 1'b0;
+                if (!(wr_active_is_mem && (wr_w_skid_valid || wr_w_hs)))
+                    m_wvalid <= 1'b0;
                 wr_burst_count <= wr_burst_count + 8'd1;
-                if (wr_beat_is_last)
+                if (wr_beat_is_last) begin
                     wr_state <= WR_B;
+                    wr_mem_wready_level <= 1'b0;
+                end
             end
         end
 
@@ -616,7 +698,7 @@ assign mem_arready_contrib = rd_mem_arready_pulse;
 assign per_arready_contrib = rd_per_arready_pulse;
 assign mem_awready_contrib = wr_mem_awready_pulse;
 assign per_awready_contrib = wr_per_awready_pulse;
-assign mem_wready_contrib  = wr_mem_wready_pulse;
+assign mem_wready_contrib  = wr_mem_wready_pulse || wr_mem_wready_level;
 assign per_wready_contrib  = wr_per_wready_pulse;
 
 // Read responses (sticky until master's *_rready is asserted)

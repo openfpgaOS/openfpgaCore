@@ -786,6 +786,13 @@ localparam [31:0] HW_FEATURES_RESOLVED =
                        //        derivation needs INCLUDE_VERT_TRI.  OS25
                        //        clears it (ALM); OS30 keeps it — it is the
                        //        Quake2 world-pass header-dedup opcode.
+    | 32'h1000_0000    // bit 28 OF_HW_GPU_SPAN_CONT: records-only 0x58
+                       //        continuation of a long-form 0x48 (surface
+                       //        header cached in the GPU's spanprod staging;
+                       //        SDK emitters self-gate on this bit so old
+                       //        bitstreams keep receiving full headers).
+                       //        Unconditional: the long-form machinery it
+                       //        rides is part of the base GPU span support.
     | (INCLUDE_COMPACT_SPAN ? 32'h0080_0000 : 32'h0000_0000)  // bit 23
                        //        OF_HW_GPU_SPAN_GROUP: 0x48 compact-direct
                        //        lane form (SDK span-group emitters).  NEW

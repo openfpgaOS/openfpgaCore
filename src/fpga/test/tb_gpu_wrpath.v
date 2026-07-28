@@ -159,12 +159,12 @@ wire [1:0]  gpu_swap_idx;
 // gpu_core
 // ============================================================
 gpu_core #(
-    .GPU_HAS_VERT_TRI(GPU_HAS_VERT_TRI),
-    .GPU_HAS_PARAM_TRI_RECS(GPU_HAS_PARAM_TRI_RECS),
+    .INCLUDE_VERT_TRI(GPU_HAS_VERT_TRI),
+    .INCLUDE_PARAM_TRI_RECS(GPU_HAS_PARAM_TRI_RECS),
     .GPU_Z_READ_WINDOW(GPU_Z_READ_WINDOW),
     .GPU_EW_PARALLEL_DIVS(GPU_EW_PARALLEL_DIVS),
-    .GPU_HAS_COMPACT_SPAN(GPU_HAS_COMPACT_SPAN),
-    .GPU_HAS_COLUMN_LIST(GPU_HAS_COLUMN_LIST)
+    .INCLUDE_COMPACT_SPAN(GPU_HAS_COMPACT_SPAN),
+    .INCLUDE_COLUMN_LIST(GPU_HAS_COLUMN_LIST)
 ) gpu (
     .clk(clk), .reset_n(reset_n), .gpu_enable(1'b1),
     .m_rd_arvalid(gpu_rd_arvalid), .m_rd_arready(gpu_rd_arready),

@@ -35,6 +35,12 @@ module tb_scanout #(
     // Analog raster timing select (ATIMING_* in the DUT):
     // 0=240p, 1=480p (slaved to LCD), 2=480i NTSC, 3=576i PAL.
     input  wire [1:0] analog_timing,
+    // Gate under test: the DUT must issue ZERO analog line fetches while
+    // this is low (the LCD stream must be unaffected).
+    input  wire analog_fetch_ena,
+    // Rising-edge count of the DUT's analog fetch requests (XMR) so the
+    // harness can assert the analog_fetch_ena gate.
+    output reg [15:0] analog_fetch_reqs,
     // When 1, point the analog framebuffer at a different base than the LCD
     // (offset so analog source row R reads as R+1000). Proves the analog fetch
     // reads its OWN framebuffer while the LCD reads the LCD framebuffer.
@@ -109,6 +115,18 @@ module tb_scanout #(
     wire [23:0] pixel_color;
     wire        pal_busy;
 
+    reg prev_analog_req;
+    always @(posedge clk) begin
+        if (!reset_n) begin
+            analog_fetch_reqs <= 16'd0;
+            prev_analog_req   <= 1'b0;
+        end else begin
+            prev_analog_req <= dut.analog_fetch_request;
+            if (dut.analog_fetch_request && !prev_analog_req)
+                analog_fetch_reqs <= analog_fetch_reqs + 16'd1;
+        end
+    end
+
     video_CRT_scanout_indexed_BRAM #(
         .HAS_ANALOG_RASTER(HAS_ANALOG_RASTER)
     ) dut (
@@ -124,6 +142,7 @@ module tb_scanout #(
         .analog_ce_pix(analog_ce_pix),
         .analog_scanlines(2'd0),
         .analog_timing(analog_timing),
+        .analog_fetch_ena(analog_fetch_ena),
         .analog_pixel_clk(analog_pixel_clk),
         .analog_pixel_color(analog_pixel_color_o),
         .analog_hblank(analog_hblank),

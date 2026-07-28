@@ -1478,3 +1478,9 @@ int of_file_async_poll(void) {
 int of_file_async_busy(void) {
     return async_state.active;
 }
+
+/* 1 kHz kernel tick hook (hal/file.h).  The MiSTer DS engine completes
+ * through its own deferred-drain model (async_drain via the IRQ service and
+ * of_file_async_poll) and stages in SDRAM — there is no bounce copy to pump
+ * and no lost-IRQ wedge mode to watch, so the tick has nothing to do here. */
+void of_file_async_tick(void) {}

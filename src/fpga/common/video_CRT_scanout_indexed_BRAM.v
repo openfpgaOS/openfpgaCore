@@ -60,6 +60,14 @@ module video_CRT_scanout_indexed_BRAM #(
     //          frames (312.5-line fields, 50.03 Hz), free-running (a 50 Hz
     //          raster cannot phase-lock to the 60 Hz LCD frame).
     input wire [1:0] analog_timing,
+    // Gate for the analog line fetch (clk_analog domain, quasi-static —
+    // core_top feeds its 2-FF-synced Analogizer-enable).  When low, the
+    // analog raster keeps running (timing/syncs unaffected) but no SDRAM
+    // line fetches are requested: with the Analogizer disabled the fetched
+    // lines have no consumer, and the stream costs a full second
+    // framebuffer read per frame of SDRAM bandwidth.  Tie high where the
+    // analog output is always live (testbenches, non-Pocket targets).
+    input wire analog_fetch_ena,
     output reg analog_pixel_clk,
     output reg [23:0] analog_pixel_color,
     output reg analog_hblank,
@@ -693,6 +701,7 @@ module video_CRT_scanout_indexed_BRAM #(
     // analog fetch is ever requested, so the clk_sdram analog handshake,
     // serving_analog and the analog_line_buffer write port all fold.
     wire analog_fetch_can_issue = (HAS_ANALOG_RASTER != 0) &&
+        analog_fetch_ena &&
         !analog_fetch_request && !analog_fetch_ack_sync2 &&
         (analog_fetch_line < analog_v_active_end[9:0]) &&
         ({1'b0, analog_fetch_line} <= ({1'b0, analog_line_y} + 11'd2));
@@ -818,6 +827,45 @@ module video_CRT_scanout_indexed_BRAM #(
     wire [23:0] out_rgb_dim =
         out_analog_dim_q ? rgb888_half(out_rgb) : out_rgb;
 
+`ifdef INCLUDE_VI_FILTER
+    // ------------------------------------------------------------------
+    // VI_FILTER — N64 Video-Interface-style output softening (module
+    // registry: INCLUDE_VI_FILTER; first user os30/SM64).  Zero-latency
+    // 2-tap horizontal average (cur+prev)/2 on the LCD stream — the
+    // half-pixel-offset resample the real VI applied in its common modes.
+    // Softens what the nearest-only texel sampler cannot: magnification
+    // aliasing (the letter's vertical lines) and minification moiré (the
+    // water grid) — sampling signatures, NOT pipeline defects (blend math,
+    // seam discipline and fabric ordering are all exonerated byte-exact in
+    // tb_gpu truecolor_blend_full/_overlap/_abutting).
+    //
+    // Applied ONLY to direct-color pixels (the app framebuffer): CLUT
+    // modes — the boot terminal — pass through crisp.  The previous-pixel
+    // tap holds the last LCD-tagged pixel, so the shared-pipe bubbles and
+    // interleaved analog slots (os25) do not corrupt the history; the
+    // first active pixel of a line has an inactive prev and passes
+    // through unfiltered (edge replication).  Adds ~30 ALMs in the
+    // slack-rich clk_analog domain; a 3-tap needs a delayed output (the
+    // pipe has no lookahead LCD slot) and was rejected for the raster
+    // shift it would cost.
+    // ------------------------------------------------------------------
+    reg  [23:0] vi_prev_q;
+    reg         vi_prev_act_q;
+    function [7:0] vi_avg;
+        input [7:0] a;
+        input [7:0] b;
+        reg [8:0] s;
+        begin
+            s = {1'b0, a} + {1'b0, b} + 9'd1;   // round-to-nearest
+            vi_avg = s[8:1];
+        end
+    endfunction
+    wire [23:0] vi_rgb_w = { vi_avg(vi_prev_q[23:16], out_rgb[23:16]),
+                             vi_avg(vi_prev_q[15:8],  out_rgb[15:8]),
+                             vi_avg(vi_prev_q[7:0],   out_rgb[7:0]) };
+    wire        vi_engage_w = out_use_direct_q && vi_prev_act_q;
+`endif
+
     always @(posedge clk_analog or negedge reset_analog_n) begin
         if (!reset_analog_n) begin
             lcd_bram_rd_data <= 32'b0;
@@ -825,6 +873,10 @@ module video_CRT_scanout_indexed_BRAM #(
             rd_from_analog <= 1'b0;
             pal_rd_addr <= 8'b0;
             pixel_color <= 24'b0;
+`ifdef INCLUDE_VI_FILTER
+            vi_prev_q     <= 24'b0;
+            vi_prev_act_q <= 1'b0;
+`endif
             analog_pixel_clk <= 1'b0;
             analog_pixel_color <= 24'b0;
             analog_hblank <= 1'b1;
@@ -1050,8 +1102,20 @@ module video_CRT_scanout_indexed_BRAM #(
             out_direct_color_q <= decode_direct_color_q;
             out_use_direct_q <= decode_use_direct_q;
 
-            if (out_tag_q == READ_LCD)
+            if (out_tag_q == READ_LCD) begin
+`ifdef INCLUDE_VI_FILTER
+                pixel_color <= out_active_q
+                             ? (vi_engage_w ? vi_rgb_w : out_rgb)
+                             : 24'h000000;
+                // History holds SOURCE pixels (FIR, not IIR) and only
+                // advances on LCD slots, so pipe bubbles / analog slots
+                // never corrupt it.  Inactive slots mark the line edge.
+                vi_prev_q     <= out_rgb;
+                vi_prev_act_q <= out_active_q;
+`else
                 pixel_color <= out_active_q ? out_rgb : 24'h000000;
+`endif
+            end
 
             if ((HAS_ANALOG_RASTER != 0) && (out_tag_q == READ_ANALOG)) begin
                 analog_hblank <= out_analog_hblank_q;

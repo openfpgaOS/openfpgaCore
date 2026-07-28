@@ -153,6 +153,19 @@ extern "C" {
                                          * this bit is CLEAR on os25/os30/mister;
                                          * the INCLUDE_TEX_MEM module exists for a
                                          * future texture-bound core. */
+#define OF_HW_GPU_SPAN_CONT (1 << 28)   /* Records-only continuation of a
+                                         * long-form 0x48 param span list
+                                         * (GPU_CMD_PARAM_SPAN_CONT 0x58):
+                                         * the 29-word surface header
+                                         * persists in the GPU staging, so
+                                         * repeat emissions send count +
+                                         * shift + records only.  The SDK
+                                         * emitter self-gates on this bit
+                                         * and keeps a header cache that is
+                                         * invalidated by every staging-
+                                         * overwriting emit (compact 0x48,
+                                         * 0x4C, 0x49, 0x4A) — mirroring
+                                         * the RTL residency contract. */
 #define OF_HW_GPU_XFORM_RGB (1 << 26)   /* GPU transform front-end truecolor +
                                          * vertex cache + per-vertex lighting:
                                          * 0x52 xform_tri_rgb, 0x53 load_verts,

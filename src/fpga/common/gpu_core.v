@@ -88,6 +88,15 @@ module gpu_core #(
     // Only the values 1 and 4 are supported.
     parameter GPU_Z_READ_WINDOW = 4,
 
+    // Truecolor-blend dst read-window size, in 32-bit words: 4, 2, or 1.
+    // 4 = one aligned 4-beat burst serves 8 RGB565 pixels (fastest, ~128
+    // FFs + the widest muxes); 2 = halves the storage/mux widths for
+    // ALM-pressed variants at ~most of the win; 1 = the window prunes
+    // entirely and the CB flow degenerates to the legacy barrier + one
+    // single-word read per pixel (measurement/fallback).  Behavior is
+    // byte-identical at every size — only the read amortisation changes.
+    parameter GPU_CB_READ_WINDOW = 4,
+
     // ----------------------------------------------------------------
     // Edge-walker slope-divide layout, forwarded verbatim to
     // gpu_edge_walker's EW_PARALLEL_DIVS (see the header comment there).
@@ -940,7 +949,7 @@ wire blend_owns_m0  = (fbss == FBSS_ZTEST_AR_WAIT)
                    || (fbss == FBSS_BLEND_AR_WAIT)
                    || (fbss == FBSS_BLEND_R_WAIT)
                    || (fbss == FBSS_CB_AR)
-                   || (fbss == FBSS_CB_R);
+                   || (fbss == FBSS_CB_FILLR);
 wire dma_owns_ar    = (dma_state == DMA_S_AR)
                    || (dma_state == DMA_S_R);
 wire dma_owns_r     = (dma_state == DMA_S_R);
@@ -970,7 +979,7 @@ assign m_rd_araddr     = dma_owns_ar   ? dma_araddr
                        : blend_owns_m0 ? {{(32-GPU_ADDR_W){1'b0}}, blend_araddr}
                        :                 tex_axi_araddr;
 assign m_rd_arlen      = dma_owns_ar   ? dma_arlen
-                       : blend_owns_m0 ? {6'b0, blend_ar_is_burst, blend_ar_is_burst}
+                       : blend_owns_m0 ? {6'b0, blend_arlen_r}
                        :                 tex_axi_arlen;
 
 // Fast-texture fill master — driven only when redirected.  Independent of the
@@ -3630,11 +3639,12 @@ localparam FBSS_BLEND_LOOKUP   = 4'd13;
 // Truecolor constant-alpha src-over blend (OF_GPU_SPAN_BLEND): read the dst
 // RGB565 pixel, mix with p3_color by sp_const_alpha, write back.  Uses the free
 // fbss codes; INCLUDE_DIRECT_COLOR-gated (unreachable when sp_blend is const 0).
-localparam FBSS_CB_REQ         = 4'd1;   // flush fb_acc, wait drain, issue read
+localparam FBSS_CB_REQ         = 4'd1;   // flush fb_acc, wait drain, issue 4-beat line read
 localparam FBSS_CB_AR          = 4'd3;   // wait AR accepted
-localparam FBSS_CB_R           = 4'd14;  // capture dst halfword (read response)
+localparam FBSS_CB_FILLR       = 4'd14;  // capture the 4-beat dst line into cbw_*
 localparam FBSS_CB_BLEND       = 4'd15;  // stage-1: per-channel weighted sums (pipeline)
 localparam FBSS_CB_BLEND2      = 5'd16;  // stage-2: >>6 + repack -> fb_acc (pipeline)
+localparam FBSS_CB_WINSEL      = 5'd17;  // window hit: cross-word flush + dst select
 reg [4:0] fbss;
 // Pipeline reg: the dst halfword captured in FBSS_CB_R so rgb565_blend runs
 // register-to-register in FBSS_CB_BLEND (splits the read-response -> 6-mul blend
@@ -3668,10 +3678,11 @@ reg [1:0]  blend_lane_iter;
 reg [1:0]  blend_lut_lane;
 reg        blend_arvalid;
 reg [GPU_ADDR_W-1:0] blend_araddr;
-// Per-issue AR length for the blend/z M0 reads: only ever 0 (translucent
-// FB word read) or 3 (4-word z-window fill, item 5), so it is stored as
-// one bit and expanded to arlen {6'b0, b, b} at the m_rd_arlen mux.
-reg        blend_ar_is_burst;
+// Per-issue AR length for the blend/z M0 reads: 0 (translucent FB word
+// read), CBW_ARLEN (blend-window fill: 0/1/3), or 3 (4-word z-window
+// fill).  Stored as the 2-bit arlen value and zero-extended at the
+// m_rd_arlen mux.
+reg [1:0]  blend_arlen_r;
 
 // ----------------------------------------------------------------
 // Z read window (4 words = 8 z pixels).  The z-test detour used to
@@ -3717,6 +3728,33 @@ reg [1:0]              zw_fill_beat;
 // same-cycle (N) hit case is unchanged and remains covered by z_acc
 // priority, exactly as before (exactness rules 1-3 untouched).
 reg                    zw_snoop_pending;
+
+// ----------------------------------------------------------------
+// Truecolor-blend dst read window (4 words = 8 RGB565 pixels).
+// Same shape and exactness contract as the z read window above:
+//   1. the fill runs behind CB_REQ's full write-drain barrier;
+//   2. every fbwq push into the window's 16-byte line invalidates
+//      that word (registered snoop, one-cycle hit suppression);
+//   3. the window drops at S_DECODE and on soft reset.
+// The CB path previously paid flush + drain barrier + one single-word
+// SDRAM read PER TRANSLUCENT PIXEL (~30-60 cycles — the "translucent
+// surfaces are very expensive" report: the SM64 letter alone is ~30k
+// blended pixels/frame).  The window amortises one 4-beat burst
+// across up to 8 pixels; the fb_acc same-word bypass covers the word
+// the accumulator holds, so a horizontal blend run costs ~4
+// cycles/pixel after the first.  Reachability-pruned without
+// INCLUDE_DIRECT_COLOR: sp_blend is constant 0, the fill state is
+// unreachable, cbw_valid stays 0 and the window sweeps.
+localparam CBW_WORDS = (GPU_CB_READ_WINDOW >= 4) ? 4
+                     : (GPU_CB_READ_WINDOW >= 2) ? 2 : 1;
+localparam CBW_LG    = (CBW_WORDS == 4) ? 2 : (CBW_WORDS == 2) ? 1 : 0;
+localparam CBW_LOW   = 2 + CBW_LG;              // byte-addr line shift (4/3/2)
+localparam [1:0] CBW_ARLEN = CBW_WORDS - 1;     // fill burst arlen (3/1/0)
+reg [3:0]                    cbw_valid;          // upper bits const-0 below 4 words
+reg [GPU_ADDR_W-1-CBW_LOW:0] cbw_base;
+reg [31:0]                   cbw_word [0:3];     // entries >= CBW_WORDS sweep
+reg [1:0]                    cbw_fill_beat;
+reg                          cbw_snoop_pending;
 wire [7:0]  blend_lut_src_byte = fb_lane_read(blend_group_src_data, blend_lane_iter);
 wire [7:0]  blend_lut_fb_byte  = fb_lane_read(blend_result_word, blend_lane_iter);
 wire [14:0] blend_lut_addr_w   = {blend_lut_src_byte[7:1], blend_lut_fb_byte};
@@ -4020,6 +4058,42 @@ wire [15:0] cb_dst_half_w  = p3_fb_addr[1] ? blend_rdata[31:16] : blend_rdata[15
 wire [15:0] cb_mixed_w     = {cb_sr[10:6], cb_sg[11:6], cb_sb[10:6]};
 wire [31:0] cb_lane_data_w = p3_fb_addr[1] ? {cb_mixed_w, 16'b0}
                                            : {16'b0, cb_mixed_w};
+// Word index inside the blend window for p3 / the snooped push (constant 0
+// with a 1-word window, where the whole hit arm prunes).
+wire [1:0]  cbw_p3_idx     = (CBW_LG == 2) ? p3_fb_addr[3:2]
+                           : (CBW_LG == 1) ? {1'b0, p3_fb_addr[2]} : 2'd0;
+// Blend-window hit for the pixel at p3 (registered operands only: p3_fb_addr,
+// cbw_*).  PRUNE GATE: constant 0 with a 1-word window (cbw_valid is never
+// set), so WINSEL is unreachable and the flow is the legacy per-pixel
+// barrier + single-word read, cycle-for-cycle.
+wire        cbw_hit_raw_w  = (CBW_WORDS > 1)
+                          && cbw_valid[cbw_p3_idx]
+                          && (cbw_base == p3_fb_addr[GPU_ADDR_W-1:CBW_LOW]);
+// The IDLE dispatch additionally suppresses hits for the one in-flight
+// registered-snoop cycle, mirroring the z window's exactness argument.
+// WINSEL's post-flush re-check deliberately uses the RAW hit (no
+// suppression): the only push that can be in flight there is WINSEL's OWN
+// cross-word accumulator flush — the FBSS is the sole fbwq producer while
+// it sits in WINSEL — and that push can never target the word being read
+// (a same-word accumulator takes the bypass, never a flush).  Gating the
+// re-check on the suppression made every cross-word transition fall back
+// to CB_REQ (full barrier + refill), silently degrading the window to
+// word-pair amortisation — correct output, ~no speedup.
+wire        cbw_hit_w      = cbw_hit_raw_w && !cbw_snoop_pending;
+// fb_acc same-word bypass over the cached dst word: the accumulator holds
+// already-blended sibling pixels that are not yet visible in SDRAM (or the
+// window).  Without the overlay a second blend of the same word would read
+// the PRE-blend dst for lanes the accumulator owns.
+wire        cbw_acc_same_w = fb_acc_valid && (fb_acc_addr == p3_fb_word_addr_w);
+wire [31:0] cbw_acc_mask_w = {{8{fb_acc_mask[3]}}, {8{fb_acc_mask[2]}},
+                              {8{fb_acc_mask[1]}}, {8{fb_acc_mask[0]}}};
+wire [31:0] cbw_sel_word_w = cbw_word[cbw_p3_idx];
+wire [31:0] cbw_merged_w   = cbw_acc_same_w
+                           ? ((cbw_sel_word_w & ~cbw_acc_mask_w)
+                              | (fb_acc_data & cbw_acc_mask_w))
+                           : cbw_sel_word_w;
+wire [15:0] cbw_dst_half_w = p3_fb_addr[1] ? cbw_merged_w[31:16]
+                                           : cbw_merged_w[15:0];
 // ADDR dedup (audit A1): the 32-bit byte-lane data mask is the byte-wise
 // replication of the 4-bit strobe — derive it from the ONE lane decoder
 // above instead of elaborating fb_lane_data_mask()'s second 2:4 decode.
@@ -4453,6 +4527,65 @@ reg [3:0]  z_acc_mask;
 reg [GPU_ADDR_W-1:0] z_acc_addr;
 reg        z_acc_valid;
 wire [31:0] z_acc_data = {z_acc_hi, z_acc_lo};
+
+// ----------------------------------------------------------------
+// Z-test fold (roadmap 3.2).  The depth test used to freeze the
+// whole pipe for every z-tested pixel — even z_acc / z-window HITS
+// took the FBSS_IDLE -> ZTEST_ACC_EVAL detour.  These predicates
+// evaluate the test while the fragment sits in p2b, all operands
+// registered (p2b_*, z_acc_*, zw_*), and the p2b->p3 shift commits
+// the verdict: pass clears p3_z_test (and merges the write into
+// z_acc at the same edge), fail sets p3_discard.  Only window/acc
+// MISSES keep p2b_z_test set and take the detour unchanged.
+//
+// Same-word RAW (two 16-bit z per word) needs no bypass network: a
+// folded write lands in z_acc at the edge that moves its pixel into
+// p3, and the follower's compare — evaluated during its own p2b
+// residency, one cycle later — reads z_acc registers that already
+// carry it.  A miss pixel stalls the pipe from p3 until the detour
+// resolves, so the follower re-evaluates against the detour's
+// z_acc update for the same reason.
+//
+// Fold cases mirror the FBSS arms byte-exactly:
+//   * acc hit               -> compare vs the z_acc half; a pass-
+//                              write merges that half (ACC_EVAL
+//                              merge arm).
+//   * window hit, acc empty -> compare vs the zw word; a pass-write
+//                              loads the acc from the window word
+//                              (ACC_EVAL from_read arm).
+//   * window hit, acc dirty on ANOTHER word -> only test-only
+//                              pixels fold (a write has nowhere to
+//                              land until the acc flushes); writers
+//                              detour into FBSS_IDLE's flush-then-
+//                              serve exactly as before.
+//   * translucent fragments never fold: the FBSS TRANSLUC arm
+//                              consumes them ahead of the z arm
+//                              today, so their z_test is dead.
+// The z_src_pending apply (write-only z streams, end of the always
+// block) can never collide with a fold's z_acc write: load_p0a_z
+// requires !sp_z_test_enable and the pipe drains at command
+// boundaries before sp_ flags change — the same exclusivity
+// ACC_EVAL's mid-block z_acc writes already rely on.
+// ----------------------------------------------------------------
+wire [GPU_ADDR_W-1:0] p2b_z_word_addr_w = p2b_z_addr & {{(GPU_ADDR_W-2){1'b1}}, 2'b00};
+wire p2b_zf_acc_hit = z_acc_valid && (z_acc_addr == p2b_z_word_addr_w);
+wire p2b_zf_zw_hit  = (GPU_Z_READ_WINDOW > 1)
+                    && !zw_snoop_pending
+                    && zw_valid[p2b_z_word_addr_w[3:2]]
+                    && (zw_base == p2b_z_word_addr_w[GPU_ADDR_W-1:4]);
+// PRUNE GATE: with GPU_Z_READ_WINDOW==1 the zw arm is constant 0 so the
+// zw_word read below folds to the constant else-arm and the window
+// storage stays write-only (swept), as before.
+wire [31:0] p2b_zf_word = p2b_zf_acc_hit ? {z_acc_hi, z_acc_lo}
+                        : (GPU_Z_READ_WINDOW > 1)
+                          ? zw_word[p2b_z_word_addr_w[3:2]]
+                          : 32'd0;
+wire [15:0] p2b_zf_old_half = fb_halfword_read(p2b_zf_word, p2b_z_addr[1]);
+wire p2b_zf_fold = p2b_valid && p2b_z_test && !p2b_discard
+                 && !p2b_flags[SPAN_TRANSLUC]
+                 && (p2b_zf_acc_hit
+                     || (p2b_zf_zw_hit && (!z_acc_valid || !p2b_z_write)));
+wire p2b_zf_pass = (p2b_z_value >= p2b_zf_old_half);
 reg        z_flush_valid;
 reg [GPU_ADDR_W-1:0] z_flush_addr;
 reg [31:0] z_flush_data;
@@ -4682,11 +4815,15 @@ always @(posedge clk) begin : main_fsm
         ztest_acc_word <= 32'd0;
         blend_arvalid    <= 0;
         blend_araddr     <= 0;
-        blend_ar_is_burst <= 1'b0;
+        blend_arlen_r    <= 2'd0;
         zw_valid         <= 4'b0;
         zw_base          <= {(GPU_ADDR_W-4){1'b0}};
         zw_fill_beat     <= 2'd0;
         zw_snoop_pending <= 1'b0;
+        cbw_valid        <= 4'b0;
+        cbw_base         <= {(GPU_ADDR_W-CBW_LOW){1'b0}};
+        cbw_fill_beat    <= 2'd0;
+        cbw_snoop_pending <= 1'b0;
         blend_group_active <= 0;
         blend_group_word_addr <= 0;
         blend_group_mask <= 0;
@@ -4861,10 +4998,13 @@ always @(posedge clk) begin : main_fsm
             ztest_acc_addr <= {GPU_ADDR_W{1'b0}};
             ztest_acc_word <= 32'd0;
             blend_arvalid <= 1'b0;
-            blend_ar_is_burst <= 1'b0;
+            blend_arlen_r <= 2'd0;
             zw_valid      <= 4'b0;
             zw_fill_beat  <= 2'd0;
             zw_snoop_pending <= 1'b0;
+            cbw_valid     <= 4'b0;
+            cbw_fill_beat <= 2'd0;
+            cbw_snoop_pending <= 1'b0;
             blend_group_active <= 1'b0;
             blend_group_mask <= 4'b0;
             spanprod_active <= 1'b0;
@@ -5033,11 +5173,12 @@ always @(posedge clk) begin : main_fsm
             // state-reg writes (notably sp_tstep). Doing the decode here
             // shortens the S_EXECUTE path to a 1-bit flag check.
 
-            // Z-window exactness rule 3: drop the read cache at every
-            // command boundary so CPU z-buffer writes between commands
-            // (fence-synchronised) can never be shadowed by stale window
-            // contents.
-            zw_valid <= 4'b0;
+            // Z-window exactness rule 3: drop the read caches at every
+            // command boundary so CPU z-buffer/framebuffer writes between
+            // commands (fence-synchronised) can never be shadowed by stale
+            // window contents.  The blend dst window follows the same rule.
+            zw_valid  <= 4'b0;
+            cbw_valid <= 4'b0;
             cmd_is_fence          <= (cmd_type == CMD_FENCE);
             cmd_is_clear_rect     <= (cmd_type == CMD_CLEAR_RECT);
             cmd_is_set_fb         <= (cmd_type == CMD_SET_FB);
@@ -7240,11 +7381,43 @@ always @(posedge clk) begin : main_fsm
                                 ? {8'b0, cmap_rd_data} : p2b_color;
                 p3_flags     <= p2b_flags;
                 p3_fb_addr   <= p2b_fb_addr;
-                p3_discard   <= p2b_discard;
-                p3_z_test    <= p2b_z_test;
-                p3_z_write   <= p2b_z_write;
+                // Z-test fold: a fragment whose old z half is resident in
+                // z_acc / the z window enters p3 pre-resolved — z_test
+                // cleared on pass, discard on fail — and never takes the
+                // FBSS detour (see the p2b_zf_* block by z_acc).
+                p3_discard   <= p2b_discard || (p2b_zf_fold && !p2b_zf_pass);
+                p3_z_test    <= p2b_z_test && !p2b_zf_fold;
+                p3_z_write   <= p2b_z_write && !p2b_zf_fold;
                 p3_z_addr    <= p2b_z_addr;
                 p3_z_value   <= p2b_z_value;
+                // Fold the pass-write into the z accumulator at this same
+                // edge, so the NEXT pixel's p2b compare (one cycle later)
+                // reads it from the registers — the same-word RAW forward.
+                // Mirrors ACC_EVAL: merge arm on an acc hit, from_read arm
+                // (full-word load, written half dirty) on a window serve.
+                if (p2b_zf_fold && p2b_zf_pass && p2b_z_write) begin
+                    if (p2b_zf_acc_hit) begin
+                        if (p2b_z_addr[1]) begin
+                            z_acc_hi        <= p2b_z_value;
+                            z_acc_mask[3:2] <= 2'b11;
+                        end else begin
+                            z_acc_lo        <= p2b_z_value;
+                            z_acc_mask[1:0] <= 2'b11;
+                        end
+                    end else begin
+                        z_acc_valid <= 1'b1;
+                        z_acc_addr  <= p2b_z_word_addr_w;
+                        if (p2b_z_addr[1]) begin
+                            z_acc_hi   <= p2b_z_value;
+                            z_acc_lo   <= p2b_zf_word[15:0];
+                            z_acc_mask <= 4'b1100;
+                        end else begin
+                            z_acc_hi   <= p2b_zf_word[31:16];
+                            z_acc_lo   <= p2b_z_value;
+                            z_acc_mask <= 4'b0011;
+                        end
+                    end
+                end
 
 	                // p2b <- p2  (no-op shift, gives cmap port B time to respond)
                 p2b_valid   <= p2_valid;
@@ -7551,6 +7724,24 @@ always @(posedge clk) begin : main_fsm
                                 fbwq_push_strb = z_acc_mask;
                                 z_acc_valid    <= 1'b0;
                                 z_acc_mask     <= 4'b0;
+                                // Detour shortcut (3.2): serve a window hit in
+                                // the SAME cycle the mismatched acc flushes.
+                                // The arm's own guard says flushed word !=
+                                // tested word, so the push (whose snoop lands
+                                // on the FLUSHED word next cycle) cannot touch
+                                // the captured copy — waiting out the snoop
+                                // round trip bought nothing.  Off-window (or
+                                // suppressed-snoop) cases retry from IDLE as
+                                // before.
+                                if ((GPU_Z_READ_WINDOW > 1)
+                                    && !zw_snoop_pending
+                                    && zw_valid[p3_z_word_addr[3:2]]
+                                    && (zw_base == p3_z_word_addr[GPU_ADDR_W-1:4])) begin
+                                    ztest_cap_fire = 1'b1;
+                                    ztest_cap_from_read = 1'b1;
+                                    ztest_cap_word = zw_word[p3_z_word_addr[3:2]];
+                                    fbss <= FBSS_ZTEST_ACC_EVAL;
+                                end
                             end else begin
                                 fbss <= FBSS_FLUSH_W_RSP;
                             end
@@ -7593,7 +7784,8 @@ always @(posedge clk) begin : main_fsm
                                            ? {p3_z_word_addr[GPU_ADDR_W-1:4],
                                               4'b0}
                                            : p3_z_word_addr;
-                            blend_ar_is_burst <= (GPU_Z_READ_WINDOW > 1);
+                            blend_arlen_r <= (GPU_Z_READ_WINDOW > 1) ? 2'd3
+                                                                     : 2'd0;
                             zw_base       <= p3_z_word_addr[GPU_ADDR_W-1:4];
                             zw_valid      <= 4'b0;
                             zw_fill_beat  <= 2'd0;
@@ -7606,9 +7798,10 @@ always @(posedge clk) begin : main_fsm
                             // Translucent truecolor pixel: read-modify-write
                             // src-over blend instead of an opaque accumulate.
                             // p3 stays valid (fbss != IDLE stalls the pipe) and
-                            // is retired in FBSS_CB_BLEND.  Const 0 / pruned when
-                            // INCLUDE_DIRECT_COLOR is off -> byte-exact opaque.
-                            fbss <= FBSS_CB_REQ;
+                            // is retired in FBSS_CB_BLEND2.  Const 0 / pruned
+                            // when INCLUDE_DIRECT_COLOR is off -> byte-exact
+                            // opaque.  Window hit skips the barrier + read.
+                            fbss <= cbw_hit_w ? FBSS_CB_WINSEL : FBSS_CB_REQ;
                         end else begin
                         p3_word_match = fb_acc_p3_word_match;
 
@@ -7757,25 +7950,66 @@ always @(posedge clk) begin : main_fsm
                         end
                     end else if (!tex_axi_arvalid && !tex_m0_in_flight
                               && fb_write_drain_complete) begin
-                        // All writes drained: issue the single-word dst read.
+                        // All writes drained: fill the dst window with one
+                        // aligned burst (the requested word feeds this pixel;
+                        // the siblings serve the following pixels).  1-word
+                        // window: the "line" IS the word — legacy behavior.
                         blend_arvalid <= 1'b1;
-                        blend_araddr  <= p3_fb_word_addr_w;
-                        blend_ar_is_burst <= 1'b0;
+                        blend_araddr  <= {p3_fb_word_addr_w[GPU_ADDR_W-1:CBW_LOW],
+                                          {CBW_LOW{1'b0}}};
+                        blend_arlen_r <= CBW_ARLEN;
+                        cbw_base      <= p3_fb_word_addr_w[GPU_ADDR_W-1:CBW_LOW];
+                        cbw_valid     <= 4'b0;
+                        cbw_fill_beat <= 2'd0;
                         fbss          <= FBSS_CB_AR;
                     end
                 end
                 FBSS_CB_AR: begin
                     if (blend_arready) begin
                         blend_arvalid <= 1'b0;
-                        fbss          <= FBSS_CB_R;
+                        fbss          <= FBSS_CB_FILLR;
                     end
                 end
-                FBSS_CB_R: begin
+                FBSS_CB_FILLR: begin
                     if (blend_rvalid) begin
-                        // Capture the dst halfword (consumes the read beat); do
-                        // the blend math next cycle so read-response -> blend ->
-                        // fb_acc is split register-to-register (timing).
-                        cb_dst_r <= cb_dst_half_w;
+                        // Collect all burst beats into the window; the beat
+                        // that carries the word under blend captures cb_dst_r
+                        // (the fb_acc bypass is unnecessary here — CB_REQ
+                        // flushed the accumulator and drained before the
+                        // burst).  1-word window: single beat, no valid set
+                        // (the window bookkeeping goes write-only and sweeps).
+                        cbw_word[cbw_fill_beat] <= blend_rdata;
+                        cbw_fill_beat           <= cbw_fill_beat + 2'd1;
+                        if (cbw_fill_beat == cbw_p3_idx)
+                            cb_dst_r <= cb_dst_half_w;
+                        if (cbw_fill_beat == CBW_ARLEN) begin
+                            cbw_valid <= (CBW_WORDS == 4) ? 4'hF
+                                       : (CBW_WORDS == 2) ? 4'b0011 : 4'b0000;
+                            fbss      <= FBSS_CB_BLEND;
+                        end
+                    end
+                end
+                FBSS_CB_WINSEL: begin
+                    // Window hit.  A DIFFERENT-word accumulator must flush
+                    // first (its push snoops the window but can only kill a
+                    // SIBLING word — a same-word accumulator takes the bypass
+                    // below, never a flush).  After the flush, re-check the
+                    // hit: the snoop may have invalidated this word's sibling
+                    // state or (defensively) the word itself.
+                    if (fb_acc_valid && !cbw_acc_same_w) begin
+                        if (fb_write_can_issue) begin
+                            fbwq_push_req  = 1'b1;
+                            fbwq_push_addr = fb_acc_addr;
+                            fbwq_push_data = fb_acc_data;
+                            fbwq_push_strb = fb_acc_mask;
+                            fb_acc_valid   <= 1'b0;
+                        end else begin
+                            fbss <= FBSS_FLUSH_W_RSP;   // queue full: retry via IDLE
+                        end
+                    end else if (!cbw_hit_raw_w) begin
+                        fbss <= FBSS_CB_REQ;            // lost the window: refill
+                    end else begin
+                        cb_dst_r <= cbw_dst_half_w;     // cached dst + fb_acc bypass
                         fbss     <= FBSS_CB_BLEND;
                     end
                 end
@@ -7791,10 +8025,22 @@ always @(posedge clk) begin : main_fsm
                 FBSS_CB_BLEND2: begin
                     // Stage 2: >>6 + repack (cb_mixed_w) into p3's lane; retire
                     // p3.  p3 still valid here so p3_fb_word_addr_w / mask hold.
+                    // The accumulator can now legitimately hold the SIBLING
+                    // half of this word (window path: no flush between the two
+                    // halves) — MERGE instead of overwrite, or the sibling's
+                    // blended bytes would be lost.  Cross-word fb_acc cannot
+                    // reach here: CB_REQ flushes everything, CB_WINSEL flushes
+                    // different-word accumulators.
                     fb_acc_valid <= 1'b1;
                     fb_acc_addr  <= p3_fb_word_addr_w;
-                    fb_acc_data  <= cb_lane_data_w;
-                    fb_acc_mask  <= p3_fb_lane_mask_w;
+                    if (cbw_acc_same_w) begin
+                        fb_acc_data <= (fb_acc_data & ~p3_fb_lane_data_mask_w)
+                                     | (cb_lane_data_w & p3_fb_lane_data_mask_w);
+                        fb_acc_mask <= fb_acc_mask | p3_fb_lane_mask_w;
+                    end else begin
+                        fb_acc_data <= cb_lane_data_w;
+                        fb_acc_mask <= p3_fb_lane_mask_w;
+                    end
                     p3_valid     <= 1'b0;
                     fbss         <= FBSS_IDLE;
                 end
@@ -7830,7 +8076,7 @@ always @(posedge clk) begin : main_fsm
                               && fb_write_drain_complete) begin
                         blend_arvalid <= 1;
                         blend_araddr  <= blend_group_word_addr;
-                        blend_ar_is_burst <= 1'b0;
+                        blend_arlen_r <= 2'd0;
                         fbss          <= FBSS_BLEND_AR_WAIT;
                     end
                 end
@@ -8950,6 +9196,17 @@ always @(posedge clk) begin : main_fsm
             if ((GPU_Z_READ_WINDOW > 1) && zw_snoop_pending
                 && (fbwq_req_addr[GPU_ADDR_W-1:4] == zw_base))
                 zw_valid[fbwq_req_addr[3:2]] <= 1'b0;
+            // Blend-dst window snoop: identical contract, own pending bit.
+            // Sweeps with the window when INCLUDE_DIRECT_COLOR is absent OR
+            // the window is 1 word (cbw_valid is never set either way, so
+            // the clear is constant-dead).
+            cbw_snoop_pending <= (CBW_WORDS > 1)
+                              && fbwq_push_req && fbwq_can_push;
+            if ((CBW_WORDS > 1) && cbw_snoop_pending
+                && (fbwq_req_addr[GPU_ADDR_W-1:CBW_LOW] == cbw_base))
+                cbw_valid[(CBW_LG == 2) ? fbwq_req_addr[3:2]
+                         : (CBW_LG == 1) ? {1'b0, fbwq_req_addr[2]}
+                         : 2'd0] <= 1'b0;
         end  // closes the housekeeping `begin` introduced for m_wr_inflight + gpu_swap_req auto-clear
     end
 end

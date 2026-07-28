@@ -46,6 +46,14 @@
 `default_nettype none
 
 module tb_scanout_race #(
+    // Truecolor CB-blend coverage (gpu-cb-scanout target): the scanout
+    // burst_rd (hard-real-time, outranks word ops) racing the CB blend's
+    // dst reads + halfword writes is the LAST sim-reachable layer for the
+    // "stationary diagonal stripes on every translucent surface" report —
+    // vsync-locked render phase makes any scanout-vs-blend collision
+    // deterministic and stationary on hardware.
+    parameter INCLUDE_DIRECT_COLOR   = 0,
+    parameter GPU_CB_READ_WINDOW     = 4,
     parameter GPU_HAS_VERT_TRI       = 1,
     parameter GPU_HAS_PARAM_TRI_RECS = 1,
     parameter GPU_Z_READ_WINDOW      = 4,
@@ -92,6 +100,12 @@ module tb_scanout_race #(
     input  wire [15:0] fb_strideb,     // source FB stride (bytes)
     input  wire [9:0]  out_w,          // raster active width  (640)
     input  wire [2:0]  color_mode_in,  // OF_VIDEO_MODE_* (0 = 8bit indexed)
+
+    // Gate the scanout's io_sdram burst REQUEST (1 = held off, quiet-arm
+    // control for the CB-blend differential; the scanout FSM simply stalls
+    // waiting for service and resumes cleanly when re-enabled).  Gated
+    // BEFORE acceptance so io_sdram is never wedged mid-burst.
+    input  wire        scan_fetch_dis,
 
     // ---- SDRAM backdoor (preload ring/tex/FB; verify FB + scanout reads) ----
     input  wire        bd_we,
@@ -298,12 +312,14 @@ reg         gpu_sram_busy;
 reg         gpu_sram_rdata_valid;
 
 gpu_core #(
-    .GPU_HAS_VERT_TRI(GPU_HAS_VERT_TRI),
-    .GPU_HAS_PARAM_TRI_RECS(GPU_HAS_PARAM_TRI_RECS),
+    .INCLUDE_DIRECT_COLOR(INCLUDE_DIRECT_COLOR),
+    .GPU_CB_READ_WINDOW(GPU_CB_READ_WINDOW),
+    .INCLUDE_VERT_TRI(GPU_HAS_VERT_TRI),
+    .INCLUDE_PARAM_TRI_RECS(GPU_HAS_PARAM_TRI_RECS),
     .GPU_Z_READ_WINDOW(GPU_Z_READ_WINDOW),
     .GPU_EW_PARALLEL_DIVS(GPU_EW_PARALLEL_DIVS),
-    .GPU_HAS_COMPACT_SPAN(GPU_HAS_COMPACT_SPAN),
-    .GPU_HAS_COLUMN_LIST(GPU_HAS_COLUMN_LIST)
+    .INCLUDE_COMPACT_SPAN(GPU_HAS_COMPACT_SPAN),
+    .INCLUDE_COLUMN_LIST(GPU_HAS_COLUMN_LIST)
 ) gpu (
     .clk(clk), .reset_n(reset_n), .gpu_enable(1'b1),
     .m_rd_arvalid(gpu_rd_arvalid), .m_rd_arready(gpu_rd_arready),
@@ -567,6 +583,7 @@ video_CRT_scanout_indexed_BRAM #(
     .analog_ce_pix(analog_ce_pix),
     .analog_scanlines(2'd0),
     .analog_timing(2'd1),       // 480p (slaved to LCD); analog raster pruned anyway
+    .analog_fetch_ena(1'b1),
     .analog_pixel_clk(), .analog_pixel_color(),
     .analog_hblank(), .analog_vblank(), .analog_hsync(), .analog_vsync(),
 
@@ -616,7 +633,7 @@ io_sdram #(
     .phy_dq_out_port(ctrl_dq_out),
     .phy_dq_oe_port(ctrl_dq_oe),
     .phy_dqm(phy_dqm),
-    .burst_rd(scan_burst_rd), .burst_addr(scan_burst_addr),
+    .burst_rd(scan_burst_rd && !scan_fetch_dis), .burst_addr(scan_burst_addr),
     .burst_len(scan_burst_len), .burst_32bit(scan_burst_32bit),
     .burst_data(scan_burst_data), .burst_data_valid(scan_burst_data_valid),
     .burst_data_done(scan_burst_data_done),

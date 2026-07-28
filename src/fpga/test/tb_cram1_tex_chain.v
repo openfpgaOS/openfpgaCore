@@ -141,9 +141,11 @@ module tb_cram1_tex_chain;
         end
     endfunction
 
-    // ---- test vectors: A = backdoor region, B = word_wr-uploaded region ----
-    localparam NT = 12;
-    reg [25:0] vaddr [0:NT-1]; reg vwide [0:NT-1];
+    // ---- test vectors: A = backdoor region, B = word_wr-uploaded region,
+    //      C = interleave (fills + uploads in flight simultaneously) ----
+    localparam NT = 12;       // phase A+B vectors
+    localparam NT_ALL = 15;   // + phase-C vectors
+    reg [25:0] vaddr [0:NT_ALL-1]; reg vwide [0:NT_ALL-1];
     integer kk;
     initial begin
         // A region (backdoor-preloaded): word base 0x100 (byte 0x400)
@@ -160,17 +162,25 @@ module tb_cram1_tex_chain;
         vaddr[9]=26'h000810; vwide[9]=0;
         vaddr[10]=26'h000812; vwide[10]=1;
         vaddr[11]=26'h00081F; vwide[11]=0;
+        // C region: 12 = fresh line (forces a fill the master interleaves a
+        // word_wr into), 13 = the word uploaded MID-BURST in phase C (its
+        // fetch then issues a burst_rd while that write drains — the reverse
+        // interleave), 14 = second fresh line (post-interleave sanity).
+        vaddr[12]=26'h000C00; vwide[12]=0;
+        vaddr[13]=26'h000900; vwide[13]=0;
+        vaddr[14]=26'h000C10; vwide[14]=0;
     end
 
     // ---- port-A GPU tex driver (gated on `go`) ----
     reg go = 0;
+    reg [7:0] nt_lim = NT;   // master raises to NT_ALL for phase C
     integer ai = 0, errors = 0, served = 0;
     reg [2:0] s = 0;
     reg [25:0] cur_a; reg cur_w; reg [15:0] exp;
     always @(posedge clk or negedge reset_n) begin
         if (!reset_n) begin s<=0; ai<=0; req_valid<=0; served<=0; errors<=0; end
         else if (go) case (s)
-        0: if (ai < NT) begin
+        0: if (ai < nt_lim) begin
                cur_a <= vaddr[ai]; cur_w <= vwide[ai]; exp <= expect_texel(vaddr[ai], vwide[ai]);
                req_addr <= vaddr[ai]; req_wide <= vwide[ai]; req_valid <= 1; s <= 1;
            end
@@ -217,10 +227,44 @@ module tb_cram1_tex_chain;
         go = 1;
 
         for (t = 0; t < 100000 && served < NT; t = t + 1) @(posedge clk);
-        if (served == NT && errors == 0 && cram_errors == 16'd0)
-            $display("RESULT: PASS  (%0d texels byte-exact via CRAM1 sync-burst; backdoor+word_wr upload; chip_err=0)", served);
+
+        // ---- Test C: interleaved traffic (the historically-missing stimulus:
+        // the 2026-06 campaign validated upload and fetch in SEPARATE phases,
+        // so the controller's ST_IDLE-only pulse sampling dropped commands
+        // that arrive mid-op on real HW).  Two directions:
+        //   C1: word_wr pulsed while a tex fill burst is mid-flight
+        //       (historically: upload word silently LOST -> stale texel).
+        //   C2: the next fetch's burst_rd lands while that write drains
+        //       (historically: fill request LOST -> tex cache deadlock).
+        // ----
+        // Preload the two fresh C lines (bytes 0xC00..0xC1F).
+        for (i = 0; i < 8; i = i + 1) begin
+            @(posedge clk); bd_we <= 1'b1; bd_word_addr <= 21'h300 + i[20:0]; bd_wdata_word <= pat(22'h300 + i[21:0]);
+        end
+        @(posedge clk); bd_we <= 1'b0;
+        repeat (2) @(posedge clk);
+        nt_lim = NT_ALL;   // driver issues vector 12 -> miss -> fill burst
+        @(posedge clk); while (!burst_busy) @(posedge clk);
+        // C1: pulse the upload NOW, mid-burst.
+        word_addr <= 22'h240; word_data <= pat(22'h240); word_wstrb <= 4'hF; word_wr <= 1'b1;
+        @(posedge clk); word_wr <= 1'b0;
+        // Saw-busy completion must still work: busy must be high NOW (raised
+        // at the pulse by the pending capture) and fall only when the pended
+        // write has actually completed after the burst.
+        @(posedge clk);
+        if (!word_busy) begin
+            $display("RESULT: FAIL (word_busy low right after mid-burst word_wr pulse — pend capture broken)");
+            $finish;
+        end
+        while (word_busy) @(posedge clk);
+        // Driver fetches vector 13 (the just-uploaded word) and 14; C2 is
+        // exercised on whichever fetch lands while a word op drains.
+        for (t = 0; t < 100000 && served < NT_ALL; t = t + 1) @(posedge clk);
+
+        if (served == NT_ALL && errors == 0 && cram_errors == 16'd0)
+            $display("RESULT: PASS  (%0d texels byte-exact via CRAM1 sync-burst; backdoor+word_wr upload; mid-burst interleave lossless; chip_err=0)", served);
         else
-            $display("RESULT: FAIL  (served=%0d/%0d errors=%0d chip_err=%0d)", served, NT, errors, cram_errors);
+            $display("RESULT: FAIL  (served=%0d/%0d errors=%0d chip_err=%0d)", served, NT_ALL, errors, cram_errors);
         $finish;
     end
     initial begin #2000000 $display("RESULT: FAIL (timeout served=%0d bcr_done=%0b)", served, bcr_init_done); $finish; end

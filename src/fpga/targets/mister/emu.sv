@@ -1228,6 +1228,7 @@ video_CRT_scanout_indexed_BRAM scanout (
 	.analog_ce_pix(),
 	.analog_scanlines(2'b00),
 	.analog_timing(2'd1),    // 480p (analog raster dormant on MiSTer)
+	.analog_fetch_ena(1'b1),
 	.analog_pixel_clk(),
 	.analog_pixel_color(),
 	.analog_hblank(),

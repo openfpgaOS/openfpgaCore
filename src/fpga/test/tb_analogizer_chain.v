@@ -75,7 +75,7 @@ module tb_analogizer_chain (
         .x_count(x_count), .y_count(y_count), .line_start(line_start),
         .pixel_color(pixel_color),
         .clk_analog(clk), .reset_analog_n(reset_n), .analog_ce_pix(analog_ce_pix),
-        .analog_scanlines(2'd0), .analog_timing(2'd1),
+        .analog_scanlines(2'd0), .analog_timing(2'd1), .analog_fetch_ena(1'b1),
         .analog_pixel_clk(), .analog_pixel_color(a_rgb),
         .analog_hblank(a_hb), .analog_vblank(a_vb),
         .analog_hsync(a_hs), .analog_vsync(a_vs),

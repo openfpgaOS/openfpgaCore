@@ -214,4 +214,11 @@ uint32_t of_file_dma_stage_size(void);
  * polling fallback. */
 void of_file_async_irq_service(void);
 
+/* 1 kHz kernel tick (called from timer_isr_callback): async watchdog +
+ * deferred bounce-copy pump.  Completes DONE-latched transfers whose IRQ
+ * was lost, ages out transfers with no DONE, and advances SDRAM-destination
+ * completion copies in bounded slices outside the data-slot IRQ.  No-op on
+ * targets whose DS engine completes through other means. */
+void of_file_async_tick(void);
+
 #endif /* OFOS_FILE_H */

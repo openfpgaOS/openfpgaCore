@@ -37,8 +37,14 @@ void of_save_end_cpu(void);
 void of_save_security_wipe(void);
 
 /* Generic nonvolatile APF data slots backed by the CRAM0 window.
- * Supports the one pre-save config/settings slot (id 8 or 9, depending
- * on data.json) plus game save ids 10-19. */
+ * TWO independent config windows exist and may be used SIMULTANEOUSLY
+ * (Diablo: id 8 = stash, id 9 = settings):
+ *   id 9  -> the presave window   (bridge 0x200C0000, before the saves)
+ *   id 8  -> the shared-config /
+ *            save-meta window     (bridge 0x20380000, after the saves)
+ * plus game save ids 10-19 (10 slots x 256 KB).  Historical note: ids
+ * 8 and 9 used to alias one window and clobbered each other; the
+ * nvslot_map in targets/<t>/save.c is the authority. */
 int of_nvslot_is_supported(uint32_t data_slot_id);
 uint32_t of_nvslot_capacity(uint32_t data_slot_id);
 int of_nvslot_read(uint32_t data_slot_id, void *buf,

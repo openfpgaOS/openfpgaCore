@@ -27,6 +27,7 @@ module tb_gpu #(
     parameter INCLUDE_VERT_TRI       = 1,
     parameter INCLUDE_PARAM_TRI_RECS = 1,
     parameter GPU_Z_READ_WINDOW      = 4,
+    parameter GPU_CB_READ_WINDOW     = 4,
     parameter GPU_EW_PARALLEL_DIVS   = 1,
     parameter INCLUDE_COMPACT_SPAN   = 1,
     parameter INCLUDE_COLUMN_LIST    = 1,
@@ -90,6 +91,13 @@ module tb_gpu #(
     // the transaction count so the C++ harness can confirm the high /
     // variable latency mode is actually engaged.
     output wire [9:0]  dbg_rd_last_latency_o,
+    output wire        dbg_wr_awvalid,
+    output wire        dbg_wr_wvalid,
+    output wire        dbg_wr_awready,
+    output wire        dbg_wr_wready,
+    output wire        dbg_wr_wlast,
+    output wire        dbg_wr_bvalid,
+    output wire [7:0]  dbg_wr_awlen,
     output wire [31:0] dbg_rd_txn_count_o,
 
     // CMD_FLIP side-port (observed by C++ harness for the drain test)
@@ -124,11 +132,18 @@ wire        gpu_rd_rlast;
 // GPU AXI4 Write Master signals
 // ============================================================
 wire        gpu_wr_awvalid;
+assign dbg_wr_awvalid = gpu_wr_awvalid;
+assign dbg_wr_awready = gpu_wr_awready;
+assign dbg_wr_wready  = gpu_wr_wready;
+assign dbg_wr_wlast   = gpu_wr_wlast;
+assign dbg_wr_bvalid  = gpu_wr_bvalid;
+assign dbg_wr_awlen   = gpu_wr_awlen;
 wire        gpu_wr_awready;
 wire [31:0] gpu_wr_awaddr;
 wire [7:0]  gpu_wr_awlen;
 wire        gpu_wr_wvalid;
 wire        gpu_wr_wready;
+assign dbg_wr_wvalid = gpu_wr_wvalid;
 wire [31:0] gpu_wr_wdata;
 wire [3:0]  gpu_wr_wstrb;
 wire        gpu_wr_wlast;
@@ -156,6 +171,7 @@ gpu_core #(
     .INCLUDE_VERT_TRI(INCLUDE_VERT_TRI),
     .INCLUDE_PARAM_TRI_RECS(INCLUDE_PARAM_TRI_RECS),
     .GPU_Z_READ_WINDOW(GPU_Z_READ_WINDOW),
+    .GPU_CB_READ_WINDOW(GPU_CB_READ_WINDOW),
     .GPU_EW_PARALLEL_DIVS(GPU_EW_PARALLEL_DIVS),
     .INCLUDE_COMPACT_SPAN(INCLUDE_COMPACT_SPAN),
     .INCLUDE_COLUMN_LIST(INCLUDE_COLUMN_LIST),

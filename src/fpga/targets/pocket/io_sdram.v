@@ -179,13 +179,16 @@ assign {phy_ras, phy_cas, phy_we} = cmd;
     // top priority at every ST_IDLE entry, so pending only accumulates across
     // ONE op; the longest (an 800px 16bpp scanout line burst, ~830 cycles) is
     // under two intervals, so pending never exceeds 2 of the 3 this holds.
-    reg     [1:0]   refresh_pending;
+    // 3 bits: headroom so a future long occupancy (the comment above bounds
+    // today's worst op at ~2 intervals, but burst_len is 11-bit) cannot
+    // silently wrap the counter and drop refreshes.
+    reg     [2:0]   refresh_pending;
 
     wire reset_n_s;
 synch_3 s1(reset_n, reset_n_s, controller_clk);
 
 // Diagnostic tap (combinational; downstream re-syncs to clk_cpu).
-assign dbg_io = {1'b0, (refresh_pending != 2'd0), state[5:0]};
+assign dbg_io = {1'b0, (refresh_pending != 3'd0), state[5:0]};
 
     reg word_rd_queue;
     reg word_wr_queue;
@@ -373,7 +376,7 @@ always @(posedge controller_clk) begin
         phy_cke <= 0;
         cmd <= CMD_NOP;
         delay_boot <= 0;
-        refresh_pending <= 2'd0;
+        refresh_pending <= 3'd0;
         phy_dqm <= 2'b00;
 
         state <= ST_BOOT_0;
@@ -388,7 +391,7 @@ always @(posedge controller_clk) begin
 
             // precharge all
             cmd <= CMD_PRECHG;
-            phy_a[10] = 1'b1;
+            phy_a[10] <= 1'b1;
 
             state <= ST_BOOT_1;
         end
@@ -444,7 +447,7 @@ always @(posedge controller_clk) begin
         word_busy <= 0;
         word_op <= 0;
 
-        if(refresh_pending != 2'd0) begin
+        if(refresh_pending != 3'd0) begin
             word_busy <= 1;
             if(row_open_v != 4'd0) begin
                 // Precharge ALL banks before refresh: with per-bank
@@ -739,7 +742,14 @@ always @(posedge controller_clk) begin
     end
     ST_WRITE_4: begin
         phy_dqm <= 2'b00;
-        if(dc == TIMING_WRITE-1+1) begin
+        // tWR budget: last data beat lands on the bus one cycle into this
+        // state; every precharge that can follow goes through ST_IDLE
+        // dispatch (+1 cycle registered cmd) or ST_REQ_* first, so exiting
+        // at TIMING_WRITE-1 still leaves >=1 cycle of tWR margin on the
+        // earliest same-bank precharge (refresh precharge-all).  Only
+        // ST_WRITE_4_NEWROW issues CMD_PRECHG directly from its own state
+        // and keeps the extra cycle.
+        if(dc == TIMING_WRITE-1) begin
             state <= ST_IDLE;
             word_wr_done <= 1;  // Slave-issued word write committed: pulse so axi_sdram_slave can release bvalid without polling !word_busy across unrelated io_sdram activity (scanout burst_rd, autorefresh, etc.)
         end
@@ -985,14 +995,14 @@ always @(posedge controller_clk) begin
     // simultaneous tick+issue nets correctly — the old single flag dropped the
     // second tick in that case.
     refresh_pending <= refresh_pending
-                     + ((refresh_count == REFRESH_INTERVAL - 1) ? 2'd1 : 2'd0)
-                     - ((state == ST_REFRESH_0) ? 2'd1 : 2'd0);
+                     + ((refresh_count == REFRESH_INTERVAL - 1) ? 3'd1 : 3'd0)
+                     - ((state == ST_REFRESH_0) ? 3'd1 : 3'd0);
 
     if(~reset_n_s) begin
         // reset
         state <= ST_RESET;
         refresh_count <= 0;
-        refresh_pending <= 2'd0;
+        refresh_pending <= 3'd0;
         word_rd_queue <= 0;
         word_wr_queue <= 0;
         burst_rd_queue <= 0;

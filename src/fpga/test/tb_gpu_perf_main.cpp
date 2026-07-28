@@ -421,6 +421,55 @@ static Result measure_pal(const TriGeom &g, bool zbuf, int bbox_x1, int bbox_y1)
     return r;
 }
 
+// ------------------------------------------------------------------
+// COLUMN-LIST (0x4C) benchmark — the coalescer baseline.
+// Doom-title-like workload: 4-lane colormap-free column groups, 100 px
+// columns, fb step = stride (320).  Each pixel today produces ONE
+// single-byte SDRAM write (the fb_acc same-word merge never fires on
+// stride steps); the future column-interleave dispatch should merge
+// adjacent-x lanes into full 32-bit words => ~0.25 writes/px and
+// burst-linkable drains.  Reports cyc/px AND write-transactions/px
+// (dbg_aw_count delta) so both effects are visible.
+// ------------------------------------------------------------------
+static Result measure_columns(int groups, uint32_t *aw_per_px_x1000) {
+    gpu_init();
+    preload();
+    for (int i = 0; i < 64*64; i++)
+        sdram_write_byte(TEX_BASE_BYTE + (uint32_t)i,
+                         (uint8_t)(((i*2654435761u) >> 24) | 1u));
+
+    const int LANES = 4, COUNT = 100;
+    uint32_t aw0 = tb->dbg_aw_count;
+    uint64_t c0 = gpu_clocks;
+    for (int g = 0; g < groups; g++) {
+        ring_cmd(0x4C, 4u + 5u * (uint32_t)LANES);
+        ring_write(((uint32_t)LANES << 28));                 // lanes, flags=0
+        ring_write(64u);                                     // tex_width
+        ring_write((63u << 16) | 63u);                       // h_mask | w_mask
+        ring_write(320u);                                    // fb step = stride
+        for (int l = 0; l < LANES; l++) {
+            ring_write(FB_BASE_BYTE + 320u*8u + (uint32_t)(g*8 + l));
+            ring_write(TEX_BASE_BYTE + (uint32_t)((g*4+l)*3));
+            ring_write((0u << 28) | (0u << 16) | (uint32_t)COUNT);
+            ring_write((uint32_t)(l << 14));                 // t
+            ring_write(0x00012000u);                         // tstep
+        }
+    }
+    uint32_t tok = submit_fence();
+    bool ok = wait_fence(tok);
+    uint64_t c1 = gpu_clocks;
+    uint32_t aw1 = tb->dbg_aw_count;
+
+    Result r{};
+    r.pixels = (uint32_t)(groups * LANES * COUNT);
+    r.cycles = ok ? (c1 - c0) : 0;
+    r.cyc_per_px = r.pixels ? (double)r.cycles / r.pixels : 0.0;
+    if (aw_per_px_x1000)
+        *aw_per_px_x1000 = r.pixels ? (uint32_t)((uint64_t)(aw1 - aw0) * 1000u / r.pixels) : 0;
+    if (!ok) printf("  [column bench: FENCE TIMEOUT]\n");
+    return r;
+}
+
 static void print_row(const char *label, const Result &r) {
     printf("  %-46s cycles=%7llu  pixels=%6u  cyc/px=%7.3f\n",
            label, (unsigned long long)r.cycles, r.pixels, r.cyc_per_px);
@@ -487,6 +536,15 @@ int main(int argc, char **argv) {
     printf("  note: overdraw 'pixels' counts UNIQUE fb pixels; cyc covers BOTH draws.\n");
     printf("  cyc per RASTERIZED fragment (2x coverage) = %.3f\n",
            od.pixels ? (double)od.cycles / (2.0 * od.pixels) : 0.0);
+
+    printf("\n--- COLUMN PATH (0x4C, coalescer baseline) ---\n");
+    {
+        uint32_t awpk = 0;
+        Result rc = measure_columns(8, &awpk);
+        print_row("column-list 4-lane x100 (8 groups)", rc);
+        printf("  column write-txns/px = %u.%03u  (coalesced target ~0.25)\n",
+               awpk / 1000u, awpk % 1000u);
+    }
 
     printf("\n============================================================\n");
     printf(" SUMMARY (default SDRAM latency = %u-cyc initial read)\n",

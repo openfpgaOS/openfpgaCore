@@ -2991,6 +2991,12 @@ assign video_hs = vidout_hs;
         // worst-case burst latency.  (The earlier black-LCD bug was a stale
         // bitstream, not this fetch.)
         .analog_timing(analog_timing_vid),
+        // clk_analog(=clk_core_49152)-domain enable: the analog line fetch
+        // only runs while the Analogizer is enabled (any analog consumer,
+        // including the LCD-Terminal split, requires ena=1 — see
+        // pocket_blank_screen above).  Saves a full second FB read stream
+        // per frame of SDRAM bandwidth when the DAC is off.
+        .analog_fetch_ena(analogizer_ena_core),
         .analog_pixel_clk(),
         .analog_pixel_color(analogizer_scan_rgb),
         .analog_hblank(analogizer_scan_hblank),
@@ -3437,6 +3443,11 @@ gpu_core #(
     // setup ~30%.  Bit-identical quotients (the gpu-acceptance default is 1).
     // OS25 stays 0 (single shared divider — ALM-constrained for its feature set).
     .GPU_Z_READ_WINDOW(`ifdef INCLUDE_Z_BURST 4 `else 1 `endif),
+    // Truecolor-blend dst read window: 4-word default; INCLUDE_CB_WINDOW2
+    // halves it for ALM-pressed variants; INCLUDE_CB_WINDOW1 compiles the
+    // window out (legacy per-pixel blend reads — measurement/fallback).
+    // Byte-identical behavior at every size.
+    .GPU_CB_READ_WINDOW(`ifdef INCLUDE_CB_WINDOW1 1 `else `ifdef INCLUDE_CB_WINDOW2 2 `else 4 `endif `endif),
     // Additive: only a build that lists INCLUDE_PARALLEL_DIVS gets the concurrent
     // slope dividers.  Neither pocket variant lists it today (both = 0), which is
     // bit-identical to the old EXCLUDE_PARALLEL_DIVS/DIRECT_COLOR derivation and

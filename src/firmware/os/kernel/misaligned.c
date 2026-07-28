@@ -715,6 +715,12 @@ void fatal_trap(trap_frame_t *frame) {
     trap_uart_hex(gpu_status);
     trap_uart_puts(" state=");
     trap_uart_hex((gpu_status >> 8) & 0x3F);   /* bits[13:8] = FSM state */
+    trap_uart_puts(" fbss=");
+    trap_uart_hex((gpu_status >> 14) & 0x1F);  /* bits[18:14] */
+    /* pipe/wedge flags, [31:19]:
+     * p0a p0 p1 p1b p2 p2b p3 cmap_pend src_done spanprod persp blend fbwq_empty */
+    trap_uart_puts(" pipe=");
+    trap_uart_hex((gpu_status >> 19) & 0x1FFF);
     trap_uart_puts(" rdptr=");
     trap_uart_hex(gpu_rdptr);
     trap_uart_puts(" wrptr=");

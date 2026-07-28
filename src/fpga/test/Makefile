@@ -378,6 +378,25 @@ $(SCANOUT_RACE_DIR)/V$(SCANOUT_RACE_TOP): $(SCANOUT_RACE_SRCS) $(SCANOUT_RACE_CP
 		-I$(COMMON_DIR) \
 		$(SCANOUT_RACE_SRCS) $(SCANOUT_RACE_CPP)
 
+# gpu-cb-scanout — truecolor CB blend vs the REAL scanout burst master.
+# The LAST sim-reachable layer for the stationary-diagonal-stripes-on-
+# translucency report: vsync-locked rendering makes any scanout-vs-blend
+# collision deterministic on hardware.  Differential: identical cloud scene
+# with the scanout fetch gated off vs fetching (scan_fetch_dis).
+GPU_CB_SCAN_DIR = obj_dir_gpu_cb_scanout
+gpu-cb-scanout: $(GPU_CB_SCAN_DIR)/V$(SCANOUT_RACE_TOP)
+	@printf "\n=== Truecolor CB blend vs scanout burst (cloud differential) ===\n"
+	./$(GPU_CB_SCAN_DIR)/V$(SCANOUT_RACE_TOP) cb
+
+$(GPU_CB_SCAN_DIR)/V$(SCANOUT_RACE_TOP): $(SCANOUT_RACE_SRCS) $(SCANOUT_RACE_CPP)
+	$(VERILATOR) $(VERILATOR_FLAGS_NOTRACE) $(SCANOUT_RACE_FLAGS) \
+		-GOUT_HEIGHT=200 \
+		-GINCLUDE_DIRECT_COLOR=1 -GGPU_CB_READ_WINDOW=2 \
+		-CFLAGS "-std=c++17 -O2 -DGPU_TEST_CB_SCANOUT" \
+		--top-module $(SCANOUT_RACE_TOP) --Mdir $(GPU_CB_SCAN_DIR) \
+		-I$(COMMON_DIR) \
+		$(SCANOUT_RACE_SRCS) $(SCANOUT_RACE_CPP)
+
 # Pocket model: out_height = app-native (200) — lower scanout bandwidth, the
 # source buffer is freed faster, so the GPU should never overtake the reader.
 scanout-race-pocket: $(SCANOUT_RACE_POCKET_DIR)/V$(SCANOUT_RACE_TOP)
@@ -738,7 +757,8 @@ $(GPU_ACCEPT_OS30_DIR)/V$(GPU_TOP): $(GPU_SRCS) $(GPU_ACCEPT_CPP)
 		-I$(COMMON_DIR) \
 		$(GPU_SRCS) $(GPU_ACCEPT_CPP)
 
-gpu-acceptance-all: gpu-acceptance gpu-acceptance-single gpu-acceptance-os30
+gpu-acceptance-all: gpu-acceptance gpu-acceptance-single gpu-acceptance-os30 \
+	gpu-acceptance-os30-exact gpu-acceptance-sm64-nopal
 
 # In-flight z-RAW coherency variant.  Same full-feature config as
 # gpu-acceptance (GPU_Z_READ_WINDOW=4, INCLUDE_TRANSLUC), but the binary is
@@ -817,17 +837,19 @@ $(GPU_ACCEPT_SM64_DIR)/V$(GPU_TOP): $(GPU_SRCS) $(GPU_ACCEPT_CPP)
 		$(GPU_SRCS) $(GPU_ACCEPT_CPP)
 
 # Truecolor-ONLY functional build (INCLUDE_PALETTE=0) — proves the palette-gated
-# truecolor + SM64 paths still render with the colormap lane pruned.  Palettized
-# tests in the suite are EXPECTED to fail here (their lane is gone); only the
-# truecolor_* and SM64 (xform/indexed/lit) tests are asserted by the caller.
+# truecolor + SM64 paths still render with the colormap lane pruned.
+# -DGPU_TEST_NO_PALETTE compiles out the tests whose oracle NEEDS the cmap
+# lane (SPAN_COLORMAP is stripped at decode when INCLUDE_PALETTE=0, so raw
+# texel output is correct behavior there) — every remaining test is asserted
+# for real: this target must be GREEN, exit code and all.
 GPU_ACCEPT_NOPAL_DIR = obj_dir_gpu_acceptance_nopal
 gpu-acceptance-sm64-nopal: $(GPU_ACCEPT_NOPAL_DIR)/V$(GPU_TOP)
 	@printf "\n=== GPU acceptance (SM64, truecolor-only / palette gated out) ===\n"
-	-./$(GPU_ACCEPT_NOPAL_DIR)/V$(GPU_TOP)
+	./$(GPU_ACCEPT_NOPAL_DIR)/V$(GPU_TOP)
 
 $(GPU_ACCEPT_NOPAL_DIR)/V$(GPU_TOP): $(GPU_SRCS) $(GPU_ACCEPT_CPP)
 	$(VERILATOR) $(VERILATOR_FLAGS) \
-		-CFLAGS "-std=c++17 -O2 -DGPU_TEST_OS30_LEAN -DGPU_TEST_TRUECOLOR -DGPU_TEST_SM64" \
+		-CFLAGS "-std=c++17 -O2 -DGPU_TEST_OS30_LEAN -DGPU_TEST_TRUECOLOR -DGPU_TEST_SM64 -DGPU_TEST_NO_PALETTE" \
 		-GINCLUDE_COMPACT_SPAN=0 -GINCLUDE_COLUMN_LIST=0 -GGPU_EW_PARALLEL_DIVS=0 \
 		-GINCLUDE_PARAM_TRI=1 -GINCLUDE_VERT_TRI=1 -GINCLUDE_PARAM_TRI_RECS=1 \
 		-GGPU_Z_READ_WINDOW=4 -GINCLUDE_DIRECT_COLOR=1 -GINCLUDE_XFORM_RGB=1 \
@@ -841,17 +863,21 @@ $(GPU_ACCEPT_NOPAL_DIR)/V$(GPU_TOP): $(GPU_SRCS) $(GPU_ACCEPT_CPP)
 # PALETTE=0, TEX_MEM=0, PARAM_SPAN_Q29=0.  Runs the truecolor fragment suite in the
 # REAL os30 fold so the untextured-truecolor (white-texel Gouraud = Mario base face)
 # path is exercised in the config that ships — the kitchen-sink sm64 target never is.
+# The three -DGPU_TEST_NO_* defines compile out the tests whose ORACLE needs a
+# module this config prunes (param-tri/recs 0x49+0x4D twins, cmap-lane bytes,
+# q29 dynamic-scale z) — the disabled-path drain/no-op tests still run.  Full
+# assertions on everything that remains: must be GREEN, exit code and all.
 GPU_ACCEPT_OS30X_DIR = obj_dir_gpu_acceptance_os30x
 gpu-acceptance-os30-exact: $(GPU_ACCEPT_OS30X_DIR)/V$(GPU_TOP)
 	@printf "\n=== GPU acceptance suite (EXACT shipped os30 GPU config) ===\n"
-	-./$(GPU_ACCEPT_OS30X_DIR)/V$(GPU_TOP)
+	./$(GPU_ACCEPT_OS30X_DIR)/V$(GPU_TOP)
 
 $(GPU_ACCEPT_OS30X_DIR)/V$(GPU_TOP): $(GPU_SRCS) $(GPU_ACCEPT_CPP)
 	$(VERILATOR) $(VERILATOR_FLAGS) \
-		-CFLAGS "-std=c++17 -O2 -DGPU_TEST_OS30_LEAN -DGPU_TEST_TRUECOLOR" \
+		-CFLAGS "-std=c++17 -O2 -DGPU_TEST_OS30_LEAN -DGPU_TEST_TRUECOLOR -DGPU_TEST_NO_PALETTE -DGPU_TEST_NO_PARAM_TRI -DGPU_TEST_NO_PARAM_SPAN_Q29" \
 		-GINCLUDE_COMPACT_SPAN=0 -GINCLUDE_COLUMN_LIST=0 -GGPU_EW_PARALLEL_DIVS=0 \
 		-GINCLUDE_PARAM_TRI=0 -GINCLUDE_VERT_TRI=1 -GINCLUDE_PARAM_TRI_RECS=0 \
-		-GGPU_Z_READ_WINDOW=4 -GINCLUDE_DIRECT_COLOR=1 -GINCLUDE_COMBINE=1 \
+		-GGPU_Z_READ_WINDOW=4 -GGPU_CB_READ_WINDOW=2 -GINCLUDE_DIRECT_COLOR=1 -GINCLUDE_COMBINE=1 \
 		-GINCLUDE_XFORM_RGB=0 -GINCLUDE_CLIP_TRI=0 -GINCLUDE_VTX_CACHE=0 \
 		-GINCLUDE_GPU_LIGHT=0 -GINCLUDE_PALETTE=0 \
 		-GINCLUDE_PARAM_SPAN_Q29=0 \
@@ -954,10 +980,15 @@ gpu-perf: $(GPU_PERF_DIR)/V$(GPU_TOP)
 	@printf "\n=== GPU cyc/pixel measurement (SM64-class tri) ===\n"
 	./$(GPU_PERF_DIR)/V$(GPU_TOP) $(GPU_PERF_ARGS)
 
+# COMPACT_SPAN/COLUMN_LIST are ON here (unlike gpu-setup) for the 0x4C
+# Doom-column write-drain benchmark: INCLUDE_COLUMN_LIST_EFF in gpu_core.v
+# requires INCLUDE_COMPACT_SPAN=1.  These gates only add the 0x48-compact/
+# 0x4C decode arms — the 0x4A/0x4B/0x4E triangle factors measure identically
+# (verified: byte-identical factor output vs the previous =0 config).
 $(GPU_PERF_DIR)/V$(GPU_TOP): $(GPU_SRCS) $(GPU_PERF_CPP)
 	$(VERILATOR) $(VERILATOR_FLAGS_NOTRACE) \
 		-CFLAGS "-std=c++17 -O2" \
-		-GINCLUDE_COMPACT_SPAN=0 -GINCLUDE_COLUMN_LIST=0 -GGPU_EW_PARALLEL_DIVS=0 \
+		-GINCLUDE_COMPACT_SPAN=1 -GINCLUDE_COLUMN_LIST=1 -GGPU_EW_PARALLEL_DIVS=0 \
 		-GINCLUDE_PARAM_TRI=1 -GINCLUDE_VERT_TRI=1 -GINCLUDE_PARAM_TRI_RECS=1 \
 		-GGPU_Z_READ_WINDOW=4 -GINCLUDE_DIRECT_COLOR=1 -GINCLUDE_XFORM_RGB=1 \
 		-GINCLUDE_VTX_CACHE=1 -GINCLUDE_GPU_LIGHT=1 -GINCLUDE_PALETTE=1 \
@@ -1300,6 +1331,27 @@ GPU_TRANSLUC_FLAGS = -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC -Wno-CASEINCOMPLETE \
 gpu-transluc: $(GPU_TRANSLUC_DIR)/V$(GPU_TRANSLUC_TOP)
 	@printf "\n=== MiSTer translucent-column span-dropout repro (full SDRAM stack) ===\n"
 	./$(GPU_TRANSLUC_DIR)/V$(GPU_TRANSLUC_TOP)
+
+# gpu-cb-chain — truecolor CB blend through the REAL SDRAM chain.  The
+# acceptance suite proves CB byte-exactness on the 1-cycle stub only; this
+# config (DIRECT_COLOR + the shipped os30 2-word blend window) runs the
+# SM64 "Lakitu cloud" scene — 6 overlapping SKIP_ZERO disc billboards at
+# const-alpha 240 — differentially with aggressors off vs on.  Any pixel
+# difference = contention-induced loss/corruption in the chain (the slave
+# skid-full beat-loss window the transluc rig documents).
+GPU_CB_CHAIN_DIR = obj_dir_gpu_cb_chain
+gpu-cb-chain: $(GPU_CB_CHAIN_DIR)/V$(GPU_TRANSLUC_TOP)
+	@printf "\n=== Truecolor CB blend, full SDRAM chain (cloud differential) ===\n"
+	./$(GPU_CB_CHAIN_DIR)/V$(GPU_TRANSLUC_TOP) cb
+
+$(GPU_CB_CHAIN_DIR)/V$(GPU_TRANSLUC_TOP): $(GPU_TRANSLUC_SRCS) $(GPU_TRANSLUC_CPP)
+	$(VERILATOR) $(VERILATOR_FLAGS_NOTRACE) $(GPU_TRANSLUC_FLAGS) \
+		--top-module $(GPU_TRANSLUC_TOP) --Mdir $(GPU_CB_CHAIN_DIR) \
+		+define+INCLUDE_TRANSLUC \
+		-CFLAGS "-std=c++17 -O2 -DGPU_TEST_CB_CHAIN" \
+		-GINCLUDE_DIRECT_COLOR=1 -GGPU_CB_READ_WINDOW=2 \
+		-I$(COMMON_DIR) \
+		$(GPU_TRANSLUC_SRCS) $(GPU_TRANSLUC_CPP)
 
 $(GPU_TRANSLUC_DIR)/V$(GPU_TRANSLUC_TOP): $(GPU_TRANSLUC_SRCS) $(GPU_TRANSLUC_CPP)
 	$(VERILATOR) $(VERILATOR_FLAGS_NOTRACE) $(GPU_TRANSLUC_FLAGS) \

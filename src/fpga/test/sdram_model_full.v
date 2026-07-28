@@ -73,8 +73,18 @@ localparam CMD_WRITE   = 3'b100;
 localparam CMD_PRECHG  = 3'b010;
 localparam CMD_AUTOREF = 3'b001;
 localparam CMD_LMR     = 3'b000;
+localparam CMD_BST     = 3'b110;   // burst terminate
 
 wire [2:0] cmd = {ras_n, cas_n, we_n};
+
+// Chip-faithful burst-interrupt detection (see the truncation blocks in the
+// main always): a READ/WRITE (any bank) or BST terminates an in-flight BL=2
+// burst; PRECHARGE terminates it when it hits the burst's bank (or all
+// banks via A10).  ACT to ANOTHER bank does NOT interrupt a data burst.
+wire cmd_is_rw_bst = cke && !cs_n
+                   && (cmd == CMD_READ || cmd == CMD_WRITE || cmd == CMD_BST);
+wire wr_burst_interrupt_pre = cke && !cs_n && cmd == CMD_PRECHG;
+wire burst_interrupt_w = cmd_is_rw_bst;   // shared RW/BST term (bank-blind)
 
 // Timing parameters (100 MHz = 10ns period)
 // CAS=3 in real hardware, but model uses 2 to compensate for:
@@ -223,7 +233,24 @@ always @(posedge clk) begin
     // ST_WRITE_2 sets low half → appears on dq_in next cycle (beat 0 capture)
     // ST_WRITE_3 sets high half → appears on dq_in next cycle (beat 1 capture)
     // wr_beat: 0 = capture first beat, 1 = capture second beat
-    if (wr_pending) begin
+    //
+    // CHIP-FAITHFUL BURST TRUNCATION (2026-07 hardening): a real SDR chip
+    // TERMINATES an in-flight BL=2 burst when a new READ/WRITE (any bank),
+    // a PRECHARGE hitting the burst's bank (or all-banks A10), or a BURST
+    // TERMINATE arrives on the second-beat cycle — the beat is silently
+    // lost on silicon.  The model previously captured it unconditionally,
+    // FORGIVING controller sequences the chip punishes (the exact class a
+    // functional sim can never catch otherwise).  Truncation now drops the
+    // beat exactly like the chip AND counts a loud error: any occurrence
+    // is a controller sequencing bug.
+    if (wr_pending && wr_beat == 1
+        && (burst_interrupt_w
+            || (wr_burst_interrupt_pre && (a[10] || ba == wr_bank)))) begin
+        $display("[%0t] SDRAM ERROR: WRITE burst TRUNCATED by cmd %b (bank %0d row %0d col %0d — second beat LOST)",
+                 $time, cmd, wr_bank, wr_row, wr_col);
+        errors = errors + 1;
+        wr_pending <= 0;
+    end else if (wr_pending) begin
         if (wr_beat == 0) begin
             // First beat: low 16 bits
             if (!dqm[0]) mem[flat_addr(wr_bank, wr_row, wr_col)][7:0]  <= dq_in[7:0];
@@ -239,6 +266,17 @@ always @(posedge clk) begin
             wr_evt_dqm <= dqm;
             wr_evt_data <= dq_in;
         end
+    end
+
+    // READ burst truncation: same chip semantics for the BL=2 second read
+    // beat (rd_burst_active) — a new READ/WRITE/BST or same-bank PRECHARGE
+    // on that cycle kills the beat; the controller would latch stale DQ.
+    if (rd_burst_active
+        && (burst_interrupt_w
+            || (wr_burst_interrupt_pre && (a[10] || ba == rd_bank)))) begin
+        $display("[%0t] SDRAM ERROR: READ burst TRUNCATED by cmd %b (bank %0d row %0d col %0d — second beat invalid)",
+                 $time, cmd, rd_bank, rd_row, rd_col);
+        errors = errors + 1;
     end
 
     // Command decode

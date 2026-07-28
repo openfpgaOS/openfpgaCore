@@ -270,6 +270,7 @@ wire [2:0] gpu_wq_run =
       gwq_c3 ? 3'd3 :
       gwq_c2 ? 3'd2 :
       gwq_c1 ? 3'd1 : 3'd0;
+wire [GPU_WQ_PTR_W-1:0] active_gpuq_last_ptr = gpu_wq_rd_ptr + active_gpuq_awlen;
 wire       gpu_wq_head_ready = !gpu_wq_empty
                             && (gpu_wq_last[gpu_wq_rd_ptr] ||
                                 (gpu_wq_count >= 4'd2));
@@ -281,8 +282,18 @@ wire       gpu_wq_head_ready = !gpu_wq_empty
 // grant-priority mux, so it does not lengthen the AR-priority decision.
 wire [2:0] gpu_wq_drain_awlen = gpu_wq_run;
 wire [GPU_WQ_PTR_W-1:0] active_gpuq_w_ptr    = gpu_wq_rd_ptr + gpuq_w_idx;
-wire [GPU_WQ_PTR_W-1:0] active_gpuq_last_ptr = gpu_wq_rd_ptr + active_gpuq_awlen;
 wire       active_gpuq_wlast = (gpuq_w_idx == active_gpuq_awlen);
+// REVERTED 2026-07-24 (was: pop-on-W-accept early freeing, the bandwidth-7
+// perf change).  On hardware, Doom wedged twice with the GPU frozen on
+// write-drain terms that never cleared (S_EXECUTE fence stuck at
+// m_wr_inflight!=0 with everything drained; S_FRAG_PIPE shift stuck at
+// near-full) — the only change in that accounting family was this early
+// freeing, which makes the count depend on exact per-beat W-handshake
+// semantics across the wcont fast path.  No sim harness models the real
+// arbiter+slave+io_sdram chain under GPU load (tb_gpu_wrpath is rotten:
+// pre-doorbell protocol), so the interleave was never pinned.  DO NOT
+// re-land the early-free without first resurrecting tb_gpu_wrpath and
+// adding a count/B-per-AW invariant soak there.
 wire [3:0] gpu_wq_pop_count = gpu_wq_pop ? ({1'b0, active_gpuq_awlen} + 4'd1) : 4'd0;
 wire       gpu_wq_high     = (gpu_wq_count >= GPU_WQ_HIGH_WATERMARK[3:0]);
 wire [3:0] gpu_wq_read_budget_limit = gpu_wq_high ? 4'd1 : GPU_WRITE_READ_BUDGET;

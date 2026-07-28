@@ -757,7 +757,14 @@ always @(posedge controller_clk) begin
     ST_WRITE_4: begin
         phy_dqm <= 2'b00;
         phy_a[12:11] <= 2'b00;   // drop the A-mirrored mask with DQM
-        if(dc == TIMING_WRITE-1+1) begin
+        // tWR budget: last data beat lands on the bus one cycle into this
+        // state; every precharge that can follow goes through ST_IDLE
+        // dispatch (+1 cycle registered cmd) or ST_REQ_* first, so exiting
+        // at TIMING_WRITE-1 still leaves >=1 cycle of tWR margin on the
+        // earliest same-bank precharge (refresh precharge-all).  Only
+        // ST_WRITE_4_NEWROW issues CMD_PRECHG directly from its own state
+        // and keeps the extra cycle.
+        if(dc == TIMING_WRITE-1) begin
             state <= ST_IDLE;
             word_wr_done <= 1;  // Slave-issued word write committed: pulse so axi_sdram_slave can release bvalid without polling !word_busy across unrelated io_sdram activity (scanout burst_rd, autorefresh, etc.)
         end

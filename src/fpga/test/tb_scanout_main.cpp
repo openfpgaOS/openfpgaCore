@@ -57,17 +57,19 @@ struct Result {
     int field_seq_bad;     // interlace: # consecutive vsyncs with SAME parity
     long vs_off_short;     // median vsync->line-start offset, short-offset class
     long vs_off_long;      // median offset, long-offset class (~half line)
+    int fetch_reqs;        // analog SDRAM line-fetch requests issued by the DUT
 };
 
 // timing: 0=240p, 1=480p, 2=480i NTSC, 3=576i PAL (tb/DUT ATIMING_* encoding)
 static Result measure(int timing, int analog_split, int analog_upscale,
-                      int analog_tall) {
+                      int analog_tall, int fetch_ena = 1) {
     const uint64_t RUN = 6000000ULL;
     const bool interlaced = (timing >= 2);
     tb->analog_timing = timing;
     tb->analog_split = analog_split;
     tb->analog_upscale = analog_upscale;
     tb->analog_tall = analog_tall;
+    tb->analog_fetch_ena = fetch_ena;
     tb->reset_n = 0;
     for (int i = 0; i < 40; i++) tick();
     tb->reset_n = 1;
@@ -201,6 +203,7 @@ static Result measure(int timing, int analog_split, int analog_upscale,
         r.lcd_checked++;
         if (lcd_src_by_line[k] != k) r.lcd_mismatch++;
     }
+    r.fetch_reqs = (int)tb->analog_fetch_reqs;
     return r;
 }
 
@@ -216,6 +219,7 @@ static void report(const char *name, const Result &r) {
            r.data_mismatch, r.data_checked);
     printf("  LCD    data: %d/%d active lines show the WRONG source row\n",
            r.lcd_mismatch, r.lcd_checked);
+    printf("  analog fetch requests issued: %d\n", r.fetch_reqs);
 }
 
 static bool nearv(double v, double t, double tol) { return v >= t*(1-tol) && v <= t*(1+tol); }
@@ -278,6 +282,13 @@ int main(int argc, char **argv) {
     report("timing=480i NTSC (480-tall fb, interlaced)", p480i);
     Result p576i = measure(3, 0, 0, 1);
     report("timing=576i PAL (480-tall fb, interlaced)", p576i);
+    // Fetch gate: with analog_fetch_ena=0 the DUT must issue ZERO analog line
+    // fetches (the whole point of the gate: no wasted SDRAM stream when the
+    // Analogizer is off) while the LCD stream still renders correctly.  The
+    // analog DATA check is expectedly wrong here (buffer never written) and is
+    // deliberately not asserted.
+    Result pgate = measure(0, 1, 0, 0, /*fetch_ena=*/0);
+    report("timing=240p, FETCH GATE (analog_fetch_ena=0)", pgate);
 
     double l480 = p480.line_cyc>0 ? CLK_HZ/p480.line_cyc/1000.0 : 0;
     double l240 = p240.line_cyc>0 ? CLK_HZ/p240.line_cyc/1000.0 : 0;
@@ -346,7 +357,16 @@ int main(int argc, char **argv) {
     printf("576i PAL     timing: %s   fields: %s   data(2k/2k+1): %s   LCD: %s\n",
            i576_timing ? "PASS" : "FAIL", i576_fields ? "PASS" : "FAIL",
            i576_data ? "PASS" : "FAIL", i576_lcd ? "PASS" : "FAIL");
+    bool gate_no_fetch = (pgate.fetch_reqs == 0);
+    bool gate_lcd      = (pgate.lcd_checked > 200 && pgate.lcd_mismatch == 0);
+    // Sanity: the same scenario with the gate open must actually fetch.
+    bool gate_ctrl     = (psplit.fetch_reqs > 200);
+    printf("FETCH GATE   ena=0 fetches(%d): %s   LCD: %s   ena=1 control(%d): %s\n",
+           pgate.fetch_reqs, gate_no_fetch ? "PASS" : "FAIL",
+           gate_lcd ? "PASS" : "FAIL",
+           psplit.fetch_reqs, gate_ctrl ? "PASS" : "FAIL");
     bool ok = timing && data480 && data240 && lcd480 && lcd240 &&
+              gate_no_fetch && gate_lcd && gate_ctrl &&
               split_analog && split_lcd && split480_analog && split480_lcd &&
               up_fills && up_data &&
               i480_timing && i480_fields && i480_data && i480_lcd &&

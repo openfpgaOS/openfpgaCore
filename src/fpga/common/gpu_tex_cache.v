@@ -148,7 +148,7 @@ localparam S_FILL_DATA = 3'd2;
 localparam S_FILL_OUT  = 3'd3;
 localparam S_INIT      = 3'd4;
 
-reg [2:0] state;
+reg [2:0] state /*verilator public_flat_rd*/;
 reg [SET_BITS-1:0] init_counter;
 
 // Keep separate state-decode copies for the hot ready/prime paths.  The
@@ -165,11 +165,11 @@ reg flush_pending;
 wire flush_block = flush || flush_pending;
 
 // ---- Stage 2 registers — one set per port ----
-reg         pipe_valid_a;
+reg pipe_valid_a /*verilator public_flat_rd*/;
 reg  [25:0] pipe_addr_a;
 reg         pipe_wide_a;
 
-reg         pipe_valid_b;
+reg pipe_valid_b /*verilator public_flat_rd*/;
 reg  [25:0] pipe_addr_b;
 reg  [TAG_BITS-1:0] pipe_tag_b_r;
 reg  [1:0]          pipe_byte_b_r;
@@ -236,8 +236,8 @@ assign req_ready   = (state_pipe_ready && !pipe_miss_a && !flush_block)
 // In S_FILL_OUT (port-B fill landing) the response is resolved by
 // construction (fill_resp_valid_b), so only the skid-free condition
 // applies.
-reg  pipe_b_live;    // pipe slot holds an accepted, not-yet-popped request
-reg  held_valid_b;   // skid holds the oldest unconsumed response
+reg pipe_b_live /*verilator public_flat_rd*/;    // pipe slot holds an accepted, not-yet-popped request
+reg held_valid_b /*verilator public_flat_rd*/;   // skid holds the oldest unconsumed response
 reg  [15:0] held_data_b;
 assign req_ready_b = !flush_block
     && ( (state_pipe_ready

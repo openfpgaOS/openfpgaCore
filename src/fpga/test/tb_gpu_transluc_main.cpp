@@ -969,6 +969,168 @@ static bool run_phase(const char *name, const FrameCfg &cfg, int frames,
     return fail == 0 && invalid == 0;
 }
 
+#ifdef GPU_TEST_CB_CHAIN
+// =====================================================================
+// Truecolor CB blend through the REAL SDRAM chain — the SM64 cloud
+// differential.  Byte-exactness of the CB path is already proven on the
+// 1-cycle stub (tb_gpu_acceptance truecolor_blend_*); what has NEVER been
+// tested is the CB dst read + halfword blended writes against the real
+// arbiter/slave/io_sdram — including the skid-full beat-loss window this
+// rig's header documents — under contention.  Method: render the identical
+// 6-billboard cloud scene (32x32 disc texture with SKIP_ZERO transparent
+// surround, const-alpha 240, the exact state the SM64 trace pinned) three
+// times: A = aggressors off, B and C = aggressors on.  A==B==C exonerates
+// the chain; differences reproduce the artifact and the histograms print
+// its geometry (diagonal stripes = per-row phase-drifting periodic loss).
+// =====================================================================
+static const uint32_t CB_FB_BYTE  = 0x00080000;   // RGB565, 320-px stride
+static const uint32_t CB_TEX_BYTE = 0x00070000;   // 32x32 RGB565 disc
+static const int CB_W = 176, CB_H = 136;          // compared region
+
+static uint16_t cb_pattern(int x, int y) {
+    uint16_t r = (uint16_t)((x * 7 + y * 13) & 0x1F);
+    uint16_t g = (uint16_t)((x * 3 + y) & 0x3E);
+    uint16_t b = (uint16_t)((x + y * 5) & 0x1F);
+    return (uint16_t)((r << 11) | (g << 5) | b);
+}
+
+static void cb_emit_state(uint8_t alpha) {
+    // 0x4A 17-word wire form (matches tb_gpu_acceptance encode_set_tri_state_wire)
+    uint32_t flags = (1u << 5)      /* SPAN_PERSP     */
+                   | (1u << 7)      /* TRUECOLOR      */
+                   | (1u << 1)      /* BLEND          */
+                   | (1u << 2);     /* SKIP_ZERO      */
+    uint32_t control = flags & 0xFFu;   // z_mode 0, no mirror, integer Y
+    ring_cmd(0x4A, 17);
+    ring_write(CB_FB_BYTE);             // fb_base
+    ring_write(640);                    // fb_major_step (bytes/row)
+    ring_write(2);                      // fb_minor_step (bytes/px)
+    ring_write(CB_TEX_BYTE);            // tex_addr
+    ring_write(32);                     // tex_width
+    ring_write((31u << 16) | 31u);      // h_mask | w_mask
+    ring_write(control);
+    ring_write(0); ring_write(0);       // clamp s min/max (disabled)
+    ring_write(0); ring_write(0);       // clamp t min/max (disabled)
+    ring_write(0); ring_write(0); ring_write(0);   // z_base/major/minor
+    ring_write((320u << 16) | 0u);      // clip x1|x0
+    ring_write((200u << 16) | 0u);      // clip y1|y0
+    ring_write(alpha);                  // const_alpha (17th word, BLEND set)
+}
+
+static void cb_emit_tri(const int16_t vx[3], const int16_t vy[3],
+                        const int32_t s[3], const int32_t t[3]) {
+    ring_cmd(0x4B, 14);
+    ring_write(((uint32_t)(uint16_t)vy[0] << 16) | (uint16_t)vx[0]);
+    ring_write(((uint32_t)(uint16_t)vy[1] << 16) | (uint16_t)vx[1]);
+    ring_write(((uint32_t)(uint16_t)vy[2] << 16) | (uint16_t)vx[2]);
+    ring_write((uint32_t)s[0]); ring_write((uint32_t)s[1]); ring_write((uint32_t)s[2]);
+    ring_write((uint32_t)t[0]); ring_write((uint32_t)t[1]); ring_write((uint32_t)t[2]);
+    ring_write(1u << 16); ring_write(1u << 16); ring_write(1u << 16);  // zi = 1.0
+    ring_write(63u | (63u << 6) | (63u << 12));                        // full-bright
+    ring_write(0);
+}
+
+static void cb_emit_quad(int cx, int cy) {
+    const int H = 32;                                  // half-size (64x64 quad)
+    const int32_t S1 = 32 << 16;
+    int16_t x0 = (int16_t)((cx - H) * 16), x1 = (int16_t)((cx + H) * 16);
+    int16_t y0 = (int16_t)(cy - H),        y1 = (int16_t)(cy + H);
+    {
+        int16_t vx[3] = { x0, x1, x0 }, vy[3] = { y0, y0, y1 };
+        int32_t s[3] = { 0, S1, 0 },    t[3] = { 0, 0, S1 };
+        cb_emit_tri(vx, vy, s, t);
+    }
+    {
+        int16_t vx[3] = { x1, x1, x0 }, vy[3] = { y0, y1, y1 };
+        int32_t s[3] = { S1, S1, 0 },   t[3] = { 0, S1, S1 };
+        cb_emit_tri(vx, vy, s, t);
+    }
+}
+
+static bool cb_run_pass(std::vector<uint16_t> &out, bool aggr) {
+    for (int y = 0; y < CB_H; y++)
+        for (int x = 0; x < 320; x += 2) {
+            uint32_t byte = CB_FB_BYTE + (uint32_t)y * 640u + (uint32_t)x * 2u;
+            sdram_write(byte >> 2, (uint32_t)cb_pattern(x, y)
+                                 | ((uint32_t)cb_pattern(x + 1, y) << 16));
+        }
+    for (int ty = 0; ty < 32; ty++)
+        for (int tx = 0; tx < 32; tx += 2) {
+            int dx0 = tx - 16, dy = ty - 16, dx1 = tx + 1 - 16;
+            uint16_t p0 = (dx0 * dx0 + dy * dy <= 196) ? 0xFFFF : 0x0000;
+            uint16_t p1 = (dx1 * dx1 + dy * dy <= 196) ? 0xFFFF : 0x0000;
+            uint32_t byte = CB_TEX_BYTE + (uint32_t)(ty * 32 + tx) * 2u;
+            sdram_write(byte >> 2, (uint32_t)p0 | ((uint32_t)p1 << 16));
+        }
+
+    g_aggr = aggr; tb->aggr_en = aggr ? 1 : 0;
+    if (aggr) g_aggr_intv = 8;                        // intense contention
+
+    cb_emit_state(240);
+    // Flower cloud: center + 5-billboard ring (radius 33), heavy overlap.
+    static const int off[6][2] = { {0,0}, {33,0}, {10,31}, {-27,19}, {-27,-19}, {10,-31} };
+    for (int i = 0; i < 6; i++)
+        cb_emit_quad(88 + off[i][0], 68 + off[i][1]);
+
+    bool ok = submit_and_wait();
+    g_aggr = false; tb->aggr_en = 0;
+    if (!ok) return false;
+    drain_idle();
+
+    out.assign((size_t)CB_W * CB_H, 0);
+    for (int y = 0; y < CB_H; y++)
+        for (int x = 0; x < CB_W; x++) {
+            uint32_t byte = CB_FB_BYTE + (uint32_t)y * 640u + (uint32_t)x * 2u;
+            uint32_t w = sdram_read(byte >> 2);
+            out[(size_t)y * CB_W + x] = (byte & 2) ? (uint16_t)(w >> 16) : (uint16_t)w;
+        }
+    return true;
+}
+
+static int test_cb_chain() {
+    printf("TEST cb_chain_cloud_differential\n");
+    std::vector<uint16_t> A, B, C;
+    if (!cb_run_pass(A, false)) { printf("  FAIL: quiet pass wedged\n"); return 1; }
+    if (!cb_run_pass(B, true))  { printf("  FAIL: aggr pass 1 wedged\n"); return 1; }
+    if (!cb_run_pass(C, true))  { printf("  FAIL: aggr pass 2 wedged\n"); return 1; }
+
+    // Sanity: the quiet pass must actually have blended (not all-pattern).
+    int touched = 0;
+    for (int y = 0; y < CB_H; y++)
+        for (int x = 0; x < CB_W; x++)
+            if (A[(size_t)y * CB_W + x] != cb_pattern(x, y)) touched++;
+    printf("  quiet pass blended %d px\n", touched);
+    if (touched < 5000) { printf("  FAIL: scene did not render\n"); return 1; }
+
+    int ab = 0, bc = 0;
+    static int colbad[CB_W], rowbad[CB_H];
+    memset(colbad, 0, sizeof colbad); memset(rowbad, 0, sizeof rowbad);
+    for (int y = 0; y < CB_H; y++)
+        for (int x = 0; x < CB_W; x++) {
+            size_t i = (size_t)y * CB_W + x;
+            if (A[i] != B[i]) {
+                if (ab < 8)
+                    printf("  A!=B (%d,%d) quiet=%04X aggr=%04X pat=%04X\n",
+                           x, y, A[i], B[i], cb_pattern(x, y));
+                ab++; colbad[x]++; rowbad[y]++;
+            }
+            if (B[i] != C[i]) bc++;
+        }
+    if (ab || bc) {
+        printf("  DIFFS: quiet-vs-aggr=%d  aggr-vs-aggr=%d (%s)\n", ab, bc,
+               bc ? "NONDETERMINISTIC" : "deterministic under contention");
+        printf("  per-column:");
+        for (int x = 0; x < CB_W; x++) if (colbad[x]) printf(" c%d=%d", x, colbad[x]);
+        printf("\n  per-row:");
+        for (int y = 0; y < CB_H; y++) if (rowbad[y]) printf(" r%d=%d", y, rowbad[y]);
+        printf("\n  FAIL cb_chain_cloud_differential\n");
+        return 1;
+    }
+    printf("  PASS cb_chain_cloud_differential (chain exonerated under aggressors)\n");
+    return 0;
+}
+#endif  /* GPU_TEST_CB_CHAIN */
+
 int main(int argc, char **argv) {
     setvbuf(stdout, NULL, _IONBF, 0);
     Verilated::commandArgs(argc, argv);
@@ -1016,6 +1178,14 @@ int main(int argc, char **argv) {
     upload_palookups();
     upload_texture(false);
     printf("[init] done at cyc=%llu\n", (unsigned long long)cyc);
+
+#ifdef GPU_TEST_CB_CHAIN
+    if (mode == "cb" || mode == "all") {
+        int rc = test_cb_chain();
+        delete tb;
+        return rc;
+    }
+#endif
 
     FrameCfg base;
     base.ncmds = 24; base.height = 100; base.flags = F_COLORMAP | F_TRANSLUC;

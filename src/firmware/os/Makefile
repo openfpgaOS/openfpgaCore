@@ -365,6 +365,7 @@ DEPS = $(OBJS:.o=.d)
 
 # Install MIF to FPGA
 install: $(FW_TARGET).mif
+	@mkdir -p $(FPGA_CORE_DIR)
 	cp $(FW_TARGET).mif $(FPGA_CORE_DIR)/firmware.mif
 	@echo "MIF installed to $(FPGA_CORE_DIR)/firmware.mif"
 

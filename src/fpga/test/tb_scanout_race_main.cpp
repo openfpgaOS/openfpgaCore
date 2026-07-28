@@ -490,6 +490,229 @@ static int pick_free_buffer() {
     return sw_buf_draw;
 }
 
+#ifdef GPU_TEST_CB_SCANOUT
+// =====================================================================
+// Truecolor CB blend vs the REAL scanout burst master — the SM64 cloud
+// differential, pocket-shaped.  The CB path is proven byte-exact on the
+// stub AND through the arbiter/slave/io_sdram chain under aggressors
+// (gpu-cb-chain); the ONE traffic source neither rig modeled is the
+// scanout line fetch — hard-real-time, outranks word ops, and on hardware
+// PHASE-LOCKED to the render loop via vsync, which is exactly what a
+// stationary artifact on every translucent surface implies.  Method:
+// identical 6-billboard cloud scene with the scanout fetch gated off (A)
+// vs fetching (B, C).  A==B==C exonerates; differences reproduce the
+// stripes and the histograms print their geometry.
+// =====================================================================
+static const uint32_t CBS_FB_BYTE  = FB0_BYTE;    // RGB565, 640-byte rows
+static const uint32_t CBS_TEX_BYTE = 0x00070000;  // 32x32 RGB565 disc
+static const int CBS_W = 176, CBS_H = 136;
+
+static uint16_t cbs_pattern(int x, int y) {
+    uint16_t r = (uint16_t)((x * 7 + y * 13) & 0x1F);
+    uint16_t g = (uint16_t)((x * 3 + y) & 0x3E);
+    uint16_t b = (uint16_t)((x + y * 5) & 0x1F);
+    return (uint16_t)((r << 11) | (g << 5) | b);
+}
+
+static void cbs_emit_state(uint8_t alpha) {
+    uint32_t flags = (1u << 5) | (1u << 7) | (1u << 1) | (1u << 2);
+    ring_cmd(0x4A, 17);
+    ring_write(CBS_FB_BYTE);
+    ring_write(640);
+    ring_write(2);
+    ring_write(CBS_TEX_BYTE);
+    ring_write(32);
+    ring_write((31u << 16) | 31u);
+    ring_write(flags & 0xFFu);
+    ring_write(0); ring_write(0);
+    ring_write(0); ring_write(0);
+    ring_write(0); ring_write(0); ring_write(0);
+    ring_write((320u << 16) | 0u);
+    ring_write((200u << 16) | 0u);
+    ring_write(alpha);
+}
+
+static void cbs_emit_tri(const int16_t vx[3], const int16_t vy[3],
+                         const int32_t s[3], const int32_t t[3]) {
+    ring_cmd(0x4B, 14);
+    ring_write(((uint32_t)(uint16_t)vy[0] << 16) | (uint16_t)vx[0]);
+    ring_write(((uint32_t)(uint16_t)vy[1] << 16) | (uint16_t)vx[1]);
+    ring_write(((uint32_t)(uint16_t)vy[2] << 16) | (uint16_t)vx[2]);
+    ring_write((uint32_t)s[0]); ring_write((uint32_t)s[1]); ring_write((uint32_t)s[2]);
+    ring_write((uint32_t)t[0]); ring_write((uint32_t)t[1]); ring_write((uint32_t)t[2]);
+    ring_write(1u << 16); ring_write(1u << 16); ring_write(1u << 16);
+    ring_write(63u | (63u << 6) | (63u << 12));
+    ring_write(0);
+}
+
+static void cbs_emit_quad(int cx, int cy) {
+    const int H = 32;
+    const int32_t S1 = 32 << 16;
+    int16_t x0 = (int16_t)((cx - H) * 16), x1 = (int16_t)((cx + H) * 16);
+    int16_t y0 = (int16_t)(cy - H),        y1 = (int16_t)(cy + H);
+    {
+        int16_t vx[3] = { x0, x1, x0 }, vy[3] = { y0, y0, y1 };
+        int32_t s[3] = { 0, S1, 0 },    t[3] = { 0, 0, S1 };
+        cbs_emit_tri(vx, vy, s, t);
+    }
+    {
+        int16_t vx[3] = { x1, x1, x0 }, vy[3] = { y0, y1, y1 };
+        int32_t s[3] = { S1, S1, 0 },   t[3] = { 0, S1, S1 };
+        cbs_emit_tri(vx, vy, s, t);
+    }
+}
+
+static uint32_t cbs_fence = 1;
+static int cbs_blend_on = 1;   /* 0 = opaque coverage pass */
+static int cbs_only_quad = -1; /* >=0: emit just that billboard (coverage) */
+static bool cbs_run_pass(std::vector<uint16_t> &out, bool scan_on) {
+    for (int y = 0; y < CBS_H; y++)
+        for (int x = 0; x < 320; x += 2) {
+            uint32_t byte = CBS_FB_BYTE + (uint32_t)y * 640u + (uint32_t)x * 2u;
+            sdram_write(byte >> 2, (uint32_t)cbs_pattern(x, y)
+                                 | ((uint32_t)cbs_pattern(x + 1, y) << 16));
+        }
+    for (int ty = 0; ty < 32; ty++)
+        for (int tx = 0; tx < 32; tx += 2) {
+            int dx0 = tx - 16, dy = ty - 16, dx1 = tx + 1 - 16;
+            uint16_t p0 = (dx0 * dx0 + dy * dy <= 196) ? 0xFFFF : 0x0000;
+            uint16_t p1 = (dx1 * dx1 + dy * dy <= 196) ? 0xFFFF : 0x0000;
+            uint32_t byte = CBS_TEX_BYTE + (uint32_t)(ty * 32 + tx) * 2u;
+            sdram_write(byte >> 2, (uint32_t)p0 | ((uint32_t)p1 << 16));
+        }
+
+    tb->scan_fetch_dis = scan_on ? 0 : 1;
+    tick(64);   // let a gated/ungated fetch settle before rendering
+
+    if (cbs_blend_on)
+        cbs_emit_state(240);
+    else {
+        /* Opaque coverage pass: same geometry, BLEND flag off. */
+        uint32_t flags = (1u << 5) | (1u << 7) | (1u << 2);
+        ring_cmd(0x4A, 16);
+        ring_write(CBS_FB_BYTE); ring_write(640); ring_write(2);
+        ring_write(CBS_TEX_BYTE); ring_write(32);
+        ring_write((31u << 16) | 31u);
+        ring_write(flags & 0xFFu);
+        ring_write(0); ring_write(0); ring_write(0); ring_write(0);
+        ring_write(0); ring_write(0); ring_write(0);
+        ring_write((320u << 16) | 0u);
+        ring_write((200u << 16) | 0u);
+    }
+    static const int off[6][2] = { {0,0}, {33,0}, {10,31}, {-27,19}, {-27,-19}, {10,-31} };
+    for (int i = 0; i < 6; i++)
+        if (cbs_only_quad < 0 || cbs_only_quad == i)
+            cbs_emit_quad(88 + off[i][0], 68 + off[i][1]);
+    uint32_t tok = cbs_fence++;
+    ring_cmd(0x02, 1); ring_write(tok);
+    gpu_kick();
+    if (!fence_wait(tok)) return false;
+    tick(20000);   // drain fbwq/arbiter/io_sdram writes fully
+
+    out.assign((size_t)CBS_W * CBS_H, 0);
+    for (int y = 0; y < CBS_H; y++)
+        for (int x = 0; x < CBS_W; x++) {
+            uint32_t byte = CBS_FB_BYTE + (uint32_t)y * 640u + (uint32_t)x * 2u;
+            uint32_t w = sdram_read(byte >> 2);
+            out[(size_t)y * CBS_W + x] = (byte & 2) ? (uint16_t)(w >> 16) : (uint16_t)w;
+        }
+    return true;
+}
+
+static int test_cb_scanout() {
+    printf("TEST cb_scanout_cloud_differential (display idx=%d)\n",
+           (int)tb->fb_display_idx_o);
+    std::vector<uint16_t> COV, A, B, C;
+
+    /* Per-quad coverage passes (opaque, scan off): the six billboards
+     * OVERLAP, so overlap pixels legitimately blend once PER covering quad
+     * in draw order — union coverage under-blends the model.  This absolute
+     * reference is what the pure differential lacked — a structural
+     * protocol bug present in EVERY arm (e.g. a write-burst truncation the
+     * SDRAM model forgives) corrupts all arms identically and passes a
+     * differential; validating arm A against the C blend model catches it. */
+    static uint8_t covmask[CBS_H][CBS_W];
+    memset(covmask, 0, sizeof covmask);
+    cbs_blend_on = 0;
+    for (int q = 0; q < 6; q++) {
+        cbs_only_quad = q;
+        if (!cbs_run_pass(COV, false)) { printf("  FAIL: coverage pass %d wedged\n", q); return 1; }
+        for (int y = 0; y < CBS_H; y++)
+            for (int x = 0; x < CBS_W; x++)
+                if (COV[(size_t)y * CBS_W + x] == 0xFFFF)
+                    covmask[y][x] |= (uint8_t)(1u << q);
+    }
+    cbs_only_quad = -1;
+    cbs_blend_on = 1;
+    if (!cbs_run_pass(A, false)) { printf("  FAIL: quiet pass wedged\n"); return 1; }
+    if (!cbs_run_pass(B, true))  { printf("  FAIL: scan pass 1 wedged\n"); return 1; }
+    if (!cbs_run_pass(C, true))  { printf("  FAIL: scan pass 2 wedged\n"); return 1; }
+
+    /* Absolute byte-exact validation of the quiet arm: blend once per
+     * covering quad, in draw order. */
+    const int a6 = 240 >> 2;
+    int touched = 0, abs_bad = 0;
+    static int acolbad[CBS_W], arowbad[CBS_H];
+    memset(acolbad, 0, sizeof acolbad); memset(arowbad, 0, sizeof arowbad);
+    for (int y = 0; y < CBS_H; y++)
+        for (int x = 0; x < CBS_W; x++) {
+            size_t i = (size_t)y * CBS_W + x;
+            uint16_t want = cbs_pattern(x, y);
+            if (covmask[y][x]) touched++;
+            for (int q = 0; q < 6; q++) {
+                if (!(covmask[y][x] & (1u << q))) continue;
+                int r = (31 * a6 + ((want >> 11) & 0x1F) * (64 - a6)) >> 6;
+                int g = (63 * a6 + ((want >> 5)  & 0x3F) * (64 - a6)) >> 6;
+                int b = (31 * a6 + ( want        & 0x1F) * (64 - a6)) >> 6;
+                want = (uint16_t)((r << 11) | (g << 5) | b);
+            }
+            if (A[i] != want) {
+                if (abs_bad < 8)
+                    printf("  ABS (%d,%d) covmask=%02X want=%04X got=%04X pat=%04X\n",
+                           x, y, covmask[y][x], want, A[i], cbs_pattern(x, y));
+                abs_bad++; acolbad[x]++; arowbad[y]++;
+            }
+        }
+    printf("  coverage %d px, quiet-arm absolute mismatches %d\n", touched, abs_bad);
+    if (abs_bad) {
+        printf("  per-column:");
+        for (int x = 0; x < CBS_W; x++) if (acolbad[x]) printf(" c%d=%d", x, acolbad[x]);
+        printf("\n  per-row:");
+        for (int y = 0; y < CBS_H; y++) if (arowbad[y]) printf(" r%d=%d", y, arowbad[y]);
+        printf("\n  FAIL cb_scanout_cloud_differential (ABSOLUTE: chain corrupts blends)\n");
+        return 1;
+    }
+    if (touched < 5000) { printf("  FAIL: scene did not render\n"); return 1; }
+
+    int ab = 0, bc = 0;
+    static int colbad[CBS_W], rowbad[CBS_H];
+    memset(colbad, 0, sizeof colbad); memset(rowbad, 0, sizeof rowbad);
+    for (int y = 0; y < CBS_H; y++)
+        for (int x = 0; x < CBS_W; x++) {
+            size_t i = (size_t)y * CBS_W + x;
+            if (A[i] != B[i]) {
+                if (ab < 8)
+                    printf("  A!=B (%d,%d) quiet=%04X scan=%04X pat=%04X\n",
+                           x, y, A[i], B[i], cbs_pattern(x, y));
+                ab++; colbad[x]++; rowbad[y]++;
+            }
+            if (B[i] != C[i]) bc++;
+        }
+    if (ab || bc) {
+        printf("  DIFFS: quiet-vs-scan=%d  scan-vs-scan=%d (%s)\n", ab, bc,
+               bc ? "PHASE-DEPENDENT" : "phase-stable");
+        printf("  per-column:");
+        for (int x = 0; x < CBS_W; x++) if (colbad[x]) printf(" c%d=%d", x, colbad[x]);
+        printf("\n  per-row:");
+        for (int y = 0; y < CBS_H; y++) if (rowbad[y]) printf(" r%d=%d", y, rowbad[y]);
+        printf("\n  FAIL cb_scanout_cloud_differential\n");
+        return 1;
+    }
+    printf("  PASS cb_scanout_cloud_differential (scanout collision exonerated)\n");
+    return 0;
+}
+#endif  /* GPU_TEST_CB_SCANOUT */
+
 int main(int argc, char **argv) {
     setvbuf(stdout, NULL, _IONBF, 0);
     Verilated::commandArgs(argc, argv);
@@ -503,6 +726,22 @@ int main(int argc, char **argv) {
     //                 race, proving the detector is wired correctly).
     int frames = 24;
     int mode = 0;
+#ifdef GPU_TEST_CB_SCANOUT
+    if (argc > 1 && !strcmp(argv[1], "cb")) {
+        gpu_init();
+        tb->fb_addr_0 = (FB0_BYTE >> 1) & 0x1FFFFFF;
+        tb->fb_addr_1 = (FB1_BYTE >> 1) & 0x1FFFFFF;
+        tb->fb_addr_2 = (FB2_BYTE >> 1) & 0x1FFFFFF;
+        tb->fb_w = 320; tb->fb_h = 200; tb->fb_strideb = 640;  // 565 rows
+        tb->out_w = 640;
+        tb->color_mode_in = 0;
+        tb->scan_fetch_dis = 1;
+        tick(64);
+        int rc = test_cb_scanout();
+        delete tb;
+        return rc;
+    }
+#endif
     if (argc > 1) { int f = atoi(argv[1]); if (f > 0) frames = f; }
     if (argc > 2) { int r = atoi(argv[2]); if (r >= 0) g_rows = (uint32_t)r; }
     if (argc > 3) { int h = atoi(argv[3]); if (h > 0 && h <= 480) FB_H = (uint32_t)h; }
