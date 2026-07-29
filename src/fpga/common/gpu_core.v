@@ -944,11 +944,8 @@ gpu_tex_cache #(
 //     `dma_bus_idle`, an in-flight tex burst MUST keep receiving its
 //     R-beats — masking them would leave the cache deadlocked in
 //     S_FILL_DATA after DMA's burst eventually starts.
-wire blend_owns_m0  = (fbss == FBSS_ZTEST_AR_WAIT)
-                   || (fbss == FBSS_ZTEST_R_WAIT)
-                   || (fbss == FBSS_BLEND_AR_WAIT)
+wire blend_owns_m0  = (fbss == FBSS_ZTEST_R_WAIT)
                    || (fbss == FBSS_BLEND_R_WAIT)
-                   || (fbss == FBSS_CB_AR)
                    || (fbss == FBSS_CB_FILLR);
 wire dma_owns_ar    = (dma_state == DMA_S_AR)
                    || (dma_state == DMA_S_R);
@@ -2567,6 +2564,40 @@ function [15:0] fb_halfword_read;
     end
 endfunction
 
+// N64 RDP magic-square ordered dither (4x4, values 0..7).  The screen phase
+// comes from the FB byte address: px = addr[2:1] (pixel x & 3), py =
+// addr[8:7] (stride 640 -> +1 per row; x crossing a 64-px multiple shifts
+// the matrix row, which is harmless for an ordered pattern).  Applied in the
+// CONST-ALPHA BLEND repack only (cb_dsum_*): adding (d*8+4) before the >>6
+// truncation turns the dropped fraction into sub-LSB spatial noise instead
+// of stationary contour bands on smooth translucent surfaces (cloud/water/
+// shadow) — the artifact the N64's blender dither existed to prevent.  The
+// addend is < 1 output LSB, so exactly-representable results (alpha 0/64
+// passthrough) are never perturbed.  Deliberately NOT applied in the
+// p1->p2 modulate/gouraud cones: those adders widened the texture-pipe
+// placement footprint ~0.1 ns of fitter floor across a 50-seed sweep and
+// both top placements failed on silicon (TEXTGUARD +8 slip / mixer-init
+// bit-30 drop, 2026-07-28); the blend stage (CB_BLEND2) has register-split
+// slack and costs nothing.  Opaque smooth-gradient banding (sky, menu bg)
+// is a known, unreported residual; if it ever matters, restage the
+// modulate quantize into the p2->p2b no-op stage instead of p1->p2.
+function [2:0] dither_mag;
+    input [1:0] px;
+    input [1:0] py;
+    begin
+        case ({py, px})
+            4'd0:  dither_mag = 3'd0; 4'd1:  dither_mag = 3'd6;
+            4'd2:  dither_mag = 3'd1; 4'd3:  dither_mag = 3'd7;
+            4'd4:  dither_mag = 3'd4; 4'd5:  dither_mag = 3'd2;
+            4'd6:  dither_mag = 3'd5; 4'd7:  dither_mag = 3'd3;
+            4'd8:  dither_mag = 3'd3; 4'd9:  dither_mag = 3'd5;
+            4'd10: dither_mag = 3'd2; 4'd11: dither_mag = 3'd4;
+            4'd12: dither_mag = 3'd7; 4'd13: dither_mag = 3'd1;
+            4'd14: dither_mag = 3'd6; 4'd15: dither_mag = 3'd0;
+        endcase
+    end
+endfunction
+
 // Truecolor Gouraud: scale an RGB565 texel by a 6-bit per-pixel brightness
 // (the interpolated `light` value, 0..63, reused from the palettized path).
 // scale = light+1 (1..64); each channel * scale >> 6 keeps full range at 63.
@@ -2633,20 +2664,24 @@ function [15:0] rgb565_cd_finish;
     end
 endfunction
 
-// Src-over alpha blend of two RGB565 colors: out = (src*a + dst*(64-a)) >> 6,
-// per channel.  a in 0..64 (64 = fully src/opaque, 0 = fully dst).  Used by the
-// truecolor constant-alpha blend path (OF_GPU_SPAN_BLEND).
+// Src-over alpha blend of two RGB565 colors: out = (src*a + dst*(64-a) +
+// dither) >> 6, per channel.  a in 0..64 (64 = fully src/opaque, 0 = fully
+// dst).  Reference spec for the truecolor constant-alpha blend path
+// (OF_GPU_SPAN_BLEND) — implemented as the pipelined blend fold: the
+// multiplies register at the p2b->p3 shift (cbm_sum_*_w) and cb_mixed_w
+// does the dither + >>6 + repack at the IDLE commit.
 function [15:0] rgb565_blend;
     input [15:0] src;
     input [15:0] dst;
     input [6:0]  a;        // 0..64
+    input [2:0]  d;        // magic-square dither (see dither_mag)
     reg   [6:0]  na;
     reg   [12:0] pr, pg, pb;
     begin
         na = 7'd64 - a;
-        pr = src[15:11] * a + dst[15:11] * na;   // 5b*7b + 5b*7b
-        pg = src[10:5]  * a + dst[10:5]  * na;   // 6b*7b + 6b*7b
-        pb = src[4:0]   * a + dst[4:0]   * na;   // 5b*7b + 5b*7b
+        pr = src[15:11] * a + dst[15:11] * na + {d, 3'b100};   // max 1984+60
+        pg = src[10:5]  * a + dst[10:5]  * na + {d, 3'b100};   // max 4032+60
+        pb = src[4:0]   * a + dst[4:0]   * na + {d, 3'b100};
         rgb565_blend = {pr[10:6], pg[11:6], pb[10:6]};
     end
 endfunction
@@ -3612,9 +3647,12 @@ reg [GPU_ADDR_W-1:0] p3_z_addr;
 reg [15:0] p3_z_value;
 
 // FB write sub-FSM (lives within S3, pauses pipeline when not IDLE)
+// AR handshakes have no dedicated wait states: blend_arvalid self-clears on
+// blend_arready (one shared clear before the case), so every read flow jumps
+// straight from its issue site to its R-wait state — AXI guarantees no R
+// beat before the AR is accepted.
 localparam FBSS_IDLE        = 4'd0;
 localparam FBSS_FLUSH_W_RSP = 4'd2;  // wait for write-buffer AW/W acceptance
-localparam FBSS_ZTEST_AR_WAIT = 4'd4;
 localparam FBSS_ZTEST_R_WAIT  = 4'd5;
 localparam FBSS_ZTEST_ACC_EVAL = 4'd12;
 // Translucent-blend sub-flow.  SPAN_TRANSLUC fragments are first collected
@@ -3623,47 +3661,63 @@ localparam FBSS_ZTEST_ACC_EVAL = 4'd12;
 // transluc[] lookups for the active lanes, and commits the modified word
 // back into fb_acc.  One active lane is the old single-pixel path; adjacent
 // horizontal / span-group lanes can amortise the expensive FB read.
-//   BLEND_REQ       — wait for M0 to be free of texture-cache traffic
-//   BLEND_AR_WAIT   — issue AR; m_rd_* muxed to BLEND while in this/R_WAIT
+//   BLEND_REQ       — wait for M0 to be free of texture-cache traffic, issue AR
 //   BLEND_R_WAIT    — wait for R, capture rdata + fb_acc same-word bypass
 //   BLEND_SELECT    — find next active lane and issue transluc[] SRAM read
 //   BLEND_LUT_WAIT  — wait for SRAM read response, merge byte, loop/finish
 //   BLEND_APPLY     — write the grouped word-fragment into fb_acc
 localparam FBSS_BLEND_REQ      = 4'd6;
-localparam FBSS_BLEND_AR_WAIT  = 4'd7;
 localparam FBSS_BLEND_R_WAIT   = 4'd8;
 localparam FBSS_BLEND_LUT_WAIT = 4'd9;
 localparam FBSS_BLEND_APPLY    = 4'd10;
 localparam FBSS_BLEND_SELECT   = 4'd11;
 localparam FBSS_BLEND_LOOKUP   = 4'd13;
-// Truecolor constant-alpha src-over blend (OF_GPU_SPAN_BLEND): read the dst
-// RGB565 pixel, mix with p3_color by sp_const_alpha, write back.  Uses the free
-// fbss codes; INCLUDE_DIRECT_COLOR-gated (unreachable when sp_blend is const 0).
-localparam FBSS_CB_REQ         = 4'd1;   // flush fb_acc, wait drain, issue 4-beat line read
-localparam FBSS_CB_AR          = 4'd3;   // wait AR accepted
-localparam FBSS_CB_FILLR       = 4'd14;  // capture the 4-beat dst line into cbw_*
-localparam FBSS_CB_BLEND       = 4'd15;  // stage-1: per-channel weighted sums (pipeline)
-localparam FBSS_CB_BLEND2      = 5'd16;  // stage-2: >>6 + repack -> fb_acc (pipeline)
-localparam FBSS_CB_WINSEL      = 5'd17;  // window hit: cross-word flush + dst select
-reg [4:0] fbss;
-// Pipeline reg: the dst halfword captured in FBSS_CB_R so rgb565_blend runs
-// register-to-register in FBSS_CB_BLEND (splits the read-response -> 6-mul blend
-// -> fb_acc logic-depth cone that was the worst GPU timing path).
+// Truecolor constant-alpha src-over blend (OF_GPU_SPAN_BLEND), PIPELINED (the
+// blend fold — mirrors the p2b z-test fold): the dst halfword is probed from
+// the cbw window (+ fb_acc overlay + same-edge commit forward) while the
+// pixel sits in p2b, the 6-multiply weighted sums register at the p2b->p3
+// shift into cb_sr/sg/sb, and a window-hit pixel commits through the SAME
+// one-cycle fb_acc path as an opaque pixel (dither + >>6 + repack are the
+// short cb_mixed_w cone off those regs).  The pipe never freezes on hits.
+// Only a window MISS detours: CB_REQ (flush + barrier + burst fill) ->
+// CB_FILLR (capture, cb_dst_r on the pixel's beat) -> CB_RESOLVE (one cycle:
+// the same shared multipliers compute the sums from p3/cb_dst_r operands) ->
+// IDLE, where the pixel commits like any other.  INCLUDE_DIRECT_COLOR-gated
+// (unreachable when sp_blend is const 0).
+localparam FBSS_CB_REQ         = 4'd1;   // flush fb_acc, wait drain, issue line read
+localparam FBSS_CB_FILLR       = 4'd14;  // capture the burst into cbw_*, cb_dst_r
+localparam FBSS_CB_RESOLVE     = 4'd3;   // miss path: sums from p3 operands -> IDLE
+localparam FBSS_CB_REFRESH     = 4'd7;   // stale capture: re-derive sums from fb_acc
+reg [3:0] fbss;
+// Miss-path dst halfword captured in FBSS_CB_FILLR so the CB_RESOLVE
+// multiplies run register-to-register (read-response cone split).
 reg [15:0] cb_dst_r;
-// Stage-1 per-channel weighted sums (src*a6 + dst*(64-a6)); >>6+repacked in
-// FBSS_CB_BLEND2 so the 6-multiply blend cone is split register-to-register.
+// Per-channel weighted sums (src*a6 + dst*(64-a6)); loaded at the p2b->p3
+// shift on a window hit (the fold) or by CB_RESOLVE on a miss; consumed by
+// the cb_mixed_w repack cone at the IDLE commit.
 reg [12:0] cb_sr, cb_sg, cb_sb;
+// Stage-1 probe results riding the p2b stage: the dst halfword (window +
+// fb_acc overlay, mux-only cone off the p2->p2b shift), the hit verdict,
+// and the p2-edge staleness flag.
+reg [15:0] p2b_cb_dst;
+reg        p2b_cb_hit;
+reg        p2b_cb_stale;
+// The fold verdict, shifted alongside the pixel: ready=1 -> cb_sr/sg/sb
+// hold this pixel's blended sums (commit is a normal one-cycle fb_acc
+// merge); ready=0 -> window miss (dispatch to FBSS_CB_REQ).  stale=1 -> a
+// same-word commit landed at one of this pixel's capture edges, so the
+// sums were computed from a pre-commit dst: spend one IDLE cycle
+// re-capturing from fb_acc before committing.  Loaded by every shift; only
+// blend pixels consult them.
+reg       p3_cb_ready;
+reg       p3_cb_stale;
 
 // Registered accumulator-hit depth test.  The hot z path was previously:
 // p3_z_addr -> z_acc_addr compare -> halfword select -> depth compare ->
 // z_acc_hi/lo update, all in one 100 MHz cycle.  On a z_acc hit, capture the
 // selected old halfword and apply the test in the following FBSS cycle.
 reg [15:0] ztest_acc_old_half;
-reg [15:0] ztest_acc_value;
-reg        ztest_acc_hi;
-reg        ztest_acc_write;
 reg        ztest_acc_from_read;
-reg [GPU_ADDR_W-1:0] ztest_acc_addr;
 reg [31:0] ztest_acc_word;
 
 // BLEND same-word group state.  Source bytes are stored per framebuffer byte
@@ -4052,48 +4106,103 @@ wire [31:0] p3_fb_lane_data_w = sp_truecolor
 // Constant-alpha blend (OF_GPU_SPAN_BLEND), pipelined to keep the 6-multiply
 // cone off the critical path: weight sp_a6 (0..64) is precomputed at EMIT;
 // cb_dst_half_w = read-response halfword captured into cb_dst_r in FBSS_CB_R;
-// FBSS_CB_BLEND multiplies into cb_sr/cb_sg/cb_sb (register->register); cb_mixed_w
-// is the >>6 + repack, written in FBSS_CB_BLEND2.  Prunes when sp_blend const 0.
+// the fold multiplies register into cb_sr/cb_sg/cb_sb at the p2b->p3 shift
+// (or in FBSS_CB_RESOLVE on a miss); cb_mixed_w is the >>6 + repack consumed
+// by the IDLE commit.  Prunes when sp_blend const 0.
 wire [15:0] cb_dst_half_w  = p3_fb_addr[1] ? blend_rdata[31:16] : blend_rdata[15:0];
-wire [15:0] cb_mixed_w     = {cb_sr[10:6], cb_sg[11:6], cb_sb[10:6]};
+wire [2:0]  cb_dith_w  = dither_mag(p3_fb_addr[2:1], p3_fb_addr[8:7]);
+wire [12:0] cb_dsum_r  = cb_sr + {cb_dith_w, 3'b100};   // max 1984+60 = 2044
+wire [12:0] cb_dsum_g  = cb_sg + {cb_dith_w, 3'b100};   // max 4032+60 = 4092
+wire [12:0] cb_dsum_b  = cb_sb + {cb_dith_w, 3'b100};
+wire [15:0] cb_mixed_w = {cb_dsum_r[10:6], cb_dsum_g[11:6], cb_dsum_b[10:6]};
 wire [31:0] cb_lane_data_w = p3_fb_addr[1] ? {cb_mixed_w, 16'b0}
                                            : {16'b0, cb_mixed_w};
-// Word index inside the blend window for p3 / the snooped push (constant 0
-// with a 1-word window, where the whole hit arm prunes).
+// Word index inside the blend window for p3 (the MISS-path pixel parked in
+// p3 during CB_FILLR) / the snooped push (constant 0 with a 1-word window).
 wire [1:0]  cbw_p3_idx     = (CBW_LG == 2) ? p3_fb_addr[3:2]
                            : (CBW_LG == 1) ? {1'b0, p3_fb_addr[2]} : 2'd0;
-// Blend-window hit for the pixel at p3 (registered operands only: p3_fb_addr,
-// cbw_*).  PRUNE GATE: constant 0 with a 1-word window (cbw_valid is never
-// set), so WINSEL is unreachable and the flow is the legacy per-pixel
-// barrier + single-word read, cycle-for-cycle.
-wire        cbw_hit_raw_w  = (CBW_WORDS > 1)
-                          && cbw_valid[cbw_p3_idx]
-                          && (cbw_base == p3_fb_addr[GPU_ADDR_W-1:CBW_LOW]);
-// The IDLE dispatch additionally suppresses hits for the one in-flight
-// registered-snoop cycle, mirroring the z window's exactness argument.
-// WINSEL's post-flush re-check deliberately uses the RAW hit (no
-// suppression): the only push that can be in flight there is WINSEL's OWN
-// cross-word accumulator flush — the FBSS is the sole fbwq producer while
-// it sits in WINSEL — and that push can never target the word being read
-// (a same-word accumulator takes the bypass, never a flush).  Gating the
-// re-check on the suppression made every cross-word transition fall back
-// to CB_REQ (full barrier + refill), silently degrading the window to
-// word-pair amortisation — correct output, ~no speedup.
-wire        cbw_hit_w      = cbw_hit_raw_w && !cbw_snoop_pending;
-// fb_acc same-word bypass over the cached dst word: the accumulator holds
-// already-blended sibling pixels that are not yet visible in SDRAM (or the
-// window).  Without the overlay a second blend of the same word would read
-// the PRE-blend dst for lanes the accumulator owns.
-wire        cbw_acc_same_w = fb_acc_valid && (fb_acc_addr == p3_fb_word_addr_w);
+// ---- The blend fold: dst probe at p2b (mirrors the p2b z-test fold) ----
+// A blend pixel's dst halfword is resolved while it sits in p2b, from
+// registered state only, through THREE coherency overlays (freshest wins):
+//   1. cbw window word (SDRAM content as of the fill, snoop-invalidated on
+//      any fbwq push — a probe during the one registered-snoop cycle is
+//      suppressed, mirroring the z window's exactness argument);
+//   2. fb_acc same-word overlay (already-committed lanes not yet in SDRAM);
+//   3. same-edge commit forward: the pixel committing OUT of p3 this cycle
+//      lands its lanes in fb_acc at the same edge this probe registers —
+//      without the forward a same-word successor (sibling half, or overdraw
+//      of the same half) would blend against the pre-commit dst.  The
+//      forwarded value is p3_commit_lane_data_w, which covers both opaque
+//      and blended committers.
+// PRUNE GATE: constant 0 with a 1-word window (cbw_valid never set) — every
+// blend pixel takes the miss path, the legacy per-pixel barrier + read.
+// STAGE 1 of the fold (p2->p2b shift): probe the dst from registered window
+// + accumulator state, indexed by the P2 pixel — a pure mux cone, no
+// arithmetic, registered into p2b_cb_dst/hit.  The same-edge commit hazard
+// is NOT forwarded here (chaining the commit-fire cone into the probe made
+// a 15 ns path); instead every capture edge records whether a same-word
+// commit landed at that edge in a STALENESS flag, and a stale pixel spends
+// one extra cycle at p3 re-capturing its dst from fb_acc (which, by
+// construction, holds every prior same-word contribution by then).
+wire [1:0]  cbw_p2_idx     = (CBW_LG == 2) ? p2_fb_addr[3:2]
+                           : (CBW_LG == 1) ? {1'b0, p2_fb_addr[2]} : 2'd0;
+wire [GPU_ADDR_W-1:0] p2_fb_word_addr_w
+                           = p2_fb_addr & {{(GPU_ADDR_W-2){1'b1}}, 2'b00};
+wire [GPU_ADDR_W-1:0] p2b_fb_word_addr_w
+                           = p2b_fb_addr & {{(GPU_ADDR_W-2){1'b1}}, 2'b00};
+wire        cbw_p2_hit_w   = (CBW_WORDS > 1)
+                          && cbw_valid[cbw_p2_idx]
+                          && (cbw_base == p2_fb_addr[GPU_ADDR_W-1:CBW_LOW])
+                          && !cbw_snoop_pending;
+wire        cbw_p2_acc_same_w = fb_acc_valid
+                             && (fb_acc_addr == p2_fb_word_addr_w);
 wire [31:0] cbw_acc_mask_w = {{8{fb_acc_mask[3]}}, {8{fb_acc_mask[2]}},
                               {8{fb_acc_mask[1]}}, {8{fb_acc_mask[0]}}};
-wire [31:0] cbw_sel_word_w = cbw_word[cbw_p3_idx];
-wire [31:0] cbw_merged_w   = cbw_acc_same_w
-                           ? ((cbw_sel_word_w & ~cbw_acc_mask_w)
+wire [31:0] cbw_p2_word_w  = cbw_word[cbw_p2_idx];
+wire [31:0] cbw_p2_acc_w   = cbw_p2_acc_same_w
+                           ? ((cbw_p2_word_w & ~cbw_acc_mask_w)
                               | (fb_acc_data & cbw_acc_mask_w))
-                           : cbw_sel_word_w;
-wire [15:0] cbw_dst_half_w = p3_fb_addr[1] ? cbw_merged_w[31:16]
-                                           : cbw_merged_w[15:0];
+                           : cbw_p2_word_w;
+wire [15:0] cbw_p2_dst_w   = p2_fb_addr[1] ? cbw_p2_acc_w[31:16]
+                                           : cbw_p2_acc_w[15:0];
+// A commit "lands" this cycle for staleness purposes whenever the IDLE arm
+// can merge/load p3's lanes.  Queue-gated cross-word commits that PARK
+// instead never coincide with a shift edge (fb_write_buffer_stall blocks
+// the shift), so dropping the queue terms here is exact at capture edges.
+wire        p3_commit_land_w = (fbss == FBSS_IDLE)
+                            && p3_valid && !p3_discard && !p3_z_test
+                            && !p3_flags[SPAN_TRANSLUC] && !blend_group_active
+                            && (!(sp_truecolor && sp_blend)
+                                || (p3_cb_ready && !p3_cb_stale));
+// Staleness is PER-HALFWORD: a sibling-half commit never touches this
+// pixel's dst bytes (the probed value stays correct — no refresh), and a
+// same-half commit (overdraw) guarantees fb_acc owns the half the refresh
+// reads.  Word-granular flags would send siblings to a refresh that reads
+// acc bytes the mask does not own.
+wire        cb_stale_p2_w  = p3_commit_land_w
+                          && (p3_fb_addr[GPU_ADDR_W-1:1]
+                              == p2_fb_addr[GPU_ADDR_W-1:1]);
+wire        cb_stale_p2b_w = p3_commit_land_w
+                          && (p3_fb_addr[GPU_ADDR_W-1:1]
+                              == p2b_fb_addr[GPU_ADDR_W-1:1]);
+// The refresh dst: fb_acc holds every prior same-word lane by the time a
+// stale pixel re-captures (its predecessor merged or loaded this word at
+// the edge that set the flag).
+wire [15:0] cb_acc_dst_w   = p3_fb_addr[1] ? fb_acc_data[31:16]
+                                           : fb_acc_data[15:0];
+// STAGE 2 (p2b->p3 shift) / RESOLVE / REFRESH share one set of 6 multiplies,
+// operand-muxed on REGISTERED STATE COMPARES only — a multi-term refresh
+// decode ahead of the multipliers cost -1.5 ns (sp_truecolor -> cb_sr), so
+// the stale refresh is a 1-cycle FSM state like RESOLVE, not an IDLE-cycle
+// special case.
+wire [15:0] cbm_src_w   = (fbss == FBSS_CB_RESOLVE || fbss == FBSS_CB_REFRESH)
+                        ? p3_color : p2b_color;
+wire [15:0] cbm_dst_w   = (fbss == FBSS_CB_REFRESH) ? cb_acc_dst_w
+                        : (fbss == FBSS_CB_RESOLVE) ? cb_dst_r
+                        :                             p2b_cb_dst;
+wire [12:0] cbm_sum_r_w = cbm_src_w[15:11] * sp_a6 + cbm_dst_w[15:11] * (7'd64 - sp_a6);
+wire [12:0] cbm_sum_g_w = cbm_src_w[10:5]  * sp_a6 + cbm_dst_w[10:5]  * (7'd64 - sp_a6);
+wire [12:0] cbm_sum_b_w = cbm_src_w[4:0]   * sp_a6 + cbm_dst_w[4:0]   * (7'd64 - sp_a6);
 // ADDR dedup (audit A1): the 32-bit byte-lane data mask is the byte-wise
 // replication of the 4-bit strobe — derive it from the ONE lane decoder
 // above instead of elaborating fb_lane_data_mask()'s second 2:4 decode.
@@ -4106,6 +4215,11 @@ wire        fb_acc_p3_word_match = !fb_acc_valid
                                   || (fb_acc_addr == p3_fb_word_addr_w);
 wire        fb_acc_blend_word_match = !fb_acc_valid
                                      || (fb_acc_addr == blend_group_word_addr);
+// Blend-resolved commit: the pixel's lane data is the repacked blend result
+// instead of the raw color.
+wire        p3_cb_commit_w = sp_truecolor && sp_blend && p3_cb_ready;
+wire [31:0] p3_commit_lane_data_w = p3_cb_commit_w ? cb_lane_data_w
+                                                  : p3_fb_lane_data_w;
 wire blend_group_pipe_block = (fbss == FBSS_IDLE)
                            && blend_group_active
                            && p3_valid
@@ -4116,6 +4230,16 @@ wire blend_group_pipe_block = (fbss == FBSS_IDLE)
 assign fp_pipe_shift_blocked = (p1_valid && !p1_tex_ready)
                             || (fbss != FBSS_IDLE)
                             || (p3_valid && !p3_discard && p3_z_test)
+                            // Blend-miss/stale hold (mirrors the z-test
+                            // term): a blend pixel that missed the window
+                            // must HOLD in p3 through the CB_REQ..CB_RESOLVE
+                            // detour, and a stale capture must hold for its
+                            // one refresh cycle — the commit reads the live
+                            // p3 regs.  Self-releasing: CB_RESOLVE sets
+                            // p3_cb_ready, the refresh clears p3_cb_stale.
+                            || (p3_valid && !p3_discard
+                                && sp_truecolor && sp_blend
+                                && (!p3_cb_ready || p3_cb_stale))
                             || blend_group_pipe_block
                             || fb_write_buffer_stall
                             || m_wr_inflight_near_full;
@@ -4807,11 +4931,7 @@ always @(posedge clk) begin : main_fsm
         cmap_pending_addr <= 26'b0;
         fbss <= FBSS_IDLE;
         ztest_acc_old_half <= 16'd0;
-        ztest_acc_value <= 16'd0;
-        ztest_acc_hi <= 1'b0;
-        ztest_acc_write <= 1'b0;
         ztest_acc_from_read <= 1'b0;
-        ztest_acc_addr <= {GPU_ADDR_W{1'b0}};
         ztest_acc_word <= 32'd0;
         blend_arvalid    <= 0;
         blend_araddr     <= 0;
@@ -4991,11 +5111,7 @@ always @(posedge clk) begin : main_fsm
             sp_q29_z_value_step <= 32'sd0;
             fbss         <= FBSS_IDLE;
             ztest_acc_old_half <= 16'd0;
-            ztest_acc_value <= 16'd0;
-            ztest_acc_hi <= 1'b0;
-            ztest_acc_write <= 1'b0;
             ztest_acc_from_read <= 1'b0;
-            ztest_acc_addr <= {GPU_ADDR_W{1'b0}};
             ztest_acc_word <= 32'd0;
             blend_arvalid <= 1'b0;
             blend_arlen_r <= 2'd0;
@@ -7390,6 +7506,22 @@ always @(posedge clk) begin : main_fsm
                 p3_z_write   <= p2b_z_write && !p2b_zf_fold;
                 p3_z_addr    <= p2b_z_addr;
                 p3_z_value   <= p2b_z_value;
+                // Blend fold stage 2: the weighted sums register alongside
+                // the pixel (pure reg-to-reg multiplies off p2b_color /
+                // p2b_cb_dst).  On a window hit the pixel enters p3
+                // blend-resolved and commits through the one-cycle opaque
+                // path; a miss dispatches to FBSS_CB_REQ; a stale capture
+                // spends one refresh cycle at p3 first.  Garbage sums for
+                // non-blend pixels are never consumed (p3_cb_commit_w gates
+                // on sp_blend).
+                cb_sr <= cbm_sum_r_w;
+                cb_sg <= cbm_sum_g_w;
+                cb_sb <= cbm_sum_b_w;
+                p3_cb_ready <= p2b_valid && sp_truecolor && sp_blend
+                            && p2b_cb_hit;
+                p3_cb_stale <= p2b_valid && sp_truecolor && sp_blend
+                            && p2b_cb_hit
+                            && (p2b_cb_stale || cb_stale_p2b_w);
                 // Fold the pass-write into the z accumulator at this same
                 // edge, so the NEXT pixel's p2b compare (one cycle later)
                 // reads it from the registers — the same-word RAW forward.
@@ -7434,6 +7566,10 @@ always @(posedge clk) begin : main_fsm
                 p2b_z_write <= p2_z_write;
                 p2b_z_addr  <= p2_z_addr;
                 p2b_z_value <= p2_z_value;
+                // Blend fold stage 1: registered dst probe (mux-only cone).
+                p2b_cb_dst   <= cbw_p2_dst_w;
+                p2b_cb_hit   <= cbw_p2_hit_w;
+                p2b_cb_stale <= cb_stale_p2_w;
 
                 // p2 <- p1  (captures tex_resp; stages the cmap request)
                 p2_valid   <= p1_valid;
@@ -7684,6 +7820,13 @@ always @(posedge clk) begin : main_fsm
             // ----------------------------------------------------------
             // FB sub-FSM — consumes p3 (drains pipeline tail)
             // ----------------------------------------------------------
+            // Shared AR self-clear: every read flow (z fill, CB fill,
+            // translucent read) issues on blend_ar* and jumps straight to
+            // its R-wait state; the handshake completes here.  AXI orders
+            // R strictly after AR acceptance, so the R-wait capture logic
+            // can never fire early.
+            if (blend_arvalid && blend_arready)
+                blend_arvalid <= 1'b0;
             case (fbss)
                 FBSS_IDLE: begin
                     // Translucent fragments are grouped by destination word.
@@ -7789,19 +7932,29 @@ always @(posedge clk) begin : main_fsm
                             zw_base       <= p3_z_word_addr[GPU_ADDR_W-1:4];
                             zw_valid      <= 4'b0;
                             zw_fill_beat  <= 2'd0;
-                            fbss          <= FBSS_ZTEST_AR_WAIT;
+                            fbss          <= FBSS_ZTEST_R_WAIT;
                         end
                     end
                     // Process p3 if it has a non-discard pixel (and no pending depth work)
                     else if (p3_valid && !p3_discard) begin : fb_acc_blk
-                        if (sp_truecolor && sp_blend) begin
-                            // Translucent truecolor pixel: read-modify-write
-                            // src-over blend instead of an opaque accumulate.
-                            // p3 stays valid (fbss != IDLE stalls the pipe) and
-                            // is retired in FBSS_CB_BLEND2.  Const 0 / pruned
-                            // when INCLUDE_DIRECT_COLOR is off -> byte-exact
-                            // opaque.  Window hit skips the barrier + read.
-                            fbss <= cbw_hit_w ? FBSS_CB_WINSEL : FBSS_CB_REQ;
+                        if (sp_truecolor && sp_blend && !p3_cb_ready) begin
+                            // Blend pixel whose probe MISSED the dst window:
+                            // detour to fill + resolve (the pipe freezes; p3
+                            // holds).  A window-HIT blend pixel never reaches
+                            // this arm — p3_cb_ready routes it through the
+                            // commit below with its lane data muxed to the
+                            // repacked blend result.  Const 0 / pruned when
+                            // INCLUDE_DIRECT_COLOR is off -> byte-exact
+                            // opaque.
+                            fbss <= FBSS_CB_REQ;
+                        end else if (sp_truecolor && sp_blend && p3_cb_stale) begin
+                            // Stale capture: a same-half commit landed at one
+                            // of this pixel's capture edges.  Detour one
+                            // cycle to re-derive the sums from fb_acc (which
+                            // now holds the half) — a state, not an inline
+                            // cycle, so the multiplier operand select stays a
+                            // registered state compare.
+                            fbss <= FBSS_CB_REFRESH;
                         end else begin
                         p3_word_match = fb_acc_p3_word_match;
 
@@ -7814,7 +7967,7 @@ always @(posedge clk) begin : main_fsm
 
                                 fb_acc_valid <= 1'b1;
                                 fb_acc_addr  <= p3_fb_word_addr_w;
-                                fb_acc_data  <= p3_fb_lane_data_w;
+                                fb_acc_data  <= p3_commit_lane_data_w;
                                 fb_acc_mask  <= p3_fb_lane_mask_w;
                                 p3_consumed = 1'b1;
                             end else begin
@@ -7827,7 +7980,8 @@ always @(posedge clk) begin : main_fsm
                             fb_acc_valid <= 1'b1;
                             fb_acc_addr  <= p3_fb_word_addr_w;
                             fb_acc_data  <= (fb_acc_data & ~p3_fb_lane_data_mask_w)
-                                          | p3_fb_lane_data_w;
+                                          | (p3_commit_lane_data_w
+                                             & p3_fb_lane_data_mask_w);
                             fb_acc_mask  <= fb_acc_mask | p3_fb_lane_mask_w;
                             p3_consumed = 1'b1;
                         end
@@ -7857,13 +8011,6 @@ always @(posedge clk) begin : main_fsm
                         // write queue was full, p3 is still the unconsumed
                         // boundary-crossing pixel.  FBSS_IDLE will retry it.
                         fbss <= FBSS_IDLE;
-                    end
-                end
-
-                FBSS_ZTEST_AR_WAIT: begin
-                    if (blend_arready) begin
-                        blend_arvalid <= 1'b0;
-                        fbss          <= FBSS_ZTEST_R_WAIT;
                     end
                 end
 
@@ -7899,25 +8046,32 @@ always @(posedge clk) begin : main_fsm
 		                end
 
 		                FBSS_ZTEST_ACC_EVAL: begin
-		                    if (ztest_acc_value >= ztest_acc_old_half) begin
-		                        if (ztest_acc_write) begin
+		                    // The pixel's own operands (value/half-select/
+		                    // write/word address) are read from the LIVE p3
+		                    // registers: p3 is held valid and unshifted for
+		                    // the whole detour (z hold term in
+		                    // fp_pipe_shift_blocked), so the old captured
+		                    // copies were verbatim duplicates.  Only old_half,
+		                    // word and from_read carry information p3 lacks.
+		                    if (p3_z_value >= ztest_acc_old_half) begin
+		                        if (p3_z_write) begin
 		                            if (ztest_acc_from_read) begin
 		                                z_acc_valid <= 1'b1;
-		                                z_acc_addr  <= ztest_acc_addr;
-		                                if (ztest_acc_hi) begin
-		                                    z_acc_hi   <= ztest_acc_value;
+		                                z_acc_addr  <= p3_z_word_addr;
+		                                if (p3_z_hi) begin
+		                                    z_acc_hi   <= p3_z_value;
 		                                    z_acc_lo   <= ztest_acc_word[15:0];
 		                                    z_acc_mask <= 4'b1100;
 		                                end else begin
 		                                    z_acc_hi   <= ztest_acc_word[31:16];
-		                                    z_acc_lo   <= ztest_acc_value;
+		                                    z_acc_lo   <= p3_z_value;
 		                                    z_acc_mask <= 4'b0011;
 		                                end
-		                            end else if (ztest_acc_hi) begin
-		                                z_acc_hi <= ztest_acc_value;
+		                            end else if (p3_z_hi) begin
+		                                z_acc_hi <= p3_z_value;
 		                                z_acc_mask[3:2] <= 2'b11;
 		                            end else begin
-		                                z_acc_lo <= ztest_acc_value;
+		                                z_acc_lo <= p3_z_value;
 		                                z_acc_mask[1:0] <= 2'b11;
 		                            end
 		                        end
@@ -7929,22 +8083,29 @@ always @(posedge clk) begin : main_fsm
 	                end
 
                 // --------------------------------------------------------
-                // Truecolor constant-alpha src-over blend (OF_GPU_SPAN_BLEND):
-                // read the dst RGB565 pixel, mix p3_color by sp_const_alpha,
-                // write the blended pixel back via fb_acc.  Flush-before-read,
-                // serialized per pixel -> no RAW/group hazards.  Unreachable
+                // Truecolor constant-alpha blend MISS path (the fold's slow
+                // lane): the p2b probe missed the dst window, so fill it
+                // fresh — flush-before-read, full drain barrier — then
+                // resolve THIS pixel's sums and hand it back to IDLE, where
+                // it commits like an opaque pixel.  Following same-window
+                // pixels fold at p2b and never come back here.  Unreachable
                 // (pruned) when sp_blend is const 0 (INCLUDE_DIRECT_COLOR off).
                 // --------------------------------------------------------
                 FBSS_CB_REQ: begin
                     if (fb_acc_valid) begin
                         // Flush any pending accumulator first so the blend read
                         // sees committed pixels (it may target the same word).
+                        // Clear the MASK with the valid: the unified IDLE
+                        // commit merges into an invalid accumulator (mask-OR),
+                        // so a stale mask would adopt garbage lanes from the
+                        // flushed word (invariant: !valid => mask == 0).
                         if (fb_write_can_issue) begin
                             fbwq_push_req  = 1'b1;
                             fbwq_push_addr = fb_acc_addr;
                             fbwq_push_data = fb_acc_data;
                             fbwq_push_strb = fb_acc_mask;
                             fb_acc_valid   <= 1'b0;
+                            fb_acc_mask    <= 4'b0;
                         end else begin
                             fbss <= FBSS_FLUSH_W_RSP;   // queue full: drain, retry
                         end
@@ -7952,8 +8113,9 @@ always @(posedge clk) begin : main_fsm
                               && fb_write_drain_complete) begin
                         // All writes drained: fill the dst window with one
                         // aligned burst (the requested word feeds this pixel;
-                        // the siblings serve the following pixels).  1-word
-                        // window: the "line" IS the word — legacy behavior.
+                        // the siblings serve the following pixels' p2b
+                        // probes).  1-word window: the "line" IS the word —
+                        // legacy behavior.
                         blend_arvalid <= 1'b1;
                         blend_araddr  <= {p3_fb_word_addr_w[GPU_ADDR_W-1:CBW_LOW],
                                           {CBW_LOW{1'b0}}};
@@ -7961,12 +8123,6 @@ always @(posedge clk) begin : main_fsm
                         cbw_base      <= p3_fb_word_addr_w[GPU_ADDR_W-1:CBW_LOW];
                         cbw_valid     <= 4'b0;
                         cbw_fill_beat <= 2'd0;
-                        fbss          <= FBSS_CB_AR;
-                    end
-                end
-                FBSS_CB_AR: begin
-                    if (blend_arready) begin
-                        blend_arvalid <= 1'b0;
                         fbss          <= FBSS_CB_FILLR;
                     end
                 end
@@ -7985,64 +8141,35 @@ always @(posedge clk) begin : main_fsm
                         if (cbw_fill_beat == CBW_ARLEN) begin
                             cbw_valid <= (CBW_WORDS == 4) ? 4'hF
                                        : (CBW_WORDS == 2) ? 4'b0011 : 4'b0000;
-                            fbss      <= FBSS_CB_BLEND;
+                            fbss      <= FBSS_CB_RESOLVE;
                         end
                     end
                 end
-                FBSS_CB_WINSEL: begin
-                    // Window hit.  A DIFFERENT-word accumulator must flush
-                    // first (its push snoops the window but can only kill a
-                    // SIBLING word — a same-word accumulator takes the bypass
-                    // below, never a flush).  After the flush, re-check the
-                    // hit: the snoop may have invalidated this word's sibling
-                    // state or (defensively) the word itself.
-                    if (fb_acc_valid && !cbw_acc_same_w) begin
-                        if (fb_write_can_issue) begin
-                            fbwq_push_req  = 1'b1;
-                            fbwq_push_addr = fb_acc_addr;
-                            fbwq_push_data = fb_acc_data;
-                            fbwq_push_strb = fb_acc_mask;
-                            fb_acc_valid   <= 1'b0;
-                        end else begin
-                            fbss <= FBSS_FLUSH_W_RSP;   // queue full: retry via IDLE
-                        end
-                    end else if (!cbw_hit_raw_w) begin
-                        fbss <= FBSS_CB_REQ;            // lost the window: refill
-                    end else begin
-                        cb_dst_r <= cbw_dst_half_w;     // cached dst + fb_acc bypass
-                        fbss     <= FBSS_CB_BLEND;
-                    end
+                FBSS_CB_RESOLVE: begin
+                    // One cycle: this pixel's weighted sums through the SAME
+                    // shared multipliers the p2b fold uses (operand-muxed to
+                    // p3_color / cb_dst_r — the pipe is frozen, so the fold
+                    // capture cannot fire concurrently).  Back to IDLE where
+                    // the pixel commits through the standard one-cycle path.
+                    cb_sr       <= cbm_sum_r_w;
+                    cb_sg       <= cbm_sum_g_w;
+                    cb_sb       <= cbm_sum_b_w;
+                    p3_cb_ready <= 1'b1;
+                    // cb_dst_r is fresh post-drain SDRAM content — fresher
+                    // than any staleness the capture edges flagged (and the
+                    // refresh would read the acc CB_REQ just flushed).
+                    p3_cb_stale <= 1'b0;
+                    fbss        <= FBSS_IDLE;
                 end
-                FBSS_CB_BLEND: begin
-                    // Stage 1: per-channel weighted sums src*a6 + dst*(64-a6)
-                    // into registers (the 6 multiplies, register->register).
-                    // p3 stays valid (retired in CB_BLEND2) so p3_color holds.
-                    cb_sr <= p3_color[15:11] * sp_a6 + cb_dst_r[15:11] * (7'd64 - sp_a6);
-                    cb_sg <= p3_color[10:5]  * sp_a6 + cb_dst_r[10:5]  * (7'd64 - sp_a6);
-                    cb_sb <= p3_color[4:0]   * sp_a6 + cb_dst_r[4:0]   * (7'd64 - sp_a6);
-                    fbss  <= FBSS_CB_BLEND2;
-                end
-                FBSS_CB_BLEND2: begin
-                    // Stage 2: >>6 + repack (cb_mixed_w) into p3's lane; retire
-                    // p3.  p3 still valid here so p3_fb_word_addr_w / mask hold.
-                    // The accumulator can now legitimately hold the SIBLING
-                    // half of this word (window path: no flush between the two
-                    // halves) — MERGE instead of overwrite, or the sibling's
-                    // blended bytes would be lost.  Cross-word fb_acc cannot
-                    // reach here: CB_REQ flushes everything, CB_WINSEL flushes
-                    // different-word accumulators.
-                    fb_acc_valid <= 1'b1;
-                    fb_acc_addr  <= p3_fb_word_addr_w;
-                    if (cbw_acc_same_w) begin
-                        fb_acc_data <= (fb_acc_data & ~p3_fb_lane_data_mask_w)
-                                     | (cb_lane_data_w & p3_fb_lane_data_mask_w);
-                        fb_acc_mask <= fb_acc_mask | p3_fb_lane_mask_w;
-                    end else begin
-                        fb_acc_data <= cb_lane_data_w;
-                        fb_acc_mask <= p3_fb_lane_mask_w;
-                    end
-                    p3_valid     <= 1'b0;
-                    fbss         <= FBSS_IDLE;
+                FBSS_CB_REFRESH: begin
+                    // One cycle: re-derive the stale pixel's sums from the
+                    // fb_acc-resident dst half through the shared
+                    // multipliers, then commit normally from IDLE.
+                    cb_sr       <= cbm_sum_r_w;
+                    cb_sg       <= cbm_sum_g_w;
+                    cb_sb       <= cbm_sum_b_w;
+                    p3_cb_stale <= 1'b0;
+                    fbss        <= FBSS_IDLE;
                 end
 
 	                // --------------------------------------------------------
@@ -8077,13 +8204,6 @@ always @(posedge clk) begin : main_fsm
                         blend_arvalid <= 1;
                         blend_araddr  <= blend_group_word_addr;
                         blend_arlen_r <= 2'd0;
-                        fbss          <= FBSS_BLEND_AR_WAIT;
-                    end
-                end
-
-                FBSS_BLEND_AR_WAIT: begin
-                    if (blend_arready) begin
-                        blend_arvalid <= 0;
                         fbss          <= FBSS_BLEND_R_WAIT;
                     end
                 end
@@ -8188,18 +8308,16 @@ always @(posedge clk) begin : main_fsm
             // Shared ztest_acc capture (round-2 dedup, A2 idiom).  The
             // three FBSS sites above only raise ztest_cap_fire and select
             // the 32-bit source word; this ONE copy of the
-            // fb_halfword_read mux + p3 field routing applies it.  The
-            // z_acc-hit source never reads ztest_acc_addr/word in
-            // ACC_EVAL (from_read=0), so capturing them unconditionally
-            // here is dont-care for that arm — same FB bytes.
+            // fb_halfword_read mux applies it.  Only old_half, word and
+            // from_read are captured — the pixel's own value/half/write/
+            // address are read live from p3 in ACC_EVAL (p3 is held
+            // unshifted for the whole detour).  The z_acc-hit source
+            // never reads ztest_acc_word in ACC_EVAL (from_read=0), so
+            // capturing it unconditionally is dont-care for that arm.
             // ----------------------------------------------------------
             if (ztest_cap_fire) begin
                 ztest_acc_old_half  <= fb_halfword_read(ztest_cap_word, p3_z_hi);
-                ztest_acc_value     <= p3_z_value;
-                ztest_acc_hi        <= p3_z_hi;
-                ztest_acc_write     <= p3_z_write;
                 ztest_acc_from_read <= ztest_cap_from_read;
-                ztest_acc_addr      <= p3_z_word_addr;
                 ztest_acc_word      <= ztest_cap_word;
             end
 

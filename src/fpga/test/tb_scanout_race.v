@@ -114,6 +114,15 @@ module tb_scanout_race #(
     input  wire [23:0] bd_rd_addr,     // word address
     output wire [31:0] bd_rd_data,
 
+    // Bus-level write-event tap (sdram_model_full): one pulse per committed
+    // halfword beat.  Feeds the harness's shadow memory so the word-exact
+    // scanout-stream checker never touches eval-ordering (no backdoor reads
+    // from inside the per-cycle sampler).
+    output wire        wr_evt_o,
+    output wire [24:0] wr_evt_hw_addr_o,
+    output wire [1:0]  wr_evt_dqm_o,
+    output wire [15:0] wr_evt_data_o,
+
     // ---- Swap SM observation/inspection (for the detector) ----
     output wire [1:0]  fb_display_idx_o,
     output wire [1:0]  fb_ready_idx_o,
@@ -662,7 +671,9 @@ sdram_model_full sdram_chip (
     .dq_out(model_dq_out), .dq_oe(model_dq_oe),
     .dqm(phy_dqm),
     .bd_we(bd_we), .bd_word_addr(bd_addr), .bd_wdata(bd_wdata),
-    .bd_rd_word_addr(bd_rd_addr), .bd_rd_data(bd_rd_data)
+    .bd_rd_word_addr(bd_rd_addr), .bd_rd_data(bd_rd_data),
+    .wr_evt(wr_evt_o), .wr_evt_hw_addr(wr_evt_hw_addr_o),
+    .wr_evt_dqm(wr_evt_dqm_o), .wr_evt_data(wr_evt_data_o)
 );
 
 wire _unused = &{1'b0, lcd_pixel_color, ctrl_dq_oe, phy_clk, phy_cke, 1'b0};

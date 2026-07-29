@@ -10241,12 +10241,29 @@ static uint16_t z_compress_ref(uint32_t v) {
     uint32_t mant = (e >= 11) ? (v >> (e - 11)) : (v << (11 - e));
     return (uint16_t)(((uint32_t)e << 11) | (mant & 0x7FFu));
 }
+// gpu_core.v dither_mag mirror: N64 4x4 magic square indexed by the FB BYTE
+// address exactly as the RTL does (px = addr[2:1], py = addr[8:7]).  Applied
+// in the CONST-ALPHA BLEND repack only (blend565_ref below); the opaque
+// modulate/gouraud path is deliberately undithered (placement-pressure
+// regression on silicon, 2026-07-28 — see gpu_core.v dither_mag comment).
+static int dither_mag_ref(uint32_t fb_byte_addr) {
+    static const int mag[4][4] = {{0,6,1,7},{4,2,5,3},{3,5,2,4},{7,1,6,0}};
+    return mag[(fb_byte_addr >> 7) & 3][(fb_byte_addr >> 1) & 3];
+}
 // White-texel (0xFFFF) Gouraud passthrough: rgb565_gouraud(0xFFFF, R, G, B).
 static uint16_t gouraud_white_ref(int R, int G, int B) {
     int Ro = (31 * (R + 1) >> 5) & 0x1F;   // texel R=31; pr[9:5]
     int Go = (63 * (G + 1) >> 6) & 0x3F;   // texel G=63; pg[11:6]
     int Bo = (31 * (B + 1) >> 5) & 0x1F;   // texel B=31; pb[9:5]
     return (uint16_t)((Ro << 11) | (Go << 5) | Bo);
+}
+// rgb565_blend mirror: (src*a6 + dst*(64-a6) + d*8+4) >> 6 per channel.
+static uint16_t blend565_ref(uint16_t src, uint16_t dst, int a6, uint32_t fb_addr) {
+    int d8 = dither_mag_ref(fb_addr) * 8 + 4;
+    int r = (((src >> 11) & 0x1F) * a6 + ((dst >> 11) & 0x1F) * (64 - a6) + d8) >> 6;
+    int g = (((src >> 5)  & 0x3F) * a6 + ((dst >> 5)  & 0x3F) * (64 - a6) + d8) >> 6;
+    int b = (( src        & 0x1F) * a6 + ( dst        & 0x1F) * (64 - a6) + d8) >> 6;
+    return (uint16_t)((r << 11) | (g << 5) | b);
 }
 // Emit the SHRUNK 17-word 0x4E (q29 word dropped, RGB565 packed 3->2 at w12-13,
 // depth at w14-16) — matches of_gpu.h of_gpu_draw_vert_tri_rgb.
@@ -10419,16 +10436,18 @@ static void test_vert_tri_rgb_pack_depth_subpix_y() {
 static void test_truecolor_blend() {
     printf("TEST truecolor_blend\n");
     // dst = red 0xF800, src = blue 0x001F.  a=255 -> src, a=0 -> dst,
-    // a=128 -> a6=32 -> half: R=31*32>>6=15, B=31*32>>6=15 -> 0x780F.
+    // a=128 -> a6=32 -> half + per-pixel dither (blend565_ref).
     uint16_t a255 = tc_blend_one(0xF800, 0x001F, 255);
     uint16_t a0   = tc_blend_one(0xF800, 0x001F, 0);
     uint16_t a128 = tc_blend_one(0xF800, 0x001F, 128);
     /* (21,20) shares the 32-bit fb word with (20,20): both halves must blend
      * correctly (same-word RMW hazard — flush-before-read serialization). */
     uint16_t a128_adj = sdram_read_u16_le(FB_BASE_BYTE + 20u * 640u + 21u * 2u);
-    printf("  a255=0x%04X(want 001F) a0=0x%04X(want F800) a128=0x%04X(want 780F) sameword=0x%04X\n",
-           a255, a0, a128, a128_adj);
-    if (a255 == 0x001F && a0 == 0xF800 && a128 == 0x780F && a128_adj == 0x780F)
+    uint16_t w128     = blend565_ref(0x001F, 0xF800, 32, FB_BASE_BYTE + 20u*640u + 20u*2u);
+    uint16_t w128_adj = blend565_ref(0x001F, 0xF800, 32, FB_BASE_BYTE + 20u*640u + 21u*2u);
+    printf("  a255=0x%04X(want 001F) a0=0x%04X(want F800) a128=0x%04X(want %04X) sameword=0x%04X(want %04X)\n",
+           a255, a0, a128, w128, a128_adj, w128_adj);
+    if (a255 == 0x001F && a0 == 0xF800 && a128 == w128 && a128_adj == w128_adj)
         check_pass("truecolor_blend");
     else {
         char m[112];
@@ -10536,10 +10555,8 @@ static void test_truecolor_blend_full() {
             uint16_t want = d;
             if (cov[y][x]) {
                 covered++;
-                int r = (31 * a6 + ((d >> 11) & 0x1F) * (64 - a6)) >> 6;
-                int g = (63 * a6 + ((d >> 5)  & 0x3F) * (64 - a6)) >> 6;
-                int b = (31 * a6 + ( d        & 0x1F) * (64 - a6)) >> 6;
-                want = (uint16_t)((r << 11) | (g << 5) | b);
+                want = blend565_ref(0xFFFF, d, a6,
+                                    FB_BASE_BYTE + (uint32_t)y * 640u + (uint32_t)x * 2u);
             }
             uint16_t got = sdram_read_u16_le(FB_BASE_BYTE + (uint32_t)y * 640u
                                              + (uint32_t)x * 2u);
@@ -10681,17 +10698,9 @@ static void test_truecolor_blend_abutting() {
     for (int y = 0; y < 80; y++) {
         for (int x = 0; x < 80; x++) {
             uint16_t d = tcbf_pattern(x, y);
-            uint16_t once = d, twice;
-            {
-                int r = (31 * a6 + ((d >> 11) & 0x1F) * (64 - a6)) >> 6;
-                int g = (63 * a6 + ((d >> 5)  & 0x3F) * (64 - a6)) >> 6;
-                int b = (31 * a6 + ( d        & 0x1F) * (64 - a6)) >> 6;
-                once = (uint16_t)((r << 11) | (g << 5) | b);
-                int r2 = (31 * a6 + r * (64 - a6)) >> 6;
-                int g2 = (63 * a6 + g * (64 - a6)) >> 6;
-                int b2 = (31 * a6 + b * (64 - a6)) >> 6;
-                twice = (uint16_t)((r2 << 11) | (g2 << 5) | b2);
-            }
+            uint32_t addr = FB_BASE_BYTE + (uint32_t)y * 640u + (uint32_t)x * 2u;
+            uint16_t once  = blend565_ref(0xFFFF, d, a6, addr);
+            uint16_t twice = blend565_ref(0xFFFF, once, a6, addr);
             uint16_t want = cov[y][x] ? once : d;
             uint16_t got = sdram_read_u16_le(FB_BASE_BYTE + (uint32_t)y * 640u
                                              + (uint32_t)x * 2u);
@@ -10757,19 +10766,11 @@ static void test_truecolor_blend_overlap() {
     for (int y = 0; y < 80; y++) {
         for (int x = 0; x < 80; x++) {
             uint16_t want = tcbf_pattern(x, y);
-            if (cov1[y][x]) {
-                const int a6 = 160 >> 2;
-                int r = (31 * a6 + ((want >> 11) & 0x1F) * (64 - a6)) >> 6;
-                int g = (63 * a6 + ((want >> 5)  & 0x3F) * (64 - a6)) >> 6;
-                int b = (31 * a6 + ( want        & 0x1F) * (64 - a6)) >> 6;
-                want = (uint16_t)((r << 11) | (g << 5) | b);
-            }
+            uint32_t addr = FB_BASE_BYTE + (uint32_t)y * 640u + (uint32_t)x * 2u;
+            if (cov1[y][x])
+                want = blend565_ref(0xFFFF, want, 160 >> 2, addr);
             if (cov2[y][x]) {
-                const int a6 = 96 >> 2;
-                int r = (31 * a6 + ((want >> 11) & 0x1F) * (64 - a6)) >> 6;
-                int g = (63 * a6 + ((want >> 5)  & 0x3F) * (64 - a6)) >> 6;
-                int b = (31 * a6 + ( want        & 0x1F) * (64 - a6)) >> 6;
-                want = (uint16_t)((r << 11) | (g << 5) | b);
+                want = blend565_ref(0xFFFF, want, 96 >> 2, addr);
                 if (cov1[y][x]) both++;
             }
             uint16_t got = sdram_read_u16_le(FB_BASE_BYTE + (uint32_t)y * 640u

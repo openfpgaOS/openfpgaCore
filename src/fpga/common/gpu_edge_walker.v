@@ -131,7 +131,7 @@ reg signed [15:0] y0, y1, y2;
 // ----------------------------------------------------------------
 reg  signed [26:0] mul_a;
 reg  signed [15:0] mul_b;
-reg  signed [42:0] mul_p_pipe;
+(* multstyle = "dsp" *) reg  signed [42:0] mul_p_pipe;
 reg  signed [42:0] mul_p_r;
 reg  signed [42:0] xprod0_r;
 

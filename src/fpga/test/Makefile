@@ -55,6 +55,7 @@ io_sdram_test.v: $(TARGET_DIR)/io_sdram.v
 	  -e 's/inout   wire    \[15:0\]  phy_dq,/input   wire    [15:0]  phy_dq_in,\noutput  wire    [15:0]  phy_dq_out_port,\noutput  wire            phy_dq_oe_port,/' \
 	  -e "s/assign          phy_dq = phy_dq_oe ? phy_dq_out : 16'bZZZZZZZZZZZZZZZZ;/assign phy_dq_out_port = phy_dq_out;\nassign phy_dq_oe_port = phy_dq_oe;/" \
 	  -e 's/phy_dq_latched <= phy_dq;/phy_dq_latched <= phy_dq_in;/' \
+	  -e 's/phy_dq_neg <= phy_dq;/phy_dq_neg <= phy_dq_in;/' \
 	  $< > $@
 
 # Same split-DQ generation from the MISTER io_sdram copy (kept twinned
@@ -66,6 +67,7 @@ io_sdram_mister_test.v: ../targets/mister/io_sdram.v
 	  -e 's/inout   wire    \[15:0\]  phy_dq,/input   wire    [15:0]  phy_dq_in,\noutput  wire    [15:0]  phy_dq_out_port,\noutput  wire            phy_dq_oe_port,/' \
 	  -e "s/assign          phy_dq = phy_dq_oe ? phy_dq_out : 16'bZZZZZZZZZZZZZZZZ;/assign phy_dq_out_port = phy_dq_out;\nassign phy_dq_oe_port = phy_dq_oe;/" \
 	  -e 's/phy_dq_latched <= phy_dq;/phy_dq_latched <= phy_dq_in;/' \
+	  -e 's/phy_dq_neg <= phy_dq;/phy_dq_neg <= phy_dq_in;/' \
 	  $< > $@
 
 # ============================================================

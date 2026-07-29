@@ -2942,6 +2942,39 @@ assign video_hs = vidout_hs;
     // Video scanout from SDRAM framebuffer (8-bit indexed with hardware palette)
     wire [23:0] framebuffer_pixel_color;
 
+    // ------------------------------------------------------------------
+    // Phase-safe LCD pixel handoff clk_core_49152 -> clk_vid (2026-07
+    // stripe fix).  pixel_color is produced in the 49.152 MHz domain and
+    // was sampled RAW by the clk_vid vidout stage below — but both clocks
+    // divide the SAME mp1 VCO 4:1, so EVERY clk_vid edge is coincident
+    // with a clk_core_49152 edge: a razor race on all 24 bits, decided by
+    // per-bit routing skew, frozen per build.  Only pixels whose value
+    // CHANGES at the racing edge can corrupt — i.e. transitions: smooth
+    // gradients stripe, flat regions cannot — and the artifact enters
+    // DOWNSTREAM of the scanout's VI filter, all matching the observed
+    // stationary diagonal stripes.  The async clock-group split cut this
+    // path from STA (vacuous silence — the same failure class as the
+    // dram_dq false_path and the F4 bridge pins, see the SDC).
+    //
+    // Fix: detect the clk_vid phase inside the 49.152 domain (clock-as-
+    // data — clean at 4:1 except at the coincident edge, where the race
+    // only shifts the detected phase by one) and re-register the pixel in
+    // a mid-period slot.  Under EITHER resolution of the detection race
+    // the transfer lands 1-2 clk_core_49152 cycles (20-40 ns) clear of
+    // the consuming clk_vid edge, so vidout samples a long-settled value.
+    reg  [1:0]  fbps_phase = 2'd0;
+    reg         fbps_vid_prev = 1'b0;
+    reg  [23:0] fb_pixel_safe = 24'h0;
+    always @(posedge clk_core_49152) begin
+        fbps_vid_prev <= clk_vid;
+        if (clk_vid && !fbps_vid_prev)
+            fbps_phase <= 2'd1;
+        else
+            fbps_phase <= fbps_phase + 2'd1;
+        if (fbps_phase == 2'd2)
+            fb_pixel_safe <= framebuffer_pixel_color;
+    end
+
     // Palette write signals from CPU
     wire        cpu_pal_wr;
     wire [7:0]  cpu_pal_addr;
@@ -3137,8 +3170,11 @@ always @(posedge clk_vid or negedge reset_n_vid) begin
                 // data enable. this is the active region of the line
                 vidout_de <= 1;
 
-                // All display modes rendered to framebuffer by software
-                vidout_rgb <= framebuffer_pixel_color;
+                // All display modes rendered to framebuffer by software.
+                // fb_pixel_safe: the phase-disciplined handoff register
+                // (see its block above) — never sample pixel_color raw
+                // across the coincident-edge 4:1 clock crossing.
+                vidout_rgb <= fb_pixel_safe;
             end
         end
     end

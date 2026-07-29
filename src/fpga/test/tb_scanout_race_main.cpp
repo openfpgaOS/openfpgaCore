@@ -126,6 +126,26 @@ static bool     scan_in_burst = false;
 static uint32_t scan_word_hw = 0;          // current halfword addr being returned
 static int      scan_disp_buf_at_start = -1;
 
+// ============================================================
+// Word-exact scanout-stream checker (stripe hunt).  A bus-level shadow of
+// the SDRAM model — updated from backdoor writes (sdram_write wrapper) AND
+// from wr_evt_o pulses (every committed halfword beat) — lets the per-cycle
+// sampler compare EVERY 32-bit word the io_sdram burst engine delivers to
+// the scanout against ground truth, without eval-disturbing backdoor reads.
+// A single wrong/stale/duplicated word at an interrupt/resume seam is the
+// display-stripe shape the FB dump proved lives OUTSIDE the framebuffer.
+// ============================================================
+static std::vector<uint16_t> g_shadow;   // halfword-addressed, lazy-sized
+static inline void shadow_hw_write(uint32_t hw, uint16_t v, uint8_t dqm) {
+    if (g_shadow.size() <= hw) g_shadow.resize((size_t)hw + 1024, 0);
+    if (!(dqm & 1)) g_shadow[hw] = (uint16_t)((g_shadow[hw] & 0xFF00) | (v & 0x00FF));
+    if (!(dqm & 2)) g_shadow[hw] = (uint16_t)((g_shadow[hw] & 0x00FF) | (v & 0xFF00));
+}
+static uint64_t stream_checked = 0, stream_bad = 0;
+static uint64_t stream_first_cyc = 0;
+static uint32_t stream_first_hw = 0, stream_first_got = 0, stream_first_want = 0;
+static int      stream_first_y = -1;
+
 // FB base as a HALFWORD (>>1 of byte addr).  Scanout drives burst_addr in
 // halfwords; GPU/backdoor use byte/word.  fb byte B -> halfword B>>1.
 static inline uint32_t fb_base_hw(int idx) { return FB_BASE_BYTE[idx] >> 1; }
@@ -172,6 +192,37 @@ static void detector_post() {
                 phys_rdw_first_cyc = sim_time / 2;
                 phys_rdw_first_buf = fb;
                 phys_rdw_first_addr = hw;
+            }
+        }
+    }
+
+    // Shadow mirror: every committed halfword beat (idempotent — safe if a
+    // pulse gets sampled twice across the tick's two edges).
+    if (tb->wr_evt_o)
+        shadow_hw_write(tb->wr_evt_hw_addr_o, tb->wr_evt_data_o, tb->wr_evt_dqm_o);
+
+    // (b2) WORD-EXACT stream check: every 32-bit word delivered to the
+    // scanout must equal the shadow.  Skip only words inside the buffer the
+    // GPU is actively drawing (legitimate concurrent writes race the
+    // compare).  Any mismatch here IS the display-stripe mechanism.
+    if (scan_in_burst && tb->scanout_burst_data_valid_o) {
+        uint32_t hw = scan_word_hw;
+        int fbany = hw_to_fb(hw);
+        if (fbany >= 0 && fbany != gpu_active_draw_buf
+            && g_shadow.size() > (size_t)hw + 1) {
+            uint32_t want = (uint32_t)g_shadow[hw]
+                          | ((uint32_t)g_shadow[hw + 1] << 16);
+            uint32_t got = tb->scanout_burst_data_o;
+            stream_checked++;
+            if (got != want) {
+                if (!stream_bad) {
+                    stream_first_cyc  = sim_time / 2;
+                    stream_first_hw   = hw;
+                    stream_first_got  = got;
+                    stream_first_want = want;
+                    stream_first_y    = tb->y_count_o;
+                }
+                stream_bad++;
             }
         }
     }
@@ -224,7 +275,13 @@ static void tick(int n = 1) {
 // ============================================================
 // Backdoor SDRAM access (via sdram_model_full bd_* ports)
 // ============================================================
+static void sdram_write_raw(uint32_t word_addr, uint32_t data);
 static void sdram_write(uint32_t word_addr, uint32_t data) {
+    shadow_hw_write(word_addr * 2u,     (uint16_t)data,         0);
+    shadow_hw_write(word_addr * 2u + 1, (uint16_t)(data >> 16), 0);
+    sdram_write_raw(word_addr, data);
+}
+static void sdram_write_raw(uint32_t word_addr, uint32_t data) {
     tb->bd_we = 1; tb->bd_addr = word_addr; tb->bd_wdata = data;
     tick(); tb->bd_we = 0;
 }
@@ -659,11 +716,16 @@ static int test_cb_scanout() {
             size_t i = (size_t)y * CBS_W + x;
             uint16_t want = cbs_pattern(x, y);
             if (covmask[y][x]) touched++;
+            /* gpu_core.v dither_mag mirror: magic square indexed by FB byte
+             * address (px = addr[2:1], py = addr[8:7]). */
+            static const int dith_mag[4][4] = {{0,6,1,7},{4,2,5,3},{3,5,2,4},{7,1,6,0}};
+            uint32_t addr = CBS_FB_BYTE + (uint32_t)y * 640u + (uint32_t)x * 2u;
+            int d8 = dith_mag[(addr >> 7) & 3][(addr >> 1) & 3] * 8 + 4;
             for (int q = 0; q < 6; q++) {
                 if (!(covmask[y][x] & (1u << q))) continue;
-                int r = (31 * a6 + ((want >> 11) & 0x1F) * (64 - a6)) >> 6;
-                int g = (63 * a6 + ((want >> 5)  & 0x3F) * (64 - a6)) >> 6;
-                int b = (31 * a6 + ( want        & 0x1F) * (64 - a6)) >> 6;
+                int r = (31 * a6 + ((want >> 11) & 0x1F) * (64 - a6) + d8) >> 6;
+                int g = (63 * a6 + ((want >> 5)  & 0x3F) * (64 - a6) + d8) >> 6;
+                int b = (31 * a6 + ( want        & 0x1F) * (64 - a6) + d8) >> 6;
                 want = (uint16_t)((r << 11) | (g << 5) | b);
             }
             if (A[i] != want) {
@@ -857,6 +919,14 @@ int main(int argc, char **argv) {
 
     printf("\n----------------------------------------------------------------\n");
     printf("DETECTOR RESULTS\n");
+    printf("  WORD-EXACT scanout stream: %llu words checked, %llu MISMATCHES\n",
+           (unsigned long long)stream_checked, (unsigned long long)stream_bad);
+    if (stream_bad) {
+        printf("    FIRST: cyc=%llu hw=0x%07x y=%d got=%08x want=%08x  "
+               "<-- DISPLAY-STRIPE MECHANISM CANDIDATE\n",
+               (unsigned long long)stream_first_cyc, stream_first_hw,
+               stream_first_y, stream_first_got, stream_first_want);
+    }
     printf("  read-during-write events (scanout read buf == GPU active draw buf): %llu\n",
            (unsigned long long)rdw_events);
     if (rdw_events)

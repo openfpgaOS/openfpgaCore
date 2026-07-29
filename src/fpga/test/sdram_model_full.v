@@ -159,7 +159,24 @@ endfunction
 
 integer i;
 // Combinational DQ output — mimics real SDRAM's CAS latency output
-assign dq_out = rd_pipe_valid[CAS_LATENCY] ? rd_pipe_data[CAS_LATENCY] : 16'h0;
+// CHIP-FAITHFUL READ-DQM MASKING (2026-07 hardening, stripe hunt): on a
+// real SDR chip, DQM high at cycle T tri-states the READ data beat at T+2
+// (2-cycle read mask latency) — the bus floats and the controller's input
+// register captures the CHARGE-RETAINED PREVIOUS WORD, i.e. a duplicated
+// word.  The model previously ignored read DQM entirely, hiding every
+// controller path that leaves a write's byte-mask DQM high within 2 cycles
+// of live read beats.  A masked beat now outputs the last-driven value
+// (silicon-faithful stale capture) AND counts a loud error: any occurrence
+// is a controller sequencing bug — and the duplicated-word-on-a-gradient
+// shape is exactly the display-stripe artifact.
+reg [1:0] dqm_rd_hist0, dqm_rd_hist1;   // dqm 1 and 2 cycles ago
+reg [15:0] last_driven;
+wire rd_beat_masked = rd_pipe_valid[CAS_LATENCY] && (dqm_rd_hist1 != 2'b00);
+// Keep driving on a masked beat (charge-retained bus reaches the capture
+// register deterministically) — the DATA is stale, which is the point.
+assign dq_out = rd_pipe_valid[CAS_LATENCY]
+              ? (rd_beat_masked ? last_driven : rd_pipe_data[CAS_LATENCY])
+              : 16'h0;
 assign dq_oe  = rd_pipe_valid[CAS_LATENCY];
 
 initial begin
@@ -171,6 +188,9 @@ initial begin
     refresh_count = 0;
     refresh_tracking = 0;
     refresh_err_latched = 0;
+    dqm_rd_hist0 = 2'b00;
+    dqm_rd_hist1 = 2'b00;
+    last_driven = 16'h0;
     for (i = 0; i < 4; i = i + 1) begin
         bank_active[i] = 0;
         bank_row[i] = 0;
@@ -266,6 +286,18 @@ always @(posedge clk) begin
             wr_evt_dqm <= dqm;
             wr_evt_data <= dq_in;
         end
+    end
+
+    // Read-DQM mask history + last-driven tracking (read-mask hardening).
+    dqm_rd_hist1 <= dqm_rd_hist0;
+    dqm_rd_hist0 <= dqm;
+    if (rd_pipe_valid[CAS_LATENCY])
+        last_driven <= rd_beat_masked ? last_driven
+                                      : rd_pipe_data[CAS_LATENCY];
+    if (rd_beat_masked) begin
+        $display("[%0t] SDRAM ERROR: READ beat MASKED by DQM=%b two cycles prior — capture gets STALE word %04x instead of %04x",
+                 $time, dqm_rd_hist1, last_driven, rd_pipe_data[CAS_LATENCY]);
+        errors = errors + 1;
     end
 
     // READ burst truncation: same chip semantics for the BL=2 second read

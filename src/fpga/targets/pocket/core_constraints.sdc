@@ -63,10 +63,34 @@ create_generated_clock -name dram_clk_pin \
 set_output_delay -clock dram_clk_pin -max  3.0 [get_ports {dram_a[*] dram_ba[*] dram_dq[*] dram_dqm[*] dram_ras_n dram_cas_n dram_we_n dram_cke}]
 set_output_delay -clock dram_clk_pin -min -1.0 [get_ports {dram_a[*] dram_ba[*] dram_dq[*] dram_dqm[*] dram_ras_n dram_cas_n dram_we_n dram_cke}]
 
-# DQ input: sampled by clk_ram_chip (phase-shifted), not clk_ram_controller.
-# The cross-clock path from dram_clk_pin to clk_ram_controller is handled
-# by the PLL phase relationship, not fitter placement.
-set_false_path -from [get_ports {dram_dq[*]}]
+# DQ input (2026-07 stripe fix — this path was previously set_false_path'd
+# under a comment wrongly claiming DQ is sampled on the chip-phase clock;
+# io_sdram latches phy_dq on the CONTROLLER clock, so per-bit capture
+# timing was unconstrained fabric routing: the stationary diagonal display
+# stripes).  Truthful constraint: the chip launches read data off
+# dram_clk_pin with tAC(CL3) max 5.4 ns / tOH min 2.5 ns (AS4C32M16SA),
+# plus ~0.6/-0.2 ns board flight; capture is the FALLING-edge IO register
+# phy_dq_neg (FAST_INPUT_REGISTER, io_sdram.v) whose window STA now
+# verifies instead of ignoring.
+set_input_delay -clock dram_clk_pin -max 6.0 [get_ports {dram_dq[*]}]
+set_input_delay -clock dram_clk_pin -min 2.3 [get_ports {dram_dq[*]}]
+# Edge pairing: the launch clock carries ~8.8 ns of network+output-buffer
+# insertion to the pin (STA includes it in arrival), so data returns after
+# the first falling controller edge — the physical capture is the NEXT
+# falling edge (verified: arrival ~24.7 ns vs MC2 required ~29 ns = ~+4 ns
+# real margin; the default pairing reported an impossible -5.8 and let the
+# fitter chase unfixable paths).  Whole-cycle consumption downstream is
+# independently proven by simulation (enable_dq_read_4 arithmetic).
+set_multicycle_path -setup -end -from [get_ports {dram_dq[*]}] 2
+set_multicycle_path -hold  -end -from [get_ports {dram_dq[*]}] 1
+# The falling-edge sample's neg->pos retime is now the HARDENED DDIO input
+# path (altddio_in in io_sdram.v) — dedicated IO-cell silicon, no fabric
+# route, nothing for the fitter to trade away.  History: a discrete
+# negedge-FF -> posedge-FF fabric pair here was a real half-cycle path
+# whose per-seed slack (+1.6 .. -1.8) was INVISIBLE in the ram_out0
+# WNS ranking and shipped as SDRAM read corruption (TEXTGUARD +8-byte
+# slip / I$-delivered wrong immediates, 2026-07-28); a set_max_delay 4.0
+# proved physically unreachable (IO->LAB route + 0.9 ns clock skew).
 
 # CRAM0 async-mode pin timing (F5, bridge-corruption mitigation 2026-06).
 # cram0_clk is now tied LOW in core_top.v: the chip runs exclusively in

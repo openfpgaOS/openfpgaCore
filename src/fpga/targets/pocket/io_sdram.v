@@ -288,10 +288,57 @@ assign dbg_io = {1'b0, (refresh_pending != 3'd0), state[5:0]};
                                           !(pending_bank_ok &&
                                             (open_row[trk(pending_bank)] == pending_row));
 
+    // DQ read capture — FALLING-edge IO capture (2026-07 stripe fix).
+    // The chip launches read data off dram_clk (the +243°-phased chip
+    // clock); with CL=3 the datasheet valid window (tAC max .. period+tOH)
+    // straddles the controller's FALLING edge dead-center, while the old
+    // rising-edge capture sat at the ragged edge of the window (and the
+    // path was set_false_path'd, so per-bit capture was frozen routing
+    // luck: the stationary diagonal display stripes).
+    //
+    // The falling-edge sample MUST be retimed into the rising domain
+    // inside the IO cell: a discrete negedge-FF -> posedge-FF fabric pair
+    // is a REAL half-cycle path whose achievable delay (IO->LAB route +
+    // clock-network skew, measured 4.6-4.8 ns + 0.9 ns skew across a
+    // 50-seed sweep even under a set_max_delay 4.0) exceeds the 5 ns
+    // budget — a per-seed lottery that shipped as SDRAM read corruption
+    // (TEXTGUARD +8-byte slip / I$-delivered wrong immediates,
+    // 2026-07-28).  ALTDDIO_IN uses the hardened DDIO input registers:
+    // the neg->pos transfer happens in dedicated silicon with no fabric
+    // route, same one-cycle latency the downstream enable_dq_read_4
+    // arithmetic already assumes.  Simulation (Verilator) takes the
+    // behaviorally identical FF-pair branch.
+`ifdef ALTERA_RESERVED_QIS
+    wire    [15:0]  phy_dq_latched;
+    wire    [15:0]  phy_dq_ddio_h_unused;
+    altddio_in #(
+        .width                 (16),
+        .intended_device_family("Cyclone V"),
+        .invert_input_clocks   ("OFF"),
+        .lpm_hint              ("UNUSED"),
+        .lpm_type              ("altddio_in"),
+        .power_up_high         ("OFF")
+    ) u_dq_ddio_in (
+        .datain    (phy_dq),
+        .inclock   (controller_clk),
+        .dataout_h (phy_dq_ddio_h_unused),  // rising-edge sample (unused)
+        .dataout_l (phy_dq_latched),        // falling-edge sample, rising-aligned
+        .aclr      (1'b0),
+        .aset      (1'b0),
+        .inclocken (1'b1),
+        .sclr      (1'b0),
+        .sset      (1'b0)
+    );
+`else
+    reg     [15:0]  phy_dq_neg;
     reg     [15:0]  phy_dq_latched;
-always @(posedge controller_clk) begin
-    phy_dq_latched <= phy_dq;
+always @(negedge controller_clk) begin
+    phy_dq_neg <= phy_dq;
 end
+always @(posedge controller_clk) begin
+    phy_dq_latched <= phy_dq_neg;
+end
+`endif
 
 
 always @(*) begin
