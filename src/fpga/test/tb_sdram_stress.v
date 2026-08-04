@@ -4,29 +4,36 @@
 // SPDX-FileCopyrightText: (c) 2026, ThinkElastic <Think@Elastic.com>
 //------------------------------------------------------------------------------
 //
-// Verilator testbench: MiSTer SDRAM WRITE-PATH multi-master contention stack.
+// Verilator testbench: FIELD-FAULT reproduction rig for the Pocket os25
+// "+8-byte shifted .text" SDRAM corruption.
 //
 //   axi_sdram_arbiter  (4 masters: M0 GPU, M1 CPU, M2 bridge, M3 audio)
 //        -> axi_sdram_slave
-//        -> pulse adapter (byte-identical to core_top.v:2607-2634)
-//        -> io_sdram_test  (== targets/mister/io_sdram.v, DQ-split for sim)
-//        -> sdram_model    (cycle-accurate, refresh + row-timing enforced)
+//        -> pulse adapter (byte-identical to core_top.v fabric)
+//        -> io_sdram_test  (== targets/pocket/io_sdram.v, DQ-split for sim)
+//        -> sdram_model_full (cycle-accurate, refresh + row-timing enforced)
 //
-// This is the EXACT production write path that only MiSTer exercises under
-// load (Pocket puts CPU on CRAM0, audio on CRAM1, so the arbiter sees light
-// traffic).  All four AXI master ports are exposed to the C++ harness, which
-// drives realistic GPU framebuffer-write traffic against M0 while M1/M2/M3
-// aggressors hammer the slave to force gpu_wq-full backpressure, read<->write
-// grant switches mid-burst, SDRAM row crossings, and refresh collisions.  A
-// video burst_rd injection port reproduces scanout's hard-real-time fetch
-// contention on io_sdram.
+// Field traffic mix (OS init window on Pocket):
+//   * M1 (CPU) cache-line eviction WRITE bursts (8/16 beats, wcont=0 ->
+//     the slave's S_WR_FILL buffered path -> ONE native io_sdram burst),
+//     back-to-back, plus cache-refill read bursts.
+//   * Scanout burst_rd injection (hard-real-time terminal fetch) preempting
+//     at randomized phases against in-flight write bursts.
+//   * M2 occasional single-word reads/writes; M3 audio-mixer-style short
+//     read bursts.  Refresh fires autonomously inside io_sdram.
 //
-// TEST-ONLY, ADDITIVE.  No production RTL is modified.
+// The C++ harness scoreboards every committed byte against the physical
+// sdram_model memory and SPECIFICALLY hunts the field signature
+// mem[addr] == expected[addr-8] (data stream lagging its address by one
+// 8-byte unit), plus wedges (no completion progress for N cycles).
+//
+// TEST-ONLY, ADDITIVE.  No production RTL is modified.  Structure is a
+// twin of tb_sdram_cont.v (new file so existing tests stay untouched).
 //
 
 `default_nettype none
 
-module tb_sdram_cont #(
+module tb_sdram_stress #(
     parameter BANK_ROW_TRACK = 1
 ) (
     input  wire        clk,
@@ -70,6 +77,7 @@ module tb_sdram_cont #(
     input  wire [3:0]  m1_wstrb,
     input  wire        m1_wlast,
     output wire        m1_bvalid,
+    output wire [1:0]  m1_bresp,
 
     // ---- M2: bridge file DMA (read + write) ----
     input  wire        m2_arvalid,
@@ -113,7 +121,12 @@ module tb_sdram_cont #(
     output wire [1:0]  dbg_arb_state,
     output wire [1:0]  dbg_grant,
     output wire [7:0]  dbg_io,
-    output wire        dbg_busy
+    output wire        dbg_busy,
+    output wire [3:0]  dbg_slave_state,
+    output wire [3:0]  dbg_wbuf_wptr,
+    output wire [3:0]  dbg_wbuf_rptr,
+    output wire        dbg_wr_data_next,
+    output wire        dbg_wr_done
 );
 
 // ============================================================
@@ -179,10 +192,15 @@ wire        model_dq_oe;
 wire [15:0] dq_to_ctrl = model_dq_oe ? model_dq_out : 16'h0;
 
 assign dbg_busy = ram1_word_busy;
+assign dbg_slave_state = slave.state;
+assign dbg_wbuf_wptr = slave.wbuf_wptr;
+assign dbg_wbuf_rptr = slave.wbuf_rptr;
+assign dbg_wr_data_next = sdram_slave_wr_data_next;
+assign dbg_wr_done = sdram_slave_wr_done;
 
 // ============================================================
 // Slave -> io_sdram pulse adapter
-// Byte-identical to core_top.v:2607-2634 (the production fabric).
+// Byte-identical to core_top.v (the production fabric).
 // ============================================================
 reg sdram_accepted_r;
 reg sdram_cmd_forwarded;
@@ -248,7 +266,7 @@ axi_sdram_arbiter sdram_arb (
     .m1_wvalid(m1_wvalid),   .m1_wready(m1_wready),
     .m1_wdata(m1_wdata),     .m1_wstrb(m1_wstrb),
     .m1_wlast(m1_wlast),
-    .m1_bvalid(m1_bvalid),   .m1_bresp(),
+    .m1_bvalid(m1_bvalid),   .m1_bresp(m1_bresp),
 
     .m2_arvalid(m2_arvalid), .m2_arready(m2_arready),
     .m2_araddr(m2_araddr),   .m2_arlen(m2_arlen),
@@ -287,7 +305,7 @@ axi_sdram_arbiter sdram_arb (
 );
 
 // ============================================================
-// DUT 2: AXI SDRAM slave (production, unmodified)
+// DUT 2: AXI SDRAM slave (production, unmodified; params == core_top.v)
 // ============================================================
 axi_sdram_slave #(
     .SERIALIZE_WRITE_BURSTS(1'b0),
@@ -318,7 +336,7 @@ axi_sdram_slave #(
 );
 
 // ============================================================
-// DUT 3: io_sdram (MiSTer controller; test variant with split DQ)
+// DUT 3: io_sdram (Pocket controller; test variant with split DQ)
 // ============================================================
 io_sdram #(
     .BANK_ROW_TRACK(BANK_ROW_TRACK)
@@ -350,9 +368,6 @@ io_sdram #(
 
 // ============================================================
 // Behavioral SDRAM model — ground truth of what was physically written.
-// Full-column variant (10-bit column) so row-crossing write integrity is
-// validated faithfully (the shared 9-bit-column sdram_model.v aliases
-// col>=512 onto the same row).
 // ============================================================
 sdram_model_full sdram_chip (
     .clk(phy_clk), .cke(phy_cke), .cs_n(1'b0),

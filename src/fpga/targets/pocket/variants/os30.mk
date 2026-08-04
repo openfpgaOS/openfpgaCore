@@ -44,7 +44,7 @@
 # src/fpga/vendor/vexriscv/configs/os30.cfg; its committed fitter seed in
 # seeds/os30.seed.
 
-# INCLUDE_CLK96 (2026-07-25): os30 moves to the os20-proven 96 MHz clock.
+# INCLUDE_CLK90 (2026-07-25): os30 moves to the os20-proven 96 MHz clock.
 # HW reported glitches on the 100 MHz wave-2 build (WNS -1.385 / TNS -609,
 # spread across hundreds of CPU decode->regfile/predictor-M10K endpoints —
 # a plateau no single-cone fix lifts; knob survey receipts in memory).
@@ -65,5 +65,5 @@
 # the real N64 hid the same aliasing behind its VI resampler.  ~30 ALMs in
 # the slack-rich clk_analog domain.
 DEFS := INCLUDE_VERT_TRI INCLUDE_DIRECT_COLOR INCLUDE_COMBINE INCLUDE_Z_BURST \
-        VEXII_CPU_OS30 INCLUDE_HW_MIXER INCLUDE_TEX_MEM INCLUDE_CLK96 \
+        VEXII_CPU_OS30 INCLUDE_HW_MIXER INCLUDE_TEX_MEM INCLUDE_CLK90 \
         INCLUDE_CB_WINDOW2 INCLUDE_VI_FILTER

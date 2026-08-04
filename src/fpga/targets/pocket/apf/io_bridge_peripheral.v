@@ -99,9 +99,15 @@ synch_3 s02(phy_spiss, phy_spiss_s, clk, phy_spiss_r, phy_spiss_f);
     reg [1:0]   data_cnt;
     reg [6:0]   read_cnt;
 
-    // synchronize rd byte flag's rising edge into clk
-    wire rx_byte_done_s, rx_byte_done_r;
-synch_3 s03(rx_byte_done, rx_byte_done_s, clk, rx_byte_done_r);
+    // Byte-event CDC: a pulse here is truncated by SS-rise and, with
+    // spiclk/clk at the same frequency and a power-up-fixed phase, a
+    // missed pulse is missed on every byte (a cold-boot dead band).
+    // Cross a TOGGLE instead -- SS- and phase-immune; rise|fall of the
+    // synced level is the byte strobe, same 3-FF latency as the old
+    // pulse path so the rx_byte_2 alignment margin is unchanged.
+    wire rx_evt_s, rx_evt_rise, rx_evt_fall;
+synch_3 s03(rx_byte_evt, rx_evt_s, clk, rx_evt_rise, rx_evt_fall);
+    wire rx_byte_done_r = rx_evt_rise | rx_evt_fall;
     
     reg [4:0]   spis;
     localparam  ST_SIDLE        = 'd1;
@@ -304,18 +310,16 @@ end
     reg [1:0]   rx_latch_idx;
     reg [7:0]   rx_dat;
     reg [7:0]   rx_byte;    // latched by clk, but upon a synchronized trigger
-    reg         rx_byte_done;
+    reg         rx_byte_evt = 1'b0;  // toggles per completed byte; NOT cleared by SS
     
 always @(posedge phy_spiclk or posedge phy_spiss) begin
     
     if(phy_spiss) begin
         // reset 
-        rx_byte_done <= 0;
         rx_latch_idx <= 0;
         
     end else begin
         // spiclk rising edge, latch data
-        rx_byte_done <= 0;
         
         case(rx_latch_idx)
         0: begin    rx_dat[7:6] <= {phy_spimosi, phy_spimiso}; rx_latch_idx <= 1;   end
@@ -325,7 +329,7 @@ always @(posedge phy_spiclk or posedge phy_spiss) begin
             // final 2 bits
             rx_byte <= {rx_dat[7:2], phy_spimosi, phy_spimiso};
             rx_latch_idx <= 0;
-            rx_byte_done <= 1;
+            rx_byte_evt  <= ~rx_byte_evt;
         end
         endcase
     end

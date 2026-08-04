@@ -427,6 +427,32 @@
 #define DT_QUERY            REG32(SYSREG_BASE + 0x90)
 #define DT_QUERY_DATA       REG32(SYSREG_BASE + 0x94)
 
+/* "Mouse Speed %" interact slider (0x6C) — read-only mirror of the
+ * Pocket menu slider at bridge 0xF700000C (latched in core_top, CDC'd
+ * to the CPU clock).  Percent, 25..400.  Reads 0 on cores without the
+ * latch (pre-2026-07 builds) — consumers fall back to their default. */
+#define MOUSE_SPEED_PCT     REG32(SYSREG_BASE + 0x6C)
+
+/* Firmware/bitstream register-contract revision (0x8C) — read-only
+ * constant baked into the RTL (axi_periph_slave.v HW_CONTRACT_REV).
+ * OS_EXPECTED_HW_CONTRACT is the revision THIS os.bin was built for;
+ * boot halts with a readable banner when they differ (kernel/main.c),
+ * instead of running into undefined behaviour (blank screen / trap
+ * cascade).  Bump BOTH in the same commit whenever a register's
+ * address or semantics changes incompatibly.  Pre-versioning
+ * bitstreams read the sysreg default (0). */
+/* SDRAM write-burst refusal counter (0xCC) -- read-only.  Each count is
+ * a CONTAINED corruption event: the SDRAM slave's WLAST cross-checks
+ * refused a desynced write burst (B=SLVERR) instead of committing it
+ * +8-shifted (the 2026-07/08 field corruption).  0 on healthy silicon;
+ * reads 0 on pre-2026-08 cores (unmapped word).  Nonzero after a session
+ * = the write-path replay fired and was contained -- expect one stale
+ * cache line worth of lost data, not silent .text corruption. */
+#define SDRAM_WLAST_ERR     REG32(SYSREG_BASE + 0xCC)
+
+#define HW_CONTRACT_REV     REG32(SYSREG_BASE + 0x8C)
+#define OS_EXPECTED_HW_CONTRACT 1u
+
 /* Hardware features (0x98) — read-only, set at synthesis time in RTL */
 #define HW_FEATURES         REG32(SYSREG_BASE + 0x98)
 #define   HW_FEAT_MIXER         (1 << 0)   /* a 32-voice mixer is available (always set) */

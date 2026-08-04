@@ -303,19 +303,36 @@ int elf_load(uint32_t slot_id, uintptr_t load_addr,
                     !seg_in_app_vmap((uint32_t)seg_addr, phdr.p_memsz))
                     return -7;
 
-                /* Load file contents directly to SDRAM via DMA */
+                /* Load file contents to SDRAM through the UNCACHED alias.
+                 * The destination hop used to be cached writes + the full
+                 * flush below, whose line-eviction write bursts are the
+                 * path the 2026-07-31/08-01 field corruption rode (beat
+                 * faults punching holes into freshly loaded app .text --
+                 * traps at engineInit with zeros/c.ebreak mid-stream).
+                 * Uncached stores hit the controller directly; nothing
+                 * depends on writeback -- the same lesson boot.c already
+                 * codifies for the os.bin copy. */
+                uintptr_t seg_uc = seg_addr
+                                 + (SDRAM_UNCACHED_BASE - SDRAM_BASE);
                 if (phdr.p_filesz > 0) {
                     rc = of_file_read_chunked(slot_id, phdr.p_offset,
-                                               (void *)seg_addr, phdr.p_filesz);
+                                               (void *)seg_uc, phdr.p_filesz);
                     if (rc < 0)
                         return -6;
                 }
 
-                /* Zero BSS (memsz > filesz) */
+                /* Zero BSS (memsz > filesz) -- uncached for the same reason
+                 * (app .bss runs to ~1 MB; a cached memset is another
+                 * eviction storm). */
                 if (phdr.p_memsz > phdr.p_filesz) {
-                    memset((void *)(seg_addr + phdr.p_filesz), 0,
+                    memset((void *)(seg_uc + phdr.p_filesz), 0,
                            phdr.p_memsz - phdr.p_filesz);
                 }
+
+                /* Drop any stale cached lines over the segment so later
+                 * cached reads (relocation, execution) refill from the
+                 * bytes that actually landed in DRAM. */
+                of_cache_inval_range((void *)seg_addr, phdr.p_memsz);
 
                 /* Track end of loaded segments */
                 uintptr_t seg_end = seg_addr + phdr.p_memsz;

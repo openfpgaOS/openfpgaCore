@@ -69,6 +69,10 @@ output  reg             word_busy,
 output  reg             word_q_valid, // Pulses high for one cycle when word_q data is valid
 output  reg             word_wr_data_next, // Pulse: need next word data for burst write
 output  reg             word_wr_done,      // Pulse: slave-issued word write completed (ST_WRITE_4→IDLE)
+output  wire            word_queue_pending, // accepted-but-undispatched word op (queue occupied);
+                                            // adapter + slave gate on THIS, not word_busy -- ops must
+                                            // enter the queue during scanout or defer never engages
+                                            // (pocket storm-seed livelock, fixed 2026-08-02)
 
 input   wire    [31:0]  burst_wr_direct_data, // Direct data bus from AXI slave (bypasses pulse adapter)
 input   wire    [3:0]   burst_wr_direct_strb,  // Direct byte enables
@@ -192,6 +196,7 @@ assign dbg_io = {1'b0, (refresh_pending != 2'd0), state[5:0]};
 
     reg word_rd_queue;
     reg word_wr_queue;
+    assign word_queue_pending = word_rd_queue | word_wr_queue;
 
     // Word interface - same clock domain as controller (no CDC needed)
     // word_rd/word_wr are 1-cycle pulses, use directly as triggers
@@ -490,6 +495,14 @@ always @(posedge controller_clk) begin
         // negligible against a scanline period, so it cannot be starved.
         if(burst_rd_queue && !(burst_defer_word && (word_rd_queue || word_wr_queue))) begin
             burst_rd_queue <= 0;
+            // Defer arming is EDGE-based (set in the capture block on the
+            // burst_rd pulse).  Level-arming it here -- granting scanout
+            // while any word op sits queued -- made scanout yield on nearly
+            // every grant and starved the video line fetch (torn text at
+            // reduced clk_ram, 2026-08-03).  It is also redundant: word ops
+            // are now ACCEPTED into the queue even while busy, so the
+            // capture-block edge always sees them and the livelock this
+            // guarded against cannot recur.
             burst_defer_word <= 0;
             addr <= burst_addr;
             phy_ba <= burst_addr[24:23];
@@ -974,6 +987,11 @@ always @(posedge controller_clk) begin
             state <= ST_IDLE;
         end
     end
+
+
+    // Unencoded state (SEU / marginal state-bit capture): recover instead of
+    // parking forever with word_busy stuck high.
+    default: state <= ST_IDLE;
 
     endcase
 

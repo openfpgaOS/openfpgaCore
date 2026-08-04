@@ -231,7 +231,11 @@ int main(int argc, char **argv) {
     Verilated::commandArgs(argc, argv);
 
     const char *os_bin_path = "../../firmware/os/bld/sim/os.bin";
-    uint64_t max_cycles = 8000000;
+    /* 24M: the boot memtest (addr-tag sweep + 256KB burst pass + CRAM0
+     * probes, ~4-5M cycles) now runs before the "HAL init" PASS marker
+     * on top of the existing ~6M-cycle boot, so the old 8M budget is a
+     * guaranteed timeout. */
+    uint64_t max_cycles = 24000000;
     if (argc > 1) os_bin_path = argv[1];
     if (argc > 2) max_cycles = std::strtoull(argv[2], nullptr, 0);
 

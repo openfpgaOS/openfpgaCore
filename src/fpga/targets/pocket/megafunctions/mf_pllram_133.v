@@ -21,7 +21,7 @@ module mf_pllram_133(
         .phase_shift0("0 ps"),
         .duty_cycle0(50),
         .output_clock_frequency1("100.000000 MHz"),
-        .phase_shift1("6750 ps"),
+        .phase_shift1("6000 ps"),  // 216.0 deg (was 243), VCO/8-quantized: -0.8 ns chip phase -- trades write-launch surplus (+1.28) into the DQ read-capture window (-0.38 floor); see sta_dq.tcl + 2026-08-02 forensics
         .duty_cycle1(50),
         .output_clock_frequency2("100.000000 MHz"),
         .phase_shift2("5500 ps"),

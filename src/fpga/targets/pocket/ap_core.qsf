@@ -923,6 +923,7 @@ set_global_assignment -name VERILOG_FILE ../../common/video_CRT_scanout_indexed_
 # truth for which CPU to fit.
 set_global_assignment -name VERILOG_FILE megafunctions/mf_pllram_133.v
 set_global_assignment -name VERILOG_FILE megafunctions/mf_pllram_96.v
+set_global_assignment -name VERILOG_FILE megafunctions/mf_pllram_90.v
 set_global_assignment -name SDC_FILE core_constraints.sdc
 # Fallback seed for raw quartus_sh runs.  `make build` overrides this per
 # variant with --seed from the repo-stored seeds/<variant>.seed (the source

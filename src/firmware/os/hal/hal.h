@@ -28,7 +28,12 @@
 #include "codec.h"
 #include "lzw.h"
 
-/* Initialize all HAL subsystems */
+/* Initialize all HAL subsystems.  of_init() = of_init_early() +
+ * of_init_late(); os_main() calls the halves separately so the
+ * core/os contract handshake and boot memtest run between them,
+ * before the full register surface is touched (see kernel/main.c). */
 void of_init(void);
+void of_init_early(void);  /* clocks, cache, timer, video, terminal */
+void of_init_late(void);   /* input, disk, file, mixer, save, analogizer, link */
 
 #endif /* OFOS_HAL_H */

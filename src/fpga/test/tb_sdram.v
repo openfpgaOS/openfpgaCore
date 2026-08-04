@@ -113,6 +113,7 @@ reg  [3:0]  word_burst_len;
 reg  [3:0]  word_burst_wr_len;
 wire [31:0] word_q;
 wire        word_busy;
+wire        word_queue_pending;
 wire        word_q_valid;
 wire        word_wr_data_next;
 wire        word_wr_done;
@@ -175,7 +176,7 @@ axi_sdram_slave #(
     .sdram_rd(sdram_rd), .sdram_wr(sdram_wr),
     .sdram_addr(sdram_addr), .sdram_wdata(sdram_wdata), .sdram_wstrb(sdram_wstrb),
     .sdram_burst_len(sdram_burst_len), .sdram_burst_wr_len(sdram_burst_wr_len),
-    .sdram_rdata(word_q), .sdram_busy(word_busy),
+    .sdram_rdata(word_q), .sdram_busy(word_queue_pending),
     .sdram_accepted(accepted_r), .sdram_rdata_valid(word_q_valid),
     .sdram_wr_data_next(word_wr_data_next),
     .sdram_wr_done(word_wr_done),
@@ -205,7 +206,8 @@ io_sdram #(
     .word_addr(word_addr), .word_data(word_data), .word_wstrb(word_wstrb),
     .word_data_next(word_data_next), .word_wstrb_next(word_wstrb_next),
     .word_burst_len(word_burst_len), .word_burst_wr_len(word_burst_wr_len),
-    .word_q(word_q), .word_busy(word_busy), .word_q_valid(word_q_valid),
+    .word_q(word_q), .word_busy(word_busy),
+    .word_queue_pending ( word_queue_pending ), .word_q_valid(word_q_valid),
     .word_wr_data_next(word_wr_data_next),
     .word_wr_done(word_wr_done),
     .burst_wr_direct_data(sdram_next_wdata),

@@ -1361,3 +1361,39 @@ $(GPU_TRANSLUC_DIR)/V$(GPU_TRANSLUC_TOP): $(GPU_TRANSLUC_SRCS) $(GPU_TRANSLUC_CP
 		+define+INCLUDE_TRANSLUC \
 		-I$(COMMON_DIR) \
 		$(GPU_TRANSLUC_SRCS) $(GPU_TRANSLUC_CPP)
+
+# ============================================================
+# sdram-stress — FIELD-FAULT repro rig: Pocket os25 "+8-byte shifted .text".
+# Real Pocket write path (arbiter -> slave -> pulse adapter -> pocket
+# io_sdram -> sdram_model_full) under the OS-init traffic mix: CPU cache-line
+# eviction write bursts (8/16 beats, wcont=0 buffered S_WR_FILL path) vs
+# scanout burst_rd preemption + M2 singles + M3 audio reads + refresh.
+# Scoreboards every committed byte against the physical model and hunts the
+# mem[addr]==expected[addr-8] signature + wedges.  50-seed deterministic
+# sweep.  Additive, test-only; run `make sdram-stress` standalone.
+# ============================================================
+SDRAM_STRESS_SRCS = \
+	tb_sdram_stress.v \
+	sdram_model_full.v \
+	$(COMMON_DIR)/axi_sdram_arbiter.v \
+	$(COMMON_DIR)/axi_sdram_slave.v \
+	../targets/mister/synch_3.v \
+	io_sdram_test.v
+
+SDRAM_STRESS_CPP = tb_sdram_stress_main.cpp
+SDRAM_STRESS_TOP = tb_sdram_stress
+SDRAM_STRESS_DIR = obj_dir_sdram_stress
+SDRAM_STRESS_FLAGS = -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC -Wno-CASEINCOMPLETE \
+                     -Wno-SYNCASYNCNET -Wno-UNUSEDSIGNAL -Wno-PINMISSING \
+                     --public-flat-rw
+
+.PHONY: sdram-stress
+sdram-stress: $(SDRAM_STRESS_DIR)/V$(SDRAM_STRESS_TOP)
+	@printf "\n=== SDRAM field-fault stress rig (+8-byte shift hunt) ===\n"
+	./$(SDRAM_STRESS_DIR)/V$(SDRAM_STRESS_TOP)
+
+$(SDRAM_STRESS_DIR)/V$(SDRAM_STRESS_TOP): $(SDRAM_STRESS_SRCS) $(SDRAM_STRESS_CPP)
+	$(VERILATOR) $(VERILATOR_FLAGS_NOTRACE) $(SDRAM_STRESS_FLAGS) \
+		--top-module $(SDRAM_STRESS_TOP) --Mdir $(SDRAM_STRESS_DIR) \
+		-I$(COMMON_DIR) \
+		$(SDRAM_STRESS_SRCS) $(SDRAM_STRESS_CPP)

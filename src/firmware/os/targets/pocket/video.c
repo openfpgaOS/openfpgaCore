@@ -161,6 +161,30 @@ static void video_program_terminal_mode(void) {
     VIDEO_SCALER_MODE = VIDEO_SCALER_SLOT_DEFAULT_320X240;
 }
 
+/* Report the scanout scaler geometry whenever it changes.  The pixel
+ * readout is a Bresenham stepper: with fb_width == out_width the source
+ * advances exactly one pixel per output pixel; a mismatch makes it skip
+ * (fb>out) or repeat (fb<out) one source pixel per line, and since the
+ * accumulator carries across lines the skip walks down the screen --
+ * seen as text shearing differently on every row.  out_width is not a
+ * register; it is the scaler slot's width, decoded here the same way
+ * core_top's scaler_slot_width() does. */
+static void video_report_scaler(void) {
+    static const unsigned short slot_w[8] = {320,320,320,320,320,400,256,640};
+    static const unsigned short slot_h[8] = {240,200,224,256,288,300,240,480};
+    static uint32_t last = 0xFFFFFFFFu;
+    uint32_t sz   = FB_MODE_SIZE;
+    uint32_t slot = VIDEO_SCALER_MODE & 7u;
+    uint32_t key  = (sz & 0x03FF03FFu) | (slot << 28);
+    if (key == last)
+        return;
+    last = key;
+    unsigned fbw = (unsigned)(sz & 0x3FFu), fbh = (unsigned)((sz >> 16) & 0x3FFu);
+    of_term_printf("  scaler: fb %ux%u out %ux%u slot%u %s\n",
+                   fbw, fbh, slot_w[slot], slot_h[slot], (unsigned)slot,
+                   (fbw == slot_w[slot]) ? "1:1" : "SCALED-X");
+}
+
 static void video_program_visible_mode(void) {
     if (vid_display_mode == DISPLAY_MODE_TERMINAL)
         video_program_terminal_mode();
@@ -812,7 +836,29 @@ void of_video_flush_cache(void) {
     of_cache_clean_range((void *)fb_addr[buf_draw], vid_frame_bytes);
 }
 
+/* SDRAM write-burst refusal watchdog.  SDRAM_WLAST_ERR counts bursts the
+ * slave refused because their beat count and WLAST disagreed -- each one
+ * is a CONTAINED corruption event, but also a DROPPED write, which on the
+ * framebuffer stream shows up as damaged pixels (fine detail like text
+ * first).  Report the transition once per flip so a rendering artifact can
+ * be attributed or exonerated on the spot instead of by inference.  Runs
+ * in app context (syscall path), so of_term output is safe here.  Reads 0
+ * on cores predating the counter, where it is silently inert. */
+static void wlast_err_watchdog(void) {
+    video_report_scaler();   /* app context: terminal is initialized here */
+    static uint32_t seen;
+    uint32_t now = SDRAM_WLAST_ERR;
+    if (now != seen) {
+        of_term_printf("\n  \033[93mSDRAM write bursts refused: %lu\033[0m"
+                       " (contained; dropped FB/CPU writes)\n",
+                       (unsigned long)now);
+        seen = now;
+    }
+}
+
 uint8_t *of_video_flip(void) {
+    wlast_err_watchdog();
+
     /* Refresh our view of hardware state */
     sync_swap_state();
 

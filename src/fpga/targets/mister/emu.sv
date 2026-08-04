@@ -839,6 +839,8 @@ axi_periph_slave #(
 	// Analogizer — not present
 	.analogizer_settings(32'd0),
 	.analogizer_hoffset(32'd0),
+	.mouse_speed_pct(32'd0),
+	.sdram_wlast_err(sdram_wlast_errs),
 	.analogizer_voffset(32'd0),
 	.analogizer_cpu_wr_toggle(),
 	.analogizer_cpu_wr_settings(),
@@ -1005,6 +1007,15 @@ reg  [3:0]  ram1_word_burst_len;
 reg  [3:0]  ram1_word_burst_wr_len;
 wire [31:0] ram1_word_q;
 wire        ram1_word_busy;
+wire            ram1_word_queue_pending;
+
+// Contained write-burst refusals (B=SLVERR from the slave's WLAST
+// cross-checks).  Read-only at sysreg 0xCC; bready tied high so bvalid
+// is single-cycle.  Same instrument as the pocket build.
+reg [31:0] sdram_wlast_errs = 32'd0;
+always @(posedge clk_cpu)
+    if (arb_s_bvalid && arb_s_bresp == 2'b10)
+        sdram_wlast_errs <= sdram_wlast_errs + 32'd1;
 wire        ram1_word_q_valid;
 
 axi_sdram_slave #(
@@ -1043,7 +1054,7 @@ axi_sdram_slave #(
 	.sdram_burst_len(sdram_slave_burst_len),
 	.sdram_burst_wr_len(sdram_slave_burst_wr_len),
 	.sdram_rdata(ram1_word_q),
-	.sdram_busy(ram1_word_busy),
+	.sdram_busy(ram1_word_queue_pending),  // "busy" to the slave = queue occupied
 	.sdram_accepted(sdram_accepted_r),
 	.sdram_rdata_valid(ram1_word_q_valid),
 	.sdram_wr_data_next(sdram_slave_wr_data_next),
@@ -1067,7 +1078,10 @@ always @(posedge clk_ram_controller) begin
 	if (!sdram_slave_rd && !sdram_slave_wr)
 		sdram_cmd_forwarded <= 0;
 
-	if (!ram1_word_busy && !sdram_cmd_forwarded &&
+	// Gate on QUEUE occupancy, not word_busy (2026-08-02, pocket parity):
+	// ops must enter io_sdram's queue during scanout or burst_defer_word
+	// never engages and sustained scanout livelocks the fabric.
+	if (!ram1_word_queue_pending && !sdram_cmd_forwarded &&
 	    (sdram_slave_rd || sdram_slave_wr)) begin
 		ram1_word_rd <= sdram_slave_rd;
 		ram1_word_wr <= sdram_slave_wr;
@@ -1617,6 +1631,7 @@ io_sdram isr0 (
 	.word_burst_wr_len ( ram1_word_burst_wr_len ),
 	.word_q     ( ram1_word_q ),
 	.word_busy  ( ram1_word_busy ),
+	.word_queue_pending ( ram1_word_queue_pending ),
 	.word_q_valid ( ram1_word_q_valid ),
 	.word_wr_data_next ( sdram_slave_wr_data_next ),
 	.word_wr_done ( sdram_slave_wr_done ),

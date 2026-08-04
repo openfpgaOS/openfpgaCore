@@ -107,6 +107,14 @@ localparam S_WR_BURST  = 4'd6;  // Streaming: io_sdram pulls data via wr_data_ne
 localparam S_WR_NATIVE_W0 = 4'd7; // Capture beat 0 on a real W handshake
 localparam S_WR_NATIVE_W1 = 4'd8; // Capture beat 1 before issuing a 2-beat write
 localparam S_WR_FILL   = 4'd9;  // Buffered writeback: fill local FIFO, then native burst
+localparam S_WR_RESYNC = 4'd10; // AW/W desync: drain W to WLAST, error the B response
+
+// Sticky count of AW/W desync events caught by the WLAST cross-checks in
+// the W-accept states (each one is a would-have-been +8-shifted commit:
+// a replayed or lost W beat upstream makes every later burst land one
+// beat-pair off, region-wide).  Not register-mapped yet; visible in sim
+// and to FPGA-editor probes.
+reg [7:0] wlast_err_count;
 
 reg [3:0] state;
 
@@ -220,6 +228,7 @@ always @(posedge clk or posedge reset) begin
         s_axi_wready <= 0;
         s_axi_bvalid <= 0;
         s_axi_bresp <= 0;
+        wlast_err_count <= 0;
 
         sdram_rd <= 0;
         sdram_wr <= 0;
@@ -590,11 +599,22 @@ always @(posedge clk or posedge reset) begin
         S_WR_NATIVE_W0: begin
             // Strict native-2 W receiver.  Set WREADY, then sample only when
             // WREADY was already visible to the master for this clock edge.
+            // Beat 0 of a native burst (2-beat or longer wcont stream) must
+            // carry WLAST only for a 1-beat burst — which never routes here.
+            // An early WLAST means the upstream stream lost a beat: refuse.
             s_axi_wready <= 1'b1;
             if (s_axi_wvalid && s_axi_wready) begin
-                sdram_wdata <= s_axi_wdata;
-                sdram_wstrb <= s_axi_wstrb;
-                state <= S_WR_NATIVE_W1;
+                if (s_axi_wlast != (burst_len == 8'd0)) begin
+                    wlast_err_count <= wlast_err_count + 8'd1;
+                    s_axi_wready <= 1'b0;
+                    s_axi_bvalid <= 1'b1;
+                    s_axi_bresp  <= 2'b10;  // SLVERR
+                    state <= S_IDLE;
+                end else begin
+                    sdram_wdata <= s_axi_wdata;
+                    sdram_wstrb <= s_axi_wstrb;
+                    state <= S_WR_NATIVE_W1;
+                end
             end
         end
 
@@ -604,11 +624,19 @@ always @(posedge clk or posedge reset) begin
             // drop on the capturing edge (fall through to the cycle-default
             // 0): leaving it high one more cycle lets a >2-beat master hand
             // over beat 2 while we sit in S_WR_CMD ignoring W — the beat
-            // would be silently dropped and the whole burst shifted.
+            // would be silently dropped and the whole burst shifted.  Beat 1
+            // carries WLAST exactly when the burst is 2 beats long (longer
+            // wcont streams continue in S_WR_BURST); a mismatch means a
+            // replayed or lost beat upstream (the +8 genesis): refuse it.
             if (s_axi_wvalid && s_axi_wready) begin
-                next_wdata <= s_axi_wdata;
-                next_wstrb <= s_axi_wstrb;
-                state <= S_WR_CMD;
+                if (s_axi_wlast != (burst_len == 8'd1)) begin
+                    wlast_err_count <= wlast_err_count + 8'd1;
+                    state <= S_WR_RESYNC;
+                end else begin
+                    next_wdata <= s_axi_wdata;
+                    next_wstrb <= s_axi_wstrb;
+                    state <= S_WR_CMD;
+                end
             end else begin
                 s_axi_wready <= 1'b1;
             end
@@ -627,34 +655,93 @@ always @(posedge clk or posedge reset) begin
             if (s_axi_wvalid && s_axi_wready) begin
                 /* wbuf write itself happens in the dedicated SDP write
                  * block above (memory-inference structure). */
-                if (wbuf_wptr == 4'd0) begin
-                    sdram_wdata <= s_axi_wdata;
-                    sdram_wstrb <= s_axi_wstrb;
-                end
-                if (wbuf_wptr == 4'd1) begin
-                    next_wdata <= s_axi_wdata;
-                    next_wstrb <= s_axi_wstrb;
-                end
-                wbuf_wptr <= wbuf_wptr + 4'd1;
-                if (wbuf_wptr == burst_len[3:0]) begin
-                    // Final beat buffered — issue one native burst.  Beats 0
-                    // and 1 ride the command itself (sdram_wdata + preload);
-                    // the first continuation pull fetches beat 2.
-                    s_axi_wready <= 1'b0;
-                    wbuf_rptr <= 4'd2;
-                    wbuf_active <= 1'b1;
-                    state <= S_WR_CMD;
+                if ((wbuf_wptr == burst_len[3:0]) != s_axi_wlast) begin
+                    // AW/W desync: the beat count and WLAST disagree, so the
+                    // W stream is skewed (a replayed or lost beat upstream).
+                    // Committing it would land this line shifted and every
+                    // following burst region-wide (mem[a]==correct[a-8], the
+                    // field signature).  Refuse the burst: drain to WLAST,
+                    // error the B, self-heal at the next AW.  The line's
+                    // write is LOST (stale RAM) — a visible, contained
+                    // failure instead of silent creeping corruption.
+                    wlast_err_count <= wlast_err_count + 8'd1;
+                    if (s_axi_wlast) begin
+                        // Early WLAST: this was the final available beat.
+                        s_axi_wready <= 1'b0;
+                        s_axi_bvalid <= 1'b1;
+                        s_axi_bresp  <= 2'b10;  // SLVERR
+                        state <= S_IDLE;
+                    end else begin
+                        state <= S_WR_RESYNC;
+                    end
+                end else begin
+                    if (wbuf_wptr == 4'd0) begin
+                        sdram_wdata <= s_axi_wdata;
+                        sdram_wstrb <= s_axi_wstrb;
+                    end
+                    if (wbuf_wptr == 4'd1) begin
+                        next_wdata <= s_axi_wdata;
+                        next_wstrb <= s_axi_wstrb;
+                    end
+                    wbuf_wptr <= wbuf_wptr + 4'd1;
+                    if (wbuf_wptr == burst_len[3:0]) begin
+                        // Final beat buffered — issue one native burst.  Beats 0
+                        // and 1 ride the command itself (sdram_wdata + preload);
+                        // the first continuation pull fetches beat 2.
+                        s_axi_wready <= 1'b0;
+                        wbuf_rptr <= 4'd2;
+                        wbuf_active <= 1'b1;
+                        state <= S_WR_CMD;
+                    end
                 end
             end
         end
 
+        S_WR_RESYNC: begin
+            // Drain a desynced W stream to its WLAST beat (strict
+            // handshake), then complete the burst with SLVERR.  Nothing is
+            // written to SDRAM; the next AW re-establishes alignment.
+            if (s_axi_wvalid && s_axi_wready) begin
+                if (s_axi_wlast) begin
+                    s_axi_bvalid <= 1'b1;
+                    s_axi_bresp  <= 2'b10;  // SLVERR
+                    wbuf_active <= 1'b0;
+                    state <= S_IDLE;
+                end else begin
+                    s_axi_wready <= 1'b1;
+                end
+            end else begin
+                s_axi_wready <= 1'b1;
+            end
+        end
+
         S_WR_NEXT: begin
-            // Accept next W beat (single-word fallback path)
-            s_axi_wready <= 1'b1;
-            if (s_axi_wvalid) begin
-                sdram_wdata <= s_axi_wdata;
-                sdram_wstrb <= s_axi_wstrb;
-                state <= S_WR_CMD;
+            // Accept next W beat (single-word / serialized path).  Strict
+            // handshake — sample only when the registered WREADY was
+            // already visible to the master, and let WREADY fall on the
+            // capturing edge via the cycle-default (same discipline as
+            // S_WR_NATIVE_W1).  The old wvalid-only sample could consume a
+            // beat on an edge the master never saw handshaken, desyncing
+            // the W stream by one beat — the genesis shape of the +8 field
+            // corruption.  Cross-check WLAST against the serialized beat
+            // counter for the same containment as S_WR_FILL.
+            if (s_axi_wvalid && s_axi_wready) begin
+                if ((beat_count == burst_len) != s_axi_wlast) begin
+                    wlast_err_count <= wlast_err_count + 8'd1;
+                    if (s_axi_wlast) begin
+                        s_axi_bvalid <= 1'b1;
+                        s_axi_bresp  <= 2'b10;  // SLVERR
+                        state <= S_IDLE;
+                    end else begin
+                        state <= S_WR_RESYNC;
+                    end
+                end else begin
+                    sdram_wdata <= s_axi_wdata;
+                    sdram_wstrb <= s_axi_wstrb;
+                    state <= S_WR_CMD;
+                end
+            end else begin
+                s_axi_wready <= 1'b1;
             end
         end
 

@@ -280,6 +280,14 @@ sdk: check-target
 		done; \
 		test -f assets/banks/sc55.ofsf && cp assets/banks/sc55.ofsf "$$dir/runtime/bank.ofsf" && \
 			printf "  $(C_OK)sc55.ofsf$(C_RESET)      → runtime/bank.ofsf\n" || true; \
+		( cd "$$dir/runtime" && { \
+			echo "# openfpgaOS runtime publish manifest — written by 'make sdk'."; \
+			echo "# Consumers (platforms/<t>/image.sh) verify staged artifacts against"; \
+			echo "# these md5s; a mismatch means a hand-mixed runtime set, which boots"; \
+			echo "# into undefined behaviour.  source: $$(git -C '$(CURDIR)' describe --always --dirty)"; \
+			find . -type f ! -name MANIFEST -print0 | sort -z | xargs -0 md5sum; \
+		} > MANIFEST ); \
+		printf "  $(C_OK)MANIFEST$(C_RESET)       → runtime/MANIFEST\n"; \
 		printf "$(C_OK)[sdk] Done$(C_RESET) $$dir\n\n"; \
 	done
 

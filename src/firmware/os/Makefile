@@ -134,6 +134,7 @@ HAL_SRCS = $(HAL_DIR)/hal.c \
            $(HAL_DIR)/lzw.c \
            $(HAL_DIR)/disk.c \
            $(HAL_DIR)/hid_mouse.c \
+           $(HAL_DIR)/memtest.c \
            ../api/of_smp_tables.c
 
 # Optional debug force-override: MIXER=sw pins of_mixer_use_sw=1 (CPU software
@@ -224,8 +225,9 @@ $(OBJS): | $(BLD)/.ccid
 # RAM size for MIF generation
 RAM_WORDS = 8192
 
-# Default target
-all: $(FW_TARGET).bin $(FW_TARGET).mif $(FW_TARGET).lst $(BLD)/os.bin
+# Default target (contract-check first: a plain `make` here must not
+# produce an os.bin that bypassed the fw/os contract tripwire)
+all: contract-check $(FW_TARGET).bin $(FW_TARGET).mif $(FW_TARGET).lst $(BLD)/os.bin
 	$(SIZE) $(FW_TARGET).elf
 
 # Link
@@ -285,8 +287,14 @@ $(FW_TARGET).mif: $(FW_TARGET).elf
 # and streams the .rodata / .data portion directly to its SDRAM VMA.
 # `make os.bin` — the target-agnostic name the FPGA target Makefiles invoke
 # ($(FW_MAKE) os.bin); alias it to this target's bld/<target>/os.bin.
-.PHONY: os.bin
-os.bin: $(BLD)/os.bin
+.PHONY: os.bin contract-check
+os.bin: contract-check $(BLD)/os.bin
+
+# Fails the build when a contract-surface file (register map, memory
+# boundaries, app.ld, caps ABI) changed without an explicit decision --
+# see tools/contract-check.sh for the bless/bump flow.
+contract-check:
+	@bash ../../../tools/contract-check.sh
 
 $(BLD)/os.bin: $(FW_TARGET).elf
 	@mkdir -p $(BLD)
@@ -363,8 +371,8 @@ $(BLD)/lib/iso9660/%.o: $(ISO9660_DIR)/%.c
 DEPS = $(OBJS:.o=.d)
 -include $(DEPS)
 
-# Install MIF to FPGA
-install: $(FW_TARGET).mif
+# Install MIF to FPGA (contract-checked: boot.c compiles against regs.h)
+install: contract-check $(FW_TARGET).mif
 	@mkdir -p $(FPGA_CORE_DIR)
 	cp $(FW_TARGET).mif $(FPGA_CORE_DIR)/firmware.mif
 	@echo "MIF installed to $(FPGA_CORE_DIR)/firmware.mif"

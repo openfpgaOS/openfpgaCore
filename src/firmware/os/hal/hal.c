@@ -43,9 +43,16 @@ static void uart_dbg_puts(const char *s) {
 }
 #endif
 
-void of_init(void) {
+/* Early bring-up: ONLY the contract-stable surfaces (CLK_FREQ_REG
+ * fallback idiom, caches, timer, video, terminal) — enough to print a
+ * banner and measure time.  os_main() runs the HW_CONTRACT_REV
+ * handshake and the boot memtest between the two phases, so a
+ * mismatched core/os pair halts readably BEFORE the full register
+ * surface (input/disk/file/mixer/save/analogizer/link) is touched,
+ * and the memtest probes its windows before any FS/bridge traffic
+ * exists.  Relaunch callers keep using of_init() = early + late. */
+void of_init_early(void) {
     uart_dbg_puts("[init] enter\n");
-    uint32_t features = HW_FEATURES;
 
     /* Adopt the bitstream's advertised clock before anything derives time
      * from CPU_FREQ_HZ.  Plausibility-gated (50-150 MHz): 0 = register not
@@ -62,6 +69,11 @@ void of_init(void) {
     of_video_init();
     uart_dbg_puts("[init] term..\n");
     of_term_init();
+}
+
+void of_init_late(void) {
+    uint32_t features = HW_FEATURES;
+
     uart_dbg_puts("[init] input..\n");
     of_input_init();
     /* of_disk_init must run before of_file_init: the latter's
@@ -100,4 +112,9 @@ void of_init(void) {
         of_link_init(LINK_MODE_SLAVE);
     }
     uart_dbg_puts("[init] done\n");
+}
+
+void of_init(void) {
+    of_init_early();
+    of_init_late();
 }

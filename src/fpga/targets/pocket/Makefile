@@ -379,6 +379,21 @@ compile: build
 # with the VERILOG_MACROs + SEED baked into $(BDIR)/ap_core.qsf.
 build: $(VEXII_OUT) bootloader $(BDIR)/ap_core.qsf
 	@test -n "$(SEED)" || { printf "$(C_ERR)[fpga] No seed stored for VARIANT=$(VARIANT) — expected $(SEED_FILE)$(C_RESET)\n"; exit 1; }
+	@# Seed/netlist pairing guard: a stored seed is only meaningful on the
+	@# exact netlist it was swept on — ANY RTL delta reshuffles placement
+	@# (a one-constant UART change turned a swept -0.156 into a shipped
+	@# -1.083/-346 black-screen fit, 2026-08-02).  Warn, don't fail: a
+	@# deliberate rebuild mid-work is fine, shipping one is not.
+	@if [ -f "$(SEED_FILE).src" ] && [ -f $(ROOT_DIR)/tools/netlist_hash.sh ]; then \
+		. $(ROOT_DIR)/tools/netlist_hash.sh; \
+		now=$$(netlist_hash "$(BDIR)/ap_core.qsf"); \
+		want=$$(cat "$(SEED_FILE).src"); \
+		if [ "$$now" != "$$want" ]; then \
+			printf "$(C_ERR)[fpga] WARNING: netlist changed since VARIANT=$(VARIANT) was swept —$(C_RESET)\n"; \
+			printf "$(C_ERR)        seed $(SEED) is a placement lottery ticket on this netlist.$(C_RESET)\n"; \
+			printf "$(C_ERR)        Re-run: make sweep VARIANT=$(VARIANT) (then build) before shipping.$(C_RESET)\n"; \
+		fi; \
+	fi
 	@printf "$(C_HEAD)[fpga]$(C_RESET) Container compile (VARIANT=$(VARIANT), JOB=$(JOB), seed $(SEED), dir $(BDIR))...\n"
 	@bash $(ROOT_DIR)/tools/quartus-container.sh "$(CURDIR)/$(BDIR)"
 	@$(MAKE) --no-print-directory install-bitstream

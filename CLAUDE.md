@@ -186,6 +186,33 @@ make check-api         # verify the cross-target app .elf contract
 ```
 The OS is selected by the same `.target` mechanism. `boot.c` (`.text.boot` → BRAM → `firmware.mif`) is baked into the bitstream — changing it needs a `make firmware` MIF-patch (or a full refit), **not** just a new `os.bin`.
 
+## Hardware/OS contract (fw ↔ os.bin pairing)
+
+The bitstream and os.bin share a contract — register map, memory boundaries
+(`target_platform.h`, both `app.ld` copies), caps ABI. A mismatched pair used to
+boot into a blank screen / trap cascade. Three guards now cover it:
+
+- **Boot handshake** — `HW_CONTRACT_REV` (`axi_periph_slave.v`, sysreg 0x8C) vs
+  `OS_EXPECTED_HW_CONTRACT` (`hal/regs.h`). Nonzero mismatch = halt with a
+  readable banner; pre-versioning cores (read 0) warn and continue. **Bump BOTH
+  in the same commit** for any breaking register/memory-map change.
+- **Boot memtest** (`hal/memtest.c`) — catches the physical layer no version
+  number can: controller interleave changes, DDIO DQ capture regressions,
+  timing-marginal cores. Prints region/addr/wrote/read on failure and halts.
+- **Contract tripwire** (`tools/contract-check.sh`, run by every os.bin build) —
+  fails the build when a contract-surface file changes without an explicit
+  decision. Breaking → bump both revs, then `tools/contract-check.sh --bless`;
+  additive → just re-bless. Commit `.contract.md5` with the change.
+
+**Policy: prefer additive changes.** New behavior lands at new addresses behind a
+new `HW_FEATURES`/caps bit (the `CLK_HZ` fallback idiom); existing registers keep
+their meaning. The rev should move rarely. Semantics-only changes (same fields,
+new meaning) evade the tripwire — those still rely on the manual bump rule.
+
+`make sdk` writes `runtime/MANIFEST` (md5s of the atomically published set);
+consumer `image.sh` refuses to assemble a hand-mixed runtime. Ship rbf + os.bin
+from ONE tree — `make full VARIANT=<v>`, then `make sdk DEST=…`.
+
 ## Tests (Verilator)
 
 ```bash

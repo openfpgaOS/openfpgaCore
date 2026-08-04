@@ -54,7 +54,7 @@ C_HEAD='\033[1m'; C_OK='\033[32m'; C_WARN='\033[33m'; C_ERR='\033[31m'
 C_DIM='\033[2m'; C_RESET='\033[0m'
 
 TOTAL=$(( MAX - MIN + 1 ))
-declare -A R_WNS R_TNS R_FMAX
+declare -A R_WNS R_TNS R_FMAX R_DQ
 
 # parse_sta <sta.rpt> -> sets _wns _tns _fmax (restricted Fmax on CLOCK_RE).
 parse_sta() {
@@ -98,7 +98,14 @@ if [ "$USE_CONTAINER" = 1 ]; then
         # Harvest this seed's numbers NOW (subshell-local parse; single-line
         # O_APPEND write is atomic across the MAXJOBS parallel jobs).
         parse_sta "bld/$job/output_files/${PROJECT}.sta.rpt"
-        printf "%s|%s|%s|%s\n" "$s" "$_wns" "$_tns" "$_fmax" >> "$RESULTS"
+        # Per-class DQ-capture slack (path-class-blind ranking shipped the
+        # blank-booting s23 and the read-marginal s41; see sta_dq.tcl).
+        local _dq=""
+        if [ -f "$TOOLS/sta_dq.tcl" ]; then
+            cp "$TOOLS/sta_dq.tcl" "bld/$job/" 2>/dev/null
+            _dq=$(bash "$TOOLS/quartus-container.sh" "$TARGET_DIR/bld/$job"                     quartus_sta -t sta_dq.tcl 2>/dev/null                   | grep -o 'DQCLASS_WNS=[-0-9.]*' | head -1 | cut -d= -f2)
+        fi
+        printf "%s|%s|%s|%s|%s\n" "$s" "$_wns" "$_tns" "$_fmax" "$_dq" >> "$RESULTS"
         if [ -n "$_wns" ]; then
             printf "  seed %-3s ${C_DIM}fit done:${C_RESET} WNS %-9s TNS %s\n" "$s" "$_wns" "${_tns:--}"
         else
@@ -114,8 +121,8 @@ if [ "$USE_CONTAINER" = 1 ]; then
 
     # Load the harvested results; fall back to a live dir parse only for a
     # seed whose line is missing AND whose scratch dir still exists.
-    while IFS='|' read -r s w t f; do
-        R_WNS[$s]=$w; R_TNS[$s]=$t; R_FMAX[$s]=$f
+    while IFS='|' read -r s w t f d; do
+        R_WNS[$s]=$w; R_TNS[$s]=$t; R_FMAX[$s]=$f; R_DQ[$s]=${d:-}
     done < "$RESULTS"
     for s in $(seq "$MIN" "$MAX"); do
         [ -n "${R_WNS[$s]:-}" ] && continue
@@ -165,15 +172,50 @@ fi
 # ── Rank by setup WNS on the target clock (robust; fmax ~ 1/(T-wns)) ─────
 echo ""
 printf "${C_HEAD}Results:${C_RESET}\n"
+# Winner policy (2026-08-01, after the s41/s21/s23 field failures):
+#   1. VETO any seed whose DQ-capture class WNS is worse than SWEEP_DQ_VETO
+#      (default -0.40): those read-marginal placements boot-loop or corrupt
+#      reads in the field regardless of global WNS.
+#   2. Shortlist the WNS band: every surviving seed within 0.10 ns of the
+#      best WNS (at a clamped WNS floor the band is where the information is).
+#   3. Winner = smallest |TNS| in the band (fewest paths hovering at the
+#      wall -- pure argmax-WNS picked the field-corrupting s41 over s43/s48).
+DQ_VETO=${SWEEP_DQ_VETO:--0.40}
 BEST=""; BEST_WNS=""
+declare -A R_VETO
 for s in $(seq "$MIN" "$MAX"); do
     w=${R_WNS[$s]:-}
     if [ -z "$w" ]; then printf "  ${C_ERR}seed %-3s failed${C_RESET}\n" "$s"; continue; fi
-    printf "  seed %-3s Fmax %-10s WNS %-9s TNS %s\n" "$s" "${R_FMAX[$s]:--}" "$w" "${R_TNS[$s]:--}"
+    dq=${R_DQ[$s]:-}
+    veto=""
+    if [ -n "$dq" ] && awk -v a="$dq" -v v="$DQ_VETO" 'BEGIN{exit !(a<v)}'; then
+        veto=" ${C_ERR}(DQ ${dq} < ${DQ_VETO}: VETOED)${C_RESET}"
+        R_VETO[$s]=1
+    fi
+    printf "  seed %-3s Fmax %-10s WNS %-9s TNS %-9s DQ %s%b\n"         "$s" "${R_FMAX[$s]:--}" "$w" "${R_TNS[$s]:--}" "${dq:--}" "$veto"
+    [ -n "$veto" ] && continue
     if [ -z "$BEST" ] || awk -v a="$w" -v b="$BEST_WNS" 'BEGIN{exit !(a>b)}'; then
         BEST=$s; BEST_WNS=$w
     fi
 done
+if [ -n "$BEST" ]; then
+    BAND_MIN=$(awk -v b="$BEST_WNS" 'BEGIN{printf "%.3f", b-0.10}')
+    W_SEED=""; W_ABS_TNS=""
+    for s in $(seq "$MIN" "$MAX"); do
+        w=${R_WNS[$s]:-}; [ -z "$w" ] && continue
+        [ -n "${R_VETO[$s]:-}" ] && continue
+        awk -v a="$w" -v m="$BAND_MIN" 'BEGIN{exit !(a>=m)}' || continue
+        t=${R_TNS[$s]:-0}
+        at=$(awk -v t="$t" 'BEGIN{printf "%.3f", (t<0)?-t:t}')
+        if [ -z "$W_SEED" ] || awk -v a="$at" -v b="$W_ABS_TNS" 'BEGIN{exit !(a<b)}'; then
+            W_SEED=$s; W_ABS_TNS=$at
+        fi
+    done
+    if [ -n "$W_SEED" ] && [ "$W_SEED" != "$BEST" ]; then
+        printf "  ${C_WARN}band pick: seed %s (|TNS| %s) over argmax-WNS seed %s${C_RESET}\n"             "$W_SEED" "$W_ABS_TNS" "$BEST"
+        BEST=$W_SEED; BEST_WNS=${R_WNS[$W_SEED]}
+    fi
+fi
 
 if [ -z "$BEST" ]; then printf "\n${C_ERR}[sweep] All seeds failed${C_RESET}\n"; exit 1; fi
 
@@ -188,6 +230,16 @@ echo ""
 if [ -n "${SEED_FILE:-}" ]; then
     printf "%s\n" "$BEST" > "$SEED_FILE"
     printf "${C_OK}[sweep]${C_RESET} stored seed $BEST → $SEED_FILE\n"
+    # Fingerprint the exact netlist this seed was ranked on (sources +
+    # macros from the winning job's generated qsf).  `make build` compares
+    # and warns loudly: a seed on a changed netlist is a placement lottery.
+    if [ -f "$TOOLS/netlist_hash.sh" ]; then
+        . "$TOOLS/netlist_hash.sh"
+        _bq="bld/${VARIANT}-s${BEST}/ap_core.qsf"
+        [ -f "$_bq" ] || _bq="${PROJECT}.qsf"
+        netlist_hash "$_bq" > "${SEED_FILE}.src"
+        printf "${C_OK}[sweep]${C_RESET} netlist fingerprint → ${SEED_FILE}.src\n"
+    fi
 fi
 
 # In-place mode rebuilds the best seed where it swept (MiSTer relies on the

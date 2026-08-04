@@ -10,10 +10,13 @@
  *   KEY[31:28] = OF_INPUT_TYPE_MOUSE, KEY[15:0] = report counter,
  *   JOY[31:16] = buttons, JOY[15:0] = X, TRIG[15:0] = Y
  *   (signed 16-bit, positive Y is down per HID convention).
- * The X/Y field semantics differ per target: the Pocket APF dock reports
- * per-report deltas, MiSTer's encoder exposes free-running wrapping
+ * The X/Y field semantics differ per target: the Pocket APF dock packs
+ * TWO consecutive samples' int8 deltas per 16-bit field ({a<<8 | b}; the
+ * report's true delta is (int8)a + (int8)b -- decoding the field as one
+ * int16 turns every negative low-byte sample into a phantom +256, a
+ * down-right drift), MiSTer's encoder exposes free-running wrapping
  * accumulators (delta = (int16_t)(now - prev), lossless under pure
- * polling).  Both dedup on the report counter, so decoding the same
+ * polling).  All modes dedup on the report counter, so decoding the same
  * register snapshot twice (IRQ path + poll fallback) is idempotent.
  */
 
@@ -23,8 +26,9 @@
 #include <stdint.h>
 #include "of_input_types.h"
 
-#define HID_MOUSE_XY_DELTA  0u  /* X/Y are per-report deltas (Pocket) */
+#define HID_MOUSE_XY_DELTA  0u  /* X/Y are int16 per-report deltas */
 #define HID_MOUSE_XY_ACCUM  1u  /* X/Y are wrapping accumulators (MiSTer) */
+#define HID_MOUSE_XY_PAIR8  2u  /* X/Y pack two int8 sample deltas (Pocket dock) */
 
 /* App-visible state plus decode context.  state.dx/dy AND the
  * pressed/released edge masks accumulate across reports until a
@@ -35,6 +39,7 @@ typedef struct {
     uint16_t prev_buttons;
     uint16_t prev_report_counter;
     uint16_t prev_x, prev_y;
+    uint16_t added_x, added_y;  /* DELTA mode: payload credited for prev_report_counter */
     uint8_t  report_valid;
     uint8_t  xy_mode;
 } hid_mouse_t;

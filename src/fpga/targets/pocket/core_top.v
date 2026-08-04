@@ -211,6 +211,7 @@ assign bridge_endian_little = 1;
 reg [31:0] analogizer_settings = 32'd0;
 reg [31:0] signed_hoff = 32'd0;
 reg [31:0] signed_voff = 32'd0;
+reg [31:0] mouse_speed = 32'd0;   // "Mouse Speed %" slider (0xF700000C); 0 = unset
 
 // App ID from instance JSON memory_writes (bridge 0xF7000010)
 reg [31:0] app_id_74a;
@@ -223,6 +224,7 @@ end
 reg [31:0] analogizer_settings_cpu_s1, analogizer_settings_cpu;
 reg [31:0] signed_hoff_cpu_s1, signed_hoff_cpu;
 reg [31:0] signed_voff_cpu_s1, signed_voff_cpu;
+reg [31:0] mouse_speed_cpu_s1, mouse_speed_cpu;
 reg [31:0] analogizer_settings_core_s1, analogizer_settings_core;
 reg [31:0] signed_hoff_core_s1, signed_hoff_core;
 reg [31:0] signed_voff_core_s1, signed_voff_core;
@@ -235,6 +237,8 @@ always @(posedge clk_cpu) begin
   signed_hoff_cpu            <= signed_hoff_cpu_s1;
   signed_voff_cpu_s1         <= signed_voff;
   signed_voff_cpu            <= signed_voff_cpu_s1;
+  mouse_speed_cpu_s1         <= mouse_speed;
+  mouse_speed_cpu            <= mouse_speed_cpu_s1;
 end
 
 always @(posedge clk_core_49152) begin
@@ -1159,7 +1163,10 @@ sram_controller #(
 
 // ============================================================
 // UART (2 Mbaud, 8N1): DevKey/Cartridge service interface.
-// CLKS_PER_BIT = clk_cpu / 2_000_000.  clk_cpu is set in
+// CLKS_PER_BIT = clk_cpu / 2_000_000, so it MUST follow the CPU-clock
+// variant or the stream arrives bit-slipped (90 MHz at the 100 MHz
+// divisor = 10% baud error = every byte left-shifted one bit).
+// clk_cpu is set in
 // mf_pllram_133.v output_clock_frequency0; any change there MUST
 // update this divisor, or the host will see a baud-rate mismatch
 // and silently drop every byte.
@@ -1174,7 +1181,7 @@ wire [7:0]  uart_tx_byte;
 wire        uart_rx_dv;
 wire [7:0]  uart_rx_byte;
 
-uart_tx #(.CLKS_PER_BIT(50)) uart_tx_inst (
+uart_tx #(.CLKS_PER_BIT(`ifdef INCLUDE_CLK90 45 `elsif INCLUDE_CLK96 48 `else 50 `endif)) uart_tx_inst (
     .i_Clock(clk_cpu),
     .i_Tx_DV(uart_tx_dv),
     .i_Tx_Byte(uart_tx_byte),
@@ -1183,7 +1190,7 @@ uart_tx #(.CLKS_PER_BIT(50)) uart_tx_inst (
     .o_Tx_Done(uart_tx_done)
 );
 
-uart_rx #(.CLKS_PER_BIT(50)) uart_rx_inst (
+uart_rx #(.CLKS_PER_BIT(`ifdef INCLUDE_CLK90 45 `elsif INCLUDE_CLK96 48 `else 50 `endif)) uart_rx_inst (
     .i_Clock(clk_cpu),
     .i_Rx_Serial(uart_rx_serial),  // Gated: idle-high when SNAC active
     .o_Rx_DV(uart_rx_dv),
@@ -1213,6 +1220,17 @@ wire            ram1_word_wr_data_next;
 wire            ram1_word_wr_done;
 wire    [31:0]  ram1_word_q;
 wire            ram1_word_busy;
+wire            ram1_word_queue_pending;
+
+// Sticky count of SDRAM write-burst refusals: B=SLVERR only ever comes
+// from the slave's WLAST cross-checks, so each count is a CONTAINED
+// would-have-been +8-shift corruption (the upstream W elastic replayed
+// a beat pair and the burst was refused instead of committed skewed).
+// Read-only at sysreg 0xCC; bready is tied high so bvalid is 1-cycle.
+reg [31:0] sdram_wlast_errs = 32'd0;
+always @(posedge clk_ram_controller)
+    if (arb_s_bvalid && arb_s_bresp == 2'b10)
+        sdram_wlast_errs <= sdram_wlast_errs + 32'd1;
 wire            ram1_word_q_valid;
 
 // axi_sdram_slave word-level outputs (held signals, need pulse conversion)
@@ -1621,6 +1639,10 @@ always @(posedge clk_74a) begin
         //the byte order is inverted because the bridge_endian_little = 1
         bridge_rd_data <= {signed_hoff[7:0],signed_hoff[15:8],signed_hoff[23:16],signed_hoff[31:24]}; //signed_hoff;
         end
+        32'hF700000C: begin
+        //the byte order is inverted because the bridge_endian_little = 1
+        bridge_rd_data <= {mouse_speed[7:0],mouse_speed[15:8],mouse_speed[23:16],mouse_speed[31:24]};
+        end
         32'hF7000008: begin
         //the byte order is inverted because the bridge_endian_little = 1
         bridge_rd_data <= {signed_voff[7:0],signed_voff[15:8],signed_voff[23:16],signed_voff[31:24]}; //signed_voff;
@@ -1656,6 +1678,12 @@ always @(posedge clk_74a) begin
         bridge_wr_data[31:24]};
 
         32'hF7000004: signed_hoff <= {
+        bridge_wr_data[7:0],
+        bridge_wr_data[15:8],
+        bridge_wr_data[23:16],
+        bridge_wr_data[31:24]};
+
+        32'hF700000C: mouse_speed <= {
         bridge_wr_data[7:0],
         bridge_wr_data[15:8],
         bridge_wr_data[23:16],
@@ -2533,7 +2561,7 @@ assign video_hs = vidout_hs;
         // must track the mp_ram PLL selection above.  Firmware reads it at
         // boot (fallback: compile-time OF_TARGET_CPU_FREQ_HZ when 0), so
         // ONE os.bin serves 100 MHz and 96 MHz bitstreams alike.
-        .CLK_HZ(`ifdef INCLUDE_CLK96 32'd96_000_000 `else 32'd100_000_000 `endif),
+        .CLK_HZ(`ifdef INCLUDE_CLK90 32'd90_000_000 `elsif INCLUDE_CLK96 32'd96_000_000 `else 32'd100_000_000 `endif),
         // ANALOGIZER (HW_FEATURES bit 3): the SNAC instances inside
         // axi_periph_slave.v gate on this; clear → they constant-fold away.
         .INCLUDE_ANALOGIZER(`ifdef INCLUDE_ANALOGIZER 1 `else 0 `endif),
@@ -2721,6 +2749,8 @@ assign video_hs = vidout_hs;
         .analogizer_settings(analogizer_settings_cpu),
         .analogizer_hoffset(signed_hoff_cpu),
         .analogizer_voffset(signed_voff_cpu),
+        .mouse_speed_pct(mouse_speed_cpu),
+        .sdram_wlast_err(sdram_wlast_errs),
         .analogizer_cpu_wr_toggle(analogizer_cpu_wr_toggle),
         .analogizer_cpu_wr_settings(analogizer_cpu_wr_settings),
         .analogizer_cpu_wr_hoffset(analogizer_cpu_wr_hoffset),
@@ -2771,7 +2801,13 @@ assign video_hs = vidout_hs;
         if (!sdram_slave_rd && !sdram_slave_wr)
             sdram_cmd_forwarded <= 0;
 
-        if (!ram1_word_busy && !sdram_cmd_forwarded &&
+        // Gate on QUEUE occupancy, not word_busy: io_sdram accepts ops
+        // into its 1-deep queue at any time, and only a queued op arms
+        // burst_defer_word against the next scanout grant.  Gating on
+        // word_busy meant sustained scanout kept busy high forever, the
+        // op never entered the queue, and the whole fabric livelocked
+        // (storm-seed reproduction, 2026-08-01).
+        if (!ram1_word_queue_pending && !sdram_cmd_forwarded &&
             (sdram_slave_rd || sdram_slave_wr)) begin
             ram1_word_rd <= sdram_slave_rd;
             ram1_word_wr <= sdram_slave_wr;
@@ -2912,7 +2948,7 @@ assign video_hs = vidout_hs;
         .sdram_burst_len(sdram_slave_burst_len),
         .sdram_burst_wr_len(sdram_slave_burst_wr_len),
         .sdram_rdata(ram1_word_q),
-        .sdram_busy(ram1_word_busy),
+        .sdram_busy(ram1_word_queue_pending),  // "busy" to the slave = queue occupied (see adapter note)
         .sdram_accepted(sdram_accepted_r),
         .sdram_rdata_valid(ram1_word_q_valid),
         .sdram_wr_data_next(sdram_slave_wr_data_next),
@@ -3622,7 +3658,9 @@ mf_pllbase mp1 (
 // derived-clock paths (ic|mp_ram|altera_pll_i|...) hold for both.  The
 // actual frequency is advertised to firmware via CLK_FREQ_HZ (sysreg 0xD4,
 // CLK_HZ parameter on axi_periph_slave below).
-`ifdef INCLUDE_CLK96
+`ifdef INCLUDE_CLK90
+mf_pllram_90 mp_ram (
+`elsif INCLUDE_CLK96
 mf_pllram_96 mp_ram (
 `else
 mf_pllram_133 mp_ram (
@@ -3663,6 +3701,11 @@ io_sdram #(
     .BANK_ROW_TRACK(1)
 `else
     .BANK_ROW_TRACK(0)
+`endif
+`ifdef INCLUDE_CLK90
+    // 90 MHz: rescale the refresh divider (736 x 11.11 ns = 8.18 us would
+    // violate tREFI 7.8125 us; 660 x 11.11 ns = 7.33 us, margin 6.1%).
+    , .REFRESH_INTERVAL(10'd660)
 `endif
 ) isr0 (
     .controller_clk ( clk_ram_controller ),
@@ -3710,6 +3753,7 @@ io_sdram #(
     .word_burst_wr_len ( ram1_word_burst_wr_len ),
     .word_q     ( ram1_word_q ),
     .word_busy  ( ram1_word_busy ),
+    .word_queue_pending ( ram1_word_queue_pending ),
     .word_q_valid ( ram1_word_q_valid ),
     .word_wr_data_next ( ram1_word_wr_data_next ),
     .word_wr_done ( ram1_word_wr_done ),

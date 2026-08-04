@@ -10,6 +10,7 @@
  */
 
 #include "../hal/hal.h"
+#include "../hal/memtest.h"
 #include "syscall.h"
 #include "loader.h"
 #include "caps_table.h"
@@ -384,8 +385,63 @@ void os_main(void) {
      * brackets where the runtime .text corruption first appears. */
     os_textguard_baseline();
 
-    /* Initialize all hardware */
-    of_init();
+    /* Bring up ONLY the contract-stable HAL surfaces (clocks, cache,
+     * timer, video, terminal) — enough to print.  The rest of the
+     * register map is not touched until the handshake and memtest
+     * below have vouched for the core/os pairing. */
+    of_init_early();
+
+    /* Boot stage: red logo = OS initializing */
+    boot_logo("\033[91m");  /* red */
+
+    /* Firmware/bitstream contract handshake.  A mismatched pair used to
+     * boot into undefined behaviour -- blank screen or a trap cascade
+     * with a garbled console that took a night to diagnose.  Halt with a
+     * readable banner instead; only term/video and the timer have been
+     * initialized at this point, both stable across every contract
+     * revision -- a mismatched core cannot wedge us before the banner. */
+    {
+        uint32_t hw_rev = HW_CONTRACT_REV;
+        if (hw_rev == 0) {
+            /* Pre-versioning bitstream: can't verify, warn and proceed so
+             * firmware can still be iterated against existing cores. */
+            of_term_puts("\n  \033[93mWARN: pre-versioning bitstream -- core/os"
+                         " contract unverified\033[0m\n\n");
+            of_timer_delay_ms(3000);
+        } else if (hw_rev != OS_EXPECTED_HW_CONTRACT) {
+            for (;;) {
+                of_term_printf("\n  \033[91mCORE/OS CONTRACT MISMATCH\033[0m\n"
+                               "  core bitstream: rev %u\n"
+                               "  this os.bin   : rev %u\n"
+                               "  Rebuild and deploy BOTH from one tree:\n"
+                               "  make full VARIANT=<v>, then ship rbf + os.bin together.\n",
+                               (unsigned)hw_rev,
+                               (unsigned)OS_EXPECTED_HW_CONTRACT);
+                of_timer_delay_ms(3000);
+            }
+        }
+    }
+
+    /* Physical-layer check the contract handshake can't make: controller
+     * interleave / DQ-capture mismatches and timing-marginal cores all
+     * present as scrambled memory.  Runs before the FS/app half of HAL
+     * bring-up (of_init_late below) -- of_memtest_boot() writes to
+     * windows that carry no traffic yet. */
+    of_term_puts("  Memory check...... ");
+    if (of_memtest_boot() == 0) {
+        status_ok();
+    } else {
+        status_fail();
+        for (;;) {
+            of_term_puts("  \033[91mMemory integrity FAILED\033[0m -- core/os pairing or hardware fault.\n"
+                         "  Rebuild and deploy rbf + os.bin from ONE tree (make full VARIANT=<v>).\n");
+            of_timer_delay_ms(3000);
+        }
+    }
+
+    /* Core/os pairing verified: bring up the rest of the HAL (input,
+     * disk, file, mixer, save, analogizer, link). */
+    of_init_late();
     of_irq_enable_cpu();
     /* On a SW-audio-mixer build (of_mixer_use_sw, e.g. OS30) the OS owns a
      * permanent 1 kHz machine-timer tick that drives the CPU DAC pump
@@ -393,9 +449,6 @@ void os_main(void) {
      * arm the timer via MIDI playback.  No-op on HW-mixer builds. */
     of_os_timer_boot_arm();
     os_textguard_check("after of_init");
-
-    /* Boot stage: red logo = OS initializing */
-    boot_logo("\033[91m");  /* red */
 
     /* Boot stage: green logo = HAL ready */
     boot_logo("\033[92m");  /* green */

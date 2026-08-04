@@ -75,7 +75,11 @@ static uint32_t analogizer_pack_settings(const of_analogizer_state_t *s) {
  * hardware).  analogizer_pack_settings() never sets these bits, so every
  * write-back must OR back the current hardware value or the per-frame
  * normalize in of_analogizer_refresh() would reset the user's choice. */
-#define ANLG_PRESERVED_SETTINGS_MASK 0x000F0000u
+/* Widened 19:16 -> 23:16 (2026-07-30): bits 22:20 carry the "Mouse
+ * Speed" interact variable (read by apps straight off the settings
+ * sysreg); 23 is spare.  analogizer_pack_settings() never produces
+ * bits above 15, so preserving the whole byte is free. */
+#define ANLG_PRESERVED_SETTINGS_MASK 0x00FF0000u
 
 static void analogizer_write_settings(uint32_t packed) {
     ANALOGIZER_SETTINGS = (packed & ~ANLG_PRESERVED_SETTINGS_MASK) |

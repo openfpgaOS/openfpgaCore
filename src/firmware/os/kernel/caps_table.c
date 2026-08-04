@@ -40,6 +40,10 @@ void caps_table_init(uintptr_t heap_base) {
 
     caps->magic   = OF_CAPS_MAGIC;
     caps->version = OF_CAPS_VERSION;
+    /* This OS decodes the dock's packed mouse sample pairs to counts
+     * (hal/hid_mouse.c HID_MOUSE_XY_PAIR8); advertise so apps skip
+     * their raw-pair fallback decode. */
+    caps->os_features = OF_OS_FEAT_MOUSE_COUNTS;
 
     /* Memory regions */
     caps->heap_base   = (uint32_t)heap_base;

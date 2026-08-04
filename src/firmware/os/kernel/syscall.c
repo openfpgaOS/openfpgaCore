@@ -1794,9 +1794,22 @@ static long sys_clock_nanosleep_time64(long clk_id, long flags,
  * app pulling in many small allocations of diverse sizes can easily
  * hold hundreds of concurrent slabs once a larger C++ game/runtime has
  * menus, resource tables, file readers, and texture state alive at the
- * same time.  1024 costs 12 KB of OS BSS and avoids false ENOMEM when
- * SDRAM is still available. */
-#define MMAP_SLOTS 1024
+ * same time.
+ *
+ * Raised 1024 -> 4096 after DevilutionX (Diablo, issue #4) wedged the
+ * allocator on hardware: a 42 KB request returned ENOMEM with 48 MB of
+ * arena still free.  A full table makes EVERY carve fail, so the only
+ * requests still served are those reusing a free region — which is why the
+ * failure looked so strange from userspace (a 16 MB allocation succeeding
+ * moments after a 41 KB one failed).  Reproduced on the host against these
+ * exact sources: 1024 slots wedge after ~4 MB of live mappings, and the
+ * arena size is irrelevant to it.  4096 costs 48 KB of OS BSS. */
+#define MMAP_SLOTS 4096
+
+/* Do not leave slivers behind when splitting a reused region: a remainder
+ * smaller than this is handed out with the allocation instead of costing a
+ * slot to track. One page is the smallest unit sys_mmap2 deals in. */
+#define MMAP_MIN_SPLIT 4096u
 
 typedef struct {
     uintptr_t base;     /* 0 = slot unused */
@@ -1806,6 +1819,8 @@ typedef struct {
 
 static mmap_slot_t mmap_slots[MMAP_SLOTS];
 static int         mmap_slots_used;
+
+static int mmap_alloc_slot(void);   /* used by the splitting reuse path */
 
 static void mmap_coalesce_bottom(void) {
     /* Walk free slots; any free slot whose BASE equals mmap_bottom
@@ -1837,24 +1852,87 @@ static void mmap_coalesce_bottom(void) {
     } while (changed);
 }
 
+/* Merge adjacent free regions into one slot.
+ *
+ * Without this the table leaks an entry per distinct freed size: reuse used
+ * to be exact-fit, so a free region of the "wrong" size was dead space AND a
+ * permanently occupied slot.  Merging reclaims the slot and, just as
+ * importantly, rebuilds large contiguous free regions out of neighbouring
+ * small ones so best-fit below can actually satisfy a big request.
+ *
+ * O(n^2) to fixed point, so it is deliberately NOT on the fast path — only
+ * sys_mmap2's failure path calls it, right before it would have returned
+ * ENOMEM. A rare quadratic sweep over 4096 slots is far cheaper than a
+ * spurious allocation failure. */
+static void mmap_merge_free(void) {
+    int changed;
+    do {
+        changed = 0;
+        for (int i = 0; i < MMAP_SLOTS; i++) {
+            mmap_slot_t *s = &mmap_slots[i];
+            if (!s->base || !s->free)
+                continue;
+            for (int j = 0; j < MMAP_SLOTS; j++) {
+                mmap_slot_t *t = &mmap_slots[j];
+                if (i == j || !t->base || !t->free)
+                    continue;
+                if (s->base + s->len == t->base) {
+                    s->len += t->len;
+                    t->base = 0;
+                    t->len  = 0;
+                    t->free = 0;
+                    mmap_slots_used--;
+                    changed = 1;
+                }
+            }
+        }
+    } while (changed);
+}
+
+/* Best fit over the free regions, splitting the remainder back into the
+ * table when it is worth tracking.
+ *
+ * This replaces an exact-fit-only search.  The old comment here warned that
+ * splitting risked handing back memory whose head mallocng might still read;
+ * that concern does not apply to what we do now, because a split only ever
+ * hands out a region the app had already munmapped in full, and the returned
+ * range is zeroed before it is handed over exactly as a fresh carve is.
+ * Keeping exact-fit-only, by contrast, was actively harmful: it guaranteed
+ * that a workload allocating varied sizes could never reuse anything.
+ *
+ * Returns the slot index to hand out, or -1.  On success the slot's len is
+ * the caller's requested length, so sys_munmap's bookkeeping stays exact. */
 static int mmap_find_reusable(uintptr_t want_len) {
-    /* Exact-fit only.  Splitting a larger free slot and returning the
-     * tail has correctness pitfalls (mallocng's metadata in the head
-     * part can be read through the mmap arena even after we mark it
-     * reusable), so we trade the potential fragmentation for
-     * predictability: a slot is reused only when an earlier munmap
-     * released exactly the size now being requested.  mallocng's
-     * usage pattern is size-class driven and usually does this — the
-     * 48 MB malloc/free loop in testdemo's test_malloc frees each
-     * mmap at the same size it was allocated at, so exact-fit alone
-     * recovers all of it.  Anything without an exact match falls
-     * through to carve-from-top. */
+    int best = -1;
     for (int i = 0; i < MMAP_SLOTS; i++) {
         mmap_slot_t *s = &mmap_slots[i];
-        if (!s->base || !s->free) continue;
-        if (s->len == want_len) return i;
+        if (!s->base || !s->free || s->len < want_len)
+            continue;
+        if (best < 0 || s->len < mmap_slots[best].len)
+            best = i;
     }
-    return -1;
+    if (best < 0)
+        return -1;
+
+    mmap_slot_t *s = &mmap_slots[best];
+    uintptr_t excess = s->len - want_len;
+    if (excess >= MMAP_MIN_SPLIT) {
+        /* Track the tail as its own free region. If no slot is spare the
+         * split cannot be recorded, so hand the whole region over rather
+         * than lose track of the tail -- see the len note below. */
+        int extra = mmap_alloc_slot();
+        if (extra >= 0) {
+            mmap_slots[extra].base = s->base + want_len;
+            mmap_slots[extra].len  = excess;
+            mmap_slots[extra].free = 1;
+            mmap_slots_used++;
+            s->len = want_len;
+        }
+    }
+    /* s->len may still exceed want_len when the split was skipped. That is
+     * safe: sys_munmap matches on base and uses the recorded length, so the
+     * region is returned whole. */
+    return best;
 }
 
 static int mmap_alloc_slot(void) {
@@ -1933,8 +2011,37 @@ static long sys_mmap2(long addr, long length, long prot,
      * fail the allocation rather than losing track of it — a leaked
      * region would cause munmap to not find it and corruption later. */
     int slot = mmap_alloc_slot();
-    if (slot < 0)
+    if (slot < 0) {
+        /* Last chance: fold adjacent free regions together, which both
+         * frees slots and may expose a region big enough to reuse outright.
+         * Only reached when we would otherwise have returned ENOMEM, so the
+         * quadratic sweep costs nothing in steady state. */
+        mmap_merge_free();
+        int reuse2 = mmap_find_reusable(len_aligned);
+        if (reuse2 >= 0) {
+            mmap_slot_t *s = &mmap_slots[reuse2];
+            s->free = 0;
+            memset((void *)s->base, 0, s->len);
+            return (long)s->base;
+        }
+        slot = mmap_alloc_slot();
+    }
+    if (slot < 0) {
+        /* Genuinely out of bookkeeping, with arena very possibly to spare.
+         * Say so once: this exact condition (table full, tens of MB free)
+         * is what made Diablo's level loads fail, and from userspace it is
+         * indistinguishable from real exhaustion. */
+        static int warned_slots_full;
+        if (!warned_slots_full) {
+            warned_slots_full = 1;
+            of_term_printf("[mmap] slot table FULL (%d entries) - refusing "
+                           "%u bytes with %u KB of arena free; raise "
+                           "MMAP_SLOTS\n",
+                           MMAP_SLOTS, (unsigned)len_aligned,
+                           (unsigned)((mmap_bottom - current_brk) / 1024u));
+        }
         return -ENOMEM;
+    }
 
     memset((void *)base, 0, len_aligned);
     *mb_p = base;
@@ -1960,19 +2067,29 @@ static long sys_munmap(long addr, long length) {
     uintptr_t base = (uintptr_t)addr;
     uintptr_t len  = ((uintptr_t)length + 4095u) & ~4095u;
 
-    /* Find the exact allocation.  musl's mallocng pairs each mmap
-     * with a matching munmap(base, size), so an exact-match lookup
-     * covers the common case. */
+    /* Match on BASE alone and trust the recorded length.
+     *
+     * This used to also require s->len == len. That is no longer safe now
+     * that mmap_find_reusable() can hand out a region larger than the caller
+     * asked for (when the leftover was too small to be worth a slot): the
+     * app frees the size it requested, the recorded region is bigger, and a
+     * length-sensitive match would miss it and leak the region forever.
+     * Base is unique across live regions, so it identifies the allocation on
+     * its own; the caller's length is ignored entirely. */
+    (void)len;
     for (int i = 0; i < MMAP_SLOTS; i++) {
         mmap_slot_t *s = &mmap_slots[i];
-        if (s->base != base || s->len != len || s->free)
+        if (s->base != base || s->free)
             continue;
 
         /* If this region sits right at mmap_bottom, reclaim by
          * raising mmap_bottom and freeing the slot outright —
-         * that's the LIFO case (very common for mallocng). */
+         * that's the LIFO case (very common for mallocng).
+         * Raise by the RECORDED length: the caller's may be smaller than
+         * the region we actually handed out, and using it would strand the
+         * difference in untracked space. */
         if (base == mmap_bottom) {
-            mmap_bottom = base + len;
+            mmap_bottom = base + s->len;
             s->base = 0;
             s->len  = 0;
             s->free = 0;

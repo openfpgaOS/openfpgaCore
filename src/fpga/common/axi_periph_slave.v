@@ -311,6 +311,15 @@ module axi_periph_slave #(
     input  wire [31:0] analogizer_settings,
     input  wire [31:0] analogizer_hoffset,
     input  wire [31:0] analogizer_voffset,
+    // "Mouse Speed %" interact slider (bridge 0xF700000C, latched in
+    // core_top).  Read-only at sysreg 0x6C; 0 = unset/legacy core, apps
+    // fall back to their default.  MiSTer ties this to 0.
+    input  wire [31:0] mouse_speed_pct,
+    // Count of refused (SLVERR) SDRAM write bursts -- the WLAST-desync
+    // containment tripwire.  Nonzero = the write-path elastic replayed a
+    // beat pair and the slave refused the commit (would have been the
+    // +8-shift field corruption).  Read-only at sysreg 0xCC.
+    input  wire [31:0] sdram_wlast_err,
     output reg  [2:0]  analogizer_cpu_wr_toggle,
     output reg  [31:0] analogizer_cpu_wr_settings,
     output reg  [31:0] analogizer_cpu_wr_hoffset,
@@ -748,6 +757,14 @@ localparam [31:0] FEAT_LINK = INCLUDE_LINK ? 32'h0000_0004 : 32'h0000_0000;
 `else
 localparam [31:0] FEAT_LINK = 32'h0000_0000;
 `endif
+// Firmware/bitstream register-contract revision, read back at sysreg
+// word 35 (0x8C).  Bump TOGETHER with OS_EXPECTED_HW_CONTRACT in
+// src/firmware/os/hal/regs.h whenever a register's address or semantics
+// changes incompatibly; the firmware halts with a readable banner on a
+// mismatch instead of booting into undefined behaviour.  Pre-versioning
+// bitstreams fall through to the sysreg default read (0).
+localparam [31:0] HW_CONTRACT_REV = 32'd1;
+
 localparam [31:0] HW_FEATURES_RESOLVED =
     32'h0000_0001      // bit 0  OF_HW_MIXER: a 32-voice mixer is available (SET on
                        //        every target; SW-backed when bit 1 is clear)
@@ -1730,9 +1747,12 @@ always @(*) begin
             6'd23, 6'd24, 6'd25:
                    sysreg_rdata = input_slot_rdata;
             6'd26: sysreg_rdata = app_id;
+            6'd27: sysreg_rdata = mouse_speed_pct;                 // MOUSE_SPEED_PCT (0x6C)
             6'd32: sysreg_rdata = analogizer_settings;             // ANALOGIZER_SETTINGS
             6'd33: sysreg_rdata = analogizer_hoffset;              // ANALOGIZER_H_OFFSET
             6'd34: sysreg_rdata = analogizer_voffset;              // ANALOGIZER_V_OFFSET
+            6'd35: sysreg_rdata = HW_CONTRACT_REV;                 // HW_CONTRACT_REV
+            6'd51: sysreg_rdata = sdram_wlast_err;                // SDRAM_WLAST_ERR (0xCC)
             6'd36: sysreg_rdata = {dt_query_valid, dt_query_data[30:0]};
             6'd37: sysreg_rdata = dt_query_data;                    // DT_QUERY_DATA full 32-bit result
             6'd38: sysreg_rdata = HW_FEATURES_RESOLVED;                     // HW_FEATURES
@@ -1765,7 +1785,9 @@ always @(*) begin
             6'd50: sysreg_rdata = {21'b0, save_dt_word_mode, save_dt_word};  // SAVE_DT_WORD + armed flag (diagnostic)
             // Display timing live readback.
             6'd55: sysreg_rdata = {22'b0, vrr_v_total};
-`ifdef INCLUDE_CLK96
+`ifdef INCLUDE_CLK90
+            6'd53: sysreg_rdata = CLK_HZ;   // CLK_FREQ_HZ (0xD4), 90 MHz build
+`elsif INCLUDE_CLK96
             // CLK_FREQ_HZ (0xD4).  Emitted ONLY for reduced-clock builds so
             // every existing 100 MHz variant keeps a bit-identical netlist;
             // on those, 0xD4 falls through to the default read value and

@@ -20,7 +20,11 @@ module io_sdram #(
     // Both configs keep the registered row-hit decision (req_* registered
     // at ST_IDLE dispatch, consumed in ST_REQ_*) and the refresh
     // precharge-ALL (A10=1) path.
-    parameter BANK_ROW_TRACK = 1
+    parameter BANK_ROW_TRACK = 1,
+    // Refresh divider in controller cycles.  Clock-scaled by reduced-clock
+    // variants (core_top passes 660 under INCLUDE_CLK90; the 736 default
+    // violates tREFI below ~94 MHz).  Default = bit-exact legacy builds.
+    parameter REFRESH_INTERVAL = 10'd736
 ) (
 
 input   wire            controller_clk,
@@ -67,6 +71,12 @@ output  reg             word_busy,
 output  reg             word_q_valid, // Pulses high for one cycle when word_q data is valid
 output  reg             word_wr_data_next, // Pulse: need next word data for burst write
 output  reg             word_wr_done,      // Pulse: slave-issued word write completed (ST_WRITE_4→IDLE)
+output  wire            word_queue_pending, // A word op is accepted-but-undispatched (queue occupied).
+                                            // The core_top pulse adapter and the AXI slave gate on THIS,
+                                            // not word_busy: ops must enter the queue even while the FSM
+                                            // is busy on scanout, or burst_defer_word can never engage
+                                            // and sustained scanout livelocks the fabric (2026-08-01
+                                            // storm-seed reproduction).
 
 input   wire    [31:0]  burst_wr_direct_data, // Direct data bus from AXI slave (bypasses pulse adapter)
 input   wire    [3:0]   burst_wr_direct_strb,  // Direct byte enables
@@ -170,7 +180,7 @@ assign {phy_ras, phy_cas, phy_we} = cmd;
     // 736 keeps >5% margin while issuing ~30% fewer refreshes than the old
     // 5.12us interval.  Unlike dc above, this terminal-count compare feeds
     // only the slow pending counter, not the SDRAM command path.
-    localparam      REFRESH_INTERVAL = 10'd736;
+    // REFRESH_INTERVAL is a module parameter (ANSI header) as of 2026-08-02.
     reg     [9:0]   refresh_count;
     // Pending-refresh counter (was a single flag).  A counter cannot drop a
     // refresh tick if a previous refresh is still being serviced when the next
@@ -192,6 +202,7 @@ assign dbg_io = {1'b0, (refresh_pending != 3'd0), state[5:0]};
 
     reg word_rd_queue;
     reg word_wr_queue;
+    assign word_queue_pending = word_rd_queue | word_wr_queue;
 
     // Word interface - same clock domain as controller (no CDC needed)
     // word_rd/word_wr are 1-cycle pulses, use directly as triggers
@@ -531,6 +542,21 @@ always @(posedge controller_clk) begin
         // negligible against a scanline period, so it cannot be starved.
         if(burst_rd_queue && !(burst_defer_word && (word_rd_queue || word_wr_queue))) begin
             burst_rd_queue <= 0;
+            // Level-based defer arming (2026-08-01): granting scanout while a
+            // word op sits queued arms the one-shot defer so the NEXT grant
+            // serves the word.  The old edge-arming (capture block, on the
+            // burst_rd pulse only) misses any word op accepted after the
+            // pulse but before ST_IDLE — under back-to-back scanout that
+            // ordering is the steady state, and word ops starved forever
+            // (storm-seed 0/400 drain).  Bounded both ways: a word waits at
+            // most one scanout burst, scanout waits at most one word op.
+            // Defer arming is EDGE-based (capture block, on the burst_rd
+            // pulse).  Level-arming it here -- yielding whenever any word op
+            // sits queued -- made scanout defer on nearly every grant and
+            // starved the video line fetch (torn text at reduced clk_ram,
+            // 2026-08-03).  Redundant too: word ops are now ACCEPTED into
+            // the queue while busy, so the capture-block edge always sees
+            // them and the livelock this guarded against cannot recur.
             burst_defer_word <= 0;
             addr <= burst_addr;
             phy_ba <= burst_addr[24:23];
@@ -1002,6 +1028,12 @@ always @(posedge controller_clk) begin
             state <= ST_IDLE;
         end
     end
+
+
+    // Unencoded state (SEU / marginal state-bit capture): recover instead of
+    // parking forever with word_busy stuck high (blank screen + fabric hang).
+    // word_busy self-heals at the next dispatch/completion.
+    default: state <= ST_IDLE;
 
     endcase
 

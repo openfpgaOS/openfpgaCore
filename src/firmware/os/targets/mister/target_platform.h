@@ -100,7 +100,13 @@
 #define OF_TARGET_INTERACT_UNCACHED    0x503FE000u
 #define OF_TARGET_INTERACT_MAX_VARS    64u
 
-/* Staging arena ("CRAM0" role) — cached SDRAM + uncached alias. */
+/* Staging arena ("CRAM0" role) — cached SDRAM + uncached alias.
+ * OF_TARGET_CRAM0_IS_CACHED_SDRAM tells target-agnostic code (boot
+ * memtest) that plain CRAM0_BASE pointers are CACHED here: probe/DMA
+ * discipline must go through the OF_TARGET_SDRAM_UNCACHED_BASE alias
+ * or the D-cache masks the memory and leaves dirty lines over the
+ * sector-DMA windows.  Pocket/sim CRAM0 is natively uncached. */
+#define OF_TARGET_CRAM0_IS_CACHED_SDRAM 1
 #define OF_TARGET_CRAM0_BASE           0x13300000u
 #define OF_TARGET_CRAM_SIZE            (8u * 1024u * 1024u)
 /* No dedicated fast texture memory — MiSTer textures live in SDRAM. */

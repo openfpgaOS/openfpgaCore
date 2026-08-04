@@ -101,7 +101,7 @@ void of_input_init(void) {
         prev_buttons[i] = 0;
     }
     keyboard_state = (of_keyboard_state_t){0};
-    hid_mouse_init(&hid_mouse, HID_MOUSE_XY_DELTA);
+    hid_mouse_init(&hid_mouse, HID_MOUSE_XY_PAIR8);
     prev_keyboard_modifiers = 0;
     for (int i = 0; i < (int)OF_KEYBOARD_WORDS; i++)
         prev_keyboard_keys[i] = 0;
@@ -154,6 +154,26 @@ static inline void read_apf(int player, uint32_t *keys, uint32_t *joy, uint32_t 
     }
 }
 
+/* Coherent mouse (slot 3) snapshot.  The 74a-domain bridge writes
+ * KEY/JOY/TRIG on separate cycles and our three uncached reads span
+ * tens of CPU cycles, so a report landing mid-read can pair the new
+ * counter with the old payload OR the old counter with the new payload.
+ * The decoder's amend branch corrects the first ordering but cannot
+ * distinguish the second (it would double-count the report), so require
+ * two consecutive identical 3-word snapshots before decoding.  Bounded:
+ * reports arrive at mouse-report rate, orders of magnitude slower than
+ * this loop, so the retry practically never triggers twice. */
+static inline void read_apf_mouse(uint32_t *key, uint32_t *joy, uint32_t *trig) {
+    read_apf(3, key, joy, trig);
+    for (int tries = 0; tries < 4; tries++) {
+        uint32_t k2, j2, t2;
+        read_apf(3, &k2, &j2, &t2);
+        if (*key == k2 && *joy == j2 && *trig == t2)
+            return;
+        *key = k2; *joy = j2; *trig = t2;
+    }
+}
+
 void of_input_irq_service(void) {
     if (!input_hub_present) {
         snac_irq_ack();
@@ -196,7 +216,7 @@ void of_input_irq_service(void) {
      * Runs with interrupts already disabled (trap context). */
     if (mouse_event) {
         uint32_t key, joy, trig;
-        read_apf(3, &key, &joy, &trig);
+        read_apf_mouse(&key, &joy, &trig);
         hid_mouse_decode(&hid_mouse, key, joy, trig);
     }
 }
@@ -360,7 +380,7 @@ static void poll_hid_slots(void) {
      * report in between would let this stale snapshot re-pass the
      * counter dedup and double-count its delta. */
     uint32_t irq = input_irq_save_local();
-    read_apf(3, &key, &joy, &trig);
+    read_apf_mouse(&key, &joy, &trig);
     hid_mouse_decode(&hid_mouse, key, joy, trig);
     input_irq_restore_local(irq);
 }

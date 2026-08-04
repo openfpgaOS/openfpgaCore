@@ -136,6 +136,15 @@ module video_CRT_scanout_indexed_BRAM #(
     localparam VID_V_SYNC   = 3;
     localparam VID_H_SYNC   = 58;
     localparam [9:0] VID_H_ACTIVE_START = 10'd120;
+    // Line-fetch lead: fetch runs ACTIVE-FETCH scanlines ahead of readout.
+    // 2026-08-03: reverted to the original 1-line lead.  Widening it fixed
+    // the app framebuffer at 90 MHz but broke the display two ways -- moving
+    // FETCH earlier (16) blanked 240-line terminal mode, and moving ACTIVE
+    // later (19) shifted the output window the Pocket scaler locks to and
+    // made the picture flash.  The raster geometry here is load-bearing for
+    // scaler lock: do NOT retune it to buy fetch headroom.  If scanout
+    // starvation needs addressing, take it from the SDRAM side (arbiter
+    // priority / burst efficiency), not from the output timing.
     localparam [9:0] VID_V_FETCH_BASE   = 10'd17;
     localparam [9:0] VID_V_ACTIVE_BASE  = 10'd18;
     localparam [9:0] VID_V_CENTER_HEIGHT = 10'd240;
@@ -351,9 +360,28 @@ module video_CRT_scanout_indexed_BRAM #(
     wire [9:0] fetch_output_line = y_count - vid_v_fetch_start[9:0];
     wire in_vactive = ({1'b0, y_count} >= vid_v_fetch_start) &&
                       ({1'b0, y_count} < vid_v_fetch_end);
+    // Output line currently being displayed (0 until active begins), and the
+    // lead the fetch engine is allowed: 4 banks, one held by the line being
+    // displayed, so up to 3 may be filled ahead.
+    wire [9:0] disp_line_now =
+        ({1'b0, y_count} >= vid_v_active_start) ?
+        (y_count - vid_v_active_start[9:0]) : 10'd0;
+    wire fetch_room = (fetch_line_ptr < out_height_safe) &&
+                      ({1'b0, y_count} >= vid_v_fetch_start) &&
+                      ((fetch_line_ptr - disp_line_now) < 10'd3);
 
     reg fetch_request;
     reg fetch_request_ack_sync1, fetch_request_ack_sync2;
+    // Next output line to fetch.  Decoupled from y_count so the fetch engine
+    // can run AHEAD of the readout by up to the spare bank count instead of
+    // exactly one line: during vblank it pre-fills banks, and in active it
+    // keeps a cushion that absorbs SDRAM contention (CPU writebacks, GPU
+    // bursts).  A one-line lead is 3174 clk_ram cycles at 100 MHz but only
+    // 2856 at 90 MHz, which is where the video line fetch began losing
+    // pixels (torn text).  Raster geometry is NOT touched -- retuning
+    // VID_V_FETCH_BASE/ACTIVE_BASE to buy the same headroom blanked
+    // 240-line terminal mode and broke Pocket scaler lock (2026-08-03).
+    reg [9:0] fetch_line_ptr;
     reg [9:0] fetch_output_line_latched;
     reg [9:0] fetch_src_line_latched;
     reg [9:0] src_y_scan;
@@ -385,6 +413,7 @@ module video_CRT_scanout_indexed_BRAM #(
             fetch_request_ack_sync2 <= 0;
             src_y_scan <= 0;
             y_acc <= 0;
+            fetch_line_ptr <= 0;
         end else begin
             fetch_request_ack_sync1 <= fetch_request_ack;
             fetch_request_ack_sync2 <= fetch_request_ack_sync1;
@@ -395,9 +424,16 @@ module video_CRT_scanout_indexed_BRAM #(
             if (frame_start) begin
                 src_y_scan <= 0;
                 y_acc <= 0;
+                fetch_line_ptr <= 0;
             end
 
-            if (line_start && in_vactive && !fetch_request) begin
+            // One fetch per scanline, paced by line_start.  Issuing
+            // opportunistically to run further ahead turned the text
+            // artifact from static into continuously moving without curing
+            // it, so the deficit is not lead time.  line_start also spaces
+            // the cross-domain request/ack handshake safely: re-asserting
+            // before the ack clears deadlocks the fetch engine outright.
+            else if (line_start && in_vactive && !fetch_request) begin
                 fetch_request <= 1;
                 fetch_output_line_latched <= fetch_output_line;
                 fetch_src_line_latched <= src_y_scan;
@@ -761,12 +797,24 @@ module video_CRT_scanout_indexed_BRAM #(
     wire [11:0] sh_outw_2x = {1'b0, sh_out_w, 1'b0};
     wire [11:0] sh_outw_3x = sh_outw_2x + sh_outw_1x;
     wire [11:0] sh_outw_4x = {sh_out_w, 2'b00};
+    // 1:1 bypass.  With equal source and output widths the scaler must
+    // advance exactly one source pixel per output pixel and the accumulator
+    // must stay zero.  Deriving that from the Bresenham ladder makes it
+    // conditional on the accumulator being pristine: any transient leaving
+    // acc non-zero (multi-bit width CDC settling, a missed hblank reset)
+    // promotes one step to 2, skipping a source pixel and shifting the rest
+    // of the line left by one -- exactly the single-pixel text corruption
+    // seen at reduced clk_ram.  Forcing the step removes that failure mode
+    // by construction; scaled modes are untouched.
+    wire sh_x_unity = (sh_fb_width == sh_out_w);
     wire [2:0] sh_x_inc =
+        sh_x_unity ? 3'd1 :
         (sh_x_sum_ext >= sh_outw_4x) ? 3'd4 :
         (sh_x_sum_ext >= sh_outw_3x) ? 3'd3 :
         (sh_x_sum_ext >= sh_outw_2x) ? 3'd2 :
         (sh_x_sum_ext >= sh_outw_1x) ? 3'd1 : 3'd0;
     wire [11:0] sh_x_acc_next_ext =
+        sh_x_unity ? 12'd0 :
         sh_x_sum_ext - ((sh_x_inc == 3'd4) ? sh_outw_4x :
                         (sh_x_inc == 3'd3) ? sh_outw_3x :
                         (sh_x_inc == 3'd2) ? sh_outw_2x :

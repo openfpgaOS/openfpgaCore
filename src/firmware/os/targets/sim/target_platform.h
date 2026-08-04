@@ -60,6 +60,10 @@
 #define OF_TARGET_TERM_FB_BASE         0x50300000u
 
 #define OF_TARGET_DMA_CHUNK_SIZE       (512u * 1024u)
+/* Same window as ASYNC_BOUNCE below; target-agnostic code (boot
+ * memtest) sizes its CRAM0 scratch probe with the CRAM0-prefixed
+ * name that pocket/mister define. */
+#define OF_TARGET_CRAM0_DMA_CHUNK_SIZE OF_TARGET_DMA_CHUNK_SIZE
 
 #define OF_TARGET_INTERACT_BASE        0x103FE000u
 #define OF_TARGET_INTERACT_UNCACHED    0x503FE000u

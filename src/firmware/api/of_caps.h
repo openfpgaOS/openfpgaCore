@@ -30,7 +30,16 @@ extern "C" {
 #include <stdint.h>
 
 #define OF_CAPS_MAGIC   0x43415053  /* 'CAPS' */
-#define OF_CAPS_VERSION 3
+#define OF_CAPS_VERSION 4
+
+/* OS software-feature flags (of_capabilities.os_features, caps v4+).
+ * These describe FIRMWARE behavior, not hardware -- apps gate on
+ * caps->version >= 4 before reading the field. */
+#define OF_OS_FEAT_MOUSE_COUNTS (1u << 0)  /* of_mouse_state dx/dy are decoded
+                                            * mouse counts.  Absent (v3 OS): the
+                                            * Pocket dock's packed int8 sample
+                                            * pairs {a<<8|b} pass through raw and
+                                            * the app must decode. */
 /* The of_capabilities pointer is delivered to apps via the AT_OF_CAPS
  * auxv tag set up by the kernel ELF loader (see of_app_abi.h). Apps
  * never need to know where the struct lives -- they just call
@@ -231,6 +240,11 @@ struct of_capabilities {
      * Addressed by GPU byte offset [0, tex_fast_size); upload via the GPU's
      * fast-texture upload regs.  The of_texture.h API hides this entirely. */
     uint32_t tex_fast_size;
+
+    /* v4: OS software-feature flags (OF_OS_FEAT_*).  Firmware behavior
+     * contracts the app adapts to at runtime -- the loose-coupling
+     * alternative to lockstep app/os deploys. */
+    uint32_t os_features;
 };
 
 #ifndef OF_PC
