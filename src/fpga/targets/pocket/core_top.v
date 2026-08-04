@@ -3492,10 +3492,17 @@ gpu_core #(
     // 0x4F clip — is one INCLUDE_XFORM.  Off on every shipping variant (CPU
     // geometry); os25 thus sheds its previously-dead 0x50/0x51/0x4F cones.
     .INCLUDE_XFORM_RGB(`ifdef INCLUDE_XFORM 1 `else 0 `endif),
-    .INCLUDE_CLIP_TRI(`ifdef INCLUDE_XFORM 1 `else 0 `endif),
+    // Fine-grained opt-outs inside the XFORM bundle, so a variant can take
+    // the vertex cache (0x53 LOAD_VERTS / 0x54 DRAW_INDEXED_TRI, the
+    // transform-once/draw-many win) WITHOUT paying for the parts it does
+    // not use.  The 0x53 decode gates on VTX_CACHE && XFORM_RGB only -- it
+    // does NOT require the matrix MAC -- so a host that already does its
+    // own model/view math (os30) can drop the MAC and its xf_M M10K and
+    // keep only reciprocal/projection + the cache.
+    .INCLUDE_CLIP_TRI(`ifdef INCLUDE_XFORM `ifdef EXCLUDE_CLIP_TRI 0 `else 1 `endif `else 0 `endif),
     .INCLUDE_VTX_CACHE(`ifdef INCLUDE_XFORM 1 `else 0 `endif),
-    .INCLUDE_GPU_LIGHT(`ifdef INCLUDE_XFORM 1 `else 0 `endif),
-    .INCLUDE_GPU_XFORM_MAC(`ifdef INCLUDE_XFORM 1 `else 0 `endif),
+    .INCLUDE_GPU_LIGHT(`ifdef INCLUDE_XFORM `ifdef EXCLUDE_GPU_LIGHT 0 `else 1 `endif `else 0 `endif),
+    .INCLUDE_GPU_XFORM_MAC(`ifdef INCLUDE_XFORM `ifdef EXCLUDE_GPU_XFORM_MAC 0 `else 1 `endif `else 0 `endif),
     // Palette / colormap lane (additive): os25/mister list INCLUDE_PALETTE; os30 omits it.
     .INCLUDE_PALETTE(`ifdef INCLUDE_PALETTE 1 `else 0 `endif),
     // Combiner texel*C+D (additive): os30 lists INCLUDE_COMBINE (Mario head).
