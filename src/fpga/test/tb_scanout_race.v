@@ -580,6 +580,7 @@ assign scanout_burst_data_o        = scan_burst_data;
 video_CRT_scanout_indexed_BRAM #(
     .HAS_ANALOG_RASTER(0)   // LCD-only: MiSTer prunes the analog raster cone
 ) scanout (
+        .fetch_diag(),
     .clk_video(clk_vid),
     .reset_n(reset_n),
     .x_count(x_count),

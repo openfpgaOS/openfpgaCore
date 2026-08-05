@@ -10922,6 +10922,574 @@ static void test_vert_tri_tex_persp_bias() {
 }
 #endif
 
+#ifdef GPU_TEST_XFORM
+// ============================================================================
+// 0x50/0x52/0x53/0x54/0x56 transform + vertex-cache functional tests —
+// first-ever functional coverage of the vertex cache and the clip-space load.
+// All GPU-vs-GPU A/B byte-compares: the cache path must be byte-identical to
+// its direct-draw twin because both feed the identical S_XFORM results into
+// the identical derive-input regs — XF_PROJ_LAUNCH stores exactly the regs the
+// derive consumes ({rgb, depth32, t32, s32, zi32, sy16, sx16}) and S_VCREAD
+// restores them 1:1.  depth32 is the divider zi on the 0x53 matrix path but
+// the EXPLICIT w7 payload word on 0x56 (xf_clip mux at the vc_mem pack) — the
+// oracles pass xft_divider_zi(w) there to stay bit-identical to 0x4F, and the
+// depth-override test proves the explicit word is the one that lands.
+// Contracts the payloads pin (gpu_core.v):
+//   - every vert keeps w (resp. cam.z) > nearclip: 0x4F's all-behind trivial
+//     reject is per-TRIANGLE and NOT re-derived by 0x54 (S_VCREAD launches
+//     unconditionally), so byte-identity only holds in front of near;
+//   - q29_en=0 in 0x50 w25: the 0x54 launch hard-forces Q16.16 planes;
+//   - non-combine truecolor surface: combine D-planes are carried by NEITHER
+//     path (identity would hinge on stale-reg history).
+// Config matrix: os30-exact (MAC=1, CLIP_TRI=0), sm64/sm64-nopal (MAC=1,
+// CLIP_TRI=1), nomac (MAC=0, CLIP_TRI=1).  All three have DIRECT_COLOR=1.
+// ============================================================================
+
+// 0x50 SET_OBJECT_STATE, 26 words: w0..19 matrix rows 0-4 x {mx,my,mz,transl}
+// Q16.16 (rows 0-2 cam, 3-4 s/t; dropped at capture when the MAC is pruned);
+// w20 xc, w21 yc (screen center px); w22 xscale, w23 yscale (integer px
+// scales); w24 nearclip Q16.16; w25 = {q29_shift[8:4], q29_en[3], rows[2:0]}.
+static void emit_set_object_state_raw(const int32_t M[20], int32_t xc, int32_t yc,
+                                      int32_t xs, int32_t ys, int32_t nearclip,
+                                      uint32_t rows_word) {
+    ring_cmd(0x50, 26);
+    for (int i = 0; i < 20; i++) ring_write((uint32_t)M[i]);
+    ring_write((uint32_t)xc); ring_write((uint32_t)yc);
+    ring_write((uint32_t)xs); ring_write((uint32_t)ys);
+    ring_write((uint32_t)nearclip);
+    ring_write(rows_word);
+}
+
+// 0x52 DRAW_XFORM_TRI_RGB / 0x4F DRAW_CLIP_TRI, 18 words (identical wire):
+// w0-8 = 3 verts {x,y,z} Q16.16 (0x4F: clip {x,y,w}); w9-11 raw s; w12-14
+// raw t; w15-17 one RGB565 per word in [15:0].
+static void emit_xform_rgb_tri_raw(uint8_t op, const int32_t v[9],
+                                   const int32_t s[3], const int32_t t[3],
+                                   const uint16_t rgb[3]) {
+    ring_cmd(op, 18);
+    for (int i = 0; i < 9; i++) ring_write((uint32_t)v[i]);
+    for (int i = 0; i < 3; i++) ring_write((uint32_t)s[i]);
+    for (int i = 0; i < 3; i++) ring_write((uint32_t)t[i]);
+    for (int i = 0; i < 3; i++) ring_write((uint32_t)rgb[i]);
+}
+
+// 0x53 LOAD_VERTS, 7 words: w0[4:0]=slot; w1-3 {x,y,z}; w4 raw s; w5 raw t;
+// w6 RGB565 in [15:0].  Depth is GPU-derived (= zi) on this matrix path.
+static void emit_load_vert_raw(uint8_t op, uint32_t slot_word,
+                               int32_t x, int32_t y, int32_t z,
+                               int32_t s, int32_t t, uint16_t rgb) {
+    ring_cmd(op, 7);
+    ring_write(slot_word);
+    ring_write((uint32_t)x); ring_write((uint32_t)y); ring_write((uint32_t)z);
+    ring_write((uint32_t)s); ring_write((uint32_t)t);
+    ring_write((uint32_t)rgb);
+}
+
+// 0x56 LOAD_VERT_CLIP, EXACTLY 8 words: w0[4:0]=slot (full 32 bits on purpose
+// — the wrap case sends garbage high bits); w1-3 clip {x,y,w}; w4 raw s; w5
+// raw t; w6 RGB565; w7 = EXPLICIT z-buffer depth32 (xf_load_depth — the
+// far-field z-popping fix: the divider-derived zi quantizes far z, so the
+// pre-transforming app supplies the slot depth itself).
+static void emit_load_vert_clip_raw(uint32_t slot_word,
+                                    int32_t x, int32_t y, int32_t w,
+                                    int32_t s, int32_t t, uint16_t rgb,
+                                    uint32_t depth32) {
+    ring_cmd(0x56, 8);
+    ring_write(slot_word);
+    ring_write((uint32_t)x); ring_write((uint32_t)y); ring_write((uint32_t)w);
+    ring_write((uint32_t)s); ring_write((uint32_t)t);
+    ring_write((uint32_t)rgb);
+    ring_write(depth32);
+}
+
+// 0x54 DRAW_INDEXED_TRI, 1 word: i0[4:0] | i1[9:5] | i2[14:10]; [31:15] ignored.
+static void emit_draw_indexed_tri_raw(uint32_t word) {
+    ring_cmd(0x54, 1);
+    ring_write(word);
+}
+
+// Shared viewport (0x50 w20-25): center (160,100), 100/80 px scales, nearclip
+// 1.0, rows=3, q29_en=0 (contract above).
+static const int32_t XFT_XC = 160, XFT_YC = 100, XFT_XS = 100, XFT_YS = 80;
+static const int32_t XFT_NEAR = 1 << 16;
+static const uint32_t XFT_ROWS3 = 3;
+
+// Mirror of XF_RECIP: zi = floor(2^32 / max(w_q16, nearclip_q16)).  Passing
+// this as the 0x56 explicit depth makes the cache slot match what 0x4F holds
+// at derive launch bit-for-bit (its depth IS the divider zi), so the
+// byte-identity oracles stay exact on the framebuffer AND the z-buffer.
+static uint32_t xft_divider_zi(int32_t w_q16) {
+    uint64_t d = (uint64_t)(uint32_t)((w_q16 < XFT_NEAR) ? XFT_NEAR : w_q16);
+    return (uint32_t)(0x100000000ull / d);
+}
+
+// Identity-SCALE camera matrix (diag 1.0, translate {tx,ty,tz}): cam = v + T
+// exactly ((1.0*v)>>16 carries no rounding), so with T=0 an 0x52 of clip
+// {x,y,w} values computes the same cam triple XF_CLIP_FEED loads directly —
+// the cross-oracle for configs without 0x4F.
+static void emit_identity_object_state(int32_t tx, int32_t ty, int32_t tz) {
+    int32_t M[20] = {0};
+    M[0]  = 1 << 16; M[3]  = tx;
+    M[5]  = 1 << 16; M[7]  = ty;
+    M[10] = 1 << 16; M[11] = tz;
+    emit_set_object_state_raw(M, XFT_XC, XFT_YC, XFT_XS, XFT_YS, XFT_NEAR, XFT_ROWS3);
+}
+
+// Truecolor textured surface on an 8x8 RGB565 texture: DISTINCT texels make
+// the cached raw-s/t fields load-bearing (a mangled s or t changes the
+// sampled texel and breaks the A/B compare; a 1x1 white texel would hide it).
+static ParamSpanListWire make_xform_surface(uint32_t fb_base) {
+    ParamSpanListWire p {};
+    p.fb_base = fb_base;
+    p.fb_major_step = 640;
+    p.fb_minor_step = 2;
+    p.tex_addr = TEX_BASE_BYTE;
+    p.tex_width = 8; p.tex_w_mask = 7; p.tex_h_mask = 7;
+    p.attr_mode = 1;
+    p.span_axis = 0;
+    p.flags = SPAN_PERSP | (1u << 7);      // PERSP + TRUECOLOR, non-combine
+    return p;
+}
+
+// Sentinel-fill BOTH truecolor FBs full-height (200 rows x 640 B — projected
+// tris land below preload_with_sentinel()'s 320x200-BYTE window) + upload the
+// 8x8 distinct-texel texture.
+static void xform_preload() {
+    gpu_init();
+    sdram_fill(FB_BASE_BYTE,     640u * 200u, SENTINEL_BYTE);
+    sdram_fill(FB_ALT_BASE_BYTE, 640u * 200u, SENTINEL_BYTE);
+    for (int t = 0; t < 8; t++)
+        for (int s = 0; s < 8; s++)
+            sdram_write_u16_le(TEX_BASE_BYTE + ((uint32_t)t * 8u + (uint32_t)s) * 2u,
+                               (uint16_t)((s * 0x1234u + t * 0x0421u + 0x0842u) & 0xFFFFu));
+}
+
+// u16 A/B compare over pixel rect [x0,x1)x[y0,y1) of two stride-640 surfaces.
+// painted (base_a != blank) > min_painted guards a vacuous both-blank pass.
+static bool xform_ab_match(const char *name, uint32_t base_a, uint32_t base_b,
+                           int x0, int x1, int y0, int y1,
+                           int min_painted, uint16_t blank = 0xABABu) {
+    int diffs = 0, painted = 0, fx = -1, fy = -1;
+    uint16_t fa = 0, fb = 0;
+    for (int y = y0; y < y1; y++)
+        for (int x = x0; x < x1; x++) {
+            uint16_t pa = sdram_read_u16_le(base_a + (uint32_t)y * 640u + (uint32_t)x * 2u);
+            uint16_t pb = sdram_read_u16_le(base_b + (uint32_t)y * 640u + (uint32_t)x * 2u);
+            if (pa != blank) painted++;
+            if (pa != pb) { if (!diffs) { fx = x; fy = y; fa = pa; fb = pb; } diffs++; }
+        }
+    if (diffs == 0 && painted > min_painted) { check_pass(name); return true; }
+    char m[144];
+    snprintf(m, sizeof m, "%d diffs, %d painted (min %d); first @(%d,%d) a=%04x b=%04x",
+             diffs, painted, min_painted, fx, fy, fa, fb);
+    check_fail(name, m);
+    return false;
+}
+
+// Assert a stride-640 u16 rect is untouched (all still `blank`).
+static bool xform_all_blank(const char *name, uint32_t base,
+                            int x0, int x1, int y0, int y1,
+                            uint16_t blank = 0xABABu) {
+    int bad = 0, fx = -1, fy = -1;
+    uint16_t fg = 0;
+    for (int y = y0; y < y1; y++)
+        for (int x = x0; x < x1; x++) {
+            uint16_t g = sdram_read_u16_le(base + (uint32_t)y * 640u + (uint32_t)x * 2u);
+            if (g != blank) { if (!bad) { fx = x; fy = y; fg = g; } bad++; }
+        }
+    if (bad == 0) { check_pass(name); return true; }
+    char m[112];
+    snprintf(m, sizeof m, "%d px written; first @(%d,%d) got=%04x", bad, fx, fy, fg);
+    check_fail(name, m);
+    return false;
+}
+
+// Shared clip triangle {x,y,w} Q16.16, all w=2.0 > nearclip=1.0: projects to
+// (110,132)-(210,132)-(160,64) under the shared viewport.
+static const int32_t XFT_CLIP_V[9] = {
+    -(1 << 16), -((4 << 16) / 5), 2 << 16,
+     (1 << 16), -((4 << 16) / 5), 2 << 16,
+     0,          (9 << 16) / 10,  2 << 16,
+};
+static const int32_t  XFT_S[3]   = {0, 8 << 16, 3 << 16};
+static const int32_t  XFT_T[3]   = {0, 2 << 16, 7 << 16};
+static const uint16_t XFT_RGB[3] = {0xF800, 0x07E0, 0x001F};
+
+// One-command oracle draw of CLIP verts: 0x4F where CLIP_TRI is in the
+// config; on the no-clip fold (os30-exact) the byte-identical identity-matrix
+// 0x52 twin (see emit_identity_object_state).  nomac keeps CLIP_TRI=1 so no
+// config is oracle-less.  Assumes emit_identity_object_state(0,0,0) is armed.
+static void emit_clip_oracle_tri(const int32_t v[9], const int32_t s[3],
+                                 const int32_t t[3], const uint16_t rgb[3]) {
+#ifndef GPU_TEST_NO_CLIP_TRI
+    emit_xform_rgb_tri_raw(0x4F, v, s, t, rgb);
+#else
+    emit_xform_rgb_tri_raw(0x52, v, s, t, rgb);
+#endif
+}
+
+#ifndef GPU_TEST_NO_MAC
+// TEST A — matrix path: 0x50 (identity-scale + translate, exercising the
+// translate column) + 3x 0x53 loads + one 0x54 must render byte-identical —
+// framebuffer AND z-buffer — to the same triangle via a single 0x52.  Slots
+// 2/17/31 cover mid + top-boundary slots; distinct cam.z per vert (1.5/2.0/
+// 3.0) makes zi/depth non-constant so the cached zi32/depth32 fields are
+// load-bearing under z_mode=3 (test+write of z_compress(depth)).
+static void test_vtx_cache_mac_load_matches_xform_rgb() {
+    printf("TEST vtx_cache_mac_load_matches_xform_rgb\n");
+    xform_preload();
+    const uint32_t ZA = 0x00200000u, ZB = 0x00240000u;
+    sdram_fill(ZA, 640u * 200u, 0x00);      // z prefill 0 -> every pixel passes
+    sdram_fill(ZB, 640u * 200u, 0x00);
+    emit_identity_object_state(1 << 14, -(1 << 14), 1 << 16);  // T={0.25,-0.25,1.0}
+
+    // Object verts; cam = v+T = (-0.5,-0.55,1.5) (0.85,-0.35,2.0) (0.25,0.4,3.0)
+    // -> screen ~(126,130) (202,114) (168,90).
+    const int32_t V[9] = { -49152, -19661,  32768,
+                            39322,  -6554,  65536,
+                                0,  42598, 131072 };
+
+    ParamSpanListWire pa = make_xform_surface(FB_BASE_BYTE);
+    pa.z_mode = 3; pa.z_base = ZA; pa.z_major_step = 640; pa.z_minor_step = 2;
+    emit_set_tri_state_raw(pa, 0, 320, 0, 200);
+    emit_xform_rgb_tri_raw(0x52, V, XFT_S, XFT_T, XFT_RGB);
+
+    ParamSpanListWire pb = make_xform_surface(FB_ALT_BASE_BYTE);
+    pb.z_mode = 3; pb.z_base = ZB; pb.z_major_step = 640; pb.z_minor_step = 2;
+    emit_set_tri_state_raw(pb, 0, 320, 0, 200);   // matrix is sticky: no 0x50 reload
+    for (int k = 0; k < 3; k++) {
+        static const uint32_t slots[3] = {2, 17, 31};
+        emit_load_vert_raw(0x53, slots[k], V[k*3], V[k*3+1], V[k*3+2],
+                           XFT_S[k], XFT_T[k], XFT_RGB[k]);
+    }
+    emit_draw_indexed_tri_raw(2u | (17u << 5) | (31u << 10));
+
+    if (!submit_and_wait()) {
+        check_fail("vtx_cache_mac_load_matches_xform_rgb", "timeout");
+        return;
+    }
+    xform_ab_match("vtx_cache_mac_load_matches_xform_rgb.fb",
+                   FB_BASE_BYTE, FB_ALT_BASE_BYTE, 110, 215, 80, 140, 300);
+    xform_ab_match("vtx_cache_mac_load_matches_xform_rgb.z",
+                   ZA, ZB, 110, 215, 80, 140, 300, /*blank=*/0x0000);
+}
+#endif  // !GPU_TEST_NO_MAC
+
+// Core of TEST B / B2: three 0x56 clip loads (explicit depth = the divider
+// mirror, so the slots match 0x4F's writes bit-for-bit) + 0x54 into FB_BASE
+// must be byte-identical — framebuffer AND z-buffer (z_mode=3 makes the
+// depth32 field load-bearing) — to ONE oracle draw of the same clip verts
+// into FB_ALT.
+static void run_clip_load_equiv(const char *name) {
+    xform_preload();
+    const uint32_t ZB = 0x00200000u, ZA = 0x00240000u;
+    sdram_fill(ZB, 640u * 200u, 0x00);      // z prefill 0 -> every pixel passes
+    sdram_fill(ZA, 640u * 200u, 0x00);
+    emit_identity_object_state(0, 0, 0);
+
+    ParamSpanListWire pa = make_xform_surface(FB_ALT_BASE_BYTE);
+    pa.z_mode = 3; pa.z_base = ZA; pa.z_major_step = 640; pa.z_minor_step = 2;
+    emit_set_tri_state_raw(pa, 0, 320, 0, 200);
+    emit_clip_oracle_tri(XFT_CLIP_V, XFT_S, XFT_T, XFT_RGB);
+
+    ParamSpanListWire pb = make_xform_surface(FB_BASE_BYTE);
+    pb.z_mode = 3; pb.z_base = ZB; pb.z_major_step = 640; pb.z_minor_step = 2;
+    emit_set_tri_state_raw(pb, 0, 320, 0, 200);
+    for (int k = 0; k < 3; k++)
+        emit_load_vert_clip_raw((uint32_t)k,
+                                XFT_CLIP_V[k*3], XFT_CLIP_V[k*3+1], XFT_CLIP_V[k*3+2],
+                                XFT_S[k], XFT_T[k], XFT_RGB[k],
+                                xft_divider_zi(XFT_CLIP_V[k*3+2]));
+    emit_draw_indexed_tri_raw(0u | (1u << 5) | (2u << 10));
+
+    if (!submit_and_wait()) { check_fail(name, "timeout"); return; }
+    xform_ab_match(name, FB_BASE_BYTE, FB_ALT_BASE_BYTE, 100, 220, 55, 145, 500);
+    char zname[96];
+    snprintf(zname, sizeof zname, "%s.z", name);
+    xform_ab_match(zname, ZB, ZA, 100, 220, 55, 145, 500, /*blank=*/0x0000);
+}
+
+#ifndef GPU_TEST_NO_CLIP_TRI
+// TEST B — clip path vs the 0x4F oracle (both run XF_CLIP_FEED -> recip ->
+// project on the same numbers).  The core acceptance criterion for 0x56.
+static void test_vtx_cache_clip_load_matches_clip_tri() {
+    printf("TEST vtx_cache_clip_load_matches_clip_tri\n");
+    run_clip_load_equiv("vtx_cache_clip_load_matches_clip_tri");
+}
+#else
+#ifndef GPU_TEST_NO_MAC
+// TEST B2 (no-clip fold, os30-exact) — same equivalence with the identity-
+// matrix 0x52 as cross-oracle: proves 0x56 works in the shipped os30 fold
+// where the 0x4F machinery is pruned (the load must NOT be gated on CLIP_TRI).
+static void test_vtx_cache_clip_load_matches_identity_xform() {
+    printf("TEST vtx_cache_clip_load_matches_identity_xform\n");
+    run_clip_load_equiv("vtx_cache_clip_load_matches_identity_xform");
+}
+#endif
+
+// On the CLIP_TRI=0 fold an 18-word 0x4F falls to CMDCLS_NONE: it must drain
+// (fence completes) and paint nothing.
+static void test_clip_tri_drains_when_pruned() {
+    printf("TEST clip_tri_drains_when_pruned\n");
+    xform_preload();
+    emit_identity_object_state(0, 0, 0);
+    ParamSpanListWire p = make_xform_surface(FB_BASE_BYTE);
+    emit_set_tri_state_raw(p, 0, 320, 0, 200);
+    emit_xform_rgb_tri_raw(0x4F, XFT_CLIP_V, XFT_S, XFT_T, XFT_RGB);
+    if (!submit_and_wait()) {
+        check_fail("clip_tri_drains_when_pruned", "timeout (0x4F wedged)");
+        return;
+    }
+    xform_all_blank("clip_tri_drains_when_pruned", FB_BASE_BYTE, 100, 220, 55, 145);
+}
+#endif  // GPU_TEST_NO_CLIP_TRI
+
+#ifdef GPU_TEST_NO_MAC
+// TEST C (MAC-less fold) — full-size matrix-form commands 0x51 (16w), 0x52
+// (18w), 0x53 (7w), 0x57 (9w) must fall to CMDCLS_NONE and DRAIN: no wedge,
+// no pixels (the review bug: an ungated 0x52 ran the zeroed matrix).  The
+// payloads are on-screen-looking so a wrongly-decoded draw would land inside
+// the compare rect.  FB_BASE then receives ONLY the known-good 0x56x3 + 0x54
+// draw; FB_ALT gets the 0x4F oracle of the same verts, so a full-FB compare
+// proves the drained commands wrote nothing anywhere.
+static void test_xform_matrix_cmds_drain_no_mac() {
+    printf("TEST xform_matrix_cmds_drain_no_mac\n");
+    xform_preload();
+    emit_identity_object_state(0, 0, 0);
+
+    ParamSpanListWire pb = make_xform_surface(FB_BASE_BYTE);
+    emit_set_tri_state_raw(pb, 0, 320, 0, 200);
+    {   // 0x51: verts + s/t + light word
+        std::vector<uint32_t> w51(16, 0);
+        for (int i = 0; i < 9; i++) w51[i] = (uint32_t)XFT_CLIP_V[i];
+        emit_raw_command(0x51, w51);
+    }
+    emit_xform_rgb_tri_raw(0x52, XFT_CLIP_V, XFT_S, XFT_T, XFT_RGB);
+    emit_load_vert_raw(0x53, 5, XFT_CLIP_V[0], XFT_CLIP_V[1], XFT_CLIP_V[2],
+                       XFT_S[0], XFT_T[0], XFT_RGB[0]);
+    {   // 0x57: slot + xyz + normal xyz + s/t
+        std::vector<uint32_t> w57(9, 0);
+        w57[0] = 6;
+        for (int i = 0; i < 3; i++) w57[1 + i] = (uint32_t)XFT_CLIP_V[i];
+        w57[4] = 0x00010000u;   // normal (0,0,1)... arbitrary, must be ignored
+        emit_raw_command(0x57, w57);
+    }
+    for (int k = 0; k < 3; k++)
+        emit_load_vert_clip_raw((uint32_t)k,
+                                XFT_CLIP_V[k*3], XFT_CLIP_V[k*3+1], XFT_CLIP_V[k*3+2],
+                                XFT_S[k], XFT_T[k], XFT_RGB[k],
+                                xft_divider_zi(XFT_CLIP_V[k*3+2]));
+    emit_draw_indexed_tri_raw(0u | (1u << 5) | (2u << 10));
+
+    ParamSpanListWire pa = make_xform_surface(FB_ALT_BASE_BYTE);
+    emit_set_tri_state_raw(pa, 0, 320, 0, 200);
+    emit_clip_oracle_tri(XFT_CLIP_V, XFT_S, XFT_T, XFT_RGB);
+
+    if (!submit_and_wait()) {
+        check_fail("xform_matrix_cmds_drain_no_mac", "timeout (drain wedged)");
+        return;
+    }
+    xform_ab_match("xform_matrix_cmds_drain_no_mac",
+                   FB_BASE_BYTE, FB_ALT_BASE_BYTE, 0, 320, 0, 200, 500);
+}
+#endif  // GPU_TEST_NO_MAC
+
+// TEST C (all configs) — wrong-size 0x56 payloads fall to CMDCLS_NONE and
+// drain: 6 words, and 7 words — the PRE-depth wire form, now undersized since
+// the explicit-depth contract made 0x56 exactly 8 words.  The stream then
+// still renders a good cache draw byte-identical to the oracle.
+static void test_load_vert_clip_wrong_size_drains() {
+    printf("TEST load_vert_clip_wrong_size_drains\n");
+    xform_preload();
+    emit_identity_object_state(0, 0, 0);
+
+    ParamSpanListWire pb = make_xform_surface(FB_BASE_BYTE);
+    emit_set_tri_state_raw(pb, 0, 320, 0, 200);
+    {   // 6-word 0x56 aimed at an unused slot: must drain, never load
+        std::vector<uint32_t> bad(6, 0xC7C7C7C7u);
+        bad[0] = 7;
+        emit_raw_command(0x56, bad);
+    }
+    {   // 7-word 0x56 (the legacy no-depth form) with a REAL vert payload
+        // aimed at slot 0: were it still accepted, it would poison the slot
+        // the good load below must own — the oracle compare would catch it.
+        std::vector<uint32_t> bad7 = {
+            0u, (uint32_t)XFT_CLIP_V[3], (uint32_t)XFT_CLIP_V[4],
+            (uint32_t)XFT_CLIP_V[5], (uint32_t)XFT_S[1], (uint32_t)XFT_T[1],
+            (uint32_t)XFT_RGB[1] };
+        emit_raw_command(0x56, bad7);
+    }
+    for (int k = 0; k < 3; k++)
+        emit_load_vert_clip_raw((uint32_t)k,
+                                XFT_CLIP_V[k*3], XFT_CLIP_V[k*3+1], XFT_CLIP_V[k*3+2],
+                                XFT_S[k], XFT_T[k], XFT_RGB[k],
+                                xft_divider_zi(XFT_CLIP_V[k*3+2]));
+    emit_draw_indexed_tri_raw(0u | (1u << 5) | (2u << 10));
+
+    ParamSpanListWire pa = make_xform_surface(FB_ALT_BASE_BYTE);
+    emit_set_tri_state_raw(pa, 0, 320, 0, 200);
+    emit_clip_oracle_tri(XFT_CLIP_V, XFT_S, XFT_T, XFT_RGB);
+
+    if (!submit_and_wait()) {
+        check_fail("load_vert_clip_wrong_size_drains", "timeout (drain wedged)");
+        return;
+    }
+    xform_ab_match("load_vert_clip_wrong_size_drains",
+                   FB_BASE_BYTE, FB_ALT_BASE_BYTE, 100, 220, 55, 145, 500);
+}
+
+// The explicit 0x56 depth is LOAD-BEARING: two overlapping cache tris whose
+// EXPLICIT depths invert the zi-implied order.  Tri A (w=2.0, zi 32768) gets
+// depth 0x40000000 (near); tri B — strictly inside A's footprint on screen
+// but NEARER by w (w=1.5, zi 43690) — gets depth 0x00020000 (far).  Were the
+// slot depth still the divider value (the pre-fix contract, or a broken
+// xf_load_depth mux), B would win the z-test (z_compress(43690) >=
+// z_compress(32768)) and paint blue over A; with the explicit word it is
+// rejected everywhere (z_compress(0x20000)=0x8800 < z_compress(0x40000000)=
+// 0xF000).  FB_BASE = A then B under z test+write must equal FB_ALT = A
+// alone, framebuffer and z-buffer.
+static void test_vtx_cache_clip_depth_override() {
+    printf("TEST vtx_cache_clip_depth_override\n");
+    xform_preload();
+    const uint32_t ZB0 = 0x00200000u, ZA0 = 0x00240000u;
+    sdram_fill(ZB0, 640u * 200u, 0x00);
+    sdram_fill(ZA0, 640u * 200u, 0x00);
+    emit_identity_object_state(0, 0, 0);
+
+    const uint32_t DEPTH_NEAR = 0x40000000u, DEPTH_FAR = 0x00020000u;
+    const uint16_t RGB_A[3] = {0xF800, 0xF800, 0xF800};
+    const uint16_t RGB_B[3] = {0x001F, 0x001F, 0x001F};
+
+    ParamSpanListWire pb = make_xform_surface(FB_BASE_BYTE);
+    pb.z_mode = 3; pb.z_base = ZB0; pb.z_major_step = 640; pb.z_minor_step = 2;
+    emit_set_tri_state_raw(pb, 0, 320, 0, 200);
+    for (int k = 0; k < 3; k++) {
+        emit_load_vert_clip_raw((uint32_t)k,
+                                XFT_CLIP_V[k*3], XFT_CLIP_V[k*3+1], XFT_CLIP_V[k*3+2],
+                                XFT_S[k], XFT_T[k], RGB_A[k], DEPTH_NEAR);
+        // B: clip x/y scaled 3/8 at w=1.5 -> half-size screen footprint
+        // strictly inside A ((135,116)(185,116)(160,82) vs A's
+        // (110,132)(210,132)(160,64)), so a rejected B changes nothing and a
+        // wrongly-passing B lands entirely inside the compare rect.
+        emit_load_vert_clip_raw((uint32_t)(3 + k),
+                                (int32_t)((int64_t)XFT_CLIP_V[k*3]     * 3 / 8),
+                                (int32_t)((int64_t)XFT_CLIP_V[k*3 + 1] * 3 / 8),
+                                3 << 15,                            // w = 1.5
+                                XFT_S[k], XFT_T[k], RGB_B[k], DEPTH_FAR);
+    }
+    emit_draw_indexed_tri_raw(0u | (1u << 5) | (2u << 10));    // A first
+    emit_draw_indexed_tri_raw(3u | (4u << 5) | (5u << 10));    // B: must lose
+
+    ParamSpanListWire pa = make_xform_surface(FB_ALT_BASE_BYTE);
+    pa.z_mode = 3; pa.z_base = ZA0; pa.z_major_step = 640; pa.z_minor_step = 2;
+    emit_set_tri_state_raw(pa, 0, 320, 0, 200);
+    emit_draw_indexed_tri_raw(0u | (1u << 5) | (2u << 10));    // A alone (slots persist)
+
+    if (!submit_and_wait()) {
+        check_fail("vtx_cache_clip_depth_override", "timeout");
+        return;
+    }
+    xform_ab_match("vtx_cache_clip_depth_override.fb",
+                   FB_BASE_BYTE, FB_ALT_BASE_BYTE, 100, 220, 55, 145, 500);
+    xform_ab_match("vtx_cache_clip_depth_override.z",
+                   ZB0, ZA0, 100, 220, 55, 145, 500, /*blank=*/0x0000);
+}
+
+// TEST D — slot behaviour: boundary slots 0/31; a 2-identical-index draw
+// (zero area) paints nothing and doesn't wedge; a real {0,1,2} draw renders;
+// a slot reload uses the SECOND value (proven against the oracle of the
+// second verts) through a wrapping slot word (w0=32 -> [4:0]=0) and an 0x54
+// header with garbage high bits ([31:15] ignored); and a post-soft-reset 0x54
+// refuses cleanly (tri_state_valid cleared).  Loads use 0x56 (present in all
+// three configs).
+static void test_vtx_cache_slot_reuse_and_wrap() {
+    printf("TEST vtx_cache_slot_reuse_and_wrap\n");
+    xform_preload();
+    emit_identity_object_state(0, 0, 0);
+
+    ParamSpanListWire pb = make_xform_surface(FB_BASE_BYTE);
+    emit_set_tri_state_raw(pb, 0, 320, 0, 200);
+    emit_load_vert_clip_raw(0,  XFT_CLIP_V[0], XFT_CLIP_V[1], XFT_CLIP_V[2],
+                            XFT_S[0], XFT_T[0], XFT_RGB[0],
+                            xft_divider_zi(XFT_CLIP_V[2]));
+    emit_load_vert_clip_raw(31, XFT_CLIP_V[3], XFT_CLIP_V[4], XFT_CLIP_V[5],
+                            XFT_S[1], XFT_T[1], XFT_RGB[1],
+                            xft_divider_zi(XFT_CLIP_V[5]));
+    // {0,31,0}: v2==v0 -> zero-area -> the walker emits nothing.
+    emit_draw_indexed_tri_raw(0u | (31u << 5) | (0u << 10));
+    if (!submit_and_wait()) {
+        check_fail("vtx_cache_slot_reuse_and_wrap.degenerate", "timeout (wedged)");
+        return;
+    }
+    xform_all_blank("vtx_cache_slot_reuse_and_wrap.degenerate",
+                    FB_BASE_BYTE, 90, 230, 45, 155);
+
+    // Real {0,1,2} renders.
+    emit_load_vert_clip_raw(1, XFT_CLIP_V[3], XFT_CLIP_V[4], XFT_CLIP_V[5],
+                            XFT_S[1], XFT_T[1], XFT_RGB[1],
+                            xft_divider_zi(XFT_CLIP_V[5]));
+    emit_load_vert_clip_raw(2, XFT_CLIP_V[6], XFT_CLIP_V[7], XFT_CLIP_V[8],
+                            XFT_S[2], XFT_T[2], XFT_RGB[2],
+                            xft_divider_zi(XFT_CLIP_V[8]));
+    emit_draw_indexed_tri_raw(0u | (1u << 5) | (2u << 10));
+    if (!submit_and_wait()) {
+        check_fail("vtx_cache_slot_reuse_and_wrap.renders", "timeout");
+        return;
+    }
+    {
+        int painted = 0;
+        for (int y = 55; y < 145; y++)
+            for (int x = 100; x < 220; x++)
+                if (sdram_read_u16_le(FB_BASE_BYTE + (uint32_t)y * 640u
+                                      + (uint32_t)x * 2u) != 0xABABu) painted++;
+        if (painted > 500) check_pass("vtx_cache_slot_reuse_and_wrap.renders");
+        else {
+            char m[64];
+            snprintf(m, sizeof m, "only %d painted px", painted);
+            check_fail("vtx_cache_slot_reuse_and_wrap.renders", m);
+        }
+    }
+
+    // Reload slot 0 with a shifted vert via w0=32 (wraps to slot 0) and draw
+    // {0,1,2} into FB_ALT with garbage 0x54 high bits.
+    const int32_t V0p[3] = { -(1 << 15), -((4 << 16) / 5), 2 << 16 };  // x=-0.5 -> px 135
+    ParamSpanListWire pc = make_xform_surface(FB_ALT_BASE_BYTE);
+    emit_set_tri_state_raw(pc, 0, 320, 0, 200);
+    emit_load_vert_clip_raw(32u, V0p[0], V0p[1], V0p[2],
+                            XFT_S[0], XFT_T[0], XFT_RGB[0],
+                            xft_divider_zi(V0p[2]));
+    emit_draw_indexed_tri_raw((0u | (1u << 5) | (2u << 10)) | 0xDEAD8000u);
+    if (!submit_and_wait()) {
+        check_fail("vtx_cache_slot_reuse_and_wrap.second_value", "timeout");
+        return;
+    }
+    // Oracle of the SECOND verts into a re-sentineled FB_BASE (GPU idle after
+    // the fence, so the backdoor fill can't race in-flight writes).
+    sdram_fill(FB_BASE_BYTE, 640u * 200u, SENTINEL_BYTE);
+    const int32_t V2nd[9] = { V0p[0], V0p[1], V0p[2],
+                              XFT_CLIP_V[3], XFT_CLIP_V[4], XFT_CLIP_V[5],
+                              XFT_CLIP_V[6], XFT_CLIP_V[7], XFT_CLIP_V[8] };
+    ParamSpanListWire pd = make_xform_surface(FB_BASE_BYTE);
+    emit_set_tri_state_raw(pd, 0, 320, 0, 200);
+    emit_clip_oracle_tri(V2nd, XFT_S, XFT_T, XFT_RGB);
+    if (!submit_and_wait()) {
+        check_fail("vtx_cache_slot_reuse_and_wrap.second_value", "oracle timeout");
+        return;
+    }
+    xform_ab_match("vtx_cache_slot_reuse_and_wrap.second_value",
+                   FB_ALT_BASE_BYTE, FB_BASE_BYTE, 100, 220, 55, 145, 500);
+
+    // Soft reset clears tri_state_valid: 0x54 must refuse and retire.
+    gpu_soft_reset();
+    emit_draw_indexed_tri_raw(0u | (1u << 5) | (2u << 10));
+    if (submit_and_wait())
+        check_pass("vtx_cache_slot_reuse_and_wrap.soft_reset_refusal");
+    else
+        check_fail("vtx_cache_slot_reuse_and_wrap.soft_reset_refusal",
+                   "timeout (0x54 wedged without armed 0x4A)");
+}
+#endif  // GPU_TEST_XFORM
+
 int main(int argc, char **argv) {
     Verilated::commandArgs(argc, argv);
     Verilated::traceEverOn(false);
@@ -11149,6 +11717,27 @@ int main(int argc, char **argv) {
     test_vert_tri_subpixel_y_attrib();
     test_vert_tri_tex_persp_bias();
 #endif
+#endif
+
+#ifdef GPU_TEST_XFORM
+    // ---- 0x50/0x52/0x53/0x54/0x56 transform + vertex-cache functional tests ----
+#ifndef GPU_TEST_NO_MAC
+    test_vtx_cache_mac_load_matches_xform_rgb();        // TEST A (matrix path, fb+z)
+#endif
+#ifndef GPU_TEST_NO_CLIP_TRI
+    test_vtx_cache_clip_load_matches_clip_tri();        // TEST B (0x4F oracle)
+#else
+#ifndef GPU_TEST_NO_MAC
+    test_vtx_cache_clip_load_matches_identity_xform();  // TEST B2 (os30-exact)
+#endif
+    test_clip_tri_drains_when_pruned();
+#endif
+#ifdef GPU_TEST_NO_MAC
+    test_xform_matrix_cmds_drain_no_mac();              // TEST C (MAC-gate drains)
+#endif
+    test_load_vert_clip_wrong_size_drains();            // TEST C (6w + legacy-7w drains)
+    test_vtx_cache_clip_depth_override();               // explicit w7 depth is the one used
+    test_vtx_cache_slot_reuse_and_wrap();               // TEST D
 #endif
 
     printf("\n=== Acceptance Results: %d passed, %d failed ===\n",

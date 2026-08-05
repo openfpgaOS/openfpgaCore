@@ -509,7 +509,7 @@ SYSTEM_FLAGS = -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC -Wno-CASEINCOMPLETE \
 # ============================================================
 # Targets
 # ============================================================
-.PHONY: all sdram sdram-serialize sdram-native2 sdram-wcont0 sdram-all sdram-cont sram scanout scanout-lean analogchain gpu gpu-persp gpu-floor gpu-gpudemo gpu-acceptance gpu-acceptance-single gpu-acceptance-os30 gpu-acceptance-zraw gpu-acceptance-burst2 gpu-acceptance-all gpu-chain \
+.PHONY: all sdram sdram-serialize sdram-native2 sdram-wcont0 sdram-all sdram-cont sram scanout scanout-lean analogchain gpu gpu-persp gpu-floor gpu-gpudemo gpu-acceptance gpu-acceptance-single gpu-acceptance-os30 gpu-acceptance-zraw gpu-acceptance-burst2 gpu-acceptance-all gpu-acceptance-nomac gpu-elab-nomac-noclip gpu-chain \
         gpu-wrpath gpu-wstall scanout-race scanout-race-pocket axi-periph bridge-cmd bridge-rx audio audio-mixer arbiter system system-mister run run-sram build clean \
         cram1-tex-chain cram1-cmap-chain gpu-cram1-repro
 
@@ -760,7 +760,8 @@ $(GPU_ACCEPT_OS30_DIR)/V$(GPU_TOP): $(GPU_SRCS) $(GPU_ACCEPT_CPP)
 		$(GPU_SRCS) $(GPU_ACCEPT_CPP)
 
 gpu-acceptance-all: gpu-acceptance gpu-acceptance-single gpu-acceptance-os30 \
-	gpu-acceptance-os30-exact gpu-acceptance-sm64-nopal
+	gpu-acceptance-os30-exact gpu-acceptance-sm64 gpu-acceptance-sm64-nopal \
+	gpu-acceptance-nomac gpu-elab-nomac-noclip
 
 # In-flight z-RAW coherency variant.  Same full-feature config as
 # gpu-acceptance (GPU_Z_READ_WINDOW=4, INCLUDE_TRANSLUC), but the binary is
@@ -819,7 +820,7 @@ gpu-acceptance-sm64: $(GPU_ACCEPT_SM64_DIR)/V$(GPU_TOP)
 
 $(GPU_ACCEPT_SM64_DIR)/V$(GPU_TOP): $(GPU_SRCS) $(GPU_ACCEPT_CPP)
 	$(VERILATOR) $(VERILATOR_FLAGS) \
-		-CFLAGS "-std=c++17 -O2 -DGPU_TEST_OS30_LEAN -DGPU_TEST_TRUECOLOR -DGPU_TEST_SM64" \
+		-CFLAGS "-std=c++17 -O2 -DGPU_TEST_OS30_LEAN -DGPU_TEST_TRUECOLOR -DGPU_TEST_SM64 -DGPU_TEST_XFORM" \
 		-GINCLUDE_COMPACT_SPAN=0 \
 		-GINCLUDE_COLUMN_LIST=0 \
 		-GGPU_EW_PARALLEL_DIVS=0 \
@@ -830,6 +831,8 @@ $(GPU_ACCEPT_SM64_DIR)/V$(GPU_TOP): $(GPU_SRCS) $(GPU_ACCEPT_CPP)
 		-GINCLUDE_DIRECT_COLOR=1 \
 		-GINCLUDE_XFORM_RGB=1 \
 		-GINCLUDE_VTX_CACHE=1 \
+		-GINCLUDE_GPU_XFORM_MAC=1 \
+		-GINCLUDE_CLIP_TRI=1 \
 		-GINCLUDE_GPU_LIGHT=1 \
 		-GINCLUDE_PALETTE=1 \
 		-GINCLUDE_COMBINE=1 \
@@ -851,22 +854,28 @@ gpu-acceptance-sm64-nopal: $(GPU_ACCEPT_NOPAL_DIR)/V$(GPU_TOP)
 
 $(GPU_ACCEPT_NOPAL_DIR)/V$(GPU_TOP): $(GPU_SRCS) $(GPU_ACCEPT_CPP)
 	$(VERILATOR) $(VERILATOR_FLAGS) \
-		-CFLAGS "-std=c++17 -O2 -DGPU_TEST_OS30_LEAN -DGPU_TEST_TRUECOLOR -DGPU_TEST_SM64 -DGPU_TEST_NO_PALETTE" \
+		-CFLAGS "-std=c++17 -O2 -DGPU_TEST_OS30_LEAN -DGPU_TEST_TRUECOLOR -DGPU_TEST_SM64 -DGPU_TEST_NO_PALETTE -DGPU_TEST_XFORM" \
 		-GINCLUDE_COMPACT_SPAN=0 -GINCLUDE_COLUMN_LIST=0 -GGPU_EW_PARALLEL_DIVS=0 \
 		-GINCLUDE_PARAM_TRI=1 -GINCLUDE_VERT_TRI=1 -GINCLUDE_PARAM_TRI_RECS=1 \
 		-GGPU_Z_READ_WINDOW=4 -GINCLUDE_DIRECT_COLOR=1 -GINCLUDE_XFORM_RGB=1 \
-		-GINCLUDE_VTX_CACHE=1 -GINCLUDE_GPU_LIGHT=1 -GINCLUDE_PALETTE=0 \
+		-GINCLUDE_VTX_CACHE=1 -GINCLUDE_GPU_XFORM_MAC=1 -GINCLUDE_CLIP_TRI=1 \
+		-GINCLUDE_GPU_LIGHT=1 -GINCLUDE_PALETTE=0 \
 		--top-module $(GPU_TOP) --Mdir $(GPU_ACCEPT_NOPAL_DIR) -I$(COMMON_DIR) \
 		$(GPU_SRCS) $(GPU_ACCEPT_CPP)
 
 # EXACT shipped os30 bitstream GPU config (mirrors core_top.v gpu_core params for
-# DEFS_os30 = VERT_TRI DIRECT_COLOR COMBINE Z_BURST HW_MIXER): every other module
-# folds OFF — PARAM_TRI/RECS=0, COMPACT/COLUMN=0, XFORM/CLIP/VTX/LIGHT/XFORM_MAC=0,
-# PALETTE=0, TEX_MEM=0, PARAM_SPAN_Q29=0.  Runs the truecolor fragment suite in the
+# DEFS_os30 = VERT_TRI DIRECT_COLOR COMBINE Z_BURST HW_MIXER TEX_MEM XFORM
+# (−LIGHT, −CLIP_TRI)): PARAM_TRI/RECS=0, COMPACT/COLUMN=0, PALETTE=0,
+# PARAM_SPAN_Q29=0, TEX_MEM=1 (default; fill masters tied idle in tb_gpu), and
+# the transform front-end ON — XFORM_RGB=1, VTX_CACHE=1, GPU_XFORM_MAC=1 with
+# GPU_LIGHT=0 and CLIP_TRI=0 pruned.  Runs the truecolor fragment suite in the
 # REAL os30 fold so the untextured-truecolor (white-texel Gouraud = Mario base face)
 # path is exercised in the config that ships — the kitchen-sink sm64 target never is.
-# The three -DGPU_TEST_NO_* defines compile out the tests whose ORACLE needs a
-# module this config prunes (param-tri/recs 0x49+0x4D twins, cmap-lane bytes,
+# -DGPU_TEST_XFORM adds the 0x50/0x52/0x53/0x54/0x56 functional tests;
+# -DGPU_TEST_NO_CLIP_TRI switches the clip-load oracle to the identity-matrix
+# 0x52 twin (no 0x4F here) and asserts the 18-word 0x4F drains.  The other
+# -DGPU_TEST_NO_* defines compile out the tests whose ORACLE needs a module
+# this config prunes (param-tri/recs 0x49+0x4D twins, cmap-lane bytes,
 # q29 dynamic-scale z) — the disabled-path drain/no-op tests still run.  Full
 # assertions on everything that remains: must be GREEN, exit code and all.
 GPU_ACCEPT_OS30X_DIR = obj_dir_gpu_acceptance_os30x
@@ -876,11 +885,12 @@ gpu-acceptance-os30-exact: $(GPU_ACCEPT_OS30X_DIR)/V$(GPU_TOP)
 
 $(GPU_ACCEPT_OS30X_DIR)/V$(GPU_TOP): $(GPU_SRCS) $(GPU_ACCEPT_CPP)
 	$(VERILATOR) $(VERILATOR_FLAGS) \
-		-CFLAGS "-std=c++17 -O2 -DGPU_TEST_OS30_LEAN -DGPU_TEST_TRUECOLOR -DGPU_TEST_NO_PALETTE -DGPU_TEST_NO_PARAM_TRI -DGPU_TEST_NO_PARAM_SPAN_Q29" \
+		-CFLAGS "-std=c++17 -O2 -DGPU_TEST_OS30_LEAN -DGPU_TEST_TRUECOLOR -DGPU_TEST_NO_PALETTE -DGPU_TEST_NO_PARAM_TRI -DGPU_TEST_NO_PARAM_SPAN_Q29 -DGPU_TEST_XFORM -DGPU_TEST_NO_CLIP_TRI" \
 		-GINCLUDE_COMPACT_SPAN=0 -GINCLUDE_COLUMN_LIST=0 -GGPU_EW_PARALLEL_DIVS=0 \
 		-GINCLUDE_PARAM_TRI=0 -GINCLUDE_VERT_TRI=1 -GINCLUDE_PARAM_TRI_RECS=0 \
 		-GGPU_Z_READ_WINDOW=4 -GGPU_CB_READ_WINDOW=2 -GINCLUDE_DIRECT_COLOR=1 -GINCLUDE_COMBINE=1 \
-		-GINCLUDE_XFORM_RGB=0 -GINCLUDE_CLIP_TRI=0 -GINCLUDE_VTX_CACHE=0 \
+		-GINCLUDE_XFORM_RGB=1 -GINCLUDE_CLIP_TRI=0 -GINCLUDE_VTX_CACHE=1 \
+		-GINCLUDE_GPU_XFORM_MAC=1 \
 		-GINCLUDE_GPU_LIGHT=0 -GINCLUDE_PALETTE=0 \
 		-GINCLUDE_PARAM_SPAN_Q29=0 \
 		--top-module $(GPU_TOP) --Mdir $(GPU_ACCEPT_OS30X_DIR) -I$(COMMON_DIR) \
@@ -913,6 +923,29 @@ $(GPU_ACCEPT_MISTERX_DIR)/V$(GPU_TOP): $(GPU_SRCS) $(GPU_ACCEPT_CPP)
 		-GINCLUDE_VTX_CACHE=0 -GINCLUDE_GPU_LIGHT=0 -GINCLUDE_PALETTE=1 \
 		-GINCLUDE_COMBINE=1 -GINCLUDE_PARAM_SPAN_Q29=1 \
 		--top-module $(GPU_TOP) --Mdir $(GPU_ACCEPT_MISTERX_DIR) -I$(COMMON_DIR) \
+		$(GPU_SRCS) $(GPU_ACCEPT_CPP)
+
+# MAC-less xform fold: matrix MAC pruned (INCLUDE_GPU_XFORM_MAC=0) with the
+# vertex cache + clip feed alive.  Proves (1) 0x51/0x52/0x53/0x57 matrix-form
+# commands DRAIN as no-ops (decode gate fix), (2) clip-space cache load 0x56 +
+# 0x54 renders byte-identical to 0x4F without the MAC.  Full-feature base
+# (only DIRECT_COLOR/XFORM_RGB/VTX_CACHE flipped on) so the whole default
+# suite stays green alongside.  CLIP_TRI=1 is deliberate: 0x4F is the only
+# possible in-config oracle for the clip load once the MAC (and with it the
+# identity-matrix 0x52 oracle) is gone.
+GPU_ACCEPT_NOMAC_DIR = obj_dir_gpu_acceptance_nomac
+gpu-acceptance-nomac: $(GPU_ACCEPT_NOMAC_DIR)/V$(GPU_TOP)
+	@printf "\n=== GPU acceptance suite (MAC-less xform fold) ===\n"
+	./$(GPU_ACCEPT_NOMAC_DIR)/V$(GPU_TOP)
+
+$(GPU_ACCEPT_NOMAC_DIR)/V$(GPU_TOP): $(GPU_SRCS) $(GPU_ACCEPT_CPP)
+	$(VERILATOR) $(VERILATOR_FLAGS) \
+		-CFLAGS "-std=c++17 -O2 -DGPU_TEST_XFORM -DGPU_TEST_NO_MAC" \
+		+define+INCLUDE_TRANSLUC \
+		-GINCLUDE_DIRECT_COLOR=1 -GINCLUDE_XFORM_RGB=1 \
+		-GINCLUDE_VTX_CACHE=1 -GINCLUDE_GPU_XFORM_MAC=0 \
+		-GINCLUDE_GPU_LIGHT=0 -GINCLUDE_CLIP_TRI=1 \
+		--top-module $(GPU_TOP) --Mdir $(GPU_ACCEPT_NOMAC_DIR) -I$(COMMON_DIR) \
 		$(GPU_SRCS) $(GPU_ACCEPT_CPP)
 
 # MAP01 courtyard "fence scene" interleave test against the EXACT MiSTer GPU
@@ -963,6 +996,33 @@ gpu-elab-sm64:
 		-I$(COMMON_DIR) \
 		$(GPU_SRCS)
 	@printf "=== SM64 prune elaborates clean ===\n"
+
+# Elaboration smoke of the one xform fold with no possible in-config oracle:
+# {MAC=0, CLIP_TRI=0, VTX_CACHE=1}.  0x53 has no MAC and 0x56's 0x4F/identity-
+# 0x52 oracles are both pruned, so functional coverage is impossible — assert
+# the fold at least elaborates cleanly (prune-folding errors caught pre-fit).
+gpu-elab-nomac-noclip:
+	@printf "\n=== GPU elaboration smoke (MAC-less no-clip xform fold) ===\n"
+	$(VERILATOR) --lint-only -Wall -Wno-fatal -Wno-BADVLTPRAGMA \
+		-Wno-WIDTH -Wno-UNOPTFLAT -Wno-CASEINCOMPLETE \
+		-GINCLUDE_COMPACT_SPAN=0 \
+		-GINCLUDE_COLUMN_LIST=0 \
+		-GGPU_EW_PARALLEL_DIVS=0 \
+		-GINCLUDE_PARAM_TRI=0 \
+		-GINCLUDE_VERT_TRI=1 \
+		-GINCLUDE_PARAM_TRI_RECS=0 \
+		-GGPU_Z_READ_WINDOW=4 \
+		-GINCLUDE_DIRECT_COLOR=1 \
+		-GINCLUDE_XFORM_RGB=1 \
+		-GINCLUDE_VTX_CACHE=1 \
+		-GINCLUDE_GPU_XFORM_MAC=0 \
+		-GINCLUDE_CLIP_TRI=0 \
+		-GINCLUDE_GPU_LIGHT=0 \
+		-GINCLUDE_PALETTE=0 \
+		--top-module $(GPU_TOP) \
+		-I$(COMMON_DIR) \
+		$(GPU_SRCS)
+	@printf "=== MAC-less no-clip fold elaborates clean ===\n"
 
 # --- GPU cyc/pixel EMPIRICAL measurement (SM64-class triangle) ---
 # Drives ONE large textured RGB565-truecolor z-buffered triangle through the

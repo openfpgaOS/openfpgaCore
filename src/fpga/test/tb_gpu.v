@@ -34,6 +34,7 @@ module tb_gpu #(
     parameter INCLUDE_DIRECT_COLOR   = 0,
     parameter INCLUDE_XFORM_RGB      = 0,
     parameter INCLUDE_CLIP_TRI       = 1,
+    parameter INCLUDE_GPU_XFORM_MAC  = 1,   // matrix MAC (0x50 matrix/0x51/0x52/0x53/0x57)
     parameter INCLUDE_VTX_CACHE      = 0,
     parameter INCLUDE_GPU_LIGHT      = 0,
     parameter INCLUDE_PALETTE        = 1,
@@ -177,6 +178,7 @@ gpu_core #(
     .INCLUDE_COLUMN_LIST(INCLUDE_COLUMN_LIST),
     .INCLUDE_DIRECT_COLOR(INCLUDE_DIRECT_COLOR),
     .INCLUDE_XFORM_RGB(INCLUDE_XFORM_RGB),
+        .INCLUDE_GPU_XFORM_MAC(INCLUDE_GPU_XFORM_MAC),
     .INCLUDE_CLIP_TRI(INCLUDE_CLIP_TRI),
     .INCLUDE_VTX_CACHE(INCLUDE_VTX_CACHE),
     .INCLUDE_GPU_LIGHT(INCLUDE_GPU_LIGHT),

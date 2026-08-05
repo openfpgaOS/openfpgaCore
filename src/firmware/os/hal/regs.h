@@ -450,6 +450,13 @@
  * cache line worth of lost data, not silent .text corruption. */
 #define SDRAM_WLAST_ERR     REG32(SYSREG_BASE + 0xCC)
 
+/* Scanout line-fetch diagnostics (0xD0) -- read-only shear forensics.
+ * [15:0] line fetches that completed with a word count != requested
+ * (a lost burst beat = the rest of the line shifts left 4 CLUT / 2
+ * RGB565 pixels); [31:16] words received on the last mismatch.  0 on
+ * healthy silicon and on pre-2026-08 cores (unmapped word). */
+#define SCANOUT_FETCH_DIAG  REG32(SYSREG_BASE + 0xD0)
+
 #define HW_CONTRACT_REV     REG32(SYSREG_BASE + 0x8C)
 #define OS_EXPECTED_HW_CONTRACT 1u
 

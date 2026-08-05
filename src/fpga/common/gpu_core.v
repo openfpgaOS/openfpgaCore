@@ -179,7 +179,7 @@ module gpu_core #(
     // the host pre-transforms and uses CMD_DRAW_CLIP_TRI (0x4F) — then the matrix
     // MAC + xf_M fold away and only XF_RECIP/XF_PROJ remain.
     parameter INCLUDE_GPU_XFORM_MAC = 1,
-    // T3: GPU vertex cache + indexed draw (0x53 LOAD_VERTS / 0x54
+    // T3: GPU vertex cache + indexed draw (0x53/0x56 loads / 0x54
     // DRAW_INDEXED_TRI) — transform-once / draw-many.  Requires INCLUDE_XFORM_RGB.
     parameter INCLUDE_VTX_CACHE = 0,
     // T4: GPU per-vertex lighting (0x55 SET_LIGHT_STATE + normal transform +
@@ -858,7 +858,7 @@ always @(posedge clk) dsp2_p <= dsp2_a * dsp2_b;
 reg [9:0]  recip_rd_addr;
 reg [15:0] recip_rd_data;
 always @(posedge clk) recip_rd_data <= recip_lut[recip_rd_addr];
-// T3: vertex-cache registered read port (MLAB).  Single read port — 0x54 reads
+// T3: vertex-cache registered read port (M10K).  Single read port — 0x54 reads
 // its 3 indices sequentially in S_VCREAD.  Omitted entirely when the cache is off.
 generate if (INCLUDE_VTX_CACHE != 0) begin : g_vcache_rd
     always @(posedge clk) vc_q <= vc_mem[vc_raddr];
@@ -1317,6 +1317,11 @@ localparam CMD_LOAD_VERTS             = 8'h53;  // T3: transform N raw verts -> 
 localparam CMD_DRAW_INDEXED_TRI       = 8'h54;  // T3: 3 cache indices -> derive (draw-many)
 localparam CMD_SET_LIGHT_STATE        = 8'h55;  // T4: sticky light dir/colour/ambient
 localparam CMD_LOAD_VERT_LIT          = 8'h57;  // T4: transform+light one vert -> cache
+localparam CMD_LOAD_VERT_CLIP         = 8'h56;  // T3: park ONE pre-transformed clip-space
+                                                //   vert {x,y,w} in the cache (XF_CLIP_FEED,
+                                                //   skips the MAC entirely) -- the cache-load
+                                                //   analogue of 0x4F, for hosts that do their
+                                                //   own model/view/projection (Quake2).
 localparam CMD_DRAW_CLIP_TRI          = 8'h4F;  // clip-space feed: CPU sends M*v clip {x,y,w},
                                                 //   GPU does ONLY recip+project (skips the MAC).
                                                 //   Wire-identical to 0x52 (18w), truecolor.
@@ -2778,7 +2783,8 @@ reg cmd_is_set_object_state;     // 0x50
 reg cmd_is_draw_xform_tri;       // 0x51
 reg cmd_is_draw_xform_tri_rgb;   // 0x52 (T1 truecolor transform tri)
 reg cmd_is_draw_clip_tri;        // 0x4F clip-space-feed truecolor tri (skips the MAC)
-reg cmd_is_load_verts;           // 0x53 (T3 transform -> vertex cache)
+reg cmd_is_load_verts;
+reg cmd_is_load_vert_clip;           // 0x53 (T3 transform -> vertex cache)
 reg cmd_is_draw_indexed_tri;     // 0x54 (T3 indexed draw from cache)
 reg cmd_is_set_light_state;      // 0x55 (T4 sticky light state)
 reg cmd_is_load_vert_lit;        // 0x57 (T4 transform+light -> cache)
@@ -2815,6 +2821,7 @@ localparam [4:0] CMDCLS_LOAD_VERTS       = 5'd15;  // 0x53
 localparam [4:0] CMDCLS_INDEXED_TRI      = 5'd16;  // 0x54
 localparam [4:0] CMDCLS_SET_LIGHT_STATE  = 5'd17;  // 0x55
 localparam [4:0] CMDCLS_LOAD_VERT_LIT    = 5'd18;  // 0x57
+localparam [4:0] CMDCLS_LOAD_VERT_CLIP   = 5'd19;  // 0x56
 reg [4:0] cmd_class;
 
 // ================================================================
@@ -3427,20 +3434,30 @@ localparam XF_MAC_L=5'd0, XF_MAC_W=5'd1, XF_MAC_C=5'd2, XF_ROW_DONE=5'd3,
 // ============================================================
 localparam VC_SLOTS = (INCLUDE_VTX_CACHE != 0) ? 32 : 1;
 // One packed slot per entry: {b5,g6,r5, depth32, t32, s32, zi32, sy16, sx16}.
-// MLAB-backed (NOT a register file) so it stays off the near-full M10K budget
-// and out of ALMs-as-FFs: single write port (0x53/0x57) + single registered
-// read port (0x54 reads the 3 indices SEQUENTIALLY over 3 cycles in S_VCREAD).
+// Single write port (0x53/0x57) + single registered read port (0x54 reads the
+// 3 indices SEQUENTIALLY over 3 cycles in S_VCREAD), so it must infer as RAM
+// rather than a register file either way.
 localparam VC_W = 176;
+// M10K, not MLAB.  The original choice was MLAB to protect the near-full
+// M10K budget, but on a design this close to the LAB ceiling that is the
+// wrong resource to economise: an MLAB is a WHOLE LAB switched to memory
+// mode and it can no longer host logic, so 176 bits (Cyclone V MLABs are
+// 32x20 => 9-10 of them) costs 9-10 LABs outright.  os30 failed to fit the
+// vertex cache by exactly 5 LABs while 23 M10K blocks sat free; an M10K
+// instance costs 0.0 ALM here (every altsyncram child of gpu_core reports
+// 0.0 in the fit hierarchy).  Behaviour is byte-identical -- the read is
+// already synchronous, so nothing about the protocol changes.
 // no_rw_check: 0x53/0x57 (write) and 0x54 (read) are distinct commands, never
 // the same cycle, so read-during-write behaviour is don't-care — required or
 // Quartus leaves vc_mem as a register file (RAM logic uninferred).
-(* ramstyle = "MLAB, no_rw_check" *) reg [VC_W-1:0] vc_mem [0:VC_SLOTS-1];
+(* ramstyle = "M10K, no_rw_check" *) reg [VC_W-1:0] vc_mem [0:VC_SLOTS-1];
 reg [VC_W-1:0] vc_q;            // registered read data
 reg [4:0]      vc_raddr;        // cache read address
 reg [1:0]      vcr_cnt;         // sequential 3-vert read counter (0x54)
 reg        xf_to_cache;        // T3: this S_XFORM run writes the cache (0x53/0x57)
 reg [1:0]  xf_last_vtx;        // T3: last vert index (0 for load, 2 for tri)
 reg [4:0]  xf_load_slot;       // T3: destination cache slot for 0x53/0x57
+reg [31:0] xf_load_depth;         // 0x56 w7: explicit slot depth (see payload arm)
 reg [4:0]  vc_i0, vc_i1, vc_i2; // T3: 0x54 indexed-draw cache indices
 
 // T4: GPU per-vertex lighting — sticky state (0x55) + lit cache-load (0x57).
@@ -5424,8 +5441,12 @@ always @(posedge clk) begin : main_fsm
             // T1: 0x52 truecolor transform tri.  18-word payload: 3 verts {x,y,z}
             // + 3 {s,t} + 3 RGB565.  GPU computes zi+depth (no per-draw zi/depth
             // words).  Gated on the RGB datapath (XFORM_RGB+DIRECT_COLOR+VERT_TRI).
+            // MAC term (2026-08-04): without it a MAC-less config decodes 0x52,
+            // runs the zeroed matrix and silently draws nothing (review finding).
+            // Gated out it falls to CMDCLS_NONE and drains as a clean no-op,
+            // exactly like 0x51 always has.
             cmd_is_draw_xform_tri_rgb <= (INCLUDE_VERT_TRI != 0) && (INCLUDE_DIRECT_COLOR != 0) &&
-                (INCLUDE_XFORM_RGB != 0) &&
+                (INCLUDE_XFORM_RGB != 0) && (INCLUDE_GPU_XFORM_MAC != 0) &&
                 (cmd_type == CMD_DRAW_XFORM_TRI_RGB && cmd_payload_words == 13'd18);
             // Clip-space feed (0x4F): wire-identical to 0x52 (18w), but the 3
             // "verts" are CPU-computed M*v clip {x,y,w}; S_XFORM skips the matrix
@@ -5437,8 +5458,16 @@ always @(posedge clk) begin : main_fsm
             // payload words, fits the 6-bit pay_idx) and 0x54 DRAW_INDEXED_TRI
             // (1 word: 3 cache indices).  Gated on the vertex cache.
             cmd_is_load_verts <= (INCLUDE_VTX_CACHE != 0) && (INCLUDE_XFORM_RGB != 0) &&
+                (INCLUDE_GPU_XFORM_MAC != 0) &&
                 (cmd_type == CMD_LOAD_VERTS &&
                  cmd_payload_words >= 13'd7 && cmd_payload_words <= 13'd49);
+            // T3 0x56: clip-space cache load -- 7 words wire-identical to 0x53
+            // but w1-3 carry CPU-computed M*v clip {x,y,w}; S_XFORM enters at
+            // XF_CLIP_FEED (recip+project only), so this deliberately has NO
+            // MAC term: it is the load path for MAC-less configs and for hosts
+            // that pre-transform (Quake2 CPU geometry).
+            cmd_is_load_vert_clip <= (INCLUDE_VTX_CACHE != 0) && (INCLUDE_XFORM_RGB != 0) &&
+                (cmd_type == CMD_LOAD_VERT_CLIP && cmd_payload_words == 13'd8);
             cmd_is_draw_indexed_tri <= (INCLUDE_VTX_CACHE != 0) && (INCLUDE_XFORM_RGB != 0) &&
                 (cmd_type == CMD_DRAW_INDEXED_TRI && cmd_payload_words == 13'd1);
             // T4: 0x55 SET_LIGHT_STATE sticky (6 words: dir x/y/z, light RGB565,
@@ -5448,7 +5477,7 @@ always @(posedge clk) begin : main_fsm
             // T4: 0x57 LOAD_VERT_LIT (9 words: slot + xyz + normal-xyz + s/t) —
             // GPU transforms position AND computes lighting -> cache slot.
             cmd_is_load_vert_lit <= (INCLUDE_GPU_LIGHT != 0) && (INCLUDE_VTX_CACHE != 0) &&
-                (INCLUDE_XFORM_RGB != 0) &&
+                (INCLUDE_XFORM_RGB != 0) && (INCLUDE_GPU_XFORM_MAC != 0) &&
                 (cmd_type == CMD_LOAD_VERT_LIT && cmd_payload_words == 13'd9);
             cmd_is_flip           <= (cmd_type == CMD_FLIP);
             // Registered command class — same decode, same cycle as the
@@ -5506,7 +5535,7 @@ always @(posedge clk) begin : main_fsm
                                ? CMDCLS_XFORM_TRI : CMDCLS_NONE;
                 CMD_DRAW_XFORM_TRI_RGB:
                     cmd_class <= ((INCLUDE_VERT_TRI != 0) && (INCLUDE_DIRECT_COLOR != 0)
-                                  && (INCLUDE_XFORM_RGB != 0)
+                                  && (INCLUDE_XFORM_RGB != 0) && (INCLUDE_GPU_XFORM_MAC != 0)
                                   && cmd_payload_words == 13'd18)
                                ? CMDCLS_XFORM_RGB_CLIP : CMDCLS_NONE;
                 CMD_DRAW_CLIP_TRI:
@@ -5516,9 +5545,14 @@ always @(posedge clk) begin : main_fsm
                                ? CMDCLS_XFORM_RGB_CLIP : CMDCLS_NONE;
                 CMD_LOAD_VERTS:
                     cmd_class <= ((INCLUDE_VTX_CACHE != 0) && (INCLUDE_XFORM_RGB != 0)
+                                  && (INCLUDE_GPU_XFORM_MAC != 0)
                                   && cmd_payload_words >= 13'd7
                                   && cmd_payload_words <= 13'd49)
                                ? CMDCLS_LOAD_VERTS : CMDCLS_NONE;
+                CMD_LOAD_VERT_CLIP:
+                    cmd_class <= ((INCLUDE_VTX_CACHE != 0) && (INCLUDE_XFORM_RGB != 0)
+                                  && cmd_payload_words == 13'd8)
+                               ? CMDCLS_LOAD_VERT_CLIP : CMDCLS_NONE;
                 CMD_DRAW_INDEXED_TRI:
                     cmd_class <= ((INCLUDE_VTX_CACHE != 0) && (INCLUDE_XFORM_RGB != 0)
                                   && cmd_payload_words == 13'd1)
@@ -5529,7 +5563,7 @@ always @(posedge clk) begin : main_fsm
                                ? CMDCLS_SET_LIGHT_STATE : CMDCLS_NONE;
                 CMD_LOAD_VERT_LIT:
                     cmd_class <= ((INCLUDE_GPU_LIGHT != 0) && (INCLUDE_VTX_CACHE != 0)
-                                  && (INCLUDE_XFORM_RGB != 0)
+                                  && (INCLUDE_XFORM_RGB != 0) && (INCLUDE_GPU_XFORM_MAC != 0)
                                   && cmd_payload_words == 13'd9)
                                ? CMDCLS_LOAD_VERT_LIT : CMDCLS_NONE;
                 default:         cmd_class <= CMDCLS_NONE;
@@ -5890,8 +5924,10 @@ always @(posedge clk) begin : main_fsm
                     default: ;
                 endcase
             end
-            CMDCLS_LOAD_VERTS: begin
-                // T3 0x53: one raw vert {x,y,z}+{s,t}+RGB565 (parked in the
+            CMDCLS_LOAD_VERTS,
+            CMDCLS_LOAD_VERT_CLIP: begin
+                // T3 0x53/0x56: one vert (raw {x,y,z} for 0x53, clip {x,y,w}
+                // for 0x56 -- identical wire) + {s,t} + RGB565 (parked in the
                 // transform's vert-0 slots) + destination cache slot.  S_XFORM
                 // transforms it and writes the slot (see XF_PROJ_LAUNCH).
                 case (pay_idx)
@@ -5904,6 +5940,14 @@ always @(posedge clk) begin : main_fsm
                     6'd6: begin vt_rrow[0] <= ring_rd_data[15:11];
                                 vt_lrow[0] <= ring_rd_data[10:5];
                                 vt_brow[0] <= ring_rd_data[4:0]; end
+                    // w7 (0x56 only -- 0x53 is 7 words in practice and any
+                    // long-form 0x53 word lands here harmlessly): explicit
+                    // z-buffer depth.  The GPU-derived depth (= zi) serves
+                    // position/perspective well but quantizes far-field z to
+                    // ~zi codes; the app computes (1/w)*2^30 in float at full
+                    // legacy 0x4E precision and supplies it directly.  Consumed
+                    // at the cache write only when xf_clip && xf_to_cache.
+                    6'd7: xf_load_depth <= ring_rd_data;
                     default: ;
                 endcase
             end
@@ -6212,8 +6256,34 @@ always @(posedge clk) begin : main_fsm
                     xf_behind   <= 2'd0;
                     xf_to_cache <= 1'b1;   // T3: write the cache, do NOT draw
                     xf_lit      <= 1'b0;   // explicit RGB load (no lighting)
+                    xf_clip     <= 1'b0;   // matrix path (hygiene: never stale)
                     xf_last_vtx <= 2'd0;   // single vert
                     xf_state    <= XF_MAC_A;
+                    state       <= S_XFORM;
+                end else begin
+                    state <= S_IDLE;
+                end
+            end
+            CMDCLS_LOAD_VERT_CLIP: begin
+                // T3 0x56: park ONE pre-transformed clip-space vert in the cache.
+                // Same wire as 0x53 but w1-3 are CPU-computed M*v clip {x,y,w};
+                // S_XFORM enters at XF_CLIP_FEED (cam.z = clip.w is the divisor)
+                // and takes the existing xf_to_cache exit in XF_PROJ_LAUNCH --
+                // recip+project only, no MAC, no new states.  s/t are pure
+                // payload passthrough (the MAC's s/t rows never run), which is
+                // exactly 0x4F's contract; the derive multiplies s/t by zi at
+                // 0x54 draw time for every path.  Needs the 0x50 sticky viewport
+                // (xc/yc/scales/nearclip -- matrix words are don't-care) + 0x4A.
+                if ((INCLUDE_VTX_CACHE != 0) && tri_state_valid) begin
+                    xf_vtx      <= 2'd0;
+                    xf_row      <= 2'd0;
+                    xf_idx      <= 2'd0;
+                    xf_behind   <= 2'd0;   // cache exit precedes the behind check
+                    xf_to_cache <= 1'b1;
+                    xf_lit      <= 1'b0;
+                    xf_clip     <= 1'b1;   // multi-vert-safe if last_vtx ever grows
+                    xf_last_vtx <= 2'd0;
+                    xf_state    <= XF_CLIP_FEED;
                     state       <= S_XFORM;
                 end else begin
                     state <= S_IDLE;
@@ -6228,6 +6298,7 @@ always @(posedge clk) begin : main_fsm
                     xf_behind   <= 2'd0;
                     xf_to_cache <= 1'b1;   // write the cache
                     xf_lit      <= 1'b1;   // compute lighting -> RGB565
+                    xf_clip     <= 1'b0;
                     xf_last_vtx <= 2'd0;   // single vert
                     xf_state    <= XF_MAC_A;
                     state       <= S_XFORM;
@@ -6236,7 +6307,7 @@ always @(posedge clk) begin : main_fsm
                 end
             end
             CMDCLS_INDEXED_TRI: begin
-                // T3 0x54: read 3 cached verts SEQUENTIALLY (single MLAB read port)
+                // T3 0x54: read 3 cached verts SEQUENTIALLY (single M10K read port)
                 // in S_VCREAD, then launch the derive.  Issue the vert-0 read addr
                 // here; vc_q reflects it next cycle.
                 if ((INCLUDE_VTX_CACHE != 0) && tri_state_valid) begin
@@ -6942,8 +7013,12 @@ always @(posedge clk) begin : main_fsm
                         // cache slot.  vt_zi[0]/vt_depth[0] set in XF_PROJ_YS2; raw
                         // s/t in dv_szi/dv_tzi[0]; RGB in vt_rrow/lrow/brow[0].
                         // Layout: {b5,g6,r5, depth32, t32, s32, zi32, sy16, sx16}.
+                        // Depth field: 0x56 (xf_clip) supplies it explicitly
+                        // (w7, full app float precision); matrix loads keep the
+                        // divider-derived value (= zi).
                         vc_mem[xf_load_slot] <= { vt_brow[0], vt_lrow[0], vt_rrow[0],
-                                                  vt_depth[0], dv_tzi[0], dv_szi[0],
+                                                  (xf_clip ? xf_load_depth : vt_depth[0]),
+                                                  dv_tzi[0], dv_szi[0],
                                                   vt_zi[0], xf_sy[0], xf_sx[0] };
                         state <= S_IDLE;
                     end else if (xf_behind == 2'd3) begin

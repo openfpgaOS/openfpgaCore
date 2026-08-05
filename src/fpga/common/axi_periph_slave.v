@@ -90,6 +90,12 @@ module axi_periph_slave #(
     // bit 26, OF_HW_GPU_XFORM_RGB).  Must track gpu_core's INCLUDE_XFORM_RGB on
     // the same target (Pocket os30/SM64).
     parameter INCLUDE_XFORM_RGB = 0,
+    // bit 29, OF_HW_GPU_CLIP_LOAD: 0x56 clip-space cache load + 0x54.  Tracks
+    // gpu_core INCLUDE_VTX_CACHE && INCLUDE_XFORM_RGB; independent of the MAC.
+    parameter INCLUDE_GPU_CLIP_LOAD = 0,
+    // bit 30, OF_HW_GPU_LIGHT: 0x55/0x57 lighting cone.  Carved out of bit 26
+    // before it ever shipped (os30 excludes lighting, keeps the rest).
+    parameter INCLUDE_GPU_LIGHT = 0,
     // GPU full texel*C+D color combiner (HILITE/specular class).  Advertised in
     // HW_FEATURES bit 27 (OF_HW_GPU_COMBINE), gated AND with INCLUDE_DIRECT_COLOR
     // (combine only exists on the truecolor path).  Must track gpu_core's
@@ -320,6 +326,10 @@ module axi_periph_slave #(
     // beat pair and the slave refused the commit (would have been the
     // +8-shift field corruption).  Read-only at sysreg 0xCC.
     input  wire [31:0] sdram_wlast_err,
+    // Scanout line-fetch diagnostics (0xD0): [15:0] fetches completing with
+    // wrong word count, [31:16] words received on the last mismatch.  The
+    // periodic-shear forensics instrument (2026-08-04).
+    input  wire [31:0] scanout_fetch_diag,
     output reg  [2:0]  analogizer_cpu_wr_toggle,
     output reg  [31:0] analogizer_cpu_wr_settings,
     output reg  [31:0] analogizer_cpu_wr_hoffset,
@@ -828,6 +838,8 @@ localparam [31:0] HW_FEATURES_RESOLVED =
                        //        clears it (EXCLUDE_COMBINE) so the app emits
                        //        plain texel*shade — a gated GPU would otherwise
                        //        mis-read the biased-C/D payload words.
+    | (INCLUDE_GPU_CLIP_LOAD ? 32'h2000_0000 : 32'h0000_0000)  // bit 29: OF_HW_GPU_CLIP_LOAD (0x56+0x54)
+    | (INCLUDE_GPU_LIGHT     ? 32'h4000_0000 : 32'h0000_0000)  // bit 30: OF_HW_GPU_LIGHT (0x55/0x57)
     | 32'h0100_0000;   // bit 24 OF_HW_SAVE_DT_WORD: SAVE_DT_WORD (0xC8)
                        //        entry-resolved nonvolatile size commits.
                        //        UNCONDITIONAL on new bitstreams; a new OS
@@ -1753,6 +1765,7 @@ always @(*) begin
             6'd34: sysreg_rdata = analogizer_voffset;              // ANALOGIZER_V_OFFSET
             6'd35: sysreg_rdata = HW_CONTRACT_REV;                 // HW_CONTRACT_REV
             6'd51: sysreg_rdata = sdram_wlast_err;                // SDRAM_WLAST_ERR (0xCC)
+            6'd52: sysreg_rdata = scanout_fetch_diag;             // SCANOUT_FETCH_DIAG (0xD0)
             6'd36: sysreg_rdata = {dt_query_valid, dt_query_data[30:0]};
             6'd37: sysreg_rdata = dt_query_data;                    // DT_QUERY_DATA full 32-bit result
             6'd38: sysreg_rdata = HW_FEATURES_RESOLVED;                     // HW_FEATURES

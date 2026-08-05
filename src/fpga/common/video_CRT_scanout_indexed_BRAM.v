@@ -108,6 +108,12 @@ module video_CRT_scanout_indexed_BRAM #(
     input wire clk_sdram,
 
     // SDRAM burst interface
+    // Shear forensics (2026-08-04): sticky line-fetch diagnostics.
+    // [15:0] count of line fetches that completed with a word count !=
+    // burst_len (a lost burst beat shifts the rest of the line left by
+    // 4 CLUT / 2 RGB565 pixels -- the periodic-shear candidate);
+    // [31:16] words actually received on the last mismatched fetch.
+    output reg  [31:0] fetch_diag,
     output reg         burst_rd,
     output reg  [24:0] burst_addr,
     output reg  [10:0] burst_len,
@@ -1214,6 +1220,9 @@ module video_CRT_scanout_indexed_BRAM #(
     reg [2:0]  calc_mode;
     reg [9:0]  calc_width;
 
+    // Words received this burst, counting a beat landing on the done cycle.
+    wire [10:0] rx_words_now = {2'b00, write_ptr} + (burst_data_valid ? 11'd1 : 11'd0);
+
     function [10:0] burst_len_for_mode;
         input [2:0] mode;
         input [9:0] width;
@@ -1243,6 +1252,7 @@ module video_CRT_scanout_indexed_BRAM #(
             burst_rd <= 0;
             burst_addr <= 0;
             burst_len <= 0;
+            fetch_diag <= 32'd0;
             write_ptr <= 0;
             write_bank <= 0;
             fetch_request_sync1 <= 0;
@@ -1341,6 +1351,12 @@ module video_CRT_scanout_indexed_BRAM #(
                         write_ptr <= write_ptr + 9'd1;
                     end
                     if (burst_data_done) begin
+                        // Short/over-fetch detector: words received (incl. a
+                        // beat arriving this cycle) must equal burst_len.
+                        if (rx_words_now != burst_len) begin
+                            fetch_diag[15:0]  <= fetch_diag[15:0] + 16'd1;
+                            fetch_diag[31:16] <= {5'b0, rx_words_now};
+                        end
                         state <= ST_IDLE;
                     end
                 end

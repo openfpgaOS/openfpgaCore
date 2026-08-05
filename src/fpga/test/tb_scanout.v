@@ -130,6 +130,7 @@ module tb_scanout #(
     video_CRT_scanout_indexed_BRAM #(
         .HAS_ANALOG_RASTER(HAS_ANALOG_RASTER)
     ) dut (
+        .fetch_diag(),
         .clk_video(clk_video),
         .reset_n(reset_n),
         .x_count(x_count),

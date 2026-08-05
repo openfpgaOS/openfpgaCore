@@ -841,6 +841,7 @@ axi_periph_slave #(
 	.analogizer_hoffset(32'd0),
 	.mouse_speed_pct(32'd0),
 	.sdram_wlast_err(sdram_wlast_errs),
+	.scanout_fetch_diag(32'd0),
 	.analogizer_voffset(32'd0),
 	.analogizer_cpu_wr_toggle(),
 	.analogizer_cpu_wr_settings(),

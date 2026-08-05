@@ -71,6 +71,7 @@ module tb_analogizer_chain (
     wire a_csync  = ~(a_hs ^ a_vs);
 
     video_CRT_scanout_indexed_BRAM scanout (
+        .fetch_diag(),
         .clk_video(clk_vid), .reset_n(reset_n),
         .x_count(x_count), .y_count(y_count), .line_start(line_start),
         .pixel_color(pixel_color),

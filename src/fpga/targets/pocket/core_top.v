@@ -1227,6 +1227,7 @@ wire            ram1_word_queue_pending;
 // would-have-been +8-shift corruption (the upstream W elastic replayed
 // a beat pair and the burst was refused instead of committed skewed).
 // Read-only at sysreg 0xCC; bready is tied high so bvalid is 1-cycle.
+wire [31:0] scanout_fetch_diag;
 reg [31:0] sdram_wlast_errs = 32'd0;
 always @(posedge clk_ram_controller)
     if (arb_s_bvalid && arb_s_bresp == 2'b10)
@@ -2593,6 +2594,8 @@ assign video_hs = vidout_hs;
         .INCLUDE_DIRECT_COLOR(`ifdef INCLUDE_DIRECT_COLOR 1 `elsif INCLUDE_COMBINE 1 `elsif INCLUDE_XFORM 1 `else 0 `endif),
         // XFORM bundle cap (bit 26): tracks the gpu_core transform front-end.
         .INCLUDE_XFORM_RGB(`ifdef INCLUDE_XFORM 1 `else 0 `endif),
+        .INCLUDE_GPU_CLIP_LOAD(`ifdef INCLUDE_XFORM 1 `else 0 `endif),
+        .INCLUDE_GPU_LIGHT(`ifdef INCLUDE_XFORM `ifdef EXCLUDE_GPU_LIGHT 0 `else 1 `endif `else 0 `endif),
         // GPU texel*C+D combiner cap (bit 27, OF_HW_GPU_COMBINE), additive —
         // advertised only when the build lists INCLUDE_COMBINE (gated AND with
         // truecolor inside axi_periph_slave).
@@ -2751,6 +2754,7 @@ assign video_hs = vidout_hs;
         .analogizer_voffset(signed_voff_cpu),
         .mouse_speed_pct(mouse_speed_cpu),
         .sdram_wlast_err(sdram_wlast_errs),
+        .scanout_fetch_diag(scanout_fetch_diag),
         .analogizer_cpu_wr_toggle(analogizer_cpu_wr_toggle),
         .analogizer_cpu_wr_settings(analogizer_cpu_wr_settings),
         .analogizer_cpu_wr_hoffset(analogizer_cpu_wr_hoffset),
@@ -3038,6 +3042,7 @@ assign video_hs = vidout_hs;
         .HAS_ANALOG_RASTER(0)
 `endif
     ) scanout (
+        .fetch_diag(scanout_fetch_diag),
         .clk_video(clk_vid),
         .reset_n(reset_n_vid),
         .x_count(x_count),
@@ -3488,9 +3493,10 @@ gpu_core #(
     // INCLUDE_XFORM alone and get truecolor automatically.  See docs/MODULES.md.
     .INCLUDE_DIRECT_COLOR(`ifdef INCLUDE_DIRECT_COLOR 1 `elsif INCLUDE_COMBINE 1 `elsif INCLUDE_XFORM 1 `else 0 `endif),
     // XFORM module (coarse bundle): the whole GPU transform front-end — 0x52
-    // xform + 0x50/0x51 matrix-MAC + 0x53/0x54 vtx-cache + 0x55/0x57 lighting +
-    // 0x4F clip — is one INCLUDE_XFORM.  Off on every shipping variant (CPU
-    // geometry); os25 thus sheds its previously-dead 0x50/0x51/0x4F cones.
+    // xform + 0x50/0x51 matrix-MAC + 0x53/0x54/0x56 vtx-cache + 0x55/0x57
+    // lighting + 0x4F clip — is one INCLUDE_XFORM, refined by the EXCLUDE_*
+    // opt-outs below.  os30 ships it as of 2026-08-04 (minus lighting/clip);
+    // os25 stays off and thus sheds its previously-dead 0x50/0x51/0x4F cones.
     .INCLUDE_XFORM_RGB(`ifdef INCLUDE_XFORM 1 `else 0 `endif),
     // Fine-grained opt-outs inside the XFORM bundle, so a variant can take
     // the vertex cache (0x53 LOAD_VERTS / 0x54 DRAW_INDEXED_TRI, the

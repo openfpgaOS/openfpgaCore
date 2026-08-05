@@ -822,6 +822,13 @@ void of_video_flush_cache(void) {
  * on cores predating the counter, where it is silently inert. */
 static void wlast_err_watchdog(void) {
     static uint32_t seen;
+    static uint32_t diag_seen;
+    uint32_t diag = SCANOUT_FETCH_DIAG;
+    if (diag != diag_seen) {
+        of_term_printf("\n  \033[93mscanout short fetches: %u (last rx %u words)\033[0m\n",
+                       (unsigned)(diag & 0xFFFFu), (unsigned)(diag >> 16));
+        diag_seen = diag;
+    }
     uint32_t now = SDRAM_WLAST_ERR;
     if (now != seen) {
         of_term_printf("\n  \033[93mSDRAM write bursts refused: %lu\033[0m"

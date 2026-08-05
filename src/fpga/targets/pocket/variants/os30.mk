@@ -12,10 +12,11 @@
 # behavior in RTL that keys on it.  Ships as os30.rbf_r.
 #
 # Pays for the triangle path by cutting what Quake2 never uses — NOT listed
-# (= off, additive): PALETTE (truecolor-only), the XFORM transform front-end
-# (CPU does geometry — sheds 0x52/0x50/0x51/0x53-57/0x4F + xf_M M10K),
-# PARAM_TRI/PARAM_TRI_RECS, COMPACT_SPAN/COLUMN_LIST, ANALOGIZER,
-# TRANSLUC, PARALLEL_DIVS, LINK, 4PLAYER.
+# (= off, additive): PALETTE (truecolor-only), PARAM_TRI/PARAM_TRI_RECS,
+# COMPACT_SPAN/COLUMN_LIST, ANALOGIZER, TRANSLUC, PARALLEL_DIVS, LINK,
+# 4PLAYER.  The XFORM transform front-end is back IN as of 2026-08-04 (see
+# the INCLUDE_XFORM note below) — this header previously listed it among
+# the cuts.
 #
 # TEX_MEM (CRAM1 fast textures) is back IN (2026-07 perf review): every
 # texture fill otherwise contends with z reads + scanout + CPU on the one
@@ -58,6 +59,17 @@
 # netlist AND keeps ~most of the blend speedup (one barrier+burst per 4
 # pixels vs per pixel).  Byte-identical behavior at every size
 # (gpu-acceptance-all covers W=2 in the os30-exact config, W=4 elsewhere).
+# INCLUDE_XFORM + EXCLUDE_GPU_LIGHT + EXCLUDE_CLIP_TRI (2026-08-04): the GPU
+# vertex cache (0x53 LOAD_VERTS / 0x54 DRAW_INDEXED_TRI, transform-once/
+# draw-many) plus the new 0x56 LOAD_VERT_CLIP (clip-space cache load for the
+# CPU-geometry path).  Made affordable by moving vc_mem MLAB->M10K (9 LABs
+# back) — measured A/B: full XFORM = 1,857/1,848 LABs (DOES NOT FIT); this
+# config = 18,114 ALM / 1,846 LABs (fits).  The lighting cone (0x55/0x57)
+# and 0x4F draw-clip-tri are excluded; caps bits are honest about it:
+# bit 26 = matrix front-end (0x50/52/53/54), bit 29 = 0x56 clip load,
+# bit 30 = lighting (clear here).  The MAC must stay: 0x53 transforms
+# through the sticky 0x50 matrix with NO bypass — a MAC-less 0x53 collapses
+# every vert to the viewport center (2026-08-04 review, CONFIRMED).
 # INCLUDE_VI_FILTER (2026-07-26): N64 VI-style output softening — 2-tap
 # horizontal average on the LCD stream, direct-color modes only (terminal
 # stays crisp).  Chosen over per-texel bilinear as the fix for the sampling
@@ -66,4 +78,5 @@
 # the slack-rich clk_analog domain.
 DEFS := INCLUDE_VERT_TRI INCLUDE_DIRECT_COLOR INCLUDE_COMBINE INCLUDE_Z_BURST \
         VEXII_CPU_OS30 INCLUDE_HW_MIXER INCLUDE_TEX_MEM INCLUDE_CLK90 \
-        INCLUDE_CB_WINDOW2 INCLUDE_VI_FILTER
+        INCLUDE_CB_WINDOW2 INCLUDE_VI_FILTER \
+        INCLUDE_XFORM EXCLUDE_GPU_LIGHT EXCLUDE_CLIP_TRI
