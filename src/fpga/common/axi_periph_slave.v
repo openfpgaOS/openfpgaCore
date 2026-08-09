@@ -813,11 +813,39 @@ localparam [31:0] HW_FEATURES_RESOLVED =
                        //        derivation needs INCLUDE_VERT_TRI.  OS25
                        //        clears it (ALM); OS30 keeps it — it is the
                        //        Quake2 world-pass header-dedup opcode.
-    | 32'h1000_0000    // bit 28 OF_HW_GPU_SPAN_CONT: records-only 0x58
-                       //        continuation of a long-form 0x48 (surface
-                       //        header cached in the GPU's spanprod staging;
-                       //        SDK emitters self-gate on this bit so old
-                       //        bitstreams keep receiving full headers).
+                       // bit 28 OF_HW_GPU_SPAN_CONT: DO NOT ADVERTISE.  The
+                       //        records-only 0x58 continuation of a long-form
+                       //        0x48 was never implemented in gpu_core --
+                       //        `grep "8'h58" src/fpga/` returns nothing, so
+                       //        0x58 falls through the cmd_type case to
+                       //        `default: cmd_class <= CMDCLS_NONE`, whose
+                       //        payload drains word-by-word with NO
+                       //        destination writes.  Silently dropped: the
+                       //        ring stays in sync, but the spans are never
+                       //        rasterised.
+                       //        The caps bit shipped in fd8d626 (2026-07-27)
+                       //        WITHOUT its RTL half (Verilator artifacts from
+                       //        2026-07-25 reference a CMD_PARAM_SPAN_CONT
+                       //        parameter and a span_header_valid reg, but
+                       //        `git log -S` finds them on no ref -- the
+                       //        implementation was written and lost).
+                       //        SDK emitters self-gate on this bit
+                       //        (of_gpu.h:1551), so with it CLEAR every list
+                       //        re-sends its full 29-word header, which is the
+                       //        pre-fd8d626 behaviour.
+                       //        HW SYMPTOM this caused, both targets: Doom
+                       //        drops whole visplanes whenever R_CheckPlane
+                       //        mints adjacent visplanes with an identical
+                       //        (height, picnum, lightlevel) key -- a floor
+                       //        seen through two openings, or split by a
+                       //        pillar -- because their 29-word headers are
+                       //        byte-identical and the second is sent as
+                       //        0x58.  Doom never clears the acquired buffer,
+                       //        so the hole shows that buffer's content from
+                       //        several presents ago (black on a fresh boot,
+                       //        the intermission screen after one).
+                       //        Re-advertise ONLY together with a gpu_core
+                       //        0x58 implementation.
                        //        Unconditional: the long-form machinery it
                        //        rides is part of the base GPU span support.
     | (INCLUDE_COMPACT_SPAN ? 32'h0080_0000 : 32'h0000_0000)  // bit 23

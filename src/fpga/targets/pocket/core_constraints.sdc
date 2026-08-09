@@ -17,16 +17,38 @@
 #
 # Unused PLL counters are omitted from this group list.  Referencing unused
 # counters produces unmatched-clock warnings and can hide real timing issues.
+#
+# clk_core_49152 (general[2]) MUST be grouped WITH clk_vid/clk_vid_90deg
+# (general[3]/[4]), never in its own async group: all three divide the same
+# mp1 VCO with 0 ps phase, so every clk_vid edge coincides with a
+# clk_core_49152 edge — the domains are mesochronous, not asynchronous.  The
+# scanout consumes raw clk_vid raster counters (x_count/y_count/line_start)
+# in the clk_core_49152 domain; with the pair split into separate groups
+# those paths are cut from STA and the coincident-edge capture becomes a
+# per-fit routing-skew lottery (the 2026-08 FB/terminal wiggle + os30 shear:
+# torn x_count capture displaced scanlines ±1 px, placement-sensitive and
+# invisible to STA).  Grouped, STA times the crossing (20.3 ns setup to the
+# mid edge; hold at the coincident edge gets fitter min-delay padding) and
+# any future razor FAILS timing instead of shipping.
 set_clock_groups -asynchronous \
  -group { bridge_spiclk } \
  -group { clk_74a } \
  -group { clk_74b } \
  -group { ic|mp1|mf_pllbase_inst|altera_pll_i|general[0].gpll~PLL_OUTPUT_COUNTER|divclk } \
- -group { ic|mp1|mf_pllbase_inst|altera_pll_i|general[2].gpll~PLL_OUTPUT_COUNTER|divclk } \
- -group { ic|mp1|mf_pllbase_inst|altera_pll_i|general[3].gpll~PLL_OUTPUT_COUNTER|divclk \
+ -group { ic|mp1|mf_pllbase_inst|altera_pll_i|general[2].gpll~PLL_OUTPUT_COUNTER|divclk \
+          ic|mp1|mf_pllbase_inst|altera_pll_i|general[3].gpll~PLL_OUTPUT_COUNTER|divclk \
           ic|mp1|mf_pllbase_inst|altera_pll_i|general[4].gpll~PLL_OUTPUT_COUNTER|divclk } \
  -group { ic|mp_ram|altera_pll_i|general[0].gpll~PLL_OUTPUT_COUNTER|divclk \
           ic|mp_ram|altera_pll_i|general[1].gpll~PLL_OUTPUT_COUNTER|divclk }
+
+# NO false_path here any more.  The stripe-fix phase detector used to sample
+# clk_vid as data at a COINCIDENT edge (unfixable by construction: -1.5 ns
+# hold, and it was the 2026-08 +/-1 px image jitter), so it had to be
+# exempted.  It now samples clk_vid_90deg instead (core_top.v ~3005), whose
+# transitions sit 10.17 ns from every clk_core_49152 edge — a real,
+# deterministic, TIMEABLE path.  Leave it in the analysis: it is the
+# tripwire that catches anyone re-pointing the detector at a coincident
+# clock.
 
 # ============================================================================
 # APF bridge SPI I/O timing (F4, bridge-corruption mitigation 2026-06).

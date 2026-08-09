@@ -853,9 +853,22 @@ wire [31:0] mux_word_wdata = cram0_mode_74a ? cpu_cram0_word_wdata : bridge_wr_f
 wire [3:0]  mux_word_wstrb = cram0_mode_74a ? cpu_cram0_word_wstrb : 4'b1111;
 
 // Controller response fans out to whichever owner asked for it.
+//
+// Qualified by ownership: ctrl_word_busy / ctrl_word_rdata_valid are SHARED
+// with the bridge side, so while the bridge owns the mux its traffic would
+// otherwise look like completion for a CPU beat the controller never saw —
+// a false BRESP=OKAY for a store that never reached PSRAM, or the bridge's
+// data delivered to a CPU read.  Forcing both low when we do not own the mux
+// means an unowned CPU access simply never completes, which cram0_cdc's
+// B_WAIT watchdog then retires as SLVERR.
+//
+// busy is forced to 0 (not 1) deliberately: the CDC gates dispatch out of
+// B_IDLE on !b_word_busy, so a 1 here would park it in B_IDLE, which the
+// watchdog does not cover.  0 lets the beat dispatch (harmlessly — it is
+// muxed away from the controller) and reach B_WAIT, where it times out.
 assign cpu_cram0_word_rdata       = ctrl_word_rdata;
-assign cpu_cram0_word_busy        = ctrl_word_busy;
-assign cpu_cram0_word_rdata_valid = ctrl_word_rdata_valid;
+assign cpu_cram0_word_busy        = cram0_mode_74a && ctrl_word_busy;
+assign cpu_cram0_word_rdata_valid = cram0_mode_74a && ctrl_word_rdata_valid;
 
 // Bridge side of the word interface also reads the controller's rdata
 // (used for bridge 0x20xxxxxx read-backs below).
@@ -2986,7 +2999,8 @@ assign video_hs = vidout_hs;
     // Phase-safe LCD pixel handoff clk_core_49152 -> clk_vid (2026-07
     // stripe fix).  pixel_color is produced in the 49.152 MHz domain and
     // was sampled RAW by the clk_vid vidout stage below — but both clocks
-    // divide the SAME mp1 VCO 4:1, so EVERY clk_vid edge is coincident
+    // divide the SAME mp1 VCO (49.152 = VCO/2, 24.576 = VCO/4, i.e. 2:1 to
+    // each other, both 0 ps), so EVERY clk_vid edge is coincident
     // with a clk_core_49152 edge: a razor race on all 24 bits, decided by
     // per-bit routing skew, frozen per build.  Only pixels whose value
     // CHANGES at the racing edge can corrupt — i.e. transitions: smooth
@@ -2996,22 +3010,39 @@ assign video_hs = vidout_hs;
     // path from STA (vacuous silence — the same failure class as the
     // dram_dq false_path and the F4 bridge pins, see the SDC).
     //
-    // Fix: detect the clk_vid phase inside the 49.152 domain (clock-as-
-    // data — clean at 4:1 except at the coincident edge, where the race
-    // only shifts the detected phase by one) and re-register the pixel in
-    // a mid-period slot.  Under EITHER resolution of the detection race
-    // the transfer lands 1-2 clk_core_49152 cycles (20-40 ns) clear of
-    // the consuming clk_vid edge, so vidout samples a long-settled value.
-    reg  [1:0]  fbps_phase = 2'd0;
-    reg         fbps_vid_prev = 1'b0;
+    // Fix: re-register the pixel in the 49.152 domain in a MID-PERIOD slot,
+    // so the consuming clk_vid edge always samples a long-settled value.
+    //
+    // 2026-08-06 — the mid-period slot was NOT actually mid-period, and that
+    // was the ±1 px image jitter ("text readable but sliding left and right
+    // one pixel").  The ratio here is 2:1, not 4:1 (49.152 / 24.576); the VCO
+    // is what runs 4x clk_vid.  At 2:1 the old detect+counter degenerated:
+    // the rising detect fires every other cycle, so fbps_phase only ever
+    // alternated 1 -> 2, and `fbps_phase == 2` therefore came true on the
+    // clk_vid RISING EDGES themselves — loading fb_pixel_safe at the exact
+    // instant vidout_rgb samples it.  All 24 bits then move together, so it
+    // is no longer the per-bit stripe of the original bug: vidout takes the
+    // whole OLD or whole NEW pixel, decided by picosecond skew AND ambient
+    // noise, which is why it varies over time instead of freezing per fit.
+    // (That also explains why re-seeding "cured" it on some builds: a fit
+    // whose skew is one-sided resolves consistently and just shows a static
+    // 1 px offset nobody notices.)
+    //
+    // The phase reference is now clk_vid_90deg (mp1 general[4], the SAME
+    // 24.576 MHz shifted 90 deg = 10.17 ns, already generated for
+    // video_rgb_clock_90).  Its transitions sit 10.17 ns from EVERY
+    // clk_core_49152 edge, so sampling it is deterministic — unlike clk_vid,
+    // whose edges are coincident with ours and can only ever be sampled
+    // metastably.  Its rising detect lands exactly halfway between clk_vid
+    // rising edges, so fb_pixel_safe is written 20.3 ns before the consuming
+    // clk_vid edge and next changes 20.3 ns after it: the eye is centered by
+    // construction, and STA verifies it now that the mesochronous mp1 outputs
+    // share one clock group (see core_constraints.sdc).
+    reg         fbps_vid90_prev = 1'b0;
     reg  [23:0] fb_pixel_safe = 24'h0;
     always @(posedge clk_core_49152) begin
-        fbps_vid_prev <= clk_vid;
-        if (clk_vid && !fbps_vid_prev)
-            fbps_phase <= 2'd1;
-        else
-            fbps_phase <= fbps_phase + 2'd1;
-        if (fbps_phase == 2'd2)
+        fbps_vid90_prev <= clk_vid_90deg;
+        if (clk_vid_90deg && !fbps_vid90_prev)
             fb_pixel_safe <= framebuffer_pixel_color;
     end
 
@@ -3214,7 +3245,7 @@ always @(posedge clk_vid or negedge reset_n_vid) begin
                 // All display modes rendered to framebuffer by software.
                 // fb_pixel_safe: the phase-disciplined handoff register
                 // (see its block above) — never sample pixel_color raw
-                // across the coincident-edge 4:1 clock crossing.
+                // across the coincident-edge 2:1 clock crossing.
                 vidout_rgb <= fb_pixel_safe;
             end
         end

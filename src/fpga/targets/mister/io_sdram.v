@@ -290,10 +290,64 @@ assign dbg_io = {1'b0, (refresh_pending != 2'd0), state[5:0]};
                                           !(pending_bank_ok &&
                                             (open_row[trk(pending_bank)] == pending_row));
 
+    // DQ read capture — FALLING-edge IO capture (2026-08-08, ported from the
+    // Pocket target's 2026-07 stripe fix; MiSTer had been left on the
+    // pre-fix rising-edge fabric capture).
+    //
+    // SDRAM_CLK here is the INVERTED controller clock (mister.sdc's
+    // sdram_clk_pin is `-invert` of general[0], forwarded through the DDIO
+    // output at emu.sv), so the chip launches read data on the controller's
+    // FALLING edge.  At 100 MHz with CL=3 the datasheet valid window at the
+    // FPGA pin (tAC max .. period + tOH, plus board flight) lands roughly
+    // T+11 .. T+17 ns for a beat launched at T+5 — so the controller's
+    // RISING edge at T+10 sampled BEFORE the data was valid, and the next
+    // FALLING edge at T+15 sits near the middle of the window.  Combined
+    // with mister.sdc's `set_false_path -from [get_ports {SDRAM_DQ[*]}]`,
+    // per-bit capture was frozen routing luck that changed with every
+    // fitter seed — the same failure Pocket shipped as the "+8-byte slip"
+    // (TEXTGUARD / I$-delivered wrong immediates, 2026-07-28), and the
+    // suspected cause of the 2026-08-08 MiSTer framebuffer roll + stale
+    // regions (the FB copy pulls through this exact burst-read path).
+    //
+    // The falling-edge sample MUST be retimed into the rising domain INSIDE
+    // the IO cell: a discrete negedge-FF -> posedge-FF fabric pair is a real
+    // half-cycle path whose achievable delay exceeds the 5 ns budget (see the
+    // Pocket comment for the measured numbers) — a per-seed lottery.
+    // ALTDDIO_IN uses the hardened DDIO input registers, so the neg->pos
+    // transfer happens in dedicated silicon with no fabric route, at the SAME
+    // one-cycle latency the downstream enable_dq_read_4 arithmetic already
+    // assumes.  Simulation takes the behaviorally identical FF-pair branch.
+`ifdef ALTERA_RESERVED_QIS
+    wire    [15:0]  phy_dq_latched;
+    wire    [15:0]  phy_dq_ddio_h_unused;
+    altddio_in #(
+        .width                 (16),
+        .intended_device_family("Cyclone V"),
+        .invert_input_clocks   ("OFF"),
+        .lpm_hint              ("UNUSED"),
+        .lpm_type              ("altddio_in"),
+        .power_up_high         ("OFF")
+    ) u_dq_ddio_in (
+        .datain    (phy_dq),
+        .inclock   (controller_clk),
+        .dataout_h (phy_dq_ddio_h_unused),  // rising-edge sample (unused)
+        .dataout_l (phy_dq_latched),        // falling-edge sample, rising-aligned
+        .aclr      (1'b0),
+        .aset      (1'b0),
+        .inclocken (1'b1),
+        .sclr      (1'b0),
+        .sset      (1'b0)
+    );
+`else
+    reg     [15:0]  phy_dq_neg;
     reg     [15:0]  phy_dq_latched;
-always @(posedge controller_clk) begin
-    phy_dq_latched <= phy_dq;
+always @(negedge controller_clk) begin
+    phy_dq_neg <= phy_dq;
 end
+always @(posedge controller_clk) begin
+    phy_dq_latched <= phy_dq_neg;
+end
+`endif
 
 
 always @(*) begin

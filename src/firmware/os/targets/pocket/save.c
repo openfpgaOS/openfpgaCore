@@ -187,8 +187,17 @@ void of_save_init(void) {
 }
 
 void of_save_begin_cpu(void) {
-    if (cram0_cpu_hold_count++ == 0)
-        cram0_acquire_cpu();
+    /* Re-assert UNCONDITIONALLY, not just on the 0->1 transition.  The hold
+     * count is advisory: file.c re-points CRAM0_MODE directly at several
+     * sites (async completion, bridge reads), so between an outer hold and an
+     * inner one the mux may have moved back to the bridge.  The nested
+     * acquire is exactly the case that matters — sys_openat takes a hold for
+     * the whole fd lifetime and of_nvslot_read/write nest inside it, so
+     * without this the inner copy_from_cram/copy_to_cram can run while the
+     * bridge owns CRAM0, which stalls the CPU forever in cram0_cdc.
+     * Cost is one register write plus the settle loop. */
+    cram0_cpu_hold_count++;
+    cram0_acquire_cpu();
 }
 
 void of_save_end_cpu(void) {

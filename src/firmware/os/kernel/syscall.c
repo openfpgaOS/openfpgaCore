@@ -41,6 +41,7 @@ extern void *dlcalloc(size_t, size_t);
 #define EIO             5
 #define EFAULT          14
 #define ERANGE          34
+#define EFBIG           27
 
 #define AT_FDCWD        -100
 
@@ -390,13 +391,23 @@ static int slot_read_cached(uint32_t slot_id, uint32_t off,
 #define MAX_FILE_SLOTS      32
 #define FILE_SLOT_NAME_MAX  24
 #define SAVE_SLOT_ID_BASE   10u
+#define SHARED_CONFIG_SLOT_ID 8u
 #define DUKE_SETTINGS_SLOT_ID 9u
 #define NV_CONFIG_CACHE_IDX 0
 #define NV_SAVE_CACHE_BASE  1
 /* By-name config slots (hal/file.h of_file_config_slot) get their own
  * size-cache entries so each named .cfg tracks its own logical size. */
 #define NV_NAMED_CFG_CACHE_BASE (NV_SAVE_CACHE_BASE + SAVE_MAX_SLOTS)
-#define NV_CACHE_SLOTS      (NV_NAMED_CFG_CACHE_BASE + OF_FILE_CFG_SLOT_COUNT)
+/* Data id 9 (presave / per-game settings) is a SEPARATE 256 KB CRAM window
+ * from id 8 (shared config) — see targets/pocket/save.c nvslot_map, which
+ * maps 8 to bridge 0x20380000 and 9 to 0x200C0000.  They used to share
+ * NV_CONFIG_CACHE_IDX, so a core declaring BOTH (Diablo: stash at 8,
+ * settings at 9) had one logical size serving two files: whichever closed
+ * last decided the length the host wrote back for both, truncating one or
+ * persisting trailing garbage past the other.  Appended at the END so the
+ * save and named-config indices keep the values they already had. */
+#define NV_PRESAVE_CACHE_IDX (NV_NAMED_CFG_CACHE_BASE + OF_FILE_CFG_SLOT_COUNT)
+#define NV_CACHE_SLOTS      (NV_PRESAVE_CACHE_IDX + 1)
 
 #define O_ACCMODE       03
 #define O_WRONLY        01
@@ -474,8 +485,10 @@ static int save_slot_from_data_id(uint32_t slot_id) {
 }
 
 static int nv_cache_index_from_data_id(uint32_t slot_id) {
-    if (slot_id == 8 || slot_id == 9)
+    if (slot_id == SHARED_CONFIG_SLOT_ID)
         return NV_CONFIG_CACHE_IDX;
+    if (slot_id == DUKE_SETTINGS_SLOT_ID)
+        return NV_PRESAVE_CACHE_IDX;
 
     int save_slot = save_slot_from_data_id(slot_id);
     if (save_slot >= 0)
@@ -1144,8 +1157,14 @@ static long sys_write(long fd, long buf, long count) {
         uint32_t capacity = of_nvslot_capacity(f->slot_id);
         if (capacity == 0)
             return -EIO;
+        /* At capacity: MUST be an error, never 0.  write(2) returning 0 for
+         * a non-zero count is a value no libc can act on — musl's
+         * __stdio_write treats it as neither completion nor error and
+         * re-issues the identical writev forever, hanging the app inside
+         * fwrite with the slot half written.  EFBIG is the POSIX answer for
+         * "exceeds the file size limit". */
         if (f->offset >= capacity)
-            return 0;
+            return -EFBIG;
         uint32_t available = capacity - (uint32_t)f->offset;
         uint32_t to_write = (uint32_t)count;
         if (to_write > available)
@@ -1153,13 +1172,17 @@ static long sys_write(long fd, long buf, long count) {
 
         int rc = of_nvslot_write(f->slot_id, (const void *)buf,
                                  (uint32_t)f->offset, to_write);
-        if (rc > 0) {
-            f->offset += rc;
-            if (f->offset > f->size)
-                f->size = f->offset;
-            f->dirty = 1;
-            save_size_cache_store(f->nv_cache_idx, (uint32_t)f->size);
-        }
+        /* of_nvslot_write returns len or -1; map anything non-positive to a
+         * real errno.  A bare -1 would surface as EPERM, and a 0 would spin
+         * musl exactly as above. */
+        if (rc <= 0)
+            return -EIO;
+
+        f->offset += rc;
+        if (f->offset > f->size)
+            f->size = f->offset;
+        f->dirty = 1;
+        save_size_cache_store(f->nv_cache_idx, (uint32_t)f->size);
         return rc;
     }
 

@@ -20,9 +20,16 @@ netlist_hash() {
         grep -E "(SYSTEM)?VERILOG_FILE|QIP_FILE" "$qsf" \
         | awk '{print $NF}' \
         | while read -r f; do
-            # qsf paths are absolute (generated) or relative to the qsf dir
-            if [ -f "$f" ]; then md5sum "$f"
-            elif [ -f "$(dirname "$qsf")/$f" ]; then md5sum "$(dirname "$qsf")/$f"
+            # qsf paths are absolute (generated) or relative to the qsf dir.
+            # Hash CONTENT ONLY -- `md5sum <file>` prints "<hash>  <path>", and
+            # the path carries the per-seed build dir (bld/<variant>-s<seed>/).
+            # Including it made the fingerprint differ between two runs of the
+            # SAME netlist: sweep.sh stores the hash from bld/<v>-s<best>/ while
+            # `make build` recomputes it from bld/<v>/, so the staleness warning
+            # fired on every build and the real check it guards was lost in the
+            # noise.
+            if [ -f "$f" ]; then md5sum < "$f"
+            elif [ -f "$(dirname "$qsf")/$f" ]; then md5sum < "$(dirname "$qsf")/$f"
             fi
           done | sort
     } | md5sum | cut -d' ' -f1

@@ -123,6 +123,8 @@ reg        req_toggle_cpu;
 // because the bridge FSM latches it before flipping resp_toggle_bridge.
 wire        resp_toggle_cpu_s;
 wire [31:0] c_rdata_synced;
+wire        c_err_synced;      // response was completed by the B_WAIT watchdog
+reg         c_wr_err;          // sticky across a write burst (AXI: one B per burst)
 reg         resp_toggle_prev_cpu;
 wire        resp_edge_cpu = (resp_toggle_cpu_s != resp_toggle_prev_cpu);
 
@@ -138,6 +140,7 @@ always @(posedge clk_cpu or negedge reset_n_cpu) begin
         c_wdata              <= 32'd0;
         c_wstrb              <= 4'd0;
         c_is_write           <= 1'b0;
+        c_wr_err             <= 1'b0;
         req_toggle_cpu       <= 1'b0;
         resp_toggle_prev_cpu <= 1'b0;
 
@@ -181,6 +184,7 @@ always @(posedge clk_cpu or negedge reset_n_cpu) begin
                 c_len          <= s_axi_awlen;
                 c_beat         <= 8'd0;
                 c_is_write     <= 1'b1;
+                c_wr_err       <= 1'b0;
                 c_state        <= C_WR_REQ;
             end
         end
@@ -190,7 +194,7 @@ always @(posedge clk_cpu or negedge reset_n_cpu) begin
                 // Fresh response — emit R beat.
                 s_axi_rvalid <= 1'b1;
                 s_axi_rdata  <= c_rdata_synced;
-                s_axi_rresp  <= 2'b00;
+                s_axi_rresp  <= c_err_synced ? 2'b10 : 2'b00;  // SLVERR on watchdog
                 s_axi_rlast  <= c_beat_is_last;
                 c_state      <= C_RD_RESP;
             end
@@ -225,9 +229,12 @@ always @(posedge clk_cpu or negedge reset_n_cpu) begin
         C_WR_WAIT: begin
             // Wait for bridge to complete the write beat.
             if (resp_edge_cpu) begin
+                // One B response covers the whole burst, so the error is
+                // sticky across beats.
+                c_wr_err <= c_wr_err | c_err_synced;
                 if (c_beat_is_last) begin
                     s_axi_bvalid <= 1'b1;
-                    s_axi_bresp  <= 2'b00;
+                    s_axi_bresp  <= (c_wr_err | c_err_synced) ? 2'b10 : 2'b00;
                     c_state      <= C_WR_RESP;
                 end else begin
                     c_beat  <= c_beat + 8'd1;
@@ -299,7 +306,23 @@ reg [1:0]  b_state;
 reg        b_prev_toggle;
 wire       b_req_edge = (req_toggle_bridge_sync[2] != b_prev_toggle);
 
+// B_WAIT watchdog.  A CPU access issued while the BRIDGE owns the mux is
+// discarded upstream (core_top's mux_word_* select), so the controller never
+// answers and this FSM used to sit in B_WAIT forever.  That is not a local
+// stall: the CPU AXI beat never completes, cpu_target_port_per holds
+// rd_state != RD_IDLE, and cpu_system gates every per_axi AR on
+// !global_per_rd_busy — so the whole machine stops, UART included.  Silent,
+// unrecoverable, no trap.
+//
+// Bound the wait and return SLVERR instead: a bus fault is diagnosable, a
+// hang is not.  2048 clk_bridge cycles ~= 27.6 us at 74.25 MHz, ~200x the
+// ~10-cycle round trip of a healthy transaction, so no working access can
+// trip it — this only fires where the alternative was hanging forever.
+localparam [11:0] B_WAIT_LIMIT = 12'd2048;
+
 reg        b_busy_seen;
+reg [11:0] b_wait_cnt;
+reg        b_err_hold;         // this response completed by watchdog, not by the controller
 reg [31:0] b_rdata_hold;
 reg        resp_toggle_bridge;
 reg        b_op_is_write;  // latched from b_iswrite_sync2 on dispatch
@@ -319,6 +342,8 @@ always @(posedge clk_bridge or negedge reset_n_bridge) begin
         b_word_wdata       <= 32'd0;
         b_word_wstrb       <= 4'd0;
         b_busy_seen        <= 1'b0;
+        b_wait_cnt         <= 12'd0;
+        b_err_hold         <= 1'b0;
         b_rdata_hold       <= 32'd0;
         resp_toggle_bridge <= 1'b0;
         b_op_is_write      <= 1'b0;
@@ -360,6 +385,7 @@ always @(posedge clk_bridge or negedge reset_n_bridge) begin
                 else
                     b_word_rd <= 1'b1;
                 b_busy_seen <= 1'b0;
+                b_wait_cnt  <= 12'd0;
                 b_state     <= B_WAIT;
             end
         end
@@ -369,19 +395,26 @@ always @(posedge clk_bridge or negedge reset_n_bridge) begin
             if (!b_busy_seen && b_word_busy)
                 b_busy_seen <= 1'b1;
 
-            if (b_op_is_write) begin
-                // Write completion: busy has risen then fallen.
-                if (b_busy_seen && !b_word_busy) begin
-                    resp_toggle_bridge <= ~resp_toggle_bridge;
-                    b_state            <= B_IDLE;
-                end
-            end else begin
-                // Read completion: rdata_valid pulse.
-                if (b_word_rdata_valid) begin
-                    b_rdata_hold       <= b_word_rdata;
-                    resp_toggle_bridge <= ~resp_toggle_bridge;
-                    b_state            <= B_IDLE;
-                end
+            b_wait_cnt <= b_wait_cnt + 12'd1;
+
+            // Completion: writes see busy rise then fall, reads get an
+            // rdata_valid pulse.  Unchanged from the original behaviour —
+            // only the watchdog arm below is new.
+            if (b_op_is_write ? (b_busy_seen && !b_word_busy)
+                              : b_word_rdata_valid) begin
+                if (!b_op_is_write)
+                    b_rdata_hold <= b_word_rdata;
+                b_err_hold         <= 1'b0;
+                resp_toggle_bridge <= ~resp_toggle_bridge;
+                b_state            <= B_IDLE;
+            end else if (b_wait_cnt >= B_WAIT_LIMIT) begin
+                // Never answered.  Complete it as an error so the CPU beat
+                // retires; poison the data so an ignored SLVERR cannot pass
+                // for a real value.
+                b_rdata_hold       <= 32'hDEADC0DE;
+                b_err_hold         <= 1'b1;
+                resp_toggle_bridge <= ~resp_toggle_bridge;
+                b_state            <= B_IDLE;
             end
         end
 
@@ -401,19 +434,28 @@ end
 // toggle edge, which itself is ≥3 clk_cpu cycles behind the flip.
 reg [2:0]  resp_toggle_cpu_sync;
 reg [31:0] c_rdata_sync1, c_rdata_sync2;
+reg        c_err_sync1, c_err_sync2;
 
 always @(posedge clk_cpu or negedge reset_n_cpu) begin
     if (!reset_n_cpu) begin
         resp_toggle_cpu_sync <= 3'b0;
         c_rdata_sync1        <= 32'd0;
         c_rdata_sync2        <= 32'd0;
+        c_err_sync1          <= 1'b0;
+        c_err_sync2          <= 1'b0;
     end else begin
         resp_toggle_cpu_sync <= {resp_toggle_cpu_sync[1:0], resp_toggle_bridge};
         c_rdata_sync1        <= b_rdata_hold;
         c_rdata_sync2        <= c_rdata_sync1;
+        // b_err_hold is written on the same edge as the toggle flip and held
+        // until the next completion, exactly like b_rdata_hold — so the same
+        // 2-flop chain is safe.
+        c_err_sync1          <= b_err_hold;
+        c_err_sync2          <= c_err_sync1;
     end
 end
 assign resp_toggle_cpu_s = resp_toggle_cpu_sync[2];
 assign c_rdata_synced    = c_rdata_sync2;
+assign c_err_synced      = c_err_sync2;
 
 endmodule

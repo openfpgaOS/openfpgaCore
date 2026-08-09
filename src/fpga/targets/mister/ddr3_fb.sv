@@ -280,7 +280,9 @@ localparam S_WRITE   = 3'd4;
 localparam S_PUBLISH = 3'd5;
 
 reg [2:0]  st;
-reg [5:0]  settle_cnt;
+// 17 bits: the settle must outlast the OS's early-vblank swap window, not
+// just the slave's swap pulse.  See S_IDLE.
+reg [16:0] settle_cnt;
 
 // latched frame geometry
 reg [24:0] src_half;        // SDRAM halfword addr of frame base
@@ -310,10 +312,46 @@ wire [11:0] stride_words = cp_stride[13:2];
 // stride is a multiple of 8 (fb_supported), so chunk word counts are even
 wire [7:0]  chunk_pairs  = chunk_words[8:1];           // 64-bit words/chunk
 
-always @(posedge clk or negedge reset_n) begin
-    if (!reset_n) begin
+// SYNCHRONOUS reset, and it DRAINS an open Avalon burst before accepting.
+//
+// 2026-08-08, HW-proven.  This block used to reset asynchronously and drop
+// DDRAM_WE mid-burst (see the old `DDRAM_WE <= 1'b0` below).  Avalon latches
+// the address only at BURST START, so a slave left owing beats ignores the
+// address of every later burst's first beat: from then on every 64-bit word
+// lands 8 bytes early, contiguously, FOREVER.  At 8bpp that is a permanent
+// 8-pixel LEFT ROLL with the leftmost columns wrapping to the right edge.
+//
+// The state lives in the HPS f2h SDRAM slave, NOT in FPGA fabric, so it
+// SURVIVES FPGA RECONFIGURATION — measured on hardware: the seam at column
+// (stride-8) persisted across 3 load_core cycles at 9.2x the median column
+// discontinuity, and was gone (0.7x, not in the top 5) on the first core
+// load after an HPS REBOOT.  That reconfiguration-survives/reboot-clears
+// signature is what proves it is the bridge and not our capture logic.
+//
+// reset_n here is reset_n_cpu_core, which includes mount_reset (every image
+// mount) and ini_reset (every instance F-load) — so EVERY GAME LAUNCH rolls
+// the dice, at roughly 1% per launch, and it never heals.
+//
+// reset_n is already 2FF-synchronised in emu.sv, so a synchronous reset is
+// safe; reset is deferred by at most a few hundred ns while the burst drains.
+// RULE: any master on an HPS f2h port must complete or explicitly terminate
+// its bursts before it can be reset or the fabric reconfigured.
+// (MiSTer ships sys/f2sdram_safe_terminator.sv for this hazard; it is
+// compiled via sys.qip but never instantiated in sys_top.v.)
+always @(posedge clk) begin
+    if (!reset_n && DDRAM_WE) begin
+        // Finish the burst we owe the slave, then let the reset land.
+        if (!DDRAM_BUSY) begin
+            if (wr_idx == chunk_pairs[5:0])
+                DDRAM_WE <= 1'b0;
+            else begin
+                DDRAM_DIN <= cbuf[wr_idx[4:0]];
+                wr_idx    <= wr_idx + 6'd1;
+            end
+        end
+    end else if (!reset_n) begin
         st          <= S_IDLE;
-        settle_cnt  <= 6'd0;
+        settle_cnt  <= 17'd0;
         dma_req     <= 1'b0;
         dma_addr    <= 25'd0;
         dma_len     <= 11'd0;
@@ -349,14 +387,31 @@ always @(posedge clk or negedge reset_n) begin
             if (!en_q || !fb_supported)
                 FB_EN <= 1'b0;               // immediate fallback to VGA path
             if (vs_rising && en_q && fb_supported) begin
-                settle_cnt <= 6'd32;         // let the slave's swap settle
+                // NOTE (2026-08-08): 32 cycles only covers the slave's swap
+                // pulse, NOT the OS's early-vblank swap window
+                // (early_vblank_safe_vid, y_count < crt_v_active_start = 18
+                // lines x 31.74 us = 571 us AFTER vsync).  fb_display_addr can
+                // therefore still change -- and the app can hand that buffer
+                // back to the GPU -- long after src_half is latched here, so a
+                // published slot can hold part frame N-1 and part N+1:
+                // REGIONAL intermittent flashes of stale content, ~1% of
+                // frames.  Nor does this path consult the GPU's
+                // fb_write_drain_complete, so the copy can start before the
+                // GPU's writes have reached SDRAM.
+                // FIX PENDING and deliberately NOT a widened magic count here:
+                // the correct trigger is the FALLING edge of early_vblank
+                // (2FF-synced in from emu.sv:1180), which is raster-independent.
+                // Simply raising this to 60000 (600 us) does work around it but
+                // is tied to the raster AND breaks all six tb_ddr3_fb harness
+                // budgets, which is the test suite saying the same thing.
+                settle_cnt <= 17'd32;         // let the slave's swap settle
                 st <= S_SETTLE;
             end
         end
 
         S_SETTLE: begin
-            settle_cnt <= settle_cnt - 6'd1;
-            if (settle_cnt == 6'd1) begin
+            settle_cnt <= settle_cnt - 17'd1;
+            if (settle_cnt == 17'd1) begin
                 src_half   <= fb_display_addr;
                 cp_mode    <= color_mode;
                 cp_width   <= fb_width;

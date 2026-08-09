@@ -54,7 +54,7 @@ C_HEAD='\033[1m'; C_OK='\033[32m'; C_WARN='\033[33m'; C_ERR='\033[31m'
 C_DIM='\033[2m'; C_RESET='\033[0m'
 
 TOTAL=$(( MAX - MIN + 1 ))
-declare -A R_WNS R_TNS R_FMAX R_DQ
+declare -A R_WNS R_TNS R_FMAX R_DQ R_HOLD
 
 # parse_sta <sta.rpt> -> sets _wns _tns _fmax (restricted Fmax on CLOCK_RE).
 parse_sta() {
@@ -105,9 +105,13 @@ if [ "$USE_CONTAINER" = 1 ]; then
             cp "$TOOLS/sta_dq.tcl" "bld/$job/" 2>/dev/null
             _dq=$(bash "$TOOLS/quartus-container.sh" "$TARGET_DIR/bld/$job"                     quartus_sta -t sta_dq.tcl 2>/dev/null                   | grep -o 'DQCLASS_WNS=[-0-9.]*' | head -1 | cut -d= -f2)
         fi
-        printf "%s|%s|%s|%s|%s\n" "$s" "$_wns" "$_tns" "$_fmax" "$_dq" >> "$RESULTS"
+        # Worst hold across all corners: a residual negative = the fitter
+        # gave up hold-fixing an analyzed path = silicon razor (see sta_lib).
+        local _hold=""
+        _hold=$(sta_hold_wns "bld/$job/output_files/${PROJECT}.sta.rpt")
+        printf "%s|%s|%s|%s|%s|%s\n" "$s" "$_wns" "$_tns" "$_fmax" "$_dq" "$_hold" >> "$RESULTS"
         if [ -n "$_wns" ]; then
-            printf "  seed %-3s ${C_DIM}fit done:${C_RESET} WNS %-9s TNS %s\n" "$s" "$_wns" "${_tns:--}"
+            printf "  seed %-3s ${C_DIM}fit done:${C_RESET} WNS %-9s TNS %-9s HOLD %s\n" "$s" "$_wns" "${_tns:--}" "${_hold:--}"
         else
             printf "  seed %-3s ${C_ERR}fit failed (no STA)${C_RESET}\n" "$s"
         fi
@@ -121,13 +125,14 @@ if [ "$USE_CONTAINER" = 1 ]; then
 
     # Load the harvested results; fall back to a live dir parse only for a
     # seed whose line is missing AND whose scratch dir still exists.
-    while IFS='|' read -r s w t f d; do
-        R_WNS[$s]=$w; R_TNS[$s]=$t; R_FMAX[$s]=$f; R_DQ[$s]=${d:-}
+    while IFS='|' read -r s w t f d h; do
+        R_WNS[$s]=$w; R_TNS[$s]=$t; R_FMAX[$s]=$f; R_DQ[$s]=${d:-}; R_HOLD[$s]=${h:-}
     done < "$RESULTS"
     for s in $(seq "$MIN" "$MAX"); do
         [ -n "${R_WNS[$s]:-}" ] && continue
         parse_sta "bld/${VARIANT}-s$s/output_files/${PROJECT}.sta.rpt"
-        [ -n "$_wns" ] && { R_WNS[$s]=$_wns; R_TNS[$s]=$_tns; R_FMAX[$s]=$_fmax; }
+        [ -n "$_wns" ] && { R_WNS[$s]=$_wns; R_TNS[$s]=$_tns; R_FMAX[$s]=$_fmax;
+                            R_HOLD[$s]=$(sta_hold_wns "bld/${VARIANT}-s$s/output_files/${PROJECT}.sta.rpt"); }
     done
 else
     # ── In-place backend: serial compile per seed (mister / Quartus 17) ──
@@ -161,6 +166,7 @@ else
         parse_sta "output_files/${PROJECT}.sta.rpt"
         cp "output_files/${PROJECT}.sta.rpt" "output_files/seed_${s}_sta.log" 2>/dev/null || true
         R_WNS[$s]=$_wns; R_TNS[$s]=$_tns; R_FMAX[$s]=$_fmax
+        R_HOLD[$s]=$(sta_hold_wns "output_files/${PROJECT}.sta.rpt")
         if [ -n "$_wns" ]; then
             printf "${C_OK}%-10s${C_RESET} ${C_DIM}WNS %-8s TNS %s${C_RESET}\n" "$_fmax" "${_wns:--}" "${_tns:--}"
         else
@@ -172,7 +178,12 @@ fi
 # ── Rank by setup WNS on the target clock (robust; fmax ~ 1/(T-wns)) ─────
 echo ""
 printf "${C_HEAD}Results:${C_RESET}\n"
-# Winner policy (2026-08-01, after the s41/s21/s23 field failures):
+# Winner policy (2026-08-01, after the s41/s21/s23 field failures; hold veto
+# added 2026-08-05 after the scanout razor):
+#   0. VETO any seed whose worst HOLD slack (all corners, all clocks) is
+#      below SWEEP_HOLD_VETO (default 0): the fitter hold-fixes every
+#      analyzed path, so a residual negative means it gave up — that fit
+#      razor-races in silicon (wiggle/shear class) regardless of setup WNS.
 #   1. VETO any seed whose DQ-capture class WNS is worse than SWEEP_DQ_VETO
 #      (default -0.40): those read-marginal placements boot-loop or corrupt
 #      reads in the field regardless of global WNS.
@@ -181,18 +192,24 @@ printf "${C_HEAD}Results:${C_RESET}\n"
 #   3. Winner = smallest |TNS| in the band (fewest paths hovering at the
 #      wall -- pure argmax-WNS picked the field-corrupting s41 over s43/s48).
 DQ_VETO=${SWEEP_DQ_VETO:--0.40}
+HOLD_VETO=${SWEEP_HOLD_VETO:-0}
 BEST=""; BEST_WNS=""
 declare -A R_VETO
 for s in $(seq "$MIN" "$MAX"); do
     w=${R_WNS[$s]:-}
     if [ -z "$w" ]; then printf "  ${C_ERR}seed %-3s failed${C_RESET}\n" "$s"; continue; fi
     dq=${R_DQ[$s]:-}
+    hold=${R_HOLD[$s]:-}
     veto=""
-    if [ -n "$dq" ] && awk -v a="$dq" -v v="$DQ_VETO" 'BEGIN{exit !(a<v)}'; then
-        veto=" ${C_ERR}(DQ ${dq} < ${DQ_VETO}: VETOED)${C_RESET}"
+    if [ -n "$hold" ] && awk -v a="$hold" -v v="$HOLD_VETO" 'BEGIN{exit !(a<v)}'; then
+        veto=" ${C_ERR}(HOLD ${hold} < ${HOLD_VETO}: VETOED)${C_RESET}"
         R_VETO[$s]=1
     fi
-    printf "  seed %-3s Fmax %-10s WNS %-9s TNS %-9s DQ %s%b\n"         "$s" "${R_FMAX[$s]:--}" "$w" "${R_TNS[$s]:--}" "${dq:--}" "$veto"
+    if [ -n "$dq" ] && awk -v a="$dq" -v v="$DQ_VETO" 'BEGIN{exit !(a<v)}'; then
+        veto="$veto ${C_ERR}(DQ ${dq} < ${DQ_VETO}: VETOED)${C_RESET}"
+        R_VETO[$s]=1
+    fi
+    printf "  seed %-3s Fmax %-10s WNS %-9s TNS %-9s DQ %-8s HOLD %s%b\n"         "$s" "${R_FMAX[$s]:--}" "$w" "${R_TNS[$s]:--}" "${dq:--}" "${hold:--}" "$veto"
     [ -n "$veto" ] && continue
     if [ -z "$BEST" ] || awk -v a="$w" -v b="$BEST_WNS" 'BEGIN{exit !(a>b)}'; then
         BEST=$s; BEST_WNS=$w
@@ -200,15 +217,28 @@ for s in $(seq "$MIN" "$MAX"); do
 done
 if [ -n "$BEST" ]; then
     BAND_MIN=$(awk -v b="$BEST_WNS" 'BEGIN{printf "%.3f", b-0.10}')
-    W_SEED=""; W_ABS_TNS=""
+    W_SEED=""; W_ABS_TNS=""; W_WNS=""; W_HOLD=""
     for s in $(seq "$MIN" "$MAX"); do
         w=${R_WNS[$s]:-}; [ -z "$w" ] && continue
         [ -n "${R_VETO[$s]:-}" ] && continue
         awk -v a="$w" -v m="$BAND_MIN" 'BEGIN{exit !(a>=m)}' || continue
         t=${R_TNS[$s]:-0}
         at=$(awk -v t="$t" 'BEGIN{printf "%.3f", (t<0)?-t:t}')
-        if [ -z "$W_SEED" ] || awk -v a="$at" -v b="$W_ABS_TNS" 'BEGIN{exit !(a<b)}'; then
-            W_SEED=$s; W_ABS_TNS=$at
+        h=${R_HOLD[$s]:-0}
+        # Smallest |TNS| wins; within 0.05 ns the two are indistinguishable, so
+        # break by setup WNS and then by hold margin.  Plain "<" made ties fall
+        # to seed ITERATION ORDER: on 2026-08-06 that auto-picked s9 over s12,
+        # which had identical TNS but better WNS (-0.473 vs -0.558) AND better
+        # hold (+0.075 vs +0.041) -- strictly the better fit on every axis.
+        if [ -z "$W_SEED" ] || awk -v a="$at" -v b="$W_ABS_TNS" \
+                                   -v aw="$w"  -v bw="$W_WNS" \
+                                   -v ah="$h"  -v bh="$W_HOLD" 'BEGIN{
+                 d = a - b; if (d < 0) d = -d
+                 if (d > 0.05)          { exit !(a+0  < b+0)  }
+                 if (aw+0 != bw+0)      { exit !(aw+0 > bw+0) }
+                 exit !(ah+0 > bh+0)
+             }'; then
+            W_SEED=$s; W_ABS_TNS=$at; W_WNS=$w; W_HOLD=$h
         fi
     done
     if [ -n "$W_SEED" ] && [ "$W_SEED" != "$BEST" ]; then

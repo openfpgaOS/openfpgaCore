@@ -33,3 +33,25 @@ sta_wns_tns() {
         END { if (wns != "") printf "%s %.1f\n", wns, tns }
     ' "$rpt"
 }
+
+# Worst hold slack across EVERY hold-summary panel (multicorner runs have
+# four: slow/fast x 85C/0C; Q17 single-corner has a plain "Hold Summary").
+# The fitter hold-fixes every ANALYZED path, so a residual negative here
+# means it tried and gave up — such a fit razor-races in silicon no matter
+# how good its setup WNS is (2026-08-05: the vid/analog clock-group merge
+# exposed exactly this on the scanout x_count crossing; intentional
+# clock-as-data samplers must be set_false_path'd or they pollute this
+# number).  Echoes the worst slack, or nothing when no hold panel exists.
+sta_hold_wns() {
+    local rpt="$1"
+    [ -f "$rpt" ] || return 0
+    awk -F';' '
+        /^; ([A-Za-z0-9 ]* Model )?Hold Summary/ { f=1; dash=0; next }
+        f && /^\+/ { dash++; if (dash >= 3) f=0; next }
+        f && /^;/ && $3 ~ /-?[0-9]+\.[0-9]/ {
+            slack=$3; gsub(/[ \t]/, "", slack)
+            if (wns == "" || slack+0 < wns+0) wns=slack
+        }
+        END { if (wns != "") print wns }
+    ' "$rpt"
+}
