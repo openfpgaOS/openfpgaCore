@@ -461,6 +461,19 @@ HPSMOUSE_DIR = obj_dir_hps_mouse
 HPSMOUSE_FLAGS = -Wno-UNUSEDSIGNAL
 
 # ============================================================
+# MiSTer hps_keyboard — USB keyboard → input-hub slot 2 encoder.
+# Rebuilds a HID boot report (modifier bitmap + 6-key rollover) from
+# hps_io's ps2_key make/break stream, in the Pocket dock's slot layout.
+# ============================================================
+HPSKBD_SRCS = \
+	tb_hps_keyboard.v \
+	$(MISTER_DIR)/hps_keyboard.v
+
+HPSKBD_CPP = tb_hps_keyboard_main.cpp
+HPSKBD_TOP = tb_hps_keyboard
+HPSKBD_DIR = obj_dir_hps_keyboard
+
+# ============================================================
 # Full system bring-up — CPU + SDRAM + CRAM0 CDC + BRAM
 # ============================================================
 # Boots the VexiiRiscv through the v2 fabric, loads os.bin into the
@@ -513,7 +526,7 @@ SYSTEM_FLAGS = -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC -Wno-CASEINCOMPLETE \
         gpu-wrpath gpu-wstall scanout-race scanout-race-pocket axi-periph bridge-cmd bridge-rx audio audio-mixer arbiter system system-mister run run-sram build clean \
         cram1-tex-chain cram1-cmap-chain gpu-cram1-repro
 
-all: sdram-all sram gpu gpu-persp axi-periph bridge-cmd bridge-rx audio audio-mixer arbiter hps-bridge hps-mouse skid ddr3-fb
+all: sdram-all sram gpu gpu-persp axi-periph bridge-cmd bridge-rx audio audio-mixer arbiter hps-bridge hps-mouse hps-keyboard skid ddr3-fb
 
 # --- SDRAM ---
 sdram: $(SDRAM_DIR)/V$(SDRAM_TOP)
@@ -1262,6 +1275,17 @@ $(HPSMOUSE_DIR)/V$(HPSMOUSE_TOP): $(HPSMOUSE_SRCS) $(HPSMOUSE_CPP)
 		--top-module $(HPSMOUSE_TOP) --Mdir $(HPSMOUSE_DIR) \
 		-I$(COMMON_DIR) -I$(MISTER_DIR) \
 		$(HPSMOUSE_SRCS) $(HPSMOUSE_CPP)
+
+# --- MiSTer hps_keyboard ---
+hps-keyboard: $(HPSKBD_DIR)/V$(HPSKBD_TOP)
+	@printf "\n=== MiSTer hps_keyboard (USB keyboard -> input-hub slot 2) ===\n"
+	./$(HPSKBD_DIR)/V$(HPSKBD_TOP)
+
+$(HPSKBD_DIR)/V$(HPSKBD_TOP): $(HPSKBD_SRCS) $(HPSKBD_CPP)
+	$(VERILATOR) $(VERILATOR_FLAGS) \
+		--top-module $(HPSKBD_TOP) --Mdir $(HPSKBD_DIR) \
+		-I$(COMMON_DIR) -I$(MISTER_DIR) \
+		$(HPSKBD_SRCS) $(HPSKBD_CPP)
 
 # --- System bring-up ---
 system: $(SYSTEM_DIR)/V$(SYSTEM_TOP)

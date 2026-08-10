@@ -221,6 +221,7 @@ set_global_assignment -name SYSTEMVERILOG_FILE emu.sv
 set_global_assignment -name SYSTEMVERILOG_FILE ddr3_fb.sv
 set_global_assignment -name VERILOG_FILE hps_bridge.v
 set_global_assignment -name VERILOG_FILE hps_mouse.v
+set_global_assignment -name VERILOG_FILE hps_keyboard.v
 set_global_assignment -name VERILOG_FILE io_sdram.v
 set_global_assignment -name VERILOG_FILE pll_sys.v
 set_global_assignment -name VERILOG_FILE sram_bram.v

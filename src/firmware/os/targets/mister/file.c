@@ -957,6 +957,30 @@ void of_file_init(void) {
     mister_fs_enter();
     int mounted = ensure_mounted();
     mister_fs_exit();
+    /* Successful-mount chatter, OFF by default (2026-08-09).  These three fire
+     * on every NORMAL boot and were the "(899 MB)" / "mounted (128 MB)" lines
+     * users saw on the MiSTer boot screen.  Build with -DOF_DEBUG_MOUNTS to
+     * bring them back when bringing up a new volume layout.
+     * The FAILURE diagnostics in this file stay unconditional — a mount that
+     * did NOT happen is exactly what you need told about. */
+    /* Bring-up chatter, OFF by default.  These fire on every NORMAL boot and
+     * were the "(899 MB)" / "mounted (128 MB)" lines on the MiSTer boot
+     * screen.  Nothing depends on them.
+     *
+     * 2026-08-09 note, because this looks like a repeat of a bad change:
+     * removing them once produced a blank screen and a reset loop, and that
+     * was NOT caused by these lines.  os.bin and the bitstream's BRAM
+     * bootloader are two halves of ONE link -- start.S bakes the absolute
+     * addresses of irq_handler and syscall_dispatch and mtvec is set once, in
+     * BRAM, never re-pointed -- so shrinking os.bin by 512 B relocated both
+     * vectors by -384 B.  The break came from shipping the new os.bin against
+     * a bitstream baked from the old one (`make os && make deploy` instead of
+     * `make firmware`).  Rebuild with `make firmware` and this is inert.
+     *
+     * The FAILURE diagnostics in this file stay unconditional: a mount that
+     * did not happen is exactly what a user needs told about.
+     * Build with -DOF_DEBUG_MOUNTS to bring these back. */
+#ifdef OF_DEBUG_MOUNTS
     if (mounted) {
         if (vol_mounted(0))
             of_term_printf("[file] disk image mounted (%u MB)\n",
@@ -968,6 +992,9 @@ void of_file_init(void) {
             of_term_printf("[file] S2 borrow volume mounted (%u MB)\n",
                            (unsigned)(of_blockdev_size(2) >> 20));
     }
+#else
+    (void)mounted;
+#endif
 }
 
 /* MiSTer has no APF shutdown handshake — the framework hard-resets the

@@ -502,7 +502,12 @@ void os_main(void) {
         of_term_get_pos(&saved_col, &saved_row);
         boot_logo("\033[94m");
         of_term_set_pos(saved_col, saved_row);
-        of_term_puts("  Select an instance from the menu...\n");
+        /* Not an instruction to the user: on the normal path a .mgl launcher
+         * F-loads the ini automatically (~4 s in, well inside the 8 s wait
+         * below), so telling them to "select from the menu" describes an
+         * action they neither need nor can usefully take from here — the
+         * core's own OSD is the wrong place to pick an instance. */
+        of_term_puts("  Waiting for game...\n");
         /* Bounded wait so a plain core load (or a misconfigured MGL that never
          * F-loads a nonzero-index ini) can't hang here forever: after the
          * timeout, fall through to of_config_load, which serves the mounted
@@ -542,14 +547,20 @@ void os_main(void) {
 
     /* Load application ELF */
 #ifdef OF_TARGET_SUPPORTS_RELAUNCH
-    /* Diagnostic (MiSTer only): did the MGL/RTL index-2 F-load actually stage an
-     * app.elf?  elf_fload=1 len=N confirms the staged engine reached the SoC and
-     * this boot reads it via APP_SLOT_ID -> elf_slot_read; elf_fload=0 means the
-     * F-load never fired — look upstream (CONF_STR / MGL / RTL), not at this
-     * routing.  Compiled out on Pocket/sim so their boot output is unchanged. */
+    /* Bring-up diagnostic (MiSTer only), OFF by default: did the MGL/RTL
+     * index-2 F-load actually stage an app.elf?  elf_fload=1 len=N confirms the
+     * staged engine reached the SoC and this boot reads it via APP_SLOT_ID ->
+     * elf_slot_read; elf_fload=0 means the F-load never fired — look upstream
+     * (CONF_STR / MGL / RTL), not at this routing.
+     * Silenced 2026-08-09: the F-load path is proven in the field, and this was
+     * the only bracketed debug line users saw on the MiSTer boot screen.  Build
+     * with -DOF_DEBUG_ELF_FLOAD to bring it back.  Compiled out on Pocket/sim
+     * either way, so their boot output is unchanged. */
+#ifdef OF_DEBUG_ELF_FLOAD
     of_term_printf("  [elf_fload=%d len=%u]\n",
                    of_file_app_from_staging(),
                    (unsigned)of_file_app_staging_len());
+#endif
 #endif
     of_term_puts("  Loading app....... ");
 

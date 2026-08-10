@@ -90,7 +90,12 @@ in `pll_sys.v` (`phase_shift1`, shipped at the Pocket's 6750 ps).
 - 64 MB of the SDRAM module used (128 MB needs io_sdram column widening
   + VexiiRiscv PMA regen + AXI width audit — planned follow-up).
 - No 15 kHz native analog raster yet (framework analog out works).
-- No USB keyboard plumbing yet (`ps2_key` unconnected).
+- USB keyboard works: `hps_keyboard.v` turns hps_io's `ps2_key` events into a
+  HID boot report on input-hub slot 2 (`cont3_*`), the same layout the Pocket
+  dock keyboard uses, so firmware shares one decoder and no new sysreg was
+  needed.  No key auto-repeat — a held key reports as held (correct HID boot
+  behaviour, and what the Pocket dock does); software repeat would belong in
+  the SDL shim, not the RTL.
 - OPENFILE/GETFILE data-slot ops report err=7 (no MiSTer backing; the
   FAT name registry replaces them).
 

@@ -25,9 +25,16 @@
  * lossless with no hub IRQ.  No probe: a bitstream without the encoder
  * reads type nibble 0 and the mouse simply stays absent.
  *
- * No input hub IRQs, SNAC or dock keyboard on MiSTer v1 — the keyboard
- * state object exists but always reads disconnected.  USB keyboards via
- * hps_io ps2_key are a follow-up.
+ * The USB keyboard rides input-hub slot 2 (INPUT_SLOT_KEY/JOY/TRIG(2)) as a
+ * HID BOOT REPORT — KEY[31:28]=4, KEY[7:0]=modifier bitmap, JOY/TRIG=the six
+ * rollover usage IDs — which is byte-for-byte the Pocket dock keyboard layout,
+ * so decode_keyboard() below is the pocket decoder verbatim.  hps_keyboard.v
+ * does the PS/2 set-2 → HID translation and the rollover bookkeeping in RTL,
+ * because slot 2 is a shared contract carrying HID usage IDs and must not mean
+ * something different per target.  No probe, same as the mouse: a bitstream
+ * without the encoder reads type nibble 0 and the keyboard stays absent.
+ *
+ * No input hub IRQs or SNAC on MiSTer v1.
  */
 
 #include "input.h"
@@ -39,6 +46,8 @@ of_input_state_t of_input_states[INPUT_MAX_PLAYERS];
 static of_keyboard_state_t keyboard_state;
 static hid_mouse_t hid_mouse;
 static uint32_t prev_buttons[INPUT_MAX_PLAYERS];
+static uint32_t prev_keyboard_keys[OF_KEYBOARD_WORDS];
+static uint16_t prev_keyboard_modifiers;
 static int16_t stick_deadzone = 8000;
 
 void of_input_init(void) {
@@ -47,6 +56,9 @@ void of_input_init(void) {
         prev_buttons[i] = 0;
     }
     keyboard_state = (of_keyboard_state_t){0};
+    prev_keyboard_modifiers = 0;
+    for (int i = 0; i < (int)OF_KEYBOARD_WORDS; i++)
+        prev_keyboard_keys[i] = 0;
     hid_mouse_init(&hid_mouse, HID_MOUSE_XY_ACCUM);
 }
 
@@ -112,6 +124,77 @@ static void fill_state(int player, uint32_t keys, uint32_t joy, uint32_t trig) {
     of_input_states[player].trigger_r = (trig >> 16) & 0xFFFF;
 }
 
+static inline uint8_t apf_input_type(uint32_t key) {
+    return (uint8_t)(key >> 28);
+}
+
+static void keyboard_disconnect(void) {
+    keyboard_state.present = 0;
+    keyboard_state.reserved0 = 0;
+    keyboard_state.modifiers = 0;
+    keyboard_state.modifiers_pressed = 0;
+    keyboard_state.modifiers_released = prev_keyboard_modifiers;
+    prev_keyboard_modifiers = 0;
+
+    for (int i = 0; i < (int)OF_KEYBOARD_WORDS; i++) {
+        keyboard_state.keys[i] = 0;
+        keyboard_state.keys_pressed[i] = 0;
+        keyboard_state.keys_released[i] = prev_keyboard_keys[i];
+        prev_keyboard_keys[i] = 0;
+    }
+    for (int i = 0; i < (int)OF_KEYBOARD_REPORT_KEYS; i++)
+        keyboard_state.report_keys[i] = 0;
+}
+
+/* Slot 2 carries a HID boot report in the Pocket dock's layout; this is the
+ * pocket decoder unchanged.  See the file header for why the PS/2 → HID
+ * translation happens in RTL rather than here. */
+static void decode_keyboard(uint32_t key, uint32_t joy, uint32_t trig) {
+    if (apf_input_type(key) != OF_INPUT_TYPE_KEYBOARD) {
+        keyboard_disconnect();
+        return;
+    }
+
+    uint32_t curr_keys[OF_KEYBOARD_WORDS] = {0};
+    uint8_t report_keys[OF_KEYBOARD_REPORT_KEYS];
+
+    report_keys[0] = (uint8_t)((joy >> 24) & 0xFFu);
+    report_keys[1] = (uint8_t)((joy >> 16) & 0xFFu);
+    report_keys[2] = (uint8_t)((joy >> 8) & 0xFFu);
+    report_keys[3] = (uint8_t)(joy & 0xFFu);
+    report_keys[4] = (uint8_t)((trig >> 8) & 0xFFu);
+    report_keys[5] = (uint8_t)(trig & 0xFFu);
+
+    for (int i = 0; i < (int)OF_KEYBOARD_REPORT_KEYS; i++) {
+        uint8_t usage = report_keys[i];
+        if (usage != 0)
+            curr_keys[usage >> 5] |= 1u << (usage & 31);
+        keyboard_state.report_keys[i] = usage;
+    }
+
+    uint16_t modifiers = (uint16_t)(key & 0xFFFFu);
+
+    keyboard_state.present = 1;
+    keyboard_state.reserved0 = 0;
+    keyboard_state.modifiers = modifiers;
+    keyboard_state.modifiers_pressed = modifiers & (uint16_t)~prev_keyboard_modifiers;
+    keyboard_state.modifiers_released = (uint16_t)~modifiers & prev_keyboard_modifiers;
+    prev_keyboard_modifiers = modifiers;
+
+    for (int i = 0; i < (int)OF_KEYBOARD_WORDS; i++) {
+        keyboard_state.keys[i] = curr_keys[i];
+        keyboard_state.keys_pressed[i] = curr_keys[i] & ~prev_keyboard_keys[i];
+        keyboard_state.keys_released[i] = ~curr_keys[i] & prev_keyboard_keys[i];
+        prev_keyboard_keys[i] = curr_keys[i];
+    }
+}
+
+static void poll_keyboard_slot(void) {
+    uint32_t irq = input_irq_save_local();
+    decode_keyboard(INPUT_SLOT_KEY(2), INPUT_SLOT_JOY(2), INPUT_SLOT_TRIG(2));
+    input_irq_restore_local(irq);
+}
+
 static void poll_mouse_slot(void) {
     uint32_t irq = input_irq_save_local();
     hid_mouse_decode(&hid_mouse, INPUT_SLOT_KEY(3), INPUT_SLOT_JOY(3),
@@ -122,11 +205,13 @@ static void poll_mouse_slot(void) {
 void of_input_poll(void) {
     fill_state(0, CONT1_KEY, CONT1_JOY, CONT1_TRIG);
     fill_state(1, CONT2_KEY, CONT2_JOY, CONT2_TRIG);
+    poll_keyboard_slot();
     poll_mouse_slot();
 }
 
 void of_input_poll_p0(of_input_state_t *out) {
     fill_state(0, CONT1_KEY, CONT1_JOY, CONT1_TRIG);
+    poll_keyboard_slot();
     poll_mouse_slot();
     *out = of_input_states[0];
 }

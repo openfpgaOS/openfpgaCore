@@ -232,6 +232,7 @@ wire [15:0]  joystick_l_analog_1, joystick_r_analog_1;
 
 wire [24:0]  ps2_mouse;
 wire [15:0]  ps2_mouse_ext;
+wire [10:0]  ps2_key;
 
 wire [32:0]  timestamp;
 
@@ -276,6 +277,7 @@ hps_io #(.CONF_STR(CONF_STR), .WIDE(1), .VDNUM(3), .BLKSZ(2)) hps_io (
 
 	.ps2_mouse           (ps2_mouse),
 	.ps2_mouse_ext       (ps2_mouse_ext),
+	.ps2_key             (ps2_key),
 
 	.TIMESTAMP           (timestamp)
 );
@@ -300,6 +302,28 @@ hps_mouse mouse (
 	.cont4_key  (mouse_controls),
 	.cont4_joy  (mouse_joypad),
 	.cont4_trig (mouse_trigger)
+);
+
+// Framework USB keyboard → input-hub slot 2 (periph cont3_*).  Rebuilds a HID
+// boot report in the Pocket dock's exact slot layout, so firmware decodes both
+// targets with one path and no new sysreg is needed.
+wire [31:0] kbd_controls, kbd_joypad;
+wire [15:0] kbd_trigger;
+
+hps_keyboard keyboard (
+	.clk      (clk_cpu),
+	// Never reset, for the same reason as hps_mouse above: hps_io survives the
+	// core's warm resets, so ps2_key[10] keeps toggling across them and
+	// clearing stb_prev would fabricate one phantom event.  Held keys
+	// persisting is also correct -- the keyboard is still physically there,
+	// and a break for a key held across the reset still clears its slot.
+	.reset_n  (1'b1),
+
+	.ps2_key    (ps2_key),
+
+	.cont3_key  (kbd_controls),
+	.cont3_joy  (kbd_joypad),
+	.cont3_trig (kbd_trigger)
 );
 
 ///////////////////////  HPS BRIDGE  /////////////////////////////
@@ -744,9 +768,9 @@ axi_periph_slave #(
 	.cont2_key(p2_controls),
 	.cont2_joy(p2_joypad),
 	.cont2_trig(p2_trigger),
-	.cont3_key(32'd0),
-	.cont3_joy(32'd0),
-	.cont3_trig(16'd0),
+	.cont3_key(kbd_controls),
+	.cont3_joy(kbd_joypad),
+	.cont3_trig(kbd_trigger),
 	.cont4_key(mouse_controls),
 	.cont4_joy(mouse_joypad),
 	.cont4_trig(mouse_trigger),

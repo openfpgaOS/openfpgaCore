@@ -257,7 +257,45 @@ quartus17-image:
 HW_CORE_DIR  = /media/fat/_Computer
 HW_GAMES_DIR = /media/fat/games/OpenfpgaOS
 SSH_OPTS     = -o ControlMaster=auto -o ControlPath=/tmp/.of-mister-mux-%r@%h:%p -o ControlPersist=20
-deploy:
+# GUARD (2026-08-09): os.bin and the bitstream's BRAM bootloader are two halves
+# of ONE link.  start.S bakes ABSOLUTE addresses of os.bin symbols -- notably
+# `la t0, irq_handler` and `la t0, syscall_dispatch` -- and mtvec is written
+# once, in BRAM, and never re-pointed.  So ANY change to os.bin's size relocates
+# those symbols and the baked vectors dispatch into the wrong code for the whole
+# runtime.  Removing three of_term_printf calls shrank os.bin 512 B and moved
+# both vectors -384 B: blank screen + endless trap/reset loop, HW-reproduced.
+# `make os` rebuilds ONLY os.bin, so `make os && make deploy` ships a new half
+# against a stale one.  The BOOT_ABI guard in boot.c does NOT catch it -- it
+# hashes TARGET + six memory-map #defines (Makefile:61), i.e. the memory MAP,
+# not the LAYOUT, so it matches and passes silently.
+# Until the vectors move into the OSE2 image-carried metadata (the proper fix),
+# refuse to ship a pair that cannot have been baked together.
+#
+# NOTE ON PLACEMENT: this rule MUST stay ABOVE `deploy`.  The push half of
+# `deploy` lives in an `ifeq ($(MISTER_IP),)` block further down, and make
+# attaches those recipe lines to whatever target was defined LAST.  Defining
+# deploy-pair-check between `deploy` and that ifeq (as this rule originally
+# was) silently hands the push block to the GUARD -- which is a prerequisite
+# of deploy, so it runs FIRST and scp's the PREVIOUS contents of $(BUILD_OUT),
+# then deploy stages the fresh ones afterwards.  The device ends up one build
+# behind and a second `make deploy` appears to "fix" it.  Keep this rule here.
+deploy-pair-check:
+	@sof=output_files/$(PROJECT).sof; osbin=$(FW_DIR)/bld/mister/os.bin; \
+	if [ -f "$$osbin" ] && [ -f "$$sof" ] && [ "$$osbin" -nt "$$sof" ]; then \
+		printf "$(C_ERR)[deploy] REFUSING: os.bin is NEWER than the .sof.$(C_RESET)\n"; \
+		printf "         The .sof carries the BRAM bootloader baked from an OLDER\n"; \
+		printf "         os.bin, and the two are one link: the bootloader holds\n"; \
+		printf "         ABSOLUTE addresses of irq_handler and syscall_dispatch, and\n"; \
+		printf "         mtvec is set once in BRAM and never re-pointed.  Shipping\n"; \
+		printf "         them apart points those vectors at the wrong code for the\n"; \
+		printf "         whole runtime: blank screen + endless trap/reset loop.\n"; \
+		printf "         (BOOT_ABI does not catch this -- it hashes the memory MAP,\n"; \
+		printf "         not the LAYOUT, so it matches and passes silently.)\n"; \
+		printf "$(C_CMD)         Run: make firmware$(C_RESET)  (rebuilds both and re-bakes the MIF)\n"; \
+		exit 1; \
+	fi
+
+deploy: deploy-pair-check
 	@mkdir -p $(BUILD_OUT)
 	@test -f output_files/$(PROJECT).rbf && \
 		cp output_files/$(PROJECT).rbf $(BUILD_OUT)/openfpgaOS.rbf && \
@@ -269,6 +307,7 @@ deploy:
 	else \
 		printf "  $(C_DIM)[ ] boot.rom (run make os TARGET=mister first)$(C_RESET)\n"; \
 	fi
+
 ifeq ($(strip $(MISTER_IP)),)
 	@printf "$(C_OK)[deploy] Done$(C_RESET) $(C_DIM)(add MISTER_IP=<ip> to also push to hardware)$(C_RESET)\n"
 else
