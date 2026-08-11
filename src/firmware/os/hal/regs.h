@@ -458,7 +458,15 @@
 #define SCANOUT_FETCH_DIAG  REG32(SYSREG_BASE + 0xD0)
 
 #define HW_CONTRACT_REV     REG32(SYSREG_BASE + 0x8C)
-#define OS_EXPECTED_HW_CONTRACT 1u
+/* rev 2 (2026-08-10): MiSTer F-load staging windows moved and resized —
+ * app.elf 0x13700000/2 MB -> 0x13540000/5.5 MB, os.ini 0x13900000/2 MB ->
+ * 0x13AC0000/256 KB (targets/mister/target_platform.h, hps_bridge.v
+ * {ELF,INI}_STAGE_ADDR).  An old bitstream DMAs the engine to the old
+ * address while this os.bin reads the new one, which is precisely the
+ * silent-garbage pairing this handshake exists to catch.  Pocket's map is
+ * unchanged, but the rev is a single shared constant, so pocket bitstreams
+ * must be rebuilt from this tree before shipping them with this os.bin. */
+#define OS_EXPECTED_HW_CONTRACT 2u
 
 /* Hardware features (0x98) — read-only, set at synthesis time in RTL */
 #define HW_FEATURES         REG32(SYSREG_BASE + 0x98)

@@ -507,8 +507,56 @@ static int alloc_voice(int priority)
  * separate "opposite end" pass.  Stealing prefers a same-group victim
  * first so a busy group never silences the other group's audio while
  * its own range still holds something stealable. */
+/* Drop active_shadow bits the HARDWARE says are not playing.
+ *
+ * active_shadow is maintained edge-wise: mixer_reap_ended_pending() clears a
+ * bit when it observes that voice's end in MIX_IRQ_PENDING.  Every end must
+ * therefore be seen exactly once -- and any that is missed leaves the bit set
+ * FOREVER.  The voice is then unreachable: the free scan skips it and no steal
+ * can reclaim it, because nothing owns it.  Measured on MiSTer 2026-08-10:
+ * music-note refusals grew 6 -> 57 per 5 s inside one session while the synth's
+ * own footprint stayed flat at ~12 of 32 and nothing sat in orphan-grace --
+ * the pool was filling with voices that had already finished.
+ *
+ * MIX_ACTIVE_MASK is a read-only LEVEL snapshot of what is actually playing,
+ * so intersecting against it makes a missed end self-healing.
+ *
+ * CAVEAT -- the mask LAGS a just-issued start, and this AND can therefore drop
+ * a voice that IS live.  On the HW mixer a CTRL[0]=1 write parks in
+ * voice_start_pending and is promoted into voice_active only once the CPU
+ * write queue drains (audio_mixer.v); on the SW mixer the mask is rebuilt per
+ * render chunk, so it is up to ~1 ms stale.  A voice armed inside that window
+ * reads as inactive here and its shadow bit can be cleared, after which the
+ * retry scan may hand the same slot out a second time and cut the first note
+ * a few microseconds after attack.
+ *
+ * That is accepted deliberately: this runs ONLY after the free scan already
+ * failed, where the alternative is a priority steal that also cuts a note, and
+ * the pool at that point is dominated by leaked bits rather than live voices
+ * (that is the condition being repaired).  Do not read this as "recently armed
+ * voices are safe" -- they are the exact set at risk. */
+static void mixer_resync_active_shadow(void)
+{
+    /* Sample the level mask OUTSIDE the critical section -- it is a slow MMIO
+     * read and holding interrupts off across it would add jitter to the 1 kHz
+     * tick.  Apply it INSIDE, because every other active_shadow mutation is
+     * guarded and a bare read-modify-write straddling that MMIO read would
+     * silently discard a concurrent `active_shadow &= ~ended` from the
+     * mixer-end ISR (mixer_reap_ended_pending), resurrecting a dead bit --
+     * the exact leak this function exists to repair.
+     *
+     * Sampling early only widens the staleness already described above; the
+     * AND can never resurrect a bit, so a mask read a few cycles early is
+     * safe in the other direction. */
+    uint32_t hw  = MIX_ACTIVE_MASK;
+    uint32_t irq = mixer_irq_save_local();
+    active_shadow &= hw;
+    mixer_irq_restore_local(irq);
+}
+
 static int alloc_voice_grouped(int priority, int group)
 {
+    for (int attempt = 0; attempt < 2; attempt++) {
     if (group == OF_MIXER_GROUP_MUSIC) {
         for (int i = 0; i < MIXER_MAX_VOICES; i++) {
             if (i == MIXER_SCRATCH_VOICE) continue;
@@ -519,6 +567,14 @@ static int alloc_voice_grouped(int priority, int group)
             if (i == MIXER_SCRATCH_VOICE) continue;
             if (!(active_shadow & (1u << i))) return i;
         }
+    }
+
+    /* Free scan found nothing.  Before stealing, reconcile against hardware
+     * once: if the pool is full of leaked bits rather than real voices, this
+     * recovers them and the retry succeeds with no steal at all. */
+    if (attempt == 0) {
+        mixer_resync_active_shadow();
+        continue;
     }
 
     int victim = -1;
@@ -542,6 +598,8 @@ static int alloc_voice_grouped(int priority, int group)
         }
     }
     return victim;
+    }
+    return -1;
 }
 
 /* Program an already-allocated voice slot for fresh playback.  Shared by

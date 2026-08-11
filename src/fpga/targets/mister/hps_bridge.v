@@ -56,17 +56,25 @@ module hps_bridge #(
     // (= OF_TARGET_CRAM0_BRIDGE + OF_TARGET_CRAM0_OS_OFFSET).
     parameter [31:0] BOOT_STAGE_ADDR = 32'h0330_0000,
     // SDRAM byte offset of the instance-ini (F-load) staging region:
-    // the 2 MB reserved spare in the staging arena, safe post-boot
+    // a 256 KB window at the very top of the staging arena, safe post-boot
     // (boot and ini downloads are time-disjoint, so the drain pipeline
     // is shared; only the target address / length / done flag differ).
-    parameter [31:0] INI_STAGE_ADDR  = 32'h0390_0000,
-    // SDRAM byte offset of the app.elf (F-load) staging region: a second
-    // 2 MB window directly BELOW the ini staging.  The mgl F-loads app.elf
+    parameter [31:0] INI_STAGE_ADDR  = 32'h03AC_0000,
+    // SDRAM byte offset of the app.elf (F-load) staging region: a 5.5 MB
+    // window directly BELOW the ini staging.  The mgl F-loads app.elf
     // as ioctl index 2 (index 1 stays the instance ini); the OS then serves
     // the app slot out of this staging instead of the mounted boot.vhd.
     // Both F-load windows are boot-time-only borrows from the top of the
-    // audio reserve — see targets/mister/target_platform.h.
-    parameter [31:0] ELF_STAGE_ADDR  = 32'h0370_0000,
+    // audio reserve — see targets/mister/target_platform.h, whose
+    // CRAM0_BRIDGE + {ELF,INI}_STAGE_OFFSET must equal these.
+    parameter [31:0] ELF_STAGE_ADDR  = 32'h0354_0000,
+    // Window sizes.  An F-load longer than its window is TRUNCATED at the
+    // boundary and leaves its LOADED flag clear, so the OS falls back to the
+    // mounted vhd instead of running a half-written image.  Without this the
+    // stream ran straight past the window: a 4 MB ScummVM engine overwrote
+    // the ini staging and the OS file cache while still latching ELF_LOADED.
+    parameter [31:0] ELF_STAGE_SIZE  = 32'h0058_0000,   // 5.5 MB
+    parameter [31:0] INI_STAGE_SIZE  = 32'h0004_0000,   // 256 KB
     // Watchdog: abort a sector op if the HPS doesn't answer (~1.3 s).
     parameter [27:0] SD_TIMEOUT      = 28'd134_000_000
 ) (
@@ -276,6 +284,16 @@ reg [31:0] ini_len_r;
 reg        is_elf_load;
 reg        elf_loaded_r;
 reg [31:0] elf_len_r;
+
+// Window overflow for the active F-load.  Set the moment the stream reaches
+// its window size; from then on incoming words are consumed but neither
+// counted nor posted, and the completion below refuses to set the LOADED
+// flag — an oversized engine/ini reads as "not staged" and the OS takes the
+// mounted-vhd path rather than executing a truncated image.  Boot.rom is
+// deliberately NOT bounded here (its size is fixed by our own os.bin build).
+reg        stage_ovf_r;
+wire       stage_full = (is_elf_load && elf_len_r >= ELF_STAGE_SIZE) ||
+                        (is_ini_load && ini_len_r >= INI_STAGE_SIZE);
 
 wire boot_index = (ioctl_index[5:0] == 6'd0);
 wire elf_index  = (ioctl_index[5:0] == 6'd2);
@@ -504,6 +522,7 @@ always @(posedge clk or negedge reset_n) begin
         is_elf_load <= 1'b0;
         elf_loaded_r <= 1'b0;
         elf_len_r <= 32'd0;
+        stage_ovf_r <= 1'b0;
     end else begin
         // Edge-detect only the op's ack bit.  op_disk changes only at
         // dispatch, when no transfer is in flight (all acks low), so the
@@ -528,6 +547,7 @@ always @(posedge clk or negedge reset_n) begin
             boot_have_lo  <= 1'b0;
             boot_word_pending <= 1'b0;
             boot_skid_full <= 1'b0;
+            stage_ovf_r   <= 1'b0;
         end else if (elf_start) begin
             // App.elf F-load: same drain pipeline, only the target address /
             // length counter / done flag differ.  Boot AND ini state
@@ -541,6 +561,7 @@ always @(posedge clk or negedge reset_n) begin
             boot_have_lo  <= 1'b0;
             boot_word_pending <= 1'b0;
             boot_skid_full <= 1'b0;
+            stage_ovf_r   <= 1'b0;
         end else if (ini_start) begin
             // Instance-ini F-load: same drain pipeline, only the target
             // address / length counter / done flag differ.  Boot AND elf
@@ -554,6 +575,7 @@ always @(posedge clk or negedge reset_n) begin
             boot_have_lo  <= 1'b0;
             boot_word_pending <= 1'b0;
             boot_skid_full <= 1'b0;
+            stage_ovf_r   <= 1'b0;
         end else begin
             // 1. Consumption/promotion (reads pre-cycle state).
             if (boot_word_consumed) begin
@@ -567,7 +589,15 @@ always @(posedge clk or negedge reset_n) begin
             // 2. New-word completion.  boot_slot_free accounts for a
             //    consumption happening THIS cycle (promotion occupied the
             //    slot again only if the skid had a word).
-            if (boot_active && ioctl_wr) begin
+            if (boot_active && ioctl_wr && stage_full) begin
+                // Window is full: swallow the rest of the stream without
+                // counting or posting it, and drop any half-word already
+                // latched so the end-of-download flush below can't push one
+                // last word past the boundary.  stage_ovf_r suppresses the
+                // LOADED flag at completion.
+                stage_ovf_r  <= 1'b1;
+                boot_have_lo <= 1'b0;
+            end else if (boot_active && ioctl_wr) begin
                 if (is_elf_load)      elf_len_r  <= elf_len_r  + 32'd2;
                 else if (is_ini_load) ini_len_r  <= ini_len_r  + 32'd2;
                 else                  boot_len_r <= boot_len_r + 32'd2;
@@ -611,10 +641,10 @@ always @(posedge clk or negedge reset_n) begin
             !boot_have_lo &&
             state != S_BOOT_AW && state != S_BOOT_W && state != S_BOOT_B) begin
             if (is_elf_load) begin
-                if (!elf_loaded_r && elf_len_r != 32'd0)
+                if (!elf_loaded_r && elf_len_r != 32'd0 && !stage_ovf_r)
                     elf_loaded_r <= 1'b1;
             end else if (is_ini_load) begin
-                if (!ini_loaded_r && ini_len_r != 32'd0)
+                if (!ini_loaded_r && ini_len_r != 32'd0 && !stage_ovf_r)
                     ini_loaded_r <= 1'b1;
             end else begin
                 if (!boot_loaded_r && boot_len_r != 32'd0)

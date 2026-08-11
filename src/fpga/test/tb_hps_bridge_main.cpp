@@ -489,15 +489,15 @@ int main(int argc, char **argv) {
 
         // (b) A SECOND ioctl download with a NON-ZERO index (instance ini):
         //     a small known payload that must DMA to INI_STAGE_ADDR
-        //     (0x03900000) via the SAME drain pipeline, without touching
+        //     (0x03AC0000) via the SAME drain pipeline, without touching
         //     the boot staging/length/flag.
         static uint8_t ini[600];
         for (uint32_t i = 0; i < sizeof(ini); i++)
             ini[i] = (uint8_t)(i ^ 0x3C);
         ioctl_boot(ini, sizeof(ini), false, /*index=*/1);
 
-        CHECK(sdram_check(0x03900000u, ini, sizeof(ini), "ini"),
-              "ini bytes DMA'd to INI_STAGE_ADDR (0x03900000)");
+        CHECK(sdram_check(0x03AC0000u, ini, sizeof(ini), "ini"),
+              "ini bytes DMA'd to INI_STAGE_ADDR (0x03AC0000)");
         CHECK((tb->hps_status & ST_INI) != 0, "hps_status bit10 = ini loaded");
         CHECK(tb->hps_ini_len == sizeof(ini), "hps_ini_len == ini byte length");
 
@@ -534,15 +534,15 @@ int main(int argc, char **argv) {
         CHECK(tb->hps_elf_len == 0, "elf length 0 before any elf F-load");
 
         // (b) A THIRD ioctl download with index 2 (app.elf): a known payload
-        //     that must DMA to ELF_STAGE_ADDR (0x03700000) via the SAME drain
+        //     that must DMA to ELF_STAGE_ADDR (0x03540000) via the SAME drain
         //     pipeline, without touching boot OR ini staging/length/flag.
         static uint8_t elf[1500];
         for (uint32_t i = 0; i < sizeof(elf); i++)
             elf[i] = (uint8_t)(i * 9u + 0x81);
         ioctl_boot(elf, sizeof(elf), false, /*index=*/2);
 
-        CHECK(sdram_check(0x03700000u, elf, sizeof(elf), "elf"),
-              "elf bytes DMA'd to ELF_STAGE_ADDR (0x03700000)");
+        CHECK(sdram_check(0x03540000u, elf, sizeof(elf), "elf"),
+              "elf bytes DMA'd to ELF_STAGE_ADDR (0x03540000)");
         CHECK((tb->hps_status & ST_ELF) != 0, "hps_status bit11 = elf loaded");
         CHECK(tb->hps_elf_len == sizeof(elf), "hps_elf_len == elf byte length");
 
@@ -559,8 +559,100 @@ int main(int argc, char **argv) {
               "status bit10 = ini still loaded after elf F-load");
         CHECK(tb->hps_ini_len == sizeof(ini),
               "hps_ini_len unchanged by elf F-load");
-        CHECK(sdram_check(0x03900000u, ini, sizeof(ini), "ini-post-elf"),
+        CHECK(sdram_check(0x03AC0000u, ini, sizeof(ini), "ini-post-elf"),
               "ini staging bytes untouched by elf F-load");
+    }
+
+    printf("test_fload_window_overflow:\n");
+    {
+        // An F-load longer than its window must TRUNCATE at the boundary and
+        // leave its LOADED flag CLEAR, so the OS takes the mounted-vhd path
+        // instead of executing a half-written image.
+        //
+        // Before this bound check the stream ran straight past the window end:
+        // a 4 MB ScummVM engine staged at ELF_STAGE_ADDR overwrote the ini
+        // staging and the head of the OS file cache, yet still latched
+        // ELF_LOADED — so the loader trusted a corrupted image.
+        //
+        // Driven on the ini window (256 KB, the smaller of the two) to keep the
+        // sim short; stage_full / stage_ovf_r are shared by both F-load paths.
+        const uint32_t INI_WIN = 0x00040000u;
+        static uint8_t big[INI_WIN + 512u];
+        for (uint32_t i = 0; i < sizeof(big); i++)
+            big[i] = (uint8_t)(i * 7u + 0x11);
+
+        ioctl_boot(big, sizeof(big), false, /*index=*/1);
+
+        CHECK((tb->hps_status & ST_INI) == 0,
+              "oversized ini F-load leaves INI_LOADED clear");
+        CHECK(tb->hps_ini_len == INI_WIN,
+              "oversized ini F-load counts exactly one window");
+        // Data must be intact right up to the boundary — truncation, not an
+        // early abort.
+        CHECK(sdram_check(0x03AC0000u + INI_WIN - 512u, big + INI_WIN - 512u,
+                          512u, "ini-trunc-tail"),
+              "in-window ini bytes intact up to the window boundary");
+    }
+
+    printf("test_fload_exact_fit:\n");
+    {
+        // A payload of EXACTLY the window size must still be accepted: the
+        // boundary is reached only as the LAST word lands, so stage_full never
+        // coincides with an ioctl_wr and stage_ovf_r stays clear.  An off-by-one
+        // here (> vs >=, or arming the overflow a word early) would silently
+        // reject the largest legal image.
+        const uint32_t INI_WIN = 0x00040000u;
+        static uint8_t exact[INI_WIN];
+        for (uint32_t i = 0; i < sizeof(exact); i++)
+            exact[i] = (uint8_t)(i * 5u + 0x2A);
+
+        ioctl_boot(exact, sizeof(exact), false, /*index=*/1);
+
+        CHECK((tb->hps_status & ST_INI) != 0,
+              "exactly-window-sized ini F-load still sets INI_LOADED");
+        CHECK(tb->hps_ini_len == INI_WIN,
+              "exactly-window-sized ini F-load counts the full window");
+        CHECK(sdram_check(0x03AC0000u + INI_WIN - 512u, exact + INI_WIN - 512u,
+                          512u, "ini-exact-tail"),
+              "exact-fit ini bytes intact up to the final word");
+    }
+
+    printf("test_fload_elf_window_overflow:\n");
+    {
+        // The ELF term of stage_full -- the one that actually failed in the
+        // field.  The ELF window ends EXACTLY where the ini window begins
+        // (0x03540000 + 5.5 MB == 0x03AC0000), so before the bound check a
+        // 4 MB ScummVM engine ran straight past the boundary and overwrote the
+        // instance ini that had just been staged, then latched ELF_LOADED
+        // anyway -- the loader trusted a corrupted image against a destroyed
+        // ini.  Stage a known ini FIRST, then overflow the ELF window at it:
+        // the ini surviving is the regression assertion.
+        const uint32_t ELF_WIN = 0x00580000u;   // 5.5 MB
+
+        static uint8_t ini_guard[600];
+        for (uint32_t i = 0; i < sizeof(ini_guard); i++)
+            ini_guard[i] = (uint8_t)(i ^ 0x5A);
+        ioctl_boot(ini_guard, sizeof(ini_guard), false, /*index=*/1);
+        CHECK((tb->hps_status & ST_INI) != 0, "guard ini staged before elf overflow");
+
+        static uint8_t bigelf[ELF_WIN + 512u];
+        for (uint32_t i = 0; i < sizeof(bigelf); i++)
+            bigelf[i] = (uint8_t)(i * 3u + 0xC7);
+
+        ioctl_boot(bigelf, sizeof(bigelf), false, /*index=*/2);
+
+        CHECK((tb->hps_status & ST_ELF) == 0,
+              "oversized elf F-load leaves ELF_LOADED clear");
+        CHECK(tb->hps_elf_len == ELF_WIN,
+              "oversized elf F-load counts exactly one window");
+        CHECK(sdram_check(0x03540000u + ELF_WIN - 512u, bigelf + ELF_WIN - 512u,
+                          512u, "elf-trunc-tail"),
+              "in-window elf bytes intact up to the window boundary");
+        // THE regression: nothing above the ELF window may have been written.
+        CHECK(sdram_check(0x03AC0000u, ini_guard, sizeof(ini_guard), "ini-guard"),
+              "ini staging above the elf window untouched by the overrun");
+        CHECK((tb->hps_status & ST_INI) != 0,
+              "INI_LOADED survives an oversized elf F-load");
     }
 
     // ════════════════ multi-vhd (VDNUM=3) coverage ════════════════

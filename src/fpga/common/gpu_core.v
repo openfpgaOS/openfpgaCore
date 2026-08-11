@@ -3918,6 +3918,12 @@ localparam FBWQ_DEPTH = 16;
 // reads are at fbwq_rd_ptr (head entry always counted), writes at
 // fbwq_wr_ptr gated on !fbwq_full, and rd_ptr == wr_ptr only at count
 // 0 or 16 — so a same-cycle same-address read-during-write never occurs.
+// A/B'd 2026-08-11 (os30 fit crisis): forcing addr/strb to M10K instead was
+// NOT a win — os30 went 18,344 ALM / 1,847 LABs to 18,692 / 1,904 and still
+// failed to fit.  Both were failing fits so the numbers are estimates, and
+// the delta is inside the ±800-ALM packing chaos this design shows above the
+// 95% cliff, but there was no signal to justify spending 3 M10K on it.  The
+// MLAB form stays.
 (* ramstyle = "MLAB, no_rw_check" *) reg [GPU_ADDR_W-1:0] fbwq_addr [0:FBWQ_DEPTH-1];
 reg [31:0] fbwq_data [0:FBWQ_DEPTH-1];
 (* ramstyle = "MLAB, no_rw_check" *) reg [3:0]  fbwq_strb [0:FBWQ_DEPTH-1];

@@ -26,6 +26,19 @@ VEXII_DIR  = ../../vendor/vexriscv/VexiiRiscv
 TEST_DIR   = ../../test
 ROOT_DIR   = ../../../..
 
+# ── Fitter seed ──────────────────────────────────────────────────────
+# The seed is COMMITTED in seeds/mister.seed and sed-patched into
+# mister.qsf by `build`, mirroring the Pocket's seeds/<variant>.seed.
+# It used to live only in the qsf, so a sweep's winner survived as an
+# untracked edit to a tracked file and NOTHING recorded which netlist it
+# had been ranked on — the one guard that catches a seed gone stale under
+# an RTL change (see tools/netlist_hash.sh for what that costs).
+# seeds/mister.seed.src carries that fingerprint; `build` compares.
+# Falls back to the qsf's own seed when the file is absent.
+SEED_FILE  = seeds/mister.seed
+SEED       = $(shell [ -f $(SEED_FILE) ] && cat $(SEED_FILE) || \
+                     awk '/^set_global_assignment -name SEED /{print $$NF}' $(PROJECT).qsf)
+
 # ── Variant registry + resolution (same model as the pocket target) ──
 # MiSTer currently has ONE variant ("mister", the default) — but it uses
 # the same auto-discovered variants/<name>.mk registry, so VARIANT= is
@@ -212,7 +225,30 @@ sweep-all: sweep
 # quartus_map.  The sys/build_id.tcl PRE_FLOW script still runs ahead of
 # quartus_map (stamps build_id.v); quartus_asm emits the .rbf.
 build: $(VEXII_OUT) bootloader build_id.v
-	@printf "$(C_HEAD)[fpga]$(C_RESET) Clean compile (Quartus 17.0.x)...\n"
+	@# Apply the persisted seed.  Rewriting only on a real difference keeps a
+	@# clean tree clean (mister.qsf is tracked, unlike the Pocket's generated
+	@# per-job qsf).
+	@if [ -f "$(SEED_FILE)" ]; then \
+		cur=$$(awk '/^set_global_assignment -name SEED /{print $$NF}' $(PROJECT).qsf); \
+		if [ "$$cur" != "$(SEED)" ]; then \
+			sed -i 's/^set_global_assignment -name SEED .*/set_global_assignment -name SEED $(SEED)/' $(PROJECT).qsf; \
+			printf "$(C_HEAD)[fpga]$(C_RESET) seed $$cur → $(SEED) (from $(SEED_FILE))\n"; \
+		fi; \
+	fi
+	@# Same stale-seed guard as the Pocket flow: a stored seed is only
+	@# meaningful for the exact netlist it was ranked on.  Warn, don't fail —
+	@# a deliberate rebuild mid-work is fine, shipping one is not.
+	@if [ -f "$(SEED_FILE).src" ] && [ -f $(ROOT_DIR)/tools/netlist_hash.sh ]; then \
+		. $(ROOT_DIR)/tools/netlist_hash.sh; \
+		now=$$(netlist_hash "$(PROJECT).qsf"); \
+		want=$$(cat "$(SEED_FILE).src"); \
+		if [ "$$now" != "$$want" ]; then \
+			printf "$(C_ERR)[fpga] WARNING: netlist changed since mister was swept —$(C_RESET)\n"; \
+			printf "$(C_ERR)        seed $(SEED) is a placement lottery ticket on this netlist.$(C_RESET)\n"; \
+			printf "$(C_ERR)        Re-run: make sweep TARGET=mister (then build) before shipping.$(C_RESET)\n"; \
+		fi; \
+	fi
+	@printf "$(C_HEAD)[fpga]$(C_RESET) Clean compile (Quartus 17.0.x, seed $(SEED))...\n"
 	@rm -rf db incremental_db
 	@# One container call for the whole map/fit/asm/sta chain — Q17's
 	@# per-tool startup adds up under Rosetta; one container start amortizes.
@@ -415,11 +451,20 @@ sdk:
 SWEEP_MIN ?= 1
 SWEEP_MAX ?= 30
 
+# Stop the serial sweep as soon as a seed CLOSES timing (setup WNS >= 0 with
+# hold still clean).  The Pocket variants sit permanently below the wall so
+# they must rank the whole range, but mister has headroom: once a seed passes
+# there is nothing better to find, and each further fit costs ~15-20 min of
+# wall clock for no ranking value.  Set 0 to force the full range.
+SWEEP_STOP_ON_PASS ?= 1
+
 sweep: firmware
 	@USE_CONTAINER=0 MAXJOBS=1 PROJECT=$(PROJECT) \
 		CLOCK_RE='emu|pll|pll_inst.*general\[0\]' \
 		VARIANT_DEFS="$(INCLUDE_DEFS)" \
 		QRUN='$(Q)' \
+		SEED_FILE='$(SEED_FILE)' \
+		STOP_ON_PASS='$(SWEEP_STOP_ON_PASS)' \
 		bash $(ROOT_DIR)/tools/sweep.sh $(SWEEP_MIN) $(SWEEP_MAX)
 
 # ── Resource / timing report ─────────────────────────────────────────

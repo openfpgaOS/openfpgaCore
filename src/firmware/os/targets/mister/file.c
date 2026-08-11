@@ -102,14 +102,14 @@ _Static_assert(2u + (MISTER_INSTANCE_ROOT_MAX - 1u)
 #define BOOT_STAGE_UNCACHED (SDRAM_UNCACHED_BASE + OF_TARGET_CRAM0_BRIDGE + \
                              OF_TARGET_CRAM0_OS_OFFSET)
 
-/* F-loaded instance ini staging copy — bridge offset 0x00600000 above the
- * arena base (the 2 MB "reserved" spare window in target_platform.h).  Read
+/* F-loaded instance ini staging copy — the 256 KB window at the very top of
+ * the staging arena (see target_platform.h).  Read
  * through the uncached alias exactly like boot.rom, so the CPU never caches
  * lines the HPS ini DMA may rewrite.  Mirrors BOOT_STAGE_UNCACHED. */
 #define INI_STAGE_UNCACHED  (SDRAM_UNCACHED_BASE + OF_TARGET_CRAM0_BRIDGE + \
                              OF_TARGET_CRAM0_INI_STAGE_OFFSET)
 
-/* F-loaded app.elf staging copy — a second 2 MB window directly below the ini
+/* F-loaded app.elf staging copy — the 5.5 MB window directly below the ini
  * staging (see target_platform.h).  Read through the uncached alias exactly
  * like os.bin/os.ini so the CPU never caches lines the HPS elf DMA may rewrite
  * on a reload.  Mirrors INI_STAGE_UNCACHED. */
@@ -1032,6 +1032,10 @@ static int ini_slot_read(uint32_t slot_offset, void *dest, uint32_t length) {
     uint32_t ini_len = HPS_INI_LEN;
     if (!(HPS_STATUS & HPS_STATUS_INI_LOADED) || ini_len == 0)
         return OF_ERR_NOT_SUPPORTED;
+    /* Same window clamp as elf_slot_read — the ini window is the last thing
+     * in the arena, so an over-long read runs straight into the file cache. */
+    if (ini_len > OF_TARGET_CRAM0_INI_STAGE_SIZE)
+        return OF_ERR_BAD_RANGE;
     if (slot_offset > ini_len || length > ini_len - slot_offset)
         return OF_ERR_BAD_RANGE;
     memcpy(dest, (const void *)(INI_STAGE_UNCACHED + slot_offset), length);
@@ -1048,6 +1052,12 @@ static int elf_slot_read(uint32_t slot_offset, void *dest, uint32_t length) {
     uint32_t elf_len = HPS_ELF_LEN;
     if (!(HPS_STATUS & HPS_STATUS_ELF_LOADED) || elf_len == 0)
         return OF_ERR_NOT_SUPPORTED;
+    /* Never trust HPS_ELF_LEN past the window: the RTL bounds the stream and
+     * refuses to set ELF_LOADED on overflow, so a length beyond the window
+     * should be unreachable — but reading on it would walk into the ini
+     * staging and the OS file cache, so clamp here as well. */
+    if (elf_len > OF_TARGET_CRAM0_ELF_STAGE_SIZE)
+        return OF_ERR_BAD_RANGE;
     if (slot_offset > elf_len || length > elf_len - slot_offset)
         return OF_ERR_BAD_RANGE;
     memcpy(dest, (const void *)(ELF_STAGE_UNCACHED + slot_offset), length);

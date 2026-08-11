@@ -773,7 +773,12 @@ localparam [31:0] FEAT_LINK = 32'h0000_0000;
 // changes incompatibly; the firmware halts with a readable banner on a
 // mismatch instead of booting into undefined behaviour.  Pre-versioning
 // bitstreams fall through to the sysreg default read (0).
-localparam [31:0] HW_CONTRACT_REV = 32'd1;
+// rev 2 (2026-08-10): MiSTer F-load staging windows moved/resized so an
+// engine larger than Doom's fits (app.elf -> 0x13540000/5.5 MB, os.ini ->
+// 0x13AC0000/256 KB).  Pocket's map is unchanged; the rev is shared, so
+// pocket bitstreams need a rebuild from this tree before shipping with the
+// matching os.bin.
+localparam [31:0] HW_CONTRACT_REV = 32'd2;
 
 localparam [31:0] HW_FEATURES_RESOLVED =
     32'h0000_0001      // bit 0  OF_HW_MIXER: a 32-voice mixer is available (SET on

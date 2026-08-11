@@ -17,7 +17,15 @@ netlist_hash() {
     [ -f "$qsf" ] || { echo "no-qsf"; return; }
     {
         grep -E "VERILOG_MACRO|SEED " "$qsf" | grep -v "SEED " | sort
-        grep -E "(SYSTEM)?VERILOG_FILE|QIP_FILE" "$qsf" \
+        # MIF_FILE is part of the netlist, not a build artifact: the boot ROM
+        # image is BAKED into the bitstream, so a firmware change alters what
+        # the fitter places even when every .v is byte-identical.  Omitting it
+        # left a hole exactly the shape of the bug this guard exists to catch:
+        # on 2026-08-11 an os30 sweep went 0/12 "Can't fit design in device"
+        # against an UNCHANGED RTL fingerprint -- the only differing input was
+        # firmware.mif (rebuilt for the HW_CONTRACT_REV bump), and at 98% ALM
+        # that perturbation alone was enough to flip the placement over.
+        grep -E "(SYSTEM)?VERILOG_FILE|QIP_FILE|MIF_FILE" "$qsf" \
         | awk '{print $NF}' \
         | while read -r f; do
             # qsf paths are absolute (generated) or relative to the qsf dir.

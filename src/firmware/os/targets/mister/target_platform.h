@@ -25,11 +25,11 @@
  *   0x13420000  app async pool   (of_file_dma_stage_alloc, 1 MB)
  *   0x13520000  audio reserve    (mixer/SoundFont; grows DOWN from the top,
  *                                 floor here, top at 0x13B00000)
- *   0x13700000  app.elf F-load   (2 MB) ─┐ boot-time staging borrows from the
- *   0x13900000  os.ini  F-load   (2 MB) ─┘ TOP of the audio reserve (below)
+ *   0x13540000  app.elf F-load   (5.5 MB) ─┐ boot-time staging borrows from
+ *   0x13AC0000  os.ini  F-load   (256 KB) ─┘ the audio reserve (below)
  *   0x13B00000  (file cache — unchanged from Pocket)
  *
- * The two F-load windows (app.elf @ 0x13700000, os.ini @ 0x13900000) overlap
+ * The two F-load windows (app.elf @ 0x13540000, os.ini @ 0x13AC0000) overlap
  * the top of the audio reserve ON PURPOSE.  The mgl streams os.ini (ioctl
  * index 1) and app.elf (ioctl index 2) into them at core start; the OS reads
  * os.ini and copies the app's ELF segments out of staging into app RAM
@@ -37,7 +37,15 @@
  * SoundFont allocation runs, and the mixer reserve grows top-down from
  * 0x13B00000 — so audio is free to reuse both windows once the app is loaded.
  * (NB: the in-place RELAUNCH path re-reads os.ini + app.elf from staging;
- * this is a pre-existing property of the ini window.)
+ * this is a pre-existing property of the ini window.  Widening the ELF
+ * window to 5.5 MB widens that exposure: the arena cannot hold both a
+ * multi-MB engine and a 2.7 MB SoundFont, so once audio has allocated,
+ * staging above the mixer floor is gone.  Doom fit under the old floor by
+ * ~24 KB and survived; a ScummVM-class engine will not.  Relaunch is only
+ * reachable from a menu app (syscall), and the MiSTer launch path is one
+ * core load per .mgl with a fresh F-load, so nothing shipped hits this —
+ * but an in-core menu that relaunches a large engine must re-stage it, not
+ * re-read staging.)
  *
  * IMPORTANT vs Pocket: this arena is CACHED SDRAM (the Pocket CRAM0 was
  * uncached per PMA). The MiSTer file/save HAL does explicit cache
@@ -134,13 +142,23 @@
  * so an engine/config update is a single loose-file replacement.  Both are
  * boot-time-only borrows from the top of the audio reserve (consumed before
  * any audio allocation — see the map above and hps_bridge.v INI/ELF_STAGE_ADDR
- * which must equal CRAM0_BRIDGE + these offsets).  ELF sized for the Doom-class
- * engine (~1.3 MB) with margin; larger engines keep their app.elf in the vhd
- * (ELF_LOADED just stays clear → slot 3 falls back to FAT). */
-#define OF_TARGET_CRAM0_ELF_STAGE_OFFSET 0x00400000u   /* app.elf F-load — CPU 0x13700000 */
-#define OF_TARGET_CRAM0_ELF_STAGE_SIZE   0x00200000u   /* 2 MB */
-#define OF_TARGET_CRAM0_INI_STAGE_OFFSET 0x00600000u   /* os.ini  F-load — CPU 0x13900000 */
-#define OF_TARGET_CRAM0_INI_STAGE_SIZE   0x00200000u   /* 2 MB */
+ * which must equal CRAM0_BRIDGE + these offsets).
+ *
+ * The ELF window was originally sized for the Doom-class engine (2 MB for a
+ * ~1.3 MB app.elf) on the theory that a larger engine would simply leave
+ * ELF_LOADED clear and fall back to the vhd.  The RTL never implemented that
+ * fallback — hps_bridge.v streamed straight past the window end and latched
+ * ELF_LOADED regardless — so a 4 MB ScummVM engine silently overran the ini
+ * window and the OS file cache.  The window now holds the largest shipped
+ * engine (scummvm_sci.elf, 4.57 MB) with ~20% headroom, the ini window drops
+ * to a still-generous 256 KB (an os.ini is a few hundred bytes), and the RTL
+ * bounds BOTH streams (hps_bridge.v ELF/INI_STAGE_SIZE) so an oversized
+ * F-load truncates cleanly and leaves its LOADED flag clear instead of
+ * corrupting whatever follows it in the arena. */
+#define OF_TARGET_CRAM0_ELF_STAGE_OFFSET 0x00240000u   /* app.elf F-load — CPU 0x13540000 */
+#define OF_TARGET_CRAM0_ELF_STAGE_SIZE   0x00580000u   /* 5.5 MB */
+#define OF_TARGET_CRAM0_INI_STAGE_OFFSET 0x007C0000u   /* os.ini  F-load — CPU 0x13AC0000 */
+#define OF_TARGET_CRAM0_INI_STAGE_SIZE   0x00040000u   /* 256 KB */
 
 /* High SDRAM reservations — identical to Pocket above the staging arena:
  *   0x13FC0000-0x14000000  GPU palookup tables (fixed RTL address)
@@ -170,7 +188,19 @@
 /* Nonvolatile slots: persistence is FAT files inside the mounted disk image
  * (config CFGs and saves/slot_N.sav — see targets/mister/save.c).  The
  * region macros below point at the in-arena mirror window so shared code
- * and caps keep a valid address; nothing persists from the mirror itself. */
+ * and caps keep a valid address; nothing persists from the mirror itself.
+ *
+ * WARNING — on THIS target SAVE_MAX_SLOTS is a slot-ID count, NOT an array
+ * extent.  The region is a SINGLE-slot assembly mirror (256 KB); the
+ * pocket-style base + slot * SAVE_SLOT_SIZE addressing in
+ * targets/pocket/save.c is NOT valid here, and MiSTer deliberately does not
+ * compile that file.  Taken as an array these values describe 10 x 256 KB =
+ * 2.5 MB from 0x133C0000, which runs to 0x13640000 — straight through the
+ * DMA scratch, the app DMA pool and the app.elf F-load staging window.  The
+ * static guard below only proves ONE slot fits.  targets/mister/save.c uses
+ * these purely to report capacity (nvslot_cap) and reaches storage through
+ * FatFs, never through memory; hal/platform.c re-exports them and nothing
+ * reads those fields.  Keep it that way, or carve a real array first. */
 #define OF_TARGET_PRESAVE_REGION_ADDR  (OF_TARGET_CRAM0_BASE + OF_TARGET_CRAM0_PRESAVE_OFFSET)
 #define OF_TARGET_PRESAVE_SLOT_SIZE    0x00040000u
 

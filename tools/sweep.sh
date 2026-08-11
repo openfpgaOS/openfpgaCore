@@ -54,7 +54,7 @@ C_HEAD='\033[1m'; C_OK='\033[32m'; C_WARN='\033[33m'; C_ERR='\033[31m'
 C_DIM='\033[2m'; C_RESET='\033[0m'
 
 TOTAL=$(( MAX - MIN + 1 ))
-declare -A R_WNS R_TNS R_FMAX R_DQ R_HOLD
+declare -A R_WNS R_TNS R_FMAX R_DQ R_HOLD R_RAN
 
 # parse_sta <sta.rpt> -> sets _wns _tns _fmax (restricted Fmax on CLOCK_RE).
 parse_sta() {
@@ -127,6 +127,7 @@ if [ "$USE_CONTAINER" = 1 ]; then
     # seed whose line is missing AND whose scratch dir still exists.
     while IFS='|' read -r s w t f d h; do
         R_WNS[$s]=$w; R_TNS[$s]=$t; R_FMAX[$s]=$f; R_DQ[$s]=${d:-}; R_HOLD[$s]=${h:-}
+        R_RAN[$s]=1
     done < "$RESULTS"
     for s in $(seq "$MIN" "$MAX"); do
         [ -n "${R_WNS[$s]:-}" ] && continue
@@ -167,10 +168,26 @@ else
         cp "output_files/${PROJECT}.sta.rpt" "output_files/seed_${s}_sta.log" 2>/dev/null || true
         R_WNS[$s]=$_wns; R_TNS[$s]=$_tns; R_FMAX[$s]=$_fmax
         R_HOLD[$s]=$(sta_hold_wns "output_files/${PROJECT}.sta.rpt")
+        R_RAN[$s]=1
         if [ -n "$_wns" ]; then
             printf "${C_OK}%-10s${C_RESET} ${C_DIM}WNS %-8s TNS %s${C_RESET}\n" "$_fmax" "${_wns:--}" "${_tns:--}"
         else
             printf "${C_ERR}failed${C_RESET}\n"
+        fi
+        # STOP_ON_PASS: a seed that CLOSES timing is the best outcome the
+        # ranking can report -- no later seed can beat "passes" -- so on a
+        # target with headroom (mister) the remaining fits are pure wall
+        # clock at ~15-20 min each.  Hold must be clean too, or we would
+        # stop on a seed the hold veto below throws out anyway.  Serial mode
+        # only: container mode has already launched its whole batch.
+        if [ "${STOP_ON_PASS:-0}" = "1" ] && [ -n "$_wns" ]; then
+            _h=${R_HOLD[$s]:-}
+            if awk -v w="$_wns" 'BEGIN{exit !(w>=0)}' &&
+               { [ -z "$_h" ] || awk -v h="$_h" -v v="${SWEEP_HOLD_VETO:-0}" 'BEGIN{exit !(h>=v)}'; }; then
+                printf "${C_OK}[sweep]${C_RESET} seed %s closes timing (WNS %s, HOLD %s) — stopping early\n" \
+                       "$s" "$_wns" "${_h:--}"
+                break
+            fi
         fi
     done
 fi
@@ -196,6 +213,9 @@ HOLD_VETO=${SWEEP_HOLD_VETO:-0}
 BEST=""; BEST_WNS=""
 declare -A R_VETO
 for s in $(seq "$MIN" "$MAX"); do
+    # Skip seeds the run never reached (STOP_ON_PASS ended it early) -- they
+    # are not failures and must not be printed as such.
+    [ -n "${R_RAN[$s]:-}" ] || continue
     w=${R_WNS[$s]:-}
     if [ -z "$w" ]; then printf "  ${C_ERR}seed %-3s failed${C_RESET}\n" "$s"; continue; fi
     dq=${R_DQ[$s]:-}

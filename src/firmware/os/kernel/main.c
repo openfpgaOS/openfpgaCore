@@ -285,26 +285,39 @@ static int prepare_app_launch_ex(const char *elf_override,
 
     filesystem_init();
 
-    rc = resolve_app_slot(app_elf_name, slot_out);
-    if (rc < 0)
-        return OF_CONFIG_ERR_NOENT;
-
 #ifdef OF_TARGET_SUPPORTS_RELAUNCH
     /* MiSTer F-load app model (Phase 2): when the OSD/MGL has F-loaded an
      * app.elf into SDRAM staging (HPS_STATUS_ELF_LOADED), the loader must read
      * those STAGED bytes, not the os.ini "ELF=..." name looked up in the vhd.
      * targets/mister/file.c serves the staged ELF only through the fixed app-elf
-     * slot (APP_SLOT_ID), so force the resolved slot there; load_app(APP_SLOT_ID)
-     * then reads through elf_slot_read and of_file_size64(APP_SLOT_ID) returns
-     * HPS_ELF_LEN.  of_file_app_from_staging() is '0' on MiSTer when no ELF is
-     * staged, so the by-name/vhd resolution above stands unchanged then —
-     * backward compatible (that is what keeps a non-F-loaded core, and step 1
-     * of this bring-up, reading app.elf from the mounted vhd).  Gated to
-     * OF_TARGET_SUPPORTS_RELAUNCH so Pocket/sim are wholly unaffected (the hook
-     * has a no-op '0' stub there, matching of_file_instance_ready). */
-    if (of_file_app_from_staging())
+     * slot (APP_SLOT_ID), so force the slot there; load_app(APP_SLOT_ID) then
+     * reads through elf_slot_read and of_file_size64(APP_SLOT_ID) returns
+     * HPS_ELF_LEN.
+     *
+     * This MUST come before the by-name resolve below.  The staged bytes ARE
+     * the application, so the "ELF=" name need not exist inside boot.vhd at
+     * all — that is the whole point of shipping the engine as a loose,
+     * update-safe file.  Resolving the name first made every launch depend on
+     * a stale duplicate living in the vhd: Doom happened to carry one
+     * (/Doom/common/doom.elf), so it booted; ScummVM's image carries only
+     * assets, so a perfectly good F-loaded engine was rejected with NOENT
+     * ("No application found: scummvm_lucasarts.elf") without the staging
+     * check ever running.
+     *
+     * of_file_app_from_staging() is '0' when no ELF is staged, so the
+     * by-name/vhd resolution below stands unchanged then — backward
+     * compatible for a non-F-loaded core.  Gated to
+     * OF_TARGET_SUPPORTS_RELAUNCH so Pocket/sim are wholly unaffected (the
+     * hook has a no-op '0' stub there, matching of_file_instance_ready). */
+    if (of_file_app_from_staging()) {
         *slot_out = APP_SLOT_ID;
+        return build_app_argv(argc_out);
+    }
 #endif
+
+    rc = resolve_app_slot(app_elf_name, slot_out);
+    if (rc < 0)
+        return OF_CONFIG_ERR_NOENT;
 
     return build_app_argv(argc_out);
 }
