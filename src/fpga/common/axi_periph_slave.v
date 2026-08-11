@@ -21,7 +21,7 @@ module axi_periph_slave #(
     // CPU/RAM clock frequency in Hz (CLK_FREQ_HZ register @ 0xD4, read-
     // only).  Set by the target's core_top to match its clk_cpu PLL so the
     // OS derives timers/pacing from the REAL frequency — one os.bin serves
-    // 100 MHz and reduced-clock (96 MHz) bitstreams alike.  Older
+    // 100 MHz and reduced-clock (90/96 MHz) bitstreams alike.  Older
     // bitstreams without this register read 0 → firmware falls back to its
     // compile-time OF_TARGET_CPU_FREQ_HZ.
     parameter CLK_HZ             = 32'd100_000_000,
@@ -38,14 +38,14 @@ module axi_periph_slave #(
     // whether that mixer is the hardware audio_mixer.v (MMIO @ 0x48000000)
     // or the CPU software mixer.  The OS reads this once at boot to choose
     // the backend, so ONE os.bin runs on both.  Default 1 (HW mixer
-    // present); the OS30 build passes INCLUDE_HW_MIXER(0).
+    // present); every current pocket variant and mister ship the HW mixer.
     parameter INCLUDE_HW_MIXER   = 1,
     // GPU param-triangle (CMD_DRAW_PARAM_TRI 0x49) + the shared edge walker.
     // Advertised in HW_FEATURES bit 19.  Must track gpu_core's
     // INCLUDE_PARAM_TRI on the same target so apps don't submit 0x49 to a
     // core that drains it as a no-op.  Pocket OS25 gates it out on ALM budget
     // (only Quake1 emits 0x49 → it falls back to SW alias rendering); Pocket
-    // OS30 and MiSTer keep the default 1.
+    // OS30 gates it out too (no param-tri path); MiSTer keeps the default 1.
     parameter INCLUDE_PARAM_TRI  = 1,
     // GPU hardware vertex-triangle plane derivation (CMD_SET_TRI_STATE 0x4A +
     // CMD_DRAW_VERT_TRI 0x4B).  Advertised in HW_FEATURES bit 20.  Must track
@@ -59,8 +59,8 @@ module axi_periph_slave #(
     // ~21 constant header words per triangle.  HW_FEATURES bit 22.  Must
     // track gpu_core's INCLUDE_PARAM_TRI_RECS parameter on the same target
     // so apps don't submit 0x4D to a core that drains it as a no-op.
-    // Pocket OS25 gates it out on ALM budget (INCLUDE_PARAM_TRI_RECS(0));
-    // Pocket OS30 and MiSTer keep the default 1.
+    // Both pocket variants gate it out on ALM budget; MiSTer keeps the
+    // default 1.
     parameter INCLUDE_PARAM_TRI_RECS = 1,
     // CMD_DRAW_COLUMN_LIST (0x4C) decode.  HW_FEATURES bit 21.  Must track
     // gpu_core's INCLUDE_COLUMN_LIST on the same target.  Default 1 (the
@@ -99,9 +99,9 @@ module axi_periph_slave #(
     // GPU full texel*C+D color combiner (HILITE/specular class).  Advertised in
     // HW_FEATURES bit 27 (OF_HW_GPU_COMBINE), gated AND with INCLUDE_DIRECT_COLOR
     // (combine only exists on the truecolor path).  Must track gpu_core's
-    // INCLUDE_COMBINE on the same target.  Pocket OS30/SM64 clears it
-    // (EXCLUDE_COMBINE) so the app falls back to plain texel*shade instead of
-    // emitting biased-C/D payload words a gated GPU would mis-read.
+    // INCLUDE_COMBINE on the same target: a variant that gates the combiner
+    // must clear the caps bit too, or the app emits biased-C/D payload words a
+    // gated GPU would mis-read.  os30 currently KEEPS the combiner.
     parameter INCLUDE_COMBINE = 1,
     // Param-span/tri Q29 dynamic-scale caps (bit 18, OF_HW_GPU_PARAM_SPAN_Q29_SCALE).
     // Tracks gpu_core's INCLUDE_PARAM_SPAN_Q29; os30/SM64 clears it (Q29 cone folded).
@@ -867,10 +867,10 @@ localparam [31:0] HW_FEATURES_RESOLVED =
     | ((INCLUDE_DIRECT_COLOR && INCLUDE_COMBINE) ? 32'h0800_0000 : 32'h0000_0000) // bit 27
                        //        OF_HW_GPU_COMBINE: full texel*C+D combiner
                        //        (HILITE/specular).  Gated AND with DIRECT_COLOR
-                       //        (combine is truecolor-only).  Pocket OS30/SM64
-                       //        clears it (EXCLUDE_COMBINE) so the app emits
-                       //        plain texel*shade — a gated GPU would otherwise
-                       //        mis-read the biased-C/D payload words.
+                       //        (combine is truecolor-only).  A variant that
+                       //        gates the combiner must clear this bit so the
+                       //        app emits plain texel*shade — otherwise a gated
+                       //        GPU mis-reads the biased-C/D payload words.
     | (INCLUDE_GPU_CLIP_LOAD ? 32'h2000_0000 : 32'h0000_0000)  // bit 29: OF_HW_GPU_CLIP_LOAD (0x56+0x54)
     | (INCLUDE_GPU_LIGHT     ? 32'h4000_0000 : 32'h0000_0000)  // bit 30: OF_HW_GPU_LIGHT (0x55/0x57)
     | 32'h0100_0000;   // bit 24 OF_HW_SAVE_DT_WORD: SAVE_DT_WORD (0xC8)

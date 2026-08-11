@@ -91,11 +91,11 @@ toolchains.
 - **VARIANT** = feature profile of a target, **auto-discovered** from `src/fpga/targets/<t>/variants/<name>.mk`. Resolution: command line > environment > `.variant` (root file written by `make use-os30` etc., gitignored) > target default (pocket→`os25`, mister→`mister`). The sticky `.variant` is SOFT (applies only when the selected target has that variant); an explicit `VARIANT=<unknown>` errors. `make use-<name>` at the root auto-detects whether `<name>` is a target or a variant; `make use-default` clears both.
 - **Adding a variant = 3 file drops, zero edits**: `variants/<name>.mk` (its `DEFS` module list), `src/fpga/vendor/vexriscv/configs/<name>.cfg` (its CPU config — cache geometry, extra Generate flags, maxfan hint), `seeds/<name>.seed`. Then `build`/`sweep`/`build-all` just work, shipping `<name>.rbf_r`.
 - Pocket variants, default `os25`:
-  - **os20** — 2D games (Diablo/DevilutionX, ScummVM point-and-click) with a **DUAL-ISSUE CPU** (the mister `--decoders=2 --lanes=2` config on the Pocket A4/C8, + fma-reduced, 64 KB D$). Keeps Analogizer, HW mixer, translucency, palette lane, 4-player/mouse; cuts the three 2.5D span input forms (compact 0x48, column 0x4C, Q29 perspective — caps 23/21/18 clear, SDK emitters self-gate). 16,397 ALM (89%), 246/308 M10K. Games stay pinned to os25 until os20 is HW-validated.
-  - **os25** — 2.5D games (Doom/Duke3D/ScummVM/Wolf + Quake1 SW). Full HW audio mixer, Analogizer/SNAC, translucency, column lists, compact span groups. No HW triangle path, no fast-texture. **At 308/308 M10K (100%).**
-  - **os30** — Quake2 / SM64 (3D triangles). HW vertex-triangle + truecolor; cuts Analogizer/SNAC, HW mixer (→ **CPU software mixer**), translucency, column/compact.
+  - **os20** — 2D games (Diablo/DevilutionX, ScummVM point-and-click) with a **DUAL-ISSUE CPU** (the mister `--decoders=2 --lanes=2` config on the Pocket A4/C8, + fma-reduced, 64 KB D$). Keeps Analogizer, HW mixer, translucency, palette lane, 4-player/mouse; cuts the three 2.5D span input forms (compact 0x48, column 0x4C, Q29 perspective — caps 23/21/18 clear, SDK emitters self-gate). Runs at **90 MHz** (`INCLUDE_CLK90`; os.bin re-derives timers from `CLK_FREQ_HZ` 0xD4). 16,385 ALM (89%), 243/308 M10K at seed 33. Games stay pinned to os25 until os20 is HW-validated.
+  - **os25** — 2.5D games (Doom/Duke3D/ScummVM/Wolf + Quake1 SW). Full HW audio mixer, Analogizer/SNAC, translucency, column lists, compact span groups. No HW triangle path, no fast-texture. **16,000 ALM (87%), 301/308 M10K at seed 35** — still the M10K-tightest variant; check the fit summary before adding block RAM.
+  - **os30** — Quake2 / SM64 (3D triangles) at 90 MHz. HW vert-tri + truecolor + combiner + XFORM vertex cache + CRAM1 fast textures + **HW mixer**; cuts Analogizer/SNAC, translucency, palette, column/compact. `variants/os30.mk` is authoritative. ⛔ **Does not currently fit** — LAB-limited, 1864 needed / 1848 available (`Error 170012`), all 12 swept seeds failed; its stored seed is unvalidated. Shrink before sweeping.
   - **One caps-driven `os.bin` runs on both** — the bitstream sets `HW_FEATURES`; firmware auto-selects features at boot. There is no per-variant firmware flag.
-  - Output bitstreams are variant-named: `os25.rbf_r` / `os30.rbf_r` (≤15-char Pocket filename cap), so both coexist on one SD card.
+  - Output bitstreams are variant-named (`os20.rbf_r` / `os25.rbf_r` / `os30.rbf_r`, ≤15-char Pocket filename cap), so all three coexist on one SD card.
 
 ## Build dirs & jobs (isolation model)
 
@@ -129,7 +129,13 @@ make cpu VARIANT=os30          # regenerate THIS variant's netlist (VexiiRiscv_o
 `--verilog_macro`/`--seed` flags), then runs `quartus_map → fit → asm → sta` in a container with `bld/<job>/`
 mounted, and reverses the `.rbf` into `build/pocket/Cores/ThinkElastic.openfpgaOS/<variant>.rbf_r`.
 
-> **Deploy = the Makefile**, not a top-level `deploy.sh`. Device push lives in the SDK (`copy.sh`), invoked via Makefile targets. On **pocket**, `make deploy`/`make package` refresh the `build/pocket/` SD tree. On **mister** the model is **per-game / update-safe**: `make copy TARGET=mister` (alias `make copy-app`) does a per-game engine update — atomically scp's the built ELF to the loose F-loaded engine `games/OpenfpgaOS/<Game>/<GameElf>` (e.g. `doom.elf`), leaving the user's `boot.vhd` wads and `<Game>.vhd` saves untouched. The game-agnostic **core** ships separately: `make package TARGET=mister` → `releases/mister/openfpgaos-core-v<ver>.zip` (`_Computer/OpenfpgaOS.rbf` + `games/OpenfpgaOS/boot.rom` + `INSTALL.txt`) plus a Downloader DB `openfpgaos.json.zip`; `make release TARGET=mister` drafts the GitHub release. `make sdk` stages `os.bin` into game repos but no longer vendors the `.rbf`. Full flow: `src/sdk/platforms/mister/PACKAGING.md`.
+> **Deploy = the Makefile**, not a top-level `deploy.sh`.
+> - **pocket** — `make deploy` / `make package` refresh the `build/pocket/` SD tree.
+> - **mister core** — `make deploy TARGET=mister` stages `build/mister/`; add `MISTER_IP=<ip>` to also scp the bitstream + kernel to the card. It refuses when os.bin is newer than the .sof: the bootloader/os.bin pair is one link.
+> - **mister release** — `make package TARGET=mister` → `releases/mister/openfpgaos-core-v<ver>.zip` (`_Computer/OpenfpgaOS.rbf` + `games/OpenfpgaOS/boot.rom` + `INSTALL.txt`) plus the Downloader DB; `make release TARGET=mister` drafts the GitHub release.
+> - **per-game engine updates** (`make copy`) are a **GAME-repo** target, not a target here — see that repo's `src/sdk/platforms/mister/PACKAGING.md`.
+>
+> `make sdk` stages `os.bin` into game repos but no longer vendors the `.rbf`.
 
 ## Container builds & parallel jobs
 
@@ -153,13 +159,15 @@ builds end-to-end on **Docker + internet alone** — no host Quartus, JDK, or sb
 ## Seeds & timing sweep
 
 - Fitter seed is **committed per variant** in `seeds/<variant>.seed`. `make build` reads it; the design is seed/placement-sensitive at the timing wall, so the seed matters.
-- `make sweep` is a **parallel container** seed search: one job (`bld/<variant>-s<seed>/`) per seed, shared netlist+firmware built once, `MAXJOBS` container fits at a time, ranked by setup **WNS** on the 100 MHz `mp_ram` clock; the winner is written back to `seeds/<variant>.seed`.
+- `seeds/<v>.seed.src` fingerprints the exact netlist (sources + macros + MIF) the seed was ranked on. `make build` warns when it drifts — a stale seed once shipped a WNS −1.08 black-screen fit. Re-sweep before shipping when it fires.
+- `make sweep` is a **parallel container** seed search: one job (`bld/<variant>-s<seed>/`) per seed, shared netlist+firmware built once, `MAXJOBS` container fits at a time, winner written back to `seeds/<variant>.seed`. Ranked on the `mp_ram` CPU/RAM clock — 100 MHz on os25, 90 MHz on os20/os30.
+- **Winner policy:** hold-veto → DQ-veto → seeds within 0.10 ns of the best WNS → smallest |TNS|. The vetoes exist because plain argmax-WNS shipped field failures (s41 read-marginal, s23 blank boot, the scanout hold razor). Results are 6-column: `seed|WNS|TNS|Fmax|DQ|HOLD`.
 
 ```bash
 make sweep VARIANT=os30 SWEEP_MIN=1 SWEEP_MAX=12 MAXJOBS=4
 ```
 
-> MiSTer's `make sweep` runs the **same** `tools/sweep.sh` in in-place serial mode (`USE_CONTAINER=0 MAXJOBS=1` — no `bld/<job>/` isolation on the Q17 flow), but every quartus invocation goes through the **Q17 container** (`QRUN=quartus17-container.sh`) and now carries the variant's `INCLUDE_*` macros (`VARIANT_DEFS`) — an unmacro'd sweep ranks a featureless design and its seed is meaningless. `sweep` depends on `firmware` so the baked `.mif` is fresh (stale-mif black-boot guard).
+> MiSTer's `make sweep` runs the **same** `tools/sweep.sh` in in-place serial mode (`USE_CONTAINER=0 MAXJOBS=1` — no `bld/<job>/` isolation on the Q17 flow), through the **Q17 container** (`QRUN=quartus17-container.sh`) and carrying the variant's `INCLUDE_*` macros (`VARIANT_DEFS`) — an unmacro'd sweep ranks a featureless design and its seed is meaningless. `sweep` depends on `firmware` so the baked `.mif` is fresh (stale-mif black-boot guard). The winner lands in `seeds/mister.seed` (+ a `.seed.src` fingerprint) and `make build` sed-patches it into `mister.qsf`. `SWEEP_STOP_ON_PASS=1` (default) stops at the first seed closing timing with clean hold — mister has the headroom (seed 7 = WNS +0.122); set 0 to rank the whole range.
 
 Always **include the current stored seed in the range** so the sweep can't replace it with a worse one. The "failed" in the Fmax column is a cosmetic parse quirk — ranking is by WNS, which is correct.
 
@@ -172,8 +180,8 @@ make report      # resource summary  (FULL=true → top ALM entities + 25 worst 
 
 - Generated by `src/fpga/vendor/vexriscv/generate_vexii.sh` (sbt). Output is **gitignored**; `make cpu VARIANT=<v>` regenerates **only if missing** — to force: `rm src/fpga/vendor/vexriscv/VexiiRiscv/VexiiRiscv_<v>.v && make cpu VARIANT=<v>`.
 - **Runs in a Docker container by default** (`tools/vexii-container.sh`, image `openfpgaos-vexii` = JDK21 + sbt, auto-built on first use) — no host JDK/sbt needed. Scala/SpinalHDL deps download once into `tools/.vexii-home` (gitignored, ~250 MB) then reuse offline; the `Generate` itself is ~3 s. Output is **byte-identical** to host sbt (the netlist header carries only the SpinalHDL + VexiiRiscv git hashes, no timestamp → deterministic). Use host sbt instead with `make cpu USE_VEXII_CONTAINER=0`.
-- **One netlist per variant**, generated separately: `VexiiRiscv_os25.v`, `VexiiRiscv_os30.v`, `VexiiRiscv_mister.v`. Each per-job `bld/<job>/ap_core.qsf` names its variant's netlist directly via `VERILOG_FILE` (injected by the pocket Makefile's qsf-gen rule); mister's qsf does the same. `grep VERILOG_FILE bld/<job>/ap_core.qsf` shows exactly which CPU is being fit.
-- **Per-variant CPU config lives in `src/fpga/vendor/vexriscv/configs/<variant>.cfg`** (sourced by `generate_vexii.sh`): `ICACHE_SETS`/`DCACHE_SETS`, `EXTRA_FLAGS` (os30 = `--fma-reduced-accuracy`, mister = `--decoders=2 --lanes=2`), and `MAXFAN_HINT` (the pocket-tuned `execute_freeze_valid` annotation; 0 on mister). All variants currently run **32 KB I$ / 128 KB D$** (256 KB D$ overflows the mister A6's M10K *block* count — see `configs/mister.cfg`). Adding a variant's CPU = drop a `.cfg`; unknown variants error listing the available configs.
+- **One netlist per variant**, generated separately (`VexiiRiscv_<variant>.v` for every `variants/*.mk`). Each per-job `bld/<job>/ap_core.qsf` names its variant's netlist directly via `VERILOG_FILE` (injected by the pocket Makefile's qsf-gen rule); mister's qsf does the same. `grep VERILOG_FILE bld/<job>/ap_core.qsf` shows exactly which CPU is being fit.
+- **Per-variant CPU config lives in `src/fpga/vendor/vexriscv/configs/<variant>.cfg`** (sourced by `generate_vexii.sh`): `ICACHE_SETS`/`DCACHE_SETS`, `EXTRA_FLAGS` (os30 = `--fma-reduced-accuracy`, mister = `--decoders=2 --lanes=2`), and `MAXFAN_HINT` (the pocket-tuned `execute_freeze_valid` annotation; 0 on mister). os25/os30/mister run **32 KB I$ / 128 KB D$**; **os20 runs 64 KB D$** (128 KB + dual issue overflows the A4). 256 KB D$ overflows the mister A6's M10K *block* count — see `configs/mister.cfg`. Read the `.cfg`, not this summary. Adding a variant's CPU = drop a `.cfg`; unknown variants error listing the available configs.
 - Shared base config (RV32IMAFC + Zicbom): `--allow-bypass-from=0` (mandatory for correctness), `--lsu-hardware-prefetch=none`. Changing a `.cfg` needs an sbt regen (`rm` the netlist, `make cpu VARIANT=<v>`).
 
 ## Firmware / OS
@@ -216,19 +224,25 @@ from ONE tree — `make full VARIANT=<v>`, then `make sdk DEST=…`.
 ## Tests (Verilator)
 
 ```bash
-make test                              # full suite (root or pocket)
+make test                              # RTL regression set (root or pocket) — NOT everything
 cd src/fpga/test && make <name>        # one test, e.g. gpu / gpu-acceptance / sdram-all /
                                        #   axi-periph / audio-mixer / scanout / cram1-tex-chain / skid
 ```
 Build success = elaboration-clean; each prints a `=== Results: N passed, M failed ===`.
 
+`make test` is the RTL regression set only. It does **not** include `gpu-acceptance-all`
+(7 byte-exact suites, ~1655 checks) or the scanout/cram1/system benches — run those
+explicitly. Host-side MiSTer FAT tests: `make -C src/firmware/os/targets/mister/test/pc`
+then `./build/fat_tests build/test.vhd build/s0.vhd build/s1.vhd build/s2.vhd` (5612).
+`bridge-rx` fails at HEAD and is **not** a regression signal.
+
 ## Notes for agents
 
 - **Concurrency:** `make build` runs in a **container by default** (private `$HOME`+`/tmp`), so fits parallelize freely — `build-all` runs every `$(VARIANTS)` at once (MAXJOBS-capped) and `sweep` is MAXJOBS-wide. (On the *host*, two Quartus fits at the same instant segfault on shared `~/.altera.quartus` + `/tmp`; the container is what isolates that state. Don't add a host-side build path back without that isolation.)
-- **Apple Silicon (Rosetta) — single-threaded by default.** Rosetta's thread allocation / locking overhead makes Quartus die with `Error (112002): Can not read any output from quartus_map` when too many threads are spawned (per-fit AND across parallel fits). The pocket Makefile auto-detects `Darwin/arm64` and drops `QPROCS` and `MAXJOBS` from 4 to 1. Override with `QPROCS=N MAXJOBS=N make build` if you want to experiment. On native x86_64 Linux the wide defaults (4 × 4) stay.
-- **Builds/sweeps are long** (~18 min/fit). Launch with `run_in_background` (or `&`) and chain with `&&` — never busy-poll with `until`/`sleep` loops.
+- **Apple Silicon (Rosetta) — single-threaded by default.** Rosetta's thread allocation / locking overhead makes Quartus die with `Error (112002): Can not read any output from quartus_map` when too many threads are spawned (per-fit AND across parallel fits). On Darwin/arm64 + Docker the Makefile drops `MAXJOBS` 4→1; `QPROCS` stays 4 on every host (the committed seeds were tuned at that processor count). Override with `QPROCS=N MAXJOBS=N make build` if you want to experiment. On native x86_64 Linux the wide defaults (4 × 4) stay.
+- **Builds/sweeps are long** (~8 min/fit standalone, ~9 min each MAXJOBS-wide — a 12-seed sweep is ~30 min at MAXJOBS=4). Launch with `run_in_background` (or `&`) and chain with `&&` — never busy-poll with `until`/`sleep` loops.
 - **Don't start a host build while another is mid-`sbt`** — the generator emits a transient `VexiiRiscv.v` before renaming, so two concurrent `make cpu` collide. Generate netlists first (or let the build do it), then parallelize the fits via containers.
-- **os25 is M10K-bound (308/308); os30 ~88% ALM.** The 100 MHz `clk_ram`/CPU clock is the timing wall (WNS negative; ships passing at nominal). The critical path is CPU-internal (decode→BTB / FP-operand cluster) — not the fabric.
+- **Resource state:** os20 16,385 ALM (89%) / 243 M10K, os25 16,000 (87%) / 301 M10K, os30 **does not fit** — LAB-limited, 1864 needed / 1848 available (`Error 170012`). Its best-ever fit had 2 LABs spare, so any perturbation flips it. The CPU/RAM clock is the timing wall on every variant (WNS negative; ships passing at nominal) and the critical path is CPU-internal (decode→BTB / FP-operand cluster), not fabric.
 - **Do not commit or push without being asked.** Reverts must be forward edits, never `git checkout`/`restore`/`stash` of modified files.
 - Build artifacts (`bld/`, `db/`, `output_files/`, `obj_dir*/`, `*.rbf`, generated `VexiiRiscv_*.v`) are gitignored — don't add them.
 ```

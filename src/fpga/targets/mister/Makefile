@@ -27,13 +27,9 @@ TEST_DIR   = ../../test
 ROOT_DIR   = ../../../..
 
 # ── Fitter seed ──────────────────────────────────────────────────────
-# The seed is COMMITTED in seeds/mister.seed and sed-patched into
-# mister.qsf by `build`, mirroring the Pocket's seeds/<variant>.seed.
-# It used to live only in the qsf, so a sweep's winner survived as an
-# untracked edit to a tracked file and NOTHING recorded which netlist it
-# had been ranked on — the one guard that catches a seed gone stale under
-# an RTL change (see tools/netlist_hash.sh for what that costs).
-# seeds/mister.seed.src carries that fingerprint; `build` compares.
+# Committed in seeds/mister.seed and sed-patched into mister.qsf by `build`,
+# mirroring the Pocket.  seeds/mister.seed.src fingerprints the netlist it was
+# swept on so `build` can warn when it goes stale (tools/netlist_hash.sh).
 # Falls back to the qsf's own seed when the file is absent.
 SEED_FILE  = seeds/mister.seed
 SEED       = $(shell [ -f $(SEED_FILE) ] && cat $(SEED_FILE) || \
@@ -113,12 +109,14 @@ CORE_VER  = $(shell python3 -c "import json;print(json.load(open('$(ABS_ROOT)/di
 CORE_ZIP  = $(REL_DIR)/openfpgaos-core-v$(CORE_VER).zip
 # Downloader-DB generator lives in the SDK (not vendored here); overridable.
 MKDB     ?= $(abspath $(ROOT_DIR)/../openfpgaSDK)/src/sdk/platforms/mister/mkdb.py
-# Owner/repo track the actual remote: github.com/openfpgaOS/openfpgaCore.
-# The old thinkelastic/openfpgaOS path was stale on BOTH counts (wrong owner,
-# wrong repo name), so every generated downloader.ini pointed at a 404.
+# Downloader DB. Hosted as GitHub RELEASE ASSETS, not a dist branch:
+# raw.githubusercontent refuses files over 100 MB and these bundles ship
+# multi-hundred-MB .vhd images. releases/latest/download/ always resolves to
+# the newest release, so a user's downloader.ini never goes stale, and the DB
+# is generated --url-mode flat to match the flat asset namespace.
 MISTER_DB_ID       ?= openfpgaOS/openfpgaos
-MISTER_DB_BASE_URL ?= https://raw.githubusercontent.com/openfpgaOS/openfpgaCore/mister-dist/
-MISTER_DB_URL      ?= https://raw.githubusercontent.com/openfpgaOS/openfpgaCore/mister-dist/openfpgaos.json.zip
+MISTER_DB_BASE_URL ?= https://github.com/openfpgaOS/openfpgaCore/releases/latest/download/
+MISTER_DB_URL      ?= https://github.com/openfpgaOS/openfpgaCore/releases/latest/download/openfpgaos.json.zip
 
 # ── Feature include-list: variants/<name>.mk ─────────────────────────
 # The variant file owns the ADDITIVE module list (a feature is PRESENT iff
@@ -228,9 +226,8 @@ sweep-all: sweep
 # quartus_map.  The sys/build_id.tcl PRE_FLOW script still runs ahead of
 # quartus_map (stamps build_id.v); quartus_asm emits the .rbf.
 build: $(VEXII_OUT) bootloader build_id.v
-	@# Apply the persisted seed.  Rewriting only on a real difference keeps a
-	@# clean tree clean (mister.qsf is tracked, unlike the Pocket's generated
-	@# per-job qsf).
+	@# Apply the persisted seed.  Only rewrite on a real difference — unlike
+	@# the Pocket's generated qsf, mister.qsf is tracked.
 	@if [ -f "$(SEED_FILE)" ]; then \
 		cur=$$(awk '/^set_global_assignment -name SEED /{print $$NF}' $(PROJECT).qsf); \
 		if [ "$$cur" != "$(SEED)" ]; then \
@@ -238,9 +235,8 @@ build: $(VEXII_OUT) bootloader build_id.v
 			printf "$(C_HEAD)[fpga]$(C_RESET) seed $$cur → $(SEED) (from $(SEED_FILE))\n"; \
 		fi; \
 	fi
-	@# Same stale-seed guard as the Pocket flow: a stored seed is only
-	@# meaningful for the exact netlist it was ranked on.  Warn, don't fail —
-	@# a deliberate rebuild mid-work is fine, shipping one is not.
+	@# Stale-seed guard, as on Pocket.  Warn, don't fail: a rebuild mid-work is
+	@# fine, shipping one is not.
 	@if [ -f "$(SEED_FILE).src" ] && [ -f $(ROOT_DIR)/tools/netlist_hash.sh ]; then \
 		. $(ROOT_DIR)/tools/netlist_hash.sh; \
 		now=$$(netlist_hash "$(PROJECT).qsf"); \
@@ -405,7 +401,7 @@ package:
 	@printf "  $(C_OK)core zip$(C_RESET)       → releases/mister/openfpgaos-core-v$(CORE_VER).zip\n"
 	@if [ -x "$(MKDB)" ]; then \
 		"$(MKDB)" --staging "$(REL_STAGE)" --sd-prefix "" \
-			--base-url "$(MISTER_DB_BASE_URL)" --db-id "$(MISTER_DB_ID)" \
+			--base-url "$(MISTER_DB_BASE_URL)" --url-mode flat --db-id "$(MISTER_DB_ID)" \
 			--reboot '_Computer/OpenfpgaOS.rbf' --reboot 'games/OpenfpgaOS/boot.rom' \
 			--db-url "$(MISTER_DB_URL)" \
 			--output "$(REL_DIR)/openfpgaos.json.zip" \
@@ -454,11 +450,8 @@ sdk:
 SWEEP_MIN ?= 1
 SWEEP_MAX ?= 30
 
-# Stop the serial sweep as soon as a seed CLOSES timing (setup WNS >= 0 with
-# hold still clean).  The Pocket variants sit permanently below the wall so
-# they must rank the whole range, but mister has headroom: once a seed passes
-# there is nothing better to find, and each further fit costs ~15-20 min of
-# wall clock for no ranking value.  Set 0 to force the full range.
+# Stop the sweep once a seed closes timing (WNS >= 0, hold clean).  MiSTer has
+# the headroom to pass; the Pocket variants never do.  Set 0 for the full range.
 SWEEP_STOP_ON_PASS ?= 1
 
 sweep: firmware

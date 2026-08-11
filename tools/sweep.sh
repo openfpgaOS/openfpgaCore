@@ -174,12 +174,9 @@ else
         else
             printf "${C_ERR}failed${C_RESET}\n"
         fi
-        # STOP_ON_PASS: a seed that CLOSES timing is the best outcome the
-        # ranking can report -- no later seed can beat "passes" -- so on a
-        # target with headroom (mister) the remaining fits are pure wall
-        # clock at ~15-20 min each.  Hold must be clean too, or we would
-        # stop on a seed the hold veto below throws out anyway.  Serial mode
-        # only: container mode has already launched its whole batch.
+        # Nothing beats "closes timing", so stop there rather than burn
+        # ~15-20 min per remaining fit.  Hold must be clean too, or we would
+        # stop on a seed the veto below discards.  Serial mode only.
         if [ "${STOP_ON_PASS:-0}" = "1" ] && [ -n "$_wns" ]; then
             _h=${R_HOLD[$s]:-}
             if awk -v w="$_wns" 'BEGIN{exit !(w>=0)}' &&

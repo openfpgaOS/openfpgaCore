@@ -48,9 +48,14 @@ PREV="${PREV:-}"
 PUBLISH="${PUBLISH:-0}"
 
 # Assets: the core zip, plus the Downloader DB + ini snippet if packaged.
+# The DB is generated --url-mode flat against releases/latest/download/, so
+# every file it references must be attached here as a flat asset.
 ASSETS=("$ZIP")
 [ -f "releases/mister/openfpgaos.json.zip" ]       && ASSETS+=("releases/mister/openfpgaos.json.zip")
 [ -f "releases/mister/openfpgaos.downloader.ini" ] && ASSETS+=("releases/mister/openfpgaos.downloader.ini")
+if [ -d "build/mister/release" ]; then
+    while IFS= read -r f; do ASSETS+=("$f"); done < <(find "build/mister/release" -type f | sort)
+fi
 
 # Refuse to clobber an already-released version.
 if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null 2>&1; then

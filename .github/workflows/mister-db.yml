@@ -17,13 +17,14 @@ on:
       - "mister-*"
 
 permissions:
-  contents: write   # attach release assets + push the dist branch
+  contents: write   # attach release assets
 
 env:
-  DB_ID: thinkelastic/openfpgaos
-  # Raw base for small files (rbf/os.bin/script) served straight from the repo
-  # dist branch; large vhd shells ride the release zip instead.
-  BASE_FILES_URL: https://raw.githubusercontent.com/${{ github.repository }}/dist/dist/mister/release/
+  DB_ID: openfpgaOS/openfpgaos
+  # Flat release assets — releases/latest/download/ always resolves to the
+  # newest release, and has no 100 MB ceiling (raw.githubusercontent does,
+  # and these bundles ship multi-hundred-MB .vhd images).
+  BASE_FILES_URL: https://github.com/${{ github.repository }}/releases/latest/download/
   RELEASE_TAG: mister-latest
 
 jobs:

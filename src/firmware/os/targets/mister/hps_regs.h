@@ -48,7 +48,7 @@
 #define   HPS_STATUS_IMG1_READONLY (1u << 8)  /* disk 1 mounted read-only */
 #define   HPS_STATUS_IMG2_READONLY (1u << 9)  /* disk 2 mounted read-only */
 /* F-load instance model: set once the HPS has DMA'd a menu/MGL-picked .ini
- * into the ini staging window (bridge offset 0x00600000 from CRAM0_BRIDGE,
+ * into the ini staging window (bridge offset 0x007C0000 from CRAM0_BRIDGE,
  * read via the uncached alias — see INI_STAGE_UNCACHED in file.c).  When set,
  * the firmware serves os.ini (slot 2) from staging instead of the vhd. */
 #define   HPS_STATUS_INI_LOADED    (1u << 10) /* instance ini staged in SDRAM */

@@ -18,9 +18,9 @@ arena at `0x13300000` (see `src/firmware/os/targets/mister/target_platform.h`).
 
 ## Build
 
-Requires **Quartus Prime 17.0.x** (the MiSTer framework requirement;
-`QUARTUS` in the Makefile points at `~/intelFPGA_lite/17.0/quartus/bin`).
-The Pocket target keeps its own 25.1std toolchain — they don't conflict.
+Requires **Quartus Prime 17.0.x** (a MiSTer framework requirement), which
+runs in Docker by default — `USE_QUARTUS_CONTAINER=0` falls back to a host
+install. The Pocket target keeps its own 25.1std toolchain; they don't conflict.
 
 ```sh
 make full TARGET=mister        # from the repo root: cpu → firmware → compile
@@ -45,10 +45,8 @@ from the SDK. See `src/sdk/platforms/mister/PACKAGING.md` for the full flow.
 # saves volume are untouched — no Main-stop / loop-mount.
 src/sdk/platforms/mister/copy.sh game <Game> <GameElf> <elf> [192.168.x.x]
 
-# Legacy single-image model:
-src/sdk/platforms/mister/copy.sh core 192.168.x.x      # push boot.rom only
-src/sdk/platforms/mister/copy.sh <app> <elf>           # build + push full ~64 MB openfpgaOS.vhd
-src/sdk/platforms/mister/copy.sh update <elf>          # loop-mount on-card vhd, swap in-vhd ELF
+# Core-only bring-up (bitstream + boot.rom):
+src/sdk/platforms/mister/copy.sh core 192.168.x.x
 ```
 
 Artifacts on the MiSTer (primary per-game / update-safe model):
@@ -78,10 +76,12 @@ in `pll_sys.v` (`phase_shift1`, shipped at the Pocket's 6750 ps).
 
 ## Tests
 
-- `make -C src/fpga/test hps-bridge` — 27-assertion Verilator suite for
-  the bridge datapath (boot DMA, sector R/W, error codes, handshake).
-- `make -C src/firmware/os/targets/mister/test/pc run` — 99-assertion
-  host-native FAT-stack suite against a real `.vhd` (ASAN/UBSAN).
+- `make -C src/fpga/test hps-bridge` — 112-assertion Verilator suite for
+  the bridge datapath (boot DMA, sector R/W, error codes, handshake,
+  F-load window bounds).
+- `make -C src/firmware/os/targets/mister/test/pc` then
+  `./build/fat_tests build/test.vhd build/s0.vhd build/s1.vhd build/s2.vhd`
+  — 5612-assertion host-native FAT-stack suite (ASAN/UBSAN).
 - All common-RTL Verilator suites cover the shared datapath unchanged.
 
 ## Known v1 limits
@@ -90,12 +90,9 @@ in `pll_sys.v` (`phase_shift1`, shipped at the Pocket's 6750 ps).
 - 64 MB of the SDRAM module used (128 MB needs io_sdram column widening
   + VexiiRiscv PMA regen + AXI width audit — planned follow-up).
 - No 15 kHz native analog raster yet (framework analog out works).
-- USB keyboard works: `hps_keyboard.v` turns hps_io's `ps2_key` events into a
-  HID boot report on input-hub slot 2 (`cont3_*`), the same layout the Pocket
-  dock keyboard uses, so firmware shares one decoder and no new sysreg was
-  needed.  No key auto-repeat — a held key reports as held (correct HID boot
-  behaviour, and what the Pocket dock does); software repeat would belong in
-  the SDL shim, not the RTL.
+- USB keyboard has no auto-repeat: a held key reports as held (correct HID
+  boot behaviour, matching the Pocket dock).  Software repeat belongs in the
+  SDL shim, not the RTL.
 - OPENFILE/GETFILE data-slot ops report err=7 (no MiSTer backing; the
   FAT name registry replaces them).
 

@@ -21,10 +21,10 @@
 # MiSTer on Quartus 17 to confirm.
 #
 # The variant's CPU config (dual issue for the DE10-Nano's A6/I7 grade)
-# lives in src/fpga/vendor/vexriscv/configs/mister.cfg.  The fitter seed
-# stays committed in mister.qsf (in-place build model — no bld/<job>/
-# isolation on the Quartus 17 flow; `make sweep` patches and rebuilds it
-# in place).
+# lives in src/fpga/vendor/vexriscv/configs/mister.cfg.  The fitter seed is
+# committed in seeds/mister.seed (+ .seed.src fingerprint) and sed-patched
+# into mister.qsf by `build` — the Q17 flow builds in place, with no
+# bld/<job>/ isolation.
 
 DEFS := INCLUDE_HW_MIXER INCLUDE_TRANSLUC \
         INCLUDE_COLUMN_LIST INCLUDE_COMPACT_SPAN INCLUDE_PARAM_TRI \

@@ -56,7 +56,7 @@ archive** so the downloader pulls one release asset and extracts, instead of N l
   "v": 1,
   "db_id": "openfpgaOS/openfpgaos",
   "timestamp": 1730000000,
-  "base_files_url": "https://raw.githubusercontent.com/openfpgaOS/openfpgaCore/dist/dist/mister/release/",
+  "base_files_url": "https://github.com/openfpgaOS/openfpgaCore/releases/latest/download/",
   "files": {
     "_Computer/openfpgaOS.rbf":       { "hash": "<md5>", "size": 3988580, "reboot": true },
     "games/openfpgaOS/boot.rom":      { "hash": "<md5>", "size": 130764,  "reboot": true },
@@ -94,7 +94,7 @@ User installs by adding to `/media/fat/downloader.ini`:
 
 ```ini
 [openfpgaOS/openfpgaos]
-db_url = 'https://raw.githubusercontent.com/openfpgaOS/openfpgaCore/dist/dist/mister/db/openfpgaos.json.zip'
+db_url = 'https://github.com/openfpgaOS/openfpgaCore/releases/latest/download/openfpgaos.json.zip'
 ```
 
 Then `update_all` (or `Scripts/downloader.sh`) syncs it.

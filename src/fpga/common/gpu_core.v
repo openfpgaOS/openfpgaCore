@@ -190,7 +190,7 @@ module gpu_core #(
     // SM64) to prune the colormap request/response pipe and the 8-bit lane.
     parameter INCLUDE_PALETTE = 1,
     // Truecolor texel*C+D combiner (HILITE/specular, 0x4A control bit 30).
-    // Default 1.  Set 0 (EXCLUDE_COMBINE, SM64-dedicated os30) to const-0
+    // Default 1.  Set 0 in an ALM-starved variant to const-0
     // spanprod_cd_combine so the texel*C cone + rgb565_cd_finish + additive-D
     // staging fold away (the same fold os25 gets via INCLUDE_DIRECT_COLOR=0).
     parameter INCLUDE_COMBINE = 1,
@@ -3918,12 +3918,8 @@ localparam FBWQ_DEPTH = 16;
 // reads are at fbwq_rd_ptr (head entry always counted), writes at
 // fbwq_wr_ptr gated on !fbwq_full, and rd_ptr == wr_ptr only at count
 // 0 or 16 — so a same-cycle same-address read-during-write never occurs.
-// A/B'd 2026-08-11 (os30 fit crisis): forcing addr/strb to M10K instead was
-// NOT a win — os30 went 18,344 ALM / 1,847 LABs to 18,692 / 1,904 and still
-// failed to fit.  Both were failing fits so the numbers are estimates, and
-// the delta is inside the ±800-ALM packing chaos this design shows above the
-// 95% cliff, but there was no signal to justify spending 3 M10K on it.  The
-// MLAB form stays.
+// Tried M10K for addr/strb to buy os30 LABs: no win (it still failed to fit,
+// and the delta sat inside this design's packing noise), so MLAB stays.
 (* ramstyle = "MLAB, no_rw_check" *) reg [GPU_ADDR_W-1:0] fbwq_addr [0:FBWQ_DEPTH-1];
 reg [31:0] fbwq_data [0:FBWQ_DEPTH-1];
 (* ramstyle = "MLAB, no_rw_check" *) reg [3:0]  fbwq_strb [0:FBWQ_DEPTH-1];

@@ -5,23 +5,17 @@
 //------------------------------------------------------------------------------
 
 /*
- * openfpgaOS mixer HAL — thin facade over the HW audio_mixer (v2).
+ * openfpgaOS mixer HAL — facade over the HW audio_mixer, with a CPU software
+ * mixer as the fallback backend (of_mixer_use_sw, chosen at boot from
+ * HW_FEATURES).
  *
- * Hardware fetches samples from absolute SDRAM byte addresses, does
- * 2-tap linear interp + per-channel volume ramp, mixes 32 voices, and
- * drives audio_output's dcfifo at 48 kHz.  The public of_mixer_* API is
- * unchanged from the old swmixer-backed HAL so existing apps link.
+ * Hardware fetches samples from absolute SDRAM byte addresses, does 2-tap
+ * linear interp + per-channel volume ramp, mixes 32 voices, and drives
+ * audio_output's dcfifo at 48 kHz.
  *
- * Programming model (see audio_mixer.v + axi_periph_slave.v):
- *   MIX_VOICE_SEL      = <voice>        // latches target voice index
- *   MIX_VOICE_<field>  = <value>        // writes the corresponding VTBL slot
- *   MIX_VOICE_POS      read-only        // returns pos_int for selected voice
- *   MIX_IRQ_PENDING    = W1C bitmap     // one bit per retired one-shot voice
- *
- * MIX_VOICE_SEL is shared between the write path and the pos readback, so
- * a concurrent caller (interrupt context + main thread) can interleave
- * and read the wrong voice.  Firmware convention: call of_mixer_* only
- * from the main thread.
+ * Programming model (audio_mixer.v + axi_periph_slave.v): every per-voice
+ * register is flat-addressed, so main-thread and ISR writes never race.
+ * MIX_IRQ_PENDING is a W1C bitmap, one bit per retired one-shot voice.
  */
 
 #include "mixer.h"
@@ -47,8 +41,9 @@ extern void of_term_printf(const char *fmt, ...);
 /* v3 flat MMIO: every per-voice register has its own address, so main
  * thread + ISR writes never race.  Group and master volume are HW-side
  * (composed in audio_mixer.v's S_WR_VOL stage), so set_master_volume
- * and set_group_volume are now O(1) MMIO writes.  The old SEL+field
- * race-guarding (mixer_irq_save/restore) is gone. */
+ * and set_group_volume are now O(1) MMIO writes, with no SEL+field
+ * race-guarding needed on THAT path.  (mixer_irq_save/restore is still
+ * used throughout the file — every active_shadow mutation is guarded.) */
 
 #define MIXER_MAX_VOICES     32
 #define MIXER_OUTPUT_RATE    48000
@@ -507,47 +502,24 @@ static int alloc_voice(int priority)
  * separate "opposite end" pass.  Stealing prefers a same-group victim
  * first so a busy group never silences the other group's audio while
  * its own range still holds something stealable. */
-/* Drop active_shadow bits the HARDWARE says are not playing.
+/* Drop active_shadow bits the hardware says are not playing.
  *
- * active_shadow is maintained edge-wise: mixer_reap_ended_pending() clears a
- * bit when it observes that voice's end in MIX_IRQ_PENDING.  Every end must
- * therefore be seen exactly once -- and any that is missed leaves the bit set
- * FOREVER.  The voice is then unreachable: the free scan skips it and no steal
- * can reclaim it, because nothing owns it.  Measured on MiSTer 2026-08-10:
- * music-note refusals grew 6 -> 57 per 5 s inside one session while the synth's
- * own footprint stayed flat at ~12 of 32 and nothing sat in orphan-grace --
- * the pool was filling with voices that had already finished.
+ * active_shadow is edge-maintained, so an end missed in MIX_IRQ_PENDING leaves
+ * its bit set forever and the voice becomes unreachable — the free scan skips
+ * it and no steal can reclaim it because nothing owns it.  MIX_ACTIVE_MASK is
+ * a level snapshot, so intersecting against it self-heals that.
  *
- * MIX_ACTIVE_MASK is a read-only LEVEL snapshot of what is actually playing,
- * so intersecting against it makes a missed end self-healing.
- *
- * CAVEAT -- the mask LAGS a just-issued start, and this AND can therefore drop
- * a voice that IS live.  On the HW mixer a CTRL[0]=1 write parks in
- * voice_start_pending and is promoted into voice_active only once the CPU
- * write queue drains (audio_mixer.v); on the SW mixer the mask is rebuilt per
- * render chunk, so it is up to ~1 ms stale.  A voice armed inside that window
- * reads as inactive here and its shadow bit can be cleared, after which the
- * retry scan may hand the same slot out a second time and cut the first note
- * a few microseconds after attack.
- *
- * That is accepted deliberately: this runs ONLY after the free scan already
- * failed, where the alternative is a priority steal that also cuts a note, and
- * the pool at that point is dominated by leaked bits rather than live voices
- * (that is the condition being repaired).  Do not read this as "recently armed
- * voices are safe" -- they are the exact set at risk. */
+ * The mask LAGS a just-issued start (HW: the CTRL write waits in
+ * voice_start_pending until the CPU queue drains; SW: rebuilt per render
+ * chunk), so this can clear a live voice's bit and hand its slot out twice.
+ * Accepted: it runs only after the free scan already failed, where the
+ * alternative is a priority steal that also cuts a note.  Recently armed
+ * voices are the set at risk here, not the set that is safe. */
 static void mixer_resync_active_shadow(void)
 {
-    /* Sample the level mask OUTSIDE the critical section -- it is a slow MMIO
-     * read and holding interrupts off across it would add jitter to the 1 kHz
-     * tick.  Apply it INSIDE, because every other active_shadow mutation is
-     * guarded and a bare read-modify-write straddling that MMIO read would
-     * silently discard a concurrent `active_shadow &= ~ended` from the
-     * mixer-end ISR (mixer_reap_ended_pending), resurrecting a dead bit --
-     * the exact leak this function exists to repair.
-     *
-     * Sampling early only widens the staleness already described above; the
-     * AND can never resurrect a bit, so a mask read a few cycles early is
-     * safe in the other direction. */
+    /* Sample the slow MMIO mask outside the lock, apply it inside: every other
+     * active_shadow mutation is guarded, and an unguarded read-modify-write
+     * would drop a concurrent clear from the mixer-end ISR. */
     uint32_t hw  = MIX_ACTIVE_MASK;
     uint32_t irq = mixer_irq_save_local();
     active_shadow &= hw;

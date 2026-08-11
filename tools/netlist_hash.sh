@@ -5,37 +5,27 @@
 # SPDX-FileCopyrightText: (c) 2026, ThinkElastic <Think@Elastic.com>
 #------------------------------------------------------------------------------
 #
-# netlist_hash <generated-qsf> -> one md5 over every HDL source + macro the
-# qsf names.  A stored fitter seed is only meaningful for the exact netlist
-# it was swept on: ANY RTL change (even one constant) reshuffles placement
-# and turns the stored seed into a lottery ticket -- this shipped a
-# WNS -1.08/TNS -346 os20 (black screen) from a seed swept at -0.156/-1.5
-# on 2026-08-02, and earlier made two sweep tables silently incomparable.
-# sweep.sh records the hash next to the seed; `make build` compares.
+# netlist_hash <generated-qsf> -> one md5 over every source + macro the qsf
+# names.  A stored fitter seed only means anything for the exact netlist it was
+# swept on: any RTL change reshuffles placement and makes the seed a lottery
+# ticket.  That once shipped a WNS -1.08 black-screen os20 from a seed swept at
+# -0.156.  sweep.sh records the hash beside the seed; `make build` compares.
 netlist_hash() {
     local qsf="$1"
     [ -f "$qsf" ] || { echo "no-qsf"; return; }
     {
         grep -E "VERILOG_MACRO|SEED " "$qsf" | grep -v "SEED " | sort
-        # MIF_FILE is part of the netlist, not a build artifact: the boot ROM
-        # image is BAKED into the bitstream, so a firmware change alters what
-        # the fitter places even when every .v is byte-identical.  Omitting it
-        # left a hole exactly the shape of the bug this guard exists to catch:
-        # on 2026-08-11 an os30 sweep went 0/12 "Can't fit design in device"
-        # against an UNCHANGED RTL fingerprint -- the only differing input was
-        # firmware.mif (rebuilt for the HW_CONTRACT_REV bump), and at 98% ALM
-        # that perturbation alone was enough to flip the placement over.
+        # MIF_FILE counts: the boot ROM is baked into the bitstream, so a
+        # firmware rebuild changes what the fitter places even when every .v is
+        # byte-identical.  Leaving it out once let an os30 sweep fail 12/12
+        # against an unchanged RTL fingerprint.
         grep -E "(SYSTEM)?VERILOG_FILE|QIP_FILE|MIF_FILE" "$qsf" \
         | awk '{print $NF}' \
         | while read -r f; do
-            # qsf paths are absolute (generated) or relative to the qsf dir.
-            # Hash CONTENT ONLY -- `md5sum <file>` prints "<hash>  <path>", and
-            # the path carries the per-seed build dir (bld/<variant>-s<seed>/).
-            # Including it made the fingerprint differ between two runs of the
-            # SAME netlist: sweep.sh stores the hash from bld/<v>-s<best>/ while
-            # `make build` recomputes it from bld/<v>/, so the staleness warning
-            # fired on every build and the real check it guards was lost in the
-            # noise.
+            # Hash CONTENT only: md5sum <file> would include the path, which
+            # carries the per-seed build dir, so the same netlist hashed
+            # differently from bld/<v>-s<best>/ and bld/<v>/ and the staleness
+            # warning fired on every build.
             if [ -f "$f" ]; then md5sum < "$f"
             elif [ -f "$(dirname "$qsf")/$f" ]; then md5sum < "$(dirname "$qsf")/$f"
             fi

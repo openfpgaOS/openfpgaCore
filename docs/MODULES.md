@@ -48,7 +48,7 @@ So `INCLUDE_COMBINE=1` alone forces truecolor; illegal combos are impossible by 
 ### Caps
 Every module gets **one** caps bit, advertised as `EFF_<MODULE> ? bit : 0`. `of_caps.h` defines exactly the
 advertisable bits. core_top wires **every** param on **every** target (no relying on defaults). Apps gate
-emitters on `of_has_feature()` only. Canonical name **`TRUECOLOR`** replaces the VCOLOR/DIRECT_COLOR triad.
+emitters on `of_has_feature()` only. **`TRUECOLOR`** is the intended canonical name; the shipping macro is still `INCLUDE_DIRECT_COLOR`.
 
 ---
 
@@ -140,10 +140,10 @@ BASE rasterizer + minimal CPU only.
 | **Quake1 (SW)** | PARAM_TRI | PALETTE | — | FPU | HW_MIXER, ANALOGIZER |
 | **SM64** | VERT_TRI | TRUECOLOR + COMBINE | Z-window=4 | FPU | HW_MIXER |
 | **Quake2** | VERT_TRI + PARAM_TRI_RECS | TRUECOLOR | Z-window=4 | FPU | HW_MIXER |
-| **MiSTer (all)** | all | all | TEX_MEM | FPU + L2 | HW_MIXER |
+| **MiSTer** | VERT_TRI + PARAM_TRI + PARAM_TRI_RECS | TRANSLUC + COLUMN_LIST + COMPACT_SPAN | MISTER_FB(+PALETTE) | FPU | HW_MIXER |
 
 (Today's variants map to these: os20 = the 2D row (dual-issue CPU — the span-form cuts fund the second
-issue lane); os25 = the 2.5D + Quake1 union; os30 = SM64 ∪ Quake2 — **all use the HW
+issue lane); os25 = the 2.5D row (NOT the Quake1 union — it has no PARAM_TRI); os30 = SM64 ∪ Quake2 — **all use the HW
 mixer**: every `variants/<v>.mk` DEFS list carries `INCLUDE_HW_MIXER`.)
 
 > **LINK and 4PLAYER are NOT required by MiSTer** (verified): LINK is *stubbed* in `emu.sv` — advertises
@@ -164,8 +164,7 @@ mixer**: every `variants/<v>.mk` DEFS list carries `INCLUDE_HW_MIXER`.)
 - **Orphaned caps** — `BILINEAR`(11) decide/drop; `ALPHA`(12) → wire to `TRANSLUC`.
 - **Name triad** — `VCOLOR`/`DIRECT_COLOR`/truecolor → `TRUECOLOR` on bit 10.
 - **Missing caps** — `PALETTE`/`XFORM`(clip/mac) get bits; CACHE_MGMT/L2/4PLAYER get bits.
-- **Fast-tex story** — `of_caps.h`/periph comments claim os30 sets `FAST_TEX`, but no variant defines
-  `INCLUDE_TEX_MEM` (CRAM1 reverted); fix the comments.
+- ~~**Fast-tex story**~~ — resolved: os30 defines `INCLUDE_TEX_MEM` again (2026-07 perf review).
 - **Uniform check** — SM64 reads `OF_HW_GPU_SPAN` by raw bit-test; use `of_has_feature()`.
 - **Reserved bits** — mark bit 5 (now PALETTE), document free bits 28+.
 

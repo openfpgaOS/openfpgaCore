@@ -22,7 +22,7 @@ fit independently and concurrently without recompiling shared RTL twice.
 cd src/fpga/targets/pocket
 make build VARIANT=os25         # default — 2.5D games, full HW mixer
 make build VARIANT=os30         # 3D / SM64 — HW vertex triangles
-make build-all                  # both, in parallel containers
+make build-all                  # every variant, in parallel containers
 make sweep VARIANT=os30         # fitter seed search for that variant
 ```
 

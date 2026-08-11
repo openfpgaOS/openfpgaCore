@@ -1131,7 +1131,7 @@ assign sram_lb_n  = sram_lb_n_w;
 `ifndef INCLUDE_TRANSLUC
 // The GPU translucency LUT is this controller's ONLY client, and without
 // INCLUDE_TRANSLUC gpu_core holds its SRAM word port permanently idle — so
-// the controller itself is dropped (docs/os30-quake2-cut-plan.md C5).
+// the controller itself is dropped (cut C5).
 // The physical pins MUST be parked explicitly: left undriven, Quartus
 // grounds them, and sram_we_n=0 would hold the chip in a continuous write.
 // All control strobes deasserted (active-low high), DQ bus high-Z.
@@ -1670,7 +1670,7 @@ end
 
 // Interact variable writes (SNAC adapter type from APF menu)
 //
-// No analogizer (docs/os30-quake2-cut-plan.md C2): the analogizer
+// No analogizer (cut C2): the analogizer
 // settings/hoff/voff writes are dropped — menu and CPU writes still
 // complete on the bridge/MMIO side, they just no longer land anywhere.
 // The three source registers then hold their reset value forever, so the
@@ -2574,7 +2574,7 @@ assign video_hs = vidout_hs;
         // CPU/RAM clock frequency advertisement (CLK_FREQ_HZ @ 0xD4) —
         // must track the mp_ram PLL selection above.  Firmware reads it at
         // boot (fallback: compile-time OF_TARGET_CPU_FREQ_HZ when 0), so
-        // ONE os.bin serves 100 MHz and 96 MHz bitstreams alike.
+        // ONE os.bin serves 100, 96 and 90 MHz bitstreams alike.
         .CLK_HZ(`ifdef INCLUDE_CLK90 32'd90_000_000 `elsif INCLUDE_CLK96 32'd96_000_000 `else 32'd100_000_000 `endif),
         // ANALOGIZER (HW_FEATURES bit 3): the SNAC instances inside
         // axi_periph_slave.v gate on this; clear → they constant-fold away.
@@ -3553,11 +3553,10 @@ gpu_core #(
     // sweeps the window logic).  Keyed off INCLUDE_Z_BURST (NOT INCLUDE_TEX_MEM)
     // so OS30/SM64 keeps the 16-byte z-line burst even with the fast-tex chip
     // disabled — SM64 z-tests every fragment.
-    // EW_PARALLEL_DIVS: OS30/SM64 uses 1 — three slope dividers run concurrently
-    // (~28 beats vs ~87 serial).  The serial walker was the per-triangle setup
-    // long pole (vs the ~61-cycle derive), so parallelising it cuts triangle
-    // setup ~30%.  Bit-identical quotients (the gpu-acceptance default is 1).
-    // OS25 stays 0 (single shared divider — ALM-constrained for its feature set).
+    // EW_PARALLEL_DIVS: 1 runs three slope dividers concurrently (~28 beats vs
+    // ~87 serial), cutting triangle setup ~30% with bit-identical quotients.
+    // BOTH pocket variants currently ship 0 — no variant defines
+    // INCLUDE_PARALLEL_DIVS (os30 lists it among its cuts) — on ALM budget.
     .GPU_Z_READ_WINDOW(`ifdef INCLUDE_Z_BURST 4 `else 1 `endif),
     // Truecolor-blend dst read window: 4-word default; INCLUDE_CB_WINDOW2
     // halves it for ALM-pressed variants; INCLUDE_CB_WINDOW1 compiles the

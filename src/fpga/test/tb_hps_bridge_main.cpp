@@ -596,11 +596,9 @@ int main(int argc, char **argv) {
 
     printf("test_fload_exact_fit:\n");
     {
-        // A payload of EXACTLY the window size must still be accepted: the
-        // boundary is reached only as the LAST word lands, so stage_full never
-        // coincides with an ioctl_wr and stage_ovf_r stays clear.  An off-by-one
-        // here (> vs >=, or arming the overflow a word early) would silently
-        // reject the largest legal image.
+        // Exactly-window-sized must still be accepted: the boundary is reached
+        // as the last word lands, so stage_full never coincides with an
+        // ioctl_wr.  An off-by-one here would reject the largest legal image.
         const uint32_t INI_WIN = 0x00040000u;
         static uint8_t exact[INI_WIN];
         for (uint32_t i = 0; i < sizeof(exact); i++)
@@ -619,14 +617,10 @@ int main(int argc, char **argv) {
 
     printf("test_fload_elf_window_overflow:\n");
     {
-        // The ELF term of stage_full -- the one that actually failed in the
-        // field.  The ELF window ends EXACTLY where the ini window begins
-        // (0x03540000 + 5.5 MB == 0x03AC0000), so before the bound check a
-        // 4 MB ScummVM engine ran straight past the boundary and overwrote the
-        // instance ini that had just been staged, then latched ELF_LOADED
-        // anyway -- the loader trusted a corrupted image against a destroyed
-        // ini.  Stage a known ini FIRST, then overflow the ELF window at it:
-        // the ini surviving is the regression assertion.
+        // The ELF window ends exactly where the ini window begins
+        // (0x03540000 + 5.5 MB == 0x03AC0000), so an unbounded ELF stream
+        // overwrote the staged ini and latched ELF_LOADED anyway.  Stage a
+        // known ini first, then overflow at it: the ini surviving is the test.
         const uint32_t ELF_WIN = 0x00580000u;   // 5.5 MB
 
         static uint8_t ini_guard[600];

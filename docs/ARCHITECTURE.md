@@ -7,7 +7,7 @@ app ABI, one set of platform-neutral RTL — multiple hardware targets
 ```
 ┌────────────────────────────── FPGA fabric ──────────────────────────────┐
 │                                                                         │
-│  VexiiRiscv (RV32IMAFC, 100 MHz, 64K I$ / 128K D$)                      │
+│  VexiiRiscv (RV32IMAFC, 90-100 MHz, 32K I$ / 128K D$)                   │
 │   │ i_axi      │ d_axi      │ p_axi          (3 AXI4 masters)           │
 │   └────────────┴─┬──────────┴───────┐                                   │
 │        cpu_system │ (cpu_target_port address decode + register slices)  │
@@ -34,8 +34,9 @@ app ABI, one set of platform-neutral RTL — multiple hardware targets
 ## 1. CPU and bus topology
 
 - **VexiiRiscv** (generated netlist, `src/fpga/vendor/vexriscv/`):
-  RV32IMAFC, single-issue in-order, FPU, Zicbom (+Zicboz), 64 KB I$ /
-  128 KB 2-way D$. Three AXI masters: instruction fetch, data (cached +
+  RV32IMAFC in-order, FPU, Zicbom (+Zicboz), 32 KB I$ / 128 KB 2-way D$
+  (os20: 64 KB D$).  Single-issue on os25/os30; dual-issue on mister and
+  os20. Three AXI masters: instruction fetch, data (cached +
   cbo), and uncached LSU I/O.
 - **`cpu_system.v`** routes the three masters to three slave targets by
   PMA address decode — SDRAM (cached `0x10000000` + uncached alias
@@ -195,7 +196,7 @@ Hot-path support: apps may place code/data in the BRAM window
 | Input | APF cont regs / hub / SNAC | hps_io joysticks → APF layout in RTL |
 | GPU LUT | `sram_controller.v` (ext. chip) | `sram_bram.v` (M10K) |
 | Toolchain | Quartus 25.1std | Quartus 17.0.x (framework req.) |
-| Device | 5CEBA4F23C8 (~18K ALM, ~90 % full) | 5CSEBA6U23I7 (~42K ALM, ~51 % full) |
+| Device | 5CEBA4F23C8 (18.5K ALM, 87-89 % full) | 5CSEBA6U23I7 (41.9K ALM, 67 % full) |
 
 Shared files carry tied-off hooks rather than forks: the arbiter's M2
 read channel and the periph's `REGION_HPS` exist on Pocket but read
@@ -204,7 +205,7 @@ zero / fold away. See `docs/ADDING_A_TARGET.md` for the porting recipe.
 ## 8. Test architecture
 
 - **Verilator component suites** (`src/fpga/test/`): sdram, sram, gpu
-  (+acceptance: 119 byte-exact frames vs. a CPU reference), gpu-persp,
+  (+acceptance: ~1655 byte-exact checks across 7 suites), gpu-persp,
   axi-periph, bridge-cmd, audio, audio-mixer, arbiter, **hps-bridge**
   (MiSTer bridge datapath: boot DMA, sector R/W, error paths,
   handshake), scanout, and `tb_system` (full CPU + SDRAM + BRAM boot of

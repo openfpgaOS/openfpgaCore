@@ -110,10 +110,9 @@ builds reuse them.
 > so bake the mister image from a pre-extracted tree (the `prebuilt` path in
 > `build-quartus17-image.sh`) rather than the raw 2017 installer.
 
-The mister target still uses a host Quartus install (`17.0.x`, expected
-at `/home/alberto/intelFPGA_lite/17.0/quartus`) because Quartus 17 is a
-hard MiSTer framework requirement and isn't worth containerizing for the
-single-host Linux build flow it expects.
+The mister target runs Quartus 17.0.x in Docker by default (image
+`openfpgaos-quartus17`, baked on first use).  Set `USE_QUARTUS_CONTAINER=0`
+to fall back to a host install.
 
 Quartus is not redistributable, so each contributor supplies their own
 copy.  Download the Lite (free, covers Cyclone V) or Standard tarball:
@@ -144,8 +143,9 @@ make test            # Verilator RTL test suite
 make timing          # timing summary from the last full compile
 make report          # resource summary; FULL=true adds top ALM entities
                      #   and the 25 worst setup paths (TOP=/PATHS= to tune)
-make sweep SEEDS=1-30  # fitter seed sweep; ranks Fmax, reports WNS/TNS,
-                     #   rebuilds with the best seed (both targets)
+make sweep           # fitter seed sweep; ranks setup WNS (hold/DQ vetoes,
+                     #   then min |TNS|).  Pocket writes seeds/<v>.seed;
+                     #   MiSTer also rebuilds in place.
 make package         # SD-card layout (pocket) → build/; MiSTer builds a
                      #   core-release zip + Downloader DB in releases/mister/
                      #   (make release TARGET=mister then drafts the GH release)
@@ -326,10 +326,10 @@ firmware VRR register is accepted but ignored there.
 
 ## MiSTer Target Notes
 
-Port status: first full Quartus 17.0.2 compile is clean and timing-closed
-(setup +0.68 ns at the slow corner, 51 % ALMs), the bridge datapath has a
-27-assertion Verilator suite and the FAT stack a 99-assertion host-native
-suite. The MiSTer core boots the OS and runs the per-game Doom bundle on hardware.
+Port status: timing-closed at seed 7 (setup +0.122 ns, TNS 0.0) and 67 % ALMs.
+The bridge datapath has a 112-assertion Verilator suite and the FAT stack a
+5612-assertion host-native suite. The MiSTer core boots the OS and runs the
+per-game Doom and ScummVM bundles on hardware.
 
 Key architecture points (details in `src/fpga/targets/mister/README.md`):
 
@@ -348,8 +348,9 @@ Key architecture points (details in `src/fpga/targets/mister/README.md`):
   24.576 MHz for video — no legal shared VCO exists for both).
 - The GPU's translucency LUT lives in a 32 KB BRAM (`sram_bram.v`);
   the Pocket's external async SRAM has no MiSTer equivalent.
-- v1 limits: fixed 60 Hz, no 15 kHz native analog raster, no USB
-  keyboard, OPENFILE/GETFILE data-slot ops report "unsupported".
+- v1 limits: fixed 60 Hz, no 15 kHz native analog raster,
+  OPENFILE/GETFILE data-slot ops report "unsupported". (USB keyboard now
+  works — `targets/mister/hps_keyboard.v`.)
 
 ## GPU Notes
 

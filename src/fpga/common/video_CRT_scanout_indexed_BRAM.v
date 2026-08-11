@@ -17,7 +17,7 @@ module video_CRT_scanout_indexed_BRAM #(
     // raster + 480p mirror, its private 2048x32 line cache, the dedicated
     // SDRAM line fetch, and the analog leg of the shared output pipeline.
     //
-    // PRUNE GATE (docs/os30-quake2-cut-plan.md C2): when 0 the two analog
+    // PRUNE GATE (cut C2): when 0 the two analog
     // issue points fold (analog_fetch_can_issue and issue_analog_read are
     // constant 0), which kills — transitively, by constant propagation and
     // dangling-register sweep — the analog raster counters/sync cone, the

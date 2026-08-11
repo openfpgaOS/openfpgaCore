@@ -87,9 +87,8 @@ Feeds the periph's `cont4_*` port (2FF-synced inside `axi_periph_slave` like eve
 
 - **Pocket**: needs `INCLUDE_4PLAYER` (wires cont3/cont4 through, `core_top.v`) + the input hub.
   os20/os25 have it; **os30 does not, by decision** — slot 3 reads 0 there and the mouse is absent.
-- **Keyboard**: Pocket dock keyboard (slot 2, type 4) already works; MiSTer USB keyboard via `ps2_key`
-  is a follow-up (PS/2 set-2 → HID usage translation belongs in `targets/mister/input.c` as a C table,
-  not a ROM in RTL).
+- **Keyboard**: Pocket dock keyboard (slot 2, type 4) and the MiSTer USB keyboard both work — MiSTer
+  consumes hps_io's `ps2_key` stream via `targets/mister/hps_keyboard.v` (see `tb_hps_keyboard`).
 - **Wheel / >5 buttons**: deferred — `of_mouse_state_t` is a fixed-size syscall copy, so extending it
   breaks shipped ELFs. Needs a size-carrying v2 FID when wanted (MiSTer already has the data;
   whether the Pocket dock forwards wheel needs a HW probe).
