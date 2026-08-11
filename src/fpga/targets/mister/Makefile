@@ -113,9 +113,12 @@ CORE_VER  = $(shell python3 -c "import json;print(json.load(open('$(ABS_ROOT)/di
 CORE_ZIP  = $(REL_DIR)/openfpgaos-core-v$(CORE_VER).zip
 # Downloader-DB generator lives in the SDK (not vendored here); overridable.
 MKDB     ?= $(abspath $(ROOT_DIR)/../openfpgaSDK)/src/sdk/platforms/mister/mkdb.py
-MISTER_DB_ID       ?= thinkelastic/openfpgaos
-MISTER_DB_BASE_URL ?= https://raw.githubusercontent.com/thinkelastic/openfpgaOS/mister-dist/
-MISTER_DB_URL      ?= https://raw.githubusercontent.com/thinkelastic/openfpgaOS/mister-dist/openfpgaos.json.zip
+# Owner/repo track the actual remote: github.com/openfpgaOS/openfpgaCore.
+# The old thinkelastic/openfpgaOS path was stale on BOTH counts (wrong owner,
+# wrong repo name), so every generated downloader.ini pointed at a 404.
+MISTER_DB_ID       ?= openfpgaOS/openfpgaos
+MISTER_DB_BASE_URL ?= https://raw.githubusercontent.com/openfpgaOS/openfpgaCore/mister-dist/
+MISTER_DB_URL      ?= https://raw.githubusercontent.com/openfpgaOS/openfpgaCore/mister-dist/openfpgaos.json.zip
 
 # ── Feature include-list: variants/<name>.mk ─────────────────────────
 # The variant file owns the ADDITIVE module list (a feature is PRESENT iff

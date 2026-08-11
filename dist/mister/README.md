@@ -54,9 +54,9 @@ archive** so the downloader pulls one release asset and extracts, instead of N l
 ```jsonc
 {
   "v": 1,
-  "db_id": "thinkelastic/openfpgaos",
+  "db_id": "openfpgaOS/openfpgaos",
   "timestamp": 1730000000,
-  "base_files_url": "https://raw.githubusercontent.com/thinkelastic/openfpgaOS/dist/dist/mister/release/",
+  "base_files_url": "https://raw.githubusercontent.com/openfpgaOS/openfpgaCore/dist/dist/mister/release/",
   "files": {
     "_Computer/openfpgaOS.rbf":       { "hash": "<md5>", "size": 3988580, "reboot": true },
     "games/openfpgaOS/boot.rom":      { "hash": "<md5>", "size": 130764,  "reboot": true },
@@ -74,7 +74,7 @@ archive** so the downloader pulls one release asset and extracts, instead of N l
       "description": "Installing openfpgaOS Doom images",
       "archive_file": {
         "hash": "<md5 of shells.zip>", "size": 0,
-        "url": "https://github.com/thinkelastic/openfpgaOS/releases/download/mister-latest/openfpgaos-shells.zip"
+        "url": "https://github.com/openfpgaOS/openfpgaCore/releases/download/mister-latest/openfpgaos-shells.zip"
       },
       "summary_inline": {
         "files": {
@@ -93,8 +93,8 @@ archive** so the downloader pulls one release asset and extracts, instead of N l
 User installs by adding to `/media/fat/downloader.ini`:
 
 ```ini
-[thinkelastic/openfpgaos]
-db_url = 'https://raw.githubusercontent.com/thinkelastic/openfpgaOS/dist/dist/mister/db/openfpgaos.json.zip'
+[openfpgaOS/openfpgaos]
+db_url = 'https://raw.githubusercontent.com/openfpgaOS/openfpgaCore/dist/dist/mister/db/openfpgaos.json.zip'
 ```
 
 Then `update_all` (or `Scripts/downloader.sh`) syncs it.
