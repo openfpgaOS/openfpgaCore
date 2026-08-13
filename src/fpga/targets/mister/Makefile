@@ -378,9 +378,13 @@ package:
 	@printf "  $(C_OK)staged$(C_RESET)         → build/mister/ (rbf + boot.rom)\n"
 	@# Release bundle: an SD-rooted zip plus an optional Downloader DB.
 	@rm -rf $(REL_STAGE)
-	@mkdir -p "$(REL_STAGE)/_Computer" "$(REL_STAGE)/games/OpenfpgaOS" "$(REL_DIR)"
+	@mkdir -p "$(REL_STAGE)/_Computer" "$(REL_STAGE)/games/OpenfpgaOS" "$(REL_STAGE)/Scripts" "$(REL_DIR)"
 	@cp $(BUILD_OUT)/openfpgaOS.rbf "$(REL_STAGE)/_Computer/OpenfpgaOS.rbf"
 	@cp $(BUILD_OUT)/boot.rom "$(REL_STAGE)/games/OpenfpgaOS/boot.rom"
+	@# One-button setup runner: shows up in the OSD Scripts menu; runs every
+	@# installed game's idempotent setup.sh (and can install a boot hook).
+	@cp "$(ABS_ROOT)/dist/mister/scripts/openfpgaos_setup.sh" "$(REL_STAGE)/Scripts/openfpgaos_setup.sh"
+	@chmod +x "$(REL_STAGE)/Scripts/openfpgaos_setup.sh"
 	@{ \
 		echo "openfpgaOS core for MiSTer  v$(CORE_VER)"; \
 		echo ""; \
