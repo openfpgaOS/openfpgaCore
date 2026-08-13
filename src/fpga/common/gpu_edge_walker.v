@@ -307,6 +307,17 @@ wire signed [15:0] dy_clip_mid  = ($signed(y_mid) <<< 4) - y1;
 // ----------------------------------------------------------------
 wire step_swap = !in_bottom_half && (y_cur + 16'sd1 >= y_mid);
 
+// ONE shared slope_sat27 cone for the three S_PRESTEP_* DSP launches.  The
+// launches sit in mutually exclusive states and all write the SAME mul_a
+// register, so muxing the ARGUMENT ahead of the clamp is bit-identical to
+// three clamps muxed at the register input — and costs one saturator
+// instead of three.
+wire signed [31:0] ew_prestep_slope_sel =
+      (state == S_PRESTEP_LL) ? slope_long
+    : (state == S_PRESTEP_LC) ? (in_bottom_half ? slope_bot : slope_top)
+    :                           slope_bot;   // S_PRESTEP_SC mid-prestep
+wire signed [26:0] ew_prestep_slope_sat = slope_sat27(ew_prestep_slope_sel);
+
 reg signed [31:0] xl_base, xl_off, xr_base, xr_off;
 always @* begin
     if (state == S_PRESTEP_CM) begin
@@ -566,7 +577,7 @@ always @(posedge clk) begin
                     busy  <= 1'b0;
                     state <= S_IDLE;
                 end else begin
-                    mul_a <= slope_sat27(slope_long);
+                    mul_a <= ew_prestep_slope_sat;
                     mul_b <= dy_clip_long;
                     in_bottom_half <= (y_start >= y_mid);
                     state <= S_PRESTEP_W1;
@@ -579,7 +590,7 @@ always @(posedge clk) begin
                 xprod0_r <= subpix_y ? (mul_p_pipe >>> 4) : mul_p_pipe;  // long-edge prestep offset, Q16.16
                 // Short edge: top half steps from v0 with slope_top;
                 // bottom half steps from v1 with slope_bot.
-                mul_a <= slope_sat27(in_bottom_half ? slope_bot : slope_top);
+                mul_a <= ew_prestep_slope_sat;
                 mul_b <= in_bottom_half ? dy_clip_bot : dy_clip_long;
                 state <= S_PRESTEP_W2;
             end
@@ -591,7 +602,7 @@ always @(posedge clk) begin
                 // that already starts in the bottom half need no correction, so
                 // bot_mid_off stays 0 and the swap re-seeds to exactly x1_q16.
                 if (subpix_y && !in_bottom_half) begin
-                    mul_a <= slope_sat27(slope_bot);
+                    mul_a <= ew_prestep_slope_sat;
                     mul_b <= dy_clip_mid;
                     state <= S_PRESTEP_MIDW;
                 end else begin

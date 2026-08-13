@@ -3190,8 +3190,8 @@ reg signed [63:0] drv_qsum_r;
 // coarse(byte)/fine(0-7) across two registered stages + a negate/sat32 third.
 // q29_shamt is precomputed in DRV_SCALE_LS so the shift control is a register,
 // not a combinational mux off vt_q29_shift.
-reg [5:0]         q29_shamt_r;
-reg signed [63:0] drv_q_coarse, drv_q_fine;
+reg [4:0]         q29_shamt_r;              // TOTAL shift MINUS 7 (0..31)
+reg signed [56:0] drv_q_coarse, drv_q_fine; // operand already pre-shifted by 7
 // Shared DSP-product capture registers for the derivation FSM.  The derivation
 // is strictly sequential (one DSP launch/capture in flight at a time), so one
 // 64-bit capture per DSP port is enough.  Splitting "read dsp_p -> arithmetic
@@ -6665,9 +6665,13 @@ always @(posedge clk) begin : main_fsm
                                 + $signed({1'b0, drv_prod_r[54:DERIV_SPLIT]});
                     // precompute the final shift here so the barrel shift in
                     // DRV_SCALE_LF reads a register, not a mux off vt_q29_shift.
+                    // Stored BIASED BY -7: the constant 7 of the total shift is
+                    // folded into DRV_SCALE_LF's operand as a free wiring shift,
+                    // which narrows the barrel to 5 bits over a 57-bit operand
+                    // instead of 6 bits over 64.  Do NOT re-add the +7 here.
                     q29_shamt_r <= (vt_q29_en && (dv_attr != 3'd3))
-                                 ? (6'd7 + {1'b0, vt_q29_shift})
-                                 : (DERIV_N - DERIV_SPLIT);
+                                 ? vt_q29_shift
+                                 : (DERIV_N - DERIV_SPLIT - 6'd7);
                     dstate <= DRV_SCALE_LF;
                 end
                 // Q29 BARREL-SHIFT PIPELINE (fixes the -3.97 dv_du cone — all 400+
@@ -6679,7 +6683,7 @@ always @(posedge clk) begin : main_fsm
                 // x >>> (8a+b) == (x >>> 8a) >>> b.  +2 cy/du-dv pass, free under
                 // the walker.  q29_shamt_r precomputed in DRV_SCALE_LS.
                 DRV_SCALE_LF: begin
-                    drv_q_coarse <= drv_qsum_r >>> {q29_shamt_r[5:3], 3'b000};
+                    drv_q_coarse <= (drv_qsum_r >>> 7) >>> {q29_shamt_r[4:3], 3'b000};
                     dstate <= DRV_SCALE_LF2;
                 end
                 DRV_SCALE_LF2: begin
