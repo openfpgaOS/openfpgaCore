@@ -460,6 +460,31 @@ int main(void) {
      * a swapped boot.rom with a shifted layout would otherwise get a
      * stale clear range and/or a stale entry jump (the boot lottery). */
     (void)boot_read_os_meta(os_size);
+
+    /* LOUD fallback (2026-08-13): every modern os.bin is OSE2-stamped, so
+     * "no meta at the computed offset" means the SIZE is wrong — on hardware
+     * HPS_BOOT_LEN was found not delivering a sane value, the silent baked
+     * fallback engaged, and any boot.rom whose layout differed from this
+     * bitstream's build derailed into an unexplained black screen.  Falling
+     * back is still the right move (it is what boots a matched pair), but it
+     * must never be silent again: paint the sizes on screen and pause so a
+     * mismatched pair is a readable message, not a lottery. */
+    if (!os_meta_entry) {
+        static const char hexd[] = "0123456789abcdef";
+        char msg[22] = "meta miss h=";
+        uint32_t v = HPS_BOOT_LEN;
+        for (int i = 0; i < 8; i++)
+            msg[12 + i] = hexd[(v >> (28 - 4 * i)) & 0xF];
+        msg[20] = 0;
+        boot_fb_puts(0, 0, msg);
+        char msg2[22] = "using sz  u=";
+        v = os_size;
+        for (int i = 0; i < 8; i++)
+            msg2[12 + i] = hexd[(v >> (28 - 4 * i)) & 0xF];
+        msg2[20] = 0;
+        boot_fb_puts(0, 1, msg2);
+        for (volatile uint32_t spin = 0; spin < 300000000u; spin++) {}
+    }
     {
     char *bss_lo = os_meta_entry ? (char *)(uintptr_t)os_meta_bss_lo
                                  : _os_bss_start;

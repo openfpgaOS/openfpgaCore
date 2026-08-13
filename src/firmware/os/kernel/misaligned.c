@@ -651,6 +651,37 @@ void fatal_trap(trap_frame_t *frame) {
     VIDEO_SCALER_MODE = VIDEO_SCALER_SLOT_DEFAULT_320X240;
     TERM_FB_CTRL      = 1u;  /* 1 = terminal overlay shown, 0 = app framebuffer */
 
+    /* MiSTer's fb_direct output never shows the terminal (ddr3_fb DMA-reads
+     * the app framebuffer), so ALSO force the 16 VGA console colors and
+     * mirror the terminal FB into FB0, then display FB0 — the inline twin of
+     * of_video_console_reveal(), kept call-free for this trap context.
+     * Without it a trap is an unexplained black screen there (2026-08-13). */
+    {
+        for (uint32_t spin = 0; (PAL_INDEX & PAL_INDEX_BUSY) && spin < 4000000u;
+             spin++) {}
+        static const uint32_t vga16[16] = {
+            0x000000, 0x0000AA, 0x00AA00, 0x00AAAA,
+            0xAA0000, 0xAA00AA, 0xAA5500, 0xAAAAAA,
+            0x555555, 0x5555FF, 0x55FF55, 0x55FFFF,
+            0xFF5555, 0xFF55FF, 0xFFFF55, 0xFFFFFF,
+        };
+        PAL_INDEX = 0;
+        for (int i = 0; i < 16; i++)
+            PAL_WRITE = vga16[i];
+        PAL_INDEX = PAL_INDEX_COMMIT;
+
+        const volatile uint8_t *src = (const volatile uint8_t *)(uintptr_t)
+            ((uint32_t)TERM_FB_BASE >= SDRAM_UNCACHED_BASE
+                 ? (uint32_t)TERM_FB_BASE
+                 : (uint32_t)TERM_FB_BASE - SDRAM_BASE + SDRAM_UNCACHED_BASE);
+        volatile uint8_t *dst = (volatile uint8_t *)(uintptr_t)
+            (FB0_BASE - SDRAM_BASE + SDRAM_UNCACHED_BASE);
+        for (uint32_t i = 0; i < (uint32_t)FB_STRIDE * FB_HEIGHT; i++)
+            dst[i] = src[i];
+        __asm__ volatile("fence" ::: "memory");
+        FB_SWAP_CTRL = (0u << 1) | 1u;
+    }
+
     /* Shout cause/mepc/mtval to UART first so the host sees it even
      * if the terminal / screen has been torn down.  Format:
      *   ==TRAP==

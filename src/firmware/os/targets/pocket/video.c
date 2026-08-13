@@ -241,6 +241,13 @@ static void palette_wait_ready(void) {
 static volatile int pal_dirty;
 static volatile int pal_uploading;
 
+#ifdef OF_DEBUG_WALL_REVEAL
+/* Declared here (used by palette_try_upload_shadow); see the wall-clock
+ * reveal instrument block below for the legend. */
+static volatile uint32_t dbg_pal_upload_count;   /* app SET_PALETTE* calls   */
+static volatile uint32_t dbg_pal_commit_count;   /* commits actually issued  */
+#endif
+
 static int palette_try_upload_shadow(void) {
     if (PAL_INDEX & PAL_INDEX_BUSY)
         return 0;
@@ -248,6 +255,9 @@ static int palette_try_upload_shadow(void) {
     for (int i = 0; i < 256; i++)
         PAL_WRITE = pal_shadow[i];
     palette_commit_staged();
+#ifdef OF_DEBUG_WALL_REVEAL
+    dbg_pal_commit_count++;
+#endif
     return 1;
 }
 
@@ -257,11 +267,279 @@ static void palette_upload_shadow(void) {
     pal_uploading = 0;
 }
 
+/* Console reveal that survives MiSTer's fb_direct display path.
+ *
+ * TERM_FB_CTRL only switches the LEGACY scanout; ddr3_fb (MiSTer's default
+ * output) DMA-reads the app framebuffer and never shows the terminal, so a
+ * trap banner / exit console / boot error used to be INVISIBLE there — the
+ * 2026-08 "app-side black screen" hunt burned days on exactly that.  Make a
+ * console restore real on every path: program terminal geometry, force the
+ * 16 VGA colors (the app may have faded the CLUT to black), mirror the
+ * terminal FB into FB0, and display FB0.  On the Pocket/legacy path the
+ * TERM_FB_CTRL switch already shows the terminal and the mirror is a
+ * harmless extra copy.  Main-line / halt-path context only (bounded palette
+ * wait + a 76 KB uncached copy) — not for IRQ handlers.  One-shot mirror:
+ * text printed AFTER the call needs another call to become visible on the
+ * fb_direct path. */
+void of_video_console_reveal(void) {
+    video_program_terminal_mode();
+    TERM_FB_CTRL = 1u;
+
+    palette_wait_ready();
+    PAL_INDEX = 0;
+    for (int i = 0; i < 16; i++)
+        PAL_WRITE = overlay_term_pal[i];
+    palette_commit_staged();
+
+    const volatile uint8_t *src = (const volatile uint8_t *)(uintptr_t)
+        ((uint32_t)TERM_FB_BASE >= SDRAM_UNCACHED_BASE
+             ? (uint32_t)TERM_FB_BASE
+             : (uint32_t)TERM_FB_BASE - SDRAM_BASE + SDRAM_UNCACHED_BASE);
+    volatile uint8_t *dst = (volatile uint8_t *)(uintptr_t)
+        (fb_addr[0] - SDRAM_BASE + SDRAM_UNCACHED_BASE);
+    for (uint32_t i = 0; i < (uint32_t)FB_STRIDE * FB_HEIGHT; i++)
+        dst[i] = src[i];
+    __asm__ volatile("fence" ::: "memory");
+
+    FB_SWAP_CTRL = (0u << 1) | 1u;
+}
+
 static volatile uint32_t timing_vblank_count;
 static volatile uint32_t timing_present_count;
 static volatile uint32_t timing_last_presented_idx;
 static volatile uint64_t timing_last_vblank_cycles;
 static volatile uint64_t timing_last_present_cycles;
+
+#ifdef OF_DEBUG_WALL_REVEAL
+/* DEBUG INSTRUMENT (never defined by a shipping variant) — wall-clock reveal.
+ *
+ * The STALL_REVEAL below only fires when presentation STOPS, so an app
+ * happily presenting black frames is indistinguishable from a healthy one,
+ * and if the CPU derailed the vsync leg is dead anyway.  This leg fires N
+ * seconds after the FIRST of_video_init regardless of presentation, from
+ * BOTH the machine-timer IRQ (self-armed at 1 kHz — HW-mixer builds leave
+ * the timer off) and the vsync IRQ, then prints counters every 5 s:
+ *
+ *   black + no reveal            => CPU derailed / all IRQs dead
+ *   reveal + pc frozen           => app alive but stopped presenting
+ *   reveal + pc advancing, pnz~0 => presenting through an all-black CLUT
+ *   reveal + pc advancing, pnz>0 => framebuffer content genuinely black
+ *   vb frozen + tk advancing     => vsync IRQ dead while timer lives
+ *
+ * The reveal force-installs the 16 VGA terminal colors: an app that faded
+ * the palette to black would otherwise make the revealed console (and the
+ * STALL_REVEAL / fatal_trap consoles) invisible. */
+#ifndef OF_DEBUG_WALL_REVEAL_SEC
+#define OF_DEBUG_WALL_REVEAL_SEC 30u
+#endif
+static volatile uint32_t dbg_set_mode_count;     /* of_video_set_mode calls  */
+static volatile uint32_t dbg_video_init_count;   /* of_video_init calls (>1 = relaunch loop) */
+static volatile uint32_t dbg_flip_req_count;     /* CPU-side flip requests   */
+static volatile uint32_t dbg_timer_ticks;        /* timer-IRQ heartbeats     */
+static volatile uint64_t dbg_wall_arm_cycles;
+static volatile int      dbg_wall_armed;
+static volatile int      dbg_wall_revealed;
+static volatile uint32_t dbg_wall_reports;
+static volatile uint64_t dbg_wall_next_report;
+
+/* Force the 16 VGA colors back into CLUT 0-15 so terminal text is visible
+ * even after an app faded the palette to black.  Exported: the SYS_exit
+ * debug banner (syscall.c) needs it too.  Bounded wait + direct MMIO. */
+void of_video_dbg_force_term_palette(void) {
+    palette_wait_ready();
+    PAL_INDEX = 0;
+    for (int i = 0; i < 16; i++)
+        PAL_WRITE = overlay_term_pal[i];
+    palette_commit_staged();
+}
+
+/* ---- Phase 1: console reveal, IRQ-safe ----
+ * Row-pinned cell writes only (of_term_set_cell -> pure FB stores).  No
+ * of_term_puts from IRQ context: the escape parser, scroll path, and UART
+ * mirror ring are main-line machinery.  Palette is forced BEFORE printing
+ * so the report is visible through an app-blackened CLUT. */
+static void dbg_cell_text(int col, int row, const char *s) {
+    while (*s && col < 40)
+        of_term_set_cell(col++, row, *s++, 15, 0);
+}
+
+static void dbg_cell_hex(int col, int row, uint32_t v) {
+    for (int i = 28; i >= 0; i -= 4) {
+        unsigned n = (v >> i) & 0xFu;
+        if (col < 40)
+            of_term_set_cell(col++, row, (char)((n < 10) ? '0' + n
+                                                         : 'a' + n - 10), 14, 0);
+    }
+}
+
+static uint32_t dbg_pal_nonzero(void) {
+    uint32_t pnz = 0;
+    for (int i = 0; i < 256; i++)
+        if (pal_shadow[i] & 0xFFFFFFu)
+            pnz++;
+    return pnz;
+}
+
+static void dbg_report_cells(void) {
+    dbg_cell_text(0, 25, "==WALL REVEAL==  PC/VB/TK  UP/CM/FL");
+    dbg_cell_hex(0,  26, timing_present_count);
+    dbg_cell_hex(10, 26, timing_vblank_count);
+    dbg_cell_hex(20, 26, dbg_timer_ticks);
+    dbg_cell_hex(0,  27, dbg_pal_upload_count);
+    dbg_cell_hex(10, 27, dbg_pal_commit_count);
+    dbg_cell_hex(20, 27, dbg_flip_req_count);
+    dbg_cell_text(0, 28, "PZ/SM/VI");
+    dbg_cell_hex(10, 28, dbg_pal_nonzero());
+    dbg_cell_hex(20, 28, dbg_set_mode_count);
+    dbg_cell_hex(30, 28, dbg_video_init_count);
+}
+
+/* ---- Phase 2: palette-independent RGB565 barcode beacon ----
+ * Two display facts force this design: (a) the CLUT itself is a suspect,
+ * so the beacon must not depend on it -> RGB565; (b) on MiSTer's default
+ * fb_direct path, ddr3_fb DMA-reads fb_display_addr (the APP framebuffer)
+ * and never sees TERM_FB_CTRL or the terminal FB — every terminal-side
+ * reveal (fatal_trap banner included) is INVISIBLE there.  So the beacon
+ * takes over the APP path: reprogram the mode regs (which also feed
+ * ddr3_fb), paint the barcode into FB0, and force-display FB0.  Each
+ * counter is a 32-bit barcode row (4 px tall, 2 px/bit, MSB first, 4-px
+ * white start marker).  Machine-readable from a screenshot or the HPS
+ * /dev/fb0 mirror no matter what the app did to palettes or swaps. */
+static void dbg_beacon_row(volatile uint16_t *fb, int rowpx, uint32_t v) {
+    for (int ry = 0; ry < 4; ry++) {
+        volatile uint16_t *p = fb + (uint32_t)(rowpx + ry) * 320u;
+        int x = 0;
+        for (; x < 4; x++)
+            p[x] = 0xFFFFu;
+        for (int b = 31; b >= 0; b--) {
+            uint16_t c = ((v >> b) & 1u) ? 0xFFFFu : 0x0000u;
+            p[x++] = c;
+            p[x++] = c;
+        }
+        for (; x < 320; x++)
+            p[x] = 0x0000u;
+    }
+}
+
+static void dbg_beacon_paint(void) {
+    volatile uint16_t *fb = (volatile uint16_t *)fb_addr[0];
+    for (int y = 0; y < 4; y++) {
+        volatile uint16_t *p = fb + (uint32_t)y * 320u;
+        for (int x = 0; x < 320; x++)
+            p[x] = ((x >> 2) & 1) ? 0x0000u : 0xFFFFu;
+    }
+    uint32_t f[16];
+    int n = 0;
+    f[n++] = 0xC0FFEE42u;                     /* magic / bit-decode check  */
+    f[n++] = (uint32_t)((read_cycles() - dbg_wall_arm_cycles) / CPU_FREQ_HZ);
+    f[n++] = timing_vblank_count;
+    f[n++] = timing_present_count;
+    f[n++] = dbg_timer_ticks;
+    f[n++] = dbg_flip_req_count;
+    f[n++] = dbg_pal_upload_count;
+    f[n++] = dbg_pal_commit_count;
+    f[n++] = (uint32_t)pal_dirty
+           | ((PAL_INDEX & PAL_INDEX_BUSY) ? 2u : 0u)
+           | ((uint32_t)pal_uploading << 2);
+    f[n++] = dbg_pal_nonzero();
+    f[n++] = dbg_set_mode_count;
+    f[n++] = dbg_video_init_count;
+    f[n++] = FB_SWAP_CTRL;
+    f[n++] = (uint32_t)vid_mode.width | ((uint32_t)vid_mode.height << 16);
+    f[n++] = (uint32_t)vid_mode.color_mode | ((uint32_t)vid_display_mode << 8);
+    f[n++] = 0x600DB10Bu;                     /* end magic                 */
+    for (int i = 0; i < n; i++)
+        dbg_beacon_row(fb, 8 + i * 4, f[i]);
+    /* FB0 lives at the cached SDRAM alias — flush so scanout/ddr3_fb see it. */
+    of_cache_clean_range((void *)fb_addr[0], 320u * 240u * 2u);
+    /* Re-assert mode + display idx every repaint: a still-live app fights
+     * back with its own set_mode/flips, and losing that fight silently
+     * would blind the beacon. */
+    SYS_COLOR_MODE    = COLOR_MODE_RGB565;
+    FB_MODE_SIZE      = (240u << 16) | 320u;
+    FB_MODE_STRIDE    = 640u;
+    VIDEO_SCALER_MODE = VIDEO_SCALER_SLOT_DEFAULT_320X240;
+    TERM_FB_CTRL      = 0u;
+    FB_SWAP_CTRL      = (0u << 1) | 1u;
+}
+
+/* Boot breadcrumbs: launch-path stages stamped straight into FB0 so the
+ * fb_direct display shows how far the OS got even though the console is
+ * invisible there (see the phase-2 comment).  Layout mirrors the beacon
+ * (sync band + rows at 8/12/16: code, aux, end magic) so the same decoder
+ * reads both.  of_video_init's buffer clear wipes the stamp when an app
+ * actually starts — a persisting stamp IS the diagnosis. */
+void of_video_dbg_boot_stamp(uint32_t code, uint32_t aux) {
+    volatile uint16_t *fb = (volatile uint16_t *)fb_addr[0];
+    for (int y = 0; y < 4; y++) {
+        volatile uint16_t *p = fb + (uint32_t)y * 320u;
+        for (int x = 0; x < 320; x++)
+            p[x] = ((x >> 2) & 1) ? 0x0000u : 0xFFFFu;
+    }
+    dbg_beacon_row(fb, 8, code);
+    dbg_beacon_row(fb, 12, aux);
+    dbg_beacon_row(fb, 16, 0x600DB10Bu);
+    of_cache_clean_range((void *)fb_addr[0], 320u * 24u * 2u);
+    /* Pure paint — NO register writes.  Stamp variants that touched the mode
+     * regs (even just SYS_COLOR_MODE) wedged the boot console / Doom's boot:
+     * these regs also drive the live display paths.  The stamp is therefore
+     * only visible once something else points the display at FB0 (the phase-2
+     * beacon, or a post-mortem FB read) — that is the accepted trade. */
+}
+
+static void dbg_wall_do_reveal(void) {
+    dbg_wall_revealed = 1;
+    /* Mirror fatal_trap's console restore: direct MMIO only. */
+    SYS_COLOR_MODE    = COLOR_MODE_8BIT;
+    FB_MODE_SIZE      = ((uint32_t)FB_HEIGHT << 16) | (uint32_t)FB_WIDTH;
+    FB_MODE_STRIDE    = FB_STRIDE;
+    VIDEO_SCALER_MODE = VIDEO_SCALER_SLOT_DEFAULT_320X240;
+    TERM_FB_CTRL      = 1u;
+    of_video_dbg_force_term_palette();
+    dbg_report_cells();
+}
+
+static void dbg_wall_beacon_mode(void) {
+    dbg_wall_revealed = 2;
+    dbg_beacon_paint();
+}
+
+/* Called from both IRQ legs.  M-mode IRQs don't nest, so no locking. */
+static void dbg_wall_check(void) {
+    if (!dbg_wall_armed)
+        return;
+    uint64_t now = read_cycles();
+    if (dbg_wall_revealed == 0) {
+        if (now - dbg_wall_arm_cycles >=
+            (uint64_t)OF_DEBUG_WALL_REVEAL_SEC * CPU_FREQ_HZ) {
+            dbg_wall_do_reveal();
+            dbg_wall_next_report = now + 2ull * CPU_FREQ_HZ;
+        }
+        return;
+    }
+    if (now < dbg_wall_next_report)
+        return;
+    dbg_wall_next_report = now + 2ull * CPU_FREQ_HZ;
+    if (dbg_wall_revealed == 1) {
+        /* ~16 s of readable console (if the CLUT cooperates), then switch
+         * to the beacon, which cannot be blinded. */
+        if (++dbg_wall_reports >= 8u) {
+            dbg_wall_beacon_mode();
+        } else {
+            of_video_dbg_force_term_palette();
+            dbg_report_cells();
+        }
+        return;
+    }
+    dbg_beacon_paint();
+}
+
+/* Timer-IRQ leg — called from timer_isr_callback (kernel/syscall.c). */
+void of_video_dbg_wall_tick(void) {
+    dbg_timer_ticks++;
+    dbg_wall_check();
+}
+#endif /* OF_DEBUG_WALL_REVEAL */
 
 /* ---- Display refresh policy ----
  * Firmware owns the adaptive refresh policy and writes VIDEO_VTOTAL. The
@@ -641,7 +919,15 @@ int of_video_set_mode(const of_video_mode_t *mode) {
     vid_display_mode = DISPLAY_MODE_FRAMEBUFFER;
     video_reset_buffer_roles();
     video_program_app_mode();
+#ifdef OF_DEBUG_WALL_REVEAL
+    /* Once revealed, keep the console on glass: a later set_mode (or a
+     * relaunch loop's re-init) must not silently hide the evidence. */
+    dbg_set_mode_count++;
+    if (!dbg_wall_revealed)
+        TERM_FB_CTRL = 0;
+#else
     TERM_FB_CTRL = 0;
+#endif
     video_irq_restore_local(irq);
 
     video_clear_mode_change_buffers(old_frame_bytes);
@@ -772,7 +1058,23 @@ void of_video_init(void) {
     video_program_app_mode();
 
     /* Switch scanout to app triple-buffered FB */
+#ifdef OF_DEBUG_WALL_REVEAL
+    /* Arm the wall-clock reveal.  Deliberately does NOT touch the machine
+     * timer: a debug build that armed a permanent 1 kHz tick here made
+     * timer_isr_callback (uart drain + async file tick) run during F-load
+     * staging / DS streaming on MiSTer and broke EVERY game's boot — the
+     * instrument must not perturb the system it observes.  The vsync IRQ
+     * is the only heartbeat; if it is dead, no reveal = that is the answer. */
+    dbg_video_init_count++;
+    if (!dbg_wall_armed) {
+        dbg_wall_arm_cycles = read_cycles();
+        dbg_wall_armed = 1;
+    }
+    if (!dbg_wall_revealed)
+        TERM_FB_CTRL = 0;
+#else
     TERM_FB_CTRL = 0;
+#endif
 
     video_reset_buffer_roles();
     timing_vblank_count = 0;
@@ -874,6 +1176,9 @@ uint8_t *of_video_flip(void) {
     /* Queue draw buffer for display at next vsync.
      * Write format: bits[2:1] = buffer index, bit[0] = trigger */
     vrr_update_on_swap();
+#ifdef OF_DEBUG_WALL_REVEAL
+    dbg_flip_req_count++;
+#endif
     FB_SWAP_CTRL = (buf_draw << 1) | 1;
     /* Kernel-driven kick — fb_swap_pending is high NOW (sysreg write
      * is committed by the time this returns), so sync_swap_state's
@@ -968,6 +1273,49 @@ void of_video_vsync_irq_service(void) {
     sync_swap_state();
     vrr_update_on_vblank(timing_present_count != present_count_before);
 
+#ifdef OF_DEBUG_STALL_REVEAL
+    /* DEBUG INSTRUMENT (never defined by a shipping variant).
+     *
+     * On MiSTer there is NO output channel once an app starts: emu.sv stubs the
+     * UART, of_video_init() has already switched the console off screen, and the
+     * only two paths that put it back -- fatal_trap and SYS_exit -- do not run
+     * when an app silently derails or spins (a NULL deref does not trap here:
+     * page 0 is BRAM with no MMU).  The result is an unfalsifiable black screen.
+     *
+     * If nothing has been presented for ~2 s, put the console back so the last
+     * printf lines are readable.  One-shot; direct MMIO only, mirroring exactly
+     * what fatal_trap already does from a far more hostile context.
+     *
+     * Caveat: if the app derailed with interrupts dead this never runs -- which
+     * is itself the answer, distinguishing "spinning with IRQs alive" from
+     * "CPU off the rails". */
+    {
+        static uint32_t stall_vblanks;
+        static int      stall_revealed;
+        if (timing_present_count != present_count_before) {
+            stall_vblanks = 0;
+        } else if (!stall_revealed && ++stall_vblanks >= 120u) {
+            stall_revealed    = 1;
+            SYS_COLOR_MODE    = COLOR_MODE_8BIT;
+            FB_MODE_SIZE      = ((uint32_t)FB_HEIGHT << 16) | (uint32_t)FB_WIDTH;
+            FB_MODE_STRIDE    = FB_STRIDE;
+            VIDEO_SCALER_MODE = VIDEO_SCALER_SLOT_DEFAULT_320X240;
+            TERM_FB_CTRL      = 1u;
+#ifdef OF_DEBUG_WALL_REVEAL
+            /* The app may have faded the CLUT to black — without this the
+             * revealed console is itself invisible (black-on-black). */
+            of_video_dbg_force_term_palette();
+            dbg_cell_text(0, 24, "==STALL== no present 2s");
+#endif
+        }
+    }
+#endif
+
+#ifdef OF_DEBUG_WALL_REVEAL
+    /* vsync leg of the wall-clock reveal (see instrument block above). */
+    dbg_wall_check();
+#endif
+
     /* Retire a deferred palette upload (see palette_upload_shadow).  The
      * previous commit latched at this vblank, so the engine is normally
      * free here; if not, the next vblank retries.  Skipped in overlay
@@ -1023,6 +1371,9 @@ static void overlay_restore_palette(void) {
 void of_video_set_palette(uint8_t index, uint8_t r, uint8_t g, uint8_t b) {
     uint32_t rgb = ((uint32_t)r << 16) | ((uint32_t)g << 8) | b;
     pal_shadow[index] = rgb;
+#ifdef OF_DEBUG_WALL_REVEAL
+    dbg_pal_upload_count++;
+#endif
     if (vid_display_mode == DISPLAY_MODE_OVERLAY) {
         overlay_install_palette();
     } else {
@@ -1033,6 +1384,9 @@ void of_video_set_palette(uint8_t index, uint8_t r, uint8_t g, uint8_t b) {
 void of_video_set_palette_bulk(const uint32_t *palette, int count) {
     for (int i = 0; i < count && i < 256; i++)
         pal_shadow[i] = palette[i];
+#ifdef OF_DEBUG_WALL_REVEAL
+    dbg_pal_upload_count++;
+#endif
     if (vid_display_mode == DISPLAY_MODE_OVERLAY) {
         overlay_install_palette();
     } else {
@@ -1048,6 +1402,9 @@ void of_video_set_palette_vga4(const uint8_t *vga_pal, int count) {
         uint32_t r = (vga_pal[i * 4 + 2] * 255 + 31) / 63;
         pal_shadow[i] = (r << 16) | (g << 8) | b;
     }
+#ifdef OF_DEBUG_WALL_REVEAL
+    dbg_pal_upload_count++;
+#endif
     if (vid_display_mode == DISPLAY_MODE_OVERLAY) {
         overlay_install_palette();
     } else {

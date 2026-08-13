@@ -22,6 +22,22 @@
 #include <stddef.h>
 #include <string.h>
 
+#ifdef OF_DEBUG_WALL_REVEAL
+/* Debug boot breadcrumbs (targets/pocket/video.c): launch-path stage codes
+ * stamped into FB0 — the only display channel on MiSTer's fb_direct path,
+ * where the console is invisible.  DISABLED pending root-cause: even the
+ * pure-paint variant correlated with the boot console never appearing on
+ * hardware (2026-08-13 bisect); define OF_DEBUG_BOOT_STAMPS to re-enable. */
+extern void of_video_dbg_boot_stamp(uint32_t code, uint32_t aux);
+#ifdef OF_DEBUG_BOOT_STAMPS
+#define BOOT_STAMP(c, a) of_video_dbg_boot_stamp((c), (a))
+#else
+#define BOOT_STAMP(c, a) ((void)0)
+#endif
+#else
+#define BOOT_STAMP(c, a) ((void)0)
+#endif
+
 /* Layout-shift pad for boot-lottery bisection (sim + HW pad sweeps).
  * Build with EXTRA_CFLAGS=-DOS_LAYOUT_PAD=<bytes> to insert N bytes of
  * never-referenced data into .text, shifting every symbol downstream of
@@ -96,7 +112,7 @@ static void boot_logo(const char *color) {
     of_term_puts("    /_/_/_/___\\___/_/ |_|\n");
     of_term_puts("   / __ \\/ __/\n");
     of_term_puts("  / /_/ /\\ \\\n");
-    of_term_puts("  \\____/___/  \033[93mv0.7\033[0m\n\n");
+    of_term_puts("  \\____/___/  \033[93mv0.8\033[0m\n\n");
 }
 
 static void status_ok(void) {
@@ -448,6 +464,7 @@ void os_main(void) {
         for (;;) {
             of_term_puts("  \033[91mMemory integrity FAILED\033[0m -- core/os pairing or hardware fault.\n"
                          "  Rebuild and deploy rbf + os.bin from ONE tree (make full VARIANT=<v>).\n");
+            of_video_console_reveal();
             of_timer_delay_ms(3000);
         }
     }
@@ -528,10 +545,13 @@ void os_main(void) {
          * instead of a silent hang.  An MGL F-loads its ini ~1-2 s after boot,
          * far inside this window, so the selected game always wins. */
         unsigned waited_ms = 0u;
+        BOOT_STAMP(0xB0070001u, 0u);
         while (!of_file_instance_ready() && waited_ms < 8000u) {
             of_timer_delay_ms(100);
             waited_ms += 100u;
         }
+        BOOT_STAMP(0xB0070002u,
+                   ((uint32_t)of_file_instance_ready() << 31) | waited_ms);
     }
 #endif
 
@@ -543,9 +563,12 @@ void os_main(void) {
         if (of_config_error_line() > 0)
             of_term_printf(" line=%d", of_config_error_line());
         of_term_putchar('\n');
+        BOOT_STAMP(0xB007E003u, (uint32_t)config_rc);
+        of_video_console_reveal();
         while (1) of_timer_delay_ms(1000);
     }
     status_ok();
+    BOOT_STAMP(0xB0070003u, 0u);
 
 #ifdef OF_TARGET_SUPPORTS_RELAUNCH
     /* Derive the two roots (common_root / instance_root) from the loaded
@@ -581,6 +604,14 @@ void os_main(void) {
     uint32_t app_slot = APP_SLOT_ID;
     int app_argc = 1;
     os_textguard_check("before app load");
+#ifdef OF_TARGET_SUPPORTS_RELAUNCH
+    BOOT_STAMP(0xB0070004u,
+               of_file_app_from_staging()
+                   ? (0x80000000u | (uint32_t)of_file_app_staging_len())
+                   : 0u);
+#else
+    BOOT_STAMP(0xB0070004u, 0u);
+#endif
     int rc = prepare_app_launch(&app_slot, &app_argc);
     if (rc == 0)
         rc = load_app_with_retries(app_slot, &app);
@@ -588,12 +619,14 @@ void os_main(void) {
 
     if (rc < 0) {
         status_fail();
+        BOOT_STAMP(0xB007E005u, (uint32_t)rc);
         of_term_printf("  rc=%d\n", rc);
         of_term_printf("  \033[93mNo application found: %s\033[0m\n\n",
                        app_elf_name);
         of_term_puts("  Place .elf in data slot 3\n");
         of_term_puts("  or set [os] ELF in os.ini\n");
         of_term_puts("  and press START to retry.\n");
+        of_video_console_reveal();
 
         while (1) {
             of_input_poll();
@@ -695,6 +728,7 @@ void os_main(void) {
 
     /* Execute the app */
     os_textguard_check("before elf_exec");
+    BOOT_STAMP(0xB0070006u, app_slot);
     elf_exec(&app, app_argc, app_argv);
 
     /* Should never reach here */
@@ -761,7 +795,9 @@ static void relaunch_fail(const char *what, int rc) {
      * interrupts disabled so a timer/vsync IRQ can't fire into the now-stale
      * trap frame while we spin (os_relaunch may have already re-enabled them). */
     __asm__ volatile("csrci mstatus, 0x8" ::: "memory");
+    BOOT_STAMP(0xB007E00Fu, (uint32_t)rc);
     of_term_printf("  \033[91mrelaunch: %s (rc=%d)\033[0m\n", what, rc);
+    of_video_console_reveal();
     while (1)
         of_timer_delay_ms(1000);
 }

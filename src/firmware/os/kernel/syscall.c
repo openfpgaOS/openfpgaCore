@@ -137,6 +137,14 @@ void of_os_timer_boot_arm(void) {
 
 /* Called from irq_handler() on machine timer interrupt */
 void timer_isr_callback(void) {
+#ifdef OF_DEBUG_WALL_REVEAL
+    /* Debug tick counter only (targets/pocket/video.c).  The instrument
+     * never arms this timer itself — see the of_video_init note there. */
+    {
+        extern void of_video_dbg_wall_tick(void);
+        of_video_dbg_wall_tick();
+    }
+#endif
     /* Service the terminal UART hook before app callbacks.  The Pocket
      * implementation is currently synchronous/no-op here, but keeping the
      * call preserves the HAL contract for targets with buffered output. */
@@ -429,8 +437,17 @@ static uint8_t save_size_known[NV_CACHE_SLOTS];
 static void save_size_cache_store(int cache_idx, uint32_t size);
 
 void file_slot_register(uint32_t slot_id, const char *filename) {
-    if (file_slot_count >= MAX_FILE_SLOTS)
+    if (file_slot_count >= MAX_FILE_SLOTS) {
+        /* A dropped registration means the app's open-by-name will fail with
+         * NOENT for a file that IS on the media — which on MiSTer surfaced
+         * as an unexplained black screen (Wolfenstein shipped 47 files in one
+         * vhd; the VSWAP.* family silently fell off the table, 2026-08-13).
+         * The cap itself is fine — no legitimate instance needs 32 names —
+         * so the fix is to make the packaging bug impossible to miss. */
+        of_term_printf("  \033[91mfile table full (%d): dropped %s\033[0m\n",
+                       MAX_FILE_SLOTS, filename);
         return;
+    }
 
     file_slot_entry_t *e = &file_slots[file_slot_count++];
     e->slot_id = slot_id;
@@ -466,9 +483,26 @@ static const char *path_basename(const char *path) {
     return base;
 }
 
-/* Search file slot registry by basename (case-insensitive).
- * Returns slot_id or -1 if not found. */
+/* Search file slot registry (case-insensitive).  Full registered name
+ * first, then basename.
+ * Returns slot_id or -1 if not found.
+ *
+ * The two-pass order matters when a slot is registered under a
+ * subdirectory: Quake's mission packs bind "HIPNOTIC/PAK0.PAK" alongside
+ * id1's "pak0.pak", and those share a basename.  Basename-only matching
+ * resolved BOTH to whichever came first in the table (id1), so the mission
+ * pack silently loaded the base game's pak instead of its own.  Matching
+ * the full name first lets a caller name the exact slot it means, while
+ * bare filenames keep resolving as before. */
 static int file_slot_lookup(const char *path) {
+    const char *full = path;
+    while (*full == '/')
+        full++;
+    for (int i = 0; i < file_slot_count; i++) {
+        if (stricmp(full, file_slots[i].filename) == 0)
+            return (int)file_slots[i].slot_id;
+    }
+
     const char *name = path_basename(path);
     for (int i = 0; i < file_slot_count; i++) {
         if (stricmp(name, file_slots[i].filename) == 0)
@@ -2456,6 +2490,38 @@ static long linux_dispatch(long n, long a0, long a1, long a2,
 
     case SYS_exit:
     case SYS_exit_group:
+#ifdef OF_DEBUG_WALL_REVEAL
+        /* Debug: make every app exit visible before a relaunch swallows it —
+         * reveal the terminal (with visible VGA colors), print the code,
+         * hold 3 s.  Distinguishes an exit/relaunch loop from a hang. */
+        {
+            extern void of_video_dbg_force_term_palette(void);
+            SYS_COLOR_MODE = COLOR_MODE_8BIT;
+            FB_MODE_SIZE = ((uint32_t)FB_HEIGHT << 16) | FB_WIDTH;
+            FB_MODE_STRIDE = FB_STRIDE;
+            VIDEO_SCALER_MODE = VIDEO_SCALER_SLOT_DEFAULT_320X240;
+            TERM_FB_CTRL = 1;
+            of_video_dbg_force_term_palette();
+            of_term_puts("\n==SYS_exit== code=");
+            {
+                char rev[12], out[12];
+                int n = 0, m = 0;
+                uint32_t v = (uint32_t)a0;
+                do { rev[n++] = (char)('0' + (v % 10u)); v /= 10u; } while (v && n < 11);
+                while (n) out[m++] = rev[--n];
+                out[m] = 0;
+                of_term_puts(out);
+            }
+#ifdef OF_TARGET_SUPPORTS_RELAUNCH
+            of_term_puts(os_menu_pending() ? " (relaunch pending; 3s hold)\n"
+                                           : " (halt)\n");
+#else
+            of_term_puts(" (halt)\n");
+#endif
+            uint64_t dbg_dl = read_cycles() + 3ull * CPU_FREQ_HZ;
+            while (read_cycles() < dbg_dl) {}
+        }
+#endif
 #ifdef OF_TARGET_SUPPORTS_RELAUNCH
         /* If a launcher (menu.elf) is registered, an app exit returns to it
          * instead of halting — game → exit → menu.  Does not return. */
@@ -2464,13 +2530,11 @@ static long linux_dispatch(long n, long a0, long a1, long a2,
             os_relaunch();
         }
 #endif
-        /* Switch scanout back to the legacy 8-bit terminal path so user sees
-         * boot screen even if the app left RGB565/low-bit/dynamic mode set. */
-        SYS_COLOR_MODE = COLOR_MODE_8BIT;
-        FB_MODE_SIZE = ((uint32_t)FB_HEIGHT << 16) | FB_WIDTH;
-        FB_MODE_STRIDE = FB_STRIDE;
-        VIDEO_SCALER_MODE = VIDEO_SCALER_SLOT_DEFAULT_320X240;
-        TERM_FB_CTRL = 1;
+        /* Restore the boot console so the user sees it on EVERY display path
+         * — of_video_console_reveal also mirrors the terminal into FB0 for
+         * MiSTer's fb_direct output, where a bare TERM_FB_CTRL flip is
+         * invisible (the 2026-08 black-screen trap). */
+        of_video_console_reveal();
         while (1) {}
         return 0;
 

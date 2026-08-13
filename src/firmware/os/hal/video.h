@@ -57,6 +57,12 @@ typedef struct of_video_caps {
 /* Initialize framebuffer subsystem (sets display mode, initial palette) */
 void of_video_init(void);
 
+/* Restore the boot console in a way that is visible on EVERY display path,
+ * including MiSTer's fb_direct (which never shows the terminal FB): terminal
+ * geometry + forced VGA palette + terminal-FB mirror into FB0 + display FB0.
+ * Main-line / halt-path context only; one-shot (re-call after later prints). */
+void of_video_console_reveal(void);
+
 /* Set/query the active app framebuffer geometry. */
 int of_video_set_mode(const of_video_mode_t *mode);
 void of_video_get_mode(of_video_mode_t *out);
