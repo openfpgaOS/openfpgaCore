@@ -396,7 +396,13 @@ static int slot_read_cached(uint32_t slot_id, uint32_t off,
  * of_file_slot_register() still works for backward compatibility.
  * ====================================================================== */
 
-#define MAX_FILE_SLOTS      32
+/* Capacity of the filename->slot ALIAS TABLE, not the data-slot count (that
+ * stays <=32 by the APF map).  A slot legitimately carries ~2 names: the boot
+ * probe's discovered name plus the port's canonical alias (ECWolf: probe
+ * names + AUDIOHED.wl6-style aliases + a save-name set per prefix ~= 58
+ * names for 27 slots, measured on HW 2026-08-13 — the 32-name table dropped
+ * savegam1-9 and wedged boot).  64 = 32 slots x 2 aliases; costs ~1.2 KB BSS. */
+#define MAX_FILE_SLOTS      64
 #define FILE_SLOT_NAME_MAX  24
 #define SAVE_SLOT_ID_BASE   10u
 #define SHARED_CONFIG_SLOT_ID 8u
