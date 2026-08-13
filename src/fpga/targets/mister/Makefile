@@ -402,7 +402,6 @@ package:
 	@if [ -x "$(MKDB)" ]; then \
 		"$(MKDB)" --staging "$(REL_STAGE)" --sd-prefix "" \
 			--base-url "$(MISTER_DB_BASE_URL)" --url-mode flat --db-id "$(MISTER_DB_ID)" \
-			--reboot '_Computer/OpenfpgaOS.rbf' --reboot 'games/OpenfpgaOS/boot.rom' \
 			--db-url "$(MISTER_DB_URL)" \
 			--output "$(REL_DIR)/openfpgaos.json.zip" \
 			--ini-out "$(REL_DIR)/openfpgaos.downloader.ini" \
