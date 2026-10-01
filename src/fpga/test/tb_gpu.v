@@ -566,11 +566,12 @@ assign bd_rd_data = sdram_mem[bd_rd_addr[19:0]];
 //                              RNG — Verilator scripts forbid it).  The
 //                              per-transaction value is published on
 //                              dbg_rd_last_latency for the harness.
+//   +gpu_rd_beat_gap=N       : bubble cycles between burst beats (default 0),
+//                              exercising consumers that restart mid-fill.
 //
 // The single-outstanding contract is UNCHANGED in every mode: arready
 // is low while rd_active, exactly one AR is in flight, beats are in
-// order, rlast on the final beat.  The ONLY thing the modes change is
-// how many bubble cycles precede the first beat.
+// order, rlast on the final beat. Latency settings only insert bubbles.
 localparam [9:0] LAT_VAR_MIN = 10'd8;
 localparam [9:0] LAT_VAR_MAX = 10'd60;
 
@@ -581,6 +582,7 @@ reg [9:0]  rd_delay;       // 10 bits so the texlat boost (up to ~1023) fits
 
 // Latency configuration latched once at reset from plusargs.
 reg [9:0]  cfg_rd_latency;     // fixed initial latency
+reg [9:0]  cfg_rd_beat_gap;    // bubbles between accepted burst beats
 reg        cfg_rd_latency_var; // variable (LFSR) mode select
 reg [15:0] lat_lfsr;           // deterministic pseudo-random source
 
@@ -621,12 +623,14 @@ assign gpu_rd_rlast   = rd_active && (rd_delay == 0) && (rd_beats_left == 0);
 
 // Plusarg latch + LFSR seed (one-time, at reset).
 integer plusarg_lat;
+integer plusarg_gap;
 integer plusarg_var;
 integer plusarg_texlat;
 integer plusarg_texlo;
 integer plusarg_texhi;
 initial begin
     cfg_rd_latency     = 10'd2;   // historical default
+    cfg_rd_beat_gap    = 10'd0;
     cfg_rd_latency_var = 1'b0;
     lat_lfsr           = 16'hACE1;
     dbg_rd_last_latency = 10'd2;
@@ -635,6 +639,7 @@ initial begin
     cfg_texlat_lo      = 32'h0004_0000;  // default = TEX_BASE_BYTE
     cfg_texlat_hi      = 32'h0007_FFFF;  // default = up to FB_BASE_BYTE-1
     plusarg_lat = 0;
+    plusarg_gap = 0;
     plusarg_var = 0;
     plusarg_texlat = 0;
     plusarg_texlo = 0;
@@ -646,6 +651,11 @@ initial begin
     end
     if ($value$plusargs("gpu_rd_latency_var=%d", plusarg_var)) begin
         cfg_rd_latency_var = (plusarg_var != 0);
+    end
+    if ($value$plusargs("gpu_rd_beat_gap=%d", plusarg_gap)) begin
+        if (plusarg_gap < 0) plusarg_gap = 0;
+        if (plusarg_gap > 1023) plusarg_gap = 1023;
+        cfg_rd_beat_gap = plusarg_gap[9:0];
     end
     if ($value$plusargs("gpu_rd_texlat=%d", plusarg_texlat)) begin
         if (plusarg_texlat < 0)    plusarg_texlat = 0;
@@ -692,7 +702,7 @@ always @(posedge clk) begin
                 end else begin
                     rd_addr       <= rd_addr + 1;
                     rd_beats_left <= rd_beats_left - 1;
-                    rd_delay      <= 0;  // back-to-back beats
+                    rd_delay      <= cfg_rd_beat_gap;
                 end
             end
         end

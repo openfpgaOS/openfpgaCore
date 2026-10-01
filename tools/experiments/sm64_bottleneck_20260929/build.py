@@ -1,21 +1,22 @@
 #!/usr/bin/env python3
-"""Live SM64 model of today's os30 GPU for the current SM64 binary (no overlay).
+"""Coupled SM64 model for comparing GPU implementations (no overlay).
 
 Builds the coupled qsim CPU + GPU/cache/SDRAM RTL model like
-sm64_cache_20260924 (working-tree gpu_core.v and render cache, os30 options:
-8-word depth window, no selective waits, write combiner off, texture queues in
-MLAB), with three differences:
+sm64_cache_20260924. Use --gpu-manifest with the os30 manifest emitted by
+check_gpu_target_matrix.py to select current production parameters/macros;
+without it, the model retains its September 25 options. Other differences:
 
 * no colour-clear filter.  SM64 builds since 2026-09-24 clear colour only on a
   buffer's first use, so the harness filter (written for the old binary) would
   drop the per-frame DEPTH clear instead -- same 640x240-byte rectangle -- and
   leave the depth buffer stale;
 * --cache-rtl swaps in another render-cache source for A/B runs;
+* --common-dir selects a complete common RTL snapshot for A/B runs;
 * --counters adds GPU/cache state counters (printed by the RTL's final block
   into run.log) and a CPU profile snapshot at the first coupled frame, which
   analyze.py uses to separate the measured window from boot.
 """
-import argparse, importlib.util
+import argparse, importlib.util, json, shutil
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -85,13 +86,24 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument('label', help='output directory name under build/sm64-bottleneck-20260929')
     p.add_argument('--cache-rtl', type=Path, default=ROOT/'src/fpga/common/gpu_color_depth_cache.sv')
+    p.add_argument('--common-dir', type=Path, default=ROOT/'src/fpga/common',
+                   help='RTL source snapshot for reproducible before/after comparisons')
+    p.add_argument('--gpu-manifest', type=Path,
+                   help='Production parameters/macros from check_gpu_target_matrix.py')
     p.add_argument('--counters', action='store_true')
     p.add_argument('--cache-set-bits', type=int, help='render cache sets = 2**N (os30: 6, 8 KiB)')
     a = p.parse_args()
     params = [x for x in PARAMS if not (a.cache_set_bits and x.startswith('-GCACHE_SET_BITS='))]
     if a.cache_set_bits: params.append(f'-GCACHE_SET_BITS={a.cache_set_bits}')
+    manifest = json.loads(a.gpu_manifest.read_text()) if a.gpu_manifest else None
+    if manifest:
+        overridden = {flag.split('=')[0] for flag in manifest['flags']}
+        params = [flag for flag in params if flag.split('=')[0] not in overridden]
+        params += manifest['flags']
     out = OUT/a.label
     out.mkdir(parents=True, exist_ok=True)
+    if manifest:
+        (out/'gpu-manifest.json').write_text(json.dumps(manifest, indent=2)+'\n')
     cache_rtl = a.cache_rtl.resolve().read_text()
     (out/'coupled.cpp').write_text((cache.BASE/'coupled.cpp').read_text())
     (out/'audio.inc').write_text((cache.BASE/'audio.inc').read_text())
@@ -111,12 +123,13 @@ def main():
                  ("'--top-module','tb_gpu_transluc',", "'--top-module','tb_gpu_transluc',*PARAMS,"),
                  ("HERE/'coupled.cpp'", "OUT/'coupled.cpp'"),
                  ("    top = frozen/'tb_gpu_transluc.v'; s = top.read_text()",
-                  "    shutil.copy2(ROOT/'src/fpga/common/gpu_core.v', frozen/'common/gpu_core.v')\n"
+                  "    COPY_COMMON(frozen)\n"
                   "    APPLY_CACHE(frozen, True)\n"
                   "    top = frozen/'tb_gpu_transluc.v'; s = top.read_text()"),
                  ("    rtl = [top, frozen/'sdram_model_full.v',", "    rtl = [top, frozen/'gpu_color_depth_cache.sv', frozen/'sdram_model_full.v',"),
                  ("    sources = 'cpu fpu cache prof qelf lint gpu app env main'.split()",
-                  "    SNAPSHOT(q)\n    sources = 'cpu fpu cache prof qelf lint gpu app env main'.split()")]:
+                  "    SNAPSHOT(q)\n    sources = 'cpu fpu cache prof qelf lint gpu app env main'.split()"),
+                 ("cfg['variant']['defs'].split()", "(GPU_DEFS if GPU_DEFS is not None else cfg['variant']['defs'].split())")]:
         assert source.count(o) == 1, o
         source = source.replace(o, n)
 
@@ -130,8 +143,12 @@ def main():
             "if (E.sm64_profile && profile && (nrows % 60 == 0 || (getenv(\"COUPLED_START_FRAME\") && "
             "nrows == (size_t)atoll(getenv(\"COUPLED_START_FRAME\"))))) {"))
 
+    def copy_common(frozen):
+        shutil.copytree(a.common_dir.resolve(), frozen/'common', dirs_exist_ok=True)
+
     ns = dict(__file__=str(cache.BASE/'build.py'), __name__='private_build', PRIVATE_OUT=out,
-              PARAMS=params, APPLY_CACHE=apply, SNAPSHOT=snapshot)
+              PARAMS=params, APPLY_CACHE=apply, SNAPSHOT=snapshot, COPY_COMMON=copy_common,
+              GPU_DEFS=manifest['variant']['defs'].split() if manifest else None)
     exec(compile(source, str(cache.BASE/'build.py'), 'exec'), ns)
     ns['main']()
 

@@ -47,6 +47,9 @@ static Vtb_audio_mixer *dut;
 static vluint64_t        sim_time;
 static int               passes;
 static int               fails;
+static bool report_perf = std::getenv("AUDIO_PERF_REPORT") != nullptr;
+static uint64_t sample_trace = 14695981039346656037ull;
+static unsigned sample_count = 0;
 
 static void tick(int n = 1) {
     for (int i = 0; i < n; i++) {
@@ -56,6 +59,11 @@ static void tick(int n = 1) {
         dut->clk = 1;
         dut->eval();
         sim_time++;
+        if (report_perf && dut->sample_wr) {
+            sample_trace = (sample_trace ^ sim_time) * 1099511628211ull;
+            sample_trace = (sample_trace ^ dut->sample_data) * 1099511628211ull;
+            ++sample_count;
+        }
     }
 }
 
@@ -121,14 +129,14 @@ static void mmio_voice_write(int voice, int field, uint32_t data) {
 }
 
 // Backdoor read. audio_mixer.v keeps the MMIO-visible 16-field voice
-// layout in two packed tables: CPU-owned fields and FSM-owned fields.
+// layout at MMIO; the FSM-owned backing table uses a four-word stride.
 static uint32_t vtbl_read(int voice, int field) {
     int addr = (voice << 4) | field;
     switch (field) {
     case VTBL_POS_INT:
     case VTBL_POS_FRAC:
     case VTBL_VOL_LR:
-        return dut->rootp->tb_audio_mixer->dut__DOT__vtbl_fsm_mem[addr];
+        return dut->rootp->tb_audio_mixer->dut__DOT__vtbl_fsm_mem[(voice << 2) | (field & 3)];
     case VTBL_ADDR:
     case VTBL_LEN:
     case VTBL_RATE:
@@ -220,6 +228,25 @@ static void test_flat_mmio_independence(void) {
     mmio_voice_write(15, VTBL_VOL_TARGET, 0x5678);
     check_eq_u32("voice  7 VOL_TARGET", vtbl_read(7,  VTBL_VOL_TARGET), 0x1234);
     check_eq_u32("voice 15 VOL_TARGET", vtbl_read(15, VTBL_VOL_TARGET), 0x5678);
+}
+
+// Exercise every voice through MMIO so compact mutable-table addressing
+// cannot alias neighboring voices or POS_INT and VOL_LR. Voices stay inactive;
+// queued start-state writes must drain without the sample FSM changing them.
+static void test_mutable_fields_all_voices(void) {
+    printf("test_mutable_fields_all_voices:\n");
+    reset_dut();
+    for (int voice = 0; voice < 32; ++voice) {
+        mmio_voice_write(voice, VTBL_CTRL, 0);
+        mmio_voice_write(voice, VTBL_POS_INT, 0x200000u + voice * 257u);
+        mmio_voice_write(voice, VTBL_VOL_LR, 0x8000u + voice * 131u);
+    }
+    tick(2000);
+    bool intact = true;
+    for (int voice = 0; voice < 32; ++voice)
+        intact &= vtbl_read(voice, VTBL_POS_INT) == 0x200000u + voice * 257u
+               && vtbl_read(voice, VTBL_VOL_LR) == 0x8000u + voice * 131u;
+    check(intact, "all 32 voices retain independent mutable fields");
 }
 
 // ---------------------------------------------------------------------
@@ -981,6 +1008,10 @@ int main(int argc, char **argv) {
     test_rearm_during_sample();
     test_rearm_phase_sweep();
     test_mister_paced_mixer();
+    test_mutable_fields_all_voices();
+    // Compare both PCM values and their exact emission cycles across builds.
+    if (report_perf) printf("PERF audio samples %u trace %016llx\n", sample_count,
+                            (unsigned long long)sample_trace);
 
     printf("\n=== Results: %d passed, %d failed ===\n", passes, fails);
 

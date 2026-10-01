@@ -160,14 +160,14 @@ localparam [21:0] STREAM_FLOOR = 22'd4;
 /* =================================================================
  * Voice table backing store.
  *
- * Keep the hardware in two packed 512x32 memories instead of many
+ * Keep the hardware in two packed memories instead of many
  * tiny 32xN field memories.  The field-split version reduced logical
  * bits but forced Quartus to spend one RAM block per tiny field on
  * Cyclone V, which made both M10K and LAB packing pressure worse.
  *
  *   vtbl_cpu: CPU-written fields, FSM read-only.
- *   vtbl_fsm: per-sample mutable fields, FSM read/write plus queued
- *             CPU writes for retrigger/start state.
+ *   vtbl_fsm: 128x32, four-word stride for the three mutable fields,
+ *             FSM read/write plus queued CPU writes for retrigger/start state.
  * ================================================================= */
 reg  [8:0]  vtbl_a_addr;
 reg  [31:0] vtbl_a_data;
@@ -275,12 +275,12 @@ always @(posedge clk) begin
 end
 
 // OS30 (Pocket Quake/Quake2): MIXER_LITE halves the voice count 32->16.
-// The two packed voice tables shrink 512->256 words (16-word stride x 16
-// voices).  The MMIO port widths (voice_sel[4:0], 32-bit masks) are
+// The CPU table shrinks 512->256 words and the mutable table 128->64 words.
+// The MMIO port widths (voice_sel[4:0], 32-bit masks) are
 // unchanged so axi_periph_slave's contract is identical; only voices 0-15
 // are functional (the per-sample FSM loop bound below stops at 15) and the
 // firmware uses only those slots in lite builds.  Default (macro undefined)
-// keeps the full 32-voice / 512-word tables.
+// keeps the full 32-voice CPU table.
 `ifdef MIXER_LITE
 reg [31:0] vtbl_cpu_mem [0:255] /*verilator public_flat_rw*/;
 `else
@@ -292,16 +292,22 @@ always @(posedge clk) begin
 end
 assign vtbl_cpu_q = vtbl_cpu_mem[vtbl_a_addr];
 
+// Only POS_INT (4), POS_FRAC (5), and VOL_LR (6) live here. Their low
+// two field bits are unique, so the internal four-word stride preserves
+// every voice/field while reducing the full mixer from two M10Ks to one.
+// Keep the external addresses and queued CPU-write ordering unchanged.
+wire [6:0] vtbl_fsm_wr_index = {vtbl_fsm_addr_a[8:4], vtbl_fsm_addr_a[1:0]};
+wire [6:0] vtbl_fsm_rd_index = {vtbl_a_addr[8:4], vtbl_a_addr[1:0]};
 `ifdef MIXER_LITE
-reg [31:0] vtbl_fsm_mem [0:255] /*verilator public_flat_rw*/;
+reg [31:0] vtbl_fsm_mem [0:63] /*verilator public_flat_rw*/;
 `else
-reg [31:0] vtbl_fsm_mem [0:511] /*verilator public_flat_rw*/;
+reg [31:0] vtbl_fsm_mem [0:127] /*verilator public_flat_rw*/;
 `endif
 always @(posedge clk) begin
     if (vtbl_fsm_wren_a)
-        vtbl_fsm_mem[vtbl_fsm_addr_a] <= vtbl_fsm_data_a;
+        vtbl_fsm_mem[vtbl_fsm_wr_index] <= vtbl_fsm_data_a;
 end
-assign vtbl_fsm_q = vtbl_fsm_mem[vtbl_a_addr];
+assign vtbl_fsm_q = vtbl_fsm_mem[vtbl_fsm_rd_index];
 
 // Shadow active bit — updated when CPU writes CTRL (bit 0), or when
 // the FSM retires a one-shot voice (voice_end_clear_mask pulses high

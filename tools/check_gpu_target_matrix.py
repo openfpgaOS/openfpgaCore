@@ -116,8 +116,15 @@ def main():
         with (dest / 'build.log').open('w') as log:
             subprocess.run(command, stdout=log, stderr=subprocess.STDOUT, check=True)
         result = {}
-        for label, plus in [('quiet', []), ('delayed', ['+gpu_rd_latency=24',
-                            '+gpu_rd_latency_var=1', '+gpu_wr_latency=17'])]:
+        scenarios = [('quiet', []), ('delayed', ['+gpu_rd_latency=24',
+                      '+gpu_rd_latency_var=1', '+gpu_wr_latency=17'])]
+        if 'INCLUDE_Z_EARLY_RESTART' in row['defs'].split():
+            # Restarted pixels must remain coherent while later fill beats
+            # pause, and command completion must wait for the burst tail.
+            scenarios.append(('gapped', ['+gpu_rd_latency=24',
+                              '+gpu_rd_latency_var=1', '+gpu_wr_latency=17',
+                              '+gpu_rd_beat_gap=7']))
+        for label, plus in scenarios:
             with (dest / (label + '.log')).open('w') as log:
                 p = subprocess.run([str(dest / 'obj/Vtb_gpu'), *plus], cwd=dest,
                                    stdout=log, stderr=subprocess.STDOUT, timeout=300)

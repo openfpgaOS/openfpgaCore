@@ -215,6 +215,18 @@ def verify_frozen(out):
     return frozen
 
 
+def seed_candidates(rows, offsets, seeds=None):
+    if seeds is None:
+        tasks = [(row, row['seed'] + offset) for offset in offsets for row in rows]
+    else:
+        tasks = [(row, seed) for seed in seeds for row in rows]
+        # A full range must still measure the saved seed if it lies outside it.
+        tasks += [(row, row['seed']) for row in rows if row['seed'] not in seeds]
+    if any(seed < 1 for _, seed in tasks) or len({(r['variant'], s) for r, s in tasks}) != len(tasks):
+        raise ValueError('invalid or duplicate seeds')
+    return tasks
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path, required=True)
@@ -225,7 +237,10 @@ def main():
                         help='Also sweep the archived SDRAM diagnostic configurations')
     parser.add_argument('--jobs', type=int, default=4)
     parser.add_argument('--processors', type=int, default=4)
-    parser.add_argument('--seed-offsets', nargs='+', type=int, default=[0, 1, 2])
+    seed_selection = parser.add_mutually_exclusive_group()
+    seed_selection.add_argument('--seed-offsets', nargs='+', type=int, default=[0, 1, 2])
+    seed_selection.add_argument('--seeds', nargs='+', type=int,
+                                help='Absolute seeds for every variant; also includes each saved seed')
     parser.add_argument('--target', action='append', help='Restrict a retry to specific target(s)')
     parser.add_argument('--variant', help='Restrict a diagnostic trial to one variant')
     parser.add_argument('--extra-macro', action='append', default=[],
@@ -248,6 +263,7 @@ def main():
         rows = json.loads((out / 'inventory.json').read_text())
         previous = json.loads((out / 'config.json').read_text())
         args.seed_offsets = previous['seed_offsets']
+        args.seeds = previous.get('seeds')
         if args.processors != previous['processors']:
             parser.error('Resume must retain the original per-fit processor count')
         # A killed driver can leave a Docker tool running. It must not write
@@ -285,13 +301,14 @@ def main():
             parser.error('Diagnostic macros require one variant and uppercase identifiers')
         rows[0]['original_defs'] = rows[0]['defs']
         rows[0]['defs'] += ' ' + ' '.join(args.extra_macro)
+    try:
+        tasks = seed_candidates(rows, args.seed_offsets, args.seeds)
+    except ValueError as error:
+        parser.error(str(error))
     if not args.resume:
         frozen = freeze(out, rows)
-    tasks = [(row, row['seed'] + offset) for offset in args.seed_offsets for row in rows]
-    if any(seed < 1 for _, seed in tasks) or len({(r['variant'], s) for r,s in tasks}) != len(tasks):
-        parser.error('invalid or duplicate seed offsets')
     save(out / 'config.json', dict(jobs=args.jobs, processors=args.processors,
-        seed_offsets=args.seed_offsets, variants=len(rows), candidates=len(tasks)))
+        seed_offsets=args.seed_offsets, seeds=args.seeds, variants=len(rows), candidates=len(tasks)))
 
     def run(pair):
         row, seed = pair

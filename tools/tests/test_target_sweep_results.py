@@ -7,7 +7,26 @@ import tempfile
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from sweep_target_matrix import parse_result
+from sweep_target_matrix import parse_result, seed_candidates
+
+
+class SeedSelection(unittest.TestCase):
+    def test_full_range_includes_saved_seeds_once(self):
+        rows = [{'variant': 'os30', 'seed': 2}, {'variant': 'os20', 'seed': 33}]
+        tasks = seed_candidates(rows, [0, 1, 2], list(range(1, 31)))
+        self.assertEqual(len(tasks), 61)
+        self.assertEqual({seed for row, seed in tasks if row['variant'] == 'os30'}, set(range(1, 31)))
+        self.assertEqual({seed for row, seed in tasks if row['variant'] == 'os20'}, set(range(1, 31)) | {33})
+
+    def test_legacy_relative_seeds_are_preserved(self):
+        rows = [{'variant': 'mister', 'seed': 30}]
+        self.assertEqual([seed for _, seed in seed_candidates(rows, [0, 1, 2])], [30, 31, 32])
+
+    def test_invalid_or_duplicate_seeds_are_rejected(self):
+        rows = [{'variant': 'os30', 'seed': 2}]
+        for offsets, seeds in [([0, 0], None), ([-2], None), ([0], [0, 1]), ([0], [1, 1])]:
+            with self.subTest(offsets=offsets, seeds=seeds), self.assertRaises(ValueError):
+                seed_candidates(rows, offsets, seeds)
 
 
 class TimingResults(unittest.TestCase):

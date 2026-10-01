@@ -337,8 +337,17 @@ static bool wait_fence(uint32_t token, int timeout = 400000) {
 }
 
 static bool submit_and_wait(int timeout = 400000) {
+    const uint64_t start = sim_time;
     uint32_t t = submit_fence();
-    return wait_fence(t, timeout);
+    const bool complete = wait_fence(t, timeout);
+    // Opt-in A/B cycle measurements include command upload and fence drain.
+    // The sequence number identifies identical batches across RTL builds.
+    static unsigned batch = 0;
+    if (std::getenv("GPU_PERF_REPORT"))
+        printf("PERF batch %u cycles %llu complete %d\n", batch,
+               (unsigned long long)((sim_time - start) / 2), complete);
+    ++batch;
+    return complete;
 }
 
 // ============================================================================
@@ -6471,7 +6480,8 @@ static void emit_set_tri_state_raw(const ParamSpanListWire &p,
 // Emit a 0x4B (14-word) vertex triangle.
 static void emit_draw_vert_tri_raw(const int16_t vx[3], const int16_t vy[3],
                                    const int32_t s[3], const int32_t t[3],
-                                   const int32_t zi[3], const uint8_t lrow[3]) {
+                                   const int32_t zi[3], const uint8_t lrow[3],
+                                   uint32_t q29 = 0) {
     std::vector<uint32_t> w(14, 0);
     w[0]  = ((uint32_t)(uint16_t)vy[0] << 16) | (uint16_t)vx[0];
     w[1]  = ((uint32_t)(uint16_t)vy[1] << 16) | (uint16_t)vx[1];
@@ -6482,7 +6492,7 @@ static void emit_draw_vert_tri_raw(const int16_t vx[3], const int16_t vy[3],
     w[12] = ((uint32_t)(lrow[0] & 0x3F))
           | ((uint32_t)(lrow[1] & 0x3F) << 6)
           | ((uint32_t)(lrow[2] & 0x3F) << 12);
-    w[13] = 0;
+    w[13] = q29;
     ring_cmd(0x4B, (uint32_t)w.size());
     for (uint32_t x : w)
         ring_write(x);
@@ -6522,6 +6532,49 @@ static ParamSpanListWire make_vert_tri_surface() {
     p.flags = SPAN_PERSP;
     return p;
 }
+
+#if defined(GPU_TEST_NO_PARAM_SPAN_Q29) && !defined(GPU_TEST_NO_VERT_TRI)
+// An unadvertised Q29 override must not change the triangle's derive while
+// the fragment path uses Q16.16. Compare real rendered output, including
+// small-subpixel and ordinary reciprocal modes, for every override shift.
+static void test_disabled_vertex_q29_override() {
+    printf("TEST disabled_vertex_q29_override\n");
+    for (int subpix : {0, 1}) {
+        std::vector<uint8_t> reference;
+        for (int shift = -1; shift < 32; ++shift) {
+            gpu_init(); preload_with_sentinel();
+            upload_texture(TEX_BASE_BYTE, make_projection_test_texture());
+            ParamSpanListWire p = make_vert_tri_surface();
+            p.subpix_y = subpix;
+            const int16_t x[3] = {16*16, 24*16, 16*16+1};
+            const int16_t y[3] = {16, 17, 48};
+            const int16_t ysub[3] = {16*16, 16*16+1, 20*16};
+            const int32_t s[3] = {0, 16<<16, 4<<16};
+            const int32_t t[3] = {0, 2<<16, 24<<16};
+            const int32_t zi[3] = {65536, 32768, 49152};
+            const uint8_t light[3] = {0, 0, 0};
+            emit_set_tri_state_raw(p, 0, 64, 0, 64);
+            emit_draw_vert_tri_raw(x, subpix ? ysub : y, s, t, zi, light,
+                                   shift < 0 ? 0u : (32u | (uint32_t)shift));
+            if (!submit_and_wait()) {
+                check_fail("disabled_vertex_q29_override", "timeout"); return;
+            }
+            std::vector<uint8_t> pixels;
+            int painted = 0;
+            for (int py = 0; py < 64; ++py) for (int px = 0; px < 64; ++px) {
+                uint8_t v = sdram_read_byte(FB_BASE_BYTE + py*320u + px);
+                pixels.push_back(v); painted += v != SENTINEL_BYTE;
+            }
+            if (shift < 0) reference = pixels;
+            if (!painted || pixels != reference) {
+                check_fail("disabled_vertex_q29_override", "override changed pixels or triangle blank");
+                return;
+            }
+        }
+    }
+    check_pass("disabled_vertex_q29_override");
+}
+#endif
 
 // Render one vert-triangle two ways (0x4A+0x4B at FB_BASE; 0x49-with-derived
 // planes at FB_ALT_BASE) and return the per-pixel mismatch count over the walk
@@ -11128,6 +11181,13 @@ static void test_vert_tri_subpixel_y_attrib() {
     struct C { int16_t vx[3], vy[3]; int32_t s[3], t[3], zi[3]; uint8_t l[3];
                int16_t cx0, cx1, cy0, cy1; };
     C cs[] = {
+        // Determinants 8191/8192/8193 straddle the Q31/Q44 reciprocal switch.
+        { {320,448,321}, {320,321,384},
+          {0,16*Q,4*Q},{0,2*Q,24*Q},{Q,Q/2,3*Q/4},{0,0,0}, 0,64,0,28 },
+        { {320,448,320}, {320,321,384},
+          {0,16*Q,4*Q},{0,2*Q,24*Q},{Q,Q/2,3*Q/4},{0,0,0}, 0,64,0,28 },
+        { {320,448,319}, {320,321,384},
+          {0,16*Q,4*Q},{0,2*Q,24*Q},{Q,Q/2,3*Q/4},{0,0,0}, 0,64,0,28 },
         // v0,v1 share integer scanline 8 (Q12.4 8.125 / 8.8125) — degenerate
         // under round-Y, fine under Q12.4.
         { {(int16_t)(10*16),(int16_t)(50*16),(int16_t)(30*16+5)},
@@ -12035,6 +12095,9 @@ int main(int argc, char **argv) {
     test_lean_column_list_drains();
 #ifndef GPU_TEST_NO_VERT_TRI
     test_lean_sticky_state_contract();
+#ifdef GPU_TEST_NO_PARAM_SPAN_Q29
+    test_disabled_vertex_q29_override();
+#endif
 #else
     test_disabled_vertex_commands_drain();
 #endif

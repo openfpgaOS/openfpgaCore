@@ -90,7 +90,13 @@ DEFS := INCLUDE_VERT_TRI INCLUDE_DIRECT_COLOR INCLUDE_COMBINE INCLUDE_Z_BURST \
         INCLUDE_SPAN_DEDICATED_MULT INCLUDE_TEX_QUEUE_RAM INCLUDE_TEX_QUEUE_MLAB \
         INCLUDE_EW_STEP_PREDECODE INCLUDE_EARLY_Z_CAPTURE \
         EXCLUDE_SYSREG_DIAG_READBACK INCLUDE_Z_WINDOW8 \
-        INCLUDE_GPU_RENDER_CACHE
+        INCLUDE_GPU_RENDER_CACHE \
+        INCLUDE_DERIVE_PARALLEL_SCALE INCLUDE_Z_EARLY_RESTART
+
+# Parallel reciprocal scaling uses both existing triangle DSP ports, removing
+# two wait/capture states per derivative without changing the arithmetic.
+# Depth early restart evaluates the requested word while the rest of its read
+# window fills; bus ownership and write invalidations remain live to the end.
 
 # Experimental 100 MHz candidate measured with seed 31. These options retain
 # rendering features and arithmetic while moving work off critical paths.
