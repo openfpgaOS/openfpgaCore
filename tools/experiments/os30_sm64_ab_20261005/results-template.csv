@@ -1,0 +1,10 @@
+configuration,session,sample,scene_id,fps,lcd,rend_ms,smp,geo,screenshot,notes
+A,A1,1,BOB_FIXED_VIEW,,,,,0,,
+A,A1,2,BOB_FIXED_VIEW,,,,,0,,
+A,A1,3,BOB_FIXED_VIEW,,,,,0,,
+B,B1,1,BOB_FIXED_VIEW,,,,,0,,
+B,B1,2,BOB_FIXED_VIEW,,,,,0,,
+B,B1,3,BOB_FIXED_VIEW,,,,,0,,
+C,C1,1,BOB_FIXED_VIEW,,,,,1,,
+C,C1,2,BOB_FIXED_VIEW,,,,,1,,
+C,C1,3,BOB_FIXED_VIEW,,,,,1,,

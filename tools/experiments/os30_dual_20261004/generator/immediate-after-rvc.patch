@@ -1,0 +1,77 @@
+--- a/src/main/scala/vexiiriscv/Param.scala
++++ b/src/main/scala/vexiiriscv/Param.scala
+@@ -111,6 +111,7 @@
+   var lanes = 1
+   // Private os30 area experiment: second lane implements only the base integer ALU.
+   var lane1AluOnly = false
++  var lane1ImmediateOnly = false
+   var decoderAt = 1
+   var rvcDecompressAt = 0
+   var dispatcherAt = 1
+@@ -613,6 +614,7 @@
+     opt[Int]("decoders") action { (v, c) => decoders = v }
+     opt[Int]("lanes") action { (v, c) => lanes = v }
+     opt[Unit]("lane1-alu-only") action { (v, c) => lane1AluOnly = true }
++    opt[Unit]("lane1-immediate-only") action { (v, c) => lane1AluOnly = true; lane1ImmediateOnly = true }
+     opt[Int]("decoder-at") action { (v, c) => decoderAt = v }
+     opt[Int]("rvc-decompress-at") action { (v, c) => rvcDecompressAt = v }
+     opt[Int]("dispatcher-at") action { (v, c) => dispatcherAt = v }
+@@ -1182,7 +1184,7 @@
+       plugins += lane1
+ 
+       plugins += new SrcPlugin(early1, executeAt = 0, relaxedRs = relaxedSrc)
+-      plugins += new IntAluPlugin(early1, formatAt = 0)
++      plugins += new IntAluPlugin(early1, formatAt = 0, withRegisterOperands = !lane1ImmediateOnly)
+       if(!lane1AluOnly) plugins += shifter(early1, formatAt = relaxedShift.toInt)
+       plugins += new IntFormatPlugin(lane1)
+       if(!lane1AluOnly) plugins += new BranchPlugin(early1, aluAt = 0, jumpAt = relaxedBranch.toInt, wbAt = 0)
+--- a/src/main/scala/vexiiriscv/execute/IntAluPlugin.scala
++++ b/src/main/scala/vexiiriscv/execute/IntAluPlugin.scala
+@@ -23,7 +23,8 @@
+  */
+ class IntAluPlugin(var layer: LaneLayer,
+                    var aluAt : Int = 0,
+-                   var formatAt : Int = 0) extends ExecutionUnitElementSimple(layer) {
++                   var formatAt : Int = 0,
++                   var withRegisterOperands : Boolean = true) extends ExecutionUnitElementSimple(layer) {
+   import IntAluPlugin._
+ 
+   val ALU_BITWISE_CTRL = Payload(AluBitwiseCtrlEnum())
+@@ -46,13 +47,15 @@
+     val ORI = Rvi.ORI(avoidCmoPrefetch)
+ 
+     // Define all the instruction implemented by the plugin
+-    add(Rvi.ADD ).srcs(Op.ADD   , SRC1.RF, SRC2.RF).decode(ALU_ADD_SUB -> True , ALU_SLTX -> False, ALU_BITWISE_CTRL -> abce.ZERO )
+-    add(Rvi.SUB ).srcs(Op.SUB   , SRC1.RF, SRC2.RF).decode(ALU_ADD_SUB -> True , ALU_SLTX -> False, ALU_BITWISE_CTRL -> abce.ZERO )
+-    add(Rvi.SLT ).srcs(Op.LESS  , SRC1.RF, SRC2.RF).decode(ALU_ADD_SUB -> False, ALU_SLTX -> True , ALU_BITWISE_CTRL -> abce.ZERO )
+-    add(Rvi.SLTU).srcs(Op.LESS_U, SRC1.RF, SRC2.RF).decode(ALU_ADD_SUB -> False, ALU_SLTX -> True , ALU_BITWISE_CTRL -> abce.ZERO )
+-    add(Rvi.XOR ).srcs(           SRC1.RF, SRC2.RF).decode(ALU_ADD_SUB -> False, ALU_SLTX -> False, ALU_BITWISE_CTRL -> abce.XOR )
+-    add(Rvi.OR  ).srcs(           SRC1.RF, SRC2.RF).decode(ALU_ADD_SUB -> False, ALU_SLTX -> False, ALU_BITWISE_CTRL -> abce.OR  )
+-    add(Rvi.AND ).srcs(           SRC1.RF, SRC2.RF).decode(ALU_ADD_SUB -> False, ALU_SLTX -> False, ALU_BITWISE_CTRL -> abce.AND )
++    if(withRegisterOperands) {
++      add(Rvi.ADD ).srcs(Op.ADD   , SRC1.RF, SRC2.RF).decode(ALU_ADD_SUB -> True , ALU_SLTX -> False, ALU_BITWISE_CTRL -> abce.ZERO )
++      add(Rvi.SUB ).srcs(Op.SUB   , SRC1.RF, SRC2.RF).decode(ALU_ADD_SUB -> True , ALU_SLTX -> False, ALU_BITWISE_CTRL -> abce.ZERO )
++      add(Rvi.SLT ).srcs(Op.LESS  , SRC1.RF, SRC2.RF).decode(ALU_ADD_SUB -> False, ALU_SLTX -> True , ALU_BITWISE_CTRL -> abce.ZERO )
++      add(Rvi.SLTU).srcs(Op.LESS_U, SRC1.RF, SRC2.RF).decode(ALU_ADD_SUB -> False, ALU_SLTX -> True , ALU_BITWISE_CTRL -> abce.ZERO )
++      add(Rvi.XOR ).srcs(           SRC1.RF, SRC2.RF).decode(ALU_ADD_SUB -> False, ALU_SLTX -> False, ALU_BITWISE_CTRL -> abce.XOR )
++      add(Rvi.OR  ).srcs(           SRC1.RF, SRC2.RF).decode(ALU_ADD_SUB -> False, ALU_SLTX -> False, ALU_BITWISE_CTRL -> abce.OR  )
++      add(Rvi.AND ).srcs(           SRC1.RF, SRC2.RF).decode(ALU_ADD_SUB -> False, ALU_SLTX -> False, ALU_BITWISE_CTRL -> abce.AND )
++    }
+ 
+     add(Rvi.ADDI ).srcs(Op.ADD   , SRC1.RF, SRC2.I).decode(ALU_ADD_SUB -> True , ALU_SLTX -> False, ALU_BITWISE_CTRL -> abce.ZERO)
+     add(Rvi.SLTI ).srcs(Op.LESS  , SRC1.RF, SRC2.I).decode(ALU_ADD_SUB -> False, ALU_SLTX -> True , ALU_BITWISE_CTRL -> abce.ZERO)
+@@ -65,11 +68,11 @@
+     add(Rvi.AUIPC).srcs(Op.ADD , SRC1.U, SRC2.PC).decode(ALU_ADD_SUB -> True, ALU_SLTX -> False, ALU_BITWISE_CTRL -> abce.ZERO)
+ 
+     if(Riscv.XLEN.get == 64){
+-      add(Rvi.ADDW ).srcs(Op.ADD   , SRC1.RF, SRC2.RF).decode(ALU_ADD_SUB -> True, ALU_SLTX -> False,  ALU_BITWISE_CTRL -> abce.ZERO)
+-      add(Rvi.SUBW ).srcs(Op.SUB   , SRC1.RF, SRC2.RF).decode(ALU_ADD_SUB -> True, ALU_SLTX -> False,  ALU_BITWISE_CTRL -> abce.ZERO)
++      if(withRegisterOperands) add(Rvi.ADDW ).srcs(Op.ADD   , SRC1.RF, SRC2.RF).decode(ALU_ADD_SUB -> True, ALU_SLTX -> False,  ALU_BITWISE_CTRL -> abce.ZERO)
++      if(withRegisterOperands) add(Rvi.SUBW ).srcs(Op.SUB   , SRC1.RF, SRC2.RF).decode(ALU_ADD_SUB -> True, ALU_SLTX -> False,  ALU_BITWISE_CTRL -> abce.ZERO)
+       add(Rvi.ADDIW).srcs(Op.ADD   , SRC1.RF, SRC2.I ).decode(ALU_ADD_SUB -> True, ALU_SLTX -> False,  ALU_BITWISE_CTRL -> abce.ZERO)
+ 
+-      for(op <- List(Rvi.ADDW, Rvi.SUBW, Rvi.ADDIW)){
++      for(op <- (if(withRegisterOperands) List(Rvi.ADDW, Rvi.SUBW, Rvi.ADDIW) else List(Rvi.ADDIW))){
+         ifp.signExtend(wb, layer(op), 32)
+       }
+     }

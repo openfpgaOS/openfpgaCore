@@ -1,0 +1,39 @@
+SDRAM write-buffer MLAB-to-M10K review
+====================================
+
+The private --write-buffer-bram option changes only the QSF RAMSTYLE_ATTRIBUTE
+for axi_sdram_slave.wbuf. Its depth, width and RTL read latency are unchanged;
+no no_rw_check attribute is added.
+
+Schedule review
+---------------
+Only non-continuous 2..16-beat writes take S_WR_FILL. Each accepted beat is
+written there, and the complete burst is resident before S_WR_CMD starts.
+Beats 0 and 1 also copy directly into the command/preload registers; the first
+RAM continuation is beat 2. Command acceptance provides time to register that
+head. Later continuation pulls are at least two clocks apart, so the existing
+free-running one-cycle RAM read has time to follow each read-pointer advance.
+No fill writes occur while S_WR_BURST consumes the memory.
+
+Same-address read/write collisions can occur during fill, but their read data
+is not consumed. The isolated check_wbuf.py instrumented the existing SDRAM
+regression to poison collision reads and assert that every actual buffered
+continuation consumes the current read pointer with no collision/fill overlap.
+Result: 491 checks passed, 0 failed, 32 poisoned collision reads, 335 checked
+continuation consumptions. Source hashes and logs are under
+docs/measurements/os30-dual-20261004/wbuf-check-collision-v2/.
+This is a behavioral schedule check, not a vendor-primitive simulation.
+
+Quartus inference and physical placement
+---------------------------------------
+fit-lean-area-wbuf-v3 map.rpt (inferred-parameter section beginning at 13364)
+records RAM_BLOCK_TYPE=M10K, READ_DURING_WRITE_MODE_MIXED_PORTS=OLD_DATA,
+ADDRESS_REG_B=CLOCK0 and OUTDATA_REG_B=UNREGISTERED. Thus the original
+one-cycle read and old-data behavior are preserved.
+
+The final fit.rpt RAM row at 6778 confirms one physical M10K at
+M10K_X30_Y40_N0: 16x36, simple dual port, single clock, registered B input,
+unregistered B output and mixed-port Old data. The complete private design
+uses 18112 reported ALMs and 1848/1848 LABs. Timing qualification is separate.
+
+Production RTL and QSF were not modified by this audit.

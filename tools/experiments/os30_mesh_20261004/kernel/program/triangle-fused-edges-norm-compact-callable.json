@@ -1,0 +1,22 @@
+{
+  "words": 234,
+  "labels": {
+    "no_combine": 24,
+    "sort0": 40,
+    "sort1": 50,
+    "sort2": 60,
+    "attributes": 115,
+    "attributes_no_additive": 162,
+    "normalized": 171,
+    "absolute_det": 177,
+    "nonzero_det": 181,
+    "recip_large": 190,
+    "numerator44": 198,
+    "numerator_done": 199,
+    "recip_clamp": 209,
+    "recip_ready": 210,
+    "plane": 214,
+    "plane_full": 224,
+    "halt": 233
+  }
+}

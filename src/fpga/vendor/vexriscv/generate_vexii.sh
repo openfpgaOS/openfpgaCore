@@ -98,15 +98,25 @@ BTB_SETS=512             # BTB sets (3 M10K at 512)
 LSU_SW_PREFETCH=1        # Zicbop prefetch.r/w decode (0 = omit)
 FPU_WB_AT=1              # FPU→int writeback stage (upstream default 2; we
                          # ship 1 — tighter.  Overridable per-variant .cfg.)
+FETCH_REFILL_COUNT=2    # I$ outstanding refill slots (os30 qualifies one).
+LSU_REFILL_COUNT=2      # D$ outstanding refill slots.
+LSU_WRITEBACK_COUNT=2   # D$ outstanding writeback slots.
+OS30_FP_RS3_GROUPED=0   # Exact checked os30 FP RS3 selection factoring.
+OS30_FRONTEND_FLAT=0    # Exact checked os30 frontend Boolean factoring.
 LSU_L1_WAYS=2            # D$ associativity (sets x ways x 64 B line)
 LSU_SB_SLOTS=2           # D$ store-buffer line slots
 LSU_SB_OPS=16            # D$ store-buffer op capacity
 DIV_RADIX=2             # Integer and FP divider radix; qualified per variant.
 EXTRA_FLAGS=""
+DISPATCHER_AT=2         # Preserve every existing variant unless explicitly selected.
+OS30_RVC_PIPELINE=0     # os30-only isolated Scala source overlay.
 MAXFAN_HINT=0
 FETCH_READ_HOLD=0        # Preserve stalled reads using a registered selector.
 ALIGNER_PC_HOLD=0        # Preserve the buffered PC with a registered enable.
 FETCH_READY_FACTOR=0     # Factor the late dispatch hazard out of fetch control.
+FPU_MATCH_REG=0          # Precompute FPU register matches alongside pipeline IDs.
+FETCH_PIPELINE_HOLD=0    # Preserve fetch payloads with registered capture selectors.
+OS20_TIMING=0            # Qualified dual-issue frontend and FPU selection rewrites.
 FETCH_L1_PREFETCH=nl     # I$ hardware prefetch: nl (next line) or none.
 RELAXED_LEARN=0          # 1 = register the branch-predictor update (+1 cycle).
 NO_SHIFT_TAPS=0          # 1 = keep Quartus from packing CPU pipeline FFs into RAM.
@@ -151,22 +161,47 @@ for source_patch in "$SCRIPT_DIR"/patches/*.patch; do
     git apply "$source_patch"
 done
 
+# The optional RVC pipeline must never patch the shared generator tree:
+# other variants (including os30_worker) can elaborate concurrently. A killed
+# process can leave only its private temporary copy, never changed source.
+GENERATION_DIR="$VEXII_DIR"
+if [ "$OS30_RVC_PIPELINE" = 1 ]; then
+    [ "$VARIANT" = os30 ] || { echo "RVC pipeline is qualified only for os30" >&2; exit 1; }
+    GENERATION_DIR=$(mktemp -d "$SCRIPT_DIR/.os30-rvc.XXXXXXXX")
+    cleanup_os30_source() { rm -rf -- "$GENERATION_DIR"; }
+    trap cleanup_os30_source EXIT
+    # Preserve all build inputs, but never reuse compiled classes or outputs.
+    (set -o pipefail; tar --exclude=.git --exclude=target --exclude='VexiiRiscv*.v' \
+        --exclude=vexii_active.v -cf - . | tar -xf - -C "$GENERATION_DIR")
+    cd "$GENERATION_DIR"
+    sha256sum -c <<'OS30_SOURCE_BEFORE'
+868df74562a7d566a56ee5f3f4fbfb976978279c37b686b610cb1915ff7af9a6  src/main/scala/vexiiriscv/Param.scala
+f4caaf7bb9f885ac252ca32cd751a9394076d26da789ebf324af9ea946626460  src/main/scala/vexiiriscv/decode/AlignerPlugin.scala
+OS30_SOURCE_BEFORE
+    git apply --check "$SCRIPT_DIR/os30-rvc-pipeline.patch"
+    git apply "$SCRIPT_DIR/os30-rvc-pipeline.patch"
+    sha256sum -c <<'OS30_SOURCE_AFTER'
+d77c0726a3c33dafe4cc4736530c80a0a35818e038a389f7ed8ffe6b68769e6e  src/main/scala/vexiiriscv/Param.scala
+4d6e618b6ee7d504e40fa11523200765cb36a8747ff5379a24d7c2e4286ecb32  src/main/scala/vexiiriscv/decode/AlignerPlugin.scala
+OS30_SOURCE_AFTER
+fi
+
 # sbt always emits the bare name VexiiRiscv.v here; clear any stale copy from
 # an interrupted run so the post-gen rename can't pick up an old netlist.
 # Each variant's final file is VexiiRiscv_<variant>.v (no shared default).
-rm -f "$VEXII_DIR/VexiiRiscv.v"
+rm -f "$GENERATION_DIR/VexiiRiscv.v"
 
 sbt -Dsbt.server.forcestart=true --batch "Test/runMain vexiiriscv.Generate \
       --xlen=32 \
       --with-rvm --with-rva --with-rvf --with-rvc \
       --with-rvZcbm \
-      --with-fetch-l1 --fetch-l1-sets=$ICACHE_SETS --fetch-l1-ways=2 --fetch-l1-refill-count=2 \
+      --with-fetch-l1 --fetch-l1-sets=$ICACHE_SETS --fetch-l1-ways=2 --fetch-l1-refill-count=$FETCH_REFILL_COUNT \
       --fetch-l1-mem-data-width-min=64 \
       --fetch-l1-read-at=1 --fetch-l1-hits-at=2 --fetch-l1-hit-at=2 \
       --fetch-l1-bank-muxes-at=2 --fetch-l1-bank-mux-at=3 --fetch-l1-ctrl-at=3 \
       --fetch-l1-hardware-prefetch=$FETCH_L1_PREFETCH --fetch-axi4 \
       --with-lsu-l1 --lsu-l1-sets=$DCACHE_SETS --lsu-l1-ways=$LSU_L1_WAYS \
-      --lsu-l1-refill-count=2 --lsu-l1-writeback-count=2 \
+      --lsu-l1-refill-count=$LSU_REFILL_COUNT --lsu-l1-writeback-count=$LSU_WRITEBACK_COUNT \
       --lsu-l1-store-buffer-slots=$LSU_SB_SLOTS --lsu-l1-store-buffer-ops=$LSU_SB_OPS \
       --lsu-l1-axi4 \
       $LSU_SW_PREFETCH_FLAG --lsu-hardware-prefetch=none \
@@ -179,7 +214,7 @@ sbt -Dsbt.server.forcestart=true --batch "Test/runMain vexiiriscv.Generate \
       --fpu-add-math-stage=3 --fpu-add-norm-stage=4 --fpu-add-pack-at=5 \
       --relaxed-src --relaxed-branch --relaxed-div --relaxed-shift \
       --div-radix=$DIV_RADIX --with-store-rs2-late \
-      --dispatcher-at=2 \
+      --dispatcher-at=$DISPATCHER_AT \
       --reset-vector=0 \
       --region base=0,size=8000,main=0,exe=1 \
       --region base=10000000,size=4000000,main=1,exe=1 \
@@ -188,7 +223,7 @@ sbt -Dsbt.server.forcestart=true --batch "Test/runMain vexiiriscv.Generate \
       --region base=40000000,size=40000000,main=0,exe=0 \
       $RELAXED_LEARN_FLAG $EXTRA_FLAGS"
 
-GENERATED="$VEXII_DIR/VexiiRiscv.v"
+GENERATED="$GENERATION_DIR/VexiiRiscv.v"
 FINAL_OUTPUT="$VEXII_DIR/$OUTPUT_NAME"
 if [ ! -f "$GENERATED" ]; then
     echo "ERROR: VexiiRiscv.v not found after generation"
@@ -260,10 +295,50 @@ fi
 if [ "$FETCH_READY_FACTOR" = 1 ]; then
     perl "$SCRIPT_DIR/factor_fetch_ready.pl" "$OUTPUT"
 fi
+if [ "$FPU_MATCH_REG" = 1 ]; then
+    perl "$SCRIPT_DIR/retime_fpu_matches.pl" "$OUTPUT"
+fi
+if [ "$FETCH_PIPELINE_HOLD" = 1 ]; then
+    perl "$SCRIPT_DIR/retime_fetch_pipeline.pl" "$OUTPUT"
+fi
+if [ "$OS20_TIMING" = 1 ]; then
+    perl "$SCRIPT_DIR/optimize_os20_timing.pl" "$OUTPUT"
+fi
 # Take the store hit/redo cone off the D$ M10K write enables; reads bypass the
 # pending write, so every load and victim read returns the same data.
 if [ "$LSU_WRITE_REG" = 1 ]; then
     perl "$SCRIPT_DIR/retime_dcache_writes.pl" "$OUTPUT"
+fi
+
+# Keep this final: its hash guard includes every preceding qualified helper.
+# Failure leaves the previous published CPU intact, as with the other passes.
+if [ "$OS30_FP_RS3_GROUPED" = 1 ]; then
+    perl "$SCRIPT_DIR/factor_os30_fp_rs3.pl" "$VARIANT" "$OUTPUT"
+fi
+
+# This pass binds the exact output of the qualified RS3/helper chain.
+if [ "$OS30_FRONTEND_FLAT" = 1 ]; then
+    perl "$SCRIPT_DIR/factor_os30_frontend.pl" "$VARIANT" "$OUTPUT"
+fi
+
+# Exact os30 registered-RVC output only; other variants retain their chain.
+if [ "$OS30_RVC_PIPELINE" = 1 ]; then
+    perl "$SCRIPT_DIR/factor_os30_load_forward.pl" "$VARIANT" "$OUTPUT"
+fi
+
+# Exact os30 registered-RVC output only; other variants retain their chain.
+if [ "$OS30_RVC_PIPELINE" = 1 ]; then
+    perl "$SCRIPT_DIR/factor_os30_control_paths.pl" "$VARIANT" "$OUTPUT"
+fi
+
+# Exact os30 registered-RVC output only; other variants retain their chain.
+if [ "$OS30_RVC_PIPELINE" = 1 ]; then
+    perl "$SCRIPT_DIR/factor_os30_parallel_paths.pl" "$VARIANT" "$OUTPUT"
+fi
+
+# Exact os30 registered-RVC output only; other variants retain their chain.
+if [ "$OS30_RVC_PIPELINE" = 1 ]; then
+    perl "$SCRIPT_DIR/factor_os30_endpoint_paths.pl" "$VARIANT" "$OUTPUT"
 fi
 
 mv -f "$OUTPUT" "$FINAL_OUTPUT"

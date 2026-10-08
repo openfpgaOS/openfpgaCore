@@ -3,6 +3,9 @@
 
 Reports component workload cycles and exact pixels, not complete-game FPS.
 With --no-command-dma, checks the SDK against a core with the DMA removed.
+
+This legacy fixture reads common modules directly, without variants/*.sources.
+See check_gpu_target_matrix.py for the separate selected-os30 source provenance.
 """
 import argparse
 import hashlib
@@ -24,7 +27,7 @@ def run(command, logfile, **kwargs):
 
 
 def sdram_parameters(config, output):
-    """Read the controller configuration from the preprocessed production top."""
+    """Read controller settings from the common top, without variant source maps."""
     def decimal(value):
         match = re.fullmatch(r"(?:\d+'[dD])?(\d+)", value.strip())
         if not match:

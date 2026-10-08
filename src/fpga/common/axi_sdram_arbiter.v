@@ -54,7 +54,9 @@
 module axi_sdram_arbiter #(
     parameter [3:0] CPU_FAIR_THRESHOLD   = 4'd8, // Force CPU grant after this many non-CPU grants
     parameter [3:0] BRG_FAIR_THRESHOLD   = 4'd12,// Force bridge grant after this many non-bridge grants
-    parameter [3:0] GPU_WRITE_READ_BUDGET = 4'd4 // Max GPU reads while posted writes wait
+    parameter [3:0] GPU_WRITE_READ_BUDGET = 4'd4, // Max GPU reads while posted writes wait
+    parameter BUFFERED_SLAVE = 1'b0, // Address queues may accept again before completion
+    parameter GPU_WRITE_QUEUE_DEPTH = 8 // Power of two, at least one 8-word burst
 ) (
     input wire clk,
     input wire reset_n,
@@ -212,13 +214,13 @@ wire audio_pending = m3_arvalid;
 // GPU bursts are split into consecutive queue entries and one B is returned
 // when the entry carrying WLAST commits.
 //
-// Keep this deliberately compact.  The GPU emits up to 8-beat contiguous
-// framebuffer write bursts; an 8-entry queue holds one full burst and gives
-// useful read/write decoupling without spending the routing/ALM budget of a
-// larger register FIFO in the already dense 100 MHz SDRAM domain.
-localparam GPU_WQ_DEPTH = 8;
-localparam GPU_WQ_HIGH_WATERMARK = 6;
-localparam GPU_WQ_PTR_W = 3;
+// Eight entries hold one complete GPU burst. os30 uses sixteen so the next
+// burst can queue while the current burst commits, reducing gaps during
+// clears and cache writebacks. Slots still retire on the downstream B;
+// capacity does not change the burst limit or completion semantics.
+localparam GPU_WQ_DEPTH = GPU_WRITE_QUEUE_DEPTH;
+localparam GPU_WQ_HIGH_WATERMARK = GPU_WQ_DEPTH - 2;
+localparam GPU_WQ_PTR_W = $clog2(GPU_WQ_DEPTH);
 
 reg [31:0] gpu_wq_addr [0:GPU_WQ_DEPTH-1];
 reg [31:0] gpu_wq_data [0:GPU_WQ_DEPTH-1];
@@ -226,7 +228,7 @@ reg [3:0]  gpu_wq_strb [0:GPU_WQ_DEPTH-1];
 reg        gpu_wq_last [0:GPU_WQ_DEPTH-1];
 reg [GPU_WQ_PTR_W-1:0] gpu_wq_rd_ptr;
 reg [GPU_WQ_PTR_W-1:0] gpu_wq_wr_ptr;
-reg [3:0]  gpu_wq_count;
+reg [GPU_WQ_PTR_W:0] gpu_wq_count;
 
 reg        m0w_active;
 reg [31:0] m0w_addr;
@@ -241,9 +243,9 @@ wire grant_m3 = (grant == 2'd3);
 wire active_rd = (arb_state == ST_RD);
 wire active_wr = (arb_state == ST_WR);
 
-wire gpu_wq_empty = (gpu_wq_count == 5'd0);
-wire gpu_wq_full  = (gpu_wq_count == 4'd8);
-wire [4:0] gpu_wq_free = 5'd8 - {1'b0, gpu_wq_count};
+wire gpu_wq_empty = (gpu_wq_count == 0);
+wire gpu_wq_full  = (gpu_wq_count == GPU_WQ_DEPTH);
+wire [GPU_WQ_PTR_W:0] gpu_wq_free = GPU_WQ_DEPTH - gpu_wq_count;
 wire [4:0] m0_aw_beats = {1'b0, m0_awlen[3:0]} + 5'd1;
 wire       m0_aw_supported = (m0_awlen[7:3] == 5'd0);
 wire       m0_aw_has_space = m0_aw_supported && (gpu_wq_free >= m0_aw_beats);
@@ -319,7 +321,7 @@ wire       active_gpuq_wlast = (gpuq_w_idx == active_gpuq_awlen);
 // re-land the early-free without first resurrecting tb_gpu_wrpath and
 // adding a count/B-per-AW invariant soak there.
 wire [3:0] gpu_wq_pop_count = gpu_wq_pop ? ({1'b0, active_gpuq_awlen} + 4'd1) : 4'd0;
-wire       gpu_wq_high     = (gpu_wq_count >= GPU_WQ_HIGH_WATERMARK[3:0]);
+wire       gpu_wq_high     = (gpu_wq_count >= GPU_WQ_HIGH_WATERMARK);
 wire [3:0] gpu_wq_read_budget_limit = gpu_wq_high ? 4'd1 : GPU_WRITE_READ_BUDGET;
 wire       gpu_wq_read_budget_spent = (gpu_reads_since_write >= gpu_wq_read_budget_limit);
 wire       gpu_wq_should_drain = gpu_wq_head_ready &&
@@ -329,6 +331,26 @@ wire       gpu_wq_should_drain = gpu_wq_head_ready &&
 // S_IDLE while the arbiter is still registered in ST_WR/ST_RD.
 wire rd_completing = active_rd && s_rvalid && s_rlast;
 wire wr_completing = active_wr && s_bvalid;
+
+// The legacy single-transaction slave drops READY after one address. A
+// clock bridge can remain ready, so explicitly retire each address handshake
+// until this grant completes. Also block an upstream next AR on RLAST: it
+// must not see READY while the completion guard suppresses downstream VALID.
+reg ar_sent, aw_sent;
+always @(posedge clk or posedge reset) begin
+    if (reset) begin
+        ar_sent <= 1'b0;
+        aw_sent <= 1'b0;
+    end else if (!BUFFERED_SLAVE || arb_state == ST_IDLE) begin
+        ar_sent <= 1'b0;
+        aw_sent <= 1'b0;
+    end else begin
+        if (s_arvalid && s_arready) ar_sent <= 1'b1;
+        if (s_awvalid && s_awready) aw_sent <= 1'b1;
+    end
+end
+wire ar_ready_once = s_arready && (!BUFFERED_SLAVE || (!ar_sent && !rd_completing));
+wire aw_ready_once = s_awready && (!BUFFERED_SLAVE || (!aw_sent && !wr_completing));
 
 // Grant arbitration, M0 posted-write receiver, and M0 B response generation.
 always @(posedge clk or posedge reset) begin
@@ -343,7 +365,7 @@ always @(posedge clk or posedge reset) begin
         brg_deficit <= 4'd0;
         gpu_wq_rd_ptr <= {GPU_WQ_PTR_W{1'b0}};
         gpu_wq_wr_ptr <= {GPU_WQ_PTR_W{1'b0}};
-        gpu_wq_count <= 4'd0;
+        gpu_wq_count <= 0;
         m0w_active <= 1'b0;
         m0w_addr <= 32'd0;
         m0w_beats_left <= 8'd0;
@@ -510,7 +532,7 @@ end
 // ============================================
 
 // AR channel.
-assign s_arvalid = (active_rd && !rd_completing) ? (grant_m0 ? m0_arvalid :
+assign s_arvalid = (active_rd && !rd_completing && (!BUFFERED_SLAVE || !ar_sent)) ? (grant_m0 ? m0_arvalid :
                                                      grant_m1 ? m1_arvalid :
                                                      grant_m2 ? m2_arvalid :
                                                                 m3_arvalid) : 1'b0;
@@ -525,7 +547,7 @@ assign s_arlen   = grant_m0 ? m0_arlen   :
 // contiguous full-strobe framebuffer AW (up to 8 beats) is coalesced into a
 // single slave burst (s_awlen = run length), amortizing the per-grant AW /
 // arbitration / SDRAM command overhead over the whole span.
-assign s_awvalid = (active_wr && !wr_completing)
+assign s_awvalid = (active_wr && !wr_completing && (!BUFFERED_SLAVE || !aw_sent))
                  ? (active_wr_gpuq ? 1'b1 :
                     grant_m1       ? m1_awvalid :
                     grant_m2       ? m2_awvalid : 1'b0)
@@ -551,10 +573,10 @@ assign s_wlast   = active_wr_gpuq ? active_gpuq_wlast :
 // Slave -> Master channel demux (combinational)
 // ============================================
 
-assign m0_arready = (active_rd && grant_m0) ? s_arready : 1'b0;
-assign m1_arready = (active_rd && grant_m1) ? s_arready : 1'b0;
-assign m2_arready = (active_rd && grant_m2) ? s_arready : 1'b0;
-assign m3_arready = (active_rd && grant_m3) ? s_arready : 1'b0;
+assign m0_arready = (active_rd && grant_m0) ? ar_ready_once : 1'b0;
+assign m1_arready = (active_rd && grant_m1) ? ar_ready_once : 1'b0;
+assign m2_arready = (active_rd && grant_m2) ? ar_ready_once : 1'b0;
+assign m3_arready = (active_rd && grant_m3) ? ar_ready_once : 1'b0;
 
 assign m0_rvalid = (active_rd && grant_m0) ? s_rvalid : 1'b0;
 assign m1_rvalid = (active_rd && grant_m1) ? s_rvalid : 1'b0;
@@ -583,8 +605,8 @@ assign m2_rlast  = s_rlast;
 assign m3_rlast  = s_rlast;
 
 assign m0_awready = !m0w_active && m0_aw_has_space;
-assign m1_awready = (active_wr && grant_m1 && !active_wr_gpuq) ? s_awready : 1'b0;
-assign m2_awready = (active_wr && grant_m2 && !active_wr_gpuq) ? s_awready : 1'b0;
+assign m1_awready = (active_wr && grant_m1 && !active_wr_gpuq) ? aw_ready_once : 1'b0;
+assign m2_awready = (active_wr && grant_m2 && !active_wr_gpuq) ? aw_ready_once : 1'b0;
 
 assign m0_wready = m0w_active && !gpu_wq_full;
 assign m1_wready = (active_wr && grant_m1 && !active_wr_gpuq) ? s_wready : 1'b0;

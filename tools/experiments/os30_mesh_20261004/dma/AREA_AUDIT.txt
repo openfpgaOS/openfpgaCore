@@ -1,0 +1,61 @@
+SM64 mesh area audit and exact refactors, 2026-10-04
+==================================================
+
+The v7 private prepared-raster core already disables the unused parametric
+span/triangle commands, palette, original vertex transform/cache/derivation,
+Q29 precision, command DMA and optional DOT/extended mesh operations. The
+remaining depth, perspective, truecolor alpha blend, texel*C+D combiner,
+texture cache, render cache and stream pipe are used by SM64. Disabling them
+would change rendering or discard established throughput improvements.
+
+One demonstrably unused physical feature remains: dedicated texture memory.
+Current SM64 gfx_gpu.c allocates its textures using posix_memalign, writes its
+SDRAM buffers and sends their physical addresses. It only prints FAST_TEX;
+no texture-route/upload API is used. of_gpu_init() does not enable that route.
+The private fit.py now has --no-texmem, removing INCLUDE_TEX_MEM consistently
+from the frozen top/peripheral/GPU feature macros. Production defaults are
+unchanged. v7 measured hierarchy costs are 170.7 ALMs for cram1_controller and
+20.5 for gpu_cram1_tex_adapter, plus unmeasured BCR and GPU upload/route glue.
+This is the dedicated GPU texture chip, not CPU RAM. Other applications must
+obey capability bit25 and use their SDRAM fallback; the current trial remains
+SM64-specific and is not a claim about their throughput.
+
+No further broad GPU feature deletion is justified from the examined SM64
+path. Eight v3 complete frames contain only commands 0x62, 0x63, 0x4A, 0x02,
+0x11 and 0x42 before mesh expansion. This confirms these frames, not every
+menu/level or another application's capability use.
+
+Two exact arithmetic refactors, same ports and cycles:
+
+1. gpu_mesh_vertex.v selects operands before one 64-bit adder. Matrix and
+   light accumulation, unsigned light/fog correction, high-word accumulation
+   and fog offset happen in mutually exclusive states. Every result remains
+   the same modulo64 integer value, including extreme/fuzz lighting values.
+   It does not assume a bounded real-game light vector or drop high bits.
+
+2. gpu_mesh_project.v replaces a 64-bit product negation followed by addition
+   with one 53-bit add/sub chain. The greatest-magnitude term is any signed64
+   product shifted right12, which fits signed52. Adding a signed32 viewport
+   center shifted left4 fits signed53. The Y terms (product>>16 and center)
+   have a smaller bound. Saturation to signed16 occurs only after retaining
+   the complete signed53 sum. This needs no captured viewport assumption.
+
+Validation:
+  vertex-unit-v3-shared-add: 65,264 captured/fuzz vertices, all 456,848 vertex
+  words exact, 514 cancellation phases, unchanged 4,395,820 unit cycles.
+  vertex-engine-v3-shared-add: 65,264 complete instruction programs, 3,002,144
+  exact words and exact cycle counts, persistent scratch guards, following
+  MUL/DIV, 90 cancellation phases and illegal-op behavior.
+  project-engine-v3-area: 85,744 PROJ/PROJA programs, 2,143,600 exact words and
+  exact cycles, arbitrary viewport/32-bit denominator boundaries, preserved
+  context, shared-resource return and 150 cancellation phases.
+  root whole-mesh-area-final-v1: 13,457 complete programs, 617,605 exact words
+  and cycle counts, including the root's lean unused-op gates.
+All evidence directories are under docs/measurements/os30-mesh-20261004/.
+
+Root separately gated unused SEXT and plain PROJ47 in EXTENDED_ISA=0; PROJA51
+remains. The full/default ISA is unchanged. No settings or arithmetic area
+saving is claimed until the combined mesh-v8-area-notex fit reports it.
+The nominal 191-ALM physical block cut and unmeasured arithmetic sharing do
+not yet prove the approximately 720-ALM conservative placement target. No
+memory-bit saving is counted as an ALM saving.

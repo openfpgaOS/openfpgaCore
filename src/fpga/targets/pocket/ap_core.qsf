@@ -897,6 +897,7 @@ set_global_assignment -name VERILOG_FILE ../../common/audio_mixer.v
 # cram1_burst_mmio.v retired in memory-arch v2.
 set_global_assignment -name VERILOG_FILE audio_output.v
 set_global_assignment -name VERILOG_FILE ../../common/gpu_core.v
+set_global_assignment -name VERILOG_FILE ../../common/gpu_geometry_worker.v
 set_global_assignment -name VERILOG_FILE ../../common/gpu_edge_walker.v
 set_global_assignment -name VERILOG_FILE ../../common/gpu_tex_cache.v
 set_global_assignment -name SYSTEMVERILOG_FILE ../../common/gpu_color_depth_cache.sv
@@ -957,3 +958,7 @@ set_instance_assignment -name RAMSTYLE_ATTRIBUTE MLAB -to *sdram_axi_slave|wbuf*
 # the Lite-compatible fallback is set_location_assignment on the ~20
 # spiclk-domain FFs (ibs|rx_dat*, ibs|rx_byte_*, ibs|ss_tgl) near the
 # bridge pin bank (pins at X54_Y20 / X42_Y45).
+
+# Opt-in os30 83/83/166 clock experiment (unused modules prune in normal builds).
+set_global_assignment -name VERILOG_FILE ../../common/axi_sdram_clock_bridge.v
+set_global_assignment -name VERILOG_FILE megafunctions/mf_pllram_166.v

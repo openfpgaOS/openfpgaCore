@@ -97,6 +97,7 @@ GPU_SRCS = \
 	tb_gpu.v \
 	altsyncram_stub.v \
 	$(COMMON_DIR)/gpu_core.v \
+	$(COMMON_DIR)/gpu_geometry_worker.v \
 	$(COMMON_DIR)/gpu_edge_walker.v \
 	$(COMMON_DIR)/gpu_tex_cache.v
 
@@ -1057,7 +1058,10 @@ gpu-acceptance-os30-exact: $(GPU_ACCEPT_OS30X_DIR)/V$(GPU_TOP)
 	./$(GPU_ACCEPT_OS30X_DIR)/V$(GPU_TOP)
 
 # Independent analytic coverage: pixel centers and watertight shared edges.
-.PHONY: gpu-edge-coverage
+.PHONY: gpu-edge-coverage gpu-edge-range
+gpu-edge-range:
+	python3 ../../../tools/check_gpu_edge_range.py
+
 gpu-edge-coverage:
 	$(VERILATOR) --cc --exe --build -j 4 -Wno-fatal --top-module gpu_edge_walker \
 		--Mdir obj_dir_edge_coverage $(COMMON_DIR)/gpu_edge_walker.v tb_gpu_edge_coverage.cpp
@@ -1386,6 +1390,31 @@ axi-periph: $(AXI_PERIPH_DIR)/V$(AXI_PERIPH_TOP)
 	@printf "\n=== AXI periph slave ===\n"
 	./$(AXI_PERIPH_DIR)/V$(AXI_PERIPH_TOP)
 
+# Exercise the os20 perspective/depth capability cuts through actual MMIO.
+.PHONY: axi-periph-affine
+axi-periph-affine: obj_dir_axi_periph_affine/V$(AXI_PERIPH_TOP)
+	./obj_dir_axi_periph_affine/V$(AXI_PERIPH_TOP)
+
+obj_dir_axi_periph_affine/V$(AXI_PERIPH_TOP): $(AXI_PERIPH_SRCS) $(AXI_PERIPH_CPP)
+	$(VERILATOR) $(VERILATOR_FLAGS) $(AXI_PERIPH_FLAGS) \
+		+define+INCLUDE_ANALOGIZER +define+INCLUDE_LINK \
+		-GINCLUDE_PERSPECTIVE=0 -GINCLUDE_DEPTH=0 \
+		-CFLAGS "-DGPU_TEST_NO_PERSPECTIVE -DGPU_TEST_NO_DEPTH" \
+		--top-module $(AXI_PERIPH_TOP) --Mdir obj_dir_axi_periph_affine \
+		-I$(COMMON_DIR) $(AXI_PERIPH_SRCS) $(AXI_PERIPH_CPP)
+
+# os30's triangle GPU keeps perspective/depth but omits long-form span lists.
+.PHONY: axi-periph-triangles
+axi-periph-triangles: obj_dir_axi_periph_triangles/V$(AXI_PERIPH_TOP)
+	./obj_dir_axi_periph_triangles/V$(AXI_PERIPH_TOP)
+
+obj_dir_axi_periph_triangles/V$(AXI_PERIPH_TOP): $(AXI_PERIPH_SRCS) $(AXI_PERIPH_CPP)
+	$(VERILATOR) $(VERILATOR_FLAGS) $(AXI_PERIPH_FLAGS) \
+		+define+INCLUDE_ANALOGIZER +define+INCLUDE_LINK \
+		-GINCLUDE_PARAM_SPAN_LIST=0 -CFLAGS "-DGPU_TEST_NO_PARAM_SPAN_LIST" \
+		--top-module $(AXI_PERIPH_TOP) --Mdir obj_dir_axi_periph_triangles \
+		-I$(COMMON_DIR) $(AXI_PERIPH_SRCS) $(AXI_PERIPH_CPP)
+
 .PHONY: axi-periph-mister
 axi-periph-mister: obj_dir_axi_periph_mister/V$(AXI_PERIPH_TOP)
 	./obj_dir_axi_periph_mister/V$(AXI_PERIPH_TOP)
@@ -1682,7 +1711,7 @@ clean:
 	rm -rf $(SDRAM_DIR) $(SDRAM_SERIAL_DIR) $(SDRAM_NATIVE2_DIR) $(SRAM_DIR) $(GPU_DIR) $(GPU_FLOOR_DIR) \
 	       $(GPU_GPUDEMO_DIR) $(GPU_ACCEPT_DIR) $(GPU_ACCEPT_SINGLE_DIR) \
 	       $(GPU_ACCEPT_OS30_DIR) $(GPU_ACCEPT_ZRAW_DIR) $(SCANOUT_LEAN_DIR) \
-	       $(AXI_PERIPH_DIR) \
+	       $(AXI_PERIPH_DIR) obj_dir_axi_periph_affine obj_dir_axi_periph_triangles \
 	       $(AUDIO_DIR) $(MIXER_DIR) $(MIXER_MISTER_DIR) $(SYSTEM_DIR) \
 	       $(ARBITER_DIR) \
 	       obj_dir_gpu obj_dir_gpu_floor obj_dir_gpu_gpudemo \

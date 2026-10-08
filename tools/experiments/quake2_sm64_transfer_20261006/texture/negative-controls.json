@@ -1,0 +1,71 @@
+{
+  "all_detected": true,
+  "controls": [
+    {
+      "mutation": "rounded_source_read",
+      "file": "src/sdk/include/of_texture.h",
+      "original": "    uint32_t words = nbytes >> 2;",
+      "replacement": "    _of_gpu_fast_tex_upload(off, (const uint32_t *)src, (nbytes + 3u) >> 2);\n    uint32_t words = nbytes >> 2;",
+      "exit_code": 1,
+      "detected": true,
+      "failure_evidence": [
+        "==16==ERROR: AddressSanitizer: heap-buffer-overflow on address 0x7c12ab7e0010 at pc 0x0000004016ef bp 0x7ffc88a4caa0 sp 0x7ffc88a4ca90"
+      ]
+    },
+    {
+      "mutation": "init_route",
+      "file": "src/quake2/openfpga/of_emit_q2.c",
+      "original": "of_texture_init();\n\tofq2_texture_route_sdram();\n\tofq2_tex_generation = 1;",
+      "replacement": "of_texture_init();\n\tofq2_tex_generation = 1;",
+      "exit_code": 1,
+      "detected": true,
+      "failure_evidence": [
+        "texture_test: /home/alberto/Repos/openfpgaCore/tools/experiments/quake2_sm64_transfer_20261006/texture/texture_test.c:91: setup: Assertion `strcmp(events, version >= 3 && bytes ? \"IS\" : \"I\") == 0' failed."
+      ]
+    },
+    {
+      "mutation": "reset_drain",
+      "file": "src/quake2/openfpga/of_emit_q2.c",
+      "original": "\tOFQ2_Finish();\n\tof_texture_reset();",
+      "replacement": "\tof_texture_reset();",
+      "exit_code": 1,
+      "detected": true,
+      "failure_evidence": [
+        "texture_test: /home/alberto/Repos/openfpgaCore/tools/experiments/quake2_sm64_transfer_20261006/texture/texture_test.c:161: test_lifecycle_and_domains: Assertion `strcmp(events, \"F\") == 0' failed."
+      ]
+    },
+    {
+      "mutation": "reinit_drain",
+      "file": "src/quake2/openfpga/of_emit_q2.c",
+      "original": "\tOFQ2_Finish();\n\tof_texture_init();",
+      "replacement": "\tof_texture_init();",
+      "exit_code": 1,
+      "detected": true,
+      "failure_evidence": [
+        "texture_test: /home/alberto/Repos/openfpgaCore/tools/experiments/quake2_sm64_transfer_20261006/texture/texture_test.c:27: _of_gpu_route_fast_tex: Assertion `!pending' failed."
+      ]
+    },
+    {
+      "mutation": "shutdown_route",
+      "file": "src/quake2/openfpga/of_emit_q2.c",
+      "original": "\t\tofq2_texture_route_sdram();\n\t\tof_gpu_shutdown();",
+      "replacement": "\t\tof_gpu_shutdown();",
+      "exit_code": 1,
+      "detected": true,
+      "failure_evidence": [
+        "texture_test: /home/alberto/Repos/openfpgaCore/tools/experiments/quake2_sm64_transfer_20261006/texture/texture_test.c:181: test_lifecycle_and_domains: Assertion `strcmp(events, \"FSD\") == 0' failed."
+      ]
+    },
+    {
+      "mutation": "create_clean",
+      "file": "src/quake2/openfpga/of_emit_q2.c",
+      "original": "\tif (ofq2_ready)\n\t\tOFQ2_CacheClean(pixels, nbytes);",
+      "replacement": "",
+      "exit_code": 1,
+      "detected": true,
+      "failure_evidence": [
+        "texture_test: /home/alberto/Repos/openfpgaCore/tools/experiments/quake2_sm64_transfer_20261006/texture/texture_test.c:105: test_exact_sizes: Assertion `clean_count == 1 && events[0] == 'C'' failed."
+      ]
+    }
+  ]
+}

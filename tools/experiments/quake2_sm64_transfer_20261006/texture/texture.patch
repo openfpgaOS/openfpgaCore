@@ -1,0 +1,106 @@
+--- a/src/sdk/include/of_texture.h
++++ b/src/sdk/include/of_texture.h
+@@ -116,7 +116,18 @@
+ /* Internal: bump-allocate + upload `nbytes` of `src` into fast memory. */
+ static inline uint32_t _of_tex_fast_put(const void *src, uint32_t nbytes) {
+     uint32_t off = _of_tex_fast_top;
+-    _of_gpu_fast_tex_upload(off, (const uint32_t *)src, (nbytes + 3u) >> 2);
++    uint32_t words = nbytes >> 2;
++    if (words)
++        _of_gpu_fast_tex_upload(off, (const uint32_t *)src, words);
++    /* A 1x1 RGB565 image has only two allocated bytes. Never read beyond
++     * the caller's source to round it up to the hardware's word width. */
++    if (nbytes & 3u) {
++        const uint8_t *tail = (const uint8_t *)src + (words << 2);
++        uint32_t last = 0;
++        for (uint32_t i = 0; i < (nbytes & 3u); ++i)
++            last |= (uint32_t)tail[i] << (i * 8u);
++        _of_gpu_fast_tex_upload(off + (words << 2), &last, 1u);
++    }
+     _of_tex_fast_top = (off + nbytes + 15u) & ~15u;   /* 16-byte align next */
+     return off;
+ }
+--- a/src/quake2/openfpga/of_emit_q2.c
++++ b/src/quake2/openfpga/of_emit_q2.c
+@@ -104,6 +104,19 @@
+ typedef char ofq2_texture_layout_check[
+ 	(sizeof(ofq2_texture_t) == sizeof(of_texture_t)) ? 1 : -1];
+ 
++/* The texture route survives GPU soft reset and shutdown. Normalize it only
++ * with an idle GPU and a reported fast-memory tier; SDRAM-only cores need no
++ * route-register access. This does not recreate or migrate texture handles. */
++static void
++ofq2_texture_route_sdram(void)
++{
++	if (of_texture_has_fast_mem())
++	{
++		_of_gpu_route_fast_tex(0);
++		_of_tex_bound = 0;
++	}
++}
++
+ int
+ OFQ2_Init(int fb_stride)
+ {
+@@ -253,6 +266,7 @@
+ 	/* fast-texture manager: read tex_fast_size now that the GPU is up
+ 	 * (no-op / SDRAM-only when the target has no fast texture tier). */
+ 	of_texture_init();
++	ofq2_texture_route_sdram();
+ 	ofq2_tex_generation = 1;
+ 
+ 	ofq2_ready = true;
+@@ -267,7 +281,10 @@
+ {
+ 	if (!ofq2_ready)
+ 		return;
++	/* Reinitialization invalidates all handles: finish their draws first. */
++	OFQ2_Finish();
+ 	of_texture_init();
++	ofq2_texture_route_sdram();
+ 	ofq2_tex_generation = 1;
+ }
+ 
+@@ -276,6 +293,8 @@
+ {
+ 	if (!ofq2_ready)
+ 		return;
++	/* Drain before new uploads reuse offsets referenced by queued draws. */
++	OFQ2_Finish();
+ 	of_texture_reset();
+ 	ofq2_tex_generation++;
+ }
+@@ -355,6 +374,7 @@
+ 	if (ofq2_ready)
+ 	{
+ 		OFQ2_Finish();
++		ofq2_texture_route_sdram();
+ 		of_gpu_shutdown();
+ 	}
+ 
+--- a/src/quake2/openfpga/of_gl1.c
++++ b/src/quake2/openfpga/of_gl1.c
+@@ -1011,7 +1011,6 @@
+ 	{
+ 		white[i] = 0xFFFF;
+ 	}
+-	OFQ2_CacheClean(white, sizeof(white));
+ 	OFQ2_TexCreate(&ofgl_flat_tex, white, 8, 8, sizeof(white));
+ 	ofgl_flat_ready = 1;
+ }
+@@ -1767,7 +1766,6 @@
+ 		if (!ct->gtex_valid && ct->texels)
+ 		{
+ 			/* fallback lazy build (world textures are built eagerly at upload) */
+-			OFQ2_CacheClean(ct->texels, (size_t)ct->w * (size_t)ct->h * 2);
+ 			OFQ2_TexCreate(&ct->gtex, ct->texels, ct->w, ct->h,
+ 				(uint32_t)((size_t)ct->w * (size_t)ct->h * 2));
+ 			ct->gtex_valid = 1;
+@@ -2934,7 +2932,6 @@
+ 	if (ofgl_tex_is3d(ofgl_store_texture) &&
+ 		up_tex != OFGL_TEXNUM_SCRAPS && ofgl_gpu_ok)
+ 	{
+-		OFQ2_CacheClean(t->texels, n * 2);
+ 		OFQ2_TexCreate(&t->gtex, t->texels, t->w, t->h, (uint32_t)(n * 2));
+ 		t->gtex_valid = 1;
+ 		if (t->gtex.flags & 0x1u)	/* _OF_TEX_FAST: lives in CRAM, not the heap */

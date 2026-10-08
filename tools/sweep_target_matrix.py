@@ -114,12 +114,38 @@ def docker(out, target, cwd, command):
     raise ValueError('No Quartus backend for target ' + target)
 
 
+
+def pocket_source_overrides(text, source_map):
+    """Select an optional variant snapshot without changing other variants."""
+    if not source_map.is_file():
+        return text
+    overrides = {}
+    for line in source_map.read_text().splitlines():
+        fields = line.split()
+        if not fields or fields[0].startswith('#'):
+            continue
+        if len(fields) != 2 or fields[0] in overrides:
+            raise ValueError('Invalid source override: ' + line)
+        overrides[fields[0]] = fields[1]
+    for old, new in overrides.items():
+        pattern = r'^(set_global_assignment -name (?:VERILOG_FILE|SYSTEMVERILOG_FILE) )' + re.escape(old) + r'$'
+        text, count = re.subn(pattern, lambda match: match[1] + new, text, flags=re.M)
+        if count != 1:
+            raise ValueError('Source override must match once: ' + old)
+    return text
+
+
 def prepare(frozen, dest, row, seed, processors):
     shutil.copytree(frozen, dest)
     project = 'mister' if row['target'] == 'mister' else 'ap_core'
     directory = dest / 'src/fpga/targets' / row['target']
     qsf = directory / (project + '.qsf')
     text = qsf.read_text()
+    variant_qsf = directory / 'variants' / (row['variant'] + '.qsf')
+    if row['target'] == 'pocket' and variant_qsf.is_file():
+        text += '\n' + variant_qsf.read_text()
+    if row['target'] == 'pocket':
+        text = pocket_source_overrides(text, directory / 'variants' / (row['variant'] + '.sources'))
     legacy_selector = row['target'] == 'mister' and 'source cpu_select.tcl' in text
     text = re.sub(r'^set_global_assignment -name (SEED|NUM_PARALLEL_PROCESSORS) .*\n',
                   '', text, flags=re.M)

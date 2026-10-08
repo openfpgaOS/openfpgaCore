@@ -1,0 +1,103 @@
+{
+  "destination": "/home/alberto/Repos/Quake2",
+  "files": [
+    {
+      "path": "src/quake2/Makefile",
+      "source": "/tmp/quake2-sm64-20261006/candidate/src/quake2/Makefile",
+      "before": "eec1f0fc08665bac555633ff406ae67a44aaf951c1b7b54ca4590a3ea5af542c",
+      "after": "af18bb2ba1b70482a7b7fe44d7e6ce4ab941aaff9b3c4ae3c3df993c215b0fc6"
+    },
+    {
+      "path": "src/quake2/openfpga/input_of.c",
+      "source": "/tmp/quake2-sm64-20261006/candidate/src/quake2/openfpga/input_of.c",
+      "before": "eb85b646c3b09c272c2c563f053eafdddba2aa8f9920fb36ba108b88c3fe57ca",
+      "after": "1f6d864c7c2e2ec8fb2429a974d9ad389e676645f6978f5247055a8a588faeea"
+    },
+    {
+      "path": "src/quake2/openfpga/of_emit_q2.c",
+      "source": "/tmp/quake2-sm64-20261006/candidate/src/quake2/openfpga/of_emit_q2.c",
+      "before": "5eaa6e73aaef240c57e42cb2dacbcc13f07eefba6a8156b98ffe6f2c9405a7cd",
+      "after": "63aaa50d302721ac0b5e72921c34649177e7866b80ecfec4be0612bd0167f71f"
+    },
+    {
+      "path": "src/quake2/openfpga/of_emit_q2.h",
+      "source": "/tmp/quake2-sm64-20261006/candidate/src/quake2/openfpga/of_emit_q2.h",
+      "before": "7ed350dca75646f38f8e5205ed26e1ebb339cf5cebecd341f1689ad8789f2ef3",
+      "after": "de7742d1d35e63660a3db8a9857bf37f6a6930d1a8f54e1bffd9f43c938b3b69"
+    },
+    {
+      "path": "src/quake2/openfpga/of_gl1.c",
+      "source": "/tmp/quake2-sm64-20261006/candidate/src/quake2/openfpga/of_gl1.c",
+      "before": "cf0dfcea1a0cd5e0c292ca7667ab42e140d15f574d91ea79de7ca3254c358103",
+      "after": "fd93411dd58ec75dc931928c5bf1303cf6e85ede607ca9a3cb85468d69e8de54"
+    },
+    {
+      "path": "src/quake2/openfpga/of_gpu_profile_q2.h",
+      "source": "/tmp/quake2-sm64-20261006/candidate/src/quake2/openfpga/of_gpu_profile_q2.h",
+      "before": null,
+      "after": "6c2e77e262432066fe9e5cc86b64f44ad004b1453898e9d65f0264f01cad382a"
+    },
+    {
+      "path": "src/quake2/src/client/cl_screen.c",
+      "source": "/tmp/quake2-sm64-20261006/candidate/src/quake2/src/client/cl_screen.c",
+      "before": "674a9d7d8d0d8f436f18b1e62c16672618497c28329b53a44842907aa067ee4c",
+      "after": "586e675c93a545716840e3593860debfdd1f0f90b41dfbbc58f1af33572fb9e3"
+    },
+    {
+      "path": "src/sdk/include/of_gpu.h",
+      "source": "/tmp/quake2-sm64-20261006/candidate/src/sdk/include/of_gpu.h",
+      "before": "c7309a6e45e2b8baccad7e23bcd30e35fdfa0817a77bcc2de0c23bed1eda3e63",
+      "after": "b0b227de408e6399d88c5c9dce7dde44ce4107c3d952d5a106f0ee6842e7f1fe"
+    },
+    {
+      "path": "src/sdk/include/of_texture.h",
+      "source": "/tmp/quake2-sm64-20261006/candidate/src/sdk/include/of_texture.h",
+      "before": "12ec590ceb83b0f8d0bc48ca137960c230bfd648c50265c3dbe669d65f1cc593",
+      "after": "e7023575e98857e011c1bb3514f3d832a1fe067d91e33a265e85bfce6d529775"
+    },
+    {
+      "path": "tools/check_quake2_gpu_profile.py",
+      "source": "/tmp/quake2-sm64-20261006/candidate/tools/check_quake2_gpu_profile.py",
+      "before": null,
+      "after": "70fa4e1a97561821801d35bcbad9959dc4d8c043897b4618d8923818fac2e871"
+    },
+    {
+      "path": "tools/check_quake2_textures.py",
+      "source": "/tmp/quake2-sm64-20261006/candidate/tools/check_quake2_textures.py",
+      "before": null,
+      "after": "68265cbdb26ff110ce4cc1b73d6c0c954f577b955876d7bd6ebfb1bfc918f91a"
+    },
+    {
+      "path": "tools/tests/quake2_texture_test.c",
+      "source": "/tmp/quake2-sm64-20261006/candidate/tools/tests/quake2_texture_test.c",
+      "before": null,
+      "after": "16cc9c6cfa8e89b2b68a247a783a37090ed0ca66a6b626e3883717a5b25d336f"
+    },
+    {
+      "path": "docs/sm64-os30-transfer-20261006.txt",
+      "source": "/tmp/quake2-sm64-20261006/candidate/docs/sm64-os30-transfer-20261006.txt",
+      "before": null,
+      "after": "3f776a1364dcb295db7d7f6f9846c8801e4b3f4ee19f2058cf66f759659f6027"
+    },
+    {
+      "path": ".obj/quake2/app.elf",
+      "source": "/tmp/quake2-sm64-20261006/candidate/.obj/quake2/app.elf",
+      "before": "b829ff91a914dac681fec05d712bbf9bfc5220e3707dc8d6bec9c3fd34bb64d7",
+      "after": "5730f56ba8aab7dfe76772cb5927ee9a5d3b5c2216a9fcb5b1a19be1048abce8"
+    },
+    {
+      "path": "build/pocket/quake2/Assets/quake2/common/quake2.elf",
+      "source": "/tmp/quake2-sm64-20261006/candidate/.obj/quake2/app.elf",
+      "before": "b829ff91a914dac681fec05d712bbf9bfc5220e3707dc8d6bec9c3fd34bb64d7",
+      "after": "5730f56ba8aab7dfe76772cb5927ee9a5d3b5c2216a9fcb5b1a19be1048abce8"
+    },
+    {
+      "path": "build/diagnostics/quake2-gpuprofile.elf",
+      "source": "/tmp/quake2-sm64-20261006/candidate/build/diagnostics/quake2-gpuprofile.elf",
+      "before": null,
+      "after": "5e784075ee11dcae3d28ad7a5ff72c802bcdc3c20ad79be9873741f658dc3629"
+    }
+  ],
+  "retained_core_sha256": "b4d55466283320c798047effa1dd9895d990fd6f297857e52ad99ec9bbf3778d",
+  "retained_os_sha256": "054abd4b3d2c57d55b4ecec23f2fcaa3703206db3df14ebe7793c22941d34ef7"
+}

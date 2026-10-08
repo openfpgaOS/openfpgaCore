@@ -1,0 +1,28 @@
+{
+  "words": 275,
+  "labels": {
+    "no_combine": 24,
+    "sort0": 40,
+    "sort1": 50,
+    "sort2": 60,
+    "attributes": 115,
+    "attributes_no_additive": 162,
+    "norm_vertex": 173,
+    "norm_attribute": 174,
+    "norm_count": 188,
+    "norm_counted": 195,
+    "norm_shift_vertex": 199,
+    "norm_shift_attribute": 200,
+    "normalized": 212,
+    "absolute_det": 218,
+    "nonzero_det": 222,
+    "recip_large": 231,
+    "numerator44": 239,
+    "numerator_done": 240,
+    "recip_clamp": 250,
+    "recip_ready": 251,
+    "plane": 255,
+    "plane_full": 265,
+    "halt": 274
+  }
+}

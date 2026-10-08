@@ -1,0 +1,80 @@
+Focused v8 memory-placement audit, 2026-10-04 (read-only)
+======================================================
+
+Source: docs/measurements/os30-mesh-20261004/fit-mesh-v8-area-notex/
+        jobs/pocket-os30-s2/src/fpga/targets/pocket/output_files/ap_core.fit.rpt
+
+Actual Fitter resource summary:
+  1,868 total LABs required / 1,848 available
+  1,854 logic LABs
+     14 memory LABs
+    248 M10Ks / 308 available
+
+The RAM Summary has seven logical MLAB rows. It reports one MLAB for each
+logical row, but the Fitter resource summary counts 14 physical memory LABs.
+Use the physical summary for the placement bound. Migrating every existing
+MLAB memory can therefore directly free at most 14 LABs, less than the
+20-LAB deficit. Do not claim that spare M10K capacity resolves the current fit.
+
+Logical MLAB rows (fitted depths/widths, not inferred FF arrays):
+  audio_mixer.pos_latch                     32 x 22
+  axi_periph_slave.input_event_fifo.mem     16 x 22
+  axi_sdram_slave.wbuf                      16 x 36
+  axi_sdram_slave.read_fifo.mem             16 x 33
+  gpu_core.fbwq_addr__dual                  16 x 24
+  gpu_core.fbwq_addr                        16 x 24
+  gpu_core.fbwq_strb                        16 x 4
+Machine-readable exact report columns are retained in:
+  fit-mesh-v8-area-notex/mlab-audit.json
+
+Concrete existing synchronous candidates
+----------------------------------------
+Frozen src/fpga/common/audio_mixer.v:378/380 forces pos_latch to MLAB.
+Line384 is the single registered read:
+  pos_readback_r <= pos_latch[voice_sel_rd];
+Line1230 writes pos_latch[cur_voice] <= adv_pos_next. It has one write and
+one synchronous read, with exactly one select-to-readback cycle required by
+the MMIO contract (documented at lines370..376). A private M10K hint can retain
+that latency, subject to inference and read-during-write equivalence checks.
+
+Frozen src/fpga/common/axi_sdram_slave.v:152 is wbuf[0:15], with both its
+write and free-running registered read head in lines155..159. The existing
+protocol fills before draining; continuation pulls are at least two clocks
+apart. The MLAB selection is not inline: frozen pocket/ap_core.qsf:950 has
+  set_instance_assignment -name RAMSTYLE_ATTRIBUTE MLAB -to *sdram_axi_slave|wbuf*
+Change this targeted assignment if testing M10K. The source explicitly warns
+that an inline RAMSTYLE attribute crashes Quartus25.1's Verific frontend;
+do not reintroduce that unrelated failure. Existing read latency can remain
+unchanged. These two small logical rows cannot supply twenty LABs.
+
+GPU write-queue candidates need an inference check
+------------------------------------------------
+Frozen gpu_core.v:4542/4544 forces fbwq_addr/strb to "MLAB, no_rw_check".
+Fitted rows show no B-input or B-output register, but the RTL loads their
+heads directly into held AXI output registers at lines11100..11135. Thus
+these are not the same unconditional asynchronous-output contract as the
+sync_fifo module below. A targeted M10K hint may preserve the external
+latency; the source itself records an earlier M10K trial with no useful
+whole-fit improvement. The duplicate fbwq_addr row is a real inferred extra
+read copy, not a separate source array. Any inference trial must preserve
+AW-ahead, W chaining and same-address read/write assumptions; do not simply
+insert a cycle into this throughput-critical queue.
+
+Actual first-word fall-through memories
+--------------------------------------
+Both input_event_fifo and read_fifo instantiate frozen sync_fifo.v. Line47
+is assign dout = mem[rd_ptr] (unregistered read). Changing only RAMSTYLE to
+M10K does not implement this interface. A synchronous read-ahead FIFO would
+need separate empty-to-first-push bypass, simultaneous push/pop handling,
+full-throughput next-word prefetch and protocol tests. Even such a rewrite
+cannot evade the total fourteen-memory-LAB bound above.
+
+All mesh program/scratch/banks/FIFO and GPU span-plane arrays are already
+M10K in v8. Texture request/result queues are also M10K, so the earlier
+MLAB-to-M10K opportunities there have already been taken. No hidden
+20-LAB collection of synchronous MLAB arrays remains.
+
+No RTL/config mutation, synthesis run, fit, seed sweep, or production change
+was performed for this audit. A small pair of targeted migrations could help
+alongside a separate logic reduction, but RAM placement alone is not a
+concrete solution to this twenty-LAB deficit.

@@ -1,0 +1,87 @@
+Private mesh driver optimization evidence (2026-10-04)
+
+All changes are experimental. No hardware FPS or coupled performance gain is
+claimed by the instruction measurements below. Fit and complete raster/CPU
+replays are separate parent-owned checks. The earlier coupled prototype was
+slower than the original and had image-fidelity issues; it is not a deployable
+baseline merely because its own packet oracle passes.
+
+SCOPY53
+-------
+Counted scratch copy reuses COPY49's RAM sequencer. The modulo256 source and
+destination ranges must be disjoint. Pointer registers are latched before any
+copy writes and may lie in the destination. N words cost N+3 cycles.
+The clip implementation copies seven-word vertex chunks between A64..126 and
+B128..190; final B-to-A normalization is also disjoint. Scalar and fused forms
+have identical polygon output, pointer endpoints and remaining count. Scratch
+temporary216's obsolete final copied word is deliberately not retained.
+
+results/scopy/result.json:32,768 instruction cases;20,786 clip cases including
+all19,784 real scene triangles and full-width UV extrema;2,608 full mesh jobs.
+results/scopy-engine/result.json:4,096 actual lean-engine cases;1,048,576 exact
+output words;160 cancellation phases, wrap/alias/stalled output; exact cycles.
+
+PLANES54
+--------
+Reuses the original PLANE40 multiplier/accumulators. D names the scratch count
+register (valid low4-bit count1..10), A/B name bank pointer registers for the
+first two vertices; the third pointer is first+20. Attributes are stride10.
+Each plane streams origin,du,dv, truncating/sign-extending RGB planes3..5/7..9
+to24bits. No scratch, bank, accumulator or flag changes. Context is read once
+at the first nonconstant plane; constant planes bypass arithmetic. Stable
+output backpressure and cancel are enforced. The BATCH_ONLY parameter removes
+the old scalar scratch-write path in the lean engine; PLANE40 remains available
+in the full instruction configuration and standalone unit oracle.
+
+Instruction cost excluding stalls:
+  5 + 12*constant_planes + 33*nonconstant_planes
+    + (10 if there is any nonconstant plane)
+
+results/plane-rtl-batch-control/result.json:98,611 original PLANE40 cases and
+50 cancellation phases; original14/45-cycle unit behavior unchanged.
+results/planes-engine-batchonly/result.json:20,937 actual lean-engine programs;
+133,611 planes;5,760,705 exact words;450 cancellation phases; exact cycles and
+all scratch/bank preservation. Includes every extracted scene context and
+10,000 random full-range/sliver/mixed-constant batches with wrapped bank bases.
+Final plane RTL SHA256:
+462fcb09346246e5b065b7e6e9b523830b02d5d82c7fd6bd8258f960c5de724f
+
+Driver changes
+--------------
+mesh_program.build defaults enable SCOPY, three unrolled PROJA calls, one
+OUTBLOCK55 for material payloads, PLANES54, three direct ATTR52 calls, SETUP56,
+and the accepted-load guard flag. ExplicitFalse options retain the509-word
+original program for captured trace comparisons. The client owns SETUP and
+OUTBLOCK independent RTL proofs. The DMA agent owns the shortened PROJ divide.
+
+results/driver-variants-setup/result.json compares431 real captured frame360
+jobs (including projected fallback jobs), preserving all39,214 packet words:
+  Frozen initial program/old divide: 3,463,761 cycles (earlier profile)
+  Same509-word program/short divide: 3,344,781
+  +SCOPY:                          3,221,127
+  +unrolled projection:           3,116,777
+  +OUTBLOCK material:             3,051,411
+  +PLANES/unrolled attributes:    2,656,823
+  +SETUP:                         2,454,157
+The last value is29.15% fewer engine instruction cycles than the frozen
+prototype, excluding DMA, backpressure, raster and CPU execution. It cannot be
+translated directly into game FPS. These comparisons retain the prototype's
+full clipping semantics and do not prove agreement with CPU float shading.
+
+Accepted-load guard flag
+------------------------
+state47/scratch53 bit19 suppresses only X/Y clip planes after GATHER. The
+malformed coordinate-range check runs first; near/far OR/AND bits0..1 remain.
+The producer may assert the flag only when the original geometry load guard
+accepted the entire load. Producer eligibility and exact host-float behavior
+are separate client-owned tests. The hybrid producer falls back for other loads.
+results/guardband/result.json verifies2,608 jobs/19,784 triangles/400,584 words
+against the independently masked polygon oracle across cull/material variants,
+and explicitly verifies malformed range rejection and depth-plane rejection.
+
+Final default program:410 words; projected_fallback entry404.
+Little-endian program binary SHA256:
+c2df2d5ea216287ea0a6a8e333cbfc220b0a3e26521189d122358e750deeccde
+
+No production RTL, public bitstream, device files, commits or seed sweep were
+changed by these checks. Parent owns current saved-seed fit and coupled replay.

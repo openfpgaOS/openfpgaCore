@@ -1,9 +1,13 @@
-# os20 — THE 2D/dual-issue pocket variant (90 MHz since 2026-08-02; the
-# retired 100 MHz and 96 MHz configurations' numbers live in the project
-# memory and git history).  90 MHz CPU/RAM clock: INCLUDE_CLK90 =
-# mf_pllram_90 PLL + CLK_FREQ_HZ sysreg (0xD4) so the shared os.bin
-# re-derives timers at boot.  CPU adds the 4/32 store buffer
-# (configs/os20.cfg).  The dual-issue wall needs ~11.2 ns, so 96 MHz
-# could never truly close; 90 MHz targets real closure margin.
+# os20 — 2D / dual-issue Pocket variant, 100 MHz CPU/GPU/SDRAM.
+# The default PLL and CLK_FREQ_HZ sysreg select 100 MHz; firmware derives
+# timers from that register. CPU geometry lives in configs/os20.cfg.
+# GPU cuts plus CPU/physical optimizations: seed 35 estimates 94.24 MHz,
+# setup -0.611 ns at 100 MHz, worst hold +0.066 ns across four corners.
+# 16,795 / 18,480 ALMs; the 94 MHz trial goal is met, 100 MHz is not closed.
+# Retained GPU workloads and the CPU stress test preserve their cycle counts.
+# Both ports render on the CPU. Diablo's optional GPU=1 probe also uses
+# affine colormapped spans and uploads its blend table, so retain those.
+# Neither client submits GPU perspective or depth-tested spans.
 DEFS := INCLUDE_ANALOGIZER INCLUDE_HW_MIXER INCLUDE_TRANSLUC \
-        INCLUDE_PALETTE INCLUDE_4PLAYER INCLUDE_CLK90
+        INCLUDE_PALETTE INCLUDE_4PLAYER \
+        EXCLUDE_GPU_PERSPECTIVE EXCLUDE_GPU_DEPTH INCLUDE_GPU_CLAMP_PIPE

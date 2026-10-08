@@ -170,6 +170,10 @@ $(VEXII_OUT): $(VEXII_DIR)/../generate_vexii.sh \
               $(VEXII_DIR)/../retime_aligner_pc.pl \
               $(VEXII_DIR)/../factor_fetch_ready.pl \
               $(VEXII_DIR)/../retime_dcache_writes.pl \
+              $(VEXII_DIR)/../retime_fpu_matches.pl \
+              $(VEXII_DIR)/../retime_fetch_pipeline.pl \
+              $(VEXII_DIR)/../optimize_os20_timing.pl \
+              $(if $(filter os30,$(VARIANT)),$(VEXII_DIR)/../factor_os30_fp_rs3.pl $(VEXII_DIR)/../factor_os30_frontend.pl $(VEXII_DIR)/../os30-rvc-pipeline.patch $(VEXII_DIR)/../factor_os30_load_forward.pl $(VEXII_DIR)/../factor_os30_control_paths.pl $(VEXII_DIR)/../factor_os30_parallel_paths.pl $(VEXII_DIR)/../factor_os30_endpoint_paths.pl) \
               $(VEXII_DIR)/../configs/$(VARIANT).cfg \
               $(wildcard $(VEXII_DIR)/../patches/*.patch) \
               | $(VEXII_DIR)/build.sbt $(VEXII_DIR)/ext/SpinalHDL/build.sbt
@@ -312,6 +316,12 @@ firmware: bootloader os
 DEFS :=
 include variants/$(VARIANT).mk
 VARIANT_DEFS := $(DEFS)
+# Optional per-variant fitter settings and additional timing constraints.
+# Include them in the seed fingerprint as well as the generated project.
+VARIANT_QSF := $(wildcard variants/$(VARIANT).qsf)
+# Optional exact-source snapshots for one variant; other variants retain the master.
+VARIANT_SOURCE_MAP := $(wildcard variants/$(VARIANT).sources)
+NETLIST_EXTRA_FILES := $(VARIANT_QSF) $(VARIANT_SOURCE_MAP) $(wildcard variants/$(VARIANT).sdc)
 
 # Variant-named bitstream.  Deployed cores ship os25.rbf_r / os30.rbf_r
 # (the name IS the variant token, and the core.json "filename" matches),
@@ -335,33 +345,44 @@ SEED      := $(strip $(shell cat $(SEED_FILE) 2>/dev/null))
 # (variants/<v>.mk) or the build config (Makefile: QPROCS) change — so `make
 # build` after a sweep or a variant edit actually picks up the new seed /
 # macros and the pinned processor count instead of reusing a stale qsf.
-$(BDIR)/ap_core.qsf: ap_core.qsf ap_core.qpf $(SEED_FILE) variants/$(VARIANT).mk Makefile | $(VEXII_OUT)
+$(BDIR)/ap_core.qsf: ap_core.qsf ap_core.qpf $(SEED_FILE) variants/$(VARIANT).mk $(VARIANT_QSF) $(VARIANT_SOURCE_MAP) Makefile | $(VEXII_OUT)
 	@mkdir -p $(QOUT)
 	@awk -v base="$(CURDIR)" '\
+	  FILENAME ~ /\.sources$$/ { \
+	    if (!NF || $$1 ~ /^#/) next; \
+	    if (NF != 2 || $$1 in overrides) { print "Invalid source override" > "/dev/stderr"; exit 1 } \
+	    overrides[$$1] = $$2; next } \
 	  $$1=="set_global_assignment" && $$2=="-name" && \
 	  ($$3=="VERILOG_FILE"||$$3=="SYSTEMVERILOG_FILE"||$$3=="VHDL_FILE"||$$3=="QIP_FILE"||$$3=="SDC_FILE"||$$3=="MIF_FILE"||$$3=="SOURCE_FILE"||$$3=="SEARCH_PATH"||$$3=="QSYS_FILE") { \
+	    if (($$3=="VERILOG_FILE"||$$3=="SYSTEMVERILOG_FILE") && $$4 in overrides) { \
+	      used[$$4]++; $$4 = overrides[$$4] } \
 	    if ($$4 !~ /^\//) $$4 = base "/" $$4; print; next } \
 	  $$1=="set_global_assignment" && $$2=="-name" && ($$3=="SEED"||$$3=="NUM_PARALLEL_PROCESSORS") { next } \
-	  { print }' ap_core.qsf > $(BDIR)/ap_core.qsf
+	  { print } \
+	  END { for (name in overrides) if (used[name] != 1) { \
+	    print "Source override must match once: " name > "/dev/stderr"; exit 1 } }' \
+	  $(VARIANT_SOURCE_MAP) ap_core.qsf $(VARIANT_QSF) > $(BDIR)/ap_core.qsf.tmp || \
+	  { rm -f $(BDIR)/ap_core.qsf.tmp; exit 1; }
 	@# Variant CPU netlist (VexiiRiscv_<variant>.v) — explicit per-job so
 	@# `grep VERILOG_FILE bld/<job>/ap_core.qsf` shows exactly which CPU
 	@# is being fit, with no preprocessor-macro indirection.  Mirrors how
 	@# mister's qsf names its netlist directly.
-	@echo "set_global_assignment -name VERILOG_FILE $(abspath $(VEXII_OUT))" >> $(BDIR)/ap_core.qsf
-	@for m in $(VARIANT_DEFS); do echo "set_global_assignment -name VERILOG_MACRO $$m" >> $(BDIR)/ap_core.qsf; done
-	@echo "set_global_assignment -name SEED $(SEED)" >> $(BDIR)/ap_core.qsf
+	@echo "set_global_assignment -name VERILOG_FILE $(abspath $(VEXII_OUT))" >> $(BDIR)/ap_core.qsf.tmp
+	@for m in $(VARIANT_DEFS); do echo "set_global_assignment -name VERILOG_MACRO $$m" >> $(BDIR)/ap_core.qsf.tmp; done
+	@echo "set_global_assignment -name SEED $(SEED)" >> $(BDIR)/ap_core.qsf.tmp
 	@# Pin the fitter's processor count so a single build and every parallel sweep
 	@# fit place IDENTICALLY and reproducibly (Quartus's parallel placement varies
 	@# with processor count).  QPROCS x MAXJOBS should fit the host cores.
-	@echo "set_global_assignment -name NUM_PARALLEL_PROCESSORS $(QPROCS)" >> $(BDIR)/ap_core.qsf
+	@echo "set_global_assignment -name NUM_PARALLEL_PROCESSORS $(QPROCS)" >> $(BDIR)/ap_core.qsf.tmp
 	@# The compile runs with CWD = $(BDIR), but some RTL init_file refs are BARE
 	@# relative names resolved from the project dir — notably the boot-ROM
 	@# "firmware.mif" (axi_periph_slave) and "./apf/build_id.mif".  Without the
 	@# project dir on SEARCH_PATH, Quartus can't find them and inits the BRAM to
 	@# all-zeros (Critical Warning 127003) → the boot ROM is dead and the core
 	@# never starts.  This is the container-build "stopped booting" bug.
-	@echo "set_global_assignment -name SEARCH_PATH $(CURDIR)" >> $(BDIR)/ap_core.qsf
+	@echo "set_global_assignment -name SEARCH_PATH $(CURDIR)" >> $(BDIR)/ap_core.qsf.tmp
 	@cp ap_core.qpf $(BDIR)/ap_core.qpf
+	@mv $(BDIR)/ap_core.qsf.tmp $(BDIR)/ap_core.qsf
 	@printf "  $(C_OK)qsf$(C_RESET) → $(BDIR)/ (abspath sources + $(VARIANT) macros + seed $(SEED))\n"
 
 # Variant-named (non-reversed) copy: `make rbf-named VARIANT=os30`
@@ -393,7 +414,7 @@ build: $(VEXII_OUT) bootloader $(BDIR)/ap_core.qsf
 	@# deliberate rebuild mid-work is fine, shipping one is not.
 	@if [ -f "$(SEED_FILE).src" ] && [ -f $(ROOT_DIR)/tools/netlist_hash.sh ]; then \
 		. $(ROOT_DIR)/tools/netlist_hash.sh; \
-		now=$$(netlist_hash "$(BDIR)/ap_core.qsf"); \
+		now=$$(netlist_hash "$(BDIR)/ap_core.qsf" $(NETLIST_EXTRA_FILES)); \
 		want=$$(cat "$(SEED_FILE).src"); \
 		if [ "$$now" != "$$want" ]; then \
 			printf "$(C_ERR)[fpga] WARNING: netlist changed since VARIANT=$(VARIANT) was swept —$(C_RESET)\n"; \
@@ -659,6 +680,7 @@ sweep:
 	@MAXJOBS=$(MAXJOBS) VARIANT=$(VARIANT) PROJECT=$(PROJECT) \
 		CLOCK_RE='mp_ram.*general\[0\]' SEED_FILE="$(CURDIR)/$(SEED_FILE)" \
 		TARGET_DIR="$(CURDIR)" \
+		NETLIST_EXTRA_FILES='$(NETLIST_EXTRA_FILES)' \
 		bash $(ROOT_DIR)/tools/sweep.sh $(SWEEP_MIN) $(SWEEP_MAX)
 
 # ── Tools ────────────────────────────────────────────────────────────

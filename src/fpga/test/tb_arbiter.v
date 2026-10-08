@@ -5,7 +5,7 @@
 //------------------------------------------------------------------------------
 
 //
-// Verilator testbench for axi_sdram_arbiter.v.
+// Testbench for axi_sdram_arbiter.v, run with Verilator.
 //
 // Probes the read-vs-write priority decision the arbiter makes at
 // ST_IDLE (lines 187-196 of axi_sdram_arbiter.v): m0_arvalid is
@@ -21,7 +21,8 @@
 
 `default_nettype none
 
-module tb_arbiter #(parameter WRITE_RESP_DELAY = 0) (
+module tb_arbiter #(parameter WRITE_RESP_DELAY = 0,
+                    parameter GPU_WRITE_QUEUE_DEPTH = 8) (
     input  wire        clk,
     input  wire        reset_n,
 
@@ -86,10 +87,12 @@ module tb_arbiter #(parameter WRITE_RESP_DELAY = 0) (
     output wire        dbg_s_awvalid,
     output wire        dbg_s_awready,
     output wire [7:0]  dbg_s_awlen,
+    output wire [31:0] dbg_s_awaddr,
     output wire        dbg_s_wvalid,
     output wire        dbg_s_wready,
     output wire        dbg_s_wlast,
     output wire [31:0] dbg_s_wdata,
+    output wire [3:0]  dbg_s_wstrb,
     output wire        dbg_s_bvalid,
     output wire        dbg_s_rvalid,
     output wire        dbg_s_rlast,
@@ -125,7 +128,7 @@ wire        m2_wready_unused;
 wire        m2_bvalid_unused;
 wire [1:0]  m2_bresp_unused;
 
-axi_sdram_arbiter dut (
+axi_sdram_arbiter #(.GPU_WRITE_QUEUE_DEPTH(GPU_WRITE_QUEUE_DEPTH)) dut (
     .clk        (clk),
     .reset_n    (reset_n),
 
@@ -334,10 +337,12 @@ assign dbg_s_arready = s_arready;
 assign dbg_s_awvalid = s_awvalid;
 assign dbg_s_awready = s_awready;
 assign dbg_s_awlen   = s_awlen;
+assign dbg_s_awaddr  = s_awaddr;
 assign dbg_s_wvalid  = s_wvalid;
 assign dbg_s_wready  = s_wready;
 assign dbg_s_wlast   = s_wlast;
 assign dbg_s_wdata   = s_wdata;
+assign dbg_s_wstrb   = s_wstrb;
 assign dbg_s_bvalid  = s_bvalid;
 assign dbg_s_rvalid  = s_rvalid;
 assign dbg_s_rlast   = s_rlast;

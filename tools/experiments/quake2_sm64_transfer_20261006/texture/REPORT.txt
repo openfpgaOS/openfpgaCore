@@ -1,0 +1,68 @@
+Quake2 texture transfer review and narrow candidate patch
+2026-10-06
+
+Scope
+-----
+The active GL1 port already uploads static RGB565 textures to the dedicated
+texture tier and frees their SDRAM copies. SM64 F6's newly enabled texture
+placement is therefore already present here. No new gameplay speedup is claimed.
+
+The GL1 conversion writes cached malloc storage. OFQ2_TexCreate performs the
+existing flush-plus-readback handoff before the SDK reads its source. There is
+no observed uncached-write/stale-cached-read source pattern to correct. Retain
+this handoff; do not blindly convert reads to the uncached alias.
+
+Patch
+-----
+apply_texture.py CANDIDATE_ROOT makes guarded changes to three candidate files:
+
+1. of_gl1.c: remove the three redundant full cache flush/readbacks immediately
+   before OFQ2_TexCreate. The common wrapper still performs one handoff.
+   Texture contents, placement, dimensions, rendering math, and lifetimes stay
+   identical. This reduces upload-time work, not proven per-frame CPU work.
+
+2. of_emit_q2.c: normalize the persistent texture-route register to SDRAM after
+   GPU/texture initialization and before shutdown, only when the caps-backed
+   manager reports fast memory. Drain queued work before resetting or
+   reinitializing the allocator. Reinitialization still invalidates old handles.
+
+3. of_texture.h: upload full words plus a zero-padded tail without reading past
+   the source. The old ceil(nbytes/4) source read overran exact 1-, 2-, or 3-byte
+   allocations. A valid 1x1 RGB565 upload can allocate only two bytes. Fast
+   offsets still advance to 16-byte alignment; the common multiple-of-four
+   path still uses one upload leaf call.
+
+Lifecycle limits
+----------------
+GL1 never calls OFQ2_TexReset or OFQ2_TexInit while live. Its fast-only textures
+remain valid until RI_ShutdownContext releases all textures; this patch does
+not reset their allocator at a level boundary or discard resident copies.
+The software renderer calls OFQ2_TexReset on map registration, retains source
+pixels, and rebuilds stale handles by generation. The drain makes reuse safe.
+
+Do not transplant SM64's permanent SDRAM fallback or generation scheme: GL1
+has already freed the fast-only textures' SDRAM sources and cannot move them
+back wholesale. Per-domain draining remains required for the existing mixed
+fast/SDRAM fallback. No allocator redesign or new per-draw fences were added.
+
+Validation
+----------
+check_texture.py CANDIDATE_ROOT --report REPORT_JSON compiles the actual
+non-OF_PC of_texture.h and exact extracted OFQ2 lifecycle/wrapper functions.
+Hardware leaves record uploads, routing, clean, and finish ordering. ASan and
+UBSan passed 65 exact source lengths (1 through 65), final-word zero padding,
+16-byte placement, one clean per creation, capacity fallback, caps versions
+2/3/4, reset/reinit drain-before-reuse, startup/shutdown route normalization,
+no-op wrappers before readiness, and repeated same-domain binding without
+extra drain. Test inputs and extracted-body hashes are in test-results.json.
+
+Six negative controls were detected: restored rounded source reads trigger
+ASan heap-buffer-overflow; removing init route, reset drain, reinit drain,
+shutdown route, or the sole wrapper clean triggers the expected assertion.
+Exact mutation text and failure evidence are in negative-controls.json.
+
+These are source-helper correctness tests with recording hardware leaves.
+They do not emulate physical D-cache/AXI timing, prove GPU render equivalence,
+measure Pocket FPS, or replace the full candidate build/renderer regression.
+No sibling source, core bitstream, release folder, SD card, or git state was
+modified by this subtask. Temporary candidate: /tmp/quake2-texture-transfer-test.

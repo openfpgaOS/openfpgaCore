@@ -1188,16 +1188,31 @@ static void test_hw_features_readback() {
         (1u << 6) |   // MIDI
         (1u << 8) |   // FPU
         (1u << 9) |   // save slots
+#ifndef GPU_TEST_NO_PERSPECTIVE
         (1u << 13) |  // GPU perspective spans
+#endif
         (1u << 14) |  // GPU fragment pipeline
+#ifndef GPU_TEST_NO_PARAM_SPAN_LIST
         (1u << 15) |  // GPU param span-list
+#endif
+#ifndef GPU_TEST_NO_DEPTH
         (1u << 16) |  // GPU param span z-write
         (1u << 17) |  // GPU param span z-test/write
+#endif
         (1u << 18);   // GPU param span Q29 dynamic scale
 
     uint32_t features = mmio_read32(HW_FEATURES);
     check_eq("hw-features-required", features & REQUIRED, REQUIRED);
     check_eq("hw-features-no-triangle", features & (1u << 5), 0u);
+#ifdef GPU_TEST_NO_PARAM_SPAN_LIST
+    check_eq("hw-features-no-param-span-list", features & (1u << 15), 0u);
+#endif
+#ifdef GPU_TEST_NO_PERSPECTIVE
+    check_eq("hw-features-no-perspective", features & (1u << 13), 0u);
+#endif
+#ifdef GPU_TEST_NO_DEPTH
+    check_eq("hw-features-no-depth", features & ((1u << 16) | (1u << 17)), 0u);
+#endif
 }
 
 static uint32_t mmio_read32(uint32_t addr) {

@@ -1,4 +1,4 @@
-/* Exercise the real timer HAL with both supported runtime clock rates. */
+/* Exercise the real timer HAL at production and experimental clock rates. */
 #include <assert.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -18,7 +18,7 @@ static void of_check_shutdown(void) { ++cycles; }
 
 int main(void)
 {
-    const uint32_t rates[] = {100000000, 90000000};
+    const uint32_t rates[] = {100000000, 96000000, 90000000, 83000000};
     const uint32_t seconds[] = {0, 1, 123456, UINT32_MAX};
     for (unsigned f = 0; f < sizeof(rates) / sizeof(*rates); ++f) {
         frequency = rates[f];
@@ -36,10 +36,10 @@ int main(void)
         cycles = frequency - 1;
         uint32_t ns;
         assert(of_timer_get_seconds(&ns) == 0);
-        assert(ns == (frequency == 90000000 ? 999999988u : 999999990u));
+        assert(ns == (uint32_t)(((uint64_t)frequency - 1) * 1000000000 / frequency));
         ++cycles;
         assert(of_timer_get_seconds(&ns) == 1 && ns == 0);
     }
-    puts("PASS: timer seconds, fractions, rollover and runtime 90/100 MHz clocks");
+    puts("PASS: timer seconds, fractions, rollover and runtime 83/90/96/100 MHz clocks");
     return 0;
 }

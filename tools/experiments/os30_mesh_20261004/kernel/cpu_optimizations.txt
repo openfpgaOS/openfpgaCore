@@ -1,0 +1,84 @@
+Private SM64 producer CPU optimizations, 2026-10-04
+=================================================
+
+All changes are in the private measurement app, not production SM64/os30.
+No deployment or seed sweep is part of this experiment.
+
+Completed and verified
+----------------------
+Material template memo (client/sm64_material.h):
+  Reuse fully encoded material words24..63 and selector status while the
+  renderer's existing triangle-material memo is valid. Its recompute clears a
+  separate ready bit, avoiding a wrapping generation counter. LOAD fog is an
+  independent key; shader0..23 and guard acceptance bit19 remain per-job.
+  Unsupported statuses are preserved and leave the caller output untouched.
+  Material preparation is called before checking the new ready bit, so all
+  original texture/viewport/depth updates still execute at their existing
+  invalidation points. No emitted GPU state is used as the cache key.
+
+  check_material_memo.py compares every64-word result/status against the frozen
+  original helper over400,000 jobs, including300,000 warm hits with zero
+  selector/snapshot calls. Original and memoized outputs match under O3 and
+  AddressSanitizer/UndefinedBehaviorSanitizer. All five status outcomes occur;
+  source shader, saved fog and guard bits change independently of draw state.
+  client/check_fog_state.py adds16 explicit LOAD/DRAW fog cases.
+
+Optional exact fallback depth quotient (retained_contexts/sm64_lazy_state.h):
+  Optional MESH_LAZY_FAST_DEPTH=1 reuses the already-computed float1/w as an
+  estimate, then corrects with exact64-bit product comparisons. The accepted
+  denominator range1024..8388607 is exhaustive-tested, with ±1ULP perturbations
+  and200,000 additional general inputs. Maximum correction8;99.015% need none.
+  Outside that range the original64-bit division remains.
+  This is exact math but was not a measured full-frame win by itself.
+
+Optional retained per-slot lazy contexts (retained_contexts/ headers):
+  Each of32 contexts holds only required LOAD-time matrix/light/UV/fog state,
+  fixed matrix, immutable source, epoch and pending mask (~244bytes on RV32).
+  Each pending slot has an8-bit context owner. A context owns at least one
+  disjoint slot, so32 contexts suffice for every partial LOAD arrangement.
+  G_VTX discards overwritten pending slots without evaluating them; surviving
+  slots stay deferred until a real CPU triangle consumer requests them.
+  Materialization groups contiguous slots from one owner, preserving the
+  original arithmetic. Fixed recovery reads compact context directly; the
+  original float helper restores one scratch RSP only when actually required.
+  No immutable source pointer is retained for unsupported/mutable LOADs.
+
+  check_lazy_pool.py:69,224 loads,178,074 requested vertices,250,923 discarded
+  without computation, maximum32 live contexts;2,608 real LOAD fixtures each
+  through float and fixed recovery. All original float bits, colors, UVs, clip
+  flags, exact depth, current-RSP preservation and ownership match. It tests
+  all four FAST_DEPTH/NOINLINE combinations under O3 and sanitizers.
+  check_lazy.py and check_lazy_fixed.py continue to pass original single-LOAD
+  controls against the selected v5 single-context implementation.
+
+Coupled timing evidence (frames360..367, milliseconds/frame)
+---------------------------------------------------------
+  Original baseline approximately36.07.
+  Correctness-complete hybrid v3:38.64560 (all8 images exact).
+  Shader conversion memo v4:37.79397 (all8 images exact).
+  Material template memo v5:35.92107 (all8 images exact).
+  Extra noinline/exact-depth v6:36.25422 (all8 images exact, regression).
+  Retained pool v7, original divide/inlining:36.54517 (all8 images exact).
+  Retained pool v8, fast divide/noinline:36.36945 (all8 images exact).
+  Retained pool v9, scalar-copy correction:36.20471 (all8 images exact).
+
+Selected source is restored to exact best-v5 single-context/original-division
+headers, matching the frozen results/lazy-fixed/ files byte-for-byte. Pool and
+reciprocal variants remain optional under retained_contexts/, not staged by the
+normal stage_lazy.py path. Their tests explicitly copy these optional headers.
+The pool eliminated2,848 unused materializations/8frames but added owner/copy
+work and cache/layout costs; it did not improve full-frame throughput. Actual
+memcpy calls did not increase: the hypothesized tiny-call explanation was wrong.
+Replacing scalar memcpy with assignments reduced the regression but still lost.
+The RV32 memcpy checks only4-byte relative alignment, already guaranteed for
+all four context arrays; speculative32-byte context alignment was not added.
+Local operation-count savings do not establish FPS gains; code layout/cache
+misses matter materially. Best-v5 is only~0.4% faster than the original baseline,
+so no substantial improvement is established by this hybrid design.
+
+Unfinished, excluded prototype
+------------------------------
+float_frontend.c/.h are an unvalidated companion CPU cost-probe draft, stopped
+when coverage revealed the retained-context waste. They are not included by
+any runtime/build and are not a correctness/performance claim. Parent's tiny
+RV32IMF+prepared-arithmetic area/cycle evidence is maintained separately.

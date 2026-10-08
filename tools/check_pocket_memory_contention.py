@@ -100,15 +100,21 @@ def main():
     parser.add_argument('--mhz', nargs='+', type=int, choices=[90, 100], default=[90, 100])
     parser.add_argument('--voices', nargs='+', type=int, choices=range(1, 33), default=[9, 20])
     parser.add_argument('--jobs', type=int, default=4)
+    parser.add_argument('--queue-depth', type=int, choices=(8, 16), default=8,
+                        help='GPU posted-write queue capacity in words')
     args = parser.parse_args()
     if args.jobs < 1:
         parser.error('--jobs must be positive')
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=True)
     sources = fixture(root, output)
+    if args.queue_depth != 8:
+        top = sources[0]
+        top.write_text(once(top.read_text(), '.CPU_FAIR_THRESHOLD(8)',
+                           f'.CPU_FAIR_THRESHOLD(8), .GPU_WRITE_QUEUE_DEPTH({args.queue_depth})'))
     inputs = [*sources, root / 'src/fpga/targets/pocket/io_sdram.v',
               root / 'src/fpga/test/tb_sdram_cont.v']
-    report = dict(scope=__doc__, sources={str(s):
+    report = dict(scope=__doc__, queue_depth=args.queue_depth, sources={str(s):
                   hashlib.sha256(s.read_bytes()).hexdigest() for s in inputs}, runs=[])
     for mhz in args.mhz:
         for bank in (0, 1):

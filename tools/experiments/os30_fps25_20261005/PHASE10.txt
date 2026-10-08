@@ -1,0 +1,2418 @@
+Phase 10: remove the CPU vertex-preparation bottleneck
+====================================================
+
+Status: active private implementation. No new deployable core, demonstrated
+frame-rate improvement, sibling publication, SD update, or seed sweep.
+The retained F11 application and retained core remain the comparison baseline.
+
+The user rejected another device trial of the sub-1% F11 change. This phase
+therefore screens alternatives in software/RTL and measures the complete core
+budget before proposing another Pocket image.
+
+Findings
+--------
+F11 gameplay model: gfx_sp_vertex is about8.94ms/frame (29.45% CPU self time),
+indexed-run preparation4.31ms, cache batching1.73ms. These are model costs,
+not promises of recoverable wall-clock time. Actual retained-CPU kernel replay
+finds roughly202 cycles/vertex warm,333 data-cold and436 both-cold; heavy
+memory contention raises the cold cases. About95% of observed D-cache misses
+are capacity misses, so a small address-layout change cannot eliminate them.
+
+Memoization, filtered culling, index reservation and pure GPU-cull forwarding
+experiments were rejected for negligible or negative modeled benefit. Their
+individual source/capture reports remain under the phase10 measurement tree.
+
+Implemented private components
+------------------------------
+* Exact native transform DAG using the retained os30 truncated-product FMA;
+  correctly rounded reciprocal and one-light/unlit RGB. No general tiny CPU.
+* Original24-byte vertex DMA, UV scaling, clip flags, persistent32-slot storage
+  with validity tracking, partial LOAD preservation and explicit failure.
+* Shared transform/lighting/cull arithmetic and reused position scratch RAM.
+* One byte-enabled block RAM replaces separate normal/RGB/UV/alpha/clip arrays.
+* Exact cull with six scratch words instead of a wide register file.
+* Typed integer UV packet path: ((int16 UV - uint16 tile*8)<<11) + filter bias.
+  The complete uint16 tile range is exact and fits signed32. This removes all
+  formatter FMA requests; unexpected old floating uniforms require fallback.
+* Bounded RUN precheck, atomic TRI2 rejection, private survivor list, and
+  unpublished packet scratch words in the same block RAM.
+* A software reference consumes actual raw descriptors and regenerates ordered
+  legacy load/draw packets. This is a correctness reference, not acceleration.
+
+Evidence and important limits
+-----------------------------
+Measurements live in docs/measurements/os30-fps25-20261005/phase10/.
+raw-frontend-precheck-v6 passes199 LOADs and2897 integrated cull cases with
+partial destinations, native results, invalid slots, backpressure and faults.
+Native RGB independence is limited to145 of230 original native fixture
+vertices; separate native lighting probes cover the other coefficient sets.
+Large full-game packet comparisons use the qsim IEEE-FMA reference; native
+arithmetic has independent RTL checks and must not be conflated with that.
+
+Raw LOAD + cull component attribute-v4:1996 ALMs,3 M10Ks,3 DSPs,92.95MHz minimum
+standalone slow-corner Fmax. Inverse-only placement variant:1973 ALMs,4 M10Ks,
+95.68MHz. These contain virtual I/O and are not additive whole-core budgets.
+Integer packet formatter standalone573 ALMs, no RAM/DSP,163.93MHz. Full command
+transport, buffering, material handshakes and fallback are not included.
+
+Full-core resource experiments (original CPU, retained seed2)
+-----------------------------------------------------------
+Narrow GPU cache: 32x176 ->192x32, one M10K instead of five. All30 paired
+pixel/depth/fence replays and an independent full176-bit record checker pass.
+Needed ALMs17248 ->17084, M10Ks306 ->302, LABs1846 ->1844. Minimum timing91.58MHz.
+Serial GPU replay overhead~0.17ms/frame; this is not a measured frame penalty.
+
+LR/SC-only CPU: arithmetic AMO removal passes CPU compatibility/trap tests but
+the complete fit needs126 more ALMs than the narrow-cache base and has worse
+timing. Rejected; keep the original CPU and full A extension.
+
+Removing the existing GPU projector saves only133 net needed ALMs in the
+complete core before replacement projection/FIFO cost. The area-only probe
+does not render legacy0x56 correctly and is not a deployable optimization.
+
+Rejected LOAD-only integration
+------------------------------
+raw-load-mmio-v2 implements native LOAD and packed36-byte result DMA on M2.
+Its real whole-core seed2 fit fails:1935/1848LABs,19041/18480 neededALMs.
+No timing result exists for that failed fit. The raw subtree owns3M10Ks;
+failed placement cannot establish its final whole-device RAM packing.
+
+raw-load-mmio-v3 instead writes9 meaningful words into independent64-byte slots.
+This permits safe discard of dirty old fog results without losing adjacent
+CPU state. All528 count/destination combinations and untouched padding pass.
+The real private load-driver-v1 app reproduces721 frames/eight GPU streams in
+normal, absent-device, injected read/compute/partial-write failure, and delayed
+completion modes. Synthetic completion timing is functional evidence only.
+
+Native retainedCPU probes show why this is still a poor architecture:
+* M-mode cbo.inval discards dirty lines without later writeback (verified).
+* Packed result invalidation and copy cost~2.97ms/frame under nominal scanout.
+* Direct64 ownership plus cold consumption minus identical warm reads costs
+  ~3.08ms/frame. Removing the copy does not remove the cache-miss cost.
+These costs exclude GPU contention, MMIO launch/poll and accelerator time.
+cpu-audit/dma-native-v4 measures96 jobs/768 iterations per memory schedule.
+Its initial rdcycle-based predecessor failed because that CSR is absent;
+the successful probes use the retained MMIO timer at0x40000004.
+
+load-memory-contention-v3 couples actual LOAD hardware, retained arbitration,
+SDRAM controller/model and a recorded GPU frame. For230 vertices, nominal
+scanout/audio and busy GPU: stride64 LOAD costs87830cycles at retained M2
+fairness12,52071 at4,32878 at1. At1, naive3711vertices/frame scaling gives
+5.30ms accelerator time plus3.08ms cache cost, already8.38ms versus8.94ms
+CPU vertex preparation before real MMIO overhead. These kernel extrapolations
+are not coupled frame predictions; GPU slowdown and CPU/GPU overlap matter.
+Even aggressive priority gives no basis for a substantial performance claim.
+LOAD-only is rejected for deployment, rather than sent to the Pocket.
+
+Direct integration and measured limit
+------------------------------------
+Keep raw transformed vertices in private FPGA RAM, fetch original triangle
+indices, cull before submission and emit directly into the ordered GPU ring.
+The CPU retains existing material/texture side effects and rare fallback.
+Synchronous LOAD completion first avoids saved-context replay on math errors;
+it still overlaps prior raster work. PRECHECK has no GPU side effects. COMMIT
+means ordered queue acceptance, not raster completion. Raw slots and the GPU
+projected cache remain separate so a future LOAD cannot damage queued draws.
+
+The command reader drains at most16 words into otherwise spare survivor-RAM
+rows80..95 before checking triangles. It must never hold an accepted AXI burst
+open while waiting for arithmetic. Rows0..63 hold accepted survivors and
+64..79 hold one unpublished packet. TRI2 fallback remains atomic.
+
+The shared W-first clip classifier saves97 standaloneALMs at unchanged4N+1
+scan latency and passes the same native/random checks. This does not establish
+a fitting complete frontend.
+
+The integrated GDR1 engine now passes native arithmetic, AXI, ring ownership,
+atomic abort and full color/depth checks. Fresh native-FMA baseline/candidate
+captures match all721 frames, including27,657 injected LOAD failures and3732
+atomic COMMIT failures. gpu-direct-native-functional-v1 records this proof.
+This means scene/culling records and word counts plus eight sampled command
+streams. The retained functional qsim treats os30 indexed commands as no-ops;
+its color/depth hashes are not a 721-frame rendering proof. The actual eight
+RTL raster frames below provide the meaningful image/depth comparison.
+
+gpu-direct-coupled-v1 runs actual GDR/GPU/SDRAM/CRAM1 RTL with a modeled CPU:
+eight exact color/depth frames, submission37.8276 ->34.1501ms/frame, throughput
+improvement10.77%. LOAD3.976/PRECHECK2.101/COMMIT3.204ms of synchronous waits
+consume much of the functional model's larger CPU saving. COMMIT includes
+2.783ms ring-space waits. These overlap GPU work, so do not sum them with GPU
+busy time. MMIO callbacks are modeled, not actual CPU AXI latency. This is not
+a Pocket FPS measurement. Aggressive M2 priority changes34.1501 to34.1693ms:
+it moves contention from LOAD to the GPU and provides no frame benefit.
+
+Full retained-seed2 GDR fit fails19,828/18,480ALMs and2016/1848LABs. Compact
+CSR readback, shared validity and shared LOAD/RUN DMA reduce this to19,508
+ALMs/1977LABs, still1028ALMs/129LABs over capacity. No STA or bitstream exists
+for either failed fit. See gpu-direct-core-v1 and gpu-direct-core-compact-v2.
+
+CPU cuts do not solve this: queue reductions save244 CPU-system ALUTs and
+cost up to4.15% in native stress tests; adding fetch32, radix2 and unpipelined
+I2F saves520 ALUTs but costs9-12% on several native kernels. ALUT figures are
+mapping screens, not physical ALM savings. Retain the CPU and caches.
+
+Rejected smaller alternative: CPU-native LOAD plus in-ring raw-slot culling/
+formatting. The native producer v1 grows modeled CPU cost11.42%. V2 moves
+guards outside the hot LOAD loop, checks only needed vertices, deduplicates raw
+uploads and reserves one whole bounded run. It still grows CPU time8.148%:
+30.361046 ->32.834928ms/frame, before any hardware worker latency. Raw uploads
+occur before GPU culling and cost more transport than culled legacy packets.
+Eight reference-expanded streams render exactly through actual retained GPU
+and memory RTL. See raw-slot-ring-v1/v2; keep the original CPU culling path.
+
+The independently tested raw-float processor remains reusable evidence only:
+v6 checks14,744 triangles,147 eligible actual-A vertices,29 fault rollbacks;
+identical v5 RTL fits1,164 standaloneALMs,2M10Ks,1DSP,106.60MHz. Its output
+queue adds anotherM10K. The real GPU/AXI parser smoke passes34,118 words and
+137 fences. These are correctness/area results, not a selected optimization.
+
+The separate CPU transform/attribute loop split also regresses modeled cycles
+0.613%, so vertex-split-v1 is rejected without unnecessary native/fit work.
+
+Current bounded resource screen: byte-identical compact GDR RTL with area-
+oriented synthesis, retaining the CPU/caches/clocks and seed2. Full-core and
+module-local settings are separate comparisons, not a seed sweep. No new
+device trial or deployment is requested while fit/timing remain unresolved.
+Global BALANCED/AREA, register duplication OFF, CPU instance SPEED reduces
+19,508 to19,230ALMs and1977 to1950LABs; still750ALMs/102LABs over capacity.
+There is no routed timing result. Module-local area settings do not change
+19508ALMs/1977LABs at all. AGGRESSIVE AREA saves only20moreALMs, to
+19210ALMs/1948LABs: still730ALMs/100LABs over capacity. Synthesis presets
+do not make the working GDR architecture fit; that screen is closed.
+
+Async COMMIT is not the missing overlap: actual trace bounds its optimistic
+benefit at0.568ms/frame, before earlier unlogged GPU/configuration writes and
+readback dependencies. Excluding immediate clipped fallback reduces that to
+0.505ms. Frame game/audio work already overlaps previous GPU completion;
+the prior GPU frame is nearly finished when CPU submission ends. See the
+sealed overlap-architecture-audit-v1 and gpu-direct-async-commit-bound-v1.
+
+Useful reproduction entry points
+-------------------------------
+phase10_experiment.py: isolated F11-derived application build/capture/analysis.
+phase10_raw_pipeline.py stage NAME [--frontend]: freeze selected private RTL.
+phase10_raw_pipeline.py simulate NAME: Verilator native/random component checks.
+phase10_raw_pipeline.py fit-report NAME: summarize standalone Quartus report.
+Quartus runs use tools/quartus-container.sh on the frozen fit-v1 directory.
+Existing snapshot names must not be reused or rewritten.
+
+New bounded handoff screen (not yet measured)
+--------------------------------------------
+Read-only cacheable BRAM result alias before CPU SDRAM M1, copied into the
+ordinary36B LoadedVertex array after one invalidate. Existing raw rows can
+be exposed vertex-major32B/slot; CPU performs two UV int-to-float conversions.
+This avoids result DMA/writer and SDRAM result reads without writable-alias
+coherence hazards. The native CPU fixture is measuring32B and64B layouts.
+A production integration also needs an explicitly reserved address window,
+LOAD/readburst mutual exclusion, and first-use/reset cache ownership.
+No gain or fitting implementation is established yet.
+
+BRAM alias screen now measured: bram-alias-native-v1 uses the actual retained
+CPU/cache and yields1.946844ms/frame absolute invalidate+raw32copy+UVconvert.
+Expanded64 costs2.546327ms; CPUreciprocal in raw32copy adds0.636955ms. These
+are weighted handoff kernels, not fullframe gains. Data/protocol and UVedge
+cases pass with quiet and scanout traffic. The integrated alias initial response
+latency is slightly longer and must be accounted for in coupled measurement.
+
+load-alias-driver-v1 builds from unchanged36B F11 vertices. Fresh native-FMA
+functional-v2 passes four721frame modes (normal, absent, injectedread/numeric
+errors, drainedtimeout), all scene/culling records and8sampledorderedstreams.
+The v1 timeout checker issue is archived explicitly; v2 scanslogsforFATAL.
+Completed scratch can safely be abandoned aftertimeout withoutpostinvalidate.
+Hardwaredest0, readonlyreservedguardalias andCPUcopy removepersistentslot
+ownership, resultDMA andGPUproducer changes. Wholefit/coupledtime pending.
+
+LOAD alias coupled result: useful transfer improvement, insufficient overall
+--------------------------------------------------------------------------
+load-alias-coupled-v1 compares actualGPU/LOAD/alias/SDRAM/CRAM1 RTL with
+calibrated modeledCPU.8actualcolor+depthframes are exact. TotalCPUframe
+37.827574 ->36.252159ms (4.346%throughputgain), notsubstantialusergoal.
+Originalgfx_sp_vertex9.838930ms becomescombined7.947493ms, saving1.891437ms;
+GPUbatchsubmissionthenabsorbs~0.400msmorequeuepressure. LOADwait3.929180ms.
+Priority1cutsLOADwaitto2.631900ms butwholeframeworsensslightly36.259466ms,
+ascontentionmovesintolaterGPUsubmission. No furtherpriorityvariantsjustified.
+Finalaliascalibration uses17cyclespernativewholetransaction; prediction
+1.962727ms versusnative1.946844 (+0.82%, conservative). ActualRTLaliasfills
+take19cycles, measuredindividually. Earlier16cycleconventionisnotselected.
+
+LOADaliaswholeSPEEDfitfails18709ALMs/1901LABs (229/53over),306M10Ks45DSPs.
+Alias93.9ALM, wrapper94.0exclusive, raw1036.6inclusive. SameRTLglobalAREA
+fit completes at 18,170 needed ALMs, all 1,848 LABs, 306 M10Ks, and 45 DSPs.
+Its slow-corner minimum is 84.11 MHz, below the requested >90 MHz estimate.
+The worst GPU path is almost entirely routing; M2-to-SDRAM routing also
+misses 90 MHz. This 4.35% candidate is not selected for deployment or more
+seed trials. See load-bram-core-area-v1 and its timing addendum.
+
+New simplecore investigation: premature idle render-cache maintenance
+-------------------------------------------------------------------
+Coretop automaticallyflushes+invalidatesrendercachewhen!gpu_busy_core.
+ButGPUbusy includes!fb_write_drain_complete onlywhenGPU_WRITE_COMBINE=1;
+os30rendercache setsGPU_WRITE_COMBINE=0. GPUcanthereforeappearidlewhile
+queuedframebufferwrite tails remain. Anidleflushcaninterruptthosetailsand
+repeat. Independentagentpreparingone-linebusy-drainpredicatefixonfrozen
+narrowGPU; passivecoupledmaintenanceinstrumentationwillmeasuremateriality.
+No correctness/performanceclaimyet. ExplicitFENCE/FLIP/CLEAR/TEXbarriers
+remainunchanged. Ifshortidlecachechurnpersists, boundedidledebounceisaseparate
+possiblecounterfactual. Do notreplaceautonomousflushwithstatus-read-only: SDK
+readsSTATUSbeforePUBLISH,andunfencedfrontbufferdrawingneedsboundedvisibility.
+
+Idle/drain investigation completed: correctness fix, no frame gain
+-----------------------------------------------------------------
+The old busy predicate really permits 8-16 output bytes to commit after
+busy falls in unfenced clear/triangle tests. Including the existing write
+drain predicate unconditionally fixes that ownership bug. All 42 independent
+pixel/barrier assertions pass under quiet and delayed memory schedules.
+
+Paired eight-frame coupled measurements remove all 239 premature idle-flush
+starts and reduce idle maintenance episodes from 272 to 115. Total cache
+maintenance falls from 0.462616 to 0.411173 ms/frame, but CPU frame time is
+exactly unchanged at 37.827574 ms and all eight color/depth outputs match.
+Texture-flush maintenance is only 0.008099 ms/frame. These costs are hidden
+by CPU preparation; cache-maintenance tuning is not the speed solution.
+The one-line correction is sealed privately in gpu-idle-drain-v1, with
+gpu-cache-maint-observe-v2 and gpu-idle-drain-coupled-v1 providing paired
+performance evidence. No production edit or device trial follows from it.
+
+Current independent investigations
+----------------------------------
+* Canonical vertex UVs are signed16 values represented as float. A packed
+  representation could remove conversion work and the 36-byte vertex stride;
+  fractional clipping/rectangle consumers must retain their exact behavior.
+* Clipped polygon fans may repeat projection and packet preparation for
+  vertices shared by multiple fan triangles. Measure this duplication before
+  changing the fallback path or its arithmetic.
+* Actual GPU counters place about 4.93 ms/frame in the depth-read wait state.
+  A proposed failed-depth fast reject covers only 29 pixels/frame and is not
+  worth implementation. Review depth-window service instead. These residency
+  times overlap CPU work and are not directly recoverable frame time.
+
+Further screens completed without a deployable speed solution
+-------------------------------------------------------------
+packed-uv-v1 preserves native-FMA scene/cull/count records over 721 frames
+and eight sampled ordered command streams. Its modeled CPU cost increases
+0.740%, however: indexed preparation saves 0.092 ms/frame, while generic
+triangle/clip consumers add more overhead. Do not deploy it. The independent
+packed-uv-math-v1 reference exhausts 4,718,528 UV cases across all four
+rounding modes; representation bookkeeping, not UV arithmetic, is the issue.
+
+software-reuse-audit-v1 finds only about 99 repeated clipped fan corners per
+frame, a roughly 0.126 ms projection ceiling. A local fan cache cannot meet
+the requested gain. Existing guarded whole-batch culling experiments already
+cost more than they save. The no-copy LOAD alias also lacks a compelling case:
+only warm copy (~1.15 ms in the coupled window) is removable; invalidation
+and cold reads remain. Its optimistic combined gain is ~7.8% before overhead,
+with the same unresolved all-LAB/84.11-MHz resource problem.
+
+render-line32-v1 keeps 8 KiB/2 ways but halves lines to 32 bytes. Independent
+cache scoreboards and eight exact color/depth frames pass. Frame time improves
+only 0.274%; extra fills offset reduced write barriers. No fit is justified.
+
+A 64-bit conservative write-line bitmap permits independent depth reads
+before global write drain. Its first coupled screen gains only 0.115%:
+the single-transaction render cache gives AW priority, so an early AR still
+waits downstream. The current bounded extension adds an explicit depth-read
+priority sideband; ordinary texture/blend traffic retains existing arbitration.
+Correct address dependence, cache writeback ownership and stalled-AR stability
+must be preserved. A separate 32 KiB render-cache screen first measures the
+upper bound with the original CPU; a 64 KiB CPU D-cache tradeoff is considered
+only if that upper bound is large enough. Neither is production-qualified.
+
+Memory scheduling and capacity screens completed: reject for performance
+----------------------------------------------------------------------
+depth-priority-v1 permits the eligible depth AR to win over AW consistently
+through the cache's ready, address, tag/data lookup and dispatch paths. The
+independent delayed-write checks observe 61,683 priority reads, 58,539 wins
+over AW, and all 895,445 accepted writes completing. Eight actual color/depth
+frames match. Frame time changes 37.827574 ->37.828870 ms, effectively flat:
+the latency moves to writes. No fit or production integration follows.
+
+render-capacity-v1 quadruples only the render cache to32KiB while retaining
+the original128KiB CPU cache. This optimistic, unfittable storage screen
+reduces read traffic26.2%, but frame time only37.827574 ->37.158401 ms
+(1.77%). All eight actual renders match. Do not shrink the CPU cache or run
+a fit to fund this small upper-bound result.
+
+CRAM1 immutable vertex-source screen completed: reject for performance
+---------------------------------------------------------------------
+The raw LOAD accelerator can share the physical texture-memory controller
+through a tiny locked round-robin read arbiter, with no response RAM. The
+actual controller/PHY proof passes both dies, refresh delays, simultaneous
+uploads, stalled grant ownership and reset. An unlocked-grant negative
+control fails. See cram1-share-v1 and cram1-geometry-audit-v1.
+
+Observed immutable vertex sources occupy145,392 bytes over all721 captured
+frames (60 merged ranges); gameplay360..720 uses91,752 bytes. The source
+inventory is hash-bound in cram1-source-inventory-v1. This is captured-scene
+capacity, not a guarantee for every world or mutable vertex stream.
+
+cram-source-coupled-v1 optimistically preloads these exact bytes into CRAM1,
+remaps source descriptors, and excludes upload/lookup costs. Against the
+matched LOD4 SDRAM source, LOAD wait falls3.929180 ->2.309000 ms/frame and
+source arbitration wait1.680380 ->0.050286 ms. Yet total frame time only
+falls36.252159 ->35.960023 ms (0.81%). GPU ring polling rises105,369 ->162,837
+across eight frames. Physical CRAM1 CE occupancy is only1.88% ->3.63%; chip
+bandwidth is available, but faster vertex delivery exposes downstream work.
+All eight actual color/depth buffers match, and the SDRAM control is exactly
+cycle-identical to the prior LOAD-alias baseline. This fails the substantial
+gain gate even before real client overhead. No fit or deployment follows.
+
+writable-alias-audit-v1 records a possible cacheable writable32-byte result
+layout with68 CPU slots. Existing spare accumulator/attribute RAM capacity
+may avoid additional M10Ks. Whole64-byte preclean, completed writeback fence,
+hardware ownership and post-invalidation are mandatory; delayed-B/native
+proof and physical fit remain outstanding. Removing a copy cannot justify
+this branch after the CRAM source result. It is not implemented.
+
+Current focus: GPU execution bubbles and whole-frame upper bounds
+----------------------------------------------------------------
+Both geometry and memory acceleration shift work onto the GPU queue. New
+investigation measures exclusive setup/raster/fragment states and separates
+GPU service time from CPU starvation. One candidate is preparing the next
+span while the current span renders using existing dedicated multipliers.
+It requires an actual dependency/ownership proof and a coupled frame gain;
+state residency alone is not recoverable time. No new solution is claimed.
+
+gpu-critical-bound-v2 establishes the matched-window limits. Maximal-rate
+ordered replay, preserving required texture/MMIO barriers and ring capacity,
+finishes in23.517671ms/frame with all eight color/depth buffers exact. An
+ideal one-word/cycle GPU SDRAM responder, with the actual render cache and
+CRAM1 still present, reduces coupled time37.827574 ->35.816420ms (5.32%).
+It is a diagnostic upper bound, not synthesizable hardware or a release.
+
+The matching fresh native-FMA CPU-only capture for frames360..367 costs
+35.746666ms/frame. Do not substitute the30.361ms long-gameplay average here:
+different windows gave a misleadingly large GPU-wait estimate. The current
+simple-core GPU-only opportunity is therefore about5.5% in this window.
+Geometry acceleration and reduced GPU stalls must be evaluated together.
+
+Exclusive GPU residency: span setup1.312909ms; derive2.052381ms (reciprocal
+divider only0.439390ms); projector0.723791ms. Source-finished span tails take
+5.648441ms. Their overlapping subcauses include depth responses2.423639ms
+and write barriers1.158161ms. Perspective source blocking without pixel-pipe
+stall takes3.189221ms. These categories are not additive frame savings.
+
+The existing Q29-only reciprocal cache is excluded from os30, but enabling
+a legacy cache is not a useful primary fix. gpu-reciprocal-trace-v2 records
+188,116 exact reciprocal keys. One-entry reuse is12.49%;128 entries12.67%.
+Their source-blocking ceilings are only0.235 and0.238ms/frame, respectively.
+An exact legacy implementation would cache the unbiased result and apply
+the current constant-Z/sign-sensitive bias on use. No such RTL was added.
+
+span-lookahead-v2 implements the actual overlap candidate privately: reuse
+existing dedicated span multipliers and staging while remaining in FRAG,
+then start the next span/PSS with the old fragment tail still draining.
+It is limited to one unchanged triangle and current four-record chunk,
+CRAM1 textures, no source-only depth writes, and no Z_PREFETCH configuration.
+Final/chunk/empty-record paths retain their original full-drain behavior.
+Three new scheduler state bits do not establish fitted ALM/timing cost.
+Independent ownership tests and paired F11/LOD4-CRAM coupled measurements
+are pending. No production integration, physical fit or deployment yet.
+
+Span overlap is correct and complementary, but not yet a deployable solution
+-------------------------------------------------------------------------
+span-lookahead-coupled-v1: v2 changes simple F11 time37.827574 ->37.338839ms;
+combined LOD4+CRAM35.960023 ->34.876293ms. Both eight-frame pairs are exact.
+GPU busy23.672524 ->21.620720ms, while main span setup1.312909 ->0.383699ms
+and exposed perspective issue stalls3.189221 ->1.969676ms. These local
+reductions exceed the frame gain because CPU work remains on the critical path.
+
+span-tail-observe-v1 finds1.718591ms/frame of eligible nonfinal-chunk tail
+after old source/issue stages are empty. span-lookahead-v3 extends the same
+background scheduler across each four-record chunk: refill only dead record
+RAM, retain visible current index/count until atomic source handoff, and keep
+collecting all fragment/memory responses. It adds one flag, reusing the
+existing pending count and record RAM. Final triangles remain fully ordered.
+
+span-nextchunk-coupled-v1: simple37.338839 ->37.118369ms; combined34.876293
+->34.653496ms. The combined result is8.391% less time /9.16% more throughput
+than original F11, before a real source-pool client's overhead. All eight
+actual color/depth outputs match in each pair. This is still modeled CPU
+timing, not Pocket FPS or a25FPS guarantee.
+
+Independent span-lookahead-review-v2 passes12 native frame comparisons over
+three memory schedules and four96-triangle boundary streams. All123,003
+walker records are emitted exactly once in order.24,366 chunk handoffs
+exercise pending counts1..4, including4,712 after walker_done. Outstanding
+texture/depth work, blending, column spans and excluded paths are covered.
+The source-only depth, SDRAM texture and Z_PREFETCH exclusions remain.
+
+combined-cache64-model-v1 changes only the v2 CPU model's data-cache sets
+1024 ->512. Offloading vertex sources does not eliminate the cost:34.876293
+->35.604750ms (+2.09%). All eight renders match. No CPU regeneration or
+physical-cache/timing claim follows. Do not assume66 freed M10Ks mean ALM
+savings; the original CPU128KiB remains the first fit configuration.
+
+Current concrete qualification: real LOD5 source path and one physical fit
+------------------------------------------------------------------------
+The measured combined9.16% throughput gain now justifies checking physical
+feasibility before another architecture expansion, although it remains below
+the desired substantial gain. Root authorized exactly one saved-seed2 AREA
+fit with originalCPU128KiB, same clocks, actual CRAM1 source arbiter and spanv3.
+LOD5 must have a different ID from LOD4 so old clients cannot submit SDRAM
+addresses as CRAM offsets. Source range is[0,16MiB), with alignment/count/end
+validation; M2 becomes idle again. CPU reset must not strand chip transactions.
+
+The real private SM64 client must reserve the top256KiB of16MiB fast texture
+memory before ordinary allocations and lazily upload immutable vertex ranges.
+Lookup/upload costs, pool-full/unsupported/absent-device fallbacks and source
+lifetimes must be measured. Address-faithful simulation must model8MiB per die
+to exercise the actual0xfc0000 pool, rather than remapping it to low memory.
+There is still no production edit, completed fit, selected bitstream or SD
+deployment from this phase. The full seed sweep remains deferred.
+
+A separate read-only scheduling audit considers running next-frame game work
+during current ring waits. The current Pocket port has ONE51,280-byte GfxPool,
+so nesting the game loop would overwrite the display list being interpreted.
+Audio also retains pointers to mutable object positions and a single pending
+game-tick flag. Safe overlap would need separately owned frame storage plus
+explicit game/audio/submit/retire ordering, with serialized title/transition
+arenas. No nested game-loop callback or speculative simulation was added.
+
+LOD5 real-client qualification and failed fit
+--------------------------------------------
+load-cram-driver-v1 reserves the real0xfc0000..0xffffff source pool before
+the first white texture, gates on exactLOD5 ID and16MiB capacity, and uploads
+immutable original24-byte vertices through the existing drained upload port.
+Normal721-frame functional comparison passes. Independent actual-C cache
+checks cover100,728 calls, bounded-probe exhaustion and the full256KiB limit.
+Full16MiB physical CRAM checks exercise both dies, top addresses, uploads and
+media reset; accepted texture reads drain with sticky response discard.
+
+The actual warm client with spanv3 costs34.737340ms/frame versus original
+F1137.827574ms:8.169% lower modeled time /8.896% higher throughput. All eight
+actual color/depth buffers match. Warm helper self cost is0.306789ms/frame;
+the net frame difference versus the old preloaded-source upper bound is only
+0.083844ms because stalls move/overlap. These must not be conflated. Cold
+upload qualification remains in progress. No Pocket FPS claim follows.
+
+The one savedseed2 AREA fit fails placement:18,358 neededALMs,1,867 LABs
+versus1,848 available. No routed timing or bitstream exists. Its307M10K
+prepacking count versus old routed306 is explained by unshared span record
+RAM packing, not a new source array. GPU hierarchy adds252ALUTs/83.1ALM;
+the CRAM arbiter itself costs19ALUTs/6.4ALM. A new seed is not a repair.
+
+Root's next private area screen, span-lookahead-v4, keeps the same scheduling
+but replaces the within-triangle full EMIT task with a dynamic-only resume.
+Material, mode, clamp and plane-step registers stay unchanged across these
+handoffs. Per-span accumulators, addresses and perspective scheduling still
+restart. Independent equivalence checks and one map-only comparison are
+pending; no further placement run has been selected or launched.
+
+The v4 source audit caught a real exception: constant-Z perspective setup
+clears PERSP in sp_flags within the current span. v4 is explicitly rejected;
+its map-only output is not a functional candidate. Corrected v5 restores
+flags and omits only33 truly invariant targets. Independent tests observe
+111,508 such handoffs with exact cycle/pixel output;384 extra triangles cover
+affine, perspective and combine paths. v4's tiny23ALUT saving is insufficient.
+
+span-lookahead-v6 additionally factors identical WAIT/CAPTURE task writes
+into single shared phase enables. The frozen whole-core map reduces GPU
+ALUTs10,308 ->10,069, recovering239 of the overlap's252 added ALUTs. Whole
+map uses26,769ALUTs/25,702 registers; these are not physical ALM/LAB counts.
+Independent v6 cycle/ownership proof is pending. If it passes, root has
+authorized one new savedseed2 AREA fit of this revised RTL, retaining the
+original128KiB CPU and clocks. This is not a seed sweep or a timing claim.
+
+The real cold-source render window234..241 also matches all eight outputs.
+It uploads23,100 words /92,400 bytes through the actual high-address pool.
+Average49.9776925 ->48.968385ms is2.02% less than the matching spanv3 base.
+First frame234 grows134.87882 ->142.04381ms; the+7.165ms is the net one-time
+impact, not isolated upload duration. Warm results repeat cycle-identically.
+
+v6 passes all12 native and four384-triangle extended comparisons with exact
+pixels AND cycles versus v3, including111,508 checked invariant handoffs.
+However its revised seed2 fit also fails:18,342ALM/1,862LAB,14LABover. No
+Fmax exists. GPU fitted saving83.7ALM is partly offset by whole-core packing
+changes in unchangedCPU/LOAD; global saving is only16ALM/fiveLAB. Do not
+translate the239 synthesis ALUT reduction directly into physical headroom.
+
+The real LOD5 cache screen keeps exact eight-frame renders: I16/D128 costs
+36.087380ms (+3.89%) versus34.737340; I32/D64 costs35.458898ms (+2.08%).
+Neither CPU cache has been changed or regenerated. A single distributed
+RAM conversion is insufficient:12 memories total152memoryALMs, largest
+single SDRAM16x36writebuffer only18.7ALM. Sharing matrix/inverse lifetime
+could save32memoryALMs using oneM10K but cannot alone close14LAB.
+
+Read-only arithmetic audits find no free large cut. LOAD's2.30348ms wait
+includes0.750ms CRAMresponse,0.04697ms sourcequeue,1.266..1.293ms arithmetic,
+0.16574ms clip scan and0.00978ms wrapper handoff. All arithmetic bubbles
+together are only0.31..0.34ms; fasterreciprocal saves~0.0264ms. Actual FMA
+cost279.3ALM already excludes constant RNE/NaN/Inf paths. SharingCPUFMA
+would require CPU arbitration, independent arithmetic enables, result/flag
+routing and reset ownership; polling currently freezes the CPU arithmetic.
+That CPU redesign and approximate arithmetic are not selected.
+
+New concrete screen: transform-only LOD6, ID0x4c4f4406. Keep hardware
+transform/reciprocal and independentCRAM reads; delete hardware lighting and
+perform the existing exact memoized one-light calculation onCPU between
+START and polling. Preserve CPU-calculated canonicalRGBA when copying the
+completed BRAMcoordinates/UV/clip. This may hide CPU lighting under existing
+hardware wait while freeing controller/operand-mux area. It is not yet a
+performance/fit result. Geometryagent owns nativeproof andmap-only; appagent
+owns realclient/coupledcomparison; triangleagent independently reviews the
+ownership, arithmetic and fallback. No further fit is authorized yet.
+
+LOD6 native/protocol proof passes230native geometry/UV/clip/reciprocal
+vertices,230unlitRGBA checks,528count/destination combinations and unchanged
+source/alias/reset/error interlocks. Synthesis completely eliminates the
+lighting and byte-clamp units by tying their inputs off in the wrapper.
+The directly changed LOAD hierarchy shrinks1,725 ->1,366ALUT and1,559 ->1,127
+registers. Its11,264memorybits/threeDSPs stayunchanged. Wholemap26,769 ->26,125
+ALUT also includes remapping of unchanged logic; do not claim all644 locally.
+Only the wrapper RTL differs from LOD5-v6. Actualclientcolor and coupled
+timing remain pending, so there is still no authorized LOD6 fit or deployment.
+
+Two additional boundaries are established. Constant-D RGB interpolation is
+required by423 of684combine triangles in retainedSM64frame120, with allthree
+channels varying; it cannot be deleted while preserving the title renderer.
+Immediate source-pool recycling is safe at the existing synchronous LOAD
+boundary, but an unbounded recycler could thrash. A120-rendered-frame rate
+limit was proposed and audited, not implemented. The existing frozen client's
+no-recycling limit remains explicit for now to keep comparisons controlled.
+
+LOD6 is correct but rejected for performance
+-------------------------------------------
+lod6-coupled-v2:34.737340 ->36.166914ms (+4.12% time), all eight actual
+buffers and368 scene/cull/geometry records exact. Actual hardware duration
+2.244850ms overlaps CPU work for2.089350ms; only0.155500ms remains at the
+first poll. CPU lighting costs3.812464ms, so the overlap is real but too short.
+Of2608jobs,2231 already finish before the first poll. Source Dmisses rise
+47,482 ->62,313 over eightframes. Copies improve only1.771403 ->1.700234ms.
+
+lod6-light-profile-v1 is passive/cycle-identical: lighting1.874708ms base,
+0.933314Dcache wait,0.436branch redirects,0.52855dependencies,0.02775F2I,
+0.01215Icache. Memo hits18,232/30,336lit vertices (60.10%); misses12,104.
+10,731 of11,056Dmisses occur on the FIRST raw-normal byte read. Perfectly
+removing those misses alone cannot repay the1.429574ms regression. Do not
+claim a trivial memo fix or input-DMA improvement will remove this CPU limit.
+Native original-ELF lighting/copy proof passes421,992 checks and3809calls;
+all five721-frame functional modes also pass. Correctness is not speed.
+
+LOD7 compactXYZ was stopped before any app/map/fit after this negative result.
+Its component-only proof completed:12B XYZ input, rawview0..4 geometry,
+row7clip in deadpositionRAM, rows5/6zero;230native and528+96synthetic cases,
+32overflow rejections and ownership/reset tests. It could remove attribute
+BRAM/twoUV DSPs and~0.372ms input time, but CPUlighting already exceeds the
+hardware job; addingCPUUV is not a justified speed solution. Never deploy it.
+
+Current selected area work keeps hardwarelighting and existingLOD5client:
+unify transform and lighting pass control/tag pipelines. The source audit
+identifies71 duplicate tagFF plus30..40 other shared-controlFF. Byte encoders,
+color clamp and reciprocal remain. A shared operand register could add~five
+cycles/batch (~0.016ms/frame). Actual area and frame effects are pending;
+no large saving is claimed without map/proof. Geometryagent owns native/map,
+appagent will rebind the unchanged realLOD5coupled client after nativeproof.
+
+In parallel, the already native-tested queue-onlyCPU is being composed in a
+private map screen: I/D refill2->1, Dwriteback2->1, storebuffer2slots/16ops
+->1slot/4ops. It preserves128KD/32KI,64-bit fetch,radix4,pipelinedI2F,fullISA
+andpredictors. Prior244cpu_systemALUT saving was too small for fullGDR's
+1348ALMdeficit; current14LABgap is smaller. Currentalias/nativekernel cost
+and newwholemap are pending. No CPU regeneration, productionCPU change or
+newplacement run is authorized yet.
+
+The queue-only current-alias/native screen passes both CPUs under quiet and
+nominal scanout:192 copy cases and12 GPU submission cases per run. Weighted
+alias invalidation+cold copy is cycle-identical at2.016243ms/frame; nominal
+64..4094-word submissions are cycle-identical. SDRAM-copy nominal cost rises
+0.075%; earlier stress regression remains3.48..4.15%, so this is not a proven
+zero-cost full-game change. The private map saves285CPU ALUTs/144FF and
+289cpu_system ALUTs/161FF. No placed ALM/LAB/timing inference follows.
+
+Unified transform/light v1 passes230native/5998random vertices, persistent
+partial slots,128 latency combinations, cancellation and alias/source gates.
+It removes113LOAD registers but only7LOAD ALUTs; the shared decoder offsets
+combinational controller savings. Actual coupled warm time34.737340 ->
+34.733156ms is effectively unchanged, all8actualbuffers/368recordsexact.
+Actual hardware completion grows0.010234ms/frame; polling quantization and
+overlap absorb this. It does not create an additional material frame gain.
+
+Unified v2 folds matrix16x32 and inverse32x32 into one64x32M10K with shared
+synchronous read output. Reads of inverse results occur only after ownership
+returns; inverse writes while busy use a disjoint bank from idle matrix writes.
+Native/protocol and all128 latency comparisons match v1 exactly. Map-only
+resource screening is in progress. The selected combined area candidate will
+retain hardware lighting, original caches/ISA/arithmetic and clocks, with only
+the independently checked queue reductions; no further fitter is running yet.
+
+The storage fold's map confirms one64x32M10K replacing1536 distributed bits,
+but adds38ALUT versus unifiedv1. Its64 fewerFF partly reflect old RAM-output
+storage; do not add these to32memoryALM savings as independent placed gains.
+Combined versus originalLOD5 LOAD is+31ALUT/−177FF. The exact three-file
+composition (CPU, its zero-ID wrapper, unifiedgeometry) is independently
+reviewed and is now running one seed2AREA fit under compact-lod5-core-v1.
+Placement has passed; routing/timing and final resources remain pending.
+
+Unified cold48.968385 ->48.967849ms also preserves8actualbuffers and242
+scene/cull records. Source-cache recycling is separately implemented and
+qualified in lod5-recycle-driver-v1: firstcapacityfailure canrecycle, then
+120renderedframescooldown; hitsremainusable andprobefailuresneverrecycle.
+102344actual-C sanitizercalls pass generations,cooldown119/120 anduint32wrap.
+Forcedcapacity721records/8orderedstreams remainexact, with731descriptors
+acrossgenerations and40693safeCPUfallbacks duringcooldown. This has not been
+mixed into the frozen coupled timing control or deployed.
+
+Profiler accounting correction: retained F11/LOD5 modeled controls already
+use PROFILE=0/PERF_DIAG=0; profiling scopes/timer hooks compile away. Existing
+same-renderer F11 diagnostic captures cost~0.285..0.325ms in two old coupled
+windows, not severalms. LOADstatistics and observation counters used for the
+current client comparison are retained; no new profiling removal gain exists.
+
+compact-lod5-core-v1 fits but misses the timing target
+----------------------------------------------------
+The completed one-seed fit uses 18,128 needed / 18,151 placed ALMs,
+1,847 of 1,848 LABs, 307 M10Ks and 45 DSPs. Assembly passes. Main-clock
+Fmax estimates are 83.74 MHz at slow85 and 84.99 MHz at slow0; configured
+100 MHz remains open with -1.942 ns setup. Worst hold is +0.002 ns, recovery
++1.835 ns, removal +0.277 ns and pulse width +0.500 ns. The corner script
+returns 3 because the timing checks fail; this is not a passing release.
+The result and sources are sealed under compact-lod5-core-v1.
+
+The independent span-v7 proof reuses dead high bits of existing product
+registers to relay depth_du through DRV_ORG_CAP, without adding state cycles
+or declared registers. All 12 native and four boundary cases retain exact
+cycles/pixels, with 110,988 plane calculations and 15,636 depth-store checks.
+However, that old worst route is absent from this fit's first20 paths.
+Current failures are dominated by GPU read-address selection into the render
+cache lookup RAM/hot-line compare. A fresh read-only timing export and a
+targeted read-channel pipeline audit are next; no new placement is running.
+
+Cache timing and GPU queue composition: compact-lod5-core-v2
+-----------------------------------------------------------
+Actual compactv1 detailed STA identifies33/40 global paths ending in the
+render cache. The worst is GPUdepth-read selection into lookupM10K(-1.942ns);
+nextaddr7->previousline/hazard->SDRAMaddress-enable is-1.552ns. Geometry's
+worst is-0.863ns and the old depthgradient path only-0.274ns. Spanv7 therefore
+remains unselected: it does not address current critical paths.
+
+Cachev2 adds optional REGISTER_READ_LOOKUP and REGISTER_FILL_HAZARD stages,
+selected only in this private os30 instance. R_ACCEPT captures accepted reads
+before tag/hot/data lookup. FILL_CHECK registers the previous/current/nextline
+pendingwrite hazard; noAW can add entries while checking/filling, so delayed
+clear is conservative. Default parameters retain original cycles. Twelve
+protocol runs plus independent reset/poisonedinput/trackerfull/wrap checks
+pass. Actual coupled warm34.733156->34.789221ms(+0.056065ms,+0.1614%) and cold
+48.967849->49.018649ms(+0.050800ms) preserve all16actualcolor/depthbuffers
+and368/242records. This is a timing intervention with a small modeled cost.
+Map saves38wholeALUT andadds3FF, unchangedRAM/DSP. Fmax stillrequiresfit.
+
+GPUv8 packs16x32data+16x4strobe intoexisting16x36M10K and factorsidentical
+queuedAWaddressreads. This eliminatesseparatestrobeMLAB andduplicateaddress
+readbank; directlyGPU saves31ALUT/4FF butunchangedCPU remapping makeswholemap
++45ALUT, so noadditivefittedarea claim. Twelve native plusfourboundary pairs
+retain exactpixels/depth/fence ANDcycles;2.3milliondata/stroberecords and
+1.5millionAWaddresses checked understall/wrap/reset. SameaddressRDW cannot
+beintroduced: readrequiresnonempty/write requiresnotfull, pointersequalonly
+empty/full. Bothqueuecuts arezero-cycles transformations.
+
+compactv2 changes exactly GPU,cache,andinstanceparams overcompactv1. CPU,
+geometry,allclocks/QSF/SDC andseed2 areunchanged. IndependentgateSHA
+ff49bd7001c9ab3badbfd326a188adb5b17e46a01b048b2e9462412160678274passes;
+one AREA seed2fit nowrunning. No production,app,SD or fullsweep changes.
+
+One-pass indexed-direct-v2 removesintermediatepayload/jobs fromCPUsubmission
+with exact721functionalrecords/eightorderedstreams, butbusyCPUtime saves
+only0.0816ms(0.228%); it is sealedunselectedwithoutcoupledexpansion. Batchcursor
+also remainsunselected: itsactualcoupled gain0.110196ms(0.2913%) is too small.
+A passiveunchangedLOD5per-PCbreakdown isnext toidentify realindexedcosts.
+
+compactv2 routed timing result and actual next paths
+---------------------------------------------------
+Fit/assembly pass at18125needed/18171placedALMs,1848/1848LAB,307M10K,
+45DSP. Minimum main-clockestimate86.87MHzslow85,88.48slow0; setup-1.511ns,
+hold+0.073,recovery+1.825,removal+0.379,pulse+0.500. Stillbelow>90target.
+The cache interventions worked: worstcacheendpoint92.09MHzbound. OldSDRAM
+rowopen->A10+1.300/+1.483ns andoldCPUaligner-0.003/-0.155ns no longerneed
+changes. Their auditedhoist/Booleanrewrite remainunselected.
+
+Freshcompact-timing-audit-v2 manifest3a0833bd8780e834be0f40f457279102d927bf29aa2121fa343f8fc93ff55fa7:
+CPUworstDecodeUOP29->floatRS3[26] is-1.511ns, genericFPforwardingpriority
+mux. GPUslow85 p3_z_addr16->fbwq_req_addr2 is-1.323ns; slow0restoringdivider
+rdet_divisor27->rdet_rem11 is-1.199ns. Geometryslow0 contextRAM->outputmux
+->clipclassifier->attributeRAM is-1.186ns. Classifieronlyrequestsposition
+rows, so the inverse-data mux input is structurallyunneededforSCAN.
+
+Selectednewprivatezero-cyclecandidatesunderproof: directpositionreadport
+forthegeometrySCANconsumer; hierarchicalexactpriorityCPUFPforwardingmux;
+GPUfour-sourcepayloadselection withcapturewhilerequestslotempty/retiring;
+andshared37bitrestoringdivisiondifference usingbit36borrow. No extra
+architecturalstate, arithmeticapproximation orcyclesintended. Noadditional
+fituntilfunctional/native proofandmapscreen. Newdatawhenrequestinvalidmay
+differ; everyownedpayloadandexternalAXItransfer mustremainidentical.
+
+ThepassivecurrentLOD5indexedCPUaudit reconciles5.268570msselfexactly:
+winding1.078945ms,index/clipaccess0.735778,decode0.596318,dirtyjobs0.492103,
+color0.355058,material0.324485,preparedscan0.320139,UV0.154673,quantization
+0.272063,depthclamp0.142855,payloadstores0.099873. Dcachepenaltyonly0.09153ms;
+FPUdependencies0.26749andFCVTextra0.08561. CompileralreadyunrollsTRI1/2and
+retainsfirstcornersinregisters. Perfecteliminationofallcornerstacktraffic
+wouldsaveonly0.12031ms; nofurtherdecodepackingprototypejustified.
+
+Projectiontemporaryslotextension isdistinctfromoldzi-mismatchrejection:
+explicitinterpolationzi couldpreservelegacyplanes, but18->32wordpackets
+add3031words/frame(+13.24%) plusresidentreloads. Simplematerialprojection
+self0.8180775ms givesoptimisticceiling~0.517msaftermindestaging/FCVT/stores,
+beforeGPU/ownershipcosts. Itremainsunselected, notaconcrete25FPSsolution.
+
+compact v3 composition and qualification
+---------------------------------------
+Four source files change over v2: GPU v10, CPU RS3 forwarding, geometry raw
+LOAD SCAN consumer and transform/light read output. All clocks, constraints,
+seed 2, caches, ISA and arithmetic formats remain fixed. The combined map
+passes: top -125 ALUT, CPU -29, cpu_system -33, LOAD -30, GPU -56, with no
+register/RAM/DSP increase. This is synthesis evidence, not fitted resources.
+Root helper phase10_compact_datapath_fit.py stages/maps and requires a bound
+native CPU manifest plus independent review before one AREA fit can run.
+
+GPU v10 groups four request-payload sources and captures unowned/retiring
+payload independently from late request-valid. Valid data, acceptance and
+retirement are unchanged. Its shared 37-bit divider difference uses bit36
+borrow for comparison and low35 bits for subtraction; no iteration changes.
+Actual extracted RTL passes1,322,060 boundary/random/equality checks, with
+an algebraic proof over all36-bit trials/35-bit divisors. All12native+4boundary
+pairs retain exact output AND cycles. New full-width monitors check2,303,368
+requests,3,116,914 owned stall cycles,1,504,976 full32-bit AW records, all W
+records and all four payload sources. Old v8's AW monitor covered onlylow24
+bits; failed initial v10 monitor-width attempts are preserved, and finalv10d
+uses parameter-derived widths. Optional WC/swap configurations are static
+ownership review only. GPU-only map saves58localALUT but wholemap+37 from
+remapping; combinedmap above is the relevant composition screen.
+GPU review manifest cce2f63410e30ceaf79deb061fe123ca994c2490877e476790b339ed6d933a57.
+
+Geometry v3 exposes the existing accumulator q directly for SCAN, while
+retaining muxed alias output. Its SCAN addresses never select inverse data.
+Native/internal+external FMA, random5998vertices, wrapper and128latency cases
+all preserve v2 results/cycles. No added state. Manifest
+928095a8f4ad6c0e530ca301213139a337c6e047bdeae0b6727c3f55abc06c5f.
+
+CPU RS3 mux hierarchically selects the same earliest enabled stage among
+nine forwarding stages plus register-file default. Unchanged matching/control
+and no state/cycle changes. Literal old/new RTL passes355,328 checks covering
+all1024selectorvectors and every input bit basis. Native lighting quiet/nominal
+matches1227 outputs each; separate13-gap WAW/RAW/FDIV/FMA and16-trap corpus
+matches208outputs/run and exercises150simultaneous forwarding matches/run.
+Direct old/new expression equality is also asserted on every live CPU cycle.
+CPU frozen SHA10e54e8bd73f186f42beda085b0fe27ac390bf0de2e1c181be197b6f793dc803.
+
+Live LOD5 actual-CPU integration now passes original/queue CPUs with physical
+16MiB CRAM uploads and competing texture traffic, real read-only alias,
+invalidation and copy, nominal scanout, stalled responses and accepted-read
+CPU-reset survival. All9logical vertex fields are checked, including fresh
+actual-A lighting oracles for historical memo-hit rows. Per stress run37,048
+checks,4,548physical uploadwords,614LOADbursts,12,480aliaswords and2,213fences.
+Missing-CBO negative control fails atjob1 withstalejob0 data. Source RRESP is
+physically OKAY like the chosen top, so no artificial CRAM-bus-fault claim.
+Manifest5830b0fd13b8f943a013b8d263601d3b3aac012779a359ec28cfc50b10e60591.
+This is actual CPU/client integration, not native fullgame or PocketFPS.
+
+compact v3 routed result and remaining work
+------------------------------------------
+The v3 fit passes area: 18,066 needed / 18,100 placed ALMs, 1,847 LABs,
+307 M10Ks, 45 DSPs. Timing regresses to 84.95 MHz slow85 / 85.55 MHz slow0.
+Setup is -1.772 ns; hold +0.120, recovery +3.037, removal +0.405, pulse +0.500.
+No deployment and no seed sweep. Source/result/final manifest are sealed.
+
+Fresh copied-netlist STA identifies different paths: CPU buffer-mask through
+RVC decode to instruction bit26 (-1.772); cache GPU AW address through write
+hit selection to data RAM (-1.682); GPU sorted vertex delta to DSP (-1.311),
+z accumulator address (-1.210), and ring-full qualification to ring RAM data
+(-1.215 at slow0). SDRAM state-to-A10 is near90 (-1.117), mostly long routing.
+Geometry SCAN now exceeds93.5 MHz. Current work targets those actual cones;
+previous forwarding, divider and geometry fixes remain functionally qualified.
+
+Live composed v3 proof passed 37,048 comparisons. Independent review SHA
+ a0ed8ea3fda43431c436dc49910be2338eb514f69c686142f7595b672218c0b4;
+composed native manifest SHA
+ 65c7770eb823648386f1921a2c44c2e55fc93fbc9f7403ac631718821148abd3.
+A private real Scala regeneration with proposed os30-only config/postprocessor
+reproduces CPU SHA10e54e8b exactly; other variant arguments stay unchanged.
+No production build files have been edited.
+
+Recycler client paired coupled proof preserves all16 actual frame buffers and
+complete warm/cold scene/cull histories. Warm34.78922125 ->34.988370ms;
+cold49.01864875 ->49.227475ms. The approximately0.2ms cost includes ELF layout,
+I-cache and branch effects. This is a bounded source-pool reuse robustness cost,
+not an optimization gain. Its exact app payload is staged privately and rebuilt
+from the normal source patch byte-for-byte; no SM64/SD publication occurred.
+
+Remaining-path components and synthesis-only compact v4
+-------------------------------------------------------
+GPU v11 moves existing XY delta/anchor registers to the first post-sort product
+state, uses raw CPU ring data when command DMA is excluded, and captures an
+unowned Z accumulator address independently of late qualification. No states or
+cycles added. All16 replay/boundary pairs match actual buffers and cycles;
+15,636 XY/DSP launches and4,294,599 owned Z addresses checked. Ring full/wrap/
+reset passes for DMA0/1, including83,069 stored words,170 full-ring rejections
+and257 stalled DMA words. Final manifest e1d29a95c5bc588c22b2f2ffe8a2617b6b3d56e7e95f551f1f40d1e967e0de80.
+
+SDRAM address v1 separates state-based pin selection from command/counter
+qualification. All18 address-bearing command branches independently audited;
+ignored NOP/AUTOREF and PRECHARGE non-A10 pins may differ. All command/data/
+status/cycle behavior remains exact. Native chip-model miter passes36,531,891
+cycles in each tracking mode; extra all-four-bank/FB-bank-crossing stimulus
+passes34,337,441 (per-bank) and36,533,123 (single-bank) cycles, no protocol or
+readback errors. Early fixture-only pragma/final-summary failures preserved.
+SDRAM synthesis497->473 ALUT,381FF unchanged; full map+13ALUT/+1FF due remapping.
+Review964539f0f311991e00e576a12efb9545e42597aa92a78b6440a0a0e1b7bcba8f.
+Map reviewd224211fc551c1e77dafc8d9675fcccda6aad90157fb95e3d6e872e93d51cc82.
+
+CPU compressed decoder bits15/16/26/28 are flattened; other data/control and
+raw32 bypass unchanged.1,245,184 exhaustive low16/upper16 pattern comparisons
+and6,326,529 live native instruction comparisons pass. Six frontend/stress/
+lighting runs retain exact outputs/cycles. Candidate4ae06f1c00bff2d8f480b06c782fbf5efa9301706635cac3fc5213cdf1203afc;
+manifestd91cc1247cd809f1e57847a6dca4c4b3e3cc18d09ce59d76b817d09ad0ccd1ea.
+A distinct aligner-mask->fetch-ready path remains in the actual v3 STA;
+separate exact Boolean simplification is now under proof. Do not imply these
+four bits alone resolve every CPU timing path.
+
+Cache write speculation v1 unconditionally pre-reads hot0 in IDLE; only hot1
+write hits take existing W_WAIT. Twelve hostile protocol runs and all16 paired
+recycler warm/cold actual buffers/histories pass. Added warm cost0.199940ms
+(34.988370->35.188310); cold0.200885ms(49.227475->49.428360). ~44,597/40,743
+hot1 waits/frame, partly hidden by overlap. Source/proof review0132c4db4569ed456f54b03ee1427d85b6c82c1d3bbe181f71d3c8a92b204fa9;
+coupled4961a103ed3afc800ac39fbaa87ba835ed446396d3705f0e0f69ad0be3c221e5.
+A full-strobe W_WAIT shortcut is being qualified separately to recover this
+cost without extra RAM/register state. Never change frozen cache-v1 source.
+
+Compact v4 contains only these four RTL changes and the cache parameter in
+core_top over v3. Combined map+39ALUT/+1FF, no RAM/DSP change. NO FIT: the
+additional frontend control cone and full-word cache shortcut should be
+resolved first. Independent synthesis-only review e617dda0d10055fa0652103807f82b8d05bda277b37cc0f9fe375f1fc566831a explicitly
+sets passed_for_resource_fit=false; no enabling review in v4. Next combined
+revision gets a new label. Still no production/sibling/SD changes or sweep.
+
+compact v5 selected single-seed fit launched
+------------------------------------------
+Final cache-write-v2 consumes full-strobe W in W_WAIT using existing W_GET
+storage and advance logic. Explicit next-state W_GET avoids repeating the
+wait on same-line bursts. Partial/zero/absent W retain the wait, option0 is
+unchanged. No extra storage or RAM ports. Twelve protocol runs with72 new
+cases/config pass hot1/WCLEAR entries, line crossings, subsequent partial W,
+metadata, and deliberate stale-data poisoning. Source e42f06c03b8b2aa8cfc69d330c937f51fe7283bc15d9f1b034b657dbeed7afe0;
+manifest d1a1ce63aaf2f38f9f170d529bd6ddf97972a0fc3e2a2f7a56bac33a0068a661.
+Paired recycler coupling: warm34.988370->34.957095ms, cold49.227475->49.214986ms.
+All16 actual buffers and complete histories exact. It recovers v1's0.2ms cost.
+Coupled manifest c46755893729024837ec5958017e2b8a4f5ee80b0c10387c6146a202388415b3.
+
+CPU control-v3 additionally replaces only fetch_ready_allow with exact saved
+halfword-consumption predicate, keeping all priority/hazard/trap/sequential
+logic.4096 arbitrary scanner/width/mask/fetch/halt combinations and6,326,529
+native live ready/decode comparisons pass; all6 paired output/cycle runs exact.
+Residual RS2/RS3 hazard->ready fanout paths remain a physical placement risk;
+no safe redundant term or documented combinational duplication directive was
+found, so neither was changed. CPU b5397043e842bb2ed88005e6f24321668f2ddbffe392db94f08be3b44b36576d;
+manifest a7e5da2bc7a802c291548429934404bd0744235190186710e9acdf1403f196bb.
+Final os30-only checked postprocessor/config proposal passes and actual offline
+Scala regeneration reproduces the exact CPU. Regeneration manifest
+3117d8ab78a41cda4caaed6dabbe6cf41ec1161a2f90883b5c59c2ba3cd7230e.
+
+V5 changes exactly five files over routed v3: CPU, GPUv11, cachewritev2,
+SDRAMaddressv1, and core_top's SPECULATE_WRITE_HOT0 parameter. Same clocks,
+constraints, AREA, seed2, cache capacities, ISA. Combined map -10ALUT/+1mappedFF,
+no RAM/DSP increase. Source-equivalent normal build integration-v2 (19 changed
+inventory entries, six os30-only source overrides) matches source/QIP/SDC/MIF/
+macros/settings and leaves os20/os25 unchanged. Manifest
+63302032dfa3dd087d2a20a717cecafda5bcfd8a2d305696c37c40e7bc520424.
+Independent fit gate5c92bfa395eedc2e6e3aa5cbb22f950923ac842c05c505b0ec9fde50a4f7329c
+binds every final component, coupling, map, generation and build closure.
+Root launched one AREA seed2 fit with phase10_compact_final_paths_fit.py fit,
+exec session89301. No sweep or production/sibling/SD changes. After completion,
+seal with phase10_compact_lod5_report.py compact-lod5-core-v5. Read-only fresh
+STA audit agent is prepared if needed. Modeled warm improvement versus original
+37.82757375ms is~7.59% less frame time; no actual PocketFPS or25FPS claim.
+
+Compact v5 result and remaining work
+-----------------------------------
+The fit completed and is sealed: 18008 needed / 18054 placed ALMs, 1841/1848
+LABs, 307/308 M10Ks, 45/66 DSPs. Slow85 Fmax 81.90 MHz, slow0 84.24 MHz;
+setup -2.210 ns, hold +0.121 ns. This fails the user's >90 MHz target and is
+not promoted. Report SHA c29d4be677ad8b70c328707e5ff25de118319e40b3c6a8dccc71fe0d4e20d085.
+
+Fresh STA census finds 73/18 endpoints below90 across the slow85/slow0 corners;
+60/10 are CPU dependency hazards feeding fetch backpressure. Worst path has
+8 logic levels, 67% routing and a final ready signal with fanout270. Required
+hazard checks cannot be removed. Previously targeted decoder, aligner, cache,
+geometry and internal SDRAM cones now meet >90 MHz; this is physical timing
+progress, not a measured FPS gain. STA manifest
+b0fccf42e4d8292595f31858ff9a5fb37ab7f2e39cd5d70ee0b5397f4efa2c1e.
+
+Unconditional tag/PLRU RAM reads are unsafe through stalls because refill or
+PLRU writes may change the held row. Exact held-output retiming would address
+only three of the many endpoints and is not selected. Installed CycloneV DSE
+documents combinational physical optimization plus register duplication ON;
+both were OFF in the actual v5 fit. A private settings-only candidate
+compact-lod5-physical-v1 changes exactly those two final QSF options, same
+seed2, RTL, clocks and constraints. One reviewed fit is planned, no sweep.
+Read-port/options audit b9d64f137084af55fc06fd8e4f1c22e020f40ec86deceea3be89f5fddb653878.
+
+LOD8 dense read-only canonical vertex alias and software copy-on-write are
+being implemented privately over v5. This preserves partial destination
+slots and exposes9 words/36 bytes per canonical vertex, expanding signed UV
+exactly on reads. CPU triangle code reads through a32-entry pointer table;
+deferred fog materializes a vertex into RAM before mutation. Hardware never
+accepts CPU alias writes. This aims to remove the1.776826 ms CPU result-copy
+cost while retaining exact values and ownership. Preliminary estimated net
+benefit is unproven; require actual coupled correctness and >0.5 ms saving
+before selecting or fitting it. Feasibility audit
+bb443e432d73c1773733eb182693c58d25325d9c6bafdd46f2cde41e1490d898.
+No production, sibling project, SD, configured clock, saved seed or commit
+has changed. The Pocket25 FPS target remains unproven.
+
+LOD8 resource screen and adjacent submission overlap
+---------------------------------------------------
+LOD8 functional proof passes normal/fault/absence/timeout/fullpool: all721
+scene/cull records and8 ordered streams per mode match. Component native
+20-job/230-vertex corpus, all528 legal count/dest pairs and all65536 signed
+UV inputs pass. A synthesis-only screen costs +443ALUT/+104FF/+1DSP with
+unchanged RAM; this could exceed the seven free LABs. No LOD8 fit is selected.
+Its coupled performance comparison is running with explicit persistent-slot
+initialization at the preexisting idle warm handoff and an actual alias read
+check before timing. No native whole-game or PocketFPS claim.
+
+A separate software-only hypothesis is now staged: load-submit-overlap-v1,
+based on the proven LOD5 recycler, without LOD8 hardware. When a prepared
+indexed run ends immediately at G_VTX, retain that batch in its one static
+payload/job buffer without copying. The next LOAD starts hardware, submits
+the prior prepared batch while transformation runs, then performs its normal
+completion wait/result copy. Every no-START path submits before CPU fallback;
+zero-length VTX also drains. No material/state command or fallback triangle
+may cross the pending batch. Geometry values are owned in the prepared buffer.
+This attempts to overlap part of2.3ms LOAD wait with3.5ms indexed submission.
+Its real benefit and adjacency coverage remain unmeasured. Private app built,
+ELF bbb1c31adce29de9f33be6df1cfd2c126714b8017e3d232b1cb9c77c12d9c405.
+Independent ownership/functional review is in progress; actual coupled runner
+will reuse the selected cache-write-v2 simulator byte-for-byte after that gate.
+
+Settings-only physical-v1 passed independent gate4ce636bb030d16023f247eec7f5b5a7768b3edd52244a816c98054e974a94a48.
+Root launched one seed2 fit, session26092. No full seed sweep or promotion.
+
+Measured closure of performance branches and final path factoring
+----------------------------------------------------------------
+Physical-v1 fails area:18435 needed ALMs,1873 LABs (25 over),308M10Ks,
+45DSPs. Its pre-route1860ps estimated resynthesis improvement is not routed
+timing. No bitstream/clock gain. Sealed29fa675813597e499bc5c84fe96626596c24f490f6aa539ada8c19781b295780.
+CPU-instance physical scope is supported by the installed project API, but
+no further settings-only fit is selected while exact logic reductions proceed.
+
+LOD8 is rejected: warm34.957095->34.83264625ms (0.12444875 saved),
+cold49.21498625->49.07220625ms. All16 actual buffers and histories exact.
+Copy elimination1.776826ms is replaced mainly by indexed preparation+1.081830,
+driver+0.415929, fogCOW+0.095894 and direct records+0.129135ms. The+443ALUT
+screen is not justified. Sealed3e4864302f4afb0486c778eac23ffa0dd27d7cc7135038ac56fc86bc92da6b67.
+
+Software-only adjacent submission overlap is correct but modest:
+warm34.957095->34.650480ms (-0.306615,0.8771%),
+cold49.21498625->48.98422250ms (-0.23076375,0.4689%). Same actual simulator,
+all16 actual buffers and complete histories exact, identical command words.
+All five functional modes preserve721 records/eight streams;64175 pending
+batches/mode pass byte lifetime, exclusive reuse, adjacency and frame guards.
+Zero-lengthVTX is source/emitted-code reviewed, absent from runtime corpus.
+Functional manifest58e45ea2a0ccdaa10394080539a34404f0872dc9f2f736cf7d7e7e3d60d573be;
+coupled7c8fbe0056c708bcc31275a2b3dfad3d728f7f9a2c7bfacfd24c8bf0592432e6.
+Warm1059/2608 LOADs overlap;0.864305ms hardware work hidden, exposed polling
+down0.859595ms, but other submission/cache costs rise and ring polls+8.28%.
+No trustworthy >0.5ms bound for broadening through DL/ENDDL, so not implemented.
+Cost auditc03c9de866b6808eb9e5487f4b7de2972f8ab0f983804964752497c465aecd1b.
+
+Input-DMA/arithmetic streaming is also closed read-only: unchanged row order
+completion ceiling~0.04062ms/frame; phase0 row-inner~0.15270ms. Eight-vertex
+chunks add repeated50-cycle drains and yield only~0.20ms optimistic benefit,
+plus new failure/drain ownership. No RTL implementation selected. Audit
+bb9c1914ab2b79a7d8a0f255004e3aef63085b8965f039bef9426c6a93a0982f.
+
+New zero-cycle CPU timing pieces target actual remaining paths: final stall
+factor(32768 exhaustive controls,6.326M live assertions,6 exact native pairs)
+and FP_RS2 hierarchical priority data mux(355328 comparisons,6.784M live
+assertions,8 exact native pairs). Ready CPU726cb18a; RS2-over-ready7cb6d7c5.
+Integer formatted-data gate redundancy is separately under proof; all actual
+valid/write/commit/cancel signals remain. Final composition/reproduction is
+pending, no new fit yet.
+
+Root staged GPUclamp-v12 and attribute-v13 privately. Clamp stores the exact
+quarter-magnitude threshold minus1 in30 rather than32 existing register bits,
+then compares one's-complement magnitude without a serial negate. Original
+Q29 sign/zero policy remains. Attribute adds10 shadow decode FFs alongside the
+existing counter, taking binary decode off the owned attribute→sorted mux.
+There are8 net additional declared FFbits across the two edits, no added FSM
+state or cycle. Invalid/unowned attribute values and threshold reset shadow
+need explicit ownership proof; independent arithmetic and actual16-buffer/
+cycle tests are underway. Neither candidate is selected for fit until proof.
+
+Final v6 composition and software locality closure
+-------------------------------------------------
+Combined CPU022f46fb retains every architectural control/cycle and passes ten
+native pairs with14,519,017 live equality checks. Actual offline Scala plus
+checked postprocessors reproduces exact bytes in53.026s. Final proof
+f12e5afec280963f7b99e97747f8f2bffa3d7eedf5f155f6c82c250a8ca6cdd9;
+reproductionf90135fee4793716e03e803a410260c4371f8c25cdac5b447cc32f223ce6d1dd;
+regenerationc35bfa5f75567b2d6ec10ae020e06b48f563a5867f541d522c73226076e9e0f5.
+GPUv13(61f4776c) retains exact clamp/attribute values and16 native color/depth/
+fence/cycle pairs.37,318,776 literal clamp checks,187028 live owned clamp,
+110988 attr captures and1,852,482 owned onehot/mux checks pass. The10-bit
+shadow counter decode plus30-bit threshold has net+8 declared FFbits and
+zero added FSM states/cycles. Proof9341a5ee4353f08ab83a3a7eb1c3838b5255f77aa5451a35ebdc869b1ef5264c.
+
+Compact-v6 changes only final CPU andGPU versusv5. Map passes top+15ALUT/
++10mappedFF, CPU-42ALUT/+1FF, GPU+71ALUT/+10FF, RAM/DSP unchanged.
+Normal-build-integration-v3 exactly resolvesv6 through six os30-only overrides;
+master/shared andos20/os25 unchanged. Manifest3306ac7b7f2b5686241b49009e77ca49316c7f2646444c3a33896227c8781edd.
+Independent fit gatee885ff4954414d194ff34899b87b2a2cedd59d6c26a634307f4374430410ff33.
+Initial invocation stopped in Python preflight before any fitter because gate
+key was candidate_prepared_sha256 instead of driver-required prepared_sha256.
+Original sealed gate was preserved; fit-driver-compat-v1 explicitly aliases
+that key and redirects only two review paths, retaining all original checks.
+Compatibility1d0822b534c8462a9bd01248a66e8279c482e872b4f2c44e3c3e6589e3a69cce.
+Root started one AREA seed2 fit via phase10_compact_v6_fit_adapter.py, session
+66388. No clock/seed/physical-option change or seed sweep. Timing pending.
+
+Stack-owned overlapv2 rejects the hypothesis that static prepared buffers
+caused the lost benefit: warm34.65554625ms vs staticv1 34.65048, cold48.96691125
+vs48.98422250. All16 actual buffers and histories remain exact. Five functional
+modes retain721 records/eight streams,64,175 pending batches,213,940 indexed
+entries/returns and1,638,105 outer dispatches. Peak37,728 observed stack bytes
+fits source512KiB reserve; zeroVTX source/emitted-code checked, absent corpus.
+Because no meaningful extra gain, retain simpler staticv1 and do not promote
+stackv2. Functional24cef87a10f342a1ec60f1648dbbc1f344326cae13498790bec1e893ce8b52d7;
+coupled1310830fb4589b46ffb420105fd49cd1d2b70f72441c0d5f109338542a6319ea.
+No production RTL, normal project build files, siblingSM64/Quake2,SD, clocks,
+saved seeds or commits have changed in this work.
+
+V6 fit outcome and final dataflow targets
+----------------------------------------
+V6 fits17952needed/18018placedALMs,1843/1848LABs,307/308M10Ks,45DSPs.
+Worst85.69MHz slow85 and88.64slow0, improved fromv5 but still below>90.
+Configured100MHz setup-1.670ns,hold+0.103,recovery+3.939,removal+0.266.
+Read-only complete endpoint census13/2below90 vs73/18inv5. CPUdependency/
+forwarding no longerlimits90. MainGPU dstate.DRV_PLANE_ORG->dsp_a[10] is
+6levels/74%route. RemainingtwoCPUdecodebits16/18,cacheR_ACCEPT lookup,
+texturecache reset,SDRAMdc counter andwritequeueMLABreadenable are87.9–89.5.
+Auditdd392208b7f93d4755685ee0069ffcbf173c9afe77717469aab52d75e7a1ad09.
+
+Selected backend passive observer preserves exact originalcycles/eightRTL
+buffers:3.47814ms splitsringpoll1.24430,flush/kick0.81851(includingrequired
+MMIOcopies0.63360),dirtypacketemit0.67768,decode/popcount0.18352,reserve0.15607,
+drawcommit/counters0.19353. Across1560calls/6623tris/11414preparedslots,
+no same-generation re-preparations orduplicateuploads exist. Compiler already
+specializes3dirtycorners. No new>=0.5ms backend-only simplification supported.
+Auditcb1b143b012cb9732b8b248eaed0f54b3878e0ac0443af1508089ba2b0a20f6e.
+
+Removing unused backend diagnostic updates preservesallfivefunctionalmodes
+and16actualbuffers but regresses vs immediateoverlapparent: warm+0.10904875ms,
+cold+0.156590ms, duecode/layout/cacheeffects despitefewerinstructions. Retain
+originalsimplerqualifiedoverlapELF; no padding chase. Profile-on backendcode
+andrelocations remainexact inbothflagmodes;offcountersremovedcorrectly.
+Negativecoupled2c28329f656fbbf50e1dda65c1f887bb2e49666cc71a7bad59e853d59db26415.
+
+Fallbackobserver identifies132.125XY-onlynonemptyclippingcalls/frame,6depth/
+near;123otherclippercallsalreadyinside.445of1057XYcrossingshavevaryingRGBA.
+CPUclipinterpolation/byteconversion/newendpointquantizationprevents assuming
+scissor-onlyGPUrenderingexact. EqualW33texturedgameplaytriangles/frame is
+real,butcachedintegerzi versusfallbackUVscaledfloatzi needsdistinctimageproof;
+no bypassselected. Audit6b20dfb0fb560901e7b08360c4e7de5a71face315d7ac30478e16f3d59594a28.
+
+V7 nowprepared,rootmaprunning58517,sameAREAseed2settings,parentv6.
+Exactly3sourcechanges:CPU8fca2871 bits16independentSOP+bit18plane (1,245,184
+combchecks,10exactnativepairs,14,519,017livecycles);GPU3c171d36 defaultidle
+DSP-A=dv_duwithB0 (16exactnativepairs,30,829,320literalproductchecks);cache
+R_ACCEPTdataRAusesownedaddrcomparisonexplicitly (lookup_addr=addrinthis
+state,18protocolrunsold/newcycleandmemorytransactionexact). No newstates,
+registers,RAM orcycles. CPUrepro-v5/normal-build-v4reviewpending. No newfit
+untilmapandallreviewbindingscomplete. No production/sibling/SDchanges.
+
+V7 fit underway; selected software packaged privately
+----------------------------------------------------
+V7 map passes top-5ALUT, CPU+24,GPU-42, noFF/RAM/DSPdelta. RealScala
+reproduces8fcaCPU in52.237s,regeneration7456889251ea9a7bfeb39e74e1d8e306a724ca3ab89229a0438776a16a021fbf.
+Normalbuildv4d3aff1e27d544eed80ca765fc5858f71543633bd45db977d077eda757b7d6a34;
+fitgatedf468cd50041588b5d1bbfb44de56ea85e848fb61c7305acbef88b163aecfc9b.
+RootstartedoneAREAseed2fit82205. Quartusplacementpassed; firstroutefoundone
+CPUdata-bankwrite signal conflict and is automatically retrying inthesamefit.
+No newseed/options/sweep. Resultpending.
+
+Selectedsoftwaredelivery load-submit-delivery-v1 includesonlytheexactnormal
+ELFbbb1c31a andthree-fileSM64patch. FreshordinarypatchbuildfromretainedF11
+PROFILE0/PERF_DIAG0 reproducesit in35.36s. Manifestbb3a5ecd2a5f7b75d3b3e11cd98373b36dcefcd4c72346d98cf71f76bcaf47e0;
+peerreviewaff54e2b772bb64e909a564cd3989a1a816b19de4472d52feba1c97b4293142a.
+Newprivatepromotion-plan-v2 guards132coreand6747SM64sourceinputs, unchanged.
+Plana6084617d476a988a1e4553e5da818b40d2ddd073eea7f26db7d3f66c09bff22,
+rollback7421a3e95a3ded186d1e50f5ace1130d810e532239897bc2814d6329049c7b0e:
+36plannedpaths,15exactbackups,21newabsentpaths. Corehashpendingv7timing;
+no promotionperformed. SDnotmounted. Quake2excludedfromthisSM64delivery.
+
+Updatedreadonlyperformanceconsolidationselected-performance-summary-v2:
+37.82757375->34.650480ms,3.17709375saved,8.398883%lesstime/9.168975%
+modeledthroughput. ThisisnotPocketFPSor25FPSproof. Manifest
+cf2d109a99924795e128249e9dfe7da31e62b55e22ef6862f6b4019096d37f0a.
+
+V7 routed result; CPU-only V8 under qualification
+------------------------------------------------
+V7 fits17956needed/17997placedALM,1842/1848LAB,307/308M10K,45DSP.
+Worst slow85 89.65MHz; slow0 91.20MHz. Configured100MHz setup-1.154ns,
+hold+0.032ns. Not >90 and not promoted. Complete endpoint audit has3below90
+at85 and0at0, all threeCPU mask/last enables through reservation/early-ready/
+fetch PLRU controls. Other module limits GPU92.336,SDRAM91.600,cache97.399,
+LOAD100.867. Audit ac44b85bdd4dccbb260b505953836a9ff5601bb992b45c85be61d0eb325c33bc.
+
+V8 changes only CPU3e8cbcee4df8fae9a0a5b5e6d02a46b00a3430dd0bfad63b86cca850949ee514.
+Exact existing mask/last update enable absorption removes late capture control;
+reservation moves from early-can intermediate to final stall OR. No new state,
+registers or cycles. Separate262144/32768truth proofs and10native pairs pass;
+14,519,017 live original state/control assertions, including143788 captures
+without downFire and212375 flush cycles. Component5527633e391f548695d9d6df4eb56b9a25e393a7fb031e7785b3b7e90fc80c38.
+Real Scala generation52.466s reproduces exact source; regenerate-v6
+b117b4ffe27bb53903b689c54c00db48cf1cb1bc6548271b6708a46305344a93.
+Private sole-CPU composition prepared; map session33205 running, final normal
+integration/fit gate pending. Unneeded GPU/SDRAM/CRAM fallback rewrites remain
+unselected because those modules already exceed90. No production or deployment
+changes. No full seed sweep.
+
+V8 map passes: top-5ALUT, CPU0, FF/RAM/DSP0. Normal-build-v5 clean closure
+matches exactly; os20/os25 closures unchanged. ActualScala/normal/frozen
+sources bound by fit gate44725ec6e72745b1aaf660d303fb51701ceb912a04c6f277fc9ac4d9b287f37a.
+Root singleAREAseed2 fit session28700 underway. No source/payload promotion.
+Bounded final performance audit finds no untried simple >=2ms warm gain:
+indexed5.412296, batch3.478136, direct/generic/push/clip/project7.701960,
+individualcached1.059701, DLdispatch1.903739ms (exclusive). Remaining LOAD
+hardware1.287ms cannot hide2ms. Static adjacent overlap stays selected.
+
+V8 rejected after routed fit
+----------------------------
+V8 fits18052needed/18090placedALM,1844LAB,307M10K,45DSP but85.76slow85/
+85.43slow0. Setup-1.706hold+0.028. Elapsed588.449s,singleunchangedAREAseed2.
+Targetedalignerfamilyimproves91.449/91.558;old3endpointsdisappear. However,
+75otherendpoints/cornerfallbelow90 inunchanged GPUfbaddress->destinationcolor
+andCPUloadaddress->bypasshit. Cache94.082/97.523,SDRAM92.524/93.967.
+No promotion/SDcopy. V7 remainsbetter89.65. CPUv9nowbeingqualifiedasONLY
+localenableabsorption b511dba1 overv7,removingtheunnecessaryreservationrewrite
+fromv8. No newstate/cycle/resources; no performancechange intended. Root
+helperphase10_compact_enable_only_fit.py preparedbutnotexecuted.
+
+V9 component qualification complete
+----------------------------------
+CPU b511dba179677c9f2b3fe433caeb0c5399a4fe1dc688e5d85587f6888d9cbeab is
+v7+enableabsorptiononly,notv8reservation. Componentc3bc138bce20826a8b0b372c515cb84c6baf52ebae10238194b161b217fd057a;
+independentreviewa0b171242950a1bc23930c30fe5423209e7c4053a3464818d6ff7a1cf45d8e66.
+10nativepairsexactoutputs/cycles,262144enablecases,14519017livestatechecks.
+ActualScala+helperregeneration53.665s reproduces b511;manifest
+4c6c230e9829812d78882eea644c60da39ea08fbff29e0238ccc21d26f83764e.
+Rootcompact-v9parentv7map passes,top-78ALUT/CPU-62,noFF/RAM/DSPdelta.
+Normalbuildv6/finalfitgatepending. No production/sibling/SDwrites.
+
+V9 routed outcome
+-----------------
+SingleAREAseed2 fit26681 completed603.408s:17973needed/18037placedALM,
+1838/1848LAB,307M10K45DSP. Slow85 passes comparative90 at90.86MHz;
+slow0 remains88.28. Configured100MHz setup-1.328hold+0.119. Notselected,
+no promotion. v4plan/rollback/transactionrecipes reviewedb5e83682... but
+unexecuted. Readonlyv9STAauditrequestedtoisolatecoldcornerlimiter.
+
+V9 complete STA census0hot/1cold endpointbelow90. SolecoldgeometryaccM10K
+read->classification[0]->attribute_memory data0,88.277MHz,-1.328ns,7levels,
+8.853nsdata3.732route. CPU90.860/91.954,GPU91.100/91.895,SDRAM92.473/94.073,
+cache95.484/96.219. Audit7ec7b9bdf6dfd108168aa05bcaa13ce646b1a64479b3869683d2c0825588ee29.
+V10 remedy inqualification: default attribute_write_data=classification,
+retainUV/RGBA/RGBoverridesandSCANwriteaddress/bytes; idledataunownedwhen
+byteenables0. No float_lt/comparison changes,no addedstate/cycles. Parentv9,
+geometry_raw_load.vonly. Roothelperphase10_compact_clip_write_fit.pyready;
+componentgeometry-clip-write-v1pending,noproduction/promotionwrites.
+
+V10 map/gates complete; fit running
+---------------------------------
+Rawload19b54ebca9c671612b2b8a6e1000b5c20ab5416ae94f574023fadb485113e6f6;
+component5098e3bc0e7ecd26f1d233fdcc2096b6ef8dd2462dc5e4eeb245a59d9f660e31;
+independentreview1611aef97f91b54cc14246ee649fe4d92d0894d9e982201bd279903a7d1dc96a.
+524288control/classification+1000000payloadcases,868033ownedwritesexact,
+646002unownedinputdifferences,missingRGBoverride negativecaught. Native
+230recorded+528syntheticvertices,17248aliaswords,58942cyclesexact.
+Wholemaptop+1ALUT,geometry-15,register/RAM/DSPunchanged. Normalv7
+0a9cb3df9dcd72171b62ba5a1cf6c074cbfebd4407785ebc52f7a3458f98627e;
+fitgate8f5d2db17a13ca1ddb079d8ea9b0ca8480ba8ae26d2d095aefaa53ff0fd96aea.
+RootsingleAREAseed2 fit47244 running. UnchangedCPUb511/repro7/regenerate7.
+No production/sibling/SDchanges; promotion-v5recipespreparedonly.
+
+V10 outcome and V11 single-path remedy
+--------------------------------------
+V10completed550.989s;17938needed/18023placedALM1843LAB307M10K45DSP,
+88.50hot/88.24cold,setup-1.333hold+.074. ClipRAMpathfixworked:7->5levels,
+now94.985hot/92.098cold. Exactlyonebelow90endpointpercorner isnow GPU
+ring_rd_addr[4]->periph_rd_data_r[0],4serialequalityLUT+GPU/periphreadmuxes,
+8levelstotal,routing6.402/5.987ns. CPU90.204/91.996;GPUinternal90.728/92.191;
+cache99.088/98.756;SDRAM97.656/101.297. Audit
+34a48d04cf89c1d1abff47036c2b2637dfcd692de5ecd30cbc97a8b2935aab66.
+No promotion. V11willonlybalance12bitringpointerequalityusingfourkept
+parallel3bitcomparisons+AND,nostate/latency/interfacechange. Stage
+ gpu-ring-equality-v16 pending; otherMMIO/overlayideasremainunselected.
+
+V11 proof/map/gate; fit underway
+--------------------------------
+GPU32de956cdfc6a85e627aed6772c805494c4475a92d9193ece5673d7650aff177
+only12bitring_emptybalancedasfourkept3bitcomparisons+reduction. Literal
+16777216pointerpairsexact;12native+4boundarypairs exactcolor/depth/fence/
+cycles;30829320liveequalities,2850STATUSreads,144wraps,320resets.
+Component71087488b92dfffde24006b6d01a15da6d1a19aa85bf5a4052e4ef8fc1680022,
+replayc97c310d8156dcb99f83ba77d808178be7dc2792158e4ce97f8ba8025ccfbc12,
+sourcefd4123cba24b23d56f65430b1483f5f1b58e76a8bacab8184693b61daf43074a.
+Mapparallelizedafterexhaustiveproof;finalfitwaitedfullnative/sourcegate.
+Wholemap-3ALUT,GPU-24,nostorage/DSPdelta. Normalv8
+2151ac857623bf2c3d367dc2598a478c842fce371fee0b10cc8efa15e2b08779;
+fitgatef64a4b46cf026e369b7adf42271eba690d2e441d1f36cdc223791b59f3d1b1d3.
+RootoneAREAseed2 fit56388running. No promotion/source/SDwrites.
+
+Postclip cached-slot alternative explicitly reviewed, not implemented
+--------------------------------------------------------------------
+KeepingCPUclippingalonewouldnotmakecurrent0x56/0x54cachedrouteequivalent:
+XY/depth/RGB565/UVcanmatch,butcachedintegerreciprocalofrounded/prescaledW
+isnotdirect0x4EfloatinvWtimespertriangleUV-dependentzscale. Resultingtexture
+planesdiffer. Existingexplicit-zialternativehas0.818msprojectionself for216.5
+simpletris/frame;32versus18wordscutsoptimisticceilingto0.517msbeforeGPU/
+ownership. Warmnoncachesubset183.5/frameapportionment~0.438ms,notmeasuredgain.
+Existingtrace1468noncachepushes=1357textured+111untextured;allWbounded,
+136equalW. Untextured13.875/frameprojectionceiling~0.052ms. Retainselected
+software,donotimplementchangedquantization oranotherlayouttrial. Sourceaudit
+3a49443391bfd5404d9d3172da2811dc195573e6a262783b4fbc3ee044385de0.
+
+V11 outcome and V12 combined critical-path fixes
+------------------------------------------------
+V11 completed562.699s:17957needed/18029placedALM1842LAB307M10K45DSP,
+89.41hot/89.52cold,setup-1.184hold+.119. Ring equality now2 LUT instead4;
+full status path6 instead8,118.34/119.32MHz. Complete remaining misses:
+CPU stage2 integer formatter/data gating89.413MHz; texturetag->RAMaddress
+89.413/89.847; audio multiply->21bitaccum89.518cold. Audit
+3bd8c5fe10fd5dd7f5d4466d4ddb5c01eee3e465e66df687aba0ea7da9ce9271.
+V12 changes only those three data/address expressions, preserving state,
+cycle counts and enabled outputs. CPU482e data-plane source uses early
+byte/half copy/sign controls; texture RAM addresses use accepted-request
+ownership; audio splits16bitlowcarry from5bithigh correction. CPU10native
+pairs14519017live checks,155904literal; texture12native+4boundaryGPU pairs,
+131072literal plus cacheprotocol SET_BITS4/10/11; audio177assertions and
+14223exact-cyclePCM samples,17777216literal additions. Independent reviews
+CPU07018f46f839d5b2893ce6997ce9b880e5d7effd3eb5a7b892df18caa7a80840,
+texture82939ac0a26319938d0eafd2368c0f64197336887fdef2d6f08dd1faa4fb9594,
+audio78132b5e673d4095672d4524640ce834a4f785098acbad045d87940b4d55101e.
+Actual Scala regenerate8 b94b51e9532a685eb6721232131e1a832a06c0226803810f29c117ae5be39a8f
+reproduces exactCPU in53.178s. Map passes top+1ALUT/+1mappedFF (architectural
+state unchanged; mappedFF attribution audit pending), noRAM/DSPdifference.
+Normalv9 has31proposed outputs/eight os30 overrides; manifest
+3765e4e5620bd1528af3776b9c8032edabf78a58e8fc7317f06fd9d848cabe19.
+Final gate f1f67544940e7f52c1d9779e4abb83eef1f94163e9db4b5016c6f61debdefa7a.
+Single AREAseed2 fit73340 running. No source/package/SD promotion yet.
+
+V12 mapped-register attribution and local-promotion readiness
+------------------------------------------------------------
+Independentmapreview8cdbe028ee6507aae408a726d83c4a70d09c18f7df6e52de05a06c50a463a00d:
++1mappedFF is unchanged CRAM1 PHY output register cram_ub_n no longer merged
+into equivalent cram_lb_n; internal_q merging persists. CPU/GPU/texture/audio/
+geometry FF counts unchanged. No architectural state/latency addition.
+Promotion-v7 recipes targetv12/normal9/repro8/regenerate8/CPU482e;38destinations
+=31hardwarebuild+3SM64source+4artifacts, eight os30 overrides. Independent
+mechanical review c5cd832d90d190704a9c37c9ce1dcdc05c62957d91d8c8e6f66e950afc53fd6b.
+Recipes prepared only; no plan/backups/payload/apply action until both slow
+corners exceed90 and holdpositive. V12 placement succeeded; routingunderway.
+
+V12 routed outcome and actual remaining-cone diagnosis
+------------------------------------------------------
+V12completed562.492s:18072needed/18101placedALM1845LAB307M10K45DSP,
+86.51hot/87.03cold,setup-1.559hold+.052. No promotion. All three targeted
+fixes work: CPUcachedload->regfile101.368MHz/5levels(old6),texture98.396/
+100.898,audio94.153/92.081,ring113.83/113.73. Completecensus46hot/23cold:
+GPUcalcstep->next-codeencode->NONEcompare->FSM86.513(8.539nsroute),
+spancountRAM->nonzerotest->sharedzero-recordaccumulatordrain87.032cold;
+secondary CPU RS3hazard->finalfetchready88.865hot90.236cold. OtherCPU
+secondarySRC1bypass89.74/RVCbit4 89.85hotmayreflectplacement. Audit
+148e0ab3f9260686d063c32e0ca96b468c9ce3b235b92ca84e04649e47d0e9e1;
+diagnosisa178030c6c4bed62ff2769467cfceedbd03b15a97d5da40396c24d159566c320.
+SavedGPUv15fbwqfinalityfactor DOESNOT targetspancount source;notselected.
+V13underqualification: directGPUterminalpredicate and recode existing
+count-valid metadata asvalid-and-nonzero toremoveRAM->drain comparison;
+CPUonlyfinalfetchready precomputes occupancy before latefullhazard predicate.
+No new storage/cycles intended, strictcomparisons/nativechecks inprogress.
+Roothelpersphase10_compact_span_control_fit.py/normal_build_stage_v10.py
+preparedonly;CPUagentownscomponentv11/repro9/regenerate9,GPUagentowns
+span-control-v17. Independentcounterauditfindsnoremaining100ALMcleanup:
+GPUprofilersdisabled/LOD5countersunconnected; remainingtimer/fence/queueslive.
+
+V13 qualification and synthesis progress
+----------------------------------------
+CPU6c02b722fe4a66f91ad88408e035dbadec92686e18000559cf13a93b5f541b54:
+finalfetchreadyfactoronly,32768booleanstates and10direct482enativepairs
+exact,14519017livechecks incl4933884fetchstalls/16532RS3hazards. Component
+d9a22329d6203329535af567ff541f70c79b18501966b1eab92e7f1ad5fba770;
+peerreviewa05e0490b6171e05d047c7f79da5ee611119352eec9dda38c0df685723ba931d;
+repro96361c912465bc6f471db4cd18d2542919c82804793527795066fb888ef1f6b0f;
+actualScala9 10e3ba30befa24d1a646676905eca9dc21b9765d08c29935501e0abcfe5ec950,
+52.697s exactoutput. CPUISA/cache/pipeline unchanged.
+GPU7076c8e7c9d41361aa01bda2612089dcff924cc38885d958e2956a39ca0037a2:
+allten count-valid setters recodedaswritten-and-nonzero;fourclears and
+lexicalprioritiesunchanged,bitmaponlyreadSELECT. Directterminalpredicate
+replaces2encoded-next-code comparisons. 16384controls262144countcombos
+4194304slottransitionspass. Native12+4GPU pairs exactbuffers/fence/cycles;
+focusedfull-decoderzero-recordcheck pending. Rootmapparallelizedwithnative
+proofafterfrozenliteralhashgate;fullfitstillrequiresfinalcomponent+peer.
+V13mapPASS:top+40ALUT0FF/RAM/DSP,CPU+33ALUT0FF,GPU-11ALUT+1mappedFF,
+geometry-6ALUT. No architecturalregisteraddition; don'tclaimallmapped
+hierarchyFFcountsunchanged. Normalv10passes/sealed
+bdf38691ad45135ff0be2e180b136d59844fce3c63959d46ea4f75e1a48d2e4b.
+
+Additional read-only audits, no experiments
+------------------------------------------
+Diagnosticcounterauditfaf52caa31027fe0f0db2f26440a7dda83020f134f300efc8da90baa1ad6802f:
+noidentifiedliveunusedbank;GPU484bitscompiledout,LOD5unconnected128cycle+
+32valid,CPU360Whiteboxunused,remainingtimer/fence/queuesrequired.
+RV32A alreadyrequiredinstaticexecutabletext OS12LR/12SC,SM6416/16,Q222/22,
+allocator/locks. ExistingLRSC-onlyprivatevariantneeded+126ALM/+2LAB, rejected.
+Compileraudit09466cc2469ff7101be366a53f264c51ebffb9ebd7ca2a9ae811344d70690639:
+selected298TUs effectiveO3, noLTO/PGO;wholeLTOdisabledforcrossTUassettypes.
+Priorphase2three-renderer-TULTO721records:instruction-1.1865%,modeledCPU
+cycles-0.2014%,scenecountsexactbutnoactualGPUbufferqualification;notselected.
+Whole-appLTO/PGOnotmeasuredinphase9/10,notdisprovedbyrenderer-only result.
+
+V13 final proof/gate complete; routed fit started
+------------------------------------------------
+GPU component: 1f763aea89cf19814d6a5709b55b3a5ff4032a5b76265ba1bb8ea181ed6638d0.
+Full GPU proof: 116a70094fc7e7eb1bca4089d6097d6fb49930670afe66a909fd9716bb812a10.
+Independent GPU source review:
+96a096e1bae6e027d118e464897c2b174660a905942a5151e7dc075857fa5141.
+Sixteen selected native/boundary pairs plus two explicit zero-record protocol
+pairs match color, depth, fence, total and busy cycles. There are 30,962,114
+live original-mask/terminal comparisons, 816 selected zero records and 348
+stale nonzero-to-zero RAM writes. The initial zero-test coverage expectation
+was corrected after the loader's mandatory mask clear; that attempt remains
+preserved, and candidate RTL never changed. All component checks are done.
+Final fit gate: 56001ba407501f1eac14909d6d1184ae4ae017e866f0e67dabcfa76620afcb55.
+Root single AREA seed2 fit session90328 started. No production/source/package
+promotion or SD write. Promotion-v8 recipes are being prepared only.
+
+V13 routed result after user continuation
+-----------------------------------------
+The background build completed before the user resumed. Session90328 was no
+longer attached; complete on-disk assembler/STA results were preserved and
+root sealed the result without rerunning anything. Duration565.234s;
+18058 needed /18109 placed ALMs,1847 LABs,307 M10Ks,45 DSPs. Fmax86.70 hot /
+87.38 cold, setup-1.534, hold+0.107. No promotion; v8 recipes stay unapplied.
+Prepared eaafaab1e5d88d82c9d7aa501ccd16ef15041bdf91abed73370922972092b82e;
+fit report38c2fb3e479068851edc44d3a43a0a8d6c660eccacb600498a439754f67b9ff2.
+V13 STA export reports30hot/5cold misses (down46/23). Intended fixes work:
+count RAM->drain path gone; metadata->drain112.41/112.33MHz;
+calc-step->state103.66/103.65; RS3->fetch93.33/96.22.
+New families: CPUbranchcontrol->GShare address86.70hot /BTBbadtarget87.38cold;
+cpu_systemwrite-head->burstindex/sent87.67/88.59;
+texturetag->S_INIT89.25/88.26. Tri agent owns audit/diagnosis and wrapper/cache
+remedy inspection; geometry owns predictor-path inspection; new timing_strategy
+agent independently reviews physical/resource strategy. No new source changes
+selected yet and no additional fit started.
+
+One bounded alternate placement of the smaller proven design
+------------------------------------------------------------
+The v13 fixes resolve their intended paths but leave mostly routing limits.
+V7 has only three identical hot endpoints,42.9ps short of90MHz, and six spare
+LABs. V13 has one spare LAB and needs422.9ps improvement across more families.
+Root therefore selected exactly one private v7 seed1 placement, not a full
+sweep or source/ISA/cycle change. No special advantage is claimed for seed1.
+Stage compact-lod5-v7-seed1-v1; helper phase10_compact_v7_seed1_fit.py and
+matching _report.py. Prepared5be2837e16b5d000dfd61e64f07499588ec4cb5bfa49eba1b810c71adb216d17.
+Independent gate88992040192cc82ad5d52c09ec41abc73f71278d17ffc45ca9960a184533a6ca
+rehashes734 inherited proof/result bindings and115 frozen files. Dry shared
+prepare produces exactly the old job QSF except SEED2->1; other generated
+files match. Root fit session58507 running. The source snapshot's savedseed2
+is unchanged metadata, while the actual effective job seed is1.
+Normal-v11 is conditionally prepared/checked/sealed for this selected job:
+8c6119a5fe38db93e9c6408289e265fb47db893dbfa763dbae6d8ff010e236ca.
+All29 normal-v4 proposed files are identical; only os30.seed=1 and the fresh
+os30.seed.src fingerprint df65992b23b8809aec443a0422ef5e4c are added.
+Total31 proposed files/six overrides. Ordinary/frozen QSF source content,
+macros and all non-search settings match actual seed1; os20/os25 unchanged.
+CPU remains8fca/repro5/actualregen5. Production savedseed is still2 and no
+source/package write occurred. A successful fit would require explicit
+seed1+fingerprint promotion too; old statements promising no seed change
+must not be reused for that final transaction. Conditional promotion-v9
+recipes are being prepared from the latest guarded transaction implementation.
+
+Read-only v13 follow-up proposals are not selected
+-------------------------------------------------
+Wrapper: recode existing wr_matches_prev with same-address/mask AND LOCAL at
+push, removing head-address decode from WLAST; no storage change proposed.
+Texture: separate state transition from miss/flush updates; benefit uncertain.
+Secondary-cone audit6842689ef2718dcd32108e26a3345792db0ac2e3d735d24f89e135e4f33ccd33.
+CPU cold32bitBAD_TARGET comparison could use balanced3bit groups. HotGShare
+path is79percent routing through redirect/PC priority mux; directpriority mux
+might remove a level, but RELAXED_LEARN does not target this read/redirect cone.
+No implementation or tests for these proposals.
+
+Single alternate placement rejected
+-----------------------------------
+compact-lod5-v7-seed1-v1 finished618.429s and was sealed. Effective seed1
+produces85.62hot/86.18cold,18036needed/18085placedALM1844LAB307M10K45DSP;
+setup-1.680hold+.014,recovery+.946. The fitter also warned of congestion.
+No further seed trials selected. Normal-v11 and promotion-v9 remain private,
+unapplied; savedseed stays2. Sealed report SHA
+7c492d52bf1d0149713be1fcb2009c2a0a5103dc5037cf85a95e01252e826a78.
+Root/strategy now evaluate one physical-combinational-only option on v7seed2,
+with physical register duplication and retiming OFF; no new run authorized yet.
+Previous failed global physical trial enabled BOTH combo and duplication, so
+its area increase cannot simply be assumed for combo-only. DSP add mapping
+is a read-only contingency, not an implemented or measured option.
+
+Pacing audit rules out a hidden large wait
+-----------------------------------------
+Selected present queues FLIP; next game/audio work occurs before next renderer
+acquisition. Kernel acquisition returns the third framebuffer without waiting
+for display vblank; legacy osRecvMesg/osViSwapBuffer are stubs. Wall-clock30Hz
+deadline only idles while ahead. The coupled model already clocks60Hz swaps;
+GPU completes at least6.410ms before next render eligibility in the selected
+warm window. Excluded final presentation tail is6.12951ms TOTAL across8frames,
+not16.7ms per frame. Model fixes one game update per rendered frame; real
+catch-up/kernel/interrupt costs differ. F10 screenshot rendering35.9+game9.5+
+audio1.4 approximately46.8ms already explains21.4FPS without a large pacing gap.
+F10 diagnostic screenshot and F11 normal simulation are not a matched absolute
+FPS comparison. No pacing code changed and no new performance experiment ran.
+
+Physical-option assessment correction (read-only)
+-------------------------------------------------
+The proposed global combo-only trial is not selected. The earlier v5 control
+and combo+dup trial both created337 register duplicates during initial packing.
+The physical speed pass logged only Boolean-division combinational resynthesis;
+CPU net209 physical nodes and+208 combinational ALUTs closely match its growth.
+The previous+223.7 CPU ALM-needed estimate therefore cannot be attributed mainly
+to register duplication. No isolated combo-only result exists, so its exact
+resource cost remains unknown rather than assumed equal.
+Router effort2.0 is also not selected: the earlier installed25.1 Cyclone V
+full-core trial changed only that QSF line and produced byte-identical RBF
+and all timing/clock tables. Tiny2.0/4.0 probes show parser/fit acceptance,
+without ignored/deprecated/range warnings, but no report proves greater
+effective routing effort. Root's existing MAXIMUM setting is a distinct option.
+All seven prior router-audit bindings and both RBF hashes were rechecked.
+New evidence: physical-options-readonly-assessment-v1, manifest SHA ed7ef69c2eb4162e44e15fcf20ab28cd543a9b2587f191c3936216d1264dd304.
+No new helper, map, fit, simulation, source/settings change or promotion.
+
+Direct final-fetch factor on the smaller v7 source
+-------------------------------------------------
+Selected a CPU-only candidate, compact-lod5-core-v14, over exact v7 seed 2.
+The only source delta is the final fetch-ready Boolean factor already proved
+on a later parent. The direct v7 candidate is ca6a2cb822978bf3ad6223397bc5622f0149a550237fb8096178a5087bc76d40
+(cpu-fetch-v7-v12). Intermediate aligner-enable, integer writeback DATA-plane,
+and v10-v13 GPU/audio/texture changes are excluded. No state or cycle is added.
+The corrected v7 critical path launches execute ctrl3 lane selection, passes
+through reservation/early_can and shared ready, and ends at aligner mask/last;
+it does not launch from the aligner. The new expression bypasses dispatch
+l373 for fetch capture. The independent literal proof passes all 32,768
+control combinations and detects a missing-hazard negative control. Root map
+session 27508 is running; native comparisons, exact CPU regeneration and
+normal-build-v12 are pending. One saved-seed-2 fit is conditional on all proofs
+and independent review. No new seed sweep, production edit or Pocket trial.
+
+V14 component and synthesis checks
+---------------------------------
+All ten direct-v7 CPU comparisons preserve UART and exact cycle counts;
+14,519,017 live fetch-ready checks include 4,933,884 stalled cycles and
+16,532 RS3 hazard cycles. Component manifest 744e30f52b4666c93800d37240c7d7a6918f9a73f357c028d7bf1004a28dfe36;
+independent component review 8de54e6a456c09d0b0ef2f01b3d5a5c2075a4bd8400ea16fe10732b86ccd60cc.
+Actual private offline Scala regeneration reproduces ca6a2cb8 in54.117s;
+manifest ebf0d0dca8873816a5c7828b7842ecfd4b01a60587737918fef43131b0cce2af.
+The initial sandbox Docker-access failure occurred before Scala and is
+preserved separately as regenerate-v10-attempt1-docker-permission.
+Map passes: CPU -14 ALUTs, no CPU register/memory/DSP change; top -4 ALUTs,
++1 mapped FF. Unchanged GPU RTL retains its preexisting synchronous-clear
+spanprod_header_supported register, previously removed for lost fanout;
+this explains the +1 mapped FF without added architectural state or cycles.
+No physical timing claim follows from synthesis alone.
+
+V14 normal build integration qualified (private)
+------------------------------------------------
+Normal-build-integration-v12 is prepared, checked and sealed. It composes only
+exact compact-v7 snapshots plus the final-fetch-only ca6a2cb8 CPU/repro10 chain.
+All115 selected source bindings equal v7 except the CPU. Saved/effective seed2
+and six source overrides remain unchanged; no seed metadata is proposed.
+The29 proposed files produce exact v14 mapped source/settings/SDC/QIP/MIF/macros
+closure through normal make and the frozen generator. os20/os25 closures remain
+unchanged. Malformed/duplicate/missing source maps are rejected atomically;
+existing variant-timing, CPU-freshness and atomic-publish tests pass.
+Actual regen10 output is checked directly against both selected and proposed
+CPU bytes, manifest ebf0d0dca8873816a5c7828b7842ecfd4b01a60587737918fef43131b0cce2af.
+Normal12 manifest 2174638f933c619eb659288c6062f70433004ce8265210ab4fbeed232adffecb.
+No production write, Quartus invocation or deployment by this integration.
+Independent v7 hot-cone review finds the existing v9 mask/last enable option
+already tried and v8 reservation-ready rewrite not beneficial overall. Grouping
+the three ctrl3 lane-qualified reservation terms is algebraically possible,
+but WideOr109 may already implement that factor; no evidence proves an area
+or depth reduction. No additional cone change is selected for v14.
+
+V14 routed result rejected
+-------------------------
+The single seed-2 build completes in590.122s: 18,005 needed /18,010 placed
+ALMs, 1,841 LABs, 307 M10Ks,45 DSPs. Slow corners are85.96 hot /87.21 cold;
+setup -1.633 ns, hold +.115 ns. Map/fit/asm/STA complete; timing fails.
+No normal-v12 or promotion-v10 action executed. Tri owns one read-only copied
+STA audit. Initial export shows original ctrl3-lane to aligner path improves
+89.654 ->98.736 MHz hot, but other hazards and unrelated texture routing limit
+this placement. The exact CPU factor is correct, but this physical candidate
+is not selected. Best smaller v7 remains89.65/91.20. Geometry audits memory
+packing area opportunities; strategy audits exact DSP preadder use. A possible
+bounded v7 alternate-placement check is under review, not a full seed sweep.
+
+Bounded placement decision after v14 diagnosis
+---------------------------------------------
+V14 demonstrably repairs its original CPU cone but creates unrelated limiting
+paths. Further tiny RTL changes are not a reliable way to recover the last
+43 ps of v7. Root and two independent reviewers therefore reconsider the
+previous self-imposed no-more-seed-trials decision: exactly two additional
+placements, v7 seeds3 and4, unchanged RTL/settings/clock. This is within the
+ongoing optimization instruction and keeps the user's deferred full1-30 sweep
+on hold. No further seeds are selected if both fail. Preserve and report both.
+The source snapshot and production saved seed remain2 until a passing choice
+has matching normal-build source/seed/fingerprint closure and guarded promotion.
+Root reviewed both fixed helper/report pairs and prepared their private stages.
+Tri owns independent dry-source/QSF gates; root owns the two actual fits.
+No performance simulation rerun is needed: all115 frozen files are exact v7.
+Current v7 memory ALMs are160, not the older190 bound. No credible100-ALM
+zero-cycle BRAM migration is established with one free M10K. DSP preadder
+mapping remains a read-only, uncertain fallback and is not being implemented.
+
+Both bounded v7 placements rejected; no further seeds
+----------------------------------------------------
+Seed3 completes579.935s:88.73 hot/89.20 cold,18,113 needed ALMs,1,847 LABs,
+setup -1.270 ns,hold +.119. Seed4 completes557.128s:81.90 hot/84.02 cold,
+17,989 needed ALMs,1,844 LABs,setup -2.210 ns,hold +.087. Both use307 M10Ks
+and45 DSPs. Both complete map/fit/asm/STA, and both fail the comparative target.
+Root sealed both results and bounded-v7-placement-selection-v1 selects null.
+Independent actual selection check manifest79fd42454b19797a0b3d1447886a3379f1892af314b880a0ba8a55386ed1473a
+revalidates111 evidence records and actual timing/QSF data. No further seeds.
+Conditional normal-v13/v14 closures pass but remain unselected/unapplied.
+They preserve29 proposed source files and add seed+fresh fingerprint only;
+netlist fingerprint df65992b23b8809aec443a0422ef5e4c excludes seed identity.
+No source, savedseed, application package or SD destination has changed.
+
+Selected next gate is an isolated DSP arithmetic feasibility comparison,
+not another full-core build. Six GPU per-pixel color additions have observed
+widths22/21/21/21/22/21. All high q/step bits are pruned in current v7. A
+26-bit DSP preadder with coefficient1 may implement exact modular addition
+without another cycle. Nominal66 carry ALM locations is not a net saving:
+existing q/step FFs and load muxes may already share those ALMs. The tiny
+comparison must include these controls/registers; full-core map is required
+before any full fit. Strategy owns primitive/vendor-model/area/timing proof,
+geometry owns conditional GPU integration/native replay, tri independent review.
+No GPU integration source has changed yet; the mapping/packing gate comes first.
+
+DSP and shift-storage area gates rejected
+----------------------------------------
+The isolated controlled 21/22-bit DSP preadder comparison completes actual
+mapping, fitting and timing. Dedicated DSP arithmetic removes LUT additions
+but leaves their co-packed q/step registers and load/enable controls: needed
+ALMs increase 33 -> 35, with two DSPs added; both cases retain 86 FFs.
+Hot/cold estimates fall from 288.77/276.32 to 121.64/119.05 MHz. No GPU edit
+or full-core DSP fit is justified. Vendor-model compilation succeeds, but
+simulation executes zero vectors because its license checkout fails; there
+is no vendor arithmetic simulation claim. Component manifest
+e9fa9270ce22b35f27cb5b11c6633ceca8303424406bbd8ede7fffb48fe625dc;
+independent review fcfee2eb9e887b0874e1414718f944a1244efce755cff46265ba022661ef1c57.
+
+The historical exact-source NO_SHIFT_TAPS comparison saves only 23.3 CPU
+ALMs using three extra M10Ks; whole-core needed ALMs increase by nine.
+V7 has only one M10K free. A terminal 36-bit FMA tuple may fit in one block,
+but no credible >=40-ALM saving is established. It remains unselected.
+Read-only audit 3be1d0f2406a340a7fc523fc1ca99edb8399828fe4618d862f1a517dcec5c910.
+
+Local timing closure investigation
+----------------------------------
+V7 remains the best routed result at 89.65 hot / 91.20 cold, about 43 ps
+short of the comparative 90 MHz target. No additional seeds are selected.
+Installed Quartus Lite lacks Rapid Recompile. Cyclone V does not support
+the old routing back-annotation mechanism. On an isolated copy, LC location
+back-annotation works; LAB annotation is rejected. Chip Planner reports ECO
+support and exports post-fit locations. A minimal same-netlist relocation
+and its reproducible post-fit recipe are being investigated. No original DB,
+clock, timing constraint, production source or deployment is modified.
+In parallel, a private v7 map-only gate will check a single MAX_FANOUT 4
+assignment on execute_ctrl3_up_LANE_SEL_lane0. Actual duplication and area
+must be verified before deciding whether a new full fit is warranted.
+
+Targeted fanout map succeeds; one fit selected
+---------------------------------------------
+compact-lod5-v7-lanefan4-v1 retains all 115 v7 frozen files and seed 2.
+The sole generated-QSF addition is MAX_FANOUT 4 on the ctrl3 lane register.
+Quartus explicitly reports three duplicated registers for that exact target.
+CPU and top mapping use two fewer ALUTs and three additional FFs, with no
+RAM/DSP change. All 1,051 normalized warnings match the parent; the assignment
+is not ignored. Final map manifest
+e1697f9da80a4792cbc9bcd76674f86da482e626aab0091d98db1c87f3f5ae66;
+independent resource-fit review
+3fedaff3291b4b1466709ca2bde3f572aa026f0707bac2a9468b706bd34c0c2b.
+Root starts one private fit from an exact copy of the mapped job, followed
+by assembly and full corner analysis. No remapping or additional seed trial.
+Helper phase10_v7_lane_fanout_fit.py; execution session 39669. Normal-build
+integration v15 is conditional on a passing physical result, not promoted.
+
+The separate ECO investigation identifies a legal one-LUT move for
+WideOr109~0 from X50/Y32/N33 to X44/Y34/N6. The launch distance decreases;
+another input moves farther away. This is only a discarded dry legality
+check so far, not a fitted improvement. A checked one-node save, full logical
+netlist comparison and fresh all-corner timing are required for selection.
+
+Targeted fanout fit rejected
+----------------------------
+The one seed-2 fit completes in 504.113 s including assembly and STA:
+18,006 needed / 18,108 placed ALMs, 1,847 LABs, 307 M10Ks and 45 DSPs.
+Slow-corner estimates are 89.37 hot / 88.78 cold. Setup is -1.264 ns,
+hold +0.117, recovery +2.283, removal +0.268, pulse width +0.500.
+All physical tools finish; the corner script exits 3 with its expected
+Whole-design timing failed error and complete 20-check/four-corner table.
+Hot limiting paths now include CPU wrapper write routing; cold is GPU
+edge-walker span interpolation. This candidate is rejected; normal-v15
+remains unapplied and no promotion recipe is needed. Original mapped job
+and all production inputs remain unchanged. V7 is still the best result.
+
+One-LUT ECO rejected; timing-driven constrained placement is next
+----------------------------------------------------------------
+The authorized ECO save succeeds in 84 s and internally assembles a new
+bitstream, but its route pass disables timing-driven compilation. Exactly
+WideOr109~0 changes location. Another 141 RAM objects receive new internal
+IDs without changing sites. Independent export comparison confirms all
+56,374 node names/types and 216,642 named connections, plus all 89 source,
+HDL/configuration/constraint inputs. Full configuration equivalence is NOT
+claimed: some vendor flags/object references differ. The raw strict failure
+and the independent classification remain preserved.
+
+Fresh provisional timing rejects the move outright: hot Fmax 65.27 MHz,
+setup -5.322 ns at configured 100 MHz. No further ECO move, promotion or
+separate assembler run is selected. The original v7 job remains unchanged.
+Installed Cyclone V Lite reports SUPPORTS_STAGED_TCL_FLOW=0 and exposes no
+supported route-only/post-route timing optimization flow. Its final-operations
+mode bypasses both placement and routing, so it cannot remedy this result.
+
+Next private candidate preparation uses the successful LC back-annotation
+of v7 with the one dry-legal target location changed, followed by an ordinary
+timing-driven fit. Source RTL and saved seed 2 stay exact; no clock or timing
+exception changes. A source/assignment preflight precedes the single fit.
+Any successful delivery must include the placement text in normal-build
+closure; source-only rebuild equivalence is not assumed.
+
+Renderer-only PGO bounded experiment
+------------------------------------
+Compiler audit finds the installed RV32 libgcov lacks ordinary exit/value
+profiling support, but real edge counters and gcov-info streaming are usable.
+Selected gfx_pc/gfx_gpu account for 27.5603 ms and 1.5653M instructions per
+warm frame; modeled branch penalties total 1.64352 ms. This is a potential
+optimization budget, not a demonstrated gain. One private two-TU edge-only
+training/use experiment is selected, with unchanged arithmetic/source
+algorithms/assets/hardware and no production edits. Optimized output must
+contain no instrumentation and match workload results. First CPU screen
+precedes any coupled-RTL expansion; tiny gains do not justify extra work.
+Feasibility manifest 52924874518e0e92bc33a4fd452263ff265337315f1de217e9d3b9c4b1ca911c.
+
+2026-10-07 one-LUT v7 ECO rejected (timing_strategy): installed Lite accepts
+check_netlist_and_save and internally assembles. Exactly WideOr109~0 moved from
+LABCELL_X50_Y32_N33 to dry-legal X44_Y34_N6; 141 RAM IDs changed without moving.
+Fresh all-corner STA: CPU 65.27 MHz hot / 67.58 MHz cold, configured100 MHz still;
+setup -5.322 / -4.797 ns, all hold/recovery/removal/pulse-width positive (hold min
++0.032 ns). ECO disables timing-driven routing: first critical IC hop worsened
+1.599 -> 2.665 ns, second1.097 -> 4.202 ns. Full named connectivity matches, but
+unknown vendor metadata/onePLLdelay-chain-field differences leave complete
+logical equivalence unproven; no waiver needed for rejected timing. No more ECO
+moves/assembly or promotion. Original677-file v7 job and89source/config inputs
+unchanged. Evidence eco-v7-local-placement-v1/manifest.json
+5dc846b1c9a2fd9b05cd86153883ca35c89b24406492799dcd7a8f096f7ae172.
+Routing-path API crashes even on critical input; complete native ATM works.
+Installed fit_supports_tcl_fitter_flow returns0forCycloneV5CEBA4; legacy dispatch
+has no route/post_route stage. Ordinary LC-constrained timing-driven fit is a
+separate candidate, not a preserved-route ECO or source-only reproducibility.
+
+2026-10-07 LC preparation corrections (timing_strategy): ordinary timing-driven
+LC v1 stopped after 27.94 s before placement/routing: 157 Error 171011 packed
+register aliases assigned to MLABCELL sites. V2 mechanically removed only those
+157 rows, preserving all covered sites, then stopped after 37.81 s before
+placement: 125 Error 11943 messages name 117 unique targets. Of these, 98 are
+mapped FF aliases constrained to M10Ks; 19 are real fitted SDRAM duplicate FF
+names absent from the mapped database, interacting with original-register DDIO
+assignments. These are preparation failures, with no timing or final area result.
+
+Root selected v3 as 53,143 exact-fitted-name rows, including all 224 pins, minus
+those 19 proven failing SDRAM clone targets. This deliberately releases 343
+previously covered sites: 324 represented only by aliases plus 19 FFs. It does
+not invent new hard-block names or claim all placement is frozen. Source, seed2,
+clocks and non-location QSF lines remain unchanged. Prepared only, pending one
+reviewed fit. Mapped census uses a fresh private original v7 copy, 54,281 atoms;
+no map or fitter invoked by the census. Evidence lc-mapped-type-audit-v1.
+
+Renderer PGO retained; portable reproduction still under qualification
+---------------------------------------------------------------------
+The two-TU edge-profile build preserves all 721 scene/geometry/culling records,
+eight ordered renderer streams, and all 16 actual coupled RTL color/depth
+buffers. Against the load-submit app, warm time improves 34.65048000 ->
+34.02665625 ms and cold time 48.98422250 -> 47.88541375 ms. The cumulative
+matched warm progression is 37.82757375 -> 34.02665625 ms, 10.0480% less
+modeled time. This is neither a Pocket FPS result nor proof of the 25 FPS goal.
+The original qualified ELF starts fff132a5. Coupled evidence manifest
+f1780b7987fffe3e6b931f705a6cabc211550197b0354b83921c43d624d31c79;
+selected-performance-summary-v3
+8e2e6ac06c57cf670c0960427e9d38db70f3139c448cd491e3b2f842ec48c2c2.
+
+The actual GCC profiles contain 136 function identities and 1,357 counters,
+842 nonzero. Freestanding runs/sum_max remain zero as emitted; no counters,
+statistics, IDs or histograms were fabricated. Training and first screen use
+the same deterministic Bob-omb run, so generalization remains unmeasured.
+Only gfx_pc.c/gfx_gpu.c use profile feedback; the normal output has no profiling
+instrumentation. Existing fallback proofs are inherited source evidence.
+
+Portable delivery v6 accepts all strict profile checks using packaged profiles
+and the old auxiliary directory only as a compiler identity string. gfx_pc.o
+is byte-exact, but gfx_gpu.o changes code generation. No portable full ELF was
+built before this was reported. On continuation, root authorizes one narrow
+check of the omitted IPA dump option; if code still differs, one portable normal
+ELF and full matched functional/coupled requalification. Original qualified
+output stays immutable; its proof cannot be transferred to differing code.
+No actual SM64, production core, saved seed, clock, SD or Git state is changed.
+
+LC placement v3 independent gate passes; root starts the single private fit
+-------------------------------------------------------------------------
+Review 0f738301b39d8250d50a068f8185a26c22fce83b0ca5fe786d996c70ed4a5998
+binds prepared 909122b50812ca5332469774215f0b087342e494a25cbfaced8b80f9c7981589.
+All 677 original files and all non-location QSF lines are exact. Canonical
+constraints number 53,143, with all 224 pins retained and 343 explicitly
+released sites. Root session 28996 runs the frozen v3 runner once. Actual
+constraint acceptance, fresh four-corner timing and resulting placements must
+be audited after completion. Old copied report files are not fresh evidence.
+
+Portable PGO ordinary build succeeds; cache redistribution selected for screen
+-----------------------------------------------------------------------------
+Restoring the original explicit -fdump-ipa-profile-details compiler option
+makes both portable renderer objects byte-identical. The subsequent ordinary
+clean 298-object build finishes in 33.95 s and reproduces the entire qualified
+ELF fff132a5ee34d625a279fbf612e4abe54faa122fe519b386130f5ee230dfe63b.
+Delivery v7 contains the same three renderer changes, one normal-only Makefile
+block, and two unchanged measured gcda files. The old auxiliary path is only
+an opaque key under package-local profiles; the build container cannot access
+the old training directory. Profile mismatch/missing-profile checks stay errors.
+Manifest d923e397b89aab6f94e00405be78cc017dccd9b18a7a615854f15c3782c7e218.
+Independent delivery review remains pending; nothing is promoted.
+
+Performance wording must retain the denominator: the 10.0480% gain is CPU
+progression before the final presentation tail. PGO and its immediate control
+have equal complete simulated presentation-window durations. This is not a
+measured frame-rate gain. Raw original warm buffers also match PGO directly.
+
+The untried I64 KiB / D64 KiB split is selected for one private warm/cold
+coupled model screen with the exact PGO ELF and unchanged RTL/traffic/assets.
+Earlier rejected cuts were I16/D128 and I32/D64, not this redistribution.
+The active renderer code footprint is about 59.3 KiB and PGO raises warm
+I-cache misses from 3,884 to 4,989 per frame, making this a concrete hypothesis.
+Model sets change only I256 -> 512 and D1024 -> 512 (2 ways, 64-byte lines).
+Possible net M10K savings require actual CPU mapping later. No regeneration,
+map or fit for this cache configuration is authorized before the screen result.
+The deferred full-native renderer-window integration remains read-only.
+
+LC v3 preparation failure identified; narrow v4 correction
+--------------------------------------------------------
+V3 stops before placement after 32.985 s. Twenty-seven Error11943 instances
+name the same nineteen SDRAM duplicate FFs; no fresh area or timing exists.
+Info176253 explicitly shows each clone inheriting its original register's
+DDIOOUTCELL constraint. V4 therefore removes exactly those nineteen original
+internal DDIO rows too. It keeps all 224 pin assignments and all other retained
+placements: 53,124 rows, 362 baseline covered sites now explicitly released.
+Prepared cf7a73d7f35f61c0b89ba35faeab22a4dbf680fc9b5f6ee33e7fbf43dc1e3ab9.
+Only this correction is selected for independent review and one private fit.
+
+2026-10-07 LC v4 constrained-placement branch closed (private, no promotion).
+Removing exactly the 19 inherited SDRAM parent-DDIO constraints allowed the ordinary timing-driven fitter to complete; all original pins, RTL, seed 2 and clock/SDC settings stayed unchanged. Fresh fit/asm/STA passed as tool phases, but both slow main-clock limits failed the >90 MHz comparison: 85.76 hot / 86.20 cold, configured 100 MHz. All 20 timing checks across four corners are present; minimum hold +0.007 ns. Needed ALMs 18,480, placed ALMs 18,000, LABs 1,842, M10Ks 307, DSPs 45.
+Read-only copied-DB audit lc-v4-placement-audit-v1 (manifest 693e17ed94de37b8e4b3984e9ce74c54a9281a9b944f66cad39dc2c96337f337): all 51,568 surviving constrained names matched requested locations; the 1,556 absent targets exactly matched warning 15706. Common-name locations: 54,265 unchanged / 233 moved; 1,876 original names disappeared and 338 new names appeared. The requested WideOr109 move was honored. Original launch/mask/last FF locations stayed fixed. Original lane-to-aligner cone improved to -0.941 ns hot / -0.415 ns cold at 100 MHz (period equivalents 91.40 / 96.02 MHz); launch-to-WideOr route became 1.431 ns hot versus 1.599 ns originally. Other CPU load-result forwarding, SDRAM-port decode and GPU Z-accumulator paths became limiting. This is not a preserved-netlist or route-equivalence claim. No additional placement trial or normal-build integration is selected.
+
+2026-10-07 I64/D64 cache-only resource branch (explicit physical-headroom experiment).
+The matched PGO software screen is NOT a speed gain: warm CPU progression34.02665625→34.23251ms (+0.60498%), cold47.88541375→48.02562625ms (+0.29281%); presentation windows unchanged and all16 buffers exact. Root explicitly authorized private CPU generation/map despite this small modeled cost, to assess whether less RAM eases placement. I32/D128 remains the performance reference.
+Private cpu-cache64-resource-v1 starts from exact reproducible v7 CPU/repro5. Only os30's block overrides I sets256→512 and D sets1024→512; os30_worker stays256/1024. All15 original generator/helper/patch inputs initially match real regeneration5 except os30.cfg. First generation intentionally fails the unchanged hash guard and archives raw body; exact original one RS3 and eight frontend hunk bodies then qualify new intermediate/final hashes. Only two SHA constants in each helper change, with idempotence/negative guards retained. Final real Scala regeneration passes exactly ab3205dff8e38211a223234e237a4ee083b55ecd0a02cb915c58850a34ce322e. Actual logged flags differ only in the two cache-set arguments.
+Map-only resource evidence (manifest64c0ff19c171744568a5a6b6a9d99c7cd4e5866559da5f03831857dca8b7aee9): CPU ALUT6,266→6,217, registers5,119→5,112, RAM bits1,452,416→1,180,800. Whole map ALUT26,273→26,220, registers25,374→25,368, RAM bits2,343,859→2,072,243, DSP45 unchanged. Estimated ALMs17,936→17,945 (+9), so no ALM savings claim. An early approximate34-M10K estimate was withdrawn: baseline I data banks use13 blocks per way and new depth may choose different packing. Actual M10K count remains unknown until fitting.
+Root authorized preparation of exactly one ordinary seed2 cache-only fit, with identical v7 QSF and224 original pin constraints, no LC constraints or other RTL changes. Candidate cache64-v7-fit-v1 prepared1021b851e9ba87b977be86cc1582b87af0ffa5b870119357ee85dd9d0f1b9855; root will run after independent gate. Strict fresh four-corner20-row timing checks and expected nonzero timing-failure classification are built in. No source production changes or deployment.
+
+2026-10-07 cache-only fit permission recovery.
+Initial cache64-v7-fit-v1 adapter attempt failed after0.0094s because the sandbox could not access the Docker API; no container or Quartus fitter started. Old outputs are retained (manifest e6326f81ff904ad39c8c4c727824a353bc73fe17a883e5ff9081f6f33e9fbd2d), with failure-classification.json clarifying actual Quartus executions0; the generic result full_fit_count1 meant a scheduled adapter attempt. Root authorized one actual retry with escalation.
+Fresh cache64-v7-fit-v1-retry1 helper changes only the private output label; source/QSF/mapped inventory are identical. Prepared d88b2aa99b21a723bf4fc076c607d8c32f0c47c1bb40933674bd072ea3cee02e and independent retry gate4bdba9e5f94738ec4dc863f1b2e8b16a604ec8e782876c883208eb42cdeb5444 passed. The same one seed2 ordinary fit is now running with authorized Docker access; this is not a second Quartus placement or a seed sweep.
+
+2026-10-07 cache64 physical result and native evidence update.
+The one actual seed2 cache-only fit completed469.864s with fit/asm/STA return0 and the expected corners3 configured-clock setup failure. Sealed cache64-v7-fit-v1-retry1 manifest8499cf076f6d35fa969ea66f6ed4bf5e0dd7c23ddeccd187f628f77ce9e7c375:89.21MHz hot /88.64MHz cold, so still below the requested >90 comparative gate; configured clock stays100MHz. All20 checks/four corners present, minimumhold+0.114ns. Actual physical resources17,869neededALMs,18,000placedALMs,1,842LABs,279M10Ks,45DSPs. Versus v7 this frees28M10Ks and87neededALMs; an exact34-block prediction would have been wrong. No additional fit was launched. Vendor fitter report contains a non-UTF8 degree glyph; a separate postprocessor decodes it with replacement while hashing unchanged raw bytes. Frozen execution recipe stayed unchanged.
+Independent actual native CPU+GPU cold-call evidence changes the performance assessment: native-renderer-cache-check-v1 manifest8d98895f176ec23ed235b0489284637c7844272aa80daa5a0ed49483bef4f8ef checks same164fixture sources/config,66entry words,23,036command words,307,200frame bytes. I32/D128 renderer2,924,576cycles→I64/D64 2,786,449 (-4.723%); including final GPU drain2,945,961→2,804,826 (-4.791%). Accepted I linefill bursts3,254→1,305; D3,756→3,811, counters include restore/drain. All reader errors0. This is one cold native renderer call, not a warm/full-frame/Pocket FPS result; earlier slower analytic multi-frame results remain preserved.
+Current limiting families: hot audio ramp -1.210ns and CPU compressed-decode bit19 -1.170ns; cold CPUbit19 -1.281ns and GPU reciprocalROM -1.218ns. CPUdiagnosis cache64-cpu-bit19-diagnosis-v1 manifest6d5b4b0cb1858206f0f717e6dec28bc7a434a6bf8161ea4be8501c23ef7e53b7 recommends a direct bit19 plane following existing bit18, retaining all state/cycles. Root owns implementation/exhaustive decoder proof; geometry owns audio/GPU-ROM remedies. Prior final-fetch fix is not this cone and v14's global placement regression remains visible.
+
+2026-10-07 native renderer milestone: real Vexii/cache/controller replay.
+Root implemented phase10_native_renderer_model.py and native_renderer_main.cpp. Geometry captured the qualified PGO ELF's full SDRAM/BRAM/CRAM state immediately before the original gfx_run at busy frame360; guest-v2 restores integer/FP state, invokes untouched original renderer/end-frame functions, and provides explicit fail-loud guest OS services. Private reset/return overlays are sparse and applied before CPU release. The first guest preparation incorrectly wrote qsim-only CSR7ff; review caught it, and guest-v2 requires capturedzero and omits the unsupported native write. Initial native model lacked production peripheral parameters, then lacked WQ16; model-v3 fixes both and retains exact selected core modules/macros. Initial runner-v1 incorrectly compared dynamic alias output with SDRAM backing storage. Preserved run-v1 stops at that observer failure. Runner-v2 snapshots alias golden data directly from geometry BRAM at actual alias AR acceptance and binds it to both M1 and CPU request trackers; it checks every beat, ID, last marker and physical write.
+Native run-v2 succeeds: all66 integer/FP/PC/FCSR entry words, all23036 uploaded command words and all307200 color/depth bytes are exactly the captured reference. No CPU/M1/audio read, write, scanout or CRAM errors. Actual cold call from gfx_run entry through gfx_end_frame return is2,924,576 cycles (29.24576ms at100MHz), followed by21,385 cycles of GPU/cache drain. Independent method review6b572b48ec4d1602e3cdf925e17517097f870ab10f46cb49e6747c3ac4631fd6; independent capture/state/output check88aa201df3fa96d07dccce31678c9ed11b51ecc523da91a9b81be18d2cc68710. This is NOT native full-game/warm-frame or Pocket FPS evidence. Restored guest runs from cold CPU/cache, restore code warms its own lines; no game/audio execution or OS kernel. Injected scanout/audio pressure matches the earlier synthetic cadence/address, but phase restarts at CPU release. GPU return/drain is not a vblank period.
+
+Native I64/D64 evidence changes the cold renderer cache decision.
+Same runner/snapshot/application/GPU/traffic, actual CPU-only8fca->ab3205 substitution: call2,924,576->2,786,449 cycles (-4.722975%), through GPUdrain2,945,961->2,804,826 (-4.790797%). Instruction bursts3254->1305, data bursts3756->3811. All entry state/commands/pixels remain exact, zero errors. Independent native-renderer-cache-check-v1 manifest8d98895f176ec23ed235b0489284637c7844272aa80daa5a0ed49483bef4f8ef. The earlier analytic warm+0.605%/cold+0.293% regressions remain archived; this actual native cold-call result is a different, stronger measurement for this specific window, not grounds to invent warm/full-game speed.
+Physical cache-only retry finished:89.21hot/88.64coldMHz, misses>90. Real17869neededALM/18000placed,1842LAB,279M10K,45DSP; versusv7 -87neededALM/-28M10K. Hold/recovery/removal/pulse positive, configured100MHz setup negative. No production promotion.
+
+GPU cache capacity revisited only with the newly freed RAM and native contention.
+Old GPU32 screen was an unfittable I32/D128 optimistic analytic result (~1.77%); retained as historical, not rediscovered. With actual I64/D64 CPU and native bus pressure, GPU8->32KiB reduces cold renderer call2,786,449->2,691,126 cycles, incremental95,323cycles/3.421% and total233,450cycles/7.98236% versus native original. All registers/command words/pixels exact, zero bus errors. Independent native-renderer-render32-check-v1 binds the sole SET_BITS6->8 source delta. Map-only cache64-gpu32 is authorized; no fitter yet. It costs+297ALUT/+200FF/+253952RAMbits, estimatedALM17945->18088. Because physical fit is tight, a single 16KiB native screen is selected to compare useful speed retained against resource cost; not a seed sweep.
+
+Targeted exact timing components, no arithmetic/cycle changes.
+Actual cache64 critical paths: CPU fetch_ctrl3_valid->decode bit19, audio S_WR_VOL_RAMP->nxt_l_r, GPU reciprocal ROM->recip_q16_r. CPU bit19 direct plane component cpu-cache64-rvc19-v1 (candidate32cf8619ebd6beb9b7c62e593e300ba85486daf9c70c199ad0f978a23b80b3ea) compares full32-bit decompressor outputs for all65536 low16 encodings with19 upper patterns:1245184 checks pass, including raw32 and simulator-defined illegal values. Actual GPU32 native replay with this CPU is byte-exact in result.json/PC histogram/MMIO trace/entry registers/command stream/pixels, including total cycle count. No FF/latency/feature changes. Independent source reviewdcd5d87ad925255d2450bdd67b2ee2762d1e072867fcfd586747a47f65010e2f; native addendum pending.
+Audio ramp component audio-ramp-flat-v1 changes only shared8bit combinational function:16,777,216 exhaustive original-RTL comparisons,177 paired mixer tests/14,223samples and32voice throughput pass everycycle; no FF/latency/voicereduction. Sourcef9cbfe37da81ae6d5564df076e75c6d28f46feabb992bb695392d06aa55e0ba4; componentmanifestd0639d8b6d65c59f7ec755b38401055bec2e7890a3cb6c4c3b85dbff50129337; independentgate d439f36414ff0a15b3dbf59b45ec472bab926a2c70b91ebd73b106af2ff83bff. GPU reciprocal write-data factoring is delegated as a third private exact component; no fit selected before proof/resource review.
+
+2026-10-07 selected GPU8 timing composition and reproducible generation.
+GPU16 and GPU32 native gains remain preserved, but both capacity changes are deferred: GPU16 saves26,093 cold-call cycles (0.936%); GPU32 costs297ALUT/200FF/253,952RAMbits and estimated143ALMs, with actual physical M10K packing unproven. The selected composition uses I64/D64 with original GPU8, plus only the exact CPUbit19/audio-ramp/GPU-reciprocal-write factors. Combined native result/PC/MMIO/entry/commands/pixels are byte-and-cycle identical to plain cache64. Independent combined native gate9d70f21190d29eb407bdb6f600b04f3d952b8da191d9a70cb8dfed1404d81762; GPU source gated05027159bf0e05db1d409d9b6da2e28c86e3388b41b76776ef9811880c1d39c.
+Composition v1 guard stopped before Quartus because mutable native runner tools had changed after their proof was sealed. Frozen exact old main.cpp/recipe.py copies were already bound by that proof. New composition-v2 explicitly resolves only those two historical paths to those exact copies, preserving every other hash guard and the rejected attempt. Map passes; cache64-timing-compose-v2 manifeste74508b1a97b0373bbae9717feabd9ee4b770cd22f63a09edcd1829a42778b7b. Versus cache64, total-21ALUT/+1mappedFF, estimatedALMs17,945→17,946, RAM/DSP unchanged. CPU+28ALUT/0FF, GPU+18/0, audio-34/0. Independent audit attributes the sole mappedFF difference to unchanged cram1_phy retaining cram_ub_n instead of merging with cram_lb_n. No added RTL state/cycles.
+Root selected exactly one ordinary seed2 fit; cache64-timing-fit-v1 gatebdcb8e19c99b7120c63e61742185e281c019233befc3f8edea3cd625d674a406. Original224pin constraints only, no LC/clock/SDC/other settings changes. Authorized fitter now running; actual timing/resources remain pending.
+Private generator proposal cpu-cache64-timing-repro-v2 manifestdd995a6058bbc3cece6aa24481c29e90488ca5e0f0c6162a894b387e1135c0b7 retains original one RS3/eight frontend hunks plus two exact checked bit19 hunks, whole-file hash/idempotence/negative guards. os30-only I/D sets512/512; other variants including os30_worker keep their original flags. Initial replay fixture contained the already-applied module attribute and was rejected after shell duplicated it; failed v1 preserved. V2 reconstructs the replay precursor by removing that one annotation, explicitly labeled not an actual raw-emitter capture. Fresh actual Scala generation independently passes in49.862s and yields exact32cf8619ebd6beb9b7c62e593e300ba85486daf9c70c199ad0f978a23b80b3ea (regeneration manifest6c1b5ff85ee714186cc54a79dd588dc43017375887829fe117096b9dd098e7d8).
+Private normal-build-cache64-timing-v1 manifestc0dba0a67e78783593fd155cdcc46bc9c870df23964f39590506177f2b14b14c passes exact selected source/QSF closure, normal/frozen generator agreement, os20/os25 invariance, publication/freshness tests, unchanged seed2 and a refreshed .seed.src fingerprint. Audio adds the seventh os30-only source override. No production write/deployment; normal-build equivalence is not timing closure.
+
+2026-10-07 selected timing-composition fit rejected; no promotion.
+One ordinary seed2 fit completed467.335s: fit/assembly/STA return0, fresh corners3 expected setup failure, all20 numeric checks across four corners. cache64-timing-fit-v1 manifest4b0b7d0d23e7a2c186f775ed9f7537a507c8ad55caa6a2fb05932baeed68db06 records84.45MHz hot/86.23MHz cold (configured100MHz), neededALMs17,914,placed18,018,LABs1,843,M10Ks279,DSPs45. Minimumhold+0.079ns,recovery3.109,removal0.304,pulse0.5. This fails>90 and is not a deployment candidate.
+New worst path in both corners is aligner buffer_mask[1]→decode instruction[16], -1.841hot/-1.597cold; 8levels, hot data11.573ns with8.179ns routing (71%). Additional limiting families include LSUways-hit→GSharewrite-enable (-1.625hot), GPUframebuffer-address→Zmask (-1.507hot), and compressed-decodebit27 cold. The three intended timing-factor endpoints no longer appear among top20 paths, but that limited export alone does not prove their individual >90 timing. No new physical trial/source change selected by this result. Correctness and native cold-call speed evidence remain valid; timing-qualified hardware is still unresolved.
+
+2026-10-07 aligned native comparison and composition outcome.
+Root aligned synthetic scanout/audio/vsync epoch to first renderer entry, removing the510cycle cache-initializer difference from traffic phase. Native aligned baseline/candidate remain exact on66 entry words,23036 commands and307200 color/depth bytes; no bus errors. CPUcall2,927,230->2,788,545 (-4.737755%); call+drain2,939,967->2,804,267 (-4.615698%). Instruction refills3292->1315; data3752->3796. Independent native-renderer-aligned-check-v1 manifest68aeaf8e3113ef5d2855ad0e855b2560e14f7c950517f6ca6e17775171c396c3. The former host-epoch runs remain historical evidence. Two mutable tools referenced by old manifests are explicitly resolved only to their exact-hash frozen runner copies; canonical combined native review9d70f21190d29eb407bdb6f600b04f3d952b8da191d9a70cb8dfed1404d81762 documents this.
+GPU capacity physical choice: GPU32 map+143estimatedALM and unknown303/311M10K packing, GPU16 cold gain only26,093cycles(.26093ms,.936425%). Both deferred; keep GPU8 for simplest selected core. Native capacity review017a0683217a34f87ed8de59a38fc95d79a91eff2afe61c78903de84dc3e6c71 preserves positive GPU32 result and exact-equivalent bit19 CPU distinction.
+GPU reciprocal factor component passes7,291,456 literal checks plus16 actualGPU replay/boundary pairs with30,829,640 every-cycle original next-state/enable checks; no added RTL state/latency. Source238f44273b6bb0188447485d1501e898c8df0c1cb9b758841e8af7ceac414adb, manifest a5fb30e7e45927b7e636b1030f178248e1f39ee3d7aade09c8a3290623ecdf1e, independent sourcegate d05027159bf0e05db1d409d9b6da2e28c86e3388b41b76776ef9811880c1d39c. Q29 selectedoff; arbitrary Q29 cases only literalproof, not fullrendercoverage. Combined GPU8/CPUbit19/audioflat/recipfactor native run is cycle/PC/MMIO/output exact toplaincache64.
+Composition map CPU+28/GPU+18/audio-34ALUT, whole-21ALUT, mapped+1FF due unchanged CRAM1 ub/lb registers no longer merged (componentFF countsunchanged), estimatedALM17946. One ordinary seed2 fit was selected after independentgate bdcb8e19c99b7120c63e61742185e281c019233befc3f8edea3cd625d674a406. Actual Scala generation49.862s reproduces CPU32cf8619...; private normal-build closure/seven os30 overrides/seed2+newfingerprint pass independentgate811fcf3d9604efb3b7c3aa21a26e065e8f5da1111ae37b9f0673d2f125f6afc9.
+Physical outcome REJECTED:84.45hot/86.23coldMHz, setup-1.841ns, minimumhold+.079ns, recovery3.109/removal.304/pulse.5. Actual17914neededALM/18018placed/1843LAB/279M10K/45DSP; all20 fresh numeric checks verified. Both corners now limit aligner buffer_mask[1]->instructionbit16,8logic levels with71% routing hot; original three endpoints absentfromtop20 is not a proof of local90MHz. Manifest4b0b7d0d23e7a2c186f775ed9f7537a507c8ad55caa6a2fb05932baeed68db06; independent outcome596cf1a96321e7fbc42d4aa7a3be44a67d5f350ff26a5140968f45fef069d1f4. No production/sibling/SD/clock/seed changes and no sweep.
+
+Next selected work is bounded and explicit.
+(1) Native caller/game/audio continuation: capture360->362 with original bytes, full229service/ecall records and32voice/allocatorstate. Native-warm-capture-v4 manifestfe6f59ca901d1f9d73fdd098cb30a50df2c0c44c7b72c8e6a366f5060d88805b. Guest services retain fixed qsim logical timer semantics and guest-owned writes; real FB ownership/fences are not forced to captured choices. Host stops at original subsequentgfxentry before architectural writeback; captures actual buffers/commands/registers. Two-entry proofchecks data-cacheeffectingame/audio; threeentriesincludeone warmrender. Guest mixer simulation is not actualOS/audio execution cost; extra service cycles mustbe distinguished. Geometry/triangle ownguestservices, rootownsnewnative_interval_main.cpp. No sealed single-call fixtures changed.
+(2) Native-first front-end pipeline candidate: existing private rvc-pipeline.patch from old dualwork, singleissue with --rvc-decompress-at=1 --decoder-at=2 --dispatcher-at=3. Moves alignment selection before RAWFF, expansion before separateFF, thenISAdecode. One additional redirect cycle, nominalsteadythroughput1/cycle. Historical dualarea/timing results were NOTqualified (83.98whole), so no reusedtimingclaim. Strategy now stages actualgeneration/helpercompatibility; no new map/fit authorization until functional/native performance screen. Simple stockdecoder-at alone does notsplitRVC becauseexpansioniscurrentlyhardwiredinaligner.
+
+2026-10-07 continuation: native original application interval is now running correctly.
+Warm guest-v3 finalized ae58c8dba32b11088f952cea7a14ba9d211815a888708e98a252478c1a715393 with exact original application/caller instructions. Guest-service component b57c9182b7bedc13d8aec731b4e8932f07ab880937407c7d64c3c416e8afac06 and independent source review3b940d6dc888f1f73bb178b44008999e26dccc79bc6894985afb54593a2fa473 preserve229 calls, voice/allocator/timer semantics; these are guest substitutes, not actual OS/audio mixer timing.
+New phase10_native_interval_run.py freezes host/recipe paths in each runner inventory instead of referencing mutable tools. Host stops pre-edge at third original gfx_run entry, preserves all three framebuffer/depth dumps at each boundary, records raw commands and architectural state. V1 baseline/cache stop in second renderer at an observer address error: CPU halfword AW retains bit1, but physical bridge uses AW[25:2]. Corrected only host read/write word alignment, preserving WSTRB, data and alias semantics. V1 failures remain sealed9c5ef1cb0911662205646cb45bb7259cfe85349288f7757f83b7515f05e4c1e7 and09caef59a67bc5d16611d6fe5db41fc2b783e3ffaa9bca04ba8bb6107287bd3f. Independentalignmentreview90f0a87eb7530c4baf5859b8ab0d848fff5b9ccef1e77314586a39018ef29f4d confirms exact observer-only delta.
+V2 full interval baseline/candidate complete0, no reader/physicalwrite/scanout/CRAMerrors; initial and next two entries all66words exact, both actual rendered buffers exact. Raw A/B46036commandwords and allframebuffer dumps identical. Reference has46040words because real scanout freed already-initialized buffer1 forsecondframe; reference choseuninitializedbuffer2. Explicit differences: omit4wordcolorclear, framebufferaddress10200000->10100000, FLIPindex2->1. No automatic normalization; rawreferencecomparison remainsfalse and boundaryactualbuffer1 exact. Intermediatefence362/final363.
+First interval3878071->3790161cycles(-2.26685%), second4284150->4221468(-1.46311%), total8162221->8011629(-1.84499%). V2run manifests45e547a868a577b13651753a36682fd652087919cb13c4650bac7d27ed8c6a4d and7aebe5fa6edaf9d8f21276c9aad8c88f59436687d45be3941bb5146585a7876b. Smaller gain than isolatedcoldrenderer4.7378%; no physicalFPSclaim. Geometry independentlysealing packet/function/roleproof.
+RVCpipeline actualCPU aecbd7d8f63675333909df756c072b767bab269d29188190f80cfb3cde376295 generation52.402s, source gate5917e78ef2fdd0364ebcdcda845e7c243afb696b706283083c89b5df04f18f85. Separatemodel-cache64-rvcpipe-v1 built10.625s; all165 modelsourcefiles identical topreviouscache64timingmodel exceptCPU. Prepared1b19ff82f97452f9b74a26a1f04d3e7ec2e2e44431d7849d06c69eb4db76ec1e. Cold andwarmoriginalapp replays nowactive; no new physical map/fit launched. Prospective maprecipe preparation only pendingnativegate. Tri inspectingdirectedIRQ/redirecttests; no productionchange.
+
+RVC pipeline native-first candidate (private, 2026-10-07):
+  cpu-cache64-rvcpipe-v1 actually regenerates the single-issue I64/D64 CPU
+  with raw compressed instructions captured at stage1, decompression there,
+  ISA decode2 and dispatch3. This adds one frontend stage; no cycle equivalence
+  is claimed. Actual Scala took52.402s; CPUaecbd7d8 and author manifest9ffac4b0.
+  Original four postprocessors pass unchanged. Only exact applicable RS3,
+  early-fetch-ready, INTWB and RS2 literal overlays remain; obsolete stage0
+  bitplanes/dispatch2 overlay and bit19 are omitted, not blindly renamed.
+  Literal expansion/illegal/raw-value proof passes2,245,184 checks. Independent
+  source gate5917e78e allows native screening only. Native model prepared
+  1b19ff82/library2a1ecf8d builds10.625s and differs from the previous timing
+  fixture in exactly one of165 frozen files: whole CPU32cf8619 to aecbd7d8.
+  Directed frontend/stress quiet+scan tests pass, manifestc2e70125; native
+  renderer performance is separately reviewed. Prospective map preparation
+  cache64-rvcpipe-map-v1/761ec085 changes only CPU in the115-source hardware
+  closure, keeps seed2/QSF/clocks/GPU8/audio, and awaits the bound native gate.
+  No fitter or production change is authorized by these source/native proofs.
+
+RVC pipeline resource map (private, no fitter):
+  Native-map gate b1a49edf binds the directed CPU proof c2e70125 and renderer
+  comparison6aa8d836: cold call+1.089636% and two continuous intervals+0.585162%
+  versus the I64/D64 timing control; still1.270622% below original I32/D128
+  across those intervals. Registers, commands and all observed pixels match;
+  full native OS/IRQ/PCM and sustained FPS remain outside this replay scope.
+  Authorized one seed2/100MHz map completed74.108s,0errors.
+  Map manifestdf38686d: total−67logicALUT/+114FF, estimatedALM17946→18011;
+  CPU−40ALUT/+115FF, RAM/MLAB/DSP unchanged. Only CPU source changed; other
+  entity map deltas are synthesis effects, not edits. Physical ALM/LAB/M10K
+  usage and timing are unmeasured; no fitter or production promotion yet.
+
+RVC pipeline physical trial rejected (one ordinary seed2 fit):
+  Independent gatef1dbcb27 bound exact map/native/directed tests. Fitter,
+  assembler and standard STA return0; fresh20-row/four-corner report returns
+  expected setup-failure3. No new seeds or location constraints. Runtime485.652s.
+  Fit manifest92f39d98:88.15MHz hot/87.57cold, configured100MHz unchanged;
+  needed18,034ALM, placed18,109,1,841LAB,279M10K,45DSP. Worst setup−1.420ns,
+  hold+.119/recovery+4.526/removal+.343/pulse+.500. Both >90 target and full
+  configured100MHz setup closure fail; no promotion/deployment selected.
+  Bounded existing-top20 audit3cedc267: leading paths are now LSU bank data
+  through load/sign formatting, writeback merge and integer operand forwarding.
+  Worst hot6levels/11.037ns data/7.338ns routing; cold6/11.136/6.771ns. Hot
+  also contains texture-tag→dataRAM-address at89.453MHz (8levels,9.792nsdata,
+  5.956nsroute,−1.267nsskew). This does not authorize changing clock constraints.
+  Former aligner/RVC path is absent from these top20; that limited evidence
+  does not establish closure of every frontend endpoint. Hot export ends
+  below90, so this diagnosis is not a complete failing-path census. No new
+  STA or fitter was invoked for diagnosis, and all failed evidence is retained.
+
+2026-10-07 native pipeline outcome and physical rejection.
+Moved-RVC CPU native cold call2818930cycles+15760drain; continuous8058510cycles (+0.585162% vs cache64, -1.270622% vs old I32/D128). Independent native review6aa8d836ee0de314e2606d303899a5b3f23311f07bbbabbc227a97b319041296 and directed CPU gatec2e70125789e4acc7c667bb620e6c6af980ba6e2cd21d365408778ed24c18cbb pass exact commands/pixels/entries, compressed fetch crossings/wrong-path poison/traps/FPU/AMOs/cache and98–397IRQs percase.
+Resource mapdf38686d02bbed0540b5e44c8262f6d7789f80b6bf3dc060672748d1072ef042: estimated18011ALM(+65),-67logicALUT/+114FF,RAM/DSPunchanged. CPU+115FF and unchangedGPU loses1spanprod_header_supported FF through synthesis lost-fanout pruning. Root authorizedoneordinaryseed2fit. Independentgatef1dbcb27a8f7959459a662e3b75262ba8aa0cbaed0e281b642774f2604bf7ead, finalfit92f39d98b5690542d18a50998ec12791514e33bd949333a2e3b01191812d5236:88.15hot/87.57coldMHz,18034neededALM/18109placed/1841LAB/279M10K/45DSP;hold+.119ns,recovery4.526/removal.343/pulse.5. All20freshcornerrows,fit/asm/STA0/corners3. FAIL>90; nopromotion. New worstCPUloaddata->width/signformatter->writebackmerge->operandbypass; sixLUTlevels, colddata11.136ns(6.771route). Hot top2014loaddata/3loadhit/2operandtag/1texturetag->dataRAMaddress; texturealone89.453MHzhot. Newaligner/RVCconeabsenttop20notuniversaltimingproof. Independentpathaudit3cedc2678a6876d60618d7d48ac9fb997f49afd7f0864505cb0cd43b6297b63f.
+Privateactualgeneratorclosure preserved: cpu-cache64-rvcpipe-repro-v1 b232eed9, cpu-cache64-rvcpipe-regenerate-v2 9f580cdb(actualoffline52.57s exactaecb), normal-build-cache64-rvcpipe-v2 905862dd. os30-only isolatedScala sourcecopy carries two-filepatch andexplicitdispatch3; normalother-core sources/defaultdispatch2 unchanged. No sharedsourcepatch survivinginterrupt, noproductionwrite.
+
+2026-10-07 new memory-layout opportunity, no blind capacity promotion.
+RootranGPU32 withsameaecbCPU/GPU/audio factors inactualnativecontinuouswindow. ModelsoleSET_BITS6->8; run-interval-rvcpipe-render32-v1 manifest32057bd57a5233243685077bb9cbc3e4433b9af9f6a87c2eb25a673dfca2f81f: first3722274,second4146763,total7869037cycles vs8058510GPU8, -189473cycles/-2.351216%. Nativeall3entryregs/46036rawcommands/allbufferdumps exact. Independentreviewfc580e7a21a1a57d199d29ce0df1b8b8be6205dcd1086a12dd01fcb51e0e8b28. NotFPS; currentGPU8fitremainsrejected.
+SourceinspectionfoundoldGPU32's+200FF/+297ALUTlargelycomesfrom asynchronous victim[SETS] replacementarray (64->256one-bitentries). OnlyconsumedatLOOK, whoseexisting synchronousmeta_ra prefetchcanservevictimM10Kwithoutaddedcycles. Data8192x40maymap40M10Ks; explicitfour2048x40banks target32blocks plus1newvictimblock, expectedwhole304butNOTactualuntilfit. Newbank40bitreadmux mayaffecttiming. Feasibilitye952abb8a00bac0e29b43f6118be1732fdd883c0928789f7183811e18d5514c5, sourcev1reviewd303ff6d961277b252851699da7720c1e5f56df96815be97cdc0a685277138c2. Tri ownsprivatecomponent. V1passed12existingconfiguration/ranged/4way/legacy/poisonoriginalRTLmitercases; reporting-only rangedreplacementcounterstop preserved. V2source13fa29b4d44202be88ca22fd89ca2b1c901c86049e9e75c828de77a2e651bdb8 usesunpackedbank_q[read_bank] toavoidexplicitindex*40DSPinference; same12proofs pending. Rootnativehelper hasunique--cache-storageGPU8/32variant pins tov2; no native execution yet. Strategy preparation-onlyresourceadapter; no newmap/fit authorizeduntilcomponent/nativegates.
+BoundedCRAM0auditclosed:OSbootloadsos.bin SD->CRAM0->CPU->SDRAM,ordinary/asyncfileioandsavesrequireit. DirectbootSDRAMpathpreviouslyremovedforsiliconcorruption. NamedCRAM0hierarchy386.6usedALMs+6M10Ks is notunusedrecoverablearea; noremove route selected.
+RootauthorizedseparateF11normalcapture/guest preparation toquantifysoftwaredeltaondefinedselected-v7core, NOThistoricaldeployedhardware. Exactphase9/checks-state-f11/app.elf fb4ebb1c291cab41226a940b34d534ffcb723a8fe820addf06e78eed342f02cd waslocallypublishednormal. OldactualSD F10diagnostic d5e16a5f... isdifferent; neverconflate. F11requiresownsnapshot/guest/timerfliptoken10fda714; noPGOmemorytransplant. Originalhardwarebaseline reconstructiondeferred. Geometry ownsadaptation; rootownsrunner. No production/sibling/SD/seed/clock/full-sweep changes.
+
+GPU32 storage resource attempt stopped at parsing (preserved):
+  rvcpipe-gpu32-storage-map-v1 frozen115-input closure changed only GPU
+  capacity SET_BITS6→8 and cache source13fa29b4. Native matched-capacity
+  GPU8/32 byte-and-cycle proof2b8b222d, component2dfe5bd4 and source review
+  95c49e15 passed before the one authorized map. Quartus returned3 after
+  3.840s: Error10170 rejects inline `for(genvar b=...)` at cache.sv143 under
+  the unchanged project source treatment;10112 then ignores the module.
+  Failure manifestb88eb020 preserves raw log/source/QSF and reports no ALM,
+  M10K packing or timing results. Separate-declaration syntax correction
+  requires a fresh bound candidate/retry; no fitter or automatic retry ran.
+
+GPU32 storage compatibility retry and forwarding resource gates:
+  Cache25343436 moves only genvar declaration/spelling from13fa29b4.
+  Component60f29132 and source2320ea0b pass; native084c62d8 matches all17
+  storage-v2 artifacts byte-and-cycle exactly. Gate0fa226d6 rehashes both
+  model closures and the exact source-only difference. One map retry passed:
+  rvcpipe-gpu32-storage-map-v2 manifest464f18e6. Versus sameCPU GPU8, total
+  −81ALUT/−54FF, estimatedALM18011→17957; cache alone−98ALUT/−54FF,
+  RAM+254,208bits/DSPsame. Four2048×40 data banks and256×1victim are inferred.
+  The bank type is AUTO; only victim explicitly reports M10K. Clarification
+  5477e710 records that the original sealer boolean combined dimensions with
+  forced-M10K type: dimensions pass, physical block allocation is unmeasured.
+  Historical monolithicGPU32 cache1230ALUT/576FF versus853/322 now is only a
+  historical per-entity comparison, not an isolated whole-core area claim.
+
+  Root then authorized exactly one CPU82b7 load-forwarding composition map,
+  changing only aecbCPU in the successful GPU32/storage-v3 closure. Literal
+  83ccfd8b/source2fef1bab/native413b7c23/actual-generation9493db91 pass;
+  all17 native artifacts and7,869,037 interval cycles remain exact. Prepared
+  cf0b6e10; result manifestb8e8ad67. CPU+56ALUT/0FF, wholecore+50ALUT/0FF,
+  estimatedALM17957→18023. RAM/DSP and all bank shapes unchanged. This is a
+  real logic cost for the zero-cycle forwarding reassociation; no timing gain
+  or physical M10K count is yet claimed. No fitter selected/executed here.
+
+2026-10-07 combined native performance and final texture composition.
+  Preserved normal F11 ELF fb4ebb1c was captured independently, with its own
+  memory, symbols and guest-service overlay. It is a selected-v7 hardware
+  comparison, not a reconstruction of the historical SD-card hardware.
+  F11 run b0476c8b: first interval4,201,145, second4,629,250, total8,830,395
+  cycles. Current PGO software on the same v7 core takes8,162,221 (-7.566751%).
+  Current software plus CPU82b7/GPU32 storage2534 takes7,869,037 (-10.886920%
+  versus F11/v7). Independent comparison936449e7 verifies identical scene,
+  commands and pixels, with each executable checked against its own reference
+  architectural entries. Native guest OS/audio substitutes and synthetic
+  scanout remain explicit limitations; this is not a Pocket FPS measurement.
+
+  GPU32 storage-v3 and CPU forwarding both preserve all17 native artifacts
+  byte-and-cycle exactly at matched capacity. Forwarding native5575c9ba and
+  independent413b7c23 bind the final82b7 CPU. Actual offline Scala generation
+  9493db91 reproduces82b7 in52.903s. Private normal-build closure28ee52e0
+  binds seven os30 overrides, unchanged seed2 and fresh source fingerprint;
+  os20/os25 and shared generator sources remain untouched.
+
+  Final composition reuses the already-proved texture owned-read address
+  factor3999efcf->c3fdc0ad, without registers or extra cycles. Reuse review
+  2de8a843 rehashes268 bindings and confirms the current parent source.
+  Native run7b8671d2 completes with zero bus/write/scanout/CRAM errors;
+  root compared all17 outputs against the forwarding-only control: exact
+  commands, three entry states, every buffer, PC/MMIO traces and cycle counts.
+  Total remains7,869,037. Reference buffer-role/initial-clear differences are
+  retained explicitly; native A/B comparison is raw byte equality.
+
+  One final composition map910e57ee is selected, with only texture source
+  changed from the successful18023-estimated-ALM composition. Final normal
+  proposal normal-build-cache64-render32-texture-v1 adds its eighth os30
+  override. Mapping and independent native/normal closure are pending here.
+  No new fitter, production update, sibling copy, SD write or seed sweep has
+  occurred at this entry. Physical M10K packing and both-corner >90MHz remain
+  required before selecting a deployable candidate;100MHz setup closure is
+  a separate stronger condition and is not implied by that comparative gate.
+
+Final composition selected for one physical fit:
+  Map2cc9430f passes: estimated18,013ALM (10 below forwarding-only map),
+  FF/RAM/DSP unchanged. Texture entity loses5ALUT; whole-core mapping gains
+  77ALUT despite lower estimated ALMs. Four2048x40 AUTO data banks and one
+  256x1 M10K victim remain; physical allocation is still pending.
+  Independent texture native f31ff8b5 confirms all17 artifacts and7,869,037
+  cycles exact. Normal closure b2089cba matches final map sources/QSF,
+  eight os30 overrides/35 proposed files, unchanged seed2, other variants
+  unchanged. Actual CPU regeneration9493db91 remains the exact82b7 source.
+  Root selected one ordinaryseed2 fit. Prepared23e2660a, independent gate
+  22e59d8b and adapter phase10_rvcpipe_gpu32_forward_texture_fit.py require
+  complete physical resource totals, at most308M10Ks, both slow Fmax>90,
+  all20 fresh timing rows and positive hold/recovery/removal/pulse margins.
+  Gate validates the acceptance procedure, NOT an already-passing fit.
+  The final source/delivery preimages pass readiness f1b41ca2; old promotion
+  recipes are stale and must not be executed. No production/sibling/SD writes.
+
+Final GPU32 composition physical result rejected; memory layout succeeds.
+  One ordinaryseed2 run502.90s:86.08MHz hot/86.72cold, configured100MHz.
+  Actual17,977neededALM/18,056placed/1,840LAB/304M10K/45DSP. The explicit
+  bank layout therefore fits, but fails the >90MHz timing selection. Worst
+  setup−1.617ns; hold+.117,recovery3.586,removal.445,pulse.500. All20 fresh
+  checks complete, fit/asm/STA0 and expected corners3. Manifest e299f2c3.
+  No delivery helper prepare/integration/deployment was run. The bounded
+  helper488aafa7 was statically reviewed91c7df69; its gate rejects this fit.
+
+  Existing top20 audit55869c78 finds new leading branch BAD_TARGET and FP
+  RS3 tag paths; late load WAYS_HITS remains. Root selected one diagnostic
+  STA export from a copied completed database, not another fitter. Complete
+  endpoint census dd155cc3 examines1000 per slow corner, with final slacks
+  −.257hot/−.077cold above the90MHz threshold. All55hot/7cold register
+  endpoints below90 are covered. Sources/database in original fit unchanged.
+  Families: branch target equality; FP RS3 late tag; load hit/sign propagation
+  into RS1/RS2/registerfile; GPU lookahead owner→sp_sZ/sp_zinv; fragment owner
+  →dsp_a; and five hot decodeRS3 hazard→frontend enable endpoints missed by
+  the default top20. No timing constraint changes or seed sweep.
+
+  Selected private zero-cycle corrections are being proved before another
+  combined native/map screen. Root balanced branch equality into eight kept
+  4-bit compares, two kept four-way reductions and final two-way reduction.
+  PC arithmetic/control/state unchanged. Source1a1eeb60, component c6b01ce1,
+  independent3200075c;792576 literal2state cases and wholeCPUlint pass.
+  cpu-btb-balanced-v1 preserves a proof-wrapper parse error (module named
+  `new`); v2 only renames wrappers and uses identical candidate RTL.
+  Geometry's FP RS3 ctrl9 tag factor splits six tag/RFID bits into two kept
+  three-bit comparisons, preserving original enables/data/priority. Source
+  05cd29a9, component29e15fb8:16384 exhaustive cases+CPUlint pass. Native
+  and physical results remain pending. Tri owns late per-way sign factoring;
+  strategy owns exact GPU operand-owner factor and proved lookahead invariant.
+  Separate decodeRS3 hazard/ready audit pending; extra load pipeline stage is
+  unselected because potential exposed latency would erase runtime savings.
+
+Six-family control correction is now native-exact (no added cycles/state).
+  CPU source878e6978 combines four components/five disjoint hunks over82b7:
+  branch balanced equality1a1eeb60; scalar per-way sign precompute06714ce1;
+  FP RS3 ctrl9 tag split05cd29a9; stage2->3 ready absorption6ecd1d12.
+  Sign component0ac352f6 passes5,521,408 extracted full-DATA vectors including
+  arbitrary multi-hit/IO/SC/MUL/F2I controls; independent1a365dbe verifies the
+  source algebra. Ready component0ed91703 passes4096 arbitrary controls
+  through the actual scheduler/fire/link cone; independentfc32ef36. Exact
+  ready absorption is free||(allow&&!RS3hazard), with original dispatch
+  fire/issue/cancel/state untouched. Ready v1 preserves a harness-only regex
+  preparation failure; v2 has identical candidate RTL. Composite f37b5446
+  and independent28fa4eae verify exact reversible/disjoint application,
+  wholeCPUlint and no newFF/cycles. The speculative extra LSU stage is not used.
+
+  GPU sourcee75ac93d over238f removes only the inductively redundant triangle
+  owner term from lookahead eligibility and factors DSP-A PSS operand/owner
+  selection, preserving all eight write cases, defaults and other state
+  writers. Componentdd8754de:69,108,864 literal checks,16 exact GPU pairs,
+  30,829,640cycles agreeing with the original DSP-A shadow,18,063,960 active
+  LA-owner cycles/115,684handoffs/25,797flushcycles. Four additional real-MMIO
+  active-LA_SELECT/LA_WAIT soft-abort/recovery A/B pairs against immediate
+  parent pass exact bytes/cycles, including malformed commands and recovery.
+
+  New native model-control-cones-v1 prepared08994cfe clones the last tested
+  texture model and changes only CPU/GPU among165 source files. Run
+  interval-control-cones-v1 manifest8a9e0b94 completes0, all error counters0.
+  Root verifies all17 artifacts raw byte-and-cycle exact versus the previous
+  texture run: result, PC/MMIO/boundaries,46036commands,three architectural
+  entries,and every framebuffer/depth dump. Total7,869,037cycles unchanged;
+  inherited reference buffer-role/first-clear caveat stays explicit.
+  One combined resource map control-cones-compose-map-v1 prepared04b5de01
+  is selected after bound source/native gates. Physical timing remains pending;
+  no new fitter/deployment/sibling/SD/seed-sweep action at this entry.
+
+Control-cones resource selection and reproducibility:
+  Independent native6228b7ca confirms exact165-source two-file substitution,
+  same host/guest/config and all17 raw artifacts at7,869,037cycles. GPU source
+  gate6347bc0e verifies generic write priority and ownership induction.
+  Actual offline Scala9c27d100 reproduces878e in52.331s. Checked repro-v2
+  d9b2146f appends the five guarded hunks after the unchanged82b7 helper chain;
+  v1 preserves a heredoc framing preparation error only. Regenerate-v1 records
+  an initial Docker-socket denial with no Scala execution; retry1 is the sole
+  actual run. Normal closurecca9d971 has36 files/eight overrides, unchanged
+  seed2/new fingerprint, os20/os25 unchanged. Independent f2178499 passes.
+
+  Map8bdf2e43 passes:18,005estimatedALM (−8), total−3ALUT/+1mappedFF,
+  CPU+40ALUT/0FF, GPU−20ALUT/+1FF; RAM/DSP and four2048x40bank shapes unchanged.
+  Read-only audit52935edd finds existing sp_fastpath pruning/alias differences;
+  no new RTL sequential declaration or write. Do not mislabel mapped+1FF as
+  a newly added pipeline stage or claim unique accounting without evidence.
+  Root selects ONE ordinaryseed2control-cones-fit-v1: prepared8accf008,
+  independentgatea7d86c9b. Strict>90bothslow/20freshrows/positive other margins
+  and actualM10K<=308 remain required; clocks/SDC/pins unchanged, no sweep.
+  Delivery-v2 helper4545f7ff is pinned to this new36-file source closure and
+  matching PGOfff ELF; packaging/integration remain blocked until fit passes.
+
+2026-10-07 GPU control-owner component proof completes.
+  gpu-control-owner-v1 source e75ac93d from238f4427; manifest dd8754de.
+  Remove only cmd_is_tri_walker from the lookahead eligible expression;
+  initial EMIT arming keeps that gate. Source induction binds all18 LA
+  writes and reset/soft-reset/S_DECODE-only writers of all8 owner flags.
+  A live LA owner therefore cannot outlive its unchanged command owner.
+  Move the eight DSP-A PSS data sites into a mux independent of main-state
+  ownership, then apply all original conditions at the existing register.
+  Existing default dv_du, other writers, resets and illegal-PSS behavior
+  remain exact. Zero state registers or cycles added; no timing claim.
+
+  Literal tests pass69,108,864 old/new cases (both speculative policies,
+  all64 PSS codes, all control/divisor combinations,64 payload bases and
+  random full data). All16 inherited actual GPU replay/boundary pairs keep
+  pixels and cycles exact. An original-source full DSP-A shadow agrees on
+  30,829,640 edges; LA invariant covers18,063,960 active-owner cycles,
+  115,684 handoffs and25,797 flush cycles. These16 had zero soft resets;
+  that coverage gap is explicitly retained in owner-result.json.
+  Separate abort cf1112fb adds4 immediate-parent/candidate comparisons:
+  real MMIO soft reset at active LA_SELECT/LA_WAIT, then unsupported and
+  wrong-size command fallback, valid draw and fence recovery. All bytes
+  and cycles exact. No DUT backdoor writes. Arbitrary in-flight AXI abort
+  behavior is outside this bounded test. Hard reset is exercised by every
+  run; generic Q29/illegal codes are literal-tested, not full-render claims.
+
+  control-cones-compose-map-v1 prepared04b5de01 changes exactly CPU82b7
+  to878e6978 and GPU238f to e75ac93d in the final115-source closure2cc9430f.
+  GPU32/cache2534/texturec3fd/audio/seed2/clock100/settings are unchanged.
+  Preparation only; resource map remains blocked on the matched combined
+  native17-artifact gate. No fitter, production, sibling or SD changes.
+
+2026-10-07 control-cones seed2 physical result: reject, preserve.
+  One ordinary fit, assembly, STA and strict fresh20-row corner export
+  completed in505.01s. Manifest cdb86dc7;86.63MHz hot/88.05cold misses
+  the >90 comparative gate. Configured100MHz unchanged. Needed17,972ALM,
+  placed17,988ALM,1,841LAB,304M10K,45DSP. Resource gate passes; minhold
+  +.119ns/recovery2.064/removal.445/pulse.500, worstsetup−1.543ns.
+  Fit/asm/STA returned0; corners3 contains only the expected timing-failure
+  error shape with all20 fresh rows. No promotion or delivery selection.
+
+  Read-only top20 path audit1486038c shows new exported families: ctrl5
+  RD_PHYS->floatRS1 at86.633hot/88.051cold; GPUwritequeue rdptr->MLABread
+  enable88.684hot and->AWLEN89.270cold; GPU32 bankwriteenable->bankread
+  address88.984cold; pixel light->color89.135cold. Prior targeted branch,
+  load-hit, RS3, frontend-ready and GPU-owner families are absent top20.
+  Both lists stop below90; this audit alone does not establish complete
+  failure coverage or endpoint-specific improvement. No extra STA/fit,
+  source edit, seed change or production action follows from this audit.
+
+2026-10-07 complete control-fit endpoint census and next exact factors.
+  Diagnostic STA on an immutable copy completes; no new fitter. Census
+  bbb68b9b reports39 hot/35 cold sub90 endpoints, complete after1000 each.
+  Seven families: FP RS1, GPU queue, GPU32 read, light scale, decode-ready,
+  GShare read-history and GShare cancellation/write. The latter CPU families
+  were absent top20, so the earlier top20 absence did not prove closure.
+  Root selects private zero-cycle factors for all seven; component proofs
+  and combined native byte/cycle comparison precede one map/fit selection.
+  No production, sibling, SD, seed or clock change; old delivery gates stay
+  blocked by86.63/88.05MHz. Configured100MHz remains distinct from>90 gate.
+
+2026-10-07: Private cache lookahead/color-prefix candidates (no CAD)
+- render-cache-speculative-read-v1 source a88bf783, manifest c2a4b018.
+  Only removes word_valid==15 from R_WORD speculative data_ra lookahead;
+  unchanged response/FSM and all writes. 12 literal old/new runs passed
+  15,774,921 checks, including 7,515 differing speculative addresses and
+  6,584 explicitly unowned RAM-output differences. All 4,379,491 consumer
+  output checks, states, writes and bus outputs remain exact; legacy
+  unstaged refill, all GPU32 banks and hostile collisions are covered.
+- gpu-light-prefix-v1 source 0e4c3472, manifest 52abebc1. Explicit six-bit
+  increment prefix only in modulate.scale and Gouraud green sg; raw light,
+  R/B increment and signed combiner unchanged. All64 inputs and complete
+  4,194,304 texel/light domain pass extracted old/new RTL + integer oracle.
+  Gouraud full independent channel domains pass; joint vertex RGB space
+  is not exhaustively enumerated. Neither component adds state/cycles.
+- Both target actual control-cones-fit-v1 residual families. Area and
+  routed timing remain unmeasured; native composed proof is still pending.
+
+Parallel-control composition and continuous native proof:
+  CPU3bbe3886 over878: uniform26 additionalFP tag splits +RS1 local3x3
+  priority (all arbitrary enables), symmetric three-hazard finalready LUT,
+  GShare two prehashed priority groups and unchanged latecancel after kept
+  noncancel qualification. Sevenhunks,0FF/cycles; composition53d64cf2;
+  source reviewdb4312cf. Root GShare componentde122183 passes325,632
+  literal cases including negative hash/cancel controls; review293291cb.
+  FP component5d743205 passes425,984tag+355,328payload cases; readyc7eb69e1
+  passes4,096 controls through original scheduler/link. No traps weakened.
+
+  GPUaae8ad7d over e75: queuefinality directly from count/link bits without
+  the encoded length dependency; exact sixbit light increment prefix.
+  Queuecc1880bb passes33,554,432 combinations,16GPU replay pairs and4
+  actual MMIOabort/recovery pairs, all bytes/cycles exact. Color52abebc1
+  passes all64increment inputs and4,194,304texel/light combinations plus
+  independent Gouraud channel domains. GPUcomposition88542a32 no state.
+  Cachea88bf783 over2534 removes only word_valid from speculative R_WORD
+  read-ahead; validation/FSM/responses unchanged. Proofc2a4b018:12configs,
+  15,774,921 checks;7,515different speculative addresses and6,584 explicitly
+  unowned RAMoutputs exercised,4,379,491 consumer outputs exact.
+
+  Native model-parallel-control-v1 preparedf03b78bb changes exactly CPU,
+  GPU and rendercache among165 sources; unchanged guest/host/traffic.
+  Actual runner label is parallel-control-v1 (not interval-parallel).
+  Runb607caf4 exits0, zeroerrors; pairedcheck26f66d65 confirms all17raw
+  artifacts byte-and-cycle exact:7,869,037cycles,3,722,274+4,146,763.
+  Prior raw analytic-reference role/firstclear differences remain visible;
+  no normalization or fullgame/PocketFPS claim. One resource map selected
+  after bound native/source gates; physical fit not yet authorized here.
+
+2026-10-07: Parallel-control composition resource gate
+- parallel-control-map-v1 prepared929e4e57; native-map-gatea24aeb5 binds
+  exactCPU3bbe/GPUaae8/cachea88-only delta and all17 matched native outputs.
+  Root ran one resource map. Sealed manifestca5ff6cc: estimatedALM17974
+  (−31 vscontrol-cones), totalALUT−23, totalFF/RAM/DSP unchanged. CPU
+  −34ALUT/+1mappedFF;GPU+5ALUT/−1mappedFF;cache+1ALUT/0FF. No source
+  state was added. Four2048x40AUTO data banks and256x1M10K victim remain.
+- Root selected exactly one ordinaryseed2 fit pending independent gate.
+  parallel-control-fit-v1 preparedb28af768 binds unchanged100MHz clocks,
+  original224pin constraints and noLC. Adapter now explicitly rehashes
+  every flat normal-manifest member and requires actual needed/placedALM
+  <=18480,LAB<=1848,M10K<=308,DSP<=66, bothslowFmax>90, allnonsetup
+  minima positive and20fresh corner/check rows. No fitter run by author;
+  Geometry owns enabling review and root owns invocation. No promotion.
+
+Parallel-control resource/reproduction selection:
+  Resource mapca5ff6cc passes:17,974estimatedALM (−31), total−23ALUT,
+  unchanged totalFF/RAM/DSP; CPU−34ALUT/+1mappedFF, GPU+5ALUT/−1mappedFF,
+  cache+1ALUT/0FF. No RTLstate/cycles added; mappedretention differs.
+  Four2048x40data banks and256x1M10Kvictim unchanged. Native mapa24aeb5f
+  binds17exact rawartifacts and115/165source closure.
+  Repro0fa2f654 appends guarded7hunk helper after878 chain. Actual single
+  offlineScala11e47f6a in53.911s regenerates exact3bbe. Normal690c9ec3
+  has37files/eightoverrides, seed2/freshfingerprint, os20/os25unchanged;
+  independent8af2b23f rehashes1,329normal entries and source/native gates.
+  Rootselects ONEordinaryseed2fit, preparedb28af768, reviewb23e6168/
+  a655ee39. All resourcecaps now explicit:18480ALM/1848LAB/308M10K/66DSP.
+  >90bothslow, positiveotherchecks, fresh20rows stillrequired. Actualfit
+  launched; no production/sibling/SD action and no sweep.
+
+2026-10-07: Parallel-control timing rejection and accepted-AW slot fix
+- parallel-control-fit-v1 sealedfb50ae4d fails87.71hot/88.78cold. Native
+ 7,869,037cycles remains exact. Top20auditdb53562b groups frontend hazard
+ ready→aligner, GShare RAM read address and hotAW→cache slot-enable. The
+ earlier RAM-valid feedback/light/queue paths are absent from top20; full
+ endpoint census remains parent-owned, so absence is not a blanket pass.
+- New render-cache-owned-write-slot-v1 sourceab1f1aee, manifest348f4827:
+ accepted IDLE AW captures its candidate slot unconditionally, using the
+ owned AW address, before hit/bypass qualification. Flush priority and all
+ otherfive slotwriters are unchanged. Bypass/miss slot values may differ
+ until overwritten, but all consumer slots/data, writes and bus/state match.
+-12config/seed miter runs pass15,774,921checks;98,963AWaccepts,88,574
+ speculativecaptures,837,254unownedslot differences and732,919unowned
+ RAMoutput differences exercised.7,120,656consumer-slot checks and
+4,379,491consumer-data checks exact. Host/cycles/memorytransactioncounts
+ match the prior proof. NoFF/cycles added; native composition/CAD pending.
+
+Parallel-control physical result and remaining endpoints:
+  Fitfb50ae4d completes467.289s, fit/asm/STA0,corners3 expected setupfail;
+  87.71hot/88.78cold improves both previouscorners but fails>90.
+  Needed17,903ALM/placed18,069,1,848LAB(atcap),304M10K,45DSP. Worstsetup
+  −1.401ns; hold+.046,recovery3.673,removal.316,pulse.500. All20rowsfresh.
+  No packaging/integration/deployment; all savedseed/clock/production stay.
+  Top20db53562b highlights frontendready,BTB→GShare,AW→cache slot enable.
+  Diagnostic-only copied-fit census992f50b3 completes55hot/4cold endpoints
+  after1000percorner. Additional hot GPUblend accumulator→p2b_dst89.405
+  and source_done→perspective-step enable89.993 are included in next work.
+  FP/oldqueue/light/oldcachefeedback no longer appear in complete sub90 list.
+
+  Rootselects next exactendpoint factors overCPU3bbe/GPUaae8/cachea88:
+  frontend capture/mask/last/ready0, BTB-event prehash, acceptedAW slot capture,
+  blend halfword premux, and perspective-step early qualifier. No addedcycle
+  or state intended. CPUfrontendv2d4aa7a6c covers32,768controls and1,048,576
+  localnextstates; v1preservesproof reset0-vs-hold harness error, sameRTL.
+  GShareBTB a32ea2b5 covers352,256 literal cases with independent trap/PC
+  histories and untaken BTB history updates. CombinedCPU6f50382a manifest
+  5a166289 passes wholelint/reconstruction;4hunks/0FF/0cycles.
+  CacheAWslotab1f1aee proof348f4827:12runs15,774,921checks,98,963AW
+  accepts,88,574speculativecaptures,837,254trackedunownedslotdifferences,
+  732,919unownedRAMdifferences;7,120,656consuming-slots/4,379,491data exact.
+  GPUblend80a8ea7e proof6c96a45d covers278,784cases; halfword selection
+  before address-match leaves one masked-byte mux after latecompare.
+  v1preservesliteral-extraction whitespace regex preparationfailure; v2
+  sameRTL. Spanstep and complete composition/native stillpendinghere.
+
+2026-10-07: Running perspective-step enable component (no CAD)
+- gpu-span-step-enable-v1 sourceb37a7b35, manifest6d77ccef. Only moves
+ sp_sstep/tstep curvature increments from nested load_p0a into an exact
+ low-fanout kept early qualification, with src_done last; insertion remains
+ before segment swap and later PSS commits. All9writer priorities/register
+ preserved; zero added functional state/cycles. Literal original predicate
+ extraction exhausts2,097,152 cases (13Boolean controls,seg16,warm4,
+ count0/1/2/65535), with15,120active updates; all exact.
+- Approved replay utility is phase10_gpu_span_step_shadow_v3.py only:
+ instrument_shadow(source) + PROBE mirror alloriginalwriters andrestore
+ the two old increment sites. Selected full-fixture lint passes. First
+ regex draft accidentally matched a comment; second optional monitor
+ referenced inaccessible block scope. Both retained/excluded. Candidate
+ source/literal proof unaffected. Parent owns fullGPU/native replay.
+- Endpoint source stage prepared895e1a93:CPU6f50382/GPU5e9dd586/cacheab1f,
+ exact3-file delta overparallel-control-map-v1. No newCAD until gates.
+
+Endpoint-control combined qualification (2026-10-07):
+  CPU6f50382/GPU5e9dd586/cacheab1f compose zero-new-state endpoint
+  factors. GPU2e6690eaf has4 disjoint/reversible hunks,24 orders. Full
+  GPUreplay6995c3c7 passes16 replay+4real-MMIO abort pairs with exact
+  output/cycles. Full original9-writer step shadows check31,029,362cycles,
+  1,163,416advances,44,450swaps,3,915,651source-done; literal original
+  blending matches31,028,958checks. Active-AXI abort remains out ofscope.
+  Native model97f000f5 builds and run9be9679f completes0. Independent
+  paircdc704a2 rehashes666evidence files and all17raw artifacts identical
+  to parallel-control:3,722,274+4,146,763=7,869,037cycles. No new cycle
+  cost or error. Inherited analytic-reference frame2 role/clear mismatches
+  remain raw and explicit; paired native outputs are exact.
+  Actual offlineScala085c96c9 regeneratesCPU6f50382 in52.041s; repro
+  a17ff615 appends guarded endpoint helper. Normal38-file closure waits
+  for selected map QSF. Root selects one resource map after peer gate;
+  no fitter, packaging, production/sibling/SD writes or seed sweep yet.
+
+Endpoint-control resource gate and prospective fit (2026-10-07):
+  Final span/source peer4023290f and adapter review09dbfd8e pass. Native
+  map gate726812e6 binds all source/replay/native gates; root ran exactly
+  one resource map (149.235s, return0). Sealed map5f59c2a9 reports18,017
+  estimated ALMs (+43),26,240 logicALUTs (+88),25,429FF (-1); blockRAM,
+  MLAB and45DSP unchanged. CPU+61ALUT/-1FF,GPU-1ALUT/0FF,cache+13ALUT/0FF.
+  Four2048x40 AUTO data banks plus256x1 M10K victim retain exact shapes;
+  fitted M10K/LAB/ALM/timing still unknown. No resource-fit claim from map.
+  Normal c894be3e binds38 proposedfiles/eightoverrides and exact actual
+  QSF, same seed2/clock100. Root selected one ordinary seed2 fit; prepared
+  2506f39b and recipe5e5590e6 preserve mappedDB/settings/pins, no resynthesis
+  or LC. Complete actual ALM/LAB/M10K/DSP budgets and strict both-slow>90
+  plus positive nonsetup/fresh20-row gates retained. Independent enabling
+  review pending; root owns physical execution. No deployment/promotion.
+
+Endpoint-control map / selected single fit:
+  GPU source review4023290f and adapter09dbfd8e pass; mapgate726812e6
+  binds allsource/native/replay evidence. Initial root run request before
+  gate file existed stopped before CAD/output; completed gate then allowed
+  exactly ONEresource map, elapsed~149s/exit0.
+  Map5f59c2a9:18,017estimatedALM(+43),26,240logicALUT(+88),25,429FF(−1),
+  sameRAM/DSP. Four2048x40AUTO databanks +256x1M10Kvictim preserved.
+  CPU+61ALUT/−1FF, GPU−1ALUT/0FF, cache+13ALUT/0FF; synthesis resource
+  distribution alone does not claim physical packing or new RTLstate.
+  Normalc894be3e closes38files/eightos30overrides/1,337flatmanifestmembers,
+  exact mappedQSF/sources and actualScala085c96c9; os20/os25unchanged.
+  Rootselects oneordinaryseed2fit at unchanged100MHz, noLC,224pins.
+  Prepared2506f39b/recipe5e5590e6; strictbothslow>90,positive nonsetup,
+  all20fresh rows and18480ALM/1848LAB/308M10K/66DSP stillrequired.
+  Delivery-v3 is only being rebound whilefitruns; physical gate remains
+  required before packaging or production/sibling/SD mutation. No sweep.
+
+Endpoint-control PHYSICAL ACCEPTANCE (2026-10-07):
+  Exactlyone ordinaryseed2fit completed521.079s; fit/asm/STA0, corners3
+  onlyexpected configured100MHz setupfail. Fitmanifest60da6979 passes
+  requestedcomparativegate:90.33MHzslow85C /91.75MHzslow0C (>90both).
+  Needed18,006ALM/placed18,071,1,842LAB,304M10K,45DSP withinallcaps.
+  Worstsetup−1.070ns,hold+.119,recovery3.899,removal.421,pulse.500;
+  all20rowsfresh. This is NOT100MHz setupclosure and NOTdeviceFPSproof.
+  RawRBF e3ff63b2929177a752f853811843626da7b2de8901d685dcbd643a41f8e56f1c.
+  Rootselected packaging afterphysicalpass. Deliveryv3helper7ac1abe7
+  peerdb9f3553 preservesallv2gates/transactions with38filebindings.
+  Package manifest4f34548b:reversedcoreb1083c26b99c063684b411af1299e3b
+  820c69f025ce6ee0003f6d7d4ab93a8e4 andnormalPGOELFfff132a5; full
+  byte-table reversal/involution andtwo-memberZIPexact.
+  SM64planv2manifest487dd065/peera83511fe updates10destinations,13guards,
+  diagnostic648bguardonly; readinesscheck passesactualcore/app hashes.
+  Actualhardware/SM64integration stillpending at thisentry; no SDwrites,
+  no Quake2change, no additionalCAD orseed sweep. Native remains17raw
+  artifactsexact7,869,037cycles,10.886920%fewerthanF11/v7baseline.
+
+Endpoint physical and private delivery independent review (2026-10-07):
+  endpoint-physical-delivery-review-v1 manifest eac7bfae independently
+  parses fresh20 report/log/TSV rows and rehashes fit60da6979, full mapped
+  inventory/source/QSF/SDC, normalc894 and delivery4f34548b. Bothslow
+  main Fmax90.33hot/91.75cold exceed90. Actual18,006needed/18,071placed
+  ALM,1842LAB,304M10K,45DSP fit all explicit budgets. Nonsetup minima
+  hold+.119,recovery+3.899,removal+.421,pulse+.500 pass. Configured100MHz
+  setup remains-1.070; this is NOT100MHz timing closure.
+  All17 native artifacts still byte/cycleexact,7,869,037intervalcycles.
+  RawRBF e3ff63b2 independently bit-reverses/inverts exactly to b1083c26;
+  ZIPf8e1d7c9 contains only that core and selectedfff132a5SM64ELF, exact.
+  All60 payload files and38 hardware preimages checked before integration.
+  Review is read-only, with no CAD/simulation/conversion or production/SD/
+  sibling writes. Parent may separately select guarded source integration.
+  No sustainedPocketFPS or nativeOS/PCM/IRQ qualification is inferred.
+
+Endpoint-control DELIVERED (2026-10-07):
+  Independent physical/payload revieweac7bfae passesactual20rows,resources,
+  exactraw/reversedRBF andtwo-memberZIP. Rootintegrated37changedrepo
+  files/38verifiedoutputs, with durablebackupsunderdelivery-v3/integration.
+  Postintegration variant-timing,CPU-freshness andVexii-publication tests
+  allpass0. Existingunrelatedguards unchanged.
+  Installerfdd1921c has10focused/tmptransactiontests(c27ad7ee), sourcepeer
+  e59e48cd; actualreadonly readinessalsoPASS. Rootauthorizedescalation
+  installedexact10SM64paths withtransactionffede97f andverifiedallpostimages
+  plusguard-onlydiagnostic648b. BackupsinSM64transaction-v2.
+  Completion endpoint-installed-v1 recordsall38+10hash/modechecks and
+  explicit100MHz/non-FPSlimits. Normalcoreb1083c26,appfff132a5.
+  NoSDorQuake2writes, nofullseed sweep, noactual25FPSclaim.
+
+SD UPDATE: user requested SD installation after endpoint source/SM64 delivery.
+  Connected POCKETDEV UUID995B-1B19 was mounted viaudisks; exactly
+  Cores/ThinkElastic.SM64/os30.rbf_r andAssets/sm64/common/sm64.elf
+  updated to b1083c26 andfff132a5, respectively. Original twofiles
+  backedup inphase10/sd-update-endpoint-v1/backup; bothnewfileshashverified,
+  12existingOS/loader/config/soundbank guardfiles unchanged. Filesystem
+  synced andudisks unmounted/dev/sda1 successfully. NoQuake2orotherasset
+  updates; actualPocketFPS remainsunmeasured.

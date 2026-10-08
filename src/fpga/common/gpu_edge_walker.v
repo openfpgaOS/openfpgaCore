@@ -17,7 +17,7 @@
 // corners. Both use left-closed right-open coverage, clipped to
 // [clip_x0, clip_x1) x [clip_y0, clip_y1).
 //
-// Datapath: y-sort, winding cross product (pipelined 27x16 DSP shared with
+// Datapath: y-sort, winding cross product (pipelined DSP shared with
 // the clip presteps), per-edge Q16.16 slope dividers (28/32-beat serial
 // restoring — see EW_PARALLEL_DIVS below for the one-vs-three layout),
 // two-half DDA with a registered emit cone and a valid/ready record
@@ -59,8 +59,8 @@ module gpu_edge_walker #(
     input  wire        start,
     // subpix_y = 0 (legacy): v*_y are INTEGER scanlines, byte-exact behaviour.
     // subpix_y = 1: v*_y are Q12.4 subpixel (same as x), so triangle vertices
-    // are not snapped to whole scanlines.  Gated so the integer path is wholly
-    // unchanged — only callers that opt in (SM64 truecolor 0x4E) set it.
+    // are not snapped to whole scanlines. Integer-Y commands keep their
+    // original corner-sampled coverage; 3D callers explicitly opt in.
     input  wire        subpix_y,
     input  wire signed [15:0] v0_x,   // Q12.4
     input  wire signed [15:0] v0_y,   // integer scanline (subpix_y=0) / Q12.4 (subpix_y=1)
@@ -124,29 +124,19 @@ reg signed [15:0] y0, y1, y2;
 
 // ----------------------------------------------------------------
 // Shared multiplier (winding cross product + clip presteps).
-// 27x16 fits one Cyclone V DSP in native 27x27 mode; mul_p_pipe is the
-// DSP output register, so the reg->DSP->reg path closes at clk_sys.
-// Prestep slope operands saturate to Q10.16 (+/-1024 px/line): any edge
-// steeper than that crosses the whole clip rect between two scanlines
-// and its spans clip out regardless.
+// Endpoint differences need 17 signed bits, including dy=65535. Slopes
+// need 33 signed bits for (abs(dxQ4)<<16)/dyQ4. Do not saturate the
+// prestep slope: even a very short edge can straddle a pixel center, and
+// its fractional prestep must still land at the correct intersection.
+// mul_p_pipe keeps the DSP output register and the existing launch/capture
+// latency. Winding compares the complete signed 33-bit cross products.
 // ----------------------------------------------------------------
-reg  signed [26:0] mul_a;
-reg  signed [15:0] mul_b;
-(* multstyle = "dsp" *) reg  signed [42:0] mul_p_pipe;
-reg  signed [42:0] mul_p_r;
-reg  signed [42:0] xprod0_r;
-
-function signed [26:0] slope_sat27;
-    input signed [31:0] s;
-    begin
-        if (s > 32'sh03FFFFFF)
-            slope_sat27 = 27'sh3FFFFFF;
-        else if (s < -32'sh04000000)
-            slope_sat27 = -27'sh4000000;
-        else
-            slope_sat27 = s[26:0];
-    end
-endfunction
+reg  signed [32:0] mul_a;
+reg  signed [16:0] mul_b;
+(* multstyle = "dsp" *) reg  signed [49:0] mul_p_pipe;
+reg  signed [49:0] mul_p_r;
+reg  signed [49:0] xprod0_r;
+wire winding_positive = $signed(xprod0_r[32:0]) > $signed(mul_p_r[32:0]);
 
 // ----------------------------------------------------------------
 // Slope dividers retain all 16 fractional bits. Integer Y uses dxQ4<<12
@@ -156,6 +146,9 @@ endfunction
 // its four unconsumed low bits are zero, preserving the legacy quotient.
 // The subpixel path consumes all 32 bits, avoiding the previous loss of
 // four quotient bits before edge accumulation.
+// A signed-16 endpoint pair can span 65535 units. Preserve all 16 divisor
+// bits and the 17-bit trial remainder; truncating dy to 13 bits wrapped
+// edges at 512 pixels in Q4-Y mode, before scissor clipping could help.
 //
 // EW_PARALLEL_DIVS == 1: three dividers, one per edge (0 = long (02),
 // 1 = top (01), 2 = bot (12)), operands loaded in S_DIV_INIT, three
@@ -164,8 +157,9 @@ endfunction
 // S_DIV_DONE — same result the shared divider's early-out produced.
 //
 // EW_PARALLEL_DIVS == 0: the single shared divider, sequenced over the
-// edges by edge_sel (S_DIV_DONE loops back to S_DIV_INIT); beat 29 of
-// S_DIV_RUN loads the abs operands from the registered edge_dx/edge_dy.
+// edges by edge_sel (S_DIV_DONE loops back to S_DIV_INIT). Operands load
+// directly in S_DIV_INIT; the first S_DIV_RUN beat checks for dy=0 and
+// preserves the original setup latency without duplicate operand registers.
 //
 // Both register sets are declared unconditionally; the prune gates in
 // the FSM mean only the selected set ever has a writer or a reader, so
@@ -173,23 +167,26 @@ endfunction
 // ----------------------------------------------------------------
 // Parallel-divider set (EW_PARALLEL_DIVS == 1)
 reg  [31:0] div_dq0,       div_dq1,       div_dq2;  // fused dividend/quotient
-reg  [12:0] div_divisor0,  div_divisor1,  div_divisor2;
-reg  [13:0] div_rem0,      div_rem1,      div_rem2;
+reg  [15:0] div_divisor0,  div_divisor1,  div_divisor2;
+reg  [16:0] div_rem0,      div_rem1,      div_rem2;
 reg  [5:0]  div_cnt;
 reg         div_neg0,      div_neg1,      div_neg2;
 reg         div_skip0,     div_skip1,     div_skip2;
 
-wire [13:0] div_try0  = {div_rem0[12:0], div_dq0[31]};
-wire        div_ge0   = div_try0 >= {1'b0, div_divisor0};
-wire [13:0] div_next0 = div_ge0 ? (div_try0 - {1'b0, div_divisor0}) : div_try0;
+wire [16:0] div_try0  = {div_rem0[15:0], div_dq0[31]};
+wire [17:0] div_sub0  = {1'b0, div_try0} - {2'b0, div_divisor0};
+wire        div_ge0   = !div_sub0[17];
+wire [16:0] div_next0 = div_ge0 ? div_sub0[16:0] : div_try0;
 
-wire [13:0] div_try1  = {div_rem1[12:0], div_dq1[31]};
-wire        div_ge1   = div_try1 >= {1'b0, div_divisor1};
-wire [13:0] div_next1 = div_ge1 ? (div_try1 - {1'b0, div_divisor1}) : div_try1;
+wire [16:0] div_try1  = {div_rem1[15:0], div_dq1[31]};
+wire [17:0] div_sub1  = {1'b0, div_try1} - {2'b0, div_divisor1};
+wire        div_ge1   = !div_sub1[17];
+wire [16:0] div_next1 = div_ge1 ? div_sub1[16:0] : div_try1;
 
-wire [13:0] div_try2  = {div_rem2[12:0], div_dq2[31]};
-wire        div_ge2   = div_try2 >= {1'b0, div_divisor2};
-wire [13:0] div_next2 = div_ge2 ? (div_try2 - {1'b0, div_divisor2}) : div_try2;
+wire [16:0] div_try2  = {div_rem2[15:0], div_dq2[31]};
+wire [17:0] div_sub2  = {1'b0, div_try2} - {2'b0, div_divisor2};
+wire        div_ge2   = !div_sub2[17];
+wire [16:0] div_next2 = div_ge2 ? div_sub2[16:0] : div_try2;
 
 // Edge slot counter — used by BOTH configs: the shared-divider config
 // iterates whole divides over it; the parallel config sequences its
@@ -198,21 +195,25 @@ wire [13:0] div_next2 = div_ge2 ? (div_try2 - {1'b0, div_divisor2}) : div_try2;
 // parallel cones committing in a single cycle).
 reg  [1:0]  edge_sel;            // 0 = long (02), 1 = top (01), 2 = bot (12)
 
-// Per-edge dx/dy operand cone, sequenced over edge_sel (parallel
-// config): ONE shared 17-bit subtractor pair plus ONE shared
-// abs/negate unit serve all three edges.  x0..y2 are stable after
-// S_SORT_C, so slot i's operands are bit-identical to the old
-// single-cycle parallel loads — they just land i cycles later, still
-// before S_DIV_RUN first consumes them.
-wire signed [15:0] eop_xa = (edge_sel == 2'd1) ? x1 : x2;   // minuend
-wire signed [15:0] eop_ya = (edge_sel == 2'd1) ? y1 : y2;
-wire signed [15:0] eop_xb = (edge_sel == 2'd2) ? x1 : x0;   // subtrahend
-wire signed [15:0] eop_yb = (edge_sel == 2'd2) ? y1 : y0;
+// Winding and divider setup are mutually exclusive. Share one subtractor
+// pair across both, selecting endpoints before subtraction. The winding
+// products need (dx01,dy02), then (dx02,dy01); divisions select 02/01/12.
+wire eop_winding = (state == S_XPROD_A) || (state == S_XPROD_B);
+wire eop_x_mid = eop_winding ? (state == S_XPROD_A) : (edge_sel == 2'd1);
+wire eop_y_mid = eop_winding ? (state == S_XPROD_B) : (edge_sel == 2'd1);
+wire eop_from_mid = !eop_winding && (edge_sel == 2'd2);
+wire signed [15:0] eop_xa = eop_x_mid ? x1 : x2;
+wire signed [15:0] eop_ya = eop_y_mid ? y1 : y2;
+wire signed [15:0] eop_xb = eop_from_mid ? x1 : x0;
+wire signed [15:0] eop_yb = eop_from_mid ? y1 : y0;
 wire signed [16:0] eop_dx = {eop_xa[15], eop_xa} - {eop_xb[15], eop_xb};
 wire signed [16:0] eop_dy = {eop_ya[15], eop_ya} - {eop_yb[15], eop_yb};
 wire        [15:0] eop_abs_dx = eop_dx[16] ? -eop_dx[15:0] : eop_dx[15:0];
-wire        [12:0] eop_abs_dy = eop_dy[16] ? -eop_dy[12:0] : eop_dy[12:0];
-wire               eop_neg    = eop_dx[16] ^ eop_dy[16];
+// Sorting guarantees ya >= yb for all three edges. The complete unsigned
+// difference fits 16 bits; a conditional dy negate would only duplicate
+// logic for a sign that can never occur after S_SORT_C.
+wire        [15:0] eop_abs_dy = eop_dy[15:0];
+wire               eop_neg    = eop_dx[16];
 wire               eop_skip   = (eop_dy == 17'sd0);
 
 // S_DIV_DONE slope fixup, sequenced over edge_sel (parallel config):
@@ -226,28 +227,27 @@ wire               fix_skip = (edge_sel == 2'd0) ? div_skip0
                             : (edge_sel == 2'd1) ? div_skip1 : div_skip2;
 wire               fix_neg  = (edge_sel == 2'd0) ? div_neg0
                             : (edge_sel == 2'd1) ? div_neg1  : div_neg2;
-wire        [31:0] fix_scaled = fix_dq;
-wire        [31:0] fix_slope  = fix_skip ? 32'd0
+wire        [32:0] fix_scaled = {1'b0, fix_dq};
+wire        [32:0] fix_slope  = fix_skip ? 33'd0
                               : fix_neg  ? -fix_scaled : fix_scaled;
 
 // Shared-divider set (EW_PARALLEL_DIVS == 0)
 reg  [31:0] div_dq;              // fused dividend/quotient
-reg  [12:0] div_divisor;
-reg  [13:0] div_rem;
+reg  [15:0] div_divisor;
+reg  [16:0] div_rem;
 reg         div_neg;
 
-wire [13:0] div_try  = {div_rem[12:0], div_dq[31]};
-wire        div_ge   = div_try >= {1'b0, div_divisor};
-wire [13:0] div_next = div_ge ? (div_try - {1'b0, div_divisor}) : div_try;
+wire [16:0] div_try  = {div_rem[15:0], div_dq[31]};
+// The subtraction's borrow supplies the comparison too. The extra bit
+// preserves unsigned 17-bit trial values above 65535.
+wire [17:0] div_sub  = {1'b0, div_try} - {2'b0, div_divisor};
+wire        div_ge   = !div_sub[17];
+wire [16:0] div_next = div_ge ? div_sub[16:0] : div_try;
 
-// Per-edge dx/dy selection for the shared divider's setup.
-reg signed [16:0] edge_dx;       // Q12.4, one extra bit for the subtract
-reg signed [16:0] edge_dy;
-
-// Slopes in Q16.16.
-reg signed [31:0] slope_long;
-reg signed [31:0] slope_top;
-reg signed [31:0] slope_bot;
+// Slopes have 16 fractional bits and a sign bit above the full quotient.
+reg signed [32:0] slope_long;
+reg signed [32:0] slope_top;
+reg signed [32:0] slope_bot;
 reg               long_left;     // long edge is the left edge
 
 // ----------------------------------------------------------------
@@ -266,16 +266,18 @@ wire signed [31:0] x1_q16 = {{4{x1[15]}}, x1, 12'd0};
 
 // Subpixel triangles sample pixel centers: ceil(edge_x - 0.5). Legacy
 // integer-Y commands retain their original corner-sampled coverage.
-wire signed [31:0] ceil_bias = subpix_y ? 32'sh00007FFF : 32'sh0000FFFF;
-wire signed [31:0] ceil_sum_l = xl + ceil_bias;
-wire signed [31:0] ceil_sum_r = xr + ceil_bias;
-wire signed [15:0] ceil_xl = ceil_sum_l[31:16];
-wire signed [15:0] ceil_xr = ceil_sum_r[31:16];
+// Only the carry out of the fractional half is used. Express it directly
+// so each pixel-boundary conversion needs a 16-bit increment, not an
+// otherwise discarded 32-bit bias addition. Exact ties remain unchanged.
+wire ceil_inc_l = subpix_y ? (xl[15] && |xl[14:0]) : |xl[15:0];
+wire ceil_inc_r = subpix_y ? (xr[15] && |xr[14:0]) : |xr[15:0];
+wire signed [15:0] ceil_xl = xl[31:16] + {15'd0, ceil_inc_l};
+wire signed [15:0] ceil_xr = xr[31:16] + {15'd0, ceil_inc_r};
 wire signed [15:0] span_u0 = (ceil_xl < clip_x0) ? clip_x0 : ceil_xl;
 wire signed [15:0] span_u1 = (ceil_xr > clip_x1) ? clip_x1 : ceil_xr;
 
 // S_EMIT_A registers the ceil+clamp results so the width subtract and
-// the record mux are not in the same cycle as the 32-bit ceil adds.
+// the record mux are not in the same cycle as the ceil increments.
 reg signed [15:0] span_u0_r, span_u1_r;
 wire signed [16:0] span_w = {span_u1_r[15], span_u1_r}
                           - {span_u0_r[15], span_u0_r};
@@ -292,14 +294,17 @@ wire signed [15:0] y2_scan = subpix_y ? (($signed({y2[15],y2}) + 17'sd7) >>> 4) 
 // subpix_y=0: integer line count (y_start - y_vertex), exactly as before.
 // subpix_y=1: Q12.4 distance ((y_start<<4)+8 - y_vertexQ12.4); the prestep multiply
 // product is then >>4 back to a Q16.16 x offset (see S_PRESTEP_LC capture).
-wire signed [15:0] dy_clip_long = subpix_y ? (($signed(y_start) <<< 4) + 16'sd8 - y0)
-                                           : (y_start - y0);
-wire signed [15:0] dy_clip_bot  = subpix_y ? (($signed(y_start) <<< 4) + 16'sd8 - y1)
-                                           : (y_start - y1);
+wire signed [16:0] dy_clip_long = subpix_y
+    ? (($signed({y_start[15], y_start}) <<< 4) + 17'sd8 - $signed({y0[15], y0}))
+    : ($signed({y_start[15], y_start}) - $signed({y0[15], y0}));
+wire signed [16:0] dy_clip_bot = subpix_y
+    ? (($signed({y_start[15], y_start}) <<< 4) + 17'sd8 - $signed({y1[15], y1}))
+    : ($signed({y_start[15], y_start}) - $signed({y1[15], y1}));
 // subpix: Q12.4 distance from the bottom-edge start vertex v1 to scanline y_mid,
 // used to prestep the bottom edge when it is re-seeded at the mid-vertex swap.
 // Only consumed in the subpix && !in_bottom_half branch (y1 is Q12.4 there).
-wire signed [15:0] dy_clip_mid  = ($signed(y_mid) <<< 4) + 16'sd8 - y1;
+wire signed [16:0] dy_clip_mid = ($signed({y_mid[15], y_mid}) <<< 4)
+                               + 17'sd8 - $signed({y1[15], y1});
 
 // ----------------------------------------------------------------
 // Shared DDA accumulator adders: xl and xr each get exactly ONE
@@ -309,6 +314,10 @@ wire signed [15:0] dy_clip_mid  = ($signed(y_mid) <<< 4) + 16'sd8 - y1;
 // Values and commit cycles are identical to the per-arm adds this
 // replaces — pure structural sharing; the operand mux now sits ahead
 // of each adder (reg -> mux -> add -> reg).
+// Dropping a slope's top sign bit here preserves the modulo-2^32 sum.
+// Every visited edge intersection lies between its Q12.4 X endpoints,
+// which fit Q16.16. Slopes requiring the extra bit span less than one
+// scanline; only their full-width fractional prestep is consumed.
 // ----------------------------------------------------------------
 `ifdef INCLUDE_EW_STEP_PREDECODE
 // EMIT_A and EMIT_B separate every y_cur update from S_STEP, including
@@ -325,16 +334,11 @@ wire step_end = step_end_r;
 wire step_swap = !in_bottom_half && (y_cur + 16'sd1 >= y_mid);
 `endif
 
-// ONE shared slope_sat27 cone for the three S_PRESTEP_* DSP launches.  The
-// launches sit in mutually exclusive states and all write the SAME mul_a
-// register, so muxing the ARGUMENT ahead of the clamp is bit-identical to
-// three clamps muxed at the register input — and costs one saturator
-// instead of three.
-wire signed [31:0] ew_prestep_slope_sel =
+// The three prestep launches share the multiplier's slope input mux.
+wire signed [32:0] ew_prestep_slope_sel =
       (state == S_PRESTEP_LL) ? slope_long
     : (state == S_PRESTEP_LC) ? (in_bottom_half ? slope_bot : slope_top)
     :                           slope_bot;   // S_PRESTEP_SC mid-prestep
-wire signed [26:0] ew_prestep_slope_sat = slope_sat27(ew_prestep_slope_sel);
 
 reg signed [31:0] xl_base, xl_off, xr_base, xr_off;
 always @* begin
@@ -353,16 +357,16 @@ always @* begin
     end else begin  // S_STEP is the only other state committing xl/xr
         if (long_left) begin
             xl_base = xl;
-            xl_off  = slope_long;
+            xl_off  = slope_long[31:0];
             xr_base = step_swap ? x1_q16 : xr;
             xr_off  = step_swap ? bot_mid_off
-                                : (in_bottom_half ? slope_bot : slope_top);
+                                : (in_bottom_half ? slope_bot[31:0] : slope_top[31:0]);
         end else begin
             xr_base = xr;
-            xr_off  = slope_long;
+            xr_off  = slope_long[31:0];
             xl_base = step_swap ? x1_q16 : xl;
             xl_off  = step_swap ? bot_mid_off
-                                : (in_bottom_half ? slope_bot : slope_top);
+                                : (in_bottom_half ? slope_bot[31:0] : slope_top[31:0]);
         end
     end
 end
@@ -411,15 +415,15 @@ always @(posedge clk) begin
 
             // ---------------- winding cross product ----------------
             S_XPROD_A: begin
-                mul_a <= {{11{x1[15]}}, x1} - {{11{x0[15]}}, x0};
-                mul_b <= y2 - y0;
+                mul_a <= eop_dx;
+                mul_b <= eop_dy;
                 state <= S_XPROD_W1;
             end
             S_XPROD_W1: state <= S_XPROD_B;
             S_XPROD_B: begin
                 xprod0_r <= mul_p_pipe;
-                mul_a <= {{11{x2[15]}}, x2} - {{11{x0[15]}}, x0};
-                mul_b <= y1 - y0;
+                mul_a <= eop_dx;
+                mul_b <= eop_dy;
                 state <= S_XPROD_W2;
             end
             S_XPROD_W2: state <= S_XPROD_C;
@@ -430,7 +434,7 @@ always @(posedge clk) begin
             S_XPROD_D: begin
                 // z = cross(d01, d02) in y-down screen space; z > 0 →
                 // mid vertex right of the long edge → long edge is left.
-                long_left <= (xprod0_r - mul_p_r > 43'sd0);
+                long_left <= winding_positive;
                 edge_sel  <= 2'd0;   // both configs sequence on edge_sel
                 state     <= S_DIV_INIT;
                 // Degenerate (all on one line) resolves via dy=0 slopes
@@ -457,21 +461,21 @@ always @(posedge clk) begin
                         div_dq0      <= {eop_abs_dx, 16'd0};
                         div_divisor0 <= eop_abs_dy;
                         div_neg0     <= eop_neg;
-                        div_rem0     <= 14'd0;
+                        div_rem0     <= 17'd0;
                     end
                     2'd1: begin
                         div_skip1    <= eop_skip;
                         div_dq1      <= {eop_abs_dx, 16'd0};
                         div_divisor1 <= eop_abs_dy;
                         div_neg1     <= eop_neg;
-                        div_rem1     <= 14'd0;
+                        div_rem1     <= 17'd0;
                     end
                     default: begin
                         div_skip2    <= eop_skip;
                         div_dq2      <= {eop_abs_dx, 16'd0};
                         div_divisor2 <= eop_abs_dy;
                         div_neg2     <= eop_neg;
-                        div_rem2     <= 14'd0;
+                        div_rem2     <= 17'd0;
                     end
                 endcase
                 if (edge_sel == 2'd2) begin
@@ -482,27 +486,16 @@ always @(posedge clk) begin
                     edge_sel <= edge_sel + 2'd1;
                 end
             end else begin
-                // Shared divider: select the current edge's operands.
-                case (edge_sel)
-                    2'd0: begin
-                        edge_dx <= {x2[15], x2} - {x0[15], x0};
-                        edge_dy <= {y2[15], y2} - {y0[15], y0};
-                    end
-                    2'd1: begin
-                        edge_dx <= {x1[15], x1} - {x0[15], x0};
-                        edge_dy <= {y1[15], y1} - {y0[15], y0};
-                    end
-                    default: begin
-                        edge_dx <= {x2[15], x2} - {x1[15], x1};
-                        edge_dy <= {y2[15], y2} - {y1[15], y1};
-                    end
-                endcase
+                // Load the same abs operands directly, as in the parallel
+                // configuration. Sorted vertices remain stable throughout
+                // setup. Keep the following preparation beat so divider and
+                // record timing remain identical to the registered-delta form.
                 state <= S_DIV_RUN;
-                div_cnt <= subpix_y ? 6'd33 : 6'd29;   // beat 29 loads operands, 28..1 iterate
-                div_dq  <= 28'd0;
-                div_rem <= 14'd0;
-                div_divisor <= 13'd0;
-                div_neg <= 1'b0;
+                div_cnt <= subpix_y ? 6'd33 : 6'd29;
+                div_dq  <= {eop_abs_dx, 16'd0};
+                div_rem <= 17'd0;
+                div_divisor <= eop_abs_dy;
+                div_neg <= eop_neg;
             end
 
             S_DIV_RUN: if (EW_PARALLEL_DIVS != 0) begin
@@ -518,20 +511,12 @@ always @(posedge clk) begin
                     div_cnt <= div_cnt - 5'd1;
             end else begin
                 if (div_cnt == (subpix_y ? 6'd33 : 6'd29)) begin
-                    // First beat: load abs operands. dy==0 → degenerate
-                    // edge; slope forced to 0 and divide skipped.
-                    if (edge_dy == 17'sd0) begin
-                        div_dq <= 28'd0;
+                    // Original preparation beat. dy==0 forces a zero slope
+                    // and skips division; other edges begin on the next beat.
+                    if (div_divisor == 16'd0) begin
+                        div_dq <= 32'd0;
                         state  <= S_DIV_DONE;
                     end else begin
-                        div_dq      <= edge_dx[16]
-                                     ? {-edge_dx[15:0], 16'd0}
-                                     : { edge_dx[15:0], 16'd0};
-                        div_divisor <= edge_dy[16]
-                                     ? -edge_dy[12:0]
-                                     :  edge_dy[12:0];
-                        div_neg <= edge_dx[16] ^ edge_dy[16];
-                        div_rem <= 14'd0;
                         div_cnt <= div_cnt - 5'd1;
                     end
                 end else begin
@@ -568,12 +553,12 @@ always @(posedge clk) begin
                 end
             end else begin
                 case (edge_sel)
-                    2'd0: slope_long <= div_neg ? -div_dq
-                                                :  div_dq;
-                    2'd1: slope_top  <= div_neg ? -div_dq
-                                                :  div_dq;
-                    default: slope_bot <= div_neg ? -div_dq
-                                                  :  div_dq;
+                    2'd0: slope_long <= div_neg ? -{1'b0, div_dq}
+                                                :  {1'b0, div_dq};
+                    2'd1: slope_top  <= div_neg ? -{1'b0, div_dq}
+                                                :  {1'b0, div_dq};
+                    default: slope_bot <= div_neg ? -{1'b0, div_dq}
+                                                  :  {1'b0, div_dq};
                 endcase
                 if (edge_sel == 2'd2) begin
                     // Clip the walk range before prestep (scanline bounds).
@@ -594,7 +579,7 @@ always @(posedge clk) begin
                     busy  <= 1'b0;
                     state <= S_IDLE;
                 end else begin
-                    mul_a <= ew_prestep_slope_sat;
+                    mul_a <= ew_prestep_slope_sel;
                     mul_b <= dy_clip_long;
                     in_bottom_half <= (y_start >= y_mid);
                     state <= S_PRESTEP_W1;
@@ -607,7 +592,7 @@ always @(posedge clk) begin
                 xprod0_r <= subpix_y ? (mul_p_pipe >>> 4) : mul_p_pipe;  // long-edge prestep offset, Q16.16
                 // Short edge: top half steps from v0 with slope_top;
                 // bottom half steps from v1 with slope_bot.
-                mul_a <= ew_prestep_slope_sat;
+                mul_a <= ew_prestep_slope_sel;
                 mul_b <= in_bottom_half ? dy_clip_bot : dy_clip_long;
                 state <= S_PRESTEP_W2;
             end
@@ -619,7 +604,7 @@ always @(posedge clk) begin
                 // that already starts in the bottom half need no correction, so
                 // bot_mid_off stays 0 and the swap re-seeds to exactly x1_q16.
                 if (subpix_y && !in_bottom_half) begin
-                    mul_a <= ew_prestep_slope_sat;
+                    mul_a <= ew_prestep_slope_sel;
                     mul_b <= dy_clip_mid;
                     state <= S_PRESTEP_MIDW;
                 end else begin

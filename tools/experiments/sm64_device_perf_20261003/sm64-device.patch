@@ -1,0 +1,436 @@
+--- a/src/sm64/Makefile
++++ b/src/sm64/Makefile
+@@ -44,6 +44,12 @@
+ # nothing derived from a ROM — is distributed with this project.
+ ASSET_BLOBS ?=
+ PROFILE ?= 0
++# Low-overhead hardware snapshots, opened with Select+L+R. The detailed UART
++# profiler remains separate: its per-triangle timers perturb GPU traffic.
++PERF_DIAG ?= 1
++ifeq ($(PROFILE),1)
++override PERF_DIAG := 0
++endif
+ GEOMETRY ?= 1
+ GEOMETRY_REFERENCE ?= 0
+ ifeq ($(GEOMETRY_REFERENCE),1)
+@@ -51,6 +57,9 @@
+ endif
+ ifeq ($(GEOMETRY),0)
+ OBJ_DIR := $(ROOT)/.obj/sm64-geometry-off
++endif
++ifeq ($(PERF_DIAG),1)
++OBJ_DIR := $(OBJ_DIR)-perfdiag
+ endif
+ 
+ # ── Asset extraction (baserom.us.z64 → PNG / AIFF / M64 / BIN) ────────
+@@ -165,7 +174,8 @@
+           pocket/wm_pocket.c \
+           pocket/controller_pocket.c \
+           pocket/audio_pocket.c \
+-          pocket/fx32_mtx.c
++          pocket/fx32_mtx.c \
++          pocket/perf_pocket.c
+ 
+ SRCS = $(ENGINE_SRCS) $(GAME_SRCS) $(AUDIO_SRCS) $(MENU_SRCS) $(BUFFER_SRCS) \
+        $(GODDARD_SRCS) $(PC_SRCS) $(ULTRA_SRCS) $(LEVEL_SRCS) $(ACTOR_SRCS) \
+@@ -191,7 +201,7 @@
+ CFLAGS += -O3 -ffast-math -fno-math-errno -fno-trapping-math
+ CFLAGS += -fsingle-precision-constant
+ CFLAGS += -falign-loops=8
+-CFLAGS += -DSM64_PROFILE=$(PROFILE)
++CFLAGS += -DSM64_PROFILE=$(PROFILE) -DSM64_PERF_DIAG=$(PERF_DIAG)
+ CFLAGS += -DGFX_GPU_GEOMETRY=$(GEOMETRY) -DGFX_GPU_GEOMETRY_REFERENCE=$(GEOMETRY_REFERENCE)
+ CFLAGS += -DVERSION_US -DNON_MATCHING -DAVOID_UB -D_LANGUAGE_C \
+           -DF3DEX_GBI_2E -DNO_SEGMENTED_MEMORY -DWIDESCREEN=0 \
+--- /dev/null
++++ b/src/sm64/pocket/perf_pocket.h
+@@ -0,0 +1,35 @@
++#ifndef SM64_PERF_POCKET_H
++#define SM64_PERF_POCKET_H
++
++#include <stdint.h>
++
++#ifndef SM64_PERF_DIAG
++#define SM64_PERF_DIAG 0
++#endif
++
++#if SM64_PERF_DIAG
++#ifdef OF_PC
++#include "of_timer.h"
++static inline uint32_t sm64_perf_clock(void) { return of_time_us(); }
++#else
++static inline uint32_t sm64_perf_clock(void) {
++    return *(volatile uint32_t *)0x40000004;
++}
++#endif
++uint32_t sm64_perf_step_begin(void);
++void sm64_perf_step_end(uint32_t begin, uint32_t game_end,
++                        uint32_t audio_end, uint32_t end);
++void sm64_perf_render_end(uint32_t begin, uint32_t end);
++uint32_t sm64_perf_input(uint32_t buttons);
++void sm64_perf_draw(void);
++#else
++static inline uint32_t sm64_perf_clock(void) { return 0; }
++static inline uint32_t sm64_perf_step_begin(void) { return 0; }
++static inline void sm64_perf_step_end(uint32_t a,uint32_t b,uint32_t c,uint32_t d) {
++    (void)a;(void)b;(void)c;(void)d;
++}
++static inline void sm64_perf_render_end(uint32_t a,uint32_t b) {(void)a;(void)b;}
++static inline uint32_t sm64_perf_input(uint32_t buttons) { return buttons; }
++static inline void sm64_perf_draw(void) { }
++#endif
++#endif
+--- /dev/null
++++ b/src/sm64/pocket/perf_pocket.c
+@@ -0,0 +1,172 @@
++/* Low-frequency hardware measurements. No text is drawn or printed while
++ * collecting. Select+L+R displays the last complete two-second window; that
++ * snapshot stays frozen so the panel's own rendering cannot bias it. */
++#include "perf_pocket.h"
++#if SM64_PERF_DIAG
++#include <stdio.h>
++#include <string.h>
++#include "of_caps.h"
++#include "of_input.h"
++#include "of_video.h"
++#include "sm64.h"
++#include "game/area.h"
++#include "game/game_init.h"
++#include "game/print.h"
++#include "gfx/gfx_gpu.h"
++
++extern unsigned sm64_geometry_vertices,sm64_geometry_triangles;
++void gpu_ring_prof_get(unsigned *spins,unsigned *min_free);
++void gpu_present_prof_get(unsigned *flip,unsigned *acquire);
++
++struct PerfWindow {
++    uint64_t game,render,audio,wait,tail,ring;
++    uint32_t begin,frames,steps,presents,vertices,triangles;
++};
++/* Exported for the capture harness; values are real hardware wall-clock
++ * measurements on device, never the qsim estimated-cycle report. */
++struct PerfSnapshot {
++    uint32_t valid,level,clock_hz,frames,steps,elapsed_ticks;
++    uint32_t render_fps10,display_fps10,sim_fps10;
++    uint32_t game_ms10,render_ms10,audio_ms10,wait_ms10,gap_ms10;
++    uint32_t ring_spins,geometry,vertices,triangles;
++};
++struct PerfSnapshot sm64_perf_snapshot;
++static struct PerfWindow window;
++static uint32_t tick_hz,step_render,step_frames;
++static int window_active,visible,chord_held,warmup=2,last_level=-1;
++
++static uint32_t perf_hz(void) {
++#ifdef OF_PC
++    return 1000000u;
++#else
++    const struct of_capabilities *caps=of_get_caps();
++    return caps && caps->cpu_freq_hz ? caps->cpu_freq_hz : 100000000u;
++#endif
++}
++
++uint32_t sm64_perf_step_begin(void) {
++    uint32_t now=sm64_perf_clock();
++    if(!tick_hz)tick_hz=perf_hz();
++    step_render=step_frames=0;
++    if(last_level!=gCurrLevelNum) {
++        last_level=gCurrLevelNum;window_active=0;warmup=2;
++        sm64_perf_snapshot.valid=0;
++    }
++    if(!visible && !warmup && !window_active) {
++        of_video_timing_t timing;
++        of_video_get_timing(&timing);
++        memset(&window,0,sizeof(window));window.begin=now;
++        window.presents=timing.present_count;
++        window.vertices=sm64_geometry_vertices;
++        window.triangles=sm64_geometry_triangles;
++        window_active=1;
++    }
++    return now;
++}
++
++void sm64_perf_render_end(uint32_t begin,uint32_t end) {
++    unsigned flip,acquire,spins,free_words;
++    gpu_present_prof_get(&flip,&acquire);
++    gpu_ring_prof_get(&spins,&free_words);
++    uint32_t duration=end-begin;
++    step_render+=duration;step_frames++;
++    if(!window_active || visible)return;
++    window.render+=duration;
++    window.wait+=acquire;
++    window.ring+=spins;
++    window.frames++;
++    /* Flip submission belongs to render. Ring polls are reported as a count:
++     * their variable MMIO latency cannot honestly be converted to time here. */
++    (void)flip;(void)free_words;
++}
++
++static uint32_t average_ms10(uint64_t ticks) {
++    return (uint32_t)((ticks*10000u)/(tick_hz*(uint64_t)window.frames));
++}
++
++void sm64_perf_step_end(uint32_t begin,uint32_t game_end,uint32_t audio_end,uint32_t end) {
++    if(visible) {window_active=0;return;}
++    if(warmup) {if(step_frames)warmup--;return;}
++    if(!window_active)return;
++    uint32_t total_game=game_end-begin;
++    window.game+=total_game>=step_render?total_game-step_render:0;
++    window.audio+=audio_end-game_end;
++    window.tail+=end-audio_end;
++    window.steps++;
++    uint32_t elapsed=end-window.begin;
++    if(elapsed<tick_hz*2u || !window.frames)return;
++    window_active=0;
++    /* A long system-menu pause is not a slow game frame. Discard that window
++     * and allow both pending presentation and pacing state to settle. */
++    if(elapsed>tick_hz*4u) {warmup=2;return;}
++    of_video_timing_t timing;
++    of_video_get_timing(&timing);
++    struct PerfSnapshot *s=&sm64_perf_snapshot;
++    s->valid=1;s->level=gCurrLevelNum;s->clock_hz=tick_hz;
++    s->frames=window.frames;s->steps=window.steps;s->elapsed_ticks=elapsed;
++    s->render_fps10=(uint64_t)window.frames*tick_hz*10u/elapsed;
++    s->display_fps10=(uint64_t)(timing.present_count-window.presents)*tick_hz*10u/elapsed;
++    s->sim_fps10=(uint64_t)window.steps*tick_hz*10u/elapsed;
++    s->game_ms10=average_ms10(window.game);
++    s->audio_ms10=average_ms10(window.audio);
++    s->wait_ms10=average_ms10(window.wait);
++    s->render_ms10=average_ms10(window.render>window.wait?window.render-window.wait:0);
++    uint64_t accounted=window.game+window.render+window.audio+window.tail;
++    s->gap_ms10=average_ms10(elapsed>accounted?elapsed-accounted:0);
++    s->ring_spins=window.ring/window.frames;
++    s->geometry=gfx_gpu_geometry_enabled();
++    s->vertices=(sm64_geometry_vertices-window.vertices)/window.frames;
++    s->triangles=(sm64_geometry_triangles-window.triangles)/window.frames;
++}
++
++uint32_t sm64_perf_input(uint32_t buttons) {
++    const uint32_t chord=OF_BTN_SELECT|OF_BTN_L1|OF_BTN_R1;
++    if((buttons&chord)==chord && !chord_held) {
++        visible=!visible;chord_held=1;window_active=0;warmup=2;
++    }
++    /* Swallow the whole chord until all three buttons are released, avoiding
++     * first-person/camera events when fingers release at different times. */
++    if(chord_held) {
++        if(!(buttons&chord))chord_held=0;
++        buttons&=~chord;
++    }
++    return buttons;
++}
++
++static void pair_line(int y,const char *a,uint32_t av,const char *b,uint32_t bv) {
++    char text[40];
++    snprintf(text,sizeof(text),"%s %u.%u %s %u.%u",a,av/10,av%10,b,bv/10,bv%10);
++    print_text(12,y,text);
++}
++
++void sm64_perf_draw(void) {
++    if(!visible)return;
++    const struct PerfSnapshot *s=&sm64_perf_snapshot;
++    gDPPipeSync(gDisplayListHead++);
++    gDPSetScissor(gDisplayListHead++,G_SC_NON_INTERLACE,0,0,320,240);
++    gDPSetCycleType(gDisplayListHead++,G_CYC_FILL);
++    gDPSetFillColor(gDisplayListHead++,0x00010001);
++    gDPFillRectangle(gDisplayListHead++,4,28,315,239);
++    gDPPipeSync(gDisplayListHead++);
++    gDPSetCycleType(gDisplayListHead++,G_CYC_1CYCLE);
++    print_text(12,190,"PERF P1 SNAPSHOT");
++    if(!s->valid) {
++        print_text(12,158,"WAIT 5 SECONDS IN LEVEL");
++        print_text(12,126,"THEN SELECT L R");
++    } else {
++        char text[40];
++        snprintf(text,sizeof(text),"LEVEL %u CPU %u MHZ",s->level,s->clock_hz/1000000u);
++        print_text(12,166,text);
++        pair_line(142,"FPS",s->render_fps10,"LCD",s->display_fps10);
++        pair_line(118,"GAME",s->game_ms10,"AUD",s->audio_ms10);
++        pair_line(94,"RENDER",s->render_ms10,"WAIT",s->wait_ms10);
++        pair_line(70,"GAP",s->gap_ms10,"SIM",s->sim_fps10);
++        snprintf(text,sizeof(text),"RING %u GEO %u",s->ring_spins,s->geometry);
++        print_text(12,46,text);
++        snprintf(text,sizeof(text),"VERT %u TRI %u",s->vertices,s->triangles);
++        print_text(12,22,text);
++    }
++    print_text(12,2,"SELECT L R TO CLOSE");
++    render_text_labels();
++}
++#endif
+--- a/src/sm64/pocket/controller_pocket.c
++++ b/src/sm64/pocket/controller_pocket.c
+@@ -22,6 +22,7 @@
+ 
+ #include "of.h"
+ #include "of_input.h"
++#include "perf_pocket.h"
+ 
+ /* Analog dead zone in of_input's int16 stick range (~7.3%). */
+ #define DEADZONE 2400
+@@ -90,7 +91,7 @@
+     of_input_poll();
+     of_input_state(0, &st);
+ 
+-    uint32_t b = st.buttons;
++    uint32_t b = sm64_perf_input(st.buttons);
+ 
+     /* Face buttons, on the Pocket's SNES-style diamond (X top, Y left,
+      * A right, B bottom):
+--- a/src/sm64/sm64/src/pc/pc_main.c
++++ b/src/sm64/sm64/src/pc/pc_main.c
+@@ -23,6 +23,7 @@
+ #ifdef TARGET_OPENFPGA
+ #include "pocket/audio_pocket.h"
+ #include "pocket/wm_pocket.h"
++#include "pocket/perf_pocket.h"
+ #include "gfx/gfx_gpu.h"
+ #else
+ #include "audio/audio_sb16.h"
+@@ -110,8 +111,14 @@
+ #undef printf
+ 
+ void produce_one_frame(void) {
++#ifdef TARGET_OPENFPGA
++    uint32_t perf_begin=sm64_perf_step_begin();
++#endif
+     gfx_start_frame();
+     game_loop_one_iteration();
++#ifdef TARGET_OPENFPGA
++    uint32_t perf_game_end=sm64_perf_clock();
++#endif
+ 
+     if (configEnableSound) {
+ #ifdef TARGET_OPENFPGA
+@@ -159,7 +166,13 @@
+ #endif
+     }
+ 
++#ifdef TARGET_OPENFPGA
++    uint32_t perf_audio_end=sm64_perf_clock();
++#endif
+     gfx_end_frame();
++#ifdef TARGET_OPENFPGA
++    sm64_perf_step_end(perf_begin,perf_game_end,perf_audio_end,sm64_perf_clock());
++#endif
+ }
+ 
+ #ifdef TARGET_WEB
+--- a/src/sm64/sm64/src/game/game_init.c
++++ b/src/sm64/sm64/src/game/game_init.c
+@@ -20,6 +20,9 @@
+ #include "segment_symbols.h"
+ #include "thread6.h"
+ #include <prevent_bss_reordering.h>
++#ifdef TARGET_OPENFPGA
++#include "pocket/perf_pocket.h"
++#endif
+ 
+ // FIXME: I'm not sure all of these variables belong in this file, but I don't
+ // know of a good way to split them
+@@ -257,6 +260,9 @@
+         draw_profiler();
+     }
+ 
++#ifdef TARGET_OPENFPGA
++    sm64_perf_draw();
++#endif
+     gDPFullSync(gDisplayListHead++);
+     gSPEndDisplayList(gDisplayListHead++);
+ 
+--- a/src/sm64/sm64/src/pc/gfx/gfx_pc.c
++++ b/src/sm64/sm64/src/pc/gfx/gfx_pc.c
+@@ -23,6 +23,7 @@
+ 
+ #ifdef TARGET_OPENFPGA
+ #include "gfx_gpu.h"   /* GPU vertex-cache fast path (0x56/0x54) entry points */
++#include "pocket/perf_pocket.h"
+ #include "game/area.h"
+ #include "level_table.h"
+ #endif
+@@ -2892,6 +2893,9 @@
+         return;
+     }
+     dropped_frame = false;
++#ifdef TARGET_OPENFPGA
++    uint32_t perf_render_begin=sm64_perf_clock();
++#endif
+ 
+ #ifdef TARGET_POCKET
+     uint32_t _t0 = PROF_TMR();
+@@ -2916,6 +2920,9 @@
+ #endif
+     gfx_rapi->end_frame();
+     gfx_wapi->swap_buffers_begin();
++#ifdef TARGET_OPENFPGA
++    sm64_perf_render_end(perf_render_begin,sm64_perf_clock());
++#endif
+ #ifdef TARGET_POCKET
+     uint32_t _t4 = PROF_TMR();
+     uint32_t frame_ticks = _t0 - prof_prev_t0;   /* true frame-to-frame period */
+--- /dev/null
++++ b/PERFORMANCE-TEST.txt
+@@ -0,0 +1,66 @@
++SM64 Pocket performance snapshot P1 -- 2026-10-03
++
++The previous optimization has not produced a noticeable improvement in the
++first world on your Pocket. Its simulated CPU savings are not a measured
++whole-game speedup. This build adds measurements to find the actual limit.
++The os30 bitstream, OS, game logic, audio and rendering quality are unchanged.
++
++TEST
++1. From the SM64 repository, run: make copy
++2. Enter Bob-omb Battlefield and move to a view that feels slow/choppy.
++3. Keep that view for at least five seconds, with the panel closed.
++4. Press Select + L + R together, then release them. You should see
++   "PERF P1 SNAPSHOT". Send a photo of the panel and describe the location.
++5. The same combination closes the panel. After closing it, wait five seconds
++   before taking another sample. A second sample facing a simple view or the
++   sky is useful for comparison, but the slow view is the priority.
++
++The values come from the last complete two-second window BEFORE opening the
++panel. They stay frozen. The game continues behind the panel, and drawing the
++panel can slow it down; that extra work is excluded from the saved values.
++If there is no valid sample yet, close the panel, play five seconds, and reopen.
++
++READOUT
++FPS: rendered frames per second. LCD: newly presented frames per second,
++  excluding repeated scans of the same frame. These are window averages.
++SIM: game simulation steps per second. SM64 aims for 30 simulation steps and
++  may skip rendering some steps to catch up; movement speed alone is not FPS.
++GAME: game logic and display-list construction, in milliseconds per rendered
++  frame. Includes any catch-up simulation steps in the measurement window.
++AUD: audio sequence/sample preparation, in ms per rendered frame.
++RENDER: display-list translation and command submission, in ms per rendered
++  frame, excluding WAIT. GPU command-ring stalls are included here.
++WAIT: time waiting for the previous GPU flip fence / a free draw buffer, in
++  ms per rendered frame. GPU execution and display scheduling can both matter.
++GAP: remaining wall time, in ms per rendered frame, outside the measured game,
++  renderer, audio and end-frame work. Includes pacing and loop/service overhead;
++  this is not a pure CPU-idle measurement.
++RING: command-ring polling iterations per rendered frame, not milliseconds.
++GEO: whether the geometry accelerator is enabled (expected 1).
++VERT / TRI: average accelerated input vertices / submitted geometry triangles.
++CPU: runtime-reported CPU clock in MHz, not a fitted timing/Fmax measurement.
++
++COLLECTION COST AND CHECKS
++Six coarse timer reads per simulation/rendered step and existing GPU counters;
++no per-triangle instrumentation, live text, or UART output while collecting.
++The CPU model estimates under 1% overhead in six Bob-omb windows. Actual Pocket
++overhead is not measured. Eight sampled framebuffer/depth pairs match the
++current renderer exactly with the panel hidden. The disabled build matches
++the baseline's per-frame modeled CPU cycles across the full 721-frame route.
++Timing arithmetic, catch-up steps, timer wrap and frozen snapshots are tested.
++This does not yet measure individual LCD frame intervals or prove a speedup.
++
++DISABLE / RESTORE
++To build and copy without collection: make copy PERF_DIAG=0
++The diagnostic and normal builds use separate object directories. A subsequent
++plain make copy enables diagnostics again. PROFILE=1 disables this snapshot
++to avoid conflicting with the older detailed profiler.
++
++To restore the exact source state from before this diagnostic change:
++  python3 .obj/perf-snapshot-backup-20261003/restore.py
++  make -C src/sm64
++  make copy
++The restore script checks for later edits before touching files. The previous
++geometry optimization and its separate rollback remain in GEOMETRY-TRIAL.txt.
++
++No SD-card copy or full FPGA seed sweep was run for this diagnostic build.

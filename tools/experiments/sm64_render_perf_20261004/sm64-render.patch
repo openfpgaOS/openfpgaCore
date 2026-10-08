@@ -1,0 +1,507 @@
+--- a/src/sm64/pocket/perf_pocket.h
++++ b/src/sm64/pocket/perf_pocket.h
+@@ -6,6 +6,15 @@
+ #ifndef SM64_PERF_DIAG
+ #define SM64_PERF_DIAG 0
+ #endif
++
++/* Exclusive CPU wall-time buckets. SEND includes backend conversion,
++ * command packing, MMIO uploads and any ring stalls; it is not GPU busy time.
++ * TEX includes SDRAM publication; SYNC isolates its reuse fence. */
++enum Sm64PerfBucket {
++    SM64_PERF_DL, SM64_PERF_VTX, SM64_PERF_TRI, SM64_PERF_MAT,
++    SM64_PERF_TEX, SM64_PERF_SEND, SM64_PERF_SYNC, SM64_PERF_MISC,
++    SM64_PERF_WAIT, SM64_PERF_BUCKETS
++};
+ 
+ #if SM64_PERF_DIAG
+ #ifdef OF_PC
+@@ -16,6 +25,51 @@
+     return *(volatile uint32_t *)0x40000004;
+ }
+ #endif
++extern unsigned sm64_perf_detail_active;
++struct Sm64PerfDetail {
++    unsigned bucket,depth,parents[32];
++    uint32_t stamp,ticks[SM64_PERF_BUCKETS];
++};
++extern struct Sm64PerfDetail sm64_perf_detail;
++static inline __attribute__((always_inline)) void sm64_perf_enter(unsigned bucket) {
++    /* No tokens stay live in the renderer's hot functions. This avoids
++     * register spills even on the seven frames that are not sampled. */
++    if(sm64_perf_detail.depth==32) {sm64_perf_detail_active=0;return;}
++    unsigned previous=sm64_perf_detail.bucket;
++    sm64_perf_detail.parents[sm64_perf_detail.depth++]=previous;
++    if(previous==bucket)return;
++    uint32_t now=sm64_perf_clock();
++    sm64_perf_detail.ticks[previous]+=now-sm64_perf_detail.stamp;
++    sm64_perf_detail.stamp=now;sm64_perf_detail.bucket=bucket;
++}
++
++static inline __attribute__((always_inline)) void sm64_perf_leave(void) {
++    if(!sm64_perf_detail.depth) {sm64_perf_detail_active=0;return;}
++    unsigned previous=sm64_perf_detail.parents[--sm64_perf_detail.depth];
++    if(previous==sm64_perf_detail.bucket)return;
++    uint32_t now=sm64_perf_clock();
++    sm64_perf_detail.ticks[sm64_perf_detail.bucket]+=now-sm64_perf_detail.stamp;
++    sm64_perf_detail.stamp=now;sm64_perf_detail.bucket=previous;
++}
++
++
++void sm64_perf_render_begin(uint32_t begin);
++
++static inline unsigned sm64_perf_scope_begin(unsigned bucket) {
++    if(__builtin_expect(sm64_perf_detail_active,0))sm64_perf_enter(bucket);
++    return 0;
++}
++static inline void sm64_perf_scope_end(unsigned *unused) {
++    (void)unused;
++    if(__builtin_expect(sm64_perf_detail_active,0))sm64_perf_leave();
++}
++/* GCC cleanup restores the parent on every return/break/goto leaving scope.
++ * Same-bucket recursion is free of timer reads. Inactive frames only test a
++ * flag; PERF_DIAG=0 removes even that test. Use once per lexical scope. */
++#define SM64_PERF_SCOPE(bucket) \
++    unsigned sm64_perf_unused __attribute__((cleanup(sm64_perf_scope_end))) = \
++        sm64_perf_scope_begin(bucket)
++
+ uint32_t sm64_perf_step_begin(void);
+ void sm64_perf_step_end(uint32_t begin, uint32_t game_end,
+                         uint32_t audio_end, uint32_t end);
+@@ -23,6 +77,8 @@
+ uint32_t sm64_perf_input(uint32_t buttons);
+ void sm64_perf_draw(void);
+ #else
++#define SM64_PERF_SCOPE(bucket) ((void)0)
++static inline void sm64_perf_render_begin(uint32_t begin) { (void)begin; }
+ static inline uint32_t sm64_perf_clock(void) { return 0; }
+ static inline uint32_t sm64_perf_step_begin(void) { return 0; }
+ static inline void sm64_perf_step_end(uint32_t a,uint32_t b,uint32_t c,uint32_t d) {
+--- a/src/sm64/pocket/perf_pocket.c
++++ b/src/sm64/pocket/perf_pocket.c
+@@ -20,6 +20,8 @@
+ 
+ struct PerfWindow {
+     uint64_t game,render,audio,wait,tail,ring;
++    uint64_t detail[SM64_PERF_BUCKETS];
++    uint32_t samples;
+     uint32_t begin,frames,steps,presents,vertices,triangles;
+ };
+ /* Exported for the capture harness; values are real hardware wall-clock
+@@ -29,11 +31,28 @@
+     uint32_t render_fps10,display_fps10,sim_fps10;
+     uint32_t game_ms10,render_ms10,audio_ms10,wait_ms10,gap_ms10;
+     uint32_t ring_spins,geometry,vertices,triangles;
++    /* Append only: the original P1 fields keep their capture ABI. */
++    uint32_t version,samples,sample_render_ms10;
++    uint32_t detail_ms10[SM64_PERF_BUCKETS];
+ };
+ struct PerfSnapshot sm64_perf_snapshot;
+ static struct PerfWindow window;
+ static uint32_t tick_hz,step_render,step_frames;
+ static int window_active,visible,chord_held,warmup=2,last_level=-1;
++
++unsigned sm64_perf_detail_active;
++static unsigned detail_serial;
++struct Sm64PerfDetail sm64_perf_detail;
++
++void sm64_perf_render_begin(uint32_t begin) {
++    sm64_perf_detail_active=0;
++    if(!window_active || visible)return;
++    /* Keep phase across windows so sampling is not reset by a 2s boundary. */
++    if((detail_serial++ & 7u)!=0)return;
++    memset(sm64_perf_detail.ticks,0,sizeof(sm64_perf_detail.ticks));
++    sm64_perf_detail.depth=0;sm64_perf_detail.bucket=SM64_PERF_MISC;sm64_perf_detail.stamp=begin;
++    sm64_perf_detail_active=1;
++}
+ 
+ static uint32_t perf_hz(void) {
+ #ifdef OF_PC
+@@ -65,6 +84,14 @@
+ }
+ 
+ void sm64_perf_render_end(uint32_t begin,uint32_t end) {
++    if(sm64_perf_detail_active) {
++        sm64_perf_detail.ticks[sm64_perf_detail.bucket]+=end-sm64_perf_detail.stamp;
++        sm64_perf_detail_active=0;
++        if(window_active && !visible) {
++            for(unsigned i=0;i<SM64_PERF_BUCKETS;i++)window.detail[i]+=sm64_perf_detail.ticks[i];
++            window.samples++;
++        }
++    }
+     unsigned flip,acquire,spins,free_words;
+     gpu_present_prof_get(&flip,&acquire);
+     gpu_ring_prof_get(&spins,&free_words);
+@@ -117,6 +144,15 @@
+     s->geometry=gfx_gpu_geometry_enabled();
+     s->vertices=(sm64_geometry_vertices-window.vertices)/window.frames;
+     s->triangles=(sm64_geometry_triangles-window.triangles)/window.frames;
++    s->version=2;s->samples=window.samples;
++    uint64_t sample_render=0;
++    for(unsigned i=0;i<SM64_PERF_BUCKETS;i++) {
++        s->detail_ms10[i]=window.samples
++            ?(window.detail[i]*10000u)/(tick_hz*(uint64_t)window.samples):0;
++        if(i!=SM64_PERF_WAIT)sample_render+=window.detail[i];
++    }
++    s->sample_render_ms10=window.samples
++        ?(sample_render*10000u)/(tick_hz*(uint64_t)window.samples):0;
+ }
+ 
+ uint32_t sm64_perf_input(uint32_t buttons) {
+@@ -146,27 +182,29 @@
+     gDPSetScissor(gDisplayListHead++,G_SC_NON_INTERLACE,0,0,320,240);
+     gDPSetCycleType(gDisplayListHead++,G_CYC_FILL);
+     gDPSetFillColor(gDisplayListHead++,0x00010001);
+-    gDPFillRectangle(gDisplayListHead++,4,28,315,239);
++    gDPFillRectangle(gDisplayListHead++,4,8,315,239);
+     gDPPipeSync(gDisplayListHead++);
+     gDPSetCycleType(gDisplayListHead++,G_CYC_1CYCLE);
+-    print_text(12,190,"PERF P1 SNAPSHOT");
++    print_text(12,210,"PERF P2 SNAPSHOT");
+     if(!s->valid) {
+-        print_text(12,158,"WAIT 5 SECONDS IN LEVEL");
+-        print_text(12,126,"THEN SELECT L R");
++        print_text(12,178,"WAIT 5 SECONDS IN LEVEL");
++        print_text(12,146,"THEN SELECT L R");
+     } else {
+         char text[40];
+-        snprintf(text,sizeof(text),"LEVEL %u CPU %u MHZ",s->level,s->clock_hz/1000000u);
+-        print_text(12,166,text);
+-        pair_line(142,"FPS",s->render_fps10,"LCD",s->display_fps10);
+-        pair_line(118,"GAME",s->game_ms10,"AUD",s->audio_ms10);
+-        pair_line(94,"RENDER",s->render_ms10,"WAIT",s->wait_ms10);
+-        pair_line(70,"GAP",s->gap_ms10,"SIM",s->sim_fps10);
++        pair_line(190,"FPS",s->render_fps10,"LCD",s->display_fps10);
++        pair_line(170,"GAME",s->game_ms10,"AUD",s->audio_ms10);
++        pair_line(150,"REND",s->render_ms10,"WAIT",s->wait_ms10);
++        pair_line(130,"DL",s->detail_ms10[SM64_PERF_DL],"VERT",s->detail_ms10[SM64_PERF_VTX]);
++        pair_line(110,"TRI",s->detail_ms10[SM64_PERF_TRI],"MAT",s->detail_ms10[SM64_PERF_MAT]);
++        pair_line(90,"TILE",s->detail_ms10[SM64_PERF_TEX],"SEND",s->detail_ms10[SM64_PERF_SEND]);
++        pair_line(70,"SYNC",s->detail_ms10[SM64_PERF_SYNC],"MISC",s->detail_ms10[SM64_PERF_MISC]);
++        snprintf(text,sizeof(text),"SMP %u SUM %u.%u",s->samples,
++            s->sample_render_ms10/10,s->sample_render_ms10%10);
++        print_text(12,50,text);
+         snprintf(text,sizeof(text),"RING %u GEO %u",s->ring_spins,s->geometry);
+-        print_text(12,46,text);
+-        snprintf(text,sizeof(text),"VERT %u TRI %u",s->vertices,s->triangles);
+-        print_text(12,22,text);
+-    }
+-    print_text(12,2,"SELECT L R TO CLOSE");
++        print_text(12,30,text);
++    }
++    print_text(12,10,"SELECT L R TO CLOSE");
+     render_text_labels();
+ }
+ #endif
+--- a/src/sm64/sm64/src/pc/gfx/gfx_pc.c
++++ b/src/sm64/sm64/src/pc/gfx/gfx_pc.c
+@@ -13,6 +13,9 @@
+ #endif
+ #include <PR/gbi.h>
+ 
++#ifndef TARGET_OPENFPGA
++#define SM64_PERF_SCOPE(bucket) ((void)0)
++#endif
+ #include "gfx_pc.h"
+ #include "gfx_cc.h"
+ #include "gfx_window_manager_api.h"
+@@ -823,6 +826,7 @@
+ }
+ 
+ static void gfx_sp_matrix(uint8_t parameters, const int32_t *addr) {
++    SM64_PERF_SCOPE(SM64_PERF_VTX);
+ #ifdef TARGET_OPENFPGA
+     ++vertex_state_epoch;
+ #endif
+@@ -875,6 +879,7 @@
+ }
+ 
+ static void gfx_sp_pop_matrix(uint32_t count) {
++    SM64_PERF_SCOPE(SM64_PERF_VTX);
+ #ifdef TARGET_OPENFPGA
+     ++vertex_state_epoch;
+ #endif
+@@ -908,6 +913,7 @@
+ /* The deferred path needs only UVs and lighting. Keep its register footprint
+  * independent of the sixteen matrix scalars and clipping/fog temporaries. */
+ static void gfx_load_geometry_attributes(size_t count,size_t first,const GeometryInput *vertices,uint32_t needed) {
++    SM64_PERF_SCOPE(SM64_PERF_VTX);
+     const uint16_t scale_s=rsp.texture_scaling_factor.s,scale_t=rsp.texture_scaling_factor.t;
+     const unsigned light_count=rsp.current_num_lights-1;
+     const bool lighting=(rsp.geometry_mode&G_LIGHTING)!=0;
+@@ -962,6 +968,7 @@
+ #endif
+ 
+ static void gfx_sp_vertex(size_t n_vertices, size_t dest_index, const Vtx *vertices) {
++    SM64_PERF_SCOPE(SM64_PERF_VTX);
+ #ifdef TARGET_POCKET
+     uint32_t _pv = PROF_TMR();
+ #endif
+@@ -1233,6 +1240,7 @@
+ }
+ 
+ static inline bool gfx_update_textures(const bool used_textures[2], const bool linear_filter) {
++    SM64_PERF_SCOPE(SM64_PERF_TEX);
+     for (int i = 0; i < 2; i++) {
+         if (used_textures[i]) {
+             if (rdp.textures_changed[i]) {
+@@ -1543,6 +1551,7 @@
+         use_alpha=triangle_material_alpha;use_texture=triangle_material_texture;
+     } else {
+ #endif
++    SM64_PERF_SCOPE(SM64_PERF_MAT);
+     const bool depth_test = (rsp.geometry_mode & G_ZBUFFER) == G_ZBUFFER;
+     if (depth_test != rendering_state.depth_test) {
+ #ifdef TARGET_POCKET
+@@ -1854,6 +1863,7 @@
+ #endif
+ 
+ static void gfx_sp_tri1(uint8_t vtx1_idx, uint8_t vtx2_idx, uint8_t vtx3_idx) {
++    SM64_PERF_SCOPE(SM64_PERF_TRI);
+     struct LoadedVertex *v1 = &rsp.loaded_vertices[vtx1_idx];
+     struct LoadedVertex *v2 = &rsp.loaded_vertices[vtx2_idx];
+     struct LoadedVertex *v3 = &rsp.loaded_vertices[vtx3_idx];
+@@ -2240,6 +2250,7 @@
+ }
+ 
+ static void gfx_draw_rectangle(int32_t ulx, int32_t uly, int32_t lrx, int32_t lry) {
++    SM64_PERF_SCOPE(SM64_PERF_TRI);
+     uint32_t saved_other_mode_h = rdp.other_mode_h;
+     uint32_t cycle_type = (rdp.other_mode_h & (3U << G_MDSFT_CYCLETYPE));
+ 
+@@ -2459,6 +2470,7 @@
+ }
+ 
+ static Gfx *gfx_geometry_run(Gfx *first) {
++    SM64_PERF_SCOPE(SM64_PERF_TRI);
+     Gfx *cmd=first;
+     struct ColorCombiner *comb=NULL;
+     int rgb_in=-1, alpha_in=-1, elig=0;
+@@ -2895,6 +2907,7 @@
+     dropped_frame = false;
+ #ifdef TARGET_OPENFPGA
+     uint32_t perf_render_begin=sm64_perf_clock();
++    sm64_perf_render_begin(perf_render_begin);
+ #endif
+ 
+ #ifdef TARGET_POCKET
+@@ -2910,7 +2923,7 @@
+ #ifdef TARGET_POCKET
+     uint32_t _t1 = PROF_TMR();
+ #endif
+-    gfx_run_dl(commands);
++    { SM64_PERF_SCOPE(SM64_PERF_DL); gfx_run_dl(commands); }
+ #ifdef TARGET_POCKET
+     uint32_t _t2 = PROF_TMR();
+ #endif
+--- a/src/sm64/sm64/src/pc/gfx/gfx_gpu.c
++++ b/src/sm64/sm64/src/pc/gfx/gfx_gpu.c
+@@ -43,6 +43,7 @@
+ #include "gfx_cc.h"
+ #include "gfx_rendering_api.h"
+ #include "gfx_gpu.h"
++#include "pocket/perf_pocket.h"
+ 
+ #ifndef GFX_GPU_GEOMETRY
+ #define GFX_GPU_GEOMETRY 1
+@@ -406,6 +407,7 @@
+ }
+ 
+ void gfx_gpu_present(void) {
++    SM64_PERF_SCOPE(SM64_PERF_SEND);
+     if (!g_has_gpu) {
+         of_video_flip();
+         return;
+@@ -561,7 +563,10 @@
+      * frame must wait before overwriting pixels still referenced by commands.
+      * Earlier frames have retired: gpu_start_frame waits for their flip. */
+     if (t->slot_epoch[slotc] == g_tex_epoch) {
+-        of_gpu_finish();
++        {
++            SM64_PERF_SCOPE(SM64_PERF_SYNC);
++            of_gpu_finish();
++        }
+         for (uint32_t i = 0; i < g_tex_count; i++)
+             g_tex[i].slot_epoch[0] = g_tex[i].slot_epoch[1] = 0;
+         t->slot_epoch[slotc] = 0;
+@@ -1155,6 +1160,7 @@
+  * 0 < w < 32767, and that buffered 0x4E tris were flushed first. */
+ void gfx_gpu_vtx_cache_tri(const struct gfx_vc_vtx v[3], const uint8_t slot[3],
+                            unsigned dirty_mask) {
++    SM64_PERF_SCOPE(SM64_PERF_SEND);
+     /* The shared emitter checks material changes and dynamic draw fields
+      * before building state. Every path still passes through that one memo. */
+     g_cd_active = 0;      /* eligible => never the texel*C+D class */
+@@ -1241,6 +1247,7 @@
+ void gfx_gpu_geometry_tri(const struct gfx_vc_vtx v[3], const uint8_t slot[3],
+                          unsigned dirty, const int16_t *pos[3],
+                          const int32_t *matrix[3], const uint32_t serial[3], unsigned cull) {
++    SM64_PERF_SCOPE(SM64_PERF_SEND);
+ #ifndef OF_PC
+     g_cd_active=0;g_subpix_tri=1;g_surf_alpha=v[0].a;
+     emit_tri_state(g_vc_textured);
+@@ -1293,6 +1300,7 @@
+ void gfx_gpu_geometry_batch(const struct gfx_geometry_upload *restrict upload, unsigned count,
+                             const uint32_t *restrict triangles, unsigned triangle_count,
+                             uint8_t alpha) {
++    SM64_PERF_SCOPE(SM64_PERF_SEND);
+ #ifndef OF_PC
+     g_cd_active=0; g_subpix_tri=1; g_surf_alpha=alpha;
+     emit_tri_state(g_vc_textured);
+@@ -1372,6 +1380,7 @@
+ 
+ static void gpu_draw_triangles(float buf_vbo[], size_t buf_vbo_len,
+                                size_t buf_vbo_num_tris) {
++    SM64_PERF_SCOPE(SM64_PERF_SEND);
+     if (!g_has_gpu || !g_cur_shader || buf_vbo_num_tris == 0)
+         return;
+ 
+@@ -1640,6 +1649,7 @@
+  * ================================================================ */
+ 
+ static void gpu_fill_rect(int x0, int y0, int x1, int y1, const uint8_t *rgba) {
++    SM64_PERF_SCOPE(SM64_PERF_SEND);
+     if (!g_has_gpu) return;
+     if (x0 < 0) x0 = 0;
+     if (y0 < 0) y0 = 0;
+@@ -1683,6 +1693,7 @@
+ 
+ static void gpu_tex_rect(int x0, int y0, int x1, int y1, float u0, float v0,
+                          float dudx, float dvdy, const uint8_t *rgba) {
++    SM64_PERF_SCOPE(SM64_PERF_SEND);
+     if (!g_has_gpu || !g_cur_tex[0] || !g_cur_tex[0]->ci8) return;
+     if (x1 <= x0 || y1 <= y0) return;
+ 
+@@ -1781,10 +1792,13 @@
+      * frame returns from gfx_run before both this and the present, so the
+      * pending flag simply carries to the next rendered frame. */
+     if (g_flip_pending) {
++        {
++        SM64_PERF_SCOPE(SM64_PERF_WAIT);
+         PROF_ACQ_BEGIN();
+         gpu_wait_flip_fence(g_flip_token);
+         g_draw_idx = of_video_acquire_next(g_draw_idx, g_flip_token);
+         PROF_ACQ_END();
++        }
+         g_draw_fb = (uint32_t)(uintptr_t)of_video_buffer_addr(g_draw_idx);
+         g_flip_pending = 0;
+         if (!g_fb_active) {
+@@ -1812,6 +1826,7 @@
+ #ifndef GFX_GPU_CLEAR_COLOR
+ #define GFX_GPU_CLEAR_COLOR 0
+ #endif
++    SM64_PERF_SCOPE(SM64_PERF_SEND);
+     static uint8_t cleared_bufs;
+     if (GFX_GPU_CLEAR_COLOR || !(cleared_bufs & (1u << (g_draw_idx & 7)))) {
+         cleared_bufs |= (uint8_t)(1u << (g_draw_idx & 7));
+@@ -1824,7 +1839,8 @@
+     of_gpu_kick_now();
+ }
+ 
+-static void gpu_end_frame(void)    { if (g_has_gpu) of_gpu_kick(); }
++static void gpu_end_frame(void)    {
++    SM64_PERF_SCOPE(SM64_PERF_SEND); if (g_has_gpu) of_gpu_kick(); }
+ static void gpu_finish_render(void) { }
+ static void gpu_shutdown(void) {
+     if (g_has_gpu) of_gpu_shutdown();
+--- a/PERFORMANCE-TEST.txt
++++ b/PERFORMANCE-TEST.txt
+@@ -1,66 +1,38 @@
+-SM64 Pocket performance snapshot P1 -- 2026-10-03
++SM64 P2: measure the renderer on your Pocket
+ 
+-The previous optimization has not produced a noticeable improvement in the
+-first world on your Pocket. Its simulated CPU savings are not a measured
+-whole-game speedup. This build adds measurements to find the actual limit.
+-The os30 bitstream, OS, game logic, audio and rendering quality are unchanged.
++Play Bob-omb Battlefield and hold the same slow view for at least five seconds
++with the panel hidden. Press Select+L+R together to show the last completed
++two-second snapshot. Photograph/capture it. The same chord closes the panel.
++The saved numbers remain frozen while visible, excluding the panel's own cost.
+ 
+-TEST
+-1. From the SM64 repository, run: make copy
+-2. Enter Bob-omb Battlefield and move to a view that feels slow/choppy.
+-3. Keep that view for at least five seconds, with the panel closed.
+-4. Press Select + L + R together, then release them. You should see
+-   "PERF P1 SNAPSHOT". Send a photo of the panel and describe the location.
+-5. The same combination closes the panel. After closing it, wait five seconds
+-   before taking another sample. A second sample facing a simple view or the
+-   sky is useful for comparison, but the slow view is the priority.
++FPS / LCD: rendered frames and actual presentations per second, over all frames.
++GAME / AUD: game logic and audio preparation, milliseconds per rendered frame.
++REND / WAIT: rendering and frame acquisition, milliseconds per rendered frame.
+ 
+-The values come from the last complete two-second window BEFORE opening the
+-panel. They stay frozen. The game continues behind the panel, and drawing the
+-panel can slow it down; that extra work is excluded from the saved values.
+-If there is no valid sample yet, close the panel, play five seconds, and reopen.
++The next four lines sample one rendered frame in eight. All numbers are ms:
++DL: display-list interpretation and state commands.
++VERT: matrix/vertex loads and deferred texture-coordinate/lighting evaluation.
++TRI: CPU triangle preparation, visibility/culling, clipping and batching.
++MAT: combiner/material selection and renderer-state preparation.
++TILE: texture lookup, conversion, allocation and SDRAM upload/publication.
++SEND: GPU backend conversion, command packing, MMIO uploads and ring stalls.
++SYNC: GPU drain before reusing an in-flight texture buffer (including submit).
++MISC: remaining frame setup and completion work.
++Nested work belongs to only one bucket. SEND is CPU wall time, not GPU busy time.
++SMP: number of sampled frames. SUM: sampled render time, excluding acquisition.
++The eight buckets add to SUM apart from 0.1ms display truncation. SUM can differ
++from REND because REND includes all frames. Hold a steady view for comparison.
++RING is the all-frame average number of ring polling iterations. Zero does not
++rule out slow MMIO. GEO 1 means the geometry path is enabled, not utilization.
+ 
+-READOUT
+-FPS: rendered frames per second. LCD: newly presented frames per second,
+-  excluding repeated scans of the same frame. These are window averages.
+-SIM: game simulation steps per second. SM64 aims for 30 simulation steps and
+-  may skip rendering some steps to catch up; movement speed alone is not FPS.
+-GAME: game logic and display-list construction, in milliseconds per rendered
+-  frame. Includes any catch-up simulation steps in the measurement window.
+-AUD: audio sequence/sample preparation, in ms per rendered frame.
+-RENDER: display-list translation and command submission, in ms per rendered
+-  frame, excluding WAIT. GPU command-ring stalls are included here.
+-WAIT: time waiting for the previous GPU flip fence / a free draw buffer, in
+-  ms per rendered frame. GPU execution and display scheduling can both matter.
+-GAP: remaining wall time, in ms per rendered frame, outside the measured game,
+-  renderer, audio and end-frame work. Includes pacing and loop/service overhead;
+-  this is not a pure CPU-idle measurement.
+-RING: command-ring polling iterations per rendered frame, not milliseconds.
+-GEO: whether the geometry accelerator is enabled (expected 1).
+-VERT / TRI: average accelerated input vertices / submitted geometry triangles.
+-CPU: runtime-reported CPU clock in MHz, not a fitted timing/Fmax measurement.
++This is a diagnostic build. It adds approximately 3.3-4.3% modeled CPU cost over
++P1 in the first-level test; actual hardware overhead is unmeasured. PERF_DIAG=0
++removes the panel and probes completely for normal performance testing.
+ 
+-COLLECTION COST AND CHECKS
+-Six coarse timer reads per simulation/rendered step and existing GPU counters;
+-no per-triangle instrumentation, live text, or UART output while collecting.
+-The CPU model estimates under 1% overhead in six Bob-omb windows. Actual Pocket
+-overhead is not measured. Eight sampled framebuffer/depth pairs match the
+-current renderer exactly with the panel hidden. The disabled build matches
+-the baseline's per-frame modeled CPU cycles across the full 721-frame route.
+-Timing arithmetic, catch-up steps, timer wrap and frozen snapshots are tested.
+-This does not yet measure individual LCD frame intervals or prove a speedup.
++This client uses SDRAM textures, not CRAM1/PSRAM textures.
+ 
+-DISABLE / RESTORE
+-To build and copy without collection: make copy PERF_DIAG=0
+-The diagnostic and normal builds use separate object directories. A subsequent
+-plain make copy enables diagnostics again. PROFILE=1 disables this snapshot
+-to avoid conflicting with the older detailed profiler.
+-
+-To restore the exact source state from before this diagnostic change:
+-  python3 .obj/perf-snapshot-backup-20261003/restore.py
+-  make -C src/sm64
+-  make copy
+-The restore script checks for later edits before touching files. The previous
+-geometry optimization and its separate rollback remain in GEOMETRY-TRIAL.txt.
+-
+-No SD-card copy or full FPGA seed sweep was run for this diagnostic build.
++The P2 publication copies only sm64.elf to the package and Pocket. The Pocket
++keeps its existing os30 worker bitstream and OS. The sibling runtime/pocket
++still contains an older bitstream: a plain make copy would replace the worker.
++For this trial, copy only build/pocket/sm64/Assets/sm64/common/sm64.elf into
++Assets/sm64/common/sm64.elf on the Pocket SD card, then safely eject it.

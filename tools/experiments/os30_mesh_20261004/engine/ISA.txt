@@ -1,0 +1,141 @@
+Private mesh engine ISA, not a production ABI
+
+CODE_PAGES selects 512 or 768 writable 32-bit instructions (2 or 3 pages);
+the current 410-word SM64 program uses two pages. PC is 10 bits.
+256 scratch words form the register file, implemented as true-dual-port
+synchronous RAM (two physical M10Ks on the Pocket). DMA uses
+two separate 256-word banks. Engine LOAD/STORE addresses the selected bank.
+Code/data uploads only accepted while idle. Every scratch read must follow
+initialization; reset clears control, not RAM. An illegal opcode traps without
+releasing a partially generated packet as successful work.
+
+Encoding: opcode[31:24], destination[23:16], sourceA[15:8], sourceB[7:0].
+Opcode values live in isa.py. Ordinary operations use two scratch operands.
+LI/LUI/ORI use the low16 bits; LI sign extends, LUI shifts16, ORI reads dest.
+ADDI sign extends sourceB as immediate. LOAD/STORE bank address is scratch[A]
++ signext(B), low8 bits. STORE data is scratch[dest]. OUT emits scratch[A].
+MUL sets signed64 accumulator=A*B and writes its low32 to dest; MAC adds A*B.
+ACCLO/ACCHI read accumulator halves. ACCSAR shifts signed64 by immediate B
+(0..63), returning low32; ACCSHL shifts accumulator left by immediate B.
+ACCSET sets accumulator={A,B}. ACCADD/ACCSUB add/subtract {A,B} modulo64.
+SAT saturates signed64 accumulator to signed32. NEG returns 0-A.
+DIVU/DIVS divide32 A/B, write quotient and extend it into accumulator. DIVW
+divides unsigned64 accumulator by unsigned33 {A[0],B}; quotient remains64.
+REM copies low32 remainder. Divide-by-zero yields all-ones unsigned quotient
+or -1 signed quotient, remainder=numerator. INT_MIN/-1 wraps (RISC-V rule).
+The signed divide remainder follows the dividend sign. DIVW remainder bit32
+is not exposed by REM; geometry kernels use only the quotient.
+SEXT mode B=0/1/2 sign extends A's low8/16/24. Other modes trap.
+ADD/SUB/ADDC/SUBB set carry (SUB uses no-borrow); ADDC adds prior carry and
+SUBB subtracts !prior-carry. All four set EQ/LT/LTU by operand comparison,
+not result sign; CMP sets the same comparison flags without writing dest.
+Only these five operations update flags, allowing load/move between compare
+and branch. Branch condition codes live in isa.py. BR/JMP/JAL low10 bits are
+absolute PC; JAL writes return PC to dest. JREG jumps to scratch[A] low10.
+HALT produces done for one cycle. OUT holds valid/data until ready. Soft
+abort discards the current instruction and suppresses writes/output; the
+wrapper separately drains outstanding DMA and cancels queued packets.
+OUTBLOCK (55) emits D+1 words from scratch[scratch[A]..], wrapping modulo256.
+D is a literal count-minus-one. It preserves all registers, accumulator,
+flags and bank memory; output data stays stable under backpressure.
+The unstalled cost is count+3 cycles, including first/last word handling.
+
+Memory and fused instructions
+-----------------------------
+SLOAD/SSTORE are scratch-indirect equivalents of LOAD/STORE. Address addition
+wraps modulo256. COPY D,A,B copies D+1 consecutive bank words to scratch,
+using scratch[A]/scratch[B] as the initial source/destination pointers;
+D is a literal count-minus-one. Both pointers wrap modulo256.
+
+Fused operations preserve generic flags, accumulator and architectural REM,
+except MATROW/DOT3, which update the accumulator and destination. Their bank
+and scratch writes are documented by the executable contract in emulator.py.
+COMPACT_LAYOUT selects the kernel address remap in client/mesh_program.py.
+
+PLANE (40): derive one attribute plane, with saturated deltas, exact integer
+reciprocal scale and subpixel prestep; writes du,dv,origin to kernel context.
+EDGE (43): exact sorted triangle edges, clip bounds and slope setup, including
+33-bit slope before fractional prestep; writes prepared edge context.
+MATROW (44), DOT3 (45): shared-multiplier three-element dot product, with
+MATROW's Q16 shift and translation. Disabled when ENABLE_DOT=0.
+NORM (46): normalize bank's three groups of S*zi,T*zi,zi together, preserving
+the original common shift and every attribute's signed32 wrapping.
+PROJ (47): project seven clip-space words at scratch[A] to scratch[B],
+using viewport words49..52 and clamping w to at least256.
+VERTEX (48): transform four packed raw bank words at scratch[A] into seven
+clip/UV/RGBA bank words at scratch[B]. Uses scratch64..87 matrix/light/fog.
+COPY (49): bank-to-scratch counted copy described above.
+SCOPY (53): scratch-to-scratch counted copy, same operands and count+3 cost.
+The modulo-256 source and destination ranges must be disjoint; overlapping
+ranges are outside the instruction contract because simultaneous dual-port
+read/write collision values are device-dependent. Pointer operands are latched
+before copying, so overwriting their register locations is otherwise valid.
+PLANES (54): D names a scratch register containing count1..10; A/B contain
+the first/second attribute bank pointers, and third pointer is first+20.
+The PLANE context is frozen across the batch, with all pointers incremented
+once per plane. Emits origin/du/dv directly for each plane, signextending
+the low24bits for plane indices3..5 and7..9. Preserves all scratch/bank,
+arithmetic accumulator and flags. Streams obey output backpressure/cancel.
+Cost is5+12*constant_planes+33*nonconstant_planes plus10 if any nonconstant
+plane exists, excluding output stalls. Retains one shared multiplier.
+GATHER (50): packed triangle ordinal scratch[A], polygon base scratch[B],
+literal mask destination D. Copies three seven-word vertices from bank;
+writes OR mask to D, AND mask to D+1, OR bit31 for coordinates outside
+[-2^29,+2^29]. The triangle indices occupy scratch0..31, two per word.
+PROJA (51): PROJ plus UV offsets scratch60/61 and material selectors:
+scratch53 flags,54 additive D,55 constant C; shade alpha is preserved.
+ATTR (52): scratch[A] projected vertex to bank destination scratch[B];
+scratch[D] selects seven ordinary attributes or ten C+D attributes.
+S/T products use the shared signed multiplier and >>16 truncation.
+
+Costs and configuration
+-----------------------
+Costs exclude OUT backpressure and DMA. One cycle precedes execution.
+HALT/BR/JMP:1. LI/LUI/JAL:2. Ordinary scratch-writing ALU:3.
+CMP/ACCSET/ACCADD/ACCSUB/ACCSHL:2. MUL/MAC:5. LOAD/SLOAD:4.
+STORE/SSTORE:3. OUT/JREG:3. DIVU/DIVS:35. DIVW:67; divide-zero:3.
+COPY:count+3. MATROW/DOT3:11. NORM:23+shift+(18 if shifted).
+PROJ:72-k. PROJA:78-k, where k=floor(log2(max(signedW,256))). GATHER:62. ATTR:16 or19. PLANE:17 constant/48 general.
+VERTEX and EDGE vary with lighting/fog and clipping; executable reference
+and their independent original-arithmetic tests check exact cycle counts.
+
+EXTENDED_ISA=0 removes unused MAC, ACCADD, ACCSUB, ACCSHL, DIVU, DIVS, REM,
+SEXT and plain PROJ47 (PROJA51 remains),
+SAT, XOR, NEG, ADDC, STORE and scalar PLANE; executing any of them traps. In this mode
+ACCSAR accepts only immediate1,16,30, all other counts trap. These cuts are
+private to the uploaded program; the default engine retains the full ISA.
+No RAM initialization is implied by reset. Internal datapath registers may
+retain stale values across cancellation; control and valid state prevent
+those values from being consumed before the next operation initializes them.
+
+Batched operations added after the initial whole-frame profile
+-------------------------------------------------------------
+SCOPY (53): COPY's count/pointers applied scratch-to-scratch through portB
+read/portA write. Modulo256 source and destination ranges must be disjoint;
+FPGA mixed-port read/write collision results are deliberately not part of
+this private contract. Count+3cycles. Flags/accumulator preserved.
+PLANES (54): D identifies scratch count7or10, A/B identify first/second
+bank attribute pointers; third starts first+20. Emit each plane as
+origin,du,dv, preserving shared context across planes. Attributes3..5/7..9
+sign-extend low24bits,0..2/6 retain32bits. All scratch/bank words preserved;
+output backpressure can stall every word. BATCH_ONLY=1 removes scalar writes
+in lean configuration. Timing is data-dependent; emulator and unit oracle
+cover constant/general attributes and all backpressure/cancellation points.
+OUTBLOCK (55): emit D+1 scratch words starting at scratch[A] low8bits, wrapping
+modulo256. Count+3cycles plus output stalls; no scratch/flags/acc changes.
+SETUP (56): compact-layout only, stable-sort projected XY at235/242/249 by
+signedY. Write sorted pointers137..139, coordinates140..145, deltas176..179,
+sorted determinant180..181 and original driver winding199..200. No other
+state changed. Shared multiplier,32instructioncycles. Default noncompact
+engine traps this opcode.
+
+Runtime guardband policy
+------------------------
+State47/scratch53 bit19 records the original renderer's accepted LOAD bounds
+proof. It removes side-plane clipping/rejection while retaining malformed
+range checks and near/far safety checks. The current application candidate
+submits whole meshes only when this original predicate accepts the LOAD;
+other loads retain the original CPU clipping and precision path. The general
+full-clipping program remains for tests and guarded safety fallthrough.
+Transform matrix coefficients are Q8.24, translations/clip output are Q24.8.
+The 2^29 coordinate safety threshold is in raw fixed-point units.

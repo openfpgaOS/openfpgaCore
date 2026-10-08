@@ -1,0 +1,332 @@
+OS30 FEATURE AND GEOMETRY-WORKER REVIEW
+2026-10-03
+
+Recommendation
+
+A small asynchronous geometry/display-list worker is worth prototyping. The
+strongest resource trade is a 128 -> 64 KiB main-CPU data cache, followed by
+replacing the existing serialized geometry frontend and moving selected logic
+back into the newly available block RAM. Removing useful rendering or audio
+features is a poor way to fund the worker.
+
+There is enough potential RAM to investigate this seriously. There is not yet
+a demonstrated logic-placement or timing budget for the complete worker. A
+matrix-only accelerator is too narrow to explain a substantial whole-game gain.
+The useful target includes display-list work, attribute preparation, lighting,
+culling/clipping, and eventually triangle setup, while the GPU rasterizes an
+earlier batch.
+
+Scope and evidence
+
+This review covers the current SM64 trial: os30 with OS30_GEOMETRY=1 and
+OS30_DEPTH_PREFETCH=1. Normal os30 omits those two experiments. It reviews all
+36 resolved trial build switches, grouped into 29 features; 15 CPU groups;
+resolved GPU parameters; and the remaining memory, audio, display, loader and
+board infrastructure. This is feature coverage, not a claim that every feature
+has an independent measured FPS benefit.
+
+Evidence is distinguished throughout:
+  - Fitted resources: existing Quartus reports for the exact staged bitstream.
+  - Fresh CPU sensitivity: eight configurations, same 721-frame SM64 route.
+  - Fresh GPU sensitivity: two cache sizes, eight frames, two memory schedules;
+    all 32 color/depth comparisons match the baseline exactly.
+  - Historical component tests: useful direction, not present-device FPS.
+  - Source reasoning: required behavior or candidate architecture, unmeasured.
+
+The user reports that the first world still feels equally slow/choppy. No new
+Pocket timing-panel readings are available. None of this review establishes a
+real-device FPS improvement. The CPU replay uses the preceding normal optimized
+ELF; the packaged diagnostic ELF remains installed and unchanged.
+
+Current fitted budget
+
+Resource                 Used / available               Remaining
+ALMs, reported need      17,918 / 18,480                 562 nominal
+LABs                     1,847 / 1,848                  1
+M10K block RAM           307 / 308                      1
+DSP blocks               41 / 66                        25
+
+The saved seed-2 report is configured at 100 MHz. Its minimum main-clock Fmax
+is 91.04 MHz, with -0.984 ns setup slack and +0.112 ns hold slack. It does not
+close timing at 100 MHz. A new worker must be fitted and timed as a complete
+system; nominal unused ALMs do not guarantee spare placement capacity.
+
+Normal os30 before the geometry/prefetch trial: 16,993 ALMs, 306 M10Ks,
+41 DSPs, 1,845 LABs, 91.73 MHz Fmax. Adding geometry was approximately
++918 ALMs/+1 M10K; adding prefetch to that fit was +7 ALMs. These are historical
+whole-fit deltas, not exact standalone module sizes or guaranteed future savings.
+
+Inclusive resource attribution from the current fit:
+
+Block                         ALMs       M10Ks    DSPs
+GPU core                      7,325.9      53      26
+CPU subsystem                 5,106.9     182       4
+  Vexii CPU within it         4,495.7     182       4
+GPU render cache                597.1      10       0
+Hardware audio mixer            776.1       4      10
+Audio output                    130.9       4       0
+Peripherals and boot RAM      1,031.1      33       0
+SDRAM arbiter                   512.9       2       0
+AXI SDRAM slave                 250.2       0       0
+SDRAM controller                308.8       0       0
+Host command bridge             276.9       4       0
+Host CRAM0 write FIFO             43.9       6       0
+CRAM0 crossing/controller    160.4+132.8     0       0
+CRAM1 controller/adapter     170.8+24.1      0       0
+Scanout                         295.9       9       1
+
+These are inclusive hierarchy attributions, not additive removable-feature
+costs. Full hierarchy data is in resources.csv. The main resource problem is
+physical RAM blocks and packed LABs, not total unused logical RAM bits or DSPs.
+
+Cache and predictor experiments
+
+CPU change               Estimated M10Ks freed   Extra modeled CPU time
+D-cache 128 -> 64 KiB              66                    +2.71%
+D-cache 128 -> 32 KiB              98                    +5.19%
+I-cache 32 -> 16 KiB               12                    +7.49%
+BTB 1024 -> 512 sets                3                    +0.85%
+GShare 4 -> 1 KiB                   3                    +0.82%
+D-cache64 + BTB512                 69                    +3.56%
+D-cache64 + I-cache16 + BTB512      81                   +11.07%
+
+Percentages compare six equal 60-frame gameplay windows, frames 360-719.
+The 64 KiB D-cache cost ranges from 2.62 to 2.79% across those windows.
+All eight runs follow the same scene trace and have zero modeled ring overflow.
+The default case reproduces the prior audio-enabled baseline frame by frame.
+
+The CPU model has synthetic time, simplified voice lifetimes, and no hardware
+GPU backpressure or real LCD scheduling. Increased D-cache traffic is not fed
+back into the GPU model. Thus 2.71% is a CPU sensitivity estimate, not a bound
+on device frame-time regression. Sound CPU work is enabled, but kernel audio
+interrupt and real PCM timing are not simulated fully.
+
+D-cache currently occupies 128 data blocks plus six tag/metadata/victim blocks.
+Halving its data array saves 64 blocks and is expected to save two tag blocks.
+The I-cache occupies 29 blocks, BTB six, GShare four. Other CPU RAM includes
+RAS, CSR, integer/float register files and store-buffer operations. The full CPU
+sum is 182 M10Ks. New cache variants have not been generated and fitted;
+the savings above are structural estimates, including RAM width/depth packing.
+
+GPU change               Estimated M10Ks freed   Extra gameplay GPU time
+Texture cache 16 -> 8 KiB           9                 +0.18 to +0.32%
+Render cache 8 -> 4 KiB             4                 +0.91 to +1.45%
+
+The texture cut slows the sampled title frame by 10.55-10.76%, despite its
+small cost in Bob-omb Battlefield. The render-cache worst sampled gameplay
+increase is 2.04%. All 32 framebuffer/depth comparisons are exact. The render
+cache stores color/depth metadata wider than a software byte count suggests;
+halving it is expected to save four blocks, not five.
+
+These replays use real Pocket SDRAM RTL and synthetic background traffic, with
+textures in SDRAM. They do not reproduce the device's CRAM1 texture path or
+coupled CPU/GPU scheduling. Retain both GPU caches initially: D-cache resizing
+provides much more worker RAM, and rendering bandwidth is already important.
+
+Feature decisions
+
+KEEP: main CPU FPU, integer multiply/divide, compressed instructions, cache
+maintenance, normal bypass/predictor/queue support. Radix-4 divide shortened a
+prior RTL vertex kernel by 13.1%; pipelined int-to-float shortened 16 independent
+conversions from about 66 to 19 cycles. These are real component improvements,
+not measured current-game FPS gains. Atomics and CSR are ABI/runtime features;
+no safe removal from the current software contract was established. The CPU
+already has one issue lane, no supervisor MMU, no vector unit and no L2.
+
+KEEP: RGB565/Gouraud shading, perspective, depth, RGB565 alpha blending, and the
+texel*C+D combiner. The prior combiner cut saved about 884 ALMs but darkened the
+Mario head and did not improve timing. The old indexed translucency lookup is
+already absent; that does not mean alpha blending is unused.
+
+KEEP: texture/render caches, depth window/early restart/prefetch, posted cache
+writeback, burst linking, and the 16-word write queue. These reduce memory waits.
+Historical burst-link removal cost 10-26% in the coupled model. Current depth
+prefetch improves sampled GPU throughput about 5-8%, but Pocket FPS remains
+unverified. Parallel derivative scaling uses existing DSP ports to save states.
+
+KEEP: hardware audio mixing. SM64 uses note resampling, volume ramps, looping
+and voice groups. Removing the mixer transfers sample work back to the main
+CPU. Stock presets can require 20 notes, so cutting 32 voices to 16 is not
+generally valid. Reducing to 20/24 does not remove the ten shared mixer DSPs and
+has no demonstrated large resource saving. No full audio-specialization A/B
+was done; other os30 software can also require modes not used by SM64.
+
+KEEP PENDING DEVICE A/B: CRAM1 fast textures. The game selects this path when
+available, separating texture reads from SDRAM. Controller plus adapter account
+for about 195 ALMs, before GPU routing/upload logic. The new SDRAM-texture
+replays cannot establish how much the actual CRAM1 path benefits the device.
+
+TIMING STRUCTURE: fetch-data/PC holds, fetch-ready factoring, D-cache write
+registration and bypass, clamp/depth/address predecode pipelines, split blend
+and dedicated span multipliers, perspective speculation, edge-step predecode,
+and fanout hints. Most do not remove work or increase IPC. They shorten paths or
+improve placement. Removing them because they lack a direct FPS delta would
+ignore timing; the existing build already misses its 100 MHz constraint.
+Projection-ratio pipelining actually adds two geometry cycles to break a DSP
+feedback path. The 25 spare DSPs make multiplier sharing a weak area objective.
+
+PACKING CANDIDATES: texture request/result/metadata queues use about 90 ALMs as
+MLABs. After freeing D-cache RAM, test placing them in approximately five M10Ks.
+Also reconsider NO_SHIFT_TAPS=1, which currently forces selected CPU pipeline
+storage into FFs to save block RAM. Both changes preserve cycle behavior in
+principle, but actual LAB and timing benefits require isolated fits.
+
+SMALL OPTIONAL CUTS: the VI horizontal softening filter has no game-throughput
+benefit and was estimated at about 30 ALMs. Removing it changes the picture.
+UART RX/TX account for about 45 ALMs, with a FIFO in peripherals; they also serve
+loading/debugging. Neither is a meaningful source of geometry-worker capacity.
+
+ALREADY CUT: GPU palette/colormap and indexed translucency; compact spans and
+column lists; long-form 0x48 span input; param-triangle 0x49/0x4D frontends and
+Q29 mode; old lighting and clip-triangle hardware; command DMA; Analogizer,
+SNAC/link and four-player paths; unused diagnostic readbacks; CPU software
+prefetch decode and next-line I-cache prefetch; parallel edge dividers;
+selective read wait, redundant write combining and cache-path skid swapping.
+GPU_PSS_RECIP_CACHE=1 is gated by disabled Q29 support and synthesizes away.
+Legacy matrix commands are guarded out in the SM64 trial even though its new
+geometry opcode reuses matrix arithmetic. The 166 MHz experiments are inactive.
+
+Detailed decisions, evidence and exact switch/CPU setting names are generated
+in docs/measurements/os30-feature-audit-20261003/feature-details.txt and
+features.csv. audit.json also records the resolved GPU parameters.
+
+Base infrastructure and less obvious RAM
+
+The 16 KiB command ring uses 16 M10Ks. Reducing it requires maximum batch-size,
+producer ordering and backpressure analysis; there is no measured safe reduction
+here. A worker will also need queues, so deleting buffering is not free capacity.
+
+The vertex cache is only 704 logical bytes but occupies five M10Ks because of
+its wide ports. Three coordinate stores occupy another three blocks; prior
+register-based storage cost logic and worsened placement. Reciprocal tables,
+matrix, span producer and small blend windows also occupy physical RAM blocks.
+Moving these into FFs would work against the current need for logic space.
+
+Boot/application RAM uses 32 M10Ks. The present SM64 ELF does not occupy the
+upper 0x4000-0x7800 application reservation, but it remains part of the shared
+OS memory map; loader, trap state and stack still use the surrounding RAM.
+Reusing those 14 KiB as a worker scratchpad would require port/arbitration and
+ownership changes. Simply halving boot RAM would break the current map.
+
+Host loading/command buffers, CRAM crossings, SDRAM arbitration, save/controller
+I/O, audio output and video scanout provide required service rather than game
+acceleration. Host-to-CRAM buffering cannot be shortened without checking its
+limited backpressure. Scanout still requires the boot indexed palette even
+though the GPU's indexed fragment path is absent. No safe large cut was found.
+
+What a second worker must accelerate
+
+Audio-enabled CPU profile, exclusive self cycles over gameplay:
+  gfx_run_dl                       16.34%
+  gfx_geometry_run                 14.47%
+  geometry_prepare                 12.18%
+  gpu_draw_triangles                 8.09%
+  gfx_load_geometry_attributes       6.69%
+  gfx_gpu_geometry_batch             5.06%
+  gfx_push_triangle                  4.23%
+  gfx_sp_tri1                        3.02%
+  emit_tri_state                     2.37%
+  gfx_clip_triangle                  2.29%
+  mtx4_mul                           1.12%
+
+The four geometry/preparation/attribute/batch functions alone account for about
+38.4% of modeled CPU time. That is a candidate work region, not 38.4% guaranteed
+offloadable arithmetic: it includes fallback decisions, conversion, validation
+and command production. The display-list interpreter is another large target.
+
+GPU phase occupancy in five gameplay samples:
+  Matrix/projection:    5.24-7.46% of busy cycles
+  Triangle derivation:  7.16-9.21%
+  Fragment phase:      63.69-68.06% (includes memory waiting)
+
+Existing geometry shares the GPU state machine, DSP inputs and divider. It
+serializes setup with raster work. Perfectly overlapping just matrix/projection
+would improve sampled GPU throughput at most about 5.5-8.1%, before transfer
+costs; this is not a whole-game gain. Even eliminating both geometry and triangle
+derivation gives an ideal GPU-only ceiling of about 14.3-20.0% in these samples.
+A 30% overall throughput gain needs at least 23.1% less critical frame time in
+an ideal model. Broader CPU offload and overlap are necessary candidates.
+
+Proposed architecture, subject to implementation measurements:
+  Main CPU: game logic, collision, audio sequencing, submission of immutable
+            display-list/geometry batches.
+  Worker:   local program/data RAM, double-buffered input/output, fixed-point
+            MAC/reciprocal assistance; transform, attributes/lighting, cull/clip,
+            triangle preparation. Runs while the GPU rasterizes a prior batch.
+  GPU:      retain edge walking, perspective sampling, color/depth caches,
+            combiner, blending and memory scheduling.
+
+Start by replacing the old serialized geometry frontend. If more logic is
+needed, move triangle-plane derivation into the worker and replace that frontend
+with a lean, full-attribute plane interface. Existing param-triangle commands
+must not be assumed sufficient for all RGB/fog/texture attributes; this requires
+an ABI design and renderer changes. No current fit quantifies these savings.
+
+Core choice is not enough: official VexRiscv examples report 352-933 Cyclone V
+ALMs for small RV32I/IM configurations under standalone benchmark conditions.
+Those counts omit this worker's geometry datapath, local memories, integration
+and FPU. A duplicate of the current 4,496-ALM Vexii CPU is not practical here.
+PicoRV32 has no FPU and reports roughly four cycles per instruction even with
+single-cycle memory; ordinary multiply/divide can take many cycles. A tiny CPU
+executing software floating point could easily be slower than the existing
+hardware. A programmable fixed-point worker with private DSP assistance is the
+more plausible design to evaluate.
+
+Correct concurrency also needs explicit flush/fence ownership, stable matrix
+and vertex lifetimes, a single ordered command producer or arbiter, and fallback
+handling for clipping/precision/fog/texture generation. The system has no
+coherent multicore cache. A second master issuing random SDRAM reads could erase
+the benefit, so local scratchpads and batched transfers are central to the plan.
+
+Suggested validation order
+
+1. Use the already-installed device timing panel to separate actual CPU/render
+   work from GPU waits, audio and presentation stalls in the slow first world.
+2. Fit the D-cache64 and RAM-for-logic alternatives individually at the saved
+   seed; check capacity, timing and device sensitivity before accumulating cuts.
+3. Prototype the worker's real transform/lighting/clip kernels with realistic
+   batches and bus contention. Compare against the existing CPU plus frontend.
+4. Replace duplicated geometry hardware; verify rendered color/depth, culling,
+   command ordering and fallback behavior. Measure complete-system frame time.
+5. Proceed to a full seed sweep only after implementation and the user-requested
+   device trial. No full sweep was performed for this review.
+
+Artifacts and reproduction
+
+All paths below are relative to /home/alberto/Repos/openfpgaCore.
+  tools/experiments/os30_feature_audit_20261003/cpu_screen.py
+  tools/experiments/os30_feature_audit_20261003/gpu_screen.py
+  tools/experiments/os30_feature_audit_20261003/analyze.py
+  docs/measurements/os30-feature-audit-20261003/audit.json
+  docs/measurements/os30-feature-audit-20261003/feature-details.txt
+  docs/measurements/os30-feature-audit-20261003/features.csv
+  docs/measurements/os30-feature-audit-20261003/resources.csv
+  docs/measurements/os30-feature-audit-20261003/cpu-screen.json
+  docs/measurements/os30-feature-audit-20261003/gpu-screen.json
+
+The measurement directory retains private simulators, frozen RTL manifests,
+input hashes, logs, per-frame profiles and exact output hashes. The screen
+scripts deliberately refuse to overwrite existing case directories. To repeat
+an experiment, archive its output first or select a new campaign directory.
+analyze.py can be rerun on the retained results without rerunning simulations.
+
+Primary local references:
+  src/fpga/targets/pocket/variants/os30.mk
+  src/fpga/vendor/vexriscv/configs/os30.cfg
+  src/fpga/vendor/vexriscv/generate_vexii.sh
+  src/fpga/targets/pocket/core_top.v
+  src/fpga/common/gpu_core.v
+  docs/measurements/sm64-geometry-fast-20261003/runtime-staged.json
+  docs/measurements/sm64-geometry-fast-20261003/fit-prefetch-v1/results/
+    pocket-os30-s2/ap_core.fit.rpt
+
+Primary external references (reference configurations, not Pocket fit promises):
+  https://github.com/SpinalHDL/VexRiscv#area-usage-and-maximal-frequency
+  https://github.com/YosysHQ/picorv32#cycles-per-instruction-performance
+
+Verification: all eight CPU cases completed; all 32 GPU color/depth comparisons
+matched; Python compilation and git diff --check passed. The publication check
+verified the installed diagnostic application, runtime and rollback hashes.
+Production RTL/configuration, SM64 application/runtime, and deployment were not
+changed by this review. No new FPGA fit, full seed sweep, commit or copy to the
+SD card was performed.

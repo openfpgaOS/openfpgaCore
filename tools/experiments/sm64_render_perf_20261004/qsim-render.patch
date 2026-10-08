@@ -1,0 +1,24 @@
+--- a/main.c
++++ b/main.c
+@@ -755,17 +755,17 @@
+                 fprintf(scene_csv, "%llu,%d,%d,%d,%08x,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f\n",
+                     (unsigned long long)fr->seq,lv,ar,ac,action,
+                     pos[0],pos[1],pos[2],cam[0],cam[1],cam[2]);
+-                const qsim_sym *diagnostic=qsim_syms_lookup(&E.syms,"sm64_render_stats");
++                const qsim_sym *diagnostic=qsim_syms_lookup(&E.syms,"sm64_perf_snapshot");
+                 if(diagnostic) {
+                     if(!diagnostic_csv) {
+                         snprintf(path,sizeof path,"%s/diagnostic.csv",out);
+                         diagnostic_csv=fopen(path,"w");fprintf(diagnostic_csv,"frame");
+-                        for(unsigned k=0;k<32;k++)fprintf(diagnostic_csv,",stat%u",k);
++                        for(unsigned k=0;k<30;k++)fprintf(diagnostic_csv,",stat%u",k);
+                         fputc('\n',diagnostic_csv);
+                     }
+-                    uint32_t data[32];memcpy(data,qsim_mem_ptr(E.cpu,diagnostic->addr,sizeof data),sizeof data);
++                    uint32_t data[30];memcpy(data,qsim_mem_ptr(E.cpu,diagnostic->addr,sizeof data),sizeof data);
+                     fprintf(diagnostic_csv,"%llu",(unsigned long long)fr->seq);
+-                    for(unsigned k=0;k<32;k++)fprintf(diagnostic_csv,",%u",data[k]);
++                    for(unsigned k=0;k<30;k++)fprintf(diagnostic_csv,",%u",data[k]);
+                     fputc('\n',diagnostic_csv);
+                 }
+                 const char *names[]={"sm64_geometry_batches","sm64_geometry_vertices",

@@ -1,0 +1,19 @@
+#!/usr/bin/env python3
+"""Seal the exact cache-storage source and completed cycle-miter campaign."""
+from pathlib import Path
+import hashlib,json
+R=Path(__file__).resolve().parents[3];P=R/'docs/measurements/os30-fps25-20261005/phase10';O=P/'render-cache-storage-v2';D=O/'protocol';B=P/'render-cache-storage-v1'
+sha=lambda p:hashlib.sha256(p.read_bytes()).hexdigest()
+def put(p,d):
+ with p.open('x') as f:json.dump(d,f,indent=2,sort_keys=True);f.write('\n')
+assert sha(O/'gpu_color_depth_cache.sv')=='13fa29b4d44202be88ca22fd89ca2b1c901c86049e9e75c828de77a2e651bdb8'
+r=json.loads((D/'result.json').read_text());old=json.loads((B/'protocol/result.json').read_text());assert r==old
+runs=[x for a in r['runs'].values() for x in a];tot={k:sum(x[k] for x in runs) for k in ['cycles','checks','look','replace','collision','init','alloc','reset','bank_switch']}
+result=dict(passed=True,candidate_sha256=sha(O/'gpu_color_depth_cache.sv'),baseline_sha256=sha(O/'baseline.sv'),configurations=r['configurations'],runs=len(runs),totals=tot,exact_original_RTL_cycle_and_transaction_miter=True,all_data_RAM_outputs_compared=True,collision_poisoning=True,v1_and_v2_all_run_metrics_identical=True,new_fsm_states=0,extra_bus_cycles=0,quartus_invoked=False,physical_resource_claim=False,deployment_ready=False,limits=['Quartus must establish actual RAM inference/packing and physical timing. The40-bit output mux remains a timing risk.','The synchronous victim RAM should replace256 one-bit victim registers atGPU32. This is not a measured ALM saving.','No new native application replay in this component; root owns exactGPU8/GPU32 integration comparisons.','Generic configurations are checked by source invariants plus representative two/four-way, minimum depth/line, staged/unstaged and ranged/all-address tests, not exhaustive every legal parameter tuple.'])
+put(O/'result.json',result)
+(O/'REPORT.txt').write_text('PASS: final unpacked-bank cache storage source.\n\n12 actual old/new RTL miter runs,13,996,120 exact cycle/FSM/data/owned-bus checks;317,097 owned victim reads,155,814 full-set replacements,250,084 victim collisions,61,560 bank changes. Every physical bank read/written. All runs exactly match v1 metrics and the original reference cache.\n\nSix geometries: GPU8 and GPU32 selected modes, GPU32 ranged, four-way banked, minimum two-set/two-word configuration, and legacy mode with all three staging/speculation parameters disabled. Hostile read/write poisoning, masked/full writes, posted writeback hazards, dirty evictions, burst crossings, reset during INIT and before ALLOC, and soft reset with outstanding writes pass.\n\nOnly three lines differ from v1: use an unpacked40-bit word array and direct registered-index selection, avoiding an explicit variable index multiply. Victim INIT/ALLOC write edges, tag/data latency, all FSM and bus timing remain unchanged. V1 source/proof/history remain intact. No additional cycle or state is introduced; GPU32 adds the two-bit registered bank selector and a40-bit output mux.\n\nNo Quartus or native full-application run is claimed. Conditional304M10K sizing is only a hypothesis pending inference and fit. Bank mux timing must be measured. No production edits.\n')
+paths=[p for p in O.iterdir() if p.is_file()]+[p for p in D.rglob('*') if p.is_file() and 'obj' not in p.parts]
+paths += list(D.glob('*/obj/Vgpu_color_depth_cache'))
+paths += [B/'manifest.json',P/'render-cache-storage-feasibility-v1/manifest.json',P/'cache-write-speculate-v2/protocol/main.cpp',Path(__file__),R/'tools/experiments/os30_fps25_20261005/phase10_render_cache_storage_v2.py',R/'tools/experiments/os30_fps25_20261005/phase10_render_cache_storage_v2_tests.py']
+put(O/'manifest.json',dict(passed=True,deployment_ready=False,evidence_sha256={str(p.relative_to(R)):sha(p) for p in sorted(set(paths))}))
+print('MANIFEST',sha(O/'manifest.json'));print('RESULT',sha(O/'result.json'))

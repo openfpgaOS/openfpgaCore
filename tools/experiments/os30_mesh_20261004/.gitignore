@@ -1,0 +1,4 @@
+__pycache__/
+**/__pycache__/
+# Private ROM-derived scene fixtures and generated simulation artifacts.
+kernel/results/

@@ -1,0 +1,41 @@
+Private mesh v4 resource review, 2026-10-04
+
+Frozen v4 fit:18,668 ALMs needed vs18,480;1,898 LABs vs1,848;
+309 M10K blocks vs308. Synthesis arithmetic correctness alone cannot close
+these three independent placement/resource limits.
+
+Hierarchy ALMs needed (inclusive; parentheses denote local engine logic):
+  Mesh frontend4,098.7; DMA89.1; engine3,722.1(1,936.4local)
+  PLANE473.1,VERTEX420.8,EDGE356.2,PROJ266.5,GATHER117.4,NORM71.2,ATTR80.6.
+
+Implemented in kernel-owned modules, with unchanged cycles:
+  PLANE: shared64-bit add/sub and paired32-bit origin/bias add/sub lanes.
+  PLANE: remove66temporary delta FFs; direct sat33 uses sign-bit overflow.
+  EDGE: endpoint muxes before common pair17-bit subtractors; common prestep
+  subtractor with the Q4 center formed by wiring selected_y<<4|8.
+Final oracle evidence: plane-rtl-shared-final and edges-rtl-shared-subtractors.
+No measured ALM saving is claimed until the integrated v5 fit completes.
+
+Reset audit: PLANE/EDGE/GATHER reset only state,busy,done. EDGE's start clears
+for slopes/seeds are required because empty inputs write deterministic zeros.
+Deleting these without explicit empty-output masking is incorrect. GATHER's
+mask initializers are also functional reductions, not gratuitous resets.
+
+Root owns and implements generic-engine32-bit lean shift, one-hot bus muxes,
+unused opcode pruning, and six tiny raster M10K arrays moved to MLAB.
+Unused current program ops include STORE,ADDC,NEG,PROJ47. SUBB remains used;
+ACCSAR1/16/30 remain used. Do not specialize compare flags silently: the
+general ADD/SUB instruction contract includes comparison flags.
+
+Alternative memory packing, analysis only (no raster edits):
+  Raster du/dv are16x32 arrays with the same read index. One true-dual-port
+  32x32 RAM could put du at0..15 and dv at16..31, one read port per field.
+  Command writes and span reads occupy separate phases; writes can reuse the
+  ports with explicit address muxes. This saves one M10K with small mux cost.
+  Raster u/v/count are4x16 each. If all simultaneous U/V writes share index,
+  combine U/V into32bits at0..3 and count into4..7 of one true-dual-port RAM,
+  using one read port per logical word. That can save two M10Ks, but requires
+  checking/asserting all write callsites and preserving read latency.
+  Root's MLAB conversion is simpler and already staged; consider packing only
+  if its additional ALMs remain a fit blocker. Do not cut cache capacity or
+  widen timing exceptions to conceal an unclosed design.

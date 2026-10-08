@@ -1,0 +1,10 @@
+# Exact compact-v7 candidate snapshots; relative to the Pocket target.
+# These are os30-only copies, pending future common-module consolidation.
+../../common/audio_mixer.v ../../common/os30/audio_mixer.v
+../../common/axi_periph_slave.v ../../common/os30/axi_periph_slave.v
+../../common/cpu_system.v ../../common/os30/cpu_system.v
+../../common/gpu_color_depth_cache.sv ../../common/os30/gpu_color_depth_cache.sv
+../../common/gpu_core.v ../../common/os30/gpu_core.v
+../../common/gpu_tex_cache.v ../../common/os30/gpu_tex_cache.v
+core_top.v os30/core_top.v
+io_sdram.v os30/io_sdram.v

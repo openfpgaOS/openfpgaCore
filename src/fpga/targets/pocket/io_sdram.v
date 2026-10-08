@@ -24,7 +24,10 @@ module io_sdram #(
     // Refresh divider in controller cycles.  Clock-scaled by reduced-clock
     // variants (core_top passes 660 under INCLUDE_CLK90; the 736 default
     // violates tREFI below ~94 MHz).  Default = bit-exact legacy builds.
-    parameter REFRESH_INTERVAL = 10'd736
+    parameter REFRESH_INTERVAL = 10'd736,
+    // Opt-in Pocket AS4C32M16MSA-6BIN timing at 166 MHz, CL=3.
+    // Keep legacy cycle counts bit-identical when this is zero.
+    parameter FAST_166 = 0
 ) (
 
 input   wire            controller_clk,
@@ -106,14 +109,15 @@ assign {phy_ras, phy_cas, phy_we} = cmd;
     localparam      CMD_AUTOREF         = 3'b001;
     localparam      CMD_LMR             = 3'b000;
 
-    localparam      CAS                 =   4'd3;   // timings are for 100MHz (10ns)
+    localparam      CAS                 =   4'd3;   // CL3 at either 100 or 166 MHz
     localparam      TIMING_LMR          =   4'd2;   // tLMR = 2ck
-    localparam      TIMING_AUTOREFRESH  =   4'd8;   // tRFC = 80ns @ 100MHz = 8 cycles (80ns)
-    localparam      TIMING_PRECHARGE    =   4'd2;   // tRP = 15ns @ 100MHz = 2 cycles (20ns)
+    localparam      TIMING_AUTOREFRESH  = FAST_166 ? 4'd14 : 4'd8; // tRFC >=80 ns
+    localparam      TIMING_PRECHARGE    = FAST_166 ? 4'd3 : 4'd2;  // tRP >=18 ns
     // (tRC / ACT-to-ACT is satisfied implicitly by the FSM's per-row command
     // latency; no explicit ACT-ACT timer is needed.)
-    localparam      TIMING_ACT_RW       =   4'd2;   // tRCD = 15ns @ 100MHz = 2 cycles (20ns)
-    localparam      TIMING_WRITE        =   4'd2;   // tWR = 2ck
+    localparam      TIMING_ACT_RW       = FAST_166 ? 4'd3 : 4'd2; // tRCD >=18 ns
+    localparam      TIMING_WRITE        = FAST_166 ? 4'd3 : 4'd2; // tWR >=15 ns
+    localparam      BOOT_CYCLES         = FAST_166 ? 40000 : 30000; // >=200 us
 
     reg     [5:0]   state;
 
@@ -181,7 +185,8 @@ assign {phy_ras, phy_cas, phy_we} = cmd;
     // 5.12us interval.  Unlike dc above, this terminal-count compare feeds
     // only the slow pending counter, not the SDRAM command path.
     // REFRESH_INTERVAL is a module parameter (ANSI header) as of 2026-08-02.
-    reg     [9:0]   refresh_count;
+    localparam REFRESH_BITS = (REFRESH_INTERVAL > 1023) ? 11 : 10;
+    reg [REFRESH_BITS-1:0] refresh_count;
     // Pending-refresh counter (was a single flag).  A counter cannot drop a
     // refresh tick if a previous refresh is still being serviced when the next
     // tick arrives, so it stays correct even if a future longer op or clock
@@ -442,8 +447,8 @@ always @(posedge controller_clk) begin
     ST_BOOT_0: begin
         delay_boot <= delay_boot + 1'b1;
 
-        if(delay_boot == 30000-16) phy_cke <= 1;
-        if(delay_boot == 30000) begin
+        if(delay_boot == BOOT_CYCLES-16) phy_cke <= 1;
+        if(delay_boot == BOOT_CYCLES) begin
             // >=200us power-up delay (30000 cycles @90MHz ~= 333us)
             dc <= 0;
 
@@ -1005,19 +1010,27 @@ always @(posedge controller_clk) begin
     end
     ST_BURSTWR_4: begin
         cmd <= CMD_NOP;
+        if (FAST_166) dc <= 0;
         phy_dqm <= 2'b11;  // Mask unwanted second BL=2 data beat
         state <= ST_BURSTWR_5;
     end
     ST_BURSTWR_5: begin
+      // Wait five cycles after WRITE, covering both tWR and tRAS even
+      // when the first strobe follows ACT immediately. Count from the
+      // write tail so an arbitrarily delayed strobe cannot wrap the timer.
+      if (!FAST_166 || dc >= 4'd3) begin
+        if (FAST_166) dc <= 0;
         cmd <= CMD_PRECHG;
         phy_a[10] <= 0; // only precharge current bank
         phy_dqm <= 2'b00;  // Restore DQM for future operations
         row_open_v[trk(addr[24:23])] <= 1'b0;  // Track bank close (burstwr never crosses banks)
         state <= ST_BURSTWR_6;
+      end
     end
     ST_BURSTWR_6: begin
         cmd <= CMD_NOP;
-        state <= ST_BURSTWR_7;
+        if (!FAST_166 || dc >= TIMING_PRECHARGE-2)
+            state <= ST_BURSTWR_7;
     end
     ST_BURSTWR_7: begin
         cmd <= CMD_NOP;

@@ -1,0 +1,1106 @@
+--- a/src/quake2/Makefile
++++ b/src/quake2/Makefile
+@@ -5,11 +5,17 @@
+ # dynamic game DLL, dynamic renderer, OpenGL, cURL, or OpenAL.
+ 
+ APP       = quake2
++GPU_PROFILE ?= 0
++ifneq ($(GPU_PROFILE),0)
++ifneq ($(GPU_PROFILE),1)
++$(error GPU_PROFILE must be 0 or 1)
++endif
++endif
+ TARGET   ?= pocket
+ MISTER_IP ?= mister.local
+ SDK_DIR   = ../sdk
+ ROOT      = $(realpath $(CURDIR)/../..)
+-OBJ_DIR   = $(ROOT)/.obj/$(APP)
++OBJ_DIR   = $(ROOT)/.obj/$(APP)$(if $(filter 1,$(GPU_PROFILE)),-gpuprofile)
+ BUILD_DIR = $(OBJ_DIR)
+ DIST      = $(ROOT)/dist/$(APP)
+ OUT       = $(ROOT)/build/$(TARGET)/$(APP)
+@@ -164,6 +170,7 @@
+ SRCS_CXX =
+ 
+ CFLAGS  = -I. -I$(YQ2)
++CFLAGS += -DOFQ2_GPU_PROFILE=$(GPU_PROFILE)
+ CFLAGS += -I$(YQ2)/common/header -I$(YQ2)/client/header -I$(YQ2)/client/input/header
+ CFLAGS += -I$(YQ2)/client/sound/header -I$(YQ2)/client/vid/header
+ CFLAGS += -I$(YQ2)/client/refresh/soft/header -I$(YQ2)/client/refresh/files
+@@ -217,7 +224,12 @@
+ all: $(OBJ_DIR)/app.elf release
+ 	@$(SIZE) $<
+ 
+-ifeq ($(TARGET),mister)
++ifeq ($(GPU_PROFILE),1)
++# Diagnostic builds never replace the normal Pocket package.
++release: $(OBJ_DIR)/app.elf
++	@mkdir -p "$(ROOT)/build/diagnostics"
++	cp "$<" "$(ROOT)/build/diagnostics/quake2-gpuprofile.elf"
++else ifeq ($(TARGET),mister)
+ release: game-dist        # MiSTer: the per-game bundle IS the release artifact
+ else
+ release: $(OBJ_DIR)/app.elf
+@@ -332,6 +344,10 @@
+ 	python3 $(ROOT)/tools/check_quake2_renderer.py
+ 
+ clean: sdk-clean
++ifeq ($(GPU_PROFILE),1)
++	rm -f "$(ROOT)/build/diagnostics/quake2-gpuprofile.elf"
++else
+ 	rm -rf $(OUT)
++endif
+ 
+ .PHONY: all release debug copy copy-app package test check-renderer clean game-dist
+--- a/src/quake2/openfpga/input_of.c
++++ b/src/quake2/openfpga/input_of.c
+@@ -8,6 +8,11 @@
+ 
+ #include "of.h"
+ #include "of_input.h"
++#if OFQ2_GPU_PROFILE
++#include "of_emit_q2.h"
++static int ofq2_profile_chord;
++static uint32_t ofq2_profile_suppressed;
++#endif
+ 
+ #include <string.h>
+ 
+@@ -286,6 +291,17 @@
+ 	sys_frame_time = Sys_Milliseconds();
+ 
+ 	buttons = pad.buttons;
++#if OFQ2_GPU_PROFILE
++	/* Reuse this input sample; no additional hardware poll. Release any game
++	 * keys already held when the chord is completed, then suppress its keys. */
++	uint32_t chord_mask = OF_BTN_SELECT | OF_BTN_L1 | OF_BTN_R1;
++	int chord = (buttons & chord_mask) == chord_mask;
++	if (chord && !ofq2_profile_chord) OFQ2_GPUProfileToggle();
++	ofq2_profile_chord = chord;
++	ofq2_profile_suppressed &= buttons;
++	if (chord) ofq2_profile_suppressed = chord_mask;
++	buttons &= ~ofq2_profile_suppressed;
++#endif
+ 	changed = buttons ^ prev_buttons;
+ 
+ 	edge_key(buttons, changed, OF_BTN_START, K_ESCAPE);
+--- a/src/quake2/openfpga/of_emit_q2.c
++++ b/src/quake2/openfpga/of_emit_q2.c
+@@ -6,6 +6,7 @@
+ #include "of.h"
+ #include "of_cache.h"
+ #include "of_caps.h"
++#include "of_gpu_profile_q2.h"
+ #include "of_gpu.h"
+ #include "of_texture.h"
+ #include "of_video.h"
+@@ -104,6 +105,19 @@
+ typedef char ofq2_texture_layout_check[
+ 	(sizeof(ofq2_texture_t) == sizeof(of_texture_t)) ? 1 : -1];
+ 
++/* The texture route survives GPU soft reset and shutdown. Normalize it only
++ * with an idle GPU and a reported fast-memory tier; SDRAM-only cores need no
++ * route-register access. This does not recreate or migrate texture handles. */
++static void
++ofq2_texture_route_sdram(void)
++{
++	if (of_texture_has_fast_mem())
++	{
++		_of_gpu_route_fast_tex(0);
++		_of_tex_bound = 0;
++	}
++}
++
+ int
+ OFQ2_Init(int fb_stride)
+ {
+@@ -253,6 +267,7 @@
+ 	/* fast-texture manager: read tex_fast_size now that the GPU is up
+ 	 * (no-op / SDRAM-only when the target has no fast texture tier). */
+ 	of_texture_init();
++	ofq2_texture_route_sdram();
+ 	ofq2_tex_generation = 1;
+ 
+ 	ofq2_ready = true;
+@@ -267,7 +282,10 @@
+ {
+ 	if (!ofq2_ready)
+ 		return;
++	/* Reinitialization invalidates all handles: finish their draws first. */
++	OFQ2_Finish();
+ 	of_texture_init();
++	ofq2_texture_route_sdram();
+ 	ofq2_tex_generation = 1;
+ }
+ 
+@@ -276,6 +294,8 @@
+ {
+ 	if (!ofq2_ready)
+ 		return;
++	/* Drain before new uploads reuse offsets referenced by queued draws. */
++	OFQ2_Finish();
+ 	of_texture_reset();
+ 	ofq2_tex_generation++;
+ }
+@@ -355,6 +375,7 @@
+ 	if (ofq2_ready)
+ 	{
+ 		OFQ2_Finish();
++		ofq2_texture_route_sdram();
+ 		of_gpu_shutdown();
+ 	}
+ 
+@@ -425,9 +446,8 @@
+ 				 * per triangle, +17 per re-arm) */
+ uint32_t ofq2_stat_2d_us;	/* us building 2D GPU blits this window */
+ 
+-/* ring-backpressure snapshot: SDK statics accumulate per TU; read +
+- * reset by the perf heartbeat to expose CPU time spent waiting for
+- * ring space (each spin iteration ~ a few cycles) */
++/* Ring-backpressure counts, not elapsed time. MMIO polling latency varies;
++ * use the optional episode timers to measure time spent waiting. */
+ void
+ OFQ2_RingStats(uint32_t *waits, uint32_t *spins,
+ 	uint32_t *dma_waits, uint32_t *dma_spins)
+@@ -1170,3 +1190,73 @@
+ {
+ 	return ofq2_pending;
+ }
++
++#if OFQ2_GPU_PROFILE
++/* Windows end after presentation. No additional GPU barrier is inserted.
++ * The frozen overlay is drawn only after collection has stopped. */
++void OFQ2_GPUProfileToggle(void)
++{
++    if (ofq2_profile_visible)
++    {
++        ofq2_profile_visible = 0;
++        ofq2_profile_active = 0;
++        ofq2_profile_warmup = 2;
++    }
++    else if (ofq2_profile_valid)
++    {
++        ofq2_profile_visible = 1;
++        ofq2_profile_active = 0;
++    }
++}
++
++const char *OFQ2_GPUProfileLine(unsigned line)
++{
++    return ofq2_profile_visible && line < 6 ? ofq2_profile_lines[line] : NULL;
++}
++
++static uint32_t ofq2_profile_ms10(uint32_t us)
++{
++    return (uint32_t)((uint64_t)us / ((uint64_t)ofq2_profile_frames * 100u));
++}
++
++void OFQ2_GPUProfileFrame(int gameplay)
++{
++    if (!gameplay)
++    {
++        ofq2_profile_reset();
++        return;
++    }
++    if (ofq2_profile_visible) return;
++    if (ofq2_profile_warmup) { ofq2_profile_warmup--; return; }
++    uint32_t now = of_time_us();
++    if (!ofq2_profile_active)
++    {
++        ofq2_profile_counters_clear();
++        ofq2_profile_window = now;
++        ofq2_profile_active = 1;
++        return;
++    }
++    ofq2_profile_frames++;
++    uint32_t elapsed = now - ofq2_profile_window;
++    if (elapsed < 2000000u) return;
++    if (elapsed <= 4000000u)
++    {
++        uint32_t fps10 = (uint32_t)((uint64_t)ofq2_profile_frames * 10000000u / elapsed);
++        uint32_t frame = ofq2_profile_ms10(elapsed);
++        uint32_t ring = ofq2_profile_ms10(ofq2_profile_wait[0]);
++        uint32_t dma = ofq2_profile_ms10(ofq2_profile_wait[1]);
++        uint32_t fence = ofq2_profile_ms10(ofq2_profile_wait[2]);
++        uint32_t copy = ofq2_profile_ms10(ofq2_profile_copy_us);
++        snprintf(ofq2_profile_lines[0], 40, "Q2 P1 GPU SNAPSHOT");
++        snprintf(ofq2_profile_lines[1], 40, "FPS %u.%u FRAME %u.%u MS", fps10/10, fps10%10, frame/10, frame%10);
++        snprintf(ofq2_profile_lines[2], 40, "RING %u.%u DMA %u.%u MS", ring/10, ring%10, dma/10, dma%10);
++        snprintf(ofq2_profile_lines[3], 40, "FENC %u.%u COPY %u.%u MS", fence/10, fence%10, copy/10, copy%10);
++        snprintf(ofq2_profile_lines[4], 40, "WORDS %u BATCH %u / FRAME", ofq2_profile_words/ofq2_profile_frames, ofq2_profile_batches/ofq2_profile_frames);
++        snprintf(ofq2_profile_lines[5], 40, "MODE %s TEX FREE %uK", ofq2_profile_modes == 2 ? "CPU" : ofq2_profile_modes == 1 ? "DMA" : "MIX", of_texture_budget_free()/1024u);
++        ofq2_profile_valid = 1;
++    }
++    /* Formatting is outside the next measurement window. */
++    ofq2_profile_counters_clear();
++    ofq2_profile_window = of_time_us();
++}
++#endif
+--- a/src/quake2/openfpga/of_emit_q2.h
++++ b/src/quake2/openfpga/of_emit_q2.h
+@@ -344,4 +344,10 @@
+ void OFQ2_RingStats(uint32_t *waits, uint32_t *spins,
+ 	uint32_t *dma_waits, uint32_t *dma_spins);
+ 
++#if OFQ2_GPU_PROFILE
++void OFQ2_GPUProfileToggle(void);
++void OFQ2_GPUProfileFrame(int gameplay);
++const char *OFQ2_GPUProfileLine(unsigned line);
+ #endif
++
++#endif
+--- a/src/quake2/openfpga/of_gl1.c
++++ b/src/quake2/openfpga/of_gl1.c
+@@ -1011,7 +1011,6 @@
+ 	{
+ 		white[i] = 0xFFFF;
+ 	}
+-	OFQ2_CacheClean(white, sizeof(white));
+ 	OFQ2_TexCreate(&ofgl_flat_tex, white, 8, 8, sizeof(white));
+ 	ofgl_flat_ready = 1;
+ }
+@@ -1767,7 +1766,6 @@
+ 		if (!ct->gtex_valid && ct->texels)
+ 		{
+ 			/* fallback lazy build (world textures are built eagerly at upload) */
+-			OFQ2_CacheClean(ct->texels, (size_t)ct->w * (size_t)ct->h * 2);
+ 			OFQ2_TexCreate(&ct->gtex, ct->texels, ct->w, ct->h,
+ 				(uint32_t)((size_t)ct->w * (size_t)ct->h * 2));
+ 			ct->gtex_valid = 1;
+@@ -2934,7 +2932,6 @@
+ 	if (ofgl_tex_is3d(ofgl_store_texture) &&
+ 		up_tex != OFGL_TEXNUM_SCRAPS && ofgl_gpu_ok)
+ 	{
+-		OFQ2_CacheClean(t->texels, n * 2);
+ 		OFQ2_TexCreate(&t->gtex, t->texels, t->w, t->h, (uint32_t)(n * 2));
+ 		t->gtex_valid = 1;
+ 		if (t->gtex.flags & 0x1u)	/* _OF_TEX_FAST: lives in CRAM, not the heap */
+--- a/src/quake2/openfpga/of_gpu_profile_q2.h
++++ b/src/quake2/openfpga/of_gpu_profile_q2.h
+@@ -0,0 +1,64 @@
++/* Optional GPU transport diagnostics. Included only by the GPU-owner TU.
++ * The normal build compiles out all state, hooks, timers and UI calls. */
++#ifndef OF_GPU_PROFILE_Q2_H
++#define OF_GPU_PROFILE_Q2_H
++#ifndef OFQ2_GPU_PROFILE
++#define OFQ2_GPU_PROFILE 0
++#endif
++#if OFQ2_GPU_PROFILE
++#include <stdint.h>
++#include <string.h>
++#include "of_timer.h"
++
++static int ofq2_profile_active, ofq2_profile_visible, ofq2_profile_valid;
++static uint32_t ofq2_profile_started[3], ofq2_profile_wait[3];
++static uint32_t ofq2_profile_copy_start, ofq2_profile_copy_us;
++static uint32_t ofq2_profile_words, ofq2_profile_batches, ofq2_profile_modes;
++static uint32_t ofq2_profile_window, ofq2_profile_frames;
++static unsigned ofq2_profile_warmup;
++static char ofq2_profile_lines[6][40];
++
++static void ofq2_profile_counters_clear(void)
++{
++    memset(ofq2_profile_wait, 0, sizeof(ofq2_profile_wait));
++    ofq2_profile_copy_us = ofq2_profile_words = ofq2_profile_batches = 0;
++    ofq2_profile_modes = 0;
++    ofq2_profile_frames = 0;
++}
++static void ofq2_profile_reset(void)
++{
++    ofq2_profile_counters_clear();
++    ofq2_profile_active = 0;
++    ofq2_profile_visible = 0;
++    ofq2_profile_valid = 0;
++    ofq2_profile_warmup = 2;
++}
++static inline void ofq2_profile_wait_begin(unsigned kind, int first)
++{
++    if (first && ofq2_profile_active)
++        ofq2_profile_started[kind] = of_time_us();
++}
++static inline void ofq2_profile_wait_end(unsigned kind, int waited)
++{
++    if (waited && ofq2_profile_active)
++        ofq2_profile_wait[kind] += of_time_us() - ofq2_profile_started[kind];
++}
++static inline void ofq2_profile_submit_begin(void)
++{
++    if (ofq2_profile_active) ofq2_profile_copy_start = of_time_us();
++}
++static inline void ofq2_profile_submit_end(unsigned cpu_ring, uint32_t words)
++{
++    if (!ofq2_profile_active) return;
++    ofq2_profile_copy_us += of_time_us() - ofq2_profile_copy_start;
++    ofq2_profile_words += words;
++    ofq2_profile_batches++;
++    ofq2_profile_modes |= 1u << cpu_ring;
++}
++#define OF_GPU_WAIT_PROFILE_BEGIN(kind, first) ofq2_profile_wait_begin(kind, first)
++#define OF_GPU_WAIT_PROFILE_END(kind, waited) ofq2_profile_wait_end(kind, waited)
++#define OF_GPU_WAIT_PROFILE_RESET() ofq2_profile_reset()
++#define OF_GPU_SUBMIT_PROFILE_BEGIN(cpu_ring) ofq2_profile_submit_begin()
++#define OF_GPU_SUBMIT_PROFILE_END(cpu_ring, words) ofq2_profile_submit_end(cpu_ring, words)
++#endif
++#endif
+--- a/src/quake2/src/client/cl_screen.c
++++ b/src/quake2/src/client/cl_screen.c
+@@ -26,6 +26,9 @@
+  */
+ 
+ #include "header/client.h"
++#if OFQ2_GPU_PROFILE
++#include "openfpga/of_emit_q2.h"
++#endif
+ 
+ static float scr_con_current; /* aproaches scr_conlines at scr_conspeed */
+ static float scr_conlines; /* 0.0 to 1.0 lines of console to display */
+@@ -1665,6 +1668,15 @@
+ 	int i;
+ 	float separation[2] = {0, 0};
+ 	float scale = SCR_GetMenuScale();
++#if OFQ2_GPU_PROFILE
++	/* Capture before SCR_DrawLoading clears its flag. Reset even when a
++	 * disabled/uninitialized screen returns without reaching EndFrame. */
++	int profile_gameplay = cls.state == ca_active && cls.key_dest == key_game &&
++		!cl.cinematictime && !(cl_paused && cl_paused->value) &&
++		!scr_draw_loading && !cls.disable_screen &&
++		scr_initialized && con.initialized;
++	if (!profile_gameplay) OFQ2_GPUProfileFrame(0);
++#endif
+ 
+ 	/* if the screen is disabled (loading plaque is
+ 	   up, or vid mode changing) do nothing at all */
+@@ -1806,7 +1818,19 @@
+ 	}
+ 
+ 	SCR_Framecounter();
++#if OFQ2_GPU_PROFILE
++	/* Collection freezes before the panel is drawn, so its CPU blits do not
++	 * contaminate the captured window. A build marker distinguishes it. */
++	for (unsigned row = 0; row < 6; row++)
++	{
++		const char *line = OFQ2_GPUProfileLine(row);
++		if (line) DrawStringScaled(0, 16 + row * 8, line, 1.0f);
++	}
++#endif
+ 	R_EndFrame();
++#if OFQ2_GPU_PROFILE
++	OFQ2_GPUProfileFrame(profile_gameplay);
++#endif
+ }
+ 
+ static float
+--- a/src/sdk/include/of_gpu.h
++++ b/src/sdk/include/of_gpu.h
+@@ -37,6 +37,37 @@
+  * Keep the default empty so existing applications pay no additional cost. */
+ #ifndef OF_GPU_WAIT_HOOK
+ #define OF_GPU_WAIT_HOOK() ((void)0)
++#endif
++
++/* Optional episode timing, defined before inclusion by diagnostic builds.
++ * BEGIN receives true only on the first failed poll; END receives whether
++ * any poll failed. Hooks must evaluate those predicates before reading a
++ * timer, must not re-enter GPU APIs, and run on the calling thread only.
++ * Ring timing excludes preceding submission/DMA waits. These hooks do not
++ * cover MMIO store latency, texture/LUT uploads, nonblocking reserve probes,
++ * or application/kernel presentation waits. Defaults generate no code. */
++#define OF_GPU_WAIT_PROFILE_RING   0u
++#define OF_GPU_WAIT_PROFILE_DMA    1u
++#define OF_GPU_WAIT_PROFILE_FENCE  2u
++#ifndef OF_GPU_WAIT_PROFILE_BEGIN
++#define OF_GPU_WAIT_PROFILE_BEGIN(kind, first) ((void)0)
++#endif
++#ifndef OF_GPU_WAIT_PROFILE_END
++#define OF_GPU_WAIT_PROFILE_END(kind, waited) ((void)0)
++#endif
++#ifndef OF_GPU_WAIT_PROFILE_RESET
++#define OF_GPU_WAIT_PROFILE_RESET() ((void)0)
++#endif
++
++/* Optional per-batch transport timing. CPU-ring timing includes the staged
++ * loads, MMIO stores, status check and publish. DMA timing covers source
++ * visibility preparation only; descriptor/idle waits are separate wait hooks.
++ * Neither hook runs per word; defaults generate no code. */
++#ifndef OF_GPU_SUBMIT_PROFILE_BEGIN
++#define OF_GPU_SUBMIT_PROFILE_BEGIN(cpu_ring) ((void)0)
++#endif
++#ifndef OF_GPU_SUBMIT_PROFILE_END
++#define OF_GPU_SUBMIT_PROFILE_END(cpu_ring, words) ((void)0)
+ #endif
+ 
+ #ifndef OF_PC
+@@ -533,10 +564,12 @@
+      * here forever with no diagnostic. */
+     uint32_t dma_spins = 0;
+     while (GPU_STATUS & GPU_STATUS_DMA_BUSY) {
++        OF_GPU_WAIT_PROFILE_BEGIN(OF_GPU_WAIT_PROFILE_DMA, dma_spins == 0u);
+         OF_GPU_WAIT_HOOK();
+         if (++dma_spins == 50000000u)
+             __builtin_trap();  /* → fatal_trap dumps GPU state */
+     }
++    OF_GPU_WAIT_PROFILE_END(OF_GPU_WAIT_PROFILE_DMA, dma_spins != 0u);
+     _gpu_batch_inflight_mask = 0;
+     if (dma_spins) {
+         _gpu_dbg_dma_waits++;
+@@ -553,10 +586,12 @@
+ 
+     uint32_t dma_spins = 0;
+     while (GPU_STATUS & GPU_STATUS_DMA_DESC_FULL) {
++        OF_GPU_WAIT_PROFILE_BEGIN(OF_GPU_WAIT_PROFILE_DMA, dma_spins == 0u);
+         OF_GPU_WAIT_HOOK();
+         if (++dma_spins == 50000000u)
+             __builtin_trap();  /* wedged DMA queue — see of_gpu_wait */
+     }
++    OF_GPU_WAIT_PROFILE_END(OF_GPU_WAIT_PROFILE_DMA, dma_spins != 0u);
+     if (dma_spins) {
+         _gpu_dbg_dma_waits++;
+         _gpu_dbg_dma_spin_iters += dma_spins;
+@@ -628,6 +663,7 @@
+     uint32_t submit_index = _gpu_batch_index;
+ 
+     if (_gpu_cpu_ring) {
++        OF_GPU_SUBMIT_PROFILE_BEGIN(1);
+         /* Space for the complete batch was reserved before staging it. The
+          * published pointer moves only after every word reaches ring BRAM. */
+         /* Load four words before their MMIO stores to avoid load/use bubbles.
+@@ -688,6 +724,7 @@
+             != GPU_STATUS_CPU_RING_MODE)
+             __builtin_trap();
+         GPU_CTRL = GPU_CTRL_CPU_RING_PUBLISH;
++        OF_GPU_SUBMIT_PROFILE_END(1, submit_words);
+         _gpu_cmd_words = 0;
+         _gpu_unflushed_sync = 0;
+         _gpu_batch_inflight_mask = 0;
+@@ -714,6 +751,7 @@
+      * and far faster than re-writing every command word through the
+      * single-outstanding uncached alias (thousands of serialized stores
+      * per heavy frame = visible frame-rate loss on the handheld). */
++    OF_GPU_SUBMIT_PROFILE_BEGIN(0);
+     if (_gpu_publish_uncached < 0)
+         _gpu_publish_uncached =
+             (of_get_caps()->platform_id == OF_PLATFORM_MISTER);
+@@ -727,6 +765,7 @@
+         _gpu_flush_cmd_cache_range(_gpu_batch_buf, submit_words * 4u);
+         _gpu_drain_cmd_writeback(submit_words * 4u);
+     }
++    OF_GPU_SUBMIT_PROFILE_END(0, submit_words);
+     _gpu_wait_dma_desc_slot_debug();
+ 
+     /* The publish above is the data-visibility barrier.  The GPU MMIO
+@@ -772,10 +811,12 @@
+             _gpu_note_ring_free(ring_free);
+             if (ring_free >= bytes)
+                 break;
++            OF_GPU_WAIT_PROFILE_BEGIN(OF_GPU_WAIT_PROFILE_RING, ring_spins == 0u);
+             OF_GPU_WAIT_HOOK();
+             if (++ring_spins == 50000000u)
+                 __builtin_trap();  /* → fatal_trap dumps GPU state */
+         } while (1);
++        OF_GPU_WAIT_PROFILE_END(OF_GPU_WAIT_PROFILE_RING, ring_spins != 0u);
+         _gpu_dbg_ring_waits++;
+         _gpu_dbg_ring_spin_iters += ring_spins;
+     }
+@@ -913,6 +954,7 @@
+     _gpu_dbg_ring_waits = 0;
+     _gpu_dbg_ring_spin_iters = 0;
+     _gpu_dbg_min_ring_free = OF_GPU_RING_SIZE;
++    OF_GPU_WAIT_PROFILE_RESET();
+     _gpu_state_valid = 0;
+     _gpu_span_hdr_valid = 0;
+     GPU_CTRL = 6;               /* soft_reset | ring_reset */
+@@ -1132,11 +1174,13 @@
+      * a genuine hang surfaces quickly. */
+     uint32_t spins = 50000000u;
+     while (!of_gpu_fence_reached(token)) {
++        OF_GPU_WAIT_PROFILE_BEGIN(OF_GPU_WAIT_PROFILE_FENCE, spins == 50000000u);
+         OF_GPU_WAIT_HOOK();
+         if (--spins == 0) {
+             __builtin_trap();  /* → illegal-instruction trap, mcause=2 */
+         }
+     }
++    OF_GPU_WAIT_PROFILE_END(OF_GPU_WAIT_PROFILE_FENCE, spins != 50000000u);
+ }
+ 
+ static inline void of_gpu_finish(void) {
+--- a/src/sdk/include/of_texture.h
++++ b/src/sdk/include/of_texture.h
+@@ -116,7 +116,18 @@
+ /* Internal: bump-allocate + upload `nbytes` of `src` into fast memory. */
+ static inline uint32_t _of_tex_fast_put(const void *src, uint32_t nbytes) {
+     uint32_t off = _of_tex_fast_top;
+-    _of_gpu_fast_tex_upload(off, (const uint32_t *)src, (nbytes + 3u) >> 2);
++    uint32_t words = nbytes >> 2;
++    if (words)
++        _of_gpu_fast_tex_upload(off, (const uint32_t *)src, words);
++    /* A 1x1 RGB565 image has only two allocated bytes. Never read beyond
++     * the caller's source to round it up to the hardware's word width. */
++    if (nbytes & 3u) {
++        const uint8_t *tail = (const uint8_t *)src + (words << 2);
++        uint32_t last = 0;
++        for (uint32_t i = 0; i < (nbytes & 3u); ++i)
++            last |= (uint32_t)tail[i] << (i * 8u);
++        _of_gpu_fast_tex_upload(off + (words << 2), &last, 1u);
++    }
+     _of_tex_fast_top = (off + nbytes + 15u) & ~15u;   /* 16-byte align next */
+     return off;
+ }
+--- a/tools/check_quake2_gpu_profile.py
++++ b/tools/check_quake2_gpu_profile.py
+@@ -0,0 +1,176 @@
++#!/usr/bin/env python3
++"""Test actual Q2 profiling helpers and SDK wait/copy ordering with fake MMIO."""
++from pathlib import Path
++import importlib.util
++import hashlib
++import json
++import os
++import subprocess
++import sys
++
++import re
++def function(source, name):
++    match = re.search(r'^(?:static inline |static |void )[^{;\n]*\b' + name + r'\(', source, re.M)
++    assert match, name
++    brace = source.index('{', match.end())
++    pos, depth = brace + 1, 1
++    while depth:
++        depth += (source[pos] == '{') - (source[pos] == '}')
++        pos += 1
++    return source[match.start():pos]
++
++PREFIX = "\n#include <stdint.h>\n#include <stddef.h>\n#include <stdio.h>\n#include <string.h>\n#include <assert.h>\nstatic uint32_t now, timer_reads, hooks;\nstatic uint32_t status_values[32], ring_values[32], fence_values[32];\nstatic unsigned ns, is, nr, ir, nf, iff;\nstatic char events[1024]; static unsigned ne;\nstatic void event(char c) { assert(ne+1<sizeof events); events[ne++]=c; events[ne]=0; }\nstatic uint32_t status_read(void) { event('S'); now+=10; assert(is<ns); return status_values[is++]; }\nstatic uint32_t ring_read(void) { event('R'); now+=10; assert(ir<nr); return ring_values[ir++]; }\nstatic uint32_t fence_read(void) { event('F'); now+=10; assert(iff<nf); return fence_values[iff++]; }\n#if TEST_PROFILE\nstatic uint32_t fake_clock(void) { event('T'); timer_reads++; return now; }\n#endif\nstatic void cooperate(void) { event('H'); hooks++; now+=3; }\n#define OF_GPU_WAIT_HOOK() cooperate()\n#define OF_GPU_RING_SIZE 16384u\n#define OF_GPU_BATCH_BUFFER_BYTES 16384u\n#define OF_GPU_COMMAND_STREAM_BATCH_WORDS 4095u\n#define GPU_STATUS_DMA_BUSY 4u\n#define GPU_STATUS_DMA_DESC_FULL 64u\n#define GPU_STATUS_CPU_RING_MODE 256u\n#define GPU_STATUS_CPU_RING_OVERFLOW 512u\n#define GPU_CTRL_CPU_RING_PUBLISH 8u\n#define OF_PLATFORM_MISTER 2u\n#define GPU_STATUS status_read()\n#define GPU_RING_RDPTR ring_read()\n#define GPU_FENCE_REACHED fence_read()\nstatic uint32_t reg_port,reg_ctrl,reg_src,reg_len,reg_kick;\n#define GPU_RING_WRPTR reg_port\n#define GPU_CTRL reg_ctrl\n#define GPU_DMA_SRC reg_src\n#define GPU_DMA_LEN reg_len\n#define GPU_DMA_KICK reg_kick\nstatic uint32_t _gpu_batch_index,_gpu_batch_dma_addr,_gpu_batch_dma_base;\nstatic uint32_t storage[8192],*_gpu_batch_buf_base=storage,*_gpu_batch_buf=storage;\nstatic uint32_t _gpu_cmd_words,_gpu_unflushed_sync,_gpu_batch_inflight_mask;\nstatic uint32_t _gpu_wrptr,_gpu_known_rdptr;\nstatic const uint32_t _gpu_ring_mask=OF_GPU_RING_SIZE-1;\nstatic uint32_t _gpu_dbg_dma_waits,_gpu_dbg_dma_spin_iters;\nstatic uint32_t _gpu_dbg_ring_waits,_gpu_dbg_ring_spin_iters,_gpu_dbg_min_ring_free;\nstatic int _gpu_cpu_ring,_gpu_publish_uncached;\nstruct caps {unsigned platform_id;}; static struct caps cap;\nstatic const struct caps *of_get_caps(void) { return &cap; }\nstatic void *of_uncached(void *p) { return p; }\nstatic void _gpu_flush_cmd_cache_range(void *p,uint32_t n) { (void)p;(void)n;event('C'); }\nstatic void _gpu_drain_cmd_writeback(uint32_t n) { (void)n;event('D'); }\n"
++TESTS = '\nstatic void reset(void) {\n    now=timer_reads=hooks=ns=is=nr=ir=nf=iff=ne=0;events[0]=0;\n    _gpu_wrptr=100;_gpu_known_rdptr=104;_gpu_cmd_words=0;\n    _gpu_batch_inflight_mask=_gpu_unflushed_sync=_gpu_batch_index=0;\n    _gpu_batch_dma_base=0x10000000;_gpu_batch_dma_addr=_gpu_batch_dma_base;\n    _gpu_batch_buf_base=storage;_gpu_batch_buf=storage;\n    _gpu_dbg_dma_waits=_gpu_dbg_dma_spin_iters=_gpu_dbg_ring_waits=_gpu_dbg_ring_spin_iters=0;\n    _gpu_dbg_min_ring_free=OF_GPU_RING_SIZE;\n    _gpu_cpu_ring=0;_gpu_publish_uncached=0;\n    reg_port=reg_ctrl=reg_src=reg_len=reg_kick=0;\n    OF_GPU_WAIT_PROFILE_RESET();\n}\nstatic void statuses(uint32_t a,uint32_t b,uint32_t c) {\n    status_values[0]=a;status_values[1]=b;status_values[2]=c;ns=3;\n}\nstatic void rings(uint32_t a,uint32_t b,uint32_t c) {\n    ring_values[0]=a;ring_values[1]=b;ring_values[2]=c;nr=3;\n}\nstatic void check_profile(uint32_t r,uint32_t d,uint32_t f,unsigned reads) {\n#if TEST_PROFILE\n    uint32_t rr,dd,ff;unsigned before=timer_reads;\n    gpu_wait_prof_read(&rr,&dd,&ff);gpu_wait_prof_read(&rr,&dd,&ff);\n    assert(timer_reads==before && rr==r && dd==d && ff==f);\n    assert(timer_reads==reads);\n#else\n    (void)r;(void)d;(void)f;(void)reads;assert(timer_reads==0);\n#endif\n}\nstatic void report(const char *name) {\n    /* Remove only added timer observations: GPU polls/hooks/state must match\n     * the unmodified-header control in both content and order. */\n    char trace[1024];unsigned j=0;for(unsigned i=0;i<ne;i++)if(events[i]!=\'T\')trace[j++]=events[i];trace[j]=0;\n    printf("%s %s %u %u %u %u %u %u %u %u %u %u %u %u\\n",name,trace,is,ir,iff,hooks,\n      _gpu_dbg_dma_waits,_gpu_dbg_dma_spin_iters,_gpu_dbg_ring_waits,_gpu_dbg_ring_spin_iters,\n      _gpu_batch_inflight_mask,_gpu_cmd_words,reg_ctrl,reg_port);\n}\nint main(void) {\n    reset();statuses(0,0,0);_gpu_batch_inflight_mask=3;_gpu_wait_dma_idle_debug();\n    assert(is==1 && hooks==0 && _gpu_batch_inflight_mask==0);check_profile(0,0,0,0);report("idle-ready");\n    reset();statuses(4,4,0);_gpu_batch_inflight_mask=3;_gpu_wait_dma_idle_debug();\n    assert(is==3 && hooks==2 && _gpu_dbg_dma_waits==1 && _gpu_dbg_dma_spin_iters==2);\n    check_profile(0,26,0,2);report("idle-blocked");\n    reset();_gpu_batch_inflight_mask=1;_gpu_wait_dma_desc_slot_debug();\n    assert(is==0);check_profile(0,0,0,0);report("descriptor-skip");\n    reset();statuses(0,0,0);_gpu_batch_inflight_mask=3;_gpu_wait_dma_desc_slot_debug();\n    assert(is==1);check_profile(0,0,0,0);report("descriptor-ready");\n    reset();statuses(64,64,0);_gpu_batch_inflight_mask=3;_gpu_wait_dma_desc_slot_debug();\n    assert(is==3 && hooks==2 && _gpu_batch_inflight_mask==3);check_profile(0,26,0,2);report("descriptor-blocked");\n    reset();_gpu_known_rdptr=200;_gpu_stream_reserve_words(4);\n    assert(is==0 && ir==0);check_profile(0,0,0,0);report("ring-cached-ready");\n    reset();statuses(0,0,0);rings(120,0,0);_gpu_ring_ensure(16);\n    assert(is==1 && ir==1 && hooks==0 && _gpu_dbg_ring_waits==1);\n    check_profile(0,0,0,0);report("ring-refreshed-ready");\n    reset();statuses(0,0,0);rings(104,108,120);_gpu_stream_reserve_words(4);\n    assert(is==1 && ir==3 && hooks==2 && _gpu_dbg_ring_spin_iters==2);\n    check_profile(26,0,0,2);report("ring-blocked");\n    /* Actual CPU-ring flush returns before DMA descriptor/cache submission,\n     * but reserve still reaches the ring-space wait. MMIO stores are retained. */\n    reset();_gpu_cpu_ring=1;_gpu_cmd_words=3;storage[0]=11;storage[1]=22;storage[2]=33;\n    statuses(256,0,0);rings(104,108,120);_gpu_ring_ensure(16);\n    assert(is==2 && ir==3 && hooks==2 && reg_port==33 && reg_ctrl==8 && _gpu_cmd_words==0);\n    check_profile(26,0,0,2);report("cpu-ring-transport");\n    /* Actual DMA flush: descriptor wait, reused-buffer wait, and ring wait\n     * are successive episodes. Their categories must not overlap. */\n    reset();_gpu_cmd_words=3;_gpu_batch_inflight_mask=3;\n    uint32_t seq[]={64,0,4,0,0};memcpy(status_values,seq,sizeof seq);ns=5;\n    rings(104,108,120);_gpu_ring_ensure(16);\n    assert(is==5 && ir==3 && hooks==4 && _gpu_dbg_dma_waits==2);\n    assert(reg_len==3 && reg_kick==1 && reg_src==0x10000000);\n    check_profile(26,26,0,6);report("dma-and-ring");\n    reset();fence_values[0]=7;nf=1;of_gpu_wait(7);\n    assert(iff==1 && hooks==0);check_profile(0,0,0,0);report("fence-ready");\n    reset();fence_values[0]=0xffffffff;fence_values[1]=0;fence_values[2]=1;nf=3;of_gpu_wait(1);\n    assert(iff==3 && hooks==2);check_profile(0,0,26,2);report("fence-token-wrap");\n    reset();now=0xfffffff0;statuses(0,0,0);rings(104,108,120);\n#if TEST_PROFILE\n    gpu_wait_prof_ticks[0]=0xfffffff0;\n#endif\n    _gpu_ring_ensure(16);check_profile(10,0,0,2);report("timer-counter-wrap");\n    /* Reset/read APIs do not touch timer/MMIO and reset all epochs together. */\n    unsigned nr0=timer_reads;OF_GPU_WAIT_PROFILE_RESET();\n    assert(timer_reads==nr0);check_profile(0,0,0,TEST_PROFILE?2:0);report("profile-reset");\n    return 0;\n}\n'
++FUNCS = ['_gpu_select_batch_buffer', '_gpu_wait_dma_idle_debug', '_gpu_wait_dma_desc_slot_debug', '_gpu_ring_free_now', '_gpu_ring_free_known', '_gpu_note_ring_free', '_gpu_flush_cmd_stream', '_gpu_ring_ensure', '_gpu_stream_reserve_words', 'of_gpu_fence_reached', 'of_gpu_wait']
++
++base, candidate, out = map(Path, sys.argv[1:])
++out.mkdir(parents=True, exist_ok=True)
++baseline = (base / 'src/sdk/include/of_gpu.h').read_text()
++header = (candidate / 'src/sdk/include/of_gpu.h').read_text()
++app = (candidate / 'src/quake2/openfpga/of_emit_q2.c').read_text()
++hooks = (candidate / 'src/quake2/openfpga/of_gpu_profile_q2.h').read_text().replace('#include "of_timer.h"', '')
++hooks = hooks.replace('of_time_us()', 'fake_clock()')
++sdkhooks = header[header.index('/* Optional episode timing'):header.index('\n#ifndef OF_PC', header.index('/* Optional episode timing'))]
++
++def run_c(name, text, profile=1):
++    path = out / (name + '.c')
++    path.write_text(text)
++    cmd = ['cc', '-std=c11', '-O2', '-Wall', '-Wextra', '-Wno-unused-function', '-DTEST_PROFILE='+str(profile), '-DOFQ2_GPU_PROFILE='+str(profile), str(path), '-o', str(out/name)]
++    subprocess.run(cmd, check=True)
++    run = subprocess.run([str(out/name)], capture_output=True, text=True, check=True)
++    (out/(name+'.log')).write_text(run.stdout)
++    return run.stdout
++
++# Existing exhaustive episode tests, with Quake2's real profiling helpers.
++# Copy hooks are checked separately below; disable them for these wait-only cases.
++test_hooks = hooks + '''
++#undef OF_GPU_SUBMIT_PROFILE_BEGIN
++#undef OF_GPU_SUBMIT_PROFILE_END
++#define OF_GPU_SUBMIT_PROFILE_BEGIN(cpu_ring) ((void)0)
++#define OF_GPU_SUBMIT_PROFILE_END(cpu_ring, words) ((void)0)
++#if TEST_PROFILE
++#define gpu_wait_prof_ticks ofq2_profile_wait
++static void gpu_wait_prof_read(uint32_t *r,uint32_t *d,uint32_t *f) {
++    *r=ofq2_profile_wait[0]; *d=ofq2_profile_wait[1]; *f=ofq2_profile_wait[2];
++}
++#endif
++'''
++tests = TESTS.replace('    OF_GPU_WAIT_PROFILE_RESET();\n}', '    OF_GPU_WAIT_PROFILE_RESET();\n#if TEST_PROFILE\n    ofq2_profile_active=1;\n#endif\n}')
++expected = None
++for name, source, enabled in [('wait-baseline', baseline, 0), ('wait-off', header, 0), ('wait-on', header, 1)]:
++    funcs = '\n'.join(function(source, n) for n in FUNCS).replace('__asm__ volatile("fence" ::: "memory");', '__asm__ volatile("" ::: "memory");')
++    output = run_c(name, PREFIX + test_hooks + sdkhooks + funcs + tests, enabled)
++    if expected is None: expected = output
++    assert output == expected, name
++
++prefix = PREFIX + hooks + sdkhooks
++funcs = '\n'.join(function(header,n) for n in FUNCS).replace('__asm__ volatile("fence" ::: "memory");', '__asm__ volatile("" ::: "memory");')
++copy_tests = r'''
++int main(void) {
++    ofq2_profile_reset();
++    _gpu_cpu_ring=1;_gpu_batch_buf=storage;_gpu_cmd_words=19;
++    status_values[0]=GPU_STATUS_CPU_RING_MODE;ns=1;
++    for(unsigned i=0;i<19;i++)storage[i]=0x100+i;
++    ofq2_profile_active=1;
++    _gpu_flush_cmd_stream();
++    assert(timer_reads==2 && ofq2_profile_batches==1 && ofq2_profile_words==19);
++    assert(ofq2_profile_modes==2 && ofq2_profile_copy_us==10);
++    assert(reg_port==0x112 && reg_ctrl==GPU_CTRL_CPU_RING_PUBLISH && _gpu_cmd_words==0);
++    assert(ofq2_profile_wait[0]==0 && ofq2_profile_wait[1]==0 && ofq2_profile_wait[2]==0);
++    _gpu_flush_cmd_stream();assert(timer_reads==2); /* empty flush */
++    ofq2_profile_active=0;
++    _gpu_cmd_words=1;status_values[1]=GPU_STATUS_CPU_RING_MODE;ns=2;
++    _gpu_flush_cmd_stream();assert(timer_reads==2); /* frozen overlay */
++    ofq2_profile_reset();ofq2_profile_active=1;
++    _gpu_cpu_ring=0;_gpu_publish_uncached=0;_gpu_cmd_words=3;_gpu_batch_inflight_mask=0;
++    _gpu_flush_cmd_stream();
++    assert(timer_reads==4 && ofq2_profile_words==3 && ofq2_profile_batches==1 && ofq2_profile_modes==1);
++    assert(reg_len==3 && reg_kick==1); /* DMA descriptor unaffected */
++    ofq2_profile_reset();ofq2_profile_active=1;
++    now=0xfffffff0;ofq2_profile_submit_begin();now=8;ofq2_profile_submit_end(1,4);
++    assert(ofq2_profile_copy_us==24 && ofq2_profile_words==4);
++    puts("PASS: CPU-ring batch, empty/frozen paths, DMA publication, timer wrap");
++}
++'''
++run_c('copy', prefix + funcs + copy_tests)
++
++public = app[app.index('#if OFQ2_GPU_PROFILE\n/* Windows end'):]
++public = public.replace('of_time_us()', 'fake_clock()')
++frame_prefix = '''#include <stdint.h>\n#include <stdio.h>\n#include <assert.h>\nstatic uint32_t now,reads;\nstatic uint32_t fake_clock(void){reads++;return now;}\nstatic uint32_t of_texture_budget_free(void){return 102400;}\n'''
++frame_tests = r'''
++int main(void) {
++    ofq2_profile_reset();OFQ2_GPUProfileFrame(1);OFQ2_GPUProfileFrame(1);
++    assert(reads==0);OFQ2_GPUProfileFrame(1);assert(ofq2_profile_active && reads==1);
++    for(unsigned i=0;i<40;i++) {
++        now+=50000;
++        ofq2_profile_wait[0]+=1000;ofq2_profile_wait[1]+=2000;ofq2_profile_wait[2]+=3000;
++        ofq2_profile_copy_us+=4000;ofq2_profile_words+=100;ofq2_profile_batches+=2;ofq2_profile_modes=2;
++        OFQ2_GPUProfileFrame(1);
++    }
++    assert(ofq2_profile_valid);
++    OFQ2_GPUProfileToggle();assert(ofq2_profile_visible && !ofq2_profile_active);
++    assert(!strcmp(OFQ2_GPUProfileLine(0),"Q2 P1 GPU SNAPSHOT"));
++    assert(!strcmp(OFQ2_GPUProfileLine(1),"FPS 20.0 FRAME 50.0 MS"));
++    assert(!strcmp(OFQ2_GPUProfileLine(2),"RING 1.0 DMA 2.0 MS"));
++    assert(!strcmp(OFQ2_GPUProfileLine(3),"FENC 3.0 COPY 4.0 MS"));
++    assert(!strcmp(OFQ2_GPUProfileLine(4),"WORDS 100 BATCH 2 / FRAME"));
++    assert(!strcmp(OFQ2_GPUProfileLine(5),"MODE CPU TEX FREE 100K"));
++    unsigned before=reads;now+=100000;OFQ2_GPUProfileFrame(1);assert(reads==before);
++    OFQ2_GPUProfileToggle();OFQ2_GPUProfileFrame(1);OFQ2_GPUProfileFrame(1);OFQ2_GPUProfileFrame(1);
++    assert(ofq2_profile_active && reads==before+1);
++    now+=5000000;OFQ2_GPUProfileFrame(1); /* reject long pause, keep last valid */
++    assert(!strcmp(ofq2_profile_lines[1],"FPS 20.0 FRAME 50.0 MS"));
++    OFQ2_GPUProfileFrame(0);assert(!ofq2_profile_valid && !ofq2_profile_active);
++    /* A two-second window spanning the 32-bit microsecond timer wrap. */
++    OFQ2_GPUProfileFrame(1);OFQ2_GPUProfileFrame(1);now=0xfffffff0;OFQ2_GPUProfileFrame(1);
++    now+=2000000;OFQ2_GPUProfileFrame(1);assert(ofq2_profile_valid);
++    puts("PASS: per-frame units, game/menu reset, frozen overlay, warmup, pause and timer wrap");
++}
++'''
++run_c('window', frame_prefix + hooks + public + frame_tests)
++input_source = (candidate/'src/quake2/openfpga/input_of.c').read_text()
++chord = input_source[input_source.index('\tbuttons = pad.buttons;'):input_source.index('\tchanged = buttons ^ prev_buttons;')]
++run_c('input', r'''
++#include <stdint.h>
++#include <assert.h>
++#include <stdio.h>
++#define OF_BTN_SELECT 1u
++#define OF_BTN_L1 2u
++#define OF_BTN_R1 4u
++static int ofq2_profile_chord, toggles;
++static uint32_t ofq2_profile_suppressed;
++static struct { uint32_t buttons; } pad;
++static void OFQ2_GPUProfileToggle(void) { toggles++; }
++static uint32_t filtered(uint32_t incoming) { uint32_t buttons;pad.buttons=incoming;
++''' + chord + r'''
++return buttons; }
++int main(void) {
++    assert(filtered(6)==6 && toggles==0);
++    assert(filtered(7)==0 && toggles==1);
++    assert(filtered(7)==0 && toggles==1);
++    assert(filtered(6)==0 && toggles==1); /* suppress until each key released */
++    assert(filtered(4)==0 && toggles==1);
++    assert(filtered(0)==0 && toggles==1);
++    assert(filtered(6)==6 && toggles==1);
++    assert(filtered(7)==0 && toggles==2);
++    assert(filtered(8)==8 && toggles==2); /* unrelated game key survives */
++    puts("PASS: chord edge, hold, staggered release, repeat, other buttons");
++}
++''')
++clean = subprocess.run(['make', '-n', '-C', str(candidate/'src/quake2'), 'GPU_PROFILE=1', 'clean'], capture_output=True, text=True, check=True)
++assert 'build/pocket/quake2' not in clean.stdout
++assert 'build/diagnostics/quake2-gpuprofile.elf' in clean.stdout
++invalid = subprocess.run(['make', '-n', '-C', str(candidate/'src/quake2'), 'GPU_PROFILE=2', 'clean'], capture_output=True, text=True)
++assert invalid.returncode and 'GPU_PROFILE must be 0 or 1' in invalid.stderr
++result = {'passed': True, 'wait_poll_and_state_order_unchanged': True,
++          'diagnostic_clean_preserves_normal_package': True,
++          'invalid_profile_mode_rejected': True,
++          'ready_path_wait_timer_reads': 0, 'timer_reads_per_blocked_episode': 2,
++          'batch_timer_reads': 2, 'copy_timer_not_per_word': True,
++          'frozen_overlay_no_collection': True, 'counter_and_clock_wrap_tested': True,
++          'limits': ['Fake MMIO/clock tests establish accounting and ordering, not physical timing or FPS.',
++                     'CPU COPY includes loads, MMIO stores, status check and publish; DMA COPY covers visibility preparation.',
++                     'Wait counters omit texture/LUT uploads, translucency table waits, nonblocking probes and kernel presentation waits.'],
++          'hashes': {str(p.relative_to(candidate)): hashlib.sha256(p.read_bytes()).hexdigest() for p in [candidate/'src/sdk/include/of_gpu.h',candidate/'src/quake2/openfpga/of_gpu_profile_q2.h',candidate/'src/quake2/openfpga/of_emit_q2.c']}}
++(out/'results.json').write_text(json.dumps(result,indent=2)+'\n')
++print(json.dumps(result,indent=2))
+--- a/tools/check_quake2_textures.py
++++ b/tools/check_quake2_textures.py
+@@ -0,0 +1,71 @@
++#!/usr/bin/env python3
++"""Exercise actual candidate manager + extracted lifecycle under ASan/UBSan."""
++import argparse
++import hashlib
++import json
++import os
++from pathlib import Path
++import re
++import subprocess
++import tempfile
++
++HERE = Path(__file__).resolve().parent
++
++
++def function(text, name):
++    match = re.search(r"(?m)^(?:static )?(?:void|int)\n" + re.escape(name) + r"\([^;]*?\)\n\{", text)
++    if not match:
++        raise ValueError("Function not found: " + name)
++    # Mask comments/string literals without altering offsets before brace scan.
++    mask = re.sub(r'/\*.*?\*/|//[^\n]*|"(?:\\.|[^"\\])*"',
++                  lambda m: " " * len(m.group()), text, flags=re.S)
++    start = text.index("{", match.start())
++    depth = 1
++    end = start + 1
++    while depth:
++        depth += (mask[end] == "{") - (mask[end] == "}")
++        end += 1
++    return text[match.start():end] + "\n"
++
++
++def main():
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument("candidate_root", type=Path)
++    parser.add_argument("--report", type=Path)
++    args = parser.parse_args()
++    root = args.candidate_root.resolve()
++    emit_path = root / "src/quake2/openfpga/of_emit_q2.c"
++    source = emit_path.read_text()
++    names = ["ofq2_texture_route_sdram", "OFQ2_Init", "OFQ2_TexInit", "OFQ2_TexReset",
++             "OFQ2_TexCreate", "OFQ2_TexBindDomain", "OFQ2_Shutdown"]
++    extracted = "\n".join(function(source, name) for name in names)
++    with tempfile.TemporaryDirectory(prefix="quake2-texture-") as temp:
++        work = Path(temp)
++        (work / "extracted_texture_functions.inc").write_text(extracted)
++        exe = work / "texture_test"
++        cmd = [os.environ.get("CC", "cc"), "-std=c11", "-O1", "-g",
++               "-fsanitize=address,undefined", "-fno-omit-frame-pointer", "-fno-pie", "-no-pie",
++               "-I" + str(work), "-I" + str(root / "src/sdk/include"),
++               "-I" + str(root / "src/quake2/openfpga"),
++               str(HERE / "tests/quake2_texture_test.c"), "-o", str(exe)]
++        subprocess.run(cmd, check=True)
++        result = subprocess.run([str(exe)], capture_output=True, text=True,
++                                env=dict(os.environ, ASAN_OPTIONS="detect_leaks=0",
++                                         UBSAN_OPTIONS="halt_on_error=1"))
++        if result.returncode:
++            raise RuntimeError("Texture helper test failed:\n" + result.stdout + result.stderr)
++    print(result.stdout, end="")
++    if args.report:
++        inputs = [emit_path, root / "src/sdk/include/of_texture.h",
++                  root / "src/quake2/openfpga/of_emit_q2.h", root / "src/sdk/include/of_caps.h",
++                  HERE / "tests/quake2_texture_test.c", Path(__file__)]
++        args.report.write_text(json.dumps({"passed": True, "candidate_root": str(root),
++            "test_stdout": result.stdout, "extracted_functions": names,
++            "extracted_sha256": hashlib.sha256(extracted.encode()).hexdigest(),
++            "inputs": {str(p): hashlib.sha256(p.read_bytes()).hexdigest() for p in inputs},
++            "limitations": ["Records MMIO leaf actions; not a cycle-accurate GPU/cache model.",
++                            "Does not prove device FPS or sustained performance."]}, indent=2) + "\n")
++
++
++if __name__ == "__main__":
++    main()
+--- a/tools/tests/quake2_texture_test.c
++++ b/tools/tests/quake2_texture_test.c
+@@ -0,0 +1,196 @@
++/* Real non-OF_PC texture manager and extracted Quake2 lifecycle functions.
++ * Hardware leaves are recording mocks; no cached/uncached coherency emulation. */
++#include <assert.h>
++#include <stdbool.h>
++#include <stdint.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#define OF_GPU_H
++#define OF_CACHE_H
++#include "of_caps.h"
++#include "of_emit_q2.h"
++
++static struct of_capabilities caps;
++const struct of_capabilities *_of_caps_ptr = &caps;
++static uint32_t GPU_PALOOKUP_BASE, GPU_STATUS;
++typedef struct { uint32_t addr; uint16_t width, height; } of_gpu_texture_t;
++static unsigned char fast_bytes[4096];
++static char events[1024];
++static unsigned event_count, route, finish_count, upload_count, clean_count;
++static unsigned pending, expected_live_top;
++static void event(char c) { assert(event_count + 1 < sizeof(events)); events[event_count++] = c; events[event_count] = 0; }
++static void clear_events(void) { event_count = 0; events[0] = 0; }
++static void of_gpu_finish(void);
++static void _of_gpu_route_fast_tex(int enable)
++{
++    assert(!pending);
++    route = enable != 0;
++    event(enable ? 'T' : 'S');
++}
++static void _of_gpu_fast_tex_upload(uint32_t off, const uint32_t *src, uint32_t words)
++{
++    assert(off % 4 == 0 && off + words * 4 <= sizeof(fast_bytes));
++    /* Explicit word reads preserve the actual leaf's source access size. */
++    for (uint32_t i = 0; i < words; ++i) {
++        uint32_t word = src[i];
++        memcpy(fast_bytes + off + i * 4, &word, 4);
++    }
++    ++upload_count;
++    event('U');
++}
++static void of_gpu_bind_texture(const of_gpu_texture_t *tex) { (void)tex; event('B'); }
++static void of_cache_flush_range(void *src, uint32_t bytes) { (void)src; (void)bytes; }
++#include "of_texture.h"
++
++static uint32_t ofq2_caps, ofq2_tex_generation;
++static bool ofq2_ready, ofq2_pending;
++static uint8_t *ofq2_bound_fb;
++static int ofq2_bound_stride;
++static ofq2_tri_state_t ofq2_tristate_cur;
++static bool ofq2_tristate_valid, ofq2_tristate_dirty;
++static ofq2_object_state_t ofq2_objstate_cur;
++static bool ofq2_objstate_valid;
++static uint32_t ofq2_clean_once_slots[4], ofq2_clean_once_hash[4], ofq2_clean_once_next;
++#define OF_SVC_MAGIC 0x4f535643u
++static struct { unsigned magic, count; void *video_acquire_next, *video_buffer_addr; } services;
++#define OF_SVC (&services)
++
++static void of_gpu_init(void) { pending = 0; event('I'); }
++static void of_gpu_finish(void)
++{
++    if (pending) assert(_of_tex_fast_top == expected_live_top);
++    pending = 0;
++    ++finish_count;
++    event('F');
++}
++static void of_gpu_shutdown(void) { assert(!pending); event('D'); }
++void OFQ2_Finish(void) { of_gpu_finish(); ofq2_pending = false; }
++void OFQ2_CacheClean(const void *src, uint32_t bytes)
++{
++    assert(src && bytes);
++    ++clean_count;
++    event('C');
++}
++#include "extracted_texture_functions.inc"
++
++static void setup(uint32_t bytes, uint32_t version)
++{
++    memset(&caps, 0, sizeof(caps));
++    caps.version = version;
++    caps.tex_fast_size = bytes;
++    caps.gpu_base = 0x40000000u;
++    caps.hw_features = OF_HW_GPU_SPAN;
++    route = 1; /* hardware soft reset deliberately leaves the route latched */
++    pending = 0;
++    clean_count = finish_count = upload_count = 0;
++    clear_events();
++    memset(fast_bytes, 0xa5, sizeof(fast_bytes));
++    assert(OFQ2_Init(640));
++    assert(ofq2_ready && ofq2_bound_stride == 640);
++    assert(strcmp(events, version >= 3 && bytes ? "IS" : "I") == 0);
++    if (version >= 3 && bytes) assert(route == 0 && _of_tex_bound == 0);
++    clear_events();
++}
++
++static void test_exact_sizes(void)
++{
++    for (unsigned n = 1; n <= 65; ++n) {
++        setup(4096, 4);
++        unsigned char *src = malloc(n); /* exact allocation: ASan checks tails */
++        assert(src);
++        for (unsigned i = 0; i < n; ++i) src[i] = (unsigned char)(i * 37u + n);
++        ofq2_texture_t t;
++        OFQ2_TexCreate(&t, src, 1, 1, n);
++        assert(clean_count == 1 && events[0] == 'C');
++        assert((t.flags & _OF_TEX_FAST) && t.addr == 0);
++        assert(memcmp(fast_bytes, src, n) == 0);
++        for (unsigned i = n; i < (n + 3u) / 4u * 4u; ++i) assert(fast_bytes[i] == 0);
++        assert(fast_bytes[(n + 3u) / 4u * 4u] == 0xa5);
++        assert(_of_tex_fast_top == ((n + 15u) & ~15u));
++        assert(upload_count == (n / 4u != 0) + (n % 4u != 0));
++        free(src);
++    }
++    puts("PASS: 65 exact source lengths, padded tails, alignment, one clean per create");
++}
++
++static void test_capacity_and_versions(void)
++{
++    unsigned char *src = malloc(45);
++    memset(src, 0x35, 45);
++    ofq2_texture_t a, b;
++    setup(64, 4);
++    OFQ2_TexCreate(&a, src, 1, 1, 45);
++    assert(a.flags & _OF_TEX_FAST);
++    assert(_of_tex_fast_top == 48 && of_texture_budget_free() == 16);
++    unsigned uploads = upload_count;
++    OFQ2_TexCreate(&b, src, 1, 1, 17);
++    assert(!(b.flags & _OF_TEX_FAST) && upload_count == uploads);
++    assert(_of_tex_fast_top == 48);
++    assert(b.addr == (uint32_t)(uintptr_t)src);
++    for (unsigned version = 2; version <= 4; ++version) {
++        setup(version == 2 ? 4096 : 0, version);
++        assert(!of_texture_has_fast_mem());
++        OFQ2_TexCreate(&a, src, 1, 1, 45);
++        assert(a.flags == 0 && upload_count == 0);
++        clear_events();
++        OFQ2_Shutdown();
++        assert(strcmp(events, "FD") == 0); /* no fast-register write */
++    }
++    free(src);
++    puts("PASS: bounded capacity fallback and caps v2/v3/v4 SDRAM-only lifecycle");
++}
++
++static void test_lifecycle_and_domains(void)
++{
++    unsigned char *src = malloc(17);
++    memset(src, 0x91, 17);
++    ofq2_texture_t a;
++    setup(4096, 4);
++    OFQ2_TexCreate(&a, src, 1, 1, 17);
++    clear_events();
++    OFQ2_TexBindDomain(&a);
++    assert(strcmp(events, "FT") == 0 && route == 1);
++    clear_events();
++    OFQ2_TexBindDomain(&a);
++    assert(event_count == 0); /* no per-draw fence for the common domain */
++    expected_live_top = _of_tex_fast_top;
++    pending = 1;
++    unsigned generation = ofq2_tex_generation;
++    OFQ2_TexReset();
++    assert(strcmp(events, "F") == 0);
++    assert(_of_tex_fast_top == 0 && ofq2_tex_generation == generation + 1);
++    /* New offsets may now overwrite old bytes; old handles are invalid. */
++    OFQ2_TexCreate(&a, src, 1, 1, 17);
++    assert(a.addr == 0);
++    clear_events();
++    OFQ2_TexBindDomain(&a);
++    assert(strcmp(events, "FT") == 0); /* reset invalidates route/cache shadow */
++    clear_events();
++    expected_live_top = _of_tex_fast_top;
++    pending = 1;
++    OFQ2_TexInit();
++    assert(strcmp(events, "FS") == 0);
++    assert(route == 0 && _of_tex_fast_top == 0);
++    OFQ2_TexCreate(&a, src, 1, 1, 17);
++    OFQ2_TexBindDomain(&a);
++    clear_events();
++    expected_live_top = _of_tex_fast_top;
++    pending = 1;
++    OFQ2_Shutdown();
++    assert(strcmp(events, "FSD") == 0);
++    assert(!ofq2_ready && route == 0);
++    clear_events();
++    OFQ2_TexInit(); OFQ2_TexReset(); OFQ2_Shutdown();
++    assert(event_count == 0); /* idle wrappers do not touch uninitialized GPU */
++    free(src);
++    puts("PASS: startup stale route, reset/reinit drain-before-reuse, shutdown route, stable binds");
++}
++
++int main(void)
++{
++    test_exact_sizes();
++    test_capacity_and_versions();
++    test_lifecycle_and_domains();
++    return 0;
++}
+--- a/docs/sm64-os30-transfer-20261006.txt
++++ b/docs/sm64-os30-transfer-20261006.txt
+@@ -0,0 +1,104 @@
++SM64 / os30 findings transferred to Quake2, 2026-10-06
++
++What is already present
++
++Quake2's active GL1 renderer already places static RGB565 textures in the
++capability-reported dedicated texture tier. It already reuses transformed
++vertices, uses compact sticky GPU state, and keeps one GPU submit owner.
++Fast-resident GL1 textures free their SDRAM copies. SM64's resident texture
++allocator and permanent SDRAM fallback therefore cannot be copied here.
++Quake2 retains its current core, OS, clocks, rendering math and capability gates.
++The packaged os30 core is b4d55466283320c798047effa1dd9895d990fd6f297857e52ad99ec9bbf3778d;
++it differs from SM64's retained A core d3d90e20c7116304108a2f94b65d3a69335347603fab388b905cafc3fc6f5f9f.
++The OS matches 054abd4b3d2c57d55b4ecec23f2fcaa3703206db3df14ebe7793c22941d34ef7.
++No core swap is justified without checking Quake2's required capabilities and
++actual rendering on that core. Configured clock is not proof of timing closure.
++
++Applied normal-build changes
++
++- Remove three duplicate texture cache flush/readbacks in the mini-GL layer.
++  OFQ2_TexCreate still performs the visibility handoff exactly once. This cuts
++  upload-time work; no sustained frame-rate improvement has been measured.
++- Pad partial final upload words instead of reading beyond the source. A
++  1x1 RGB565 texture has only two bytes, while the physical upload port takes
++  four-byte words. Aligned upload bodies retain their single-call path.
++- Restore SDRAM texture routing after initialization and before shutdown,
++  since GPU reset alone does not reset that persistent route register.
++- Drain queued references before texture allocator reset/reinitialization.
++  Existing mixed-domain bind fences remain necessary. GL1 does not reset its
++  allocator while fast-only handles are live; that ownership model is retained.
++
++Diagnostics: opt-in and separate from the normal package
++
++  make -C src/quake2 GPU_PROFILE=1
++
++produces build/diagnostics/quake2-gpuprofile.elf and keeps the normal packaged
++quake2.elf unchanged. GPU_PROFILE=0 is the default, using .obj/quake2;
++GPU_PROFILE=1 uses .obj/quake2-gpuprofile. Only 0 and 1 are accepted.
++A fresh full-ELF comparison proved adding these hooks with profiling disabled
++was byte-identical to the pre-update source build before the texture changes.
++
++Use the diagnostic ELF in place of the game ELF only for a measurement. Enter
++normal gameplay, stay in the desired area for at least five seconds, then
++hold L+R and press Select. The Q2 P1 GPU SNAPSHOT panel freezes the latest
++complete two-second window. Repeat the chord to hide it and resume collection;
++allow another complete window before taking another snapshot. Menus, loading screens, pauses and cinematics
++reset collection. This update does not deploy the diagnostic to an SD card.
++
++All times are milliseconds per rendered frame, truncated to 0.1 ms:
++- FPS/FRAME: elapsed end-of-frame intervals, including game/audio/presentation.
++- RING/DMA/FENC: disjoint blocked SDK episodes. Two timer reads per blocked
++  episode, zero timer reads on ready wait paths. Poll counts are not time.
++- COPY: two timer reads per submitted batch, never per command word. In MODE
++  CPU it includes staging loads, serial command MMIO stores, status check and
++  publish. In MODE DMA it measures source copy/cache visibility preparation;
++  descriptor and idle blocking are in DMA, not COPY.
++- WORDS/BATCH: averages per frame; TEX FREE: remaining dedicated arena space.
++
++No new GPU barrier is inserted for measurement. The overlay draws only after
++collection stops, so its CPU text blits do not contaminate the captured window.
++Timers and counter updates can still change measured execution; compare the
++normal executable separately. FENC omits application/kernel presentation waits.
++Texture/LUT uploads, translucency-table waits, nonblocking probes and game/CPU
++work are not classified here. Zero RING does not establish GPU idleness or
++prove the CPU/SDRAM/command-port path is free of stalls. Do not add overlapped
++CPU and GPU component times to predict FPS.
++
++Evidence that motivated the transfer
++
++SM64 F6 single Pocket MAP9 snapshot: 27.4 FPS, 26.6 ms render, 29.9 Hz simulation;
++prior F5: 22.2 FPS, 33.8 ms render. This clears the 25 FPS target for that
++snapshot. It was not a controlled same-state repeated A/B and does not establish
++an equivalent Quake2 improvement. F6 enabled fast texture memory already
++present in Quake2. GPU component replays predicted only 2.5-2.8%, which must not
++be presented as a complete physical frame model.
++
++SM64 F7 snapshot: 21.8 FPS, 34.8 ms render/HOST, explicit ring/DMA/fence/acquire
++waits each below the 0.1 ms display resolution; three sampled frames showed
++12.2 ms vertex and 20.6 ms triangle preparation/submission. HOST includes cache
++stalls and command-store latency, not just arithmetic. Its observed FPS differs
++from F6, confounded by scene and instrumentation; the modeled 0.84% overhead is
++not a physical guarantee. Batched command transfer timing addresses this gap.
++
++Keep the simple core as the reference. Dual issue, geometry workers and faster
++clock experiments did not establish reliable end-to-end gains for the measured
++SM64 scene. Do not enable them by analogy. Division was a smaller full-frame
++contributor than preparation, cache behavior and transport. Preserve Quake2's
++existing float math and texture/material behavior; retained hardware FMA differs
++from IEEE functional simulation, so numerical equivalence needs real evidence.
++
++Reproducible focused checks (run from repository root)
++
++  python3 tools/check_quake2_renderer.py
++  python3 tools/check_quake2_textures.py . --report /tmp/q2-textures.json
++  python3 tools/check_quake2_gpu_profile.py . . /tmp/q2-gpu-profile-tests
++
++The texture helper suite uses ASan/UBSan, exact source lengths 1-65, capacity
++fallback, old capabilities, lifecycle ordering and stable-domain bindings.
++The profiling tests exercise actual extracted SDK/helper code with recording
++MMIO/timer substitutes: poll order, ready paths, blocked episodes, batched
++transport, counter wrap, frozen overlay, window units and chord release.
++Existing eight renderer/loader/audio regression suites pass. Normal and
++separate diagnostic RISC-V builds pass with the existing pinned GCC13.2.0.
++These tests do not simulate an entire Quake2 level or prove device FPS. No FPGA
++fits, timing sweep, clock change, SD deployment or git commit was performed.

@@ -1,0 +1,84 @@
+Local SM64 publication and rollback
+==================================
+
+Local publication of qualified simple-v4 is complete; see published.json and
+selection.json in the measurement directory. The separate deploy_sd.py also
+updated only the mounted card app; see sd-deployed.json for synced/read-back
+verification and the old app backup. publish.py itself never writes a card,
+publishes Quake2, or runs an FPGA build. The workflow below describes its
+guards and rollback; do not rerun --apply over the existing publication.
+
+Core choice
+-----------
+Use the retained A-single bitstream (SHA-256 d3d90e20c7116304108a2f94b65d3a69335347603fab388b905cafc3fc6f5f9f).
+It is the existing single-issue CPU with geometry disabled, configured at 100 MHz.
+Publication changes BOTH ../SM64/runtime/pocket/os30.rbf_r and the packaged
+build/pocket/sm64/Cores/ThinkElastic.SM64/os30.rbf_r from frozen B to A. Updating
+the runtime copy prevents the next ordinary package build from reinstating B.
+There is no new timing result: A retains its previous reported setup shortfall.
+The historical runtime/pocket/ap_core.sof, other variants and all OS/SDK files
+stay unchanged. This publication supplies the Pocket RBF; it does not select a
+new JTAG/SOF image.
+
+Selection manifest
+------------------
+Create docs/measurements/os30-simple-20261005/selection.json after validation:
+
+{
+  "qualified": true,
+  "candidate": "NAME-OF-CANDIDATE-DIRECTORY",
+  "core": "A-single",
+  "core_sha256": "d3d90e20c7116304108a2f94b65d3a69335347603fab388b905cafc3fc6f5f9f",
+  "source_sha256": {
+    "src/sm64/sm64/src/pc/gfx/gfx_pc.c": "SHA256"
+  },
+  "normal_app_sha256": "SHA256",
+  "diagnostic_app_sha256": "SHA256",
+  "evidence_sha256": {
+    "docs/measurements/os30-simple-20261005/validation/REPORT.json": "SHA256"
+  }
+}
+
+source_sha256 may also contain gfx_gpu.c in that same directory if it is selected
+and validated. Those are the only allowed source mutations. The candidate must
+contain app.elf, diagnostic.elf, build-normal.json, build-diagnostic.json and the
+changed source(s). Unchanged input sources are read from baseline/. Both build
+records must bind all four tracked graphics inputs to those exact hashes.
+evidence_sha256 paths are relative to the openfpgaCore repository root.
+
+Commands from openfpgaCore (all are read-only unless --apply is present):
+
+  python3 tools/experiments/os30_simple_20261005/publish.py --check-before
+  python3 tools/experiments/os30_simple_20261005/publish.py
+  python3 tools/experiments/os30_simple_20261005/publish.py --apply
+  python3 tools/experiments/os30_simple_20261005/publish.py --verify
+
+--apply requires the existing authorization and filesystem escalation to write
+../SM64. The default invocation validates and prints the full destination list.
+
+Publication updates the normal and diagnostic .obj app copies, and puts the
+diagnostic app in the ordinary Pocket package so the P3 panel remains available.
+The unchanged-source/SDK/runtime/package inventory contains 6,782 frozen files;
+each is checked before and after publication. Backups and publication records
+are stored only under docs/measurements/os30-simple-20261005/. The recovery list
+is written before any destination replacement. The SD card is never updated by
+this script, even if it happens to be mounted.
+
+Rollback
+--------
+  python3 tools/experiments/os30_simple_20261005/publish.py --rollback
+  python3 tools/experiments/os30_simple_20261005/publish.py --rollback --apply
+
+Rollback restores the previous source/apps and B bitstream in ../SM64. It accepts
+a mixture of before/after hashes to recover an interrupted copy, but refuses to
+overwrite a subsequently edited source or app. It does not roll back the SD.
+Do not delete backup/record files or rerun publication over an earlier record.
+
+Verification performed during preparation
+-----------------------------------------
+Python syntax and the actual 6,782-file before inventory passed. A disposable
+/tmp fixture exercised dry-run, successful publication and verification,
+unqualified/source/evidence/protected-file rejection, refusal to overwrite a
+later app edit, and exact rollback from a partially applied publication. No
+actual ../SM64 files were written during these checks. Results are recorded in
+docs/measurements/os30-simple-20261005/publication-script-checks.json.

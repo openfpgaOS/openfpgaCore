@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the shared Pocket/MiSTer timer HAL against both runtime clock rates."""
+"""Run the shared Pocket/MiSTer timer HAL at production and trial clock rates."""
 import argparse
 from pathlib import Path
 import subprocess

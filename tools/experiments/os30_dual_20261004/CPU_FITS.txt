@@ -1,0 +1,104 @@
+Standalone CPU area and timing probes, 2026-10-04
+================================================
+
+Scope
+-----
+These use a standalone VexiiRiscv top, virtual unconstrained external
+interfaces, Cyclone V 5CEBA4F23C8, a 100 MHz constraint, saved seed 2, and
+two Quartus processors. Settings match the earlier tiny-imf-v1 CPU probe.
+They measure CPU area and internal register-to-register timing only.
+They are neither complete os30 fits nor board/interface timing qualification.
+
+                    ALMs  LABs  M10Ks  DSPs  Registers  Fmax MHz  Setup ns  Hold ns
+single-d64-v1        4629   668    116     4       5597    102.67    +0.260   +0.119
+lean-v1              5901   828    122     4       6570     88.50    -1.300   +0.096
+immediate-v1         5703   798    120     4       6582     90.46    -1.055   +0.098
+lean-grouped-v1      6189   884    122     4       6565     86.37    -1.578   +0.106
+lean-control-v1      5935   858    122     4       6551     89.39    -1.187   +0.069
+
+The single-D64 control is the existing os30_worker CPU (single issue with a
+64 KiB D-cache). The freshly generated single64 control differs only in
+generator comments and declaration whitespace, not RTL structure.
+Both dual candidates keep the same caches, shared FPU/multiply/divide/LSU,
+predictors and two-slot/sixteen-operation store buffer.
+
+Lean adds 1272 ALMs to the standalone single control. Restricting its second
+lane to immediate ALU operations saves 198 of those ALMs and two M10Ks.
+These deltas must not be added to a whole-core report as guaranteed placement
+savings; full os30 placement and timing are separate experiment results.
+
+Diagnosis
+---------
+Lean's worst path is AlignerPlugin_logic_buffer_mask[0] to
+decode_ctrls_1_up_Decode_INSTRUCTION_1[16]: second-instruction extraction and
+compressed decoding, nine logic levels, 11.035 ns data delay.
+
+Immediate's worst path is decode_ctrls_2_up_RS3_PHYS_0[4] through dependency
+checking and dispatch backpressure to AlignerPlugin_logic_buffer_last[3],
+10.820 ns data delay. Its second-instruction extraction/decompression path
+still has -1.017 ns slack. Fixing decompression alone would leave the ready
+path as another limit.
+
+The grouped frontend rewrite adds 288 ALMs over lean and regresses internal
+Fmax to 86.37 MHz. Its worst path remains buffer-mask to instruction1[15],
+nine logic levels and 11.357 ns data delay. It is rejected as an area/timing
+rescue. The smaller control-only rewrite adds 34 ALMs and improves setup by
+only 0.113 ns: fetch_ctrl3.valid to instruction1[16] remains 10.977 ns, and
+the RS1 dependency-to-aligner-ready path remains at -1.074 ns. Neither
+rewrite establishes 100 MHz internal timing, let alone full-core closure.
+
+The integer register file grows from two to eight M10Ks in lean, with about
+85 ALMs directly attributed to its two-write-port storage selection. The
+floating-point register file remains three M10Ks. The shared divider remains
+about 190 ALMs, and the CPU retains four DSPs. Most additional ALMs are in
+the flat main VexiiRiscv entity (decode, dispatch, operand selection, bypass
+and pipeline control), not duplicated floating-point arithmetic. This is
+hierarchy evidence, not precise attribution among those flattened functions.
+
+Reproduction and evidence
+-------------------------
+  python3 tools/experiments/os30_dual_20261004/fit_cpu.py NEW_LABEL --cpu CPU.v
+
+The utility refuses existing output directories and holds a campaign-wide
+lock to prevent simultaneous standalone CPU fits. It does not run assembly,
+change production RTL/configuration, deploy files or sweep seeds.
+
+Artifacts live under docs/measurements/os30-dual-20261004/cpu-fit-LABEL/:
+  manifest.json            exact input hashes, source identity and scope
+  inputs/                  immutable initial RTL/project/timing inputs
+  fit_cpu.py               exact executed utility source
+  result.json              resources and all twenty timing-corner checks
+  entity-resources.txt     complete hierarchy resource table
+  fit/timing/              full setup/hold paths at four timing corners
+  fit/output_files/        Quartus map/fit/STA reports
+
+All five map/fit/STA stages passed. The four dual candidates fail internal
+100 MHz setup checks; hold checks pass. The utility records that distinction
+explicitly rather than treating a successful fitter exit as timing closure.
+
+Follow-up frontend timing work
+------------------------------
+These standalone results are diagnostics, not complete-core Fmax.
+All keep I32/D128 and reduced predictors. Saved seed 2, 100 MHz constraint.
+
+profile                                  ALMs LABs M10K MHz     setup   hold
+rvc-pipeline-v1                          5815  830  183  89.05  -1.230  0.141
+rvc-skid-control-v1                      6128  882  183  94.51  -0.581  0.121
+  REJECTED: fails architectural CPU tests; timing is not a valid candidate result.
+rvc-stage1-control-rawfp-v1              5982  843  183  89.19  -1.212  0.136
+rvc-stage1-control-v1                    5915  814  183  89.13  -1.219  0.058
+rvc-stage1-v1                            5965  845  183  86.03  -1.624  0.046
+
+RVC stage1 moves expansion after raw instruction capture without adding a cycle.
+RVC pipeline additionally separates ISA decode, adding a frontend pipeline stage.
+Control variants factor exact-equivalent aligner/dispatch expressions.
+Raw-FP classification saves no state and produced little further timing benefit.
+
+The first skid variant broke the ready chain but failed flush/IRQ tests. Its
+94.51 MHz result must not be presented as a correct or qualified CPU. The
+corrected masked-skid variant gates stored lane masks on flush and passes the
+full fourteen-case CPU suite. Its authoritative timing is the full-core fit,
+not the rejected unmasked standalone probe above.
+
+See generator/README.txt, validation/REPORT.txt, and the full-core REPORT.txt.
+None of these standalone probes establishes board/interface or game performance.

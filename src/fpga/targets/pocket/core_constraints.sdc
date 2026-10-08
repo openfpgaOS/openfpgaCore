@@ -30,6 +30,21 @@
 # invisible to STA).  Grouped, STA times the crossing (20.3 ns setup to the
 # mid edge; hold at the coincident edge gets fitter min-delay padding) and
 # any future razor FAILS timing instead of shipping.
+# The 83/166 clocks come from one PLL. Keep them in the same group so
+# FIFO payload and pointer paths are checked, including coincident-edge hold.
+set os30_sdram166 0
+foreach_in_collection assignment [get_all_global_assignments -name VERILOG_MACRO] {
+    if {[lindex $assignment 2] eq "INCLUDE_OS30_SDRAM166"} { set os30_sdram166 1 }
+}
+set ram_clock_group {
+    ic|mp_ram|altera_pll_i|general[0].gpll~PLL_OUTPUT_COUNTER|divclk
+    ic|mp_ram|altera_pll_i|general[1].gpll~PLL_OUTPUT_COUNTER|divclk
+}
+set cpu_clock_pin {ic|mp_ram|altera_pll_i|general[0].gpll~PLL_OUTPUT_COUNTER|divclk}
+if {$os30_sdram166} {
+    set cpu_clock_pin {ic|mp_ram|altera_pll_i|general[2].gpll~PLL_OUTPUT_COUNTER|divclk}
+    lappend ram_clock_group $cpu_clock_pin
+}
 set_clock_groups -asynchronous \
  -group { bridge_spiclk } \
  -group { clk_74a } \
@@ -38,8 +53,7 @@ set_clock_groups -asynchronous \
  -group { ic|mp1|mf_pllbase_inst|altera_pll_i|general[2].gpll~PLL_OUTPUT_COUNTER|divclk \
           ic|mp1|mf_pllbase_inst|altera_pll_i|general[3].gpll~PLL_OUTPUT_COUNTER|divclk \
           ic|mp1|mf_pllbase_inst|altera_pll_i|general[4].gpll~PLL_OUTPUT_COUNTER|divclk } \
- -group { ic|mp_ram|altera_pll_i|general[0].gpll~PLL_OUTPUT_COUNTER|divclk \
-          ic|mp_ram|altera_pll_i|general[1].gpll~PLL_OUTPUT_COUNTER|divclk }
+ -group $ram_clock_group
 
 # NO false_path here any more.  The stripe-fix phase detector used to sample
 # clk_vid as data at a COINCIDENT edge (unfixable by construction: -1.5 ns
@@ -74,10 +88,10 @@ set_clock_groups -asynchronous \
 # F4-AB-disabled: set_output_delay -clock bridge_spiclk -min -2.0 [get_ports {bridge_spimosi bridge_spimiso}]
 
 # SDRAM I/O timing
-# The io_sdram controller uses clk_ram_chip (243° phase shift) internally
-# to manage setup/hold timing. The phase relationship is fixed by the PLL,
-# not by the fitter. Constrain output delays loosely; mark DQ input as
-# false path since the controller samples at the correct phase internally.
+# clk_ram_chip drives the SDRAM clock pin; the controller clock captures
+# DQ through DDIO inputs. Both input and output paths must meet timing.
+# The 166 MHz trial uses an initial 180-degree pin phase and currently
+# fails pin timing; do not treat functional simulation as hardware signoff.
 create_generated_clock -name dram_clk_pin \
   -source [get_pins {ic|mp_ram|altera_pll_i|general[1].gpll~PLL_OUTPUT_COUNTER|divclk}] \
   [get_ports dram_clk]
@@ -94,7 +108,9 @@ set_output_delay -clock dram_clk_pin -min -1.0 [get_ports {dram_a[*] dram_ba[*] 
 # plus ~0.6/-0.2 ns board flight; capture is the FALLING-edge IO register
 # phy_dq_neg (FAST_INPUT_REGISTER, io_sdram.v) whose window STA now
 # verifies instead of ignoring.
-set_input_delay -clock dram_clk_pin -max 6.0 [get_ports {dram_dq[*]}]
+# AS4C32M16MSA CL3 tAC=5.5 ns plus 0.6 ns board budget in this trial.
+set dram_input_max [expr {$os30_sdram166 ? 6.1 : 6.0}]
+set_input_delay -clock dram_clk_pin -max $dram_input_max [get_ports {dram_dq[*]}]
 set_input_delay -clock dram_clk_pin -min 2.3 [get_ports {dram_dq[*]}]
 # Edge pairing: the launch clock carries ~8.8 ns of network+output-buffer
 # insertion to the pin (STA includes it in arrival), so data returns after
@@ -102,7 +118,10 @@ set_input_delay -clock dram_clk_pin -min 2.3 [get_ports {dram_dq[*]}]
 # falling edge (verified: arrival ~24.7 ns vs MC2 required ~29 ns = ~+4 ns
 # real margin; the default pairing reported an impossible -5.8 and let the
 # fitter chase unfixable paths).  Whole-cycle consumption downstream is
-# independently proven by simulation (enable_dq_read_4 arithmetic).
+# independently proven for the existing 100 MHz setup by simulation
+# (enable_dq_read_4 arithmetic). These legacy edge-pair constraints are
+# retained for the experiment: a new capture phase/pipeline must be proven
+# before changing them. They currently report violations at 166 MHz.
 set_multicycle_path -setup -end -from [get_ports {dram_dq[*]}] 2
 set_multicycle_path -hold  -end -from [get_ports {dram_dq[*]}] 1
 # The falling-edge sample's neg->pos retime is now the HARDENED DDIO input
@@ -150,7 +169,7 @@ foreach_in_collection assignment [get_all_global_assignments -name VERILOG_MACRO
 }
 if {$cram1_timing_enabled} {
     create_generated_clock -name cram1_clk_pin \
-        -source [get_pins {ic|mp_ram|altera_pll_i|general[0].gpll~PLL_OUTPUT_COUNTER|divclk}] \
+        -source [get_pins $cpu_clock_pin] \
         [get_ports cram1_clk]
     set_input_delay -clock cram1_clk_pin -max 7.6 [get_ports {cram1_dq[*] cram1_wait}]
     set_input_delay -clock cram1_clk_pin -min 1.8 [get_ports {cram1_dq[*] cram1_wait}]

@@ -1,0 +1,6 @@
+# os20's dual-issue CPU needs physical retiming at the configured 100 MHz.
+# Keep these overrides local to os20; other variants use ap_core.qsf defaults.
+set_global_assignment -name PHYSICAL_SYNTHESIS_COMBO_LOGIC ON
+set_global_assignment -name PHYSICAL_SYNTHESIS_REGISTER_RETIMING ON
+set_global_assignment -name PHYSICAL_SYNTHESIS_EFFORT EXTRA
+set_global_assignment -name SDC_FILE variants/os20.sdc

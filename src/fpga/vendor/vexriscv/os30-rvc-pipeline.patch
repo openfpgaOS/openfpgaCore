@@ -1,0 +1,70 @@
+--- a/src/main/scala/vexiiriscv/Param.scala
++++ b/src/main/scala/vexiiriscv/Param.scala
+@@ -110,6 +110,7 @@
+   var decoders = 1
+   var lanes = 1
+   var decoderAt = 1
++  var rvcDecompressAt = 0
+   var dispatcherAt = 1
+   var regFileSync = true
+   var regFileDualPortRam = true
+@@ -610,6 +611,7 @@
+     opt[Int]("decoders") action { (v, c) => decoders = v }
+     opt[Int]("lanes") action { (v, c) => lanes = v }
+     opt[Int]("decoder-at") action { (v, c) => decoderAt = v }
++    opt[Int]("rvc-decompress-at") action { (v, c) => rvcDecompressAt = v }
+     opt[Int]("dispatcher-at") action { (v, c) => dispatcherAt = v }
+     opt[Long]("reset-vector").unbounded() action { (v, c) => resetVector = v }
+     opt[Unit]("relaxed-div") action { (v, c) => relaxedDiv = true }
+@@ -804,6 +806,8 @@
+   def pluginsArea(hartId : Int = 0) = new Area {
+     val plugins = ArrayBuffer[Hostable]()
+     if(withLateAlu) assert(allowBypassFrom == 0)
++    require(rvcDecompressAt >= 0 && rvcDecompressAt <= decoderAt,
++      "RVC decompression must precede or share ISA decode stage")
+     if(withMmu && lsuL1Enable) assert(lsuL1Sets <= 64, "MMU require not more than 64 sets in the LSU L1")
+     if(withMmu && fetchL1Enable) assert(fetchL1Sets <= 64, "MMU require not more than 64 sets in the FETCH L1")
+ 
+@@ -929,7 +933,8 @@
+     plugins += new decode.AlignerPlugin(
+       fetchAt = alignerPluginFetchAt,
+       lanes = decoders,
+-      withBuffer = withAlignerBuffer
++      withBuffer = withAlignerBuffer,
++      decompressAt = rvcDecompressAt
+     )
+     plugins += new decode.DecoderPlugin(
+       decodeAt = decoderAt
+--- a/src/main/scala/vexiiriscv/decode/AlignerPlugin.scala
++++ b/src/main/scala/vexiiriscv/decode/AlignerPlugin.scala
+@@ -29,7 +29,7 @@
+  */
+ class AlignerPlugin(fetchAt : Int,
+                     lanes : Int,
+-                    withBuffer : Boolean) extends FiberPlugin with AlignerService with InjectorService{
++                    withBuffer : Boolean, decompressAt : Int = 0) extends FiberPlugin with AlignerService with InjectorService{
+ 
+ 
+   val api = during build new Area{
+@@ -182,15 +182,15 @@
+         val valid = CombInit(extractor.valid)
+         lane.up(lane.LANE_SEL) := valid
+ 
+-        lane.up(Decode.INSTRUCTION) := extractor.ctx.instruction
+-        lane.up(Decode.DECOMPRESSION_FAULT) := False
++        val decLane = dpp.ctrl(decompressAt).lane(laneId)
+         lane.up(Decode.INSTRUCTION_RAW) := extractor.ctx.instruction
++        val decRaw = if(decompressAt == 0) extractor.ctx.instruction else decLane.up(Decode.INSTRUCTION_RAW)
++        decLane.up(Decode.INSTRUCTION) := decRaw; decLane.up(Decode.DECOMPRESSION_FAULT) := False
+         val isRvc = extractor.ctx.instruction(1 downto 0) =/= 3
+         val withRvc = Riscv.RVC.get generate new Area {
+-          val dec = RvcDecompressor(extractor.ctx.instruction, rvf = Riscv.RVF, rvd = Riscv.RVD, Riscv.XLEN)
+-          when(isRvc) {
+-            lane.up(Decode.INSTRUCTION) := dec.inst
+-            lane.up(Decode.DECOMPRESSION_FAULT) := dec.illegal
++          val dec = RvcDecompressor(decRaw, rvf = Riscv.RVF, rvd = Riscv.RVD, Riscv.XLEN)
++          when(decRaw(1 downto 0) =/= 3) {
++            decLane.up(Decode.INSTRUCTION) := dec.inst; decLane.up(Decode.DECOMPRESSION_FAULT) := dec.illegal
+           }
+         }
+         when(isRvc) {

@@ -73,7 +73,7 @@ module axi_periph_slave #(
     // of_gpu_draw_affine_span_group / 0x4C fallback shape).  NEW
     // HW_FEATURES bit 23, claimed 2026-06-10: the compact form previously
     // had no caps bit of its own (bit 15 covers the long-form record-style
-    // command, which stays on every target).  Must track gpu_core's
+    // command). Must track gpu_core's
     // INCLUDE_COMPACT_SPAN.  Default 1; Pocket OS30 passes 0, so SDK
     // emitters can self-gate instead of silently draining.
     parameter INCLUDE_COMPACT_SPAN = 1,
@@ -107,7 +107,12 @@ module axi_periph_slave #(
     parameter INCLUDE_COMBINE = 1,
     // Param-span/tri Q29 dynamic-scale caps (bit 18, OF_HW_GPU_PARAM_SPAN_Q29_SCALE).
     // Tracks gpu_core's INCLUDE_PARAM_SPAN_Q29; os30/SM64 clears it (Q29 cone folded).
-    parameter INCLUDE_PARAM_SPAN_Q29 = 1
+    parameter INCLUDE_PARAM_SPAN_Q29 = 1,
+    // Long-form 0x48 command; os30 uses the triangle frontends instead.
+    parameter INCLUDE_PARAM_SPAN_LIST = 1,
+    // Match gpu_core: os20 keeps affine spans while pruning these modes.
+    parameter INCLUDE_PERSPECTIVE = 1,
+    parameter INCLUDE_DEPTH = 1
 ) (
     input wire clk,
     input wire reset_n,
@@ -798,7 +803,10 @@ localparam [31:0] HW_FEATURES_RESOLVED =
     32'h0000_0001      // bit 0  OF_HW_MIXER: a 32-voice mixer is available (SET on
                        //        every target; SW-backed when bit 1 is clear)
     | 32'h0000_0010    // GPU span renderer
-    | 32'h0003_E000    // GPU persp + fragpipe + param span/list/z caps (bits 13..17)
+    | 32'h0000_4000    // GPU fragment pipeline (bit 14)
+    | (INCLUDE_PARAM_SPAN_LIST ? 32'h0000_8000 : 32'h0000_0000) // bit 15
+    | (INCLUDE_PERSPECTIVE ? 32'h0000_2000 : 32'h0000_0000) // bit 13
+    | (INCLUDE_DEPTH ? 32'h0003_0000 : 32'h0000_0000) // bits 16..17
     | ((INCLUDE_PARAM_SPAN_Q29 != 0) ? 32'h0004_0000 : 32'h0000_0000) // bit 18 Q29 dynamic scale (os30 clears)
     | 32'h0000_0340    // MIDI(6) + FPU(8) + Save slots(9)
     | FEAT_LINK
@@ -1867,6 +1875,8 @@ always @(*) begin
             // hps_clk_ctrl[2] = "running at 90 MHz" from clk_autotune
             // (quasi-static long before os.bin reads this).
             6'd53: sysreg_rdata = hps_clk_ctrl[2] ? 32'd90_000_000 : CLK_HZ;
+`elsif INCLUDE_OS30_SDRAM166
+            6'd53: sysreg_rdata = CLK_HZ; // 83 MHz CPU/peripheral counters
 `elsif INCLUDE_CLK90
             6'd53: sysreg_rdata = CLK_HZ;   // CLK_FREQ_HZ (0xD4), 90 MHz build
 `elsif INCLUDE_CLK96

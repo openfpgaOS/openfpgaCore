@@ -1,0 +1,1207 @@
+FINAL SELECTED RESULT — 2026-10-05
+=================================
+The saved-seed2 full os30 fit rvc-skid-pointer-packer-coord-v1 reaches
+90.04 MHz at the warm slow corner and 90.11 MHz at the cold slow corner.
+This meets the requested estimated-Fmax threshold above 90 MHz. The PLL
+and all timing constraints remain configured for 100 MHz: setup slack is
+still -1.106 ns at that clock, so this is NOT full 100 MHz timing closure.
+The margin above the requested estimate is only 0.04 MHz.
+
+Selected resources: 18,142 ALMs, 1848/1848 LABs, 308/308 M10Ks.
+All non-setup checks pass across the four corners: hold +0.097 ns,
+recovery +2.414 ns, removal +0.270 ns, pulse width +0.500 ns.
+All other clocks meet setup, with minimum +0.725 ns. Actual default
+placement effort is 1.0; the comparable effort2 fit reached 88.95 MHz.
+
+Exact integration/qualification evidence:
+  docs/measurements/os30-dual-20261004/coordinate-default-fit-integration-audit-v1/manifest.json
+  tools/experiments/os30_dual_20261004/check_coordinate_default_fit_integration.py
+The audit binds all 104 frozen/job inputs, the seven source overrides,
+saved seed2, unchanged SDC/PLL/phases, CPU5209's 14 retained fixtures and
+GPU8e471's 114 rendering cases. CPU logs and GPU workload cycles/pixels/
+qualified bus observations match their qualified references. This does
+not claim a new whole CPU+GPU simulation or measured game FPS gain.
+Selected RBF SHA256:
+  42349712814e0b3d3d496f71d1f194e5a1111338e144dca690c79b040c671b8a
+
+The final headvalid+coordinate+port effort2 experiment reached only
+87.97 MHz and is unselected. Port-only effort2 reached 84.99 MHz despite
+saving 57 ALMs and two LABs. Neither supersedes the selected source set.
+No full seed sweep or deployment was performed by this audit agent.
+
+Optional unfinished physical proposal:
+  docs/measurements/os30-dual-20261004/iar-target-pma-v1/manifest.json
+The private I-fetch target bit28 specialization has a focused PMA/refill/
+slot/queue proof, but remains unselected and unfitted. It is scoped to
+the exact generated CPU's admitted fetch addresses, not arbitrary CPUs.
+It is not part of the selected 90.04 MHz result.
+
+HISTORICAL ANALYSIS BELOW — earlier candidates and conditional ideas
+=================================================================
+Independent timing/resource audit, 2026-10-04
+
+This is an analysis record, not a production change or qualification report.
+Root schedules all map/fit jobs. The only new Quartus operation run for this
+audit was STA on the existing completed fullcache-smallpred-v1 database.
+
+Recorded timing evidence
+------------------------
+docs/measurements/os30-dual-20261004/timing-audit-fullcache-v1/
+contains a manifest of the original QSF, SDC, fit report, Tcl, exact command,
+summary.tsv and twelve distinct worst endpoints per requested endpoint group
+at slow 85 C and slow 0 C. Original constraints were read without overrides.
+The helper is tools/experiments/os30_dual_20261004/audit_timing.tcl.
+
+At slow 85 C the previous completed whole-core placement has these walls:
+  CPU frontend: -2.156 ns, fetch valid through align/RVC to decode1 instruction
+  integer execute: -1.871 ns, D-cache way hit through load format/forward/SRC1
+  fetch payload capture: -1.835 ns, PC through aligner usage/ready to predictor PC
+  aligner control: -1.493 ns, dispatch RS3 ID hazard through ready to buffer mask
+  GPU DSP input: -1.324 ns, perspective-active through DSP input selection
+  memory fabric: -1.263 ns, render-cache address through burst/fill hazard logic
+  FPU control: -1.161 ns, divide unschedule through global execute freeze
+  render-cache RAM: -1.037 ns
+  floating operand: -1.004 ns, packer result through float RS3 forwarding
+  dispatch state: -0.861 ns
+
+These are paths in the old congested placement, not forecasts for a changed
+CPU. The frontend pipeline change can alter placement of all these cones.
+The previous full-core fit is 18,141 ALM, 1847/1848 LAB, 307/308 M10K,
+82.26 MHz estimated Fmax, setup -2.156 ns and hold +0.022 ns at 100 MHz.
+The comparable single-issue full I32/D128 core reached 92.53 MHz.
+
+Compact, conditional follow-ups
+------------------------------
+1. Measure the structural RVC split before changing these secondary paths.
+   Independent v4->v5 stage1 RTL comparison: all 57 sequential always blocks
+   are identical except removal of two 32-bit expanded-instruction captures
+   and two 1-bit decompression-fault captures. Raw captures, valid, flush,
+   ready and execute/memory state updates are unchanged. The first expanded
+   instruction/fault consumer is DecoderPlugin at stage1; the new combinational
+   RVC logic uses the registered raw payload there. Compressed trap mtval raw
+   zero extension is retained. See timing-audit.../rvc-stage1-review.json.
+   This static review does not replace the CPU stall/flush/trap regressions.
+
+2. If integer forwarding still dominates, consider only the implicated lane0
+   RS1 combinational keep boundary, rather than deleting all four RS keeps.
+   The measured path is WAY_HITS -> cache mux -> load result -> IntFormat ->
+   writeback -> merged write data -> RS1 forwarding -> SRC1 register. Much of
+   its delay is routing; the broad prior keep-removal trial cost 281 ALMs.
+   Removing one keep is a synthesis freedom, not a pipeline/ISA change, but
+   area and timing still need measuring. Generator owns any such transform.
+
+3. The old fetch-ready critical endpoint is stage3 Prediction_WORD_JUMP_PC,
+   not Fetch_WORD_PC. Existing retime_fetch_pipeline.pl only transforms three
+   Fetch_WORD_PC registers and two fetch-bank payloads. Applying it blindly
+   therefore misses this endpoint. A focused raw/held/en capture replacement
+   on the actual 32-bit predictor payload adds 33 registers, versus about229
+   for the broad helper. It preserves the enabled-register cycle behavior but
+   needs stall/flush validation and may merely move the ready fanout elsewhere.
+
+4. FPU-match precomputation does not address the measured dispatch scoreboard
+   ID comparisons. Do not claim that helper fixes the aligner-ready path.
+   The old FPU freeze path is mostly a very long route to one maxfan16 clone;
+   changing the maxfan hint is an unmeasured placement experiment, not a
+   demonstrated logic-depth solution.
+
+RAM accounting for failed fit-rvc-stage1-area-v1
+-----------------------------------------------
+The stage1 attempt failed placement at 18,221 ALM, 1856 LAB. Its failed report
+lists 308 M10K, versus 307 for the completed predecessor. This is not an extra
+CPU memory: both RAM tables contain the same 73 logical memories with the
+same depths/widths/modes. The failed table counts one block for each tiny
+spanprod_count/u/v memory; the completed placement combines those three
+4x16-bit GPU memories into two physical M10Ks. The completed RAM table also
+spreads/shares spanprod_pl_du/dv across the same two locations. Summing logical
+RAM rows in a completed report double-counts shared blocks (312 versus307
+unique physical locations). The failed report has no placed locations.
+
+An SDRAM wbuf MLAB->M10K trial might therefore end at308 physical blocks if
+existing GPU packing repeats, but the failed report does not prove headroom.
+Do not claim a guaranteed spare M10K from a failed placement report.
+
+Whole-core area levers without removing caches/GPU/ISA
+----------------------------------------------------
+The established wbuf migration is the smallest validated RTL-neutral option:
+one 16x36 synchronous RAM, approximately20 memory ALMs and2 memory LABs locally.
+Its old D64 whole-core trial gained one physical LAB. It cannot by itself be
+expected to recover eight LABs. WBUF_REVIEW.txt records the old-data and
+collision/consumption checks. Other FWFT asynchronous FIFOs cannot safely be
+converted by a RAM-style hint alone.
+
+The area fit already selects BALANCED mode, AREA synthesis and disables
+physical register duplication. It leaves these extra candidates disabled:
+
+  set_global_assignment -name PHYSICAL_SYNTHESIS_COMBO_LOGIC_FOR_AREA ON
+
+This fitting-stage combinational area optimization is the first QSF-only
+candidate to measure for a small LAB overflow. It preserves cycle semantics;
+there is no measured benefit yet. Quartus Standard18.1 explicitly documents it:
+https://www.intel.com/programmable/technical-pdfs/683230.pdf (section4.3.2).
+
+  set_instance_assignment -name AUTO_RESOURCE_SHARING ON -to *gpu -entity gpu_core
+
+The exact instance pattern must be checked for applicability in its map
+report before relying on it. Source-equivalent sharing of mutually exclusive
+add/sub/multiply operations may reduce area, but extra muxing can worsen
+timing. This is a secondary candidate, not a promised improvement.
+https://www.intel.com/programmable/technical-pdfs/683296.pdf
+(AUTO_RESOURCE_SHARING; default Off; supports instance assignments).
+
+Auto Packed Registers is already Auto. Forcing Minimize Area is a lower
+priority alternative because the vendor explicitly says it trades timing
+for denser packing. No such fit was run by this audit.
+
+Turning router duplication off cannot explain or directly fix the failed
+stage1 placement: its report has zero routing optimization registers, and
+failure precedes routing. The old completed placement has1702 routing
+optimization registers (785 GPU and536 CPU duplicated nodes), but removing
+those may simply recreate the long routes they were inserted to shorten.
+
+No new fit, seed sweep, production source change, deployment or FPS claim
+was performed by this audit.
+
+Follow-up: direct raw FP trap classification
+------------------------------------------
+The stage1 split's isolated critical path was not its standalone decompressor
+illegal flag. At 86.03 MHz it passed RAW instruction bit1 -> expanded opcode ->
+DecoderPlugin fp_triggered -> TRAP bypass -> PC halt -> fetch valid enable.
+The control-factored version reached89.13 MHz, with RAW bits14/11 -> expanded
+opcode -> fp_triggered -> trap pending register enable as its critical path.
+Moving only DECOMPRESSION_FAULT back to decode0 would restore two old enabled
+registers without changing cycles, but would leave this measured cone intact.
+
+A smaller candidate computes the two FP trap classification flags directly
+from the already registered raw instruction. For compressed RV32F instructions,
+NEED_RM is always false, and NEED_FPU is true for raw {quadrant,funct3} values
+3,5,7,19,23. Value5 preserves the existing C.FSD classification: the configured
+RV32F ISA rejects it later, but this decompressor's own illegal flag does not.
+For ordinary instructions, evaluate the unchanged generated classification
+expression on RAW, which equals the expanded instruction. Rounding-mode
+bits may also come from RAW: compressed NEED_RM is zero, while ordinary
+instructions have the same bits. Dynamic FP enable and frm remain live in
+the same decoder stage; no state or cycle is added.
+
+check_raw_fp_flags.py extracts the actual generated classification cones and
+the existing actual generated RVC cone. Its artifacts are at
+docs/measurements/os30-dual-20261004/raw-fp-flags-audit-v1/.
+It passed65,536 exhaustive low16-bit inputs plus1,000,000 random32-bit inputs,
+with all16 FP-enable/frm states per input. It compares the flags whenever the
+RVC output is defined and compares the resulting fault/FP-trap OR for every
+input including illegal encodings. Existing DECOMPRESSION_FAULT unconditionally
+forces ISA LEGAL false, masking decompressor instruction don't-cares.
+Only fp_triggered consumes these NEED_FPU/RM flags in this generated profile.
+The generator agent owns candidate emission and exact-profile guards; the
+validation agent owns full CPU trap/stall/kernel regressions. The extracted
+proof establishes this combinational rewrite, not final FPGA timing or FPS.
+
+Completed whole-core C and B-control audits
+------------------------------------------
+fit-rvc-immediate-area-v1 (C) fits18083 ALM,1846 LAB,308 M10K, but its
+80.46 MHz limit is worse than the older fullcache trial. Its critical path
+is RAW0[13] -> expanded instruction bits29/28 -> WideOr168 legality nodes ->
+trap valid -> trap-payload arbitration -> trap pending tval[22], -2.428 ns.
+Unlike the A-control isolated path, it does not explicitly pass fp_triggered;
+direct RAW FP classification therefore cannot be claimed to fix all of C's
+static legality cone. C also has a separate -2.218 ns aligner mask -> fetch
+and BTB capture-enable path. The candidate needs actual remeasurement.
+
+fit-rvc-pipeline-control-combo-v1 (B-control) fits18100 ALM,1846 LAB,307 M10K,
+42 DSP and reaches83.98 MHz, setup -1.908 ns, hold +0.043 ns at100 MHz.
+Grouped STA is at timing-audit-rvc-pipeline-control-combo-v1/. QSF, SDC,
+fit report and frozen-source manifest hashes were unchanged after the audit.
+The audit_fit.py helper reproduces this analysis only after a normal completed
+whole-core flow; it refuses unfinished or failed fitted databases.
+
+B-control subgroup walls:
+  SDRAM DDIO output -> receive data: -1.908 ns (normal whole-core report)
+  CPU scoreboard -> aligner ready/mask: -1.723 ns at0 C, -1.697 ns at85 C
+  GPU triangle coordinate subtraction -> DSP operand mux: -1.572 ns
+  LSU IO-result select -> load-format/writeback/RS1 bypass -> SRC1: -1.468 ns
+  Render-cache address -> SDRAM address: -1.227 ns
+  Render-cache RAM address: -0.983 ns
+  FPU computation: -0.523 ns
+The float-regfile -1.541 ns result is the same CPU ready chain controlling
+the RAM read-address enable, not an FPU arithmetic wall.
+
+The CPU ready path starts at decode3 RS1_RFID and passes three hazard OR
+levels, two dispatch inserter one-hot levels, decode3 downstream-ready and
+two aligner mask levels. Existing control factoring shortened the dispatch
+state-update path to positive slack, but did not break this backwards ready
+dependence. Generator is investigating a structural ready break.
+
+The SDRAM path is purely physical: north-edge DDIO cellX43/Y45 -> receiver
+registerX41/Y9, with9.960 ns interconnect, no combinational logic and fanout4.
+All16 DQ input cells occupy north-edgeY45 (X36..52). The board receive phase
+and hardened falling-to-rising DDIO retime must stay unchanged. If later CPU
+placement does not fix it, a small placement region for burst_data/word_q
+nearer the north edge is a cycle-neutral physical candidate. Any such trial
+must check receiver-enable and downstream paths too. No location constraint
+or SDRAM RTL/phase/latency change was made by this audit.
+
+Receive-placement syntax and licensing qualification
+---------------------------------------------------
+logiclock-syntax-probe-v1/ records an empty-project syntax probe using the
+installed Quartus 25.1 Standard Tcl interface. The intended nonreserved region
+is X34..53/Y28..44 (origin X34_Y28, width20, height17), immediately below the
+north DQ inputs. LL_MEMBER_OF needs its -section_id SDRAM_RX even when the
+assignment value already names the same region. The helper's *isr0|bus[*]*
+patterns include entity-qualified names and any replicated receive registers.
+The probe does not establish that a fitted design honors the constraints.
+
+In particular, the existing fitter report emits Warning292013, whose installed
+msg_index.xml handle is FEATURE_DISABLED_POST: LogicLock requires a subscription
+license. The warning predates these new assignments. Until a new fitted region
+report and actual locations show otherwise, assume this placement intent is
+unqualified and may be ignored. Check all32 burst_data and32 word_q register
+bits, clones, ignored assignments, and nearby/downstream timing. Normal supported
+LOCATION assignments to small groups of LABs are a possible fallback; no such
+assignments have been applied by this audit.
+
+receive-lab-proposal-v2/ now records the alternative 64 LOCATION-to-LAB
+assignments. prepare_rx_locations.py derives the proposal from an unchanged
+completed B-control fitted database, extracted by audit_placement.tcl under
+receive-location-audit-v1/. Every selected LAB has an observed physical FF.
+The west/east DQ groups are separated into eight LABs, with eight registers
+from a single bus half/shared capture enable in each LAB. The Cyclone V LAB
+has10 ALMs/40 FFs; this is not a promise of free placement space, since logic
+and control packing must still fit. No LAB is exclusively reserved.
+
+The installed Quartus pmadirect_ff_placer.tcl derives LAB_Xx_Yy locations from
+observed FF_Xx_Yy_Nn coordinates (lines600..617), then emits the ordinary
+set_location_assignment command (lines379..391). All64 v2 proposal assignments
+are loaded directly from QSF and queried by exact canonical node name with
+0 errors/0 warnings. The initial v1 probe sourced assignments as Tcl, which
+stripped braces before exporting. Copying that original Tcl text directly
+into a QSF preserved the braces literally; fit-rvc-skid-masked-rxlabs-v1
+correctly reported all64 destinations missing with Warning15706. Its receive
+constraints were ignored. That failed applicability experiment is preserved.
+V2 removes the braces and uses exact ic|isr0|bus[index] targets. Its direct
+QSF load/query probe exercises the same insertion mode used by fit.py.
+No synthesis/fit was performed for this parser check. Fitter applicability,
+register copies, effects on other paths and improvement still require the
+next whole-core fit. The private fit helper owns applying the copied QSF.
+
+Future grouped audits now also extract registers.tsv and separate SDRAM
+burst/word endpoints. check_rx_locations.py compares all64 base registers
+with their proposed LAB and reports any replicated registers separately.
+The existing report and frozen inputs remain unchanged by those read-only
+audits. No production constraint or receive timing was changed here.
+
+Completed masked-skid timing and receive-placement rejection
+-----------------------------------------------------------
+fit-rvc-skid-masked-rxlabs-v1 fits18146 ALM/1848 LAB/308 M10K with the
+corrected flush-aware skid CPU, but its receive assignments were ignored as
+described above. It is an unplaced-RX result:82.95 MHz, setup-2.055 ns,
+hold+0.083 ns. The read-only grouped audit verifies unchanged inputs and
+records all64 ignored receive destinations in its manifest.
+
+The actual receive paths pass comfortably: burst+3.624 ns and word+2.096 ns
+across slow corners. There is no measured need to constrain them in this
+placement. The correctly parsed fit-rvc-skid-masked-rxlabs-v2 failed with
+1856 LABs, eight above capacity; the forced groups disturbed packing. Do not
+apply the receive-location proposal to later candidates without a new actual
+receive timing problem.
+
+V1's main walls are GPU spanprod_count RAM -> zero classification -> request
+register clears(-2.055), CPU D-cache tag RAM input(-1.957), integer forwarding
+(-1.767), float forwarding(-1.606), render-cache lookup(-1.524) and aligner
+trap/PC halt(-1.365). The former dispatch-scoreboard -> aligner-ready wall
+is removed, with dispatch sent now+0.773 ns. The new0 C frontend path is
+buffer_data -> variable-length alignment -> RAW instruction(-1.723).
+
+The smaller fit-rvc-skid-immediate-combo-v1 reaches83.61 MHz at18085 ALM,
+1847 LAB/308 M10K. Its grouped walls move to memory arbitration(-1.961),
+float forwarding(-1.822), render-cache(-1.656) and texture-cache(-1.507).
+Its aligner improves to-0.532, but the overall result does not justify claiming
+a timing advantage from the reduced lane. RX paths again pass above+2.9 ns.
+
+Early tag-data selection proof and forwarding candidates
+-------------------------------------------------------
+The CPU tag-input path is MIXED_ADDRESS -> writebackHazards -> canFlush/doFlush
+-> tag data selection -> ways_1_mem M10K. The existing retime_dcache_writes
+helper covers data banks, not this18-bit tag memory. An earlier tag-data mux
+can omit late writeback/full/refill-address hazards while retaining unchanged
+write enables and reservation arbitration. A blocked write observes no tag
+data, and a simultaneous refill retains ownership through reservation_win.
+
+check_tag_select.py extracts the actual generated control/tag-data cones.
+tag-select-audit-v1/ exhausts524288 control states, including both refill
+valid/address-match combinations, late hazards, cancel/freeze and initialization.
+All330992 enabled-write cases preserve loaded, and all enabled noninitializer
+tag bits match. Initialization always stores loaded=false; the ignored invalid
+tag address/fault payload may differ. The actual emitted full-skid-fpu candidate
+SHA6e2ab04eb9859aa36c5af5087f010e0a1621b46d61d7391475cc5a6d21dd7093
+passes the same check in tag-select-emitted-audit-v1/. No register or cycle is
+added by the tag selector. This proof does not replace CPU or FPGA validation.
+
+FPU match retiming(+27 FF) addresses the measured physical/ID equality input
+to the float bypass priority mux. The next narrowly scoped integer candidate
+precomputes only lane0 RS2's eight producer matches, including previous-stage
+DOWN_RD_ENABLE(+8 FF). Live current UP_LANE_SEL remains to honor cancellation
+while execute is frozen. integer-rs2-source-audit-v1/ verifies26 source fields,
+single writers, shared execute advance and PHYS/RFID aliases. RD_ENABLE may
+be suppressed combinationally in a producer stage, so using previous UP instead
+of the exact captured previous DOWN value would be wrong. Generator owns that
+candidate and its sequential equivalence checks; no timing benefit is claimed
+before fitting it.
+
+Emitted follow-up audits and framebuffer queue packing
+------------------------------------------------------
+The immediate tag-selector candidate SHA44abc261 has all six actual control
+blocks and eleven continuous drivers identical to the previously exhaustive
+524288-state cone; see tag-select-emitted-audit-v2/. The full lane integer
+RS2 candidate SHAe9abfb87 independently reverses to its exact tag/FPU reference
+after removing eight match registers and restoring eight enable equations;
+see integer-rs2-emitted-audit-v2/. The original live lane validity remains.
+
+fbwq-payload-reset-v1/ removes only six hard/soft-reset assignments for the
+62 request addr/data/strb bits. The exact consumer audit records every source
+reference. Request-valid or either delayed snoop-pending bit implies the
+payload has been loaded identically; all three observers are reset. A million
+extracted cycles pass, including11618 resets and44889 deliberately different
+invalid payload cycles. This is a source noninterference argument and focused
+simulation, not full-GPU formal equivalence or an established area saving.
+
+The more direct area candidate is fbwq-single-read-v1/, SHA4ab7ecda. Original
+m_wr_awaddr has exactly two assignments, both reading fbwq_addr[fbwq_rd_ptr]
+at the same edge under start_now and aw_ahead_issue in the same nonreset branch.
+One OR-enabled capture is identical even if both conditions assert; all other
+source bytes reverse exactly. The262144-cycle extracted check passes49152
+captures,1536 read/write collisions and16384 simultaneous enable assertions.
+Reset behavior, latency, queue depth and all AXI controls remain exact.
+
+Existing successful fits report two duplicated address MLAB memories, each
+reserving two LABs/20 memory ALMs. Consolidating the source read may remove
+one duplicate, but only the subsequent Quartus report establishes that result.
+Swapping spanprod_u/v/count into MLAB while moving texture queues to M10K is
+not a comparable area win: both sides reserve approximately three MLABs, and
+the original span memories already share two physical M10Ks. Neither proposal
+cuts GPU features, cache capacity or ISA support. Production is untouched.
+
+Both exact GPU derivatives subsequently pass retained rendering against the
+validated count-shadow source:38 workloads across3 traffic modes, with79
+pixel checks per mode. Per candidate comparison,42548619 cycles,387 hard
+resets and6 soft resets preserve cycles plus valid-qualified payload/AXI
+hashes. The reset-only invalid stale payload differences are deliberate and
+remain unobserved. See validation/gpu-fbwq-single-read-v2/results.json and
+validation/gpu-fbwq-payload-reset/results.json. The single-read map report
+confirms the duplicate fbwq_addr__dual memory is gone; its fit/timing result
+is still required. Original proof manifests retain their historical pending
+status; adjacent whole-gpu-validation.json files link the subsequent checks.
+
+The completed immediate all-fixes/shared-read fit reaches86.45 MHz,18042 ALMs,
+1843 LABs and308 M10Ks. Setup at100 MHz is-1.567 ns, hold+.047 ns. The new
+grouped audit verifies unchanged frozen inputs. Primary timing now runs from
+decode3 RS2_PHYS through dispatch availability and decode3/decode2 ready to
+decode1 capture:8 logic levels,11.253 ns data, with a302-fanout final node and
+2.115 ns final route. An additional-1.477 ns CPU path reaches the retimed FPU
+match register through dispatch candidate selection; this endpoint is not
+included in the float operand group. Integer data forwarding is-1.363 ns,
+fetch-1.056, render cache-1.050, float operands-1.008, GPU-.921, LSU-.854,
+fabric-.833, audio-.242. SDRAM receive paths pass above+2.27 ns.
+
+The state-conditioned hot cache comparison audit removes only an unneeded
+non-IDLE address selection before two hot-line comparators. All consumers are
+IDLE-only; meta/tag addressing remains unchanged. Candidate03e4d625 passed
+three poisoned-collision cache scoreboards and114 cache-included rendering
+workload comparisons; see render-hot-audit-v1/ and validation/render-cache-hot-v1/.
+
+The next ready expression, ff0bd8cf, independently reverses exactly to the
+original CPU and matches its262144-state extracted proof, including independent
+frame-valid, lane-mask and sent flags. fanout-option-audit-v1/ documents installed
+Quartus support for a named combinational LCELL plus MAX_FANOUT64. Both new map
+reports confirm Info18058 inserted3 logic cells at decode_skid_gate_down_ready;
+this is actual applicability evidence, not just accepted QSF syntax. The
+Pro-only MAX_FANOUT_FOR_SYNCH_CTRL option is rejected by installed Lite25.1.
+
+The completed ready-only/fanout/hot-cache fit reaches87.31 MHz,18089 ALMs,
+1847 LABs and308 M10Ks, setup-1.454 ns and hold+.034 ns. Its four preserved
+ready-net copies have fanouts53/64/64/66. The old ready wall is absent;
+aligner setup is-.067 ns and dispatch-sent+1.077 ns. The measured critical
+group is now FP match precomputation through dispatch candidate selection,
+not FPU arithmetic: worst-1.454 ns at fp_match_RS2_10. Eight endpoints are
+below the-1.111 ns setup equivalent of90 MHz. Other closest groups are
+integer execute-1.183, fetch-1.182, GPU-1.156 and LSU-1.113 ns. The attempted
+single RS2 forwarding KEEP removal instead reaches85.61 MHz and negative
+hold-.015 ns, so it is not selected. Read-only audit input hashes remain exact.
+
+The eight-endpoint compare-before-dispatch CPU a85cdf36 reverses exactly to
+ready-only ff0bd8cf outside16 early comparator wires and eight FF RHS edits.
+All27 FFs, enables, current bypass qualification and no-selection RD=0 case
+remain identical. Independent emitted-source audit verifies the actual
+scheduler extraction and proof harnesses; reruns pass2097152 dispatch states
+and786432 local ID/selector cases per endpoint. See fp-preselect-emitted-audit-v1.
+This establishes combinational equivalence, not a timing or area improvement;
+those claims require the independent full fit and CPU regression evidence.
+
+The reset-payload-removal comparison with the same ready-only CPU reaches
+88.15 MHz but fails video handoff hold timing (-.089 ns). It uses18125 ALMs,
+1848 LABs and308 M10Ks; there is no measured area benefit. Hold violations
+are fb_pixel_safe[21]/[8] to vidout_rgb[21]/[8] between the existing mp1 PLL
+outputs2 and3, not the changed GPU request payload. All other reported hold
+paths are at least+.112 ns. Both setup and hold audits preserve input hashes.
+
+Eight-match preselection with combined-reset GPU fits17979 ALMs/1848 LABs,
+308 M10Ks but reaches85.23 MHz, setup-1.733 and hold+.110 ns. The remaining
+worst path is an untouched FP match RS2_5; integer RS2 match5_0 reuses that
+late comparison and reaches-1.694 ns. Other affected endpoints are untouched
+RS3_7(-1.335), integer match2_0(-1.253) and3_1(-1.218). Modified RS1_10 is
+-1.187; other modified endpoints are less critical. SRC1 itself is-.747,
+fetch-.718, LSU-.612 and cache-.678 ns in this placement. These endpoint
+changes justify addressing the remaining selected-ID comparison pattern,
+not claiming the eight-match version has met the requested clock limit.
+
+The independent SRC1 emitted audit confirms6077cfd9 changes only one kept
+data mux: nine mutually exclusive terms replace eight terms plus selector0
+override. The original priority cone remains exact and has no data input
+dependencies. Actual extracted cones pass8388608 cases; this bitwise proof
+covers arbitrary simultaneous32-bit input words. See src1-balance-emitted-audit-v1.
+
+The eight-match fit also exposes a GPU ring-data path at-1.449 ns:
+append-pointer increment/full compare -> CPU write qualification -> RAM
+data selector, including2.521 ns on the last RAM route. gpu-ring-data-v1/
+changes only that data selector to raw-DMA?DMA:CPU. Write enable and address
+are identical. Actual DMA_R=>busy and CPU-write=>!busy control equations
+prove writer exclusion for all control states, independent of software mode.
+All enabled data values are exact; no additional state/cycles are introduced.
+The exhaustive extracted proof passes16384 cases. Rendering and physical
+benefits require separate qualification; no production source is changed.
+
+GPU ring-data rendering subsequently passes all114 workload pairs with the
+hot cache,42548619 monitored cycles,387 hard resets and6 soft resets per
+source. A RAM-write oracle checks34959 CPU writes and3 wraps. Runtime DMA
+traffic and full-ring rejection counts are zero for this os30 configuration;
+the arbitrary-control extracted proof covers those control cases separately.
+See gpu-ring-data-v1/whole-gpu-validation.json and validation/gpu-ring-data-v1/.
+
+The SRC1 variant with original GPU reaches83.92 MHz at ordinary effort and
+83.89 MHz at placement effort2. The QSF changes only that option and one blank
+separator; all other frozen source hashes are identical. Fitter reports
+confirm applied1.0/2.0, and effort2 saves two LABs (1845->1843) but does not
+improve Fmax. Both variants expose the late raw-instruction normalization
+path: aligned selection -> selected RAW low bits -> compressed comparison ->
+upper RAW -> decode1 capture. The effort2 path is-1.921 ns. See
+placement-effort-audit-v1/ and the respective read-only timing-audit directories.
+
+All remaining match preselection0b4b291a passes independent emitted audit:
+19 additional FP and8 integer RHS changes,50 additional kept equality wires,
+no FF/cycle change. Every endpoint's actual input leaves and previous DOWN
+write-enable are checked; reversing exactly restores6077cfd9. Exhaustive
+dispatch and1572864 cases per endpoint rerun successfully. See
+all-match-emitted-audit-v1/. No new assumptions about invalid/no-selection
+match values are introduced.
+
+All-match plus ring-data fits18042 ALMs,1841 LABs,308 M10Ks at86.59 MHz,
+setup-1.549 ns and hold+.118 ns. FP match improves to-.461, integer match
+to-.218, and the old ring-data wall disappears from the top GPU paths
+(GPU worst-1.034). Remaining primary is decode1 capture-ready with a64-load
+preserved copy and2.106 ns final enable route. Other minima: integer SRC1
+data-1.394, raw frontend data-1.349 cold, fetch-1.295, integer regfile write
+data-1.285, cache-.962, audio-1.020, LSU-.579 ns. SDRAM receive placement
+is worse here: word-1.102 and burst-.825 ns at the unchanged100 MHz constraints.
+The original100 MHz setup target has not closed, and this variant has not
+yet met the requested estimated limit above90 MHz.
+
+The RAW upper-half normalization06c79789 passes independent emitted audit:
+all32768 actual selector states and150994944 relevant-bit data cases rerun
+successfully; source guards establish the per-bit proof decomposition. It
+moves each upper-half compressed test before the original one-hot mux, with
+no mask/control/FF/cycle change. See raw-normalize-emitted-audit-v1/.
+
+The LSU/global-trap aggregate and load-byte changes also pass independent
+emitted audits. inflight-hold-emitted-audit-v1 confirms ordinary decode
+pending is copied exactly, bypass pending is already counted there, and
+LSU flush implies an existing execute pending trap. Only the additional
+held-skid contribution drops that redundant LSU cancellation; actual skid
+flush/cancel/lane masks remain untouched. load-byte-emitted-audit-v1 verifies
+both-hit OR, IO priority and zero-hit behavior for the exact original partial
+byte arrangement. For fixed controls the actual cones preserve zero and OR,
+so96 basis vectors per control establish arbitrary96-bit data equality.
+The combined1bce3882 source is identical under either patch order; reversing
+each independent edit recovers its exact qualified counterpart. No additional
+storage or architectural cycles are introduced. Whole-CPU qualification is
+recorded separately by the generator/validator.
+
+Fanout32-only completes18054 ALMs/1844 LABs/308 M10Ks at87.02 MHz,
+setup-1.491 ns, hold-.008 ns. The latter is datatable_data[0] to bridge
+datatable M10K at fast0 on clk_74a: .386 ns skew against.378 ns data.
+Its overall setup wall is SDRAM transmit state[5] to phy_dq_out[0]; receive
+burst/word paths are positive by more than1.2 ns. Other grouped minima are
+RAW capture-1.461, audio-1.421, GPU-1.362, LSU-1.337, render cache-1.297,
+load-data to float RS3-1.295, aligner control-1.080, integer regfile-.901,
+fetch-.788, integer match-.630 and FP match+.014 ns. This version cannot
+replace the positive-hold best despite its small setup improvement.
+
+RAW-only with fanout32 completes18121 ALMs/1847 LABs/308 M10Ks at84.29 MHz,
+setup-1.864, hold+.120 ns. Its original selected-low-bits to upper-RAW
+normalization path disappears, but its lower RAW selection is now-1.808 ns:
+mask2 -> scanner2.valid -> extractor0.slicesOh -> extractor1.usableMask ->
+extractor1.slicesOh -> ctx_instruction3 -> RAW1[3], with1.609 ns final route.
+The worst path is GPU spanprod_attr_persp to state.S_EXECUTE (-1.864);
+CPU read-address scheduling to float RF is-1.858 and fetch-valid-1.854.
+Integer SRC1 data is-1.844, LSU-1.587, fabric-1.463 and cache-1.419 ns.
+The RAW rewrite is combinationally sound but this fit is not a timing win.
+
+fanout32-option-audit-v1/fitted-evidence.json verifies eight actual ready
+copies in both fits, compared with four at64. The32 synthesis assignment
+survives exact frozen QSF hashing; final fitted fanouts range19..34 and20..33
+because later fitter optimization can slightly increase them. All read-only
+STA audits verify unchanged recorded sources, QSF, SDC and fit report hashes.
+
+Combined RAW+hold+load1bce3882 reaches84.82 MHz (18037 ALMs/1847 LABs,
+308 M10Ks), setup-1.790 and hold+.089 ns. The byte factor makes the grouped
+load-data to float path-.954, but the current worst data-to-integer path is
+FP conversion/sign-format writeback (-1.692) and regfile write (-1.676),
+with several routes near2 ns. The primary path is scoreboard -> scheduler
+availability -> decode capture-ready -> enable, including1.822 ns on the
+last route fromX32 toX19. Fetch-valid is-1.757 through fetch hit/scanner/
+slicesOh/global halt. The main report also exposes tag-M10K write enable
+at-1.727, which is outside the Lsu*-named group; grouped minima must not be
+mistaken for complete CPU hierarchy coverage. GPU-1.653, cache-1.380,
+audio-1.368, integer match-1.156, FP match-.409; SDRAM receive is positive.
+
+A local parser-only probe of PHYSICAL_SYNTHESIS_REGISTER_RETIMING ON on
+5CEBA4F23C8 succeeds in installed Quartus25.1 SC Lite with0 errors/warnings.
+The shipped CycloneV DSE Physical Synthesis with Retiming Space explicitly
+uses the same option. retiming-option-audit-v1 records this support evidence,
+not a claim of register movement or a timing improvement. Root subsequently
+selected a full retiming trial with exact combined1bce source; the frozen
+source audit differs only in QSF, whose only additional setting is that ON
+option. Actual fitter movement/resource/timing evidence remains required.
+
+The exact-source retiming comparison completes84.93 MHz,18064 ALMs/1847
+LABs/308 M10Ks, setup-1.774, hold+.107, recovery+.798, removal+.279 ns.
+This is only a marginal improvement over84.82 and remains below the target.
+The fitter explicitly applies retiming despite its initial0 ps estimate:
+511 distinct Retimed Register entries (CPU14, render cache144, GPU99,
+texture cache252, scanout2),244 physical-synthesis deleted nodes,541 modified
+nodes. Total fitted registers increase25947->26194. CPU entries concern BTB/
+fetch prediction, not decode/skid/execute payload FFs. Action counts are
+reported fitter transformations, not an inferred one-to-one register mapping.
+See retiming-option-audit-v1/fitter-evidence.json. The cold overall worst
+path moves to GPU write-queue read pointer to active burst length (-1.774).
+
+The ping-pong candidate d471c5da passes independent emitted refinement review
+(pingpong-emitted-audit-v1/). Its exact source difference reuses the original
+276-bit head and276-bit skid payload banks as two rotating banks, preserving
+all four lane-mask FFs, both occupancy FFs, ready and flush equations literally.
+Only one read-pointer FF is added. Every one of30 logical fields has identical
+width/order in input/head/tail mappings, and every former tail consumer is
+occupancy-qualified. Payload writes now depend only on registered pointer/
+head-valid/tail-valid, not late scheduler ready. The original blocked-flush
+head-valid bubble is retained with masks cleared; tail occupancy clears.
+Independent896-state payload induction and rerun114688-state extracted
+control/mask proof pass. Head payload is exact after every nonreset edge,
+including invalid heads; reset only permits differing unobserved invalid
+payload and the next ordinary edge restores the correspondence. This review
+does not claim an area/timing win or replace whole-CPU qualification.
+
+The ping-pong full fit completes at87.50 MHz (slow85 87.89, slow0 87.50),
+18067 ALMs/1848 LABs/308 M10Ks, setup-1.428 and hold+.106 ns. Its original
+late-ready payload-enable wall is removed. Focused post-fit analysis finds
+new bank captures-.356 ns, bank outputs+.760 ns, and read-pointer outputs
++.376 ns, despite pointer fanout246. The bank-write enables each drive240
+actual fitted FFs. A new pointer fanout override is not justified by these
+paths. Existing downstream decode2 capture-ready reaches-1.090 ns.
+
+The remaining CPU worst is LSU hit bits -> l1Failed -> lsuTrap -> trap-FSM
+control (-1.301 ns,8 logic levels,68% routing), with the same source reaching
+fetch-valid at-1.289 and aligner-last at-1.252. CPU therefore remains a small
+barrier to90 MHz; these are not claims of full100 MHz closure. Integer SRC1
+is-1.131, float operands-1.045, FP matches-.441, integer matches-.517,
+integer regfile-.952, LSU-named endpoints-.966 ns. The overall cold wall is
+audio volume ramp-1.428; warm CPU-system AW FIFO to m_wlast is-1.378 and GPU
+framebuffer-queue link to address-MLAB enable is-1.330. Render cache-.806,
+SDRAM arbiter-.763; SDRAM receive burst/word are positive by1.29 ns or more.
+No source/SDC/QSF/fit report was changed by the two read-only STA audits.
+
+The audio ramp candidate7dd77c3e passes independent emitted review and rerun
+of all16,777,216 cur/target/step triples against the actual original/new
+functions and independent distance oracle. Its take-up/take-down predicates
+imply the original direction, are mutually exclusive, and retain zero-step
+snap-to-target. Only ramp_step changes; all sequential source is exact.
+Original mixer test logs and all36 throughput cases are byte-identical.
+Evidence is audio-ramp-emitted-audit-v1; physical benefit requires a fit.
+
+The same ping-pong database has positive setup into its existing D-cache
+way-hit vector: +.386 ns at slow0 and+.584 ns at slow85 (three physical
+endpoints including a duplicate). The measured source is a tag-M10K write-
+enable register through its read/control mux and tag compare. This establishes
+current input margin for a proposed same-stage any-hit shadow; the extra OR
+and changed placement still require a new full fit, not inferred closure.
+
+GPU chain-final candidate5e628c9a replaces only head_chain_final with count>=8
+or an existing broken link before the tail. It bypasses the encoded burst
+length and following comparison on the measured-1.330 ns MLAB enable path.
+All16 pointers,32 count encodings and65536 link vectors (33,554,432 cases)
+match the actual old/new cones and independent prefix-scan oracle. Invalid
+counts and wrap are included; no sequential invariant is assumed. Burst
+length, all sequential/channel data/address/enable source remains exact,
+with no added state or cycles. Zero-fuzz patch reversal and replay recover
+exact source hashes; gpu-chain-final-v1 and gpu-chain-final-replay-v1 record
+the evidence. Retained whole-GPU rendering is separately qualified.
+
+Posted-write factoring2eb40171 independently passes actual-cone262144-case
+proof rerun. Its exact source difference consists of two combinational
+replacements: LOCAL run calculation before target classification, and
+accepted/held/live WLAST equality before selection. All FIFO/accounting/
+sequential source is unchanged. The accepted>held>live priority is preserved
+including both qualifiers true, all count encodings and circular pointers.
+Original source equals the frozen ping-pong full-fit input. See
+posted-write-emitted-audit-v1; paired actual-shim validation is separate.
+
+GPU5e628c9a whole-rendering qualification subsequently passes all38x3 modes
+with full logs byte-identical to ring baselinec1d60662 and shared hot cache.
+This covers114 workload pairs/237 acceptance checks,387 hard and6 soft
+resets per source. The independent source/harness review and runtime results
+are under validation/gpu-chain-final-v1; original source proof manifest
+remains immutable and whole-gpu-qualification.json points to final evidence.
+
+Same-stage LSU any-hit shadow4b01fdaa independently passes exact emitted
+audit: one new scalar register declaration, one OR capture beside the
+unchanged vector capture, and one aggregate alias replacement. All five
+aggregate consumers/tag comparisons/vector bits remain byte-identical.
+The unique vector/scalar writers share execute_ctrl3_down_isReady and the
+same unreset payload block.1024 four-state induction cases and rerun32
+actual-capture steps pass. Stage4 lane/LSU select resets clear and can first
+activate only on that same capture edge. Thus the first capture establishes
+correspondence before use even for arbitrary physical power-up payload bits;
+standard RTL X/X startup also matches. No pipeline cycle is added. Evidence
+is lsu-hit-emitted-audit-v1; whole-CPU tests and timing are separate gates.
+
+The three-peripheral full fit completes86.33 MHz,18119 ALMs/1848 LABs/308
+M10Ks, setup-1.584, hold+.115, recovery+4.042, removal+.441 ns. Audio now
+reaches-.233, GPU-.936, render cache-.721 and SDRAM arbiter-1.003; the
+targeted audio ramp and GPU finality walls are gone. Current worst is
+MMIO req_addr3 to read-data bit6,6 levels/75% routing; CPU is-1.479 through
+aligner lane1 selection/usage classification to PC hold. Other clock setup
+minima remain positive (clk74a+3.709, bridge+10.103, other internal clocks
++6.778 or greater, SDRAM pin+1.182, CRAM pin+.725). All nonsetup checks
+are positive at every clock/corner.
+
+The focused MMIO timing-pin predecessor audit establishes that the measured
+~24/~25 nodes decode request-address bits2..6, then Mux206~11/~12 merge
+SYSREG signals (SNAC/VRR/RTC/counters/app/palette/datatable), followed by
+Mux206~14 regional input/controller/audio merge and~17 UART/mixer merge.
+A kept SYSREG data boundary is therefore a scoped synthesis experiment;
+actual physical improvement is not established by this structural audit.
+See timing-audit-rvc-skid-pingpong-peripheral-v1-mmio-v2 and its NOTES.
+
+Direct aligner trap candidateec69d8b6 changes only two ctx_trap assignments
+to classify buffer/fetch ownership from each pre-priority usableMask. Actual
+priority/usage/first-last/trap cones are extracted (69 source blocks), and
+393216 independent-lane mask/required/fault cases match the unchanged
+reference and independent first-slice oracle. No selection and arbitrary
+invalid mask patterns are included; no cross-lane or sequential invariant
+is assumed. Masks, all other metadata, state and cycles remain unchanged.
+Guarded reversal/replay, full lint, generator independent emitted audit
+and all14 whole-CPU fixtures pass. Full logs are byte-identical to4b01,
+with33363543 monitored cycles and zero errors. Source/proof provenance is
+under aligner-trap-direct-v1/immediate; runtime qualification is separate.
+
+The first sampled-hit/peripheral full fit is rejected:18099 ALMs/1846 LABs/
+308 M10Ks, setup-6.678 ns (about59.96 MHz), hold+.033 ns. The main failure
+is an8.681 ns route between two unchanged RAW mux LUTs, despite only6
+logic levels, rather than the new hit shadow. Unrelated LSU flusher-4.930,
+branch-target-3.784 and GPU DSP-input-3.361 paths confirm widespread routing
+detours. The sampled any-hit register exists exactly once, with input
+slack-.064 ns worst and output+.095 ns worst; existing hit-vector inputs
+remain+.443 ns or better. Its intended retiming cone is healthy. The same-
+source higher-placement-effort comparison is still a separate physical
+experiment, not an equivalence issue. All other clocks retain positive
+setup and all nonsetup checks remain positive.
+
+MMIO boundary0af14f6d independently passes exact attribute-only review: the
+sole difference is KEEP on existing combinational sysreg_rdata[31:0].
+Removing it restores all reference bytes and all feature/preprocessor
+configurations, state, read side effects and cycles. Mapping must establish
+actual preservation/area/timing; no redundant behavioral simulation is
+needed for literal behavioral source identity. Evidence is
+mmio-read-boundary-emitted-audit-v1.
+
+The sampled-hit higher-effort result is also rejected: 76.12 MHz,
+18099 ALMs/1847 LABs/308 M10Ks, setup -3.137 ns, hold +.024 ns. Its worst
+integer register-file path is 86% routing, including a 7.847 ns wire.
+The independent clk74a setup margin is also negative (-.551 ns); this
+candidate cannot qualify on its main-clock estimate alone.
+
+Direct-trap plus kept-SYSREG fit rvc-skid-trap-mmio-v1 completes at
+85.95 MHz, 18059 ALMs/1843 LABs/308 M10Ks. Worst setup is -1.635 ns,
+hold +.063 ns, recovery +3.123 ns, removal +.410 ns, pulse width +.500 ns.
+All other clocks have positive setup at every reported corner. The
+postfit audit records 28 mapped SYSREG combinational output nodes, compared
+with none in the unkept comparison. This establishes an actual mapping
+boundary, not 32 independently retained LUTs. MMIO margin improves to
+-.882 ns; the worst paths are float RS1 priority/data selection (-1.635 ns,
+slow85), aligner lastFromBuffer-to-prediction metadata (-1.558 ns, slow0),
+and GPU texture tag-to-data-address (-1.403 ns). All frozen source and
+constraint hashes remain unchanged by the audit.
+
+The controlled no-sampled-hit source 1aaeb857 passes exact commutation:
+it is d471 plus only the two direct-trap equations, or ec69 minus only the
+one sampled-hit declaration/capture/aggregate alias. Its full fit falls
+to 83.94 MHz, 18026 ALMs/1845 LABs/308 M10Ks, hold +.118 ns. The top wall
+is decode RS2 RFID to fp_match_RS2_6 (-1.913 ns), not a correctness failure.
+No additional no-hit timing experiments are indicated by this comparison.
+
+Private lastFromBuffer candidate ef386e8e changes exactly two ownership
+predicates on ec69. The earliest usable slice's boundary/length class is
+computed directly before the priority usage mux, preserving all masks,
+trap equations, prediction values, state and cycles. All 393216 actual
+priority/usage/ownership/fault cases pass, including no selection and
+arbitrary invalid masks, against an independent first-slice oracle.
+Zero-fuzz patch reversal/replay and full lint pass. Whole-CPU qualification
+will apply to the final composition with the independent FP RS1 rewrite.
+
+FP RS1 candidate a0afc808 passes independent emitted-source review at
+fp-rs1-priority-emitted-audit-v1. Exactly one data-output assignment is
+replaced with two kept combinational word boundaries and a late group
+mask. Original selectors and live validity/match/write gates remain exact.
+All 1024 priority masks, including zero selection, preserve producer
+identity; exact word-wise expressions establish bit independence. Fresh
+actual cones match proof artifacts and the 1048576-case compiled proof
+passes all 33554432 bit comparisons. Full-core fit must determine whether
+the two boundaries improve timing and packing.
+
+Final CPU composition 9faabaee is independently verified at
+fp-last-composition-audit-v1: exactly two ownership-predicate edits plus
+one FP data-output edit, with both source orders and component reversals
+byte-identical. Both focused actual-cone proofs rerun cleanly; no state
+or cycle changes were introduced by composition. The retained14-case
+suite qualifies this final source separately.
+
+Texture early-offer candidate GPU2d4870c5/cache0d2d3669 passes independent
+source/FSM/proof audit at texture-offer-emitted-audit-v1. The entire actual
+cache FSM remains byte-identical. Removing the explicit proof-only load,
+miss cutpoints and probes reconstructs the complete original cache module.
+The reset-based invariant fill_resp_valid_A == (S_FILL_OUT && portA)
+passes 131072 actual transitions; original default selection and actual
+GPU producer equations also pass. At the only active prime-A boundary,
+ready and response-valid are true, so the new response-independent offer
+is exactly the original qualified request. An independent65536-case
+boundary calculation confirms the same equality with arbitrary flags,
+counters and unused state encodings. Read enables, writes, all normal
+handshakes and port-B equations remain source-identical; all their values
+remain equal because prime-A is equal. No registers or cycles are added.
+The new input/parameter are compatible with current named callers; a
+positional external instantiation would need an interface update. Paired
+cache and retained GPU runtime qualification remains separate.
+
+The combined CPU-only fit rvc-skid-fp-last-mmio-v1 reaches86.51 MHz,
+18090 ALMs/1847 LABs/308 M10Ks, setup -1.560 ns and hold +.104 ns.
+FP RS1 capture improves to -.419 ns, while the worst path moves to lane1
+RAW[17] capture through the first/second extractor selector dependency.
+RS2/RS3 need no speculative grouping in this placement (all float paths
+are -.741 ns or better). Names retained in the physical database include
+five late-group LUT outputs but no early-group name; source KEEP presence
+must not be reported as64 individually retained LUTs. Both direct ownership
+predicates have named physical logic. All other clocks/nonsetup pass.
+
+Adding the independently audited early texture offer reaches86.81 MHz,
+18088 ALMs/1847 LABs/308 M10Ks, setup -1.519 ns, hold +.040 ns, recovery
++.368 ns, removal +.264 ns. The old tag-RAM to port-A data-address path
+is absent from the timing graph; all192 port-A address endpoints have
+minimum+.019 ns and port-B address minimum+1.012 ns. This establishes the
+specific dependency cut. Decode-bank payload capture is now -.618 ns,
+so RAW-selector rewriting is unwarranted in this placement. The primary
+wall moves to FP rounding/exponent data to the float register-file RAM
+(-1.519 ns), followed by scheduler completion to the pointer FF enable
+(-1.463 ns). All other clocks and nonsetup checks pass. Grouped and focused
+evidence is timing-audit-rvc-skid-fp-last-texoffer-v1[-texture].
+
+The pointer critical path has eight LUT levels,72% routing, a2.634 ns
+launch wire within one LAB, and final arrival at the FF ENA pin with
+.863 ns cell delay. Private derivative d6f88a0c keeps that same original
+pointer/register/reset/toggle predicate but expresses next-state as
+ptr XOR (headValid && ready), unconditionally on the existing clock.
+Only that register receives AUTO_CLOCK_ENABLE_RECOGNITION OFF. The installed
+Lite25.1 parser accepts the precise per-instance option without warnings;
+16 actual-source state/valid/ready/reset transitions and off-clock async
+reset pass, as do source reversal/replay and full lint. No FF or cycle
+is added. Actual postfit D-versus-ENA mapping and timing must qualify the
+experiment; source form and parser acceptance alone do not prove the
+physical change. Retained14-case CPU tests await final composition.
+
+Runtime qualification is now complete for9fa CPU and the early texture pair:
+all14 CPU logs match the established ping-pong, sampled-hit and direct-trap
+parents byte-for-byte, including unchanged skid/pointer monitor coverage.
+Texture cache comparisons check every output on244148 observed cycles,
+16 resets and5598 port-A fill/prime cases, with no errors. All38 retained
+GPU workloads in all3 latency modes have identical full logs and114 matched
+workload cycle counts,237 pixel checks,387 hard resets and6 soft resets.
+The texture monitor observes42548619 cycles, both offer/no-offer fill cases
+and40717 unqualified offers outside the cut, without errors. Evidence is
+fp-last-combined-v1/immediate/qualification.json and
+validation/texture-offer-v1/qualification.json. These establish component
+behavior/cycles, not game FPS or full combined CPU/GPU game execution.
+
+Independent component and composition audits now pass for the pointer/packer
+and optional RS3 family. Packer b5002595 removes only the NORMAL qualifier
+from ROUNDING_INCR: NORMAL is structurally identical; all three special modes
+mask the changed arithmetic at the exact packed result and five-flag boundary.
+The source-derived closure has three direct uses and26 affected nodes, no
+state or escape. Full sign/NaN/quiet handling, DZ/NV and all metadata remain
+exact;417792 special-mode basis/control cases,576 metadata and1524288 full
+raw supplemental checks pass. This is Boolean hardware equivalence, not an
+assertion of identical X-mode simulation during uninitialized invalid data.
+Evidence: packer-round-emitted-audit-v1.
+
+RS3 186a99f3 uses the same proved4+6 priority grouping as RS1. Only its data
+output and two kept combinational32-bit group words change; original live
+enables, selectors, producer ordering, RF fallback, all FFs and RS1/RS2 are
+unchanged. Actual source cones pass1048576 enable/data patterns over all32
+positions; independent1024 priority-index cases include zero selection.
+Evidence: fp-rs3-priority-emitted-audit-v1.
+
+Two-fix5209f490 and triple a083bdb0 are exact compositions on9fa. Independent
+replay/reversal verifies both two-fix orders and all six triple orders;
+removing only RS3 restores the two-fix source. Pointer adds no state and has
+an equivalent next-state equation; all other sequential source remains
+identical. Evidence: pointer-packer-rs3-composition-audit-v1. Full14-case CPU
+qualification for the triple is separate and pending at this entry; physical
+D-versus-ENA mapping, area and timing also remain to be measured.
+
+Postfit results confirm the intended pointer and packer changes physically.
+Two-fix rvc-skid-pointer-packer-texoffer-v1 reaches87.65MHz,18084 ALMs,
+1847 LABs/308 M10Ks: setup-1.409ns, hold+.098, recovery+3.347, removal+.265,
+pulse+.500. All other clocks pass (minimum setup+.725ns). The pointer is
+exactly one FF with a D input, no ENA input edge, and a neighboring XOR LUT
+feeding D with zero final routing delay. Its minimum setup margin is+.957ns
+warm/+1.044 cold. Packer mode-register paths to all CPU endpoints now have
+minimum+1.415ns, versus the previous-1.519ns wall. Texture tag-to-A-address
+remains absent, with A/B address minima+.187/+.566. New top paths are integer
+SRC1 priority/data (-1.409ns), FP RS2 priority/data(-1.315ns), and decode
+head-valid control(-1.205ns). All peripheral groups are-.806ns or better;
+decode-bank payload capture is-1.132ns. Evidence is the grouped and focused
+texture audits for this exact fit, both with all recorded inputs unchanged.
+
+Adding only grouped RS3 gives a different placement,85.67MHz,18124 ALMs,
+1846 LABs/308 M10Ks, setup-1.672ns, hold+.074, recovery+3.545, removal+.273,
+pulse+.500; all other clocks pass(minimum+.722ns). Pointer remains one D FF
+with+.726ns minimum and packer mode outputs+.852ns. RS3 capture is-.381ns;
+five late-group physical combinational names exist, no separately named
+ early group. The new limiting RAW selector to bank1[118] is six LUTs,
+65% routing; float-RF initializer(-1.354ns) and GPU queue burst length
+(-1.265ns) also move above the90MHz threshold. The two-fix family is the
+better measured base. Triple14-case CPU tests subsequently passed with
+unchanged skid/ping-pong monitors; qualification is recorded adjacent to
+pointer-packer-rs3-combined-v1/immediate. Two-fix runtime qualification is
+separate; source subset equivalence alone is not its14-case evidence.
+
+Pair5209's retained14 CPU fixtures now pass with identical complete logs to
+9fa and triple a083; runtime qualification is recorded separately adjacent
+to pointer-packer-combined-v1. An endpoint census at the90MHz-equivalent
+threshold(-1.111111ns with unchanged10ns main period) finds only8 warm and1
+cold register endpoints below it: integer SRC1(-1.409), three FP RS2 endpoints
+(-1.315/-1.312/-1.145), head-valid(-1.205), CSR inject-unfreeze(-1.132),
+decode bank1[126](-1.132 warm/-1.128 cold), and SDRAM phy_a[10](-1.126).
+The1000-endpoint cutoff reaches-.237/-.007ns, proving no omitted violating
+register endpoints. The head-valid path already ends at D and traverses
+ISA legality/trap/cancel logic, so the pointer CE change is not applicable.
+
+Independent audits pass for pair-based integer RS1 b182970b(2+7 groups),
+FP RS2 6c3560a5(2+8 groups), and their exact combined fb18b1ca source.
+The original kept integer data result and sole operand alias remain exact;
+all original live gates, priority selectors and FFs remain byte-identical.
+Actual extracted cones match their frozen proofs:262144 integer and1048576
+FP cases, with all output-bit positions and arbitrary zero-selection covered.
+Both combined application orders/reversals restore exact parents. Evidence:
+integer-rs1-priority-emitted-audit-v2,
+fp-rs2-priority-2plus8-emitted-audit-v1 and
+integer-rs1-fp-rs2-composition-audit-v1. Final runtime/physical qualification
+remains separate; no cycle or register is added by these data-group rewrites.
+
+Global combinational physical synthesis speed/EXTRA trials both fail area
+before routing:18534 ALMs/1884 LABs/309 prefit M10Ks. Reports confirm settings
+were applied. The same4795 unique physical-action rows appear in both trials
+(1814 created/1352 deleted/1629 modified), spanning CPU/GPU/cache/peripherals.
+The2950ps reported improvement is a pre-placement estimate, not measured
+routed improvement. Enabling register duplication in the second trial adds
+no logged duplication algorithm before the same capacity failure; therefore
+these failed builds establish no duplication benefit. Evidence:
+physical-combo-rejected-audit-v1. No STA was run on failed placement databases.
+
+Register-duplication-only/EXTRA on unchanged pair5209 produces exactly the
+same ap_core.rbf and every all-corner clock/check table as default settings.
+The report confirms duplication ON and effort EXTRA, but no corresponding
+physical algorithm is logged. SOF differs, so only RBF identity is claimed.
+No redundant STA was run. Evidence: physical-duplication-only-audit-v1.
+
+Standalone integer grouping b182 fits18052 ALMs/1846 LABs/308 M10Ks but only
+86.41MHz: setup-1.573, hold+.028, recovery+2.980, removal+.275, pulse+.500;
+all other clocks pass(minimum+.725). SRC1 margin improves from-1.409 to-1.156
+(and direct integer-RS1 capture-1.170), with five named late-group combinational
+nodes. The worst path moves to scoreboard/dispatch-ready feeding stage2
+capture ENA: eight LUTs, final ready fanout323 and final wire1.899ns. Other
+new walls include LSU-to-aligner flush-1.421, integer match-1.327 and audio
+voice-table-to-loop-valid-1.323; FP RS2 is-1.166. Local improvement alone does
+not qualify a faster complete core. Evidence is the grouped audit for
+rvc-skid-pointer-packer-intrs1-texoffer-v1, inputs unchanged.
+
+Combined integer2+7/FP_RS2_2+8 fb18 fits18042 ALMs/1844 LABs/308 M10Ks at
+87.12MHz: setup-1.478, hold+.032, recovery+2.417, removal+.299, pulse+.500;
+all other clocks pass(minimum+.725). The intended endpoints improve: SRC1
+-1.041 and FP RS2-.690, versus pair-1.409/-1.315. Physical late-group names
+survive (integer6, FP RS2 134 combinational output nodes); named-node counts
+are not a count of independent32-bit kept words or net area. Main path is
+scoreboard through ready fanout326 to head lane-select enable. Secondary
+walls are unchanged FP RS3-1.289, audio loop-valid-1.190, decode legality to
+aligner last-1.145, and MMIO-1.116. GPU/cache/fabric are-1.030/-.749/-.909.
+Frozen sources/constraints remain unchanged by STA. A separately scheduled
+scoped stage2-ready fanout32 test targets the measured driver, while the
+single alternate placement-seed comparison is independent of the postponed
+full seed sweep. No source edit or clock relaxation follows from STA itself.
+
+The agreed single alternate seed3 on fully qualified pair5209 is worse:
+82.73MHz,18088 ALMs/308 M10Ks, setup-2.087ns (cold-2.068), hold+.030,
+recovery+2.677, removal+.263, pulse+.500. All other clocks pass(minimum+.726).
+Its worst unchanged LSU write-queue address[3] to bypass-hit[2] begins with
+a6.715ns wire from a fanout130 FF. This is evidence of placement sensitivity,
+not a reason to change those source semantics. Seed2 remains the baseline;
+no further seed probing or full sweep was launched by this audit. Only the
+normal finished reports were read for this rejected placement.
+
+The all-operand ffed candidate independently composes previously proved
+RS3 4+6 with fb18's integer2+7 and FP RS2 2+8. All six source application and
+reverse orders on5209 reproduce exact parents/final; only the original186a
+RS3 data block is new relative tofb18. All FF blocks/live gates remain exact.
+Evidence: all-operand-groups-composition-audit-v1, with three independently
+checked component proofs. Retained14 fixtures and physical fit remain separate.
+The selected stage2 fanout hint is observed by synthesis: Info18058 inserts
+nine logic cells for MAX_FANOUT32 on decode_ctrls_1_down_ready. This confirms
+assignment applicability only; final area/timing/hold still require fitting.
+
+Stage2 MAX_FANOUT32 is physically effective but insufficient. fb18 fanout
+fits18138 ALMs/1848 LABs/308 M10Ks at85.80MHz: setup-1.655, hold+.078,
+recovery+2.297, removal+.279. Worst moves to LSU way selection/formatted
+load feeding integer SRC1; stage2 capture remains-1.346, head masks-1.543,
+and stage3-1.008. The exact source hint creates nine SynDup outputs plus
+original; reported copied fanout32 is real, yet final stage2 wire1.543ns.
+
+AllRS ffed with the same hint fits18053 ALMs/308 M10Ks at84.90MHz:
+setup-1.778, hold+.035, recovery+3.491, removal+.267, pulse+.500. All other
+clocks pass for both builds(minimum+.725). Forwarding endpoints now have
+ample90MHz margins: SRC1-.696, FP RS1-.228/RS2-.141/RS3-.582. GPU/cache/
+fabric/audio/MMIO are-.984/-.936/-.969/-.628/-.744. Main path is buffer-data
+through the second extractor usable-mask/last-ownership predicate to
+predicted-jump-PC payload bank1[23](-1.778 warm/-1.689 cold). The focused
+report separately exposes secondary ready paths: stage2-1.242, head masks
+-1.155, stage3-.813. Copied ready fanout32 still has1.707ns final routing;
+its original output fanout22. Pointer remains one D-driven FF with+1.287ns
+minimum. Complete grouped/focused evidence is timing-audit-rvc-skid-rs12-
+stage2fan32-v1 and timing-audit-rvc-skid-allrs-stage2fan32-v1, including their
+-texture reports. All frozen inputs/constraints remain unchanged by STA.
+
+The allRS no-fanout control fits85.29MHz with18075 ALMs/308 M10Ks,
+setup-1.725, hold+.016, recovery+2.422, removal+.284. Other clocks pass
+(minimum+.725). Its worst GPU spanprod_Dg_du[14] to sp_Dg_step[14] path
+has zero logic cells, fanout1 and10.701ns routing. CPU SRC1 remains-1.694
+and LSU atomic buffer-1.575; this control has a less favorable critical
+distribution than the allRS fanout32 fit. No extra source change is implied
+by this placement-sensitive result. Frozen inputs remain unchanged by STA.
+
+Second-usable direct mask856b independently passes exact one-assignment
+source audit, fresh actual-cone identity and rerun of65,536 cases/31 bits.
+The cut includes all16 actual shared scanner leaves, so no hidden usable
+mask/valid correlation is assumed. Independent math covers all holes and
+lengths, including3,200 empty-second and56,064 sparse-mask cases. Every
+other RTL byte is unchanged. Evidence: second-usable-emitted-audit-v1.
+
+Global routing for the existing stage2 ready control is supported by the
+Cyclone V device handbook and accepted by installed25.1 parser;8/16 GCLK
+resources are currently used. Evidence/global-routing limitations and
+postfit acceptance checks are in global-ready-option-probe-v1. This is a
+physical routing experiment, not a clock change, and parser acceptance
+does not establish actual promotion or timing benefit. No source, SDC,
+clock-rate or production edits were made by this feasibility audit.
+
+Secondusable856b with stage2 fanout32 fits84.79MHz,18142 ALMs/308 M10Ks;
+setup-1.794, hold+.094, recovery+2.393, removal+.260, pulse+.500. Other
+clocks pass(minimum+.725). Bank capture improves from-1.778 to-1.360
+(warm fetch-PC trap cone) /-1.245(cold normalized RAW1); the previous
+lastFromBuffer to predicted-PC wall is no longer worst. Stage2 capture
+remains-1.320 with final ready-copy fanout33 and1.688ns ENA wire; head
+masks-1.405, stage3-.844. One pointer D-driven FF remains+.603; packer
+mode+1.366 and texture-tag to A-address path still absent. Wholecore worst
+is already-grouped integer forwarding control-1.794 (six LUTs,7.906ns
+routing); other margins are FP RS1-1.430/RS2-.565/RS3-1.396, fetch-1.549,
+GPU-1.561, cache-1.131, fabric-1.304, audio-1.080, MMIO-.944. This shows
+the local mask improvement and independent placement regression, not a
+wholecore timing win. Grouped/focused audits preserve all frozen inputs.
+
+The global-ready trial is physically applied and rejected: ready appears
+onGCLK6,323 fanouts,9/16 global resources; original constrained sink remains
+ENA and the full clock-name set/SDC match the fanout32 control. Setup is
+-4.836ns (~67.40MHz), hold+.024, recovery+2.914, removal+.277, pulse+.500;
+18122 ALMs/308 M10Ks. Other clocks still pass(minimum+.731). The ready LUT
+to global input wire is3.776ns, global buffer.348ns and output to head-mask
+logic2.265ns. This real global insertion cost outweighs local routing, so
+the option is not a timing rescue. Evidence: global-ready-mapped-audit-v1
+and timing-audit-rvc-skid-secondusable-stage2global-v1. No clock pin was
+reinterpreted and no timing constraints changed. Frozen inputs unchanged.
+
+Router effort2.0/4.0 support probes each compile a private32-register
+Cyclone V design successfully in installed25.1 Lite. Exact parser readbacks
+match, with no deprecated12288/range170010/ignored-option warning. The
+fitter report has no explicit router-effort settings row, so effective
+routing impact remains unproved. Tiny acceptance does not claim os30
+timing improvement. Evidence: router-effort-option-probe-v1; fullcore
+comparisons remain root-scheduled and must judge actual physical outputs.
+
+Framebuffer payload packinge7a1b8aa independently passes exact source and
+memory-interface audit, including819,200 transition proof rerun. It combines
+only identical data/strobe write/read schedules, retains old-data collisions
+and adds no no_rw_check override. Every other byte is unchanged. Physical
+36-bit M10K sharing and retained rendering remain independent qualifications.
+Evidence: fbwq-payload-pack-emitted-audit-v1.
+
+High Performance Effort assessment uses actual earlier25.1 Cyclone V reports:
+mode recognized, explicit performance-combo/retiming OFF settings respected,
+and implicit placement effort4.0 observed versus BALANCED1.0. RetainingAREA
+and physical OFF guards bounds the proposed mode comparison but does not
+prove a benefit. Evidence: high-performance-mode-assessment-v1.
+
+The no-physical-area pair5209 trial changes the actual fitter setting from
+On toOff but is byte-identical to the best87.65MHz RBF(fda857f2...), every
+corner/clock table and all resources. Neither report records physical
+synthesis actions. It supplies no new timing result and needs no duplicate
+STA. Evidence: physical-area-off-audit-v1.
+
+PackedGPUe7a1b8aa maps the intended single16x36 M10K payload with Old data
+mixed-port behavior and eliminates one memory LAB(9 reported). It still
+fails overall capacity:18189 ALMs/1853 LABs,5 over. Final block placement
+and timing are unqualified; the failed report's309 prefit M10K count is
+not a final successful usage. Evidence: fbwq-payload-pack-mapping-audit-v1.
+
+Router2.0 fullcore requested QSF is exact and emits no deprecation/range
+warning, but the resulting RBF(fda857f2...) and all corner/clock timing
+tables are byte-identical to the87.65MHz pair baseline. It provides no
+physical benefit or evidence that effective routing effort changed in this
+flow. No redundant grouped STA was run. Evidence: router-effort2-full-audit-v1.
+
+High Performance Effort with explicitAREA and performance-combo/duplication/
+retiming OFF guards applies exactly: actual placement effort4.0, AREA remains
+selected and all three OFF guards are respected. The full fit is slower:
+84.19MHz,18084 ALMs/1848 LABs/308 M10Ks, setup-1.878, hold+.049, recovery
++.523, removal+.276, pulse+.500. Other clocks pass(minimum+.725). No further
+grouped STA was needed for this rejected physical comparison. Evidence:
+high-performance-mode-full-audit-v1.
+
+Pair5209 with explicit placement effort2.0 reaches87.58MHz warm/90.02 cold;
+18084 ALMs/1847 LABs/308 M10Ks, setup-1.418, hold+.105, recovery+3.209,
+removal+.276 and pulse+.500. Other clocks pass(minimum+.722). The ordinary
+top20 changes domain: GPU dv_ord to dsp_a-1.418, SDRAM state toDQ-1.331,
+and CPU RAW buffer to payload bank-1.223. Integer SRC1 and FP RS2 are now
+above90MHz-equivalent in those paths. This placement comparison is still
+below the requested overall target. Evidence: pair-placement-effort2-audit-v1.
+
+Integer RS1 reuse34a06d1e changes only two bypass equality terms to existing
+sampled full PHYS+RFID matches. It adds no FF or pipeline cycle and retains
+current producer LANE_SEL/RD_ENABLE gates, priority, data mux and all existing
+sequential code. Independent emitted audit proves the common capture aliases
+and zero/one-hot dispatch input functions. All14 retained whole-CPU logs are
+byte-identical to pair5209; both monitors check33,363,543 cycles without errors.
+Evidence: integer-rs1-reuse-v1/immediate/qualification.json and
+validation/rvc_skid_immediate_pingpong_integer_rs1_reuse/. Fit pending.
+
+The34a0 fit completed85.07MHz,18110 ALMs/1847 LABs/308 M10Ks;
+setup-1.755, hold+.079, recovery2.323, removal.266, pulse.500 and other
+clock setup minimum+.722. Grouped STA shows LSU refill-address hazard to
+global flush to aligner mask ENA-1.755, integer SRC1-1.406 (now stage3
+lane0 RD_ENABLE to bypass index2), fetch-1.313 and audio-1.169. FP RS1/
+RS2/RS3 are-.421/-.577/-.245, GPU-.898, cache-.728 and fabric-1.102.
+This is functionally qualified but does not improve overall timing. Inputs
+remain unchanged; evidence: timing-audit-rvc-skid-intrs1-reuse-v1.
+
+A distinct27ed0176 derivative samples the remaining measured stage4-lane1
+integer RS1 index5 equality with one FF and two upstream candidate equality
+wires. Exact current qualification remains outside the FF. Full-ID input
+enumeration786432, actual scheduler2097152,256-state sampling induction and
+one million supplemental cycles pass, plus exact reverse/replay/lint.
+Evidence: integer-rs1-sample-lane1-v2/immediate/. Its independent review,
+whole-CPU and physical qualifications remain separate; no gain is assumed.
+
+The27ed0176 +1FF candidate subsequently passed all14 retained CPU fixtures,
+with complete logs identical to34a0/pair5209 and33,363,543 monitored cycles.
+Both CPU harnesses retain68 shared input hashes and identical generated
+testbench/C++ sources versus pair5209. Separate qualification and harness
+input audit files bind these results; physical timing remains independent.
+
+Shared FP_RS2 candidate0111fd5a targets the measured pair5209 stage4 lane
+qualification path without adding a register. It qualifies the existing
+integer match with the aligned previous lane bit and asynchronous reset,
+then directly uses that match for FP enable0. Original integer consumer
+is unchanged; the old raw FP match becomes unobserved. Exact consumer/
+writer/advance contracts,384 Boolean induction transitions,4,194,304
+actual full-ID/control transitions and one million supplemental cycles pass.
+Independent review and whole-CPU/physical results remain pending separately.
+Evidence: shared-rs2-qualified-v1/immediate/.
+
+0111 subsequently passed independent emitted review and all14 retained CPU
+fixtures, with complete logs identical to pair5209 and33,363,543 monitored
+cycles. The qualified-match state adds no observed cycle changes. Separate
+qualification files bind the exact source, input proof and independent audit.
+
+27ed +1FF maps exactly one new match FF at FF_X50_Y18_N8, but full timing
+is83.85MHz:18060 ALMs/1846 LABs/308 M10Ks, setup-1.926, hold+.102,
+recovery3.012, removal.274, pulse.500. Its new critical wall is bank-data to
+load formatting/writeback merge to integer RF RAM data. Integer forwarding
+data is-1.55, aligner-1.714, GPU-1.777 and MMIO-1.762. This is a rejected
+physical placement despite functional qualification.
+
+The independent a78c lane1 RFID specialization physically removes all five
+lane1 RD_RFID registers. Its forwarding groups are above90MHz-equivalent
+(SRC1-.885, FP RS1/2/3-.827/-.438/-.646), but overall timing is84.91MHz:
+18119 ALMs/1847 LABs/308 M10Ks, setup-1.777, hold+.046, recovery3.327,
+removal.265, pulse.500. Worst is LSU refill-hazard/flush to GShare RAM write
+enable, including a2.425ns late route; GPU-1.312 is secondary. Both fits'
+other clocks pass(minimum+.725). Evidence: rs1-sample-rdid-mapping-audit-v1
+and their grouped timing-audit directories. Frozen inputs remain unchanged.
+
+The0111 shared-qualified-match fit completed82.91MHz,18077 ALMs/1845 LABs/
+308 M10Ks, setup-2.061, hold+.119, recovery+.590 and removal+.269. The
+ordinary top report now limits fetch-PC/hash to BTB return-stack RAM address;
+the intended FP change does not improve the overall placement. No additional
+grouped STA was necessary while reviewing the second decoded buffer.
+
+GShare fa82e393 only factors the actual learn-valid conjunction into one kept
+non-cancellation predicate and the unchanged final full-cancellation gate.
+Independent exact reconstruction, actual one-input StreamArbiter_2 valid/
+payload binding and4096 extracted-expression four-state cases pass. All
+training address/data, read-collision bypass and state remain unchanged.
+Evidence: gshare-eligibility-emitted-audit-v1. Physical result and selected
+whole-CPU qualification are separate.
+
+GPU8e471228 reuses six existing DDS registers for sorted coordinates during
+the preceding product states. Its earlier scratch contents are unobserved;
+all original consumers follow DELTA, and all entries/reset/abort paths restart
+the derivation before any consumption. Independent exact capture/projection
+substitution proves all six arbitrary16-bit operands; all following signed
+17-bit arithmetic is identical. Actual extracted supporting proof was rerun,
+and the retained38x3 renderer subsequently passed byte-identical logs with
+1011 captures/deltas,6054 consumers,5469 scratch holding cycles and414
+normalization cycles. Runtime reset-in-scratch coverage was zero and is not
+conflated with focused reset tests. Evidence: gpu-coordinate-stage-emitted-
+audit-v1 and validation/gpu-coordinate-stage-v1/qualification.json.
+
+Second decoded buffer f703a709 passes independent exact emitted control and
+90-field/380-bit mapping review. The actual-source storage/head-mask harness
+also passes an independent explicit S2M+StageLink reference over1340480
+cycles and146892 off-clock resets. This is a new capacity-changing boundary;
+local refinement does not establish unchanged original CPU timing or replace
+architectural fixtures. Evidence: decode-second-skid-emitted-audit-v1 and
+decode-second-skid-actual-emitted-audit-v1.
+
+The second-buffer post-map census retains262 FF bits per nominal380-bit bank.
+All trace UOP IDs are already absent;118 bits per bank are constant, merged
+or dead. Manually repacking these declarations cannot recover new capacity.
+Live fields include124 PC/predicted-PC bits,36 GShare/history bits,20 UOP
+bits and82 operand/control bits per bank. Evidence: second-skid-bank-map-
+audit-v1/bank-fields.json. The read-only query preserved all frozen inputs.
+
+GShare fa82 subsequently produced exactly the a78c RBF(a7a58165...) and
+identical all-corner/clock timing tables, ALMs/M10Ks and20 checks. Its kept
+early predicate creates no physical change in this compiler flow. The
+alternative remains unselected and requires no duplicate CPU fixture run.
+Evidence: gshare-eligibility-physical-audit-v1.

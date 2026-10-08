@@ -1,0 +1,89 @@
+--- a/src/main/scala/vexiiriscv/decode/DecodePipelinePlugin.scala
++++ b/src/main/scala/vexiiriscv/decode/DecodePipelinePlugin.scala
+@@ -15,7 +15,7 @@
+ /**
+  * Provide a decode pipeline skeleton, used by other plugins to compose the decode pipeline.
+  */
+-class DecodePipelinePlugin extends FiberPlugin with PipelineService{
++class DecodePipelinePlugin(withSkid : Boolean = false) extends FiberPlugin with PipelineService{
+   setName("decode")
+ 
+ 
+@@ -60,8 +60,29 @@
+     val idMax = idToCtrl.keys.max
+     for(i <- 0 to idMax) ctrl(i) //To ensure the creation to all intermediate nodes
+     val ctrls = idToCtrl.toList.sortBy(_._1).map(_._2)
++    val rp = host[ReschedulePlugin]
++    // The bypass skid is younger than every registered decode stage. It adds
++    // capacity and registers ready, without adding an unstalled forward cycle.
++    val skid = withSkid generate new Area {
++      require(Global.HART_COUNT.get == 1 && idMax >= 1)
++      val age = Ages.DECODE + Ages.STAGE / 2
++      // AlignerPlugin consumes on ready OR cancel, like Node.arbitrateFrom(Stream).
++      // The new forget request always accompanies this whole-frame cancellation.
++      ctrls.head.link.up.ctrl.forgetOneSupported = true
++      val gate = CtrlLink().setName("decode_skid_gate")
++      val link = new S2MLink(ctrls.head.link.down, gate.up).setName("decode_skid")
++      val flushIt = rp.isFlushedAt(age, U(0), U(0)).getOrElse(False)
++      // No decoder may emit a partial-frame flush at or before the skid age.
++      // Younger fetch prediction flushes intentionally do not discard it.
++      require(rp.flushPorts.forall(p => p.age < Ages.DECODE || p.age > age),
++        "Decode skid requires all decode flush sources strictly older than its age")
++      println(s"OS30_DECODE_SKID age=$age flushSources=${rp.flushPorts.map(_.age).distinct.sorted.mkString(",")}")
++      gate.throwWhen(flushIt)
++      val trapPending = gate.down.isValid && (for(laneId <- 0 until Decode.LANES)
++        yield gate.down(CtrlLaneApi.LANE_SEL, laneId.toString) && gate.down(Global.TRAP, laneId.toString)).orR
++    }
+     val sc = for(ctrlId <- ctrls.indices.dropRight(1);
+-                 from = ctrls(ctrlId); to = ctrls(ctrlId+1)) yield new pipeline.StageLink(from.link.down, to.link.up){
++                 from = ctrls(ctrlId); to = ctrls(ctrlId+1)) yield new pipeline.StageLink(if(withSkid && ctrlId == 0) skid.gate.down else from.link.down, to.link.up){
+       override def build() = {
+         super.build()
+         // Implement LANE_SEL register clearing
+@@ -73,8 +94,7 @@
+         }
+       }
+     }
+-    val connectors = (sc ++ ctrls.map(_.link)).toSeq
+-    val rp = host[ReschedulePlugin]
++    val connectors = (sc ++ ctrls.map(_.link) ++ (if(withSkid) Seq(skid.link, skid.gate) else Nil)).toSeq
+ 
+     val flushRange = 0 until ctrls.size
+     val flushes = for(ctrlId <- flushRange) yield new Area {
+@@ -99,7 +119,7 @@
+     }
+ 
+     for (hartId <- 0 until Global.HART_COUNT) {
+-      trapPending(hartId) := (for (ctrlId <- 0 to idMax; laneId <- 0 until Decode.LANES; e = ctrl(ctrlId).lane(laneId)) yield e.isValid && e(Global.HART_ID) === hartId && e(Global.TRAP)).orR
++      trapPending(hartId) := (for (ctrlId <- 0 to idMax; laneId <- 0 until Decode.LANES; e = ctrl(ctrlId).lane(laneId)) yield e.isValid && e(Global.HART_ID) === hartId && e(Global.TRAP)).orR || (if(withSkid) skid.trapPending else False)
+     }
+   }
+ }
+\ No newline at end of file
+--- a/src/main/scala/vexiiriscv/Param.scala
++++ b/src/main/scala/vexiiriscv/Param.scala
+@@ -102,6 +102,7 @@
+   var withISA = Set[String]("i", "zicsr", "zifencei")
+   var withAlignerBuffer = false
+   var withDispatcherBuffer = false
++  var withDecodeSkid = false
+   var hartCount = 1
+   var disableMmu = false
+   var asidWidth = 0
+@@ -674,6 +675,7 @@
+     opt[Int]("fpu-add-pack-at") action { (v, c) => fpuAddSharedParam.packAt = v }
+     opt[Unit]("with-aligner-buffer").unbounded() action { (v, c) => withAlignerBuffer = true }
+     opt[Unit]("with-dispatcher-buffer") action { (v, c) => withDispatcherBuffer = true }
++    opt[Unit]("with-decode-skid") action { (v, c) => withDecodeSkid = true }
+     opt[Unit]("with-supervisor") action { (v, c) => addISA("s", "u") }
+     opt[Unit]("with-user") action { (v, c) => addISA("u") }
+     opt[Unit]("without-mmu") action { (v, c) => disableMmu = false }
+@@ -934,7 +936,7 @@
+         case FetchBusEnum.wishbone => plugins += new FetchL1WishbonePlugin()
+       }
+     }
+-    plugins += new decode.DecodePipelinePlugin()
++    plugins += new decode.DecodePipelinePlugin(withSkid = withDecodeSkid)
+     plugins += new decode.AlignerPlugin(
+       fetchAt = alignerPluginFetchAt,
+       lanes = decoders,

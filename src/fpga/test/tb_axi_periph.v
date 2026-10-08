@@ -14,7 +14,11 @@
 
 `default_nettype none
 
-module tb_axi_periph (
+module tb_axi_periph #(
+    parameter INCLUDE_PERSPECTIVE = 1,
+    parameter INCLUDE_DEPTH = 1,
+    parameter INCLUDE_PARAM_SPAN_LIST = 1
+) (
     input wire clk,
     input wire reset_n,
     input wire mixer_ready,
@@ -187,6 +191,9 @@ end
 
 // DUT
 axi_periph_slave #(
+    .INCLUDE_PERSPECTIVE(INCLUDE_PERSPECTIVE),
+    .INCLUDE_DEPTH(INCLUDE_DEPTH),
+    .INCLUDE_PARAM_SPAN_LIST(INCLUDE_PARAM_SPAN_LIST),
     .FREEZE_VIDEO_IN_MENU(`ifdef MISTER_MENU_CONTINUES 0 `else 1 `endif)
 ) dut (
     .clk    (clk),

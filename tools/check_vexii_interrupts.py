@@ -30,6 +30,8 @@ def main():
                         "src/fpga/vendor/vexriscv/VexiiRiscv/VexiiRiscv_mister.v")
     parser.add_argument("--output", type=Path, default=root / "build/vexii-interrupts")
     parser.add_argument("--profile", choices=("mister", "pocket"), default="mister")
+    parser.add_argument("--bank-row-track", type=int, choices=(0, 1), default=1,
+                        help="Pocket SDRAM bank tracking (os20 uses 0)")
     args = parser.parse_args()
     out = args.output.resolve()
     out.mkdir(parents=True, exist_ok=True)
@@ -80,7 +82,7 @@ sync_trap:""")
     tb = replace_once(tb, ".timer_irq  ()", ".timer_irq  (test_timer_irq)")
     if args.profile == "pocket":
         tb, count = re.subn(r'io_sdram\s+(\w+)\s*\(',
-                           r"assign phy_ncs = 1'b0;\nio_sdram #(.BANK_ROW_TRACK(1)) \1 (", tb)
+                           rf"assign phy_ncs = 1'b0;\nio_sdram #(.BANK_ROW_TRACK({args.bank_row_track})) \1 (", tb)
         if count != 1:
             raise RuntimeError("SDRAM controller instance changed")
         tb = replace_once(tb, "    .phy_ncs(phy_ncs),", "")

@@ -18,6 +18,9 @@
 `default_nettype none
 
 module tb_gpu #(
+    parameter INCLUDE_PERSPECTIVE = 1,
+    parameter INCLUDE_DEPTH = 1,
+    parameter INCLUDE_PARAM_SPAN_LIST = 1,
     parameter INCLUDE_CPU_RING = 0,
     parameter INCLUDE_COMMAND_DMA = 1,
     parameter GPU_WRITE_COMBINE_FAST_FLUSH = 0,
@@ -261,6 +264,38 @@ generate if (GPU_STREAM_PIPE) begin : stream_checks
     end
 end endgenerate
 
+// These timing changes must preserve the values at the original consume
+// edge, including stalls and concurrent depth-window fills/invalidation.
+`ifdef INCLUDE_Z_PREFETCH
+always @(posedge clk) if (reset_n && !gpu.soft_reset
+    && gpu.state == gpu.S_FRAG_PIPE && gpu.zw_prefetch_armed && !gpu.p0a_valid) begin
+    if (gpu.stream_pending || gpu.p0_valid || gpu.p1_valid || gpu.p2_valid
+        || gpu.p2b_valid || gpu.p3_valid)
+        $fatal(1, "Depth prefetch opportunity contains older fragments");
+    if (gpu.sp_z_test_enable && gpu.p3_z_addr !== gpu.sp_z_addr)
+        $fatal(1, "Depth prefetch address differs from the first source pixel");
+end
+`endif
+`ifdef INCLUDE_GPU_CLAMP_FLAGS_PIPE
+always @(posedge clk) if (reset_n && !gpu.soft_reset && gpu.state == gpu.S_SPANPROD_EMIT) begin
+    if (gpu.spanprod_clamp0_min_nz !== (gpu.spanprod_clamp0_min != 0)
+        || gpu.spanprod_clamp0_max_nz !== (gpu.spanprod_clamp0_max != 0)
+        || gpu.spanprod_clamp1_min_nz !== (gpu.spanprod_clamp1_min != 0)
+        || gpu.spanprod_clamp1_max_nz !== (gpu.spanprod_clamp1_max != 0))
+        $fatal(1, "Clamp flag not ready at span emission");
+end
+`endif
+`ifdef INCLUDE_Z_COMPARE_PARALLEL
+`ifdef INCLUDE_Z_WINDOW_PREDECODE
+always @(posedge clk) if (reset_n && !gpu.soft_reset && gpu.p2b_valid
+                        && gpu.state == gpu.S_FRAG_PIPE && !gpu.fp_pipe_stall) begin
+    if (GPU_Z_READ_WINDOW > 1 && gpu.p2b_zf_window_half !==
+        (gpu.p2b_z_addr[1] ? gpu.p2b_zf_window_word[31:16] : gpu.p2b_zf_window_word[15:0]))
+        $fatal(1, "Predecoded depth address does not match the live window");
+end
+`endif
+`endif
+
 gpu_core #(
     .INCLUDE_CPU_RING(INCLUDE_CPU_RING),
     .INCLUDE_COMMAND_DMA(INCLUDE_COMMAND_DMA),
@@ -289,6 +324,9 @@ gpu_core #(
     .INCLUDE_VTX_CACHE(INCLUDE_VTX_CACHE),
     .INCLUDE_GPU_LIGHT(INCLUDE_GPU_LIGHT),
     .INCLUDE_PALETTE(INCLUDE_PALETTE),
+    .INCLUDE_PERSPECTIVE(INCLUDE_PERSPECTIVE),
+    .INCLUDE_DEPTH(INCLUDE_DEPTH),
+    .INCLUDE_PARAM_SPAN_LIST(INCLUDE_PARAM_SPAN_LIST),
     .INCLUDE_COMBINE(INCLUDE_COMBINE),
     .INCLUDE_PARAM_SPAN_Q29(INCLUDE_PARAM_SPAN_Q29),
     .INCLUDE_TEX_MEM(INCLUDE_TEX_MEM)

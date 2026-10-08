@@ -1,0 +1,196 @@
+RV32IMF companion / primary dual-issue audit, 2026-10-04
+=====================================================
+
+Scope
+-----
+This is an isolated os30 feasibility experiment. No production configuration,
+vendor source, bitstream, application, or deployed file was changed. The tiny
+core is generated from a reflink copy of the local patched Vexii checkout.
+The generated netlist and standalone Quartus project are retained under:
+
+  docs/measurements/os30-mesh-20261004/tiny-imf-v1/
+
+Its manifest.json contains the complete generation command, generated RTL
+SHA256, Quartus settings, and timing constraints. fit/output_files contains
+the actual Quartus reports. The fit uses Cyclone V 5CEBA4F23C8, seed 2, the
+same high-performance effort/physical-synthesis profile as the full os30
+experiment, and a 10 ns clock. Native bus ports are virtual and unconstrained.
+Reported Fmax therefore covers internal core register paths, not the eventual
+memory adapters, job transport, worker firmware memory, or full-core placement.
+
+Measured tiny-core result
+-------------------------
+The standalone fit completed: 3096 ALMs, 3354 registers, 7 M10Ks holding
+5314 bits, and 4 DSPs. Slow-corner Fmax is 98.14 MHz; setup WNS is -0.190 ns
+at 100 MHz, with hold passing (worst across corners +0.146 ns). Critical
+paths are ten-level FP source-operand selection/bypass paths into RS2/RS3
+registers. This is not a timing-closed 100 MHz core. The internal RAMs are
+2 integer regfile copies, 3 FP regfile copies, one CSR RAM and a 66-bit
+fetch-response buffer. The isolated FpuSqrt hierarchy is only 37.6 ALMs;
+removing sqrt alone would not change the feasibility materially.
+
+Against the custom engine 4168.6 ALMs, the standalone CPU saves 1072.6
+ALMs before its ROM/SRAM, native adapters and transport integration. Area
+looks plausible enough for a firmware-cycle probe, with limited full-fit
+headroom; it is not evidence that a complete worker fits or runs faster.
+
+Minimal generator configuration
+-------------------------------
+One decoder and one execution lane; RV32IMF; no instruction/data cache,
+BTB/GShare/RAS, atomics, compressed instructions, supervisor/user mode, PMP,
+MMU, JTAG, or cache coherence. The native instruction and data ports remain
+exposed. Integer bypasses remain enabled: cutting bypasses is not a safe area
+shortcut given the repository's earlier operand-hazard regression.
+
+The floating-point behavior and pipeline match the current os30 choices:
+ignore subnormals, reduced-accuracy FMA, pipelined integer-to-float, the current
+add pipeline, and radix-4 division. This is not the previously rejected
+"stressed-fpu" timing configuration.
+
+Local source: src/fpga/vendor/vexriscv/VexiiRiscv/src/main/scala/vexiiriscv/Param.scala
+and its generated VexiiRiscv.v. Stock --with-rvf still instantiates FP add,
+multiply/FMA, divide, sqrt, conversion, compare/classification, FP register
+file and CSR logic. There is no CLI switch to delete only sqrt or FMA.
+Machine-mode CSR/trap logic is always instantiated. FP divide reuses the
+integer divider. The current main os30 already lacks MMU, JTAG and coherence;
+those are not additional savings available from its measured area.
+
+Measured primary CPU comparisons
+-------------------------------
+These are inclusive Fitter entity ALM totals, not synthesis estimates:
+
+  Configuration                         ALMs     Registers   Memory bits DSP
+  os30 single, 32K I / 64K D             4343.1   5036        910488      4
+  os30 single, prepared backend /128K D  4525.9   5581        1453720     4
+  os20 dual, physical-opt fit            6186.4   7195        853944      4
+  os20 dual, later timing-closure fit    7497.3   7442        853944      4
+
+Sources, relative to docs/measurements/:
+  os30-mesh-20261004/fit-mesh-v6-dc64/jobs/pocket-os30-s2/src/fpga/targets/pocket/output_files/ap_core.fit.rpt
+  os30-parallel-20261004/fit-backend-v2/jobs/pocket-os30-s2/src/fpga/targets/pocket/output_files/ap_core.fit.rpt
+  os20-gpu-cuts-20261001/physical-opt/results/pocket-os20-s35/ap_core.fit.rpt
+  os20-timing-closure-20261001/artifacts/ap_core.fit.rpt
+
+The two os20 fits show how much physical duplication/packing can change area;
+do not promise a dual-issue cost of exactly 1843 ALMs. Relative to the 4343
+ALM single-issue CPU, these measured dual examples add 1843 to 3154 ALMs.
+The prepared backend occupies 14683 ALMs with the 4526 ALM single CPU. Simple
+replacement arithmetic gives 16344 to 17654 ALMs, before any new placement,
+cache adjustments or integration logic. It is a budget comparison, not a fit.
+
+The os20 configuration differs beyond issue width: BTB256/GShare1K versus
+os30's BTB1024/GShare4K, and 4-slot/32-op versus 2-slot/16-op store buffering.
+It also omits os30's radix-4 divide and pipelined integer-to-float options.
+A fair dual-issue SM64 trial should retain os30 arithmetic settings rather
+than copy the os20 netlist literally. Vexii's second lane adds integer ALU,
+branch and shift capacity; LSU, multiply, divide and FP remain on lane zero.
+There is no measured dual-versus-single SM64 CPU kernel pair here, and no
+basis to claim twice the floating-point throughput.
+
+Implementation implications
+---------------------------
+A worker would use separate local program and data memories with simple
+one-cycle native responses. Both buses carry a one-bit request ID; the adapter
+must preserve it and honor request ready/valid. Read responses have no ready
+backpressure. The data interface also acknowledges stores. Program updates
+must occur only while the worker is reset or parked; reset/abort must drain
+accepted external DMA before a bank can be reused. The current banked DMA
+and ordered output/fence transport can remain, but the CPU cannot write into
+a bank still owned by the producer or rasterizer.
+
+Local memory planning examples are 16 KiB code + 8 KiB data (about 24 M10Ks)
+or 32 KiB code + 16 KiB data (about 48 M10Ks), plus CPU-internal RAM and the
+existing banks/FIFO. These are capacities, not a measured firmware size.
+The 64 KiB main data-cache experiment frees approximately 60 M10Ks, so RAM
+capacity appears more tractable than ALM area. A linker map is still required.
+
+Using a CPU only addresses the precision problem if it executes the original
+float/fixed expressions and receives the original input state. The current
+fixed-matrix DMA descriptor has discarded some original float information.
+Original float matrices, lighting, fog and material normalization must be
+captured; accepted guard-band loads also use the original fixed X/Y/W rules
+with float Z/fog. Compiler contraction, reduced-accuracy FMA behavior and
+rounding order must match the main CPU. An FPU by itself is not a fidelity proof.
+
+Performance gate
+----------------
+The tiny core trades caches and prediction for area, not faster dependent
+floating-point arithmetic. The qualified os30 measurements retain about
+7 cycles for dependent add, 5.1 multiply, 10 FMA and 19.1 divide. Local RAM
+can remove SDRAM/cache misses, while no branch prediction can increase loop
+and control cost. Original clipping, packet setup and 64-bit plane arithmetic
+must all be included; measuring transform alone would overstate the benefit.
+
+The existing os30 36916-instruction transform fixture takes 88168 warm cycles
+with the main cache/predictor configuration. It is not a workload-complete
+companion estimate. Source: tools/experiments/sm64_cpu_20260924/README.md.
+The stressed FP option was faster but failed approximately 75 MHz timing;
+it is not a demonstrated 100 MHz solution.
+
+The next decision gate after area is an exact original-geometry firmware
+fixture on the generated worker with synchronous local RAM, reporting complete
+job cycles, code/data size, output identity, reset cancellation and output
+backpressure. Only then can its processing rate be compared with concurrent
+CPU production and raster consumption. Two processors do not imply a 2x
+frame-rate gain.
+
+Native RTL firmware measurement
+-------------------------------
+dma/tiny_cpu_sim.cpp is the standalone Verilator native I/D memory adapter.
+It loads ELF32 PT_LOAD segments or a raw binary; code RAM is 0..0xffff, data
+RAM 0x10000..0x1ffff, and MMIO 0x20000..0x20fff. Independent instruction/data
+responses take one clock by default. Random command stalls and variable,
+potentially out-of-order ID response delays are optional. Invalid addresses,
+reused outstanding IDs and changed stalled commands fail the run. Mailbox:
+  0x20000 write exit status (1 success)
+  0x20004 write output word
+  0x20008/0x2000c read cycle counter low/high
+  0x20010 read next word from --input little-endian binary
+The harness does not model DMA, output FIFO blocking, shared SDRAM, raster
+work or main-CPU contention. Reset restarts the CPU and test image together.
+
+check_tiny_cpu.py passed 25 cases, each with 13 exact output words from integer
+multiply/divide, FP add/multiply/divide/FMA/conversions, byte/halfword access,
+dependent operations and taken branch loops. Sixteen random bus-delay cases
+and eight reset phases pass native-port persistence/ID checks.
+
+The root's exact projected-triangle firmware was then run on 782 captured
+scene jobs with ideal one-cycle RAM. All 31,100 output words matched the
+independent prepared-packet reference. It needed 3,715,290 cycles, or 4,751.0
+cycles/job: 37.15 ms at 100 MHz before any transform, clipping or DMA work.
+The current custom engine executes those same inputs/outputs in 631,004 cycles
+(806.9/job) in its separately RTL-validated ISA model, excluding OUT blocking.
+Software packet construction is therefore 5.89x slower on this fixture.
+Evidence: tiny-imf-v1/scene-result.json and scene-custom-engine.json.
+This rejects an entirely software prepared-triangle path for this target;
+transform/clip-only worker timing remains a separate, unmeasured question.
+
+Retaining fixed packet hardware costs more than the old geometry worker
+-----------------------------------------------------------------------
+The old gpu_geometry_worker.v processes transform/project/attributes and
+culling, not edge and plane preparation. Its measured saved attribute-worker
+entity is 1130.3 ALMs, 3 M10Ks and 3 DSPs in the parallel audit. Adding it to a
+software worker does not replace the expensive prepared-triangle software.
+
+Measured v6 mesh-engine child entities:
+  edge preparation       411.6 ALMs
+  plane preparation      475.8 ALMs
+  determinant/setup      219.9 ALMs
+  vertex attributes      100.0 ALMs
+  normalization           77.7 ALMs
+  subtotal              1285.0 ALMs
+These use the engine's shared multiply/divider and scratch/control, whose
+cost is outside the subtotal. CPU 3096 + fixed units 1285 already exceeds
+the measured 4168.6 ALM custom engine, before new adapters or job control.
+A specially shared sequencer could change packing, but it has not been fitted.
+
+FPU trimming is not a stock CLI feature. A private generator could omit
+FpuSqrtPlugin, but its measured child is only 37.6 ALMs plus shared decode
+selection. FpuCsrPlugin supplies ROUNDING and FpuDirtyService; flags-writeback
+calls it directly. Removing it requires a custom constant-rounding/flags
+contract, not deletion of one line. The main CSR/trap implementation is still
+required by the stock machine-mode core. Removing FMA could eliminate the
+third FP source and its critical bypass path, but the mul plugin contains
+both FMUL and FMA, so that also requires a private source change and compiler/
+firmware proof that no fused operations or changed rounding are introduced.
+No such trimming or additional generation/fit has been performed.

@@ -1,0 +1,96 @@
+--- a/env.c
++++ b/env.c
+@@ -659,7 +659,7 @@
+ {
+     /* Exactly one fixed game step per presented frame; no FPS inference. */
+     const qsim_sym *sound = qsim_syms_lookup(&E->syms, "configEnableSound");
+-    if (sound) gzero(E, sound->addr, 1);
++    if (sound && !getenv("SM64_AUDIO")) gzero(E, sound->addr, 1);
+     return 5000000u + (E->flips * 1000000ull + 29) / 30;
+ 
+     int k = -1;
+@@ -1318,6 +1318,26 @@
+     memcpy(gp(E, sym->addr, size), value, size);
+     env_wrote(E, sym->addr, size);
+ }
++/* Functional voice lifetime for profiling the real SM64 sequence/predecode
++ * code. PCM mixing, interrupt service and kernel-call cost are NOT modeled. */
++static void sm64_voice_advance(qenv *E) {
++    uint64_t now=5000000u+(E->flips*1000000ull+29)/30;
++    for(unsigned i=0;i<32;i++) {
++        __typeof__(E->sm64_voice[0]) *v=&E->sm64_voice[i];
++        uint64_t dt=now-v->last_us;v->last_us=now;
++        if(!v->active)continue;
++        uint64_t n=dt*48000u*v->rate+v->fraction;
++        v->position+=n/1000000u;v->fraction=n%1000000u;
++        if(v->loop_end>v->loop_start) {
++            uint64_t end=(uint64_t)v->loop_end<<16;
++            uint64_t span=(uint64_t)(v->loop_end-v->loop_start)<<16;
++            if(v->position>=end)v->position=((uint64_t)v->loop_start<<16)+(v->position-end)%span;
++        } else if(v->position>=((uint64_t)v->count<<16)) {
++            v->active=0;E->sm64_ended|=1u<<i;
++        }
++    }
++}
++
+ static int on_hook(void *ctx, qsim_cpu *cpu, uint32_t pc)
+ {
+     qenv *E = ctx;
+@@ -1444,12 +1464,41 @@
+             if (E->flips >= 270 && E->flips < 350 && E->flips % 20 < 2) buttons = 1u << 6;
+             if (E->flips >= 420 && E->flips < 600) buttons = (1u << 0) | (1u << 4);
+             if ((E->flips >= 620 && E->flips < 622) || (E->flips >= 640 && E->flips < 642)) buttons = 1u << 9;
++            if(getenv("SM64_PERF_PANEL") &&
++                ((E->flips>=600 && E->flips<602) || (E->flips>=680 && E->flips<682)))
++                buttons=(1u<<14)|(1u<<8)|(1u<<9);
+             wr32(E, a1, buttons);
+         }
+         break;                /* input_get_state */
+     case 16: gzero(E, a0, 24); break;                /* input_poll_p0 */
+     case 17: break;
+-    case 18: case 21: case 57: case 58: break;       /* mixer_init/stop_all/group vol/master vol */
++    case 18: case 21:
++        memset(E->sm64_voice,0,sizeof(E->sm64_voice));E->sm64_ended=0;break;
++    case 19: { /* mixer_play: signed-16 PCM frames, Hz, priority, volume */
++        sm64_voice_advance(E);unsigned slot;
++        for(slot=0;slot<32 && E->sm64_voice[slot].active;slot++);
++        if(slot==32 || !a0 || !a1) {r0=(uint32_t)-1;break;}
++        __typeof__(E->sm64_voice[0]) *v=&E->sm64_voice[slot];
++        memset(v,0,sizeof(*v));v->active=1;v->count=a1;
++        v->rate=((uint64_t)a2<<16)/48000u;
++        v->last_us=5000000u+(E->flips*1000000ull+29)/30;
++        E->sm64_ended&=~(1u<<slot);r0=slot;break;
++    }
++    case 20:
++        if(a0<32) {E->sm64_voice[a0].active=0;E->sm64_ended&=~(1u<<a0);}break;
++    case 24:
++        sm64_voice_advance(E);r0=a0<32 && E->sm64_voice[a0].active;break;
++    case 26:
++        sm64_voice_advance(E);
++        if(a0<32 && a1<a2 && a2<=E->sm64_voice[a0].count) {
++            E->sm64_voice[a0].loop_start=a1;E->sm64_voice[a0].loop_end=a2;
++        }break;
++    case 28: case 34:
++        sm64_voice_advance(E);if(a0<32)E->sm64_voice[a0].rate=a1;break;
++    case 36:
++        sm64_voice_advance(E);r0=E->sm64_ended;E->sm64_ended=0;break;
++    case 22: case 23: case 29: case 35: case 56: case 57: case 58:
++        break; /* volume/group controls; CPU callers execute, mixer samples do not */
+     case 40:                                          /* audio_init */
+         audio_advance(E);
+         E->audio_active = 0;
+--- a/env.h
++++ b/env.h
+@@ -169,6 +169,12 @@
+     int       audio_active;
+     uint64_t  audio_wr, audio_rd, audio_rd_frac, audio_last_t;
+     uint64_t  mixer_seq;
++    struct {
++        uint64_t position, last_us, fraction;
++        uint32_t count, rate, loop_start, loop_end;
++        int active;
++    } sm64_voice[32];
++    uint32_t sm64_ended;
+ 
+     /* GPU bookkeeping */
+     uint64_t  cmd_hash, cmd_words;       /* since the last presented frame */

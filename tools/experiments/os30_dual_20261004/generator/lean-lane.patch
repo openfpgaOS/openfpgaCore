@@ -1,0 +1,42 @@
+--- a/src/main/scala/vexiiriscv/Param.scala
++++ b/src/main/scala/vexiiriscv/Param.scala
+@@ -109,6 +109,8 @@
+   var resetVector = 0x80000000l
+   var decoders = 1
+   var lanes = 1
++  // Private os30 area experiment: second lane implements only the base integer ALU.
++  var lane1AluOnly = false
+   var decoderAt = 1
+   var dispatcherAt = 1
+   var regFileSync = true
+@@ -609,6 +611,7 @@
+     opt[Int]("xlen") action { (v, c) => xlen = v }
+     opt[Int]("decoders") action { (v, c) => decoders = v }
+     opt[Int]("lanes") action { (v, c) => lanes = v }
++    opt[Unit]("lane1-alu-only") action { (v, c) => lane1AluOnly = true }
+     opt[Int]("decoder-at") action { (v, c) => decoderAt = v }
+     opt[Int]("dispatcher-at") action { (v, c) => dispatcherAt = v }
+     opt[Long]("reset-vector").unbounded() action { (v, c) => resetVector = v }
+@@ -804,6 +807,8 @@
+   def pluginsArea(hartId : Int = 0) = new Area {
+     val plugins = ArrayBuffer[Hostable]()
+     if(withLateAlu) assert(allowBypassFrom == 0)
++    require(!lane1AluOnly || (lanes == 2 && decoders == 2 && !withLateAlu),
++      "lane1-alu-only requires exactly two lanes/decoders and no late ALU")
+     if(withMmu && lsuL1Enable) assert(lsuL1Sets <= 64, "MMU require not more than 64 sets in the LSU L1")
+     if(withMmu && fetchL1Enable) assert(fetchL1Sets <= 64, "MMU require not more than 64 sets in the FETCH L1")
+ 
+@@ -1173,10 +1178,10 @@
+ 
+       plugins += new SrcPlugin(early1, executeAt = 0, relaxedRs = relaxedSrc)
+       plugins += new IntAluPlugin(early1, formatAt = 0)
+-      plugins += shifter(early1, formatAt = relaxedShift.toInt)
++      if(!lane1AluOnly) plugins += shifter(early1, formatAt = relaxedShift.toInt)
+       plugins += new IntFormatPlugin(lane1)
+-      plugins += new BranchPlugin(early1, aluAt = 0, jumpAt = relaxedBranch.toInt, wbAt = 0)
+-      plugins ++= ZbPlugin.make(
++      if(!lane1AluOnly) plugins += new BranchPlugin(early1, aluAt = 0, jumpAt = relaxedBranch.toInt, wbAt = 0)
++      if(!lane1AluOnly) plugins ++= ZbPlugin.make(
+         early1,
+         zba = withRvZba,
+         zbb = withRvZbb,

@@ -1,0 +1,91 @@
+OS30 PRIVATE MESH OWNERSHIP / RESOURCE AUDIT — 2026-10-04
+
+Protocol and ownership findings
+-------------------------------
+DMA bank ownership starts on the first accepted segment and lasts through final
+commit, engine processing, and explicit release after successful engine DONE.
+Parser and engine alternate bank order independently. The parser may fetch a
+second bank concurrently but cannot overwrite a pending, ready, or running bank.
+The final state read is the commit segment. Error responses, invalid lengths,
+and inconsistent RLAST quarantine the whole bank and fault the frontend.
+
+Abort is not a fabric reset. An asserted ARVALID remains stable until accepted;
+all outstanding R data drains without writing any bank. A later job cannot
+consume those stale responses. GPU hard/soft/ring resets use this abort path;
+DMA reset_n follows the separate arbiter reset. Shared fabric reset may discard
+transactions only when the memory arbiter/slave reset as well. A fabric-only
+reset during otherwise live GPU work requires restarting the GPU/jobs too;
+it does not reconstruct lost pending DMA descriptors. Pocket's normal GPU/media
+reset is distinct from the PLL-owned SDRAM reset, so this distinction remains
+an integration contract rather than an assumption that both reset together.
+
+Per-bank entry PC, vertex count and triangle count survive descriptor reuse.
+The frontend writes scratch62/63 only in two idle cycles before engine start.
+Counts therefore cannot be changed by a second descriptor while the first job
+executes. Private compact descriptors validate4-word raw vertex alignment and
+exact ceil(triangle_count/2) index length; legacy zero high16 count remains valid.
+
+Engine output stalls hold data until FIFO acceptance. FIFO physical capacity is
+256 words while its logical ring pointers wrap at4096. Ordinary material/fence
+packets cannot pass preceding jobs; code upload also waits for prior jobs to
+finish. Engine DONE releases input-bank storage after all generated words have
+entered the output FIFO. It does not mean GPU rasterization is complete.
+External immutable raw/index/state records and texture storage remain owned by
+the producer until a GPU completion fence, including SDRAM write response drain.
+
+A program fault may occur after a prefix has entered the FIFO. The frontend
+fails closed and stays busy; recovery resets the GPU/FIFO together. There is no
+implicit skip/success retirement. Program RAM and scratch are not initialized
+on reset. The producer must upload all executable addresses, initialize its
+scratch operands, and observe the private material/geometry ABI. There is no
+memory protection against an incorrect microprogram within its active bank.
+
+Synthesis evidence and practical limits
+--------------------------------------
+fit-mesh-v1 (frozen original512word program version):
+  16,585ALMs;1,842/1,848LABs;308/308M10Ks;43DSPs.
+  Slowest main Fmax79.92MHz; worst setup-2.512ns, hold+0.011ns.
+  Worst paths ran from multiplier partial products to scratch RAM write input.
+  Scratch inferred two simple-dual-port RAMs rather than one true dual port.
+
+engine-ram-map-v2 (isolated, subsequent explicit write-first RAM source):
+  scratch256x32 inferred ONE8192bit true-dual-port M10K.
+  old code512x32 inferred16384bits/two simple-dual-port M10Ks.
+  This confirms inference only; it is not a full-core placement/timing result.
+
+fit-mesh-v2 (later768word ROM, before final PROJ/VERTEX/GATHER/ALU pipeline):
+  17,973ALMs;308M10Ks; successful map/fit/assembly but timing did not pass.
+  Worst setup-2.616ns; worst hold+0.118ns.
+  Root is addressing critical general scratch writeback paths separately.
+
+Current wrapper memory budget is two256x32 mesh-bank RAMs plus256x32 FIFO.
+Engine adds one256x32 true-dual-port scratch and three256x32 code pages: seven
+M10Ks in total if inference remains as demonstrated. Current dedicated VERTEX
+module uses no local RAM, multiply operator, or divide operator; it schedules
+the engine's shared DSP/divider and has register/control overhead. Arithmetic
+units and multiplexing still consume ALMs/LABs. Old fit subtraction cannot prove
+new full-core fit, especially with LAB packing and all308M10Ks already used.
+
+Validation evidence and boundaries
+----------------------------------
+DMA-test-v5:3,025 commits,306 error jobs,601 aborts,102 shared resets;
+94,410bursts/583,270beats. Production-arbiter randomized competing traffic also
+passed; CPU maximum8 intervening grants and M2 maximum13. These are workload
+fairness measurements, not an audio deadline or SDRAM bandwidth guarantee.
+
+Frontend-test-v6-packed:59,979 exact output words,40 varied metadata jobs,
+47,006 DMA/engine overlap cycles,90 GPU/soft/ring cancellations,10 fault cases,
+768word program-page boundaries. The copy kernel proves ownership/order, not
+geometry speed. Later parameter forwarding leaves defaults unchanged.
+
+Vertex-unit-v1:65,264 exact independent-reference vertices and514 abort phases.
+Vertex-engine-v2:65,264 actual engine programs and3,002,144 exact output words;
+COPY context, VERTEX, scratch guards, subsequent MUL/DIV, stalled OUT and exact
+cycle model. Frozen before final ordinary-ALU writeback timing changes.
+
+GPU-replay-all-v1:12scenes/10,341 already-projected triangle jobs exactly matched
+64MB SDRAM hashes, color/depth dumps and fences. It proves early-stage overlap
+through real raster/SDRAM but that older serialized setup was slower. It does
+not validate current complete raw-mesh shader/clipper. Updated whole-mesh
+frontend and physical replay results are separate and must be checked before
+making any performance or original-game framebuffer claim.

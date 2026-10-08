@@ -934,7 +934,7 @@ always @(posedge clk_cpu)
     pll_ram_locked_c1_sync <= {pll_ram_locked_c1_sync[1:0], pll_ram_locked};
 wire         cram1_reset_n = pll_ram_locked_c1_sync[2];
 
-cram1_controller #(.CLOCK_SPEED(100.0)) psram1 (
+cram1_controller #(.CLOCK_SPEED(`ifdef INCLUDE_OS30_SDRAM166 83.0 `else 100.0 `endif)) psram1 (
     .clk(clk_cpu), .reset_n(cram1_reset_n),
     // word interface — CPU texture upload (word_wr); word_rd unused
     .word_rd(1'b0),
@@ -1153,7 +1153,7 @@ assign sram_word_rdata_valid = 1'b0;
 sram_controller #(
     .WAIT_CYCLES(6)
 ) sram0 (
-    .clk(clk_ram_controller),
+    .clk(clk_cpu),
     .reset_n(1'b1),
     .word_rd(sram_word_rd),
     .word_wr(sram_word_wr),
@@ -1185,6 +1185,7 @@ sram_controller #(
 // mf_pllram_133.v output_clock_frequency0; any change there MUST
 // update this divisor, or the host will see a baud-rate mismatch
 // and silently drop every byte.
+//    83 MHz -> 42  (1.976 Mbaud, -1.19% from the 2 Mbaud host)
 //   100 MHz -> 50  (current)
 //    90 MHz -> 45
 // ============================================================
@@ -1196,7 +1197,7 @@ wire [7:0]  uart_tx_byte;
 wire        uart_rx_dv;
 wire [7:0]  uart_rx_byte;
 
-uart_tx #(.CLKS_PER_BIT(`ifdef INCLUDE_CLK90 45 `elsif INCLUDE_CLK96 48 `else 50 `endif)) uart_tx_inst (
+uart_tx #(.CLKS_PER_BIT(`ifdef INCLUDE_OS30_SDRAM166 42 `elsif INCLUDE_CLK90 45 `elsif INCLUDE_CLK96 48 `else 50 `endif)) uart_tx_inst (
     .i_Clock(clk_cpu),
     .i_Tx_DV(uart_tx_dv),
     .i_Tx_Byte(uart_tx_byte),
@@ -1205,7 +1206,7 @@ uart_tx #(.CLKS_PER_BIT(`ifdef INCLUDE_CLK90 45 `elsif INCLUDE_CLK96 48 `else 50
     .o_Tx_Done(uart_tx_done)
 );
 
-uart_rx #(.CLKS_PER_BIT(`ifdef INCLUDE_CLK90 45 `elsif INCLUDE_CLK96 48 `else 50 `endif)) uart_rx_inst (
+uart_rx #(.CLKS_PER_BIT(`ifdef INCLUDE_OS30_SDRAM166 42 `elsif INCLUDE_CLK90 45 `elsif INCLUDE_CLK96 48 `else 50 `endif)) uart_rx_inst (
     .i_Clock(clk_cpu),
     .i_Rx_Serial(uart_rx_serial),  // Gated: idle-high when SNAC active
     .o_Rx_DV(uart_rx_dv),
@@ -1244,7 +1245,7 @@ wire            ram1_word_queue_pending;
 // Read-only at sysreg 0xCC; bready is tied high so bvalid is 1-cycle.
 wire [31:0] scanout_fetch_diag;
 reg [31:0] sdram_wlast_errs = 32'd0;
-always @(posedge clk_ram_controller)
+always @(posedge clk_cpu)
     if (arb_s_bvalid && arb_s_bresp == 2'b10)
         sdram_wlast_errs <= sdram_wlast_errs + 32'd1;
 wire            ram1_word_q_valid;
@@ -1258,7 +1259,7 @@ wire    [3:0]   sdram_slave_wstrb;
 wire    [3:0]   sdram_slave_burst_len;
 wire    [3:0]   sdram_slave_burst_wr_len;
 // io_sdram word_wr_data_next → axi_sdram_slave sdram_wr_data_next
-// Same clock domain (clk_cpu = clk_ram_controller), direct wire
+// Both endpoints stay on clk_ram_controller, including the 166 MHz experiment.
 wire            sdram_slave_wr_data_next = ram1_word_wr_data_next;
 wire            sdram_slave_wr_done      = ram1_word_wr_done;
 wire    [31:0]  sdram_slave_next_wdata;
@@ -1779,7 +1780,7 @@ wire cpu_ds_getfile_start = cpu_target_dataslot_getfile && !cpu_ds_getfile_prev;
 wire cpu_ds_start = cpu_ds_read_start || cpu_ds_write_start || cpu_ds_open_start || cpu_ds_getfile_start;
 wire ds_done_blanking_active = (ds_done_blanking != 8'd0);
 wire target_dataslot_done_safe = ds_done_ram_sync[2] && ds_done_quiet_reached;
-always @(posedge clk_ram_controller) begin
+always @(posedge clk_cpu) begin
     cpu_ds_read_prev <= cpu_target_dataslot_read;
     cpu_ds_write_prev <= cpu_target_dataslot_write;
     cpu_ds_open_prev <= cpu_target_dataslot_openfile;
@@ -1928,7 +1929,7 @@ end
 
     wire            osnotify_inmenu;
 
-    // CPU-side signals (in clk_ram_controller domain)
+    // CPU-side signals (in clk_cpu domain)
     wire            cpu_target_dataslot_read;
     wire            cpu_target_dataslot_write;
     wire            cpu_target_dataslot_openfile;
@@ -2099,7 +2100,7 @@ wire        cpu_save_dt_commit;
 wire [9:0]  cpu_save_dt_word;
 wire        cpu_save_dt_word_mode;
 
-// CDC: synchronize the commit toggle from clk_ram_controller to clk_74a.
+// CDC: synchronize the commit toggle from clk_cpu to clk_74a.
 // A single-cycle pulse can be missed between 100 MHz and 74.25 MHz; the
 // toggle makes each SAVE_DT_SIZE write phase-independent.
 reg [2:0] save_dt_commit_sync = 3'b000;
@@ -2108,7 +2109,7 @@ always @(posedge clk_74a)
 
 wire save_dt_commit_event = save_dt_commit_sync[1] ^ save_dt_commit_sync[2];
 
-// Latch slot/size/word in clk_ram_controller domain (stable when commit
+// Latch slot/size/word in clk_cpu domain (stable when commit
 // arrives — the OS writes the selector registers strictly before the
 // SAVE_DT_SIZE commit write, so all of these are settled long before the
 // commit toggle crosses).
@@ -2116,7 +2117,7 @@ reg [3:0]  save_dt_slot_latch;
 reg [31:0] save_dt_size_latch;
 reg [9:0]  save_dt_word_latch;
 reg        save_dt_word_mode_latch;
-always @(posedge clk_ram_controller) begin
+always @(posedge clk_cpu) begin
     save_dt_slot_latch <= cpu_save_dt_slot;
     save_dt_size_latch <= cpu_save_dt_size;
     save_dt_word_latch <= cpu_save_dt_word;
@@ -2150,7 +2151,7 @@ wire [9:0] save_dt_commit_addr =
             ? PRESAVE_SIZE_WORD
             : SAVE0_SIZE_WORD + {5'd0, save_dt_slot_sync, 1'b0};
 
-// Datatable slot size query: CDC from CPU (clk_ram_controller) → clk_74a → back
+// Datatable slot size query: CDC from CPU (clk_cpu) → clk_74a → back
 wire [9:0]  cpu_dt_query_addr;
 wire        cpu_dt_query_toggle;
 wire [31:0] cpu_dt_query_data;
@@ -2164,7 +2165,7 @@ wire dt_req_rise = dt_toggle_sync[1] ^ dt_toggle_sync[2];  // any change = new r
 
 // Latch query address (stable before req rises)
 reg [9:0] dt_addr_latch;
-always @(posedge clk_ram_controller)
+always @(posedge clk_cpu)
     dt_addr_latch <= cpu_dt_query_addr;
 reg [9:0] dt_addr_sync;
 always @(posedge clk_74a)
@@ -2179,7 +2180,7 @@ reg [1:0]  dt_read_cnt = 0;
 // CDC: result + toggle back to CPU domain
 reg [31:0] dt_result_sync1, dt_result_sync2;
 reg        dt_rtoggle_sync1, dt_rtoggle_sync2;
-always @(posedge clk_ram_controller) begin
+always @(posedge clk_cpu) begin
     dt_result_sync1 <= dt_result;
     dt_result_sync2 <= dt_result_sync1;
     dt_rtoggle_sync1 <= dt_result_toggle;
@@ -2228,7 +2229,7 @@ wire shutdown_ack_cpu;
 wire shutdown_pending_cpu;
 wire shutdown_ack_74a;
 
-synch_3 sync_shutdown_pending(shutdown_pending_74a, shutdown_pending_cpu, clk_ram_controller);
+synch_3 sync_shutdown_pending(shutdown_pending_74a, shutdown_pending_cpu, clk_cpu);
 
 // Wait for the CPU to acknowledge shutdown so firmware can hand CRAM0
 // back to the bridge before Pocket nonvolatile save writeback.  The
@@ -2577,7 +2578,7 @@ assign video_hs = vidout_hs;
         // must track the mp_ram PLL selection above.  Firmware reads it at
         // boot (fallback: compile-time OF_TARGET_CPU_FREQ_HZ when 0), so
         // ONE os.bin serves 100, 96 and 90 MHz bitstreams alike.
-        .CLK_HZ(`ifdef INCLUDE_CLK90 32'd90_000_000 `elsif INCLUDE_CLK96 32'd96_000_000 `else 32'd100_000_000 `endif),
+        .CLK_HZ(`ifdef INCLUDE_OS30_SDRAM166 32'd83_000_000 `elsif INCLUDE_CLK90 32'd90_000_000 `elsif INCLUDE_CLK96 32'd96_000_000 `else 32'd100_000_000 `endif),
         // ANALOGIZER (HW_FEATURES bit 3): the SNAC instances inside
         // axi_periph_slave.v gate on this; clear → they constant-fold away.
         .INCLUDE_ANALOGIZER(`ifdef INCLUDE_ANALOGIZER 1 `else 0 `endif),
@@ -2610,7 +2611,7 @@ assign video_hs = vidout_hs;
         // XFORM bundle cap (bit 26): tracks the gpu_core transform front-end.
         // 0x51/0x52/0x53 all need the matrix MAC, so a MAC-less build clears it
         // (bit 29 still advertises the 0x56/0x54 clip-space cache).
-        .INCLUDE_XFORM_RGB(`ifdef INCLUDE_XFORM `ifdef EXCLUDE_GPU_XFORM_MAC 0 `else 1 `endif `else 0 `endif),
+        .INCLUDE_XFORM_RGB(`ifdef INCLUDE_GPU_SM64_GEOMETRY 0 `else `ifdef INCLUDE_XFORM `ifdef EXCLUDE_GPU_XFORM_MAC 0 `else 1 `endif `else 0 `endif `endif),
         .INCLUDE_GPU_CLIP_LOAD(`ifdef INCLUDE_XFORM 1 `else 0 `endif),
         .INCLUDE_GPU_LIGHT(`ifdef INCLUDE_XFORM `ifdef EXCLUDE_GPU_LIGHT 0 `else 1 `endif `else 0 `endif),
         // GPU texel*C+D combiner cap (bit 27, OF_HW_GPU_COMBINE), additive —
@@ -2618,7 +2619,10 @@ assign video_hs = vidout_hs;
         // truecolor inside axi_periph_slave).
         .INCLUDE_COMBINE(`ifdef INCLUDE_COMBINE 1 `else 0 `endif),
         // Q29 caps bit 18: advertised only when the build keeps the module (os30 clears it).
-        .INCLUDE_PARAM_SPAN_Q29(`ifdef INCLUDE_PARAM_SPAN_Q29 1 `else 0 `endif)
+        .INCLUDE_PARAM_SPAN_Q29(`ifdef INCLUDE_PARAM_SPAN_Q29 1 `else 0 `endif),
+        .INCLUDE_PERSPECTIVE(`ifdef EXCLUDE_GPU_PERSPECTIVE 0 `else 1 `endif),
+        .INCLUDE_DEPTH(`ifdef EXCLUDE_GPU_DEPTH 0 `else 1 `endif),
+        .INCLUDE_PARAM_SPAN_LIST(`ifdef EXCLUDE_GPU_PARAM_SPAN_LIST 0 `else 1 `endif)
     ) periph (
         .clk(clk_cpu),
         .reset_n(reset_n_cpu_core),
@@ -2847,6 +2851,12 @@ assign video_hs = vidout_hs;
             sdram_accepted_r <= 1;
             sdram_cmd_forwarded <= 1;
         end
+        if (!sdram_fast_reset_n) begin
+            ram1_word_rd <= 0;
+            ram1_word_wr <= 0;
+            sdram_cmd_forwarded <= 0;
+            sdram_accepted_r <= 0;
+        end
     end
 
     // bridge_to_sdram (the direct SD->SDRAM bridge write master) REMOVED — it
@@ -2860,9 +2870,16 @@ assign video_hs = vidout_hs;
     // but they are never active simultaneously — the GPU FSM serialises
     // its own reads and writes.  We drop both into the arbiter's M0
     // master: only one channel fires at a time, the other is idle.
-    axi_sdram_arbiter sdram_arb (
+    axi_sdram_arbiter #(
+        .GPU_WRITE_QUEUE_DEPTH(`ifdef INCLUDE_GPU_WQ16 16 `else 8 `endif),
+`ifdef INCLUDE_OS30_SDRAM166
+        .BUFFERED_SLAVE(1'b1)
+`else
+        .BUFFERED_SLAVE(1'b0)
+`endif
+    ) sdram_arb (
         .clk(clk_cpu),
-        .reset_n(1'b1),
+        .reset_n(sdram_cpu_reset_n),
         // M0: GPU (merged read + write)
         .m0_arvalid(gpu_mem_rd_arvalid), .m0_arready(gpu_mem_rd_arready),
         .m0_araddr(gpu_mem_rd_araddr),   .m0_arlen(gpu_mem_rd_arlen),
@@ -2931,6 +2948,94 @@ assign video_hs = vidout_hs;
     // the arbiter-local signal, not cpu_m_sdram_rready directly. The
     // arbiter itself already provides back-pressure to each master; for
     // now leave this tied to 1'b1 (matches pre-burst behaviour).
+    // Experimental 83 MHz fabric -> 166 MHz SDRAM boundary. CPU/GPU,
+    // MMIO, render cache, and arbitration stay together on clk_cpu.
+    wire mem_s_arvalid;
+    wire mem_s_arready;
+    wire [31:0] mem_s_araddr;
+    wire [7:0] mem_s_arlen;
+    wire mem_s_rvalid;
+    wire mem_s_rready;
+    wire [31:0] mem_s_rdata;
+    wire [1:0] mem_s_rresp;
+    wire mem_s_rlast;
+    wire mem_s_awvalid;
+    wire mem_s_awready;
+    wire [31:0] mem_s_awaddr;
+    wire [7:0] mem_s_awlen;
+    wire mem_s_wvalid;
+    wire mem_s_wready;
+    wire [31:0] mem_s_wdata;
+    wire [3:0] mem_s_wstrb;
+    wire mem_s_wlast;
+    wire mem_s_bvalid;
+    wire [1:0] mem_s_bresp;
+    wire mem_s_bready, mem_s_wcont;
+    wire sdram_fast_reset_n, sdram_cpu_reset_n;
+`ifdef INCLUDE_OS30_SDRAM166
+    // PLL reset only: the memory fabric must finish saves across CPU resets.
+    reg [2:0] sdram_fast_reset_sync = 0;
+    reg [2:0] sdram_cpu_reset_sync = 0;
+    always @(posedge clk_ram_controller or negedge pll_ram_locked)
+        if (!pll_ram_locked) sdram_fast_reset_sync <= 0;
+        else sdram_fast_reset_sync <= {sdram_fast_reset_sync[1:0], 1'b1};
+    always @(posedge clk_cpu or negedge pll_ram_locked)
+        if (!pll_ram_locked) sdram_cpu_reset_sync <= 0;
+        else sdram_cpu_reset_sync <= {sdram_cpu_reset_sync[1:0], 1'b1};
+    assign sdram_fast_reset_n = sdram_fast_reset_sync[2];
+    assign sdram_cpu_reset_n = sdram_cpu_reset_sync[2];
+    assign mem_s_wcont = 1'b0; // Clock crossing can insert WVALID bubbles.
+    axi_sdram_clock_bridge sdram_clock_bridge (
+        .s_clk(clk_cpu), .m_clk(clk_ram_controller), .reset_n(pll_ram_locked),
+        .s_arvalid(arb_s_arvalid), .m_arvalid(mem_s_arvalid),
+        .s_arready(arb_s_arready), .m_arready(mem_s_arready),
+        .s_araddr(arb_s_araddr), .m_araddr(mem_s_araddr),
+        .s_arlen(arb_s_arlen), .m_arlen(mem_s_arlen),
+        .s_rvalid(arb_s_rvalid), .m_rvalid(mem_s_rvalid),
+        .s_rready(arb_s_rready), .m_rready(mem_s_rready),
+        .s_rdata(arb_s_rdata), .m_rdata(mem_s_rdata),
+        .s_rresp(arb_s_rresp), .m_rresp(mem_s_rresp),
+        .s_rlast(arb_s_rlast), .m_rlast(mem_s_rlast),
+        .s_awvalid(arb_s_awvalid), .m_awvalid(mem_s_awvalid),
+        .s_awready(arb_s_awready), .m_awready(mem_s_awready),
+        .s_awaddr(arb_s_awaddr), .m_awaddr(mem_s_awaddr),
+        .s_awlen(arb_s_awlen), .m_awlen(mem_s_awlen),
+        .s_wvalid(arb_s_wvalid), .m_wvalid(mem_s_wvalid),
+        .s_wready(arb_s_wready), .m_wready(mem_s_wready),
+        .s_wdata(arb_s_wdata), .m_wdata(mem_s_wdata),
+        .s_wstrb(arb_s_wstrb), .m_wstrb(mem_s_wstrb),
+        .s_wlast(arb_s_wlast), .m_wlast(mem_s_wlast),
+        .s_bvalid(arb_s_bvalid), .m_bvalid(mem_s_bvalid),
+        .s_bresp(arb_s_bresp), .m_bresp(mem_s_bresp),
+        .s_bready(1'b1), .m_bready(mem_s_bready)
+    );
+`else
+    assign mem_s_arvalid = arb_s_arvalid;
+    assign arb_s_arready = mem_s_arready;
+    assign mem_s_araddr = arb_s_araddr;
+    assign mem_s_arlen = arb_s_arlen;
+    assign arb_s_rvalid = mem_s_rvalid;
+    assign mem_s_rready = arb_s_rready;
+    assign arb_s_rdata = mem_s_rdata;
+    assign arb_s_rresp = mem_s_rresp;
+    assign arb_s_rlast = mem_s_rlast;
+    assign mem_s_awvalid = arb_s_awvalid;
+    assign arb_s_awready = mem_s_awready;
+    assign mem_s_awaddr = arb_s_awaddr;
+    assign mem_s_awlen = arb_s_awlen;
+    assign mem_s_wvalid = arb_s_wvalid;
+    assign arb_s_wready = mem_s_wready;
+    assign mem_s_wdata = arb_s_wdata;
+    assign mem_s_wstrb = arb_s_wstrb;
+    assign mem_s_wlast = arb_s_wlast;
+    assign arb_s_bvalid = mem_s_bvalid;
+    assign arb_s_bresp = mem_s_bresp;
+    assign mem_s_bready = 1'b1;
+    assign mem_s_wcont = arb_s_wcont;
+    assign sdram_fast_reset_n = 1'b1;
+    assign sdram_cpu_reset_n = 1'b1;
+`endif
+
     axi_sdram_slave #(
         // Native streaming write bursts are gated per-master by s_axi_wcont
         // (driven from the arbiter's s_wcont): the GPU's queue-fed framebuffer
@@ -2942,30 +3047,30 @@ assign video_hs = vidout_hs;
         .SERIALIZE_WRITE_BURSTS(1'b0),
         .MAX_NATIVE_WRITE_BURST_LEN(8'd15)
     ) sdram_axi_slave (
-        .clk(clk_cpu),
-        .reset_n(1'b1),
-        .s_axi_arvalid(arb_s_arvalid),
-        .s_axi_arready(arb_s_arready),
-        .s_axi_araddr(arb_s_araddr),
-        .s_axi_arlen(arb_s_arlen),
-        .s_axi_rvalid(arb_s_rvalid),
-        .s_axi_rready(arb_s_rready),
-        .s_axi_rdata(arb_s_rdata),
-        .s_axi_rresp(arb_s_rresp),
-        .s_axi_rlast(arb_s_rlast),
-        .s_axi_awvalid(arb_s_awvalid),
-        .s_axi_awready(arb_s_awready),
-        .s_axi_awaddr(arb_s_awaddr),
-        .s_axi_awlen(arb_s_awlen),
-        .s_axi_wvalid(arb_s_wvalid),
-        .s_axi_wready(arb_s_wready),
-        .s_axi_wdata(arb_s_wdata),
-        .s_axi_wstrb(arb_s_wstrb),
-        .s_axi_wlast(arb_s_wlast),
-        .s_axi_bvalid(arb_s_bvalid),
-        .s_axi_bready(1'b1),
-        .s_axi_bresp(arb_s_bresp),
-        .s_axi_wcont(arb_s_wcont),
+        .clk(clk_ram_controller),
+        .reset_n(sdram_fast_reset_n),
+        .s_axi_arvalid(mem_s_arvalid),
+        .s_axi_arready(mem_s_arready),
+        .s_axi_araddr(mem_s_araddr),
+        .s_axi_arlen(mem_s_arlen),
+        .s_axi_rvalid(mem_s_rvalid),
+        .s_axi_rready(mem_s_rready),
+        .s_axi_rdata(mem_s_rdata),
+        .s_axi_rresp(mem_s_rresp),
+        .s_axi_rlast(mem_s_rlast),
+        .s_axi_awvalid(mem_s_awvalid),
+        .s_axi_awready(mem_s_awready),
+        .s_axi_awaddr(mem_s_awaddr),
+        .s_axi_awlen(mem_s_awlen),
+        .s_axi_wvalid(mem_s_wvalid),
+        .s_axi_wready(mem_s_wready),
+        .s_axi_wdata(mem_s_wdata),
+        .s_axi_wstrb(mem_s_wstrb),
+        .s_axi_wlast(mem_s_wlast),
+        .s_axi_bvalid(mem_s_bvalid),
+        .s_axi_bready(mem_s_bready),
+        .s_axi_bresp(mem_s_bresp),
+        .s_axi_wcont(mem_s_wcont),
         .sdram_rd(sdram_slave_rd),
         .sdram_wr(sdram_slave_wr),
         .sdram_addr(sdram_slave_addr),
@@ -3554,6 +3659,9 @@ gpu_core #(
     .INCLUDE_GPU_XFORM_MAC(`ifdef INCLUDE_XFORM `ifdef EXCLUDE_GPU_XFORM_MAC 0 `else 1 `endif `else 0 `endif),
     // Palette / colormap lane (additive): os25/mister list INCLUDE_PALETTE; os30 omits it.
     .INCLUDE_PALETTE(`ifdef INCLUDE_PALETTE 1 `else 0 `endif),
+    .INCLUDE_PERSPECTIVE(`ifdef EXCLUDE_GPU_PERSPECTIVE 0 `else 1 `endif),
+    .INCLUDE_DEPTH(`ifdef EXCLUDE_GPU_DEPTH 0 `else 1 `endif),
+    .INCLUDE_PARAM_SPAN_LIST(`ifdef EXCLUDE_GPU_PARAM_SPAN_LIST 0 `else 1 `endif),
     // Combiner texel*C+D (additive): os30 lists INCLUDE_COMBINE (Mario head).
     .INCLUDE_COMBINE(`ifdef INCLUDE_COMBINE 1 `else 0 `endif),
     // Q29 param-span dynamic-scale precision (additive): os25/mister keep it
@@ -3821,13 +3929,16 @@ mf_pllbase mp1 (
     .locked         ( pll_core_locked )
 );
 
+// INCLUDE_OS30_SDRAM166 selects related 83 MHz CPU/GPU and 166 MHz RAM.
 // CPU/RAM clock: 100 MHz (mf_pllram_133) by default; INCLUDE_CLK96 selects
 // the 96 MHz PLL (reduced-clock variants, e.g. os20 — dual-issue closes
 // timing at 96 where 100 sits at WNS −1.0).  Same instance name so the SDC
 // derived-clock paths (ic|mp_ram|altera_pll_i|...) hold for both.  The
 // actual frequency is advertised to firmware via CLK_FREQ_HZ (sysreg 0xD4,
 // CLK_HZ parameter on axi_periph_slave below).
-`ifdef INCLUDE_CLK90
+`ifdef INCLUDE_OS30_SDRAM166
+mf_pllram_166 mp_ram (
+`elsif INCLUDE_CLK90
 mf_pllram_90 mp_ram (
 `elsif INCLUDE_CLK96
 mf_pllram_96 mp_ram (
@@ -3838,11 +3949,13 @@ mf_pllram_133 mp_ram (
     .rst            ( 0 ),
     .outclk_0       ( clk_ram_controller ),
     .outclk_1       ( clk_ram_chip ),
-    .outclk_2       ( ),
+    .outclk_2       ( `ifdef INCLUDE_OS30_SDRAM166 clk_cpu `endif ),
     .locked         ( pll_ram_locked )
 );
 
+`ifndef INCLUDE_OS30_SDRAM166
 assign clk_cpu = clk_ram_controller;
+`endif
 
 // cram0_clk: chip currently runs in async page mode (BCR_VALUE = 16'h9D1F
 // above, burst_rd tied 1'b0 at the controller instance) with the clock pin
@@ -3871,7 +3984,9 @@ io_sdram #(
 `else
     .BANK_ROW_TRACK(0)
 `endif
-`ifdef INCLUDE_CLK90
+`ifdef INCLUDE_OS30_SDRAM166
+    , .FAST_166(1), .REFRESH_INTERVAL(1222)
+`elsif INCLUDE_CLK90
     // 90 MHz: rescale the refresh divider (736 x 11.11 ns = 8.18 us would
     // violate tREFI 7.8125 us; 660 x 11.11 ns = 7.33 us, margin 6.1%).
     , .REFRESH_INTERVAL(10'd660)
@@ -3880,7 +3995,7 @@ io_sdram #(
     .controller_clk ( clk_ram_controller ),
     .chip_clk       ( clk_ram_chip ),
     .clk_90         ( clk_ram_chip ),
-    .reset_n        ( 1'b1 ),
+    .reset_n        ( sdram_fast_reset_n ),
 
     .phy_cke        ( dram_cke ),
     .phy_clk        ( dram_clk ),

@@ -1,0 +1,14 @@
+Final staged Quake2 source review: PASS, no open findings.
+
+Diagnostic clean now preserves the normal package; verified using make -n.
+Collector eligibility is captured at screen entry and reset before disabled/
+uninitialized returns. Loading, pause, menu and cinematic frames are excluded;
+256 extracted predicate combinations plus null-pause/loading flag tests pass.
+
+Wait/transport timers remain disjoint. Profiling-off paths compile away. Chord
+release and frozen-window behavior remain sound. The reviewed 16-entry update
+changes source/tests/docs and three ELF destinations, with core/OS/SD retained.
+
+Source hashes are in final-candidate-review.json. Parent must finish pending
+builds and refresh publication/qualification hashes; reviewer made no edits to
+staged source and performed no publication or device performance test.

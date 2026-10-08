@@ -1,0 +1,27 @@
+{
+  "passed": true,
+  "candidate_root": "/tmp/quake2-texture-transfer-test",
+  "test_stdout": "PASS: 65 exact source lengths, padded tails, alignment, one clean per create\nPASS: bounded capacity fallback and caps v2/v3/v4 SDRAM-only lifecycle\nPASS: startup stale route, reset/reinit drain-before-reuse, shutdown route, stable binds\n",
+  "extracted_functions": [
+    "ofq2_texture_route_sdram",
+    "OFQ2_Init",
+    "OFQ2_TexInit",
+    "OFQ2_TexReset",
+    "OFQ2_TexCreate",
+    "OFQ2_TexBindDomain",
+    "OFQ2_Shutdown"
+  ],
+  "extracted_sha256": "7337214436b56a30c14f274db871464696f27d6e479a0129a5e0db213474f32f",
+  "inputs": {
+    "/tmp/quake2-texture-transfer-test/src/quake2/openfpga/of_emit_q2.c": "4a6992e046489d10b7a874851562390b3c8a589a9b8eaa09c472de6d30db9e11",
+    "/tmp/quake2-texture-transfer-test/src/sdk/include/of_texture.h": "e7023575e98857e011c1bb3514f3d832a1fe067d91e33a265e85bfce6d529775",
+    "/tmp/quake2-texture-transfer-test/src/quake2/openfpga/of_emit_q2.h": "7ed350dca75646f38f8e5205ed26e1ebb339cf5cebecd341f1689ad8789f2ef3",
+    "/tmp/quake2-texture-transfer-test/src/sdk/include/of_caps.h": "c58c9b3418099cd55c41d118768b7bf0b1b33abdaf95473ebe8d65467ce33ad1",
+    "/home/alberto/Repos/openfpgaCore/tools/experiments/quake2_sm64_transfer_20261006/texture/texture_test.c": "16cc9c6cfa8e89b2b68a247a783a37090ed0ca66a6b626e3883717a5b25d336f",
+    "/home/alberto/Repos/openfpgaCore/tools/experiments/quake2_sm64_transfer_20261006/texture/check_texture.py": "c05ab245252ebefe541a2ef2d814c70c1fe1cf91fe1704e5a71fa6693529825e"
+  },
+  "limitations": [
+    "Records MMIO leaf actions; not a cycle-accurate GPU/cache model.",
+    "Does not prove device FPS or sustained performance."
+  ]
+}

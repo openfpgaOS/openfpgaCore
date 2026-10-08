@@ -201,6 +201,9 @@ $(VEXII_OUT): $(VEXII_DIR)/../generate_vexii.sh \
               $(VEXII_DIR)/../retime_aligner_pc.pl \
               $(VEXII_DIR)/../factor_fetch_ready.pl \
               $(VEXII_DIR)/../retime_dcache_writes.pl \
+              $(VEXII_DIR)/../retime_fpu_matches.pl \
+              $(VEXII_DIR)/../retime_fetch_pipeline.pl \
+              $(VEXII_DIR)/../optimize_os20_timing.pl \
               $(VEXII_DIR)/../configs/$(VARIANT).cfg \
               $(VEXII_DIR)/../configs/mister-common.inc \
               $(wildcard $(VEXII_DIR)/../patches/*.patch)

@@ -1,0 +1,42 @@
+{
+  "review_passed": true,
+  "candidate": "/tmp/quake2-sm64-20261006/candidate",
+  "open_findings": [],
+  "resolved_findings": [
+    {
+      "finding": "Diagnostic clean removed the normal packaged build",
+      "resolution": "GPU_PROFILE=1 clean only removes separate diagnostic ELF and separate object directory",
+      "verification": "make -n GPU_PROFILE=1 clean excludes normal package path"
+    },
+    {
+      "finding": "Disabled/loading screens could contaminate a gameplay window",
+      "resolution": "Entry predicate resets before early returns and excludes loading, disabled/uninitialized state, menus, cinematic and pause; end-of-frame uses captured predicate",
+      "verification": "PASS: 256 entry-state combinations, null pause cvar, captured loading flag"
+    }
+  ],
+  "additional_review": [
+    "Wait and batch-transfer timers are disjoint in current SDK paths.",
+    "Default macros and all app/UI call sites compile out when profiling is disabled.",
+    "Chord suppression releases previously held game keys and suppresses them until individually released.",
+    "Snapshot display disables collection before its text rendering; hiding applies warmup.",
+    "Texture changes preserve GL1 fast-only texture lifetimes and retain one source visibility handoff.",
+    "Reviewed publication scope is 13 source/test/doc files plus 3 ELF destinations, with no core/OS/SD mutation."
+  ],
+  "source_hashes": {
+    "src/quake2/Makefile": "af18bb2ba1b70482a7b7fe44d7e6ce4ab941aaff9b3c4ae3c3df993c215b0fc6",
+    "src/quake2/openfpga/input_of.c": "1f6d864c7c2e2ec8fb2429a974d9ad389e676645f6978f5247055a8a588faeea",
+    "src/quake2/openfpga/of_emit_q2.c": "63aaa50d302721ac0b5e72921c34649177e7866b80ecfec4be0612bd0167f71f",
+    "src/quake2/openfpga/of_emit_q2.h": "de7742d1d35e63660a3db8a9857bf37f6a6930d1a8f54e1bffd9f43c938b3b69",
+    "src/quake2/openfpga/of_gpu_profile_q2.h": "6c2e77e262432066fe9e5cc86b64f44ad004b1453898e9d65f0264f01cad382a",
+    "src/quake2/src/client/cl_screen.c": "586e675c93a545716840e3593860debfdd1f0f90b41dfbbc58f1af33572fb9e3",
+    "src/sdk/include/of_gpu.h": "b0b227de408e6399d88c5c9dce7dde44ce4107c3d952d5a106f0ee6842e7f1fe",
+    "src/sdk/include/of_texture.h": "e7023575e98857e011c1bb3514f3d832a1fe067d91e33a265e85bfce6d529775",
+    "src/quake2/openfpga/of_gl1.c": "fd93411dd58ec75dc931928c5bf1303cf6e85ede607ca9a3cb85468d69e8de54",
+    "docs/sm64-os30-transfer-20261006.txt": "3f776a1364dcb295db7d7f6f9846c8801e4b3f4ee19f2058cf66f759659f6027"
+  },
+  "limitations": [
+    "No device FPS or physical timing claims.",
+    "Parent must finish pending normal/diagnostic builds and regenerate publication-plan/qualification hashes after these fixes.",
+    "Publication not performed by reviewer."
+  ]
+}

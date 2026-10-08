@@ -1,0 +1,30 @@
+# os30-only candidate sources/settings. Common files and other variants are unchanged.
+
+set_global_assignment -name VERILOG_FILE ../../common/os30/phase10_load_alias.v
+
+set_global_assignment -name VERILOG_FILE ../../common/os30/phase10_bram_alias.v
+
+set_global_assignment -name VERILOG_FILE ../../common/os30/phase10_float_recip2.v
+
+set_global_assignment -name VERILOG_FILE ../../common/os30/phase10_raw_vtx_dma.v
+
+set_global_assignment -name VERILOG_FILE ../../common/os30/GeometryFmaProbe.v
+
+set_global_assignment -name VERILOG_FILE ../../common/os30/geometry_lighting_batch.v
+
+set_global_assignment -name VERILOG_FILE ../../common/os30/geometry_color_rtz.v
+
+set_global_assignment -name VERILOG_FILE ../../common/os30/geometry_float_batch_recip.v
+
+set_global_assignment -name VERILOG_FILE ../../common/os30/geometry_transform_light.v
+
+set_global_assignment -name VERILOG_FILE ../../common/os30/geometry_raw_load.v
+
+# Exact selected compact-v7 settings; no timing-constraint changes.
+set_global_assignment -name OPTIMIZATION_MODE BALANCED
+set_global_assignment -name OPTIMIZATION_TECHNIQUE AREA
+set_global_assignment -name PHYSICAL_SYNTHESIS_REGISTER_DUPLICATION OFF
+set_instance_assignment -name OPTIMIZATION_TECHNIQUE SPEED -to ic|cpu|cpu
+
+# LOD5 shares the full-capacity CRAM texture bus.
+set_global_assignment -name VERILOG_FILE ../../common/os30/phase10_cram1_read_arbiter.v

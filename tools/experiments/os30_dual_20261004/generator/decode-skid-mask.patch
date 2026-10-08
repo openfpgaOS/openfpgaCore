@@ -1,0 +1,13 @@
+--- a/src/main/scala/vexiiriscv/decode/DecodePipelinePlugin.scala
++++ b/src/main/scala/vexiiriscv/decode/DecodePipelinePlugin.scala
+@@ -78,6 +78,10 @@
+         "Decode skid requires all decode flush sources strictly older than its age")
+       println(s"OS30_DECODE_SKID age=$age flushSources=${rp.flushPorts.map(_.age).distinct.sorted.mkString(",")}")
+       gate.throwWhen(flushIt)
++      // Decode consumers use per-lane validity even when frame valid is false.
++      // A stored frame must therefore lose both lane selects on the flush edge.
++      for(laneId <- 0 until Decode.LANES)
++        gate.bypass(CtrlLaneApi.LANE_SEL, laneId.toString) := gate.up(CtrlLaneApi.LANE_SEL, laneId.toString) && !flushIt
+       val trapPending = gate.down.isValid && (for(laneId <- 0 until Decode.LANES)
+         yield gate.down(CtrlLaneApi.LANE_SEL, laneId.toString) && gate.down(Global.TRAP, laneId.toString)).orR
+     }

@@ -7,8 +7,8 @@
 #
 # Hardware vert-tri plane derivation (0x4A/0x4B), truecolor RGB565, the
 # texel*C+D combiner (HILITE/specular,
-# e.g. the Mario head), HW mixer.  INCLUDE_Z_BURST forces GPU_Z_READ_WINDOW=4
-# (SM64 z-tests every fragment).  VEXII_CPU_OS30 selects the os30 CPU netlist
+# e.g. the Mario head), HW mixer. INCLUDE_Z_WINDOW8 selects an eight-word
+# depth window (SM64 z-tests every fragment). VEXII_CPU_OS30 selects the os30 CPU netlist
 # behavior in RTL that keys on it.  Ships as os30.rbf_r.
 #
 # Pays for the triangle path by cutting what Quake2 never uses — NOT listed
@@ -84,6 +84,7 @@ DEFS := INCLUDE_VERT_TRI INCLUDE_DIRECT_COLOR INCLUDE_COMBINE INCLUDE_Z_BURST \
         INCLUDE_CB_WINDOW2 INCLUDE_VI_FILTER \
         INCLUDE_XFORM EXCLUDE_GPU_LIGHT EXCLUDE_CLIP_TRI EXCLUDE_GPU_XFORM_MAC \
         INCLUDE_CPU_RING EXCLUDE_GPU_COMMAND_DMA \
+        EXCLUDE_GPU_PARAM_SPAN_LIST \
         INCLUDE_XFORM_VERTEX_RAM INCLUDE_XFORM_RATIO_PIPE \
         INCLUDE_GPU_CLAMP_PIPE INCLUDE_Z_COMPARE_PARALLEL \
         INCLUDE_CB_SPLIT_MULT INCLUDE_PSS_SPECULATIVE_STEP \
@@ -91,12 +92,33 @@ DEFS := INCLUDE_VERT_TRI INCLUDE_DIRECT_COLOR INCLUDE_COMBINE INCLUDE_Z_BURST \
         INCLUDE_EW_STEP_PREDECODE INCLUDE_EARLY_Z_CAPTURE \
         EXCLUDE_SYSREG_DIAG_READBACK INCLUDE_Z_WINDOW8 \
         INCLUDE_GPU_RENDER_CACHE \
-        INCLUDE_DERIVE_PARALLEL_SCALE INCLUDE_Z_EARLY_RESTART
+        INCLUDE_DERIVE_PARALLEL_SCALE INCLUDE_Z_EARLY_RESTART \
+        INCLUDE_GPU_CLAMP_FLAGS_PIPE INCLUDE_GPU_WQ16 \
+        INCLUDE_Z_WINDOW_PREDECODE
+
+# A second eight-word posted burst can queue while SDRAM commits the first.
+# B responses and slot retirement still wait for the physical write commit.
+# Clamp flags and depth address predecode shorten combinational paths
+# without adding rendering cycles. The depth
+# data, tags and accumulator forwarding stay live through pipeline stalls.
+# See docs/measurements/os30-memory-opt-20261002 for saved-seed fits and
+# rendering, queue-integrity and real-mixer contention checks.
+# Saved seed 2: 16,993 ALMs, 306 M10Ks, worst setup -0.902 ns;
+# minimum main-clock Fmax 91.73 MHz. 100 MHz timing remains open.
 
 # Parallel reciprocal scaling uses both existing triangle DSP ports, removing
 # two wait/capture states per derivative without changing the arithmetic.
 # Depth early restart evaluates the requested word while the rest of its read
 # window fills; bus ownership and write invalidations remain live to the end.
+
+# SM64 and the current Quake2 gl1 renderer submit triangles, not long-form
+# 0x48 span lists. Drop only that command's header/record frontend and clear
+# capability bit 15. The shared span producer, perspective/depth pipeline,
+# RGB combiner and alpha blending remain available to triangle commands.
+# Saved-seed A/B (seed 2, 2026-10-02): 17,128 -> 16,874 ALMs,
+# 306 -> 305 M10Ks; worst setup -1.004 -> -0.887 ns at 100 MHz.
+# 38 retained workloads have identical pixels/cycles across three memory
+# schedules. The clock remains experimental; the full sweep is deferred.
 
 # Experimental 100 MHz candidate measured with seed 31. These options retain
 # rendering features and arithmetic while moving work off critical paths.
@@ -148,3 +170,49 @@ DEFS := INCLUDE_VERT_TRI INCLUDE_DIRECT_COLOR INCLUDE_COMBINE INCLUDE_Z_BURST \
 # 24.0 -> 27.3 FPS, castle under CPU traffic 18.7 -> 23.3, Bowser 22.4 -> 24.4,
 # matching frames byte-identical.  40-seed sweep: best WNS -0.791 -> -0.693,
 # median -1.388 -> -1.295; +16 ALUT, +112 FF.
+
+# Opt-in span-start depth prefetch. Reuses the depth window and idle P3
+# address register; no rendering features, precision or clocks change.
+# 26 SM64 captures x 3 traffic schedules match the baseline byte-for-byte:
+# aggregate GPU throughput +8.38% quiet, +7.85% scanout/audio, +4.82% with
+# added CPU reads. These are replay measurements, not whole-game FPS.
+# Seed 2: 17,023 ALMs (+30), 306 M10Ks (unchanged), setup -1.190 ns;
+# minimum main-clock Fmax 89.37 MHz (baseline 91.73). Timing regresses,
+# so keep this disabled in normal builds pending further timing work.
+# make build VARIANT=os30 OS30_DEPTH_PREFETCH=1 JOB=os30-depth-prefetch
+# See tools/experiments/os30_depth_prefetch_20261002 and the corresponding
+# docs/measurements campaign for exact tests and the experimental bitstream.
+ifeq ($(OS30_DEPTH_PREFETCH),1)
+DEFS += INCLUDE_Z_PREFETCH
+endif
+
+# Experimental SM64 geometry frontend. Advertises its own GPU_STATUS bit 10;
+# legacy matrix commands/caps stay disabled. The app retains CPU lighting and
+# clipping fallbacks. Build only with the matching experimental SM64 renderer.
+# make build VARIANT=os30 OS30_GEOMETRY=1 JOB=os30-geometry
+ifeq ($(OS30_GEOMETRY),1)
+DEFS := $(filter-out EXCLUDE_GPU_XFORM_MAC,$(DEFS)) INCLUDE_GPU_SM64_GEOMETRY
+endif
+
+# Experimental independent geometry command worker. Replaces the serialized
+# matrix/projection path and overlaps preparation with the pixel pipeline.
+# Keeps the normal 128 KiB CPU data cache; its bounded 2 KiB output FIFO can
+# pause the rasterizer's command loader inside long payloads. Status bit 11
+# advertises worker culling and 1..32-vertex 0x59 batches. The existing SM64
+# renderer works unchanged; CPU-culling removal remains a private experiment.
+# No full seed sweep or device performance qualification has been completed.
+# make build VARIANT=os30 OS30_GEOMETRY_WORKER=1 OS30_DEPTH_PREFETCH=1 JOB=os30-worker
+ifeq ($(OS30_GEOMETRY_WORKER),1)
+DEFS := $(filter-out EXCLUDE_GPU_XFORM_MAC INCLUDE_GPU_SM64_GEOMETRY,$(DEFS)) \
+        EXCLUDE_GPU_XFORM_MAC INCLUDE_GPU_SM64_GEOMETRY INCLUDE_GPU_GEOMETRY_WORKER
+endif
+
+# Opt-in experiment, never selected by a normal production build or sweep.
+# Simulation passes; SDRAM physical timing is NOT closed. Not for deployment.
+# make build VARIANT=os30 OS30_SDRAM166=1 JOB=os30-sdram166
+ifeq ($(OS30_SDRAM166),1)
+DEFS += INCLUDE_OS30_SDRAM166
+endif
+
+# Exact compact-v7 same-triangle span lookahead (private integration candidate).
+DEFS += INCLUDE_SPAN_LOOKAHEAD
